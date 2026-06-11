@@ -109,6 +109,17 @@ impl GameBoy {
         self.bus.apu_mut().drain_samples(out);
     }
 
+    /// Set the audio output sample rate in Hz (default
+    /// [`apu::DEFAULT_SAMPLE_RATE`]).
+    pub fn set_sample_rate(&mut self, hz: u32) {
+        self.bus.apu_mut().set_sample_rate(hz);
+    }
+
+    /// Map the four DMG shades to XRGB8888 colors (ignored on CGB models).
+    pub fn set_dmg_palette(&mut self, palette: [u32; 4]) {
+        self.bus.ppu_mut().set_dmg_palette(palette);
+    }
+
     /// Battery-backed cartridge RAM (plus RTC state for MBC3), if any.
     pub fn save_data(&self) -> Option<Vec<u8>> {
         self.bus.cartridge().save_data()

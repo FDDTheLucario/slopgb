@@ -39,13 +39,23 @@ pub fn step(cpu: &mut Cpu, bus: &mut impl Bus) {
         }
         cpu.stopped = false;
     }
-    if cpu.ime && bus.pending() != 0 {
-        dispatch_interrupt(cpu, bus);
-    }
     // EI enables IME only after the instruction *following* EI completes
     // (gbctr; mooneye acceptance/ei_sequence, ei_timing, rapid_di_ei).
     let ei_delay = cpu.ime_pending;
-    let opcode = fetch_opcode(cpu, bus);
+    // Integration fix: the IE & IF check happens at the *end* of the opcode
+    // fetch M-cycle, so an IF bit raised by that very cycle's tick still
+    // triggers a dispatch; the fetched opcode is then discarded (PC is not
+    // incremented) and re-fetched after the dispatch. This is mooneye-gb's
+    // `prefetch_next` model; the pass counters of
+    // acceptance/serial/boot_sclk_align-dmgABCmgb and acceptance/intr_timing
+    // pin the aborting behavior on hardware.
+    let pc_before = cpu.regs.pc;
+    let mut opcode = fetch_opcode(cpu, bus);
+    if cpu.ime && bus.pending() != 0 {
+        cpu.regs.pc = pc_before;
+        dispatch_interrupt(cpu, bus);
+        opcode = fetch_opcode(cpu, bus);
+    }
     execute(cpu, bus, opcode);
     if ei_delay && cpu.ime_pending {
         cpu.ime_pending = false;
@@ -53,10 +63,12 @@ pub fn step(cpu: &mut Cpu, bus: &mut impl Bus) {
     }
 }
 
-/// Interrupt dispatch. 5 M-cycles total; the 5th is the opcode fetch at the
-/// target address, performed by the caller as the start of the next
-/// instruction. IME is cleared immediately; a not-yet-committed EI enable is
-/// swallowed by the dispatch.
+/// Interrupt dispatch: two internal cycles and two pushes here. Counting
+/// the aborted opcode fetch that detected the interrupt (see `step`), the
+/// whole sequence is 5 M-cycles; the opcode fetch at the target address is
+/// performed by the caller as the start of the handler's first instruction.
+/// IME is cleared immediately; a not-yet-committed EI enable is swallowed
+/// by the dispatch.
 fn dispatch_interrupt(cpu: &mut Cpu, bus: &mut impl Bus) {
     cpu.ime = false;
     cpu.ime_pending = false;
@@ -1782,6 +1794,7 @@ mod tests {
         assert_eq!(
             b.log,
             [
+                Read(PC0 + 2, 0x04), // aborted fetch: discarded, PC kept
                 Tick,
                 Tick,
                 Write(SP0 - 1, 0xC0),
@@ -1829,6 +1842,7 @@ mod tests {
         assert_eq!(
             b.log,
             [
+                Read(PC0 + 2, 0xF3), // aborted fetch: DI is discarded
                 Tick,
                 Tick,
                 Write(SP0 - 1, 0xC0),
@@ -1885,6 +1899,7 @@ mod tests {
         assert_eq!(
             b.log,
             [
+                Read(0xC100, 0x00), // aborted fetch at the return address
                 Tick,
                 Tick,
                 Write(SP0 + 1, 0xC1),
@@ -1909,6 +1924,7 @@ mod tests {
         assert_eq!(
             b.log,
             [
+                Read(0xC123, 0x00), // aborted fetch: discarded, PC kept
                 Tick,
                 Tick,
                 Write(SP0 - 1, 0xC1),
@@ -1948,6 +1964,7 @@ mod tests {
         assert_eq!(
             b.log,
             [
+                Read(0x0212, 0x00), // aborted fetch
                 Tick,
                 Tick,
                 Write(0xFFFF, 0x02), // IE := 0x02, timer no longer enabled
@@ -1975,6 +1992,7 @@ mod tests {
         assert_eq!(
             b.log,
             [
+                Read(0x0212, 0x00), // aborted fetch
                 Tick,
                 Tick,
                 Write(0x0000, 0x02),
@@ -2001,6 +2019,7 @@ mod tests {
         assert_eq!(
             b.log,
             [
+                Read(0x0212, 0x00), // aborted fetch
                 Tick,
                 Tick,
                 Write(0xFFFF, 0x02),
@@ -2030,6 +2049,7 @@ mod tests {
         assert_eq!(
             b.log,
             [
+                Read(PC0 + 1, 0x00), // aborted fetch after the halt wakes
                 Tick,
                 Tick,
                 Write(SP0 - 1, 0xC0),
@@ -2114,6 +2134,7 @@ mod tests {
         assert_eq!(
             b.log,
             [
+                Read(PC0 + 2, 0x00), // aborted fetch after the halt wakes
                 Tick,
                 Tick,
                 Write(SP0 - 1, 0xC0),
