@@ -30,6 +30,7 @@ enum DmaBus {
 
 /// An OAM DMA transfer in progress: `idx` is the next byte to copy (one per
 /// M-cycle).
+#[derive(Clone, Copy)]
 struct OamDmaRun {
     src: u16,
     idx: u8,
@@ -230,8 +231,9 @@ impl Interconnect {
         }
 
         // SGB boot duration depends on the cartridge header: the boot ROM
-        // sends it to the SNES bit by bit, and a zero bit costs one M-cycle
-        // more than a one bit (boot_div-S vs boot_div2-S).
+        // sends it to the SNES bit by bit, and the zero-bit branch of its
+        // send loop is one M-cycle longer than the one-bit branch (see
+        // `sgb_header_zero_bits` for the boot ROM derivation).
         let div = if matches!(self.model, Model::Sgb | Model::Sgb2) {
             s.div_counter
                 .wrapping_add((4 * sgb_header_zero_bits(&self.cart)) as u16)
@@ -241,6 +243,26 @@ impl Interconnect {
         self.timer.set_div(div);
         self.serial.tick(div);
         self.apu.tick(div, false);
+
+        // APU warmup: the hwio replay above re-triggered the boot beep, but
+        // on hardware the beep plays while the logo is shown, well before
+        // hand-off, and its decaying envelope (NR12=$F3: 15 steps x 3
+        // frame-sequencer envelope ticks = 45/64 s) has reached volume 0 by
+        // PC=0x100 — channel 1 stays *enabled* (NR52 still reads $F1; volume
+        // is not an enable condition), it just outputs digital 0, so the CGB
+        // PCM12 register reads $00 at hand-off (oracle: misc/boot_hwio-C and
+        // misc/bits/unused_hwio-C, which expect FF76 == $00). Run the APU
+        // through one emulated second of synthetic DIV time to decay the
+        // envelope; samples produced are discarded. The real DIV counter and
+        // the serial/APU edge detectors are re-seeded afterwards.
+        let mut warm_div = div;
+        for _ in 0..1_048_576u32 {
+            warm_div = warm_div.wrapping_add(4);
+            self.apu.tick(warm_div, false);
+        }
+        self.apu.tick(div, false);
+        let mut sink = Vec::new();
+        self.apu.drain_samples(&mut sink);
     }
 
     pub fn model(&self) -> Model {
@@ -362,16 +384,14 @@ impl Interconnect {
             Some(s) => s.delay -= 1,
             None => {}
         }
-        if let Some(run) = &self.dma_run {
+        if let Some(run) = self.dma_run {
             let (bus, byte) = self.oam_dma_source_read(run.src.wrapping_add(run.idx.into()));
-            let idx = run.idx;
-            self.ppu.oam_dma_write(idx, byte);
+            self.ppu.oam_dma_write(run.idx, byte);
             self.dma_conflict = Some((bus, byte));
-            match &mut self.dma_run {
-                Some(run) if run.idx == 159 => self.dma_run = None,
-                Some(run) => run.idx += 1,
-                None => unreachable!(),
-            }
+            self.dma_run = (run.idx < 159).then_some(OamDmaRun {
+                idx: run.idx + 1,
+                ..run
+            });
         }
     }
 
@@ -441,13 +461,22 @@ impl Interconnect {
                 self.ppu
                     .vram_write_raw(0x8000 | (self.hdma_dst & 0x1FFF), byte);
                 self.hdma_src = self.hdma_src.wrapping_add(1);
+                // A destination past 0x9FFF wraps to the start of VRAM and
+                // the transfer continues. Pan Docs only documents the
+                // VRAM masking; the wrap (rather than terminating at
+                // 0xA000) follows SameBoy Core/memory.c GB_hdma_run, which
+                // writes vram[vram_base + (hdma_current_dest++ & 0x1FFF)]
+                // (`gdma_destination_wraps_to_vram_start`).
                 self.hdma_dst = (self.hdma_dst + 1) & 0x1FFF;
             }
         }
     }
 
     /// VRAM DMA source read. VRAM itself and the 0xE000+ region are not
-    /// valid sources (Pan Docs); they read as 0xFF here.
+    /// valid sources (Pan Docs); they read as 0xFF here (SameBoy
+    /// Core/memory.c GB_hdma_run drives the bus only for ROM/SRAM/WRAM
+    /// sources and leaves the idle data-bus byte for everything else —
+    /// `gdma_invalid_sources_fill_destination_with_ff`).
     fn vram_dma_source_read(&self, addr: u16) -> u8 {
         match addr {
             0x0000..=0x7FFF => self.cart.read_rom(addr),
@@ -508,7 +537,7 @@ impl Interconnect {
         if self.model.is_cgb() {
             let lo = addr as u8;
             (lo & 0xF0) | (lo >> 4)
-        } else if self.ppu.read(0xFF41) & 0x03 >= 2 {
+        } else if (self.ppu.read(0xFF41) & 0x03) >= 2 {
             0xFF
         } else {
             0x00
@@ -550,7 +579,14 @@ impl Interconnect {
                 self.wram[i] = value;
             }
             0xFE00..=0xFE9F => {
-                // CPU OAM writes are dropped while DMA owns OAM.
+                // CPU OAM writes are dropped while DMA owns OAM. This is
+                // the only write-side conflict modelled: a CPU write to
+                // ROM/WRAM on the bus the DMA is reading would also
+                // conflict on hardware (the DMA controller drives that
+                // bus), but gbctr documents only the read side, no mooneye
+                // test covers writes, and real code runs from HRAM during
+                // OAM DMA and never stores to a conflicted bus — so
+                // same-bus writes intentionally pass through unmodelled.
                 if self.dma_conflict.is_none() {
                     self.ppu.write(addr, value);
                 }
@@ -596,8 +632,10 @@ impl Interconnect {
             0xFF73 if self.model.is_cgb() => self.ff73,
             0xFF74 if self.cgb_mode => self.ff74,
             0xFF75 if self.model.is_cgb() => 0x8F | (self.ff75 & 0x70),
-            // FF76/FF77: read-only APU digital outputs (stubbed silent).
-            0xFF76 | 0xFF77 if self.model.is_cgb() => 0x00,
+            // FF76/FF77 (PCM12/PCM34): read-only per-channel 4-bit digital
+            // outputs (Pan Docs "PCM amplitude readouts").
+            0xFF76 if self.model.is_cgb() => self.apu.pcm12(),
+            0xFF77 if self.model.is_cgb() => self.apu.pcm34(),
             // FF50 (boot ROM disable) and everything unmapped: $FF.
             _ => 0xFF,
         }
@@ -625,6 +663,17 @@ impl Interconnect {
             }
             0xFF4D if self.cgb_mode => self.key1_armed = value & 1 != 0,
             0xFF4F if self.cgb_mode => self.ppu.write(addr, value),
+            // FF51-FF54 are the *live* DMA address counters, not start
+            // latches: `hdma_src`/`hdma_dst` advance as blocks copy, and a
+            // register write merges into the current counter value with
+            // these masks. This matches SameBoy Core/memory.c, whose
+            // GB_IO_HDMA1-4 write handlers update hdma_current_src/dest in
+            // place with the same masks (e.g. HDMA1: `hdma_current_src &=
+            // 0xF0; hdma_current_src |= value << 8;`), so a partial rewrite
+            // between blocks keeps the other half's incremented bits and a
+            // new FF55 start continues from the incremented addresses
+            // (`hdma_partial_src_rewrite_blends_live_counter`,
+            // `gdma_continues_from_incremented_addresses`).
             0xFF51 if self.cgb_mode => {
                 self.hdma_src = (self.hdma_src & 0x00F0) | (u16::from(value) << 8)
             }
@@ -663,10 +712,27 @@ impl Interconnect {
 /// Zero bits among the bytes the SGB boot ROM transfers to the SNES: six
 /// 16-byte packets, each a command byte ($F1 + 2×packet), a checksum byte
 /// (8-bit sum of the payload) and 14 payload bytes from $0104 + 14×packet
-/// (addresses ≥ $0150 read as $00). Each zero bit costs one extra M-cycle
-/// of boot time relative to a one bit — calibrated against
-/// acceptance/boot_div-S and boot_div2-S, which differ only in the global
-/// checksum bytes.
+/// (addresses ≥ $0150 read as $00).
+///
+/// Each zero bit costs one extra M-cycle of boot time relative to a one
+/// bit. Derivation — the SGB boot ROM's per-bit send loop, $0095-$00A5 in
+/// the dumped ROM (sha1 aa2f50a77dfb4823da96ba99309085a3c6278515), clocks
+/// each bit out to the SNES via JOYP P14/P15:
+///
+/// ```text
+/// $0095  BIT 0,D      ; 2 M-cycles
+/// $0097  LD A,$10     ; 2          (P15 low = "1" bit)
+/// $0099  JR NZ,$009D  ; 3 taken (one bit) / 2 not taken (zero bit)
+/// $009B  LD A,$20     ; 2          (P14 low = "0" bit), zero path only
+/// $009D  LDH (C),A    ; pulse, then $30 restores both lines high
+/// ```
+///
+/// A one bit takes 2+2+3 = 7 M-cycles to reach the pulse; a zero bit
+/// takes 2+2+2+2 = 8 — exactly one M-cycle (4 DIV T-cycles) more. The
+/// per-packet reset and stop pulses are unconditional and sit in the DIV
+/// base value instead. Verified against acceptance/boot_div-S and
+/// boot_div2-S, which differ only in the global checksum bytes
+/// (`model::tests::sgb_div_base_matches_both_checksum_roms`).
 fn sgb_header_zero_bits(cart: &Cartridge) -> u32 {
     let mut zeros = 0;
     for packet in 0..6u16 {
@@ -1297,6 +1363,62 @@ mod tests {
         assert_eq!(b.read(0x801F), 0x1F);
     }
 
+    /// FF51-FF54 write straight into the *live* DMA address counters
+    /// (SameBoy Core/memory.c GB_IO_HDMA1 handler: `hdma_current_src &=
+    /// 0xF0; hdma_current_src |= value << 8;`): rewriting only FF51 after
+    /// blocks have copied keeps the incremented low byte — including its
+    /// high nibble, which the FF51 mask preserves — so the next transfer
+    /// reads from (new high byte | live low byte), not from a fresh xx00.
+    #[test]
+    fn hdma_partial_src_rewrite_blends_live_counter() {
+        let mut b = ic_cgb_mode();
+        fill_wram(&mut b, 0xC000, 0x00, 0x30);
+        fill_wram(&mut b, 0xD030, 0xA0, 0x10);
+        setup_gdma_regs(&mut b, 0xC000, 0x0000);
+        b.write(0xFF55, 0x02); // 3 blocks: src counter is now 0xC030
+        b.write(0xFF51, 0xD0); // rewrite the high byte only
+        b.write(0xFF55, 0x00); // 1 block: src 0xD030.., dst continues at 0x30
+        assert_eq!(b.read(0x8030), 0xA0, "live low byte kept: src 0xD030");
+        assert_eq!(b.read(0x803F), 0xAF);
+    }
+
+    /// VRAM and 0xE000+ are not valid VRAM-DMA sources (Pan Docs "CGB
+    /// DMA"); the engine copies 0xFF instead of looping VRAM back into
+    /// itself (SameBoy GB_hdma_run only drives the bus for ROM/SRAM/WRAM
+    /// sources; everything else yields the idle data-bus value).
+    #[test]
+    fn gdma_invalid_sources_fill_destination_with_ff() {
+        for src in [0x8000u16, 0x9000, 0xE000, 0xF000] {
+            let mut b = ic_cgb_mode();
+            // Distinct data at the would-be source and the destination.
+            b.write(0x8000, 0x12);
+            b.write(0x9000, 0x34);
+            for i in 0..16 {
+                b.write(0x9800 + i, 0x55);
+            }
+            setup_gdma_regs(&mut b, src, 0x1800);
+            b.write(0xFF55, 0x00); // one block
+            for i in 0..16 {
+                assert_eq!(b.read(0x9800 + i), 0xFF, "src {src:04X} byte {i}");
+            }
+        }
+    }
+
+    /// A destination running past 0x9FFF wraps to 0x8000 and the transfer
+    /// continues (SameBoy Core/memory.c GB_hdma_run:
+    /// `vram[vram_base + (hdma_current_dest++ & 0x1FFF)]`).
+    #[test]
+    fn gdma_destination_wraps_to_vram_start() {
+        let mut b = ic_cgb_mode();
+        fill_wram(&mut b, 0xC000, 0x40, 0x20);
+        setup_gdma_regs(&mut b, 0xC000, 0x1FF0);
+        b.write(0xFF55, 0x01); // 2 blocks: 0x9FF0-0x9FFF, then the wrap
+        assert_eq!(b.read(0x9FF0), 0x40);
+        assert_eq!(b.read(0x9FFF), 0x4F);
+        assert_eq!(b.read(0x8000), 0x50, "second block wrapped to 0x8000");
+        assert_eq!(b.read(0x800F), 0x5F);
+    }
+
     #[test]
     fn hblank_dma_one_block_per_hblank() {
         let mut b = ic_cgb_mode();
@@ -1461,5 +1583,35 @@ mod tests {
             ticks(&mut b, 284);
             assert_eq!(b.read(0xFF0F), 0xE1, "{model:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod pcm_decay_probe {
+    use super::*;
+    use crate::cartridge::Cartridge;
+    use crate::cpu::Bus;
+
+    #[test]
+    fn post_boot_beep_already_decayed_at_handoff() {
+        // The CGB boot beep plays during the logo, ~0.7s before hand-off;
+        // its NR12=$F3 envelope is at volume 0 by PC=0x100. NR52 keeps the
+        // channel-1 status bit (enable != volume), but PCM12 reads $00
+        // (oracle: misc/boot_hwio-C, misc/bits/unused_hwio-C).
+        let mut rom = vec![0u8; 0x8000];
+        rom[0x143] = 0x80;
+        rom[0x147] = 0x00;
+        let mut ic = Interconnect::new(Model::Cgb, Cartridge::from_bytes(rom).unwrap());
+        ic.apply_post_boot_state();
+        assert_eq!(
+            ic.read_no_tick(0xFF76),
+            0,
+            "beep already silent at hand-off"
+        );
+        assert_eq!(ic.read_no_tick(0xFF26) & 0x01, 0x01, "ch1 still enabled");
+        for _ in 0..1_048_576 {
+            ic.tick();
+        }
+        assert_eq!(ic.read_no_tick(0xFF76), 0, "stays silent");
     }
 }

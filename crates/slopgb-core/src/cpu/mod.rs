@@ -19,6 +19,13 @@ use crate::model::Model;
 /// * Each of [`read`](Bus::read), [`write`](Bus::write) and
 ///   [`tick`](Bus::tick) advances the machine by exactly one M-cycle, then
 ///   performs the access (if any).
+/// * The access part of [`read`](Bus::read) must have no side effects — a
+///   read may differ from [`tick`](Bus::tick) only in the value it returns.
+///   The halted CPU issues a discarded prefetch read of PC every idle
+///   M-cycle to model its NOP-loop-equivalent wake timing (see
+///   `execute::step`), even though the halted CPU performs no bus accesses
+///   on hardware; a side-effecting read would turn those into phantom
+///   accesses.
 /// * [`pending`](Bus::pending) and [`ack`](Bus::ack) take no time.
 pub trait Bus {
     /// One M-cycle ending in a memory read.

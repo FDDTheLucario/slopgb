@@ -406,6 +406,22 @@ impl Apu {
         }
     }
 
+    /// CGB PCM12 (FF76): channel 1 digital output in the low nibble,
+    /// channel 2 in the high nibble (Pan Docs "PCM amplitude readouts").
+    /// A channel with its DAC off reads 0.
+    pub fn pcm12(&self) -> u8 {
+        let c1 = if self.ch1.dac { self.ch1.digital() } else { 0 };
+        let c2 = if self.ch2.dac { self.ch2.digital() } else { 0 };
+        c1 | (c2 << 4)
+    }
+
+    /// CGB PCM34 (FF77): channel 3 low nibble, channel 4 high nibble.
+    pub fn pcm34(&self) -> u8 {
+        let c3 = if self.ch3.dac { self.ch3.digital() } else { 0 };
+        let c4 = if self.ch4.dac { self.ch4.digital() } else { 0 };
+        c3 | (c4 << 4)
+    }
+
     /// Instantaneous analog output of both terminals, each in [-1, 1].
     fn mix(&self) -> (f32, f32) {
         let digital = [
@@ -1074,6 +1090,31 @@ mod tests {
         h.apu.drain_samples(&mut out);
         let first = out[0].0;
         assert!(first > 0.05, "digital 0 must map to analog +1, got {first}");
+    }
+
+    #[test]
+    fn pcm_readouts_expose_channel_digital_outputs() {
+        // Pan Docs "PCM amplitude readouts": PCM12 low nibble = ch1 digital
+        // output, high nibble = ch2; PCM34 likewise for ch3/ch4. DAC-off
+        // channels read 0.
+        let mut h = H::dmg();
+        assert_eq!(h.apu.pcm12(), 0x00, "all DACs off at power-on");
+        assert_eq!(h.apu.pcm34(), 0x00);
+        h.w(0xFF24, 0x77);
+        h.w(0xFF25, 0xFF);
+        // ch2: max volume, no envelope; duty 2 (50%); trigger.
+        h.w(0xFF17, 0xF0);
+        h.w(0xFF18, 0x00);
+        h.w(0xFF19, 0x87);
+        // A full duty cycle is 8 steps of (2048-1024)*4 T-cycles; sample the
+        // high nibble across one cycle and expect both 0 and 15 phases.
+        let mut seen = [false; 16];
+        for _ in 0..8 * 1024 {
+            h.apu.tick(0, false);
+            seen[usize::from(h.apu.pcm12() >> 4)] = true;
+        }
+        assert!(seen[0] && seen[15], "50% duty must swing 0<->15: {seen:?}");
+        assert_eq!(h.apu.pcm12() & 0x0F, 0, "ch1 DAC off reads 0");
     }
 
     #[test]

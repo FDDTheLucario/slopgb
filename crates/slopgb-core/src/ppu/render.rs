@@ -187,7 +187,11 @@ impl Ppu {
         if !oam_glitch_magic_enable(&self.oam) {
             return;
         }
-        let old = self.oam[usize::from(index)];
+        // The interconnect caps the in-flight index at 159, but this pub
+        // API accepts any u8: out-of-range degrades to the undriven-bus
+        // value like `next` below (matching `oam_dma_write`'s bounds
+        // check) instead of panicking.
+        let old = self.oam.get(usize::from(index)).copied().unwrap_or(0xFF);
         // The byte after the in-flight one. A freeze on the final byte
         // (index 159) has no successor; the asm does not pin that case and
         // $FF is the usual undriven-bus value.
@@ -248,19 +252,33 @@ impl Ppu {
         // once the pipeline is actually about to ship that pixel (the FIFO
         // holds pixels and SCX discarding is done) — the alignment penalty
         // is the BG fetcher finishing the tile row it is mid-way through.
+        // Multiple sprites can share a trigger only in the left-clipped
+        // X <= 8 group (all trigger at lx == 0); they are fetched in
+        // ascending (X, OAM index) order, not OAM order: on hardware the
+        // OBJ position comparator also runs through the 8-pixel prefill,
+        // so an X=3 sprite is reached before an X=8 one. That keeps the
+        // first-fetched-wins FIFO merge equal to the DMG lower-X-wins rule
+        // (Pan Docs "Drawing priority": smaller X = higher priority, OAM
+        // order only breaks ties).
         if self.lcdc & 0x02 != 0 && self.render.bg_count > 0 && self.render.discard == 0 {
-            for i in 0..usize::from(self.render.n_sprites) {
-                if self.render.fetched & (1 << i) != 0 {
-                    continue;
+            loop {
+                let mut pick: Option<usize> = None;
+                for i in 0..usize::from(self.render.n_sprites) {
+                    if self.render.fetched & (1 << i) != 0 {
+                        continue;
+                    }
+                    let s = self.render.sprites[i];
+                    if s.x >= 168 || s.x.saturating_sub(8) != self.render.lx {
+                        continue;
+                    }
+                    // Strict `<` keeps the earlier slot (= lower OAM
+                    // index) on equal X.
+                    if pick.is_none_or(|p| s.x < self.render.sprites[p].x) {
+                        pick = Some(i);
+                    }
                 }
+                let Some(i) = pick else { break };
                 let s = self.render.sprites[i];
-                if s.x >= 168 {
-                    continue;
-                }
-                let trigger = s.x.saturating_sub(8);
-                if trigger != self.render.lx {
-                    continue;
-                }
                 // The first OBJ fetch of the line stalls the pipeline 3
                 // dots less than later ones: its OAM read + first tile-data
                 // dots overlap fetch work the BG pipeline performs anyway,
@@ -344,9 +362,12 @@ impl Ppu {
     }
 
     fn win_enabled_now(&self) -> bool {
-        // DMG: LCDC bit 0 gates the window as well; CGB: bit 0 is only
-        // priority (Pan Docs LCDC.0).
-        self.lcdc & 0x20 != 0 && (self.model.is_cgb() || self.lcdc & 0x01 != 0)
+        // DMG: LCDC bit 0 gates the window as well; native CGB: bit 0 is
+        // only priority. DMG compatibility mode behaves like DMG — bit 0
+        // clear blanks BG *and* window, ignoring the window enable bit
+        // (Pan Docs LCDC.0) — mirroring `output_pixel`'s bg_off condition.
+        self.lcdc & 0x20 != 0
+            && ((self.model.is_cgb() && !self.dmg_compat) || self.lcdc & 0x01 != 0)
     }
 
     fn fetcher_step(&mut self) {
@@ -903,6 +924,29 @@ mod tests {
         assert_eq!(px(&p, 2, 0), WHITE);
     }
 
+    #[test]
+    fn cgb_dmg_compat_lcdc0_gates_window() {
+        // DMG compatibility mode: LCDC.0 behaves like DMG — clear blanks
+        // BG *and* window, the window enable bit is ignored (Pan Docs
+        // "LCDC.0 — BG and Window enable/priority"). No window trigger
+        // means no 6-dot penalty and no window line counter advance.
+        let mut p = cgb_on(0xB0); // LCD on, window on, LCDC.0 = 0
+        p.set_dmg_compat(true);
+        p.write(0xFF4A, 0); // WY = 0
+        p.write(0xFF4B, 87); // WX: window from pixel 80
+        let v0 = render_line(&mut p, 2);
+        assert_eq!(v0, 256, "no window penalty in compat mode with LCDC.0=0");
+        assert_eq!(p.win_line, 0, "win_line must not advance");
+
+        // Native CGB mode: LCDC.0 is only priority — window unaffected.
+        let mut p = cgb_on(0xB0);
+        p.write(0xFF4A, 0);
+        p.write(0xFF4B, 87);
+        let v0 = render_line(&mut p, 2);
+        assert_eq!(v0, 262, "native CGB: window triggers despite LCDC.0=0");
+        assert_eq!(p.win_line, 2, "lines 0 and 1 advanced the counter");
+    }
+
     // --- Sprite rendering ---
 
     #[test]
@@ -985,6 +1029,35 @@ mod tests {
         assert_eq!(px(&p, 2, 10), DARK, "lower-X sprite only");
         assert_eq!(px(&p, 2, 14), DARK, "lower X wins overlap on DMG");
         assert_eq!(px(&p, 2, 18), LIGHT, "higher-X sprite tail");
+    }
+
+    #[test]
+    fn sprite_priority_clipped_left_edge_lower_x_wins() {
+        // Sprites with X <= 8 all trigger at lx == 0, but hardware still
+        // fetches them in ascending X order (the OBJ position comparator
+        // also runs through the 8-pixel prefill), so the DMG lower-X-wins
+        // rule (Pan Docs "Drawing priority") holds even when the OAM order
+        // is reversed.
+        let mut p = dmg_on(0x93);
+        p.write(0xFF49, 0x1B);
+        set_tile_row(&mut p, 0, 4, 0, 0xFF, 0x00); // solid color 1
+        sprite(&mut p, 0, 18, 8, 4, 0x00); // idx 0, X=8: screen 0-7, OBP0
+        sprite(&mut p, 1, 18, 3, 4, 0x10); // idx 1, X=3: screen 0-2, OBP1
+        render_line(&mut p, 2);
+        assert_eq!(px(&p, 2, 0), DARK, "X=3 sprite wins the overlap");
+        assert_eq!(px(&p, 2, 2), DARK, "X=3 sprite covers pixels 0-2");
+        assert_eq!(px(&p, 2, 3), LIGHT, "X=8 sprite resumes at pixel 3");
+        assert_eq!(px(&p, 2, 7), LIGHT);
+    }
+
+    #[test]
+    fn sprite_penalty_clipped_group_pays_in_x_order() {
+        // X=0 and X=4 share the trigger (lx == 0) *and* the BG tile: the
+        // leftmost sprite pays the first-per-tile alignment penalty
+        // (5 - 0 = 5 dots) whichever OAM slot it sits in, so OAM order
+        // [4, 0] costs the same as [0, 4]: 3 + 5 + 6 + 0 dots.
+        assert_eq!(penalty(&[0, 4]), 14);
+        assert_eq!(penalty(&[4, 0]), 14, "OAM order must not change timing");
     }
 
     #[test]
@@ -1127,6 +1200,21 @@ mod tests {
         sprite(&mut p, 5, 0x9F, 0xA7, 0x9F, 0xA7);
         p.oam_scan();
         assert_eq!(p.render.n_sprites, 10);
+    }
+
+    /// The interconnect caps the in-flight DMA index at 159, but the pub
+    /// `set_oam_dma_freeze` API accepts any u8: an out-of-range index must
+    /// degrade like the no-successor case (undriven bus reads 0xFF), not
+    /// panic during the next scan.
+    #[test]
+    fn mgb_glitch_freeze_index_out_of_range_no_panic() {
+        let mut p = mgb_on(0x93);
+        sprite(&mut p, 1, 0x9F, 0xA7, 0x9F, 0xA7); // magic enable entry
+        p.set_oam_dma_freeze(Some((0xA0, 0x1A)));
+        p.ly = 40;
+        p.oam_scan();
+        // old = next = 0xFF -> glitched Y = 0xFC: matches no visible line.
+        assert_eq!(p.render.n_sprites, 0);
     }
 
     /// The glitch is MGB-only: the asm documents different (unreferenced)

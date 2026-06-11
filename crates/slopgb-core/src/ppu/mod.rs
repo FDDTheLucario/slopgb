@@ -1024,8 +1024,12 @@ mod tests {
         let mut p = cgb();
         p.write(0xFF41, 0x20);
         p.write(0xFF40, 0x81);
+        // Run past line 143's own mode-2 edge (the OAM source falls at dot
+        // 84), then assert the vblank-entry pulse fires no earlier than
+        // 144:0.
+        run_to(&mut p, 143, 84);
         let ifs = run_to(&mut p, 143, 455);
-        let _ = ifs;
+        assert_eq!(ifs & 2, 0, "no OAM edge between 143:84 and 144:0 on CGB");
         assert_eq!(p.tick() & 2, 2, "CGB OAM pulse at 144:0");
         tick_n(&mut p, 3);
         assert_eq!(p.tick() & 1, 1, "vblank IF 4 dots later");

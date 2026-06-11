@@ -4,7 +4,7 @@
 //! code.
 
 use slopgb_core::cpu::Bus;
-use slopgb_core::{Button, GameBoy, Model};
+use slopgb_core::{Button, CYCLES_PER_FRAME, GameBoy, Model};
 
 /// A minimal valid 32 KiB ROM (cart type 0, size codes 0) with `chunks` of
 /// machine code / data placed at absolute addresses.
@@ -33,6 +33,8 @@ fn run_to_breakpoint(gb: &mut GameBoy, max_steps: u32) {
 #[test]
 fn post_boot_cpu_registers_per_model() {
     let rom = build_rom(&[(0x100, &[0x40])]); // immediate LD B,B
+    // Pan Docs "CPU registers" power-up table (per model: DMG A=01 F=B0,
+    // MGB A=FF F=B0, SGB A=01 F=00, CGB A=11 F=80; SP=FFFE, PC=0100 on all).
     for (model, af) in [
         (Model::Dmg, 0x01B0u16),
         (Model::Mgb, 0xFFB0),
@@ -162,7 +164,14 @@ fn oam_dma_end_to_end_from_cpu_code() {
         0xE0, 0x46, // ldh (DMA),a
         0x3E, 0x28, // ld a,40
         0x3D, // dec a
-        0x20, 0xFD, // jr nz,-3        ; 40 x 4 M-cycles > 162
+        // Busy-wait covering the transfer: after the FF46 write the
+        // trampoline burns 2 (ld a,40) + 40 dec + 39 taken jr + 1 untaken
+        // jr = 161 M-cycles; RET (4 M) plus the post-RET setup before the
+        // first OAM read (ld hl / ld de / ld b / ld a,(de), ~10 M) push
+        // that read to >= 175 > 162 M-cycles, the point where OAM unlocks
+        // (1 setup + 160 transfer + access cycle — see interconnect.rs
+        // `oam_dma_timing_exact`).
+        0x20, 0xFD, // jr nz,-3
         0xC9, // ret
     ];
     let pattern: Vec<u8> = (0..160u32).map(|i| (i * 7 + 3) as u8).collect();
@@ -284,5 +293,9 @@ fn run_frame_progresses() {
     let c0 = gb.cycles();
     gb.run_frame();
     gb.run_frame();
-    assert!(gb.cycles() >= c0 + 70224, "deadline progress with LCD off");
+    // CYCLES_PER_FRAME = 154 lines x 456 dots (Pan Docs "Rendering").
+    assert!(
+        gb.cycles() >= c0 + u64::from(CYCLES_PER_FRAME),
+        "deadline progress with LCD off"
+    );
 }

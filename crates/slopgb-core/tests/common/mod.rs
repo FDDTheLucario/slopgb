@@ -91,11 +91,17 @@ pub fn mts_root() -> Option<PathBuf> {
 /// model revision ABCDE as [`Model::Cgb`], so no modeled machine can pass).
 pub fn models_for(rel: &Path) -> Vec<Model> {
     let top = rel.iter().next().and_then(|c| c.to_str()).unwrap_or("");
+    // madness/ is covered by `run_madness` frame comparison, never by the
+    // breakpoint protocol: mgb_oam_dma_halt_sprites halts forever and never
+    // executes LD B,B. Defense in depth — checked before suffix parsing so
+    // that even a future suffixed madness ROM swept up by `run_group` is
+    // skipped loudly instead of timing out for 120 emulated seconds per
+    // model.
+    if top == "madness" {
+        return vec![];
+    }
     // Mapper tests probe the cartridge only; they are model-agnostic.
     // One plain and one CGB machine give double-speed-free coverage.
-    // (madness/mgb_oam_dma_halt_sprites never reaches this function: like
-    // manual-only/sprite_priority it is verified by frame comparison, not
-    // the breakpoint protocol — see `run_madness`.)
     if top == "emulator-only" {
         return vec![Model::Dmg, Model::Cgb];
     }
@@ -640,6 +646,17 @@ mod tests {
     }
 
     #[test]
+    fn madness_is_frame_compare_only() {
+        // madness/ ROMs are verified by `run_madness` frame comparison and
+        // must map to an *empty* breakpoint-protocol matrix: the eternal-HALT
+        // ROM never executes LD B,B, so running it via `run_group` would be
+        // a 120-emulated-second timeout per model. Guards both the suffixless
+        // stem (the shipped ROM) and any future suffixed madness ROM.
+        assert!(models("madness/mgb_oam_dma_halt_sprites.gb").is_empty());
+        assert!(models("madness/future_rom-mgb.gb").is_empty());
+    }
+
+    #[test]
     fn emulator_only_is_model_agnostic() {
         assert_eq!(
             models("emulator-only/mbc1/rom_512kb.gb"),
@@ -698,10 +715,12 @@ mod tests {
     #[test]
     fn mgb_oam_dma_halt_sprites_reference_histogram() {
         // Decoded from the suite's mgb_oam_dma_halt_sprites_expected.png:
-        // an even white/light-grey 8x8 checkerboard (the 18 missing
-        // light-grey pixels sit under the sprite) plus the 18 dark-grey
-        // pixels of one glitch sprite — the '8' glyph (tile $38) at
-        // Y=56/X=90 the asm derives from old=$30/next=$40/new=$1A.
+        // an even white/light-grey 8x8 checkerboard (11520 + 11520 pixels)
+        // plus the 18 dark-grey pixels of one glitch sprite — the '8' glyph
+        // (tile $38) at Y=56/X=90 the asm derives from old=$30/next=$40/
+        // new=$1A. The sprite's 18 pixels replace 15 light-grey and 3 white
+        // checkerboard pixels (its right column, x=88, crosses an 8x8 tile
+        // boundary), hence 11517 / 11505.
         assert_eq!(
             shade_histogram(MGB_OAM_DMA_HALT_SPRITES_SHADES),
             [11517, 11505, 18, 0]
