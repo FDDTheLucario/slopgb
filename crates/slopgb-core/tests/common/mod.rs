@@ -24,16 +24,15 @@
 //! AGS is not modeled, and `-C` ROMs that depend on AGB-only deviations have
 //! dedicated `-A` variants.
 
+use std::cell::Cell;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
+use std::sync::Once;
 
 use slopgb_core::{GameBoy, Model, SCREEN_PIXELS, SCREEN_W};
 
-/// The Fibonacci register signature of a passing test (B,C,D,E,H,L).
-pub const FIB: [u8; 6] = [3, 5, 8, 13, 21, 34];
-
-/// 120 emulated seconds; a test that has not hit `LD B,B` by then has hung.
-pub const TIMEOUT_TCYCLES: u64 = 120 * 4_194_304;
+mod protocol;
+pub use protocol::{FIB, TIMEOUT_TCYCLES};
 
 /// Default DMG shade-to-RGB mapping the harness expects from
 /// `Ppu::frame()` on DMG-family models, low 24 bits only (the X byte of
@@ -181,16 +180,19 @@ pub fn run_breakpoint_rom(rom: &[u8], model: Model) -> Result<(), String> {
 /// Collect `.gb`/`.gbc` files under `dir`, sorted for determinism.
 /// Non-recursive unless `recursive` (so `acceptance/` does not swallow its
 /// per-topic subdirectories, which have their own test functions).
-fn collect_roms(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut paths: Vec<PathBuf> = entries.filter_map(|e| e.ok()).map(|e| e.path()).collect();
+///
+/// I/O errors (unreadable directory, failing entry) are propagated rather
+/// than swallowed, so a permission problem or interrupted extraction cannot
+/// masquerade as an empty — and therefore silently green — group.
+pub fn collect_roms(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    let mut paths = std::fs::read_dir(dir)?
+        .map(|entry| entry.map(|e| e.path()))
+        .collect::<std::io::Result<Vec<PathBuf>>>()?;
     paths.sort();
     for p in paths {
         if p.is_dir() {
             if recursive {
-                collect_roms(&p, true, out);
+                collect_roms(&p, true, out)?;
             }
         } else if p
             .extension()
@@ -200,6 +202,7 @@ fn collect_roms(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>) {
             out.push(p);
         }
     }
+    Ok(())
 }
 
 fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
@@ -210,6 +213,41 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
     } else {
         "non-string panic payload".to_string()
     }
+}
+
+thread_local! {
+    /// True while the current thread is inside [`quiet_catch_unwind`].
+    static SUPPRESS_PANIC_OUTPUT: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Run `f`, catching panics *without* the default panic hook printing a
+/// "thread panicked at ..." report (plus backtrace note) for each one. While
+/// core subsystems are still `todo!()`, every PPU-dependent (rom x model)
+/// combination panics; hundreds of duplicate hook reports would bury the
+/// structured failure list [`run_group`] builds.
+///
+/// A bare no-op hook would also swallow the *summary* panic that carries that
+/// failure list (and any other test's assertion message), so instead the
+/// installed hook delegates to the previous one unless the current thread has
+/// opted into suppression. The hook is installed exactly once per test binary
+/// (`set_hook` is process-global); the suppression flag is per-thread so
+/// parallel test threads cannot silence each other.
+fn quiet_catch_unwind<R>(
+    f: impl FnOnce() -> R,
+) -> Result<R, Box<dyn std::any::Any + Send + 'static>> {
+    static INSTALL_HOOK: Once = Once::new();
+    INSTALL_HOOK.call_once(|| {
+        let default_hook = panic::take_hook();
+        panic::set_hook(Box::new(move |info| {
+            if !SUPPRESS_PANIC_OUTPUT.with(Cell::get) {
+                default_hook(info);
+            }
+        }));
+    });
+    SUPPRESS_PANIC_OUTPUT.with(|s| s.set(true));
+    let result = panic::catch_unwind(AssertUnwindSafe(f));
+    SUPPRESS_PANIC_OUTPUT.with(|s| s.set(false));
+    result
 }
 
 /// Run every (ROM x model) combination of one directory group through the
@@ -228,7 +266,19 @@ pub fn run_group(dir: &str, recursive: bool) {
         return;
     }
     let mut roms = Vec::new();
-    collect_roms(&group_dir, recursive, &mut roms);
+    if let Err(e) = collect_roms(&group_dir, recursive, &mut roms) {
+        panic!(
+            "{dir}: cannot enumerate ROMs under {}: {e}",
+            group_dir.display()
+        );
+    }
+    // Only a *missing* mts root / group directory is an intentional skip; an
+    // existing-but-empty group means a corrupt checkout and must fail rather
+    // than report "0 combinations passed" as green.
+    assert!(
+        !roms.is_empty(),
+        "{dir} exists but contains no .gb/.gbc ROMs — corrupt checkout?"
+    );
     let mut failures: Vec<String> = Vec::new();
     let mut passed = 0usize;
     for rom_path in &roms {
@@ -244,12 +294,16 @@ pub fn run_group(dir: &str, recursive: bool) {
         let rom = match std::fs::read(rom_path) {
             Ok(rom) => rom,
             Err(e) => {
-                failures.push(format!("{}: read failed: {e}", rel.display()));
+                // One entry per suppressed (rom x model) combination, so the
+                // "{n} of {total}" denominator still counts the full matrix.
+                for model in &models {
+                    failures.push(format!("{} [{model:?}]: read failed: {e}", rel.display()));
+                }
                 continue;
             }
         };
         for model in models {
-            match panic::catch_unwind(AssertUnwindSafe(|| run_breakpoint_rom(&rom, model))) {
+            match quiet_catch_unwind(|| run_breakpoint_rom(&rom, model)) {
                 Ok(Ok(())) => passed += 1,
                 Ok(Err(reason)) => {
                     failures.push(format!("{} [{model:?}]: {reason}", rel.display()))
@@ -289,7 +343,13 @@ pub fn compare_frame_exact_dmg(frame: &[u32], expected: &[u8]) -> Result<(), Str
     let mut mismatches = 0usize;
     let mut samples = Vec::new();
     for (i, (&px, &class)) in frame.iter().zip(expected).enumerate() {
-        let want = DMG_SHADE_RGB[usize::from(class)];
+        let Some(&want) = DMG_SHADE_RGB.get(usize::from(class)) else {
+            return Err(format!(
+                "{}: invalid shade class {class} in expected data (must be 0..=3) — \
+                 corrupt reference asset?",
+                pixel_coords(i, frame.len())
+            ));
+        };
         if px & 0x00FF_FFFF != want {
             mismatches += 1;
             if samples.len() < 8 {
@@ -325,9 +385,16 @@ pub fn compare_frame_structural(frame: &[u32], expected: &[u8]) -> Result<(), St
     let mut class_color: [Option<u32>; 4] = [None; 4];
     for (i, (&px, &class)) in frame.iter().zip(expected).enumerate() {
         let px = px & 0x00FF_FFFF;
-        match &mut class_color[usize::from(class)] {
-            slot @ None => *slot = Some(px),
-            Some(c) if *c == px => {}
+        let Some(slot) = class_color.get_mut(usize::from(class)) else {
+            return Err(format!(
+                "{}: invalid shade class {class} in expected data (must be 0..=3) — \
+                 corrupt reference asset?",
+                pixel_coords(i, frame.len())
+            ));
+        };
+        match *slot {
+            None => *slot = Some(px),
+            Some(c) if c == px => {}
             Some(c) => {
                 return Err(format!(
                     "{}: shade class {} rendered both as {c:06X} and {px:06X}",
@@ -397,14 +464,14 @@ pub fn run_sprite_priority() {
     let rom = std::fs::read(&rom_path).expect("read sprite_priority.gb");
     let mut failures: Vec<String> = Vec::new();
     for model in [Model::Dmg, Model::Cgb] {
-        let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        let result = quiet_catch_unwind(|| {
             let frame = run_for_frames(&rom, model, 10)?;
             if model.is_cgb() {
                 compare_frame_structural(&frame, SPRITE_PRIORITY_SHADES)
             } else {
                 compare_frame_exact_dmg(&frame, SPRITE_PRIORITY_SHADES)
             }
-        }));
+        });
         match result {
             Ok(Ok(())) => {}
             Ok(Err(reason)) => {
@@ -601,6 +668,22 @@ mod tests {
     }
 
     #[test]
+    fn exact_compare_rejects_invalid_shade_class() {
+        // A regenerated/corrupt expected .bin must produce a diagnostic
+        // naming the bad pixel, not an index-out-of-bounds panic.
+        let err = compare_frame_exact_dmg(&[0x00FF_FFFF], &[4u8]).unwrap_err();
+        assert!(err.contains("invalid shade class 4"), "{err}");
+        assert!(err.contains("#0"), "{err}");
+    }
+
+    #[test]
+    fn structural_compare_rejects_invalid_shade_class() {
+        let err = compare_frame_structural(&[0x00FF_FFFF], &[7u8]).unwrap_err();
+        assert!(err.contains("invalid shade class 7"), "{err}");
+        assert!(err.contains("#0"), "{err}");
+    }
+
+    #[test]
     fn structural_compare_accepts_any_consistent_ordered_palette() {
         // CGB compat colors: class 0 bright, class 1 mid, class 3 dark.
         let expected = [0u8, 1, 3, 0, 1, 3];
@@ -638,6 +721,42 @@ mod tests {
         let frame = [0x00FF_FFFF, 0x0000_0000, 0x00AA_AAAA];
         let err = compare_frame_structural(&frame, &expected).unwrap_err();
         assert!(err.contains("not brighter"), "{err}");
+    }
+
+    // --- ROM collection error handling ---
+
+    #[test]
+    fn collect_roms_propagates_io_errors() {
+        // An unreadable directory must surface as Err, not as a silently
+        // empty (and therefore green) group.
+        let mut out = Vec::new();
+        let missing = Path::new("/nonexistent/slopgb-collect-roms-test");
+        assert!(collect_roms(missing, true, &mut out).is_err());
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn collect_roms_yields_empty_for_dir_without_roms() {
+        // Empty-but-readable is Ok(()) + no ROMs; run_group turns that into
+        // an assert failure ("corrupt checkout?") rather than a pass.
+        let dir = std::env::temp_dir().join(format!("slopgb-empty-group-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut out = Vec::new();
+        collect_roms(&dir, true, &mut out).unwrap();
+        assert!(out.is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // --- quiet panic capture ---
+
+    #[test]
+    fn quiet_catch_unwind_reports_payload_and_resets_suppression() {
+        let err = quiet_catch_unwind(|| panic!("boom {}", 42)).unwrap_err();
+        assert_eq!(panic_message(err.as_ref()), "boom 42");
+        // Non-panicking closures pass their value through, and the
+        // suppression flag is cleared so later real panics stay loud.
+        assert_eq!(quiet_catch_unwind(|| 7).unwrap(), 7);
+        assert!(!SUPPRESS_PANIC_OUTPUT.with(Cell::get));
     }
 
     #[test]

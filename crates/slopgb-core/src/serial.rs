@@ -47,10 +47,14 @@ impl Serial {
         let mask = self.clock_mask();
         let falling = self.prev_div & mask != 0 && div & mask == 0;
         self.prev_div = div;
+        // Invariant (maintained by `write` and by completion below): a
+        // transfer is in flight exactly while SC bit 7 is set, so the SC
+        // check alone also guarantees bits_left > 0.
+        debug_assert_eq!(self.bits_left > 0, self.sc & 0x80 != 0);
         // Shifts happen only with an active transfer using the internal
         // clock (SC bit 7 and bit 0 both set). With an external clock and no
         // peer, the transfer never advances.
-        if !falling || self.bits_left == 0 || self.sc & 0x81 != 0x81 {
+        if !falling || self.sc & 0x81 != 0x81 {
             return 0;
         }
         // MSB out first; no peer, so 1 bits come in.
@@ -88,9 +92,13 @@ impl Serial {
                 let mask = if self.cgb { 0x83 } else { 0x81 };
                 self.sc = value & mask;
                 // Setting bit 7 (re)starts a transfer; clearing it aborts.
-                // The shift clock itself stays aligned to the DIV counter
-                // (mooneye boot_sclk_align: edges align to the counter reset
-                // time, not to the SC write).
+                // Any SC write resets the bit counter, so a rewrite with
+                // bit 7 set mid-transfer restarts a full 8-bit count while
+                // keeping the partially shifted SB (SameBoy Core/memory.c,
+                // GB_IO_SC case: `gb->serial_count = 0;` unconditionally on
+                // every write). The shift clock itself stays aligned to the
+                // DIV counter (mooneye boot_sclk_align: edges align to the
+                // counter reset time, not to the SC write).
                 self.bits_left = if self.sc & 0x80 != 0 { 8 } else { 0 };
             }
             _ => {}
@@ -263,6 +271,36 @@ mod tests {
         s.write(0xFF02, 0x81);
         s.tick(4); // DIV was written: counter jumped to 0, then +4
         assert_eq!(s.read(0xFF01), 0x01); // one bit shifted
+    }
+
+    /// Rewriting SC with bit 7 set mid-transfer restarts the bit counter:
+    /// 8 more shift edges are needed before completion, and SB keeps the
+    /// partially shifted contents (SameBoy Core/memory.c resets its serial
+    /// bit counter on every SC write).
+    #[test]
+    fn sc_rewrite_mid_transfer_restarts_bit_counter() {
+        let mut s = Serial::new(false);
+        let mut div = 0u16;
+        s.write(0xFF01, 0x00);
+        s.write(0xFF02, 0x81);
+        while div < 1024 {
+            step(&mut s, &mut div); // two bits shifted (edges at 512, 1024)
+        }
+        assert_eq!(s.read(0xFF01), 0x03);
+        s.write(0xFF02, 0x81); // restart mid-transfer
+        assert_eq!(s.read(0xFF01), 0x03, "SB keeps the partial shift");
+        while div < 1536 {
+            step(&mut s, &mut div); // next edge continues from partial SB
+        }
+        assert_eq!(s.read(0xFF01), 0x07);
+        // 8 fresh edges from the rewrite: completion at 1024 + 8 * 512,
+        // not at the original 8 * 512.
+        assert_eq!(
+            run_until_irq(&mut s, &mut div, 20_000),
+            Some(1024 + 8 * 512)
+        );
+        assert_eq!(s.read(0xFF01), 0xFF);
+        assert_eq!(s.read(0xFF02), 0x7F); // bit 7 cleared on completion
     }
 
     /// Clearing SC bit 7 aborts an in-flight transfer.

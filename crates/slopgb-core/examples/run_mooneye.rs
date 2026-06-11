@@ -14,7 +14,11 @@ use std::process::ExitCode;
 
 use slopgb_core::{GameBoy, Model};
 
-const TIMEOUT_TCYCLES: u64 = 120 * 4_194_304;
+// Pass/fail protocol constants shared with the integration harness
+// (tests/common/mod.rs) so the two cannot drift.
+#[path = "../tests/common/protocol.rs"]
+mod protocol;
+use protocol::{FIB, TIMEOUT_TCYCLES};
 
 fn parse_model(s: &str) -> Option<Model> {
     match s.to_ascii_lowercase().as_str() {
@@ -70,7 +74,7 @@ fn main() -> ExitCode {
     }
 
     let r = gb.cpu_regs();
-    let pass = !timed_out && [r.b, r.c, r.d, r.e, r.h, r.l] == [3, 5, 8, 13, 21, 34];
+    let pass = !timed_out && [r.b, r.c, r.d, r.e, r.h, r.l] == FIB;
     println!(
         "{}: {} [{model:?}]",
         if pass { "PASS" } else { "FAIL" },

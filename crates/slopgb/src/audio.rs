@@ -5,8 +5,15 @@
 //! The audio callback only pops from the queue; on underrun it outputs
 //! silence. The emulation side pushes; pushes beyond the queue capacity
 //! (~250 ms) are dropped, which doubles as the discard policy during turbo.
+//!
+//! Lock discipline: the queue mutex is shared with the realtime callback, so
+//! both sides keep their critical sections tiny — the callback drains into a
+//! preallocated scratch buffer and converts samples outside the lock, and the
+//! queue is preallocated to capacity so `push` never reallocates under the
+//! lock. Stream errors set a flag the emulation thread polls via [`AudioOutput::failed`].
 
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -26,6 +33,8 @@ pub struct AudioOutput {
     ring: Ring,
     sample_rate: u32,
     capacity: usize,
+    /// Set by the stream error callback; see [`Self::failed`].
+    failed: Arc<AtomicBool>,
 }
 
 impl AudioOutput {
@@ -43,17 +52,22 @@ impl AudioOutput {
         if sample_rate == 0 || channels == 0 {
             return Err("output device reports an unusable default config".into());
         }
-        let ring: Ring = Arc::new(Mutex::new(VecDeque::new()));
+        // ~250 ms cap so a stalled callback can't grow the queue forever.
+        // Preallocated to capacity so `push` never reallocates while holding
+        // the lock the realtime callback contends on.
+        let capacity = sample_rate as usize / 4;
+        let ring: Ring = Arc::new(Mutex::new(VecDeque::with_capacity(capacity)));
+        let failed = Arc::new(AtomicBool::new(false));
         let config = supported.config();
         let stream = match supported.sample_format() {
             cpal::SampleFormat::F32 => {
-                build_stream::<f32>(&device, &config, channels, Arc::clone(&ring))
+                build_stream::<f32>(&device, &config, channels, Arc::clone(&ring), &failed)
             }
             cpal::SampleFormat::I16 => {
-                build_stream::<i16>(&device, &config, channels, Arc::clone(&ring))
+                build_stream::<i16>(&device, &config, channels, Arc::clone(&ring), &failed)
             }
             cpal::SampleFormat::U16 => {
-                build_stream::<u16>(&device, &config, channels, Arc::clone(&ring))
+                build_stream::<u16>(&device, &config, channels, Arc::clone(&ring), &failed)
             }
             other => return Err(format!("unsupported sample format {other}")),
         }
@@ -65,8 +79,8 @@ impl AudioOutput {
             _stream: stream,
             ring,
             sample_rate,
-            // ~250 ms cap so a stalled callback can't grow the queue forever.
-            capacity: sample_rate as usize / 4,
+            capacity,
+            failed,
         })
     }
 
@@ -85,6 +99,43 @@ impl AudioOutput {
         let free = self.capacity.saturating_sub(q.len());
         q.extend(samples.iter().take(free).copied());
     }
+
+    /// True once the stream has reported an error (device unplugged, backend
+    /// died). The stream is dead; the owner should stop pacing on it.
+    pub fn failed(&self) -> bool {
+        self.failed.load(Ordering::Relaxed)
+    }
+}
+
+/// Fill one device buffer from the ring. The lock is held only to drain at
+/// most `data.len() / channels` frames into `scratch`; the sample conversion
+/// and channel fan-out run outside it so the emulation thread's `push` is
+/// never blocked behind a whole buffer fill.
+fn fill_from_ring<T>(data: &mut [T], channels: usize, ring: &Ring, scratch: &mut Vec<(f32, f32)>)
+where
+    T: SizedSample + FromSample<f32>,
+{
+    let frames = data.len() / channels;
+    scratch.clear();
+    {
+        let mut q = lock(ring);
+        let n = frames.min(q.len());
+        scratch.extend(q.drain(..n));
+    }
+    scratch.resize(frames, (0.0, 0.0)); // underrun: silence
+    for (frame, &(l, r)) in data.chunks_mut(channels).zip(scratch.iter()) {
+        match frame {
+            [mono] => *mono = T::from_sample(0.5 * (l + r)),
+            [fl, fr, rest @ ..] => {
+                *fl = T::from_sample(l);
+                *fr = T::from_sample(r);
+                for s in rest {
+                    *s = T::from_sample(0.0f32);
+                }
+            }
+            [] => {}
+        }
+    }
 }
 
 fn build_stream<T>(
@@ -92,30 +143,23 @@ fn build_stream<T>(
     config: &cpal::StreamConfig,
     channels: usize,
     ring: Ring,
+    failed: &Arc<AtomicBool>,
 ) -> Result<cpal::Stream, cpal::BuildStreamError>
 where
     T: SizedSample + FromSample<f32>,
 {
+    // Sized so a typical device buffer never makes the callback allocate.
+    let mut scratch: Vec<(f32, f32)> = Vec::with_capacity(4096);
+    let failed = Arc::clone(failed);
     device.build_output_stream(
         config,
         move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
-            let mut q = lock(&ring);
-            for frame in data.chunks_mut(channels) {
-                let (l, r) = q.pop_front().unwrap_or((0.0, 0.0)); // underrun: silence
-                match frame {
-                    [mono] => *mono = T::from_sample(0.5 * (l + r)),
-                    [fl, fr, rest @ ..] => {
-                        *fl = T::from_sample(l);
-                        *fr = T::from_sample(r);
-                        for s in rest {
-                            *s = T::from_sample(0.0f32);
-                        }
-                    }
-                    [] => {}
-                }
-            }
+            fill_from_ring(data, channels, &ring, &mut scratch);
         },
-        |err| eprintln!("slopgb: audio stream error: {err}"),
+        move |err| {
+            eprintln!("slopgb: audio stream error: {err}");
+            failed.store(true, Ordering::Relaxed);
+        },
         None,
     )
 }
@@ -169,6 +213,53 @@ impl Resampler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ring_with(frames: &[(f32, f32)]) -> Ring {
+        Arc::new(Mutex::new(frames.iter().copied().collect()))
+    }
+
+    #[test]
+    fn fill_drains_stereo_frames_in_order() {
+        let ring = ring_with(&[(0.1, 0.2), (0.3, 0.4)]);
+        let mut data = [9.0f32; 4];
+        let mut scratch = Vec::new();
+        fill_from_ring(&mut data, 2, &ring, &mut scratch);
+        assert_eq!(data, [0.1, 0.2, 0.3, 0.4]);
+        assert!(lock(&ring).is_empty());
+    }
+
+    #[test]
+    fn fill_pads_underrun_with_silence() {
+        let ring = ring_with(&[(0.5, -0.5)]);
+        let mut data = [9.0f32; 6];
+        let mut scratch = Vec::new();
+        fill_from_ring(&mut data, 2, &ring, &mut scratch);
+        assert_eq!(data, [0.5, -0.5, 0.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn fill_leaves_excess_frames_queued() {
+        let ring = ring_with(&[(0.1, 0.1), (0.2, 0.2), (0.3, 0.3)]);
+        let mut data = [9.0f32; 4]; // room for two frames only
+        let mut scratch = Vec::new();
+        fill_from_ring(&mut data, 2, &ring, &mut scratch);
+        assert_eq!(data, [0.1, 0.1, 0.2, 0.2]);
+        assert_eq!(lock(&ring).front(), Some(&(0.3, 0.3)));
+    }
+
+    #[test]
+    fn fill_downmixes_mono_and_zeroes_extra_channels() {
+        let ring = ring_with(&[(0.2, 0.4)]);
+        let mut mono = [9.0f32; 1];
+        let mut scratch = Vec::new();
+        fill_from_ring(&mut mono, 1, &ring, &mut scratch);
+        assert!((mono[0] - 0.3).abs() < 1e-6);
+
+        let ring = ring_with(&[(0.2, 0.4)]);
+        let mut quad = [9.0f32; 4];
+        fill_from_ring(&mut quad, 4, &ring, &mut scratch);
+        assert_eq!(quad, [0.2, 0.4, 0.0, 0.0]);
+    }
 
     #[test]
     fn resampler_passthrough_when_rates_match() {

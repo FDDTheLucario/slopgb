@@ -72,8 +72,10 @@ impl Joypad {
     }
 
     /// Latch the joypad interrupt on any 1 -> 0 input line transition.
+    /// `before` is a prior `input_lines()` value, so both operands are
+    /// already confined to the low nibble.
     fn latch_edges(&mut self, before: u8) {
-        if before & !self.input_lines() & 0x0F != 0 {
+        if before & !self.input_lines() != 0 {
             self.irq |= 0x10;
         }
     }

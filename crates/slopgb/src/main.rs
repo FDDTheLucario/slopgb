@@ -13,12 +13,18 @@ mod video;
 
 use std::env;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use slopgb_core::{CLOCK_HZ, CYCLES_PER_FRAME, GameBoy, Model, SCREEN_H, SCREEN_W};
+// The APU's default output rate, exported by the core so the resampler ratio
+// can't silently drift from it. The frontend resamples it to the device rate;
+// once `GameBoy` exposes `set_sample_rate`, set it to the device rate and the
+// resampler becomes a pass-through.
+use slopgb_core::apu::DEFAULT_SAMPLE_RATE as CORE_SAMPLE_RATE;
+use slopgb_core::{Button, GameBoy, Model, CLOCK_HZ, CYCLES_PER_FRAME, SCREEN_H, SCREEN_W};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{KeyEvent, WindowEvent};
@@ -27,7 +33,7 @@ use winit::keyboard::PhysicalKey;
 use winit::window::{Window, WindowId};
 
 use audio::{AudioOutput, Resampler};
-use input::Action;
+use input::{Action, ButtonTracker};
 use video::Video;
 
 const USAGE: &str = "\
@@ -59,11 +65,10 @@ const FRAME_DURATION: Duration =
 /// Audio-driven pacing keeps about this much queued for the device.
 const AUDIO_TARGET_MS: u64 = 50;
 
-/// The APU's default output rate (see `slopgb_core::apu`). The frontend
-/// resamples this to the device rate; once `GameBoy` exposes
-/// `set_sample_rate`, set it to the device rate and the resampler becomes a
-/// pass-through.
-const CORE_SAMPLE_RATE: u32 = 48_000;
+/// Audio-paced emulation falls back to wall-clock pacing if the device queue
+/// stops draining for this long (the cpal stream stalled or died without
+/// reporting an error).
+const AUDIO_STALL_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Autosave battery RAM every 5 seconds of emulated time.
 const AUTOSAVE_CYCLES: u64 = 5 * CLOCK_HZ as u64;
@@ -77,7 +82,11 @@ const TURBO_BUDGET: Duration = Duration::from_millis(10);
 
 fn main() {
     let opts = match Options::parse(env::args().skip(1)) {
-        Ok(opts) => opts,
+        Ok(ParseOutcome::Run(opts)) => opts,
+        Ok(ParseOutcome::Help) => {
+            print!("{USAGE}");
+            return;
+        }
         Err(e) => {
             eprintln!("error: {e}\n");
             eprint!("{USAGE}");
@@ -115,18 +124,23 @@ struct Options {
     mute: bool,
 }
 
+/// What a successful argument parse asks the program to do. Printing the
+/// help text (and exiting) is the caller's job, keeping `parse` pure and
+/// testable.
+enum ParseOutcome {
+    Run(Options),
+    Help,
+}
+
 impl Options {
-    fn parse(mut args: impl Iterator<Item = String>) -> Result<Self, String> {
+    fn parse(mut args: impl Iterator<Item = String>) -> Result<ParseOutcome, String> {
         let mut rom = None;
         let mut model = None;
         let mut scale = 3u32;
         let mut mute = false;
         while let Some(arg) = args.next() {
             match arg.as_str() {
-                "-h" | "--help" => {
-                    print!("{USAGE}");
-                    process::exit(0);
-                }
+                "-h" | "--help" => return Ok(ParseOutcome::Help),
                 "--mute" => mute = true,
                 "--model" => {
                     let v = args.next().ok_or("--model requires a value")?;
@@ -150,12 +164,12 @@ impl Options {
             }
         }
         let rom = rom.ok_or("missing ROM path")?;
-        Ok(Self {
+        Ok(ParseOutcome::Run(Self {
             rom,
             model,
             scale,
             mute,
-        })
+        }))
     }
 }
 
@@ -206,8 +220,14 @@ impl Session {
         let mut last_saved = None;
         match fs::read(&sav_path) {
             Ok(data) => {
-                gb.load_save_data(&data);
-                last_saved = Some(data);
+                if gb.load_save_data(&data) {
+                    last_saved = Some(data);
+                } else {
+                    eprintln!(
+                        "slopgb: ignoring save file '{}' (wrong size or no battery)",
+                        sav_path.display()
+                    );
+                }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => eprintln!(
@@ -235,7 +255,7 @@ impl Session {
         match GameBoy::new(self.model, self.rom_bytes.clone()) {
             Ok(mut gb) => {
                 if let Ok(data) = fs::read(&self.sav_path) {
-                    gb.load_save_data(&data);
+                    let _ = gb.load_save_data(&data); // rejection already warned at load
                 }
                 self.gb = gb;
                 self.next_autosave = AUTOSAVE_CYCLES;
@@ -271,12 +291,25 @@ impl Session {
     }
 }
 
-/// Write `data` to `path` via a temp file + rename, so a crash mid-write
-/// never truncates an existing save.
+/// Write `data` to `path` via a temp file, fsync and rename, so a crash —
+/// of the process or the whole machine — mid-write never truncates an
+/// existing save: the data blocks are durable before the rename can commit.
 fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
     let tmp = path.with_extension("sav.tmp");
-    fs::write(&tmp, data)?;
-    fs::rename(&tmp, path)
+    let mut file = fs::File::create(&tmp)?;
+    file.write_all(data)?;
+    file.sync_all()?;
+    drop(file);
+    fs::rename(&tmp, path)?;
+    // Best effort: also persist the rename itself (the directory entry), so
+    // power loss right after the rename can't roll back to the old contents.
+    #[cfg(unix)]
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        if let Ok(d) = fs::File::open(dir) {
+            let _ = d.sync_all();
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -321,6 +354,44 @@ impl AudioPipe {
     }
 }
 
+/// Watchdog for a dead audio stream. Audio-paced emulation only makes
+/// progress when the device drains the queue, so "zero frames emulated and
+/// the queue level never dropping" sustained for [`AUDIO_STALL_TIMEOUT`]
+/// means the stream is stalled even if cpal never reported an error — and
+/// without intervention the emulator would silently freeze.
+struct StallWatchdog {
+    /// Queue level at the last observation.
+    last_queued: usize,
+    /// Last time the queue drained or emulation produced frames.
+    progress_at: Instant,
+}
+
+impl StallWatchdog {
+    fn new() -> Self {
+        Self {
+            last_queued: usize::MAX,
+            progress_at: Instant::now(),
+        }
+    }
+
+    /// Restart the grace period (after pause, resume, audio re-open).
+    fn reset(&mut self) {
+        self.last_queued = usize::MAX;
+        self.progress_at = Instant::now();
+    }
+
+    /// Record one wake's outcome; true if the stream looks stalled.
+    fn is_stalled(&mut self, frames_emulated: u32, queued: usize, now: Instant) -> bool {
+        if frames_emulated > 0 || queued < self.last_queued {
+            self.last_queued = queued;
+            self.progress_at = now;
+            return false;
+        }
+        self.last_queued = queued;
+        now.duration_since(self.progress_at) > AUDIO_STALL_TIMEOUT
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Application
 
@@ -332,6 +403,10 @@ struct App {
     audio: Option<AudioPipe>,
     paused: bool,
     turbo: bool,
+    /// Per-key hold state, so two keys mapped to one button release cleanly.
+    buttons: ButtonTracker,
+    /// Detects a cpal stream that stopped draining (see [`StallWatchdog`]).
+    watchdog: StallWatchdog,
     /// Deadline of the next frame for wall-clock pacing.
     next_frame: Instant,
     /// Scratch for draining (and discarding) APU output while muted.
@@ -351,6 +426,8 @@ impl App {
             audio: None,
             paused: false,
             turbo: false,
+            buttons: ButtonTracker::default(),
+            watchdog: StallWatchdog::new(),
             next_frame: Instant::now(),
             discard_buf: Vec::new(),
             fps_frames: 0,
@@ -378,9 +455,11 @@ impl App {
         }
     }
 
-    /// Restart wall-clock pacing from now (after pause, turbo, load, reset).
+    /// Restart wall-clock pacing from now (after pause, turbo, load, reset),
+    /// and give the audio stall watchdog a fresh grace period.
     fn resync_pacing(&mut self) {
         self.next_frame = Instant::now();
+        self.watchdog.reset();
     }
 
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, key: &KeyEvent) {
@@ -397,8 +476,9 @@ impl App {
         match action {
             Action::Button(b) => {
                 if pressed {
+                    self.buttons.press(code, b);
                     self.session.gb.press(b);
-                } else {
+                } else if self.buttons.release(code, b) {
                     self.session.gb.release(b);
                 }
             }
@@ -426,10 +506,35 @@ impl App {
         }
     }
 
+    /// Focus lost: no release events will arrive for keys held right now, so
+    /// release every Game Boy button and drop turbo before they stick.
+    fn release_all_input(&mut self) {
+        self.buttons.clear();
+        for b in [
+            Button::A,
+            Button::B,
+            Button::Select,
+            Button::Start,
+            Button::Up,
+            Button::Down,
+            Button::Left,
+            Button::Right,
+        ] {
+            self.session.gb.release(b);
+        }
+        if self.turbo {
+            self.turbo = false;
+            self.resync_pacing();
+        }
+    }
+
     fn load_dropped(&mut self, path: &Path) {
+        // Persist the outgoing game *before* the new session reads its .sav:
+        // if the dropped file is the currently loaded ROM, loading first
+        // would resurrect a stale save and later overwrite the fresh one.
+        self.session.flush_save();
         match Session::load(path, self.opts.model) {
             Ok(new) => {
-                self.session.flush_save(); // persist the outgoing game
                 self.session = new;
                 self.paused = false;
                 self.resync_pacing();
@@ -496,6 +601,26 @@ impl App {
         }
         self.resync_pacing();
         frames
+    }
+
+    /// Detect a dead or stalled cpal stream and fall back to wall-clock
+    /// pacing, so audio-paced emulation can't freeze forever waiting on a
+    /// queue nobody drains.
+    fn check_audio_health(&mut self, frames: u32) {
+        let Some(pipe) = &self.audio else { return };
+        let failed = pipe.out.failed();
+        if failed
+            || self
+                .watchdog
+                .is_stalled(frames, pipe.out.queued(), Instant::now())
+        {
+            eprintln!(
+                "slopgb: audio stream {}; falling back to timer pacing",
+                if failed { "failed" } else { "stalled" }
+            );
+            self.audio = None;
+            self.resync_pacing();
+        }
     }
 
     fn update_fps(&mut self, frames: u32) {
@@ -565,6 +690,7 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::DroppedFile(path) => self.load_dropped(&path),
+            WindowEvent::Focused(false) => self.release_all_input(),
             WindowEvent::KeyboardInput { event, .. } => self.handle_key(event_loop, &event),
             _ => {}
         }
@@ -585,6 +711,8 @@ impl ApplicationHandler for App {
         } else {
             self.run_timer_paced()
         };
+        // A dead stream would otherwise pin `frames` at 0 forever.
+        self.check_audio_health(frames);
         if frames > 0 {
             self.session.autosave();
             if let Some(window) = &self.window {
@@ -612,13 +740,21 @@ impl ApplicationHandler for App {
 mod tests {
     use super::*;
 
-    fn parse(args: &[&str]) -> Result<Options, String> {
+    fn parse(args: &[&str]) -> Result<ParseOutcome, String> {
         Options::parse(args.iter().map(ToString::to_string))
+    }
+
+    /// Parse args expected to yield a run (not help).
+    fn parse_run(args: &[&str]) -> Result<Options, String> {
+        match parse(args)? {
+            ParseOutcome::Run(opts) => Ok(opts),
+            ParseOutcome::Help => panic!("unexpected help outcome for {args:?}"),
+        }
     }
 
     #[test]
     fn parse_rom_only_defaults() {
-        let opts = parse(&["game.gb"]).unwrap();
+        let opts = parse_run(&["game.gb"]).unwrap();
         assert_eq!(opts.rom, PathBuf::from("game.gb"));
         assert_eq!(opts.model, None);
         assert_eq!(opts.scale, 3);
@@ -627,11 +763,19 @@ mod tests {
 
     #[test]
     fn parse_all_options() {
-        let opts = parse(&["--model", "cgb", "--scale", "5", "--mute", "x.gbc"]).unwrap();
+        let opts = parse_run(&["--model", "cgb", "--scale", "5", "--mute", "x.gbc"]).unwrap();
         assert_eq!(opts.rom, PathBuf::from("x.gbc"));
         assert_eq!(opts.model, Some(Model::Cgb));
         assert_eq!(opts.scale, 5);
         assert!(opts.mute);
+    }
+
+    #[test]
+    fn parse_help_returns_outcome_instead_of_exiting() {
+        assert!(matches!(parse(&["-h"]), Ok(ParseOutcome::Help)));
+        assert!(matches!(parse(&["--help"]), Ok(ParseOutcome::Help)));
+        // Help wins even when mixed with other (even bogus) arguments.
+        assert!(matches!(parse(&["x.gb", "--help"]), Ok(ParseOutcome::Help)));
     }
 
     #[test]
@@ -668,7 +812,8 @@ mod tests {
 
     #[test]
     fn atomic_write_replaces_existing_file() {
-        let dir = std::env::temp_dir().join("slopgb-test-sav");
+        // Per-process directory so concurrent test runs can't race on it.
+        let dir = std::env::temp_dir().join(format!("slopgb-test-sav-{}", process::id()));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("game.sav");
         write_atomic(&path, b"first").unwrap();
@@ -676,5 +821,44 @@ mod tests {
         assert_eq!(fs::read(&path).unwrap(), b"second");
         assert!(!path.with_extension("sav.tmp").exists());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn watchdog_trips_after_sustained_stall() {
+        let mut w = StallWatchdog::new();
+        let t0 = Instant::now();
+        // First observation records the baseline.
+        assert!(!w.is_stalled(0, 100, t0));
+        // Queue stuck at the same level, no frames: not stalled until the
+        // timeout has fully elapsed.
+        assert!(!w.is_stalled(0, 100, t0 + AUDIO_STALL_TIMEOUT / 2));
+        assert!(!w.is_stalled(0, 100, t0 + AUDIO_STALL_TIMEOUT));
+        assert!(w.is_stalled(0, 100, t0 + AUDIO_STALL_TIMEOUT * 2));
+    }
+
+    #[test]
+    fn watchdog_treats_drain_or_frames_as_progress() {
+        let long = AUDIO_STALL_TIMEOUT * 2;
+        // Queue level dropping counts as progress.
+        let mut w = StallWatchdog::new();
+        let t0 = Instant::now();
+        assert!(!w.is_stalled(0, 100, t0));
+        assert!(!w.is_stalled(0, 99, t0 + long));
+        assert!(!w.is_stalled(0, 99, t0 + long + AUDIO_STALL_TIMEOUT / 2));
+        // Emulated frames count as progress even if the queue grew.
+        let mut w = StallWatchdog::new();
+        assert!(!w.is_stalled(0, 100, t0));
+        assert!(!w.is_stalled(3, 200, t0 + long));
+        assert!(!w.is_stalled(0, 200, t0 + long + AUDIO_STALL_TIMEOUT / 2));
+    }
+
+    #[test]
+    fn watchdog_reset_restarts_grace_period() {
+        let mut w = StallWatchdog::new();
+        let t0 = Instant::now();
+        assert!(!w.is_stalled(0, 100, t0));
+        w.reset();
+        // Stale `progress_at` must not trip right after a reset (unpause).
+        assert!(!w.is_stalled(0, 100, t0 + AUDIO_STALL_TIMEOUT * 2));
     }
 }

@@ -8,7 +8,7 @@
 use super::{Bus, Cpu, Flags};
 
 /// Execute one instruction (preceded by interrupt dispatch if one is
-/// pending and IME is set), or one M-cycle of halt.
+/// pending and IME is set), or one M-cycle of halt or stop mode.
 pub fn step(cpu: &mut Cpu, bus: &mut impl Bus) {
     if cpu.locked {
         // An illegal opcode hard-locks the CPU; it only burns cycles.
@@ -25,6 +25,19 @@ pub fn step(cpu: &mut Cpu, bus: &mut impl Bus) {
             return;
         }
         cpu.halted = false;
+    }
+    if cpu.stopped {
+        // Stop mode ends on joypad wake (Pan Docs, "Using the STOP
+        // Instruction"). The raw P1 input lines are not visible through
+        // `Bus`, so wake is modelled as IE & IF != 0, like halt; in stop
+        // mode every other interrupt source is frozen, so a newly pending
+        // bit can only be the joypad. Not modelled: hardware wakes on the
+        // P1 lines even with IE bit 4 clear.
+        if bus.pending() == 0 {
+            bus.tick();
+            return;
+        }
+        cpu.stopped = false;
     }
     if cpu.ime && bus.pending() != 0 {
         dispatch_interrupt(cpu, bus);
@@ -340,12 +353,22 @@ fn op_halt(cpu: &mut Cpu, bus: &mut impl Bus) {
 }
 
 fn op_stop(cpu: &mut Cpu, bus: &mut impl Bus) {
-    // STOP always skips the byte that follows it (it is nominally a 2-byte
-    // instruction). If the bus performed a CGB speed switch we continue
-    // normally; deep stop mode is otherwise the bus's problem, not modelled
-    // further here.
-    bus.stop();
-    cpu.regs.pc = cpu.regs.pc.wrapping_add(1);
+    // Per the STOP flowchart in Pan Docs ("Using the STOP Instruction"):
+    // with no interrupt pending STOP is a 2-byte opcode and the byte after
+    // it is skipped; with IE & IF != 0 it stays a 1-byte opcode. Branches
+    // not modelled (the joypad input state is not visible through `Bus`):
+    // a held button turns STOP into a 1-byte HALT (or a plain 1-byte NOP if
+    // an interrupt is also pending), and a pending interrupt with IME=1
+    // while a speed switch is armed glitches the CPU non-deterministically.
+    if bus.pending() == 0 {
+        cpu.regs.pc = cpu.regs.pc.wrapping_add(1);
+    }
+    // true: the bus performed an armed CGB speed switch and execution
+    // continues. false: deep stop; the CPU sleeps like in halt mode until
+    // the joypad wakes it (see `step`).
+    if !bus.stop() {
+        cpu.stopped = true;
+    }
 }
 
 fn execute(cpu: &mut Cpu, bus: &mut impl Bus, op: u8) {
@@ -629,27 +652,29 @@ fn cb_rot(cpu: &mut Cpu, kind: u8, v: u8) -> u8 {
 
 fn execute_cb(cpu: &mut Cpu, bus: &mut impl Bus, op: u8) {
     let idx = op & 7;
-    let bit = (op >> 3) & 7;
+    // Decode field y (bits 5..3): the rotate/shift kind in the 0x00..=0x3F
+    // range, the bit index for BIT/RES/SET.
+    let y = (op >> 3) & 7;
     match op >> 6 {
         // Rotates/shifts: (HL) is read-modify-write
         0 => {
             let v = r8_get(cpu, bus, idx);
-            let r = cb_rot(cpu, bit, v);
+            let r = cb_rot(cpu, y, v);
             r8_set(cpu, bus, idx, r);
         }
         // BIT: read only; C preserved, H set
         1 => {
             let v = r8_get(cpu, bus, idx);
             let c = flag(cpu, Flags::C);
-            set_flags(cpu, v & 1 << bit == 0, false, true, c);
+            set_flags(cpu, v & 1 << y == 0, false, true, c);
         }
         2 => {
             let v = r8_get(cpu, bus, idx);
-            r8_set(cpu, bus, idx, v & !(1 << bit));
+            r8_set(cpu, bus, idx, v & !(1 << y));
         }
         3 => {
             let v = r8_get(cpu, bus, idx);
-            r8_set(cpu, bus, idx, v | 1 << bit);
+            r8_set(cpu, bus, idx, v | 1 << y);
         }
         _ => unreachable!(),
     }
@@ -749,6 +774,7 @@ mod tests {
             ime: false,
             ime_pending: false,
             halted: false,
+            stopped: false,
             halt_bug: false,
             debug_breakpoint: false,
             locked: false,
@@ -1324,49 +1350,88 @@ mod tests {
         assert_eq!(c.regs.f, Flags::C);
     }
 
-    /// Independent DAA model, written from the algorithm description in
-    /// gbctr: accumulate the adjustment, carry only ever set in add mode.
-    fn daa_ref(a: u8, n: bool, h: bool, c: bool) -> (u8, bool, bool) {
-        if n {
-            let mut r = a;
-            if c {
-                r = r.wrapping_sub(0x60);
-            }
-            if h {
-                r = r.wrapping_sub(0x06);
-            }
-            (r, r == 0, c)
-        } else {
-            let mut adjust = 0u8;
-            let mut carry = c;
-            if h || a & 0x0F > 0x09 {
-                adjust += 0x06;
-            }
-            if c || a > 0x99 {
-                adjust += 0x60;
-                carry = true;
-            }
-            let r = a.wrapping_add(adjust);
-            (r, r == 0, carry)
+    /// Independent DAA model for add mode (N=0), written from the algorithm
+    /// description in gbctr: accumulate the adjustment, apply it in one
+    /// step, carry set by the 0x60 correction. Subtract mode is
+    /// deliberately not re-derived here: a flag-based reference would share
+    /// `op_daa`'s structure and could not catch a shared misunderstanding.
+    /// It is checked against decimal arithmetic instead, in
+    /// `daa_after_sub_computes_bcd_difference_for_all_operands`.
+    fn daa_add_ref(a: u8, h: bool, c: bool) -> (u8, bool, bool) {
+        let mut adjust = 0u8;
+        let mut carry = c;
+        if h || a & 0x0F > 0x09 {
+            adjust += 0x06;
         }
+        if c || a > 0x99 {
+            adjust += 0x60;
+            carry = true;
+        }
+        let r = a.wrapping_add(adjust);
+        (r, r == 0, carry)
     }
 
     #[test]
-    fn daa_matches_reference_for_all_inputs() {
-        for fbits in 0..8u8 {
-            let n = fbits & 1 != 0;
-            let h = fbits & 2 != 0;
-            let cf = fbits & 4 != 0;
+    fn daa_matches_reference_for_all_add_mode_inputs() {
+        for fbits in 0..4u8 {
+            let h = fbits & 1 != 0;
+            let cf = fbits & 2 != 0;
             for a in 0..=255u8 {
                 let mut c = cpu();
                 c.regs.a = a;
-                c.regs.f = fl(false, n, h, cf);
+                c.regs.f = fl(false, false, h, cf);
                 let mut b = bus(&[0x27]);
                 step(&mut c, &mut b);
-                let (ra, rz, rc) = daa_ref(a, n, h, cf);
-                let expect_f = fl(rz, n, false, rc);
-                assert_eq!(c.regs.a, ra, "a={a:#04x} n={n} h={h} c={cf}");
-                assert_eq!(c.regs.f, expect_f, "a={a:#04x} n={n} h={h} c={cf}");
+                let (ra, rz, rc) = daa_add_ref(a, h, cf);
+                let expect_f = fl(rz, false, false, rc);
+                assert_eq!(c.regs.a, ra, "a={a:#04x} h={h} c={cf}");
+                assert_eq!(c.regs.f, expect_f, "a={a:#04x} h={h} c={cf}");
+            }
+        }
+    }
+
+    /// BCD property oracle for DAA's subtract mode, independent of the
+    /// flag-correction algorithm: for every valid packed-BCD operand pair,
+    /// SUB (and SBC with carry-in) followed by DAA must yield the decimal
+    /// difference modulo 100, with C set exactly on decimal borrow, N kept
+    /// and H cleared.
+    #[test]
+    fn daa_after_sub_computes_bcd_difference_for_all_operands() {
+        let packed = |v: u8| (v / 10) << 4 | (v % 10);
+        for x in 0..100u8 {
+            for y in 0..100u8 {
+                // SUB B: decimal x - y.
+                let mut c = cpu();
+                c.regs.a = packed(x);
+                c.regs.b = packed(y);
+                let mut b = bus(&[0x90, 0x27]); // SUB B; DAA
+                step(&mut c, &mut b);
+                step(&mut c, &mut b);
+                let diff = (100 + x - y) % 100;
+                let borrow = x < y;
+                assert_eq!(c.regs.a, packed(diff), "sub x={x} y={y}");
+                assert_eq!(
+                    c.regs.f,
+                    fl(diff == 0, true, false, borrow),
+                    "sub x={x} y={y}"
+                );
+
+                // SBC B with carry in: decimal x - y - 1.
+                let mut c = cpu();
+                c.regs.a = packed(x);
+                c.regs.b = packed(y);
+                c.regs.f = fl(false, false, false, true);
+                let mut b = bus(&[0x98, 0x27]); // SBC B; DAA
+                step(&mut c, &mut b);
+                step(&mut c, &mut b);
+                let diff = (99 + x - y) % 100;
+                let borrow = x <= y;
+                assert_eq!(c.regs.a, packed(diff), "sbc x={x} y={y}");
+                assert_eq!(
+                    c.regs.f,
+                    fl(diff == 0, true, false, borrow),
+                    "sbc x={x} y={y}"
+                );
             }
         }
     }
@@ -2073,26 +2138,61 @@ mod tests {
     // ----- STOP -----
 
     #[test]
-    fn stop_calls_bus_and_skips_following_byte() {
+    fn stop_skips_following_byte_and_sleeps_until_joypad_wake() {
+        // Pan Docs STOP flowchart: no interrupt pending -> 2-byte opcode;
+        // bus.stop() == false -> deep stop, the CPU burns tick cycles like
+        // halt until the joypad interrupt becomes pending.
         let mut c = cpu();
         let mut b = bus(&[0x10, 0x00, 0x04]); // STOP; (skipped); INC B
         step(&mut c, &mut b);
         assert_eq!(b.take_log(), [Read(PC0, 0x10)]);
         assert_eq!(b.stop_calls, 1);
         assert_eq!(c.regs.pc, PC0 + 2);
+        assert!(c.stopped);
+        for _ in 0..3 {
+            step(&mut c, &mut b);
+        }
+        assert_eq!(b.take_log(), [Tick, Tick, Tick]);
+        assert_eq!(c.regs.pc, PC0 + 2);
+        // Joypad interrupt wakes it; execution resumes after the skipped
+        // byte with no extra delay cycles.
+        b.mem[0xFFFF] = 0x10;
+        b.mem[0xFF0F] = 0x10;
         step(&mut c, &mut b);
+        assert!(!c.stopped);
+        assert_eq!(b.log, [Read(PC0 + 2, 0x04)]);
         assert_eq!(c.regs.b, 1);
     }
 
     #[test]
     fn stop_with_speed_switch_continues_normally() {
+        // bus.stop() == true: the bus performed the armed CGB speed switch,
+        // so the CPU does not enter stop mode and keeps executing.
         let mut c = cpu();
         let mut b = bus(&[0x10, 0x00, 0x04]);
         b.stop_result = true;
         step(&mut c, &mut b);
         assert_eq!(b.stop_calls, 1);
         assert_eq!(c.regs.pc, PC0 + 2);
+        assert!(!c.stopped);
         step(&mut c, &mut b);
+        assert_eq!(c.regs.b, 1);
+    }
+
+    #[test]
+    fn stop_with_pending_interrupt_is_one_byte_opcode() {
+        // Pan Docs STOP flowchart: with IE & IF != 0, STOP is a 1-byte
+        // opcode - the byte after it is executed, not skipped.
+        let mut c = cpu();
+        let mut b = bus(&[0x10, 0x04]); // STOP; INC B
+        b.mem[0xFFFF] = 0x10;
+        b.mem[0xFF0F] = 0x10;
+        step(&mut c, &mut b);
+        assert_eq!(c.regs.pc, PC0 + 1);
+        // The already-pending interrupt also ends the stop immediately
+        // (IME=0, so it is not dispatched).
+        step(&mut c, &mut b);
+        assert!(!c.stopped);
         assert_eq!(c.regs.b, 1);
     }
 

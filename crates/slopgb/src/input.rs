@@ -27,6 +27,38 @@ pub enum Action {
     Quit,
 }
 
+/// Tracks which physical keys currently hold each button, so two keys mapped
+/// to the same button (Right Shift and Backspace both press Select) don't
+/// release it while the other key is still physically held.
+#[derive(Default)]
+pub struct ButtonTracker {
+    /// Currently held mapped keys. At most one entry per `KeyCode`; tiny, so
+    /// a Vec beats a set.
+    held: Vec<(KeyCode, Button)>,
+}
+
+impl ButtonTracker {
+    /// Record a key press for `button`.
+    pub fn press(&mut self, code: KeyCode, button: Button) {
+        if !self.held.iter().any(|&(c, _)| c == code) {
+            self.held.push((code, button));
+        }
+    }
+
+    /// Record a key release for `button`. Returns true if the button should
+    /// actually be released (no other held key still maps to it).
+    pub fn release(&mut self, code: KeyCode, button: Button) -> bool {
+        self.held.retain(|&(c, _)| c != code);
+        !self.held.iter().any(|&(_, b)| b == button)
+    }
+
+    /// Forget all held keys (e.g. on focus loss, when release events for
+    /// currently held keys will never arrive).
+    pub fn clear(&mut self) {
+        self.held.clear();
+    }
+}
+
 /// Map a physical key to its action, if it has one.
 pub fn map(code: KeyCode) -> Option<Action> {
     Some(match code {
@@ -65,5 +97,48 @@ mod tests {
     fn unmapped_keys_do_nothing() {
         assert_eq!(map(KeyCode::KeyQ), None);
         assert_eq!(map(KeyCode::F1), None); // palette toggle: needs core API
+    }
+
+    #[test]
+    fn tracker_keeps_select_held_while_either_key_is_down() {
+        let mut t = ButtonTracker::default();
+        t.press(KeyCode::ShiftRight, Button::Select);
+        t.press(KeyCode::Backspace, Button::Select);
+        // Backspace still holds Select after Right Shift is released.
+        assert!(!t.release(KeyCode::ShiftRight, Button::Select));
+        assert!(t.release(KeyCode::Backspace, Button::Select));
+    }
+
+    #[test]
+    fn tracker_releases_independent_buttons_independently() {
+        let mut t = ButtonTracker::default();
+        t.press(KeyCode::KeyZ, Button::A);
+        t.press(KeyCode::KeyX, Button::B);
+        assert!(t.release(KeyCode::KeyZ, Button::A));
+        assert!(t.release(KeyCode::KeyX, Button::B));
+    }
+
+    #[test]
+    fn tracker_release_without_press_still_releases() {
+        // A release whose press was never seen (key held before focus gain)
+        // must not leave the button stuck.
+        let mut t = ButtonTracker::default();
+        assert!(t.release(KeyCode::KeyZ, Button::A));
+    }
+
+    #[test]
+    fn tracker_ignores_duplicate_presses() {
+        let mut t = ButtonTracker::default();
+        t.press(KeyCode::ShiftRight, Button::Select);
+        t.press(KeyCode::ShiftRight, Button::Select);
+        assert!(t.release(KeyCode::ShiftRight, Button::Select));
+    }
+
+    #[test]
+    fn tracker_clear_forgets_held_keys() {
+        let mut t = ButtonTracker::default();
+        t.press(KeyCode::ShiftRight, Button::Select);
+        t.clear();
+        assert!(t.release(KeyCode::Backspace, Button::Select));
     }
 }

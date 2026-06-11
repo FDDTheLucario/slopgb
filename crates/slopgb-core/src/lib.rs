@@ -115,8 +115,9 @@ impl GameBoy {
     }
 
     /// Restore battery-backed RAM previously obtained from [`Self::save_data`].
-    pub fn load_save_data(&mut self, data: &[u8]) {
-        self.bus.cartridge_mut().load_save_data(data);
+    /// Returns false if the image was rejected (wrong size / no battery).
+    pub fn load_save_data(&mut self, data: &[u8]) -> bool {
+        self.bus.cartridge_mut().load_save_data(data)
     }
 
     /// True once the CPU has executed `LD B,B` (opcode 0x40) — the mooneye
