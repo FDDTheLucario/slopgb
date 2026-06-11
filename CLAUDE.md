@@ -38,9 +38,9 @@ Parallel cargo runs: set `CARGO_TARGET_DIR=target/<name>` to dodge lock contenti
 
 Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 3,5,8,13,21,34. Model from filename suffix (see ARCHITECTURE.md §Mooneye). Timeout 120 emulated s.
 
-## State (2026-06-10)
+## State (2026-06-11)
 
 - Goal: every mooneye test green (acceptance, emulator-only, misc, madness, sprite_priority via frame compare). Fully featured emulator, not test-ROM golf.
-- Done: scaffold, CPU, timer/serial/joypad, cartridge (MBC1(+M)/2/3+RTC/5), APU, harness, UI frontend, CI.
-- In flight: PPU (dot-accurate FIFO), then interconnect/model tables, then mooneye fix loop.
-- Pending core API for UI: `GameBoy::set_sample_rate`, `GameBoy::set_dmg_palette`.
+- All subsystems implemented; 382 unit tests; mooneye 392/439 combos passing.
+- CPU interrupt sampling is FROZEN: sampled at end of opcode fetch, dispatch aborts the fetched instruction (mooneye-gb prefetch semantics). Recalibrate dependents (PPU IRQ anchors), don't move the sampling.
+- Fix loop running on the 47 remaining: PPU STAT anchors (38), di/halt intr timing (8), madness OAM-DMA-halt (1).
