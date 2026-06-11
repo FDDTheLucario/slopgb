@@ -1,0 +1,654 @@
+//! Shared helpers for the mooneye test-suite integration harness
+//! (`tests/mooneye.rs`).
+//!
+//! # Test protocol
+//!
+//! A mooneye test ROM signals completion by executing `LD B,B` (opcode 0x40),
+//! exposed as [`GameBoy::debug_breakpoint_hit`]. The test passed iff the
+//! registers then hold the Fibonacci sequence B=3, C=5, D=8, E=13, H=21, L=34
+//! (test-roms-src/README.markdown, "Pass/fail reporting"). Anything else —
+//! including 120 emulated seconds without the breakpoint — is a failure.
+//!
+//! # Model matrix
+//!
+//! Filename suffixes name the hardware a ROM is expected to pass on
+//! (test-roms-src/README.markdown, "Test naming"):
+//!
+//! - exact revisions: `-dmg0`, `-dmgABC`, `-dmgABCmgb`, `-mgb`, `-sgb`,
+//!   `-sgb2`, `-cgb`, `-cgb0`, `-cgbABCDE`
+//! - hardware groups, combinable letter-per-group: `G` = dmg+mgb,
+//!   `S` = sgb+sgb2, `C` = cgb+agb+ags, `A` = agb+ags
+//!
+//! Per the architecture contract (docs/ARCHITECTURE.md, src/model.rs) the
+//! `C` group is run on [`Model::Cgb`] only and `A` on [`Model::Agb`] only:
+//! AGS is not modeled, and `-C` ROMs that depend on AGB-only deviations have
+//! dedicated `-A` variants.
+
+use std::panic::{self, AssertUnwindSafe};
+use std::path::{Path, PathBuf};
+
+use slopgb_core::{GameBoy, Model, SCREEN_PIXELS, SCREEN_W};
+
+/// The Fibonacci register signature of a passing test (B,C,D,E,H,L).
+pub const FIB: [u8; 6] = [3, 5, 8, 13, 21, 34];
+
+/// 120 emulated seconds; a test that has not hit `LD B,B` by then has hung.
+pub const TIMEOUT_TCYCLES: u64 = 120 * 4_194_304;
+
+/// Default DMG shade-to-RGB mapping the harness expects from
+/// `Ppu::frame()` on DMG-family models, low 24 bits only (the X byte of
+/// XRGB8888 is ignored). Shade 0 (lightest) .. shade 3 (darkest). These are
+/// the grey levels of the suite's own reference image
+/// `manual-only/sprite_priority-expected.png` (2-bit greyscale PNG).
+pub const DMG_SHADE_RGB: [u32; 4] = [0x00FF_FFFF, 0x00AA_AAAA, 0x0055_5555, 0x0000_0000];
+
+/// Expected `manual-only/sprite_priority` frame as one shade class (0..=3)
+/// per pixel, row-major 160x144.
+///
+/// Provenance: decoded offline from the mooneye test suite's own reference
+/// image `test-roms-src/manual-only/sprite_priority-expected.png` (160x144,
+/// 2-bit greyscale, PNG grey level g maps to DMG shade 3-g). The identical
+/// image (RGB-expanded with levels FF/AA/55/00) is shipped by
+/// gbdev/GBEmulatorShootout as `testroms/mooneye/manual-only/
+/// sprite_priority.png`.
+pub const SPRITE_PRIORITY_SHADES: &[u8; SCREEN_PIXELS] =
+    include_bytes!("../expected/sprite_priority.bin");
+
+/// Locate the newest mooneye test-suite release directory
+/// (`<repo>/test-roms/mts-*`). `None` when the ROMs are not checked out —
+/// callers print a skip notice instead of failing.
+pub fn mts_root() -> Option<PathBuf> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-roms");
+    let mut releases: Vec<PathBuf> = std::fs::read_dir(root)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_dir()
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("mts-"))
+        })
+        .collect();
+    releases.sort();
+    releases.pop()
+}
+
+/// Models a ROM (path relative to the mts root) must pass on.
+///
+/// An empty vector means "no modeled hardware revision" (e.g. `-cgb0`:
+/// `misc/boot_div-cgb0.s` documents "pass: CGB 0 / fail: CGB ABCDE", and we
+/// model revision ABCDE as [`Model::Cgb`], so no modeled machine can pass).
+pub fn models_for(rel: &Path) -> Vec<Model> {
+    let top = rel.iter().next().and_then(|c| c.to_str()).unwrap_or("");
+    match top {
+        // Mapper tests probe the cartridge only; they are model-agnostic.
+        // One plain and one CGB machine give double-speed-free coverage.
+        "emulator-only" => return vec![Model::Dmg, Model::Cgb],
+        // The whole madness/ category is MGB-only (mgb_oam_dma_halt_sprites).
+        "madness" => return vec![Model::Mgb],
+        _ => {}
+    }
+    let stem = rel.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    if let Some((_, sfx)) = stem.rsplit_once('-') {
+        if let Some(models) = suffix_models(sfx) {
+            return models;
+        }
+    }
+    match top {
+        // misc/ is "extra tests for CGB / AGB hardware" (suite README); all
+        // current ROMs there carry suffixes, this is a conservative default.
+        "misc" => vec![Model::Cgb, Model::Agb],
+        _ => vec![
+            Model::Dmg,
+            Model::Mgb,
+            Model::Sgb,
+            Model::Sgb2,
+            Model::Cgb,
+            Model::Agb,
+        ],
+    }
+}
+
+/// Map one filename suffix (the part after the last `-`) to models, or
+/// `None` if it is not a recognized model suffix.
+fn suffix_models(sfx: &str) -> Option<Vec<Model>> {
+    let models = match sfx {
+        "dmg0" => vec![Model::Dmg0],
+        "dmgABC" => vec![Model::Dmg],
+        "dmgABCmgb" => vec![Model::Dmg, Model::Mgb],
+        "mgb" => vec![Model::Mgb],
+        "sgb" => vec![Model::Sgb],
+        "sgb2" => vec![Model::Sgb2],
+        "cgb" | "cgbABCDE" => vec![Model::Cgb],
+        // CGB revision 0 is not modeled; the only -cgb0 ROM is documented to
+        // fail on the CGB ABCDE revision that Model::Cgb emulates.
+        "cgb0" => vec![],
+        "agb" => vec![Model::Agb],
+        _ => return group_letter_models(sfx),
+    };
+    Some(models)
+}
+
+/// Combined group letters, e.g. `GS` = dmg+mgb+sgb+sgb2.
+fn group_letter_models(sfx: &str) -> Option<Vec<Model>> {
+    if sfx.is_empty() || !sfx.chars().all(|c| matches!(c, 'G' | 'S' | 'C' | 'A')) {
+        return None;
+    }
+    let mut models = Vec::new();
+    for c in sfx.chars() {
+        match c {
+            'G' => models.extend([Model::Dmg, Model::Mgb]),
+            'S' => models.extend([Model::Sgb, Model::Sgb2]),
+            'C' => models.push(Model::Cgb),
+            'A' => models.push(Model::Agb),
+            _ => unreachable!(),
+        }
+    }
+    Some(models)
+}
+
+/// Check the post-breakpoint register signature.
+pub fn check_fib(b: u8, c: u8, d: u8, e: u8, h: u8, l: u8) -> Result<(), String> {
+    if [b, c, d, e, h, l] == FIB {
+        Ok(())
+    } else {
+        Err(format!(
+            "regs at breakpoint B={b:02X} C={c:02X} D={d:02X} E={e:02X} H={h:02X} L={l:02X}, \
+             want Fibonacci 03/05/08/0D/15/22"
+        ))
+    }
+}
+
+/// Run one ROM image on `model` until the `LD B,B` breakpoint or timeout,
+/// then check the Fibonacci signature.
+pub fn run_breakpoint_rom(rom: &[u8], model: Model) -> Result<(), String> {
+    let mut gb =
+        GameBoy::new(model, rom.to_vec()).map_err(|e| format!("cartridge rejected: {e}"))?;
+    while !gb.debug_breakpoint_hit() {
+        if gb.cycles() > TIMEOUT_TCYCLES {
+            return Err(format!(
+                "timeout: no LD B,B after {} T-cycles (120 emulated seconds)",
+                gb.cycles()
+            ));
+        }
+        gb.step();
+    }
+    let r = gb.cpu_regs();
+    check_fib(r.b, r.c, r.d, r.e, r.h, r.l)
+}
+
+/// Collect `.gb`/`.gbc` files under `dir`, sorted for determinism.
+/// Non-recursive unless `recursive` (so `acceptance/` does not swallow its
+/// per-topic subdirectories, which have their own test functions).
+fn collect_roms(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut paths: Vec<PathBuf> = entries.filter_map(|e| e.ok()).map(|e| e.path()).collect();
+    paths.sort();
+    for p in paths {
+        if p.is_dir() {
+            if recursive {
+                collect_roms(&p, true, out);
+            }
+        } else if p
+            .extension()
+            .and_then(|x| x.to_str())
+            .is_some_and(|x| x == "gb" || x == "gbc")
+        {
+            out.push(p);
+        }
+    }
+}
+
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "non-string panic payload".to_string()
+    }
+}
+
+/// Run every (ROM x model) combination of one directory group through the
+/// breakpoint protocol, collecting *all* failures, then panic with a
+/// readable `rom [model]: reason` list. Panics inside the core (e.g.
+/// unimplemented subsystems) are caught and reported per combination so one
+/// broken ROM cannot mask the rest of the group.
+pub fn run_group(dir: &str, recursive: bool) {
+    let Some(root) = mts_root() else {
+        println!("skipping {dir}: no mooneye ROMs under <repo>/test-roms/mts-*");
+        return;
+    };
+    let group_dir = root.join(dir);
+    if !group_dir.is_dir() {
+        println!("skipping {dir}: {} not present", group_dir.display());
+        return;
+    }
+    let mut roms = Vec::new();
+    collect_roms(&group_dir, recursive, &mut roms);
+    let mut failures: Vec<String> = Vec::new();
+    let mut passed = 0usize;
+    for rom_path in &roms {
+        let rel = rom_path.strip_prefix(&root).unwrap_or(rom_path);
+        let models = models_for(rel);
+        if models.is_empty() {
+            println!(
+                "note: {} skipped (no modeled hardware revision)",
+                rel.display()
+            );
+            continue;
+        }
+        let rom = match std::fs::read(rom_path) {
+            Ok(rom) => rom,
+            Err(e) => {
+                failures.push(format!("{}: read failed: {e}", rel.display()));
+                continue;
+            }
+        };
+        for model in models {
+            match panic::catch_unwind(AssertUnwindSafe(|| run_breakpoint_rom(&rom, model))) {
+                Ok(Ok(())) => passed += 1,
+                Ok(Err(reason)) => {
+                    failures.push(format!("{} [{model:?}]: {reason}", rel.display()))
+                }
+                Err(payload) => failures.push(format!(
+                    "{} [{model:?}]: panicked: {}",
+                    rel.display(),
+                    panic_message(payload.as_ref())
+                )),
+            }
+        }
+    }
+    if failures.is_empty() {
+        println!("{dir}: {passed} rom x model combinations passed");
+    } else {
+        panic!(
+            "{dir}: {} of {} rom x model combinations failed:\n  {}",
+            failures.len(),
+            passed + failures.len(),
+            failures.join("\n  ")
+        );
+    }
+}
+
+fn pixel_coords(index: usize, len: usize) -> String {
+    if len == SCREEN_PIXELS {
+        format!("({},{})", index % SCREEN_W, index / SCREEN_W)
+    } else {
+        format!("#{index}")
+    }
+}
+
+/// Exact-color comparison for DMG-family models: every pixel must equal the
+/// expected shade class rendered through [`DMG_SHADE_RGB`] (X byte ignored).
+pub fn compare_frame_exact_dmg(frame: &[u32], expected: &[u8]) -> Result<(), String> {
+    assert_eq!(frame.len(), expected.len());
+    let mut mismatches = 0usize;
+    let mut samples = Vec::new();
+    for (i, (&px, &class)) in frame.iter().zip(expected).enumerate() {
+        let want = DMG_SHADE_RGB[usize::from(class)];
+        if px & 0x00FF_FFFF != want {
+            mismatches += 1;
+            if samples.len() < 8 {
+                samples.push(format!(
+                    "{}: want shade {} = {want:06X}, got {:06X}",
+                    pixel_coords(i, frame.len()),
+                    class,
+                    px & 0x00FF_FFFF
+                ));
+            }
+        }
+    }
+    if mismatches == 0 {
+        Ok(())
+    } else {
+        Err(format!(
+            "{mismatches} pixel(s) differ from reference image: {}",
+            samples.join("; ")
+        ))
+    }
+}
+
+/// Palette-independent structural comparison (used on CGB, where DMG-compat
+/// colors come from boot-ROM-assigned palette RAM rather than fixed greys):
+///
+/// - all pixels of one expected shade class must share one actual color,
+/// - different classes must render as different colors,
+/// - luminance must strictly decrease with the shade class index (so a
+///   priority mix-up that swaps a light-grey sprite with a black one cannot
+///   slip through as a mere relabeling).
+pub fn compare_frame_structural(frame: &[u32], expected: &[u8]) -> Result<(), String> {
+    assert_eq!(frame.len(), expected.len());
+    let mut class_color: [Option<u32>; 4] = [None; 4];
+    for (i, (&px, &class)) in frame.iter().zip(expected).enumerate() {
+        let px = px & 0x00FF_FFFF;
+        match &mut class_color[usize::from(class)] {
+            slot @ None => *slot = Some(px),
+            Some(c) if *c == px => {}
+            Some(c) => {
+                return Err(format!(
+                    "{}: shade class {} rendered both as {c:06X} and {px:06X}",
+                    pixel_coords(i, frame.len()),
+                    class
+                ));
+            }
+        }
+    }
+    let lum = |c: u32| ((c >> 16) & 0xFF) + ((c >> 8) & 0xFF) + (c & 0xFF);
+    let present: Vec<(usize, u32)> = class_color
+        .iter()
+        .enumerate()
+        .filter_map(|(class, c)| c.map(|c| (class, c)))
+        .collect();
+    for (a, &(class_a, color_a)) in present.iter().enumerate() {
+        for &(class_b, color_b) in &present[a + 1..] {
+            if color_a == color_b {
+                return Err(format!(
+                    "shade classes {class_a} and {class_b} both rendered as {color_a:06X}"
+                ));
+            }
+            if lum(color_a) <= lum(color_b) {
+                return Err(format!(
+                    "shade class {class_a} ({color_a:06X}) not brighter than \
+                     class {class_b} ({color_b:06X})"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Run `rom` on `model` until at least `frames` frames have completed and
+/// return a copy of the last frame. Bounded by [`TIMEOUT_TCYCLES`].
+pub fn run_for_frames(rom: &[u8], model: Model, frames: u64) -> Result<Vec<u32>, String> {
+    let mut gb =
+        GameBoy::new(model, rom.to_vec()).map_err(|e| format!("cartridge rejected: {e}"))?;
+    while gb.frame_count() < frames {
+        if gb.cycles() > TIMEOUT_TCYCLES {
+            return Err(format!(
+                "timeout: only {} frames after {} T-cycles",
+                gb.frame_count(),
+                gb.cycles()
+            ));
+        }
+        gb.run_frame();
+    }
+    Ok(gb.frame().to_vec())
+}
+
+/// `manual-only/sprite_priority`: render ~10 frames and compare the frame
+/// against the suite's reference image instead of the breakpoint protocol.
+pub fn run_sprite_priority() {
+    let Some(root) = mts_root() else {
+        println!("skipping sprite_priority: no mooneye ROMs under <repo>/test-roms/mts-*");
+        return;
+    };
+    let rom_path = root.join("manual-only/sprite_priority.gb");
+    if !rom_path.is_file() {
+        println!(
+            "skipping sprite_priority: {} not present",
+            rom_path.display()
+        );
+        return;
+    }
+    let rom = std::fs::read(&rom_path).expect("read sprite_priority.gb");
+    let mut failures: Vec<String> = Vec::new();
+    for model in [Model::Dmg, Model::Cgb] {
+        let result = panic::catch_unwind(AssertUnwindSafe(|| {
+            let frame = run_for_frames(&rom, model, 10)?;
+            if model.is_cgb() {
+                compare_frame_structural(&frame, SPRITE_PRIORITY_SHADES)
+            } else {
+                compare_frame_exact_dmg(&frame, SPRITE_PRIORITY_SHADES)
+            }
+        }));
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(reason)) => {
+                failures.push(format!(
+                    "manual-only/sprite_priority.gb [{model:?}]: {reason}"
+                ));
+            }
+            Err(payload) => failures.push(format!(
+                "manual-only/sprite_priority.gb [{model:?}]: panicked: {}",
+                panic_message(payload.as_ref())
+            )),
+        }
+    }
+    if !failures.is_empty() {
+        panic!(
+            "sprite_priority: {} model(s) failed:\n  {}",
+            failures.len(),
+            failures.join("\n  ")
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn models(path: &str) -> Vec<Model> {
+        models_for(Path::new(path))
+    }
+
+    // --- model matrix: exact revision suffixes ---
+
+    #[test]
+    fn suffix_dmg0() {
+        assert_eq!(models("acceptance/boot_div-dmg0.gb"), [Model::Dmg0]);
+    }
+
+    #[test]
+    fn suffix_dmg_abc() {
+        assert_eq!(models("acceptance/boot_regs-dmgABC.gb"), [Model::Dmg]);
+    }
+
+    #[test]
+    fn suffix_dmg_abc_mgb() {
+        assert_eq!(
+            models("acceptance/boot_div-dmgABCmgb.gb"),
+            [Model::Dmg, Model::Mgb]
+        );
+        assert_eq!(
+            models("acceptance/serial/boot_sclk_align-dmgABCmgb.gb"),
+            [Model::Dmg, Model::Mgb]
+        );
+    }
+
+    #[test]
+    fn suffix_mgb_sgb_sgb2() {
+        assert_eq!(models("acceptance/boot_regs-mgb.gb"), [Model::Mgb]);
+        assert_eq!(models("acceptance/boot_regs-sgb.gb"), [Model::Sgb]);
+        assert_eq!(models("acceptance/boot_regs-sgb2.gb"), [Model::Sgb2]);
+    }
+
+    #[test]
+    fn suffix_cgb_variants() {
+        assert_eq!(models("misc/boot_regs-cgb.gb"), [Model::Cgb]);
+        assert_eq!(models("misc/boot_div-cgbABCDE.gb"), [Model::Cgb]);
+    }
+
+    #[test]
+    fn suffix_cgb0_is_skipped() {
+        // misc/boot_div-cgb0.s: "pass: CGB 0 / fail: ... CGB ABCDE". We model
+        // ABCDE, so this ROM maps to no machine at all.
+        assert!(models("misc/boot_div-cgb0.gb").is_empty());
+    }
+
+    // --- model matrix: group letters ---
+
+    #[test]
+    fn suffix_s_means_both_super_game_boys() {
+        assert_eq!(
+            models("acceptance/boot_div-S.gb"),
+            [Model::Sgb, Model::Sgb2]
+        );
+        // Trailing digits in the test name must not confuse suffix parsing.
+        assert_eq!(
+            models("acceptance/boot_div2-S.gb"),
+            [Model::Sgb, Model::Sgb2]
+        );
+    }
+
+    #[test]
+    fn suffix_gs_means_dmg_and_sgb_families() {
+        assert_eq!(
+            models("acceptance/bits/unused_hwio-GS.gb"),
+            [Model::Dmg, Model::Mgb, Model::Sgb, Model::Sgb2]
+        );
+    }
+
+    #[test]
+    fn suffix_c_and_a() {
+        assert_eq!(models("misc/bits/unused_hwio-C.gb"), [Model::Cgb]);
+        assert_eq!(models("misc/boot_regs-A.gb"), [Model::Agb]);
+        assert_eq!(models("misc/boot_div-A.gb"), [Model::Agb]);
+    }
+
+    // --- model matrix: defaults per directory ---
+
+    #[test]
+    fn no_suffix_acceptance_runs_everywhere_but_dmg0() {
+        assert_eq!(
+            models("acceptance/div_timing.gb"),
+            [
+                Model::Dmg,
+                Model::Mgb,
+                Model::Sgb,
+                Model::Sgb2,
+                Model::Cgb,
+                Model::Agb
+            ]
+        );
+        // Underscores are not suffix separators.
+        assert_eq!(models("acceptance/timer/tim00_div_trigger.gb").len(), 6);
+    }
+
+    #[test]
+    fn emulator_only_is_model_agnostic() {
+        assert_eq!(
+            models("emulator-only/mbc1/rom_512kb.gb"),
+            [Model::Dmg, Model::Cgb]
+        );
+        // Even "multicart_rom_8Mb" (no model suffix, despite Mb) stays put.
+        assert_eq!(
+            models("emulator-only/mbc1/multicart_rom_8Mb.gb"),
+            [Model::Dmg, Model::Cgb]
+        );
+    }
+
+    #[test]
+    fn madness_is_mgb() {
+        assert_eq!(models("madness/mgb_oam_dma_halt_sprites.gb"), [Model::Mgb]);
+    }
+
+    #[test]
+    fn unknown_group_letters_fall_back_to_default() {
+        assert_eq!(group_letter_models("X"), None);
+        assert_eq!(group_letter_models(""), None);
+        assert_eq!(group_letter_models("expected"), None);
+    }
+
+    // --- breakpoint protocol register check ---
+
+    #[test]
+    fn fib_signature_passes() {
+        assert!(check_fib(3, 5, 8, 13, 21, 34).is_ok());
+    }
+
+    #[test]
+    fn fail_signature_is_reported_with_regs() {
+        let err = check_fib(0x42, 0x42, 0x42, 0x42, 0x42, 0x42).unwrap_err();
+        assert!(err.contains("B=42"), "{err}");
+        assert!(err.contains("Fibonacci"), "{err}");
+    }
+
+    // --- vendored sprite_priority reference asset ---
+
+    #[test]
+    fn sprite_priority_reference_histogram() {
+        // Locks the asset against corruption: decoded from the suite's
+        // sprite_priority-expected.png, the image is 22705 white, 114 light
+        // grey, 0 dark grey and 221 black pixels.
+        let mut histogram = [0usize; 4];
+        for &shade in SPRITE_PRIORITY_SHADES.iter() {
+            assert!(shade < 4, "shade class out of range: {shade}");
+            histogram[usize::from(shade)] += 1;
+        }
+        assert_eq!(histogram, [22705, 114, 0, 221]);
+    }
+
+    // --- frame comparison helpers (on tiny synthetic frames) ---
+
+    #[test]
+    fn exact_compare_accepts_default_palette() {
+        let expected = [0u8, 1, 2, 3];
+        let frame = [0xFFFF_FFFF, 0xFFAA_AAAA, 0xFF55_5555, 0xFF00_0000];
+        assert!(compare_frame_exact_dmg(&frame, &expected).is_ok());
+    }
+
+    #[test]
+    fn exact_compare_ignores_x_byte_only() {
+        let expected = [0u8];
+        assert!(compare_frame_exact_dmg(&[0x00FF_FFFF], &expected).is_ok());
+        assert!(compare_frame_exact_dmg(&[0x12FF_FFFF], &expected).is_ok());
+        let err = compare_frame_exact_dmg(&[0xFFFF_FFFE], &expected).unwrap_err();
+        assert!(err.contains("1 pixel(s)"), "{err}");
+    }
+
+    #[test]
+    fn structural_compare_accepts_any_consistent_ordered_palette() {
+        // CGB compat colors: class 0 bright, class 1 mid, class 3 dark.
+        let expected = [0u8, 1, 3, 0, 1, 3];
+        let frame = [
+            0x00E0_F8D0,
+            0x0088_C070,
+            0x0008_1820,
+            0x00E0_F8D0,
+            0x0088_C070,
+            0x0008_1820,
+        ];
+        assert!(compare_frame_structural(&frame, &expected).is_ok());
+    }
+
+    #[test]
+    fn structural_compare_rejects_inconsistent_class_color() {
+        let expected = [1u8, 1];
+        let err = compare_frame_structural(&[0x0011_2233, 0x0011_2234], &expected).unwrap_err();
+        assert!(err.contains("rendered both"), "{err}");
+    }
+
+    #[test]
+    fn structural_compare_rejects_merged_classes() {
+        let expected = [0u8, 3];
+        let err = compare_frame_structural(&[0x00AB_CDEF, 0x00AB_CDEF], &expected).unwrap_err();
+        assert!(err.contains("both rendered"), "{err}");
+    }
+
+    #[test]
+    fn structural_compare_rejects_swapped_brightness() {
+        // A priority bug that paints the light-grey sprite black and vice
+        // versa produces the same partition with inverted luminance — the
+        // ordering requirement must catch it.
+        let expected = [0u8, 1, 3];
+        let frame = [0x00FF_FFFF, 0x0000_0000, 0x00AA_AAAA];
+        let err = compare_frame_structural(&frame, &expected).unwrap_err();
+        assert!(err.contains("not brighter"), "{err}");
+    }
+
+    #[test]
+    fn rom_discovery_points_at_mts_release() {
+        match mts_root() {
+            Some(root) => {
+                let name = root.file_name().unwrap().to_str().unwrap();
+                assert!(name.starts_with("mts-"), "{name}");
+                assert!(root.join("acceptance").is_dir());
+            }
+            None => println!("note: test-roms/mts-* not present, discovery returned None"),
+        }
+    }
+}

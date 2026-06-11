@@ -49,6 +49,9 @@ pub struct Cpu {
     halt_bug: bool,
     /// Set once `LD B,B` (0x40) executes — mooneye "test done" breakpoint.
     debug_breakpoint: bool,
+    /// CPU fetched an illegal opcode and is permanently locked up,
+    /// consuming tick cycles forever.
+    locked: bool,
 }
 
 impl Cpu {
@@ -61,6 +64,7 @@ impl Cpu {
             halted: false,
             halt_bug: false,
             debug_breakpoint: false,
+            locked: false,
         }
     }
 

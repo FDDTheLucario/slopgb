@@ -1,0 +1,93 @@
+//! Run a single mooneye test ROM and report pass/fail, final registers and
+//! elapsed cycles. Dev tool for the test fix loop.
+//!
+//! Usage: `run_mooneye <rom.gb> [dmg0|dmg|mgb|sgb|sgb2|cgb|agb]`
+//!
+//! Without a model argument the ROM's CGB-support header flag picks DMG or
+//! CGB. Exit code 0 = pass, 1 = fail/timeout, 2 = usage or I/O error.
+//!
+//! Protocol (test-roms-src/README.markdown): the ROM executes `LD B,B` when
+//! finished; it passed iff B/C/D/E/H/L are the Fibonacci numbers
+//! 3/5/8/13/21/34. 120 emulated seconds without the breakpoint is a timeout.
+
+use std::process::ExitCode;
+
+use slopgb_core::{GameBoy, Model};
+
+const TIMEOUT_TCYCLES: u64 = 120 * 4_194_304;
+
+fn parse_model(s: &str) -> Option<Model> {
+    match s.to_ascii_lowercase().as_str() {
+        "dmg0" => Some(Model::Dmg0),
+        "dmg" => Some(Model::Dmg),
+        "mgb" => Some(Model::Mgb),
+        "sgb" => Some(Model::Sgb),
+        "sgb2" => Some(Model::Sgb2),
+        "cgb" => Some(Model::Cgb),
+        "agb" => Some(Model::Agb),
+        _ => None,
+    }
+}
+
+fn main() -> ExitCode {
+    let mut args = std::env::args().skip(1);
+    let Some(rom_path) = args.next() else {
+        eprintln!("usage: run_mooneye <rom.gb> [dmg0|dmg|mgb|sgb|sgb2|cgb|agb]");
+        return ExitCode::from(2);
+    };
+    let rom = match std::fs::read(&rom_path) {
+        Ok(rom) => rom,
+        Err(e) => {
+            eprintln!("error: cannot read {rom_path}: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let model = match args.next() {
+        Some(name) => match parse_model(&name) {
+            Some(model) => model,
+            None => {
+                eprintln!("error: unknown model {name:?}");
+                return ExitCode::from(2);
+            }
+        },
+        None => GameBoy::auto_model(&rom),
+    };
+
+    let mut gb = match GameBoy::new(model, rom) {
+        Ok(gb) => gb,
+        Err(e) => {
+            eprintln!("error: cartridge rejected: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let mut timed_out = false;
+    while !gb.debug_breakpoint_hit() {
+        if gb.cycles() > TIMEOUT_TCYCLES {
+            timed_out = true;
+            break;
+        }
+        gb.step();
+    }
+
+    let r = gb.cpu_regs();
+    let pass = !timed_out && [r.b, r.c, r.d, r.e, r.h, r.l] == [3, 5, 8, 13, 21, 34];
+    println!(
+        "{}: {} [{model:?}]",
+        if pass { "PASS" } else { "FAIL" },
+        rom_path
+    );
+    if timed_out {
+        println!("  timeout: no LD B,B breakpoint within 120 emulated seconds");
+    }
+    println!(
+        "  regs: A={:02X} F={:02X} B={:02X} C={:02X} D={:02X} E={:02X} H={:02X} L={:02X} \
+         SP={:04X} PC={:04X}",
+        r.a, r.f, r.b, r.c, r.d, r.e, r.h, r.l, r.sp, r.pc
+    );
+    println!("  cycles: {} T-cycles", gb.cycles());
+    if pass {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
+}

@@ -79,3 +79,29 @@ impl Registers {
         [self.h, self.l] = v.to_be_bytes();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Registers;
+
+    #[test]
+    fn pair_accessors_round_trip() {
+        let mut r = Registers::default();
+        r.set_bc(0x1234);
+        r.set_de(0x5678);
+        r.set_hl(0x9ABC);
+        assert_eq!((r.b, r.c), (0x12, 0x34));
+        assert_eq!(r.bc(), 0x1234);
+        assert_eq!(r.de(), 0x5678);
+        assert_eq!(r.hl(), 0x9ABC);
+    }
+
+    #[test]
+    fn set_af_masks_f_low_nibble() {
+        let mut r = Registers::default();
+        r.set_af(0x12FF);
+        assert_eq!(r.a, 0x12);
+        assert_eq!(r.f, 0xF0);
+        assert_eq!(r.af(), 0x12F0);
+    }
+}

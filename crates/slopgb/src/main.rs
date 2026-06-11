@@ -1,11 +1,680 @@
+//! slopgb desktop frontend: CLI parsing, winit event loop, emulation pacing,
+//! and battery-RAM persistence. Video lives in [`video`], audio in [`audio`],
+//! the keymap in [`input`].
+//!
+//! Pacing: with audio on, emulation is driven by the audio clock — we emulate
+//! exactly enough frames to keep ~50 ms queued for the cpal callback. Muted
+//! (or if the device fails to open), a wall-clock loop paces frames at the
+//! hardware rate, 4194304 / 70224 ≈ 59.7275 Hz.
+
+mod audio;
+mod input;
+mod video;
+
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
+
+use slopgb_core::{CLOCK_HZ, CYCLES_PER_FRAME, GameBoy, Model, SCREEN_H, SCREEN_W};
+use winit::application::ApplicationHandler;
+use winit::dpi::LogicalSize;
+use winit::event::{KeyEvent, WindowEvent};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::keyboard::PhysicalKey;
+use winit::window::{Window, WindowId};
+
+use audio::{AudioOutput, Resampler};
+use input::Action;
+use video::Video;
+
+const USAGE: &str = "\
+slopgb — Game Boy / Game Boy Color emulator
+
+USAGE:
+    slopgb <rom.gb|.gbc> [OPTIONS]
+
+OPTIONS:
+    --model <MODEL>   Hardware model: dmg, dmg0, mgb, sgb, sgb2, cgb, agb
+                      (default: auto-detect from the ROM header)
+    --scale <N>       Initial window scale factor, 1-16 (default: 3)
+    --mute            Disable audio output
+    -h, --help        Print this help
+
+KEYS:
+    Z = A        X = B        Enter = Start    RShift/Backspace = Select
+    Arrow keys = D-pad        Tab (hold) = turbo
+    P = pause    R = reset    Esc = quit
+
+A ROM file dropped onto the window is loaded in place of the current one.
+";
+
+/// Wall-clock duration of one emulated frame: 70224 T-cycles at 4194304 Hz
+/// (~59.7275 Hz).
+const FRAME_DURATION: Duration =
+    Duration::from_nanos(CYCLES_PER_FRAME as u64 * 1_000_000_000 / CLOCK_HZ as u64);
+
+/// Audio-driven pacing keeps about this much queued for the device.
+const AUDIO_TARGET_MS: u64 = 50;
+
+/// The APU's default output rate (see `slopgb_core::apu`). The frontend
+/// resamples this to the device rate; once `GameBoy` exposes
+/// `set_sample_rate`, set it to the device rate and the resampler becomes a
+/// pass-through.
+const CORE_SAMPLE_RATE: u32 = 48_000;
+
+/// Autosave battery RAM every 5 seconds of emulated time.
+const AUTOSAVE_CYCLES: u64 = 5 * CLOCK_HZ as u64;
+
+/// Upper bound on frames emulated per event-loop wake (non-turbo), so a host
+/// that can't keep up stays responsive instead of spiraling.
+const MAX_FRAMES_PER_WAKE: u32 = 8;
+
+/// Wall-clock emulation budget per wake while turbo is held.
+const TURBO_BUDGET: Duration = Duration::from_millis(10);
+
 fn main() {
-    // Frontend work package: winit window + softbuffer presentation + cpal
-    // audio + ROM loading. Until then, prove the core links.
-    eprintln!(
-        "slopgb {}: frontend not yet implemented ({}x{} target)",
-        env!("CARGO_PKG_VERSION"),
-        slopgb_core::SCREEN_W,
-        slopgb_core::SCREEN_H,
-    );
-    std::process::exit(2);
+    let opts = match Options::parse(env::args().skip(1)) {
+        Ok(opts) => opts,
+        Err(e) => {
+            eprintln!("error: {e}\n");
+            eprint!("{USAGE}");
+            process::exit(2);
+        }
+    };
+    let session = match Session::load(&opts.rom, opts.model) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: {e}");
+            process::exit(1);
+        }
+    };
+    let event_loop = match EventLoop::new() {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("error: cannot create event loop: {e}");
+            process::exit(1);
+        }
+    };
+    let mut app = App::new(opts, session);
+    if let Err(e) = event_loop.run_app(&mut app) {
+        eprintln!("error: event loop failed: {e}");
+        process::exit(1);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CLI
+
+struct Options {
+    rom: PathBuf,
+    model: Option<Model>,
+    scale: u32,
+    mute: bool,
+}
+
+impl Options {
+    fn parse(mut args: impl Iterator<Item = String>) -> Result<Self, String> {
+        let mut rom = None;
+        let mut model = None;
+        let mut scale = 3u32;
+        let mut mute = false;
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "-h" | "--help" => {
+                    print!("{USAGE}");
+                    process::exit(0);
+                }
+                "--mute" => mute = true,
+                "--model" => {
+                    let v = args.next().ok_or("--model requires a value")?;
+                    model = Some(parse_model(&v)?);
+                }
+                "--scale" => {
+                    let v = args.next().ok_or("--scale requires a value")?;
+                    scale = v
+                        .parse::<u32>()
+                        .ok()
+                        .filter(|n| (1..=16).contains(n))
+                        .ok_or_else(|| format!("invalid --scale '{v}' (expected 1-16)"))?;
+                }
+                s if s.starts_with('-') => return Err(format!("unknown option '{s}'")),
+                _ => {
+                    if rom.is_some() {
+                        return Err(format!("unexpected extra argument '{arg}'"));
+                    }
+                    rom = Some(PathBuf::from(arg));
+                }
+            }
+        }
+        let rom = rom.ok_or("missing ROM path")?;
+        Ok(Self {
+            rom,
+            model,
+            scale,
+            mute,
+        })
+    }
+}
+
+fn parse_model(s: &str) -> Result<Model, String> {
+    Ok(match s.to_ascii_lowercase().as_str() {
+        "dmg" => Model::Dmg,
+        "dmg0" => Model::Dmg0,
+        "mgb" => Model::Mgb,
+        "sgb" => Model::Sgb,
+        "sgb2" => Model::Sgb2,
+        "cgb" => Model::Cgb,
+        "agb" => Model::Agb,
+        _ => {
+            return Err(format!(
+                "unknown model '{s}' (expected dmg, dmg0, mgb, sgb, sgb2, cgb or agb)"
+            ));
+        }
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Emulation session (one loaded ROM)
+
+struct Session {
+    gb: GameBoy,
+    /// Original ROM image, kept for reset.
+    rom_bytes: Vec<u8>,
+    model: Model,
+    /// ROM file stem, for the window title.
+    title: String,
+    sav_path: PathBuf,
+    /// Last battery-RAM image written to disk (dirty check).
+    last_saved: Option<Vec<u8>>,
+    /// Emulated-cycle deadline for the next autosave.
+    next_autosave: u64,
+}
+
+impl Session {
+    /// Load a ROM, pick its model (CLI override beats header auto-detect),
+    /// and restore `<rom>.sav` if present.
+    fn load(path: &Path, model_override: Option<Model>) -> Result<Self, String> {
+        let rom_bytes =
+            fs::read(path).map_err(|e| format!("cannot read ROM '{}': {e}", path.display()))?;
+        let model = model_override.unwrap_or_else(|| GameBoy::auto_model(&rom_bytes));
+        let mut gb = GameBoy::new(model, rom_bytes.clone())
+            .map_err(|e| format!("cannot load ROM '{}': {e}", path.display()))?;
+        let sav_path = path.with_extension("sav");
+        let mut last_saved = None;
+        match fs::read(&sav_path) {
+            Ok(data) => {
+                gb.load_save_data(&data);
+                last_saved = Some(data);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => eprintln!(
+                "slopgb: cannot read save file '{}': {e}",
+                sav_path.display()
+            ),
+        }
+        let title = path
+            .file_stem()
+            .map_or_else(|| "rom".to_owned(), |s| s.to_string_lossy().into_owned());
+        Ok(Self {
+            gb,
+            rom_bytes,
+            model,
+            title,
+            sav_path,
+            last_saved,
+            next_autosave: AUTOSAVE_CYCLES,
+        })
+    }
+
+    /// Power-cycle: fresh machine, save RAM reloaded from disk.
+    fn reset(&mut self) {
+        self.flush_save();
+        match GameBoy::new(self.model, self.rom_bytes.clone()) {
+            Ok(mut gb) => {
+                if let Ok(data) = fs::read(&self.sav_path) {
+                    gb.load_save_data(&data);
+                }
+                self.gb = gb;
+                self.next_autosave = AUTOSAVE_CYCLES;
+            }
+            // Can't happen (the same image loaded before), but never panic.
+            Err(e) => eprintln!("slopgb: reset failed: {e}"),
+        }
+    }
+
+    /// Write battery RAM to `<rom>.sav` if it changed since the last write.
+    fn flush_save(&mut self) {
+        let Some(data) = self.gb.save_data() else {
+            return; // cartridge has no battery RAM
+        };
+        if self.last_saved.as_deref() == Some(data.as_slice()) {
+            return;
+        }
+        match write_atomic(&self.sav_path, &data) {
+            Ok(()) => self.last_saved = Some(data),
+            Err(e) => eprintln!(
+                "slopgb: cannot write save file '{}': {e}",
+                self.sav_path.display()
+            ),
+        }
+    }
+
+    /// Flush battery RAM at most once per [`AUTOSAVE_CYCLES`] of emulated time.
+    fn autosave(&mut self) {
+        if self.gb.cycles() >= self.next_autosave {
+            self.next_autosave = self.gb.cycles().saturating_add(AUTOSAVE_CYCLES);
+            self.flush_save();
+        }
+    }
+}
+
+/// Write `data` to `path` via a temp file + rename, so a crash mid-write
+/// never truncates an existing save.
+fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    let tmp = path.with_extension("sav.tmp");
+    fs::write(&tmp, data)?;
+    fs::rename(&tmp, path)
+}
+
+// ---------------------------------------------------------------------------
+// Audio pipeline (emulation side)
+
+struct AudioPipe {
+    out: AudioOutput,
+    resampler: Resampler,
+    /// Queue fill target in device-rate frames (~[`AUDIO_TARGET_MS`]).
+    target_fill: usize,
+    /// Scratch: samples drained from the core (core rate).
+    drain_buf: Vec<(f32, f32)>,
+    /// Scratch: resampled samples (device rate).
+    device_buf: Vec<(f32, f32)>,
+}
+
+impl AudioPipe {
+    fn new(out: AudioOutput) -> Self {
+        let rate = out.sample_rate();
+        Self {
+            resampler: Resampler::new(CORE_SAMPLE_RATE, rate),
+            target_fill: usize::try_from(u64::from(rate) * AUDIO_TARGET_MS / 1000)
+                .unwrap_or(usize::MAX),
+            out,
+            drain_buf: Vec::new(),
+            device_buf: Vec::new(),
+        }
+    }
+
+    /// Move all pending core samples to the device queue (resampling on the
+    /// way). Excess beyond the queue capacity is dropped by `push`.
+    fn pump(&mut self, gb: &mut GameBoy) {
+        self.drain_buf.clear();
+        gb.drain_audio(&mut self.drain_buf);
+        self.device_buf.clear();
+        self.resampler.run(&self.drain_buf, &mut self.device_buf);
+        self.out.push(&self.device_buf);
+    }
+
+    fn needs_more(&self) -> bool {
+        self.out.queued() < self.target_fill
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Application
+
+struct App {
+    opts: Options,
+    session: Session,
+    window: Option<Rc<Window>>,
+    video: Option<Video>,
+    audio: Option<AudioPipe>,
+    paused: bool,
+    turbo: bool,
+    /// Deadline of the next frame for wall-clock pacing.
+    next_frame: Instant,
+    /// Scratch for draining (and discarding) APU output while muted.
+    discard_buf: Vec<(f32, f32)>,
+    fps_frames: u32,
+    fps_since: Instant,
+    fps: f64,
+}
+
+impl App {
+    fn new(opts: Options, session: Session) -> Self {
+        Self {
+            opts,
+            session,
+            window: None,
+            video: None,
+            audio: None,
+            paused: false,
+            turbo: false,
+            next_frame: Instant::now(),
+            discard_buf: Vec::new(),
+            fps_frames: 0,
+            fps_since: Instant::now(),
+            fps: 0.0,
+        }
+    }
+
+    fn update_title(&self) {
+        if let Some(window) = &self.window {
+            let state = if self.paused {
+                " — paused".to_owned()
+            } else {
+                format!(" — {:.1} fps", self.fps)
+            };
+            window.set_title(&format!("{} — slopgb{state}", self.session.title));
+        }
+    }
+
+    fn redraw(&mut self) {
+        if let (Some(window), Some(video)) = (&self.window, &mut self.video) {
+            if let Err(e) = video.draw(window, self.session.gb.frame()) {
+                eprintln!("slopgb: failed to present frame: {e}");
+            }
+        }
+    }
+
+    /// Restart wall-clock pacing from now (after pause, turbo, load, reset).
+    fn resync_pacing(&mut self) {
+        self.next_frame = Instant::now();
+    }
+
+    fn handle_key(&mut self, event_loop: &ActiveEventLoop, key: &KeyEvent) {
+        if key.repeat {
+            return;
+        }
+        let PhysicalKey::Code(code) = key.physical_key else {
+            return;
+        };
+        let Some(action) = input::map(code) else {
+            return;
+        };
+        let pressed = key.state.is_pressed();
+        match action {
+            Action::Button(b) => {
+                if pressed {
+                    self.session.gb.press(b);
+                } else {
+                    self.session.gb.release(b);
+                }
+            }
+            Action::Turbo => {
+                self.turbo = pressed;
+                if !pressed {
+                    self.resync_pacing();
+                }
+            }
+            Action::Pause if pressed => {
+                self.paused = !self.paused;
+                if self.paused {
+                    self.session.flush_save();
+                } else {
+                    self.resync_pacing();
+                }
+                self.update_title();
+            }
+            Action::Reset if pressed => {
+                self.session.reset();
+                self.resync_pacing();
+            }
+            Action::Quit if pressed => event_loop.exit(),
+            _ => {}
+        }
+    }
+
+    fn load_dropped(&mut self, path: &Path) {
+        match Session::load(path, self.opts.model) {
+            Ok(new) => {
+                self.session.flush_save(); // persist the outgoing game
+                self.session = new;
+                self.paused = false;
+                self.resync_pacing();
+                self.update_title();
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
+            Err(e) => eprintln!("slopgb: drop ignored: {e}"),
+        }
+    }
+
+    /// Drain APU output nobody will play, so the core's sample buffer can't
+    /// grow without bound while muted.
+    fn discard_audio(&mut self) {
+        self.discard_buf.clear();
+        self.session.gb.drain_audio(&mut self.discard_buf);
+    }
+
+    /// Emulate enough frames to keep the audio queue at its fill target.
+    fn run_audio_paced(&mut self) -> u32 {
+        let Some(pipe) = &mut self.audio else {
+            return 0;
+        };
+        let mut frames = 0;
+        while frames < MAX_FRAMES_PER_WAKE && pipe.needs_more() {
+            self.session.gb.run_frame();
+            pipe.pump(&mut self.session.gb);
+            frames += 1;
+        }
+        frames
+    }
+
+    /// Emulate frames owed according to the wall clock at ~59.7275 Hz.
+    fn run_timer_paced(&mut self) -> u32 {
+        let now = Instant::now();
+        // If we fell far behind (stall, drag, debugger), resync instead of
+        // fast-forwarding through the backlog.
+        if now.duration_since(self.next_frame) > 8 * FRAME_DURATION {
+            self.next_frame = now;
+        }
+        let mut frames = 0;
+        while frames < MAX_FRAMES_PER_WAKE && self.next_frame <= now {
+            self.session.gb.run_frame();
+            self.discard_audio();
+            self.next_frame += FRAME_DURATION;
+            frames += 1;
+        }
+        frames
+    }
+
+    /// Turbo: emulate as much as fits in a small wall-clock budget.
+    fn run_turbo(&mut self) -> u32 {
+        let start = Instant::now();
+        let mut frames = 0;
+        while start.elapsed() < TURBO_BUDGET {
+            self.session.gb.run_frame();
+            match &mut self.audio {
+                // The queue keeps ~250 ms and drops the rest.
+                Some(pipe) => pipe.pump(&mut self.session.gb),
+                None => self.discard_audio(),
+            }
+            frames += 1;
+        }
+        self.resync_pacing();
+        frames
+    }
+
+    fn update_fps(&mut self, frames: u32) {
+        self.fps_frames += frames;
+        let elapsed = self.fps_since.elapsed();
+        if elapsed >= Duration::from_secs(1) {
+            self.fps = f64::from(self.fps_frames) / elapsed.as_secs_f64();
+            self.fps_frames = 0;
+            self.fps_since = Instant::now();
+            self.update_title();
+        }
+    }
+}
+
+impl ApplicationHandler for App {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.window.is_some() {
+            return;
+        }
+        let scale = self.opts.scale;
+        let attrs = Window::default_attributes()
+            .with_title(format!("{} — slopgb", self.session.title))
+            .with_inner_size(LogicalSize::new(
+                f64::from(SCREEN_W as u32 * scale),
+                f64::from(SCREEN_H as u32 * scale),
+            ))
+            .with_min_inner_size(LogicalSize::new(SCREEN_W as f64, SCREEN_H as f64));
+        let window = match event_loop.create_window(attrs) {
+            Ok(w) => Rc::new(w),
+            Err(e) => {
+                eprintln!("error: cannot create window: {e}");
+                event_loop.exit();
+                return;
+            }
+        };
+        match Video::new(window.clone()) {
+            Ok(v) => self.video = Some(v),
+            Err(e) => {
+                eprintln!("error: cannot create render surface: {e}");
+                event_loop.exit();
+                return;
+            }
+        }
+        if !self.opts.mute && self.audio.is_none() {
+            match AudioOutput::new() {
+                Ok(out) => self.audio = Some(AudioPipe::new(out)),
+                Err(e) => eprintln!("slopgb: audio disabled: {e}"),
+            }
+        }
+        self.window = Some(window);
+        self.resync_pacing();
+        self.update_title();
+    }
+
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _window_id: WindowId,
+        event: WindowEvent,
+    ) {
+        match event {
+            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::RedrawRequested => self.redraw(),
+            WindowEvent::Resized(_) => {
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
+            WindowEvent::DroppedFile(path) => self.load_dropped(&path),
+            WindowEvent::KeyboardInput { event, .. } => self.handle_key(event_loop, &event),
+            _ => {}
+        }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if self.window.is_none() {
+            return; // not resumed yet
+        }
+        if self.paused {
+            event_loop.set_control_flow(ControlFlow::Wait);
+            return;
+        }
+        let frames = if self.turbo {
+            self.run_turbo()
+        } else if self.audio.is_some() {
+            self.run_audio_paced()
+        } else {
+            self.run_timer_paced()
+        };
+        if frames > 0 {
+            self.session.autosave();
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+        }
+        self.update_fps(frames);
+        let flow = if self.turbo {
+            ControlFlow::Poll
+        } else if self.audio.is_some() {
+            // Wake well before ~50 ms of queued audio can drain.
+            ControlFlow::WaitUntil(Instant::now() + FRAME_DURATION / 4)
+        } else {
+            ControlFlow::WaitUntil(self.next_frame)
+        };
+        event_loop.set_control_flow(flow);
+    }
+
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.session.flush_save();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<Options, String> {
+        Options::parse(args.iter().map(ToString::to_string))
+    }
+
+    #[test]
+    fn parse_rom_only_defaults() {
+        let opts = parse(&["game.gb"]).unwrap();
+        assert_eq!(opts.rom, PathBuf::from("game.gb"));
+        assert_eq!(opts.model, None);
+        assert_eq!(opts.scale, 3);
+        assert!(!opts.mute);
+    }
+
+    #[test]
+    fn parse_all_options() {
+        let opts = parse(&["--model", "cgb", "--scale", "5", "--mute", "x.gbc"]).unwrap();
+        assert_eq!(opts.rom, PathBuf::from("x.gbc"));
+        assert_eq!(opts.model, Some(Model::Cgb));
+        assert_eq!(opts.scale, 5);
+        assert!(opts.mute);
+    }
+
+    #[test]
+    fn parse_rejects_bad_input() {
+        assert!(parse(&[]).is_err()); // missing ROM
+        assert!(parse(&["--model", "snes", "x.gb"]).is_err());
+        assert!(parse(&["--scale", "0", "x.gb"]).is_err());
+        assert!(parse(&["--scale", "huge", "x.gb"]).is_err());
+        assert!(parse(&["--frobnicate", "x.gb"]).is_err());
+        assert!(parse(&["a.gb", "b.gb"]).is_err());
+        assert!(parse(&["--model"]).is_err()); // value missing
+    }
+
+    #[test]
+    fn parse_model_accepts_every_variant() {
+        for (s, m) in [
+            ("dmg", Model::Dmg),
+            ("dmg0", Model::Dmg0),
+            ("mgb", Model::Mgb),
+            ("sgb", Model::Sgb),
+            ("sgb2", Model::Sgb2),
+            ("cgb", Model::Cgb),
+            ("agb", Model::Agb),
+        ] {
+            assert_eq!(parse_model(s).unwrap(), m);
+        }
+    }
+
+    #[test]
+    fn frame_duration_matches_hardware_rate() {
+        // 70224 / 4194304 s = 16.742706... ms
+        assert_eq!(FRAME_DURATION.as_nanos(), 16_742_706);
+    }
+
+    #[test]
+    fn atomic_write_replaces_existing_file() {
+        let dir = std::env::temp_dir().join("slopgb-test-sav");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("game.sav");
+        write_atomic(&path, b"first").unwrap();
+        write_atomic(&path, b"second").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"second");
+        assert!(!path.with_extension("sav.tmp").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
