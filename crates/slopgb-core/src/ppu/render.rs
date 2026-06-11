@@ -17,6 +17,7 @@
 
 use super::Ppu;
 use crate::SCREEN_W;
+use crate::model::Model;
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct Sprite {
@@ -124,6 +125,21 @@ impl Ppu {
     /// (X — even 0 or ≥168 — does not affect selection; it only affects
     /// fetching: see `intr_2_mode0_timing_sprites`).
     pub(super) fn oam_scan(&mut self) {
+        // While an OAM DMA transfer sits frozen mid-byte (HALT gates the
+        // core clock the DMA controller runs on), the scan does not see
+        // real OAM data. On MGB the result is fully characterized by
+        // madness/mgb_oam_dma_halt_sprites.s, hardware-verified by its
+        // author; the other models differ ("DMG: A different sprite ...
+        // CGB: Checkerboard without sprites ... AGB/AGS: A different
+        // sprite (probably different logic with the values)") and the asm
+        // gives no reference data for them, so they keep the plain scan of
+        // the frozen OAM below.
+        if self.model == Model::Mgb {
+            if let Some((index, new)) = self.dma_freeze {
+                self.oam_scan_dma_freeze_mgb(index, new);
+                return;
+            }
+        }
         let h = if self.lcdc & 0x04 != 0 { 16u16 } else { 8 };
         let row = u16::from(self.ly) + 16;
         self.render.n_sprites = 0;
@@ -143,6 +159,60 @@ impl Ppu {
                     break;
                 }
             }
+        }
+    }
+
+    /// MGB OAM scan with an OAM DMA transfer frozen mid-byte by HALT.
+    /// Everything here implements the hardware behavior documented in
+    /// madness/mgb_oam_dma_halt_sprites.s:
+    ///
+    /// With `new` = the in-flight DMA source byte, `old` = the OAM byte it
+    /// was about to replace and `next` = the OAM byte after that one, every
+    /// OAM entry is seen as the same glitched sprite
+    ///
+    /// ```text
+    /// Y: (old | new) & $FC      C: (old | new) & $FC
+    /// X:  next | new            F:  next | new
+    /// ```
+    ///
+    /// ("Why & $FC? I have no idea, but it seems that the low two bits are
+    /// always 0"). Selection then proceeds as normal — Y match, 10-sprite
+    /// cap — so a matching line gets its sprite slots filled with identical
+    /// copies, which render as a single sprite shape (the asm's expected
+    /// image shows exactly one).
+    fn oam_scan_dma_freeze_mgb(&mut self, index: u8, new: u8) {
+        self.render.n_sprites = 0;
+        // "This is the data that somehow enables sprite rendering": without
+        // at least one aligned magic entry in OAM, no sprite renders.
+        if !oam_glitch_magic_enable(&self.oam) {
+            return;
+        }
+        let old = self.oam[usize::from(index)];
+        // The byte after the in-flight one. A freeze on the final byte
+        // (index 159) has no successor; the asm does not pin that case and
+        // $FF is the usual undriven-bus value.
+        let next = self
+            .oam
+            .get(usize::from(index) + 1)
+            .copied()
+            .unwrap_or(0xFF);
+        let y = (old | new) & 0xFC;
+        let x = next | new;
+        let tile = (old | new) & 0xFC;
+        let flags = next | new;
+        let h = if self.lcdc & 0x04 != 0 { 16u16 } else { 8 };
+        let row = u16::from(self.ly) + 16;
+        if row >= u16::from(y) && row < u16::from(y) + h {
+            for i in 0..10u8 {
+                self.render.sprites[usize::from(i)] = Sprite {
+                    y,
+                    x,
+                    tile,
+                    flags,
+                    idx: i,
+                };
+            }
+            self.render.n_sprites = 10;
         }
     }
 
@@ -519,9 +589,25 @@ impl Ppu {
     }
 }
 
+/// "Magic enable" for the MGB frozen-OAM-DMA sprite glitch: sprites render
+/// at all only if OAM holds at least one properly aligned 4-byte entry whose
+/// bytes lie within `[$98-$9F, $00-$A7, $09-$9F, $00-$A7]`. "The position in
+/// OAM does not matter, and there can be more than one. ... If any value is
+/// out of range, the data will have no effect."
+/// (madness/mgb_oam_dma_halt_sprites.s)
+fn oam_glitch_magic_enable(oam: &[u8; 0xA0]) -> bool {
+    oam.chunks_exact(4).any(|e| {
+        (0x98..=0x9F).contains(&e[0])
+            && e[1] <= 0xA7
+            && (0x09..=0x9F).contains(&e[2])
+            && e[3] <= 0xA7
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::Ppu;
+    use super::oam_glitch_magic_enable;
     use crate::Model;
 
     const WHITE: u32 = 0xFF_FFFF;
@@ -910,6 +996,161 @@ mod tests {
         sprite(&mut p, 1, 18, 20, 4, 0x10); // idx 1, OBP1, same X
         render_line(&mut p, 2);
         assert_eq!(px(&p, 2, 14), LIGHT, "lower OAM index wins at equal X");
+    }
+
+    // --- MGB frozen-OAM-DMA sprite glitch (madness/mgb_oam_dma_halt_sprites.s) ---
+
+    fn mgb_on(lcdc: u8) -> Ppu {
+        let mut p = Ppu::new(Model::Mgb);
+        p.write(0xFF47, 0xE4);
+        p.write(0xFF40, lcdc);
+        p
+    }
+
+    /// The exact scenario of the test ROM: old=$30/next=$40 in OAM, in-flight
+    /// byte $1A, magic-enable entry present. The glitch sprite must render at
+    /// Y=$38/X=$5A, tile $38, flags $5A (OBP1, Y flip, above BG, no X flip).
+    #[test]
+    fn mgb_frozen_dma_glitch_sprite_renders() {
+        let mut p = mgb_on(0x93);
+        p.write(0xFF48, 0x00); // OBP0 all white: proves OBP1 is selected
+        p.write(0xFF49, 0xE4); // identity OBP1
+        p.oam_dma_write(2, 0x30); // old
+        p.oam_dma_write(3, 0x40); // next
+        sprite(&mut p, 1, 0x9F, 0xA7, 0x9F, 0xA7); // magic enable entry
+        set_tile_row(&mut p, 0, 0x38, 0, 0xFF, 0xFF); // solid color 3
+        set_tile_row(&mut p, 0, 0x38, 7, 0x80, 0x80); // leftmost pixel only
+        p.set_oam_dma_freeze(Some((2, 0x1A)));
+        // Sprite Y=$38=56: first line 40. Flags Y flip: line 40 = tile row 7.
+        render_line(&mut p, 40);
+        assert_eq!(p.render.n_sprites, 10, "all slots hold the glitch sprite");
+        assert_eq!(px(&p, 40, 81), WHITE);
+        assert_eq!(px(&p, 40, 82), BLACK, "X=$5A: left edge at 82, OBP1");
+        assert_eq!(px(&p, 40, 83), WHITE, "flags $5A: no X flip");
+        // Last line 47 = tile row 0 (flipped): solid 8 pixels.
+        render_line(&mut p, 47);
+        for x in 82..90 {
+            assert_eq!(px(&p, 47, x), BLACK, "x={x}");
+        }
+        assert_eq!(px(&p, 47, 90), WHITE);
+        // Off the glitch sprite's Y range: nothing renders.
+        render_line(&mut p, 48);
+        assert_eq!(p.render.n_sprites, 0);
+        assert_eq!(px(&p, 48, 82), WHITE);
+    }
+
+    /// The glitched entry formulas: Y = C = (old | new) & $FC,
+    /// X = F = next | new; selection by the glitched Y as usual.
+    #[test]
+    fn mgb_glitch_formulas_and_selection() {
+        let mut p = mgb_on(0x93);
+        sprite(&mut p, 1, 0x98, 0x00, 0x09, 0x00); // minimal magic entry
+        p.oam[8] = 0x21; // old
+        p.oam[9] = 0x05; // next
+        p.set_oam_dma_freeze(Some((8, 0x18)));
+        // (0x21|0x18) & 0xFC = 0x38; 0x05|0x18 = 0x1D.
+        p.ly = 40; // row 56 = Y exactly
+        p.oam_scan();
+        assert_eq!(p.render.n_sprites, 10);
+        for (i, s) in p.render.sprites.iter().enumerate() {
+            assert_eq!(s.y, 0x38, "slot {i}");
+            assert_eq!(s.x, 0x1D, "slot {i}");
+            assert_eq!(s.tile, 0x38, "slot {i}");
+            assert_eq!(s.flags, 0x1D, "slot {i}");
+            assert_eq!(s.idx, i as u8, "slot {i}");
+        }
+        p.ly = 39; // row 55: above the sprite
+        p.oam_scan();
+        assert_eq!(p.render.n_sprites, 0);
+        p.ly = 47; // row 63: last 8x8 line
+        p.oam_scan();
+        assert_eq!(p.render.n_sprites, 10);
+        p.ly = 48; // row 64: below
+        p.oam_scan();
+        assert_eq!(p.render.n_sprites, 0);
+        // 8x16 mode extends the match window like a normal sprite.
+        p.write(0xFF40, 0x97);
+        p.ly = 55; // row 71 < 56+16
+        p.oam_scan();
+        assert_eq!(p.render.n_sprites, 10);
+        // Clearing the freeze restores the normal scan (real OAM: nothing
+        // on this line).
+        p.set_oam_dma_freeze(None);
+        p.ly = 40;
+        p.write(0xFF40, 0x93);
+        p.oam_scan();
+        assert_eq!(p.render.n_sprites, 0);
+    }
+
+    /// Magic-enable ranges [$98-$9F, $00-$A7, $09-$9F, $00-$A7]: each byte
+    /// position checked just inside and just outside its range; position in
+    /// OAM is irrelevant but 4-byte alignment is required.
+    #[test]
+    fn mgb_glitch_magic_enable_ranges() {
+        let mut oam = [0u8; 0xA0];
+        assert!(!oam_glitch_magic_enable(&oam), "all-zero OAM: no enable");
+        for (entry, ok) in [
+            ([0x98, 0x00, 0x09, 0x00], true),  // every byte at its low bound
+            ([0x9F, 0xA7, 0x9F, 0xA7], true),  // every byte at its high bound
+            ([0x97, 0x00, 0x09, 0x00], false), // byte 0 below $98
+            ([0xA0, 0x00, 0x09, 0x00], false), // byte 0 above $9F
+            ([0x98, 0xA8, 0x09, 0x00], false), // byte 1 above $A7
+            ([0x98, 0x00, 0x08, 0x00], false), // byte 2 below $09
+            ([0x98, 0x00, 0xA0, 0x00], false), // byte 2 above $9F
+            ([0x98, 0x00, 0x09, 0xA8], false), // byte 3 above $A7
+        ] {
+            let mut oam = [0u8; 0xA0];
+            oam[12..16].copy_from_slice(&entry);
+            assert_eq!(oam_glitch_magic_enable(&oam), ok, "{entry:02X?}");
+        }
+        // "The position in OAM does not matter": last entry works too.
+        oam[156..160].copy_from_slice(&[0x9F, 0xA7, 0x9F, 0xA7]);
+        assert!(oam_glitch_magic_enable(&oam));
+        // Misaligned in-range bytes straddling two entries do not count.
+        let mut oam = [0u8; 0xA0];
+        oam[14..18].copy_from_slice(&[0x98, 0x00, 0x09, 0x00]);
+        assert!(!oam_glitch_magic_enable(&oam));
+    }
+
+    /// Without a magic-enable entry the MGB scan selects nothing at all
+    /// while frozen, even on a line the glitched Y would match.
+    #[test]
+    fn mgb_glitch_needs_magic_enable() {
+        let mut p = mgb_on(0x93);
+        p.oam[2] = 0x30;
+        p.oam[3] = 0x40;
+        p.set_oam_dma_freeze(Some((2, 0x1A)));
+        p.ly = 40;
+        p.oam_scan();
+        assert_eq!(p.render.n_sprites, 0);
+        // Adding the magic entry enables it.
+        sprite(&mut p, 5, 0x9F, 0xA7, 0x9F, 0xA7);
+        p.oam_scan();
+        assert_eq!(p.render.n_sprites, 10);
+    }
+
+    /// The glitch is MGB-only: the asm documents different (unreferenced)
+    /// results for DMG/CGB/AGB, so those models keep the plain scan of the
+    /// frozen OAM contents.
+    #[test]
+    fn frozen_dma_glitch_is_mgb_only() {
+        for model in [Model::Dmg, Model::Cgb, Model::Agb] {
+            let mut p = Ppu::new(model);
+            p.write(0xFF40, 0x93);
+            p.oam_dma_write(2, 0x30);
+            p.oam_dma_write(3, 0x40);
+            sprite(&mut p, 1, 0x9F, 0xA7, 0x9F, 0xA7); // magic entry
+            p.set_oam_dma_freeze(Some((2, 0x1A)));
+            p.ly = 40; // glitched Y would match here on MGB
+            p.oam_scan();
+            assert_eq!(p.render.n_sprites, 0, "{model:?}");
+            // Plain scan still sees the real (frozen) OAM: the $9F entry
+            // covers rows 159-166, i.e. visible line 143 only.
+            p.ly = 143;
+            p.oam_scan();
+            assert_eq!(p.render.n_sprites, 1, "{model:?}");
+            assert_eq!(p.render.sprites[0].y, 0x9F, "{model:?}");
+        }
     }
 
     #[test]

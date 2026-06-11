@@ -90,6 +90,11 @@ pub struct Ppu {
 
     vram: Box<[u8; 0x4000]>,
     oam: [u8; 0xA0],
+    /// OAM DMA transfer frozen mid-byte by the HALT/STOP core clock gate,
+    /// as (OAM index about to be replaced, in-flight source byte). Set by
+    /// the interconnect; while set, the MGB OAM scan sees glitched data
+    /// (madness/mgb_oam_dma_halt_sprites.s — see `oam_scan` in render.rs).
+    dma_freeze: Option<(u8, u8)>,
 
     // Timing state.
     enabled: bool,
@@ -159,6 +164,7 @@ impl Ppu {
                 .try_into()
                 .unwrap_or_else(|_| unreachable!()),
             oam: [0; 0xA0],
+            dma_freeze: None,
             enabled: false,
             line: 0,
             dot: 0,
@@ -603,6 +609,23 @@ impl Ppu {
         if usize::from(index) < self.oam.len() {
             self.oam[usize::from(index)] = value;
         }
+    }
+
+    /// Interconnect wiring: an OAM DMA transfer is frozen mid-byte because
+    /// HALT/STOP gated the core clock the DMA controller runs on
+    /// (`Some((oam_index, in_flight_source_byte))`), or the freeze ended /
+    /// no transfer was in flight (`None`). While frozen, the MGB PPU's OAM
+    /// scan sees glitched data derived from the frozen access instead of
+    /// real OAM entries (madness/mgb_oam_dma_halt_sprites.s; see
+    /// `oam_scan` in render.rs).
+    pub fn set_oam_dma_freeze(&mut self, freeze: Option<(u8, u8)>) {
+        self.dma_freeze = freeze;
+    }
+
+    /// Test hook for the interconnect wiring tests.
+    #[cfg(test)]
+    pub(crate) fn oam_dma_freeze(&self) -> Option<(u8, u8)> {
+        self.dma_freeze
     }
 
     /// VRAM read for CGB HDMA (no mode blocking — the engine is responsible

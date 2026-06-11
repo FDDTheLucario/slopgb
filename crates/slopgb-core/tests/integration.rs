@@ -179,6 +179,77 @@ fn oam_dma_end_to_end_from_cpu_code() {
     assert_eq!(r.pc, 0x0130);
 }
 
+/// HALT freezing an in-flight OAM DMA, end to end through real CPU code —
+/// the exact `ldh (DMA),a / nop / halt` sequence of
+/// test-roms-src/madness/mgb_oam_dma_halt_sprites.s `hiram_test`. The asm's
+/// hardware-verified result pins the freeze point: with the transfer started
+/// 2 M-cycles before the HALT fetch, bytes 0 and 1 are copied and byte 2 is
+/// left mid-access, its old OAM value intact ("OAM DMA is in the middle of
+/// OAM access (but not proceeding with it!)") — i.e. the core clock gate
+/// engages only after the post-HALT prefetch M-cycle.
+#[test]
+fn halt_freezes_inflight_oam_dma_end_to_end() {
+    let main: &[u8] = &[
+        0x3E, 0x30, // 0100: ld a,$30
+        0xEA, 0x02, 0xFE, // 0102: ld ($FE02),a  ; old OAM byte 2 (LCD off)
+        0x3E, 0x40, // 0105: ld a,$40
+        0xEA, 0x03, 0xFE, // 0107: ld ($FE03),a  ; old OAM byte 3
+        0x21, 0x80, 0xFF, // 010A: ld hl,$FF80
+        0x11, 0x50, 0x01, // 010D: ld de,$0150
+        0x06, 0x08, // 0110: ld b,8
+        0x1A, // 0112: ld a,(de)
+        0x22, // 0113: ld (hl+),a
+        0x13, // 0114: inc de
+        0x05, // 0115: dec b
+        0x20, 0xFA, // 0116: jr nz,$0112   ; copy hiram routine to HRAM
+        0xC3, 0x80, 0xFF, // 0118: jp $FF80
+    ];
+    let hiram: &[u8] = &[
+        0x3E, 0x20, // FF80: ld a,$20      ; source page $2000
+        0xE0, 0x46, // FF82: ldh (DMA),a   ; cycle W: transfer requested
+        0x00, // FF84: nop                 ; W+1: setup delay elapses
+        0x76, // FF85: halt                ; fetch at W+2 (byte 0 copies);
+        //            post-HALT prefetch at W+3 (byte 1 copies); frozen after.
+        0x00, // FF86: nop
+    ];
+    let mut source = vec![0xFFu8; 160];
+    source[0] = 0xA0;
+    source[1] = 0xA1;
+    source[2] = 0x1A; // the in-flight byte that must never commit
+    source[3] = 0xA3;
+    let rom = build_rom(&[(0x100, main), (0x150, hiram), (0x2000, &source)]);
+    let cart = slopgb_core::cartridge::Cartridge::from_bytes(rom).unwrap();
+    // Interconnect without post-boot state: LCD off, so the direct OAM
+    // writes land and OAM stays CPU-readable during the frozen transfer.
+    let mut bus = slopgb_core::interconnect::Interconnect::new(Model::Mgb, cart);
+    let mut cpu = slopgb_core::cpu::Cpu::new(Model::Mgb);
+    // Comfortably more M-cycles than program + a full 160-byte transfer, so
+    // a missing freeze fails as "transfer completed", not "still running".
+    for _ in 0..400 {
+        cpu.step(&mut bus);
+    }
+    // Frozen mid-transfer: copied bytes stay, byte 2 keeps its old value,
+    // and no further byte was touched. The test bus reads tick the machine,
+    // which must not advance the gated DMA either.
+    assert_eq!(bus.read(0xFE00), 0xA0, "byte 0 copied before the freeze");
+    assert_eq!(
+        bus.read(0xFE01),
+        0xA1,
+        "byte 1 copied by the post-HALT prefetch cycle"
+    );
+    assert_eq!(
+        bus.read(0xFE02),
+        0x30,
+        "byte 2 frozen mid-access: old value intact"
+    );
+    assert_eq!(bus.read(0xFE03), 0x40, "byte 3 untouched");
+    assert_eq!(
+        bus.read(0xFF46),
+        0x20,
+        "DMA register reads back the source page"
+    );
+}
+
 /// The interconnect alone, driven through the `Bus` trait: an OAM DMA from
 /// cartridge ROM lands in OAM with the documented 1 M-cycle setup delay.
 #[test]

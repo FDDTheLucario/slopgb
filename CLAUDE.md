@@ -40,7 +40,7 @@ Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 
 
 ## State (2026-06-11)
 
-- Goal: every mooneye test green (acceptance, emulator-only, misc, madness, sprite_priority via frame compare). Fully featured emulator, not test-ROM golf.
-- All subsystems implemented; 382 unit tests; mooneye 392/439 combos passing.
+- Goal reached: every mooneye test green — 439/439 rom×model combos. Breakpoint protocol for acceptance/emulator-only/misc; frame compare for sprite_priority *and* madness/mgb_oam_dma_halt_sprites (that ROM halts forever, never executes LD B,B; reference frames vendored as shade-class .bin under `crates/slopgb-core/tests/expected/`).
+- All subsystems implemented; 395 unit tests.
 - CPU interrupt sampling is FROZEN: sampled at end of opcode fetch, dispatch aborts the fetched instruction (mooneye-gb prefetch semantics). Recalibrate dependents (PPU IRQ anchors), don't move the sampling.
-- Fix loop running on the 47 remaining: PPU STAT anchors (38), di/halt intr timing (8), madness OAM-DMA-halt (1).
+- HALT/STOP gate the CPU core clock via `Bus::set_halted` — engaging only *after* the post-HALT prefetch M-cycle — and the OAM DMA engine freezes with it; while frozen, the MGB PPU's OAM scan renders the glitch sprite documented in `test-roms-src/madness/mgb_oam_dma_halt_sprites.s` (other models keep the plain frozen-OAM scan: no reference data).

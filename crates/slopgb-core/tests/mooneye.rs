@@ -8,11 +8,13 @@
 //! at once.
 //!
 //! One `#[test]` per directory group so the groups parallelize. `utils/` is
-//! not a test category and `manual-only/sprite_priority` is verified by
-//! frame comparison against the suite's reference image instead of the
-//! breakpoint protocol. `every_release_rom_is_harnessed` guards the group
-//! list against drift: `common::mts_root()` picks the *newest* release at
-//! runtime, so a future release could otherwise add ROMs no group runs.
+//! not a test category, and `manual-only/sprite_priority` plus
+//! `madness/mgb_oam_dma_halt_sprites` (which halts forever and never
+//! executes `LD B,B`) are verified by frame comparison against the suite's
+//! reference images instead of the breakpoint protocol.
+//! `every_release_rom_is_harnessed` guards the group list against drift:
+//! `common::mts_root()` picks the *newest* release at runtime, so a future
+//! release could otherwise add ROMs no group runs.
 
 mod common;
 
@@ -35,7 +37,6 @@ const GROUPS: &[(&str, bool)] = &[
     ("emulator-only/mbc2", false),
     ("emulator-only/mbc5", false),
     ("misc", true),
-    ("madness", false),
 ];
 
 /// Run one group from [`GROUPS`]; panics if `dir` is not listed there.
@@ -55,9 +56,12 @@ fn is_harnessed(rel: &Path) -> bool {
     if rel.starts_with("utils") {
         return true;
     }
-    // Covered by `sprite_priority` below via frame comparison rather than a
-    // breakpoint-protocol group.
-    if rel == Path::new("manual-only/sprite_priority.gb") {
+    // Covered by `sprite_priority` / `madness` below via frame comparison
+    // rather than a breakpoint-protocol group (the madness ROM halts
+    // forever and never executes `LD B,B`).
+    if rel == Path::new("manual-only/sprite_priority.gb")
+        || rel == Path::new("madness/mgb_oam_dma_halt_sprites.gb")
+    {
         return true;
     }
     GROUPS.iter().any(|&(dir, recursive)| {
@@ -165,7 +169,7 @@ fn misc() {
 
 #[test]
 fn madness() {
-    run_group("madness");
+    common::run_madness();
 }
 
 #[test]

@@ -53,6 +53,17 @@ pub const DMG_SHADE_RGB: [u32; 4] = [0x00FF_FFFF, 0x00AA_AAAA, 0x0055_5555, 0x00
 pub const SPRITE_PRIORITY_SHADES: &[u8; SCREEN_PIXELS] =
     include_bytes!("../expected/sprite_priority.bin");
 
+/// Expected `madness/mgb_oam_dma_halt_sprites` frame as one shade class
+/// (0..=3) per pixel, row-major 160x144.
+///
+/// Provenance: decoded offline from the suite's own reference image
+/// `test-roms-src/madness/mgb_oam_dma_halt_sprites_expected.png` (160x144,
+/// 8-bit greyscale with the three levels 255/176/104; descending brightness
+/// maps to DMG shades 0/1/2 — the ROM's BGP $54 draws its checkerboard with
+/// shades 0 and 1, and OBP1 $AA maps every sprite color to shade 2).
+pub const MGB_OAM_DMA_HALT_SPRITES_SHADES: &[u8; SCREEN_PIXELS] =
+    include_bytes!("../expected/mgb_oam_dma_halt_sprites.bin");
+
 /// Locate the newest mooneye test-suite release directory
 /// (`<repo>/test-roms/mts-*`). `None` when the ROMs are not checked out —
 /// callers print a skip notice instead of failing.
@@ -80,13 +91,13 @@ pub fn mts_root() -> Option<PathBuf> {
 /// model revision ABCDE as [`Model::Cgb`], so no modeled machine can pass).
 pub fn models_for(rel: &Path) -> Vec<Model> {
     let top = rel.iter().next().and_then(|c| c.to_str()).unwrap_or("");
-    match top {
-        // Mapper tests probe the cartridge only; they are model-agnostic.
-        // One plain and one CGB machine give double-speed-free coverage.
-        "emulator-only" => return vec![Model::Dmg, Model::Cgb],
-        // The whole madness/ category is MGB-only (mgb_oam_dma_halt_sprites).
-        "madness" => return vec![Model::Mgb],
-        _ => {}
+    // Mapper tests probe the cartridge only; they are model-agnostic.
+    // One plain and one CGB machine give double-speed-free coverage.
+    // (madness/mgb_oam_dma_halt_sprites never reaches this function: like
+    // manual-only/sprite_priority it is verified by frame comparison, not
+    // the breakpoint protocol — see `run_madness`.)
+    if top == "emulator-only" {
+        return vec![Model::Dmg, Model::Cgb];
     }
     let stem = rel.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     if let Some((_, sfx)) = stem.rsplit_once('-') {
@@ -494,6 +505,39 @@ pub fn run_sprite_priority() {
     }
 }
 
+/// `madness/mgb_oam_dma_halt_sprites`: this ROM never executes `LD B,B` —
+/// it halts forever with no interrupt enabled and the pass criterion is the
+/// screen the still-running PPU keeps rendering from the HALT-frozen OAM
+/// DMA (test-roms-src/madness/mgb_oam_dma_halt_sprites.s: "Verified
+/// behaviour: MGB: As described here and visualized by *_expected.png"; the
+/// asm documents MGB only, so only [`Model::Mgb`] is run). Render ~10
+/// frames and compare against the vendored reference, like
+/// `run_sprite_priority`.
+pub fn run_madness() {
+    let Some(root) = mts_root() else {
+        println!("skipping madness: no mooneye ROMs under <repo>/test-roms/mts-*");
+        return;
+    };
+    let rom_path = root.join("madness/mgb_oam_dma_halt_sprites.gb");
+    if !rom_path.is_file() {
+        println!("skipping madness: {} not present", rom_path.display());
+        return;
+    }
+    let rom = std::fs::read(&rom_path).expect("read mgb_oam_dma_halt_sprites.gb");
+    let result = quiet_catch_unwind(|| {
+        let frame = run_for_frames(&rom, Model::Mgb, 10)?;
+        compare_frame_exact_dmg(&frame, MGB_OAM_DMA_HALT_SPRITES_SHADES)
+    });
+    match result {
+        Ok(Ok(())) => {}
+        Ok(Err(reason)) => panic!("madness/mgb_oam_dma_halt_sprites.gb [Mgb]: {reason}"),
+        Err(payload) => panic!(
+            "madness/mgb_oam_dma_halt_sprites.gb [Mgb]: panicked: {}",
+            panic_message(payload.as_ref())
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -609,11 +653,6 @@ mod tests {
     }
 
     #[test]
-    fn madness_is_mgb() {
-        assert_eq!(models("madness/mgb_oam_dma_halt_sprites.gb"), [Model::Mgb]);
-    }
-
-    #[test]
     fn unknown_group_letters_fall_back_to_default() {
         assert_eq!(group_letter_models("X"), None);
         assert_eq!(group_letter_models(""), None);
@@ -634,19 +673,39 @@ mod tests {
         assert!(err.contains("Fibonacci"), "{err}");
     }
 
-    // --- vendored sprite_priority reference asset ---
+    // --- vendored frame-compare reference assets ---
+
+    fn shade_histogram(shades: &[u8; SCREEN_PIXELS]) -> [usize; 4] {
+        let mut histogram = [0usize; 4];
+        for &shade in shades.iter() {
+            assert!(shade < 4, "shade class out of range: {shade}");
+            histogram[usize::from(shade)] += 1;
+        }
+        histogram
+    }
 
     #[test]
     fn sprite_priority_reference_histogram() {
         // Locks the asset against corruption: decoded from the suite's
         // sprite_priority-expected.png, the image is 22705 white, 114 light
         // grey, 0 dark grey and 221 black pixels.
-        let mut histogram = [0usize; 4];
-        for &shade in SPRITE_PRIORITY_SHADES.iter() {
-            assert!(shade < 4, "shade class out of range: {shade}");
-            histogram[usize::from(shade)] += 1;
-        }
-        assert_eq!(histogram, [22705, 114, 0, 221]);
+        assert_eq!(
+            shade_histogram(SPRITE_PRIORITY_SHADES),
+            [22705, 114, 0, 221]
+        );
+    }
+
+    #[test]
+    fn mgb_oam_dma_halt_sprites_reference_histogram() {
+        // Decoded from the suite's mgb_oam_dma_halt_sprites_expected.png:
+        // an even white/light-grey 8x8 checkerboard (the 18 missing
+        // light-grey pixels sit under the sprite) plus the 18 dark-grey
+        // pixels of one glitch sprite — the '8' glyph (tile $38) at
+        // Y=56/X=90 the asm derives from old=$30/next=$40/new=$1A.
+        assert_eq!(
+            shade_histogram(MGB_OAM_DMA_HALT_SPRITES_SHADES),
+            [11517, 11505, 18, 0]
+        );
     }
 
     // --- frame comparison helpers (on tiny synthetic frames) ---

@@ -28,8 +28,23 @@ pub fn step(cpu: &mut Cpu, bus: &mut impl Bus) {
         // matters) whose result is discarded while IE & IF stays 0.
         let opcode = bus.read(cpu.regs.pc);
         if bus.pending() == 0 {
+            // Staying halted: gate the core clock (and with it the OAM DMA
+            // controller) off. The gate engages only now — *after* the
+            // first idle prefetch — not on HALT execution: the SM83
+            // prefetches the next opcode before sleeping (the same prefetch
+            // the halt bug replays, gbctr "halt"), and madness/
+            // mgb_oam_dma_halt_sprites.s pins the hardware OAM DMA freeze
+            // point exactly two M-cycles after the HALT opcode fetch
+            // (`ldh (DMA),a / nop / halt` leaves bytes 0-1 copied and
+            // byte 2 mid-access). Repeat calls are idempotent no-ops.
+            bus.set_halted(true);
             return;
         }
+        // Waking: the core clock restarts. The observing prefetch cycle
+        // ticked with the gate still in its previous state (on, unless the
+        // wake came at the very first prefetch); exact DMA resume timing
+        // within the waking cycle is not pinned by any test ROM.
+        bus.set_halted(false);
         cpu.halted = false;
         if cpu.ime {
             // The observing cycle is the aborted prefetch of the dispatch
@@ -57,8 +72,13 @@ pub fn step(cpu: &mut Cpu, bus: &mut impl Bus) {
         // P1 lines even with IE bit 4 clear.
         if bus.pending() == 0 {
             bus.tick();
+            // Stop mode switches the core clock off like halt mode does
+            // (same gate, so an in-flight OAM DMA freezes here too); the
+            // gate engages after the idle cycle, mirroring the halt path.
+            bus.set_halted(true);
             return;
         }
+        bus.set_halted(false);
         cpu.stopped = false;
     }
     // EI enables IME only after the instruction *following* EI completes
@@ -744,6 +764,13 @@ mod tests {
         /// `bits` into IF - models e.g. the PPU raising the vblank IF bit
         /// partway through a cycle, before that cycle's memory access.
         raise_if: Option<(usize, u8)>,
+        /// Current core-clock gate level as driven through
+        /// [`Bus::set_halted`] (the calls are idempotent).
+        halted_state: bool,
+        /// Gate *transitions*, as (M-cycles elapsed when the call arrived,
+        /// new level) — pins exactly when halt/stop engage and release the
+        /// core clock gate.
+        halt_calls: Vec<(usize, bool)>,
     }
 
     impl TestBus {
@@ -755,6 +782,8 @@ mod tests {
                 stop_calls: 0,
                 cycles: 0,
                 raise_if: None,
+                halted_state: false,
+                halt_calls: Vec::new(),
             }
         }
 
@@ -810,6 +839,13 @@ mod tests {
         fn stop(&mut self) -> bool {
             self.stop_calls += 1;
             self.stop_result
+        }
+
+        fn set_halted(&mut self, halted: bool) {
+            if self.halted_state != halted {
+                self.halted_state = halted;
+                self.halt_calls.push((self.cycles, halted));
+            }
         }
     }
 
@@ -2186,6 +2222,66 @@ mod tests {
         assert!(!c.halted);
         assert_eq!(c.regs.b, 1);
         assert_eq!(b.mem[0xFF0F], 0x04); // not acked: no dispatch
+    }
+
+    #[test]
+    fn halt_gates_core_clock_after_the_post_halt_prefetch() {
+        // The core clock gate (Bus::set_halted — the OAM DMA controller
+        // freezes with it) engages only after the post-HALT prefetch
+        // M-cycle, not on HALT execution: the SM83 prefetches the next
+        // opcode before sleeping (gbctr halt bug prefetch), and madness/
+        // mgb_oam_dma_halt_sprites.s pins the hardware OAM DMA freeze two
+        // M-cycles after the HALT opcode fetch.
+        let mut c = cpu();
+        let mut b = bus(&[0x76, 0x04]); // HALT; INC B
+        b.mem[0xFFFF] = 0x04;
+        step(&mut c, &mut b); // cycle 1: HALT fetch
+        assert!(c.halted);
+        assert!(b.halt_calls.is_empty(), "no gate during HALT itself");
+        step(&mut c, &mut b); // cycle 2: idle prefetch, then the gate engages
+        assert_eq!(b.halt_calls, [(2, true)]);
+        step(&mut c, &mut b); // cycle 3: idle, gate stays on (idempotent)
+        step(&mut c, &mut b); // cycle 4
+        assert_eq!(b.halt_calls, [(2, true)]);
+        b.raise_if = Some((4, 0x04)); // IF.2 rises during cycle 5
+        step(&mut c, &mut b); // cycle 5 observes IF: wake, gate released
+        assert!(!c.halted);
+        assert_eq!(b.halt_calls, [(2, true), (5, false)]);
+        assert_eq!(c.regs.b, 1, "woke into INC B");
+    }
+
+    #[test]
+    fn halt_with_immediate_wake_never_gates_the_clock() {
+        let mut c = cpu();
+        let mut b = bus(&[0x76, 0x04]); // HALT; INC B
+        b.mem[0xFFFF] = 0x04;
+        step(&mut c, &mut b); // HALT fetch
+        b.raise_if = Some((1, 0x04)); // IF rises during the first prefetch
+        step(&mut c, &mut b); // prefetch observes IF: immediate wake
+        assert!(!c.halted);
+        assert!(b.halt_calls.is_empty(), "clock never stopped");
+    }
+
+    #[test]
+    fn stop_gates_core_clock_after_the_first_idle_cycle() {
+        // Stop mode switches the same core clock gate (and so freezes an
+        // in-flight OAM DMA the same way halt mode does).
+        let mut c = cpu();
+        let mut b = bus(&[0x10, 0x00, 0x04]); // STOP; (skipped); INC B
+        step(&mut c, &mut b); // cycle 1: STOP fetch
+        assert!(c.stopped);
+        assert!(b.halt_calls.is_empty(), "no gate during STOP itself");
+        step(&mut c, &mut b); // cycle 2: idle tick, then the gate engages
+        assert_eq!(b.halt_calls, [(2, true)]);
+        step(&mut c, &mut b); // cycle 3: idle
+        assert_eq!(b.halt_calls, [(2, true)]);
+        // Joypad wake: the gate is released before execution resumes.
+        b.mem[0xFFFF] = 0x10;
+        b.mem[0xFF0F] = 0x10;
+        step(&mut c, &mut b); // wakes, executes INC B
+        assert!(!c.stopped);
+        assert_eq!(b.halt_calls, [(2, true), (3, false)]);
+        assert_eq!(c.regs.b, 1);
     }
 
     #[test]
