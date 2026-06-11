@@ -1,0 +1,12 @@
+[package]
+name = "slopgb"
+description = "Game Boy / Game Boy Color emulator."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+slopgb-core = { path = "../slopgb-core" }
+# UI deps (winit, softbuffer, cpal) are added by the frontend work package.
