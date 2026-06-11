@@ -302,11 +302,7 @@ impl Cartridge {
                 let high_bits = usize::from(bank2) << shift;
                 if low_area {
                     // Mode 0 forces zeros on the upper lines for 0x0000-0x3FFF.
-                    if mode {
-                        high_bits
-                    } else {
-                        0
-                    }
+                    if mode { high_bits } else { 0 }
                 } else {
                     high_bits | usize::from(bank1 & bank1_mask)
                 }

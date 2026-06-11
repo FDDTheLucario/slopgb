@@ -8,11 +8,12 @@
 //! 172 + SCX%8 dots — pixel 159 ships at line dot 256 + SCX%8, matching
 //! `hblank_ly_scx_timing-GS`.
 //!
-//! Sprite fetches stall the pipeline for 6 dots each, plus a first-per-tile
-//! alignment penalty of max(0, 5 - (x + SCX) % 8) dots (the BG fetcher must
-//! finish its current tile row first). This reproduces every case table in
+//! Sprite fetches stall the pipeline for 6 dots each (3 for the first fetch
+//! of the line — see `render_step`), plus a first-per-tile alignment penalty
+//! of max(0, 5 - (x + SCX) % 8) dots (the BG fetcher must finish its current
+//! tile row first). This reproduces every case table in
 //! `intr_2_mode0_timing_sprites` exactly (Pan Docs "Mode 3 length" OBJ
-//! penalty algorithm).
+//! penalty algorithm, with the first fetch overlapping pipeline startup).
 
 use super::Ppu;
 use crate::SCREEN_W;
@@ -190,6 +191,15 @@ impl Ppu {
                 if trigger != self.render.lx {
                     continue;
                 }
+                // The first OBJ fetch of the line stalls the pipeline 3
+                // dots less than later ones: its OAM read + first tile-data
+                // dots overlap fetch work the BG pipeline performs anyway,
+                // while every later fetch pays the full 6 dots. Derived
+                // from the intr_2_mode0_timing_sprites case table measured
+                // against the no-sprite mode-3 end at dot 256: one sprite
+                // at X=0 ends mode 3 at 256+8 (3 + alignment 5), and each
+                // additional sprite on the same X adds exactly 6 dots.
+                let base = if self.render.fetched == 0 { 3 } else { 6 };
                 self.render.fetched |= 1 << i;
                 let wait = self.sprite_penalty(s.x);
                 // The BG fetcher keeps working during the alignment wait
@@ -198,7 +208,7 @@ impl Ppu {
                     self.fetcher_step();
                 }
                 self.fetch_sprite(i);
-                self.render.stall += 6 + wait;
+                self.render.stall += base + wait;
             }
             if self.render.stall > 0 {
                 self.render.stall -= 1;
@@ -622,7 +632,7 @@ mod tests {
     #[test]
     fn bg_signed_tile_addressing() {
         let mut p = dmg_on(0x81); // LCDC bit 4 clear: 0x8800 signed mode
-                                  // Tile 0x80 lives at 0x9000 + (-128)*16 = 0x8800.
+        // Tile 0x80 lives at 0x9000 + (-128)*16 = 0x8800.
         p.vram[0x0800 + 2 * 2] = 0xFF;
         p.vram[0x0800 + 2 * 2 + 1] = 0xFF;
         set_map(&mut p, 0x1800, 0, 0, 0x80);
@@ -668,17 +678,20 @@ mod tests {
         render_line(&mut p, 3) - 256
     }
 
-    /// Mooneye intr_2_mode0_timing_sprites measures floor(penalty/4) as
-    /// "extra cycles"; the dot counts come from the Pan Docs OBJ penalty
-    /// algorithm which reproduces that whole table.
+    /// Mooneye intr_2_mode0_timing_sprites pins each case's penalty to the
+    /// 4-dot window (4e-4, 4e] around its "extra cycles" value e — its
+    /// mode-0 poll lands exactly on the no-sprite mode-3 end plus 4e dots —
+    /// so e = ceil(penalty/4). The dot counts are the Pan Docs OBJ penalty
+    /// algorithm with the first fetch of the line costing 3 dots instead
+    /// of 6 (it overlaps work the BG pipeline performs anyway).
     #[test]
     fn sprite_penalty_table() {
         // 1-N sprites at X=0 -> extra cycles 2,4,5,7,8,10,11,13,14,16.
         let expect = [2, 4, 5, 7, 8, 10, 11, 13, 14, 16];
         for n in 1..=10usize {
             let dots = penalty(&vec![0u8; n]);
-            assert_eq!(dots, 6 * n as u16 + 5, "{n} sprites at x=0");
-            assert_eq!(dots / 4, expect[n - 1], "{n} sprites at x=0 (cycles)");
+            assert_eq!(dots, 6 * n as u16 + 2, "{n} sprites at x=0");
+            assert_eq!(dots.div_ceil(4), expect[n - 1], "{n} sprites at x=0");
         }
         // 10 sprites at X=N.
         for (x, cycles) in [
@@ -691,28 +704,50 @@ mod tests {
             (160, 16),
             (167, 15),
         ] {
-            assert_eq!(penalty(&[x; 10]) / 4, cycles, "10 sprites at x={x}");
+            assert_eq!(penalty(&[x; 10]).div_ceil(4), cycles, "10 sprites at x={x}");
         }
-        // Off-screen X >= 168: selected but never fetched.
+        // Off-screen X >= 168: selected but never fetched (no first-fetch
+        // discount either: the baseline mode-3 length is unchanged).
         assert_eq!(penalty(&[168; 10]), 0);
         assert_eq!(penalty(&[169; 10]), 0);
         // Two groups on different BG tiles both pay the alignment penalty.
-        assert_eq!(penalty(&[0, 0, 0, 0, 0, 160, 160, 160, 160, 160]) / 4, 17);
-        assert_eq!(penalty(&[4, 4, 4, 4, 4, 164, 164, 164, 164, 164]) / 4, 15);
+        assert_eq!(
+            penalty(&[0, 0, 0, 0, 0, 160, 160, 160, 160, 160]).div_ceil(4),
+            17
+        );
+        assert_eq!(
+            penalty(&[4, 4, 4, 4, 4, 164, 164, 164, 164, 164]).div_ceil(4),
+            15
+        );
         // Single sprite at X=N.
         for (x, cycles) in [(0u8, 2), (3, 2), (4, 1), (7, 1), (8, 2), (164, 1)] {
-            assert_eq!(penalty(&[x]) / 4, cycles, "1 sprite at x={x}");
+            assert_eq!(penalty(&[x]).div_ceil(4), cycles, "1 sprite at x={x}");
         }
         // Two sprites 8 apart.
-        assert_eq!(penalty(&[0, 8]) / 4, 5);
-        assert_eq!(penalty(&[4, 12]) / 4, 3);
+        assert_eq!(penalty(&[0, 8]).div_ceil(4), 5);
+        assert_eq!(penalty(&[4, 12]).div_ceil(4), 3);
         // 10 sprites 8 apart.
-        assert_eq!(penalty(&[0, 8, 16, 24, 32, 40, 48, 56, 64, 72]) / 4, 27);
-        assert_eq!(penalty(&[1, 9, 17, 25, 33, 41, 49, 57, 65, 73]) / 4, 25);
-        assert_eq!(penalty(&[4, 12, 20, 28, 36, 44, 52, 60, 68, 76]) / 4, 17);
-        assert_eq!(penalty(&[5, 13, 21, 29, 37, 45, 53, 61, 69, 77]) / 4, 15);
+        assert_eq!(
+            penalty(&[0, 8, 16, 24, 32, 40, 48, 56, 64, 72]).div_ceil(4),
+            27
+        );
+        assert_eq!(
+            penalty(&[1, 9, 17, 25, 33, 41, 49, 57, 65, 73]).div_ceil(4),
+            25
+        );
+        assert_eq!(
+            penalty(&[4, 12, 20, 28, 36, 44, 52, 60, 68, 76]).div_ceil(4),
+            17
+        );
+        assert_eq!(
+            penalty(&[5, 13, 21, 29, 37, 45, 53, 61, 69, 77]).div_ceil(4),
+            15
+        );
         // Reverse OAM order: identical timing.
-        assert_eq!(penalty(&[72, 64, 56, 48, 40, 32, 24, 16, 8, 0]) / 4, 27);
+        assert_eq!(
+            penalty(&[72, 64, 56, 48, 40, 32, 24, 16, 8, 0]).div_ceil(4),
+            27
+        );
     }
 
     #[test]
@@ -840,7 +875,7 @@ mod tests {
         let mut p = dmg_on(0x97); // 8x16
         set_tile_row(&mut p, 0, 4, 0, 0xFF, 0x00); // top tile row 0: color 1
         set_tile_row(&mut p, 0, 5, 0, 0xFF, 0xFF); // bottom tile row 0: color 3
-                                                   // Line 2 hits row 8 of a sprite at y=10 -> bottom tile.
+        // Line 2 hits row 8 of a sprite at y=10 -> bottom tile.
         sprite(&mut p, 0, 10, 16, 5, 0x00); // tile 5: bit 0 ignored -> 4/5
         render_line(&mut p, 2);
         assert_eq!(px(&p, 2, 8), BLACK, "row 8 comes from tile|1");

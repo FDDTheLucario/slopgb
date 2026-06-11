@@ -8,7 +8,8 @@
 use super::{Bus, Cpu, Flags};
 
 /// Execute one instruction (preceded by interrupt dispatch if one is
-/// pending and IME is set), or one M-cycle of halt or stop mode.
+/// pending and IME is set), one idle M-cycle of halt or stop mode, or a
+/// halt wake (the waking cycle plus dispatch and/or the next instruction).
 pub fn step(cpu: &mut Cpu, bus: &mut impl Bus) {
     if cpu.locked {
         // An illegal opcode hard-locks the CPU; it only burns cycles.
@@ -16,15 +17,36 @@ pub fn step(cpu: &mut Cpu, bus: &mut impl Bus) {
         return;
     }
     if cpu.halted {
-        // Halt mode ends when IE & IF != 0 regardless of IME. Waking adds no
-        // extra delay: mooneye acceptance/halt_ime0_nointr_timing states the
-        // timing is "exactly the same as if a long series of NOP instructions
-        // were used to wait for the interrupt".
+        // Halt mode ends when IE & IF != 0 regardless of IME, and the CPU
+        // re-evaluates that condition *within* every M-cycle: waking adds no
+        // delay over a NOP wait loop (mooneye acceptance/
+        // halt_ime0_nointr_timing and halt_ime1_timing2-GS both pin this by
+        // comparing DIV-measured latencies of the two paths, verified on
+        // hardware). In a NOP loop the M-cycle whose tick raises IF is an
+        // opcode fetch, so the halt idle cycle is modelled as a prefetch
+        // read (bus reads have no side effects; only the M-cycle of time
+        // matters) whose result is discarded while IE & IF stays 0.
+        let opcode = bus.read(cpu.regs.pc);
         if bus.pending() == 0 {
-            bus.tick();
             return;
         }
         cpu.halted = false;
+        if cpu.ime {
+            // The observing cycle is the aborted prefetch of the dispatch
+            // sequence: the vector fetch lands 5 M-cycles after the cycle
+            // that saw IF rise, exactly like a dispatch aborting a NOP
+            // fetch (acceptance/halt_ime1_timing2-GS rounds 3/4 vs 1/2).
+            dispatch_interrupt(cpu, bus);
+            let vector_opcode = fetch_opcode(cpu, bus);
+            execute(cpu, bus, vector_opcode);
+        } else {
+            // IME=0: the observing cycle already is the next instruction's
+            // opcode fetch (acceptance/halt_ime0_nointr_timing: "halt +
+            // nops 6" measures the same DIV delta as dispatch + jp hl).
+            cpu.regs.pc = cpu.regs.pc.wrapping_add(1);
+            execute(cpu, bus, opcode);
+        }
+        return;
     }
     if cpu.stopped {
         // Stop mode ends on joypad wake (Pan Docs, "Using the STOP
@@ -715,6 +737,13 @@ mod tests {
         log: Vec<Ev>,
         stop_result: bool,
         stop_calls: u32,
+        /// M-cycles elapsed since construction (`take_log` does not reset
+        /// this).
+        cycles: usize,
+        /// Simulated peripheral IRQ: during M-cycle `at` (0-based), OR
+        /// `bits` into IF - models e.g. the PPU raising the vblank IF bit
+        /// partway through a cycle, before that cycle's memory access.
+        raise_if: Option<(usize, u8)>,
     }
 
     impl TestBus {
@@ -724,7 +753,20 @@ mod tests {
                 log: Vec::new(),
                 stop_result: false,
                 stop_calls: 0,
+                cycles: 0,
+                raise_if: None,
             }
+        }
+
+        /// Start of every M-cycle: advance the simulated peripherals
+        /// (tick-then-access, same ordering as the real interconnect).
+        fn advance(&mut self) {
+            if let Some((at, bits)) = self.raise_if {
+                if at == self.cycles {
+                    self.mem[0xFF0F] |= bits;
+                }
+            }
+            self.cycles += 1;
         }
 
         fn load(&mut self, addr: u16, bytes: &[u8]) {
@@ -740,17 +782,20 @@ mod tests {
 
     impl Bus for TestBus {
         fn read(&mut self, addr: u16) -> u8 {
+            self.advance();
             let v = self.mem[usize::from(addr)];
             self.log.push(Read(addr, v));
             v
         }
 
         fn write(&mut self, addr: u16, value: u8) {
+            self.advance();
             self.log.push(Write(addr, value));
             self.mem[usize::from(addr)] = value;
         }
 
         fn tick(&mut self) {
+            self.advance();
             self.log.push(Tick);
         }
 
@@ -2043,13 +2088,14 @@ mod tests {
         assert!(c.halted);
         step(&mut c, &mut b);
         step(&mut c, &mut b);
-        assert_eq!(b.take_log(), [Tick, Tick]); // halted: one tick per step
+        // halted: one discarded prefetch read per idle M-cycle
+        assert_eq!(b.take_log(), [Read(PC0 + 1, 0x00), Read(PC0 + 1, 0x00)]);
         b.mem[0xFF0F] = 0x04;
         step(&mut c, &mut b);
         assert_eq!(
             b.log,
             [
-                Read(PC0 + 1, 0x00), // aborted fetch after the halt wakes
+                Read(PC0 + 1, 0x00), // prefetch observing IF, aborted
                 Tick,
                 Tick,
                 Write(SP0 - 1, 0xC0),
@@ -2069,7 +2115,7 @@ mod tests {
         step(&mut c, &mut b);
         assert!(c.halted);
         step(&mut c, &mut b);
-        assert_eq!(b.take_log(), [Read(PC0, 0x76), Tick]);
+        assert_eq!(b.take_log(), [Read(PC0, 0x76), Read(PC0 + 1, 0x04)]);
         b.mem[0xFF0F] = 0x04;
         step(&mut c, &mut b);
         // wakes with no extra delay and just executes the next instruction
@@ -2077,6 +2123,69 @@ mod tests {
         assert_eq!(c.regs.b, 1);
         assert_eq!(b.mem[0xFF0F], 0x04); // IF not acked
         assert!(!c.ime);
+    }
+
+    #[test]
+    fn halt_ime1_dispatch_reuses_the_if_raising_cycle_as_prefetch() {
+        // Servicing an interrupt out of HALT takes "exactly same timing as
+        // if a long series of NOP instructions were used to wait for the
+        // interrupt" (mooneye acceptance/halt_ime1_timing2-GS, verified on
+        // DMG/MGB/SGB/SGB2). In the NOP case the M-cycle whose tick raises
+        // IF is the aborted prefetch and the vector fetch lands 5 M-cycles
+        // later; the halt idle cycle that observes IF must therefore play
+        // the same role - no extra fetch cycle in between.
+        let mut c = cpu();
+        c.ime = true;
+        let mut b = bus(&[0x76]); // HALT
+        b.mem[0xFFFF] = 0x04; // timer interrupt enabled
+        step(&mut c, &mut b); // cycle 0: HALT fetch
+        assert_eq!(b.take_log(), [Read(PC0, 0x76)]);
+        assert!(c.halted);
+        b.raise_if = Some((3, 0x04)); // IF.2 rises during cycle 3
+        step(&mut c, &mut b); // cycle 1: idle
+        step(&mut c, &mut b); // cycle 2: idle
+        assert!(c.halted);
+        b.take_log();
+        // Cycle 3 sees IF rise -> it is the aborted prefetch; dispatch
+        // follows in the same step and the vector fetch is cycle 8 = 3+5.
+        step(&mut c, &mut b);
+        assert_eq!(
+            b.take_log(),
+            [
+                Read(PC0 + 1, 0x00),  // cycle 3: IF rises during this cycle
+                Tick,                 // cycle 4
+                Tick,                 // cycle 5
+                Write(SP0 - 1, 0xC0), // cycle 6
+                Write(SP0 - 2, 0x01), // cycle 7: return addr = after HALT
+                Read(0x0050, 0x00),   // cycle 8: vector fetch, IF cycle + 5
+            ]
+        );
+        assert!(!c.halted);
+        assert!(!c.ime);
+        assert_eq!(b.mem[0xFF0F], 0); // acked
+        assert_eq!(c.regs.pc, 0x0051);
+    }
+
+    #[test]
+    fn halt_ime0_wake_fetch_is_the_if_raising_cycle() {
+        // IME=0 wake: HALT continues "with exactly same timing as if a long
+        // series of NOP instructions were used" (mooneye acceptance/
+        // halt_ime0_nointr_timing, verified on all models): the cycle whose
+        // tick raises IF would be a NOP fetch in the wait loop, so out of
+        // halt it is already the next instruction's opcode fetch.
+        let mut c = cpu();
+        let mut b = bus(&[0x76, 0x04]); // HALT; INC B
+        b.mem[0xFFFF] = 0x04;
+        step(&mut c, &mut b); // cycle 0: HALT fetch
+        b.raise_if = Some((2, 0x04)); // IF.2 rises during cycle 2
+        step(&mut c, &mut b); // cycle 1: idle
+        assert!(c.halted);
+        b.take_log();
+        step(&mut c, &mut b); // cycle 2: fetches and executes INC B
+        assert_eq!(b.take_log(), [Read(PC0 + 1, 0x04)]);
+        assert!(!c.halted);
+        assert_eq!(c.regs.b, 1);
+        assert_eq!(b.mem[0xFF0F], 0x04); // not acked: no dispatch
     }
 
     #[test]
@@ -2145,14 +2254,16 @@ mod tests {
     }
 
     #[test]
-    fn halted_cpu_consumes_tick_cycles() {
+    fn halted_cpu_consumes_idle_prefetch_cycles() {
+        // Each halted M-cycle is a discarded prefetch read of PC (so the
+        // cycle that eventually observes IF can double as the real fetch).
         let mut c = cpu();
         c.halted = true;
         let mut b = TestBus::new();
         for _ in 0..5 {
             step(&mut c, &mut b);
         }
-        assert_eq!(b.log, [Tick, Tick, Tick, Tick, Tick]);
+        assert_eq!(b.log, [Read(PC0, 0); 5]);
         assert!(c.halted);
     }
 

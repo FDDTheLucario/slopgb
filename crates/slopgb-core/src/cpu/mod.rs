@@ -75,7 +75,8 @@ impl Cpu {
     }
 
     /// Run one instruction (including any interrupt dispatch that precedes
-    /// it), or one M-cycle of halt or stop mode.
+    /// it), one idle M-cycle of halt or stop mode, or a halt wake (the
+    /// waking cycle plus dispatch and/or the next instruction).
     pub fn step(&mut self, bus: &mut impl Bus) {
         execute::step(self, bus);
     }

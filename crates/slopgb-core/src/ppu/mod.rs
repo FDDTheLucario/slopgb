@@ -18,20 +18,20 @@
 //! | dot          | event |
 //! |--------------|-------|
 //! | 0            | LY := line; OAM reads blocked; LYC compare invalid (flag 0); STAT mode reads 0 |
-//! | 4            | STAT mode reads 2; OAM writes blocked; LYC compare valid |
-//! | 12           | STAT mode-2 (OAM) interrupt source asserts (derived: `intr_2_mode0_timing` / `intr_2_mode3_timing` / `intr_2_oam_ok_timing` place it 244/72/244 dots before their observed events) |
+//! | 4            | STAT mode reads 2; OAM writes blocked; LYC compare valid; STAT mode-2 (OAM) interrupt source asserts (one M-cycle after the LY change, together with the readable mode and the compare — `intr_2_mode3_timing` puts the first mode-3 STAT read exactly 80 dots after the IRQ becomes visible, and `lcdon_timing-GS` pins that read flip at dot 84) |
 //! | 80           | VRAM reads blocked; OAM scan complete |
-//! | 84           | STAT mode reads 3; VRAM writes blocked |
-//! | V0           | mode 0: STAT reads 0, mode-0 IRQ source asserts, OAM+VRAM unblock. V0 = 256 + SCX%8 + sprite/window penalties (`hblank_ly_scx_timing-GS`, `intr_2_mode0_timing_sprites`) |
+//! | 84           | STAT mode reads 3; VRAM writes blocked; OAM source drops (follows the readable mode-2 window) |
+//! | V0           | mode 0: STAT reads 0, mode-0 IRQ source asserts, OAM+VRAM unblock. V0 = 256 + SCX%8 + sprite/window penalties (`hblank_ly_scx_timing-GS`: LY increments 51/50/49 cycles after the mode-0 IRQ for SCX%8 = 0/1-4/5-7; `intr_2_mode0_timing`/`intr_2_oam_ok_timing`: 252 dots after the mode-2 IRQ) |
 //!
 //! VBlank: line 144 dots 0-3 still read STAT mode 0 (the mode-0 IRQ source
 //! stays asserted, keeping the STAT line gapless for `stat_irq_blocking`);
 //! mode 1 and the VBlank IF bit assert at 144:4. The OAM IRQ source also
 //! pulses at 144:4 on DMG (`vblank_stat_intr-GS`: simultaneous with VBlank)
 //! and at 144:0 on CGB (`misc/ppu/vblank_stat_intr-C`: one M-cycle earlier),
-//! and on DMG it pulses again at dot 8 of every later vblank line
-//! (`intr_1_2_timing-GS` measures mode1→mode2 IRQ distance = 460 dots, i.e.
-//! one line + 4 dots — the next pulse is on line 145, not on line 0).
+//! and on DMG it pulses again at dot 12 of every later vblank line
+//! (`intr_1_2_timing-GS` measures mode1→mode2 IRQ distance = 464 dots, i.e.
+//! one line + 8 dots — the next pulse is on line 145, sitting 8 dots after
+//! the dot-4 position the OAM source rises at on visible lines).
 //!
 //! Line 153: LY reads 153 during dots 0-3 only, then 0; the LYC compare sees
 //! 153 during dots 4-7, is invalid during 8-11, and sees 0 from dot 12
@@ -43,8 +43,8 @@
 
 mod render;
 
-use crate::model::Model;
 use crate::SCREEN_PIXELS;
+use crate::model::Model;
 
 use render::Render;
 
@@ -345,14 +345,22 @@ impl Ppu {
         high |= en & 0x08 != 0 && vm == 0 && !(self.glitch_line && self.dot < GLITCH_MODE3_START);
         high |= en & 0x10 != 0 && (self.line >= 145 || (self.line == 144 && self.dot >= 4));
         if en & 0x20 != 0 {
-            let oam_window = self.line <= 143 && !self.glitch_line && (12..84).contains(&self.dot);
+            // The OAM source follows the readable mode-2 window: it rises at
+            // dot 4 (one M-cycle after the LY change, simultaneous with the
+            // LYC compare turning valid) and drops with the mode-3 read flip
+            // at dot 84. `intr_2_mode3_timing`/`intr_2_mode0_timing`/
+            // `intr_2_oam_ok_timing` measure their events 80/252/252 dots
+            // after this IRQ becomes CPU-visible (see module docs).
+            let oam_window = self.line <= 143 && !self.glitch_line && (4..84).contains(&self.dot);
             let cgb = self.model.is_cgb();
             // OAM pulse at vblank start: `vblank_stat_intr-GS` (DMG: with
             // vblank), `misc/ppu/vblank_stat_intr-C` (CGB: 4 dots earlier).
             let pulse144 = self.line == 144 && self.dot == if cgb { 0 } else { 4 };
             // DMG: the OAM source also pulses on every later vblank line
-            // (`intr_1_2_timing-GS`: mode1→mode2 IRQ distance is 460 dots).
-            let vblank_pulse = !cgb && (145..=153).contains(&self.line) && self.dot == 8;
+            // (`intr_1_2_timing-GS`: mode1→mode2 IRQ distance is 464 dots —
+            // one line + 8 dots, i.e. the pulse sits 8 dots after the point
+            // where the OAM source rises on visible lines).
+            let vblank_pulse = !cgb && (145..=153).contains(&self.line) && self.dot == 12;
             high |= oam_window || pulse144 || vblank_pulse;
         }
         high
@@ -915,14 +923,16 @@ mod tests {
     // --- STAT interrupt sources ---
 
     #[test]
-    fn mode2_irq_asserts_at_dot_12() {
+    fn mode2_irq_asserts_at_dot_4() {
         let mut p = dmg();
         p.write(0xFF41, 0x20);
         p.write(0xFF40, 0x81);
-        // No mode-2 source on the glitched line; first edge at line 1.
-        let ifs = run_to(&mut p, 1, 11);
+        // No mode-2 source on the glitched line; first edge at line 1,
+        // dot 4: the OAM IRQ rises one M-cycle after the LY change,
+        // together with the readable mode 2 (see module docs).
+        let ifs = run_to(&mut p, 1, 3);
         assert_eq!(ifs & 2, 0);
-        assert_eq!(p.tick(), 0x02, "OAM IRQ at state(1,12)");
+        assert_eq!(p.tick(), 0x02, "OAM IRQ at state(1,4)");
         // Source stays high through dot 83: no second edge.
         assert_eq!(run_to(&mut p, 1, 200) & 2, 0);
     }
@@ -949,26 +959,31 @@ mod tests {
         p.write(0xFF41, 0x60);
         p.write(0xFF40, 0x81);
         // Drain everything up to just before (2,4): with bit5 + bit6, edges
-        // happen earlier (line 1 dot 12). At (2,0..3) line is low.
+        // happen earlier (line 1 dot 4). At (2,0..3) the line is low (OAM
+        // source down, compare invalid).
         run_to(&mut p, 2, 3);
-        assert_eq!(p.tick() & 2, 2, "LYC raises the line at (2,4)");
+        assert_eq!(p.tick() & 2, 2, "LYC + OAM raise the line at (2,4)");
         let mut got = 0;
         for _ in 0..400 {
             got |= p.tick();
         }
-        assert_eq!(got & 2, 0, "mode-2 source at dot 12 is blocked");
+        assert_eq!(got & 2, 0, "one shared edge; no second one this line");
     }
 
     #[test]
-    fn hblank_to_oam_gap_produces_edge_each_line() {
+    fn hblank_to_oam_handover_gapless() {
         let mut p = dmg();
         p.write(0xFF41, 0x28); // hblank + OAM sources
         p.write(0xFF40, 0x81);
-        run_to(&mut p, 2, 0);
-        // hblank source high through dots 0-3, drops at 4, OAM source at 12.
-        let ifs = tick_n(&mut p, 11);
-        assert_eq!(ifs & 2, 0);
-        assert_eq!(p.tick() & 2, 2, "edge at dot 12 after 8-dot gap");
+        run_to(&mut p, 1, 300); // line-1 hblank: line is high
+        // The hblank source covers dots 0-3 of the next line and the OAM
+        // source rises at dot 4: consecutive sources overlap, so the
+        // handover produces no edge (`stat_irq_blocking` semantics), and
+        // neither does the OAM drop at 84 (falling). The next edge is the
+        // mode-0 source rising when mode 3 ends at dot 256.
+        let ifs = run_to(&mut p, 2, 255);
+        assert_eq!(ifs & 2, 0, "no edge across the hblank->OAM handover");
+        assert_eq!(p.tick() & 2, 2, "edge at the line-2 mode-0 rise (256)");
     }
 
     #[test]
@@ -994,14 +1009,14 @@ mod tests {
     }
 
     #[test]
-    fn vblank_line_oam_pulses_dot8_dmg_only() {
+    fn vblank_line_oam_pulses_dot12_dmg_only() {
         let mut p = dmg();
         p.write(0xFF41, 0x20);
         p.write(0xFF40, 0x81);
-        run_to(&mut p, 145, 7);
-        assert_eq!(p.tick() & 2, 2, "DMG: OAM pulse at 145:8");
-        run_to(&mut p, 146, 7);
-        assert_eq!(p.tick() & 2, 2, "DMG: OAM pulse at 146:8");
+        run_to(&mut p, 145, 11);
+        assert_eq!(p.tick() & 2, 2, "DMG: OAM pulse at 145:12");
+        run_to(&mut p, 146, 11);
+        assert_eq!(p.tick() & 2, 2, "DMG: OAM pulse at 146:12");
 
         let mut c = cgb();
         c.write(0xFF41, 0x20);
