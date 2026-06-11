@@ -7,10 +7,19 @@ Cycle-accurate GB/GBC emulator. Workspace: `crates/slopgb-core` (emulator, zero 
 ## Rules
 
 - TDD: failing test first. Every obscure hardware behavior gets a unit test.
-- NEVER special-case mooneye ROMs — emulate documented hardware (gbctr > Pan Docs > mooneye test asm in `test-roms-src/` > SameBoy/mooneye-gb source). Cite obscure behavior in comments.
-- No new deps in core. No unsafe anywhere. Clippy `-D warnings` clean.
+- Never special-case mooneye ROMs — emulate the documented hardware behavior and cite the source in a comment when obscure.
+- No new deps in core (std only); no unsafe anywhere (`forbid(unsafe_code)`); clippy `-D warnings` clean.
 - Commit + push frequently (after each phase/fix round). Repo-local `commit.gpgsign=false` (user's ssh key locked in non-interactive sessions).
-- Keep this file updated as the project evolves (goal requirement).
+- Keep this file updated as the project evolves.
+
+When a hardware question comes up, consult in order:
+
+| Source | For |
+|---|---|
+| gbctr (Gekkio, Complete Technical Reference) | CPU/MBC timing, micro-ops |
+| Pan Docs | everything else |
+| `test-roms-src/<failing test>.s` asm | what a failing mooneye test actually checks |
+| SameBoy / mooneye-gb source | undocumented corners, tie-breaks |
 
 ## Commands
 
