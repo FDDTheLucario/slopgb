@@ -36,6 +36,14 @@ pub trait Bus {
     /// mode, sleeping until [`pending`](Bus::pending) becomes non-zero
     /// (joypad wake). Takes no time.
     fn stop(&mut self) -> bool;
+    /// Halt/stop mode gated the CPU core clock off (`true`) or the CPU woke
+    /// up (`false`). The OAM DMA controller runs on that clock and freezes
+    /// with it (madness/mgb_oam_dma_halt_sprites.s; see
+    /// `Interconnect::set_cpu_halted`). The CPU engages the gate only
+    /// *after* the post-HALT prefetch M-cycle (see `execute::step`). Takes
+    /// no time; calls are idempotent. Defaults to a no-op for `Bus`
+    /// implementations that do not model the DMA engine.
+    fn set_halted(&mut self, _halted: bool) {}
 }
 
 /// SM83 CPU. Owns architectural registers, IME, halt state.

@@ -313,11 +313,32 @@ impl Interconnect {
     /// of OAM access (but not proceeding with it!)"); its observed sprite
     /// data pins the freeze mid-byte, with the overwritten OAM byte intact.
     ///
-    /// Called by the CPU wiring on halt/stop entry and exit; the halted CPU
-    /// performs no bus accesses on hardware, so the CPU-visible bus state
-    /// during the freeze is unobservable and no bus conflict is modelled.
+    /// Called by the CPU wiring on halt/stop entry and exit (via
+    /// [`Bus::set_halted`]); the halted CPU performs no bus accesses on
+    /// hardware, so the CPU-visible bus state during the freeze is
+    /// unobservable and no bus conflict is modelled.
+    ///
+    /// While a transfer sits frozen mid-byte, the PPU is handed the frozen
+    /// access (OAM index about to be replaced + in-flight source byte): the
+    /// DMA controller is "in the middle of OAM access (but not proceeding
+    /// with it!)" and the MGB PPU's OAM scan sees glitched data derived
+    /// from exactly these bytes (madness/mgb_oam_dma_halt_sprites.s; see
+    /// `Ppu::set_oam_dma_freeze`). A freeze during the setup delay has no
+    /// OAM access in flight and hands over nothing.
     pub fn set_cpu_halted(&mut self, halted: bool) {
+        if self.cpu_halted == halted {
+            return;
+        }
         self.cpu_halted = halted;
+        let freeze = if halted {
+            self.dma_run.as_ref().map(|run| {
+                let (_, byte) = self.oam_dma_source_read(run.src.wrapping_add(run.idx.into()));
+                (run.idx, byte)
+            })
+        } else {
+            None
+        };
+        self.ppu.set_oam_dma_freeze(freeze);
     }
 
     fn oam_dma_tick(&mut self) {
@@ -697,6 +718,10 @@ impl Bus for Interconnect {
             false
         }
     }
+
+    fn set_halted(&mut self, halted: bool) {
+        self.set_cpu_halted(halted);
+    }
 }
 
 #[cfg(test)]
@@ -1056,6 +1081,34 @@ mod tests {
         assert_eq!(b.read(0xFE00), 0xFF, "byte 0 in flight");
         ticks(&mut b, 159);
         assert_eq!(b.read(0xFE00), 0x80, "transfer complete");
+    }
+
+    /// Gating the clock mid-transfer hands the PPU the frozen in-flight
+    /// access (OAM index + source byte) for the MGB OAM scan glitch
+    /// (madness/mgb_oam_dma_halt_sprites.s); ungating (or freezing with no
+    /// transfer / only the setup delay in flight) hands over nothing.
+    #[test]
+    fn cpu_halt_hands_frozen_dma_access_to_ppu() {
+        let mut b = ic(Model::Mgb);
+        fill_wram(&mut b, 0xC000, 0x80, 160);
+        b.set_cpu_halted(true);
+        assert_eq!(b.ppu.oam_dma_freeze(), None, "no transfer running");
+        b.set_cpu_halted(false);
+        b.write(0xFF46, 0xC0); // cycle W
+        b.set_cpu_halted(true);
+        assert_eq!(b.ppu.oam_dma_freeze(), None, "setup delay: no OAM access");
+        b.set_cpu_halted(false);
+        b.tick(); // W+1: setup delay elapses
+        b.tick(); // W+2: byte 0 in flight
+        b.tick(); // W+3: byte 1 in flight
+        b.set_cpu_halted(true);
+        assert_eq!(
+            b.ppu.oam_dma_freeze(),
+            Some((2, 0x82)),
+            "byte 2 frozen mid-access"
+        );
+        b.set_cpu_halted(false);
+        assert_eq!(b.ppu.oam_dma_freeze(), None, "cleared on wake");
     }
 
     #[test]
