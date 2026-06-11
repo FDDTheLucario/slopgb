@@ -166,10 +166,13 @@ impl Model {
     /// `boot_hwio-*`: DMG ABC reads STAT=$80 at dot 4556 and LY=$0A at dot
     /// 4760 after hand-off (→ window [70028,70224)∪[0,8), midpoint 70124);
     /// DMG0 reads STAT=$83/LY=$01 (→ window [66208,66376), midpoint 66292).
-    /// SGB and CGB mask the LCD registers out, so their phase is
-    /// unconstrained; SGB reuses the DMG value and CGB starts in mid-vblank
-    /// (line 145), which is where CGB boot ROMs are commonly reported to
-    /// hand off.
+    /// SGB and CGB mask the LCD registers out, so no mooneye oracle
+    /// constrains their phase; SGB reuses the DMG value. CGB/AGB hardware
+    /// hands off inside vblank with LY observed in the $90-$94 range
+    /// (hardware reports collected in gbdev/pandocs#426: "firmly within
+    /// VBlank", implying STAT=$81); the exact dot within that window is a
+    /// free parameter here, chosen as line 145 ($91) dot 0 — mid-window,
+    /// with no oracle constraint beyond the #426 vblank window.
     pub fn post_boot_state(self) -> PostBootState {
         // Common fields; per-model values below.
         let base = PostBootState {
@@ -444,5 +447,12 @@ mod tests {
         let p0 = Model::Dmg0.post_boot_state().lcd_phase_dots;
         let pos = (p0 + 4556) % 70224;
         assert!((456 + 84..456 + 256).contains(&pos), "DMG0: {p0}");
+        // CGB/AGB: no mooneye oracle (boot_hwio masks LY/STAT), but real
+        // hardware hands off inside vblank with LY in $90-$94
+        // (gbdev/pandocs#426).
+        for m in [Model::Cgb, Model::Agb] {
+            let p0 = m.post_boot_state().lcd_phase_dots;
+            assert!((144 * 456..149 * 456).contains(&p0), "{m:?}: {p0}");
+        }
     }
 }

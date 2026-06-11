@@ -17,6 +17,11 @@ pub fn step(cpu: &mut Cpu, bus: &mut impl Bus) {
         return;
     }
     if cpu.halted {
+        // halted and halt_bug are mutually exclusive by construction:
+        // op_halt arms the bug *instead of* halting. The IME=0 wake below
+        // relies on this when it duplicates fetch_opcode's PC increment
+        // without fetch_opcode's halt_bug check.
+        debug_assert!(!cpu.halt_bug);
         // Halt mode ends when IE & IF != 0 regardless of IME, and the CPU
         // re-evaluates that condition *within* every M-cycle: waking adds no
         // delay over a NOP wait loop (mooneye acceptance/
@@ -69,12 +74,18 @@ pub fn step(cpu: &mut Cpu, bus: &mut impl Bus) {
         // `Bus`, so wake is modelled as IE & IF != 0, like halt; in stop
         // mode every other interrupt source is frozen, so a newly pending
         // bit can only be the joypad. Not modelled: hardware wakes on the
-        // P1 lines even with IE bit 4 clear.
+        // P1 lines even with IE bit 4 clear. Unlike halt, wake is sampled
+        // here at the step boundary, one M-cycle coarser than halt's
+        // within-cycle re-check: an IF bit raised during the idle cycle
+        // below is only observed at the start of the next step, so the
+        // resume fetch lands one M-cycle later than the equivalent halt
+        // wake would. No test ROM pins stop wake latency.
         if bus.pending() == 0 {
             bus.tick();
             // Stop mode switches the core clock off like halt mode does
             // (same gate, so an in-flight OAM DMA freezes here too); the
-            // gate engages after the idle cycle, mirroring the halt path.
+            // gate engages after the idle cycle, mirroring the halt path's
+            // gate placement (wake sampling differs; see above).
             bus.set_halted(true);
             return;
         }
@@ -2235,16 +2246,16 @@ mod tests {
         let mut c = cpu();
         let mut b = bus(&[0x76, 0x04]); // HALT; INC B
         b.mem[0xFFFF] = 0x04;
-        step(&mut c, &mut b); // cycle 1: HALT fetch
+        step(&mut c, &mut b); // cycle 0: HALT fetch
         assert!(c.halted);
         assert!(b.halt_calls.is_empty(), "no gate during HALT itself");
-        step(&mut c, &mut b); // cycle 2: idle prefetch, then the gate engages
+        step(&mut c, &mut b); // cycle 1: idle prefetch, then the gate engages
         assert_eq!(b.halt_calls, [(2, true)]);
-        step(&mut c, &mut b); // cycle 3: idle, gate stays on (idempotent)
-        step(&mut c, &mut b); // cycle 4
+        step(&mut c, &mut b); // cycle 2: idle, gate stays on (idempotent)
+        step(&mut c, &mut b); // cycle 3
         assert_eq!(b.halt_calls, [(2, true)]);
-        b.raise_if = Some((4, 0x04)); // IF.2 rises during cycle 5
-        step(&mut c, &mut b); // cycle 5 observes IF: wake, gate released
+        b.raise_if = Some((4, 0x04)); // IF.2 rises during cycle 4
+        step(&mut c, &mut b); // cycle 4 observes IF: wake, gate released
         assert!(!c.halted);
         assert_eq!(b.halt_calls, [(2, true), (5, false)]);
         assert_eq!(c.regs.b, 1, "woke into INC B");
@@ -2268,12 +2279,12 @@ mod tests {
         // in-flight OAM DMA the same way halt mode does).
         let mut c = cpu();
         let mut b = bus(&[0x10, 0x00, 0x04]); // STOP; (skipped); INC B
-        step(&mut c, &mut b); // cycle 1: STOP fetch
+        step(&mut c, &mut b); // cycle 0: STOP fetch
         assert!(c.stopped);
         assert!(b.halt_calls.is_empty(), "no gate during STOP itself");
-        step(&mut c, &mut b); // cycle 2: idle tick, then the gate engages
+        step(&mut c, &mut b); // cycle 1: idle tick, then the gate engages
         assert_eq!(b.halt_calls, [(2, true)]);
-        step(&mut c, &mut b); // cycle 3: idle
+        step(&mut c, &mut b); // cycle 2: idle
         assert_eq!(b.halt_calls, [(2, true)]);
         // Joypad wake: the gate is released before execution resumes.
         b.mem[0xFFFF] = 0x10;
