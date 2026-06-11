@@ -10,7 +10,8 @@ Cycle-accurate GB/GBC emulator. Workspace: `crates/slopgb-core` (emulator, zero 
 - Never special-case mooneye ROMs — emulate the documented hardware behavior and cite the source in a comment when obscure.
 - No new deps in core (std only); no unsafe anywhere (`forbid(unsafe_code)`); clippy `-D warnings` clean.
 - Commit + push frequently (after each phase/fix round). Repo-local `commit.gpgsign=false` (user's ssh key locked in non-interactive sessions).
-- Keep this file updated as the project evolves.
+- Each iteration: run `/rust-diff-review` on that iteration's diff, fix every finding before the next iteration.
+- Keep this file updated (and `/clean-docs`-clean) as the project evolves.
 
 When a hardware question comes up, consult in order:
 
