@@ -9,4 +9,6 @@ repository.workspace = true
 
 [dependencies]
 slopgb-core = { path = "../slopgb-core" }
-# UI deps (winit, softbuffer, cpal) are added by the frontend work package.
+winit = "0.30"
+softbuffer = "0.4"
+cpal = "0.16"
