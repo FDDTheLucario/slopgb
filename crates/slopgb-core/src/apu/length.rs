@@ -26,6 +26,10 @@ impl LengthCounter {
     /// NRx1 write: the counter is reloaded with `max - data` (caller masks
     /// `data` to 6 bits for pulse/noise channels).
     pub(super) fn load(&mut self, data: u8) {
+        debug_assert!(
+            u16::from(data) < self.max,
+            "length data must be masked by caller"
+        );
         self.counter = self.max - u16::from(data);
     }
 
@@ -105,6 +109,14 @@ mod tests {
         assert_eq!(w.counter, 256);
         w.load(255);
         assert_eq!(w.counter, 1);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "length data must be masked by caller")]
+    fn load_rejects_unmasked_data_in_debug() {
+        let mut l = LengthCounter::new(64);
+        l.load(64); // callers must mask to 6 bits first
     }
 
     #[test]

@@ -217,7 +217,9 @@ impl Cartridge {
 
         // Pad the image to a power of two so `bank & (banks - 1)` mirrors
         // undersized images exactly like a physical ROM chip whose upper
-        // address lines are ignored.
+        // address lines are ignored. Multicart detection keys on the
+        // *unpadded* dump size, so capture it first.
+        let orig_len = rom.len();
         let padded = rom.len().next_power_of_two().max(2 * ROM_BANK_SIZE);
         rom.resize(padded, 0xFF);
 
@@ -228,7 +230,7 @@ impl Cartridge {
                 bank1: 1,
                 bank2: 0,
                 mode: false,
-                multicart: detect_mbc1_multicart(&rom),
+                multicart: detect_mbc1_multicart(&rom, orig_len),
             },
             0x05 | 0x06 => Mapper::Mbc2 {
                 ramg: false,
@@ -430,6 +432,10 @@ impl Cartridge {
         if self.ram.is_empty() {
             return None;
         }
+        // The mask below mirrors instead of corrupting only because every
+        // RAM size chosen in `from_bytes` is a power of two; catch any
+        // future size-code addition that breaks this.
+        debug_assert!(self.ram.len().is_power_of_two());
         Some((bank * RAM_BANK_SIZE + usize::from(addr & 0x1FFF)) & (self.ram.len() - 1))
     }
 
@@ -481,7 +487,8 @@ impl Cartridge {
             Some(RamTarget::Rtc(reg)) => match &self.mapper {
                 // Reads see the *latched* registers (Pan Docs).
                 Mapper::Mbc3 { rtc: Some(rtc), .. } => rtc.latched[reg],
-                _ => 0xFF,
+                // `ram_target` yields Rtc only for Mbc3 with rtc.is_some().
+                _ => unreachable!("RamTarget::Rtc implies MBC3 with RTC"),
             },
         }
     }
@@ -517,7 +524,7 @@ impl Cartridge {
     /// Format: the raw RAM contents (MBC2: 512 bytes, low nibble valid),
     /// followed — for RTC carts (types 0x0F/0x10) — by a 16-byte block:
     /// live S,M,H,DL,DH; latched S,M,H,DL,DH; sub-second T-cycle counter as
-    /// little-endian u32; two zero pad bytes.
+    /// little-endian u32; the last latch register write; one zero pad byte.
     pub fn save_data(&self) -> Option<Vec<u8>> {
         if !self.has_battery {
             return None;
@@ -527,35 +534,70 @@ impl Cartridge {
             data.extend_from_slice(&rtc.regs);
             data.extend_from_slice(&rtc.latched);
             data.extend_from_slice(&rtc.subsec.to_le_bytes());
-            data.extend_from_slice(&[0, 0]);
+            // latch_prev so an armed 0x00 -> 0x01 latch sequence survives a
+            // save taken between the two writes.
+            data.extend_from_slice(&[rtc.latch_prev, 0]);
         }
         Some(data)
     }
 
-    /// Restore a [`Self::save_data`] image. Wrong-size data is ignored.
-    pub fn load_save_data(&mut self, data: &[u8]) {
-        if !self.has_battery {
-            return;
+    /// Restore a [`Self::save_data`] image; also accepts the de-facto .sav
+    /// layouts of other emulators. Returns whether anything was restored.
+    ///
+    /// The RAM prefix is loaded whenever `data` is at least RAM-sized; the
+    /// trailing block is then interpreted as RTC state if the cartridge has
+    /// an RTC: either our own 16-byte block ([`Self::save_data`]) or the
+    /// 44/48-byte footer written by VBA/mGBA/BGB/SameBoy (five 4-byte LE
+    /// live registers, five 4-byte LE latched registers, 32/64-bit
+    /// timestamp). An unknown trailer size skips only the RTC restore, so
+    /// e.g. a Pokemon G/S/C save imported from another emulator never loses
+    /// its RAM. Data shorter than the RAM is rejected (returns false).
+    pub fn load_save_data(&mut self, data: &[u8]) -> bool {
+        if !self.has_battery || data.len() < self.ram.len() {
+            return false;
         }
-        let rtc_len = if self.rtc().is_some() {
-            RTC_SAVE_LEN
-        } else {
-            0
-        };
-        if data.len() != self.ram.len() + rtc_len {
-            return;
-        }
-        let (ram, rtc_block) = data.split_at(self.ram.len());
+        let (ram, trailer) = data.split_at(self.ram.len());
         self.ram.copy_from_slice(ram);
-        if let Mapper::Mbc3 { rtc: Some(rtc), .. } = &mut self.mapper {
-            for (i, (reg, mask)) in rtc.regs.iter_mut().zip(RTC_MASKS).enumerate() {
-                *reg = rtc_block[i] & mask;
+        let rtc_restored = self.load_rtc_trailer(trailer);
+        !self.ram.is_empty() || rtc_restored
+    }
+
+    /// Parse the post-RAM trailer of a save image into the RTC, if any.
+    /// Returns whether RTC state was restored.
+    fn load_rtc_trailer(&mut self, trailer: &[u8]) -> bool {
+        let Mapper::Mbc3 { rtc: Some(rtc), .. } = &mut self.mapper else {
+            return false;
+        };
+        match trailer.len() {
+            // Our own block, see `save_data`.
+            RTC_SAVE_LEN => {
+                for (i, (reg, mask)) in rtc.regs.iter_mut().zip(RTC_MASKS).enumerate() {
+                    *reg = trailer[i] & mask;
+                }
+                for (i, (reg, mask)) in rtc.latched.iter_mut().zip(RTC_MASKS).enumerate() {
+                    *reg = trailer[5 + i] & mask;
+                }
+                let subsec = u32::from_le_bytes(trailer[10..14].try_into().unwrap());
+                rtc.subsec = subsec % CYCLES_PER_SECOND;
+                rtc.latch_prev = trailer[14];
+                true
             }
-            for (i, (reg, mask)) in rtc.latched.iter_mut().zip(RTC_MASKS).enumerate() {
-                *reg = rtc_block[5 + i] & mask;
+            // De-facto VBA footer (also mGBA/BGB/SameBoy): each register is
+            // stored as a 4-byte LE word (only the low byte is meaningful),
+            // five live then five latched, then a 32- or 64-bit host
+            // timestamp we ignore (our RTC is deterministic and never reads
+            // the host clock).
+            44 | 48 => {
+                for (i, (reg, mask)) in rtc.regs.iter_mut().zip(RTC_MASKS).enumerate() {
+                    *reg = trailer[4 * i] & mask;
+                }
+                for (i, (reg, mask)) in rtc.latched.iter_mut().zip(RTC_MASKS).enumerate() {
+                    *reg = trailer[20 + 4 * i] & mask;
+                }
+                rtc.subsec = 0;
+                true
             }
-            let subsec = u32::from_le_bytes(rtc_block[10..14].try_into().unwrap());
-            rtc.subsec = subsec % CYCLES_PER_SECOND;
+            _ => false,
         }
     }
 
@@ -591,8 +633,12 @@ enum RamTarget {
 /// 8 Mbit and contains a Nintendo logo in the header position of each 256 KiB
 /// "game slot". Two or more logos (one is just the boot header) mean
 /// multicart wiring.
-fn detect_mbc1_multicart(rom: &[u8]) -> bool {
-    if rom.len() != 0x100000 {
+///
+/// `orig_len` is the dump size *before* power-of-two padding: a
+/// non-power-of-two dump between 512 KiB and 1 MiB pads to 1 MiB but is not
+/// 8 Mbit, so it must not become multicart-eligible.
+fn detect_mbc1_multicart(rom: &[u8], orig_len: usize) -> bool {
+    if orig_len != 0x100000 {
         return false;
     }
     let logos = rom
@@ -605,9 +651,6 @@ fn detect_mbc1_multicart(rom: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// One T-cycle short of nothing: RTC second period in T-cycles.
-    const SECOND: u32 = 4_194_304;
 
     /// Build a ROM image: `banks` 16 KiB banks where the first two bytes of
     /// each bank hold the bank index (little endian), plus the header fields
@@ -750,12 +793,31 @@ mod tests {
     }
 
     #[test]
-    fn load_save_data_wrong_size_ignored() {
+    fn load_save_data_too_short_rejected() {
         let mut c = cart(0x09, 2, 2);
         c.write_ram(0xA000, 0x42);
-        c.load_save_data(&[0x99; 16]);
+        assert!(!c.load_save_data(&[0x99; 16]));
         assert_eq!(c.read_ram(0xA000), 0x42);
-        c.load_save_data(&[0x99; 0x2000]);
+        assert!(c.load_save_data(&[0x99; 0x2000]));
+        assert_eq!(c.read_ram(0xA000), 0x99);
+    }
+
+    #[test]
+    fn load_save_data_without_battery_rejected() {
+        let mut c = cart(0x08, 2, 2); // ROM+RAM, no battery
+        assert!(!c.load_save_data(&[0x99; 0x2000]));
+        c.write_ram(0xA000, 0x42);
+        assert_eq!(c.read_ram(0xA000), 0x42);
+    }
+
+    #[test]
+    fn load_save_data_oversized_loads_ram_prefix() {
+        // Foreign .sav files may carry trailers we don't understand; the
+        // compatible RAM prefix must still be imported.
+        let mut c = cart(0x09, 2, 2);
+        let mut data = vec![0x99; 0x2000];
+        data.extend_from_slice(&[0xAB; 7]);
+        assert!(c.load_save_data(&data));
         assert_eq!(c.read_ram(0xA000), 0x99);
     }
 
@@ -938,6 +1000,18 @@ mod tests {
     #[test]
     fn mbc1_multicart_needs_at_least_two_logos() {
         let mut c = Cartridge::from_bytes(multicart_rom(&[0])).unwrap();
+        c.write_rom(0x2000, 0x10);
+        assert_eq!(bank_at(&c, 0x4000), 16); // normal MBC1 wiring
+    }
+
+    #[test]
+    fn mbc1_multicart_requires_unpadded_1mib_dump() {
+        // mooneye-gb's heuristic keys on the *dump* being exactly 8 Mbit. A
+        // 768 KiB dump pads to 1 MiB internally but must stay normal MBC1
+        // even with multiple logos present.
+        let mut rom = multicart_rom(&[0, 1, 2]);
+        rom.truncate(0xC0000);
+        let mut c = Cartridge::from_bytes(rom).unwrap();
         c.write_rom(0x2000, 0x10);
         assert_eq!(bank_at(&c, 0x4000), 16); // normal MBC1 wiring
     }
@@ -1144,8 +1218,8 @@ mod tests {
         rtc_latch(&mut c);
         assert_eq!(rtc_read_latched(&mut c, 0x08), 10);
         // Latched value is stable while the live clock ticks.
-        c.tick_rtc(SECOND);
-        c.tick_rtc(SECOND);
+        c.tick_rtc(CYCLES_PER_SECOND);
+        c.tick_rtc(CYCLES_PER_SECOND);
         assert_eq!(rtc_read_latched(&mut c, 0x08), 10);
         rtc_latch(&mut c);
         assert_eq!(rtc_read_latched(&mut c, 0x08), 12);
@@ -1159,7 +1233,7 @@ mod tests {
         rtc_write(&mut c, 0x0A, 23);
         rtc_write(&mut c, 0x0B, 0xFF);
         rtc_write(&mut c, 0x0C, 0x01); // day = 511
-        c.tick_rtc(SECOND);
+        c.tick_rtc(CYCLES_PER_SECOND);
         rtc_latch(&mut c);
         assert_eq!(rtc_read_latched(&mut c, 0x08), 0);
         assert_eq!(rtc_read_latched(&mut c, 0x09), 0);
@@ -1168,7 +1242,7 @@ mod tests {
         // Day wrapped 511 -> 0: bit 0 clear, carry (bit 7) set.
         assert_eq!(rtc_read_latched(&mut c, 0x0C), 0x80);
         // Carry is sticky until written.
-        c.tick_rtc(SECOND);
+        c.tick_rtc(CYCLES_PER_SECOND);
         rtc_latch(&mut c);
         assert_eq!(rtc_read_latched(&mut c, 0x0C), 0x80);
     }
@@ -1177,11 +1251,11 @@ mod tests {
     fn mbc3_rtc_halt_stops_clock() {
         let mut c = rtc_cart();
         rtc_write(&mut c, 0x0C, 0x40); // halt
-        c.tick_rtc(SECOND);
+        c.tick_rtc(CYCLES_PER_SECOND);
         rtc_latch(&mut c);
         assert_eq!(rtc_read_latched(&mut c, 0x08), 0);
         rtc_write(&mut c, 0x0C, 0x00); // resume
-        c.tick_rtc(SECOND);
+        c.tick_rtc(CYCLES_PER_SECOND);
         rtc_latch(&mut c);
         assert_eq!(rtc_read_latched(&mut c, 0x08), 1);
     }
@@ -1189,12 +1263,12 @@ mod tests {
     #[test]
     fn mbc3_rtc_seconds_write_resets_subsecond_counter() {
         let mut c = rtc_cart();
-        c.tick_rtc(SECOND / 2);
+        c.tick_rtc(CYCLES_PER_SECOND / 2);
         rtc_write(&mut c, 0x08, 0); // resets the sub-second divider
-        c.tick_rtc(SECOND * 3 / 4);
+        c.tick_rtc(CYCLES_PER_SECOND * 3 / 4);
         rtc_latch(&mut c);
         assert_eq!(rtc_read_latched(&mut c, 0x08), 0);
-        c.tick_rtc(SECOND / 4);
+        c.tick_rtc(CYCLES_PER_SECOND / 4);
         rtc_latch(&mut c);
         assert_eq!(rtc_read_latched(&mut c, 0x08), 1);
     }
@@ -1205,7 +1279,7 @@ mod tests {
         // a minute carry (verified by rtc3test on hardware).
         let mut c = rtc_cart();
         rtc_write(&mut c, 0x08, 63);
-        c.tick_rtc(SECOND);
+        c.tick_rtc(CYCLES_PER_SECOND);
         rtc_latch(&mut c);
         assert_eq!(rtc_read_latched(&mut c, 0x08), 0);
         assert_eq!(rtc_read_latched(&mut c, 0x09), 0); // no minute carry
@@ -1241,7 +1315,7 @@ mod tests {
         assert_eq!(c2.read_ram(0xA000), 0x42);
         // Both live and latched RTC state restored.
         assert_eq!(rtc_read_latched(&mut c2, 0x08), 7);
-        c2.tick_rtc(SECOND);
+        c2.tick_rtc(CYCLES_PER_SECOND);
         rtc_latch(&mut c2);
         assert_eq!(rtc_read_latched(&mut c2, 0x08), 8);
     }
@@ -1263,6 +1337,91 @@ mod tests {
         let c = cart(0x0F, 4, 0);
         let save = c.save_data().unwrap();
         assert_eq!(save.len(), 16);
+    }
+
+    #[test]
+    fn mbc3_rtc_armed_latch_survives_save_roundtrip() {
+        // A save taken between the 0x00 and 0x01 latch writes must keep the
+        // latch armed: latch_prev travels in save byte ram_len + 14.
+        let mut c = rtc_cart();
+        rtc_write(&mut c, 0x08, 5);
+        c.write_rom(0x6000, 0x00); // arm the latch
+        let save = c.save_data().unwrap();
+        let mut c2 = rtc_cart();
+        assert!(c2.load_save_data(&save));
+        c2.write_rom(0x6000, 0x01); // completes the armed sequence
+        assert_eq!(rtc_read_latched(&mut c2, 0x08), 5);
+
+        // Conversely, an un-armed save must not let a lone 0x01 latch.
+        let mut c3 = rtc_cart();
+        rtc_write(&mut c3, 0x08, 5);
+        let save = c3.save_data().unwrap();
+        let mut c4 = rtc_cart();
+        assert!(c4.load_save_data(&save));
+        c4.write_rom(0x6000, 0x01);
+        assert_eq!(rtc_read_latched(&mut c4, 0x08), 0);
+    }
+
+    /// Build a VBA/mGBA/BGB-style RTC footer: five live + five latched
+    /// registers, each as a 4-byte little-endian word, then a timestamp of
+    /// `ts_len` (4 or 8) bytes.
+    fn vba_footer(live: [u8; 5], latched: [u8; 5], ts_len: usize) -> Vec<u8> {
+        let mut f = Vec::new();
+        for reg in live.into_iter().chain(latched) {
+            f.extend_from_slice(&u32::from(reg).to_le_bytes());
+        }
+        f.resize(f.len() + ts_len, 0xEE);
+        f
+    }
+
+    #[test]
+    fn mbc3_rtc_accepts_vba_style_footer() {
+        for ts_len in [4usize, 8] {
+            let mut data = vec![0x42; 0x8000];
+            data.extend_from_slice(&vba_footer(
+                [7, 8, 9, 10, 1],
+                [11, 12, 13, 14, 0xFF],
+                ts_len,
+            ));
+            let mut c = rtc_cart();
+            assert!(c.load_save_data(&data));
+            c.write_rom(0x4000, 0x00);
+            assert_eq!(c.read_ram(0xA000), 0x42);
+            // Latched registers restored (DH masked to its 0xC1 wired bits).
+            assert_eq!(rtc_read_latched(&mut c, 0x08), 11);
+            assert_eq!(rtc_read_latched(&mut c, 0x0C), 0xC1);
+            // Live registers restored: latch and observe them.
+            rtc_latch(&mut c);
+            assert_eq!(rtc_read_latched(&mut c, 0x08), 7);
+            assert_eq!(rtc_read_latched(&mut c, 0x09), 8);
+            assert_eq!(rtc_read_latched(&mut c, 0x0A), 9);
+            assert_eq!(rtc_read_latched(&mut c, 0x0B), 10);
+            assert_eq!(rtc_read_latched(&mut c, 0x0C), 1);
+        }
+    }
+
+    #[test]
+    fn mbc3_rtc_unknown_footer_still_loads_ram() {
+        // e.g. importing a Pokemon G/S/C save with a footer size we don't
+        // recognize: the RAM portion is compatible and must be applied; only
+        // the RTC restore is skipped.
+        let mut data = vec![0x42; 0x8000];
+        data.extend_from_slice(&[0xEE; 20]);
+        let mut c = rtc_cart();
+        assert!(c.load_save_data(&data));
+        c.write_rom(0x4000, 0x00);
+        assert_eq!(c.read_ram(0xA000), 0x42);
+        rtc_latch(&mut c);
+        assert_eq!(rtc_read_latched(&mut c, 0x08), 0); // RTC untouched
+    }
+
+    #[test]
+    fn mbc3_rtc_only_cart_rejects_unknown_image() {
+        // No RAM and an unparseable trailer: nothing was applied.
+        let mut c = cart(0x0F, 4, 0);
+        assert!(!c.load_save_data(&[0xEE; 20]));
+        let save = c.save_data().unwrap();
+        assert!(c.load_save_data(&save));
     }
 
     // --- MBC5 ---

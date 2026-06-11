@@ -19,6 +19,11 @@ use noise::Noise;
 use pulse::Pulse;
 use wave::Wave;
 
+/// Default output sample rate in Hz for [`Apu::drain_samples`], in effect
+/// until a frontend overrides it via [`Apu::set_sample_rate`]. Exported so
+/// frontends can size resamplers against it instead of copying the literal.
+pub const DEFAULT_SAMPLE_RATE: u32 = 48_000;
+
 pub struct Apu {
     cgb: bool,
     /// NR52 bit 7.
@@ -43,6 +48,9 @@ pub struct Apu {
     hp_cap_l: f32,
     hp_cap_r: f32,
     samples: Vec<(f32, f32)>,
+    /// Cap on `samples` (one second of audio) so headless runs that never
+    /// call [`Self::drain_samples`] stay flat in memory.
+    max_samples: usize,
 }
 
 /// Blargg-style single-pole high-pass ("the output capacitor").
@@ -76,8 +84,9 @@ impl Apu {
             hp_cap_l: 0.0,
             hp_cap_r: 0.0,
             samples: Vec::new(),
+            max_samples: 0,
         };
-        apu.set_sample_rate(48000);
+        apu.set_sample_rate(DEFAULT_SAMPLE_RATE);
         apu
     }
 
@@ -350,10 +359,12 @@ impl Apu {
         self.ch3.sample_byte = 0;
     }
 
-    /// Output sample rate for [`Self::drain_samples`]. Default 48000.
+    /// Output sample rate for [`Self::drain_samples`]. Default
+    /// [`DEFAULT_SAMPLE_RATE`].
     pub fn set_sample_rate(&mut self, hz: u32) {
         let hz = hz.max(1);
         self.cycles_per_sample = f64::from(crate::CLOCK_HZ) / f64::from(hz);
+        self.max_samples = hz as usize;
         // Blargg measured the DMG output capacitor as a charge factor of
         // ~0.999958 per T-cycle; scale it to one factor per output sample.
         self.hp_charge = 0.999_958_f64.powf(self.cycles_per_sample) as f32;
@@ -386,7 +397,12 @@ impl Apu {
             self.sum_count = 0;
             let l = high_pass(&mut self.hp_cap_l, l, self.hp_charge);
             let r = high_pass(&mut self.hp_cap_r, r, self.hp_charge);
-            self.samples.push((l, r));
+            // Drop new samples once one second of audio has piled up: a
+            // consumer that far behind has lost real-time anyway, and
+            // headless runs (e.g. the mooneye harness) never drain at all.
+            if self.samples.len() < self.max_samples {
+                self.samples.push((l, r));
+            }
         }
     }
 
@@ -406,9 +422,11 @@ impl Apu {
                 // DAC off: the channel contributes nothing at all.
                 continue;
             }
-            // DAC: digital 0-15 to analog. (A disabled channel with a live
-            // DAC outputs digital 0, i.e. a DC offset — that is hardware.)
-            let analog = f32::from(d) / 7.5 - 1.0;
+            // DAC: digital 0-15 to analog with a *negative* slope — Pan
+            // Docs "Audio Details" (DACs): digital 0 maps to analog +1,
+            // digital 15 to analog -1. (A disabled channel with a live DAC
+            // outputs digital 0, i.e. a DC offset — that is hardware.)
+            let analog = 1.0 - f32::from(d) / 7.5;
             if self.nr51 & (0x10 << i) != 0 {
                 left += analog;
             }
@@ -633,6 +651,15 @@ mod tests {
             h.fs_edge();
         }
         assert_eq!(h.apu.ch1.length.counter, 3, "frozen while disabled");
+        assert!(h.ch_on(1));
+        // Re-enable in a phase where the next FS step clocks length so the
+        // NRx4 write itself causes no extra clock, then resume counting.
+        h.fs_edge(); // step 1 ran: fs_step is now 2 (next step clocks length)
+        assert_eq!(h.apu.fs_step, 2);
+        h.w(0xFF14, 0x40); // re-enable length, no trigger
+        assert_eq!(h.apu.ch1.length.counter, 3, "no extra clock on re-enable");
+        h.fs_edge(); // step 2 clocks length
+        assert_eq!(h.apu.ch1.length.counter, 2, "resumes once re-enabled");
         assert!(h.ch_on(1));
     }
 
@@ -1015,6 +1042,38 @@ mod tests {
         h.apu.drain_samples(&mut out);
         let energy: f32 = out.iter().map(|&(l, _)| l * l).sum();
         assert!(energy > 0.01, "NR50 never mutes, got {energy}");
+    }
+
+    #[test]
+    fn sample_buffer_is_capped_without_a_consumer() {
+        // Headless runs (the mooneye harness never drains audio) must not
+        // grow the buffer without bound: capped at one second of audio.
+        let mut h = H::dmg();
+        h.apu.set_sample_rate(1000);
+        h.ticks(2 * 1_048_576); // two emulated seconds, never drained
+        assert_eq!(h.apu.samples.len(), 1000);
+        // Draining frees the cap and output resumes.
+        let mut out = Vec::new();
+        h.apu.drain_samples(&mut out);
+        assert_eq!(out.len(), 1000);
+        h.ticks(10_000);
+        assert!(!h.apu.samples.is_empty());
+    }
+
+    #[test]
+    fn dac_maps_digital_zero_to_positive_analog() {
+        // Pan Docs "Audio Details" (DACs): the DAC slope is negative —
+        // digital 0 is analog +1, digital 15 is analog -1. A live DAC on a
+        // silent channel is therefore a *positive* DC offset.
+        let mut h = H::dmg();
+        h.w(0xFF24, 0x77);
+        h.w(0xFF25, 0xFF);
+        h.w(0xFF12, 0xF0); // ch1 DAC on, channel not triggered: digital 0
+        h.ticks(100);
+        let mut out = Vec::new();
+        h.apu.drain_samples(&mut out);
+        let first = out[0].0;
+        assert!(first > 0.05, "digital 0 must map to analog +1, got {first}");
     }
 
     #[test]

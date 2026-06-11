@@ -41,7 +41,6 @@ impl Video {
         };
         self.surface.resize(w, h)?;
         let mut buffer = self.surface.buffer_mut()?;
-        buffer.fill(0); // letterbox bars
         blit(&mut buffer, size.width, size.height, frame, &mut self.row);
         window.pre_present_notify();
         buffer.present()
@@ -49,7 +48,10 @@ impl Video {
 }
 
 /// Nearest-neighbor integer upscale of `frame` into the center of `dst`
-/// (`dst_w` x `dst_h`). If the window is smaller than 160x144 the image is
+/// (`dst_w` x `dst_h`), painting the letterbox margins black. Every pixel of
+/// `dst` is written, but only the margins are cleared — the image region is
+/// overwritten directly, so a large window doesn't pay for a full clear plus
+/// a full blit each frame. If the window is smaller than 160x144 the image is
 /// drawn at 1x and clipped.
 fn blit(dst: &mut [u32], dst_w: u32, dst_h: u32, frame: &[u32; SCREEN_PIXELS], row: &mut Vec<u32>) {
     let screen_w = SCREEN_W as u32;
@@ -59,6 +61,10 @@ fn blit(dst: &mut [u32], dst_w: u32, dst_h: u32, frame: &[u32; SCREEN_PIXELS], r
     let img_h = (screen_h * scale).min(dst_h);
     let x0 = (dst_w - img_w) / 2;
     let y0 = (dst_h - img_h) / 2;
+
+    // Letterbox bars above and below the image.
+    dst[..(y0 * dst_w) as usize].fill(0);
+    dst[((y0 + img_h) * dst_w) as usize..].fill(0);
 
     row.clear();
     row.resize(img_w as usize, 0);
@@ -72,8 +78,12 @@ fn blit(dst: &mut [u32], dst_w: u32, dst_h: u32, frame: &[u32; SCREEN_PIXELS], r
                 *px = src[dx / scale as usize];
             }
         }
-        let off = ((y0 + dy) * dst_w + x0) as usize;
+        // Left bar, image row, right bar.
+        let line = ((y0 + dy) * dst_w) as usize;
+        let off = line + x0 as usize;
+        dst[line..off].fill(0);
         dst[off..off + img_w as usize].copy_from_slice(row);
+        dst[off + img_w as usize..line + dst_w as usize].fill(0);
     }
 }
 
@@ -107,16 +117,29 @@ mod tests {
         let mut dst = vec![u32::MAX; (w * h) as usize];
         let mut row = Vec::new();
         blit(&mut dst, w, h, &frame, &mut row);
-        // Letterbox bars are untouched by the blit (`Video::draw` clears the
-        // whole buffer to black first).
-        assert_eq!(dst[0], u32::MAX);
-        assert_eq!(dst[(w * h - 1) as usize], u32::MAX);
-        // Top-left image pixel is frame[0], replicated 2x2 at offset (2, 1).
         let at = |x: u32, y: u32| dst[(y * w + x) as usize];
+        // Letterbox bars are cleared to black by the blit itself.
+        assert_eq!(dst[0], 0); // top bar
+        assert_eq!(dst[(w * h - 1) as usize], 0); // bottom bar
+        assert_eq!(at(1, 5), 0); // left bar
+        assert_eq!(at(w - 1, 5), 0); // right bar
+                                     // Top-left image pixel is frame[0], replicated 2x2 at offset (2, 1).
         assert_eq!(at(2, 1), frame[0]);
         assert_eq!(at(3, 1), frame[0]);
         assert_eq!(at(2, 2), frame[0]);
         assert_eq!(at(4, 1), frame[1]);
+    }
+
+    #[test]
+    fn blit_writes_every_destination_pixel() {
+        // The blit owns the whole buffer now (no full clear beforehand), so
+        // no pixel may survive from the previous frame.
+        let frame = test_frame(); // values 0..SCREEN_PIXELS, never u32::MAX
+        let (w, h) = (324u32, 290u32);
+        let mut dst = vec![u32::MAX; (w * h) as usize];
+        let mut row = Vec::new();
+        blit(&mut dst, w, h, &frame, &mut row);
+        assert!(dst.iter().all(|&px| px != u32::MAX));
     }
 
     #[test]

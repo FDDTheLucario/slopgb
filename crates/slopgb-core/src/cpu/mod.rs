@@ -32,8 +32,9 @@ pub trait Bus {
     /// Clear bit `bit` (0..=4) of IF. Takes no time.
     fn ack(&mut self, bit: u8);
     /// CPU executed STOP: if a speed switch is armed (CGB KEY1.0), perform
-    /// it and return true; otherwise enter stop mode semantics as the bus
-    /// sees fit. Takes no time.
+    /// it and return true; otherwise return false and the CPU enters stop
+    /// mode, sleeping until [`pending`](Bus::pending) becomes non-zero
+    /// (joypad wake). Takes no time.
     fn stop(&mut self) -> bool;
 }
 
@@ -45,6 +46,10 @@ pub struct Cpu {
     /// EI executed, IME turns on after the *next* instruction.
     ime_pending: bool,
     halted: bool,
+    /// STOP executed without an armed speed switch: the CPU sleeps,
+    /// consuming tick cycles until the joypad wakes it (modelled as a
+    /// pending interrupt; see `execute::step`).
+    stopped: bool,
     /// Halt bug armed: next opcode fetch does not increment PC.
     halt_bug: bool,
     /// Set once `LD B,B` (0x40) executes — mooneye "test done" breakpoint.
@@ -62,6 +67,7 @@ impl Cpu {
             ime: false,
             ime_pending: false,
             halted: false,
+            stopped: false,
             halt_bug: false,
             debug_breakpoint: false,
             locked: false,
@@ -69,7 +75,7 @@ impl Cpu {
     }
 
     /// Run one instruction (including any interrupt dispatch that precedes
-    /// it), or one M-cycle of halt.
+    /// it), or one M-cycle of halt or stop mode.
     pub fn step(&mut self, bus: &mut impl Bus) {
         execute::step(self, bus);
     }
