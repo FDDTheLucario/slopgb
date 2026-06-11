@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 // once `GameBoy` exposes `set_sample_rate`, set it to the device rate and the
 // resampler becomes a pass-through.
 use slopgb_core::apu::DEFAULT_SAMPLE_RATE as CORE_SAMPLE_RATE;
-use slopgb_core::{Button, GameBoy, Model, CLOCK_HZ, CYCLES_PER_FRAME, SCREEN_H, SCREEN_W};
+use slopgb_core::{Button, CLOCK_HZ, CYCLES_PER_FRAME, GameBoy, Model, SCREEN_H, SCREEN_W};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{KeyEvent, WindowEvent};

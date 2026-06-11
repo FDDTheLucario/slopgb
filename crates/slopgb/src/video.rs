@@ -123,7 +123,7 @@ mod tests {
         assert_eq!(dst[(w * h - 1) as usize], 0); // bottom bar
         assert_eq!(at(1, 5), 0); // left bar
         assert_eq!(at(w - 1, 5), 0); // right bar
-                                     // Top-left image pixel is frame[0], replicated 2x2 at offset (2, 1).
+        // Top-left image pixel is frame[0], replicated 2x2 at offset (2, 1).
         assert_eq!(at(2, 1), frame[0]);
         assert_eq!(at(3, 1), frame[0]);
         assert_eq!(at(2, 2), frame[0]);

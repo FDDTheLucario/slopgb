@@ -76,6 +76,9 @@ pub struct Interconnect {
     dma_reg: u8,
     dma_run: Option<OamDmaRun>,
     dma_start: Option<OamDmaStart>,
+    /// CPU core clock gated off by HALT/STOP (see [`Self::set_cpu_halted`]).
+    /// The OAM DMA controller shares that clock and freezes with it.
+    cpu_halted: bool,
     /// Bus occupied + byte transferred during the current M-cycle, if a DMA
     /// byte was copied this cycle.
     dma_conflict: Option<(DmaBus, u8)>,
@@ -144,6 +147,7 @@ impl Interconnect {
             dma_reg: 0,
             dma_run: None,
             dma_start: None,
+            cpu_halted: false,
             dma_conflict: None,
             hdma_src: 0,
             hdma_dst: 0,
@@ -297,8 +301,33 @@ impl Interconnect {
 
     // ---- OAM DMA engine ------------------------------------------------
 
+    /// Gate (true) or ungate (false) the OAM DMA controller's clock.
+    ///
+    /// The OAM DMA controller is clocked by the CPU core clock, which HALT
+    /// (and STOP) switches off while the PPU keeps running on its own clock.
+    /// A transfer in progress therefore does not proceed while the CPU is
+    /// halted: bytes already copied stay, the byte in flight never commits,
+    /// and the rest of OAM keeps its old contents — the PPU renders from
+    /// that mixture for as long as the CPU sleeps. Hardware-verified by
+    /// mooneye madness/mgb_oam_dma_halt_sprites.s ("OAM DMA is in the middle
+    /// of OAM access (but not proceeding with it!)"); its observed sprite
+    /// data pins the freeze mid-byte, with the overwritten OAM byte intact.
+    ///
+    /// Called by the CPU wiring on halt/stop entry and exit; the halted CPU
+    /// performs no bus accesses on hardware, so the CPU-visible bus state
+    /// during the freeze is unobservable and no bus conflict is modelled.
+    pub fn set_cpu_halted(&mut self, halted: bool) {
+        self.cpu_halted = halted;
+    }
+
     fn oam_dma_tick(&mut self) {
         self.dma_conflict = None;
+        // HALT/STOP gate the CPU core clock that drives this controller:
+        // neither the setup delay nor the transfer advances while the CPU
+        // is halted (see set_cpu_halted; madness/mgb_oam_dma_halt_sprites).
+        if self.cpu_halted {
+            return;
+        }
         // Promote a pending start whose setup delay has elapsed. The old
         // transfer (if any) keeps copying during the delay cycle
         // (acceptance/oam_dma_restart) and is replaced exactly when the new
@@ -846,8 +875,8 @@ mod tests {
         let mut b = ic(Model::Dmg);
         fill_wram(&mut b, 0xC000, 0x80, 160);
         b.write(0xFF46, 0xC0); // cycle W
-                               // Cycle W+1: setup delay, OAM still reads its old content
-                               // (oam_dma_start executes an opcode from OAM here).
+        // Cycle W+1: setup delay, OAM still reads its old content
+        // (oam_dma_start executes an opcode from OAM here).
         assert_eq!(b.read(0xFE00), 0x00);
         // Cycle W+2: byte 0 is in flight, OAM reads $FF.
         assert_eq!(b.read(0xFE00), 0xFF);
@@ -896,8 +925,8 @@ mod tests {
         b.tick(); // W+1 setup
         b.tick(); // W+2 old byte 0
         b.write(0xFF46, 0xD0); // cycle W+3: old byte 1 copied, then write
-                               // Cycle W+4 (new setup): the old transfer copies byte 2. Observe it
-                               // through the external-bus conflict (WRAM shares the bus on DMG).
+        // Cycle W+4 (new setup): the old transfer copies byte 2. Observe it
+        // through the external-bus conflict (WRAM shares the bus on DMG).
         assert_eq!(b.read(0x0000), 0x82);
         // Cycle W+5: new transfer byte 0.
         assert_eq!(b.read(0x0000), 0x10);
@@ -972,6 +1001,61 @@ mod tests {
         b.tick();
         assert_eq!(b.read(0x9999), 0x45, "VRAM read sees DMA byte 1");
         assert_eq!(b.read(0x1000), 0x5A, "external bus unaffected");
+    }
+
+    /// The OAM DMA controller runs on the CPU core clock, which HALT gates
+    /// off (the PPU keeps its own clock): a transfer in progress does not
+    /// proceed while the CPU is halted. Bytes already copied stay, the byte
+    /// in flight never commits, the rest of OAM keeps its old contents, and
+    /// the transfer resumes exactly where it stopped when the CPU wakes.
+    /// Hardware-verified by madness/mgb_oam_dma_halt_sprites.s: halting
+    /// after the third byte's read leaves that OAM byte un-replaced, and the
+    /// PPU renders from the old/new mixture indefinitely.
+    #[test]
+    fn oam_dma_freezes_while_cpu_halted() {
+        let mut b = ic(Model::Mgb);
+        fill_wram(&mut b, 0xC000, 0x80, 160);
+        b.write_no_tick(0xFE02, 0x30); // old OAM byte the freeze must keep
+        b.write(0xFF46, 0xC0); // cycle W
+        b.tick(); // W+1: setup delay
+        b.tick(); // W+2: byte 0 in flight
+        b.tick(); // W+3: byte 1 in flight
+        b.set_cpu_halted(true);
+        // Frozen for hundreds of M-cycles: no progress. (On hardware the
+        // halted CPU performs no bus accesses, so these reads observe
+        // unobservable state: raw OAM, no bus conflict — LCD is off here.)
+        for _ in 0..200 {
+            assert_eq!(b.read(0xFE00), 0x80, "copied byte 0 stays");
+        }
+        assert_eq!(b.read(0xFE01), 0x81, "copied byte 1 stays");
+        assert_eq!(b.read(0xFE02), 0x30, "frozen: old OAM byte persists");
+        assert_eq!(b.read(0xC000), 0x80, "no DMA traffic on the external bus");
+        // Waking resumes from byte 2: 158 transfer cycles remain.
+        b.set_cpu_halted(false);
+        ticks(&mut b, 157);
+        assert_eq!(b.read(0xFE00), 0xFF, "byte 159 in flight: OAM blocked");
+        assert_eq!(b.read(0xFE00), 0x80, "transfer complete");
+        assert_eq!(b.read(0xFE02), 0x82, "resumed transfer replaced the byte");
+        assert_eq!(b.read(0xFE9F), 0x80u8.wrapping_add(159));
+    }
+
+    /// The FF46 1 M-cycle setup delay counts on the same gated clock, so a
+    /// CPU halting right after the FF46 write freezes the transfer before
+    /// its first byte (companion to `oam_dma_freezes_while_cpu_halted`).
+    #[test]
+    fn oam_dma_setup_delay_freezes_while_cpu_halted() {
+        let mut b = ic(Model::Mgb);
+        fill_wram(&mut b, 0xC000, 0x80, 160);
+        b.write(0xFF46, 0xC0);
+        b.set_cpu_halted(true);
+        for _ in 0..10 {
+            assert_eq!(b.read(0xFE00), 0x00, "setup delay frozen: no transfer");
+        }
+        b.set_cpu_halted(false);
+        assert_eq!(b.read(0xFE00), 0x00, "setup delay elapses this cycle");
+        assert_eq!(b.read(0xFE00), 0xFF, "byte 0 in flight");
+        ticks(&mut b, 159);
+        assert_eq!(b.read(0xFE00), 0x80, "transfer complete");
     }
 
     #[test]
@@ -1139,7 +1223,7 @@ mod tests {
         setup_gdma_regs(&mut b, 0xC000, 0x0000);
         let before = b.cycles();
         b.write(0xFF55, 0x03); // 4 blocks = 64 bytes
-                               // Write cycle (4 dots) + 4 blocks x 8 M-cycles (32 dots each... 8*4).
+        // Write cycle (4 dots) + 4 blocks x 8 M-cycles (32 dots each... 8*4).
         assert_eq!(b.cycles() - before, 4 + 4 * 8 * 4);
         assert_eq!(b.read(0xFF55), 0xFF, "completed");
         assert_eq!(b.read(0x8000), 0x00);
