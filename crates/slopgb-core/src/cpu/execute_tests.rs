@@ -1725,6 +1725,18 @@ fn all_illegal_opcodes_lock() {
     }
 }
 
+/// The lock state is exposed to harnesses (wilbertpol's mooneye fork ends
+/// its tests with 0xED) and is distinct from the LD B,B breakpoint.
+#[test]
+fn illegal_opcode_reports_debug_undefined_hit() {
+    let mut c = cpu();
+    let mut b = bus(&[0xED]);
+    assert!(!c.debug_undefined_hit());
+    step(&mut c, &mut b);
+    assert!(c.debug_undefined_hit());
+    assert!(!c.debug_breakpoint_hit());
+}
+
 // ----- whole-opcode-space cycle count sweeps -----
 
 /// Expected M-cycles per base opcode, given the branch outcome of each
