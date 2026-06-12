@@ -143,6 +143,9 @@ impl Interconnect {
         // header byte 0x143 bit 7 (same predicate `GameBoy::auto_model`
         // uses: `cartridge::cgb_flag`).
         let cgb_mode = model.is_cgb() && cart.supports_cgb();
+        // SGB packet/multiplayer port: SGB-family hardware with a cart
+        // whose header unlocks SGB functions (Pan Docs "SGB flag").
+        let sgb_joypad = matches!(model, Model::Sgb | Model::Sgb2) && cart.supports_sgb();
         let mut ppu = Ppu::new(model);
         ppu.set_dmg_compat(model.is_cgb() && !cgb_mode);
         Self {
@@ -154,7 +157,7 @@ impl Interconnect {
             // The serial fast-clock bit (SC bit 1) exists in CGB mode only;
             // in DMG compatibility mode SC reads $7E (misc/boot_hwio-C).
             serial: Serial::new(cgb_mode),
-            joypad: Joypad::new(),
+            joypad: Joypad::new(sgb_joypad),
             cycles: 0,
             cgb_mode,
             double_speed: false,
@@ -735,7 +738,19 @@ impl Interconnect {
             0xFF01 | 0xFF02 => self.serial.write(addr, value),
             // A timer write never requests IF directly: a write-induced TIMA
             // overflow raises it only at the reload, from `Timer::tick`.
-            0xFF04..=0xFF07 => self.timer.write(addr, value),
+            0xFF04..=0xFF07 => {
+                if addr == 0xFF04 {
+                    // The DIV-reset falling edge must reach the serial
+                    // clock within this cycle: the once-per-M-cycle
+                    // sampled tick would miss it for the CGB fast clock,
+                    // whose DIV bit is high again by the next sample
+                    // (`Serial::div_write`; gambatte serial/
+                    // start83_late_div_write_*).
+                    let iff = self.serial.div_write(self.timer.div_counter());
+                    self.intf |= iff & IF_MASK;
+                }
+                self.timer.write(addr, value)
+            }
             0xFF0F => self.intf = value & IF_MASK,
             0xFF10..=0xFF3F => self.apu.write(addr, value),
             0xFF46 => {

@@ -178,9 +178,24 @@ fn frame_case(
 
 // ---------------------------------------------------------------- bully --
 
-// Both legs show scattered fail markers in the ROM's test grid (~420/290
-// pixels off). The DMG leg may be the howto's documented real-hardware
-// behavior (DMG-C fails "Bad Echo RAM Reads"); triage in a later phase.
+// Triaged (the screen's only diff vs the all-pass reference is the failure
+// message text; decoded from the ROM's ASCII-indexed tilemap):
+//
+// * [Dmg]: `initram.asm` "Uninitialized RAM not randomized" — the test
+//   fails iff every WRAM byte is $00/$FF at power-on, and our WRAM is
+//   deterministically zeroed (core design: deterministic, no host
+//   entropy). Note the all-pass reference is unreachable for a faithful
+//   DMG anyway: the howto documents a *real* DMG-C failing this ROM with
+//   "Bad Echo RAM Reads" (bully/game-boy-test-roms-howto.md), a check we
+//   pass — so this leg stays a documented divergence whichever way WRAM
+//   init goes.
+// * [Cgb]: `divtest.asm` "Invalid initial DIV" — the ROM's very first
+//   test compares the first DIV read against $1F, a value its own source
+//   marks "(TODO: Confirm)". Our hand-off DIV counter is pinned by the
+//   hardware-verified mooneye boot_div-cgbABCDE (green); the bully read
+//   happens after framework init whose duration couples to LCD phase, so
+//   this is a downstream-timing divergence, not a hand-off-state bug.
+//   The [Dmg] leg passes the same test ($AD expected).
 const BULLY_BASELINE: &[&str] = &["bully/bully.gb [Dmg]", "bully/bully.gb [Cgb]"];
 
 /// BullyGB (`bully/game-boy-test-roms-howto.md`): run 0.5 emulated seconds,
@@ -427,15 +442,16 @@ fn smallsuites_little_things_gb() {
 
 // ---------------------------------------------------------- mbc3-tester --
 
-// DMG leg: ~1280 pixels of genuine results-area diff; the CGB leg shares
-// it and its reference is additionally an off-convention asset — its green
-// is #7BFF4A where the collection's `(c << 3) | (c >> 2)` expansion of the
-// default compat palette gives #7BFF31 (the ROM is not Nintendo-licensed,
-// so no per-game boot palette exists either). Not fixable by palette work.
-const MBC3_TESTER_BASELINE: &[&str] = &[
-    "mbc3-tester/mbc3-tester.gb [Dmg]",
-    "mbc3-tester/mbc3-tester.gb [Cgb]",
-];
+// DMG leg passes via the MBC30 8-bit ROM-bank register (the ROM is a 4 MiB
+// MBC3-type cart, src/cartridge.rs). After that fix the CGB leg's only
+// remaining diff is a defective reference asset: every mismatching pixel
+// (3825) is `got #7BFF31 want #7BFF4A`, i.e. the PNG's compat-mode green
+// contradicts the suite's own howto, which specifies the background shades
+// as "#000000, #0063C6, #7BFF31 and #FFFFFF"
+// (mbc3-tester/game-boy-test-roms-howto.md). #7BFF31 is exactly the
+// `(c << 3) | (c >> 2)` expansion of the CGB boot ROM's default compat BG
+// palette entry $1BEF; do not "fix" this with palette work.
+const MBC3_TESTER_BASELINE: &[&str] = &["mbc3-tester/mbc3-tester.gb [Cgb]"];
 
 /// MBC3 Bank Tester (`mbc3-tester/game-boy-test-roms-howto.md`): the ROM
 /// loops indefinitely, the result is valid after the first 40 frames (run

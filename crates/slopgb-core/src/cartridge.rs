@@ -179,11 +179,16 @@ enum Mapper {
     /// 0x05, 0x06: 4-bit ROMB, 512 half-bytes of built-in RAM.
     Mbc2 { ramg: bool, romb: u8 },
     /// 0x0F-0x13: 7-bit ROMB, RAM banks 0-7 / RTC registers 0x08-0x0C.
+    /// `mbc30` selects the MBC30 wiring (Pan Docs "MBC3": up to 4 MiB ROM /
+    /// 64 KiB RAM): ROMB grows to 8 bits. Detected like SameBoy
+    /// (Core/mbc.c): an MBC3-type cart whose ROM exceeds 2 MiB or whose
+    /// RAM exceeds 32 KiB can only be the MBC30 chip.
     Mbc3 {
         ramg: bool,
         romb: u8,
         ramb: u8,
         rtc: Option<Rtc>,
+        mbc30: bool,
     },
     /// 0x19-0x1E: 9-bit ROM bank (0 allowed), 4-bit RAMB, optional rumble.
     Mbc5 {
@@ -256,6 +261,9 @@ impl Cartridge {
                 ramb: 0,
                 // Only 0x0F/0x10 (MBC3+TIMER...) have the RTC crystal.
                 rtc: matches!(cart_type, 0x0F | 0x10).then(Rtc::new),
+                // See the Mapper::Mbc3 docs; rom is already padded to a
+                // power of two, which preserves the > 2 MiB predicate.
+                mbc30: rom.len() > 0x200000 || ram_len > 0x8000,
             },
             0x19..=0x1E => Mapper::Mbc5 {
                 ramg: false,
@@ -289,6 +297,14 @@ impl Cartridge {
     /// True if this cartridge's header requests CGB mode (see [`cgb_flag`]).
     pub fn supports_cgb(&self) -> bool {
         cgb_flag(self.rom[0x143])
+    }
+
+    /// True if the header unlocks SGB functions: SGB flag (0x146) == 0x03
+    /// *and* old licensee code (0x14B) == 0x33 (Pan Docs "SGB flag": the
+    /// SGB ignores command packets otherwise; SameBoy's HLE BIOS checks
+    /// exactly these two header bytes, Core/sgb.c).
+    pub fn supports_sgb(&self) -> bool {
+        self.rom[0x146] == 0x03 && self.rom[0x14B] == 0x33
     }
 
     /// `rom.len()` is a power of two, so this masks bank numbers the way the
@@ -397,10 +413,14 @@ impl Cartridge {
                 romb,
                 ramb,
                 rtc,
+                mbc30,
             } => match addr {
                 0x0000..=0x1FFF => *ramg = value & 0x0F == 0x0A,
                 0x2000..=0x3FFF => {
-                    *romb = value & 0x7F;
+                    // MBC3 wires 7 ROM-bank lines, MBC30 all 8 (Pan Docs
+                    // "MBC3"; SameBoy Core/mbc.c masks only non-MBC30).
+                    // Zero substitution applies to the masked value.
+                    *romb = value & if *mbc30 { 0xFF } else { 0x7F };
                     if *romb == 0 {
                         *romb = 1;
                     }
@@ -1167,6 +1187,56 @@ mod tests {
         c.write_rom(0x3FFF, 0x7F);
         assert_eq!(bank_at(&c, 0x4000), 127);
         assert_eq!(bank_at(&c, 0x0000), 0); // low area fixed
+    }
+
+    #[test]
+    fn mbc30_8bit_romb_on_4mb_rom() {
+        // A 4 MiB MBC3-type cart can only be the MBC30 chip (Pan Docs
+        // "MBC3"; the mbc3-tester ROM): all 8 ROMB bits are wired.
+        let mut c = cart(0x11, 256, 0);
+        c.write_rom(0x2000, 0x80);
+        assert_eq!(bank_at(&c, 0x4000), 128);
+        c.write_rom(0x2000, 0xFF);
+        assert_eq!(bank_at(&c, 0x4000), 255);
+        // Zero substitution still applies to the full 8-bit value.
+        c.write_rom(0x2000, 0x00);
+        assert_eq!(bank_at(&c, 0x4000), 1);
+    }
+
+    #[test]
+    fn mbc30_detected_by_64kb_ram() {
+        // 64 KiB RAM (8 banks) implies MBC30 even with a small ROM
+        // (SameBoy Core/mbc.c detection; Pokemon Crystal JP shape).
+        let mut c = cart(0x13, 4, 5);
+        // 8-bit ROMB: 0x80 stays bank 128 (masked to the 4-bank ROM = 0),
+        // not the 7-bit chip's zero-substituted bank 1.
+        c.write_rom(0x2000, 0x80);
+        assert_eq!(bank_at(&c, 0x4000), 0);
+        // All 8 RAM banks are distinct.
+        c.write_rom(0x0000, 0x0A);
+        for bank in 0..8 {
+            c.write_rom(0x4000, bank);
+            c.write_ram(0xA000, 0x40 + bank);
+        }
+        for bank in 0..8 {
+            c.write_rom(0x4000, bank);
+            assert_eq!(c.read_ram(0xA000), 0x40 + bank);
+        }
+    }
+
+    #[test]
+    fn supports_sgb_requires_flag_and_old_licensee() {
+        // Pan Docs "SGB flag" (0x146 == 0x03) and old licensee code
+        // (0x14B == 0x33) must both match.
+        let mut rom = make_rom(0x00, 2, 0);
+        rom[0x146] = 0x03;
+        rom[0x14B] = 0x33;
+        assert!(Cartridge::from_bytes(rom.clone()).unwrap().supports_sgb());
+        rom[0x14B] = 0x01;
+        assert!(!Cartridge::from_bytes(rom.clone()).unwrap().supports_sgb());
+        rom[0x14B] = 0x33;
+        rom[0x146] = 0x00;
+        assert!(!Cartridge::from_bytes(rom).unwrap().supports_sgb());
     }
 
     #[test]
