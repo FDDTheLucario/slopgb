@@ -16,14 +16,20 @@
 //!   is model-agnostic, so it runs on one plain and one CGB machine exactly
 //!   like the mooneye `emulator-only/` mapper tests.
 //!
-//! Reference selection per docs/ARCHITECTURE.md §CGB revision policy:
-//! `Model::Dmg` legs compare against `<stem>_dmg_blob.png` and `Model::Cgb`
-//! (≡ CPU CGB C) legs against `<stem>_cgb_c.png`. The shipped `_cgb_d.png`
-//! references are PARKED for a future CgbD/CgbE revision model, and the two
-//! `_dmg_b.png` ones document a DMG-B-only divergence we likewise do not
-//! model — neither series creates a leg. A rom-model leg with no shipped
-//! reference does not run, and `ppu/win_without_bg.gb`, which ships no
-//! reference at all, is the suite's only whole-ROM exemption.
+//! Reference selection per docs/ARCHITECTURE.md §CGB revision policy
+//! (including its DMG-revision note): `Model::Dmg` pins late-DMG silicon —
+//! the suite's "blob" (DMG-C-ish) capture series — consistent with age's
+//! `-dmgC` routing and gambatte's `dmg08` expectations, so DMG legs compare
+//! against `<stem>_dmg_blob.png`; `Model::Cgb` (≡ CPU CGB C) legs against
+//! `<stem>_cgb_c.png`. The shipped `_cgb_d.png` references are PARKED for a
+//! future CgbD/CgbE revision model, and the two `_dmg_b.png` ones stay
+//! parked likewise: they capture early-DMG-B silicon whose output differs
+//! from the blob series, and the policy picks blob for corpus consistency
+//! (mooneye's `-dmgABC` ROMs pass on our `Model::Dmg`; B-vs-blob skew shows
+//! up only in these two screenshots). Neither parked series creates a leg.
+//! A rom-model leg with no shipped reference does not run, and
+//! `ppu/win_without_bg.gb`, which ships no reference at all, is the suite's
+//! only whole-ROM exemption.
 //!
 //! The howto states no per-ROM duration; every ROM is breakpoint-terminated
 //! and finishes in well under a second, so the runner reuses the mooneye
@@ -92,11 +98,7 @@ fn suite_cases(root: &Path) -> (Vec<Case>, Vec<String>) {
     let mut cases = Vec::new();
     let mut exempted = Vec::new();
     for rom in roms {
-        let rel = rom
-            .strip_prefix(root)
-            .unwrap_or(&rom)
-            .to_string_lossy()
-            .replace('\\', "/");
+        let rel = harness::rel_unix(root, &rom);
         let stem = rom
             .file_stem()
             .and_then(|s| s.to_str())
@@ -178,18 +180,7 @@ fn run_case(rom: &[u8], case: &Case) -> Result<(), String> {
 /// key per line in `baselines/mealybug.txt`, discovered by running the full
 /// matrix. Shrinking it is progress; growing it is a regression.
 fn baseline() -> Vec<&'static str> {
-    parse_baseline(include_str!("baselines/mealybug.txt"))
-}
-
-/// Parse the known-failure baseline file: one case key per line, blank lines
-/// and `#` comments (whole-line or trailing) ignored.
-fn parse_baseline(text: &'static str) -> Vec<&'static str> {
-    text.lines()
-        .filter_map(|line| {
-            let key = line.split('#').next().unwrap_or("").trim();
-            (!key.is_empty()).then_some(key)
-        })
-        .collect()
+    harness::parse_baseline(include_str!("baselines/mealybug.txt"))
 }
 
 /// Phase B2 inventory guard hook: (claimed, exempted) collection-relative
@@ -197,7 +188,6 @@ fn parse_baseline(text: &'static str) -> Vec<&'static str> {
 /// claimed = at least one rom×model leg runs; exempted = documented
 /// never-run (`ppu/win_without_bg.gb`: no reference image shipped, see the
 /// module docs and ARCHITECTURE.md §CGB revision policy).
-#[allow(dead_code)] // consumed by the Phase B2 inventory guard
 pub fn inventory() -> (Vec<String>, Vec<String>) {
     let Some(root) = common::gbtr_root() else {
         return (Vec::new(), Vec::new());
@@ -227,7 +217,7 @@ fn mealybug_matrix() {
             std::fs::read(&case.rom).unwrap_or_else(|e| panic!("read {}: {e}", case.rom.display()));
         results.push(CaseResult {
             key: harness::case_key(&case.rel, case.model),
-            result: run_case(&rom, case),
+            result: harness::catch_case(|| run_case(&rom, case)),
         });
     }
     harness::assert_against_baseline("mealybug", &results, &baseline());
@@ -254,12 +244,7 @@ fn mealybug_inventory_covers_suite_exactly() {
     common::collect_roms(&root.join(SUITE_DIR), true, &mut on_disk).unwrap();
     let on_disk: BTreeSet<String> = on_disk
         .iter()
-        .map(|p| {
-            p.strip_prefix(&root)
-                .unwrap_or(p)
-                .to_string_lossy()
-                .replace('\\', "/")
-        })
+        .map(|p| harness::rel_unix(&root, p))
         .collect();
     let union: BTreeSet<String> = claimed.union(&exempted).cloned().collect();
     assert_eq!(
@@ -334,14 +319,6 @@ fn mealybug_dma_suffix_detection() {
     assert!(has_cgb_suffix("hdma_timing-C"));
     assert!(!has_cgb_suffix("mbc3_rtc"));
     assert!(!has_cgb_suffix("m3_bgp_change"));
-}
-
-#[test]
-fn mealybug_baseline_parser_strips_comments_and_blanks() {
-    assert_eq!(
-        parse_baseline("# header\n\na [Dmg]\nb [Cgb] # trailing note\n"),
-        vec!["a [Dmg]", "b [Cgb]"]
-    );
 }
 
 #[test]

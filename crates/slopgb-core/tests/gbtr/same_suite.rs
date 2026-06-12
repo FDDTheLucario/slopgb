@@ -84,29 +84,6 @@ fn route(rel: &str) -> Route<'_> {
     Route::Run(Model::Cgb)
 }
 
-/// Best-effort text of a caught panic payload (the common `&str`/`String`
-/// cases; `common::quiet_catch_unwind`'s extractor is private).
-fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
-    if let Some(s) = payload.downcast_ref::<&str>() {
-        (*s).to_string()
-    } else if let Some(s) = payload.downcast_ref::<String>() {
-        s.clone()
-    } else {
-        "non-string panic payload".to_string()
-    }
-}
-
-/// Collection-relative forward-slash key for a ROM path (stable across
-/// platforms — `case_key`s and the inventory must match on Windows CI too).
-fn rel_key(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .expect("rom path under the collection root")
-        .components()
-        .map(|c| c.as_os_str().to_str().expect("UTF-8 rom path"))
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
 /// Every ROM of the suite as (absolute path, collection-relative key),
 /// sorted (collect_roms sorts). An empty or unreadable directory panics:
 /// that is a corrupt checkout, not a green suite.
@@ -123,7 +100,7 @@ fn suite_roms(root: &Path) -> Vec<(PathBuf, String)> {
     paths
         .into_iter()
         .map(|p| {
-            let rel = rel_key(root, &p);
+            let rel = harness::rel_unix(root, &p);
             (p, rel)
         })
         .collect()
@@ -231,12 +208,11 @@ fn same_suite_breakpoint_matrix() {
         // Catch per-case panics (a core regression mid-suite) so one broken
         // ROM cannot mask the other cases' results — same rationale as the
         // mooneye harness's run_group.
-        let result = std::panic::catch_unwind(|| {
+        let result = harness::catch_case(|| {
             let mut gb = harness::boot(&rom, model);
             harness::run_until_breakpoint(&mut gb, common::TIMEOUT_TCYCLES)
                 .and_then(|()| harness::check_fib(&gb))
-        })
-        .unwrap_or_else(|payload| Err(format!("panicked: {}", panic_text(payload.as_ref()))));
+        });
         results.push(CaseResult {
             key: harness::case_key(&rel, model),
             result,
@@ -251,7 +227,6 @@ fn same_suite_breakpoint_matrix() {
 /// documented §CGB-revision-policy skips (their suffix revision set
 /// excludes C — the policy's extra_length_clocking hole plus
 /// `channel_1_freq_change_timing-cgbDE`).
-#[allow(dead_code)] // consumed by the Phase B2 inventory guard
 pub fn inventory() -> (Vec<String>, Vec<String>) {
     let Some(root) = common::gbtr_root() else {
         return (Vec::new(), Vec::new());
@@ -269,7 +244,9 @@ pub fn inventory() -> (Vec<String>, Vec<String>) {
 
 /// Self-check ahead of the global Phase B2 guard: the inventory partitions
 /// the on-disk ROM set exactly (claimed ∩ exempted = ∅, claimed ∪ exempted
-/// = every `.gb`/`.gbc` under `same-suite/`).
+/// = every `.gb`/`.gbc` under `same-suite/`), the exempt set is pinned to
+/// the six documented revision-skips and the partition sizes to the v7.0
+/// checkout, so a re-pinned collection or a routing change fails loudly.
 #[test]
 fn same_suite_inventory_partitions_disk_exactly() {
     let Some(root) = common::gbtr_root() else {
@@ -301,6 +278,23 @@ fn same_suite_inventory_partitions_disk_exactly() {
         union, on_disk_refs,
         "inventory does not cover the on-disk ROM set exactly"
     );
+    // The exempt set is exactly the six on-disk revision-skips of the
+    // module docs (no-C suffix sets; ARCHITECTURE.md §CGB revision policy,
+    // same-suite row), in collect_roms walk order.
+    assert_eq!(
+        exempted,
+        [
+            "same-suite/apu/channel_1/channel_1_extra_length_clocking-cgb0B.gb",
+            "same-suite/apu/channel_1/channel_1_freq_change_timing-cgbDE.gb",
+            "same-suite/apu/channel_2/channel_2_extra_length_clocking-cgb0B.gb",
+            "same-suite/apu/channel_3/channel_3_extra_length_clocking-cgb0.gb",
+            "same-suite/apu/channel_3/channel_3_extra_length_clocking-cgbB.gb",
+            "same-suite/apu/channel_4/channel_4_extra_length_clocking-cgb0B.gb",
+        ],
+        "exempt set drifted from the six documented revision-skips"
+    );
+    assert_eq!(on_disk.len(), 78, "same-suite ships 78 ROMs in v7.0");
+    assert_eq!(claimed.len(), 72, "claimed-ROM count drift");
 }
 
 #[test]

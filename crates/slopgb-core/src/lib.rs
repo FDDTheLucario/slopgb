@@ -190,4 +190,17 @@ impl GameBoy {
     pub fn debug_undefined_hit(&self) -> bool {
         self.cpu.debug_undefined_hit()
     }
+
+    /// Drain the raw audio tap: one stereo sample per dot, taken straight
+    /// off the APU channel mixer *before* the box-average resampler and the
+    /// high-pass "output capacitor" stage (`Apu::output_cycle`). The
+    /// gambatte test harness compares this stream for its `_outaudio`
+    /// sample-equality verdicts, which [`Self::drain_audio`]'s filtered
+    /// output would distort (a decaying high-pass tail reads as "sound", a
+    /// flattened distinct input as "silence"). Capped at two frames of
+    /// backlog — drain right before the frame under test.
+    #[doc(hidden)]
+    pub fn drain_audio_raw(&mut self, out: &mut Vec<(f32, f32)>) {
+        self.bus.apu_mut().drain_raw_samples(out);
+    }
 }
