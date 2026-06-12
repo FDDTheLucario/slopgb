@@ -67,17 +67,9 @@ const CASES: [Case; 4] = [
 
 /// Known-failure baseline (see `harness::assert_against_baseline`).
 ///
-/// * `dmg-acid2 [Cgb]`: the frame renders in plain greys (e.g. #A5A5A5,
-///   6442 pixels off) instead of the CGB boot ROM's compat-mode palettes —
-///   the howto requires BG #000000/#0063C6/#7BFF31/#FFFFFF and OBJ
-///   #000000/#943939/#FF8484/#FFFFFF, i.e. boot-assigned palette RAM is
-///   not yet emulated for DMG-flagged carts.
 /// * `cgb-acid-hell [Cgb]`: 2 pixels swapped at (80,68)/(80,69)
 ///   (#FFFF00 vs #000000), a one-line PPU divergence.
-const BASELINE: &[&str] = &[
-    "dmg-acid2/dmg-acid2.gb [Cgb]",
-    "cgb-acid-hell/cgb-acid-hell.gbc [Cgb]",
-];
+const BASELINE: &[&str] = &["cgb-acid-hell/cgb-acid-hell.gbc [Cgb]"];
 
 /// Run one acid case: to the `LD B,B` exit (the howtos give no run-time
 /// figure, so the mooneye-style 120-emulated-second budget applies), then

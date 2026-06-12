@@ -120,10 +120,16 @@ pub struct Interconnect {
     ff75: u8,
 }
 
-/// DMG-compat palette installed by the CGB boot ROM for DMG carts. We use a
-/// neutral grayscale (RGB555 white/light/dark/black); the hardware default
-/// depends on a title-hash lookup that is not modelled.
-const CGB_COMPAT_PALETTE: [u16; 4] = [0x7FFF, 0x5294, 0x294A, 0x0000];
+/// DMG-compat palettes installed by the CGB boot ROM for DMG carts. The
+/// boot ROM consults its title-checksum lookup table only when the licensee
+/// is Nintendo (old licensee byte $14B == $01, or $33 with "01" at
+/// $144-$145); every other cart gets this *default* combination — entries
+/// OBJ0=4, OBJ1=4, BG=29 of SameBoy's BootROMs/cgb_boot.asm palette tables
+/// (Pan Docs "Compatibility palettes"). The per-game hash table is
+/// deliberately not modelled; if it ever is, gate it on the licensee check
+/// first or non-Nintendo homebrew will mis-color.
+const CGB_COMPAT_BG_PALETTE: [u16; 4] = [0x7FFF, 0x1BEF, 0x6180, 0x0000];
+const CGB_COMPAT_OBJ_PALETTE: [u16; 4] = [0x7FFF, 0x421F, 0x1CF2, 0x0000];
 
 impl Interconnect {
     pub fn new(model: Model, cart: Cartridge) -> Self {
@@ -172,6 +178,12 @@ impl Interconnect {
         }
     }
 
+    /// True when the machine runs in native CGB mode (CGB/AGB hardware with
+    /// a CGB-flagged cart, as opposed to DMG compatibility mode).
+    pub(crate) fn cgb_mode(&self) -> bool {
+        self.cgb_mode
+    }
+
     /// Initialise hardware registers and DIV to the post-boot state of the
     /// model (called once from `GameBoy::new`).
     ///
@@ -210,13 +222,13 @@ impl Interconnect {
             // OBJ palettes 0+1 (16 bytes) leave OCPS = $90 — boot_hwio-C
             // reads $C8/$D0.
             self.ppu.write(0xFF68, 0x80);
-            for c in CGB_COMPAT_PALETTE {
+            for c in CGB_COMPAT_BG_PALETTE {
                 self.ppu.write(0xFF69, c as u8);
                 self.ppu.write(0xFF69, (c >> 8) as u8);
             }
             self.ppu.write(0xFF6A, 0x80);
             for _ in 0..2 {
-                for c in CGB_COMPAT_PALETTE {
+                for c in CGB_COMPAT_OBJ_PALETTE {
                     self.ppu.write(0xFF6B, c as u8);
                     self.ppu.write(0xFF6B, (c >> 8) as u8);
                 }
@@ -1617,6 +1629,36 @@ mod tests {
         assert_eq!(b.read(0xFF70), 0xFF);
         assert_eq!(b.read(0xFF74), 0xFF);
         assert_eq!(b.read(0xFF75), 0x8F);
+    }
+
+    /// For DMG carts whose licensee is not Nintendo (no title-hash lookup),
+    /// the CGB boot ROM installs the *default* compatibility palette
+    /// combination — BG palette 0 = $7FFF/$1BEF/$6180/$0000, OBJ palettes 0
+    /// and 1 = $7FFF/$421F/$1CF2/$0000 (Pan Docs "Compatibility palettes";
+    /// SameBoy BootROMs/cgb_boot.asm default combination OBJ0=4, OBJ1=4,
+    /// BG=29). Pins that the BG table differs from the OBJ table and that
+    /// *both* OBJ slots receive it.
+    #[test]
+    fn post_boot_cgb_compat_palettes_are_boot_defaults() {
+        fn le_bytes(table: [u16; 4]) -> [u8; 8] {
+            let mut out = [0u8; 8];
+            for (i, c) in table.into_iter().enumerate() {
+                [out[2 * i], out[2 * i + 1]] = c.to_le_bytes();
+            }
+            out
+        }
+        for model in [Model::Cgb, Model::Agb] {
+            let b = booted(model);
+            let (bg, obj) = b.ppu.palette_ram();
+            assert_eq!(
+                bg[..8],
+                le_bytes([0x7FFF, 0x1BEF, 0x6180, 0x0000]),
+                "{model:?} BG palette 0"
+            );
+            let obj_table = le_bytes([0x7FFF, 0x421F, 0x1CF2, 0x0000]);
+            assert_eq!(obj[..8], obj_table, "{model:?} OBJ palette 0");
+            assert_eq!(obj[8..16], obj_table, "{model:?} OBJ palette 1");
+        }
     }
 
     #[test]

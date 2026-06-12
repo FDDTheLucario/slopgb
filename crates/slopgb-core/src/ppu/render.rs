@@ -1514,11 +1514,57 @@ mod tests {
         assert_eq!(px(&p, 2, 8), 0x11);
     }
 
+    /// End-to-end DMG-compat rendering through the CGB boot ROM's *default*
+    /// compatibility palettes (Pan Docs "Compatibility palettes"; SameBoy
+    /// cgb_boot.asm combination OBJ0=4, OBJ1=4, BG=29): BG pixels remap
+    /// through BGP into the BG table, OBJ pixels through OBP0/OBP1 into the
+    /// distinct OBJ table. Expected XRGB values follow the c-sp collection's
+    /// `(X << 3) | (X >> 2)` channel expansion (dmg-acid2 README).
+    #[test]
+    fn cgb_compat_default_palette_render() {
+        let mut p = Ppu::new(Model::Cgb);
+        p.set_dmg_compat(true);
+        // Install the boot defaults through the palette ports (LCD off — no
+        // mode-3 blocking), exactly as `apply_post_boot_state` does.
+        p.write(0xFF68, 0x80);
+        for c in [0x7FFFu16, 0x1BEF, 0x6180, 0x0000] {
+            p.write(0xFF69, c as u8);
+            p.write(0xFF69, (c >> 8) as u8);
+        }
+        p.write(0xFF6A, 0x80);
+        for _ in 0..2 {
+            for c in [0x7FFFu16, 0x421F, 0x1CF2, 0x0000] {
+                p.write(0xFF6B, c as u8);
+                p.write(0xFF6B, (c >> 8) as u8);
+            }
+        }
+        p.write(0xFF47, 0xE4); // identity BGP
+        p.write(0xFF48, 0xE4); // identity OBP0
+        set_tile_row(&mut p, 0, 1, 2, 0xF0, 0x0F); // cols 0-3 = 1, 4-7 = 2
+        set_tile_row(&mut p, 0, 2, 2, 0xFF, 0xFF); // shade 3
+        set_map(&mut p, 0x1800, 0, 0, 1);
+        set_map(&mut p, 0x1800, 0, 1, 2);
+        set_tile_row(&mut p, 0, 3, 0, 0xF0, 0x0F); // sprite: 1s then 2s
+        sprite(&mut p, 0, 18, 48, 3, 0); // line 2 row 0, screen x 40-47, OBP0
+        p.write(0xFF40, 0x93); // LCD + BG + OBJ on
+        render_line(&mut p, 2);
+        assert_eq!(px(&p, 2, 0), 0x7BFF31, "BG shade 1");
+        assert_eq!(px(&p, 2, 4), 0x0063C6, "BG shade 2");
+        assert_eq!(px(&p, 2, 8), 0x00_0000, "BG shade 3");
+        assert_eq!(px(&p, 2, 16), 0xFF_FFFF, "BG shade 0");
+        assert_eq!(px(&p, 2, 40), 0xFF8484, "OBJ shade 1");
+        assert_eq!(px(&p, 2, 44), 0x943939, "OBJ shade 2");
+    }
+
     #[test]
     fn frame_buffer_double_buffering() {
         let mut p = dmg_on(0x91);
         set_tile_row(&mut p, 0, 1, 0, 0xFF, 0xFF);
         set_map(&mut p, 0x1800, 0, 0, 1);
+        // The frame right after the LCD enable is presented blank (see
+        // `first_frame_after_lcd_enable_is_blank`); double buffering is
+        // observable from the second frame on.
+        run_to(&mut p, 144, 0);
         run_to(&mut p, 143, 455);
         assert_eq!(p.frame()[0], WHITE, "frame() is the completed frame");
         p.tick(); // 144:0 -> swap
