@@ -21,7 +21,7 @@
 //! | 4            | STAT mode reads 2; OAM writes blocked; LYC compare valid (line 0's OAM pulse sits here, with its own dispatch-late/m1-blocked rules — see `refresh_stat`) |
 //! | 80           | VRAM reads blocked; OAM scan complete |
 //! | 84           | STAT mode reads 3; VRAM writes blocked |
-//! | V0           | mode 0: STAT reads 0, mode-0 IRQ source asserts, OAM+VRAM unblock, OAM blocking level drops. V0 = 256 + SCX%8 + sprite/window penalties (`hblank_ly_scx_timing-GS`; `intr_2_mode0_timing`/`intr_2_oam_ok_timing`: 252 dots after the mode-2 IRQ becomes CPU-visible) |
+//! | P − 2        | mode 0: STAT reads 0, mode-0 IRQ source asserts, OAM+VRAM unblock, OAM blocking level drops — two dots before the pipe end P = 256 + SCX%8 + sprite/window penalties (`m0_flip_events` in render.rs: the gbmicrotest hblank_int/int_hblank grids pin the IRQ dot, mooneye intr_2_mode0_timing/_sprites and the gbmicrotest ppu_sprite0/win*_b grids the flip — both at 254 + SCX%8 on a bare line). The pipe-end anchors (HBlank-DMA trigger, CGB palette-RAM blocking) stay at P |
 //!
 //! VBlank: line 144 dots 0-3 still read STAT mode 0 (the mode-0 IRQ source
 //! stays asserted, keeping the STAT line gapless for `stat_irq_blocking`);
@@ -226,8 +226,30 @@ pub struct Ppu {
     /// commit (see `stat_halt_late`).
     stat_halt_late_pending: bool,
     /// The externally visible mode-0 flip (STAT mode bits, OAM/VRAM
-    /// unblock): mode 3 finished on the current line.
+    /// unblock): rises with `m0_src` ahead of the pipe end (see
+    /// `m0_flip_events` in render.rs), and can drop back mid-line when
+    /// a late write arms a new stall (`m0_unflip`).
     line_render_done: bool,
+    /// The mode-0 STAT IRQ source level: rises on the visible flip's
+    /// dot — 2 dots before the pipe end on a bare line, 1 in double
+    /// speed and on window-stalled lines, 0 on DMG window-aborted lines
+    /// (see `m0_flip_events` in render.rs) — taking over the OAM
+    /// blocking level gaplessly, and drops at dot 4 of the next line
+    /// when the mode-2 window becomes visible.
+    m0_src: bool,
+    /// `m0_src` rose on the current dot: the rise emitted by
+    /// `refresh_stat` this tick is the mode-0 event and carries the
+    /// half-cycle halt law (see [`Self::take_m0_rise`]).
+    m0_rise_dot: bool,
+    /// The STAT IF bit handed out by the last tick came from the mode-0
+    /// source rise. The interconnect drains this and applies the
+    /// half-cycle halt law: a rise landing in the second half of the
+    /// CPU's M-cycle is readable at once — and fully visible to the
+    /// running CPU's interrupt sample — but missed by the halt-exit
+    /// sampler for one M-cycle (the same shape as the line-start OAM
+    /// pulses' `stat_halt_late`). mooneye hblank_ly_scx_timing-GS and
+    /// gbmicrotest int_hblank_halt_scx0-7 pin all eight SCX phases.
+    m0_rise: bool,
     /// Mode 3 actually finished (pixel 160 shipped, dot D). This is the
     /// anchor the HBlank-DMA machinery and CGB palette-RAM blocking were
     /// calibrated against (gambatte dma/hdma_start `_1`/`_2` pairs); the
@@ -260,6 +282,12 @@ pub struct Ppu {
     /// The most recent staged rendering write was double-speed (1-dot)
     /// staging — used to pick the wy2 catch-up delay.
     staged_ds: bool,
+    /// CGB double speed is engaged (set by the interconnect at the STOP
+    /// speed switch): the CPU's bus-access offset halves, so the mode-0
+    /// flip/IRQ lead over the pipe end is 1 dot instead of 2 (see
+    /// `m0_flip_events`; the gambatte *_ds STAT rows pin the halved
+    /// lead the same way the write strobe's 1-dot staging is pinned).
+    ds: bool,
     /// Window internal line counter (gambatte winYPos): initialized to
     /// 0xFF at frame start and incremented at each window *activation*
     /// (gambatte ppu.cpp plotPixel/M3Start::f0), so a same-line retrigger
@@ -405,6 +433,9 @@ impl Ppu {
             stat_line: false,
             pending_if: 0,
             stat_late: false,
+            m0_src: false,
+            m0_rise_dot: false,
+            m0_rise: false,
             stat_halt_late: false,
             stat_halt_late_pending: false,
             line_render_done: true,
@@ -414,6 +445,7 @@ impl Ppu {
             wy2: 0,
             wy2_delay: 0,
             staged_ds: false,
+            ds: false,
             win_line: 0xFF,
             win_start_pending: false,
             eff: PipeRegs {
@@ -608,6 +640,12 @@ impl Ppu {
         // model-independent mode-3 start at dot 84).
         let win_en = self.eff.lcdc & LCDC_WIN_ENABLE != 0;
         let late = u16::from(!self.model.is_cgb());
+        if self.dot == 4 {
+            // The mode-0 IRQ source level (raised by the previous line's
+            // `m0_flip_events`) drops when the mode-2 window becomes
+            // visible.
+            self.m0_src = false;
+        }
         if self.line == 0 && self.dot == 2 {
             // Line 0: assignment, not OR — this is the frame reset
             // (gambatte M2_Ly0::f0).
@@ -639,6 +677,9 @@ impl Ppu {
                     }
                 }
             }
+            // Visible mode-0 flip + IRQ-source rise (after the dot's
+            // render step so the projection sees this dot's state).
+            self.m0_flip_events();
         }
         if self.line == 153 && self.dot == 4 {
             // Line 153 quirk: LY reads 0 from dot 4 (TCAGBD §8.9).
@@ -729,6 +770,15 @@ impl Ppu {
         std::mem::take(&mut self.stat_halt_late)
     }
 
+    /// Whether the STAT IF bit handed out by the last [`Self::tick`] came
+    /// from the mode-0 source rise (`m0_flip_events`). The interconnect
+    /// drains this and, when the rise landed in the second half of the
+    /// CPU's M-cycle, masks it from the halt-exit sampler for one
+    /// M-cycle (see the `m0_rise` field docs).
+    pub(crate) fn take_m0_rise(&mut self) -> bool {
+        std::mem::take(&mut self.m0_rise)
+    }
+
     /// Level of the shared STAT interrupt line for the given enable bits.
     fn stat_line_level(&self, en: u8) -> bool {
         let mut high = en & STAT_SRC_LYC != 0 && self.cmp;
@@ -738,27 +788,37 @@ impl Ppu {
             return high;
         }
         let vm = self.vis_mode();
-        // HBlank source: follows the visible mode-0 window (including line
-        // starts and 144:0-3) so consecutive sources overlap and block each
-        // other (`stat_irq_blocking`). The glitched post-enable prefix is
-        // not a real hblank.
+        // HBlank source: rises at the mode-0 IRQ event (`m0_src`, one
+        // dot *before* the visible flip — gambatte memevent_m0irq one
+        // xpos ahead of its m0 anchor) and holds through the hblank and
+        // the next line's dots 0-3 (and 144:0-3) so consecutive sources
+        // overlap and block each other (`stat_irq_blocking`). The
+        // glitched post-enable prefix is not a real hblank.
         high |= en & STAT_SRC_HBLANK != 0
-            && vm == 0
+            && ((self.line <= 143 && self.m0_src) || (vm == 0 && self.dot < 4))
             && !(self.glitch_line && self.dot < GLITCH_MODE3_START);
         high |=
             en & STAT_SRC_VBLANK != 0 && (self.line >= 145 || (self.line == 144 && self.dot >= 4));
         if en & STAT_SRC_OAM != 0 {
             // The OAM *blocking level* spans the whole scan+render of every
-            // visible line, dots 0..flip (gambatte mstat_irq.h doM0Event:
-            // the m2 enable blocks the m0 IRQ — m2int_m0irq_*_out0; the
-            // level also blocks the LYC dot-4 edge, lycm2int). The IRQ
-            // itself is an *event* at the line-start dots — see
-            // `refresh_stat` (SameBoy display.c mode_for_interrupt pulse).
-            // Line 0's level starts at dot 4 with the LY/LYC validity.
+            // visible line, dots 0..the mode-0 source rise — one dot past
+            // the visible flip, so the hblank source takes over without a
+            // gap (gambatte mstat_irq.h doM0Event: the m2 enable blocks
+            // the m0 IRQ — m2int_m0irq_*_out0; the level also blocks the
+            // LYC dot-4 edge, lycm2int). The IRQ itself is an *event* at
+            // the line-start dots — see `refresh_stat` (SameBoy display.c
+            // mode_for_interrupt pulse). Line 0's level starts at dot 4
+            // with the LY/LYC validity.
             let oam_window = self.line <= 143
                 && !self.glitch_line
-                && !self.line_render_done
-                && (self.line != 0 || self.dot >= 4);
+                && if self.dot < 4 {
+                    // Line-start dots 0-3: the previous line's `m0_src`
+                    // is still set; the level is high here exactly as
+                    // before (line 0's starts at dot 4).
+                    self.line != 0
+                } else {
+                    !self.m0_src
+                };
             let cgb = self.model.is_cgb();
             // OAM pulse at vblank entry: one M-cycle before the vblank IF
             // on *both* families (wilbertpol intr_2_timing rounds 5-7 pin
@@ -861,12 +921,19 @@ impl Ppu {
                     // Second-half commit: also dispatch-late (see above).
                     self.stat_late = true;
                 }
+                if from_tick && self.m0_rise_dot {
+                    // The edge came from the mode-0 source rise: the
+                    // interconnect applies the half-cycle commit law
+                    // (see `m0_rise`).
+                    self.m0_rise = true;
+                }
             } else if self.stat_en & STAT_SRC_VBLANK == 0 {
                 self.pending_if |= IF_STAT;
                 self.stat_late = true;
             }
         }
         self.stat_halt_late_pending = false;
+        self.m0_rise_dot = false;
         self.stat_line = level;
     }
 
@@ -1167,6 +1234,8 @@ impl Ppu {
             self.line_render_done = true;
             self.render_finished = true;
             self.stat_halt_late_pending = false;
+            self.m0_src = false;
+            self.m0_rise_dot = false;
             self.hdma_lead = false;
             self.render.active = false;
             self.render.win_active = false;
@@ -1189,6 +1258,8 @@ impl Ppu {
             self.line_render_done = false;
             self.render_finished = false;
             self.stat_halt_late_pending = false;
+            self.m0_src = false;
+            self.m0_rise_dot = false;
             self.hdma_lead = false;
             self.render.active = false;
             self.wy_latch = false;
@@ -1224,6 +1295,11 @@ impl Ppu {
     /// scan sees glitched data derived from the frozen access instead of
     /// real OAM entries (madness/mgb_oam_dma_halt_sprites.s; see
     /// `oam_scan` in render.rs).
+    /// Interconnect wiring: CGB double speed engaged/left (see `ds`).
+    pub(crate) fn set_double_speed(&mut self, ds: bool) {
+        self.ds = ds;
+    }
+
     pub fn set_oam_dma_freeze(&mut self, freeze: Option<(u8, u8)>) {
         self.dma_freeze = freeze;
     }
@@ -1699,14 +1775,16 @@ mod tests {
     }
 
     #[test]
-    fn mode0_irq_at_256_plus_scx_fine() {
+    fn mode0_irq_at_254_plus_scx_fine() {
+        // The IRQ source rises with the visible flip, 2 dots before the
+        // pipe end (see render.rs `m0_flip_events`).
         for scx in [0u8, 1, 4, 5, 7, 8, 13] {
             let mut p = dmg();
             p.write(0xFF41, 0x08);
             p.write(0xFF43, scx);
             p.write(0xFF40, 0x81);
             run_to(&mut p, 1, 4); // line start: hblank source dropped
-            let v0 = 256 + u16::from(scx & 7);
+            let v0 = 254 + u16::from(scx & 7);
             let ifs = run_to(&mut p, 1, v0 - 1);
             assert_eq!(ifs & 2, 0, "scx {scx}: no hblank IRQ before {v0}");
             assert_eq!(p.tick(), 0x02, "scx {scx}: hblank IRQ at {v0}");
@@ -1739,8 +1817,9 @@ mod tests {
         let mut p = dmg();
         p.write(0xFF41, 0x28); // hblank + OAM sources
         p.write(0xFF40, 0x81);
-        // One edge when the glitch line's hblank rises at 250...
-        let ifs = run_to(&mut p, 0, 250);
+        // One edge when the glitch line's hblank source rises with its
+        // visible flip at 252...
+        let ifs = run_to(&mut p, 0, 252);
         assert_eq!(ifs & 2, 2, "glitch-line hblank edge");
         // ...and none after: the line stays high for the whole frame.
         let ifs = run_to(&mut p, 143, 455);
