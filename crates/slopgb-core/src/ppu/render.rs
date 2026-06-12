@@ -584,6 +584,7 @@ impl Ppu {
                 self.render.lx += 1;
                 if self.render.lx == 160 {
                     self.render.active = false;
+                    self.render_finished = true;
                     self.line_render_done = true;
                 }
                 return;
@@ -622,6 +623,7 @@ impl Ppu {
                     self.hdma_lead = true;
                 } else if self.render.lx == 160 {
                     self.render.active = false;
+                    self.render_finished = true;
                     self.line_render_done = true;
                     return;
                 }
@@ -970,13 +972,7 @@ mod tests {
     /// ended (V0).
     fn render_line(p: &mut Ppu, line: u8) -> u16 {
         run_to(p, line, 84);
-        let mut guard = 0u32;
-        while !p.line_render_done {
-            p.tick();
-            guard += 1;
-            assert!(guard < 2_000, "mode 3 never finished");
-        }
-        p.dot
+        finish_line(p)
     }
 
     fn px(p: &Ppu, line: usize, x: usize) -> u32 {
@@ -1110,13 +1106,17 @@ mod tests {
 
     /// Finish the current line's mode 3; returns the dot it ended on (V0).
     fn finish_line(p: &mut Ppu) -> u16 {
+        let mut flip = None;
         let mut guard = 0u32;
-        while !p.line_render_done {
+        while !p.line_render_done || p.render.active {
             p.tick();
+            if p.line_render_done && flip.is_none() {
+                flip = Some(p.dot);
+            }
             guard += 1;
             assert!(guard < 2_000, "mode 3 never finished");
         }
-        p.dot
+        flip.expect("flip dot recorded")
     }
 
     #[test]
@@ -1318,12 +1318,12 @@ mod tests {
         }
     }
 
-    fn penalty(xs: &[u8]) -> u16 {
+    fn penalty(xs: &[u8]) -> i32 {
         let mut p = dmg_on(0x93);
         for (i, &x) in xs.iter().enumerate() {
             sprite(&mut p, i as u8, 19, x, 0, 0); // row 0 on line 3
         }
-        render_line(&mut p, 3) - 256
+        i32::from(render_line(&mut p, 3)) - 256
     }
 
     /// Mooneye intr_2_mode0_timing_sprites pins each case's penalty to the
@@ -1334,12 +1334,16 @@ mod tests {
     /// of 6 (it overlaps work the BG pipeline performs anyway).
     #[test]
     fn sprite_penalty_table() {
+        fn e(p: i32) -> i32 {
+            assert!(p >= 0, "e() is only defined for real penalties");
+            (p + 3) / 4
+        }
         // 1-N sprites at X=0 -> extra cycles 2,4,5,7,8,10,11,13,14,16.
         let expect = [2, 4, 5, 7, 8, 10, 11, 13, 14, 16];
         for n in 1..=10usize {
             let dots = penalty(&vec![0u8; n]);
-            assert_eq!(dots, 6 * n as u16 + 2, "{n} sprites at x=0");
-            assert_eq!(dots.div_ceil(4), expect[n - 1], "{n} sprites at x=0");
+            assert_eq!(dots, 6 * n as i32 + 2, "{n} sprites at x=0");
+            assert_eq!(e(dots), expect[n - 1], "{n} sprites at x=0");
         }
         // 10 sprites at X=N.
         for (x, cycles) in [
@@ -1352,50 +1356,29 @@ mod tests {
             (160, 16),
             (167, 15),
         ] {
-            assert_eq!(penalty(&[x; 10]).div_ceil(4), cycles, "10 sprites at x={x}");
+            assert_eq!(e(penalty(&[x; 10])), cycles, "10 sprites at x={x}");
         }
         // Off-screen X >= 168: selected but never fetched (no first-fetch
         // discount either: the baseline mode-3 length is unchanged).
         assert_eq!(penalty(&[168; 10]), 0);
         assert_eq!(penalty(&[169; 10]), 0);
         // Two groups on different BG tiles both pay the alignment penalty.
-        assert_eq!(
-            penalty(&[0, 0, 0, 0, 0, 160, 160, 160, 160, 160]).div_ceil(4),
-            17
-        );
-        assert_eq!(
-            penalty(&[4, 4, 4, 4, 4, 164, 164, 164, 164, 164]).div_ceil(4),
-            15
-        );
+        assert_eq!(e(penalty(&[0, 0, 0, 0, 0, 160, 160, 160, 160, 160])), 17);
+        assert_eq!(e(penalty(&[4, 4, 4, 4, 4, 164, 164, 164, 164, 164])), 15);
         // Single sprite at X=N.
         for (x, cycles) in [(0u8, 2), (3, 2), (4, 1), (7, 1), (8, 2), (164, 1)] {
-            assert_eq!(penalty(&[x]).div_ceil(4), cycles, "1 sprite at x={x}");
+            assert_eq!(e(penalty(&[x])), cycles, "1 sprite at x={x}");
         }
         // Two sprites 8 apart.
-        assert_eq!(penalty(&[0, 8]).div_ceil(4), 5);
-        assert_eq!(penalty(&[4, 12]).div_ceil(4), 3);
+        assert_eq!(e(penalty(&[0, 8])), 5);
+        assert_eq!(e(penalty(&[4, 12])), 3);
         // 10 sprites 8 apart.
-        assert_eq!(
-            penalty(&[0, 8, 16, 24, 32, 40, 48, 56, 64, 72]).div_ceil(4),
-            27
-        );
-        assert_eq!(
-            penalty(&[1, 9, 17, 25, 33, 41, 49, 57, 65, 73]).div_ceil(4),
-            25
-        );
-        assert_eq!(
-            penalty(&[4, 12, 20, 28, 36, 44, 52, 60, 68, 76]).div_ceil(4),
-            17
-        );
-        assert_eq!(
-            penalty(&[5, 13, 21, 29, 37, 45, 53, 61, 69, 77]).div_ceil(4),
-            15
-        );
+        assert_eq!(e(penalty(&[0, 8, 16, 24, 32, 40, 48, 56, 64, 72])), 27);
+        assert_eq!(e(penalty(&[1, 9, 17, 25, 33, 41, 49, 57, 65, 73])), 25);
+        assert_eq!(e(penalty(&[4, 12, 20, 28, 36, 44, 52, 60, 68, 76])), 17);
+        assert_eq!(e(penalty(&[5, 13, 21, 29, 37, 45, 53, 61, 69, 77])), 15);
         // Reverse OAM order: identical timing.
-        assert_eq!(
-            penalty(&[72, 64, 56, 48, 40, 32, 24, 16, 8, 0]).div_ceil(4),
-            27
-        );
+        assert_eq!(e(penalty(&[72, 64, 56, 48, 40, 32, 24, 16, 8, 0])), 27);
     }
 
     #[test]

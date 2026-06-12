@@ -81,6 +81,28 @@ slopgb is a cycle-accurate Game Boy (DMG) / Game Boy Color (CGB) emulator.
   entirely while the vblank source enable is set — gambatte
   `mstat_irq.h doM2Event` and the mealybug handlers' "line 0 timing is
   different by 4 cycles" compensation pin both rules.
+- **STAT mode-2 events vs levels** (see the scanline timeline in
+  `ppu/mod.rs`): the OAM STAT interrupt is an *event* — a pulse at
+  line-start dot 0 on lines 1-143, dot 4 on line 0, 144:0
+  at vblank entry on both families (one M-cycle before the vblank IF),
+  DMG dot 12 on lines 145-153 — while the OAM *blocking level* spans
+  dots 0..mode-3 end and blocks mode-0/LYC edges under it (SameBoy
+  display.c one-shot `mode_for_interrupt`; gambatte mstat_irq.h blocking
+  predicates; gbmicrotest oam_int/line_144_oam_int grids; wilbertpol
+  intr_2_timing; mealybug per-line handlers). The dot-0 pulses are
+  second-half commits: IF reads back at once, but both the halt-exit
+  sampler (`Ppu::take_stat_halt_late` → `Interconnect::if_late`, the
+  timer mask shape) and the running CPU's same-cycle interrupt sample
+  (`Ppu::take_stat_late` → `if_stat_late`) miss them for one M-cycle —
+  the CGB 144:0 pulse is exempt. (The CGB double-speed sub-cycle phase of
+  the pulse is not separately modelled: the gambatte *_ds STAT-IRQ rows
+  carry documented-swap baselines.) Enables written into the mode-3
+  stretch of the blocking level raise nothing; inside dots 0..84 they
+  keep level edges (gambatte m2enable/late_enable). The mode-0 visible-flip/IF
+  split (flip at D−3, IF at D−2 per the gbmicrotest grids) is
+  investigated but **parked**: it conflicts with the dispatch anchors
+  the mealybug photos and wilbertpol *_nops chains pin until the pixel
+  pipe and dispatch sampling are re-derived together.
 - OAM DMA is an interconnect engine: 160 M-cycles + startup delay, restart
   semantics (an FF46 rewrite retargets the in-flight run immediately),
   source-range quirks (CGB sources ≥ $E0 read $FF; DMG re-reads WRAM), and
