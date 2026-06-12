@@ -2,59 +2,23 @@
 # Discovered empirically on this emulator (Phase B); shrink as fixes land,
 # never grow.
 #
-# Re-baselined 2026-06: the DMG post-boot LCD phase pin (70164, the
-# poweron tables) and the STAT mode-2 pulse wave flipped 60 rows to pass
-# (poweron_*, oam_int_*, line_144_oam_int, lyc2_int_halt, several
-# hblank_int rows, stat_write_glitch). The remaining clusters pin the
-# mode-0 flip/IF split (hblank_int/int_hblank/ppu_sprite0 grids: visible
-# flip at D-3, IF at D-2 — parked, see the ppu module docs) and the WX<8
-# window mode-3 stretch (win0-15 rows). dma_basic.gb can never report a verdict: it copies its
+# Re-baselined 2026-06 twice: the DMG post-boot LCD phase pin (70164,
+# the poweron tables) + STAT mode-2 pulse wave flipped 60 rows, and the
+# mode-0 event-grid re-derivation (flip/IRQ at pipe end - 2; see
+# ppu/render.rs m0_flip_events) flipped 46 more (the hblank_int_scx*
+# dispatch/_if/_nops grids, int_hblank_* incl. all 8 halt rows,
+# hblank_int_l0, ppu_sprite0_scx1/2/5/6_b, sprite4_*, win*_a leftovers,
+# win10_scx3_b). The remaining win*_b rows want a 2-dot flip lead on the
+# lcd-enable line-1 window lines where the gambatte window/late_* rows
+# pin the 1-dot stalled-window lead we model — a documented one-dot
+# conflict (see baselines/gambatte.txt). lcdon_to_oam_int_l* and the
+# remaining oam_int/int_oam rows are line-0/lcd-enable OAM-pulse chains
+# not yet derived. dma_basic.gb can never report a verdict: it copies its
 # DMA-window routine over the HRAM result block, so $FF82 reads back a
 # code byte ($18, JR) — kept here as a permanent protocol-violation entry
 # because it does write $FF82 within the deadline (see suite module docs).
 gbmicrotest/dma_basic.gb [Dmg]
 gbmicrotest/halt_op_dupe_delay.gb [Dmg]
-gbmicrotest/hblank_int_scx1.gb [Dmg]
-gbmicrotest/hblank_int_scx1_if_b.gb [Dmg]
-gbmicrotest/hblank_int_scx1_if_c.gb [Dmg]
-gbmicrotest/hblank_int_scx1_if_d.gb [Dmg]
-gbmicrotest/hblank_int_scx1_nops_a.gb [Dmg]
-gbmicrotest/hblank_int_scx1_nops_b.gb [Dmg]
-gbmicrotest/hblank_int_scx2.gb [Dmg]
-gbmicrotest/hblank_int_scx2_if_b.gb [Dmg]
-gbmicrotest/hblank_int_scx2_if_c.gb [Dmg]
-gbmicrotest/hblank_int_scx2_if_d.gb [Dmg]
-gbmicrotest/hblank_int_scx2_nops_a.gb [Dmg]
-gbmicrotest/hblank_int_scx2_nops_b.gb [Dmg]
-gbmicrotest/hblank_int_scx5.gb [Dmg]
-gbmicrotest/hblank_int_scx5_if_b.gb [Dmg]
-gbmicrotest/hblank_int_scx5_if_c.gb [Dmg]
-gbmicrotest/hblank_int_scx5_if_d.gb [Dmg]
-gbmicrotest/hblank_int_scx5_nops_a.gb [Dmg]
-gbmicrotest/hblank_int_scx5_nops_b.gb [Dmg]
-gbmicrotest/hblank_int_scx6.gb [Dmg]
-gbmicrotest/hblank_int_scx6_if_b.gb [Dmg]
-gbmicrotest/hblank_int_scx6_if_c.gb [Dmg]
-gbmicrotest/hblank_int_scx6_if_d.gb [Dmg]
-gbmicrotest/hblank_int_scx6_nops_a.gb [Dmg]
-gbmicrotest/hblank_int_scx6_nops_b.gb [Dmg]
-gbmicrotest/hblank_scx2_if_a.gb [Dmg]
-gbmicrotest/int_hblank_halt_scx0.gb [Dmg]
-gbmicrotest/int_hblank_halt_scx1.gb [Dmg]
-gbmicrotest/int_hblank_halt_scx2.gb [Dmg]
-gbmicrotest/int_hblank_halt_scx3.gb [Dmg]
-gbmicrotest/int_hblank_halt_scx4.gb [Dmg]
-gbmicrotest/int_hblank_halt_scx5.gb [Dmg]
-gbmicrotest/int_hblank_halt_scx6.gb [Dmg]
-gbmicrotest/int_hblank_halt_scx7.gb [Dmg]
-gbmicrotest/int_hblank_incs_scx1.gb [Dmg]
-gbmicrotest/int_hblank_incs_scx2.gb [Dmg]
-gbmicrotest/int_hblank_incs_scx5.gb [Dmg]
-gbmicrotest/int_hblank_incs_scx6.gb [Dmg]
-gbmicrotest/int_hblank_nops_scx1.gb [Dmg]
-gbmicrotest/int_hblank_nops_scx2.gb [Dmg]
-gbmicrotest/int_hblank_nops_scx5.gb [Dmg]
-gbmicrotest/int_hblank_nops_scx6.gb [Dmg]
 gbmicrotest/int_oam_incs.gb [Dmg]
 gbmicrotest/int_oam_nops.gb [Dmg]
 gbmicrotest/lcdon_to_oam_int_l0.gb [Dmg]
@@ -64,15 +28,10 @@ gbmicrotest/line_144_oam_int_b.gb [Dmg]
 gbmicrotest/line_144_oam_int_d.gb [Dmg]
 gbmicrotest/oam_int_inc_sled.gb [Dmg]
 gbmicrotest/oam_int_nops_a.gb [Dmg]
-gbmicrotest/ppu_sprite0_scx1_b.gb [Dmg]
-gbmicrotest/ppu_sprite0_scx2_b.gb [Dmg]
 gbmicrotest/ppu_sprite0_scx3_b.gb [Dmg]
-gbmicrotest/ppu_sprite0_scx5_b.gb [Dmg]
-gbmicrotest/ppu_sprite0_scx6_b.gb [Dmg]
 gbmicrotest/ppu_sprite0_scx7_b.gb [Dmg]
 gbmicrotest/stat_write_glitch_l154_d.gb [Dmg]
 gbmicrotest/win10_b.gb [Dmg]
-gbmicrotest/win10_scx3_b.gb [Dmg]
 gbmicrotest/win11_b.gb [Dmg]
 gbmicrotest/win12_b.gb [Dmg]
 gbmicrotest/win13_b.gb [Dmg]
@@ -81,15 +40,9 @@ gbmicrotest/win15_b.gb [Dmg]
 gbmicrotest/win8_b.gb [Dmg]
 gbmicrotest/win9_b.gb [Dmg]
 
-# Window-machine wave swap: the win*_a legs (STAT poll one M-cycle
-# earlier) now pass for the pinned reason -- WX 0-7 windows start with
-# the same 6-dot stall as WX 8-10, mealybug m3_window_timing photo-
-# perfect -- which puts the win0-7_b legs (and win0_scx3_b) on the same
-# post-LCD-enable line-timing skew their win8-15_b siblings always
-# failed on (hardware ends that line's mode 3 inside the _a/_b poll
-# window; we end it one poll later). Reverting the WX<=7 anchor would
-# restore these 9 rows but lose the 8 _a rows, 4 mealybug legs and the
-# gambatte m2int_wx00/03/07_m3stat family -- strictly worse.
+# win0-7_b (and win0_scx3_b): the same one-dot stalled-window-lead
+# conflict as the win8-15_b block above (these legs additionally carry
+# the WX<=7 6-dot-stall anchor pinned by mealybug m3_window_timing).
 gbmicrotest/win0_b.gb [Dmg]
 gbmicrotest/win0_scx3_b.gb [Dmg]
 gbmicrotest/win1_b.gb [Dmg]

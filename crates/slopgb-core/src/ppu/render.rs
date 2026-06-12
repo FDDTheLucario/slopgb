@@ -1,19 +1,21 @@
 //! Mode 3 pixel pipeline: BG/window fetcher, pixel FIFO, sprite fetcher.
 //!
-//! Timing model: the pipeline starts at line dot 84 (78 on the glitched
-//! LCD-enable line) and performs one step per dot. The fetcher needs 12 dots
-//! before the first pixel ships (a discarded first tile fetch plus a real
-//! one), each shipped pixel takes one dot, and SCX%8 leading pixels are
-//! popped and discarded, so an unobstructed line finishes mode 3 after
-//! 172 + SCX%8 dots — pixel 159 ships at line dot 256 + SCX%8, matching
-//! `hblank_ly_scx_timing-GS`.
+//! Timing model: the pipeline starts at line dot 84 (the glitched
+//! LCD-enable line blocks from dot 78 but starts its pipe at 82) and
+//! performs one step per dot. The fetcher needs 12 dots before the first
+//! pixel ships (a discarded first tile fetch plus a real one), each
+//! shipped pixel takes one dot, and SCX%8 leading pixels are popped and
+//! discarded, so an unobstructed line's pipe ends after 172 + SCX%8 dots
+//! at dot 256 + SCX%8 — with the externally visible mode-0 flip and the
+//! mode-0 IRQ source leading the pipe end by 2 dots (`m0_flip_events`),
+//! matching `hblank_ly_scx_timing-GS`.
 //!
-//! Sprite fetches stall the pipeline for 6 dots each (3 for the first fetch
-//! of the line — see `render_step`), plus a first-per-tile alignment penalty
-//! of max(0, 5 - (x + SCX) % 8) dots (the BG fetcher must finish its current
-//! tile row first). This reproduces every case table in
-//! `intr_2_mode0_timing_sprites` exactly (Pan Docs "Mode 3 length" OBJ
-//! penalty algorithm, with the first fetch overlapping pipeline startup).
+//! Sprite fetches stall the pipeline for 6 dots each (5 for the first
+//! fetch of the line — see `obj_fetch_base`), plus a first-per-tile
+//! alignment penalty of max(0, 5 - (x + SCX) % 8) dots (the BG fetcher
+//! must finish its current tile row first). This reproduces every case
+//! table in `intr_2_mode0_timing_sprites` exactly (Pan Docs "Mode 3
+//! length" OBJ penalty algorithm).
 
 use super::{
     LCDC_BG_ENABLE, LCDC_BG_MAP, LCDC_OBJ_ENABLE, LCDC_OBJ_SIZE, LCDC_TILE_DATA, LCDC_WIN_ENABLE,
@@ -49,6 +51,19 @@ const EMPTY_SPRITE_PIXEL: SpritePixel = SpritePixel {
     bg_priority: false,
     oam_idx: 0xFF,
 };
+
+/// OBJ fetch stall base cost: the first fetch of the line overlaps one
+/// dot of work the BG pipeline performs anyway and costs 5 dots; every
+/// later fetch pays the full 6. Decoded jointly from mooneye
+/// intr_2_mode0_timing_sprites (its windows pin every sprite case's
+/// visible flip to the dots the old end-anchored model used: one sprite
+/// at X=0 flips at 254 + 5 + 5 = 264) and the no-sprite grids that pin
+/// the bare flip at 254+SCX%8 (gbmicrotest/wilbertpol, see
+/// `m0_flip_events`) — the old 3-dot discount was an artifact of
+/// anchoring the flip to the pipe end.
+fn obj_fetch_base(fetched: u16) -> u16 {
+    if fetched == 0 { 5 } else { 6 }
+}
 
 /// BG/window fetcher state. Each of the three VRAM reads (tile number, low
 /// bitplane, high bitplane) takes 2 dots — the fetcher steps at half the dot
@@ -129,6 +144,18 @@ pub(super) struct Render {
     sp_fifo: [SpritePixel; 8],
 
     pub(super) win_active: bool,
+    /// A window start (or aborted DMG WX=166 start) stalled this line:
+    /// the restarted fetcher idles one dot later at the line tail, so
+    /// the mode-0 flip/IRQ lead over the pipe end shrinks to 1 dot
+    /// (gambatte window/late_* m3stat rows pin the later flip; the
+    /// gbmicrotest win*_b line-1 grid prefers a 2-dot lead there and
+    /// stays in the baseline — a documented one-dot conflict).
+    win_stalled: bool,
+    /// The window was aborted mid-line by an LCDC.5 clear: on DMG the
+    /// resumed BG fetch trails at the line tail, dropping the flip lead
+    /// to 0 (gambatte window/late_disable_* rows carry dmg08_out3 vs
+    /// cgb04c_out0 split expectations for the same read).
+    win_aborted: bool,
     /// WX comparator output on the previous dot: activations and
     /// reactivations fire on the rising edge only (the match holds while
     /// lx is frozen during the start stall and must not re-fire).
@@ -169,6 +196,8 @@ impl Render {
             penalty_tiles: 0,
             sp_fifo: [EMPTY_SPRITE_PIXEL; 8],
             win_active: false,
+            win_stalled: false,
+            win_aborted: false,
             win_match_prev: false,
             prefill_pos: 0,
         }
@@ -301,11 +330,22 @@ impl Ppu {
         r.penalty_tiles = 0;
         r.sp_fifo = [EMPTY_SPRITE_PIXEL; 8];
         r.win_active = false;
+        r.win_stalled = false;
+        r.win_aborted = false;
         r.win_match_prev = false;
         r.prefill_pos = 0;
         if self.glitch_line {
             // No OAM scan ran on the glitched LCD-enable line: no sprites.
             r.n_sprites = 0;
+            // The glitched line's pixel pipe starts 4 dots after its
+            // blocking start: the lcdon_timing-GS OAM/VRAM tables pin the
+            // unblock inside (248, 252] — the flip at 252 + SCX%8 sits at
+            // the window top — and the gbmicrotest line-0 grids
+            // (hblank_int_l0, int_hblank_nops/incs_scx0-7 dispatches,
+            // int_hblank_halt_scx0-7 halt wakes) pin the IRQ rise at
+            // 252 + SCX%8 for all eight SCX classes. Blocking begins at
+            // dot 78, the pipe at 82, ending at 254 + SCX%8.
+            r.stall = 4;
         }
         // A window-start request carried over from a DMG WX=166 match
         // (see `win_start_pending`): consumed at the next line's mode-3
@@ -382,7 +422,7 @@ impl Ppu {
                     }
                     let Some(i) = pick else { break };
                     let s = self.render.sprites[i];
-                    let base = if self.render.fetched == 0 { 3 } else { 6 };
+                    let base = obj_fetch_base(self.render.fetched);
                     self.render.fetched |= 1 << i;
                     let wait = self.sprite_penalty(s.x);
                     self.fetch_sprite(i);
@@ -431,15 +471,7 @@ impl Ppu {
                 }
                 let Some(i) = pick else { break };
                 let s = self.render.sprites[i];
-                // The first OBJ fetch of the line stalls the pipeline 3
-                // dots less than later ones: its OAM read + first tile-data
-                // dots overlap fetch work the BG pipeline performs anyway,
-                // while every later fetch pays the full 6 dots. Derived
-                // from the intr_2_mode0_timing_sprites case table measured
-                // against the no-sprite mode-3 end at dot 256: one sprite
-                // at X=0 ends mode 3 at 256+8 (3 + alignment 5), and each
-                // additional sprite on the same X adds exactly 6 dots.
-                let base = if self.render.fetched == 0 { 3 } else { 6 };
+                let base = obj_fetch_base(self.render.fetched);
                 self.render.fetched |= 1 << i;
                 let wait = self.sprite_penalty(s.x);
                 // The BG fetcher keeps working during the alignment wait
@@ -449,6 +481,7 @@ impl Ppu {
                 }
                 self.fetch_sprite(i);
                 self.render.stall += base + wait;
+                self.m0_unflip();
             }
             if self.render.stall > 0 {
                 self.render.stall -= 1;
@@ -527,12 +560,16 @@ impl Ppu {
                     // re-fire while lx sits at 159 through the stall.
                     self.win_start_pending = true;
                     self.render.win_active = true;
+                    self.render.win_stalled = true;
                     // Freeze from the match dot: 2 dots total.
                     self.render.stall += 1;
+                    self.m0_unflip();
                     return;
                 } else {
+                    self.m0_unflip();
                     let r = &mut self.render;
                     r.win_active = true;
+                    r.win_stalled = true;
                     r.win_mode = true;
                     r.bg_count = 0;
                     r.phase = FetchPhase::TileNoWait;
@@ -565,7 +602,9 @@ impl Ppu {
                 // aborted-start freeze. `win_start_pending` doubles as
                 // the once-per-line guard while lx sits at 159.
                 self.win_start_pending = true;
+                self.render.win_stalled = true;
                 self.render.stall += 1;
+                self.m0_unflip();
                 return;
             } else if self.render.win_mode && self.render.bg_count == 8 {
                 // Window *reactivation*: a WX match while the window is
@@ -581,12 +620,7 @@ impl Ppu {
                 // tile boundary, and pin that off-boundary matches have
                 // no visible effect).
                 self.output_pixel(0, 0);
-                self.render.lx += 1;
-                if self.render.lx == 160 {
-                    self.render.active = false;
-                    self.render_finished = true;
-                    self.line_render_done = true;
-                }
+                self.advance_lx();
                 return;
             }
         }
@@ -616,21 +650,150 @@ impl Ppu {
                 }
             } else {
                 self.output_pixel(c, attr);
-                self.render.lx += 1;
-                if self.render.lx == 159 {
-                    // The HBlank DMA trigger leads the mode-3 end by one
-                    // dot (see `Ppu::hdma_lead`).
-                    self.hdma_lead = true;
-                } else if self.render.lx == 160 {
-                    self.render.active = false;
-                    self.render_finished = true;
-                    self.line_render_done = true;
+                self.advance_lx();
+                if !self.render.active {
                     return;
                 }
             }
         }
 
         self.fetcher_step();
+    }
+
+    /// Advance the output position and fire the pipe-end anchors:
+    ///
+    /// * lx 159 (gambatte xpos 167): the HBlank DMA trigger leads the
+    ///   pipe end by one dot (see [`Ppu::hdma_lead`]).
+    /// * lx 160 (xpos 168): the pipeline ends; `render_finished` anchors
+    ///   the HBlank-DMA window and CGB palette-RAM blocking (gambatte
+    ///   hdma_start/cgbpAccessible calibration — must not move with the
+    ///   visible flip, which leads it: see [`Ppu::m0_flip_events`]).
+    fn advance_lx(&mut self) {
+        self.render.lx += 1;
+        match self.render.lx {
+            159 => self.hdma_lead = true,
+            160 => {
+                self.render.active = false;
+                self.render_finished = true;
+                if !self.m0_src {
+                    // Zero-lead lines (DMG aborted windows) flip at the
+                    // pipe end itself; also the safety net for any
+                    // projection miss.
+                    self.m0_src = true;
+                    self.m0_rise_dot = true;
+                    self.line_render_done = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The mode-0 STAT IRQ rise and the externally visible mode-0 flip
+    /// (STAT mode bits read 0, OAM/VRAM unblock), evaluated once per
+    /// mode-3 dot (after the dot's render step). Both land on the same
+    /// dot, leading the pipe end *including every late stall* by 2 dots
+    /// on a bare line — 254 + SCX%8 + penalties — 1 dot in double speed
+    /// or after a window start, 0 after a DMG window abort (the `lead`
+    /// computation below; gambatte's xpos-166/167 event pair and its
+    /// cc+2 access offset fold to one dot in our end-sampled lattice).
+    /// The pins: the gbmicrotest hblank_int_scx0-7 dispatch
+    /// grid and hblank_int_scx*_if_b/c FF0F-vs-dispatch races (IRQ),
+    /// the wilbertpol intr_2_mode0_scx*_nops STAT polls and mooneye's
+    /// intr_2_mode0_timing/_sprites windows (flip), and mooneye
+    /// hblank_ly_scx_timing-GS plus gbmicrotest int_hblank_halt_scx0-7
+    /// (the halt-wake view of the same rise).
+    ///
+    /// On hardware this is the fetcher/sprite machinery going idle
+    /// while the FIFO drains its last pixels, a combinational condition
+    /// — modelled here as a projection over the renderer's committed
+    /// state: the line ends in `stall + refill + pixels-left` dots once
+    /// no sprite fetch or window start can intervene. The projection is
+    /// exact for every pinned case; window starts inside the final tile
+    /// (WX 164-166) can land it ±1 dot (the gambatte wx_166 rows judge
+    /// those).
+    ///
+    /// `m0_src` also takes over the OAM blocking level gaplessly so an
+    /// enabled mode-2 source still blocks the edge (gambatte
+    /// m2int_m0irq).
+    pub(super) fn m0_flip_events(&mut self) {
+        if self.m0_src || !self.render.active {
+            return;
+        }
+        let r = &self.render;
+        let mut proj = r.stall + (160 - u16::from(r.lx));
+        // Dots until the FIFO can pop again (it refills mid-fetch only
+        // after a window start in the final tile).
+        if r.bg_count == 0 {
+            proj += match r.phase {
+                FetchPhase::TileNoWait => 6,
+                FetchPhase::TileNo => 5,
+                FetchPhase::LoWait => 4,
+                FetchPhase::Lo => 3,
+                FetchPhase::HiWait => 2,
+                FetchPhase::Hi | FetchPhase::Push => 1,
+            };
+        }
+        // Sprite fetches still ahead of the output position: the base
+        // cost plus the first-per-tile alignment penalty (mirrors the
+        // fetch path without committing the tile set).
+        if self.eff.lcdc & LCDC_OBJ_ENABLE != 0 {
+            let mut tiles = r.penalty_tiles;
+            let mut fetched = r.fetched;
+            for i in 0..usize::from(r.n_sprites) {
+                if r.fetched & (1 << i) != 0 {
+                    continue;
+                }
+                let x = r.sprites[i].x;
+                if (8..168).contains(&x) && x - 8 >= r.lx {
+                    proj += obj_fetch_base(fetched);
+                    fetched |= 1 << i;
+                    let v = u16::from(x) + u16::from(self.eff.scx);
+                    if tiles & (1u64 << (v >> 3)) == 0 {
+                        tiles |= 1u64 << (v >> 3);
+                        proj += 5u16.saturating_sub(v & 7);
+                    }
+                }
+            }
+        }
+        // A window start still ahead: 6 dots (FIFO restart), or the 2-dot
+        // DMG WX=166 aborted-start freeze. A reactivation zero pixel
+        // (±1 dot, boundary-dependent) is not projected.
+        let wx = self.eff.wx;
+        if self.eff.lcdc & LCDC_WIN_ENABLE != 0
+            && (self.wy_latch || self.wy2 == self.ly)
+            && (7..=166).contains(&wx)
+            && wx - 7 >= r.lx
+        {
+            let dmg_166 = !self.model.is_cgb() && wx == 166;
+            if !r.win_active {
+                proj += if dmg_166 { 2 } else { 6 };
+            } else if dmg_166 && !self.win_start_pending {
+                proj += 2;
+            }
+        }
+        let lead = (2 - u16::from(self.ds))
+            .saturating_sub(u16::from(r.win_stalled) + u16::from(r.win_aborted));
+        if proj <= lead {
+            self.m0_src = true;
+            self.m0_rise_dot = true;
+            self.line_render_done = true;
+        }
+    }
+
+    /// A stall source engaged after the mode-0 flip already fired (a
+    /// late WY/WX/LCDC write armed a window start or sprite fetch inside
+    /// the final tile): the flip is a combinational level on hardware —
+    /// the fetcher waking back up drops STAT back to mode 3, re-blocks
+    /// OAM/VRAM and lowers the IRQ source until the projection re-fires
+    /// (gambatte window/late_wy_* and late_disable_* m3stat rows pin the
+    /// drop; an IF bit already latched stays latched, matching the
+    /// edge-pulse the hardware line produced).
+    fn m0_unflip(&mut self) {
+        if self.m0_src && self.render.active {
+            self.m0_src = false;
+            self.m0_rise_dot = false;
+            self.line_render_done = false;
+        }
     }
 
     /// First-per-BG-tile sprite alignment penalty (Pan Docs OBJ penalty
@@ -662,6 +825,9 @@ impl Ppu {
         }
         let cgb = self.model.is_cgb();
         let r = &mut self.render;
+        if !cgb {
+            r.win_aborted = true;
+        }
         r.win_mode = false;
         // Re-arms the trigger: re-enabling with WX pointing at a pixel
         // not yet drawn retriggers the window (doc §WIN_EN).
@@ -1131,7 +1297,7 @@ mod tests {
         run_to(&mut p, 2, 130);
         mcycle_write(&mut p, 0xFF47, 0xE8); // color 1: shade 1 -> shade 2
         let v0 = finish_line(&mut p);
-        assert_eq!(v0, 256, "a palette strobe must not move mode-3 end");
+        assert_eq!(v0, 254, "a palette strobe must not move mode-3 end");
         assert_eq!(px(&p, 2, 33), LIGHT, "well before the write: old");
         assert_eq!(px(&p, 2, 34), LIGHT, "write M-cycle dot 1: still old");
         assert_eq!(
@@ -1172,9 +1338,9 @@ mod tests {
         p.write(0xFF48, 0xE4); // identity OBP0
         set_tile_row(&mut p, 0, 4, 0, 0xFF, 0x00); // sprite solid color 1
         sprite(&mut p, 0, 18, 8, 4, 0x00); // line 2, screen 0-7, OBP0
-        // The X=8 sprite stalls the pipeline 3+5 dots at dot 97, so its
-        // pixels 0-7 pop at dots 105-112; dots 107-110 cover x=2..=5.
-        run_to(&mut p, 2, 106);
+        // The X=8 sprite stalls the pipeline 5+5 dots at dot 97, so its
+        // pixels 0-7 pop at dots 107-114; dots 109-112 cover x=2..=5.
+        run_to(&mut p, 2, 108);
         mcycle_write(&mut p, 0xFF48, 0xE8);
         finish_line(&mut p);
         assert_eq!(px(&p, 2, 1), LIGHT, "before the write: old");
@@ -1228,7 +1394,7 @@ mod tests {
         assert_eq!(px(&p, 2, 0), LIGHT, "pixel 0 is bg column 2 (color 1)");
         assert_eq!(px(&p, 2, 1), LIGHT, "bg column 3");
         assert_eq!(px(&p, 2, 2), DARK, "bg column 4");
-        assert_eq!(v0, 258, "2 discarded pixels: V0 = 256 + 2");
+        assert_eq!(v0, 256, "2 discarded pixels: V0 = 254 + 2");
     }
 
     /// If an SCX write makes the comparator miss its match (the new value
@@ -1252,7 +1418,7 @@ mod tests {
         run_to(&mut p, 2, 92);
         mcycle_write(&mut p, 0xFF43, 5);
         let v0 = finish_line(&mut p);
-        assert_eq!(v0, 269, "13 discarded pixels: V0 = 256 + 13");
+        assert_eq!(v0, 267, "13 discarded pixels: V0 = 254 + 13");
         assert_eq!(
             px(&p, 2, 0),
             DARK,
@@ -1314,8 +1480,68 @@ mod tests {
             let mut p = dmg_on(0x91);
             p.write(0xFF43, scx);
             let v0 = render_line(&mut p, 1);
-            assert_eq!(v0, 256 + u16::from(scx & 7), "scx {scx}");
+            assert_eq!(v0, 254 + u16::from(scx & 7), "scx {scx}");
         }
+    }
+
+    /// The end-of-line event grid: the mode-0 STAT IRQ source and the
+    /// externally visible mode-0 flip land together 2 dots before the
+    /// pipe end — 254+SCX%8 on a bare line (see `m0_flip_events`); the
+    /// pipe end (the HDMA/palette-blocking anchor, `render_finished`)
+    /// stays at 256+SCX%8.
+    #[test]
+    fn mode0_irq_flip_pipe_end_split() {
+        for scx in [0u8, 1, 5, 7] {
+            let s = u16::from(scx & 7);
+            let mut p = dmg_on(0x91);
+            p.write(0xFF41, 0x08); // mode-0 STAT IRQ source enabled
+            p.write(0xFF43, scx);
+            run_to(&mut p, 2, 84);
+            let mut flip = None;
+            let mut if_dot = None;
+            let mut finished = None;
+            while finished.is_none() {
+                let iff = p.tick();
+                if p.line_render_done && flip.is_none() {
+                    flip = Some(p.dot);
+                }
+                if iff & 0x02 != 0 && if_dot.is_none() {
+                    if_dot = Some(p.dot);
+                }
+                if p.render_finished && finished.is_none() {
+                    finished = Some(p.dot);
+                }
+                assert!(p.dot < 400, "mode 3 never finished (scx {scx})");
+            }
+            assert_eq!(if_dot, Some(254 + s), "mode-0 STAT IF (scx {scx})");
+            assert_eq!(flip, Some(254 + s), "visible flip (scx {scx})");
+            assert_eq!(finished, Some(256 + s), "pipe end (scx {scx})");
+        }
+    }
+
+    /// Sprite stalls shift the whole event grid: one sprite at X=0 costs
+    /// 5 (first-fetch) + 5 (alignment) dots, so the flip lands at 264 —
+    /// the top of mooneye intr_2_mode0_timing_sprites' "2 extra cycles"
+    /// window (260, 264] — and the pipe ends at 266.
+    #[test]
+    fn sprite_stall_shifts_event_grid() {
+        let mut p = dmg_on(0x93);
+        sprite(&mut p, 0, 19, 0, 0, 0); // row 0 on line 3
+        run_to(&mut p, 3, 84);
+        let mut flip = None;
+        let mut finished = None;
+        while finished.is_none() {
+            p.tick();
+            if p.line_render_done && flip.is_none() {
+                flip = Some(p.dot);
+            }
+            if p.render_finished {
+                finished = Some(p.dot);
+            }
+            assert!(p.dot < 400, "mode 3 never finished");
+        }
+        assert_eq!(flip, Some(264), "flip: 254 + 5 (fetch) + 5 (alignment)");
+        assert_eq!(finished, Some(266), "pipe end: flip + 2");
     }
 
     fn penalty(xs: &[u8]) -> i32 {
@@ -1326,12 +1552,14 @@ mod tests {
         i32::from(render_line(&mut p, 3)) - 256
     }
 
-    /// Mooneye intr_2_mode0_timing_sprites pins each case's penalty to the
-    /// 4-dot window (4e-4, 4e] around its "extra cycles" value e — its
-    /// mode-0 poll lands exactly on the no-sprite mode-3 end plus 4e dots —
-    /// so e = ceil(penalty/4). The dot counts are the Pan Docs OBJ penalty
-    /// algorithm with the first fetch of the line costing 3 dots instead
-    /// of 6 (it overlaps work the BG pipeline performs anyway).
+    /// Mooneye intr_2_mode0_timing_sprites pins each case's flip to the
+    /// 4-dot window (4e-4, 4e] past its poll anchor at dot 256, where e
+    /// is the "extra cycles" value — so e = ceil((flip - 256)/4). With
+    /// the flip at pipe end - 2 and the first fetch costing 5 dots (see
+    /// `obj_fetch_base`), every sprite case's flip sits exactly where
+    /// the old end-anchored model put it (the +2 cost and the -2 flip
+    /// lead cancel), while a sprite-free line flips 2 dots earlier —
+    /// still inside its e = 0 window.
     #[test]
     fn sprite_penalty_table() {
         fn e(p: i32) -> i32 {
@@ -1358,10 +1586,11 @@ mod tests {
         ] {
             assert_eq!(e(penalty(&[x; 10])), cycles, "10 sprites at x={x}");
         }
-        // Off-screen X >= 168: selected but never fetched (no first-fetch
-        // discount either: the baseline mode-3 length is unchanged).
-        assert_eq!(penalty(&[168; 10]), 0);
-        assert_eq!(penalty(&[169; 10]), 0);
+        // Off-screen X >= 168: selected but never fetched — the line
+        // flips at the bare 254, i.e. -2 against the poll anchor, inside
+        // the e = 0 window (mooneye lists these cases at 0 extra cycles).
+        assert_eq!(penalty(&[168; 10]), -2);
+        assert_eq!(penalty(&[169; 10]), -2);
         // Two groups on different BG tiles both pay the alignment penalty.
         assert_eq!(e(penalty(&[0, 0, 0, 0, 0, 160, 160, 160, 160, 160])), 17);
         assert_eq!(e(penalty(&[4, 4, 4, 4, 4, 164, 164, 164, 164, 164])), 15);
@@ -1387,7 +1616,7 @@ mod tests {
         for i in 0..10 {
             sprite(&mut p, i, 19, 0, 0, 0);
         }
-        assert_eq!(render_line(&mut p, 3), 256);
+        assert_eq!(render_line(&mut p, 3), 254);
     }
 
     #[test]
@@ -1396,7 +1625,8 @@ mod tests {
         p.write(0xFF4A, 0); // WY=0
         p.write(0xFF4B, 87); // WX: window from pixel 80
         let v0 = render_line(&mut p, 2);
-        assert_eq!(v0, 262);
+        // Window-stalled lines flip 1 dot before the pipe end (262).
+        assert_eq!(v0, 261);
     }
 
     // --- Window rendering ---
@@ -1444,7 +1674,7 @@ mod tests {
         set_map(&mut p, 0x1C00, 0, 0, 2);
         set_tile_row(&mut p, 0, 2, 0, 0xFF, 0xFF);
         let v0 = render_line(&mut p, 2);
-        assert_eq!(v0, 256, "no window penalty");
+        assert_eq!(v0, 254, "no window penalty");
         assert_eq!(px(&p, 2, 0), WHITE);
     }
 
@@ -1526,6 +1756,7 @@ mod tests {
         );
         assert_eq!(px(&p, 2, 39), LIGHT);
         assert_eq!(px(&p, 2, 40), DARK, "BG col 5 follows: columns 0-3 skipped");
+        // DMG aborted-window line: the flip lead drops to 0 (end 262).
         assert_eq!(v0, 262, "the 6-dot window penalty is not refunded");
     }
 
@@ -1561,6 +1792,7 @@ mod tests {
         );
         assert_eq!(px(&p, 2, 108), DARK, "window column advances normally");
         assert_eq!(p.win_line, 3, "retrigger advanced the line counter");
+        // Re-enabled same line: aborted + restarted, DMG lead 0 (end 268).
         assert_eq!(v0, 268, "two window starts: 256 + 6 + 6");
     }
 
@@ -1577,7 +1809,7 @@ mod tests {
         assert_eq!(p.win_line, 0, "line 0 activation: 0xFF + 1");
         let v0 = render_line(&mut p, 1);
         assert_eq!(p.win_line, 1);
-        assert_eq!(v0, 262, "CGB: the WX=166 start stalls the line end 6 dots");
+        assert_eq!(v0, 261, "CGB: the WX=166 start stalls the line end 6 dots");
         p.write(0xFF4B, 15); // normal WX on line 2
         render_line(&mut p, 2);
         assert_eq!(p.win_line, 2, "line 2 draws window row 2: rows 0-1 skipped");
@@ -1605,14 +1837,14 @@ mod tests {
             set_map(&mut p, 0x1C00, 0, col, 2);
         }
         let v0 = render_line(&mut p, 1);
-        assert_eq!(v0, 258, "DMG: only the aborted-start stall extends mode 3");
+        assert_eq!(v0, 257, "DMG: only the aborted-start stall extends mode 3");
         assert_eq!(px(&p, 1, 159), WHITE, "no window pixel on the match line");
         assert_eq!(p.win_line, 0, "the activation still counted a row");
         let v0 = render_line(&mut p, 2);
         assert_eq!(px(&p, 2, 0), BLACK, "carryover: window from the left edge");
         assert_eq!(px(&p, 2, 159), BLACK);
         assert_eq!(p.win_line, 1, "mode-3 start consumed the request: ++row");
-        assert_eq!(v0, 258, "the re-armed match pays the same freeze");
+        assert_eq!(v0, 257, "the re-armed match pays the same freeze");
         // The carried-over activation suppresses the line's own match
         // increment but re-arms the request: one row per line.
         render_line(&mut p, 3);
@@ -1639,7 +1871,7 @@ mod tests {
         run_to(&mut p, 2, 300);
         p.write(0xFF4A, 200);
         let v0 = render_line(&mut p, 3);
-        assert_eq!(v0, 256, "no window: WY matched only between samples");
+        assert_eq!(v0, 254, "no window: WY matched only between samples");
         // A WY write that holds through the dot-451 sample arms the
         // latch for the rest of the frame.
         run_to(&mut p, 4, 100);
@@ -1647,7 +1879,7 @@ mod tests {
         run_to(&mut p, 5, 0);
         p.write(0xFF4A, 200);
         let v0 = render_line(&mut p, 6);
-        assert_eq!(v0, 262, "the dot-451 sample armed the frame latch");
+        assert_eq!(v0, 261, "the dot-451 sample armed the frame latch");
     }
 
     /// On CGB the live WY comparison uses a copy that lags the
@@ -1665,7 +1897,7 @@ mod tests {
         run_to(&mut p, 2, 173);
         p.write(0xFF4A, 2);
         let v0 = finish_line(&mut p);
-        assert_eq!(v0, 256, "wy2 still held the old value at the match");
+        assert_eq!(v0, 254, "wy2 still held the old value at the match");
         // Same write 5 dots earlier: wy2 caught up before the match.
         let mut p = cgb_on(0xB1);
         p.write(0xFF4B, 87);
@@ -1673,7 +1905,7 @@ mod tests {
         run_to(&mut p, 3, 168);
         p.write(0xFF4A, 3);
         let v0 = finish_line(&mut p);
-        assert_eq!(v0, 262, "wy2 caught up: the live comparison triggers");
+        assert_eq!(v0, 261, "wy2 caught up: the live comparison triggers");
     }
 
     /// Sprites with OAM X 0-7 are fetched during the 8-dot prefill walk
@@ -1692,7 +1924,7 @@ mod tests {
         p.write(0xFF43, 3);
         sprite(&mut p, 0, 19, 0, 0, 0);
         let v0 = render_line(&mut p, 3);
-        assert_eq!(v0, 264, "discard 3 + first-sprite stall 5");
+        assert_eq!(v0, 264, "discard 3 + first-sprite stall 7, flip at end - 2");
         // SCX rewritten from 7 to 2 during the sprite stall (X=0 with
         // SCX=7: stall 3 over dots 89-91, the hunt frozen at position
         // 0): the resumed hunt walks positions 1, 2 against the
@@ -1705,7 +1937,7 @@ mod tests {
         run_to(&mut p, 3, 88);
         mcycle_write(&mut p, 0xFF43, 2);
         let v0 = finish_line(&mut p);
-        assert_eq!(v0, 261, "paused hunt: discard 2 + stall 3");
+        assert_eq!(v0, 261, "paused hunt: discard 2 + stall 5, flip at end - 2");
     }
 
     /// WX reaches the pipeline one dot later than the palette strobe
@@ -1725,9 +1957,9 @@ mod tests {
             mcycle_write(&mut p, 0xFF4B, 200);
             let v0 = finish_line(&mut p);
             if hits {
-                assert_eq!(v0, 262, "wx=5 matched at dot 95, before the commit");
+                assert_eq!(v0, 261, "wx=5 matched at dot 95, before the commit");
             } else {
-                assert_eq!(v0, 256, "wx=6's match dot 96 already saw the rewrite");
+                assert_eq!(v0, 254, "wx=6's match dot 96 already saw the rewrite");
             }
         }
     }
@@ -1759,7 +1991,7 @@ mod tests {
         assert_eq!(px(&p, 2, 17), BLACK, "window resumes, shifted one dot");
         // The injected pixel replaces a FIFO pixel at the line's tail:
         // mode-3 length is unchanged.
-        assert_eq!(v0, 262, "zero pixel does not extend mode 3");
+        assert_eq!(v0, 261, "zero pixel does not extend mode 3");
     }
 
     /// LCDC.0 does not gate the window *machine* on DMG: with BG/window
@@ -1772,7 +2004,7 @@ mod tests {
         p.write(0xFF4A, 0);
         p.write(0xFF4B, 87); // window from pixel 80
         let v0 = render_line(&mut p, 2);
-        assert_eq!(v0, 262, "window penalty applies with LCDC.0 clear");
+        assert_eq!(v0, 261, "window penalty applies with LCDC.0 clear");
         assert_eq!(p.win_line, 2, "line counter advances (lines 0-2)");
         assert_eq!(px(&p, 2, 80), WHITE, "pixels blank through LCDC.0");
     }
@@ -1788,7 +2020,7 @@ mod tests {
         p.write(0xFF4A, 0); // WY = 0
         p.write(0xFF4B, 87); // WX: window from pixel 80
         let v0 = render_line(&mut p, 2);
-        assert_eq!(v0, 262, "window stall applies in compat mode, LCDC.0=0");
+        assert_eq!(v0, 261, "window stall applies in compat mode, LCDC.0=0");
         assert_eq!(p.win_line, 2, "line counter advances (lines 0-2)");
         assert_eq!(px(&p, 2, 80), CGB_WHITE, "pixels blank through LCDC.0");
 
@@ -1797,7 +2029,7 @@ mod tests {
         p.write(0xFF4A, 0);
         p.write(0xFF4B, 87);
         let v0 = render_line(&mut p, 2);
-        assert_eq!(v0, 262, "native CGB: window triggers despite LCDC.0=0");
+        assert_eq!(v0, 261, "native CGB: window triggers despite LCDC.0=0");
         assert_eq!(p.win_line, 2, "lines 0, 1 and 2 advanced the counter");
     }
 
