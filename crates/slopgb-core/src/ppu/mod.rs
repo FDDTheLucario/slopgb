@@ -534,14 +534,14 @@ impl Ppu {
     // --- CPU access blocking (boundaries from lcdon_timing-GS /
     // --- lcdon_write_timing-GS; see module docs) ---
 
-    fn oam_read_blocked(&self) -> bool {
+    pub(crate) fn oam_read_blocked(&self) -> bool {
         self.enabled
             && self.line <= 143
             && !self.line_render_done
             && (!self.glitch_line || self.dot >= GLITCH_MODE3_START)
     }
 
-    fn oam_write_blocked(&self) -> bool {
+    pub(crate) fn oam_write_blocked(&self) -> bool {
         if !self.enabled || self.line > 143 {
             return false;
         }
