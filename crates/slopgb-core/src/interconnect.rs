@@ -200,6 +200,14 @@ pub struct Interconnect {
     /// Re-entrancy guard: a VRAM DMA transfer is stalling the CPU and
     /// ticking the machine internally.
     vram_dma_stall: bool,
+    /// Set for the stolen byte-copy M-cycles of a VRAM DMA service (not
+    /// the teardown cycle): the VRAM DMA owns the bus, so the OAM DMA
+    /// controller performs no source reads of its own — it advances by
+    /// latching the VRAM DMA's bus traffic instead (gambatte memory.cpp
+    /// `dma()` sets `lastOamDmaUpdate_ = disabled_time` around its copy
+    /// loop and advances `oamDmaPos_` inline; see
+    /// [`Self::oam_dma_bus_capture`]).
+    vram_dma_owns_bus: bool,
 
     // CGB misc registers.
     /// FF56 RP bits 0/6/7 as written. No IR peer is modelled: bit 1
@@ -272,6 +280,7 @@ impl Interconnect {
             halt_hdma: HaltHdmaState::Low,
             hdma_prev_hblank: false,
             vram_dma_stall: false,
+            vram_dma_owns_bus: false,
             rp: 0,
             ff72: 0,
             ff73: 0,
@@ -610,6 +619,24 @@ impl Interconnect {
         }
         self.engage_halt_gate(halted);
         if !halted {
+            // The halt-mode wake restarts the OAM DMA controller's clock
+            // one M-cycle ahead of the CPU pipeline: a single catch-up
+            // cycle runs at the wake itself, before the CPU's first
+            // post-wake M-cycle (SameBoy sm83_cpu.c `GB_cpu_run` halt
+            // exit: `gb->dma_cycles = 4; GB_dma_run(gb)` on both the
+            // IME=0 resume and the dispatch path, while `GB_dma_run`
+            // returns early whenever `gb->halted`; hardware-pinned by
+            // gambatte oamdma/oamdmasrc80_halt_*_read8000 out81 and
+            // dma/hdma_transition_oamdma_2 out67, which read the
+            // in-flight source index after a wake). The speed-switch
+            // pause's gate release deliberately does NOT take this path:
+            // oamdma/oamdmasrcC0_speedchange_readC000 out11 pins the
+            // un-caught-up resume there (SameBoy's
+            // speed_switch_halt_countdown expiry likewise skips the
+            // catch-up). The conflict state left behind is unobservable —
+            // every CPU bus access ticks the machine, refreshing it,
+            // before the access.
+            self.oam_dma_tick();
             self.vram_dma_unhalt();
         }
     }
@@ -636,22 +663,13 @@ impl Interconnect {
         // HALT/STOP gate the CPU core clock that drives this controller:
         // neither the setup delay nor the transfer advances while the CPU
         // is halted (see set_cpu_halted; madness/mgb_oam_dma_halt_sprites).
-        if self.cpu_halted {
+        // While a VRAM DMA owns the bus the controller cannot read its
+        // source either: it advances via [`Self::oam_dma_bus_capture`]
+        // from the steal loop instead of here.
+        if self.cpu_halted || self.vram_dma_owns_bus {
             return;
         }
-        // Promote a pending start whose setup delay has elapsed. The old
-        // transfer (if any) keeps copying during the delay cycle
-        // (acceptance/oam_dma_restart) and is replaced exactly when the new
-        // one copies its first byte.
-        match &mut self.dma_start {
-            Some(s) if s.delay == 0 => {
-                let src = s.src;
-                self.dma_start = None;
-                self.dma_run = Some(OamDmaRun { src, idx: 0 });
-            }
-            Some(s) => s.delay -= 1,
-            None => {}
-        }
+        self.oam_dma_promote_start();
         if let Some(run) = self.dma_run {
             let byte = self.oam_dma_source_read(run.src, run.idx);
             self.ppu.oam_dma_write(run.idx, byte);
@@ -661,6 +679,66 @@ impl Interconnect {
                 idx: run.idx,
                 byte,
             });
+            self.dma_run = (run.idx < 159).then_some(OamDmaRun {
+                idx: run.idx + 1,
+                ..run
+            });
+        }
+    }
+
+    /// Promote a pending start whose setup delay has elapsed. The old
+    /// transfer (if any) keeps copying during the delay cycle
+    /// (acceptance/oam_dma_restart) and is replaced exactly when the new
+    /// one copies its first byte. Shared by the controller's own clock
+    /// ([`Self::oam_dma_tick`]) and the VRAM-DMA steal advances
+    /// ([`Self::oam_dma_bus_capture`]): gambatte's `oamDmaPos_` counts
+    /// toward `oamDmaStartPos_` identically on both paths.
+    fn oam_dma_promote_start(&mut self) {
+        match &mut self.dma_start {
+            Some(s) if s.delay == 0 => {
+                let src = s.src;
+                self.dma_start = None;
+                self.dma_run = Some(OamDmaRun { src, idx: 0 });
+            }
+            Some(s) => s.delay -= 1,
+            None => {}
+        }
+    }
+
+    /// One OAM DMA controller advance during a VRAM-DMA bus steal: the
+    /// controller cannot perform its own source read — the VRAM DMA owns
+    /// the bus — so it latches the stolen transfer's bus traffic instead,
+    /// writing `data` to the OAM cell addressed by the *bus address* low
+    /// byte (`src & 0xFF`, NOT the controller's own position), or to the
+    /// CGB-C extra OAM RAM with the usual bits-3/4 alias for low bytes ≥
+    /// $A0. The position still advances, so the skipped source bytes are
+    /// never copied (gambatte-core memory.cpp `dma()`:
+    /// `ioamhram_[src & 0xFF] = data` / `ioamhram_[p & 0xE7] = data`
+    /// per `oamDmaPos_` advance, gated on `!halted()`; hardware-pinned by
+    /// gambatte dma/hdma_transition_oamdma_1/_2 and
+    /// oamdma/oamdmasrcC000_hdmasrc0000).
+    ///
+    /// Called once per stolen M-cycle with that cycle's *last* byte: at
+    /// normal speed gambatte's 4-cc advance grid (`cc - 3 >
+    /// lOamDmaUpdate`, both M-cycle-aligned) lands every advance on the
+    /// second of the two bytes copied per M-cycle; in double speed each
+    /// M-cycle copies one byte and every byte advances.
+    fn oam_dma_bus_capture(&mut self, src: u16, data: u8) {
+        // The speed-switch pause can service a block while the core
+        // clock is gated: the OAM DMA controller is frozen with the CPU
+        // and does not advance (gambatte dma(): `&& !halted()`).
+        if self.cpu_halted {
+            return;
+        }
+        self.oam_dma_promote_start();
+        if let Some(run) = self.dma_run {
+            let p = src & 0xFF;
+            if p < 0xA0 {
+                self.ppu.oam_dma_write(p as u8, data);
+            } else if self.model == Model::Cgb {
+                // AGB skips the extra-RAM write (gambatte `!agbFlag_`).
+                self.extra_oam[Self::extra_oam_index(src)] = data;
+            }
             self.dma_run = (run.idx < 159).then_some(OamDmaRun {
                 idx: run.idx + 1,
                 ..run
@@ -796,14 +874,26 @@ impl Interconnect {
         }
         let per_m = if self.double_speed { 1 } else { 2 };
         while length > 0 {
+            // The byte-copy M-cycles own the bus: the OAM DMA controller's
+            // own clocking is suppressed (the teardown cycle below is a
+            // plain machine cycle again — gambatte restores
+            // lastOamDmaUpdate_ before its `cc += 4`).
+            self.vram_dma_owns_bus = true;
             self.tick_machine();
-            for _ in 0..per_m.min(length) {
-                let byte = self.vram_dma_source_read(self.hdma_src);
+            self.vram_dma_owns_bus = false;
+            for i in 0..per_m.min(length) {
+                let src = self.hdma_src;
+                let byte = self.vram_dma_source_read(src);
                 self.ppu
                     .vram_write_raw(0x8000 | (self.hdma_dst & 0x1FFF), byte);
-                self.hdma_src = self.hdma_src.wrapping_add(1);
+                self.hdma_src = src.wrapping_add(1);
                 self.hdma_dst = self.hdma_dst.wrapping_add(1);
                 length -= 1;
+                if i + 1 == per_m {
+                    // A concurrent OAM DMA advances once per stolen
+                    // M-cycle, latching this cycle's last bus byte.
+                    self.oam_dma_bus_capture(src, byte);
+                }
             }
         }
         if req != VramDmaReq::HblankUnhalt {
@@ -1829,13 +1919,67 @@ mod tests {
         assert_eq!(b.read(0xFE01), 0x81, "copied byte 1 stays");
         assert_eq!(b.read(0xFE02), 0x30, "frozen: old OAM byte persists");
         assert_eq!(b.read(0xC000), 0x80, "no DMA traffic on the external bus");
-        // Waking resumes from byte 2: 158 transfer cycles remain.
+        // Waking copies byte 2 in the release's catch-up cycle (see
+        // `halt_wake_advances_oam_dma_one_catchup_cycle`); 157 transfer
+        // cycles remain after it.
         b.set_cpu_halted(false);
-        ticks(&mut b, 157);
+        ticks(&mut b, 156);
         assert_eq!(b.read(0xFE00), 0xFF, "byte 159 in flight: OAM blocked");
         assert_eq!(b.read(0xFE00), 0x80, "transfer complete");
         assert_eq!(b.read(0xFE02), 0x82, "resumed transfer replaced the byte");
         assert_eq!(b.read(0xFE9F), 0x80u8.wrapping_add(159));
+    }
+
+    /// Releasing the core-clock gate advances a frozen OAM DMA by one
+    /// catch-up M-cycle *at the release itself*, before the CPU's first
+    /// post-wake cycle: the controller's clock restarts with the halt
+    /// exit, one M-cycle ahead of the CPU pipeline (SameBoy sm83_cpu.c
+    /// `GB_cpu_run` halt exit: `gb->dma_cycles = 4; GB_dma_run(gb)` on
+    /// both the IME=0 resume and the dispatch path, while `GB_dma_run`
+    /// itself returns early whenever `gb->halted`). Hardware-pinned by
+    /// gambatte oamdma/oamdmasrc80_halt_lycirq_read8000 /
+    /// _m2irq_read8000 (out81, both models), dma/hdma_transition_oamdma_2
+    /// (out67) and dma/hdma_transition_speedchange_oamdma (out71), all of
+    /// which observe the in-flight source index after a wake.
+    #[test]
+    fn halt_wake_advances_oam_dma_one_catchup_cycle() {
+        let mut b = ic(Model::Dmg);
+        fill_wram(&mut b, 0xC000, 0x50, 0xA0);
+        b.write(0xFF46, 0xC0); // cycle W
+        ticks(&mut b, 6); // W+2..W+6 copy idx 0..4
+        b.set_cpu_halted(true);
+        ticks(&mut b, 50);
+        assert_eq!(b.peek(0xFE05), 0x00, "frozen");
+        b.set_cpu_halted(false);
+        assert_eq!(b.peek(0xFE05), 0x55, "catch-up copy at the gate release");
+        assert_eq!(b.peek(0xFE06), 0x00, "exactly one cycle of catch-up");
+        b.tick();
+        assert_eq!(b.peek(0xFE06), 0x56);
+    }
+
+    /// The speed-switch pause releases the same core-clock gate but
+    /// performs *no* catch-up cycle: the next OAM DMA byte copies on the
+    /// first machine cycle after the pause, not at the release (gambatte
+    /// oamdma/oamdmasrcC0_speedchange_readC000 out11 pins the exact
+    /// post-pause in-flight index, one position below a caught-up resume;
+    /// SameBoy's `speed_switch_halt_countdown` expiry likewise just clears
+    /// `halted` with no `GB_dma_run` call, unlike its halt-exit paths).
+    #[test]
+    fn speed_switch_pause_exit_does_not_catch_up_oam_dma() {
+        let mut b = ic_cgb_mode();
+        fill_wram(&mut b, 0xC000, 0x50, 0xA0);
+        b.write(0xFF4D, 0x01); // arm the switch
+        b.write(0xFF46, 0xC0); // cycle W
+        ticks(&mut b, 6); // W+2..W+6 copy idx 0..4
+        assert!(b.stop(0x0000, false)); // read cycle copies idx 5, then pause
+        assert_eq!(b.peek(0xFE05), 0x55);
+        assert_eq!(b.peek(0xFE06), 0x00, "frozen across the pause, no catch-up");
+        b.tick();
+        assert_eq!(
+            b.peek(0xFE06),
+            0x56,
+            "resumes on the first post-pause cycle"
+        );
     }
 
     /// The FF46 1 M-cycle setup delay counts on the same gated clock, so a
@@ -1850,8 +1994,9 @@ mod tests {
         for _ in 0..10 {
             assert_eq!(b.read(0xFE00), 0x00, "setup delay frozen: no transfer");
         }
+        // The release's catch-up cycle elapses the setup delay; the next
+        // cycle copies byte 0.
         b.set_cpu_halted(false);
-        assert_eq!(b.read(0xFE00), 0x00, "setup delay elapses this cycle");
         assert_eq!(b.read(0xFE00), 0xFF, "byte 0 in flight");
         ticks(&mut b, 159);
         assert_eq!(b.read(0xFE00), 0x80, "transfer complete");
@@ -1871,10 +2016,9 @@ mod tests {
         b.write(0xFF46, 0xC0); // cycle W
         b.set_cpu_halted(true);
         assert_eq!(b.ppu.oam_dma_freeze(), None, "setup delay: no OAM access");
-        b.set_cpu_halted(false);
-        b.tick(); // W+1: setup delay elapses
-        b.tick(); // W+2: byte 0 in flight
-        b.tick(); // W+3: byte 1 in flight
+        b.set_cpu_halted(false); // catch-up cycle: setup delay elapses
+        b.tick(); // byte 0 in flight
+        b.tick(); // byte 1 in flight
         b.set_cpu_halted(true);
         assert_eq!(
             b.ppu.oam_dma_freeze(),
@@ -2749,6 +2893,175 @@ mod tests {
         b.tick();
         assert_eq!(b.peek(0x8000), 0x40);
         assert_eq!(b.read_no_tick(0xFF55), 0x00);
+    }
+
+    // ---- OAM DMA x VRAM DMA bus composition -------------------------------
+
+    /// While a VRAM DMA owns the bus, a concurrently running OAM DMA keeps
+    /// advancing one position per M-cycle but performs no source reads of
+    /// its own: each advance latches the VRAM DMA's bus traffic instead,
+    /// writing the stolen byte to OAM[hdma_src & 0xFF] — the *address* the
+    /// VRAM DMA drove, not the OAM DMA's own position (gambatte-core
+    /// memory.cpp `dma()`: `ioamhram_[src & 0xFF] = data` once per 4 cc,
+    /// gated `cc - 3 > lOamDmaUpdate`, which at normal speed lands the
+    /// advance on the *second* byte of each 2-byte stolen M-cycle —
+    /// hardware-pinned by dma/hdma_transition_oamdma_1's 50 9E 52 9C and
+    /// oamdma/oamdmasrcC000_hdmasrc0000's single 94 capture).
+    #[test]
+    fn vram_dma_steal_advances_oam_dma_capturing_the_bus() {
+        let mut b = ic_cgb_mode();
+        fill_wram(&mut b, 0xC000, 0x50, 0xA0);
+        for i in 0..0xA0 {
+            b.write(0xFE00 + i, 0xF0);
+        }
+        setup_gdma_regs(&mut b, 0x1000, 0x0000); // ROM pattern i ^ 0x5A
+        b.write(0xFF46, 0xC0); // cycle W: OAM DMA from WRAM
+        ticks(&mut b, 5); // W+2..W+5 copy idx 0..3
+        b.write(0xFF55, 0x00); // W+6 copies idx 4, then flags 1 GDMA block
+        b.tick(); // steal: 8 M-cycles (idx 5..12 advance) + teardown (idx 13)
+        for _ in 0..160 {
+            b.tick(); // let the transfer finish
+        }
+        let rom = |i: u8| i ^ 0x5A;
+        // Positions copied normally before the steal, even slots: kept.
+        assert_eq!(b.peek(0xFE00), 0x50);
+        assert_eq!(b.peek(0xFE02), 0x52);
+        assert_eq!(b.peek(0xFE04), 0x54);
+        // Captures land at OAM[src & 0xFF] of the second stolen byte of
+        // each M-cycle — the odd HDMA source offsets — overwriting the
+        // earlier normal copies of idx 1/3.
+        assert_eq!(b.peek(0xFE01), rom(0x01), "capture over earlier copy");
+        assert_eq!(b.peek(0xFE03), rom(0x03), "capture over earlier copy");
+        // Positions 5..12 advanced during the steal without copying their
+        // own source: odd ones hold captures, even ones keep the prefill.
+        assert_eq!(b.peek(0xFE05), rom(0x05));
+        assert_eq!(b.peek(0xFE07), rom(0x07));
+        assert_eq!(b.peek(0xFE09), rom(0x09));
+        assert_eq!(b.peek(0xFE0B), rom(0x0B));
+        for i in [0x06u16, 0x08, 0x0A, 0x0C] {
+            assert_eq!(b.peek(0xFE00 + i), 0xF0, "idx {i:#x} skipped");
+        }
+        // Captures at offsets 0x0D/0x0F are overwritten again by the
+        // normal copies resuming at idx 13 (teardown cycle onward).
+        assert_eq!(b.peek(0xFE0D), 0x5D);
+        assert_eq!(b.peek(0xFE0F), 0x5F);
+        assert_eq!(b.peek(0xFE10), 0x60);
+        assert_eq!(b.peek(0xFE9F), 0xEF);
+    }
+
+    /// A captured bus byte whose address low byte is ≥ 0xA0 lands in the
+    /// CGB-C extra OAM RAM behind FEA0-FEFF, decoded with the same bits
+    /// 3-4 alias (gambatte memory.cpp dma(): `ioamhram_[p & 0xE7] = data`
+    /// for `p >= oam_size`, skipped on AGB).
+    #[test]
+    fn vram_dma_steal_capture_reaches_extra_oam_ram() {
+        let mut b = ic_cgb_mode();
+        fill_wram(&mut b, 0xC000, 0x50, 0xA0);
+        setup_gdma_regs(&mut b, 0x10A0, 0x0000);
+        b.write(0xFF46, 0xC0);
+        ticks(&mut b, 5);
+        b.write(0xFF55, 0x00);
+        b.tick();
+        for _ in 0..170 {
+            b.tick(); // transfer done, OAM idle again
+        }
+        // Captures land at odd offsets 0xA1..0xAF; the bits-3/4 alias
+        // folds 0xA9/0xAB onto the 0xA1/0xA3 cells, so the later capture
+        // wins each cell.
+        assert_eq!(b.read(0xFEA1), 0xA9 ^ 0x5A);
+        assert_eq!(b.read(0xFEA3), 0xAB ^ 0x5A);
+        assert_eq!(b.read(0xFEA9), 0xA9 ^ 0x5A, "bits 3-4 alias");
+    }
+
+    /// In double speed the VRAM DMA copies one byte per stolen M-cycle, so
+    /// *every* stolen byte advances the OAM DMA and is captured (gambatte
+    /// dma(): `cc += 2 + 2 * doubleSpeed` per byte vs the 4-cc advance
+    /// period).
+    #[test]
+    fn vram_dma_steal_captures_every_byte_in_double_speed() {
+        let mut b = ic_cgb_mode();
+        b.write(0xFF4D, 0x01);
+        assert!(b.stop(0x0000, true)); // enter double speed instantly
+        fill_wram(&mut b, 0xC000, 0x50, 0xA0);
+        for i in 0..0xA0 {
+            b.write(0xFE00 + i, 0xF0);
+        }
+        setup_gdma_regs(&mut b, 0x1000, 0x0000);
+        b.write(0xFF46, 0xC0);
+        ticks(&mut b, 5);
+        b.write(0xFF55, 0x00);
+        b.tick(); // steal: 16 M-cycles, one advance + capture per byte
+        for _ in 0..160 {
+            b.tick();
+        }
+        // All 16 block offsets captured — including 0..=4, whose earlier
+        // normal copies are overwritten; positions 5..=20 advanced during
+        // the steal, so none of the captures is re-copied afterwards.
+        for i in 0..16u16 {
+            assert_eq!(b.peek(0xFE00 + i), (i as u8) ^ 0x5A, "offset {i:#x}");
+        }
+        // Positions 16..=20 advanced during the steal too: no capture
+        // (the block only drove offsets 0..=15), no copy — prefill stays.
+        for i in 16..21u16 {
+            assert_eq!(b.peek(0xFE00 + i), 0xF0, "idx {i:#x} skipped");
+        }
+        assert_eq!(b.peek(0xFE15), 0x65, "normal copies resume at idx 21");
+    }
+
+    /// A block serviced while the core clock is gated (the speed-switch
+    /// pause) advances nothing: the OAM DMA controller is frozen with the
+    /// CPU (gambatte dma(): the advance is gated on `!halted()`).
+    #[test]
+    fn vram_dma_steal_does_not_advance_a_halt_frozen_oam_dma() {
+        let mut b = ic_cgb_mode();
+        fill_wram(&mut b, 0xC000, 0x50, 0xA0);
+        for i in 0..0xA0 {
+            b.write(0xFE00 + i, 0xF0);
+        }
+        setup_gdma_regs(&mut b, 0x1000, 0x0000);
+        b.write(0xFF46, 0xC0);
+        ticks(&mut b, 5); // idx 0..3 copied
+        b.set_cpu_halted(true);
+        b.vram_dma_req = Some(VramDmaReq::Gdma);
+        b.run_vram_dma();
+        assert_eq!(b.peek(0xFE01), 0x51, "no capture while frozen");
+        assert_eq!(b.peek(0xFE05), 0xF0, "no position consumed");
+        assert_eq!(b.dma_run.unwrap().idx, 4, "frozen position kept");
+        b.set_cpu_halted(false);
+        ticks(&mut b, 170);
+        assert_eq!(b.peek(0xFE05), 0x55, "transfer resumed normally");
+        assert_eq!(b.peek(0xFE9F), 0xEF);
+    }
+
+    /// The OAM DMA setup delay keeps counting during a steal: the start
+    /// promotion happens on a stolen advance, which captures instead of
+    /// copying byte 0 (gambatte dma(): `if (oamDmaPos_ == oamDmaStartPos_)
+    /// startOamDma(...)` inside the steal loop).
+    #[test]
+    fn vram_dma_steal_counts_oam_dma_startup_delay() {
+        let mut b = ic_cgb_mode();
+        fill_wram(&mut b, 0xC000, 0x50, 0xA0);
+        for i in 0..0xA0 {
+            b.write(0xFE00 + i, 0xF0);
+        }
+        setup_gdma_regs(&mut b, 0x1000, 0x0000);
+        b.write(0xFF46, 0xC0); // cycle W: delay = 1 at commit
+        b.write(0xFF55, 0x00); // W+1 ticks delay to 0, then flags the GDMA
+        b.tick(); // steal precedes this cycle: the start promotes inside it
+        for _ in 0..170 {
+            b.tick();
+        }
+        // Steal advance 1 (2nd stolen byte, offset 1): promote, idx 0
+        // consumed by the capture at OAM[1]. Advances 2..8: idx 1..7
+        // consumed, captures at offsets 3/5/7/9/B/D/F. Normal copies
+        // resume at idx 8 (teardown cycle), overwriting captures 9/B/D/F.
+        assert_eq!(b.peek(0xFE00), 0xF0, "byte 0's copy was stolen");
+        assert_eq!(b.peek(0xFE01), 0x01 ^ 0x5A, "capture during promote");
+        assert_eq!(b.peek(0xFE03), 0x03 ^ 0x5A);
+        assert_eq!(b.peek(0xFE02), 0xF0, "idx 2 skipped (capture at 3)");
+        assert_eq!(b.peek(0xFE07), 0x07 ^ 0x5A);
+        assert_eq!(b.peek(0xFE08), 0x58, "normal copies resume at idx 8");
+        assert_eq!(b.peek(0xFE09), 0x59, "capture at 9 re-copied");
     }
 
     // ---- peek (side-effect-free harness view) -----------------------------
