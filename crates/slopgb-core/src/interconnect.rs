@@ -530,6 +530,15 @@ impl Interconnect {
                 // by 4 cycles").
                 self.if_stat_late = IF_STAT_BIT;
             }
+            if self.ppu.take_stat_halt_late() {
+                // Second-half STAT IF commit (line-start OAM pulses,
+                // mode-0 rises on dots ≡ 3,0 mod 4): readable at once,
+                // but the halt-exit sampler misses it for one cycle —
+                // the same shape as the timer's `if_late` mask (SameBoy
+                // GB_cpu_run halt path; gbmicrotest int_oam_*/
+                // int_hblank_halt_scx* pin the law).
+                self.if_late |= IF_STAT_BIT;
+            }
             // Dot-exact mode-0 entry: each visible line's hblank start
             // requests one HBlank DMA block, serviced at the head of the
             // CPU's next bus operation (gambatte video.cpp: memevent_hdma
@@ -1323,18 +1332,18 @@ impl Bus for Interconnect {
         // later than a running-CPU dispatch would (gambatte tima/tc*_irq_*
         // on both models; wilbertpol timer_if rounds 5/6 vs 3/4).
         //
-        // Deliberately *not* applied to the PPU/serial/joypad IF bits:
-        // this emulator's PPU IRQ anchors are calibrated against the
-        // running CPU's end-of-fetch sampling (CLAUDE.md frozen contract),
-        // which already absorbs the intra-cycle offset — mooneye
-        // intr_2_0_timing/intr_2_mode0_timing (STAT-sourced halt wakes,
-        // hardware-pass on every model incl. CGB/AGB) and
-        // halt_ime1_timing2-GS (vblank, DMG) pass against the live view
-        // and break if those bits are masked here. The known unmodelled
+        // The STAT bit joins the mask per event, not wholesale: the PPU
+        // flags its second-half IF commits (line-start OAM pulses, mode-0
+        // rises on dots ≡ 3,0 mod 4) via `Ppu::take_stat_halt_late`, which
+        // ORs IF_STAT into `if_late` for exactly those cycles — the
+        // gbmicrotest int_oam_*/int_hblank_halt_scx* grids and the
+        // mooneye/wilbertpol hblank halt groupings pin the law, while
+        // first-half STAT commits and the vblank IF stay live
+        // (halt_ime1_timing2-GS, vblank, DMG). The known unmodelled
         // remainder is the CGB/AGB start-of-cycle staleness for first-half
         // PPU commits (halt_ime1_timing2-GS's "fail: CGB, AGB, AGS";
-        // gambatte halt/*_cgb04c split rows): landing it requires
-        // recalibrating the PPU IRQ anchors per model, a separate work
+        // gambatte halt/*_cgb04c split rows): landing it requires a
+        // per-model widening of the halt-late mask, a separate work
         // package.
         (self.intf & !self.if_late) & self.ie & IF_MASK
     }
