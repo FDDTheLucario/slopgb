@@ -48,8 +48,13 @@ slopgb is a cycle-accurate Game Boy (DMG) / Game Boy Color (CGB) emulator.
   (4 internal T-ticks); the APU per M-cycle with the DIV counter passed in
   (DIV-APU = falling edge of DIV bit 4, bit 5 in double speed).
 - OAM DMA is an interconnect engine: 160 M-cycles + startup delay, restart
-  semantics, source-range quirks, and bus conflicts (CPU reads of
-  OAM/conflicting bus during DMA return 0xFF / DMA data per hardware).
+  semantics (an FF46 rewrite retargets the in-flight run immediately),
+  source-range quirks (CGB sources ≥ $E0 read $FF; DMG re-reads WRAM), and
+  bus conflicts mirroring gambatte-core memory.cpp: per-source-class page
+  masks decide which CPU accesses collide; conflicted reads return the
+  in-flight byte, conflicted *writes* derail into the in-flight OAM slot
+  (DMG WRAM sources wire-AND), and CGB redirects WRAM-region accesses to
+  the WRAM page picked by FF46 bit 4 (gambatte `oamdma/` is the oracle).
 
 ## Memory map routing (interconnect)
 
@@ -61,7 +66,7 @@ slopgb is a cycle-accurate Game Boy (DMG) / Game Boy Color (CGB) emulator.
 | C000-DFFF | WRAM (CGB: D000 banked via SVBK, banks 1-7) |
 | E000-FDFF | echo of C000-DDFF |
 | FE00-FE9F | `Ppu` OAM (mode + DMA blocking) |
-| FEA0-FEFF | prohibited area (model-specific reads; DMG: 00/FF behavior — see Pan Docs) |
+| FEA0-FEFF | prohibited area (DMG: 00/FF; CGB-C: 24 B extra OAM RAM, 4× mirrored; AGB: nibble echo — Pan Docs) |
 
 Any CPU access with a $FE00-$FEFF value on the address bus during the
 mode-2 OAM scan triggers the DMG-family OAM corruption bug (Pan Docs "OAM
