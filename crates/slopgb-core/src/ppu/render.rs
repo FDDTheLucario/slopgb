@@ -230,55 +230,120 @@ impl Render {
     }
 }
 
+/// Line dot on which the serial mode-2 scan latches + evaluates OAM
+/// entry `i` (gbctr "OAM scan": one entry per 2 dots across mode 2;
+/// gambatte sprite_mapper.cpp `OamReader::update` latches (y,x) per
+/// entry at the same 2-cycle rate; SameBoy display.c's mode-2 loop).
+///
+/// Anchoring (the one free parameter, like `oam_bug_row`'s): the
+/// gambatte oamdma late_sp00/01/02/39 x/y `_1`/`_2` pairs each race an
+/// OAM DMA start (x) or end (y) one M-cycle apart around a single
+/// slot's latch dot and read the resulting mode-3 length. On both
+/// model families they cohere on entry 0 latching on dot 3 or 4 — the
+/// slot-39 rows (78-dot grid span vs 80-dot delay span) cut each
+/// family's window to {3,4}, indistinguishable at the single-speed
+/// M-cycle granularity; 3 is taken as the canonical anchor. The `_ds`
+/// siblings would discriminate the dot but race at gambatte's half-dot
+/// cc granularity, unrepresentable on this whole-dot lattice (they ride
+/// the documented-swap list with the ds mode-0 flip lead). The last
+/// entry's latch (dot 81) lands before mode 3 consumes the selection at
+/// dot 84.
+const SCAN_OFF: u16 = 3;
+
+fn scan_latch_dot(i: u16) -> u16 {
+    2 * i + SCAN_OFF
+}
+
 impl Ppu {
-    /// Select up to 10 sprites for this line, in OAM order, by Y only
-    /// (X — even 0 or ≥168 — does not affect selection; it only affects
-    /// fetching: see `intr_2_mode0_timing_sprites`).
-    pub(super) fn oam_scan(&mut self) {
-        // While an OAM DMA transfer sits frozen mid-byte (HALT gates the
-        // core clock the DMA controller runs on), the scan does not see
-        // real OAM data. On MGB the result is fully characterized by
-        // madness/mgb_oam_dma_halt_sprites.s, hardware-verified by its
-        // author; the other models differ ("DMG: A different sprite ...
-        // CGB: Checkerboard without sprites ... AGB/AGS: A different
-        // sprite (probably different logic with the values)") and the asm
-        // gives no reference data for them, so they keep the plain scan of
-        // the frozen OAM below.
-        if self.model == Model::Mgb {
-            if let Some((index, new)) = self.dma_freeze {
-                self.oam_scan_dma_freeze_mgb(index, new);
-                return;
-            }
+    /// One dot of the serial OAM scan: latch + evaluate the entry whose
+    /// slot this dot is, if any. Called for every dot below mode-3 start
+    /// (84) of a visible non-glitch line.
+    pub(super) fn oam_scan_step(&mut self) {
+        let off = scan_latch_dot(0);
+        if self.dot < off || (self.dot - off) % 2 != 0 {
+            return;
         }
+        let i = (self.dot - off) / 2;
+        if i >= 40 {
+            return;
+        }
+        if i == 0 {
+            self.render.n_sprites = 0;
+        }
+        self.oam_scan_entry(i as u8);
+    }
+
+    /// Run a whole line's scan at once: selection equivalent of the serial
+    /// grid on an undisturbed line. Test/diagnostic helper only — the dot
+    /// path goes through [`Self::oam_scan_step`].
+    #[cfg(test)]
+    pub(super) fn oam_scan(&mut self) {
+        self.render.n_sprites = 0;
+        for i in 0..40 {
+            self.oam_scan_entry(i);
+        }
+    }
+
+    /// Latch OAM entry `i` from the PPU's OAM view and select it for this
+    /// line if its Y matches, in OAM order, by Y only (X — even 0 or ≥168
+    /// — does not affect selection; it only affects fetching: see
+    /// `intr_2_mode0_timing_sprites`), capped at 10.
+    ///
+    /// The view is not always real OAM:
+    ///
+    /// * While an OAM DMA transfer sits frozen mid-byte on MGB (HALT gates
+    ///   the core clock the DMA controller runs on), every entry reads as
+    ///   the same glitched sprite — fully characterized by
+    ///   madness/mgb_oam_dma_halt_sprites.s, hardware-verified by its
+    ///   author (see [`Self::mgb_dma_freeze_glitch_entry`]).
+    /// * While the OAM DMA controller owns OAM — running *or* frozen by
+    ///   HALT/STOP on the other models ("DMG: A different sprite ... CGB:
+    ///   Checkerboard without sprites" — the asm gives no reference data
+    ///   for their glitches) — the scan is disconnected and latches $FF, a
+    ///   disabled sprite (gambatte memory.cpp startOamDma/endOamDma switch
+    ///   the OamReader source to rdisabledRam; the dmg08-verified
+    ///   oamdma/late_sp* and oamdma_late_halt_stat families pin the
+    ///   selection loss per slot).
+    fn oam_scan_entry(&mut self, i: u8) {
+        let (y, x, tile, flags) = if self.model == Model::Mgb && self.dma_freeze.is_some() {
+            match self.mgb_dma_freeze_glitch_entry() {
+                Some(e) => e,
+                None => return,
+            }
+        } else if self.oam_dma_active {
+            (0xFF, 0xFF, 0xFF, 0xFF)
+        } else {
+            let b = usize::from(i) * 4;
+            (
+                self.oam[b],
+                self.oam[b + 1],
+                self.oam[b + 2],
+                self.oam[b + 3],
+            )
+        };
         let h = if self.eff.lcdc & LCDC_OBJ_SIZE != 0 {
             16u16
         } else {
             8
         };
         let row = u16::from(self.ly) + 16;
-        self.render.n_sprites = 0;
-        for i in 0..40 {
-            let y = u16::from(self.oam[i * 4]);
-            if row >= y && row < y + h {
-                let n = usize::from(self.render.n_sprites);
-                self.render.sprites[n] = Sprite {
-                    y: self.oam[i * 4],
-                    x: self.oam[i * 4 + 1],
-                    tile: self.oam[i * 4 + 2],
-                    flags: self.oam[i * 4 + 3],
-                    idx: i as u8,
-                };
-                self.render.n_sprites += 1;
-                if self.render.n_sprites == 10 {
-                    break;
-                }
-            }
+        if self.render.n_sprites < 10 && row >= u16::from(y) && row < u16::from(y) + h {
+            let n = usize::from(self.render.n_sprites);
+            self.render.sprites[n] = Sprite {
+                y,
+                x,
+                tile,
+                flags,
+                idx: i,
+            };
+            self.render.n_sprites += 1;
         }
     }
 
-    /// MGB OAM scan with an OAM DMA transfer frozen mid-byte by HALT.
-    /// Everything here implements the hardware behavior documented in
-    /// madness/mgb_oam_dma_halt_sprites.s:
+    /// The glitched entry every OAM slot reads as while an OAM DMA
+    /// transfer sits frozen mid-byte on MGB, or `None` when the magic
+    /// enable is absent. Everything here implements the hardware behavior
+    /// documented in madness/mgb_oam_dma_halt_sprites.s:
     ///
     /// With `new` = the in-flight DMA source byte, `old` = the OAM byte it
     /// was about to replace and `next` = the OAM byte after that one, every
@@ -294,17 +359,17 @@ impl Ppu {
     /// cap — so a matching line gets its sprite slots filled with identical
     /// copies, which render as a single sprite shape (the asm's expected
     /// image shows exactly one).
-    fn oam_scan_dma_freeze_mgb(&mut self, index: u8, new: u8) {
-        self.render.n_sprites = 0;
+    fn mgb_dma_freeze_glitch_entry(&self) -> Option<(u8, u8, u8, u8)> {
+        let (index, new) = self.dma_freeze?;
         // "This is the data that somehow enables sprite rendering": without
         // at least one aligned magic entry in OAM, no sprite renders.
         if !oam_glitch_magic_enable(&self.oam) {
-            return;
+            return None;
         }
-        // The interconnect caps the in-flight index at 159, but this pub
-        // API accepts any u8: out-of-range degrades to the undriven-bus
-        // value like `next` below (matching `oam_dma_write`'s bounds
-        // check) instead of panicking.
+        // The interconnect caps the in-flight index at 159, but the pub
+        // freeze API accepts any u8: out-of-range degrades to the
+        // undriven-bus value like `next` below (matching `oam_dma_write`'s
+        // bounds check) instead of panicking.
         let old = self.oam.get(usize::from(index)).copied().unwrap_or(0xFF);
         // The byte after the in-flight one. A freeze on the final byte
         // (index 159) has no successor; the asm does not pin that case and
@@ -316,26 +381,7 @@ impl Ppu {
             .unwrap_or(0xFF);
         let y = (old | new) & 0xFC;
         let x = next | new;
-        let tile = (old | new) & 0xFC;
-        let flags = next | new;
-        let h = if self.eff.lcdc & LCDC_OBJ_SIZE != 0 {
-            16u16
-        } else {
-            8
-        };
-        let row = u16::from(self.ly) + 16;
-        if row >= u16::from(y) && row < u16::from(y) + h {
-            for i in 0..10u8 {
-                self.render.sprites[usize::from(i)] = Sprite {
-                    y,
-                    x,
-                    tile,
-                    flags,
-                    idx: i,
-                };
-            }
-            self.render.n_sprites = 10;
-        }
+        Some((y, x, y, x))
     }
 
     pub(super) fn render_init(&mut self) {
@@ -2210,7 +2256,7 @@ mod tests {
         assert_eq!(px(&p, 2, 8), LIGHT, "row 0 comes from tile&0xFE");
     }
 
-    /// Sprite selection happens at OAM-scan time (dot 80) with the height
+    /// Sprite selection happens at OAM-scan time (mode 2) with the height
     /// LCDC.2 holds *then*; the fetch re-reads LCDC.2. A game clearing
     /// LCDC.2 (16 -> 8) mid-mode-3 can hand the Y-flip a scan-time row
     /// (>= 8) that exceeds the fetch-time height — `h - 1 - row` must not
@@ -2219,7 +2265,7 @@ mod tests {
     fn sprite_height_shrunk_between_scan_and_fetch_no_panic() {
         let mut p = dmg_on(0x97); // 8x16 sprites
         sprite(&mut p, 0, 10, 88, 4, 0x40); // line 2 = row 8, Y-flipped
-        run_to(&mut p, 2, 90); // scanned at dot 80 (h=16); mode 3 running
+        run_to(&mut p, 2, 90); // scanned during mode 2 (h=16); mode 3 running
         p.write(0xFF40, 0x93); // clear LCDC.2 before the sprite's fetch
         let mut guard = 0u32;
         while !p.line_render_done {
@@ -2429,8 +2475,11 @@ mod tests {
     }
 
     /// The glitch is MGB-only: the asm documents different (unreferenced)
-    /// results for DMG/CGB/AGB, so those models keep the plain scan of the
-    /// frozen OAM contents.
+    /// results for DMG/CGB/AGB. With no disconnect level set those models
+    /// fall back to the plain scan of the frozen OAM contents (in the
+    /// integrated machine a freeze always coincides with the DMA owning
+    /// OAM, so their scans latch $FF instead — the dmg08-verified
+    /// gambatte oamdma_late_halt_stat rows pin that selection).
     #[test]
     fn frozen_dma_glitch_is_mgb_only() {
         for model in [Model::Dmg, Model::Cgb, Model::Agb] {
@@ -2450,6 +2499,66 @@ mod tests {
             assert_eq!(p.render.n_sprites, 1, "{model:?}");
             assert_eq!(p.render.sprites[0].y, 0x9F, "{model:?}");
         }
+    }
+
+    // --- dot-serial OAM scan (gbctr "OAM scan": one entry per 2 dots;
+    // --- gambatte sprite_mapper.cpp OamReader; SameBoy display.c mode-2
+    // --- loop) ---
+
+    /// The scan consumes one OAM entry per 2 dots across mode 2: an OAM
+    /// mutation landing mid-scan must not affect entries the scan already
+    /// consumed, and must reach entries it has not.
+    #[test]
+    fn oam_scan_consumes_entries_serially() {
+        let mut p = dmg_on(0x93);
+        sprite(&mut p, 0, 18, 20, 4, 0x00); // covers line 2
+        sprite(&mut p, 30, 18, 40, 4, 0x00); // covers line 2
+        run_to(&mut p, 2, 40); // mid-scan: entry 0 consumed, entry 30 not
+        p.oam[0] = 0; // move both entries off every line
+        p.oam[120] = 0;
+        run_to(&mut p, 2, 83);
+        assert_eq!(
+            p.render.n_sprites, 1,
+            "entry 0 was latched before the write, entry 30 after"
+        );
+        assert_eq!(p.render.sprites[0].idx, 0);
+        // An undisturbed line selects both again (and in OAM order).
+        run_to(&mut p, 3, 83);
+        assert_eq!(p.render.n_sprites, 0, "post-write contents: none match");
+        p.oam[0] = 18;
+        p.oam[120] = 18;
+        run_to(&mut p, 4, 83);
+        assert_eq!(p.render.n_sprites, 2);
+        assert_eq!(p.render.sprites[0].idx, 0);
+        assert_eq!(p.render.sprites[1].idx, 30);
+    }
+
+    /// While the OAM DMA controller owns OAM, the scan's reads are
+    /// disconnected from it and latch $FF — a disabled sprite (gambatte
+    /// memory.cpp startOamDma: the OamReader's source switches to
+    /// rdisabledRam, all $FF, until endOamDma).
+    #[test]
+    fn oam_scan_reads_disabled_while_dma_owns_oam() {
+        let mut p = dmg_on(0x93);
+        sprite(&mut p, 0, 18, 20, 4, 0x00);
+        sprite(&mut p, 30, 18, 40, 4, 0x00);
+        run_to(&mut p, 2, 40); // entry 0 latched, entry 30 not yet
+        p.set_oam_dma_active(true);
+        run_to(&mut p, 2, 83);
+        assert_eq!(p.render.n_sprites, 1, "entry 30's slot read $FF");
+        assert_eq!(p.render.sprites[0].idx, 0);
+        // A fully covered scan selects nothing.
+        run_to(&mut p, 3, 83);
+        assert_eq!(p.render.n_sprites, 0);
+        // Reconnect mid-scan: entries scanned after it read real OAM.
+        run_to(&mut p, 4, 40);
+        p.set_oam_dma_active(false);
+        run_to(&mut p, 4, 83);
+        assert_eq!(p.render.n_sprites, 1);
+        assert_eq!(p.render.sprites[0].idx, 30, "entry 0's slot read $FF");
+        // Fully reconnected: both select again.
+        run_to(&mut p, 5, 83);
+        assert_eq!(p.render.n_sprites, 2);
     }
 
     #[test]
