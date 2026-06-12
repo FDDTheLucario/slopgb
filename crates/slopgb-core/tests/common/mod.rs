@@ -31,6 +31,7 @@ use std::sync::Once;
 
 use slopgb_core::{GameBoy, Model, SCREEN_PIXELS, SCREEN_W};
 
+pub mod framecmp;
 mod protocol;
 pub use protocol::{FIB, TIMEOUT_TCYCLES};
 
