@@ -134,6 +134,8 @@ gambatte/dma/hdma_late_m3speedchange_ly_scx1_6_cgb04c_out93.gbc [Cgb]
 gambatte/dma/hdma_late_m3speedchange_read_hdmadst00_scx1_2_cgb04c_out9F.gbc [Cgb]
 gambatte/dma/hdma_late_m3speedchange_tima_scx1_ds_4_cgb04c_outF7.gbc [Cgb]
 gambatte/dma/hdma_late_speedchange_inc_scx1_ds_2_cgb04c_out02.gbc [Cgb]
+# See the pc_7ffe comment further down (late_gdma_pc_7ffe_1): hardware
+# fetches the pre-copy $8000 byte, the steal lands before the operands.
 gambatte/dma/hdma_pc_7ffe_cgb04c_out02.gbc [Cgb]
 gambatte/dma/hdma_start_1_cgb04c_out0.gbc [Cgb]
 gambatte/dma/hdma_start_ds_1_cgb04c_out0.gbc [Cgb]
@@ -150,8 +152,6 @@ gambatte/dma/hdma_transition_halt_late_unhalt_ldaaimm_hdma_scx1_1_cgb04c_out00.g
 gambatte/dma/hdma_transition_halt_late_unhalt_ldaaimm_hdma_scx1_2_cgb04c_out02.gbc [Cgb]
 gambatte/dma/hdma_transition_halt_late_unhalt_scx1_1_cgb04c_out00.gbc [Cgb]
 gambatte/dma/hdma_transition_halt_m0unhalt_ldaaimm_scx1_cgb04c_out02.gbc [Cgb]
-gambatte/dma/hdma_transition_oamdma_1_cgb04c_out509E529C.gbc [Cgb]
-gambatte/dma/hdma_transition_oamdma_2_cgb04c_out67.gbc [Cgb]
 gambatte/dma/hdma_transition_speedchange_7fffstop_inc_cgb04c_out02.gbc [Cgb]
 gambatte/dma/hdma_transition_speedchange_hdmalen00_hdma5_scx1_cgb04c_out80.gbc [Cgb]
 gambatte/dma/hdma_transition_speedchange_hdmalen01_hdma5_scx1_cgb04c_out81.gbc [Cgb]
@@ -160,7 +160,23 @@ gambatte/dma/hdma_transition_speedchange_hdmalen7f_hdma5_scx1_cgb04c_outFF.gbc [
 gambatte/dma/hdma_transition_speedchange_hdmalen7f_hdmadst10_scx1_cgb04c_out00.gbc [Cgb]
 gambatte/dma/hdma_transition_speedchange_ldaaimm_scx1_cgb04c_outFF.gbc [Cgb]
 gambatte/dma/hdma_transition_speedchange_ldaaimm_scx1_ds_cgb04c_out03.gbc [Cgb]
+# A block serviced inside the speed-switch pause advances the frozen OAM
+# DMA by exactly one position on hardware (expected = frozen idx + 1):
+# neither gambatte (dma() gates every advance on !halted()) nor SameBoy
+# (GB_dma_run returns early while halted) models it, and the plain-pause
+# sibling oamdmasrcC0_speedchange_readC000 (passing) pins that the pause
+# exit itself must NOT catch up — so the +1 belongs to the halted block
+# service specifically; unmodelled pending an upstream tie-break.
 gambatte/dma/hdma_transition_speedchange_oamdma_cgb04c_out71.gbc [Cgb]
+# pc_7ffe rows: executing out of VRAM at $8000 right after the FF55 write
+# at $7FFE, hardware fetches the OLD byte at $8000 ($FA = ld a,(nnnn))
+# *before* the requested transfer steals the bus, then reads both operand
+# bytes from the freshly copied block ($FF $FF) - A = ($FFFF) = IE = $02.
+# Our service seam steals at the head of the very next bus op, so the
+# $8000 fetch already sees the post-copy byte ($3C/blocked) - the same
+# steal-vs-fetch dot parity the hdma_start_*_1 / gdma_cycles_*_2 swaps
+# document below; delaying FF55-flagged services by one bus op flips the
+# passing _2/_1 siblings of those families instead.
 gambatte/dma/late_gdma_pc_7ffe_1_cgb04c_out02.gbc [Cgb]
 gambatte/dmgpalette_during_m3/dmgpalette_during_m3_3.gb [Dmg]
 gambatte/dmgpalette_during_m3/dmgpalette_during_m3_4.gb [Dmg]
@@ -682,12 +698,14 @@ gambatte/oam_access/prewrite_ds_lcdoffset1_2_cgb04c_out0.gbc [Cgb]
 #   power-on content these ROMs never initialize; the expectations encode
 #   the DMG power-up WRAM pattern ($DExx page = $FF, gambatte-core
 #   mem_dumps.h setInitialDmgWram), slopgb zero-fills WRAM.
-# * oamdmasrc80_halt_*_read8000: resume alignment of a HALT-frozen
-#   transfer vs the IRQ dispatch's bus accesses (halt-wake path is
-#   calibrated elsewhere; needs its own wave).
-# * oamdmasrcC000_hdmasrc0000: OAM DMA x HDMA interaction (HDMA wave).
-# * oamdmasrcC0_speedchange_readC000: STOP speed-switch stall mid-transfer
-#   (speedchange wave).
+# * oamdmasrcC000_hdmasrc0000: the OAM-DMA x VRAM-DMA bus capture itself
+#   is modelled (interconnect.rs oam_dma_bus_capture; the
+#   hdma_transition_oamdma and oamdmasrc80_halt_*_read8000 siblings
+#   pass), but this ROM races the steal against the *end* of the OAM DMA:
+#   our block lands one M-cycle later on the OAM-DMA position grid, so
+#   the last capture (block offset $0B) is cut off by the transfer's end
+#   - the same M0-trigger/steal dot parity the dma/hdma_start_*_1 rows
+#   pin (see the mode-3 swaps block below).
 gambatte/oamdma/late_sp00x_1_dmg08_cgb04c_out0.gbc [Dmg]
 gambatte/oamdma/late_sp00x_1_dmg08_cgb04c_out0.gbc [Cgb]
 gambatte/oamdma/late_sp00x_ds_2_cgb04c_out3.gbc [Cgb]
@@ -718,10 +736,6 @@ gambatte/oamdma/oamdma_srcFE00_busyread0000_dmg08_cgb04c_out0.gbc [Dmg]
 gambatte/oamdma/oamdma_srcFE00_busyreadA000_dmg08_cgb04c_out0.gbc [Dmg]
 gambatte/oamdma/oamdma_srcFE00_busyreadC000_dmg08_out0_cgb_xoutblank.gbc [Dmg]
 gambatte/oamdma/oamdma_srcFE00_readFE00_dmg08_cgb04c_out0.gbc [Dmg]
-gambatte/oamdma/oamdmasrc80_halt_lycirq_read8000_dmg08_cgb04c_out81.gbc [Dmg]
-gambatte/oamdma/oamdmasrc80_halt_lycirq_read8000_dmg08_cgb04c_out81.gbc [Cgb]
-gambatte/oamdma/oamdmasrc80_halt_m2irq_read8000_dmg08_cgb04c_out81.gbc [Dmg]
-gambatte/oamdma/oamdmasrc80_halt_m2irq_read8000_dmg08_cgb04c_out81.gbc [Cgb]
 gambatte/oamdma/oamdmasrcC000_hdmasrc0000_cgb04c_out0A940C0D.gbc [Cgb]
 gambatte/scx_during_m3/old/offset_3/scx_during_m3_2.gb [Dmg]
 gambatte/scx_during_m3/old/offset_3/scx_during_m3_3.gb [Dmg]
