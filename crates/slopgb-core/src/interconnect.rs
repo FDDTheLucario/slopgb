@@ -22,15 +22,25 @@ use crate::timer::Timer;
 /// "Interrupts").
 const IF_MASK: u8 = 0x1F;
 
-/// The buses OAM DMA can occupy. While the DMA engine reads a byte from one
-/// of these, a CPU read of any address on the *same* bus returns the DMA's
-/// byte instead (gbctr "OAM DMA": the DMA controller drives the bus).
-/// On DMG, WRAM sits on the external bus; on CGB it has its own bus.
+/// OAM DMA source classes (gambatte-core memptrs.h `OamDmaSrc`, classified
+/// from the FF46 page by memory.cpp `oamDmaInitSetup`). The class decides
+/// what the engine reads and which address pages a CPU access conflicts
+/// with while a byte is in flight (gbctr "OAM DMA": the DMA controller
+/// drives the bus it reads from).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DmaBus {
-    External,
+enum DmaSrcKind {
+    /// FF46 $00-$7F.
+    Rom,
+    /// FF46 $80-$9F.
     Vram,
+    /// FF46 $A0-$BF.
+    Sram,
+    /// FF46 $C0-$DF, plus $E0-$FF on the DMG family (incomplete address
+    /// decoding re-reads WRAM there, acceptance/oam_dma/sources-GS).
     Wram,
+    /// FF46 $E0-$FF on CGB/AGB: the engine reads the idle bus value $FF
+    /// (gambatte memory.cpp `oamDmaSrcPtr` → `rdisabledRam`).
+    Invalid,
 }
 
 /// An OAM DMA transfer in progress: `idx` is the next byte to copy (one per
@@ -39,6 +49,21 @@ enum DmaBus {
 struct OamDmaRun {
     src: u16,
     idx: u8,
+}
+
+/// Conflict state of the current M-cycle: a DMA byte was copied, and CPU
+/// accesses to conflicting pages observe or derail it (see
+/// [`Interconnect::read_no_tick`] / [`Interconnect::write_no_tick`]).
+#[derive(Clone, Copy)]
+struct DmaConflict {
+    kind: DmaSrcKind,
+    /// FF46 of the running transfer; bit 4 selects the WRAM page of the
+    /// CGB WRAM-region redirect.
+    src_hi: u8,
+    /// OAM index the byte was committed to this cycle.
+    idx: u8,
+    /// The byte the DMA engine drove onto the bus (= the byte committed).
+    byte: u8,
 }
 
 /// A freshly written FF46 value waiting out its 1 M-cycle setup delay
@@ -91,9 +116,14 @@ pub struct Interconnect {
     /// CPU core clock gated off by HALT/STOP (see [`Self::set_cpu_halted`]).
     /// The OAM DMA controller shares that clock and freezes with it.
     cpu_halted: bool,
-    /// Bus occupied + byte transferred during the current M-cycle, if a DMA
-    /// byte was copied this cycle.
-    dma_conflict: Option<(DmaBus, u8)>,
+    /// Set while a DMA byte is copied during the current M-cycle.
+    dma_conflict: Option<DmaConflict>,
+    /// FEA0-FEFF on CPU CGB C ([`Model::Cgb`]): 24 bytes of extra OAM RAM,
+    /// mirrored 4 times because low-address bits 3-4 don't decode (Pan
+    /// Docs "FEA0-FEFF range" revisions 0-D; gambatte-core memory.cpp
+    /// indexes `(addr - 0xFE00) & 0xE7`). AGB and the DMG family never
+    /// touch this (see [`Self::prohibited_read`]).
+    extra_oam: [u8; 24],
 
     // CGB VRAM DMA (FF51-FF55).
     /// Source address as assembled from HDMA1/2 (low 4 bits always 0).
@@ -170,6 +200,7 @@ impl Interconnect {
             dma_start: None,
             cpu_halted: false,
             dma_conflict: None,
+            extra_oam: [0; 24],
             hdma_src: 0,
             hdma_dst: 0,
             hdma_active: false,
@@ -412,10 +443,9 @@ impl Interconnect {
         }
         self.cpu_halted = halted;
         let freeze = if halted {
-            self.dma_run.as_ref().map(|run| {
-                let (_, byte) = self.oam_dma_source_read(run.src.wrapping_add(run.idx.into()));
-                (run.idx, byte)
-            })
+            self.dma_run
+                .as_ref()
+                .map(|run| (run.idx, self.oam_dma_source_read(run.src, run.idx)))
         } else {
             None
         };
@@ -444,9 +474,14 @@ impl Interconnect {
             None => {}
         }
         if let Some(run) = self.dma_run {
-            let (bus, byte) = self.oam_dma_source_read(run.src.wrapping_add(run.idx.into()));
+            let byte = self.oam_dma_source_read(run.src, run.idx);
             self.ppu.oam_dma_write(run.idx, byte);
-            self.dma_conflict = Some((bus, byte));
+            self.dma_conflict = Some(DmaConflict {
+                kind: self.dma_src_kind(run.src),
+                src_hi: (run.src >> 8) as u8,
+                idx: run.idx,
+                byte,
+            });
             self.dma_run = (run.idx < 159).then_some(OamDmaRun {
                 idx: run.idx + 1,
                 ..run
@@ -454,39 +489,71 @@ impl Interconnect {
         }
     }
 
-    /// What the OAM DMA engine reads from `addr`, and the bus it occupies
-    /// doing so. Mode-based PPU blocking does not apply.
-    fn oam_dma_source_read(&self, addr: u16) -> (DmaBus, u8) {
-        // 0xE000-0xFFFF: incomplete address decoding re-reads WRAM. This
-        // covers the whole range including 0xFE/0xFF pages
-        // (acceptance/oam_dma/sources-GS: sources $FE/$FF read $DE00/$DF00).
-        let addr = if addr >= 0xE000 { addr - 0x2000 } else { addr };
-        match addr {
-            0x0000..=0x7FFF => (DmaBus::External, self.cart.read_rom(addr)),
-            0x8000..=0x9FFF => (DmaBus::Vram, self.ppu.vram_read_raw(addr)),
-            0xA000..=0xBFFF => (DmaBus::External, self.cart.read_ram(addr)),
-            _ => (self.wram_bus(), self.wram[self.wram_index(addr)]),
+    /// Source class of a transfer from `src` (gambatte-core memory.cpp
+    /// `oamDmaInitSetup`; see [`DmaSrcKind`]).
+    fn dma_src_kind(&self, src: u16) -> DmaSrcKind {
+        match src >> 8 {
+            0x00..=0x7F => DmaSrcKind::Rom,
+            0x80..=0x9F => DmaSrcKind::Vram,
+            0xA0..=0xBF => DmaSrcKind::Sram,
+            0xC0..=0xDF => DmaSrcKind::Wram,
+            _ if self.model.is_cgb() => DmaSrcKind::Invalid,
+            _ => DmaSrcKind::Wram,
         }
     }
 
-    /// The bus WRAM lives on: shared with the cartridge on DMG, its own bus
-    /// on CGB (gbctr: CGB OAM DMA from WRAM does not conflict with ROM).
-    fn wram_bus(&self) -> DmaBus {
-        if self.model.is_cgb() {
-            DmaBus::Wram
+    /// What the OAM DMA engine reads for byte `idx` of a transfer from
+    /// `src`. Mode-based PPU blocking does not apply; ROM/SRAM/VRAM
+    /// banking is live (gambatte memory.cpp `oamDmaSrcPtr`).
+    fn oam_dma_source_read(&self, src: u16, idx: u8) -> u8 {
+        let addr = src + u16::from(idx);
+        match self.dma_src_kind(src) {
+            DmaSrcKind::Rom => self.cart.read_rom(addr),
+            DmaSrcKind::Vram => self.ppu.vram_read_raw(addr),
+            DmaSrcKind::Sram => self.cart.read_ram(addr),
+            // DMG $E0-$FF: incomplete address decoding re-reads WRAM
+            // (acceptance/oam_dma/sources-GS: $FE/$FF read $DE00/$DF00).
+            DmaSrcKind::Wram => {
+                let addr = if addr >= 0xE000 { addr - 0x2000 } else { addr };
+                self.wram[self.wram_index(addr)]
+            }
+            DmaSrcKind::Invalid => 0xFF,
+        }
+    }
+
+    /// Whether a CPU access to `addr` collides with the running transfer's
+    /// bus. One 16-bit mask per source class, bit n = 4 KiB page n
+    /// conflicts (transcribed from gambatte-core memptrs.cpp
+    /// `OamDmaConflictMap`; the FE/FF page never conflicts):
+    ///
+    /// * ROM/SRAM sources drive the external bus; on CGB the WRAM pages
+    ///   C-F conflict *too*, with accesses redirected to WRAM (see
+    ///   [`Self::dma_redirect_wram_index`]).
+    /// * VRAM sources collide only with the VRAM pages 8-9.
+    /// * WRAM sources collide with everything but VRAM on DMG (WRAM sits
+    ///   on the external bus there) but only with pages C-F on CGB (its
+    ///   own bus).
+    fn in_dma_conflict_area(&self, kind: DmaSrcKind, addr: u16) -> bool {
+        let pages: u16 = match kind {
+            DmaSrcKind::Rom | DmaSrcKind::Sram | DmaSrcKind::Invalid => 0xFCFF,
+            DmaSrcKind::Vram => 0x0300,
+            DmaSrcKind::Wram if self.model.is_cgb() => 0xF000,
+            DmaSrcKind::Wram => 0xFCFF,
+        };
+        addr < 0xFE00 && pages >> (addr >> 12) & 1 != 0
+    }
+
+    /// CGB conflict redirect for WRAM-region accesses during a non-WRAM
+    /// transfer: the cell actually accessed is WRAM page 0 or the banked
+    /// page — chosen by FF46 bit 4, not by the address — at offset
+    /// `addr & 0xFFF` (gambatte memory.cpp:
+    /// `cart_.wramdata(ioamhram_[0x146] >> 4 & 1)[p & 0xFFF]`; pinned by
+    /// oamdma_srcXXXX_busypopDFFF/busypushC001+ cgb04c rows).
+    fn dma_redirect_wram_index(&self, c: &DmaConflict, addr: u16) -> usize {
+        if c.src_hi & 0x10 != 0 {
+            self.wram_index(0xD000 | (addr & 0x0FFF))
         } else {
-            DmaBus::External
-        }
-    }
-
-    /// Which DMA bus a CPU access to `addr` would occupy (None: OAM, IO,
-    /// HRAM — never in conflict).
-    fn bus_of(&self, addr: u16) -> Option<DmaBus> {
-        match addr {
-            0x0000..=0x7FFF | 0xA000..=0xBFFF => Some(DmaBus::External),
-            0x8000..=0x9FFF => Some(DmaBus::Vram),
-            0xC000..=0xFDFF => Some(self.wram_bus()),
-            _ => None,
+            usize::from(addr & 0x0FFF)
         }
     }
 
@@ -617,31 +684,76 @@ impl Interconnect {
         self.ppu.oam_bug(kind);
     }
 
-    /// FEA0-FEFF "prohibited" reads. DMG family: $00 while OAM is idle, $FF
-    /// while the PPU has OAM locked (the mode-2 corruption itself lives in
-    /// [`Self::maybe_oam_bug`]). CGB: the high nibble of the low address
-    /// byte twice (Pan Docs "FEA0-FEFF range", revision E behavior).
+    /// Cell of [`Self::extra_oam`] a FEA0-FEFF access decodes to: bits 3-4
+    /// of the low address byte are ignored (gambatte-core memory.cpp masks
+    /// the OAM-relative offset with $E7), leaving 24 cells — offsets
+    /// $A0-$A7/$C0-$C7/$E0-$E7 — each mirrored 4 times.
+    fn extra_oam_index(addr: u16) -> usize {
+        let masked = usize::from(addr & 0xE7);
+        (masked >> 5) * 8 + (masked & 7) - 40
+    }
+
+    /// FEA0-FEFF "prohibited" reads (Pan Docs "FEA0-FEFF range").
+    ///
+    /// * DMG family: $00 while OAM is idle, $FF while the PPU has OAM
+    ///   locked (the mode-2 corruption itself lives in
+    ///   [`Self::maybe_oam_bug`]).
+    /// * CPU CGB C ([`Model::Cgb`], ARCHITECTURE §CGB revision policy):
+    ///   extra OAM RAM behind the same lockout as OAM proper
+    ///   ([`Self::extra_oam`]; gambatte oamdma busypushFEA1/FF01 rows).
+    /// * AGB (and CGB revision E): the high nibble of the low address byte
+    ///   twice.
     fn prohibited_read(&self, addr: u16) -> u8 {
-        if self.model.is_cgb() {
-            let lo = addr as u8;
-            (lo & 0xF0) | (lo >> 4)
-        } else if self.ppu.mode_bits() >= 2 {
-            0xFF
-        } else {
-            0x00
+        match self.model {
+            Model::Cgb => {
+                if self.ppu.oam_read_blocked() {
+                    0xFF
+                } else {
+                    self.extra_oam[Self::extra_oam_index(addr)]
+                }
+            }
+            Model::Agb => {
+                let lo = addr as u8;
+                (lo & 0xF0) | (lo >> 4)
+            }
+            _ if self.ppu.mode_bits() >= 2 => 0xFF,
+            _ => 0x00,
         }
     }
 
-    fn read_no_tick(&self, addr: u16) -> u8 {
-        if let Some((bus, byte)) = self.dma_conflict {
+    /// Write counterpart of [`Self::prohibited_read`]: only the CGB-C
+    /// extra OAM RAM is writable, under the same gating as OAM proper
+    /// (dropped while the PPU scans or a DMA byte is in flight; the
+    /// in-flight gate is gambatte memory.cpp's `oamDmaPos_ < oam_size`).
+    fn prohibited_write(&mut self, addr: u16, value: u8) {
+        if self.model == Model::Cgb && self.dma_conflict.is_none() && !self.ppu.oam_write_blocked()
+        {
+            self.extra_oam[Self::extra_oam_index(addr)] = value;
+        }
+    }
+
+    fn read_no_tick(&mut self, addr: u16) -> u8 {
+        if let Some(c) = self.dma_conflict {
             // OAM (and the prohibited area behind it) reads $FF while a DMA
-            // byte is in flight; reads on the bus the DMA occupies see the
-            // DMA's byte (gbctr OAM DMA bus conflicts).
+            // byte is in flight (gbctr OAM DMA).
             if (0xFE00..=0xFEFF).contains(&addr) {
                 return 0xFF;
             }
-            if self.bus_of(addr) == Some(bus) {
-                return byte;
+            // Reads on conflicting pages see the DMA engine's bus, except
+            // the CGB WRAM-region redirect (gambatte-core memory.cpp
+            // nontrivial_read's OAM-DMA conflict block).
+            if self.in_dma_conflict_area(c.kind, addr) {
+                if self.model.is_cgb() && c.kind != DmaSrcKind::Wram && addr >= 0xC000 {
+                    return self.wram[self.dma_redirect_wram_index(&c, addr)];
+                }
+                if self.model.is_cgb() && c.kind == DmaSrcKind::Vram {
+                    // CGB quirk: the conflicted read also clears the
+                    // in-flight OAM byte (gambatte memory.cpp:
+                    // `ioamhram_[oamDmaPos_] = 0` after a vram-source
+                    // conflict read).
+                    self.ppu.oam_dma_write(c.idx, 0);
+                }
+                return c.byte;
             }
         }
         match addr {
@@ -658,6 +770,36 @@ impl Interconnect {
     }
 
     fn write_no_tick(&mut self, addr: u16, value: u8) {
+        // A CPU write on a conflicting page derails: the addressed memory
+        // (including MBC registers) never sees it. On DMG the byte lands
+        // in the in-flight OAM slot — wire-ANDed with the DMA byte for
+        // WRAM sources, as-is otherwise; CGB additionally zeroes the data
+        // for VRAM sources and redirects WRAM-region writes to WRAM
+        // instead of OAM (gambatte-core memory.cpp nontrivial_write's
+        // OAM-DMA conflict block; pinned by the gambatte
+        // oamdma_srcXXXX_busypush/busypop matrix).
+        if let Some(c) = self.dma_conflict {
+            if self.in_dma_conflict_area(c.kind, addr) {
+                if self.model.is_cgb() {
+                    if addr < 0xC000 {
+                        let byte = if c.kind == DmaSrcKind::Vram { 0 } else { value };
+                        self.ppu.oam_dma_write(c.idx, byte);
+                    } else if c.kind != DmaSrcKind::Wram {
+                        let i = self.dma_redirect_wram_index(&c, addr);
+                        self.wram[i] = value;
+                    }
+                    // WRAM source + WRAM region: the write is swallowed.
+                } else {
+                    let byte = if c.kind == DmaSrcKind::Wram {
+                        c.byte & value
+                    } else {
+                        value
+                    };
+                    self.ppu.oam_dma_write(c.idx, byte);
+                }
+                return;
+            }
+        }
         match addr {
             0x0000..=0x7FFF => self.cart.write_rom(addr, value),
             0x8000..=0x9FFF => self.intf |= self.ppu.write(addr, value) & IF_MASK,
@@ -667,19 +809,12 @@ impl Interconnect {
                 self.wram[i] = value;
             }
             0xFE00..=0xFE9F => {
-                // CPU OAM writes are dropped while DMA owns OAM. This is
-                // the only write-side conflict modelled: a CPU write to
-                // ROM/WRAM on the bus the DMA is reading would also
-                // conflict on hardware (the DMA controller drives that
-                // bus), but gbctr documents only the read side, no mooneye
-                // test covers writes, and real code runs from HRAM during
-                // OAM DMA and never stores to a conflicted bus — so
-                // same-bus writes intentionally pass through unmodelled.
+                // CPU OAM writes are dropped while DMA owns OAM.
                 if self.dma_conflict.is_none() {
                     self.intf |= self.ppu.write(addr, value) & IF_MASK;
                 }
             }
-            0xFEA0..=0xFEFF => {}
+            0xFEA0..=0xFEFF => self.prohibited_write(addr, value),
             0xFF00..=0xFF7F => self.io_write(addr, value),
             0xFF80..=0xFFFE => self.hram[usize::from(addr - 0xFF80)] = value,
             0xFFFF => self.ie = value,
@@ -740,10 +875,20 @@ impl Interconnect {
             0xFF10..=0xFF3F => self.apu.write(addr, value),
             0xFF46 => {
                 self.dma_reg = value;
-                self.dma_start = Some(OamDmaStart {
-                    src: u16::from(value) << 8,
-                    delay: 1,
-                });
+                let src = u16::from(value) << 8;
+                // A rewrite mid-flight retargets the running transfer
+                // immediately: the handover copies before the new
+                // transfer's byte 0 read the NEW source at the old
+                // indices, and conflict like it (gambatte-core memory.cpp
+                // FF46 handler updates ioamhram_[0x146] and re-runs
+                // oamDmaInitSetup before the next copy; pinned by gambatte
+                // oamdma_src8000_srcchange0000_busyread0000_1/2 — mooneye
+                // oam_dma_restart restarts with the same page and cannot
+                // discriminate).
+                if let Some(run) = &mut self.dma_run {
+                    run.src = src;
+                }
+                self.dma_start = Some(OamDmaStart { src, delay: 1 });
             }
             // PPU register writes can raise the STAT line in this very
             // cycle (stat_lyc_onoff round 4): `Ppu::write` returns the IF
@@ -1175,27 +1320,6 @@ mod tests {
         assert_eq!(b.read(0xFF46), 0x8F);
     }
 
-    /// acceptance/oam_dma_restart: the old transfer keeps running during
-    /// the new one's setup delay, then the new one starts from byte 0.
-    #[test]
-    fn oam_dma_restart_old_transfer_runs_through_setup() {
-        let mut b = ic(Model::Dmg);
-        fill_wram(&mut b, 0xC000, 0x80, 160); // old source
-        fill_wram(&mut b, 0xD000, 0x10, 160); // new source
-        b.write(0xFF46, 0xC0); // cycle W
-        b.tick(); // W+1 setup
-        b.tick(); // W+2 old byte 0
-        b.write(0xFF46, 0xD0); // cycle W+3: old byte 1 copied, then write
-        // Cycle W+4 (new setup): the old transfer copies byte 2. Observe it
-        // through the external-bus conflict (WRAM shares the bus on DMG).
-        assert_eq!(b.read(0x0000), 0x82);
-        // Cycle W+5: new transfer byte 0.
-        assert_eq!(b.read(0x0000), 0x10);
-        ticks(&mut b, 161);
-        assert_eq!(b.read(0xFE00), 0x10);
-        assert_eq!(b.read(0xFE05), 0x15);
-    }
-
     /// acceptance/oam_dma/sources-GS: source pages $E0-$FF re-read WRAM,
     /// including $FE/$FF -> $DE00/$DF00.
     #[test]
@@ -1347,14 +1471,19 @@ mod tests {
         assert_eq!(b.ppu.oam_dma_freeze(), None, "cleared on wake");
     }
 
+    /// CGB WRAM has its own bus: a WRAM-source transfer leaves the
+    /// external bus alone, and a ROM-source transfer never puts its byte
+    /// on the WRAM bus — a WRAM-region read mid-transfer goes through the
+    /// conflict *redirect* (same cell here: FF46 bit 4 = 0, offset 0)
+    /// rather than observing the ROM byte.
     #[test]
     fn cgb_wram_is_a_separate_bus() {
         let mut b = ic(Model::Cgb);
         fill_wram(&mut b, 0xC000, 0x80, 160);
-        b.write(0xFF46, 0x10); // ROM source
+        b.write(0xFF46, 0x00); // ROM source
         b.tick();
         b.tick();
-        assert_eq!(b.read(0xC000), 0x80, "CGB WRAM does not conflict with ROM");
+        assert_eq!(b.read(0xC000), 0x80, "no ROM byte on the CGB WRAM bus");
         let mut b = ic(Model::Cgb);
         fill_wram(&mut b, 0xC000, 0x80, 160);
         b.write(0xFF46, 0xC0); // WRAM source
@@ -1362,6 +1491,171 @@ mod tests {
         b.tick();
         assert_eq!(b.read(0x1000), 0x5A, "ROM does not conflict with CGB WRAM");
         assert_eq!(b.read(0xC050), 0x82, "WRAM read sees DMA byte 2");
+    }
+
+    // ---- OAM DMA bus-conflict writes and CGB quirks ----------------------
+    //
+    // Semantics mirrored from gambatte-core memory.cpp (nontrivial_read /
+    // nontrivial_write OAM-DMA conflict blocks) and calibrated against the
+    // hardware-recorded gambatte/oamdma expectation matrix; per-test
+    // citations name the pinning ROMs.
+
+    /// DMG: a CPU write on pages the running transfer occupies derails
+    /// into the in-flight OAM slot (pure CPU byte for a ROM source) and
+    /// never reaches the addressed memory
+    /// (oamdma_src0000_busypushC001_dmg08_out55AA1234: both pushed bytes
+    /// land in OAM $9D/$9E, the WRAM/SRAM marker bytes survive).
+    #[test]
+    fn dmg_conflicted_write_lands_in_oam_slot_not_memory() {
+        let mut b = ic(Model::Dmg);
+        b.write_no_tick(0xC050, 0x34); // marker
+        b.write(0xFF46, 0x10); // ROM source, cycle W
+        b.tick(); // W+1 setup
+        b.tick(); // W+2: byte 0 in flight
+        // Cycle W+3: byte 1 (ROM $1001 = $5B) is in flight; the WRAM write
+        // is on the conflicting external bus.
+        b.write(0xC050, 0xAA);
+        ticks(&mut b, 165); // run the transfer out
+        assert_eq!(b.read(0xFE01), 0xAA, "CPU byte replaced DMA byte 1");
+        assert_eq!(b.read(0xFE02), 0x58, "byte 2 unmolested (ROM $1002)");
+        assert_eq!(b.read(0xC050), 0x34, "memory write suppressed");
+    }
+
+    /// DMG WRAM-source conflict wire-ANDs the CPU byte into the in-flight
+    /// byte (oamdma_srcC000_busypushC001_dmg08_out45221234: $65&$55=$45,
+    /// $76&$AA=$22).
+    #[test]
+    fn dmg_wram_source_write_conflict_is_wired_and() {
+        let mut b = ic(Model::Dmg);
+        fill_wram(&mut b, 0xC000, 0x80, 160);
+        b.write(0xFF46, 0xC0);
+        b.tick();
+        b.tick();
+        b.write(0x4000, 0x55); // ROM page: same external bus on DMG
+        ticks(&mut b, 165);
+        assert_eq!(b.read(0xFE01), 0x81 & 0x55, "wired-AND of DMA and CPU byte");
+    }
+
+    /// CGB VRAM-source conflicts: a conflicted write puts $00 in the slot
+    /// (oamdma_src8000_busypush8001_cgb04c_out00761234), and a conflicted
+    /// read returns the in-flight byte but zeroes the OAM slot afterwards
+    /// (gambatte memory.cpp nontrivial_read: `ioamhram_[oamDmaPos_] = 0`
+    /// for vram sources). DMG keeps the pure CPU byte on writes
+    /// (src8000_busypush8001_dmg08_out55761234).
+    #[test]
+    fn cgb_vram_source_conflicts_zero_oam() {
+        for (model, expect_w) in [(Model::Cgb, 0x00), (Model::Dmg, 0x55)] {
+            let mut b = ic(model);
+            b.write(0x8000, 0x44);
+            b.write(0x8001, 0x45);
+            b.write(0x8002, 0x46);
+            b.write(0xFF46, 0x80);
+            b.tick();
+            b.tick(); // byte 0 in flight
+            b.write(0x9123, 0x55); // byte 1 cycle: VRAM-bus write conflict
+            assert_eq!(b.read(0x9456), 0x46, "byte 2 cycle: conflicted read");
+            ticks(&mut b, 162);
+            assert_eq!(b.read(0xFE01), expect_w, "{model:?}: write conflict");
+            let expect_r = if model.is_cgb() { 0x00 } else { 0x46 };
+            assert_eq!(b.read(0xFE02), expect_r, "{model:?}: read zeroes slot");
+        }
+    }
+
+    /// CGB: ROM/SRAM-source transfers conflict with the WRAM pages too,
+    /// but accesses there are redirected to WRAM bank 0 / the banked page
+    /// (selected by FF46 bit 4) at offset `addr & 0xFFF` — they never
+    /// touch OAM (oamdma_src0000_busypopDFFF_cgb04c_out657655AA: a $DFFF
+    /// read mid-transfer returns WRAM0[$FFF];
+    /// oamdma_srcE000_busypushC001_cgb04c_outFFAA1255: the $C000 write
+    /// lands in WRAM0[0], read back as $55 post-DMA).
+    #[test]
+    fn cgb_conflict_wram_access_redirects_to_ff46_bank() {
+        let mut b = ic(Model::Cgb);
+        fill_wram(&mut b, 0xC000, 0x80, 160);
+        b.write_no_tick(0xCFFF, 0x21);
+        b.write_no_tick(0xDFFF, 0x43);
+        b.write(0xFF46, 0x00); // ROM source, FF46 bit 4 = 0
+        b.tick();
+        b.tick();
+        assert_eq!(b.read(0xDFFF), 0x21, "read redirected to WRAM0[$FFF]");
+        b.write(0xD123, 0x99); // redirected to WRAM0[$123]
+        ticks(&mut b, 162);
+        assert_eq!(b.read(0xC123), 0x99, "write landed in WRAM bank 0");
+        assert_eq!(b.read(0xD123), 0x00, "addressed cell untouched");
+        assert_eq!(b.read(0xFE02), 0x00, "OAM untouched by the redirect");
+
+        // FF46 bit 4 set: the banked page is addressed instead.
+        let mut b = ic(Model::Cgb);
+        b.write_no_tick(0xD456, 0x77);
+        b.write(0xFF46, 0x10); // ROM source, bit 4 = 1
+        b.tick();
+        b.tick();
+        assert_eq!(b.read(0xC456), 0x77, "read redirected to banked WRAM page");
+    }
+
+    /// CGB WRAM-source transfers conflict only with the WRAM pages, and
+    /// CPU writes there are swallowed entirely
+    /// (oamdma_srcC000_busypushE001_cgb04c_out65761234: markers intact,
+    /// OAM untouched).
+    #[test]
+    fn cgb_wram_source_wram_write_swallowed() {
+        let mut b = ic(Model::Cgb);
+        fill_wram(&mut b, 0xC000, 0x80, 160);
+        b.write_no_tick(0xC050, 0x34);
+        b.write(0xFF46, 0xC0);
+        b.tick();
+        b.tick();
+        b.write(0xC050, 0xAA);
+        ticks(&mut b, 165);
+        assert_eq!(b.read(0xFE01), 0x81, "OAM untouched");
+        assert_eq!(b.read(0xC050), 0x34, "write swallowed");
+    }
+
+    /// CGB: FF46 ≥ $E0 is an invalid source — the engine reads $FF
+    /// (gambatte memory.cpp oamDmaSrcPtr → rdisabledRam; every
+    /// srcE000/EF00/F000/FE00/FF00 cgb04c expectation shows $FF OAM
+    /// bytes) while conflicting like a ROM source
+    /// (srcE000_busypush8001_cgb04c_outFFAA1255). DMG keeps the WRAM echo
+    /// (mooneye sources-GS, `oam_dma_high_sources_read_wram_echo`).
+    #[test]
+    fn cgb_high_sources_read_ff_and_conflict() {
+        let mut b = ic(Model::Cgb);
+        fill_wram(&mut b, 0xC000, 0x80, 160);
+        b.write(0xFF46, 0xE0);
+        b.tick();
+        b.tick(); // byte 0 in flight
+        assert_eq!(b.read(0x4000), 0xFF, "ROM page read sees the $FF byte");
+        b.write(0x4000, 0xAA); // conflicted write lands in the OAM slot
+        ticks(&mut b, 162);
+        assert_eq!(b.read(0xFE00), 0xFF);
+        assert_eq!(b.read(0xFE02), 0xAA, "CPU byte in slot 2");
+        assert_eq!(b.read(0xFE9F), 0xFF);
+    }
+
+    /// Restarting a transfer retargets the in-flight run immediately: the
+    /// handover copies before the new transfer's byte 0 read from the NEW
+    /// source at the old indices (gambatte memory.cpp FF46 handler updates
+    /// ioamhram_[0x146] + oamDmaInitSetup before the next copy;
+    /// hardware-pinned by oamdma_src8000_srcchange0000_busyread0000_1/2.
+    /// mooneye oam_dma_restart restarts with the same page and cannot
+    /// discriminate).
+    #[test]
+    fn oam_dma_restart_handover_copies_from_new_source() {
+        let mut b = ic(Model::Dmg);
+        fill_wram(&mut b, 0xC000, 0x80, 160); // old source
+        fill_wram(&mut b, 0xD000, 0x10, 160); // new source
+        b.write(0xFF46, 0xC0); // cycle W
+        b.tick(); // W+1 setup
+        b.tick(); // W+2 old byte 0
+        b.write(0xFF46, 0xD0); // cycle W+3: old byte 1 copied, then retarget
+        // Cycle W+4 (new setup): the handover copy reads the NEW source at
+        // the old index 2. Observe it through the external-bus conflict.
+        assert_eq!(b.read(0x0000), 0x12, "handover byte came from $D002");
+        // Cycle W+5: new transfer byte 0.
+        assert_eq!(b.read(0x0000), 0x10);
+        ticks(&mut b, 161);
+        assert_eq!(b.read(0xFE00), 0x10);
+        assert_eq!(b.read(0xFE05), 0x15);
     }
 
     // ---- prohibited area ------------------------------------------------
@@ -1379,9 +1673,49 @@ mod tests {
         assert_eq!(b.read(0xFEA0), 0xFF, "OAM locked: reads $FF");
     }
 
+    /// FEA0-FEFF on CPU CGB C (the silicon [`Model::Cgb`] pins, see
+    /// ARCHITECTURE §CGB revision policy): extra OAM RAM whose low address
+    /// bits 3-4 don't decode, so each of the 24 cells is mirrored 4 times
+    /// across the region (Pan Docs "FEA0-FEFF range", revisions 0-D;
+    /// gambatte-core memory.cpp indexes `ioamhram_[(p - 0xFE00) & 0xE7]`;
+    /// pinned by gambatte oamdma_srcXXXX_busypushFEA1/FF01 cgb04c rows,
+    /// whose markers written there survive a dropped mid-DMA push).
     #[test]
-    fn prohibited_area_cgb_echoes_high_nibble() {
+    fn prohibited_area_cgb_c_is_extra_ram_with_mirrors() {
         let mut b = ic(Model::Cgb);
+        b.write(0xFEA0, 0x12);
+        b.write(0xFEC1, 0x34);
+        b.write(0xFEFF, 0x56);
+        assert_eq!(b.read(0xFEA0), 0x12);
+        for mirror in [0xFEA8, 0xFEB0, 0xFEB8] {
+            assert_eq!(b.read(mirror), 0x12, "{mirror:04X} mirrors FEA0");
+        }
+        assert_eq!(b.read(0xFEC9), 0x34, "FEC9 mirrors FEC1");
+        assert_eq!(b.read(0xFEF7), 0x56, "FEF7 mirrors FEFF");
+        assert_eq!(b.read(0xFEA1), 0x00, "distinct cell untouched");
+    }
+
+    /// The extra RAM sits behind the same OAM gating as FE00-FE9F: $FF /
+    /// dropped while a DMA byte is in flight (gambatte memory.cpp:
+    /// `oamDmaPos_ < oam_size` guards both paths).
+    #[test]
+    fn cgb_extra_ram_blocked_during_oam_dma() {
+        let mut b = ic(Model::Cgb);
+        b.write(0xFEA0, 0x12);
+        fill_wram(&mut b, 0xC000, 0x80, 160);
+        b.write(0xFF46, 0xC0);
+        b.tick(); // setup
+        b.write(0xFEA0, 0x99); // in flight: dropped
+        assert_eq!(b.read(0xFEA0), 0xFF, "in flight: reads $FF");
+        ticks(&mut b, 161);
+        assert_eq!(b.read(0xFEA0), 0x12, "marker survived the transfer");
+    }
+
+    /// AGB (and CGB revision E) instead echo the high nibble of the low
+    /// address byte twice (Pan Docs "FEA0-FEFF range").
+    #[test]
+    fn prohibited_area_agb_echoes_high_nibble() {
+        let mut b = ic(Model::Agb);
         assert_eq!(b.read(0xFEA3), 0xAA);
         assert_eq!(b.read(0xFEB0), 0xBB);
         assert_eq!(b.read(0xFEFF), 0xFF);

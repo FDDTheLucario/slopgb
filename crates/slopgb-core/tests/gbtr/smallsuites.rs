@@ -217,7 +217,13 @@ fn smallsuites_bully() {
 // -------------------------------------------------------- strikethrough --
 
 // Both legs differ by the same 53 pixels around y=68 (the test's
-// strikethrough-line region); triage in a later phase.
+// strikethrough-line region): the ROM races an OAM DMA against the mode-2
+// scan so the PPU catches exactly one sprite of the line before OAM cuts
+// off — hardware disconnects the PPU's OAM view at a precise dot inside
+// the transfer, while this emulator's monolithic per-line scan still
+// reads the partially-copied OAM array. Same per-dot scan/disconnect
+// mechanism as the gambatte oamdma/late_sp* baseline rows; needs a
+// dot-serial OAM scan to fix.
 const STRIKETHROUGH_BASELINE: &[&str] = &[
     "strikethrough/strikethrough.gb [Dmg]",
     "strikethrough/strikethrough.gb [Cgb]",
