@@ -147,9 +147,8 @@ const BASELINE: &[&str] = &[
     "same-suite/dma/hdma_mode0.gb [Cgb]",
     // interrupt: 1 of 1.
     "same-suite/interrupt/ei_delay_halt.gb [Cgb]",
-    // sgb: both MLT_REQ command tests (SGB packet/multiplayer protocol).
-    "same-suite/sgb/command_mlt_req.gb [Sgb]",
-    "same-suite/sgb/command_mlt_req_1_incrementing.gb [Sgb]",
+    // sgb: none — both MLT_REQ command tests pass via the joypad's SGB
+    // packet receiver + MLT_REQ multiplexer (src/joypad.rs `Sgb`).
 ];
 
 /// Full breakpoint-protocol matrix: every routed rom×model case runs to
