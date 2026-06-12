@@ -109,7 +109,7 @@ fn acid_frame_matrix() {
         .iter()
         .map(|case| CaseResult {
             key: case_key(case.rom, case.model),
-            result: run_case(&root, case),
+            result: harness::catch_case(|| run_case(&root, case)),
         })
         .collect();
     assert_against_baseline("acid", &results, BASELINE);
@@ -118,23 +118,11 @@ fn acid_frame_matrix() {
 /// Inventory of every `.gb`/`.gbc` under this module's suite dirs:
 /// `(claimed, exempted)` collection-relative forward-slash paths. All three
 /// ROMs produce cases (see [`CASES`]); nothing is exempt.
-#[allow(dead_code)] // consumed by the Phase B2 inventory guard
 pub fn inventory() -> (Vec<String>, Vec<String>) {
     let mut claimed: Vec<String> = CASES.iter().map(|c| c.rom.to_string()).collect();
     claimed.sort();
     claimed.dedup(); // dmg-acid2.gb appears in two cases
     (claimed, Vec::new())
-}
-
-/// `path` relative to `root` as a forward-slash string — the inventory key
-/// format, independent of the host path separator.
-fn rel_unix(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or_else(|_| panic!("{} not under {}", path.display(), root.display()))
-        .components()
-        .map(|c| c.as_os_str().to_str().expect("non-UTF-8 ROM path"))
-        .collect::<Vec<_>>()
-        .join("/")
 }
 
 /// Self-check ahead of the global Phase B2 guard: claimed and exempted are
@@ -158,7 +146,7 @@ fn acid_inventory_is_disjoint_and_complete() {
         let mut roms = Vec::new();
         common::collect_roms(&root.join(dir), true, &mut roms)
             .unwrap_or_else(|e| panic!("cannot enumerate {dir}: {e}"));
-        on_disk.extend(roms.iter().map(|p| rel_unix(&root, p)));
+        on_disk.extend(roms.iter().map(|p| harness::rel_unix(&root, p)));
     }
     on_disk.sort();
     let mut union: Vec<String> = claimed.iter().chain(&exempted).cloned().collect();
@@ -172,14 +160,6 @@ fn acid_inventory_is_disjoint_and_complete() {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn rel_unix_joins_components_with_forward_slashes() {
-        assert_eq!(
-            rel_unix(Path::new("/a/b"), Path::new("/a/b/dmg-acid2/dmg-acid2.gb")),
-            "dmg-acid2/dmg-acid2.gb"
-        );
-    }
 
     #[test]
     fn inventory_claims_three_roms_and_exempts_none() {

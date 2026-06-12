@@ -57,7 +57,16 @@ pub struct Apu {
     /// Cap on `samples` (one second of audio) so headless runs that never
     /// call [`Self::drain_samples`] stay flat in memory.
     max_samples: usize,
+    /// Raw audio tap: one stereo sample per dot, taken straight off
+    /// [`Self::mix`] *before* the box-average resampler and the high-pass
+    /// stage of [`Self::output_cycle`] (see [`Self::drain_raw_samples`]).
+    raw_samples: Vec<(f32, f32)>,
 }
+
+/// Cap on [`Apu::raw_samples`] (two frames of dots): the tap exists for
+/// single-frame test assertions — a consumer further behind has lost the
+/// window it cares about — and headless runs never drain at all.
+const RAW_SAMPLE_CAP: usize = 2 * crate::CYCLES_PER_FRAME as usize;
 
 /// Blargg-style single-pole high-pass ("the output capacitor").
 fn high_pass(cap: &mut f32, input: f32, charge: f32) -> f32 {
@@ -151,6 +160,7 @@ impl Apu {
             hp_cap_r: 0.0,
             samples: Vec::new(),
             max_samples: 0,
+            raw_samples: Vec::new(),
         };
         apu.set_sample_rate(DEFAULT_SAMPLE_RATE);
         apu
@@ -420,10 +430,25 @@ impl Apu {
         out.append(&mut self.samples);
     }
 
+    /// Move the raw audio tap into `out`: one stereo sample per dot,
+    /// captured in [`Self::output_cycle`] straight off the channel mixer
+    /// *before* the box-average resampler and the high-pass "output
+    /// capacitor". This is the stream gambatte's testrunner inspects for
+    /// its `_outaudio` sample-equality verdicts — equality there must not
+    /// be broken by a decaying high-pass tail (false "sound") or created
+    /// by the filter flattening distinct inputs (false "silence"). Capped
+    /// at [`RAW_SAMPLE_CAP`]; drain right before the frame under test.
+    pub fn drain_raw_samples(&mut self, out: &mut Vec<(f32, f32)>) {
+        out.append(&mut self.raw_samples);
+    }
+
     /// Accumulate one T-cycle of output; emit an averaged sample whenever
     /// `CLOCK_HZ / sample_rate` cycles have been gathered.
     fn output_cycle(&mut self) {
         let (l, r) = self.mix();
+        if self.raw_samples.len() < RAW_SAMPLE_CAP {
+            self.raw_samples.push((l, r));
+        }
         self.sum_l += l;
         self.sum_r += r;
         self.sum_count += 1;
@@ -1194,6 +1219,53 @@ mod tests {
         );
         // ...but the first samples did see the offset (DAC actually mixes).
         assert!(out[0].0.abs() > 0.05);
+    }
+
+    #[test]
+    fn raw_tap_is_pre_average_pre_high_pass() {
+        // Constant DC input (DAC on, channel silent): the raw pre-filter
+        // tap must report bit-identical samples for the whole run —
+        // gambatte's testrunner judges silence by raw-sample equality —
+        // while the filtered drain_samples output decays through the
+        // output capacitor (i.e. varies).
+        let mut h = H::dmg();
+        h.w(0xFF24, 0x77);
+        h.w(0xFF25, 0xFF);
+        h.w(0xFF12, 0xF0); // ch1 DAC on, channel not triggered -> pure DC
+        h.ticks(8192);
+        let mut raw = Vec::new();
+        h.apu.drain_raw_samples(&mut raw);
+        assert_eq!(raw.len(), 8192 * 4, "one raw sample per dot");
+        let (l0, r0) = raw[0];
+        assert!(l0 != 0.0, "the DC offset must reach the tap");
+        assert!(
+            raw.iter()
+                .all(|&(l, r)| l.to_bits() == l0.to_bits() && r.to_bits() == r0.to_bits()),
+            "raw samples must be bit-identical under constant DC"
+        );
+        let mut filtered = Vec::new();
+        h.apu.drain_samples(&mut filtered);
+        let f0 = filtered[0].0;
+        assert!(
+            filtered.iter().any(|&(l, _)| l.to_bits() != f0.to_bits()),
+            "high-passed output must decay (vary) under constant DC"
+        );
+    }
+
+    #[test]
+    fn raw_tap_is_capped_and_draining_restarts_collection() {
+        let mut h = H::dmg();
+        // Run far past the cap: the buffer must stop growing, not OOM.
+        h.ticks(RAW_SAMPLE_CAP as u32 / 4 + 10_000);
+        assert_eq!(h.apu.raw_samples.len(), RAW_SAMPLE_CAP);
+        let mut out = Vec::new();
+        h.apu.drain_raw_samples(&mut out);
+        assert_eq!(out.len(), RAW_SAMPLE_CAP);
+        assert!(h.apu.raw_samples.is_empty());
+        // Collection resumes after a drain (the gambatte harness drains the
+        // 15 warm-up frames, then captures exactly the final frame).
+        h.ticks(100);
+        assert_eq!(h.apu.raw_samples.len(), 400);
     }
 
     #[test]

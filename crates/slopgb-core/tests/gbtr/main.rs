@@ -8,9 +8,8 @@
 //! baseline is progress, growing one is a regression. Suites pick models
 //! and reference images per docs/ARCHITECTURE.md §CGB revision policy.
 
-// dead_code: the mooneye binary consumes the parts of `common` this binary
-// does not (run_group etc.); suite modules consume `harness` incrementally
-// through Phase B — the allows come off with the inventory guard.
+// dead_code: `common` is shared with the mooneye binary, which consumes the
+// parts this binary does not (run_group etc.).
 #[allow(dead_code)]
 #[path = "../common/mod.rs"]
 mod common;
@@ -23,6 +22,7 @@ mod gbmicrotest;
 mod harness;
 mod inventory;
 mod mealybug;
+mod mooneye2022;
 mod same_suite;
 mod smallsuites;
 mod wilbertpol;

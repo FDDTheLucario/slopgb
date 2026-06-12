@@ -288,17 +288,6 @@ fn png_stems(dir: &Path) -> Vec<String> {
     stems
 }
 
-/// Collection-relative forward-slash path — stable across platforms; these
-/// strings are baseline keys and inventory entries.
-fn rel_key(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .expect("rom under collection root")
-        .components()
-        .map(|c| c.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
 /// Run one fib-protocol case: `LD B,B` then the Fibonacci signature.
 fn run_fib_case(rom: &[u8], model: Model) -> Result<(), String> {
     let mut gb = harness::boot(rom, model);
@@ -349,7 +338,6 @@ fn suite_roms(test: &str) -> Option<(PathBuf, Vec<PathBuf>)> {
 /// exempted = the [`segment_models`] revision-skips — `cgbE`-only and
 /// `ncmE`-only variants, ARCHITECTURE.md §CGB revision policy row
 /// "`-cgbE` ×6, `-ncmE` ×3").
-#[allow(dead_code)] // consumed by the Phase B2 inventory guard
 pub fn inventory() -> (Vec<String>, Vec<String>) {
     let Some((root, roms)) = suite_roms("age inventory") else {
         return (Vec::new(), Vec::new());
@@ -357,7 +345,7 @@ pub fn inventory() -> (Vec<String>, Vec<String>) {
     let mut claimed = Vec::new();
     let mut exempted = Vec::new();
     for rom_path in &roms {
-        let rel = rel_key(&root, rom_path);
+        let rel = harness::rel_unix(&root, rom_path);
         if cases_for(rom_path).is_empty() {
             exempted.push(rel);
         } else {
@@ -377,7 +365,7 @@ fn age_matrix() {
     let mut results: Vec<CaseResult> = Vec::new();
     for rom_path in &roms {
         let cases = cases_for(rom_path);
-        let rel = rel_key(&root, rom_path);
+        let rel = harness::rel_unix(&root, rom_path);
         if cases.is_empty() {
             println!(
                 "note: {rel} skipped (revision not modeled; ARCHITECTURE.md §CGB revision policy)"
@@ -387,10 +375,10 @@ fn age_matrix() {
         let rom = std::fs::read(rom_path)
             .unwrap_or_else(|e| panic!("cannot read {}: {e}", rom_path.display()));
         for case in cases {
-            let result = match &case.proto {
+            let result = harness::catch_case(|| match &case.proto {
                 Proto::Fib => run_fib_case(&rom, case.model),
                 Proto::Frame(png) => run_frame_case(&rom, case.model, png),
-            };
+            });
             results.push(CaseResult {
                 key: harness::case_key(&rel, case.model),
                 result,
@@ -418,7 +406,7 @@ fn age_inventory_partitions_suite() {
     }
     let mut combined: Vec<String> = claimed.iter().chain(&exempted).cloned().collect();
     combined.sort();
-    let mut on_disk: Vec<String> = roms.iter().map(|p| rel_key(&root, p)).collect();
+    let mut on_disk: Vec<String> = roms.iter().map(|p| harness::rel_unix(&root, p)).collect();
     on_disk.sort();
     assert_eq!(combined, on_disk, "inventory does not cover age-test-roms/");
     // ARCHITECTURE.md §CGB revision policy, age row: "-cgbE ×6, -ncmE ×3".

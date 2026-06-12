@@ -218,17 +218,6 @@ fn serial_contains(haystack: &[u8], needle: &str) -> bool {
     !needle.is_empty() && haystack.windows(needle.len()).any(|w| w == needle)
 }
 
-/// Collection-relative forward-slash key for a ROM path (stable across
-/// platforms — Windows yields backslash components otherwise).
-fn rel_key(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .components()
-        .map(|c| c.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
 fn t_cycles(seconds: f64) -> u64 {
     (seconds * f64::from(CLOCK_HZ)) as u64
 }
@@ -338,9 +327,9 @@ fn subsuite(label: &str, dir: &str, recursive: bool, baseline: &[&str]) {
     );
     let mut results = Vec::new();
     for rom_path in &roms {
-        let rel = rel_key(&root, rom_path);
+        let rel = harness::rel_unix(&root, rom_path);
         for (model, protocol) in route(&rel) {
-            let result = run_case(&root, &rel, model, &protocol);
+            let result = harness::catch_case(|| run_case(&root, &rel, model, &protocol));
             results.push(CaseResult {
                 key: case_key(&rel, model),
                 result,
@@ -460,7 +449,6 @@ fn blargg_halt_bug() {
 /// under `blargg/`. Every blargg ROM produces at least one rom×model case
 /// (the suite has no documented never-run ROMs), so `exempted` is empty —
 /// [`blargg_inventory_matches_disk`] asserts that and the exact coverage.
-#[allow(dead_code)] // consumed by the Phase B2 inventory guard
 pub fn inventory() -> (Vec<String>, Vec<String>) {
     let Some(root) = common::gbtr_root() else {
         return (Vec::new(), Vec::new());
@@ -472,7 +460,7 @@ pub fn inventory() -> (Vec<String>, Vec<String>) {
     let mut claimed = Vec::new();
     let mut exempted = Vec::new();
     for rom in &roms {
-        let rel = rel_key(&root, rom);
+        let rel = harness::rel_unix(&root, rom);
         if route(&rel).is_empty() {
             exempted.push(rel);
         } else {
@@ -500,7 +488,7 @@ fn blargg_inventory_matches_disk() {
     union.sort();
     let mut disk = Vec::new();
     common::collect_roms(&root.join("blargg"), true, &mut disk).expect("walk blargg/");
-    let mut disk: Vec<String> = disk.iter().map(|p| rel_key(&root, p)).collect();
+    let mut disk: Vec<String> = disk.iter().map(|p| harness::rel_unix(&root, p)).collect();
     disk.sort();
     assert_eq!(union, disk, "claimed ∪ exempted must equal the on-disk set");
     // No blargg ROM is exempt: every one runs through serial, signature or
@@ -682,14 +670,5 @@ mod tests {
         assert!(!serial_contains(b"Passed all te", "Passed all tests"));
         assert!(!serial_contains(b"", "Passed"));
         assert!(!serial_contains(b"Pass", "Passed"));
-    }
-
-    // --- key construction ---
-
-    #[test]
-    fn rel_key_is_forward_slash_collection_relative() {
-        let root = Path::new("/r/test-roms/game-boy-test-roms-v7.0");
-        let path = root.join("blargg").join("oam_bug").join("oam_bug.gb");
-        assert_eq!(rel_key(root, &path), "blargg/oam_bug/oam_bug.gb");
     }
 }

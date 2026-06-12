@@ -6,16 +6,9 @@
 //! suite's own directory; this test stitches them together and walks disk.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
 
 use crate::common;
-
-/// Collection dirs covered elsewhere, not by this binary:
-/// `mooneye-test-suite/` duplicates the pinned mts bundle that
-/// `tests/mooneye.rs` already runs (439 rom×model combos, breakpoint
-/// protocol + frame compares), so re-running the copy here would only
-/// double CI time without adding coverage.
-const FOREIGN_COVERED_DIRS: &[&str] = &["mooneye-test-suite/"];
+use crate::harness;
 
 #[test]
 fn every_collection_rom_is_claimed_or_exempted_exactly_once() {
@@ -28,13 +21,14 @@ fn every_collection_rom_is_claimed_or_exempted_exactly_once() {
     };
 
     type Inventory = fn() -> (Vec<String>, Vec<String>);
-    let suites: [(&str, Inventory); 9] = [
+    let suites: [(&str, Inventory); 10] = [
         ("acid", crate::acid::inventory),
         ("age", crate::age::inventory),
         ("blargg", crate::blargg::inventory),
         ("gambatte", crate::gambatte::inventory),
         ("gbmicrotest", crate::gbmicrotest::inventory),
         ("mealybug", crate::mealybug::inventory),
+        ("mooneye2022", crate::mooneye2022::inventory),
         ("same_suite", crate::same_suite::inventory),
         ("smallsuites", crate::smallsuites::inventory),
         ("wilbertpol", crate::wilbertpol::inventory),
@@ -60,8 +54,7 @@ fn every_collection_rom_is_claimed_or_exempted_exactly_once() {
     common::collect_roms(&root, true, &mut on_disk).expect("collection walk failed");
     let on_disk: BTreeSet<String> = on_disk
         .iter()
-        .map(|p| rel_unix(&root, p))
-        .filter(|rel| !FOREIGN_COVERED_DIRS.iter().any(|d| rel.starts_with(d)))
+        .map(|p| harness::rel_unix(&root, p))
         .collect();
 
     let inventoried: BTreeSet<String> = owner.keys().cloned().collect();
@@ -88,14 +81,4 @@ fn every_collection_rom_is_claimed_or_exempted_exactly_once() {
         phantom.len(),
         phantom.join("\n  "),
     );
-}
-
-/// Collection-relative path with forward slashes (the suites' key format).
-fn rel_unix(root: &Path, p: &Path) -> String {
-    p.strip_prefix(root)
-        .expect("rom outside collection root")
-        .components()
-        .map(|c| c.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
 }
