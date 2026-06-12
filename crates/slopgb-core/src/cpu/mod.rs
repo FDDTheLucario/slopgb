@@ -107,4 +107,12 @@ impl Cpu {
     pub fn debug_breakpoint_hit(&self) -> bool {
         self.debug_breakpoint
     }
+
+    /// True once the CPU has executed an undefined opcode and entered the
+    /// permanent hard-lock (gbctr "undefined opcodes": the CPU hangs and
+    /// interrupts do not wake it). Harness hook — wilbertpol's mooneye
+    /// fork ends its tests with 0xED.
+    pub fn debug_undefined_hit(&self) -> bool {
+        self.locked
+    }
 }

@@ -161,4 +161,33 @@ impl GameBoy {
     pub fn model(&self) -> Model {
         self.bus.model()
     }
+
+    // ---- test-harness escape hatches (not public API) ----
+
+    /// Drain the bytes "printed" over the link port: every completed
+    /// internal-clock serial transfer (SB <- byte, then $81 to SC — the
+    /// blargg test-ROM protocol) appends the byte that was shifted out.
+    /// The undrained buffer is capped at 64 KiB.
+    #[doc(hidden)]
+    pub fn take_serial_output(&mut self) -> Vec<u8> {
+        self.bus.take_serial_output()
+    }
+
+    /// Side-effect-free memory peek: no M-cycle passes and nothing is
+    /// mutated (`&self`). Follows live ROM/VRAM/cart-RAM/WRAM banking and
+    /// intentionally ignores PPU VRAM/OAM access blocking; IO registers
+    /// (FF00-FF7F) are not peekable and read $FF (see
+    /// `Interconnect::peek`).
+    #[doc(hidden)]
+    pub fn peek(&self, addr: u16) -> u8 {
+        self.bus.peek(addr)
+    }
+
+    /// True once the CPU has executed an undefined opcode (0xD3, 0xDB,
+    /// 0xDD, 0xE3, 0xE4, 0xEB, 0xEC, 0xED, 0xF4, 0xFC, 0xFD) and
+    /// hard-locked — wilbertpol's mooneye fork ends its tests with 0xED.
+    #[doc(hidden)]
+    pub fn debug_undefined_hit(&self) -> bool {
+        self.cpu.debug_undefined_hit()
+    }
 }
