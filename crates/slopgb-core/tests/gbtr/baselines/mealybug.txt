@@ -1,0 +1,77 @@
+# mealybug-tearoom-tests known-failure baseline (one case key per line,
+# consumed by gbtr/mealybug.rs via parse_baseline). Discovered by running
+# mealybug_matrix against the pinned v7.0 collection; shrinking this list is
+# progress, growing it is a regression (harness::assert_against_baseline).
+#
+# 53 of 55 rom x model legs fail; only mbc/mbc3_rtc.gb passes (both models).
+# All ROMs reach LD B,B — no timeouts; every ppu failure is a frame mismatch
+# against the bundled reference, every dma failure is the mooneye all-$42
+# fail-register signature.
+
+# dma/: HDMA timing — registers report the ROMs' fail code ($42 everywhere).
+mealybug-tearoom-tests/dma/hdma_during_halt-C.gb [Cgb]
+mealybug-tearoom-tests/dma/hdma_timing-C.gb [Cgb]
+
+# ppu/ mode-2 window-enable toggling.
+mealybug-tearoom-tests/ppu/m2_win_en_toggle.gb [Cgb]
+mealybug-tearoom-tests/ppu/m2_win_en_toggle.gb [Dmg]
+
+# ppu/ mode-3 mid-scanline palette writes (BGP/OBP0).
+mealybug-tearoom-tests/ppu/m3_bgp_change.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_bgp_change.gb [Dmg]
+mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb [Dmg]
+mealybug-tearoom-tests/ppu/m3_obp0_change.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_obp0_change.gb [Dmg]
+
+# ppu/ mode-3 mid-scanline LCDC writes (bg/win enable, maps, tile data,
+# obj enable/size).
+mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change.gb [Dmg]
+mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change2.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_lcdc_bg_map_change.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_lcdc_bg_map_change.gb [Dmg]
+mealybug-tearoom-tests/ppu/m3_lcdc_bg_map_change2.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change.gb [Dmg]
+mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change_variant.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change_variant.gb [Dmg]
+mealybug-tearoom-tests/ppu/m3_lcdc_obj_size_change.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_lcdc_obj_size_change.gb [Dmg]
+mealybug-tearoom-tests/ppu/m3_lcdc_obj_size_change_scx.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_lcdc_obj_size_change_scx.gb [Dmg]
+mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_change.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_change.gb [Dmg]
+mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_change2.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_win_change.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_win_change.gb [Dmg]
+mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_win_change2.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple.gb [Dmg]
+mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple_wx.gb [Dmg]
+mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change.gb [Dmg]
+mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change2.gb [Cgb]
+
+# ppu/ mode-3 mid-scanline scroll writes (SCX/SCY).
+mealybug-tearoom-tests/ppu/m3_scx_high_5_bits.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_scx_high_5_bits.gb [Dmg]
+mealybug-tearoom-tests/ppu/m3_scx_high_5_bits_change2.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_scx_low_3_bits.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_scx_low_3_bits.gb [Dmg]
+mealybug-tearoom-tests/ppu/m3_scy_change.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_scy_change.gb [Dmg]
+mealybug-tearoom-tests/ppu/m3_scy_change2.gb [Cgb]
+
+# ppu/ mode-3 mid-scanline WX writes.
+mealybug-tearoom-tests/ppu/m3_wx_4_change.gb [Dmg]
+mealybug-tearoom-tests/ppu/m3_wx_4_change_sprites.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_wx_4_change_sprites.gb [Dmg]
+mealybug-tearoom-tests/ppu/m3_wx_5_change.gb [Dmg]
+mealybug-tearoom-tests/ppu/m3_wx_6_change.gb [Dmg]
+
+# ppu/ window start timing.
+mealybug-tearoom-tests/ppu/m3_window_timing.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_window_timing.gb [Dmg]
+mealybug-tearoom-tests/ppu/m3_window_timing_wx_0.gb [Cgb]
+mealybug-tearoom-tests/ppu/m3_window_timing_wx_0.gb [Dmg]
