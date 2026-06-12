@@ -87,26 +87,69 @@ pub fn mts_root() -> Option<PathBuf> {
     releases.pop()
 }
 
+/// Pinned c-sp/game-boy-test-roms release directory name under
+/// `<repo>/test-roms/` — the multi-suite aggregation (blargg, gambatte,
+/// dmg-acid2, ...). The release zip has no top-level directory;
+/// `test-roms/download.sh` extracts it into this directory and verifies the
+/// zip's sha256, so bump the script's pin together with this name.
+pub const GBTR_DIR: &str = "game-boy-test-roms-v7.0";
+
+/// Locate the pinned game-boy-test-roms collection
+/// (`<repo>/test-roms/game-boy-test-roms-v7.0`). `None` when the collection
+/// is not checked out — callers print a skip notice instead of failing
+/// (unless `SLOPGB_REQUIRE_ROMS=1`, see [`missing_gbtr_outcome`]).
+pub fn gbtr_root() -> Option<PathBuf> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../test-roms")
+        .join(GBTR_DIR);
+    root.is_dir().then_some(root)
+}
+
 /// Decide how a missing ROM bundle/directory is handled, given the value of
 /// the `SLOPGB_REQUIRE_ROMS` environment variable: `Ok` carries the skip
 /// notice to print, `Err` the hard-failure message (when the variable is
 /// `1`, as CI sets it, so a checkout that never ran `test-roms/download.sh`
 /// cannot come up all-green). The env value is a *parameter* rather than
 /// read here so the decision is unit-testable without mutating process
-/// environment from parallel test threads.
+/// environment from parallel test threads. `bundle` names the missing
+/// fetchable in the failure message.
+fn missing_bundle_outcome(
+    require_roms: Option<&str>,
+    test: &str,
+    missing: &str,
+    bundle: &str,
+) -> Result<String, String> {
+    if require_roms == Some("1") {
+        Err(format!(
+            "{test}: {missing}, and SLOPGB_REQUIRE_ROMS=1 forbids skipping — \
+             run test-roms/download.sh to fetch {bundle}"
+        ))
+    } else {
+        Ok(format!("skipping {test}: {missing}"))
+    }
+}
+
+/// [`missing_bundle_outcome`] for the mooneye test-suite ROMs.
 pub fn missing_roms_outcome(
     require_roms: Option<&str>,
     test: &str,
     missing: &str,
 ) -> Result<String, String> {
-    if require_roms == Some("1") {
-        Err(format!(
-            "{test}: {missing}, and SLOPGB_REQUIRE_ROMS=1 forbids skipping — \
-             run test-roms/download.sh to fetch the mooneye test ROMs"
-        ))
-    } else {
-        Ok(format!("skipping {test}: {missing}"))
-    }
+    missing_bundle_outcome(require_roms, test, missing, "the mooneye test ROMs")
+}
+
+/// [`missing_bundle_outcome`] for the game-boy-test-roms collection.
+pub fn missing_gbtr_outcome(
+    require_roms: Option<&str>,
+    test: &str,
+    missing: &str,
+) -> Result<String, String> {
+    missing_bundle_outcome(
+        require_roms,
+        test,
+        missing,
+        "the game-boy-test-roms collection",
+    )
 }
 
 /// Print a skip notice for a missing ROM bundle/directory, or panic when
@@ -912,6 +955,45 @@ mod tests {
                 assert!(root.join("acceptance").is_dir());
             }
             None => println!("note: test-roms/mts-* not present, discovery returned None"),
+        }
+    }
+
+    #[test]
+    fn missing_gbtr_skip_when_env_unset() {
+        let notice = missing_gbtr_outcome(None, "blargg", "not present").unwrap();
+        assert_eq!(notice, "skipping blargg: not present");
+    }
+
+    #[test]
+    fn missing_gbtr_skip_when_env_not_one() {
+        // Only the documented value "1" arms the gate.
+        assert!(missing_gbtr_outcome(Some("0"), "blargg", "not present").is_ok());
+        assert!(missing_gbtr_outcome(Some(""), "blargg", "not present").is_ok());
+    }
+
+    #[test]
+    fn missing_gbtr_fail_when_required() {
+        let err = missing_gbtr_outcome(Some("1"), "blargg", "not present").unwrap_err();
+        // The failure must be actionable: name the gate and the fetch script.
+        assert!(err.contains("blargg: not present"), "{err}");
+        assert!(err.contains("SLOPGB_REQUIRE_ROMS=1"), "{err}");
+        assert!(err.contains("test-roms/download.sh"), "{err}");
+        // And name the right bundle: the collection, not the mooneye ROMs.
+        assert!(err.contains("game-boy-test-roms"), "{err}");
+    }
+
+    #[test]
+    fn rom_discovery_points_at_gbtr_collection() {
+        match gbtr_root() {
+            Some(root) => {
+                let name = root.file_name().unwrap().to_str().unwrap();
+                assert_eq!(name, GBTR_DIR);
+                // The release zip has no top-level directory; download.sh
+                // extracts it into $GBTR_DIR, so the collection's own README
+                // sits at the root of the resolved path.
+                assert!(root.join("README.md").is_file());
+            }
+            None => println!("note: test-roms/{GBTR_DIR} not present, discovery returned None"),
         }
     }
 }
