@@ -62,6 +62,18 @@ slopgb is a cycle-accurate Game Boy (DMG) / Game Boy Color (CGB) emulator.
   `Ppu::write` after the tick, so nothing mooneye observes moves.
   Calibrated against the mealybug `m3_*` reference photographs and
   gambatte `dmgpalette_during_m3`/`scx_during_m3`/`scy`.
+- **Window machine**: the WX comparator runs every mode-3 dot including
+  the 8-dot prefill, edge-triggered; the window line counter follows
+  gambatte's winYPos (reset 0xFF per frame, incremented per activation);
+  LCDC.5 mid-line disables abort the window at the pipeline-view commit
+  with the BG resuming on a live-computed tile column (mattcurrie
+  comprehensive-ppu-doc §WIN_EN; gambatte ppu.cpp setLcdc/Tile::f0);
+  the WY condition is sampled at discrete dots (gambatte weMaster) with
+  a live comparison against a delayed WY copy (wy2). WX writes commit
+  to the pipeline one dot later than the palette class. DMG WX=166
+  matches carry a window-start request into the next line. Sprites
+  with OAM X 0-7 are fetched during the pause-aware prefill walk that
+  also drives the SCX comparator hunt.
 - One IF bit has sub-cycle dispatch semantics: the line-0 OAM STAT rise is
   readable through FF0F immediately but misses the CPU's interrupt sample
   for the M-cycle it was raised in (`Interconnect::if_stat_late`, the same
