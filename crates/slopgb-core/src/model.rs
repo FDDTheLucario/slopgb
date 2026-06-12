@@ -174,13 +174,14 @@ impl Model {
     /// 4556 and LY=$0A at dot 4760 after hand-off → [70028,70224)∪[0,8)).
     /// DMG0 reads STAT=$83/LY=$01 (→ window [66208,66376), midpoint 66292;
     /// no finer oracle exists for that revision).
-    /// SGB and CGB mask the LCD registers out, so no mooneye oracle
-    /// constrains their phase; SGB reuses the DMG value. CGB/AGB hardware
-    /// hands off inside vblank with LY observed in the $90-$94 range
-    /// (hardware reports collected in gbdev/pandocs#426: "firmly within
-    /// VBlank", implying STAT=$81); the exact dot within that window is a
-    /// free parameter here, chosen as line 145 ($91) dot 0 — mid-window,
-    /// with no oracle constraint beyond the #426 vblank window.
+    /// SGB masks the LCD registers out and reuses the DMG value. CGB/AGB
+    /// hands off inside vblank (LY in the $90-$94 range per the hardware
+    /// reports in gbdev/pandocs#426); the dot is pinned by gambatte's
+    /// hardware-calibrated init state (initstate.cpp `videoCycles = cgb ?
+    /// 144*456 + 164 + agb*4 : 153*456 + 396` — the DMG value equals the
+    /// gbmicrotest-pinned 70164 exactly, anchoring the unit conversion),
+    /// which the gambatte display_startstate cgb04c rows measure: line
+    /// 144 ($90) dot 164, AGB 4 dots later.
     pub fn post_boot_state(self) -> PostBootState {
         // Common fields; per-model values below.
         let base = PostBootState {
@@ -285,7 +286,7 @@ impl Model {
                 l: 0x7C,
                 div_counter: 0x2674,
                 hwio: HWIO_CGB,
-                lcd_phase_dots: 66120,
+                lcd_phase_dots: 65828,
                 ..base
             },
             // misc/boot_regs-A, misc/boot_div-A.
@@ -300,7 +301,7 @@ impl Model {
                 l: 0x7C,
                 div_counter: 0x2678,
                 hwio: HWIO_CGB,
-                lcd_phase_dots: 66120,
+                lcd_phase_dots: 65832,
                 ..base
             },
         }
