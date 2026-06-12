@@ -109,7 +109,9 @@ fn suite_roms(root: &Path) -> Vec<(PathBuf, String)> {
 /// Known-failure baseline (see `harness::assert_against_baseline`),
 /// discovered by running the full matrix; shrinking it is progress,
 /// growing it a regression. Every entry reaches `LD B,B` with the all-$42
-/// fail registers (no timeouts).
+/// fail registers (no timeouts). Floor classes per the index in
+/// `baselines/gambatte.txt`: freq_change_timing-cgb0BC is class C,
+/// channel_4_align/freq_change are class G, ei_delay_halt class H.
 const BASELINE: &[&str] = &[
     // apu/channel_1: 1 of 19 claimed cases. The trigger/duty/alignment/
     // envelope/zombie/freq-change families pass via the SameBoy-style
@@ -120,7 +122,10 @@ const BASELINE: &[&str] = &[
     // only on real CGB-E; even SameBoy emulating CGB-E fails it) —
     // passes via the SameBoy sweep-calculation countdown machinery in
     // src/apu/pulse.rs. What remains is the CGB-C-suffixed
-    // freq_change_timing variant.
+    // freq_change_timing variant (class C: the model-specific APU 2 MHz
+    // write phase, gambatte cc+2+cgb_*2 — whole-M-cycle ordering tweaks
+    // break the channel_1_sweep* DIV-event schedule above, so don't
+    // chase it without per-model <4-dot write-phase modeling).
     "same-suite/apu/channel_1/channel_1_freq_change_timing-cgb0BC.gb [Cgb]",
     // apu/channel_2: none — all 14 claimed cases pass.
     // apu/channel_3: none — all 14 claimed cases pass, matching
@@ -130,7 +135,8 @@ const BASELINE: &[&str] = &[
     // remains needs SameBoy's NR43-write LFSR-corruption tables, which
     // upstream documents as revision- and unit-specific with
     // non-deterministic variants (apu.c nr43_write) — only the
-    // deterministic paths are modelled.
+    // deterministic paths are modelled (class G: keep asserted, lift on
+    // upstream evidence).
     "same-suite/apu/channel_4/channel_4_align.gb [Cgb]",
     "same-suite/apu/channel_4/channel_4_freq_change.gb [Cgb]",
     // apu top level: none — the plain DIV-event tests and the *_10
@@ -140,7 +146,11 @@ const BASELINE: &[&str] = &[
     // dma: none — hdma_mode0 joined via the CGB-C mode-0/OAM timeline
     // (2026-06); gbc_dma_cont, gdma_addr_mask, hdma_lcd_off passed
     // already.
-    // interrupt: 1 of 1.
+    // interrupt: 1 of 1. ei_delay_halt chains the EI one-instruction
+    // IME delay into a HALT wake — class H: the failing rung is the
+    // halt-wake sampler's intra-cycle IF view (same family as the
+    // gambatte halt/ split rows; see the halt-wake bullet in CLAUDE.md
+    // §State) — don't move the FROZEN CPU interrupt sampling for it.
     "same-suite/interrupt/ei_delay_halt.gb [Cgb]",
     // sgb: none — both MLT_REQ command tests pass via the joypad's SGB
     // packet receiver + MLT_REQ multiplexer (src/joypad.rs `Sgb`).
