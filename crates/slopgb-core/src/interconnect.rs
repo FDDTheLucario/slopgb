@@ -21,6 +21,8 @@ use crate::timer::Timer;
 /// timer, serial, joypad). Bits 5-7 of FF0F/FFFF are unmapped (Pan Docs
 /// "Interrupts").
 const IF_MASK: u8 = 0x1F;
+/// IF bit 1 (STAT), for the line-0 OAM-rise dispatch-late mask.
+const IF_STAT_BIT: u8 = 0x02;
 
 /// The buses OAM DMA can occupy. While the DMA engine reads a byte from one
 /// of these, a CPU read of any address on the *same* bus returns the DMA's
@@ -82,6 +84,11 @@ pub struct Interconnect {
     /// see them immediately ([`Bus::pending_halt_wake`]; `Timer::tick`'s
     /// `late`).
     if_late: u8,
+    /// STAT IF bit raised by the PPU in the *current* M-cycle's second
+    /// half (line-0 OAM rise): readable via FF0F at once, but the CPU's
+    /// interrupt sample for this cycle must not see it
+    /// (`Ppu::take_stat_late`).
+    if_stat_late: u8,
 
     /// FF46 readback is simply the last written value
     /// (acceptance/oam_dma/reg_read).
@@ -165,6 +172,7 @@ impl Interconnect {
             intf: 0,
             ie: 0,
             if_late: 0,
+            if_stat_late: 0,
             dma_reg: 0,
             dma_run: None,
             dma_start: None,
@@ -215,6 +223,8 @@ impl Interconnect {
     ///   cannot produce a spurious falling edge.
     pub fn apply_post_boot_state(&mut self) {
         let s = self.model.post_boot_state();
+
+        self.install_boot_logo_vram();
 
         // LCD warmup: glitched enable line (452 dots) + 153 normal lines
         // brings the PPU to line 0 dot 0; then advance to the hand-off
@@ -286,6 +296,60 @@ impl Interconnect {
         self.apu.tick(div, false);
         let mut sink = Vec::new();
         self.apu.drain_samples(&mut sink);
+    }
+
+    /// VRAM tile data as the boot ROM leaves it: the Nintendo logo
+    /// decompressed into tiles $01-$18 and the (R) trademark tile at $19
+    /// — even (low-bitplane) bytes only, the boot routine writes one
+    /// bitplane (DMG boot ROM "Graphic routine"; gambatte initstate.cpp
+    /// setInitialVram models the same bytes). mealybug m3_scx_low_3_bits
+    /// renders the leftover (R) tile straight out of this data.
+    ///
+    /// The boot ROM decompresses the logo from the cartridge header, but
+    /// it also locks up unless the header bytes equal the canonical logo
+    /// — so on hardware VRAM only ever holds the standard image, and the
+    /// fixed constant below covers every cart (including the gambatte
+    /// test ROMs, whose headers carry no logo at all; gambatte's
+    /// initstate uses the same fixed dump).
+    ///
+    /// Deliberately NOT modelled: the DMG boot also leaves the logo's two
+    /// tile-map rows at $9904/$9924 (+ the (R) entry at $9910). The
+    /// pinned gambatte reference PNGs are emulator captures from before
+    /// gambatte modelled initial VRAM — they encode a cleared map, and
+    /// several otherwise-passing screens (scx_during_m3/old,
+    /// bgtilemap/bgtiledata) show the logo rows if the entries are
+    /// installed, while no test in the corpus needs them.
+    fn install_boot_logo_vram(&mut self) {
+        const NINTENDO_LOGO: [u8; 48] = [
+            0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83, 0x00, 0x0C,
+            0x00, 0x0D, 0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E, 0xDC, 0xCC, 0x6E, 0xE6,
+            0xDD, 0xDD, 0xD9, 0x99, 0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC, 0xDD, 0xDC,
+            0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E,
+        ];
+        // Each logo nibble is bit-doubled into one tile-row byte, written
+        // twice (two consecutive tile rows).
+        let double = |n: u8| -> u8 {
+            let mut out = 0u8;
+            for bit in 0..4 {
+                if n & (1 << bit) != 0 {
+                    out |= 0b11 << (bit * 2);
+                }
+            }
+            out
+        };
+        for (i, byte) in NINTENDO_LOGO.into_iter().enumerate() {
+            let base = 0x8010 + 8 * i as u16;
+            for (j, nibble) in [byte >> 4, byte & 0x0F].into_iter().enumerate() {
+                let row = double(nibble);
+                self.ppu.vram_write_raw(base + 4 * j as u16, row);
+                self.ppu.vram_write_raw(base + 4 * j as u16 + 2, row);
+            }
+        }
+        // The (R) trademark tile data lives in the boot ROM itself.
+        const TRADEMARK: [u8; 8] = [0x3C, 0x42, 0xB9, 0xA5, 0xB9, 0xA5, 0x42, 0x3C];
+        for (i, b) in TRADEMARK.into_iter().enumerate() {
+            self.ppu.vram_write_raw(0x8190 + 2 * i as u16, b);
+        }
     }
 
     pub fn model(&self) -> Model {
@@ -368,8 +432,17 @@ impl Interconnect {
         self.intf |= t.iff & IF_MASK;
         self.if_late = if t.late { t.iff & IF_MASK } else { 0 };
         self.oam_dma_tick();
+        self.if_stat_late = 0;
         for _ in 0..dots {
             self.intf |= self.ppu.tick() & IF_MASK;
+            if self.ppu.take_stat_late() {
+                // The line-0 OAM STAT rise sits in the second half of the
+                // M-cycle: the IF bit is readable at once, but this
+                // cycle's interrupt sample must not see it (see
+                // Ppu::refresh_stat; mealybug "line 0 timing is different
+                // by 4 cycles").
+                self.if_stat_late = IF_STAT_BIT;
+            }
         }
         self.hblank_dma_check();
         let div = self.timer.div_counter();
@@ -839,6 +912,16 @@ impl Bus for Interconnect {
     }
 
     fn write(&mut self, addr: u16, value: u8) {
+        // The CPU drives the data bus during the second half of the write
+        // M-cycle (gbctr "Memory access timing"), which the dot-clocked
+        // pixel pipeline can observe mid-cycle: stage rendering-register
+        // writes with the PPU before ticking. The architectural commit
+        // below is unchanged — `Ppu::stage_write` affects only the
+        // pipeline's register view (mealybug m3_* mid-mode-3 writes).
+        if let 0xFF40 | 0xFF42 | 0xFF43 | 0xFF47..=0xFF4B = addr {
+            let dots = if self.double_speed { 1 } else { 2 };
+            self.ppu.stage_write(addr, value, dots);
+        }
         self.tick_machine();
         // Corruption first, then the (mode-blocked) write attempt — during
         // the scan the CPU byte never lands (oam_write_blocked).
@@ -862,7 +945,7 @@ impl Bus for Interconnect {
     }
 
     fn pending(&self) -> u8 {
-        self.intf & self.ie & IF_MASK
+        self.intf & self.ie & IF_MASK & !self.if_stat_late
     }
 
     fn pending_halt_wake(&self) -> u8 {
@@ -1714,6 +1797,58 @@ mod tests {
         let mut b = ic(model);
         b.apply_post_boot_state();
         b
+    }
+
+    /// The boot ROM leaves its logo graphics in VRAM at hand-off: the
+    /// header logo decompressed into tiles $01-$18 (even bytes — one
+    /// bitplane), the (R) trademark tile at $19, and on DMG-family models
+    /// the two logo tile-map rows (gambatte initstate.cpp setInitialVram
+    /// hardware dump; the expected bytes below are that dump's prefix for
+    /// the standard Nintendo logo). mealybug m3_scx_low_3_bits renders
+    /// the leftover (R) tile.
+    #[test]
+    fn post_boot_vram_boot_logo_leftovers() {
+        // The fixed logo applies regardless of the cart header (the boot
+        // ROM locks up on a mismatch, so hardware VRAM only ever holds
+        // the canonical image; gambatte's test carts have no header logo
+        // and their references still show it).
+        for model in [Model::Dmg, Model::Cgb] {
+            let mut b = ic(model);
+            b.apply_post_boot_state();
+            // $CE -> F0 F0 FC FC, $ED -> FC FC F3 F3 (even bytes).
+            for (off, want) in [
+                (0x00u16, 0xF0u8),
+                (0x02, 0xF0),
+                (0x04, 0xFC),
+                (0x06, 0xFC),
+                (0x08, 0xFC),
+                (0x0A, 0xFC),
+                (0x0C, 0xF3),
+                (0x0E, 0xF3),
+                // $66 -> 3C 3C 3C 3C twice.
+                (0x10, 0x3C),
+                (0x16, 0x3C),
+                (0x18, 0x3C),
+                (0x1E, 0x3C),
+            ] {
+                assert_eq!(
+                    b.ppu().vram_read_raw(0x8010 + off),
+                    want,
+                    "{model:?} +{off:#x}"
+                );
+            }
+            assert_eq!(b.ppu().vram_read_raw(0x8011), 0, "high bitplane untouched");
+            // (R) trademark tile $19.
+            assert_eq!(b.ppu().vram_read_raw(0x8190), 0x3C, "{model:?}");
+            assert_eq!(b.ppu().vram_read_raw(0x8192), 0x42, "{model:?}");
+            assert_eq!(b.ppu().vram_read_raw(0x8194), 0xB9, "{model:?}");
+            assert_eq!(b.ppu().vram_read_raw(0x819E), 0x3C, "{model:?}");
+            // The logo tile-map rows are deliberately not installed
+            // (see install_boot_logo_vram): the pinned gambatte
+            // reference PNGs encode a cleared map.
+            assert_eq!(b.ppu().vram_read_raw(0x9904), 0x00, "{model:?}");
+            assert_eq!(b.ppu().vram_read_raw(0x9910), 0x00, "{model:?}");
+        }
     }
 
     #[test]

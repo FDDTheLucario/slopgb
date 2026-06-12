@@ -79,8 +79,23 @@ pub(super) struct Render {
     pub(super) active: bool,
     /// Next output pixel x (0-159).
     lx: u8,
-    /// Leading pixels still to discard (SCX%8, or 7-WX for WX<7).
+    /// Leading pixels still to discard (the fixed post-match fine-scroll
+    /// schedule, or 7-WX window columns for WX<7).
     discard: u8,
+    /// Mode-3 dots elapsed (render_step calls), anchoring the fine-scroll
+    /// comparator hunt below.
+    mode3_dot: u16,
+    /// SCX fine-scroll position comparator index (hardware positions
+    /// -16..-9, cycling). From mode-3 dot 5 — where the first (thrown
+    /// away) tile's pixels start popping on hardware — the comparator
+    /// advances one step per dot (one per pop once real pops begin),
+    /// comparing against SCX&7 *live* each step; on a match the discard
+    /// schedule is fixed (SameBoy render_pixel_if_possible: `(position &
+    /// 7) == (SCX & 7) -> position = -8`, with the -9 -> -16 wrap when
+    /// the match was missed; gambatte scx_during_m3 sweeps).
+    hunt_idx: u8,
+    /// The comparator matched: the fine-scroll discard is locked in.
+    hunt_done: bool,
     /// Pipeline frozen for this many dots (sprite fetches).
     stall: u16,
 
@@ -101,7 +116,6 @@ pub(super) struct Render {
     first_discard: bool,
     t_no: u8,
     t_attr: u8,
-    t_fine: u8,
     t_lo: u8,
     t_hi: u8,
 
@@ -123,6 +137,9 @@ impl Render {
             active: false,
             lx: 0,
             discard: 0,
+            mode3_dot: 0,
+            hunt_idx: 0,
+            hunt_done: false,
             stall: 0,
             bg_lo: 0,
             bg_hi: 0,
@@ -134,7 +151,6 @@ impl Render {
             first_discard: true,
             t_no: 0,
             t_attr: 0,
-            t_fine: 0,
             t_lo: 0,
             t_hi: 0,
             sprites: [Sprite::default(); 10],
@@ -167,7 +183,7 @@ impl Ppu {
                 return;
             }
         }
-        let h = if self.lcdc & LCDC_OBJ_SIZE != 0 {
+        let h = if self.eff.lcdc & LCDC_OBJ_SIZE != 0 {
             16u16
         } else {
             8
@@ -235,7 +251,7 @@ impl Ppu {
         let x = next | new;
         let tile = (old | new) & 0xFC;
         let flags = next | new;
-        let h = if self.lcdc & LCDC_OBJ_SIZE != 0 {
+        let h = if self.eff.lcdc & LCDC_OBJ_SIZE != 0 {
             16u16
         } else {
             8
@@ -259,7 +275,10 @@ impl Ppu {
         let r = &mut self.render;
         r.active = true;
         r.lx = 0;
-        r.discard = self.scx & 7;
+        r.discard = 0;
+        r.mode3_dot = 0;
+        r.hunt_idx = 0;
+        r.hunt_done = false;
         r.stall = 0;
         r.bg_count = 0;
         r.phase = FetchPhase::TileNoWait;
@@ -278,9 +297,29 @@ impl Ppu {
 
     /// One mode-3 dot.
     pub(super) fn render_step(&mut self) {
+        self.render.mode3_dot += 1;
         if self.render.stall > 0 {
             self.render.stall -= 1;
             return;
+        }
+
+        // SCX fine-scroll comparator hunt, dot-rate phase: on hardware the
+        // first (thrown away) tile's pixels pop on mode-3 dots 5-12 while
+        // the position comparator hunts for SCX&7 (see `hunt_idx`); our
+        // pipeline never pushes that tile, so the comparator runs here as
+        // a bare counter. A match at dot 5+n fixes the discard schedule
+        // at n leading pixels (pixel 0 then ships at dot 13+n, matching
+        // `hblank_ly_scx_timing-GS` for stable SCX).
+        if !self.render.hunt_done
+            && !self.render.win_mode
+            && (5..=12).contains(&self.render.mode3_dot)
+        {
+            if self.render.hunt_idx == self.eff.scx & 7 {
+                self.render.hunt_done = true;
+                self.render.discard = (self.render.mode3_dot - 5) as u8;
+            } else {
+                self.render.hunt_idx = (self.render.hunt_idx + 1) & 7;
+            }
         }
 
         // Sprite fetch triggers at the current output position, but only
@@ -295,7 +334,11 @@ impl Ppu {
         // first-fetched-wins FIFO merge equal to the DMG lower-X-wins rule
         // (Pan Docs "Drawing priority": smaller X = higher priority, OAM
         // order only breaks ties).
-        if self.lcdc & LCDC_OBJ_ENABLE != 0 && self.render.bg_count > 0 && self.render.discard == 0
+        let fine_scrolling = !self.render.win_mode && !self.render.hunt_done;
+        if self.eff.lcdc & LCDC_OBJ_ENABLE != 0
+            && self.render.bg_count > 0
+            && self.render.discard == 0
+            && !fine_scrolling
         {
             loop {
                 let mut pick: Option<usize> = None;
@@ -345,8 +388,8 @@ impl Ppu {
         if !self.render.win_active
             && self.win_enabled_now()
             && self.wy_latch
-            && ((self.wx >= 7 && self.render.lx == self.wx - 7)
-                || (self.wx < 7 && self.render.lx == 0))
+            && ((self.eff.wx >= 7 && self.render.lx == self.eff.wx - 7)
+                || (self.eff.wx < 7 && self.render.lx == 0))
         {
             let r = &mut self.render;
             r.win_active = true;
@@ -356,12 +399,15 @@ impl Ppu {
             r.fetch_x = 0;
             r.first_discard = false;
             // Window pixels are not subject to SCX fine scroll; WX<7 cuts
-            // the leading 7-WX window columns instead.
-            r.discard = 7u8.saturating_sub(self.wx);
+            // the leading 7-WX window columns instead, and the BG
+            // fine-scroll comparator hunt ends with the BG fetching.
+            r.hunt_done = true;
+            r.discard = 7u8.saturating_sub(self.eff.wx);
         }
 
         // Pop one BG/window pixel.
         if self.render.bg_count > 0 {
+            let fine_scx = self.eff.scx & 7;
             let r = &mut self.render;
             let c = ((r.bg_hi >> 7) << 1) | (r.bg_lo >> 7);
             r.bg_lo <<= 1;
@@ -370,6 +416,18 @@ impl Ppu {
             let attr = r.bg_attr;
             if r.discard > 0 {
                 r.discard -= 1;
+            } else if !r.win_mode && !r.hunt_done {
+                // Comparator hunt, pop-rate phase: the match was missed
+                // during dots 5-12 (an SCX write moved it), so the
+                // counter wrapped (-9 -> -16) and keeps hunting through
+                // the real pops, each one discarded; a match here leaves
+                // the 7 remaining -8..-1 drops (see `hunt_idx`).
+                if r.hunt_idx == fine_scx {
+                    r.hunt_done = true;
+                    r.discard = 7;
+                } else {
+                    r.hunt_idx = (r.hunt_idx + 1) & 7;
+                }
             } else {
                 self.output_pixel(c, attr);
                 self.render.lx += 1;
@@ -387,7 +445,7 @@ impl Ppu {
     /// First-per-BG-tile sprite alignment penalty (Pan Docs OBJ penalty
     /// algorithm; verified against intr_2_mode0_timing_sprites).
     fn sprite_penalty(&mut self, x: u8) -> u16 {
-        let v = u16::from(x) + u16::from(self.scx);
+        let v = u16::from(x) + u16::from(self.eff.scx);
         let key = v >> 3;
         if self.render.penalty_tiles & (1u64 << key) != 0 {
             0
@@ -402,32 +460,27 @@ impl Ppu {
         // only priority. DMG compatibility mode behaves like DMG — bit 0
         // clear blanks BG *and* window, ignoring the window enable bit
         // (Pan Docs LCDC.0) — mirroring `output_pixel`'s bg_off condition.
-        self.lcdc & LCDC_WIN_ENABLE != 0
-            && ((self.model.is_cgb() && !self.dmg_compat) || self.lcdc & LCDC_BG_ENABLE != 0)
+        self.eff.lcdc & LCDC_WIN_ENABLE != 0
+            && ((self.model.is_cgb() && !self.dmg_compat) || self.eff.lcdc & LCDC_BG_ENABLE != 0)
     }
 
     fn fetcher_step(&mut self) {
         match self.render.phase {
             FetchPhase::TileNoWait => self.render.phase = FetchPhase::TileNo,
             FetchPhase::TileNo => {
-                // Tile number (+ attributes on CGB) from the tile map.
-                let (map_bit, row, col, fine) = if self.render.win_mode {
-                    (
-                        LCDC_WIN_MAP,
-                        self.win_line >> 3,
-                        self.render.fetch_x & 31,
-                        self.win_line & 7,
-                    )
+                // Tile number (+ attributes on CGB) from the tile map. The
+                // row is sampled from SCY here for the *map* address only;
+                // the data reads re-sample it (see `bg_tile_addr`).
+                let (map_bit, row, col) = if self.render.win_mode {
+                    (LCDC_WIN_MAP, self.win_line >> 3, self.render.fetch_x & 31)
                 } else {
-                    let y = self.ly.wrapping_add(self.scy);
                     (
                         LCDC_BG_MAP,
-                        y >> 3,
-                        (self.scx / 8).wrapping_add(self.render.fetch_x) & 31,
-                        y & 7,
+                        self.ly.wrapping_add(self.eff.scy) >> 3,
+                        (self.eff.scx / 8).wrapping_add(self.render.fetch_x) & 31,
                     )
                 };
-                let base = if self.lcdc & map_bit != 0 {
+                let base = if self.eff.lcdc & map_bit != 0 {
                     0x1C00
                 } else {
                     0x1800
@@ -438,11 +491,6 @@ impl Ppu {
                     self.vram[0x2000 + map]
                 } else {
                     0
-                };
-                self.render.t_fine = if self.render.t_attr & 0x40 != 0 {
-                    7 - fine // Y flip (CGB BG attribute bit 6).
-                } else {
-                    fine
                 };
                 self.render.phase = FetchPhase::LoWait;
             }
@@ -489,25 +537,41 @@ impl Ppu {
         r.phase = FetchPhase::TileNoWait;
     }
 
+    /// Tile-data address for the current fetch's Lo/Hi read. The fine row
+    /// is re-derived from SCY (or the window line counter) at *each* data
+    /// access rather than latched at the tile-number read: an SCY write
+    /// landing between the accesses fetches the new scroll's rows under
+    /// the old tile number (mealybug m3_scy_change; gambatte scy/). The
+    /// CGB Y-flip applies to whatever row the access samples.
     fn bg_tile_addr(&self) -> usize {
         let r = &self.render;
+        let fine = if r.win_mode {
+            self.win_line & 7
+        } else {
+            self.ly.wrapping_add(self.eff.scy) & 7
+        };
+        let fine = if r.t_attr & 0x40 != 0 {
+            7 - fine // Y flip (CGB BG attribute bit 6).
+        } else {
+            fine
+        };
         let bank = if self.model.is_cgb() && r.t_attr & 0x08 != 0 {
             0x2000
         } else {
             0
         };
-        let base = if self.lcdc & LCDC_TILE_DATA != 0 {
+        let base = if self.eff.lcdc & LCDC_TILE_DATA != 0 {
             usize::from(r.t_no) * 16
         } else {
             (0x1000i32 + i32::from(r.t_no as i8) * 16) as usize
         };
-        bank + base + usize::from(r.t_fine) * 2
+        bank + base + usize::from(fine) * 2
     }
 
     /// Fetch sprite `i`'s row and merge it into the sprite FIFO.
     fn fetch_sprite(&mut self, i: usize) {
         let s = self.render.sprites[i];
-        let tall = self.lcdc & LCDC_OBJ_SIZE != 0;
+        let tall = self.eff.lcdc & LCDC_OBJ_SIZE != 0;
         let h: u8 = if tall { 16 } else { 8 };
         // Selection bounded the row by the height LCDC.2 held at OAM-scan
         // time (dot 80), but LCDC.2 is re-read here at fetch time: a game
@@ -585,7 +649,7 @@ impl Ppu {
         // DMG LCDC bit 0: BG and window disabled — they show as white
         // (color 0 for sprite priority purposes). DMG compatibility mode on
         // CGB behaves the same way (integration addition).
-        let bg_off = (!cgb || self.dmg_compat) && self.lcdc & LCDC_BG_ENABLE == 0;
+        let bg_off = (!cgb || self.dmg_compat) && self.eff.lcdc & LCDC_BG_ENABLE == 0;
         let bg_c = if bg_off { 0 } else { bg_c };
 
         let sprite_wins = sp.color != 0
@@ -593,7 +657,7 @@ impl Ppu {
                 // CGB: BG color 0 always loses; LCDC bit 0 clear strips all
                 // BG priority; else BG attribute bit 7 or OAM bit 7 wins.
                 bg_c == 0
-                    || self.lcdc & LCDC_BG_ENABLE == 0
+                    || self.eff.lcdc & LCDC_BG_ENABLE == 0
                     || !(bg_attr & 0x80 != 0 || sp.bg_priority)
             } else {
                 !(sp.bg_priority && bg_c != 0)
@@ -606,9 +670,9 @@ impl Ppu {
                 // compat palette (Pan Docs "DMG compatibility mode").
                 let c = if self.dmg_compat {
                     let obp = if sp.palette == 1 {
-                        self.obp1
+                        self.eff.obp1
                     } else {
-                        self.obp0
+                        self.eff.obp0
                     };
                     (obp >> (sp.color * 2)) & 3
                 } else {
@@ -617,9 +681,9 @@ impl Ppu {
                 self.cgb_color(&self.obj_pal_ram, sp.palette, c)
             } else {
                 let obp = if sp.palette == 1 {
-                    self.obp1
+                    self.eff.obp1
                 } else {
-                    self.obp0
+                    self.eff.obp0
                 };
                 self.dmg_palette[usize::from((obp >> (sp.color * 2)) & 3)]
             }
@@ -628,7 +692,7 @@ impl Ppu {
             // BGP; BG attributes are all zero (VRAM bank 1 is locked), so
             // palette 0 is used either way.
             let c = if self.dmg_compat && !bg_off {
-                (self.bgp >> (bg_c * 2)) & 3
+                (self.eff.bgp >> (bg_c * 2)) & 3
             } else {
                 bg_c
             };
@@ -636,7 +700,7 @@ impl Ppu {
         } else if bg_off {
             self.dmg_palette[0]
         } else {
-            self.dmg_palette[usize::from((self.bgp >> (bg_c * 2)) & 3)]
+            self.dmg_palette[usize::from((self.eff.bgp >> (bg_c * 2)) & 3)]
         };
 
         let idx = usize::from(self.ly) * SCREEN_W + usize::from(self.render.lx);
@@ -809,6 +873,226 @@ mod tests {
         render_line(&mut p, 2);
         assert_eq!(px(&p, 2, 0), WHITE);
         assert_eq!(px(&p, 2, 159), WHITE);
+    }
+
+    // --- Mode-3 IO write strobe ---
+    //
+    // The CPU drives the data bus during the second half of a write M-cycle
+    // (gbctr "Memory access timing": the store lands around T3, not after
+    // T4), so the dot-clocked pixel pipeline observes a rendering-register
+    // write 2 dots before the tick-then-access commit point. Decoded from
+    // the mealybug m3_bgp_change references: of the write M-cycle's four
+    // dots, the pipeline pops dot 1 with the old value, dot 2 with old|new
+    // on pre-CGB models (mealybug README: "BGP takes the value old OR new
+    // for one cycle"; CGB-C switches cleanly and still reads old), and
+    // dots 3-4 with the new value.
+
+    /// Mimic the interconnect's write path: stage, tick one M-cycle (4 dots
+    /// at normal speed), then commit architecturally.
+    fn mcycle_write(p: &mut Ppu, addr: u16, value: u8) {
+        p.stage_write(addr, value, 2);
+        for _ in 0..4 {
+            p.tick();
+        }
+        p.write(addr, value);
+    }
+
+    /// Finish the current line's mode 3; returns the dot it ended on (V0).
+    fn finish_line(p: &mut Ppu) -> u16 {
+        let mut guard = 0u32;
+        while !p.line_render_done {
+            p.tick();
+            guard += 1;
+            assert!(guard < 2_000, "mode 3 never finished");
+        }
+        p.dot
+    }
+
+    #[test]
+    fn strobe_bgp_write_two_dots_early_with_dmg_blend_pixel() {
+        let mut p = dmg_on(0x91);
+        set_tile_row(&mut p, 0, 1, 2, 0xFF, 0x00); // solid color 1
+        for col in 0..32 {
+            set_map(&mut p, 0x1800, 0, col, 1);
+        }
+        // Pixel x pops at dot 97 + x (no SCX/sprites/window): after dot 130
+        // pixels 0..=33 have shipped through the old palette.
+        run_to(&mut p, 2, 130);
+        mcycle_write(&mut p, 0xFF47, 0xE8); // color 1: shade 1 -> shade 2
+        let v0 = finish_line(&mut p);
+        assert_eq!(v0, 256, "a palette strobe must not move mode-3 end");
+        assert_eq!(px(&p, 2, 33), LIGHT, "well before the write: old");
+        assert_eq!(px(&p, 2, 34), LIGHT, "write M-cycle dot 1: still old");
+        assert_eq!(
+            px(&p, 2, 35),
+            BLACK,
+            "dot 2 transition pixel: BGP reads old|new = 0xEC (color 1 -> 3)"
+        );
+        assert_eq!(px(&p, 2, 36), DARK, "dot 3: new value, 2 dots early");
+        assert_eq!(px(&p, 2, 37), DARK, "dot 4: new");
+        assert_eq!(px(&p, 2, 40), DARK, "after the commit: new");
+    }
+
+    #[test]
+    fn strobe_bgp_write_clean_switch_on_cgb() {
+        let mut p = cgb_on(0x91);
+        p.set_dmg_compat(true); // BGP remaps into compat palette 0
+        p.write(0xFF47, 0xE4);
+        set_tile_row(&mut p, 0, 1, 2, 0xFF, 0x00); // solid color 1
+        for col in 0..32 {
+            set_map(&mut p, 0x1800, 0, col, 1);
+        }
+        run_to(&mut p, 2, 130);
+        mcycle_write(&mut p, 0xFF47, 0xE8);
+        finish_line(&mut p);
+        let old = p.cgb_color(&p.bg_pal_ram, 0, 1);
+        let new = p.cgb_color(&p.bg_pal_ram, 0, 2);
+        let blend = p.cgb_color(&p.bg_pal_ram, 0, 3);
+        assert_eq!(px(&p, 2, 34), old, "write M-cycle dot 1: old");
+        assert_eq!(px(&p, 2, 35), old, "dot 2: still old — no blend on CGB");
+        assert_ne!(px(&p, 2, 35), blend, "CGB never blends");
+        assert_eq!(px(&p, 2, 36), new, "dot 3: new value, 2 dots early");
+        assert_eq!(px(&p, 2, 37), new, "dot 4: new");
+    }
+
+    #[test]
+    fn strobe_obp0_write_blend_pixel_dmg() {
+        let mut p = dmg_on(0x93);
+        p.write(0xFF48, 0xE4); // identity OBP0
+        set_tile_row(&mut p, 0, 4, 0, 0xFF, 0x00); // sprite solid color 1
+        sprite(&mut p, 0, 18, 8, 4, 0x00); // line 2, screen 0-7, OBP0
+        // The X=8 sprite stalls the pipeline 3+5 dots at dot 97, so its
+        // pixels 0-7 pop at dots 105-112; dots 107-110 cover x=2..=5.
+        run_to(&mut p, 2, 106);
+        mcycle_write(&mut p, 0xFF48, 0xE8);
+        finish_line(&mut p);
+        assert_eq!(px(&p, 2, 1), LIGHT, "before the write: old");
+        assert_eq!(px(&p, 2, 2), LIGHT, "write M-cycle dot 1: old");
+        assert_eq!(px(&p, 2, 3), BLACK, "dot 2: OBP0 reads old|new");
+        assert_eq!(px(&p, 2, 4), DARK, "dot 3: new, 2 dots early");
+        assert_eq!(px(&p, 2, 5), DARK, "dot 4: new");
+    }
+
+    /// Double speed: the M-cycle is 2 dots, the strobe lands 1 dot before
+    /// the commit (second half of the M-cycle, same as normal speed).
+    #[test]
+    fn strobe_double_speed_one_dot_early() {
+        let mut p = dmg_on(0x91);
+        set_tile_row(&mut p, 0, 1, 2, 0xFF, 0x00);
+        for col in 0..32 {
+            set_map(&mut p, 0x1800, 0, col, 1);
+        }
+        run_to(&mut p, 2, 130);
+        p.stage_write(0xFF47, 0xE8, 1);
+        for _ in 0..2 {
+            p.tick();
+        }
+        p.write(0xFF47, 0xE8);
+        finish_line(&mut p);
+        assert_eq!(px(&p, 2, 34), BLACK, "ds dot 1: transition (old|new)");
+        assert_eq!(px(&p, 2, 35), DARK, "ds dot 2: new, 1 dot early");
+    }
+
+    /// The SCX fine scroll is a live position comparator, not a latched
+    /// discard count: the comparator hunts through positions 0..7
+    /// (hardware positions -16..-9) one per dot from mode-3 dot 5,
+    /// re-reading SCX&7 each step, and the discard schedule is fixed only
+    /// once it matches (SameBoy render_pixel_if_possible: `(position &
+    /// 7) == (SCX & 7) -> position = -8`; gambatte scx_during_m3 offset
+    /// sweeps). A write landing during the hunt changes how many pixels
+    /// drop and thereby the line's phase and mode-3 length.
+    #[test]
+    fn strobe_scx_write_during_hunt_changes_discard_count() {
+        let mut p = dmg_on(0x91);
+        set_tile_row(&mut p, 0, 1, 2, 0xF0, 0x0F); // cols 0-3 = 1, 4-7 = 2
+        set_map(&mut p, 0x1800, 0, 0, 1);
+        set_map(&mut p, 0x1800, 0, 1, 1);
+        p.write(0xFF43, 7); // hunt would match at dot 96 (index 7)
+        // Stage SCX=2 at state(88): the pipeline view commits at dot 91,
+        // where the hunt is at index 2 -> match: 2 pixels discard, pixel
+        // 0 ships at dot 99 showing bg column 2.
+        run_to(&mut p, 2, 88);
+        mcycle_write(&mut p, 0xFF43, 2);
+        let v0 = finish_line(&mut p);
+        assert_eq!(px(&p, 2, 0), LIGHT, "pixel 0 is bg column 2 (color 1)");
+        assert_eq!(px(&p, 2, 1), LIGHT, "bg column 3");
+        assert_eq!(px(&p, 2, 2), DARK, "bg column 4");
+        assert_eq!(v0, 258, "2 discarded pixels: V0 = 256 + 2");
+    }
+
+    /// If an SCX write makes the comparator miss its match (the new value
+    /// points at an index the hunt already passed), the position counter
+    /// wraps (-9 -> -16) and re-hunts: the discard grows by 8 and mode 3
+    /// extends with it (SameBoy: `position_in_line == -9 -> position =
+    /// -16`; gambatte scx_during_m3 encodes the +8 in its offset sweeps).
+    #[test]
+    fn strobe_scx_write_missing_the_match_wraps_the_hunt() {
+        let mut p = dmg_on(0x91);
+        set_tile_row(&mut p, 0, 1, 2, 0xF0, 0x0F);
+        for col in 0..32 {
+            set_map(&mut p, 0x1800, 0, col, 1);
+        }
+        p.write(0xFF43, 7);
+        // Commit SCX=5 at dot 95: index 5 (dot 94) and earlier compared
+        // against 7, indices 6 (dot 95) and 7 (dot 96) miss 5, the
+        // counter wraps and re-hunts through the first real tile's pops,
+        // matching at index 5 = dot 102 (the 6th pop): 13 pixels discard
+        // in total.
+        run_to(&mut p, 2, 92);
+        mcycle_write(&mut p, 0xFF43, 5);
+        let v0 = finish_line(&mut p);
+        assert_eq!(v0, 269, "13 discarded pixels: V0 = 256 + 13");
+        assert_eq!(
+            px(&p, 2, 0),
+            DARK,
+            "pixel 0 is bg column 13 (col 5: color 2)"
+        );
+    }
+
+    /// The BG row is re-evaluated from SCY at each fetcher VRAM access,
+    /// not latched per fetch: an SCY write landing between a tile's
+    /// tile-number read and its data reads keeps the old tile number but
+    /// fetches the new scroll's data rows (mealybug m3_scy_change;
+    /// gambatte scy/).
+    #[test]
+    fn strobe_scy_write_between_tileno_and_data_reads_uses_new_row() {
+        let mut p = dmg_on(0x91);
+        set_tile_row(&mut p, 0, 1, 2, 0xFF, 0x00); // tile 1 row 2: color 1
+        set_tile_row(&mut p, 0, 1, 5, 0xFF, 0xFF); // tile 1 row 5: color 3
+        set_tile_row(&mut p, 0, 2, 2, 0x00, 0xFF); // tile 2 (map row 1): color 2
+        set_tile_row(&mut p, 0, 2, 5, 0x00, 0xFF);
+        set_map(&mut p, 0x1800, 0, 1, 1); // old scroll: map row 0 -> tile 1
+        set_map(&mut p, 0x1800, 1, 1, 2); // new scroll: map row 1 -> tile 2
+        // Tile column 1 is fetched at dots 97-102: tile number at 98, data
+        // low at 100, data high at 102. Staging SCY=11 at state(97) commits
+        // the pipeline view at dot 100: the tile number was read with SCY=0
+        // (map row 0 -> tile 1), the data reads use the new row
+        // (2 + 11) & 7 = 5.
+        run_to(&mut p, 2, 97);
+        mcycle_write(&mut p, 0xFF42, 11);
+        finish_line(&mut p);
+        assert_eq!(px(&p, 2, 0), WHITE, "tile col 0 fetched before the write");
+        assert_eq!(
+            px(&p, 2, 8),
+            BLACK,
+            "old tile number (tile 1), new data row (5): color 3"
+        );
+    }
+
+    /// A staged LCDC value must not enable/disable the LCD early: bit 7 is
+    /// only honored at the architectural commit (`lcdon_*` mooneye tables
+    /// were calibrated there).
+    #[test]
+    fn strobe_lcdc_bit7_only_at_commit() {
+        let mut p = dmg_on(0x91);
+        run_to(&mut p, 2, 130);
+        p.stage_write(0xFF40, 0x11, 2); // LCD off staged
+        for _ in 0..4 {
+            p.tick();
+        }
+        assert!(p.enabled, "staged LCDC.7 must not act before the commit");
+        p.write(0xFF40, 0x11);
+        assert!(!p.enabled, "the architectural commit disables");
     }
 
     // --- Mode 3 length ---
