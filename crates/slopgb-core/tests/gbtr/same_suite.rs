@@ -137,8 +137,9 @@ const BASELINE: &[&str] = &[
     // variants (which phase-lock DIV == $10, i.e. the DIV-APU bit HIGH,
     // before each NR52 power-on / DIV write — they never touch KEY1) all
     // pass via the power-on DIV-event skip glitch (SameBoy GB_apu_init).
-    // dma: 1 of 4 (gbc_dma_cont, gdma_addr_mask, hdma_lcd_off pass).
-    "same-suite/dma/hdma_mode0.gb [Cgb]",
+    // dma: none — hdma_mode0 joined via the CGB-C mode-0/OAM timeline
+    // (2026-06); gbc_dma_cont, gdma_addr_mask, hdma_lcd_off passed
+    // already.
     // interrupt: 1 of 1.
     "same-suite/interrupt/ei_delay_halt.gb [Cgb]",
     // sgb: none — both MLT_REQ command tests pass via the joypad's SGB

@@ -40,7 +40,6 @@ const BASELINE: &[&str] = &[
     "age-test-roms/halt/ei-halt-dmgC-cgbBCE.gb [Cgb]",
     "age-test-roms/halt/ei-halt-dmgC-cgbBCE.gb [Dmg]",
     "age-test-roms/lcd-align-ly/lcd-align-ly-cgbBC.gb [Cgb]",
-    "age-test-roms/ly/ly-dmgC-cgbBC.gb [Cgb]",
     "age-test-roms/m3-bg-bgp/m3-bg-bgp.gb [Dmg]",
     // m3-bg-lcdc-ds [Cgb] is a documented swap from the STAT mode-2 pulse
     // wave (2026-06): the line-start OAM IRQ pulse model flipped 200+

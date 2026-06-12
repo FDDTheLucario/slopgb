@@ -43,6 +43,40 @@
 //! no OAM scan (STAT reads mode 0, OAM/VRAM accessible), mode 3 (and all
 //! read+write blocking) during dots 78..250+SCX%8, then a real hblank.
 //!
+//! # CGB-C deltas (the per-model timeline axis)
+//!
+//! The table above is the DMG grid; `Model::Cgb`/`Agb` differ in
+//! CPU-visible windows only (each is cited at its implementation site):
+//!
+//! * **Readable LYC flag** ([`Ppu::compare_ly`]): no forced-invalid gaps —
+//!   the flag holds the previous line's compare through dots 0-3 and
+//!   switches at dot 4; line 153 holds 153 through dot 11 and switches to
+//!   0 at dot 12 (wilbertpol ly_lyc-C/144-C/153-C rounds 7-8). The
+//!   IRQ-side comparison ([`Ppu::compare_ly_irq`] vs the delayed
+//!   [`Ppu::lyc_event`] copy) keeps DMG-shaped windows, event-clocked.
+//! * **FF45 writes** ([`Ppu::write_lyc_cgb`]): gambatte lycRegChange —
+//!   writes within 4 dots of a line's event can't reach it, boundary
+//!   writes compare against the upcoming line, and a raised IF lands one
+//!   M-cycle after the write at single speed.
+//! * **STAT mode** ([`Ppu::vis_mode`]): line 0 dots 0-3 read mode 1 (the
+//!   vblank persists; no mode-0 gap — wilbertpol ly00_mode1_2-C), and the
+//!   vblank STAT-source level extends with it.
+//! * **VRAM read blocking** starts at dot 83 (gambatte vramReadable
+//!   `76 + 3*cgb`; age vram-read).
+//! * **OAM writes** are blocked during dots 0-3 of lines whose predecessor
+//!   was visible, and the DMG dots-80-83 writable gap does not exist
+//!   (gambatte oamWritable; age oam-write).
+//! * **LY=153** loads two dots early at single speed — readable from
+//!   (152,454) — and wraps to 0 at the DMG dot 4; double speed loads on
+//!   time and wraps at dot 6 (wilbertpol ly_new_frame-C; age ly ds rows;
+//!   SameBoy display.c).
+//! * **FF41 writes** never fire from the OAM blocking level except in the
+//!   last M-cycle before a visible line's pulse, and an m1 enable written
+//!   into mode 1's final M-cycle raises nothing (gambatte
+//!   statChangeTriggersStatIrqCgb; wilbertpol stat_write_if-C).
+//! * Boot hand-off sits at frame dot 144·456+164 (AGB +4) — gambatte
+//!   initstate videoCycles, display_startstate (`model.rs`).
+//!
 //! # Known approximation: instantaneous OAM scan
 //!
 //! Sprite selection for a line happens in one step at dot 80 rather than
@@ -250,6 +284,28 @@ pub struct Ppu {
     /// pulses' `stat_halt_late`). mooneye hblank_ly_scx_timing-GS and
     /// gbmicrotest int_hblank_halt_scx0-7 pin all eight SCX phases.
     m0_rise: bool,
+    /// Dots until a CGB-deferred FF45-write STAT IRQ is emitted (0 =
+    /// none). On CGB at single speed an FF45 write whose comparison
+    /// raises the STAT line produces its IF bit one M-cycle after the
+    /// write instead of inside the write cycle (gambatte lycRegChange:
+    /// `cgb && !ds` schedules `memevent_oneshot_statirq` at cc+5; the
+    /// lyc_ff45_trigger_delay dmg08_out0/cgb04c_out2 split and the
+    /// wilbertpol ly_lyc_*write-C rounds pin the cycle).
+    lyc_if_delay: u8,
+    /// CGB: the LYC value the line-start IRQ event samples — a delayed
+    /// copy of FF45 (gambatte LycIrq::regChange keeps `lycReg_` when the
+    /// write lands within ~4 dots of the scheduled event). An FF45 write
+    /// committing during dots 0-3 of a line (or 8-11 of line 153 for the
+    /// LYC=0 event at dot 12) reaches the comparator only after that
+    /// line's event has fired: wilbertpol ly_lyc_write-C round 2 (a
+    /// match-killing write at the line-start cycle still IRQs) and round
+    /// 4 (a match-making write there does not). Mirrors `lyc` exactly on
+    /// DMG and outside those windows.
+    lyc_event: u8,
+    /// The IRQ-side LY=LYC comparison — like `cmp` but evaluated against
+    /// [`Self::lyc_event`]. Drives the STAT line's LYC source; FF41
+    /// reads keep showing the live `cmp`.
+    cmp_irq: bool,
     /// Mode 3 actually finished (pixel 160 shipped, dot D). This is the
     /// anchor the HBlank-DMA machinery and CGB palette-RAM blocking were
     /// calibrated against (gambatte dma/hdma_start `_1`/`_2` pairs); the
@@ -436,6 +492,9 @@ impl Ppu {
             m0_src: false,
             m0_rise_dot: false,
             m0_rise: false,
+            lyc_if_delay: 0,
+            lyc_event: 0,
+            cmp_irq: false,
             stat_halt_late: false,
             stat_halt_late_pending: false,
             line_render_done: true,
@@ -572,6 +631,13 @@ impl Ppu {
         if !self.enabled {
             return std::mem::take(&mut self.pending_if);
         }
+        if self.lyc_if_delay > 0 {
+            self.lyc_if_delay -= 1;
+            if self.lyc_if_delay == 0 {
+                // CGB-deferred FF45-write STAT IRQ (see `lyc_if_delay`).
+                self.pending_if |= IF_STAT;
+            }
+        }
         self.dot += 1;
         let len = if self.glitch_line {
             GLITCH_LINE_DOTS
@@ -633,6 +699,17 @@ impl Ppu {
     }
 
     fn step_dot(&mut self) {
+        // CGB: the line-start LYC event's delayed FF45 copy catches up
+        // outside the 4-dot lead-in of each event — dot 4, and 153:12
+        // for the LYC=0 event (see `lyc_event`; gambatte
+        // LycIrq::regChange's `time_ - cc` windows).
+        if self.model.is_cgb() {
+            let protected =
+                (1..=4).contains(&self.dot) || (self.line == 153 && (9..=12).contains(&self.dot));
+            if !protected {
+                self.lyc_event = self.lyc;
+            }
+        }
         // Frame-sticky WY condition (gambatte weMaster): sampled at
         // discrete dots, not compared continuously — see `wy_latch`.
         // gambatte's line-cycle anchors translate to our dot convention
@@ -681,9 +758,26 @@ impl Ppu {
             // render step so the projection sees this dot's state).
             self.m0_flip_events();
         }
-        if self.line == 153 && self.dot == 4 {
-            // Line 153 quirk: LY reads 0 from dot 4 (TCAGBD §8.9).
-            self.ly = 0;
+        if self.model.is_cgb() && !self.ds && self.line == 152 && self.dot == 454 {
+            // CGB-C single speed loads LY=153 two dots before line 153
+            // starts: the readable window is dots -2..3 around the
+            // boundary, which is how wilbertpol ly_new_frame-C's
+            // frame-anchored reads (the boot grid sits 2 dots off the
+            // M-cycle lattice, see Model::post_boot_state) catch 153 on
+            // two consecutive M-cycles while age ly-dmgC-cgbBC's
+            // enable-anchored ladder sees it exactly once.
+            self.ly = 153;
+        }
+        if self.line == 153 {
+            // Line 153 quirk: LY reads 0 from dot 4 (TCAGBD §8.9). In
+            // CGB double speed the wrap comes 2 dots later — age
+            // ly-dmgC-cgbBC's ds ladder reads 153 at three consecutive
+            // 2-dot-spaced points; SameBoy display.c holds LY=153 for
+            // the longer sleep when `cgb_double_speed`.
+            let wrap = if self.model.is_cgb() && self.ds { 6 } else { 4 };
+            if self.dot == wrap {
+                self.ly = 0;
+            }
         }
         if self.line == 144 && self.dot == 4 {
             // VBlank interrupt: 4 dots after LY becomes 144, together with
@@ -692,12 +786,42 @@ impl Ppu {
         }
     }
 
-    /// LY value the LYC comparator sees, or None while the delayed-LY value
-    /// is invalid (comparison flag forced to 0). See module docs.
+    /// LY value the LYC comparator's *readable flag* sees, or None while
+    /// the delayed-LY value is invalid (flag forced to 0). See module
+    /// docs. The IRQ-side comparison uses [`Self::compare_ly_irq`].
     fn compare_ly(&self) -> Option<u8> {
         if self.glitch_line {
             // LCD enable: the comparison runs immediately with LY=0
             // (`stat_lyc_onoff` rounds 1-4).
+            return Some(0);
+        }
+        if self.model.is_cgb() {
+            // CGB-C: no forced-invalid gaps in the *readable* flag — it
+            // holds the previous line's value through dots 0-3 and
+            // switches at dot 4; line 153 holds 153 through dot 11
+            // (twice the DMG window) before switching to 0 at dot 12
+            // (wilbertpol ly_lyc-C/ly_lyc_144-C/ly_lyc_153-C rounds 7-8
+            // pin the holds; ly_lyc_0-C's expectations equal the -GS
+            // build's, so the 0-compare start stays at 153:12).
+            return Some(match (self.line, self.dot) {
+                (0, _) => 0,
+                (153, 0..=3) => 152,
+                (153, 4..=11) => 153,
+                (153, _) => 0,
+                (line, 0..=3) => line - 1,
+                (line, _) => line,
+            });
+        }
+        self.compare_ly_irq()
+    }
+
+    /// LY value the IRQ-side comparator sees (and the DMG readable
+    /// flag). Unlike the CGB readable flag it drops at line starts —
+    /// gambatte's lyc and m1 IRQs are separate events, and the m1 event
+    /// at 144:4 fires even when LYC matched line 143 (lycint143_m1irq
+    /// expects both IRQs; a held level would swallow the m1 edge).
+    fn compare_ly_irq(&self) -> Option<u8> {
+        if self.glitch_line {
             return Some(0);
         }
         match self.line {
@@ -739,7 +863,13 @@ impl Ppu {
                 3
             }
         } else if self.dot < 4 {
-            0
+            // CGB line 0: the vblank's mode 1 persists through dots 0-3
+            // — there is no mode-0 gap before the OAM scan (wilbertpol
+            // ly00_mode1_2-C vs ly00_mode1_0-GS; SameBoy display.c only
+            // clears the mode bits at the line-0 LY-write dot on DMG;
+            // gambatte getStat's mode-1 window runs to 3 cycles before
+            // line 0's mode 2).
+            u8::from(self.model.is_cgb() && self.line == 0)
         } else if self.dot < 84 {
             2
         } else if !self.line_render_done {
@@ -780,8 +910,10 @@ impl Ppu {
     }
 
     /// Level of the shared STAT interrupt line for the given enable bits.
+    /// The LYC source uses the IRQ-side comparison (`cmp_irq` — the
+    /// delayed `lyc_event` copy on CGB); FF41 reads show the live `cmp`.
     fn stat_line_level(&self, en: u8) -> bool {
-        let mut high = en & STAT_SRC_LYC != 0 && self.cmp;
+        let mut high = en & STAT_SRC_LYC != 0 && self.cmp_irq;
         if !self.enabled {
             // With the LCD off only the (frozen) LYC source persists
             // (`stat_lyc_onoff` round 2: no edge across off/on with cmp=1).
@@ -797,8 +929,14 @@ impl Ppu {
         high |= en & STAT_SRC_HBLANK != 0
             && ((self.line <= 143 && self.m0_src) || (vm == 0 && self.dot < 4))
             && !(self.glitch_line && self.dot < GLITCH_MODE3_START);
-        high |=
-            en & STAT_SRC_VBLANK != 0 && (self.line >= 145 || (self.line == 144 && self.dot >= 4));
+        // Vblank source. On CGB the level extends through line 0 dots
+        // 0-3 together with the persisting visible mode 1 (gambatte
+        // getStat's mode-1 window + the lycEnable lyc0_m1disable
+        // cgb04c_outE0 rows: edges under it stay blocked).
+        high |= en & STAT_SRC_VBLANK != 0
+            && (self.line >= 145
+                || (self.line == 144 && self.dot >= 4)
+                || (self.model.is_cgb() && self.line == 0 && !self.glitch_line && self.dot < 4));
         if en & STAT_SRC_OAM != 0 {
             // The OAM *blocking level* spans the whole scan+render of every
             // visible line, dots 0..the mode-0 source rise — one dot past
@@ -844,20 +982,42 @@ impl Ppu {
     fn refresh_stat(&mut self, from_tick: bool) {
         if self.enabled {
             self.cmp = self.compare_ly() == Some(self.lyc);
+            if !self.model.is_cgb() {
+                self.cmp_irq = self.cmp;
+            } else if !from_tick
+                || self.glitch_line
+                || self.dot == 0
+                || self.dot == 4
+                || (self.line == 153 && (self.dot == 8 || self.dot == 12))
+            {
+                // The IRQ-side comparison is event-clocked on CGB: it
+                // re-evaluates at the window-boundary dots and on
+                // register writes, against the delayed `lyc_event` copy
+                // — a copy that caught up *between* events changes the
+                // line level only at the next event (no IRQ for an FF45
+                // write that lands inside its line's protected window:
+                // wilbertpol ly_lyc_write-C round 4).
+                self.cmp_irq = self.compare_ly_irq() == Some(self.lyc_event);
+            }
         }
         let level = self.stat_line_level(self.stat_en);
         if level && !self.stat_line {
             // The OAM source's IRQ is an *event* at the line-start dots
             // (SameBoy display.c raises the OAM STAT interrupt via a
             // one-shot mode_for_interrupt; gambatte mstat_irq.h doM2Event),
-            // but the source still behaves as a level edge for rises
-            // landing inside the readable mode-2 window — gambatte's
-            // m2enable/late_enable_* rows fire the IRQ for an enable
-            // written mid-scan. Only a rise whose sole contributor is the
-            // *mode-3 extension* of the OAM blocking level (dots 84..end,
-            // which exists to block mode-0/LYC edges — m2int_m0irq,
-            // lycm2int) emits nothing: there is no mode-2 condition left
-            // to fire (gbmicrotest oam_int_if_level_d).
+            // but on DMG the source still behaves as a level edge for
+            // rises landing inside the readable mode-2 window —
+            // gambatte's m2enable/late_enable_* dmg08 rows fire the IRQ
+            // for an enable written mid-scan. On CGB a written m2 enable
+            // raises nothing anywhere under the blocking level
+            // (gambatte statChangeTriggersStatIrqCgb's first branch
+            // routes scan/mode-3 writes to the lyc check only;
+            // wilbertpol stat_write_if-C's mode-2 rows read IF $E0). A
+            // rise whose sole contributor is the *mode-3 extension* of
+            // the OAM blocking level (dots 84..end, which exists to
+            // block mode-0/LYC edges — m2int_m0irq, lycm2int) emits
+            // nothing on either family: there is no mode-2 condition
+            // left to fire (gbmicrotest oam_int_if_level_d).
             let sans_oam = self.stat_line_level(self.stat_en & !STAT_SRC_OAM);
             let cgb = self.model.is_cgb();
             let oam_event_dot = from_tick
@@ -865,8 +1025,29 @@ impl Ppu {
                     || (self.line == 0 && !self.glitch_line && self.dot == 4)
                     || (self.line == 144 && self.dot == 0)
                     || (!cgb && (145..=153).contains(&self.line) && self.dot == 12));
-            let in_scan = self.line <= 143 && !self.glitch_line && self.dot < 84;
-            if !sans_oam && !oam_event_dot && !in_scan {
+            // CGB: an FF41 write enabling the m2 source fires only in
+            // the last M-cycle before a visible line's pulse (gambatte
+            // statChangeTriggersM2IrqCgb `timeToNextLy <= 4*(1+ds) &&
+            // > 2`; the m2enable late_enable `_1`/`_2` ladders pin the
+            // window) — everywhere else under the blocking level it
+            // raises nothing (wilbertpol stat_write_if-C mode-2 rows).
+            let m2_write_window = self.line >= 1 && self.dot < 2 + 2 * u16::from(self.ds);
+            let in_scan = self.line <= 143
+                && !self.glitch_line
+                && self.dot < 84
+                && (!cgb || from_tick || m2_write_window);
+            // CGB: an FF41 write enabling the m1 source inside mode 1's
+            // last M-cycle (the line-0 dots where the level extension
+            // still holds) raises nothing (gambatte
+            // statChangeTriggersM0LycOrM1StatIrqCgb's `timeToNextLy >
+            // 4 + 2*ds` guard on the m1 data bit).
+            let m1_tail_veto = cgb
+                && !from_tick
+                && self.line == 0
+                && !self.glitch_line
+                && self.dot < 2 + 2 * u16::from(self.ds)
+                && !self.stat_line_level(self.stat_en & !STAT_SRC_VBLANK);
+            if (!sans_oam && !oam_event_dot && !in_scan) || m1_tail_veto {
                 self.stat_line = level;
                 self.stat_halt_late_pending = false;
                 return;
@@ -954,6 +1135,20 @@ impl Ppu {
         if self.glitch_line {
             return self.dot >= GLITCH_MODE3_START && !self.line_render_done;
         }
+        if self.model.is_cgb() {
+            // CGB: line-start dots 0-3 block writes too, unless the
+            // previous line was a vblank line (line 0 here — gambatte
+            // oamWritable's `lineCycles + 3 + cgb >= 456` arm falls back
+            // to `ly >= 143`, and lyCounter still reads 153 there), and
+            // the DMG dots-80-83 writable gap does not exist (the
+            // `lineCycles == 76 && !cgb` escape; SameBoy raises
+            // oam_write_blocked at CGB line starts; age oam-write-cgbBCE).
+            return if self.dot < 4 {
+                self.line != 0
+            } else {
+                self.dot < 84 || !self.line_render_done
+            };
+        }
         // Writes pass during dots 0-3 and 80-83 (`lcdon_write_timing-GS`).
         (4..80).contains(&self.dot) || (self.dot >= 84 && !self.line_render_done)
     }
@@ -962,10 +1157,15 @@ impl Ppu {
         if !self.enabled || self.line > 143 || self.line_render_done {
             return false;
         }
+        // CGB read locking starts 3 dots later than DMG — a read at
+        // state(80) still returns data (gambatte vramReadable
+        // `lineCycles + ds < 76 + 3*cgb`; SameBoy keeps vram_read_blocked
+        // false through the OAM scan on CGB; age vram-read-cgbBCE).
+        let late = if self.model.is_cgb() { 3 } else { 0 };
         if self.glitch_line {
-            self.dot >= GLITCH_MODE3_START
+            self.dot >= GLITCH_MODE3_START + late
         } else {
-            self.dot >= 80
+            self.dot >= 80 + late
         }
     }
 
@@ -1179,10 +1379,15 @@ impl Ppu {
                 }
             }
             0xFF45 => {
+                let old = self.lyc;
                 self.lyc = value;
                 // The comparison retriggers immediately on LYC writes while
                 // the comparison clock runs (`stat_lyc_onoff`).
-                self.refresh_stat(false);
+                if self.model.is_cgb() && self.enabled {
+                    self.write_lyc_cgb(old, value);
+                } else {
+                    self.refresh_stat(false);
+                }
             }
             0xFF47 => self.bgp = value,
             0xFF48 => self.obp0 = value,
@@ -1215,6 +1420,84 @@ impl Ppu {
         std::mem::take(&mut self.pending_if)
     }
 
+    /// CGB FF45 write path (LCD on): the IRQ decision follows gambatte's
+    /// `lycRegChangeTriggersStatIrq` — writes committing near a line
+    /// boundary compare against the *upcoming* line's value, with the
+    /// simultaneous-increment exception — and a raised IF lands one
+    /// M-cycle after the write at single speed (`lyc_if_delay`). The
+    /// line-start event comparator keeps a delayed copy (`lyc_event`)
+    /// that writes inside the event's 4-dot lead-in cannot reach.
+    /// Pinned by wilbertpol ly_lyc_write-C / ly_lyc_0_write-C /
+    /// ly_lyc_153_write-C and the gambatte lycEnable family.
+    fn write_lyc_cgb(&mut self, old: u8, value: u8) {
+        // Event-comparator copy (gambatte LycIrq::regChange windows).
+        let protected = !self.glitch_line
+            && (self.dot < 4 || (self.line == 153 && (8..12).contains(&self.dot)));
+        if !protected {
+            self.lyc_event = value;
+        }
+        // Trigger target: the compare value gambatte's predicate uses,
+        // translated to commit-dot coordinates (gambatte cc = commit
+        // state minus 4; tail window = returned timeToNextLy <= 6).
+        // `None` = the simultaneous-increment exception (old value
+        // matched the held compare inside the tail: "lyc flag never
+        // goes low -> no trigger").
+        let target = if self.glitch_line {
+            Some(0)
+        } else if self.line == 153 {
+            match self.dot {
+                // Line-152 tail: the upcoming line is 153.
+                0..=3 => Some(153),
+                // incLy(153) = 0, with the exception while ret > 2.
+                4..=7 if old == 153 => None,
+                _ => Some(0),
+            }
+        } else {
+            match self.dot {
+                // Tail of the previous line / last M-cycle of this one:
+                // the upcoming line's number.
+                0..=3 => Some(self.line),
+                452..=455 if old == self.line => None,
+                452..=455 => Some(if self.line == 152 { 153 } else { self.line + 1 }),
+                _ => Some(self.line),
+            }
+        };
+        // The trigger is an event, not a line edge: it fires even while
+        // another source holds the line high, blocked only by gambatte's
+        // lycRegChangeStatTriggerBlockedByM0OrM1Irq — a pending mode-0
+        // IRQ for a now-matching value on visible lines, the m1 enable
+        // on vblank lines (except the very end of line 153) — and by an
+        // already-matching lyc level (the old value's match means the
+        // target comparison fails, handled by `target` above; an
+        // unchanged-source rise needs `stat_line` low).
+        let blocked = if self.line <= 143 && !self.glitch_line {
+            // Blocked only once this line's mode-0 IRQ has passed (the
+            // write sits in the hblank): gambatte checks the next m0irq
+            // event lying beyond the line end. Writes earlier in the
+            // line fire (lycwirq_trigger_m0_early_ly44 rows).
+            self.stat_en & STAT_SRC_HBLANK != 0 && self.m0_src && value == self.line
+        } else {
+            self.stat_en & STAT_SRC_VBLANK != 0 && !(self.line == 153 && self.dot >= 452)
+        };
+        let lyc_level_high = self.stat_line && self.stat_line_level(STAT_SRC_LYC & self.stat_en);
+        let fire = self.stat_en & STAT_SRC_LYC != 0
+            && target == Some(value)
+            && !blocked
+            && !lyc_level_high;
+        // Converge the readable flag and the line level; the IF decision
+        // above replaces the refresh edge (strip whatever it raised).
+        let before = self.pending_if;
+        self.refresh_stat(false);
+        self.pending_if &= !(IF_STAT & !before);
+        if fire {
+            if self.ds {
+                self.pending_if |= IF_STAT;
+            } else {
+                self.lyc_if_delay = 4;
+            }
+        }
+    }
+
     fn write_lcdc(&mut self, value: u8) {
         let was_on = self.lcdc & LCDC_ENABLE != 0;
         self.lcdc = value;
@@ -1237,6 +1520,9 @@ impl Ppu {
             self.m0_src = false;
             self.m0_rise_dot = false;
             self.hdma_lead = false;
+            // An in-flight CGB FF45-write IRQ dies with the LCD
+            // (gambatte: disabling cancels every scheduled memevent).
+            self.lyc_if_delay = 0;
             self.render.active = false;
             self.render.win_active = false;
             self.win_start_pending = false;
@@ -1251,6 +1537,9 @@ impl Ppu {
             self.line = 0;
             self.dot = 0;
             self.ly = 0;
+            // The event comparator's delayed FF45 copy restarts in sync
+            // (gambatte lycIrq.lcdReset).
+            self.lyc_event = self.lyc;
             self.glitch_line = true;
             // Hardware keeps the panel blank for the whole first frame
             // after enabling (see `frame_skip`).
@@ -2218,5 +2507,250 @@ mod tests {
             p.oam_bug(OamBugKind::ReadIncrease);
             assert_eq!(p.oam, before, "dot {dot}");
         }
+    }
+
+    // --- CGB-C LY/STAT line timeline (single speed) ---
+    //
+    // The CGB line grid differs from the DMG one in a handful of
+    // CPU-visible windows; each test below cites the hardware oracle in
+    // its comment. DMG behaviour must stay bit-identical (mooneye-frozen).
+
+    /// CGB line 0 dots 0-3 read STAT mode 1 — the vblank persists into
+    /// line 0; there is no mode-0 gap (wilbertpol ly00_mode1_2-C round 6
+    /// vs ly00_mode1_0-GS; SameBoy display.c keeps STAT mode for line 0
+    /// on CGB at the LY write dot; gambatte getStat's mode-1 window ends
+    /// 3 cycles before line 0's mode 2).
+    #[test]
+    fn cgb_line0_reads_mode1_dots_0_3() {
+        let mut p = cgb();
+        p.write(0xFF40, 0x81);
+        run_to(&mut p, 153, 400); // past the glitch frame
+        run_to(&mut p, 0, 0);
+        assert_eq!(p.read(0xFF41) & 3, 1, "CGB line 0 dot 0 reads mode 1");
+        tick_n(&mut p, 3);
+        assert_eq!(p.read(0xFF41) & 3, 1, "CGB line 0 dot 3 reads mode 1");
+        p.tick();
+        assert_eq!(p.read(0xFF41) & 3, 2, "mode 2 from dot 4");
+
+        let mut d = dmg();
+        d.write(0xFF40, 0x81);
+        run_to(&mut d, 153, 400);
+        run_to(&mut d, 0, 0);
+        assert_eq!(d.read(0xFF41) & 3, 0, "DMG line 0 dot 0 reads mode 0");
+    }
+
+    /// CGB has no forced-invalid LYC gap at line starts: the comparator
+    /// holds the previous line's value through dots 0-3 and switches at
+    /// dot 4 (wilbertpol ly_lyc-C round 7: STAT reads $C4 — mode 0, flag
+    /// still set for LYC = previous line — at the start of the next
+    /// line; ly_lyc_144-C round 7 pins the same on the 144→145 edge).
+    #[test]
+    fn cgb_lyc_compare_holds_previous_line_through_dot_3() {
+        let mut p = cgb();
+        p.write(0xFF45, 2);
+        p.write(0xFF40, 0x81);
+        run_to(&mut p, 3, 0);
+        assert_eq!(p.read(0xFF41) & 4, 4, "CGB (3,0): flag holds line 2");
+        tick_n(&mut p, 3);
+        assert_eq!(p.read(0xFF41) & 4, 4, "CGB (3,3): flag holds line 2");
+        p.tick();
+        assert_eq!(p.read(0xFF41) & 4, 0, "CGB (3,4): compares line 3");
+
+        let mut d = dmg();
+        d.write(0xFF45, 2);
+        d.write(0xFF40, 0x81);
+        run_to(&mut d, 3, 0);
+        assert_eq!(d.read(0xFF41) & 4, 0, "DMG (3,0): invalid window");
+    }
+
+    /// CGB line 153 LYC windows: the comparator sees 152 during dots
+    /// 0-3, 153 during dots 4-11 (twice as long as DMG — wilbertpol
+    /// ly_lyc_153-C rounds 7/8 read $C5 one M-cycle later than the -GS
+    /// build), and 0 from dot 12 (same dot as DMG — ly_lyc_0-C ==
+    /// ly_lyc_0-GS expectations).
+    #[test]
+    fn cgb_ly153_lyc_compare_windows() {
+        let mut p = cgb();
+        p.write(0xFF45, 153);
+        p.write(0xFF40, 0x81);
+        run_to(&mut p, 153, 0);
+        assert_eq!(p.read(0xFF41) & 4, 0, "dots 0-3 hold the 152 compare");
+        tick_n(&mut p, 4);
+        assert_eq!(p.read(0xFF41) & 4, 4, "dot 4: 153 compare");
+        tick_n(&mut p, 7);
+        assert_eq!(p.read(0xFF41) & 4, 4, "dot 11: still 153");
+        p.tick();
+        assert_eq!(p.read(0xFF41) & 4, 0, "dot 12: 0 compare");
+
+        // LYC=152 stays matched through 153's dots 0-3.
+        let mut p = cgb();
+        p.write(0xFF45, 152);
+        p.write(0xFF40, 0x81);
+        run_to(&mut p, 153, 3);
+        assert_eq!(p.read(0xFF41) & 4, 4, "dots 0-3 hold the 152 compare");
+        p.tick();
+        assert_eq!(p.read(0xFF41) & 4, 0, "dot 4: 153 compare");
+    }
+
+    /// CGB-C: LY reads 153 from dot 454 of line 152 — two dots before
+    /// the line starts — through dot 3, wrapping to 0 at dot 4 like DMG
+    /// (wilbertpol ly_new_frame-C reads 153 on two consecutive
+    /// frame-anchored M-cycles — the CGB boot grid sits 2 dots off the
+    /// M lattice — while age ly-dmgC-cgbBC's enable-anchored ladder
+    /// sees it exactly once, and three times at 2-dot spacing in double
+    /// speed; only the early load satisfies all three).
+    #[test]
+    fn cgb_ly153_loads_two_dots_early() {
+        let mut p = cgb();
+        p.write(0xFF40, 0x81);
+        run_to(&mut p, 152, 453);
+        assert_eq!(p.read(0xFF44), 152);
+        p.tick();
+        assert_eq!(p.read(0xFF44), 153, "LY=153 from (152,454)");
+        run_to(&mut p, 153, 3);
+        assert_eq!(p.read(0xFF44), 153);
+        p.tick();
+        assert_eq!(p.read(0xFF44), 0, "LY=0 from (153,4)");
+
+        let mut d = dmg();
+        d.write(0xFF40, 0x81);
+        run_to(&mut d, 152, 454);
+        assert_eq!(d.read(0xFF44), 152, "DMG keeps LY=152 to the line end");
+    }
+
+    /// CGB VRAM read blocking starts 3 dots later than DMG — a read at
+    /// state(80) still returns data (gambatte vramReadable `lineCycles <
+    /// 76 + 3*cgb`; SameBoy oam_search_index-37 `vram_read_blocked =
+    /// !GB_is_cgb`; age vram-read-cgbBCE).
+    #[test]
+    fn cgb_vram_read_open_through_dot_82() {
+        let mut p = cgb();
+        p.write(0xFF40, 0x81);
+        p.write(0x9000, 0x5A);
+        run_to(&mut p, 1, 80);
+        assert_eq!(p.read(0x9000), 0x5A, "CGB state(80) readable");
+        tick_n(&mut p, 3);
+        assert_eq!(p.read(0x9000), 0xFF, "CGB state(83) blocked");
+
+        let mut d = dmg();
+        d.write(0xFF40, 0x81);
+        d.write(0x9000, 0x5A);
+        run_to(&mut d, 1, 80);
+        assert_eq!(d.read(0x9000), 0xFF, "DMG state(80) blocked");
+    }
+
+    /// CGB OAM write blocking: line-start dots 0-3 block writes on lines
+    /// whose predecessor was a visible line, and the DMG dots-80-83
+    /// writable gap does not exist (gambatte oamWritable: blocked from
+    /// `lineCycles + 3 + cgb >= 456` with the `lineCycles == 76` escape
+    /// DMG-only; SameBoy sets oam_write_blocked = GB_is_cgb at line
+    /// start; age oam-write-cgbBCE).
+    #[test]
+    fn cgb_oam_write_blocked_at_line_start_and_scan_end() {
+        let mut p = cgb();
+        p.write(0xFF40, 0x81);
+        run_to(&mut p, 2, 0);
+        p.write(0xFE00, 0x12);
+        assert_eq!(p.oam[0], 0, "CGB (2,0) write blocked");
+        run_to(&mut p, 2, 80);
+        p.write(0xFE00, 0x34);
+        assert_eq!(p.oam[0], 0, "CGB (2,80) write blocked");
+        // Line 0's dots 0-3 follow a vblank line: writable (gambatte
+        // oamWritable's `ly >= 143` arm — lyCounter still reads 153).
+        run_to(&mut p, 0, 0);
+        p.write(0xFE00, 0x56);
+        assert_eq!(p.oam[0], 0x56, "CGB (0,0) write lands");
+
+        let mut d = dmg();
+        d.write(0xFF40, 0x81);
+        run_to(&mut d, 2, 0);
+        d.write(0xFE00, 0x12);
+        assert_eq!(d.oam[0], 0x12, "DMG (2,0) write lands");
+        run_to(&mut d, 2, 80);
+        d.write(0xFE00, 0x34);
+        assert_eq!(d.oam[0], 0x34, "DMG (2,80) write lands");
+    }
+
+    /// CGB single speed: an FF45 write whose comparison raises the STAT
+    /// line produces its IF bit one M-cycle after the write instead of
+    /// inside the write cycle (gambatte lycRegChange schedules a oneshot
+    /// at cc+5 for cgb && !ds; lyc_ff45_trigger_delay_2 carries the
+    /// dmg08_out0/cgb04c_out2 split).
+    #[test]
+    fn cgb_lyc_write_irq_is_one_mcycle_late() {
+        let mut p = cgb();
+        p.write(0xFF41, 0x40);
+        p.write(0xFF40, 0x81);
+        run_to(&mut p, 5, 200);
+        assert_eq!(p.write(0xFF45, 5), 0, "CGB: no IF in the write cycle");
+        assert_eq!(tick_n(&mut p, 4) & IF_STAT, IF_STAT, "IF one cycle later");
+
+        let mut d = dmg();
+        d.write(0xFF41, 0x40);
+        d.write(0xFF40, 0x81);
+        run_to(&mut d, 5, 200);
+        assert_eq!(d.write(0xFF45, 5), IF_STAT, "DMG: IF in the write cycle");
+    }
+
+    /// CGB FF45 writes near a line boundary follow gambatte's
+    /// lycRegChangeTriggersStatIrq: a write committing at the line-start
+    /// M-cycle cannot stop that line's event (the delayed `lyc_event`
+    /// copy), a now-matching value written there raises nothing, and a
+    /// write in the previous line's last M-cycle compares against the
+    /// upcoming line (wilbertpol ly_lyc_write-C rounds 1-4).
+    #[test]
+    fn cgb_lyc_write_line_boundary_windows() {
+        // Round-2 shape: killing the match at (N,0) is too late — the
+        // dot-4 event still fires from the old LYC.
+        let mut p = cgb();
+        p.write(0xFF41, 0x40);
+        p.write(0xFF45, 2);
+        p.write(0xFF40, 0x81);
+        run_to(&mut p, 2, 0);
+        assert_eq!(p.write(0xFF45, 0xF0), 0);
+        assert_eq!(tick_n(&mut p, 4) & IF_STAT, IF_STAT, "event from old LYC");
+
+        // Round-4 shape: making a match at (N,0) raises nothing — the
+        // event sampled the old value and the write-trigger compares
+        // the upcoming line.
+        let mut p = cgb();
+        p.write(0xFF41, 0x40);
+        p.write(0xFF45, 0xF0);
+        p.write(0xFF40, 0x81);
+        run_to(&mut p, 3, 0);
+        assert_eq!(p.write(0xFF45, 2), 0);
+        assert_eq!(tick_n(&mut p, 12) & IF_STAT, 0, "no IRQ this line");
+
+        // Round-1 shape: a kill one M-cycle earlier does reach the event.
+        let mut p = cgb();
+        p.write(0xFF41, 0x40);
+        p.write(0xFF45, 2);
+        p.write(0xFF40, 0x81);
+        run_to(&mut p, 1, 452);
+        assert_eq!(p.write(0xFF45, 0xF0), 0);
+        assert_eq!(tick_n(&mut p, 12) & IF_STAT, 0, "event disarmed");
+    }
+
+    /// The CGB vblank STAT-source level extends through line 0 dots 0-3
+    /// together with the visible mode 1 (gambatte getStat + the
+    /// lycEnable lyc0_m1disable cgb04c_outE0 rows: an LYC edge under it
+    /// stays blocked).
+    #[test]
+    fn cgb_vblank_level_holds_through_line0_dots_0_3() {
+        let mut p = cgb();
+        p.write(0xFF41, 0x10);
+        p.write(0xFF40, 0x81);
+        run_to(&mut p, 153, 400);
+        run_to(&mut p, 0, 3);
+        assert!(p.stat_line, "level still high at (0,3)");
+        p.tick();
+        assert!(!p.stat_line, "level drops at (0,4)");
+
+        let mut d = dmg();
+        d.write(0xFF41, 0x10);
+        d.write(0xFF40, 0x81);
+        run_to(&mut d, 153, 400);
+        run_to(&mut d, 0, 0);
+        assert!(!d.stat_line, "DMG level low from (0,0)");
     }
 }
