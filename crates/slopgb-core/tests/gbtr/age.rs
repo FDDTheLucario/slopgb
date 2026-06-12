@@ -39,8 +39,6 @@ const SUITE_DIR: &str = "age-test-roms";
 const BASELINE: &[&str] = &[
     "age-test-roms/halt/ei-halt-dmgC-cgbBCE.gb [Cgb]",
     "age-test-roms/halt/ei-halt-dmgC-cgbBCE.gb [Dmg]",
-    "age-test-roms/halt/halt-m0-interrupt-dmgC-cgbBCE.gb [Cgb]",
-    "age-test-roms/halt/halt-m0-interrupt-dmgC-cgbBCE.gb [Dmg]",
     "age-test-roms/lcd-align-ly/lcd-align-ly-cgbBC.gb [Cgb]",
     "age-test-roms/ly/ly-dmgC-cgbBC.gb [Cgb]",
     "age-test-roms/m3-bg-bgp/m3-bg-bgp.gb [Dmg]",

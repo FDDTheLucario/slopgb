@@ -529,7 +529,7 @@ impl Interconnect {
         self.if_late = if t.late { t.iff & IF_MASK } else { 0 };
         self.oam_dma_tick();
         self.if_stat_late = 0;
-        for _ in 0..dots {
+        for i in 0..dots {
             self.intf |= self.ppu.tick() & IF_MASK;
             if self.ppu.take_stat_late() {
                 // The line-0 OAM STAT rise sits in the second half of the
@@ -537,15 +537,29 @@ impl Interconnect {
                 // cycle's interrupt sample must not see it (see
                 // Ppu::refresh_stat; mealybug "line 0 timing is different
                 // by 4 cycles").
-                self.if_stat_late = IF_STAT_BIT;
+                self.if_stat_late |= IF_STAT_BIT;
             }
             if self.ppu.take_stat_halt_late() {
-                // Second-half STAT IF commit (line-start OAM pulses,
-                // mode-0 rises on dots ≡ 3,0 mod 4): readable at once,
-                // but the halt-exit sampler misses it for one cycle —
-                // the same shape as the timer's `if_late` mask (SameBoy
-                // GB_cpu_run halt path; gbmicrotest int_oam_*/
-                // int_hblank_halt_scx* pin the law).
+                // Second-half STAT IF commit (line-start OAM pulses):
+                // readable at once, but the halt-exit sampler misses it
+                // for one cycle — the same shape as the timer's `if_late`
+                // mask (SameBoy GB_cpu_run halt path; gbmicrotest
+                // int_oam_* grids pin the law).
+                self.if_late |= IF_STAT_BIT;
+            }
+            if self.ppu.take_m0_rise() && 2 * (i + 1) > dots {
+                // The mode-0 STAT rise carries the second-half halt law
+                // — the same shape as the line-start OAM pulses — but
+                // its dot moves with SCX/sprites/window, so the half is
+                // decided here against the CPU's M-cycle: a rise in the
+                // second half (PPU dots 3-4 within the cycle; the last
+                // dot in double speed) is readable at once and fully
+                // visible to the running CPU's interrupt sample, yet
+                // missed by the halt-exit sampler for one M-cycle
+                // (SameBoy GB_cpu_run samples the halt exit mid-cycle).
+                // mooneye hblank_ly_scx_timing-GS and the gbmicrotest
+                // int_hblank_halt_scx0-7 grid pin all eight SCX phases
+                // between them.
                 self.if_late |= IF_STAT_BIT;
             }
             // Dot-exact mode-0 entry: each visible line's hblank start
@@ -1464,6 +1478,7 @@ impl Bus for Interconnect {
             // skipped-byte read below; entering double speed it lands
             // after the read + internal cycle instead.
             self.double_speed = false;
+            self.ppu.set_double_speed(false);
         }
         if !interrupt_pending {
             // The skipped byte costs one real read M-cycle (SameBoy
@@ -1501,6 +1516,7 @@ impl Bus for Interconnect {
             // spsw-interrupts).
             if entering_ds {
                 self.double_speed = true;
+                self.ppu.set_double_speed(true);
             }
             self.vram_dma_req = pending_req.or(self.vram_dma_req);
             return true;
@@ -1523,6 +1539,7 @@ impl Bus for Interconnect {
         self.tick_machine();
         if entering_ds {
             self.double_speed = true;
+            self.ppu.set_double_speed(true);
         }
         // Mode-0 entries seen by the two cycles above never flag a block:
         // gambatte defers all LCD events into the pause, where the halted
@@ -1688,6 +1705,43 @@ mod tests {
             b.ie = 0x01;
             b.write(0xFF0F, 0x01); // bit lands during this M-cycle
             assert_eq!(b.pending_halt_wake(), 0x01, "{model:?}");
+        }
+    }
+
+    /// The mode-0 STAT rise's half-cycle halt law (`Ppu::take_m0_rise` →
+    /// `if_late`): the IF bit is readable and dispatch-visible within its
+    /// own M-cycle for every phase, but the halt-exit sampler misses a
+    /// rise committed in the cycle's second half (PPU dots 3-4) for one
+    /// M-cycle. With the LCD enabled at an M-cycle boundary the rise dot
+    /// is 254 + SCX%8 on line 1 (glitch line 452 dots, ≡ 0 mod 4):
+    /// SCX=0 → dot ≡ 2 (first half, halt-visible at once), SCX=1 →
+    /// dot ≡ 3 (second half, halt-late). mooneye hblank_ly_scx_timing-GS
+    /// and gbmicrotest int_hblank_halt_scx0-7 pin all eight phases.
+    #[test]
+    fn m0_rise_second_half_commit_is_halt_late() {
+        for (scx, late) in [(0u8, false), (1, true)] {
+            let mut b = ic(Model::Dmg);
+            b.ie = 0x02;
+            b.write(0xFF43, scx);
+            b.write(0xFF41, 0x08); // hblank STAT source
+            b.write(0xFF40, 0x91);
+            // Line 1 starts at dot 452 (the enable line is 4 dots
+            // short); its mode-0 rise lands at 452 + 254 + SCX%8.
+            let rise = 452 + 254 + u32::from(scx);
+            // Run whole M-cycles up to the one containing the rise,
+            // then drop the enable line's own rise from IF.
+            ticks(&mut b, rise.div_ceil(4) - 1);
+            b.intf = 0;
+            assert_eq!(b.pending(), 0, "scx {scx}: not risen yet");
+            b.tick();
+            assert_eq!(b.pending(), 0x02, "scx {scx}: dispatch-visible");
+            assert_eq!(
+                b.pending_halt_wake(),
+                if late { 0 } else { 0x02 },
+                "scx {scx}: halt-wake view"
+            );
+            b.tick();
+            assert_eq!(b.pending_halt_wake(), 0x02, "scx {scx}: next cycle");
         }
     }
 
@@ -2783,7 +2837,10 @@ mod tests {
         setup_gdma_regs(&mut b, 0xC000, 0x0000);
         b.write(0xFF40, 0x91);
         b.write(0xFF55, 0x80);
-        while !b.ppu.hblank_active() {
+        // Stop on the tick that flags the block (the trigger leads the
+        // hblank by one dot) so the clock gate lands before any bus op
+        // can service the request.
+        while !b.ppu.hdma_trigger_level() {
             b.tick();
         }
         b.set_cpu_halted(true);
