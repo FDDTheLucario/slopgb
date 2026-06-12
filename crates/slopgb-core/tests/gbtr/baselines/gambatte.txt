@@ -768,10 +768,21 @@ gambatte/sound/ch1_init_pos_6_dmg08_cgb04c_outaudio0.gbc [Cgb]
 gambatte/sound/ch1_init_pos_7_dmg08_cgb04c_outaudio0.gbc [Dmg]
 gambatte/sound/ch1_init_pos_7_dmg08_cgb04c_outaudio0.gbc [Cgb]
 gambatte/sound/ch1_init_pos_8_dmg08_outaudio0_cgb04c_outaudio1.gbc [Dmg]
+# ch1_init_reset_sweep_counter_timing residuals (the rest of the family
+# passes via the SameBoy sweep-calculation machinery in src/apu/pulse.rs):
+# these rows scan an NR14 trigger / NR10 write landing within a few dots
+# of a 128 Hz sweep tick, with hardware DMG/CGB boundaries one M-cycle
+# apart in OPPOSITE directions (gambatte channel1.cpp anchors the unit at
+# `cc + 2 + cgb_ * 2` - a model-specific sub-M-cycle write phase against
+# the 128 Hz grid, calibrated through gambatte's boot cc constants).
+# Pinning them needs the sweep grid's phase relative to the instruction
+# stream resolved to <4 dots per model on top of tick-then-access write
+# commits; don't chase with whole-M-cycle ordering tweaks - same-suite
+# channel_1_sweep* pins the DIV-event-relative schedule that any such
+# tweak would break.
 gambatte/sound/ch1_init_reset_sweep_counter_timing_10_dmg08_outaudio0_cgb04c_outaudio1.gbc [Cgb]
 gambatte/sound/ch1_init_reset_sweep_counter_timing_4_dmg08_outaudio1_cgb04c_outaudio0.gbc [Dmg]
 gambatte/sound/ch1_init_reset_sweep_counter_timing_9_dmg08_outaudio1_cgb04c_outaudio0.gbc [Cgb]
-gambatte/sound/ch1_init_reset_sweep_counter_timing_nr52_1_dmg08_cgb04c_out1.gbc [Dmg]
 gambatte/sound/ch1_init_reset_sweep_counter_timing_nr52_3_dmg08_out0_cgb04c_out1.gbc [Cgb]
 gambatte/sound/ch2_init_env_counter_timing_2_dmg08_outaudio1_cgb04c_outaudio0.gbc [Dmg]
 gambatte/sound/ch2_init_env_counter_timing_3_dmg08_outaudio1_cgb04c_outaudio0.gbc [Dmg]
