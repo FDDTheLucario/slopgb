@@ -61,8 +61,8 @@ enum Disposition {
     /// Undefined-opcode exit + Fibonacci check, once per model.
     Protocol(Vec<Model>),
     /// `manual-only/`: `sprite_priority.gb` never signals completion (howto
-    /// "Screenshot based tests") — render 10 frames and compare against the
-    /// suite's own common-palette references, mirroring
+    /// "Screenshot based tests") — render 15 frame periods and compare
+    /// against the suite's own common-palette references, mirroring
     /// `tests/common/mod.rs::run_sprite_priority`.
     SpritePriority,
     /// `madness/`: `mgb_oam_dma_halt_sprites.gb` halts forever with no
@@ -186,16 +186,18 @@ fn run_protocol_case(rom: &[u8], model: Model) -> Result<(), String> {
     harness::check_fib(&gb)
 }
 
-/// One `manual-only/sprite_priority.gb` case: render 10 frames (the image
-/// is long stable by then; mirrors `tests/common/mod.rs::
-/// run_sprite_priority`) and compare against one of the suite's two
-/// reference PNGs. Those are the c-sp replacements for upstream's
-/// incompatible greyscale image (howto "Screenshot based tests") and use
-/// the collection's common palette — exactly the core's output, hence
-/// [`CgbColorMap::Identity`].
+/// One `manual-only/sprite_priority.gb` case: render 15 frame periods
+/// (mirrors `tests/common/mod.rs::run_sprite_priority`) and compare against
+/// one of the suite's two reference PNGs. The ROM keeps the LCD off for ~9
+/// periods while drawing and hardware presents the first frame after the
+/// re-enable blank (Pan Docs "LCDC.7"), so the image is only stable from
+/// period 10 — 15 leaves margin. The references are the c-sp replacements
+/// for upstream's incompatible greyscale image (howto "Screenshot based
+/// tests") and use the collection's common palette — exactly the core's
+/// output, hence [`CgbColorMap::Identity`].
 fn run_sprite_priority_case(rom: &[u8], model: Model, png_path: &Path) -> Result<(), String> {
     let mut gb = harness::boot(rom, model);
-    harness::run_for_frames(&mut gb, 10);
+    harness::run_for_frames(&mut gb, 15);
     harness::expect_frame_png(&gb, png_path, CgbColorMap::Identity)
 }
 

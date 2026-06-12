@@ -11,12 +11,15 @@
 //! Protocol: the standard mooneye breakpoint protocol (`LD B,B` exit +
 //! Fibonacci registers, 120-emulated-second timeout) for everything except:
 //!
-//! * `manual-only/sprite_priority.gb` never signals completion — render 10
-//!   frames and compare against the c-sp replacement references shipped
-//!   next to it (`sprite_priority-dmg.png` / `-cgb.png`, common palette ⇒
-//!   [`CgbColorMap::Identity`]), one leg each on [`Model::Dmg`] and
-//!   [`Model::Cgb`] — mirroring `tests/common/mod.rs::run_sprite_priority`
-//!   and the wilbertpol suite's handling.
+//! * `manual-only/sprite_priority.gb` never signals completion — render 15
+//!   frame periods (the ROM keeps the LCD off through ~10 of them and
+//!   hardware presents the first frame after the re-enable blank, so the
+//!   image is stable from period 11) and compare against the c-sp
+//!   replacement references shipped next to it (`sprite_priority-dmg.png` /
+//!   `-cgb.png`, common palette ⇒ [`CgbColorMap::Identity`]), one leg each
+//!   on [`Model::Dmg`] and [`Model::Cgb`] — mirroring
+//!   `tests/common/mod.rs::run_sprite_priority` and the wilbertpol suite's
+//!   handling.
 //! * `madness/mgb_oam_dma_halt_sprites.gb` halts forever with no interrupt
 //!   enabled and never executes `LD B,B`. This build differs byte-wise from
 //!   the mts copy (sha256 4040ef40… here vs 861e670e… there), so it is
@@ -49,32 +52,24 @@ const SUITE: &str = "mooneye-test-suite";
 
 /// Known-failure baseline (see `harness::assert_against_baseline`),
 /// derived by running the full matrix against the pinned v7.0 checkout:
-/// 437/439 pass — every breakpoint-protocol case scores exactly like the
-/// 439/439 the 2024 mts bundle posts in `tests/mooneye.rs`; only the two
-/// frame-compare legs below fail, both with direct precedent in the
-/// wilbertpol suite's baseline:
+/// 438/439 pass — every breakpoint-protocol case scores exactly like the
+/// 439/439 the 2024 mts bundle posts in `tests/mooneye.rs`; only one
+/// frame-compare leg fails, with direct precedent in the wilbertpol
+/// suite's baseline:
 ///
 /// * madness [Mgb]: this 2022 build renders an all-white frame under our
 ///   MGB HALT-frozen OAM-scan model (all 11 523 non-white reference pixels
 ///   differ), where the byte-different mts-20240926 build passes the
 ///   identical reference in `tests/mooneye.rs` — the same build-sensitive
 ///   divergence wilbertpol documents for its 2016 build.
-/// * sprite_priority [Cgb]: our boot-assigned DMG-compat palette renders
-///   the OBP1 sprites grey (#A5A5A5) where the c-sp reference expects the
-///   documented compat colors (#FF8484); the DMG leg passes. Same root
-///   cause as the `dmg-acid2 [Cgb]` and wilbertpol sprite_priority
-///   baseline entries.
-const BASELINE: &[&str] = &[
-    "mooneye-test-suite/madness/mgb_oam_dma_halt_sprites.gb [Mgb]",
-    "mooneye-test-suite/manual-only/sprite_priority.gb [Cgb]",
-];
+const BASELINE: &[&str] = &["mooneye-test-suite/madness/mgb_oam_dma_halt_sprites.gb [Mgb]"];
 
 /// How one suite ROM is verified — or why it never runs.
 #[derive(Debug, PartialEq, Eq)]
 enum Disposition {
     /// Breakpoint protocol + Fibonacci check, once per model.
     Protocol(Vec<Model>),
-    /// `manual-only/sprite_priority.gb`: 10 frames + reference PNGs.
+    /// `manual-only/sprite_priority.gb`: 15 frame periods + reference PNGs.
     SpritePriority,
     /// `madness/mgb_oam_dma_halt_sprites.gb`: 10 frames on MGB + the
     /// vendored shade-class reference.
@@ -123,12 +118,15 @@ fn run_protocol_case(rom: &[u8], model: Model) -> Result<(), String> {
     harness::check_fib(&gb)
 }
 
-/// One `manual-only/sprite_priority.gb` case: render 10 frames (the image
-/// is long stable by then) and compare against one of the suite's two c-sp
-/// reference PNGs — common palette, hence [`CgbColorMap::Identity`].
+/// One `manual-only/sprite_priority.gb` case: render 15 frame periods and
+/// compare against one of the suite's two c-sp reference PNGs — common
+/// palette, hence [`CgbColorMap::Identity`]. 15 leaves margin: the ROM
+/// keeps the LCD off for ~10 periods while drawing, and the first frame
+/// after the re-enable is presented blank on hardware (Pan Docs "LCDC.7"),
+/// so the image is only stable from period 11.
 fn run_sprite_priority_case(rom: &[u8], model: Model, png_path: &Path) -> Result<(), String> {
     let mut gb = harness::boot(rom, model);
-    harness::run_for_frames(&mut gb, 10);
+    harness::run_for_frames(&mut gb, 15);
     harness::expect_frame_png(&gb, png_path, CgbColorMap::Identity)
 }
 
