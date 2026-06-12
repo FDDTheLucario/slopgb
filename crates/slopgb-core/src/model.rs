@@ -166,10 +166,14 @@ impl Model {
     /// (`boot_div-S` vs `boot_div2-S`); the interconnect adds 4 T-cycles per
     /// zero bit of the transferred packets on top of this base.
     ///
-    /// `lcd_phase_dots` is pinned (DMG/DMG0) by the LY/STAT bytes of
-    /// `boot_hwio-*`: DMG ABC reads STAT=$80 at dot 4556 and LY=$0A at dot
-    /// 4760 after hand-off (→ window [70028,70224)∪[0,8), midpoint 70124);
-    /// DMG0 reads STAT=$83/LY=$01 (→ window [66208,66376), midpoint 66292).
+    /// `lcd_phase_dots` is pinned (DMG ABC/MGB) by the gbmicrotest
+    /// poweron_stat/ly/oam/vram comment tables (captured on a DMG-CPU-08):
+    /// the boot ROM hands off exactly 60 dots before the start of line 0,
+    /// i.e. 70224 - 60 = 70164 — inside the coarser window the LY/STAT
+    /// bytes of mooneye `boot_hwio-*` allow (DMG ABC reads STAT=$80 at dot
+    /// 4556 and LY=$0A at dot 4760 after hand-off → [70028,70224)∪[0,8)).
+    /// DMG0 reads STAT=$83/LY=$01 (→ window [66208,66376), midpoint 66292;
+    /// no finer oracle exists for that revision).
     /// SGB and CGB mask the LCD registers out, so no mooneye oracle
     /// constrains their phase; SGB reuses the DMG value. CGB/AGB hardware
     /// hands off inside vblank with LY observed in the $90-$94 range
@@ -192,7 +196,7 @@ impl Model {
             pc: 0x0100,
             div_counter: 0,
             hwio: HWIO_DMG,
-            lcd_phase_dots: 70124,
+            lcd_phase_dots: 70164,
         };
         match self {
             // boot_regs-dmg0, boot_div-dmg0, boot_hwio-dmg0.
@@ -447,6 +451,14 @@ mod tests {
         for m in [Model::Dmg, Model::Mgb] {
             let p0 = m.post_boot_state().lcd_phase_dots;
             assert!((70028..70224).contains(&p0) || p0 < 8, "{m:?}: {p0}");
+        }
+        // Inside that window the gbmicrotest poweron_stat/ly/oam/vram
+        // comment tables (captured on DMG-CPU-08) pin the hand-off to
+        // exactly 60 dots before the start of line 0: 70224 - 60 = 70164.
+        // SGB/SGB2 share the DMG boot timing base (no LCD oracle of their
+        // own — boot_hwio-S masks LY/STAT).
+        for m in [Model::Dmg, Model::Mgb, Model::Sgb, Model::Sgb2] {
+            assert_eq!(m.post_boot_state().lcd_phase_dots, 70164, "{m:?}");
         }
         // DMG0: STAT=$83 (mode 3, line 1) at +4556, LY=$01 at +4760.
         let p0 = Model::Dmg0.post_boot_state().lcd_phase_dots;
