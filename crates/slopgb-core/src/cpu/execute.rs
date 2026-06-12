@@ -162,6 +162,7 @@ fn dispatch_interrupt(cpu: &mut Cpu, bus: &mut impl Bus) {
 
 /// Opcode fetch. The halt bug (HALT with IME=0 while IE & IF != 0) makes
 /// exactly the next opcode fetch skip the PC increment (gbctr).
+///
 fn fetch_opcode(cpu: &mut Cpu, bus: &mut impl Bus) -> u8 {
     let opcode = bus.read(cpu.regs.pc);
     if cpu.halt_bug {
@@ -437,18 +438,24 @@ fn op_halt(cpu: &mut Cpu, bus: &mut impl Bus) {
 fn op_stop(cpu: &mut Cpu, bus: &mut impl Bus) {
     // Per the STOP flowchart in Pan Docs ("Using the STOP Instruction"):
     // with no interrupt pending STOP is a 2-byte opcode and the byte after
-    // it is skipped; with IE & IF != 0 it stays a 1-byte opcode. Branches
-    // not modelled (the joypad input state is not visible through `Bus`):
-    // a held button turns STOP into a 1-byte HALT (or a plain 1-byte NOP if
-    // an interrupt is also pending), and a pending interrupt with IME=1
-    // while a speed switch is armed glitches the CPU non-deterministically.
-    if bus.pending() == 0 {
+    // it is skipped — at the cost of a real read M-cycle, performed inside
+    // `Bus::stop` (SameBoy sm83_cpu.c stop(): `cycle_read(gb, gb->pc++)`
+    // gated on no pending interrupt); with IE & IF != 0 it stays a 1-byte
+    // opcode with no read. Branches not modelled (the joypad input state
+    // is not visible through `Bus`): a held button turns STOP into a
+    // 1-byte HALT (or a plain 1-byte NOP if an interrupt is also pending),
+    // and a pending interrupt with IME=1 while a speed switch is armed
+    // glitches the CPU non-deterministically.
+    let pending = bus.pending() != 0;
+    let skipped = cpu.regs.pc;
+    if !pending {
         cpu.regs.pc = cpu.regs.pc.wrapping_add(1);
     }
-    // true: the bus performed an armed CGB speed switch and execution
-    // continues. false: deep stop; the CPU sleeps like in halt mode until
-    // the joypad wakes it (see `step`).
-    if !bus.stop() {
+    // true: the bus performed an armed CGB speed switch (including the
+    // CPU pause while the rest of the machine runs — see `Bus::stop`) and
+    // execution continues. false: deep stop; the CPU sleeps like in halt
+    // mode until the joypad wakes it (see `step`).
+    if !bus.stop(skipped, pending) {
         cpu.stopped = true;
     }
 }

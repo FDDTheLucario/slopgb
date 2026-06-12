@@ -29,6 +29,9 @@ struct TestBus {
     log: Vec<Ev>,
     stop_result: bool,
     stop_calls: u32,
+    /// `(skipped_addr, interrupt_pending)` of the most recent
+    /// [`Bus::stop`] call.
+    stop_args: Option<(u16, bool)>,
     /// M-cycles elapsed since construction (`take_log` does not reset
     /// this).
     cycles: usize,
@@ -57,6 +60,7 @@ impl TestBus {
             log: Vec::new(),
             stop_result: false,
             stop_calls: 0,
+            stop_args: None,
             cycles: 0,
             raise_if: None,
             late_if: false,
@@ -141,8 +145,9 @@ impl Bus for TestBus {
         self.mem[0xFF0F] &= !(1 << bit);
     }
 
-    fn stop(&mut self) -> bool {
+    fn stop(&mut self, skipped_addr: u16, interrupt_pending: bool) -> bool {
         self.stop_calls += 1;
+        self.stop_args = Some((skipped_addr, interrupt_pending));
         self.stop_result
     }
 
@@ -1808,6 +1813,9 @@ fn stop_skips_following_byte_and_sleeps_until_joypad_wake() {
     step(&mut c, &mut b);
     assert_eq!(b.take_log(), [Read(PC0, 0x10)]);
     assert_eq!(b.stop_calls, 1);
+    // The bus is told where the skipped byte lives (it performs that
+    // byte's read M-cycle itself) and that no interrupt was pending.
+    assert_eq!(b.stop_args, Some((PC0 + 1, false)));
     assert_eq!(c.regs.pc, PC0 + 2);
     assert!(c.stopped);
     for _ in 0..3 {
@@ -1850,6 +1858,10 @@ fn stop_with_pending_interrupt_is_one_byte_opcode() {
     b.mem[0xFF0F] = 0x10;
     step(&mut c, &mut b);
     assert_eq!(c.regs.pc, PC0 + 1);
+    // The bus learns the interrupt was pending: no skipped-byte read
+    // M-cycle, and an armed speed switch would happen with no pause
+    // (SameBoy stop() gates both on !interrupt_pending).
+    assert_eq!(b.stop_args, Some((PC0 + 1, true)));
     // The already-pending interrupt also ends the stop immediately
     // (IME=0, so it is not dispatched).
     step(&mut c, &mut b);

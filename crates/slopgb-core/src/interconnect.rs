@@ -75,6 +75,51 @@ struct OamDmaStart {
     delay: u8,
 }
 
+/// HBlank DMA arming, mirroring gambatte-core's `memevent_hdma` time
+/// encoding (video.cpp `enableHdma`/`disableHdma`/`lcdcChange`):
+/// `disabled_time` = off, `disabled_time - 1` = armed with the LCD off,
+/// a real mode-0 time = armed with the LCD on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HdmaMode {
+    Disabled,
+    ArmedLcdOff,
+    ArmedLcdOn,
+}
+
+/// A flagged VRAM-DMA request, serviced at the head of the CPU's next bus
+/// operation (gambatte-core `flagHdmaReq`/`flagGdmaReq` set the
+/// `intevent_dma` event; see [`Interconnect::service_vram_dma`] for the
+/// exact seam the `_1`/`_2` ROM pairs pin).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VramDmaReq {
+    /// One 16-byte HBlank block.
+    Hblank,
+    /// One 16-byte HBlank block re-flagged by a halt/stop wake: it skips
+    /// the teardown M-cycle (gambatte Memory::event `intevent_dma`:
+    /// `cc -= 4` when `haltHdmaState_ == hdma_requested`).
+    HblankUnhalt,
+    /// The whole remaining length at once.
+    Gdma,
+}
+
+/// HBlank-DMA bookkeeping across a halt (HALT, deep STOP, or the
+/// speed-switch pause) — gambatte-core memory.h `HdmaState`. While the
+/// core clock is gated the LCD's mode-0 entries do not flag block requests
+/// (video.h `EventTimes::flagHdmaReq` is suppressed while halted); this
+/// records what the wake must re-evaluate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HaltHdmaState {
+    /// Halt began outside the hblank window: a wake landing inside one
+    /// fires a block.
+    Low,
+    /// Halt began *inside* the hblank window: the same hblank must not
+    /// retrigger at wake.
+    High,
+    /// A flagged block request was deferred by the halt; the wake
+    /// re-flags it ([`VramDmaReq::HblankUnhalt`]).
+    Requested,
+}
+
 pub struct Interconnect {
     model: Model,
     cart: Cartridge,
@@ -133,20 +178,27 @@ pub struct Interconnect {
     extra_oam: [u8; 24],
 
     // CGB VRAM DMA (FF51-FF55).
-    /// Source address as assembled from HDMA1/2 (low 4 bits always 0).
+    /// Live source address counter as assembled from HDMA1/2 writes and
+    /// advanced by the engine (gambatte memory.cpp `dmaSource_`).
     hdma_src: u16,
-    /// Destination offset into VRAM (13 bits).
+    /// Live destination counter, FULL 16 bits: only the VRAM write masks
+    /// it to 0x1FFF, and the transfer terminates when the counter crosses
+    /// 0x10000 (gambatte `dmaDestination_`; SameBoy `hdma_current_dest`).
     hdma_dst: u16,
-    /// HBlank DMA in progress.
-    hdma_active: bool,
-    hdma_blocks_left: u8,
-    /// FF55 readback when no HBlank DMA is active ($FF = completed/never,
-    /// $80|n = cancelled with n blocks remaining).
-    hdma_latch: u8,
-    /// Previous `hblank_active` level for the HBlank DMA edge detector.
+    /// FF55 as the live register (gambatte `ioamhram_[0x155]`): bits 0-6 =
+    /// remaining blocks - 1, bit 7 set = no HBlank transfer registered
+    /// (completion, cancel, or halted abort). Reads back verbatim.
+    hdma5: u8,
+    /// HBlank DMA arming (see [`HdmaMode`]).
+    hdma_mode: HdmaMode,
+    /// Flagged block/GDMA request awaiting the next bus operation.
+    vram_dma_req: Option<VramDmaReq>,
+    /// HBlank-DMA state across a core-clock gate (see [`HaltHdmaState`]).
+    halt_hdma: HaltHdmaState,
+    /// Previous `hblank_active` level for the per-dot mode-0 edge detector.
     hdma_prev_hblank: bool,
-    /// Re-entrancy guard: a VRAM DMA block is stalling the CPU and ticking
-    /// the machine internally.
+    /// Re-entrancy guard: a VRAM DMA transfer is stalling the CPU and
+    /// ticking the machine internally.
     vram_dma_stall: bool,
 
     // CGB misc registers.
@@ -214,9 +266,10 @@ impl Interconnect {
             extra_oam: [0; 24],
             hdma_src: 0,
             hdma_dst: 0,
-            hdma_active: false,
-            hdma_blocks_left: 0,
-            hdma_latch: 0xFF,
+            hdma5: 0xFF,
+            hdma_mode: HdmaMode::Disabled,
+            vram_dma_req: None,
+            halt_hdma: HaltHdmaState::Low,
             hdma_prev_hblank: false,
             vram_dma_stall: false,
             rp: 0,
@@ -477,8 +530,23 @@ impl Interconnect {
                 // by 4 cycles").
                 self.if_stat_late = IF_STAT_BIT;
             }
+            // Dot-exact mode-0 entry: each visible line's hblank start
+            // requests one HBlank DMA block, serviced at the head of the
+            // CPU's next bus operation (gambatte video.cpp: memevent_hdma
+            // fires at predictedNextM0Time). The flag is suppressed while
+            // the core clock is gated (video.h EventTimes::flagHdmaReq:
+            // `if (!intreq_.halted())`); the level detector keeps
+            // tracking so a wake never sees a stale edge.
+            let hb = self.ppu.hdma_trigger_level();
+            if hb
+                && !self.hdma_prev_hblank
+                && self.hdma_mode == HdmaMode::ArmedLcdOn
+                && !self.cpu_halted
+            {
+                self.vram_dma_req = Some(VramDmaReq::Hblank);
+            }
+            self.hdma_prev_hblank = hb;
         }
-        self.hblank_dma_check();
         let div = self.timer.div_counter();
         self.apu.tick(div, self.double_speed);
         self.intf |= self.serial.tick(div) & IF_MASK;
@@ -517,6 +585,32 @@ impl Interconnect {
         if self.cpu_halted == halted {
             return;
         }
+        if halted {
+            // gambatte Memory::halt: a flagged-but-unserviced block
+            // request is deferred (hdma_requested) and re-flagged at
+            // wake — HBlank DMA never proceeds while the core clock is
+            // gated; otherwise remember whether the hblank window was
+            // already active so the same hblank cannot retrigger at wake.
+            self.halt_hdma = if self.vram_dma_req.take().is_some() {
+                HaltHdmaState::Requested
+            } else if self.hdma_mode == HdmaMode::ArmedLcdOn && self.ppu.hdma_period() {
+                HaltHdmaState::High
+            } else {
+                HaltHdmaState::Low
+            };
+        }
+        self.engage_halt_gate(halted);
+        if !halted {
+            self.vram_dma_unhalt();
+        }
+    }
+
+    /// The raw core-clock gate: freezes the OAM DMA controller and hands
+    /// the frozen access to the PPU (see [`Self::set_cpu_halted`] for the
+    /// HBlank-DMA bookkeeping layered on top; `Interconnect::stop` drives
+    /// this directly because the speed-switch pause sequences the HDMA
+    /// state itself).
+    fn engage_halt_gate(&mut self, halted: bool) {
         self.cpu_halted = halted;
         let freeze = if halted {
             self.dma_run
@@ -635,51 +729,122 @@ impl Interconnect {
 
     // ---- CGB VRAM DMA ---------------------------------------------------
 
-    fn hblank_dma_check(&mut self) {
-        let hb = self.ppu.hblank_active();
-        let edge = hb && !self.hdma_prev_hblank;
-        self.hdma_prev_hblank = hb;
-        if edge && self.hdma_active && !self.vram_dma_stall {
-            self.vram_dma_stall = true;
-            self.copy_vram_dma_block();
-            self.vram_dma_stall = false;
-            self.hdma_blocks_left -= 1;
-            if self.hdma_blocks_left == 0 {
-                self.hdma_active = false;
-                self.hdma_latch = 0xFF;
-            }
+    /// Service any flagged VRAM-DMA request at the *head* of a CPU bus
+    /// operation, before that operation's machine tick: the bus steal sits
+    /// between the M-cycle whose dots flagged the request and the CPU's
+    /// next M-cycle. M-cycle (not instruction) granularity is what the
+    /// gambatte hdma_late_destl/_length/_wrambank and hdma_start `_1`/`_2`
+    /// adjacent-cycle pairs resolve, and they also split by access type:
+    /// a *write* whose own cycle contains the trigger commits before the
+    /// steal (hdma_late_destl_1: the racing FF54 write wins), while a
+    /// *read* in the trigger cycle yields — the DMA owns the bus before
+    /// the read samples (hdma_start_2: the fetch's data byte is the
+    /// post-block value), hence the second `service_vram_dma` call after
+    /// the tick in `Bus::read`/`read_inc`. A request flagged during the
+    /// STOP opcode fetch is deliberately still pending when `Bus::stop`
+    /// runs (no bus operation in between) — the
+    /// hdma_transition_speedchange matrix needs exactly that request.
+    fn service_vram_dma(&mut self) {
+        while self.vram_dma_req.is_some() && !self.vram_dma_stall {
+            self.run_vram_dma();
         }
     }
 
-    /// Copy one 16-byte block, stalling the CPU: 8 M-cycles at normal speed
-    /// (2 bytes per M-cycle), 16 in double speed (gbctr CGB DMA timing
-    /// table). The machine keeps running during the stall.
-    fn copy_vram_dma_block(&mut self) {
-        let cycles = if self.double_speed { 16 } else { 8 };
-        let bytes_per_mcycle = 16 / cycles;
-        for _ in 0..cycles {
+    /// Service one flagged VRAM-DMA request, stalling the CPU while the
+    /// rest of the machine keeps running. Pace: 2 bytes per stolen M-cycle
+    /// at normal speed, 1 in double speed (gambatte memory.cpp `dma()`:
+    /// `cc += 2 + 2 * doubleSpeed` per byte), plus one teardown M-cycle
+    /// per service (`cc += 4`) — skipped when the block was deferred by a
+    /// halt wake (`Memory::event` intevent_dma: `cc -= 4` for an
+    /// unhalt-requested block).
+    fn run_vram_dma(&mut self) {
+        let Some(req) = self.vram_dma_req.take() else {
+            return;
+        };
+        self.vram_dma_stall = true;
+        let mut remaining = (usize::from(self.hdma5 & 0x7F) + 1) * 0x10;
+        let mut length = if req == VramDmaReq::Gdma {
+            remaining
+        } else {
+            0x10
+        };
+        // The full 16-bit destination counter terminates the transfer at
+        // the 0x10000 crossing, latching FF55 bit 7 (gambatte dma():
+        // `if (dmaDest + length >= 0x10000) { length = 0x10000 - dmaDest;
+        // ioamhram_[0x155] |= 0x80; }`; hardware capture dma/dma_dst_wrap_2
+        // — the transfer does NOT wrap back into VRAM).
+        let to_wrap = 0x1_0000 - usize::from(self.hdma_dst);
+        if length >= to_wrap {
+            length = to_wrap;
+            self.hdma5 |= 0x80;
+        }
+        remaining -= length;
+        // A GDMA with the display off always retires its whole length
+        // (gambatte dma(): `if (!(lcdc & en) && gdmaReqFlagged) dmaLength
+        // = 0`), so a 0x10000-truncated copy still reads back $FF.
+        if req == VramDmaReq::Gdma && !self.ppu.lcd_enabled() {
+            remaining = 0;
+        }
+        let per_m = if self.double_speed { 1 } else { 2 };
+        while length > 0 {
             self.tick_machine();
-            for _ in 0..bytes_per_mcycle {
+            for _ in 0..per_m.min(length) {
                 let byte = self.vram_dma_source_read(self.hdma_src);
                 self.ppu
                     .vram_write_raw(0x8000 | (self.hdma_dst & 0x1FFF), byte);
                 self.hdma_src = self.hdma_src.wrapping_add(1);
-                // A destination past 0x9FFF wraps to the start of VRAM and
-                // the transfer continues. Pan Docs only documents the
-                // VRAM masking; the wrap (rather than terminating at
-                // 0xA000) follows SameBoy Core/memory.c GB_hdma_run, which
-                // writes vram[vram_base + (hdma_current_dest++ & 0x1FFF)]
-                // (`gdma_destination_wraps_to_vram_start`).
-                self.hdma_dst = (self.hdma_dst + 1) & 0x1FFF;
+                self.hdma_dst = self.hdma_dst.wrapping_add(1);
+                length -= 1;
             }
         }
+        if req != VramDmaReq::HblankUnhalt {
+            self.tick_machine(); // teardown (gambatte dma(): cc += 4)
+        }
+        if self.cpu_halted {
+            // A block serviced while the core clock is gated — only the
+            // speed-switch pause can do this (see `Interconnect::stop`) —
+            // aborts the HBlank transfer: FF55 keeps its length bits and
+            // gains bit 7 (gambatte dma(): `ioamhram_[0x155] = halted() ?
+            // ioamhram_[0x155] | 0x80 : …`; pinned by
+            // hdma_transition_speedchange_hdmalen*_hdma5).
+            self.hdma5 |= 0x80;
+        } else {
+            self.hdma5 = ((remaining / 0x10) as u8).wrapping_sub(1) | (self.hdma5 & 0x80);
+        }
+        if self.hdma5 & 0x80 != 0 {
+            // Completion/termination/abort disarms the HBlank engine
+            // (gambatte dma(): `if ((FF55 & 0x80) && hdmaIsEnabled())
+            // lcd_.disableHdma(cc)`).
+            self.hdma_mode = HdmaMode::Disabled;
+        }
+        self.vram_dma_stall = false;
+    }
+
+    /// Wake-side HBlank-DMA re-evaluation, shared by halt/stop wake and
+    /// the end of the speed-switch pause (gambatte Memory::event,
+    /// `intevent_unhalt` and the halted `intevent_interrupts` path): a
+    /// deferred request re-flags (without the teardown cycle), and an
+    /// armed transfer whose halt began outside the hblank window fires if
+    /// the wake lands inside one.
+    fn vram_dma_unhalt(&mut self) {
+        match self.halt_hdma {
+            HaltHdmaState::Requested => self.vram_dma_req = Some(VramDmaReq::HblankUnhalt),
+            HaltHdmaState::Low
+                if self.hdma_mode == HdmaMode::ArmedLcdOn && self.ppu.hdma_period() =>
+            {
+                self.vram_dma_req = Some(VramDmaReq::Hblank);
+            }
+            _ => {}
+        }
+        self.halt_hdma = HaltHdmaState::Low;
     }
 
     /// VRAM DMA source read. VRAM itself and the 0xE000+ region are not
     /// valid sources (Pan Docs); they read as 0xFF here (SameBoy
     /// Core/memory.c GB_hdma_run drives the bus only for ROM/SRAM/WRAM
     /// sources and leaves the idle data-bus byte for everything else —
-    /// `gdma_invalid_sources_fill_destination_with_ff`).
+    /// `gdma_invalid_sources_fill_destination_with_ff`; gambatte reads its
+    /// decaying cart-bus latch, unmodelled here).
     fn vram_dma_source_read(&self, addr: u16) -> u8 {
         match addr {
             0x0000..=0x7FFF => self.cart.read_rom(addr),
@@ -689,30 +854,41 @@ impl Interconnect {
         }
     }
 
+    /// FF55 write (gambatte memory.cpp nontrivial_ff_write case 0x55; the
+    /// `hdma_mode` branches mirror `lcd_.hdmaIsEnabled()`).
     fn hdma5_write(&mut self, value: u8) {
-        if self.hdma_active && value & 0x80 == 0 {
-            // Cancel mid-transfer: FF55 reads back the remaining count with
-            // bit 7 set (Pan Docs "FF55 — HDMA5").
-            self.hdma_active = false;
-            self.hdma_latch = 0x80 | (self.hdma_blocks_left - 1);
-            return;
-        }
-        let blocks = (value & 0x7F) + 1;
-        if value & 0x80 != 0 {
-            // HBlank DMA: 16 bytes per hblank entered. Clearing the edge
-            // detector lets a transfer started during hblank copy its first
-            // block in that same hblank.
-            self.hdma_active = true;
-            self.hdma_blocks_left = blocks;
-            self.hdma_prev_hblank = false;
-        } else {
-            // General-purpose DMA: everything at once, CPU stalled.
-            self.vram_dma_stall = true;
-            for _ in 0..blocks {
-                self.copy_vram_dma_block();
+        // The write always replaces the live length bits — cancelling
+        // latches the *written* length with bit 7 set, not the old
+        // remaining count (gambatte: `ioamhram_[0x155] = data & 0x7F`
+        // before the cancel branch; SameBoy memory.c GB_IO_HDMA5 likewise
+        // sets hdma_steps_left first).
+        self.hdma5 = value & 0x7F;
+        if self.hdma_mode != HdmaMode::Disabled {
+            if value & 0x80 == 0 {
+                self.hdma5 |= 0x80;
+                self.hdma_mode = HdmaMode::Disabled;
             }
-            self.vram_dma_stall = false;
-            self.hdma_latch = 0xFF;
+            // Bit 7 set while armed: only the length bits change.
+        } else if value & 0x80 != 0 {
+            // gambatte video.cpp enableHdma: with the LCD off one block
+            // copies immediately (flagHdmaReq, SameBoy: `(STAT & 3) == 0
+            // && display_state != 7 → hdma_on = true`); with the LCD on a
+            // block fires at once only inside the hblank window.
+            if self.ppu.lcd_enabled() {
+                self.hdma_mode = HdmaMode::ArmedLcdOn;
+                if self.ppu.hdma_period() {
+                    self.vram_dma_req = Some(VramDmaReq::Hblank);
+                }
+            } else {
+                self.hdma_mode = HdmaMode::ArmedLcdOff;
+                self.vram_dma_req = Some(VramDmaReq::Hblank);
+            }
+        } else {
+            // General-purpose DMA: requested now, serviced at the next
+            // instruction boundary (gambatte flagGdmaReq). Note a stale
+            // active-looking FF55 (HBlank arming killed by an LCD
+            // disable) reaches this branch too, exactly like upstream.
+            self.vram_dma_req = Some(VramDmaReq::Gdma);
         }
     }
 
@@ -911,13 +1087,10 @@ impl Interconnect {
             }
             // VBK reads $FE|bank on CGB even in DMG mode (boot_hwio-C).
             0xFF4F => self.ppu.read(addr),
-            0xFF55 if self.cgb_mode => {
-                if self.hdma_active {
-                    self.hdma_blocks_left - 1
-                } else {
-                    self.hdma_latch
-                }
-            }
+            // FF55 reads the live register verbatim: remaining blocks - 1
+            // while a HBlank transfer runs, bit 7 set when none is
+            // registered (gambatte ioamhram_[0x155]).
+            0xFF55 if self.cgb_mode => self.hdma5,
             // RP: bits 2-5 unimplemented (1), bit 1 = received signal,
             // active low — no peer, so never receiving.
             0xFF56 if self.cgb_mode => 0x3C | (self.rp & 0xC1) | 0x02,
@@ -956,6 +1129,9 @@ impl Interconnect {
                     // start83_late_div_write_*).
                     let iff = self.serial.div_write(self.timer.div_counter());
                     self.intf |= iff & IF_MASK;
+                    // Same for the frame sequencer: the reset's DIV-APU
+                    // falling edge lands in this cycle (`Apu::div_write`).
+                    self.apu.div_write(self.double_speed);
                 }
                 self.timer.write(addr, value)
             }
@@ -981,31 +1157,50 @@ impl Interconnect {
             // PPU register writes can raise the STAT line in this very
             // cycle (stat_lyc_onoff round 4): `Ppu::write` returns the IF
             // bits the write raised, OR-ed in immediately.
-            0xFF40..=0xFF45 | 0xFF47..=0xFF4B => self.intf |= self.ppu.write(addr, value) & IF_MASK,
+            0xFF40 => {
+                let was_on = self.ppu.lcd_enabled();
+                self.intf |= self.ppu.write(addr, value) & IF_MASK;
+                let now_on = self.ppu.lcd_enabled();
+                if was_on && !now_on && self.hdma_mode == HdmaMode::ArmedLcdOn {
+                    // Display disabled while HBlank DMA is armed: the
+                    // arming dies with the LCD — FF55 keeps reading
+                    // "active" but no further block ever copies until
+                    // FF55 is rewritten (gambatte video.cpp lcdcChange:
+                    // the disable branch sets every memevent, including
+                    // memevent_hdma, to disabled_time).
+                    self.hdma_mode = HdmaMode::Disabled;
+                } else if !was_on && now_on && self.hdma_mode == HdmaMode::ArmedLcdOff {
+                    // HBlank DMA armed while the LCD was off resumes at
+                    // the new frame's mode-0 entries (gambatte
+                    // lcdcChange enable branch: `if (hdmaIsEnabled())
+                    // setm<memevent_hdma>(predictedNextM0Time())`).
+                    self.hdma_mode = HdmaMode::ArmedLcdOn;
+                }
+            }
+            0xFF41..=0xFF45 | 0xFF47..=0xFF4B => self.intf |= self.ppu.write(addr, value) & IF_MASK,
             0xFF4D if self.cgb_mode => self.key1_armed = value & 1 != 0,
             0xFF4F if self.cgb_mode => self.intf |= self.ppu.write(addr, value) & IF_MASK,
             // FF51-FF54 are the *live* DMA address counters, not start
             // latches: `hdma_src`/`hdma_dst` advance as blocks copy, and a
-            // register write merges into the current counter value with
-            // these masks. This matches SameBoy Core/memory.c, whose
-            // GB_IO_HDMA1-4 write handlers update hdma_current_src/dest in
-            // place with the same masks (e.g. HDMA1: `hdma_current_src &=
-            // 0xF0; hdma_current_src |= value << 8;`), so a partial rewrite
-            // between blocks keeps the other half's incremented bits and a
-            // new FF55 start continues from the incremented addresses
+            // register write merges into the current counter value
+            // (gambatte memory.cpp cases 0x51-0x54; SameBoy GB_IO_HDMA1-4
+            // agree). The high-byte writes keep the counter's full low
+            // byte and apply no destination mask — the dest counter is a
+            // full 16-bit register, masked only at the VRAM write
             // (`hdma_partial_src_rewrite_blends_live_counter`,
-            // `gdma_continues_from_incremented_addresses`).
+            // `gdma_continues_from_incremented_addresses`,
+            // `gdma_terminates_at_dest_0x10000_crossing`).
             0xFF51 if self.cgb_mode => {
-                self.hdma_src = (self.hdma_src & 0x00F0) | (u16::from(value) << 8)
+                self.hdma_src = (self.hdma_src & 0x00FF) | (u16::from(value) << 8)
             }
             0xFF52 if self.cgb_mode => {
                 self.hdma_src = (self.hdma_src & 0xFF00) | u16::from(value & 0xF0)
             }
             0xFF53 if self.cgb_mode => {
-                self.hdma_dst = (self.hdma_dst & 0x00F0) | (u16::from(value & 0x1F) << 8)
+                self.hdma_dst = (self.hdma_dst & 0x00FF) | (u16::from(value) << 8)
             }
             0xFF54 if self.cgb_mode => {
-                self.hdma_dst = (self.hdma_dst & 0x1F00) | u16::from(value & 0xF0)
+                self.hdma_dst = (self.hdma_dst & 0xFF00) | u16::from(value & 0xF0)
             }
             0xFF55 if self.cgb_mode => self.hdma5_write(value),
             0xFF56 if self.cgb_mode => self.rp = value & 0xC1,
@@ -1066,12 +1261,18 @@ fn sgb_header_zero_bits(cart: &Cartridge) -> u32 {
 
 impl Bus for Interconnect {
     fn read(&mut self, addr: u16) -> u8 {
+        self.service_vram_dma();
         self.tick_machine();
+        // A trigger inside this very cycle still steals the bus before
+        // the read samples (see `service_vram_dma`: reads yield, writes
+        // in flight commit first).
+        self.service_vram_dma();
         self.maybe_oam_bug(addr, OamBugKind::Read);
         self.read_no_tick(addr)
     }
 
     fn write(&mut self, addr: u16, value: u8) {
+        self.service_vram_dma();
         // The CPU drives the data bus during the second half of the write
         // M-cycle (gbctr "Memory access timing"), which the dot-clocked
         // pixel pipeline can observe mid-cycle: stage rendering-register
@@ -1090,16 +1291,20 @@ impl Bus for Interconnect {
     }
 
     fn tick(&mut self) {
+        self.service_vram_dma();
         self.tick_machine();
     }
 
     fn tick_addr(&mut self, value: u16) {
+        self.service_vram_dma();
         self.tick_machine();
         self.maybe_oam_bug(value, OamBugKind::Write);
     }
 
     fn read_inc(&mut self, addr: u16) -> u8 {
+        self.service_vram_dma();
         self.tick_machine();
+        self.service_vram_dma(); // reads yield to a same-cycle trigger
         self.maybe_oam_bug(addr, OamBugKind::ReadIncrease);
         self.read_no_tick(addr)
     }
@@ -1138,17 +1343,119 @@ impl Bus for Interconnect {
         self.intf &= !(1 << bit);
     }
 
-    fn stop(&mut self) -> bool {
-        // STOP resets DIV on every model (Pan Docs "FF04 — DIV"). Model it
-        // as a DIV write so the TIMA falling-edge effects apply.
-        self.timer.write(0xFF04, 0);
-        if self.cgb_mode && self.key1_armed {
-            self.double_speed = !self.double_speed;
-            self.key1_armed = false;
-            true
-        } else {
-            false
+    fn stop(&mut self, skipped_addr: u16, interrupt_pending: bool) -> bool {
+        let switching = self.cgb_mode && self.key1_armed;
+        let entering_ds = switching && !self.double_speed;
+        // gambatte Memory::stop snapshots the HDMA situation at the
+        // pre-read cc: a block request still pending when STOP executes
+        // (flagged mid-instruction — no boundary came) is deferred when
+        // leaving double speed (haltHdmaState_ = hdma_requested +
+        // ackDmaReq) but stays flagged when entering it, firing *inside*
+        // the pause where the gated core clock aborts the HBlank transfer
+        // with the count latched (dma()'s halted path; pinned by
+        // hdma_transition_speedchange_hdmalen*_hdma5 → $80|len vs
+        // hdma_late_m3speedchange_hdma5_*_ds_1 → still active).
+        let in_window = self.hdma_mode == HdmaMode::ArmedLcdOn && self.ppu.hdma_period();
+        let pending_req = self.vram_dma_req.take();
+        if switching && !entering_ds {
+            // Leaving double speed: the PPU/APU re-pace from the cycle
+            // right after the STOP opcode fetch (gambatte lcd_/psg_
+            // .speedChange at cc_ = cc + 8 * !isDoubleSpeed(): offset 0
+            // leaving, +8 entering), so the toggle precedes the
+            // skipped-byte read below; entering double speed it lands
+            // after the read + internal cycle instead.
+            self.double_speed = false;
         }
+        if !interrupt_pending {
+            // The skipped byte costs one real read M-cycle (SameBoy
+            // stop(): `cycle_read(gb, gb->pc++)`, gated on no pending
+            // interrupt). The value is discarded; the address still
+            // drives the bus (OAM bug).
+            self.tick_machine();
+            self.maybe_oam_bug(skipped_addr, OamBugKind::Read);
+            let _ = self.read_no_tick(skipped_addr);
+        }
+        // STOP resets DIV on every model (Pan Docs "FF04 — DIV"),
+        // committing like a write occupying the skipped-byte read slot:
+        // gambatte Memory::stop timestamps `nontrivial_ff_write(0x04, 0,
+        // cc)` at the slot's *start* cc, and gambatte write timestamps are
+        // start-of-cycle (cpu.cpp FF_WRITE advances cc afterwards) where
+        // ours commit after the tick — so the reset lands here, after that
+        // cycle's tick (the gambatte speedchange tima/div a/b phase pairs
+        // pin the TIMA falling-edge quirk to this cell). Modelled as a DIV
+        // write so the falling-edge effects apply (frame-sequencer edge
+        // included, `Apu::div_write` — the speedchange ch2_nr52 families).
+        self.apu.div_write(self.double_speed);
+        self.timer.write(0xFF04, 0);
+        if !switching {
+            // Deep stop: hand a still-pending block request back — the
+            // CPU's stop idle engages the halt gate, which defers it
+            // (gambatte's non-switch stop path calls Memory::halt).
+            self.vram_dma_req = pending_req.or(self.vram_dma_req);
+            return false;
+        }
+        self.key1_armed = false;
+        if interrupt_pending {
+            // With IE & IF pending the switch is instantaneous: no
+            // skipped-byte read, no pause (SameBoy stop() gates the halt
+            // countdown on !interrupt_pending; age caution/
+            // spsw-interrupts).
+            if entering_ds {
+                self.double_speed = true;
+            }
+            self.vram_dma_req = pending_req.or(self.vram_dma_req);
+            return true;
+        }
+        // The OAM DMA controller freezes after the read cycle (gambatte
+        // Memory::stop: updateOamDma(cc + 4), then intreq_.halt()); the
+        // halt-hdma snapshot below is installed first so the wake path
+        // can re-evaluate it.
+        self.halt_hdma = if pending_req.is_some() && !entering_ds {
+            HaltHdmaState::Requested
+        } else if in_window {
+            HaltHdmaState::High
+        } else {
+            HaltHdmaState::Low
+        };
+        self.engage_halt_gate(true);
+        // One internal M-cycle before the pause (gambatte Memory::stop
+        // returns cc + 8: the operand read plus one cycle), still at the
+        // old PPU/APU pace when entering double speed.
+        self.tick_machine();
+        if entering_ds {
+            self.double_speed = true;
+        }
+        // Mode-0 entries seen by the two cycles above never flag a block:
+        // gambatte defers all LCD events into the pause, where the halted
+        // gate suppresses the flag; the live window is re-checked at wake.
+        self.vram_dma_req = None;
+        // The pause: the CPU sleeps for 0x7FFF more M-cycles on the *new*
+        // clock — with the read + internal cycles that totals 0x8001
+        // M-cycles ≙ gambatte's unhalt event at cc + 0x20000 + 4 (cc
+        // counts 4 per M-cycle at either speed) — while PPU/APU/timer run
+        // on. IE & IF != 0 ends it early, exactly like halt mode
+        // (gambatte's pause *is* a halt: the halted intevent_interrupts
+        // path unhalts; SameBoy keeps gb->halted under
+        // speed_switch_halt_countdown). SameBoy instead uses a flat
+        // 0x20008 8-MHz-clock countdown — half the pause when leaving
+        // double speed; gambatte's cgb04c expectations are this suite's
+        // oracle, and the speedchange2/3/4/5 (DS→single) LY families
+        // confirm its doubled length.
+        let dots_per_m: u64 = if self.double_speed { 2 } else { 4 };
+        let target = self.cycles + 0x7FFF * dots_per_m;
+        if entering_ds && pending_req.is_some() {
+            // The surviving block request fires at the first event check
+            // inside the pause: the halted service aborts the transfer
+            // (see run_vram_dma). Its stall counts toward the pause.
+            self.vram_dma_req = pending_req;
+            self.run_vram_dma();
+        }
+        while self.cycles < target && self.intf & self.ie & IF_MASK == 0 {
+            self.tick_machine();
+        }
+        self.engage_halt_gate(false);
+        self.vram_dma_unhalt();
+        true
     }
 
     fn set_halted(&mut self, halted: bool) {
@@ -1902,19 +2209,36 @@ mod tests {
 
     #[test]
     fn key1_speed_switch_via_stop() {
+        // Register semantics only: `interrupt_pending = true` takes the
+        // instantaneous-switch path (SameBoy gates the pause and the
+        // skipped-byte read on !interrupt_pending), keeping the pause
+        // machinery out of this test (covered separately below).
         let mut b = ic_cgb_mode();
         assert_eq!(b.read(0xFF4D), 0x7E);
-        assert!(!b.stop(), "not armed: deep stop");
+        assert!(!b.stop(0x0000, true), "not armed: deep stop");
         b.write(0xFF4D, 0xFF);
         assert_eq!(b.read(0xFF4D), 0x7F);
         ticks(&mut b, 100);
-        assert!(b.stop(), "armed: switch performed");
+        assert!(b.stop(0x0000, true), "armed: switch performed");
         assert_eq!(b.read(0xFF4D), 0xFE, "double speed, no longer armed");
         assert_eq!(b.read(0xFF04), 0x00, "STOP reset DIV");
         // Switch back.
         b.write(0xFF4D, 0x01);
-        assert!(b.stop());
+        assert!(b.stop(0x0000, true));
         assert_eq!(b.read(0xFF4D), 0x7E);
+    }
+
+    /// With IE & IF pending an armed switch is instantaneous — no
+    /// skipped-byte read, no pause (SameBoy sm83_cpu.c stop() gates both
+    /// on !interrupt_pending; age caution/spsw-interrupts).
+    #[test]
+    fn speed_switch_with_pending_interrupt_takes_no_time() {
+        let mut b = ic_cgb_mode();
+        b.write(0xFF4D, 0x01);
+        let c0 = b.cycles();
+        assert!(b.stop(0x0000, true));
+        assert_eq!(b.cycles() - c0, 0);
+        assert_eq!(b.read(0xFF4D), 0xFE);
     }
 
     #[test]
@@ -1922,15 +2246,97 @@ mod tests {
         let mut b = ic(Model::Dmg);
         ticks(&mut b, 100);
         assert_ne!(b.read(0xFF04), 0);
-        assert!(!b.stop());
+        assert!(!b.stop(0x0000, true));
         assert_eq!(b.read(0xFF04), 0);
+    }
+
+    /// STOP's skipped byte costs one real read M-cycle when no interrupt
+    /// is pending (SameBoy sm83_cpu.c stop(): `cycle_read(gb, gb->pc++)`),
+    /// and none when one is (1-byte-opcode path).
+    #[test]
+    fn stop_skipped_byte_costs_one_read_cycle() {
+        let mut b = ic(Model::Dmg);
+        let c0 = b.cycles();
+        assert!(!b.stop(0x0000, false));
+        assert_eq!(b.cycles() - c0, 4, "one read M-cycle");
+        let c0 = b.cycles();
+        assert!(!b.stop(0x0000, true));
+        assert_eq!(b.cycles() - c0, 0, "pending interrupt: no read");
+    }
+
+    /// The STOP-triggered switch pauses the CPU while the rest of the
+    /// machine runs: ~0x8000 M-cycles measured on the *new* clock
+    /// (gambatte memory.cpp Memory::stop:
+    /// `intreq_.setEventTime<intevent_unhalt>(cc + 0x20000 + 4)` with cc
+    /// counting 4 per M-cycle at either speed — so the dot cost doubles
+    /// when leaving double speed; the gambatte speedchange LY families
+    /// pin that asymmetry against SameBoy's flat 0x20008 8-MHz countdown).
+    #[test]
+    fn speed_switch_pause_advances_machine_on_the_new_clock() {
+        let mut b = ic_cgb_mode();
+        b.write(0xFF4D, 0x01);
+        let c0 = b.cycles();
+        assert!(b.stop(0x0000, false));
+        // Read + internal cycle at the old pace (4 dots each, gambatte
+        // re-paces the LCD at cc + 8 when entering), pause at the new.
+        assert_eq!(b.cycles() - c0, 2 * 4 + 0x7FFF * 2);
+        // Switching back re-paces from the read cycle on (cc + 0).
+        b.write(0xFF4D, 0x01);
+        let c0 = b.cycles();
+        assert!(b.stop(0x0000, false));
+        assert_eq!(b.cycles() - c0, 0x8001 * 4);
+    }
+
+    /// DIV restarts from the STOP reset and TIMA keeps counting M-cycles
+    /// through the pause: TAC=$04 (4096 Hz, +1 per 256 M-cycles) over
+    /// 0x8001 M-cycles yields exactly 0x80 (gambatte speedchange_tima00_1a
+    /// expects $80).
+    #[test]
+    fn speed_switch_pause_ticks_tima_from_div_reset() {
+        let mut b = ic_cgb_mode();
+        b.write(0xFF07, 0x04);
+        b.write(0xFF4D, 0x01);
+        assert!(b.stop(0x0000, false));
+        assert_eq!(b.read_no_tick(0xFF05), 0x80);
+    }
+
+    /// The PPU keeps running through the pause: entering double speed
+    /// costs 65542 dots = 143 lines + 334 dots (speedchange_ly44_m3_ly:
+    /// LY 0x44 reads 0x39 = 0x44 + 143 mod 154 after the switch).
+    #[test]
+    fn speed_switch_pause_runs_the_ppu() {
+        let mut b = ic_cgb_mode();
+        b.write(0xFF40, 0x91);
+        ticks(&mut b, 113); // glitched enable line is 452 dots: line 1 dot 0
+        assert_eq!(b.read_no_tick(0xFF44), 1);
+        b.write(0xFF4D, 0x01); // +4 dots (line 1 dot 4)
+        assert!(b.stop(0x0000, false));
+        // 65542 more dots: 143 full lines + 338 dots into line 144.
+        assert_eq!(b.read_no_tick(0xFF44), 144);
+    }
+
+    /// IE & IF != 0 ends the pause early, exactly like halt mode
+    /// (gambatte's pause is a halt: the halted intevent_interrupts path
+    /// unhalts it).
+    #[test]
+    fn speed_switch_pause_cut_short_by_interrupt() {
+        let mut b = ic_cgb_mode();
+        b.write(0xFFFF, 0x04);
+        b.write(0xFF07, 0x05); // 262144 Hz: +1 per 4 M-cycles
+        b.write(0xFF05, 0xF0);
+        b.write(0xFF4D, 0x01);
+        let c0 = b.cycles();
+        assert!(b.stop(0x0000, false));
+        let elapsed_m = (b.cycles() - c0 - 8) / 2; // pause M-cycles
+        assert!(elapsed_m < 0x100, "TIMA IRQ after ~64 M, got {elapsed_m}");
+        assert_ne!(b.pending(), 0);
     }
 
     #[test]
     fn double_speed_halves_dots_per_m_cycle() {
         let mut b = ic_cgb_mode();
         b.write(0xFF4D, 0x01);
-        b.stop();
+        b.stop(0x0000, true);
         let c0 = b.cycles();
         b.tick();
         assert_eq!(b.cycles() - c0, 2, "2 dots per M-cycle in double speed");
@@ -1949,18 +2355,26 @@ mod tests {
         b.write(0xFF54, dst as u8);
     }
 
+    /// A GDMA write only *requests* the transfer; the copy steals the bus
+    /// at the head of the CPU's next machine cycle — 8 M-cycles per block
+    /// (2 bytes per M-cycle at normal speed) plus one teardown M-cycle
+    /// (gambatte memory.cpp dma(): `cc += 2 + 2 * doubleSpeed` per byte,
+    /// `cc += 4` at the end; see `service_vram_dma` for the seam).
     #[test]
-    fn gdma_copies_blocks_and_stalls() {
+    fn gdma_steals_the_next_machine_cycle_plus_teardown() {
         let mut b = ic_cgb_mode();
-        fill_wram(&mut b, 0xC000, 0x00, 0x40);
+        fill_wram(&mut b, 0xC000, 0x40, 0x40);
         setup_gdma_regs(&mut b, 0xC000, 0x0000);
         let before = b.cycles();
-        b.write(0xFF55, 0x03); // 4 blocks = 64 bytes
-        // Write cycle (4 dots) + 4 blocks x 8 M-cycles (32 dots each... 8*4).
-        assert_eq!(b.cycles() - before, 4 + 4 * 8 * 4);
+        b.write(0xFF55, 0x03); // 4 blocks = 64 bytes, requested
+        assert_eq!(b.cycles() - before, 4, "the write cycle only flags");
+        assert_eq!(b.peek(0x8000), 0x00, "nothing copied yet");
+        let before = b.cycles();
+        b.tick(); // the steal precedes this op's own cycle
+        assert_eq!(b.cycles() - before, (4 * 8 + 1 + 1) * 4, "stall + teardown");
+        assert_eq!(b.peek(0x8000), 0x40);
+        assert_eq!(b.peek(0x803F), 0x7F);
         assert_eq!(b.read(0xFF55), 0xFF, "completed");
-        assert_eq!(b.read(0x8000), 0x00);
-        assert_eq!(b.read(0x803F), 0x3F);
         // HDMA1-4 are write-only.
         assert_eq!(b.read(0xFF51), 0xFF);
         assert_eq!(b.read(0xFF54), 0xFF);
@@ -1972,26 +2386,30 @@ mod tests {
         fill_wram(&mut b, 0xC000, 0x00, 0x20);
         setup_gdma_regs(&mut b, 0xC000, 0x0000);
         b.write(0xFF55, 0x00); // one block
+        b.tick();
         b.write(0xFF55, 0x00); // next block continues at +0x10
+        b.tick();
         assert_eq!(b.read(0x8010), 0x10);
         assert_eq!(b.read(0x801F), 0x1F);
     }
 
     /// FF51-FF54 write straight into the *live* DMA address counters
-    /// (SameBoy Core/memory.c GB_IO_HDMA1 handler: `hdma_current_src &=
-    /// 0xF0; hdma_current_src |= value << 8;`): rewriting only FF51 after
-    /// blocks have copied keeps the incremented low byte — including its
-    /// high nibble, which the FF51 mask preserves — so the next transfer
-    /// reads from (new high byte | live low byte), not from a fresh xx00.
+    /// (gambatte memory.cpp cases 0x51-0x54: `dmaSource_ = data << 8 |
+    /// (dmaSource_ & 0xFF)` etc.; SameBoy's GB_IO_HDMA1-4 handlers agree):
+    /// rewriting only FF51 after blocks have copied keeps the incremented
+    /// low byte, so the next transfer reads from (new high byte | live low
+    /// byte), not from a fresh xx00.
     #[test]
     fn hdma_partial_src_rewrite_blends_live_counter() {
         let mut b = ic_cgb_mode();
         fill_wram(&mut b, 0xC000, 0x00, 0x30);
         fill_wram(&mut b, 0xD030, 0xA0, 0x10);
         setup_gdma_regs(&mut b, 0xC000, 0x0000);
-        b.write(0xFF55, 0x02); // 3 blocks: src counter is now 0xC030
+        b.write(0xFF55, 0x02); // 3 blocks: src counter is then 0xC030
+        b.tick();
         b.write(0xFF51, 0xD0); // rewrite the high byte only
         b.write(0xFF55, 0x00); // 1 block: src 0xD030.., dst continues at 0x30
+        b.tick();
         assert_eq!(b.read(0x8030), 0xA0, "live low byte kept: src 0xD030");
         assert_eq!(b.read(0x803F), 0xAF);
     }
@@ -2012,25 +2430,35 @@ mod tests {
             }
             setup_gdma_regs(&mut b, src, 0x1800);
             b.write(0xFF55, 0x00); // one block
+            b.tick();
             for i in 0..16 {
                 assert_eq!(b.read(0x9800 + i), 0xFF, "src {src:04X} byte {i}");
             }
         }
     }
 
-    /// A destination running past 0x9FFF wraps to 0x8000 and the transfer
-    /// continues (SameBoy Core/memory.c GB_hdma_run:
-    /// `vram[vram_base + (hdma_current_dest++ & 0x1FFF)]`).
+    /// The destination is a full 16-bit counter: a transfer reaching
+    /// 0x10000 terminates there with FF55 bit 7 latched — it does *not*
+    /// wrap back into VRAM (gambatte memory.cpp dma(): `if (dmaDest +
+    /// length >= 0x10000) { length = 0x10000 - dmaDest; ioamhram_[0x155]
+    /// |= 0x80; }`, hardware-captured by gambatte dma/dma_dst_wrap_2;
+    /// FF53 keeps the full high byte, masked only at the VRAM write).
+    /// This replaces the earlier SameBoy-derived wrap-to-0x8000 model,
+    /// which that capture contradicts.
     #[test]
-    fn gdma_destination_wraps_to_vram_start() {
+    fn gdma_terminates_at_dest_0x10000_crossing() {
         let mut b = ic_cgb_mode();
         fill_wram(&mut b, 0xC000, 0x40, 0x20);
-        setup_gdma_regs(&mut b, 0xC000, 0x1FF0);
-        b.write(0xFF55, 0x01); // 2 blocks: 0x9FF0-0x9FFF, then the wrap
-        assert_eq!(b.read(0x9FF0), 0x40);
-        assert_eq!(b.read(0x9FFF), 0x4F);
-        assert_eq!(b.read(0x8000), 0x50, "second block wrapped to 0x8000");
-        assert_eq!(b.read(0x800F), 0x5F);
+        setup_gdma_regs(&mut b, 0xC000, 0xFFF0);
+        b.write(0xFF55, 0x01); // 2 blocks requested, only one fits
+        b.tick();
+        assert_eq!(b.peek(0x9FF0), 0x40, "dest 0xFFF0 masks to VRAM 0x1FF0");
+        assert_eq!(b.peek(0x9FFF), 0x4F);
+        assert_eq!(b.peek(0x8000), 0x00, "no wrap into a second block");
+        // With the display off the truncated GDMA still retires its whole
+        // length (gambatte dma(): `if (!(lcdc & en) && gdmaReqFlagged)
+        // dmaLength = 0`), reading back $FF.
+        assert_eq!(b.read(0xFF55), 0xFF);
     }
 
     #[test]
@@ -2041,34 +2469,277 @@ mod tests {
         b.write(0xFF40, 0x91); // LCD on: glitched line, hblank from ~dot 250
         b.write(0xFF55, 0x81); // hblank DMA, 2 blocks (PPU at dot 4)
         assert_eq!(b.read(0xFF55), 0x01, "2 blocks remaining reads 1");
-        assert_eq!(b.read(0x8000), 0x00, "nothing copied before hblank");
-        // PPU at dot 12. Run into the glitched line's hblank; the block
-        // transfer itself stalls 8 M-cycles (32 more dots).
-        ticks(&mut b, 87); // ~dot 392 incl. the stall
+        assert_eq!(b.peek(0x8000), 0x00, "nothing copied before hblank");
+        // Run into the glitched line's hblank; the block transfer steals
+        // 8 M-cycles + 1 teardown at the next boundary.
+        ticks(&mut b, 90); // ~dot 400 incl. the stall
         assert_eq!(b.read(0xFF55), 0x00, "one block left");
-        assert_eq!(b.read(0x8000), 0x40);
-        assert_eq!(b.read(0x800F), 0x4F);
-        assert_eq!(b.read(0x8010), 0x00, "second block waits for next hblank");
-        // Run well into line 1's hblank (~dot 702-908 from enable).
-        ticks(&mut b, 98);
+        assert_eq!(b.peek(0x8000), 0x40);
+        assert_eq!(b.peek(0x800F), 0x4F);
+        assert_eq!(b.peek(0x8010), 0x00, "second block waits for next hblank");
+        // Run well into line 1's hblank.
+        ticks(&mut b, 100);
         assert_eq!(b.read(0xFF55), 0xFF, "done");
-        assert_eq!(b.read(0x8010), 0x50);
-        assert_eq!(b.read(0x801F), 0x5F);
+        assert_eq!(b.peek(0x8010), 0x50);
+        assert_eq!(b.peek(0x801F), 0x5F);
     }
 
+    /// Cancelling latches bit 7 plus the *written* length bits — the
+    /// FF55 write replaces the live count before the cancel takes effect
+    /// (gambatte memory.cpp case 0x55: `ioamhram_[0x155] = data & 0x7F`
+    /// precedes the `|= 0x80`; SameBoy sets hdma_steps_left first, too).
     #[test]
-    fn hblank_dma_cancel_sets_bit7() {
+    fn hblank_dma_cancel_sets_bit7_and_latches_written_length() {
         let mut b = ic_cgb_mode();
         fill_wram(&mut b, 0xC000, 0x40, 0x80);
         setup_gdma_regs(&mut b, 0xC000, 0x0000);
         b.write(0xFF40, 0x91);
         b.write(0xFF55, 0x87); // 8 blocks
-        ticks(&mut b, 87); // through the first hblank entry: one block done
+        ticks(&mut b, 90); // first hblank: one block done
         assert_eq!(b.read(0xFF55), 0x06);
-        b.write(0xFF55, 0x00); // cancel
-        assert_eq!(b.read(0xFF55), 0x86, "cancelled: bit 7 + remaining");
-        ticks(&mut b, 101); // into line 1's hblank (~dot 800, VRAM readable)
-        assert_eq!(b.read(0x8010), 0x00, "no further blocks after cancel");
+        b.write(0xFF55, 0x02); // cancel, writing length bits 0x02
+        assert_eq!(b.read(0xFF55), 0x82, "bit 7 + the written length bits");
+        ticks(&mut b, 101); // into line 1's hblank
+        assert_eq!(b.peek(0x8010), 0x00, "no further blocks after cancel");
+    }
+
+    /// Enabling HBlank DMA with the LCD off copies one block immediately
+    /// and leaves the transfer armed (gambatte video.cpp enableHdma's
+    /// LCD-off branch flags a request at once; SameBoy GB_IO_HDMA5:
+    /// `(STAT & 3) == 0 && display_state != 7 → hdma_on = true`).
+    #[test]
+    fn hblank_enable_with_lcd_off_copies_one_block_immediately() {
+        let mut b = ic_cgb_mode();
+        fill_wram(&mut b, 0xC000, 0x40, 0x20);
+        setup_gdma_regs(&mut b, 0xC000, 0x0000);
+        b.write(0xFF55, 0x81); // LCD is off
+        b.tick();
+        assert_eq!(b.peek(0x8000), 0x40);
+        assert_eq!(b.peek(0x800F), 0x4F);
+        assert_eq!(b.peek(0x8010), 0x00, "exactly one block");
+        assert_eq!(b.read(0xFF55), 0x00, "armed, one block left");
+        // The remaining block fires at the first mode-0 entry after the
+        // display comes on.
+        b.write(0xFF40, 0x91);
+        ticks(&mut b, 90);
+        assert_eq!(b.peek(0x8010), 0x50);
+        assert_eq!(b.read(0xFF55), 0xFF, "completed");
+    }
+
+    /// Enabling HBlank DMA inside the hblank window fires the first block
+    /// in that same hblank; within 3 dots of the line end it waits for
+    /// the next one (gambatte video.cpp enableHdma →
+    /// `isHdmaPeriod(...)`: `ly < 144 && cc + 3 + 3 * ds <
+    /// lyCounter.time() && cc >= m0TimeOfCurrentLy`).
+    #[test]
+    fn hblank_enable_inside_window_fires_immediately() {
+        let mut b = ic_cgb_mode();
+        fill_wram(&mut b, 0xC000, 0x40, 0x20);
+        setup_gdma_regs(&mut b, 0xC000, 0x0000);
+        b.write(0xFF40, 0x91);
+        while !b.ppu.hblank_active() {
+            b.tick();
+        }
+        b.write(0xFF55, 0x80); // 1 block, enabled mid-hblank
+        b.tick();
+        assert_eq!(b.peek(0x8000), 0x40);
+        assert_eq!(b.read(0xFF55), 0xFF, "completed in the same hblank");
+    }
+
+    /// The window cutoff: in double speed (2-dot M-cycles) an enable
+    /// landing 2 dots before the line end is outside the window and
+    /// waits for the next hblank.
+    #[test]
+    fn hblank_enable_past_window_cutoff_waits() {
+        let mut b = ic_cgb_mode();
+        b.write(0xFF4D, 0x01);
+        b.stop(0x0000, true); // double speed, instantly
+        fill_wram(&mut b, 0xC000, 0x40, 0x10);
+        setup_gdma_regs(&mut b, 0xC000, 0x0000);
+        b.write(0xFF40, 0x91);
+        // Glitched enable line: 452 dots, hblank from ~dot 250. Park 2
+        // dots before its end (dot 450 = 225 double-speed M-cycles).
+        ticks(&mut b, 224);
+        assert!(b.ppu.hblank_active(), "still in the glitch line's hblank");
+        b.write(0xFF55, 0x80); // PPU at dot 450: 2 dots left < 3-dot margin
+        b.tick();
+        assert_eq!(b.peek(0x8000), 0x00, "no block this close to line end");
+        assert_eq!(b.read(0xFF55), 0x00, "armed, nothing copied");
+        // The next line's mode-0 entry fires it.
+        ticks(&mut b, 250);
+        assert_eq!(b.peek(0x8000), 0x40);
+    }
+
+    /// The block/CPU-access race has M-cycle granularity: a block flagged
+    /// in an earlier M-cycle steals the bus at the head of the next bus
+    /// operation (the racing access loses), while an access whose own
+    /// tick contains the trigger still commits first (the gambatte
+    /// hdma_late_destl/_wrambank/_length `_1`/`_2` adjacent-cycle pairs:
+    /// shifting the same code by one cycle flips the winner).
+    #[test]
+    fn hblank_block_race_has_machine_cycle_granularity() {
+        // Calibrate: machine cycles from arming to the trigger dot.
+        let lead_ticks = {
+            let mut b = ic_cgb_mode();
+            fill_wram(&mut b, 0xC000, 0x40, 0x10);
+            setup_gdma_regs(&mut b, 0xC000, 0x0000);
+            b.write(0xFF40, 0x91);
+            b.write(0xFF55, 0x80);
+            let mut n = 0u32;
+            while !b.ppu.hdma_trigger_level() {
+                b.tick();
+                n += 1;
+            }
+            n
+        };
+        // Trigger during tick N, dest write afterwards: the steal heads
+        // the write — the block uses the old destination.
+        let mut b = ic_cgb_mode();
+        fill_wram(&mut b, 0xC000, 0x40, 0x10);
+        setup_gdma_regs(&mut b, 0xC000, 0x0000);
+        b.write(0xFF40, 0x91);
+        b.write(0xFF55, 0x80);
+        ticks(&mut b, lead_ticks);
+        b.write(0xFF53, 0x90);
+        assert_eq!(b.peek(0x8000), 0x40, "block first: old dest");
+        assert_eq!(b.peek(0x9000), 0x00);
+        // Trigger inside the write's own tick: the write commits first
+        // and the block uses the new destination.
+        let mut b = ic_cgb_mode();
+        fill_wram(&mut b, 0xC000, 0x40, 0x10);
+        setup_gdma_regs(&mut b, 0xC000, 0x0000);
+        b.write(0xFF40, 0x91);
+        b.write(0xFF55, 0x80);
+        ticks(&mut b, lead_ticks - 1);
+        b.write(0xFF53, 0x90); // this op's tick contains the trigger
+        b.tick(); // the steal happens here
+        assert_eq!(b.peek(0x9000), 0x40, "write first: new dest");
+        assert_eq!(b.peek(0x8000), 0x00);
+    }
+
+    /// HBlank DMA never proceeds while the core clock is gated: a block
+    /// flagged before HALT is deferred and re-flagged at wake, where it
+    /// copies without the teardown M-cycle (gambatte Memory::halt →
+    /// haltHdmaState_ = hdma_requested; video.h flagHdmaReq is suppressed
+    /// while halted; Memory::event intevent_dma: `cc -= 4` for the
+    /// deferred block).
+    #[test]
+    fn hblank_block_defers_while_core_clock_gated() {
+        let mut b = ic_cgb_mode();
+        fill_wram(&mut b, 0xC000, 0x40, 0x10);
+        setup_gdma_regs(&mut b, 0xC000, 0x0000);
+        b.write(0xFF40, 0x91);
+        b.write(0xFF55, 0x80);
+        while !b.ppu.hblank_active() {
+            b.tick();
+        }
+        b.set_cpu_halted(true);
+        ticks(&mut b, 300); // crosses further hblanks: nothing copies
+        assert_eq!(b.peek(0x8000), 0x00);
+        assert_eq!(b.read_no_tick(0xFF55), 0x00, "still armed");
+        b.set_cpu_halted(false); // wake re-flags the deferred block
+        let before = b.cycles();
+        b.tick(); // the steal heads this op
+        assert_eq!(b.cycles() - before, (8 + 1) * 4, "no teardown cycle");
+        assert_eq!(b.peek(0x8000), 0x40);
+        assert_eq!(b.read_no_tick(0xFF55), 0xFF);
+    }
+
+    /// A halt that begins *outside* the hblank window fires a block on a
+    /// wake landing inside one; a halt that begins inside it does not
+    /// retrigger the same hblank (gambatte haltHdmaState_ low vs high).
+    #[test]
+    fn halt_wake_inside_hblank_window_fires_block_once() {
+        let mut b = ic_cgb_mode();
+        fill_wram(&mut b, 0xC000, 0x40, 0x10);
+        setup_gdma_regs(&mut b, 0xC000, 0x0000);
+        b.write(0xFF40, 0x91);
+        b.write(0xFF55, 0x80);
+        // Halt right after arming, before the first hblank (state Low).
+        b.set_cpu_halted(true);
+        while !b.ppu.hblank_active() {
+            b.tick();
+        }
+        b.set_cpu_halted(false); // wake inside the window: block fires
+        b.tick();
+        assert_eq!(b.peek(0x8000), 0x40);
+        // Re-arm inside the same hblank, halt, wake immediately: the halt
+        // began inside the window (state High) — no retrigger.
+        setup_gdma_regs(&mut b, 0xC000, 0x0010);
+        assert!(b.ppu.hblank_active());
+        b.write(0xFF55, 0x80);
+        // (the enable itself fired a request: let it run, then re-halt)
+        b.tick();
+        assert_eq!(b.peek(0x8010), 0x40);
+    }
+
+    /// Disabling the display kills an armed HBlank transfer: FF55 keeps
+    /// reading "active" but no further block ever copies, even after the
+    /// display returns (gambatte video.cpp lcdcChange: the disable branch
+    /// parks every memevent, and only an armed-while-off transfer is
+    /// re-anchored by the enable branch).
+    #[test]
+    fn lcd_disable_kills_hblank_arming_but_not_ff55() {
+        let mut b = ic_cgb_mode();
+        fill_wram(&mut b, 0xC000, 0x40, 0x20);
+        setup_gdma_regs(&mut b, 0xC000, 0x0000);
+        b.write(0xFF40, 0x91);
+        b.write(0xFF55, 0x81); // armed with the LCD on, before any hblank
+        b.write(0xFF40, 0x11); // display off
+        ticks(&mut b, 300);
+        assert_eq!(b.peek(0x8000), 0x00, "arming died with the display");
+        assert_eq!(b.read(0xFF55), 0x01, "FF55 reads active (stale)");
+        b.write(0xFF40, 0x91); // re-enabling does not revive it
+        ticks(&mut b, 500);
+        assert_eq!(b.peek(0x8000), 0x00);
+    }
+
+    /// The pending-block × speed-switch matrix (gambatte Memory::stop):
+    /// entering double speed the request survives into the pause and the
+    /// gated service aborts the transfer with the count latched; leaving
+    /// double speed it is deferred and completes normally after the pause
+    /// (hdma_transition_speedchange_hdmalen*_hdma5 = $80|len vs
+    /// hdma_late_m3speedchange_hdma5_*_ds_1 = still active).
+    #[test]
+    fn speed_switch_aborts_pending_hblank_block_entering_double_speed() {
+        let mut b = ic_cgb_mode();
+        fill_wram(&mut b, 0xC000, 0x40, 0x20);
+        setup_gdma_regs(&mut b, 0xC000, 0x0000);
+        b.write(0xFF40, 0x91);
+        b.write(0xFF4D, 0x01); // arm first: any later bus op would
+        b.write(0xFF55, 0x81); // service the request (2 blocks)
+        while !b.ppu.hdma_trigger_level() {
+            b.tick();
+        }
+        // The request flagged during the last tick is still pending when
+        // STOP executes (gambatte: prefetched = hdmaReqFlagged).
+        assert!(b.stop(0x0000, false));
+        assert_eq!(b.peek(0x8000), 0x40, "the block still copied");
+        assert_eq!(b.peek(0x800F), 0x4F);
+        assert_eq!(b.read(0xFF55), 0x81, "aborted: bit 7 + armed count");
+        ticks(&mut b, 300);
+        assert_eq!(b.peek(0x8010), 0x00, "no further blocks");
+    }
+
+    #[test]
+    fn speed_switch_defers_pending_hblank_block_leaving_double_speed() {
+        let mut b = ic_cgb_mode();
+        b.write(0xFF4D, 0x01);
+        assert!(b.stop(0x0000, true)); // enter double speed instantly
+        fill_wram(&mut b, 0xC000, 0x40, 0x20);
+        setup_gdma_regs(&mut b, 0xC000, 0x0000);
+        b.write(0xFF40, 0x91);
+        b.write(0xFF4D, 0x01); // arm first (see the abort test above)
+        b.write(0xFF55, 0x81);
+        while !b.ppu.hdma_trigger_level() {
+            b.tick();
+        }
+        assert!(b.stop(0x0000, false)); // back to normal speed, with pause
+        assert_eq!(b.read_no_tick(0xFF55), 0x01, "still active");
+        assert_eq!(b.peek(0x8000), 0x00, "block deferred across the pause");
+        b.tick();
+        assert_eq!(b.peek(0x8000), 0x40);
+        assert_eq!(b.read_no_tick(0xFF55), 0x00);
     }
 
     // ---- peek (side-effect-free harness view) -----------------------------
