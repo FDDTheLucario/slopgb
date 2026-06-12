@@ -19,7 +19,7 @@
 //! |--------------|-------|
 //! | 0            | LY := line; OAM reads blocked; LYC compare invalid (flag 0); STAT mode reads 0; **OAM (mode-2) IRQ pulse** on lines 1-143 — readable in the same M-cycle but a second-half commit: the halt-exit sampler *and* the running CPU's same-cycle interrupt sample miss it for one M-cycle (SameBoy display.c raises the OAM STAT interrupt 1 T-cycle before STAT changes; the mealybug per-line handlers and wilbertpol intr_2_timing pin the views). The OAM *blocking level* rises here and holds through mode 3, blocking mode-0/LYC edges under it (gambatte m2int_m0irq/lycm2int) |
 //! | 4            | STAT mode reads 2; OAM writes blocked; LYC compare valid (line 0's OAM pulse sits here, with its own dispatch-late/m1-blocked rules — see `stat_events_tick`) |
-//! | 80           | VRAM reads blocked; OAM scan complete |
+//! | 80           | VRAM reads blocked (the serial scan's last entry latch sits at dot 81 — see §Dot-serial OAM scan) |
 //! | 84           | STAT mode reads 3; VRAM writes blocked |
 //! | P − 2        | mode 0: STAT reads 0, mode-0 IRQ source asserts, OAM+VRAM unblock, OAM blocking level drops — two dots before the pipe end P = 256 + SCX%8 + sprite/window penalties (three on sprite-laden DMG lines, whose first OBJ fetch costs 6 dots: the flip stays on its mooneye dot while the pixels shift — see `obj_fetch_base`); `m0_flip_events` in render.rs: the gbmicrotest hblank_int/int_hblank grids pin the IRQ dot, mooneye intr_2_mode0_timing/_sprites and the gbmicrotest ppu_sprite0/win*_b grids the flip — both at 254 + SCX%8 on a bare line. The pipe-end anchors (HBlank-DMA trigger, CGB palette-RAM blocking) stay at P |
 //!
@@ -77,20 +77,46 @@
 //! * Boot hand-off sits at frame dot 144·456+164 (AGB +4) — gambatte
 //!   initstate videoCycles, display_startstate (`model.rs`).
 //!
-//! # Known approximation: instantaneous OAM scan
+//! # Dot-serial OAM scan
 //!
-//! Sprite selection for a line happens in one step at dot 80 rather than
-//! spread across dots 0-80 as on hardware (one OAM entry per 2 dots).
-//! Combined with [`Ppu::oam_dma_write`] bypassing mode-based access
-//! blocking, an OAM DMA byte landing mid-mode-2 can select sprites
-//! differently than hardware, which would already have scanned past the
-//! entry the byte lands in. No mooneye test pins this. The DMG OAM
-//! corruption bug ([`Ppu::oam_bug`]) interacts with the same
-//! approximation: corruption mutates OAM *before* the instantaneous
-//! dot-80 scan, so rows the hardware scan had already consumed are
-//! re-read post-corruption. Fine for blargg's oam_bug suite (it checks
-//! the memory effect with the LCD subsequently disabled); the rendered
-//! frame of the corrupted line itself is unpinned by any test ROM.
+//! Sprite selection is spread across mode 2 — one OAM entry latched and
+//! evaluated per 2 dots (gbctr "OAM scan"; gambatte sprite_mapper.cpp
+//! `OamReader` latches (y,x) per entry at the same rate; SameBoy
+//! display.c's mode-2 loop), entry i on dot 2i+3 on every model (see
+//! `scan_latch_dot` in render.rs for the anchoring; the last entry lands
+//! on dot 81, before mode 3 consumes the result at dot 84). Consequences
+//! the test corpus pins:
+//!
+//! * An OAM mutation landing mid-scan reaches only entries the scan has
+//!   not yet consumed — a DMA byte (committed at its copy cycle's end,
+//!   `Interconnect::oam_dma_commit_pending`) or OAM-bug corruption row
+//!   ([`Ppu::oam_bug`], which by construction hits the row *at* the scan
+//!   position) never re-selects an already-latched entry. blargg's
+//!   oam_bug suite keeps checking the memory effect only; the corrupted
+//!   line's own selection is unpinned.
+//! * While the OAM DMA controller owns OAM — running or frozen by
+//!   HALT/STOP — the scan's reads are disconnected and latch $FF, a
+//!   disabled sprite ([`Ppu::oam_dma_active`]; gambatte memory.cpp
+//!   startOamDma/endOamDma switch its OamReader source to rdisabledRam).
+//!   The gambatte oamdma/late_sp00/01/02/39{x,y} `_1`/`_2` pairs pin both
+//!   window edges against individual slots' latch dots at M-cycle
+//!   granularity, oamdma_late_halt_stat the freeze persistence, and the
+//!   strikethrough.gb reference the per-slot vanishing (its residual
+//!   7-pixel glitch-sprite cell is undocumented DMA-driver residue —
+//!   see the baseline note in tests/gbtr/smallsuites.rs). The known
+//!   approximation left: gambatte resolves the `_ds` races at half-dot
+//!   (cc) granularity — our whole-dot lattice keeps the single-speed
+//!   calibration, leaving the ds `out3` rows on the documented-swap
+//!   list together with the frozen ds mode-0 flip lead they also race.
+//! * The per-entry LCDC.2 sample (8×16 selection) happens at each
+//!   entry's latch dot (gambatte OamReader lsbuf_), which the gambatte
+//!   sprites/late_sizechange* families race per slot.
+//! * On MGB with the transfer frozen mid-byte by the core-clock gate,
+//!   every entry reads as the documented glitch sprite instead
+//!   (madness/mgb_oam_dma_halt_sprites.s — `mgb_dma_freeze_glitch_entry`
+//!   in render.rs); the other models' frozen-DMA glitches are
+//!   unreferenced and keep the plain $FF disconnect, which the
+//!   dmg08-verified oamdma_late_halt_stat rows confirm for selection.
 
 mod render;
 
@@ -216,8 +242,18 @@ pub struct Ppu {
     /// OAM DMA transfer frozen mid-byte by the HALT/STOP core clock gate,
     /// as (OAM index about to be replaced, in-flight source byte). Set by
     /// the interconnect; while set, the MGB OAM scan sees glitched data
-    /// (madness/mgb_oam_dma_halt_sprites.s — see `oam_scan` in render.rs).
+    /// (madness/mgb_oam_dma_halt_sprites.s — see
+    /// `mgb_dma_freeze_glitch_entry` in render.rs).
     dma_freeze: Option<(u8, u8)>,
+    /// The OAM DMA controller owns OAM for the current M-cycle's dots: the
+    /// PPU's OAM view is disconnected and the mode-2 scan latches $FF — a
+    /// disabled sprite — instead of real entries (gambatte memory.cpp
+    /// startOamDma/endOamDma switch the OamReader's source to
+    /// rdisabledRam, all $FF, for exactly the copying window; the level
+    /// persists across HALT/STOP freezes, which is what
+    /// oamdma_late_halt_stat/late_speedchange_stat measure). Maintained
+    /// per M-cycle by `Interconnect::oam_dma_tick`.
+    oam_dma_active: bool,
 
     // Timing state.
     enabled: bool,
@@ -499,6 +535,7 @@ impl Ppu {
                 .unwrap_or_else(|_| unreachable!()),
             oam: [0; 0xA0],
             dma_freeze: None,
+            oam_dma_active: false,
             enabled: false,
             line: 0,
             dot: 0,
@@ -785,7 +822,10 @@ impl Ppu {
                 }
             } else {
                 match self.dot {
-                    80 => self.oam_scan(),
+                    // Serial OAM scan: one entry latched + evaluated per
+                    // 2 dots (see `scan_latch_dot` in render.rs); the last
+                    // entry is consumed before mode 3 starts at dot 84.
+                    d if d < 84 => self.oam_scan_step(),
                     84 => self.render_init(),
                     d => {
                         if self.render.active && d > 84 {
@@ -1966,7 +2006,7 @@ impl Ppu {
     /// no transfer was in flight (`None`). While frozen, the MGB PPU's OAM
     /// scan sees glitched data derived from the frozen access instead of
     /// real OAM entries (madness/mgb_oam_dma_halt_sprites.s; see
-    /// `oam_scan` in render.rs).
+    /// `mgb_dma_freeze_glitch_entry` in render.rs).
     /// Interconnect wiring: CGB double speed engaged/left (see `ds`).
     pub(crate) fn set_double_speed(&mut self, ds: bool) {
         self.ds = ds;
@@ -1976,10 +2016,25 @@ impl Ppu {
         self.dma_freeze = freeze;
     }
 
+    /// Interconnect wiring: the OAM DMA controller owns (true) or released
+    /// (false) OAM for the coming M-cycle's dots — see the
+    /// [`Self::oam_dma_active`] field docs for the scan semantics and the
+    /// gambatte derivation of the level's edges.
+    pub(crate) fn set_oam_dma_active(&mut self, active: bool) {
+        self.oam_dma_active = active;
+    }
+
     /// Test hook for the interconnect wiring tests.
     #[cfg(test)]
     pub(crate) fn oam_dma_freeze(&self) -> Option<(u8, u8)> {
         self.dma_freeze
+    }
+
+    /// Test hook for the interconnect wiring tests: the scan's OAM view is
+    /// disconnected for the current M-cycle's dots.
+    #[cfg(test)]
+    pub(crate) fn oam_dma_scan_disconnected(&self) -> bool {
+        self.oam_dma_active
     }
 
     /// Test hook: raw (BG, OBJ) palette RAM. FF69/FF6B reads are gated on
