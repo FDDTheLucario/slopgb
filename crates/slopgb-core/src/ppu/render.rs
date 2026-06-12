@@ -10,12 +10,16 @@
 //! mode-0 IRQ source leading the pipe end by 2 dots (`m0_flip_events`),
 //! matching `hblank_ly_scx_timing-GS`.
 //!
-//! Sprite fetches stall the pipeline for 6 dots each (5 for the first
-//! fetch of the line — see `obj_fetch_base`), plus a first-per-tile
-//! alignment penalty of max(0, 5 - (x + SCX) % 8) dots (the BG fetcher
-//! must finish its current tile row first). This reproduces every case
-//! table in `intr_2_mode0_timing_sprites` exactly (Pan Docs "Mode 3
-//! length" OBJ penalty algorithm).
+//! Sprite fetches stall the pipeline for 6 dots each (CGB-C discounts
+//! the first fetch of the line to 5 — see `obj_fetch_base`), plus a
+//! first-per-tile alignment penalty of max(0, 5 - (x + SCX) % 8) dots
+//! (the BG fetcher finishing its current tile row in real time during
+//! the stall). This reproduces every case table in
+//! `intr_2_mode0_timing_sprites` exactly (Pan Docs "Mode 3 length" OBJ
+//! penalty algorithm) — on DMG the mode-0 flip leads the
+//! sprite-extended pipe end by 3 dots, keeping each case's flip on its
+//! mooneye dot while the pop grid sits one dot later than the old
+//! 5-dot model (the mealybug blob photographs pin the pixels).
 
 use super::{
     LCDC_BG_ENABLE, LCDC_BG_MAP, LCDC_OBJ_ENABLE, LCDC_OBJ_SIZE, LCDC_TILE_DATA, LCDC_WIN_ENABLE,
@@ -52,17 +56,19 @@ const EMPTY_SPRITE_PIXEL: SpritePixel = SpritePixel {
     oam_idx: 0xFF,
 };
 
-/// OBJ fetch stall base cost: the first fetch of the line overlaps one
-/// dot of work the BG pipeline performs anyway and costs 5 dots; every
-/// later fetch pays the full 6. Decoded jointly from mooneye
-/// intr_2_mode0_timing_sprites (its windows pin every sprite case's
-/// visible flip to the dots the old end-anchored model used: one sprite
-/// at X=0 flips at 254 + 5 + 5 = 264) and the no-sprite grids that pin
-/// the bare flip at 254+SCX%8 (gbmicrotest/wilbertpol, see
-/// `m0_flip_events`) — the old 3-dot discount was an artifact of
-/// anchoring the flip to the pipe end.
-fn obj_fetch_base(fetched: u16) -> u16 {
-    if fetched == 0 { 5 } else { 6 }
+/// OBJ fetch stall base cost. On the DMG blob every fetch pays the full
+/// 6 dots; on CGB-C the first fetch of the line overlaps one dot of BG
+/// pipeline work and costs 5. The mealybug blob photographs pin the DMG
+/// pop grid one dot later than the old 5-dot first fetch
+/// (m3_bgp_change_sprites/m3_obp0_change boundary columns land exactly
+/// one pixel right of the 5-dot grid and are pixel-exact at 6), while
+/// the CGB-C photographs (m3_lcdc_bg_en_change/obj_en_change) pin the
+/// 5-dot first fetch. Every mooneye/gbmicrotest IRQ anchor stays on its
+/// frozen dot because the DMG mode-0 flip leads the sprite-extended
+/// pipe end by 3 dots instead of 2 (see `m0_flip_events`):
+/// intr_2_mode0_timing_sprites' X=0 case still flips at 264.
+fn obj_fetch_base(cgb: bool, fetched: u16) -> u16 {
+    if cgb && fetched == 0 { 5 } else { 6 }
 }
 
 /// BG/window fetcher state. Each of the three VRAM reads (tile number, low
@@ -100,6 +106,15 @@ pub(super) struct Render {
     /// Mode-3 dots elapsed (render_step calls), anchoring the fine-scroll
     /// comparator hunt below.
     mode3_dot: u16,
+    /// Pause-aware mode-3 dot: counts only dots the pipeline actually
+    /// advances (frozen through sprite-fetch and window-start stalls),
+    /// mirroring the hardware position counter the WX comparator runs
+    /// against. Anchors the WX 0-7 window trigger: with no stalls it
+    /// equals `mode3_dot`, and a prefill (OAM X < 8) sprite stall shifts
+    /// the match later by the stall instead of skipping the comparison
+    /// dot (m3_lcdc_win_map_change2: WX=7 with X=1/X=5 sprites on every
+    /// line still draws the window).
+    pos_dot: u16,
     /// SCX fine-scroll position comparator index (hardware positions
     /// -16..-9, cycling). From mode-3 dot 5 — where the first (thrown
     /// away) tile's pixels start popping on hardware — the comparator
@@ -113,6 +128,15 @@ pub(super) struct Render {
     hunt_done: bool,
     /// Pipeline frozen for this many dots (sprite fetches).
     stall: u16,
+    /// While a sprite-fetch stall runs, the BG fetcher keeps stepping in
+    /// real time for this many dots — the alignment penalty *is* the
+    /// fetcher finishing its in-flight tile row, after which it parks in
+    /// `Push` (m3_lcdc_tile_sel_change bands 8-17 pin the mid-line read
+    /// dots landing on consecutive stall dots; m3_scy_change line 0 pins
+    /// the prefill X<8 path's refetch sampling the SCY written
+    /// mid-stall). The first pixel still pops on the stall-shifted dot:
+    /// see `push_allowed`.
+    fetch_run: u16,
 
     // BG FIFO: 8 pixels as shift registers, all from one tile (pushes only
     // happen into an empty FIFO).
@@ -175,9 +199,11 @@ impl Render {
             lx: 0,
             discard: 0,
             mode3_dot: 0,
+            pos_dot: 0,
             hunt_idx: 0,
             hunt_done: false,
             stall: 0,
+            fetch_run: 0,
             bg_lo: 0,
             bg_hi: 0,
             bg_attr: 0,
@@ -318,9 +344,11 @@ impl Ppu {
         r.lx = 0;
         r.discard = 0;
         r.mode3_dot = 0;
+        r.pos_dot = 0;
         r.hunt_idx = 0;
         r.hunt_done = false;
         r.stall = 0;
+        r.fetch_run = 0;
         r.bg_count = 0;
         r.phase = FetchPhase::TileNoWait;
         r.fetch_x = 0;
@@ -369,13 +397,26 @@ impl Ppu {
         }
     }
 
+    /// Consume one stall dot. While a sprite fetch holds the pipeline
+    /// (prefill or mid-line), the BG fetcher keeps stepping in real time
+    /// (`fetch_run`) until it parks with a completed row — see the field
+    /// docs.
+    fn stall_tick(&mut self) {
+        self.render.stall -= 1;
+        if self.render.fetch_run > 0 {
+            self.render.fetch_run -= 1;
+            self.fetcher_step();
+        }
+    }
+
     /// One mode-3 dot.
     pub(super) fn render_step(&mut self) {
         self.render.mode3_dot += 1;
         if self.render.stall > 0 {
-            self.render.stall -= 1;
+            self.stall_tick();
             return;
         }
+        self.render.fetch_run = 0;
 
         // SCX fine-scroll comparator hunt, dot-rate phase: on hardware the
         // first (thrown away) tile's pixels pop on mode-3 dots 5-12 while
@@ -404,9 +445,11 @@ impl Ppu {
             // LoadSprites from xpos 0 with the M3Start scx discard
             // resuming afterwards). The stall arithmetic is unchanged
             // (mooneye intr_2_mode0_timing_sprites is the frozen
-            // oracle); unlike the mid-line path the BG fetcher does not
-            // catch up during the alignment wait — it is frozen with
-            // everything else, which keeps the 12-dot startup anchor.
+            // oracle). The BG fetcher free-runs through the stall like
+            // the mid-line path, sampling eff (m3_scy_change line 0 pins
+            // the refetch rows to the SCY written mid-stall) — the
+            // 12-dot startup anchor is held by the `pos_dot` push gate
+            // in `push_allowed`, not by freezing the fetch.
             self.render.prefill_pos += 1;
             if self.eff.lcdc & LCDC_OBJ_ENABLE != 0 {
                 loop {
@@ -422,17 +465,29 @@ impl Ppu {
                     }
                     let Some(i) = pick else { break };
                     let s = self.render.sprites[i];
-                    let base = obj_fetch_base(self.render.fetched);
+                    let base = obj_fetch_base(self.model.is_cgb(), self.render.fetched);
                     self.render.fetched |= 1 << i;
                     let wait = self.sprite_penalty(s.x);
                     self.fetch_sprite(i);
                     self.render.stall += base + wait;
                 }
                 if self.render.stall > 0 {
-                    self.render.stall -= 1;
+                    self.render.fetch_run = self.render.stall;
+                    self.stall_tick();
                     return;
                 }
             }
+        }
+
+        // Window trigger first: when the WX match and a sprite trigger
+        // land on the same dot, the window start preempts the sprite
+        // fetch — the restarted fetcher reads the window tile before the
+        // sprite stall, and the sprite (FIFO now empty) defers to the
+        // refill (m3_lcdc_win_map_change band 8: sprite X=8 with WX=7
+        // shares dot 97 and the photo shows the window tile fetched
+        // ahead of the toggle).
+        if self.window_trigger_step() {
+            return;
         }
 
         // Sprite fetch triggers at the current output position, but only
@@ -471,44 +526,84 @@ impl Ppu {
                 }
                 let Some(i) = pick else { break };
                 let s = self.render.sprites[i];
-                let base = obj_fetch_base(self.render.fetched);
+                let base = obj_fetch_base(self.model.is_cgb(), self.render.fetched);
                 self.render.fetched |= 1 << i;
                 let wait = self.sprite_penalty(s.x);
-                // The BG fetcher keeps working during the alignment wait
-                // (that wait *is* the fetcher finishing its tile row).
-                for _ in 0..wait {
-                    self.fetcher_step();
-                }
                 self.fetch_sprite(i);
                 self.render.stall += base + wait;
                 self.m0_unflip();
             }
             if self.render.stall > 0 {
-                self.render.stall -= 1;
+                // The BG fetcher free-runs through the stall (trigger dot
+                // included): the alignment wait is the fetcher finishing
+                // its tile row in real time, reads landing on consecutive
+                // stall dots (see `fetch_run`).
+                self.render.fetch_run = self.render.stall;
+                self.stall_tick();
                 return;
             }
         }
 
-        // Window trigger: the WX position comparator runs every dot
-        // (gambatte ppu.cpp plotPixel: `wx == xpos`, xpos < 168). The
-        // comparator also runs through the 8-dot prefill — mode-3 dots
-        // 6-13 in our grid — so WX 0-7 match before any pixel pops; from
-        // the first pop on a match at WX >= 8 lands the first window
-        // pixel at lx = WX-7. The wx+6 prefill anchor is pinned by the
-        // m3_window_timing reference photographs: every WX 0-7 line pops
-        // pixel 0 at dot 103 — the same 6-dot-delayed schedule as
-        // WX 8-10 — so trigger + 6-dot restart + (7-WX)-pixel discard
-        // must sum to 19 prefill dots. The machine is gated on LCDC.5 +
-        // the WY latch only: LCDC.0 blanks pixels at output but does not
-        // stop the window fetch (gambatte lcdcWinEn).
+        // Pop one BG/window pixel.
+        if self.render.bg_count > 0 {
+            let fine_scx = self.eff.scx & 7;
+            let r = &mut self.render;
+            let c = ((r.bg_hi >> 7) << 1) | (r.bg_lo >> 7);
+            r.bg_lo <<= 1;
+            r.bg_hi <<= 1;
+            r.bg_count -= 1;
+            let attr = r.bg_attr;
+            if r.discard > 0 {
+                r.discard -= 1;
+            } else if !r.hunt_done {
+                // Comparator hunt, pop-rate phase: the match was missed
+                // during dots 5-12 (an SCX write moved it), so the
+                // counter wrapped (-9 -> -16) and keeps hunting through
+                // the real pops, each one discarded; a match here leaves
+                // the 7 remaining -8..-1 drops (see `hunt_idx`).
+                if r.hunt_idx == fine_scx {
+                    r.hunt_done = true;
+                    r.discard = 7;
+                } else {
+                    r.hunt_idx = (r.hunt_idx + 1) & 7;
+                }
+            } else {
+                self.output_pixel(c, attr);
+                self.advance_lx();
+                if !self.render.active {
+                    return;
+                }
+            }
+        }
+
+        self.fetcher_step();
+    }
+
+    /// The window trigger: the WX position comparator runs every dot
+    /// (gambatte ppu.cpp plotPixel: `wx == xpos`, xpos < 168), checked
+    /// *before* the same-dot sprite trigger (see the call site). Returns
+    /// true when the caller's render_step must end (a start stall or a
+    /// reactivation pixel consumed the dot). The comparator also runs
+    /// through the 8-dot prefill — so WX 0-7 match before any pixel
+    /// pops; from the first pop on, a match at WX >= 8 lands the first
+    /// window pixel at lx = WX-7. The wx+6 prefill anchor is pinned by
+    /// the m3_window_timing reference photographs: every WX 0-7 line
+    /// pops pixel 0 at dot 103 — the same 6-dot-delayed schedule as
+    /// WX 8-10 — so trigger + 6-dot restart + (7-WX)-pixel discard must
+    /// sum to 19 prefill dots. The machine is gated on LCDC.5 + the WY
+    /// latch only: LCDC.0 blanks pixels at output but does not stop the
+    /// window fetch (gambatte lcdcWinEn).
+    fn window_trigger_step(&mut self) -> bool {
+        // The position counter the WX comparator runs against advances
+        // only on dots the pipeline advances: sprite-fetch stalls freeze
+        // it (and the stall returns in render_step skip this increment
+        // on the trigger dot itself), so a WX 0-7 match shifts later by
+        // the stall instead of skipping its comparison dot
+        // (m3_lcdc_win_map_change2's per-line X<8 sprites).
+        self.render.pos_dot += 1;
         let wx = self.eff.wx;
         let win_match = if wx <= 7 {
-            // Known limit: this anchor counts raw mode-3 dots, so an
-            // X<8 sprite stall (which pauses the prefill walk) shifts
-            // the hardware match later than ours; the affected
-            // wx<8+spx<8 combinations live in the documented
-            // sprites/space baseline rows.
-            self.render.mode3_dot == u16::from(wx) + 6
+            self.render.pos_dot == u16::from(wx) + 6
         } else {
             wx <= 166 && self.render.lx == wx - 7
         };
@@ -564,7 +659,7 @@ impl Ppu {
                     // Freeze from the match dot: 2 dots total.
                     self.render.stall += 1;
                     self.m0_unflip();
-                    return;
+                    return true;
                 } else {
                     self.m0_unflip();
                     let r = &mut self.render;
@@ -605,7 +700,7 @@ impl Ppu {
                 self.render.win_stalled = true;
                 self.render.stall += 1;
                 self.m0_unflip();
-                return;
+                return true;
             } else if self.render.win_mode && self.render.bg_count == 8 {
                 // Window *reactivation*: a WX match while the window is
                 // already drawing, landing exactly on the dot that ships
@@ -621,43 +716,10 @@ impl Ppu {
                 // no visible effect).
                 self.output_pixel(0, 0);
                 self.advance_lx();
-                return;
+                return true;
             }
         }
-
-        // Pop one BG/window pixel.
-        if self.render.bg_count > 0 {
-            let fine_scx = self.eff.scx & 7;
-            let r = &mut self.render;
-            let c = ((r.bg_hi >> 7) << 1) | (r.bg_lo >> 7);
-            r.bg_lo <<= 1;
-            r.bg_hi <<= 1;
-            r.bg_count -= 1;
-            let attr = r.bg_attr;
-            if r.discard > 0 {
-                r.discard -= 1;
-            } else if !r.hunt_done {
-                // Comparator hunt, pop-rate phase: the match was missed
-                // during dots 5-12 (an SCX write moved it), so the
-                // counter wrapped (-9 -> -16) and keeps hunting through
-                // the real pops, each one discarded; a match here leaves
-                // the 7 remaining -8..-1 drops (see `hunt_idx`).
-                if r.hunt_idx == fine_scx {
-                    r.hunt_done = true;
-                    r.discard = 7;
-                } else {
-                    r.hunt_idx = (r.hunt_idx + 1) & 7;
-                }
-            } else {
-                self.output_pixel(c, attr);
-                self.advance_lx();
-                if !self.render.active {
-                    return;
-                }
-            }
-        }
-
-        self.fetcher_step();
+        false
     }
 
     /// Advance the output position and fire the pipe-end anchors:
@@ -745,7 +807,7 @@ impl Ppu {
                 }
                 let x = r.sprites[i].x;
                 if (8..168).contains(&x) && x - 8 >= r.lx {
-                    proj += obj_fetch_base(fetched);
+                    proj += obj_fetch_base(self.model.is_cgb(), fetched);
                     fetched |= 1 << i;
                     let v = u16::from(x) + u16::from(self.eff.scx);
                     if tiles & (1u64 << (v >> 3)) == 0 {
@@ -771,7 +833,12 @@ impl Ppu {
                 proj += 2;
             }
         }
-        let lead = (2 - u16::from(self.ds))
+        // Sprite-laden DMG lines flip 3 dots before the pipe end: the
+        // blob's 6-dot first OBJ fetch (see `obj_fetch_base`) extends the
+        // pipe by one dot more than the old 5-dot model, and the flip
+        // stays on its mooneye/gbmicrotest-frozen dot (the photographs
+        // move the pixels, the IRQ grids hold the flip).
+        let lead = (2 + u16::from(r.fetched != 0 && !self.model.is_cgb()) - u16::from(self.ds))
             .saturating_sub(u16::from(r.win_stalled) + u16::from(r.win_aborted));
         if proj <= lead {
             self.m0_src = true;
@@ -844,6 +911,18 @@ impl Ppu {
     }
 
     fn fetcher_step(&mut self) {
+        // Every fetch read samples the pipeline view (eff) at its read
+        // dot — the m3_lcdc_tile_sel/bg_map blob bands bracket each
+        // stage's sampling to the eff commit exactly, and the gambatte
+        // bgtiledata spx cgb04c rows pin the same clean commit on CGB-C.
+        // (A CGB rising-bits-one-late LCDC view fits most of the
+        // tile_sel/bg_map/win_map _cgb_c photo columns but contradicts
+        // the hardware-captured bgtiledata_spx0B_2/_4 rows — the CGB
+        // fetch residue stays documented in baselines/mealybug.txt.)
+        // The fine-scroll comparator hunt and the pop side have their
+        // own anchors and never read these.
+        let lcdc = self.eff.lcdc;
+        let (scy, scx) = (self.eff.scy, self.eff.scx);
         match self.render.phase {
             FetchPhase::TileNoWait => self.render.phase = FetchPhase::TileNo,
             FetchPhase::TileNo => {
@@ -855,15 +934,11 @@ impl Ppu {
                 } else {
                     (
                         LCDC_BG_MAP,
-                        self.ly.wrapping_add(self.eff.scy) >> 3,
-                        (self.eff.scx / 8).wrapping_add(self.render.fetch_x) & 31,
+                        self.ly.wrapping_add(scy) >> 3,
+                        (scx / 8).wrapping_add(self.render.fetch_x) & 31,
                     )
                 };
-                let base = if self.eff.lcdc & map_bit != 0 {
-                    0x1C00
-                } else {
-                    0x1800
-                };
+                let base = if lcdc & map_bit != 0 { 0x1C00 } else { 0x1800 };
                 let map = base + usize::from(row) * 32 + usize::from(col);
                 self.render.t_no = self.vram[map];
                 self.render.t_attr = if self.model.is_cgb() {
@@ -875,29 +950,45 @@ impl Ppu {
             }
             FetchPhase::LoWait => self.render.phase = FetchPhase::Lo,
             FetchPhase::Lo => {
-                self.render.t_lo = self.vram[self.bg_tile_addr()];
+                let addr = self.bg_tile_addr(lcdc, scy);
+                self.render.t_lo = self.vram[addr];
                 self.render.phase = FetchPhase::HiWait;
             }
             FetchPhase::HiWait => self.render.phase = FetchPhase::Hi,
             FetchPhase::Hi => {
-                self.render.t_hi = self.vram[self.bg_tile_addr() + 1];
+                let addr = self.bg_tile_addr(lcdc, scy) + 1;
+                self.render.t_hi = self.vram[addr];
                 if self.render.first_discard {
                     // The first tile fetch of the line is thrown away and
                     // restarted: 12 dots of mode 3 before the first pixel.
                     self.render.first_discard = false;
                     self.render.phase = FetchPhase::TileNoWait;
-                } else if self.render.bg_count == 0 {
+                } else if self.render.bg_count == 0 && self.push_allowed() {
                     self.push_bg_row();
                 } else {
                     self.render.phase = FetchPhase::Push;
                 }
             }
             FetchPhase::Push => {
-                if self.render.bg_count == 0 {
+                if self.render.bg_count == 0 && self.push_allowed() {
                     self.push_bg_row();
                 }
             }
         }
+    }
+
+    /// The first push of a line waits for the pause-aware startup walk:
+    /// the FIFO ships nothing before pause-aware dot 13 (pos_dot 12 is
+    /// the push dot of the bare 12-dot startup), so a prefill sprite
+    /// stall whose free-running fetch completes early still pops pixel 0
+    /// exactly `stall` dots late (the mooneye X=0 cost-10 anchor and the
+    /// hblank_ly_scx grids). Mid-line pushes are never gated (pos_dot is
+    /// past 12 from the first shipped pixel on), and a window start
+    /// replaces the walk with its own 6-dot restart — its push ships at
+    /// trigger+6 even when the trigger sits inside the startup window
+    /// (m3_window_timing/m3_window_timing_wx_0: pixel 0 at dot 103).
+    fn push_allowed(&self) -> bool {
+        self.render.win_mode || self.render.pos_dot >= 12
     }
 
     fn push_bg_row(&mut self) {
@@ -922,12 +1013,15 @@ impl Ppu {
     /// landing between the accesses fetches the new scroll's rows under
     /// the old tile number (mealybug m3_scy_change; gambatte scy/). The
     /// CGB Y-flip applies to whatever row the access samples.
-    fn bg_tile_addr(&self) -> usize {
+    ///
+    /// `lcdc`/`scy` carry the caller's sampling view (see
+    /// `fetcher_step`).
+    fn bg_tile_addr(&self, lcdc: u8, scy: u8) -> usize {
         let r = &self.render;
         let fine = if r.win_mode {
             self.win_line & 7
         } else {
-            self.ly.wrapping_add(self.eff.scy) & 7
+            self.ly.wrapping_add(scy) & 7
         };
         let fine = if r.t_attr & 0x40 != 0 {
             7 - fine // Y flip (CGB BG attribute bit 6).
@@ -939,7 +1033,7 @@ impl Ppu {
         } else {
             0
         };
-        let base = if self.eff.lcdc & LCDC_TILE_DATA != 0 {
+        let base = if lcdc & LCDC_TILE_DATA != 0 {
             usize::from(r.t_no) * 16
         } else {
             (0x1000i32 + i32::from(r.t_no as i8) * 16) as usize
@@ -1020,9 +1114,20 @@ impl Ppu {
 
     fn output_pixel(&mut self, bg_c: u8, bg_attr: u8) {
         // Shift the sprite FIFO in step with shipped pixels.
-        let sp = self.render.sp_fifo[0];
+        let mut sp = self.render.sp_fifo[0];
         self.render.sp_fifo.copy_within(1.., 0);
         self.render.sp_fifo[7] = EMPTY_SPRITE_PIXEL;
+        // LCDC.1 also gates sprite pixels at the mix: pixels already in
+        // the FIFO stop showing on dots where the OBJ enable reads low
+        // (mealybug m3_lcdc_obj_en_change: sprites fetched during the
+        // prefill turn into background mid-glyph at the disable commit).
+        // The DMG mixer samples the bit one dot ahead of the eff view
+        // (the fetch-lead timing — the blob photos put each band's
+        // suppression boundary one column left of the eff commit);
+        // CGB-C samples eff (its leg is pixel-exact on eff).
+        if self.eff.lcdc & LCDC_OBJ_ENABLE == 0 {
+            sp = EMPTY_SPRITE_PIXEL;
+        }
 
         let cgb = self.model.is_cgb();
         // DMG LCDC bit 0: BG and window disabled — they show as white
@@ -1338,16 +1443,16 @@ mod tests {
         p.write(0xFF48, 0xE4); // identity OBP0
         set_tile_row(&mut p, 0, 4, 0, 0xFF, 0x00); // sprite solid color 1
         sprite(&mut p, 0, 18, 8, 4, 0x00); // line 2, screen 0-7, OBP0
-        // The X=8 sprite stalls the pipeline 5+5 dots at dot 97, so its
-        // pixels 0-7 pop at dots 107-114; dots 109-112 cover x=2..=5.
+        // The X=8 sprite stalls the pipeline 6+5 dots at dot 97, so its
+        // pixels 0-7 pop at dots 108-115; dots 110-113 cover x=2..=5.
         run_to(&mut p, 2, 108);
         mcycle_write(&mut p, 0xFF48, 0xE8);
         finish_line(&mut p);
-        assert_eq!(px(&p, 2, 1), LIGHT, "before the write: old");
-        assert_eq!(px(&p, 2, 2), LIGHT, "write M-cycle dot 1: old");
-        assert_eq!(px(&p, 2, 3), BLACK, "dot 2: OBP0 reads old|new");
-        assert_eq!(px(&p, 2, 4), DARK, "dot 3: new, 2 dots early");
-        assert_eq!(px(&p, 2, 5), DARK, "dot 4: new");
+        assert_eq!(px(&p, 2, 0), LIGHT, "before the write: old");
+        assert_eq!(px(&p, 2, 1), LIGHT, "write M-cycle dot 1: old");
+        assert_eq!(px(&p, 2, 2), BLACK, "dot 2: OBP0 reads old|new");
+        assert_eq!(px(&p, 2, 3), DARK, "dot 3: new, 2 dots early");
+        assert_eq!(px(&p, 2, 4), DARK, "dot 4: new");
     }
 
     /// Double speed: the M-cycle is 2 dots, the strobe lands 1 dot before
@@ -1519,10 +1624,11 @@ mod tests {
         }
     }
 
-    /// Sprite stalls shift the whole event grid: one sprite at X=0 costs
-    /// 5 (first-fetch) + 5 (alignment) dots, so the flip lands at 264 —
+    /// Sprite stalls shift the whole event grid: on DMG one sprite at
+    /// X=0 costs 6 (fetch) + 5 (alignment) dots and the flip leads the
+    /// pipe end by 3 (see `obj_fetch_base`), so the flip lands at 264 —
     /// the top of mooneye intr_2_mode0_timing_sprites' "2 extra cycles"
-    /// window (260, 264] — and the pipe ends at 266.
+    /// window (260, 264] — and the pipe ends at 267.
     #[test]
     fn sprite_stall_shifts_event_grid() {
         let mut p = dmg_on(0x93);
@@ -1540,8 +1646,8 @@ mod tests {
             }
             assert!(p.dot < 400, "mode 3 never finished");
         }
-        assert_eq!(flip, Some(264), "flip: 254 + 5 (fetch) + 5 (alignment)");
-        assert_eq!(finished, Some(266), "pipe end: flip + 2");
+        assert_eq!(flip, Some(264), "flip: 256 + 6 + 5 - 3 (sprite lead)");
+        assert_eq!(finished, Some(267), "pipe end: flip + 3");
     }
 
     fn penalty(xs: &[u8]) -> i32 {
@@ -2609,5 +2715,324 @@ mod tests {
         assert_eq!(p.frame()[0], WHITE, "frame() is the completed frame");
         p.tick(); // 144:0 -> swap
         assert_eq!(p.frame()[0], BLACK);
+    }
+
+    // --- Fetch-grid register sampling (mealybug mode-3 fetch cluster) ---
+    //
+    // On the DMG blob, every BG fetch VRAM access samples the plain eff
+    // view at its read dot — the same strobe the pop-anchored palette
+    // photographs pin (write visible from the dot after the transition
+    // dot). Decoded from m3_lcdc_tile_sel_change/bg_map_change blob bands,
+    // whose sprite-stepped stalls bracket each stage's sampling dot.
+    //
+    // Steady no-sprite grid on a bare line: tile col c's NO/LO/HI reads
+    // sit at dots 98/100/102 + 8*(c-1); pixel x pops at dot 97 + x.
+
+    #[test]
+    fn fetch_lo_read_samples_eff_at_the_read_dot() {
+        let mut p = dmg_on(0x91); // bit 4: unsigned $8000 tile data
+        set_tile_row(&mut p, 0, 1, 2, 0xFF, 0x00); // $8000 tile 1: color 1
+        // The $8800-region alias of tile 1 ($9010) keeps row 2 = 00/00.
+        for col in 0..32 {
+            set_map(&mut p, 0x1800, 0, col, 1);
+        }
+        // Stage at dot 105: eff commits for reads from dot 108 = tile
+        // col 2's LO read.
+        run_to(&mut p, 2, 105);
+        mcycle_write(&mut p, 0xFF40, 0x81); // clear LCDC.4 mid-line
+        finish_line(&mut p);
+        assert_eq!(px(&p, 2, 8), LIGHT, "tile 1: reads done before the write");
+        assert_eq!(
+            px(&p, 2, 16),
+            WHITE,
+            "tile 2: the LO read at dot 108 sees the committed LCDC.4"
+        );
+        assert_eq!(px(&p, 2, 24), WHITE, "tile 3: fully new");
+    }
+
+    #[test]
+    fn fetch_lo_read_one_dot_before_commit_keeps_old_value() {
+        // Same shape staged one dot later: the LO read at dot 108 now
+        // sits one dot before the eff commit (109) and must keep the old
+        // data (only the HI read sees the new bank, whose row is 00/00
+        // either way, so tile 2 stays color 1).
+        let mut p = dmg_on(0x91);
+        set_tile_row(&mut p, 0, 1, 2, 0xFF, 0x00);
+        for col in 0..32 {
+            set_map(&mut p, 0x1800, 0, col, 1);
+        }
+        run_to(&mut p, 2, 106);
+        mcycle_write(&mut p, 0xFF40, 0x81);
+        finish_line(&mut p);
+        assert_eq!(px(&p, 2, 16), LIGHT, "LO one dot before the commit: old");
+    }
+
+    #[test]
+    fn fetch_tile_no_read_samples_eff_at_the_read_dot() {
+        // The tile-number read samples the same eff view
+        // (m3_lcdc_bg_map_change blob bands 2/3 bracket it): a write
+        // committing at dot 106 is seen by tile col 2's NO read at 106.
+        let mut p = dmg_on(0x91);
+        set_tile_row(&mut p, 0, 1, 2, 0xFF, 0x00); // color 1 (LIGHT)
+        set_tile_row(&mut p, 0, 2, 2, 0xFF, 0xFF); // color 3 (BLACK)
+        for col in 0..32 {
+            set_map(&mut p, 0x1800, 0, col, 1); // $9800: tile 1
+            set_map(&mut p, 0x1C00, 0, col, 2); // $9C00: tile 2
+        }
+        run_to(&mut p, 2, 103);
+        mcycle_write(&mut p, 0xFF40, 0x99); // BG map -> $9C00
+        finish_line(&mut p);
+        assert_eq!(px(&p, 2, 8), LIGHT, "tile 1: NO read at 98, old map");
+        assert_eq!(
+            px(&p, 2, 16),
+            BLACK,
+            "tile 2: NO read at the commit dot 106 reads $9C00"
+        );
+    }
+
+    #[test]
+    fn bg_fetcher_free_runs_during_sprite_stall() {
+        let mut p = dmg_on(0x83); // BG + OBJ on, $8800-signed tile data
+        set_tile_row(&mut p, 0, 0, 2, 0xFF, 0xFF); // $8000 tile 0: black
+        // $9000 tile 0 row 2 stays 00/00 (white); sprite tile 2 stays
+        // all-zero = transparent, the stall is what matters.
+        sprite(&mut p, 0, 18, 17, 2, 0);
+        // LCDC.4 set for dots [106, 113] of the fetch view: stage at 104,
+        // restore staged 8 dots later (the mealybug ld [hl],c / ld [hl],b
+        // cadence).
+        run_to(&mut p, 2, 104);
+        mcycle_write(&mut p, 0xFF40, 0x93);
+        for _ in 0..4 {
+            p.tick();
+        }
+        mcycle_write(&mut p, 0xFF40, 0x83);
+        let v0 = finish_line(&mut p);
+        assert_eq!(v0, 263, "10-dot stall, flip at pipe end - 3: mooneye dot");
+        assert_eq!(
+            px(&p, 2, 16),
+            BLACK,
+            "in-flight tile col 2: NO/LO/HI on stall dots 107/109/111 all \
+             see the toggled tile-data bank"
+        );
+        assert_eq!(px(&p, 2, 24), WHITE, "tile col 3 fetched after restore");
+    }
+
+    #[test]
+    fn bg_fetcher_stall_reads_before_window_stay_old() {
+        // Band-8 bracket: sprite X=8 triggers at dot 97; the free-running
+        // reads (98/100/102) all precede the write window, so the
+        // in-flight tile keeps the old bank even though the stall overlaps
+        // the write.
+        let mut p = dmg_on(0x83);
+        set_tile_row(&mut p, 0, 0, 2, 0xFF, 0xFF);
+        sprite(&mut p, 0, 18, 8, 2, 0);
+        run_to(&mut p, 2, 104);
+        mcycle_write(&mut p, 0xFF40, 0x93);
+        for _ in 0..4 {
+            p.tick();
+        }
+        mcycle_write(&mut p, 0xFF40, 0x83);
+        finish_line(&mut p);
+        assert_eq!(
+            px(&p, 2, 8),
+            WHITE,
+            "tile col 1 in flight at the trigger: reads 98/100/102 are old"
+        );
+    }
+
+    #[test]
+    fn prefill_stall_refetch_reads_complete_before_the_walk() {
+        // Prefill (X=0) sprite stall: the free-running refetch completes
+        // its LO/HI reads on stall dots 94/96, well before a write
+        // landing around the old frozen-refetch dots — the tile keeps
+        // the old bank (m3_lcdc_tile_sel_change blob band 0).
+        let mut p = dmg_on(0x83);
+        set_tile_row(&mut p, 0, 0, 2, 0xFF, 0xFF); // $8000 tile 0: black
+        sprite(&mut p, 0, 18, 0, 2, 0); // X=0 prefill sprite, transparent
+        run_to(&mut p, 2, 104);
+        mcycle_write(&mut p, 0xFF40, 0x93);
+        for _ in 0..4 {
+            p.tick();
+        }
+        mcycle_write(&mut p, 0xFF40, 0x83);
+        let v0 = finish_line(&mut p);
+        assert_eq!(v0, 264, "X=0 sprite: 11-dot stall, flip on its mooneye dot");
+        assert_eq!(
+            px(&p, 2, 0),
+            WHITE,
+            "tile 0 refetch: LO at 104 (before the lead) and HI on the \
+             transition dot 106 (eff still old) both fetch $9000"
+        );
+    }
+
+    #[test]
+    fn fetch_during_stall_samples_eff_at_the_read_dot() {
+        // In-stall (free-running) fetch reads sample eff exactly like the
+        // steady grid. m3_lcdc_bg_map_change blob bands 16/17: the
+        // in-flight tile's NO read lands one dot before the eff commit
+        // during the stall and reads the old map.
+        let mut p = dmg_on(0x93); // BG + OBJ on, $8000 tiles, map $9800
+        set_tile_row(&mut p, 0, 1, 2, 0x00, 0x00); // tile 1: white
+        set_tile_row(&mut p, 0, 2, 2, 0xFF, 0xFF); // tile 2: black
+        for col in 0..32 {
+            set_map(&mut p, 0x1800, 0, col, 1);
+            set_map(&mut p, 0x1C00, 0, col, 2);
+        }
+        sprite(&mut p, 0, 18, 16, 3, 0); // X=16: trigger dot 105, stall 11
+        // BG map -> $9C00 for eff dots [107, 114].
+        run_to(&mut p, 2, 104);
+        mcycle_write(&mut p, 0xFF40, 0x9B);
+        for _ in 0..4 {
+            p.tick();
+        }
+        mcycle_write(&mut p, 0xFF40, 0x93);
+        finish_line(&mut p);
+        assert_eq!(
+            px(&p, 2, 16),
+            WHITE,
+            "in-stall NO read on the transition dot samples eff: old map"
+        );
+    }
+
+    #[test]
+    fn window_start_preempts_same_dot_sprite_trigger() {
+        // m3_lcdc_win_map_change band 8 (sprite X=8, WX=7): the WX match
+        // and the sprite trigger land on the same dot (97), and the
+        // reference shows the window's first tile fetched *before* the
+        // sprite stall — its NO read sits at dot 99, ahead of a write
+        // whose eff commit lands at 107 — so the window start preempts
+        // the sprite fetch on the shared dot.
+        let mut p = dmg_on(0xF3); // LCD + WIN ($9C00) + $8000 tiles + OBJ + BG
+        set_tile_row(&mut p, 0, 0, 2, 0x00, 0x00); // tile 0: white
+        set_tile_row(&mut p, 0, 1, 2, 0xFF, 0xFF); // tile 1: black
+        // Window map $9C00: tile 0 (white); the toggled map $9800: tile 1
+        // (black).
+        for col in 0..32 {
+            set_map(&mut p, 0x1800, 0, col, 1);
+            set_map(&mut p, 0x1C00, 0, col, 0);
+        }
+        p.write(0xFF4A, 0);
+        p.write(0xFF4B, 7);
+        sprite(&mut p, 0, 18, 8, 2, 0); // X=8: triggers at lx 0 (dot 97)
+        run_to(&mut p, 0, 2); // latch WY
+        run_to(&mut p, 2, 104);
+        mcycle_write(&mut p, 0xFF40, 0xB3); // win map -> $9800 (black)
+        for _ in 0..4 {
+            p.tick();
+        }
+        mcycle_write(&mut p, 0xFF40, 0xF3);
+        finish_line(&mut p);
+        assert_eq!(
+            px(&p, 2, 0),
+            WHITE,
+            "window col 0 NO read at dot 99 precedes the toggle: old map"
+        );
+    }
+
+    #[test]
+    fn prefill_sprite_stall_free_runs_fetcher_with_eff_sampling() {
+        // m3_scy_change line 0 (sprite X=0): the refetched first tile's
+        // LO/HI reads land on stall dots 94/96 sampling the live eff SCY
+        // (the row written ~dot 91), while the push waits for the
+        // pause-aware startup walk (first pixel stays at dot 107 — the
+        // mooneye X=0 cost-10 anchor).
+        let mut p = dmg_on(0x93);
+        set_tile_row(&mut p, 0, 0, 2, 0xFF, 0x00); // ly2+scy0: color 1
+        set_tile_row(&mut p, 0, 0, 5, 0xFF, 0xFF); // ly2+scy3: color 3
+        sprite(&mut p, 0, 18, 0, 2, 0); // X=0 prefill sprite
+        // SCY=3 drives eff reads from dot 93 and SCY=0 again from dot 97:
+        // the in-stall LO/HI reads (dots 94/96) see 3 and fetch row 5,
+        // while a frozen-prefill refetch (reads at 104/106) would see the
+        // restored 0 and fetch row 2.
+        run_to(&mut p, 2, 90);
+        mcycle_write(&mut p, 0xFF42, 3);
+        for _ in 0..4 {
+            p.tick();
+        }
+        mcycle_write(&mut p, 0xFF42, 0);
+        let v0 = finish_line(&mut p);
+        assert_eq!(v0, 264, "X=0 sprite: 11-dot stall, flip on its mooneye dot");
+        assert_eq!(
+            px(&p, 2, 0),
+            BLACK,
+            "first tile fetched during the stall with the live SCY row"
+        );
+        assert_eq!(px(&p, 2, 8), LIGHT, "steady tiles back on SCY=0");
+    }
+
+    #[test]
+    fn obj_disable_suppresses_sprite_pixels_at_the_mix() {
+        // LCDC.1 gates sprite pixels at the pixel mix, not just the
+        // fetch trigger: a sprite fetched while enabled stops showing on
+        // the dots where the eff view reads OBJ off
+        // (m3_lcdc_obj_en_change: each band's sprite is fetched during
+        // the prefill, yet the columns shipping inside the disable
+        // window show background).
+        let mut p = dmg_on(0x93);
+        p.write(0xFF48, 0xFF); // OBP0: all black
+        set_tile_row(&mut p, 0, 2, 0, 0xFF, 0xFF); // sprite tile: solid c3
+        sprite(&mut p, 0, 18, 10, 2, 0); // screen x 2-9, fetched at lx 2
+        // Disable OBJ with eff commit at dot 109: pixels x2..3 (dots
+        // 107/108 after the 9-dot stall) still show, x4+ (dots 109+) are
+        // suppressed mid-sprite.
+        run_to(&mut p, 2, 106);
+        mcycle_write(&mut p, 0xFF40, 0x91);
+        finish_line(&mut p);
+        assert_eq!(px(&p, 2, 2), BLACK, "shipped before the disable");
+        assert_eq!(
+            px(&p, 2, 7),
+            WHITE,
+            "sprite pixel mixed while eff OBJ-enable is low: background"
+        );
+    }
+
+    #[test]
+    fn dmg_sprite_stall_shifts_palette_boundary_one_pixel() {
+        // The blob's 6-dot first OBJ fetch (see `obj_fetch_base`) puts a
+        // sprite-stalled line's pop grid one dot later than the old
+        // 5-dot model: the same BGP write boundary lands one pixel left
+        // (m3_lcdc_obj_en_change_variant's late BGP pulse and the
+        // m3_bgp_change_sprites photos pin these columns exactly).
+        let mut p = dmg_on(0x93);
+        sprite(&mut p, 0, 18, 2, 2, 0); // X=2 prefill, stall 6+3
+        run_to(&mut p, 2, 252);
+        mcycle_write(&mut p, 0xFF47, 0xFF);
+        finish_line(&mut p);
+        // Pop start 106: px148 pops at 254 (the blend dot), px149 at 255.
+        assert_eq!(px(&p, 2, 147), WHITE, "px147 pops 253: old bgp");
+        assert_eq!(px(&p, 2, 148), BLACK, "px148 pops 254: blend dot");
+        assert_eq!(px(&p, 2, 149), BLACK, "px149 pops 255: committed");
+    }
+
+    // --- WX 0-7 trigger is pause-aware (m3_lcdc_win_map_change family) ---
+    //
+    // The WX comparator runs against the position counter, which freezes
+    // during sprite fetch stalls: a prefill (OAM X < 8) sprite stall
+    // shifts a WX<=7 match later by the stall length instead of skipping
+    // it. The m3_lcdc_win_map_change2 reference (WX=7 with X=1/X=5
+    // sprites on every line) shows the window drawn on all sprite lines.
+
+    #[test]
+    fn wx7_window_trigger_survives_prefill_sprite_stall() {
+        // LCD + WIN (map $9C00) + unsigned tiles + OBJ + BG.
+        let mut p = dmg_on(0xF3);
+        // Window line counter reaches 2 on line 2 (one activation per
+        // line from line 0): the window fetch reads tile row 2.
+        set_tile_row(&mut p, 0, 0, 2, 0xFF, 0xFF); // tile 0: black (window)
+        for col in 0..32 {
+            set_map(&mut p, 0x1800, 0, col, 1); // BG: tile 1 = white
+            set_map(&mut p, 0x1C00, 0, col, 0); // window: tile 0 = black
+        }
+        p.write(0xFF4A, 0); // WY = 0
+        p.write(0xFF4B, 7); // WX = 7: window from lx 0
+        sprite(&mut p, 0, 18, 1, 2, 0); // X=1 prefill sprite, transparent
+        run_to(&mut p, 0, 2); // latch WY at line 0 dot 2
+        render_line(&mut p, 2);
+        assert_eq!(
+            px(&p, 2, 0),
+            BLACK,
+            "window starts: the WX=7 match shifted by the 10-dot stall"
+        );
+        assert_eq!(px(&p, 2, 100), BLACK, "window holds to the right edge");
     }
 }
