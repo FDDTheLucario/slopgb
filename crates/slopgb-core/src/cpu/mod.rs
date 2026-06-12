@@ -83,8 +83,21 @@ pub trait Bus {
     /// CPU executed STOP: if a speed switch is armed (CGB KEY1.0), perform
     /// it and return true; otherwise return false and the CPU enters stop
     /// mode, sleeping until [`pending`](Bus::pending) becomes non-zero
-    /// (joypad wake). Takes no time.
-    fn stop(&mut self) -> bool;
+    /// (joypad wake).
+    ///
+    /// Takes *time*: the bus runs STOP's whole tail so it can sequence the
+    /// machine cycles against the speed toggle. With `interrupt_pending`
+    /// false (the caller's end-of-fetch [`pending`](Bus::pending) sample)
+    /// the skipped byte at `skipped_addr` costs one real read M-cycle
+    /// (SameBoy sm83_cpu.c `stop()`: `cycle_read(gb, gb->pc++)` happens
+    /// only without a pending interrupt), and an armed switch then pauses
+    /// the CPU for ~0x8000 M-cycles on the new clock while the rest of the
+    /// machine keeps running (gambatte-core memory.cpp `Memory::stop`:
+    /// `intreq_.setEventTime<intevent_unhalt>(cc + 0x20000 + 4)`). With
+    /// `interrupt_pending` true STOP stays a 1-byte opcode and an armed
+    /// switch happens instantly with no pause (SameBoy gates both on
+    /// `!interrupt_pending`; age caution/spsw-interrupts).
+    fn stop(&mut self, skipped_addr: u16, interrupt_pending: bool) -> bool;
     /// Halt/stop mode gated the CPU core clock off (`true`) or the CPU woke
     /// up (`false`). The OAM DMA controller runs on that clock and freezes
     /// with it (madness/mgb_oam_dma_halt_sprites.s; see

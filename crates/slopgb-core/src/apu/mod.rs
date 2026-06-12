@@ -201,6 +201,24 @@ impl Apu {
         apu
     }
 
+    /// A DIV reset reaches the frame sequencer within the write's own
+    /// M-cycle: if the DIV-APU bit was high, the reset is its falling edge
+    /// and clocks the sequencer now rather than at the next sampled tick
+    /// (Pan Docs "DIV-APU": "writing to DIV ... can clock the APU's frame
+    /// sequencer"; same shape as [`crate::serial::Serial::div_write`] —
+    /// the once-per-M-cycle sampled tick would land the event one cycle
+    /// late, which the gambatte speedchange ch2_nr52 a/b phase pairs
+    /// resolve). The caller's next [`Self::tick`] passes the restarted
+    /// counter.
+    pub fn div_write(&mut self, double_speed: bool) {
+        let bit = if double_speed { 13 } else { 12 };
+        let was_high = (self.prev_div >> bit) & 1 == 1;
+        self.prev_div = 0;
+        if self.power && was_high {
+            self.div_event();
+        }
+    }
+
     /// Advance one M-cycle (4 T-cycles). `div` is the timer's internal DIV
     /// counter after this cycle; `double_speed` selects the DIV-APU bit.
     pub fn tick(&mut self, div: u16, double_speed: bool) {
@@ -767,6 +785,23 @@ mod tests {
         assert_eq!(h.apu.div_divider, 1);
         h.ticks(2048);
         assert_eq!(h.apu.div_divider, 2);
+    }
+
+    /// A DIV write while the DIV-APU bit is high clocks the frame
+    /// sequencer in the write's own cycle (Pan Docs "DIV-APU"; see
+    /// [`Apu::div_write`]), and never when the bit is low.
+    #[test]
+    fn div_write_with_div_apu_bit_high_clocks_sequencer_now() {
+        let mut h = H::dmg();
+        h.ticks(1024); // div 0x1000: bit 12 high
+        assert_eq!(h.apu.div_divider, 0);
+        h.apu.div_write(false);
+        h.div = 0; // the timer-side counter reset the hook accompanies
+        assert_eq!(h.apu.div_divider, 1, "reset = falling edge, same cycle");
+        h.ticks(512); // counter restarted: bit 12 low through 0x800
+        assert_eq!(h.apu.div_divider, 1, "no spurious edge after the reset");
+        h.apu.div_write(false); // bit low: no edge
+        assert_eq!(h.apu.div_divider, 1);
     }
 
     #[test]

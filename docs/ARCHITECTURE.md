@@ -77,6 +77,19 @@ slopgb is a cycle-accurate Game Boy (DMG) / Game Boy Color (CGB) emulator.
   in-flight byte, conflicted *writes* derail into the in-flight OAM slot
   (DMG WRAM sources wire-AND), and CGB redirects WRAM-region accesses to
   the WRAM page picked by FF46 bit 4 (gambatte `oamdma/` is the oracle).
+- CGB VRAM DMA (FF51-FF55) is a *request* engine mirroring gambatte-core:
+  the dot-exact mode-0 entry (led by one dot, `Ppu::hdma_trigger_level`)
+  or an FF55 write flags a request, which steals the bus at the head of
+  the CPU's next bus operation — an in-flight write commits first, a read
+  in the trigger cycle yields — copying 2 bytes per stolen M-cycle (1 in
+  double speed) plus one teardown M-cycle. FF55 is the live register; the
+  full 16-bit destination counter terminates at the 0x10000 crossing.
+  Blocks never run while the core clock is gated: HALT/STOP defer a
+  pending block and the wake re-fires it (gambatte `haltHdmaState_`); the
+  STOP speed switch aborts it entering double speed and defers it
+  leaving. The STOP tail itself (skipped-byte read cycle, DIV-reset cell,
+  the ~0x8000-M-cycle pause on the new clock) lives in `Bus::stop`
+  (gambatte `Memory::stop`; `dma/` + `speedchange/` are the oracle).
 
 ## Memory map routing (interconnect)
 
