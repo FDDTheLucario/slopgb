@@ -1,5 +1,6 @@
 /target
 /test-roms/mts-*
+/test-roms/game-boy-test-roms-v7.0/
 /test-roms/*.tar.xz
 /test-roms/*.zip
 *.sav
