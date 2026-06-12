@@ -39,8 +39,10 @@
 //!   goes unused, exactly like in the upstream testrunner (which never
 //!   opens bare PNGs at all).
 //! * **`_dmg08_cgb_blank`** (2 halt ROMs): no `_out` tag and no PNG — the
-//!   name documents a blank (all-white) screen on both DMG and CGB. Run
-//!   on both models expecting every pixel white ([`check_blank`]).
+//!   name documents that the ROM prints no result on either model (it
+//!   halts forever). Run on both models expecting the top tile row — the
+//!   print area — to be all white ([`check_blank`]); the rest of the
+//!   screen shows boot-ROM VRAM leftovers on hardware.
 //!
 //! Result keys are `gambatte/<rel> [Model]`; the known-failure baseline
 //! lives in `baselines/gambatte.txt` (one key per line, `#` comments).
@@ -337,17 +339,24 @@ fn check_audio(samples: &[(f32, f32)], expect_sound: bool) -> Result<(), String>
     }
 }
 
-/// Blank-screen verdict for the `_dmg08_cgb_blank` ROMs: every pixel is
-/// white. Under the testrunner's 0xF8F8F8 mask, masked-white identifies
-/// exactly DMG shade 0 (0xFFFFFF) and CGB color (31,31,31) on both the
-/// identity and gambatte color maps, so one mask check covers both models.
+/// Blank verdict for the `_dmg08_cgb_blank` ROMs (two `halt/` tests that
+/// sleep forever): "blank" names the *result*, not the panel — the ROM
+/// never reaches its print routine, so the top tile row where every
+/// gambatte test renders its hex digits stays empty. The rest of the
+/// screen is not white on hardware: these ROMs never touch VRAM, so the
+/// LCD keeps showing the boot ROM's leftover logo (see
+/// `Interconnect::install_boot_logo_vram`). Under the testrunner's
+/// 0xF8F8F8 mask, masked-white identifies exactly DMG shade 0 (0xFFFFFF)
+/// and CGB color (31,31,31) on both color maps, so one mask check covers
+/// both models.
 fn check_blank(frame: &[u32]) -> Result<(), String> {
-    let non_white = frame.iter().filter(|&&px| px & WHITE != WHITE).count();
+    let print_area = &frame[..8 * SCREEN_W];
+    let non_white = print_area.iter().filter(|&&px| px & WHITE != WHITE).count();
     if non_white == 0 {
         Ok(())
     } else {
         Err(format!(
-            "{non_white} non-white pixel(s), want a blank screen"
+            "{non_white} non-white pixel(s) in the top tile row, want no printed result"
         ))
     }
 }
@@ -776,11 +785,17 @@ fn gambatte_audio_verdicts() {
 #[test]
 fn gambatte_blank_verdict() {
     // DMG white (FFFFFF) and CGB white (F8F8F8 after the gambatte map,
-    // FFFFFF raw) are both masked-white; any other shade fails.
-    let white = vec![0x00FF_FFFFu32; 16];
+    // FFFFFF raw) are both masked-white; any other shade in the top tile
+    // row (the print area) fails. Pixels below the print area are
+    // ignored: hardware shows the boot ROM's leftover VRAM there.
+    let white = vec![0x00FF_FFFFu32; slopgb_core::SCREEN_PIXELS];
     check_blank(&white).unwrap();
     let mut speck = white.clone();
     speck[3] = 0x00AA_AAAA;
     let err = check_blank(&speck).unwrap_err();
     assert!(err.contains("1 non-white"), "{err}");
+    // Non-white outside the print area is fine (boot logo leftovers).
+    let mut logo = white.clone();
+    logo[70 * SCREEN_W + 4] = 0x0000_0000;
+    check_blank(&logo).unwrap();
 }

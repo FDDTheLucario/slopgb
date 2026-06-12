@@ -47,6 +47,28 @@ slopgb is a cycle-accurate Game Boy (DMG) / Game Boy Color (CGB) emulator.
 - The PPU is stepped per dot; the timer per M-cycle on the CPU clock
   (4 internal T-ticks); the APU per M-cycle with the DIV counter passed in
   (DIV-APU = falling edge of DIV bit 4, bit 5 in double speed).
+- **Mode-3 write strobe** (a refinement *inside* tick-then-access, not an
+  exception to it): the CPU drives the data bus during the second half of a
+  write M-cycle (gbctr "Memory access timing"), which the dot-clocked pixel
+  pipeline can observe mid-cycle. `Bus::write` therefore *stages*
+  rendering-register writes (FF40, FF42/FF43, FF47-FF4B) with the PPU
+  before ticking (`Ppu::stage_write`); the staged value expires into a
+  separate pipeline-view register copy (`Ppu::eff`) 2 dots (1 in double
+  speed) before the architectural commit, with pre-CGB palette registers
+  reading old|new on the transition dot (mealybug README: "BGP takes the
+  value old OR new for one cycle"). Everything the tick-then-access
+  contract calibrates — STAT/LYC/IRQ machinery, access blocking, LCDC.7,
+  CPU reads — keeps using the architectural registers committed by
+  `Ppu::write` after the tick, so nothing mooneye observes moves.
+  Calibrated against the mealybug `m3_*` reference photographs and
+  gambatte `dmgpalette_during_m3`/`scx_during_m3`/`scy`.
+- One IF bit has sub-cycle dispatch semantics: the line-0 OAM STAT rise is
+  readable through FF0F immediately but misses the CPU's interrupt sample
+  for the M-cycle it was raised in (`Interconnect::if_stat_late`, the same
+  shape as the timer's `if_late` halt-wake mask), and it is blocked
+  entirely while the vblank source enable is set — gambatte
+  `mstat_irq.h doM2Event` and the mealybug handlers' "line 0 timing is
+  different by 4 cycles" compensation pin both rules.
 - OAM DMA is an interconnect engine: 160 M-cycles + startup delay, restart
   semantics (an FF46 rewrite retargets the in-flight run immediately),
   source-range quirks (CGB sources ≥ $E0 read $FF; DMG re-reads WRAM), and
