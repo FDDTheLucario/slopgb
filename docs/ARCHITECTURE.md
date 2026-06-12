@@ -76,6 +76,58 @@ the exact PC=0x100 state including the internal 16-bit DIV counter (this is
 what `boot_div*` ROMs measure). Values come from gbctr/mooneye-gb and are
 verified by `boot_regs-*`/`boot_hwio-*`/`boot_div*` ROMs.
 
+## CGB revision policy (Model::Cgb)
+
+`Model::Cgb` models **one** CGB revision: **CPU CGB C** (the CGB-CPU-04 SoC).
+There is no revision parameter; revision-incompatible ROMs/references are
+model-skips, exactly like `-dmg0` ROMs on `Model::Dmg` today.
+
+Why C: the reference corpus pins it. gambatte's 3,352 `cgb04c`-tagged
+expectations were captured on CGB-CPU-04; mealybug-tearoom's `_cgb_c`
+screenshots are the only complete CGB reference set (no `_cgb_e` refs exist
+anywhere); age-test-roms' `-cgbBC` variants and blargg `cgb_sound` (real
+CGB-C passes) align. age proves real single-speed LY/STAT divergence between
+B/C and E silicon — pinning E (SameBoy's default) would put gambatte's
+~1,000+ dot-timing ROMs at legitimate-fail risk with no way to tell a real
+bug from revision skew.
+
+**Companion rule (load-bearing):** do **not** implement C-only quirks whose
+behavior upstream documents as not-understood — canonically the CGB≤C
+PCM12/PCM34 same-M-cycle read glitch (same-suite apu/README "To Do"). With
+clean PCM reads, same-suite's E-verified channel tests pass on this model;
+implementing the glitch would break them and therefore requires the revision
+split first (trigger T1 below).
+
+### Reference selection per suite
+
+| Suite | On `Model::Cgb` run / compare against | Revision-skips (empty model list, loud note) |
+|---|---|---|
+| mooneye | `-C`/`-cgb`/`-cgbABCDE` (C ∈ every set — matrix unchanged) | `-cgb0` (pre-existing) |
+| gambatte | ROMs with a `cgb04c` name segment; that tag's `_out<hex>`/`_outaudio`/PNG expectation | none (suite is CGB-C); `dmg08`-only → Dmg; `*_dumper.gbc` manual |
+| same-suite | unsuffixed (E-verified, pass via the no-PCM-glitch rule) + `-cgb0BC` | `-cgb0`, `-cgb0B`, `-cgbB`, `-cgbDE`; `-A` → Agb. extra_length_clocking has **no** C-compatible variant: known hole |
+| mealybug ppu | the 27 ROMs with `*_cgb_c.png` | `_cgb_d.png` parked (future CgbE/D); DMG-ref-only ROMs (`m3_wx_4/5/6_change`, `…multiple_wx`) → Dmg only; `win_without_bg` has no ref: never run |
+| mealybug dma | `hdma_during_halt-C`, `hdma_timing-C` | none |
+| age | `-cgbBC(E)`, `-dmgC-cgbBC(E)` CGB leg, `-ncmBC(E)`, unsuffixed `m3-bg-*`, `-ds` | `-cgbE` ×6, `-ncmE` ×3 (each has a running `-cgbBC` sibling); `-nocgb`/`-dmgC` → Dmg |
+| blargg | `cgb_sound` (real C passes; only B fails case 3) | none |
+| cgb-acid2 / acid-hell | single upstream reference (revision-agnostic) | none |
+
+Failures that triage to genuine C-vs-E silicon divergence go on a
+*documented expected-fail list* (asserted, never silently skipped) — first
+candidate: same-suite `channel_1_sweep_restart_2` (passes only on real
+CGB-E; even SameBoy-E fails it).
+
+### Escalation triggers (when to parameterize the revision)
+
+- **T1:** we implement any C-only quirk (PCM12/34 read glitch foremost) that
+  breaks an E-targeted expectation we currently pass.
+- **T2:** baseline triage attributes **>10** rom×reference failures to
+  genuine C-vs-E divergence that suffix/reference routing cannot absorb.
+
+Upgrade shape: keep `Model::Cgb` ≡ CGB-C (all existing baselines, vendored
+references and the mooneye matrix stay valid), add `Model::CgbE` behind the
+facade, put per-revision deltas in small `match`es at the divergence sites —
+no speculative per-revision behavior tables for unbaselined behaviors.
+
 ## Mooneye test protocol (harness)
 
 A test ends by executing `LD B,B` (opcode 0x40, exposed as

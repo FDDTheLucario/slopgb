@@ -20,7 +20,11 @@ pub enum Model {
     Sgb,
     /// Super Game Boy 2.
     Sgb2,
-    /// Game Boy Color (revisions A-E).
+    /// Game Boy Color. Canonical revision: CPU CGB C (CGB-CPU-04) — the
+    /// revision the bulk of the reference corpus (gambatte `cgb04c`,
+    /// mealybug `_cgb_c`) was captured on; see docs/ARCHITECTURE.md
+    /// §CGB revision policy. Revision-agnostic suffixes (`-cgbABCDE`)
+    /// also map here.
     Cgb,
     /// Game Boy Advance running in CGB mode.
     Agb,
