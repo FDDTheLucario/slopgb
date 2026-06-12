@@ -283,6 +283,95 @@ fn oam_dma_via_bus_trait() {
     assert_eq!(bus.read(0xFE9F), 159 ^ 0xA5);
 }
 
+/// Serial output capture end to end: a program that "prints" a byte the
+/// blargg-ROM way (SB <- byte, then $81 to SC: internal clock, start)
+/// hands the byte to the harness via `take_serial_output`.
+#[test]
+fn serial_output_capture_end_to_end() {
+    let program: &[u8] = &[
+        0x3E, 0x5A, // ld a,$5A
+        0xE0, 0x01, // ldh (SB),a
+        0x3E, 0x81, // ld a,$81
+        0xE0, 0x02, // ldh (SC),a
+        0x18, 0xFE, // jr -2
+    ];
+    let mut gb = GameBoy::new(Model::Dmg, build_rom(&[(0x100, program)])).unwrap();
+    assert_eq!(gb.take_serial_output(), [], "nothing sent yet");
+    gb.run_frame(); // one frame (70224 T) covers the ~4.6k-T transfer
+    assert_eq!(gb.take_serial_output(), [0x5A]);
+    assert_eq!(gb.take_serial_output(), [], "drained");
+}
+
+/// `peek` gives harnesses a side-effect-free view of cartridge state on an
+/// MBC1+RAM cart: live ROM banking, RAM-enable gating, and no time passing.
+#[test]
+fn peek_observes_mbc1_state_without_side_effects() {
+    // 64 KiB MBC1+RAM image; each ROM bank tagged at its first byte.
+    let mut rom = vec![0u8; 0x10000];
+    rom[0x147] = 0x02; // MBC1+RAM
+    rom[0x148] = 0x01; // 64 KiB
+    rom[0x149] = 0x02; // 8 KiB RAM
+    for bank in 0..4 {
+        rom[bank * 0x4000] = 0xB0 + bank as u8;
+    }
+    let program: &[u8] = &[
+        0x3E, 0x0A, // 0100: ld a,$0A
+        0xEA, 0x00, 0x00, // 0102: ld ($0000),a  ; RAMG: enable RAM
+        0x3E, 0x77, // 0105: ld a,$77
+        0xEA, 0x00, 0xA0, // 0107: ld ($A000),a
+        0x3E, 0x03, // 010A: ld a,$03
+        0xEA, 0x00, 0x20, // 010C: ld ($2000),a  ; BANK1 = 3
+        0x40, // 010F: ld b,b
+        0xAF, // 0110: xor a
+        0xEA, 0x00, 0x00, // 0111: ld ($0000),a  ; disable RAM again
+    ];
+    rom[0x100..0x100 + program.len()].copy_from_slice(program);
+    let mut gb = GameBoy::new(Model::Dmg, rom).unwrap();
+    assert_eq!(gb.peek(0x4000), 0xB1, "MBC1 boots with ROM bank 1 mapped");
+    assert_eq!(gb.peek(0x0000), 0xB0, "fixed bank area");
+    run_to_breakpoint(&mut gb, 100);
+    let cycles = gb.cycles();
+    assert_eq!(gb.peek(0xA000), 0x77, "CPU-written cart RAM byte");
+    assert_eq!(gb.peek(0x4000), 0xB3, "switched ROM bank");
+    assert_eq!(gb.cycles(), cycles, "peek advanced no time");
+    gb.step(); // xor a
+    gb.step(); // ld ($0000),a
+    assert_eq!(gb.peek(0xA000), 0xFF, "RAM disabled: open bus, like a read");
+}
+
+/// 0xED — the opcode wilbertpol's mooneye fork ends tests with — hard-locks
+/// the CPU (gbctr: undefined opcodes hang the CPU permanently) and raises
+/// the harness flag. A pending and enabled interrupt does not unfreeze the
+/// lock, and the LD B,B breakpoint stays clear.
+#[test]
+fn undefined_opcode_locks_and_reports() {
+    let program: &[u8] = &[
+        0xAF, // 0100: xor a
+        0xE0, 0x0F, // 0101: ldh (IF),a  ; clear the boot-pending vblank
+        0x3E, 0x01, // 0103: ld a,$01
+        0xE0, 0xFF, // 0105: ldh (IE),a  ; enable vblank
+        0xFB, // 0107: ei
+        0x00, // 0108: nop (EI delay)
+        0xED, // 0109: undefined: hard-lock
+        0x40, // 010A: ld b,b (never reached)
+    ];
+    let mut gb = GameBoy::new(Model::Dmg, build_rom(&[(0x100, program)])).unwrap();
+    assert!(!gb.debug_undefined_hit());
+    for _ in 0..10 {
+        gb.step();
+    }
+    assert!(gb.debug_undefined_hit());
+    assert!(!gb.debug_breakpoint_hit());
+    let pc = gb.cpu_regs().pc;
+    assert_eq!(pc, 0x010A, "PC stopped right after the 0xED fetch");
+    // The LCD is on: vblank raises IF within the next frame, IME is set
+    // and IE bit 0 enabled — the locked CPU must still not dispatch.
+    gb.run_frame();
+    gb.run_frame();
+    assert_eq!(gb.cpu_regs().pc, pc, "interrupt did not unfreeze the lock");
+    assert!(!gb.debug_breakpoint_hit());
+}
+
 /// `run_frame` makes forward progress both with the LCD on (frame_count
 /// advances) and off (cycle deadline).
 #[test]

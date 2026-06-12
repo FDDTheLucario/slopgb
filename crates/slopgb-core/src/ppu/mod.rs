@@ -683,9 +683,16 @@ impl Ppu {
     }
 
     /// VRAM read for CGB HDMA (no mode blocking — the engine is responsible
-    /// for scheduling).
+    /// for scheduling). Doubles as the active-bank view for the
+    /// interconnect's side-effect-free `peek`.
     pub fn vram_read_raw(&self, addr: u16) -> u8 {
         self.vram[self.vram_index(addr)]
+    }
+
+    /// OAM read ignoring mode-based and DMA blocking, for the
+    /// interconnect's side-effect-free `peek`.
+    pub(crate) fn oam_read_raw(&self, addr: u16) -> u8 {
+        self.oam[usize::from(addr - 0xFE00)]
     }
 
     /// VRAM write for CGB HDMA.

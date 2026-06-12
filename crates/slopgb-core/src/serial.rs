@@ -11,6 +11,11 @@
 //! the post-increment counter each M-cycle), which yields the documented
 //! 16384 Hz / 524288 Hz rates.
 
+/// Cap on the harness output buffer: a frontend that never calls
+/// `take_output` must not grow it without limit. 64 KiB is far more text
+/// than any test ROM prints; completions past the cap are dropped.
+const OUT_CAPTURE_CAP: usize = 64 * 1024;
+
 pub struct Serial {
     cgb: bool,
     sb: u8,
@@ -19,6 +24,12 @@ pub struct Serial {
     bits_left: u8,
     /// DIV counter as of the previous `tick`, for edge detection.
     prev_div: u16,
+    /// Bits shifted out so far (MSB first): at completion the low 8 bits
+    /// are the byte a link-cable peer would have received.
+    out_shift: u8,
+    /// Completed internal-clock transfer bytes awaiting [`Self::take_output`]
+    /// (test-harness hook: blargg ROMs print via SB/SC).
+    out_buf: Vec<u8>,
 }
 
 impl Serial {
@@ -31,6 +42,8 @@ impl Serial {
             sc: 0,
             bits_left: 0,
             prev_div: 0,
+            out_shift: 0,
+            out_buf: Vec::new(),
         }
     }
 
@@ -60,13 +73,28 @@ impl Serial {
             return 0;
         }
         // MSB out first; no peer, so 1 bits come in.
+        self.out_shift = (self.out_shift << 1) | (self.sb >> 7);
         self.sb = (self.sb << 1) | 1;
         self.bits_left -= 1;
         if self.bits_left == 0 {
             self.sc &= 0x7F; // transfer-in-progress flag clears itself
+            // Only internal-clock transfers reach completion (the shift
+            // above requires SC bit 0; an external-clock transfer never
+            // advances without a peer): capture the outgoing byte for the
+            // harness. An SC rewrite mid-transfer restarts the bit counter,
+            // so the captured byte is the last 8 bits actually shifted out.
+            if self.out_buf.len() < OUT_CAPTURE_CAP {
+                self.out_buf.push(self.out_shift);
+            }
             return 0x08;
         }
         0
+    }
+
+    /// Drain the bytes shifted out by completed internal-clock transfers
+    /// (test-harness hook; see [`OUT_CAPTURE_CAP`]).
+    pub(crate) fn take_output(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.out_buf)
     }
 
     /// Read FF01/FF02.
@@ -303,6 +331,79 @@ mod tests {
         );
         assert_eq!(s.read(0xFF01), 0xFF);
         assert_eq!(s.read(0xFF02), 0x7F); // bit 7 cleared on completion
+    }
+
+    // ---- harness output capture ----
+
+    /// A completed internal-clock transfer captures the byte that was
+    /// shifted out (MSB first) — what a link-cable peer would have
+    /// received. This is how blargg test ROMs print: SB <- byte, SC <- $81.
+    #[test]
+    fn internal_transfer_capture() {
+        let mut s = Serial::new(false);
+        let mut div = 0u16;
+        s.write(0xFF01, 0x5A);
+        s.write(0xFF02, 0x81);
+        assert_eq!(s.take_output(), [], "nothing captured before completion");
+        run_until_irq(&mut s, &mut div, 20_000).unwrap();
+        assert_eq!(s.take_output(), [0x5A]);
+        assert_eq!(s.take_output(), [], "take drains the buffer");
+    }
+
+    #[test]
+    fn capture_accumulates_across_transfers() {
+        let mut s = Serial::new(false);
+        let mut div = 0u16;
+        for byte in [0xAB, 0x00, 0xFF] {
+            s.write(0xFF01, byte);
+            s.write(0xFF02, 0x81);
+            run_until_irq(&mut s, &mut div, 20_000).unwrap();
+        }
+        assert_eq!(s.take_output(), [0xAB, 0x00, 0xFF]);
+    }
+
+    /// External-clock transfers (SC = $80) never advance without a peer
+    /// and must capture nothing.
+    #[test]
+    fn external_clock_captures_nothing() {
+        let mut s = Serial::new(false);
+        let mut div = 0u16;
+        s.write(0xFF01, 0x42);
+        s.write(0xFF02, 0x80);
+        assert_eq!(run_until_irq(&mut s, &mut div, 20_000), None);
+        assert_eq!(s.take_output(), []);
+    }
+
+    /// A mid-transfer SC rewrite restarts the bit counter
+    /// (`sc_rewrite_mid_transfer_restarts_bit_counter`); the captured byte
+    /// is the last 8 bits that actually shifted out, not the original SB.
+    #[test]
+    fn capture_reflects_outgoing_bits_after_restart() {
+        let mut s = Serial::new(false);
+        let mut div = 0u16;
+        s.write(0xFF01, 0x00);
+        s.write(0xFF02, 0x81);
+        while div < 1024 {
+            step(&mut s, &mut div); // two 0 bits out, SB now 0x03
+        }
+        s.write(0xFF02, 0x81); // restart: 8 fresh shifts
+        run_until_irq(&mut s, &mut div, 20_000).unwrap();
+        // Outgoing bits after the restart: six 0s (SB top bits), then the
+        // two 1s shifted in earlier reach bit 7.
+        assert_eq!(s.take_output(), [0x03]);
+    }
+
+    /// The capture buffer is bounded: a harness that never drains cannot
+    /// grow it without limit; completions past the cap are dropped.
+    #[test]
+    fn capture_buffer_is_bounded() {
+        let mut s = Serial::new(true);
+        let mut div = 0u16;
+        for _ in 0..(64 * 1024 + 8) {
+            s.write(0xFF02, 0x83); // CGB fast clock: 128 T per transfer
+            run_until_irq(&mut s, &mut div, 100).unwrap();
+        }
+        assert_eq!(s.take_output().len(), 64 * 1024);
     }
 
     /// Clearing SC bit 7 aborts an in-flight transfer.
