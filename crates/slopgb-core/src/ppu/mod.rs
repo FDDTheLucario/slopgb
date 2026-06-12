@@ -48,7 +48,13 @@
 //! Combined with [`Ppu::oam_dma_write`] bypassing mode-based access
 //! blocking, an OAM DMA byte landing mid-mode-2 can select sprites
 //! differently than hardware, which would already have scanned past the
-//! entry the byte lands in. No mooneye test pins this.
+//! entry the byte lands in. No mooneye test pins this. The DMG OAM
+//! corruption bug ([`Ppu::oam_bug`]) interacts with the same
+//! approximation: corruption mutates OAM *before* the instantaneous
+//! dot-80 scan, so rows the hardware scan had already consumed are
+//! re-read post-corruption. Fine for blargg's oam_bug suite (it checks
+//! the memory effect with the LCD subsequently disabled); the rendered
+//! frame of the corrupted line itself is unpinned by any test ROM.
 
 mod render;
 
@@ -189,6 +195,81 @@ fn pixel_buffer(fill: u32) -> Box<[u32; SCREEN_PIXELS]> {
         .into_boxed_slice()
         .try_into()
         .unwrap_or_else(|_| unreachable!())
+}
+
+/// How a CPU access with a $FE00-$FEFF value on the address bus collides
+/// with the OAM scan on DMG-family models (Pan Docs "OAM Corruption Bug").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OamBugKind {
+    /// A memory write, or the internal M-cycle of a 16-bit
+    /// increment/decrement-unit operation (INC rr/DEC rr, the PUSH/CALL/
+    /// RST pre-push cycle via SP, LD SP,HL via HL) — no memory access
+    /// needed, the value on the address bus suffices.
+    Write,
+    /// A plain memory read.
+    Read,
+    /// A memory read performed in the same M-cycle as a 16-bit
+    /// increment/decrement of the address register: POP/RET via SP,
+    /// LD A,(HL+)/(HL-) via HL.
+    ReadIncrease,
+}
+
+// The corruption patterns operate on 8-byte OAM rows; `row` is the byte
+// base of the row the scan is on (8..=0x98 — the callers guarantee the
+// preceding row exists). All bit operations are byte-wise, exactly as in
+// SameBoy v0.12.1 Core/memory.c (GB_trigger_oam_bug{,_read,_read_increase}),
+// the implementation Pan Docs' "OAM Corruption Bug" chapter documents.
+
+/// "Write corruption": the row's first word becomes
+/// `((a ^ c) & (b ^ c)) ^ c` with a = that word, b = the preceding row's
+/// first word, c = the preceding row's third word; the rest of the row is
+/// copied from the preceding row.
+fn oam_bug_write_pattern(oam: &mut [u8; 0xA0], row: usize) {
+    for i in 0..2 {
+        let (a, b, c) = (oam[row + i], oam[row - 8 + i], oam[row - 4 + i]);
+        oam[row + i] = ((a ^ c) & (b ^ c)) ^ c;
+    }
+    for i in 2..8 {
+        oam[row + i] = oam[row - 8 + i];
+    }
+}
+
+/// "Read corruption": like the write pattern but the glitched first word
+/// is `b | (a & c)` and lands in *both* the current and the preceding row.
+fn oam_bug_read_pattern(oam: &mut [u8; 0xA0], row: usize) {
+    for i in 0..2 {
+        let (a, b, c) = (oam[row + i], oam[row - 8 + i], oam[row - 4 + i]);
+        let glitched = b | (a & c);
+        oam[row - 8 + i] = glitched;
+        oam[row + i] = glitched;
+    }
+    for i in 2..8 {
+        oam[row + i] = oam[row - 8 + i];
+    }
+}
+
+/// "Read corruption during a 16-bit increase" (rows 4..=18 only — the
+/// caller guards): the *preceding* row's first word becomes
+/// `(b & (a | c | d)) | (a & c & d)` with a = the first word two rows
+/// back, b = the preceding row's first word, c = the current row's first
+/// word, d = the preceding row's third word; then the whole preceding row
+/// (glitched word included) is copied to both the current row and two
+/// rows back.
+fn oam_bug_read_increase_pattern(oam: &mut [u8; 0xA0], row: usize) {
+    for i in 0..2 {
+        let (a, b, c, d) = (
+            oam[row - 0x10 + i],
+            oam[row - 8 + i],
+            oam[row + i],
+            oam[row - 4 + i],
+        );
+        oam[row - 8 + i] = (b & (a | c | d)) | (a & c & d);
+    }
+    for i in 0..8 {
+        let byte = oam[row - 8 + i];
+        oam[row - 0x10 + i] = byte;
+        oam[row + i] = byte;
+    }
 }
 
 impl Ppu {
@@ -499,6 +580,62 @@ impl Ppu {
     /// palettes, i.e. during (visible) mode 3 (Pan Docs).
     fn pal_ram_blocked(&self) -> bool {
         self.vis_mode() == 3
+    }
+
+    // --- DMG OAM corruption bug (Pan Docs "OAM Corruption Bug") ---
+
+    /// Byte base (8..=0x98) of the OAM row the mode-2 scan makes
+    /// vulnerable to the DMG OAM corruption bug for an access observing
+    /// the current state, or `None` outside the scan.
+    ///
+    /// Anchoring (the one free parameter, calibrated against blargg's
+    /// oam_bug ROMs, which are the only hardware oracle in the corpus):
+    /// under tick-then-access an access at state(T) covers dots T-4..T.
+    /// 4-scanline_timing pins the first corrupting INC DE of a visible
+    /// line to the cycle covering dots 0-3 and the last to 72-75, with
+    /// 76-79 already clean; 5-timing_bug confirms dots 0-3 on lines 0, 1
+    /// and 143; 6-timing_no_bug brackets every visible line and hammers
+    /// vblank. That is 19 corruptible M-cycles for the 19 corruptible
+    /// rows 1..=19, so the access at state(T) corrupts row T/4, base
+    /// (T/4)*8, for T in 4..80. The row-per-cycle mapping is pinned by
+    /// 8-instr_effect's OAM-dump CRCs and by 7-timing_effect's expected
+    /// CRC $7D792E7C, which is reproduced exactly by simulating the
+    /// ROM's checksummed output for this mapping (the shipped single
+    /// itself self-destructs — see the baseline note in
+    /// tests/gbtr/blargg.rs). No scan runs on vblank lines or the
+    /// 452-dot LCD-enable glitch line (lcdon_timing-GS), and rows 0xA0
+    /// bytes apart never reach row 0 (Pan Docs: the first row is never
+    /// the corrupted row; SameBoy guards `accessed_oam_row >= 8`).
+    pub(crate) fn oam_bug_row(&self) -> Option<u8> {
+        if !self.enabled || self.line > 143 || self.glitch_line || !(4..80).contains(&self.dot) {
+            return None;
+        }
+        Some((self.dot / 4 * 8) as u8)
+    }
+
+    /// Apply the DMG OAM corruption bug for an access of the given kind
+    /// happening this M-cycle. The interconnect gates on model family,
+    /// address range, halt state and OAM DMA; everything PPU-positional
+    /// is decided here via [`Self::oam_bug_row`].
+    pub(crate) fn oam_bug(&mut self, kind: OamBugKind) {
+        let Some(row) = self.oam_bug_row() else {
+            return;
+        };
+        let row = usize::from(row);
+        match kind {
+            OamBugKind::Write => oam_bug_write_pattern(&mut self.oam, row),
+            OamBugKind::Read => oam_bug_read_pattern(&mut self.oam, row),
+            OamBugKind::ReadIncrease => {
+                // The special pattern only fires for rows 4..=18 (SameBoy
+                // v0.12.1 guards 0x20 <= row < 0x98); the plain read
+                // corruption of the read itself applies regardless — a
+                // no-op when the special pattern's row copies ran.
+                if (0x20..0x98).contains(&row) {
+                    oam_bug_read_increase_pattern(&mut self.oam, row);
+                }
+                oam_bug_read_pattern(&mut self.oam, row);
+            }
+        }
     }
 
     /// Read VRAM (0x8000-0x9FFF, current bank), OAM (0xFE00-0xFE9F), or a
@@ -1282,5 +1419,179 @@ mod tests {
         assert_eq!(p.frame_count(), 1);
         tick_n(&mut p, 70_224);
         assert_eq!(p.frame_count(), 2, "70224 dots per steady frame");
+    }
+
+    // --- DMG OAM corruption bug (Pan Docs "OAM Corruption Bug") ---
+
+    /// PPU on a steady visible line with every OAM byte distinct, so any
+    /// corruption pattern is observable and attributable.
+    fn oam_bug_ppu(line: u8, dot: u16) -> Ppu {
+        let mut p = dmg();
+        p.write(0xFF40, 0x81);
+        run_to(&mut p, line, dot);
+        for (i, byte) in p.oam.iter_mut().enumerate() {
+            *byte = (i as u8) ^ 0xA5;
+        }
+        p
+    }
+
+    /// blargg oam_bug/4-scanline_timing + 5-timing_bug pin the corruptible
+    /// window in M-cycle units: the access covering dots 0-3 of a visible
+    /// line corrupts the first row and the one covering dots 72-75 the
+    /// last, while 76-79 (and everything later) is clean. Under
+    /// tick-then-access the accessing CPU observes state(T) with the cycle
+    /// covering T-4..T, so rows 8..=0x98 map to T in 4..80.
+    #[test]
+    fn oam_bug_row_window_tracks_scan() {
+        let mut p = dmg();
+        assert_eq!(p.oam_bug_row(), None, "LCD off");
+        p.write(0xFF40, 0x81);
+        // Glitch line: no OAM scan (lcdon_timing-GS), never vulnerable.
+        for _ in 0..GLITCH_LINE_DOTS {
+            assert_eq!(p.oam_bug_row(), None, "glitch line dot {}", p.dot);
+            p.tick();
+        }
+        // Steady visible line: rows step every 4 dots through 4..80.
+        for line in [1u8, 2, 143] {
+            run_to(&mut p, line, 0);
+            for dot in 0..456u16 {
+                let expect = if (4..80).contains(&dot) {
+                    Some((dot / 4 * 8) as u8)
+                } else {
+                    None
+                };
+                assert_eq!(p.oam_bug_row(), expect, "line {line} dot {dot}");
+                p.tick();
+            }
+        }
+        // VBlank lines never scan.
+        run_to(&mut p, 144, 0);
+        for _ in 0..456 {
+            assert_eq!(p.oam_bug_row(), None, "vblank dot {}", p.dot);
+            p.tick();
+        }
+    }
+
+    #[test]
+    fn oam_bug_write_pattern_formula() {
+        // Dot 16 -> row 0x20 (row 4).
+        let mut p = oam_bug_ppu(1, 16);
+        let before = p.oam;
+        p.oam_bug(OamBugKind::Write);
+        let row = 0x20;
+        for i in 0..2 {
+            let (a, b, c) = (before[row + i], before[row - 8 + i], before[row - 4 + i]);
+            assert_eq!(p.oam[row + i], ((a ^ c) & (b ^ c)) ^ c, "glitched byte {i}");
+        }
+        for i in 2..8 {
+            assert_eq!(p.oam[row + i], before[row - 8 + i], "copied byte {i}");
+        }
+        for (i, &byte) in p.oam.iter().enumerate() {
+            if !(row..row + 8).contains(&i) {
+                assert_eq!(byte, before[i], "byte {i} outside the row untouched");
+            }
+        }
+    }
+
+    #[test]
+    fn oam_bug_write_pattern_first_row_references_row_zero() {
+        // Dot 4 -> row 8: operands come from row 0, which stays intact.
+        let mut p = oam_bug_ppu(1, 4);
+        let before = p.oam;
+        p.oam_bug(OamBugKind::Write);
+        let (a, b, c) = (before[8], before[0], before[4]);
+        assert_eq!(p.oam[8], ((a ^ c) & (b ^ c)) ^ c);
+        assert_eq!(p.oam[..8], before[..8], "row 0 untouched");
+    }
+
+    #[test]
+    fn oam_bug_read_pattern_formula() {
+        let mut p = oam_bug_ppu(1, 16);
+        let before = p.oam;
+        p.oam_bug(OamBugKind::Read);
+        let row = 0x20;
+        for i in 0..2 {
+            let (a, b, c) = (before[row + i], before[row - 8 + i], before[row - 4 + i]);
+            let glitched = b | (a & c);
+            assert_eq!(p.oam[row + i], glitched, "current row byte {i}");
+            assert_eq!(p.oam[row - 8 + i], glitched, "preceding row byte {i}");
+        }
+        for i in 2..8 {
+            assert_eq!(p.oam[row + i], before[row - 8 + i], "copied byte {i}");
+            assert_eq!(p.oam[row - 8 + i], before[row - 8 + i], "prev tail intact");
+        }
+    }
+
+    #[test]
+    fn oam_bug_read_pattern_on_uniform_oam_is_invisible() {
+        // blargg 3-non_causes tolerates read corruption only because
+        // b | (a & c) is the identity on uniform data.
+        let mut p = oam_bug_ppu(1, 16);
+        p.oam = [0x5A; 0xA0];
+        p.oam_bug(OamBugKind::Read);
+        assert_eq!(p.oam, [0x5A; 0xA0]);
+    }
+
+    #[test]
+    fn oam_bug_read_increase_pattern_at_row_4_and_up() {
+        let mut p = oam_bug_ppu(1, 16);
+        let before = p.oam;
+        p.oam_bug(OamBugKind::ReadIncrease);
+        let row = 0x20;
+        // Glitched first word lands in the *preceding* row, then that row
+        // (glitched word included) is copied to both the current row and
+        // two rows back (SameBoy v0.12.1 GB_trigger_oam_bug_read_increase;
+        // the trailing plain read corruption is a no-op after the copy).
+        let mut expect_prev = [0u8; 8];
+        expect_prev.copy_from_slice(&before[row - 8..row]);
+        for i in 0..2 {
+            let (a, b, c, d) = (
+                before[row - 0x10 + i],
+                before[row - 8 + i],
+                before[row + i],
+                before[row - 4 + i],
+            );
+            expect_prev[i] = (b & (a | c | d)) | (a & c & d);
+        }
+        for (i, &expect) in expect_prev.iter().enumerate() {
+            assert_eq!(p.oam[row - 0x10 + i], expect, "two rows back {i}");
+            assert_eq!(p.oam[row - 8 + i], expect, "preceding row {i}");
+            assert_eq!(p.oam[row + i], expect, "current row {i}");
+        }
+        for (i, &byte) in p.oam.iter().enumerate() {
+            if !(row - 0x10..row + 8).contains(&i) {
+                assert_eq!(byte, before[i], "byte {i} outside the rows untouched");
+            }
+        }
+    }
+
+    #[test]
+    fn oam_bug_read_increase_in_first_rows_is_plain_read() {
+        // Rows 1..=3 (and the last row) skip the special pattern: SameBoy
+        // v0.12.1 guards 0x20 <= row < 0x98. Dot 8 -> row 0x10.
+        let mut p = oam_bug_ppu(1, 8);
+        let mut reference = oam_bug_ppu(1, 8);
+        p.oam_bug(OamBugKind::ReadIncrease);
+        reference.oam_bug(OamBugKind::Read);
+        assert_eq!(p.oam, reference.oam);
+
+        // Dot 76 -> row 0x98 (the last row): also plain read only.
+        let mut p = oam_bug_ppu(1, 76);
+        let mut reference = oam_bug_ppu(1, 76);
+        p.oam_bug(OamBugKind::ReadIncrease);
+        reference.oam_bug(OamBugKind::Read);
+        assert_eq!(p.oam, reference.oam);
+    }
+
+    #[test]
+    fn oam_bug_outside_window_is_a_no_op() {
+        for dot in [0u16, 80, 200, 300] {
+            let mut p = oam_bug_ppu(1, dot);
+            let before = p.oam;
+            p.oam_bug(OamBugKind::Write);
+            p.oam_bug(OamBugKind::Read);
+            p.oam_bug(OamBugKind::ReadIncrease);
+            assert_eq!(p.oam, before, "dot {dot}");
+        }
     }
 }

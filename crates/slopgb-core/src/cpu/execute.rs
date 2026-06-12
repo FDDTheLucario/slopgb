@@ -274,11 +274,15 @@ fn push16(cpu: &mut Cpu, bus: &mut impl Bus, v: u16) {
     bus.write(cpu.regs.sp, v as u8);
 }
 
-/// Two read M-cycles: low byte first, then high (gbctr).
+/// Two read M-cycles: low byte first, then high (gbctr). SP increments
+/// share the read M-cycles (16-bit inc/dec unit), so reads from
+/// $FE00-$FEFF trigger the OAM bug's "read during increase" pattern
+/// (blargg oam_bug/2-causes test 8: POP with SP=$FDFF corrupts via its
+/// second read; 8-instr_effect test 3 pins the pattern).
 fn pop16(cpu: &mut Cpu, bus: &mut impl Bus) -> u16 {
-    let lo = bus.read(cpu.regs.sp);
+    let lo = bus.read_inc(cpu.regs.sp);
     cpu.regs.sp = cpu.regs.sp.wrapping_add(1);
-    let hi = bus.read(cpu.regs.sp);
+    let hi = bus.read_inc(cpu.regs.sp);
     cpu.regs.sp = cpu.regs.sp.wrapping_add(1);
     u16::from_le_bytes([lo, hi])
 }
@@ -465,28 +469,38 @@ fn execute(cpu: &mut Cpu, bus: &mut impl Bus, op: u8) {
         // LD A,(BC)/(DE)/(HL+)/(HL-)
         0x0A => cpu.regs.a = bus.read(cpu.regs.bc()),
         0x1A => cpu.regs.a = bus.read(cpu.regs.de()),
+        // The 16-bit inc/dec unit adjusts HL in the same M-cycle as the
+        // read, which selects the OAM bug's "read during increase"
+        // pattern when HL is in $FE00-$FEFF (SameBoy v0.12.1 ld_a_dhli/
+        // ld_a_dhld; blargg oam_bug/8-instr_effect test 5). The HL+/-
+        // *store* variants above stay plain writes: the write-pattern
+        // corruption already covers them and no distinct write+increase
+        // pattern is documented.
         0x2A => {
             let hl = cpu.regs.hl();
-            cpu.regs.a = bus.read(hl);
+            cpu.regs.a = bus.read_inc(hl);
             cpu.regs.set_hl(hl.wrapping_add(1));
         }
         0x3A => {
             let hl = cpu.regs.hl();
-            cpu.regs.a = bus.read(hl);
+            cpu.regs.a = bus.read_inc(hl);
             cpu.regs.set_hl(hl.wrapping_sub(1));
         }
-        // INC/DEC rp: one internal cycle, no flags
+        // INC/DEC rp: one internal cycle, no flags. The *pre*-op value
+        // rides the address bus during that cycle — blargg oam_bug/
+        // 2-causes corrupts on INC DE from $FE00, 3-non_causes is clean
+        // from $FDFF (and on DEC DE from $FF00).
         0x03 | 0x13 | 0x23 | 0x33 => {
             let i = (op >> 4) & 3;
-            let v = rp_get(cpu, i).wrapping_add(1);
-            rp_set(cpu, i, v);
-            bus.tick();
+            let v = rp_get(cpu, i);
+            rp_set(cpu, i, v.wrapping_add(1));
+            bus.tick_addr(v);
         }
         0x0B | 0x1B | 0x2B | 0x3B => {
             let i = (op >> 4) & 3;
-            let v = rp_get(cpu, i).wrapping_sub(1);
-            rp_set(cpu, i, v);
-            bus.tick();
+            let v = rp_get(cpu, i);
+            rp_set(cpu, i, v.wrapping_sub(1));
+            bus.tick_addr(v);
         }
         // INC/DEC r8 (incl. (HL): read + write cycles)
         0x04 | 0x0C | 0x14 | 0x1C | 0x24 | 0x2C | 0x34 | 0x3C => {
@@ -598,9 +612,12 @@ fn execute(cpu: &mut Cpu, bus: &mut impl Bus, op: u8) {
             let v = pop16(cpu, bus);
             rp2_set(cpu, (op >> 4) & 3, v);
         }
-        // PUSH: internal cycle *before* the writes (POP has none)
+        // PUSH: internal cycle *before* the writes (POP has none). The
+        // not-yet-decremented SP rides the address bus during it — the
+        // 16-bit dec unit is preparing the push (SameBoy push_rr; blargg
+        // oam_bug/2-causes test 9 corrupts on PUSH with SP=$FE00).
         0xC5 | 0xD5 | 0xE5 | 0xF5 => {
-            bus.tick();
+            bus.tick_addr(cpu.regs.sp);
             let v = rp2_get(cpu, (op >> 4) & 3);
             push16(cpu, bus, v);
         }
@@ -618,10 +635,11 @@ fn execute(cpu: &mut Cpu, bus: &mut impl Bus, op: u8) {
             }
         }
         0xE9 => cpu.regs.pc = cpu.regs.hl(),
-        // CALL nn: fetch, lo, hi, internal, push hi, push lo
+        // CALL nn: fetch, lo, hi, internal, push hi, push lo. Like PUSH,
+        // the internal cycle drives SP (SameBoy call_a16/call_cc_a16).
         0xCD => {
             let nn = imm16(cpu, bus);
-            bus.tick();
+            bus.tick_addr(cpu.regs.sp);
             let pc = cpu.regs.pc;
             push16(cpu, bus, pc);
             cpu.regs.pc = nn;
@@ -629,7 +647,7 @@ fn execute(cpu: &mut Cpu, bus: &mut impl Bus, op: u8) {
         0xC4 | 0xCC | 0xD4 | 0xDC => {
             let nn = imm16(cpu, bus);
             if condition(cpu, (op >> 3) & 3) {
-                bus.tick();
+                bus.tick_addr(cpu.regs.sp);
                 let pc = cpu.regs.pc;
                 push16(cpu, bus, pc);
                 cpu.regs.pc = nn;
@@ -637,7 +655,7 @@ fn execute(cpu: &mut Cpu, bus: &mut impl Bus, op: u8) {
         }
         // RST: same tail as CALL (internal, push hi, push lo)
         0xC7 | 0xCF | 0xD7 | 0xDF | 0xE7 | 0xEF | 0xF7 | 0xFF => {
-            bus.tick();
+            bus.tick_addr(cpu.regs.sp);
             let pc = cpu.regs.pc;
             push16(cpu, bus, pc);
             cpu.regs.pc = u16::from(op & 0x38);
@@ -678,9 +696,11 @@ fn execute(cpu: &mut Cpu, bus: &mut impl Bus, op: u8) {
             bus.tick();
             cpu.regs.set_hl(r);
         }
+        // LD SP,HL: the internal cycle drives the transferred value
+        // (SameBoy ld_sp_hl passes the new SP to its OAM bug check).
         0xF9 => {
             cpu.regs.sp = cpu.regs.hl();
-            bus.tick();
+            bus.tick_addr(cpu.regs.sp);
         }
         // DI takes effect immediately and cancels a pending EI enable
         0xF3 => {
