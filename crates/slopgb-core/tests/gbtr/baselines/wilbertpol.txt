@@ -1,0 +1,129 @@
+# wilbertpol known-failure baseline (consumed by tests/gbtr/wilbertpol.rs
+# via harness::assert_against_baseline; one case key per line).
+#
+# Discovered 2026-06-11 by running the full 561-case matrix; every protocol
+# failure below still exits via the 0xED protocol with non-Fibonacci
+# registers (no timeouts). This fork carries ~40 LY/STAT-edge tests beyond
+# the modern mooneye suite with 2016-era expectations, so many of these are
+# expected to be legitimately hard; shrinking this list is the tracked
+# progress, growing it is a regression.
+#
+# Failure clusters:
+#  - acceptance/gpu, CGB-only -C variants (20): the fork's CGB LY/LYC/STAT
+#    register sequence expectations — ly_lyc family ×7 ROMs, ly00_mode1_2,
+#    ly_new_frame, stat_write_if; the -GS siblings of all of these pass
+#    except stat_write_if-GS (4), which fails on its DMG/SGB matrix too.
+#  - acceptance/gpu, hblank_ly_scx_timing (14): the -C variant plus the
+#    all-model _nops/_variant_nops builds (the plain -GS variant passes).
+#  - acceptance/gpu, intr_2 family (48): intr_2_timing, intr_2_mode0
+#    scx4/scx8 nops paths, and every intr_2_mode0_timing_sprites*_nops
+#    variant, each on its full 6-model matrix.
+#  - acceptance/timer (6): timer_if on every model.
+#  - madness (1): the 2016 build of mgb_oam_dma_halt_sprites renders no
+#    HALT-glitch sprite under our MGB OAM-scan model (its 18 sprite pixels
+#    come out as bare checkerboard), although the byte-different
+#    mts-20240926 build passes the identical reference in tests/mooneye.rs.
+#  - manual-only (1): sprite_priority on CGB — our boot-assigned DMG-compat
+#    palette renders the OBP1 sprites grey (#A5A5A5) where the c-sp
+#    reference expects the documented compat colors (#FF8484); the DMG case
+#    passes.
+
+# --- acceptance/gpu ---
+mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-C.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-C.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_nops.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_nops.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_nops.gb [Dmg]
+mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_nops.gb [Mgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_nops.gb [Sgb2]
+mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_nops.gb [Sgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_variant_nops.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_variant_nops.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_variant_nops.gb [Dmg]
+mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_variant_nops.gb [Mgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_variant_nops.gb [Sgb2]
+mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_variant_nops.gb [Sgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_scx4_timing_nops.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_scx4_timing_nops.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_scx4_timing_nops.gb [Dmg]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_scx4_timing_nops.gb [Mgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_scx4_timing_nops.gb [Sgb2]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_scx4_timing_nops.gb [Sgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_scx8_timing_nops.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_scx8_timing_nops.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_scx8_timing_nops.gb [Dmg]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_scx8_timing_nops.gb [Mgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_scx8_timing_nops.gb [Sgb2]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_scx8_timing_nops.gb [Sgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_nops.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_nops.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_nops.gb [Dmg]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_nops.gb [Mgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_nops.gb [Sgb2]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_nops.gb [Sgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx1_nops.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx1_nops.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx1_nops.gb [Dmg]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx1_nops.gb [Mgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx1_nops.gb [Sgb2]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx1_nops.gb [Sgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx2_nops.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx2_nops.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx2_nops.gb [Dmg]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx2_nops.gb [Mgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx2_nops.gb [Sgb2]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx2_nops.gb [Sgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx3_nops.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx3_nops.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx3_nops.gb [Dmg]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx3_nops.gb [Mgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx3_nops.gb [Sgb2]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx3_nops.gb [Sgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx4_nops.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx4_nops.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx4_nops.gb [Dmg]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx4_nops.gb [Mgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx4_nops.gb [Sgb2]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx4_nops.gb [Sgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_timing.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_timing.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_timing.gb [Dmg]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_timing.gb [Mgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_timing.gb [Sgb2]
+mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_timing.gb [Sgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/ly00_mode1_2-C.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/ly00_mode1_2-C.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc-C.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc-C.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_0-C.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_0-C.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_0_write-C.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_0_write-C.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_144-C.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_144-C.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_153-C.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_153-C.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_153_write-C.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_153_write-C.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_write-C.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_write-C.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/ly_new_frame-C.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/ly_new_frame-C.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/stat_write_if-C.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/stat_write_if-C.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/stat_write_if-GS.gb [Dmg]
+mooneye-test-suite-wilbertpol/acceptance/gpu/stat_write_if-GS.gb [Mgb]
+mooneye-test-suite-wilbertpol/acceptance/gpu/stat_write_if-GS.gb [Sgb2]
+mooneye-test-suite-wilbertpol/acceptance/gpu/stat_write_if-GS.gb [Sgb]
+
+# --- acceptance/timer ---
+mooneye-test-suite-wilbertpol/acceptance/timer/timer_if.gb [Agb]
+mooneye-test-suite-wilbertpol/acceptance/timer/timer_if.gb [Cgb]
+mooneye-test-suite-wilbertpol/acceptance/timer/timer_if.gb [Dmg]
+mooneye-test-suite-wilbertpol/acceptance/timer/timer_if.gb [Mgb]
+mooneye-test-suite-wilbertpol/acceptance/timer/timer_if.gb [Sgb2]
+mooneye-test-suite-wilbertpol/acceptance/timer/timer_if.gb [Sgb]
+
+# --- frame-compare cases ---
+mooneye-test-suite-wilbertpol/madness/mgb_oam_dma_halt_sprites.gb [Mgb]
+mooneye-test-suite-wilbertpol/manual-only/sprite_priority.gb [Cgb]
