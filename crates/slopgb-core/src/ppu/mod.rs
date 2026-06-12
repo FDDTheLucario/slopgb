@@ -222,10 +222,36 @@ pub struct Ppu {
     hdma_lead: bool,
 
     // Window state.
-    /// WY==LY matched somewhere this frame while the window was enabled.
+    /// The frame-sticky WY condition (gambatte ppu.cpp weMaster). NOT a
+    /// continuous comparison: hardware samples `win_en && WY == LY` at
+    /// three discrete points — assigned at line 0 dot 2, OR-ed at dots
+    /// 450/454 (+1 on DMG) of every visible line against the current and
+    /// the upcoming LY (gambatte weMasterCheck{Ly0,PriorToLyInc,
+    /// AfterLyInc}LineCycle; the gambatte window/arg/late_wy_* family
+    /// pins the sample points). The trigger additionally accepts a *live*
+    /// `wy2 == LY` match (see [`Self::wy2`]).
     wy_latch: bool,
-    /// Window internal line counter.
+    /// Delayed copy of WY used by the live window-trigger comparison
+    /// (gambatte video.cpp wyChange: wy2 lags the write — modelled as
+    /// the architectural commit plus 2 dots on DMG, 6 on CGB, 5 in
+    /// double speed, via `wy2_delay`; immediate with the LCD off).
+    wy2: u8,
+    /// Dots until `wy2` catches up with the architectural WY (CGB only).
+    wy2_delay: u8,
+    /// The most recent staged rendering write was double-speed (1-dot)
+    /// staging — used to pick the wy2 catch-up delay.
+    staged_ds: bool,
+    /// Window internal line counter (gambatte winYPos): initialized to
+    /// 0xFF at frame start and incremented at each window *activation*
+    /// (gambatte ppu.cpp plotPixel/M3Start::f0), so a same-line retrigger
+    /// draws the next row (mattcurrie comprehensive-ppu-doc §WIN_EN).
     win_line: u8,
+    /// DMG: a WX=166 match leaves its window-start request unconsumed past
+    /// the last pipeline dot (gambatte handleWinDrawStartReq only honors
+    /// requests at xpos >= 167 on CGB); the request survives to the next
+    /// line's mode-3 start, which begins with the window already drawing
+    /// (gambatte M3Start::f0).
+    win_start_pending: bool,
 
     /// Pipeline-view rendering registers (see [`PipeRegs`]).
     eff: PipeRegs,
@@ -363,7 +389,11 @@ impl Ppu {
             line_render_done: true,
             hdma_lead: false,
             wy_latch: false,
-            win_line: 0,
+            wy2: 0,
+            wy2_delay: 0,
+            staged_ds: false,
+            win_line: 0xFF,
+            win_start_pending: false,
             eff: PipeRegs {
                 lcdc: 0,
                 scy: 0,
@@ -399,6 +429,18 @@ impl Ppu {
         if !matches!(addr, 0xFF40 | 0xFF42 | 0xFF43 | 0xFF47..=0xFF4B) {
             return;
         }
+        // WX reaches the pixel pipeline one dot later than the palette
+        // class — at the architectural tick's strobe point rather than
+        // mid-cycle. Pinned by the mealybug m3_wx_4/5/6_change triple:
+        // their shared WX=LY rewrite lands exactly between the WX=5 and
+        // WX=6 prefill comparator dots (the WX=5 line still triggers,
+        // the WX=6 line does not), which only the +1 commit satisfies
+        // (gambatte wxChange likewise updates wx one cycle later than
+        // the dmg palette path).
+        let dots = if addr == 0xFF4B { dots + 1 } else { dots };
+        // Speed hint for the FF4A wy2 scheduling below (1-dot staging
+        // only happens in double speed).
+        self.staged_ds = dots <= 1;
         // One bus op per M-cycle: a previous stage has always expired or
         // been architecturally committed by now; flush defensively if not.
         if let Some(s) = self.staged.take() {
@@ -414,7 +456,19 @@ impl Ppu {
     /// Fold an expired staged write into the pipeline-view registers.
     fn commit_eff(&mut self, addr: u16, value: u8) {
         match addr {
-            0xFF40 => self.eff.lcdc = value,
+            0xFF40 => {
+                let old = self.eff.lcdc;
+                self.eff.lcdc = value;
+                // LCDC.5 cleared while the window machine is drawing:
+                // the window aborts at the pipeline view's commit point
+                // (gambatte ppu.cpp setLcdc clears win_draw_started
+                // immediately; the tile data already latched still ships
+                // — see `window_abort`).
+                if old & LCDC_WIN_ENABLE != 0 && value & LCDC_WIN_ENABLE == 0 && self.render.active
+                {
+                    self.window_abort();
+                }
+            }
             0xFF42 => self.eff.scy = value,
             0xFF43 => self.eff.scx = value,
             0xFF47 => self.eff.bgp = value,
@@ -455,6 +509,12 @@ impl Ppu {
     /// (bit 0 = vblank, bit 1 = STAT), 0 if none.
     pub fn tick(&mut self) -> u8 {
         self.strobe_tick();
+        if self.wy2_delay > 0 {
+            self.wy2_delay -= 1;
+            if self.wy2_delay == 0 {
+                self.wy2 = self.wy;
+            }
+        }
         if !self.enabled {
             return std::mem::take(&mut self.pending_if);
         }
@@ -467,9 +527,8 @@ impl Ppu {
         if self.dot == len {
             self.dot = 0;
             self.glitch_line = false;
-            if self.render.win_active {
-                self.win_line = self.win_line.wrapping_add(1);
-            }
+            // The window line counter advances at window *activation*
+            // (see `win_line`), not at line end.
             self.render.win_active = false;
             self.line = if self.line == 153 { 0 } else { self.line + 1 };
             self.start_line();
@@ -483,8 +542,11 @@ impl Ppu {
         match self.line {
             0 => {
                 self.ly = 0;
-                self.wy_latch = false;
-                self.win_line = 0;
+                // The WY latch is *assigned* at line 0 dot 2 (see
+                // `step_dot`) — that sample is the frame reset.
+                // gambatte M2_Ly0::f0: winYPos = 0xFF — the first
+                // activation of the frame increments it to row 0.
+                self.win_line = 0xFF;
                 self.line_render_done = false;
                 self.hdma_lead = false;
                 self.render.active = false;
@@ -515,13 +577,27 @@ impl Ppu {
     }
 
     fn step_dot(&mut self) {
-        if self.line <= 143 {
-            // WY latch: the window activates for the rest of the frame once
-            // LY==WY is observed while the window is enabled (Pan Docs).
-            // Rendering machinery samples the pipeline-view registers.
-            if self.eff.lcdc & LCDC_WIN_ENABLE != 0 && self.ly == self.eff.wy {
-                self.wy_latch = true;
+        // Frame-sticky WY condition (gambatte weMaster): sampled at
+        // discrete dots, not compared continuously — see `wy_latch`.
+        // gambatte's line-cycle anchors translate to our dot convention
+        // with a +1 shift on DMG (m3StartLineCycle is 83+cgb against our
+        // model-independent mode-3 start at dot 84).
+        let win_en = self.eff.lcdc & LCDC_WIN_ENABLE != 0;
+        let late = u16::from(!self.model.is_cgb());
+        if self.line == 0 && self.dot == 2 {
+            // Line 0: assignment, not OR — this is the frame reset
+            // (gambatte M2_Ly0::f0).
+            self.wy_latch = win_en && self.eff.wy == 0;
+        } else if self.line < 143 && !self.glitch_line {
+            if self.dot == 450 + late {
+                self.wy_latch |= win_en && self.ly == self.eff.wy;
+            } else if self.dot == 454 + late {
+                // Just before the LY increment the comparison already
+                // sees the upcoming line (gambatte M2_LyNon0::f1).
+                self.wy_latch |= win_en && self.ly + 1 == self.eff.wy;
             }
+        }
+        if self.line <= 143 {
             if self.glitch_line {
                 if self.dot == GLITCH_MODE3_START {
                     self.render_init();
@@ -911,6 +987,27 @@ impl Ppu {
             0xFF42 => self.scy = value,
             0xFF43 => self.scx = value,
             0xFF44 => {} // LY is read-only.
+            0xFF4A => {
+                self.wy = value;
+                // The live window-trigger comparison uses a delayed WY
+                // copy — see `wy2`.
+                if self.enabled {
+                    // CGB: ~6 dots after the architectural commit (5 in
+                    // double speed); DMG: 2 (gambatte wyChange: wy2 at
+                    // cc+6-ds on CGB with the LCD on, cc+2 otherwise,
+                    // one cycle later than the wx commit; calibrated
+                    // against the gambatte window/arg/late_wy_* rounds).
+                    self.wy2_delay = if !self.model.is_cgb() {
+                        2
+                    } else if self.staged_ds {
+                        5
+                    } else {
+                        6
+                    };
+                } else {
+                    self.wy2 = value;
+                }
+            }
             0xFF45 => {
                 self.lyc = value;
                 // The comparison retriggers immediately on LYC writes while
@@ -920,7 +1017,6 @@ impl Ppu {
             0xFF47 => self.bgp = value,
             0xFF48 => self.obp0 = value,
             0xFF49 => self.obp1 = value,
-            0xFF4A => self.wy = value,
             0xFF4B => self.wx = value,
             0xFF4F if self.model.is_cgb() => self.vbk = value & 1,
             0xFF68 if self.model.is_cgb() => self.bcps = value & 0xBF,
@@ -969,6 +1065,7 @@ impl Ppu {
             self.hdma_lead = false;
             self.render.active = false;
             self.render.win_active = false;
+            self.win_start_pending = false;
             let white = self.white();
             self.front.fill(white);
             self.refresh_stat(false);
@@ -988,7 +1085,8 @@ impl Ppu {
             self.hdma_lead = false;
             self.render.active = false;
             self.wy_latch = false;
-            self.win_line = 0;
+            self.win_line = 0xFF;
+            self.win_start_pending = false;
             self.refresh_stat(false);
         }
     }

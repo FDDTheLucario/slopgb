@@ -123,7 +123,6 @@ gbmicrotest/stat_write_glitch_l0_c.gb [Dmg]
 gbmicrotest/stat_write_glitch_l154_c.gb [Dmg]
 gbmicrotest/stat_write_glitch_l154_d.gb [Dmg]
 gbmicrotest/stat_write_glitch_l1_d.gb [Dmg]
-gbmicrotest/win0_scx3_a.gb [Dmg]
 gbmicrotest/win10_b.gb [Dmg]
 gbmicrotest/win10_scx3_b.gb [Dmg]
 gbmicrotest/win11_b.gb [Dmg]
@@ -131,12 +130,24 @@ gbmicrotest/win12_b.gb [Dmg]
 gbmicrotest/win13_b.gb [Dmg]
 gbmicrotest/win14_b.gb [Dmg]
 gbmicrotest/win15_b.gb [Dmg]
-gbmicrotest/win1_a.gb [Dmg]
-gbmicrotest/win2_a.gb [Dmg]
-gbmicrotest/win3_a.gb [Dmg]
-gbmicrotest/win4_a.gb [Dmg]
-gbmicrotest/win5_a.gb [Dmg]
-gbmicrotest/win6_a.gb [Dmg]
-gbmicrotest/win7_a.gb [Dmg]
 gbmicrotest/win8_b.gb [Dmg]
 gbmicrotest/win9_b.gb [Dmg]
+
+# Window-machine wave swap: the win*_a legs (STAT poll one M-cycle
+# earlier) now pass for the pinned reason -- WX 0-7 windows start with
+# the same 6-dot stall as WX 8-10, mealybug m3_window_timing photo-
+# perfect -- which puts the win0-7_b legs (and win0_scx3_b) on the same
+# post-LCD-enable line-timing skew their win8-15_b siblings always
+# failed on (hardware ends that line's mode 3 inside the _a/_b poll
+# window; we end it one poll later). Reverting the WX<=7 anchor would
+# restore these 9 rows but lose the 8 _a rows, 4 mealybug legs and the
+# gambatte m2int_wx00/03/07_m3stat family -- strictly worse.
+gbmicrotest/win0_b.gb [Dmg]
+gbmicrotest/win0_scx3_b.gb [Dmg]
+gbmicrotest/win1_b.gb [Dmg]
+gbmicrotest/win2_b.gb [Dmg]
+gbmicrotest/win3_b.gb [Dmg]
+gbmicrotest/win4_b.gb [Dmg]
+gbmicrotest/win5_b.gb [Dmg]
+gbmicrotest/win6_b.gb [Dmg]
+gbmicrotest/win7_b.gb [Dmg]

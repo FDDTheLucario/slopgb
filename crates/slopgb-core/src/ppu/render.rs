@@ -129,6 +129,16 @@ pub(super) struct Render {
     sp_fifo: [SpritePixel; 8],
 
     pub(super) win_active: bool,
+    /// WX comparator output on the previous dot: activations and
+    /// reactivations fire on the rising edge only (the match holds while
+    /// lx is frozen during the start stall and must not re-fire).
+    win_match_prev: bool,
+    /// Pause-aware prefill position (hardware positions -16..-9 as
+    /// 0..=8): walks one step per *non-stalled* dot from mode-3 dot 5,
+    /// driving both the SCX comparator hunt and the OBJ position
+    /// comparator for sprites with OAM X 0-7 — an OBJ fetch freezes the
+    /// walk (the SCX hunt pauses during an X<8 sprite fetch).
+    prefill_pos: u8,
 }
 
 impl Render {
@@ -159,6 +169,8 @@ impl Render {
             penalty_tiles: 0,
             sp_fifo: [EMPTY_SPRITE_PIXEL; 8],
             win_active: false,
+            win_match_prev: false,
+            prefill_pos: 0,
         }
     }
 }
@@ -289,9 +301,31 @@ impl Ppu {
         r.penalty_tiles = 0;
         r.sp_fifo = [EMPTY_SPRITE_PIXEL; 8];
         r.win_active = false;
+        r.win_match_prev = false;
+        r.prefill_pos = 0;
         if self.glitch_line {
             // No OAM scan ran on the glitched LCD-enable line: no sprites.
             r.n_sprites = 0;
+        }
+        // A window-start request carried over from a DMG WX=166 match
+        // (see `win_start_pending`): consumed at the next line's mode-3
+        // start, which begins the line with the window drawing from the
+        // left edge (gambatte M3Start::f0: a pending win_draw_start with
+        // the window enabled becomes win_draw_started and increments
+        // winYPos; otherwise the request drops). The line runs the
+        // normal 12-dot startup whose thrown-away first fetch consumes
+        // window column 0 — the on_screen/wxA6_wy00 reference pins the
+        // diagonal marker tiles one column left of their map position —
+        // and the SCX&7 fine-scroll hunt still applies (gambatte
+        // M3Start::f1 discards scx % 8 regardless of the window state).
+        if std::mem::take(&mut self.win_start_pending) && self.eff.lcdc & LCDC_WIN_ENABLE != 0 {
+            self.win_line = self.win_line.wrapping_add(1);
+            let r = &mut self.render;
+            // Counts as this line's activation: the line's own WX match
+            // must not increment the counter again.
+            r.win_active = true;
+            r.win_mode = true;
+            r.fetch_x = 1;
         }
     }
 
@@ -309,16 +343,55 @@ impl Ppu {
         // pipeline never pushes that tile, so the comparator runs here as
         // a bare counter. A match at dot 5+n fixes the discard schedule
         // at n leading pixels (pixel 0 then ships at dot 13+n, matching
-        // `hblank_ly_scx_timing-GS` for stable SCX).
-        if !self.render.hunt_done
-            && !self.render.win_mode
-            && (5..=12).contains(&self.render.mode3_dot)
-        {
-            if self.render.hunt_idx == self.eff.scx & 7 {
-                self.render.hunt_done = true;
-                self.render.discard = (self.render.mode3_dot - 5) as u8;
-            } else {
-                self.render.hunt_idx = (self.render.hunt_idx + 1) & 7;
+        // `hblank_ly_scx_timing-GS` for stable SCX). A line that *begins*
+        // in window mode (DMG WX=166 carryover) still runs the hunt —
+        // gambatte M3Start::f1 applies the scx % 8 discard regardless of
+        // the window state; mid-line window starts set `hunt_done`.
+        if self.render.mode3_dot >= 5 && self.render.prefill_pos < 8 {
+            let pos = self.render.prefill_pos;
+            if !self.render.hunt_done {
+                if self.render.hunt_idx == self.eff.scx & 7 {
+                    self.render.hunt_done = true;
+                    self.render.discard = pos;
+                } else {
+                    self.render.hunt_idx = (self.render.hunt_idx + 1) & 7;
+                }
+            }
+            // OBJ position comparator, prefill phase: sprites with OAM X
+            // 0-7 are reached while the thrown-away first tile shifts
+            // out — before any pixel pops — and their fetches freeze the
+            // pipeline *including the SCX hunt* (gambatte runs
+            // LoadSprites from xpos 0 with the M3Start scx discard
+            // resuming afterwards). The stall arithmetic is unchanged
+            // (mooneye intr_2_mode0_timing_sprites is the frozen
+            // oracle); unlike the mid-line path the BG fetcher does not
+            // catch up during the alignment wait — it is frozen with
+            // everything else, which keeps the 12-dot startup anchor.
+            self.render.prefill_pos += 1;
+            if self.eff.lcdc & LCDC_OBJ_ENABLE != 0 {
+                loop {
+                    let mut pick: Option<usize> = None;
+                    for i in 0..usize::from(self.render.n_sprites) {
+                        if self.render.fetched & (1 << i) != 0 {
+                            continue;
+                        }
+                        let s = self.render.sprites[i];
+                        if s.x == pos && pick.is_none() {
+                            pick = Some(i);
+                        }
+                    }
+                    let Some(i) = pick else { break };
+                    let s = self.render.sprites[i];
+                    let base = if self.render.fetched == 0 { 3 } else { 6 };
+                    self.render.fetched |= 1 << i;
+                    let wait = self.sprite_penalty(s.x);
+                    self.fetch_sprite(i);
+                    self.render.stall += base + wait;
+                }
+                if self.render.stall > 0 {
+                    self.render.stall -= 1;
+                    return;
+                }
             }
         }
 
@@ -347,7 +420,7 @@ impl Ppu {
                         continue;
                     }
                     let s = self.render.sprites[i];
-                    if s.x >= 168 || s.x.saturating_sub(8) != self.render.lx {
+                    if s.x < 8 || s.x >= 168 || s.x - 8 != self.render.lx {
                         continue;
                     }
                     // Strict `<` keeps the earlier slot (= lower OAM
@@ -383,26 +456,138 @@ impl Ppu {
             }
         }
 
-        // Window trigger: WX matches the next output pixel (WX-7..WX-1
-        // hang off the left edge for WX<7; WX=166 starts at pixel 159).
-        if !self.render.win_active
-            && self.win_enabled_now()
+        // Window trigger: the WX position comparator runs every dot
+        // (gambatte ppu.cpp plotPixel: `wx == xpos`, xpos < 168). The
+        // comparator also runs through the 8-dot prefill — mode-3 dots
+        // 6-13 in our grid — so WX 0-7 match before any pixel pops; from
+        // the first pop on a match at WX >= 8 lands the first window
+        // pixel at lx = WX-7. The wx+6 prefill anchor is pinned by the
+        // m3_window_timing reference photographs: every WX 0-7 line pops
+        // pixel 0 at dot 103 — the same 6-dot-delayed schedule as
+        // WX 8-10 — so trigger + 6-dot restart + (7-WX)-pixel discard
+        // must sum to 19 prefill dots. The machine is gated on LCDC.5 +
+        // the WY latch only: LCDC.0 blanks pixels at output but does not
+        // stop the window fetch (gambatte lcdcWinEn).
+        let wx = self.eff.wx;
+        let win_match = if wx <= 7 {
+            // Known limit: this anchor counts raw mode-3 dots, so an
+            // X<8 sprite stall (which pauses the prefill walk) shifts
+            // the hardware match later than ours; the affected
+            // wx<8+spx<8 combinations live in the documented
+            // sprites/space baseline rows.
+            self.render.mode3_dot == u16::from(wx) + 6
+        } else {
+            wx <= 166 && self.render.lx == wx - 7
+        };
+        // The WY condition: the frame-sticky latch OR a live match
+        // against the delayed WY copy (gambatte plotPixel:
+        // `weMaster || (wy2 == ly && lcdcWinEn)`).
+        let wy_ok = self.wy_latch || self.wy2 == self.ly;
+        // Rising edge only: the match level holds while lx is frozen
+        // through the start stall and must not re-fire.
+        let prev_match = std::mem::replace(&mut self.render.win_match_prev, win_match);
+        let win_match = win_match && !prev_match;
+        let win_en_now = self.eff.lcdc & LCDC_WIN_ENABLE != 0;
+        if win_match
+            && !win_en_now
             && self.wy_latch
-            && ((self.eff.wx >= 7 && self.render.lx == self.eff.wx - 7)
-                || (self.eff.wx < 7 && self.render.lx == 0))
+            && !self.model.is_cgb()
+            && wx == 166
+            && !self.win_start_pending
         {
-            let r = &mut self.render;
-            r.win_active = true;
-            r.win_mode = true;
-            r.bg_count = 0;
-            r.phase = FetchPhase::TileNoWait;
-            r.fetch_x = 0;
-            r.first_discard = false;
-            // Window pixels are not subject to SCX fine scroll; WX<7 cuts
-            // the leading 7-WX window columns instead, and the BG
-            // fine-scroll comparator hunt ends with the BG fetching.
-            r.hunt_done = true;
-            r.discard = 7u8.saturating_sub(self.eff.wx);
+            // DMG: a WX=166 match with the window *disabled* still
+            // latches the start request when the frame's WY latch holds
+            // (gambatte plotPixel's `!cgb` branch runs without lcdcWinEn
+            // when weMaster is set; requests at any other WX are
+            // consumed and dropped one dot later, but the xpos >= 167
+            // bound leaves the 166 one pending into the next line --
+            // on_screen/wxA6_weoff_at_xposA6). Honored at the next
+            // mode-3 start only if the window is enabled by then.
+            self.win_start_pending = true;
+        }
+        if win_match && wy_ok && win_en_now {
+            if !self.render.win_active {
+                // Activation: the window line counter advances *here*
+                // (gambatte plotPixel: ++winYPos), which is what makes a
+                // same-line retrigger draw the next row (mattcurrie
+                // comprehensive-ppu-doc §WIN_EN).
+                self.win_line = self.win_line.wrapping_add(1);
+                if !self.model.is_cgb() && wx == 166 {
+                    // DMG: the start request raised at a WX=166 match is
+                    // never consumed in-line (gambatte
+                    // handleWinDrawStartReq honors requests at
+                    // xpos >= 167 only on CGB): no window pixel ships —
+                    // the pipeline only freezes briefly for the aborted
+                    // start (m2int_wxA6_m3stat_1/_2 bracket the DMG
+                    // mode-3 end 1-4 dots past the unextended end) —
+                    // and the request survives to the next line's
+                    // mode-3 start (see `win_start_pending`). The line
+                    // still counts as started (gambatte keeps
+                    // win_draw_started set) — the comparator must not
+                    // re-fire while lx sits at 159 through the stall.
+                    self.win_start_pending = true;
+                    self.render.win_active = true;
+                    // Freeze from the match dot: 2 dots total.
+                    self.render.stall += 1;
+                    return;
+                } else {
+                    let r = &mut self.render;
+                    r.win_active = true;
+                    r.win_mode = true;
+                    r.bg_count = 0;
+                    r.phase = FetchPhase::TileNoWait;
+                    r.fetch_x = 0;
+                    r.first_discard = false;
+                    // Window pixels are not subject to SCX fine scroll;
+                    // WX<7 cuts the leading 7-WX window columns instead,
+                    // and the BG fine-scroll comparator hunt ends with
+                    // the BG fetching.
+                    r.hunt_done = true;
+                    r.discard = 7u8.saturating_sub(wx);
+                    if wx == 0 {
+                        // WX=0 with a fine scroll: the start eats the
+                        // SCX&7 discard plus one extra dot (SameBoy
+                        // display.c WX=0/SCX&7 extra cycle; the mealybug
+                        // m3_window_timing_wx_0 photos pin pixel 0 at
+                        // dot 103 + SCX&7 + 1 on both DMG and CGB-C).
+                        let fine = self.eff.scx & 7;
+                        if fine > 0 {
+                            r.discard += fine + 1;
+                        }
+                    }
+                }
+            } else if !self.model.is_cgb() && wx == 166 && !self.win_start_pending {
+                // DMG: a WX=166 match with the window already drawing
+                // re-arms the carryover without counting a new activation
+                // (gambatte plotPixel else-branch: `xpos == lcd_hres + 6`
+                // sets win_draw_start; M3Start::f0 increments winYPos
+                // when it consumes the request), with the same short
+                // aborted-start freeze. `win_start_pending` doubles as
+                // the once-per-line guard while lx sits at 159.
+                self.win_start_pending = true;
+                self.render.stall += 1;
+                return;
+            } else if self.render.win_mode && self.render.bg_count == 8 {
+                // Window *reactivation*: a WX match while the window is
+                // already drawing, landing exactly on the dot that ships
+                // the first pixel of a window tile, emits one color-0
+                // pixel and delays the rest of the line by one dot
+                // (mealybug m3_wx_5_change.asm: "Window reactivation
+                // zero pixels should be present when window is already
+                // activated and the pixel that the window reactivates on
+                // is on the same cycle as the window tile nametable
+                // read" -- its reference photos pin the inserted zero
+                // pixel on exactly the rows where WX-7 falls on a window
+                // tile boundary, and pin that off-boundary matches have
+                // no visible effect).
+                self.output_pixel(0, 0);
+                self.render.lx += 1;
+                if self.render.lx == 160 {
+                    self.render.active = false;
+                    self.line_render_done = true;
+                }
+                return;
+            }
         }
 
         // Pop one BG/window pixel.
@@ -416,7 +601,7 @@ impl Ppu {
             let attr = r.bg_attr;
             if r.discard > 0 {
                 r.discard -= 1;
-            } else if !r.win_mode && !r.hunt_done {
+            } else if !r.hunt_done {
                 // Comparator hunt, pop-rate phase: the match was missed
                 // during dots 5-12 (an SCX write moved it), so the
                 // counter wrapped (-9 -> -16) and keeps hunting through
@@ -459,13 +644,35 @@ impl Ppu {
         }
     }
 
-    fn win_enabled_now(&self) -> bool {
-        // DMG: LCDC bit 0 gates the window as well; native CGB: bit 0 is
-        // only priority. DMG compatibility mode behaves like DMG — bit 0
-        // clear blanks BG *and* window, ignoring the window enable bit
-        // (Pan Docs LCDC.0) — mirroring `output_pixel`'s bg_off condition.
-        self.eff.lcdc & LCDC_WIN_ENABLE != 0
-            && ((self.model.is_cgb() && !self.dmg_compat) || self.eff.lcdc & LCDC_BG_ENABLE != 0)
+    /// LCDC.5 cleared mid-line while the window is drawing. The disable
+    /// "takes effect at the end of the current window tile being drawn"
+    /// and the BG then resumes "on a tile boundary — the low 3 bits of
+    /// SCX have no effect" (mattcurrie comprehensive-ppu-doc §WIN_EN).
+    /// Mechanically (gambatte ppu.cpp setLcdc + Tile::f0): the started
+    /// flag clears immediately, the FIFO/latched window tile row still
+    /// ships, remaining reads of the in-flight fetch revert to BG
+    /// addressing, and the next BG map read uses the live column
+    /// `(scx + xpos + 1 - cgb) / 8` — re-anchoring the tile grid to the
+    /// output position rather than re-showing skipped columns.
+    pub(super) fn window_abort(&mut self) {
+        if !self.render.win_mode {
+            return;
+        }
+        let cgb = self.model.is_cgb();
+        let r = &mut self.render;
+        r.win_mode = false;
+        // Re-arms the trigger: re-enabling with WX pointing at a pixel
+        // not yet drawn retriggers the window (doc §WIN_EN).
+        r.win_active = false;
+        // First screen pixel of the tile the *next* tile-number read
+        // belongs to: the FIFO drains bg_count more pops (minus pending
+        // discards), and a fetch already past its tile-number read ships
+        // one more full row first.
+        let tileno_pending = matches!(r.phase, FetchPhase::TileNoWait | FetchPhase::TileNo);
+        let x = i32::from(r.lx) + i32::from(r.bg_count) - i32::from(r.discard)
+            + if tileno_pending { 0 } else { 8 };
+        let col = (i32::from(self.eff.scx) + x.max(0) + 1 - i32::from(cgb)) >> 3;
+        r.fetch_x = (col as u8).wrapping_sub(self.eff.scx >> 3) & 31;
     }
 
     fn fetcher_step(&mut self) {
@@ -1258,19 +1465,349 @@ mod tests {
         assert_eq!(px(&p, 2, 0), WHITE);
     }
 
+    /// A WX<=7 value written before mode 3 triggers at its prefill dot
+    /// even when WX is rewritten twice more mid-line (the m3_wx_5_change
+    /// per-line pattern): the prefill match wins and the later rewrites
+    /// find the window already active.
+    #[test]
+    fn wx_prefill_trigger_survives_midline_wx_rewrites() {
+        let mut p = dmg_on(0xF3);
+        p.write(0xFF4A, 4); // WY=4
+        p.write(0xFF4B, 80);
+        for r in 0..8 {
+            set_tile_row(&mut p, 0, 1, r, 0xFF, 0x00); // BG LIGHT
+            set_tile_row(&mut p, 0, 2, r, 0xFF, 0xFF); // window BLACK
+        }
+        for row in 0..32 {
+            for col in 0..32 {
+                set_map(&mut p, 0x1800, row, col, 1);
+                set_map(&mut p, 0x1C00, row, col, 2);
+            }
+        }
+        // Line 10: WX=5 early (dot 58), WX=10 at dot 100, WX=80 at dot 196.
+        run_to(&mut p, 10, 56);
+        mcycle_write(&mut p, 0xFF4B, 5);
+        run_to(&mut p, 10, 98);
+        mcycle_write(&mut p, 0xFF4B, 10);
+        run_to(&mut p, 10, 194);
+        mcycle_write(&mut p, 0xFF4B, 80);
+        finish_line(&mut p);
+        assert_eq!(px(&p, 10, 0), BLACK, "WX=5 prefill trigger: window from 0");
+        assert_eq!(px(&p, 10, 80), BLACK, "window continues");
+    }
+    // --- Window machine: LCDC.5 mid-line disable / re-enable ---
+    //
+    // mattcurrie's comprehensive-ppu-doc §WIN_EN: "WIN_EN can be disabled
+    // during mode 3. The disabling will take effect at the end of the
+    // current window tile being drawn. When the current window tile has
+    // finished being drawn, the PPU will start drawing background tiles
+    // again. When the background resumes drawing it is on a tile boundary.
+    // The low 3 bits of SCX have no effect. [...] If WX has been updated
+    // correctly and WIN_EN is set again then [...] it will start drawing
+    // the next row of the window, on the same scanline."
+
+    /// Window at WX=15 (pixel 8); WIN_EN staged off so the pipeline view
+    /// commits at dot 127, mid-way through the window tile covering pixels
+    /// 24-31. That tile (and the fetch already in flight) finishes; the BG
+    /// resumes at pixel 32 on a tile boundary at the live map column
+    /// (gambatte ppu.cpp Tile::f0: `(scx + xpos + 1 - cgb) / 8`), without
+    /// re-showing the columns the window covered.
+    #[test]
+    fn win_en_disable_mid_line_finishes_window_tile_then_bg_resumes() {
+        let mut p = dmg_on(0xF1); // win map 9C00, win on, data 8000, bg map 9800
+        p.write(0xFF4A, 0); // WY=0
+        p.write(0xFF4B, 15); // window from pixel 8
+        for r in 0..8 {
+            set_tile_row(&mut p, 0, 1, r, 0xFF, 0x00); // tile 1: solid LIGHT
+            set_tile_row(&mut p, 0, 2, r, 0xFF, 0xFF); // tile 2: solid BLACK
+            set_tile_row(&mut p, 0, 3, r, 0x00, 0xFF); // tile 3: solid DARK
+        }
+        for col in 0..32 {
+            set_map(&mut p, 0x1800, 0, col, 1); // BG: LIGHT everywhere...
+            set_map(&mut p, 0x1C00, 0, col, 2); // window: BLACK everywhere
+        }
+        set_map(&mut p, 0x1800, 0, 5, 3); // ...except BG col 5: DARK
+        // Window triggers at dot 105 (lx==8); window pixel x pops at dot
+        // 103+x. Stage the disable at state(124): eff commits at dot 127,
+        // while the window tile covering 24-31 pops.
+        run_to(&mut p, 2, 124);
+        mcycle_write(&mut p, 0xFF40, 0xD1);
+        let v0 = finish_line(&mut p);
+        assert_eq!(px(&p, 2, 7), LIGHT, "BG before the window");
+        assert_eq!(px(&p, 2, 8), BLACK, "window from pixel 8");
+        assert_eq!(px(&p, 2, 31), BLACK, "current window tile finishes");
+        assert_eq!(
+            px(&p, 2, 32),
+            LIGHT,
+            "BG resumes on the tile boundary at the live column (col 4)"
+        );
+        assert_eq!(px(&p, 2, 39), LIGHT);
+        assert_eq!(px(&p, 2, 40), DARK, "BG col 5 follows: columns 0-3 skipped");
+        assert_eq!(v0, 262, "the 6-dot window penalty is not refunded");
+    }
+
+    /// After a mid-line disable, re-enabling WIN_EN with WX pointing at a
+    /// not-yet-drawn pixel retriggers the window — drawing the *next*
+    /// window row on the same scanline (doc §WIN_EN; gambatte plotPixel
+    /// increments winYPos on every activation).
+    #[test]
+    fn win_en_reenable_same_line_draws_next_window_row() {
+        let mut p = dmg_on(0xF1);
+        p.write(0xFF4A, 0);
+        p.write(0xFF4B, 15);
+        for r in 0..8 {
+            set_tile_row(&mut p, 0, 1, r, 0xFF, 0x00); // BG tile: LIGHT
+        }
+        set_tile_row(&mut p, 0, 2, 2, 0xFF, 0xFF); // win row 2: BLACK
+        set_tile_row(&mut p, 0, 2, 3, 0x00, 0xFF); // win row 3: DARK
+        for col in 0..32 {
+            set_map(&mut p, 0x1800, 0, col, 1);
+            set_map(&mut p, 0x1C00, 0, col, 2);
+        }
+        run_to(&mut p, 2, 124);
+        mcycle_write(&mut p, 0xFF40, 0xD1); // window off mid-tile
+        p.write(0xFF4B, 107); // new WX: pixel 100, not yet drawn
+        mcycle_write(&mut p, 0xFF40, 0xF1); // window back on
+        let v0 = finish_line(&mut p);
+        assert_eq!(px(&p, 2, 8), BLACK, "first segment: window row 2");
+        assert_eq!(px(&p, 2, 99), LIGHT, "BG between the segments");
+        assert_eq!(
+            px(&p, 2, 100),
+            DARK,
+            "second segment retriggers at the new WX with the next row (3)"
+        );
+        assert_eq!(px(&p, 2, 108), DARK, "window column advances normally");
+        assert_eq!(p.win_line, 3, "retrigger advanced the line counter");
+        assert_eq!(v0, 268, "two window starts: 256 + 6 + 6");
+    }
+
+    /// The window line counter increments at each activation (gambatte
+    /// plotPixel ++winYPos, init 0xFF at frame start), not at line end:
+    /// WX=166 activates every line — advancing the counter — even though
+    /// at most the last pixel can show window output.
+    #[test]
+    fn wx_166_advances_window_line_counter_every_line() {
+        let mut p = cgb_on(0xB1); // native CGB: no DMG carryover quirk
+        p.write(0xFF4A, 0); // WY=0
+        p.write(0xFF4B, 166);
+        render_line(&mut p, 0);
+        assert_eq!(p.win_line, 0, "line 0 activation: 0xFF + 1");
+        let v0 = render_line(&mut p, 1);
+        assert_eq!(p.win_line, 1);
+        assert_eq!(v0, 262, "CGB: the WX=166 start stalls the line end 6 dots");
+        p.write(0xFF4B, 15); // normal WX on line 2
+        render_line(&mut p, 2);
+        assert_eq!(p.win_line, 2, "line 2 draws window row 2: rows 0-1 skipped");
+    }
+
+    /// DMG WX=166 quirk: the start request raised at the match cannot be
+    /// consumed before the pipeline ends (gambatte handleWinDrawStartReq
+    /// honors requests at xpos >= 167 only on CGB), so the match line
+    /// shows no window pixel and only pays a short freeze for the
+    /// aborted start (m2int_wxA6_m3stat_1/_2 bracket the DMG end between
+    /// 1 and 4 dots past the unextended end). The request survives to
+    /// the next line, which starts with the window drawing from the
+    /// left edge (gambatte M3Start::f0; on_screen/wxA6_wy00), re-arms
+    /// itself at its own match, and the chain repeats — one window row
+    /// per line.
+    #[test]
+    fn dmg_wx_166_no_window_pixels_counter_advances() {
+        let mut p = dmg_on(0xF1);
+        p.write(0xFF4A, 1); // WY=1: line 0 (the LCD-enable glitch line) is clean
+        p.write(0xFF4B, 166);
+        for r in 0..8 {
+            set_tile_row(&mut p, 0, 2, r, 0xFF, 0xFF); // window: BLACK
+        }
+        for col in 0..32 {
+            set_map(&mut p, 0x1C00, 0, col, 2);
+        }
+        let v0 = render_line(&mut p, 1);
+        assert_eq!(v0, 258, "DMG: only the aborted-start stall extends mode 3");
+        assert_eq!(px(&p, 1, 159), WHITE, "no window pixel on the match line");
+        assert_eq!(p.win_line, 0, "the activation still counted a row");
+        let v0 = render_line(&mut p, 2);
+        assert_eq!(px(&p, 2, 0), BLACK, "carryover: window from the left edge");
+        assert_eq!(px(&p, 2, 159), BLACK);
+        assert_eq!(p.win_line, 1, "mode-3 start consumed the request: ++row");
+        assert_eq!(v0, 258, "the re-armed match pays the same freeze");
+        // The carried-over activation suppresses the line's own match
+        // increment but re-arms the request: one row per line.
+        render_line(&mut p, 3);
+        assert_eq!(px(&p, 3, 0), BLACK);
+        assert_eq!(p.win_line, 2);
+    }
+
+    /// The WY condition is sampled at discrete dots (gambatte weMaster
+    /// checks at line cycles 450/454 and line 0 dot 2), not compared
+    /// continuously: a WY value that matches LY only *between* the
+    /// sample points and is gone again by the window's WX match dot
+    /// must not arm the frame latch. The live comparison against the
+    /// delayed wy2 copy covers same-line writes instead.
+    #[test]
+    fn wy_latch_samples_discretely() {
+        let mut p = dmg_on(0xB1);
+        p.write(0xFF4B, 87); // window at pixel 80
+        p.write(0xFF4A, 200); // WY: no match anywhere
+        // Mid-line on line 2 (after dot 2, before dot 451), set WY=2 and
+        // move it away again before the dot-451 sample: with continuous
+        // latching this would arm the window for the rest of the frame.
+        run_to(&mut p, 2, 100);
+        p.write(0xFF4A, 2);
+        run_to(&mut p, 2, 300);
+        p.write(0xFF4A, 200);
+        let v0 = render_line(&mut p, 3);
+        assert_eq!(v0, 256, "no window: WY matched only between samples");
+        // A WY write that holds through the dot-451 sample arms the
+        // latch for the rest of the frame.
+        run_to(&mut p, 4, 100);
+        p.write(0xFF4A, 4);
+        run_to(&mut p, 5, 0);
+        p.write(0xFF4A, 200);
+        let v0 = render_line(&mut p, 6);
+        assert_eq!(v0, 262, "the dot-451 sample armed the frame latch");
+    }
+
+    /// On CGB the live WY comparison uses a copy that lags the
+    /// architectural write by ~6 dots (gambatte video.cpp wyChange:
+    /// wy2 at cc+6 vs the wx-style commit at cc+2): a WY write landing
+    /// within 6 dots before the WX match dot is not seen by the
+    /// comparator on that line.
+    #[test]
+    fn cgb_wy2_lags_architectural_wy() {
+        let mut p = cgb_on(0xB1);
+        p.write(0xFF4B, 87); // window at pixel 80: match dot 170
+        p.write(0xFF4A, 200);
+        // Commit WY=2 at dot 173 of line 2: arch wy == ly at the match
+        // dot 177 (lx == 80), but wy2 catches up only at dot 179.
+        run_to(&mut p, 2, 173);
+        p.write(0xFF4A, 2);
+        let v0 = finish_line(&mut p);
+        assert_eq!(v0, 256, "wy2 still held the old value at the match");
+        // Same write 5 dots earlier: wy2 caught up before the match.
+        let mut p = cgb_on(0xB1);
+        p.write(0xFF4B, 87);
+        p.write(0xFF4A, 200);
+        run_to(&mut p, 3, 168);
+        p.write(0xFF4A, 3);
+        let v0 = finish_line(&mut p);
+        assert_eq!(v0, 262, "wy2 caught up: the live comparison triggers");
+    }
+
+    /// Sprites with OAM X 0-7 are fetched during the 8-dot prefill walk
+    /// (positions 0-7, before any pixel pops), and the fetch pauses the
+    /// SCX comparator hunt: an SCX rewrite landing inside the sprite
+    /// stall is seen by the *paused* comparator when it resumes, not
+    /// missed (gambatte scx_during_m3 spx0/spx1; the mode-3 length
+    /// tables of intr_2_mode0_timing_sprites are unchanged because the
+    /// stall and discard counts are additive either way).
+    #[test]
+    fn prefill_sprite_fetch_pauses_scx_hunt() {
+        // Baseline: scx=3 + one sprite at X=0 -> discard 3 + stall
+        // 3 + (5 - (0+3)) = 5 (Pan Docs OBJ penalty with the
+        // first-fetch discount).
+        let mut p = dmg_on(0x93);
+        p.write(0xFF43, 3);
+        sprite(&mut p, 0, 19, 0, 0, 0);
+        let v0 = render_line(&mut p, 3);
+        assert_eq!(v0, 264, "discard 3 + first-sprite stall 5");
+        // SCX rewritten from 7 to 2 during the sprite stall (X=0 with
+        // SCX=7: stall 3 over dots 89-91, the hunt frozen at position
+        // 0): the resumed hunt walks positions 1, 2 against the
+        // committed SCX=2 and matches at position 2 -> discard 2. An
+        // unpaused hunt would have walked past index 2 before the
+        // commit, wrapped, and re-hunted through the pops.
+        let mut p = dmg_on(0x93);
+        p.write(0xFF43, 7);
+        sprite(&mut p, 0, 19, 0, 0, 0);
+        run_to(&mut p, 3, 88);
+        mcycle_write(&mut p, 0xFF43, 2);
+        let v0 = finish_line(&mut p);
+        assert_eq!(v0, 261, "paused hunt: discard 2 + stall 3");
+    }
+
+    /// WX reaches the pipeline one dot later than the palette strobe
+    /// (see `stage_write`): a WX=LY rewrite committing at the WX=6
+    /// prefill comparator dot beats the wx=6 match but not the wx=5 one
+    /// (mealybug m3_wx_4/5/6_change).
+    #[test]
+    fn wx_commit_is_one_dot_later_than_palettes() {
+        for (early_wx, hits) in [(5u8, true), (6, false)] {
+            let mut p = dmg_on(0xB1);
+            p.write(0xFF4A, 0);
+            p.write(0xFF4B, early_wx);
+            // Stage WX=200 at state(92): the +1 commit lands at dot 96 =
+            // prefill position dot for WX=6 (mode-3 dot 12), one past
+            // the WX=5 dot (11).
+            run_to(&mut p, 2, 92);
+            mcycle_write(&mut p, 0xFF4B, 200);
+            let v0 = finish_line(&mut p);
+            if hits {
+                assert_eq!(v0, 262, "wx=5 matched at dot 95, before the commit");
+            } else {
+                assert_eq!(v0, 256, "wx=6's match dot 96 already saw the rewrite");
+            }
+        }
+    }
+
+    /// A WX match while the window is already drawing ("reactivation"),
+    /// landing on the dot that ships the first pixel of a window tile,
+    /// emits one color-0 pixel and pushes the rest of the line out by a
+    /// dot; off-boundary matches do nothing (mealybug m3_wx_5_change
+    /// asm note + reference photos).
+    #[test]
+    fn window_reactivation_zero_pixel_on_tile_boundary() {
+        let mut p = dmg_on(0xF1);
+        p.write(0xFF4A, 0);
+        p.write(0xFF4B, 15); // window from pixel 8
+        for r in 0..8 {
+            set_tile_row(&mut p, 0, 2, r, 0xFF, 0xFF); // window: BLACK
+        }
+        for col in 0..32 {
+            set_map(&mut p, 0x1C00, 0, col, 2);
+        }
+        // Window tile boundaries at pixels 8, 16, 24...; pixel 16 pops
+        // at dot 119 with bg_count == 8. Stage WX=23 so the comparator
+        // matches lx==16 exactly there.
+        run_to(&mut p, 2, 112);
+        mcycle_write(&mut p, 0xFF4B, 23);
+        let v0 = finish_line(&mut p);
+        assert_eq!(px(&p, 2, 15), BLACK, "window before the reactivation");
+        assert_eq!(px(&p, 2, 16), WHITE, "the inserted zero pixel");
+        assert_eq!(px(&p, 2, 17), BLACK, "window resumes, shifted one dot");
+        // The injected pixel replaces a FIFO pixel at the line's tail:
+        // mode-3 length is unchanged.
+        assert_eq!(v0, 262, "zero pixel does not extend mode 3");
+    }
+
+    /// LCDC.0 does not gate the window *machine* on DMG: with BG/window
+    /// display disabled the pixels blank, but the fetch stall and the
+    /// line-counter advance still happen (gambatte ppu.cpp lcdcWinEn
+    /// checks only LCDC.5; the bgen bit masks pixels at output).
+    #[test]
+    fn dmg_lcdc0_off_window_still_stalls_and_counts() {
+        let mut p = dmg_on(0xB0); // window on, BG/window display off
+        p.write(0xFF4A, 0);
+        p.write(0xFF4B, 87); // window from pixel 80
+        let v0 = render_line(&mut p, 2);
+        assert_eq!(v0, 262, "window penalty applies with LCDC.0 clear");
+        assert_eq!(p.win_line, 2, "line counter advances (lines 0-2)");
+        assert_eq!(px(&p, 2, 80), WHITE, "pixels blank through LCDC.0");
+    }
+
     #[test]
     fn cgb_dmg_compat_lcdc0_gates_window() {
-        // DMG compatibility mode: LCDC.0 behaves like DMG — clear blanks
-        // BG *and* window, the window enable bit is ignored (Pan Docs
-        // "LCDC.0 — BG and Window enable/priority"). No window trigger
-        // means no 6-dot penalty and no window line counter advance.
+        // DMG compatibility mode: LCDC.0 clear blanks BG *and* window
+        // pixels (Pan Docs "LCDC.0 — BG and Window enable/priority"), but
+        // the window *machine* — trigger, 6-dot stall, line counter — only
+        // looks at LCDC.5, exactly as on DMG (gambatte lcdcWinEn).
         let mut p = cgb_on(0xB0); // LCD on, window on, LCDC.0 = 0
         p.set_dmg_compat(true);
         p.write(0xFF4A, 0); // WY = 0
         p.write(0xFF4B, 87); // WX: window from pixel 80
         let v0 = render_line(&mut p, 2);
-        assert_eq!(v0, 256, "no window penalty in compat mode with LCDC.0=0");
-        assert_eq!(p.win_line, 0, "win_line must not advance");
+        assert_eq!(v0, 262, "window stall applies in compat mode, LCDC.0=0");
+        assert_eq!(p.win_line, 2, "line counter advances (lines 0-2)");
+        assert_eq!(px(&p, 2, 80), CGB_WHITE, "pixels blank through LCDC.0");
 
         // Native CGB mode: LCDC.0 is only priority — window unaffected.
         let mut p = cgb_on(0xB0);
@@ -1278,7 +1815,7 @@ mod tests {
         p.write(0xFF4B, 87);
         let v0 = render_line(&mut p, 2);
         assert_eq!(v0, 262, "native CGB: window triggers despite LCDC.0=0");
-        assert_eq!(p.win_line, 2, "lines 0 and 1 advanced the counter");
+        assert_eq!(p.win_line, 2, "lines 0, 1 and 2 advanced the counter");
     }
 
     // --- Sprite rendering ---
