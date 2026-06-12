@@ -305,6 +305,37 @@ impl Interconnect {
         &mut self.cart
     }
 
+    /// Drain captured serial output (test-harness hook; see
+    /// `Serial::take_output`).
+    pub(crate) fn take_serial_output(&mut self) -> Vec<u8> {
+        self.serial.take_output()
+    }
+
+    /// Side-effect-free, time-free view of memory for test harnesses:
+    /// `&self` guarantees no peripheral ticks and no read side effects.
+    ///
+    /// Deliberately omniscient — unlike a CPU read it ignores PPU
+    /// mode-based VRAM/OAM lockout and OAM DMA bus conflicts.
+    /// ROM/VRAM/cart-RAM/WRAM follow the live banking; disabled cart RAM
+    /// still reads $FF like a real access (`Cartridge::read_ram`). IO
+    /// registers (FF00-FF7F) are *not* peekable — their values are
+    /// computed from live peripheral state under the tick-then-access
+    /// contract, and reading them out of band would mislead harnesses —
+    /// and the FEA0-FEFF prohibited area has no stable content; both read
+    /// $FF here.
+    pub(crate) fn peek(&self, addr: u16) -> u8 {
+        match addr {
+            0x0000..=0x7FFF => self.cart.read_rom(addr),
+            0x8000..=0x9FFF => self.ppu.vram_read_raw(addr),
+            0xA000..=0xBFFF => self.cart.read_ram(addr),
+            0xC000..=0xFDFF => self.wram[self.wram_index(addr)],
+            0xFE00..=0xFE9F => self.ppu.oam_read_raw(addr),
+            0xFEA0..=0xFF7F => 0xFF,
+            0xFF80..=0xFFFE => self.hram[usize::from(addr - 0xFF80)],
+            0xFFFF => self.ie,
+        }
+    }
+
     /// Advance the whole machine by one CPU M-cycle (docs/ARCHITECTURE.md
     /// §Timing: timer, OAM DMA engine, PPU dots, VRAM DMA, APU, serial,
     /// joypad; IF bits OR-ed in as produced).
@@ -1466,6 +1497,75 @@ mod tests {
         assert_eq!(b.read(0xFF55), 0x86, "cancelled: bit 7 + remaining");
         ticks(&mut b, 101); // into line 1's hblank (~dot 800, VRAM readable)
         assert_eq!(b.read(0x8010), 0x00, "no further blocks after cancel");
+    }
+
+    // ---- peek (side-effect-free harness view) -----------------------------
+
+    /// `peek` takes `&self`: it ticks nothing and observes raw memory —
+    /// WRAM/echo, HRAM, OAM, IE — without advancing time.
+    #[test]
+    fn peek_reads_plain_memory_without_time() {
+        let mut b = ic(Model::Dmg);
+        b.write_no_tick(0xC123, 0x11);
+        b.write_no_tick(0xFF80, 0x22);
+        b.write_no_tick(0xFE05, 0x33);
+        b.write_no_tick(0xFFFF, 0xE4);
+        let cycles = b.cycles();
+        assert_eq!(b.peek(0xC123), 0x11);
+        assert_eq!(b.peek(0xE123), 0x11, "echo");
+        assert_eq!(b.peek(0xFF80), 0x22);
+        assert_eq!(b.peek(0xFE05), 0x33);
+        assert_eq!(b.peek(0xFFFF), 0xE4);
+        assert_eq!(b.cycles(), cycles, "no time passed");
+    }
+
+    /// `peek` is omniscient by design: it ignores the PPU's mode-based
+    /// VRAM/OAM lockout that makes a real CPU read return $FF.
+    #[test]
+    fn peek_ignores_ppu_access_blocking() {
+        let mut b = ic(Model::Dmg);
+        b.write_no_tick(0x8500, 0x44);
+        b.write_no_tick(0xFE00, 0x55);
+        b.write(0xFF40, 0x91); // LCD on
+        // Into mode 3 of the glitched first line: VRAM and OAM locked.
+        ticks(&mut b, (452 + 120) / 4);
+        assert_eq!(b.read(0x8500), 0xFF, "real VRAM read: locked");
+        assert_eq!(b.read(0xFE00), 0xFF, "real OAM read: locked");
+        assert_eq!(b.peek(0x8500), 0x44);
+        assert_eq!(b.peek(0xFE00), 0x55);
+    }
+
+    /// IO registers are not peekable; the whole FF00-FF7F range (and the
+    /// FEA0-FEFF prohibited area) reads $FF through `peek`.
+    #[test]
+    fn peek_io_reads_ff() {
+        let mut b = ic(Model::Dmg);
+        b.write(0xFF40, 0x91);
+        assert_eq!(b.read(0xFF40), 0x91, "real IO read works");
+        assert_eq!(b.peek(0xFF40), 0xFF, "peek does not");
+        assert_eq!(b.peek(0xFF00), 0xFF);
+        assert_eq!(b.peek(0xFF0F), 0xFF);
+        assert_eq!(b.peek(0xFEA0), 0xFF);
+    }
+
+    /// `peek` follows the live VBK/SVBK banking on CGB.
+    #[test]
+    fn peek_follows_cgb_banking() {
+        let mut b = ic_cgb_mode();
+        b.write(0x8000, 0x11);
+        b.write(0xFF4F, 0x01);
+        b.write(0x8000, 0x22);
+        assert_eq!(b.peek(0x8000), 0x22, "active VRAM bank");
+        b.write(0xFF4F, 0x00);
+        assert_eq!(b.peek(0x8000), 0x11);
+        b.write(0xFF70, 0x03);
+        b.write(0xD000, 0x33);
+        b.write(0xFF70, 0x04);
+        b.write(0xD000, 0x44);
+        assert_eq!(b.peek(0xD000), 0x44, "active WRAM bank");
+        assert_eq!(b.peek(0xF000), 0x44, "echo follows the bank");
+        b.write(0xFF70, 0x03);
+        assert_eq!(b.peek(0xD000), 0x33);
     }
 
     // ---- post-boot state ---------------------------------------------------
