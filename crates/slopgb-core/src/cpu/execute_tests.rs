@@ -4,7 +4,7 @@
 
 use super::super::{Bus, Cpu, Registers, flags};
 use super::step;
-use Ev::{Read, Tick, Write};
+use Ev::{Read, ReadInc, Tick, TickAddr, Write};
 
 /// One bus event == one M-cycle. The index in [`TestBus::log`] is the
 /// cycle index, so comparing whole logs asserts both the kind and the
@@ -14,6 +14,12 @@ enum Ev {
     Read(u16, u8),
     Write(u16, u8),
     Tick,
+    /// Internal cycle with a 16-bit inc/dec-unit value on the address bus
+    /// ([`Bus::tick_addr`] — DMG OAM bug trigger).
+    TickAddr(u16),
+    /// Read in the same M-cycle as a 16-bit increment/decrement of the
+    /// address register ([`Bus::read_inc`]).
+    ReadInc(u16, u8),
 }
 
 /// 64 KiB flat RAM. IF lives at 0xFF0F and IE at 0xFFFF inside `mem`, so
@@ -92,6 +98,18 @@ impl Bus for TestBus {
     fn tick(&mut self) {
         self.advance();
         self.log.push(Tick);
+    }
+
+    fn tick_addr(&mut self, value: u16) {
+        self.advance();
+        self.log.push(TickAddr(value));
+    }
+
+    fn read_inc(&mut self, addr: u16) -> u8 {
+        self.advance();
+        let v = self.mem[usize::from(addr)];
+        self.log.push(ReadInc(addr, v));
+        v
     }
 
     fn pending(&self) -> u8 {
@@ -269,7 +287,9 @@ fn ld_a_indirect_loads_and_stores() {
     assert_eq!(c.regs.hl(), 0xC703);
     b.take_log();
     step(&mut c, &mut b);
-    assert_eq!(b.log, [Read(PC0 + 3, 0x3A), Read(0xC703, 0x00)]);
+    // The HL decrement shares the M-cycle with the read (SameBoy v0.12.1
+    // ld_a_dhld: an inc/dec-unit read, like the HL+ variant).
+    assert_eq!(b.log, [Read(PC0 + 3, 0x3A), ReadInc(0xC703, 0x00)]);
     assert_eq!(c.regs.hl(), 0xC702);
 }
 
@@ -352,7 +372,9 @@ fn ld_sp_hl_has_internal_cycle() {
     c.regs.set_hl(0x1234);
     let mut b = bus(&[0xF9]);
     step(&mut c, &mut b);
-    assert_eq!(b.log, [Read(PC0, 0xF9), Tick]);
+    // The internal cycle drives the new SP (= HL) onto the address bus
+    // (SameBoy ld_sp_hl: cycle_oam_bug on the HL value).
+    assert_eq!(b.log, [Read(PC0, 0xF9), TickAddr(0x1234)]);
     assert_eq!(c.regs.sp, 0x1234);
 }
 
@@ -368,7 +390,8 @@ fn push_has_internal_cycle_before_writes() {
         b.log,
         [
             Read(PC0, 0xC5),
-            Tick,
+            // The pre-decrement SP rides the address bus (SameBoy push_rr).
+            TickAddr(SP0),
             Write(SP0 - 1, 0x12),
             Write(SP0 - 2, 0x34)
         ]
@@ -384,7 +407,7 @@ fn pop_has_no_internal_cycle() {
     step(&mut c, &mut b);
     assert_eq!(
         b.log,
-        [Read(PC0, 0xD1), Read(SP0, 0x34), Read(SP0 + 1, 0x12)]
+        [Read(PC0, 0xD1), ReadInc(SP0, 0x34), ReadInc(SP0 + 1, 0x12)]
     );
     assert_eq!(c.regs.de(), 0x1234);
     assert_eq!(c.regs.sp, SP0 + 2);
@@ -411,7 +434,7 @@ fn push_af_writes_a_then_f() {
         b.log,
         [
             Read(PC0, 0xF5),
-            Tick,
+            TickAddr(SP0),
             Write(SP0 - 1, 0x12),
             Write(SP0 - 2, 0xF0)
         ]
@@ -583,12 +606,56 @@ fn inc_dec_rp_trace_and_wrap() {
     c.regs.sp = 0xFFFF;
     let mut b = bus(&[0x33, 0x3B]);
     step(&mut c, &mut b);
-    assert_eq!(b.take_log(), [Read(PC0, 0x33), Tick]);
+    assert_eq!(b.take_log(), [Read(PC0, 0x33), TickAddr(0xFFFF)]);
     assert_eq!(c.regs.sp, 0x0000);
     step(&mut c, &mut b);
-    assert_eq!(b.take_log(), [Read(PC0 + 1, 0x3B), Tick]);
+    assert_eq!(b.take_log(), [Read(PC0 + 1, 0x3B), TickAddr(0x0000)]);
     assert_eq!(c.regs.sp, 0xFFFF);
     assert_eq!(c.regs.f(), 0); // no flags
+}
+
+// ----- DMG OAM bug: 16-bit inc/dec-unit values on the address bus -----
+// (Pan Docs "OAM Corruption Bug"; trigger sites per SameBoy sm83_cpu.c.)
+
+#[test]
+fn inc_dec_rp_internal_cycle_drives_pre_op_value() {
+    // The *pre*-increment/decrement value rides the address bus: blargg
+    // oam_bug/2-causes corrupts on INC DE from $FE00 but 3-non_causes is
+    // clean on INC DE from $FDFF and DEC DE from $FF00.
+    let mut c = cpu();
+    c.regs.set_de(0xFE00);
+    let mut b = bus(&[0x13, 0x1B]); // INC DE; DEC DE
+    step(&mut c, &mut b);
+    assert_eq!(b.take_log(), [Read(PC0, 0x13), TickAddr(0xFE00)]);
+    assert_eq!(c.regs.de(), 0xFE01);
+    step(&mut c, &mut b);
+    assert_eq!(b.take_log(), [Read(PC0 + 1, 0x1B), TickAddr(0xFE01)]);
+    assert_eq!(c.regs.de(), 0xFE00);
+}
+
+#[test]
+fn non_causes_keep_plain_cycles() {
+    // blargg oam_bug/3-non_causes: the 16-bit *adder* ops (ADD HL,rr;
+    // ADD SP,e; LD HL,SP+e), 8-bit INC/DEC and plain indirect loads do
+    // not involve the inc/dec unit — no address-bus value, no
+    // increase-read.
+    let mut c = cpu();
+    c.regs.set_hl(0xFE00);
+    c.regs.set_bc(0x0001);
+    c.regs.sp = 0xFE00;
+    c.regs.set_de(0xC700);
+    // ADD HL,BC; ADD SP,1; LD HL,SP+1; INC E; LD A,(DE)
+    let mut b = bus(&[0x09, 0xE8, 0x01, 0xF8, 0x01, 0x1C, 0x1A]);
+    for _ in 0..5 {
+        step(&mut c, &mut b);
+    }
+    assert!(
+        b.log
+            .iter()
+            .all(|e| !matches!(e, TickAddr(_) | ReadInc(..))),
+        "unexpected inc/dec-unit cycle: {:?}",
+        b.log
+    );
 }
 
 // ----- 16-bit arithmetic -----
@@ -925,7 +992,8 @@ fn call_nn_exact_event_order() {
             Read(PC0, 0xCD),
             Read(PC0 + 1, 0x34),
             Read(PC0 + 2, 0x12),
-            Tick,
+            // Pre-push internal cycle drives SP (SameBoy call_a16).
+            TickAddr(SP0),
             Write(SP0 - 1, 0xC0),
             Write(SP0 - 2, 0x03)
         ]
@@ -961,7 +1029,12 @@ fn ret_and_ret_cc_traces() {
     step(&mut c, &mut b);
     assert_eq!(
         b.log,
-        [Read(PC0, 0xC9), Read(SP0, 0x34), Read(SP0 + 1, 0x12), Tick]
+        [
+            Read(PC0, 0xC9),
+            ReadInc(SP0, 0x34),
+            ReadInc(SP0 + 1, 0x12),
+            Tick
+        ]
     );
     assert_eq!(c.regs.pc, 0x1234);
 
@@ -974,8 +1047,8 @@ fn ret_and_ret_cc_traces() {
         [
             Read(PC0, 0xC0),
             Tick,
-            Read(SP0, 0x34),
-            Read(SP0 + 1, 0x12),
+            ReadInc(SP0, 0x34),
+            ReadInc(SP0 + 1, 0x12),
             Tick
         ]
     );
@@ -998,7 +1071,7 @@ fn rst_timing_like_call_tail() {
         b.log,
         [
             Read(PC0, 0xEF),
-            Tick,
+            TickAddr(SP0),
             Write(SP0 - 1, 0xC0),
             Write(SP0 - 2, 0x01)
         ]
@@ -1237,7 +1310,12 @@ fn reti_sets_ime_immediately() {
     step(&mut c, &mut b);
     assert_eq!(
         b.take_log(),
-        [Read(PC0, 0xD9), Read(SP0, 0x00), Read(SP0 + 1, 0xC1), Tick]
+        [
+            Read(PC0, 0xD9),
+            ReadInc(SP0, 0x00),
+            ReadInc(SP0 + 1, 0xC1),
+            Tick
+        ]
     );
     assert!(c.ime);
     assert_eq!(c.regs.pc, 0xC100);

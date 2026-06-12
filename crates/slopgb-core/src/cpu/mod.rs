@@ -16,16 +16,21 @@ use crate::model::Model;
 /// One M-cycle granular view of the rest of the machine, as seen by the CPU.
 ///
 /// Contract (see docs/ARCHITECTURE.md §Timing):
-/// * Each of [`read`](Bus::read), [`write`](Bus::write) and
-///   [`tick`](Bus::tick) advances the machine by exactly one M-cycle, then
-///   performs the access (if any).
-/// * The access part of [`read`](Bus::read) must have no side effects — a
-///   read may differ from [`tick`](Bus::tick) only in the value it returns.
-///   The halted CPU issues a discarded prefetch read of PC every idle
-///   M-cycle to model its NOP-loop-equivalent wake timing (see
-///   `execute::step`), even though the halted CPU performs no bus accesses
-///   on hardware; a side-effecting read would turn those into phantom
-///   accesses.
+/// * Each of [`read`](Bus::read), [`write`](Bus::write), [`tick`](Bus::tick)
+///   and their OAM-bug-carrying variants [`tick_addr`](Bus::tick_addr) /
+///   [`read_inc`](Bus::read_inc) advances the machine by exactly one
+///   M-cycle, then performs the access (if any).
+/// * The access part of [`read`](Bus::read) must have no side effects
+///   beyond the DMG OAM corruption bug (any $FE00-$FEFF access during the
+///   mode-2 OAM scan corrupts OAM — Pan Docs "OAM Corruption Bug");
+///   otherwise a read may differ from [`tick`](Bus::tick) only in the
+///   value it returns. The halted CPU issues a discarded prefetch read of
+///   PC every idle M-cycle to model its NOP-loop-equivalent wake timing
+///   (see `execute::step`), even though the halted CPU performs no bus
+///   accesses on hardware; the interconnect therefore suppresses the OAM
+///   bug while the core clock is gated off (see
+///   `Interconnect::set_cpu_halted`), keeping those phantom reads
+///   side-effect-free.
 /// * [`pending`](Bus::pending) and [`ack`](Bus::ack) take no time.
 pub trait Bus {
     /// One M-cycle ending in a memory read.
@@ -34,6 +39,26 @@ pub trait Bus {
     fn write(&mut self, addr: u16, value: u8);
     /// One M-cycle with no memory access.
     fn tick(&mut self);
+    /// One M-cycle with no memory access, but with `value` — a 16-bit
+    /// register the SM83's 16-bit increment/decrement unit operates on
+    /// this cycle (INC rr/DEC rr, the PUSH/CALL/RST pre-push cycle's SP,
+    /// LD SP,HL's HL) — driven onto the address bus. A value in
+    /// $FE00-$FEFF during a DMG-family mode-2 OAM scan triggers the OAM
+    /// corruption bug's write pattern (Pan Docs "OAM Corruption Bug");
+    /// otherwise identical to [`tick`](Bus::tick), which is the default.
+    fn tick_addr(&mut self, _value: u16) {
+        self.tick();
+    }
+    /// One M-cycle ending in a memory read whose address register is
+    /// incremented/decremented by the 16-bit inc/dec unit in the same
+    /// cycle (POP/RET reads via SP, LD A,(HL+)/(HL-)). A $FE00-$FEFF
+    /// address during a DMG-family mode-2 OAM scan triggers the OAM
+    /// corruption bug's "read during increase" pattern instead of the
+    /// plain read pattern; otherwise identical to [`read`](Bus::read),
+    /// which is the default.
+    fn read_inc(&mut self, addr: u16) -> u8 {
+        self.read(addr)
+    }
     /// `IF & IE & 0x1F` right now. Takes no time.
     fn pending(&self) -> u8;
     /// Clear bit `bit` (0..=4) of IF. Takes no time.

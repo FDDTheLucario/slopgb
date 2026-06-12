@@ -347,19 +347,20 @@ const BASELINE_MEM_TIMING: &[&str] = &[];
 const BASELINE_MEM_TIMING_2: &[&str] = &[];
 const BASELINE_DMG_SOUND: &[&str] = &[];
 const BASELINE_CGB_SOUND: &[&str] = &[];
-// The DMG OAM corruption bug is not implemented; exactly the cases that
-// require the corruption to *happen* fail (status codes from the ROMs'
-// $A004 reports), while 1-lcd_sync, 3-non_causes and 6-timing_no_bug —
-// which assert its absence or bug-free timing — pass, as does the
-// combined ROM's bug-free CGB screenshot leg.
-const BASELINE_OAM_BUG: &[&str] = &[
-    "blargg/oam_bug/oam_bug.gb [Dmg]",
-    "blargg/oam_bug/rom_singles/2-causes.gb [Dmg]",
-    "blargg/oam_bug/rom_singles/4-scanline_timing.gb [Dmg]",
-    "blargg/oam_bug/rom_singles/5-timing_bug.gb [Dmg]",
-    "blargg/oam_bug/rom_singles/7-timing_effect.gb [Dmg]",
-    "blargg/oam_bug/rom_singles/8-instr_effect.gb [Dmg]",
-];
+// The DMG OAM corruption bug is implemented (`Ppu::oam_bug`). The one
+// remaining failure is a defect in the shipped *single*, not in the
+// emulation: with hardware-correct corruption, 7-timing_effect prints
+// twenty ~525-byte OAM dumps (19 corruptions swept across the first
+// scanline plus one at the start of the second — exactly the set whose
+// simulated checksum stream reproduces the ROM's own expected CRC
+// $7D792E7C), and its unbounded $A004 text writer (common/shell.s
+// `write_text_out`) overflows the 8 KiB cart RAM into the WRAM-resident
+// runtime at $C000, destroying the test mid-run — the $A000 signature
+// protocol can never complete, on real hardware just the same. The
+// combined oam_bug.gb — a multi build with compact per-test reporting,
+// and the only artifact the collection's howto verifies on hardware —
+// runs the same test-7 logic (same CRC check) and passes.
+const BASELINE_OAM_BUG: &[&str] = &["blargg/oam_bug/rom_singles/7-timing_effect.gb [Dmg]"];
 const BASELINE_INTERRUPT_TIME: &[&str] = &[];
 const BASELINE_HALT_BUG: &[&str] = &[];
 
