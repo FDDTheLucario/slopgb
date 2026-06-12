@@ -302,15 +302,13 @@ fn smallsuites_turtle_tests() {
 
 // --------------------------------------------------------- scribbltests --
 
-// scxly fails on both models (SCX-during-LY behavior, whole test area
-// off); its CGB reference is additionally an off-convention asset — it
-// uses green-LCD colors (#0F380F/#98C00F) that no `(c << 3) | (c >> 2)`
+// scxly's [Dmg] leg passes since the per-source STAT-event port (the LYC
+// IRQ no longer rides the wired-OR line, so the per-line LYC handler runs
+// on time). The CGB reference is an off-convention asset — it uses
+// green-LCD colors (#0F380F/#98C00F) that no `(c << 3) | (c >> 2)`
 // expansion of any RGB555 palette can produce, so the [Cgb] leg can never
 // pass under the Identity compare even with correct compat palettes.
-const SCRIBBL_BASELINE: &[&str] = &[
-    "scribbltests/scxly/scxly.gb [Dmg]",
-    "scribbltests/scxly/scxly.gb [Cgb]",
-];
+const SCRIBBL_BASELINE: &[&str] = &["scribbltests/scxly/scxly.gb [Cgb]"];
 
 /// Scribbltests (`scribbltests/game-boy-test-roms-howto.md`): around 10
 /// frames is enough (run 15) except `statcount-auto`, which needs ~270

@@ -99,30 +99,36 @@ slopgb is a cycle-accurate Game Boy (DMG) / Game Boy Color (CGB) emulator.
   entirely while the vblank source enable is set — gambatte
   `mstat_irq.h doM2Event` and the mealybug handlers' "line 0 timing is
   different by 4 cycles" compensation pin both rules.
-- **STAT mode-2 events vs levels** (see the scanline timeline in
-  `ppu/mod.rs`): the OAM STAT interrupt is an *event* — a pulse at
-  line-start dot 0 on lines 1-143, dot 4 on line 0, 144:0
-  at vblank entry on both families (one M-cycle before the vblank IF),
-  DMG dot 12 on lines 145-153 — while the OAM *blocking level* spans
-  dots 0..mode-3 end and blocks mode-0/LYC edges under it (SameBoy
-  display.c one-shot `mode_for_interrupt`; gambatte mstat_irq.h blocking
-  predicates; gbmicrotest oam_int/line_144_oam_int grids; wilbertpol
-  intr_2_timing; mealybug per-line handlers). The dot-0 pulses are
-  second-half commits: IF reads back at once, but both the halt-exit
-  sampler (`Ppu::take_stat_halt_late` → `Interconnect::if_late`, the
-  timer mask shape) and the running CPU's same-cycle interrupt sample
+- **STAT IRQs are per-source events with predicates**
+  (`Ppu::stat_events_tick`, a function-by-function port of gambatte
+  mstat_irq.h `MStatIrqEvent` + lyc_irq.cpp `LycIrq`; the truth table
+  lives in its doc comment): there is no wired-OR STAT line on the IRQ
+  side — each source fires at its own dot (m2 pulses at line-start dot
+  0 on lines 1-144, dot 4 on line 0, DMG dot 12 on lines 145-153; m1 at
+  144:4; LYC at (N,4) and (153,12); m0 at the visible-flip dot), gated
+  by the *other* sources' enables sampled through delayed FF41/FF45
+  copies (the `statRegChange`/`lycRegChange` guard windows, staged
+  6/6/8 dots at single speed, 2 in double speed, with per-event fresh
+  views). m0 is blocked only by a matching delayed LYC — never by the
+  m2 enable; m1 by delayed m2en|m0en; per-line m2 pulses are routed
+  away entirely while m0en is live (mode2IrqSchedule) and are
+  lyc-blocked against the previous line's compare; LYC events are
+  m2-blocked for values 1-144 and m1-blocked otherwise. The dot-0
+  pulses stay second-half commits: IF reads back at once, but both the
+  halt-exit sampler (`Ppu::take_stat_halt_late` → `Interconnect::
+  if_late`) and the running CPU's same-cycle interrupt sample
   (`Ppu::take_stat_late` → `if_stat_late`) miss them for one M-cycle —
-  the CGB 144:0 pulse is exempt. (The CGB double-speed sub-cycle phase of
-  the pulse is not separately modelled: the gambatte *_ds STAT-IRQ rows
-  carry documented-swap baselines.) Enables written into the mode-3
-  stretch of the blocking level raise nothing; inside dots 0..84 they
-  keep level edges on DMG (gambatte m2enable/late_enable), while CGB
-  fires written m2 enables only in the last M-cycle before a visible
-  line's pulse (gambatte statChangeTriggersM2IrqCgb — see the CGB-C
-  deltas section in `ppu/mod.rs` for the whole per-model timeline:
-  readable-LYC holds, the delayed FF45 event copy, line-0 mode-1 tail,
-  VRAM/OAM blocking shifts, the LY=153 windows, and the boot LCD
-  phase). The **mode-0 flip/IRQ
+  the CGB 144:0 pulse is exempt. Register writes raise IF only through
+  the ported trigger predicates: the DMG STAT-write glitch branch table
+  (`stat_write_trigger_dmg`) plus a dots-0/4 line-start pulse
+  re-decide, the CGB newly-enabled-bits table
+  (`stat_write_trigger_cgb`) plus a dot-0 re-decide, and the FF45
+  tables (`write_lyc_dmg`/`write_lyc_cgb`, gambatte
+  lycRegChangeTriggersStatIrq). Double-speed/lcd-offset sub-cells stay
+  documented-swap baselines. (See the CGB-C deltas section in
+  `ppu/mod.rs` for the per-model timeline: readable-LYC holds, the
+  delayed FF45 event copy, line-0 mode-1 tail, VRAM/OAM blocking
+  shifts, the LY=153 windows, and the boot LCD phase.) The **mode-0 flip/IRQ
   anchor** (formerly parked) is re-derived jointly: the visible flip
   (STAT mode bits, OAM/VRAM unblock) and the mode-0 IRQ source rise
   together **2 dots before the pipe end** — 254+SCX%8 on a bare line,
