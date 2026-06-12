@@ -3,10 +3,11 @@
 # mealybug_matrix against the pinned v7.0 collection; shrinking this list is
 # progress, growing it is a regression (harness::assert_against_baseline).
 #
-# 36 of 55 rom x model legs fail. Passing: mbc/mbc3_rtc.gb (both),
+# 34 of 55 rom x model legs fail. Passing: mbc/mbc3_rtc.gb (both),
 # dma/hdma_during_halt-C (HBlank DMA defers across the core-clock gate
 # and re-fires at the wake - the gambatte-shaped HDMA engine),
-# m2_win_en_toggle [Cgb], and pixel-perfect both legs: m3_bgp_change,
+# m2_win_en_toggle [Cgb], m3_lcdc_bg_en_change/change2 [Cgb] (mode-0
+# event-grid re-derivation), and pixel-perfect both legs: m3_bgp_change,
 # m3_scx_low_3_bits (write strobe + SCX hunt wave), m3_window_timing,
 # m3_window_timing_wx_0, m3_lcdc_win_en_change_multiple,
 # m3_wx_4_change_sprites + the [Dmg]-only m3_wx_4/5/6_change (window
@@ -35,9 +36,7 @@ mealybug-tearoom-tests/ppu/m3_obp0_change.gb [Dmg]
 
 # ppu/ mode-3 mid-scanline LCDC writes (bg/win enable, maps, tile data,
 # obj enable/size).
-mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change.gb [Cgb]
 mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change.gb [Dmg]
-mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change2.gb [Cgb]
 mealybug-tearoom-tests/ppu/m3_lcdc_bg_map_change.gb [Cgb]
 mealybug-tearoom-tests/ppu/m3_lcdc_bg_map_change.gb [Dmg]
 mealybug-tearoom-tests/ppu/m3_lcdc_bg_map_change2.gb [Cgb]

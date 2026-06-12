@@ -98,11 +98,24 @@ slopgb is a cycle-accurate Game Boy (DMG) / Game Boy Color (CGB) emulator.
   the pulse is not separately modelled: the gambatte *_ds STAT-IRQ rows
   carry documented-swap baselines.) Enables written into the mode-3
   stretch of the blocking level raise nothing; inside dots 0..84 they
-  keep level edges (gambatte m2enable/late_enable). The mode-0 visible-flip/IF
-  split (flip at D−3, IF at D−2 per the gbmicrotest grids) is
-  investigated but **parked**: it conflicts with the dispatch anchors
-  the mealybug photos and wilbertpol *_nops chains pin until the pixel
-  pipe and dispatch sampling are re-derived together.
+  keep level edges (gambatte m2enable/late_enable). The **mode-0 flip/IRQ
+  anchor** (formerly parked) is re-derived jointly: the visible flip
+  (STAT mode bits, OAM/VRAM unblock) and the mode-0 IRQ source rise
+  together **2 dots before the pipe end** — 254+SCX%8 on a bare line,
+  with the pipe-end anchors (HBlank-DMA trigger, palette blocking)
+  unmoved at 256+SCX%8 — and the first OBJ fetch of a line costs 5 dots
+  (not 3), which keeps every sprite-laden flip on its old dot while bare
+  lines flip 2 dots earlier. The rise is fully visible to the running
+  CPU's interrupt sample in its own M-cycle (no dispatch law), but a
+  rise in the second half of the M-cycle is missed by the halt-exit
+  sampler for one cycle (the timer-`if_late` shape). The LCD-enable
+  glitch line starts its pipe at dot 82 (blocking still at 78), putting
+  its flip/IRQ at 252+SCX%8. Pinned jointly by the gbmicrotest
+  hblank_int/int_hblank(+_halt)/ppu_sprite0/win/sprite4 grids, mooneye
+  intr_2_mode0_timing(+_sprites)/hblank_ly_scx_timing-GS/lcdon_timing-GS
+  and the mealybug photos (whose dispatch anchors stay bit-identical at
+  SCX=0); gambatte's xpos-166/167 event pair folds to the same single
+  dot under its cc+2 access offset.
 - OAM DMA is an interconnect engine: 160 M-cycles + startup delay, restart
   semantics (an FF46 rewrite retargets the in-flight run immediately),
   source-range quirks (CGB sources ≥ $E0 read $FF; DMG re-reads WRAM), and
