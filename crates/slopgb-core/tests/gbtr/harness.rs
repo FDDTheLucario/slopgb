@@ -139,6 +139,55 @@ pub fn expect_frame_png(gb: &GameBoy, png_path: &Path, map: CgbColorMap) -> Resu
     })
 }
 
+/// Run `f`, converting a panic into `Err(payload text)`. Panic-hook output
+/// is suppressed for the duration (`common::quiet_catch_unwind`) so expected
+/// per-case panics cannot bury the structured failure report a suite builds.
+pub fn catch_panic<R>(f: impl FnOnce() -> R) -> Result<R, String> {
+    crate::common::quiet_catch_unwind(f).map_err(|p| crate::common::panic_message(p.as_ref()))
+}
+
+/// One case body through [`catch_panic`]: a panicking case becomes a
+/// regular `Err("panicked: …")` [`CaseResult`] payload, so a core crash in
+/// one rom×model case can never abort a whole suite matrix.
+pub fn catch_case(f: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
+    catch_panic(f).unwrap_or_else(|msg| Err(format!("panicked: {msg}")))
+}
+
+/// Parse a known-failure baseline file: one case key per line. Blank lines
+/// and whole-line `#` comments are ignored; a trailing comment is introduced
+/// by ` #` (space-hash, the key then trimmed) so a `#subtest` discriminator
+/// *inside* a key — smallsuites' `rtc3test/rtc3test.gb#basic-tests [Dmg]`
+/// style — survives if such a suite ever moves its baseline to a txt file.
+pub fn parse_baseline(text: &str) -> Vec<&str> {
+    text.lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+            let key = match line.find(" #") {
+                Some(i) => line[..i].trim_end(),
+                None => line,
+            };
+            (!key.is_empty()).then_some(key)
+        })
+        .collect()
+}
+
+/// `path` relative to `root` as a forward-slash string — the suites' case
+/// key and inventory entry format, independent of the host path separator
+/// (Windows CI yields backslash components otherwise). A path outside
+/// `root` is a harness bug and panics; callers must never silently fall
+/// back to an absolute path that no baseline or inventory entry can match.
+pub fn rel_unix(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or_else(|_| panic!("{} not under {}", path.display(), root.display()))
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// One executed rom×model case: `key` identifies it (stable across runs,
 /// e.g. `"dmg-acid2/dmg-acid2.gb [Cgb]"`), `result` is the protocol verdict.
 pub struct CaseResult {
@@ -251,5 +300,75 @@ mod tests {
             case_key("dmg-acid2/dmg-acid2.gb", slopgb_core::Model::Cgb),
             "dmg-acid2/dmg-acid2.gb [Cgb]"
         );
+    }
+
+    // --- panic isolation ---
+
+    #[test]
+    fn catch_case_converts_panics_and_passes_results_through() {
+        assert_eq!(catch_case(|| Ok(())), Ok(()));
+        assert_eq!(catch_case(|| Err("plain".into())), Err("plain".into()));
+        let err = catch_case(|| panic!("boom {}", 42)).unwrap_err();
+        assert_eq!(err, "panicked: boom 42");
+        let err = catch_case(|| std::panic::panic_any(7u32)).unwrap_err();
+        assert_eq!(err, "panicked: non-string panic payload");
+    }
+
+    #[test]
+    fn catch_panic_preserves_the_return_value() {
+        assert_eq!(catch_panic(|| vec![1, 2, 3]), Ok(vec![1, 2, 3]));
+        assert_eq!(catch_panic(|| -> u8 { panic!("x") }), Err("x".into()));
+    }
+
+    // --- baseline file grammar ---
+
+    #[test]
+    fn parse_baseline_skips_blanks_and_whole_line_comments() {
+        let text = "# header\n\n  a/b.gb [Dmg]  \n# note\nc/d.gbc [Cgb]\n";
+        assert_eq!(parse_baseline(text), ["a/b.gb [Dmg]", "c/d.gbc [Cgb]"]);
+        assert!(parse_baseline("").is_empty());
+        assert!(parse_baseline("# only comments\n\n").is_empty());
+    }
+
+    #[test]
+    fn parse_baseline_strips_trailing_space_hash_comments() {
+        assert_eq!(
+            parse_baseline("a [Dmg]\nb [Cgb] # trailing note\n  c [Dmg]   #x\n"),
+            ["a [Dmg]", "b [Cgb]", "c [Dmg]"]
+        );
+        // A line that is only a comment after trimming yields no key.
+        assert!(parse_baseline("   # indented comment\n").is_empty());
+    }
+
+    #[test]
+    fn parse_baseline_keeps_hash_subtest_discriminators() {
+        // The trailing-comment marker is ` #` (space-hash), so a bare `#`
+        // inside a key — the rtc3test subtest convention — must survive,
+        // even combined with a real trailing comment.
+        let text = "rtc3test/rtc3test.gb#basic-tests [Dmg]\n\
+                    rtc3test/rtc3test.gb#range-tests [Cgb] # flaky\n";
+        assert_eq!(
+            parse_baseline(text),
+            [
+                "rtc3test/rtc3test.gb#basic-tests [Dmg]",
+                "rtc3test/rtc3test.gb#range-tests [Cgb]"
+            ]
+        );
+    }
+
+    // --- rel_unix ---
+
+    #[test]
+    fn rel_unix_joins_components_with_forward_slashes() {
+        assert_eq!(
+            rel_unix(Path::new("/a/b"), Path::new("/a/b/dmg-acid2/dmg-acid2.gb")),
+            "dmg-acid2/dmg-acid2.gb"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "not under")]
+    fn rel_unix_panics_on_paths_outside_the_root() {
+        rel_unix(Path::new("/a/b"), Path::new("/elsewhere/rom.gb"));
     }
 }

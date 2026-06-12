@@ -314,7 +314,8 @@ pub fn collect_roms(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>) -> std:
     Ok(())
 }
 
-fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+/// Best-effort text of a caught panic payload (the `&str`/`String` cases).
+pub fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
     if let Some(s) = payload.downcast_ref::<&str>() {
         (*s).to_string()
     } else if let Some(s) = payload.downcast_ref::<String>() {
@@ -341,7 +342,10 @@ thread_local! {
 /// opted into suppression. The hook is installed exactly once per test binary
 /// (`set_hook` is process-global); the suppression flag is per-thread so
 /// parallel test threads cannot silence each other.
-fn quiet_catch_unwind<R>(
+///
+/// Public for the gbtr harness (`gbtr/harness.rs::catch_panic`), whose
+/// per-case panic isolation needs the same hook suppression.
+pub fn quiet_catch_unwind<R>(
     f: impl FnOnce() -> R,
 ) -> Result<R, Box<dyn std::any::Any + Send + 'static>> {
     static INSTALL_HOOK: Once = Once::new();
