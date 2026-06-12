@@ -23,10 +23,6 @@
 #    HALT-glitch sprite under our MGB OAM-scan model (its 18 sprite pixels
 #    come out as bare checkerboard), although the byte-different
 #    mts-20240926 build passes the identical reference in tests/mooneye.rs.
-#  - manual-only (1): sprite_priority on CGB — our boot-assigned DMG-compat
-#    palette renders the OBP1 sprites grey (#A5A5A5) where the c-sp
-#    reference expects the documented compat colors (#FF8484); the DMG case
-#    passes.
 
 # --- acceptance/gpu ---
 mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-C.gb [Agb]
@@ -126,4 +122,3 @@ mooneye-test-suite-wilbertpol/acceptance/timer/timer_if.gb [Sgb]
 
 # --- frame-compare cases ---
 mooneye-test-suite-wilbertpol/madness/mgb_oam_dma_halt_sprites.gb [Mgb]
-mooneye-test-suite-wilbertpol/manual-only/sprite_priority.gb [Cgb]

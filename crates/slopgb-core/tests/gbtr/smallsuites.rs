@@ -282,10 +282,11 @@ fn smallsuites_turtle_tests() {
 // --------------------------------------------------------- scribbltests --
 
 // scxly fails on both models (SCX-during-LY behavior, whole test area
-// off); the palettely/scxly CGB legs additionally render the core's grey
-// compat palette where the references show CGB-boot-assigned colors.
+// off); its CGB reference is additionally an off-convention asset — it
+// uses green-LCD colors (#0F380F/#98C00F) that no `(c << 3) | (c >> 2)`
+// expansion of any RGB555 palette can produce, so the [Cgb] leg can never
+// pass under the Identity compare even with correct compat palettes.
 const SCRIBBL_BASELINE: &[&str] = &[
-    "scribbltests/palettely/palettely.gb [Cgb]",
     "scribbltests/scxly/scxly.gb [Dmg]",
     "scribbltests/scxly/scxly.gb [Cgb]",
 ];
@@ -320,14 +321,11 @@ fn smallsuites_scribbltests() {
 
 // ----------------------------------------------------- little-things-gb --
 
-// Both CGB legs fail on colors only: the core renders its grey DMG-compat
-// palette where the references show the CGB boot ROM's per-game palette
-// (firstwhite also shows non-white pixels in its first-frame window).
-// The DMG legs pass — the tellinglys drive sequence itself is sound.
-const LITTLE_THINGS_BASELINE: &[&str] = &[
-    "little-things-gb/firstwhite.gb [Cgb]",
-    "little-things-gb/tellinglys.gb [Cgb]",
-];
+// Empty: tellinglys matches its per-model references on both models, and
+// firstwhite passes on both models via the hardware first-frame-after-LCD-
+// enable blanking (Ppu::frame_skip) — without it the ROM's text showed on
+// 1 of every 3 frames and the verdict depended on sampling phase.
+const LITTLE_THINGS_BASELINE: &[&str] = &[];
 
 /// Joypad schedule for `little-things-gb/tellinglys.gb`:
 /// `(button, gap_tcycles_before_press, hold_tcycles)` for all eight buttons.
@@ -429,9 +427,11 @@ fn smallsuites_little_things_gb() {
 
 // ---------------------------------------------------------- mbc3-tester --
 
-// DMG leg: ~1280 pixels off in the results area; CGB leg additionally
-// renders the core's grey compat palette where the reference shows the
-// CGB boot ROM's per-game colors (#7BFF4A greens).
+// DMG leg: ~1280 pixels of genuine results-area diff; the CGB leg shares
+// it and its reference is additionally an off-convention asset — its green
+// is #7BFF4A where the collection's `(c << 3) | (c >> 2)` expansion of the
+// default compat palette gives #7BFF31 (the ROM is not Nintendo-licensed,
+// so no per-game boot palette exists either). Not fixable by palette work.
 const MBC3_TESTER_BASELINE: &[&str] = &[
     "mbc3-tester/mbc3-tester.gb [Dmg]",
     "mbc3-tester/mbc3-tester.gb [Cgb]",

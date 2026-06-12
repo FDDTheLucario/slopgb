@@ -62,8 +62,18 @@ impl GameBoy {
     pub fn new(model: Model, rom: Vec<u8>) -> Result<Self, CartridgeError> {
         let cart = cartridge::Cartridge::from_bytes(rom)?;
         let mut bus = interconnect::Interconnect::new(model, cart);
-        let cpu = cpu::Cpu::new(model);
+        let mut cpu = cpu::Cpu::new(model);
         bus.apply_post_boot_state();
+        if bus.cgb_mode() {
+            // CGB-flagged cart: the CGB/AGB boot ROM hands off DE=$FF56
+            // HL=$000D instead of the DMG-cart values in the per-model
+            // table (Pan Docs "CPU registers", Power-Up Sequence). A/F/B/C
+            // are cart-independent. Pure register-file override with no
+            // timing side effects; it only needs to land before the first
+            // `step`.
+            cpu.regs_mut().set_de(0xFF56);
+            cpu.regs_mut().set_hl(0x000D);
+        }
         Ok(Self { cpu, bus })
     }
 
@@ -202,5 +212,40 @@ impl GameBoy {
     #[doc(hidden)]
     pub fn drain_audio_raw(&mut self, out: &mut Vec<(f32, f32)>) {
         self.bus.apu_mut().drain_raw_samples(out);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rom_with_cgb_flag(flag: u8) -> Vec<u8> {
+        let mut rom = vec![0u8; 0x8000];
+        rom[0x143] = flag;
+        rom
+    }
+
+    /// Pan Docs "CPU registers" (Power-Up Sequence): on CGB/AGB hardware
+    /// the boot ROM hands a CGB-flagged cart off with DE=$FF56 HL=$000D;
+    /// a DMG cart gets DE=$0008 HL=$007C (mooneye misc/boot_regs-cgb/-A —
+    /// every mooneye ROM is DMG-flagged). A/F/B/C are cart-independent:
+    /// AGB's extra `inc b` gives B=$01/F=$00 for both cart kinds.
+    #[test]
+    fn cgb_flagged_cart_boot_regs() {
+        for (model, af, bc) in [(Model::Cgb, 0x1180, 0x0000), (Model::Agb, 0x1100, 0x0100)] {
+            let gb = GameBoy::new(model, rom_with_cgb_flag(0x80)).unwrap();
+            let r = gb.cpu_regs();
+            assert_eq!(r.af(), af, "{model:?} CGB cart AF");
+            assert_eq!(r.bc(), bc, "{model:?} CGB cart BC");
+            assert_eq!(r.de(), 0xFF56, "{model:?} CGB cart DE");
+            assert_eq!(r.hl(), 0x000D, "{model:?} CGB cart HL");
+
+            let gb = GameBoy::new(model, rom_with_cgb_flag(0x00)).unwrap();
+            let r = gb.cpu_regs();
+            assert_eq!(r.af(), af, "{model:?} DMG cart AF");
+            assert_eq!(r.bc(), bc, "{model:?} DMG cart BC");
+            assert_eq!(r.de(), 0x0008, "{model:?} DMG cart DE");
+            assert_eq!(r.hl(), 0x007C, "{model:?} DMG cart HL");
+        }
     }
 }

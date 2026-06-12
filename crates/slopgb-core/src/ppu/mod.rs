@@ -154,6 +154,12 @@ pub struct Ppu {
     dot: u16,
     /// First line after LCD enable (no OAM scan, shifted mode 3, 452 dots).
     glitch_line: bool,
+    /// The frame currently being rendered is the first one after an LCD
+    /// enable: hardware does not display it — the panel stays blank/white
+    /// for one frame (Pan Docs "LCDC.7"; SameBoy display.c
+    /// `GB_FRAMESKIP_LCD_TURNED_ON`). Cleared at the vblank that would have
+    /// presented it.
+    frame_skip: bool,
     /// LY=LYC comparison flag (STAT bit 2). Frozen while the LCD is off
     /// (`stat_lyc_onoff`).
     cmp: bool,
@@ -218,6 +224,7 @@ impl Ppu {
             line: 0,
             dot: 0,
             glitch_line: false,
+            frame_skip: false,
             cmp: false,
             stat_line: false,
             pending_if: 0,
@@ -275,7 +282,17 @@ impl Ppu {
             144 => {
                 self.ly = 144;
                 self.frame_count += 1;
-                std::mem::swap(&mut self.front, &mut self.back);
+                if self.frame_skip {
+                    // The first frame after an LCD enable is not displayed
+                    // (Pan Docs "LCDC.7"; SameBoy display.c
+                    // `GB_FRAMESKIP_LCD_TURNED_ON`): drop the rendered
+                    // frame and present blank/white instead.
+                    self.frame_skip = false;
+                    let white = self.white();
+                    self.front.fill(white);
+                } else {
+                    std::mem::swap(&mut self.front, &mut self.back);
+                }
             }
             _ => self.ly = self.line,
         }
@@ -623,6 +640,9 @@ impl Ppu {
             self.dot = 0;
             self.ly = 0;
             self.glitch_line = false;
+            // Invariant hygiene: frame_skip only matters while enabled and
+            // every enable re-arms it; don't leave it stale across off.
+            self.frame_skip = false;
             self.line_render_done = true;
             self.render.active = false;
             self.render.win_active = false;
@@ -638,6 +658,9 @@ impl Ppu {
             self.dot = 0;
             self.ly = 0;
             self.glitch_line = true;
+            // Hardware keeps the panel blank for the whole first frame
+            // after enabling (see `frame_skip`).
+            self.frame_skip = true;
             self.line_render_done = false;
             self.render.active = false;
             self.wy_latch = false;
@@ -680,6 +703,14 @@ impl Ppu {
     #[cfg(test)]
     pub(crate) fn oam_dma_freeze(&self) -> Option<(u8, u8)> {
         self.dma_freeze
+    }
+
+    /// Test hook: raw (BG, OBJ) palette RAM. FF69/FF6B reads are gated on
+    /// CGB mode by the interconnect and on mode 3 here, so the post-boot
+    /// palette tests need an ungated view.
+    #[cfg(test)]
+    pub(crate) fn palette_ram(&self) -> (&[u8; 64], &[u8; 64]) {
+        (&self.bg_pal_ram, &self.obj_pal_ram)
     }
 
     /// VRAM read for CGB HDMA (no mode blocking — the engine is responsible
@@ -1216,6 +1247,31 @@ mod tests {
         // OAM/VRAM freely accessible.
         p.write(0xFE10, 0x12);
         assert_eq!(p.read(0xFE10), 0x12);
+    }
+
+    /// The first frame after the LCD is (re-)enabled is not displayed: the
+    /// panel stays blank/white for one frame and real output resumes with
+    /// the following frame (Pan Docs "LCDC.7" warning on mid-frame
+    /// enabling; SameBoy display.c skips presenting that frame —
+    /// `GB_FRAMESKIP_LCD_TURNED_ON`; little-things-gb/firstwhite verifies
+    /// it on hardware).
+    #[test]
+    fn first_frame_after_lcd_enable_is_blank() {
+        let mut p = dmg();
+        p.write(0xFF47, 0xE4); // identity BGP
+        // Tile 0 row 0 black; the map is all tile 0, so line 0 renders
+        // black across.
+        p.vram[0] = 0xFF;
+        p.vram[1] = 0xFF;
+        p.write(0xFF40, 0x91);
+        run_to(&mut p, 144, 0); // first frame boundary after enable
+        assert!(
+            p.frame().iter().all(|&px| px == 0xFF_FFFF),
+            "first frame after LCD enable must be presented blank"
+        );
+        run_to(&mut p, 0, 0);
+        run_to(&mut p, 144, 0); // second frame boundary
+        assert_eq!(p.frame()[0], 0x00_0000, "second frame shows content");
     }
 
     #[test]
