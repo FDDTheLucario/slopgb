@@ -11,9 +11,9 @@ slopgb is a cycle-accurate Game Boy (DMG) / Game Boy Color (CGB) emulator.
    obscure hardware behavior you implement must have a unit test that fails
    without it.
 2. **Emulate hardware, not test ROMs.** Never special-case a code path to make
-   a mooneye ROM pass. Every behavior must be justified by documented hardware
-   behavior (cite in a comment when obscure). The mooneye suite is the
-   *oracle*, not the *spec*.
+   a test ROM pass — mooneye or any game-boy-test-roms suite. Every behavior
+   must be justified by documented hardware behavior (cite in a comment when
+   obscure). The test-ROM corpus is the *oracle*, not the *spec*.
 3. References, in order of authority:
    - *Game Boy: Complete Technical Reference* (Gekkio, "gbctr") — CPU timing,
      instruction micro-ops, MBC register maps.
@@ -133,9 +133,12 @@ slopgb is a cycle-accurate Game Boy (DMG) / Game Boy Color (CGB) emulator.
   (STAT mode bits, OAM/VRAM unblock) and the mode-0 IRQ source rise
   together **2 dots before the pipe end** — 254+SCX%8 on a bare line,
   with the pipe-end anchors (HBlank-DMA trigger, palette blocking)
-  unmoved at 256+SCX%8 — and the first OBJ fetch of a line costs 5 dots
-  (not 3), which keeps every sprite-laden flip on its old dot while bare
-  lines flip 2 dots earlier. The rise is fully visible to the running
+  unmoved at 256+SCX%8. With the fetch grid's OBJ costs (DMG blob 6
+  dots per fetch, CGB-C first-of-line 5 — see `obj_fetch_base`),
+  sprite-laden DMG lines flip at pipe end −3, keeping every sprite-laden
+  flip on its mooneye-frozen dot while bare lines flip 2 dots earlier
+  (double speed: −1; DMG window-aborted lines: −0 — `m0_flip_events`).
+  The rise is fully visible to the running
   CPU's interrupt sample in its own M-cycle (no dispatch law), but a
   rise in the second half of the M-cycle is missed by the halt-exit
   sampler for one cycle (the timer-`if_late` shape). The LCD-enable
@@ -293,6 +296,31 @@ The harness (`crates/slopgb-core/tests/mooneye.rs`) maps every ROM under
 `-C`/`-cgb*`(=CGB), `-A`(=AGB), no suffix = every supported model.
 `manual-only/sprite_priority` is verified by frame compare against a
 reference image instead.
+
+## game-boy-test-roms battery (harness)
+
+`crates/slopgb-core/tests/gbtr/` runs the pinned c-sp/game-boy-test-roms
+v7.0 collection (fetched by `test-roms/download.sh` alongside the mooneye
+bundle): one module per suite — acid, age, blargg, gambatte, gbmicrotest,
+mealybug, mooneye2022, same-suite, smallsuites (bully/strikethrough/
+turtle/scribbl/little-things/mbc3-tester/rtc3test), wilbertpol — each
+implementing its suite's documented pass protocol (the
+`game-boy-test-roms-howto.md` inside each suite directory) and asserting
+its full rom×model matrix against an exact known-failure baseline
+(`gbtr/harness.rs::assert_against_baseline`): an unlisted failure is a
+regression, a now-passing or orphaned baseline entry fails the run too —
+shrinking the baselines is the tracked progress. A whole-collection
+inventory guard (`gbtr/inventory.rs`) pins that every `.gb`/`.gbc` on
+disk is claimed or documented-exempt by exactly one suite, so a re-pinned
+collection can never silently shrink coverage. The residual-failure floor
+is classified — classes A–H: double-speed sub-cycle phase,
+speed-switch/HDMA seams, APU write phase, 2016-era expectation chains,
+asset/build defects, upstream tie-breaks, one-dot conflicts — in the
+index header of `tests/gbtr/baselines/gambatte.txt` with per-class lift
+conditions (several require sub-dot event modeling, i.e. a revision of
+the whole-dot timing contract above). Read that index before touching any
+baselined behavior: every cluster is an A/B-swept trade whose one-sided
+"fix" regresses now-green siblings.
 
 ## Work package file ownership (parallel development)
 

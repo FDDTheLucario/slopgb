@@ -349,7 +349,8 @@ const BASELINE_DMG_SOUND: &[&str] = &[];
 const BASELINE_CGB_SOUND: &[&str] = &[];
 // The DMG OAM corruption bug is implemented (`Ppu::oam_bug`). The one
 // remaining failure is a defect in the shipped *single*, not in the
-// emulation: with hardware-correct corruption, 7-timing_effect prints
+// emulation (floor class F per the index in baselines/gambatte.txt —
+// never fix in core): with hardware-correct corruption, 7-timing_effect prints
 // twenty ~525-byte OAM dumps (19 corruptions swept across the first
 // scanline plus one at the start of the second — exactly the set whose
 // simulated checksum stream reproduces the ROM's own expected CRC

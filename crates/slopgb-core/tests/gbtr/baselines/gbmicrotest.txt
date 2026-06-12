@@ -2,6 +2,16 @@
 # Discovered empirically on this emulator (Phase B); shrink as fixes land,
 # never grow.
 #
+# Floor classes (letters per the index in baselines/gambatte.txt):
+# dma_basic and oam_int_if_level_d are class F (asset defect / real
+# hardware divergence — never fix in core); the win*_b + ppu_sprite0_*_b
+# rows are class H one-dot conflicts (lift: sub-dot IF-flop modeling —
+# their gambatte window/late_* siblings pin the opposite dot, so don't
+# chase one-sidedly); the remaining oam_int/int_oam/lcdon/line_144/
+# stat_write_glitch rows are line-0/lcd-enable/line-144 OAM-pulse chains
+# not yet derived, and halt_op_dupe_delay is halt-bug timing, untriaged
+# (both open work, not floor).
+#
 # Re-baselined 2026-06 twice: the DMG post-boot LCD phase pin (70164,
 # the poweron tables) + STAT mode-2 pulse wave flipped 60 rows, and the
 # mode-0 event-grid re-derivation (flip/IRQ at pipe end - 2; see
