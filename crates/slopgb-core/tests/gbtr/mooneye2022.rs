@@ -61,7 +61,10 @@ const SUITE: &str = "mooneye-test-suite";
 ///   MGB HALT-frozen OAM-scan model (all 11 523 non-white reference pixels
 ///   differ), where the byte-different mts-20240926 build passes the
 ///   identical reference in `tests/mooneye.rs` — the same build-sensitive
-///   divergence wilbertpol documents for its 2016 build.
+///   divergence wilbertpol documents for its 2016 build (floor class F
+///   per the index in `baselines/gambatte.txt`: build defect, the glitch
+///   sprite's controlling bytes are undocumented DMA-driver residue —
+///   don't bend the MGB scan model at the one verified build's expense).
 const BASELINE: &[&str] = &["mooneye-test-suite/madness/mgb_oam_dma_halt_sprites.gb [Mgb]"];
 
 /// How one suite ROM is verified — or why it never runs.

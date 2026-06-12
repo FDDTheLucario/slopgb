@@ -68,7 +68,13 @@ const CASES: [Case; 4] = [
 /// Known-failure baseline (see `harness::assert_against_baseline`).
 ///
 /// * `cgb-acid-hell [Cgb]`: 2 pixels swapped at (80,68)/(80,69)
-///   (#FFFF00 vs #000000), a one-line PPU divergence.
+///   (#FFFF00 vs #000000) — an untriaged one-dot CGB divergence at a
+///   sprite/window mix boundary, class H per the floor index in
+///   `baselines/gambatte.txt` (the same whole-dot-contract residue
+///   family as the mealybug `_cgb_c` photo clusters). dmg-acid2 (both
+///   legs) and cgb-acid2 are pixel-perfect and pin the surrounding
+///   dots: re-probe after the sub-dot/CGB per-stage fetch work rather
+///   than shifting whole-dot anchors at this one ROM.
 const BASELINE: &[&str] = &["cgb-acid-hell/cgb-acid-hell.gbc [Cgb]"];
 
 /// Run one acid case: to the `LD B,B` exit (the howtos give no run-time

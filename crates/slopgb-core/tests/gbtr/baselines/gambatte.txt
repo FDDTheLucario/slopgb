@@ -1,6 +1,89 @@
 # gambatte known-failure baseline (one `<rel> [Model]` key per line).
 # Generated from a full matrix run; shrinking this list is progress,
 # growing it is a regression (harness::assert_against_baseline).
+#
+# ---------------------------------------------------------------------
+# FLOOR-CLASS INDEX (2026-06 census, recounted after wave 8: 976 rows in
+# this file). The class letters are shared by every suite's baseline
+# header; the dated swap blocks at the end of this file carry the
+# per-cluster A/B evidence. Common rule for ALL classes: each cluster
+# was A/B-swept and the kept configuration maximizes the corpus — every
+# sweep flipped sibling rows green at the cost of the rows kept here,
+# so re-flipping any single row regresses its now-passing siblings
+# (often in other suites). Never chase a row one-sidedly; lift a class
+# by meeting its stated precondition, then re-run the whole matrix.
+#
+# A. CGB double-speed / lcd-offset sub-cycle phase — 440 rows here (45%
+#    of the file: the *_ds / *lcdoffset* keys, incl. the 149 sprites
+#    m3stat_ds rows and the ds residue inside every other cluster),
+#    plus the five age *-ds rows. In double speed one CPU M-cycle = 2
+#    dots; where a second-half commit (STAT pulse + its masks, mode-0
+#    flip, palette/VRAM/OAM access edge, OAM-DMA latch) sits inside
+#    that 2-dot cell is below the whole-dot timing contract's
+#    resolution (gambatte resolves 2 cc per ds dot). Lift: re-clock
+#    observable event commits to a half-dot (8 MHz) grid or phase-tag
+#    every PPU/APU event — a core timing-contract revision
+#    (ARCHITECTURE.md §Timing model), only worth attempting after the
+#    class-H sub-dot IF-flop proves the pattern. Gating the pulse
+#    masks off in ds was A/B-tested net-worse (~60 sibling
+#    regressions).
+# B. Speed-switch / HDMA sub-M-cycle seam — the dma/ + speedchange/ +
+#    oamdma *speedchange* rows (~165 here) plus mealybug hdma_timing-C
+#    and the four age spsw-* rows. A/B sweeps over the pause constant
+#    (0x7FFE..0x8000 M), the DIV-reset cell, the trigger lead (0..3
+#    dots) and the service seam each flip one _1/_2 sibling per family
+#    at the cost of the other (see the speed-switch swap block below);
+#    the remainder is PPU dot parity / APU 2 MHz grid phase inside the
+#    pause — same precondition as class A.
+# C. APU 2 MHz write-grid phase — the sound/ rows (21 here) plus
+#    same-suite channel_1_freq_change_timing-cgb0BC. gambatte
+#    channel1.cpp anchors units at cc+2+cgb_*2: a model-specific
+#    sub-M-cycle write phase against the 128/512 Hz grids. Lift:
+#    per-model <4-dot write-phase modeling on top of tick-then-access;
+#    whole-M-cycle ordering tweaks break the same-suite
+#    channel_1_sweep* DIV-event schedule (see the
+#    ch1_init_reset_sweep_counter comment below).
+# E. 2016-era wilbertpol expectation chains — lives entirely in
+#    baselines/wilbertpol.txt (the intr_2_mode0 *_nops + -C families).
+# F. Asset/build defects + hardware-faithful divergences — never fix
+#    in core: blargg oam_bug 7-timing_effect (defective single build),
+#    gbmicrotest dma_basic (self-overwriting result block) and
+#    oam_int_if_level_d (real DMG-vs-AGS divergence), mbc3-tester
+#    [Cgb] (reference contradicts its own howto), scribbltests scxly
+#    [Cgb] (green-LCD reference colors unreachable), bully ×2 (real
+#    DMG fails the reference too; CGB leg downstream-timing), the
+#    madness 2016/2022 builds [Mgb] (build-sensitive; the mts-20240926
+#    build passes), strikethrough ×2 (undocumented glitch-sprite
+#    residue) — see each suite's own comments.
+# G. Upstream-tie-break-needed — dma/hdma_transition_speedchange_oamdma
+#    here (halted-block OAM-DMA +1; neither gambatte nor SameBoy
+#    models it — see its comment below) plus same-suite
+#    channel_4_align/channel_4_freq_change (NR43 LFSR-corruption
+#    tables upstream documents as revision/unit-specific and partly
+#    non-deterministic). Keep asserted; lift on upstream evidence.
+# H. One-dot conflicts / sub-dot event phase under the whole-dot
+#    contract (CONDITIONAL floor — exactly the population a sub-dot
+#    IF-flop model would arbitrate; re-probe all of it then):
+#    * the single-speed scx2/scx5 m2-dispatch-chained reads
+#      (m2int_m0irq, m2int_m3stat, oam_access, vram_m3, vramw_m3end,
+#      halt late_m0irq) vs the gbmicrotest hblank_int_scx*_if DMG-
+#      hardware FF0F races that pin the very dots we use;
+#    * the halt/ rows: halt-wake sampler staleness (the CGB/AGB
+#      start-of-cycle view of first-half PPU commits, unmodelled
+#      pending a per-model widening of the halt-wake mask) and its
+#      DMG second-half-commit law siblings;
+#    * cgbpal_m3 boundary rows (anchored against the hdma_start pins),
+#      lyc/lycEnable/m1/m2enable enable-edge *_1 rounds, window/
+#      late_* sub-dot rounds, dmgpalette_during_m3 and
+#      scx/scy_during_m3 single-dot write-cell residue;
+#    * gbmicrotest win*_b + ppu_sprite0_scx3/7_b (one-dot stalled-
+#      window flip lead, see baselines/gbmicrotest.txt).
+#
+# (Census class D — the dot-serial OAM scan — was LIFTED by the
+# 2026-06 scan rewrite: the single-speed oamdma late_sp*/halt_stat
+# family passes; its remaining _ds rows are class A half-dot races and
+# strikethrough's glitch sprite is class F.)
+# ---------------------------------------------------------------------
 gambatte/bgtiledata/bgtiledata_spx08_ds_3.gbc [Cgb]
 gambatte/bgtiledata/bgtiledata_spx08_ds_4.gbc [Cgb]
 gambatte/bgtiledata/bgtiledata_spx09_ds_1.gbc [Cgb]
