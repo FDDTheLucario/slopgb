@@ -3,16 +3,21 @@
 # mealybug_matrix against the pinned v7.0 collection; shrinking this list is
 # progress, growing it is a regression (harness::assert_against_baseline).
 #
-# 34 of 55 rom x model legs fail. Passing: mbc/mbc3_rtc.gb (both),
+# 26 of 55 rom x model legs fail. Passing: mbc/mbc3_rtc.gb (both),
 # dma/hdma_during_halt-C (HBlank DMA defers across the core-clock gate
 # and re-fires at the wake - the gambatte-shaped HDMA engine),
 # m2_win_en_toggle [Cgb], m3_lcdc_bg_en_change/change2 [Cgb] (mode-0
-# event-grid re-derivation), and pixel-perfect both legs: m3_bgp_change,
-# m3_scx_low_3_bits (write strobe + SCX hunt wave), m3_window_timing,
-# m3_window_timing_wx_0, m3_lcdc_win_en_change_multiple,
-# m3_wx_4_change_sprites + the [Dmg]-only m3_wx_4/5/6_change (window
-# machine wave: prefill WX comparator, winYPos counting, LCDC.5 abort,
-# reactivation zero pixel, WX commit one dot after the palette strobe).
+# event-grid re-derivation), m3_lcdc_obj_en_change [Cgb] (LCDC.1 gates
+# sprite pixels at the mix), and pixel-perfect both legs: m3_bgp_change,
+# m3_scx_low_3_bits, m3_window_timing, m3_window_timing_wx_0,
+# m3_lcdc_win_en_change_multiple, m3_wx_4_change_sprites (+ [Dmg]-only
+# m3_wx_4/5/6_change), plus the fetch-grid wave's [Dmg] legs:
+# m3_lcdc_tile_sel_change, m3_lcdc_tile_sel_win_change,
+# m3_lcdc_bg_map_change, m3_lcdc_win_map_change, m3_scx_high_5_bits,
+# m3_bgp_change_sprites, m3_obp0_change (fetch reads sample eff at the
+# read dot; the BG fetcher free-runs through sprite stalls; the DMG blob
+# pays 6 dots for every OBJ fetch with the mode-0 flip leading
+# sprite-extended pipe ends by 3 — see ppu/render.rs).
 # All ROMs reach LD B,B - no timeouts; every ppu failure is a frame
 # mismatch against the bundled reference, every dma failure is the
 # mooneye all-$42 fail-register signature.
@@ -25,22 +30,29 @@ mealybug-tearoom-tests/dma/hdma_timing-C.gb [Cgb]
 # ppu/ mode-2 window-enable toggling ([Cgb] passes, see header).
 mealybug-tearoom-tests/ppu/m2_win_en_toggle.gb [Dmg]
 
-# ppu/ mode-3 mid-scanline palette writes (BGP/OBP0). m3_bgp_change passes
-# both legs; the remaining legs are ~100-px left-edge residuals that need
-# the fetch-grid calibration (the prefill sprite fetch landed; the
-# boundary still sits 2-3 dots off hardware on sprite-covered pixels).
+# ppu/ mode-3 mid-scanline palette writes. The [Dmg] legs are
+# pixel-perfect; the [Cgb] legs carry the same sprite-stall boundary
+# skew as the CGB fetch cluster below (CGB-C keeps the 5-dot first OBJ
+# fetch pinned by its bg_en/obj_en photos, so its palette boundaries on
+# stalled lines sit one pixel right of the blob's — the _cgb_c photos
+# demand a CGB-specific palette-vs-stall law not yet derived).
 mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb [Cgb]
-mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb [Dmg]
 mealybug-tearoom-tests/ppu/m3_obp0_change.gb [Cgb]
-mealybug-tearoom-tests/ppu/m3_obp0_change.gb [Dmg]
 
-# ppu/ mode-3 mid-scanline LCDC writes (bg/win enable, maps, tile data,
-# obj enable/size).
+# ppu/ mode-3 mid-scanline LCDC writes. The remaining [Cgb] legs are the
+# CGB-C fetch-sampling residue: the rising-late LCDC view (eff AND the
+# previous dot's eff) is exact for win_map_change but the
+# tile_sel/bg_map/win_map photos demand per-stage structure (a
+# rising-bits-one-late LCDC view fits most columns and makes win_map
+# [Cgb] pixel-exact, but contradicts the hardware-captured gambatte
+# bgtiledata_spx0B_2/_4 cgb04c rows — don't force a single window). The obj_size pair needs
+# the sprite fetcher's own read grid (LCDC.2 sampled at the sprite
+# tile-number read, not the trigger dot); obj_en_variant and the
+# [Dmg] bg_en/obj_en single-pixel legs are boundary-dot residue of the
+# LCDC.0/.1 mix gates.
 mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change.gb [Dmg]
 mealybug-tearoom-tests/ppu/m3_lcdc_bg_map_change.gb [Cgb]
-mealybug-tearoom-tests/ppu/m3_lcdc_bg_map_change.gb [Dmg]
 mealybug-tearoom-tests/ppu/m3_lcdc_bg_map_change2.gb [Cgb]
-mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change.gb [Cgb]
 mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change.gb [Dmg]
 mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change_variant.gb [Cgb]
 mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change_variant.gb [Dmg]
@@ -49,23 +61,19 @@ mealybug-tearoom-tests/ppu/m3_lcdc_obj_size_change.gb [Dmg]
 mealybug-tearoom-tests/ppu/m3_lcdc_obj_size_change_scx.gb [Cgb]
 mealybug-tearoom-tests/ppu/m3_lcdc_obj_size_change_scx.gb [Dmg]
 mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_change.gb [Cgb]
-mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_change.gb [Dmg]
 mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_change2.gb [Cgb]
 mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_win_change.gb [Cgb]
-mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_win_change.gb [Dmg]
 mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_win_change2.gb [Cgb]
 mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple_wx.gb [Dmg]
 mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change.gb [Cgb]
-mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change.gb [Dmg]
 mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change2.gb [Cgb]
 
-# ppu/ mode-3 mid-scanline scroll writes (SCX/SCY). m3_scx_low_3_bits
-# passes both legs (live SCX comparator hunt + boot-ROM (R) tile in VRAM);
-# the high-5-bits legs are down to 84/19 px and the SCY legs to ~6400/2400
-# px — all on the fetch-grid (just-in-time fetch) question still
-# outstanding.
+# ppu/ mode-3 mid-scanline scroll writes (SCX/SCY). m3_scx_low_3_bits and
+# m3_scx_high_5_bits [Dmg] pass; the [Cgb] scroll legs are down to
+# 30-216 px (the CGB fetch residue above), the scy [Dmg] leg to 29 px of
+# single-pixel tile-row boundary residue at columns 0/7 of
+# band-boundary lines (sub-dot SCY sampling at the line-start fetches).
 mealybug-tearoom-tests/ppu/m3_scx_high_5_bits.gb [Cgb]
-mealybug-tearoom-tests/ppu/m3_scx_high_5_bits.gb [Dmg]
 mealybug-tearoom-tests/ppu/m3_scx_high_5_bits_change2.gb [Cgb]
 mealybug-tearoom-tests/ppu/m3_scy_change.gb [Cgb]
 mealybug-tearoom-tests/ppu/m3_scy_change.gb [Dmg]
@@ -74,5 +82,3 @@ mealybug-tearoom-tests/ppu/m3_scy_change2.gb [Cgb]
 # ppu/ mode-3 mid-scanline WX writes: the sprites legs and the [Dmg]-only
 # plain wx_4/5/6 ROMs pass; the multiple_wx leg is a 148-px sub-dot
 # LCDC-write-vs-comparator race (4 isolated spots, see render.rs notes).
-
-# ppu/ window start timing.

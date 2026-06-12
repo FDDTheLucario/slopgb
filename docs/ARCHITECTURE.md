@@ -63,17 +63,35 @@ slopgb is a cycle-accurate Game Boy (DMG) / Game Boy Color (CGB) emulator.
   Calibrated against the mealybug `m3_*` reference photographs and
   gambatte `dmgpalette_during_m3`/`scx_during_m3`/`scy`.
 - **Window machine**: the WX comparator runs every mode-3 dot including
-  the 8-dot prefill, edge-triggered; the window line counter follows
-  gambatte's winYPos (reset 0xFF per frame, incremented per activation);
-  LCDC.5 mid-line disables abort the window at the pipeline-view commit
-  with the BG resuming on a live-computed tile column (mattcurrie
-  comprehensive-ppu-doc §WIN_EN; gambatte ppu.cpp setLcdc/Tile::f0);
-  the WY condition is sampled at discrete dots (gambatte weMaster) with
-  a live comparison against a delayed WY copy (wy2). WX writes commit
-  to the pipeline one dot later than the palette class. DMG WX=166
-  matches carry a window-start request into the next line. Sprites
-  with OAM X 0-7 are fetched during the pause-aware prefill walk that
-  also drives the SCX comparator hunt.
+  the 8-dot prefill, edge-triggered, against the pause-aware position
+  counter (sprite stalls freeze it, so a WX 0-7 match shifts later by
+  the stall instead of being skipped), and a match sharing a dot with a
+  sprite trigger starts the window first; the window line counter
+  follows gambatte's winYPos (reset 0xFF per frame, incremented per
+  activation); LCDC.5 mid-line disables abort the window at the
+  pipeline-view commit with the BG resuming on a live-computed tile
+  column (mattcurrie comprehensive-ppu-doc §WIN_EN; gambatte ppu.cpp
+  setLcdc/Tile::f0); the WY condition is sampled at discrete dots
+  (gambatte weMaster) with a live comparison against a delayed WY copy
+  (wy2). WX writes commit to the pipeline one dot later than the
+  palette class. DMG WX=166 matches carry a window-start request into
+  the next line. Sprites with OAM X 0-7 are fetched during the
+  pause-aware prefill walk that also drives the SCX comparator hunt.
+- **BG/window fetch grid** (mealybug fetch cluster): every fetch VRAM
+  access samples the pipeline-view registers (`eff`) at its read dot
+  on both families (the gambatte bgtiledata cgb04c rows pin the clean
+  commit on CGB-C; the CGB-C photo residue is documented in
+  baselines/mealybug.txt). The BG fetcher
+  free-runs through sprite-fetch stalls — the alignment penalty *is*
+  the fetcher finishing its tile row in real time, prefill included —
+  with the line's first push gated on the pause-aware startup walk
+  (pixel 0 stays on its stall-shifted dot). The DMG blob pays the full
+  6 dots for every OBJ fetch (no first-fetch discount; the mode-0
+  flip leads sprite-extended pipe ends by 3 dots so every mooneye/
+  gbmicrotest anchor keeps its dot), CGB-C discounts the line's first
+  fetch to 5. LCDC.1 also gates sprite pixels at the mix, not just the
+  fetch trigger. Calibrated against the mealybug m3_lcdc_*/m3_scy/
+  m3_scx/m3_bgp/m3_obp0 reference photographs.
 - One IF bit has sub-cycle dispatch semantics: the line-0 OAM STAT rise is
   readable through FF0F immediately but misses the CPU's interrupt sample
   for the M-cycle it was raised in (`Interconnect::if_stat_late`, the same
