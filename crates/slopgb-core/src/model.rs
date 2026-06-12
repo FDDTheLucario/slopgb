@@ -267,8 +267,9 @@ impl Model {
             },
             // misc/boot_regs-cgb, misc/boot_div-cgbABCDE, misc/boot_hwio-C.
             // These are the DMG-cart-on-CGB values (every mooneye ROM is a
-            // DMG-mode cart); a CGB-flagged cart would hand off with
-            // DE=$FF56 HL=$000D instead, which is not modelled.
+            // DMG-mode cart); for CGB-flagged carts `GameBoy::new`
+            // overrides DE=$FF56 HL=$000D after the post-boot warmup (Pan
+            // Docs "CPU registers" — the cart kind is not known here).
             Model::Cgb => PostBootState {
                 a: 0x11,
                 f: 0x80,

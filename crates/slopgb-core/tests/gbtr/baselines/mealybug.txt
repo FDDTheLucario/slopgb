@@ -3,17 +3,19 @@
 # mealybug_matrix against the pinned v7.0 collection; shrinking this list is
 # progress, growing it is a regression (harness::assert_against_baseline).
 #
-# 53 of 55 rom x model legs fail; only mbc/mbc3_rtc.gb passes (both models).
-# All ROMs reach LD B,B — no timeouts; every ppu failure is a frame mismatch
-# against the bundled reference, every dma failure is the mooneye all-$42
+# 52 of 55 rom x model legs fail; mbc/mbc3_rtc.gb passes (both models) and
+# ppu/m2_win_en_toggle.gb passes on Cgb (its [Cgb] reference matches once
+# the boot ROM's default DMG-compat palettes are installed; the [Dmg] leg
+# still fails on the underlying mode-2 toggle behavior). All ROMs reach
+# LD B,B — no timeouts; every ppu failure is a frame mismatch against the
+# bundled reference, every dma failure is the mooneye all-$42
 # fail-register signature.
 
 # dma/: HDMA timing — registers report the ROMs' fail code ($42 everywhere).
 mealybug-tearoom-tests/dma/hdma_during_halt-C.gb [Cgb]
 mealybug-tearoom-tests/dma/hdma_timing-C.gb [Cgb]
 
-# ppu/ mode-2 window-enable toggling.
-mealybug-tearoom-tests/ppu/m2_win_en_toggle.gb [Cgb]
+# ppu/ mode-2 window-enable toggling ([Cgb] passes, see header).
 mealybug-tearoom-tests/ppu/m2_win_en_toggle.gb [Dmg]
 
 # ppu/ mode-3 mid-scanline palette writes (BGP/OBP0).
