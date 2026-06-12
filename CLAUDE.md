@@ -41,7 +41,8 @@ Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 
 ## State (2026-06-11)
 
 - All mooneye tests green — 439/439 rom×model combos, CI-verified on linux/windows/macos. Breakpoint protocol for acceptance/emulator-only/misc; frame compare for sprite_priority and madness/mgb_oam_dma_halt_sprites (that ROM halts forever, never executes LD B,B; reference frames vendored under `crates/slopgb-core/tests/expected/`).
-- All subsystems implemented; 424 unit tests. Missing test ROMs skip silently unless `SLOPGB_REQUIRE_ROMS=1` (set in CI) — run `test-roms/download.sh` first.
+- All subsystems implemented; 442 unit tests. Missing test ROMs skip silently unless `SLOPGB_REQUIRE_ROMS=1` (set in CI) — run `test-roms/download.sh` first.
+- DMG OAM corruption bug implemented (`Ppu::oam_bug` + `Bus::tick_addr`/`read_inc`; DMG-family only, suppressed while halted/during OAM DMA). Window + patterns are CRC-calibrated against blargg `oam_bug/` — all green except 7-timing_effect, a defective single build that self-destructs on real hardware too (see baseline note in `tests/gbtr/blargg.rs`).
 - Core public API is a curated facade (`GameBoy`, `Registers`, `Button`, `CartridgeError`, `Model` + screen/clock consts); keep internals `pub(crate)`, new integration-test escape hatches go behind `#[doc(hidden)]`.
 - Audio frontend uses a hand-rolled lock-free SPSC ring (`crates/slopgb/src/audio.rs`) — the cpal callback must never lock or allocate; keep it that way.
 - PPU raises STAT/VBlank IRQs via `Ppu::write`'s return value (single drain) — when adding a PPU register path, OR the returned IF bits into `intf` like the existing interconnect call sites.
