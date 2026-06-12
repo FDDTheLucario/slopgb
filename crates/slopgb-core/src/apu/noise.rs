@@ -68,6 +68,10 @@ impl Noise {
 
     /// Advance one T-cycle.
     pub(super) fn step(&mut self) {
+        debug_assert!(
+            self.timer > 0,
+            "noise frequency timer invariant violated: must stay >= 1"
+        );
         self.timer -= 1;
         if self.timer == 0 {
             self.timer = self.period();
@@ -231,6 +235,15 @@ mod tests {
         assert_eq!(n.lfsr, 0x7FFF, "no clock before the period elapses");
         n.step();
         assert_eq!(n.lfsr, 0x3FFF);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "noise frequency timer")]
+    fn step_with_zero_timer_panics_in_debug() {
+        let mut n = Noise::new();
+        n.timer = 0; // violates the "timer always >= 1" invariant
+        n.step();
     }
 
     #[test]

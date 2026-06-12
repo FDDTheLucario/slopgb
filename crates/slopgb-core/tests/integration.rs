@@ -3,7 +3,7 @@
 //! protocol, interrupt delivery end-to-end, and OAM DMA driven by real CPU
 //! code.
 
-use slopgb_core::cpu::Bus;
+use slopgb_core::Bus;
 use slopgb_core::{Button, CYCLES_PER_FRAME, GameBoy, Model};
 
 /// A minimal valid 32 KiB ROM (cart type 0, size codes 0) with `chunks` of
@@ -51,12 +51,19 @@ fn post_boot_cpu_registers_per_model() {
 
 #[test]
 fn auto_model_uses_cgb_flag() {
+    // Pan Docs "CGB flag" (0x143): hardware (the CGB boot ROM) decodes only
+    // bit 7, so unusual values like 0x84 still enable CGB mode while values
+    // with bit 7 clear never do.
     let mut rom = build_rom(&[]);
     assert_eq!(GameBoy::auto_model(&rom), Model::Dmg);
     rom[0x143] = 0x80;
     assert_eq!(GameBoy::auto_model(&rom), Model::Cgb);
     rom[0x143] = 0xC0;
     assert_eq!(GameBoy::auto_model(&rom), Model::Cgb);
+    rom[0x143] = 0x84; // bit 7 set: CGB despite not being 0x80/0xC0
+    assert_eq!(GameBoy::auto_model(&rom), Model::Cgb);
+    rom[0x143] = 0x44; // bit 7 clear: DMG no matter the other bits
+    assert_eq!(GameBoy::auto_model(&rom), Model::Dmg);
 }
 
 /// A NOP slide into LD B,B: the breakpoint must trip with exact timing
@@ -227,11 +234,11 @@ fn halt_freezes_inflight_oam_dma_end_to_end() {
     source[2] = 0x1A; // the in-flight byte that must never commit
     source[3] = 0xA3;
     let rom = build_rom(&[(0x100, main), (0x150, hiram), (0x2000, &source)]);
-    let cart = slopgb_core::cartridge::Cartridge::from_bytes(rom).unwrap();
+    let cart = slopgb_core::Cartridge::from_bytes(rom).unwrap();
     // Interconnect without post-boot state: LCD off, so the direct OAM
     // writes land and OAM stays CPU-readable during the frozen transfer.
-    let mut bus = slopgb_core::interconnect::Interconnect::new(Model::Mgb, cart);
-    let mut cpu = slopgb_core::cpu::Cpu::new(Model::Mgb);
+    let mut bus = slopgb_core::Interconnect::new(Model::Mgb, cart);
+    let mut cpu = slopgb_core::Cpu::new(Model::Mgb);
     // Comfortably more M-cycles than program + a full 160-byte transfer, so
     // a missing freeze fails as "transfer completed", not "still running".
     for _ in 0..400 {
@@ -265,8 +272,8 @@ fn halt_freezes_inflight_oam_dma_end_to_end() {
 fn oam_dma_via_bus_trait() {
     let pattern: Vec<u8> = (0..160u32).map(|i| (i as u8) ^ 0xA5).collect();
     let rom = build_rom(&[(0x1200, &pattern)]);
-    let cart = slopgb_core::cartridge::Cartridge::from_bytes(rom).unwrap();
-    let mut bus = slopgb_core::interconnect::Interconnect::new(Model::Dmg, cart);
+    let cart = slopgb_core::Cartridge::from_bytes(rom).unwrap();
+    let mut bus = slopgb_core::Interconnect::new(Model::Dmg, cart);
     bus.write(0xFF46, 0x12);
     for _ in 0..160 {
         bus.tick();

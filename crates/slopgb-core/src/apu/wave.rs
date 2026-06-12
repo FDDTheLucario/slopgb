@@ -41,6 +41,7 @@ impl Wave {
             volume_code: 0,
             freq: 0,
             length: LengthCounter::new(256),
+            // period() at frequency 0: (2048 - 0) * 2.
             timer: 4096,
             position: 0,
             sample_byte: 0,
@@ -60,6 +61,10 @@ impl Wave {
         if !self.enabled {
             return;
         }
+        debug_assert!(
+            self.timer > 0,
+            "wave frequency timer invariant violated: must stay >= 1 while enabled"
+        );
         self.timer -= 1;
         if self.timer == 0 {
             self.timer = self.period();
@@ -328,6 +333,16 @@ mod tests {
         let before = w.ram;
         w.trigger();
         assert_eq!(w.ram, before);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "wave frequency timer")]
+    fn step_with_zero_timer_panics_in_debug() {
+        let mut w = Wave::new(false);
+        w.enabled = true;
+        w.timer = 0; // violates the "timer always >= 1 while enabled" invariant
+        w.step();
     }
 
     #[test]

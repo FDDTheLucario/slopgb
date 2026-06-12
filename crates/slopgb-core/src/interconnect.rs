@@ -17,6 +17,11 @@ use crate::ppu::Ppu;
 use crate::serial::Serial;
 use crate::timer::Timer;
 
+/// The five implemented interrupt sources: IF/IE bits 0-4 (VBlank, STAT,
+/// timer, serial, joypad). Bits 5-7 of FF0F/FFFF are unmapped (Pan Docs
+/// "Interrupts").
+const IF_MASK: u8 = 0x1F;
+
 /// The buses OAM DMA can occupy. While the DMA engine reads a byte from one
 /// of these, a CPU read of any address on the *same* bus returns the DMA's
 /// byte instead (gbctr "OAM DMA": the DMA controller drives the bus).
@@ -123,12 +128,14 @@ const CGB_COMPAT_PALETTE: [u16; 4] = [0x7FFF, 0x5294, 0x294A, 0x0000];
 impl Interconnect {
     pub fn new(model: Model, cart: Cartridge) -> Self {
         // CGB mode iff the hardware is a CGB/AGB *and* the cart opts in via
-        // header byte 0x143 bit 7 (same flag `GameBoy::auto_model` uses).
-        let cgb_mode = model.is_cgb() && cart.read_rom(0x143) & 0x80 != 0;
+        // header byte 0x143 bit 7 (same predicate `GameBoy::auto_model`
+        // uses: `cartridge::cgb_flag`).
+        let cgb_mode = model.is_cgb() && cart.supports_cgb();
         let mut ppu = Ppu::new(model);
         ppu.set_dmg_compat(model.is_cgb() && !cgb_mode);
         Self {
             model,
+            cart,
             ppu,
             apu: Apu::new(model.is_cgb()),
             timer: Timer::new(),
@@ -162,7 +169,6 @@ impl Interconnect {
             ff73: 0,
             ff74: 0,
             ff75: 0,
-            cart,
         }
     }
 
@@ -198,7 +204,6 @@ impl Interconnect {
         for _ in 0..(70224 - 4 + s.lcd_phase_dots) {
             self.ppu.tick();
         }
-        self.ppu.consume_pending_irq();
 
         if self.model.is_cgb() {
             // Compat palette: BG palette 0 (8 bytes) leaves BCPS = $88,
@@ -219,7 +224,6 @@ impl Interconnect {
             // OPRI: DMG-compat mode uses DMG-style X priority (FF6C reads
             // $FF), CGB mode uses OAM-index priority ($FE).
             self.ppu.write(0xFF6C, u8::from(!self.cgb_mode));
-            self.ppu.consume_pending_irq();
         }
 
         for &(addr, value) in s.hwio {
@@ -307,16 +311,16 @@ impl Interconnect {
     fn tick_machine(&mut self) {
         let dots: u64 = if self.double_speed { 2 } else { 4 };
         self.cycles += dots;
-        self.intf |= self.timer.tick() & 0x1F;
+        self.intf |= self.timer.tick() & IF_MASK;
         self.oam_dma_tick();
         for _ in 0..dots {
-            self.intf |= self.ppu.tick() & 0x1F;
+            self.intf |= self.ppu.tick() & IF_MASK;
         }
         self.hblank_dma_check();
         let div = self.timer.div_counter();
         self.apu.tick(div, self.double_speed);
-        self.intf |= self.serial.tick(div) & 0x1F;
-        self.intf |= self.joypad.take_irq() & 0x1F;
+        self.intf |= self.serial.tick(div) & IF_MASK;
+        self.intf |= self.joypad.take_irq() & IF_MASK;
         // RTC wall time is dot time (2 dots per M-cycle in double speed).
         self.cart.tick_rtc(dots as u32);
     }
@@ -454,9 +458,10 @@ impl Interconnect {
     /// table). The machine keeps running during the stall.
     fn copy_vram_dma_block(&mut self) {
         let cycles = if self.double_speed { 16 } else { 8 };
+        let bytes_per_mcycle = 16 / cycles;
         for _ in 0..cycles {
             self.tick_machine();
-            for _ in 0..(16 / cycles) {
+            for _ in 0..bytes_per_mcycle {
                 let byte = self.vram_dma_source_read(self.hdma_src);
                 self.ppu
                     .vram_write_raw(0x8000 | (self.hdma_dst & 0x1FFF), byte);
@@ -537,7 +542,7 @@ impl Interconnect {
         if self.model.is_cgb() {
             let lo = addr as u8;
             (lo & 0xF0) | (lo >> 4)
-        } else if (self.ppu.read(0xFF41) & 0x03) >= 2 {
+        } else if self.ppu.mode_bits() >= 2 {
             0xFF
         } else {
             0x00
@@ -572,7 +577,7 @@ impl Interconnect {
     fn write_no_tick(&mut self, addr: u16, value: u8) {
         match addr {
             0x0000..=0x7FFF => self.cart.write_rom(addr, value),
-            0x8000..=0x9FFF => self.ppu.write(addr, value),
+            0x8000..=0x9FFF => self.intf |= self.ppu.write(addr, value) & IF_MASK,
             0xA000..=0xBFFF => self.cart.write_ram(addr, value),
             0xC000..=0xFDFF => {
                 let i = self.wram_index(addr);
@@ -588,7 +593,7 @@ impl Interconnect {
                 // OAM DMA and never stores to a conflicted bus — so
                 // same-bus writes intentionally pass through unmodelled.
                 if self.dma_conflict.is_none() {
-                    self.ppu.write(addr, value);
+                    self.intf |= self.ppu.write(addr, value) & IF_MASK;
                 }
             }
             0xFEA0..=0xFEFF => {}
@@ -645,8 +650,10 @@ impl Interconnect {
         match addr {
             0xFF00 => self.joypad.write(value),
             0xFF01 | 0xFF02 => self.serial.write(addr, value),
-            0xFF04..=0xFF07 => self.intf |= self.timer.write(addr, value) & 0x1F,
-            0xFF0F => self.intf = value & 0x1F,
+            // A timer write never requests IF directly: a write-induced TIMA
+            // overflow raises it only at the reload, from `Timer::tick`.
+            0xFF04..=0xFF07 => self.timer.write(addr, value),
+            0xFF0F => self.intf = value & IF_MASK,
             0xFF10..=0xFF3F => self.apu.write(addr, value),
             0xFF46 => {
                 self.dma_reg = value;
@@ -655,14 +662,12 @@ impl Interconnect {
                     delay: 1,
                 });
             }
-            0xFF40..=0xFF45 | 0xFF47..=0xFF4B => {
-                self.ppu.write(addr, value);
-                // Register writes can raise the STAT line in this very
-                // cycle (stat_lyc_onoff round 4).
-                self.intf |= self.ppu.consume_pending_irq() & 0x1F;
-            }
+            // PPU register writes can raise the STAT line in this very
+            // cycle (stat_lyc_onoff round 4): `Ppu::write` returns the IF
+            // bits the write raised, OR-ed in immediately.
+            0xFF40..=0xFF45 | 0xFF47..=0xFF4B => self.intf |= self.ppu.write(addr, value) & IF_MASK,
             0xFF4D if self.cgb_mode => self.key1_armed = value & 1 != 0,
-            0xFF4F if self.cgb_mode => self.ppu.write(addr, value),
+            0xFF4F if self.cgb_mode => self.intf |= self.ppu.write(addr, value) & IF_MASK,
             // FF51-FF54 are the *live* DMA address counters, not start
             // latches: `hdma_src`/`hdma_dst` advance as blocks copy, and a
             // register write merges into the current counter value with
@@ -688,16 +693,10 @@ impl Interconnect {
             }
             0xFF55 if self.cgb_mode => self.hdma5_write(value),
             0xFF56 if self.cgb_mode => self.rp = value & 0xC1,
-            0xFF68 | 0xFF6A => {
-                self.ppu.write(addr, value);
-                self.intf |= self.ppu.consume_pending_irq() & 0x1F;
-            }
-            0xFF69 | 0xFF6B if self.cgb_mode => {
-                self.ppu.write(addr, value);
-                self.intf |= self.ppu.consume_pending_irq() & 0x1F;
-            }
+            0xFF68 | 0xFF6A => self.intf |= self.ppu.write(addr, value) & IF_MASK,
+            0xFF69 | 0xFF6B if self.cgb_mode => self.intf |= self.ppu.write(addr, value) & IF_MASK,
             // OPRI is set up by the boot ROM and locked outside CGB mode.
-            0xFF6C if self.cgb_mode => self.ppu.write(addr, value),
+            0xFF6C if self.cgb_mode => self.intf |= self.ppu.write(addr, value) & IF_MASK,
             0xFF70 if self.cgb_mode => self.svbk = value & 7,
             0xFF72 if self.model.is_cgb() => self.ff72 = value,
             0xFF73 if self.model.is_cgb() => self.ff73 = value,
@@ -765,7 +764,7 @@ impl Bus for Interconnect {
     }
 
     fn pending(&self) -> u8 {
-        self.intf & self.ie & 0x1F
+        self.intf & self.ie & IF_MASK
     }
 
     fn ack(&mut self, bit: u8) {
@@ -775,7 +774,7 @@ impl Bus for Interconnect {
     fn stop(&mut self) -> bool {
         // STOP resets DIV on every model (Pan Docs "FF04 — DIV"). Model it
         // as a DIV write so the TIMA falling-edge effects apply.
-        self.intf |= self.timer.write(0xFF04, 0) & 0x1F;
+        self.timer.write(0xFF04, 0);
         if self.cgb_mode && self.key1_armed {
             self.double_speed = !self.double_speed;
             self.key1_armed = false;
@@ -1246,6 +1245,18 @@ mod tests {
         b.write(0xD000, 2);
         b.write(0xFF70, 0x03);
         assert_eq!(b.read(0xD000), 2);
+    }
+
+    #[test]
+    fn cgb_mode_decodes_only_header_bit7() {
+        // Pan Docs "CGB flag" (0x143): the CGB boot ROM tests only bit 7,
+        // so 0x84 enables CGB mode just like 0x80/0xC0 — and `auto_model`
+        // must agree (shared predicate, `cartridge::cgb_flag`).
+        let mut rom = test_rom();
+        rom[0x143] = 0x84;
+        assert_eq!(crate::GameBoy::auto_model(&rom), Model::Cgb);
+        let b = Interconnect::new(Model::Cgb, Cartridge::from_bytes(rom).unwrap());
+        assert!(b.cgb_mode);
     }
 
     #[test]

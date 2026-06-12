@@ -1,9 +1,10 @@
 //! Mooneye test-suite integration harness.
 //!
 //! Discovers ROMs under `<repo>/test-roms/mts-*/` at runtime (prints a skip
-//! notice and passes when the ROMs are not checked out), maps each ROM to the
-//! hardware models it must pass on (filename suffix rules — see
-//! `common/mod.rs`), runs it through the `LD B,B`/Fibonacci breakpoint
+//! notice and passes when the ROMs are not checked out — unless
+//! `SLOPGB_REQUIRE_ROMS=1`, as in CI, which makes that a hard failure), maps
+//! each ROM to the hardware models it must pass on (filename suffix rules —
+//! see `common/mod.rs`), runs it through the `LD B,B`/Fibonacci breakpoint
 //! protocol, and reports every failing `rom [model]` combination of a group
 //! at once.
 //!
@@ -82,7 +83,10 @@ fn is_harnessed(rel: &Path) -> bool {
 #[test]
 fn every_release_rom_is_harnessed() {
     let Some(root) = common::mts_root() else {
-        println!("skipping coverage guard: no mooneye ROMs under <repo>/test-roms/mts-*");
+        common::skip_or_fail(
+            "coverage guard",
+            "no mooneye ROMs under <repo>/test-roms/mts-*",
+        );
         return;
     };
     let mut roms = Vec::new();
@@ -107,64 +111,32 @@ fn every_release_rom_is_harnessed() {
     );
 }
 
-#[test]
-fn acceptance_root() {
-    run_group("acceptance");
+/// Generate one `#[test]` wrapper per directory group. Each `$dir` must be
+/// listed in [`GROUPS`] — [`run_group`] panics on unlisted directories.
+macro_rules! group_tests {
+    ($($name:ident => $dir:literal),* $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                run_group($dir);
+            }
+        )*
+    };
 }
 
-#[test]
-fn acceptance_bits() {
-    run_group("acceptance/bits");
-}
-
-#[test]
-fn acceptance_instr() {
-    run_group("acceptance/instr");
-}
-
-#[test]
-fn acceptance_interrupts() {
-    run_group("acceptance/interrupts");
-}
-
-#[test]
-fn acceptance_oam_dma() {
-    run_group("acceptance/oam_dma");
-}
-
-#[test]
-fn acceptance_ppu() {
-    run_group("acceptance/ppu");
-}
-
-#[test]
-fn acceptance_serial() {
-    run_group("acceptance/serial");
-}
-
-#[test]
-fn acceptance_timer() {
-    run_group("acceptance/timer");
-}
-
-#[test]
-fn emulator_only_mbc1() {
-    run_group("emulator-only/mbc1");
-}
-
-#[test]
-fn emulator_only_mbc2() {
-    run_group("emulator-only/mbc2");
-}
-
-#[test]
-fn emulator_only_mbc5() {
-    run_group("emulator-only/mbc5");
-}
-
-#[test]
-fn misc() {
-    run_group("misc");
+group_tests! {
+    acceptance_root => "acceptance",
+    acceptance_bits => "acceptance/bits",
+    acceptance_instr => "acceptance/instr",
+    acceptance_interrupts => "acceptance/interrupts",
+    acceptance_oam_dma => "acceptance/oam_dma",
+    acceptance_ppu => "acceptance/ppu",
+    acceptance_serial => "acceptance/serial",
+    acceptance_timer => "acceptance/timer",
+    emulator_only_mbc1 => "emulator-only/mbc1",
+    emulator_only_mbc2 => "emulator-only/mbc2",
+    emulator_only_mbc5 => "emulator-only/mbc5",
+    misc => "misc",
 }
 
 #[test]

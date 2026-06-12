@@ -47,6 +47,9 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
+        env:
+          # Missing test ROMs must fail loudly here, never skip-to-green.
+          SLOPGB_REQUIRE_ROMS: "1"
 
       - name: Build release binary
         run: cargo build --release -p slopgb

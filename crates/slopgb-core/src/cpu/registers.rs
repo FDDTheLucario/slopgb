@@ -3,21 +3,19 @@
 use crate::model::Model;
 
 /// F-register flag bits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Flags;
-
-impl Flags {
+pub mod flags {
     pub const Z: u8 = 0x80;
     pub const N: u8 = 0x40;
     pub const H: u8 = 0x20;
     pub const C: u8 = 0x10;
 }
 
-/// CPU register snapshot. Lower 4 bits of F always read zero.
+/// CPU register snapshot. Lower 4 bits of F always read zero; the invariant
+/// holds by construction — `f` is private and every setter masks it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Registers {
     pub a: u8,
-    pub f: u8,
+    f: u8,
     pub b: u8,
     pub c: u8,
     pub d: u8,
@@ -34,7 +32,7 @@ impl Registers {
         let s = model.post_boot_state();
         Self {
             a: s.a,
-            f: s.f,
+            f: s.f & 0xF0,
             b: s.b,
             c: s.c,
             d: s.d,
@@ -44,6 +42,17 @@ impl Registers {
             sp: s.sp,
             pc: s.pc,
         }
+    }
+
+    /// F register. Lower 4 bits always read zero.
+    pub fn f(&self) -> u8 {
+        self.f
+    }
+
+    /// Set F. The lower 4 bits of the written value are discarded: they do
+    /// not exist in hardware (gbctr "Flags register").
+    pub fn set_f(&mut self, v: u8) {
+        self.f = v & 0xF0;
     }
 
     pub fn af(&self) -> u16 {
@@ -101,7 +110,24 @@ mod tests {
         let mut r = Registers::default();
         r.set_af(0x12FF);
         assert_eq!(r.a, 0x12);
-        assert_eq!(r.f, 0xF0);
+        assert_eq!(r.f(), 0xF0);
         assert_eq!(r.af(), 0x12F0);
+    }
+
+    #[test]
+    fn f_low_nibble_reads_zero_through_every_public_path() {
+        // The invariant "lower 4 bits of F always read zero" must hold by
+        // construction: every public way of writing F masks the low nibble.
+        let mut r = Registers::default();
+        r.set_f(0xFF);
+        assert_eq!(r.f() & 0x0F, 0);
+        assert_eq!(r.f(), 0xF0);
+        r.set_af(0xFFFF);
+        assert_eq!(r.f() & 0x0F, 0);
+        assert_eq!(r.af() & 0x0F, 0);
+        // Through the Cpu's mutable register access too.
+        let mut cpu = crate::cpu::Cpu::new(crate::model::Model::Dmg);
+        cpu.regs_mut().set_f(0xFF);
+        assert_eq!(cpu.regs().f() & 0x0F, 0);
     }
 }

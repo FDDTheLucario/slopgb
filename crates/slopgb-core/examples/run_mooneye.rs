@@ -86,7 +86,16 @@ fn main() -> ExitCode {
     println!(
         "  regs: A={:02X} F={:02X} B={:02X} C={:02X} D={:02X} E={:02X} H={:02X} L={:02X} \
          SP={:04X} PC={:04X}",
-        r.a, r.f, r.b, r.c, r.d, r.e, r.h, r.l, r.sp, r.pc
+        r.a,
+        r.f(),
+        r.b,
+        r.c,
+        r.d,
+        r.e,
+        r.h,
+        r.l,
+        r.sp,
+        r.pc
     );
     println!("  cycles: {} T-cycles", gb.cycles());
     if pass {

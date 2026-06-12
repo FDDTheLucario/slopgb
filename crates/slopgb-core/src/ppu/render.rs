@@ -15,7 +15,10 @@
 //! `intr_2_mode0_timing_sprites` exactly (Pan Docs "Mode 3 length" OBJ
 //! penalty algorithm, with the first fetch overlapping pipeline startup).
 
-use super::Ppu;
+use super::{
+    LCDC_BG_ENABLE, LCDC_BG_MAP, LCDC_OBJ_ENABLE, LCDC_OBJ_SIZE, LCDC_TILE_DATA, LCDC_WIN_ENABLE,
+    LCDC_WIN_MAP, Ppu,
+};
 use crate::SCREEN_W;
 use crate::model::Model;
 
@@ -47,6 +50,31 @@ const EMPTY_SPRITE_PIXEL: SpritePixel = SpritePixel {
     oam_idx: 0xFF,
 };
 
+/// BG/window fetcher state. Each of the three VRAM reads (tile number, low
+/// bitplane, high bitplane) takes 2 dots — the fetcher steps at half the dot
+/// clock (Pan Docs "Pixel FIFO", "Get Tile"/"Get Tile Data Low"/"Get Tile
+/// Data High" each lasting 2 dots) — modelled as an explicit wait state
+/// before each read. The push into the FIFO retries every dot until the
+/// FIFO drains (Pan Docs "Push": "this state is executed only if [the
+/// FIFO] is empty").
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FetchPhase {
+    /// First dot of the tile-number read.
+    TileNoWait,
+    /// Second dot: latch the tile number (+ CGB attributes).
+    TileNo,
+    /// First dot of the low-bitplane read.
+    LoWait,
+    /// Second dot: latch the low bitplane.
+    Lo,
+    /// First dot of the high-bitplane read.
+    HiWait,
+    /// Second dot: latch the high bitplane; push if the FIFO is empty.
+    Hi,
+    /// Tile row latched but the FIFO was full: retry the push each dot.
+    Push,
+}
+
 pub(super) struct Render {
     pub(super) active: bool,
     /// Next output pixel x (0-159).
@@ -64,8 +92,7 @@ pub(super) struct Render {
     bg_count: u8,
 
     // Fetcher.
-    /// 0-5: fetch steps (tile#, lo, hi); 6: push-retry hold.
-    phase: u8,
+    phase: FetchPhase,
     /// Tile column counter (BG: added to SCX/8; window: from 0).
     fetch_x: u8,
     /// Fetching window tiles instead of BG.
@@ -101,7 +128,7 @@ impl Render {
             bg_hi: 0,
             bg_attr: 0,
             bg_count: 0,
-            phase: 0,
+            phase: FetchPhase::TileNoWait,
             fetch_x: 0,
             win_mode: false,
             first_discard: true,
@@ -140,7 +167,11 @@ impl Ppu {
                 return;
             }
         }
-        let h = if self.lcdc & 0x04 != 0 { 16u16 } else { 8 };
+        let h = if self.lcdc & LCDC_OBJ_SIZE != 0 {
+            16u16
+        } else {
+            8
+        };
         let row = u16::from(self.ly) + 16;
         self.render.n_sprites = 0;
         for i in 0..40 {
@@ -204,7 +235,11 @@ impl Ppu {
         let x = next | new;
         let tile = (old | new) & 0xFC;
         let flags = next | new;
-        let h = if self.lcdc & 0x04 != 0 { 16u16 } else { 8 };
+        let h = if self.lcdc & LCDC_OBJ_SIZE != 0 {
+            16u16
+        } else {
+            8
+        };
         let row = u16::from(self.ly) + 16;
         if row >= u16::from(y) && row < u16::from(y) + h {
             for i in 0..10u8 {
@@ -227,7 +262,7 @@ impl Ppu {
         r.discard = self.scx & 7;
         r.stall = 0;
         r.bg_count = 0;
-        r.phase = 0;
+        r.phase = FetchPhase::TileNoWait;
         r.fetch_x = 0;
         r.win_mode = false;
         r.first_discard = true;
@@ -260,7 +295,8 @@ impl Ppu {
         // first-fetched-wins FIFO merge equal to the DMG lower-X-wins rule
         // (Pan Docs "Drawing priority": smaller X = higher priority, OAM
         // order only breaks ties).
-        if self.lcdc & 0x02 != 0 && self.render.bg_count > 0 && self.render.discard == 0 {
+        if self.lcdc & LCDC_OBJ_ENABLE != 0 && self.render.bg_count > 0 && self.render.discard == 0
+        {
             loop {
                 let mut pick: Option<usize> = None;
                 for i in 0..usize::from(self.render.n_sprites) {
@@ -316,7 +352,7 @@ impl Ppu {
             r.win_active = true;
             r.win_mode = true;
             r.bg_count = 0;
-            r.phase = 0;
+            r.phase = FetchPhase::TileNoWait;
             r.fetch_x = 0;
             r.first_discard = false;
             // Window pixels are not subject to SCX fine scroll; WX<7 cuts
@@ -366,17 +402,18 @@ impl Ppu {
         // only priority. DMG compatibility mode behaves like DMG — bit 0
         // clear blanks BG *and* window, ignoring the window enable bit
         // (Pan Docs LCDC.0) — mirroring `output_pixel`'s bg_off condition.
-        self.lcdc & 0x20 != 0
-            && ((self.model.is_cgb() && !self.dmg_compat) || self.lcdc & 0x01 != 0)
+        self.lcdc & LCDC_WIN_ENABLE != 0
+            && ((self.model.is_cgb() && !self.dmg_compat) || self.lcdc & LCDC_BG_ENABLE != 0)
     }
 
     fn fetcher_step(&mut self) {
         match self.render.phase {
-            1 => {
+            FetchPhase::TileNoWait => self.render.phase = FetchPhase::TileNo,
+            FetchPhase::TileNo => {
                 // Tile number (+ attributes on CGB) from the tile map.
                 let (map_bit, row, col, fine) = if self.render.win_mode {
                     (
-                        0x40,
+                        LCDC_WIN_MAP,
                         self.win_line >> 3,
                         self.render.fetch_x & 31,
                         self.win_line & 7,
@@ -384,7 +421,7 @@ impl Ppu {
                 } else {
                     let y = self.ly.wrapping_add(self.scy);
                     (
-                        0x08,
+                        LCDC_BG_MAP,
                         y >> 3,
                         (self.scx / 8).wrapping_add(self.render.fetch_x) & 31,
                         y & 7,
@@ -407,31 +444,32 @@ impl Ppu {
                 } else {
                     fine
                 };
-                self.render.phase = 2;
+                self.render.phase = FetchPhase::LoWait;
             }
-            3 => {
+            FetchPhase::LoWait => self.render.phase = FetchPhase::Lo,
+            FetchPhase::Lo => {
                 self.render.t_lo = self.vram[self.bg_tile_addr()];
-                self.render.phase = 4;
+                self.render.phase = FetchPhase::HiWait;
             }
-            5 => {
+            FetchPhase::HiWait => self.render.phase = FetchPhase::Hi,
+            FetchPhase::Hi => {
                 self.render.t_hi = self.vram[self.bg_tile_addr() + 1];
                 if self.render.first_discard {
                     // The first tile fetch of the line is thrown away and
                     // restarted: 12 dots of mode 3 before the first pixel.
                     self.render.first_discard = false;
-                    self.render.phase = 0;
+                    self.render.phase = FetchPhase::TileNoWait;
                 } else if self.render.bg_count == 0 {
                     self.push_bg_row();
                 } else {
-                    self.render.phase = 6;
+                    self.render.phase = FetchPhase::Push;
                 }
             }
-            6 => {
+            FetchPhase::Push => {
                 if self.render.bg_count == 0 {
                     self.push_bg_row();
                 }
             }
-            _ => self.render.phase += 1,
         }
     }
 
@@ -448,7 +486,7 @@ impl Ppu {
         r.bg_attr = r.t_attr;
         r.bg_count = 8;
         r.fetch_x = r.fetch_x.wrapping_add(1);
-        r.phase = 0;
+        r.phase = FetchPhase::TileNoWait;
     }
 
     fn bg_tile_addr(&self) -> usize {
@@ -458,7 +496,7 @@ impl Ppu {
         } else {
             0
         };
-        let base = if self.lcdc & 0x10 != 0 {
+        let base = if self.lcdc & LCDC_TILE_DATA != 0 {
             usize::from(r.t_no) * 16
         } else {
             (0x1000i32 + i32::from(r.t_no as i8) * 16) as usize
@@ -469,9 +507,15 @@ impl Ppu {
     /// Fetch sprite `i`'s row and merge it into the sprite FIFO.
     fn fetch_sprite(&mut self, i: usize) {
         let s = self.render.sprites[i];
-        let tall = self.lcdc & 0x04 != 0;
+        let tall = self.lcdc & LCDC_OBJ_SIZE != 0;
         let h: u8 = if tall { 16 } else { 8 };
-        let mut row = self.ly.wrapping_add(16).wrapping_sub(s.y);
+        // Selection bounded the row by the height LCDC.2 held at OAM-scan
+        // time (dot 80), but LCDC.2 is re-read here at fetch time: a game
+        // clearing it (16 -> 8) mid-mode-3 can leave row >= h. Mask into the
+        // current height (h is a power of two) — the hardware row counter
+        // feeds the tile-data address through these low bits either way —
+        // so the Y flip below cannot underflow.
+        let mut row = self.ly.wrapping_add(16).wrapping_sub(s.y) & (h - 1);
         if s.flags & 0x40 != 0 {
             row = h - 1 - row; // Y flip.
         }
@@ -541,14 +585,16 @@ impl Ppu {
         // DMG LCDC bit 0: BG and window disabled — they show as white
         // (color 0 for sprite priority purposes). DMG compatibility mode on
         // CGB behaves the same way (integration addition).
-        let bg_off = (!cgb || self.dmg_compat) && self.lcdc & 0x01 == 0;
+        let bg_off = (!cgb || self.dmg_compat) && self.lcdc & LCDC_BG_ENABLE == 0;
         let bg_c = if bg_off { 0 } else { bg_c };
 
         let sprite_wins = sp.color != 0
             && if cgb {
                 // CGB: BG color 0 always loses; LCDC bit 0 clear strips all
                 // BG priority; else BG attribute bit 7 or OAM bit 7 wins.
-                bg_c == 0 || self.lcdc & 0x01 == 0 || !(bg_attr & 0x80 != 0 || sp.bg_priority)
+                bg_c == 0
+                    || self.lcdc & LCDC_BG_ENABLE == 0
+                    || !(bg_attr & 0x80 != 0 || sp.bg_priority)
             } else {
                 !(sp.bg_priority && bg_c != 0)
             };
@@ -1016,6 +1062,25 @@ mod tests {
         sprite(&mut p, 0, 18, 16, 5, 0x00); // line 2 = row 0 -> top tile 4
         render_line(&mut p, 2);
         assert_eq!(px(&p, 2, 8), LIGHT, "row 0 comes from tile&0xFE");
+    }
+
+    /// Sprite selection happens at OAM-scan time (dot 80) with the height
+    /// LCDC.2 holds *then*; the fetch re-reads LCDC.2. A game clearing
+    /// LCDC.2 (16 -> 8) mid-mode-3 can hand the Y-flip a scan-time row
+    /// (>= 8) that exceeds the fetch-time height — `h - 1 - row` must not
+    /// underflow (panic in debug builds).
+    #[test]
+    fn sprite_height_shrunk_between_scan_and_fetch_no_panic() {
+        let mut p = dmg_on(0x97); // 8x16 sprites
+        sprite(&mut p, 0, 10, 88, 4, 0x40); // line 2 = row 8, Y-flipped
+        run_to(&mut p, 2, 90); // scanned at dot 80 (h=16); mode 3 running
+        p.write(0xFF40, 0x93); // clear LCDC.2 before the sprite's fetch
+        let mut guard = 0u32;
+        while !p.line_render_done {
+            p.tick();
+            guard += 1;
+            assert!(guard < 2_000, "mode 3 never finished");
+        }
     }
 
     #[test]

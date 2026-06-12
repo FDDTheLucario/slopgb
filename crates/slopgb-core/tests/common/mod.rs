@@ -66,7 +66,8 @@ pub const MGB_OAM_DMA_HALT_SPRITES_SHADES: &[u8; SCREEN_PIXELS] =
 
 /// Locate the newest mooneye test-suite release directory
 /// (`<repo>/test-roms/mts-*`). `None` when the ROMs are not checked out —
-/// callers print a skip notice instead of failing.
+/// callers print a skip notice instead of failing (unless
+/// `SLOPGB_REQUIRE_ROMS=1`, see [`skip_or_fail`]).
 pub fn mts_root() -> Option<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-roms");
     let mut releases: Vec<PathBuf> = std::fs::read_dir(root)
@@ -80,8 +81,42 @@ pub fn mts_root() -> Option<PathBuf> {
                     .is_some_and(|n| n.starts_with("mts-"))
         })
         .collect();
+    // Lexicographic sort picks the newest release only because the names are
+    // date-prefixed (`mts-YYYYMMDD-...`).
     releases.sort();
     releases.pop()
+}
+
+/// Decide how a missing ROM bundle/directory is handled, given the value of
+/// the `SLOPGB_REQUIRE_ROMS` environment variable: `Ok` carries the skip
+/// notice to print, `Err` the hard-failure message (when the variable is
+/// `1`, as CI sets it, so a checkout that never ran `test-roms/download.sh`
+/// cannot come up all-green). The env value is a *parameter* rather than
+/// read here so the decision is unit-testable without mutating process
+/// environment from parallel test threads.
+pub fn missing_roms_outcome(
+    require_roms: Option<&str>,
+    test: &str,
+    missing: &str,
+) -> Result<String, String> {
+    if require_roms == Some("1") {
+        Err(format!(
+            "{test}: {missing}, and SLOPGB_REQUIRE_ROMS=1 forbids skipping — \
+             run test-roms/download.sh to fetch the mooneye test ROMs"
+        ))
+    } else {
+        Ok(format!("skipping {test}: {missing}"))
+    }
+}
+
+/// Print a skip notice for a missing ROM bundle/directory, or panic when
+/// `SLOPGB_REQUIRE_ROMS=1` (see [`missing_roms_outcome`]).
+pub fn skip_or_fail(test: &str, missing: &str) {
+    let require_roms = std::env::var("SLOPGB_REQUIRE_ROMS").ok();
+    match missing_roms_outcome(require_roms.as_deref(), test, missing) {
+        Ok(notice) => println!("{notice}"),
+        Err(msg) => panic!("{msg}"),
+    }
 }
 
 /// Models a ROM (path relative to the mts root) must pass on.
@@ -274,12 +309,12 @@ fn quiet_catch_unwind<R>(
 /// broken ROM cannot mask the rest of the group.
 pub fn run_group(dir: &str, recursive: bool) {
     let Some(root) = mts_root() else {
-        println!("skipping {dir}: no mooneye ROMs under <repo>/test-roms/mts-*");
+        skip_or_fail(dir, "no mooneye ROMs under <repo>/test-roms/mts-*");
         return;
     };
     let group_dir = root.join(dir);
     if !group_dir.is_dir() {
-        println!("skipping {dir}: {} not present", group_dir.display());
+        skip_or_fail(dir, &format!("{} not present", group_dir.display()));
         return;
     }
     let mut roms = Vec::new();
@@ -467,14 +502,17 @@ pub fn run_for_frames(rom: &[u8], model: Model, frames: u64) -> Result<Vec<u32>,
 /// against the suite's reference image instead of the breakpoint protocol.
 pub fn run_sprite_priority() {
     let Some(root) = mts_root() else {
-        println!("skipping sprite_priority: no mooneye ROMs under <repo>/test-roms/mts-*");
+        skip_or_fail(
+            "sprite_priority",
+            "no mooneye ROMs under <repo>/test-roms/mts-*",
+        );
         return;
     };
     let rom_path = root.join("manual-only/sprite_priority.gb");
     if !rom_path.is_file() {
-        println!(
-            "skipping sprite_priority: {} not present",
-            rom_path.display()
+        skip_or_fail(
+            "sprite_priority",
+            &format!("{} not present", rom_path.display()),
         );
         return;
     }
@@ -521,12 +559,12 @@ pub fn run_sprite_priority() {
 /// `run_sprite_priority`.
 pub fn run_madness() {
     let Some(root) = mts_root() else {
-        println!("skipping madness: no mooneye ROMs under <repo>/test-roms/mts-*");
+        skip_or_fail("madness", "no mooneye ROMs under <repo>/test-roms/mts-*");
         return;
     };
     let rom_path = root.join("madness/mgb_oam_dma_halt_sprites.gb");
     if !rom_path.is_file() {
-        println!("skipping madness: {} not present", rom_path.display());
+        skip_or_fail("madness", &format!("{} not present", rom_path.display()));
         return;
     }
     let rom = std::fs::read(&rom_path).expect("read mgb_oam_dma_halt_sprites.gb");
@@ -835,6 +873,34 @@ mod tests {
         // suppression flag is cleared so later real panics stay loud.
         assert_eq!(quiet_catch_unwind(|| 7).unwrap(), 7);
         assert!(!SUPPRESS_PANIC_OUTPUT.with(Cell::get));
+    }
+
+    // --- SLOPGB_REQUIRE_ROMS skip gate ---
+    //
+    // The decision takes the env *value* as a parameter: cargo test runs
+    // threads in parallel, so set_var/remove_var here would race with other
+    // tests reading the process environment.
+
+    #[test]
+    fn missing_roms_skip_when_env_unset() {
+        let notice = missing_roms_outcome(None, "acceptance", "not present").unwrap();
+        assert_eq!(notice, "skipping acceptance: not present");
+    }
+
+    #[test]
+    fn missing_roms_skip_when_env_not_one() {
+        // Only the documented value "1" arms the gate.
+        assert!(missing_roms_outcome(Some("0"), "misc", "not present").is_ok());
+        assert!(missing_roms_outcome(Some(""), "misc", "not present").is_ok());
+    }
+
+    #[test]
+    fn missing_roms_fail_when_required() {
+        let err = missing_roms_outcome(Some("1"), "acceptance", "not present").unwrap_err();
+        // The failure must be actionable: name the gate and the fetch script.
+        assert!(err.contains("acceptance: not present"), "{err}");
+        assert!(err.contains("SLOPGB_REQUIRE_ROMS=1"), "{err}");
+        assert!(err.contains("test-roms/download.sh"), "{err}");
     }
 
     #[test]

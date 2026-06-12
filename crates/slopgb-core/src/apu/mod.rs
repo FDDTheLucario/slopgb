@@ -15,13 +15,19 @@ mod noise;
 mod pulse;
 mod wave;
 
+use envelope::Envelope;
+use length::LengthCounter;
 use noise::Noise;
 use pulse::Pulse;
 use wave::Wave;
 
-/// Default output sample rate in Hz for [`Apu::drain_samples`], in effect
-/// until a frontend overrides it via [`Apu::set_sample_rate`]. Exported so
-/// frontends can size resamplers against it instead of copying the literal.
+/// Default output sample rate in Hz for [`GameBoy::drain_audio`], in effect
+/// until a frontend overrides it via [`GameBoy::set_sample_rate`]. Exported
+/// so frontends can size resamplers against it instead of copying the
+/// literal.
+///
+/// [`GameBoy::drain_audio`]: crate::GameBoy::drain_audio
+/// [`GameBoy::set_sample_rate`]: crate::GameBoy::set_sample_rate
 pub const DEFAULT_SAMPLE_RATE: u32 = 48_000;
 
 pub struct Apu {
@@ -58,6 +64,66 @@ fn high_pass(cap: &mut f32, input: f32, charge: f32) -> f32 {
     let out = input - *cap;
     *cap = input - out * charge;
     out
+}
+
+// Per-channel register-write plumbing, shared by all four channels. These
+// take the individual fields (not the channel structs) because pulse, wave
+// and noise are distinct types whose step/trigger/digital logic differs
+// structurally — only the register bookkeeping is common.
+
+/// 256 Hz length clock: disable the channel when its counter expires.
+fn clock_length(length: &mut LengthCounter, enabled: &mut bool) {
+    if length.clock() {
+        *enabled = false;
+    }
+}
+
+/// NRx1 for the pulse channels: duty in bits 7-6, length load in bits 5-0.
+fn write_pulse_nrx1(ch: &mut Pulse, value: u8) {
+    ch.duty = value >> 6;
+    ch.length.load(value & 0x3F);
+}
+
+/// NRx2: store the envelope parameters and refresh the DAC flag; a channel
+/// whose DAC turns off (bits 7-3 all zero) is disabled immediately.
+///
+/// Envelope "zombie mode" — live volume manipulation when NRx2 is written
+/// while the channel is active — is intentionally unimplemented: it is not
+/// pinned by mooneye or Blargg dmg_sound, and it varies across hardware
+/// revisions (gbdev wiki, Obscure Behavior).
+fn write_nrx2(envelope: &mut Envelope, dac: &mut bool, enabled: &mut bool, value: u8) {
+    envelope.write(value);
+    *dac = envelope.dac_enabled();
+    if !*dac {
+        *enabled = false;
+    }
+}
+
+/// NRx3: frequency low byte.
+fn write_freq_low(freq: &mut u16, value: u8) {
+    *freq = (*freq & 0x0700) | u16::from(value);
+}
+
+/// NRx4 bits 2-0: frequency high bits (pulse and wave channels only).
+fn write_freq_high(freq: &mut u16, value: u8) {
+    *freq = (*freq & 0x00FF) | (u16::from(value & 7) << 8);
+}
+
+/// NRx4 trigger/length plumbing: apply the length-enable write (with its
+/// "extra length clock" edge cases, see [`LengthCounter::write_nrx4`]) and
+/// return whether the trigger bit was set so the caller can run the
+/// channel's own trigger logic afterwards.
+fn write_nrx4(
+    length: &mut LengthCounter,
+    enabled: &mut bool,
+    value: u8,
+    next_step_clocks_length: bool,
+) -> bool {
+    let trigger = value & 0x80 != 0;
+    if length.write_nrx4(value & 0x40 != 0, trigger, next_step_clocks_length) {
+        *enabled = false;
+    }
+    trigger
 }
 
 impl Apu {
@@ -133,18 +199,10 @@ impl Apu {
     }
 
     fn clock_lengths(&mut self) {
-        if self.ch1.length.clock() {
-            self.ch1.enabled = false;
-        }
-        if self.ch2.length.clock() {
-            self.ch2.enabled = false;
-        }
-        if self.ch3.length.clock() {
-            self.ch3.enabled = false;
-        }
-        if self.ch4.length.clock() {
-            self.ch4.enabled = false;
-        }
+        clock_length(&mut self.ch1.length, &mut self.ch1.enabled);
+        clock_length(&mut self.ch2.length, &mut self.ch2.enabled);
+        clock_length(&mut self.ch3.length, &mut self.ch3.enabled);
+        clock_length(&mut self.ch4.length, &mut self.ch4.enabled);
     }
 
     /// True when the next frame-sequencer step is one of 0/2/4/6. NRx4
@@ -215,59 +273,44 @@ impl Apu {
             }
             return;
         }
+        let next_clocks = self.next_step_clocks_length();
         match addr {
             0xFF10 => self.ch1.write_nr10(value),
-            0xFF11 => {
-                self.ch1.duty = value >> 6;
-                self.ch1.length.load(value & 0x3F);
-            }
-            0xFF12 => {
-                self.ch1.envelope.write(value);
-                self.ch1.dac = self.ch1.envelope.dac_enabled();
-                if !self.ch1.dac {
-                    self.ch1.enabled = false;
-                }
-            }
-            0xFF13 => self.ch1.freq = (self.ch1.freq & 0x0700) | u16::from(value),
+            0xFF11 => write_pulse_nrx1(&mut self.ch1, value),
+            0xFF12 => write_nrx2(
+                &mut self.ch1.envelope,
+                &mut self.ch1.dac,
+                &mut self.ch1.enabled,
+                value,
+            ),
+            0xFF13 => write_freq_low(&mut self.ch1.freq, value),
             0xFF14 => {
-                self.ch1.freq = (self.ch1.freq & 0x00FF) | (u16::from(value & 7) << 8);
-                let next_clocks = self.next_step_clocks_length();
-                let trigger = value & 0x80 != 0;
-                if self
-                    .ch1
-                    .length
-                    .write_nrx4(value & 0x40 != 0, trigger, next_clocks)
-                {
-                    self.ch1.enabled = false;
-                }
-                if trigger {
+                write_freq_high(&mut self.ch1.freq, value);
+                if write_nrx4(
+                    &mut self.ch1.length,
+                    &mut self.ch1.enabled,
+                    value,
+                    next_clocks,
+                ) {
                     self.ch1.trigger();
                 }
             }
-            0xFF16 => {
-                self.ch2.duty = value >> 6;
-                self.ch2.length.load(value & 0x3F);
-            }
-            0xFF17 => {
-                self.ch2.envelope.write(value);
-                self.ch2.dac = self.ch2.envelope.dac_enabled();
-                if !self.ch2.dac {
-                    self.ch2.enabled = false;
-                }
-            }
-            0xFF18 => self.ch2.freq = (self.ch2.freq & 0x0700) | u16::from(value),
+            0xFF16 => write_pulse_nrx1(&mut self.ch2, value),
+            0xFF17 => write_nrx2(
+                &mut self.ch2.envelope,
+                &mut self.ch2.dac,
+                &mut self.ch2.enabled,
+                value,
+            ),
+            0xFF18 => write_freq_low(&mut self.ch2.freq, value),
             0xFF19 => {
-                self.ch2.freq = (self.ch2.freq & 0x00FF) | (u16::from(value & 7) << 8);
-                let next_clocks = self.next_step_clocks_length();
-                let trigger = value & 0x80 != 0;
-                if self
-                    .ch2
-                    .length
-                    .write_nrx4(value & 0x40 != 0, trigger, next_clocks)
-                {
-                    self.ch2.enabled = false;
-                }
-                if trigger {
+                write_freq_high(&mut self.ch2.freq, value);
+                if write_nrx4(
+                    &mut self.ch2.length,
+                    &mut self.ch2.enabled,
+                    value,
+                    next_clocks,
+                ) {
                     self.ch2.trigger();
                 }
             }
@@ -279,42 +322,34 @@ impl Apu {
             }
             0xFF1B => self.ch3.length.load(value),
             0xFF1C => self.ch3.volume_code = (value >> 5) & 3,
-            0xFF1D => self.ch3.freq = (self.ch3.freq & 0x0700) | u16::from(value),
+            0xFF1D => write_freq_low(&mut self.ch3.freq, value),
             0xFF1E => {
-                self.ch3.freq = (self.ch3.freq & 0x00FF) | (u16::from(value & 7) << 8);
-                let next_clocks = self.next_step_clocks_length();
-                let trigger = value & 0x80 != 0;
-                if self
-                    .ch3
-                    .length
-                    .write_nrx4(value & 0x40 != 0, trigger, next_clocks)
-                {
-                    self.ch3.enabled = false;
-                }
-                if trigger {
+                write_freq_high(&mut self.ch3.freq, value);
+                if write_nrx4(
+                    &mut self.ch3.length,
+                    &mut self.ch3.enabled,
+                    value,
+                    next_clocks,
+                ) {
                     self.ch3.trigger();
                 }
             }
             0xFF20 => self.ch4.length.load(value & 0x3F),
-            0xFF21 => {
-                self.ch4.envelope.write(value);
-                self.ch4.dac = self.ch4.envelope.dac_enabled();
-                if !self.ch4.dac {
-                    self.ch4.enabled = false;
-                }
-            }
+            0xFF21 => write_nrx2(
+                &mut self.ch4.envelope,
+                &mut self.ch4.dac,
+                &mut self.ch4.enabled,
+                value,
+            ),
             0xFF22 => self.ch4.write_nr43(value),
+            // Channel 4 has no frequency; NR44 is trigger/length only.
             0xFF23 => {
-                let next_clocks = self.next_step_clocks_length();
-                let trigger = value & 0x80 != 0;
-                if self
-                    .ch4
-                    .length
-                    .write_nrx4(value & 0x40 != 0, trigger, next_clocks)
-                {
-                    self.ch4.enabled = false;
-                }
-                if trigger {
+                if write_nrx4(
+                    &mut self.ch4.length,
+                    &mut self.ch4.enabled,
+                    value,
+                    next_clocks,
+                ) {
                     self.ch4.trigger();
                 }
             }
@@ -372,6 +407,12 @@ impl Apu {
         self.sum_l = 0.0;
         self.sum_r = 0.0;
         self.sum_count = 0;
+        // Restart the output stage cleanly: samples already queued at the
+        // old rate and the capacitor charge (scaled per-sample, so wrong
+        // for the new rate) must not leak into the new stream.
+        self.hp_cap_l = 0.0;
+        self.hp_cap_r = 0.0;
+        self.samples.clear();
     }
 
     /// Move all accumulated stereo samples into `out`.
@@ -422,34 +463,36 @@ impl Apu {
         c3 | (c4 << 4)
     }
 
+    /// Sum one channel into the stereo accumulators per NR51 routing.
+    /// `ch` is the channel index 0-3 selecting the NR51 bits.
+    fn mix_channel(&self, dac: bool, digital: u8, ch: u8, left: &mut f32, right: &mut f32) {
+        if !dac {
+            // DAC off: the channel contributes nothing at all.
+            return;
+        }
+        // DAC: digital 0-15 to analog with a *negative* slope — Pan
+        // Docs "Audio Details" (DACs): digital 0 maps to analog +1,
+        // digital 15 to analog -1. (A disabled channel with a live DAC
+        // outputs digital 0, i.e. a DC offset — that is hardware.)
+        let analog = 1.0 - f32::from(digital) / 7.5;
+        if self.nr51 & (0x10 << ch) != 0 {
+            *left += analog;
+        }
+        if self.nr51 & (0x01 << ch) != 0 {
+            *right += analog;
+        }
+    }
+
     /// Instantaneous analog output of both terminals, each in [-1, 1].
+    /// Runs every T-cycle, hence the straight per-channel calls instead of
+    /// building per-call channel arrays.
     fn mix(&self) -> (f32, f32) {
-        let digital = [
-            self.ch1.digital(),
-            self.ch2.digital(),
-            self.ch3.digital(),
-            self.ch4.digital(),
-        ];
-        let dac_on = [self.ch1.dac, self.ch2.dac, self.ch3.dac, self.ch4.dac];
         let mut left = 0.0f32;
         let mut right = 0.0f32;
-        for (i, (&d, &on)) in digital.iter().zip(&dac_on).enumerate() {
-            if !on {
-                // DAC off: the channel contributes nothing at all.
-                continue;
-            }
-            // DAC: digital 0-15 to analog with a *negative* slope — Pan
-            // Docs "Audio Details" (DACs): digital 0 maps to analog +1,
-            // digital 15 to analog -1. (A disabled channel with a live DAC
-            // outputs digital 0, i.e. a DC offset — that is hardware.)
-            let analog = 1.0 - f32::from(d) / 7.5;
-            if self.nr51 & (0x10 << i) != 0 {
-                left += analog;
-            }
-            if self.nr51 & (0x01 << i) != 0 {
-                right += analog;
-            }
-        }
+        self.mix_channel(self.ch1.dac, self.ch1.digital(), 0, &mut left, &mut right);
+        self.mix_channel(self.ch2.dac, self.ch2.digital(), 1, &mut left, &mut right);
+        self.mix_channel(self.ch3.dac, self.ch3.digital(), 2, &mut left, &mut right);
+        self.mix_channel(self.ch4.dac, self.ch4.digital(), 3, &mut left, &mut right);
         // NR50 master volume scales by (vol+1)/8 — it never mutes. The
         // extra /4 normalises the 4-channel sum into [-1, 1].
         let lvol = f32::from((self.nr50 >> 4) & 7) + 1.0;
@@ -550,11 +593,8 @@ mod tests {
     #[test]
     fn register_readback_masks_after_writing_zero() {
         for (addr, mask) in MASKS {
-            let h = {
-                let mut h = H::dmg();
-                h.w(addr, 0x00);
-                h
-            };
+            let mut h = H::dmg();
+            h.w(addr, 0x00);
             assert_eq!(h.r(addr), mask, "addr {addr:04X}");
         }
     }
@@ -999,6 +1039,25 @@ mod tests {
         let mut out = Vec::new();
         h.apu.drain_samples(&mut out);
         assert!((22049..=22051).contains(&out.len()), "got {}", out.len());
+    }
+
+    #[test]
+    fn set_sample_rate_resets_capacitors_and_drops_stale_samples() {
+        let mut h = H::dmg();
+        h.w(0xFF24, 0x77);
+        h.w(0xFF25, 0xFF);
+        h.w(0xFF12, 0xF0); // ch1 DAC on: a DC offset charges the capacitors
+        h.ticks(10_000);
+        assert!(!h.apu.samples.is_empty());
+        assert_ne!(h.apu.hp_cap_l, 0.0);
+        assert_ne!(h.apu.hp_cap_r, 0.0);
+        // A mid-run rate change must not mix stale state into the new
+        // stream: pending samples at the old rate are dropped and the
+        // high-pass capacitors restart discharged.
+        h.apu.set_sample_rate(22_050);
+        assert!(h.apu.samples.is_empty(), "stale samples must be dropped");
+        assert_eq!(h.apu.hp_cap_l, 0.0);
+        assert_eq!(h.apu.hp_cap_r, 0.0);
     }
 
     #[test]
