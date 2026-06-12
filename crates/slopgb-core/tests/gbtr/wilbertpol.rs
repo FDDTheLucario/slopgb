@@ -51,16 +51,9 @@ const DEFAULT_MODELS: [Model; 6] = [
 ];
 
 /// Known-failure baseline (`baselines/wilbertpol.txt`), one case key per
-/// line, `#` comments allowed; shrinking it is progress, growing it a
-/// regression (`harness::assert_against_baseline`).
+/// line, `#` comments allowed (`harness::parse_baseline`); shrinking it is
+/// progress, growing it a regression (`harness::assert_against_baseline`).
 const BASELINE_TXT: &str = include_str!("baselines/wilbertpol.txt");
-
-fn parse_baseline(txt: &str) -> Vec<&str> {
-    txt.lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .collect()
-}
 
 /// How one suite ROM is verified — or why it never runs.
 #[derive(Debug, PartialEq, Eq)]
@@ -237,19 +230,8 @@ fn run_madness_case(rom: &[u8], png_path: &Path) -> Result<(), String> {
     common::compare_frame_exact_dmg(gb.frame(), &shades)
 }
 
-/// Forward-slash path of `path` relative to `dir` (case keys and inventory
-/// entries must not vary with the host path separator).
-fn suite_rel(dir: &Path, path: &Path) -> String {
-    path.strip_prefix(dir)
-        .unwrap_or(path)
-        .iter()
-        .map(|c| c.to_str().expect("non-UTF-8 test ROM path"))
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
 /// Models a disposition produces cases for (used to attribute a ROM read
-/// failure to every case it would have run).
+/// failure — or a caught per-ROM panic — to every case it would have run).
 fn case_models(disposition: &Disposition) -> Vec<Model> {
     match disposition {
         Disposition::Protocol(models) => models.clone(),
@@ -319,7 +301,6 @@ fn run_rom(rom_path: &Path, rel: &str) -> Vec<CaseResult> {
 /// [`wilbertpol_matrix`]; exempted ones are documented never-run (the
 /// [`Disposition::Exempt`] arms of [`classify`] carry the reasons). Both
 /// empty when the collection is not checked out.
-#[allow(dead_code)] // consumed by the Phase B2 inventory guard
 pub fn inventory() -> (Vec<String>, Vec<String>) {
     let Some(root) = common::gbtr_root() else {
         return (Vec::new(), Vec::new());
@@ -330,7 +311,7 @@ pub fn inventory() -> (Vec<String>, Vec<String>) {
         .unwrap_or_else(|e| panic!("cannot enumerate ROMs under {}: {e}", suite_dir.display()));
     let (mut claimed, mut exempted) = (Vec::new(), Vec::new());
     for rom_path in &roms {
-        let rel = suite_rel(&suite_dir, rom_path);
+        let rel = harness::rel_unix(&suite_dir, rom_path);
         let bucket = match classify(&rel) {
             Disposition::Exempt(_) => &mut exempted,
             _ => &mut claimed,
@@ -378,7 +359,24 @@ fn wilbertpol_matrix() {
                 loop {
                     let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     let Some(rom_path) = roms.get(i) else { break };
-                    let cases = run_rom(rom_path, &suite_rel(&suite_dir, rom_path));
+                    let rel = harness::rel_unix(&suite_dir, rom_path);
+                    // Catch per-ROM panics *inside* the worker loop: an
+                    // uncaught one would tear down thread::scope, poison
+                    // the results mutex and abort the whole matrix. The
+                    // panic is attributed to every rom×model case the ROM
+                    // classifies to, as keyed Err results the baseline
+                    // ratchet can report.
+                    let cases =
+                        harness::catch_panic(|| run_rom(rom_path, &rel)).unwrap_or_else(|msg| {
+                            let collection_rel = format!("{SUITE}/{rel}");
+                            case_models(&classify(&rel))
+                                .into_iter()
+                                .map(|model| CaseResult {
+                                    key: harness::case_key(&collection_rel, model),
+                                    result: Err(format!("panicked: {msg}")),
+                                })
+                                .collect()
+                        });
                     results.lock().unwrap().extend(cases);
                 }
             });
@@ -387,7 +385,11 @@ fn wilbertpol_matrix() {
     let mut results = results.into_inner().unwrap();
     results.sort_by(|a, b| a.key.cmp(&b.key));
     println!("wilbertpol: {} rom×model cases executed", results.len());
-    harness::assert_against_baseline("wilbertpol", &results, &parse_baseline(BASELINE_TXT));
+    harness::assert_against_baseline(
+        "wilbertpol",
+        &results,
+        &harness::parse_baseline(BASELINE_TXT),
+    );
 }
 
 /// Self-check of the inventory hook ahead of the global Phase B2 guard:
@@ -426,7 +428,7 @@ fn wilbertpol_inventory_is_disjoint_and_complete() {
         .unwrap_or_else(|e| panic!("cannot enumerate ROMs under {}: {e}", suite_dir.display()));
     let mut on_disk: Vec<String> = roms
         .iter()
-        .map(|p| format!("{SUITE}/{}", suite_rel(&suite_dir, p)))
+        .map(|p| format!("{SUITE}/{}", harness::rel_unix(&suite_dir, p)))
         .collect();
     on_disk.sort();
     let mut union: Vec<String> = claimed.iter().chain(&exempted).cloned().collect();
@@ -559,14 +561,5 @@ mod tests {
         assert!(err.contains("grey level 0"), "{err}");
         let err = madness_shade([255, 255, 0]).unwrap_err();
         assert!(err.contains("non-grey"), "{err}");
-    }
-
-    // --- baseline file parsing ---
-
-    #[test]
-    fn wilbertpol_parse_baseline_skips_comments_and_blanks() {
-        let txt = "# header\n\n  a/b.gb [Dmg]  \n# note\nc/d.gb [Cgb]\n";
-        assert_eq!(parse_baseline(txt), ["a/b.gb [Dmg]", "c/d.gb [Cgb]"]);
-        assert!(parse_baseline("# only comments\n\n").is_empty());
     }
 }

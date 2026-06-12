@@ -24,8 +24,10 @@
 //!   produced and `_gba.png` files are ignored.
 //! * **Expectations**: `_out<HEX>` compares the top 8 pixel rows against
 //!   hex glyphs ([`check_hex_screen`]); `_outaudio0`/`_outaudio1` expect
-//!   the final frame's audio samples to be all-identical / not
-//!   ([`check_audio`]); otherwise a sibling reference PNG is compared via
+//!   the final frame's *raw* (pre-resample, pre-high-pass) audio samples
+//!   to be all-identical / not ([`check_audio`], the testrunner's
+//!   raw-stream sample-equality semantics); otherwise a sibling reference
+//!   PNG is compared via
 //!   [`harness::expect_frame_png`]. An `x` prefix on a tag or PNG suffix
 //!   (`xout…`, `_xdmg08.png`, `_xcgb.png`) marks the expectation
 //!   unverified-on-hardware: the testrunner's substring searches can never
@@ -43,12 +45,11 @@
 //! Result keys are `gambatte/<rel> [Model]`; the known-failure baseline
 //! lives in `baselines/gambatte.txt` (one key per line, `#` comments).
 
-use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 
 use slopgb_core::{CYCLES_PER_FRAME, GameBoy, Model, SCREEN_W};
 
-use crate::common::{self, framecmp::CgbColorMap};
+use crate::common::{self, framecmp, framecmp::CgbColorMap};
 use crate::harness::{self, CaseResult};
 
 /// The howto's exit condition: 15 LCD frames = 1 053 360 T-cycles.
@@ -226,23 +227,13 @@ const GLYPHS: [[u8; 8]; 16] = [
 /// Re-encode one emulator pixel the way the testrunner sees its own frame
 /// buffer, then apply the 0xF8F8F8 mask `tilesAreEqual` compares under.
 ///
-/// CGB frames go through gambatte's CGB-to-RGB conversion first (the lut
-/// built in `runTestRom`; private re-statement of
-/// `common::framecmp::gambatte_rgb`, which is not exported — the 5-bit
-/// channels are recovered losslessly from the core's `(x<<3)|(x>>2)`
-/// expansion). DMG frames already use the FF/AA/55/00 greys the
-/// testrunner's `setDmgPaletteColor` calls configure.
+/// CGB frames go through gambatte's CGB-to-RGB conversion first
+/// ([`framecmp::gambatte_rgb`], the lut built in `runTestRom`). DMG frames
+/// already use the FF/AA/55/00 greys the testrunner's `setDmgPaletteColor`
+/// calls configure; the mask drops their low bits (and any X byte), so no
+/// separate 24-bit truncation is needed.
 fn masked_pixel(px: u32, cgb: bool) -> u32 {
-    let v = if cgb {
-        let r5 = (px >> 19) & 0x1F;
-        let g5 = (px >> 11) & 0x1F;
-        let b5 = (px >> 3) & 0x1F;
-        (((r5 * 13 + g5 * 2 + b5) / 2) << 16)
-            | (((g5 * 3 + b5) * 2) << 8)
-            | ((r5 * 3 + g5 * 2 + b5 * 11) / 2)
-    } else {
-        px & 0x00FF_FFFF
-    };
+    let v = if cgb { framecmp::gambatte_rgb(px) } else { px };
     v & 0x00F8_F8F8
 }
 
@@ -317,11 +308,16 @@ fn read_hex_screen(frame: &[u32], cgb: bool) -> String {
 // audio + blank comparators
 // ---------------------------------------------------------------------------
 
-/// Audio verdict over the final frame's samples, mirroring the
-/// testrunner's `std::count(audiobuf, audiobuf + samples_per_frame,
-/// audiobuf[0]) == samples_per_frame` silence test: silence ⇔ every
-/// sample is bit-identical to the first (an empty capture would be a
-/// harness bug, not silence).
+/// Audio verdict over the final frame's *raw* samples
+/// ([`GameBoy::drain_audio_raw`]: the per-dot mixer output, before the
+/// box-average resampler and high-pass filter), mirroring the testrunner's
+/// `std::count(audiobuf, audiobuf + samples_per_frame, audiobuf[0]) ==
+/// samples_per_frame` silence test on gambatte's own raw stream: silence ⇔
+/// every sample is bit-identical to the first (an empty capture would be a
+/// harness bug, not silence). The filtered [`GameBoy::drain_audio`] stream
+/// must not be judged instead: its decaying high-pass tail reads a silent
+/// DC level as "sound" (false `_outaudio0` fail) and its filter can
+/// flatten genuinely varying output (false `_outaudio1` pass).
 fn check_audio(samples: &[(f32, f32)], expect_sound: bool) -> Result<(), String> {
     let Some(&first) = samples.first() else {
         return Err("no audio samples captured in the final frame".into());
@@ -377,10 +373,10 @@ fn run_case(rom: &[u8], model: Model, check: &Check, rom_path: &Path) -> Result<
     match check {
         Check::Audio(expect_sound) => {
             let mut samples = Vec::new();
-            gb.drain_audio(&mut samples); // discard frames 1..=15
+            gb.drain_audio_raw(&mut samples); // discard frames 1..=15
             samples.clear();
             run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
-            gb.drain_audio(&mut samples);
+            gb.drain_audio_raw(&mut samples);
             check_audio(&samples, *expect_sound)
         }
         check => {
@@ -414,17 +410,6 @@ fn run_case(rom: &[u8], model: Model, check: &Check, rom_path: &Path) -> Result<
 // suite walk + inventory
 // ---------------------------------------------------------------------------
 
-/// Collection-relative forward-slash key for a ROM path.
-fn rel_key(root: &Path, rom_path: &Path) -> String {
-    rom_path
-        .strip_prefix(root)
-        .unwrap_or(rom_path)
-        .components()
-        .map(|c| c.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
 /// Every ROM under `gambatte/`, sorted (collect_roms order).
 fn suite_roms(root: &Path) -> Vec<PathBuf> {
     let dir = root.join("gambatte");
@@ -451,7 +436,6 @@ fn rom_cases(rom_path: &Path) -> Vec<(Model, Check)> {
     cases
 }
 
-#[allow(dead_code)] // consumed by the Phase B2 inventory guard
 pub fn inventory() -> (Vec<String>, Vec<String>) {
     let Some(root) = common::gbtr_root() else {
         return (Vec::new(), Vec::new());
@@ -459,7 +443,7 @@ pub fn inventory() -> (Vec<String>, Vec<String>) {
     let mut claimed = Vec::new();
     let mut exempted = Vec::new();
     for rom_path in suite_roms(&root) {
-        let rel = rel_key(&root, &rom_path);
+        let rel = harness::rel_unix(&root, &rom_path);
         if rom_cases(&rom_path).is_empty() {
             exempted.push(rel);
         } else {
@@ -537,19 +521,6 @@ const EXEMPT: &[&str] = &[
 ];
 
 // ---------------------------------------------------------------------------
-// baseline
-// ---------------------------------------------------------------------------
-
-/// Parse a baseline file: one case key per line, blank lines and `#`
-/// comments ignored.
-fn parse_baseline(text: &str) -> Vec<&str> {
-    text.lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .collect()
-}
-
-// ---------------------------------------------------------------------------
 // tests
 // ---------------------------------------------------------------------------
 
@@ -565,22 +536,11 @@ fn gambatte_matrix() {
         if cases.is_empty() {
             continue; // exempt; pinned by gambatte_inventory_is_exact
         }
-        let rel = rel_key(&root, &rom_path);
+        let rel = harness::rel_unix(&root, &rom_path);
         let rom =
             std::fs::read(&rom_path).unwrap_or_else(|e| panic!("read {}: {e}", rom_path.display()));
         for (model, check) in cases {
-            let result = match panic::catch_unwind(AssertUnwindSafe(|| {
-                run_case(&rom, model, &check, &rom_path)
-            })) {
-                Ok(r) => r,
-                Err(payload) => Err(match payload.downcast_ref::<String>() {
-                    Some(s) => format!("panicked: {s}"),
-                    None => match payload.downcast_ref::<&str>() {
-                        Some(s) => format!("panicked: {s}"),
-                        None => "panicked (non-string payload)".into(),
-                    },
-                }),
-            };
+            let result = harness::catch_case(|| run_case(&rom, model, &check, &rom_path));
             results.push(CaseResult {
                 key: harness::case_key(&rel, model),
                 result,
@@ -592,7 +552,7 @@ fn gambatte_matrix() {
     assert_eq!(results.len(), 5272, "case-matrix drift");
     let passed = results.iter().filter(|c| c.result.is_ok()).count();
     println!("gambatte: {passed}/{} cases pass", results.len());
-    harness::assert_against_baseline("gambatte", &results, &parse_baseline(BASELINE_TXT));
+    harness::assert_against_baseline("gambatte", &results, &harness::parse_baseline(BASELINE_TXT));
 }
 
 /// Self-verifying inventory: claimed ∩ exempted = ∅ and claimed ∪ exempted
@@ -610,7 +570,7 @@ fn gambatte_inventory_is_exact() {
     let (claimed, exempted) = inventory();
     let mut on_disk: Vec<String> = suite_roms(&root)
         .iter()
-        .map(|p| rel_key(&root, p))
+        .map(|p| harness::rel_unix(&root, p))
         .collect();
     on_disk.sort();
     let mut union: Vec<String> = claimed.iter().chain(&exempted).cloned().collect();
@@ -823,14 +783,4 @@ fn gambatte_blank_verdict() {
     speck[3] = 0x00AA_AAAA;
     let err = check_blank(&speck).unwrap_err();
     assert!(err.contains("1 non-white"), "{err}");
-}
-
-#[test]
-fn gambatte_baseline_parser_skips_comments_and_blanks() {
-    let text = "# comment\n\n  gambatte/a.gb [Dmg]  \ngambatte/b.gbc [Cgb]\n";
-    assert_eq!(
-        parse_baseline(text),
-        vec!["gambatte/a.gb [Dmg]", "gambatte/b.gbc [Cgb]"]
-    );
-    assert!(parse_baseline("# only comments\n\n").is_empty());
 }

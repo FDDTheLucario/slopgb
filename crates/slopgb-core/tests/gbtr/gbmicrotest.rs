@@ -4,11 +4,14 @@
 //! result to HRAM — $FF80 actual value, $FF81 expected value, $FF82 verdict
 //! ($01 pass, $FF fail). Only $FF82 may be trusted ("You should only check
 //! `0xFF82` when evaluating test results"); $FF80/$FF81 are reported in
-//! failure messages purely for triage. There is no completion signal, so we
-//! poll $FF82 until it goes nonzero (HRAM powers up zeroed) under a 0.6
-//! emulated-second deadline: the howto documents two frames as sufficient
-//! for every test except `is_if_set_during_ime0.gb` (~380 ms emulated), and
-//! 0.6 s covers that outlier with >50% margin.
+//! failure messages purely for triage. There is no completion signal; the
+//! howto's fixed-point semantics apply: run two frames — documented as
+//! sufficient for every test except `is_if_set_during_ime0.gb` (~380 ms
+//! emulated) — and read $FF82 *at that point* (never latch the first
+//! nonzero write: a ROM may store a provisional value before its real
+//! verdict). If $FF82 is still zero (HRAM powers up zeroed), continue to a
+//! 0.6 emulated-second deadline — covering the outlier with >50% margin —
+//! and judge the final value read there.
 //!
 //! Model routing: the howto pins the verified hardware to a DMG-CPU-08
 //! board, i.e. a DMG-CPU B or C SoC — every ROM therefore runs on
@@ -84,28 +87,32 @@ fn verdict(actual: u8, expected: u8, status: u8) -> Result<(), String> {
     }
 }
 
-/// Parse a known-failure baseline file: one case key per line, blank lines
-/// and `#` comment lines ignored, surrounding whitespace trimmed.
-fn parse_baseline(text: &str) -> Vec<&str> {
-    text.lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .collect()
-}
-
 /// Known-failure baseline (ratchet): the rom×model cases that currently
 /// fail. Shrinking this file is progress; growing it is a regression
 /// (`harness::assert_against_baseline`).
 const BASELINE_TXT: &str = include_str!("baselines/gbmicrotest.txt");
 
-/// Run one gbmicrotest ROM on DMG: poll the $FF82 verdict to the deadline,
-/// then judge it. A ROM that never sets $FF82 is a failure here — the
-/// documented no-verdict testbenches are exempted before this runs.
+/// Run one gbmicrotest ROM on DMG through the howto's fixed-point
+/// semantics (module docs): read $FF82 after two frames; if it is still
+/// zero, run to the 0.6 emulated-second deadline and read it once more —
+/// the *final* value decides, never the first nonzero write (a ROM whose
+/// verdict byte changes between a provisional store and the deadline must
+/// be judged by what it settles on). A ROM that never sets $FF82 is a
+/// failure here — the documented no-verdict testbenches are exempted
+/// before this runs.
 fn run_case(rom: &[u8]) -> Result<(), String> {
     let mut gb = harness::boot(rom, Model::Dmg);
-    harness::run_until(&mut gb, DEADLINE_TCYCLES, |gb| gb.peek(0xFF82) != 0)
-        .map_err(|e| format!("no $FF82 verdict within 0.6 emulated seconds: {e}"))?;
-    verdict(gb.peek(0xFF80), gb.peek(0xFF81), gb.peek(0xFF82))
+    let deadline = gb.cycles().saturating_add(DEADLINE_TCYCLES);
+    harness::run_for_frames(&mut gb, 2);
+    if gb.peek(0xFF82) == 0 {
+        while gb.cycles() < deadline {
+            gb.step();
+        }
+    }
+    match gb.peek(0xFF82) {
+        0 => Err("no $FF82 verdict within 0.6 emulated seconds".into()),
+        status => verdict(gb.peek(0xFF80), gb.peek(0xFF81), status),
+    }
 }
 
 /// Enumerate the suite directory as collection-relative forward-slash
@@ -139,7 +146,6 @@ fn is_testbench(rel: &str) -> bool {
 /// collection-relative paths of every `.gb`/`.gbc` under `gbmicrotest/`.
 /// Exempted = the documented no-verdict testbenches ([`TESTBENCHES`]);
 /// everything else produces exactly one DMG case.
-#[allow(dead_code)] // consumed by the Phase B2 inventory guard
 pub fn inventory() -> (Vec<String>, Vec<String>) {
     let Some(root) = common::gbtr_root() else {
         return (Vec::new(), Vec::new());
@@ -171,10 +177,14 @@ fn gbmicrotest_dmg_matrix() {
         let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
         results.push(CaseResult {
             key: harness::case_key(&rel, Model::Dmg),
-            result: run_case(&rom),
+            result: harness::catch_case(|| run_case(&rom)),
         });
     }
-    harness::assert_against_baseline("gbmicrotest", &results, &parse_baseline(BASELINE_TXT));
+    harness::assert_against_baseline(
+        "gbmicrotest",
+        &results,
+        &harness::parse_baseline(BASELINE_TXT),
+    );
 }
 
 /// Self-verifying coverage: claimed ∩ exempted = ∅ and claimed ∪ exempted
@@ -233,23 +243,6 @@ mod tests {
         let err = verdict(0x00, 0x00, 0x42).unwrap_err();
         assert!(err.contains("protocol violation"), "{err}");
         assert!(err.contains("0x42"), "{err}");
-    }
-
-    // --- baseline file parser ---
-
-    #[test]
-    fn baseline_parser_skips_comments_and_blanks() {
-        let text = "# header\n\n  gbmicrotest/a.gb [Dmg]  \n#x\ngbmicrotest/b.gb [Dmg]\n";
-        assert_eq!(
-            parse_baseline(text),
-            ["gbmicrotest/a.gb [Dmg]", "gbmicrotest/b.gb [Dmg]"]
-        );
-    }
-
-    #[test]
-    fn baseline_parser_handles_empty_file() {
-        assert!(parse_baseline("").is_empty());
-        assert!(parse_baseline("# only comments\n").is_empty());
     }
 
     // --- deadline constant ---

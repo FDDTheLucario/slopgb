@@ -40,7 +40,11 @@ pub enum CgbColorMap {
 /// the core's 5→8 expansion `(x << 3) | (x >> 2)` keeps the top 5 bits equal
 /// to `x` (the `| (x >> 2)` part only fills the low 3 bits) —
 /// `five_bit_recovery_is_lossless` proves it exhaustively.
-fn gambatte_rgb(px: u32) -> u32 {
+///
+/// Public for the gambatte suite's hex-screen comparator, which re-encodes
+/// emulator pixels through this conversion before masking
+/// (`gbtr/gambatte.rs::masked_pixel`).
+pub fn gambatte_rgb(px: u32) -> u32 {
     let r5 = (px >> 19) & 0x1F;
     let g5 = (px >> 11) & 0x1F;
     let b5 = (px >> 3) & 0x1F;

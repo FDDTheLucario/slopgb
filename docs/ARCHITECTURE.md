@@ -98,6 +98,19 @@ clean PCM reads, same-suite's E-verified channel tests pass on this model;
 implementing the glitch would break them and therefore requires the revision
 split first (trigger T1 below).
 
+### DMG revision
+
+`Model::Dmg` likewise pins **one** DMG revision for reference selection:
+late-DMG silicon — the "blob" (DMG-C-ish) capture series. This is consistent
+across the corpus: age routes its `-dmgC` variants to `Model::Dmg`,
+gambatte's `dmg08` expectations come from a DMG-CPU-08 (late-revision)
+board, and mooneye's `-dmgABC` ROMs pass on this model. mealybug-tearoom is
+the one suite that also ships early-revision screenshots: its two
+`_dmg_b.png` references differ from the `_dmg_blob` series and stay
+**parked** — the policy picks blob for corpus consistency, exactly like the
+parked `_cgb_d.png` series. A future `Model::DmgB` split would follow the
+same upgrade shape as the CGB one below.
+
 ### Reference selection per suite
 
 | Suite | On `Model::Cgb` run / compare against | Revision-skips (empty model list, loud note) |

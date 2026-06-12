@@ -35,6 +35,86 @@ const SUITE_DIRS: [&str; 7] = [
     "rtc3test",
 ];
 
+// Per-suite case tables (collection-relative paths). The seven `#[test]`
+// fns below execute exactly these, and [`inventory`] derives its claimed
+// set from the same constants — so the two can never drift apart.
+
+/// BullyGB: one ROM, one shared reference for both models.
+const BULLY_ROM: &str = "bully/bully.gb";
+const BULLY_PNG: &str = "bully/bully.png";
+
+/// Strikethrough: one ROM, per-model references (suffix via [`png_suffix`]).
+const STRIKETHROUGH_ROM: &str = "strikethrough/strikethrough.gb";
+
+/// Turtle Tests: (rom, reference valid on both models).
+const TURTLE_CASES: [(&str, &str); 2] = [
+    (
+        "turtle-tests/window_y_trigger/window_y_trigger.gb",
+        "turtle-tests/window_y_trigger/window_y_trigger.png",
+    ),
+    (
+        "turtle-tests/window_y_trigger_wx_offscreen/window_y_trigger_wx_offscreen.gb",
+        "turtle-tests/window_y_trigger_wx_offscreen/window_y_trigger_wx_offscreen.png",
+    ),
+];
+
+/// Scribbltests: (rom, reference on Dmg, reference on Cgb, frames to run).
+const SCRIBBL_CASES: [(&str, &str, &str, u64); 5] = [
+    (
+        "scribbltests/lycscx/lycscx.gb",
+        "scribbltests/lycscx/lycscx-cgb-dmg.png",
+        "scribbltests/lycscx/lycscx-cgb-dmg.png",
+        15,
+    ),
+    (
+        "scribbltests/lycscy/lycscy.gb",
+        "scribbltests/lycscy/lycscy-cgb-dmg.png",
+        "scribbltests/lycscy/lycscy-cgb-dmg.png",
+        15,
+    ),
+    (
+        "scribbltests/palettely/palettely.gb",
+        "scribbltests/palettely/palettely-dmg.png",
+        "scribbltests/palettely/palettely-cgb.png",
+        15,
+    ),
+    (
+        "scribbltests/scxly/scxly.gb",
+        "scribbltests/scxly/scxly-dmg.png",
+        "scribbltests/scxly/scxly-cgb.png",
+        15,
+    ),
+    (
+        "scribbltests/statcount/statcount-auto.gb",
+        "scribbltests/statcount/statcount_auto-cgb-dmg.png",
+        "scribbltests/statcount/statcount_auto-cgb-dmg.png",
+        350,
+    ),
+];
+
+/// little-things-gb: firstwhite (one shared reference) and the
+/// joypad-driven tellinglys (per-model references).
+const FIRSTWHITE_ROM: &str = "little-things-gb/firstwhite.gb";
+const FIRSTWHITE_PNG: &str = "little-things-gb/firstwhite-dmg-cgb.png";
+const TELLINGLYS_ROM: &str = "little-things-gb/tellinglys.gb";
+
+/// MBC3 Bank Tester: one ROM, per-model references.
+const MBC3_TESTER_ROM: &str = "mbc3-tester/mbc3-tester.gb";
+
+/// rtc3test: one ROM hosting three menu-selected subtests —
+/// (subtest name, menu presses, howto run seconds). Case keys carry a
+/// `#<subtest>` discriminator since all three share the one ROM path.
+const RTC3TEST_ROM: &str = "rtc3test/rtc3test.gb";
+const RTC3TEST_SUBTESTS: [(&str, &[Button], f64); 3] = [
+    ("basic-tests", &[Button::A], 13.0),
+    ("range-tests", &[Button::Down, Button::A], 8.0),
+    (
+        "sub-second-writes",
+        &[Button::Down, Button::Down, Button::A],
+        26.0,
+    ),
+];
+
 /// Reference-PNG filename suffix for the two models these suites run on.
 fn png_suffix(model: Model) -> &'static str {
     match model {
@@ -80,7 +160,9 @@ fn frame_case(
     drive: impl FnOnce(&mut GameBoy),
 ) -> CaseResult {
     let key = case_key(case_rel, model);
-    let result = (|| {
+    // catch_case: a panicking case (core crash) becomes a keyed Err so it
+    // cannot abort the rest of the suite matrix.
+    let result = harness::catch_case(|| {
         let rom = std::fs::read(root.join(rom_rel)).map_err(|e| format!("read failed: {e}"))?;
         let mut gb = harness::boot(&rom, model);
         drive(&mut gb);
@@ -90,7 +172,7 @@ fn frame_case(
         // recently *completed* frame).
         harness::run_for_frames(&mut gb, 1);
         harness::expect_frame_png(&gb, &root.join(png_rel), CgbColorMap::Identity)
-    })();
+    });
     CaseResult { key, result }
 }
 
@@ -122,10 +204,10 @@ fn smallsuites_bully() {
     for model in [Model::Dmg, Model::Cgb] {
         results.push(frame_case(
             &root,
-            "bully/bully.gb",
-            "bully/bully.gb",
+            BULLY_ROM,
+            BULLY_ROM,
             model,
-            "bully/bully.png",
+            BULLY_PNG,
             |gb| harness::run_for_seconds(gb, 0.65),
         ));
     }
@@ -156,8 +238,8 @@ fn smallsuites_strikethrough() {
     for model in [Model::Dmg, Model::Cgb] {
         results.push(frame_case(
             &root,
-            "strikethrough/strikethrough.gb",
-            "strikethrough/strikethrough.gb",
+            STRIKETHROUGH_ROM,
+            STRIKETHROUGH_ROM,
             model,
             &format!("strikethrough/strikethrough-{}.png", png_suffix(model)),
             |gb| harness::run_for_seconds(gb, 0.65),
@@ -186,18 +268,8 @@ fn smallsuites_turtle_tests() {
         );
         return;
     };
-    let cases = [
-        (
-            "turtle-tests/window_y_trigger/window_y_trigger.gb",
-            "turtle-tests/window_y_trigger/window_y_trigger.png",
-        ),
-        (
-            "turtle-tests/window_y_trigger_wx_offscreen/window_y_trigger_wx_offscreen.gb",
-            "turtle-tests/window_y_trigger_wx_offscreen/window_y_trigger_wx_offscreen.png",
-        ),
-    ];
     let mut results = Vec::new();
-    for (rom_rel, png_rel) in cases {
+    for (rom_rel, png_rel) in TURTLE_CASES {
         for model in [Model::Dmg, Model::Cgb] {
             results.push(frame_case(&root, rom_rel, rom_rel, model, png_rel, |gb| {
                 harness::run_for_frames(gb, 40)
@@ -235,41 +307,8 @@ fn smallsuites_scribbltests() {
         );
         return;
     };
-    // (rom, reference on Dmg, reference on Cgb, frames to run)
-    let cases = [
-        (
-            "scribbltests/lycscx/lycscx.gb",
-            "scribbltests/lycscx/lycscx-cgb-dmg.png",
-            "scribbltests/lycscx/lycscx-cgb-dmg.png",
-            15u64,
-        ),
-        (
-            "scribbltests/lycscy/lycscy.gb",
-            "scribbltests/lycscy/lycscy-cgb-dmg.png",
-            "scribbltests/lycscy/lycscy-cgb-dmg.png",
-            15,
-        ),
-        (
-            "scribbltests/palettely/palettely.gb",
-            "scribbltests/palettely/palettely-dmg.png",
-            "scribbltests/palettely/palettely-cgb.png",
-            15,
-        ),
-        (
-            "scribbltests/scxly/scxly.gb",
-            "scribbltests/scxly/scxly-dmg.png",
-            "scribbltests/scxly/scxly-cgb.png",
-            15,
-        ),
-        (
-            "scribbltests/statcount/statcount-auto.gb",
-            "scribbltests/statcount/statcount_auto-cgb-dmg.png",
-            "scribbltests/statcount/statcount_auto-cgb-dmg.png",
-            350,
-        ),
-    ];
     let mut results = Vec::new();
-    for (rom_rel, png_dmg, png_cgb, frames) in cases {
+    for (rom_rel, png_dmg, png_cgb, frames) in SCRIBBL_CASES {
         for (model, png_rel) in [(Model::Dmg, png_dmg), (Model::Cgb, png_cgb)] {
             results.push(frame_case(&root, rom_rel, rom_rel, model, png_rel, |gb| {
                 harness::run_for_frames(gb, frames)
@@ -354,16 +393,16 @@ fn smallsuites_little_things_gb() {
     for model in [Model::Dmg, Model::Cgb] {
         results.push(frame_case(
             &root,
-            "little-things-gb/firstwhite.gb",
-            "little-things-gb/firstwhite.gb",
+            FIRSTWHITE_ROM,
+            FIRSTWHITE_ROM,
             model,
-            "little-things-gb/firstwhite-dmg-cgb.png",
+            FIRSTWHITE_PNG,
             |gb| harness::run_for_seconds(gb, 0.65),
         ));
         results.push(frame_case(
             &root,
-            "little-things-gb/tellinglys.gb",
-            "little-things-gb/tellinglys.gb",
+            TELLINGLYS_ROM,
+            TELLINGLYS_ROM,
             model,
             &format!("little-things-gb/tellinglys-{}.png", png_suffix(model)),
             |gb| {
@@ -414,8 +453,8 @@ fn smallsuites_mbc3_tester() {
     for model in [Model::Dmg, Model::Cgb] {
         results.push(frame_case(
             &root,
-            "mbc3-tester/mbc3-tester.gb",
-            "mbc3-tester/mbc3-tester.gb",
+            MBC3_TESTER_ROM,
+            MBC3_TESTER_ROM,
             model,
             &format!("mbc3-tester/mbc3-tester-{}.png", png_suffix(model)),
             |gb| harness::run_for_frames(gb, 60),
@@ -450,22 +489,13 @@ fn smallsuites_rtc3test() {
         );
         return;
     };
-    let subtests: [(&str, &[Button], f64); 3] = [
-        ("basic-tests", &[Button::A], 13.0),
-        ("range-tests", &[Button::Down, Button::A], 8.0),
-        (
-            "sub-second-writes",
-            &[Button::Down, Button::Down, Button::A],
-            26.0,
-        ),
-    ];
     let mut results = Vec::new();
-    for (name, presses, secs) in subtests {
+    for (name, presses, secs) in RTC3TEST_SUBTESTS {
         for model in [Model::Dmg, Model::Cgb] {
             results.push(frame_case(
                 &root,
-                "rtc3test/rtc3test.gb",
-                &format!("rtc3test/rtc3test.gb#{name}"),
+                RTC3TEST_ROM,
+                &format!("{RTC3TEST_ROM}#{name}"),
                 model,
                 &format!("rtc3test/rtc3test-{name}-{}.png", png_suffix(model)),
                 |gb| {
@@ -486,26 +516,25 @@ fn smallsuites_rtc3test() {
 
 /// Every `.gb`/`.gbc` file under [`SUITE_DIRS`], split into ROMs that
 /// produce at least one rom×model case (`claimed`) and documented
-/// never-run ROMs (`exempted`).
-#[allow(dead_code)] // consumed by the Phase B2 inventory guard
+/// never-run ROMs (`exempted`). The claimed set is derived from the same
+/// case-table constants the seven `#[test]` fns execute, so it cannot
+/// drift from what actually runs; the rtc3test ROM is claimed once even
+/// though its three `#<subtest>` cases share it.
 pub fn inventory() -> (Vec<String>, Vec<String>) {
-    let claimed = [
-        "bully/bully.gb",
-        "little-things-gb/firstwhite.gb",
-        "little-things-gb/tellinglys.gb",
-        "mbc3-tester/mbc3-tester.gb",
-        "rtc3test/rtc3test.gb",
-        "scribbltests/lycscx/lycscx.gb",
-        "scribbltests/lycscy/lycscy.gb",
-        "scribbltests/palettely/palettely.gb",
-        "scribbltests/scxly/scxly.gb",
-        "scribbltests/statcount/statcount-auto.gb",
-        "strikethrough/strikethrough.gb",
-        "turtle-tests/window_y_trigger/window_y_trigger.gb",
-        "turtle-tests/window_y_trigger_wx_offscreen/window_y_trigger_wx_offscreen.gb",
+    let mut claimed: Vec<String> = [
+        BULLY_ROM,
+        STRIKETHROUGH_ROM,
+        FIRSTWHITE_ROM,
+        TELLINGLYS_ROM,
+        MBC3_TESTER_ROM,
+        RTC3TEST_ROM,
     ]
     .map(String::from)
     .to_vec();
+    claimed.extend(TURTLE_CASES.iter().map(|(rom, _)| (*rom).to_string()));
+    claimed.extend(SCRIBBL_CASES.iter().map(|(rom, ..)| (*rom).to_string()));
+    claimed.sort();
+    claimed.dedup();
     let exempted = [
         // scribbltests howto: "there are no screenshots for failrylake and
         // winpos at the moment". fairylake is additionally "closer to a demo
