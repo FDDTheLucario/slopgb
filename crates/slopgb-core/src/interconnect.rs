@@ -633,7 +633,7 @@ impl Interconnect {
                 // The line-0 OAM STAT rise sits in the second half of the
                 // M-cycle: the IF bit is readable at once, but this
                 // cycle's interrupt sample must not see it (see
-                // Ppu::refresh_stat; mealybug "line 0 timing is different
+                // Ppu::stat_events_tick; mealybug "line 0 timing is different
                 // by 4 cycles").
                 self.if_stat_late |= IF_STAT_BIT;
             }

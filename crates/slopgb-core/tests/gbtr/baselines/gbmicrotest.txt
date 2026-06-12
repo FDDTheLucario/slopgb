@@ -18,6 +18,14 @@
 # code byte ($18, JR) — kept here as a permanent protocol-violation entry
 # because it does write $FF82 within the deadline (see suite module docs).
 gbmicrotest/dma_basic.gb [Dmg]
+# oam_int_if_level_d: an m2 enable committing one M-cycle after the
+# line-start pulse re-decides it on DMG (gambatte m2enable/late_enable_1
+# dmg08_out2, hardware-verified on DMG) but not on AGS — this ROM's
+# expectation header says "pass - ags" and only the (2,0) cell sibling
+# (oam_int_if_level_c, E2) is model-consistent. A real DMG-vs-AGS
+# divergence carried by the Dmg-modeled run; un-baselining it needs an
+# Agb-side STAT-event table.
+gbmicrotest/oam_int_if_level_d.gb [Dmg]
 gbmicrotest/halt_op_dupe_delay.gb [Dmg]
 gbmicrotest/int_oam_incs.gb [Dmg]
 gbmicrotest/int_oam_nops.gb [Dmg]
