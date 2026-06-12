@@ -38,8 +38,12 @@ slopgb is a cycle-accurate Game Boy (DMG) / Game Boy Color (CGB) emulator.
   2. then perform the memory access (if any).
   So a read observes peripheral state *after* the cycle's ticks; this is the
   same ordering mooneye-gb uses and the mooneye timing tests expect.
-- `Bus::pending`/`ack` are free (no time). The CPU samples `pending()` at the
-  architecturally correct points (see CPU notes).
+- `Bus::pending`/`pending_halt_wake`/`ack` are free (no time). The CPU samples
+  `pending()` at the architecturally correct points (see CPU notes); the halt
+  idle loop samples `pending_halt_wake()` instead, an earlier intra-cycle view
+  that misses timer IF bits committed in the second half of the current
+  M-cycle for one cycle (SameBoy `GB_cpu_run` halt path; gambatte tima/,
+  wilbertpol timer_if).
 - The PPU is stepped per dot; the timer per M-cycle on the CPU clock
   (4 internal T-ticks); the APU per M-cycle with the DIV counter passed in
   (DIV-APU = falling edge of DIV bit 4, bit 5 in double speed).

@@ -14,6 +14,22 @@
 //! selected bit, a DIV write (counter reset), or a TAC write that disables
 //! the timer / switches to a frequency whose bit is currently 0.
 
+/// Result of one M-cycle [`Timer::tick`].
+pub struct TimerTick {
+    /// IF bits to request (bit 2 = timer), 0 if none.
+    pub iff: u8,
+    /// The reload + IF commit fired in the *second half* of this M-cycle
+    /// (T-substep 2 or 3). The SM83's halt-exit logic samples IE & IF
+    /// mid-cycle — after 2 of the 4 T-cycles (SameBoy sm83_cpu.c,
+    /// `GB_cpu_run`'s halted path) — not at the end-of-cycle point the
+    /// running CPU's prefetch sampling models, so it misses such a commit
+    /// until the next cycle (gambatte tima/tc*_irq_*; wilbertpol
+    /// acceptance/timer/timer_if rounds 5/6 vs 3/4); see
+    /// `Bus::pending_halt_wake`. IF *reads* in the commit cycle do see the
+    /// bit (mooneye `tima_reload`-derived sequences).
+    pub late: bool,
+}
+
 pub struct Timer {
     div: u16,
     tima: u8,
@@ -80,12 +96,13 @@ impl Timer {
         }
     }
 
-    /// Advance one M-cycle (4 T-cycles). Returns IF bits to request
-    /// (bit 2 = timer), 0 if none.
-    pub fn tick(&mut self) -> u8 {
+    /// Advance one M-cycle (4 T-cycles). Returns the IF bits to request
+    /// (bit 2 = timer) and on which part of the cycle they were committed.
+    pub fn tick(&mut self) -> TimerTick {
         self.reloaded = false;
         let mut iff = 0;
-        for _ in 0..4 {
+        let mut late = false;
+        for substep in 0..4 {
             // The reload pipeline runs first so the T-cycle that caused the
             // overflow does not consume one of the 4 delay T-cycles.
             if self.reload_in > 0 {
@@ -94,6 +111,7 @@ impl Timer {
                     self.tima = self.tma;
                     self.reloaded = true;
                     iff |= 0x04;
+                    late = substep >= 2;
                 }
             }
             let before = self.mux_out();
@@ -102,7 +120,7 @@ impl Timer {
                 self.clock_tima();
             }
         }
-        iff
+        TimerTick { iff, late }
     }
 
     /// Read FF04-FF07.
@@ -192,7 +210,7 @@ mod tests {
     fn ticks(t: &mut Timer, n: u32) -> u8 {
         let mut iff = 0;
         for _ in 0..n {
-            iff |= t.tick();
+            iff |= t.tick().iff;
         }
         iff
     }
@@ -354,7 +372,7 @@ mod tests {
         let mut t = timer_with(0x06, 0xFE, 0xFE);
         assert_eq!(ticks(&mut t, 32), 0); // includes the overflow cycle
         assert_eq!(t.read(0xFF05), 0x00);
-        assert_eq!(t.tick(), 0x04); // reload cycle raises IF bit 2
+        assert_eq!(t.tick().iff, 0x04); // reload cycle raises IF bit 2
         assert_eq!(t.read(0xFF05), 0xFE);
     }
 
@@ -387,7 +405,7 @@ mod tests {
         // No reload, no IRQ; next increment still at div 192 (16 cycles on).
         assert_eq!(ticks(&mut t, 15), 0);
         assert_eq!(t.read(0xFF05), 0x7F);
-        assert_eq!(t.tick(), 0);
+        assert_eq!(t.tick().iff, 0);
         assert_eq!(t.read(0xFF05), 0x80);
     }
 
@@ -416,7 +434,7 @@ mod tests {
         assert_eq!(t.read(0xFF05), 0xFF);
         t.write(0xFF04, 0); // edge -> overflow, IF delayed
         assert_eq!(t.read(0xFF05), 0x00);
-        assert_eq!(t.tick(), 0x04);
+        assert_eq!(t.tick().iff, 0x04);
         assert_eq!(t.read(0xFF05), 0x42);
     }
 
@@ -428,7 +446,7 @@ mod tests {
         ticks(&mut t, 128); // div = 512, bit 9 high
         t.write(0xFF07, 0x00); // disable -> edge -> overflow
         assert_eq!(t.read(0xFF05), 0x00);
-        assert_eq!(t.tick(), 0x04); // reload still completes when disabled
+        assert_eq!(t.tick().iff, 0x04); // reload still completes when disabled
         assert_eq!(t.read(0xFF05), 0x10);
         t.write(0xFF05, 0x99); // same M-cycle as the reload: ignored
         assert_eq!(t.read(0xFF05), 0x10);
@@ -443,5 +461,64 @@ mod tests {
         t.write(0xFF07, 0x05); // select bit 3 (currently 1; enabling is a rising edge)
         t.tick(); // div 14 -> 18, falling edge at 16 on the 2nd T-cycle
         assert_eq!(t.read(0xFF05), 1);
+    }
+
+    /// With the DIV counter ≡ 0 mod 4 at M-cycle boundaries (every
+    /// post-boot state is — `model::tests::div_counter_is_m_cycle_aligned`
+    /// — and DIV writes/STOP reset it to 0 at a boundary), a natural TIMA
+    /// overflow's falling edge lands on the last T-substep of its M-cycle,
+    /// and the reload pipeline preserves the substep: the reload + IF
+    /// commit one M-cycle later also lands on the last T-substep — after
+    /// the mid-cycle halt-exit sampling point (`TimerTick::late`; gambatte
+    /// tima/tc*_irq_*, wilbertpol timer_if rounds 5/6).
+    #[test]
+    fn natural_reload_commits_in_second_half_of_cycle() {
+        let mut t = timer_with(0x06, 0xFE, 0xFE); // bit 5: 64 T period
+        for n in 0..32 {
+            assert!(!t.tick().late, "no commit before the reload, cycle {n}");
+        }
+        // Overflow happened during M-cycle 32 (div 124 -> 128, substep 3);
+        // the reload + IF commit fires during M-cycle 33 on substep 3.
+        let reload = t.tick();
+        assert_eq!(reload.iff, 0x04);
+        assert!(reload.late, "aligned natural reload commits on substep 3");
+    }
+
+    /// A DIV phase that is not a multiple of 4 at M-cycle boundaries moves
+    /// the overflow edge — and with it the reload commit — into the first
+    /// half of the M-cycle, before the mid-cycle sampling point: `late`
+    /// must report the substep, not "timer is always late" (guards the
+    /// rule's substep dependence).
+    #[test]
+    fn off_alignment_reload_commits_in_first_half_of_cycle() {
+        let mut t = timer_with(0x06, 0xFF, 0xFE);
+        t.set_div(62); // boundary phase ≡ 2 mod 4
+        // Falling edge of bit 5 at div 63 -> 64, substep 1: overflow.
+        let over = t.tick();
+        assert_eq!(over.iff, 0);
+        assert_eq!(t.read(0xFF05), 0x00);
+        // Reload + IF commit on substep 1 of this cycle: not late.
+        let reload = t.tick();
+        assert_eq!(reload.iff, 0x04);
+        assert!(!reload.late, "first-half commit is not late");
+    }
+
+    /// A write-induced overflow (DIV/TAC write) arms the 4 T-cycle reload
+    /// pipeline after the write cycle's four substeps have run, so its
+    /// reload + IF commit also lands on the last T-substep of the next
+    /// M-cycle. Pinned for uniformity of the mechanical substep rule; it
+    /// is unobservable through the halt-wake path (the CPU is mid
+    /// instruction stream one cycle after its own DIV/TAC write, so the
+    /// running-CPU end-of-fetch sampling applies — mooneye rapid_toggle's
+    /// dispatch timing is unaffected).
+    #[test]
+    fn write_induced_reload_also_commits_in_second_half() {
+        let mut t = timer_with(0x04, 0xFF, 0x42);
+        ticks(&mut t, 128); // div = 512, bit 9 high
+        t.write(0xFF04, 0); // falling edge -> overflow, pipeline armed
+        assert_eq!(t.read(0xFF05), 0x00);
+        let reload = t.tick();
+        assert_eq!(reload.iff, 0x04);
+        assert!(reload.late);
     }
 }
