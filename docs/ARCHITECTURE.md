@@ -116,7 +116,13 @@ slopgb is a cycle-accurate Game Boy (DMG) / Game Boy Color (CGB) emulator.
   the pulse is not separately modelled: the gambatte *_ds STAT-IRQ rows
   carry documented-swap baselines.) Enables written into the mode-3
   stretch of the blocking level raise nothing; inside dots 0..84 they
-  keep level edges (gambatte m2enable/late_enable). The **mode-0 flip/IRQ
+  keep level edges on DMG (gambatte m2enable/late_enable), while CGB
+  fires written m2 enables only in the last M-cycle before a visible
+  line's pulse (gambatte statChangeTriggersM2IrqCgb — see the CGB-C
+  deltas section in `ppu/mod.rs` for the whole per-model timeline:
+  readable-LYC holds, the delayed FF45 event copy, line-0 mode-1 tail,
+  VRAM/OAM blocking shifts, the LY=153 windows, and the boot LCD
+  phase). The **mode-0 flip/IRQ
   anchor** (formerly parked) is re-derived jointly: the visible flip
   (STAT mode bits, OAM/VRAM unblock) and the mode-0 IRQ source rise
   together **2 dots before the pipe end** — 254+SCX%8 on a bare line,

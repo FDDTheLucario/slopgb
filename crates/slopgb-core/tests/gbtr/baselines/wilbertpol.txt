@@ -10,13 +10,23 @@
 #
 # Failure clusters (re-baselined 2026-06: the STAT mode-2 pulse wave
 # flipped intr_2_timing ×6 and stat_write_if-GS ×4 to pass):
-#  - acceptance/gpu, CGB-only -C variants: the fork's CGB LY/LYC/STAT
-#    register sequence expectations — ly_lyc family ×7 ROMs, ly00_mode1_2,
-#    ly_new_frame, stat_write_if-C (the CGB-C LY/STAT timeline is not
-#    modelled as a separate variant yet).
+#  - acceptance/gpu, CGB-only -C variants (2026-06: the CGB-C LY/STAT
+#    timeline landed — 16 of the 20 -C rows pass; see ppu/mod.rs). The
+#    two ROMs left measure the LY=153 window through wait_ly-152-anchored
+#    reads whose hardware results contradict age ly-dmgC-cgbBC's
+#    enable-anchored ladder at the same M-aligned dots under any single
+#    window assignment (age sees one M-aligned 153-read, ly_new_frame-C
+#    two consecutive ones; ly_lyc_0-C round 1 reads 153 where age's
+#    TEST2 reads 0) — pending a sub-M-cycle vblank-LY-load skew model,
+#    age (2022, CPU-CGB-04-verified) wins the tie-break.
 #  - acceptance/gpu, hblank_ly_scx_timing: the -C variant plus the
 #    all-model _variant_nops build (the plain -GS variant and the _nops
-#    build pass since the mode-0 event-grid re-derivation).
+#    build pass since the mode-0 event-grid re-derivation). The -C
+#    build's per-SCX halt-wake ladder decodes to the CGB mode-0 IRQ
+#    rising one dot later than DMG (255+SCX%8 bare; gambatte's
+#    m3StartLineCycle is 83+cgb) with the half-cycle halt law shifted
+#    one dot with it — that lead change lives in render.rs
+#    `m0_flip_events` (the fetcher track owns the file).
 #  - acceptance/gpu, intr_2_mode0 family: the scx*/sprites*_nops variants
 #    on their full 6-model matrices. These 2016-era chains measure the
 #    visible mode-0 flip through wait_mode-poll-quantized multi-line
@@ -108,26 +118,10 @@ mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx4_no
 mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx4_nops.gb [Mgb]
 mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx4_nops.gb [Sgb2]
 mooneye-test-suite-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx4_nops.gb [Sgb]
-mooneye-test-suite-wilbertpol/acceptance/gpu/ly00_mode1_2-C.gb [Agb]
-mooneye-test-suite-wilbertpol/acceptance/gpu/ly00_mode1_2-C.gb [Cgb]
-mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc-C.gb [Agb]
-mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc-C.gb [Cgb]
 mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_0-C.gb [Agb]
 mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_0-C.gb [Cgb]
-mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_0_write-C.gb [Agb]
-mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_0_write-C.gb [Cgb]
-mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_144-C.gb [Agb]
-mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_144-C.gb [Cgb]
-mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_153-C.gb [Agb]
-mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_153-C.gb [Cgb]
-mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_153_write-C.gb [Agb]
-mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_153_write-C.gb [Cgb]
-mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_write-C.gb [Agb]
-mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_write-C.gb [Cgb]
 mooneye-test-suite-wilbertpol/acceptance/gpu/ly_new_frame-C.gb [Agb]
 mooneye-test-suite-wilbertpol/acceptance/gpu/ly_new_frame-C.gb [Cgb]
-mooneye-test-suite-wilbertpol/acceptance/gpu/stat_write_if-C.gb [Agb]
-mooneye-test-suite-wilbertpol/acceptance/gpu/stat_write_if-C.gb [Cgb]
 
 # --- acceptance/timer ---
 
