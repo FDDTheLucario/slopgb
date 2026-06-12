@@ -114,59 +114,33 @@ fn suite_roms(root: &Path) -> Vec<(PathBuf, String)> {
 /// the *permanent* documented expected-fail list — it passes only on real
 /// CGB-E silicon; even SameBoy emulating CGB-E fails it (apu/README.md).
 const BASELINE: &[&str] = &[
-    // apu/channel_1: all 19 claimed cases (sample-accurate sweep/envelope
-    // expectations), including the -A and -cgb0BC variants.
-    "same-suite/apu/channel_1/channel_1_align.gb [Cgb]",
-    "same-suite/apu/channel_1/channel_1_align_cpu.gb [Cgb]",
-    "same-suite/apu/channel_1/channel_1_delay.gb [Cgb]",
-    "same-suite/apu/channel_1/channel_1_duty.gb [Cgb]",
-    "same-suite/apu/channel_1/channel_1_duty_delay.gb [Cgb]",
-    "same-suite/apu/channel_1/channel_1_freq_change.gb [Cgb]",
-    "same-suite/apu/channel_1/channel_1_freq_change_timing-A.gb [Agb]",
+    // apu/channel_1: 4 of 19 claimed cases. The trigger/duty/alignment/
+    // envelope/zombie/freq-change families pass via the SameBoy-style
+    // countdown model (src/apu/; the -A variant passes through the same
+    // `just_reloaded` + NRx4 freq-high glitch path); what remains is the
+    // sweep micro-timing machinery (square_sweep_calculate_countdown /
+    // restart-hold windows, SameBoy apu.c) and the CGB-C-suffixed
+    // freq_change_timing variant.
     "same-suite/apu/channel_1/channel_1_freq_change_timing-cgb0BC.gb [Cgb]",
-    "same-suite/apu/channel_1/channel_1_nrx2_glitch.gb [Cgb]",
-    "same-suite/apu/channel_1/channel_1_nrx2_speed_change.gb [Cgb]",
-    "same-suite/apu/channel_1/channel_1_restart.gb [Cgb]",
-    "same-suite/apu/channel_1/channel_1_restart_nrx2_glitch.gb [Cgb]",
-    "same-suite/apu/channel_1/channel_1_stop_div.gb [Cgb]",
-    "same-suite/apu/channel_1/channel_1_stop_restart.gb [Cgb]",
     "same-suite/apu/channel_1/channel_1_sweep.gb [Cgb]",
     "same-suite/apu/channel_1/channel_1_sweep_restart.gb [Cgb]",
     // Likely permanent (CGB-E-silicon-only pass; see doc comment above).
     "same-suite/apu/channel_1/channel_1_sweep_restart_2.gb [Cgb]",
-    "same-suite/apu/channel_1/channel_1_volume.gb [Cgb]",
-    "same-suite/apu/channel_1/channel_1_volume_div.gb [Cgb]",
-    // apu/channel_2: all 14 claimed cases.
-    "same-suite/apu/channel_2/channel_2_align.gb [Cgb]",
-    "same-suite/apu/channel_2/channel_2_align_cpu.gb [Cgb]",
-    "same-suite/apu/channel_2/channel_2_delay.gb [Cgb]",
-    "same-suite/apu/channel_2/channel_2_duty.gb [Cgb]",
-    "same-suite/apu/channel_2/channel_2_duty_delay.gb [Cgb]",
-    "same-suite/apu/channel_2/channel_2_freq_change.gb [Cgb]",
-    "same-suite/apu/channel_2/channel_2_nrx2_glitch.gb [Cgb]",
-    "same-suite/apu/channel_2/channel_2_nrx2_speed_change.gb [Cgb]",
-    "same-suite/apu/channel_2/channel_2_restart.gb [Cgb]",
-    "same-suite/apu/channel_2/channel_2_restart_nrx2_glitch.gb [Cgb]",
-    "same-suite/apu/channel_2/channel_2_stop_div.gb [Cgb]",
-    "same-suite/apu/channel_2/channel_2_stop_restart.gb [Cgb]",
-    "same-suite/apu/channel_2/channel_2_volume.gb [Cgb]",
-    "same-suite/apu/channel_2/channel_2_volume_div.gb [Cgb]",
+    // apu/channel_2: none — all 14 claimed cases pass.
     // apu/channel_3: none — all 14 claimed cases pass, matching
     // apu/README.md ("CPU-CGB-C passes the channel 3 tests").
-    // apu/channel_4: 8 of 12 claimed cases (LFSR pattern tests pass).
+    // apu/channel_4: 2 of 12 claimed cases. The free-running-counter noise
+    // model (src/apu/noise.rs) covers the alignment/restart family; what
+    // remains needs SameBoy's NR43-write LFSR-corruption tables, which
+    // upstream documents as revision- and unit-specific with
+    // non-deterministic variants (apu.c nr43_write) — only the
+    // deterministic paths are modelled.
     "same-suite/apu/channel_4/channel_4_align.gb [Cgb]",
-    "same-suite/apu/channel_4/channel_4_delay.gb [Cgb]",
-    "same-suite/apu/channel_4/channel_4_equivalent_frequencies.gb [Cgb]",
     "same-suite/apu/channel_4/channel_4_freq_change.gb [Cgb]",
-    "same-suite/apu/channel_4/channel_4_frequency_alignment.gb [Cgb]",
-    "same-suite/apu/channel_4/channel_4_lfsr_7_15.gb [Cgb]",
-    "same-suite/apu/channel_4/channel_4_lfsr_restart.gb [Cgb]",
-    "same-suite/apu/channel_4/channel_4_lfsr_restart_fast.gb [Cgb]",
-    // apu top level: the *_10 (double-speed) DIV-event variants; the
-    // single-speed div_write_trigger / div_write_trigger_volume pass.
-    "same-suite/apu/div_trigger_volume_10.gb [Cgb]",
-    "same-suite/apu/div_write_trigger_10.gb [Cgb]",
-    "same-suite/apu/div_write_trigger_volume_10.gb [Cgb]",
+    // apu top level: none — the plain DIV-event tests and the *_10
+    // variants (which phase-lock DIV == $10, i.e. the DIV-APU bit HIGH,
+    // before each NR52 power-on / DIV write — they never touch KEY1) all
+    // pass via the power-on DIV-event skip glitch (SameBoy GB_apu_init).
     // dma: 3 of 4 (gbc_dma_cont passes).
     "same-suite/dma/gdma_addr_mask.gb [Cgb]",
     "same-suite/dma/hdma_lcd_off.gb [Cgb]",
