@@ -97,6 +97,27 @@ pub fn compare_frame_rgb(
     }
 }
 
+/// [`compare_frame_rgb`] against a decoded reference [`png::Image`],
+/// rejecting any image that is not exactly screen-shaped first — a
+/// transposed or otherwise mis-sized reference with the right pixel count
+/// would compare against wrong coordinates if only the length were checked.
+pub fn compare_frame_image(
+    frame: &[u32],
+    img: &super::png::Image,
+    map: CgbColorMap,
+) -> Result<(), String> {
+    if (img.w, img.h) != (SCREEN_W, slopgb_core::SCREEN_H) {
+        return Err(format!(
+            "reference image is {}x{}, want {}x{}",
+            img.w,
+            img.h,
+            SCREEN_W,
+            slopgb_core::SCREEN_H
+        ));
+    }
+    compare_frame_rgb(frame, &img.rgb, map)
+}
+
 /// Render a frame as ASCII art for failure triage: one char per pixel, rows
 /// of [`SCREEN_W`] pixels, four luminance buckets from bright to dark —
 /// `' '`, `'.'`, `'o'`, `'#'`.
@@ -235,6 +256,27 @@ mod tests {
         let expected = [[0u8; 3]; 3];
         let err = compare_frame_rgb(&frame, &expected, CgbColorMap::Identity).unwrap_err();
         assert!(err.contains('2') && err.contains('3'), "{err}");
+    }
+
+    #[test]
+    fn image_wrapper_rejects_wrong_dimensions() {
+        // Right pixel count, wrong shape (transposed) — must be an Err
+        // before any pixel comparison happens.
+        let img = super::super::png::Image {
+            w: slopgb_core::SCREEN_H,
+            h: SCREEN_W,
+            rgb: vec![[0, 0, 0]; slopgb_core::SCREEN_PIXELS],
+        };
+        let frame = vec![0u32; slopgb_core::SCREEN_PIXELS];
+        let err = compare_frame_image(&frame, &img, CgbColorMap::Identity).unwrap_err();
+        assert!(err.contains("144x160"), "{err}");
+
+        let ok = super::super::png::Image {
+            w: SCREEN_W,
+            h: slopgb_core::SCREEN_H,
+            rgb: vec![[0, 0, 0]; slopgb_core::SCREEN_PIXELS],
+        };
+        compare_frame_image(&frame, &ok, CgbColorMap::Identity).unwrap();
     }
 
     // --- ASCII rendering ---

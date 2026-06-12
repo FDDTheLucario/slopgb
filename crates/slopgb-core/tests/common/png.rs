@@ -23,12 +23,20 @@ pub struct Image {
 
 pub fn load_png(path: &std::path::Path) -> Result<Image, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    decode_png(&bytes)
+    decode_png(&bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 pub fn decode_png(bytes: &[u8]) -> Result<Image, String> {
     let (ihdr, palette, idat) = parse_chunks(bytes)?;
-    let raw = defilter(&ihdr, &zlib_decompress(&idat)?)?;
+    // The exact decompressed size is known from the IHDR (`h` scanlines of
+    // 1 filter byte + `row_bytes`); bounding inflate by it stops a crafted
+    // IDAT (deflate expands up to ~1032:1) from allocating unbounded output
+    // before `defilter`'s length check would reject it anyway.
+    let expected = ihdr
+        .h
+        .checked_mul(ihdr.row_bytes() + 1)
+        .ok_or("pixel data size overflows usize")?;
+    let raw = defilter(&ihdr, &zlib_decompress(&idat, expected)?)?;
     unpack(&ihdr, palette.as_deref(), &raw)
 }
 
@@ -132,6 +140,12 @@ fn parse_chunks(bytes: &[u8]) -> Result<(Ihdr, Option<Vec<[u8; 3]>>, Vec<u8>), S
                 ihdr = Some(Ihdr::parse(data)?);
             }
             b"PLTE" => {
+                if palette.is_some() {
+                    return Err("duplicate PLTE".into());
+                }
+                if !idat.is_empty() {
+                    return Err("PLTE after IDAT".into());
+                }
                 if data.is_empty() || data.len() % 3 != 0 || data.len() > 256 * 3 {
                     return Err(format!("PLTE: bad length {}", data.len()));
                 }
@@ -262,7 +276,9 @@ fn unpack(ihdr: &Ihdr, palette: Option<&[[u8; 3]]>, raw: &[u8]) -> Result<Image,
 
 /// Decompress a zlib stream (RFC 1950): 2-byte header, raw DEFLATE body.
 /// The 4-byte Adler-32 trailer is not checked (see module docs).
-fn zlib_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
+/// `max_out` bounds the decompressed size (callers know it exactly from the
+/// IHDR); exceeding it is an error, not an allocation.
+fn zlib_decompress(data: &[u8], max_out: usize) -> Result<Vec<u8>, String> {
     let [cmf, flg, body @ ..] = data else {
         return Err("zlib: stream shorter than the 2-byte header".into());
     };
@@ -275,7 +291,7 @@ fn zlib_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
     if flg & 0x20 != 0 {
         return Err("zlib: preset dictionary (FDICT) unsupported".into());
     }
-    inflate(body)
+    inflate(body, max_out)
 }
 
 /// LSB-first bit reader over a byte slice (RFC 1951 §3.1.1: deflate packs
@@ -404,8 +420,8 @@ const DIST_EXTRA: [u32; 30] = [
 ];
 
 /// Decompress a raw DEFLATE stream (RFC 1951): stored, fixed-Huffman and
-/// dynamic-Huffman blocks.
-fn inflate(data: &[u8]) -> Result<Vec<u8>, String> {
+/// dynamic-Huffman blocks. Output beyond `max_out` bytes is an error.
+fn inflate(data: &[u8], max_out: usize) -> Result<Vec<u8>, String> {
     let mut br = BitReader { data, pos: 0 };
     let mut out = Vec::new();
     loop {
@@ -419,6 +435,9 @@ fn inflate(data: &[u8]) -> Result<Vec<u8>, String> {
                 if len ^ nlen != 0xFFFF {
                     return Err("deflate: stored block NLEN is not !LEN".into());
                 }
+                if out.len() + len > max_out {
+                    return Err(format!("deflate: output exceeds expected {max_out} bytes"));
+                }
                 out.extend_from_slice(br.take_aligned_bytes(len)?);
             }
             1 => {
@@ -428,11 +447,11 @@ fn inflate(data: &[u8]) -> Result<Vec<u8>, String> {
                 litlen[256..280].fill(7);
                 let litlen = Huffman::new(&litlen)?;
                 let dist = Huffman::new(&[5u8; 30])?;
-                inflate_huffman_block(&mut br, &litlen, &dist, &mut out)?;
+                inflate_huffman_block(&mut br, &litlen, &dist, &mut out, max_out)?;
             }
             2 => {
                 let (litlen, dist) = read_dynamic_tables(&mut br)?;
-                inflate_huffman_block(&mut br, &litlen, &dist, &mut out)?;
+                inflate_huffman_block(&mut br, &litlen, &dist, &mut out, max_out)?;
             }
             _ => return Err("deflate: reserved block type 3".into()),
         }
@@ -493,11 +512,17 @@ fn inflate_huffman_block(
     litlen: &Huffman,
     dist: &Huffman,
     out: &mut Vec<u8>,
+    max_out: usize,
 ) -> Result<(), String> {
     loop {
         let sym = litlen.decode(br)?;
         match sym {
-            0..=255 => out.push(sym as u8),
+            0..=255 => {
+                if out.len() >= max_out {
+                    return Err(format!("deflate: output exceeds expected {max_out} bytes"));
+                }
+                out.push(sym as u8);
+            }
             256 => return Ok(()),
             257..=285 => {
                 let i = usize::from(sym - 257);
@@ -509,6 +534,9 @@ fn inflate_huffman_block(
                 let distance = usize::from(DIST_BASE[dsym]) + br.bits(DIST_EXTRA[dsym])? as usize;
                 if distance > out.len() {
                     return Err("deflate: back-reference before output start".into());
+                }
+                if out.len() + len > max_out {
+                    return Err(format!("deflate: output exceeds expected {max_out} bytes"));
                 }
                 // Byte-by-byte so overlapping copies (distance < len)
                 // repeat the just-written bytes, as deflate requires.
@@ -596,49 +624,70 @@ mod tests {
 
     #[test]
     fn inflate_stored_block() {
-        assert_eq!(zlib_decompress(Z_STORED).unwrap(), b"hello world");
+        assert_eq!(
+            zlib_decompress(Z_STORED, usize::MAX).unwrap(),
+            b"hello world"
+        );
     }
 
     #[test]
     fn inflate_fixed_huffman_with_backreference() {
-        assert_eq!(zlib_decompress(Z_FIXED).unwrap(), b"abcabcabcabc");
+        assert_eq!(
+            zlib_decompress(Z_FIXED, usize::MAX).unwrap(),
+            b"abcabcabcabc"
+        );
     }
 
     #[test]
     fn inflate_dynamic_huffman_block() {
-        assert_eq!(zlib_decompress(Z_DYNAMIC).unwrap(), Z_DYNAMIC_RAW);
+        assert_eq!(
+            zlib_decompress(Z_DYNAMIC, usize::MAX).unwrap(),
+            Z_DYNAMIC_RAW
+        );
     }
 
     #[test]
     fn inflate_truncated_stream_is_err() {
         // Cuts into the deflate body (not merely the Adler-32 trailer).
-        assert!(zlib_decompress(&Z_FIXED[..7]).is_err());
-        assert!(zlib_decompress(&Z_DYNAMIC[..20]).is_err());
-        assert!(zlib_decompress(&[]).is_err());
-        assert!(zlib_decompress(&[0x78]).is_err());
+        assert!(zlib_decompress(&Z_FIXED[..7], usize::MAX).is_err());
+        assert!(zlib_decompress(&Z_DYNAMIC[..20], usize::MAX).is_err());
+        assert!(zlib_decompress(&[], usize::MAX).is_err());
+        assert!(zlib_decompress(&[0x78], usize::MAX).is_err());
     }
 
     #[test]
     fn inflate_reserved_block_type_is_err() {
         // BFINAL=1, BTYPE=3 (reserved, RFC 1951 §3.2.3).
-        assert!(inflate(&[0x07]).is_err());
+        assert!(inflate(&[0x07], usize::MAX).is_err());
     }
 
     #[test]
     fn inflate_stored_length_complement_mismatch_is_err() {
         // Stored block whose NLEN is not the one's complement of LEN.
-        assert!(inflate(&[0x01, 0x02, 0x00, 0x00, 0x00, 0xAA, 0xBB]).is_err());
+        assert!(inflate(&[0x01, 0x02, 0x00, 0x00, 0x00, 0xAA, 0xBB], usize::MAX).is_err());
     }
 
     #[test]
     fn zlib_rejects_bad_header() {
         // CM=7 is not DEFLATE (RFC 1950 §2.2).
-        assert!(zlib_decompress(&[0x77, 0x01, 0x03, 0x00]).is_err());
+        assert!(zlib_decompress(&[0x77, 0x01, 0x03, 0x00], usize::MAX).is_err());
         // FCHECK failure: 0x78 0x00 is not a multiple of 31.
-        assert!(zlib_decompress(&[0x78, 0x00, 0x03, 0x00]).is_err());
+        assert!(zlib_decompress(&[0x78, 0x00, 0x03, 0x00], usize::MAX).is_err());
         // FDICT set (0x7820 = 31 * 992 passes FCHECK): preset dictionaries
         // are unsupported.
-        assert!(zlib_decompress(&[0x78, 0x20, 0x03, 0x00]).is_err());
+        assert!(zlib_decompress(&[0x78, 0x20, 0x03, 0x00], usize::MAX).is_err());
+    }
+
+    #[test]
+    fn inflate_output_beyond_max_out_is_err() {
+        // Stored path: "hello world" is 11 bytes, bound at 5.
+        let err = zlib_decompress(Z_STORED, 5).unwrap_err();
+        assert!(err.contains("exceeds expected 5"), "{err}");
+        // Huffman path: "abcabcabcabc" is 12 bytes; the back-reference copy
+        // must trip the bound at 11, and exactly 12 must still succeed.
+        let err = zlib_decompress(Z_FIXED, 11).unwrap_err();
+        assert!(err.contains("exceeds expected 11"), "{err}");
+        assert_eq!(zlib_decompress(Z_FIXED, 12).unwrap(), b"abcabcabcabc");
     }
 
     // ---- decode_png ----
@@ -914,23 +963,53 @@ mod tests {
         assert!(err.contains("PLTE"), "{err}");
     }
 
+    #[test]
+    fn decode_rejects_duplicate_plte() {
+        // Splice a second copy of PNG_IDX1's PLTE chunk in right after the
+        // first (PNG spec §5.6: PLTE appears at most once).
+        let plte = &PNG_IDX1[33..51];
+        let doubled = [&PNG_IDX1[..51], plte, &PNG_IDX1[51..]].concat();
+        let err = decode_png(&doubled).unwrap_err();
+        assert!(err.contains("duplicate PLTE"), "{err}");
+    }
+
+    #[test]
+    fn decode_rejects_plte_after_idat() {
+        // Move PNG_IDX1's PLTE chunk behind its IDAT chunk (PNG spec
+        // §5.6: PLTE must precede the first IDAT). IDAT directly follows
+        // PLTE in the synthetic file, so swapping the two chunks suffices.
+        let plte = &PNG_IDX1[33..51];
+        let idat_end = 51 + 8 + {
+            let len = u32::from_be_bytes([PNG_IDX1[51], PNG_IDX1[52], PNG_IDX1[53], PNG_IDX1[54]]);
+            len as usize + 4
+        };
+        let idat = &PNG_IDX1[51..idat_end];
+        let swapped = [&PNG_IDX1[..33], idat, plte, &PNG_IDX1[idat_end..]].concat();
+        let err = decode_png(&swapped).unwrap_err();
+        assert!(err.contains("PLTE after IDAT"), "{err}");
+    }
+
     // ---- real reference image from the c-sp collection ----
 
     #[test]
     fn decode_real_dmg_acid2_reference_if_present() {
         // Opportunistic end-to-end check against a real collection file
         // (160x144, 2-bit greyscale, non-interlaced). The collection is
-        // gitignored like the mooneye ROMs, so a missing checkout skips
-        // silently, in the same spirit as `skip_or_fail`.
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../test-roms/game-boy-test-roms-v7.0/dmg-acid2/dmg-acid2-dmg.png");
-        if !path.is_file() {
-            println!(
-                "skipping dmg-acid2 PNG decode: {} not present",
-                path.display()
+        // gitignored like the mooneye ROMs; a missing checkout skips —
+        // loudly failing under SLOPGB_REQUIRE_ROMS=1 like the ROM tests.
+        let Some(root) = super::super::gbtr_root() else {
+            super::super::skip_or_fail_gbtr(
+                "dmg-acid2 PNG decode",
+                "game-boy-test-roms collection not present",
             );
             return;
-        }
+        };
+        let path = root.join("dmg-acid2/dmg-acid2-dmg.png");
+        assert!(
+            path.is_file(),
+            "collection present but {} is missing — corrupt checkout",
+            path.display()
+        );
         let img = load_png(&path).unwrap();
         assert_eq!((img.w, img.h), (160, 144));
         // Spot values and the full grey-level histogram, both derived
@@ -957,13 +1036,15 @@ mod tests {
         // The supported-format scope was fixed by a census of all 542 PNGs
         // in the v7.0 collection; this guards that every one of them keeps
         // decoding (e.g. against a future scope-narrowing refactor).
-        // Silently skipped when the collection is not checked out.
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../test-roms/game-boy-test-roms-v7.0");
-        if !root.is_dir() {
-            println!("skipping collection sweep: {} not present", root.display());
+        // Skipped when the collection is not checked out — loudly failing
+        // under SLOPGB_REQUIRE_ROMS=1 like the ROM tests.
+        let Some(root) = super::super::gbtr_root() else {
+            super::super::skip_or_fail_gbtr(
+                "collection PNG sweep",
+                "game-boy-test-roms collection not present",
+            );
             return;
-        }
+        };
         fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
             let mut entries: Vec<_> = std::fs::read_dir(dir)
                 .unwrap()
