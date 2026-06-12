@@ -8,6 +8,14 @@
 # expected to be legitimately hard; shrinking this list is the tracked
 # progress, growing it is a regression.
 #
+# Floor classes (letters per the index in baselines/gambatte.txt): the
+# whole file is class E (2016-era expectation chains rejected in favor of
+# the modern corpus — lift condition: a sub-dot IF-flop model, class H's
+# precondition, may reconcile both grids; re-probe every row then) except
+# the madness row (class F, build defect). Do not chase any -C or _nops
+# row one-sidedly: each cluster below names the modern rows that pin the
+# opposite side of its trade.
+#
 # Failure clusters (re-baselined 2026-06: the STAT mode-2 pulse wave
 # flipped intr_2_timing ×6 and stat_write_if-GS ×4 to pass):
 #  - acceptance/gpu, CGB-only -C variants (2026-06: the CGB-C LY/STAT

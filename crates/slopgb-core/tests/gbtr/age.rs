@@ -36,6 +36,24 @@ const SUITE_DIR: &str = "age-test-roms";
 /// Known-failure baseline (see `harness::assert_against_baseline`): the
 /// rom×model cases the emulator does not pass yet. Shrinking this list is
 /// progress; growing it is a regression.
+///
+/// Floor classes (letters per the index in `baselines/gambatte.txt`).
+/// age ROMs are multi-rung ladders — dozens of dot-exact assertions per
+/// ROM, so one sub-cycle rung fails the whole rom×model case:
+///
+/// * the five `*-ds` rows are class A (CGB double-speed sub-cycle phase;
+///   the whole-dot contract cannot place second-half commits inside the
+///   2-dot ds cell);
+/// * the four `spsw-*` rows are class B (speed-switch sub-M-cycle seam;
+///   their gambatte `speedchange/` siblings document the A/B trades);
+/// * the remaining stat-int/stat-mode*/oam-*/vram-read/lcd-align/ei-halt
+///   ladders are class H: their failing rungs are one-dot STAT-event /
+///   access-edge / halt-wake-sampler cells whose opposite side is pinned
+///   by gambatte and gbmicrotest rows that now pass — re-probe after
+///   sub-dot IF-flop modeling, don't shift whole-dot anchors for a
+///   single ladder;
+/// * the m3-bg-* screenshot legs are the class-H fetch-grid residue
+///   (same families as baselines/mealybug.txt).
 const BASELINE: &[&str] = &[
     "age-test-roms/halt/ei-halt-dmgC-cgbBCE.gb [Cgb]",
     "age-test-roms/halt/ei-halt-dmgC-cgbBCE.gb [Dmg]",

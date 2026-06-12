@@ -21,6 +21,14 @@
 # All ROMs reach LD B,B - no timeouts; every ppu failure is a frame
 # mismatch against the bundled reference, every dma failure is the
 # mooneye all-$42 fail-register signature.
+#
+# Floor classes (letters per the index in baselines/gambatte.txt):
+# hdma_timing-C is class B (speed-switch/HDMA sub-M-cycle seam); the
+# [Cgb] fetch/palette/scroll photo residue and the [Dmg] single-pixel
+# legs below are class H sub-dot residue of the fetch grid (lift:
+# per-stage CGB fetch structure / sub-dot write cells — the cluster
+# comments name the hardware-captured gambatte rows that pin the
+# opposite side, so don't force a single window one-sidedly).
 
 # dma/: HDMA timing — registers report the ROM's fail code ($42); needs
 # dot-exact compare of block-start latencies across its whole sub-case

@@ -179,7 +179,10 @@ fn frame_case(
 // ---------------------------------------------------------------- bully --
 
 // Triaged (the screen's only diff vs the all-pass reference is the failure
-// message text; decoded from the ROM's ASCII-indexed tilemap):
+// message text; decoded from the ROM's ASCII-indexed tilemap). Both legs
+// are floor class F per the index in baselines/gambatte.txt
+// (hardware-faithful divergence / unreachable reference — never fix in
+// core):
 //
 // * [Dmg]: `initram.asm` "Uninitialized RAM not randomized" — the test
 //   fails iff every WRAM byte is $00/$FF at power-on, and our WRAM is
@@ -243,7 +246,7 @@ fn smallsuites_bully() {
 // madness MGB freeze glitch), gambatte's rdisabledRam model cannot
 // produce it, and reading the in-flight byte instead contradicts the
 // dmg08-verified oamdma/late_sp* out0 rows. No documented mechanism to
-// emulate; floored.
+// emulate; floored (class F per the index in baselines/gambatte.txt).
 const STRIKETHROUGH_BASELINE: &[&str] = &[
     "strikethrough/strikethrough.gb [Dmg]",
     "strikethrough/strikethrough.gb [Cgb]",
@@ -312,7 +315,8 @@ fn smallsuites_turtle_tests() {
 // on time). The CGB reference is an off-convention asset — it uses
 // green-LCD colors (#0F380F/#98C00F) that no `(c << 3) | (c >> 2)`
 // expansion of any RGB555 palette can produce, so the [Cgb] leg can never
-// pass under the Identity compare even with correct compat palettes.
+// pass under the Identity compare even with correct compat palettes
+// (class F per the index in baselines/gambatte.txt — never fix in core).
 const SCRIBBL_BASELINE: &[&str] = &["scribbltests/scxly/scxly.gb [Cgb]"];
 
 /// Scribbltests (`scribbltests/game-boy-test-roms-howto.md`): around 10
@@ -459,7 +463,8 @@ fn smallsuites_little_things_gb() {
 // as "#000000, #0063C6, #7BFF31 and #FFFFFF"
 // (mbc3-tester/game-boy-test-roms-howto.md). #7BFF31 is exactly the
 // `(c << 3) | (c >> 2)` expansion of the CGB boot ROM's default compat BG
-// palette entry $1BEF; do not "fix" this with palette work.
+// palette entry $1BEF; do not "fix" this with palette work (class F per
+// the index in baselines/gambatte.txt).
 const MBC3_TESTER_BASELINE: &[&str] = &["mbc3-tester/mbc3-tester.gb [Cgb]"];
 
 /// MBC3 Bank Tester (`mbc3-tester/game-boy-test-roms-howto.md`): the ROM
