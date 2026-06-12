@@ -215,7 +215,7 @@ impl Apu {
         let was_high = (self.prev_div >> bit) & 1 == 1;
         self.prev_div = 0;
         if self.power && was_high {
-            self.div_event();
+            self.div_event(true);
         }
     }
 
@@ -232,7 +232,7 @@ impl Apu {
         self.last_double_speed = double_speed;
         if self.power {
             if was == 1 && now == 0 {
-                self.div_event();
+                self.div_event(false);
             } else if was == 0 && now == 1 {
                 // Rising edge: the "secondary event" (SameBoy timing.c —
                 // falling edge of the DIV-APU bit fires GB_apu_div_event,
@@ -251,6 +251,17 @@ impl Apu {
                 if self.phase & 1 == 0 {
                     // A full 2 MHz cycle elapsed: step the pulse and noise
                     // units (both run on the 2 MHz clock in hardware).
+                    // Channel 1's sweep machinery leads, like SameBoy
+                    // GB_apu_run (sweep countdowns before the sample
+                    // countdowns): the calculation grid is 1 MHz — the
+                    // cycle completing as `lf_div` wraps to 0 — and the
+                    // restart hold runs on the full 2 MHz clock. Neither
+                    // is gated on the channel being enabled (a pending
+                    // calculation outlives an overflow kill).
+                    if self.phase == 0 {
+                        self.ch1.sweep_machine_step();
+                    }
+                    self.ch1.sweep_hold_step();
                     self.ch1.step();
                     self.ch2.step();
                     self.ch4.step();
@@ -273,8 +284,12 @@ impl Apu {
     /// SameBoy's GB_apu_div_event: increment the divider, then gate each
     /// unit on the divider value — envelope countdowns at `divider&7 == 7`,
     /// armed envelope ticks every event, lengths on odd dividers, sweep at
-    /// `divider&3 == 3`.
-    fn div_event(&mut self) {
+    /// `divider&3 == 3`. `during_div_write` marks the event as raised by a
+    /// DIV write (see [`Self::div_write`]): the sweep calculation's lead
+    /// time drops to 1 in single speed (SameBoy apu.c
+    /// `trigger_sweep_calculation`, the `during_div_write` compensation
+    /// for the write landing later in the cycle than a natural edge).
+    fn div_event(&mut self, during_div_write: bool) {
         match self.skip_div_event {
             // Power-on glitch (see [`SkipDivEvent`]): the first event is
             // consumed entirely...
@@ -299,7 +314,12 @@ impl Apu {
             self.clock_lengths();
         }
         if self.div_divider & 3 == 3 {
-            self.ch1.sweep_clock();
+            let reload = if during_div_write && !self.last_double_speed {
+                1
+            } else {
+                1 + self.lf_div() as u8
+            };
+            self.ch1.sweep_clock(reload);
         }
     }
 
@@ -380,7 +400,11 @@ impl Apu {
         }
         let next_clocks = self.next_step_clocks_length();
         match addr {
-            0xFF10 => self.ch1.write_nr10(value),
+            0xFF10 => {
+                let lf_div = self.lf_div();
+                let ds = self.last_double_speed;
+                self.ch1.write_nr10(value, lf_div, ds);
+            }
             0xFF11 => write_pulse_nrx1(&mut self.ch1, value),
             0xFF12 => write_nrx2(
                 &mut self.ch1.envelope,
@@ -390,6 +414,12 @@ impl Apu {
             ),
             0xFF13 => self.ch1.write_nrx3(value),
             0xFF14 => {
+                // `was_active` feeds the sweep trigger tail (SameBoy
+                // captures it at the head of the NR14 case; the length
+                // extra-clock path cannot kill the channel when the
+                // trigger bit is set, so capturing before `write_nrx4`
+                // matches).
+                let was_active = self.ch1.enabled;
                 self.ch1.write_nrx4_freq(value);
                 if write_nrx4(
                     &mut self.ch1.length,
@@ -397,7 +427,10 @@ impl Apu {
                     value,
                     next_clocks,
                 ) {
-                    self.ch1.trigger(self.lf_div());
+                    let lf_div = self.lf_div();
+                    self.ch1.trigger(lf_div);
+                    self.ch1
+                        .trigger_sweep(lf_div, was_active, self.cgb, self.last_double_speed);
                 }
             }
             0xFF16 => write_pulse_nrx1(&mut self.ch2, value),
@@ -1687,13 +1720,126 @@ mod tests {
     }
 
     #[test]
-    fn sweep_overflow_on_trigger_clears_status_bit() {
+    fn sweep_overflow_on_trigger_clears_status_bit_after_the_delay() {
         let mut h = H::dmg();
         h.w(0xFF10, 0x11);
         h.w(0xFF12, 0xF0);
         h.w(0xFF13, 0x80);
-        h.w(0xFF14, 0x87); // freq 0x780 = 1920: overflows immediately
-        assert!(!h.ch_on(1));
+        h.w(0xFF14, 0x87); // freq 0x780 = 1920: overflow check armed
+        // The kill is a delayed calculation: reload 3 (2 + 1 inactive)
+        // plus shift 1 on the 1 MHz grid (SameBoy apu.c NR14 trigger).
+        assert!(h.ch_on(1), "no instant kill at trigger");
+        h.ticks(3);
+        assert!(h.ch_on(1));
+        h.tick();
+        assert!(!h.ch_on(1), "kill lands 4 M-cycles after the trigger");
+    }
+
+    // ---- sweep calculation countdown on the machine grid ----
+    //
+    // SameBoy apu.c's sweep machinery (trigger_sweep_calculation /
+    // sweep_calculation_done / square_sweep_calculate_countdown), pinned
+    // end-to-end by SameSuite channel_1_sweep / channel_1_sweep_restart
+    // and the gambatte sound/ch1_init_reset_sweep_counter_timing scans.
+
+    #[test]
+    fn sweep_fire_overflow_kill_lands_8_mcycles_after_the_div_apu_event() {
+        // SameSuite channel_1_sweep round 3 shape ($27/$7f0): the second
+        // 128 Hz fire writes frequency $7ff immediately; the overflow
+        // re-check ($7ff + $f) kills 8 M-cycles later — reload 2 + shift
+        // 7 on the 1 MHz grid, the first cycle landing inside the event's
+        // own M-cycle ("8 cycles after trigger, the APU checks if the
+        // NEXT trigger overflows", channel_1_sweep.asm).
+        let mut h = H::cgb();
+        h.w(0xFF10, 0x27); // period 2, shift 7
+        h.w(0xFF12, 0x80);
+        h.w(0xFF13, 0xF0);
+        h.w(0xFF14, 0x87); // trigger: freq $7f0; $7f0 + $f survives
+        h.ticks(2048 * 7); // divider 7: the second sweep tick fires
+        assert_eq!(h.apu.ch1.freq, 0x7FF, "fire writes the frequency");
+        assert!(h.ch_on(1));
+        h.ticks(7);
+        assert!(h.ch_on(1), "re-check still counting");
+        h.tick();
+        assert!(!h.ch_on(1), "overflow kill 8 M-cycles after the fire");
+    }
+
+    #[test]
+    fn retrigger_after_a_fire_keeps_the_swept_frequency() {
+        // SameSuite channel_1_sweep_restart round 1 ($1f/$7ff): the fire
+        // subtracts to $7f0; a restart right after must retain it (NR14
+        // $87 re-writes frequency bits 10-8 = 7, already their value),
+        // and negate-mode sweeps never overflow-kill.
+        let mut h = H::cgb();
+        h.w(0xFF10, 0x1F); // period 1, negate, shift 7
+        h.w(0xFF12, 0x80);
+        h.w(0xFF13, 0xFF);
+        h.w(0xFF14, 0x87); // freq $7ff
+        h.ticks(2048 * 3); // divider 3: fire
+        assert_eq!(h.apu.ch1.freq, 0x7F0, "negate fire: $7ff - $f");
+        h.w(0xFF14, 0x87); // restart
+        assert_eq!(h.apu.ch1.freq, 0x7F0, "restart keeps the frequency");
+        h.ticks(50_000);
+        assert!(h.ch_on(1), "negate-mode sweep never overflows");
+    }
+
+    #[test]
+    fn retrigger_replaces_a_pending_overflow_kill() {
+        // SameSuite channel_1_sweep_restart round 2 ($17/$7f0): the fire
+        // arms a kill 8 M-cycles out; a retrigger before it lands
+        // replaces the calculation — the channel survives the original
+        // deadline and dies on the NEW one (retrigger reload 2 + shift 7,
+        // first machine cycle in the next M-cycle: 9 cycles).
+        let mut h = H::cgb();
+        h.w(0xFF10, 0x17); // period 1, shift 7
+        h.w(0xFF12, 0x80);
+        h.w(0xFF13, 0xF0);
+        h.w(0xFF14, 0x87); // freq $7f0
+        h.ticks(2048 * 3); // divider 3: fire -> freq $7ff, kill armed
+        assert_eq!(h.apu.ch1.freq, 0x7FF);
+        h.w(0xFF14, 0x87); // restart before the kill lands
+        h.ticks(8);
+        assert!(h.ch_on(1), "original deadline replaced");
+        h.tick();
+        assert!(!h.ch_on(1), "new calculation kills 9 cycles after");
+    }
+
+    #[test]
+    fn clearing_shift_after_a_fire_averts_the_pending_kill() {
+        // SameSuite channel_1_sweep_restart round 3 ($17/$7f0 -> NR10=0):
+        // clearing the shift bits pauses the armed calculation — the kill
+        // never lands — and the negate-clear check sums exactly $7f0 +
+        // $f + 0 = $7ff (E form of the old-negate bit; ARCHITECTURE.md
+        // §CGB revision policy companion rule).
+        let mut h = H::cgb();
+        h.w(0xFF10, 0x17); // period 1, shift 7
+        h.w(0xFF12, 0x80);
+        h.w(0xFF13, 0xF0);
+        h.w(0xFF14, 0x87); // freq $7f0
+        h.ticks(2048 * 3); // divider 3: fire -> freq $7ff, kill armed
+        h.w(0xFF10, 0x00); // disable sweep before the re-check lands
+        h.ticks(50_000);
+        assert!(h.ch_on(1), "paused calculation must never kill");
+        assert_eq!(h.apu.ch1.freq, 0x7FF, "swept frequency survives");
+    }
+
+    #[test]
+    fn div_write_sweep_fire_uses_lead_1() {
+        // A 128 Hz fire raised by a DIV write (the reset is the falling
+        // edge) arms the calculation with a 1-cycle lead instead of
+        // 1 + lf_div: the write lands later in its M-cycle than a natural
+        // edge (SameBoy trigger_sweep_calculation, during_div_write).
+        let mut h = H::dmg();
+        h.w(0xFF10, 0x17); // period 1, shift 7
+        h.w(0xFF12, 0x80);
+        h.w(0xFF13, 0xF0);
+        h.w(0xFF14, 0x87); // freq $7f0
+        h.ticks(2048 * 2); // divider 2
+        h.ticks(1024); // DIV-APU bit high
+        h.apu.div_write(false); // divider 3: the sweep fire
+        h.div = 0;
+        assert_eq!(h.apu.ch1.freq, 0x7FF);
+        assert_eq!(h.apu.ch1.sweep_reload_timer, 1);
     }
 
     #[test]

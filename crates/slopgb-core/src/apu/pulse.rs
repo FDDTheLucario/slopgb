@@ -1,6 +1,7 @@
 //! Pulse (square wave) channels 1 and 2. Channel 1 additionally has the
 //! frequency sweep unit (NR10); channel 2's sweep state simply stays inert
-//! because no register write ever reaches it.
+//! because no register write ever reaches it and the sweep machinery is
+//! only stepped for channel 1.
 //!
 //! The frequency unit follows SameBoy's hardware-verified countdown model
 //! (Core/apu.c): `sample_countdown` counts 2 MHz cycles and an expiry
@@ -8,6 +9,18 @@
 //! 1` — a period of `(2048 - freq) * 2` cycles. Triggers anchor the first
 //! expiry to the machine-global 1 MHz grid via the APU's `lf_div` phase bit
 //! instead of restarting a private timer.
+//!
+//! The sweep unit likewise follows SameBoy's countdown machinery rather
+//! than the classic 128 Hz state machine (SameBoy apu.c
+//! `trigger_sweep_calculation` / `sweep_calculation_done` /
+//! `square_sweep_calculate_countdown`): the frequency *write* lands at the
+//! 128 Hz DIV-APU fire, but the shadow/addend refresh and the overflow
+//! check are a separate *calculation* that completes only `reload_timer +
+//! shift` 1 MHz cycles later — so an overflow kill trails the fire (or the
+//! NRx4 trigger) by several M-cycles, NR10 writes in that window hit live
+//! machinery, and a retrigger replaces a pending kill (the restart hold).
+//! SameSuite channel_1_sweep / channel_1_sweep_restart and the gambatte
+//! sound/ch1_init_reset_sweep_counter_timing scans pin this model.
 
 use super::envelope::Envelope;
 use super::length::LengthCounter;
@@ -51,16 +64,47 @@ pub(super) struct Pulse {
     /// freshly reloaded period (SameBoy `just_reloaded`); frequency writes
     /// landing here take effect immediately.
     pub(super) just_reloaded: bool,
-    // Sweep unit (channel 1 only).
+    // Sweep unit (channel 1 only). Field-by-field port of SameBoy apu.c's
+    // sweep machinery (see the module docs).
     pub(super) sweep_period: u8,
     pub(super) sweep_negate: bool,
     pub(super) sweep_shift: u8,
-    pub(super) sweep_timer: u8,
-    pub(super) sweep_enabled: bool,
+    /// 128 Hz fire phase: 3-bit up-counter incremented per sweep DIV-APU
+    /// event; the unit fires when it reads 7 and the period is non-zero
+    /// (SameBoy `square_sweep_countdown`; reset to `period ^ 7` by fires
+    /// and triggers).
+    pub(super) sweep_countdown: u8,
+    /// 1 MHz cycles until the delayed re-calculation (shadow/addend
+    /// refresh + overflow check) completes (SameBoy
+    /// `square_sweep_calculate_countdown`).
+    pub(super) sweep_calc_countdown: u8,
+    /// 1 MHz cycles before `sweep_calc_countdown` starts running (SameBoy
+    /// `square_sweep_calculate_countdown_reload_timer`).
+    pub(super) sweep_reload_timer: u8,
+    /// Shadow frequency the overflow check sums; refreshed from `freq`
+    /// only by a *completed* calculation outside the restart hold
+    /// (SameBoy `shadow_sweep_sample_length`).
     pub(super) sweep_shadow: u16,
-    /// At least one frequency calculation used negate mode since the last
-    /// trigger. Clearing negate afterwards disables the channel.
-    pub(super) sweep_negate_used: bool,
+    /// Pre-shifted delta the next fire adds (SameBoy
+    /// `sweep_length_addend`); one's-complemented by a completed
+    /// calculation in negate mode.
+    pub(super) sweep_addend: u16,
+    /// `sweep_addend` as of the last completed calculation — the NR10
+    /// negate-clear kill check sums it (SameBoy
+    /// `channel1_completed_addend`).
+    pub(super) sweep_completed_addend: u16,
+    /// 2 MHz hold window after a trigger during which completed
+    /// calculations and fires do not refresh the shadow register / addend
+    /// (SameBoy `channel_1_restart_hold`).
+    pub(super) sweep_restart_hold: u8,
+    /// The last fire ran with shift 0 (SameBoy `unshifted_sweep`): the
+    /// pending calculation keeps counting even though NR10's shift bits
+    /// read 0 (otherwise a cleared shift *pauses* it).
+    pub(super) sweep_unshifted: bool,
+    /// A shift-0 fire armed an "instant" calculation that completes when
+    /// the reload timer expires (SameBoy
+    /// `square_sweep_instant_calculation_done`).
+    pub(super) sweep_instant_done: bool,
 }
 
 impl Pulse {
@@ -81,10 +125,15 @@ impl Pulse {
             sweep_period: 0,
             sweep_negate: false,
             sweep_shift: 0,
-            sweep_timer: 0,
-            sweep_enabled: false,
+            sweep_countdown: 0,
+            sweep_calc_countdown: 0,
+            sweep_reload_timer: 0,
             sweep_shadow: 0,
-            sweep_negate_used: false,
+            sweep_addend: 0,
+            sweep_completed_addend: 0,
+            sweep_restart_hold: 0,
+            sweep_unshifted: false,
+            sweep_instant_done: false,
         }
     }
 
@@ -162,61 +211,204 @@ impl Pulse {
         }
     }
 
-    pub(super) fn write_nr10(&mut self, value: u8) {
-        let negate = value & 0x08 != 0;
-        // Clearing negate after at least one negate-mode calculation since
-        // the last trigger immediately disables the channel (gbdev wiki,
-        // Obscure Behavior; Blargg dmg_sound 05-sweep details).
-        if self.sweep_negate && !negate && self.sweep_negate_used {
+    /// NR10 write. `lf_div` is the APU's 2 MHz phase bit at the write,
+    /// `double_speed` the machine speed (both feed the in-flight-machinery
+    /// glitches). Port of SameBoy apu.c `GB_apu_write` case GB_IO_NR10:
+    /// glitch the live machinery with the OLD register, commit the new
+    /// value, run the negate-clear kill check, then let the write itself
+    /// fire the sweep if the 128 Hz counter is parked at 7.
+    pub(super) fn write_nr10(&mut self, value: u8, lf_div: u16, double_speed: bool) {
+        debug_assert!(lf_div <= 1, "lf_div is the 2 MHz phase BIT");
+        if self.sweep_calc_countdown != 0 || self.sweep_reload_timer != 0 {
+            self.nr10_write_glitch(value, lf_div, double_speed);
+        }
+        let old_negate = self.sweep_negate;
+        self.sweep_period = (value >> 4) & 7;
+        self.sweep_negate = value & 0x08 != 0;
+        self.sweep_shift = value & 7;
+        // Clearing negate kills the channel when the last completed
+        // calculation's sum (shadow + addend + the OLD negate bit) would
+        // overflow — after a negate-mode calculation the addend holds the
+        // one's complement, so the sum always crosses 0x7FF: this is the
+        // documented "negate calculation followed by negate-clear kills
+        // the channel" rule (SameBoy apu.c NR10 write; Blargg dmg_sound
+        // 05-sweep details). SameBoy forces `old_negate` to 1 on CGB-C
+        // and older; that C-only variant flips the exact-0x7FF boundary
+        // (SameSuite channel_1_sweep_restart round 3: $7f0 + $f survives
+        // on the E-verified table, dies with the forced bit), so per
+        // docs/ARCHITECTURE.md §CGB revision policy (companion rule, the
+        // PCM12/34-glitch shape) the E form is used until a revision
+        // split.
+        if self.sweep_shadow + self.sweep_completed_addend + u16::from(old_negate) > 0x7FF
+            && value & 0x08 == 0
+        {
             self.enabled = false;
         }
-        self.sweep_period = (value >> 4) & 7;
-        self.sweep_negate = negate;
-        self.sweep_shift = value & 7;
+        self.sweep_fire(1 + lf_div as u8);
     }
 
     pub(super) fn read_nr10(&self) -> u8 {
         0x80 | (self.sweep_period << 4) | (u8::from(self.sweep_negate) << 3) | self.sweep_shift
     }
 
-    /// New frequency from the shadow register. Marks negate as used.
-    fn sweep_calc(&mut self) -> u16 {
-        let delta = self.sweep_shadow >> self.sweep_shift;
-        if self.sweep_negate {
-            self.sweep_negate_used = true;
-            self.sweep_shadow - delta
-        } else {
-            self.sweep_shadow + delta
-        }
-    }
-
-    /// 128 Hz frame-sequencer clock (steps 2 and 6).
-    pub(super) fn sweep_clock(&mut self) {
-        if self.sweep_timer > 0 {
-            self.sweep_timer -= 1;
-        }
-        if self.sweep_timer == 0 {
-            // Timer treats period 0 as 8, but no frequency updates happen.
-            self.sweep_timer = if self.sweep_period == 0 {
-                8
+    /// NR10 write landing while the calculation machinery is in flight
+    /// (SameBoy apu.c `nr10_write_glitch`, the `model <= GB_MODEL_CGB_C`
+    /// branch — `Model::Cgb` is CPU CGB C and the DMG family shares the
+    /// branch upstream; the CGB-D/E/AGB variant stays unmodelled because
+    /// no AGB-routed reference writes NR10 mid-sweep). Reads the OLD
+    /// register fields (the caller commits `value` afterwards).
+    fn nr10_write_glitch(&mut self, value: u8, lf_div: u16, double_speed: bool) {
+        if self.sweep_reload_timer == 1 && lf_div == 0 {
+            // Upstream documents this double-speed cell as instance-
+            // specific data corruption (four different tables across its
+            // CGB-C units, one case non-deterministic) — like the NR43
+            // LFSR-corruption tables, only deterministic paths are
+            // modelled; the countdown is left untouched here.
+        } else if self.sweep_reload_timer > 1 {
+            if double_speed {
+                self.sweep_calc_countdown = value & 7;
+            }
+        } else if self.sweep_calc_countdown != 0 {
+            // "No clue why 1 is a special case here" (upstream comment).
+            let zombie_step = if self.sweep_shift == 0 {
+                (lf_div == 1) != double_speed
             } else {
-                self.sweep_period
+                double_speed && self.sweep_calc_countdown == 1
             };
-            if self.sweep_enabled && self.sweep_period != 0 {
-                let f = self.sweep_calc();
-                if f > 2047 {
-                    self.enabled = false;
-                } else if self.sweep_shift != 0 {
-                    // Write back to shadow and the channel frequency, then
-                    // run the overflow check again without writing back.
-                    self.sweep_shadow = f;
-                    self.freq = f;
-                    if self.sweep_calc() > 2047 {
-                        self.enabled = false;
-                    }
+            if zombie_step {
+                self.sweep_calc_countdown -= 1;
+                if self.sweep_calc_countdown <= 1 {
+                    self.sweep_calc_countdown = 0;
+                    self.sweep_calculation_done();
                 }
             }
         }
+    }
+
+    /// Completed sweep calculation (SameBoy apu.c
+    /// `sweep_calculation_done`): refresh the shadow register (outside
+    /// the restart hold), one's-complement the addend in negate mode, and
+    /// run the overflow check — "sweep frequency is checked after adding
+    /// the sweep delta twice" (upstream comment): the fire already wrote
+    /// `shadow + addend` into `freq`, and this probes one more addend on
+    /// top. Negate mode never kills (the complemented sum models the
+    /// subtraction).
+    fn sweep_calculation_done(&mut self) {
+        if self.sweep_restart_hold == 0 {
+            self.sweep_shadow = self.freq;
+        }
+        if self.sweep_negate {
+            self.sweep_addend ^= 0x7FF;
+        }
+        if self.sweep_shadow + self.sweep_addend > 0x7FF && !self.sweep_negate {
+            self.enabled = false;
+        }
+        self.sweep_completed_addend = self.sweep_addend;
+    }
+
+    /// Sweep fire (SameBoy apu.c `trigger_sweep_calculation`): runs from
+    /// the 128 Hz clock *and* from NR10 writes, gated on a non-zero period
+    /// and the up-counter reading 7. Writes the new frequency immediately
+    /// (negate mode adds the complemented addend plus the negate bit —
+    /// two's-complement subtraction), refreshes the addend outside the
+    /// restart hold, and arms the delayed re-calculation: `reload` 1 MHz
+    /// cycles of lead, then `shift` more until the overflow check.
+    fn sweep_fire(&mut self, reload: u8) {
+        if self.sweep_period != 0 && self.sweep_countdown == 7 {
+            if self.sweep_shift != 0 {
+                self.freq =
+                    (self.sweep_addend + self.sweep_shadow + u16::from(self.sweep_negate)) & 0x7FF;
+            }
+            if self.sweep_restart_hold == 0 {
+                self.sweep_addend = self.freq >> self.sweep_shift;
+            }
+            self.sweep_calc_countdown = self.sweep_shift;
+            self.sweep_reload_timer = reload;
+            self.sweep_unshifted = self.sweep_shift == 0;
+            self.sweep_countdown = self.sweep_period ^ 7;
+            if self.sweep_calc_countdown == 0 {
+                self.sweep_instant_done = true;
+            }
+        }
+    }
+
+    /// 128 Hz frame-sequencer sweep clock (DIV-APU events with
+    /// `divider & 3 == 3`): step the up-counter and try to fire. `reload`
+    /// is the calculation lead time the caller derives from the machine
+    /// phase (`1 + lf_div`; 1 for a single-speed DIV-write event —
+    /// SameBoy apu.c `trigger_sweep_calculation` and its
+    /// `during_div_write` compensation).
+    pub(super) fn sweep_clock(&mut self, reload: u8) {
+        self.sweep_countdown = (self.sweep_countdown + 1) & 7;
+        self.sweep_fire(reload);
+    }
+
+    /// One 1 MHz cycle of the calculation machinery (SameBoy GB_apu_run's
+    /// `sweep_cycles` block): the reload timer leads, then the calculation
+    /// countdown runs — unless NR10's shift bits were cleared after a
+    /// shifted fire, which pauses it ("Calculation is paused if the lower
+    /// bits are 0", SameBoy apu.c).
+    pub(super) fn sweep_machine_step(&mut self) {
+        if self.sweep_reload_timer > 0 {
+            self.sweep_reload_timer -= 1;
+            if self.sweep_reload_timer == 0 {
+                if self.sweep_calc_countdown == 0 && self.sweep_instant_done {
+                    self.sweep_calculation_done();
+                }
+                self.sweep_instant_done = false;
+            }
+        } else if self.sweep_calc_countdown != 0 && (self.sweep_shift != 0 || self.sweep_unshifted)
+        {
+            self.sweep_calc_countdown -= 1;
+            if self.sweep_calc_countdown == 0 {
+                self.sweep_calculation_done();
+            }
+        }
+    }
+
+    /// One 2 MHz cycle of the post-trigger restart hold (SameBoy
+    /// `channel_1_restart_hold` decrements on the full APU cycle clock,
+    /// not the 1 MHz sweep grid).
+    pub(super) fn sweep_hold_step(&mut self) {
+        self.sweep_restart_hold = self.sweep_restart_hold.saturating_sub(1);
+    }
+
+    /// NRx4 trigger tail for the sweep unit (channel 1 only; SameBoy
+    /// apu.c NR14 trigger, `index == GB_SQUARE_1` block). `was_active` is
+    /// the channel state before the trigger.
+    pub(super) fn trigger_sweep(
+        &mut self,
+        lf_div: u16,
+        was_active: bool,
+        cgb: bool,
+        double_speed: bool,
+    ) {
+        debug_assert!(lf_div <= 1, "lf_div is the 2 MHz phase BIT");
+        self.sweep_instant_done = false;
+        self.sweep_shadow = 0;
+        self.sweep_completed_addend = 0;
+        if self.sweep_shift != 0 {
+            // "APU bug: if shift is nonzero, overflow check also occurs
+            // on trigger" — armed as a delayed calculation, so the kill
+            // trails the trigger by `reload + shift` M-cycles (SameSuite
+            // channel_1_sweep boundaries). The lead is 3 on CGB-C and
+            // older when `lf_div ^ !double_speed` is set (upstream), 2
+            // otherwise, plus 1 when the channel was inactive.
+            self.sweep_calc_countdown = self.sweep_shift;
+            self.sweep_reload_timer = if (lf_div == 1) == double_speed { 3 } else { 2 };
+            self.sweep_unshifted = false;
+            if !was_active {
+                self.sweep_reload_timer += 1;
+            }
+            self.sweep_addend = self.freq >> self.sweep_shift;
+        } else {
+            self.sweep_addend = 0;
+        }
+        // Completed calculations inside this hold do not refresh the
+        // shadow register: a quick retrigger re-checks against the reset
+        // shadow (0), not the live frequency.
+        self.sweep_restart_hold = 2 - lf_div as u8 + if cgb { 2 } else { 0 };
+        self.sweep_countdown = self.sweep_period ^ 7;
     }
 
     /// NRx4 trigger. `lf_div` is the APU's machine-global 2 MHz phase bit.
@@ -248,19 +440,8 @@ impl Pulse {
         };
         self.did_tick = false;
         self.envelope.trigger();
-        // Sweep init (Pan Docs / gbdev wiki):
-        self.sweep_shadow = self.freq;
-        self.sweep_timer = if self.sweep_period == 0 {
-            8
-        } else {
-            self.sweep_period
-        };
-        self.sweep_enabled = self.sweep_period != 0 || self.sweep_shift != 0;
-        self.sweep_negate_used = false;
-        // With a non-zero shift the overflow check runs immediately.
-        if self.sweep_shift != 0 && self.sweep_calc() > 2047 {
-            self.enabled = false;
-        }
+        // Channel 1's sweep-unit trigger tail lives in
+        // [`Self::trigger_sweep`], invoked by the APU's NR14 handler only.
     }
 
     pub(super) fn power_off(&mut self, clear_length_counter: bool) {
@@ -278,10 +459,15 @@ impl Pulse {
         self.sweep_period = 0;
         self.sweep_negate = false;
         self.sweep_shift = 0;
-        self.sweep_timer = 0;
-        self.sweep_enabled = false;
+        self.sweep_countdown = 0;
+        self.sweep_calc_countdown = 0;
+        self.sweep_reload_timer = 0;
         self.sweep_shadow = 0;
-        self.sweep_negate_used = false;
+        self.sweep_addend = 0;
+        self.sweep_completed_addend = 0;
+        self.sweep_restart_hold = 0;
+        self.sweep_unshifted = false;
+        self.sweep_instant_done = false;
     }
 }
 
@@ -456,142 +642,203 @@ mod tests {
         assert_eq!(p.digital(), 0);
     }
 
-    #[test]
-    fn sweep_trigger_overflow_check_only_with_nonzero_shift() {
-        // freq 1920 + (1920 >> 1) = 2880 > 2047: dies on trigger.
+    /// Channel-1 setup with the sweep trigger tail, single-speed DMG
+    /// conventions (`lf_div` = 1 at every register write).
+    fn sweep_pulse(nr10: u8, freq: u16) -> Pulse {
         let mut p = Pulse::new();
         p.envelope.write(0xF0);
         p.dac = true;
-        p.freq = 1920;
-        p.write_nr10(0x11); // period 1, shift 1
-        p.trigger(0);
-        assert!(!p.enabled);
+        p.freq = freq;
+        p.write_nr10(nr10, 1, false);
+        p.trigger(1);
+        p.trigger_sweep(1, false, false, false);
+        p
+    }
 
-        // Same with shift 0: no immediate check, channel stays on.
-        let mut p = Pulse::new();
-        p.envelope.write(0xF0);
-        p.dac = true;
-        p.freq = 1920;
-        p.write_nr10(0x10);
-        p.trigger(0);
+    /// One single-speed M-cycle of the APU dot loop as `Apu::tick` drives
+    /// channel 1, positioned right after a register write (phase = 2): the
+    /// 1 MHz machine step lands on the second dot, the 2 MHz restart-hold
+    /// steps on the second and fourth.
+    fn sweep_mcycle(p: &mut Pulse) {
+        p.sweep_machine_step();
+        p.sweep_hold_step();
+        p.step();
+        p.sweep_hold_step();
+        p.step();
+    }
+
+    #[test]
+    fn sweep_trigger_overflow_kill_is_a_delayed_calculation() {
+        // freq 1920 + (1920 >> 1) = 2880 > 2047 — but the trigger only
+        // ARMS the overflow check: reload lead 3 (2 + 1 for an inactive
+        // channel) plus shift 1 on the 1 MHz grid, so the kill lands 4
+        // M-cycles after the trigger, not instantly (SameBoy apu.c NR14
+        // trigger: "overflow check also occurs on trigger" via
+        // square_sweep_calculate_countdown; SameSuite channel_1_sweep
+        // measures the analogous post-fire delay).
+        let mut p = sweep_pulse(0x11, 1920); // period 1, shift 1
+        assert!(p.enabled, "no instant kill at trigger");
+        for i in 0..3 {
+            sweep_mcycle(&mut p);
+            assert!(p.enabled, "still counting at M-cycle {i}");
+        }
+        sweep_mcycle(&mut p);
+        assert!(!p.enabled, "kill lands reload+shift M-cycles after");
+
+        // Same with shift 0: no calculation is armed, channel stays on.
+        let mut p = sweep_pulse(0x10, 1920);
+        for _ in 0..100 {
+            sweep_mcycle(&mut p);
+        }
         assert!(p.enabled);
     }
 
     #[test]
-    fn sweep_clock_updates_frequency_and_runs_second_check() {
-        // 1024 -> 1536 (ok), again-check 1536 + 768 = 2304 overflows:
-        // the new frequency is written but the channel dies immediately.
-        let mut p = Pulse::new();
-        p.envelope.write(0xF0);
-        p.dac = true;
-        p.freq = 1024;
-        p.write_nr10(0x11); // period 1, shift 1
-        p.trigger(0);
+    fn sweep_fire_writes_frequency_then_recheck_kills_after_shift_cycles() {
+        // 1024 -> 1536 at the 128 Hz fire (immediate frequency write);
+        // the re-check 1536 + 768 = 2304 > 2047 completes reload(2) +
+        // shift(1) 1 MHz cycles later and kills (SameBoy
+        // trigger_sweep_calculation / sweep_calculation_done; "sweep
+        // frequency is checked after adding the sweep delta twice").
+        let mut p = sweep_pulse(0x11, 1024); // period 1, shift 1
+        for _ in 0..4 {
+            sweep_mcycle(&mut p); // trigger calc: 1024 + 512 survives
+        }
         assert!(p.enabled);
-        p.sweep_clock();
-        assert_eq!(p.freq, 1536);
-        assert!(!p.enabled, "second overflow check must disable");
+        p.sweep_clock(2); // counter 6 -> 7: fire
+        assert_eq!(p.freq, 1536, "frequency written at the fire");
+        assert!(p.enabled, "overflow re-check has not landed yet");
+        sweep_mcycle(&mut p);
+        sweep_mcycle(&mut p);
+        assert!(p.enabled);
+        sweep_mcycle(&mut p);
+        assert!(!p.enabled, "re-check kills after reload+shift cycles");
 
-        // 256 -> 320 with shift 2, again-check 400: survives.
-        let mut p = Pulse::new();
-        p.envelope.write(0xF0);
-        p.dac = true;
-        p.freq = 256;
-        p.write_nr10(0x12);
-        p.trigger(0);
-        p.sweep_clock();
+        // 256 -> 320 with shift 2, re-check 320 + 80 = 400: survives.
+        let mut p = sweep_pulse(0x12, 256);
+        for _ in 0..5 {
+            sweep_mcycle(&mut p);
+        }
+        p.sweep_clock(2);
         assert_eq!(p.freq, 320);
+        for _ in 0..4 {
+            sweep_mcycle(&mut p);
+        }
         assert!(p.enabled);
     }
 
     #[test]
     fn sweep_negate_mode_subtracts() {
-        let mut p = Pulse::new();
-        p.envelope.write(0xF0);
-        p.dac = true;
-        p.freq = 1024;
-        p.write_nr10(0x19); // period 1, negate, shift 1
-        p.trigger(0);
-        p.sweep_clock();
+        // The completed trigger calculation one's-complements the addend
+        // (512 ^ 0x7FF = 1535); the fire then adds it plus the negate bit
+        // — two's-complement subtraction: 1024 - 512 = 512.
+        let mut p = sweep_pulse(0x19, 1024); // period 1, negate, shift 1
+        for _ in 0..4 {
+            sweep_mcycle(&mut p);
+        }
+        assert!(p.enabled);
+        p.sweep_clock(2);
         assert_eq!(p.freq, 512);
         assert!(p.enabled);
     }
 
     #[test]
     fn clearing_negate_after_negate_calc_disables_channel() {
-        // Trigger with shift != 0 performs a negate-mode calculation.
-        let mut p = Pulse::new();
-        p.envelope.write(0xF0);
-        p.dac = true;
-        p.freq = 1024;
-        p.write_nr10(0x19);
-        p.trigger(0);
+        // After the trigger-armed negate calculation completes, the
+        // completed addend holds the one's complement: an NR10 write
+        // clearing negate sums shadow(1024) + 1535 + old-negate(1) >
+        // 0x7FF and kills (SameBoy NR10 write; Blargg dmg_sound 05).
+        let mut p = sweep_pulse(0x19, 1024);
+        for _ in 0..4 {
+            sweep_mcycle(&mut p); // let the calculation complete
+        }
         assert!(p.enabled);
-        p.write_nr10(0x11); // clear negate
+        p.write_nr10(0x11, 1, false); // clear negate
         assert!(!p.enabled);
     }
 
     #[test]
     fn clearing_negate_without_any_calc_keeps_channel() {
-        // Shift 0: trigger does not calculate, so negate was never used.
-        let mut p = Pulse::new();
-        p.envelope.write(0xF0);
-        p.dac = true;
-        p.freq = 1024;
-        p.write_nr10(0x18); // period 1, negate, shift 0
-        p.trigger(0);
-        p.write_nr10(0x10);
+        // Shift 0 arms no calculation: shadow and the completed addend
+        // stay 0, so the negate-clear check cannot cross 0x7FF.
+        let mut p = sweep_pulse(0x18, 1024); // period 1, negate, shift 0
+        for _ in 0..4 {
+            sweep_mcycle(&mut p);
+        }
+        p.write_nr10(0x10, 1, false);
         assert!(p.enabled);
     }
 
     #[test]
-    fn negate_calc_on_sweep_tick_with_shift_zero_counts() {
-        // Sweep clocks calculate (for the overflow check) even with shift 0.
-        let mut p = Pulse::new();
-        p.envelope.write(0xF0);
-        p.dac = true;
-        p.freq = 1024;
-        p.write_nr10(0x18); // period 1, negate, shift 0
-        p.trigger(0);
-        p.sweep_clock(); // negate-mode calculation happens here
+    fn negate_calc_on_shift_zero_fire_counts_for_the_negate_clear_kill() {
+        // A shift-0 fire arms an "instant" calculation that completes
+        // when the reload lead expires (SameBoy
+        // square_sweep_instant_calculation_done): no frequency write, no
+        // overflow kill (negate), but the completed addend (1024 ^ 0x7FF
+        // = 1023) pins the later negate-clear kill: 1024 + 1023 + 1 >
+        // 0x7FF.
+        let mut p = sweep_pulse(0x18, 1024); // period 1, negate, shift 0
+        p.sweep_clock(2); // counter 6 -> 7: shift-0 fire
+        assert_eq!(p.freq, 1024, "shift 0 never writes the frequency");
+        sweep_mcycle(&mut p);
+        sweep_mcycle(&mut p); // reload expires: instant calculation done
         assert!(p.enabled);
-        p.write_nr10(0x10);
+        p.write_nr10(0x10, 1, false); // clear negate
         assert!(!p.enabled);
     }
 
     #[test]
     fn sweep_period_zero_never_updates_frequency() {
-        let mut p = Pulse::new();
-        p.envelope.write(0xF0);
-        p.dac = true;
-        p.freq = 512;
-        p.write_nr10(0x01); // period 0, shift 1
-        p.trigger(0);
+        let mut p = sweep_pulse(0x01, 512); // period 0, shift 1
         for _ in 0..32 {
-            p.sweep_clock();
+            p.sweep_clock(2);
+            for _ in 0..16 {
+                sweep_mcycle(&mut p);
+            }
         }
         assert_eq!(p.freq, 512);
         assert!(p.enabled);
     }
 
     #[test]
-    fn sweep_timer_uses_8_when_period_zero() {
-        // Trigger with period 0 loads the timer with 8; raising the period
-        // afterwards doesn't reload it, so the first update lands on the
-        // 8th sweep clock.
-        let mut p = Pulse::new();
-        p.envelope.write(0xF0);
-        p.dac = true;
-        p.freq = 512;
-        p.write_nr10(0x01); // period 0, shift 1
-        p.trigger(0);
-        p.write_nr10(0x11); // period 1, shift 1
-        for i in 0..7 {
-            p.sweep_clock();
-            assert_eq!(p.freq, 512, "no update on sweep clock {i}");
+    fn nr10_write_fires_sweep_when_counter_parked_at_7() {
+        // A trigger with period 0 parks the 128 Hz up-counter at 7
+        // (period ^ 7); a later NR10 write with a non-zero period fires
+        // the sweep unit from the write itself — SameBoy runs
+        // trigger_sweep_calculation at the end of every NR10 write. The
+        // restart hold has not expired here (no machine cycles ran), so
+        // the fire adds the trigger-time addend to the reset shadow (0):
+        // freq = 512 >> 1 = 256.
+        let mut p = sweep_pulse(0x01, 512); // period 0, shift 1
+        assert_eq!(p.sweep_countdown, 7);
+        p.write_nr10(0x11, 1, false); // period 1, shift 1: fires NOW
+        assert_eq!(p.freq, 256);
+        assert_eq!(p.sweep_countdown, 1 ^ 7, "counter reset by the fire");
+        assert!(p.enabled);
+    }
+
+    #[test]
+    fn cleared_shift_pauses_a_pending_calculation() {
+        // SameSuite channel_1_sweep_restart round 3: an armed overflow
+        // kill never lands once NR10's shift bits are cleared — the
+        // calculation countdown pauses ("Calculation is paused if the
+        // lower bits are 0", SameBoy GB_apu_run) — and the negate-clear
+        // check sums exactly shadow + addend + 0 = 0x7FF: no kill (the
+        // SameBoy <=CGB-C forced old-negate bit would cross 0x7FF; the E
+        // form applies per docs/ARCHITECTURE.md §CGB revision policy).
+        let mut p = sweep_pulse(0x17, 0x7F0); // period 1, shift 7
+        for _ in 0..10 {
+            sweep_mcycle(&mut p); // trigger calc: $7f0 + $f = $7ff survives
         }
-        p.sweep_clock();
-        assert_eq!(p.freq, 768);
+        assert!(p.enabled);
+        p.sweep_clock(2); // fire: freq $7ff, kill armed 9 cycles out
+        assert_eq!(p.freq, 0x7FF);
+        p.write_nr10(0x00, 1, false); // disable sweep before it lands
+        assert!(p.enabled, "negate-clear check reads exactly 0x7FF");
+        for _ in 0..100 {
+            sweep_mcycle(&mut p);
+        }
+        assert!(p.enabled, "paused calculation must never kill");
     }
 
     #[test]
