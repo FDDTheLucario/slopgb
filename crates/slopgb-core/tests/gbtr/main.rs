@@ -20,8 +20,8 @@ mod age;
 mod blargg;
 mod gambatte;
 mod gbmicrotest;
-#[allow(dead_code)]
 mod harness;
+mod inventory;
 mod mealybug;
 mod same_suite;
 mod smallsuites;
