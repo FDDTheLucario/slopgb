@@ -111,6 +111,38 @@ const IF_VBLANK: u8 = 0x01;
 /// IF bit 1: STAT interrupt.
 const IF_STAT: u8 = 0x02;
 
+/// The pixel pipeline's live view of the rendering registers.
+///
+/// Identical to the architectural registers except inside a write M-cycle:
+/// the CPU drives the data bus during the second half of the cycle (gbctr
+/// "Memory access timing" — the store lands around T3, not after T4), so
+/// the dot-clocked pipeline observes a rendering-register write ~2 dots
+/// (1 in double speed) before the tick-then-access commit point. The
+/// STAT/LYC/IRQ machinery and CPU reads deliberately keep using the
+/// architectural registers — every mooneye anchor was calibrated there,
+/// and nothing mooneye can observe resolves below 4-dot granularity.
+/// See [`Ppu::stage_write`].
+struct PipeRegs {
+    lcdc: u8,
+    scy: u8,
+    scx: u8,
+    bgp: u8,
+    obp0: u8,
+    obp1: u8,
+    wy: u8,
+    wx: u8,
+}
+
+/// An IO write in flight on the bus: staged by the interconnect before the
+/// write M-cycle ticks, expiring into [`PipeRegs`] mid-cycle (see
+/// [`Ppu::stage_write`]).
+struct StagedWrite {
+    addr: u16,
+    value: u8,
+    /// Dots until the new value drives the pipeline's register view.
+    dots_left: u8,
+}
+
 pub struct Ppu {
     model: Model,
     frame_count: u64,
@@ -174,6 +206,12 @@ pub struct Ppu {
     stat_line: bool,
     /// IF bits produced but not yet handed to the interconnect.
     pending_if: u8,
+    /// The STAT IF bit just produced came from the line-0 OAM rise, which
+    /// sits in the second half of its M-cycle: readable immediately, but
+    /// it misses the CPU's interrupt sample for that one cycle (see
+    /// `refresh_stat`). Drained by the interconnect via
+    /// [`Self::take_stat_late`].
+    stat_late: bool,
     /// Mode 3 finished on the current line (pixel 160 shipped).
     line_render_done: bool,
 
@@ -182,6 +220,12 @@ pub struct Ppu {
     wy_latch: bool,
     /// Window internal line counter.
     win_line: u8,
+
+    /// Pipeline-view rendering registers (see [`PipeRegs`]).
+    eff: PipeRegs,
+    /// Rendering-register write in flight on the bus (see
+    /// [`Self::stage_write`]).
+    staged: Option<StagedWrite>,
 
     render: Render,
 
@@ -309,9 +353,21 @@ impl Ppu {
             cmp: false,
             stat_line: false,
             pending_if: 0,
+            stat_late: false,
             line_render_done: true,
             wy_latch: false,
             win_line: 0,
+            eff: PipeRegs {
+                lcdc: 0,
+                scy: 0,
+                scx: 0,
+                bgp: 0,
+                obp0: 0,
+                obp1: 0,
+                wy: 0,
+                wx: 0,
+            },
+            staged: None,
             render: Render::new(),
             front: pixel_buffer(0xFF_FFFF),
             back: pixel_buffer(0xFF_FFFF),
@@ -319,9 +375,79 @@ impl Ppu {
         }
     }
 
+    /// Stage a rendering-register write `dots` PPU dots before its
+    /// architectural commit. The interconnect calls this *before* ticking
+    /// the write M-cycle and commits via [`Self::write`] afterwards, so
+    /// the pixel pipeline sees the new value land mid-cycle exactly as the
+    /// bus drives it on hardware (gbctr "Memory access timing"), while
+    /// everything the tick-then-access contract calibrates (STAT, IRQ,
+    /// access blocking, LCDC.7 enable/disable) keeps the architectural
+    /// commit point. `dots` is 2 at normal speed, 1 in double speed (the
+    /// second half of the M-cycle either way).
+    ///
+    /// Non-rendering addresses are ignored; rendering registers are FF40
+    /// (pipeline bits only — bit 7 acts at the commit), FF42/FF43 and
+    /// FF47-FF4B.
+    pub(crate) fn stage_write(&mut self, addr: u16, value: u8, dots: u8) {
+        if !matches!(addr, 0xFF40 | 0xFF42 | 0xFF43 | 0xFF47..=0xFF4B) {
+            return;
+        }
+        // One bus op per M-cycle: a previous stage has always expired or
+        // been architecturally committed by now; flush defensively if not.
+        if let Some(s) = self.staged.take() {
+            self.commit_eff(s.addr, s.value);
+        }
+        self.staged = Some(StagedWrite {
+            addr,
+            value,
+            dots_left: dots,
+        });
+    }
+
+    /// Fold an expired staged write into the pipeline-view registers.
+    fn commit_eff(&mut self, addr: u16, value: u8) {
+        match addr {
+            0xFF40 => self.eff.lcdc = value,
+            0xFF42 => self.eff.scy = value,
+            0xFF43 => self.eff.scx = value,
+            0xFF47 => self.eff.bgp = value,
+            0xFF48 => self.eff.obp0 = value,
+            0xFF49 => self.eff.obp1 = value,
+            0xFF4A => self.eff.wy = value,
+            0xFF4B => self.eff.wx = value,
+            _ => {}
+        }
+    }
+
+    /// Advance the in-flight write strobe by one dot. The dot on which
+    /// `dots_left` hits 0 is the transition dot: on pre-CGB models the DMG
+    /// palette registers read old OR new for that single dot (mealybug
+    /// README, m3_bgp_change: "BGP takes the value old OR new for one
+    /// cycle"; the CGB-C reference shows a clean switch); from the next
+    /// dot on, the new value drives the pipeline view.
+    fn strobe_tick(&mut self) {
+        let Some(s) = &mut self.staged else { return };
+        if s.dots_left > 0 {
+            s.dots_left -= 1;
+            if s.dots_left == 0 && !self.model.is_cgb() {
+                match s.addr {
+                    0xFF47 => self.eff.bgp |= s.value,
+                    0xFF48 => self.eff.obp0 |= s.value,
+                    0xFF49 => self.eff.obp1 |= s.value,
+                    _ => {}
+                }
+            }
+        } else {
+            let (addr, value) = (s.addr, s.value);
+            self.staged = None;
+            self.commit_eff(addr, value);
+        }
+    }
+
     /// Advance one dot. Returns IF bits to request
     /// (bit 0 = vblank, bit 1 = STAT), 0 if none.
     pub fn tick(&mut self) -> u8 {
+        self.strobe_tick();
         if !self.enabled {
             return std::mem::take(&mut self.pending_if);
         }
@@ -342,7 +468,7 @@ impl Ppu {
             self.start_line();
         }
         self.step_dot();
-        self.refresh_stat();
+        self.refresh_stat(true);
         std::mem::take(&mut self.pending_if)
     }
 
@@ -383,7 +509,8 @@ impl Ppu {
         if self.line <= 143 {
             // WY latch: the window activates for the rest of the frame once
             // LY==WY is observed while the window is enabled (Pan Docs).
-            if self.lcdc & LCDC_WIN_ENABLE != 0 && self.ly == self.wy {
+            // Rendering machinery samples the pipeline-view registers.
+            if self.eff.lcdc & LCDC_WIN_ENABLE != 0 && self.ly == self.eff.wy {
                 self.wy_latch = true;
             }
             if self.glitch_line {
@@ -478,6 +605,13 @@ impl Ppu {
         self.vis_mode()
     }
 
+    /// Whether the STAT IF bit handed out by the last [`Self::tick`] came
+    /// from the line-0 OAM rise and must miss the CPU's interrupt sample
+    /// for the current M-cycle (see `refresh_stat`).
+    pub(crate) fn take_stat_late(&mut self) -> bool {
+        std::mem::take(&mut self.stat_late)
+    }
+
     /// Level of the shared STAT interrupt line for the given enable bits.
     fn stat_line_level(&self, en: u8) -> bool {
         let mut high = en & STAT_SRC_LYC != 0 && self.cmp;
@@ -503,6 +637,7 @@ impl Ppu {
             // at dot 84. `intr_2_mode3_timing`/`intr_2_mode0_timing`/
             // `intr_2_oam_ok_timing` measure their events 80/252/252 dots
             // after this IRQ becomes CPU-visible (see module docs).
+            // Line 0's rise has special IRQ semantics — see `refresh_stat`.
             let oam_window = self.line <= 143 && !self.glitch_line && (4..84).contains(&self.dot);
             let cgb = self.model.is_cgb();
             // OAM pulse at vblank start: `vblank_stat_intr-GS` (DMG: with
@@ -519,14 +654,47 @@ impl Ppu {
     }
 
     /// Recompute the comparison flag and STAT line; emit IF bit 1 on a
-    /// rising edge of the shared line.
-    fn refresh_stat(&mut self) {
+    /// rising edge of the shared line. `from_tick` distinguishes the
+    /// dot-clock path from register-write paths: the line-0 OAM-rise
+    /// special cases below are properties of the PPU's own mode-2 event,
+    /// not of CPU writes.
+    fn refresh_stat(&mut self, from_tick: bool) {
         if self.enabled {
             self.cmp = self.compare_ly() == Some(self.lyc);
         }
         let level = self.stat_line_level(self.stat_en);
         if level && !self.stat_line {
-            self.pending_if |= IF_STAT;
+            // Line 0's OAM rise (dot 4) has event semantics pinned by
+            // gambatte's hardware suite and the mealybug photographs:
+            //
+            // * with the mode-1 (vblank) source enable bit also set the
+            //   IRQ is blocked entirely (gambatte mstat_irq.h doM2Event:
+            //   `blockedByM1Irq = ly == 0 && (statReg_ &
+            //   lcdstat_m1irqen)`; lcdirq_precedence/m2irq_ly00_lcdstat30
+            //   expects no IRQ) — the line level still rises, so nothing
+            //   re-edges later;
+            // * otherwise the IF bit is readable immediately (gambatte
+            //   lyc153int_m2irq reads it in the same M-cycle) but misses
+            //   the CPU's interrupt sample for one extra M-cycle: on
+            //   every other line the rise comes a T-cycle before the
+            //   visible mode-2 flip (SameBoy display.c: "The OAM STAT
+            //   interrupt occurs 1 T-cycle before STAT actually changes,
+            //   except on line 0"), so only line 0's sits in the second
+            //   half of the M-cycle. mealybug's handlers compensate
+            //   ("line 0 timing is different by 4 cycles",
+            //   m3_bgp_change.asm) and their references pin the late
+            //   dispatch.
+            let line0_oam_rise = from_tick
+                && self.line == 0
+                && !self.glitch_line
+                && self.dot == 4
+                && self.stat_en & STAT_SRC_OAM != 0;
+            if !line0_oam_rise {
+                self.pending_if |= IF_STAT;
+            } else if self.stat_en & STAT_SRC_VBLANK == 0 {
+                self.pending_if |= IF_STAT;
+                self.stat_late = true;
+            }
         }
         self.stat_line = level;
     }
@@ -697,6 +865,14 @@ impl Ppu {
     /// next instruction — so the caller must OR the returned bits into IF
     /// immediately, like a `tick` result.
     pub fn write(&mut self, addr: u16, value: u8) -> u8 {
+        // Architectural commit point: converge the pipeline view with the
+        // registers (the staged copy of this same write may already have
+        // expired into it — see `stage_write`; writes that never went
+        // through the staging path land in both views here).
+        if self.staged.as_ref().is_some_and(|s| s.addr == addr) {
+            self.staged = None;
+        }
+        self.commit_eff(addr, value);
         match addr {
             0x8000..=0x9FFF => {
                 if !self.vram_write_blocked() {
@@ -721,7 +897,7 @@ impl Ppu {
                     self.stat_line = level;
                 }
                 self.stat_en = value & STAT_SRC_ALL;
-                self.refresh_stat();
+                self.refresh_stat(false);
             }
             0xFF42 => self.scy = value,
             0xFF43 => self.scx = value,
@@ -730,7 +906,7 @@ impl Ppu {
                 self.lyc = value;
                 // The comparison retriggers immediately on LYC writes while
                 // the comparison clock runs (`stat_lyc_onoff`).
-                self.refresh_stat();
+                self.refresh_stat(false);
             }
             0xFF47 => self.bgp = value,
             0xFF48 => self.obp0 = value,
@@ -785,7 +961,7 @@ impl Ppu {
             self.render.win_active = false;
             let white = self.white();
             self.front.fill(white);
-            self.refresh_stat();
+            self.refresh_stat(false);
         } else if !was_on && now_on {
             // LCD on: glitched first line (`lcdon_timing-GS`); the LYC
             // comparison restarts against LY=0 immediately and can raise
@@ -802,7 +978,7 @@ impl Ppu {
             self.render.active = false;
             self.wy_latch = false;
             self.win_line = 0;
-            self.refresh_stat();
+            self.refresh_stat(false);
         }
     }
 
@@ -1026,6 +1202,57 @@ mod tests {
                 [0x00, 0xFF, 0x00, 0x00, 0xFF, 0x00, 0x00, 0xFF],
             ],
         );
+    }
+
+    // --- Line-0 OAM STAT IRQ event semantics ---
+    //
+    // The line-0 mode-2 rise differs from every other line's (see the
+    // `refresh_stat` comment for the sources): the IF bit is readable
+    // immediately (gambatte lyc153int_m2irq) but misses the CPU's
+    // interrupt sample for one M-cycle (SameBoy raises the OAM IRQ "1
+    // T-cycle before STAT actually changes, except on line 0"; mealybug
+    // m3_bgp_change compensates "line 0 timing is different by 4
+    // cycles"), and it is blocked entirely while the mode-1 source enable
+    // is set (gambatte mstat_irq.h doM2Event `blockedByM1Irq`;
+    // lcdirq_precedence/m2irq_ly00_lcdstat30).
+
+    #[test]
+    fn line0_oam_irq_is_readable_but_dispatch_late() {
+        for model in [Model::Dmg, Model::Cgb] {
+            let mut p = Ppu::new(model);
+            p.write(0xFF41, 0x20); // OAM source only
+            p.write(0xFF40, 0x81);
+            // Normal line: IF in the M-cycle covering dots 1-4, not late.
+            run_to(&mut p, 1, 0);
+            assert_eq!(tick_n(&mut p, 4) & IF_STAT, IF_STAT, "{model:?} line 1");
+            assert!(!p.take_stat_late(), "{model:?} line 1 rise is not late");
+            // Line 0: the IF bit appears in the same M-cycle but is
+            // flagged late for the dispatch sample.
+            run_to(&mut p, 0, 0);
+            p.take_stat_late();
+            assert_eq!(tick_n(&mut p, 4) & IF_STAT, IF_STAT, "{model:?} line 0");
+            assert!(p.take_stat_late(), "{model:?} line 0 rise is late");
+        }
+    }
+
+    #[test]
+    fn line0_oam_irq_blocked_by_vblank_enable() {
+        // With the mode-1 source enable also set, the line-0 OAM rise
+        // raises no IRQ at all; the line level still rises, so nothing
+        // re-edges later in the OAM window.
+        let mut p = dmg();
+        p.write(0xFF41, 0x30); // OAM + VBLANK sources
+        p.write(0xFF40, 0x81);
+        run_to(&mut p, 150, 0);
+        run_to(&mut p, 0, 0); // drain vblank-window IRQs
+        assert_eq!(
+            tick_n(&mut p, 84) & IF_STAT,
+            0,
+            "line 0 OAM rise is blocked while the vblank enable is set"
+        );
+        // The next line's edge is unaffected.
+        run_to(&mut p, 1, 0);
+        assert_eq!(tick_n(&mut p, 4) & IF_STAT, IF_STAT);
     }
 
     // --- lcdon_write_timing-GS ---
