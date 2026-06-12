@@ -176,12 +176,20 @@ impl Model {
     /// no finer oracle exists for that revision).
     /// SGB masks the LCD registers out and reuses the DMG value. CGB/AGB
     /// hands off inside vblank (LY in the $90-$94 range per the hardware
-    /// reports in gbdev/pandocs#426); the dot is pinned by gambatte's
-    /// hardware-calibrated init state (initstate.cpp `videoCycles = cgb ?
-    /// 144*456 + 164 + agb*4 : 153*456 + 396` — the DMG value equals the
-    /// gbmicrotest-pinned 70164 exactly, anchoring the unit conversion),
-    /// which the gambatte display_startstate cgb04c rows measure: line
-    /// 144 ($90) dot 164, AGB 4 dots later.
+    /// reports in gbdev/pandocs#426). The table stores the **DMG-cart**
+    /// hand-off (the boot ROM's DMG-compat path runs 0x7D8 T-cycles
+    /// longer than the CGB-cart path — see
+    /// `Interconnect::apply_post_boot_state`, which subtracts that cut
+    /// from both `div_counter` and `lcd_phase_dots` in CGB mode):
+    /// `div_counter` is pinned by mooneye misc/boot_div-cgbABCDE/-A
+    /// (mooneye ROMs are DMG carts), and the CGB-cart LCD dot by
+    /// gambatte's hardware-calibrated init state (initstate.cpp
+    /// `videoCycles = cgb ? 144*456 + 164 + agb*4 : 153*456 + 396` — the
+    /// DMG value equals the gbmicrotest-pinned 70164 exactly, anchoring
+    /// the unit conversion), which the gambatte display_startstate
+    /// cgb04c rows measure ($143=$C0 carts): line 144 ($90) dot 164, AGB
+    /// 4 dots later. DMG-cart hand-off is therefore 144*456+164+0x7D8 =
+    /// line 148 ($94) dot 348 — inside the pandocs#426 window.
     pub fn post_boot_state(self) -> PostBootState {
         // Common fields; per-model values below.
         let base = PostBootState {
@@ -286,7 +294,7 @@ impl Model {
                 l: 0x7C,
                 div_counter: 0x2674,
                 hwio: HWIO_CGB,
-                lcd_phase_dots: 65828,
+                lcd_phase_dots: 67836,
                 ..base
             },
             // misc/boot_regs-A, misc/boot_div-A.
@@ -301,7 +309,7 @@ impl Model {
                 l: 0x7C,
                 div_counter: 0x2678,
                 hwio: HWIO_CGB,
-                lcd_phase_dots: 65832,
+                lcd_phase_dots: 67840,
                 ..base
             },
         }
@@ -467,10 +475,21 @@ mod tests {
         assert!((456 + 84..456 + 256).contains(&pos), "DMG0: {p0}");
         // CGB/AGB: no mooneye oracle (boot_hwio masks LY/STAT), but real
         // hardware hands off inside vblank with LY in $90-$94
-        // (gbdev/pandocs#426).
+        // (gbdev/pandocs#426). The table holds the DMG-cart hand-off:
+        // the CGB-cart point (gambatte initstate 144*456+164, AGB +4)
+        // plus the 0x7D8-dot DMG-compat boot tail (see
+        // Interconnect::apply_post_boot_state).
         for m in [Model::Cgb, Model::Agb] {
             let p0 = m.post_boot_state().lcd_phase_dots;
             assert!((144 * 456..149 * 456).contains(&p0), "{m:?}: {p0}");
         }
+        assert_eq!(
+            Model::Cgb.post_boot_state().lcd_phase_dots,
+            144 * 456 + 164 + 0x7D8
+        );
+        assert_eq!(
+            Model::Agb.post_boot_state().lcd_phase_dots,
+            144 * 456 + 164 + 4 + 0x7D8
+        );
     }
 }

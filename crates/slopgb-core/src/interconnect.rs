@@ -159,6 +159,33 @@ pub struct Interconnect {
     /// interrupt sample for this cycle must not see it
     /// (`Ppu::take_stat_late`).
     if_stat_late: u8,
+    /// Dispatch-ack source sync-ahead (gambatte-core memory.cpp
+    /// `Memory::ackIrq`): the IF clear of an interrupt dispatch happens
+    /// slightly *into* the low-push M-cycle on hardware, so it also
+    /// consumes a hardware re-set of the acked source that lands just
+    /// after the ack — `updateSerial(cc + 3 + isCgb())`,
+    /// `updateTimaIrq(cc + 2 + isCgb())`, `lcd_.update(cc + 2)` run
+    /// before `intreq_.ackIrq(bit)`. Translated to this core's
+    /// tick-then-access grid: a timer/serial set produced by the next
+    /// machine tick (the next two on CGB/AGB — the timer IF commits on
+    /// the last T-substep, the serial IF on the DIV-edge boundary), and
+    /// a STAT/VBlank rise in the first 2 dots of the next tick, are
+    /// swallowed by the preceding [`Bus::ack`]. The 2-dot LCD window is
+    /// deliberately NOT widened to the line-anchored rises' second-half
+    /// emission dots at single speed (gambatte's `cc + 2` does not reach
+    /// them — m2int_m2irq_late_retrigger_1 and late_m0irq_retrigger_scx1_1
+    /// pin the keeps); in double speed the 2-dot window spans the whole
+    /// tick, which is what flips the `*_late_retrigger_ds_2` rows.
+    /// Pinned by gambatte tima/tc00_irq_late_retrigger_2/3 (dmg08_outE4
+    /// vs cgb04c_outE0), serial/start_wait_trigger_int8_read_if_2/3 and
+    /// the irq_precedence/m1/ly0/lyc153int `*_late_retrigger` rows.
+    /// `ack_squash_mask` is the acked source's IF bit (only that source
+    /// is consumed — others get *flagged*, which our per-tick OR already
+    /// models); `ack_squash_ticks`/`ack_squash_dots` are the remaining
+    /// windows.
+    ack_squash_mask: u8,
+    ack_squash_ticks: u8,
+    ack_squash_dots: u8,
 
     /// FF46 readback is simply the last written value
     /// (acceptance/oam_dma/reg_read).
@@ -266,6 +293,9 @@ impl Interconnect {
             ie: 0,
             if_late: 0,
             if_stat_late: 0,
+            ack_squash_mask: 0,
+            ack_squash_ticks: 0,
+            ack_squash_dots: 0,
             dma_reg: 0,
             dma_run: None,
             dma_start: None,
@@ -320,13 +350,27 @@ impl Interconnect {
     pub fn apply_post_boot_state(&mut self) {
         let s = self.model.post_boot_state();
 
+        self.install_power_on_wram();
         self.install_boot_logo_vram();
+
+        // The CGB/AGB boot ROM hands a CGB-flagged cart off 0x7D8
+        // T-cycles (502 M-cycles) *earlier* than a DMG cart: the
+        // DMG-compat path does its compatibility-palette work after the
+        // logo. DIV and the LCD run uninterrupted through that tail, so
+        // both shift together by exactly the DIV difference. The
+        // CGB-cart DIV is pinned by gambatte div/start_inc_1/2 ($143=$C0
+        // carts: FF04 reads $1E at +96 T right before an increment, $1F
+        // at +100 → counter $1E9C = $2674 - $7D8) and cross-checked by
+        // tima/tc00_start_1/2 ($1E9C + 356 ≡ 0 mod $400 puts the first
+        // TIMA increment exactly between rounds); the DMG-cart values
+        // stay pinned by mooneye misc/boot_div-cgbABCDE/-A (DMG carts).
+        let cgb_cart_cut: u32 = if self.cgb_mode { 0x7D8 } else { 0 };
 
         // LCD warmup: glitched enable line (452 dots) + 153 normal lines
         // brings the PPU to line 0 dot 0; then advance to the hand-off
         // phase.
         self.ppu.write(0xFF40, 0x91);
-        for _ in 0..(70224 - 4 + s.lcd_phase_dots) {
+        for _ in 0..(70224 - 4 + s.lcd_phase_dots - cgb_cart_cut) {
             self.ppu.tick();
         }
 
@@ -367,7 +411,7 @@ impl Interconnect {
             s.div_counter
                 .wrapping_add((4 * sgb_header_zero_bits(&self.cart)) as u16)
         } else {
-            s.div_counter
+            s.div_counter.wrapping_sub(cgb_cart_cut as u16)
         };
         self.timer.set_div(div);
         self.serial.tick(div);
@@ -392,6 +436,41 @@ impl Interconnect {
         self.apu.tick(div, false);
         let mut sink = Vec::new();
         self.apu.drain_samples(&mut sink);
+    }
+
+    /// WRAM as it powers up. Real DMG-family WRAM is not zeroed: it wakes
+    /// in a deterministic stripe pattern — alternating $00/$FF half-pages
+    /// (256 B) with the polarity inverted across each 2 KiB half, and
+    /// C000-CFFF mirrored into D000-DFFF — plus a sprinkle of per-board
+    /// bit noise. The pattern is the gambatte-core mem_dumps.h
+    /// `setInitialDmgWram` hardware dump (captured on the same DMG-CPU-08
+    /// board as the `dmg08` expectation corpus; every DMG emulator with a
+    /// hardware dump agrees on the stripe base). The per-board
+    /// `dmgWramDumpDiff` noise bytes are deliberately NOT vendored: no
+    /// test in the corpus distinguishes them, and they are unit noise,
+    /// not architecture. Pinned by gambatte `oamdma_srcFE00_*` (an OAM
+    /// DMA from $FE00 reads the $DE00 WRAM echo page, which must read
+    /// $FF). The boot ROM only clears VRAM/HRAM, never WRAM, so the
+    /// pattern survives to PC=0x100; mooneye `boot_hwio-*` masks WRAM
+    /// out. CGB WRAM keeps the zero fill: its power-on pattern differs
+    /// per bank (gambatte `setInitialCgbWram`) and nothing in the corpus
+    /// pins it.
+    fn install_power_on_wram(&mut self) {
+        if self.model.is_cgb() {
+            return;
+        }
+        for (i, byte) in self.wram.iter_mut().enumerate() {
+            // Half-page index 0..15 within the (mirrored) 4 KiB bank:
+            // $00 for even half-pages in C000-C7FF and odd ones in
+            // C800-CFFF, $FF otherwise.
+            let half_page = (i >> 8) & 0x0F;
+            let inverted = half_page >= 8;
+            *byte = if (half_page & 1 == 0) != inverted {
+                0x00
+            } else {
+                0xFF
+            };
+        }
     }
 
     /// VRAM tile data as the boot ROM leaves it: the Nintendo logo
@@ -521,16 +600,35 @@ impl Interconnect {
     fn tick_machine(&mut self) {
         let dots: u64 = if self.double_speed { 2 } else { 4 };
         self.cycles += dots;
+        // Dispatch-ack sync-ahead window for this tick (see `ack`):
+        // timer/serial sets produced by an in-window tick are consumed
+        // by the preceding ack instead of re-raising IF.
+        let tick_squash = if self.ack_squash_ticks > 0 {
+            self.ack_squash_ticks -= 1;
+            self.ack_squash_mask & 0x0C
+        } else {
+            0
+        };
         let t = self.timer.tick();
         // IF reads must see a second-half commit within its own cycle
         // (mooneye tima_reload access sequences) — only the halt-exit
         // sampling misses it, via the `if_late` mask.
-        self.intf |= t.iff & IF_MASK;
-        self.if_late = if t.late { t.iff & IF_MASK } else { 0 };
+        let t_iff = t.iff & IF_MASK & !tick_squash;
+        self.intf |= t_iff;
+        self.if_late = if t.late { t_iff } else { 0 };
         self.oam_dma_tick();
         self.if_stat_late = 0;
         for i in 0..dots {
-            self.intf |= self.ppu.tick() & IF_MASK;
+            // STAT/VBlank rises in the first 2 dots after the ack are
+            // consumed too (gambatte ackIrq lcd_.update(cc + 2); in
+            // double speed the window spans the whole tick — see `ack`).
+            let dot_squash = if self.ack_squash_dots > 0 {
+                self.ack_squash_dots -= 1;
+                self.ack_squash_mask & 0x03
+            } else {
+                0
+            };
+            self.intf |= self.ppu.tick() & IF_MASK & !dot_squash;
             if self.ppu.take_stat_late() {
                 // The line-0 OAM STAT rise sits in the second half of the
                 // M-cycle: the IF bit is readable at once, but this
@@ -581,7 +679,7 @@ impl Interconnect {
         }
         let div = self.timer.div_counter();
         self.apu.tick(div, self.double_speed);
-        self.intf |= self.serial.tick(div) & IF_MASK;
+        self.intf |= self.serial.tick(div) & IF_MASK & !tick_squash;
         self.intf |= self.joypad.take_irq() & IF_MASK;
         // RTC wall time is dot time (2 dots per M-cycle in double speed).
         self.cart.tick_rtc(dots as u32);
@@ -1454,6 +1552,34 @@ impl Bus for Interconnect {
 
     fn ack(&mut self, bit: u8) {
         self.intf &= !(1 << bit);
+        // gambatte Memory::ackIrq syncs the acked bit's source a few
+        // T-cycles past the ack point before clearing, so a hardware
+        // re-set landing just after the dispatch's IF clear is consumed
+        // by it (see the `ack_squash_*` field docs for the window
+        // derivation and the pinning ROMs).
+        match bit {
+            0 | 1 => {
+                // lcd_.update(cc + 2), no isCgb term: 2 dots into the
+                // next machine tick on both families and at both speeds
+                // (in double speed that is the whole 2-dot tick). The
+                // line-anchored rises' single-speed second-half emission
+                // dots stay OUT of reach — see the field docs.
+                self.ack_squash_mask = 1 << bit;
+                self.ack_squash_ticks = 0;
+                self.ack_squash_dots = 2;
+            }
+            2 | 3 => {
+                // updateTimaIrq(cc + 2 + isCgb()) / updateSerial(cc + 3 +
+                // isCgb()): with the timer IF on the last T-substep and
+                // the serial IF on the DIV-edge boundary, both windows
+                // cover the set produced by the next machine tick on the
+                // DMG family and the next two on CGB/AGB.
+                self.ack_squash_mask = 1 << bit;
+                self.ack_squash_ticks = if self.model.is_cgb() { 2 } else { 1 };
+                self.ack_squash_dots = 0;
+            }
+            _ => {}
+        }
     }
 
     fn stop(&mut self, skipped_addr: u16, interrupt_pending: bool) -> bool {
@@ -1771,6 +1897,148 @@ mod tests {
         ] {
             b.write(addr, 0x00);
             assert_eq!(b.read(addr), 0xFF, "{addr:04X}");
+        }
+    }
+
+    // ---- dispatch-ack source sync-ahead (gambatte Memory::ackIrq) -------
+
+    /// A timer IF set produced by the machine tick right after a
+    /// dispatch ack is consumed by it on both families (gambatte ackIrq
+    /// `updateTimaIrq(cc + 2 + isCgb())` reaches past the last-substep
+    /// commit of the next M-cycle's reload; tima/tc00_irq_late_retrigger_3
+    /// reads E0 on dmg08 *and* cgb04c). The TMA reload itself still
+    /// happens — only the IF bit is consumed.
+    #[test]
+    fn dispatch_ack_consumes_timer_set_due_next_cycle() {
+        for model in [Model::Dmg, Model::Cgb] {
+            let mut b = ic(model);
+            arm_late_timer_irq(&mut b);
+            ticks(&mut b, 4); // overflow armed; reload + IF due next tick
+            b.ack(2); // the dispatch's IF clear
+            ticks(&mut b, 1);
+            assert_eq!(b.read_no_tick(0xFF0F) & 0x04, 0, "{model:?}");
+            assert_eq!(
+                b.timer.read(0xFF05),
+                b.timer.read(0xFF06),
+                "{model:?}: reload"
+            );
+        }
+    }
+
+    /// The sync-ahead window is one M-cycle on the DMG family and two on
+    /// CGB/AGB (`+ isCgb()`): a set committing in the second tick after
+    /// the ack survives on DMG and is consumed on CGB — the
+    /// tc00_irq_late_retrigger_2 dmg08_outE4 / cgb04c_outE0 split. Three
+    /// cycles out it survives everywhere.
+    #[test]
+    fn dispatch_ack_timer_window_is_one_cycle_dmg_two_cgb() {
+        for (model, expect) in [
+            (Model::Dmg, 0x04),
+            (Model::Sgb, 0x04),
+            (Model::Cgb, 0x00),
+            (Model::Agb, 0x00),
+        ] {
+            let mut b = ic(model);
+            arm_late_timer_irq(&mut b);
+            ticks(&mut b, 3);
+            b.ack(2);
+            ticks(&mut b, 2); // overflow in tick 4, reload + IF in tick 5
+            assert_eq!(b.read_no_tick(0xFF0F) & 0x04, expect, "{model:?}");
+        }
+        for model in [Model::Dmg, Model::Cgb] {
+            let mut b = ic(model);
+            arm_late_timer_irq(&mut b);
+            ticks(&mut b, 2);
+            b.ack(2);
+            ticks(&mut b, 3);
+            assert_eq!(
+                b.read_no_tick(0xFF0F) & 0x04,
+                0x04,
+                "{model:?}: past window"
+            );
+        }
+    }
+
+    /// Serial transfer-complete IF: same ack windows via gambatte's
+    /// `updateSerial(cc + 3 + isCgb())` — with the completion on the
+    /// DIV-edge boundary, DMG consumes the set due in the next tick,
+    /// CGB also the one after (serial/start_wait_trigger_int8_read_if_2:
+    /// dmg08_outE8 vs cgb04c_outE0; round 3 E0 on both).
+    #[test]
+    fn dispatch_ack_consumes_serial_set_like_gambatte_ackirq() {
+        // Completion (8th shift) at div 4096 = machine tick 1024.
+        for (model, gap, expect) in [
+            (Model::Dmg, 1, 0x00),
+            (Model::Cgb, 1, 0x00),
+            (Model::Dmg, 2, 0x08),
+            (Model::Cgb, 2, 0x00),
+            (Model::Dmg, 3, 0x08),
+            (Model::Cgb, 3, 0x08),
+        ] {
+            let mut b = ic(model);
+            b.serial.write(0xFF01, 0x00);
+            b.serial.write(0xFF02, 0x81);
+            ticks(&mut b, 1024 - gap);
+            b.ack(3);
+            ticks(&mut b, gap);
+            assert_eq!(b.read_no_tick(0xFF0F) & 0x08, expect, "{model:?} gap {gap}");
+            assert_eq!(
+                b.serial.read(0xFF02) & 0x80,
+                0,
+                "{model:?}: transfer still ends"
+            );
+        }
+    }
+
+    /// The ack only consumes the *acked* source: a timer ack does not
+    /// swallow a serial set in the window (gambatte ackIrq clears one
+    /// bit; the sync-ahead merely flags the others earlier).
+    #[test]
+    fn dispatch_ack_squash_is_per_source() {
+        let mut b = ic(Model::Cgb);
+        b.serial.write(0xFF02, 0x81);
+        ticks(&mut b, 1023);
+        b.ack(2); // timer ack, serial completion due next tick
+        ticks(&mut b, 1);
+        assert_eq!(b.read_no_tick(0xFF0F) & 0x08, 0x08);
+    }
+
+    /// STAT/VBlank rises go through `lcd_.update(cc + 2)` — only the
+    /// first 2 dots of the next tick. The vblank rise is a line-anchored
+    /// event emitted in the *second half* of its M-cycle at single
+    /// speed, so an ack in the cycle before must NOT consume it
+    /// (gambatte m2int_m2irq_late_retrigger_1 and
+    /// irq_precedence/late_m0irq_retrigger_scx1_1 pin the keeps; the
+    /// consumed cases live on the gambatte `*_late_retrigger_ds_2` rows,
+    /// where the 2-dot window spans the whole double-speed tick, and on
+    /// the mode-0 rise's early-dot grid).
+    #[test]
+    fn dispatch_ack_does_not_reach_single_speed_line_anchored_rises() {
+        for model in [Model::Dmg, Model::Cgb] {
+            // Find the tick of the first vblank IF after an LCD enable
+            // (per model: the CGB line timeline may shift it).
+            let rise = {
+                let mut b = ic(model);
+                b.write_no_tick(0xFF40, 0x91);
+                let mut n = 0;
+                while b.read_no_tick(0xFF0F) & 0x01 == 0 {
+                    b.tick();
+                    n += 1;
+                }
+                n
+            };
+            for gap in [1, 2] {
+                let mut b = ic(model);
+                b.write_no_tick(0xFF40, 0x91);
+                ticks(&mut b, rise - gap);
+                b.ack(0);
+                ticks(&mut b, gap);
+                assert_eq!(
+                    b.read_no_tick(0xFF0F) & 0x01,
+                    0x01,
+                    "{model:?} gap {gap}: kept"
+                );
+            }
         }
     }
 
@@ -3248,6 +3516,76 @@ mod tests {
             assert_eq!(b.ppu().vram_read_raw(0x9904), 0x00, "{model:?}");
             assert_eq!(b.ppu().vram_read_raw(0x9910), 0x00, "{model:?}");
         }
+    }
+
+    /// Real DMG-family WRAM powers up in the $00/$FF half-page stripe
+    /// pattern, mirrored into D000-DFFF (gambatte-core mem_dumps.h
+    /// `setInitialDmgWram` base pattern; see `install_power_on_wram`).
+    /// The $DE00 page reading $FF is what the gambatte oamdma_srcFE00_*
+    /// expectations encode (OAM DMA from $FE00 reads the $DE00 echo).
+    /// CGB WRAM stays zero-filled.
+    #[test]
+    fn post_boot_wram_power_on_pattern() {
+        for model in [Model::Dmg0, Model::Dmg, Model::Mgb, Model::Sgb, Model::Sgb2] {
+            let b = booted(model);
+            for (addr, want) in [
+                (0xC000u16, 0x00u8),
+                (0xC0FF, 0x00),
+                (0xC100, 0xFF),
+                (0xC1FF, 0xFF),
+                (0xC2A0, 0x00),
+                (0xC700, 0xFF),
+                // Polarity inverts across the 2 KiB half...
+                (0xC800, 0xFF),
+                (0xC900, 0x00),
+                (0xCE42, 0xFF),
+                (0xCF00, 0x00),
+                // ...and D000-DFFF mirrors C000-CFFF.
+                (0xD000, 0x00),
+                (0xD100, 0xFF),
+                (0xDE00, 0xFF),
+                (0xDEFF, 0xFF),
+                (0xDF00, 0x00),
+            ] {
+                assert_eq!(b.peek(addr), want, "{model:?} {addr:04X}");
+            }
+        }
+        let b = booted(Model::Cgb);
+        for addr in [0xC100u16, 0xC800, 0xDE00] {
+            assert_eq!(b.peek(addr), 0x00, "CGB WRAM zero-filled at {addr:04X}");
+        }
+    }
+
+    /// The CGB boot ROM hands a CGB-flagged cart off 0x7D8 T-cycles
+    /// earlier than a DMG cart (the DMG-compat palette tail), shifting
+    /// DIV and the LCD phase together: DIV $1E9C pinned by gambatte
+    /// div/start_inc_1/2 (FF04 reads $1E at +96 T immediately before
+    /// the increment to $1F00) and tima/tc00_start_1/2 (first TIMA
+    /// increment, DIV bit-9 edge, exactly between rounds at +356), LY
+    /// $90 by display_startstate ly/stat. The DMG-cart side keeps
+    /// mooneye misc/boot_div-cgbABCDE's $2674 with the LCD 0x7D8 dots
+    /// further on (line 148, still in the pandocs#426 LY window).
+    #[test]
+    fn post_boot_cgb_cart_hands_off_earlier_than_dmg_cart() {
+        let mut dmg_cart = booted(Model::Cgb);
+        assert_eq!(dmg_cart.timer.div_counter(), 0x2674);
+        assert_eq!(dmg_cart.read(0xFF44), 148);
+
+        let mut cgb_cart = ic_cgb_mode();
+        cgb_cart.apply_post_boot_state();
+        let div = cgb_cart.timer.div_counter();
+        assert_eq!(div, 0x1E9C);
+        assert_eq!(div, 0x2674 - 0x7D8);
+        // div/start_inc oracle: the read 24 M-cycles in.
+        assert_eq!((div + 96) >> 8, 0x1E, "round 1 high byte");
+        assert!(
+            (div + 96) & 0xFF >= 0xFC,
+            "immediately before the increment"
+        );
+        assert_eq!((div + 100) >> 8, 0x1F, "round 2 high byte");
+        // tc00_start oracle: bit-9 falling edge between the rounds.
+        assert_eq!((div + 356) % 0x400, 0);
+        assert_eq!(cgb_cart.read(0xFF44), 144);
     }
 
     #[test]

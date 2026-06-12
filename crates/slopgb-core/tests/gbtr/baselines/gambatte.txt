@@ -26,8 +26,6 @@ gambatte/cgbpal_m3/cgbpal_read_m3start_lcdoffset1_1_cgb04c_out00.gbc [Cgb]
 gambatte/cgbpal_m3/cgbpal_write_m3start_ds_1_cgb04c_out01.gbc [Cgb]
 gambatte/cgbpal_m3/cgbpal_write_m3start_lcdoffset1_1_cgb04c_out01.gbc [Cgb]
 gambatte/display_startstate/stat_scx3_2_cgb04c_out84.gbc [Cgb]
-gambatte/div/start_inc_1_cgb04c_out1E.gbc [Cgb]
-gambatte/div/start_inc_2_cgb04c_out1F.gbc [Cgb]
 gambatte/dma/gdma_cycles_2xshort_ds_2_cgb04c_out0.gbc [Cgb]
 gambatte/dma/gdma_cycles_long_2_cgb04c_out0.gbc [Cgb]
 gambatte/dma/gdma_cycles_long_ds_2_cgb04c_out0.gbc [Cgb]
@@ -184,9 +182,6 @@ gambatte/irq_precedence/late_hdma_vs_tima_scx2_2_cgb04c_out11E9.gbc [Cgb]
 gambatte/irq_precedence/late_hdma_vs_tima_scx2_halt_2_cgb04c_out11C9.gbc [Cgb]
 gambatte/irq_precedence/late_if_via_sp_if_1_dmg08_cgb04c_outFD.gbc [Dmg]
 gambatte/irq_precedence/late_if_via_sp_if_1_dmg08_cgb04c_outFD.gbc [Cgb]
-gambatte/irq_precedence/late_m0irq_retrigger_2_dmg08_cgb04c_outE0.gbc [Dmg]
-gambatte/irq_precedence/late_m0irq_retrigger_2_dmg08_cgb04c_outE0.gbc [Cgb]
-gambatte/irq_precedence/late_m0irq_retrigger_scx1_ds_2_cgb04c_outE0.gbc [Cgb]
 gambatte/irq_precedence/late_m0irq_vs_tima_scx2_1_dmg08_cgb04c_out4.gbc [Dmg]
 gambatte/irq_precedence/late_m0irq_vs_tima_scx2_1_dmg08_cgb04c_out4.gbc [Cgb]
 gambatte/irq_precedence/late_m0irq_vs_tima_scx2_halt_1_dmg08_cgb04c_out4.gbc [Dmg]
@@ -217,16 +212,13 @@ gambatte/ly0/lycint152_ly153_ds_1_cgb04c_out98.gbc [Cgb]
 gambatte/ly0/lycint152_ly153_ds_4_cgb04c_out99.gbc [Cgb]
 gambatte/ly0/lycint152_lyc0irq_late_retrigger_2_dmg08_cgb04c_outE0.gbc [Dmg]
 gambatte/ly0/lycint152_lyc0irq_late_retrigger_2_dmg08_cgb04c_outE0.gbc [Cgb]
-gambatte/ly0/lycint152_lyc0irq_late_retrigger_ds_2_cgb04c_outE0.gbc [Cgb]
 gambatte/ly0/lycint152_lyc153irq_late_retrigger_2_dmg08_cgb04c_outE0.gbc [Dmg]
 gambatte/ly0/lycint152_lyc153irq_late_retrigger_2_dmg08_cgb04c_outE0.gbc [Cgb]
-gambatte/ly0/lycint152_lyc153irq_late_retrigger_ds_2_cgb04c_outE0.gbc [Cgb]
 gambatte/ly0/lycint152_m0irq_1_dmg08_cgb04c_outE0.gbc [Dmg]
 gambatte/ly0/lycint152_m2irq_1_dmg08_cgb04c_outE0.gbc [Dmg]
 gambatte/lyc153int_m2irq/lyc153int_m2irq_1_dmg08_cgb04c_out0.gbc [Dmg]
 gambatte/lyc153int_m2irq/lyc153int_m2irq_late_retrigger_2_dmg08_cgb04c_out0.gbc [Dmg]
 gambatte/lyc153int_m2irq/lyc153int_m2irq_late_retrigger_2_dmg08_cgb04c_out0.gbc [Cgb]
-gambatte/lyc153int_m2irq/lyc153int_m2irq_late_retrigger_ds_2_cgb04c_out0.gbc [Cgb]
 gambatte/lycEnable/ff41_disable_2_dmg08_out0_cgb04c_out2.gbc [Cgb]
 gambatte/lycEnable/ff41_disable_3_dmg08_cgb04c_out2.gbc [Dmg]
 gambatte/lycEnable/ff41_disable_3_dmg08_cgb04c_out2.gbc [Cgb]
@@ -296,10 +288,8 @@ gambatte/m1/lyc143_late_m0enable_lycdisable_ds_1_cgb04c_out1.gbc [Cgb]
 gambatte/m1/lyc143_late_m2enable_lycdisable_2_dmg08_cgb04c_out1.gbc [Dmg]
 gambatte/m1/lycint143_m1irq_late_retrigger_2_dmg08_cgb04c_out1.gbc [Dmg]
 gambatte/m1/lycint143_m1irq_late_retrigger_2_dmg08_cgb04c_out1.gbc [Cgb]
-gambatte/m1/lycint143_m1irq_late_retrigger_ds_2_cgb04c_out1.gbc [Cgb]
 gambatte/m1/lycint_vblankirq_late_retrigger_2_dmg08_cgb04c_out0.gbc [Dmg]
 gambatte/m1/lycint_vblankirq_late_retrigger_2_dmg08_cgb04c_out0.gbc [Cgb]
-gambatte/m1/lycint_vblankirq_late_retrigger_ds_2_cgb04c_out0.gbc [Cgb]
 gambatte/m1/m1irq_enable_after_lyc144_2_dmg08_out1_cgb04c_out3.gbc [Dmg]
 gambatte/m1/m1irq_late_enable_ds_1_cgb04c_out2.gbc [Cgb]
 gambatte/m1/m1irq_late_enable_ds_lcdoffset1_1_cgb04c_out2.gbc [Cgb]
@@ -390,10 +380,9 @@ gambatte/oam_access/prewrite_2_dmg08_out1_cgb04c_out0.gbc [Dmg]
 #   dot, raced against the dot-serial mode-2 scan of one sprite slot;
 #   this emulator scans a line's OAM monolithically and steps the DMA at
 #   M-cycle granularity (same mechanism as smallsuites strikethrough.gb).
-# * srcFE00_* [Dmg]: DMA from $FE00 reads the $DE00 WRAM echo, whose
-#   power-on content these ROMs never initialize; the expectations encode
-#   the DMG power-up WRAM pattern ($DExx page = $FF, gambatte-core
-#   mem_dumps.h setInitialDmgWram), slopgb zero-fills WRAM.
+# * (resolved 2026-06: the srcFE00_* [Dmg] rows passed once DMG-family
+#   WRAM got its power-on stripe pattern — Interconnect::
+#   install_power_on_wram, gambatte mem_dumps.h setInitialDmgWram.)
 # * oamdmasrcC000_hdmasrc0000: the OAM-DMA x VRAM-DMA bus capture itself
 #   is modelled (interconnect.rs oam_dma_bus_capture; the
 #   hdma_transition_oamdma and oamdmasrc80_halt_*_read8000 siblings
@@ -428,10 +417,6 @@ gambatte/oamdma/late_sp39y_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/oamdma/oamdma_late_halt_stat_1_dmg08_cgb04c_out0.gbc [Dmg]
 gambatte/oamdma/oamdma_late_halt_stat_1_dmg08_cgb04c_out0.gbc [Cgb]
 gambatte/oamdma/oamdma_late_speedchange_stat_2_cgb04c_out3.gbc [Cgb]
-gambatte/oamdma/oamdma_srcFE00_busyread0000_dmg08_cgb04c_out0.gbc [Dmg]
-gambatte/oamdma/oamdma_srcFE00_busyreadA000_dmg08_cgb04c_out0.gbc [Dmg]
-gambatte/oamdma/oamdma_srcFE00_busyreadC000_dmg08_out0_cgb_xoutblank.gbc [Dmg]
-gambatte/oamdma/oamdma_srcFE00_readFE00_dmg08_cgb04c_out0.gbc [Dmg]
 gambatte/oamdma/oamdmasrcC000_hdmasrc0000_cgb04c_out0A940C0D.gbc [Cgb]
 gambatte/scx_during_m3/old/offset_3/scx_during_m3_2.gb [Dmg]
 gambatte/scx_during_m3/old/offset_3/scx_during_m3_3.gb [Dmg]
@@ -578,10 +563,6 @@ gambatte/scy/scy_during_m3_spx0A_1.gbc [Cgb]
 gambatte/scy/scy_during_m3_spx0A_3.gbc [Cgb]
 gambatte/scy/scy_during_m3_spx0B_1.gbc [Cgb]
 gambatte/scy/scy_during_m3_spx0B_3.gbc [Cgb]
-gambatte/serial/start_wait_trigger_int8_read_if_2_dmg08_outE8_cgb04c_outE0.gbc [Cgb]
-gambatte/serial/start_wait_trigger_int8_read_if_3_dmg08_cgb04c_outE0.gbc [Dmg]
-gambatte/serial/start_wait_trigger_int8_read_if_3_dmg08_cgb04c_outE0.gbc [Cgb]
-gambatte/serial/start_wait_trigger_int8_read_if_ds_2_cgb04c_outE0.gbc [Cgb]
 gambatte/sound/ch1_duty0_pos6_to_pos7_timing_ds_6_cgb04c_outaudio1.gbc [Cgb]
 gambatte/sound/ch1_init_pos_1_dmg08_outaudio0_cgb04c_outaudio1.gbc [Dmg]
 gambatte/sound/ch1_init_pos_4_dmg08_outaudio1_cgb04c_outaudio0.gbc [Cgb]
@@ -605,23 +586,13 @@ gambatte/sound/ch1_init_pos_8_dmg08_outaudio0_cgb04c_outaudio1.gbc [Dmg]
 # tweak would break.
 gambatte/sound/ch1_init_reset_sweep_counter_timing_10_dmg08_outaudio0_cgb04c_outaudio1.gbc [Cgb]
 gambatte/sound/ch1_init_reset_sweep_counter_timing_4_dmg08_outaudio1_cgb04c_outaudio0.gbc [Dmg]
-gambatte/sound/ch1_init_reset_sweep_counter_timing_9_dmg08_outaudio1_cgb04c_outaudio0.gbc [Cgb]
-gambatte/sound/ch1_init_reset_sweep_counter_timing_nr52_3_dmg08_out0_cgb04c_out1.gbc [Cgb]
 gambatte/sound/ch2_init_env_counter_timing_2_dmg08_outaudio1_cgb04c_outaudio0.gbc [Dmg]
 gambatte/sound/ch2_init_env_counter_timing_3_dmg08_outaudio1_cgb04c_outaudio0.gbc [Dmg]
 gambatte/sound/ch2_init_env_counter_timing_4_dmg08_cgb04c_outaudio1.gbc [Dmg]
-gambatte/sound/ch2_init_env_counter_timing_4_dmg08_cgb04c_outaudio1.gbc [Cgb]
 gambatte/sound/ch2_init_reset_env_counter_timing_11_dmg08_outaudio0_cgb04c_outaudio1.gbc [Dmg]
-gambatte/sound/ch2_init_reset_env_counter_timing_14_dmg08_outaudio0_cgb04c_outaudio1.gbc [Cgb]
 gambatte/sound/ch2_init_reset_env_counter_timing_15_dmg08_outaudio1_cgb04c_outaudio0.gbc [Cgb]
-gambatte/sound/ch2_init_reset_env_counter_timing_4_dmg08_outaudio0_cgb04c_outaudio1.gbc [Cgb]
 gambatte/sound/ch2_init_reset_env_counter_timing_5_dmg08_outaudio0_cgb04c_outaudio1.gbc [Dmg]
 gambatte/sound/ch2_init_reset_env_counter_timing_7_dmg08_outaudio1_cgb04c_outaudio0.gbc [Cgb]
-gambatte/sound/ch2_init_reset_length_counter_timing_6_dmg08_outaudio1_cgb04c_outaudio0.gbc [Cgb]
-gambatte/sound/ch2_init_reset_length_counter_timing_7_dmg08_outaudio0_cgb04c_outaudio1.gbc [Cgb]
-gambatte/sound/ch2_init_reset_length_counter_timing_nr52_1_dmg08_out2_cgb04c_out0.gbc [Cgb]
-gambatte/sound/ch2_init_reset_length_counter_timing_nr52_2_dmg08_cgb04c_out0.gbc [Cgb]
-gambatte/sound/ch2_init_reset_length_counter_timing_nr52_4_dmg08_out2_cgb04c_out0.gbc [Cgb]
 gambatte/sound/ch2_late_reset_nr52_2b_dmg08_cgb04c_out0.gbc [Dmg]
 gambatte/sound/ch2_late_reset_nr52_2b_dmg08_cgb04c_out0.gbc [Cgb]
 gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
@@ -868,19 +839,13 @@ gambatte/sprites/sprite_late_late_disable_spx18_1_dmg08_out0.gb [Dmg]
 gambatte/sprites/sprite_late_late_disable_spx19_1_dmg08_out0.gb [Dmg]
 gambatte/sprites/sprite_late_late_disable_spx1A_1_dmg08_out0.gb [Dmg]
 gambatte/sprites/sprite_late_late_disable_spx1B_1_dmg08_out0.gb [Dmg]
-# tima/ residuals after the substep-aware halt-wake fix (timer IF commits
-# in the second half of the M-cycle are invisible to the halt-exit
-# sampling for one cycle; SameBoy GB_cpu_run): the late_retrigger family
-# races an IF-clearing write against the timer's re-set in the reload
-# cycle with a real DMG/CGB split (dmg08_outE4 vs cgb04c_outE0), and
-# tc00_start_2 [Cgb] pins a CGB timer-tap phase quirk that no constant
-# post-boot DIV shift can satisfy (gambatte div/start_inc_1/2 [Cgb] pin
-# the same counter 768 T apart and pass).
-gambatte/tima/tc00_irq_late_retrigger_2_dmg08_outE4_cgb04c_outE0.gbc [Cgb]
-gambatte/tima/tc00_irq_late_retrigger_3_dmg08_cgb04c_outE0.gbc [Dmg]
-gambatte/tima/tc00_irq_late_retrigger_3_dmg08_cgb04c_outE0.gbc [Cgb]
-gambatte/tima/tc00_irq_late_retrigger_ds_2_cgb04c_outE0.gbc [Cgb]
-gambatte/tima/tc00_start_2_cgb04c_outF1.gbc [Cgb]
+# (tima/ + div/ + serial/trigger_int8 cleared 2026-06: the late_retrigger
+# DMG/CGB splits are the dispatch-ack source sync-ahead — gambatte
+# Memory::ackIrq, see Interconnect::ack — and tc00_start_2/div/start_inc
+# were never a timer-tap quirk but the CGB-cart boot hand-off: the boot
+# ROM's DMG-compat tail runs 0x7D8 T longer, so $143=$C0 carts get DIV
+# $1E9C while mooneye's DMG carts keep $2674 — see
+# Interconnect::apply_post_boot_state.)
 gambatte/vram_m3/postread_1_dmg08_cgb04c_out3.gbc [Dmg]
 gambatte/vram_m3/postread_1_dmg08_cgb04c_out3.gbc [Cgb]
 gambatte/vram_m3/preread_lcdoffset2_1_cgb04c_out0.gbc [Cgb]
@@ -1080,8 +1045,14 @@ gambatte/window/late_wy_lcdoffset1_1_cgb04c_out0.gbc [Cgb]
 #   within the 2-dot ds M-cycle differs from the single-speed second-half
 #   geometry; gating the masks off in ds was A/B-tested and is net worse
 #   (it breaks ~60 *_ds_2 phase siblings).
-# * m2int_m2irq (4 non-ds): IF-read visibility in the handler one cycle
-#   after dispatch — needs the exact gambatte doM2Event IF-ack ordering.
+# * m2int_m2irq (4 non-ds + late_retrigger_ds_1): IF-read visibility in
+#   the handler one cycle after dispatch — needs the exact gambatte
+#   doM2Event IF-ack ordering. late_retrigger_ds_1 joined 2026-06 as the
+#   flip side of the dispatch-ack sync-ahead's double-speed window
+#   (Interconnect::ack): the whole-ds-tick LCD window flipped six other
+#   *_late_retrigger_ds_2 rows (m1/ly0/lyc153int/irq_precedence) but
+#   reaches this family's anchor-shifted pulse one round early; a 1-dot
+#   ds window was A/B-tested and un-flips all six for this one row.
 # * m2enable disable/late_enable_m0disable + m0enable/lcdirq_precedence/
 #   lycm2int (9 non-ds): enable/disable-edge corners where gambatte's
 #   conditional blocking predicates differ from the plain blocking level
@@ -1092,7 +1063,6 @@ gambatte/cgbpal_m3/cgbpal_m3end_ds_3_cgb04c_out0.gbc [Cgb]
 gambatte/cgbpal_m3/cgbpal_m3end_scx5_ds_1_cgb04c_out7.gbc [Cgb]
 gambatte/cgbpal_m3/cgbpal_m3end_scx5_ds_3_cgb04c_out0.gbc [Cgb]
 gambatte/cgbpal_m3/cgbpal_m3start_ds_1_cgb04c_out1.gbc [Cgb]
-gambatte/irq_precedence/late_m0irq_retrigger_ds_2_cgb04c_outE0.gbc [Cgb]
 gambatte/lcdirq_precedence/m0irq_ly44_lcdstat28_dmg08_cgb04c_out2.gbc [Cgb]
 gambatte/lcdirq_precedence/m0irq_ly44_lcdstat28_dmg08_cgb04c_out2.gbc [Dmg]
 gambatte/lycm2int/lycm2int_m2irq_1_dmg08_cgb04c_out1.gbc [Dmg]
@@ -1114,6 +1084,7 @@ gambatte/m2int_m2irq/m2int_m2irq_ds_1_cgb04c_out1.gbc [Cgb]
 gambatte/m2int_m2irq/m2int_m2irq_ifw_1_dmg08_cgb04c_out2.gbc [Cgb]
 gambatte/m2int_m2irq/m2int_m2irq_ifw_1_dmg08_cgb04c_out2.gbc [Dmg]
 gambatte/m2int_m2irq/m2int_m2irq_ifw_ds_1_cgb04c_out2.gbc [Cgb]
+gambatte/m2int_m2irq/m2int_m2irq_late_retrigger_ds_1_cgb04c_out2.gbc [Cgb]
 gambatte/scx_during_m3/old/revoffset_3/scx_during_m3_ds_4.gbc [Cgb]
 gambatte/scx_during_m3/old/revoffset_3/scx_during_m3_ds_5.gbc [Cgb]
 gambatte/scx_during_m3/old/revoffset_3/scx_during_m3_ds_7.gbc [Cgb]
