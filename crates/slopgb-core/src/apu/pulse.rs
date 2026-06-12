@@ -1,6 +1,13 @@
 //! Pulse (square wave) channels 1 and 2. Channel 1 additionally has the
 //! frequency sweep unit (NR10); channel 2's sweep state simply stays inert
 //! because no register write ever reaches it.
+//!
+//! The frequency unit follows SameBoy's hardware-verified countdown model
+//! (Core/apu.c): `sample_countdown` counts 2 MHz cycles and an expiry
+//! consumes `sample_countdown + 1` of them, reloading `(freq ^ 0x7FF) * 2 +
+//! 1` — a period of `(2048 - freq) * 2` cycles. Triggers anchor the first
+//! expiry to the machine-global 1 MHz grid via the APU's `lf_div` phase bit
+//! instead of restarting a private timer.
 
 use super::envelope::Envelope;
 use super::length::LengthCounter;
@@ -23,9 +30,27 @@ pub(super) struct Pulse {
     pub(super) freq: u16,
     pub(super) length: LengthCounter,
     pub(super) envelope: Envelope,
-    /// T-cycles until the duty position advances (always >= 1).
-    pub(super) timer: u32,
+    /// 2 MHz cycles until the duty position advances; the advance itself
+    /// consumes one more cycle (SameBoy apu.c: an expiry consumes
+    /// `sample_countdown + 1` cycles). Frozen while the channel is off.
+    pub(super) sample_countdown: u16,
     pub(super) duty_pos: u8,
+    /// Duty bit latched at the last countdown expiry. NRx1 duty writes only
+    /// take effect at the next expiry: "Changing the duty becomes effective
+    /// only after the current sample finishes" (SameSuite
+    /// channel_1/2_duty_delay; SameBoy apu.c latches the sample per step).
+    pub(super) current_sample: u8,
+    /// Output forced to digital 0 between a trigger-from-inactive and the
+    /// first countdown expiry: the preserved duty position must not become
+    /// audible at trigger time (SameBoy apu.c `sample_surpressed`).
+    pub(super) suppressed: bool,
+    /// The duty position advanced at least once since the last trigger
+    /// (SameBoy `did_tick`).
+    pub(super) did_tick: bool,
+    /// The last 2 MHz cycle processed was an expiry — the countdown holds a
+    /// freshly reloaded period (SameBoy `just_reloaded`); frequency writes
+    /// landing here take effect immediately.
+    pub(super) just_reloaded: bool,
     // Sweep unit (channel 1 only).
     pub(super) sweep_period: u8,
     pub(super) sweep_negate: bool,
@@ -47,9 +72,12 @@ impl Pulse {
             freq: 0,
             length: LengthCounter::new(64),
             envelope: Envelope::new(),
-            // period() at frequency 0: (2048 - 0) * 4.
-            timer: 8192,
+            sample_countdown: 0,
             duty_pos: 0,
+            current_sample: 0,
+            suppressed: false,
+            did_tick: false,
+            just_reloaded: false,
             sweep_period: 0,
             sweep_negate: false,
             sweep_shift: 0,
@@ -60,27 +88,74 @@ impl Pulse {
         }
     }
 
-    /// Duty step period in T-cycles.
-    pub(super) fn period(&self) -> u32 {
-        (2048 - u32::from(self.freq)) * 4
+    /// Steady-state countdown reload: period `(2048 - freq) * 2` 2 MHz
+    /// cycles counting the expiry cycle itself.
+    fn countdown_reload(&self) -> u16 {
+        (self.freq ^ 0x7FF) * 2 + 1
     }
 
-    /// Advance one T-cycle.
+    /// Advance one 2 MHz cycle. The frequency unit only runs while the
+    /// channel is on (SameBoy apu.c steps square channels under
+    /// `is_active`); a disabled channel's countdown and duty position
+    /// freeze until the next trigger re-anchors them.
     pub(super) fn step(&mut self) {
-        debug_assert!(
-            self.timer > 0,
-            "pulse frequency timer invariant violated: must stay >= 1"
-        );
-        self.timer -= 1;
-        if self.timer == 0 {
-            self.timer = self.period();
+        if !self.enabled {
+            return;
+        }
+        if self.sample_countdown == 0 {
+            self.sample_countdown = self.countdown_reload();
             self.duty_pos = (self.duty_pos + 1) & 7;
+            self.current_sample = DUTY_TABLE[usize::from(self.duty)][usize::from(self.duty_pos)];
+            self.suppressed = false;
+            self.did_tick = true;
+            self.just_reloaded = true;
+        } else {
+            self.sample_countdown -= 1;
+            self.just_reloaded = false;
         }
     }
 
-    /// Current digital output, 0-15.
+    /// NRx3: frequency low byte; a write in the reload cycle takes effect
+    /// immediately (SameBoy NR13/NR23 `just_reloaded` path).
+    pub(super) fn write_nrx3(&mut self, value: u8) {
+        self.freq = (self.freq & 0x0700) | u16::from(value);
+        if self.just_reloaded {
+            self.sample_countdown = self.countdown_reload();
+        }
+    }
+
+    /// NRx4 frequency bits 2-0, with the non-trigger "frequency high 7 ->
+    /// ≠7" glitch (SameBoy apu.c NR14/NR24): such a write on an active,
+    /// already-ticked channel whose countdown holds a freshly reloaded
+    /// period steps the sample index BACKWARDS (upstream models its
+    /// T-cycle-imprecise write timing that way) and lifts suppression. On
+    /// CGB-D/E the glitch is unconditional; on every other model it only
+    /// fires with an odd countdown — `Model::Cgb` is CPU CGB C
+    /// (docs/ARCHITECTURE.md §CGB revision policy), so the odd-countdown
+    /// form is used here.
+    pub(super) fn write_nrx4_freq(&mut self, value: u8) {
+        if value & 0x80 == 0
+            && self.enabled
+            && (self.freq >> 8) & 7 == 7
+            && value & 7 != 7
+            && self.sample_countdown & 1 == 1
+            && self.did_tick
+            && self.sample_countdown >> 1 == (self.freq ^ 0x7FF)
+        {
+            self.duty_pos = self.duty_pos.wrapping_sub(1) & 7;
+            self.suppressed = false;
+        }
+        self.freq = (self.freq & 0x00FF) | (u16::from(value & 7) << 8);
+        if self.just_reloaded {
+            self.sample_countdown = self.countdown_reload();
+        }
+    }
+
+    /// Current digital output, 0-15: the latched duty bit times the live
+    /// envelope volume (volume changes apply immediately; the duty bit only
+    /// re-latches at expiries).
     pub(super) fn digital(&self) -> u8 {
-        if self.enabled && DUTY_TABLE[usize::from(self.duty)][usize::from(self.duty_pos)] == 1 {
+        if self.enabled && !self.suppressed && self.current_sample == 1 {
             self.envelope.volume
         } else {
             0
@@ -144,12 +219,34 @@ impl Pulse {
         }
     }
 
-    pub(super) fn trigger(&mut self) {
+    /// NRx4 trigger. `lf_div` is the APU's machine-global 2 MHz phase bit.
+    ///
+    /// SameBoy apu.c (NR14/NR24 trigger), hardware-verified:
+    /// - inactive channel: `sample_countdown = (freq ^ 0x7FF) * 2 + 6 -
+    ///   lf_div` and the output is suppressed until the first expiry;
+    /// - active channel: "sound starts 2 (2MHz) ticks earlier" —
+    ///   `sample_countdown = (freq ^ 0x7FF) * 2 + 4 - lf_div`, with the
+    ///   current duty cell left audible (no suppression);
+    /// - the duty position itself is preserved in both cases (it is only
+    ///   reset by APU power-off).
+    ///
+    /// SameBoy additionally flips the lf_div sign on CGB ≤ C in double
+    /// speed; under this core's tick-then-access conventions (writes land
+    /// after the full M-cycle) the plain `6 - lf_div` form is what matches
+    /// the CGB-C-verified SameSuite channel_1/2_align and channel_1/2_duty
+    /// double-speed expectation tables cycle-for-cycle — the upstream sign
+    /// flip is an artifact of SameBoy's mid-cycle write timing.
+    pub(super) fn trigger(&mut self, lf_div: u16) {
+        let was_active = self.enabled;
         self.enabled = self.dac;
-        // The low two bits of the frequency timer are NOT modified by a
-        // trigger (gbdev wiki, Obscure Behavior). `period()` is a multiple
-        // of 4, so OR-ing the old low bits in is exact.
-        self.timer = self.period() | (self.timer & 3);
+        let base = (self.freq ^ 0x7FF) * 2;
+        self.sample_countdown = if was_active {
+            base + 4 - lf_div
+        } else {
+            self.suppressed = true;
+            base + 6 - lf_div
+        };
+        self.did_tick = false;
         self.envelope.trigger();
         // Sweep init (Pan Docs / gbdev wiki):
         self.sweep_shadow = self.freq;
@@ -173,6 +270,11 @@ impl Pulse {
         self.freq = 0;
         self.length.power_off(clear_length_counter);
         self.envelope.power_off();
+        self.sample_countdown = 0;
+        self.current_sample = 0;
+        self.suppressed = false;
+        self.did_tick = false;
+        self.just_reloaded = false;
         self.sweep_period = 0;
         self.sweep_negate = false;
         self.sweep_shift = 0;
@@ -193,16 +295,21 @@ mod tests {
         p.freq = freq;
         p.envelope.write(0xF0); // volume 15
         p.dac = true;
-        p.trigger();
+        p.trigger(0);
         p
     }
 
-    /// Step one full duty period and return the output level (0 or 15).
-    fn next_duty_output(p: &mut Pulse) -> u8 {
-        for _ in 0..p.period() {
+    /// Step until the duty position advances; returns how many 2 MHz cycles
+    /// that took.
+    fn cycles_to_next_duty_step(p: &mut Pulse) -> u32 {
+        let pos = p.duty_pos;
+        let mut n = 0;
+        while p.duty_pos == pos {
             p.step();
+            n += 1;
+            assert!(n < 10_000, "duty position never advanced");
         }
-        p.digital()
+        n
     }
 
     #[test]
@@ -216,54 +323,134 @@ mod tests {
             // Trigger does not reset duty_pos; fresh channel starts at 0,
             // so the first observed step is position 1.
             let mut p = playing_pulse(duty, 2047);
-            let got: Vec<u8> = (0..8).map(|_| next_duty_output(&mut p) / 15).collect();
+            let got: Vec<u8> = (0..8)
+                .map(|_| {
+                    cycles_to_next_duty_step(&mut p);
+                    p.digital() / 15
+                })
+                .collect();
             // `want` is DUTY_TABLE[duty] rotated left by one.
             assert_eq!(got, want, "duty {duty}");
         }
     }
 
     #[test]
-    fn frequency_timer_period_is_2048_minus_f_times_4() {
-        let mut p = playing_pulse(0, 2046);
-        assert_eq!(p.period(), 8);
-        let start = p.duty_pos;
-        for _ in 0..7 {
+    fn steady_period_is_2048_minus_f_2mhz_cycles_times_2() {
+        let mut p = playing_pulse(0, 2040);
+        cycles_to_next_duty_step(&mut p); // consume the trigger delay
+        assert_eq!(cycles_to_next_duty_step(&mut p), 16); // (2048-2040)*2
+        assert_eq!(cycles_to_next_duty_step(&mut p), 16);
+    }
+
+    #[test]
+    fn trigger_from_inactive_suppresses_output_until_first_expiry() {
+        // SameBoy apu.c (`sample_surpressed`): a trigger of an INACTIVE
+        // pulse channel keeps the duty position but forces digital 0 until
+        // the first frequency-countdown expiry — the stale duty cell must
+        // not become audible at trigger time.
+        let mut p = playing_pulse(2, 2047); // duty 2: position 0 outputs 1
+        assert_eq!(p.duty_pos, 0);
+        assert_eq!(p.digital(), 0, "suppressed despite duty table high");
+        // countdown = (2047^0x7FF)*2 + 6 - 0 = 6; the expiry consumes
+        // countdown + 1 = 7 cycles.
+        for i in 0..6 {
+            p.step();
+            assert_eq!(p.digital(), 0, "still suppressed at cycle {i}");
+            assert_eq!(p.duty_pos, 0);
+        }
+        p.step(); // expiry: position advances, suppression lifts
+        assert_eq!(p.duty_pos, 1);
+        assert!(!p.suppressed);
+        // Duty 2 position 1 is low; position 5 is the next high cell.
+        for _ in 0..4 {
+            cycles_to_next_duty_step(&mut p);
+        }
+        assert_eq!(p.duty_pos, 5);
+        assert_eq!(p.digital(), 15, "audible after the first expiry");
+    }
+
+    #[test]
+    fn duty_change_takes_effect_at_next_expiry() {
+        // SameSuite channel_1/2_duty_delay: "Changing the duty becomes
+        // effective only after the current sample finishes" — the output
+        // is the duty bit LATCHED at the last countdown expiry, so an NRx1
+        // duty write neither silences a playing cell nor un-silences a low
+        // one until the next expiry re-latches.
+        let mut p = playing_pulse(3, 2040); // duty 3: position 1 high
+        cycles_to_next_duty_step(&mut p);
+        assert_eq!(p.duty_pos, 1);
+        assert_eq!(p.digital(), 15);
+        p.duty = 0; // duty 0: position 1 low — but the latch holds
+        assert_eq!(p.digital(), 15, "old sample keeps playing");
+        cycles_to_next_duty_step(&mut p); // position 2 latches duty 0
+        assert_eq!(p.digital(), 0, "new duty latched at the expiry");
+        // And the reverse: a low latch is not raised by a duty change.
+        let mut p = playing_pulse(0, 2040); // duty 0: position 1 low
+        cycles_to_next_duty_step(&mut p);
+        assert_eq!(p.digital(), 0);
+        p.duty = 3;
+        assert_eq!(p.digital(), 0, "low latch holds despite duty 3");
+        cycles_to_next_duty_step(&mut p);
+        assert_eq!(p.digital(), 15);
+    }
+
+    #[test]
+    fn trigger_delay_depends_on_lf_div() {
+        // Inactive trigger: countdown = (freq ^ 0x7FF)*2 + 6 - lf_div. The
+        // lf_div term is what the SameSuite channel_1/2_align double-speed
+        // tables measure (their \2 = 0 vs 1 nop groups shift the threshold
+        // by exactly one M-cycle).
+        let mut p = Pulse::new();
+        p.envelope.write(0xF0);
+        p.dac = true;
+        p.freq = 2047;
+        p.trigger(1);
+        assert_eq!(p.sample_countdown, 5);
+        let mut p = Pulse::new();
+        p.envelope.write(0xF0);
+        p.dac = true;
+        p.freq = 2047;
+        p.trigger(0);
+        assert_eq!(p.sample_countdown, 6);
+    }
+
+    #[test]
+    fn retrigger_while_active_is_two_cycles_earlier_and_not_suppressed() {
+        // SameBoy apu.c: "Timing quirk: if already active, sound starts 2
+        // (2MHz) ticks earlier" — delay 4 - lf_div instead of 6 - lf_div —
+        // and the current duty cell keeps playing (no suppression).
+        let mut p = playing_pulse(2, 2047);
+        cycles_to_next_duty_step(&mut p); // suppression lifted, pos 1
+        for _ in 0..4 {
+            cycles_to_next_duty_step(&mut p);
+        }
+        assert_eq!(p.duty_pos, 5);
+        assert_eq!(p.digital(), 15);
+        p.trigger(0);
+        assert_eq!(p.sample_countdown, 4); // (2047^0x7FF)*2 + 4 - 0
+        assert_eq!(p.duty_pos, 5, "duty position preserved");
+        assert_eq!(p.digital(), 15, "no suppression on retrigger");
+    }
+
+    #[test]
+    fn disabled_channel_freezes_frequency_unit() {
+        let mut p = playing_pulse(2, 2040);
+        cycles_to_next_duty_step(&mut p);
+        let (pos, countdown) = (p.duty_pos, p.sample_countdown);
+        p.enabled = false;
+        for _ in 0..100 {
             p.step();
         }
-        assert_eq!(p.duty_pos, start, "no advance before the period elapses");
-        p.step();
-        assert_eq!(p.duty_pos, (start + 1) & 7);
-    }
-
-    #[test]
-    fn trigger_preserves_frequency_timer_low_bits() {
-        let mut p = playing_pulse(0, 2040);
-        // Walk the timer to a value with non-zero low bits.
-        p.step();
-        p.step();
-        p.step();
-        let low = p.timer & 3;
-        assert_ne!(low, 0);
-        p.trigger();
-        assert_eq!(p.timer, p.period() | low);
-    }
-
-    #[test]
-    fn trigger_does_not_reset_duty_position() {
-        let mut p = playing_pulse(2, 2047);
-        for _ in 0..3 {
-            next_duty_output(&mut p);
-        }
-        let pos = p.duty_pos;
-        p.trigger();
         assert_eq!(p.duty_pos, pos);
+        assert_eq!(p.sample_countdown, countdown);
+        assert_eq!(p.digital(), 0);
     }
 
     #[test]
     fn disabled_channel_outputs_zero() {
         let mut p = playing_pulse(3, 1000);
         // duty 3 position 0 outputs 0; advance to a high position.
-        next_duty_output(&mut p);
+        cycles_to_next_duty_step(&mut p);
         assert_eq!(p.digital(), 15);
         p.enabled = false;
         assert_eq!(p.digital(), 0);
@@ -277,7 +464,7 @@ mod tests {
         p.dac = true;
         p.freq = 1920;
         p.write_nr10(0x11); // period 1, shift 1
-        p.trigger();
+        p.trigger(0);
         assert!(!p.enabled);
 
         // Same with shift 0: no immediate check, channel stays on.
@@ -286,7 +473,7 @@ mod tests {
         p.dac = true;
         p.freq = 1920;
         p.write_nr10(0x10);
-        p.trigger();
+        p.trigger(0);
         assert!(p.enabled);
     }
 
@@ -299,7 +486,7 @@ mod tests {
         p.dac = true;
         p.freq = 1024;
         p.write_nr10(0x11); // period 1, shift 1
-        p.trigger();
+        p.trigger(0);
         assert!(p.enabled);
         p.sweep_clock();
         assert_eq!(p.freq, 1536);
@@ -311,7 +498,7 @@ mod tests {
         p.dac = true;
         p.freq = 256;
         p.write_nr10(0x12);
-        p.trigger();
+        p.trigger(0);
         p.sweep_clock();
         assert_eq!(p.freq, 320);
         assert!(p.enabled);
@@ -324,7 +511,7 @@ mod tests {
         p.dac = true;
         p.freq = 1024;
         p.write_nr10(0x19); // period 1, negate, shift 1
-        p.trigger();
+        p.trigger(0);
         p.sweep_clock();
         assert_eq!(p.freq, 512);
         assert!(p.enabled);
@@ -338,7 +525,7 @@ mod tests {
         p.dac = true;
         p.freq = 1024;
         p.write_nr10(0x19);
-        p.trigger();
+        p.trigger(0);
         assert!(p.enabled);
         p.write_nr10(0x11); // clear negate
         assert!(!p.enabled);
@@ -352,7 +539,7 @@ mod tests {
         p.dac = true;
         p.freq = 1024;
         p.write_nr10(0x18); // period 1, negate, shift 0
-        p.trigger();
+        p.trigger(0);
         p.write_nr10(0x10);
         assert!(p.enabled);
     }
@@ -365,7 +552,7 @@ mod tests {
         p.dac = true;
         p.freq = 1024;
         p.write_nr10(0x18); // period 1, negate, shift 0
-        p.trigger();
+        p.trigger(0);
         p.sweep_clock(); // negate-mode calculation happens here
         assert!(p.enabled);
         p.write_nr10(0x10);
@@ -379,7 +566,7 @@ mod tests {
         p.dac = true;
         p.freq = 512;
         p.write_nr10(0x01); // period 0, shift 1
-        p.trigger();
+        p.trigger(0);
         for _ in 0..32 {
             p.sweep_clock();
         }
@@ -397,7 +584,7 @@ mod tests {
         p.dac = true;
         p.freq = 512;
         p.write_nr10(0x01); // period 0, shift 1
-        p.trigger();
+        p.trigger(0);
         p.write_nr10(0x11); // period 1, shift 1
         for i in 0..7 {
             p.sweep_clock();
@@ -408,12 +595,43 @@ mod tests {
     }
 
     #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "pulse frequency timer")]
-    fn step_with_zero_timer_panics_in_debug() {
-        let mut p = Pulse::new();
-        p.timer = 0; // violates the "timer always >= 1" invariant
-        p.step();
+    fn freq_write_in_reload_cycle_takes_effect_immediately() {
+        // SameBoy apu.c NR13/NR23 (and the NRx4 frequency bits): a write
+        // landing on the cycle where the countdown just reloaded
+        // (`just_reloaded`) re-loads the countdown from the new frequency
+        // immediately instead of letting the stale period play out.
+        let mut p = playing_pulse(2, 2047);
+        cycles_to_next_duty_step(&mut p); // expiry: countdown reloaded to 1
+        assert!(p.just_reloaded);
+        p.write_nrx3(0x00); // freq low 0 -> freq 0x700
+        assert_eq!(p.sample_countdown, (0x700u16 ^ 0x7FF) * 2 + 1);
+        // One cycle later the write would be too late.
+        let mut p = playing_pulse(2, 2046);
+        cycles_to_next_duty_step(&mut p);
+        p.step(); // plain countdown cycle: just_reloaded clears
+        assert!(!p.just_reloaded);
+        let before = p.sample_countdown;
+        p.write_nrx3(0x00);
+        assert_eq!(p.sample_countdown, before, "no immediate reload");
+    }
+
+    #[test]
+    fn nrx4_freq_high_7_to_other_steps_sample_back() {
+        // SameBoy apu.c NR14/NR24: a NON-trigger write taking frequency
+        // bits 10-8 from 7 to another value while the channel is active
+        // steps the sample index BACKWARDS when the channel has ticked
+        // since its trigger and the countdown holds a freshly reloaded
+        // period (odd countdown on non-D/E revisions).
+        let mut p = playing_pulse(2, 0x7FF);
+        cycles_to_next_duty_step(&mut p); // pos 1, countdown = 1, did_tick
+        assert_eq!(p.duty_pos, 1);
+        p.write_nrx4_freq(0x00); // freq high 7 -> 0, no trigger
+        assert_eq!(p.duty_pos, 0, "sample index stepped back");
+        // Without a tick since the trigger the glitch does not fire.
+        let mut p = playing_pulse(2, 0x7FF);
+        p.sample_countdown = 1; // same countdown state, but did_tick false
+        p.write_nrx4_freq(0x00);
+        assert_eq!(p.duty_pos, 0, "no backward step before the first tick");
     }
 
     #[test]
@@ -421,7 +639,7 @@ mod tests {
         let mut p = Pulse::new();
         p.envelope.write(0x00);
         p.dac = p.envelope.dac_enabled();
-        p.trigger();
+        p.trigger(0);
         assert!(!p.enabled);
     }
 }
