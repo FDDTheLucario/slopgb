@@ -76,6 +76,12 @@ pub struct Interconnect {
     intf: u8,
     /// IE, all 8 bits stored and readable.
     ie: u8,
+    /// Timer IF bits committed in the *second half* of the current (most
+    /// recent) M-cycle: the halt-exit sampling misses them until the next
+    /// cycle, while IF reads and the running CPU's end-of-fetch sampling
+    /// see them immediately ([`Bus::pending_halt_wake`]; `Timer::tick`'s
+    /// `late`).
+    if_late: u8,
 
     /// FF46 readback is simply the last written value
     /// (acceptance/oam_dma/reg_read).
@@ -152,6 +158,7 @@ impl Interconnect {
             hram: [0; 0x7F],
             intf: 0,
             ie: 0,
+            if_late: 0,
             dma_reg: 0,
             dma_run: None,
             dma_start: None,
@@ -342,7 +349,12 @@ impl Interconnect {
     fn tick_machine(&mut self) {
         let dots: u64 = if self.double_speed { 2 } else { 4 };
         self.cycles += dots;
-        self.intf |= self.timer.tick() & IF_MASK;
+        let t = self.timer.tick();
+        // IF reads must see a second-half commit within its own cycle
+        // (mooneye tima_reload access sequences) — only the halt-exit
+        // sampling misses it, via the `if_late` mask.
+        self.intf |= t.iff & IF_MASK;
+        self.if_late = if t.late { t.iff & IF_MASK } else { 0 };
         self.oam_dma_tick();
         for _ in 0..dots {
             self.intf |= self.ppu.tick() & IF_MASK;
@@ -798,6 +810,32 @@ impl Bus for Interconnect {
         self.intf & self.ie & IF_MASK
     }
 
+    fn pending_halt_wake(&self) -> u8 {
+        // The halt-exit logic samples IE & IF *within* the M-cycle, not at
+        // its end (SameBoy sm83_cpu.c `GB_cpu_run`: DMG samples mid-cycle
+        // after 2 of 4 T-cycles, CGB/AGB at the start of the cycle), so a
+        // timer reload + IF commit — which lands on the last T-substep
+        // under the hardware DIV phase (div ≡ 0 mod 4 at boundaries) — is
+        // missed until the next cycle: the halt wake comes one M-cycle
+        // later than a running-CPU dispatch would (gambatte tima/tc*_irq_*
+        // on both models; wilbertpol timer_if rounds 5/6 vs 3/4).
+        //
+        // Deliberately *not* applied to the PPU/serial/joypad IF bits:
+        // this emulator's PPU IRQ anchors are calibrated against the
+        // running CPU's end-of-fetch sampling (CLAUDE.md frozen contract),
+        // which already absorbs the intra-cycle offset — mooneye
+        // intr_2_0_timing/intr_2_mode0_timing (STAT-sourced halt wakes,
+        // hardware-pass on every model incl. CGB/AGB) and
+        // halt_ime1_timing2-GS (vblank, DMG) pass against the live view
+        // and break if those bits are masked here. The known unmodelled
+        // remainder is the CGB/AGB start-of-cycle staleness for first-half
+        // PPU commits (halt_ime1_timing2-GS's "fail: CGB, AGB, AGS";
+        // gambatte halt/*_cgb04c split rows): landing it requires
+        // recalibrating the PPU IRQ anchors per model, a separate work
+        // package.
+        (self.intf & !self.if_late) & self.ie & IF_MASK
+    }
+
     fn ack(&mut self, bit: u8) {
         self.intf &= !(1 << bit);
     }
@@ -900,6 +938,53 @@ mod tests {
         assert_eq!(b.pending(), 0x1F);
         b.ack(0);
         assert_eq!(b.read(0xFF0F), 0xFE);
+    }
+
+    // ---- halt-exit IE & IF sampling (Bus::pending_halt_wake) ------------
+
+    /// Arm the timer so that the reload + IF commit lands on the last
+    /// T-substep of M-cycle 5 (div starts at 0, TAC bit 3 = 16 T period:
+    /// falling edge at div 16 on the last substep of cycle 4, reload one
+    /// cycle later on the same substep).
+    fn arm_late_timer_irq(b: &mut Interconnect) {
+        b.ie = 0x04;
+        b.timer.write(0xFF07, 0x05);
+        b.timer.write(0xFF05, 0xFF);
+    }
+
+    /// A timer IF committed in the second half of an M-cycle is readable
+    /// and `pending()`-visible in that cycle (the running CPU's frozen
+    /// end-of-fetch sampling), but the mid-cycle halt-exit sampling misses
+    /// it until the next cycle, on every model (gambatte tima/tc*_irq_*
+    /// dmg08+cgb04c shared expectations; wilbertpol timer_if rounds 5/6
+    /// vs 3/4 on its full model matrix; SameBoy `GB_cpu_run`).
+    #[test]
+    fn halt_wake_misses_late_timer_if_for_one_cycle() {
+        for model in [Model::Dmg, Model::Cgb, Model::Agb] {
+            let mut b = ic(model);
+            arm_late_timer_irq(&mut b);
+            ticks(&mut b, 5); // cycle 5 = the reload + IF commit cycle
+            assert_eq!(b.read_no_tick(0xFF0F) & 0x04, 0x04, "{model:?}: IF read");
+            assert_eq!(b.pending(), 0x04, "{model:?}: running-CPU sampling");
+            assert_eq!(b.pending_halt_wake(), 0, "{model:?}: halt wake misses it");
+            b.tick();
+            assert_eq!(b.pending_halt_wake(), 0x04, "{model:?}: visible next cycle");
+        }
+    }
+
+    /// Non-timer IF bits stay live for the halt wake: the PPU IRQ anchors
+    /// are calibrated against the running CPU's end-of-fetch sampling, so
+    /// the intra-cycle offset is already absorbed there (mooneye
+    /// intr_2_0_timing passes on all models against this view; see
+    /// `pending_halt_wake` for the unmodelled CGB remainder).
+    #[test]
+    fn halt_wake_sees_non_timer_if_in_the_same_cycle() {
+        for model in [Model::Dmg, Model::Cgb] {
+            let mut b = ic(model);
+            b.ie = 0x01;
+            b.write(0xFF0F, 0x01); // bit lands during this M-cycle
+            assert_eq!(b.pending_halt_wake(), 0x01, "{model:?}");
+        }
     }
 
     #[test]
