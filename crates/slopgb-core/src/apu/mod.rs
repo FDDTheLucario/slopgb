@@ -30,6 +30,20 @@ use wave::Wave;
 /// [`GameBoy::set_sample_rate`]: crate::GameBoy::set_sample_rate
 pub const DEFAULT_SAMPLE_RATE: u32 = 48_000;
 
+/// Power-on DIV-event skip state (SameBoy apu.c, `GB_apu_init` /
+/// `GB_apu_div_event`): "APU glitch: When turning the APU on while DIV's
+/// bit 4 (or 5 in double speed mode) is on, the first DIV/APU event is
+/// skipped." The first event after such a power-on is consumed entirely
+/// (`Skip` -> `Skipped`), the second runs its clocks without incrementing
+/// the divider (`Skipped` -> `Inactive`), and the divider parity starts
+/// shifted (div_divider = 1, like SameBoy's `GB_apu_init`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SkipDivEvent {
+    Inactive,
+    Skip,
+    Skipped,
+}
+
 pub struct Apu {
     cgb: bool,
     /// NR52 bit 7.
@@ -40,10 +54,24 @@ pub struct Apu {
     ch4: Noise,
     nr50: u8,
     nr51: u8,
-    /// Next frame-sequencer step (0-7) to run on the next DIV-APU tick.
-    /// Steps 0/2/4/6 clock lengths, 2/6 sweep, 7 envelopes.
-    fs_step: u8,
+    /// DIV-APU event divider (3 bits), incremented at the start of each
+    /// event like SameBoy's `div_divider`: lengths clock on odd values,
+    /// sweep at `divider&3 == 3`, envelope countdowns at `divider&7 == 7`.
+    div_divider: u8,
+    skip_div_event: SkipDivEvent,
+    /// Machine-global dot phase within the 1 MHz cycle, low 2 bits only.
+    /// Bit 1 is SameBoy's `lf_div` — the 2 MHz phase bit the pulse trigger
+    /// delays are anchored to ("To align the square signal to 1MHz",
+    /// SameBoy apu.c). The pulse frequency units step once per 2 dots, when
+    /// this wraps to even. Reset by APU power-on (the APU's divider chain
+    /// is held in reset while off); starts at 2 so `lf_div` reads 1 like
+    /// SameBoy's `GB_apu_init`.
+    phase: u8,
     prev_div: u16,
+    /// `double_speed` of the latest [`Self::tick`]: an NR52 power-on (which
+    /// lands between ticks) must test the DIV-APU bit the machine is
+    /// currently running on.
+    last_double_speed: bool,
     // Output stage.
     cycles_per_sample: f64,
     sample_frac: f64,
@@ -94,17 +122,21 @@ fn write_pulse_nrx1(ch: &mut Pulse, value: u8) {
 }
 
 /// NRx2: store the envelope parameters and refresh the DAC flag; a channel
-/// whose DAC turns off (bits 7-3 all zero) is disabled immediately.
-///
-/// Envelope "zombie mode" — live volume manipulation when NRx2 is written
-/// while the channel is active — is intentionally unimplemented: it is not
-/// pinned by mooneye or Blargg dmg_sound, and it varies across hardware
-/// revisions (gbdev wiki, Obscure Behavior).
+/// whose DAC turns off (bits 7-3 all zero) is disabled immediately, and a
+/// write to an *active* channel goes through the envelope "zombie mode"
+/// glitch ([`Envelope::write_active`], SameBoy `_nrx2_glitch`).
 fn write_nrx2(envelope: &mut Envelope, dac: &mut bool, enabled: &mut bool, value: u8) {
-    envelope.write(value);
-    *dac = envelope.dac_enabled();
-    if !*dac {
+    if value & 0xF8 == 0 {
+        envelope.write(value);
+        *dac = false;
         *enabled = false;
+    } else {
+        if *enabled {
+            envelope.write_active(value);
+        } else {
+            envelope.write(value);
+        }
+        *dac = envelope.dac_enabled();
     }
 }
 
@@ -148,8 +180,11 @@ impl Apu {
             ch4: Noise::new(),
             nr50: 0,
             nr51: 0,
-            fs_step: 0,
+            div_divider: 0,
+            skip_div_event: SkipDivEvent::Inactive,
+            phase: 2,
             prev_div: 0,
+            last_double_speed: false,
             cycles_per_sample: 0.0,
             sample_frac: 0.0,
             sum_l: 0.0,
@@ -173,39 +208,81 @@ impl Apu {
         // speed). DIV is the top byte of the internal counter, so that is
         // bit 12 (13) here — a 512 Hz edge in real time either way.
         let bit = if double_speed { 13 } else { 12 };
-        let fell = (self.prev_div >> bit) & 1 == 1 && (div >> bit) & 1 == 0;
+        let was = (self.prev_div >> bit) & 1;
+        let now = (div >> bit) & 1;
         self.prev_div = div;
-        if fell && self.power {
-            self.frame_sequencer_step();
+        self.last_double_speed = double_speed;
+        if self.power {
+            if was == 1 && now == 0 {
+                self.div_event();
+            } else if was == 0 && now == 1 {
+                // Rising edge: the "secondary event" (SameBoy timing.c —
+                // falling edge of the DIV-APU bit fires GB_apu_div_event,
+                // rising edge GB_apu_div_secondary_event) arms the envelope
+                // ticks of active channels whose countdown reached 0.
+                self.ch1.envelope.arm(self.ch1.enabled);
+                self.ch2.envelope.arm(self.ch2.enabled);
+                self.ch4.envelope.arm(self.ch4.enabled);
+            }
         }
         // One CPU M-cycle is 4 dots of APU time, 2 in double speed.
         let dots = if double_speed { 2 } else { 4 };
         for _ in 0..dots {
             if self.power {
-                self.ch1.step();
-                self.ch2.step();
+                self.phase = (self.phase + 1) & 3;
+                if self.phase & 1 == 0 {
+                    // A full 2 MHz cycle elapsed: step the pulse and noise
+                    // units (both run on the 2 MHz clock in hardware).
+                    self.ch1.step();
+                    self.ch2.step();
+                    self.ch4.step();
+                }
                 self.ch3.step();
-                self.ch4.step();
             }
             self.output_cycle();
         }
     }
 
-    fn frame_sequencer_step(&mut self) {
-        match self.fs_step {
-            0 | 4 => self.clock_lengths(),
-            2 | 6 => {
-                self.clock_lengths();
-                self.ch1.sweep_clock();
+    /// SameBoy's `lf_div`: the 2 MHz phase bit within the machine's 1 MHz
+    /// grid, as seen by a register write landing between ticks. Constant 1
+    /// in single speed (writes always land on the same phase); alternates
+    /// per M-cycle in double speed.
+    fn lf_div(&self) -> u16 {
+        u16::from(self.phase >> 1) & 1
+    }
+
+    /// One DIV-APU event (falling edge of the DIV-APU bit), structured like
+    /// SameBoy's GB_apu_div_event: increment the divider, then gate each
+    /// unit on the divider value — envelope countdowns at `divider&7 == 7`,
+    /// armed envelope ticks every event, lengths on odd dividers, sweep at
+    /// `divider&3 == 3`.
+    fn div_event(&mut self) {
+        match self.skip_div_event {
+            // Power-on glitch (see [`SkipDivEvent`]): the first event is
+            // consumed entirely...
+            SkipDivEvent::Skip => {
+                self.skip_div_event = SkipDivEvent::Skipped;
+                return;
             }
-            7 => {
-                self.ch1.envelope.clock();
-                self.ch2.envelope.clock();
-                self.ch4.envelope.clock();
-            }
-            _ => {}
+            // ...and the second runs its clocks without incrementing the
+            // divider.
+            SkipDivEvent::Skipped => self.skip_div_event = SkipDivEvent::Inactive,
+            SkipDivEvent::Inactive => self.div_divider = (self.div_divider + 1) & 7,
         }
-        self.fs_step = (self.fs_step + 1) & 7;
+        if self.div_divider & 7 == 7 {
+            self.ch1.envelope.countdown_event();
+            self.ch2.envelope.countdown_event();
+            self.ch4.envelope.countdown_event();
+        }
+        self.ch1.envelope.tick_event();
+        self.ch2.envelope.tick_event();
+        self.ch4.envelope.tick_event();
+        if self.div_divider & 1 == 1 {
+            self.clock_lengths();
+        }
+        if self.div_divider & 3 == 3 {
+            self.ch1.sweep_clock();
+        }
     }
 
     fn clock_lengths(&mut self) {
@@ -218,7 +295,7 @@ impl Apu {
     /// True when the next frame-sequencer step is one of 0/2/4/6. NRx4
     /// writes in the other phase produce the "extra length clock".
     fn next_step_clocks_length(&self) -> bool {
-        self.fs_step % 2 == 0
+        self.div_divider % 2 == 0
     }
 
     /// Read FF10-FF3F (unused bits read 1, wave RAM access rules apply).
@@ -293,16 +370,16 @@ impl Apu {
                 &mut self.ch1.enabled,
                 value,
             ),
-            0xFF13 => write_freq_low(&mut self.ch1.freq, value),
+            0xFF13 => self.ch1.write_nrx3(value),
             0xFF14 => {
-                write_freq_high(&mut self.ch1.freq, value);
+                self.ch1.write_nrx4_freq(value);
                 if write_nrx4(
                     &mut self.ch1.length,
                     &mut self.ch1.enabled,
                     value,
                     next_clocks,
                 ) {
-                    self.ch1.trigger();
+                    self.ch1.trigger(self.lf_div());
                 }
             }
             0xFF16 => write_pulse_nrx1(&mut self.ch2, value),
@@ -312,16 +389,16 @@ impl Apu {
                 &mut self.ch2.enabled,
                 value,
             ),
-            0xFF18 => write_freq_low(&mut self.ch2.freq, value),
+            0xFF18 => self.ch2.write_nrx3(value),
             0xFF19 => {
-                write_freq_high(&mut self.ch2.freq, value);
+                self.ch2.write_nrx4_freq(value);
                 if write_nrx4(
                     &mut self.ch2.length,
                     &mut self.ch2.enabled,
                     value,
                     next_clocks,
                 ) {
-                    self.ch2.trigger();
+                    self.ch2.trigger(self.lf_div());
                 }
             }
             0xFF1A => {
@@ -360,7 +437,7 @@ impl Apu {
                     value,
                     next_clocks,
                 ) {
-                    self.ch4.trigger();
+                    self.ch4.trigger(!self.cgb, self.last_double_speed);
                 }
             }
             0xFF24 => self.nr50 = value,
@@ -393,12 +470,26 @@ impl Apu {
         self.nr51 = 0;
     }
 
-    /// NR52 bit 7 set: the frame sequencer restarts at step 0, the pulse
-    /// duty units restart, and the wave sample buffer is cleared (gbdev
-    /// wiki, "Power Control").
+    /// NR52 bit 7 set: the divider chain restarts (div_divider, the 2 MHz
+    /// phase), the pulse duty units restart, and the wave sample buffer is
+    /// cleared (gbdev wiki, "Power Control"; SameBoy `GB_apu_init` runs on
+    /// every NR52 power-on and resets `lf_div`/`div_divider`).
+    ///
+    /// Power-on glitch (see [`SkipDivEvent`]): if the DIV-APU input bit is
+    /// HIGH right now, the first DIV-APU event is skipped and the divider
+    /// parity starts shifted — div_divider = 1 like SameBoy — which also
+    /// flips the NRx4 "extra length clock" phase.
     fn power_on(&mut self) {
         self.power = true;
-        self.fs_step = 0;
+        self.phase = 2; // divider chain reset: lf_div restarts at 1
+        let bit = if self.last_double_speed { 13 } else { 12 };
+        if (self.prev_div >> bit) & 1 == 1 {
+            self.skip_div_event = SkipDivEvent::Skip;
+            self.div_divider = 1;
+        } else {
+            self.skip_div_event = SkipDivEvent::Inactive;
+            self.div_divider = 0;
+        }
         self.ch1.duty_pos = 0;
         self.ch2.duty_pos = 0;
         self.ch3.sample_byte = 0;
@@ -671,11 +762,11 @@ mod tests {
     fn fs_edge_is_falling_div_bit_12() {
         let mut h = H::dmg();
         h.ticks(2047);
-        assert_eq!(h.apu.fs_step, 0, "no step before DIV bit 4 falls");
+        assert_eq!(h.apu.div_divider, 0, "no step before DIV bit 4 falls");
         h.tick(); // div: 0x1FFC -> 0x2000
-        assert_eq!(h.apu.fs_step, 1);
+        assert_eq!(h.apu.div_divider, 1);
         h.ticks(2048);
-        assert_eq!(h.apu.fs_step, 2);
+        assert_eq!(h.apu.div_divider, 2);
     }
 
     #[test]
@@ -686,10 +777,10 @@ mod tests {
             div = div.wrapping_add(4);
             apu.tick(div, true);
         }
-        assert_eq!(apu.fs_step, 0);
+        assert_eq!(apu.div_divider, 0);
         div = div.wrapping_add(4); // 0x4000: bit 13 falls
         apu.tick(div, true);
-        assert_eq!(apu.fs_step, 1);
+        assert_eq!(apu.div_divider, 1);
     }
 
     #[test]
@@ -698,9 +789,166 @@ mod tests {
         // falling edge, detected by comparing with the stored previous value.
         let mut apu = Apu::new(false);
         apu.tick(0x1000, false); // bit 12 high
-        assert_eq!(apu.fs_step, 0);
+        assert_eq!(apu.div_divider, 0);
         apu.tick(0x0004, false); // counter restarted: falling edge
-        assert_eq!(apu.fs_step, 1);
+        assert_eq!(apu.div_divider, 1);
+    }
+
+    // ---- APU power-on DIV-event skip glitch ----
+    //
+    // SameBoy apu.c (GB_apu_init): "APU glitch: When turning the APU on
+    // while DIV's bit 4 (or 5 in double speed mode) is on, the first DIV/APU
+    // event is skipped." Implemented there as skip_div_event=SKIP plus
+    // div_divider=1: the first DIV-APU event after power-on is consumed
+    // entirely, the second runs its clocks *without* advancing the divider,
+    // and the divider parity starts shifted (lengths clock on odd divider,
+    // and the NRx4 "extra length clock" phase is flipped). Pinned by
+    // same-suite apu/div_trigger_volume_10, div_write_trigger_10,
+    // div_write_trigger_volume_10 (the "_10" sync helper at ROM $0630
+    // phase-locks DIV == $10, i.e. DIV-APU bit high, before NR52 writes).
+
+    /// Power the APU off and back on via NR52 with DIV-APU bit 12 HIGH.
+    fn power_cycle_with_div_bit_high() -> H {
+        let mut h = H::dmg();
+        h.ticks(1024); // div = 0x1000: bit 12 high
+        h.w(0xFF26, 0x00);
+        h.w(0xFF26, 0x80);
+        h
+    }
+
+    /// Arm channel 1 with length counter `c` and write NR14 = $C1
+    /// (trigger + length enable).
+    fn arm_ch1_len(h: &mut H, c: u8) {
+        h.w(0xFF12, 0xF0);
+        h.w(0xFF11, 64 - c);
+        h.w(0xFF14, 0xC1);
+    }
+
+    #[test]
+    fn power_on_with_div_bit_high_skips_first_event() {
+        let mut h = power_cycle_with_div_bit_high();
+        // Parity is shifted: the next FS step must NOT be a length step, so
+        // NR14 trigger+enable with counter 1 takes the extra-clock (1 -> 0)
+        // + reload-63 path and the channel survives.
+        arm_ch1_len(&mut h, 1);
+        assert_eq!(h.apu.ch1.length.counter, 63, "extra clock + reload to 63");
+        assert!(h.ch_on(1));
+        // 1st DIV-APU event (div 0x1000 -> 0x2000): consumed entirely.
+        h.ticks(1024);
+        assert_eq!(h.apu.ch1.length.counter, 63, "first event skipped");
+        // 2nd event: clocks lengths WITHOUT advancing the step counter.
+        h.fs_edge();
+        assert_eq!(h.apu.ch1.length.counter, 62, "second event clocks length");
+        // 3rd event: a normal non-length step (parity stays shifted).
+        h.fs_edge();
+        assert_eq!(h.apu.ch1.length.counter, 62);
+        // 4th event: length again.
+        h.fs_edge();
+        assert_eq!(h.apu.ch1.length.counter, 61);
+    }
+
+    #[test]
+    fn power_on_with_div_bit_high_counter_c_dies_after_2c_minus_2_events() {
+        // Decoded div_write_trigger_10 contract (expected tables at ROM
+        // $05AB): after powering on with the DIV-APU bit high and writing
+        // NR14=$C1, counter 1 NEVER dies; counter c >= 2 dies after exactly
+        // 2(c-1) DIV-APU events.
+        for c in 1..=8u8 {
+            let mut h = power_cycle_with_div_bit_high();
+            arm_ch1_len(&mut h, c);
+            if c == 1 {
+                h.ticks(1024);
+                for _ in 0..32 {
+                    h.fs_edge();
+                }
+                assert!(h.ch_on(1), "counter 1 must never die");
+                continue;
+            }
+            let death = 2 * (u32::from(c) - 1);
+            h.ticks(1024); // event 1
+            for e in 2..death {
+                h.fs_edge();
+                assert!(
+                    h.ch_on(1),
+                    "counter {c}: alive before event {death}, dead at {e}"
+                );
+            }
+            h.fs_edge();
+            assert!(!h.ch_on(1), "counter {c}: dead at event {death}");
+        }
+    }
+
+    #[test]
+    fn power_on_with_div_bit_low_keeps_plain_event_sequence() {
+        // Guard (non-"_10" div_write_trigger table at ROM $05AB): with the
+        // DIV-APU bit LOW at power-on there is no skip — NR14=$C1 lands in
+        // the length-clocking phase (no extra clock) and counter c dies on
+        // event 2c-1.
+        for c in 1..=4u8 {
+            let mut h = H::dmg();
+            h.ticks(2048); // div = 0x2000: bit 12 just fell (low)
+            h.w(0xFF26, 0x00);
+            h.w(0xFF26, 0x80);
+            arm_ch1_len(&mut h, c);
+            assert_eq!(h.apu.ch1.length.counter, u16::from(c), "no extra clock");
+            let death = 2 * u32::from(c) - 1;
+            for e in 1..death {
+                h.fs_edge();
+                assert!(
+                    h.ch_on(1),
+                    "counter {c}: alive before event {death}, dead at {e}"
+                );
+            }
+            h.fs_edge();
+            assert!(!h.ch_on(1), "counter {c}: dead at event {death}");
+        }
+    }
+
+    #[test]
+    fn power_on_skip_uses_bit_13_in_double_speed() {
+        // Same glitch in double speed: the DIV-APU input is DIV bit 5,
+        // internal counter bit 13 (SameBoy apu.c: "or 5 in double speed").
+        let mut apu = Apu::new(true);
+        let mut div = 0u16;
+        let tick = |apu: &mut Apu, div: &mut u16, n: u32| {
+            for _ in 0..n {
+                *div = div.wrapping_add(4);
+                apu.tick(*div, true);
+            }
+        };
+        tick(&mut apu, &mut div, 2048); // div = 0x2000: bit 13 high
+        apu.write(0xFF26, 0x00);
+        apu.write(0xFF26, 0x80);
+        apu.write(0xFF12, 0xF0);
+        apu.write(0xFF11, 64 - 2);
+        apu.write(0xFF14, 0xC1); // extra clock 2 -> 1 (shifted parity)
+        assert_eq!(apu.ch1.length.counter, 1);
+        tick(&mut apu, &mut div, 2048); // event 1 (bit 13 falls): skipped
+        assert_eq!(apu.ch1.length.counter, 1);
+        tick(&mut apu, &mut div, 4096); // event 2: length clocks, channel dies
+        assert_eq!(apu.ch1.length.counter, 0);
+        assert_eq!(apu.read(0xFF26) & 1, 0);
+    }
+
+    #[test]
+    fn power_cycle_clears_a_pending_skip() {
+        // Power on with the bit high (arming the skip), straight off, then
+        // on again with the bit low: the stale skip must not survive — the
+        // first event after the second power-on clocks lengths normally.
+        let mut h = H::dmg();
+        h.ticks(1024); // bit 12 high
+        h.w(0xFF26, 0x00);
+        h.w(0xFF26, 0x80); // skip armed
+        h.w(0xFF26, 0x00);
+        h.ticks(1024); // div = 0x2000: bit 12 low (this edge is unpowered)
+        h.w(0xFF26, 0x80); // no skip this time
+        h.w(0xFF12, 0xF0);
+        h.w(0xFF11, 63); // counter 1
+        h.w(0xFF14, 0xC1); // length phase: no extra clock
+        assert_eq!(h.apu.ch1.length.counter, 1);
+        h.fs_edge(); // event 1 must clock length immediately
+        assert_eq!(h.apu.ch1.length.counter, 0);
+        assert!(!h.ch_on(1));
     }
 
     #[test]
@@ -735,8 +983,8 @@ mod tests {
         assert!(h.ch_on(1));
         // Re-enable in a phase where the next FS step clocks length so the
         // NRx4 write itself causes no extra clock, then resume counting.
-        h.fs_edge(); // step 1 ran: fs_step is now 2 (next step clocks length)
-        assert_eq!(h.apu.fs_step, 2);
+        h.fs_edge(); // step 1 ran: div_divider is now 2 (next step clocks length)
+        assert_eq!(h.apu.div_divider, 2);
         h.w(0xFF14, 0x40); // re-enable length, no trigger
         assert_eq!(h.apu.ch1.length.counter, 3, "no extra clock on re-enable");
         h.fs_edge(); // step 2 clocks length
@@ -779,14 +1027,78 @@ mod tests {
         assert_eq!(h.apu.ch1.envelope.volume, 3, "64 Hz: once per 8 steps");
     }
 
+    // ---- envelope: DIV-event countdown + secondary-event arming ----
+    //
+    // SameBoy apu.c GB_apu_div_event / GB_apu_div_secondary_event +
+    // timing.c GB_set_internal_div_counter: the envelope countdown
+    // decrements on DIV-APU events where (div_divider & 7) == 7; when it
+    // reaches 0 the volume tick is armed at the next RISING edge of the
+    // DIV-APU bit (the "secondary event", half an event period later) and
+    // fired at the following falling-edge event. The first-tick distance
+    // therefore depends on the trigger-vs-DIV phase — what gambatte's
+    // sound/ch2_init_env_counter_timing boundary scans measure.
+
+    #[test]
+    fn envelope_first_tick_depends_on_trigger_phase() {
+        // Trigger right AFTER the divider-7 event: the countdown (period 1)
+        // survives until the NEXT divider-7 event — first tick a full
+        // envelope period later, NOT at the next "step 7".
+        let mut h = H::dmg();
+        for _ in 0..7 {
+            h.fs_edge(); // divider = 7
+        }
+        h.w(0xFF12, 0x19); // volume 1, increase, period 1
+        h.w(0xFF14, 0x80); // trigger: countdown = 1
+        h.fs_edge(); // event 8 (divider 0)
+        assert_eq!(
+            h.apu.ch1.envelope.volume, 1,
+            "countdown only decrements at divider&7==7"
+        );
+        for _ in 0..7 {
+            h.fs_edge(); // events 9..15; event 15 takes the countdown to 0
+        }
+        assert_eq!(h.apu.ch1.envelope.volume, 1, "armed but not yet ticked");
+        h.fs_edge(); // armed at the rising edge before event 16; tick fires
+        assert_eq!(h.apu.ch1.envelope.volume, 2);
+    }
+
+    #[test]
+    fn envelope_ticks_quickly_when_triggered_just_before_divider_7() {
+        // Trigger between events 6 and 7: event 7 decrements the fresh
+        // countdown to 0, the secondary event arms, event 8 ticks — first
+        // tick only 2 events after the trigger.
+        let mut h = H::dmg();
+        h.ticks(2048 * 6 + 1024); // divider = 6, past the rising edge
+        h.w(0xFF12, 0x19); // volume 1, increase, period 1
+        h.w(0xFF14, 0x80); // trigger: countdown = 1
+        h.ticks(1024); // event 7: countdown 1 -> 0
+        assert_eq!(h.apu.ch1.envelope.volume, 1);
+        h.fs_edge(); // event 8: armed at the rising edge in between
+        assert_eq!(h.apu.ch1.envelope.volume, 2);
+    }
+
+    #[test]
+    fn envelope_lock_stops_at_15_until_retrigger() {
+        // SameBoy set_envelope_clock: arming with the volume already at the
+        // add-mode rail (15) locks the envelope — no wrap-around — until a
+        // trigger clears the lock.
+        let mut h = H::dmg();
+        h.w(0xFF12, 0xE9); // volume 14, increase, period 1
+        h.w(0xFF14, 0x80);
+        for _ in 0..64 {
+            h.fs_edge();
+        }
+        assert_eq!(h.apu.ch1.envelope.volume, 15, "clamped at 15, no wrap");
+    }
+
     // ---- NRx4 length extra-clock matrix through the register interface ----
 
     /// Put the frame sequencer in the "next step does not clock length"
-    /// phase by consuming exactly one edge (fs_step becomes 1).
+    /// phase by consuming exactly one edge (div_divider becomes 1).
     fn h_in_no_length_phase() -> H {
         let mut h = H::dmg();
         h.fs_edge();
-        assert_eq!(h.apu.fs_step, 1);
+        assert_eq!(h.apu.div_divider, 1);
         h
     }
 
@@ -961,11 +1273,11 @@ mod tests {
     fn power_on_resets_frame_sequencer_duty_and_wave_buffer() {
         let mut h = H::dmg();
         h.start_ch1();
-        h.ticks(2048 * 3 + 100); // fs_step 3, duty somewhere
+        h.ticks(2048 * 3 + 100); // div_divider 3, duty somewhere
         h.apu.ch3.sample_byte = 0xAA;
         h.w(0xFF26, 0x00);
         h.w(0xFF26, 0x80);
-        assert_eq!(h.apu.fs_step, 0);
+        assert_eq!(h.apu.div_divider, 0);
         assert_eq!(h.apu.ch1.duty_pos, 0);
         assert_eq!(h.apu.ch2.duty_pos, 0);
         assert_eq!(h.apu.ch3.sample_byte, 0);
@@ -981,7 +1293,7 @@ mod tests {
             h.fs_edge();
         }
         assert_eq!(h.apu.ch1.length.counter, 1);
-        assert_eq!(h.apu.fs_step, 0);
+        assert_eq!(h.apu.div_divider, 0);
     }
 
     #[test]
@@ -1281,6 +1593,46 @@ mod tests {
         apu.drain_samples(&mut out);
         // 524288 M-cycles * 2 dots = 1048576 dots = 0.25 s = 12000 samples.
         assert!((11999..=12001).contains(&out.len()), "got {}", out.len());
+    }
+
+    // ---- pulse trigger anchoring to the machine 2 MHz grid ----
+
+    #[test]
+    fn pulse_trigger_delay_lands_on_the_machine_grid() {
+        // Single-speed register writes always land at the same 2 MHz phase
+        // (lf_div = 1: the phase counter starts at 2 and advances 4 dots
+        // per tick). Inactive trigger: countdown = (freq^0x7FF)*2 + 6 -
+        // lf_div = 5 at freq 2047, and the expiry consumes countdown + 1 =
+        // 6 2 MHz cycles = 3 M-cycles (SameBoy apu.c square trigger).
+        let mut h = H::cgb();
+        h.w(0xFF12, 0xF0);
+        h.w(0xFF11, 0xC0); // duty 3: position 1 is the first high cell
+        h.w(0xFF13, 0xFF);
+        h.w(0xFF14, 0x87); // trigger, freq 2047
+        h.tick();
+        h.tick();
+        assert_eq!(h.apu.pcm12() & 0x0F, 0, "suppressed until first expiry");
+        h.tick();
+        assert_eq!(h.apu.pcm12() & 0x0F, 15, "position 1 after 3 M-cycles");
+        // Steady state: period (2048-2047)*2 = 2 cycles = 1 M-cycle. Duty 3
+        // is high through position 6, low at 7 and 0.
+        for pos in 2..=6 {
+            h.tick();
+            assert_eq!(h.apu.pcm12() & 0x0F, 15, "position {pos}");
+        }
+        h.tick();
+        assert_eq!(h.apu.pcm12() & 0x0F, 0, "position 7");
+        // Retrigger while active: countdown = (freq^0x7FF)*2 + 4 - lf_div =
+        // 3, expiry after 4 cycles = 2 M-cycles, position preserved.
+        h.w(0xFF14, 0x87);
+        assert_eq!(h.apu.ch1.sample_countdown, 3);
+        assert_eq!(h.apu.ch1.duty_pos, 7, "retrigger preserves position");
+        h.tick();
+        assert_eq!(h.apu.pcm12() & 0x0F, 0, "position 7 still playing");
+        h.tick();
+        assert_eq!(h.apu.pcm12() & 0x0F, 0, "position 0");
+        h.tick();
+        assert_eq!(h.apu.pcm12() & 0x0F, 15, "position 1");
     }
 
     // ---- misc cross-checks ----
