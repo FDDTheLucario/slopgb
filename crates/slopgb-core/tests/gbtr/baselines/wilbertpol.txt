@@ -18,7 +18,6 @@
 #  - acceptance/gpu, intr_2 family (48): intr_2_timing, intr_2_mode0
 #    scx4/scx8 nops paths, and every intr_2_mode0_timing_sprites*_nops
 #    variant, each on its full 6-model matrix.
-#  - acceptance/timer (6): timer_if on every model.
 #  - madness (1): the 2016 build of mgb_oam_dma_halt_sprites renders no
 #    HALT-glitch sprite under our MGB OAM-scan model (its 18 sprite pixels
 #    come out as bare checkerboard), although the byte-different
@@ -113,12 +112,6 @@ mooneye-test-suite-wilbertpol/acceptance/gpu/stat_write_if-GS.gb [Sgb2]
 mooneye-test-suite-wilbertpol/acceptance/gpu/stat_write_if-GS.gb [Sgb]
 
 # --- acceptance/timer ---
-mooneye-test-suite-wilbertpol/acceptance/timer/timer_if.gb [Agb]
-mooneye-test-suite-wilbertpol/acceptance/timer/timer_if.gb [Cgb]
-mooneye-test-suite-wilbertpol/acceptance/timer/timer_if.gb [Dmg]
-mooneye-test-suite-wilbertpol/acceptance/timer/timer_if.gb [Mgb]
-mooneye-test-suite-wilbertpol/acceptance/timer/timer_if.gb [Sgb2]
-mooneye-test-suite-wilbertpol/acceptance/timer/timer_if.gb [Sgb]
 
 # --- frame-compare cases ---
 mooneye-test-suite-wilbertpol/madness/mgb_oam_dma_halt_sprites.gb [Mgb]

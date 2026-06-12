@@ -61,6 +61,23 @@ pub trait Bus {
     }
     /// `IF & IE & 0x1F` right now. Takes no time.
     fn pending(&self) -> u8;
+    /// `IF & IE & 0x1F` as seen by the halted CPU's wake check (both the
+    /// IME=1 dispatch and the IME=0 resume). Takes no time; defaults to
+    /// [`pending`](Bus::pending).
+    ///
+    /// The SM83's halt-exit logic samples IE & IF earlier *within* the
+    /// M-cycle than the end-of-cycle view [`pending`](Bus::pending)
+    /// models (SameBoy sm83_cpu.c, `GB_cpu_run`: mid-cycle on DMG,
+    /// start-of-cycle on CGB): an IF bit committed after that point — in
+    /// practice the timer reload's IF, which lands on the last T-substep —
+    /// is missed until the next cycle, waking the CPU one M-cycle later
+    /// than a running-CPU dispatch would (gambatte tima/tc*_irq_*;
+    /// wilbertpol acceptance/timer/timer_if rounds 5/6 vs 3/4). The
+    /// running CPU's end-of-fetch sampling keeps using
+    /// [`pending`](Bus::pending) — that contract is frozen.
+    fn pending_halt_wake(&self) -> u8 {
+        self.pending()
+    }
     /// Clear bit `bit` (0..=4) of IF. Takes no time.
     fn ack(&mut self, bit: u8);
     /// CPU executed STOP: if a speed switch is armed (CGB KEY1.0), perform
