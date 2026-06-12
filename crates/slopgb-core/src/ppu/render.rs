@@ -431,7 +431,11 @@ impl Ppu {
             } else {
                 self.output_pixel(c, attr);
                 self.render.lx += 1;
-                if self.render.lx == 160 {
+                if self.render.lx == 159 {
+                    // The HBlank DMA trigger leads the mode-3 end by one
+                    // dot (see `Ppu::hdma_lead`).
+                    self.hdma_lead = true;
+                } else if self.render.lx == 160 {
                     self.render.active = false;
                     self.line_render_done = true;
                     return;

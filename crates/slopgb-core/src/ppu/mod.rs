@@ -214,6 +214,12 @@ pub struct Ppu {
     stat_late: bool,
     /// Mode 3 finished on the current line (pixel 160 shipped).
     line_render_done: bool,
+    /// Pixel 159 shipped: the HBlank DMA trigger leads the mode-3 end by
+    /// one dot (gambatte-core next_m0_time.cpp anchors `memevent_hdma` at
+    /// xpos `lcd_hres + 7`, one xpos before the 168 that ends mode 3 —
+    /// the dma/hdma_start and hdma_late_* `_1`/`_2` adjacent-cycle pairs
+    /// pin the lead). See [`Self::hdma_trigger_level`].
+    hdma_lead: bool,
 
     // Window state.
     /// WY==LY matched somewhere this frame while the window was enabled.
@@ -355,6 +361,7 @@ impl Ppu {
             pending_if: 0,
             stat_late: false,
             line_render_done: true,
+            hdma_lead: false,
             wy_latch: false,
             win_line: 0,
             eff: PipeRegs {
@@ -479,11 +486,13 @@ impl Ppu {
                 self.wy_latch = false;
                 self.win_line = 0;
                 self.line_render_done = false;
+                self.hdma_lead = false;
                 self.render.active = false;
             }
             1..=143 => {
                 self.ly = self.line;
                 self.line_render_done = false;
+                self.hdma_lead = false;
                 self.render.active = false;
             }
             144 => {
@@ -957,6 +966,7 @@ impl Ppu {
             // every enable re-arms it; don't leave it stale across off.
             self.frame_skip = false;
             self.line_render_done = true;
+            self.hdma_lead = false;
             self.render.active = false;
             self.render.win_active = false;
             let white = self.white();
@@ -975,6 +985,7 @@ impl Ppu {
             // after enabling (see `frame_skip`).
             self.frame_skip = true;
             self.line_render_done = false;
+            self.hdma_lead = false;
             self.render.active = false;
             self.wy_latch = false;
             self.win_line = 0;
@@ -1046,10 +1057,40 @@ impl Ppu {
     }
 
     /// True while the PPU is in a real hblank (mode 3 finished on a visible
-    /// line). The interconnect's HDMA engine edge-detects this; the visible
-    /// STAT mode-0 window at line starts must not retrigger HBlank DMA.
+    /// line); the visible STAT mode-0 window at line starts is excluded.
+    /// The HBlank DMA engine edge-detects [`Self::hdma_trigger_level`]
+    /// (this level led by one dot) instead.
     pub fn hblank_active(&self) -> bool {
         self.enabled && self.line <= 143 && self.line_render_done
+    }
+
+    /// The HBlank DMA trigger level: the real hblank of a visible line,
+    /// led by one dot (see [`Self::hdma_lead`]). The interconnect's
+    /// per-dot edge detector flags one block request per rising edge.
+    pub(crate) fn hdma_trigger_level(&self) -> bool {
+        self.enabled && self.line <= 143 && (self.line_render_done || self.hdma_lead)
+    }
+
+    /// The HBlank DMA trigger window: inside a visible line's hblank (as
+    /// [`Self::hdma_trigger_level`] sees it), ending 3 dots before the
+    /// line ends (gambatte-core video.cpp `isHdmaPeriod`:
+    /// `ly < 144 && cc + 3 + 3 * ds < lyCounter.time() && cc >= m0Time` —
+    /// the cc margin is 3 dots at either speed, and the m0 time derives
+    /// from the same led `predictedNextM0Time` anchor). The interconnect
+    /// consults this when HBlank DMA is enabled mid-window and when a
+    /// halt/stop wake re-evaluates a pending block.
+    pub(crate) fn hdma_period(&self) -> bool {
+        let len = if self.glitch_line {
+            GLITCH_LINE_DOTS
+        } else {
+            LINE_DOTS
+        };
+        self.hdma_trigger_level() && self.dot + 3 < len
+    }
+
+    /// LCDC bit 7 as committed (architectural view).
+    pub(crate) fn lcd_enabled(&self) -> bool {
+        self.enabled
     }
 
     /// XRGB8888 pixels of the most recently *completed* frame.

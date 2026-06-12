@@ -141,9 +141,7 @@ const BASELINE: &[&str] = &[
     // variants (which phase-lock DIV == $10, i.e. the DIV-APU bit HIGH,
     // before each NR52 power-on / DIV write — they never touch KEY1) all
     // pass via the power-on DIV-event skip glitch (SameBoy GB_apu_init).
-    // dma: 3 of 4 (gbc_dma_cont passes).
-    "same-suite/dma/gdma_addr_mask.gb [Cgb]",
-    "same-suite/dma/hdma_lcd_off.gb [Cgb]",
+    // dma: 1 of 4 (gbc_dma_cont, gdma_addr_mask, hdma_lcd_off pass).
     "same-suite/dma/hdma_mode0.gb [Cgb]",
     // interrupt: 1 of 1.
     "same-suite/interrupt/ei_delay_halt.gb [Cgb]",
