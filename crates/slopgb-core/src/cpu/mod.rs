@@ -9,7 +9,7 @@
 mod execute;
 mod registers;
 
-pub use registers::{Flags, Registers};
+pub use registers::{Registers, flags};
 
 use crate::model::Model;
 

@@ -117,13 +117,11 @@ impl Timer {
         }
     }
 
-    /// Write FF04-FF07. Returns IF bits to request immediately (a DIV/TAC
-    /// write can clock TIMA via the falling-edge detector), 0 if none.
-    ///
-    /// Note: even a write-induced TIMA overflow raises IF only at the reload
-    /// 4 T-cycles later (from `tick`), so this currently always returns 0;
-    /// the return type is kept for the interconnect contract.
-    pub fn write(&mut self, addr: u16, value: u8) -> u8 {
+    /// Write FF04-FF07. A DIV/TAC write can clock TIMA via the falling-edge
+    /// detector, but never requests IF directly: even a write-induced TIMA
+    /// overflow raises the interrupt only at the reload 4 T-cycles later
+    /// (from `tick`).
+    pub fn write(&mut self, addr: u16, value: u8) {
         match addr {
             0xFF04 => {
                 // Writing any value resets the whole 16-bit counter; if the
@@ -165,7 +163,6 @@ impl Timer {
             }
             _ => {}
         }
-        0
     }
 }
 
@@ -221,7 +218,7 @@ mod tests {
     fn div_write_resets_counter() {
         let mut t = Timer::new();
         t.set_div(0x1234);
-        assert_eq!(t.write(0xFF04, 0x99), 0); // written value is irrelevant
+        t.write(0xFF04, 0x99); // written value is irrelevant
         assert_eq!(t.div_counter(), 0);
         assert_eq!(t.read(0xFF04), 0);
     }
@@ -274,12 +271,12 @@ mod tests {
         for (tac, half_period) in [(0x04u8, 128u32), (0x05, 2), (0x06, 8), (0x07, 32)] {
             let mut t = timer_with(tac, 4, 4);
             ticks(&mut t, half_period / 2); // selected bit still 0
-            assert_eq!(t.write(0xFF04, 0), 0);
+            t.write(0xFF04, 0);
             assert_eq!(t.read(0xFF05), 4, "tac {tac:#04x}: bit low, no edge");
 
             let mut t = timer_with(tac, 4, 4);
             ticks(&mut t, half_period); // selected bit now 1
-            assert_eq!(t.write(0xFF04, 0), 0);
+            t.write(0xFF04, 0);
             assert_eq!(t.read(0xFF05), 5, "tac {tac:#04x}: bit high, edge");
         }
     }
@@ -291,7 +288,7 @@ mod tests {
     fn tac_disable_with_selected_bit_high_increments() {
         let mut t = timer_with(0x04, 4, 4);
         ticks(&mut t, 128); // div = 512, bit 9 high
-        assert_eq!(t.write(0xFF07, 0x00), 0);
+        t.write(0xFF07, 0x00);
         assert_eq!(t.read(0xFF05), 5);
         t.write(0xFF07, 0x04); // rising edge: no increment
         assert_eq!(t.read(0xFF05), 5);
@@ -417,7 +414,7 @@ mod tests {
         let mut t = timer_with(0x04, 0xFF, 0x42);
         ticks(&mut t, 128); // div = 512, bit 9 high, no edge yet
         assert_eq!(t.read(0xFF05), 0xFF);
-        assert_eq!(t.write(0xFF04, 0), 0); // edge -> overflow, IF delayed
+        t.write(0xFF04, 0); // edge -> overflow, IF delayed
         assert_eq!(t.read(0xFF05), 0x00);
         assert_eq!(t.tick(), 0x04);
         assert_eq!(t.read(0xFF05), 0x42);
@@ -429,7 +426,7 @@ mod tests {
     fn tac_write_overflow_delays_reload_and_reload_cycle_write_ignored() {
         let mut t = timer_with(0x04, 0xFF, 0x10);
         ticks(&mut t, 128); // div = 512, bit 9 high
-        assert_eq!(t.write(0xFF07, 0x00), 0); // disable -> edge -> overflow
+        t.write(0xFF07, 0x00); // disable -> edge -> overflow
         assert_eq!(t.read(0xFF05), 0x00);
         assert_eq!(t.tick(), 0x04); // reload still completes when disabled
         assert_eq!(t.read(0xFF05), 0x10);

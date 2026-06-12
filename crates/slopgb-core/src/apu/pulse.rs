@@ -47,6 +47,7 @@ impl Pulse {
             freq: 0,
             length: LengthCounter::new(64),
             envelope: Envelope::new(),
+            // period() at frequency 0: (2048 - 0) * 4.
             timer: 8192,
             duty_pos: 0,
             sweep_period: 0,
@@ -66,6 +67,10 @@ impl Pulse {
 
     /// Advance one T-cycle.
     pub(super) fn step(&mut self) {
+        debug_assert!(
+            self.timer > 0,
+            "pulse frequency timer invariant violated: must stay >= 1"
+        );
         self.timer -= 1;
         if self.timer == 0 {
             self.timer = self.period();
@@ -400,6 +405,15 @@ mod tests {
         }
         p.sweep_clock();
         assert_eq!(p.freq, 768);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "pulse frequency timer")]
+    fn step_with_zero_timer_panics_in_debug() {
+        let mut p = Pulse::new();
+        p.timer = 0; // violates the "timer always >= 1" invariant
+        p.step();
     }
 
     #[test]

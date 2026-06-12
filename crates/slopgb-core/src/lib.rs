@@ -12,19 +12,30 @@
 //! access of that cycle is performed. See `docs/ARCHITECTURE.md` for the full
 //! contract.
 
-pub mod apu;
-pub mod cartridge;
-pub mod cpu;
-pub mod interconnect;
-pub mod joypad;
-pub mod model;
-pub mod ppu;
-pub mod serial;
-pub mod timer;
+pub(crate) mod apu;
+pub(crate) mod cartridge;
+pub(crate) mod cpu;
+pub(crate) mod interconnect;
+pub(crate) mod joypad;
+pub(crate) mod model;
+pub(crate) mod ppu;
+pub(crate) mod serial;
+pub(crate) mod timer;
 
+pub use apu::DEFAULT_SAMPLE_RATE;
 pub use cartridge::CartridgeError;
+pub use cpu::Registers;
 pub use joypad::Button;
 pub use model::Model;
+
+// Escape hatch for the crate's integration tests, which drive the CPU and
+// interconnect directly (OAM DMA freeze/timing tests). Not public API.
+#[doc(hidden)]
+pub use cartridge::Cartridge;
+#[doc(hidden)]
+pub use cpu::{Bus, Cpu};
+#[doc(hidden)]
+pub use interconnect::Interconnect;
 
 /// Screen width in pixels.
 pub const SCREEN_W: usize = 160;
@@ -57,10 +68,12 @@ impl GameBoy {
     }
 
     /// Pick the best model for a ROM from its CGB-support header flag
-    /// (CGB if the ROM supports or requires it, otherwise DMG).
+    /// (CGB if the ROM supports or requires it, otherwise DMG). Uses the
+    /// same bit-7 predicate as the interconnect's CGB-mode gate
+    /// (`cartridge::cgb_flag`), matching what the CGB boot ROM checks.
     pub fn auto_model(rom: &[u8]) -> Model {
         match rom.get(0x143) {
-            Some(0x80) | Some(0xC0) => Model::Cgb,
+            Some(&flag) if cartridge::cgb_flag(flag) => Model::Cgb,
             _ => Model::Dmg,
         }
     }
@@ -95,10 +108,12 @@ impl GameBoy {
         self.bus.cycles()
     }
 
+    /// Press a joypad button (held until [`Self::release`]).
     pub fn press(&mut self, b: Button) {
         self.bus.joypad_mut().press(b);
     }
 
+    /// Release a previously pressed joypad button.
     pub fn release(&mut self, b: Button) {
         self.bus.joypad_mut().release(b);
     }
@@ -110,7 +125,7 @@ impl GameBoy {
     }
 
     /// Set the audio output sample rate in Hz (default
-    /// [`apu::DEFAULT_SAMPLE_RATE`]).
+    /// [`DEFAULT_SAMPLE_RATE`]).
     pub fn set_sample_rate(&mut self, hz: u32) {
         self.bus.apu_mut().set_sample_rate(hz);
     }
@@ -138,10 +153,11 @@ impl GameBoy {
     }
 
     /// CPU register snapshot, for test harnesses.
-    pub fn cpu_regs(&self) -> cpu::Registers {
+    pub fn cpu_regs(&self) -> Registers {
         self.cpu.regs()
     }
 
+    /// The hardware model this machine was built as.
     pub fn model(&self) -> Model {
         self.bus.model()
     }

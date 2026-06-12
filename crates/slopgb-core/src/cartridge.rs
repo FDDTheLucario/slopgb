@@ -8,13 +8,15 @@
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CartridgeError {
     /// ROM image smaller than one bank / header incomplete.
     TooSmall,
     /// Cartridge-type byte (0x147) we do not support.
     UnsupportedMapper(u8),
-    /// Declared ROM/RAM size inconsistent or unsupported.
-    BadHeader,
+    /// Declared ROM/RAM size code (0x148/0x149) unsupported; carries the
+    /// offending byte.
+    BadHeader(u8),
 }
 
 impl fmt::Display for CartridgeError {
@@ -24,12 +26,24 @@ impl fmt::Display for CartridgeError {
             CartridgeError::UnsupportedMapper(t) => {
                 write!(f, "unsupported cartridge type {t:#04x}")
             }
-            CartridgeError::BadHeader => write!(f, "inconsistent cartridge header"),
+            CartridgeError::BadHeader(b) => {
+                write!(f, "inconsistent cartridge header (size code {b:#04x})")
+            }
         }
     }
 }
 
 impl std::error::Error for CartridgeError {}
+
+/// True if a CGB-support flag byte (header 0x143) requests CGB mode.
+///
+/// Pan Docs "CGB flag": the conventional values are 0x80 (CGB-enhanced) and
+/// 0xC0 (CGB-only), but hardware (the CGB boot ROM) decodes only bit 7, so
+/// e.g. 0x84 also enables CGB mode. Single source of truth for both
+/// [`crate::GameBoy::auto_model`] and the interconnect's CGB-mode gate.
+pub fn cgb_flag(byte: u8) -> bool {
+    byte & 0x80 != 0
+}
 
 /// The Nintendo logo bitmap found at 0x104 in every bootable ROM. Used for
 /// MBC1 multicart detection (mooneye-gb heuristic).
@@ -201,7 +215,7 @@ impl Cartridge {
         let cart_type = rom[0x147];
         // ROM size code (0x148): banks = 2 << code, codes 0-8 are defined.
         if rom[0x148] > 8 {
-            return Err(CartridgeError::BadHeader);
+            return Err(CartridgeError::BadHeader(rom[0x148]));
         }
         // RAM size code (0x149). Code 1 is officially unused, but a few
         // homebrew ROMs use it meaning 2 KiB; accept it for robustness.
@@ -212,7 +226,7 @@ impl Cartridge {
             3 => 0x8000,
             4 => 0x20000,
             5 => 0x10000,
-            _ => return Err(CartridgeError::BadHeader),
+            _ => return Err(CartridgeError::BadHeader(rom[0x149])),
         };
 
         // Pad the image to a power of two so `bank & (banks - 1)` mirrors
@@ -270,6 +284,11 @@ impl Cartridge {
                 0x03 | 0x06 | 0x09 | 0x0F | 0x10 | 0x13 | 0x1B | 0x1E
             ),
         })
+    }
+
+    /// True if this cartridge's header requests CGB mode (see [`cgb_flag`]).
+    pub fn supports_cgb(&self) -> bool {
+        cgb_flag(self.rom[0x143])
     }
 
     /// `rom.len()` is a power of two, so this masks bank numbers the way the
@@ -698,7 +717,7 @@ mod tests {
         let rom = make_rom(0x03, 2, 6);
         assert_eq!(
             Cartridge::from_bytes(rom).err(),
-            Some(CartridgeError::BadHeader)
+            Some(CartridgeError::BadHeader(6))
         );
     }
 
@@ -708,8 +727,14 @@ mod tests {
         rom[0x148] = 9;
         assert_eq!(
             Cartridge::from_bytes(rom).err(),
-            Some(CartridgeError::BadHeader)
+            Some(CartridgeError::BadHeader(9))
         );
+    }
+
+    #[test]
+    fn bad_header_display_includes_offending_byte() {
+        let err = CartridgeError::BadHeader(0x09);
+        assert!(err.to_string().contains("0x09"), "{err}");
     }
 
     #[test]

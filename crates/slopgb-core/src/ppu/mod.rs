@@ -40,6 +40,15 @@
 //! LCD enable starts a glitched line 0 (`lcdon_timing-GS`): 452 dots long,
 //! no OAM scan (STAT reads mode 0, OAM/VRAM accessible), mode 3 (and all
 //! read+write blocking) during dots 78..250, then a real hblank.
+//!
+//! # Known approximation: instantaneous OAM scan
+//!
+//! Sprite selection for a line happens in one step at dot 80 rather than
+//! spread across dots 0-80 as on hardware (one OAM entry per 2 dots).
+//! Combined with [`Ppu::oam_dma_write`] bypassing mode-based access
+//! blocking, an OAM DMA byte landing mid-mode-2 can select sprites
+//! differently than hardware, which would already have scanned past the
+//! entry the byte lands in. No mooneye test pins this.
 
 mod render;
 
@@ -55,6 +64,46 @@ const LINE_DOTS: u16 = 456;
 const GLITCH_LINE_DOTS: u16 = 452;
 /// Mode 3 / blocking start on the glitched LCD-enable line.
 const GLITCH_MODE3_START: u16 = 78;
+
+// --- LCDC (FF40) bit assignments (Pan Docs "LCD Control") ---
+
+/// LCDC bit 7: LCD & PPU enable.
+const LCDC_ENABLE: u8 = 0x80;
+/// LCDC bit 6: window tile map area (0 = 9800, 1 = 9C00).
+const LCDC_WIN_MAP: u8 = 0x40;
+/// LCDC bit 5: window enable.
+const LCDC_WIN_ENABLE: u8 = 0x20;
+/// LCDC bit 4: BG/window tile data area (1 = unsigned 8000 addressing).
+const LCDC_TILE_DATA: u8 = 0x10;
+/// LCDC bit 3: BG tile map area (0 = 9800, 1 = 9C00).
+const LCDC_BG_MAP: u8 = 0x08;
+/// LCDC bit 2: OBJ size (0 = 8x8, 1 = 8x16).
+const LCDC_OBJ_SIZE: u8 = 0x04;
+/// LCDC bit 1: OBJ enable.
+const LCDC_OBJ_ENABLE: u8 = 0x02;
+/// LCDC bit 0: BG/window enable (DMG and DMG-compat mode) / BG master
+/// priority (native CGB).
+const LCDC_BG_ENABLE: u8 = 0x01;
+
+// --- STAT (FF41) interrupt source enables (Pan Docs "LCD Status") ---
+
+/// STAT bit 6: LYC=LY interrupt source enable.
+const STAT_SRC_LYC: u8 = 0x40;
+/// STAT bit 5: mode-2 (OAM) interrupt source enable.
+const STAT_SRC_OAM: u8 = 0x20;
+/// STAT bit 4: mode-1 (VBlank) interrupt source enable.
+const STAT_SRC_VBLANK: u8 = 0x10;
+/// STAT bit 3: mode-0 (HBlank) interrupt source enable.
+const STAT_SRC_HBLANK: u8 = 0x08;
+/// All four interrupt source enables: the writable FF41 bits.
+const STAT_SRC_ALL: u8 = STAT_SRC_LYC | STAT_SRC_OAM | STAT_SRC_VBLANK | STAT_SRC_HBLANK;
+
+// --- IF (FF0F) bits the PPU can raise (Pan Docs "Interrupts") ---
+
+/// IF bit 0: VBlank interrupt.
+const IF_VBLANK: u8 = 0x01;
+/// IF bit 1: STAT interrupt.
+const IF_STAT: u8 = 0x02;
 
 pub struct Ppu {
     model: Model,
@@ -209,16 +258,6 @@ impl Ppu {
         std::mem::take(&mut self.pending_if)
     }
 
-    /// Write-induced IF bits (STAT/LYC/LCDC writes can raise the STAT line
-    /// in the same M-cycle as the write — `stat_lyc_onoff` round 4 needs the
-    /// interrupt to dispatch before the next instruction). The interconnect
-    /// must OR these into IF after every PPU register write. `tick` drains
-    /// the same accumulator, so a missed call only delays the bit by one
-    /// M-cycle.
-    pub fn consume_pending_irq(&mut self) -> u8 {
-        std::mem::take(&mut self.pending_if)
-    }
-
     fn start_line(&mut self) {
         match self.line {
             0 => {
@@ -246,7 +285,7 @@ impl Ppu {
         if self.line <= 143 {
             // WY latch: the window activates for the rest of the frame once
             // LY==WY is observed while the window is enabled (Pan Docs).
-            if self.lcdc & 0x20 != 0 && self.ly == self.wy {
+            if self.lcdc & LCDC_WIN_ENABLE != 0 && self.ly == self.wy {
                 self.wy_latch = true;
             }
             if self.glitch_line {
@@ -274,7 +313,7 @@ impl Ppu {
         if self.line == 144 && self.dot == 4 {
             // VBlank interrupt: 4 dots after LY becomes 144, together with
             // the visible mode 1 (TCAGBD; `vblank_stat_intr-GS`).
-            self.pending_if |= 0x01;
+            self.pending_if |= IF_VBLANK;
         }
     }
 
@@ -335,9 +374,15 @@ impl Ppu {
         }
     }
 
+    /// STAT mode bits (FF41 bits 0-1) as currently visible to the CPU, for
+    /// the interconnect (FEA0-FEFF prohibited-area reads key on OAM locking).
+    pub(crate) fn mode_bits(&self) -> u8 {
+        self.vis_mode()
+    }
+
     /// Level of the shared STAT interrupt line for the given enable bits.
     fn stat_line_level(&self, en: u8) -> bool {
-        let mut high = en & 0x40 != 0 && self.cmp;
+        let mut high = en & STAT_SRC_LYC != 0 && self.cmp;
         if !self.enabled {
             // With the LCD off only the (frozen) LYC source persists
             // (`stat_lyc_onoff` round 2: no edge across off/on with cmp=1).
@@ -348,9 +393,12 @@ impl Ppu {
         // starts and 144:0-3) so consecutive sources overlap and block each
         // other (`stat_irq_blocking`). The glitched post-enable prefix is
         // not a real hblank.
-        high |= en & 0x08 != 0 && vm == 0 && !(self.glitch_line && self.dot < GLITCH_MODE3_START);
-        high |= en & 0x10 != 0 && (self.line >= 145 || (self.line == 144 && self.dot >= 4));
-        if en & 0x20 != 0 {
+        high |= en & STAT_SRC_HBLANK != 0
+            && vm == 0
+            && !(self.glitch_line && self.dot < GLITCH_MODE3_START);
+        high |=
+            en & STAT_SRC_VBLANK != 0 && (self.line >= 145 || (self.line == 144 && self.dot >= 4));
+        if en & STAT_SRC_OAM != 0 {
             // The OAM source follows the readable mode-2 window: it rises at
             // dot 4 (one M-cycle after the LY change, simultaneous with the
             // LYC compare turning valid) and drops with the mode-3 read flip
@@ -380,7 +428,7 @@ impl Ppu {
         }
         let level = self.stat_line_level(self.stat_en);
         if level && !self.stat_line {
-            self.pending_if |= 0x02;
+            self.pending_if |= IF_STAT;
         }
         self.stat_line = level;
     }
@@ -488,8 +536,13 @@ impl Ppu {
         }
     }
 
-    /// Write counterpart of [`Self::read`].
-    pub fn write(&mut self, addr: u16, value: u8) {
+    /// Write counterpart of [`Self::read`]. Returns IF bits raised by the
+    /// write itself (same encoding as [`Self::tick`]): STAT/LYC/LCDC writes
+    /// can raise the STAT line in the very M-cycle of the write —
+    /// `stat_lyc_onoff` round 4 needs that interrupt to dispatch before the
+    /// next instruction — so the caller must OR the returned bits into IF
+    /// immediately, like a `tick` result.
+    pub fn write(&mut self, addr: u16, value: u8) -> u8 {
         match addr {
             0x8000..=0x9FFF => {
                 if !self.vram_write_blocked() {
@@ -507,13 +560,13 @@ impl Ppu {
                 // written first for one cycle, enabling every source
                 // momentarily (Pan Docs "STAT bug"; CGB is unaffected).
                 if !self.model.is_cgb() && self.enabled {
-                    let level = self.stat_line_level(0x78);
+                    let level = self.stat_line_level(STAT_SRC_ALL);
                     if level && !self.stat_line {
-                        self.pending_if |= 0x02;
+                        self.pending_if |= IF_STAT;
                     }
                     self.stat_line = level;
                 }
-                self.stat_en = value & 0x78;
+                self.stat_en = value & STAT_SRC_ALL;
                 self.refresh_stat();
             }
             0xFF42 => self.scy = value,
@@ -554,12 +607,13 @@ impl Ppu {
             0xFF6C if self.model.is_cgb() => self.opri = value & 1,
             _ => {}
         }
+        std::mem::take(&mut self.pending_if)
     }
 
     fn write_lcdc(&mut self, value: u8) {
-        let was_on = self.lcdc & 0x80 != 0;
+        let was_on = self.lcdc & LCDC_ENABLE != 0;
         self.lcdc = value;
-        let now_on = value & 0x80 != 0;
+        let now_on = value & LCDC_ENABLE != 0;
         if was_on && !now_on {
             // LCD off: LY=0, mode 0, instantly; the comparison clock stops
             // with the flag frozen (`stat_lyc_onoff`); the displayed frame
@@ -1080,12 +1134,10 @@ mod tests {
         assert_eq!(p.read(0xFF41), 0xC5); // cmp set, mode 1 (vblank)
         p.write(0xFF40, 0x01); // LCD off
         assert_eq!(p.read(0xFF41), 0xC4, "flag retained");
-        p.write(0xFF45, 0x01);
+        assert_eq!(p.write(0xFF45, 0x01), 0, "comparison clock stopped: no IRQ");
         assert_eq!(p.read(0xFF41), 0xC4, "comparison clock stopped");
-        assert_eq!(p.consume_pending_irq(), 0);
-        p.write(0xFF40, 0x81); // LCD on: LY=0 vs LYC=1
+        assert_eq!(p.write(0xFF40, 0x81), 0); // LCD on: LY=0 vs LYC=1
         assert_eq!(p.read(0xFF41), 0xC0);
-        assert_eq!(p.consume_pending_irq(), 0);
     }
 
     #[test]
@@ -1096,13 +1148,11 @@ mod tests {
         run_to(&mut p, 144, 10);
         p.write(0xFF45, 0x90);
         p.tick();
-        p.consume_pending_irq();
         p.write(0xFF40, 0x01);
         p.write(0xFF45, 0x00); // will match LY=0 on enable
         assert_eq!(p.read(0xFF41), 0xC4);
-        p.write(0xFF40, 0x81);
+        assert_eq!(p.write(0xFF40, 0x81), 0, "no edge: flag stayed set");
         assert_eq!(p.read(0xFF41), 0xC4);
-        assert_eq!(p.consume_pending_irq(), 0, "no edge: flag stayed set");
     }
 
     #[test]
@@ -1112,16 +1162,15 @@ mod tests {
         p.write(0xFF45, 0x00);
         p.write(0xFF40, 0x81);
         run_to(&mut p, 144, 10);
-        p.consume_pending_irq();
         p.write(0xFF40, 0x01); // off with cmp clear (LY=144 vs 0)
         assert_eq!(p.read(0xFF41), 0xC0);
-        p.write(0xFF40, 0x81); // on: LY=0 vs LYC=0 -> rising edge
-        assert_eq!(p.read(0xFF41), 0xC4);
+        // On: LY=0 vs LYC=0 -> rising edge.
         assert_eq!(
-            p.consume_pending_irq(),
+            p.write(0xFF40, 0x81),
             0x02,
             "stat_lyc_onoff round 4: IRQ in the enabling write's cycle"
         );
+        assert_eq!(p.read(0xFF41), 0xC4);
     }
 
     #[test]
@@ -1130,9 +1179,8 @@ mod tests {
         p.write(0xFF40, 0x81);
         run_to(&mut p, 1, 300); // real hblank, no sources enabled
         assert_eq!(p.read(0xFF41) & 3, 0);
-        p.write(0xFF41, 0x00);
         assert_eq!(
-            p.consume_pending_irq(),
+            p.write(0xFF41, 0x00),
             0x02,
             "DMG STAT write momentarily enables every source"
         );
@@ -1140,8 +1188,7 @@ mod tests {
         let mut c = cgb();
         c.write(0xFF40, 0x81);
         run_to(&mut c, 1, 300);
-        c.write(0xFF41, 0x00);
-        assert_eq!(c.consume_pending_irq(), 0, "CGB lacks the STAT write bug");
+        assert_eq!(c.write(0xFF41, 0x00), 0, "CGB lacks the STAT write bug");
     }
 
     // --- LCD off ---

@@ -22,6 +22,8 @@ pub struct Serial {
 }
 
 impl Serial {
+    // Deliberately no `Default` (unlike Timer/Joypad): construction needs the
+    // CGB-mode flag, and there is no sensible model-independent default.
     pub fn new(cgb: bool) -> Self {
         Self {
             cgb,

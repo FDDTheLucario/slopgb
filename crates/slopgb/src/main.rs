@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 // can't silently drift from it. The frontend resamples it to the device rate;
 // once `GameBoy` exposes `set_sample_rate`, set it to the device rate and the
 // resampler becomes a pass-through.
-use slopgb_core::apu::DEFAULT_SAMPLE_RATE as CORE_SAMPLE_RATE;
+use slopgb_core::DEFAULT_SAMPLE_RATE as CORE_SAMPLE_RATE;
 use slopgb_core::{Button, CLOCK_HZ, CYCLES_PER_FRAME, GameBoy, Model, SCREEN_H, SCREEN_W};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -506,8 +506,9 @@ impl App {
         }
     }
 
-    /// Focus lost: no release events will arrive for keys held right now, so
-    /// release every Game Boy button and drop turbo before they stick.
+    /// Focus lost or window occluded: no release events will arrive for keys
+    /// held right now, so release every Game Boy button and drop turbo before
+    /// they stick.
     fn release_all_input(&mut self) {
         self.buttons.clear();
         for b in [
@@ -690,7 +691,9 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::DroppedFile(path) => self.load_dropped(&path),
-            WindowEvent::Focused(false) => self.release_all_input(),
+            // Focus loss and occlusion both mean held keys won't get release
+            // events, so drop all input before any button can stick.
+            WindowEvent::Focused(false) | WindowEvent::Occluded(true) => self.release_all_input(),
             WindowEvent::KeyboardInput { event, .. } => self.handle_key(event_loop, &event),
             _ => {}
         }
