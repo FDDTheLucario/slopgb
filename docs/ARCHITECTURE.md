@@ -209,9 +209,11 @@ same upgrade shape as the CGB one below.
 | cgb-acid2 / acid-hell | single upstream reference (revision-agnostic) | none |
 
 Failures that triage to genuine C-vs-E silicon divergence go on a
-*documented expected-fail list* (asserted, never silently skipped) — first
-candidate: same-suite `channel_1_sweep_restart_2` (passes only on real
-CGB-E; even SameBoy-E fails it).
+*documented expected-fail list* (asserted, never silently skipped). The
+one-time first candidate, same-suite `channel_1_sweep_restart_2` (passes
+only on real CGB-E; even SameBoy-E fails it), in fact passes here via the
+SameBoy sweep-calculation machinery under this core's tick-then-access
+write conventions — the list is currently empty.
 
 ### Escalation triggers (when to parameterize the revision)
 

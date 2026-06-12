@@ -109,23 +109,19 @@ fn suite_roms(root: &Path) -> Vec<(PathBuf, String)> {
 /// Known-failure baseline (see `harness::assert_against_baseline`),
 /// discovered by running the full matrix; shrinking it is progress,
 /// growing it a regression. Every entry reaches `LD B,B` with the all-$42
-/// fail registers (no timeouts). Of note: per ARCHITECTURE.md §CGB
-/// revision policy, `channel_1_sweep_restart_2` is the first candidate for
-/// the *permanent* documented expected-fail list — it passes only on real
-/// CGB-E silicon; even SameBoy emulating CGB-E fails it (apu/README.md).
+/// fail registers (no timeouts).
 const BASELINE: &[&str] = &[
-    // apu/channel_1: 4 of 19 claimed cases. The trigger/duty/alignment/
+    // apu/channel_1: 1 of 19 claimed cases. The trigger/duty/alignment/
     // envelope/zombie/freq-change families pass via the SameBoy-style
     // countdown model (src/apu/; the -A variant passes through the same
-    // `just_reloaded` + NRx4 freq-high glitch path); what remains is the
-    // sweep micro-timing machinery (square_sweep_calculate_countdown /
-    // restart-hold windows, SameBoy apu.c) and the CGB-C-suffixed
+    // `just_reloaded` + NRx4 freq-high glitch path); the sweep family —
+    // channel_1_sweep, channel_1_sweep_restart AND the formerly
+    // expected-fail channel_1_sweep_restart_2 (apu/README.md: passes
+    // only on real CGB-E; even SameBoy emulating CGB-E fails it) —
+    // passes via the SameBoy sweep-calculation countdown machinery in
+    // src/apu/pulse.rs. What remains is the CGB-C-suffixed
     // freq_change_timing variant.
     "same-suite/apu/channel_1/channel_1_freq_change_timing-cgb0BC.gb [Cgb]",
-    "same-suite/apu/channel_1/channel_1_sweep.gb [Cgb]",
-    "same-suite/apu/channel_1/channel_1_sweep_restart.gb [Cgb]",
-    // Likely permanent (CGB-E-silicon-only pass; see doc comment above).
-    "same-suite/apu/channel_1/channel_1_sweep_restart_2.gb [Cgb]",
     // apu/channel_2: none — all 14 claimed cases pass.
     // apu/channel_3: none — all 14 claimed cases pass, matching
     // apu/README.md ("CPU-CGB-C passes the channel 3 tests").
