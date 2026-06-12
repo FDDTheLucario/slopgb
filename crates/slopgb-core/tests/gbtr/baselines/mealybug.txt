@@ -3,7 +3,9 @@
 # mealybug_matrix against the pinned v7.0 collection; shrinking this list is
 # progress, growing it is a regression (harness::assert_against_baseline).
 #
-# 48 of 55 rom x model legs fail; mbc/mbc3_rtc.gb passes (both models),
+# 47 of 55 rom x model legs fail; mbc/mbc3_rtc.gb passes (both models),
+# dma/hdma_during_halt-C passes (HBlank DMA defers across the core-clock
+# gate and re-fires at the wake — the gambatte-shaped HDMA engine),
 # ppu/m2_win_en_toggle.gb passes on Cgb (its [Cgb] reference matches once
 # the boot ROM's default DMG-compat palettes are installed; the [Dmg] leg
 # still fails on the underlying mode-2 toggle behavior), and
@@ -14,8 +16,9 @@
 # reference, every dma failure is the mooneye all-$42 fail-register
 # signature.
 
-# dma/: HDMA timing — registers report the ROMs' fail code ($42 everywhere).
-mealybug-tearoom-tests/dma/hdma_during_halt-C.gb [Cgb]
+# dma/: HDMA timing — registers report the ROM's fail code ($42); needs
+# dot-exact compare of block-start latencies across its whole sub-case
+# matrix (the residual gambatte dma/ *_2 parity rows are the same class).
 mealybug-tearoom-tests/dma/hdma_timing-C.gb [Cgb]
 
 # ppu/ mode-2 window-enable toggling ([Cgb] passes, see header).

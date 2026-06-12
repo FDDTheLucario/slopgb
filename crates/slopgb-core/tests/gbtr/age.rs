@@ -59,7 +59,6 @@ const BASELINE: &[&str] = &[
     "age-test-roms/speed-switch/caution/spsw-interrupts-cgbBC.gb [Cgb]",
     "age-test-roms/speed-switch/spsw-ch2-lc-delay-cgbBCE.gb [Cgb]",
     "age-test-roms/speed-switch/spsw-mode0-cgbBCE.gb [Cgb]",
-    "age-test-roms/speed-switch/spsw-stop-prefetch-cgbBCE.gb [Cgb]",
     "age-test-roms/speed-switch/spsw-tima-cgbBC.gb [Cgb]",
     "age-test-roms/stat-interrupt/stat-int-dmgC-cgbBCE.gb [Cgb]",
     "age-test-roms/stat-interrupt/stat-int-dmgC-cgbBCE.gb [Dmg]",
