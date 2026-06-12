@@ -164,6 +164,18 @@ pub fn skip_or_fail(test: &str, missing: &str) {
     }
 }
 
+/// [`skip_or_fail`] for the game-boy-test-roms collection (see
+/// [`missing_gbtr_outcome`]) — under `SLOPGB_REQUIRE_ROMS=1` a missing
+/// collection panics instead of skipping, so CI cannot silently no-op the
+/// collection-driven tests.
+pub fn skip_or_fail_gbtr(test: &str, missing: &str) {
+    let require_roms = std::env::var("SLOPGB_REQUIRE_ROMS").ok();
+    match missing_gbtr_outcome(require_roms.as_deref(), test, missing) {
+        Ok(notice) => println!("{notice}"),
+        Err(msg) => panic!("{msg}"),
+    }
+}
+
 /// Models a ROM (path relative to the mts root) must pass on.
 ///
 /// An empty vector means "no modeled hardware revision" (e.g. `-cgb0`:
@@ -995,7 +1007,10 @@ mod tests {
                 // sits at the root of the resolved path.
                 assert!(root.join("README.md").is_file());
             }
-            None => println!("note: test-roms/{GBTR_DIR} not present, discovery returned None"),
+            None => skip_or_fail_gbtr(
+                "rom_discovery_points_at_gbtr_collection",
+                &format!("test-roms/{GBTR_DIR} not present"),
+            ),
         }
     }
 }
