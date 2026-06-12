@@ -195,7 +195,12 @@ Corruption Bug"): `Interconnect` gates on model/halt/DMA and routes to
 `Registers::post_boot(model)` + `Interconnect::apply_post_boot_state()` set
 the exact PC=0x100 state including the internal 16-bit DIV counter (this is
 what `boot_div*` ROMs measure). Values come from gbctr/mooneye-gb and are
-verified by `boot_regs-*`/`boot_hwio-*`/`boot_div*` ROMs.
+verified by `boot_regs-*`/`boot_hwio-*`/`boot_div*` ROMs. On CGB/AGB the
+hand-off moment depends on the cart type: the boot ROM's DMG-compat tail
+runs 0x7D8 T-cycles longer than the CGB-cart path, so `apply_post_boot_state`
+shifts DIV and the LCD phase together for CGB-flagged carts (mooneye ROMs —
+DMG carts — pin one side, gambatte's `$143=$C0` ROMs the other; see the
+model.rs table docs).
 
 ## CGB revision policy (Model::Cgb)
 
