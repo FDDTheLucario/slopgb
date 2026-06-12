@@ -23,17 +23,27 @@ pub fn step(cpu: &mut Cpu, bus: &mut impl Bus) {
         // discarded/aborted paths undo a plain increment.
         debug_assert!(!cpu.halt_bug);
         // Halt mode ends when IE & IF != 0 regardless of IME, and the CPU
-        // re-evaluates that condition *within* every M-cycle: waking adds no
-        // delay over a NOP wait loop (mooneye acceptance/
-        // halt_ime0_nointr_timing and halt_ime1_timing2-GS both pin this by
-        // comparing DIV-measured latencies of the two paths, verified on
-        // hardware). In a NOP loop the M-cycle whose tick raises IF is an
-        // opcode fetch, so the halt idle cycle is modelled as an opcode
-        // fetch (bus reads have no side effects; only the M-cycle of time
-        // matters) that is rolled back while IE & IF stays 0.
+        // re-evaluates that condition *within* every M-cycle: an IF bit
+        // committed before the cycle's halt-exit sampling point wakes with
+        // no delay over a NOP wait loop (mooneye acceptance/
+        // halt_ime0_nointr_timing and halt_ime1_timing2-GS both pin this
+        // by comparing DIV-measured latencies of the two paths, verified
+        // on hardware), while a bit committed after it costs one extra
+        // idle cycle (see the wake check below). In a NOP loop the M-cycle
+        // whose tick raises IF is an opcode fetch, so the halt idle cycle
+        // is modelled as an opcode fetch (bus reads have no side effects;
+        // only the M-cycle of time matters) that is rolled back while the
+        // wake condition stays false.
         let pc_before = cpu.regs.pc;
         let opcode = fetch_opcode(cpu, bus);
-        if bus.pending() == 0 {
+        // The wake check uses the halt-exit sampling point, which sits
+        // earlier *within* the M-cycle than the running CPU's end-of-fetch
+        // `pending()` view (see `Bus::pending_halt_wake`): an IF bit
+        // committed after it — in practice the timer reload's IF — keeps
+        // the CPU halted one more cycle. The same sample feeds both the
+        // IME=1 dispatch and the IME=0 resume (SameBoy sm83_cpu.c,
+        // `GB_cpu_run`: one `interrupt_queue` sample serves both paths).
+        if bus.pending_halt_wake() == 0 {
             cpu.regs.pc = pc_before;
             // Staying halted: gate the core clock (and with it the OAM DMA
             // controller) off. The gate engages only now — *after* the

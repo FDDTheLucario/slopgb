@@ -36,6 +36,11 @@ struct TestBus {
     /// `bits` into IF - models e.g. the PPU raising the vblank IF bit
     /// partway through a cycle, before that cycle's memory access.
     raise_if: Option<(usize, u8)>,
+    /// `raise_if` models a timer IF committed on the *last* T-substep of
+    /// its M-cycle: invisible to [`Bus::pending_halt_wake`] during the
+    /// cycle it is raised (visible from the next cycle on), mirroring the
+    /// real interconnect's substep-aware halt-exit sampling.
+    late_if: bool,
     /// Current core-clock gate level as driven through
     /// [`Bus::set_halted`] (the calls are idempotent).
     halted_state: bool,
@@ -54,6 +59,7 @@ impl TestBus {
             stop_calls: 0,
             cycles: 0,
             raise_if: None,
+            late_if: false,
             halted_state: false,
             halt_calls: Vec::new(),
         }
@@ -114,6 +120,21 @@ impl Bus for TestBus {
 
     fn pending(&self) -> u8 {
         self.mem[0xFF0F] & self.mem[0xFFFF] & 0x1F
+    }
+
+    fn pending_halt_wake(&self) -> u8 {
+        let mut p = self.pending();
+        if self.late_if {
+            if let Some((at, bits)) = self.raise_if {
+                // `advance` has already incremented `cycles`, so the bits
+                // raised during the current M-cycle (at == cycles - 1) are
+                // the ones the halt-exit sampling missed.
+                if at + 1 == self.cycles {
+                    p &= !bits;
+                }
+            }
+        }
+        p
     }
 
     fn ack(&mut self, bit: u8) {
@@ -1562,6 +1583,75 @@ fn halt_ime0_wake_fetch_is_the_if_raising_cycle() {
     b.take_log();
     step(&mut c, &mut b); // cycle 2: fetches and executes INC B
     assert_eq!(b.take_log(), [Read(PC0 + 1, 0x04)]);
+    assert!(!c.halted);
+    assert_eq!(c.regs.b, 1);
+    assert_eq!(b.mem[0xFF0F], 0x04); // not acked: no dispatch
+}
+
+#[test]
+fn halt_ime1_late_if_commit_wakes_one_cycle_later() {
+    // A timer IF committed on the last T-substep of an M-cycle is missed
+    // by that cycle's halt-exit sampling (Bus::pending_halt_wake): the
+    // *next* idle prefetch becomes the aborted dispatch prefetch, so the
+    // vector fetch lands 6 M-cycles after the commit cycle instead of 5
+    // (gambatte tima/tc*_irq_*; wilbertpol acceptance/timer/timer_if
+    // rounds 5/6 — dispatch-from-HALT — vs rounds 3/4 — dispatch from a
+    // NOP sled, which keeps the end-of-fetch sampling and +5).
+    let mut c = cpu();
+    c.ime = true;
+    let mut b = bus(&[0x76]); // HALT
+    b.mem[0xFFFF] = 0x04;
+    step(&mut c, &mut b); // cycle 0: HALT fetch
+    assert!(c.halted);
+    b.late_if = true;
+    b.raise_if = Some((3, 0x04)); // last-substep commit during cycle 3
+    step(&mut c, &mut b); // cycle 1: idle
+    step(&mut c, &mut b); // cycle 2: idle
+    b.take_log();
+    step(&mut c, &mut b); // cycle 3: IF commits too late to be seen
+    assert!(c.halted, "the commit cycle's wake check misses the IF bit");
+    step(&mut c, &mut b); // cycle 4: wake -> aborted prefetch + dispatch
+    assert_eq!(
+        b.take_log(),
+        [
+            Read(PC0 + 1, 0x00),  // cycle 3: still idle
+            Read(PC0 + 1, 0x00),  // cycle 4: aborted dispatch prefetch
+            Tick,                 // cycle 5
+            Tick,                 // cycle 6
+            Write(SP0 - 1, 0xC0), // cycle 7
+            Write(SP0 - 2, 0x01), // cycle 8: return addr = after HALT
+            Read(0x0050, 0x00),   // cycle 9: vector fetch = commit + 6
+        ]
+    );
+    assert!(!c.halted);
+    assert_eq!(b.mem[0xFF0F], 0); // acked
+}
+
+#[test]
+fn halt_ime0_late_if_commit_also_wakes_one_cycle_later() {
+    // The same intra-cycle sample feeds the IME=0 resume (SameBoy
+    // sm83_cpu.c `GB_cpu_run`: one `interrupt_queue` sample serves both
+    // wake paths): a late IF commit keeps the IME=0 halt asleep for one
+    // more idle cycle too. Mooneye halt_ime0_nointr_timing stays exact
+    // because its wake source is the vblank IF, which is not a late
+    // commit (it also anchors its DIV reset with the same one-cycle
+    // shift, so even a shifted source would cancel out there).
+    let mut c = cpu();
+    let mut b = bus(&[0x76, 0x04]); // HALT; INC B
+    b.mem[0xFFFF] = 0x04;
+    step(&mut c, &mut b); // cycle 0: HALT fetch
+    b.late_if = true;
+    b.raise_if = Some((2, 0x04)); // second-half commit during cycle 2
+    step(&mut c, &mut b); // cycle 1: idle
+    assert!(c.halted);
+    b.take_log();
+    step(&mut c, &mut b); // cycle 2: commit invisible to the wake check
+    assert!(c.halted, "the commit cycle's wake check misses the IF bit");
+    step(&mut c, &mut b); // cycle 3: wakes and executes INC B
+    assert_eq!(
+        b.take_log(),
+        [Read(PC0 + 1, 0x04), Read(PC0 + 1, 0x04)] // cycles 2 and 3
+    );
     assert!(!c.halted);
     assert_eq!(c.regs.b, 1);
     assert_eq!(b.mem[0xFF0F], 0x04); // not acked: no dispatch
