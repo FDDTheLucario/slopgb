@@ -57,7 +57,13 @@ slopgb is a cycle-accurate Game Boy (DMG) / Game Boy Color (CGB) emulator.
 | C000-DFFF | WRAM (CGB: D000 banked via SVBK, banks 1-7) |
 | E000-FDFF | echo of C000-DDFF |
 | FE00-FE9F | `Ppu` OAM (mode + DMA blocking) |
-| FEA0-FEFF | prohibited area (model-specific reads; DMG: OAM-corruption-free 00/FF behavior — see Pan Docs) |
+| FEA0-FEFF | prohibited area (model-specific reads; DMG: 00/FF behavior — see Pan Docs) |
+
+Any CPU access with a $FE00-$FEFF value on the address bus during the
+mode-2 OAM scan triggers the DMG-family OAM corruption bug (Pan Docs "OAM
+Corruption Bug"): `Interconnect` gates on model/halt/DMA and routes to
+`Ppu::oam_bug`; the 16-bit inc/dec-unit CPU cycles reach it through
+`Bus::tick_addr`/`Bus::read_inc` (blargg `oam_bug/` is the oracle).
 | FF00 | `Joypad` |
 | FF01-FF02 | `Serial` |
 | FF04-FF07 | `Timer` |
