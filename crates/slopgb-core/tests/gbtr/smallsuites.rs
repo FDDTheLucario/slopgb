@@ -231,14 +231,19 @@ fn smallsuites_bully() {
 
 // -------------------------------------------------------- strikethrough --
 
-// Both legs differ by the same 53 pixels around y=68 (the test's
-// strikethrough-line region): the ROM races an OAM DMA against the mode-2
-// scan so the PPU catches exactly one sprite of the line before OAM cuts
-// off — hardware disconnects the PPU's OAM view at a precise dot inside
-// the transfer, while this emulator's monolithic per-line scan still
-// reads the partially-copied OAM array. Same per-dot scan/disconnect
-// mechanism as the gambatte oamdma/late_sp* baseline rows; needs a
-// dot-serial OAM scan to fix.
+// Both legs differ by the same 7 pixels at y=68, x=71-78 (one sprite
+// cell): the ROM races an OAM DMA against the mode-2 scan, and the
+// dot-serial scan + DMA disconnect (calibrated by the gambatte
+// oamdma/late_sp* family) reproduce the strikethrough rows' sprites
+// vanishing exactly — the pre-rewrite diff was 53 pixels. The residue is
+// the single *glitch* sprite cell hardware still renders out of the
+// disconnected bus: its data is undocumented DMA-driver residue (the
+// ROM's own source marks the controlling byte "seems to affect the tile
+// number of the sprite thats shown" — the same unexplained family as the
+// madness MGB freeze glitch), gambatte's rdisabledRam model cannot
+// produce it, and reading the in-flight byte instead contradicts the
+// dmg08-verified oamdma/late_sp* out0 rows. No documented mechanism to
+// emulate; floored.
 const STRIKETHROUGH_BASELINE: &[&str] = &[
     "strikethrough/strikethrough.gb [Dmg]",
     "strikethrough/strikethrough.gb [Cgb]",

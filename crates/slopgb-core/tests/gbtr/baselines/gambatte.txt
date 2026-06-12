@@ -303,12 +303,17 @@ gambatte/oam_access/prewrite_2_dmg08_out1_cgb04c_out0.gbc [Dmg]
 # (write-side conflicts, CGB WRAM redirect, CGB invalid >=E0 sources,
 # CGB-C FEA0-FEFF extra RAM, FF46 mid-flight retarget), clustered by
 # mechanism:
-# * late_sp* + oamdma_late_halt_stat/late_speedchange_stat: sub-M-cycle
-#   alignment of the DMA engine (start / halt-freeze / speed-switch)
-#   against the PPU: hardware disconnects the PPU's OAM view at a precise
-#   dot, raced against the dot-serial mode-2 scan of one sprite slot;
-#   this emulator scans a line's OAM monolithically and steps the DMA at
-#   M-cycle granularity (same mechanism as smallsuites strikethrough.gb).
+# * late_sp* _ds rows (+ late_sp39x_4, oamdma_late_speedchange_stat_2):
+#   the dot-serial scan + DMA disconnect (2026-06) flipped the
+#   single-speed late_sp/halt_stat family — these double-speed siblings
+#   race the same window edges at gambatte's half-dot cc granularity
+#   (its OamReader resolves 2 cc per ds dot), unrepresentable on the
+#   whole-dot lattice, AND their out3 reads sit one dot past our
+#   ds mode-0 flip (lead 1; the frozen m0 event grid) even when the
+#   selection resolves correctly — verified by tracing: the raced slot
+#   selects/drops exactly per the asm in every ds row. late_sp39x_4 and
+#   the speedchange pair read at the same flip/pause-end boundary
+#   (see the speed-switch swaps block below for stat_1).
 # * (resolved 2026-06: the srcFE00_* [Dmg] rows passed once DMG-family
 #   WRAM got its power-on stripe pattern — Interconnect::
 #   install_power_on_wram, gambatte mem_dumps.h setInitialDmgWram.)
@@ -320,31 +325,13 @@ gambatte/oam_access/prewrite_2_dmg08_out1_cgb04c_out0.gbc [Dmg]
 #   the last capture (block offset $0B) is cut off by the transfer's end
 #   - the same M0-trigger/steal dot parity the dma/hdma_start_*_1 rows
 #   pin (see the mode-3 swaps block below).
-gambatte/oamdma/late_sp00x_1_dmg08_cgb04c_out0.gbc [Dmg]
-gambatte/oamdma/late_sp00x_1_dmg08_cgb04c_out0.gbc [Cgb]
 gambatte/oamdma/late_sp00x_ds_2_cgb04c_out3.gbc [Cgb]
-gambatte/oamdma/late_sp00y_2_dmg08_cgb04c_out0.gbc [Dmg]
-gambatte/oamdma/late_sp00y_2_dmg08_cgb04c_out0.gbc [Cgb]
 gambatte/oamdma/late_sp00y_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/oamdma/late_sp01x_1_dmg08_cgb04c_out0.gbc [Dmg]
-gambatte/oamdma/late_sp01x_1_dmg08_cgb04c_out0.gbc [Cgb]
 gambatte/oamdma/late_sp01x_ds_2_cgb04c_out3.gbc [Cgb]
-gambatte/oamdma/late_sp01y_2_dmg08_cgb04c_out0.gbc [Dmg]
-gambatte/oamdma/late_sp01y_2_dmg08_cgb04c_out0.gbc [Cgb]
 gambatte/oamdma/late_sp01y_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/oamdma/late_sp02x_1_dmg08_cgb04c_out0.gbc [Dmg]
-gambatte/oamdma/late_sp02x_1_dmg08_cgb04c_out0.gbc [Cgb]
-gambatte/oamdma/late_sp02y_2_dmg08_cgb04c_out0.gbc [Dmg]
-gambatte/oamdma/late_sp02y_2_dmg08_cgb04c_out0.gbc [Cgb]
-gambatte/oamdma/late_sp39x_1_dmg08_cgb04c_out0.gbc [Dmg]
-gambatte/oamdma/late_sp39x_1_dmg08_cgb04c_out0.gbc [Cgb]
 gambatte/oamdma/late_sp39x_4_cgb04c_out3.gbc [Cgb]
 gambatte/oamdma/late_sp39x_ds_2_cgb04c_out3.gbc [Cgb]
-gambatte/oamdma/late_sp39y_2_dmg08_cgb04c_out0.gbc [Dmg]
-gambatte/oamdma/late_sp39y_2_dmg08_cgb04c_out0.gbc [Cgb]
 gambatte/oamdma/late_sp39y_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/oamdma/oamdma_late_halt_stat_1_dmg08_cgb04c_out0.gbc [Dmg]
-gambatte/oamdma/oamdma_late_halt_stat_1_dmg08_cgb04c_out0.gbc [Cgb]
 gambatte/oamdma/oamdma_late_speedchange_stat_2_cgb04c_out3.gbc [Cgb]
 gambatte/oamdma/oamdmasrcC000_hdmasrc0000_cgb04c_out0A940C0D.gbc [Cgb]
 gambatte/scx_during_m3/old/offset_3/scx_during_m3_2.gb [Dmg]
@@ -629,24 +616,23 @@ gambatte/sprites/late_disable_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/late_sizechange2_sp00_2_dmg08_cgb04c_out0.gbc [Dmg]
 gambatte/sprites/late_sizechange2_sp00_2_dmg08_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/late_sizechange2_sp00_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/late_sizechange2_sp01_2_dmg08_cgb04c_out0.gbc [Dmg]
-gambatte/sprites/late_sizechange2_sp01_2_dmg08_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/late_sizechange2_sp01_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/late_sizechange2_sp02_2_dmg08_cgb04c_out0.gbc [Dmg]
 gambatte/sprites/late_sizechange2_sp02_2_dmg08_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/late_sizechange2_sp39_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/late_sizechange_2_dmg08_out0_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/late_sizechange_3_dmg08_cgb04c_out3.gbc [Dmg]
-gambatte/sprites/late_sizechange_3_dmg08_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/late_sizechange_ds_2_cgb04c_out3.gbc [Cgb]
+# late_sizechange_ds_1: adjacent-cycle sibling traded for the previously
+# red late_sizechange_ds_2 by the dot-serial scan's per-entry LCDC.2
+# sample (2026-06): the ds pair brackets the slot's latch at gambatte's
+# half-dot cc granularity — the same unrepresentable half-cell as the
+# oamdma late_sp* _ds block above.
+gambatte/sprites/late_sizechange_ds_1_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/late_sizechange_sp00_2_dmg08_cgb04c_out3.gbc [Dmg]
 gambatte/sprites/late_sizechange_sp00_2_dmg08_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/late_sizechange_sp00_4_dmg08_cgb04c_out0.gbc [Dmg]
 gambatte/sprites/late_sizechange_sp00_4_dmg08_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/late_sizechange_sp00_ds_2_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/late_sizechange_sp01_2_dmg08_out0_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/late_sizechange_sp01_3_dmg08_cgb04c_out3.gbc [Dmg]
-gambatte/sprites/late_sizechange_sp01_3_dmg08_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/late_sizechange_sp01_ds_2_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/late_sizechange_sp02_2_dmg08_cgb04c_out3.gbc [Dmg]
 gambatte/sprites/late_sizechange_sp02_2_dmg08_cgb04c_out3.gbc [Cgb]

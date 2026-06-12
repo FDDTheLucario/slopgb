@@ -192,6 +192,15 @@ pub struct Interconnect {
     dma_reg: u8,
     dma_run: Option<OamDmaRun>,
     dma_start: Option<OamDmaStart>,
+    /// A transfer owned OAM at the head of the previous M-cycle — the
+    /// one-cycle trailing edge of the PPU scan-disconnect level (see
+    /// [`Self::oam_dma_tick`]).
+    dma_oam_owned_prev: bool,
+    /// The byte copied by this M-cycle's controller advance, committed to
+    /// OAM at the head of the next one (gambatte's end-of-cycle copy
+    /// timestamp — see [`Self::oam_dma_commit_pending`]). A conflicted
+    /// CPU write derails into this slot before it lands.
+    dma_pending_oam: Option<(u8, u8)>,
     /// CPU core clock gated off by HALT/STOP (see [`Self::set_cpu_halted`]).
     /// The OAM DMA controller shares that clock and freezes with it.
     cpu_halted: bool,
@@ -299,6 +308,8 @@ impl Interconnect {
             dma_reg: 0,
             dma_run: None,
             dma_start: None,
+            dma_oam_owned_prev: false,
+            dma_pending_oam: None,
             cpu_halted: false,
             dma_conflict: None,
             extra_oam: [0; 24],
@@ -749,6 +760,11 @@ impl Interconnect {
             // every CPU bus access ticks the machine, refreshing it,
             // before the access.
             self.oam_dma_tick();
+            // The catch-up byte commits at the wake itself (SameBoy's
+            // GB_dma_run writes within the call); no PPU dots run before
+            // the next machine cycle's head, so this is indistinguishable
+            // from the regular deferred commit to the scan.
+            self.oam_dma_commit_pending();
             self.vram_dma_unhalt();
         }
     }
@@ -770,8 +786,41 @@ impl Interconnect {
         self.ppu.set_oam_dma_freeze(freeze);
     }
 
+    /// Commit the previous M-cycle's OAM DMA byte to OAM. gambatte
+    /// timestamps each copy at the *end* of its M-cycle (memory.cpp
+    /// `updateOamDma`: `lastOamDmaUpdate_ += 4` before the
+    /// `ioamhram_[oamDmaPos_]` store), so the PPU dots of the copying
+    /// cycle still see the old byte — the mode-2 scan latch racing the
+    /// transfer's first byte depends on it (late_sp01x/02x `_1`: the
+    /// slot's Y is rewritten by byte 0 in the very cycle the scan latches
+    /// it, and hardware still selects the old sprite). Runs at the head
+    /// of every controller advance, before this cycle's copy is staged.
+    fn oam_dma_commit_pending(&mut self) {
+        if let Some((idx, byte)) = self.dma_pending_oam.take() {
+            self.ppu.oam_dma_write(idx, byte);
+        }
+    }
+
     fn oam_dma_tick(&mut self) {
         self.dma_conflict = None;
+        self.oam_dma_commit_pending();
+        // The PPU's OAM view for this M-cycle's dots: disconnected while
+        // the controller owns OAM, so the mode-2 scan latches $FF
+        // (gambatte memory.cpp startOamDma/endOamDma switch the
+        // OamReader's source to rdisabledRam). Both edges trail the
+        // controller state by one M-cycle: gambatte timestamps
+        // startOamDma at the byte-0 copy step — the end of our promoting
+        // cycle, whose dots therefore still latch real OAM — and
+        // endOamDma one position step *past* byte 159, so the dots of
+        // the cycle after the last copy are still disconnected (the
+        // `prev ||` term). The level deliberately keeps refreshing
+        // through the halted/bus-stolen early returns below: a frozen
+        // transfer owns OAM for the whole freeze
+        // (oamdma_late_halt_stat/late_speedchange_stat).
+        let owned = self.dma_run.is_some();
+        self.ppu
+            .set_oam_dma_active(owned || self.dma_oam_owned_prev);
+        self.dma_oam_owned_prev = owned;
         // HALT/STOP gate the CPU core clock that drives this controller:
         // neither the setup delay nor the transfer advances while the CPU
         // is halted (see set_cpu_halted; madness/mgb_oam_dma_halt_sprites).
@@ -784,7 +833,7 @@ impl Interconnect {
         self.oam_dma_promote_start();
         if let Some(run) = self.dma_run {
             let byte = self.oam_dma_source_read(run.src, run.idx);
-            self.ppu.oam_dma_write(run.idx, byte);
+            self.dma_pending_oam = Some((run.idx, byte));
             self.dma_conflict = Some(DmaConflict {
                 kind: self.dma_src_kind(run.src),
                 src_hi: (run.src >> 8) as u8,
@@ -1213,8 +1262,9 @@ impl Interconnect {
                     // CGB quirk: the conflicted read also clears the
                     // in-flight OAM byte (gambatte memory.cpp:
                     // `ioamhram_[oamDmaPos_] = 0` after a vram-source
-                    // conflict read).
-                    self.ppu.oam_dma_write(c.idx, 0);
+                    // conflict read) — replacing the cycle's pending
+                    // byte, like a derailed write.
+                    self.dma_pending_oam = Some((c.idx, 0));
                 }
                 return c.byte;
             }
@@ -1243,10 +1293,14 @@ impl Interconnect {
         // oamdma_srcXXXX_busypush/busypop matrix).
         if let Some(c) = self.dma_conflict {
             if self.in_dma_conflict_area(c.kind, addr) {
+                // The derailed byte rides the transfer's own OAM write
+                // slot, so it replaces the cycle's pending byte and lands
+                // at the same end-of-cycle commit point
+                // ([`Self::oam_dma_commit_pending`]).
                 if self.model.is_cgb() {
                     if addr < 0xC000 {
                         let byte = if c.kind == DmaSrcKind::Vram { 0 } else { value };
-                        self.ppu.oam_dma_write(c.idx, byte);
+                        self.dma_pending_oam = Some((c.idx, byte));
                     } else if c.kind != DmaSrcKind::Wram {
                         let i = self.dma_redirect_wram_index(&c, addr);
                         self.wram[i] = value;
@@ -1258,7 +1312,7 @@ impl Interconnect {
                     } else {
                         value
                     };
-                    self.ppu.oam_dma_write(c.idx, byte);
+                    self.dma_pending_oam = Some((c.idx, byte));
                 }
                 return;
             }
@@ -2137,6 +2191,58 @@ mod tests {
         assert_eq!(b.read(0xFE9F), 0x80u8.wrapping_add(159));
     }
 
+    /// The PPU's OAM view disconnects while the OAM DMA controller owns
+    /// OAM — for the dots of cycles W+3 .. W+162 around an FF46 write at
+    /// cycle W: gambatte memory.cpp timestamps startOamDma at the byte-0
+    /// copy step (the end of our W+2) and endOamDma one step past byte
+    /// 159 (the end of our W+162), and the OamReader latches real OAM up
+    /// to each timestamp. 160 disconnected M-cycles total; the gambatte
+    /// oamdma/late_sp* `_1`/`_2` pairs pin both edges at M-cycle
+    /// granularity per scanned sprite slot.
+    #[test]
+    fn oam_dma_disconnects_ppu_scan_for_160_cycles() {
+        let mut b = ic(Model::Dmg);
+        fill_wram(&mut b, 0xC000, 0x80, 160);
+        b.write(0xFF46, 0xC0); // cycle W
+        b.tick();
+        assert!(!b.ppu.oam_dma_scan_disconnected(), "W+1: setup delay");
+        b.tick();
+        assert!(
+            !b.ppu.oam_dma_scan_disconnected(),
+            "W+2: byte 0 lands at the cycle's end"
+        );
+        for k in 3..163 {
+            b.tick();
+            assert!(b.ppu.oam_dma_scan_disconnected(), "W+{k}");
+        }
+        b.tick();
+        assert!(!b.ppu.oam_dma_scan_disconnected(), "W+163: reconnected");
+    }
+
+    /// HALT gates the controller's clock mid-transfer: the disconnect
+    /// level persists for the whole freeze (gambatte updateOamDma's
+    /// halted() path advances no position and never reaches endOamDma —
+    /// the OamReader source stays rdisabledRam; dmg08-verified by
+    /// gambatte oamdma_late_halt_stat_1/_2).
+    #[test]
+    fn oam_dma_disconnect_persists_through_halt_freeze() {
+        let mut b = ic(Model::Dmg);
+        fill_wram(&mut b, 0xC000, 0x80, 160);
+        b.write(0xFF46, 0xC0);
+        ticks(&mut b, 10);
+        assert!(b.ppu.oam_dma_scan_disconnected());
+        b.set_cpu_halted(true);
+        ticks(&mut b, 400); // far past the un-frozen end of the transfer
+        assert!(
+            b.ppu.oam_dma_scan_disconnected(),
+            "frozen transfer still owns OAM"
+        );
+        b.set_cpu_halted(false);
+        // The remaining ~152 bytes finish after the wake; then reconnect.
+        ticks(&mut b, 160);
+        assert!(!b.ppu.oam_dma_scan_disconnected());
+    }
+
     #[test]
     fn oam_dma_reg_reads_back_last_write() {
         let mut b = ic(Model::Dmg);
@@ -2275,6 +2381,7 @@ mod tests {
         b.set_cpu_halted(false);
         assert_eq!(b.peek(0xFE05), 0x55, "catch-up copy at the gate release");
         assert_eq!(b.peek(0xFE06), 0x00, "exactly one cycle of catch-up");
+        b.tick(); // copies idx 6, committing at the next cycle's head
         b.tick();
         assert_eq!(b.peek(0xFE06), 0x56);
     }
@@ -2296,7 +2403,8 @@ mod tests {
         assert!(b.stop(0x0000, false)); // read cycle copies idx 5, then pause
         assert_eq!(b.peek(0xFE05), 0x55);
         assert_eq!(b.peek(0xFE06), 0x00, "frozen across the pause, no catch-up");
-        b.tick();
+        b.tick(); // copies idx 6: the first post-pause cycle...
+        b.tick(); // ...committing at the next cycle's head
         assert_eq!(
             b.peek(0xFE06),
             0x56,
