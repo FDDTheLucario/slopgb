@@ -1,1 +1,612 @@
-//! smallsuites suite harness — filled in by Phase B (see tests/gbtr.rs module docs).
+//! Small screenshot suites of the c-sp collection: `bully/`,
+//! `strikethrough/`, `turtle-tests/`, `scribbltests/`, `little-things-gb/`,
+//! `mbc3-tester/` and `rtc3test/`.
+//!
+//! All of these are timed-run + frame-compare suites (no breakpoint or
+//! serial completion signal); each directory's `game-boy-test-roms-howto.md`
+//! gives the emulated run time and the reference screenshot(s). Run times
+//! below are the howto figures plus ~30% margin — the result screens are
+//! stable once drawn, so extra time is safe. The references use the
+//! collection's "common palette" — DMG greys FF/AA/55/00 and straight 5→8
+//! CGB expansion — which is exactly the core's output, so every comparison
+//! here uses [`CgbColorMap::Identity`].
+
+use std::path::Path;
+
+use slopgb_core::{Button, GameBoy, Model};
+
+use crate::common;
+use crate::common::framecmp::CgbColorMap;
+use crate::harness::{self, CaseResult, case_key};
+
+/// T-cycles per PPU scanline (Pan Docs "Rendering": 456 dots).
+const TCYCLES_PER_LINE: u64 = 456;
+/// T-cycles per frame (154 scanlines x 456 dots).
+const TCYCLES_PER_FRAME: u64 = 154 * TCYCLES_PER_LINE;
+
+/// Collection directories this module owns (see the inventory test).
+const SUITE_DIRS: [&str; 7] = [
+    "bully",
+    "strikethrough",
+    "turtle-tests",
+    "scribbltests",
+    "little-things-gb",
+    "mbc3-tester",
+    "rtc3test",
+];
+
+/// Reference-PNG filename suffix for the two models these suites run on.
+fn png_suffix(model: Model) -> &'static str {
+    match model {
+        Model::Dmg => "dmg",
+        Model::Cgb => "cgb",
+        other => panic!("smallsuites only routes Dmg/Cgb, got {other:?}"),
+    }
+}
+
+/// Step until at least `tcycles` more T-cycles have elapsed (instruction
+/// granularity, like `harness::run_for_seconds` — the overshoot is at most
+/// one instruction).
+fn run_for_tcycles(gb: &mut GameBoy, tcycles: u64) {
+    let target = gb.cycles().saturating_add(tcycles);
+    while gb.cycles() < target {
+        gb.step();
+    }
+}
+
+/// One menu tap: press, hold a few frames, release, settle a few frames —
+/// these ROMs poll the joypad (or take the interrupt) once per frame, so a
+/// multi-frame hold registers reliably.
+fn tap(gb: &mut GameBoy, b: Button) {
+    gb.press(b);
+    harness::run_for_frames(gb, 3);
+    gb.release(b);
+    harness::run_for_frames(gb, 3);
+}
+
+/// Shared case plumbing: read `rom_rel`, boot it on `model`, drive the
+/// machine via `drive`, then settle on the next completed frame boundary
+/// and compare against `png_rel`.
+///
+/// `case_rel` is the baseline-key identity — equal to `rom_rel` except for
+/// rtc3test, where one ROM hosts three menu-selected subtests and the key
+/// carries a `#<subtest>` discriminator.
+fn frame_case(
+    root: &Path,
+    rom_rel: &str,
+    case_rel: &str,
+    model: Model,
+    png_rel: &str,
+    drive: impl FnOnce(&mut GameBoy),
+) -> CaseResult {
+    let key = case_key(case_rel, model);
+    let result = (|| {
+        let rom = std::fs::read(root.join(rom_rel)).map_err(|e| format!("read failed: {e}"))?;
+        let mut gb = harness::boot(&rom, model);
+        drive(&mut gb);
+        // Timed runs stop mid-frame; advance to the next completed frame
+        // boundary so the comparison sees a frame rendered entirely after
+        // the howto's exit condition (`GameBoy::frame` returns the most
+        // recently *completed* frame).
+        harness::run_for_frames(&mut gb, 1);
+        harness::expect_frame_png(&gb, &root.join(png_rel), CgbColorMap::Identity)
+    })();
+    CaseResult { key, result }
+}
+
+// ---------------------------------------------------------------- bully --
+
+// Both legs show scattered fail markers in the ROM's test grid (~420/290
+// pixels off). The DMG leg may be the howto's documented real-hardware
+// behavior (DMG-C fails "Bad Echo RAM Reads"); triage in a later phase.
+const BULLY_BASELINE: &[&str] = &["bully/bully.gb [Dmg]", "bully/bully.gb [Cgb]"];
+
+/// BullyGB (`bully/game-boy-test-roms-howto.md`): run 0.5 emulated seconds,
+/// compare against the single `bully.png`. Device-specific test cases are
+/// "included/skipped automatically" by the ROM itself (BullyGB wiki), so the
+/// one reference applies to both DMG and CGB.
+///
+/// Howto caveat: a *real* DMG (DMG-CPU C) fails with `Bad Echo RAM Reads`
+/// while CGB devices pass — so a faithful DMG emulation may legitimately
+/// mismatch the reference; the baseline records the observed verdict.
+#[test]
+fn smallsuites_bully() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "smallsuites_bully",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let mut results = Vec::new();
+    for model in [Model::Dmg, Model::Cgb] {
+        results.push(frame_case(
+            &root,
+            "bully/bully.gb",
+            "bully/bully.gb",
+            model,
+            "bully/bully.png",
+            |gb| harness::run_for_seconds(gb, 0.65),
+        ));
+    }
+    harness::assert_against_baseline("smallsuites/bully", &results, BULLY_BASELINE);
+}
+
+// -------------------------------------------------------- strikethrough --
+
+// Both legs differ by the same 53 pixels around y=68 (the test's
+// strikethrough-line region); triage in a later phase.
+const STRIKETHROUGH_BASELINE: &[&str] = &[
+    "strikethrough/strikethrough.gb [Dmg]",
+    "strikethrough/strikethrough.gb [Cgb]",
+];
+
+/// Strikethrough (`strikethrough/game-boy-test-roms-howto.md`): run 0.5
+/// emulated seconds, compare against the per-model reference.
+#[test]
+fn smallsuites_strikethrough() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "smallsuites_strikethrough",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let mut results = Vec::new();
+    for model in [Model::Dmg, Model::Cgb] {
+        results.push(frame_case(
+            &root,
+            "strikethrough/strikethrough.gb",
+            "strikethrough/strikethrough.gb",
+            model,
+            &format!("strikethrough/strikethrough-{}.png", png_suffix(model)),
+            |gb| harness::run_for_seconds(gb, 0.65),
+        ));
+    }
+    harness::assert_against_baseline(
+        "smallsuites/strikethrough",
+        &results,
+        STRIKETHROUGH_BASELINE,
+    );
+}
+
+// --------------------------------------------------------- turtle-tests --
+
+const TURTLE_BASELINE: &[&str] = &[];
+
+/// Turtle Tests (`turtle-tests/game-boy-test-roms-howto.md`): around 30
+/// frames is sufficient (run 40); one suffix-less reference per ROM, valid
+/// on both DMG and CGB ("these tests will probably run on any DMG and CGB").
+#[test]
+fn smallsuites_turtle_tests() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "smallsuites_turtle_tests",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let cases = [
+        (
+            "turtle-tests/window_y_trigger/window_y_trigger.gb",
+            "turtle-tests/window_y_trigger/window_y_trigger.png",
+        ),
+        (
+            "turtle-tests/window_y_trigger_wx_offscreen/window_y_trigger_wx_offscreen.gb",
+            "turtle-tests/window_y_trigger_wx_offscreen/window_y_trigger_wx_offscreen.png",
+        ),
+    ];
+    let mut results = Vec::new();
+    for (rom_rel, png_rel) in cases {
+        for model in [Model::Dmg, Model::Cgb] {
+            results.push(frame_case(&root, rom_rel, rom_rel, model, png_rel, |gb| {
+                harness::run_for_frames(gb, 40)
+            }));
+        }
+    }
+    harness::assert_against_baseline("smallsuites/turtle-tests", &results, TURTLE_BASELINE);
+}
+
+// --------------------------------------------------------- scribbltests --
+
+// scxly fails on both models (SCX-during-LY behavior, whole test area
+// off); the palettely/scxly CGB legs additionally render the core's grey
+// compat palette where the references show CGB-boot-assigned colors.
+const SCRIBBL_BASELINE: &[&str] = &[
+    "scribbltests/palettely/palettely.gb [Cgb]",
+    "scribbltests/scxly/scxly.gb [Dmg]",
+    "scribbltests/scxly/scxly.gb [Cgb]",
+];
+
+/// Scribbltests (`scribbltests/game-boy-test-roms-howto.md`): around 10
+/// frames is enough (run 15) except `statcount-auto`, which needs ~270
+/// frames (run 350). Verified by the author on MGB and CGB; lycscx, lycscy
+/// and statcount-auto share one `-cgb-dmg` reference for both models, while
+/// palettely and scxly have per-model references.
+///
+/// `fairylake`, `winpos` and the plain `statcount` are exempt — see
+/// [`inventory`].
+#[test]
+fn smallsuites_scribbltests() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "smallsuites_scribbltests",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    // (rom, reference on Dmg, reference on Cgb, frames to run)
+    let cases = [
+        (
+            "scribbltests/lycscx/lycscx.gb",
+            "scribbltests/lycscx/lycscx-cgb-dmg.png",
+            "scribbltests/lycscx/lycscx-cgb-dmg.png",
+            15u64,
+        ),
+        (
+            "scribbltests/lycscy/lycscy.gb",
+            "scribbltests/lycscy/lycscy-cgb-dmg.png",
+            "scribbltests/lycscy/lycscy-cgb-dmg.png",
+            15,
+        ),
+        (
+            "scribbltests/palettely/palettely.gb",
+            "scribbltests/palettely/palettely-dmg.png",
+            "scribbltests/palettely/palettely-cgb.png",
+            15,
+        ),
+        (
+            "scribbltests/scxly/scxly.gb",
+            "scribbltests/scxly/scxly-dmg.png",
+            "scribbltests/scxly/scxly-cgb.png",
+            15,
+        ),
+        (
+            "scribbltests/statcount/statcount-auto.gb",
+            "scribbltests/statcount/statcount_auto-cgb-dmg.png",
+            "scribbltests/statcount/statcount_auto-cgb-dmg.png",
+            350,
+        ),
+    ];
+    let mut results = Vec::new();
+    for (rom_rel, png_dmg, png_cgb, frames) in cases {
+        for (model, png_rel) in [(Model::Dmg, png_dmg), (Model::Cgb, png_cgb)] {
+            results.push(frame_case(&root, rom_rel, rom_rel, model, png_rel, |gb| {
+                harness::run_for_frames(gb, frames)
+            }));
+        }
+    }
+    harness::assert_against_baseline("smallsuites/scribbltests", &results, SCRIBBL_BASELINE);
+}
+
+// ----------------------------------------------------- little-things-gb --
+
+// Both CGB legs fail on colors only: the core renders its grey DMG-compat
+// palette where the references show the CGB boot ROM's per-game palette
+// (firstwhite also shows non-white pixels in its first-frame window).
+// The DMG legs pass — the tellinglys drive sequence itself is sound.
+const LITTLE_THINGS_BASELINE: &[&str] = &[
+    "little-things-gb/firstwhite.gb [Cgb]",
+    "little-things-gb/tellinglys.gb [Cgb]",
+];
+
+/// Joypad schedule for `little-things-gb/tellinglys.gb`:
+/// `(button, gap_tcycles_before_press, hold_tcycles)` for all eight buttons.
+///
+/// The ROM seeds its entropy check from the LY register at each joypad
+/// interrupt (tellinglys-readme.md), so the eight press instants must land
+/// on varied scanlines — an emulator that effectively presses everything at
+/// the same frame position fails as "polling occurs on GB vblank".
+fn tellinglys_schedule() -> [(Button, u64, u64); 8] {
+    // Prime scanline counts plus prime dot remainders make every gap
+    // irregular; combined with the whole-frame paddings below (which are
+    // 0 mod the frame period) the cumulative press instants fall on the
+    // pairwise distinct scanlines 83, 26, 139, 117, 113, 126, 0 and 45 —
+    // verified by `smallsuites_tellinglys_schedule_has_entropy`.
+    let gap_lines: [u64; 8] = [83, 97, 113, 131, 149, 167, 181, 199];
+    let gap_dots: [u64; 8] = [101, 151, 199, 251, 307, 353, 409, 31];
+    // Human-tap pacing: hold each button three frames and pad every gap by
+    // ten whole frames (LY-neutral), giving ~220 ms press-to-press —
+    // observed: with only ~4 frames press-to-press the ROM dropped presses
+    // and never reached its pass screen.
+    let pad = 10 * TCYCLES_PER_FRAME;
+    let hold = 3 * TCYCLES_PER_FRAME;
+    let buttons = [
+        Button::A,
+        Button::B,
+        Button::Select,
+        Button::Start,
+        Button::Right,
+        Button::Left,
+        Button::Up,
+        Button::Down,
+    ];
+    let mut sched = [(Button::A, 0u64, 0u64); 8];
+    for (i, &button) in buttons.iter().enumerate() {
+        sched[i] = (
+            button,
+            pad + gap_lines[i] * TCYCLES_PER_LINE + gap_dots[i],
+            hold,
+        );
+    }
+    sched
+}
+
+/// little-things-gb (`little-things-gb/game-boy-test-roms-howto.md`):
+///
+/// * `firstwhite.gb` — result visible nearly immediately; run 0.5 emulated
+///   seconds, one shared `-dmg-cgb` reference for both models (the readme
+///   excludes only the Super Game Boy).
+/// * `tellinglys.gb` — input-driven: starting at the title screen, press
+///   all eight buttons one after another ([`tellinglys_schedule`]), then
+///   give it 5 emulated seconds after the last press for the pass screen;
+///   per-model references.
+#[test]
+fn smallsuites_little_things_gb() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "smallsuites_little_things_gb",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let mut results = Vec::new();
+    for model in [Model::Dmg, Model::Cgb] {
+        results.push(frame_case(
+            &root,
+            "little-things-gb/firstwhite.gb",
+            "little-things-gb/firstwhite.gb",
+            model,
+            "little-things-gb/firstwhite-dmg-cgb.png",
+            |gb| harness::run_for_seconds(gb, 0.65),
+        ));
+        results.push(frame_case(
+            &root,
+            "little-things-gb/tellinglys.gb",
+            "little-things-gb/tellinglys.gb",
+            model,
+            &format!("little-things-gb/tellinglys-{}.png", png_suffix(model)),
+            |gb| {
+                // Let the title screen come up before the first press
+                // (readme: "Starting at the title screen, press ...").
+                harness::run_for_frames(gb, 60);
+                for (button, gap, hold) in tellinglys_schedule() {
+                    run_for_tcycles(gb, gap);
+                    gb.press(button);
+                    run_for_tcycles(gb, hold);
+                    gb.release(button);
+                }
+                // howto: 5 s emulated after the last press is enough.
+                harness::run_for_seconds(gb, 6.5);
+            },
+        ));
+    }
+    harness::assert_against_baseline(
+        "smallsuites/little-things-gb",
+        &results,
+        LITTLE_THINGS_BASELINE,
+    );
+}
+
+// ---------------------------------------------------------- mbc3-tester --
+
+// DMG leg: ~1280 pixels off in the results area; CGB leg additionally
+// renders the core's grey compat palette where the reference shows the
+// CGB boot ROM's per-game colors (#7BFF4A greens).
+const MBC3_TESTER_BASELINE: &[&str] = &[
+    "mbc3-tester/mbc3-tester.gb [Dmg]",
+    "mbc3-tester/mbc3-tester.gb [Cgb]",
+];
+
+/// MBC3 Bank Tester (`mbc3-tester/game-boy-test-roms-howto.md`): the ROM
+/// loops indefinitely, the result is valid after the first 40 frames (run
+/// 60); per-model references — on CGB it runs in CGB compatibility mode.
+#[test]
+fn smallsuites_mbc3_tester() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "smallsuites_mbc3_tester",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let mut results = Vec::new();
+    for model in [Model::Dmg, Model::Cgb] {
+        results.push(frame_case(
+            &root,
+            "mbc3-tester/mbc3-tester.gb",
+            "mbc3-tester/mbc3-tester.gb",
+            model,
+            &format!("mbc3-tester/mbc3-tester-{}.png", png_suffix(model)),
+            |gb| harness::run_for_frames(gb, 60),
+        ));
+    }
+    harness::assert_against_baseline("smallsuites/mbc3-tester", &results, MBC3_TESTER_BASELINE);
+}
+
+// ------------------------------------------------------------- rtc3test --
+
+const RTC3TEST_BASELINE: &[&str] = &[];
+
+/// rtc3test (`rtc3test/game-boy-test-roms-howto.md`): one ROM, three
+/// menu-selected subtests; emulate the button presses, then wait the
+/// documented emulated duration:
+///
+/// | subtest           | presses       | duration |
+/// |-------------------|---------------|----------|
+/// | basic tests       | A             | 13 s     |
+/// | range tests       | down, A       | 8 s      |
+/// | sub-second writes | down, down, A | 26 s     |
+///
+/// "This procedure should be the same on all Game Boy devices"; per-model
+/// references exist for DMG and CGB. Case keys carry a `#<subtest>`
+/// discriminator since all three share one ROM path.
+#[test]
+fn smallsuites_rtc3test() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "smallsuites_rtc3test",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let subtests: [(&str, &[Button], f64); 3] = [
+        ("basic-tests", &[Button::A], 13.0),
+        ("range-tests", &[Button::Down, Button::A], 8.0),
+        (
+            "sub-second-writes",
+            &[Button::Down, Button::Down, Button::A],
+            26.0,
+        ),
+    ];
+    let mut results = Vec::new();
+    for (name, presses, secs) in subtests {
+        for model in [Model::Dmg, Model::Cgb] {
+            results.push(frame_case(
+                &root,
+                "rtc3test/rtc3test.gb",
+                &format!("rtc3test/rtc3test.gb#{name}"),
+                model,
+                &format!("rtc3test/rtc3test-{name}-{}.png", png_suffix(model)),
+                |gb| {
+                    // Let the menu draw (~1 emulated second) before pressing.
+                    harness::run_for_seconds(gb, 1.3);
+                    for &b in presses {
+                        tap(gb, b);
+                    }
+                    harness::run_for_seconds(gb, secs * 1.3);
+                },
+            ));
+        }
+    }
+    harness::assert_against_baseline("smallsuites/rtc3test", &results, RTC3TEST_BASELINE);
+}
+
+// ------------------------------------------------------------ inventory --
+
+/// Every `.gb`/`.gbc` file under [`SUITE_DIRS`], split into ROMs that
+/// produce at least one rom×model case (`claimed`) and documented
+/// never-run ROMs (`exempted`).
+#[allow(dead_code)] // consumed by the Phase B2 inventory guard
+pub fn inventory() -> (Vec<String>, Vec<String>) {
+    let claimed = [
+        "bully/bully.gb",
+        "little-things-gb/firstwhite.gb",
+        "little-things-gb/tellinglys.gb",
+        "mbc3-tester/mbc3-tester.gb",
+        "rtc3test/rtc3test.gb",
+        "scribbltests/lycscx/lycscx.gb",
+        "scribbltests/lycscy/lycscy.gb",
+        "scribbltests/palettely/palettely.gb",
+        "scribbltests/scxly/scxly.gb",
+        "scribbltests/statcount/statcount-auto.gb",
+        "strikethrough/strikethrough.gb",
+        "turtle-tests/window_y_trigger/window_y_trigger.gb",
+        "turtle-tests/window_y_trigger_wx_offscreen/window_y_trigger_wx_offscreen.gb",
+    ]
+    .map(String::from)
+    .to_vec();
+    let exempted = [
+        // scribbltests howto: "there are no screenshots for failrylake and
+        // winpos at the moment". fairylake is additionally "closer to a demo
+        // than a proper test ROM" and WIP (its README) — nothing to compare
+        // against.
+        "scribbltests/fairylake/fairylake.gb",
+        // Same missing-screenshot howto note; winpos is an interactive
+        // debugging tool (its README: WX/WY modified at runtime via the
+        // joypad), with no automatable pass criterion.
+        "scribbltests/winpos/winpos.gb",
+        // statcount/README.md: the plain statcount ROM is the interactive
+        // variant (NOP count selected with Up/Down); only statcount-auto
+        // runs unattended and only it has a reference screenshot.
+        "scribbltests/statcount/statcount.gb",
+    ]
+    .map(String::from)
+    .to_vec();
+    (claimed, exempted)
+}
+
+/// Self-check: `claimed` and `exempted` are disjoint and together cover the
+/// on-disk `.gb`/`.gbc` set of [`SUITE_DIRS`] exactly (the global Phase B2
+/// guard re-asserts this across all suites later).
+#[test]
+fn smallsuites_inventory_covers_suite_dirs() {
+    let (claimed, exempted) = inventory();
+    for c in &claimed {
+        assert!(!exempted.contains(c), "{c} both claimed and exempted");
+    }
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "smallsuites_inventory_covers_suite_dirs",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let mut on_disk = Vec::new();
+    for dir in SUITE_DIRS {
+        let mut roms = Vec::new();
+        common::collect_roms(&root.join(dir), true, &mut roms)
+            .unwrap_or_else(|e| panic!("cannot enumerate {dir}: {e}"));
+        for rom in roms {
+            let rel = rom.strip_prefix(&root).expect("rom under collection root");
+            // Forward-slash keys on every platform (CI runs windows too).
+            on_disk.push(
+                rel.iter()
+                    .map(|c| c.to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/"),
+            );
+        }
+    }
+    on_disk.sort();
+    let mut combined: Vec<String> = claimed.into_iter().chain(exempted).collect();
+    combined.sort();
+    assert_eq!(
+        combined, on_disk,
+        "inventory() must cover the suite dirs exactly"
+    );
+}
+
+// ----------------------------------------------------------- unit tests --
+
+#[test]
+fn smallsuites_tellinglys_schedule_has_entropy() {
+    let sched = tellinglys_schedule();
+    // Every button exactly once (the ROM requires all eight presses).
+    let mut buttons: Vec<String> = sched.iter().map(|(b, _, _)| format!("{b:?}")).collect();
+    buttons.sort();
+    buttons.dedup();
+    assert_eq!(
+        buttons.len(),
+        8,
+        "schedule must press all 8 distinct buttons"
+    );
+    // Press instants, accumulated from a frame boundary (the runner applies
+    // the schedule right after `run_for_frames`), must land on pairwise
+    // distinct scanlines so LY is a genuine entropy source.
+    let mut t = 0u64;
+    let mut lys = Vec::new();
+    for (_, gap, hold) in sched {
+        t += gap;
+        lys.push((t % TCYCLES_PER_FRAME) / TCYCLES_PER_LINE);
+        t += hold;
+    }
+    let mut unique = lys.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(
+        unique.len(),
+        8,
+        "press instants must hit 8 distinct LY lines, got {lys:?}"
+    );
+    // Holds must be long enough for the ROM to display the press (a few
+    // frames, like a human tap) and gaps must be irregular (all distinct).
+    for (_, gap, hold) in sched {
+        assert!(hold >= 2 * TCYCLES_PER_FRAME, "hold too short: {hold}");
+        assert!(gap >= TCYCLES_PER_LINE, "gap too short: {gap}");
+    }
+    let mut gaps: Vec<u64> = sched.iter().map(|(_, g, _)| *g).collect();
+    gaps.sort_unstable();
+    gaps.dedup();
+    assert_eq!(gaps.len(), 8, "gaps must be pairwise distinct");
+}
