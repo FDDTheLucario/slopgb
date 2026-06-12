@@ -1335,8 +1335,6 @@ gambatte/sprites/sprite_late_enable_spx1B_2_dmg08_out0.gb [Dmg]
 gambatte/window/late_disable_early_scx03_wx12_2_dmg08_out0_cgb04c_out3.gbc [Cgb]
 gambatte/window/late_reenable_scx5_1_dmg08_cgb04c_out3.gbc [Cgb]
 gambatte/window/late_reenable_scx5_1_dmg08_cgb04c_out3.gbc [Dmg]
-gambatte/window/late_wx_ff_07_1_dmg08_cgb04c_out3.gbc [Cgb]
-gambatte/window/late_wx_ff_07_1_dmg08_cgb04c_out3.gbc [Dmg]
 
 # Speed-switch / HDMA rework residuals (documented strictly-more-accurate
 # swaps): the STOP pause (gambatte cc+0x20000+4), the gambatte-shaped
