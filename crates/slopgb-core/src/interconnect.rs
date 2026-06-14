@@ -175,6 +175,16 @@ pub struct Interconnect {
     /// unblock lands in this M-cycle's second half (gambatte `cgbpal_m3`).
     /// See `Ppu::pal_access_flip`.
     pal_access_mid_blocked: bool,
+    /// The mode-3→mode-0 STAT mode-bit flip fired in the *second half* of
+    /// the current M-cycle (`Ppu::take_m0_stat_flip` half-classified against
+    /// the dot-loop index): a CPU FF41 read samples the mode bits at the
+    /// cc+2 MID phase, so in double speed it still reads mode 3 when the flip
+    /// lands late (gambatte sprites `m3stat_ds_1`). The FF41 override
+    /// consults this only in double speed; the single-speed STAT-mode read,
+    /// and the first-half/other-chain DS reads, are the parked multi-chain
+    /// problem (see the dot-loop comment). See `Ppu::m0_stat_flip` (sub-dot
+    /// event-phase model, increment INC-DS-1).
+    stat_mode_mid_blocked: bool,
     /// Dispatch-ack source sync-ahead (gambatte-core memory.cpp
     /// `Memory::ackIrq`): the IF clear of an interrupt dispatch happens
     /// slightly *into* the low-push M-cycle on hardware, so it also
@@ -320,6 +330,7 @@ impl Interconnect {
             if_stat_late: 0,
             m0_access_mid_blocked: false,
             pal_access_mid_blocked: false,
+            stat_mode_mid_blocked: false,
             ack_squash_mask: 0,
             ack_squash_ticks: 0,
             ack_squash_dots: 0,
@@ -649,6 +660,7 @@ impl Interconnect {
         self.if_stat_late = 0;
         self.m0_access_mid_blocked = false;
         self.pal_access_mid_blocked = false;
+        self.stat_mode_mid_blocked = false;
         for i in 0..dots {
             // STAT/VBlank rises in the first 2 dots after the ack are
             // consumed too (gambatte ackIrq lcd_.update(cc + 2); in
@@ -707,6 +719,23 @@ impl Interconnect {
                 // Same cc+2 MID rule for the CGB palette-RAM unblock at the
                 // pipe end (gambatte cgbpal_m3).
                 self.pal_access_mid_blocked = true;
+            }
+            if self.ppu.take_m0_stat_flip() && 2 * (i + 1) > dots {
+                // Same cc+2 MID half-classification as the OAM/VRAM access
+                // edge: only a flip in the M-cycle's second half holds the
+                // double-speed FF41 mode bits at the pre-flip mode 3
+                // (gambatte sprites m3stat_ds_1). The kept config (sprite-line
+                // gate on the flip + this half-split) is zero-regression. Two
+                // looser axes were A/B-rejected: dropping the half-split
+                // (whole-M-cycle override) lifts ~84 more rows but regresses
+                // 21 green DS reads that want mode 0, and dropping the
+                // sprite-line gate regresses 5 bare-line reads
+                // (dma gdma/hdma_cycles_scx5_ds_2, lcd_offset m0stat_count) —
+                // both reach FF41 through the m2-dispatch / DMA / lcd-offset
+                // chains at a different sub-cycle offset, the parked
+                // multi-chain CPU↔PPU phase problem (sub-dot event-phase
+                // model, increment INC-DS-1).
+                self.stat_mode_mid_blocked = true;
             }
             // Dot-exact mode-0 entry: each visible line's hblank start
             // requests one HBlank DMA block, serviced at the head of the
@@ -1412,6 +1441,20 @@ impl Interconnect {
             0xFF0F => 0xE0 | self.intf,
             0xFF10..=0xFF3F => self.apu.read(addr),
             0xFF46 => self.dma_reg,
+            // The STAT mode bits read at the cc+2 MID phase: in double speed
+            // a read whose M-cycle straddles the mode-3→mode-0 flip (flip in
+            // the second half) still reads mode 3, where the whole-dot end
+            // view has already flipped to mode 0 (gambatte sprites
+            // m3stat_ds). Only the low mode bits move; the enable bits and
+            // the live LYC compare keep the end view. The LCD-on guard is
+            // belt-and-braces: the flag is only set by a live flip (LCD on)
+            // and reset every tick, so an LCD-off read can never carry it,
+            // but the guard keeps the override from ever forcing mode 3 over
+            // the LCD-off mode 0. Sub-dot event-phase model, increment
+            // INC-DS-1.
+            0xFF41 if self.stat_mode_mid_blocked && self.double_speed && self.ppu.lcd_enabled() => {
+                self.ppu.read(0xFF41) | 0x03
+            }
             0xFF40..=0xFF45 | 0xFF47..=0xFF4B => self.ppu.read(addr),
             0xFF4D if self.cgb_mode => {
                 0x7E | (u8::from(self.double_speed) << 7) | u8::from(self.key1_armed)
@@ -2023,7 +2066,11 @@ mod tests {
                 "scx {scx}: cc+2 MID OAM read"
             );
             b.tick();
-            assert_eq!(b.read_no_tick(0xFE00), 0x00, "scx {scx}: unblocked next cycle");
+            assert_eq!(
+                b.read_no_tick(0xFE00),
+                0x00,
+                "scx {scx}: unblocked next cycle"
+            );
         }
     }
 
@@ -2090,12 +2137,51 @@ mod tests {
     fn cgb_palette_read_mid_override_returns_ff() {
         let mut b = ic(Model::Cgb);
         b.pal_access_mid_blocked = true;
-        assert_eq!(b.read_no_tick(0xFF69), 0xFF, "BG palette read locked at cc+2 MID");
-        assert_eq!(b.read_no_tick(0xFF6B), 0xFF, "OBJ palette read locked at cc+2 MID");
+        assert_eq!(
+            b.read_no_tick(0xFF69),
+            0xFF,
+            "BG palette read locked at cc+2 MID"
+        );
+        assert_eq!(
+            b.read_no_tick(0xFF6B),
+            0xFF,
+            "OBJ palette read locked at cc+2 MID"
+        );
         // The flag is reset every machine tick (only the straddle M-cycle
         // carries it); a normal read goes to the PPU.
         b.tick();
         assert!(!b.pal_access_mid_blocked, "flag cleared by the next tick");
+    }
+
+    /// In double speed the FF41 mode bits read at the cc+2 MID phase: when
+    /// the mode-3→mode-0 flip fired in the straddle M-cycle
+    /// (`stat_mode_mid_blocked`) the STAT read still shows mode 3, even
+    /// though the PPU's whole-dot end view has flipped to mode 0 (gambatte
+    /// sprites m3stat_ds). Single speed keeps the end view (the parked
+    /// multi-chain STAT-mode read). Sub-dot event-phase model, INC-DS-1.
+    #[test]
+    fn stat_mode_read_forces_mode3_at_cc2_mid_in_double_speed() {
+        let mut b = ic(Model::Cgb);
+        // LCD on (the override is LCD-gated) but still in the post-enable
+        // glitch line's early dots, so the end-view mode bits are 0 and the
+        // override is the only source of the mode bits.
+        b.write(0xFF40, 0x80);
+        assert!(b.ppu.lcd_enabled());
+        let base = b.ppu.read(0xFF41) & 0x03;
+        assert_eq!(base, 0, "end-view mode bits are 0");
+        b.stat_mode_mid_blocked = true;
+        // Single speed: the override is gated off, the end view (mode 0)
+        // shows through.
+        b.double_speed = false;
+        assert_eq!(b.read_no_tick(0xFF41) & 0x03, 0, "SS keeps the end view");
+        // Double speed: the straddle M-cycle reads the old mode 3.
+        b.double_speed = true;
+        assert_eq!(b.read_no_tick(0xFF41) & 0x03, 3, "DS cc+2 MID reads mode 3");
+        // Only the low mode bits move — the rest of STAT keeps the end view.
+        assert_eq!(b.read_no_tick(0xFF41) & !0x03, b.ppu.read(0xFF41) & !0x03);
+        // The flag is reset every machine tick (only the straddle carries it).
+        b.tick();
+        assert!(!b.stat_mode_mid_blocked, "flag cleared by the next tick");
     }
 
     #[test]
