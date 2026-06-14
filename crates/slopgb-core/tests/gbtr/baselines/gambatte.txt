@@ -71,7 +71,22 @@
 #    * the halt/ rows: halt-wake sampler staleness (the CGB/AGB
 #      start-of-cycle view of first-half PPU commits, unmodelled
 #      pending a per-model widening of the halt-wake mask) and its
-#      DMG second-half-commit law siblings;
+#      DMG second-half-commit law siblings. PROBED 2026-06 (AXIS-1, a
+#      per-model halt-wake sample phase: CGB/AGB mask the *whole* current
+#      M-cycle's IF commits, not just the second half — if_cycle vs
+#      if_late): it correctly lifts 15 halt/ rows (m1int_ly_2,
+#      lycirq_m2stat_2, late_m0int/m0irq_halt_m0stat_scx3_1b-4b,
+#      m0int/m0irq_m0stat_scx2_ds_2/scx3_2/scx4_2) AND ~24 dma/ *_2-round
+#      rows, but REGRESSES 13 green dma/ rows — 9 class-A ds
+#      (gdma/hdma_cycles_scx5_ds_1, hdma_late_disable_*_ds_1/2,
+#      hdma_late_enable_ds_lcdoffset1_1) and 4 class-B HDMA-seam single-
+#      speed (hdma_late_destl/length/wrambank_1, hdma_start_scx2_1). All
+#      four seam rows HALT to align then trigger HDMA, so the one-cycle
+#      wake shift moves their service seam: AXIS-1 is INSEPARABLE from
+#      classes A (ds) and B (HDMA seam) because gambatte's dma cycle/seam
+#      tests share the halt-wake alignment path. Net +27 but it grows the
+#      floor by 13 — reverted (hold-floor policy). Lift only jointly with
+#      the half-dot grid (class A's precondition), then re-probe.
 #    * cgbpal_m3 boundary rows (anchored against the hdma_start pins),
 #      lyc/lycEnable/m1/m2enable enable-edge *_1 rounds, window/
 #      late_* sub-dot rounds, dmgpalette_during_m3 and
