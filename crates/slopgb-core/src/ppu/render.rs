@@ -783,6 +783,12 @@ impl Ppu {
             160 => {
                 self.render.active = false;
                 self.render_finished = true;
+                // The CGB palette-RAM unblock (this `render_finished` rise)
+                // is half-classified by the interconnect for the cc+2
+                // MID-phase FF69/FF6B read (sub-dot event-phase model);
+                // bare steady-state lines only (see `m0_access_flip`).
+                self.pal_access_flip =
+                    self.render.fetched == 0 && !self.render.win_active && !self.glitch_line;
                 if !self.m0_src {
                     // Zero-lead lines (DMG aborted windows) flip at the
                     // pipe end itself; also the safety net for any
