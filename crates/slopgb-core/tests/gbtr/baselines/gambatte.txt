@@ -1265,7 +1265,8 @@ gambatte/m1/m2m1irq_ifw_ds_1_cgb04c_out3.gbc [Cgb]
 # First class-A double-speed lift of the sub-dot event-phase ladder. The
 # CGB double-speed FF41 mode bits read at the cc+2 MID phase: a third PPU
 # edge `Ppu::m0_stat_flip` (set in m0_flip_events on SPRITE-extended lines,
-# `r.fetched != 0`) → `Interconnect::stat_mode_mid_blocked` (half-split
+# `r.fetched != 0`) → `Interconnect::stat_mode_edge` (the flip's dot-END
+# commit eighth; `stamp_blocks` vs the MID observer = the old half-split
 # `2*(i+1) > dots`) forces the FF41 low mode bits to 3 (the pre-flip mode 3)
 # when a sprite-line m3→m0 flip lands in the read M-cycle's second half AND
 # double_speed AND lcd_enabled. Removed 43 sprites m3stat_ds_1 rows from this

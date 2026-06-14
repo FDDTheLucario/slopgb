@@ -57,6 +57,20 @@ fn obs_pre_edge(obs: u8, edge: u8) -> bool {
     obs < edge
 }
 
+/// Whether a CPU read/write observing at phase `obs` (eighths) is still
+/// blocked by a per-M-cycle accessibility/STAT edge stamped at its dot-END
+/// commit eighth (`Some(edge)` from [`edge_eighth`]; `None` = no edge this
+/// M-cycle). The edge-stamp replaces the old precomputed boolean: storing the
+/// raw commit eighth instead of `obs_pre_edge(MID_PHASE, edge)` lets each read
+/// chain supply its own observer phase (the m2-dispatch ISR read samples at
+/// O=2, not the MID default — see INC-G2). `stamp_blocks(Some(edge),
+/// MID_PHASE)` is bit-identical to the legacy half-split for every dot/speed
+/// (`stamp_blocks_matches_half_split`).
+#[inline]
+fn stamp_blocks(stamp: Option<u8>, obs: u8) -> bool {
+    stamp.is_some_and(|edge| obs_pre_edge(obs, edge))
+}
+
 /// OAM DMA source classes (gambatte-core memptrs.h `OamDmaSrc`, classified
 /// from the FF46 page by memory.cpp `oamDmaInitSetup`). The class decides
 /// what the engine reads and which address pages a CPU access conflicts
@@ -201,23 +215,26 @@ pub struct Interconnect {
     /// read; the m0 IRQ, mode-bit flip and every other access stay on the
     /// whole-dot end view, so this is net-zero except the straddle
     /// M-cycle (gambatte `oam_access/postread_*`). See `Ppu::m0_access_flip`.
-    m0_access_mid_blocked: bool,
-    /// As `m0_access_mid_blocked` but for the CGB palette-RAM unblock
-    /// (anchored at the pipe end / `render_finished`, one dot after the m0
-    /// flip): a cc+2 MID-phase FF69/FF6B read still reads $FF when the
-    /// unblock lands in this M-cycle's second half (gambatte `cgbpal_m3`).
-    /// See `Ppu::pal_access_flip`.
-    pal_access_mid_blocked: bool,
-    /// The mode-3→mode-0 STAT mode-bit flip fired in the *second half* of
-    /// the current M-cycle (`Ppu::take_m0_stat_flip` half-classified against
-    /// the dot-loop index): a CPU FF41 read samples the mode bits at the
-    /// cc+2 MID phase, so in double speed it still reads mode 3 when the flip
-    /// lands late (gambatte sprites `m3stat_ds_1`). The FF41 override
+    /// Stamped with the flip's dot-END commit eighth ([`edge_eighth`]; `None`
+    /// = no flip this M-cycle); a read is blocked when its observer phase
+    /// precedes the stamp ([`stamp_blocks`]).
+    m0_access_edge: Option<u8>,
+    /// As `m0_access_edge` but for the CGB palette-RAM unblock (anchored at
+    /// the pipe end / `render_finished`, one dot after the m0 flip): a cc+2
+    /// MID-phase FF69/FF6B read still reads $FF when the unblock lands in
+    /// this M-cycle's second half (gambatte `cgbpal_m3`). See
+    /// `Ppu::pal_access_flip`.
+    pal_access_edge: Option<u8>,
+    /// The mode-3→mode-0 STAT mode-bit flip's dot-END commit eighth, or
+    /// `None` when no flip lands this M-cycle (`Ppu::take_m0_stat_flip`,
+    /// gated to sprite-extended lines): a CPU FF41 read samples the mode bits
+    /// at the cc+2 MID phase, so in double speed it still reads mode 3 when
+    /// the flip lands late (gambatte sprites `m3stat_ds_1`). The FF41 override
     /// consults this only in double speed; the single-speed STAT-mode read,
     /// and the first-half/other-chain DS reads, are the parked multi-chain
     /// problem (see the dot-loop comment). See `Ppu::m0_stat_flip` (sub-dot
     /// event-phase model, increment INC-DS-1).
-    stat_mode_mid_blocked: bool,
+    stat_mode_edge: Option<u8>,
     /// Dispatch-ack source sync-ahead (gambatte-core memory.cpp
     /// `Memory::ackIrq`): the IF clear of an interrupt dispatch happens
     /// slightly *into* the low-push M-cycle on hardware, so it also
@@ -361,9 +378,9 @@ impl Interconnect {
             ie: 0,
             if_late: 0,
             if_stat_late: 0,
-            m0_access_mid_blocked: false,
-            pal_access_mid_blocked: false,
-            stat_mode_mid_blocked: false,
+            m0_access_edge: None,
+            pal_access_edge: None,
+            stat_mode_edge: None,
             ack_squash_mask: 0,
             ack_squash_ticks: 0,
             ack_squash_dots: 0,
@@ -691,9 +708,9 @@ impl Interconnect {
         self.if_late = if t.late { t_iff } else { 0 };
         self.oam_dma_tick();
         self.if_stat_late = 0;
-        self.m0_access_mid_blocked = false;
-        self.pal_access_mid_blocked = false;
-        self.stat_mode_mid_blocked = false;
+        self.m0_access_edge = None;
+        self.pal_access_edge = None;
+        self.stat_mode_edge = None;
         for i in 0..dots {
             // STAT/VBlank rises in the first 2 dots after the ack are
             // consumed too (gambatte ackIrq lcd_.update(cc + 2); in
@@ -736,7 +753,7 @@ impl Interconnect {
                 // between them.
                 self.if_late |= IF_STAT_BIT;
             }
-            if self.ppu.take_m0_access_flip() && obs_pre_edge(MID_PHASE, edge_eighth(i, dots)) {
+            if self.ppu.take_m0_access_flip() {
                 // The OAM/VRAM accessibility unblock trails the IRQ rise by
                 // one half-dot (gambatte m0Time = xpos lcd_hres+7 vs the IRQ
                 // at +6). A CPU OAM read samples at the cc+2 MID phase — two
@@ -744,16 +761,18 @@ impl Interconnect {
                 // unblock lands in the cycle's second half it still reads
                 // mode 3 ($FF). The IRQ, mode-bit flip and every other
                 // access keep the end view; only the OAM read consults this
-                // (gambatte oam_access/postread_*). Sub-dot event-phase
-                // model, increment 1.
-                self.m0_access_mid_blocked = true;
+                // (gambatte oam_access/postread_*). The edge is stamped with
+                // its dot-END commit eighth; the read decides blocking against
+                // its own observer phase ([`stamp_blocks`]). Sub-dot
+                // event-phase model, increment 1.
+                self.m0_access_edge = Some(edge_eighth(i, dots));
             }
-            if self.ppu.take_pal_access_flip() && obs_pre_edge(MID_PHASE, edge_eighth(i, dots)) {
+            if self.ppu.take_pal_access_flip() {
                 // Same cc+2 MID rule for the CGB palette-RAM unblock at the
                 // pipe end (gambatte cgbpal_m3).
-                self.pal_access_mid_blocked = true;
+                self.pal_access_edge = Some(edge_eighth(i, dots));
             }
-            if self.ppu.take_m0_stat_flip() && obs_pre_edge(MID_PHASE, edge_eighth(i, dots)) {
+            if self.ppu.take_m0_stat_flip() {
                 // Same cc+2 MID half-classification as the OAM/VRAM access
                 // edge: only a flip in the M-cycle's second half holds the
                 // double-speed FF41 mode bits at the pre-flip mode 3
@@ -767,8 +786,10 @@ impl Interconnect {
                 // both reach FF41 through the m2-dispatch / DMA / lcd-offset
                 // chains at a different sub-cycle offset, the parked
                 // multi-chain CPU↔PPU phase problem (sub-dot event-phase
-                // model, increment INC-DS-1).
-                self.stat_mode_mid_blocked = true;
+                // model, increment INC-DS-1). The edge is stamped with its
+                // dot-END commit eighth; the FF41 read decides blocking
+                // against its own observer phase ([`stamp_blocks`]).
+                self.stat_mode_edge = Some(edge_eighth(i, dots));
             }
             // Dot-exact mode-0 entry: each visible line's hblank start
             // requests one HBlank DMA block, serviced at the head of the
@@ -1320,7 +1341,9 @@ impl Interconnect {
                 // The CGB FEA0-FEFF extra OAM RAM mirrors OAM read
                 // blocking, including the cc+2 MID-phase second-half
                 // unblock view (sub-dot event-phase model).
-                if self.ppu.oam_read_blocked() || self.m0_access_mid_blocked {
+                if self.ppu.oam_read_blocked()
+                    || stamp_blocks(self.m0_access_edge, self.obs_phase(addr))
+                {
                     0xFF
                 } else {
                     self.extra_oam[Self::extra_oam_index(addr)]
@@ -1344,6 +1367,19 @@ impl Interconnect {
         {
             self.extra_oam[Self::extra_oam_index(addr)] = value;
         }
+    }
+
+    /// The sub-cc observer phase (eighths of an M-cycle) at which a CPU
+    /// access to `addr` samples the per-M-cycle accessibility/STAT edge
+    /// stamps. The default is the cc+2 M-cycle midpoint [`MID_PHASE`] — the
+    /// tick-then-access read effectively samples two dots before its
+    /// end-of-cycle view. INC-G2 gives the interrupt-dispatch ISR FF41 read
+    /// chain its own earlier phase; until then every chain samples at MID, so
+    /// this is net-zero (`default_observer_phase_is_mid`). `_addr` is the
+    /// access target the next increment keys the dispatch tag on.
+    #[inline]
+    fn obs_phase(&self, _addr: u16) -> u8 {
+        MID_PHASE
     }
 
     fn read_no_tick(&mut self, addr: u16) -> u8 {
@@ -1380,7 +1416,8 @@ impl Interconnect {
             // mode-0 entry and its read-back interaction (gambatte
             // dma/hdma_start_*) is the HDMA-seam increment's job.
             0x8000..=0x9FFF
-                if self.m0_access_mid_blocked && self.hdma_mode == HdmaMode::Disabled =>
+                if stamp_blocks(self.m0_access_edge, self.obs_phase(addr))
+                    && self.hdma_mode == HdmaMode::Disabled =>
             {
                 0xFF
             }
@@ -1391,7 +1428,7 @@ impl Interconnect {
                 // cc+2 MID-phase OAM read: a mode-3→mode-0 unblock landing
                 // in this M-cycle's second half is not yet visible here
                 // (sub-dot event-phase model, increment 1).
-                if self.m0_access_mid_blocked {
+                if stamp_blocks(self.m0_access_edge, self.obs_phase(addr)) {
                     0xFF
                 } else {
                     self.ppu.read(addr)
@@ -1445,7 +1482,7 @@ impl Interconnect {
             // this M-cycle's second half is not yet visible here, so the
             // write is still locked out (dropped) — same edge/sub-dot
             // phase as the OAM/VRAM read (sub-dot event-phase model).
-            0x8000..=0x9FFF if self.m0_access_mid_blocked => {}
+            0x8000..=0x9FFF if stamp_blocks(self.m0_access_edge, self.obs_phase(addr)) => {}
             0x8000..=0x9FFF => self.intf |= self.ppu.write(addr, value) & IF_MASK,
             0xA000..=0xBFFF => self.cart.write_ram(addr, value),
             0xC000..=0xFDFF => {
@@ -1455,7 +1492,9 @@ impl Interconnect {
             0xFE00..=0xFE9F => {
                 // CPU OAM writes are dropped while DMA owns OAM, and while
                 // the cc+2 MID view still reads mode 3 (sub-dot phase).
-                if self.dma_conflict.is_none() && !self.m0_access_mid_blocked {
+                if self.dma_conflict.is_none()
+                    && !stamp_blocks(self.m0_access_edge, self.obs_phase(addr))
+                {
                     self.intf |= self.ppu.write(addr, value) & IF_MASK;
                 }
             }
@@ -1485,7 +1524,11 @@ impl Interconnect {
             // but the guard keeps the override from ever forcing mode 3 over
             // the LCD-off mode 0. Sub-dot event-phase model, increment
             // INC-DS-1.
-            0xFF41 if self.stat_mode_mid_blocked && self.double_speed && self.ppu.lcd_enabled() => {
+            0xFF41
+                if stamp_blocks(self.stat_mode_edge, self.obs_phase(addr))
+                    && self.double_speed
+                    && self.ppu.lcd_enabled() =>
+            {
                 self.ppu.read(0xFF41) | 0x03
             }
             0xFF40..=0xFF45 | 0xFF47..=0xFF4B => self.ppu.read(addr),
@@ -1507,7 +1550,11 @@ impl Interconnect {
             // cc+2 MID-phase CGB palette read: a pipe-end unblock landing in
             // this M-cycle's second half still reads $FF here (sub-dot
             // event-phase model).
-            0xFF69 | 0xFF6B if self.cgb_mode && self.pal_access_mid_blocked => 0xFF,
+            0xFF69 | 0xFF6B
+                if self.cgb_mode && stamp_blocks(self.pal_access_edge, self.obs_phase(addr)) =>
+            {
+                0xFF
+            }
             0xFF69 | 0xFF6B if self.cgb_mode => self.ppu.read(addr),
             0xFF6C => self.ppu.read(addr),
             0xFF70 if self.cgb_mode => 0xF8 | self.svbk,
@@ -2160,8 +2207,9 @@ mod tests {
 
     /// The CGB FF69/FF6B palette read is held at the cc+2 MID phase: when
     /// the pipe-end palette unblock landed in the M-cycle's second half
-    /// (`pal_access_mid_blocked`), the CPU read still returns $FF even
-    /// though the PPU's own (end-view) palette RAM has unlocked. Pins
+    /// (`pal_access_edge` precedes the MID observer), the CPU read still
+    /// returns $FF even though the PPU's own (end-view) palette RAM has
+    /// unlocked. Pins
     /// gambatte `cgbpal_m3` (the pipe-end-anchored read; population +
     /// end-to-end correctness validated by that suite). Anchored at
     /// `render_finished`, one dot after the m0 flip — see
@@ -2169,7 +2217,9 @@ mod tests {
     #[test]
     fn cgb_palette_read_mid_override_returns_ff() {
         let mut b = ic(Model::Cgb);
-        b.pal_access_mid_blocked = true;
+        // A dot-END commit (eighth 8) lands in the M-cycle's second half, so
+        // a MID (cc+2) observer is still blocked.
+        b.pal_access_edge = Some(8);
         assert_eq!(
             b.read_no_tick(0xFF69),
             0xFF,
@@ -2180,15 +2230,16 @@ mod tests {
             0xFF,
             "OBJ palette read locked at cc+2 MID"
         );
-        // The flag is reset every machine tick (only the straddle M-cycle
+        // The stamp is reset every machine tick (only the straddle M-cycle
         // carries it); a normal read goes to the PPU.
         b.tick();
-        assert!(!b.pal_access_mid_blocked, "flag cleared by the next tick");
+        assert_eq!(b.pal_access_edge, None, "stamp cleared by the next tick");
     }
 
     /// In double speed the FF41 mode bits read at the cc+2 MID phase: when
     /// the mode-3→mode-0 flip fired in the straddle M-cycle
-    /// (`stat_mode_mid_blocked`) the STAT read still shows mode 3, even
+    /// (`stat_mode_edge` precedes the MID observer) the STAT read still shows
+    /// mode 3, even
     /// though the PPU's whole-dot end view has flipped to mode 0 (gambatte
     /// sprites m3stat_ds). Single speed keeps the end view (the parked
     /// multi-chain STAT-mode read). Sub-dot event-phase model, INC-DS-1.
@@ -2202,7 +2253,9 @@ mod tests {
         assert!(b.ppu.lcd_enabled());
         let base = b.ppu.read(0xFF41) & 0x03;
         assert_eq!(base, 0, "end-view mode bits are 0");
-        b.stat_mode_mid_blocked = true;
+        // A dot-END commit (eighth 8) is in the M-cycle's second half, so the
+        // MID (cc+2) observer is still pre-flip.
+        b.stat_mode_edge = Some(8);
         // Single speed: the override is gated off, the end view (mode 0)
         // shows through.
         b.double_speed = false;
@@ -2212,9 +2265,9 @@ mod tests {
         assert_eq!(b.read_no_tick(0xFF41) & 0x03, 3, "DS cc+2 MID reads mode 3");
         // Only the low mode bits move — the rest of STAT keeps the end view.
         assert_eq!(b.read_no_tick(0xFF41) & !0x03, b.ppu.read(0xFF41) & !0x03);
-        // The flag is reset every machine tick (only the straddle carries it).
+        // The stamp is reset every machine tick (only the straddle carries it).
         b.tick();
-        assert!(!b.stat_mode_mid_blocked, "flag cleared by the next tick");
+        assert_eq!(b.stat_mode_edge, None, "stamp cleared by the next tick");
     }
 
     /// The eighth-grid sub-cc phase comparator (`obs_pre_edge` /
@@ -2248,6 +2301,40 @@ mod tests {
                     "dots={dots} i={i}"
                 );
             }
+        }
+    }
+
+    /// The `Option<u8>` edge-stamp (INC-G2a) must reproduce the legacy
+    /// precomputed boolean exactly: for an edge firing on dot `i`, a MID
+    /// observer is blocked iff the old `2 * (i + 1) > dots` half-split was
+    /// true, and an unstamped (`None`) M-cycle never blocks. This is the
+    /// net-zero proof — every green floor row still rides on it.
+    #[test]
+    fn stamp_blocks_matches_half_split() {
+        for dots in [2u64, 4] {
+            for i in 0..dots {
+                assert_eq!(
+                    stamp_blocks(Some(edge_eighth(i, dots)), MID_PHASE),
+                    2 * (i + 1) > dots,
+                    "dots={dots} i={i}"
+                );
+            }
+        }
+        assert!(
+            !stamp_blocks(None, MID_PHASE),
+            "no edge this M-cycle never blocks"
+        );
+    }
+
+    /// Every read chain samples the edge stamps at the cc+2 M-cycle midpoint
+    /// until INC-G2c gives the interrupt-dispatch chain its own earlier phase;
+    /// `obs_phase` returning MID for all addresses is what keeps G2a/G2b
+    /// net-zero.
+    #[test]
+    fn default_observer_phase_is_mid() {
+        let b = ic(Model::Cgb);
+        for addr in [0xFE00u16, 0x8000, 0xFF41, 0xFF69, 0xFF6B] {
+            assert_eq!(b.obs_phase(addr), MID_PHASE, "addr {addr:#06x}");
         }
     }
 
