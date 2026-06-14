@@ -911,6 +911,16 @@ impl Ppu {
             // half-classified by the interconnect for the cc+2 MID-phase
             // OAM read (sub-dot event-phase model, increment 1).
             self.m0_access_flip = bare_flip;
+            // The STAT mode-bit flip routes the double-speed FF41 mode-bit
+            // read at the cc+2 MID phase (sub-dot event-phase model,
+            // increment INC-DS-1 — gambatte sprites m3stat_ds). Gated to
+            // sprite-extended lines (`r.fetched != 0`): bare-line DS reads
+            // that reach FF41 through the DMA-cycle / lcd-offset chains
+            // (dma/gdma/hdma_cycles_scx5_ds_2, lcd_offset m0stat_count) sit at
+            // a different sub-cycle offset within the same M-cycle half, so a
+            // bare-line override regresses them — the parked multi-chain
+            // problem. Sprite lines are the clean, hold-floor-safe subset.
+            self.m0_stat_flip = r.fetched != 0;
         }
     }
 

@@ -337,6 +337,24 @@ pub struct Ppu {
     /// M-cycle's second half. Drained via [`Self::take_pal_access_flip`]
     /// (sub-dot event-phase model; routes only the CGB palette read).
     pal_access_flip: bool,
+    /// The mode-3→mode-0 *STAT mode-bit* flip fired on the current dot
+    /// (`line_render_done` set true by `m0_flip_events`). Gated to
+    /// *sprite-extended* lines (`r.fetched != 0`) — the complement of
+    /// `m0_access_flip`'s bare-line gate: it routes the FF41 mode-bit read,
+    /// which the OAM/VRAM-read gate does not cover, on exactly the lines the
+    /// `m3stat_ds` cluster exercises. Bare-line DS reads reach FF41 through
+    /// the DMA-cycle / lcd-offset chains at a different sub-cycle offset, so a
+    /// bare-line override regresses them (the parked multi-chain problem). In
+    /// CGB double speed the visible flip lands at a sub-dot (cc) phase the
+    /// whole-dot grid cannot place, so a CPU STAT read whose M-cycle straddles
+    /// the flip still reads mode 3 (gambatte's `m3stat_ds_1` rows). The
+    /// interconnect drains this via [`Self::take_m0_stat_flip`] and
+    /// half-classifies it against the dot-loop index (`2*(i+1) > dots`): a
+    /// second-half flip holds the FF41 read at mode 3. The override is gated
+    /// to double speed; the single-speed read, and DS reads reaching FF41
+    /// through other dispatch chains, are the parked multi-chain INC3
+    /// problem. Sub-dot event-phase model, increment INC-DS-1.
+    m0_stat_flip: bool,
     /// Dots until a CGB-deferred FF45-write STAT IRQ is emitted (0 =
     /// none). On CGB at single speed an FF45 write whose comparison
     /// raises the STAT line produces its IF bit one M-cycle after the
@@ -570,6 +588,7 @@ impl Ppu {
             m0_rise: false,
             m0_access_flip: false,
             pal_access_flip: false,
+            m0_stat_flip: false,
             lyc_if_delay: 0,
             lyc_event: 0,
             cmp_irq: false,
@@ -1026,6 +1045,14 @@ impl Ppu {
     /// $FF when the unblock lands in the cycle's second half.
     pub(crate) fn take_pal_access_flip(&mut self) -> bool {
         std::mem::take(&mut self.pal_access_flip)
+    }
+
+    /// Whether the mode-3→mode-0 STAT mode-bit flip fired on the dot just
+    /// stepped (see the `m0_stat_flip` field docs). The interconnect
+    /// half-classifies it so a cc+2 MID-phase FF41 read in double speed
+    /// still reads mode 3 when the flip lands in the M-cycle's second half.
+    pub(crate) fn take_m0_stat_flip(&mut self) -> bool {
+        std::mem::take(&mut self.m0_stat_flip)
     }
 
     /// Level of the shared STAT interrupt line for the given enable bits.
@@ -2199,6 +2226,55 @@ mod tests {
             assert!(guard < 200_000, "run_to({line},{dot}) never reached");
         }
         ifs
+    }
+
+    /// The STAT mode-bit flip edge (`m0_stat_flip`, drained by
+    /// `take_m0_stat_flip`) fires once per *sprite-extended* line on the
+    /// mode-3→mode-0 flip dot, and not at all on a bare line (the sprite gate
+    /// keeps the bare-line DMA/lcd-offset reads off the override — sub-dot
+    /// event-phase model, INC-DS-1).
+    #[test]
+    fn m0_stat_flip_fires_once_on_a_sprite_line() {
+        let mut p = cgb();
+        // A sprite covering screen lines 0-7 (Y=16), on-screen X — so it is
+        // fetched and the flip edge is armed.
+        p.oam[0] = 16;
+        p.oam[1] = 8;
+        p.write(0xFF40, 0x93); // LCD on, OBJ on, BG on
+        run_to(&mut p, 1, 0); // steady-state line 1, sprite present
+        p.take_m0_stat_flip(); // drain line 0's edge (the interconnect drains every tick)
+        let mut fired = 0;
+        let mut flip_dot = None;
+        for _ in 0..400 {
+            p.tick();
+            if p.take_m0_stat_flip() {
+                fired += 1;
+                flip_dot = Some(p.dot);
+                assert!(p.line_render_done, "flip edge implies mode-0 entry");
+                assert_eq!(p.vis_mode(), 0, "mode bits are 0 at the flip dot");
+            }
+        }
+        assert_eq!(fired, 1, "stat flip fires exactly once on the sprite line");
+        assert!(flip_dot.unwrap() > 84, "flip is past the mode-3 start");
+    }
+
+    /// The STAT mode-bit flip edge stays off on a bare line: those DS reads
+    /// reach FF41 through the DMA-cycle / lcd-offset chains at a different
+    /// sub-cycle offset, so the override would regress them (INC-DS-1 gate).
+    #[test]
+    fn m0_stat_flip_is_off_on_a_bare_line() {
+        let mut p = cgb();
+        p.write(0xFF40, 0x91); // LCD on, BG on, no sprites
+        run_to(&mut p, 1, 0);
+        p.take_m0_stat_flip();
+        let mut fired = 0;
+        for _ in 0..400 {
+            p.tick();
+            if p.take_m0_stat_flip() {
+                fired += 1;
+            }
+        }
+        assert_eq!(fired, 0, "bare-line flip stays off the STAT-mode override");
     }
 
     // --- lcdon_timing-GS: read state at 4*(c+2) dots after LCD enable ---
