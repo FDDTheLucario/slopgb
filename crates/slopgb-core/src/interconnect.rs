@@ -169,6 +169,12 @@ pub struct Interconnect {
     /// whole-dot end view, so this is net-zero except the straddle
     /// M-cycle (gambatte `oam_access/postread_*`). See `Ppu::m0_access_flip`.
     m0_access_mid_blocked: bool,
+    /// As `m0_access_mid_blocked` but for the CGB palette-RAM unblock
+    /// (anchored at the pipe end / `render_finished`, one dot after the m0
+    /// flip): a cc+2 MID-phase FF69/FF6B read still reads $FF when the
+    /// unblock lands in this M-cycle's second half (gambatte `cgbpal_m3`).
+    /// See `Ppu::pal_access_flip`.
+    pal_access_mid_blocked: bool,
     /// Dispatch-ack source sync-ahead (gambatte-core memory.cpp
     /// `Memory::ackIrq`): the IF clear of an interrupt dispatch happens
     /// slightly *into* the low-push M-cycle on hardware, so it also
@@ -313,6 +319,7 @@ impl Interconnect {
             if_late: 0,
             if_stat_late: 0,
             m0_access_mid_blocked: false,
+            pal_access_mid_blocked: false,
             ack_squash_mask: 0,
             ack_squash_ticks: 0,
             ack_squash_dots: 0,
@@ -641,6 +648,7 @@ impl Interconnect {
         self.oam_dma_tick();
         self.if_stat_late = 0;
         self.m0_access_mid_blocked = false;
+        self.pal_access_mid_blocked = false;
         for i in 0..dots {
             // STAT/VBlank rises in the first 2 dots after the ack are
             // consumed too (gambatte ackIrq lcd_.update(cc + 2); in
@@ -694,6 +702,11 @@ impl Interconnect {
                 // (gambatte oam_access/postread_*). Sub-dot event-phase
                 // model, increment 1.
                 self.m0_access_mid_blocked = true;
+            }
+            if self.ppu.take_pal_access_flip() && 2 * (i + 1) > dots {
+                // Same cc+2 MID rule for the CGB palette-RAM unblock at the
+                // pipe end (gambatte cgbpal_m3).
+                self.pal_access_mid_blocked = true;
             }
             // Dot-exact mode-0 entry: each visible line's hblank start
             // requests one HBlank DMA block, serviced at the head of the
@@ -1415,6 +1428,10 @@ impl Interconnect {
             // BCPS/OCPS stay readable in DMG-compat mode (boot_hwio-C reads
             // the boot leftovers $C8/$D0); the data ports do not.
             0xFF68 | 0xFF6A => self.ppu.read(addr),
+            // cc+2 MID-phase CGB palette read: a pipe-end unblock landing in
+            // this M-cycle's second half still reads $FF here (sub-dot
+            // event-phase model).
+            0xFF69 | 0xFF6B if self.cgb_mode && self.pal_access_mid_blocked => 0xFF,
             0xFF69 | 0xFF6B if self.cgb_mode => self.ppu.read(addr),
             0xFF6C => self.ppu.read(addr),
             0xFF70 if self.cgb_mode => 0xF8 | self.svbk,
@@ -2059,6 +2076,26 @@ mod tests {
                 assert_eq!(after, probe, "scx {scx}: first-half write landed");
             }
         }
+    }
+
+    /// The CGB FF69/FF6B palette read is held at the cc+2 MID phase: when
+    /// the pipe-end palette unblock landed in the M-cycle's second half
+    /// (`pal_access_mid_blocked`), the CPU read still returns $FF even
+    /// though the PPU's own (end-view) palette RAM has unlocked. Pins
+    /// gambatte `cgbpal_m3` (the pipe-end-anchored read; population +
+    /// end-to-end correctness validated by that suite). Anchored at
+    /// `render_finished`, one dot after the m0 flip — see
+    /// `Ppu::pal_access_flip`.
+    #[test]
+    fn cgb_palette_read_mid_override_returns_ff() {
+        let mut b = ic(Model::Cgb);
+        b.pal_access_mid_blocked = true;
+        assert_eq!(b.read_no_tick(0xFF69), 0xFF, "BG palette read locked at cc+2 MID");
+        assert_eq!(b.read_no_tick(0xFF6B), 0xFF, "OBJ palette read locked at cc+2 MID");
+        // The flag is reset every machine tick (only the straddle M-cycle
+        // carries it); a normal read goes to the PPU.
+        b.tick();
+        assert!(!b.pal_access_mid_blocked, "flag cleared by the next tick");
     }
 
     #[test]

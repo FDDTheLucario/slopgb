@@ -329,6 +329,14 @@ pub struct Ppu {
     /// dot-loop index (the eighth-grid MID-vs-End comparison; increment 1
     /// of the sub-dot event-phase model — routes only the OAM-read arm).
     m0_access_flip: bool,
+    /// The CGB palette-RAM unblock fired on the current dot
+    /// (`render_finished` set true at the pipe end, one dot after the
+    /// HDMA trigger `hdma_lead`). Like `m0_access_flip` but anchored at the
+    /// palette/render-end edge: a CPU FF69/FF6B read samples at the cc+2
+    /// MID phase, so it still reads $FF when the unblock lands in the
+    /// M-cycle's second half. Drained via [`Self::take_pal_access_flip`]
+    /// (sub-dot event-phase model; routes only the CGB palette read).
+    pal_access_flip: bool,
     /// Dots until a CGB-deferred FF45-write STAT IRQ is emitted (0 =
     /// none). On CGB at single speed an FF45 write whose comparison
     /// raises the STAT line produces its IF bit one M-cycle after the
@@ -561,6 +569,7 @@ impl Ppu {
             m0_rise_dot: false,
             m0_rise: false,
             m0_access_flip: false,
+            pal_access_flip: false,
             lyc_if_delay: 0,
             lyc_event: 0,
             cmp_irq: false,
@@ -1009,6 +1018,14 @@ impl Ppu {
     /// unblock lands in the cycle's second half.
     pub(crate) fn take_m0_access_flip(&mut self) -> bool {
         std::mem::take(&mut self.m0_access_flip)
+    }
+
+    /// Whether the CGB palette-RAM unblock fired on the dot just stepped
+    /// (see the `pal_access_flip` field docs). The interconnect
+    /// half-classifies it so a cc+2 MID-phase FF69/FF6B read still reads
+    /// $FF when the unblock lands in the cycle's second half.
+    pub(crate) fn take_pal_access_flip(&mut self) -> bool {
+        std::mem::take(&mut self.pal_access_flip)
     }
 
     /// Level of the shared STAT interrupt line for the given enable bits.
