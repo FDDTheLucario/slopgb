@@ -24,6 +24,39 @@ const IF_MASK: u8 = 0x1F;
 /// IF bit 1 (STAT), for the line-0 OAM-rise dispatch-late mask.
 const IF_STAT_BIT: u8 = 0x02;
 
+/// Eighth-grid sub-cc phase model. An M-cycle spans 4 cc = 8 *eighths*; PPU
+/// events commit and CPU observers sample at sub-cc phases within it.
+/// `MID_PHASE` is the cc+2 observer phase (the M-cycle midpoint a
+/// tick-then-access read effectively samples at — gambatte's access offset
+/// two dots before our cc+4 end-sampled view, which is the full M-cycle = 8
+/// eighths). See [`edge_eighth`] / [`obs_pre_edge`] and the dot-loop in
+/// [`Interconnect::tick_machine`].
+const MID_PHASE: u8 = 4;
+
+/// The dot-END commit phase (in eighths of an M-cycle) of an event that
+/// fired on dot `i` of a `dots`-dot M-cycle (`dots` = 4 single speed / 2
+/// double speed). Single speed → {2,4,6,8}; double speed → {4,8}. The
+/// edge commits at the end of its dot, so a later increment adds a small
+/// negative offset (e.g. −1 eighth) to model an edge that leads the dot end.
+#[inline]
+fn edge_eighth(i: u64, dots: u64) -> u8 {
+    // `dots` is the PPU-dots-per-M-cycle, structurally 4 (single speed) or 2
+    // (double speed); the eighth table {2,4,6,8}/{4,8} relies on it.
+    debug_assert!(dots == 2 || dots == 4, "dots must be 2 or 4, got {dots}");
+    ((i + 1) * 8 / dots) as u8
+}
+
+/// Whether an observer sampling at phase `obs` (eighths) precedes the event
+/// committing at phase `edge` — i.e. the observer sees the pre-commit state.
+/// For accessibility/STAT reads that means "still blocked / pre-flip"; for
+/// the mode-0 IRQ rise it means "the halt-exit sampler misses the rise this
+/// M-cycle". Bit-identical to the legacy `2 * (i + 1) > dots` half-split when
+/// `obs == MID_PHASE` (see `eighth_grid_predicate_matches_half_split`).
+#[inline]
+fn obs_pre_edge(obs: u8, edge: u8) -> bool {
+    obs < edge
+}
+
 /// OAM DMA source classes (gambatte-core memptrs.h `OamDmaSrc`, classified
 /// from the FF46 page by memory.cpp `oamDmaInitSetup`). The class decides
 /// what the engine reads and which address pages a CPU access conflicts
@@ -688,7 +721,7 @@ impl Interconnect {
                 // int_oam_* grids pin the law).
                 self.if_late |= IF_STAT_BIT;
             }
-            if self.ppu.take_m0_rise() && 2 * (i + 1) > dots {
+            if self.ppu.take_m0_rise() && obs_pre_edge(MID_PHASE, edge_eighth(i, dots)) {
                 // The mode-0 STAT rise carries the second-half halt law
                 // — the same shape as the line-start OAM pulses — but
                 // its dot moves with SCX/sprites/window, so the half is
@@ -703,7 +736,7 @@ impl Interconnect {
                 // between them.
                 self.if_late |= IF_STAT_BIT;
             }
-            if self.ppu.take_m0_access_flip() && 2 * (i + 1) > dots {
+            if self.ppu.take_m0_access_flip() && obs_pre_edge(MID_PHASE, edge_eighth(i, dots)) {
                 // The OAM/VRAM accessibility unblock trails the IRQ rise by
                 // one half-dot (gambatte m0Time = xpos lcd_hres+7 vs the IRQ
                 // at +6). A CPU OAM read samples at the cc+2 MID phase — two
@@ -715,12 +748,12 @@ impl Interconnect {
                 // model, increment 1.
                 self.m0_access_mid_blocked = true;
             }
-            if self.ppu.take_pal_access_flip() && 2 * (i + 1) > dots {
+            if self.ppu.take_pal_access_flip() && obs_pre_edge(MID_PHASE, edge_eighth(i, dots)) {
                 // Same cc+2 MID rule for the CGB palette-RAM unblock at the
                 // pipe end (gambatte cgbpal_m3).
                 self.pal_access_mid_blocked = true;
             }
-            if self.ppu.take_m0_stat_flip() && 2 * (i + 1) > dots {
+            if self.ppu.take_m0_stat_flip() && obs_pre_edge(MID_PHASE, edge_eighth(i, dots)) {
                 // Same cc+2 MID half-classification as the OAM/VRAM access
                 // edge: only a flip in the M-cycle's second half holds the
                 // double-speed FF41 mode bits at the pre-flip mode 3
@@ -2182,6 +2215,40 @@ mod tests {
         // The flag is reset every machine tick (only the straddle carries it).
         b.tick();
         assert!(!b.stat_mode_mid_blocked, "flag cleared by the next tick");
+    }
+
+    /// The eighth-grid sub-cc phase comparator (`obs_pre_edge` /
+    /// `edge_eighth`) is a bit-exact reframe of the old `2 * (i + 1) > dots`
+    /// half-split, expressing each per-M-cycle event/observer timing in
+    /// eighths of an M-cycle (8 eighths = 4 cc; MID = cc+2, END = cc+4). The
+    /// reframe lifts ZERO rows by itself — its worth is converting the parked
+    /// multi-chain CPU↔PPU read-phase problem from one boolean (which
+    /// conflates *when the edge committed* with *the single cc+2 observer*)
+    /// into a comparison where later increments can give an edge its own
+    /// sub-dot commit offset and a read chain its own sampling phase. This
+    /// test pins the equivalence the scaffold MUST preserve: every green floor
+    /// row still rides on the legacy boolean.
+    #[test]
+    fn eighth_grid_predicate_matches_half_split() {
+        assert_eq!(MID_PHASE, 4, "cc+2 observer = M-cycle midpoint (eighths)");
+        // The dot-END commit eighth of an edge firing on dot `i`; the last
+        // dot commits at 8 eighths = cc+4, the full M-cycle (tick-then-access).
+        let ss: Vec<u8> = (0..4u64).map(|i| edge_eighth(i, 4)).collect();
+        assert_eq!(ss, [2, 4, 6, 8], "single speed: dot-end eighths");
+        let ds: Vec<u8> = (0..2u64).map(|i| edge_eighth(i, 2)).collect();
+        assert_eq!(ds, [4, 8], "double speed: dot-end eighths");
+        // Bit-identical to the legacy half-split for every dot of both speeds:
+        // an observer sampling at MID precedes (is blocked by) an edge whose
+        // dot-end commit eighth exceeds MID.
+        for dots in [2u64, 4] {
+            for i in 0..dots {
+                assert_eq!(
+                    obs_pre_edge(MID_PHASE, edge_eighth(i, dots)),
+                    2 * (i + 1) > dots,
+                    "dots={dots} i={i}"
+                );
+            }
+        }
     }
 
     #[test]
