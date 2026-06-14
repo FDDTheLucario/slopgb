@@ -886,10 +886,25 @@ impl Ppu {
         // move the pixels, the IRQ grids hold the flip).
         let lead = (2 + u16::from(r.fetched != 0 && !self.model.is_cgb()) - u16::from(self.ds))
             .saturating_sub(u16::from(r.win_stalled) + u16::from(r.win_aborted));
+        // Increment 1 of the sub-dot event-phase model calibrates the
+        // accessibility-unblock sub-dot phase for STEADY-STATE BARE-line
+        // flips only. Sprite/window mode-3 extensions push the visible
+        // flip onto its mooneye/gbmicrotest-frozen dot (above), and the
+        // LCD-enable glitch line runs a 452-dot/dot-82-pipe geometry — both
+        // carry a different cc+2 accessibility phase (gambatte
+        // oam_access/10spritesprline_postread_2 reads unblocked; gbmicrotest
+        // lcdon_to_oam_unlock/oam_read_l0 + mooneye lcdon_timing-GS unlock
+        // earlier). Gate the OAM-read MID signal to those lines; the
+        // sprite/window/glitch phases are later increments.
+        let bare_flip = r.fetched == 0 && !r.win_active && !self.glitch_line;
         if proj <= lead {
             self.m0_src = true;
             self.m0_rise_dot = true;
             self.line_render_done = true;
+            // The accessibility unblock (this `line_render_done` rise) is
+            // half-classified by the interconnect for the cc+2 MID-phase
+            // OAM read (sub-dot event-phase model, increment 1).
+            self.m0_access_flip = bare_flip;
         }
     }
 

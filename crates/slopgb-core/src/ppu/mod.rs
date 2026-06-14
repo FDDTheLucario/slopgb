@@ -317,6 +317,18 @@ pub struct Ppu {
     /// pulses' `stat_halt_late`). mooneye hblank_ly_scx_timing-GS and
     /// gbmicrotest int_hblank_halt_scx0-7 pin all eight SCX phases.
     m0_rise: bool,
+    /// The mode-3→mode-0 OAM/VRAM *accessibility* unblock fired on the
+    /// current dot (`line_render_done` set true by `m0_flip_events`).
+    /// On hardware this access edge trails the mode-0 IRQ rise by one
+    /// half-dot (gambatte `m0Time`/accessibility at xpos lcd_hres+7 vs the
+    /// IRQ at lcd_hres+6); a CPU accessibility read samples at the cc+2
+    /// MID phase, two dots before this whole-M-cycle's end-sampled view,
+    /// so it still reads mode 3 when the unblock lands in the M-cycle's
+    /// second half. The interconnect drains this via
+    /// [`Self::take_m0_access_flip`] and half-classifies it against the
+    /// dot-loop index (the eighth-grid MID-vs-End comparison; increment 1
+    /// of the sub-dot event-phase model — routes only the OAM-read arm).
+    m0_access_flip: bool,
     /// Dots until a CGB-deferred FF45-write STAT IRQ is emitted (0 =
     /// none). On CGB at single speed an FF45 write whose comparison
     /// raises the STAT line produces its IF bit one M-cycle after the
@@ -548,6 +560,7 @@ impl Ppu {
             m0_src: false,
             m0_rise_dot: false,
             m0_rise: false,
+            m0_access_flip: false,
             lyc_if_delay: 0,
             lyc_event: 0,
             cmp_irq: false,
@@ -987,6 +1000,15 @@ impl Ppu {
     /// M-cycle (see the `m0_rise` field docs).
     pub(crate) fn take_m0_rise(&mut self) -> bool {
         std::mem::take(&mut self.m0_rise)
+    }
+
+    /// Whether the mode-3→mode-0 OAM/VRAM accessibility unblock fired on
+    /// the dot just stepped (see the `m0_access_flip` field docs). The
+    /// interconnect half-classifies it against the M-cycle's dot-loop
+    /// index so a cc+2 MID-phase OAM read still sees mode 3 when the
+    /// unblock lands in the cycle's second half.
+    pub(crate) fn take_m0_access_flip(&mut self) -> bool {
+        std::mem::take(&mut self.m0_access_flip)
     }
 
     /// Level of the shared STAT interrupt line for the given enable bits.

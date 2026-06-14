@@ -159,6 +159,16 @@ pub struct Interconnect {
     /// interrupt sample for this cycle must not see it
     /// (`Ppu::take_stat_late`).
     if_stat_late: u8,
+    /// The mode-3→mode-0 OAM accessibility unblock fired in the *second
+    /// half* of the current M-cycle (`Ppu::take_m0_access_flip`
+    /// half-classified against the dot-loop index): a CPU OAM read samples
+    /// at the cc+2 MID phase, two dots before this M-cycle's end-sampled
+    /// view, so it still reads mode 3 ($FF) when the unblock lands late.
+    /// First wedge of the sub-dot event-phase model — routes only the OAM
+    /// read; the m0 IRQ, mode-bit flip and every other access stay on the
+    /// whole-dot end view, so this is net-zero except the straddle
+    /// M-cycle (gambatte `oam_access/postread_*`). See `Ppu::m0_access_flip`.
+    m0_access_mid_blocked: bool,
     /// Dispatch-ack source sync-ahead (gambatte-core memory.cpp
     /// `Memory::ackIrq`): the IF clear of an interrupt dispatch happens
     /// slightly *into* the low-push M-cycle on hardware, so it also
@@ -302,6 +312,7 @@ impl Interconnect {
             ie: 0,
             if_late: 0,
             if_stat_late: 0,
+            m0_access_mid_blocked: false,
             ack_squash_mask: 0,
             ack_squash_ticks: 0,
             ack_squash_dots: 0,
@@ -629,6 +640,7 @@ impl Interconnect {
         self.if_late = if t.late { t_iff } else { 0 };
         self.oam_dma_tick();
         self.if_stat_late = 0;
+        self.m0_access_mid_blocked = false;
         for i in 0..dots {
             // STAT/VBlank rises in the first 2 dots after the ack are
             // consumed too (gambatte ackIrq lcd_.update(cc + 2); in
@@ -670,6 +682,18 @@ impl Interconnect {
                 // int_hblank_halt_scx0-7 grid pin all eight SCX phases
                 // between them.
                 self.if_late |= IF_STAT_BIT;
+            }
+            if self.ppu.take_m0_access_flip() && 2 * (i + 1) > dots {
+                // The OAM/VRAM accessibility unblock trails the IRQ rise by
+                // one half-dot (gambatte m0Time = xpos lcd_hres+7 vs the IRQ
+                // at +6). A CPU OAM read samples at the cc+2 MID phase — two
+                // dots before this M-cycle's end-sampled view — so when the
+                // unblock lands in the cycle's second half it still reads
+                // mode 3 ($FF). The IRQ, mode-bit flip and every other
+                // access keep the end view; only the OAM read consults this
+                // (gambatte oam_access/postread_*). Sub-dot event-phase
+                // model, increment 1.
+                self.m0_access_mid_blocked = true;
             }
             // Dot-exact mode-0 entry: each visible line's hblank start
             // requests one HBlank DMA block, serviced at the head of the
@@ -1218,7 +1242,10 @@ impl Interconnect {
     fn prohibited_read(&self, addr: u16) -> u8 {
         match self.model {
             Model::Cgb => {
-                if self.ppu.oam_read_blocked() {
+                // The CGB FEA0-FEFF extra OAM RAM mirrors OAM read
+                // blocking, including the cc+2 MID-phase second-half
+                // unblock view (sub-dot event-phase model).
+                if self.ppu.oam_read_blocked() || self.m0_access_mid_blocked {
                     0xFF
                 } else {
                     self.extra_oam[Self::extra_oam_index(addr)]
@@ -1274,7 +1301,16 @@ impl Interconnect {
             0x8000..=0x9FFF => self.ppu.read(addr),
             0xA000..=0xBFFF => self.cart.read_ram(addr),
             0xC000..=0xFDFF => self.wram[self.wram_index(addr)],
-            0xFE00..=0xFE9F => self.ppu.read(addr),
+            0xFE00..=0xFE9F => {
+                // cc+2 MID-phase OAM read: a mode-3→mode-0 unblock landing
+                // in this M-cycle's second half is not yet visible here
+                // (sub-dot event-phase model).
+                if self.m0_access_mid_blocked {
+                    0xFF
+                } else {
+                    self.ppu.read(addr)
+                }
+            }
             0xFEA0..=0xFEFF => self.prohibited_read(addr),
             0xFF00..=0xFF7F => self.io_read(addr),
             0xFF80..=0xFFFE => self.hram[usize::from(addr - 0xFF80)],
@@ -1922,6 +1958,38 @@ mod tests {
             );
             b.tick();
             assert_eq!(b.pending_halt_wake(), 0x02, "scx {scx}: next cycle");
+        }
+    }
+
+    /// The OAM accessibility unblock is read at the cc+2 MID phase (sub-dot
+    /// event-phase model, increment 1): when the mode-3→mode-0 unblock
+    /// lands in the M-cycle's second half (SCX=1 → rise dot ≡ 3) a CPU OAM
+    /// read in that same cycle still sees mode 3 ($FF), even though the m0
+    /// IRQ is already dispatch-visible and `line_render_done` is set; a
+    /// first-half unblock (SCX=0 → dot ≡ 2) is already accessible. One
+    /// M-cycle later the OAM read returns the unblocked value on both.
+    /// Pins gambatte `oam_access/postread_*` (out3 vs out0 round pair).
+    #[test]
+    fn oam_read_holds_blocked_at_cc2_through_a_second_half_unblock() {
+        for (scx, second_half) in [(0u8, false), (1, true)] {
+            let mut b = ic(Model::Dmg);
+            b.write(0xFF43, scx);
+            b.write(0xFF41, 0x08); // hblank STAT source
+            b.write(0xFF40, 0x91);
+            // Same geometry as `m0_rise_second_half_commit_is_halt_late`:
+            // line-1 mode-0 flip at 452 + 254 + SCX%8.
+            let rise = 452 + 254 + u32::from(scx);
+            ticks(&mut b, rise.div_ceil(4) - 1);
+            b.tick(); // the M-cycle whose flip lands the unblock
+            assert_eq!(b.intf & 0x02, 0x02, "scx {scx}: m0 IRQ dispatch-visible");
+            assert!(!b.ppu.oam_read_blocked(), "scx {scx}: end view unblocked");
+            assert_eq!(
+                b.read_no_tick(0xFE00),
+                if second_half { 0xFF } else { 0x00 },
+                "scx {scx}: cc+2 MID OAM read"
+            );
+            b.tick();
+            assert_eq!(b.read_no_tick(0xFE00), 0x00, "scx {scx}: unblocked next cycle");
         }
     }
 
