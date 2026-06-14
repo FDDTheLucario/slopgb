@@ -1298,13 +1298,24 @@ impl Interconnect {
         }
         match addr {
             0x0000..=0x7FFF => self.cart.read_rom(addr),
+            // cc+2 MID-phase VRAM read: same mode-3→mode-0 unblock edge as
+            // OAM below — a second-half unblock is not yet visible here
+            // (sub-dot event-phase model, increment 2). Suppressed while an
+            // HDMA is armed: the HDMA service seam writes VRAM at the same
+            // mode-0 entry and its read-back interaction (gambatte
+            // dma/hdma_start_*) is the HDMA-seam increment's job.
+            0x8000..=0x9FFF
+                if self.m0_access_mid_blocked && self.hdma_mode == HdmaMode::Disabled =>
+            {
+                0xFF
+            }
             0x8000..=0x9FFF => self.ppu.read(addr),
             0xA000..=0xBFFF => self.cart.read_ram(addr),
             0xC000..=0xFDFF => self.wram[self.wram_index(addr)],
             0xFE00..=0xFE9F => {
                 // cc+2 MID-phase OAM read: a mode-3→mode-0 unblock landing
                 // in this M-cycle's second half is not yet visible here
-                // (sub-dot event-phase model).
+                // (sub-dot event-phase model, increment 1).
                 if self.m0_access_mid_blocked {
                     0xFF
                 } else {
@@ -1990,6 +2001,31 @@ mod tests {
             );
             b.tick();
             assert_eq!(b.read_no_tick(0xFE00), 0x00, "scx {scx}: unblocked next cycle");
+        }
+    }
+
+    /// VRAM unblocks on the same mode-3→mode-0 edge as OAM, so a CPU VRAM
+    /// read is held at the cc+2 MID phase the same way (sub-dot event-phase
+    /// model, increment 2): a second-half unblock reads $FF even though the
+    /// end view is already accessible. Pins gambatte `vram_m3/postread_*`.
+    #[test]
+    fn vram_read_holds_blocked_at_cc2_through_a_second_half_unblock() {
+        for (scx, second_half) in [(0u8, false), (1, true)] {
+            let mut b = ic(Model::Dmg);
+            b.write(0xFF43, scx);
+            b.write(0xFF41, 0x08);
+            b.write(0xFF40, 0x91);
+            let rise = 452 + 254 + u32::from(scx);
+            ticks(&mut b, rise.div_ceil(4) - 1);
+            b.tick();
+            assert!(!b.ppu.vram_read_blocked(), "scx {scx}: end view unblocked");
+            let direct = b.ppu.read(0x8000); // bypasses the MID override
+            let via = b.read_no_tick(0x8000);
+            if second_half {
+                assert_eq!(via, 0xFF, "scx {scx}: cc+2 MID VRAM read still blocked");
+            } else {
+                assert_eq!(via, direct, "scx {scx}: first-half unblock is accessible");
+            }
         }
     }
 

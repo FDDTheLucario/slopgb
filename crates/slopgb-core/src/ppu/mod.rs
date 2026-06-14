@@ -1300,7 +1300,7 @@ impl Ppu {
         (4..80).contains(&self.dot) || (self.dot >= 84 && !self.line_render_done)
     }
 
-    fn vram_read_blocked(&self) -> bool {
+    pub(crate) fn vram_read_blocked(&self) -> bool {
         if !self.enabled || self.line > 143 || self.line_render_done {
             return false;
         }
