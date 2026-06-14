@@ -85,8 +85,23 @@
 #      wake shift moves their service seam: AXIS-1 is INSEPARABLE from
 #      classes A (ds) and B (HDMA seam) because gambatte's dma cycle/seam
 #      tests share the halt-wake alignment path. Net +27 but it grows the
-#      floor by 13 — reverted (hold-floor policy). Lift only jointly with
-#      the half-dot grid (class A's precondition), then re-probe.
+#      floor by 13 — reverted (hold-floor policy). RE-PROBED 2026-06 with
+#      a single-speed + no-HDMA gate (excludes the 9 ds) + a g-anchor
+#      attempt: the 4 single-speed seam rows STILL regress and CANNOT be
+#      gated — they have hdma_mode=Disabled/hdma5=$FF at the wake (the
+#      HDMA is armed by POST-wake handler code: LY=152→LYC1 STAT wake→
+#      ldff(55),$80→a late FF54/55/70 write racing line 1's mode-0 dot,
+#      a fixed PPU-anchored seam). The halt-HDMA re-fire (vram_dma_unhalt)
+#      already re-samples hdma_period at the shifted wake and is a no-op
+#      here, so NO re-fire/g-anchor patch can move them (verified vs
+#      gambatte memory.cpp intevent_unhalt). gambatte's CGB wake is +1
+#      M-cycle unconditionally (memory.cpp:301 cc+=4) yet renders out0;
+#      our whole-M-cycle AXIS-1 +1 lands the post-wake stream at out1 —
+#      same +1, different seam sub-phase. The 13 halt rows need the LYC/m0
+#      wake +1 while these 4 need it +0, both line-start STAT: only a
+#      PHASE-SELECTIVE halt mask (delay just the commit sub-phase the halt
+#      rows use) reconciles them, which needs sub-dot IF-flop resolution.
+#      Lift only jointly with the half-dot grid (class A's precondition).
 #    * cgbpal_m3 boundary rows (anchored against the hdma_start pins),
 #      lyc/lycEnable/m1/m2enable enable-edge *_1 rounds, window/
 #      late_* sub-dot rounds, dmgpalette_during_m3 and
