@@ -1366,6 +1366,11 @@ impl Interconnect {
         }
         match addr {
             0x0000..=0x7FFF => self.cart.write_rom(addr, value),
+            // cc+2 MID-phase VRAM write: a mode-3→mode-0 unblock landing in
+            // this M-cycle's second half is not yet visible here, so the
+            // write is still locked out (dropped) — same edge/sub-dot
+            // phase as the OAM/VRAM read (sub-dot event-phase model).
+            0x8000..=0x9FFF if self.m0_access_mid_blocked => {}
             0x8000..=0x9FFF => self.intf |= self.ppu.write(addr, value) & IF_MASK,
             0xA000..=0xBFFF => self.cart.write_ram(addr, value),
             0xC000..=0xFDFF => {
@@ -1373,8 +1378,9 @@ impl Interconnect {
                 self.wram[i] = value;
             }
             0xFE00..=0xFE9F => {
-                // CPU OAM writes are dropped while DMA owns OAM.
-                if self.dma_conflict.is_none() {
+                // CPU OAM writes are dropped while DMA owns OAM, and while
+                // the cc+2 MID view still reads mode 3 (sub-dot phase).
+                if self.dma_conflict.is_none() && !self.m0_access_mid_blocked {
                     self.intf |= self.ppu.write(addr, value) & IF_MASK;
                 }
             }
@@ -2025,6 +2031,32 @@ mod tests {
                 assert_eq!(via, 0xFF, "scx {scx}: cc+2 MID VRAM read still blocked");
             } else {
                 assert_eq!(via, direct, "scx {scx}: first-half unblock is accessible");
+            }
+        }
+    }
+
+    /// A CPU VRAM write is locked out at the cc+2 MID phase the same way
+    /// the read is (sub-dot event-phase model): a second-half mode-3→mode-0
+    /// unblock drops the write (still mode 3 at cc+2), while a first-half
+    /// unblock lets it land. Pins gambatte `vramw_m3end_*`.
+    #[test]
+    fn vram_write_dropped_at_cc2_through_a_second_half_unblock() {
+        for (scx, second_half) in [(0u8, false), (1, true)] {
+            let mut b = ic(Model::Dmg);
+            b.write(0xFF43, scx);
+            b.write(0xFF41, 0x08);
+            b.write(0xFF40, 0x91);
+            let rise = 452 + 254 + u32::from(scx);
+            ticks(&mut b, rise.div_ceil(4) - 1);
+            b.tick();
+            let before = b.ppu.vram_read_raw(0x8000);
+            let probe = before ^ 0xFF; // a value distinct from the current byte
+            b.write_no_tick(0x8000, probe);
+            let after = b.ppu.vram_read_raw(0x8000);
+            if second_half {
+                assert_eq!(after, before, "scx {scx}: cc+2 MID write dropped");
+            } else {
+                assert_eq!(after, probe, "scx {scx}: first-half write landed");
             }
         }
     }
