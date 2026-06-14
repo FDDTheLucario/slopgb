@@ -97,11 +97,28 @@
 #      gambatte memory.cpp intevent_unhalt). gambatte's CGB wake is +1
 #      M-cycle unconditionally (memory.cpp:301 cc+=4) yet renders out0;
 #      our whole-M-cycle AXIS-1 +1 lands the post-wake stream at out1 —
-#      same +1, different seam sub-phase. The 13 halt rows need the LYC/m0
-#      wake +1 while these 4 need it +0, both line-start STAT: only a
-#      PHASE-SELECTIVE halt mask (delay just the commit sub-phase the halt
-#      rows use) reconciles them, which needs sub-dot IF-flop resolution.
-#      Lift only jointly with the half-dot grid (class A's precondition).
+#      same +1, different seam sub-phase. CORRECTED DIAGNOSIS 2026-06
+#      (workflow wcwot9hvs, measure→derive→verify, instrumented vs the
+#      real gambatte ROMs on CGB): AXIS-1 is the WRONG fix — a DOUBLE-COUNT
+#      of gambatte's CGB cc+=4. Our natural CGB wake already lands the
+#      post-wake stream at gambatte's POST-+4 phase (the seam $8000 read is
+#      dot-for-dot identical: our read at line1 dot256, trigger dot257,
+#      out0 = gambatte). AXIS-1 adds a SECOND +4 with no gambatte
+#      counterpart → seam out1. So do NOT pursue any halt-wake-phase fix.
+#      The 13 rows actually fail on the READ side (CGB, halt-independent):
+#      m1int_ly wants gambatte getLyReg (video.h:124-146 ly+1 when ≤6+4*ds
+#      cc remain in the line); m0int/m0irq_m0stat want getStat's line-start
+#      mode-2 window (video.cpp:811-813); lycirq_m2stat_2 wants mode 3
+#      (video.cpp:814-816, the PARKED CGB mode-3 +1-dot = hblank_ly_scx_
+#      timing-C). NOT cleanly liftable: a faithful getLyReg fires in every
+#      CGB line's last 6 dots and getStat changes every CGB line-start STAT
+#      read — both A/B-swept clusters (the 74-row CGB-C LY/STAT timeline,
+#      age/wilbertpol ly). late_m0int/m0irq_halt_m0stat_scx3 is a CGB-vs-
+#      CGB 3-step sweep: _1a/_2a(out0) + _1c-4c(out2) GREEN bracket the
+#      floored _1b-4b; widening the mode-2 read window drags the green _a
+#      reads in. Lift only by re-deriving the whole CGB-C LY/STAT read
+#      lattice jointly with the parked mode-3 +1-dot (sub-dot resolution),
+#      with the full gbtr matrix as the A/B gate — not a wake-phase patch.
 #    * cgbpal_m3 boundary rows (anchored against the hdma_start pins),
 #      lyc/lycEnable/m1/m2enable enable-edge *_1 rounds, window/
 #      late_* sub-dot rounds, dmgpalette_during_m3 and
