@@ -242,6 +242,28 @@ impl GameBoy {
         self.bus.ppu().debug_palette_ram()
     }
 
+    /// Run instructions until `PC` matches one of `breakpoints` (returns that
+    /// address) or `max_instructions` have executed (returns `None`) — the
+    /// debugger's "run" / "run to cursor". The check is *after* each step, so a
+    /// breakpoint on the current `PC` doesn't stop instantly; "run" always
+    /// advances off the current line and a loop back to a breakpoint still
+    /// stops. This drives emulation forward; only call it for a debugger run,
+    /// never on a golden/test path.
+    pub fn run_until_breakpoint(
+        &mut self,
+        breakpoints: &[u16],
+        max_instructions: u64,
+    ) -> Option<u16> {
+        for _ in 0..max_instructions {
+            self.step();
+            let pc = self.cpu_regs().pc;
+            if breakpoints.contains(&pc) {
+                return Some(pc);
+            }
+        }
+        None
+    }
+
     /// True once the CPU has executed an undefined opcode (0xD3, 0xDB,
     /// 0xDD, 0xE3, 0xE4, 0xEB, 0xEC, 0xED, 0xF4, 0xFC, 0xFD) and
     /// hard-locked — wilbertpol's mooneye fork ends its tests with 0xED.
@@ -333,5 +355,41 @@ mod tests {
                 | (u16::from(gb.debug_read(addr.wrapping_add(1))) << 8);
             assert_eq!(word, want, "word @ {addr:#06x}");
         }
+    }
+
+    /// A ROM whose entry (`0x100`) is `nop; jp 0x150` and `0x150..` is nops,
+    /// so PC walks 0x100 -> 0x101 -> 0x150 -> 0x151 -> 0x152 … deterministically.
+    fn linear_code_rom() -> Vec<u8> {
+        let mut rom = vec![0u8; 0x8000];
+        rom[0x100] = 0x00; // nop
+        rom[0x101..0x104].copy_from_slice(&[0xC3, 0x50, 0x01]); // jp 0150
+        // 0x150.. already 0x00 (nop) from the zero-fill.
+        rom
+    }
+
+    #[test]
+    fn run_until_breakpoint_stops_at_the_address() {
+        let mut gb = GameBoy::new(Model::Dmg, linear_code_rom()).unwrap();
+        assert_eq!(gb.cpu_regs().pc, 0x100);
+        // 0x100 nop -> 0x101 jp -> 0x150 nop -> 0x151. bp at 0x151.
+        assert_eq!(gb.run_until_breakpoint(&[0x151], 100), Some(0x151));
+        assert_eq!(gb.cpu_regs().pc, 0x151);
+    }
+
+    #[test]
+    fn run_until_breakpoint_respects_the_step_limit() {
+        let mut gb = GameBoy::new(Model::Dmg, linear_code_rom()).unwrap();
+        // No reachable breakpoint -> runs the cap, returns None.
+        assert_eq!(gb.run_until_breakpoint(&[0xBEEF], 5), None);
+        assert_eq!(gb.run_until_breakpoint(&[], 3), None);
+    }
+
+    #[test]
+    fn run_until_breakpoint_advances_off_the_current_pc() {
+        let mut gb = GameBoy::new(Model::Dmg, linear_code_rom()).unwrap();
+        // A breakpoint on the *current* PC must not stop instantly — one step
+        // moves to 0x101, which isn't the (already-left) 0x100.
+        assert_eq!(gb.run_until_breakpoint(&[0x100], 1), None);
+        assert_eq!(gb.cpu_regs().pc, 0x101);
     }
 }
