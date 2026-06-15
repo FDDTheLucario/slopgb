@@ -8,6 +8,7 @@ use slopgb_core::debug;
 use crate::dbg::{Breakpoints, DebugAction};
 use crate::ui::Theme;
 use crate::ui::canvas::{Canvas, Rect};
+use crate::ui::dialog::{self, DialogKey, DialogResult, InputDialog};
 use crate::ui::menu::{self, MenuItem};
 use crate::ui::text::{draw_text, hex_row, line_height};
 use crate::ui::widgets::scroll_list;
@@ -272,6 +273,8 @@ pub struct DebuggerState {
     pub pinned: bool,
     /// An open right-click context menu, if any.
     pub menu: Option<OpenMenu>,
+    /// An open modal prompt (Go to…), if any.
+    pub dialog: Option<GotoDialog>,
 }
 
 impl Default for DebuggerState {
@@ -282,6 +285,7 @@ impl Default for DebuggerState {
             cursor: None,
             pinned: false,
             menu: None,
+            dialog: None,
         }
     }
 }
@@ -293,6 +297,20 @@ impl DebuggerState {
     pub fn disasm_start(&self, pc: u16) -> u16 {
         if self.pinned { self.disasm_base } else { pc }
     }
+}
+
+/// Which pane a `Go to…` repositions (RM5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GotoTarget {
+    Disasm,
+    Memory,
+}
+
+/// An open `Go to…` modal: the hex-input box plus which pane it moves on accept.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GotoDialog {
+    pub input: InputDialog,
+    pub target: GotoTarget,
 }
 
 /// Which pane a click landed in, resolved to its address where meaningful — the
@@ -308,13 +326,14 @@ pub enum ClickTarget {
 }
 
 /// What selecting a menu item does. Execution effects (`Act`) are returned to
-/// `main` to apply against the machine; view effects (`TogglePin`) mutate the
-/// window's own `DebuggerState`; `None` is a separator / disabled / not-yet-wired
-/// stub.
+/// `main` to apply against the machine; view effects (`TogglePin`, `OpenGoto`)
+/// mutate the window's own `DebuggerState`; `None` is a separator / disabled /
+/// not-yet-wired stub.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuChoice {
     Act(DebugAction),
     TogglePin,
+    OpenGoto(GotoTarget),
     None,
 }
 
@@ -412,10 +431,15 @@ fn disabled(label: &str) -> (MenuItem, MenuChoice) {
 /// The disasm (rc-disasm.png) / memory (rc-memory.png) right-click menu — the
 /// memory variant drops `force code view`. `addr` is the clicked cursor.
 fn disasm_entries(addr: u16, st: &DebuggerState, is_disasm: bool) -> Vec<(MenuItem, MenuChoice)> {
+    let goto = if is_disasm {
+        GotoTarget::Disasm
+    } else {
+        GotoTarget::Memory
+    };
     let mut v = vec![
         (
-            MenuItem::new("Go to…").shortcut("Ctrl+G").disabled(),
-            MenuChoice::None,
+            MenuItem::new("Go to...").shortcut("Ctrl+G"),
+            MenuChoice::OpenGoto(goto),
         ),
         disabled("Modify code/data"),
         disabled("Copy data"),
@@ -435,9 +459,9 @@ fn disasm_entries(addr: u16, st: &DebuggerState, is_disasm: bool) -> Vec<(MenuIt
     ));
     v.push(disabled("Jump to cursor"));
     v.push(disabled("Call cursor"));
-    v.push(disabled("Set watchpoint…"));
+    v.push(disabled("Set watchpoint..."));
     v.push((
-        MenuItem::new("Set break/condition…"),
+        MenuItem::new("Set break/condition..."),
         MenuChoice::Act(DebugAction::ToggleBreakpoint(addr)),
     ));
     v
@@ -448,8 +472,8 @@ fn disasm_entries(addr: u16, st: &DebuggerState, is_disasm: bool) -> Vec<(MenuIt
 fn stack_entries() -> Vec<(MenuItem, MenuChoice)> {
     vec![
         (
-            MenuItem::new("Go to…").shortcut("Ctrl+G").disabled(),
-            MenuChoice::None,
+            MenuItem::new("Go to...").shortcut("Ctrl+G"),
+            MenuChoice::OpenGoto(GotoTarget::Memory),
         ),
         disabled("Modify data"),
         disabled("Code go here"),
@@ -480,6 +504,10 @@ pub fn on_left_click(
                     st.disasm_base = pc;
                 }
                 st.pinned = !st.pinned;
+                None
+            }
+            Some(MenuChoice::OpenGoto(target)) => {
+                open_goto(st, target);
                 None
             }
             _ => None, // disabled item or click-away: just dismiss
@@ -513,6 +541,69 @@ pub fn on_right_click(
         st.cursor = Some(a);
     }
     st.menu = menu_for(target, st, (px, py));
+}
+
+// --- Go to… modal (RM5) ----------------------------------------------------
+
+/// Open the `Go to…` hex prompt for `target` (closing any open menu).
+pub fn open_goto(st: &mut DebuggerState, target: GotoTarget) {
+    st.menu = None;
+    st.dialog = Some(GotoDialog {
+        input: InputDialog::new("Go to address", true),
+        target,
+    });
+}
+
+/// Apply an accepted `Go to…` address: reposition the target pane (the disasm
+/// pane pins to the entered base so it stops following PC).
+fn apply_goto(st: &mut DebuggerState, target: GotoTarget, text: &str) {
+    let Ok(addr) = u16::from_str_radix(text.trim(), 16) else {
+        return; // empty / unparseable: leave the view unchanged
+    };
+    match target {
+        GotoTarget::Disasm => {
+            st.disasm_base = addr;
+            st.pinned = true;
+        }
+        GotoTarget::Memory => st.mem_base = addr,
+    }
+}
+
+/// Feed one key to the open `Go to…` dialog: accept repositions + closes,
+/// cancel closes, anything else keeps editing. Returns whether a dialog was open
+/// to consume the key.
+pub fn feed_goto(st: &mut DebuggerState, key: DialogKey) -> bool {
+    let Some(gd) = &mut st.dialog else {
+        return false;
+    };
+    match gd.input.on_key(key) {
+        DialogResult::Accept(text) => {
+            let target = gd.target;
+            apply_goto(st, target, &text);
+            st.dialog = None;
+        }
+        DialogResult::Cancel => st.dialog = None,
+        DialogResult::Continue => {}
+    }
+    true
+}
+
+/// Handle a left-click while the `Go to…` dialog is open: OK accepts, Cancel
+/// dismisses. Returns whether the dialog consumed the click.
+pub fn goto_click(st: &mut DebuggerState, area: Rect, px: i32, py: i32) -> bool {
+    let Some(gd) = &st.dialog else {
+        return false;
+    };
+    match dialog::click(&gd.input, area, px, py) {
+        DialogResult::Accept(text) => {
+            let target = gd.target;
+            apply_goto(st, target, &text);
+            st.dialog = None;
+        }
+        DialogResult::Cancel => st.dialog = None,
+        DialogResult::Continue => {}
+    }
+    true
 }
 
 #[cfg(test)]

@@ -1,18 +1,31 @@
 //! Keyboard mapping: physical key codes to Game Boy buttons and frontend
-//! actions.
+//! actions, **focus-dependent** like bgb (see [`map`] / [`Focus`]).
 //!
-//! Layout (fixed, no rebinding):
-//! Z=A, X=B, Enter=Start, Right Shift / Backspace=Select, arrows=D-pad,
-//! Tab (held)=turbo, P=pause, R=reset, Esc=quit.
+//! Global (any focus): Z=A, X=B, Enter=Start, Right Shift / Backspace=Select,
+//! arrows=D-pad, Tab (held)=turbo, P=pause, R=reset, Esc=quit, F9=break toggle.
+//! Game-window F-keys: F2/F3/F4 open the debugger / VRAM / I-O-map windows.
+//! Debugger-window F-keys: F2 toggle breakpoint, F3 step over, F4 run to cursor,
+//! F7 trace (step), Ctrl+G go to, F5/F10 open VRAM/iomap.
 //!
 //! F1 (DMG palette toggle) is intentionally unmapped: `Ppu::set_dmg_palette`
 //! is not reachable through the public `GameBoy` API. See the frontend report
 //! for the requested core addition.
 
 use slopgb_core::Button;
-use winit::keyboard::KeyCode;
+use winit::keyboard::{KeyCode, ModifiersState};
 
 use crate::ui::ToolWindow;
+
+/// Which window currently has focus — the key map is focus-dependent, exactly
+/// like bgb (the debugger's F-keys differ from the game window's). Resolved in
+/// `main` from the window the key event arrived on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Focus {
+    /// The game LCD window (and the VRAM / I/O-map viewers).
+    Game,
+    /// The debugger window.
+    Debugger,
+}
 
 /// What a mapped key does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,12 +42,18 @@ pub enum Action {
     Quit,
     /// Open/close a bgb-style debug tool window (on press).
     ToggleTool(ToolWindow),
-    /// Toggle the debugger break (freeze emulation) — F9, on press.
+    /// Toggle the debugger break (freeze emulation) — F9, focus-independent.
     DbgBreak,
-    /// Single-step one instruction while broken — F7, on press.
+    /// Single-step one instruction (bgb "Trace") — debugger F7, on press.
     DbgStep,
-    /// Step over a call/rst while broken — F8, on press.
+    /// Step over a call/rst — debugger F3, on press.
     DbgStepOver,
+    /// Toggle a breakpoint at the cursor — debugger F2, on press.
+    DbgToggleBreakpoint,
+    /// Run to the cursor — debugger F4, on press.
+    DbgRunToCursor,
+    /// Open the Go-to address prompt — debugger Ctrl+G, on press.
+    DbgGoto,
 }
 
 /// Tracks which physical keys currently hold each button, so two keys mapped
@@ -69,70 +88,129 @@ impl ButtonTracker {
     }
 }
 
-/// Map a physical key to its action, if it has one.
-pub fn map(code: KeyCode) -> Option<Action> {
-    Some(match code {
-        KeyCode::KeyZ => Action::Button(Button::A),
-        KeyCode::KeyX => Action::Button(Button::B),
-        KeyCode::Enter => Action::Button(Button::Start),
-        KeyCode::ShiftRight | KeyCode::Backspace => Action::Button(Button::Select),
-        KeyCode::ArrowUp => Action::Button(Button::Up),
-        KeyCode::ArrowDown => Action::Button(Button::Down),
-        KeyCode::ArrowLeft => Action::Button(Button::Left),
-        KeyCode::ArrowRight => Action::Button(Button::Right),
-        KeyCode::Tab => Action::Turbo,
-        KeyCode::KeyP => Action::Pause,
-        KeyCode::KeyR => Action::Reset,
-        KeyCode::Escape => Action::Quit,
-        KeyCode::F2 => Action::ToggleTool(ToolWindow::Debugger),
-        KeyCode::F3 => Action::ToggleTool(ToolWindow::Vram),
-        KeyCode::F4 => Action::ToggleTool(ToolWindow::IoMap),
-        KeyCode::F7 => Action::DbgStep,
-        KeyCode::F8 => Action::DbgStepOver,
-        KeyCode::F9 => Action::DbgBreak,
-        _ => return None,
-    })
+/// Map a physical key to its action under the current window `focus`, if any.
+///
+/// Game-button + global keys (turbo/pause/reset/quit, and **F9** break which
+/// stays focus-independent so a frozen machine is always resumable) bind in any
+/// focus. The F-keys then split by focus, matching bgb: in the **game** window
+/// F2/F3/F4 open the debugger/VRAM/iomap windows; in the **debugger** window
+/// they become bgb's debugger keys (F2 toggle breakpoint, F3 step over, F4 run
+/// to cursor, F7 trace, Ctrl+G go to, F5/F10 open VRAM/iomap). Keys for
+/// not-yet-built features (F6 jump, F8 step out, F12 load ROM) stay unmapped.
+#[must_use]
+pub fn map(code: KeyCode, mods: ModifiersState, focus: Focus) -> Option<Action> {
+    // Global (any focus): buttons + emulator controls + the break toggle.
+    let global = match code {
+        KeyCode::KeyZ => Some(Action::Button(Button::A)),
+        KeyCode::KeyX => Some(Action::Button(Button::B)),
+        KeyCode::Enter => Some(Action::Button(Button::Start)),
+        KeyCode::ShiftRight | KeyCode::Backspace => Some(Action::Button(Button::Select)),
+        KeyCode::ArrowUp => Some(Action::Button(Button::Up)),
+        KeyCode::ArrowDown => Some(Action::Button(Button::Down)),
+        KeyCode::ArrowLeft => Some(Action::Button(Button::Left)),
+        KeyCode::ArrowRight => Some(Action::Button(Button::Right)),
+        KeyCode::Tab => Some(Action::Turbo),
+        KeyCode::KeyP => Some(Action::Pause),
+        KeyCode::KeyR => Some(Action::Reset),
+        KeyCode::Escape => Some(Action::Quit),
+        KeyCode::F9 => Some(Action::DbgBreak),
+        _ => None,
+    };
+    if global.is_some() {
+        return global;
+    }
+    match focus {
+        Focus::Debugger => match code {
+            KeyCode::F2 => Some(Action::DbgToggleBreakpoint),
+            KeyCode::F3 => Some(Action::DbgStepOver),
+            KeyCode::F4 => Some(Action::DbgRunToCursor),
+            KeyCode::F7 => Some(Action::DbgStep),
+            KeyCode::F5 => Some(Action::ToggleTool(ToolWindow::Vram)),
+            KeyCode::F10 => Some(Action::ToggleTool(ToolWindow::IoMap)),
+            KeyCode::KeyG if mods.control_key() => Some(Action::DbgGoto),
+            _ => None,
+        },
+        Focus::Game => match code {
+            KeyCode::F2 => Some(Action::ToggleTool(ToolWindow::Debugger)),
+            KeyCode::F3 => Some(Action::ToggleTool(ToolWindow::Vram)),
+            KeyCode::F4 => Some(Action::ToggleTool(ToolWindow::IoMap)),
+            _ => None,
+        },
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const NONE: ModifiersState = ModifiersState::empty();
+    const CTRL: ModifiersState = ModifiersState::CONTROL;
+
+    /// Map under game focus, no modifiers (the common case).
+    fn g(code: KeyCode) -> Option<Action> {
+        map(code, NONE, Focus::Game)
+    }
+    /// Map under debugger focus, no modifiers.
+    fn d(code: KeyCode) -> Option<Action> {
+        map(code, NONE, Focus::Debugger)
+    }
+
     #[test]
     fn dpad_maps_to_matching_buttons() {
-        assert_eq!(map(KeyCode::ArrowUp), Some(Action::Button(Button::Up)));
-        assert_eq!(map(KeyCode::ArrowDown), Some(Action::Button(Button::Down)));
-        assert_eq!(map(KeyCode::ArrowLeft), Some(Action::Button(Button::Left)));
-        assert_eq!(
-            map(KeyCode::ArrowRight),
-            Some(Action::Button(Button::Right))
-        );
+        // Buttons are global — same under either focus.
+        for f in [Focus::Game, Focus::Debugger] {
+            assert_eq!(
+                map(KeyCode::ArrowUp, NONE, f),
+                Some(Action::Button(Button::Up))
+            );
+            assert_eq!(
+                map(KeyCode::ArrowRight, NONE, f),
+                Some(Action::Button(Button::Right))
+            );
+        }
     }
 
     #[test]
     fn unmapped_keys_do_nothing() {
-        assert_eq!(map(KeyCode::KeyQ), None);
-        assert_eq!(map(KeyCode::F1), None); // palette toggle: needs core API
+        assert_eq!(g(KeyCode::KeyQ), None);
+        assert_eq!(g(KeyCode::F1), None); // palette toggle: needs core API
+        // Not-yet-built debugger keys stay unmapped (no dead actions).
+        assert_eq!(d(KeyCode::F6), None); // jump to cursor (RM7, M5b-2)
+        assert_eq!(d(KeyCode::F8), None); // step out (RM13, M5c)
+        assert_eq!(d(KeyCode::F12), None); // load ROM (MB2/MN4)
     }
 
     #[test]
-    fn function_keys_toggle_the_tool_windows() {
+    fn game_focus_function_keys_open_the_tool_windows() {
         assert_eq!(
-            map(KeyCode::F2),
+            g(KeyCode::F2),
             Some(Action::ToggleTool(ToolWindow::Debugger))
         );
-        assert_eq!(map(KeyCode::F3), Some(Action::ToggleTool(ToolWindow::Vram)));
-        assert_eq!(
-            map(KeyCode::F4),
-            Some(Action::ToggleTool(ToolWindow::IoMap))
-        );
+        assert_eq!(g(KeyCode::F3), Some(Action::ToggleTool(ToolWindow::Vram)));
+        assert_eq!(g(KeyCode::F4), Some(Action::ToggleTool(ToolWindow::IoMap)));
     }
 
     #[test]
-    fn function_keys_drive_the_debugger() {
-        assert_eq!(map(KeyCode::F7), Some(Action::DbgStep));
-        assert_eq!(map(KeyCode::F8), Some(Action::DbgStepOver));
-        assert_eq!(map(KeyCode::F9), Some(Action::DbgBreak));
+    fn debugger_focus_function_keys_are_bgb_debugger_keys() {
+        assert_eq!(d(KeyCode::F2), Some(Action::DbgToggleBreakpoint));
+        assert_eq!(d(KeyCode::F3), Some(Action::DbgStepOver));
+        assert_eq!(d(KeyCode::F4), Some(Action::DbgRunToCursor));
+        assert_eq!(d(KeyCode::F7), Some(Action::DbgStep));
+        assert_eq!(d(KeyCode::F5), Some(Action::ToggleTool(ToolWindow::Vram)));
+        assert_eq!(d(KeyCode::F10), Some(Action::ToggleTool(ToolWindow::IoMap)));
+        // Ctrl+G is Go to; plain G does nothing.
+        assert_eq!(
+            map(KeyCode::KeyG, CTRL, Focus::Debugger),
+            Some(Action::DbgGoto)
+        );
+        assert_eq!(d(KeyCode::KeyG), None);
+    }
+
+    #[test]
+    fn f9_break_is_focus_independent() {
+        // Resume-safety: F9 toggles break from any focus.
+        assert_eq!(g(KeyCode::F9), Some(Action::DbgBreak));
+        assert_eq!(d(KeyCode::F9), Some(Action::DbgBreak));
     }
 
     #[test]

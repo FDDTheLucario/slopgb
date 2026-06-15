@@ -111,9 +111,12 @@ fn render_debugger(
     let stack_rows = (l.stack.h / line_height()).max(0) as usize;
     debugger::render_stack(c, l.stack, &gb.stack(stack_rows), theme);
     debugger::render_memory(c, l.memory, |a| gb.debug_read(a), st.mem_base, theme);
-    // The open context menu draws last, on top of every pane.
+    // The open context menu / modal draws last, on top of every pane.
     if let Some(om) = &st.menu {
         crate::ui::menu::render(c, om.origin, &om.items, om.hovered, theme);
+    }
+    if let Some(gd) = &st.dialog {
+        crate::ui::dialog::render(c, area, &gd.input, theme);
     }
 }
 

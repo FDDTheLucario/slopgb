@@ -33,11 +33,12 @@ use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::PhysicalKey;
+use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 use audio::{AudioOutput, Resampler};
-use input::{Action, ButtonTracker};
+use input::{Action, ButtonTracker, Focus};
+use ui::dialog::DialogKey;
 use video::Video;
 
 const USAGE: &str = "\
@@ -56,8 +57,12 @@ OPTIONS:
 KEYS:
     Z = A        X = B        Enter = Start    RShift/Backspace = Select
     Arrow keys = D-pad        Tab (hold) = turbo
-    P = pause    R = reset    Esc = quit
+    P = pause    R = reset    Esc = quit       F9 = break/resume
     F2 = debugger    F3 = VRAM viewer    F4 = I/O map  (bgb-style debug windows)
+
+When the debugger window is focused its keys follow bgb: F2 toggle breakpoint,
+F3 step over, F7 trace (step), F4 run to cursor, Ctrl+G go to, F5/F10 open the
+VRAM viewer / I/O map. Right-click a debugger pane for its context menu.
 
 A ROM file dropped onto the window is loaded in place of the current one.
 Set SLOPGB_OPEN_TOOLS=debugger,vram,iomap to open debug windows at startup.
@@ -423,8 +428,10 @@ struct App {
     /// Open bgb-style debug tool windows (F2/F3/F4). The game window is handled
     /// directly; these are routed by [`ToolWindows::owns`].
     tools: toolwin::ToolWindows,
-    /// Debugger execution control (F9 break, F7 step, F8 step-over).
+    /// Debugger execution control (break / step / breakpoints).
     dbg: dbg::Debugger,
+    /// Current keyboard modifiers, for the focus-dependent key map (Ctrl+G).
+    modifiers: ModifiersState,
 }
 
 impl App {
@@ -446,6 +453,7 @@ impl App {
             fps: 0.0,
             tools: toolwin::ToolWindows::new(),
             dbg: dbg::Debugger::default(),
+            modifiers: ModifiersState::empty(),
         }
     }
 
@@ -477,14 +485,23 @@ impl App {
         self.watchdog.reset();
     }
 
-    fn handle_key(&mut self, event_loop: &ActiveEventLoop, key: &KeyEvent) {
+    fn handle_key(&mut self, event_loop: &ActiveEventLoop, key: &KeyEvent, focus: Focus) {
         if key.repeat {
+            return;
+        }
+        // Modal capture: while the debugger's Go-to prompt is open, every key
+        // goes to it (so typing an address can't trigger a debugger hotkey).
+        if focus == Focus::Debugger && key.state.is_pressed() && self.tools.debugger_modal_active()
+        {
+            if let Some(dk) = dialog_key_from(key) {
+                self.tools.feed_debugger_dialog(dk);
+            }
             return;
         }
         let PhysicalKey::Code(code) = key.physical_key else {
             return;
         };
-        let Some(action) = input::map(code) else {
+        let Some(action) = input::map(code, self.modifiers, focus) else {
             return;
         };
         let pressed = key.state.is_pressed();
@@ -540,8 +557,35 @@ impl App {
                 self.dbg.step_over(&mut self.session.gb);
                 self.refresh_after_step();
             }
+            // Debugger F2 / F4 act on the cursor (or PC when nothing is selected).
+            Action::DbgToggleBreakpoint if pressed => {
+                let addr = self.debug_cursor_or_pc();
+                self.dbg.apply(
+                    &mut self.session.gb,
+                    dbg::DebugAction::ToggleBreakpoint(addr),
+                );
+                self.refresh_after_step();
+            }
+            Action::DbgRunToCursor if pressed => {
+                let addr = self.debug_cursor_or_pc();
+                self.dbg
+                    .apply(&mut self.session.gb, dbg::DebugAction::RunToCursor(addr));
+                self.update_title();
+                self.refresh_after_step();
+            }
+            Action::DbgGoto if pressed => {
+                self.tools.open_debugger_goto();
+            }
             _ => {}
         }
+    }
+
+    /// The debugger's selected cursor address, or PC if no line is selected —
+    /// what a keyboard breakpoint / run-to-cursor acts on.
+    fn debug_cursor_or_pc(&self) -> u16 {
+        self.tools
+            .debugger_cursor()
+            .unwrap_or_else(|| self.session.gb.cpu_regs().pc)
     }
 
     /// After a single/over step, repaint the game window (the LCD may have
@@ -705,6 +749,22 @@ impl App {
     }
 }
 
+/// Translate a winit key event into an abstract [`DialogKey`] for the modal
+/// prompt: the named editing keys (backspace / enter / escape), else the typed
+/// character.
+fn dialog_key_from(key: &KeyEvent) -> Option<DialogKey> {
+    if let PhysicalKey::Code(code) = key.physical_key {
+        match code {
+            KeyCode::Backspace => return Some(DialogKey::Backspace),
+            KeyCode::Enter | KeyCode::NumpadEnter => return Some(DialogKey::Enter),
+            KeyCode::Escape => return Some(DialogKey::Escape),
+            _ => {}
+        }
+    }
+    let ch = key.text.as_ref()?.chars().next()?;
+    (!ch.is_control()).then_some(DialogKey::Char(ch))
+}
+
 /// Run one frame, halting early at a breakpoint when armed. A free function (not
 /// a method) so the pacers can call it while the audio pipe holds `&mut
 /// self.audio` — borrowing only the machine, not all of `self`. Returns whether
@@ -778,6 +838,12 @@ impl ApplicationHandler for App {
         window_id: WindowId,
         event: WindowEvent,
     ) {
+        // Track keyboard modifiers for the focus-dependent key map (Ctrl+G),
+        // regardless of which window has focus.
+        if let WindowEvent::ModifiersChanged(m) = &event {
+            self.modifiers = m.state();
+            return;
+        }
         // A debug tool window owns its events; the game window path below is
         // untouched. Its close button closes just that window (not the app).
         if self.tools.owns(window_id) {
@@ -812,8 +878,16 @@ impl ApplicationHandler for App {
                         self.refresh_after_step();
                     }
                 }
-                // Hotkeys (F2/F3/F4, pause, reset…) work from any window.
-                WindowEvent::KeyboardInput { event, .. } => self.handle_key(event_loop, &event),
+                // Hotkeys route by focused window kind: the debugger window gets
+                // bgb's debugger keys, the viewers keep the game keymap.
+                WindowEvent::KeyboardInput { event, .. } => {
+                    let focus = if self.tools.kind_of(window_id) == Some(ui::ToolWindow::Debugger) {
+                        Focus::Debugger
+                    } else {
+                        Focus::Game
+                    };
+                    self.handle_key(event_loop, &event, focus);
+                }
                 _ => {}
             }
             return;
@@ -830,7 +904,9 @@ impl ApplicationHandler for App {
             // Focus loss and occlusion both mean held keys won't get release
             // events, so drop all input before any button can stick.
             WindowEvent::Focused(false) | WindowEvent::Occluded(true) => self.release_all_input(),
-            WindowEvent::KeyboardInput { event, .. } => self.handle_key(event_loop, &event),
+            WindowEvent::KeyboardInput { event, .. } => {
+                self.handle_key(event_loop, &event, Focus::Game)
+            }
             _ => {}
         }
     }

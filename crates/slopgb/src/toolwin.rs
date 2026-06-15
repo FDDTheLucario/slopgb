@@ -17,8 +17,10 @@ use winit::window::{Window, WindowId};
 
 use crate::dbg::{Breakpoints, DebugAction};
 use crate::ui::canvas::Rect;
+use crate::ui::dialog::DialogKey;
 use crate::ui::{Canvas, Theme, ToolWindow, WindowRegistry};
 use crate::windows::{self, WinState, debugger, vram};
+use debugger::GotoTarget;
 
 struct ToolView {
     window: Rc<Window>,
@@ -225,7 +227,12 @@ impl ToolWindows {
                 None
             }
             WinState::Debugger(s) => {
-                let action = debugger_left_click(s, area, gb, px, py);
+                // An open modal eats the click (OK/Cancel); else normal routing.
+                let action = if debugger::goto_click(s, area, px, py) {
+                    None
+                } else {
+                    debugger_left_click(s, area, gb, px, py)
+                };
                 view.window.request_redraw();
                 action
             }
@@ -245,6 +252,66 @@ impl ToolWindows {
             view.window.request_redraw();
         }
         None
+    }
+
+    /// The tool a window shows, for the focus-dependent key router in `main`.
+    #[must_use]
+    pub fn kind_of(&self, id: WindowId) -> Option<ToolWindow> {
+        self.reg.kind_of(id)
+    }
+
+    /// The (single) open debugger window's view, by kind.
+    fn debugger_view_mut(&mut self) -> Option<&mut ToolView> {
+        let id = self.reg.id_of(ToolWindow::Debugger)?;
+        self.views.get_mut(&id)
+    }
+
+    fn debugger_view(&self) -> Option<&ToolView> {
+        let id = self.reg.id_of(ToolWindow::Debugger)?;
+        self.views.get(&id)
+    }
+
+    /// The debugger's selected cursor address (keyboard breakpoint / run-to-cursor).
+    #[must_use]
+    pub fn debugger_cursor(&self) -> Option<u16> {
+        match &self.debugger_view()?.state {
+            WinState::Debugger(s) => s.cursor,
+            _ => None,
+        }
+    }
+
+    /// Whether the debugger window has an open modal, so `main` routes keys to it
+    /// instead of the focus keymap.
+    #[must_use]
+    pub fn debugger_modal_active(&self) -> bool {
+        if let Some(WinState::Debugger(s)) = self.debugger_view().map(|v| &v.state) {
+            s.dialog.is_some()
+        } else {
+            false
+        }
+    }
+
+    /// Feed one key to the debugger's open `Go to…` modal; redraw on a change.
+    pub fn feed_debugger_dialog(&mut self, key: DialogKey) {
+        let Some(view) = self.debugger_view_mut() else {
+            return;
+        };
+        if let WinState::Debugger(s) = &mut view.state {
+            if debugger::feed_goto(s, key) {
+                view.window.request_redraw();
+            }
+        }
+    }
+
+    /// Open the debugger's `Go to…` modal on the disasm pane (Ctrl+G).
+    pub fn open_debugger_goto(&mut self) {
+        let Some(view) = self.debugger_view_mut() else {
+            return;
+        };
+        if let WinState::Debugger(s) = &mut view.state {
+            debugger::open_goto(s, GotoTarget::Disasm);
+            view.window.request_redraw();
+        }
     }
 
     /// Clear the remembered cursor when it leaves tool window `id`, so a stale

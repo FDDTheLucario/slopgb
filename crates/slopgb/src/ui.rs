@@ -4,6 +4,7 @@
 //! Layer C.
 
 pub mod canvas;
+pub mod dialog;
 pub mod font;
 pub mod menu;
 pub mod registry;

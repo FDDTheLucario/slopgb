@@ -429,3 +429,101 @@ fn right_click_with_a_menu_open_dismisses_it() {
     );
     assert!(st.menu.is_none(), "a second right-click closes the menu");
 }
+
+// --- Go to… modal (RM5) ----------------------------------------------------
+
+use crate::ui::dialog::DialogKey;
+
+/// Type a string of chars into an open dialog via feed_goto.
+fn type_goto(st: &mut DebuggerState, s: &str) {
+    for ch in s.chars() {
+        feed_goto(st, DialogKey::Char(ch));
+    }
+}
+
+#[test]
+fn disasm_menu_go_to_is_enabled_and_opens_the_dialog() {
+    let (mut st, rects) = open_disasm_menu();
+    // "Go to…" is the first item, now enabled (was greyed in M5a).
+    let r = rects[0];
+    let action = on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+    );
+    assert_eq!(action, None, "opening a dialog is a view effect");
+    assert!(st.menu.is_none(), "menu closed");
+    let gd = st.dialog.as_ref().expect("Go-to dialog opened");
+    assert_eq!(gd.target, GotoTarget::Disasm);
+}
+
+#[test]
+fn goto_disasm_pins_the_view_to_the_entered_address() {
+    let mut st = DebuggerState::default();
+    open_goto(&mut st, GotoTarget::Disasm);
+    type_goto(&mut st, "0150");
+    feed_goto(&mut st, DialogKey::Enter);
+    assert!(st.dialog.is_none(), "accept closes the dialog");
+    assert!(st.pinned, "disasm Go-to pins the view");
+    assert_eq!(st.disasm_base, 0x0150);
+}
+
+#[test]
+fn goto_memory_repositions_the_memory_base() {
+    let mut st = DebuggerState::default();
+    open_goto(&mut st, GotoTarget::Memory);
+    type_goto(&mut st, "C000");
+    feed_goto(&mut st, DialogKey::Enter);
+    assert!(st.dialog.is_none());
+    assert_eq!(st.mem_base, 0xC000);
+    assert!(!st.pinned, "memory Go-to does not pin the disasm view");
+}
+
+#[test]
+fn goto_escape_cancels_without_moving_the_view() {
+    let mut st = DebuggerState::default();
+    let base = st.disasm_base;
+    open_goto(&mut st, GotoTarget::Disasm);
+    type_goto(&mut st, "ABCD");
+    feed_goto(&mut st, DialogKey::Escape);
+    assert!(st.dialog.is_none(), "escape closes");
+    assert_eq!(st.disasm_base, base, "view unchanged on cancel");
+    assert!(!st.pinned);
+}
+
+#[test]
+fn feed_goto_with_no_dialog_open_consumes_nothing() {
+    let mut st = DebuggerState::default();
+    assert!(
+        !feed_goto(&mut st, DialogKey::Enter),
+        "no dialog -> not consumed"
+    );
+}
+
+#[test]
+fn goto_click_ok_accepts_and_cancel_dismisses() {
+    use crate::ui::dialog::{self, DialogLayout};
+    let mut st = DebuggerState::default();
+    open_goto(&mut st, GotoTarget::Memory);
+    type_goto(&mut st, "8000");
+    let DialogLayout { ok, cancel, .. } = dialog::layout(AREA);
+    // Click OK -> accept.
+    assert!(goto_click(&mut st, AREA, ok.x + ok.w / 2, ok.y + ok.h / 2));
+    assert_eq!(st.mem_base, 0x8000);
+    assert!(st.dialog.is_none());
+    // Re-open, click Cancel -> dismiss, no change.
+    open_goto(&mut st, GotoTarget::Memory);
+    type_goto(&mut st, "1234");
+    assert!(goto_click(
+        &mut st,
+        AREA,
+        cancel.x + cancel.w / 2,
+        cancel.y + cancel.h / 2
+    ));
+    assert_eq!(st.mem_base, 0x8000, "cancel left the base unchanged");
+    assert!(st.dialog.is_none());
+}
