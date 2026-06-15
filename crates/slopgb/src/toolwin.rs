@@ -132,6 +132,13 @@ impl ToolWindows {
         self.reg.kind_of(id).is_some()
     }
 
+    /// Whether a tool window of `kind` is currently open (gates the debugger
+    /// hotkeys to when its window is up).
+    #[must_use]
+    pub fn is_open(&self, kind: ToolWindow) -> bool {
+        self.reg.id_of(kind).is_some()
+    }
+
     /// Render the tool window `id` from the live machine.
     pub fn redraw(&mut self, id: WindowId, gb: &GameBoy) {
         let Some(view) = self.views.get_mut(&id) else {

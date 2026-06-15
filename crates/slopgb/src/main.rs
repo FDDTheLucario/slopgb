@@ -8,6 +8,7 @@
 //! hardware rate, 4194304 / 70224 ≈ 59.7275 Hz.
 
 mod audio;
+mod dbg;
 mod input;
 mod toolwin;
 mod ui;
@@ -422,6 +423,8 @@ struct App {
     /// Open bgb-style debug tool windows (F2/F3/F4). The game window is handled
     /// directly; these are routed by [`ToolWindows::owns`].
     tools: toolwin::ToolWindows,
+    /// Debugger execution control (F9 break, F7 step, F8 step-over).
+    dbg: dbg::Debugger,
 }
 
 impl App {
@@ -442,12 +445,15 @@ impl App {
             fps_since: Instant::now(),
             fps: 0.0,
             tools: toolwin::ToolWindows::new(),
+            dbg: dbg::Debugger::default(),
         }
     }
 
     fn update_title(&self) {
         if let Some(window) = &self.window {
-            let state = if self.paused {
+            let state = if self.dbg.is_broken() {
+                " (debugging)".to_owned()
+            } else if self.paused {
                 " — paused".to_owned()
             } else {
                 format!(" — {:.1} fps", self.fps)
@@ -512,8 +518,39 @@ impl App {
             }
             Action::Quit if pressed => event_loop.exit(),
             Action::ToggleTool(kind) if pressed => self.tools.toggle(event_loop, kind),
+            // F9 enters a break only with the debugger window up (so the key is
+            // inert during normal play), but always *resumes* one — otherwise
+            // closing the window while broken would strand the frozen machine.
+            Action::DbgBreak
+                if pressed
+                    && (self.dbg.is_broken() || self.tools.is_open(ui::ToolWindow::Debugger)) =>
+            {
+                self.dbg.toggle_break();
+                if !self.dbg.is_broken() {
+                    self.resync_pacing();
+                }
+                self.update_title();
+                self.tools.request_redraw_all();
+            }
+            Action::DbgStep if pressed && self.dbg.is_broken() => {
+                self.dbg.step(&mut self.session.gb);
+                self.refresh_after_step();
+            }
+            Action::DbgStepOver if pressed && self.dbg.is_broken() => {
+                self.dbg.step_over(&mut self.session.gb);
+                self.refresh_after_step();
+            }
             _ => {}
         }
+    }
+
+    /// After a single/over step, repaint the game window (the LCD may have
+    /// advanced) and every open tool window so they track the new PC.
+    fn refresh_after_step(&mut self) {
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+        self.tools.request_redraw_all();
     }
 
     /// Focus lost or window occluded: no release events will arrive for keys
@@ -753,7 +790,9 @@ impl ApplicationHandler for App {
         if self.window.is_none() {
             return; // not resumed yet
         }
-        if self.paused {
+        // A debugger break freezes emulation exactly like pause: the LCD holds
+        // its last frame and zero frames are emulated until F9/step.
+        if self.paused || self.dbg.is_broken() {
             event_loop.set_control_flow(ControlFlow::Wait);
             return;
         }

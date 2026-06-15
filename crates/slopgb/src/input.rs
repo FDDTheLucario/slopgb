@@ -29,6 +29,12 @@ pub enum Action {
     Quit,
     /// Open/close a bgb-style debug tool window (on press).
     ToggleTool(ToolWindow),
+    /// Toggle the debugger break (freeze emulation) — F9, on press.
+    DbgBreak,
+    /// Single-step one instruction while broken — F7, on press.
+    DbgStep,
+    /// Step over a call/rst while broken — F8, on press.
+    DbgStepOver,
 }
 
 /// Tracks which physical keys currently hold each button, so two keys mapped
@@ -81,6 +87,9 @@ pub fn map(code: KeyCode) -> Option<Action> {
         KeyCode::F2 => Action::ToggleTool(ToolWindow::Debugger),
         KeyCode::F3 => Action::ToggleTool(ToolWindow::Vram),
         KeyCode::F4 => Action::ToggleTool(ToolWindow::IoMap),
+        KeyCode::F7 => Action::DbgStep,
+        KeyCode::F8 => Action::DbgStepOver,
+        KeyCode::F9 => Action::DbgBreak,
         _ => return None,
     })
 }
@@ -117,6 +126,13 @@ mod tests {
             map(KeyCode::F4),
             Some(Action::ToggleTool(ToolWindow::IoMap))
         );
+    }
+
+    #[test]
+    fn function_keys_drive_the_debugger() {
+        assert_eq!(map(KeyCode::F7), Some(Action::DbgStep));
+        assert_eq!(map(KeyCode::F8), Some(Action::DbgStepOver));
+        assert_eq!(map(KeyCode::F9), Some(Action::DbgBreak));
     }
 
     #[test]
