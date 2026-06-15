@@ -7,7 +7,7 @@ use slopgb_core::debug;
 
 use crate::ui::Theme;
 use crate::ui::canvas::{Canvas, Rect};
-use crate::ui::text::line_height;
+use crate::ui::text::{draw_text, hex_row, line_height};
 use crate::ui::widgets::scroll_list;
 
 /// The four panes of the debugger body, partitioned from the window size to
@@ -124,6 +124,104 @@ pub fn render_disasm(
     let highlight = rows.iter().position(|r| r.addr == pc);
     scroll_list(c, rect, &texts, 0, highlight, theme);
     rows
+}
+
+/// The values the registers panel shows, gathered from the machine
+/// (`cpu_regs` + `ime`/`ime_pending`/`double_speed` + `debug_read` of the PPU /
+/// interrupt registers). Built by the window layer so the renderer stays pure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RegsView {
+    pub af: u16,
+    pub bc: u16,
+    pub de: u16,
+    pub hl: u16,
+    pub sp: u16,
+    pub pc: u16,
+    pub ime: bool,
+    pub ima: bool,
+    pub lcdc: u8,
+    pub stat: u8,
+    pub ly: u8,
+    pub ie: u8,
+    pub iflag: u8,
+    pub double_speed: bool,
+}
+
+/// The two-column register lines bgb shows (`af= …  lcdc=…`, …). `cnt` and the
+/// ROM-bank field are omitted pending their deferred accessors.
+#[must_use]
+pub fn regs_lines(r: &RegsView) -> Vec<String> {
+    let flag = |b: bool| if b { '1' } else { '.' };
+    vec![
+        format!("af= {:04X}   lcdc={:02X}", r.af, r.lcdc),
+        format!("bc= {:04X}   stat={:02X}", r.bc, r.stat),
+        format!("de= {:04X}   ly= {:02X}", r.de, r.ly),
+        format!("hl= {:04X}", r.hl),
+        format!("sp= {:04X}   ie= {:02X}", r.sp, r.ie),
+        format!("pc= {:04X}   if= {:02X}", r.pc, r.iflag),
+        format!("ime={}   spd= {}", flag(r.ime), u8::from(r.double_speed)),
+        format!("ima={}", flag(r.ima)),
+    ]
+}
+
+/// Draw the registers panel into `rect`.
+pub fn render_regs(c: &mut Canvas, rect: Rect, r: &RegsView, theme: &Theme) {
+    let saved = c.push_clip(rect);
+    for (i, line) in regs_lines(r).iter().enumerate() {
+        draw_text(
+            c,
+            rect.x + 1,
+            rect.y + i as i32 * line_height(),
+            line,
+            theme.text,
+        );
+    }
+    c.set_clip(saved);
+}
+
+/// Stack-pane lines from [`slopgb_core::GameBoy::stack`] output: `LABEL:ADDR WORD`,
+/// descending from SP.
+#[must_use]
+pub fn stack_lines(stack: &[(u16, u16)]) -> Vec<String> {
+    stack
+        .iter()
+        .map(|&(a, w)| format!("{}:{a:04X} {w:04X}", region_label(a)))
+        .collect()
+}
+
+/// Draw the stack pane; the top (SP) row gets the highlight bar, as in bgb.
+pub fn render_stack(c: &mut Canvas, rect: Rect, stack: &[(u16, u16)], theme: &Theme) {
+    let lines = stack_lines(stack);
+    let texts: Vec<&str> = lines.iter().map(String::as_str).collect();
+    let highlight = (!texts.is_empty()).then_some(0);
+    scroll_list(c, rect, &texts, 0, highlight, theme);
+}
+
+/// Memory-pane rows: `count` hex-dump lines of 16 bytes each from `start`,
+/// via [`hex_row`] over `read` (use `GameBoy::debug_read`).
+#[must_use]
+pub fn memory_rows(read: impl Fn(u16) -> u8, start: u16, count: usize) -> Vec<String> {
+    (0..count)
+        .map(|i| {
+            let base = start.wrapping_add((i * 16) as u16);
+            let bytes: Vec<u8> = (0..16).map(|j| read(base.wrapping_add(j))).collect();
+            hex_row(&format!("{}:{base:04X}", region_label(base)), &bytes)
+        })
+        .collect()
+}
+
+/// Draw the memory hex-dump pane.
+pub fn render_memory(
+    c: &mut Canvas,
+    rect: Rect,
+    read: impl Fn(u16) -> u8,
+    start: u16,
+    theme: &Theme,
+) {
+    let count = (rect.h / line_height()).max(0) as usize + 1;
+    let rows = memory_rows(read, start, count);
+    let texts: Vec<&str> = rows.iter().map(String::as_str).collect();
+    scroll_list(c, rect, &texts, 0, None, theme);
 }
 
 #[cfg(test)]

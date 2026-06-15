@@ -111,3 +111,50 @@ fn layout_degenerate_sizes_do_not_panic_or_go_negative() {
         }
     }
 }
+
+#[test]
+fn regs_lines_match_bgb_two_column_layout() {
+    // Values from the real bgb capture (dbg-regs.png).
+    let v = RegsView {
+        af: 0x1180,
+        bc: 0x0000,
+        de: 0xFF56,
+        hl: 0x000D,
+        sp: 0xFFFE,
+        pc: 0x0100,
+        ime: false,
+        ima: false,
+        lcdc: 0x91,
+        stat: 0x81,
+        ly: 0x90,
+        ie: 0x00,
+        iflag: 0xF1,
+        double_speed: false,
+    };
+    let l = regs_lines(&v);
+    assert_eq!(l[0], "af= 1180   lcdc=91");
+    assert_eq!(l[1], "bc= 0000   stat=81");
+    assert_eq!(l[2], "de= FF56   ly= 90");
+    assert_eq!(l[4], "sp= FFFE   ie= 00");
+    assert_eq!(l[5], "pc= 0100   if= F1");
+    assert_eq!(l[6], "ime=.   spd= 0");
+    assert_eq!(l[7], "ima=.");
+}
+
+#[test]
+fn stack_lines_label_and_format_words() {
+    let stack = [(0xFFFEu16, 0x0022u16), (0xFFFC, 0x00F9), (0xFFFA, 0x05D3)];
+    let lines = stack_lines(&stack);
+    assert_eq!(lines[0], "HRAM:FFFE 0022");
+    assert_eq!(lines[1], "HRAM:FFFC 00F9");
+    assert_eq!(lines[2], "HRAM:FFFA 05D3");
+}
+
+#[test]
+fn memory_rows_dump_sixteen_bytes_per_line() {
+    let read = |a: u16| (a & 0xFF) as u8; // byte value = low addr byte
+    let rows = memory_rows(read, 0x0000, 2);
+    assert_eq!(rows.len(), 2);
+    assert!(rows[0].starts_with("ROM0:0000 00 01 02 03 04 05 06 07  08"));
+    assert!(rows[1].starts_with("ROM0:0010 10 11 12 13"));
+}
