@@ -61,15 +61,58 @@ fn obs_pre_edge(obs: u8, edge: u8) -> bool {
 /// blocked by a per-M-cycle accessibility/STAT edge stamped at its dot-END
 /// commit eighth (`Some(edge)` from [`edge_eighth`]; `None` = no edge this
 /// M-cycle). The edge-stamp replaces the old precomputed boolean: storing the
-/// raw commit eighth instead of `obs_pre_edge(MID_PHASE, edge)` lets each read
-/// chain supply its own observer phase (the m2-dispatch ISR read samples at
-/// O=2, not the MID default — see INC-G2). `stamp_blocks(Some(edge),
-/// MID_PHASE)` is bit-identical to the legacy half-split for every dot/speed
-/// (`stamp_blocks_matches_half_split`).
+/// raw commit eighth (rather than `obs_pre_edge(MID_PHASE, edge)`) is what lets
+/// an EVENT carry its own sub-dot position via [`event_phase`] — the INC-G3
+/// discriminator between read chains, since every CPU access observes at the
+/// one [`ACCESS_PHASE`] (the reverted G2c per-read-chain observer phase was the
+/// wrong premise). `stamp_blocks(Some(edge), MID_PHASE)` is bit-identical to
+/// the legacy half-split for every dot/speed (`stamp_blocks_matches_half_split`).
 #[inline]
 fn stamp_blocks(stamp: Option<u8>, obs: u8) -> bool {
     stamp.is_some_and(|edge| obs_pre_edge(obs, edge))
 }
+
+/// The boundary events that commit a per-M-cycle sub-cc edge. Each PPU edge
+/// commits at its own dot-END eighth today ([`event_phase`] returns
+/// [`edge_eighth`] for every kind — net-zero), so the kinds are
+/// interchangeable; the enum is the seam a later INC-G3 increment uses to give
+/// one event its own sub-dot lead/lag (the cc-exact boundary positions from
+/// the gambatte xpos formulas — e.g. the CGB palette unblock trails the mode-0
+/// IRQ rise by a half-dot, m0Time=xpos+7 vs IRQ+6) without recalibrating the
+/// dot-clocked pixel pipe or the other events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EdgeKind {
+    /// The mode-0 STAT IRQ rise (consumed by the halt-exit sampler, not stamped).
+    M0Rise,
+    /// The OAM/VRAM mode-3→mode-0 accessibility unblock (`m0_access_edge`).
+    M0Access,
+    /// The CGB palette-RAM pipe-end unblock (`pal_access_edge`).
+    PalAccess,
+    /// The double-speed FF41 STAT mode-bit flip (`stat_mode_edge`).
+    StatMode,
+}
+
+/// The dot-END commit phase (eighths of an M-cycle) of boundary event `kind`
+/// firing on dot `i` of a `dots`-dot M-cycle. Net-zero today: every kind
+/// returns [`edge_eighth`] (`event_phase_is_net_zero`). The `kind` parameter
+/// is the hook a later INC-G3 increment uses to offset one event's sub-dot
+/// position independently of the others.
+#[inline]
+fn event_phase(kind: EdgeKind, i: u64, dots: u64) -> u8 {
+    // Net-zero scaffold: every kind shares the dot-END commit eighth. A later
+    // increment matches on `kind` to add a per-event sub-dot lead/lag.
+    let _ = kind;
+    edge_eighth(i, dots)
+}
+
+/// The single sub-cc phase (eighths) at which every CPU bus access samples the
+/// accessibility/STAT edge stamps. INC-G3 corrects the reverted G2c premise (a
+/// per-read-chain observer phase): M-cycles are dot-aligned to the PPU, so all
+/// CPU accesses sample at the SAME M-cycle cc-offset — the discriminator
+/// between read chains is the EVENT's sub-dot position ([`event_phase`]), not
+/// the observer's. Equals [`MID_PHASE`] (cc+2), so the scaffold is net-zero
+/// (`access_phase_is_single_constant`).
+const ACCESS_PHASE: u8 = MID_PHASE;
 
 /// OAM DMA source classes (gambatte-core memptrs.h `OamDmaSrc`, classified
 /// from the FF46 page by memory.cpp `oamDmaInitSetup`). The class decides
@@ -738,7 +781,9 @@ impl Interconnect {
                 // int_oam_* grids pin the law).
                 self.if_late |= IF_STAT_BIT;
             }
-            if self.ppu.take_m0_rise() && obs_pre_edge(MID_PHASE, edge_eighth(i, dots)) {
+            if self.ppu.take_m0_rise()
+                && obs_pre_edge(MID_PHASE, event_phase(EdgeKind::M0Rise, i, dots))
+            {
                 // The mode-0 STAT rise carries the second-half halt law
                 // — the same shape as the line-start OAM pulses — but
                 // its dot moves with SCX/sprites/window, so the half is
@@ -762,15 +807,16 @@ impl Interconnect {
                 // mode 3 ($FF). The IRQ, mode-bit flip and every other
                 // access keep the end view; only the OAM read consults this
                 // (gambatte oam_access/postread_*). The edge is stamped with
-                // its dot-END commit eighth; the read decides blocking against
-                // its own observer phase ([`stamp_blocks`]). Sub-dot
-                // event-phase model, increment 1.
-                self.m0_access_edge = Some(edge_eighth(i, dots));
+                // its dot-END commit eighth ([`event_phase`]); the read decides
+                // blocking against the single CPU-access observer phase
+                // [`ACCESS_PHASE`] ([`stamp_blocks`]). Sub-dot event-phase
+                // model, increment 1.
+                self.m0_access_edge = Some(event_phase(EdgeKind::M0Access, i, dots));
             }
             if self.ppu.take_pal_access_flip() {
                 // Same cc+2 MID rule for the CGB palette-RAM unblock at the
                 // pipe end (gambatte cgbpal_m3).
-                self.pal_access_edge = Some(edge_eighth(i, dots));
+                self.pal_access_edge = Some(event_phase(EdgeKind::PalAccess, i, dots));
             }
             if self.ppu.take_m0_stat_flip() {
                 // Same cc+2 MID half-classification as the OAM/VRAM access
@@ -787,9 +833,10 @@ impl Interconnect {
                 // chains at a different sub-cycle offset, the parked
                 // multi-chain CPU↔PPU phase problem (sub-dot event-phase
                 // model, increment INC-DS-1). The edge is stamped with its
-                // dot-END commit eighth; the FF41 read decides blocking
-                // against its own observer phase ([`stamp_blocks`]).
-                self.stat_mode_edge = Some(edge_eighth(i, dots));
+                // dot-END commit eighth ([`event_phase`]); the FF41 read decides
+                // blocking against the single CPU-access observer phase
+                // [`ACCESS_PHASE`] ([`stamp_blocks`]).
+                self.stat_mode_edge = Some(event_phase(EdgeKind::StatMode, i, dots));
             }
             // Dot-exact mode-0 entry: each visible line's hblank start
             // requests one HBlank DMA block, serviced at the head of the
@@ -1341,9 +1388,7 @@ impl Interconnect {
                 // The CGB FEA0-FEFF extra OAM RAM mirrors OAM read
                 // blocking, including the cc+2 MID-phase second-half
                 // unblock view (sub-dot event-phase model).
-                if self.ppu.oam_read_blocked()
-                    || stamp_blocks(self.m0_access_edge, self.obs_phase(addr))
-                {
+                if self.ppu.oam_read_blocked() || stamp_blocks(self.m0_access_edge, ACCESS_PHASE) {
                     0xFF
                 } else {
                     self.extra_oam[Self::extra_oam_index(addr)]
@@ -1367,19 +1412,6 @@ impl Interconnect {
         {
             self.extra_oam[Self::extra_oam_index(addr)] = value;
         }
-    }
-
-    /// The sub-cc observer phase (eighths of an M-cycle) at which a CPU
-    /// access to `addr` samples the per-M-cycle accessibility/STAT edge
-    /// stamps. The default is the cc+2 M-cycle midpoint [`MID_PHASE`] — the
-    /// tick-then-access read effectively samples two dots before its
-    /// end-of-cycle view. INC-G2 gives the interrupt-dispatch ISR FF41 read
-    /// chain its own earlier phase; until then every chain samples at MID, so
-    /// this is net-zero (`default_observer_phase_is_mid`). `_addr` is the
-    /// access target the next increment keys the dispatch tag on.
-    #[inline]
-    fn obs_phase(&self, _addr: u16) -> u8 {
-        MID_PHASE
     }
 
     fn read_no_tick(&mut self, addr: u16) -> u8 {
@@ -1416,7 +1448,7 @@ impl Interconnect {
             // mode-0 entry and its read-back interaction (gambatte
             // dma/hdma_start_*) is the HDMA-seam increment's job.
             0x8000..=0x9FFF
-                if stamp_blocks(self.m0_access_edge, self.obs_phase(addr))
+                if stamp_blocks(self.m0_access_edge, ACCESS_PHASE)
                     && self.hdma_mode == HdmaMode::Disabled =>
             {
                 0xFF
@@ -1428,7 +1460,7 @@ impl Interconnect {
                 // cc+2 MID-phase OAM read: a mode-3→mode-0 unblock landing
                 // in this M-cycle's second half is not yet visible here
                 // (sub-dot event-phase model, increment 1).
-                if stamp_blocks(self.m0_access_edge, self.obs_phase(addr)) {
+                if stamp_blocks(self.m0_access_edge, ACCESS_PHASE) {
                     0xFF
                 } else {
                     self.ppu.read(addr)
@@ -1482,7 +1514,7 @@ impl Interconnect {
             // this M-cycle's second half is not yet visible here, so the
             // write is still locked out (dropped) — same edge/sub-dot
             // phase as the OAM/VRAM read (sub-dot event-phase model).
-            0x8000..=0x9FFF if stamp_blocks(self.m0_access_edge, self.obs_phase(addr)) => {}
+            0x8000..=0x9FFF if stamp_blocks(self.m0_access_edge, ACCESS_PHASE) => {}
             0x8000..=0x9FFF => self.intf |= self.ppu.write(addr, value) & IF_MASK,
             0xA000..=0xBFFF => self.cart.write_ram(addr, value),
             0xC000..=0xFDFF => {
@@ -1492,9 +1524,7 @@ impl Interconnect {
             0xFE00..=0xFE9F => {
                 // CPU OAM writes are dropped while DMA owns OAM, and while
                 // the cc+2 MID view still reads mode 3 (sub-dot phase).
-                if self.dma_conflict.is_none()
-                    && !stamp_blocks(self.m0_access_edge, self.obs_phase(addr))
-                {
+                if self.dma_conflict.is_none() && !stamp_blocks(self.m0_access_edge, ACCESS_PHASE) {
                     self.intf |= self.ppu.write(addr, value) & IF_MASK;
                 }
             }
@@ -1525,7 +1555,7 @@ impl Interconnect {
             // the LCD-off mode 0. Sub-dot event-phase model, increment
             // INC-DS-1.
             0xFF41
-                if stamp_blocks(self.stat_mode_edge, self.obs_phase(addr))
+                if stamp_blocks(self.stat_mode_edge, ACCESS_PHASE)
                     && self.double_speed
                     && self.ppu.lcd_enabled() =>
             {
@@ -1551,7 +1581,7 @@ impl Interconnect {
             // this M-cycle's second half still reads $FF here (sub-dot
             // event-phase model).
             0xFF69 | 0xFF6B
-                if self.cgb_mode && stamp_blocks(self.pal_access_edge, self.obs_phase(addr)) =>
+                if self.cgb_mode && stamp_blocks(self.pal_access_edge, ACCESS_PHASE) =>
             {
                 0xFF
             }
@@ -2326,16 +2356,43 @@ mod tests {
         );
     }
 
-    /// Every read chain samples the edge stamps at the cc+2 M-cycle midpoint
-    /// until INC-G2c gives the interrupt-dispatch chain its own earlier phase;
-    /// `obs_phase` returning MID for all addresses is what keeps G2a/G2b
-    /// net-zero.
+    /// INC-G3 net-zero scaffold, task 2-3: `event_phase` generalizes
+    /// `edge_eighth` over an [`EdgeKind`] so a later increment can give one
+    /// boundary event its own sub-dot lead/lag. The scaffold itself must lift
+    /// ZERO rows — every kind returns the same dot-END commit eighth as the
+    /// legacy `edge_eighth`, for both speeds and every dot.
     #[test]
-    fn default_observer_phase_is_mid() {
-        let b = ic(Model::Cgb);
-        for addr in [0xFE00u16, 0x8000, 0xFF41, 0xFF69, 0xFF6B] {
-            assert_eq!(b.obs_phase(addr), MID_PHASE, "addr {addr:#06x}");
+    fn event_phase_is_net_zero() {
+        for kind in [
+            EdgeKind::M0Rise,
+            EdgeKind::M0Access,
+            EdgeKind::PalAccess,
+            EdgeKind::StatMode,
+        ] {
+            for dots in [2u64, 4] {
+                for i in 0..dots {
+                    assert_eq!(
+                        event_phase(kind, i, dots),
+                        edge_eighth(i, dots),
+                        "kind={kind:?} dots={dots} i={i}"
+                    );
+                }
+            }
         }
+    }
+
+    /// INC-G3 net-zero scaffold, task 4: every CPU bus access samples the edge
+    /// stamps at one fixed phase ([`ACCESS_PHASE`]) — correcting the reverted
+    /// G2c per-read-chain `obs_phase(addr)`. The single constant equals
+    /// [`MID_PHASE`] (cc+2), which is what keeps the scaffold net-zero; the
+    /// read chains are later separated by the EVENT's sub-dot position
+    /// ([`event_phase`]), not the observer's.
+    #[test]
+    fn access_phase_is_single_constant() {
+        assert_eq!(
+            ACCESS_PHASE, MID_PHASE,
+            "the one CPU-access observer phase is the cc+2 midpoint (net-zero)"
+        );
     }
 
     #[test]
