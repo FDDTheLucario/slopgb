@@ -96,6 +96,33 @@ fn outline_rect_draws_only_the_border() {
 }
 
 #[test]
+fn blit_tile_scales_each_pixel_through_the_palette() {
+    let pal = [0x00, 0x11, 0x22, 0x33];
+    let mut pix = [[0u8; 8]; 8];
+    pix[0][0] = 3; // top-left -> pal[3]
+    pix[0][1] = 1; // next col -> pal[1]
+    pix[1][0] = 2; // next row -> pal[2]
+    let scale = 2i32;
+    let cw = 8 * scale as usize;
+    let ch = 8 * scale as usize;
+    let mut buf = vec![0xDEAD_u32; cw * ch];
+    {
+        let mut c = Canvas::new(&mut buf, cw, ch);
+        c.blit_tile(0, 0, &pix, &pal, scale);
+    }
+    let at = |x: usize, y: usize| buf[y * cw + x];
+    // (0,0) source fills the 2×2 block (0..2, 0..2) with pal[3].
+    for dy in 0..2 {
+        for dx in 0..2 {
+            assert_eq!(at(dx, dy), 0x33, "block (0,0) px ({dx},{dy})");
+        }
+    }
+    assert_eq!(at(2, 0), 0x11, "source (1,0) -> x block 2..4");
+    assert_eq!(at(0, 2), 0x22, "source (0,1) -> y block 2..4");
+    assert_eq!(at(4, 0), 0x00, "source (2,0) is index 0 -> pal[0]");
+}
+
+#[test]
 fn rect_intersect_and_contains() {
     let a = Rect::new(0, 0, 4, 4);
     let b = Rect::new(2, 2, 4, 4);

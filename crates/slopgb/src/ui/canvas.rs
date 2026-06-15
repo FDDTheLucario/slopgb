@@ -129,6 +129,28 @@ impl<'a> Canvas<'a> {
         self.vline(r.x, r.y, r.h, color); // left
         self.vline(r.right() - 1, r.y, r.h, color); // right
     }
+
+    /// Draw an 8×8 grid of 2-bit palette indices (e.g. from
+    /// `slopgb_core::debug::tile_pixels`) through `palette` at integer `scale`
+    /// — each source pixel becomes a `scale × scale` block — with the tile's
+    /// top-left at `(x, y)`. Indices are masked to 0..=3. Clipped.
+    pub fn blit_tile(
+        &mut self,
+        x: i32,
+        y: i32,
+        pixels: &[[u8; 8]; 8],
+        palette: &[u32; 4],
+        scale: i32,
+    ) {
+        for (row, line) in pixels.iter().enumerate() {
+            for (col, &idx) in line.iter().enumerate() {
+                let color = palette[(idx & 3) as usize];
+                let px = x + col as i32 * scale;
+                let py = y + row as i32 * scale;
+                self.fill_rect(Rect::new(px, py, scale, scale), color);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
