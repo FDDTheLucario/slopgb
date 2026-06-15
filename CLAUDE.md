@@ -4,7 +4,7 @@ Cycle-accurate GB/GBC emulator. Workspace: `crates/slopgb-core` (emulator, zero 
 
 **Read `docs/ARCHITECTURE.md` before touching core** — timing contract (tick-then-access M-cycles), memory map, module ownership, mooneye + game-boy-test-roms harness protocols.
 
-**Debugger/viewer UI** (bgb functional-clone, in progress on branch `bgb-ui`): read-only introspection lives in `slopgb_core::debug` (std-only, side-effect-free `&self` — golden-safe by construction); the frontend renders it on softbuffer (no GUI deps). Plan: [`docs/bgb-clone-plan.md`](docs/bgb-clone-plan.md). Real-screenshot spec + re-capture protocol: [`docs/bgb-reference/`](docs/bgb-reference/README.md) — **never invent bgb's UI; capture it** (bgb runs under wine on this machine).
+**Debugger/viewer UI** (bgb functional-clone, branch `bgb-ui`): **F2/F3/F4** open the debugger / VRAM viewer / I/O map (or `SLOPGB_OPEN_TOOLS=debugger,vram,iomap`). Read-only introspection lives in `slopgb_core::debug` (std-only, side-effect-free `&self` — golden-safe); the frontend renders it on softbuffer (`ui::` toolkit + `windows::` content + `toolwin::` multi-window). Plan: [`docs/bgb-clone-plan.md`](docs/bgb-clone-plan.md). Real-screenshot spec + re-capture rig: [`docs/bgb-reference/`](docs/bgb-reference/README.md) — **never invent bgb's UI; capture it** (bgb runs under wine on this machine). To screenshot slopgb's own windows, `import -window "slopgb — debugger"` (XGetImage by title) — `import -window root` misses them under a compositor.
 
 ## Rules
 
