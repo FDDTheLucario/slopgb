@@ -1,5 +1,10 @@
 # TDD plan — split god files (no file > 1000 lines)
 
+> **STATUS: executed (2026-06-14).** All phases done; every `.rs` is now < 1000
+> lines. Behavior byte-identical (84 method bodies + 805 #[test] moved verbatim;
+> 600 lib + 439 mooneye + gbtr 184/184 ratchet green). The plan below is kept as
+> the seam map / rationale. The standing rule is in CLAUDE.md ("No god files").
+
 Scope: **every file > 1000 lines** (the "god file" anti-pattern). Behavior-preserving
 extraction only — no logic edits. Current offenders (2026-06-14, code-vs-test split):
 

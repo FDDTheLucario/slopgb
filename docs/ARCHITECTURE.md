@@ -328,10 +328,30 @@ baselined behavior: every cluster is an A/B-swept trade whose one-sided
 |---|---|
 | CPU | `src/cpu/execute.rs`, `src/cpu/registers.rs`, `src/cpu/mod.rs` |
 | Timer/serial/joypad | `src/timer.rs`, `src/serial.rs`, `src/joypad.rs` |
-| Cartridge | `src/cartridge.rs` (may become `src/cartridge/`) |
-| PPU | `src/ppu.rs` (may become `src/ppu/`) |
-| APU | `src/apu.rs` (may become `src/apu/`) |
-| Interconnect | `src/interconnect.rs`, `src/model.rs`, `src/lib.rs`, `tests/` |
+| Cartridge | `src/cartridge.rs` |
+| PPU | `src/ppu/mod.rs` (struct + driver) + submodules below |
+| APU | `src/apu/mod.rs` + `envelope`/`length`/`noise`/`pulse`/`wave` |
+| Interconnect | `src/interconnect.rs` (struct + sub-dot machinery + `Bus` impl) + submodules below, `src/model.rs`, `src/lib.rs`, `tests/` |
+
+Each god-file split keeps the struct, its fields, and shared consts in the
+parent; every submodule is a second `impl` block (`use super::*`) owning one
+concern. Module ownership (each file's `//!` header names its oracle suite):
+
+| Parent | Submodule | Owns |
+|---|---|---|
+| `interconnect.rs` | `interconnect/boot.rs` | power-on / post-boot state install |
+| | `interconnect/oam_dma.rs` | OAM DMA engine + bus conflicts |
+| | `interconnect/hdma.rs` | CGB VRAM (HBlank/General) DMA request engine |
+| | `interconnect/memory.rs` | memory-map routing + IO register read/write |
+| | `interconnect/tick.rs` | per-M-cycle machine advance + HALT/STOP gate |
+| `ppu/mod.rs` | `ppu/stat_irq.rs` | STAT IRQ event engine + mode readout |
+| | `ppu/lyc.rs` | LYC compare + FF45 write triggers |
+| | `ppu/blocking.rs` | mode/DMA access-block predicates + OAM bug |
+| | `ppu/regs.rs` | FF40-FF4B read/write + mode-3 write strobe |
+| | `ppu/render.rs` | mode-3 pipeline driver (struct + `render_step`) |
+| | `ppu/render/sprite.rs` | OAM scan + OBJ fetch/mix |
+| | `ppu/render/window.rs` | window machine |
+| | `ppu/render/mode0.rs` | BG fetcher + mode-0/IRQ end-of-line grid |
 
 Public signatures in the skeleton are the inter-package API. If you must
 change one, it's a coordination point — keep the change minimal and adjust
