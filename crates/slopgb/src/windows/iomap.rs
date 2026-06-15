@@ -3,7 +3,7 @@
 //! `GameBoy::debug_read`; the winit surface comes with B12b.
 
 use crate::ui::Theme;
-use crate::ui::canvas::{Canvas, Rect};
+use crate::ui::canvas::Canvas;
 use crate::ui::text::{draw_text, line_height};
 use crate::ui::widgets::checkbox;
 
@@ -102,7 +102,9 @@ pub const LCDC_BITS: [&str; 8] = [
     "LCD on", "WIN map", "WIN on", "BG tiles", "BG map", "OBJ 8x16", "OBJ on", "BG on",
 ];
 
-/// STAT (FF41) interrupt-enable + status labels (bits 6 → 2).
+/// STAT (FF41) interrupt-enable + status labels (bits 6 → 2). Drawn by the I/O
+/// map's STAT breakdown next milestone (C16); kept tested and ready.
+#[allow(dead_code)]
 pub const STAT_BITS: [&str; 5] = ["LYC int", "OAM int", "VBL int", "HBL int", "LY=LYC"];
 
 /// Decode a register's bits into `(label, set)` pairs (MSB first) for the

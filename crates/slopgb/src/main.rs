@@ -30,7 +30,7 @@ use slopgb_core::DEFAULT_SAMPLE_RATE as CORE_SAMPLE_RATE;
 use slopgb_core::{Button, CLOCK_HZ, CYCLES_PER_FRAME, GameBoy, Model, SCREEN_H, SCREEN_W};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::{KeyEvent, WindowEvent};
+use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::PhysicalKey;
 use winit::window::{Window, WindowId};
@@ -715,6 +715,17 @@ impl ApplicationHandler for App {
                 WindowEvent::RedrawRequested | WindowEvent::Resized(_) => {
                     self.tools.redraw(window_id, &self.session.gb);
                 }
+                // Mouse drives the tool windows' tabs/checkboxes/details.
+                WindowEvent::CursorMoved { position, .. } => {
+                    self.tools
+                        .on_cursor_moved(window_id, position.x, position.y);
+                }
+                WindowEvent::CursorLeft { .. } => self.tools.on_cursor_left(window_id),
+                WindowEvent::MouseInput {
+                    state: ElementState::Pressed,
+                    button: MouseButton::Left,
+                    ..
+                } => self.tools.on_mouse_left(window_id),
                 // Hotkeys (F2/F3/F4, pause, reset…) work from any window.
                 WindowEvent::KeyboardInput { event, .. } => self.handle_key(event_loop, &event),
                 _ => {}

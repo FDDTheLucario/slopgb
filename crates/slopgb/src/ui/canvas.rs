@@ -75,12 +75,6 @@ impl<'a> Canvas<'a> {
         Rect::new(0, 0, self.w, self.h)
     }
 
-    /// The active clip rectangle.
-    #[must_use]
-    pub fn clip(&self) -> Rect {
-        self.clip
-    }
-
     /// Intersect the clip with `r`, returning the previous clip so the caller
     /// can restore it (a poor-man's save/restore for nested widgets).
     pub fn push_clip(&mut self, r: Rect) -> Rect {

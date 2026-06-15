@@ -55,6 +55,27 @@ fn button_draws_border_and_pressed_inverts() {
 }
 
 #[test]
+fn checkbox_rect_equals_the_drawn_hit_rect() {
+    let pure = checkbox_rect(1, 0, "grid");
+    let (w, h) = (60, GLYPH_H);
+    let mut buf = canvas(w, h);
+    let mut c = Canvas::new(&mut buf, w, h);
+    let drawn = checkbox(&mut c, 1, 0, true, "grid", &T);
+    assert_eq!(pure, drawn);
+}
+
+#[test]
+fn radio_rects_equal_the_drawn_hit_rects() {
+    let opts = ["Auto", "9800", "9C00"];
+    let pure = radio_rects(1, 0, &opts);
+    let (w, h) = (140, GLYPH_H);
+    let mut buf = canvas(w, h);
+    let mut c = Canvas::new(&mut buf, w, h);
+    let drawn = radio_group(&mut c, 1, 0, &opts, 1, &T);
+    assert_eq!(pure, drawn);
+}
+
+#[test]
 fn radio_group_marks_only_the_selected_option() {
     let (w, h) = (140, GLYPH_H);
     let mut buf = canvas(w, h);
@@ -73,6 +94,22 @@ fn radio_group_marks_only_the_selected_option() {
     assert_eq!(buf[centre(&rects[1])], T.text, "selected dot filled");
     assert_eq!(buf[centre(&rects[0])], T.bg, "unselected dot empty");
     assert_eq!(buf[centre(&rects[2])], T.bg);
+}
+
+#[test]
+fn tab_rects_match_what_tab_strip_returns() {
+    // The pure geometry a window hit-tests against must equal the rects
+    // tab_strip draws and returns, so a click maps to the right tab.
+    let labels = ["BG map", "Tiles", "OAM", "Palettes"];
+    let pure = tab_rects(5, 3, &labels);
+    let (w, h) = (220, GLYPH_H + 4);
+    let mut buf = canvas(w, h);
+    let mut c = Canvas::new(&mut buf, w, h);
+    let drawn = tab_strip(&mut c, 5, 3, &labels, 1, &T);
+    assert_eq!(pure, drawn, "pure rects equal the drawn rects");
+    // Each width is measure(label)+2*PAD(=4); tabs advance left-to-right by w+2.
+    assert_eq!(pure[0].w, measure("BG map") + 8);
+    assert_eq!(pure[1].x, pure[0].right() + 2);
 }
 
 #[test]

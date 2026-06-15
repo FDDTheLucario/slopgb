@@ -32,20 +32,6 @@ impl<Id: Eq + Hash + Copy> WindowRegistry<Id> {
         }
     }
 
-    /// Whether a window of this kind is currently open.
-    #[must_use]
-    pub fn is_open(&self, kind: ToolWindow) -> bool {
-        self.open.values().any(|&k| k == kind)
-    }
-
-    /// What a toggle of `kind` should do: `true` = open it (it's closed),
-    /// `false` = close it. Pure decision; the caller then creates/destroys the
-    /// winit window and calls [`register`](Self::register)/[`forget`](Self::forget).
-    #[must_use]
-    pub fn toggle_opens(&self, kind: ToolWindow) -> bool {
-        !self.is_open(kind)
-    }
-
     /// Record a freshly-created window `id` showing `kind`.
     pub fn register(&mut self, id: Id, kind: ToolWindow) {
         self.open.insert(id, kind);
@@ -68,11 +54,6 @@ impl<Id: Eq + Hash + Copy> WindowRegistry<Id> {
         self.open
             .iter()
             .find_map(|(&id, &k)| (k == kind).then_some(id))
-    }
-
-    /// Every open tool window's id, for redraw-all / close-all sweeps.
-    pub fn ids(&self) -> impl Iterator<Item = Id> + '_ {
-        self.open.keys().copied()
     }
 }
 

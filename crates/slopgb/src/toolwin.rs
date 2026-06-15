@@ -15,8 +15,9 @@ use winit::dpi::LogicalSize;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
+use crate::ui::canvas::Rect;
 use crate::ui::{Canvas, Theme, ToolWindow, WindowRegistry};
-use crate::windows;
+use crate::windows::{self, WinState, vram};
 
 struct ToolView {
     window: Rc<Window>,
@@ -24,6 +25,20 @@ struct ToolView {
     _ctx: softbuffer::Context<Rc<Window>>,
     surface: softbuffer::Surface<Rc<Window>, Rc<Window>>,
     kind: ToolWindow,
+    /// Persistent interactive UI state (active tab, checkboxes, hovered cell).
+    state: WinState,
+    /// Last cursor position (physical pixels) over this window, for click
+    /// hit-testing — `MouseInput` itself carries no coordinates.
+    cursor: Option<(i32, i32)>,
+}
+
+impl ToolView {
+    /// The window's content rect in physical pixels — matches the `Canvas`
+    /// bounds `render` draws into, so hit-rects line up with the cursor.
+    fn area(&self) -> Rect {
+        let size = self.window.inner_size();
+        Rect::new(0, 0, size.width as i32, size.height as i32)
+    }
 }
 
 /// The set of open tool windows.
@@ -44,7 +59,9 @@ fn title(kind: ToolWindow) -> &'static str {
 fn default_size(kind: ToolWindow) -> LogicalSize<f64> {
     let (w, h) = match kind {
         ToolWindow::Debugger => (760.0, 560.0),
-        ToolWindow::Vram => (380.0, 420.0),
+        // Wide enough for the 16×24 tile grid at 2× (256×384) plus the details
+        // panel ([`vram::PANEL_W`]); tall enough for the grid + tab strip.
+        ToolWindow::Vram => (560.0, 470.0),
         ToolWindow::IoMap => (560.0, 360.0),
     };
     LogicalSize::new(w, h)
@@ -102,6 +119,8 @@ impl ToolWindows {
                 _ctx: ctx,
                 surface,
                 kind,
+                state: WinState::new(kind),
+                cursor: None,
             },
         );
         self.reg.register(id, kind);
@@ -110,7 +129,7 @@ impl ToolWindows {
     /// Whether `id` is one of our tool windows (so `main` can route its events).
     #[must_use]
     pub fn owns(&self, id: WindowId) -> bool {
-        self.views.contains_key(&id)
+        self.reg.kind_of(id).is_some()
     }
 
     /// Render the tool window `id` from the live machine.
@@ -130,7 +149,7 @@ impl ToolWindows {
         };
         {
             let mut canvas = Canvas::new(&mut buf, size.width as usize, size.height as usize);
-            windows::render(view.kind, gb, &mut canvas, &self.theme);
+            windows::render(view.kind, gb, &mut canvas, &self.theme, &view.state);
         }
         // Force opaque alpha: softbuffer leaves the top byte 0, which a 32-bit
         // ARGB compositor reads as fully transparent (the window would show the
@@ -150,6 +169,54 @@ impl ToolWindows {
             true
         } else {
             false
+        }
+    }
+
+    /// Record the cursor moving to physical `(x, y)` over tool window `id`;
+    /// updates the hovered-cell details and redraws only if the hover changed.
+    pub fn on_cursor_moved(&mut self, id: WindowId, x: f64, y: f64) {
+        let Some(view) = self.views.get_mut(&id) else {
+            return;
+        };
+        let (px, py) = (x as i32, y as i32);
+        view.cursor = Some((px, py));
+        let area = view.area();
+        if let WinState::Vram(s) = &mut view.state {
+            if vram::on_hover(s, area, px, py) {
+                view.window.request_redraw();
+            }
+        }
+    }
+
+    /// Handle a left-button press on tool window `id` (uses the last cursor
+    /// position): switches tab / toggles a control, redrawing on any change.
+    pub fn on_mouse_left(&mut self, id: WindowId) {
+        let Some(view) = self.views.get_mut(&id) else {
+            return;
+        };
+        let Some((px, py)) = view.cursor else {
+            return;
+        };
+        let area = view.area();
+        if let WinState::Vram(s) = &mut view.state {
+            if vram::on_click(s, area, px, py) {
+                view.window.request_redraw();
+            }
+        }
+    }
+
+    /// Clear the remembered cursor when it leaves tool window `id`, so a stale
+    /// position can't drive a click and the hover details clear.
+    pub fn on_cursor_left(&mut self, id: WindowId) {
+        let Some(view) = self.views.get_mut(&id) else {
+            return;
+        };
+        view.cursor = None;
+        let area = view.area();
+        if let WinState::Vram(s) = &mut view.state {
+            if vram::on_hover(s, area, -1, -1) {
+                view.window.request_redraw();
+            }
         }
     }
 

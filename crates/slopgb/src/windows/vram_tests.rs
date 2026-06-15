@@ -104,6 +104,7 @@ fn render_bgmap_draws_cells_and_the_viewport_outline() {
             16,
             &GREYS,
             scale,
+            true,
             &T,
         );
     }
@@ -111,6 +112,119 @@ fn render_bgmap_draws_cells_and_the_viewport_outline() {
     assert_eq!(buf[0], GREYS[3]);
     // The viewport outline (theme.breakpoint = red) sits at (scx=8, scy=16).
     assert_eq!(buf[16 * w + 8], T.breakpoint, "viewport top edge at (8,16)");
+}
+
+#[test]
+fn render_bgmap_omits_the_viewport_when_disabled() {
+    let mut vram = vec![0u8; 0x4000];
+    for b in &mut vram[0..16] {
+        *b = 0xFF;
+    }
+    let (w, h) = (32 * 8usize, 32 * 8usize);
+    let mut buf = vec![0x0012_3456_u32; w * h];
+    {
+        let mut c = Canvas::new(&mut buf, w, h);
+        render_bgmap(
+            &mut c,
+            Rect::new(0, 0, w as i32, h as i32),
+            &vram,
+            0x9800,
+            false,
+            8,
+            16,
+            &GREYS,
+            1,
+            false,
+            &T,
+        );
+    }
+    // No outline drawn where the viewport edge would be.
+    assert_ne!(buf[16 * w + 8], T.breakpoint, "viewport suppressed");
+}
+
+#[test]
+fn vram_state_defaults_match_bgb() {
+    let s = VramState::default();
+    assert_eq!(s.tab, VramTab::Tiles);
+    assert!(s.grid);
+    assert!(s.show_paletted);
+    assert!(s.scxy);
+    assert_eq!((s.map_src, s.tile_src), (0, 0));
+    assert_eq!(s.hover, None);
+}
+
+#[test]
+fn layout_partitions_the_window_without_overlap() {
+    let area = Rect::new(0, 0, 520, 440);
+    let l = layout(area);
+    assert_eq!(l.tabs.len(), 4);
+    assert!(l.tabs[0].x < l.tabs[1].x, "tabs left-to-right");
+    // Content sits below the tabs; details sits to its right; they don't overlap.
+    assert!(l.content.y >= l.tabs[0].bottom());
+    assert!(l.details.x >= l.content.right());
+    assert!(l.content.intersect(&l.details).w == 0);
+    // Controls live inside the details column.
+    for r in [l.grid_box, l.paletted_box, l.scxy_box] {
+        assert!(r.x >= l.details.x, "control inside details panel");
+        assert!(r.bottom() <= area.bottom());
+    }
+}
+
+#[test]
+fn click_on_a_tab_switches_the_active_tab() {
+    let area = Rect::new(0, 0, 520, 440);
+    let mut s = VramState::default();
+    let l = layout(area);
+    // Click the OAM tab (index 2).
+    let t = l.tabs[2];
+    assert!(on_click(&mut s, area, t.x + 1, t.y + 1));
+    assert_eq!(s.tab, VramTab::Oam);
+    // Clicking the same tab again is a no-op (no redraw).
+    assert!(!on_click(&mut s, area, t.x + 1, t.y + 1));
+}
+
+#[test]
+fn click_toggles_checkboxes_and_empty_space_does_nothing() {
+    let area = Rect::new(0, 0, 520, 440);
+    let mut s = VramState::default();
+    let l = layout(area);
+    assert!(s.grid, "Grid on by default");
+    assert!(on_click(&mut s, area, l.grid_box.x + 1, l.grid_box.y + 1));
+    assert!(!s.grid, "Grid toggled off");
+    assert!(on_click(&mut s, area, l.grid_box.x + 1, l.grid_box.y + 1));
+    assert!(s.grid, "Grid toggled back on");
+    // A click in dead space (mid-content, no widget) changes nothing.
+    assert!(!on_click(&mut s, area, l.content.x + 1, l.content.y + 1));
+}
+
+#[test]
+fn click_source_radio_only_acts_on_bg_map_tab() {
+    let area = Rect::new(0, 0, 520, 440);
+    let l = layout(area);
+    // On the Tiles tab the source radios are inert.
+    let mut s = VramState::default();
+    let r = l.map_src[2];
+    assert!(!on_click(&mut s, area, r.x + 1, r.y + 1));
+    assert_eq!(s.map_src, 0);
+    // On the BG map tab they select.
+    s.tab = VramTab::BgMap;
+    assert!(on_click(&mut s, area, r.x + 1, r.y + 1));
+    assert_eq!(s.map_src, 2);
+}
+
+#[test]
+fn hover_tracks_only_the_content_area() {
+    let area = Rect::new(0, 0, 520, 440);
+    let mut s = VramState::default();
+    let l = layout(area);
+    let (cx, cy) = (l.content.x + 5, l.content.y + 5);
+    assert!(on_hover(&mut s, area, cx, cy));
+    assert_eq!(s.hover, Some((cx, cy)));
+    // Same spot again: no change.
+    assert!(!on_hover(&mut s, area, cx, cy));
+    // Moving into the details panel clears the hover.
+    assert!(on_hover(&mut s, area, l.details.x + 2, l.details.y + 2));
+    assert_eq!(s.hover, None);
 }
 
 #[test]

@@ -2,9 +2,6 @@
 //! (Layer B of `docs/bgb-clone-plan.md`): pure pixel drawing into softbuffer
 //! XRGB8888 buffers, no GUI dependency. Composed into the tool windows in
 //! Layer C.
-// Scaffolding under construction; the re-exports and helpers are consumed by
-// the tool windows in Layer C. Remove these allows once those land.
-#![allow(dead_code, unused_imports)]
 
 pub mod canvas;
 pub mod font;
@@ -12,9 +9,8 @@ pub mod registry;
 pub mod text;
 pub mod widgets;
 
-pub use canvas::{Canvas, Rect};
+pub use canvas::Canvas;
 pub use registry::{ToolWindow, WindowRegistry};
-pub use text::{draw_text, measure};
 
 /// The bgb debugger colour scheme, as XRGB8888 (`0x00RRGGBB`). Values are bgb's
 /// `bgb.ini` defaults converted from Windows `COLORREF` (`0x00BBGGRR`): bg white
@@ -27,6 +23,9 @@ pub struct Theme {
     pub current: u32,
     pub breakpoint: u32,
     pub hilight: u32,
+    /// Break/locked highlight — consumed when the debugger gains its break
+    /// state (next milestone); part of bgb's documented palette.
+    #[allow(dead_code)]
     pub freeze: u32,
     pub border: u32,
 }
