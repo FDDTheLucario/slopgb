@@ -9,6 +9,7 @@
 
 mod audio;
 mod input;
+mod ui;
 mod video;
 
 use std::env;
