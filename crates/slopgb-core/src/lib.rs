@@ -219,6 +219,29 @@ impl GameBoy {
             .collect()
     }
 
+    /// Whole 16 KiB VRAM for the debug VRAM viewer: CGB bank 0 is `[..0x2000]`,
+    /// bank 1 is `[0x2000..]` (DMG fills only bank 0). Decode tiles/maps with
+    /// [`debug::tile_pixels`]. Side-effect-free.
+    #[must_use]
+    pub fn vram(&self) -> &[u8; 0x4000] {
+        self.bus.ppu().debug_vram()
+    }
+
+    /// Raw 160-byte OAM (40 sprites × 4 bytes). Decode with
+    /// [`debug::oam_sprites`].
+    #[must_use]
+    pub fn oam(&self) -> &[u8; 0xA0] {
+        self.bus.ppu().debug_oam()
+    }
+
+    /// Raw CGB palette RAM `(BG, OBJ)`, 64 bytes each (8 palettes × 4 colors ×
+    /// 2 bytes, little-endian 15-bit BGR555). DMG palettes are BGP/OBP/OBP1,
+    /// readable via [`Self::debug_read`] at FF47/FF48/FF49.
+    #[must_use]
+    pub fn cgb_palette_ram(&self) -> (&[u8; 64], &[u8; 64]) {
+        self.bus.ppu().debug_palette_ram()
+    }
+
     /// True once the CPU has executed an undefined opcode (0xD3, 0xDB,
     /// 0xDD, 0xE3, 0xE4, 0xEB, 0xEC, 0xED, 0xF4, 0xFC, 0xFD) and
     /// hard-locked — wilbertpol's mooneye fork ends its tests with 0xED.

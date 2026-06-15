@@ -7,5 +7,7 @@
 //! spec these mirror.
 
 pub mod disasm;
+pub mod vram;
 
 pub use disasm::{Insn, decode};
+pub use vram::{Sprite, oam_sprites, tile_pixels};

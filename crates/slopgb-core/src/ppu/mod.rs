@@ -890,6 +890,23 @@ impl Ppu {
         (&self.bg_pal_ram, &self.obj_pal_ram)
     }
 
+    /// Whole 16 KiB VRAM for the debug viewer: CGB bank 0 is `[..0x2000]`,
+    /// bank 1 is `[0x2000..]` (DMG fills only bank 0). Side-effect-free.
+    pub(crate) fn debug_vram(&self) -> &[u8; 0x4000] {
+        &self.vram
+    }
+
+    /// Raw 160-byte OAM (40 sprites × 4) for the debug OAM viewer.
+    pub(crate) fn debug_oam(&self) -> &[u8; 0xA0] {
+        &self.oam
+    }
+
+    /// Raw CGB palette RAM `(BG, OBJ)`, 64 bytes each, for the debug palette
+    /// viewer. DMG palettes come from BGP/OBP through the IO read instead.
+    pub(crate) fn debug_palette_ram(&self) -> (&[u8; 64], &[u8; 64]) {
+        (&self.bg_pal_ram, &self.obj_pal_ram)
+    }
+
     /// VRAM read for CGB HDMA (no mode blocking — the engine is responsible
     /// for scheduling). Doubles as the active-bank view for the
     /// interconnect's side-effect-free `peek`.
