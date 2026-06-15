@@ -144,7 +144,17 @@ opcodes at 0x0150) in bgb and reading its debugger. Rules slopgb's disassembler 
    [`menus/`](menus/) → spec/plan in [`../bgb-rclick-menu-plan.md`](../bgb-rclick-menu-plan.md).
 6. Restore `bgb.ini`, `pkill -9 -f bgb64.exe`.
 
-**Known flake:** bgb can crash at startup under wine with `X Error … X_OpenDevice
-XI_BadDevice` (a flaky XInput2 device). It's intermittent — `wineserver -k` + retry, or
-relaunch from an interactive shell (`! wine bgb64.exe <rom>`); it ran fine repeatedly earlier
-the same session.
+**XInput crash + the reliable fix:** bgb can crash at startup under wine with `X Error …
+X_OpenDevice XI_BadDevice` — wine's winex11 tripping on a flaky real XInput2 device on `:0`
+(heavy synthetic `xdotool` input seems to trigger it). The dependable workaround is to run bgb
+on a **fresh Xvfb display** (no real input devices to enumerate):
+
+```sh
+Xvfb :21 -screen 0 1400x950x24 -ac -nolisten tcp &           # clean virtual display
+DISPLAY=:21 WINEDEBUG=-all wine bgb64.exe <rom> &            # bgb, no XInput crash
+DISPLAY=:21 xdotool search --name "" …                       # drive it (clicks reach it)
+import -display :21 -window root /tmp/r.png                   # screenshot, then crop
+```
+
+Captured bgb menus (debugger pane menus, Run/Debug bars, the main-window menu + submenus, and
+the negative result that VRAM/I-O-map have no right-click menu) live in [`menus/`](menus/).

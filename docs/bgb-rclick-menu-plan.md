@@ -17,12 +17,21 @@ Pokemon Crystal, wine, this machine):
 | `rc-stack.png` | Debugger **stack** right-click | Go to… (Ctrl+G) · Modify data · Code go here · Data go here |
 | `menubar-run.png` | Debugger **Run** menu | Run F9 · Run no break ⇧F9 · Run not this break ^F9 · Reset ^R · Trace F7 · Trace reverse ⇧F7 · Step Over F3 · Step Over reverse ⇧F3 · Animate ⌥A · Run to Cursor F4 · Run cursor no break ⇧F4 · Run cursor reverse ^F4 · Jump to cursor F6 · Call cursor · Step out F8 · Step out reverse ⇧F8 · jump (SP); SP=SP+2 · Rewind cycles ^E |
 | `menubar-debug.png` | Debugger **Debug** menu | Toggle breakpoint F2 · Evaluate expression · Set user clocks counter · Breakpoints ^H · Watchpoints ^J |
+| `rc-main.png` | **Main LCD window** right-click | Pause · Load ROM… · Enable sound · Options… F11 · Cheat… F10 · Reset gameboy * · Save screenshot · Debugger Esc · State▶ · Other▶ · Sound channel▶ · Window size▶ · Link▶ · Recent ROMs▶ · Exit |
+| `main-sub-state.png` | Main → **State** | Quick Save F2 · Quick Load F4 · Select▶ F3 · Load recovery state · Load state… |
+| `main-sub-other.png` | Main → **Other** | Cart info · System info · VRAM viewer · cheat searcher · Camera control… · clear recent roms list · debug mode enabled: * · Close screen · About… |
+| `main-sub-soundchannel.png` | Main → **Sound channel** | 1 F5 · 2 F6 · 3 F7 · 4 F8 (each a mute toggle) |
+| `main-sub-windowsize.png` | Main → **Window size** | 1x1 · 2x2 · 3x3 · 4x4 · 5x5 · 6x6 · Full screen · Fullscreen stretched |
+| `main-sub-link.png` | Main → **Link** | Listen · Connect · Disconnect · Cancel listen |
+| `main-sub-recentroms.png` | Main → **Recent ROMs** | (dynamic recently-opened ROM file list) |
+| `rc-vram-none.png` | **VRAM viewer** right-click | **no context menu** — left-click selects a tile/cell |
+| `rc-iomap-none.png` | **I/O map** right-click | **no context menu** — display + Refresh button only |
 
-**CAPTURE-PENDING** (bgb hit a persistent wine XInput crash mid-session — relaunch via the
-`docs/bgb-reference/README.md` rig and screenshot before planning their items, never invent):
-the **main LCD window** right-click menu, the **VRAM viewer** right-click menu, the **I/O map**
-right-click menu, and the debugger **File / Search / Window / Execution profiler** menu-bar
-dropdowns. Tasks RC-CAP* below own these.
+Every window is now captured. **bgb's keybindings are focus-dependent**: in the MAIN window
+F2/F3/F4 = Quick Save / Select-state / Quick Load and F5–F8 = mute channels 1–4; in the DEBUGGER
+F2/F3/F4 = Toggle breakpoint / Step Over / Run-to-cursor and F7/F8 = Trace / Step out. The only
+remaining un-captured items are the debugger **File / Search / Window / Execution profiler**
+menu-bar dropdowns (task RC-CAP4).
 
 ```xml
 <plan goal="Clone bgb's right-click menus + menu-bar features across every window, functional-1:1">
@@ -129,26 +138,54 @@ dropdowns. Tasks RC-CAP* below own these.
     <done>Breakpoint/watchpoint manager dialogs (menubar-debug.png).</done>
   </task>
 
-  <!-- CAPTURE-PENDING WINDOWS (do not invent — screenshot first) -->
-  <task id="RC-CAP1" model="sonnet" deps="none">
-    <do>[capture] Screenshot bgb's MAIN LCD window right-click menu (rig in docs/bgb-reference/README.md); save to docs/bgb-reference/menus/rc-main.png; transcribe its items into this plan as RM-main* tasks.</do>
-    <test>rc-main.png exists; each item has a concrete action + a named test before any code.</test>
-    <done>Main-window menu features enumerated from a real capture.</done>
+  <!-- MAIN LCD WINDOW right-click menu (captured: rc-main.png + submenus) -->
+  <task id="MN1" model="sonnet" deps="RM1,RM2,RA0">
+    <do>Main-window right-click opens the rc-main.png menu (reuse PopupMenu); items wired to existing/new actions: Pause, Reset gameboy (*), Exit, Debugger (Esc, opens the debugger window), Enable sound (toggle the mute the CLI already has).</do>
+    <test>right-click the game window opens a menu matching rc-main.png; clicking Pause pauses; Reset resets; Debugger opens the debugger window; Enable sound toggles audio.</test>
+    <done>The five already-supported actions fire from the menu.</done>
   </task>
-  <task id="RC-CAP2" model="sonnet" deps="none">
-    <do>[capture] Screenshot bgb's VRAM viewer right-click menu(s) (each tab if they differ); save rc-vram*.png; transcribe into RM-vram* tasks.</do>
-    <test>rc-vram*.png exist; items enumerated with tests.</test>
-    <done>VRAM-window menu features enumerated from real captures.</done>
+  <task id="MN2" model="sonnet" deps="MN1">
+    <do>"Window size" submenu (main-sub-windowsize.png): 1x1…6x6 + Full screen + Fullscreen stretched; set the integer window scale / toggle fullscreen, check-marking the active size.</do>
+    <test>selecting 3x3 resizes the game window to 3× (480x432) and check-marks it; Full screen toggles a borderless fullscreen.</test>
+    <done>Window-size submenu matches main-sub-windowsize.png.</done>
   </task>
-  <task id="RC-CAP3" model="sonnet" deps="none">
-    <do>[capture] Screenshot bgb's I/O map right-click menu; save rc-iomap.png; transcribe into RM-iomap* tasks.</do>
-    <test>rc-iomap.png exists; items enumerated with tests.</test>
-    <done>I/O-map menu features enumerated from a real capture.</done>
+  <task id="MN3" model="sonnet" deps="MN1">
+    <do>"Sound channel" submenu (main-sub-soundchannel.png): channels 1–4 (F5–F8) as mute toggles with check-marks, driving a per-channel mute mask into the APU mixer (needs a core channel-mute accessor — add if missing, golden-safe / debug-only).</do>
+    <test>toggling channel 2 mutes NR2x in the output and un-checks its item; re-toggling restores it.</test>
+    <done>Per-channel mute submenu matches main-sub-soundchannel.png.</done>
+  </task>
+  <task id="MN4" model="sonnet" deps="MN1">
+    <do>File ops: "Load ROM…" (open a ROM, reuse the drop-load path), "Recent ROMs" (a recent-files list, main-sub-recentroms.png), "Save screenshot" (write the current frame to PNG-less PPM/BMP — std only).</do>
+    <test>Save screenshot writes the current 160x144 frame to a file; Load ROM swaps the running ROM; Recent ROMs lists prior loads and reloads one.</test>
+    <done>File submenu actions match rc-main.png + main-sub-recentroms.png.</done>
+  </task>
+  <task id="MN5" model="sonnet" deps="MN1,RM3">
+    <do>"Other" submenu (main-sub-other.png): VRAM viewer + (debugger/iomap) window toggles, Cart info / System info dialogs (header + model facts from the cart/debug API), About…; "Close screen"; gray-out/stub Camera control + cheat searcher.</do>
+    <test>Other→VRAM viewer opens the VRAM window; Cart info shows the parsed header (title/MBC/rom/ram); About shows version.</test>
+    <done>Other submenu matches main-sub-other.png (info dialogs + window toggles real; camera/cheats stubbed).</done>
+  </task>
+  <analysis id="MN6" model="opus" deps="none">
+    <do>Save-state submenu (main-sub-state.png: Quick Save F2, Quick Load F4, Select F3, Load state…) needs full machine state serialization/restore — a large core feature (every subsystem serializable, version-stable, golden-safe). Decide scope + the core API.</do>
+    <done>Save-state feasibility + core serialization surface recorded; in-scope or deferred.</done>
+    <why>Large new core surface (whole-machine (de)serialization) touching every subsystem.</why>
+  </analysis>
+  <analysis id="MN7" model="opus" deps="none">
+    <do>"Link" submenu (main-sub-link.png: Listen/Connect/Disconnect/Cancel listen) is serial-link networking — a frontend socket layer + core serial-transfer hooks. Decide scope. "Options…"/"Cheat…"/"Camera control…" are large dialogs — scope each.</do>
+    <done>Link + Options/Cheat/Camera scoped (likely deferred); their core/frontend surface recorded.</done>
+    <why>Networking + large config/cheat/camera subsystems; judgment on scope vs the 1:1 goal.</why>
+  </analysis>
+
+  <!-- SUB-WINDOWS: no right-click menu (captured negative result) -->
+  <task id="SW1" model="haiku" deps="none">
+    <do>Record that bgb's VRAM viewer (rc-vram-none.png) and I/O map (rc-iomap-none.png) have NO right-click context menu — VRAM left-click selects a tile/cell, I/O map is display + Refresh. No menu to clone for these; their left-click selection is already covered by the window plan (C14 / C17).</do>
+    <test>n/a (negative capture result); the two windows ship without a right-click menu, matching bgb.</test>
+    <done>No context menu on VRAM/iomap — confirmed against captures, not assumed.</done>
+    <why>Documentation of a captured negative; no code.</why>
   </task>
   <task id="RC-CAP4" model="haiku" deps="none">
-    <do>[capture] Screenshot the debugger File / Search / Window / Execution profiler menu-bar dropdowns; save menubar-*.png; transcribe into tasks.</do>
+    <do>[capture] Screenshot the debugger File / Search / Window / Execution profiler menu-bar dropdowns (Xvfb method in README); save menubar-{file,search,window,profiler}.png; transcribe into tasks.</do>
     <test>the four menubar-*.png exist; items enumerated.</test>
-    <done>Remaining menu-bar dropdowns enumerated from real captures.</done>
+    <done>The last un-captured dropdowns enumerated from real captures.</done>
     <why>Capture + transcription, no logic.</why>
   </task>
 
@@ -162,8 +199,12 @@ dropdowns. Tasks RC-CAP* below own these.
 </plan>
 ```
 
-**Plan: 23 tasks (3 opus analysis, 2 haiku, 18 sonnet) + 4 capture-gated.** Critical path:
-RA0/RA1 → RM1 → RM2 → RM4 → (RM5…RM12 menu actions) → RM13/14/15 → RM16. The main-LCD / VRAM /
-I/O-map window menus and the File/Search/Window/Execution-profiler dropdowns are **blocked on real
-capture** (RC-CAP1–4) — bgb must be relaunched (it crashed on wine XInput this session); their
-items are enumerated only after screenshots exist, never invented.
+**Plan: ~30 tasks (5 opus analysis, ~4 haiku, ~21 sonnet).** Critical path: RA0/RA1 → RM1 → RM2 →
+RM4 → (RM5…RM12 debugger menu actions) → RM13/14/15 → RM16; the main-window branch RM1/RM2 →
+MN1 → MN2…MN5 runs in parallel. Coverage is now **complete and captured across every window**:
+debugger pane menus + Run/Debug bars, the main-LCD menu + all six submenus, and the captured
+**negative** that VRAM/I-O-map have no right-click menu (SW1). Only the debugger File/Search/
+Window/Execution-profiler menu-bar dropdowns remain to screenshot (RC-CAP4). Large subsystems
+(save-states MN6, link-cable/Options/Cheat MN7, reverse-exec RA2) are analysis-gated, likely
+deferred. **Capture method that works:** run bgb under a fresh `Xvfb` display — it dodges the
+wine `XI_BadDevice` XInput crash that kills bgb on the real `:0` (see bgb-reference README).
