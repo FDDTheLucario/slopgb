@@ -712,27 +712,6 @@ gambatte/speedchange/speedchange_tima03_2a_cgb04c_out01.gbc [Cgb]
 gambatte/speedchange/speedchange_tima03_2b_cgb04c_out02.gbc [Cgb]
 gambatte/sprites/10spritesPrLine_10xposA7_m0irq_2_dmg08_cgb04c_out2.gbc [Dmg]
 gambatte/sprites/10spritesPrLine_10xposA7_m0irq_2_dmg08_cgb04c_out2.gbc [Cgb]
-gambatte/sprites/10spritesprline_1xposa1_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/10spritesprline_1xposa3_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/10spritesprline_1xposa5_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/10spritesprline_1xposa6_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/10spritesprline_1xposa7_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/10spritesprline_2overlap1_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/10spritesprline_2overlap2_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/10spritesprline_2overlap3_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/10spritesprline_2overlap4_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/10spritesprline_2overlap5_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/10spritesprline_2overlap6_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/10spritesprline_2overlap7_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/10spritesprline_2overlap8_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/10spritesprline_2xposa2overlap8_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/1spritesPrLine_1sprite8pBgCover_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/1spritesPrLine_1sprite8pBgPrior_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/1spritesPrLine_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/3spritesPrLine_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/5spritesPrLine_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/7spritesPrLine_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/9spritesPrLine_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/enable/late_disable_ds_3_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/late_disable_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/late_sizechange2_sp00_2_dmg08_cgb04c_out0.gbc [Dmg]
@@ -753,25 +732,13 @@ gambatte/sprites/late_sizechange_sp00_2_dmg08_cgb04c_out3.gbc [Dmg]
 gambatte/sprites/late_sizechange_sp00_2_dmg08_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/late_sizechange_sp00_4_dmg08_cgb04c_out0.gbc [Dmg]
 gambatte/sprites/late_sizechange_sp00_4_dmg08_cgb04c_out0.gbc [Cgb]
-gambatte/sprites/late_sizechange_sp00_ds_2_cgb04c_out3.gbc [Cgb]
+gambatte/sprites/late_sizechange_sp00_ds_1_cgb04c_out0.gbc [Cgb]
+gambatte/sprites/late_sizechange_sp01_ds_1_cgb04c_out0.gbc [Cgb]
+gambatte/sprites/late_sizechange_sp39_ds_1_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/late_sizechange_sp01_2_dmg08_out0_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/late_sizechange_sp01_ds_2_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/late_sizechange_sp02_2_dmg08_cgb04c_out3.gbc [Dmg]
 gambatte/sprites/late_sizechange_sp02_2_dmg08_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/late_sizechange_sp39_ds_2_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/space/10spritesPrLine_late_scx4_ds_2_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/10spritesPrLine_nr10space11_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/10spritesPrLine_nr10space13_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/10spritesPrLine_nr10space1_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/10spritesPrLine_nr10space3_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/10spritesPrLine_nr10space5_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/10spritesPrLine_nr10space6_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/10spritesPrLine_nr10space7_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/10spritesPrLine_nr10space9_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/10spritesPrLine_scx1_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/10spritesPrLine_scx3_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/10spritesPrLine_scx5_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/10spritesPrLine_scx7_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/space/10spritesPrLine_wx0_m3stat_ds_2_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/space/10spritesPrLine_wx1_m3stat_ds_2_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/space/10spritesPrLine_wx2_m3stat_ds_2_cgb04c_out0.gbc [Cgb]
@@ -779,57 +746,6 @@ gambatte/sprites/space/10spritesPrLine_wx3_m3stat_ds_2_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/space/10spritesPrLine_wx4_m3stat_ds_2_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/space/10spritesPrLine_wx5_m3stat_ds_2_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/space/1pos8_8pos9_wx08_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/2overlap1_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/2overlap1_offset4_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/2overlap1_offset5_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/2overlap3_offset4_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/2overlap5_offset4_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/2overlap6_offset4_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/2overlap7_offset4_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/2overlap8_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/2overlap8_offset4_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap1_scx6_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap1_scx7_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap2_scx1_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap2_scx3_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap2_scx4_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap2_scx5_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap2_scx7_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap3_scx1_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap3_scx4_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap3_scx6_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap4_scx1_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap4_scx3_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap4_scx5_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap4_scx6_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap4_scx7_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap5_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap5_rev_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap5_scx1_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap5_scx3_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap6_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap6_rev_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap6_scx1_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap6_scx2_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap6_scx3_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap6_scx5_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap6_scx6_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap6_scx7_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap7_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap7_rev_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap7_scx1_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap7_scx2_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap7_scx3_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap7_scx4_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap7_scx5_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap7_scx6_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap8_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap8_scx1_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap8_scx2_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap8_scx3_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap8_scx4_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap8_scx5_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/3overlap8_scx7_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/space/9pos8_wx08_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/space/9pos8_wx08_scx5_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/space/9pos8_wx09_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
@@ -1270,21 +1186,15 @@ gambatte/m1/m2m1irq_ifw_ds_1_cgb04c_out3.gbc [Cgb]
 # `2*(i+1) > dots`) forces the FF41 low mode bits to 3 (the pre-flip mode 3)
 # when a sprite-line m3→m0 flip lands in the read M-cycle's second half AND
 # double_speed AND lcd_enabled. Removed 43 sprites m3stat_ds_1 rows from this
-# file (961 -> 918), zero regressions. The kept config is the unique
-# zero-regression point of two A/B axes:
-#  * dropping the half-split (whole-M-cycle override) lifts ~84 more rows but
-#    regresses 21 green DS reads that want mode 0 in the same M-cycle
-#    (m2int/m0int_m3stat_ds_2, dma gdma/hdma_cycles_scx5_ds_2, window
-#    late_disable/late_sizechange_ds_1, lcd_offset, scx_during_m3,
-#    speedchange);
-#  * dropping the sprite-line gate regresses 5 bare-line reads
-#    (dma gdma/hdma_cycles_scx5_ds_2, lcd_offset m0stat_count_scx1_ds_2).
-# Both leaks reach FF41 through the m2-dispatch / DMA / lcd-offset chains at a
+# file (961 -> 918) at zero regression — the conservative half-split endpoint.
+# The half-split axis was SUPERSEDED by INC-G3 task 6 (whole-M-cycle block, see
+# its note below): the dot-END half-split caught only the 2nd-half flips; the
+# whole-M-cycle block adds the 1st-half-flip rows. The remaining sprite-line
+# gate (dropping it floors 5 bare-line reads — dma gdma/hdma_cycles_scx5_ds_2,
+# lcd_offset m0stat_count_scx1_ds_2, a different chain offset) is kept. The bare
+# leaks reach FF41 through the m2-dispatch / DMA / lcd-offset chains at a
 # different sub-cycle offset than the sprites direct poll — the parked
 # multi-chain CPU↔PPU sub-cycle-phase problem (CLAUDE.md sub-dot bullet).
-# Residual m3stat_ds still floored here: the 9 window `wx` cases (a different
-# window-stall flip phase), the m2int/speedchange dispatch reads, and the
-# 21/5 dropped above. Lift them only with the per-read-chain sub-cycle phase.
 #
 # --- INC-G3 task 5: whole-M-cycle CGB palette block (2026-06) --------------
 # First lift driven by the eighth-grid `event_phase(kind,...)` seam (INC-G3
@@ -1301,3 +1211,38 @@ gambatte/m1/m2m1irq_ifw_ds_1_cgb04c_out3.gbc [Cgb]
 # cgbpal_m3end floored here: the *_3 (out0) rounds + plain _1/_2/_3 +
 # m3start/read/write_m3start rows (a different read offset / write cell, not
 # the straddle-M-cycle block).
+#
+# --- INC-G3 task 6: whole-M-cycle double-speed FF41 STAT-mode block (2026-06) -
+# Second lift on the `event_phase(kind,...)` seam: `event_phase(StatMode)` now
+# returns phase 8 (cc+4 = END), like PalAccess. INC-DS-1's dot-END half-split
+# held mode 3 only when the sprite-line m3->m0 flip landed in the read
+# M-cycle's SECOND half (+43); the whole-M-cycle block holds it regardless of
+# which dot the flip lands on, lifting the +84 residual sprite `m3stat_ds_1`
+# (out3) rows whose flip lands in the FIRST half. Net-positive A/B trade
+# (half-dot-grid branch policy): removed 87 rows (84 `sprites[/space]
+# *_m3stat_ds_1` + the 3 `late_sizechange_sp00/01/39_ds_2` out3), added the 3
+# `late_sizechange_sp00/01/39_ds_1` (out0) — a net-neutral in-cluster swap
+# (whole-M-cycle forces both the _1 and _2 size-change reads to mode 3; the _2
+# siblings want it, the _1 do not, and no `event_phase` offset separates them).
+# Net floor -84 (915->831). ZERO cross-suite cascade (age/mealybug/gbmicrotest/
+# mooneye2022/blargg/wilbertpol all green; mooneye 439 + 600 lib green). Kept
+# gates: sprite-line (`m0_stat_flip = r.fetched != 0`) and `double_speed` — the
+# latter load-bearing, not belt-and-braces (single-speed m3stat shares this one
+# stamp but wants the mode-0 end view: probe LIFT 0/REGRESS 30, cross-oracle;
+# see interconnect.rs `stat_mode_override_requires_double_speed`). Residual
+# m3stat_ds still floored: the window `wx` cases (a different stall-flip phase
+# via the silent advance_lx pipe-end path, `m0_stat_flip` never set), the
+# m2int/speedchange dispatch reads (per-read-chain sub-cycle offset), and the
+# speedchange `_2` (dot-+/-1-off, needs the cc-granular pixel-pipe reclock).
+#
+# --- INC-G3 task 7: IF-flop set/read race — OUT OF SCOPE (cross-oracle) -------
+# The single-speed m2int_m0irq / wilbertpol intr_2_mode0_*_nops cluster is an
+# irreducible cross-oracle swap, not a missing calibration. gbmicrotest
+# hblank_int_scx*_if pins the very FF0F dots gambatte's m2int reads contradict
+# (siding with gambatte forfeits 46 gbmicrotest + 117 gambatte + 2 mealybug +
+# 2 age rows — see wilbertpol.txt intr_2_mode0 note), and the G2c ack-countdown
+# tag that lifted the gambatte side broke the canonical `intr_2_mode0_timing`
+# mooneye test. Lifting needs a real sub-cc IF flip-flop set/read race model or
+# a full cc-granular pixel-pipe reclock (recalibrates ~5944 green dot-level
+# cases incl. mealybug photos), not an `event_phase` offset. Not attempted; the
+# ceiling is pinned by `stat_mode_override_requires_double_speed`.

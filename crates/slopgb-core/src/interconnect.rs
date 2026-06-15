@@ -94,7 +94,8 @@ enum EdgeKind {
     M0Access,
     /// The CGB palette-RAM pipe-end unblock (`pal_access_edge`).
     PalAccess,
-    /// The double-speed FF41 STAT mode-bit flip (`stat_mode_edge`).
+    /// The double-speed FF41 STAT mode-bit flip (`stat_mode_edge`); commits at
+    /// the whole-M-cycle END phase (INC-G3 task 6), like `PalAccess`.
     StatMode,
 }
 
@@ -117,6 +118,23 @@ fn event_phase(kind: EdgeKind, i: u64, dots: u64) -> u8 {
         // cgbpAccessible vs m0Time), so it gets the whole-M-cycle block where
         // OAM/VRAM only get the second half. INC-G3 task 5.
         EdgeKind::PalAccess => END_PHASE,
+        // The double-speed FF41 STAT mode-bit block also commits at the
+        // M-cycle END (INC-G3 task 6): a sprite-line m3→m0 flip anywhere in the
+        // straddle M-cycle holds the cc+2 read at the old mode 3, not only a
+        // 2nd-half flip. The INC-DS-1 dot-END half-split caught the +43 rows
+        // whose flip lands in the M-cycle's second half; promoting StatMode to
+        // the whole-M-cycle block lifts the +84 residual `m3stat_ds_1` rows
+        // whose flip lands in the FIRST half (gambatte sprites). The full-gbtr
+        // ratchet measured +84/−3 (net floor −84): the only regressions are the
+        // 3 `late_sizechange_sp00/01/39_ds_1` (out0, want mode 0) — a net-neutral
+        // in-cluster A/B swap, since their `_ds_2` siblings (out3) are in the
+        // lift. Whole-M-cycle forces both the size-change `_1` and `_2` reads on
+        // the straddle line to mode 3; the `_2` want it, the `_1` do not, and no
+        // `event_phase` offset separates two reads in the same M-cycle (the
+        // parked multi-chain CPU↔PPU phase problem). Taken on the half-dot-grid
+        // branch (net-positive trades OK); see the task-6 swap note in
+        // tests/gbtr/baselines/gambatte.txt.
+        EdgeKind::StatMode => END_PHASE,
         // Every other event commits at its dot-END eighth (net-zero scaffold).
         _ => edge_eighth(i, dots),
     }
@@ -840,22 +858,24 @@ impl Interconnect {
                 self.pal_access_edge = Some(event_phase(EdgeKind::PalAccess, i, dots));
             }
             if self.ppu.take_m0_stat_flip() {
-                // Same cc+2 MID half-classification as the OAM/VRAM access
-                // edge: only a flip in the M-cycle's second half holds the
-                // double-speed FF41 mode bits at the pre-flip mode 3
-                // (gambatte sprites m3stat_ds_1). The kept config (sprite-line
-                // gate on the flip + this half-split) is zero-regression. Two
-                // looser axes were A/B-rejected: dropping the half-split
-                // (whole-M-cycle override) lifts ~84 more rows but regresses
-                // 21 green DS reads that want mode 0, and dropping the
-                // sprite-line gate regresses 5 bare-line reads
-                // (dma gdma/hdma_cycles_scx5_ds_2, lcd_offset m0stat_count) —
-                // both reach FF41 through the m2-dispatch / DMA / lcd-offset
-                // chains at a different sub-cycle offset, the parked
-                // multi-chain CPU↔PPU phase problem (sub-dot event-phase
-                // model, increment INC-DS-1). The edge is stamped with its
-                // dot-END commit eighth ([`event_phase`]); the FF41 read decides
-                // blocking against the single CPU-access observer phase
+                // A sprite-line m3→m0 flip holds the double-speed FF41 mode bits
+                // at the pre-flip mode 3 for the WHOLE straddle M-cycle
+                // (`event_phase(StatMode)=END_PHASE`, INC-G3 task 6): INC-DS-1's
+                // dot-END half-split caught only the +43 rows whose flip lands in
+                // the M-cycle's second half; the whole-M-cycle block adds the +84
+                // residual `m3stat_ds_1` rows whose flip lands in the first half
+                // (gambatte sprites). Net-positive A/B trade (full-gbtr +84/−3,
+                // net floor −84): the only regressions are the 3
+                // `late_sizechange_sp00/01/39_ds_1` (a net-neutral in-cluster
+                // swap — their `_ds_2` siblings are in the lift; whole-M-cycle
+                // forces both same-line size-change reads to mode 3, the `_2`
+                // want it and the `_1` do not, and no `event_phase` offset
+                // separates two reads in one M-cycle). The sprite-line gate stays
+                // (dropping it floors 5
+                // bare-line reads at a different chain offset:
+                // dma gdma/hdma_cycles_scx5_ds_2, lcd_offset m0stat_count). The
+                // edge stamps the whole-M-cycle END phase ([`event_phase`]); the
+                // FF41 read blocks against the single CPU-access observer phase
                 // [`ACCESS_PHASE`] ([`stamp_blocks`]).
                 self.stat_mode_edge = Some(event_phase(EdgeKind::StatMode, i, dots));
             }
@@ -1565,16 +1585,20 @@ impl Interconnect {
             0xFF10..=0xFF3F => self.apu.read(addr),
             0xFF46 => self.dma_reg,
             // The STAT mode bits read at the cc+2 MID phase: in double speed
-            // a read whose M-cycle straddles the mode-3→mode-0 flip (flip in
-            // the second half) still reads mode 3, where the whole-dot end
-            // view has already flipped to mode 0 (gambatte sprites
-            // m3stat_ds). Only the low mode bits move; the enable bits and
-            // the live LYC compare keep the end view. The LCD-on guard is
-            // belt-and-braces: the flag is only set by a live flip (LCD on)
-            // and reset every tick, so an LCD-off read can never carry it,
-            // but the guard keeps the override from ever forcing mode 3 over
-            // the LCD-off mode 0. Sub-dot event-phase model, increment
-            // INC-DS-1.
+            // a read whose M-cycle straddles a sprite-line mode-3→mode-0 flip
+            // still reads mode 3 for the WHOLE straddle M-cycle
+            // (`event_phase(StatMode)=END_PHASE`, INC-G3 task 6 — not only a
+            // 2nd-half flip), where the whole-dot end view has already flipped
+            // to mode 0 (gambatte sprites m3stat_ds). Only the low mode bits
+            // move; the enable bits and the live LYC compare keep the end view.
+            // The `double_speed` gate is load-bearing, not belt-and-braces:
+            // single-speed FF41 m3stat reads share this one stamp but want the
+            // end view (cross-oracle — see
+            // `stat_mode_override_requires_double_speed`). The LCD-on guard is
+            // belt-and-braces: the flag is only set by a live flip (LCD on) and
+            // reset every tick, so an LCD-off read can never carry it, but the
+            // guard keeps the override from ever forcing mode 3 over the LCD-off
+            // mode 0. Sub-dot event-phase model, INC-DS-1 + INC-G3 task 6.
             0xFF41
                 if stamp_blocks(self.stat_mode_edge, ACCESS_PHASE)
                     && self.double_speed
@@ -2288,15 +2312,18 @@ mod tests {
         assert_eq!(b.pal_access_edge, None, "stamp cleared by the next tick");
     }
 
-    /// In double speed the FF41 mode bits read at the cc+2 MID phase: when
-    /// the mode-3→mode-0 flip fired in the straddle M-cycle
-    /// (`stat_mode_edge` precedes the MID observer) the STAT read still shows
-    /// mode 3, even
-    /// though the PPU's whole-dot end view has flipped to mode 0 (gambatte
-    /// sprites m3stat_ds). Single speed keeps the end view (the parked
-    /// multi-chain STAT-mode read). Sub-dot event-phase model, INC-DS-1.
+    /// In double speed the FF41 mode bits read at the cc+2 MID phase: when a
+    /// sprite-line mode-3→mode-0 flip fired anywhere in the straddle M-cycle the
+    /// STAT read still shows the old mode 3, even though the PPU's whole-dot end
+    /// view has flipped to mode 0 (gambatte sprites m3stat_ds). INC-G3 task 6
+    /// promotes the block to the WHOLE M-cycle (`event_phase(StatMode)=END_PHASE`,
+    /// like the palette block): a flip on the M-cycle's FIRST dot — which the
+    /// INC-DS-1 dot-END half-split left readable as mode 0 — now also holds
+    /// mode 3 (the +84 residual `m3stat_ds_1` rows whose flip lands in the first
+    /// half). Single speed keeps the end view (the parked multi-chain STAT-mode
+    /// read; cross-oracle, see `stat_mode_override_requires_double_speed`).
     #[test]
-    fn stat_mode_read_forces_mode3_at_cc2_mid_in_double_speed() {
+    fn stat_mode_read_forces_mode3_whole_mcycle_in_double_speed() {
         let mut b = ic(Model::Cgb);
         // LCD on (the override is LCD-gated) but still in the post-enable
         // glitch line's early dots, so the end-view mode bits are 0 and the
@@ -2305,21 +2332,76 @@ mod tests {
         assert!(b.ppu.lcd_enabled());
         let base = b.ppu.read(0xFF41) & 0x03;
         assert_eq!(base, 0, "end-view mode bits are 0");
-        // A dot-END commit (eighth 8) is in the M-cycle's second half, so the
-        // MID (cc+2) observer is still pre-flip.
-        b.stat_mode_edge = Some(8);
+        // A flip on the M-cycle's FIRST dot (i=0): the INC-DS-1 dot-END eighth
+        // was `edge_eighth(0,2)=4` = the M-cycle midpoint, which the cc+2 MID
+        // observer does NOT precede (the half-split left it readable as mode 0).
+        // `event_phase(StatMode)` now returns END_PHASE, so the whole straddle
+        // M-cycle blocks regardless of which dot the flip lands on.
+        b.stat_mode_edge = Some(event_phase(EdgeKind::StatMode, 0, 2));
+        assert_eq!(
+            b.stat_mode_edge,
+            Some(END_PHASE),
+            "StatMode stamps the whole-M-cycle END phase"
+        );
         // Single speed: the override is gated off, the end view (mode 0)
         // shows through.
         b.double_speed = false;
         assert_eq!(b.read_no_tick(0xFF41) & 0x03, 0, "SS keeps the end view");
-        // Double speed: the straddle M-cycle reads the old mode 3.
+        // Double speed: even a first-dot flip now reads the old mode 3.
         b.double_speed = true;
-        assert_eq!(b.read_no_tick(0xFF41) & 0x03, 3, "DS cc+2 MID reads mode 3");
+        assert_eq!(
+            b.read_no_tick(0xFF41) & 0x03,
+            3,
+            "DS whole-M-cycle reads mode 3"
+        );
         // Only the low mode bits move — the rest of STAT keeps the end view.
         assert_eq!(b.read_no_tick(0xFF41) & !0x03, b.ppu.read(0xFF41) & !0x03);
         // The stamp is reset every machine tick (only the straddle carries it).
         b.tick();
         assert_eq!(b.stat_mode_edge, None, "stamp cleared by the next tick");
+    }
+
+    /// INC-G3 task 6/7 ceiling pin: the `double_speed` gate on the FF41
+    /// STAT-mode override is load-bearing, NOT belt-and-braces. The same
+    /// `stat_mode_edge` stamp serves single- and double-speed reads (the
+    /// dot-loop is speed-agnostic past `dots`), but they want OPPOSITE results:
+    /// the double-speed sprite `m3stat_ds` reads want the held mode 3 (lifted),
+    /// while the single-speed `m3stat` direct-poll reads (enable_display,
+    /// sprite-count, m0int/ine_m3stat) and the m2-dispatch FF41/FF0F chains want
+    /// the mode-0 end view. Relaxing the gate measured LIFT 0 / REGRESS 30
+    /// (task 6 single-speed probe). The single discriminator that would separate
+    /// them is a per-read-chain CPU↔bus sub-cc phase, and the IF-flop set/read
+    /// race that implements it (task 7, intr_2_mode0_nops / m2int_m0irq) is
+    /// cross-oracle irreducible — gbmicrotest hblank_int_scx*_if pins the very
+    /// dots gambatte's m2int reads contradict, and the G2c ack-countdown tag
+    /// that lifted the gambatte side broke the canonical `intr_2_mode0_timing`
+    /// mooneye test. So the gate stays speed-conditioned; this test fails the
+    /// moment someone drops `&& self.double_speed`.
+    #[test]
+    fn stat_mode_override_requires_double_speed() {
+        let mut b = ic(Model::Cgb);
+        b.write(0xFF40, 0x80);
+        assert!(b.ppu.lcd_enabled());
+        let end_view = b.ppu.read(0xFF41) & 0x03;
+        assert_eq!(end_view, 0, "end-view mode bits are 0");
+        // A live sprite-line whole-M-cycle stamp (set identically for both
+        // speeds — the same value the dot-loop stamps).
+        b.stat_mode_edge = Some(event_phase(EdgeKind::StatMode, 0, 2));
+        // Single speed: the override is gated off — the read shows the unforced
+        // PPU end view, matching the green single-speed m3stat direct polls.
+        b.double_speed = false;
+        assert_eq!(
+            b.read_no_tick(0xFF41) & 0x03,
+            end_view,
+            "SS read keeps the end view (the override must not fire)"
+        );
+        // Double speed: the same stamp forces the held mode 3.
+        b.double_speed = true;
+        assert_eq!(
+            b.read_no_tick(0xFF41) & 0x03,
+            3,
+            "DS read holds mode 3 (the override fires)"
+        );
     }
 
     /// The eighth-grid sub-cc phase comparator (`obs_pre_edge` /
@@ -2379,18 +2461,35 @@ mod tests {
     }
 
     /// `event_phase` generalizes `edge_eighth` over an [`EdgeKind`] so a lift
-    /// can give one boundary event its own sub-dot offset (INC-G3). Every kind
-    /// EXCEPT the calibrated `PalAccess` still rides the legacy dot-END commit
-    /// eighth, for both speeds and every dot — the scaffold stays net-zero for
-    /// the OAM/VRAM/STAT/halt edges.
+    /// can give one boundary event its own sub-dot offset (INC-G3). The
+    /// OAM/VRAM accessibility unblock (`M0Access`) and the halt-exit mode-0
+    /// rise (`M0Rise`) still ride the legacy dot-END commit eighth, for both
+    /// speeds and every dot — the scaffold stays net-zero for those edges. Both
+    /// calibrated kinds — `PalAccess` (task 5) and `StatMode` (task 6) — commit
+    /// at the whole-M-cycle END phase instead (their own assertions below).
     #[test]
-    fn event_phase_net_zero_except_pal() {
-        for kind in [EdgeKind::M0Rise, EdgeKind::M0Access, EdgeKind::StatMode] {
+    fn event_phase_net_zero_except_pal_and_stat() {
+        for kind in [EdgeKind::M0Rise, EdgeKind::M0Access] {
             for dots in [2u64, 4] {
                 for i in 0..dots {
                     assert_eq!(
                         event_phase(kind, i, dots),
                         edge_eighth(i, dots),
+                        "kind={kind:?} dots={dots} i={i}"
+                    );
+                }
+            }
+        }
+        // The two calibrated whole-M-cycle blocks commit at END regardless of
+        // dot/speed (PalAccess: task 5; StatMode: task 6 — the double-speed
+        // sprite m3stat_ds block, lifted from the dot-END half-split so a
+        // 1st-half flip also holds the old mode 3).
+        for kind in [EdgeKind::PalAccess, EdgeKind::StatMode] {
+            for dots in [2u64, 4] {
+                for i in 0..dots {
+                    assert_eq!(
+                        event_phase(kind, i, dots),
+                        END_PHASE,
                         "kind={kind:?} dots={dots} i={i}"
                     );
                 }
