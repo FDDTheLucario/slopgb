@@ -116,6 +116,57 @@ pub fn render_palettes(c: &mut Canvas, rect: Rect, bg: &[u8], obj: &[u8], theme:
     c.set_clip(saved);
 }
 
+/// Absolute tile index (0..=383) for a BG-map tile number under the LCDC tile
+/// data area: unsigned 0x8000 method (`n`), or signed 0x8800 method where `n`
+/// is taken as `i8` relative to tile 256 (`0x9000`).
+#[must_use]
+pub fn tile_index(n: u8, signed: bool) -> usize {
+    if signed {
+        (256 + i16::from(n as i8)) as usize
+    } else {
+        n as usize
+    }
+}
+
+/// Render the BG map tab: the 32×32 tilemap at `base` (0x9800/0x9C00), each
+/// cell's tile (resolved via the `signed` tile-data area) drawn at `scale`, with
+/// the screen viewport outlined at `(scx, scy)`. Clipped to `rect`.
+#[allow(clippy::too_many_arguments)]
+pub fn render_bgmap(
+    c: &mut Canvas,
+    rect: Rect,
+    vram: &[u8],
+    base: u16,
+    signed: bool,
+    scx: u8,
+    scy: u8,
+    palette: &[u32; 4],
+    scale: i32,
+    theme: &Theme,
+) {
+    let saved = c.push_clip(rect);
+    let map = debug::bg_map(vram, base);
+    for (i, cell) in map.iter().enumerate() {
+        let col = i as i32 % 32;
+        let row = i as i32 / 32;
+        let px = rect.x + col * 8 * scale;
+        let py = rect.y + row * 8 * scale;
+        let pixels = debug::tile_pixels(vram, 0, tile_index(cell.tile, signed));
+        c.blit_tile(px, py, &pixels, palette, scale);
+    }
+    // Screen viewport: 160×144 map pixels at (scx, scy); 1 map pixel = `scale`.
+    c.outline_rect(
+        Rect::new(
+            rect.x + i32::from(scx) * scale,
+            rect.y + i32::from(scy) * scale,
+            160 * scale,
+            144 * scale,
+        ),
+        theme.breakpoint,
+    );
+    c.set_clip(saved);
+}
+
 #[cfg(test)]
 #[path = "vram_tests.rs"]
 mod tests;

@@ -72,6 +72,48 @@ fn render_oam_draws_present_sprites_and_skips_empty() {
 }
 
 #[test]
+fn tile_index_resolves_signed_and_unsigned_addressing() {
+    assert_eq!(tile_index(0, false), 0);
+    assert_eq!(tile_index(255, false), 255);
+    // Signed (0x8800): n is i8 relative to tile 256.
+    assert_eq!(tile_index(0, true), 256);
+    assert_eq!(tile_index(127, true), 383);
+    assert_eq!(tile_index(0x80, true), 128); // -128
+    assert_eq!(tile_index(0xFF, true), 255); // -1
+}
+
+#[test]
+fn render_bgmap_draws_cells_and_the_viewport_outline() {
+    let mut vram = vec![0u8; 0x4000];
+    // tile 0 = all index 3; map cell (0,0) at 0x9800 (offset 0x1800) -> tile 0.
+    for b in &mut vram[0..16] {
+        *b = 0xFF;
+    }
+    let scale = 1;
+    let (w, h) = (32 * 8usize, 32 * 8usize);
+    let mut buf = vec![0x0012_3456_u32; w * h];
+    {
+        let mut c = Canvas::new(&mut buf, w, h);
+        render_bgmap(
+            &mut c,
+            Rect::new(0, 0, w as i32, h as i32),
+            &vram,
+            0x9800,
+            false,
+            8,
+            16,
+            &GREYS,
+            scale,
+            &T,
+        );
+    }
+    // Cell (0,0) drew tile 0 (black) at the top-left.
+    assert_eq!(buf[0], GREYS[3]);
+    // The viewport outline (theme.breakpoint = red) sits at (scx=8, scy=16).
+    assert_eq!(buf[16 * w + 8], T.breakpoint, "viewport top edge at (8,16)");
+}
+
+#[test]
 fn render_palettes_expands_cgb_colour_words() {
     let mut bg = vec![0u8; 64];
     bg[0] = 0xFF; // palette 0, colour 0 = 0x7FFF -> white
