@@ -194,6 +194,31 @@ impl GameBoy {
         self.bus.peek(addr)
     }
 
+    /// Read for the bgb-style debugger views: like [`Self::peek`] but resolves
+    /// the IO registers (FF00-FF7F) to their live hardware values instead of
+    /// the `$FF` `peek` returns. Side-effect-free; the value is what the CPU
+    /// would read at this instant. Use this for the memory dump and I/O map.
+    #[must_use]
+    pub fn debug_read(&self, addr: u16) -> u8 {
+        self.bus.debug_read(addr)
+    }
+
+    /// The top `n` 16-bit words of the stack as `(address, word)` pairs,
+    /// descending from `SP` like bgb's stack pane: `(SP, [SP]), (SP-2, [SP-2]),
+    /// …`. Words are little-endian; addresses wrap at `0x0000`.
+    #[must_use]
+    pub fn stack(&self, n: usize) -> Vec<(u16, u16)> {
+        let sp = self.cpu_regs().sp;
+        (0..n)
+            .map(|i| {
+                let addr = sp.wrapping_sub((2 * i) as u16);
+                let lo = self.bus.debug_read(addr);
+                let hi = self.bus.debug_read(addr.wrapping_add(1));
+                (addr, u16::from(lo) | (u16::from(hi) << 8))
+            })
+            .collect()
+    }
+
     /// True once the CPU has executed an undefined opcode (0xD3, 0xDB,
     /// 0xDD, 0xE3, 0xE4, 0xEB, 0xEC, 0xED, 0xF4, 0xFC, 0xFD) and
     /// hard-locked — wilbertpol's mooneye fork ends its tests with 0xED.
@@ -247,6 +272,43 @@ mod tests {
             assert_eq!(r.bc(), bc, "{model:?} DMG cart BC");
             assert_eq!(r.de(), 0x0008, "{model:?} DMG cart DE");
             assert_eq!(r.hl(), 0x007C, "{model:?} DMG cart HL");
+        }
+    }
+
+    #[test]
+    fn debug_read_resolves_io_but_peek_does_not() {
+        let gb = GameBoy::new(Model::Dmg, rom_with_cgb_flag(0x00)).unwrap();
+        // peek keeps IO out of band ($FF); debug_read returns the live value.
+        // Post-boot LY is a valid scanline (0..=153), so it can't be the $FF
+        // peek hands back — proving debug_read took the io_read path.
+        assert_eq!(gb.peek(0xFF44), 0xFF, "peek must not read IO");
+        assert!(
+            gb.debug_read(0xFF44) <= 153,
+            "debug_read should give live LY"
+        );
+        // Outside IO, debug_read is identical to peek (and to ROM contents).
+        assert_eq!(gb.debug_read(0x0143), gb.peek(0x0143));
+        assert_eq!(gb.debug_read(0x0143), 0x00); // the CGB flag we wrote
+        for addr in [0x0000u16, 0x4000, 0xC000, 0xFF80, 0xFFFF] {
+            assert_eq!(gb.debug_read(addr), gb.peek(addr), "non-IO {addr:#06x}");
+        }
+    }
+
+    #[test]
+    fn stack_descends_from_sp_little_endian() {
+        let gb = GameBoy::new(Model::Dmg, rom_with_cgb_flag(0x00)).unwrap();
+        let sp = gb.cpu_regs().sp;
+        let s = gb.stack(3);
+        assert_eq!(s.len(), 3);
+        // Addresses descend by two from SP (bgb's stack pane order).
+        assert_eq!(s[0].0, sp);
+        assert_eq!(s[1].0, sp.wrapping_sub(2));
+        assert_eq!(s[2].0, sp.wrapping_sub(4));
+        // Each word is the little-endian pair at its address.
+        for &(addr, word) in &s {
+            let want = u16::from(gb.debug_read(addr))
+                | (u16::from(gb.debug_read(addr.wrapping_add(1))) << 8);
+            assert_eq!(word, want, "word @ {addr:#06x}");
         }
     }
 }

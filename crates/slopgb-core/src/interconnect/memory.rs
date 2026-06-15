@@ -217,6 +217,18 @@ impl Interconnect {
         }
     }
 
+    /// Read for the debugger views: like [`Self::peek`] but resolves the IO
+    /// registers (FF00-FF7F) to their live hardware values via [`Self::io_read`]
+    /// — the bgb debugger/IO-map want to *show* register state, not the `$FF`
+    /// `peek` returns to keep test harnesses from reading IO out of band.
+    /// Side-effect-free (`&self`); the value is what the CPU would read now.
+    pub(crate) fn debug_read(&self, addr: u16) -> u8 {
+        match addr {
+            0xFF00..=0xFF7F => self.io_read(addr),
+            _ => self.peek(addr),
+        }
+    }
+
     fn io_read(&self, addr: u16) -> u8 {
         match addr {
             0xFF00 => self.joypad.read(),
