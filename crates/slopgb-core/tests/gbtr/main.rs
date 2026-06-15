@@ -19,6 +19,7 @@ mod age;
 mod blargg;
 mod gambatte;
 mod gbmicrotest;
+mod golden;
 mod harness;
 mod inventory;
 mod mealybug;
