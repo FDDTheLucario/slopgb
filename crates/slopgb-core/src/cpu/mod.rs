@@ -159,6 +159,17 @@ impl Cpu {
         &mut self.regs
     }
 
+    /// Interrupt master enable, for the debugger registers panel.
+    pub fn ime(&self) -> bool {
+        self.ime
+    }
+
+    /// `EI` has executed but its IME-enable is still one instruction away
+    /// (the EI delay). For the debugger registers panel.
+    pub fn ime_pending(&self) -> bool {
+        self.ime_pending
+    }
+
     pub fn debug_breakpoint_hit(&self) -> bool {
         self.debug_breakpoint
     }

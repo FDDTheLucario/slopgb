@@ -553,6 +553,11 @@ impl Interconnect {
         self.cgb_mode
     }
 
+    /// CGB double-speed (KEY1 bit 7) state, for the debugger registers panel.
+    pub(crate) fn double_speed(&self) -> bool {
+        self.double_speed
+    }
+
     pub fn model(&self) -> Model {
         self.model
     }

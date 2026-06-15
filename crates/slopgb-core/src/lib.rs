@@ -168,6 +168,25 @@ impl GameBoy {
         self.cpu.regs()
     }
 
+    /// Interrupt master enable (the debugger's `ime`). Pair with
+    /// [`Self::ime_pending`] for the post-`EI` one-instruction delay.
+    #[must_use]
+    pub fn ime(&self) -> bool {
+        self.cpu.ime()
+    }
+
+    /// True when `EI` has run but its IME-enable is still one instruction away.
+    #[must_use]
+    pub fn ime_pending(&self) -> bool {
+        self.cpu.ime_pending()
+    }
+
+    /// CGB double-speed mode (KEY1 bit 7) — the debugger's `spd`.
+    #[must_use]
+    pub fn double_speed(&self) -> bool {
+        self.bus.double_speed()
+    }
+
     /// The hardware model this machine was built as.
     pub fn model(&self) -> Model {
         self.bus.model()
@@ -391,5 +410,20 @@ mod tests {
         // moves to 0x101, which isn't the (already-left) 0x100.
         assert_eq!(gb.run_until_breakpoint(&[0x100], 1), None);
         assert_eq!(gb.cpu_regs().pc, 0x101);
+    }
+
+    #[test]
+    fn ime_accessors_track_the_ei_delay() {
+        let mut rom = vec![0u8; 0x8000];
+        rom[0x100] = 0xFB; // ei; 0x101.. stay nop
+        let mut gb = GameBoy::new(Model::Dmg, rom).unwrap();
+        assert!(!gb.ime() && !gb.ime_pending(), "post-boot: interrupts off");
+        assert!(!gb.double_speed(), "DMG is never double-speed");
+        gb.step(); // ei: arms the pending enable, IME still off
+        assert!(!gb.ime(), "IME stays off the instruction after EI");
+        assert!(gb.ime_pending(), "EI arms the pending enable");
+        gb.step(); // the following instruction commits IME
+        assert!(gb.ime(), "IME enabled one instruction after EI");
+        assert!(!gb.ime_pending(), "pending cleared once applied");
     }
 }
