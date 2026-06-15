@@ -121,7 +121,10 @@
 #      reads in. Lift only by re-deriving the whole CGB-C LY/STAT read
 #      lattice jointly with the parked mode-3 +1-dot (sub-dot resolution),
 #      with the full gbtr matrix as the A/B gate — not a wake-phase patch.
-#    * cgbpal_m3 boundary rows (anchored against the hdma_start pins),
+#    * cgbpal_m3 residue: the m3end *_3 (out0) rounds + plain _1/_2/_3 +
+#      m3start/read/write_m3start rows (the m3end scx2_1/scx5_1/scx5_ds_1
+#      out7 rounds were LIFTED by the whole-M-cycle palette block — INC-G3
+#      task 5, see the swap note at the end of this file);
 #      lyc/lycEnable/m1/m2enable enable-edge *_1 rounds, window/
 #      late_* sub-dot rounds, dmgpalette_during_m3 and
 #      scx/scy_during_m3 single-dot write-cell residue;
@@ -146,10 +149,8 @@ gambatte/bgtilemap/bgtilemap_spx09_ds_4.gbc [Cgb]
 gambatte/cgbpal_m3/cgbpal_m3end_1_cgb04c_out7.gbc [Cgb]
 gambatte/cgbpal_m3/cgbpal_m3end_2_cgb04c_out0.gbc [Cgb]
 gambatte/cgbpal_m3/cgbpal_m3end_3_cgb04c_out0.gbc [Cgb]
-gambatte/cgbpal_m3/cgbpal_m3end_scx2_1_cgb04c_out7.gbc [Cgb]
 gambatte/cgbpal_m3/cgbpal_m3end_scx2_3_cgb04c_out0.gbc [Cgb]
 gambatte/cgbpal_m3/cgbpal_m3end_scx3_3_cgb04c_out0.gbc [Cgb]
-gambatte/cgbpal_m3/cgbpal_m3end_scx5_1_cgb04c_out7.gbc [Cgb]
 gambatte/cgbpal_m3/cgbpal_m3end_scx5_3_cgb04c_out0.gbc [Cgb]
 gambatte/cgbpal_m3/cgbpal_m3start_1_cgb04c_out1.gbc [Cgb]
 gambatte/cgbpal_m3/cgbpal_read_m3start_ds_1_cgb04c_out00.gbc [Cgb]
@@ -1061,7 +1062,6 @@ gambatte/window/late_wy_lcdoffset1_1_cgb04c_out0.gbc [Cgb]
 #   (e.g. m0irq_ly44_lcdstat28 expects the m0 IRQ to fire with the m2
 #   enable set) — needs the per-source doM0Event/doM2Event predicates.
 gambatte/cgbpal_m3/cgbpal_m3end_ds_3_cgb04c_out0.gbc [Cgb]
-gambatte/cgbpal_m3/cgbpal_m3end_scx5_ds_1_cgb04c_out7.gbc [Cgb]
 gambatte/cgbpal_m3/cgbpal_m3end_scx5_ds_3_cgb04c_out0.gbc [Cgb]
 gambatte/cgbpal_m3/cgbpal_m3start_ds_1_cgb04c_out1.gbc [Cgb]
 gambatte/lycm2int/lycm2int_m2irq_1_dmg08_cgb04c_out1.gbc [Dmg]
@@ -1285,3 +1285,19 @@ gambatte/m1/m2m1irq_ifw_ds_1_cgb04c_out3.gbc [Cgb]
 # Residual m3stat_ds still floored here: the 9 window `wx` cases (a different
 # window-stall flip phase), the m2int/speedchange dispatch reads, and the
 # 21/5 dropped above. Lift them only with the per-read-chain sub-cycle phase.
+#
+# --- INC-G3 task 5: whole-M-cycle CGB palette block (2026-06) --------------
+# First lift driven by the eighth-grid `event_phase(kind,...)` seam (INC-G3
+# scaffold): the CGB palette-RAM unblock commits at the M-cycle END, not its
+# midpoint. `event_phase(EdgeKind::PalAccess, ..)` returns phase 8 (cc+4) so a
+# cc+2 MID FF69/FF6B read stays $FF for the ENTIRE straddle M-cycle and the
+# palette reads back only next M-cycle — one observer grid later than the
+# OAM/VRAM dot-split (the palette unblock physically lags the pixel-pipe end,
+# gambatte cgbpAccessible vs m0Time). The earlier half-split under-blocked the
+# geometries where the lx==160 pipe-end lands in the M-cycle's FIRST half.
+# Removed 3 rows from this file: cgbpal_m3end scx2_1 / scx5_1 / scx5_ds_1
+# (out7). NOT an A/B swap — full gbtr confirmed zero cross-suite regression
+# (mealybug photos, age/wilbertpol, every CGB palette read green). Residual
+# cgbpal_m3end floored here: the *_3 (out0) rounds + plain _1/_2/_3 +
+# m3start/read/write_m3start rows (a different read offset / write cell, not
+# the straddle-M-cycle block).

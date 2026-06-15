@@ -33,6 +33,12 @@ const IF_STAT_BIT: u8 = 0x02;
 /// [`Interconnect::tick_machine`].
 const MID_PHASE: u8 = 4;
 
+/// The M-cycle END phase (cc+4 = 8 eighths) — [`edge_eighth`]'s last-dot value
+/// for both speeds. An event committing here is past every observer (it blocks
+/// the whole M-cycle and is visible only next M-cycle); the CGB palette unblock
+/// commits here (`event_phase(EdgeKind::PalAccess, ..)`, INC-G3 task 5).
+const END_PHASE: u8 = 8;
+
 /// The dot-END commit phase (in eighths of an M-cycle) of an event that
 /// fired on dot `i` of a `dots`-dot M-cycle (`dots` = 4 single speed / 2
 /// double speed). Single speed → {2,4,6,8}; double speed → {4,8}. The
@@ -92,17 +98,28 @@ enum EdgeKind {
     StatMode,
 }
 
-/// The dot-END commit phase (eighths of an M-cycle) of boundary event `kind`
-/// firing on dot `i` of a `dots`-dot M-cycle. Net-zero today: every kind
-/// returns [`edge_eighth`] (`event_phase_is_net_zero`). The `kind` parameter
-/// is the hook a later INC-G3 increment uses to offset one event's sub-dot
-/// position independently of the others.
+/// The commit phase (eighths of an M-cycle) of boundary event `kind` firing on
+/// dot `i` of a `dots`-dot M-cycle. Most kinds commit at their dot-END eighth
+/// ([`edge_eighth`]); `PalAccess` is calibrated off it (INC-G3 task 5) — its
+/// per-event offset is exactly what [`EdgeKind`] keys, so the others stay
+/// dot-clocked while one event moves.
 #[inline]
 fn event_phase(kind: EdgeKind, i: u64, dots: u64) -> u8 {
-    // Net-zero scaffold: every kind shares the dot-END commit eighth. A later
-    // increment matches on `kind` to add a per-event sub-dot lead/lag.
-    let _ = kind;
-    edge_eighth(i, dots)
+    match kind {
+        // The CGB palette-RAM unblock commits at the M-cycle END (phase 8 =
+        // cc+4), one observer grid later than OAM/VRAM's dot-split: a cc+2 MID
+        // FF69/FF6B read stays blocked for the ENTIRE straddle M-cycle and reads
+        // $FF until the next M-cycle, regardless of which dot lx==160 lands on.
+        // The dot-split half-classification under-blocked the geometries where
+        // lx==160 falls in the M-cycle's first half — gambatte cgbpal_m3end
+        // scx2_1/scx5_1/scx5_ds_1 (out7) pin the late effect across SCX. The
+        // palette unblock physically lags the pixel-pipe end (gambatte
+        // cgbpAccessible vs m0Time), so it gets the whole-M-cycle block where
+        // OAM/VRAM only get the second half. INC-G3 task 5.
+        EdgeKind::PalAccess => END_PHASE,
+        // Every other event commits at its dot-END eighth (net-zero scaffold).
+        _ => edge_eighth(i, dots),
+    }
 }
 
 /// The single sub-cc phase (eighths) at which every CPU bus access samples the
@@ -263,10 +280,12 @@ pub struct Interconnect {
     /// precedes the stamp ([`stamp_blocks`]).
     m0_access_edge: Option<u8>,
     /// As `m0_access_edge` but for the CGB palette-RAM unblock (anchored at
-    /// the pipe end / `render_finished`, one dot after the m0 flip): a cc+2
-    /// MID-phase FF69/FF6B read still reads $FF when the unblock lands in
-    /// this M-cycle's second half (gambatte `cgbpal_m3`). See
-    /// `Ppu::pal_access_flip`.
+    /// the pipe end / `render_finished`, one dot after the m0 flip). Unlike
+    /// OAM/VRAM, the palette unblock commits at the M-cycle END
+    /// ([`event_phase`] gives `PalAccess` phase 8 = the whole-M-cycle block,
+    /// INC-G3 task 5): a cc+2 MID-phase FF69/FF6B read reads $FF for the
+    /// ENTIRE straddle M-cycle, not just its second half (gambatte
+    /// `cgbpal_m3end` `scx2_1`/`scx5_1`/`scx5_ds_1`). See `Ppu::pal_access_flip`.
     pal_access_edge: Option<u8>,
     /// The mode-3→mode-0 STAT mode-bit flip's dot-END commit eighth, or
     /// `None` when no flip lands this M-cycle (`Ppu::take_m0_stat_flip`,
@@ -814,8 +833,10 @@ impl Interconnect {
                 self.m0_access_edge = Some(event_phase(EdgeKind::M0Access, i, dots));
             }
             if self.ppu.take_pal_access_flip() {
-                // Same cc+2 MID rule for the CGB palette-RAM unblock at the
-                // pipe end (gambatte cgbpal_m3).
+                // The CGB palette-RAM unblock commits at the M-cycle end
+                // ([`event_phase`] gives `PalAccess` the whole-M-cycle block):
+                // the FF69/FF6B read stays $FF for the entire straddle M-cycle,
+                // not just its second half (gambatte cgbpal_m3end). INC-G3 task 5.
                 self.pal_access_edge = Some(event_phase(EdgeKind::PalAccess, i, dots));
             }
             if self.ppu.take_m0_stat_flip() {
@@ -1577,9 +1598,11 @@ impl Interconnect {
             // BCPS/OCPS stay readable in DMG-compat mode (boot_hwio-C reads
             // the boot leftovers $C8/$D0); the data ports do not.
             0xFF68 | 0xFF6A => self.ppu.read(addr),
-            // cc+2 MID-phase CGB palette read: a pipe-end unblock landing in
-            // this M-cycle's second half still reads $FF here (sub-dot
-            // event-phase model).
+            // cc+2 MID-phase CGB palette read: the pipe-end unblock commits at
+            // the M-cycle end (whole-M-cycle block, see `pal_access_edge` /
+            // [`event_phase`]), so the read stays $FF for the entire straddle
+            // M-cycle and becomes readable only next M-cycle (sub-dot
+            // event-phase model, INC-G3 task 5).
             0xFF69 | 0xFF6B
                 if self.cgb_mode && stamp_blocks(self.pal_access_edge, ACCESS_PHASE) =>
             {
@@ -2235,21 +2258,20 @@ mod tests {
         }
     }
 
-    /// The CGB FF69/FF6B palette read is held at the cc+2 MID phase: when
-    /// the pipe-end palette unblock landed in the M-cycle's second half
-    /// (`pal_access_edge` precedes the MID observer), the CPU read still
-    /// returns $FF even though the PPU's own (end-view) palette RAM has
-    /// unlocked. Pins
-    /// gambatte `cgbpal_m3` (the pipe-end-anchored read; population +
-    /// end-to-end correctness validated by that suite). Anchored at
-    /// `render_finished`, one dot after the m0 flip — see
-    /// `Ppu::pal_access_flip`.
+    /// The CGB FF69/FF6B palette read is held at the cc+2 MID phase: the
+    /// pipe-end palette unblock commits at the M-cycle END (`PalAccess` =
+    /// phase 8, the whole-M-cycle block — INC-G3 task 5), so the CPU read still
+    /// returns $FF for the entire straddle M-cycle even though the PPU's own
+    /// (end-view) palette RAM has unlocked. Pins gambatte `cgbpal_m3` (the
+    /// pipe-end-anchored read; population + end-to-end correctness validated by
+    /// that suite). Anchored at `render_finished`, one dot after the m0 flip —
+    /// see `Ppu::pal_access_flip`.
     #[test]
     fn cgb_palette_read_mid_override_returns_ff() {
         let mut b = ic(Model::Cgb);
-        // A dot-END commit (eighth 8) lands in the M-cycle's second half, so
-        // a MID (cc+2) observer is still blocked.
-        b.pal_access_edge = Some(8);
+        // The palette unblock commits at the M-cycle end (`END_PHASE` =
+        // `event_phase(PalAccess, ..)`), so a MID (cc+2) observer is blocked.
+        b.pal_access_edge = Some(END_PHASE);
         assert_eq!(
             b.read_no_tick(0xFF69),
             0xFF,
@@ -2356,19 +2378,14 @@ mod tests {
         );
     }
 
-    /// INC-G3 net-zero scaffold, task 2-3: `event_phase` generalizes
-    /// `edge_eighth` over an [`EdgeKind`] so a later increment can give one
-    /// boundary event its own sub-dot lead/lag. The scaffold itself must lift
-    /// ZERO rows — every kind returns the same dot-END commit eighth as the
-    /// legacy `edge_eighth`, for both speeds and every dot.
+    /// `event_phase` generalizes `edge_eighth` over an [`EdgeKind`] so a lift
+    /// can give one boundary event its own sub-dot offset (INC-G3). Every kind
+    /// EXCEPT the calibrated `PalAccess` still rides the legacy dot-END commit
+    /// eighth, for both speeds and every dot — the scaffold stays net-zero for
+    /// the OAM/VRAM/STAT/halt edges.
     #[test]
-    fn event_phase_is_net_zero() {
-        for kind in [
-            EdgeKind::M0Rise,
-            EdgeKind::M0Access,
-            EdgeKind::PalAccess,
-            EdgeKind::StatMode,
-        ] {
+    fn event_phase_net_zero_except_pal() {
+        for kind in [EdgeKind::M0Rise, EdgeKind::M0Access, EdgeKind::StatMode] {
             for dots in [2u64, 4] {
                 for i in 0..dots {
                     assert_eq!(
@@ -2377,6 +2394,32 @@ mod tests {
                         "kind={kind:?} dots={dots} i={i}"
                     );
                 }
+            }
+        }
+    }
+
+    /// INC-G3 task 5: the CGB palette-RAM unblock commits at the M-cycle END
+    /// (phase 8 = cc+4), one observer grid later than OAM/VRAM's dot-split, so
+    /// a cc+2 [`ACCESS_PHASE`] FF69/FF6B read stays blocked ($FF) for the WHOLE
+    /// straddle M-cycle regardless of which dot lx==160 lands on — readable
+    /// only next M-cycle. The half-split under-blocked the 1st-half (scx2/scx5)
+    /// geometries that gambatte cgbpal_m3end `scx2_1`/`scx5_1`/`scx5_ds_1`
+    /// (out7) pin (+3 floor rows, zero cross-suite regression).
+    #[test]
+    fn pal_access_blocks_whole_mcycle() {
+        for dots in [2u64, 4] {
+            for i in 0..dots {
+                let e = event_phase(EdgeKind::PalAccess, i, dots);
+                // Pin the exact commit phase, not just "blocks": the unblock
+                // commits at the M-cycle END regardless of dot/speed.
+                assert_eq!(
+                    e, END_PHASE,
+                    "palette commits at M-cycle end: dots={dots} i={i}"
+                );
+                assert!(
+                    stamp_blocks(Some(e), ACCESS_PHASE),
+                    "palette blocked at MID for every dot: dots={dots} i={i} e={e}"
+                );
             }
         }
     }
