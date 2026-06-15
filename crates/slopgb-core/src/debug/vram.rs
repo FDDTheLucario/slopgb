@@ -62,6 +62,34 @@ pub fn oam_sprites(oam: &[u8]) -> [Sprite; 40] {
     out
 }
 
+/// One BG/Window tilemap cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MapCell {
+    /// Tile index (VRAM bank 0 at the map offset).
+    pub tile: u8,
+    /// CGB attribute byte (VRAM bank 1, same offset; 0 on DMG): bit7 BG
+    /// priority, bit6 Y-flip, bit5 X-flip, bit3 tile VRAM bank, bits2-0 BG
+    /// palette.
+    pub attr: u8,
+}
+
+/// Decode a 32×32 BG/Window tilemap into 1024 cells, row-major (32 per row).
+/// `base` is 0x9800 or 0x9C00 (only the VRAM offset bits matter). The tile
+/// index comes from bank 0 and the CGB attribute from bank 1 at the same
+/// offset. Note: mapping a cell's `tile` to pixels still needs the LCDC
+/// tile-data area (0x8000 unsigned vs 0x8800 signed) — that's the caller's
+/// choice, applied through [`tile_pixels`].
+#[must_use]
+pub fn bg_map(vram: &[u8], base: u16) -> [MapCell; 1024] {
+    let off = (base & 0x1FFF) as usize; // 0x1800 or 0x1C00
+    let mut out = [MapCell { tile: 0, attr: 0 }; 1024];
+    for (i, cell) in out.iter_mut().enumerate() {
+        cell.tile = vram.get(off + i).copied().unwrap_or(0);
+        cell.attr = vram.get(0x2000 + off + i).copied().unwrap_or(0);
+    }
+    out
+}
+
 #[cfg(test)]
 #[path = "vram_tests.rs"]
 mod tests;
