@@ -4,6 +4,8 @@ Cycle-accurate GB/GBC emulator. Workspace: `crates/slopgb-core` (emulator, zero 
 
 **Read `docs/ARCHITECTURE.md` before touching core** — timing contract (tick-then-access M-cycles), memory map, module ownership, mooneye + game-boy-test-roms harness protocols.
 
+**Debugger/viewer UI** (bgb functional-clone, in progress on branch `bgb-ui`): read-only introspection lives in `slopgb_core::debug` (std-only, side-effect-free `&self` — golden-safe by construction); the frontend renders it on softbuffer (no GUI deps). Plan: [`docs/bgb-clone-plan.md`](docs/bgb-clone-plan.md). Real-screenshot spec + re-capture protocol: [`docs/bgb-reference/`](docs/bgb-reference/README.md) — **never invent bgb's UI; capture it** (bgb runs under wine on this machine).
+
 ## Rules
 
 - TDD: failing test first. Every obscure hardware behavior gets a unit test.
