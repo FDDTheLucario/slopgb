@@ -75,6 +75,63 @@ pub const SOUND: &[IoReg] = &[
     r(0xFF26, "NR52"),
 ];
 
+/// bgb's "GBC DMA" group (HDMA source/dest/control, FF51–FF55).
+pub const GBC_DMA: &[IoReg] = &[
+    r(0xFF51, "HDMA1"),
+    r(0xFF52, "HDMA2"),
+    r(0xFF53, "HDMA3"),
+    r(0xFF54, "HDMA4"),
+    r(0xFF55, "HDMA5"),
+];
+
+/// bgb's "GBC pal" group (CGB palette index/data ports, FF68–FF6B).
+pub const GBC_PAL: &[IoReg] = &[
+    r(0xFF68, "BCPS"),
+    r(0xFF69, "BCPD"),
+    r(0xFF6A, "OCPS"),
+    r(0xFF6B, "OCPD"),
+];
+
+/// The five interrupt vectors (vector address, bgb name), IE/IF **bit 0 → 4**.
+pub const INT_VECTORS: [(u16, &str); 5] = [
+    (0x40, "VBlank"),
+    (0x48, "LCD"),
+    (0x50, "Timer"),
+    (0x58, "Serial"),
+    (0x60, "Joypad"),
+];
+
+/// Wave RAM (FF30–FF3F) as a 32-hex-digit string for the wave-pattern panel.
+#[must_use]
+pub fn wave_row(read: impl Fn(u16) -> u8) -> String {
+    (0..16)
+        .map(|i| format!("{:02X}", read(0xFF30 + i)))
+        .collect()
+}
+
+/// One IF/IE vector row: its label (`40 VBlank`, plus ` *` when the `IF` bit is
+/// pending) and whether the `IE` enable bit is set. `i` indexes [`INT_VECTORS`].
+#[must_use]
+pub fn vector_line(i: usize, iflag: u8, ie: u8) -> (String, bool) {
+    let (vec, name) = INT_VECTORS[i];
+    let bit = 1u8 << i;
+    let label = format!(
+        "{vec:02X} {name}{}",
+        if iflag & bit != 0 { " *" } else { "" }
+    );
+    (label, ie & bit != 0)
+}
+
+/// Draw the IF/IE interrupt vectors as enable check-boxes (checked = `IE` set,
+/// ` *` suffix = `IF` pending) down from `(x, y)`.
+pub fn render_vectors(c: &mut Canvas, x: i32, y: i32, iflag: u8, ie: u8, theme: &Theme) {
+    let lh = line_height();
+    for i in 0..INT_VECTORS.len() {
+        let (label, enabled) = vector_line(i, iflag, ie);
+        checkbox(c, x, y + i as i32 * lh, enabled, &label, theme);
+    }
+}
+
 /// `FFNN NAME XX` — one register line from `read` (use `GameBoy::debug_read`).
 #[must_use]
 pub fn reg_line(read: impl Fn(u16) -> u8, reg: IoReg) -> String {
@@ -102,9 +159,7 @@ pub const LCDC_BITS: [&str; 8] = [
     "LCD on", "WIN map", "WIN on", "BG tiles", "BG map", "OBJ 8x16", "OBJ on", "BG on",
 ];
 
-/// STAT (FF41) interrupt-enable + status labels (bits 6 → 2). Drawn by the I/O
-/// map's STAT breakdown next milestone (C16); kept tested and ready.
-#[allow(dead_code)]
+/// STAT (FF41) interrupt-enable + status labels (bits 6 → 2).
 pub const STAT_BITS: [&str; 5] = ["LYC int", "OAM int", "VBL int", "HBL int", "LY=LYC"];
 
 /// Decode a register's bits into `(label, set)` pairs (MSB first) for the

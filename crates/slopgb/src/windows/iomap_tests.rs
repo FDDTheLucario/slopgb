@@ -40,6 +40,36 @@ fn bit_states_decode_msb_first() {
 }
 
 #[test]
+fn wave_row_reads_all_sixteen_bytes() {
+    let read = |a: u16| (a - 0xFF30) as u8; // FF30->0, FF31->1, ...
+    assert_eq!(wave_row(read), "000102030405060708090A0B0C0D0E0F");
+}
+
+#[test]
+fn vector_line_decodes_enable_and_pending() {
+    // IF = 0x05 (VBlank + Timer pending), IE = 0x01 (VBlank enabled).
+    let (vb, vb_en) = vector_line(0, 0x05, 0x01);
+    assert_eq!(vb, "40 VBlank *", "VBlank pending marked");
+    assert!(vb_en, "VBlank enabled");
+    let (timer, timer_en) = vector_line(2, 0x05, 0x01);
+    assert_eq!(timer, "50 Timer *", "Timer pending");
+    assert!(!timer_en, "Timer not enabled");
+    let (lcd, _) = vector_line(1, 0x05, 0x01);
+    assert_eq!(lcd, "48 LCD", "LCD neither pending nor marked");
+}
+
+#[test]
+fn gbc_groups_cover_the_dma_and_palette_ports() {
+    assert!(
+        GBC_DMA
+            .iter()
+            .any(|x| x.addr == 0xFF55 && x.name == "HDMA5")
+    );
+    assert!(GBC_PAL.iter().any(|x| x.addr == 0xFF68 && x.name == "BCPS"));
+    assert!(GBC_PAL.iter().any(|x| x.addr == 0xFF6B && x.name == "OCPD"));
+}
+
+#[test]
 fn render_group_advances_and_draws() {
     let read = |_a: u16| 0x00u8;
     let (w, h) = (120usize, 200usize);

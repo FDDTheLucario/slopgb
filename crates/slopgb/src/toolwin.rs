@@ -62,7 +62,8 @@ fn default_size(kind: ToolWindow) -> LogicalSize<f64> {
         // Wide enough for the 16×24 tile grid at 2× (256×384) plus the details
         // panel ([`vram::PANEL_W`]); tall enough for the grid + tab strip.
         ToolWindow::Vram => (560.0, 470.0),
-        ToolWindow::IoMap => (560.0, 360.0),
+        // Four register columns + the decoded LCDC/STAT/vector/wave panels.
+        ToolWindow::IoMap => (600.0, 400.0),
     };
     LogicalSize::new(w, h)
 }

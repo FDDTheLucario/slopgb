@@ -323,28 +323,58 @@ fn bgmap_details(gb: &GameBoy, state: &VramState, lx: i32, ly: i32) -> Vec<Strin
 
 fn render_iomap(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme) {
     let read = |a: u16| gb.debug_read(a);
-    let col_w = area.w / 3;
-    iomap::render_group(c, area.x + 2, area.y + 2, &read, iomap::LCD, theme);
-    iomap::render_group(c, area.x + col_w, area.y + 2, &read, iomap::VARIOUS, theme);
-    iomap::render_group(
-        c,
-        area.x + 2 * col_w,
-        area.y + 2,
-        &read,
-        iomap::SOUND,
-        theme,
-    );
-    // LCDC / STAT bit breakdowns under the first column.
-    let bits_y = area.y + 2 + (iomap::LCD.len() as i32 + 1) * line_height();
+    let lh = line_height();
+    let col_w = area.w / 4;
+    let x = |i: i32| area.x + 2 + i * col_w;
+    let y0 = area.y + 2;
+    let label = |c: &mut Canvas, x: i32, y: i32, s: &str| draw_text(c, x, y, s, theme.text);
+
+    // Col 0: LCD registers, then the LCDC bit breakdown.
+    let after_lcd = iomap::render_group(c, x(0), y0, &read, iomap::LCD, theme);
+    label(c, x(0), after_lcd + lh, "LCDC (FF40)");
     iomap::render_bits(
         c,
-        area.x + 2,
-        bits_y,
+        x(0),
+        after_lcd + 2 * lh,
         read(0xFF40),
         &iomap::LCDC_BITS,
         7,
         theme,
     );
+
+    // Col 1: the "various" registers, then the STAT bit breakdown.
+    let after_var = iomap::render_group(c, x(1), y0, &read, iomap::VARIOUS, theme);
+    label(c, x(1), after_var + lh, "STAT (FF41)");
+    iomap::render_bits(
+        c,
+        x(1),
+        after_var + 2 * lh,
+        read(0xFF41),
+        &iomap::STAT_BITS,
+        6,
+        theme,
+    );
+
+    // Col 2: the sound channels + master control.
+    iomap::render_group(c, x(2), y0, &read, iomap::SOUND, theme);
+
+    // Col 3: GBC DMA + palette ports, then the IF/IE interrupt vectors.
+    let after_dma = iomap::render_group(c, x(3), y0, &read, iomap::GBC_DMA, theme);
+    let after_pal = iomap::render_group(c, x(3), after_dma + lh, &read, iomap::GBC_PAL, theme);
+    label(c, x(3), after_pal + lh, "IF, IE");
+    iomap::render_vectors(
+        c,
+        x(3),
+        after_pal + 2 * lh,
+        read(0xFF0F),
+        read(0xFFFF),
+        theme,
+    );
+
+    // Wave pattern (FF30–3F): full-width row along the bottom.
+    let wy = area.bottom() - lh - 2;
+    label(c, x(0), wy, "wave (FF3x)");
+    draw_text(c, x(0) + 11 * 8, wy, &iomap::wave_row(read), theme.text);
 }
 
 #[cfg(test)]
