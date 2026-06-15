@@ -39,11 +39,17 @@ const SUITE_DIRS: [&str; 7] = [
 // fns below execute exactly these, and [`inventory`] derives its claimed
 // set from the same constants — so the two can never drift apart.
 
-/// BullyGB: one ROM, one shared reference for both models.
+/// BullyGB and Strikethrough are TOSSED — both whole suites are class-F crap
+/// (zero accuracy signal) and now `inventory`-exempted, not run:
+/// * bully: a real DMG-C fails the ROM's own all-pass reference
+///   (`Bad Echo RAM Reads`, per its howto), so the reference is unreachable
+///   for a faithful DMG; the CGB leg is a downstream-timing divergence.
+/// * strikethrough: the residual diff is one undocumented glitch-sprite cell
+///   the ROM's own source can't explain — no spec to emulate against.
+///
+/// Upstream relocated (Hacktix → Ashiepaws/). The ROM paths are retained only
+/// to mark them exempt against the inventory disk-walk.
 const BULLY_ROM: &str = "bully/bully.gb";
-const BULLY_PNG: &str = "bully/bully.png";
-
-/// Strikethrough: one ROM, per-model references (suffix via [`png_suffix`]).
 const STRIKETHROUGH_ROM: &str = "strikethrough/strikethrough.gb";
 
 /// Turtle Tests: (rom, reference valid on both models).
@@ -176,110 +182,8 @@ fn frame_case(
     CaseResult { key, result }
 }
 
-// ---------------------------------------------------------------- bully --
-
-// Triaged (the screen's only diff vs the all-pass reference is the failure
-// message text; decoded from the ROM's ASCII-indexed tilemap). Both legs
-// are floor class F per the index in baselines/gambatte.txt
-// (hardware-faithful divergence / unreachable reference — never fix in
-// core):
-//
-// * [Dmg]: `initram.asm` "Uninitialized RAM not randomized" — the test
-//   fails iff every WRAM byte is $00/$FF at power-on, and our WRAM is
-//   deterministically zeroed (core design: deterministic, no host
-//   entropy). Note the all-pass reference is unreachable for a faithful
-//   DMG anyway: the howto documents a *real* DMG-C failing this ROM with
-//   "Bad Echo RAM Reads" (bully/game-boy-test-roms-howto.md), a check we
-//   pass — so this leg stays a documented divergence whichever way WRAM
-//   init goes.
-// * [Cgb]: `divtest.asm` "Invalid initial DIV" — the ROM's very first
-//   test compares the first DIV read against $1F, a value its own source
-//   marks "(TODO: Confirm)". Our hand-off DIV counter is pinned by the
-//   hardware-verified mooneye boot_div-cgbABCDE (green); the bully read
-//   happens after framework init whose duration couples to LCD phase, so
-//   this is a downstream-timing divergence, not a hand-off-state bug.
-//   The [Dmg] leg passes the same test ($AD expected).
-const BULLY_BASELINE: &[&str] = &["bully/bully.gb [Dmg]", "bully/bully.gb [Cgb]"];
-
-/// BullyGB (`bully/game-boy-test-roms-howto.md`): run 0.5 emulated seconds,
-/// compare against the single `bully.png`. Device-specific test cases are
-/// "included/skipped automatically" by the ROM itself (BullyGB wiki), so the
-/// one reference applies to both DMG and CGB.
-///
-/// Howto caveat: a *real* DMG (DMG-CPU C) fails with `Bad Echo RAM Reads`
-/// while CGB devices pass — so a faithful DMG emulation may legitimately
-/// mismatch the reference; the baseline records the observed verdict.
-#[test]
-fn smallsuites_bully() {
-    let Some(root) = common::gbtr_root() else {
-        common::skip_or_fail_gbtr(
-            "smallsuites_bully",
-            "game-boy-test-roms collection not present",
-        );
-        return;
-    };
-    let mut results = Vec::new();
-    for model in [Model::Dmg, Model::Cgb] {
-        results.push(frame_case(
-            &root,
-            BULLY_ROM,
-            BULLY_ROM,
-            model,
-            BULLY_PNG,
-            |gb| harness::run_for_seconds(gb, 0.65),
-        ));
-    }
-    harness::assert_against_baseline("smallsuites/bully", &results, BULLY_BASELINE);
-}
-
-// -------------------------------------------------------- strikethrough --
-
-// Both legs differ by the same 7 pixels at y=68, x=71-78 (one sprite
-// cell): the ROM races an OAM DMA against the mode-2 scan, and the
-// dot-serial scan + DMA disconnect (calibrated by the gambatte
-// oamdma/late_sp* family) reproduce the strikethrough rows' sprites
-// vanishing exactly — the pre-rewrite diff was 53 pixels. The residue is
-// the single *glitch* sprite cell hardware still renders out of the
-// disconnected bus: its data is undocumented DMA-driver residue (the
-// ROM's own source marks the controlling byte "seems to affect the tile
-// number of the sprite thats shown" — the same unexplained family as the
-// madness MGB freeze glitch), gambatte's rdisabledRam model cannot
-// produce it, and reading the in-flight byte instead contradicts the
-// dmg08-verified oamdma/late_sp* out0 rows. No documented mechanism to
-// emulate; floored (class F per the index in baselines/gambatte.txt).
-const STRIKETHROUGH_BASELINE: &[&str] = &[
-    "strikethrough/strikethrough.gb [Dmg]",
-    "strikethrough/strikethrough.gb [Cgb]",
-];
-
-/// Strikethrough (`strikethrough/game-boy-test-roms-howto.md`): run 0.5
-/// emulated seconds, compare against the per-model reference.
-#[test]
-fn smallsuites_strikethrough() {
-    let Some(root) = common::gbtr_root() else {
-        common::skip_or_fail_gbtr(
-            "smallsuites_strikethrough",
-            "game-boy-test-roms collection not present",
-        );
-        return;
-    };
-    let mut results = Vec::new();
-    for model in [Model::Dmg, Model::Cgb] {
-        results.push(frame_case(
-            &root,
-            STRIKETHROUGH_ROM,
-            STRIKETHROUGH_ROM,
-            model,
-            &format!("strikethrough/strikethrough-{}.png", png_suffix(model)),
-            |gb| harness::run_for_seconds(gb, 0.65),
-        ));
-    }
-    harness::assert_against_baseline(
-        "smallsuites/strikethrough",
-        &results,
-        STRIKETHROUGH_BASELINE,
-    );
-}
+// bully + strikethrough: TOSSED (class-F crap, exempted in `inventory`, no
+// test fn). See the BULLY_ROM/STRIKETHROUGH_ROM doc comment for why.
 
 // --------------------------------------------------------- turtle-tests --
 
@@ -310,14 +214,13 @@ fn smallsuites_turtle_tests() {
 
 // --------------------------------------------------------- scribbltests --
 
-// scxly's [Dmg] leg passes since the per-source STAT-event port (the LYC
-// IRQ no longer rides the wired-OR line, so the per-line LYC handler runs
-// on time). The CGB reference is an off-convention asset — it uses
-// green-LCD colors (#0F380F/#98C00F) that no `(c << 3) | (c >> 2)`
-// expansion of any RGB555 palette can produce, so the [Cgb] leg can never
-// pass under the Identity compare even with correct compat palettes
-// (class F per the index in baselines/gambatte.txt — never fix in core).
-const SCRIBBL_BASELINE: &[&str] = &["scribbltests/scxly/scxly.gb [Cgb]"];
+// scxly's [Dmg] leg runs + passes (the per-source STAT-event port runs the
+// per-line LYC handler on time). The scxly [Cgb] leg is TOSSED (not run — see
+// the loop skip): its CGB reference is a defective off-convention asset using
+// green-LCD colors (#0F380F/#98C00F) that no `(c << 3) | (c >> 2)` expansion of
+// any RGB555 palette can produce, so it could never pass the Identity compare
+// (class F — never fix in core). Every other scribbltests leg passes.
+const SCRIBBL_BASELINE: &[&str] = &[];
 
 /// Scribbltests (`scribbltests/game-boy-test-roms-howto.md`): around 10
 /// frames is enough (run 15) except `statcount-auto`, which needs ~270
@@ -339,6 +242,11 @@ fn smallsuites_scribbltests() {
     let mut results = Vec::new();
     for (rom_rel, png_dmg, png_cgb, frames) in SCRIBBL_CASES {
         for (model, png_rel) in [(Model::Dmg, png_dmg), (Model::Cgb, png_cgb)] {
+            // scxly [Cgb] is tossed: defective green-LCD reference asset
+            // (see SCRIBBL_BASELINE). Its [Dmg] leg still runs.
+            if model == Model::Cgb && rom_rel.contains("/scxly/") {
+                continue;
+            }
             results.push(frame_case(&root, rom_rel, rom_rel, model, png_rel, |gb| {
                 harness::run_for_frames(gb, frames)
             }));
@@ -455,17 +363,15 @@ fn smallsuites_little_things_gb() {
 
 // ---------------------------------------------------------- mbc3-tester --
 
-// DMG leg passes via the MBC30 8-bit ROM-bank register (the ROM is a 4 MiB
-// MBC3-type cart, src/cartridge.rs). After that fix the CGB leg's only
-// remaining diff is a defective reference asset: every mismatching pixel
-// (3825) is `got #7BFF31 want #7BFF4A`, i.e. the PNG's compat-mode green
-// contradicts the suite's own howto, which specifies the background shades
-// as "#000000, #0063C6, #7BFF31 and #FFFFFF"
-// (mbc3-tester/game-boy-test-roms-howto.md). #7BFF31 is exactly the
-// `(c << 3) | (c >> 2)` expansion of the CGB boot ROM's default compat BG
-// palette entry $1BEF; do not "fix" this with palette work (class F per
-// the index in baselines/gambatte.txt).
-const MBC3_TESTER_BASELINE: &[&str] = &["mbc3-tester/mbc3-tester.gb [Cgb]"];
+// DMG leg runs + passes via the MBC30 8-bit ROM-bank register (the ROM is a
+// 4 MiB MBC3-type cart, src/cartridge.rs). The [Cgb] leg is TOSSED (not run —
+// only the [Dmg] case is built below): its only diff is a defective reference
+// asset — every
+// mismatching pixel (3825) is `got #7BFF31 want #7BFF4A`, i.e. the PNG's
+// compat-mode green contradicts the suite's own howto ("#000000, #0063C6,
+// #7BFF31 and #FFFFFF"). #7BFF31 is exactly the `(c << 3) | (c >> 2)` expansion
+// of the CGB boot ROM's default compat BG palette entry $1BEF (class F).
+const MBC3_TESTER_BASELINE: &[&str] = &[];
 
 /// MBC3 Bank Tester (`mbc3-tester/game-boy-test-roms-howto.md`): the ROM
 /// loops indefinitely, the result is valid after the first 40 frames (run
@@ -479,17 +385,16 @@ fn smallsuites_mbc3_tester() {
         );
         return;
     };
-    let mut results = Vec::new();
-    for model in [Model::Dmg, Model::Cgb] {
-        results.push(frame_case(
-            &root,
-            MBC3_TESTER_ROM,
-            MBC3_TESTER_ROM,
-            model,
-            &format!("mbc3-tester/mbc3-tester-{}.png", png_suffix(model)),
-            |gb| harness::run_for_frames(gb, 60),
-        ));
-    }
+    // [Cgb] tossed: defective reference asset (see MBC3_TESTER_BASELINE); only
+    // the [Dmg] leg runs.
+    let results = vec![frame_case(
+        &root,
+        MBC3_TESTER_ROM,
+        MBC3_TESTER_ROM,
+        Model::Dmg,
+        &format!("mbc3-tester/mbc3-tester-{}.png", png_suffix(Model::Dmg)),
+        |gb| harness::run_for_frames(gb, 60),
+    )];
     harness::assert_against_baseline("smallsuites/mbc3-tester", &results, MBC3_TESTER_BASELINE);
 }
 
@@ -551,9 +456,9 @@ fn smallsuites_rtc3test() {
 /// drift from what actually runs; the rtc3test ROM is claimed once even
 /// though its three `#<subtest>` cases share it.
 pub fn inventory() -> (Vec<String>, Vec<String>) {
+    // MBC3_TESTER_ROM and the scribbltests scxly ROM stay claimed — their
+    // [Dmg] legs still run; only the defective [Cgb] reference legs were tossed.
     let mut claimed: Vec<String> = [
-        BULLY_ROM,
-        STRIKETHROUGH_ROM,
         FIRSTWHITE_ROM,
         TELLINGLYS_ROM,
         MBC3_TESTER_ROM,
@@ -566,6 +471,11 @@ pub fn inventory() -> (Vec<String>, Vec<String>) {
     claimed.sort();
     claimed.dedup();
     let exempted = [
+        // TOSSED class-F whole suites (see the BULLY_ROM/STRIKETHROUGH_ROM doc):
+        // bully (real DMG-C fails its own reference) and strikethrough
+        // (undocumented glitch-sprite residue, no spec). Zero accuracy signal.
+        BULLY_ROM,
+        STRIKETHROUGH_ROM,
         // scribbltests howto: "there are no screenshots for failrylake and
         // winpos at the moment". fairylake is additionally "closer to a demo
         // than a proper test ROM" and WIP (its README) — nothing to compare
