@@ -58,16 +58,21 @@
 #    ch1_init_reset_sweep_counter comment below).
 # E. 2016-era wilbertpol expectation chains — lives entirely in
 #    baselines/wilbertpol.txt (the intr_2_mode0 *_nops + -C families).
-# F. Asset/build defects + hardware-faithful divergences — never fix
-#    in core: blargg oam_bug 7-timing_effect (defective single build),
+# F. Asset/build defects + hardware-faithful divergences. Two policies:
+#    (1) KEEP-BASELINED (still asserted-fail — SameBoy-compat suites, never
+#    drop a test SameBoy passes): blargg oam_bug 7-timing_effect (defective
+#    single build; the howto-verified combined oam_bug.gb passes),
 #    gbmicrotest dma_basic (self-overwriting result block) and
-#    oam_int_if_level_d (real DMG-vs-AGS divergence), mbc3-tester
-#    [Cgb] (reference contradicts its own howto), scribbltests scxly
-#    [Cgb] (green-LCD reference colors unreachable), bully ×2 (real
-#    DMG fails the reference too; CGB leg downstream-timing), the
-#    madness 2016/2022 builds [Mgb] (build-sensitive; the mts-20240926
-#    build passes), strikethrough ×2 (undocumented glitch-sprite
-#    residue) — see each suite's own comments.
+#    oam_int_if_level_d (real DMG-vs-AGS divergence), the madness 2016/2022
+#    builds [Mgb] (build-sensitive; the mts-20240926 build passes).
+#    (2) TOSSED 2026-06 (exempted/leg-dropped, no longer run — defective
+#    Hacktix suites + defective reference-PNG assets, not in SameBoy's
+#    pass-all set): bully ×2 (real DMG fails its own reference; CGB
+#    downstream-timing) and strikethrough ×2 (undocumented glitch-sprite
+#    residue) → whole-suite exempt in smallsuites.rs; scribbltests scxly
+#    [Cgb] (green-LCD reference colors unreachable) and mbc3-tester [Cgb]
+#    (reference contradicts its own howto) → defective-asset CGB leg dropped,
+#    [Dmg] leg still runs. See each suite's own comments.
 # G. Upstream-tie-break-needed — dma/hdma_transition_speedchange_oamdma
 #    here (halted-block OAM-DMA +1; neither gambatte nor SameBoy
 #    models it — see its comment below) plus same-suite
