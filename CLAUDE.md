@@ -18,7 +18,7 @@ When a hardware question comes up, consult in order:
 
 | Source | For |
 |---|---|
-| `docs/hardware-state.md` | this emulator's per-subsystem implementation state, quirks, and parked/disproven approaches |
+| `docs/hardware-state/` | this emulator's per-subsystem implementation state, quirks, and parked/disproven approaches (one file per subsystem; see its README index) |
 | gbctr (Gekkio, Complete Technical Reference) | CPU/MBC timing, micro-ops |
 | Pan Docs | everything else |
 | `test-roms-src/<failing test>.s` asm | what a failing mooneye test actually checks |
@@ -46,4 +46,4 @@ Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 
 
 All mooneye green (439/439 rom×model); game-boy-test-roms v7.0 battery green against ratcheted baselines (7047 cases = 5941 pass + 1106 baselined floor); 597 core unit tests. Missing test ROMs skip silently unless `SLOPGB_REQUIRE_ROMS=1` (CI) — run `test-roms/download.sh` first.
 
-**Per-subsystem hardware-behavior notes — timing laws, quirks, the test ROMs that pin each, and the parked/disproven approaches not to re-chase — live in [`docs/hardware-state.md`](docs/hardware-state.md). Read the relevant bullet before touching that subsystem.** The floor-class index (classes A–H with lift conditions) is the header of `tests/gbtr/baselines/gambatte.txt`.
+**Per-subsystem hardware-behavior notes — timing laws, quirks, the test ROMs that pin each, and the parked/disproven approaches not to re-chase — live in [`docs/hardware-state/`](docs/hardware-state/README.md) (one file per subsystem). Read the relevant file before touching that subsystem.** The floor-class index (classes A–H with lift conditions) is the header of `tests/gbtr/baselines/gambatte.txt`.
