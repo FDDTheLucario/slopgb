@@ -5,3 +5,4 @@
 #![allow(dead_code, unused_imports)] // scaffolding; wired to winit surfaces in B12b.
 
 pub mod debugger;
+pub mod vram;
