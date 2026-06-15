@@ -42,6 +42,12 @@ impl Video {
         self.surface.resize(w, h)?;
         let mut buffer = self.surface.buffer_mut()?;
         blit(&mut buffer, size.width, size.height, frame, &mut self.row);
+        // Force opaque alpha: softbuffer leaves the top byte 0, which a 32-bit
+        // ARGB compositor reads as fully transparent (the window would show the
+        // desktop through it). softbuffer itself ignores the top byte.
+        for px in buffer.iter_mut() {
+            *px |= 0xFF00_0000;
+        }
         window.pre_present_notify();
         buffer.present()
     }
