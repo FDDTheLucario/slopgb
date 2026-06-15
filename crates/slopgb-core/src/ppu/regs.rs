@@ -1,0 +1,361 @@
+//! PPU register read/write dispatch (FF40-FF4B) + the mode-3 write strobe staging (stage_write/commit_eff/strobe_tick) + LCDC.7 enable/disable. docs/ARCHITECTURE.md §Mode-3 write strobe. Oracle: mealybug m3_*, gambatte scx/scy/dmgpalette during_m3.
+
+use super::*;
+
+impl Ppu {
+    /// Stage a rendering-register write `dots` PPU dots before its
+    /// architectural commit. The interconnect calls this *before* ticking
+    /// the write M-cycle and commits via [`Self::write`] afterwards, so
+    /// the pixel pipeline sees the new value land mid-cycle exactly as the
+    /// bus drives it on hardware (gbctr "Memory access timing"), while
+    /// everything the tick-then-access contract calibrates (STAT, IRQ,
+    /// access blocking, LCDC.7 enable/disable) keeps the architectural
+    /// commit point. `dots` is 2 at normal speed, 1 in double speed (the
+    /// second half of the M-cycle either way).
+    ///
+    /// Non-rendering addresses are ignored; rendering registers are FF40
+    /// (pipeline bits only — bit 7 acts at the commit), FF42/FF43 and
+    /// FF47-FF4B.
+    pub(crate) fn stage_write(&mut self, addr: u16, value: u8, dots: u8) {
+        if !matches!(addr, 0xFF40 | 0xFF42 | 0xFF43 | 0xFF47..=0xFF4B) {
+            return;
+        }
+        // WX reaches the pixel pipeline one dot later than the palette
+        // class — at the architectural tick's strobe point rather than
+        // mid-cycle. Pinned by the mealybug m3_wx_4/5/6_change triple:
+        // their shared WX=LY rewrite lands exactly between the WX=5 and
+        // WX=6 prefill comparator dots (the WX=5 line still triggers,
+        // the WX=6 line does not), which only the +1 commit satisfies
+        // (gambatte wxChange likewise updates wx one cycle later than
+        // the dmg palette path).
+        let dots = if addr == 0xFF4B { dots + 1 } else { dots };
+        // Speed hint for the FF4A wy2 scheduling below (1-dot staging
+        // only happens in double speed).
+        self.staged_ds = dots <= 1;
+        // One bus op per M-cycle: a previous stage has always expired or
+        // been architecturally committed by now; flush defensively if not.
+        if let Some(s) = self.staged.take() {
+            self.commit_eff(s.addr, s.value);
+        }
+        self.staged = Some(StagedWrite {
+            addr,
+            value,
+            dots_left: dots,
+        });
+    }
+
+    /// Fold an expired staged write into the pipeline-view registers.
+    fn commit_eff(&mut self, addr: u16, value: u8) {
+        match addr {
+            0xFF40 => {
+                let old = self.eff.lcdc;
+                self.eff.lcdc = value;
+                // LCDC.5 cleared while the window machine is drawing:
+                // the window aborts at the pipeline view's commit point
+                // (gambatte ppu.cpp setLcdc clears win_draw_started
+                // immediately; the tile data already latched still ships
+                // — see `window_abort`).
+                if old & LCDC_WIN_ENABLE != 0 && value & LCDC_WIN_ENABLE == 0 && self.render.active
+                {
+                    self.window_abort();
+                }
+            }
+            0xFF42 => self.eff.scy = value,
+            0xFF43 => self.eff.scx = value,
+            0xFF47 => self.eff.bgp = value,
+            0xFF48 => self.eff.obp0 = value,
+            0xFF49 => self.eff.obp1 = value,
+            0xFF4A => self.eff.wy = value,
+            0xFF4B => self.eff.wx = value,
+            _ => {}
+        }
+    }
+
+    /// Advance the in-flight write strobe by one dot. The dot on which
+    /// `dots_left` hits 0 is the transition dot: on pre-CGB models the DMG
+    /// palette registers read old OR new for that single dot (mealybug
+    /// README, m3_bgp_change: "BGP takes the value old OR new for one
+    /// cycle"; the CGB-C reference shows a clean switch); from the next
+    /// dot on, the new value drives the pipeline view.
+    pub(super) fn strobe_tick(&mut self) {
+        let Some(s) = &mut self.staged else { return };
+        if s.dots_left > 0 {
+            s.dots_left -= 1;
+            if s.dots_left == 0 && !self.model.is_cgb() {
+                match s.addr {
+                    0xFF47 => self.eff.bgp |= s.value,
+                    0xFF48 => self.eff.obp0 |= s.value,
+                    0xFF49 => self.eff.obp1 |= s.value,
+                    _ => {}
+                }
+            }
+        } else {
+            let (addr, value) = (s.addr, s.value);
+            self.staged = None;
+            self.commit_eff(addr, value);
+        }
+    }
+
+    /// Read VRAM (0x8000-0x9FFF, current bank), OAM (0xFE00-0xFE9F), or a
+    /// PPU register (FF40-FF4B, FF4F, FF68-FF6B). Mode-based access blocking
+    /// applies to VRAM/OAM.
+    pub fn read(&self, addr: u16) -> u8 {
+        match addr {
+            0x8000..=0x9FFF => {
+                if self.vram_read_blocked() {
+                    0xFF
+                } else {
+                    self.vram[self.vram_index(addr)]
+                }
+            }
+            0xFE00..=0xFE9F => {
+                if self.oam_read_blocked() {
+                    0xFF
+                } else {
+                    self.oam[usize::from(addr - 0xFE00)]
+                }
+            }
+            0xFF40 => self.lcdc,
+            0xFF41 => 0x80 | self.stat_en | (u8::from(self.cmp) << 2) | self.vis_mode(),
+            0xFF42 => self.scy,
+            0xFF43 => self.scx,
+            0xFF44 => self.ly,
+            0xFF45 => self.lyc,
+            0xFF47 => self.bgp,
+            0xFF48 => self.obp0,
+            0xFF49 => self.obp1,
+            0xFF4A => self.wy,
+            0xFF4B => self.wx,
+            0xFF4F if self.model.is_cgb() => 0xFE | self.vbk,
+            0xFF68 if self.model.is_cgb() => 0x40 | self.bcps,
+            0xFF69 if self.model.is_cgb() => {
+                if self.pal_ram_blocked() {
+                    0xFF
+                } else {
+                    self.bg_pal_ram[usize::from(self.bcps & 0x3F)]
+                }
+            }
+            0xFF6A if self.model.is_cgb() => 0x40 | self.ocps,
+            0xFF6B if self.model.is_cgb() => {
+                if self.pal_ram_blocked() {
+                    0xFF
+                } else {
+                    self.obj_pal_ram[usize::from(self.ocps & 0x3F)]
+                }
+            }
+            0xFF6C if self.model.is_cgb() => 0xFE | self.opri,
+            _ => 0xFF,
+        }
+    }
+
+    /// Write counterpart of [`Self::read`]. Returns IF bits raised by the
+    /// write itself (same encoding as [`Self::tick`]): STAT/LYC/LCDC writes
+    /// can raise the STAT line in the very M-cycle of the write —
+    /// `stat_lyc_onoff` round 4 needs that interrupt to dispatch before the
+    /// next instruction — so the caller must OR the returned bits into IF
+    /// immediately, like a `tick` result.
+    pub fn write(&mut self, addr: u16, value: u8) -> u8 {
+        // Architectural commit point: converge the pipeline view with the
+        // registers (the staged copy of this same write may already have
+        // expired into it — see `stage_write`; writes that never went
+        // through the staging path land in both views here).
+        if self.staged.as_ref().is_some_and(|s| s.addr == addr) {
+            self.staged = None;
+        }
+        self.commit_eff(addr, value);
+        match addr {
+            0x8000..=0x9FFF => {
+                if !self.vram_write_blocked() {
+                    self.vram[self.vram_index(addr)] = value;
+                }
+            }
+            0xFE00..=0xFE9F => {
+                if !self.oam_write_blocked() {
+                    self.oam[usize::from(addr - 0xFE00)] = value;
+                }
+            }
+            0xFF40 => self.write_lcdc(value),
+            0xFF41 => {
+                let old = self.stat_en;
+                let data = value & STAT_SRC_ALL;
+                if self.enabled {
+                    let fire = if self.model.is_cgb() {
+                        // Retroactive pulse reach: the CGB line-start m2
+                        // pulse sits a sub-cycle after our dot-0 tick, so
+                        // a write committing in that same M-cycle still
+                        // decides it (the un-fire direction is
+                        // unrepresentable — m2enable disable_1 stays a
+                        // documented swap).
+                        let retro = self.dot == 0
+                            && !self.glitch_line
+                            && (1..=143).contains(&self.line)
+                            && old & STAT_SRC_HBLANK == 0
+                            && !self.m2_pulse_fires(old)
+                            && self.m2_pulse_fires(data);
+                        retro || self.stat_write_trigger_cgb(old, data)
+                    } else {
+                        // The glitch trigger, plus the DMG pulse reach:
+                        // an m2 enable committing at the pulse's M-cycle
+                        // or the one after re-decides a pulse that did
+                        // not exist under the old enables (old m2en off),
+                        // blocked by the held LYC match — through the
+                        // *new* lyc enable at dot 0, either enable at
+                        // dot 4 (the m2enable late_enable /
+                        // late_enable_after_lycint(_disable) dmg08 cell
+                        // grids pin all eleven cells).
+                        let retro = (self.dot == 0 || self.dot == 4)
+                            && !self.glitch_line
+                            && (1..=144).contains(&self.line)
+                            && old & (STAT_SRC_OAM | STAT_SRC_HBLANK) == 0
+                            && data & STAT_SRC_OAM != 0
+                            && data & STAT_SRC_HBLANK == 0
+                            && {
+                                let lycen = if self.dot == 0 { data } else { data | old };
+                                !(lycen & STAT_SRC_LYC != 0 && self.lyc_ev_m == self.line - 1)
+                            };
+                        retro || self.stat_write_trigger_dmg(old)
+                    };
+                    if fire {
+                        self.pending_if |= IF_STAT;
+                    }
+                    self.stat_en = data;
+                    self.stage_stat_copies();
+                    self.refresh_cmp(false);
+                } else {
+                    self.stat_en = data;
+                    self.flush_stat_copies();
+                    self.legacy_level_edge();
+                }
+            }
+            0xFF42 => self.scy = value,
+            0xFF43 => self.scx = value,
+            0xFF44 => {} // LY is read-only.
+            0xFF4A => {
+                self.wy = value;
+                // The live window-trigger comparison uses a delayed WY
+                // copy — see `wy2`.
+                if self.enabled {
+                    // CGB: ~6 dots after the architectural commit (5 in
+                    // double speed); DMG: 2 (gambatte wyChange: wy2 at
+                    // cc+6-ds on CGB with the LCD on, cc+2 otherwise,
+                    // one cycle later than the wx commit; calibrated
+                    // against the gambatte window/arg/late_wy_* rounds).
+                    self.wy2_delay = if !self.model.is_cgb() {
+                        2
+                    } else if self.staged_ds {
+                        5
+                    } else {
+                        6
+                    };
+                } else {
+                    self.wy2 = value;
+                }
+            }
+            0xFF45 => {
+                let old = self.lyc;
+                self.lyc = value;
+                // The comparison retriggers immediately on LYC writes while
+                // the comparison clock runs (`stat_lyc_onoff`).
+                if self.enabled && old != value {
+                    if self.model.is_cgb() {
+                        self.write_lyc_cgb(old, value);
+                    } else {
+                        self.write_lyc_dmg(old, value);
+                    }
+                } else {
+                    self.lyc_event = value;
+                    self.lyc_ev_m = value;
+                    self.legacy_level_edge();
+                }
+            }
+            0xFF47 => self.bgp = value,
+            0xFF48 => self.obp0 = value,
+            0xFF49 => self.obp1 = value,
+            0xFF4B => self.wx = value,
+            0xFF4F if self.model.is_cgb() => self.vbk = value & 1,
+            0xFF68 if self.model.is_cgb() => self.bcps = value & 0xBF,
+            0xFF69 if self.model.is_cgb() => {
+                if !self.pal_ram_blocked() {
+                    self.bg_pal_ram[usize::from(self.bcps & 0x3F)] = value;
+                }
+                // Auto-increment happens even when the write is blocked
+                // (Pan Docs, "LCD Color Palettes (CGB only)").
+                if self.bcps & 0x80 != 0 {
+                    self.bcps = 0x80 | (self.bcps.wrapping_add(1) & 0x3F);
+                }
+            }
+            0xFF6A if self.model.is_cgb() => self.ocps = value & 0xBF,
+            0xFF6B if self.model.is_cgb() => {
+                if !self.pal_ram_blocked() {
+                    self.obj_pal_ram[usize::from(self.ocps & 0x3F)] = value;
+                }
+                if self.ocps & 0x80 != 0 {
+                    self.ocps = 0x80 | (self.ocps.wrapping_add(1) & 0x3F);
+                }
+            }
+            0xFF6C if self.model.is_cgb() => self.opri = value & 1,
+            _ => {}
+        }
+        std::mem::take(&mut self.pending_if)
+    }
+
+    fn write_lcdc(&mut self, value: u8) {
+        let was_on = self.lcdc & LCDC_ENABLE != 0;
+        self.lcdc = value;
+        let now_on = value & LCDC_ENABLE != 0;
+        if was_on && !now_on {
+            // LCD off: LY=0, mode 0, instantly; the comparison clock stops
+            // with the flag frozen (`stat_lyc_onoff`); the displayed frame
+            // goes white.
+            self.enabled = false;
+            self.line = 0;
+            self.dot = 0;
+            self.ly = 0;
+            self.glitch_line = false;
+            // Invariant hygiene: frame_skip only matters while enabled and
+            // every enable re-arms it; don't leave it stale across off.
+            self.frame_skip = false;
+            self.line_render_done = true;
+            self.render_finished = true;
+            self.m0_src = false;
+            self.m0_rise_dot = false;
+            self.hdma_lead = false;
+            // An in-flight CGB FF45-write IRQ dies with the LCD
+            // (gambatte: disabling cancels every scheduled memevent).
+            self.lyc_if_delay = 0;
+            self.flush_stat_copies();
+            self.render.active = false;
+            self.render.win_active = false;
+            self.win_start_pending = false;
+            let white = self.white();
+            self.front.fill(white);
+            self.legacy_level_edge();
+        } else if !was_on && now_on {
+            // LCD on: glitched first line (`lcdon_timing-GS`); the LYC
+            // comparison restarts against LY=0 immediately and can raise
+            // the STAT line in this very cycle (`stat_lyc_onoff` round 4).
+            self.enabled = true;
+            self.line = 0;
+            self.dot = 0;
+            self.ly = 0;
+            // The event comparator's delayed FF45 copy restarts in sync
+            // (gambatte lycIrq.lcdReset).
+            self.lyc_event = self.lyc;
+            self.glitch_line = true;
+            // Hardware keeps the panel blank for the whole first frame
+            // after enabling (see `frame_skip`).
+            self.frame_skip = true;
+            self.line_render_done = false;
+            self.render_finished = false;
+            self.m0_src = false;
+            self.m0_rise_dot = false;
+            self.hdma_lead = false;
+            self.flush_stat_copies();
+            self.render.active = false;
+            self.wy_latch = false;
+            self.win_line = 0xFF;
+            self.win_start_pending = false;
+            self.legacy_level_edge();
+        }
+    }
+}
