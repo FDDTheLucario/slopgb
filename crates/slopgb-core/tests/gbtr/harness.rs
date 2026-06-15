@@ -6,6 +6,7 @@
 //! serial/memory polling, frame-vs-PNG comparison, baseline ratchets).
 
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use slopgb_core::{CLOCK_HZ, GameBoy, Model};
 
@@ -256,6 +257,56 @@ pub fn assert_against_baseline(suite: &str, results: &[CaseResult], baseline: &[
     panic!("{msg}");
 }
 
+/// Map `f` over `items` across a pool of worker threads (one per available
+/// core, capped to the item count), flattening each item's `Vec` of results in
+/// **input order** — so output is identical to a sequential `flat_map`, only
+/// faster. Each gbtr case builds its own [`GameBoy`] and shares nothing
+/// mutable, so a suite's rom×model matrix parallelizes cleanly; this turns the
+/// big suites (gambatte's ~3.5k ROMs) from a single-core wall-clock floor into
+/// an all-core sweep. std only: scoped threads + an atomic work-stealing cursor
+/// (no rayon, honoring core's zero-dep stance). A worker that panics outside a
+/// [`catch_case`] (e.g. a corrupt-checkout file read) propagates here, matching
+/// the sequential behavior.
+pub fn par_flat_map<T, R>(items: &[T], f: impl Fn(&T) -> Vec<R> + Sync) -> Vec<R>
+where
+    T: Sync,
+    R: Send,
+{
+    let n = items.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let workers = std::thread::available_parallelism()
+        .map_or(1, |c| c.get())
+        .min(n);
+    let cursor = AtomicUsize::new(0);
+    let mut produced: Vec<(usize, Vec<R>)> = std::thread::scope(|s| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                s.spawn(|| {
+                    let mut local: Vec<(usize, Vec<R>)> = Vec::new();
+                    loop {
+                        let i = cursor.fetch_add(1, Ordering::Relaxed);
+                        if i >= n {
+                            break;
+                        }
+                        local.push((i, f(&items[i])));
+                    }
+                    local
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            // Re-raise a worker's original panic (with its message, e.g. the
+            // "read <path>: <err>" of a corrupt checkout) instead of masking it.
+            .flat_map(|h| h.join().unwrap_or_else(|p| std::panic::resume_unwind(p)))
+            .collect()
+    });
+    produced.sort_by_key(|&(i, _)| i);
+    produced.into_iter().flat_map(|(_, v)| v).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,6 +343,42 @@ mod tests {
     #[should_panic(expected = "match no executed case")]
     fn baseline_panics_on_orphaned_entry() {
         assert_against_baseline("demo", &[case("a [Dmg]", Ok(()))], &["zz [Cgb]"]);
+    }
+
+    #[test]
+    fn par_flat_map_preserves_order_and_visits_every_item() {
+        // Each item yields two outputs; result must equal the sequential
+        // flat_map exactly (order-preserving), regardless of thread scheduling.
+        let items: Vec<u32> = (0..1000).collect();
+        let expected: Vec<u32> = items.iter().flat_map(|&x| vec![x * 2, x * 2 + 1]).collect();
+        let got = par_flat_map(&items, |&x| vec![x * 2, x * 2 + 1]);
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn par_flat_map_handles_empty_and_uneven_yields() {
+        let empty: Vec<u32> = par_flat_map(&[] as &[u32], |&x| vec![x]);
+        assert!(empty.is_empty());
+        // Some items yield nothing, some many — order across the gaps holds.
+        let items: Vec<u32> = (0..50).collect();
+        let got = par_flat_map(&items, |&x| {
+            if x % 3 == 0 {
+                vec![x; (x % 4) as usize]
+            } else {
+                vec![]
+            }
+        });
+        let expected: Vec<u32> = items
+            .iter()
+            .flat_map(|&x| {
+                if x % 3 == 0 {
+                    vec![x; (x % 4) as usize]
+                } else {
+                    vec![]
+                }
+            })
+            .collect();
+        assert_eq!(got, expected);
     }
 
     #[test]

@@ -325,17 +325,18 @@ fn subsuite(label: &str, dir: &str, recursive: bool, baseline: &[&str]) {
         "{label}: {} contains no .gb/.gbc ROMs — corrupt checkout?",
         sub.display()
     );
-    let mut results = Vec::new();
-    for rom_path in &roms {
+    // blargg ROMs run for several emulated seconds each — fan the matrix out
+    // across cores (results stay in ROM order, identical to sequential).
+    let results: Vec<CaseResult> = harness::par_flat_map(&roms, |rom_path| {
         let rel = harness::rel_unix(&root, rom_path);
-        for (model, protocol) in route(&rel) {
-            let result = harness::catch_case(|| run_case(&root, &rel, model, &protocol));
-            results.push(CaseResult {
+        route(&rel)
+            .into_iter()
+            .map(|(model, protocol)| CaseResult {
                 key: case_key(&rel, model),
-                result,
-            });
-        }
-    }
+                result: harness::catch_case(|| run_case(&root, &rel, model, &protocol)),
+            })
+            .collect()
+    });
     harness::assert_against_baseline(label, &results, baseline);
 }
 

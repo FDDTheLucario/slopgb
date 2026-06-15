@@ -82,44 +82,26 @@ fn capture(root: &Path) -> Vec<String> {
     let mut roms = Vec::new();
     common::collect_roms(root, true, &mut roms).expect("walk collection");
     roms.sort();
-    let n = std::thread::available_parallelism()
-        .map(usize::from)
-        .unwrap_or(4)
-        .min(16);
-    let chunks: Vec<&[PathBuf]> = roms.chunks(roms.len().div_ceil(n).max(1)).collect();
-    // Silence the per-ROM panic spew from catch_unwind during the run.
+    // Silence the per-ROM panic spew from fingerprint()'s catch_unwind during
+    // the run; restore the hook afterward.
     let prev = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
-    let lines: Vec<String> = std::thread::scope(|sc| {
-        let handles: Vec<_> = chunks
-            .iter()
-            .map(|chunk| {
-                sc.spawn(move || {
-                    let mut out = Vec::new();
-                    for path in *chunk {
-                        let rel = harness::rel_unix(root, path);
-                        let Ok(bytes) = std::fs::read(path) else {
-                            continue;
-                        };
-                        for model in [Model::Dmg, Model::Cgb] {
-                            let (h, a) = fingerprint(&bytes, model);
-                            out.push(format!(
-                                "{} | {h:016x} | {a}",
-                                harness::case_key(&rel, model)
-                            ));
-                        }
-                    }
-                    out
-                })
-            })
-            .collect();
-        handles
+    // Work-stealing across every core (par_flat_map), not fixed 16-way chunks —
+    // the 9020 cases have uneven per-ROM cost, so a cursor balances far better.
+    let mut lines: Vec<String> = harness::par_flat_map(&roms, |path| {
+        let rel = harness::rel_unix(root, path);
+        let Ok(bytes) = std::fs::read(path) else {
+            return Vec::new();
+        };
+        [Model::Dmg, Model::Cgb]
             .into_iter()
-            .flat_map(|h| h.join().unwrap())
+            .map(|model| {
+                let (h, a) = fingerprint(&bytes, model);
+                format!("{} | {h:016x} | {a}", harness::case_key(&rel, model))
+            })
             .collect()
     });
     std::panic::set_hook(prev);
-    let mut lines = lines;
     lines.sort();
     lines
 }

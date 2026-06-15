@@ -166,20 +166,21 @@ fn gbmicrotest_dmg_matrix() {
         );
         return;
     };
-    let mut results: Vec<CaseResult> = Vec::new();
-    for rel in suite_roms(&root) {
-        if is_testbench(&rel) {
+    // Independent per-ROM cases — fan out across cores (order preserved).
+    let rels = suite_roms(&root);
+    let results: Vec<CaseResult> = harness::par_flat_map(&rels, |rel| {
+        if is_testbench(rel) {
             // Documented no-verdict testbench (see TESTBENCHES) — running it
             // can only ever time out.
-            continue;
+            return Vec::new();
         }
-        let path = root.join(&rel);
+        let path = root.join(rel);
         let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        results.push(CaseResult {
-            key: harness::case_key(&rel, Model::Dmg),
+        vec![CaseResult {
+            key: harness::case_key(rel, Model::Dmg),
             result: harness::catch_case(|| run_case(&rom)),
-        });
-    }
+        }]
+    });
     harness::assert_against_baseline(
         "gbmicrotest",
         &results,

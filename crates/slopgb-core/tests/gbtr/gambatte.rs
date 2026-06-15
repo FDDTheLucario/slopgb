@@ -539,23 +539,26 @@ fn gambatte_matrix() {
         common::skip_or_fail_gbtr("gambatte", "game-boy-test-roms collection not present");
         return;
     };
-    let mut results: Vec<CaseResult> = Vec::new();
-    for rom_path in suite_roms(&root) {
-        let cases = rom_cases(&rom_path);
+    // The matrix is 5272 independent rom×model cases — the suite's wall-clock
+    // floor. Each case builds its own machine, so fan it out across cores
+    // (results stay in ROM order, identical to a sequential run).
+    let roms = suite_roms(&root);
+    let results: Vec<CaseResult> = harness::par_flat_map(&roms, |rom_path| {
+        let cases = rom_cases(rom_path);
         if cases.is_empty() {
-            continue; // exempt; pinned by gambatte_inventory_is_exact
+            return Vec::new(); // exempt; pinned by gambatte_inventory_is_exact
         }
-        let rel = harness::rel_unix(&root, &rom_path);
+        let rel = harness::rel_unix(&root, rom_path);
         let rom =
-            std::fs::read(&rom_path).unwrap_or_else(|e| panic!("read {}: {e}", rom_path.display()));
-        for (model, check) in cases {
-            let result = harness::catch_case(|| run_case(&rom, model, &check, &rom_path));
-            results.push(CaseResult {
+            std::fs::read(rom_path).unwrap_or_else(|e| panic!("read {}: {e}", rom_path.display()));
+        cases
+            .into_iter()
+            .map(|(model, check)| CaseResult {
                 key: harness::case_key(&rel, model),
-                result,
-            });
-        }
-    }
+                result: harness::catch_case(|| run_case(&rom, model, &check, rom_path)),
+            })
+            .collect()
+    });
     // Routing pin: 5272 cases = 4674 hex + 374 png + 220 audio + 4 blank
     // over 3474 claimed ROMs (see module docs for the per-rule census).
     assert_eq!(results.len(), 5272, "case-matrix drift");

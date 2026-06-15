@@ -163,57 +163,57 @@ fn mooneye2022_matrix() {
         "{} exists but contains no .gb/.gbc ROMs — corrupt checkout?",
         suite_dir.display()
     );
-    let mut results: Vec<CaseResult> = Vec::new();
-    for rom_path in &roms {
+    // Each ROM's legs are independent — fan out across cores (order preserved).
+    let results: Vec<CaseResult> = harness::par_flat_map(&roms, |rom_path| {
         let rel = harness::rel_unix(&suite_dir, rom_path);
         let collection_rel = format!("{SUITE}/{rel}");
         let disposition = classify(&rel);
         if let Disposition::Exempt(reason) = disposition {
             println!("note: {collection_rel} skipped ({reason})");
-            continue;
+            return Vec::new();
         }
         let rom = match std::fs::read(rom_path) {
             Ok(rom) => rom,
             Err(e) => {
-                for model in case_models(&disposition) {
-                    results.push(CaseResult {
+                return case_models(&disposition)
+                    .into_iter()
+                    .map(|model| CaseResult {
                         key: harness::case_key(&collection_rel, model),
                         result: Err(format!("read failed: {e}")),
-                    });
-                }
-                continue;
+                    })
+                    .collect();
             }
         };
         match disposition {
-            Disposition::Protocol(models) => {
-                for model in models {
-                    results.push(CaseResult {
-                        key: harness::case_key(&collection_rel, model),
-                        result: harness::catch_case(|| run_protocol_case(&rom, model)),
-                    });
+            Disposition::Protocol(models) => models
+                .into_iter()
+                .map(|model| CaseResult {
+                    key: harness::case_key(&collection_rel, model),
+                    result: harness::catch_case(|| run_protocol_case(&rom, model)),
+                })
+                .collect(),
+            Disposition::SpritePriority => [
+                (Model::Dmg, "sprite_priority-dmg.png"),
+                (Model::Cgb, "sprite_priority-cgb.png"),
+            ]
+            .into_iter()
+            .map(|(model, png)| {
+                let png_path = rom_path.with_file_name(png);
+                CaseResult {
+                    key: harness::case_key(&collection_rel, model),
+                    result: harness::catch_case(|| {
+                        run_sprite_priority_case(&rom, model, &png_path)
+                    }),
                 }
-            }
-            Disposition::SpritePriority => {
-                for (model, png) in [
-                    (Model::Dmg, "sprite_priority-dmg.png"),
-                    (Model::Cgb, "sprite_priority-cgb.png"),
-                ] {
-                    let png_path = rom_path.with_file_name(png);
-                    results.push(CaseResult {
-                        key: harness::case_key(&collection_rel, model),
-                        result: harness::catch_case(|| {
-                            run_sprite_priority_case(&rom, model, &png_path)
-                        }),
-                    });
-                }
-            }
-            Disposition::Madness => results.push(CaseResult {
+            })
+            .collect(),
+            Disposition::Madness => vec![CaseResult {
                 key: harness::case_key(&collection_rel, Model::Mgb),
                 result: harness::catch_case(|| run_madness_case(&rom)),
-            }),
+            }],
             Disposition::Exempt(_) => unreachable!("handled above"),
         }
-    }
+    });
     // Routing pin for the v7.0 checkout: 112 claimed ROMs route to exactly
     // 439 rom×model cases (436 breakpoint + 2 sprite_priority legs +
     // 1 madness leg — the same 439 the 2024 mts bundle yields in
