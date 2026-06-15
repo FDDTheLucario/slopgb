@@ -8,10 +8,12 @@
 
 pub mod canvas;
 pub mod font;
+pub mod registry;
 pub mod text;
 pub mod widgets;
 
 pub use canvas::{Canvas, Rect};
+pub use registry::{ToolWindow, WindowRegistry};
 pub use text::{draw_text, measure};
 
 /// The bgb debugger colour scheme, as XRGB8888 (`0x00RRGGBB`). Values are bgb's
