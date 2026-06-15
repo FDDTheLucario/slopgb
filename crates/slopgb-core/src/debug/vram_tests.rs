@@ -83,8 +83,8 @@ fn oam_sprites_short_slice_pads_zero() {
 #[test]
 fn bg_map_reads_tile_from_bank0_and_attr_from_bank1() {
     let mut vram = vec![0u8; 0x4000];
-    // 0x9800 map: offset 0x1800. cell (row 1, col 2) = index 34.
-    let cell = 1 * 32 + 2;
+    // 0x9800 map: offset 0x1800. cell (row 1, col 2) = 1*32 + 2 = index 34.
+    let cell = 34;
     vram[0x1800 + cell] = 0x7F; // tile index, bank 0
     vram[0x2000 + 0x1800 + cell] = 0x68; // attribute, bank 1
     let map = bg_map(&vram, 0x9800);
