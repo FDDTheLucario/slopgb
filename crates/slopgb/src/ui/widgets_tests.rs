@@ -55,6 +55,48 @@ fn button_draws_border_and_pressed_inverts() {
 }
 
 #[test]
+fn radio_group_marks_only_the_selected_option() {
+    let (w, h) = (140, GLYPH_H);
+    let mut buf = canvas(w, h);
+    let rects;
+    {
+        let mut c = Canvas::new(&mut buf, w, h);
+        rects = radio_group(&mut c, 1, 0, &["Auto", "9800", "9C00"], 1, &T);
+    }
+    assert_eq!(rects.len(), 3);
+    assert!(
+        rects[0].x < rects[1].x && rects[1].x < rects[2].x,
+        "left-to-right"
+    );
+    // The dot's filled interior centre: rect.x+4, y+4 (dot = GLYPH_H-4).
+    let centre = |r: &Rect| ((r.x as usize) + 4) + 4 * w;
+    assert_eq!(buf[centre(&rects[1])], T.text, "selected dot filled");
+    assert_eq!(buf[centre(&rects[0])], T.bg, "unselected dot empty");
+    assert_eq!(buf[centre(&rects[2])], T.bg);
+}
+
+#[test]
+fn tab_strip_outlines_the_active_tab() {
+    let (w, h) = (180, GLYPH_H + 4);
+    let mut buf = canvas(w, h);
+    let rects;
+    {
+        let mut c = Canvas::new(&mut buf, w, h);
+        rects = tab_strip(&mut c, 0, 0, &["BG map", "Tiles", "OAM", "Palettes"], 2, &T);
+    }
+    assert_eq!(rects.len(), 4);
+    // Active tab (index 2 = OAM) has an outline: its top-left pixel is text.
+    let active = rects[2];
+    assert_eq!(buf[(active.y as usize) * w + active.x as usize], T.text);
+    // An inactive tab's top-left was not outlined (stays canvas background).
+    let inactive = rects[0];
+    assert_eq!(
+        buf[(inactive.y as usize) * w + inactive.x as usize],
+        0x00AA_AAAA
+    );
+}
+
+#[test]
 fn swatch_fills_colour_with_a_border() {
     let (w, h) = (12, 12);
     let mut buf = canvas(w, h);

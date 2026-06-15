@@ -39,6 +39,39 @@ pub const fn line_height() -> i32 {
     GLYPH_H as i32
 }
 
+/// Format one hex-dump row like bgb's memory pane:
+/// `LABEL  b0 … b7  b8 … b15  |ascii|` — 16 bytes in two 8-byte groups, then an
+/// ASCII gutter (non-printable bytes shown as `.`). A short slice space/`.`-pads
+/// the missing tail so columns stay aligned. Render it with [`draw_text`].
+#[must_use]
+pub fn hex_row(label: &str, bytes: &[u8]) -> String {
+    use core::fmt::Write as _;
+    let mut s = String::from(label);
+    let mut ascii = String::new();
+    for i in 0..16 {
+        s.push(' '); // separator before every byte
+        if i == 8 {
+            s.push(' '); // extra gap between the two 8-byte groups
+        }
+        match bytes.get(i) {
+            Some(&b) => {
+                let _ = write!(s, "{b:02X}");
+                ascii.push(if (0x20..=0x7E).contains(&b) {
+                    b as char
+                } else {
+                    '.'
+                });
+            }
+            None => {
+                s.push_str("  ");
+                ascii.push(' ');
+            }
+        }
+    }
+    let _ = write!(s, "  |{ascii}|");
+    s
+}
+
 #[cfg(test)]
 #[path = "text_tests.rs"]
 mod tests;

@@ -43,6 +43,60 @@ pub fn swatch(c: &mut Canvas, rect: Rect, color: u32, theme: &Theme) {
     c.outline_rect(rect, theme.text);
 }
 
+/// Horizontal radio group: a small box with a filled centre on the `selected`
+/// option, each followed by its label (e.g. the BG-map source `Auto/9800/9C00`).
+/// Returns each option's hit-rect, so a click maps to its index.
+pub fn radio_group(
+    c: &mut Canvas,
+    x: i32,
+    y: i32,
+    options: &[&str],
+    selected: usize,
+    theme: &Theme,
+) -> Vec<Rect> {
+    let dot = GLYPH_H as i32 - 4;
+    let mut rects = Vec::with_capacity(options.len());
+    let mut cx = x;
+    for (i, opt) in options.iter().enumerate() {
+        c.fill_rect(Rect::new(cx, y, dot, dot), theme.bg);
+        c.outline_rect(Rect::new(cx, y, dot, dot), theme.text);
+        if i == selected {
+            c.fill_rect(Rect::new(cx + 2, y + 2, dot - 4, dot - 4), theme.text);
+        }
+        let end = draw_text(c, cx + dot + 2, y, opt, theme.text);
+        rects.push(Rect::new(cx, y, end - cx, dot));
+        cx = end + 8; // gap before the next option
+    }
+    rects
+}
+
+/// A row of tabs (e.g. `BG map / Tiles / OAM / Palettes`); the `active` tab gets
+/// a full outline. Returns each tab's hit-rect.
+pub fn tab_strip(
+    c: &mut Canvas,
+    x: i32,
+    y: i32,
+    labels: &[&str],
+    active: usize,
+    theme: &Theme,
+) -> Vec<Rect> {
+    const PAD: i32 = 4;
+    let h = GLYPH_H as i32 + 2;
+    let mut rects = Vec::with_capacity(labels.len());
+    let mut cx = x;
+    for (i, lbl) in labels.iter().enumerate() {
+        let r = Rect::new(cx, y, measure(lbl) + PAD * 2, h);
+        if i == active {
+            c.fill_rect(r, theme.bg);
+            c.outline_rect(r, theme.text);
+        }
+        draw_text(c, cx + PAD, y + 1, lbl, theme.text);
+        rects.push(r);
+        cx += r.w + 2;
+    }
+    rects
+}
+
 #[cfg(test)]
 #[path = "widgets_tests.rs"]
 mod tests;
