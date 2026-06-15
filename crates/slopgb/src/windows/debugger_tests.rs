@@ -410,9 +410,16 @@ fn clicking_a_disabled_item_or_away_just_closes_the_menu() {
     );
     assert_eq!(action, None);
     assert!(st.menu.is_none(), "disabled item dismisses the menu");
-    // A click far outside the menu also dismisses it.
+    assert_eq!(
+        st.cursor,
+        Some(0x0102),
+        "a disabled item is swallowed — the cursor set by the right-click is not \
+         overwritten by falling through to the line under the item"
+    );
+    // A click off the menu (and off the menu bar) also dismisses it.
     let (mut st, _) = open_disasm_menu();
-    let action = on_left_click(NOPS, AREA, &mut st, 0x0100, 0xFFFE, 5, 5);
+    let l = DebuggerLayout::for_size(AREA.w, AREA.h);
+    let action = on_left_click(NOPS, AREA, &mut st, 0x0100, 0xFFFE, 5, l.memory.y + 5);
     assert_eq!(action, None);
     assert!(st.menu.is_none(), "click-away dismisses the menu");
 }
@@ -663,4 +670,137 @@ fn stack_data_go_here_marks_data_and_code_go_here_clears() {
         !st.data_hints.contains(&0xFFFC),
         "Code go here leaves it code"
     );
+}
+
+// --- menu bar + dropdowns (MB1) --------------------------------------------
+
+#[test]
+fn menubar_rects_tile_the_bar_left_to_right() {
+    let l = DebuggerLayout::for_size(AREA.w, AREA.h);
+    let rects = menubar_rects(l.menu);
+    assert_eq!(rects.len(), 6);
+    for w in rects.windows(2) {
+        assert_eq!(w[0].right(), w[1].x, "labels abut without gaps");
+    }
+    assert_eq!(rects[0].x, l.menu.x);
+    // Each label resolves to its own index.
+    for (i, r) in rects.iter().enumerate() {
+        assert_eq!(menubar_at(l.menu, r.x + 1, r.y + 1), Some(i));
+    }
+    assert_eq!(
+        menubar_at(l.menu, l.menu.right() + 5, 1),
+        None,
+        "past the bar"
+    );
+}
+
+#[test]
+fn each_bar_menu_has_the_captured_item_count() {
+    let l = DebuggerLayout::for_size(AREA.w, AREA.h);
+    let st = DebuggerState::default();
+    let counts = [16, 5, 18, 5, 10, 5]; // File, Search, Run, Debug, Window, Profiler
+    for (idx, &n) in counts.iter().enumerate() {
+        let m = menubar_menu(idx, l.menu, &st, 0x0100);
+        assert_eq!(m.items.len(), n, "menu {idx} item count");
+        assert_eq!(m.bar, Some(idx), "dropdown knows its bar label");
+    }
+}
+
+#[test]
+fn clicking_a_bar_label_opens_its_dropdown() {
+    let l = DebuggerLayout::for_size(AREA.w, AREA.h);
+    let rects = menubar_rects(l.menu);
+    let mut st = DebuggerState::default();
+    // Click the "Run" label (index 2).
+    let r = rects[2];
+    let action = on_left_click(NOPS, AREA, &mut st, 0x0100, 0xFFFE, r.x + 2, r.y + 2);
+    assert_eq!(action, None);
+    let m = st.menu.as_ref().expect("Run dropdown opened");
+    assert_eq!(m.bar, Some(2));
+    assert_eq!(m.items.len(), 18);
+}
+
+#[test]
+fn debug_menu_toggle_breakpoint_acts_on_the_cursor() {
+    let l = DebuggerLayout::for_size(AREA.w, AREA.h);
+    let rects = menubar_rects(l.menu);
+    let mut st = DebuggerState {
+        cursor: Some(0x0150),
+        ..DebuggerState::default()
+    };
+    // Open the Debug menu (index 3).
+    let r = rects[3];
+    on_left_click(NOPS, AREA, &mut st, 0x0100, 0xFFFE, r.x + 2, r.y + 2);
+    // "Toggle breakpoint" is the first item; clicking it toggles bp at the cursor.
+    let item_rects = menu_rects(
+        st.menu.as_ref().unwrap().origin,
+        &st.menu.as_ref().unwrap().items,
+    );
+    let ir = item_rects[0];
+    let action = on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        ir.x + ir.w / 2,
+        ir.y + ir.h / 2,
+    );
+    assert_eq!(action, Some(DebugAction::ToggleBreakpoint(0x0150)));
+    assert!(st.menu.is_none(), "selecting closes the dropdown");
+}
+
+#[test]
+fn run_menu_run_to_cursor_falls_back_to_pc_without_a_cursor() {
+    let l = DebuggerLayout::for_size(AREA.w, AREA.h);
+    let rects = menubar_rects(l.menu);
+    let mut st = DebuggerState::default(); // no cursor selected
+    on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        rects[2].x + 2,
+        rects[2].y + 2,
+    );
+    // "Run to Cursor" is index 9 in the Run menu.
+    let item_rects = menu_rects(
+        st.menu.as_ref().unwrap().origin,
+        &st.menu.as_ref().unwrap().items,
+    );
+    let ir = item_rects[9];
+    let action = on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        ir.x + ir.w / 2,
+        ir.y + ir.h / 2,
+    );
+    assert_eq!(
+        action,
+        Some(DebugAction::RunToCursor(0x0100)),
+        "defaults to PC"
+    );
+}
+
+#[test]
+fn render_menubar_draws_labels_and_highlights_the_open_one() {
+    use crate::ui::Theme;
+    let t = Theme::BGB;
+    let bar = Rect::new(0, 0, 760, 18);
+    let (w, h) = (760usize, 18usize);
+    let mut buf = vec![0x00AA_AAAA_u32; w * h];
+    {
+        let mut c = Canvas::new(&mut buf, w, h);
+        render_menubar(&mut c, bar, Some(2), &t); // "Run" open
+    }
+    // Some label ink is present (the bar isn't blank).
+    assert!(buf.contains(&t.text), "labels drawn");
+    // The open label (index 2) is flooded with the highlight colour.
+    let r2 = menubar_rects(bar)[2];
+    let mid = (r2.y as usize + r2.h as usize / 2) * w + (r2.x as usize + 1);
+    assert_eq!(buf[mid], t.current, "open label highlighted");
 }

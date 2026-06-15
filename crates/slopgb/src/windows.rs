@@ -104,6 +104,8 @@ fn render_debugger(
 ) {
     let l = debugger::DebuggerLayout::for_size(area.w, area.h);
     let pc = gb.cpu_regs().pc;
+    // The menu bar across the top, highlighting an open dropdown's parent label.
+    debugger::render_menubar(c, l.menu, st.menu.as_ref().and_then(|m| m.bar), theme);
     // Disasm follows PC (or the pinned base); memory + stack from their bases.
     let start = st.disasm_start(pc);
     debugger::render_disasm(

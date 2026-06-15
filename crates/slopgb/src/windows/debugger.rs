@@ -11,8 +11,9 @@ use crate::dbg::{Breakpoints, DebugAction};
 use crate::ui::Theme;
 use crate::ui::canvas::{Canvas, Rect};
 use crate::ui::dialog::{self, DialogKey, DialogResult, InputDialog};
+use crate::ui::font::GLYPH_H;
 use crate::ui::menu::{self, MenuItem};
-use crate::ui::text::{draw_text, hex_row, line_height};
+use crate::ui::text::{draw_text, hex_row, line_height, measure};
 use crate::ui::widgets::scroll_list;
 
 /// The four panes of the debugger body, partitioned from the window size to
@@ -371,16 +372,26 @@ pub enum MenuChoice {
 }
 
 /// An open context menu: its origin, the rendered items, the parallel choice for
-/// each, and the hovered row.
+/// each, the hovered row, and — for a menu-bar dropdown — which bar label it
+/// hangs from (so the bar highlights it; `None` for a pane right-click menu).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpenMenu {
     pub origin: (i32, i32),
     pub items: Vec<MenuItem>,
     pub choices: Vec<MenuChoice>,
     pub hovered: Option<usize>,
+    pub bar: Option<usize>,
 }
 
 impl OpenMenu {
+    /// Whether `(px, py)` is inside the menu box (a click here dismisses the menu
+    /// but is otherwise swallowed — only a click *outside* falls through to the
+    /// menu bar / panes).
+    #[must_use]
+    pub fn contains(&self, px: i32, py: i32) -> bool {
+        menu::menu_bounds(self.origin, &self.items).contains(px, py)
+    }
+
     /// The choice under `(px, py)`, if it lands on an enabled item.
     #[must_use]
     pub fn choice_at(&self, px: i32, py: i32) -> Option<MenuChoice> {
@@ -453,6 +464,7 @@ pub fn menu_for(target: ClickTarget, st: &DebuggerState, origin: (i32, i32)) -> 
         items,
         choices,
         hovered: None,
+        bar: None,
     })
 }
 
@@ -534,44 +546,67 @@ pub fn on_left_click(
     px: i32,
     py: i32,
 ) -> Option<DebugAction> {
+    let l = DebuggerLayout::for_size(area.w, area.h);
+    // An open menu eats the click: an enabled item acts; a click anywhere else
+    // inside the box just dismisses (disabled item / separator); a click outside
+    // dismisses *and* falls through, so clicking the bar can open another menu.
     if let Some(om) = st.menu.take() {
-        return match om.choice_at(px, py) {
-            Some(MenuChoice::Act(action)) => Some(action),
-            Some(MenuChoice::TogglePin) => {
-                // Freeze the disasm view where it currently sits when pinning on.
-                if !st.pinned {
-                    st.disasm_base = pc;
-                }
-                st.pinned = !st.pinned;
-                None
-            }
-            Some(MenuChoice::OpenGoto(target)) => {
-                open_goto(st, target);
-                None
-            }
-            Some(MenuChoice::ToggleDataHint(a)) => {
-                if !st.data_hints.remove(&a) {
-                    st.data_hints.insert(a);
-                }
-                None
-            }
-            Some(MenuChoice::MarkCode(a)) => {
-                st.data_hints.remove(&a);
-                None
-            }
-            Some(MenuChoice::MarkData(a)) => {
-                st.data_hints.insert(a);
-                None
-            }
-            _ => None, // disabled item or click-away: just dismiss
-        };
+        if let Some(choice) = om.choice_at(px, py) {
+            return apply_choice(st, choice, pc);
+        }
+        if om.contains(px, py) {
+            return None;
+        }
     }
+    // Menu-bar label → open its dropdown below the bar.
+    if l.menu.contains(px, py) {
+        if let Some(idx) = menubar_at(l.menu, px, py) {
+            st.menu = Some(menubar_menu(idx, l.menu, st, pc));
+        }
+        return None;
+    }
+    // Otherwise select the clicked pane line (sets the cursor).
     if let ClickTarget::Disasm(a) | ClickTarget::Memory(a) | ClickTarget::Stack(a) =
         target_at(read, area, st, pc, sp, px, py)
     {
         st.cursor = Some(a);
     }
     None
+}
+
+/// Apply a selected menu choice: execution effects return a [`DebugAction`] for
+/// `main`; view effects mutate `st` in place.
+fn apply_choice(st: &mut DebuggerState, choice: MenuChoice, pc: u16) -> Option<DebugAction> {
+    match choice {
+        MenuChoice::Act(action) => Some(action),
+        MenuChoice::TogglePin => {
+            // Freeze the disasm view where it currently sits when pinning on.
+            if !st.pinned {
+                st.disasm_base = pc;
+            }
+            st.pinned = !st.pinned;
+            None
+        }
+        MenuChoice::OpenGoto(target) => {
+            open_goto(st, target);
+            None
+        }
+        MenuChoice::ToggleDataHint(a) => {
+            if !st.data_hints.remove(&a) {
+                st.data_hints.insert(a);
+            }
+            None
+        }
+        MenuChoice::MarkCode(a) => {
+            st.data_hints.remove(&a);
+            None
+        }
+        MenuChoice::MarkData(a) => {
+            st.data_hints.insert(a);
+            None
+        }
+        MenuChoice::None => None,
+    }
 }
 
 /// Handle a right-click: open the clicked pane's context menu at the cursor (and
@@ -657,6 +692,190 @@ pub fn goto_click(st: &mut DebuggerState, area: Rect, px: i32, py: i32) -> bool 
         DialogResult::Continue => {}
     }
     true
+}
+
+// --- menu bar + dropdowns (MB1) --------------------------------------------
+
+/// The debugger menu-bar labels, left to right (menubar-*.png).
+pub const MENUBAR: [&str; 6] = [
+    "File",
+    "Search",
+    "Run",
+    "Debug",
+    "Window",
+    "Execution profiler",
+];
+
+/// Padding each side of a menu-bar label.
+const BAR_PAD: i32 = 5;
+
+/// Hit-rect of each menu-bar label within the `bar` rect (the layout's `menu`).
+#[must_use]
+pub fn menubar_rects(bar: Rect) -> Vec<Rect> {
+    let mut rects = Vec::with_capacity(MENUBAR.len());
+    let mut x = bar.x;
+    for label in MENUBAR {
+        let w = measure(label) + 2 * BAR_PAD;
+        rects.push(Rect::new(x, bar.y, w, bar.h));
+        x += w;
+    }
+    rects
+}
+
+/// The menu-bar label index under `(px, py)`, if any.
+#[must_use]
+pub fn menubar_at(bar: Rect, px: i32, py: i32) -> Option<usize> {
+    menubar_rects(bar).iter().position(|r| r.contains(px, py))
+}
+
+/// Draw the menu bar; the dropdown's parent label (if a bar menu is open) is
+/// highlighted.
+pub fn render_menubar(c: &mut Canvas, bar: Rect, open: Option<usize>, theme: &Theme) {
+    c.fill_rect(bar, theme.bg);
+    c.hline(bar.x, bar.bottom() - 1, bar.w, theme.border);
+    let ty = bar.y + (bar.h - GLYPH_H as i32) / 2;
+    for (i, (label, r)) in MENUBAR.iter().zip(menubar_rects(bar)).enumerate() {
+        let fg = if open == Some(i) {
+            c.fill_rect(r, theme.current);
+            theme.bg
+        } else {
+            theme.text
+        };
+        draw_text(c, r.x + BAR_PAD, ty, label, fg);
+    }
+}
+
+/// Build the dropdown for menu-bar label `idx`, hung under its label. Items are
+/// transcribed from menubar-{file,search,run,debug,window,profiler}.png; the few
+/// already-supported ones (Debug → Toggle breakpoint, Run → Run to Cursor) are
+/// enabled, the rest greyed pending MB2–MB5. The cursor address (or PC) is what
+/// the enabled execution items act on.
+#[must_use]
+pub fn menubar_menu(idx: usize, bar: Rect, st: &DebuggerState, pc: u16) -> OpenMenu {
+    let cursor = st.cursor.unwrap_or(pc);
+    let entries = match idx {
+        0 => file_menu(),
+        1 => search_menu(),
+        2 => run_menu(cursor),
+        3 => debug_menu(cursor),
+        4 => window_menu(),
+        _ => profiler_menu(),
+    };
+    let origin = (
+        menubar_rects(bar).get(idx).map_or(bar.x, |r| r.x),
+        bar.bottom(),
+    );
+    let (items, choices) = entries.into_iter().unzip();
+    OpenMenu {
+        origin,
+        items,
+        choices,
+        hovered: None,
+        bar: Some(idx),
+    }
+}
+
+/// A greyed dropdown item carrying a shortcut label.
+fn dis_sc(label: &str, sc: &str) -> (MenuItem, MenuChoice) {
+    (
+        MenuItem::new(label).shortcut(sc).disabled(),
+        MenuChoice::None,
+    )
+}
+
+fn file_menu() -> Vec<(MenuItem, MenuChoice)> {
+    vec![
+        dis_sc("Load ROM...", "F12"),
+        disabled("Load ROM without reset..."),
+        dis_sc("Save ROM as...", "Ctrl+S"),
+        disabled("Reload ROM"),
+        disabled("Reload SRAM"),
+        disabled("Load SRAM..."),
+        disabled("reload SYM file"),
+        dis_sc("Load state...", "Ctrl+L"),
+        dis_sc("Save state...", "Ctrl+W"),
+        disabled("Fix checksums"),
+        disabled("save screenshot"),
+        disabled("save memory_dump..."),
+        disabled("save asm..."),
+        dis_sc("Undo", "Ctrl+Z"),
+        dis_sc("Redo", "Ctrl+Alt+Z"),
+        disabled("Fix area with erase value"),
+    ]
+}
+
+fn search_menu() -> Vec<(MenuItem, MenuChoice)> {
+    vec![
+        dis_sc("Search string (eg. 'ld a,')", "Ctrl+F"),
+        dis_sc("Continue search", "Ctrl+C"),
+        dis_sc("go to next bookmark", "Ctrl+N"),
+        dis_sc("go to previous bookmark", "Ctrl+B"),
+        dis_sc("go to PC", "Ctrl+A"),
+    ]
+}
+
+fn run_menu(cursor: u16) -> Vec<(MenuItem, MenuChoice)> {
+    vec![
+        dis_sc("Run", "F9"),
+        dis_sc("Run no break", "Shift+F9"),
+        dis_sc("Run not this break", "Ctrl+F9"),
+        dis_sc("Reset (numpad *)", "Ctrl+R"),
+        dis_sc("Trace", "F7"),
+        dis_sc("Trace reverse", "Shift+F7"),
+        dis_sc("Step Over", "F3"),
+        dis_sc("Step Over reverse", "Shift+F3"),
+        disabled("Animate (Alt+A)"),
+        (
+            MenuItem::new("Run to Cursor").shortcut("F4"),
+            MenuChoice::Act(DebugAction::RunToCursor(cursor)),
+        ),
+        dis_sc("Run cursor no break", "Shift+F4"),
+        dis_sc("Run cursor reverse", "Ctrl+F4"),
+        dis_sc("Jump to cursor", "F6"),
+        disabled("Call cursor"),
+        dis_sc("Step out", "F8"),
+        dis_sc("Step out reverse", "Shift+F8"),
+        disabled("jump (SP); SP=SP+2"),
+        dis_sc("Rewind cycles...", "Ctrl+E"),
+    ]
+}
+
+fn debug_menu(cursor: u16) -> Vec<(MenuItem, MenuChoice)> {
+    vec![
+        (
+            MenuItem::new("Toggle breakpoint").shortcut("F2"),
+            MenuChoice::Act(DebugAction::ToggleBreakpoint(cursor)),
+        ),
+        disabled("Evaluate expression"),
+        disabled("Set user clocks counter"),
+        dis_sc("Breakpoints", "Ctrl+H"),
+        dis_sc("Watchpoints", "Ctrl+J"),
+    ]
+}
+
+fn window_menu() -> Vec<(MenuItem, MenuChoice)> {
+    vec![
+        dis_sc("VRAM viewer", "F5"),
+        disabled("SGB packets"),
+        disabled("log link transfers (to SGB window)"),
+        dis_sc("Options", "F11"),
+        disabled("cheats"),
+        disabled("cheat searcher"),
+        dis_sc("IO map", "F10"),
+        disabled("screen"),
+        dis_sc("joypads", "Ctrl+K"),
+        disabled("debug messages"),
+    ]
+}
+
+fn profiler_menu() -> Vec<(MenuItem, MenuChoice)> {
+    vec![
+        disabled("logging mode"),
+        disabled("break mode"),
+        disabled("stop (*)"),
+        disabled("clear buffer"),
+        disabled("0 addresses seen"),
+    ]
 }
 
 #[cfg(test)]
