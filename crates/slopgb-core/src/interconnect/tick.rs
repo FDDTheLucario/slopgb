@@ -39,9 +39,10 @@ impl Interconnect {
         // instead, the half-dot offset the LCD dot clock keeps across a STOP
         // speed switch (`cc_grid_matches_dot_loop`). Each event edge is stamped
         // with its dot's [`cc_eighth`] (carrying that sub-dot offset) instead
-        // of the loop index. `dot_phase` is held at 0 (the fixed even-cc
-        // alignment = bit-identical to the dot loop) until a speed switch sets
-        // it.
+        // of the loop index. `dot_phase` stays 0 (the fixed even-cc alignment =
+        // bit-identical to the dot loop): a speed-switch phase set was measured
+        // to lift nothing — only a full pixel-pipe reclock uses it (see the
+        // `dot_phase` field docs).
         for cc in 1..=4u8 {
             if !dot_ticks_on_cc(cc, self.double_speed, self.dot_phase) {
                 continue;

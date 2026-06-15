@@ -29,6 +29,17 @@
 #    regressions). INC-DS-1 (2026-06) lifted 43 sprites m3stat_ds_1
 #    rows via the cc+2 MID STAT mode-bit read — see the dated
 #    INC-DS-1 swap note at the end of this file.
+#    UPDATE 2026-06 (cc-reclock): the EVENT-layer half of "re-clock to a
+#    half-dot grid" is now built (the cc-granular `for cc in 1..=4` tick
+#    loop + `dot_phase`, net-zero — commit 22ee6fc), but a phase set at
+#    the speed switch was MEASURED to lift 0 of these rows (probe note in
+#    docs/hardware-state/ppu-subdot-ladder.md): the m3stat/speedchange `_2`
+#    reads ride the cc-invariant END_PHASE StatMode/PalAccess overrides, and
+#    their answer needs the pixel-pipe END *dot* to move, not the M-cycle
+#    sample phase. The remaining lift is the full PIXEL-PIPE reclock
+#    (recalibrates ~6028 green dot-level cases incl. mealybug photos / the
+#    mode-3 fetch grid / the window machine) — separate architecture, not a
+#    revert-on-regression increment.
 # B. Speed-switch / HDMA sub-M-cycle seam — the dma/ + speedchange/ +
 #    oamdma *speedchange* rows (~165 here) plus mealybug hdma_timing-C
 #    and the four age spsw-* rows. A/B sweeps over the pause constant

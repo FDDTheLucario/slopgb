@@ -308,8 +308,15 @@ pub struct Interconnect {
     /// in (single speed is phase-independent); 1 = the odd-cc {1,3} half-dot
     /// offset a STOP speed switch can establish (the LCD dot clock runs on
     /// continuously across the switch while the CPU's M-cycle grid is re-paced).
-    /// Held at 0 until a speed switch sets it (the next increment); 0 is
-    /// bit-identical to the dot loop (`cc_grid_matches_dot_loop`).
+    /// **Held at 0**: setting it at the speed switch was measured to lift ZERO
+    /// gambatte DS rows (env probe `SLOPGB_DOTPHASE`, all of const-1 / cycle-
+    /// parity candidates over 287 baselined rows). The m3stat / speedchange
+    /// `_2` reads are served by the cc-invariant `END_PHASE` StatMode/PalAccess
+    /// overrides, and their correct answer needs the pixel-pipe END *dot* to
+    /// move (a full pixel-pipe reclock), not the M-cycle's sample phase — see
+    /// docs/hardware-state/ppu-subdot-ladder.md. The field is the cc-granular
+    /// substrate that reclock would drive; 0 is bit-identical to the dot loop
+    /// (`cc_grid_matches_dot_loop`).
     dot_phase: u8,
     /// KEY1 bit 0: speed switch armed for the next STOP.
     key1_armed: bool,
