@@ -3,6 +3,8 @@
 //! pure rendering into a [`Canvas`], unit-tested headless; the winit surface
 //! wiring (B12b) feeds it a real buffer later.
 
+use std::collections::BTreeSet;
+
 use slopgb_core::debug;
 
 use crate::dbg::{Breakpoints, DebugAction};
@@ -83,10 +85,29 @@ fn region_label(addr: u16) -> &'static str {
 /// disasm line `LABEL:ADDR  bytes  mnemonic  ;m-cycles`. `read(addr)` yields the
 /// byte at `addr` (use `GameBoy::debug_read`). Exact column widths are tuned in
 /// the C8 visual diff; the content (addr/bytes/mnemonic/cycles) is final.
-pub fn disasm_rows(read: impl Fn(u16) -> u8, start: u16, count: usize) -> Vec<DisasmRow> {
+pub fn disasm_rows(
+    read: impl Fn(u16) -> u8,
+    start: u16,
+    count: usize,
+    data_hints: &BTreeSet<u16>,
+) -> Vec<DisasmRow> {
     let mut rows = Vec::with_capacity(count);
     let mut addr = start;
     for _ in 0..count {
+        // An address marked data renders as a single `db XX` byte (RM9), so the
+        // disassembler doesn't mis-decode an embedded data table as code.
+        if data_hints.contains(&addr) {
+            let b = read(addr);
+            let text = format!(
+                "{}:{addr:04X} {:<9}{:<20};",
+                region_label(addr),
+                format!("{b:02X}"),
+                format!("db {b:02X}")
+            );
+            rows.push(DisasmRow { addr, text });
+            addr = addr.wrapping_add(1);
+            continue;
+        }
         let bytes = [
             read(addr),
             read(addr.wrapping_add(1)),
@@ -118,6 +139,7 @@ pub const DISASM_GUTTER: i32 = 7;
 /// past a left gutter with the row at `pc` highlighted (the blue current-PC
 /// bar), and a red dot in the gutter on every row carrying a breakpoint.
 /// Returns the rows so the window can hit-test clicks.
+#[allow(clippy::too_many_arguments)]
 pub fn render_disasm(
     c: &mut Canvas,
     rect: Rect,
@@ -125,11 +147,12 @@ pub fn render_disasm(
     start: u16,
     pc: u16,
     bps: &Breakpoints,
+    data_hints: &BTreeSet<u16>,
     theme: &Theme,
 ) -> Vec<DisasmRow> {
     let lh = line_height();
     let count = (rect.h / lh).max(0) as usize + 1;
-    let rows = disasm_rows(read, start, count);
+    let rows = disasm_rows(read, start, count, data_hints);
     let texts: Vec<&str> = rows.iter().map(|r| r.text.as_str()).collect();
     let highlight = rows.iter().position(|r| r.addr == pc);
     let body = Rect::new(
@@ -275,6 +298,9 @@ pub struct DebuggerState {
     pub menu: Option<OpenMenu>,
     /// An open modal prompt (Go to…), if any.
     pub dialog: Option<GotoDialog>,
+    /// Addresses forced to render as `db XX` data instead of decoded code
+    /// (RM9 — "Data go here" / "force code view" / "Modify code/data").
+    pub data_hints: BTreeSet<u16>,
 }
 
 impl Default for DebuggerState {
@@ -286,6 +312,7 @@ impl Default for DebuggerState {
             pinned: false,
             menu: None,
             dialog: None,
+            data_hints: BTreeSet::new(),
         }
     }
 }
@@ -334,6 +361,12 @@ pub enum MenuChoice {
     Act(DebugAction),
     TogglePin,
     OpenGoto(GotoTarget),
+    /// Flip the code/data hint at the address ("Modify code/data" / "Modify data").
+    ToggleDataHint(u16),
+    /// Force the address to decode as code ("force code view" / "Code go here").
+    MarkCode(u16),
+    /// Force the address to render as data ("Data go here").
+    MarkData(u16),
     None,
 }
 
@@ -381,7 +414,7 @@ pub fn target_at(
     let lh = line_height().max(1);
     if l.disasm.contains(px, py) {
         let row = ((py - l.disasm.y) / lh) as usize;
-        let rows = disasm_rows(read, st.disasm_start(pc), row + 1);
+        let rows = disasm_rows(read, st.disasm_start(pc), row + 1, &st.data_hints);
         return rows
             .get(row)
             .map_or(ClickTarget::None, |r| ClickTarget::Disasm(r.addr));
@@ -410,7 +443,7 @@ pub fn menu_for(target: ClickTarget, st: &DebuggerState, origin: (i32, i32)) -> 
     let entries: Vec<(MenuItem, MenuChoice)> = match target {
         ClickTarget::Disasm(addr) => disasm_entries(addr, st, true),
         ClickTarget::Memory(addr) => disasm_entries(addr, st, false),
-        ClickTarget::Stack(_) => stack_entries(),
+        ClickTarget::Stack(addr) => stack_entries(addr),
         ClickTarget::Registers => vec![disabled("edit register")],
         ClickTarget::None => return None,
     };
@@ -441,13 +474,16 @@ fn disasm_entries(addr: u16, st: &DebuggerState, is_disasm: bool) -> Vec<(MenuIt
             MenuItem::new("Go to...").shortcut("Ctrl+G"),
             MenuChoice::OpenGoto(goto),
         ),
-        disabled("Modify code/data"),
+        (
+            MenuItem::new("Modify code/data"),
+            MenuChoice::ToggleDataHint(addr),
+        ),
         disabled("Copy data"),
         disabled("Copy code"),
         disabled("Insert size"),
     ];
     if is_disasm {
-        v.push(disabled("force code view"));
+        v.push((MenuItem::new("force code view"), MenuChoice::MarkCode(addr)));
     }
     v.push((
         MenuItem::new("Stay on bank and address").checked(st.pinned),
@@ -467,17 +503,20 @@ fn disasm_entries(addr: u16, st: &DebuggerState, is_disasm: bool) -> Vec<(MenuIt
     v
 }
 
-/// The stack pane (rc-stack.png) right-click menu — all items land in later
-/// milestones, so every row is greyed for now.
-fn stack_entries() -> Vec<(MenuItem, MenuChoice)> {
+/// The stack pane (rc-stack.png) right-click menu. `addr` is the clicked stack
+/// slot; its Go-to / code-data items act on that address.
+fn stack_entries(addr: u16) -> Vec<(MenuItem, MenuChoice)> {
     vec![
         (
             MenuItem::new("Go to...").shortcut("Ctrl+G"),
             MenuChoice::OpenGoto(GotoTarget::Memory),
         ),
-        disabled("Modify data"),
-        disabled("Code go here"),
-        disabled("Data go here"),
+        (
+            MenuItem::new("Modify data"),
+            MenuChoice::ToggleDataHint(addr),
+        ),
+        (MenuItem::new("Code go here"), MenuChoice::MarkCode(addr)),
+        (MenuItem::new("Data go here"), MenuChoice::MarkData(addr)),
     ]
 }
 
@@ -508,6 +547,20 @@ pub fn on_left_click(
             }
             Some(MenuChoice::OpenGoto(target)) => {
                 open_goto(st, target);
+                None
+            }
+            Some(MenuChoice::ToggleDataHint(a)) => {
+                if !st.data_hints.remove(&a) {
+                    st.data_hints.insert(a);
+                }
+                None
+            }
+            Some(MenuChoice::MarkCode(a)) => {
+                st.data_hints.remove(&a);
+                None
+            }
+            Some(MenuChoice::MarkData(a)) => {
+                st.data_hints.insert(a);
                 None
             }
             _ => None, // disabled item or click-away: just dismiss

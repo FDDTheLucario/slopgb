@@ -106,7 +106,16 @@ fn render_debugger(
     let pc = gb.cpu_regs().pc;
     // Disasm follows PC (or the pinned base); memory + stack from their bases.
     let start = st.disasm_start(pc);
-    debugger::render_disasm(c, l.disasm, |a| gb.debug_read(a), start, pc, bps, theme);
+    debugger::render_disasm(
+        c,
+        l.disasm,
+        |a| gb.debug_read(a),
+        start,
+        pc,
+        bps,
+        &st.data_hints,
+        theme,
+    );
     debugger::render_regs(c, l.regs, &regs_view(gb), theme);
     let stack_rows = (l.stack.h / line_height()).max(0) as usize;
     debugger::render_stack(c, l.stack, &gb.stack(stack_rows), theme);

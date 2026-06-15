@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeSet;
 
 #[test]
 fn layout_panes_tile_the_window_without_overlap() {
@@ -54,7 +55,7 @@ fn disasm_rows_decode_format_and_advance() {
         0x105 => 0xFF,
         _ => 0x00, // nop fills the rest
     };
-    let rows = disasm_rows(mem, 0x100, 3);
+    let rows = disasm_rows(mem, 0x100, 3, &BTreeSet::new());
     assert_eq!(rows.len(), 3);
 
     assert_eq!(rows[0].addr, 0x100);
@@ -94,6 +95,7 @@ fn render_disasm_highlights_the_pc_row() {
             0x100,
             0x102,
             &Breakpoints::default(),
+            &BTreeSet::new(),
             &t,
         );
     }
@@ -189,6 +191,7 @@ fn render_disasm_draws_a_red_gutter_dot_on_breakpoint_rows() {
             0x0100,
             0x0100,
             &bps,
+            &BTreeSet::new(),
             &t,
         );
     }
@@ -526,4 +529,138 @@ fn goto_click_ok_accepts_and_cancel_dismisses() {
     ));
     assert_eq!(st.mem_base, 0x8000, "cancel left the base unchanged");
     assert!(st.dialog.is_none());
+}
+
+// --- code/data hints (RM9) -------------------------------------------------
+
+#[test]
+fn data_hint_renders_db_and_advances_one_byte() {
+    // 0x0150 = C3 50 01 (jp 0150); as code it is 3 bytes, as data one `db C3`.
+    let mem = |a: u16| match a {
+        0x0150 => 0xC3,
+        0x0151 => 0x50,
+        0x0152 => 0x01,
+        _ => 0x00,
+    };
+    let hints: BTreeSet<u16> = [0x0150].into_iter().collect();
+    let rows = disasm_rows(mem, 0x0150, 2, &hints);
+    assert!(rows[0].text.contains("db C3"), "{}", rows[0].text);
+    assert_eq!(
+        rows[1].addr, 0x0151,
+        "a data byte advances by 1, not the jp's 3"
+    );
+    // Without the hint the same address decodes as the 3-byte jp.
+    let code = disasm_rows(mem, 0x0150, 2, &BTreeSet::new());
+    assert!(code[0].text.contains("jp 0150"));
+    assert_eq!(code[1].addr, 0x0153);
+}
+
+/// Open a pane's menu and click the item at `idx`; returns the state after.
+fn click_menu_item(target_kind: char, idx: usize) -> DebuggerState {
+    let l = DebuggerLayout::for_size(AREA.w, AREA.h);
+    let lh = line_height();
+    let (px, py) = match target_kind {
+        'd' => (l.disasm.x + 9, l.disasm.y + 2 * lh + 1),
+        's' => (l.stack.x + 5, l.stack.y + lh),
+        _ => unreachable!(),
+    };
+    let mut st = DebuggerState::default();
+    on_right_click(NOPS, AREA, &mut st, 0x0100, 0xFFFE, px, py);
+    let rects = menu_rects(
+        st.menu.as_ref().unwrap().origin,
+        &st.menu.as_ref().unwrap().items,
+    );
+    let r = rects[idx];
+    on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+    );
+    st
+}
+
+#[test]
+fn modify_code_data_toggles_the_hint_at_the_cursor() {
+    // Disasm "Modify code/data" is index 1; cursor resolves to 0x0102.
+    let st = click_menu_item('d', 1);
+    assert!(st.data_hints.contains(&0x0102), "marked data");
+    assert!(st.menu.is_none());
+    // Toggling again (re-open + click) clears it.
+    let mut st = st;
+    let l = DebuggerLayout::for_size(AREA.w, AREA.h);
+    let lh = line_height();
+    on_right_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        l.disasm.x + 9,
+        l.disasm.y + 2 * lh + 1,
+    );
+    let rects = menu_rects(
+        st.menu.as_ref().unwrap().origin,
+        &st.menu.as_ref().unwrap().items,
+    );
+    let r = rects[1];
+    on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+    );
+    assert!(!st.data_hints.contains(&0x0102), "toggled back to code");
+}
+
+#[test]
+fn force_code_view_clears_a_data_hint() {
+    // Pre-mark 0x0102 as data, then "force code view" (disasm index 5) clears it.
+    let l = DebuggerLayout::for_size(AREA.w, AREA.h);
+    let lh = line_height();
+    let mut st = DebuggerState::default();
+    st.data_hints.insert(0x0102);
+    on_right_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        l.disasm.x + 9,
+        l.disasm.y + 2 * lh + 1,
+    );
+    let rects = menu_rects(
+        st.menu.as_ref().unwrap().origin,
+        &st.menu.as_ref().unwrap().items,
+    );
+    let r = rects[5]; // "force code view"
+    on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+    );
+    assert!(!st.data_hints.contains(&0x0102), "forced back to code");
+}
+
+#[test]
+fn stack_data_go_here_marks_data_and_code_go_here_clears() {
+    // Stack menu: index 3 = "Data go here", index 2 = "Code go here".
+    // Stack row 1 from SP 0xFFFE resolves to 0xFFFC.
+    let st = click_menu_item('s', 3);
+    assert!(st.data_hints.contains(&0xFFFC), "Data go here marked it");
+    let st = click_menu_item('s', 2);
+    assert!(
+        !st.data_hints.contains(&0xFFFC),
+        "Code go here leaves it code"
+    );
 }
