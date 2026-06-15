@@ -30,7 +30,22 @@ impl Interconnect {
         self.m0_access_edge = None;
         self.pal_access_edge = None;
         self.stat_mode_edge = None;
-        for i in 0..dots {
+        // cc-granular reclock: advance the M-cycle one CPU cc at a time
+        // (cc=1..=4), ticking a whole PPU dot only on the cc's
+        // [`dot_ticks_on_cc`] selects for this speed + `dot_phase`. At phase 0
+        // this is bit-identical to the old `for i in 0..dots` loop — single
+        // speed ticks every cc (4 dots), double speed the even cc {2,4} (2
+        // dots) — but a phase-1 double-speed M-cycle ticks the odd cc {1,3}
+        // instead, the half-dot offset the LCD dot clock keeps across a STOP
+        // speed switch (`cc_grid_matches_dot_loop`). Each event edge is stamped
+        // with its dot's [`cc_eighth`] (carrying that sub-dot offset) instead
+        // of the loop index. `dot_phase` is held at 0 (the fixed even-cc
+        // alignment = bit-identical to the dot loop) until a speed switch sets
+        // it.
+        for cc in 1..=4u8 {
+            if !dot_ticks_on_cc(cc, self.double_speed, self.dot_phase) {
+                continue;
+            }
             // STAT/VBlank rises in the first 2 dots after the ack are
             // consumed too (gambatte ackIrq lcd_.update(cc + 2); in
             // double speed the window spans the whole tick — see `ack`).
@@ -57,8 +72,7 @@ impl Interconnect {
                 // int_oam_* grids pin the law).
                 self.if_late |= IF_STAT_BIT;
             }
-            if self.ppu.take_m0_rise()
-                && obs_pre_edge(MID_PHASE, event_phase(EdgeKind::M0Rise, i, dots))
+            if self.ppu.take_m0_rise() && obs_pre_edge(MID_PHASE, event_phase(EdgeKind::M0Rise, cc))
             {
                 // The mode-0 STAT rise carries the second-half halt law
                 // — the same shape as the line-start OAM pulses — but
@@ -87,14 +101,14 @@ impl Interconnect {
                 // blocking against the single CPU-access observer phase
                 // [`ACCESS_PHASE`] ([`stamp_blocks`]). Sub-dot event-phase
                 // model, increment 1.
-                self.m0_access_edge = Some(event_phase(EdgeKind::M0Access, i, dots));
+                self.m0_access_edge = Some(event_phase(EdgeKind::M0Access, cc));
             }
             if self.ppu.take_pal_access_flip() {
                 // The CGB palette-RAM unblock commits at the M-cycle end
                 // ([`event_phase`] gives `PalAccess` the whole-M-cycle block):
                 // the FF69/FF6B read stays $FF for the entire straddle M-cycle,
                 // not just its second half (gambatte cgbpal_m3end). INC-G3 task 5.
-                self.pal_access_edge = Some(event_phase(EdgeKind::PalAccess, i, dots));
+                self.pal_access_edge = Some(event_phase(EdgeKind::PalAccess, cc));
             }
             if self.ppu.take_m0_stat_flip() {
                 // A sprite-line m3→m0 flip holds the double-speed FF41 mode bits
@@ -116,7 +130,7 @@ impl Interconnect {
                 // edge stamps the whole-M-cycle END phase ([`event_phase`]); the
                 // FF41 read blocks against the single CPU-access observer phase
                 // [`ACCESS_PHASE`] ([`stamp_blocks`]).
-                self.stat_mode_edge = Some(event_phase(EdgeKind::StatMode, i, dots));
+                self.stat_mode_edge = Some(event_phase(EdgeKind::StatMode, cc));
             }
             // Dot-exact mode-0 entry: each visible line's hblank start
             // requests one HBlank DMA block, serviced at the head of the
