@@ -139,12 +139,12 @@ fn stat_mode_read_forces_mode3_whole_mcycle_in_double_speed() {
     assert!(b.ppu.lcd_enabled());
     let base = b.ppu.read(0xFF41) & 0x03;
     assert_eq!(base, 0, "end-view mode bits are 0");
-    // A flip on the M-cycle's FIRST dot (i=0): the INC-DS-1 dot-END eighth
-    // was `edge_eighth(0,2)=4` = the M-cycle midpoint, which the cc+2 MID
-    // observer does NOT precede (the half-split left it readable as mode 0).
-    // `event_phase(StatMode)` now returns END_PHASE, so the whole straddle
-    // M-cycle blocks regardless of which dot the flip lands on.
-    b.stat_mode_edge = Some(event_phase(EdgeKind::StatMode, 0, 2));
+    // A flip on the M-cycle's FIRST double-speed dot (cc=2): the INC-DS-1
+    // dot-END eighth was `cc_eighth(2)=4` = the M-cycle midpoint, which the
+    // cc+2 MID observer does NOT precede (the half-split left it readable as
+    // mode 0). `event_phase(StatMode)` now returns END_PHASE, so the whole
+    // straddle M-cycle blocks regardless of which cc the flip lands on.
+    b.stat_mode_edge = Some(event_phase(EdgeKind::StatMode, 2));
     assert_eq!(
         b.stat_mode_edge,
         Some(END_PHASE),
@@ -192,8 +192,8 @@ fn stat_mode_override_requires_double_speed() {
     let end_view = b.ppu.read(0xFF41) & 0x03;
     assert_eq!(end_view, 0, "end-view mode bits are 0");
     // A live sprite-line whole-M-cycle stamp (set identically for both
-    // speeds — the same value the dot-loop stamps).
-    b.stat_mode_edge = Some(event_phase(EdgeKind::StatMode, 0, 2));
+    // speeds — the same value the cc-loop stamps).
+    b.stat_mode_edge = Some(event_phase(EdgeKind::StatMode, 2));
     // Single speed: the override is gated off — the read shows the unforced
     // PPU end view, matching the green single-speed m3stat direct polls.
     b.double_speed = false;
@@ -209,6 +209,17 @@ fn stat_mode_override_requires_double_speed() {
         3,
         "DS read holds mode 3 (the override fires)"
     );
+}
+
+/// The cc-granular reclock's `dot_phase` starts at 0 — the fixed even-cc
+/// {2,4} double-speed alignment the old dot loop baked in — so a fresh
+/// interconnect (no speed switch yet) is bit-identical to the dot loop. A
+/// speed switch is what sets it to the half-dot offset (the next increment).
+#[test]
+fn dot_phase_defaults_zero() {
+    for model in [Model::Dmg, Model::Cgb] {
+        assert_eq!(ic(model).dot_phase, 0, "{model:?}: dot_phase starts at 0");
+    }
 }
 
 /// The eighth-grid sub-cc phase comparator (`obs_pre_edge` /
@@ -245,6 +256,45 @@ fn eighth_grid_predicate_matches_half_split() {
     }
 }
 
+/// The cc-granular tick grid (`dot_ticks_on_cc` + `cc_eighth`) reproduces the
+/// old `for i in 0..dots` dot loop exactly at `dot_phase` 0: the cc's (1..=4)
+/// that tick a whole PPU dot, in order, stamp the same eighths
+/// `edge_eighth(i, dots)` the loop produced for i in 0..dots. This is the
+/// net-zero proof for the cc-granular reclock foundation — phase 0 is
+/// bit-identical to the fixed-alignment loop. `dot_phase` 1 (double speed
+/// only) ticks the complementary odd cc's, stamping the new odd-cc eighths
+/// {2,6} the whole-dot fixed loop could never place — the half-dot offset a
+/// STOP speed switch establishes (the LCD dot clock runs on across the switch).
+#[test]
+fn cc_grid_matches_dot_loop() {
+    for (ds, dots) in [(false, 4u64), (true, 2)] {
+        let cc_eighths: Vec<u8> = (1..=4u8)
+            .filter(|&cc| dot_ticks_on_cc(cc, ds, 0))
+            .map(cc_eighth)
+            .collect();
+        let loop_eighths: Vec<u8> = (0..dots).map(|i| edge_eighth(i, dots)).collect();
+        assert_eq!(
+            cc_eighths, loop_eighths,
+            "ds={ds}: phase-0 cc grid == dot loop"
+        );
+    }
+    // Double-speed phase 1 ticks the complementary odd cc's {1,3}, stamping
+    // the odd-cc eighths {2,6} the fixed even-cc {4,8} loop could never reach.
+    let p1: Vec<u8> = (1..=4u8)
+        .filter(|&cc| dot_ticks_on_cc(cc, true, 1))
+        .map(cc_eighth)
+        .collect();
+    assert_eq!(p1, [2, 6], "double speed phase 1: odd-cc eighths");
+    // Single speed ignores the phase (one dot per cc regardless): 4 dots.
+    assert_eq!(
+        (1..=4u8)
+            .filter(|&cc| dot_ticks_on_cc(cc, false, 1))
+            .count(),
+        4,
+        "single speed is phase-independent"
+    );
+}
+
 /// The `Option<u8>` edge-stamp (INC-G2a) must reproduce the legacy
 /// precomputed boolean exactly: for an edge firing on dot `i`, a MID
 /// observer is blocked iff the old `2 * (i + 1) > dots` half-split was
@@ -276,30 +326,25 @@ fn stamp_blocks_matches_half_split() {
 /// at the whole-M-cycle END phase instead (their own assertions below).
 #[test]
 fn event_phase_net_zero_except_pal_and_stat() {
+    // The dot-clocked kinds commit at their cc's `cc_eighth` for every cc on
+    // the 1..=4 grid — the cc-granular net-zero seam (the cc already carries
+    // the `dot_phase` sub-dot offset, so there is no `i`/`dots` parameter).
     for kind in [EdgeKind::M0Rise, EdgeKind::M0Access] {
-        for dots in [2u64, 4] {
-            for i in 0..dots {
-                assert_eq!(
-                    event_phase(kind, i, dots),
-                    edge_eighth(i, dots),
-                    "kind={kind:?} dots={dots} i={i}"
-                );
-            }
+        for cc in 1..=4u8 {
+            assert_eq!(
+                event_phase(kind, cc),
+                cc_eighth(cc),
+                "kind={kind:?} cc={cc}"
+            );
         }
     }
-    // The two calibrated whole-M-cycle blocks commit at END regardless of
-    // dot/speed (PalAccess: task 5; StatMode: task 6 — the double-speed
-    // sprite m3stat_ds block, lifted from the dot-END half-split so a
-    // 1st-half flip also holds the old mode 3).
+    // The two calibrated whole-M-cycle blocks commit at END regardless of cc
+    // (PalAccess: task 5; StatMode: task 6 — the double-speed sprite m3stat_ds
+    // block, lifted from the dot-END half-split so a 1st-half flip also holds
+    // the old mode 3).
     for kind in [EdgeKind::PalAccess, EdgeKind::StatMode] {
-        for dots in [2u64, 4] {
-            for i in 0..dots {
-                assert_eq!(
-                    event_phase(kind, i, dots),
-                    END_PHASE,
-                    "kind={kind:?} dots={dots} i={i}"
-                );
-            }
+        for cc in 1..=4u8 {
+            assert_eq!(event_phase(kind, cc), END_PHASE, "kind={kind:?} cc={cc}");
         }
     }
 }
@@ -313,20 +358,15 @@ fn event_phase_net_zero_except_pal_and_stat() {
 /// (out7) pin (+3 floor rows, zero cross-suite regression).
 #[test]
 fn pal_access_blocks_whole_mcycle() {
-    for dots in [2u64, 4] {
-        for i in 0..dots {
-            let e = event_phase(EdgeKind::PalAccess, i, dots);
-            // Pin the exact commit phase, not just "blocks": the unblock
-            // commits at the M-cycle END regardless of dot/speed.
-            assert_eq!(
-                e, END_PHASE,
-                "palette commits at M-cycle end: dots={dots} i={i}"
-            );
-            assert!(
-                stamp_blocks(Some(e), ACCESS_PHASE),
-                "palette blocked at MID for every dot: dots={dots} i={i} e={e}"
-            );
-        }
+    for cc in 1..=4u8 {
+        let e = event_phase(EdgeKind::PalAccess, cc);
+        // Pin the exact commit phase, not just "blocks": the unblock commits
+        // at the M-cycle END regardless of which cc lx==160 lands on.
+        assert_eq!(e, END_PHASE, "palette commits at M-cycle end: cc={cc}");
+        assert!(
+            stamp_blocks(Some(e), ACCESS_PHASE),
+            "palette blocked at MID for every cc: cc={cc} e={e}"
+        );
     }
 }
 

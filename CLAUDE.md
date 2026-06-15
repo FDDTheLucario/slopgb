@@ -45,6 +45,6 @@ Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 
 
 ## State (2026-06-14)
 
-All mooneye green (439/439 rom×model); game-boy-test-roms v7.0 battery green against ratcheted baselines (7047 cases = 6028 pass + 1019 baselined floor); 600 core unit tests. Missing test ROMs skip silently unless `SLOPGB_REQUIRE_ROMS=1` (CI) — run `test-roms/download.sh` first.
+All mooneye green (439/439 rom×model); game-boy-test-roms v7.0 battery green against ratcheted baselines (7047 cases = 6028 pass + 1019 baselined floor); 602 core unit tests. Missing test ROMs skip silently unless `SLOPGB_REQUIRE_ROMS=1` (CI) — run `test-roms/download.sh` first.
 
 **Per-subsystem hardware-behavior notes — timing laws, quirks, the test ROMs that pin each, and the parked/disproven approaches not to re-chase — live in [`docs/hardware-state/`](docs/hardware-state/README.md) (one file per subsystem). Read the relevant file before touching that subsystem.** The floor-class index (classes A–H with lift conditions) is the header of `tests/gbtr/baselines/gambatte.txt`.

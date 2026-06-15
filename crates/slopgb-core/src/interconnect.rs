@@ -61,6 +61,36 @@ fn edge_eighth(i: u64, dots: u64) -> u8 {
     ((i + 1) * 8 / dots) as u8
 }
 
+/// Whether a whole PPU dot ticks on cc `cc` (1..=4) of an M-cycle, at the
+/// given speed and CPU↔PPU `dot_phase`. The cc-granular successor to the fixed
+/// `for i in 0..dots` dot loop: single speed ticks one dot per cc (4 dots per
+/// M-cycle, phase-independent — 1 cc = 1 dot); double speed ticks one dot per
+/// 2 cc (2 dots per M-cycle). In double speed `phase`=0 ticks on the even cc
+/// {2,4} — the alignment the old loop baked in — and `phase`=1 on the odd cc
+/// {1,3}, the half-dot (1 cc) offset a STOP speed switch can establish because
+/// the LCD dot clock runs on continuously across the switch while the CPU's
+/// M-cycle grid is re-paced. Phase 0 is bit-identical to the dot loop
+/// (`cc_grid_matches_dot_loop`).
+#[inline]
+fn dot_ticks_on_cc(cc: u8, ds: bool, phase: u8) -> bool {
+    debug_assert!((1..=4).contains(&cc), "cc must be 1..=4, got {cc}");
+    !ds || cc % 2 == phase % 2
+}
+
+/// The commit eighth (of 8 per M-cycle) of an event on the dot that ticks at
+/// cc `cc` (1..=4). The cc grid IS the single-speed dot grid — cc is the
+/// single-speed dot index + 1 — so the eighth is the single-speed dot-END
+/// [`edge_eighth`]: `cc*2` → {2,4,6,8}. Double speed selects a 2-cc subset of
+/// these per [`dot_ticks_on_cc`] (phase 0 → the even cc, eighths {4,8} = today;
+/// phase 1 → the odd cc, eighths {2,6} = the half-dot offset the whole-dot loop
+/// could never place). At `dot_phase` 0 the dot-tick cc's reproduce
+/// [`edge_eighth`]'s per-`i` sequence exactly (`cc_grid_matches_dot_loop`).
+#[inline]
+fn cc_eighth(cc: u8) -> u8 {
+    debug_assert!((1..=4).contains(&cc), "cc must be 1..=4, got {cc}");
+    edge_eighth(u64::from(cc) - 1, 4)
+}
+
 /// Whether an observer sampling at phase `obs` (eighths) precedes the event
 /// committing at phase `edge` — i.e. the observer sees the pre-commit state.
 /// For accessibility/STAT reads that means "still blocked / pre-flip"; for
@@ -108,13 +138,15 @@ enum EdgeKind {
     StatMode,
 }
 
-/// The commit phase (eighths of an M-cycle) of boundary event `kind` firing on
-/// dot `i` of a `dots`-dot M-cycle. Most kinds commit at their dot-END eighth
-/// ([`edge_eighth`]); `PalAccess` is calibrated off it (INC-G3 task 5) — its
-/// per-event offset is exactly what [`EdgeKind`] keys, so the others stay
-/// dot-clocked while one event moves.
+/// The commit phase (eighths of an M-cycle) of boundary event `kind` on the
+/// dot that ticks at cc `cc` (1..=4 — see [`dot_ticks_on_cc`]). Most kinds
+/// commit at their dot-END eighth ([`cc_eighth`]); `PalAccess`/`StatMode` are
+/// calibrated off it (INC-G3 tasks 5/6) — their per-event offset is exactly
+/// what [`EdgeKind`] keys, so the others stay dot-clocked while one event
+/// moves. cc-granular: the cc the event's dot ticks on already carries the
+/// sub-dot (`dot_phase`) offset, so no separate `i`/`dots` parameter.
 #[inline]
-fn event_phase(kind: EdgeKind, i: u64, dots: u64) -> u8 {
+fn event_phase(kind: EdgeKind, cc: u8) -> u8 {
     match kind {
         // The CGB palette-RAM unblock commits at the M-cycle END (phase 8 =
         // cc+4), one observer grid later than OAM/VRAM's dot-split: a cc+2 MID
@@ -145,7 +177,7 @@ fn event_phase(kind: EdgeKind, i: u64, dots: u64) -> u8 {
         // tests/gbtr/baselines/gambatte.txt.
         EdgeKind::StatMode => END_PHASE,
         // Every other event commits at its dot-END eighth (net-zero scaffold).
-        _ => edge_eighth(i, dots),
+        _ => cc_eighth(cc),
     }
 }
 
@@ -270,6 +302,15 @@ pub struct Interconnect {
     /// palette data ports are disabled (misc/boot_hwio-C).
     cgb_mode: bool,
     double_speed: bool,
+    /// CPU↔PPU sub-dot phase for the cc-granular reclock: which cc's of the
+    /// M-cycle tick a PPU dot in double speed (see [`dot_ticks_on_cc`]). 0 =
+    /// the fixed even-cc {2,4} alignment the old `for i in 0..dots` loop baked
+    /// in (single speed is phase-independent); 1 = the odd-cc {1,3} half-dot
+    /// offset a STOP speed switch can establish (the LCD dot clock runs on
+    /// continuously across the switch while the CPU's M-cycle grid is re-paced).
+    /// Held at 0 until a speed switch sets it (the next increment); 0 is
+    /// bit-identical to the dot loop (`cc_grid_matches_dot_loop`).
+    dot_phase: u8,
     /// KEY1 bit 0: speed switch armed for the next STOP.
     key1_armed: bool,
 
@@ -459,6 +500,7 @@ impl Interconnect {
             cycles: 0,
             cgb_mode,
             double_speed: false,
+            dot_phase: 0,
             key1_armed: false,
             wram: vec![0; if model.is_cgb() { 0x8000 } else { 0x2000 }],
             svbk: 0,
