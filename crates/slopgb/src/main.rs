@@ -9,6 +9,7 @@
 
 mod audio;
 mod input;
+mod toolwin;
 mod ui;
 mod video;
 mod windows;
@@ -55,8 +56,10 @@ KEYS:
     Z = A        X = B        Enter = Start    RShift/Backspace = Select
     Arrow keys = D-pad        Tab (hold) = turbo
     P = pause    R = reset    Esc = quit
+    F2 = debugger    F3 = VRAM viewer    F4 = I/O map  (bgb-style debug windows)
 
 A ROM file dropped onto the window is loaded in place of the current one.
+Set SLOPGB_OPEN_TOOLS=debugger,vram,iomap to open debug windows at startup.
 ";
 
 /// Wall-clock duration of one emulated frame: 70224 T-cycles at 4194304 Hz
@@ -416,6 +419,9 @@ struct App {
     fps_frames: u32,
     fps_since: Instant,
     fps: f64,
+    /// Open bgb-style debug tool windows (F2/F3/F4). The game window is handled
+    /// directly; these are routed by [`ToolWindows::owns`].
+    tools: toolwin::ToolWindows,
 }
 
 impl App {
@@ -435,6 +441,7 @@ impl App {
             fps_frames: 0,
             fps_since: Instant::now(),
             fps: 0.0,
+            tools: toolwin::ToolWindows::new(),
         }
     }
 
@@ -504,6 +511,7 @@ impl App {
                 self.resync_pacing();
             }
             Action::Quit if pressed => event_loop.exit(),
+            Action::ToggleTool(kind) if pressed => self.tools.toggle(event_loop, kind),
             _ => {}
         }
     }
@@ -674,6 +682,19 @@ impl ApplicationHandler for App {
             }
         }
         self.window = Some(window);
+        // Optionally open debug tool windows at startup (comma-separated
+        // `debugger,vram,iomap` in `SLOPGB_OPEN_TOOLS`) — handy for screenshot
+        // verification and for users who always want them up.
+        if let Ok(list) = env::var("SLOPGB_OPEN_TOOLS") {
+            for kind in list.split(',').filter_map(|s| match s.trim() {
+                "debugger" => Some(ui::ToolWindow::Debugger),
+                "vram" => Some(ui::ToolWindow::Vram),
+                "iomap" => Some(ui::ToolWindow::IoMap),
+                _ => None,
+            }) {
+                self.tools.toggle(event_loop, kind);
+            }
+        }
         self.resync_pacing();
         self.update_title();
     }
@@ -681,9 +702,25 @@ impl ApplicationHandler for App {
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
-        _window_id: WindowId,
+        window_id: WindowId,
         event: WindowEvent,
     ) {
+        // A debug tool window owns its events; the game window path below is
+        // untouched. Its close button closes just that window (not the app).
+        if self.tools.owns(window_id) {
+            match event {
+                WindowEvent::CloseRequested => {
+                    self.tools.close(window_id);
+                }
+                WindowEvent::RedrawRequested | WindowEvent::Resized(_) => {
+                    self.tools.redraw(window_id, &self.session.gb);
+                }
+                // Hotkeys (F2/F3/F4, pause, reset…) work from any window.
+                WindowEvent::KeyboardInput { event, .. } => self.handle_key(event_loop, &event),
+                _ => {}
+            }
+            return;
+        }
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::RedrawRequested => self.redraw(),
@@ -723,6 +760,8 @@ impl ApplicationHandler for App {
             if let Some(window) = &self.window {
                 window.request_redraw();
             }
+            // Keep the open debug windows tracking live machine state.
+            self.tools.request_redraw_all();
         }
         self.update_fps(frames);
         let flow = if self.turbo {

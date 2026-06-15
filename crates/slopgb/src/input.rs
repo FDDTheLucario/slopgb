@@ -12,6 +12,8 @@
 use slopgb_core::Button;
 use winit::keyboard::KeyCode;
 
+use crate::ui::ToolWindow;
+
 /// What a mapped key does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
@@ -25,6 +27,8 @@ pub enum Action {
     Reset,
     /// Quit the emulator (on press).
     Quit,
+    /// Open/close a bgb-style debug tool window (on press).
+    ToggleTool(ToolWindow),
 }
 
 /// Tracks which physical keys currently hold each button, so two keys mapped
@@ -74,6 +78,9 @@ pub fn map(code: KeyCode) -> Option<Action> {
         KeyCode::KeyP => Action::Pause,
         KeyCode::KeyR => Action::Reset,
         KeyCode::Escape => Action::Quit,
+        KeyCode::F2 => Action::ToggleTool(ToolWindow::Debugger),
+        KeyCode::F3 => Action::ToggleTool(ToolWindow::Vram),
+        KeyCode::F4 => Action::ToggleTool(ToolWindow::IoMap),
         _ => return None,
     })
 }
@@ -97,6 +104,19 @@ mod tests {
     fn unmapped_keys_do_nothing() {
         assert_eq!(map(KeyCode::KeyQ), None);
         assert_eq!(map(KeyCode::F1), None); // palette toggle: needs core API
+    }
+
+    #[test]
+    fn function_keys_toggle_the_tool_windows() {
+        assert_eq!(
+            map(KeyCode::F2),
+            Some(Action::ToggleTool(ToolWindow::Debugger))
+        );
+        assert_eq!(map(KeyCode::F3), Some(Action::ToggleTool(ToolWindow::Vram)));
+        assert_eq!(
+            map(KeyCode::F4),
+            Some(Action::ToggleTool(ToolWindow::IoMap))
+        );
     }
 
     #[test]
