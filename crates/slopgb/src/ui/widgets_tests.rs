@@ -97,6 +97,55 @@ fn tab_strip_outlines_the_active_tab() {
 }
 
 #[test]
+fn scroll_list_windows_rows_and_highlights() {
+    use crate::ui::text::line_height;
+    let lh = line_height() as usize;
+    let (w, h) = (80, lh * 3); // viewport shows exactly 3 rows
+    let mut buf = canvas(w, h);
+    let rows = ["r0", "r1", "r2", "r3", "r4", "r5"];
+    let drawn;
+    {
+        let mut c = Canvas::new(&mut buf, w, h);
+        // Offset 2 -> rows 2,3,4 visible; highlight row 3 (the middle one).
+        drawn = scroll_list(
+            &mut c,
+            Rect::new(0, 0, w as i32, h as i32),
+            &rows,
+            2,
+            Some(3),
+            &T,
+        );
+    }
+    assert_eq!(drawn, 3, "viewport holds 3 rows");
+    // Row index 1 of the viewport (global row 3) has the blue highlight bar.
+    let bar_y = lh + 1; // inside the 2nd visible row
+    assert_eq!(buf[bar_y * w], T.current, "highlighted row bar");
+    // The first visible row (global row 2) is not highlighted (bg untouched
+    // where there's no glyph ink): far-right pixel of that row.
+    assert_eq!(buf[2 * w - 1], 0x00AA_AAAA, "non-highlight row bg");
+}
+
+#[test]
+fn scroll_list_past_the_end_draws_only_remaining_rows() {
+    use crate::ui::text::line_height;
+    let lh = line_height() as usize;
+    let (w, h) = (40, lh * 4);
+    let mut buf = canvas(w, h);
+    let rows = ["a", "b", "c"];
+    let mut c = Canvas::new(&mut buf, w, h);
+    // Offset 2 with a 4-row viewport: only "c" remains.
+    let drawn = scroll_list(
+        &mut c,
+        Rect::new(0, 0, w as i32, h as i32),
+        &rows,
+        2,
+        None,
+        &T,
+    );
+    assert_eq!(drawn, 1);
+}
+
+#[test]
 fn swatch_fills_colour_with_a_border() {
     let (w, h) = (12, 12);
     let mut buf = canvas(w, h);

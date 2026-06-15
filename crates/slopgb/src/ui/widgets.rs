@@ -6,7 +6,7 @@
 use crate::ui::Theme;
 use crate::ui::canvas::{Canvas, Rect};
 use crate::ui::font::GLYPH_H;
-use crate::ui::text::{draw_text, measure};
+use crate::ui::text::{draw_text, line_height, measure};
 
 /// Square check-box drawn at `(x, y)` with `label` to its right; a filled inner
 /// square shows `checked`. Returns the clickable rect spanning box + label.
@@ -95,6 +95,41 @@ pub fn tab_strip(
         cx += r.w + 2;
     }
     rects
+}
+
+/// A vertical slice of text `rows` into `rect`: `rows[offset..]` top-aligned,
+/// one per [`line_height`], clipped to `rect`. `highlight` (an index into
+/// `rows`) gets a full-width bar in `theme.current` with `theme.bg` text — the
+/// disasm pane's current-PC line / the stack pane's SP row. Returns how many
+/// rows were drawn. The caller computes `offset` (scroll position).
+pub fn scroll_list(
+    c: &mut Canvas,
+    rect: Rect,
+    rows: &[&str],
+    offset: usize,
+    highlight: Option<usize>,
+    theme: &Theme,
+) -> usize {
+    let lh = line_height();
+    let visible = (rect.h / lh).max(0) as usize;
+    let saved = c.push_clip(rect);
+    let mut drawn = 0;
+    for i in 0..visible {
+        let Some(text) = rows.get(offset + i) else {
+            break;
+        };
+        let y = rect.y + i as i32 * lh;
+        let fg = if Some(offset + i) == highlight {
+            c.fill_rect(Rect::new(rect.x, y, rect.w, lh), theme.current);
+            theme.bg
+        } else {
+            theme.text
+        };
+        draw_text(c, rect.x + 1, y, text, fg);
+        drawn += 1;
+    }
+    c.set_clip(saved);
+    drawn
 }
 
 #[cfg(test)]
