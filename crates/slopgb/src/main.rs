@@ -11,6 +11,7 @@ mod audio;
 mod input;
 mod ui;
 mod video;
+mod windows;
 
 use std::env;
 use std::fs;
