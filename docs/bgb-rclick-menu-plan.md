@@ -17,6 +17,10 @@ Pokemon Crystal, wine, this machine):
 | `rc-stack.png` | Debugger **stack** right-click | Go to… (Ctrl+G) · Modify data · Code go here · Data go here |
 | `menubar-run.png` | Debugger **Run** menu | Run F9 · Run no break ⇧F9 · Run not this break ^F9 · Reset ^R · Trace F7 · Trace reverse ⇧F7 · Step Over F3 · Step Over reverse ⇧F3 · Animate ⌥A · Run to Cursor F4 · Run cursor no break ⇧F4 · Run cursor reverse ^F4 · Jump to cursor F6 · Call cursor · Step out F8 · Step out reverse ⇧F8 · jump (SP); SP=SP+2 · Rewind cycles ^E |
 | `menubar-debug.png` | Debugger **Debug** menu | Toggle breakpoint F2 · Evaluate expression · Set user clocks counter · Breakpoints ^H · Watchpoints ^J |
+| `menubar-file.png` | Debugger **File** menu | Load ROM… F12 · Load ROM without reset… · Save ROM as… ^S · Reload ROM · Reload SRAM · Load SRAM… · reload SYM file · Load state… ^L · Save state… ^W · Fix checksums · save screenshot · save memory_dump… · save asm… · Undo ^Z · Redo ^⌥Z · Fix area with erase value |
+| `menubar-search.png` | Debugger **Search** menu | Search string (eg. 'ld a,') ^F · Continue search ^C · go to next bookmark ^N · go to previous bookmark ^B · go to PC ^A |
+| `menubar-window.png` | Debugger **Window** menu | VRAM viewer F5 · SGB packets · log link transfers (to SGB window) · Options F11 · cheats · cheat searcher · IO map F10 · screen · joypads ^K · debug messages |
+| `menubar-profiler.png` | Debugger **Execution profiler** menu | logging mode · break mode · stop (•) · clear buffer · 0 addresses seen |
 | `rc-main.png` | **Main LCD window** right-click | Pause · Load ROM… · Enable sound · Options… F11 · Cheat… F10 · Reset gameboy * · Save screenshot · Debugger Esc · State▶ · Other▶ · Sound channel▶ · Window size▶ · Link▶ · Recent ROMs▶ · Exit |
 | `main-sub-state.png` | Main → **State** | Quick Save F2 · Quick Load F4 · Select▶ F3 · Load recovery state · Load state… |
 | `main-sub-other.png` | Main → **Other** | Cart info · System info · VRAM viewer · cheat searcher · Camera control… · clear recent roms list · debug mode enabled: * · Close screen · About… |
@@ -27,11 +31,13 @@ Pokemon Crystal, wine, this machine):
 | `rc-vram-none.png` | **VRAM viewer** right-click | **no context menu** — left-click selects a tile/cell |
 | `rc-iomap-none.png` | **I/O map** right-click | **no context menu** — display + Refresh button only |
 
-Every window is now captured. **bgb's keybindings are focus-dependent**: in the MAIN window
-F2/F3/F4 = Quick Save / Select-state / Quick Load and F5–F8 = mute channels 1–4; in the DEBUGGER
-F2/F3/F4 = Toggle breakpoint / Step Over / Run-to-cursor and F7/F8 = Trace / Step out. The only
-remaining un-captured items are the debugger **File / Search / Window / Execution profiler**
-menu-bar dropdowns (task RC-CAP4).
+**Every window AND every menu is now captured** — all 6 debugger menu-bar dropdowns (File,
+Search, Run, Debug, Window, Execution profiler), the four debugger pane right-click menus, the
+main-window right-click menu + its six submenus, and the captured negative that VRAM/I-O-map have
+no right-click menu. **bgb's keybindings are focus-dependent**: in the MAIN window F2/F3/F4 =
+Quick Save / Select-state / Quick Load and F5–F8 = mute channels 1–4; in the DEBUGGER F2/F3/F4 =
+Toggle breakpoint / Step Over / Run-to-cursor, F7/F8 = Trace / Step out, F5/F10/F11 open VRAM/IO
+map/Options, F12 = Load ROM.
 
 ```xml
 <plan goal="Clone bgb's right-click menus + menu-bar features across every window, functional-1:1">
@@ -182,11 +188,31 @@ menu-bar dropdowns (task RC-CAP4).
     <done>No context menu on VRAM/iomap — confirmed against captures, not assumed.</done>
     <why>Documentation of a captured negative; no code.</why>
   </task>
-  <task id="RC-CAP4" model="haiku" deps="none">
-    <do>[capture] Screenshot the debugger File / Search / Window / Execution profiler menu-bar dropdowns (Xvfb method in README); save menubar-{file,search,window,profiler}.png; transcribe into tasks.</do>
-    <test>the four menubar-*.png exist; items enumerated.</test>
-    <done>The last un-captured dropdowns enumerated from real captures.</done>
-    <why>Capture + transcription, no logic.</why>
+  <!-- DEBUGGER MENU-BAR DROPDOWNS (all captured) -->
+  <task id="MB1" model="sonnet" deps="RM1,RM2">
+    <do>Debugger menu bar (File · Search · Run · Debug · Window · Execution profiler) drawn across the menu rect; left-click an item opens its PopupMenu dropdown; the six match menubar-{file,search,run,debug,window,profiler}.png.</do>
+    <test>clicking each menu-bar label opens a dropdown listing exactly that capture's items; click-away/Escape closes it.</test>
+    <done>The menu bar + six dropdowns render + open (menubar-*.png).</done>
+  </task>
+  <task id="MB2" model="sonnet" deps="MB1,RM3">
+    <do>File menu (menubar-file.png): Load ROM…/Load ROM without reset…/Reload ROM/Save ROM as…/Reload SRAM/Load SRAM…/reload SYM file/Load state…/Save state…/Fix checksums/save screenshot/save memory_dump…/save asm…/Undo/Redo/Fix area with erase value — wire the file ops (states + asm/memdump export gated by their analyses).</do>
+    <test>save memory_dump… writes the dumped region; save asm… writes the disasm; Reload ROM re-loads; Undo/Redo step an edit history.</test>
+    <done>File menu actions match menubar-file.png (states via MN6, big editors stubbed).</done>
+  </task>
+  <task id="MB3" model="sonnet" deps="MB1,RM3,RM5">
+    <do>Search menu (menubar-search.png): Search string (^F, find a byte/mnemonic pattern from the cursor), Continue search (^C), go to next/previous bookmark (^N/^B), go to PC (^A); plus a bookmark set/clear.</do>
+    <test>Search string "ld a," finds the next matching disasm line and scrolls to it; go to PC re-centers on PC; next/previous bookmark cycle set bookmarks.</test>
+    <done>Search menu matches menubar-search.png.</done>
+  </task>
+  <task id="MB4" model="sonnet" deps="MB1">
+    <do>Window menu (menubar-window.png): VRAM viewer (F5) / IO map (F10) window toggles, Options (F11), screen, joypads (^K), debug messages, cheats / cheat searcher (stub) — open/close the corresponding tool windows.</do>
+    <test>Window→VRAM viewer toggles the VRAM window; Window→IO map toggles the I/O map; joypads opens a joypad-state view.</test>
+    <done>Window menu toggles match menubar-window.png.</done>
+  </task>
+  <task id="MB5" model="sonnet" deps="MB1">
+    <do>Execution profiler menu (menubar-profiler.png): logging mode / break mode / stop (radio) + clear buffer + "N addresses seen"; tally per-PC execution counts shown in the disasm gutter while logging.</do>
+    <test>with logging mode on, stepping increments the executed-address tally; clear buffer zeroes it; the disasm shows per-line counts.</test>
+    <done>Profiler menu + per-address tally match menubar-profiler.png.</done>
   </task>
 
   <!-- INTEGRATION -->
@@ -199,12 +225,14 @@ menu-bar dropdowns (task RC-CAP4).
 </plan>
 ```
 
-**Plan: ~30 tasks (5 opus analysis, ~4 haiku, ~21 sonnet).** Critical path: RA0/RA1 → RM1 → RM2 →
-RM4 → (RM5…RM12 debugger menu actions) → RM13/14/15 → RM16; the main-window branch RM1/RM2 →
-MN1 → MN2…MN5 runs in parallel. Coverage is now **complete and captured across every window**:
-debugger pane menus + Run/Debug bars, the main-LCD menu + all six submenus, and the captured
-**negative** that VRAM/I-O-map have no right-click menu (SW1). Only the debugger File/Search/
-Window/Execution-profiler menu-bar dropdowns remain to screenshot (RC-CAP4). Large subsystems
-(save-states MN6, link-cable/Options/Cheat MN7, reverse-exec RA2) are analysis-gated, likely
-deferred. **Capture method that works:** run bgb under a fresh `Xvfb` display — it dodges the
-wine `XI_BadDevice` XInput crash that kills bgb on the real `:0` (see bgb-reference README).
+**Plan: ~35 tasks (5 opus analysis, ~4 haiku, ~26 sonnet).** Critical path: RA0/RA1 → RM1 → RM2 →
+RM4 → (RM5…RM12 debugger pane-menu actions) → RM13/14/15 → RM16; the main-window branch (MN1→
+MN2…MN5) and the menu-bar branch (MB1→MB2…MB5) run in parallel off RM1/RM2. **Coverage is complete
+and fully captured — every window and every menu**: the six debugger menu-bar dropdowns
+(File/Search/Run/Debug/Window/Execution profiler), the four debugger pane right-click menus, the
+main-LCD right-click menu + all six submenus, and the captured **negative** that VRAM/I-O-map have
+no right-click menu (SW1). Nothing is invented; nothing un-shot. Large subsystems (save-states MN6,
+link-cable/Options/Cheat MN7, reverse-exec RA2) are analysis-gated, likely deferred. **Capture
+method that works:** run bgb under a fresh `Xvfb` display (`Xvfb :N -screen 0 1500x1000x24 -ac
+-nolisten tcp`) — it dodges the wine `XI_BadDevice` XInput crash that kills bgb on the real `:0`;
+dropdowns open as override-redirect popups, so capture `-window root` and crop the menu region.
