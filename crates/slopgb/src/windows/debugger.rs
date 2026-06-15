@@ -3,7 +3,12 @@
 //! pure rendering into a [`Canvas`], unit-tested headless; the winit surface
 //! wiring (B12b) feeds it a real buffer later.
 
-use crate::ui::canvas::Rect;
+use slopgb_core::debug;
+
+use crate::ui::Theme;
+use crate::ui::canvas::{Canvas, Rect};
+use crate::ui::text::line_height;
+use crate::ui::widgets::scroll_list;
 
 /// The four panes of the debugger body, partitioned from the window size to
 /// match bgb's layout (see `docs/bgb-reference/02-debugger.png`): a thin menu
@@ -42,6 +47,83 @@ impl DebuggerLayout {
             memory: Rect::new(0, body_bot, w, mem_h),
         }
     }
+}
+
+/// One decoded disassembly line: its address and the formatted bgb text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DisasmRow {
+    pub addr: u16,
+    pub text: String,
+}
+
+/// A coarse bank label from the address region. Precise ROM/VRAM/WRAM bank
+/// numbers are a deferred accessor (see handoff); this gives bgb's `ROM0:` for
+/// the fixed bank and a best-effort tag elsewhere.
+fn region_label(addr: u16) -> &'static str {
+    match addr {
+        0x0000..=0x3FFF => "ROM0",
+        0x4000..=0x7FFF => "ROMX",
+        0x8000..=0x9FFF => "VRAM",
+        0xA000..=0xBFFF => "SRAM",
+        0xC000..=0xCFFF => "WRA0",
+        0xD000..=0xDFFF => "WRAX",
+        0xE000..=0xFDFF => "ECHO",
+        0xFE00..=0xFE9F => "OAM ",
+        0xFEA0..=0xFEFF => "??? ",
+        0xFF00..=0xFF7F => "I/O ",
+        0xFF80..=0xFFFE => "HRAM",
+        0xFFFF => "IE  ",
+    }
+}
+
+/// Disassemble `count` instructions from `start`, each formatted as a bgb
+/// disasm line `LABEL:ADDR  bytes  mnemonic  ;m-cycles`. `read(addr)` yields the
+/// byte at `addr` (use `GameBoy::debug_read`). Exact column widths are tuned in
+/// the C8 visual diff; the content (addr/bytes/mnemonic/cycles) is final.
+pub fn disasm_rows(read: impl Fn(u16) -> u8, start: u16, count: usize) -> Vec<DisasmRow> {
+    let mut rows = Vec::with_capacity(count);
+    let mut addr = start;
+    for _ in 0..count {
+        let bytes = [
+            read(addr),
+            read(addr.wrapping_add(1)),
+            read(addr.wrapping_add(2)),
+        ];
+        let insn = debug::decode(&bytes, addr);
+        let hex: String = bytes[..insn.len as usize]
+            .iter()
+            .map(|b| format!("{b:02X} "))
+            .collect();
+        let text = format!(
+            "{}:{addr:04X} {:<9}{:<20};{}",
+            region_label(addr),
+            hex.trim_end(),
+            insn.text,
+            insn.cycles
+        );
+        rows.push(DisasmRow { addr, text });
+        addr = addr.wrapping_add(u16::from(insn.len.max(1)));
+    }
+    rows
+}
+
+/// Render the disasm pane: decode from `start` to fill `rect`, draw it with the
+/// row at `pc` highlighted (the blue current-PC bar). Returns the rows so the
+/// window can hit-test clicks (breakpoint toggling / run-to-cursor).
+pub fn render_disasm(
+    c: &mut Canvas,
+    rect: Rect,
+    read: impl Fn(u16) -> u8,
+    start: u16,
+    pc: u16,
+    theme: &Theme,
+) -> Vec<DisasmRow> {
+    let count = (rect.h / line_height()).max(0) as usize + 1;
+    let rows = disasm_rows(read, start, count);
+    let texts: Vec<&str> = rows.iter().map(|r| r.text.as_str()).collect();
+    let highlight = rows.iter().position(|r| r.addr == pc);
+    scroll_list(c, rect, &texts, 0, highlight, theme);
+    rows
 }
 
 #[cfg(test)]
