@@ -8,8 +8,10 @@
 
 pub mod canvas;
 pub mod font;
+pub mod text;
 
 pub use canvas::{Canvas, Rect};
+pub use text::{draw_text, measure};
 
 #[cfg(test)]
 #[path = "ui/font_tests.rs"]
