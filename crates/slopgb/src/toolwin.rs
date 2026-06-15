@@ -15,9 +15,10 @@ use winit::dpi::LogicalSize;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
+use crate::dbg::{Breakpoints, DebugAction};
 use crate::ui::canvas::Rect;
 use crate::ui::{Canvas, Theme, ToolWindow, WindowRegistry};
-use crate::windows::{self, WinState, vram};
+use crate::windows::{self, WinState, debugger, vram};
 
 struct ToolView {
     window: Rc<Window>,
@@ -140,8 +141,9 @@ impl ToolWindows {
         self.reg.id_of(kind).is_some()
     }
 
-    /// Render the tool window `id` from the live machine.
-    pub fn redraw(&mut self, id: WindowId, gb: &GameBoy) {
+    /// Render the tool window `id` from the live machine. `bps` (the App-owned
+    /// breakpoint set) feeds the debugger's gutter dots; other windows ignore it.
+    pub fn redraw(&mut self, id: WindowId, gb: &GameBoy, bps: &Breakpoints) {
         let Some(view) = self.views.get_mut(&id) else {
             return;
         };
@@ -157,7 +159,7 @@ impl ToolWindows {
         };
         {
             let mut canvas = Canvas::new(&mut buf, size.width as usize, size.height as usize);
-            windows::render(view.kind, gb, &mut canvas, &self.theme, &view.state);
+            windows::render(view.kind, gb, &mut canvas, &self.theme, &view.state, bps);
         }
         // Force opaque alpha: softbuffer leaves the top byte 0, which a 32-bit
         // ARGB compositor reads as fully transparent (the window would show the
@@ -189,28 +191,60 @@ impl ToolWindows {
         let (px, py) = (x as i32, y as i32);
         view.cursor = Some((px, py));
         let area = view.area();
-        if let WinState::Vram(s) = &mut view.state {
-            if vram::on_hover(s, area, px, py) {
-                view.window.request_redraw();
+        match &mut view.state {
+            WinState::Vram(s) => {
+                if vram::on_hover(s, area, px, py) {
+                    view.window.request_redraw();
+                }
             }
+            // Track the hovered row of an open context menu.
+            WinState::Debugger(s) => {
+                if let Some(om) = &mut s.menu {
+                    if om.hover_at(px, py) {
+                        view.window.request_redraw();
+                    }
+                }
+            }
+            WinState::Stateless => {}
         }
     }
 
     /// Handle a left-button press on tool window `id` (uses the last cursor
-    /// position): switches tab / toggles a control, redrawing on any change.
-    pub fn on_mouse_left(&mut self, id: WindowId) {
-        let Some(view) = self.views.get_mut(&id) else {
-            return;
-        };
-        let Some((px, py)) = view.cursor else {
-            return;
-        };
+    /// position): switches a VRAM control, selects a debugger menu item, or sets
+    /// the debugger cursor. Returns an execution [`DebugAction`] for `main` to
+    /// apply (debugger only), redrawing on any change.
+    pub fn on_mouse_left(&mut self, id: WindowId, gb: &GameBoy) -> Option<DebugAction> {
+        let view = self.views.get_mut(&id)?;
+        let (px, py) = view.cursor?;
         let area = view.area();
-        if let WinState::Vram(s) = &mut view.state {
-            if vram::on_click(s, area, px, py) {
-                view.window.request_redraw();
+        match &mut view.state {
+            WinState::Vram(s) => {
+                if vram::on_click(s, area, px, py) {
+                    view.window.request_redraw();
+                }
+                None
             }
+            WinState::Debugger(s) => {
+                let action = debugger_left_click(s, area, gb, px, py);
+                view.window.request_redraw();
+                action
+            }
+            WinState::Stateless => None,
         }
+    }
+
+    /// Handle a right-button press on tool window `id`: on the debugger, open the
+    /// context menu for the clicked pane (or dismiss an open one). Returns `None`
+    /// — opening a menu has no immediate machine effect.
+    pub fn on_mouse_right(&mut self, id: WindowId, gb: &GameBoy) -> Option<DebugAction> {
+        let view = self.views.get_mut(&id)?;
+        let (px, py) = view.cursor?;
+        let area = view.area();
+        if let WinState::Debugger(s) = &mut view.state {
+            debugger_right_click(s, area, gb, px, py);
+            view.window.request_redraw();
+        }
+        None
     }
 
     /// Clear the remembered cursor when it leaves tool window `id`, so a stale
@@ -235,4 +269,29 @@ impl ToolWindows {
             v.window.request_redraw();
         }
     }
+}
+
+/// Glue the live machine onto the pure [`debugger::on_left_click`] (the register
+/// snapshot + `debug_read` closure the resolver needs).
+fn debugger_left_click(
+    s: &mut debugger::DebuggerState,
+    area: Rect,
+    gb: &GameBoy,
+    px: i32,
+    py: i32,
+) -> Option<DebugAction> {
+    let r = gb.cpu_regs();
+    debugger::on_left_click(|a| gb.debug_read(a), area, s, r.pc, r.sp, px, py)
+}
+
+/// Glue for [`debugger::on_right_click`] (opens / dismisses the context menu).
+fn debugger_right_click(
+    s: &mut debugger::DebuggerState,
+    area: Rect,
+    gb: &GameBoy,
+    px: i32,
+    py: i32,
+) {
+    let r = gb.cpu_regs();
+    debugger::on_right_click(|a| gb.debug_read(a), area, s, r.pc, r.sp, px, py);
 }

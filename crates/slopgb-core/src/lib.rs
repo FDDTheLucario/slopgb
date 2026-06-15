@@ -104,6 +104,28 @@ impl GameBoy {
         }
     }
 
+    /// Like [`Self::run_frame`], but stop early (returning that address) if `PC`
+    /// reaches one of `breakpoints` after a step — the debugger's free-running
+    /// auto-halt. The PC check is *after* each step, matching
+    /// [`Self::run_until_breakpoint`], so a breakpoint on the current line
+    /// doesn't fire instantly (the loop always advances off it; a loop back to
+    /// the breakpoint still stops). With no breakpoints it is exactly a
+    /// `run_frame`. Returns `None` if the frame completed without a hit. This
+    /// drives emulation forward; only call it for a live debugger run, never on
+    /// a golden/test path.
+    pub fn run_frame_until_breakpoint(&mut self, breakpoints: &[u16]) -> Option<u16> {
+        let target = self.bus.frame_count().wrapping_add(1);
+        let deadline = self.bus.cycles().wrapping_add(u64::from(CYCLES_PER_FRAME));
+        while self.bus.frame_count() != target && self.bus.cycles() < deadline {
+            self.step();
+            let pc = self.cpu_regs().pc;
+            if breakpoints.contains(&pc) {
+                return Some(pc);
+            }
+        }
+        None
+    }
+
     /// XRGB8888 pixels of the most recently completed frame, row-major.
     pub fn frame(&self) -> &[u32; SCREEN_PIXELS] {
         self.bus.ppu().frame()
@@ -410,6 +432,37 @@ mod tests {
         // moves to 0x101, which isn't the (already-left) 0x100.
         assert_eq!(gb.run_until_breakpoint(&[0x100], 1), None);
         assert_eq!(gb.cpu_regs().pc, 0x101);
+    }
+
+    #[test]
+    fn run_frame_until_breakpoint_halts_at_a_breakpoint_mid_frame() {
+        let mut gb = GameBoy::new(Model::Dmg, linear_code_rom()).unwrap();
+        assert_eq!(gb.cpu_regs().pc, 0x100);
+        let frames_before = gb.frame_count();
+        // 0x100 nop -> 0x101 jp -> 0x150 nop -> 0x151: stops within a handful of
+        // cycles, far short of a full frame's worth of dots.
+        assert_eq!(gb.run_frame_until_breakpoint(&[0x151]), Some(0x151));
+        assert_eq!(gb.cpu_regs().pc, 0x151);
+        assert_eq!(
+            gb.frame_count(),
+            frames_before,
+            "halted before the frame completed"
+        );
+    }
+
+    #[test]
+    fn run_frame_until_breakpoint_with_no_hit_completes_a_frame_like_run_frame() {
+        // No reachable breakpoint -> runs a whole frame and returns None,
+        // leaving the machine exactly where a plain run_frame would.
+        let mut a = GameBoy::new(Model::Dmg, linear_code_rom()).unwrap();
+        let mut b = GameBoy::new(Model::Dmg, linear_code_rom()).unwrap();
+        assert_eq!(a.run_frame_until_breakpoint(&[0xBEEF]), None);
+        b.run_frame();
+        assert_eq!(a.frame_count(), b.frame_count());
+        assert_eq!(a.cycles(), b.cycles());
+        assert_eq!(a.cpu_regs().pc, b.cpu_regs().pc);
+        // Empty breakpoint list is just a run_frame.
+        assert_eq!(a.run_frame_until_breakpoint(&[]), None);
     }
 
     #[test]

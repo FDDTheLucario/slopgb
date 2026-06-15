@@ -5,8 +5,10 @@
 
 use slopgb_core::debug;
 
+use crate::dbg::{Breakpoints, DebugAction};
 use crate::ui::Theme;
 use crate::ui::canvas::{Canvas, Rect};
+use crate::ui::menu::{self, MenuItem};
 use crate::ui::text::{draw_text, hex_row, line_height};
 use crate::ui::widgets::scroll_list;
 
@@ -107,22 +109,46 @@ pub fn disasm_rows(read: impl Fn(u16) -> u8, start: u16, count: usize) -> Vec<Di
     rows
 }
 
-/// Render the disasm pane: decode from `start` to fill `rect`, draw it with the
-/// row at `pc` highlighted (the blue current-PC bar). Returns the rows so the
-/// window can hit-test clicks (breakpoint toggling / run-to-cursor).
+/// Width of the disasm pane's left gutter — holds the red breakpoint dot, and
+/// the current-PC highlight bar extends across it.
+pub const DISASM_GUTTER: i32 = 7;
+
+/// Render the disasm pane: decode from `start` to fill `rect`, draw the rows
+/// past a left gutter with the row at `pc` highlighted (the blue current-PC
+/// bar), and a red dot in the gutter on every row carrying a breakpoint.
+/// Returns the rows so the window can hit-test clicks.
 pub fn render_disasm(
     c: &mut Canvas,
     rect: Rect,
     read: impl Fn(u16) -> u8,
     start: u16,
     pc: u16,
+    bps: &Breakpoints,
     theme: &Theme,
 ) -> Vec<DisasmRow> {
-    let count = (rect.h / line_height()).max(0) as usize + 1;
+    let lh = line_height();
+    let count = (rect.h / lh).max(0) as usize + 1;
     let rows = disasm_rows(read, start, count);
     let texts: Vec<&str> = rows.iter().map(|r| r.text.as_str()).collect();
     let highlight = rows.iter().position(|r| r.addr == pc);
-    scroll_list(c, rect, &texts, 0, highlight, theme);
+    let body = Rect::new(
+        rect.x + DISASM_GUTTER,
+        rect.y,
+        (rect.w - DISASM_GUTTER).max(0),
+        rect.h,
+    );
+    let drawn = scroll_list(c, body, &texts, 0, highlight, theme);
+    // Extend the PC bar across the gutter and stamp breakpoint dots in it.
+    for (i, row) in rows.iter().enumerate().take(drawn) {
+        let y = rect.y + i as i32 * lh;
+        if Some(i) == highlight {
+            c.fill_rect(Rect::new(rect.x, y, DISASM_GUTTER, lh), theme.current);
+        }
+        if bps.contains(row.addr) {
+            let cy = y + lh / 2;
+            c.fill_rect(Rect::new(rect.x + 1, cy - 2, 4, 4), theme.breakpoint);
+        }
+    }
     rows
 }
 
@@ -222,6 +248,271 @@ pub fn render_memory(
     let rows = memory_rows(read, start, count);
     let texts: Vec<&str> = rows.iter().map(String::as_str).collect();
     scroll_list(c, rect, &texts, 0, None, theme);
+}
+
+// ---------------------------------------------------------------------------
+// Interaction (RM4): per-window view state, click resolution, context menus.
+
+/// Per-window debugger view state (mirrors `vram::VramState`): which addresses
+/// each pane shows, the selected cursor, the follow-PC toggle, and an open
+/// context menu. Owned by `WinState::Debugger`, mutated by the click/hover
+/// hit-tests and read by the renderer. The breakpoint *set* is **not** here — it
+/// lives in the App-owned `dbg::Debugger` (both the key handler and the run loop
+/// consult it; see `docs/bgb-menu-design.md` RA1).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DebuggerState {
+    /// Disasm view base when [`pinned`](Self::pinned) (else the pane follows PC).
+    pub disasm_base: u16,
+    /// Memory-dump view base.
+    pub mem_base: u16,
+    /// Last-clicked address (the menu's cursor).
+    pub cursor: Option<u16>,
+    /// "Stay on bank and address": the disasm view stays put instead of
+    /// following PC (RM12).
+    pub pinned: bool,
+    /// An open right-click context menu, if any.
+    pub menu: Option<OpenMenu>,
+}
+
+impl Default for DebuggerState {
+    fn default() -> Self {
+        Self {
+            disasm_base: 0x0100,
+            mem_base: 0xFF00,
+            cursor: None,
+            pinned: false,
+            menu: None,
+        }
+    }
+}
+
+impl DebuggerState {
+    /// The address the disasm pane starts at: the pinned base, or PC when
+    /// following.
+    #[must_use]
+    pub fn disasm_start(&self, pc: u16) -> u16 {
+        if self.pinned { self.disasm_base } else { pc }
+    }
+}
+
+/// Which pane a click landed in, resolved to its address where meaningful — the
+/// pure result of [`target_at`], reused so a menu action and the rendering can
+/// never disagree about the clicked address.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClickTarget {
+    Disasm(u16),
+    Memory(u16),
+    Stack(u16),
+    Registers,
+    None,
+}
+
+/// What selecting a menu item does. Execution effects (`Act`) are returned to
+/// `main` to apply against the machine; view effects (`TogglePin`) mutate the
+/// window's own `DebuggerState`; `None` is a separator / disabled / not-yet-wired
+/// stub.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MenuChoice {
+    Act(DebugAction),
+    TogglePin,
+    None,
+}
+
+/// An open context menu: its origin, the rendered items, the parallel choice for
+/// each, and the hovered row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpenMenu {
+    pub origin: (i32, i32),
+    pub items: Vec<MenuItem>,
+    pub choices: Vec<MenuChoice>,
+    pub hovered: Option<usize>,
+}
+
+impl OpenMenu {
+    /// The choice under `(px, py)`, if it lands on an enabled item.
+    #[must_use]
+    pub fn choice_at(&self, px: i32, py: i32) -> Option<MenuChoice> {
+        menu::item_at(self.origin, &self.items, px, py).map(|i| self.choices[i])
+    }
+
+    /// Update the hovered row; returns whether it changed (so the loop only
+    /// redraws on a real change).
+    pub fn hover_at(&mut self, px: i32, py: i32) -> bool {
+        let new = menu::item_at(self.origin, &self.items, px, py);
+        let changed = self.hovered != new;
+        self.hovered = new;
+        changed
+    }
+}
+
+/// Resolve a click at `(px, py)` to the pane + address under it. Re-runs
+/// `disasm_rows` from the same view-base the renderer used (variable-length
+/// instructions ⇒ fixed pixel math can't work), so hit-test and render agree.
+#[must_use]
+pub fn target_at(
+    read: impl Fn(u16) -> u8,
+    area: Rect,
+    st: &DebuggerState,
+    pc: u16,
+    sp: u16,
+    px: i32,
+    py: i32,
+) -> ClickTarget {
+    let l = DebuggerLayout::for_size(area.w, area.h);
+    let lh = line_height().max(1);
+    if l.disasm.contains(px, py) {
+        let row = ((py - l.disasm.y) / lh) as usize;
+        let rows = disasm_rows(read, st.disasm_start(pc), row + 1);
+        return rows
+            .get(row)
+            .map_or(ClickTarget::None, |r| ClickTarget::Disasm(r.addr));
+    }
+    if l.memory.contains(px, py) {
+        let row = ((py - l.memory.y) / lh) as u16;
+        return ClickTarget::Memory(st.mem_base.wrapping_add(row.wrapping_mul(16)));
+    }
+    if l.stack.contains(px, py) {
+        let row = ((py - l.stack.y) / lh) as u16;
+        return ClickTarget::Stack(sp.wrapping_sub(row.wrapping_mul(2)));
+    }
+    if l.regs.contains(px, py) {
+        return ClickTarget::Registers;
+    }
+    ClickTarget::None
+}
+
+/// Build the context menu for a right-click `target`, item-for-item as bgb's
+/// captures (`docs/bgb-reference/menus/rc-*.png`). Items whose action isn't
+/// wired yet (Go to / copy / modify / watchpoints / register edit — later
+/// milestones) render **disabled** (greyed) so the menu structure matches bgb
+/// while only the working subset is selectable. `None` for a pane with no menu.
+#[must_use]
+pub fn menu_for(target: ClickTarget, st: &DebuggerState, origin: (i32, i32)) -> Option<OpenMenu> {
+    let entries: Vec<(MenuItem, MenuChoice)> = match target {
+        ClickTarget::Disasm(addr) => disasm_entries(addr, st, true),
+        ClickTarget::Memory(addr) => disasm_entries(addr, st, false),
+        ClickTarget::Stack(_) => stack_entries(),
+        ClickTarget::Registers => vec![disabled("edit register")],
+        ClickTarget::None => return None,
+    };
+    let (items, choices) = entries.into_iter().unzip();
+    Some(OpenMenu {
+        origin,
+        items,
+        choices,
+        hovered: None,
+    })
+}
+
+/// A greyed, not-yet-wired item.
+fn disabled(label: &str) -> (MenuItem, MenuChoice) {
+    (MenuItem::new(label).disabled(), MenuChoice::None)
+}
+
+/// The disasm (rc-disasm.png) / memory (rc-memory.png) right-click menu — the
+/// memory variant drops `force code view`. `addr` is the clicked cursor.
+fn disasm_entries(addr: u16, st: &DebuggerState, is_disasm: bool) -> Vec<(MenuItem, MenuChoice)> {
+    let mut v = vec![
+        (
+            MenuItem::new("Go to…").shortcut("Ctrl+G").disabled(),
+            MenuChoice::None,
+        ),
+        disabled("Modify code/data"),
+        disabled("Copy data"),
+        disabled("Copy code"),
+        disabled("Insert size"),
+    ];
+    if is_disasm {
+        v.push(disabled("force code view"));
+    }
+    v.push((
+        MenuItem::new("Stay on bank and address").checked(st.pinned),
+        MenuChoice::TogglePin,
+    ));
+    v.push((
+        MenuItem::new("Run to cursor"),
+        MenuChoice::Act(DebugAction::RunToCursor(addr)),
+    ));
+    v.push(disabled("Jump to cursor"));
+    v.push(disabled("Call cursor"));
+    v.push(disabled("Set watchpoint…"));
+    v.push((
+        MenuItem::new("Set break/condition…"),
+        MenuChoice::Act(DebugAction::ToggleBreakpoint(addr)),
+    ));
+    v
+}
+
+/// The stack pane (rc-stack.png) right-click menu — all items land in later
+/// milestones, so every row is greyed for now.
+fn stack_entries() -> Vec<(MenuItem, MenuChoice)> {
+    vec![
+        (
+            MenuItem::new("Go to…").shortcut("Ctrl+G").disabled(),
+            MenuChoice::None,
+        ),
+        disabled("Modify data"),
+        disabled("Code go here"),
+        disabled("Data go here"),
+    ]
+}
+
+/// Handle a left-click. With a menu open, any click closes it and an enabled
+/// item performs its [`MenuChoice`] (execution actions return a [`DebugAction`]
+/// for `main`; `TogglePin` is a view effect handled here). With no menu open, a
+/// left-click selects the clicked line (sets the cursor). Pure over `read` + the
+/// register snapshot, so it tests headless.
+pub fn on_left_click(
+    read: impl Fn(u16) -> u8,
+    area: Rect,
+    st: &mut DebuggerState,
+    pc: u16,
+    sp: u16,
+    px: i32,
+    py: i32,
+) -> Option<DebugAction> {
+    if let Some(om) = st.menu.take() {
+        return match om.choice_at(px, py) {
+            Some(MenuChoice::Act(action)) => Some(action),
+            Some(MenuChoice::TogglePin) => {
+                // Freeze the disasm view where it currently sits when pinning on.
+                if !st.pinned {
+                    st.disasm_base = pc;
+                }
+                st.pinned = !st.pinned;
+                None
+            }
+            _ => None, // disabled item or click-away: just dismiss
+        };
+    }
+    if let ClickTarget::Disasm(a) | ClickTarget::Memory(a) | ClickTarget::Stack(a) =
+        target_at(read, area, st, pc, sp, px, py)
+    {
+        st.cursor = Some(a);
+    }
+    None
+}
+
+/// Handle a right-click: open the clicked pane's context menu at the cursor (and
+/// select that line), or dismiss an already-open menu. Pure over `read`.
+pub fn on_right_click(
+    read: impl Fn(u16) -> u8,
+    area: Rect,
+    st: &mut DebuggerState,
+    pc: u16,
+    sp: u16,
+    px: i32,
+    py: i32,
+) {
+    if st.menu.is_some() {
+        st.menu = None;
+        return;
+    }
+    let target = target_at(read, area, st, pc, sp, px, py);
+    if let ClickTarget::Disasm(a) | ClickTarget::Memory(a) | ClickTarget::Stack(a) = target {
+        st.cursor = Some(a);
+    }
+    st.menu = menu_for(target, st, (px, py));
 }
 
 #[cfg(test)]

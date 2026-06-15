@@ -5,6 +5,7 @@
 
 pub mod canvas;
 pub mod font;
+pub mod menu;
 pub mod registry;
 pub mod text;
 pub mod widgets;

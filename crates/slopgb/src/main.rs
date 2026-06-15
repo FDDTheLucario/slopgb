@@ -602,22 +602,41 @@ impl App {
         self.session.gb.drain_audio(&mut self.discard_buf);
     }
 
-    /// Emulate enough frames to keep the audio queue at its fill target.
-    fn run_audio_paced(&mut self) -> u32 {
-        let Some(pipe) = &mut self.audio else {
-            return 0;
-        };
+    /// Whether the debugger is "armed": its window is open and at least one
+    /// breakpoint is set, so the free-run loop watches for a halt.
+    fn dbg_armed(&self) -> bool {
+        self.tools.is_open(ui::ToolWindow::Debugger) && !self.dbg.breakpoints().is_empty()
+    }
+
+    /// The breakpoint PC list to watch this wake, or `None` when not armed (the
+    /// pacers then run plain frames). Computed once before the pacing loop so it
+    /// doesn't re-borrow `self` while the audio pipe is held.
+    fn run_breakpoints(&self) -> Option<Vec<u16>> {
+        self.dbg_armed().then(|| self.dbg.breakpoints().pc_list())
+    }
+
+    /// Emulate enough frames to keep the audio queue at its fill target. Returns
+    /// the frame count and whether a breakpoint halted emulation.
+    fn run_audio_paced(&mut self) -> (u32, bool) {
+        let bps = self.run_breakpoints();
         let mut frames = 0;
-        while frames < MAX_FRAMES_PER_WAKE && pipe.needs_more() {
-            self.session.gb.run_frame();
-            pipe.pump(&mut self.session.gb);
-            frames += 1;
+        let mut hit = false;
+        {
+            let Some(pipe) = &mut self.audio else {
+                return (0, false);
+            };
+            while frames < MAX_FRAMES_PER_WAKE && pipe.needs_more() && !hit {
+                hit = run_one_frame(&mut self.session.gb, &bps);
+                pipe.pump(&mut self.session.gb);
+                frames += 1;
+            }
         }
-        frames
+        (frames, hit)
     }
 
     /// Emulate frames owed according to the wall clock at ~59.7275 Hz.
-    fn run_timer_paced(&mut self) -> u32 {
+    fn run_timer_paced(&mut self) -> (u32, bool) {
+        let bps = self.run_breakpoints();
         let now = Instant::now();
         // If we fell far behind (stall, drag, debugger), resync instead of
         // fast-forwarding through the backlog.
@@ -625,21 +644,24 @@ impl App {
             self.next_frame = now;
         }
         let mut frames = 0;
-        while frames < MAX_FRAMES_PER_WAKE && self.next_frame <= now {
-            self.session.gb.run_frame();
+        let mut hit = false;
+        while frames < MAX_FRAMES_PER_WAKE && self.next_frame <= now && !hit {
+            hit = run_one_frame(&mut self.session.gb, &bps);
             self.discard_audio();
             self.next_frame += FRAME_DURATION;
             frames += 1;
         }
-        frames
+        (frames, hit)
     }
 
     /// Turbo: emulate as much as fits in a small wall-clock budget.
-    fn run_turbo(&mut self) -> u32 {
+    fn run_turbo(&mut self) -> (u32, bool) {
+        let bps = self.run_breakpoints();
         let start = Instant::now();
         let mut frames = 0;
-        while start.elapsed() < TURBO_BUDGET {
-            self.session.gb.run_frame();
+        let mut hit = false;
+        while start.elapsed() < TURBO_BUDGET && !hit {
+            hit = run_one_frame(&mut self.session.gb, &bps);
             match &mut self.audio {
                 // The queue keeps ~250 ms and drops the rest.
                 Some(pipe) => pipe.pump(&mut self.session.gb),
@@ -648,7 +670,7 @@ impl App {
             frames += 1;
         }
         self.resync_pacing();
-        frames
+        (frames, hit)
     }
 
     /// Detect a dead or stalled cpal stream and fall back to wall-clock
@@ -679,6 +701,20 @@ impl App {
             self.fps_frames = 0;
             self.fps_since = Instant::now();
             self.update_title();
+        }
+    }
+}
+
+/// Run one frame, halting early at a breakpoint when armed. A free function (not
+/// a method) so the pacers can call it while the audio pipe holds `&mut
+/// self.audio` — borrowing only the machine, not all of `self`. Returns whether
+/// a breakpoint stopped the frame.
+fn run_one_frame(gb: &mut GameBoy, breakpoints: &Option<Vec<u16>>) -> bool {
+    match breakpoints {
+        Some(list) => gb.run_frame_until_breakpoint(list).is_some(),
+        None => {
+            gb.run_frame();
+            false
         }
     }
 }
@@ -750,9 +786,11 @@ impl ApplicationHandler for App {
                     self.tools.close(window_id);
                 }
                 WindowEvent::RedrawRequested | WindowEvent::Resized(_) => {
-                    self.tools.redraw(window_id, &self.session.gb);
+                    self.tools
+                        .redraw(window_id, &self.session.gb, self.dbg.breakpoints());
                 }
-                // Mouse drives the tool windows' tabs/checkboxes/details.
+                // Mouse drives the tool windows' tabs/checkboxes/details and the
+                // debugger's context menu (left selects/acts, right opens it).
                 WindowEvent::CursorMoved { position, .. } => {
                     self.tools
                         .on_cursor_moved(window_id, position.x, position.y);
@@ -760,9 +798,20 @@ impl ApplicationHandler for App {
                 WindowEvent::CursorLeft { .. } => self.tools.on_cursor_left(window_id),
                 WindowEvent::MouseInput {
                     state: ElementState::Pressed,
-                    button: MouseButton::Left,
+                    button,
                     ..
-                } => self.tools.on_mouse_left(window_id),
+                } if matches!(button, MouseButton::Left | MouseButton::Right) => {
+                    let action = if button == MouseButton::Left {
+                        self.tools.on_mouse_left(window_id, &self.session.gb)
+                    } else {
+                        self.tools.on_mouse_right(window_id, &self.session.gb)
+                    };
+                    if let Some(a) = action {
+                        self.dbg.apply(&mut self.session.gb, a);
+                        self.update_title();
+                        self.refresh_after_step();
+                    }
+                }
                 // Hotkeys (F2/F3/F4, pause, reset…) work from any window.
                 WindowEvent::KeyboardInput { event, .. } => self.handle_key(event_loop, &event),
                 _ => {}
@@ -796,13 +845,19 @@ impl ApplicationHandler for App {
             event_loop.set_control_flow(ControlFlow::Wait);
             return;
         }
-        let frames = if self.turbo {
+        let (frames, hit_bp) = if self.turbo {
             self.run_turbo()
         } else if self.audio.is_some() {
             self.run_audio_paced()
         } else {
             self.run_timer_paced()
         };
+        // A free-running breakpoint hit freezes the debugger; the top guard then
+        // idles to `Wait` on the next wake (bgb's halt-at-breakpoint).
+        if hit_bp {
+            self.dbg.set_broken(true);
+            self.update_title();
+        }
         // A dead stream would otherwise pin `frames` at 0 forever.
         self.check_audio_health(frames);
         if frames > 0 {

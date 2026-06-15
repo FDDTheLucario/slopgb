@@ -9,18 +9,22 @@ pub mod vram;
 
 use slopgb_core::{GameBoy, Model, debug};
 
+use crate::dbg::Breakpoints;
 use crate::ui::canvas::Rect;
 use crate::ui::text::{draw_text, line_height};
 use crate::ui::widgets::{checkbox, radio_group};
 use crate::ui::{Canvas, Theme, ToolWindow};
+use debugger::DebuggerState;
 use vram::{VramLayout, VramState, VramTab};
 
-/// Per-window interactive state. Only the VRAM viewer is stateful so far; the
-/// debugger and I/O map carry no UI state yet (their interaction lands later).
+/// Per-window interactive state. The VRAM viewer and the debugger carry view
+/// state (active tab / hover, or disasm cursor + open menu); the I/O map is
+/// stateless.
 #[derive(Clone, Debug)]
 pub enum WinState {
     Stateless,
     Vram(VramState),
+    Debugger(DebuggerState),
 }
 
 impl WinState {
@@ -29,7 +33,8 @@ impl WinState {
     pub fn new(kind: ToolWindow) -> Self {
         match kind {
             ToolWindow::Vram => WinState::Vram(VramState::default()),
-            _ => WinState::Stateless,
+            ToolWindow::Debugger => WinState::Debugger(DebuggerState::default()),
+            ToolWindow::IoMap => WinState::Stateless,
         }
     }
 }
@@ -38,11 +43,25 @@ impl WinState {
 /// persistent UI `state` — the single entry point the event loop's redraw calls
 /// (B12b). Pure (`&GameBoy`), so it tests headless against a real machine; the
 /// winit layer only has to hand it a surface buffer + the window's state.
-pub fn render(kind: ToolWindow, gb: &GameBoy, c: &mut Canvas, theme: &Theme, state: &WinState) {
+pub fn render(
+    kind: ToolWindow,
+    gb: &GameBoy,
+    c: &mut Canvas,
+    theme: &Theme,
+    state: &WinState,
+    bps: &Breakpoints,
+) {
     let area = c.bounds();
     c.fill_rect(area, theme.bg);
     match kind {
-        ToolWindow::Debugger => render_debugger(gb, c, area, theme),
+        ToolWindow::Debugger => {
+            let default = DebuggerState::default();
+            let st = match state {
+                WinState::Debugger(s) => s,
+                _ => &default,
+            };
+            render_debugger(gb, c, area, theme, st, bps);
+        }
         ToolWindow::Vram => {
             let default = VramState::default();
             let st = match state {
@@ -75,15 +94,27 @@ fn regs_view(gb: &GameBoy) -> debugger::RegsView {
     }
 }
 
-fn render_debugger(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme) {
+fn render_debugger(
+    gb: &GameBoy,
+    c: &mut Canvas,
+    area: Rect,
+    theme: &Theme,
+    st: &DebuggerState,
+    bps: &Breakpoints,
+) {
     let l = debugger::DebuggerLayout::for_size(area.w, area.h);
     let pc = gb.cpu_regs().pc;
-    // Disasm from PC; memory dump from the stack page; stack from SP.
-    debugger::render_disasm(c, l.disasm, |a| gb.debug_read(a), pc, pc, theme);
+    // Disasm follows PC (or the pinned base); memory + stack from their bases.
+    let start = st.disasm_start(pc);
+    debugger::render_disasm(c, l.disasm, |a| gb.debug_read(a), start, pc, bps, theme);
     debugger::render_regs(c, l.regs, &regs_view(gb), theme);
     let stack_rows = (l.stack.h / line_height()).max(0) as usize;
     debugger::render_stack(c, l.stack, &gb.stack(stack_rows), theme);
-    debugger::render_memory(c, l.memory, |a| gb.debug_read(a), 0xFF00, theme);
+    debugger::render_memory(c, l.memory, |a| gb.debug_read(a), st.mem_base, theme);
+    // The open context menu draws last, on top of every pane.
+    if let Some(om) = &st.menu {
+        crate::ui::menu::render(c, om.origin, &om.items, om.hovered, theme);
+    }
 }
 
 /// Tile-grid scale for the Tiles tab, and OAM-cell preview scale.

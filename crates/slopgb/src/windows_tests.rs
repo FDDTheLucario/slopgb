@@ -14,7 +14,14 @@ fn render_each_tool_window_fills_background_and_draws_content() {
         let mut buf = vec![0xDEAD_BEEF_u32; w * h];
         {
             let mut c = Canvas::new(&mut buf, w, h);
-            render(kind, &gb, &mut c, &theme, &WinState::new(kind));
+            render(
+                kind,
+                &gb,
+                &mut c,
+                &theme,
+                &WinState::new(kind),
+                &Breakpoints::default(),
+            );
         }
         // The whole surface was painted (no leftover sentinel) and the window
         // background + some text ink are present.
@@ -41,7 +48,14 @@ fn vram_render_routes_each_tab_and_shows_hover_details() {
             ..VramState::default()
         });
         let mut c = Canvas::new(&mut buf, w, h);
-        render(ToolWindow::Vram, &gb, &mut c, &theme, &st);
+        render(
+            ToolWindow::Vram,
+            &gb,
+            &mut c,
+            &theme,
+            &st,
+            &Breakpoints::default(),
+        );
         buf
     };
     // Each tab routes to a different renderer, so their buffers differ.
@@ -80,6 +94,7 @@ fn render_is_side_effect_free_on_the_machine() {
         &mut c,
         &Theme::BGB,
         &WinState::Stateless,
+        &Breakpoints::default(),
     );
     assert_eq!((gb.cycles(), gb.frame_count(), gb.cpu_regs().pc), before);
 }

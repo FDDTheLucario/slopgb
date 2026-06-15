@@ -79,3 +79,47 @@ fn step_over_a_plain_instruction_is_one_step() {
     d.step_over(&mut gb);
     assert_eq!(gb.cpu_regs().pc, 0x0101, "single-stepped a nop");
 }
+
+#[test]
+fn breakpoints_toggle_on_off_and_report() {
+    let mut bp = Breakpoints::default();
+    assert!(bp.is_empty());
+    assert!(bp.toggle(0x0150), "first toggle sets it");
+    assert!(bp.contains(0x0150));
+    assert!(!bp.is_empty());
+    assert_eq!(bp.pc_list(), vec![0x0150]);
+    assert!(!bp.toggle(0x0150), "second toggle clears it");
+    assert!(!bp.contains(0x0150));
+    assert!(bp.is_empty());
+}
+
+#[test]
+fn pc_list_is_sorted_and_deduped() {
+    let mut bp = Breakpoints::default();
+    bp.toggle(0x0200);
+    bp.toggle(0x0100);
+    bp.toggle(0x0200); // clears 0x0200
+    bp.toggle(0x0150);
+    assert_eq!(bp.pc_list(), vec![0x0100, 0x0150], "sorted, 0x0200 removed");
+}
+
+#[test]
+fn apply_toggle_breakpoint_updates_the_set() {
+    let mut d = Debugger::default();
+    let mut gb = machine(call_rom());
+    d.apply(&mut gb, DebugAction::ToggleBreakpoint(0x0150));
+    assert!(d.breakpoints().contains(0x0150));
+    d.apply(&mut gb, DebugAction::ToggleBreakpoint(0x0150));
+    assert!(!d.breakpoints().contains(0x0150));
+}
+
+#[test]
+fn apply_run_to_cursor_stops_at_the_address_and_breaks() {
+    let mut d = Debugger::default();
+    let mut gb = machine(call_rom());
+    assert_eq!(gb.cpu_regs().pc, 0x0100);
+    // 0x0100 call -> 0x0150 (subroutine). Run to 0x0150.
+    d.apply(&mut gb, DebugAction::RunToCursor(0x0150));
+    assert_eq!(gb.cpu_regs().pc, 0x0150, "ran to the cursor address");
+    assert!(d.is_broken(), "run-to-cursor halts the debugger there");
+}

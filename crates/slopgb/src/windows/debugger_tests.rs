@@ -93,11 +93,13 @@ fn render_disasm_highlights_the_pc_row() {
             mem,
             0x100,
             0x102,
+            &Breakpoints::default(),
             &t,
         );
     }
     assert!(rows.iter().any(|r| r.addr == 0x102));
-    // The 3rd row (index 2) carries the blue current-PC bar.
+    // The 3rd row (index 2) carries the blue current-PC bar (the bar reaches
+    // across the gutter to x=0).
     assert_eq!(buf[(2 * lh) * w], t.current, "PC row highlighted");
     assert_ne!(buf[0], t.current, "first row not highlighted");
 }
@@ -157,4 +159,273 @@ fn memory_rows_dump_sixteen_bytes_per_line() {
     assert_eq!(rows.len(), 2);
     assert!(rows[0].starts_with("ROM0:0000 00 01 02 03 04 05 06 07  08"));
     assert!(rows[1].starts_with("ROM0:0010 10 11 12 13"));
+}
+
+// --- interaction (RM4 / RM6 / RM7 / RM12) ---------------------------------
+
+use crate::ui::canvas::Canvas;
+use crate::ui::menu::menu_rects;
+use crate::ui::text::line_height;
+
+/// The default debugger window size, partitioned the way `render_debugger` does.
+const AREA: Rect = Rect::new(0, 0, 760, 560);
+const NOPS: fn(u16) -> u8 = |_| 0x00; // every line a 1-byte nop
+
+#[test]
+fn render_disasm_draws_a_red_gutter_dot_on_breakpoint_rows() {
+    use crate::ui::Theme;
+    let t = Theme::BGB;
+    let lh = line_height() as usize;
+    let (w, h) = (200usize, lh * 4);
+    let mut buf = vec![0x00AA_AAAA_u32; w * h];
+    let mut bps = Breakpoints::default();
+    bps.toggle(0x0101); // rows are 0x100,0x101,... -> dot on visible row 1
+    {
+        let mut c = Canvas::new(&mut buf, w, h);
+        render_disasm(
+            &mut c,
+            Rect::new(0, 0, w as i32, h as i32),
+            NOPS,
+            0x0100,
+            0x0100,
+            &bps,
+            &t,
+        );
+    }
+    // A red pixel sits in the gutter (x in 1..GUTTER) of row 1; row 0 has none.
+    let dot_y = lh + lh / 2;
+    assert_eq!(buf[dot_y * w + 1], t.breakpoint, "breakpoint dot on row 1");
+    let no_dot_y = lh / 2;
+    assert_ne!(buf[no_dot_y * w + 1], t.breakpoint, "no dot on row 0");
+}
+
+#[test]
+fn target_at_resolves_each_pane_to_its_address() {
+    let l = DebuggerLayout::for_size(AREA.w, AREA.h);
+    let st = DebuggerState::default();
+    let lh = line_height();
+    // Disasm row 2 (all nops): 0x100 -> 0x101 -> 0x102.
+    let t = target_at(
+        NOPS,
+        AREA,
+        &st,
+        0x0100,
+        0xFFFE,
+        l.disasm.x + 9,
+        l.disasm.y + 2 * lh + 1,
+    );
+    assert_eq!(t, ClickTarget::Disasm(0x0102));
+    // Memory row 1 from the 0xFF00 base: 0xFF00 + 16.
+    let t = target_at(
+        NOPS,
+        AREA,
+        &st,
+        0x0100,
+        0xFFFE,
+        l.memory.x + 9,
+        l.memory.y + lh,
+    );
+    assert_eq!(t, ClickTarget::Memory(0xFF10));
+    // Stack row 1 descends by 2 from SP.
+    let t = target_at(
+        NOPS,
+        AREA,
+        &st,
+        0x0100,
+        0xFFFE,
+        l.stack.x + 5,
+        l.stack.y + lh,
+    );
+    assert_eq!(t, ClickTarget::Stack(0xFFFC));
+    // Registers pane: just the pane id.
+    let t = target_at(NOPS, AREA, &st, 0x0100, 0xFFFE, l.regs.x + 5, l.regs.y + 5);
+    assert_eq!(t, ClickTarget::Registers);
+}
+
+#[test]
+fn pinned_disasm_follows_the_base_not_pc() {
+    let st = DebuggerState {
+        pinned: true,
+        disasm_base: 0x0200,
+        ..DebuggerState::default()
+    };
+    let l = DebuggerLayout::for_size(AREA.w, AREA.h);
+    // Row 0 resolves to the pinned base, not PC (0x0100).
+    let t = target_at(
+        NOPS,
+        AREA,
+        &st,
+        0x0100,
+        0xFFFE,
+        l.disasm.x + 9,
+        l.disasm.y + 1,
+    );
+    assert_eq!(t, ClickTarget::Disasm(0x0200));
+}
+
+#[test]
+fn right_click_opens_the_matching_pane_menu_and_sets_the_cursor() {
+    let l = DebuggerLayout::for_size(AREA.w, AREA.h);
+    let lh = line_height();
+    // Disasm pane -> the 12-item rc-disasm menu, cursor at the clicked row.
+    let mut st = DebuggerState::default();
+    on_right_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        l.disasm.x + 9,
+        l.disasm.y + 2 * lh + 1,
+    );
+    let om = st.menu.as_ref().expect("disasm menu opened");
+    assert_eq!(om.items.len(), 12, "rc-disasm has 12 items");
+    assert_eq!(st.cursor, Some(0x0102));
+    // Memory pane -> 11 items (rc-disasm minus "force code view").
+    let mut st = DebuggerState::default();
+    on_right_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        l.memory.x + 9,
+        l.memory.y + lh,
+    );
+    assert_eq!(st.menu.as_ref().unwrap().items.len(), 11);
+    // Stack -> 4, registers -> 1.
+    let mut st = DebuggerState::default();
+    on_right_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        l.stack.x + 5,
+        l.stack.y + lh,
+    );
+    assert_eq!(st.menu.as_ref().unwrap().items.len(), 4);
+    let mut st = DebuggerState::default();
+    on_right_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        l.regs.x + 5,
+        l.regs.y + 5,
+    );
+    assert_eq!(st.menu.as_ref().unwrap().items.len(), 1);
+}
+
+/// Open the disasm menu at the cursor and return (state, item rects) for clicking.
+fn open_disasm_menu() -> (DebuggerState, Vec<Rect>) {
+    let l = DebuggerLayout::for_size(AREA.w, AREA.h);
+    let lh = line_height();
+    let mut st = DebuggerState::default();
+    on_right_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        l.disasm.x + 9,
+        l.disasm.y + 2 * lh + 1,
+    );
+    let om = st.menu.as_ref().unwrap();
+    let rects = menu_rects(om.origin, &om.items);
+    (st, rects)
+}
+
+#[test]
+fn selecting_set_break_returns_a_toggle_breakpoint_action() {
+    let (mut st, rects) = open_disasm_menu();
+    // "Set break/condition…" is the last (index 11) item; cursor is 0x0102.
+    let r = rects[11];
+    let action = on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+    );
+    assert_eq!(action, Some(DebugAction::ToggleBreakpoint(0x0102)));
+    assert!(st.menu.is_none(), "menu closes after a selection");
+}
+
+#[test]
+fn selecting_run_to_cursor_returns_a_run_action() {
+    let (mut st, rects) = open_disasm_menu();
+    let r = rects[7]; // "Run to cursor"
+    let action = on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+    );
+    assert_eq!(action, Some(DebugAction::RunToCursor(0x0102)));
+}
+
+#[test]
+fn stay_on_bank_toggles_pin_and_freezes_the_view() {
+    let (mut st, rects) = open_disasm_menu();
+    assert!(!st.pinned);
+    let r = rects[6]; // "Stay on bank and address"
+    let action = on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+    );
+    assert_eq!(action, None, "pin is a view effect, no machine action");
+    assert!(st.pinned, "pin turned on");
+    assert_eq!(st.disasm_base, 0x0100, "froze the view at the current PC");
+    assert!(st.menu.is_none());
+}
+
+#[test]
+fn clicking_a_disabled_item_or_away_just_closes_the_menu() {
+    // A disabled row ("Copy data", index 2) selects nothing.
+    let (mut st, rects) = open_disasm_menu();
+    let r = rects[2];
+    let action = on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+    );
+    assert_eq!(action, None);
+    assert!(st.menu.is_none(), "disabled item dismisses the menu");
+    // A click far outside the menu also dismisses it.
+    let (mut st, _) = open_disasm_menu();
+    let action = on_left_click(NOPS, AREA, &mut st, 0x0100, 0xFFFE, 5, 5);
+    assert_eq!(action, None);
+    assert!(st.menu.is_none(), "click-away dismisses the menu");
+}
+
+#[test]
+fn right_click_with_a_menu_open_dismisses_it() {
+    let (mut st, _) = open_disasm_menu();
+    let l = DebuggerLayout::for_size(AREA.w, AREA.h);
+    on_right_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        l.disasm.x + 9,
+        l.disasm.y + 1,
+    );
+    assert!(st.menu.is_none(), "a second right-click closes the menu");
 }
