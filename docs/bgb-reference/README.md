@@ -136,7 +136,15 @@ opcodes at 0x0150) in bgb and reading its debugger. Rules slopgb's disassembler 
 4. `import -window root /tmp/r.png` (IM7 `-window` rejects numeric ids — capture root),
    then crop to each window's `xdotool getwindowgeometry --shell <id>`. Raise/activate the
    target first (`xdotool windowraise; windowactivate --sync`). VRAM tabs: `xdotool
-   mousemove --sync X Y click 1` on the tab. (bgb's right-click menu and menu-bar dropdowns
-   do **not** open under synthetic wine clicks — capture menu *items* from the manual if
-   needed; the panels above are what matters.)
-5. Restore `bgb.ini`, `pkill -9 -f bgb64.exe`.
+   mousemove --sync X Y click 1` on the tab.
+5. **Context + menu-bar menus DO open under synthetic clicks** (an earlier note here was
+   wrong): `xdotool mousemove --sync X Y click 3` opens the pane's right-click menu;
+   `click 1` on a menu-bar item opens its dropdown. `import -window root` then crop around
+   the click; `xdotool key Escape` dismisses. Captured menus live in
+   [`menus/`](menus/) → spec/plan in [`../bgb-rclick-menu-plan.md`](../bgb-rclick-menu-plan.md).
+6. Restore `bgb.ini`, `pkill -9 -f bgb64.exe`.
+
+**Known flake:** bgb can crash at startup under wine with `X Error … X_OpenDevice
+XI_BadDevice` (a flaky XInput2 device). It's intermittent — `wineserver -k` + retry, or
+relaunch from an interactive shell (`! wine bgb64.exe <rom>`); it ran fine repeatedly earlier
+the same session.

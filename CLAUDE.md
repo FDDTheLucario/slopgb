@@ -4,7 +4,15 @@ Cycle-accurate GB/GBC emulator. Workspace: `crates/slopgb-core` (emulator, zero 
 
 **Read `docs/ARCHITECTURE.md` before touching core** — timing contract (tick-then-access M-cycles), memory map, module ownership, mooneye + game-boy-test-roms harness protocols.
 
-**Debugger/viewer UI** (bgb functional-clone, branch `bgb-ui`): **F2/F3/F4** open the debugger / VRAM viewer / I/O map (or `SLOPGB_OPEN_TOOLS=debugger,vram,iomap`). Read-only introspection lives in `slopgb_core::debug` (std-only, side-effect-free `&self` — golden-safe); the frontend renders it on softbuffer (`ui::` toolkit + `windows::` content + `toolwin::` multi-window). The **VRAM viewer is interactive**: per-window `WinState` in `windows.rs`, mouse routed `main` → `toolwin` → pure `vram::on_click`/`on_hover` hit-tests against a pure `vram::layout` (clicks switch tab / toggle Grid·show-paletted·scxy / pick Map·Tiles source radios; hover fills the cell-details panel). Tool windows render at **physical pixels**, so cursor coords hit-test directly (no scale conversion). The **Tiles tab renders grey** (a raw tile has no inherent palette — bgb does the same; do not map it through BG palette 0). Plan: [`docs/bgb-clone-plan.md`](docs/bgb-clone-plan.md). Real-screenshot spec + re-capture rig: [`docs/bgb-reference/`](docs/bgb-reference/README.md) — **never invent bgb's UI; capture it** (bgb runs under wine on this machine). To screenshot slopgb's own windows, `import -window "slopgb — debugger"` (XGetImage by title) — `import -window root` misses them under a compositor. **Synthetic xdotool clicks DO reach the winit windows** (so tab/checkbox UX is capture-verifiable); synthetic keys do not.
+**Debugger/viewer UI** (bgb functional-clone, branch `bgb-ui`): **F2/F3/F4** open the debugger / VRAM viewer / I/O map (or `SLOPGB_OPEN_TOOLS=debugger,vram,iomap`); the debugger also drives execution (F9 break, F7 step, F8 step-over). Read-only introspection lives in `slopgb_core::debug` (std-only, side-effect-free `&self` — golden-safe); the frontend renders it on softbuffer — `ui::` toolkit + `windows::` content (per-window `WinState`, pure `layout`/`on_click`/`on_hover` hit-tests) + `toolwin::`/`dbg::`. The VRAM viewer is interactive (tab/checkbox/radio clicks + hover details).
+
+**Never invent bgb's UI — capture it** (bgb runs under wine here). Plans: [`docs/bgb-clone-plan.md`](docs/bgb-clone-plan.md) (windows), [`docs/bgb-rclick-menu-plan.md`](docs/bgb-rclick-menu-plan.md) (menus). Real-screenshot spec + re-capture rig + gotchas: [`docs/bgb-reference/`](docs/bgb-reference/README.md) (captured bgb menus in [`menus/`](docs/bgb-reference/menus/)).
+
+| To screenshot | How |
+|---|---|
+| slopgb's own windows | `import -window "slopgb — debugger"` (by title; `-window root` misses them under a compositor) |
+| slopgb tab/checkbox UX | synthetic xdotool **clicks** reach winit windows (keys do **not**) |
+| bgb's menus | synthetic wine clicks DO open them — `click 3` (right-click menu), menubar `click 1` (dropdown) |
 
 ## Rules
 
