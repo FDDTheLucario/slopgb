@@ -7,5 +7,10 @@
 #![allow(dead_code, unused_imports)]
 
 pub mod canvas;
+pub mod font;
 
 pub use canvas::{Canvas, Rect};
+
+#[cfg(test)]
+#[path = "ui/font_tests.rs"]
+mod font_tests;
