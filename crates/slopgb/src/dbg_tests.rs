@@ -35,6 +35,30 @@ fn is_subroutine_call_matches_call_and_rst_only() {
     assert!(!is_subroutine_call(0xC9), "ret");
 }
 
+/// A ROM that writes 0x42 to 0xC000 then self-loops (for the watchpoint test).
+fn write_c000_rom() -> Vec<u8> {
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x0100..0x0107].copy_from_slice(&[0x3E, 0x42, 0xEA, 0x00, 0xC0, 0x18, 0xFE]);
+    rom
+}
+
+#[test]
+fn apply_toggle_watchpoint_arms_and_halts_the_free_run() {
+    let mut d = Debugger::default();
+    let mut gb = machine(write_c000_rom());
+    assert!(d.watchpoints().is_empty());
+    d.apply(&mut gb, DebugAction::ToggleWatchpoint(0xC000));
+    assert!(
+        d.watchpoints().list().iter().any(|w| w.addr == 0xC000),
+        "watchpoint armed"
+    );
+    // The write to 0xC000 now halts the free run at that address.
+    assert_eq!(gb.run_frame_until_breakpoint(&[]), Some(0xC000));
+    // Toggling again clears it (and pushes the empty set to the machine).
+    d.apply(&mut gb, DebugAction::ToggleWatchpoint(0xC000));
+    assert!(d.watchpoints().is_empty(), "watchpoint cleared");
+}
+
 #[test]
 fn apply_set_reg_set_pc_and_call_mutate_the_machine() {
     let mut d = Debugger::default();

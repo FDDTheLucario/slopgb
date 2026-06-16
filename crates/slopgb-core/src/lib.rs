@@ -49,6 +49,19 @@ pub const CYCLES_PER_FRAME: u32 = 70224;
 /// Master clock in Hz (T-cycles / dots per second, normal speed).
 pub const CLOCK_HZ: u32 = 4_194_304;
 
+/// A debugger memory watchpoint (bgb's "Set watchpoint"): the free run halts
+/// after the CPU accesses `addr` with a matching access kind. A frontend/
+/// debugger control — the watch list defaults empty (zero overhead, no behavior
+/// change) and is never populated on a golden/test path, so it is golden-safe.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Watchpoint {
+    pub addr: u16,
+    /// Halt when the CPU reads `addr`.
+    pub read: bool,
+    /// Halt when the CPU writes `addr`.
+    pub write: bool,
+}
+
 /// A CPU register pair the debugger can write via [`GameBoy::debug_set_reg`]
 /// (bgb's registers-pane "edit register"). The 8-bit halves are always edited
 /// as their 16-bit pair, matching bgb's `af`/`bc`/`de`/`hl`/`sp`/`pc` rows.
@@ -131,12 +144,26 @@ impl GameBoy {
         let deadline = self.bus.cycles().wrapping_add(u64::from(CYCLES_PER_FRAME));
         while self.bus.frame_count() != target && self.bus.cycles() < deadline {
             self.step();
+            // A memory watchpoint hit during the step halts here (RM8); the
+            // returned address is the watched location. Always `None` when no
+            // watchpoint is set, so this is inert on a plain run.
+            if let Some(addr) = self.bus.take_watch_hit() {
+                return Some(addr);
+            }
             let pc = self.cpu_regs().pc;
             if breakpoints.contains(&pc) {
                 return Some(pc);
             }
         }
         None
+    }
+
+    /// Set (replacing any previous) the debugger memory watchpoints the free run
+    /// halts on (bgb's "Set watchpoint"). A live-debugger-only control — the list
+    /// defaults empty and is never set on a golden/test path, so it is
+    /// golden-safe (an empty list is a zero-overhead no-op in the access path).
+    pub fn set_watchpoints(&mut self, wps: &[Watchpoint]) {
+        self.bus.set_watchpoints(wps);
     }
 
     /// XRGB8888 pixels of the most recently completed frame, row-major.
@@ -425,6 +452,45 @@ mod tests {
             assert_eq!(r.de(), 0x0008, "{model:?} DMG cart DE");
             assert_eq!(r.hl(), 0x007C, "{model:?} DMG cart HL");
         }
+    }
+
+    /// A ROM that writes 0x42 to 0xC000 then self-loops:
+    /// `ld a,42 ; ld (C000),a ; jr -2`.
+    fn write_c000_rom() -> Vec<u8> {
+        let mut rom = vec![0u8; 0x8000];
+        rom[0x0100..0x0107].copy_from_slice(&[0x3E, 0x42, 0xEA, 0x00, 0xC0, 0x18, 0xFE]);
+        rom
+    }
+
+    #[test]
+    fn watchpoint_halts_the_free_run_on_a_matching_access() {
+        let mut gb = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
+        gb.set_watchpoints(&[Watchpoint {
+            addr: 0xC000,
+            read: false,
+            write: true,
+        }]);
+        // The write to 0xC000 halts the frame at that address.
+        assert_eq!(gb.run_frame_until_breakpoint(&[]), Some(0xC000));
+    }
+
+    #[test]
+    fn watchpoint_kind_and_emptiness_are_respected() {
+        // A read-only watchpoint at 0xC000 does NOT fire on the write.
+        let mut gb = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
+        gb.set_watchpoints(&[Watchpoint {
+            addr: 0xC000,
+            read: true,
+            write: false,
+        }]);
+        assert_eq!(
+            gb.run_frame_until_breakpoint(&[]),
+            None,
+            "a read watchpoint ignores the write"
+        );
+        // Golden-safety: with no watchpoints set, the frame runs to completion.
+        let mut gb = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
+        assert_eq!(gb.run_frame_until_breakpoint(&[]), None);
     }
 
     #[test]

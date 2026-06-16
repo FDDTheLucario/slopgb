@@ -8,7 +8,7 @@
 
 use std::collections::BTreeSet;
 
-use slopgb_core::{DebugReg, GameBoy, debug};
+use slopgb_core::{DebugReg, GameBoy, Watchpoint, debug};
 
 /// The set of PC breakpoints the free-run loop halts on. Lives in the
 /// App-owned [`Debugger`] (not the per-window view state) because both the key
@@ -46,6 +46,43 @@ impl Breakpoints {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.pc.is_empty()
+    }
+}
+
+/// The debugger's memory watchpoints (RM8), App-owned beside [`Breakpoints`]
+/// because the free-run loop consults them. Each "Set watchpoint" toggles a
+/// **write** watchpoint at the cursor (bgb's common "break when this changes").
+#[derive(Default, Clone, Debug)]
+pub struct Watchpoints {
+    items: Vec<Watchpoint>,
+}
+
+impl Watchpoints {
+    /// Toggle a write watchpoint at `addr`; returns whether it is now set.
+    pub fn toggle_write(&mut self, addr: u16) -> bool {
+        if let Some(i) = self.items.iter().position(|w| w.addr == addr) {
+            self.items.remove(i);
+            false
+        } else {
+            self.items.push(Watchpoint {
+                addr,
+                read: false,
+                write: true,
+            });
+            true
+        }
+    }
+
+    /// The watchpoints, for [`GameBoy::set_watchpoints`] and the manager dialog.
+    #[must_use]
+    pub fn list(&self) -> &[Watchpoint] {
+        &self.items
+    }
+
+    /// Whether no watchpoint is set (the free-run loop stays a plain `run_frame`).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
     }
 }
 
@@ -92,6 +129,8 @@ pub enum DebugAction {
     Call(u16),
     /// Write a register pair (`edit register`, RM11).
     SetReg(RegField, u16),
+    /// Toggle a write watchpoint at the address (`Set watchpoint`, RM8).
+    ToggleWatchpoint(u16),
 }
 
 /// Debugger run-state owned by the event loop. When `broken`, the paced loop
@@ -100,6 +139,7 @@ pub enum DebugAction {
 pub struct Debugger {
     broken: bool,
     bps: Breakpoints,
+    wps: Watchpoints,
 }
 
 /// Upper bound on instructions a single step-over runs before giving up, so a
@@ -139,6 +179,12 @@ impl Debugger {
         &self.bps
     }
 
+    /// The watchpoint set (read — for the free-run arm check + the manager).
+    #[must_use]
+    pub fn watchpoints(&self) -> &Watchpoints {
+        &self.wps
+    }
+
     /// Apply a [`DebugAction`] from a menu item or pane click against the live
     /// machine. `Run to cursor` halts at the cursor afterward (bgb's behavior).
     pub fn apply(&mut self, gb: &mut GameBoy, action: DebugAction) {
@@ -153,6 +199,10 @@ impl Debugger {
             DebugAction::SetPc(addr) => gb.debug_set_pc(addr),
             DebugAction::Call(addr) => gb.debug_call(addr),
             DebugAction::SetReg(field, value) => gb.debug_set_reg(field.to_core(), value),
+            DebugAction::ToggleWatchpoint(addr) => {
+                self.wps.toggle_write(addr);
+                gb.set_watchpoints(self.wps.list());
+            }
         }
     }
 

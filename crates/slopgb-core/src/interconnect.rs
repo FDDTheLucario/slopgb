@@ -294,6 +294,12 @@ pub struct Interconnect {
     timer: Timer,
     serial: Serial,
     joypad: Joypad,
+    /// Debugger memory watchpoints (RM8). Empty on every golden/test path, so
+    /// [`Self::check_watch`] is a zero-cost no-op there (golden-safe).
+    watchpoints: Vec<crate::Watchpoint>,
+    /// Address of the most recent watchpoint-matching CPU access, consumed by
+    /// the free-run loop ([`crate::GameBoy::run_frame_until_breakpoint`]).
+    watch_hit: Option<u16>,
     /// Elapsed T-cycles since power-on (normal-speed dots).
     cycles: u64,
 
@@ -504,6 +510,8 @@ impl Interconnect {
             // in DMG compatibility mode SC reads $7E (misc/boot_hwio-C).
             serial: Serial::new(cgb_mode),
             joypad: Joypad::new(sgb_joypad),
+            watchpoints: Vec::new(),
+            watch_hit: None,
             cycles: 0,
             cgb_mode,
             double_speed: false,
@@ -580,6 +588,31 @@ impl Interconnect {
 
     pub fn apu(&self) -> &Apu {
         &self.apu
+    }
+
+    /// Replace the debugger memory watchpoints (RM8). Empty disables the
+    /// access-path check entirely (golden-safe).
+    pub fn set_watchpoints(&mut self, wps: &[crate::Watchpoint]) {
+        self.watchpoints = wps.to_vec();
+        self.watch_hit = None;
+    }
+
+    /// Take the pending watchpoint hit address (cleared by the read).
+    pub fn take_watch_hit(&mut self) -> Option<u16> {
+        self.watch_hit.take()
+    }
+
+    /// Flag a watchpoint hit if `addr` is watched for this access kind. A
+    /// no-op (one branch on an empty Vec) whenever no watchpoint is set.
+    fn check_watch(&mut self, addr: u16, is_write: bool) {
+        if self.watchpoints.is_empty() {
+            return;
+        }
+        if self.watchpoints.iter().any(|w| {
+            w.addr == addr && if is_write { w.write } else { w.read }
+        }) {
+            self.watch_hit = Some(addr);
+        }
     }
 
     /// Debugger memory write: store `value` at `addr` with no M-cycle timing
@@ -687,6 +720,7 @@ impl Bus for Interconnect {
         // in flight commit first).
         self.service_vram_dma();
         self.maybe_oam_bug(addr, OamBugKind::Read);
+        self.check_watch(addr, false);
         self.read_no_tick(addr)
     }
 
@@ -706,6 +740,7 @@ impl Bus for Interconnect {
         // Corruption first, then the (mode-blocked) write attempt — during
         // the scan the CPU byte never lands (oam_write_blocked).
         self.maybe_oam_bug(addr, OamBugKind::Write);
+        self.check_watch(addr, true);
         self.write_no_tick(addr, value);
     }
 
@@ -725,6 +760,7 @@ impl Bus for Interconnect {
         self.tick_machine();
         self.service_vram_dma(); // reads yield to a same-cycle trigger
         self.maybe_oam_bug(addr, OamBugKind::ReadIncrease);
+        self.check_watch(addr, false);
         self.read_no_tick(addr)
     }
 

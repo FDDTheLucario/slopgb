@@ -544,6 +544,18 @@ fn jump_and_call_cursor_return_their_actions() {
 }
 
 #[test]
+fn set_watchpoint_menu_item_returns_a_toggle_action() {
+    // "Set watchpoint..." is index 10 (was greyed; now enabled, RM8); cursor 0x0102.
+    let (mut st, rects) = open_disasm_menu();
+    let r = rects[10];
+    let out = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
+    assert_eq!(
+        out,
+        Some(MenuOutcome::Act(DebugAction::ToggleWatchpoint(0x0102)))
+    );
+}
+
+#[test]
 fn editable_register_row_opens_a_seeded_prompt_and_writes_on_accept() {
     let l = DebuggerLayout::for_size(AREA.w, AREA.h);
     let mut st = DebuggerState::default();
