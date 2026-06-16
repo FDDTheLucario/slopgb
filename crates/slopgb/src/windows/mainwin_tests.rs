@@ -7,11 +7,14 @@ fn row_rect(m: &MainMenu, idx: usize) -> Rect {
     menu_rects(m.origin, &m.items)[idx]
 }
 
-/// Click point at the centre of row `idx`.
+/// Click point at the centre of main-menu row `idx`.
 fn at(m: &MainMenu, idx: usize) -> (i32, i32) {
     let r = row_rect(m, idx);
     (r.x + r.w / 2, r.y + r.h / 2)
 }
+
+/// Index of the "Window size" row (carries the submenu opener).
+const WINDOW_SIZE_ROW: usize = 11;
 
 #[test]
 fn menu_has_the_fifteen_rc_main_rows_in_order() {
@@ -37,7 +40,7 @@ fn menu_has_the_fifteen_rc_main_rows_in_order() {
             "Exit",
         ]
     );
-    assert_eq!(m.actions.len(), m.items.len(), "one action slot per row");
+    assert_eq!(m.effects.len(), m.items.len(), "one effect slot per row");
 }
 
 #[test]
@@ -46,50 +49,71 @@ fn enable_sound_checkmark_tracks_the_sound_state() {
     let off = MainMenu::open((0, 0), false);
     assert!(on.items[2].checked, "checked when sound is on");
     assert!(!off.items[2].checked, "unchecked when muted");
-    // Either way the row toggles the sound.
-    assert_eq!(on.actions[2], Some(Action::ToggleSound));
+    assert_eq!(on.effects[2], MenuEffect::Run(Action::ToggleSound));
 }
 
 #[test]
-fn supported_rows_carry_their_action_the_rest_are_none() {
+fn supported_rows_run_their_action_window_size_opens_a_submenu_rest_none() {
     let m = MainMenu::open((0, 0), true);
-    assert_eq!(m.actions[0], Some(Action::Pause));
-    assert_eq!(m.actions[2], Some(Action::ToggleSound));
-    assert_eq!(m.actions[5], Some(Action::Reset));
-    assert_eq!(m.actions[7], Some(Action::ToggleTool(ToolWindow::Debugger)));
-    assert_eq!(m.actions[14], Some(Action::Quit));
-    // Greyed stubs + submenu rows have no action.
-    for i in [1, 3, 4, 6, 8, 9, 10, 11, 12, 13] {
-        assert_eq!(m.actions[i], None, "row {i} is a stub");
+    assert_eq!(m.effects[0], MenuEffect::Run(Action::Pause));
+    assert_eq!(m.effects[2], MenuEffect::Run(Action::ToggleSound));
+    assert_eq!(m.effects[5], MenuEffect::Run(Action::Reset));
+    assert_eq!(
+        m.effects[7],
+        MenuEffect::Run(Action::ToggleTool(ToolWindow::Debugger))
+    );
+    assert_eq!(m.effects[14], MenuEffect::Run(Action::Quit));
+    assert_eq!(
+        m.effects[WINDOW_SIZE_ROW],
+        MenuEffect::Submenu(SubKind::WindowSize)
+    );
+    // Greyed stubs + not-yet-wired submenu rows have no effect.
+    for i in [1, 3, 4, 6, 8, 9, 10, 12, 13] {
+        assert_eq!(m.effects[i], MenuEffect::None, "row {i} is a stub");
     }
 }
 
 #[test]
-fn submenu_rows_show_the_arrow_but_are_greyed_until_wired() {
+fn submenu_rows_show_the_arrow_window_size_enabled_others_greyed() {
     let m = MainMenu::open((0, 0), true);
-    for i in 8..=13 {
+    // All six submenu rows draw the arrow.
+    for i in [8, 9, 10, 11, 12, 13] {
         assert!(m.items[i].submenu, "row {i} draws the submenu arrow");
-        assert!(!m.items[i].enabled, "row {i} greyed until MN2-7");
     }
-    // The greyed file-ops rows are not submenus.
+    // Window size is live; the others stay greyed until MN3-7.
+    assert!(
+        m.items[WINDOW_SIZE_ROW].enabled,
+        "Window size is wired (MN2)"
+    );
+    for i in [8, 9, 10, 12, 13] {
+        assert!(!m.items[i].enabled, "row {i} greyed until its milestone");
+    }
     assert!(!m.items[1].submenu, "Load ROM is a plain (greyed) item");
 }
 
 #[test]
-fn action_at_resolves_only_enabled_wired_rows() {
+fn effect_at_resolves_only_enabled_rows() {
     let m = MainMenu::open((10, 10), true);
-    assert_eq!(m.action_at(at(&m, 0).0, at(&m, 0).1), Some(Action::Pause));
-    assert_eq!(m.action_at(at(&m, 14).0, at(&m, 14).1), Some(Action::Quit));
-    // A greyed row resolves to nothing (item_at skips disabled rows).
     assert_eq!(
-        m.action_at(at(&m, 1).0, at(&m, 1).1),
-        None,
-        "Load ROM greyed"
+        m.effect_at(at(&m, 0).0, at(&m, 0).1),
+        MenuEffect::Run(Action::Pause)
     );
-    // A submenu row likewise (greyed, no action) until MN2-7.
-    assert_eq!(m.action_at(at(&m, 8).0, at(&m, 8).1), None, "State stub");
-    // A point outside the box resolves to nothing.
-    assert_eq!(m.action_at(-50, -50), None);
+    assert_eq!(
+        m.effect_at(at(&m, WINDOW_SIZE_ROW).0, at(&m, WINDOW_SIZE_ROW).1),
+        MenuEffect::Submenu(SubKind::WindowSize)
+    );
+    // A greyed row + a point outside the box resolve to None.
+    assert_eq!(m.effect_at(at(&m, 1).0, at(&m, 1).1), MenuEffect::None);
+    assert_eq!(m.effect_at(-50, -50), MenuEffect::None);
+}
+
+#[test]
+fn row_rect_locates_the_window_size_row_for_its_submenu() {
+    let m = MainMenu::open((10, 10), true);
+    let r = m
+        .row_rect(MenuEffect::Submenu(SubKind::WindowSize))
+        .expect("window size row exists");
+    assert_eq!(r, row_rect(&m, WINDOW_SIZE_ROW), "matches the 12th row");
 }
 
 #[test]
@@ -104,7 +128,6 @@ fn hover_at_tracks_the_enabled_row_and_reports_changes() {
         !m.hover_at(at(&m, 0).0, at(&m, 0).1),
         "same row → no change"
     );
-    // Greyed rows don't take the highlight (item_at skips them).
     assert!(
         m.hover_at(at(&m, 1).0, at(&m, 1).1),
         "leaving Pause changes hover"
@@ -124,7 +147,66 @@ fn render_draws_ink_including_the_check_and_arrow_columns() {
         let mut c = Canvas::new(&mut buf, w, h);
         render(&mut c, &m, &Theme::BGB);
     }
-    // Background, border, and label ink are all present (not a blank box).
     assert!(buf.contains(&Theme::BGB.bg), "menu background filled");
     assert!(buf.contains(&Theme::BGB.text), "label ink drawn");
+}
+
+// --- Window size submenu (MN2) ---------------------------------------------
+
+/// A parent row rect to anchor the submenu against.
+const PARENT: Rect = Rect::new(20, 40, 100, 15);
+
+#[test]
+fn window_size_submenu_has_the_eight_captured_rows() {
+    let s = SubMenu::window_size(PARENT, WindowSizeChoice::Scale(2));
+    let labels: Vec<&str> = s.items.iter().map(|i| i.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        [
+            "1x1",
+            "2x2",
+            "3x3",
+            "4x4",
+            "5x5",
+            "6x6",
+            "Full screen",
+            "Fullscreen stretched",
+        ]
+    );
+    assert_eq!(s.kind, SubKind::WindowSize);
+    assert_eq!(s.choices[2], Some(WindowSizeChoice::Scale(3)));
+    assert_eq!(s.choices[6], Some(WindowSizeChoice::Fullscreen));
+    assert_eq!(s.choices[7], Some(WindowSizeChoice::FullscreenStretched));
+}
+
+#[test]
+fn the_active_size_is_the_only_checked_row() {
+    let s = SubMenu::window_size(PARENT, WindowSizeChoice::Scale(2));
+    assert!(s.items[1].checked, "2x2 checked when active is Scale(2)");
+    for i in [0, 2, 3, 4, 5, 6, 7] {
+        assert!(!s.items[i].checked, "row {i} unchecked");
+    }
+    // Fullscreen active → only "Full screen" checked.
+    let f = SubMenu::window_size(PARENT, WindowSizeChoice::Fullscreen);
+    assert!(f.items[6].checked, "Full screen checked");
+    assert!(!f.items[1].checked, "no integer size checked in fullscreen");
+}
+
+#[test]
+fn submenu_opens_to_the_right_of_its_parent_row() {
+    let s = SubMenu::window_size(PARENT, WindowSizeChoice::Scale(3));
+    assert_eq!(s.origin.0, PARENT.right(), "hangs off the row's right edge");
+    assert_eq!(s.origin.1, PARENT.y, "top-aligned to the row");
+}
+
+#[test]
+fn choice_at_resolves_the_clicked_size() {
+    let s = SubMenu::window_size(PARENT, WindowSizeChoice::Scale(2));
+    let rects = menu_rects(s.origin, &s.items);
+    let centre = |i: usize| (rects[i].x + rects[i].w / 2, rects[i].y + rects[i].h / 2);
+    let (x4, y4) = centre(3); // "4x4"
+    assert_eq!(s.choice_at(x4, y4), Some(WindowSizeChoice::Scale(4)));
+    let (xf, yf) = centre(6); // "Full screen"
+    assert_eq!(s.choice_at(xf, yf), Some(WindowSizeChoice::Fullscreen));
+    assert_eq!(s.choice_at(-99, -99), None, "outside the box");
 }

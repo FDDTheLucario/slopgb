@@ -34,13 +34,14 @@ use winit::dpi::LogicalSize;
 use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
-use winit::window::{Window, WindowId};
+use winit::window::{Fullscreen, Window, WindowId};
 
 use audio::{AudioOutput, Resampler};
 use input::{Action, ButtonTracker, Focus};
 use ui::dialog::DialogKey;
 use video::Video;
 use windows::debugger::MenuOutcome;
+use windows::mainwin::{MainMenu, MenuEffect, SubMenu, WindowSizeChoice};
 
 const USAGE: &str = "\
 slopgb — Game Boy / Game Boy Color emulator
@@ -439,7 +440,13 @@ struct App {
     modifiers: ModifiersState,
     /// The open game-window right-click menu (bgb's `rc-main.png`), if any —
     /// drawn as an overlay over the LCD and routed by the game-window mouse.
-    main_menu: Option<windows::mainwin::MainMenu>,
+    main_menu: Option<MainMenu>,
+    /// The open child submenu (currently only Window size), drawn to the right of
+    /// its parent row over the main menu.
+    main_submenu: Option<SubMenu>,
+    /// The current window size, for the "Window size" submenu check-mark and the
+    /// stretched-fullscreen blit. Init from `--scale`.
+    window_size: WindowSizeChoice,
     /// Last cursor position over the game window (physical px), so a right-click
     /// can open the menu where the pointer is.
     game_cursor: (i32, i32),
@@ -448,6 +455,7 @@ struct App {
 impl App {
     fn new(opts: Options, session: Session) -> Self {
         let muted = opts.mute;
+        let window_size = WindowSizeChoice::Scale(opts.scale);
         Self {
             opts,
             session,
@@ -468,6 +476,8 @@ impl App {
             dbg: dbg::Debugger::default(),
             modifiers: ModifiersState::empty(),
             main_menu: None,
+            main_submenu: None,
+            window_size,
             game_cursor: (0, 0),
         }
     }
@@ -493,13 +503,18 @@ impl App {
             return;
         };
         let frame = self.session.gb.frame();
-        // Overlay the game-window right-click menu, if open (captures locals, not
-        // `self`, so the disjoint field borrows stay clean).
+        // Overlay the game-window right-click menu + open submenu, if any
+        // (captures locals, not `self`, so the disjoint field borrows stay clean).
         let menu = self.main_menu.as_ref();
+        let sub = self.main_submenu.as_ref();
         let theme = ui::Theme::BGB;
-        if let Err(e) = video.draw(window, frame, |canvas| {
+        let stretch = self.window_size == WindowSizeChoice::FullscreenStretched;
+        if let Err(e) = video.draw(window, frame, stretch, |canvas| {
             if let Some(m) = menu {
                 windows::mainwin::render(canvas, m, &theme);
+            }
+            if let Some(s) = sub {
+                windows::mainwin::render_sub(canvas, s, &theme);
             }
         }) {
             eprintln!("slopgb: failed to present frame: {e}");
@@ -518,10 +533,14 @@ impl App {
             return;
         }
         // With the game-window menu open, Escape closes it (rather than quitting
-        // the emulator) and is swallowed so it can't also fire a hotkey.
-        if focus == Focus::Game && key.state.is_pressed() && self.main_menu.is_some() {
+        // the emulator) and is swallowed so it can't also fire a hotkey. An open
+        // submenu peels off first, then the main menu.
+        let menu_open = self.main_menu.is_some() || self.main_submenu.is_some();
+        if focus == Focus::Game && key.state.is_pressed() && menu_open {
             if let PhysicalKey::Code(KeyCode::Escape) = key.physical_key {
-                self.main_menu = None;
+                if self.main_submenu.take().is_none() {
+                    self.main_menu = None;
+                }
                 self.request_game_redraw();
                 return;
             }
@@ -682,23 +701,71 @@ impl App {
     }
 
     /// A left/right press on the game window. Right-click (re)opens the bgb
-    /// main-menu at the pointer; left-click runs the clicked row's action via the
-    /// shared `run_action` (greyed/submenu/outside-the-box clicks just dismiss).
+    /// main-menu at the pointer (closing any submenu); left-click applies a
+    /// submenu choice, runs a main-menu row's action, opens its submenu, or
+    /// dismisses (a click off both popups closes them).
     fn on_game_click(&mut self, button: MouseButton, event_loop: &ActiveEventLoop) {
         let (px, py) = self.game_cursor;
         if button == MouseButton::Right {
-            let sound_on = !self.muted;
-            self.main_menu = Some(windows::mainwin::MainMenu::open((px, py), sound_on));
+            self.main_submenu = None;
+            self.main_menu = Some(MainMenu::open((px, py), !self.muted));
             self.request_game_redraw();
             return;
         }
-        if let Some(menu) = self.main_menu.take() {
-            let action = menu.action_at(px, py);
-            self.request_game_redraw();
-            if let Some(act) = action {
+        // A click on the open submenu applies its choice and closes everything.
+        if let Some(sub) = &self.main_submenu {
+            if let Some(choice) = sub.choice_at(px, py) {
+                self.apply_window_size(choice);
+                self.main_submenu = None;
+                self.main_menu = None;
+                self.request_game_redraw();
+                return;
+            }
+            // Off the submenu: close it, then let the main menu handle the click.
+            self.main_submenu = None;
+        }
+        let Some(menu) = self.main_menu.take() else {
+            return;
+        };
+        match menu.effect_at(px, py) {
+            MenuEffect::Run(act) => {
+                self.request_game_redraw();
                 self.run_action(act, event_loop);
             }
+            MenuEffect::Submenu(kind) => {
+                // Keep the main menu open and hang the child off its row.
+                if let Some(row) = menu.row_rect(MenuEffect::Submenu(kind)) {
+                    let active = self.window_size;
+                    self.main_submenu = Some(SubMenu::window_size(row, active));
+                }
+                self.main_menu = Some(menu);
+                self.request_game_redraw();
+            }
+            MenuEffect::None => self.request_game_redraw(), // dismissed
         }
+    }
+
+    /// Apply a "Window size" submenu choice: an integer scale resizes the window
+    /// (and leaves fullscreen), a fullscreen mode goes borderless. `window_size`
+    /// records the active choice for the submenu check-mark + the stretched blit.
+    fn apply_window_size(&mut self, choice: WindowSizeChoice) {
+        self.window_size = choice;
+        let Some(window) = &self.window else {
+            return;
+        };
+        match choice {
+            WindowSizeChoice::Scale(n) => {
+                window.set_fullscreen(None);
+                let _ = window.request_inner_size(LogicalSize::new(
+                    f64::from(SCREEN_W as u32 * n),
+                    f64::from(SCREEN_H as u32 * n),
+                ));
+            }
+            WindowSizeChoice::Fullscreen | WindowSizeChoice::FullscreenStretched => {
+                window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+            }
+        }
+        self.request_game_redraw();
     }
 
     /// Focus lost or window occluded: no release events will arrive for keys
@@ -1023,13 +1090,19 @@ impl ApplicationHandler for App {
             // events, so drop all input before any button can stick.
             WindowEvent::Focused(false) | WindowEvent::Occluded(true) => self.release_all_input(),
             // Track the pointer (for opening the menu where it sits) and, with a
-            // menu open, highlight the hovered row.
+            // menu open, highlight the hovered row of the frontmost popup.
             WindowEvent::CursorMoved { position, .. } => {
                 self.game_cursor = (position.x as i32, position.y as i32);
-                if let Some(m) = &mut self.main_menu {
-                    if m.hover_at(self.game_cursor.0, self.game_cursor.1) {
-                        self.request_game_redraw();
-                    }
+                let (px, py) = self.game_cursor;
+                let changed = if let Some(s) = &mut self.main_submenu {
+                    s.hover_at(px, py)
+                } else if let Some(m) = &mut self.main_menu {
+                    m.hover_at(px, py)
+                } else {
+                    false
+                };
+                if changed {
+                    self.request_game_redraw();
                 }
             }
             WindowEvent::MouseInput {
