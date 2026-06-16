@@ -456,6 +456,39 @@ impl ToolWindows {
             .join("\n")
     }
 
+    /// Clipboard text for the debugger "Copy code" / "Copy data" items (RM10):
+    /// 16 disassembled rows from `addr` (`code`) or 16 hex bytes from `addr`
+    /// (data), honouring the pane's code/data hints + hex-case format.
+    #[must_use]
+    pub fn debugger_copy_text(&self, gb: &GameBoy, addr: u16, code: bool) -> String {
+        let (hints, fmt) = match self.debugger_view().map(|v| &v.state) {
+            Some(WinState::Debugger(s)) => (s.data_hints.clone(), s.disasm_fmt),
+            _ => (
+                std::collections::BTreeSet::new(),
+                debugger::DisasmFmt::default(),
+            ),
+        };
+        if code {
+            let rows = debugger::disasm_rows(|a| gb.debug_read(a), addr, 16, &hints, fmt);
+            rows.iter()
+                .map(|r| r.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            (0..16u16)
+                .map(|i| {
+                    let b = gb.debug_read(addr.wrapping_add(i));
+                    if fmt.lowercase_hex {
+                        format!("{b:02x}")
+                    } else {
+                        format!("{b:02X}")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
+    }
+
     /// Push the disasm display options (Options → Debug) to the debugger view,
     /// repainting it if open. Inert when the debugger window isn't built yet.
     pub fn set_disasm_fmt(&mut self, fmt: debugger::DisasmFmt) {

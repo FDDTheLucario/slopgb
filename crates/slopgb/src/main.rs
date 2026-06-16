@@ -18,6 +18,7 @@ mod app_pacing;
 mod app_run;
 mod audio;
 mod cli;
+mod clipboard;
 mod dbg;
 mod input;
 mod keymap;

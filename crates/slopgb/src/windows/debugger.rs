@@ -488,8 +488,14 @@ fn disasm_entries(addr: u16, st: &DebuggerState, is_disasm: bool) -> Vec<(MenuIt
             MenuItem::new("Modify code/data"),
             MenuChoice::ToggleDataHint(addr),
         ),
-        disabled("Copy data"),
-        disabled("Copy code"),
+        (
+            MenuItem::new("Copy data"),
+            MenuChoice::Command(Action::DbgCopyData(addr)),
+        ),
+        (
+            MenuItem::new("Copy code"),
+            MenuChoice::Command(Action::DbgCopyCode(addr)),
+        ),
         disabled("Insert size"),
     ];
     if is_disasm {

@@ -191,6 +191,37 @@ fn apply_exceptions_pushes_the_mask_to_the_machine() {
 }
 
 #[test]
+fn debugger_copy_text_matches_memory_and_disasm() {
+    // RM10: "Copy data" yields the 16 hex bytes at the address (matching
+    // debug_read); "Copy code" yields disasm lines, the first tagged with the
+    // address.
+    let app = blank_app();
+    let addr = 0x0100u16;
+    let data = app.tools.debugger_copy_text(&app.session.gb, addr, false);
+    let expect: String = (0..16u16)
+        .map(|i| format!("{:02X}", app.session.gb.debug_read(addr.wrapping_add(i))))
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert_eq!(data, expect);
+    assert_eq!(data.split(' ').count(), 16, "16 bytes");
+
+    let code = app.tools.debugger_copy_text(&app.session.gb, addr, true);
+    let first = code.lines().next().expect("at least one disasm line");
+    assert!(
+        first.contains("0100"),
+        "first disasm line tags the addr: {first}"
+    );
+}
+
+#[test]
+fn clipboard_candidates_are_dep_free_tools() {
+    // RM10 is implemented without a clipboard *crate* — only std shell-outs.
+    let c = crate::clipboard::clipboard_candidates();
+    assert_eq!(c.len(), 3);
+    assert!(c.iter().all(|(prog, _)| !prog.is_empty()));
+}
+
+#[test]
 fn frame_duration_matches_hardware_rate() {
     // 70224 / 4194304 s = 16.742706... ms
     assert_eq!(FRAME_DURATION.as_nanos(), 16_742_706);

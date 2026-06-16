@@ -205,6 +205,10 @@ impl App {
             Action::DbgLoadState => {
                 self.open_path_prompt("Load state (path)", crate::PathPurpose::LoadState);
             }
+            // Disasm/memory right-click Copy data/code (RM10): build the text and
+            // push it to the system clipboard (dep-free shell-out; non-fatal).
+            Action::DbgCopyData(addr) => self.copy_to_clipboard(addr, false),
+            Action::DbgCopyCode(addr) => self.copy_to_clipboard(addr, true),
             // File menu (MB2): export the disassembly of the current region.
             Action::DbgSaveAsm => self.save_asm(),
             // Debug menu (RM14): evaluate an expression + the user-clock counter.
@@ -243,6 +247,18 @@ impl App {
         match fs::write(&path, text) {
             Ok(()) => eprintln!("saved asm to {path}"),
             Err(e) => eprintln!("error: could not save asm: {e}"),
+        }
+    }
+
+    /// Copy the disassembly (`code`) or hex bytes (data) at `addr` to the system
+    /// clipboard (RM10). Dep-free shell-out — a host with no clipboard tool just
+    /// logs a hint (non-fatal).
+    fn copy_to_clipboard(&self, addr: u16, code: bool) {
+        let text = self.tools.debugger_copy_text(&self.session.gb, addr, code);
+        if crate::clipboard::copy(&text) {
+            println!("slopgb: copied {} chars to the clipboard", text.len());
+        } else {
+            eprintln!("slopgb: no clipboard tool found (install wl-copy/xclip/xsel)");
         }
     }
 

@@ -117,6 +117,12 @@ pub enum Action {
     /// Open the on-disk Load-state path prompt (debugger File → "Load state...",
     /// Ctrl+L).
     DbgLoadState,
+    /// Copy 16 hex bytes at the cursor to the clipboard (disasm/memory right-click
+    /// "Copy data", RM10). Menu-only; carries the clicked address.
+    DbgCopyData(u16),
+    /// Copy 16 disassembled rows at the cursor to the clipboard (disasm/memory
+    /// right-click "Copy code", RM10). Menu-only; carries the clicked address.
+    DbgCopyCode(u16),
 }
 
 /// Tracks which physical keys currently hold each button, so two keys mapped

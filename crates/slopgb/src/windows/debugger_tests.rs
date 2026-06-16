@@ -321,6 +321,21 @@ fn selecting_set_break_returns_a_toggle_breakpoint_action() {
 }
 
 #[test]
+fn copy_data_and_code_route_to_clipboard_actions() {
+    use crate::input::Action;
+    // RM10: the formerly-greyed Copy rows (indices 2/3) are live + carry the
+    // clicked address (cursor 0x0102) to the clipboard actions.
+    let (mut st, rects) = open_disasm_menu();
+    let r = rects[2]; // "Copy data"
+    let a = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
+    assert_eq!(a, Some(MenuOutcome::Command(Action::DbgCopyData(0x0102))));
+    let (mut st, rects) = open_disasm_menu();
+    let r = rects[3]; // "Copy code"
+    let a = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
+    assert_eq!(a, Some(MenuOutcome::Command(Action::DbgCopyCode(0x0102))));
+}
+
+#[test]
 fn selecting_run_to_cursor_returns_a_run_action() {
     let (mut st, rects) = open_disasm_menu();
     let r = rects[7]; // "Run to cursor"
@@ -345,9 +360,9 @@ fn stay_on_bank_toggles_pin_and_freezes_the_view() {
 
 #[test]
 fn clicking_a_disabled_item_or_away_just_closes_the_menu() {
-    // A disabled row ("Copy data", index 2) selects nothing.
+    // A disabled row ("Insert size", index 4) selects nothing.
     let (mut st, rects) = open_disasm_menu();
-    let r = rects[2];
+    let r = rects[4];
     let action = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
     assert_eq!(action, None);
     assert!(st.menu.is_none(), "disabled item dismisses the menu");
