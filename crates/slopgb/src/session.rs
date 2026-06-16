@@ -32,6 +32,29 @@ pub(crate) struct Session {
 }
 
 impl Session {
+    /// A no-ROM session for the bgb-style blank startup: a valid blank machine
+    /// (a 32 KiB ROM-only image of zeros) frozen at power-on, with no title, no
+    /// `.sav` file, and no snapshot. The blank cart has no battery, so
+    /// [`flush_save`](Self::flush_save) is a pure no-op (no stray file). The
+    /// frontend gates emulation off until a real ROM is loaded.
+    pub(crate) fn blank(model: Model) -> Self {
+        let rom_bytes = vec![0u8; 0x8000];
+        // A 32 KiB zero image is a valid ROM-only cart (header type $00, size $00)
+        // and always constructs for every model.
+        let gb = GameBoy::new(model, rom_bytes.clone())
+            .expect("blank 32 KiB ROM-only image is always a valid cartridge");
+        Self {
+            gb,
+            rom_bytes,
+            model,
+            title: String::new(),
+            sav_path: PathBuf::new(),
+            last_saved: None,
+            next_autosave: AUTOSAVE_CYCLES,
+            quick_state: None,
+        }
+    }
+
     /// Load a ROM, pick its model (CLI override beats header auto-detect),
     /// and restore `<rom>.sav` if present.
     pub(crate) fn load(path: &Path, model_override: Option<Model>) -> Result<Self, String> {

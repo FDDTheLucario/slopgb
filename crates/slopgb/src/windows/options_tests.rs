@@ -42,6 +42,11 @@ fn settings_default_matches_spec() {
     assert!(!d.pause_on_focus_loss);
     assert_eq!(d.scheme, 0);
     assert_eq!(d.dmg_palette, SCHEMES[0].colors);
+    // The default scheme is bgb's pale-green LCD ("BGB 0.3"), decoded from
+    // bgb.ini Color0..3 (stored BGR) — so a fresh slopgb (and its no-ROM blank
+    // screen) looks like bgb. The lightest shade is the captured #E8FCCC.
+    assert_eq!(SCHEMES[0].name, "BGB 0.3");
+    assert_eq!(d.dmg_palette[0], 0x00E8_FCCC);
 }
 
 // --- Task 2: tab labels + groups --------------------------------------------

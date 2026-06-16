@@ -75,9 +75,16 @@ pub struct Scheme {
     pub colors: [u32; 4],
 }
 
-/// Built-in DMG palette schemes. Index 0 ("Grayscale") matches the core's
-/// power-on default, so `Defaults` never changes the look unexpectedly.
+/// Built-in DMG palette schemes. Index 0 ("BGB 0.3") is slopgb's default — bgb's
+/// own default pale-green LCD palette, decoded straight from `bgb.ini`'s
+/// `Color0..3` (stored BGR: `CCFCE8 90D4AC 708C54 382C14` → RGB below). So a
+/// fresh slopgb (and its no-ROM blank screen) matches bgb out of the box; the
+/// core power-on default stays grayscale, available here as a selectable scheme.
 pub const SCHEMES: [Scheme; 4] = [
+    Scheme {
+        name: "BGB 0.3",
+        colors: [0x00E8_FCCC, 0x00AC_D490, 0x0054_8C70, 0x0014_2C38],
+    },
     Scheme {
         name: "Grayscale",
         colors: [0x00FF_FFFF, 0x00AA_AAAA, 0x0055_5555, 0x0000_0000],
@@ -85,10 +92,6 @@ pub const SCHEMES: [Scheme; 4] = [
     Scheme {
         name: "DMG green",
         colors: [0x009B_BC0F, 0x008B_AC0F, 0x0030_6230, 0x000F_380F],
-    },
-    Scheme {
-        name: "BGB 0.3",
-        colors: [0x00E0_F8D0, 0x0088_C070, 0x0034_5E34, 0x0008_1820],
     },
     Scheme {
         name: "Pocket",

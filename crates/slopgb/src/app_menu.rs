@@ -199,7 +199,10 @@ impl App {
             self.resync_pacing();
             self.request_game_redraw();
         }
-        self.session.gb.set_dmg_palette(s.dmg_palette);
+        // Push the palette + rebuild the no-ROM blank frame, so changing the GB
+        // Colors scheme recolours even the blank screen (with no ROM loaded the
+        // LCD shows `blank_frame`, not the machine's front buffer).
+        self.apply_palette();
         // Stretch maps onto the Window-size fullscreen-stretched mode.
         if s.stretch && self.window_size != WindowSizeChoice::FullscreenStretched {
             self.apply_window_size(WindowSizeChoice::FullscreenStretched);

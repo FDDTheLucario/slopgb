@@ -15,16 +15,30 @@ fn parse_run(args: &[&str]) -> Result<Options, String> {
 #[test]
 fn parse_rom_only_defaults() {
     let opts = parse_run(&["game.gb"]).unwrap();
-    assert_eq!(opts.rom, PathBuf::from("game.gb"));
+    assert_eq!(opts.rom, Some(PathBuf::from("game.gb")));
     assert_eq!(opts.model, None);
     assert_eq!(opts.scale, 3);
     assert!(!opts.mute);
 }
 
 #[test]
+fn parse_no_rom_starts_blank() {
+    // bgb starts with no ROM: a bare invocation is a valid run, not an error
+    // (the CLI execution dependency is removed — a ROM loads later via the menu).
+    let opts = parse_run(&[]).unwrap();
+    assert_eq!(opts.rom, None);
+    assert_eq!(opts.scale, 3);
+    // Options without a ROM still parse — only the positional is optional.
+    let opts = parse_run(&["--scale", "4", "--mute"]).unwrap();
+    assert_eq!(opts.rom, None);
+    assert_eq!(opts.scale, 4);
+    assert!(opts.mute);
+}
+
+#[test]
 fn parse_all_options() {
     let opts = parse_run(&["--model", "cgb", "--scale", "5", "--mute", "x.gbc"]).unwrap();
-    assert_eq!(opts.rom, PathBuf::from("x.gbc"));
+    assert_eq!(opts.rom, Some(PathBuf::from("x.gbc")));
     assert_eq!(opts.model, Some(Model::Cgb));
     assert_eq!(opts.scale, 5);
     assert!(opts.mute);
@@ -40,7 +54,6 @@ fn parse_help_returns_outcome_instead_of_exiting() {
 
 #[test]
 fn parse_rejects_bad_input() {
-    assert!(parse(&[]).is_err()); // missing ROM
     assert!(parse(&["--model", "snes", "x.gb"]).is_err());
     assert!(parse(&["--scale", "0", "x.gb"]).is_err());
     assert!(parse(&["--scale", "huge", "x.gb"]).is_err());

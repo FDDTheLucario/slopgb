@@ -34,7 +34,7 @@ use std::process;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use slopgb_core::{Button, CLOCK_HZ, CYCLES_PER_FRAME, SCREEN_H, SCREEN_W};
+use slopgb_core::{Button, CLOCK_HZ, CYCLES_PER_FRAME, SCREEN_H, SCREEN_PIXELS, SCREEN_W};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
@@ -70,12 +70,21 @@ fn main() {
             process::exit(2);
         }
     };
-    let session = match Session::load(&opts.rom, opts.model) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("error: {e}");
-            process::exit(1);
-        }
+    // No ROM on the command line → boot to a blank LCD (bgb behaviour); a ROM
+    // loads later via drag-drop / the Load ROM... menu. With a ROM, a load error
+    // still aborts (the user named a file that can't be read).
+    let (session, rom_loaded) = match &opts.rom {
+        Some(rom) => match Session::load(rom, opts.model) {
+            Ok(s) => (s, true),
+            Err(e) => {
+                eprintln!("error: {e}");
+                process::exit(1);
+            }
+        },
+        None => (
+            Session::blank(opts.model.unwrap_or(slopgb_core::Model::Dmg)),
+            false,
+        ),
     };
     let event_loop = match EventLoop::new() {
         Ok(l) => l,
@@ -84,7 +93,7 @@ fn main() {
             process::exit(1);
         }
     };
-    let mut app = App::new(opts, session);
+    let mut app = App::new(opts, session, rom_loaded);
     if let Err(e) = event_loop.run_app(&mut app) {
         eprintln!("error: event loop failed: {e}");
         process::exit(1);
@@ -97,6 +106,13 @@ fn main() {
 struct App {
     opts: Options,
     session: Session,
+    /// Whether a real ROM is loaded. `false` at a no-ROM (bgb-style) startup:
+    /// the blank machine is frozen at power-on (emulation gated off) and the LCD
+    /// shows [`Self::blank_frame`] until a ROM is loaded (drag-drop / Load ROM).
+    rom_loaded: bool,
+    /// A solid LCD-off frame (the palette's lightest shade) shown while no ROM is
+    /// loaded — bgb's pale-green blank screen. Rebuilt when the palette changes.
+    blank_frame: Box<[u32; SCREEN_PIXELS]>,
     window: Option<Rc<Window>>,
     video: Option<Video>,
     audio: Option<AudioPipe>,
@@ -161,7 +177,7 @@ struct App {
 }
 
 impl App {
-    fn new(opts: Options, session: Session) -> Self {
+    fn new(opts: Options, session: Session, rom_loaded: bool) -> Self {
         let muted = opts.mute;
         let scale = opts.scale;
         let window_size = WindowSizeChoice::Scale(scale);
@@ -173,9 +189,12 @@ impl App {
             model: windows::options::ModelChoice::from_option(opts.model),
             ..windows::options::Settings::default()
         };
-        Self {
+        let blank_frame = blank_frame(settings.dmg_palette[0]);
+        let mut app = Self {
             opts,
             session,
+            rom_loaded,
+            blank_frame,
             settings,
             options: None,
             paused_by_focus: false,
@@ -203,7 +222,22 @@ impl App {
             main_submenu: None,
             window_size,
             game_cursor: (0, 0),
-        }
+        };
+        // Push the default DMG palette (bgb's pale green) onto the freshly-built
+        // machine so loaded DMG games look like bgb out of the box, not the core's
+        // grayscale power-on default.
+        app.apply_palette();
+        app
+    }
+
+    /// Push the current DMG palette to the live machine and rebuild the no-ROM
+    /// blank frame from its lightest shade. Called after every machine (re)build
+    /// (startup, ROM load) since `GameBoy::new` resets the palette to the core
+    /// grayscale default; Options OK/Apply applies the palette through its own
+    /// path (`apply_settings`).
+    fn apply_palette(&mut self) {
+        self.session.gb.set_dmg_palette(self.settings.dmg_palette);
+        self.blank_frame = blank_frame(self.settings.dmg_palette[0]);
     }
 
     fn update_title(&self) {
@@ -217,7 +251,7 @@ impl App {
             } else {
                 String::new()
             };
-            window.set_title(&format!("{} — slopgb{state}", self.session.title));
+            window.set_title(&window_title(self.rom_loaded, &self.session.title, &state));
         }
     }
 
@@ -228,7 +262,14 @@ impl App {
         let Some(video) = self.video.as_mut() else {
             return;
         };
-        let frame = self.session.gb.frame();
+        // With no ROM loaded the LCD shows a solid lightest-shade blank (bgb's
+        // pale-green off screen); the machine is frozen so its own front buffer
+        // never paints.
+        let frame: &[u32; SCREEN_PIXELS] = if self.rom_loaded {
+            self.session.gb.frame()
+        } else {
+            &self.blank_frame
+        };
         // Overlay the game-window right-click menu + open submenu, if any
         // (captures locals, not `self`, so the disjoint field borrows stay clean).
         let menu = self.main_menu.as_ref();
@@ -466,6 +507,11 @@ impl App {
         match Session::load(path, self.opts.model) {
             Ok(new) => {
                 self.session = new;
+                // A loaded ROM starts emulation: leave the no-ROM blank state and
+                // (re)apply the DMG palette to the fresh machine (GameBoy::new
+                // resets it to the core grayscale default).
+                self.rom_loaded = true;
+                self.apply_palette();
                 self.paused = false;
                 self.push_recent(path);
                 self.resync_pacing();
@@ -477,6 +523,31 @@ impl App {
             Err(e) => eprintln!("slopgb: load ignored: {e}"),
         }
     }
+}
+
+/// Whether emulation should idle (emulate zero frames) this wake: when paused,
+/// when the debugger has broken, or — the no-ROM startup case — when no ROM is
+/// loaded (the blank machine is frozen at power-on like bgb). A free function so
+/// the gate is unit-testable without a live event loop.
+fn should_idle(paused: bool, broken: bool, rom_loaded: bool) -> bool {
+    paused || broken || !rom_loaded
+}
+
+/// The window title: with a ROM, `"<stem> — slopgb<state>"`; with none, a bare
+/// `"slopgb"` (no game name / no leading separator), matching bgb's no-ROM
+/// window. A free function so the formatting is unit-testable.
+fn window_title(rom_loaded: bool, title: &str, state: &str) -> String {
+    if rom_loaded {
+        format!("{title} — slopgb{state}")
+    } else {
+        "slopgb".to_owned()
+    }
+}
+
+/// A solid LCD frame filled with `color` (the palette's lightest shade) — the
+/// no-ROM blank screen. A free function so the fill is unit-testable.
+fn blank_frame(color: u32) -> Box<[u32; SCREEN_PIXELS]> {
+    Box::new([color; SCREEN_PIXELS])
 }
 
 /// Insert `path` at the front of the recent-ROMs list (MN4): de-duplicated,
@@ -512,7 +583,7 @@ impl ApplicationHandler for App {
         }
         let scale = self.opts.scale;
         let attrs = Window::default_attributes()
-            .with_title(format!("{} — slopgb", self.session.title))
+            .with_title(window_title(self.rom_loaded, &self.session.title, ""))
             .with_inner_size(LogicalSize::new(
                 f64::from(SCREEN_W as u32 * scale),
                 f64::from(SCREEN_H as u32 * scale),
@@ -679,8 +750,9 @@ impl ApplicationHandler for App {
             return; // not resumed yet
         }
         // A debugger break freezes emulation exactly like pause: the LCD holds
-        // its last frame and zero frames are emulated until F9/step.
-        if self.paused || self.dbg.is_broken() {
+        // its last frame and zero frames are emulated until F9/step. With no ROM
+        // loaded the blank machine is likewise frozen (bgb's no-ROM screen).
+        if should_idle(self.paused, self.dbg.is_broken(), self.rom_loaded) {
             event_loop.set_control_flow(ControlFlow::Wait);
             return;
         }

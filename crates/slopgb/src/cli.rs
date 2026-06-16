@@ -9,7 +9,10 @@ pub(crate) const USAGE: &str = "\
 slopgb — Game Boy / Game Boy Color emulator
 
 USAGE:
-    slopgb <rom.gb|.gbc> [OPTIONS]
+    slopgb [rom.gb|.gbc] [OPTIONS]
+
+Launched without a ROM, slopgb opens to a blank LCD (like bgb); load a ROM
+later by dropping a file on the window or via the right-click Load ROM... menu.
 
 OPTIONS:
     --model <MODEL>   Hardware model: dmg, dmg0, mgb, sgb, sgb2, cgb, agb
@@ -33,7 +36,9 @@ Set SLOPGB_OPEN_TOOLS=debugger,vram,iomap to open debug windows at startup.
 ";
 
 pub(crate) struct Options {
-    pub(crate) rom: PathBuf,
+    /// ROM to load at startup, or `None` to boot to a blank LCD (bgb-style) and
+    /// load one later via drag-drop / the Load ROM... menu.
+    pub(crate) rom: Option<PathBuf>,
     pub(crate) model: Option<Model>,
     pub(crate) scale: u32,
     pub(crate) mute: bool,
@@ -78,7 +83,8 @@ impl Options {
                 }
             }
         }
-        let rom = rom.ok_or("missing ROM path")?;
+        // A missing ROM is no longer an error: slopgb boots to a blank LCD and
+        // loads one later (bgb behaviour — the CLI execution dependency is gone).
         Ok(ParseOutcome::Run(Self {
             rom,
             model,

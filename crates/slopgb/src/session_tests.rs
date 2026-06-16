@@ -1,5 +1,23 @@
 use super::*;
+use slopgb_core::Model;
 use std::process;
+
+#[test]
+fn blank_session_has_no_rom_and_no_battery() {
+    // The no-ROM startup machine: a valid blank GameBoy, empty title, no battery
+    // RAM (so flush_save is a pure no-op — no stray file, no panic), no snapshot.
+    let mut s = Session::blank(Model::Dmg);
+    assert_eq!(s.title, "");
+    assert_eq!(s.gb.model(), Model::Dmg);
+    assert!(
+        s.gb.save_data().is_none(),
+        "blank ROM-only cart has no battery"
+    );
+    s.flush_save(); // must not panic / write anything
+    // A blank machine can still be quick-saved/loaded like any other (used by
+    // the State menu); it just starts with no snapshot.
+    assert!(!s.quick_load(), "no snapshot until the first quick_save");
+}
 
 #[test]
 fn cart_info_lines_parse_the_header() {
@@ -21,7 +39,6 @@ fn cart_info_lines_parse_the_header() {
 
 #[test]
 fn set_model_reloads_only_on_change() {
-    use slopgb_core::Model;
     let dir = std::env::temp_dir().join(format!("slopgb-test-model-{}", process::id()));
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("game.gb");
