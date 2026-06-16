@@ -99,6 +99,13 @@ pub enum Action {
     DbgSetBookmark(u8),
     /// Jump to numbered bookmark slot N (Ctrl+digit).
     DbgGotoBookmark(u8),
+    /// Open the Evaluate-expression prompt (Debug → Evaluate expression). Menu-only.
+    DbgEvaluate,
+    /// Evaluate the entered expression + show the result. Internal (from accept).
+    DbgEvalRun,
+    /// Zero the regs-pane `cnt` user-clock counter (Debug → Set user clocks
+    /// counter). Menu-only.
+    DbgSetUserClocks,
 }
 
 /// Tracks which physical keys currently hold each button, so two keys mapped

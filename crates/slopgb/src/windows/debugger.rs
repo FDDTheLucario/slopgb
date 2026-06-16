@@ -222,6 +222,9 @@ pub struct RegsView {
     pub ie: u8,
     pub iflag: u8,
     pub double_speed: bool,
+    /// User-clock counter (RM14): emulated cycles since the last "Set user clocks
+    /// counter" reset, shown on the `hl` line's right column like bgb.
+    pub cnt: u32,
 }
 
 /// The two-column register lines bgb shows (`af= …  lcdc=…`, …). `cnt` and the
@@ -233,7 +236,7 @@ pub fn regs_lines(r: &RegsView) -> Vec<String> {
         format!("af= {:04X}   lcdc={:02X}", r.af, r.lcdc),
         format!("bc= {:04X}   stat={:02X}", r.bc, r.stat),
         format!("de= {:04X}   ly= {:02X}", r.de, r.ly),
-        format!("hl= {:04X}", r.hl),
+        format!("hl= {:04X}   cnt= {}", r.hl, r.cnt),
         format!("sp= {:04X}   ie= {:02X}", r.sp, r.ie),
         format!("pc= {:04X}   if= {:02X}", r.pc, r.iflag),
         format!("ime={}   spd= {}", flag(r.ime), u8::from(r.double_speed)),
@@ -350,6 +353,11 @@ pub struct DebuggerState {
     /// Numbered bookmark slots 0-9 (bgb Ctrl+Shift+digit set / Ctrl+digit goto;
     /// Ctrl+N/Ctrl+B walk these plus the breakpoints).
     pub bookmarks: [Option<u16>; 10],
+    /// Pending Evaluate-expression text (RM14), stored on accept for the scan.
+    pub eval_input: String,
+    /// Baseline for the regs-pane `cnt` user-clock counter (RM14): `cnt` is
+    /// `gb.cycles() - clock_base`; "Set user clocks counter" zeroes it.
+    pub clock_base: u64,
 }
 
 impl Default for DebuggerState {
@@ -366,6 +374,8 @@ impl Default for DebuggerState {
             search_query: String::new(),
             search_hit: None,
             bookmarks: [None; 10],
+            eval_input: String::new(),
+            clock_base: 0,
         }
     }
 }
@@ -396,6 +406,11 @@ pub enum DialogKind {
     /// Search-string prompt (MB3): a non-hex text field whose accept stores the
     /// query and triggers a scan (run where the machine is reachable).
     SearchString,
+    /// Evaluate-expression prompt (RM14): accept stores the expression and
+    /// triggers an evaluation (run where the machine is reachable).
+    EvalExpr,
+    /// Evaluate-expression *result* box (RM14): display-only; accept/cancel close.
+    EvalResult,
 }
 
 /// An open modal: the hex-input box plus what accepting it does.
@@ -781,6 +796,25 @@ pub fn open_search(st: &mut DebuggerState) {
     });
 }
 
+/// Open the `Evaluate expression` text prompt (RM14), closing any open menu.
+pub fn open_eval(st: &mut DebuggerState) {
+    st.menu = None;
+    st.dialog = Some(ModalDialog {
+        input: InputDialog::new("Evaluate expression", false),
+        kind: DialogKind::EvalExpr,
+    });
+}
+
+/// Show an Evaluate-expression result (RM14) in a display-only box seeded with
+/// `text` (closing any open menu); any accept/cancel dismisses it.
+pub fn show_eval_result(st: &mut DebuggerState, text: String) {
+    st.menu = None;
+    st.dialog = Some(ModalDialog {
+        input: InputDialog::new("Result", false).with_initial(text),
+        kind: DialogKind::EvalResult,
+    });
+}
+
 /// Open the `edit register` hex prompt for `field`, seeded with its current
 /// `value` (closing any open menu).
 pub fn open_edit_reg(st: &mut DebuggerState, field: RegField, value: u16) {
@@ -825,6 +859,14 @@ fn accept_dialog(st: &mut DebuggerState, kind: DialogKind, text: &str) -> Option
             st.search_hit = None;
             (!st.search_query.is_empty()).then_some(MenuOutcome::Command(Action::DbgContinueSearch))
         }
+        // Stash the expression, then signal `main` to evaluate it (needs the
+        // machine). The result is shown via a follow-up EvalResult box.
+        DialogKind::EvalExpr => {
+            st.eval_input = text.trim().to_owned();
+            (!st.eval_input.is_empty()).then_some(MenuOutcome::Command(Action::DbgEvalRun))
+        }
+        // The result box is display-only; accepting/cancelling just closes it.
+        DialogKind::EvalResult => None,
     }
 }
 
@@ -884,6 +926,8 @@ mod menubar;
 pub use menubar::{address_list_menu, menubar_at, menubar_menu, render_menubar};
 mod search;
 pub use search::{find_match, next_mark};
+mod eval;
+pub use eval::eval_expr;
 // `menubar_rects` is exercised only by the debugger tests; the rest of the crate
 // reaches the bar via menubar_at/menubar_menu/render_menubar.
 #[cfg(test)]
@@ -900,3 +944,7 @@ mod profiler_tests;
 #[cfg(test)]
 #[path = "debugger_search_tests.rs"]
 mod search_tests;
+
+#[cfg(test)]
+#[path = "debugger_eval_tests.rs"]
+mod eval_tests;

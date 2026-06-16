@@ -79,7 +79,7 @@ pub fn render(
     }
 }
 
-fn regs_view(gb: &GameBoy) -> debugger::RegsView {
+fn regs_view(gb: &GameBoy, clock_base: u64) -> debugger::RegsView {
     let r = gb.cpu_regs();
     debugger::RegsView {
         af: r.af(),
@@ -96,6 +96,8 @@ fn regs_view(gb: &GameBoy) -> debugger::RegsView {
         ie: gb.debug_read(0xFFFF),
         iflag: gb.debug_read(0xFF0F),
         double_speed: gb.double_speed(),
+        // Emulated cycles since the last user-clock reset (RM14); low 32 bits.
+        cnt: gb.cycles().wrapping_sub(clock_base) as u32,
     }
 }
 
@@ -127,7 +129,7 @@ fn render_debugger(
     if gb.profiling() {
         debugger::render_profile_counts(c, l.disasm, &rows, |a| gb.profile_count(a), theme);
     }
-    debugger::render_regs(c, l.regs, &regs_view(gb), theme);
+    debugger::render_regs(c, l.regs, &regs_view(gb, st.clock_base), theme);
     let stack_rows = (l.stack.h / line_height()).max(0) as usize;
     debugger::render_stack(c, l.stack, &gb.stack(stack_rows), theme);
     debugger::render_memory(c, l.memory, |a| gb.debug_read(a), st.mem_base, theme);

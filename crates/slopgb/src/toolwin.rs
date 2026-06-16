@@ -434,6 +434,48 @@ impl ToolWindows {
         }
     }
 
+    /// Open the debugger's `Evaluate expression` modal (RM14).
+    pub fn open_debugger_eval(&mut self) {
+        let Some(view) = self.debugger_view_mut() else {
+            return;
+        };
+        if let WinState::Debugger(s) = &mut view.state {
+            debugger::open_eval(s);
+            view.window.request_redraw();
+        }
+    }
+
+    /// Evaluate the stored expression against the live machine (RM14) and show
+    /// the result (or the error) in a display-only box.
+    pub fn debugger_eval(&mut self, gb: &GameBoy) {
+        let regs = gb.cpu_regs();
+        let Some(view) = self.debugger_view_mut() else {
+            return;
+        };
+        if let WinState::Debugger(s) = &mut view.state {
+            let expr = s.eval_input.clone();
+            let text = match debugger::eval_expr(&expr, &regs, |a| gb.debug_read(a)) {
+                Ok(v) => format!("{expr} = {v:04X} ({v})"),
+                Err(e) => format!("{expr}: {e}"),
+            };
+            debugger::show_eval_result(s, text);
+            view.window.request_redraw();
+        }
+    }
+
+    /// Zero the regs-pane `cnt` user-clock counter (RM14, "Set user clocks
+    /// counter"): re-baseline it to the current cycle count.
+    pub fn reset_debugger_clocks(&mut self, gb: &GameBoy) {
+        let now = gb.cycles();
+        let Some(view) = self.debugger_view_mut() else {
+            return;
+        };
+        if let WinState::Debugger(s) = &mut view.state {
+            s.clock_base = now;
+            view.window.request_redraw();
+        }
+    }
+
     /// Clear the remembered cursor when it leaves tool window `id`, so a stale
     /// position can't drive a click and the hover details clear.
     pub fn on_cursor_left(&mut self, id: WindowId) {

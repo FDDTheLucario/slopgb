@@ -187,8 +187,14 @@ fn debug_menu(cursor: u16) -> Vec<(MenuItem, MenuChoice)> {
             MenuItem::new("Toggle breakpoint").shortcut("F2"),
             MenuChoice::Act(DebugAction::ToggleBreakpoint(cursor)),
         ),
-        disabled("Evaluate expression"),
-        disabled("Set user clocks counter"),
+        (
+            MenuItem::new("Evaluate expression"),
+            MenuChoice::Command(Action::DbgEvaluate),
+        ),
+        (
+            MenuItem::new("Set user clocks counter"),
+            MenuChoice::Command(Action::DbgSetUserClocks),
+        ),
         cmd("Breakpoints", "Ctrl+H", Action::DbgManageBreakpoints),
         cmd("Watchpoints", "Ctrl+J", Action::DbgManageWatchpoints),
     ]

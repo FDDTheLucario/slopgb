@@ -198,6 +198,10 @@ impl App {
                     self.tools.debugger_goto_addr(addr);
                 }
             }
+            // Debug menu (RM14): evaluate an expression + the user-clock counter.
+            Action::DbgEvaluate => self.tools.open_debugger_eval(),
+            Action::DbgEvalRun => self.tools.debugger_eval(&self.session.gb),
+            Action::DbgSetUserClocks => self.tools.reset_debugger_clocks(&self.session.gb),
             _ => {}
         }
     }

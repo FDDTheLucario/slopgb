@@ -144,11 +144,14 @@ fn regs_lines_match_bgb_two_column_layout() {
         ie: 0x00,
         iflag: 0xF1,
         double_speed: false,
+        cnt: 144,
     };
     let l = regs_lines(&v);
     assert_eq!(l[0], "af= 1180   lcdc=91");
     assert_eq!(l[1], "bc= 0000   stat=81");
     assert_eq!(l[2], "de= FF56   ly= 90");
+    // The hl line carries the user-clock counter (RM14) in its right column.
+    assert_eq!(l[3], "hl= 000D   cnt= 144");
     assert_eq!(l[4], "sp= FFFE   ie= 00");
     assert_eq!(l[5], "pc= 0100   if= F1");
     assert_eq!(l[6], "ime=.   spd= 0");
