@@ -64,9 +64,8 @@ impl MenuItem {
         self
     }
 
-    /// Show a right-aligned submenu arrow.
-    // TODO(MN1): consumed by the main-window menu's State/Other/… submenus.
-    #[allow(dead_code)]
+    /// Show a right-aligned submenu arrow (the main-window menu's State/Other/…
+    /// rows).
     #[must_use]
     pub fn submenu(mut self) -> Self {
         self.submenu = true;

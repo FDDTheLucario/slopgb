@@ -7,6 +7,8 @@ use std::rc::Rc;
 use slopgb_core::{SCREEN_H, SCREEN_PIXELS, SCREEN_W};
 use winit::window::Window;
 
+use crate::ui::Canvas;
+
 /// Owns the softbuffer context + surface for one window.
 pub struct Video {
     /// Kept alive alongside the surface (softbuffer's display connection).
@@ -28,12 +30,16 @@ impl Video {
     }
 
     /// Present `frame` at the largest integer scale that fits the window,
-    /// centered on black. The core frame and the softbuffer pixel format are
-    /// both `0x00RRGGBB` u32s, so pixels are copied verbatim.
+    /// centered on black, then let `overlay` draw on top (the bgb-style popup
+    /// menu — pass a no-op closure when there is nothing to overlay). The core
+    /// frame and the softbuffer pixel format are both `0x00RRGGBB` u32s, so
+    /// pixels are copied verbatim; the opaque-alpha pass runs *after* the
+    /// overlay so menu pixels (drawn with a 0 top byte) become opaque too.
     pub fn draw(
         &mut self,
         window: &Window,
         frame: &[u32; SCREEN_PIXELS],
+        overlay: impl FnOnce(&mut Canvas),
     ) -> Result<(), softbuffer::SoftBufferError> {
         let size = window.inner_size();
         let (Some(w), Some(h)) = (NonZeroU32::new(size.width), NonZeroU32::new(size.height)) else {
@@ -42,9 +48,14 @@ impl Video {
         self.surface.resize(w, h)?;
         let mut buffer = self.surface.buffer_mut()?;
         blit(&mut buffer, size.width, size.height, frame, &mut self.row);
+        {
+            let mut canvas = Canvas::new(&mut buffer, size.width as usize, size.height as usize);
+            overlay(&mut canvas);
+        }
         // Force opaque alpha: softbuffer leaves the top byte 0, which a 32-bit
         // ARGB compositor reads as fully transparent (the window would show the
-        // desktop through it). softbuffer itself ignores the top byte.
+        // desktop through it). softbuffer itself ignores the top byte. Runs last
+        // so both the LCD and the overlay end up opaque.
         for px in buffer.iter_mut() {
             *px |= 0xFF00_0000;
         }

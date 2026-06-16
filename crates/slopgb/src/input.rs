@@ -56,6 +56,9 @@ pub enum Action {
     DbgStepOut,
     /// Open the Go-to address prompt — debugger Ctrl+G, on press.
     DbgGoto,
+    /// Toggle audio output (bgb's main-menu "Enable sound"). Menu-only — no key
+    /// binds it, so [`map`] never returns it; it rides the shared `run_action`.
+    ToggleSound,
 }
 
 /// Tracks which physical keys currently hold each button, so two keys mapped

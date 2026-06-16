@@ -5,6 +5,7 @@
 
 pub mod debugger;
 pub mod iomap;
+pub mod mainwin;
 pub mod vram;
 
 use slopgb_core::{GameBoy, Model, debug};

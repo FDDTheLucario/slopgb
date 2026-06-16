@@ -413,6 +413,10 @@ struct App {
     window: Option<Rc<Window>>,
     video: Option<Video>,
     audio: Option<AudioPipe>,
+    /// Runtime audio mute (bgb's "Enable sound" toggle). Initialised from the
+    /// `--mute` flag; gates audio pacing so the pipe drains to silence without
+    /// tearing down the cpal stream. See [`audio_pacing`].
+    muted: bool,
     paused: bool,
     turbo: bool,
     /// Per-key hold state, so two keys mapped to one button release cleanly.
@@ -433,16 +437,24 @@ struct App {
     dbg: dbg::Debugger,
     /// Current keyboard modifiers, for the focus-dependent key map (Ctrl+G).
     modifiers: ModifiersState,
+    /// The open game-window right-click menu (bgb's `rc-main.png`), if any —
+    /// drawn as an overlay over the LCD and routed by the game-window mouse.
+    main_menu: Option<windows::mainwin::MainMenu>,
+    /// Last cursor position over the game window (physical px), so a right-click
+    /// can open the menu where the pointer is.
+    game_cursor: (i32, i32),
 }
 
 impl App {
     fn new(opts: Options, session: Session) -> Self {
+        let muted = opts.mute;
         Self {
             opts,
             session,
             window: None,
             video: None,
             audio: None,
+            muted,
             paused: false,
             turbo: false,
             buttons: ButtonTracker::default(),
@@ -455,6 +467,8 @@ impl App {
             tools: toolwin::ToolWindows::new(),
             dbg: dbg::Debugger::default(),
             modifiers: ModifiersState::empty(),
+            main_menu: None,
+            game_cursor: (0, 0),
         }
     }
 
@@ -472,10 +486,23 @@ impl App {
     }
 
     fn redraw(&mut self) {
-        if let (Some(window), Some(video)) = (&self.window, &mut self.video) {
-            if let Err(e) = video.draw(window, self.session.gb.frame()) {
-                eprintln!("slopgb: failed to present frame: {e}");
+        let Some(window) = self.window.as_ref() else {
+            return;
+        };
+        let Some(video) = self.video.as_mut() else {
+            return;
+        };
+        let frame = self.session.gb.frame();
+        // Overlay the game-window right-click menu, if open (captures locals, not
+        // `self`, so the disjoint field borrows stay clean).
+        let menu = self.main_menu.as_ref();
+        let theme = ui::Theme::BGB;
+        if let Err(e) = video.draw(window, frame, |canvas| {
+            if let Some(m) = menu {
+                windows::mainwin::render(canvas, m, &theme);
             }
+        }) {
+            eprintln!("slopgb: failed to present frame: {e}");
         }
     }
 
@@ -489,6 +516,15 @@ impl App {
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, key: &KeyEvent, focus: Focus) {
         if key.repeat {
             return;
+        }
+        // With the game-window menu open, Escape closes it (rather than quitting
+        // the emulator) and is swallowed so it can't also fire a hotkey.
+        if focus == Focus::Game && key.state.is_pressed() && self.main_menu.is_some() {
+            if let PhysicalKey::Code(KeyCode::Escape) = key.physical_key {
+                self.main_menu = None;
+                self.request_game_redraw();
+                return;
+            }
         }
         // Modal capture: while the debugger's Go-to prompt is open, every key
         // goes to it (so typing an address can't trigger a debugger hotkey).
@@ -593,6 +629,16 @@ impl App {
                 self.refresh_after_step();
             }
             Action::DbgGoto => self.tools.open_debugger_goto(),
+            // bgb's "Enable sound": flip the runtime mute. Unmuting lazily opens
+            // the device (so a `--mute` start can still enable sound). Resync
+            // pacing so the audio↔timer switch doesn't fast-forward a backlog.
+            Action::ToggleSound => {
+                self.muted = !self.muted;
+                if !self.muted {
+                    self.try_open_audio();
+                }
+                self.resync_pacing();
+            }
             _ => {}
         }
     }
@@ -612,6 +658,47 @@ impl App {
             window.request_redraw();
         }
         self.tools.request_redraw_all();
+    }
+
+    /// Repaint the game window (the menu overlay changed, but emulation didn't).
+    fn request_game_redraw(&self) {
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
+
+    /// Open the cpal output stream if it isn't already open. Called at startup
+    /// (when not launched `--mute`) and when "Enable sound" is toggled on after a
+    /// muted start, so the menu toggle always restores audio. A device that won't
+    /// open just leaves `audio` `None` — the timer paces, silently.
+    fn try_open_audio(&mut self) {
+        if self.audio.is_some() {
+            return;
+        }
+        match AudioOutput::new() {
+            Ok(out) => self.audio = Some(AudioPipe::new(out)),
+            Err(e) => eprintln!("slopgb: audio disabled: {e}"),
+        }
+    }
+
+    /// A left/right press on the game window. Right-click (re)opens the bgb
+    /// main-menu at the pointer; left-click runs the clicked row's action via the
+    /// shared `run_action` (greyed/submenu/outside-the-box clicks just dismiss).
+    fn on_game_click(&mut self, button: MouseButton, event_loop: &ActiveEventLoop) {
+        let (px, py) = self.game_cursor;
+        if button == MouseButton::Right {
+            let sound_on = !self.muted;
+            self.main_menu = Some(windows::mainwin::MainMenu::open((px, py), sound_on));
+            self.request_game_redraw();
+            return;
+        }
+        if let Some(menu) = self.main_menu.take() {
+            let action = menu.action_at(px, py);
+            self.request_game_redraw();
+            if let Some(act) = action {
+                self.run_action(act, event_loop);
+            }
+        }
     }
 
     /// Focus lost or window occluded: no release events will arrive for keys
@@ -718,6 +805,7 @@ impl App {
     /// Turbo: emulate as much as fits in a small wall-clock budget.
     fn run_turbo(&mut self) -> (u32, bool) {
         let bps = self.run_breakpoints();
+        let muted = self.muted;
         let start = Instant::now();
         let mut frames = 0;
         let mut hit = false;
@@ -725,8 +813,8 @@ impl App {
             hit = run_one_frame(&mut self.session.gb, &bps);
             match &mut self.audio {
                 // The queue keeps ~250 ms and drops the rest.
-                Some(pipe) => pipe.pump(&mut self.session.gb),
-                None => self.discard_audio(),
+                Some(pipe) if !muted => pipe.pump(&mut self.session.gb),
+                _ => self.discard_audio(),
             }
             frames += 1;
         }
@@ -782,6 +870,16 @@ fn dialog_key_from(key: &KeyEvent) -> Option<DialogKey> {
     (!ch.is_control()).then_some(DialogKey::Char(ch))
 }
 
+/// Whether to pace against the audio queue this wake: only with a live pipe and
+/// sound un-muted. When muted the pipe stays open (drains to silence) but the
+/// timer paces instead, so toggling "Enable sound" never tears down the stream.
+/// A free function for the truth-table test (an `App` with a real pipe can't be
+/// built headless).
+#[must_use]
+fn audio_pacing(has_audio: bool, muted: bool) -> bool {
+    has_audio && !muted
+}
+
 /// Run one frame, halting early at a breakpoint when armed. A free function (not
 /// a method) so the pacers can call it while the audio pipe holds `&mut
 /// self.audio` — borrowing only the machine, not all of `self`. Returns whether
@@ -825,11 +923,8 @@ impl ApplicationHandler for App {
                 return;
             }
         }
-        if !self.opts.mute && self.audio.is_none() {
-            match AudioOutput::new() {
-                Ok(out) => self.audio = Some(AudioPipe::new(out)),
-                Err(e) => eprintln!("slopgb: audio disabled: {e}"),
-            }
+        if !self.opts.mute {
+            self.try_open_audio();
         }
         self.window = Some(window);
         // Optionally open debug tool windows at startup (comma-separated
@@ -927,6 +1022,23 @@ impl ApplicationHandler for App {
             // Focus loss and occlusion both mean held keys won't get release
             // events, so drop all input before any button can stick.
             WindowEvent::Focused(false) | WindowEvent::Occluded(true) => self.release_all_input(),
+            // Track the pointer (for opening the menu where it sits) and, with a
+            // menu open, highlight the hovered row.
+            WindowEvent::CursorMoved { position, .. } => {
+                self.game_cursor = (position.x as i32, position.y as i32);
+                if let Some(m) = &mut self.main_menu {
+                    if m.hover_at(self.game_cursor.0, self.game_cursor.1) {
+                        self.request_game_redraw();
+                    }
+                }
+            }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button,
+                ..
+            } if matches!(button, MouseButton::Left | MouseButton::Right) => {
+                self.on_game_click(button, event_loop);
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 self.handle_key(event_loop, &event, Focus::Game)
             }
@@ -946,7 +1058,7 @@ impl ApplicationHandler for App {
         }
         let (frames, hit_bp) = if self.turbo {
             self.run_turbo()
-        } else if self.audio.is_some() {
+        } else if audio_pacing(self.audio.is_some(), self.muted) {
             self.run_audio_paced()
         } else {
             self.run_timer_paced()
@@ -970,7 +1082,7 @@ impl ApplicationHandler for App {
         self.update_fps(frames);
         let flow = if self.turbo {
             ControlFlow::Poll
-        } else if self.audio.is_some() {
+        } else if audio_pacing(self.audio.is_some(), self.muted) {
             // Wake well before ~50 ms of queued audio can drain.
             ControlFlow::WaitUntil(Instant::now() + FRAME_DURATION / 4)
         } else {
@@ -990,6 +1102,17 @@ mod tests {
 
     fn parse(args: &[&str]) -> Result<ParseOutcome, String> {
         Options::parse(args.iter().map(ToString::to_string))
+    }
+
+    #[test]
+    fn audio_pacing_requires_a_live_pipe_and_unmuted_sound() {
+        assert!(audio_pacing(true, false), "pipe + sound on → audio-paced");
+        assert!(
+            !audio_pacing(true, true),
+            "muted → timer-paced even with a pipe"
+        );
+        assert!(!audio_pacing(false, false), "no pipe → timer-paced");
+        assert!(!audio_pacing(false, true), "no pipe + muted → timer-paced");
     }
 
     /// Parse args expected to yield a run (not help).
