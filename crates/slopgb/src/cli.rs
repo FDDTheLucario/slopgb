@@ -1,0 +1,110 @@
+//! Command-line parsing for the slopgb frontend. Kept pure (no I/O, no exit)
+//! so [`Options::parse`] is unit-testable; `main` prints the help / errors.
+
+use std::path::PathBuf;
+
+use slopgb_core::Model;
+
+pub(crate) const USAGE: &str = "\
+slopgb — Game Boy / Game Boy Color emulator
+
+USAGE:
+    slopgb <rom.gb|.gbc> [OPTIONS]
+
+OPTIONS:
+    --model <MODEL>   Hardware model: dmg, dmg0, mgb, sgb, sgb2, cgb, agb
+                      (default: auto-detect from the ROM header)
+    --scale <N>       Initial window scale factor, 1-16 (default: 3)
+    --mute            Disable audio output
+    -h, --help        Print this help
+
+KEYS:
+    Z = A        X = B        Enter = Start    RShift/Backspace = Select
+    Arrow keys = D-pad        Tab (hold) = turbo
+    P = pause    R = reset    Esc = quit       F9 = break/resume
+    F2 = debugger    F3 = VRAM viewer    F4 = I/O map  (bgb-style debug windows)
+
+When the debugger window is focused its keys follow bgb: F2 toggle breakpoint,
+F3 step over, F7 trace (step), F4 run to cursor, Ctrl+G go to, F5/F10 open the
+VRAM viewer / I/O map. Right-click a debugger pane for its context menu.
+
+A ROM file dropped onto the window is loaded in place of the current one.
+Set SLOPGB_OPEN_TOOLS=debugger,vram,iomap to open debug windows at startup.
+";
+
+pub(crate) struct Options {
+    pub(crate) rom: PathBuf,
+    pub(crate) model: Option<Model>,
+    pub(crate) scale: u32,
+    pub(crate) mute: bool,
+}
+
+/// What a successful argument parse asks the program to do. Printing the
+/// help text (and exiting) is the caller's job, keeping `parse` pure and
+/// testable.
+pub(crate) enum ParseOutcome {
+    Run(Options),
+    Help,
+}
+
+impl Options {
+    pub(crate) fn parse(mut args: impl Iterator<Item = String>) -> Result<ParseOutcome, String> {
+        let mut rom = None;
+        let mut model = None;
+        let mut scale = 3u32;
+        let mut mute = false;
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "-h" | "--help" => return Ok(ParseOutcome::Help),
+                "--mute" => mute = true,
+                "--model" => {
+                    let v = args.next().ok_or("--model requires a value")?;
+                    model = Some(parse_model(&v)?);
+                }
+                "--scale" => {
+                    let v = args.next().ok_or("--scale requires a value")?;
+                    scale = v
+                        .parse::<u32>()
+                        .ok()
+                        .filter(|n| (1..=16).contains(n))
+                        .ok_or_else(|| format!("invalid --scale '{v}' (expected 1-16)"))?;
+                }
+                s if s.starts_with('-') => return Err(format!("unknown option '{s}'")),
+                _ => {
+                    if rom.is_some() {
+                        return Err(format!("unexpected extra argument '{arg}'"));
+                    }
+                    rom = Some(PathBuf::from(arg));
+                }
+            }
+        }
+        let rom = rom.ok_or("missing ROM path")?;
+        Ok(ParseOutcome::Run(Self {
+            rom,
+            model,
+            scale,
+            mute,
+        }))
+    }
+}
+
+pub(crate) fn parse_model(s: &str) -> Result<Model, String> {
+    Ok(match s.to_ascii_lowercase().as_str() {
+        "dmg" => Model::Dmg,
+        "dmg0" => Model::Dmg0,
+        "mgb" => Model::Mgb,
+        "sgb" => Model::Sgb,
+        "sgb2" => Model::Sgb2,
+        "cgb" => Model::Cgb,
+        "agb" => Model::Agb,
+        _ => {
+            return Err(format!(
+                "unknown model '{s}' (expected dmg, dmg0, mgb, sgb, sgb2, cgb or agb)"
+            ));
+        }
+    })
+}
+
+#[cfg(test)]
+#[path = "cli_tests.rs"]
+mod tests;

@@ -1,0 +1,65 @@
+use super::*;
+
+fn parse(args: &[&str]) -> Result<ParseOutcome, String> {
+    Options::parse(args.iter().map(ToString::to_string))
+}
+
+/// Parse args expected to yield a run (not help).
+fn parse_run(args: &[&str]) -> Result<Options, String> {
+    match parse(args)? {
+        ParseOutcome::Run(opts) => Ok(opts),
+        ParseOutcome::Help => panic!("unexpected help outcome for {args:?}"),
+    }
+}
+
+#[test]
+fn parse_rom_only_defaults() {
+    let opts = parse_run(&["game.gb"]).unwrap();
+    assert_eq!(opts.rom, PathBuf::from("game.gb"));
+    assert_eq!(opts.model, None);
+    assert_eq!(opts.scale, 3);
+    assert!(!opts.mute);
+}
+
+#[test]
+fn parse_all_options() {
+    let opts = parse_run(&["--model", "cgb", "--scale", "5", "--mute", "x.gbc"]).unwrap();
+    assert_eq!(opts.rom, PathBuf::from("x.gbc"));
+    assert_eq!(opts.model, Some(Model::Cgb));
+    assert_eq!(opts.scale, 5);
+    assert!(opts.mute);
+}
+
+#[test]
+fn parse_help_returns_outcome_instead_of_exiting() {
+    assert!(matches!(parse(&["-h"]), Ok(ParseOutcome::Help)));
+    assert!(matches!(parse(&["--help"]), Ok(ParseOutcome::Help)));
+    // Help wins even when mixed with other (even bogus) arguments.
+    assert!(matches!(parse(&["x.gb", "--help"]), Ok(ParseOutcome::Help)));
+}
+
+#[test]
+fn parse_rejects_bad_input() {
+    assert!(parse(&[]).is_err()); // missing ROM
+    assert!(parse(&["--model", "snes", "x.gb"]).is_err());
+    assert!(parse(&["--scale", "0", "x.gb"]).is_err());
+    assert!(parse(&["--scale", "huge", "x.gb"]).is_err());
+    assert!(parse(&["--frobnicate", "x.gb"]).is_err());
+    assert!(parse(&["a.gb", "b.gb"]).is_err());
+    assert!(parse(&["--model"]).is_err()); // value missing
+}
+
+#[test]
+fn parse_model_accepts_every_variant() {
+    for (s, m) in [
+        ("dmg", Model::Dmg),
+        ("dmg0", Model::Dmg0),
+        ("mgb", Model::Mgb),
+        ("sgb", Model::Sgb),
+        ("sgb2", Model::Sgb2),
+        ("cgb", Model::Cgb),
+        ("agb", Model::Agb),
+    ] {
+        assert_eq!(parse_model(s).unwrap(), m);
+    }
+}
