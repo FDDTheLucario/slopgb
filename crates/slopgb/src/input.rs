@@ -73,6 +73,10 @@ pub enum Action {
     /// Dump the whole 64 KiB address space to a file (debugger File →
     /// "save memory_dump..."). Menu-only.
     DbgSaveMemDump,
+    /// Show the Options info box (main menu "Options...", F11). Menu-only stub.
+    MainOptions,
+    /// Show the Cheats info box (main menu "Cheat...", F10). Menu-only stub.
+    MainCheats,
 }
 
 /// Tracks which physical keys currently hold each button, so two keys mapped

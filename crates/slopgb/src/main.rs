@@ -722,6 +722,24 @@ impl App {
             }
             Action::SaveScreenshot => self.save_screenshot(),
             Action::DbgSaveMemDump => self.save_memory_dump(),
+            // bgb's "Options..." / "Cheat..." — partial stubs (the real config /
+            // cheat subsystems aren't built): a read-only info box of the live
+            // settings, and an empty cheat list (MN7).
+            Action::MainOptions => {
+                self.info_box = Some(InfoBox::new(
+                    "Options",
+                    vec![
+                        format!("sound:  {}", if self.muted { "off" } else { "on" }),
+                        format!("scale:  {}", scale_label(self.window_size)),
+                        format!("model:  {:?}", self.session.model),
+                    ],
+                ));
+                self.request_game_redraw();
+            }
+            Action::MainCheats => {
+                self.info_box = Some(InfoBox::new("Cheats", vec!["(no cheats loaded)".into()]));
+                self.request_game_redraw();
+            }
             _ => {}
         }
     }
@@ -1157,6 +1175,15 @@ fn cart_type_name(t: u8) -> &'static str {
         0xFE => "HuC3",
         0xFF => "HuC1",
         _ => "?",
+    }
+}
+
+/// A short label for the active window size (Options info box).
+fn scale_label(size: WindowSizeChoice) -> String {
+    match size {
+        WindowSizeChoice::Scale(n) => format!("{n}x"),
+        WindowSizeChoice::Fullscreen => "fullscreen".into(),
+        WindowSizeChoice::FullscreenStretched => "fullscreen (stretched)".into(),
     }
 }
 

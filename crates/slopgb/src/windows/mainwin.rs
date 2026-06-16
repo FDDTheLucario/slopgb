@@ -106,12 +106,12 @@ fn entries(sound_on: bool) -> Vec<(MenuItem, MenuEffect)> {
             MenuEffect::Run(Action::ToggleSound),
         ),
         (
-            MenuItem::new("Options...").shortcut("F11").disabled(),
-            MenuEffect::None,
+            MenuItem::new("Options...").shortcut("F11"),
+            MenuEffect::Run(Action::MainOptions),
         ),
         (
-            MenuItem::new("Cheat...").shortcut("F10").disabled(),
-            MenuEffect::None,
+            MenuItem::new("Cheat...").shortcut("F10"),
+            MenuEffect::Run(Action::MainCheats),
         ),
         (
             MenuItem::new("Reset gameboy").shortcut("*"),
