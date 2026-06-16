@@ -65,6 +65,9 @@ pub enum Action {
     /// Toggle audio output (bgb's main-menu "Enable sound"). Menu-only — no key
     /// binds it, so [`map`] never returns it; it rides the shared `run_action`.
     ToggleSound,
+    /// Save the current frame to a BMP (bgb's main-menu "Save screenshot").
+    /// Menu-only — no key binds it.
+    SaveScreenshot,
 }
 
 /// Tracks which physical keys currently hold each button, so two keys mapped

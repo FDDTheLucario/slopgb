@@ -74,8 +74,13 @@ fn supported_rows_run_their_action_window_size_opens_a_submenu_rest_none() {
         MenuEffect::Submenu(SubKind::SoundChannel),
         "Sound channel opens its submenu (MN3)"
     );
+    assert_eq!(
+        m.effects[6],
+        MenuEffect::Run(Action::SaveScreenshot),
+        "Save screenshot is wired (MN4)"
+    );
     // Greyed stubs + not-yet-wired submenu rows have no effect.
-    for i in [1, 3, 4, 6, 8, 9, 12, 13] {
+    for i in [1, 3, 4, 8, 9, 12, 13] {
         assert_eq!(m.effects[i], MenuEffect::None, "row {i} is a stub");
     }
 }

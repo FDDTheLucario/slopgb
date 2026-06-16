@@ -117,8 +117,8 @@ fn entries(sound_on: bool) -> Vec<(MenuItem, MenuEffect)> {
             MenuEffect::Run(Action::Reset),
         ),
         (
-            MenuItem::new("Save screenshot").disabled(),
-            MenuEffect::None,
+            MenuItem::new("Save screenshot"),
+            MenuEffect::Run(Action::SaveScreenshot),
         ),
         (
             MenuItem::new("Debugger").shortcut("Esc"),

@@ -10,6 +10,7 @@
 mod audio;
 mod dbg;
 mod input;
+mod screenshot;
 mod toolwin;
 mod ui;
 mod video;
@@ -706,7 +707,22 @@ impl App {
                 }
                 self.resync_pacing();
             }
+            Action::SaveScreenshot => self.save_screenshot(),
             _ => {}
+        }
+    }
+
+    /// Write the current frame to `slopgb-<unix-millis>.bmp` in the working
+    /// directory (bgb's "Save screenshot"); log the path or any I/O error.
+    fn save_screenshot(&self) {
+        let bmp = screenshot::to_bmp(self.session.gb.frame(), SCREEN_W, SCREEN_H);
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis());
+        let path = format!("slopgb-{stamp}.bmp");
+        match fs::write(&path, &bmp) {
+            Ok(()) => eprintln!("saved screenshot to {path}"),
+            Err(e) => eprintln!("error: could not save screenshot: {e}"),
         }
     }
 
