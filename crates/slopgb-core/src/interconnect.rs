@@ -25,6 +25,7 @@ mod debug;
 mod hdma;
 mod memory;
 mod oam_dma;
+mod state;
 mod tick;
 
 /// The five implemented interrupt sources: IF/IE bits 0-4 (VBlank, STAT,

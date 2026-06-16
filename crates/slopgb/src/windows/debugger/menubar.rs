@@ -120,8 +120,8 @@ fn file_menu() -> Vec<(MenuItem, MenuChoice)> {
         disabled("Reload SRAM"),
         disabled("Load SRAM..."),
         disabled("reload SYM file"),
-        dis_sc("Load state...", "Ctrl+L"),
-        dis_sc("Save state...", "Ctrl+W"),
+        cmd("Load state...", "Ctrl+L", Action::DbgLoadState),
+        cmd("Save state...", "Ctrl+W", Action::DbgSaveState),
         disabled("Fix checksums"),
         (
             MenuItem::new("save screenshot"),

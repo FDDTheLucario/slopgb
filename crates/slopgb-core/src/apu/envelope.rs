@@ -181,6 +181,34 @@ impl Envelope {
     }
 }
 
+// --- Save state (see `crate::state`) ---
+impl Envelope {
+    pub(super) fn write_state(&self, w: &mut crate::state::Writer) {
+        w.u8(self.initial_volume);
+        w.bool(self.add_mode);
+        w.u8(self.period);
+        w.u8(self.volume);
+        w.u8(self.countdown);
+        w.bool(self.clock);
+        w.bool(self.should_lock);
+        w.bool(self.locked);
+    }
+    pub(super) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        self.initial_volume = r.u8()?;
+        self.add_mode = r.bool()?;
+        self.period = r.u8()?;
+        self.volume = r.u8()?;
+        self.countdown = r.u8()?;
+        self.clock = r.bool()?;
+        self.should_lock = r.bool()?;
+        self.locked = r.bool()?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

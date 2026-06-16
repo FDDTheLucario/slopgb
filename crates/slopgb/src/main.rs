@@ -104,6 +104,18 @@ fn main() {
 // ---------------------------------------------------------------------------
 // Application
 
+/// What an accepted [`App::path_dialog`] entry does — the path modal is shared
+/// by Load ROM (MN4) and on-disk save states.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PathPurpose {
+    /// Load a ROM from the typed path (the existing drop path).
+    LoadRom,
+    /// Write the serialized machine to the typed path.
+    SaveState,
+    /// Restore the machine from the typed path (atomic; a bad file is logged).
+    LoadState,
+}
+
 struct App {
     opts: Options,
     session: Session,
@@ -152,9 +164,11 @@ struct App {
     /// An open info box (Other → Cart info / System info / About), drawn centred
     /// over the LCD; any click or Escape closes it.
     info_box: Option<InfoBox>,
-    /// The open "Load ROM" path-entry modal (MN4), drawn centred over the LCD;
-    /// accept loads the typed path, Escape/cancel closes it.
+    /// The open path-entry modal, drawn centred over the LCD; accept routes by
+    /// [`Self::path_purpose`] (Load ROM / Save state / Load state), Escape closes.
     path_dialog: Option<InputDialog>,
+    /// What the open [`Self::path_dialog`] does on accept.
+    path_purpose: PathPurpose,
     /// Recently loaded ROM paths (MN4), most-recent first, deduped, capped — the
     /// Recent ROMs submenu. In-memory only (on-disk persistence deferred).
     recent: Vec<PathBuf>,
@@ -225,6 +239,7 @@ impl App {
             modifiers: ModifiersState::empty(),
             info_box: None,
             path_dialog: None,
+            path_purpose: PathPurpose::LoadRom,
             recent: Vec::new(),
             main_menu: None,
             main_submenu: None,
@@ -489,21 +504,48 @@ impl App {
         })
     }
 
-    /// Apply a "Load ROM" modal result (MN4): accept loads the typed path (a
+    /// Open the shared path-entry modal for `purpose` over the LCD.
+    pub(crate) fn open_path_prompt(&mut self, title: &str, purpose: PathPurpose) {
+        self.path_purpose = purpose;
+        self.path_dialog = Some(crate::ui::dialog::InputDialog::new(title, false));
+        self.request_game_redraw();
+    }
+
+    /// Apply a path-modal result: accept routes by [`Self::path_purpose`] (a
     /// blank entry just closes), cancel closes; continue keeps editing.
     fn resolve_path_dialog(&mut self, result: DialogResult) {
         match result {
             DialogResult::Accept(path) => {
+                let purpose = self.path_purpose;
                 self.path_dialog = None;
                 let trimmed = path.trim();
                 if !trimmed.is_empty() {
-                    self.load_dropped(Path::new(trimmed));
+                    self.run_path_action(purpose, Path::new(trimmed));
                 }
             }
             DialogResult::Cancel => self.path_dialog = None,
             DialogResult::Continue => {}
         }
         self.request_game_redraw();
+    }
+
+    /// Carry out an accepted path entry per its purpose.
+    fn run_path_action(&mut self, purpose: PathPurpose, path: &Path) {
+        match purpose {
+            PathPurpose::LoadRom => self.load_dropped(path),
+            PathPurpose::SaveState => match self.session.save_state_to(path) {
+                Ok(()) => println!("slopgb: saved state to {}", path.display()),
+                Err(e) => eprintln!("slopgb: save state failed: {e}"),
+            },
+            PathPurpose::LoadState => match self.session.load_state_from(path) {
+                Ok(()) => {
+                    println!("slopgb: loaded state from {}", path.display());
+                    self.resync_pacing();
+                    self.request_game_redraw();
+                }
+                Err(e) => eprintln!("slopgb: load state failed: {e}"),
+            },
+        }
     }
 
     /// Record a successfully loaded ROM in the recent list (MN4). Skipped when

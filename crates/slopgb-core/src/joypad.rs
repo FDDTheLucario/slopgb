@@ -352,6 +352,60 @@ impl Default for Joypad {
     }
 }
 
+// --- Save state (manual serialization; see `crate::state`) ---
+impl Joypad {
+    pub(crate) fn write_state(&self, w: &mut crate::state::Writer) {
+        w.u8(self.select);
+        w.u8(self.dpad);
+        w.u8(self.buttons);
+        w.u8(self.irq);
+        match &self.sgb {
+            Some(s) => {
+                w.bool(true);
+                w.bytes(&s.command);
+                w.u32(s.write_index as u32);
+                w.bool(s.ready_for_pulse);
+                w.bool(s.ready_for_write);
+                w.bool(s.ready_for_stop);
+                w.u8(s.player_count);
+                w.u8(s.current_player);
+            }
+            None => w.bool(false),
+        }
+    }
+    pub(crate) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        self.select = r.u8()?;
+        self.dpad = r.u8()?;
+        self.buttons = r.u8()?;
+        self.irq = r.u8()?;
+        if r.bool()? {
+            let mut command = [0u8; SGB_COMMAND_MAX];
+            r.bytes_into(&mut command)?;
+            let write_index = r.u32()? as usize;
+            let ready_for_pulse = r.bool()?;
+            let ready_for_write = r.bool()?;
+            let ready_for_stop = r.bool()?;
+            let player_count = r.u8()?;
+            let current_player = r.u8()?;
+            self.sgb = Some(Sgb {
+                command,
+                write_index,
+                ready_for_pulse,
+                ready_for_write,
+                ready_for_stop,
+                player_count,
+                current_player,
+            });
+        } else {
+            self.sgb = None;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

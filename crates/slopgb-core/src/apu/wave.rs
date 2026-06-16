@@ -155,6 +155,40 @@ impl Wave {
     }
 }
 
+// --- Save state (see `crate::state`) ---
+impl Wave {
+    pub(super) fn write_state(&self, w: &mut crate::state::Writer) {
+        w.bool(self.cgb);
+        w.bool(self.enabled);
+        w.bool(self.dac);
+        w.u8(self.volume_code);
+        w.u16(self.freq);
+        self.length.write_state(w);
+        w.u32(self.timer);
+        w.u8(self.position);
+        w.u8(self.sample_byte);
+        w.bytes(&self.ram);
+        w.u32(self.t_since_fetch);
+    }
+    pub(super) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        self.cgb = r.bool()?;
+        self.enabled = r.bool()?;
+        self.dac = r.bool()?;
+        self.volume_code = r.u8()?;
+        self.freq = r.u16()?;
+        self.length.read_state(r)?;
+        self.timer = r.u32()?;
+        self.position = r.u8()?;
+        self.sample_byte = r.u8()?;
+        r.bytes_into(&mut self.ram)?;
+        self.t_since_fetch = r.u32()?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

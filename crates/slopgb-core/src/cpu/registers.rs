@@ -89,6 +89,35 @@ impl Registers {
     }
 }
 
+// --- Save state (manual serialization; see `crate::state`) ---
+impl Registers {
+    pub(crate) fn write_state(&self, w: &mut crate::state::Writer) {
+        for b in [
+            self.a, self.f, self.b, self.c, self.d, self.e, self.h, self.l,
+        ] {
+            w.u8(b);
+        }
+        w.u16(self.sp);
+        w.u16(self.pc);
+    }
+    pub(crate) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        self.a = r.u8()?;
+        self.f = r.u8()?;
+        self.b = r.u8()?;
+        self.c = r.u8()?;
+        self.d = r.u8()?;
+        self.e = r.u8()?;
+        self.h = r.u8()?;
+        self.l = r.u8()?;
+        self.sp = r.u16()?;
+        self.pc = r.u16()?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Registers;

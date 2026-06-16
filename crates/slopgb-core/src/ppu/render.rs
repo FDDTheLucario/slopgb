@@ -508,6 +508,149 @@ fn oam_glitch_magic_enable(oam: &[u8; 0xA0]) -> bool {
     })
 }
 
+// --- Save state (see `crate::state`) ---
+impl Sprite {
+    fn write_state(&self, w: &mut crate::state::Writer) {
+        w.u8(self.y);
+        w.u8(self.x);
+        w.u8(self.tile);
+        w.u8(self.flags);
+        w.u8(self.idx);
+    }
+    fn read_state(r: &mut crate::state::Reader<'_>) -> Result<Self, crate::state::StateError> {
+        Ok(Self {
+            y: r.u8()?,
+            x: r.u8()?,
+            tile: r.u8()?,
+            flags: r.u8()?,
+            idx: r.u8()?,
+        })
+    }
+}
+
+impl SpritePixel {
+    fn write_state(&self, w: &mut crate::state::Writer) {
+        w.u8(self.color);
+        w.u8(self.palette);
+        w.bool(self.bg_priority);
+        w.u8(self.oam_idx);
+    }
+    fn read_state(r: &mut crate::state::Reader<'_>) -> Result<Self, crate::state::StateError> {
+        Ok(Self {
+            color: r.u8()?,
+            palette: r.u8()?,
+            bg_priority: r.bool()?,
+            oam_idx: r.u8()?,
+        })
+    }
+}
+
+impl FetchPhase {
+    fn tag(self) -> u8 {
+        match self {
+            FetchPhase::TileNoWait => 0,
+            FetchPhase::TileNo => 1,
+            FetchPhase::LoWait => 2,
+            FetchPhase::Lo => 3,
+            FetchPhase::HiWait => 4,
+            FetchPhase::Hi => 5,
+            FetchPhase::Push => 6,
+        }
+    }
+    fn from_tag(t: u8) -> Self {
+        match t {
+            0 => FetchPhase::TileNoWait,
+            1 => FetchPhase::TileNo,
+            2 => FetchPhase::LoWait,
+            3 => FetchPhase::Lo,
+            4 => FetchPhase::HiWait,
+            5 => FetchPhase::Hi,
+            _ => FetchPhase::Push,
+        }
+    }
+}
+
+impl Render {
+    pub(super) fn write_state(&self, w: &mut crate::state::Writer) {
+        w.bool(self.active);
+        w.u8(self.lx);
+        w.u8(self.discard);
+        w.u16(self.mode3_dot);
+        w.u16(self.pos_dot);
+        w.u8(self.hunt_idx);
+        w.bool(self.hunt_done);
+        w.u16(self.stall);
+        w.u16(self.fetch_run);
+        w.u8(self.bg_lo);
+        w.u8(self.bg_hi);
+        w.u8(self.bg_attr);
+        w.u8(self.bg_count);
+        w.u8(self.phase.tag());
+        w.u8(self.fetch_x);
+        w.bool(self.win_mode);
+        w.bool(self.first_discard);
+        w.u8(self.t_no);
+        w.u8(self.t_attr);
+        w.u8(self.t_lo);
+        w.u8(self.t_hi);
+        for s in &self.sprites {
+            s.write_state(w);
+        }
+        w.u8(self.n_sprites);
+        w.u16(self.fetched);
+        w.u64(self.penalty_tiles);
+        for p in &self.sp_fifo {
+            p.write_state(w);
+        }
+        w.bool(self.win_active);
+        w.bool(self.win_stalled);
+        w.bool(self.win_aborted);
+        w.bool(self.win_match_prev);
+        w.u8(self.prefill_pos);
+    }
+    pub(super) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        self.active = r.bool()?;
+        self.lx = r.u8()?;
+        self.discard = r.u8()?;
+        self.mode3_dot = r.u16()?;
+        self.pos_dot = r.u16()?;
+        self.hunt_idx = r.u8()?;
+        self.hunt_done = r.bool()?;
+        self.stall = r.u16()?;
+        self.fetch_run = r.u16()?;
+        self.bg_lo = r.u8()?;
+        self.bg_hi = r.u8()?;
+        self.bg_attr = r.u8()?;
+        self.bg_count = r.u8()?;
+        self.phase = FetchPhase::from_tag(r.u8()?);
+        self.fetch_x = r.u8()?;
+        self.win_mode = r.bool()?;
+        self.first_discard = r.bool()?;
+        self.t_no = r.u8()?;
+        self.t_attr = r.u8()?;
+        self.t_lo = r.u8()?;
+        self.t_hi = r.u8()?;
+        for s in &mut self.sprites {
+            *s = Sprite::read_state(r)?;
+        }
+        self.n_sprites = r.u8()?;
+        self.fetched = r.u16()?;
+        self.penalty_tiles = r.u64()?;
+        for p in &mut self.sp_fifo {
+            *p = SpritePixel::read_state(r)?;
+        }
+        self.win_active = r.bool()?;
+        self.win_stalled = r.bool()?;
+        self.win_aborted = r.bool()?;
+        self.win_match_prev = r.bool()?;
+        self.prefill_pos = r.u8()?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 #[path = "render_tests.rs"]
 mod tests;

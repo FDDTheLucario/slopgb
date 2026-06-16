@@ -697,6 +697,97 @@ impl Apu {
     }
 }
 
+// --- Save state (see `crate::state`). The output-stage config
+// (cycles_per_sample / max_samples) is NOT serialized: it is re-derived from
+// the live sample rate, so a state loads at the host's current rate. ---
+impl Apu {
+    pub(super) fn write_state(&self, w: &mut crate::state::Writer) {
+        w.bool(self.cgb);
+        w.bool(self.power);
+        self.ch1.write_state(w);
+        self.ch2.write_state(w);
+        self.ch3.write_state(w);
+        self.ch4.write_state(w);
+        w.u8(self.nr50);
+        w.u8(self.nr51);
+        w.u8(self.mute_mask);
+        w.u8(self.div_divider);
+        w.u8(match self.skip_div_event {
+            SkipDivEvent::Inactive => 0,
+            SkipDivEvent::Skip => 1,
+            SkipDivEvent::Skipped => 2,
+        });
+        w.u8(self.phase);
+        w.u16(self.prev_div);
+        w.bool(self.last_double_speed);
+        w.u64(self.sample_frac.to_bits());
+        w.u32(self.sum_l.to_bits());
+        w.u32(self.sum_r.to_bits());
+        w.u32(self.sum_count);
+        w.u32(self.hp_charge.to_bits());
+        w.u32(self.hp_cap_l.to_bits());
+        w.u32(self.hp_cap_r.to_bits());
+        write_sample_buf(w, &self.samples);
+        write_sample_buf(w, &self.raw_samples);
+    }
+    pub(super) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        self.cgb = r.bool()?;
+        self.power = r.bool()?;
+        self.ch1.read_state(r)?;
+        self.ch2.read_state(r)?;
+        self.ch3.read_state(r)?;
+        self.ch4.read_state(r)?;
+        self.nr50 = r.u8()?;
+        self.nr51 = r.u8()?;
+        self.mute_mask = r.u8()?;
+        self.div_divider = r.u8()?;
+        self.skip_div_event = match r.u8()? {
+            0 => SkipDivEvent::Inactive,
+            1 => SkipDivEvent::Skip,
+            _ => SkipDivEvent::Skipped,
+        };
+        self.phase = r.u8()?;
+        self.prev_div = r.u16()?;
+        self.last_double_speed = r.bool()?;
+        self.sample_frac = f64::from_bits(r.u64()?);
+        self.sum_l = f32::from_bits(r.u32()?);
+        self.sum_r = f32::from_bits(r.u32()?);
+        self.sum_count = r.u32()?;
+        self.hp_charge = f32::from_bits(r.u32()?);
+        self.hp_cap_l = f32::from_bits(r.u32()?);
+        self.hp_cap_r = f32::from_bits(r.u32()?);
+        self.samples = read_sample_buf(r)?;
+        self.raw_samples = read_sample_buf(r)?;
+        Ok(())
+    }
+}
+
+fn write_sample_buf(w: &mut crate::state::Writer, buf: &[(f32, f32)]) {
+    w.u32(buf.len() as u32);
+    for (l, rr) in buf {
+        w.u32(l.to_bits());
+        w.u32(rr.to_bits());
+    }
+}
+
+fn read_sample_buf(
+    r: &mut crate::state::Reader<'_>,
+) -> Result<Vec<(f32, f32)>, crate::state::StateError> {
+    let n = r.u32()? as usize;
+    // No speculative pre-alloc: each pair is read (and bounds-checked) before
+    // it is pushed, so a corrupt length errors instead of allocating.
+    let mut buf = Vec::new();
+    for _ in 0..n {
+        let l = f32::from_bits(r.u32()?);
+        let rr = f32::from_bits(r.u32()?);
+        buf.push((l, rr));
+    }
+    Ok(buf)
+}
+
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;

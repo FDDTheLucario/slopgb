@@ -876,9 +876,19 @@ fn file_menu_wires_the_export_commands() {
         Some(MenuOutcome::Command(Action::DbgSaveAsm)),
         "save asm"
     );
-    // Load ROM / state ops stay greyed (need a picker / save-state infra).
+    // On-disk save states are now live (via the shared path modal).
+    assert_eq!(
+        click_menubar_item(0, 7),
+        Some(MenuOutcome::Command(Action::DbgLoadState)),
+        "Load state"
+    );
+    assert_eq!(
+        click_menubar_item(0, 8),
+        Some(MenuOutcome::Command(Action::DbgSaveState)),
+        "Save state"
+    );
+    // Load ROM stays greyed in the debugger File menu (needs a picker).
     assert_eq!(click_menubar_item(0, 0), None, "Load ROM greyed");
-    assert_eq!(click_menubar_item(0, 8), None, "Save state greyed");
 }
 
 #[test]

@@ -58,6 +58,43 @@ fn set_model_reloads_only_on_change() {
 }
 
 #[test]
+fn save_state_round_trips_through_a_file() {
+    let dir = std::env::temp_dir().join(format!("slopgb-test-state-{}", process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let rom_path = dir.join("game.gb");
+    let state_path = dir.join("game.state");
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x134..0x13B].copy_from_slice(b"STATEST");
+    rom[0x147] = 0x00; // ROM ONLY
+    fs::write(&rom_path, &rom).unwrap();
+
+    // Run a while, then save to disk.
+    let mut s = Session::load(&rom_path, Some(Model::Dmg)).expect("load");
+    for _ in 0..20 {
+        s.gb.run_frame();
+    }
+    let pc = s.gb.cpu_regs().pc;
+    let cyc = s.gb.cycles();
+    s.save_state_to(&state_path).expect("save state");
+
+    // A fresh same-ROM session restores to the exact saved machine.
+    let mut s2 = Session::load(&rom_path, Some(Model::Dmg)).expect("reload");
+    s2.load_state_from(&state_path).expect("load state");
+    assert_eq!(s2.gb.cpu_regs().pc, pc);
+    assert_eq!(s2.gb.cycles(), cyc);
+
+    // A non-existent path is a non-fatal error (machine intact).
+    let before = s2.gb.cycles();
+    assert!(s2.load_state_from(&dir.join("nope.state")).is_err());
+    assert_eq!(
+        s2.gb.cycles(),
+        before,
+        "failed load leaves the machine intact"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn atomic_write_replaces_existing_file() {
     // Per-process directory so concurrent test runs can't race on it.
     let dir = std::env::temp_dir().join(format!("slopgb-test-sav-{}", process::id()));

@@ -187,6 +187,10 @@ impl App {
                     self.request_game_redraw();
                 }
             }
+            // State → Load state... (on-disk): open the shared path modal.
+            SubChoice::LoadState => {
+                self.open_path_prompt("Load state (path)", crate::PathPurpose::LoadState);
+            }
             // Recent ROMs → reload that entry (MN4); clone the path out first so
             // the load can borrow `self` mutably.
             SubChoice::LoadRecent(i) => {

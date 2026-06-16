@@ -21,6 +21,7 @@ pub(crate) mod joypad;
 pub(crate) mod model;
 pub(crate) mod ppu;
 pub(crate) mod serial;
+pub(crate) mod state;
 pub(crate) mod timer;
 
 pub use apu::DEFAULT_SAMPLE_RATE;
@@ -28,6 +29,7 @@ pub use cartridge::CartridgeError;
 pub use cpu::Registers;
 pub use joypad::Button;
 pub use model::Model;
+pub use state::StateError;
 
 // Escape hatch for the crate's integration tests, which drive the CPU and
 // interconnect directly (OAM DMA freeze/timing tests). Not public API.
@@ -61,6 +63,11 @@ pub const EXC_INVALID_OPCODE: u16 = 1 << 1;
 pub const EXC_ECHO_RAM: u16 = 1 << 2;
 /// Break on disabling the LCD (`FF40` bit 7 → 0) outside vblank.
 pub const EXC_LCD_OFF_VBLANK: u16 = 1 << 3;
+
+/// Leading bytes of a slopgb save state (see [`GameBoy::save_state`]).
+const STATE_MAGIC: &[u8; 4] = b"SLPS";
+/// Save-state format version (bumped on any layout change).
+const STATE_VERSION: u16 = 1;
 
 /// A debugger memory watchpoint (bgb's "Set watchpoint"): the free run halts
 /// after the CPU accesses `addr` with a matching access kind. A frontend/
@@ -204,6 +211,57 @@ impl GameBoy {
     #[must_use]
     pub fn exceptions(&self) -> u16 {
         self.bus.exceptions()
+    }
+
+    /// Serialize the whole machine to bytes (bgb's File → Save state). A
+    /// magic + version + ROM-fingerprint header precedes the volatile state
+    /// (CPU + all peripherals). ROM bytes are *not* included — a state restores
+    /// into a machine already built from the same ROM. `&self`/read-only, so it
+    /// is golden-safe (never reached on a golden/test path).
+    #[must_use]
+    pub fn save_state(&self) -> Vec<u8> {
+        let mut w = state::Writer::new();
+        w.bytes(STATE_MAGIC);
+        w.u16(STATE_VERSION);
+        let id = self.bus.cartridge().rom_id();
+        w.u32(id.len() as u32);
+        w.bytes(&id);
+        self.cpu.write_state(&mut w);
+        self.bus.write_state(&mut w);
+        w.into_vec()
+    }
+
+    /// Restore a machine from [`Self::save_state`] bytes (bgb's File → Load
+    /// state). Validates the magic/version/ROM fingerprint against the *loaded*
+    /// ROM, then restores the volatile state. The debugger state (breakpoints,
+    /// watchpoints, profiler, exception mask) is left untouched. **Atomic**: on
+    /// any error the machine is unchanged (the restore lands in a clone that
+    /// only replaces `self` on full success). Live-debugger/UI only.
+    pub fn load_state(&mut self, bytes: &[u8]) -> Result<(), StateError> {
+        let mut restored = self.clone();
+        restored.load_state_into(bytes)?;
+        *self = restored;
+        Ok(())
+    }
+
+    fn load_state_into(&mut self, bytes: &[u8]) -> Result<(), StateError> {
+        let mut r = state::Reader::new(bytes);
+        let mut magic = [0u8; 4];
+        r.bytes_into(&mut magic)?;
+        if &magic != STATE_MAGIC {
+            return Err(StateError::BadMagic);
+        }
+        if r.u16()? != STATE_VERSION {
+            return Err(StateError::BadVersion);
+        }
+        let id_len = r.u32()? as usize;
+        let id = r.bytes_vec(id_len)?;
+        if id != self.bus.cartridge().rom_id() {
+            return Err(StateError::RomMismatch);
+        }
+        self.cpu.read_state(&mut r)?;
+        self.bus.read_state(&mut r)?;
+        Ok(())
     }
 
     /// Enable/disable the execution profiler (bgb's "logging mode"/"stop"): a
@@ -514,407 +572,5 @@ impl GameBoy {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn rom_with_cgb_flag(flag: u8) -> Vec<u8> {
-        let mut rom = vec![0u8; 0x8000];
-        rom[0x143] = flag;
-        rom
-    }
-
-    /// Pan Docs "CPU registers" (Power-Up Sequence): on CGB/AGB hardware
-    /// the boot ROM hands a CGB-flagged cart off with DE=$FF56 HL=$000D;
-    /// a DMG cart gets DE=$0008 HL=$007C (mooneye misc/boot_regs-cgb/-A —
-    /// every mooneye ROM is DMG-flagged). A/F/B/C are cart-independent:
-    /// AGB's extra `inc b` gives B=$01/F=$00 for both cart kinds.
-    #[test]
-    fn cgb_flagged_cart_boot_regs() {
-        for (model, af, bc) in [(Model::Cgb, 0x1180, 0x0000), (Model::Agb, 0x1100, 0x0100)] {
-            let gb = GameBoy::new(model, rom_with_cgb_flag(0x80)).unwrap();
-            let r = gb.cpu_regs();
-            assert_eq!(r.af(), af, "{model:?} CGB cart AF");
-            assert_eq!(r.bc(), bc, "{model:?} CGB cart BC");
-            assert_eq!(r.de(), 0xFF56, "{model:?} CGB cart DE");
-            assert_eq!(r.hl(), 0x000D, "{model:?} CGB cart HL");
-
-            let gb = GameBoy::new(model, rom_with_cgb_flag(0x00)).unwrap();
-            let r = gb.cpu_regs();
-            assert_eq!(r.af(), af, "{model:?} DMG cart AF");
-            assert_eq!(r.bc(), bc, "{model:?} DMG cart BC");
-            assert_eq!(r.de(), 0x0008, "{model:?} DMG cart DE");
-            assert_eq!(r.hl(), 0x007C, "{model:?} DMG cart HL");
-        }
-    }
-
-    /// A ROM that writes 0x42 to 0xC000 then self-loops:
-    /// `ld a,42 ; ld (C000),a ; jr -2`.
-    fn write_c000_rom() -> Vec<u8> {
-        let mut rom = vec![0u8; 0x8000];
-        rom[0x0100..0x0107].copy_from_slice(&[0x3E, 0x42, 0xEA, 0x00, 0xC0, 0x18, 0xFE]);
-        rom
-    }
-
-    #[test]
-    fn watchpoint_halts_the_free_run_on_a_matching_access() {
-        let mut gb = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
-        gb.set_watchpoints(&[Watchpoint {
-            addr: 0xC000,
-            read: false,
-            write: true,
-        }]);
-        // The write to 0xC000 halts the frame at that address.
-        assert_eq!(gb.run_frame_until_breakpoint(&[]), Some(0xC000));
-    }
-
-    #[test]
-    fn watchpoint_kind_and_emptiness_are_respected() {
-        // A read-only watchpoint at 0xC000 does NOT fire on the write.
-        let mut gb = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
-        gb.set_watchpoints(&[Watchpoint {
-            addr: 0xC000,
-            read: true,
-            write: false,
-        }]);
-        assert_eq!(
-            gb.run_frame_until_breakpoint(&[]),
-            None,
-            "a read watchpoint ignores the write"
-        );
-        // Golden-safety: with no watchpoints set, the frame runs to completion.
-        let mut gb = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
-        assert_eq!(gb.run_frame_until_breakpoint(&[]), None);
-    }
-
-    #[test]
-    fn profiler_tallies_executed_instruction_addresses() {
-        // The execution profiler (MB5): an opt-in per-PC instruction tally that
-        // is inert (no map) until enabled, so it never perturbs a golden run.
-        let mut gb = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
-        assert!(!gb.profiling(), "off by default");
-        assert_eq!(gb.profile_seen(), 0);
-        assert_eq!(gb.profile_count(0x0100), 0);
-
-        gb.set_profiling(true);
-        assert!(gb.profiling());
-        // ld a,42 @0100 ; ld (C000),a @0102 ; jr -2 @0105 (then self-loops).
-        gb.step();
-        gb.step();
-        gb.step();
-        assert_eq!(gb.profile_count(0x0100), 1, "ld a,42 executed once");
-        assert_eq!(gb.profile_count(0x0102), 1, "ld (C000),a executed once");
-        assert_eq!(gb.profile_count(0x0105), 1, "jr executed once");
-        assert_eq!(gb.profile_seen(), 3, "three distinct addresses seen");
-        gb.step(); // the jr self-loops back to 0x0105
-        assert_eq!(gb.profile_count(0x0105), 2);
-        assert_eq!(
-            gb.profile_seen(),
-            3,
-            "seen counts distinct addresses, not hits"
-        );
-
-        // "clear buffer" keeps logging on but zeroes the counts.
-        gb.clear_profile();
-        assert!(gb.profiling());
-        assert_eq!(gb.profile_seen(), 0);
-        assert_eq!(gb.profile_count(0x0105), 0);
-
-        // Disabling drops the tally; stepping no longer records anything.
-        gb.set_profiling(false);
-        assert!(!gb.profiling());
-        gb.step();
-        assert_eq!(gb.profile_seen(), 0, "no tally while profiling is off");
-    }
-
-    #[test]
-    fn profiler_break_mode_halts_on_first_execution() {
-        // bgb's coverage break: the free run stops the first time each address
-        // executes, then continues past it.
-        let mut gb = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
-        gb.set_profiling(true);
-        gb.set_profile_break(true);
-        assert!(gb.profile_break());
-        // 0100 (ld a), 0102 (ld (C000),a), 0105 (jr) each halt once on first run.
-        assert_eq!(gb.run_frame_until_breakpoint(&[]), Some(0x0100));
-        assert_eq!(gb.run_frame_until_breakpoint(&[]), Some(0x0102));
-        assert_eq!(gb.run_frame_until_breakpoint(&[]), Some(0x0105));
-        // The jr self-loops over only already-seen addresses → no more halts.
-        assert_eq!(gb.run_frame_until_breakpoint(&[]), None);
-        // Disabling break mode keeps logging: no halts, but the tally still grows.
-        let before = gb.profile_count(0x0105);
-        gb.set_profile_break(false);
-        assert!(!gb.profile_break());
-        assert_eq!(gb.run_frame_until_breakpoint(&[]), None);
-        assert!(gb.profile_count(0x0105) > before);
-    }
-
-    /// A 32 KiB ROM with `bytes` placed at the entry point (0x0100).
-    fn exc_rom(bytes: &[u8]) -> Vec<u8> {
-        let mut rom = vec![0u8; 0x8000];
-        rom[0x0100..0x0100 + bytes.len()].copy_from_slice(bytes);
-        rom
-    }
-
-    #[test]
-    fn exception_break_defaults_inert() {
-        // Options → Exceptions: nothing armed by default ⇒ the free run never
-        // halts on these conditions (golden-safe — the mask is 0 on every
-        // golden/test path).
-        let mut gb = GameBoy::new(Model::Dmg, exc_rom(&[0x40, 0x18, 0xFE])).unwrap();
-        assert_eq!(gb.exceptions(), 0, "no exception armed by default");
-        assert_eq!(gb.run_frame_until_breakpoint(&[]), None);
-    }
-
-    #[test]
-    fn exception_break_on_ld_b_b() {
-        // ld b,b (40h) ; jr -2 — halts at the ld b,b when armed.
-        let mut gb = GameBoy::new(Model::Dmg, exc_rom(&[0x40, 0x18, 0xFE])).unwrap();
-        gb.set_exceptions(EXC_LD_B_B);
-        assert_eq!(gb.exceptions(), EXC_LD_B_B);
-        assert_eq!(gb.run_frame_until_breakpoint(&[]), Some(0x0100));
-        // The invalid-opcode mask does NOT fire on a (legal) ld b,b.
-        let mut gb = GameBoy::new(Model::Dmg, exc_rom(&[0x40, 0x18, 0xFE])).unwrap();
-        gb.set_exceptions(EXC_INVALID_OPCODE);
-        assert_eq!(gb.run_frame_until_breakpoint(&[]), None);
-    }
-
-    #[test]
-    fn exception_break_on_invalid_opcode() {
-        // 0xDD is one of the 11 undefined SM83 opcodes (the CPU hard-locks).
-        let mut gb = GameBoy::new(Model::Dmg, exc_rom(&[0xDD])).unwrap();
-        gb.set_exceptions(EXC_INVALID_OPCODE);
-        assert_eq!(gb.run_frame_until_breakpoint(&[]), Some(0x0100));
-        // The ld-b,b mask does NOT fire on an invalid opcode.
-        let mut gb = GameBoy::new(Model::Dmg, exc_rom(&[0xDD])).unwrap();
-        gb.set_exceptions(EXC_LD_B_B);
-        assert_eq!(gb.run_frame_until_breakpoint(&[]), None);
-    }
-
-    #[test]
-    fn exception_break_on_echo_ram_access() {
-        // ld a,(E000) ; jr -5 — a CPU read of echo RAM (E000-FDFF) halts.
-        let mut gb = GameBoy::new(Model::Dmg, exc_rom(&[0xFA, 0x00, 0xE0, 0x18, 0xFB])).unwrap();
-        gb.set_exceptions(EXC_ECHO_RAM);
-        assert_eq!(gb.run_frame_until_breakpoint(&[]), Some(0xE000));
-        // A work-RAM (C000) access is NOT echo RAM → no halt.
-        let mut gb = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
-        gb.set_exceptions(EXC_ECHO_RAM);
-        assert_eq!(gb.run_frame_until_breakpoint(&[]), None);
-    }
-
-    #[test]
-    fn exception_break_on_lcd_off_outside_vblank() {
-        // 16 NOPs (the DMG boot hands off mid-vblank at LY 0; the PPU leaves
-        // mode 1 a few M-cycles in) then: xor a ; ldh (40),a ; ldh (40),a ;
-        // jr -2 — two writes of FF40←0 well outside vblank.
-        let mut prog = vec![0x00u8; 16];
-        prog.extend_from_slice(&[0xAF, 0xE0, 0x40, 0xE0, 0x40, 0x18, 0xFE]);
-        let rom = exc_rom(&prog);
-        // Armed from boot: the LCD is on (LCDC=0x91) and the first FF40←0 write
-        // lands outside vblank, so it halts.
-        let mut gb = GameBoy::new(Model::Dmg, rom.clone()).unwrap();
-        gb.set_exceptions(EXC_LCD_OFF_VBLANK);
-        assert_eq!(gb.run_frame_until_breakpoint(&[]), Some(0xFF40));
-        // Already off: step the NOPs + xor + first write disarmed (LCD now off),
-        // then arm — the second FF40←0 write must NOT halt (LCD already off).
-        let mut gb = GameBoy::new(Model::Dmg, rom).unwrap();
-        for _ in 0..18 {
-            gb.step(); // 16 NOPs, xor a, first ldh (40),a -> LCD off
-        }
-        gb.set_exceptions(EXC_LCD_OFF_VBLANK);
-        assert_eq!(gb.run_frame_until_breakpoint(&[]), None);
-    }
-
-    #[test]
-    fn clone_is_an_independent_machine_snapshot() {
-        // The Quick Save/Load primitive (MN6): GameBoy: Clone must be a deep,
-        // independent copy — advancing one must not touch the other.
-        let mut gb = GameBoy::new(Model::Dmg, rom_with_cgb_flag(0x00)).unwrap();
-        gb.run_frame();
-        let snap = gb.clone();
-        let (pc0, cyc0) = (snap.cpu_regs().pc, snap.cycles());
-        for _ in 0..10 {
-            gb.run_frame();
-        }
-        assert_ne!(gb.cycles(), cyc0, "original advanced");
-        assert_eq!(snap.cycles(), cyc0, "clone is frozen at the snapshot");
-        assert_eq!(
-            snap.cpu_regs().pc,
-            pc0,
-            "clone PC unchanged by the original"
-        );
-        // Restoring rewinds the machine exactly to the snapshot.
-        let restored = snap.clone();
-        assert_eq!(restored.cycles(), cyc0);
-        assert_eq!(restored.cpu_regs().pc, pc0);
-    }
-
-    #[test]
-    fn debug_set_reg_writes_each_register_pair() {
-        let mut gb = GameBoy::new(Model::Dmg, rom_with_cgb_flag(0x00)).unwrap();
-        gb.debug_set_reg(DebugReg::Af, 0x12FF); // F low nibble must mask to 0
-        gb.debug_set_reg(DebugReg::Bc, 0x1234);
-        gb.debug_set_reg(DebugReg::De, 0x5678);
-        gb.debug_set_reg(DebugReg::Hl, 0x9ABC);
-        gb.debug_set_reg(DebugReg::Sp, 0xD000);
-        gb.debug_set_reg(DebugReg::Pc, 0x0150);
-        let r = gb.cpu_regs();
-        assert_eq!(r.af(), 0x12F0, "AF written, F low nibble masked");
-        assert_eq!(r.bc(), 0x1234);
-        assert_eq!(r.de(), 0x5678);
-        assert_eq!(r.hl(), 0x9ABC);
-        assert_eq!(r.sp, 0xD000);
-        assert_eq!(r.pc, 0x0150);
-    }
-
-    #[test]
-    fn debug_call_pushes_return_addr_and_jumps() {
-        // bgb "Call cursor": push the current PC (little-endian) and set
-        // PC=target, so a later RET returns to where execution was.
-        let mut gb = GameBoy::new(Model::Dmg, rom_with_cgb_flag(0x00)).unwrap();
-        gb.debug_set_reg(DebugReg::Sp, 0xD000);
-        gb.debug_set_reg(DebugReg::Pc, 0x1234);
-        gb.debug_call(0x4000);
-        let r = gb.cpu_regs();
-        assert_eq!(r.sp, 0xCFFE, "SP descended by 2");
-        assert_eq!(r.pc, 0x4000, "PC jumped to the target");
-        assert_eq!(gb.debug_read(0xCFFE), 0x34, "return low byte");
-        assert_eq!(gb.debug_read(0xCFFF), 0x12, "return high byte");
-    }
-
-    #[test]
-    fn channel_mute_round_trips_and_defaults_off() {
-        let mut gb = GameBoy::new(Model::Dmg, rom_with_cgb_flag(0x00)).unwrap();
-        for ch in 1..=4 {
-            assert!(!gb.channel_muted(ch), "ch{ch} audible at power-on");
-        }
-        gb.set_channel_mute(3, true);
-        assert!(gb.channel_muted(3));
-        assert!(!gb.channel_muted(2), "only ch3 muted");
-        gb.set_channel_mute(3, false);
-        assert!(!gb.channel_muted(3));
-        // Out-of-range channels are ignored (no panic).
-        gb.set_channel_mute(0, true);
-        gb.set_channel_mute(9, true);
-        assert!(!gb.channel_muted(0) && !gb.channel_muted(9));
-    }
-
-    #[test]
-    fn debug_read_resolves_io_but_peek_does_not() {
-        let gb = GameBoy::new(Model::Dmg, rom_with_cgb_flag(0x00)).unwrap();
-        // peek keeps IO out of band ($FF); debug_read returns the live value.
-        // Post-boot LY is a valid scanline (0..=153), so it can't be the $FF
-        // peek hands back — proving debug_read took the io_read path.
-        assert_eq!(gb.peek(0xFF44), 0xFF, "peek must not read IO");
-        assert!(
-            gb.debug_read(0xFF44) <= 153,
-            "debug_read should give live LY"
-        );
-        // Outside IO, debug_read is identical to peek (and to ROM contents).
-        assert_eq!(gb.debug_read(0x0143), gb.peek(0x0143));
-        assert_eq!(gb.debug_read(0x0143), 0x00); // the CGB flag we wrote
-        for addr in [0x0000u16, 0x4000, 0xC000, 0xFF80, 0xFFFF] {
-            assert_eq!(gb.debug_read(addr), gb.peek(addr), "non-IO {addr:#06x}");
-        }
-    }
-
-    #[test]
-    fn stack_descends_from_sp_little_endian() {
-        let gb = GameBoy::new(Model::Dmg, rom_with_cgb_flag(0x00)).unwrap();
-        let sp = gb.cpu_regs().sp;
-        let s = gb.stack(3);
-        assert_eq!(s.len(), 3);
-        // Addresses descend by two from SP (bgb's stack pane order).
-        assert_eq!(s[0].0, sp);
-        assert_eq!(s[1].0, sp.wrapping_sub(2));
-        assert_eq!(s[2].0, sp.wrapping_sub(4));
-        // Each word is the little-endian pair at its address.
-        for &(addr, word) in &s {
-            let want = u16::from(gb.debug_read(addr))
-                | (u16::from(gb.debug_read(addr.wrapping_add(1))) << 8);
-            assert_eq!(word, want, "word @ {addr:#06x}");
-        }
-    }
-
-    /// A ROM whose entry (`0x100`) is `nop; jp 0x150` and `0x150..` is nops,
-    /// so PC walks 0x100 -> 0x101 -> 0x150 -> 0x151 -> 0x152 … deterministically.
-    fn linear_code_rom() -> Vec<u8> {
-        let mut rom = vec![0u8; 0x8000];
-        rom[0x100] = 0x00; // nop
-        rom[0x101..0x104].copy_from_slice(&[0xC3, 0x50, 0x01]); // jp 0150
-        // 0x150.. already 0x00 (nop) from the zero-fill.
-        rom
-    }
-
-    #[test]
-    fn run_until_breakpoint_stops_at_the_address() {
-        let mut gb = GameBoy::new(Model::Dmg, linear_code_rom()).unwrap();
-        assert_eq!(gb.cpu_regs().pc, 0x100);
-        // 0x100 nop -> 0x101 jp -> 0x150 nop -> 0x151. bp at 0x151.
-        assert_eq!(gb.run_until_breakpoint(&[0x151], 100), Some(0x151));
-        assert_eq!(gb.cpu_regs().pc, 0x151);
-    }
-
-    #[test]
-    fn run_until_breakpoint_respects_the_step_limit() {
-        let mut gb = GameBoy::new(Model::Dmg, linear_code_rom()).unwrap();
-        // No reachable breakpoint -> runs the cap, returns None.
-        assert_eq!(gb.run_until_breakpoint(&[0xBEEF], 5), None);
-        assert_eq!(gb.run_until_breakpoint(&[], 3), None);
-    }
-
-    #[test]
-    fn run_until_breakpoint_advances_off_the_current_pc() {
-        let mut gb = GameBoy::new(Model::Dmg, linear_code_rom()).unwrap();
-        // A breakpoint on the *current* PC must not stop instantly — one step
-        // moves to 0x101, which isn't the (already-left) 0x100.
-        assert_eq!(gb.run_until_breakpoint(&[0x100], 1), None);
-        assert_eq!(gb.cpu_regs().pc, 0x101);
-    }
-
-    #[test]
-    fn run_frame_until_breakpoint_halts_at_a_breakpoint_mid_frame() {
-        let mut gb = GameBoy::new(Model::Dmg, linear_code_rom()).unwrap();
-        assert_eq!(gb.cpu_regs().pc, 0x100);
-        let frames_before = gb.frame_count();
-        // 0x100 nop -> 0x101 jp -> 0x150 nop -> 0x151: stops within a handful of
-        // cycles, far short of a full frame's worth of dots.
-        assert_eq!(gb.run_frame_until_breakpoint(&[0x151]), Some(0x151));
-        assert_eq!(gb.cpu_regs().pc, 0x151);
-        assert_eq!(
-            gb.frame_count(),
-            frames_before,
-            "halted before the frame completed"
-        );
-    }
-
-    #[test]
-    fn run_frame_until_breakpoint_with_no_hit_completes_a_frame_like_run_frame() {
-        // No reachable breakpoint -> runs a whole frame and returns None,
-        // leaving the machine exactly where a plain run_frame would.
-        let mut a = GameBoy::new(Model::Dmg, linear_code_rom()).unwrap();
-        let mut b = GameBoy::new(Model::Dmg, linear_code_rom()).unwrap();
-        assert_eq!(a.run_frame_until_breakpoint(&[0xBEEF]), None);
-        b.run_frame();
-        assert_eq!(a.frame_count(), b.frame_count());
-        assert_eq!(a.cycles(), b.cycles());
-        assert_eq!(a.cpu_regs().pc, b.cpu_regs().pc);
-        // Empty breakpoint list is just a run_frame.
-        assert_eq!(a.run_frame_until_breakpoint(&[]), None);
-    }
-
-    #[test]
-    fn ime_accessors_track_the_ei_delay() {
-        let mut rom = vec![0u8; 0x8000];
-        rom[0x100] = 0xFB; // ei; 0x101.. stay nop
-        let mut gb = GameBoy::new(Model::Dmg, rom).unwrap();
-        assert!(!gb.ime() && !gb.ime_pending(), "post-boot: interrupts off");
-        assert!(!gb.double_speed(), "DMG is never double-speed");
-        gb.step(); // ei: arms the pending enable, IME still off
-        assert!(!gb.ime(), "IME stays off the instruction after EI");
-        assert!(gb.ime_pending(), "EI arms the pending enable");
-        gb.step(); // the following instruction commits IME
-        assert!(gb.ime(), "IME enabled one instruction after EI");
-        assert!(!gb.ime_pending(), "pending cleared once applied");
-    }
-}
+#[path = "lib_tests.rs"]
+mod tests;

@@ -114,6 +114,22 @@ impl Session {
         true
     }
 
+    /// Save state to disk (bgb File / State → Save state): write the serialized
+    /// machine to `path`. Returns an error string (logged by the caller) on an
+    /// I/O failure.
+    pub(crate) fn save_state_to(&self, path: &Path) -> Result<(), String> {
+        fs::write(path, self.gb.save_state()).map_err(|e| format!("{e}"))
+    }
+
+    /// Load state from disk (bgb File / State → Load state): read `path` and
+    /// restore the machine. The restore is atomic — a bad/foreign/corrupt file
+    /// leaves the running machine intact ([`GameBoy::load_state`]). Returns an
+    /// error string (logged by the caller) on I/O or validation failure.
+    pub(crate) fn load_state_from(&mut self, path: &Path) -> Result<(), String> {
+        let bytes = fs::read(path).map_err(|e| format!("{e}"))?;
+        self.gb.load_state(&bytes).map_err(|e| format!("{e}"))
+    }
+
     /// Power-cycle: fresh machine, save RAM reloaded from disk.
     pub(crate) fn reset(&mut self) {
         self.flush_save();

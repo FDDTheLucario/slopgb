@@ -198,3 +198,35 @@ impl Cpu {
         self.locked
     }
 }
+
+// --- Save state (manual serialization; see `crate::state`) ---
+impl Cpu {
+    pub(crate) fn write_state(&self, w: &mut crate::state::Writer) {
+        self.regs.write_state(w);
+        for b in [
+            self.ime,
+            self.ime_pending,
+            self.halted,
+            self.stopped,
+            self.halt_bug,
+            self.debug_breakpoint,
+            self.locked,
+        ] {
+            w.bool(b);
+        }
+    }
+    pub(crate) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        self.regs.read_state(r)?;
+        self.ime = r.bool()?;
+        self.ime_pending = r.bool()?;
+        self.halted = r.bool()?;
+        self.stopped = r.bool()?;
+        self.halt_bug = r.bool()?;
+        self.debug_breakpoint = r.bool()?;
+        self.locked = r.bool()?;
+        Ok(())
+    }
+}

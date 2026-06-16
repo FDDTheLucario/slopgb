@@ -111,6 +111,12 @@ pub enum Action {
     /// Export the disassembly of the current region to a text file (debugger
     /// File → "save asm..."). Menu-only.
     DbgSaveAsm,
+    /// Open the on-disk Save-state path prompt (debugger File → "Save state...",
+    /// Ctrl+W).
+    DbgSaveState,
+    /// Open the on-disk Load-state path prompt (debugger File → "Load state...",
+    /// Ctrl+L).
+    DbgLoadState,
 }
 
 /// Tracks which physical keys currently hold each button, so two keys mapped
@@ -196,6 +202,8 @@ pub fn map(code: KeyCode, mods: ModifiersState, focus: Focus) -> Option<Action> 
             KeyCode::KeyC if mods.control_key() => Some(Action::DbgContinueSearch),
             KeyCode::KeyN if mods.control_key() => Some(Action::DbgNextBookmark),
             KeyCode::KeyB if mods.control_key() => Some(Action::DbgPrevBookmark),
+            KeyCode::KeyW if mods.control_key() => Some(Action::DbgSaveState),
+            KeyCode::KeyL if mods.control_key() => Some(Action::DbgLoadState),
             // Ctrl+Shift+digit sets a numbered bookmark; Ctrl+digit jumps to it
             // (bgb). Placed after the named Ctrl keys so they take precedence.
             _ if mods.control_key() => digit_of(code).map(|d| {
@@ -269,6 +277,10 @@ mod tests {
         );
         // A named Ctrl key still wins over the digit catch-all.
         assert_eq!(dc(KeyCode::KeyA), Some(Action::DbgGoToPc));
+        // On-disk save states: Ctrl+W save / Ctrl+L load (debugger focus only).
+        assert_eq!(dc(KeyCode::KeyW), Some(Action::DbgSaveState));
+        assert_eq!(dc(KeyCode::KeyL), Some(Action::DbgLoadState));
+        assert_eq!(map(KeyCode::KeyW, CTRL, Focus::Game), None);
         // Search/bookmark keys are debugger-focus only; the game keeps its map.
         assert_eq!(map(KeyCode::KeyF, CTRL, Focus::Game), None);
         assert_eq!(map(KeyCode::Digit3, CTRL, Focus::Game), None);

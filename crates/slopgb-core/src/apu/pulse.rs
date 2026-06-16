@@ -472,6 +472,66 @@ impl Pulse {
     }
 }
 
+// --- Save state (see `crate::state`) ---
+impl Pulse {
+    pub(super) fn write_state(&self, w: &mut crate::state::Writer) {
+        w.bool(self.enabled);
+        w.bool(self.dac);
+        w.u8(self.duty);
+        w.u16(self.freq);
+        self.length.write_state(w);
+        self.envelope.write_state(w);
+        w.u16(self.sample_countdown);
+        w.u8(self.duty_pos);
+        w.u8(self.current_sample);
+        w.bool(self.suppressed);
+        w.bool(self.did_tick);
+        w.bool(self.just_reloaded);
+        w.u8(self.sweep_period);
+        w.bool(self.sweep_negate);
+        w.u8(self.sweep_shift);
+        w.u8(self.sweep_countdown);
+        w.u8(self.sweep_calc_countdown);
+        w.u8(self.sweep_reload_timer);
+        w.u16(self.sweep_shadow);
+        w.u16(self.sweep_addend);
+        w.u16(self.sweep_completed_addend);
+        w.u8(self.sweep_restart_hold);
+        w.bool(self.sweep_unshifted);
+        w.bool(self.sweep_instant_done);
+    }
+    pub(super) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        self.enabled = r.bool()?;
+        self.dac = r.bool()?;
+        self.duty = r.u8()?;
+        self.freq = r.u16()?;
+        self.length.read_state(r)?;
+        self.envelope.read_state(r)?;
+        self.sample_countdown = r.u16()?;
+        self.duty_pos = r.u8()?;
+        self.current_sample = r.u8()?;
+        self.suppressed = r.bool()?;
+        self.did_tick = r.bool()?;
+        self.just_reloaded = r.bool()?;
+        self.sweep_period = r.u8()?;
+        self.sweep_negate = r.bool()?;
+        self.sweep_shift = r.u8()?;
+        self.sweep_countdown = r.u8()?;
+        self.sweep_calc_countdown = r.u8()?;
+        self.sweep_reload_timer = r.u8()?;
+        self.sweep_shadow = r.u16()?;
+        self.sweep_addend = r.u16()?;
+        self.sweep_completed_addend = r.u16()?;
+        self.sweep_restart_hold = r.u8()?;
+        self.sweep_unshifted = r.bool()?;
+        self.sweep_instant_done = r.bool()?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

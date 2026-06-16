@@ -196,11 +196,14 @@ impl App {
             }
             // Main menu (MN4): open the Load-ROM path-entry modal over the LCD.
             Action::MainLoadRom => {
-                self.path_dialog = Some(crate::ui::dialog::InputDialog::new(
-                    "Load ROM (path)",
-                    false,
-                ));
-                self.request_game_redraw();
+                self.open_path_prompt("Load ROM (path)", crate::PathPurpose::LoadRom);
+            }
+            // File / State menu: on-disk save states via the shared path modal.
+            Action::DbgSaveState => {
+                self.open_path_prompt("Save state (path)", crate::PathPurpose::SaveState);
+            }
+            Action::DbgLoadState => {
+                self.open_path_prompt("Load state (path)", crate::PathPurpose::LoadState);
             }
             // File menu (MB2): export the disassembly of the current region.
             Action::DbgSaveAsm => self.save_asm(),

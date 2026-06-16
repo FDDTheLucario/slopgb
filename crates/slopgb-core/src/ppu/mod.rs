@@ -126,7 +126,7 @@ mod lyc;
 mod regs;
 mod render;
 mod stat_irq;
-
+mod state;
 use crate::SCREEN_PIXELS;
 use crate::model::Model;
 

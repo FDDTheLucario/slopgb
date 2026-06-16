@@ -387,8 +387,11 @@ fn state_submenu_has_quick_save_load_live_rest_greyed() {
     );
     assert_eq!(s.choices[0], Some(SubChoice::QuickSave));
     assert_eq!(s.choices[1], Some(SubChoice::QuickLoad));
-    // The on-disk-format rows stay greyed (MN6 deferred).
-    for i in [2, 3, 4] {
+    // Load state... is now live (on-disk save states); Select / Load recovery
+    // stay greyed (those subsystems aren't built).
+    assert_eq!(s.choices[4], Some(SubChoice::LoadState));
+    assert!(s.items[4].enabled, "Load state... is live");
+    for i in [2, 3] {
         assert!(!s.items[i].enabled, "row {i} greyed");
         assert_eq!(s.choices[i], None);
     }

@@ -182,6 +182,36 @@ impl Serial {
     }
 }
 
+// --- Save state (manual serialization; see `crate::state`) ---
+impl Serial {
+    pub(crate) fn write_state(&self, w: &mut crate::state::Writer) {
+        w.bool(self.cgb);
+        w.u8(self.sb);
+        w.u8(self.sc);
+        w.u8(self.shifted);
+        w.bool(self.master_clock);
+        w.u16(self.prev_div);
+        w.u8(self.out_shift);
+        w.u32(self.out_buf.len() as u32);
+        w.bytes(&self.out_buf);
+    }
+    pub(crate) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        self.cgb = r.bool()?;
+        self.sb = r.u8()?;
+        self.sc = r.u8()?;
+        self.shifted = r.u8()?;
+        self.master_clock = r.bool()?;
+        self.prev_div = r.u16()?;
+        self.out_shift = r.u8()?;
+        let n = r.u32()? as usize;
+        self.out_buf = r.bytes_vec(n)?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

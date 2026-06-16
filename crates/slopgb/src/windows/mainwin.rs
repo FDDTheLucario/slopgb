@@ -188,6 +188,8 @@ pub enum SubChoice {
     QuickSave,
     /// State → "Quick Load": restore the last snapshot.
     QuickLoad,
+    /// State → "Load state...": open the on-disk load-state path modal.
+    LoadState,
     /// Recent ROMs → load the recent-list entry at this index (MN4).
     LoadRecent(usize),
 }
@@ -233,9 +235,9 @@ impl SubMenu {
     }
 
     /// Open the [`SubKind::State`] submenu (`main-sub-state.png`) to the right of
-    /// `parent_row`. Quick Save / Quick Load (an in-memory snapshot) are live;
-    /// Select / Load recovery / Load state... stay greyed (the on-disk save-state
-    /// format isn't built — see `docs/bgb-menu-design.md` MN6).
+    /// `parent_row`. Quick Save / Quick Load (an in-memory snapshot) + Load
+    /// state... (on-disk, via a path modal) are live; Select / Load recovery
+    /// stay greyed (their subsystems aren't built — see `docs/bgb-menu-design.md`).
     #[must_use]
     pub fn state(parent_row: Rect) -> Self {
         let (items, choices) = state_items().into_iter().unzip();
@@ -367,7 +369,7 @@ fn state_items() -> Vec<(MenuItem, Option<SubChoice>)> {
             None,
         ),
         (MenuItem::new("Load recovery state").disabled(), None),
-        (MenuItem::new("Load state...").disabled(), None),
+        (MenuItem::new("Load state..."), Some(SubChoice::LoadState)),
     ]
 }
 
