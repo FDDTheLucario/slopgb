@@ -52,6 +52,8 @@ pub enum Action {
     DbgToggleBreakpoint,
     /// Run to the cursor — debugger F4, on press.
     DbgRunToCursor,
+    /// Jump PC to the cursor without running — debugger F6, on press.
+    DbgJumpToCursor,
     /// Step out of the current subroutine — debugger F8, on press.
     DbgStepOut,
     /// Open the Go-to address prompt — debugger Ctrl+G, on press.
@@ -100,8 +102,8 @@ impl ButtonTracker {
 /// focus. The F-keys then split by focus, matching bgb: in the **game** window
 /// F2/F3/F4 open the debugger/VRAM/iomap windows; in the **debugger** window
 /// they become bgb's debugger keys (F2 toggle breakpoint, F3 step over, F4 run
-/// to cursor, F7 trace, F8 step out, Ctrl+G go to, F5/F10 open VRAM/iomap).
-/// Keys for not-yet-built features (F6 jump, F12 load ROM) stay unmapped.
+/// to cursor, F6 jump to cursor, F7 trace, F8 step out, Ctrl+G go to, F5/F10
+/// open VRAM/iomap). Keys for not-yet-built features (F12 load ROM) stay unmapped.
 #[must_use]
 pub fn map(code: KeyCode, mods: ModifiersState, focus: Focus) -> Option<Action> {
     // Global (any focus): buttons + emulator controls + the break toggle.
@@ -129,6 +131,7 @@ pub fn map(code: KeyCode, mods: ModifiersState, focus: Focus) -> Option<Action> 
             KeyCode::F2 => Some(Action::DbgToggleBreakpoint),
             KeyCode::F3 => Some(Action::DbgStepOver),
             KeyCode::F4 => Some(Action::DbgRunToCursor),
+            KeyCode::F6 => Some(Action::DbgJumpToCursor),
             KeyCode::F7 => Some(Action::DbgStep),
             KeyCode::F8 => Some(Action::DbgStepOut),
             KeyCode::F5 => Some(Action::ToggleTool(ToolWindow::Vram)),
@@ -180,8 +183,9 @@ mod tests {
     fn unmapped_keys_do_nothing() {
         assert_eq!(g(KeyCode::KeyQ), None);
         assert_eq!(g(KeyCode::F1), None); // palette toggle: needs core API
+        // F6 in the *game* focus is still unmapped (debugger-only key).
+        assert_eq!(g(KeyCode::F6), None);
         // Not-yet-built debugger keys stay unmapped (no dead actions).
-        assert_eq!(d(KeyCode::F6), None); // jump to cursor (RM7, M5b-2)
         assert_eq!(d(KeyCode::F12), None); // load ROM (MB2/MN4)
     }
 
@@ -200,6 +204,7 @@ mod tests {
         assert_eq!(d(KeyCode::F2), Some(Action::DbgToggleBreakpoint));
         assert_eq!(d(KeyCode::F3), Some(Action::DbgStepOver));
         assert_eq!(d(KeyCode::F4), Some(Action::DbgRunToCursor));
+        assert_eq!(d(KeyCode::F6), Some(Action::DbgJumpToCursor));
         assert_eq!(d(KeyCode::F7), Some(Action::DbgStep));
         assert_eq!(d(KeyCode::F8), Some(Action::DbgStepOut));
         // F8 step out is debugger-only — the game window keeps it unmapped.

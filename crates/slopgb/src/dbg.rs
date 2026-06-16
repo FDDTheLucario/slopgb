@@ -8,7 +8,7 @@
 
 use std::collections::BTreeSet;
 
-use slopgb_core::{GameBoy, debug};
+use slopgb_core::{DebugReg, GameBoy, debug};
 
 /// The set of PC breakpoints the free-run loop halts on. Lives in the
 /// App-owned [`Debugger`] (not the per-window view state) because both the key
@@ -49,17 +49,49 @@ impl Breakpoints {
     }
 }
 
+/// A 16-bit CPU register pair the registers pane can edit ("edit register",
+/// rc-registers.png). Maps to the core's [`DebugReg`]; the frontend keeps its
+/// own copy so `windows`/`dbg` don't leak the core enum into hit-test results.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RegField {
+    Af,
+    Bc,
+    De,
+    Hl,
+    Sp,
+    Pc,
+}
+
+impl RegField {
+    /// The core register this edits.
+    #[must_use]
+    pub fn to_core(self) -> DebugReg {
+        match self {
+            RegField::Af => DebugReg::Af,
+            RegField::Bc => DebugReg::Bc,
+            RegField::De => DebugReg::De,
+            RegField::Hl => DebugReg::Hl,
+            RegField::Sp => DebugReg::Sp,
+            RegField::Pc => DebugReg::Pc,
+        }
+    }
+}
+
 /// An execution/state change a debugger click (menu item or pane click) asks
 /// `main` to apply against the live machine — kept out of the windows layer so
 /// every `&mut gb` mutation stays in `main`, where the golden gate is honored.
-/// `Jump to cursor` / `Call cursor` need a core PC/SP-write accessor (lands with
-/// RM11) — those menu items are greyed until then.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DebugAction {
     /// Toggle a breakpoint at the address (F2 / `Set break`).
     ToggleBreakpoint(u16),
     /// Run until PC reaches the address (`Run to cursor`, F4).
     RunToCursor(u16),
+    /// Redirect PC to the address without running (`Jump to cursor`, F6).
+    SetPc(u16),
+    /// Push the current PC and jump to the address (`Call cursor`).
+    Call(u16),
+    /// Write a register pair (`edit register`, RM11).
+    SetReg(RegField, u16),
 }
 
 /// Debugger run-state owned by the event loop. When `broken`, the paced loop
@@ -118,6 +150,9 @@ impl Debugger {
                 gb.run_until_breakpoint(&[addr], RUN_TO_CURSOR_CAP);
                 self.broken = true;
             }
+            DebugAction::SetPc(addr) => gb.debug_set_pc(addr),
+            DebugAction::Call(addr) => gb.debug_call(addr),
+            DebugAction::SetReg(field, value) => gb.debug_set_reg(field.to_core(), value),
         }
     }
 

@@ -61,9 +61,8 @@ impl InputDialog {
         }
     }
 
-    /// Pre-fill the buffer (e.g. the current register value to edit).
-    // TODO(RM11): consumed by the edit-register dialog (M5b-2).
-    #[allow(dead_code)]
+    /// Pre-fill the buffer (the current register value the edit-register
+    /// prompt opens with, RM11).
     #[must_use]
     pub fn with_initial(mut self, text: impl Into<String>) -> Self {
         self.buffer = text.into();

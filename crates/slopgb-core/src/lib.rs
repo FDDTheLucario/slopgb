@@ -49,6 +49,19 @@ pub const CYCLES_PER_FRAME: u32 = 70224;
 /// Master clock in Hz (T-cycles / dots per second, normal speed).
 pub const CLOCK_HZ: u32 = 4_194_304;
 
+/// A CPU register pair the debugger can write via [`GameBoy::debug_set_reg`]
+/// (bgb's registers-pane "edit register"). The 8-bit halves are always edited
+/// as their 16-bit pair, matching bgb's `af`/`bc`/`de`/`hl`/`sp`/`pc` rows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DebugReg {
+    Af,
+    Bc,
+    De,
+    Hl,
+    Sp,
+    Pc,
+}
+
 /// A complete emulated Game Boy.
 pub struct GameBoy {
     cpu: cpu::Cpu,
@@ -177,6 +190,43 @@ impl GameBoy {
     #[must_use]
     pub fn channel_muted(&self, channel: u8) -> bool {
         self.bus.apu().channel_muted(channel)
+    }
+
+    /// Debugger register write (bgb's registers-pane "edit register"). A live-
+    /// debugger-only `&mut` path — never invoked on a golden/test run, so the
+    /// golden gate is untouched (same caveat as [`Self::run_until_breakpoint`]).
+    /// Writing `Af` masks the F register's low nibble, which does not exist in
+    /// hardware.
+    pub fn debug_set_reg(&mut self, reg: DebugReg, value: u16) {
+        let r = self.cpu.regs_mut();
+        match reg {
+            DebugReg::Af => r.set_af(value),
+            DebugReg::Bc => r.set_bc(value),
+            DebugReg::De => r.set_de(value),
+            DebugReg::Hl => r.set_hl(value),
+            DebugReg::Sp => r.sp = value,
+            DebugReg::Pc => r.pc = value,
+        }
+    }
+
+    /// Set PC (bgb's "Jump to cursor"): redirect execution without running.
+    /// Live-debugger-only `&mut`, golden-safe (see [`Self::debug_set_reg`]).
+    pub fn debug_set_pc(&mut self, pc: u16) {
+        self.cpu.regs_mut().pc = pc;
+    }
+
+    /// bgb's "Call cursor": push the current PC (little-endian) onto the stack
+    /// and jump to `target`, exactly like a `CALL` — so a later `RET` returns
+    /// to where execution was. Live-debugger-only `&mut`, golden-safe.
+    pub fn debug_call(&mut self, target: u16) {
+        let pc = self.cpu.regs().pc;
+        let sp = self.cpu.regs().sp.wrapping_sub(2);
+        let [lo, hi] = pc.to_le_bytes();
+        self.bus.debug_write(sp, lo);
+        self.bus.debug_write(sp.wrapping_add(1), hi);
+        let r = self.cpu.regs_mut();
+        r.sp = sp;
+        r.pc = target;
     }
 
     /// Map the four DMG shades to XRGB8888 colors (ignored on CGB models).
@@ -375,6 +425,39 @@ mod tests {
             assert_eq!(r.de(), 0x0008, "{model:?} DMG cart DE");
             assert_eq!(r.hl(), 0x007C, "{model:?} DMG cart HL");
         }
+    }
+
+    #[test]
+    fn debug_set_reg_writes_each_register_pair() {
+        let mut gb = GameBoy::new(Model::Dmg, rom_with_cgb_flag(0x00)).unwrap();
+        gb.debug_set_reg(DebugReg::Af, 0x12FF); // F low nibble must mask to 0
+        gb.debug_set_reg(DebugReg::Bc, 0x1234);
+        gb.debug_set_reg(DebugReg::De, 0x5678);
+        gb.debug_set_reg(DebugReg::Hl, 0x9ABC);
+        gb.debug_set_reg(DebugReg::Sp, 0xD000);
+        gb.debug_set_reg(DebugReg::Pc, 0x0150);
+        let r = gb.cpu_regs();
+        assert_eq!(r.af(), 0x12F0, "AF written, F low nibble masked");
+        assert_eq!(r.bc(), 0x1234);
+        assert_eq!(r.de(), 0x5678);
+        assert_eq!(r.hl(), 0x9ABC);
+        assert_eq!(r.sp, 0xD000);
+        assert_eq!(r.pc, 0x0150);
+    }
+
+    #[test]
+    fn debug_call_pushes_return_addr_and_jumps() {
+        // bgb "Call cursor": push the current PC (little-endian) and set
+        // PC=target, so a later RET returns to where execution was.
+        let mut gb = GameBoy::new(Model::Dmg, rom_with_cgb_flag(0x00)).unwrap();
+        gb.debug_set_reg(DebugReg::Sp, 0xD000);
+        gb.debug_set_reg(DebugReg::Pc, 0x1234);
+        gb.debug_call(0x4000);
+        let r = gb.cpu_regs();
+        assert_eq!(r.sp, 0xCFFE, "SP descended by 2");
+        assert_eq!(r.pc, 0x4000, "PC jumped to the target");
+        assert_eq!(gb.debug_read(0xCFFE), 0x34, "return low byte");
+        assert_eq!(gb.debug_read(0xCFFF), 0x12, "return high byte");
     }
 
     #[test]

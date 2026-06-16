@@ -5,9 +5,9 @@
 
 use std::collections::BTreeSet;
 
-use slopgb_core::debug;
+use slopgb_core::{Registers, debug};
 
-use crate::dbg::{Breakpoints, DebugAction};
+use crate::dbg::{Breakpoints, DebugAction, RegField};
 use crate::input::Action;
 use crate::ui::canvas::{Canvas, Rect};
 use crate::ui::dialog::{self, DialogKey, DialogResult, InputDialog};
@@ -298,8 +298,8 @@ pub struct DebuggerState {
     pub pinned: bool,
     /// An open right-click context menu, if any.
     pub menu: Option<OpenMenu>,
-    /// An open modal prompt (Go to…), if any.
-    pub dialog: Option<GotoDialog>,
+    /// An open modal prompt (Go to… / edit register), if any.
+    pub dialog: Option<ModalDialog>,
     /// Addresses forced to render as `db XX` data instead of decoded code
     /// (RM9 — "Data go here" / "force code view" / "Modify code/data").
     pub data_hints: BTreeSet<u16>,
@@ -335,11 +335,20 @@ pub enum GotoTarget {
     Memory,
 }
 
-/// An open `Go to…` modal: the hex-input box plus which pane it moves on accept.
+/// What an open modal does on accept: reposition a pane (`Go to…`, RM5) or
+/// write a register pair (`edit register`, RM11). The two share one hex
+/// [`InputDialog`] + the same key/click plumbing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DialogKind {
+    Goto(GotoTarget),
+    EditReg(RegField),
+}
+
+/// An open modal: the hex-input box plus what accepting it does.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct GotoDialog {
+pub struct ModalDialog {
     pub input: InputDialog,
-    pub target: GotoTarget,
+    pub kind: DialogKind,
 }
 
 /// Which pane a click landed in, resolved to its address where meaningful — the
@@ -350,6 +359,10 @@ pub enum ClickTarget {
     Disasm(u16),
     Memory(u16),
     Stack(u16),
+    /// An editable register-pair row (af/bc/de/hl/sp/pc → "edit register").
+    Reg(RegField),
+    /// A non-editable registers-pane row (ime/spd/ima) — the menu still shows
+    /// `edit register`, greyed.
     Registers,
     None,
 }
@@ -374,6 +387,8 @@ pub enum MenuChoice {
     MarkCode(u16),
     /// Force the address to render as data ("Data go here").
     MarkData(u16),
+    /// Open the "edit register" hex prompt for a register pair (RM11).
+    OpenEditReg(RegField),
     None,
 }
 
@@ -455,7 +470,18 @@ pub fn target_at(
         return ClickTarget::Stack(sp.wrapping_sub(row.wrapping_mul(2)));
     }
     if l.regs.contains(px, py) {
-        return ClickTarget::Registers;
+        // Rows match `regs_lines`: 0 af, 1 bc, 2 de, 3 hl, 4 sp, 5 pc are the
+        // editable pairs; 6 ime/spd, 7 ima are not (left as `Registers`).
+        let row = ((py - l.regs.y) / lh) as usize;
+        return match row {
+            0 => ClickTarget::Reg(RegField::Af),
+            1 => ClickTarget::Reg(RegField::Bc),
+            2 => ClickTarget::Reg(RegField::De),
+            3 => ClickTarget::Reg(RegField::Hl),
+            4 => ClickTarget::Reg(RegField::Sp),
+            5 => ClickTarget::Reg(RegField::Pc),
+            _ => ClickTarget::Registers,
+        };
     }
     ClickTarget::None
 }
@@ -471,6 +497,10 @@ pub fn menu_for(target: ClickTarget, st: &DebuggerState, origin: (i32, i32)) -> 
         ClickTarget::Disasm(addr) => disasm_entries(addr, st, true),
         ClickTarget::Memory(addr) => disasm_entries(addr, st, false),
         ClickTarget::Stack(addr) => stack_entries(addr),
+        ClickTarget::Reg(field) => vec![(
+            MenuItem::new("edit register"),
+            MenuChoice::OpenEditReg(field),
+        )],
         ClickTarget::Registers => vec![disabled("edit register")],
         ClickTarget::None => return None,
     };
@@ -521,8 +551,14 @@ fn disasm_entries(addr: u16, st: &DebuggerState, is_disasm: bool) -> Vec<(MenuIt
         MenuItem::new("Run to cursor"),
         MenuChoice::Act(DebugAction::RunToCursor(addr)),
     ));
-    v.push(disabled("Jump to cursor"));
-    v.push(disabled("Call cursor"));
+    v.push((
+        MenuItem::new("Jump to cursor"),
+        MenuChoice::Act(DebugAction::SetPc(addr)),
+    ));
+    v.push((
+        MenuItem::new("Call cursor"),
+        MenuChoice::Act(DebugAction::Call(addr)),
+    ));
     v.push(disabled("Set watchpoint..."));
     v.push((
         MenuItem::new("Set break/condition..."),
@@ -557,8 +593,7 @@ pub fn on_left_click(
     read: impl Fn(u16) -> u8,
     area: Rect,
     st: &mut DebuggerState,
-    pc: u16,
-    sp: u16,
+    regs: Registers,
     px: i32,
     py: i32,
 ) -> Option<MenuOutcome> {
@@ -568,7 +603,7 @@ pub fn on_left_click(
     // dismisses *and* falls through, so clicking the bar can open another menu.
     if let Some(om) = st.menu.take() {
         if let Some(choice) = om.choice_at(px, py) {
-            return apply_choice(st, choice, pc);
+            return apply_choice(st, choice, regs);
         }
         if om.contains(px, py) {
             return None;
@@ -577,35 +612,55 @@ pub fn on_left_click(
     // Menu-bar label → open its dropdown below the bar.
     if l.menu.contains(px, py) {
         if let Some(idx) = menubar_at(l.menu, px, py) {
-            st.menu = Some(menubar_menu(idx, l.menu, st, pc));
+            st.menu = Some(menubar_menu(idx, l.menu, st, regs.pc));
         }
         return None;
     }
     // Otherwise select the clicked pane line (sets the cursor).
     if let ClickTarget::Disasm(a) | ClickTarget::Memory(a) | ClickTarget::Stack(a) =
-        target_at(read, area, st, pc, sp, px, py)
+        target_at(read, area, st, regs.pc, regs.sp, px, py)
     {
         st.cursor = Some(a);
     }
     None
 }
 
+/// The current value of a register pair, for seeding the "edit register" prompt.
+fn reg_value(r: &Registers, f: RegField) -> u16 {
+    match f {
+        RegField::Af => r.af(),
+        RegField::Bc => r.bc(),
+        RegField::De => r.de(),
+        RegField::Hl => r.hl(),
+        RegField::Sp => r.sp,
+        RegField::Pc => r.pc,
+    }
+}
+
 /// Apply a selected menu choice: execution / command effects return a
 /// [`MenuOutcome`] for `main`; view effects mutate `st` in place.
-fn apply_choice(st: &mut DebuggerState, choice: MenuChoice, pc: u16) -> Option<MenuOutcome> {
+fn apply_choice(
+    st: &mut DebuggerState,
+    choice: MenuChoice,
+    regs: Registers,
+) -> Option<MenuOutcome> {
     match choice {
         MenuChoice::Act(action) => Some(MenuOutcome::Act(action)),
         MenuChoice::Command(action) => Some(MenuOutcome::Command(action)),
         MenuChoice::TogglePin => {
             // Freeze the disasm view where it currently sits when pinning on.
             if !st.pinned {
-                st.disasm_base = pc;
+                st.disasm_base = regs.pc;
             }
             st.pinned = !st.pinned;
             None
         }
         MenuChoice::OpenGoto(target) => {
             open_goto(st, target);
+            None
+        }
+        MenuChoice::OpenEditReg(field) => {
+            open_edit_reg(st, field, reg_value(&regs, field));
             None
         }
         MenuChoice::ToggleDataHint(a) => {
@@ -648,23 +703,30 @@ pub fn on_right_click(
     st.menu = menu_for(target, st, (px, py));
 }
 
-// --- Go to… modal (RM5) ----------------------------------------------------
+// --- modal prompts: Go to… (RM5) + edit register (RM11) --------------------
 
 /// Open the `Go to…` hex prompt for `target` (closing any open menu).
 pub fn open_goto(st: &mut DebuggerState, target: GotoTarget) {
     st.menu = None;
-    st.dialog = Some(GotoDialog {
+    st.dialog = Some(ModalDialog {
         input: InputDialog::new("Go to address", true),
-        target,
+        kind: DialogKind::Goto(target),
+    });
+}
+
+/// Open the `edit register` hex prompt for `field`, seeded with its current
+/// `value` (closing any open menu).
+pub fn open_edit_reg(st: &mut DebuggerState, field: RegField, value: u16) {
+    st.menu = None;
+    st.dialog = Some(ModalDialog {
+        input: InputDialog::new("edit register", true).with_initial(format!("{value:04X}")),
+        kind: DialogKind::EditReg(field),
     });
 }
 
 /// Apply an accepted `Go to…` address: reposition the target pane (the disasm
 /// pane pins to the entered base so it stops following PC).
-fn apply_goto(st: &mut DebuggerState, target: GotoTarget, text: &str) {
-    let Ok(addr) = u16::from_str_radix(text.trim(), 16) else {
-        return; // empty / unparseable: leave the view unchanged
-    };
+fn apply_goto(st: &mut DebuggerState, target: GotoTarget, addr: u16) {
     match target {
         GotoTarget::Disasm => {
             st.disasm_base = addr;
@@ -674,41 +736,72 @@ fn apply_goto(st: &mut DebuggerState, target: GotoTarget, text: &str) {
     }
 }
 
-/// Feed one key to the open `Go to…` dialog: accept repositions + closes,
-/// cancel closes, anything else keeps editing. Returns whether a dialog was open
-/// to consume the key.
-pub fn feed_goto(st: &mut DebuggerState, key: DialogKey) -> bool {
-    let Some(gd) = &mut st.dialog else {
-        return false;
-    };
-    match gd.input.on_key(key) {
-        DialogResult::Accept(text) => {
-            let target = gd.target;
-            apply_goto(st, target, &text);
-            st.dialog = None;
+/// Apply an accepted modal: `Go to…` repositions a pane (view effect, no
+/// outcome); `edit register` returns the register write for `main` to apply.
+/// An empty / unparseable entry leaves everything unchanged.
+fn accept_dialog(st: &mut DebuggerState, kind: DialogKind, text: &str) -> Option<MenuOutcome> {
+    let parsed = u16::from_str_radix(text.trim(), 16).ok();
+    match kind {
+        DialogKind::Goto(target) => {
+            if let Some(addr) = parsed {
+                apply_goto(st, target, addr);
+            }
+            None
         }
-        DialogResult::Cancel => st.dialog = None,
-        DialogResult::Continue => {}
+        DialogKind::EditReg(field) => {
+            parsed.map(|v| MenuOutcome::Act(DebugAction::SetReg(field, v)))
+        }
     }
-    true
 }
 
-/// Handle a left-click while the `Go to…` dialog is open: OK accepts, Cancel
-/// dismisses. Returns whether the dialog consumed the click.
-pub fn goto_click(st: &mut DebuggerState, area: Rect, px: i32, py: i32) -> bool {
-    let Some(gd) = &st.dialog else {
-        return false;
+/// Feed one key to the open modal: accept applies + closes, cancel closes,
+/// anything else keeps editing. Returns `(was a dialog open to consume the key,
+/// outcome for `main`)`.
+pub fn feed_dialog(st: &mut DebuggerState, key: DialogKey) -> (bool, Option<MenuOutcome>) {
+    let Some(md) = &mut st.dialog else {
+        return (false, None);
     };
-    match dialog::click(&gd.input, area, px, py) {
+    let kind = md.kind;
+    let result = md.input.on_key(key);
+    let outcome = resolve_dialog(st, kind, result);
+    (true, outcome)
+}
+
+/// Handle a left-click while a modal is open: OK accepts, Cancel dismisses.
+/// Returns `(did the dialog consume the click, outcome for `main`)`.
+pub fn dialog_click(
+    st: &mut DebuggerState,
+    area: Rect,
+    px: i32,
+    py: i32,
+) -> (bool, Option<MenuOutcome>) {
+    let Some(md) = &st.dialog else {
+        return (false, None);
+    };
+    let kind = md.kind;
+    let result = dialog::click(&md.input, area, px, py);
+    let outcome = resolve_dialog(st, kind, result);
+    (true, outcome)
+}
+
+/// Resolve a [`DialogResult`] from key or click: accept/cancel close the modal
+/// (accept may yield a [`MenuOutcome`]), continue leaves it open.
+fn resolve_dialog(
+    st: &mut DebuggerState,
+    kind: DialogKind,
+    result: DialogResult,
+) -> Option<MenuOutcome> {
+    match result {
         DialogResult::Accept(text) => {
-            let target = gd.target;
-            apply_goto(st, target, &text);
             st.dialog = None;
+            accept_dialog(st, kind, &text)
         }
-        DialogResult::Cancel => st.dialog = None,
-        DialogResult::Continue => {}
+        DialogResult::Cancel => {
+            st.dialog = None;
+            None
+        }
+        DialogResult::Continue => None,
     }
-    true
 }
 
 // --- menu bar + dropdowns (MB1) --------------------------------------------

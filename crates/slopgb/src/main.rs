@@ -546,12 +546,16 @@ impl App {
                 return;
             }
         }
-        // Modal capture: while the debugger's Go-to prompt is open, every key
-        // goes to it (so typing an address can't trigger a debugger hotkey).
+        // Modal capture: while the debugger's modal prompt (Go to… / edit
+        // register) is open, every key goes to it (so typing an address can't
+        // trigger a debugger hotkey). An `edit register` accept yields a
+        // register write, applied through the same path a menu/click uses.
         if focus == Focus::Debugger && key.state.is_pressed() && self.tools.debugger_modal_active()
         {
             if let Some(dk) = dialog_key_from(key) {
-                self.tools.feed_debugger_dialog(dk);
+                if let Some(outcome) = self.tools.feed_debugger_dialog(dk) {
+                    self.apply_menu_outcome(outcome, event_loop);
+                }
             }
             return;
         }
@@ -582,6 +586,21 @@ impl App {
             // menu entry can never diverge.
             _ if pressed => self.run_action(action, event_loop),
             _ => {}
+        }
+    }
+
+    /// Apply a debugger [`MenuOutcome`] from a menu item, pane click, or modal
+    /// accept: an execution `Act` mutates the machine (then refreshes the
+    /// views); a `Command` reuses the keyboard dispatch so a menu item and its
+    /// hotkey never diverge.
+    fn apply_menu_outcome(&mut self, outcome: MenuOutcome, event_loop: &ActiveEventLoop) {
+        match outcome {
+            MenuOutcome::Act(a) => {
+                self.dbg.apply(&mut self.session.gb, a);
+                self.update_title();
+                self.refresh_after_step();
+            }
+            MenuOutcome::Command(act) => self.run_action(act, event_loop),
         }
     }
 
@@ -645,6 +664,13 @@ impl App {
                 let addr = self.debug_cursor_or_pc();
                 self.dbg
                     .apply(&mut self.session.gb, dbg::DebugAction::RunToCursor(addr));
+                self.update_title();
+                self.refresh_after_step();
+            }
+            Action::DbgJumpToCursor => {
+                let addr = self.debug_cursor_or_pc();
+                self.dbg
+                    .apply(&mut self.session.gb, dbg::DebugAction::SetPc(addr));
                 self.update_title();
                 self.refresh_after_step();
             }
@@ -1078,16 +1104,8 @@ impl ApplicationHandler for App {
                     } else {
                         self.tools.on_mouse_right(window_id, &self.session.gb)
                     };
-                    match outcome {
-                        // A debugger execution action applies against the machine;
-                        // a menu Command reuses the keyboard dispatch (run_action).
-                        Some(MenuOutcome::Act(a)) => {
-                            self.dbg.apply(&mut self.session.gb, a);
-                            self.update_title();
-                            self.refresh_after_step();
-                        }
-                        Some(MenuOutcome::Command(act)) => self.run_action(act, event_loop),
-                        None => {}
+                    if let Some(outcome) = outcome {
+                        self.apply_menu_outcome(outcome, event_loop);
                     }
                 }
                 // Hotkeys route by focused window kind: the debugger window gets

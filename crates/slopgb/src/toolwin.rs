@@ -227,9 +227,11 @@ impl ToolWindows {
                 None
             }
             WinState::Debugger(s) => {
-                // An open modal eats the click (OK/Cancel); else normal routing.
-                let action = if debugger::goto_click(s, area, px, py) {
-                    None
+                // An open modal eats the click (OK/Cancel may yield a register
+                // write); else normal routing.
+                let (consumed, outcome) = debugger::dialog_click(s, area, px, py);
+                let action = if consumed {
+                    outcome
                 } else {
                     debugger_left_click(s, area, gb, px, py)
                 };
@@ -291,16 +293,19 @@ impl ToolWindows {
         }
     }
 
-    /// Feed one key to the debugger's open `Go to…` modal; redraw on a change.
-    pub fn feed_debugger_dialog(&mut self, key: DialogKey) {
-        let Some(view) = self.debugger_view_mut() else {
-            return;
-        };
+    /// Feed one key to the debugger's open modal (Go to… / edit register);
+    /// redraw if it consumed the key. Returns the modal's outcome (an `edit
+    /// register` accept yields a register write) for `main` to apply.
+    pub fn feed_debugger_dialog(&mut self, key: DialogKey) -> Option<MenuOutcome> {
+        let view = self.debugger_view_mut()?;
         if let WinState::Debugger(s) = &mut view.state {
-            if debugger::feed_goto(s, key) {
+            let (consumed, outcome) = debugger::feed_dialog(s, key);
+            if consumed {
                 view.window.request_redraw();
             }
+            return outcome;
         }
+        None
     }
 
     /// Open the debugger's `Go to…` modal on the disasm pane (Ctrl+G).
@@ -348,7 +353,7 @@ fn debugger_left_click(
     py: i32,
 ) -> Option<MenuOutcome> {
     let r = gb.cpu_regs();
-    debugger::on_left_click(|a| gb.debug_read(a), area, s, r.pc, r.sp, px, py)
+    debugger::on_left_click(|a| gb.debug_read(a), area, s, r, px, py)
 }
 
 /// Glue for [`debugger::on_right_click`] (opens / dismisses the context menu).

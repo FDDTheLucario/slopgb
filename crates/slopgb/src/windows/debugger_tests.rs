@@ -1,5 +1,15 @@
 use super::*;
+use slopgb_core::Registers;
 use std::collections::BTreeSet;
+
+/// Register snapshot for `on_left_click`: the common PC=0x0100 / SP=0xFFFE the
+/// pane tests use (other fields zero — only PC/SP drive disasm/stack clicks).
+fn regs0() -> Registers {
+    let mut r = Registers::default();
+    r.pc = 0x0100;
+    r.sp = 0xFFFE;
+    r
+}
 
 #[test]
 fn layout_panes_tile_the_window_without_overlap() {
@@ -240,8 +250,19 @@ fn target_at_resolves_each_pane_to_its_address() {
         l.stack.y + lh,
     );
     assert_eq!(t, ClickTarget::Stack(0xFFFC));
-    // Registers pane: just the pane id.
+    // Registers pane: row 0 (af) is an editable pair; a row past pc (ime/ima)
+    // is the non-editable `Registers`.
     let t = target_at(NOPS, AREA, &st, 0x0100, 0xFFFE, l.regs.x + 5, l.regs.y + 5);
+    assert_eq!(t, ClickTarget::Reg(RegField::Af));
+    let t = target_at(
+        NOPS,
+        AREA,
+        &st,
+        0x0100,
+        0xFFFE,
+        l.regs.x + 5,
+        l.regs.y + 6 * lh + 1,
+    );
     assert_eq!(t, ClickTarget::Registers);
 }
 
@@ -345,15 +366,7 @@ fn selecting_set_break_returns_a_toggle_breakpoint_action() {
     let (mut st, rects) = open_disasm_menu();
     // "Set break/condition…" is the last (index 11) item; cursor is 0x0102.
     let r = rects[11];
-    let action = on_left_click(
-        NOPS,
-        AREA,
-        &mut st,
-        0x0100,
-        0xFFFE,
-        r.x + r.w / 2,
-        r.y + r.h / 2,
-    );
+    let action = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
     assert_eq!(
         action,
         Some(MenuOutcome::Act(DebugAction::ToggleBreakpoint(0x0102)))
@@ -365,15 +378,7 @@ fn selecting_set_break_returns_a_toggle_breakpoint_action() {
 fn selecting_run_to_cursor_returns_a_run_action() {
     let (mut st, rects) = open_disasm_menu();
     let r = rects[7]; // "Run to cursor"
-    let action = on_left_click(
-        NOPS,
-        AREA,
-        &mut st,
-        0x0100,
-        0xFFFE,
-        r.x + r.w / 2,
-        r.y + r.h / 2,
-    );
+    let action = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
     assert_eq!(
         action,
         Some(MenuOutcome::Act(DebugAction::RunToCursor(0x0102)))
@@ -385,15 +390,7 @@ fn stay_on_bank_toggles_pin_and_freezes_the_view() {
     let (mut st, rects) = open_disasm_menu();
     assert!(!st.pinned);
     let r = rects[6]; // "Stay on bank and address"
-    let action = on_left_click(
-        NOPS,
-        AREA,
-        &mut st,
-        0x0100,
-        0xFFFE,
-        r.x + r.w / 2,
-        r.y + r.h / 2,
-    );
+    let action = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
     assert_eq!(action, None, "pin is a view effect, no machine action");
     assert!(st.pinned, "pin turned on");
     assert_eq!(st.disasm_base, 0x0100, "froze the view at the current PC");
@@ -405,15 +402,7 @@ fn clicking_a_disabled_item_or_away_just_closes_the_menu() {
     // A disabled row ("Copy data", index 2) selects nothing.
     let (mut st, rects) = open_disasm_menu();
     let r = rects[2];
-    let action = on_left_click(
-        NOPS,
-        AREA,
-        &mut st,
-        0x0100,
-        0xFFFE,
-        r.x + r.w / 2,
-        r.y + r.h / 2,
-    );
+    let action = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
     assert_eq!(action, None);
     assert!(st.menu.is_none(), "disabled item dismisses the menu");
     assert_eq!(
@@ -425,7 +414,7 @@ fn clicking_a_disabled_item_or_away_just_closes_the_menu() {
     // A click off the menu (and off the menu bar) also dismisses it.
     let (mut st, _) = open_disasm_menu();
     let l = DebuggerLayout::for_size(AREA.w, AREA.h);
-    let action = on_left_click(NOPS, AREA, &mut st, 0x0100, 0xFFFE, 5, l.memory.y + 5);
+    let action = on_left_click(NOPS, AREA, &mut st, regs0(), 5, l.memory.y + 5);
     assert_eq!(action, None);
     assert!(st.menu.is_none(), "click-away dismisses the menu");
 }
@@ -450,10 +439,10 @@ fn right_click_with_a_menu_open_dismisses_it() {
 
 use crate::ui::dialog::DialogKey;
 
-/// Type a string of chars into an open dialog via feed_goto.
+/// Type a string of chars into an open dialog via feed_dialog.
 fn type_goto(st: &mut DebuggerState, s: &str) {
     for ch in s.chars() {
-        feed_goto(st, DialogKey::Char(ch));
+        feed_dialog(st, DialogKey::Char(ch));
     }
 }
 
@@ -462,19 +451,11 @@ fn disasm_menu_go_to_is_enabled_and_opens_the_dialog() {
     let (mut st, rects) = open_disasm_menu();
     // "Go to…" is the first item, now enabled (was greyed in M5a).
     let r = rects[0];
-    let action = on_left_click(
-        NOPS,
-        AREA,
-        &mut st,
-        0x0100,
-        0xFFFE,
-        r.x + r.w / 2,
-        r.y + r.h / 2,
-    );
+    let action = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
     assert_eq!(action, None, "opening a dialog is a view effect");
     assert!(st.menu.is_none(), "menu closed");
     let gd = st.dialog.as_ref().expect("Go-to dialog opened");
-    assert_eq!(gd.target, GotoTarget::Disasm);
+    assert_eq!(gd.kind, DialogKind::Goto(GotoTarget::Disasm));
 }
 
 #[test]
@@ -482,7 +463,7 @@ fn goto_disasm_pins_the_view_to_the_entered_address() {
     let mut st = DebuggerState::default();
     open_goto(&mut st, GotoTarget::Disasm);
     type_goto(&mut st, "0150");
-    feed_goto(&mut st, DialogKey::Enter);
+    feed_dialog(&mut st, DialogKey::Enter);
     assert!(st.dialog.is_none(), "accept closes the dialog");
     assert!(st.pinned, "disasm Go-to pins the view");
     assert_eq!(st.disasm_base, 0x0150);
@@ -493,7 +474,7 @@ fn goto_memory_repositions_the_memory_base() {
     let mut st = DebuggerState::default();
     open_goto(&mut st, GotoTarget::Memory);
     type_goto(&mut st, "C000");
-    feed_goto(&mut st, DialogKey::Enter);
+    feed_dialog(&mut st, DialogKey::Enter);
     assert!(st.dialog.is_none());
     assert_eq!(st.mem_base, 0xC000);
     assert!(!st.pinned, "memory Go-to does not pin the disasm view");
@@ -505,43 +486,119 @@ fn goto_escape_cancels_without_moving_the_view() {
     let base = st.disasm_base;
     open_goto(&mut st, GotoTarget::Disasm);
     type_goto(&mut st, "ABCD");
-    feed_goto(&mut st, DialogKey::Escape);
+    feed_dialog(&mut st, DialogKey::Escape);
     assert!(st.dialog.is_none(), "escape closes");
     assert_eq!(st.disasm_base, base, "view unchanged on cancel");
     assert!(!st.pinned);
 }
 
 #[test]
-fn feed_goto_with_no_dialog_open_consumes_nothing() {
+fn feed_dialog_with_no_dialog_open_consumes_nothing() {
     let mut st = DebuggerState::default();
-    assert!(
-        !feed_goto(&mut st, DialogKey::Enter),
-        "no dialog -> not consumed"
-    );
+    let (consumed, outcome) = feed_dialog(&mut st, DialogKey::Enter);
+    assert!(!consumed, "no dialog -> not consumed");
+    assert_eq!(outcome, None);
 }
 
 #[test]
-fn goto_click_ok_accepts_and_cancel_dismisses() {
+fn dialog_click_ok_accepts_and_cancel_dismisses() {
     use crate::ui::dialog::{self, DialogLayout};
     let mut st = DebuggerState::default();
     open_goto(&mut st, GotoTarget::Memory);
     type_goto(&mut st, "8000");
     let DialogLayout { ok, cancel, .. } = dialog::layout(AREA);
     // Click OK -> accept.
-    assert!(goto_click(&mut st, AREA, ok.x + ok.w / 2, ok.y + ok.h / 2));
+    assert!(dialog_click(&mut st, AREA, ok.x + ok.w / 2, ok.y + ok.h / 2).0);
     assert_eq!(st.mem_base, 0x8000);
     assert!(st.dialog.is_none());
     // Re-open, click Cancel -> dismiss, no change.
     open_goto(&mut st, GotoTarget::Memory);
     type_goto(&mut st, "1234");
-    assert!(goto_click(
-        &mut st,
-        AREA,
-        cancel.x + cancel.w / 2,
-        cancel.y + cancel.h / 2
-    ));
+    assert!(
+        dialog_click(
+            &mut st,
+            AREA,
+            cancel.x + cancel.w / 2,
+            cancel.y + cancel.h / 2
+        )
+        .0
+    );
     assert_eq!(st.mem_base, 0x8000, "cancel left the base unchanged");
     assert!(st.dialog.is_none());
+}
+
+// --- edit register (RM11) + jump/call cursor (RM7) -------------------------
+
+#[test]
+fn jump_and_call_cursor_return_their_actions() {
+    // Disasm menu (cursor 0x0102): Jump to cursor = index 8, Call cursor = 9.
+    let (mut st, rects) = open_disasm_menu();
+    let r = rects[8];
+    let out = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
+    assert_eq!(out, Some(MenuOutcome::Act(DebugAction::SetPc(0x0102))));
+
+    let (mut st, rects) = open_disasm_menu();
+    let r = rects[9];
+    let out = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
+    assert_eq!(out, Some(MenuOutcome::Act(DebugAction::Call(0x0102))));
+}
+
+#[test]
+fn editable_register_row_opens_a_seeded_prompt_and_writes_on_accept() {
+    let l = DebuggerLayout::for_size(AREA.w, AREA.h);
+    let mut st = DebuggerState::default();
+    // Right-click the af row (row 0): the menu's lone item is enabled.
+    on_right_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        l.regs.x + 5,
+        l.regs.y + 5,
+    );
+    let om = st.menu.as_ref().expect("registers menu");
+    assert_eq!(om.items.len(), 1);
+    assert!(om.items[0].enabled, "edit register enabled on an af row");
+    let rects = menu_rects(om.origin, &om.items);
+    let r = rects[0];
+    // Click it with AF=0x12F0 live (F low nibble already 0) → a prompt seeded
+    // with the current value.
+    let mut regs = Registers::default();
+    regs.set_af(0x12F0);
+    let out = on_left_click(NOPS, AREA, &mut st, regs, r.x + r.w / 2, r.y + r.h / 2);
+    assert_eq!(out, None, "opening the prompt is a view effect");
+    let md = st.dialog.as_ref().expect("edit-register prompt opened");
+    assert_eq!(md.kind, DialogKind::EditReg(RegField::Af));
+    assert_eq!(md.input.buffer, "12F0", "seeded with the live AF");
+    // Accepting the seeded value yields the register write for `main`.
+    let (consumed, out) = feed_dialog(&mut st, DialogKey::Enter);
+    assert!(consumed);
+    assert_eq!(
+        out,
+        Some(MenuOutcome::Act(DebugAction::SetReg(RegField::Af, 0x12F0)))
+    );
+    assert!(st.dialog.is_none(), "accept closes the prompt");
+}
+
+#[test]
+fn non_editable_register_row_greys_edit_register() {
+    let l = DebuggerLayout::for_size(AREA.w, AREA.h);
+    let lh = line_height();
+    let mut st = DebuggerState::default();
+    // A row past pc (ime/spd, ima) is not an editable pair.
+    on_right_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        l.regs.x + 5,
+        l.regs.y + 6 * lh + 1,
+    );
+    let om = st.menu.as_ref().expect("registers menu");
+    assert_eq!(om.items.len(), 1);
+    assert!(!om.items[0].enabled, "ime/ima row: edit register greyed");
 }
 
 // --- code/data hints (RM9) -------------------------------------------------
@@ -584,15 +641,7 @@ fn click_menu_item(target_kind: char, idx: usize) -> DebuggerState {
         &st.menu.as_ref().unwrap().items,
     );
     let r = rects[idx];
-    on_left_click(
-        NOPS,
-        AREA,
-        &mut st,
-        0x0100,
-        0xFFFE,
-        r.x + r.w / 2,
-        r.y + r.h / 2,
-    );
+    on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
     st
 }
 
@@ -620,15 +669,7 @@ fn modify_code_data_toggles_the_hint_at_the_cursor() {
         &st.menu.as_ref().unwrap().items,
     );
     let r = rects[1];
-    on_left_click(
-        NOPS,
-        AREA,
-        &mut st,
-        0x0100,
-        0xFFFE,
-        r.x + r.w / 2,
-        r.y + r.h / 2,
-    );
+    on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
     assert!(!st.data_hints.contains(&0x0102), "toggled back to code");
 }
 
@@ -653,15 +694,7 @@ fn force_code_view_clears_a_data_hint() {
         &st.menu.as_ref().unwrap().items,
     );
     let r = rects[5]; // "force code view"
-    on_left_click(
-        NOPS,
-        AREA,
-        &mut st,
-        0x0100,
-        0xFFFE,
-        r.x + r.w / 2,
-        r.y + r.h / 2,
-    );
+    on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
     assert!(!st.data_hints.contains(&0x0102), "forced back to code");
 }
 
@@ -719,7 +752,7 @@ fn clicking_a_bar_label_opens_its_dropdown() {
     let mut st = DebuggerState::default();
     // Click the "Run" label (index 2).
     let r = rects[2];
-    let action = on_left_click(NOPS, AREA, &mut st, 0x0100, 0xFFFE, r.x + 2, r.y + 2);
+    let action = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + 2, r.y + 2);
     assert_eq!(action, None);
     let m = st.menu.as_ref().expect("Run dropdown opened");
     assert_eq!(m.bar, Some(2));
@@ -736,7 +769,7 @@ fn debug_menu_toggle_breakpoint_acts_on_the_cursor() {
     };
     // Open the Debug menu (index 3).
     let r = rects[3];
-    on_left_click(NOPS, AREA, &mut st, 0x0100, 0xFFFE, r.x + 2, r.y + 2);
+    on_left_click(NOPS, AREA, &mut st, regs0(), r.x + 2, r.y + 2);
     // "Toggle breakpoint" is the first item; clicking it toggles bp at the cursor.
     let item_rects = menu_rects(
         st.menu.as_ref().unwrap().origin,
@@ -747,8 +780,7 @@ fn debug_menu_toggle_breakpoint_acts_on_the_cursor() {
         NOPS,
         AREA,
         &mut st,
-        0x0100,
-        0xFFFE,
+        regs0(),
         ir.x + ir.w / 2,
         ir.y + ir.h / 2,
     );
@@ -764,15 +796,7 @@ fn run_menu_run_to_cursor_falls_back_to_pc_without_a_cursor() {
     let l = DebuggerLayout::for_size(AREA.w, AREA.h);
     let rects = menubar_rects(l.menu);
     let mut st = DebuggerState::default(); // no cursor selected
-    on_left_click(
-        NOPS,
-        AREA,
-        &mut st,
-        0x0100,
-        0xFFFE,
-        rects[2].x + 2,
-        rects[2].y + 2,
-    );
+    on_left_click(NOPS, AREA, &mut st, regs0(), rects[2].x + 2, rects[2].y + 2);
     // "Run to Cursor" is index 9 in the Run menu.
     let item_rects = menu_rects(
         st.menu.as_ref().unwrap().origin,
@@ -783,8 +807,7 @@ fn run_menu_run_to_cursor_falls_back_to_pc_without_a_cursor() {
         NOPS,
         AREA,
         &mut st,
-        0x0100,
-        0xFFFE,
+        regs0(),
         ir.x + ir.w / 2,
         ir.y + ir.h / 2,
     );
@@ -802,7 +825,7 @@ fn click_menubar_item(bar_idx: usize, item_idx: usize) -> Option<MenuOutcome> {
     let rects = menubar_rects(l.menu);
     let mut st = DebuggerState::default();
     let br = rects[bar_idx];
-    on_left_click(NOPS, AREA, &mut st, 0x0100, 0xFFFE, br.x + 2, br.y + 2);
+    on_left_click(NOPS, AREA, &mut st, regs0(), br.x + 2, br.y + 2);
     let item_rects = menu_rects(
         st.menu.as_ref().unwrap().origin,
         &st.menu.as_ref().unwrap().items,
@@ -812,8 +835,7 @@ fn click_menubar_item(bar_idx: usize, item_idx: usize) -> Option<MenuOutcome> {
         NOPS,
         AREA,
         &mut st,
-        0x0100,
-        0xFFFE,
+        regs0(),
         ir.x + ir.w / 2,
         ir.y + ir.h / 2,
     )

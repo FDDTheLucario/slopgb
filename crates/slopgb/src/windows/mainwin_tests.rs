@@ -244,11 +244,7 @@ fn sound_channel_submenu_has_the_four_captured_rows() {
     let s = SubMenu::sound_channel(PARENT, [false; 4]);
     let labels: Vec<&str> = s.items.iter().map(|i| i.label.as_str()).collect();
     assert_eq!(labels, ["1", "2", "3", "4"]);
-    let shortcuts: Vec<Option<&str>> = s
-        .items
-        .iter()
-        .map(|i| i.shortcut.as_deref())
-        .collect();
+    let shortcuts: Vec<Option<&str>> = s.items.iter().map(|i| i.shortcut.as_deref()).collect();
     assert_eq!(
         shortcuts,
         [Some("F5"), Some("F6"), Some("F7"), Some("F8")],

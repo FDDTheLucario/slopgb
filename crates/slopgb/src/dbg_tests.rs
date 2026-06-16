@@ -36,6 +36,25 @@ fn is_subroutine_call_matches_call_and_rst_only() {
 }
 
 #[test]
+fn apply_set_reg_set_pc_and_call_mutate_the_machine() {
+    let mut d = Debugger::default();
+    let mut gb = machine(call_rom());
+    // edit register → write a pair.
+    d.apply(&mut gb, DebugAction::SetReg(RegField::Bc, 0x1234));
+    assert_eq!(gb.cpu_regs().bc(), 0x1234);
+    // Jump to cursor → redirect PC without running.
+    d.apply(&mut gb, DebugAction::SetPc(0x0150));
+    assert_eq!(gb.cpu_regs().pc, 0x0150);
+    // Call cursor → push the (now 0x0150) PC and jump.
+    let sp = gb.cpu_regs().sp;
+    d.apply(&mut gb, DebugAction::Call(0x0103));
+    assert_eq!(gb.cpu_regs().pc, 0x0103, "jumped to the call target");
+    assert_eq!(gb.cpu_regs().sp, sp.wrapping_sub(2), "pushed a return addr");
+    assert_eq!(gb.debug_read(sp.wrapping_sub(2)), 0x50, "return low byte");
+    assert_eq!(gb.debug_read(sp.wrapping_sub(1)), 0x01, "return high byte");
+}
+
+#[test]
 fn toggle_break_flips_and_reports() {
     let mut d = Debugger::default();
     assert!(!d.is_broken());
