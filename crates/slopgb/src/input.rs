@@ -108,6 +108,9 @@ pub enum Action {
     DbgSetUserClocks,
     /// Open the game-window "Load ROM" path prompt (main menu). Menu-only.
     MainLoadRom,
+    /// Export the disassembly of the current region to a text file (debugger
+    /// File → "save asm..."). Menu-only.
+    DbgSaveAsm,
 }
 
 /// Tracks which physical keys currently hold each button, so two keys mapped

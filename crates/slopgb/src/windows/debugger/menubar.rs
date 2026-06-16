@@ -131,7 +131,10 @@ fn file_menu() -> Vec<(MenuItem, MenuChoice)> {
             MenuItem::new("save memory_dump..."),
             MenuChoice::Command(Action::DbgSaveMemDump),
         ),
-        disabled("save asm..."),
+        (
+            MenuItem::new("save asm..."),
+            MenuChoice::Command(Action::DbgSaveAsm),
+        ),
         dis_sc("Undo", "Ctrl+Z"),
         dis_sc("Redo", "Ctrl+Alt+Z"),
         disabled("Fix area with erase value"),

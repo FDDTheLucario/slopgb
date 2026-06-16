@@ -206,6 +206,8 @@ impl App {
                 ));
                 self.request_game_redraw();
             }
+            // File menu (MB2): export the disassembly of the current region.
+            Action::DbgSaveAsm => self.save_asm(),
             // Debug menu (RM14): evaluate an expression + the user-clock counter.
             Action::DbgEvaluate => self.tools.open_debugger_eval(),
             Action::DbgEvalRun => self.tools.debugger_eval(&self.session.gb),
@@ -228,6 +230,20 @@ impl App {
         match fs::write(&path, &dump) {
             Ok(()) => eprintln!("saved memory dump to {path}"),
             Err(e) => eprintln!("error: could not save memory dump: {e}"),
+        }
+    }
+
+    /// Export the disassembly of the current region to `slopgb-asm-<unix-millis>
+    /// .txt` (debugger File → "save asm..."); log the path or any I/O error.
+    fn save_asm(&self) {
+        let text = self.tools.debugger_disasm_dump(&self.session.gb);
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis());
+        let path = format!("slopgb-asm-{stamp}.txt");
+        match fs::write(&path, text) {
+            Ok(()) => eprintln!("saved asm to {path}"),
+            Err(e) => eprintln!("error: could not save asm: {e}"),
         }
     }
 

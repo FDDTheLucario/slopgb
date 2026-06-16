@@ -947,6 +947,11 @@ fn file_menu_wires_the_export_commands() {
         Some(MenuOutcome::Command(Action::DbgSaveMemDump)),
         "save memory_dump"
     );
+    assert_eq!(
+        click_menubar_item(0, 12),
+        Some(MenuOutcome::Command(Action::DbgSaveAsm)),
+        "save asm"
+    );
     // Load ROM / state ops stay greyed (need a picker / save-state infra).
     assert_eq!(click_menubar_item(0, 0), None, "Load ROM greyed");
     assert_eq!(click_menubar_item(0, 8), None, "Save state greyed");

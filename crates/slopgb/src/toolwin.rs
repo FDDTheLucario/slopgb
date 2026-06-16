@@ -434,6 +434,24 @@ impl ToolWindows {
         }
     }
 
+    /// Disassemble a fixed region from the current disasm base for the File →
+    /// "save asm..." export (MB2): the formatted lines joined by newlines,
+    /// honouring the pane's code/data hints.
+    #[must_use]
+    pub fn debugger_disasm_dump(&self, gb: &GameBoy) -> String {
+        const COUNT: usize = 4096;
+        let pc = gb.cpu_regs().pc;
+        let (start, hints) = match self.debugger_view().map(|v| &v.state) {
+            Some(WinState::Debugger(s)) => (s.disasm_start(pc), s.data_hints.clone()),
+            _ => (pc, std::collections::BTreeSet::new()),
+        };
+        let rows = debugger::disasm_rows(|a| gb.debug_read(a), start, COUNT, &hints);
+        rows.iter()
+            .map(|r| r.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     /// Open the debugger's `Evaluate expression` modal (RM14).
     pub fn open_debugger_eval(&mut self) {
         let Some(view) = self.debugger_view_mut() else {
