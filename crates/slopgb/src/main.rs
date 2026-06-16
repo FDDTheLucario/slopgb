@@ -40,6 +40,7 @@ use audio::{AudioOutput, Resampler};
 use input::{Action, ButtonTracker, Focus};
 use ui::dialog::DialogKey;
 use video::Video;
+use windows::debugger::MenuOutcome;
 
 const USAGE: &str = "\
 slopgb — Game Boy / Game Boy Color emulator
@@ -426,7 +427,7 @@ struct App {
     fps_since: Instant,
     fps: f64,
     /// Open bgb-style debug tool windows (F2/F3/F4). The game window is handled
-    /// directly; these are routed by [`ToolWindows::owns`].
+    /// directly; these are routed by [`toolwin::ToolWindows::owns`].
     tools: toolwin::ToolWindows,
     /// Debugger execution control (break / step / breakpoints).
     dbg: dbg::Debugger,
@@ -520,7 +521,22 @@ impl App {
                     self.resync_pacing();
                 }
             }
-            Action::Pause if pressed => {
+            // Every other action fires on press only; the debugger menu items
+            // reuse this same dispatch via `run_action`, so a hotkey and its
+            // menu entry can never diverge.
+            _ if pressed => self.run_action(action, event_loop),
+            _ => {}
+        }
+    }
+
+    /// Run a discrete, press-only frontend [`Action`] — shared by the keyboard
+    /// map ([`Self::handle_key`]) and the debugger menu items
+    /// ([`MenuOutcome::Command`]), so a hotkey and its menu entry stay in lock-
+    /// step. `Button`/`Turbo` are held-state and stay in `handle_key`; they
+    /// (and any guard-failed debugger action) no-op here.
+    fn run_action(&mut self, action: Action, event_loop: &ActiveEventLoop) {
+        match action {
+            Action::Pause => {
                 self.paused = !self.paused;
                 if self.paused {
                     self.session.flush_save();
@@ -529,18 +545,17 @@ impl App {
                 }
                 self.update_title();
             }
-            Action::Reset if pressed => {
+            Action::Reset => {
                 self.session.reset();
                 self.resync_pacing();
             }
-            Action::Quit if pressed => event_loop.exit(),
-            Action::ToggleTool(kind) if pressed => self.tools.toggle(event_loop, kind),
+            Action::Quit => event_loop.exit(),
+            Action::ToggleTool(kind) => self.tools.toggle(event_loop, kind),
             // F9 enters a break only with the debugger window up (so the key is
             // inert during normal play), but always *resumes* one — otherwise
             // closing the window while broken would strand the frozen machine.
             Action::DbgBreak
-                if pressed
-                    && (self.dbg.is_broken() || self.tools.is_open(ui::ToolWindow::Debugger)) =>
+                if self.dbg.is_broken() || self.tools.is_open(ui::ToolWindow::Debugger) =>
             {
                 self.dbg.toggle_break();
                 if !self.dbg.is_broken() {
@@ -549,16 +564,20 @@ impl App {
                 self.update_title();
                 self.tools.request_redraw_all();
             }
-            Action::DbgStep if pressed && self.dbg.is_broken() => {
+            Action::DbgStep if self.dbg.is_broken() => {
                 self.dbg.step(&mut self.session.gb);
                 self.refresh_after_step();
             }
-            Action::DbgStepOver if pressed && self.dbg.is_broken() => {
+            Action::DbgStepOver if self.dbg.is_broken() => {
                 self.dbg.step_over(&mut self.session.gb);
                 self.refresh_after_step();
             }
+            Action::DbgStepOut if self.dbg.is_broken() => {
+                self.dbg.step_out(&mut self.session.gb);
+                self.refresh_after_step();
+            }
             // Debugger F2 / F4 act on the cursor (or PC when nothing is selected).
-            Action::DbgToggleBreakpoint if pressed => {
+            Action::DbgToggleBreakpoint => {
                 let addr = self.debug_cursor_or_pc();
                 self.dbg.apply(
                     &mut self.session.gb,
@@ -566,16 +585,14 @@ impl App {
                 );
                 self.refresh_after_step();
             }
-            Action::DbgRunToCursor if pressed => {
+            Action::DbgRunToCursor => {
                 let addr = self.debug_cursor_or_pc();
                 self.dbg
                     .apply(&mut self.session.gb, dbg::DebugAction::RunToCursor(addr));
                 self.update_title();
                 self.refresh_after_step();
             }
-            Action::DbgGoto if pressed => {
-                self.tools.open_debugger_goto();
-            }
+            Action::DbgGoto => self.tools.open_debugger_goto(),
             _ => {}
         }
     }
@@ -867,15 +884,21 @@ impl ApplicationHandler for App {
                     button,
                     ..
                 } if matches!(button, MouseButton::Left | MouseButton::Right) => {
-                    let action = if button == MouseButton::Left {
+                    let outcome = if button == MouseButton::Left {
                         self.tools.on_mouse_left(window_id, &self.session.gb)
                     } else {
                         self.tools.on_mouse_right(window_id, &self.session.gb)
                     };
-                    if let Some(a) = action {
-                        self.dbg.apply(&mut self.session.gb, a);
-                        self.update_title();
-                        self.refresh_after_step();
+                    match outcome {
+                        // A debugger execution action applies against the machine;
+                        // a menu Command reuses the keyboard dispatch (run_action).
+                        Some(MenuOutcome::Act(a)) => {
+                            self.dbg.apply(&mut self.session.gb, a);
+                            self.update_title();
+                            self.refresh_after_step();
+                        }
+                        Some(MenuOutcome::Command(act)) => self.run_action(act, event_loop),
+                        None => {}
                     }
                 }
                 // Hotkeys route by focused window kind: the debugger window gets

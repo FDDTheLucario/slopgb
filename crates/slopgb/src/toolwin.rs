@@ -15,12 +15,12 @@ use winit::dpi::LogicalSize;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
-use crate::dbg::{Breakpoints, DebugAction};
+use crate::dbg::Breakpoints;
 use crate::ui::canvas::Rect;
 use crate::ui::dialog::DialogKey;
 use crate::ui::{Canvas, Theme, ToolWindow, WindowRegistry};
 use crate::windows::{self, WinState, debugger, vram};
-use debugger::GotoTarget;
+use debugger::{GotoTarget, MenuOutcome};
 
 struct ToolView {
     window: Rc<Window>,
@@ -213,9 +213,9 @@ impl ToolWindows {
 
     /// Handle a left-button press on tool window `id` (uses the last cursor
     /// position): switches a VRAM control, selects a debugger menu item, or sets
-    /// the debugger cursor. Returns an execution [`DebugAction`] for `main` to
-    /// apply (debugger only), redrawing on any change.
-    pub fn on_mouse_left(&mut self, id: WindowId, gb: &GameBoy) -> Option<DebugAction> {
+    /// the debugger cursor. Returns a [`MenuOutcome`] for `main` to apply
+    /// (debugger only), redrawing on any change.
+    pub fn on_mouse_left(&mut self, id: WindowId, gb: &GameBoy) -> Option<MenuOutcome> {
         let view = self.views.get_mut(&id)?;
         let (px, py) = view.cursor?;
         let area = view.area();
@@ -243,7 +243,7 @@ impl ToolWindows {
     /// Handle a right-button press on tool window `id`: on the debugger, open the
     /// context menu for the clicked pane (or dismiss an open one). Returns `None`
     /// — opening a menu has no immediate machine effect.
-    pub fn on_mouse_right(&mut self, id: WindowId, gb: &GameBoy) -> Option<DebugAction> {
+    pub fn on_mouse_right(&mut self, id: WindowId, gb: &GameBoy) -> Option<MenuOutcome> {
         let view = self.views.get_mut(&id)?;
         let (px, py) = view.cursor?;
         let area = view.area();
@@ -346,7 +346,7 @@ fn debugger_left_click(
     gb: &GameBoy,
     px: i32,
     py: i32,
-) -> Option<DebugAction> {
+) -> Option<MenuOutcome> {
     let r = gb.cpu_regs();
     debugger::on_left_click(|a| gb.debug_read(a), area, s, r.pc, r.sp, px, py)
 }

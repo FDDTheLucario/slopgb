@@ -8,13 +8,14 @@ use std::collections::BTreeSet;
 use slopgb_core::debug;
 
 use crate::dbg::{Breakpoints, DebugAction};
-use crate::ui::Theme;
+use crate::input::Action;
 use crate::ui::canvas::{Canvas, Rect};
 use crate::ui::dialog::{self, DialogKey, DialogResult, InputDialog};
 use crate::ui::font::GLYPH_H;
 use crate::ui::menu::{self, MenuItem};
 use crate::ui::text::{draw_text, hex_row, line_height, measure};
 use crate::ui::widgets::scroll_list;
+use crate::ui::{Theme, ToolWindow};
 
 /// The four panes of the debugger body, partitioned from the window size to
 /// match bgb's layout (see `docs/bgb-reference/02-debugger.png`): a thin menu
@@ -353,13 +354,18 @@ pub enum ClickTarget {
     None,
 }
 
-/// What selecting a menu item does. Execution effects (`Act`) are returned to
-/// `main` to apply against the machine; view effects (`TogglePin`, `OpenGoto`)
-/// mutate the window's own `DebuggerState`; `None` is a separator / disabled /
+/// What selecting a menu item does. Execution effects (`Act`) and frontend
+/// commands (`Command`, reusing the keyboard `Action` dispatch) are returned to
+/// `main` as a [`MenuOutcome`]; view effects (`TogglePin`, `OpenGoto`) mutate
+/// the window's own `DebuggerState`; `None` is a separator / disabled /
 /// not-yet-wired stub.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuChoice {
     Act(DebugAction),
+    /// A frontend action shared with the keyboard map (Run/Trace/Step Over/Step
+    /// out/Reset, VRAM/IO-map window toggles) — `main` runs it through the same
+    /// `run_action` the keys use, so a menu item and its hotkey never diverge.
+    Command(Action),
     TogglePin,
     OpenGoto(GotoTarget),
     /// Flip the code/data hint at the address ("Modify code/data" / "Modify data").
@@ -369,6 +375,16 @@ pub enum MenuChoice {
     /// Force the address to render as data ("Data go here").
     MarkData(u16),
     None,
+}
+
+/// What a clicked menu item asks `main` to do against the live machine: either a
+/// debugger [`DebugAction`] (applied via `dbg::Debugger::apply`) or a frontend
+/// [`Action`] (run through `main`'s shared `run_action`, same as the keyboard).
+/// View-only effects never reach here — they mutate `DebuggerState` in place.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MenuOutcome {
+    Act(DebugAction),
+    Command(Action),
 }
 
 /// An open context menu: its origin, the rendered items, the parallel choice for
@@ -533,10 +549,10 @@ fn stack_entries(addr: u16) -> Vec<(MenuItem, MenuChoice)> {
 }
 
 /// Handle a left-click. With a menu open, any click closes it and an enabled
-/// item performs its [`MenuChoice`] (execution actions return a [`DebugAction`]
-/// for `main`; `TogglePin` is a view effect handled here). With no menu open, a
-/// left-click selects the clicked line (sets the cursor). Pure over `read` + the
-/// register snapshot, so it tests headless.
+/// item performs its [`MenuChoice`] (execution / command effects return a
+/// [`MenuOutcome`] for `main`; `TogglePin` is a view effect handled here). With
+/// no menu open, a left-click selects the clicked line (sets the cursor). Pure
+/// over `read` + the register snapshot, so it tests headless.
 pub fn on_left_click(
     read: impl Fn(u16) -> u8,
     area: Rect,
@@ -545,7 +561,7 @@ pub fn on_left_click(
     sp: u16,
     px: i32,
     py: i32,
-) -> Option<DebugAction> {
+) -> Option<MenuOutcome> {
     let l = DebuggerLayout::for_size(area.w, area.h);
     // An open menu eats the click: an enabled item acts; a click anywhere else
     // inside the box just dismisses (disabled item / separator); a click outside
@@ -574,11 +590,12 @@ pub fn on_left_click(
     None
 }
 
-/// Apply a selected menu choice: execution effects return a [`DebugAction`] for
-/// `main`; view effects mutate `st` in place.
-fn apply_choice(st: &mut DebuggerState, choice: MenuChoice, pc: u16) -> Option<DebugAction> {
+/// Apply a selected menu choice: execution / command effects return a
+/// [`MenuOutcome`] for `main`; view effects mutate `st` in place.
+fn apply_choice(st: &mut DebuggerState, choice: MenuChoice, pc: u16) -> Option<MenuOutcome> {
     match choice {
-        MenuChoice::Act(action) => Some(action),
+        MenuChoice::Act(action) => Some(MenuOutcome::Act(action)),
+        MenuChoice::Command(action) => Some(MenuOutcome::Command(action)),
         MenuChoice::TogglePin => {
             // Freeze the disasm view where it currently sits when pinning on.
             if !st.pinned {
@@ -783,6 +800,16 @@ fn dis_sc(label: &str, sc: &str) -> (MenuItem, MenuChoice) {
     )
 }
 
+/// An enabled dropdown item carrying a shortcut label + its choice.
+fn en_sc(label: &str, sc: &str, choice: MenuChoice) -> (MenuItem, MenuChoice) {
+    (MenuItem::new(label).shortcut(sc), choice)
+}
+
+/// A dropdown item running a frontend [`Action`] (shared with the keyboard map).
+fn cmd(label: &str, sc: &str, action: Action) -> (MenuItem, MenuChoice) {
+    en_sc(label, sc, MenuChoice::Command(action))
+}
+
 fn file_menu() -> Vec<(MenuItem, MenuChoice)> {
     vec![
         dis_sc("Load ROM...", "F12"),
@@ -816,24 +843,28 @@ fn search_menu() -> Vec<(MenuItem, MenuChoice)> {
 
 fn run_menu(cursor: u16) -> Vec<(MenuItem, MenuChoice)> {
     vec![
-        dis_sc("Run", "F9"),
+        // "Run" is the F9 action verbatim (its shortcut), so the menu item and
+        // the key stay in lockstep: from a break it resumes; while already
+        // running it toggles a break, exactly as pressing F9 would.
+        cmd("Run", "F9", Action::DbgBreak),
         dis_sc("Run no break", "Shift+F9"),
         dis_sc("Run not this break", "Ctrl+F9"),
-        dis_sc("Reset (numpad *)", "Ctrl+R"),
-        dis_sc("Trace", "F7"),
+        cmd("Reset (numpad *)", "Ctrl+R", Action::Reset),
+        cmd("Trace", "F7", Action::DbgStep),
         dis_sc("Trace reverse", "Shift+F7"),
-        dis_sc("Step Over", "F3"),
+        cmd("Step Over", "F3", Action::DbgStepOver),
         dis_sc("Step Over reverse", "Shift+F3"),
         disabled("Animate (Alt+A)"),
-        (
-            MenuItem::new("Run to Cursor").shortcut("F4"),
+        en_sc(
+            "Run to Cursor",
+            "F4",
             MenuChoice::Act(DebugAction::RunToCursor(cursor)),
         ),
         dis_sc("Run cursor no break", "Shift+F4"),
         dis_sc("Run cursor reverse", "Ctrl+F4"),
         dis_sc("Jump to cursor", "F6"),
         disabled("Call cursor"),
-        dis_sc("Step out", "F8"),
+        cmd("Step out", "F8", Action::DbgStepOut),
         dis_sc("Step out reverse", "Shift+F8"),
         disabled("jump (SP); SP=SP+2"),
         dis_sc("Rewind cycles...", "Ctrl+E"),
@@ -855,13 +886,13 @@ fn debug_menu(cursor: u16) -> Vec<(MenuItem, MenuChoice)> {
 
 fn window_menu() -> Vec<(MenuItem, MenuChoice)> {
     vec![
-        dis_sc("VRAM viewer", "F5"),
+        cmd("VRAM viewer", "F5", Action::ToggleTool(ToolWindow::Vram)),
         disabled("SGB packets"),
         disabled("log link transfers (to SGB window)"),
         dis_sc("Options", "F11"),
         disabled("cheats"),
         disabled("cheat searcher"),
-        dis_sc("IO map", "F10"),
+        cmd("IO map", "F10", Action::ToggleTool(ToolWindow::IoMap)),
         disabled("screen"),
         dis_sc("joypads", "Ctrl+K"),
         disabled("debug messages"),

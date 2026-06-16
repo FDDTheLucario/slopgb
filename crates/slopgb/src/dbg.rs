@@ -79,6 +79,10 @@ const STEP_OVER_CAP: u64 = 10_000_000;
 /// emulated time).
 const RUN_TO_CURSOR_CAP: u64 = 100_000_000;
 
+/// Upper bound on instructions a step-out runs before giving up, so a routine
+/// that never returns (a main loop) can't hang the UI thread.
+const STEP_OUT_CAP: u64 = 10_000_000;
+
 impl Debugger {
     /// Whether emulation is currently frozen at a break.
     #[must_use]
@@ -120,6 +124,24 @@ impl Debugger {
     /// Execute exactly one instruction (F7, "Trace" / step into).
     pub fn step(&self, gb: &mut GameBoy) {
         gb.step();
+    }
+
+    /// Step out of the current subroutine (F8): single-step until SP rises
+    /// above its entry value — a `ret`/`reti` has popped the frame's return
+    /// address past where we started — or the cap is hit (a routine that never
+    /// returns, like a main loop, can't hang the UI thread). bgb's "Step out".
+    pub fn step_out(&self, gb: &mut GameBoy) {
+        let entry_sp = gb.cpu_regs().sp;
+        for _ in 0..STEP_OUT_CAP {
+            gb.step();
+            // Wrap-safe "SP rose above entry": the signed 16-bit difference is
+            // positive once a `ret`/`reti` has popped the frame past where we
+            // started, even when the pop wraps the 0xFFFF→0x0000 boundary (a
+            // plain `sp > entry_sp` would miss that return).
+            if (gb.cpu_regs().sp.wrapping_sub(entry_sp) as i16) > 0 {
+                break;
+            }
+        }
     }
 
     /// Step over a `call`/`rst` by running to the instruction after it (F3);

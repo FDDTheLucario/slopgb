@@ -81,6 +81,64 @@ fn step_over_a_plain_instruction_is_one_step() {
 }
 
 #[test]
+fn step_out_returns_from_the_current_subroutine() {
+    let d = Debugger::default();
+    let mut gb = machine(call_rom());
+    // Get inside the subroutine first: run to its entry (call pushed 0x0103).
+    let mut dd = Debugger::default();
+    dd.apply(&mut gb, DebugAction::RunToCursor(0x0150));
+    assert_eq!(gb.cpu_regs().pc, 0x0150, "inside the subroutine");
+    let inside_sp = gb.cpu_regs().sp;
+    d.step_out(&mut gb);
+    // nop; ret -> back to the return address, SP risen past entry.
+    assert_eq!(gb.cpu_regs().pc, 0x0103, "stepped out to the return addr");
+    assert!(gb.cpu_regs().sp > inside_sp, "the ret popped past entry");
+}
+
+#[test]
+fn step_out_caps_on_a_non_returning_routine() {
+    let d = Debugger::default();
+    // 0x0100: jr -2 (an infinite self-loop that never returns).
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x0100] = 0x18;
+    rom[0x0101] = 0xFE;
+    let mut gb = machine(rom);
+    let sp0 = gb.cpu_regs().sp;
+    d.step_out(&mut gb); // must return (cap), not hang
+    assert_eq!(
+        gb.cpu_regs().sp,
+        sp0,
+        "SP never rose: no frame to return from"
+    );
+}
+
+#[test]
+fn step_out_detects_a_return_that_wraps_the_stack_top() {
+    // A frame whose `ret` raises SP across the 0xFFFF→0x0000 boundary: enter
+    // with SP=0x0000 so the call leaves SP=0xFFFE, then `ret` pops to 0x0000.
+    // A naive `sp > entry_sp` (0x0000 > 0xFFFE) would miss this return.
+    let mut rom = vec![0u8; 0x8000];
+    // 0x0100: ld sp,0x0000 ; 0x0103: call 0x0150 ; 0x0106: nop
+    rom[0x0100] = 0x31;
+    rom[0x0101] = 0x00;
+    rom[0x0102] = 0x00;
+    rom[0x0103] = 0xCD;
+    rom[0x0104] = 0x50;
+    rom[0x0105] = 0x01;
+    // 0x0150: nop ; ret
+    rom[0x0150] = 0x00;
+    rom[0x0151] = 0xC9;
+    let mut gb = machine(rom);
+    let d = Debugger::default();
+    let mut dd = Debugger::default();
+    dd.apply(&mut gb, DebugAction::RunToCursor(0x0150));
+    assert_eq!(gb.cpu_regs().pc, 0x0150, "inside the subroutine");
+    assert_eq!(gb.cpu_regs().sp, 0xFFFE, "frame sits at the stack top");
+    d.step_out(&mut gb);
+    assert_eq!(gb.cpu_regs().pc, 0x0106, "stepped out across the SP wrap");
+}
+
+#[test]
 fn breakpoints_toggle_on_off_and_report() {
     let mut bp = Breakpoints::default();
     assert!(bp.is_empty());

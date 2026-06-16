@@ -354,7 +354,10 @@ fn selecting_set_break_returns_a_toggle_breakpoint_action() {
         r.x + r.w / 2,
         r.y + r.h / 2,
     );
-    assert_eq!(action, Some(DebugAction::ToggleBreakpoint(0x0102)));
+    assert_eq!(
+        action,
+        Some(MenuOutcome::Act(DebugAction::ToggleBreakpoint(0x0102)))
+    );
     assert!(st.menu.is_none(), "menu closes after a selection");
 }
 
@@ -371,7 +374,10 @@ fn selecting_run_to_cursor_returns_a_run_action() {
         r.x + r.w / 2,
         r.y + r.h / 2,
     );
-    assert_eq!(action, Some(DebugAction::RunToCursor(0x0102)));
+    assert_eq!(
+        action,
+        Some(MenuOutcome::Act(DebugAction::RunToCursor(0x0102)))
+    );
 }
 
 #[test]
@@ -746,7 +752,10 @@ fn debug_menu_toggle_breakpoint_acts_on_the_cursor() {
         ir.x + ir.w / 2,
         ir.y + ir.h / 2,
     );
-    assert_eq!(action, Some(DebugAction::ToggleBreakpoint(0x0150)));
+    assert_eq!(
+        action,
+        Some(MenuOutcome::Act(DebugAction::ToggleBreakpoint(0x0150)))
+    );
     assert!(st.menu.is_none(), "selecting closes the dropdown");
 }
 
@@ -781,9 +790,74 @@ fn run_menu_run_to_cursor_falls_back_to_pc_without_a_cursor() {
     );
     assert_eq!(
         action,
-        Some(DebugAction::RunToCursor(0x0100)),
+        Some(MenuOutcome::Act(DebugAction::RunToCursor(0x0100))),
         "defaults to PC"
     );
+}
+
+/// Open menu-bar dropdown `bar_idx`, click its item `item_idx`, return the
+/// outcome. Each click closes the menu, so callers reopen per item.
+fn click_menubar_item(bar_idx: usize, item_idx: usize) -> Option<MenuOutcome> {
+    let l = DebuggerLayout::for_size(AREA.w, AREA.h);
+    let rects = menubar_rects(l.menu);
+    let mut st = DebuggerState::default();
+    let br = rects[bar_idx];
+    on_left_click(NOPS, AREA, &mut st, 0x0100, 0xFFFE, br.x + 2, br.y + 2);
+    let item_rects = menu_rects(
+        st.menu.as_ref().unwrap().origin,
+        &st.menu.as_ref().unwrap().items,
+    );
+    let ir = item_rects[item_idx];
+    on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        ir.x + ir.w / 2,
+        ir.y + ir.h / 2,
+    )
+}
+
+#[test]
+fn run_menu_wires_forward_execution_commands() {
+    use crate::input::Action;
+    // (item index in run_menu, expected command).
+    let cases = [
+        (0, Action::DbgBreak),    // Run (resume)
+        (3, Action::Reset),       // Reset (numpad *)
+        (4, Action::DbgStep),     // Trace
+        (6, Action::DbgStepOver), // Step Over
+        (14, Action::DbgStepOut), // Step out
+    ];
+    for (item, act) in cases {
+        assert_eq!(
+            click_menubar_item(2, item),
+            Some(MenuOutcome::Command(act)),
+            "Run menu item {item} fires {act:?}"
+        );
+    }
+    // The reverse / not-yet-built variants stay greyed (no outcome).
+    assert_eq!(click_menubar_item(2, 1), None, "Run no break greyed");
+    assert_eq!(click_menubar_item(2, 8), None, "Animate greyed");
+}
+
+#[test]
+fn window_menu_wires_the_viewer_toggles() {
+    use crate::input::Action;
+    use crate::ui::ToolWindow;
+    assert_eq!(
+        click_menubar_item(4, 0),
+        Some(MenuOutcome::Command(Action::ToggleTool(ToolWindow::Vram))),
+        "VRAM viewer toggles its window"
+    );
+    assert_eq!(
+        click_menubar_item(4, 6),
+        Some(MenuOutcome::Command(Action::ToggleTool(ToolWindow::IoMap))),
+        "IO map toggles its window"
+    );
+    // Options (F11) is not built yet — stays greyed.
+    assert_eq!(click_menubar_item(4, 3), None, "Options greyed");
 }
 
 #[test]
