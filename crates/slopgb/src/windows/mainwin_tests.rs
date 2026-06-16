@@ -89,10 +89,11 @@ fn supported_rows_run_their_action_window_size_opens_a_submenu_rest_none() {
     assert_eq!(m.effects[4], MenuEffect::Run(Action::MainCheats));
     // State opens its submenu (MN6 Quick Save/Load).
     assert_eq!(m.effects[8], MenuEffect::Submenu(SubKind::State));
-    // Greyed stubs + not-yet-wired submenu rows have no effect.
-    for i in [1, 12, 13] {
-        assert_eq!(m.effects[i], MenuEffect::None, "row {i} is a stub");
-    }
+    // Load ROM (MN4) opens the path modal; Recent ROMs (MN4) opens its submenu.
+    assert_eq!(m.effects[1], MenuEffect::Run(Action::MainLoadRom));
+    assert_eq!(m.effects[13], MenuEffect::Submenu(SubKind::RecentRoms));
+    // Only the Link row stays a not-yet-wired stub.
+    assert_eq!(m.effects[12], MenuEffect::None, "Link is a stub");
 }
 
 #[test]
@@ -113,10 +114,16 @@ fn submenu_rows_show_the_arrow_window_size_enabled_others_greyed() {
     );
     assert!(m.items[9].enabled, "Other is wired (MN5)");
     assert!(m.items[8].enabled, "State is wired (MN6)");
-    for i in [12, 13] {
-        assert!(!m.items[i].enabled, "row {i} greyed until its milestone");
-    }
-    assert!(!m.items[1].submenu, "Load ROM is a plain (greyed) item");
+    assert!(m.items[13].enabled, "Recent ROMs is wired (MN4)");
+    assert!(
+        !m.items[12].enabled,
+        "Link stays greyed until its milestone"
+    );
+    assert!(m.items[1].enabled, "Load ROM is wired (MN4)");
+    assert!(
+        !m.items[1].submenu,
+        "Load ROM is a plain item (opens a modal)"
+    );
 }
 
 #[test]
@@ -130,8 +137,13 @@ fn effect_at_resolves_only_enabled_rows() {
         m.effect_at(at(&m, WINDOW_SIZE_ROW).0, at(&m, WINDOW_SIZE_ROW).1),
         MenuEffect::Submenu(SubKind::WindowSize)
     );
-    // A greyed row + a point outside the box resolve to None.
-    assert_eq!(m.effect_at(at(&m, 1).0, at(&m, 1).1), MenuEffect::None);
+    // Load ROM (row 1) now opens the path modal.
+    assert_eq!(
+        m.effect_at(at(&m, 1).0, at(&m, 1).1),
+        MenuEffect::Run(Action::MainLoadRom)
+    );
+    // A still-greyed row (Link) + a point outside the box resolve to None.
+    assert_eq!(m.effect_at(at(&m, 12).0, at(&m, 12).1), MenuEffect::None);
     assert_eq!(m.effect_at(-50, -50), MenuEffect::None);
 }
 
@@ -157,10 +169,10 @@ fn hover_at_tracks_the_enabled_row_and_reports_changes() {
         "same row → no change"
     );
     assert!(
-        m.hover_at(at(&m, 1).0, at(&m, 1).1),
+        m.hover_at(at(&m, 12).0, at(&m, 12).1),
         "leaving Pause changes hover"
     );
-    assert_eq!(m.hovered, None, "greyed row is not hovered");
+    assert_eq!(m.hovered, None, "greyed row (Link) is not hovered");
 }
 
 #[test]
@@ -380,4 +392,25 @@ fn state_submenu_has_quick_save_load_live_rest_greyed() {
         assert!(!s.items[i].enabled, "row {i} greyed");
         assert_eq!(s.choices[i], None);
     }
+}
+
+// --- Recent ROMs submenu (MN4) ---------------------------------------------
+
+#[test]
+fn recent_roms_submenu_lists_entries_or_a_greyed_placeholder() {
+    // Empty: a single greyed "(no recent ROMs)" row.
+    let empty = SubMenu::recent_roms(PARENT, &[]);
+    assert_eq!(empty.kind, SubKind::RecentRoms);
+    assert_eq!(empty.items.len(), 1);
+    assert!(!empty.items[0].enabled);
+    assert_eq!(empty.choices[0], None);
+
+    // Non-empty: one live row per name, each loading its index.
+    let names = vec!["crystal.gbc".to_owned(), "tetris.gb".to_owned()];
+    let s = SubMenu::recent_roms(PARENT, &names);
+    let labels: Vec<&str> = s.items.iter().map(|i| i.label.as_str()).collect();
+    assert_eq!(labels, ["crystal.gbc", "tetris.gb"]);
+    assert_eq!(s.choices[0], Some(SubChoice::LoadRecent(0)));
+    assert_eq!(s.choices[1], Some(SubChoice::LoadRecent(1)));
+    assert!(s.items.iter().all(|i| i.enabled));
 }

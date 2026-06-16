@@ -29,7 +29,7 @@ mod video;
 mod windows;
 
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -47,7 +47,8 @@ use cli::{Options, ParseOutcome, USAGE};
 use input::{Action, ButtonTracker, Focus};
 use pacing::{AudioPipe, StallWatchdog, audio_pacing};
 use session::Session;
-use ui::dialog::DialogKey;
+use ui::canvas::Rect;
+use ui::dialog::{self, DialogKey, DialogResult, InputDialog};
 use video::Video;
 use windows::mainwin::{InfoBox, MainMenu, SubMenu, WindowSizeChoice};
 
@@ -132,6 +133,12 @@ struct App {
     /// An open info box (Other → Cart info / System info / About), drawn centred
     /// over the LCD; any click or Escape closes it.
     info_box: Option<InfoBox>,
+    /// The open "Load ROM" path-entry modal (MN4), drawn centred over the LCD;
+    /// accept loads the typed path, Escape/cancel closes it.
+    path_dialog: Option<InputDialog>,
+    /// Recently loaded ROM paths (MN4), most-recent first, deduped, capped — the
+    /// Recent ROMs submenu. In-memory only (on-disk persistence deferred).
+    recent: Vec<PathBuf>,
     /// The current window size, for the "Window size" submenu check-mark and the
     /// stretched-fullscreen blit. Init from `--scale`.
     window_size: WindowSizeChoice,
@@ -164,6 +171,8 @@ impl App {
             dbg: dbg::Debugger::default(),
             modifiers: ModifiersState::empty(),
             info_box: None,
+            path_dialog: None,
+            recent: Vec::new(),
             main_menu: None,
             main_submenu: None,
             window_size,
@@ -197,6 +206,7 @@ impl App {
         let menu = self.main_menu.as_ref();
         let sub = self.main_submenu.as_ref();
         let info = self.info_box.as_ref();
+        let path_dlg = self.path_dialog.as_ref();
         let theme = ui::Theme::BGB;
         let stretch = self.window_size == WindowSizeChoice::FullscreenStretched;
         if let Err(e) = video.draw(window, frame, stretch, |canvas| {
@@ -206,9 +216,13 @@ impl App {
             if let Some(s) = sub {
                 windows::mainwin::render_sub(canvas, s, &theme);
             }
-            // The info box draws on top of everything (it's modal).
+            // The info box / Load-ROM modal draw on top of everything (modal).
             if let Some(i) = info {
                 windows::mainwin::render_info(canvas, i, &theme);
+            }
+            if let Some(d) = path_dlg {
+                let area = canvas.bounds();
+                dialog::render(canvas, area, d, &theme);
             }
         }) {
             eprintln!("slopgb: failed to present frame: {e}");
@@ -224,6 +238,16 @@ impl App {
 
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, key: &KeyEvent, focus: Focus) {
         if key.repeat {
+            return;
+        }
+        // Game-window "Load ROM" modal capture (MN4): every key goes to it while
+        // open (so typing a path can't fire a hotkey); Enter loads, Esc cancels.
+        if focus == Focus::Game && key.state.is_pressed() && self.path_dialog.is_some() {
+            if let Some(dk) = dialog_key_from(key) {
+                if let Some(result) = self.path_dialog.as_mut().map(|d| d.on_key(dk)) {
+                    self.resolve_path_dialog(result);
+                }
+            }
             return;
         }
         // With a game-window overlay open, Escape closes it (rather than quitting
@@ -299,6 +323,50 @@ impl App {
         }
     }
 
+    /// The game window's content rect in physical pixels — the area the overlay
+    /// modal renders into, so a click hit-tests against the same bounds (MN4).
+    fn window_area(&self) -> Rect {
+        self.window.as_ref().map_or(Rect::new(0, 0, 0, 0), |w| {
+            let s = w.inner_size();
+            Rect::new(0, 0, s.width as i32, s.height as i32)
+        })
+    }
+
+    /// Apply a "Load ROM" modal result (MN4): accept loads the typed path (a
+    /// blank entry just closes), cancel closes; continue keeps editing.
+    fn resolve_path_dialog(&mut self, result: DialogResult) {
+        match result {
+            DialogResult::Accept(path) => {
+                self.path_dialog = None;
+                let trimmed = path.trim();
+                if !trimmed.is_empty() {
+                    self.load_dropped(Path::new(trimmed));
+                }
+            }
+            DialogResult::Cancel => self.path_dialog = None,
+            DialogResult::Continue => {}
+        }
+        self.request_game_redraw();
+    }
+
+    /// Record a successfully loaded ROM in the recent list (MN4).
+    fn push_recent(&mut self, path: &Path) {
+        push_recent_into(&mut self.recent, path);
+    }
+
+    /// Basenames of the recent ROMs for the Recent ROMs submenu (MN4).
+    fn recent_names(&self) -> Vec<String> {
+        self.recent
+            .iter()
+            .map(|p| {
+                p.file_name().map_or_else(
+                    || p.display().to_string(),
+                    |n| n.to_string_lossy().into_owned(),
+                )
+            })
+            .collect()
+    }
+
     /// Open the cpal output stream if it isn't already open. Called at startup
     /// (when not launched `--mute`) and when "Enable sound" is toggled on after a
     /// muted start, so the menu toggle always restores audio. A device that won't
@@ -345,15 +413,26 @@ impl App {
             Ok(new) => {
                 self.session = new;
                 self.paused = false;
+                self.push_recent(path);
                 self.resync_pacing();
                 self.update_title();
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }
             }
-            Err(e) => eprintln!("slopgb: drop ignored: {e}"),
+            Err(e) => eprintln!("slopgb: load ignored: {e}"),
         }
     }
+}
+
+/// Insert `path` at the front of the recent-ROMs list (MN4): de-duplicated,
+/// most-recent first, capped at 10. A free function so the list logic is
+/// unit-testable without a live `App`.
+fn push_recent_into(recent: &mut Vec<PathBuf>, path: &Path) {
+    let p = path.to_path_buf();
+    recent.retain(|e| e != &p);
+    recent.insert(0, p);
+    recent.truncate(10);
 }
 
 /// Translate a winit key event into an abstract [`DialogKey`] for the modal

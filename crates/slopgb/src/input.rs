@@ -106,6 +106,8 @@ pub enum Action {
     /// Zero the regs-pane `cnt` user-clock counter (Debug → Set user clocks
     /// counter). Menu-only.
     DbgSetUserClocks,
+    /// Open the game-window "Load ROM" path prompt (main menu). Menu-only.
+    MainLoadRom,
 }
 
 /// Tracks which physical keys currently hold each button, so two keys mapped

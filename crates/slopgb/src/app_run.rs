@@ -198,6 +198,14 @@ impl App {
                     self.tools.debugger_goto_addr(addr);
                 }
             }
+            // Main menu (MN4): open the Load-ROM path-entry modal over the LCD.
+            Action::MainLoadRom => {
+                self.path_dialog = Some(crate::ui::dialog::InputDialog::new(
+                    "Load ROM (path)",
+                    false,
+                ));
+                self.request_game_redraw();
+            }
             // Debug menu (RM14): evaluate an expression + the user-clock counter.
             Action::DbgEvaluate => self.tools.open_debugger_eval(),
             Action::DbgEvalRun => self.tools.debugger_eval(&self.session.gb),

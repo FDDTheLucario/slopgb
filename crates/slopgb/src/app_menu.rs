@@ -24,6 +24,18 @@ impl App {
     /// dismisses (a click off both popups closes them).
     pub(crate) fn on_game_click(&mut self, button: MouseButton, event_loop: &ActiveEventLoop) {
         let (px, py) = self.game_cursor;
+        // The Load-ROM modal is topmost (MN4): route the click to OK/Cancel.
+        if self.path_dialog.is_some() {
+            let area = self.window_area();
+            if let Some(r) = self
+                .path_dialog
+                .as_ref()
+                .map(|d| ui::dialog::click(d, area, px, py))
+            {
+                self.resolve_path_dialog(r);
+            }
+            return;
+        }
         // An open info box is modal: any click dismisses it and is swallowed.
         if self.info_box.take().is_some() {
             self.request_game_redraw();
@@ -75,6 +87,7 @@ impl App {
             SubKind::SoundChannel => SubMenu::sound_channel(row, self.channel_mutes()),
             SubKind::Other => SubMenu::other(row),
             SubKind::State => SubMenu::state(row),
+            SubKind::RecentRoms => SubMenu::recent_roms(row, &self.recent_names()),
         }
     }
 
@@ -108,6 +121,13 @@ impl App {
                     self.resync_pacing();
                     self.update_title();
                     self.request_game_redraw();
+                }
+            }
+            // Recent ROMs → reload that entry (MN4); clone the path out first so
+            // the load can borrow `self` mutably.
+            SubChoice::LoadRecent(i) => {
+                if let Some(p) = self.recent.get(i).cloned() {
+                    self.load_dropped(&p);
                 }
             }
         }

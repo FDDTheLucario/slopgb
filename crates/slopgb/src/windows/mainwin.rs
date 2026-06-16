@@ -25,6 +25,7 @@ pub enum SubKind {
     SoundChannel,
     Other,
     State,
+    RecentRoms,
 }
 
 /// What clicking a main-menu row does: run a shared frontend [`Action`], open a
@@ -101,7 +102,10 @@ pub fn render(c: &mut Canvas, m: &MainMenu, theme: &Theme) {
 fn entries(sound_on: bool) -> Vec<(MenuItem, MenuEffect)> {
     vec![
         (MenuItem::new("Pause"), MenuEffect::Run(Action::Pause)),
-        (MenuItem::new("Load ROM...").disabled(), MenuEffect::None),
+        (
+            MenuItem::new("Load ROM..."),
+            MenuEffect::Run(Action::MainLoadRom),
+        ),
         (
             MenuItem::new("Enable sound").checked(sound_on),
             MenuEffect::Run(Action::ToggleSound),
@@ -144,8 +148,8 @@ fn entries(sound_on: bool) -> Vec<(MenuItem, MenuEffect)> {
         ),
         (MenuItem::new("Link").submenu().disabled(), MenuEffect::None),
         (
-            MenuItem::new("Recent ROMs").submenu().disabled(),
-            MenuEffect::None,
+            MenuItem::new("Recent ROMs").submenu(),
+            MenuEffect::Submenu(SubKind::RecentRoms),
         ),
         (MenuItem::new("Exit"), MenuEffect::Run(Action::Quit)),
     ]
@@ -184,6 +188,8 @@ pub enum SubChoice {
     QuickSave,
     /// State → "Quick Load": restore the last snapshot.
     QuickLoad,
+    /// Recent ROMs → load the recent-list entry at this index (MN4).
+    LoadRecent(usize),
 }
 
 /// An open child submenu (Window size or Sound channel): its kind, box origin
@@ -234,6 +240,10 @@ impl SubMenu {
     pub fn state(parent_row: Rect) -> Self {
         let (items, choices) = state_items().into_iter().unzip();
         Self::hang(SubKind::State, parent_row, items, choices)
+    }
+    pub fn recent_roms(parent_row: Rect, names: &[String]) -> Self {
+        let (items, choices) = recent_roms_items(names).into_iter().unzip();
+        Self::hang(SubKind::RecentRoms, parent_row, items, choices)
     }
 
     /// Shared constructor: hang a submenu off the right edge of `parent_row`,
@@ -310,6 +320,19 @@ fn sound_channel_items(muted: [bool; 4]) -> Vec<(MenuItem, Option<SubChoice>)> {
 
 /// The Other rows (`main-sub-other.png`), item-for-item; the wired ones carry a
 /// [`SubChoice`], the not-built ones render greyed with no choice.
+/// The Recent ROMs submenu rows (MN4): one per remembered ROM (most-recent
+/// first), each loading that entry; an empty list shows a single greyed row.
+fn recent_roms_items(names: &[String]) -> Vec<(MenuItem, Option<SubChoice>)> {
+    if names.is_empty() {
+        return vec![(MenuItem::new("(no recent ROMs)").disabled(), None)];
+    }
+    names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (MenuItem::new(n.clone()), Some(SubChoice::LoadRecent(i))))
+        .collect()
+}
+
 fn other_items() -> Vec<(MenuItem, Option<SubChoice>)> {
     let live = |label: &str, c: SubChoice| (MenuItem::new(label), Some(c));
     let greyed = |label: &str| (MenuItem::new(label).disabled(), None);
