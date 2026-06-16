@@ -151,6 +151,12 @@ impl GameBoy {
             if let Some(addr) = self.bus.take_watch_hit() {
                 return Some(addr);
             }
+            // Profiler break mode: halt on an address's first execution (MB5).
+            // Always `None` unless break mode is armed, so this is inert
+            // otherwise.
+            if let Some(addr) = self.bus.take_prof_break_hit() {
+                return Some(addr);
+            }
             let pc = self.cpu_regs().pc;
             if breakpoints.contains(&pc) {
                 return Some(pc);
@@ -165,6 +171,52 @@ impl GameBoy {
     /// golden-safe (an empty list is a zero-overhead no-op in the access path).
     pub fn set_watchpoints(&mut self, wps: &[Watchpoint]) {
         self.bus.set_watchpoints(wps);
+    }
+
+    /// Enable/disable the execution profiler (bgb's "logging mode"/"stop"): a
+    /// per-PC instruction tally. Off by default and never set on a golden/test
+    /// path, so it is golden-safe (an unset tally is a zero-overhead no-op in
+    /// the CPU fetch path).
+    pub fn set_profiling(&mut self, on: bool) {
+        self.bus.set_profiling(on);
+    }
+
+    /// Zero the profiler tally without disabling logging (bgb's "clear buffer").
+    pub fn clear_profile(&mut self) {
+        self.bus.clear_profile();
+    }
+
+    /// Arm/disarm profiler "break mode": the free run halts the first time each
+    /// address executes (bgb's coverage break). Only meaningful with profiling
+    /// on; live-debugger-only, golden-safe.
+    pub fn set_profile_break(&mut self, on: bool) {
+        self.bus.set_profile_break(on);
+    }
+
+    /// Whether profiler break mode is armed.
+    #[must_use]
+    pub fn profile_break(&self) -> bool {
+        self.bus.profile_break()
+    }
+
+    /// Whether the execution profiler is currently logging.
+    #[must_use]
+    pub fn profiling(&self) -> bool {
+        self.bus.profiling()
+    }
+
+    /// Times the instruction at `pc` has executed since the last clear (0 if
+    /// unseen or profiling is off).
+    #[must_use]
+    pub fn profile_count(&self, pc: u16) -> u64 {
+        self.bus.profile_count(pc)
+    }
+
+    /// Distinct instruction addresses the profiler has seen since the last clear
+    /// (bgb's "N addresses seen").
+    #[must_use]
+    pub fn profile_seen(&self) -> usize {
+        self.bus.profile_seen()
     }
 
     /// XRGB8888 pixels of the most recently completed frame, row-major.
@@ -492,6 +544,68 @@ mod tests {
         // Golden-safety: with no watchpoints set, the frame runs to completion.
         let mut gb = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
         assert_eq!(gb.run_frame_until_breakpoint(&[]), None);
+    }
+
+    #[test]
+    fn profiler_tallies_executed_instruction_addresses() {
+        // The execution profiler (MB5): an opt-in per-PC instruction tally that
+        // is inert (no map) until enabled, so it never perturbs a golden run.
+        let mut gb = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
+        assert!(!gb.profiling(), "off by default");
+        assert_eq!(gb.profile_seen(), 0);
+        assert_eq!(gb.profile_count(0x0100), 0);
+
+        gb.set_profiling(true);
+        assert!(gb.profiling());
+        // ld a,42 @0100 ; ld (C000),a @0102 ; jr -2 @0105 (then self-loops).
+        gb.step();
+        gb.step();
+        gb.step();
+        assert_eq!(gb.profile_count(0x0100), 1, "ld a,42 executed once");
+        assert_eq!(gb.profile_count(0x0102), 1, "ld (C000),a executed once");
+        assert_eq!(gb.profile_count(0x0105), 1, "jr executed once");
+        assert_eq!(gb.profile_seen(), 3, "three distinct addresses seen");
+        gb.step(); // the jr self-loops back to 0x0105
+        assert_eq!(gb.profile_count(0x0105), 2);
+        assert_eq!(
+            gb.profile_seen(),
+            3,
+            "seen counts distinct addresses, not hits"
+        );
+
+        // "clear buffer" keeps logging on but zeroes the counts.
+        gb.clear_profile();
+        assert!(gb.profiling());
+        assert_eq!(gb.profile_seen(), 0);
+        assert_eq!(gb.profile_count(0x0105), 0);
+
+        // Disabling drops the tally; stepping no longer records anything.
+        gb.set_profiling(false);
+        assert!(!gb.profiling());
+        gb.step();
+        assert_eq!(gb.profile_seen(), 0, "no tally while profiling is off");
+    }
+
+    #[test]
+    fn profiler_break_mode_halts_on_first_execution() {
+        // bgb's coverage break: the free run stops the first time each address
+        // executes, then continues past it.
+        let mut gb = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
+        gb.set_profiling(true);
+        gb.set_profile_break(true);
+        assert!(gb.profile_break());
+        // 0100 (ld a), 0102 (ld (C000),a), 0105 (jr) each halt once on first run.
+        assert_eq!(gb.run_frame_until_breakpoint(&[]), Some(0x0100));
+        assert_eq!(gb.run_frame_until_breakpoint(&[]), Some(0x0102));
+        assert_eq!(gb.run_frame_until_breakpoint(&[]), Some(0x0105));
+        // The jr self-loops over only already-seen addresses → no more halts.
+        assert_eq!(gb.run_frame_until_breakpoint(&[]), None);
+        // Disabling break mode keeps logging: no halts, but the tally still grows.
+        let before = gb.profile_count(0x0105);
+        gb.set_profile_break(false);
+        assert!(!gb.profile_break());
+        assert_eq!(gb.run_frame_until_breakpoint(&[]), None);
+        assert!(gb.profile_count(0x0105) > before);
     }
 
     #[test]

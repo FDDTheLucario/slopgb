@@ -156,6 +156,27 @@ impl App {
                 self.info_box = Some(InfoBox::new("Cheats", vec!["(no cheats loaded)".into()]));
                 self.request_game_redraw();
             }
+            // Execution profiler (MB5): the three radio modes + clear buffer.
+            // "logging" and "break" both enable the tally; break also halts the
+            // free run on each address's first execution.
+            Action::ProfilerLogging => {
+                self.session.gb.set_profiling(true);
+                self.session.gb.set_profile_break(false);
+                self.refresh_after_step();
+            }
+            Action::ProfilerBreak => {
+                self.session.gb.set_profiling(true);
+                self.session.gb.set_profile_break(true);
+                self.refresh_after_step();
+            }
+            Action::ProfilerStop => {
+                self.session.gb.set_profiling(false);
+                self.refresh_after_step();
+            }
+            Action::ProfilerClear => {
+                self.session.gb.clear_profile();
+                self.refresh_after_step();
+            }
             _ => {}
         }
     }

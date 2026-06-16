@@ -378,6 +378,13 @@ fn debugger_left_click(
     py: i32,
 ) -> Option<MenuOutcome> {
     let r = gb.cpu_regs();
+    // Refresh the cached profiler state so an opening Execution-profiler dropdown
+    // shows the live mode + "N addresses seen" (MB5).
+    s.prof = debugger::ProfilerView {
+        logging: gb.profiling(),
+        brk: gb.profile_break(),
+        seen: gb.profile_seen(),
+    };
     debugger::on_left_click(|a| gb.debug_read(a), area, s, r, px, py)
 }
 

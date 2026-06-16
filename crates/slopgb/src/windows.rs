@@ -109,7 +109,7 @@ fn render_debugger(
     debugger::render_menubar(c, l.menu, st.menu.as_ref().and_then(|m| m.bar), theme);
     // Disasm follows PC (or the pinned base); memory + stack from their bases.
     let start = st.disasm_start(pc);
-    debugger::render_disasm(
+    let rows = debugger::render_disasm(
         c,
         l.disasm,
         |a| gb.debug_read(a),
@@ -119,6 +119,10 @@ fn render_debugger(
         &st.data_hints,
         theme,
     );
+    // Profiler: overlay per-line execution counts while logging (MB5).
+    if gb.profiling() {
+        debugger::render_profile_counts(c, l.disasm, &rows, |a| gb.profile_count(a), theme);
+    }
     debugger::render_regs(c, l.regs, &regs_view(gb), theme);
     let stack_rows = (l.stack.h / line_height()).max(0) as usize;
     debugger::render_stack(c, l.stack, &gb.stack(stack_rows), theme);

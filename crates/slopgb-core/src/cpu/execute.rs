@@ -70,12 +70,15 @@ pub fn step(cpu: &mut Cpu, bus: &mut impl Bus) {
             // fetch (acceptance/halt_ime1_timing2-GS rounds 3/4 vs 1/2).
             cpu.regs.pc = pc_before;
             dispatch_interrupt(cpu, bus);
+            let vec_pc = cpu.regs.pc;
             let vector_opcode = fetch_opcode(cpu, bus);
+            bus.profile_pc(vec_pc);
             execute(cpu, bus, vector_opcode);
         } else {
             // IME=0: the observing cycle already was the next instruction's
             // opcode fetch (acceptance/halt_ime0_nointr_timing: "halt +
             // nops 6" measures the same DIV delta as dispatch + jp hl).
+            bus.profile_pc(pc_before);
             execute(cpu, bus, opcode);
         }
         return;
@@ -116,11 +119,17 @@ pub fn step(cpu: &mut Cpu, bus: &mut impl Bus) {
     // pin the aborting behavior on hardware.
     let pc_before = cpu.regs.pc;
     let mut opcode = fetch_opcode(cpu, bus);
+    // The address of the instruction `execute` will run: `pc_before`, unless an
+    // interrupt was dispatched, in which case it is the handler's entry (the
+    // re-fetch reads from the vector). Used only by the profiler hook below.
+    let mut exec_pc = pc_before;
     if cpu.ime && bus.pending() != 0 {
         cpu.regs.pc = pc_before;
         dispatch_interrupt(cpu, bus);
+        exec_pc = cpu.regs.pc;
         opcode = fetch_opcode(cpu, bus);
     }
+    bus.profile_pc(exec_pc);
     execute(cpu, bus, opcode);
     if ei_delay && cpu.ime_pending {
         cpu.ime_pending = false;

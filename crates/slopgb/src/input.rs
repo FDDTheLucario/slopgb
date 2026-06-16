@@ -77,6 +77,16 @@ pub enum Action {
     MainOptions,
     /// Show the Cheats info box (main menu "Cheat...", F10). Menu-only stub.
     MainCheats,
+    /// Execution profiler → "logging mode": tally each executed PC (MB5).
+    /// Menu-only (Execution-profiler dropdown).
+    ProfilerLogging,
+    /// Execution profiler → "break mode": logging + halt on each address's first
+    /// execution. Menu-only.
+    ProfilerBreak,
+    /// Execution profiler → "stop": disable profiling. Menu-only.
+    ProfilerStop,
+    /// Execution profiler → "clear buffer": zero the tally. Menu-only.
+    ProfilerClear,
 }
 
 /// Tracks which physical keys currently hold each button, so two keys mapped

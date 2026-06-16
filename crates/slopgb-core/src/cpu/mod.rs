@@ -59,6 +59,13 @@ pub trait Bus {
     fn read_inc(&mut self, addr: u16) -> u8 {
         self.read(addr)
     }
+    /// Record that the instruction at `pc` is about to execute — the execution
+    /// profiler's per-PC tally hook (MB5). Takes no emulated time and has no
+    /// architectural effect. The default is a no-op; only the real
+    /// [`Interconnect`](crate::interconnect::Interconnect) bus implements it,
+    /// and even there it is inert unless profiling was explicitly enabled, so a
+    /// golden/test run is byte-identical.
+    fn profile_pc(&mut self, _pc: u16) {}
     /// `IF & IE & 0x1F` right now. Takes no time.
     fn pending(&self) -> u8;
     /// `IF & IE & 0x1F` as seen by the halted CPU's wake check (both the

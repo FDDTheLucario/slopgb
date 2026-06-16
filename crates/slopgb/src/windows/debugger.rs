@@ -13,7 +13,7 @@ use crate::ui::Theme;
 use crate::ui::canvas::{Canvas, Rect};
 use crate::ui::dialog::{self, DialogKey, DialogResult, InputDialog};
 use crate::ui::menu::{self, MenuItem};
-use crate::ui::text::{draw_text, hex_row, line_height};
+use crate::ui::text::{draw_text, hex_row, line_height, measure};
 use crate::ui::widgets::scroll_list;
 
 /// The four panes of the debugger body, partitioned from the window size to
@@ -177,6 +177,32 @@ pub fn render_disasm(
     rows
 }
 
+/// Overlay per-row execution counts (MB5 profiler) at the right edge of the
+/// disasm pane: each row whose address has a nonzero tally shows `xN`. Only
+/// called while the profiler is logging; the row layout matches
+/// [`render_disasm`] (same `rect`, same `line_height`), so the counts line up.
+pub fn render_profile_counts(
+    c: &mut Canvas,
+    rect: Rect,
+    rows: &[DisasmRow],
+    count: impl Fn(u16) -> u64,
+    theme: &Theme,
+) {
+    let lh = line_height();
+    let visible = (rect.h / lh).max(0) as usize;
+    for (i, row) in rows.iter().enumerate().take(visible) {
+        let n = count(row.addr);
+        if n == 0 {
+            continue;
+        }
+        let label = format!("x{n}");
+        let x = (rect.right() - measure(&label) - 2).max(rect.x);
+        // A muted tone, readable on both the white rows and the blue PC-row
+        // highlight (the standard `current` ink would vanish on the PC row).
+        draw_text(c, x, rect.y + i as i32 * lh, &label, theme.hilight);
+    }
+}
+
 /// The values the registers panel shows, gathered from the machine
 /// (`cpu_regs` + `ime`/`ime_pending`/`double_speed` + `debug_read` of the PPU /
 /// interrupt registers). Built by the window layer so the renderer stays pure.
@@ -284,6 +310,18 @@ pub fn render_memory(
 /// hit-tests and read by the renderer. The breakpoint *set* is **not** here — it
 /// lives in the App-owned `dbg::Debugger` (both the key handler and the run loop
 /// consult it; see `docs/bgb-menu-design.md` RA1).
+/// Live execution-profiler state for the Execution-profiler dropdown (MB5):
+/// which radio mode is active and the distinct-addresses-seen count. Cached on
+/// [`DebuggerState`] (refreshed from the machine when the menu opens) so the
+/// pure menu builder needs no `&GameBoy`. `logging=false` ⇒ "stop";
+/// `logging && !brk` ⇒ "logging mode"; `logging && brk` ⇒ "break mode".
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ProfilerView {
+    pub logging: bool,
+    pub brk: bool,
+    pub seen: usize,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DebuggerState {
     /// Disasm view base when [`pinned`](Self::pinned) (else the pane follows PC).
@@ -302,6 +340,9 @@ pub struct DebuggerState {
     /// Addresses forced to render as `db XX` data instead of decoded code
     /// (RM9 — "Data go here" / "force code view" / "Modify code/data").
     pub data_hints: BTreeSet<u16>,
+    /// Cached profiler state for the Execution-profiler dropdown (MB5), refreshed
+    /// from the machine when the menu opens.
+    pub prof: ProfilerView,
 }
 
 impl Default for DebuggerState {
@@ -314,6 +355,7 @@ impl Default for DebuggerState {
             menu: None,
             dialog: None,
             data_hints: BTreeSet::new(),
+            prof: ProfilerView::default(),
         }
     }
 }
@@ -818,3 +860,7 @@ pub use menubar::menubar_rects;
 #[cfg(test)]
 #[path = "debugger_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "debugger_profiler_tests.rs"]
+mod profiler_tests;

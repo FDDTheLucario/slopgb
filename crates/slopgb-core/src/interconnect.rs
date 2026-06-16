@@ -21,6 +21,7 @@ use crate::timer::Timer;
 // The struct, its fields, the sub-dot access machinery (EdgeKind/event_phase/
 // edge_eighth/stamp_blocks/ACCESS_PHASE) and the free helpers stay here.
 mod boot;
+mod debug;
 mod hdma;
 mod memory;
 mod oam_dma;
@@ -302,6 +303,17 @@ pub struct Interconnect {
     /// Address of the most recent watchpoint-matching CPU access, consumed by
     /// the free-run loop ([`crate::GameBoy::run_frame_until_breakpoint`]).
     watch_hit: Option<u16>,
+    /// Execution-profiler per-PC instruction tally (MB5). `None` on every
+    /// golden/test path, so [`Bus::profile_pc`] is a single-branch no-op there
+    /// (golden-safe); `Some` only while the live debugger's profiler logs.
+    prof: Option<std::collections::BTreeMap<u16, u64>>,
+    /// Profiler "break mode": flag the first execution of each address so the
+    /// free run can halt there (bgb's coverage break — find unexecuted code).
+    /// Only meaningful while `prof` is `Some`.
+    prof_break: bool,
+    /// A newly-seen address under break mode, consumed by the free-run loop
+    /// ([`crate::GameBoy::run_frame_until_breakpoint`]).
+    prof_break_hit: Option<u16>,
     /// Elapsed T-cycles since power-on (normal-speed dots).
     cycles: u64,
 
@@ -514,6 +526,9 @@ impl Interconnect {
             joypad: Joypad::new(sgb_joypad),
             watchpoints: Vec::new(),
             watch_hit: None,
+            prof: None,
+            prof_break: false,
+            prof_break_hit: None,
             cycles: 0,
             cgb_mode,
             double_speed: false,
@@ -592,17 +607,8 @@ impl Interconnect {
         &self.apu
     }
 
-    /// Replace the debugger memory watchpoints (RM8). Empty disables the
-    /// access-path check entirely (golden-safe).
-    pub fn set_watchpoints(&mut self, wps: &[crate::Watchpoint]) {
-        self.watchpoints = wps.to_vec();
-        self.watch_hit = None;
-    }
-
-    /// Take the pending watchpoint hit address (cleared by the read).
-    pub fn take_watch_hit(&mut self) -> Option<u16> {
-        self.watch_hit.take()
-    }
+    // The debugger watchpoint (RM8) + execution-profiler (MB5) inherent methods
+    // live in the `debug` submodule (a second `impl Interconnect` block).
 
     /// Flag a watchpoint hit if `addr` is watched for this access kind. A
     /// no-op (one branch on an empty Vec) whenever no watchpoint is set.
@@ -766,6 +772,22 @@ impl Bus for Interconnect {
         self.maybe_oam_bug(addr, OamBugKind::ReadIncrease);
         self.check_watch(addr, false);
         self.read_no_tick(addr)
+    }
+
+    fn profile_pc(&mut self, pc: u16) {
+        // Inert unless the live debugger enabled profiling — `prof` is `None` on
+        // every golden/test path, so this records nothing and the emulated
+        // state (and the fingerprint) is byte-identical.
+        if let Some(m) = &mut self.prof {
+            let count = m.entry(pc).or_insert(0);
+            let first_seen = *count == 0;
+            *count += 1;
+            // Break mode: remember an address's first execution so the free run
+            // can halt there (consumed by `take_prof_break_hit`).
+            if first_seen && self.prof_break {
+                self.prof_break_hit = Some(pc);
+            }
+        }
     }
 
     fn pending(&self) -> u8 {

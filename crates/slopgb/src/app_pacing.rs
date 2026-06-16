@@ -30,7 +30,9 @@ impl App {
     /// the core watchpoints already pushed via `set_watchpoints`).
     fn dbg_armed(&self) -> bool {
         self.tools.is_open(ui::ToolWindow::Debugger)
-            && (!self.dbg.breakpoints().is_empty() || !self.dbg.watchpoints().is_empty())
+            && (!self.dbg.breakpoints().is_empty()
+                || !self.dbg.watchpoints().is_empty()
+                || self.session.gb.profile_break())
     }
 
     /// The breakpoint PC list to watch this wake, or `None` when not armed (the

@@ -12,7 +12,7 @@ use crate::ui::menu::MenuItem;
 use crate::ui::text::{draw_text, measure};
 use crate::ui::{Theme, ToolWindow};
 
-use super::{DebuggerState, MenuChoice, OpenMenu, disabled, region_label};
+use super::{DebuggerState, MenuChoice, OpenMenu, ProfilerView, disabled, region_label};
 
 /// The debugger menu-bar labels, left to right (menubar-*.png).
 pub const MENUBAR: [&str; 6] = [
@@ -77,7 +77,7 @@ pub fn menubar_menu(idx: usize, bar: Rect, st: &DebuggerState, pc: u16) -> OpenM
         2 => run_menu(cursor),
         3 => debug_menu(cursor),
         4 => window_menu(),
-        _ => profiler_menu(),
+        _ => profiler_menu(st.prof),
     };
     let origin = (
         menubar_rects(bar).get(idx).map_or(bar.x, |r| r.x),
@@ -246,12 +246,26 @@ fn window_menu() -> Vec<(MenuItem, MenuChoice)> {
     ]
 }
 
-fn profiler_menu() -> Vec<(MenuItem, MenuChoice)> {
+fn profiler_menu(prof: ProfilerView) -> Vec<(MenuItem, MenuChoice)> {
+    // The three modes are a radio group; the active one is check-marked (bgb's
+    // • marker). "stop" is the default (profiling off).
     vec![
-        disabled("logging mode"),
-        disabled("break mode"),
-        disabled("stop (*)"),
-        disabled("clear buffer"),
-        disabled("0 addresses seen"),
+        (
+            MenuItem::new("logging mode").checked(prof.logging && !prof.brk),
+            MenuChoice::Command(Action::ProfilerLogging),
+        ),
+        (
+            MenuItem::new("break mode").checked(prof.logging && prof.brk),
+            MenuChoice::Command(Action::ProfilerBreak),
+        ),
+        (
+            MenuItem::new("stop").checked(!prof.logging),
+            MenuChoice::Command(Action::ProfilerStop),
+        ),
+        (
+            MenuItem::new("clear buffer"),
+            MenuChoice::Command(Action::ProfilerClear),
+        ),
+        disabled(&format!("{} addresses seen", prof.seen)),
     ]
 }
