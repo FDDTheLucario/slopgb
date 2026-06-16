@@ -49,6 +49,19 @@ pub const CYCLES_PER_FRAME: u32 = 70224;
 /// Master clock in Hz (T-cycles / dots per second, normal speed).
 pub const CLOCK_HZ: u32 = 4_194_304;
 
+// Debugger exception-break mask bits (bgb's Options → Exceptions "break on X").
+// Set via [`GameBoy::set_exceptions`]; the free run halts when an armed
+// condition occurs. The mask is 0 on every golden/test path, so the
+// exec/access checks are single-branch no-ops there (golden-safe).
+/// Break on `LD B,B` (opcode `40h`).
+pub const EXC_LD_B_B: u16 = 1 << 0;
+/// Break on an undefined opcode (the 11 illegal SM83 opcodes).
+pub const EXC_INVALID_OPCODE: u16 = 1 << 1;
+/// Break on any CPU access to echo RAM (`E000-FDFF`).
+pub const EXC_ECHO_RAM: u16 = 1 << 2;
+/// Break on disabling the LCD (`FF40` bit 7 → 0) outside vblank.
+pub const EXC_LCD_OFF_VBLANK: u16 = 1 << 3;
+
 /// A debugger memory watchpoint (bgb's "Set watchpoint"): the free run halts
 /// after the CPU accesses `addr` with a matching access kind. A frontend/
 /// debugger control — the watch list defaults empty (zero overhead, no behavior
@@ -157,6 +170,12 @@ impl GameBoy {
             if let Some(addr) = self.bus.take_prof_break_hit() {
                 return Some(addr);
             }
+            // Exception break (Options → Exceptions): halt on an armed
+            // opcode/access condition. Always `None` with no exception armed
+            // (`exc_mask == 0`), so this is inert on a plain run.
+            if let Some(addr) = self.bus.take_exc_hit() {
+                return Some(addr);
+            }
             let pc = self.cpu_regs().pc;
             if breakpoints.contains(&pc) {
                 return Some(pc);
@@ -171,6 +190,20 @@ impl GameBoy {
     /// golden-safe (an empty list is a zero-overhead no-op in the access path).
     pub fn set_watchpoints(&mut self, wps: &[Watchpoint]) {
         self.bus.set_watchpoints(wps);
+    }
+
+    /// Set the debugger exception-break mask (bgb's Options → Exceptions): the
+    /// free run halts when an armed `EXC_*` condition occurs. `0` (the default)
+    /// disarms every check, so it is golden-safe (never set on a golden/test
+    /// path; an unset mask is a zero-overhead no-op in the exec/access paths).
+    pub fn set_exceptions(&mut self, mask: u16) {
+        self.bus.set_exceptions(mask);
+    }
+
+    /// The current exception-break mask (`0` when no exception is armed).
+    #[must_use]
+    pub fn exceptions(&self) -> u16 {
+        self.bus.exceptions()
     }
 
     /// Enable/disable the execution profiler (bgb's "logging mode"/"stop"): a
@@ -613,6 +646,83 @@ mod tests {
         assert!(!gb.profile_break());
         assert_eq!(gb.run_frame_until_breakpoint(&[]), None);
         assert!(gb.profile_count(0x0105) > before);
+    }
+
+    /// A 32 KiB ROM with `bytes` placed at the entry point (0x0100).
+    fn exc_rom(bytes: &[u8]) -> Vec<u8> {
+        let mut rom = vec![0u8; 0x8000];
+        rom[0x0100..0x0100 + bytes.len()].copy_from_slice(bytes);
+        rom
+    }
+
+    #[test]
+    fn exception_break_defaults_inert() {
+        // Options → Exceptions: nothing armed by default ⇒ the free run never
+        // halts on these conditions (golden-safe — the mask is 0 on every
+        // golden/test path).
+        let mut gb = GameBoy::new(Model::Dmg, exc_rom(&[0x40, 0x18, 0xFE])).unwrap();
+        assert_eq!(gb.exceptions(), 0, "no exception armed by default");
+        assert_eq!(gb.run_frame_until_breakpoint(&[]), None);
+    }
+
+    #[test]
+    fn exception_break_on_ld_b_b() {
+        // ld b,b (40h) ; jr -2 — halts at the ld b,b when armed.
+        let mut gb = GameBoy::new(Model::Dmg, exc_rom(&[0x40, 0x18, 0xFE])).unwrap();
+        gb.set_exceptions(EXC_LD_B_B);
+        assert_eq!(gb.exceptions(), EXC_LD_B_B);
+        assert_eq!(gb.run_frame_until_breakpoint(&[]), Some(0x0100));
+        // The invalid-opcode mask does NOT fire on a (legal) ld b,b.
+        let mut gb = GameBoy::new(Model::Dmg, exc_rom(&[0x40, 0x18, 0xFE])).unwrap();
+        gb.set_exceptions(EXC_INVALID_OPCODE);
+        assert_eq!(gb.run_frame_until_breakpoint(&[]), None);
+    }
+
+    #[test]
+    fn exception_break_on_invalid_opcode() {
+        // 0xDD is one of the 11 undefined SM83 opcodes (the CPU hard-locks).
+        let mut gb = GameBoy::new(Model::Dmg, exc_rom(&[0xDD])).unwrap();
+        gb.set_exceptions(EXC_INVALID_OPCODE);
+        assert_eq!(gb.run_frame_until_breakpoint(&[]), Some(0x0100));
+        // The ld-b,b mask does NOT fire on an invalid opcode.
+        let mut gb = GameBoy::new(Model::Dmg, exc_rom(&[0xDD])).unwrap();
+        gb.set_exceptions(EXC_LD_B_B);
+        assert_eq!(gb.run_frame_until_breakpoint(&[]), None);
+    }
+
+    #[test]
+    fn exception_break_on_echo_ram_access() {
+        // ld a,(E000) ; jr -5 — a CPU read of echo RAM (E000-FDFF) halts.
+        let mut gb = GameBoy::new(Model::Dmg, exc_rom(&[0xFA, 0x00, 0xE0, 0x18, 0xFB])).unwrap();
+        gb.set_exceptions(EXC_ECHO_RAM);
+        assert_eq!(gb.run_frame_until_breakpoint(&[]), Some(0xE000));
+        // A work-RAM (C000) access is NOT echo RAM → no halt.
+        let mut gb = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
+        gb.set_exceptions(EXC_ECHO_RAM);
+        assert_eq!(gb.run_frame_until_breakpoint(&[]), None);
+    }
+
+    #[test]
+    fn exception_break_on_lcd_off_outside_vblank() {
+        // 16 NOPs (the DMG boot hands off mid-vblank at LY 0; the PPU leaves
+        // mode 1 a few M-cycles in) then: xor a ; ldh (40),a ; ldh (40),a ;
+        // jr -2 — two writes of FF40←0 well outside vblank.
+        let mut prog = vec![0x00u8; 16];
+        prog.extend_from_slice(&[0xAF, 0xE0, 0x40, 0xE0, 0x40, 0x18, 0xFE]);
+        let rom = exc_rom(&prog);
+        // Armed from boot: the LCD is on (LCDC=0x91) and the first FF40←0 write
+        // lands outside vblank, so it halts.
+        let mut gb = GameBoy::new(Model::Dmg, rom.clone()).unwrap();
+        gb.set_exceptions(EXC_LCD_OFF_VBLANK);
+        assert_eq!(gb.run_frame_until_breakpoint(&[]), Some(0xFF40));
+        // Already off: step the NOPs + xor + first write disarmed (LCD now off),
+        // then arm — the second FF40←0 write must NOT halt (LCD already off).
+        let mut gb = GameBoy::new(Model::Dmg, rom).unwrap();
+        for _ in 0..18 {
+            gb.step(); // 16 NOPs, xor a, first ldh (40),a -> LCD off
+        }
+        gb.set_exceptions(EXC_LCD_OFF_VBLANK);
+        assert_eq!(gb.run_frame_until_breakpoint(&[]), None);
     }
 
     #[test]

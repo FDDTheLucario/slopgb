@@ -73,12 +73,14 @@ pub fn step(cpu: &mut Cpu, bus: &mut impl Bus) {
             let vec_pc = cpu.regs.pc;
             let vector_opcode = fetch_opcode(cpu, bus);
             bus.profile_pc(vec_pc);
+            bus.check_exec(vec_pc, vector_opcode);
             execute(cpu, bus, vector_opcode);
         } else {
             // IME=0: the observing cycle already was the next instruction's
             // opcode fetch (acceptance/halt_ime0_nointr_timing: "halt +
             // nops 6" measures the same DIV delta as dispatch + jp hl).
             bus.profile_pc(pc_before);
+            bus.check_exec(pc_before, opcode);
             execute(cpu, bus, opcode);
         }
         return;
@@ -121,7 +123,8 @@ pub fn step(cpu: &mut Cpu, bus: &mut impl Bus) {
     let mut opcode = fetch_opcode(cpu, bus);
     // The address of the instruction `execute` will run: `pc_before`, unless an
     // interrupt was dispatched, in which case it is the handler's entry (the
-    // re-fetch reads from the vector). Used only by the profiler hook below.
+    // re-fetch reads from the vector). Used only by the profiler/exception
+    // hooks below.
     let mut exec_pc = pc_before;
     if cpu.ime && bus.pending() != 0 {
         cpu.regs.pc = pc_before;
@@ -130,6 +133,7 @@ pub fn step(cpu: &mut Cpu, bus: &mut impl Bus) {
         opcode = fetch_opcode(cpu, bus);
     }
     bus.profile_pc(exec_pc);
+    bus.check_exec(exec_pc, opcode);
     execute(cpu, bus, opcode);
     if ei_delay && cpu.ime_pending {
         cpu.ime_pending = false;

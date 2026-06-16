@@ -252,7 +252,19 @@ impl App {
             lowercase_hex: s.lowercase_hex,
             show_clocks: s.show_clocks,
         });
+        // Exceptions-tab break conditions → the core exception-break mask.
+        self.apply_exceptions();
         self.update_title();
+    }
+
+    /// Push the Options → Exceptions break mask to the live machine. Called
+    /// after every machine (re)build (startup, ROM load — `GameBoy::new` clears
+    /// the mask) and on Options OK/Apply. The mask only *fires* while the
+    /// debugger window is open (see `dbg_armed`); a `0` mask is golden-safe.
+    pub(crate) fn apply_exceptions(&mut self) {
+        self.session
+            .gb
+            .set_exceptions(self.settings.exception_mask());
     }
 
     fn apply_window_size(&mut self, choice: WindowSizeChoice) {

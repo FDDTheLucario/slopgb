@@ -314,6 +314,13 @@ pub struct Interconnect {
     /// A newly-seen address under break mode, consumed by the free-run loop
     /// ([`crate::GameBoy::run_frame_until_breakpoint`]).
     prof_break_hit: Option<u16>,
+    /// Debugger exception-break mask (Options → Exceptions, the `EXC_*` bits).
+    /// `0` on every golden/test path ⇒ the exec/access checks are single-branch
+    /// no-ops (golden-safe). Set only by the live debugger.
+    exc_mask: u16,
+    /// PC/addr of the most recent armed-exception hit, consumed by the free-run
+    /// loop ([`crate::GameBoy::run_frame_until_breakpoint`]).
+    exc_hit: Option<u16>,
     /// Elapsed T-cycles since power-on (normal-speed dots).
     cycles: u64,
 
@@ -529,6 +536,8 @@ impl Interconnect {
             prof: None,
             prof_break: false,
             prof_break_hit: None,
+            exc_mask: 0,
+            exc_hit: None,
             cycles: 0,
             cgb_mode,
             double_speed: false,
@@ -608,22 +617,9 @@ impl Interconnect {
     }
 
     // The debugger watchpoint (RM8) + execution-profiler (MB5) inherent methods
-    // live in the `debug` submodule (a second `impl Interconnect` block).
-
-    /// Flag a watchpoint hit if `addr` is watched for this access kind. A
-    /// no-op (one branch on an empty Vec) whenever no watchpoint is set.
-    fn check_watch(&mut self, addr: u16, is_write: bool) {
-        if self.watchpoints.is_empty() {
-            return;
-        }
-        if self
-            .watchpoints
-            .iter()
-            .any(|w| w.addr == addr && if is_write { w.write } else { w.read })
-        {
-            self.watch_hit = Some(addr);
-        }
-    }
+    // live in the `debug` submodule (a second `impl Interconnect` block) —
+    // including the per-access watchpoint + exception checks (`check_access`,
+    // `check_exc_lcd`) and the per-opcode exception check (`exec_exception`).
 
     /// Debugger memory write: store `value` at `addr` with no M-cycle timing
     /// (the symmetric counterpart of [`Self::peek`] / the debug read path).
@@ -736,7 +732,7 @@ impl Bus for Interconnect {
         // in flight commit first).
         self.service_vram_dma();
         self.maybe_oam_bug(addr, OamBugKind::Read);
-        self.check_watch(addr, false);
+        self.check_access(addr, false);
         self.read_no_tick(addr)
     }
 
@@ -756,7 +752,10 @@ impl Bus for Interconnect {
         // Corruption first, then the (mode-blocked) write attempt — during
         // the scan the CPU byte never lands (oam_write_blocked).
         self.maybe_oam_bug(addr, OamBugKind::Write);
-        self.check_watch(addr, true);
+        self.check_access(addr, true);
+        // Exception break: disabling the LCD outside vblank — sample the *old*
+        // LCDC (`write_no_tick` commits the new one below).
+        self.check_exc_lcd(addr, value);
         self.write_no_tick(addr, value);
     }
 
@@ -776,8 +775,14 @@ impl Bus for Interconnect {
         self.tick_machine();
         self.service_vram_dma(); // reads yield to a same-cycle trigger
         self.maybe_oam_bug(addr, OamBugKind::ReadIncrease);
-        self.check_watch(addr, false);
+        self.check_access(addr, false);
         self.read_no_tick(addr)
+    }
+
+    fn check_exec(&mut self, pc: u16, opcode: u8) {
+        // Inert unless an opcode exception was armed (`exc_mask == 0` on every
+        // golden/test path), so this is byte-identical there.
+        self.exec_exception(pc, opcode);
     }
 
     fn profile_pc(&mut self, pc: u16) {

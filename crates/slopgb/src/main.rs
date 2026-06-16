@@ -235,6 +235,8 @@ impl App {
         // machine so loaded DMG games look like bgb out of the box, not the core's
         // grayscale power-on default.
         app.apply_palette();
+        // Arm the default exception-break mask (bgb's "break on invalid opcode").
+        app.apply_exceptions();
         app
     }
 
@@ -580,6 +582,8 @@ impl App {
                 // resets it to the core grayscale default).
                 self.rom_loaded = true;
                 self.apply_palette();
+                // The fresh machine starts with no exception mask; re-arm it.
+                self.apply_exceptions();
                 self.paused = false;
                 self.push_recent(path);
                 self.resync_pacing();

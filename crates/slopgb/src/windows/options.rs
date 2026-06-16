@@ -135,6 +135,14 @@ pub struct Settings {
     /// Joypad → "allow pressing L+R or U+D". `false` (bgb default) filters
     /// opposing directions so the joypad never reports both at once.
     pub allow_opposing: bool,
+    /// Exceptions → "break on ld b,b (40h)".
+    pub break_ld_b_b: bool,
+    /// Exceptions → "break on invalid opcode" (bgb checks this by default).
+    pub break_invalid_op: bool,
+    /// Exceptions → "break on ram echo (E000-FDFF) access".
+    pub break_echo_ram: bool,
+    /// Exceptions → "break on disabling LCD outside vblank".
+    pub break_lcd_off_vblank: bool,
 }
 
 impl Default for Settings {
@@ -155,6 +163,11 @@ impl Default for Settings {
             scheme: 0,
             dmg_palette: SCHEMES[0].colors,
             allow_opposing: false,
+            break_ld_b_b: false,
+            // bgb ships with "break on invalid opcode" checked.
+            break_invalid_op: true,
+            break_echo_ram: false,
+            break_lcd_off_vblank: false,
         }
     }
 }
@@ -166,6 +179,27 @@ impl Settings {
             self.scheme = i;
             self.dmg_palette = s.colors;
         }
+    }
+
+    /// The core exception-break mask (`EXC_*` bits) for the armed conditions —
+    /// pushed to the machine by `App::apply_exceptions`.
+    #[must_use]
+    pub fn exception_mask(&self) -> u16 {
+        use slopgb_core::{EXC_ECHO_RAM, EXC_INVALID_OPCODE, EXC_LCD_OFF_VBLANK, EXC_LD_B_B};
+        let mut m = 0;
+        if self.break_ld_b_b {
+            m |= EXC_LD_B_B;
+        }
+        if self.break_invalid_op {
+            m |= EXC_INVALID_OPCODE;
+        }
+        if self.break_echo_ram {
+            m |= EXC_ECHO_RAM;
+        }
+        if self.break_lcd_off_vblank {
+            m |= EXC_LCD_OFF_VBLANK;
+        }
+        m
     }
 }
 

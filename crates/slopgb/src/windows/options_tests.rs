@@ -47,6 +47,36 @@ fn settings_default_matches_spec() {
     // screen) looks like bgb. The lightest shade is the captured #E8FCCC.
     assert_eq!(SCHEMES[0].name, "BGB 0.3");
     assert_eq!(d.dmg_palette[0], 0x00E8_FCCC);
+    // Exceptions: bgb ships with "break on invalid opcode" checked, the rest off.
+    assert!(d.break_invalid_op);
+    assert!(!d.break_ld_b_b);
+    assert!(!d.break_echo_ram);
+    assert!(!d.break_lcd_off_vblank);
+}
+
+#[test]
+fn exception_mask_maps_settings_to_core_bits() {
+    use slopgb_core::{EXC_ECHO_RAM, EXC_INVALID_OPCODE, EXC_LCD_OFF_VBLANK, EXC_LD_B_B};
+    // Default = invalid-opcode only.
+    assert_eq!(Settings::default().exception_mask(), EXC_INVALID_OPCODE);
+    // Nothing armed → 0 (golden-safe / inert).
+    let none = Settings {
+        break_invalid_op: false,
+        ..Settings::default()
+    };
+    assert_eq!(none.exception_mask(), 0);
+    // All four armed → all four bits.
+    let all = Settings {
+        break_ld_b_b: true,
+        break_invalid_op: true,
+        break_echo_ram: true,
+        break_lcd_off_vblank: true,
+        ..Settings::default()
+    };
+    assert_eq!(
+        all.exception_mask(),
+        EXC_LD_B_B | EXC_INVALID_OPCODE | EXC_ECHO_RAM | EXC_LCD_OFF_VBLANK
+    );
 }
 
 // --- Task 2: tab labels + groups --------------------------------------------
@@ -305,17 +335,52 @@ fn graphics_tab_stretch_toggle() {
 }
 
 #[test]
-fn exceptions_tab_is_fully_inert() {
-    // slopgb's free-run halts only on PC breakpoints/watchpoints, so every
-    // Exceptions break-condition is an inert stub (no backend).
+fn exceptions_tab_break_conditions_are_live() {
+    // Four break conditions are wired to the core exception-break mask; the
+    // rest of the tab stays faithfully inert (no clean detector / no backend).
     let s = Settings::default();
     let content = OptionsState::content_rect(dialog());
-    assert!(
+    let live: Vec<_> = controls(OptionsTab::Exceptions, &s, content)
+        .into_iter()
+        .filter_map(|c| c.field)
+        .collect();
+    for f in [
+        Field::BreakLdBB,
+        Field::BreakInvalidOp,
+        Field::BreakEchoRam,
+        Field::BreakLcdOffVblank,
+    ] {
+        assert!(live.contains(&f), "{f:?} is live");
+    }
+    assert_eq!(live.len(), 4, "exactly four live break conditions");
+    // The inert rows (OAM DMA / 16-bit inc-dec / SGB) stay non-live.
+    use super::tabs::Kind;
+    let inert_present = |label: &str| {
         controls(OptionsTab::Exceptions, &s, content)
-            .iter()
-            .all(|c| c.field.is_none()),
-        "Exceptions tab has no live controls"
-    );
+            .into_iter()
+            .any(|c| {
+                matches!(&c.kind, Kind::Check { label: l, .. } if *l == label) && c.field.is_none()
+            })
+    };
+    assert!(inert_present("break on OAM DMA bad accesses"));
+    assert!(inert_present("break on SGB transfer start"));
+}
+
+#[test]
+fn exceptions_tab_toggles_flip_settings() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Exceptions;
+    // invalid-opcode starts checked (bgb default) — a click clears it.
+    assert!(st.working.break_invalid_op);
+    click_field(&mut st, Field::BreakInvalidOp);
+    assert!(!st.working.break_invalid_op);
+    // the other three start off — a click arms them.
+    click_field(&mut st, Field::BreakLdBB);
+    click_field(&mut st, Field::BreakEchoRam);
+    click_field(&mut st, Field::BreakLcdOffVblank);
+    assert!(st.working.break_ld_b_b);
+    assert!(st.working.break_echo_ram);
+    assert!(st.working.break_lcd_off_vblank);
 }
 
 #[test]
@@ -355,6 +420,12 @@ fn defaults_resets_every_tab_only_its_own_fields() {
         (OptionsTab::Sound, |s| s.volume = 0.1, |s| s.volume == 1.0),
         (OptionsTab::GbColors, |s| s.scheme = 2, |s| s.scheme == 0),
         (OptionsTab::Misc, |s| s.ff_speed = 3, |s| s.ff_speed == 10),
+        (
+            // invalid-opcode defaults checked, so flip it off to test the reset.
+            OptionsTab::Exceptions,
+            |s| s.break_invalid_op = false,
+            |s| s.break_invalid_op,
+        ),
     ];
     for (tab, mutate, is_default) in cases {
         let mut st = OptionsState::new(Settings::default());

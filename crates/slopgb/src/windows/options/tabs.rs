@@ -41,6 +41,14 @@ pub(crate) enum Field {
     ConfigureKeyboard,
     /// Joypad → "allow pressing L+R or U+D" (the SOCD filter toggle).
     AllowOpposing,
+    /// Exceptions → "break on ld b,b (40h)".
+    BreakLdBB,
+    /// Exceptions → "break on invalid opcode".
+    BreakInvalidOp,
+    /// Exceptions → "break on ram echo (E000-FDFF) access".
+    BreakEchoRam,
+    /// Exceptions → "break on disabling LCD outside vblank".
+    BreakLcdOffVblank,
 }
 
 /// Fast-forward speed slider range (1..=`FF_SPEED_MAX`).
@@ -235,6 +243,10 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         }
         Field::SchemeCycle => s.select_scheme((s.scheme + 1) % SCHEMES.len()),
         Field::AllowOpposing => s.allow_opposing = !s.allow_opposing,
+        Field::BreakLdBB => s.break_ld_b_b = !s.break_ld_b_b,
+        Field::BreakInvalidOp => s.break_invalid_op = !s.break_invalid_op,
+        Field::BreakEchoRam => s.break_echo_ram = !s.break_echo_ram,
+        Field::BreakLcdOffVblank => s.break_lcd_off_vblank = !s.break_lcd_off_vblank,
         // Routed out by `on_content_click` before reaching here.
         Field::ConfigureKeyboard => {}
     }
@@ -251,8 +263,13 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
             s.lowercase_hex = d.lowercase_hex;
             s.show_clocks = d.show_clocks;
         }
-        // Exceptions has no live fields (all break conditions are inert stubs).
-        OptionsTab::Exceptions => {}
+        // The four wired break conditions; the rest of the tab is inert.
+        OptionsTab::Exceptions => {
+            s.break_ld_b_b = d.break_ld_b_b;
+            s.break_invalid_op = d.break_invalid_op;
+            s.break_echo_ram = d.break_echo_ram;
+            s.break_lcd_off_vblank = d.break_lcd_off_vblank;
+        }
         OptionsTab::Sound => {
             s.volume = d.volume;
             s.mono = d.mono;
@@ -427,23 +444,44 @@ fn debug(s: &Settings, content: Rect) -> Vec<Ctrl> {
     v
 }
 
-fn exceptions(_s: &Settings, content: Rect) -> Vec<Ctrl> {
+fn exceptions(s: &Settings, content: Rect) -> Vec<Ctrl> {
     let mut l = Lay::new(content);
     let mut v = Vec::new();
-    // All break-conditions are inert stubs (bgb black) — slopgb's core free-run
-    // halts only on PC breakpoints / watchpoints, not on these opcode/access
-    // conditions, so none is wired (faithful list from the capture). The bgb
-    // capture shows "invalid opcode" checked by default, the rest unchecked.
-    for (label, checked) in [
-        ("break on OAM DMA bad accesses", false),
-        ("break on 16 bits inc/dec FE00-FEFF", false),
-        ("break on disabling LCD outside vblank", false),
-        ("break on ram echo (E000-FDFF) access", false),
-        ("break on SGB transfer start", false),
-        ("break on ld b,b (40h)", false),
-        ("break on invalid opcode", true),
-    ] {
-        v.push(Ctrl::inert(rc(l.at(), label), chk(label, checked)));
+    // Four break conditions are wired to the core exception-break mask (the
+    // free run halts when armed + the debugger is open); the rest stay
+    // faithfully inert (bgb black) — no clean golden-safe detector / no backend.
+    // Each entry: (label, live field, checked-from-settings).
+    let rows: [(&str, Option<Field>, bool); 7] = [
+        ("break on OAM DMA bad accesses", None, false),
+        ("break on 16 bits inc/dec FE00-FEFF", None, false),
+        (
+            "break on disabling LCD outside vblank",
+            Some(Field::BreakLcdOffVblank),
+            s.break_lcd_off_vblank,
+        ),
+        (
+            "break on ram echo (E000-FDFF) access",
+            Some(Field::BreakEchoRam),
+            s.break_echo_ram,
+        ),
+        ("break on SGB transfer start", None, false),
+        (
+            "break on ld b,b (40h)",
+            Some(Field::BreakLdBB),
+            s.break_ld_b_b,
+        ),
+        (
+            "break on invalid opcode",
+            Some(Field::BreakInvalidOp),
+            s.break_invalid_op,
+        ),
+    ];
+    for (label, field, checked) in rows {
+        let ctrl = match field {
+            Some(f) => Ctrl::live(rc(l.at(), label), chk(label, checked), f),
+            None => Ctrl::inert(rc(l.at(), label), chk(label, checked)),
+        };
+        v.push(ctrl);
         l.row();
     }
     l.row();

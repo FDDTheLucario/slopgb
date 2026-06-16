@@ -170,6 +170,27 @@ fn key_wizard_cancel_leaves_bindings_unchanged() {
 }
 
 #[test]
+fn apply_exceptions_pushes_the_mask_to_the_machine() {
+    use slopgb_core::{EXC_ECHO_RAM, EXC_INVALID_OPCODE};
+    // App::new already armed the default mask (bgb's "break on invalid opcode").
+    let mut app = blank_app();
+    assert_eq!(
+        app.session.gb.exceptions(),
+        EXC_INVALID_OPCODE,
+        "default invalid-opcode break armed at startup"
+    );
+    // Changing settings + applying pushes the new mask to the live machine.
+    app.settings.break_invalid_op = false;
+    app.settings.break_echo_ram = true;
+    app.apply_exceptions();
+    assert_eq!(app.session.gb.exceptions(), EXC_ECHO_RAM);
+    // Disarming everything is golden-safe (mask 0).
+    app.settings.break_echo_ram = false;
+    app.apply_exceptions();
+    assert_eq!(app.session.gb.exceptions(), 0);
+}
+
+#[test]
 fn frame_duration_matches_hardware_rate() {
     // 70224 / 4194304 s = 16.742706... ms
     assert_eq!(FRAME_DURATION.as_nanos(), 16_742_706);

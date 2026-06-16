@@ -26,14 +26,16 @@ impl App {
     }
 
     /// Whether the debugger is "armed": its window is open and at least one
-    /// breakpoint or watchpoint is set, so the free-run loop watches for a halt
-    /// (`run_frame_until_breakpoint` checks both the PC list and, internally,
-    /// the core watchpoints already pushed via `set_watchpoints`).
+    /// halt source is active — a PC breakpoint, a watchpoint, profiler break
+    /// mode, or an Options → Exceptions break condition — so the free-run loop
+    /// watches for a halt (`run_frame_until_breakpoint` checks the PC list and,
+    /// internally, the core watchpoint / profiler / exception hits).
     fn dbg_armed(&self) -> bool {
         self.tools.is_open(ui::ToolWindow::Debugger)
             && (!self.dbg.breakpoints().is_empty()
                 || !self.dbg.watchpoints().is_empty()
-                || self.session.gb.profile_break())
+                || self.session.gb.profile_break()
+                || self.session.gb.exceptions() != 0)
     }
 
     /// The breakpoint PC list to watch this wake, or `None` when not armed (the
