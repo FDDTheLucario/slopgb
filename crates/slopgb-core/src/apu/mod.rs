@@ -54,6 +54,11 @@ pub struct Apu {
     ch4: Noise,
     nr50: u8,
     nr51: u8,
+    /// Per-channel mute mask: bit `(channel-1)` set => channel silenced in
+    /// [`Self::mix`]. A frontend/debugger control (bgb's "Sound channel"
+    /// submenu), NOT hardware — it survives NR52 power cycles and defaults
+    /// to 0 (all audible) so it never perturbs golden output.
+    mute_mask: u8,
     /// DIV-APU event divider (3 bits), incremented at the start of each
     /// event like SameBoy's `div_divider`: lengths clock on odd values,
     /// sweep at `divider&3 == 3`, envelope countdowns at `divider&7 == 7`.
@@ -180,6 +185,7 @@ impl Apu {
             ch4: Noise::new(),
             nr50: 0,
             nr51: 0,
+            mute_mask: 0,
             div_divider: 0,
             skip_div_event: SkipDivEvent::Inactive,
             phase: 2,
@@ -546,6 +552,27 @@ impl Apu {
         self.ch3.sample_byte = 0;
     }
 
+    /// Mute or un-mute one APU channel (1-4) in the mixer. A frontend/
+    /// debugger control, not hardware: see [`Self::mute_mask`]. Channels
+    /// outside 1..=4 are ignored.
+    pub fn set_channel_mute(&mut self, channel: u8, muted: bool) {
+        if let 1..=4 = channel {
+            let bit = 1u8 << (channel - 1);
+            if muted {
+                self.mute_mask |= bit;
+            } else {
+                self.mute_mask &= !bit;
+            }
+        }
+    }
+
+    /// Whether channel `channel` (1-4) is currently muted by
+    /// [`Self::set_channel_mute`]. Out-of-range channels read `false`.
+    #[must_use]
+    pub fn channel_muted(&self, channel: u8) -> bool {
+        matches!(channel, 1..=4) && self.mute_mask & (1 << (channel - 1)) != 0
+    }
+
     /// Output sample rate for [`Self::drain_samples`]. Default
     /// [`DEFAULT_SAMPLE_RATE`].
     pub fn set_sample_rate(&mut self, hz: u32) {
@@ -633,8 +660,9 @@ impl Apu {
     /// Sum one channel into the stereo accumulators per NR51 routing.
     /// `ch` is the channel index 0-3 selecting the NR51 bits.
     fn mix_channel(&self, dac: bool, digital: u8, ch: u8, left: &mut f32, right: &mut f32) {
-        if !dac {
-            // DAC off: the channel contributes nothing at all.
+        if !dac || self.mute_mask & (1 << ch) != 0 {
+            // DAC off, or muted by the frontend ([`Self::mute_mask`]): the
+            // channel contributes nothing at all.
             return;
         }
         // DAC: digital 0-15 to analog with a *negative* slope — Pan

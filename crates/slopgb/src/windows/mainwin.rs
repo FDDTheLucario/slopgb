@@ -17,11 +17,12 @@ use crate::ui::canvas::{Canvas, Rect};
 use crate::ui::menu::{self, MenuItem};
 use crate::ui::{Theme, ToolWindow};
 
-/// Which submenu a main-menu row opens. Only `WindowSize` is wired (MN2); the
-/// rest of bgb's submenus arrive in MN3–MN7.
+/// Which submenu a main-menu row opens. `WindowSize` (MN2) and `SoundChannel`
+/// (MN3) are wired; the rest of bgb's submenus arrive in MN4–MN7.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SubKind {
     WindowSize,
+    SoundChannel,
 }
 
 /// What clicking a main-menu row does: run a shared frontend [`Action`], open a
@@ -132,8 +133,8 @@ fn entries(sound_on: bool) -> Vec<(MenuItem, MenuEffect)> {
             MenuEffect::None,
         ),
         (
-            MenuItem::new("Sound channel").submenu().disabled(),
-            MenuEffect::None,
+            MenuItem::new("Sound channel").submenu(),
+            MenuEffect::Submenu(SubKind::SoundChannel),
         ),
         (
             MenuItem::new("Window size").submenu(),
@@ -148,7 +149,7 @@ fn entries(sound_on: bool) -> Vec<(MenuItem, MenuEffect)> {
     ]
 }
 
-// --- Window size submenu (MN2) ---------------------------------------------
+// --- Submenus (MN2 Window size, MN3 Sound channel) -------------------------
 
 /// A window-size choice from the "Window size" submenu
 /// (`main-sub-windowsize.png`): an integer pixel scale, or a borderless
@@ -160,7 +161,17 @@ pub enum WindowSizeChoice {
     FullscreenStretched,
 }
 
-/// An open child submenu (currently only Window size): its kind, box origin
+/// What activating a submenu row does. One variant per wired submenu so a
+/// single [`SubMenu`] type backs them all (the parent dispatches on the
+/// variant): a window-size change, or a toggle of sound channel 1-4.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SubChoice {
+    WindowSize(WindowSizeChoice),
+    /// Toggle mute on the given sound channel (1-4).
+    SoundChannel(u8),
+}
+
+/// An open child submenu (Window size or Sound channel): its kind, box origin
 /// (right of its parent row), rows, the parallel choice per row, and the hovered
 /// row. Drawn through the same [`menu`] widget.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -168,7 +179,7 @@ pub struct SubMenu {
     pub kind: SubKind,
     pub origin: (i32, i32),
     pub items: Vec<MenuItem>,
-    pub choices: Vec<Option<WindowSizeChoice>>,
+    pub choices: Vec<Option<SubChoice>>,
     pub hovered: Option<usize>,
 }
 
@@ -178,9 +189,28 @@ impl SubMenu {
     #[must_use]
     pub fn window_size(parent_row: Rect, active: WindowSizeChoice) -> Self {
         let (items, choices) = window_size_items(active).into_iter().unzip();
+        Self::hang(SubKind::WindowSize, parent_row, items, choices)
+    }
+
+    /// Open the [`SubKind::SoundChannel`] submenu (`main-sub-soundchannel.png`)
+    /// to the right of `parent_row`. `muted[i]` mutes channel `i+1`; a row is
+    /// check-marked when its channel is *audible* (bgb checks the live ones).
+    #[must_use]
+    pub fn sound_channel(parent_row: Rect, muted: [bool; 4]) -> Self {
+        let (items, choices) = sound_channel_items(muted).into_iter().unzip();
+        Self::hang(SubKind::SoundChannel, parent_row, items, choices)
+    }
+
+    /// Shared constructor: hang a submenu off the right edge of `parent_row`,
+    /// top-aligned (bgb's layout).
+    fn hang(
+        kind: SubKind,
+        parent_row: Rect,
+        items: Vec<MenuItem>,
+        choices: Vec<Option<SubChoice>>,
+    ) -> Self {
         Self {
-            kind: SubKind::WindowSize,
-            // Right of the parent row, top-aligned (bgb hangs it off the row).
+            kind,
             origin: (parent_row.right(), parent_row.y),
             items,
             choices,
@@ -191,7 +221,7 @@ impl SubMenu {
     /// The choice under `(px, py)` if it lands on a row (all submenu rows are
     /// enabled); points outside the box resolve to `None`.
     #[must_use]
-    pub fn choice_at(&self, px: i32, py: i32) -> Option<WindowSizeChoice> {
+    pub fn choice_at(&self, px: i32, py: i32) -> Option<SubChoice> {
         menu::item_at(self.origin, &self.items, px, py).and_then(|i| self.choices[i])
     }
 
@@ -211,25 +241,36 @@ pub fn render_sub(c: &mut Canvas, s: &SubMenu, theme: &Theme) {
 
 /// The Window-size rows (`main-sub-windowsize.png`): 1x1‥6x6 then Full screen /
 /// Fullscreen stretched, with the row matching `active` check-marked.
-fn window_size_items(active: WindowSizeChoice) -> Vec<(MenuItem, Option<WindowSizeChoice>)> {
+fn window_size_items(active: WindowSizeChoice) -> Vec<(MenuItem, Option<SubChoice>)> {
     let mut v = Vec::with_capacity(8);
-    for n in 1..=6u32 {
-        let choice = WindowSizeChoice::Scale(n);
+    let mut push = |label: String, choice: WindowSizeChoice| {
         v.push((
-            MenuItem::new(format!("{n}x{n}")).checked(active == choice),
-            Some(choice),
+            MenuItem::new(label).checked(active == choice),
+            Some(SubChoice::WindowSize(choice)),
         ));
+    };
+    for n in 1..=6u32 {
+        push(format!("{n}x{n}"), WindowSizeChoice::Scale(n));
     }
-    v.push((
-        MenuItem::new("Full screen").checked(active == WindowSizeChoice::Fullscreen),
-        Some(WindowSizeChoice::Fullscreen),
-    ));
-    v.push((
-        MenuItem::new("Fullscreen stretched")
-            .checked(active == WindowSizeChoice::FullscreenStretched),
-        Some(WindowSizeChoice::FullscreenStretched),
-    ));
+    push("Full screen".into(), WindowSizeChoice::Fullscreen);
+    push(
+        "Fullscreen stretched".into(),
+        WindowSizeChoice::FullscreenStretched,
+    );
     v
+}
+
+/// The Sound-channel rows (`main-sub-soundchannel.png`): channels 1-4 with
+/// hotkeys F5-F8, each check-marked while audible (`!muted[i]`).
+fn sound_channel_items(muted: [bool; 4]) -> Vec<(MenuItem, Option<SubChoice>)> {
+    (1..=4u8)
+        .map(|ch| {
+            let item = MenuItem::new(ch.to_string())
+                .shortcut(format!("F{}", ch + 4))
+                .checked(!muted[usize::from(ch - 1)]);
+            (item, Some(SubChoice::SoundChannel(ch)))
+        })
+        .collect()
 }
 
 #[cfg(test)]

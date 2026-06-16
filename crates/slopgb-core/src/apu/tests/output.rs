@@ -85,6 +85,48 @@ fn playing_pulse_is_audible_and_routed_by_nr51() {
 }
 
 #[test]
+fn per_channel_mute_silences_only_that_channel() {
+    // A frontend/debug control (bgb's "Sound channel" submenu): muting a
+    // channel drops it from the mixer without touching any hardware
+    // register. Off by default so golden output is never perturbed.
+    let mut h = H::dmg();
+    h.w(0xFF24, 0x77);
+    h.w(0xFF25, 0x20); // ch2 left only (NR51 bit 5)
+    h.w(0xFF16, 0x80); // duty 2 (50%)
+    h.w(0xFF17, 0xF0); // ch2 DAC on, max volume, no envelope
+    h.w(0xFF18, 0x00);
+    h.w(0xFF19, 0x84); // trigger, freq 0x400: audible
+    for n in 1..=4 {
+        assert!(!h.apu.channel_muted(n), "ch{n} audible by default");
+    }
+    // Measure the *raw* pre-high-pass tap: a suddenly-muted loud channel
+    // leaves a decaying transient in the filtered output, but the raw mix
+    // is exactly silent the instant a channel is dropped.
+    let energy = |h: &mut H| -> f32 {
+        let mut raw = Vec::new();
+        h.apu.drain_raw_samples(&mut raw); // discard the previous window
+        h.ticks(20_000); // 80k dots, within RAW_SAMPLE_CAP
+        raw.clear();
+        h.apu.drain_raw_samples(&mut raw);
+        raw.iter().map(|&(l, _)| l * l).sum()
+    };
+    // Muting a *different* channel leaves ch2 playing.
+    h.apu.set_channel_mute(1, true);
+    assert!(energy(&mut h) > 1.0, "muting ch1 must not silence ch2");
+    // Muting ch2 itself drops it to silence; un-muting restores it.
+    h.apu.set_channel_mute(2, true);
+    assert!(h.apu.channel_muted(2), "ch2 reads muted");
+    assert_eq!(energy(&mut h), 0.0, "muted ch2 drops from the raw mix");
+    h.apu.set_channel_mute(2, false);
+    assert!(!h.apu.channel_muted(2));
+    assert!(energy(&mut h) > 1.0, "un-muted ch2 is audible again");
+    // Channels outside 1..=4 are no-ops (never panic / out-of-bounds).
+    h.apu.set_channel_mute(0, true);
+    h.apu.set_channel_mute(5, true);
+    assert!(!h.apu.channel_muted(0) && !h.apu.channel_muted(5));
+}
+
+#[test]
 fn nr50_zero_does_not_mute() {
     let mut h = H::dmg();
     h.w(0xFF24, 0x00); // volume 0 = gain 1/8

@@ -578,6 +578,10 @@ impl Interconnect {
         &mut self.ppu
     }
 
+    pub fn apu(&self) -> &Apu {
+        &self.apu
+    }
+
     pub fn apu_mut(&mut self) -> &mut Apu {
         &mut self.apu
     }

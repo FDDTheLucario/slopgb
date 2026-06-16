@@ -163,6 +163,22 @@ impl GameBoy {
         self.bus.apu_mut().set_sample_rate(hz);
     }
 
+    /// Mute or un-mute one APU channel (1-4) in the mixer — a frontend/
+    /// debugger control (bgb's "Sound channel" submenu), *not* hardware.
+    /// The mask defaults to all-audible and is never touched on any golden/
+    /// test path, so it cannot perturb golden output. Channels outside
+    /// 1..=4 are ignored.
+    pub fn set_channel_mute(&mut self, channel: u8, muted: bool) {
+        self.bus.apu_mut().set_channel_mute(channel, muted);
+    }
+
+    /// Whether APU channel `channel` (1-4) is currently muted by
+    /// [`Self::set_channel_mute`]. Out-of-range channels read `false`.
+    #[must_use]
+    pub fn channel_muted(&self, channel: u8) -> bool {
+        self.bus.apu().channel_muted(channel)
+    }
+
     /// Map the four DMG shades to XRGB8888 colors (ignored on CGB models).
     pub fn set_dmg_palette(&mut self, palette: [u32; 4]) {
         self.bus.ppu_mut().set_dmg_palette(palette);
@@ -359,6 +375,23 @@ mod tests {
             assert_eq!(r.de(), 0x0008, "{model:?} DMG cart DE");
             assert_eq!(r.hl(), 0x007C, "{model:?} DMG cart HL");
         }
+    }
+
+    #[test]
+    fn channel_mute_round_trips_and_defaults_off() {
+        let mut gb = GameBoy::new(Model::Dmg, rom_with_cgb_flag(0x00)).unwrap();
+        for ch in 1..=4 {
+            assert!(!gb.channel_muted(ch), "ch{ch} audible at power-on");
+        }
+        gb.set_channel_mute(3, true);
+        assert!(gb.channel_muted(3));
+        assert!(!gb.channel_muted(2), "only ch3 muted");
+        gb.set_channel_mute(3, false);
+        assert!(!gb.channel_muted(3));
+        // Out-of-range channels are ignored (no panic).
+        gb.set_channel_mute(0, true);
+        gb.set_channel_mute(9, true);
+        assert!(!gb.channel_muted(0) && !gb.channel_muted(9));
     }
 
     #[test]

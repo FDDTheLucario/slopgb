@@ -15,6 +15,8 @@ fn at(m: &MainMenu, idx: usize) -> (i32, i32) {
 
 /// Index of the "Window size" row (carries the submenu opener).
 const WINDOW_SIZE_ROW: usize = 11;
+/// Index of the "Sound channel" row (MN3 submenu opener).
+const SOUND_CHANNEL_ROW: usize = 10;
 
 #[test]
 fn menu_has_the_fifteen_rc_main_rows_in_order() {
@@ -67,8 +69,13 @@ fn supported_rows_run_their_action_window_size_opens_a_submenu_rest_none() {
         m.effects[WINDOW_SIZE_ROW],
         MenuEffect::Submenu(SubKind::WindowSize)
     );
+    assert_eq!(
+        m.effects[SOUND_CHANNEL_ROW],
+        MenuEffect::Submenu(SubKind::SoundChannel),
+        "Sound channel opens its submenu (MN3)"
+    );
     // Greyed stubs + not-yet-wired submenu rows have no effect.
-    for i in [1, 3, 4, 6, 8, 9, 10, 12, 13] {
+    for i in [1, 3, 4, 6, 8, 9, 12, 13] {
         assert_eq!(m.effects[i], MenuEffect::None, "row {i} is a stub");
     }
 }
@@ -80,12 +87,16 @@ fn submenu_rows_show_the_arrow_window_size_enabled_others_greyed() {
     for i in [8, 9, 10, 11, 12, 13] {
         assert!(m.items[i].submenu, "row {i} draws the submenu arrow");
     }
-    // Window size is live; the others stay greyed until MN3-7.
+    // Window size + Sound channel are live; the rest stay greyed until MN4-7.
     assert!(
         m.items[WINDOW_SIZE_ROW].enabled,
         "Window size is wired (MN2)"
     );
-    for i in [8, 9, 10, 12, 13] {
+    assert!(
+        m.items[SOUND_CHANNEL_ROW].enabled,
+        "Sound channel is wired (MN3)"
+    );
+    for i in [8, 9, 12, 13] {
         assert!(!m.items[i].enabled, "row {i} greyed until its milestone");
     }
     assert!(!m.items[1].submenu, "Load ROM is a plain (greyed) item");
@@ -174,9 +185,18 @@ fn window_size_submenu_has_the_eight_captured_rows() {
         ]
     );
     assert_eq!(s.kind, SubKind::WindowSize);
-    assert_eq!(s.choices[2], Some(WindowSizeChoice::Scale(3)));
-    assert_eq!(s.choices[6], Some(WindowSizeChoice::Fullscreen));
-    assert_eq!(s.choices[7], Some(WindowSizeChoice::FullscreenStretched));
+    assert_eq!(
+        s.choices[2],
+        Some(SubChoice::WindowSize(WindowSizeChoice::Scale(3)))
+    );
+    assert_eq!(
+        s.choices[6],
+        Some(SubChoice::WindowSize(WindowSizeChoice::Fullscreen))
+    );
+    assert_eq!(
+        s.choices[7],
+        Some(SubChoice::WindowSize(WindowSizeChoice::FullscreenStretched))
+    );
 }
 
 #[test]
@@ -205,8 +225,60 @@ fn choice_at_resolves_the_clicked_size() {
     let rects = menu_rects(s.origin, &s.items);
     let centre = |i: usize| (rects[i].x + rects[i].w / 2, rects[i].y + rects[i].h / 2);
     let (x4, y4) = centre(3); // "4x4"
-    assert_eq!(s.choice_at(x4, y4), Some(WindowSizeChoice::Scale(4)));
+    assert_eq!(
+        s.choice_at(x4, y4),
+        Some(SubChoice::WindowSize(WindowSizeChoice::Scale(4)))
+    );
     let (xf, yf) = centre(6); // "Full screen"
-    assert_eq!(s.choice_at(xf, yf), Some(WindowSizeChoice::Fullscreen));
+    assert_eq!(
+        s.choice_at(xf, yf),
+        Some(SubChoice::WindowSize(WindowSizeChoice::Fullscreen))
+    );
+    assert_eq!(s.choice_at(-99, -99), None, "outside the box");
+}
+
+// --- Sound channel submenu (MN3) -------------------------------------------
+
+#[test]
+fn sound_channel_submenu_has_the_four_captured_rows() {
+    let s = SubMenu::sound_channel(PARENT, [false; 4]);
+    let labels: Vec<&str> = s.items.iter().map(|i| i.label.as_str()).collect();
+    assert_eq!(labels, ["1", "2", "3", "4"]);
+    let shortcuts: Vec<Option<&str>> = s
+        .items
+        .iter()
+        .map(|i| i.shortcut.as_deref())
+        .collect();
+    assert_eq!(
+        shortcuts,
+        [Some("F5"), Some("F6"), Some("F7"), Some("F8")],
+        "each channel carries its bgb hotkey"
+    );
+    assert_eq!(s.kind, SubKind::SoundChannel);
+    for (i, ch) in (1..=4u8).enumerate() {
+        assert_eq!(s.choices[i], Some(SubChoice::SoundChannel(ch)));
+    }
+}
+
+#[test]
+fn sound_channel_checks_track_the_audible_channels() {
+    // A row is checked when its channel is *audible* (not muted): muting
+    // channel 2 un-checks only row 2.
+    let s = SubMenu::sound_channel(PARENT, [false, true, false, false]);
+    assert!(s.items[0].checked, "ch1 audible");
+    assert!(!s.items[1].checked, "ch2 muted -> unchecked");
+    assert!(s.items[2].checked && s.items[3].checked, "ch3/4 audible");
+    // All audible -> every row checked.
+    let all = SubMenu::sound_channel(PARENT, [false; 4]);
+    assert!(all.items.iter().all(|i| i.checked));
+}
+
+#[test]
+fn sound_channel_choice_at_resolves_the_clicked_channel() {
+    let s = SubMenu::sound_channel(PARENT, [false; 4]);
+    let rects = menu_rects(s.origin, &s.items);
+    let centre = |i: usize| (rects[i].x + rects[i].w / 2, rects[i].y + rects[i].h / 2);
+    let (x3, y3) = centre(2); // row "3"
+    assert_eq!(s.choice_at(x3, y3), Some(SubChoice::SoundChannel(3)));
     assert_eq!(s.choice_at(-99, -99), None, "outside the box");
 }
