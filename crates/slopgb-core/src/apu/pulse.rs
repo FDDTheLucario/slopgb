@@ -34,6 +34,7 @@ pub(super) const DUTY_TABLE: [[u8; 8]; 4] = [
     [0, 1, 1, 1, 1, 1, 1, 0],
 ];
 
+#[derive(Clone)]
 pub(super) struct Pulse {
     pub(super) enabled: bool,
     pub(super) dac: bool,

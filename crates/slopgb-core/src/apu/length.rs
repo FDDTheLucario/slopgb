@@ -6,6 +6,7 @@
 //! 03-trigger, gbdev wiki "Game Boy Sound Operation", Obscure Behavior)
 //! are implemented in [`LengthCounter::write_nrx4`].
 
+#[derive(Clone)]
 pub(super) struct LengthCounter {
     /// 64 for pulse/noise, 256 for wave.
     pub(super) max: u16,

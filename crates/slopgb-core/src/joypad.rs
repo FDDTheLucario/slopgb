@@ -54,6 +54,7 @@ const SGB_COMMAND_MAX: usize = SGB_PACKET_BYTES * 7;
 /// only MLT_REQ is executed — every other SGB command affects the
 /// SNES-side presentation (palettes, borders, sound) and has no effect
 /// observable from the Game Boy bus.
+#[derive(Clone)]
 struct Sgb {
     /// Accumulated command bits (LSB-first within each byte).
     command: [u8; SGB_COMMAND_MAX],
@@ -230,6 +231,7 @@ impl Sgb {
     }
 }
 
+#[derive(Clone)]
 pub struct Joypad {
     /// P1 bits 4-5 as last written (active low; 1 = column not selected).
     select: u8,

@@ -236,6 +236,7 @@ struct DmaConflict {
 
 /// A freshly written FF46 value waiting out its 1 M-cycle setup delay
 /// (acceptance/oam_dma_start: the cycle after the write still reads OAM).
+#[derive(Clone)]
 struct OamDmaStart {
     src: u16,
     delay: u8,
@@ -286,6 +287,7 @@ enum HaltHdmaState {
     Requested,
 }
 
+#[derive(Clone)]
 pub struct Interconnect {
     model: Model,
     cart: Cartridge,
@@ -608,9 +610,11 @@ impl Interconnect {
         if self.watchpoints.is_empty() {
             return;
         }
-        if self.watchpoints.iter().any(|w| {
-            w.addr == addr && if is_write { w.write } else { w.read }
-        }) {
+        if self
+            .watchpoints
+            .iter()
+            .any(|w| w.addr == addr && if is_write { w.write } else { w.read })
+        {
             self.watch_hit = Some(addr);
         }
     }

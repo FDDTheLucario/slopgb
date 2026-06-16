@@ -24,6 +24,7 @@ pub enum SubKind {
     WindowSize,
     SoundChannel,
     Other,
+    State,
 }
 
 /// What clicking a main-menu row does: run a shared frontend [`Action`], open a
@@ -126,8 +127,8 @@ fn entries(sound_on: bool) -> Vec<(MenuItem, MenuEffect)> {
             MenuEffect::Run(Action::ToggleTool(ToolWindow::Debugger)),
         ),
         (
-            MenuItem::new("State").submenu().disabled(),
-            MenuEffect::None,
+            MenuItem::new("State").submenu(),
+            MenuEffect::Submenu(SubKind::State),
         ),
         (
             MenuItem::new("Other").submenu(),
@@ -179,6 +180,10 @@ pub enum SubChoice {
     SystemInfo,
     /// Other → "About...": show the version info box.
     About,
+    /// State → "Quick Save": snapshot the machine.
+    QuickSave,
+    /// State → "Quick Load": restore the last snapshot.
+    QuickLoad,
 }
 
 /// An open child submenu (Window size or Sound channel): its kind, box origin
@@ -219,6 +224,16 @@ impl SubMenu {
     pub fn other(parent_row: Rect) -> Self {
         let (items, choices) = other_items().into_iter().unzip();
         Self::hang(SubKind::Other, parent_row, items, choices)
+    }
+
+    /// Open the [`SubKind::State`] submenu (`main-sub-state.png`) to the right of
+    /// `parent_row`. Quick Save / Quick Load (an in-memory snapshot) are live;
+    /// Select / Load recovery / Load state... stay greyed (the on-disk save-state
+    /// format isn't built — see `docs/bgb-menu-design.md` MN6).
+    #[must_use]
+    pub fn state(parent_row: Rect) -> Self {
+        let (items, choices) = state_items().into_iter().unzip();
+        Self::hang(SubKind::State, parent_row, items, choices)
     }
 
     /// Shared constructor: hang a submenu off the right edge of `parent_row`,
@@ -308,6 +323,28 @@ fn other_items() -> Vec<(MenuItem, Option<SubChoice>)> {
         greyed("debug mode enabled: *"),
         greyed("Close screen"),
         live("About...", SubChoice::About),
+    ]
+}
+
+/// The State rows (`main-sub-state.png`): Quick Save (F2) / Quick Load (F4) are
+/// the in-memory snapshot; Select / Load recovery / Load state... are greyed
+/// (the on-disk format isn't built).
+fn state_items() -> Vec<(MenuItem, Option<SubChoice>)> {
+    vec![
+        (
+            MenuItem::new("Quick Save").shortcut("F2"),
+            Some(SubChoice::QuickSave),
+        ),
+        (
+            MenuItem::new("Quick Load").shortcut("F4"),
+            Some(SubChoice::QuickLoad),
+        ),
+        (
+            MenuItem::new("Select").shortcut("F3").submenu().disabled(),
+            None,
+        ),
+        (MenuItem::new("Load recovery state").disabled(), None),
+        (MenuItem::new("Load state...").disabled(), None),
     ]
 }
 

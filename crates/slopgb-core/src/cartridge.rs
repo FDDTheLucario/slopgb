@@ -164,6 +164,7 @@ impl Rtc {
     }
 }
 
+#[derive(Clone)]
 enum Mapper {
     /// 0x00, 0x08, 0x09: ROM directly mapped, optional always-enabled RAM.
     None,
@@ -201,6 +202,7 @@ enum Mapper {
     },
 }
 
+#[derive(Clone)]
 pub struct Cartridge {
     /// ROM image, padded with 0xFF to a power of two (>= 32 KiB) so the bank
     /// mask mirrors reads the way unconnected high ROM address lines do.

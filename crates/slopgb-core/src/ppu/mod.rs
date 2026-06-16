@@ -191,6 +191,7 @@ const IF_STAT: u8 = 0x02;
 /// architectural registers — every mooneye anchor was calibrated there,
 /// and nothing mooneye can observe resolves below 4-dot granularity.
 /// See [`Ppu::stage_write`].
+#[derive(Clone)]
 struct PipeRegs {
     lcdc: u8,
     scy: u8,
@@ -205,6 +206,7 @@ struct PipeRegs {
 /// An IO write in flight on the bus: staged by the interconnect before the
 /// write M-cycle ticks, expiring into [`PipeRegs`] mid-cycle (see
 /// [`Ppu::stage_write`]).
+#[derive(Clone)]
 struct StagedWrite {
     addr: u16,
     value: u8,
@@ -212,6 +214,7 @@ struct StagedWrite {
     dots_left: u8,
 }
 
+#[derive(Clone)]
 pub struct Ppu {
     model: Model,
     frame_count: u64,

@@ -76,6 +76,7 @@ pub enum DebugReg {
 }
 
 /// A complete emulated Game Boy.
+#[derive(Clone)]
 pub struct GameBoy {
     cpu: cpu::Cpu,
     bus: interconnect::Interconnect,
@@ -491,6 +492,30 @@ mod tests {
         // Golden-safety: with no watchpoints set, the frame runs to completion.
         let mut gb = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
         assert_eq!(gb.run_frame_until_breakpoint(&[]), None);
+    }
+
+    #[test]
+    fn clone_is_an_independent_machine_snapshot() {
+        // The Quick Save/Load primitive (MN6): GameBoy: Clone must be a deep,
+        // independent copy — advancing one must not touch the other.
+        let mut gb = GameBoy::new(Model::Dmg, rom_with_cgb_flag(0x00)).unwrap();
+        gb.run_frame();
+        let snap = gb.clone();
+        let (pc0, cyc0) = (snap.cpu_regs().pc, snap.cycles());
+        for _ in 0..10 {
+            gb.run_frame();
+        }
+        assert_ne!(gb.cycles(), cyc0, "original advanced");
+        assert_eq!(snap.cycles(), cyc0, "clone is frozen at the snapshot");
+        assert_eq!(
+            snap.cpu_regs().pc,
+            pc0,
+            "clone PC unchanged by the original"
+        );
+        // Restoring rewinds the machine exactly to the snapshot.
+        let restored = snap.clone();
+        assert_eq!(restored.cycles(), cyc0);
+        assert_eq!(restored.cpu_regs().pc, pc0);
     }
 
     #[test]

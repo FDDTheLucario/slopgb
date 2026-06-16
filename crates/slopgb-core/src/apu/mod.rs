@@ -44,6 +44,7 @@ enum SkipDivEvent {
     Skipped,
 }
 
+#[derive(Clone)]
 pub struct Apu {
     cgb: bool,
     /// NR52 bit 7.

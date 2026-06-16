@@ -12,6 +12,7 @@
 //! decreasing) locks the envelope until the next trigger — that is how the
 //! hardware clamps without a comparator.
 
+#[derive(Clone)]
 pub(super) struct Envelope {
     /// NRx2 bits 7-4.
     pub(super) initial_volume: u8,

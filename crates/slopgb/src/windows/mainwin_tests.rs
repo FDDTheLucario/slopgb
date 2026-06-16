@@ -87,8 +87,10 @@ fn supported_rows_run_their_action_window_size_opens_a_submenu_rest_none() {
     // Options / Cheat open their info-box stubs (MN7).
     assert_eq!(m.effects[3], MenuEffect::Run(Action::MainOptions));
     assert_eq!(m.effects[4], MenuEffect::Run(Action::MainCheats));
+    // State opens its submenu (MN6 Quick Save/Load).
+    assert_eq!(m.effects[8], MenuEffect::Submenu(SubKind::State));
     // Greyed stubs + not-yet-wired submenu rows have no effect.
-    for i in [1, 8, 12, 13] {
+    for i in [1, 12, 13] {
         assert_eq!(m.effects[i], MenuEffect::None, "row {i} is a stub");
     }
 }
@@ -110,7 +112,8 @@ fn submenu_rows_show_the_arrow_window_size_enabled_others_greyed() {
         "Sound channel is wired (MN3)"
     );
     assert!(m.items[9].enabled, "Other is wired (MN5)");
-    for i in [8, 12, 13] {
+    assert!(m.items[8].enabled, "State is wired (MN6)");
+    for i in [12, 13] {
         assert!(!m.items[i].enabled, "row {i} greyed until its milestone");
     }
     assert!(!m.items[1].submenu, "Load ROM is a plain (greyed) item");
@@ -351,4 +354,30 @@ fn render_info_draws_the_box_and_text() {
     }
     assert!(buf.contains(&Theme::BGB.bg), "info box background filled");
     assert!(buf.contains(&Theme::BGB.text), "info text ink drawn");
+}
+
+// --- State submenu (MN6 Quick Save/Load) -----------------------------------
+
+#[test]
+fn state_submenu_has_quick_save_load_live_rest_greyed() {
+    let s = SubMenu::state(PARENT);
+    assert_eq!(s.kind, SubKind::State);
+    let labels: Vec<&str> = s.items.iter().map(|i| i.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        [
+            "Quick Save",
+            "Quick Load",
+            "Select",
+            "Load recovery state",
+            "Load state...",
+        ]
+    );
+    assert_eq!(s.choices[0], Some(SubChoice::QuickSave));
+    assert_eq!(s.choices[1], Some(SubChoice::QuickLoad));
+    // The on-disk-format rows stay greyed (MN6 deferred).
+    for i in [2, 3, 4] {
+        assert!(!s.items[i].enabled, "row {i} greyed");
+        assert_eq!(s.choices[i], None);
+    }
 }

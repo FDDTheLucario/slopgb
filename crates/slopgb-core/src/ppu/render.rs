@@ -103,6 +103,7 @@ enum FetchPhase {
     Push,
 }
 
+#[derive(Clone)]
 pub(super) struct Render {
     pub(super) active: bool,
     /// Next output pixel x (0-159).

@@ -25,6 +25,7 @@
 /// than any test ROM prints; completions past the cap are dropped.
 const OUT_CAPTURE_CAP: usize = 64 * 1024;
 
+#[derive(Clone)]
 pub struct Serial {
     cgb: bool,
     sb: u8,

@@ -109,6 +109,7 @@ pub trait Bus {
 }
 
 /// SM83 CPU. Owns architectural registers, IME, halt state.
+#[derive(Clone)]
 pub struct Cpu {
     regs: Registers,
     /// Interrupt master enable.

@@ -225,6 +225,12 @@ struct Session {
     last_saved: Option<Vec<u8>>,
     /// Emulated-cycle deadline for the next autosave.
     next_autosave: u64,
+    /// In-memory quick-save snapshot (bgb State → Quick Save / Quick Load): a
+    /// whole-machine clone, boxed (a `GameBoy` is large). `None` until the first
+    /// Quick Save. A ROM change (`load_dropped`) builds a fresh `Session`, so it
+    /// resets to `None`; it deliberately **survives a reset** so a Quick Load can
+    /// undo the reset (bgb's behavior — the snapshot is the same ROM).
+    quick_state: Option<Box<GameBoy>>,
 }
 
 impl Session {
@@ -266,7 +272,25 @@ impl Session {
             sav_path,
             last_saved,
             next_autosave: AUTOSAVE_CYCLES,
+            quick_state: None,
         })
+    }
+
+    /// Quick Save (bgb State → Quick Save): snapshot the whole machine into
+    /// memory, replacing any previous quick-save.
+    fn quick_save(&mut self) {
+        self.quick_state = Some(Box::new(self.gb.clone()));
+    }
+
+    /// Quick Load (bgb State → Quick Load): restore the last Quick Save, if any.
+    /// Returns whether a snapshot was restored (so the caller can resync pacing
+    /// / redraw only on a real load).
+    fn quick_load(&mut self) -> bool {
+        let Some(snap) = &self.quick_state else {
+            return false;
+        };
+        self.gb = (**snap).clone();
+        true
     }
 
     /// Power-cycle: fresh machine, save RAM reloaded from disk.
@@ -869,6 +893,7 @@ impl App {
             SubKind::WindowSize => SubMenu::window_size(row, self.window_size),
             SubKind::SoundChannel => SubMenu::sound_channel(row, self.channel_mutes()),
             SubKind::Other => SubMenu::other(row),
+            SubKind::State => SubMenu::state(row),
         }
     }
 
@@ -894,6 +919,16 @@ impl App {
             SubChoice::CartInfo => self.info_box = Some(self.cart_info_box()),
             SubChoice::SystemInfo => self.info_box = Some(self.system_info_box()),
             SubChoice::About => self.info_box = Some(about_box()),
+            // State → Quick Save / Quick Load (MN6): an in-memory whole-machine
+            // snapshot. A load resyncs pacing + repaints (the LCD jumped).
+            SubChoice::QuickSave => self.session.quick_save(),
+            SubChoice::QuickLoad => {
+                if self.session.quick_load() {
+                    self.resync_pacing();
+                    self.update_title();
+                    self.request_game_redraw();
+                }
+            }
         }
     }
 

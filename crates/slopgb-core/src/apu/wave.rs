@@ -11,6 +11,7 @@
 
 use super::length::LengthCounter;
 
+#[derive(Clone)]
 pub(super) struct Wave {
     cgb: bool,
     pub(super) enabled: bool,

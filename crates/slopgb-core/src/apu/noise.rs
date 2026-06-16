@@ -16,6 +16,7 @@
 use super::envelope::Envelope;
 use super::length::LengthCounter;
 
+#[derive(Clone)]
 pub(super) struct Noise {
     pub(super) enabled: bool,
     pub(super) dac: bool,

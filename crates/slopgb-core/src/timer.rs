@@ -30,6 +30,7 @@ pub struct TimerTick {
     pub late: bool,
 }
 
+#[derive(Clone)]
 pub struct Timer {
     div: u16,
     tima: u8,
