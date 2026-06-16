@@ -17,12 +17,13 @@ use crate::ui::canvas::{Canvas, Rect};
 use crate::ui::menu::{self, MenuItem};
 use crate::ui::{Theme, ToolWindow};
 
-/// Which submenu a main-menu row opens. `WindowSize` (MN2) and `SoundChannel`
-/// (MN3) are wired; the rest of bgb's submenus arrive in MN4–MN7.
+/// Which submenu a main-menu row opens. `WindowSize` (MN2), `SoundChannel`
+/// (MN3) and `Other` (MN5) are wired; the rest of bgb's submenus arrive later.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SubKind {
     WindowSize,
     SoundChannel,
+    Other,
 }
 
 /// What clicking a main-menu row does: run a shared frontend [`Action`], open a
@@ -129,8 +130,8 @@ fn entries(sound_on: bool) -> Vec<(MenuItem, MenuEffect)> {
             MenuEffect::None,
         ),
         (
-            MenuItem::new("Other").submenu().disabled(),
-            MenuEffect::None,
+            MenuItem::new("Other").submenu(),
+            MenuEffect::Submenu(SubKind::Other),
         ),
         (
             MenuItem::new("Sound channel").submenu(),
@@ -161,14 +162,23 @@ pub enum WindowSizeChoice {
     FullscreenStretched,
 }
 
-/// What activating a submenu row does. One variant per wired submenu so a
+/// What activating a submenu row does. One variant per wired submenu row so a
 /// single [`SubMenu`] type backs them all (the parent dispatches on the
-/// variant): a window-size change, or a toggle of sound channel 1-4.
+/// variant): a window-size change, a sound-channel mute toggle, or an "Other"
+/// submenu action (open the VRAM viewer / show an info box).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SubChoice {
     WindowSize(WindowSizeChoice),
     /// Toggle mute on the given sound channel (1-4).
     SoundChannel(u8),
+    /// Other → "VRAM viewer": open the VRAM tool window.
+    OpenVram,
+    /// Other → "Cart info": show the cartridge-header info box.
+    CartInfo,
+    /// Other → "System info": show the emulated-model info box.
+    SystemInfo,
+    /// Other → "About...": show the version info box.
+    About,
 }
 
 /// An open child submenu (Window size or Sound channel): its kind, box origin
@@ -199,6 +209,16 @@ impl SubMenu {
     pub fn sound_channel(parent_row: Rect, muted: [bool; 4]) -> Self {
         let (items, choices) = sound_channel_items(muted).into_iter().unzip();
         Self::hang(SubKind::SoundChannel, parent_row, items, choices)
+    }
+
+    /// Open the [`SubKind::Other`] submenu (`main-sub-other.png`) to the right of
+    /// `parent_row`. Cart info / System info / VRAM viewer / About are live; the
+    /// rest (cheat searcher / Camera / clear-recent / debug-mode / Close screen)
+    /// stay greyed (their subsystems aren't built).
+    #[must_use]
+    pub fn other(parent_row: Rect) -> Self {
+        let (items, choices) = other_items().into_iter().unzip();
+        Self::hang(SubKind::Other, parent_row, items, choices)
     }
 
     /// Shared constructor: hang a submenu off the right edge of `parent_row`,
@@ -271,6 +291,82 @@ fn sound_channel_items(muted: [bool; 4]) -> Vec<(MenuItem, Option<SubChoice>)> {
             (item, Some(SubChoice::SoundChannel(ch)))
         })
         .collect()
+}
+
+/// The Other rows (`main-sub-other.png`), item-for-item; the wired ones carry a
+/// [`SubChoice`], the not-built ones render greyed with no choice.
+fn other_items() -> Vec<(MenuItem, Option<SubChoice>)> {
+    let live = |label: &str, c: SubChoice| (MenuItem::new(label), Some(c));
+    let greyed = |label: &str| (MenuItem::new(label).disabled(), None);
+    vec![
+        live("Cart info", SubChoice::CartInfo),
+        live("System info", SubChoice::SystemInfo),
+        live("VRAM viewer", SubChoice::OpenVram),
+        greyed("cheat searcher"),
+        greyed("Camera control..."),
+        greyed("clear recent roms list"),
+        greyed("debug mode enabled: *"),
+        greyed("Close screen"),
+        live("About...", SubChoice::About),
+    ]
+}
+
+// --- Info box (MN5): a centred message overlay over the LCD -----------------
+
+/// A read-only info box (Other → Cart info / System info / About): a centred
+/// titled panel of text lines drawn over the LCD. Any click or Escape closes it
+/// (`main` owns the `Option<InfoBox>` and routes those, like the menus).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InfoBox {
+    pub title: String,
+    pub lines: Vec<String>,
+}
+
+impl InfoBox {
+    #[must_use]
+    pub fn new(title: impl Into<String>, lines: Vec<String>) -> Self {
+        Self {
+            title: title.into(),
+            lines,
+        }
+    }
+}
+
+/// Draw the info box centred in the canvas: a bordered panel, the title, then
+/// each line, then an `OK` hint at the bottom.
+pub fn render_info(c: &mut Canvas, info: &InfoBox, theme: &Theme) {
+    use crate::ui::text::{draw_text, line_height, measure};
+    let lh = line_height();
+    let pad = 8;
+    // Size the box to the widest of the title / lines / "OK", plus padding.
+    let widest = std::iter::once(info.title.as_str())
+        .chain(info.lines.iter().map(String::as_str))
+        .chain(std::iter::once("OK"))
+        .map(measure)
+        .max()
+        .unwrap_or(0);
+    let w = widest + 2 * pad;
+    // title + blank + lines + blank + OK row.
+    let rows = info.lines.len() as i32 + 3;
+    let h = rows * lh + 2 * pad;
+    let area = c.bounds();
+    let x = area.x + (area.w - w) / 2;
+    let y = area.y + (area.h - h) / 2;
+    let boxr = Rect::new(x, y, w, h);
+    c.fill_rect(boxr, theme.bg);
+    c.outline_rect(boxr, theme.border);
+    draw_text(c, x + pad, y + pad, &info.title, theme.text);
+    for (i, line) in info.lines.iter().enumerate() {
+        draw_text(c, x + pad, y + pad + (i as i32 + 2) * lh, line, theme.text);
+    }
+    // A simple OK affordance bottom-right (any click closes the box).
+    draw_text(
+        c,
+        boxr.right() - pad - measure("OK"),
+        boxr.bottom() - pad - lh,
+        "OK",
+        theme.text,
+    );
 }
 
 #[cfg(test)]

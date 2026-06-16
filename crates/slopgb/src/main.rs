@@ -43,7 +43,9 @@ use ui::canvas::Rect;
 use ui::dialog::DialogKey;
 use video::Video;
 use windows::debugger::MenuOutcome;
-use windows::mainwin::{MainMenu, MenuEffect, SubChoice, SubKind, SubMenu, WindowSizeChoice};
+use windows::mainwin::{
+    InfoBox, MainMenu, MenuEffect, SubChoice, SubKind, SubMenu, WindowSizeChoice,
+};
 
 /// Top-left origin of the bp/wp manager list popup, below the debugger menu bar.
 const MANAGER_ORIGIN: (i32, i32) = (40, 30);
@@ -446,9 +448,12 @@ struct App {
     /// The open game-window right-click menu (bgb's `rc-main.png`), if any —
     /// drawn as an overlay over the LCD and routed by the game-window mouse.
     main_menu: Option<MainMenu>,
-    /// The open child submenu (currently only Window size), drawn to the right of
-    /// its parent row over the main menu.
+    /// The open child submenu (Window size / Sound channel / Other), drawn to the
+    /// right of its parent row over the main menu.
     main_submenu: Option<SubMenu>,
+    /// An open info box (Other → Cart info / System info / About), drawn centred
+    /// over the LCD; any click or Escape closes it.
+    info_box: Option<InfoBox>,
     /// The current window size, for the "Window size" submenu check-mark and the
     /// stretched-fullscreen blit. Init from `--scale`.
     window_size: WindowSizeChoice,
@@ -480,6 +485,7 @@ impl App {
             tools: toolwin::ToolWindows::new(),
             dbg: dbg::Debugger::default(),
             modifiers: ModifiersState::empty(),
+            info_box: None,
             main_menu: None,
             main_submenu: None,
             window_size,
@@ -512,6 +518,7 @@ impl App {
         // (captures locals, not `self`, so the disjoint field borrows stay clean).
         let menu = self.main_menu.as_ref();
         let sub = self.main_submenu.as_ref();
+        let info = self.info_box.as_ref();
         let theme = ui::Theme::BGB;
         let stretch = self.window_size == WindowSizeChoice::FullscreenStretched;
         if let Err(e) = video.draw(window, frame, stretch, |canvas| {
@@ -520,6 +527,10 @@ impl App {
             }
             if let Some(s) = sub {
                 windows::mainwin::render_sub(canvas, s, &theme);
+            }
+            // The info box draws on top of everything (it's modal).
+            if let Some(i) = info {
+                windows::mainwin::render_info(canvas, i, &theme);
             }
         }) {
             eprintln!("slopgb: failed to present frame: {e}");
@@ -537,13 +548,14 @@ impl App {
         if key.repeat {
             return;
         }
-        // With the game-window menu open, Escape closes it (rather than quitting
-        // the emulator) and is swallowed so it can't also fire a hotkey. An open
-        // submenu peels off first, then the main menu.
-        let menu_open = self.main_menu.is_some() || self.main_submenu.is_some();
-        if focus == Focus::Game && key.state.is_pressed() && menu_open {
+        // With a game-window overlay open, Escape closes it (rather than quitting
+        // the emulator) and is swallowed so it can't also fire a hotkey. The info
+        // box peels first, then an open submenu, then the main menu.
+        let overlay_open =
+            self.info_box.is_some() || self.main_menu.is_some() || self.main_submenu.is_some();
+        if focus == Focus::Game && key.state.is_pressed() && overlay_open {
             if let PhysicalKey::Code(KeyCode::Escape) = key.physical_key {
-                if self.main_submenu.take().is_none() {
+                if self.info_box.take().is_none() && self.main_submenu.take().is_none() {
                     self.main_menu = None;
                 }
                 self.request_game_redraw();
@@ -789,6 +801,11 @@ impl App {
     /// dismisses (a click off both popups closes them).
     fn on_game_click(&mut self, button: MouseButton, event_loop: &ActiveEventLoop) {
         let (px, py) = self.game_cursor;
+        // An open info box is modal: any click dismisses it and is swallowed.
+        if self.info_box.take().is_some() {
+            self.request_game_redraw();
+            return;
+        }
         if button == MouseButton::Right {
             self.main_submenu = None;
             self.main_menu = Some(MainMenu::open((px, py), !self.muted));
@@ -798,7 +815,7 @@ impl App {
         // A click on the open submenu applies its choice and closes everything.
         if let Some(sub) = &self.main_submenu {
             if let Some(choice) = sub.choice_at(px, py) {
-                self.apply_sub_choice(choice);
+                self.apply_sub_choice(choice, event_loop);
                 self.main_submenu = None;
                 self.main_menu = None;
                 self.request_game_redraw();
@@ -833,6 +850,7 @@ impl App {
         match kind {
             SubKind::WindowSize => SubMenu::window_size(row, self.window_size),
             SubKind::SoundChannel => SubMenu::sound_channel(row, self.channel_mutes()),
+            SubKind::Other => SubMenu::other(row),
         }
     }
 
@@ -843,15 +861,40 @@ impl App {
     }
 
     /// Apply a submenu activation: dispatch on the variant to the window-size
-    /// resize or a per-channel mute toggle.
-    fn apply_sub_choice(&mut self, choice: SubChoice) {
+    /// resize, a per-channel mute toggle, or an "Other" action (open the VRAM
+    /// viewer / show an info box).
+    fn apply_sub_choice(&mut self, choice: SubChoice, event_loop: &ActiveEventLoop) {
         match choice {
             SubChoice::WindowSize(c) => self.apply_window_size(c),
             SubChoice::SoundChannel(ch) => {
                 let now = self.session.gb.channel_muted(ch);
                 self.session.gb.set_channel_mute(ch, !now);
             }
+            SubChoice::OpenVram => {
+                self.run_action(Action::ToggleTool(ui::ToolWindow::Vram), event_loop);
+            }
+            SubChoice::CartInfo => self.info_box = Some(self.cart_info_box()),
+            SubChoice::SystemInfo => self.info_box = Some(self.system_info_box()),
+            SubChoice::About => self.info_box = Some(about_box()),
         }
+    }
+
+    /// Cartridge-header facts for the Other → "Cart info" box, parsed from the
+    /// loaded ROM image (the frontend already holds it for reset).
+    fn cart_info_box(&self) -> InfoBox {
+        InfoBox::new("Cart info", cart_info_lines(&self.session.rom_bytes))
+    }
+
+    /// Emulated-model facts for the Other → "System info" box.
+    fn system_info_box(&self) -> InfoBox {
+        InfoBox::new(
+            "System info",
+            vec![
+                format!("model: {:?}", self.session.model),
+                format!("clock: {} Hz", CLOCK_HZ),
+                format!("double speed: {}", self.session.gb.double_speed()),
+            ],
+        )
     }
 
     /// Apply a "Window size" submenu choice: an integer scale resizes the window
@@ -1057,6 +1100,76 @@ fn dialog_key_from(key: &KeyEvent) -> Option<DialogKey> {
 #[must_use]
 fn audio_pacing(has_audio: bool, muted: bool) -> bool {
     has_audio && !muted
+}
+
+/// Cartridge-header facts (Pan Docs "The Cartridge Header") for the Other →
+/// "Cart info" box, parsed straight from the ROM image.
+fn cart_info_lines(rom: &[u8]) -> Vec<String> {
+    if rom.len() < 0x150 {
+        return vec!["(ROM too small for a header)".into()];
+    }
+    let title: String = rom[0x134..0x143]
+        .iter()
+        .take_while(|&&b| b != 0)
+        .filter(|&&b| (0x20..0x7F).contains(&b))
+        .map(|&b| b as char)
+        .collect();
+    let cgb = match rom[0x143] {
+        0xC0 => "CGB only",
+        0x80 => "CGB+DMG",
+        _ => "DMG",
+    };
+    let ram = match rom[0x149] {
+        0 => "none",
+        1 => "2 KiB",
+        2 => "8 KiB",
+        3 => "32 KiB",
+        4 => "128 KiB",
+        5 => "64 KiB",
+        _ => "?",
+    };
+    // 32 KiB << header byte; a malformed (too-large) byte yields 0, never a
+    // shift-overflow panic.
+    let rom_kb = 32u32.checked_shl(u32::from(rom[0x148])).unwrap_or(0);
+    vec![
+        format!("title: {}", title.trim()),
+        format!("type:  {:02X} {}", rom[0x147], cart_type_name(rom[0x147])),
+        format!("rom:   {rom_kb} KiB"),
+        format!("ram:   {ram}"),
+        format!("cgb:   {cgb}"),
+    ]
+}
+
+/// The MBC / mapper family for a cartridge-type byte (header `$0147`).
+fn cart_type_name(t: u8) -> &'static str {
+    match t {
+        0x00 => "ROM ONLY",
+        0x01..=0x03 => "MBC1",
+        0x05 | 0x06 => "MBC2",
+        0x08 | 0x09 => "ROM+RAM",
+        0x0B..=0x0D => "MMM01",
+        0x0F..=0x13 => "MBC3",
+        0x19..=0x1E => "MBC5",
+        0x20 => "MBC6",
+        0x22 => "MBC7",
+        0xFC => "POCKET CAMERA",
+        0xFD => "BANDAI TAMA5",
+        0xFE => "HuC3",
+        0xFF => "HuC1",
+        _ => "?",
+    }
+}
+
+/// The Other → "About..." info box.
+fn about_box() -> InfoBox {
+    InfoBox::new(
+        "About slopgb",
+        vec![
+            format!("slopgb {}", env!("CARGO_PKG_VERSION")),
+            "cycle-accurate GB/GBC emulator".into(),
+            "bgb-style debugger UI clone".into(),
+        ],
+    )
 }
 
 /// Run one frame, halting early at a breakpoint when armed. A free function (not
@@ -1279,6 +1392,24 @@ mod tests {
 
     fn parse(args: &[&str]) -> Result<ParseOutcome, String> {
         Options::parse(args.iter().map(ToString::to_string))
+    }
+
+    #[test]
+    fn cart_info_lines_parse_the_header() {
+        let mut rom = vec![0u8; 0x8000];
+        rom[0x134..0x13B].copy_from_slice(b"POKEMON"); // title
+        rom[0x143] = 0xC0; // CGB only
+        rom[0x147] = 0x13; // MBC3+RAM+BATTERY
+        rom[0x148] = 0x05; // 32 KiB << 5 = 1 MiB
+        rom[0x149] = 0x03; // 32 KiB RAM
+        let l = cart_info_lines(&rom);
+        assert_eq!(l[0], "title: POKEMON");
+        assert!(l[1].contains("13 MBC3"), "{}", l[1]);
+        assert_eq!(l[2], "rom:   1024 KiB");
+        assert_eq!(l[3], "ram:   32 KiB");
+        assert_eq!(l[4], "cgb:   CGB only");
+        // A too-small ROM doesn't panic.
+        assert_eq!(cart_info_lines(&[0u8; 4]).len(), 1);
     }
 
     #[test]

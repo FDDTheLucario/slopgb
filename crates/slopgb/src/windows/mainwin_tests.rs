@@ -79,8 +79,13 @@ fn supported_rows_run_their_action_window_size_opens_a_submenu_rest_none() {
         MenuEffect::Run(Action::SaveScreenshot),
         "Save screenshot is wired (MN4)"
     );
+    assert_eq!(
+        m.effects[9],
+        MenuEffect::Submenu(SubKind::Other),
+        "Other opens its submenu (MN5)"
+    );
     // Greyed stubs + not-yet-wired submenu rows have no effect.
-    for i in [1, 3, 4, 8, 9, 12, 13] {
+    for i in [1, 3, 4, 8, 12, 13] {
         assert_eq!(m.effects[i], MenuEffect::None, "row {i} is a stub");
     }
 }
@@ -101,7 +106,8 @@ fn submenu_rows_show_the_arrow_window_size_enabled_others_greyed() {
         m.items[SOUND_CHANNEL_ROW].enabled,
         "Sound channel is wired (MN3)"
     );
-    for i in [8, 9, 12, 13] {
+    assert!(m.items[9].enabled, "Other is wired (MN5)");
+    for i in [8, 12, 13] {
         assert!(!m.items[i].enabled, "row {i} greyed until its milestone");
     }
     assert!(!m.items[1].submenu, "Load ROM is a plain (greyed) item");
@@ -282,4 +288,64 @@ fn sound_channel_choice_at_resolves_the_clicked_channel() {
     let (x3, y3) = centre(2); // row "3"
     assert_eq!(s.choice_at(x3, y3), Some(SubChoice::SoundChannel(3)));
     assert_eq!(s.choice_at(-99, -99), None, "outside the box");
+}
+
+// --- Other submenu + info box (MN5) ----------------------------------------
+
+#[test]
+fn other_submenu_has_the_captured_rows_live_and_greyed() {
+    let s = SubMenu::other(PARENT);
+    assert_eq!(s.kind, SubKind::Other);
+    let labels: Vec<&str> = s.items.iter().map(|i| i.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        [
+            "Cart info",
+            "System info",
+            "VRAM viewer",
+            "cheat searcher",
+            "Camera control...",
+            "clear recent roms list",
+            "debug mode enabled: *",
+            "Close screen",
+            "About...",
+        ]
+    );
+    assert_eq!(s.choices[0], Some(SubChoice::CartInfo));
+    assert_eq!(s.choices[1], Some(SubChoice::SystemInfo));
+    assert_eq!(s.choices[2], Some(SubChoice::OpenVram));
+    assert_eq!(s.choices[8], Some(SubChoice::About));
+    // The not-built rows are greyed with no choice.
+    for i in [3, 4, 5, 6, 7] {
+        assert!(!s.items[i].enabled, "row {i} greyed");
+        assert_eq!(s.choices[i], None, "row {i} has no choice");
+    }
+}
+
+#[test]
+fn other_choice_at_resolves_only_enabled_rows() {
+    let s = SubMenu::other(PARENT);
+    let rects = menu_rects(s.origin, &s.items);
+    let centre = |i: usize| (rects[i].x + rects[i].w / 2, rects[i].y + rects[i].h / 2);
+    let (xc, yc) = centre(0); // "Cart info"
+    assert_eq!(s.choice_at(xc, yc), Some(SubChoice::CartInfo));
+    let (xg, yg) = centre(3); // "cheat searcher" (greyed)
+    assert_eq!(s.choice_at(xg, yg), None, "greyed row resolves to None");
+}
+
+#[test]
+fn render_info_draws_the_box_and_text() {
+    use crate::ui::Canvas;
+    let info = InfoBox::new(
+        "Cart info",
+        vec!["title: TEST".into(), "rom: 32 KiB".into()],
+    );
+    let (w, h) = (220usize, 130usize);
+    let mut buf = vec![0x00AA_AAAA_u32; w * h];
+    {
+        let mut c = Canvas::new(&mut buf, w, h);
+        render_info(&mut c, &info, &Theme::BGB);
+    }
+    assert!(buf.contains(&Theme::BGB.bg), "info box background filled");
+    assert!(buf.contains(&Theme::BGB.text), "info text ink drawn");
 }
