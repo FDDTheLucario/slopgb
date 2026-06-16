@@ -165,6 +165,22 @@ fn sound_volume_slider_full_range() {
     );
 }
 
+// --- JP5: configure-keyboard routes an outcome -------------------------------
+
+#[test]
+fn configure_keyboard_button_routes_outcome_without_applying_or_closing() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Joypad;
+    let before = st.working;
+    let r = field_rect(OptionsTab::Joypad, &st.working, Field::ConfigureKeyboard);
+    let out = st.on_click(r.x + r.w / 2, r.y + r.h / 2, BOUNDS);
+    assert_eq!(out, Some(OptionsOutcome::ConfigureKeyboard));
+    // It opens the wizard, not a settings change, and never closes the dialog.
+    assert_eq!(st.working, before, "no settings mutated");
+    assert!(!OptionsOutcome::ConfigureKeyboard.applies());
+    assert!(!OptionsOutcome::ConfigureKeyboard.closes());
+}
+
 // --- Task 5: scratch / button semantics --------------------------------------
 
 #[test]
@@ -400,15 +416,80 @@ fn misc_tab_pacing_sliders() {
 }
 
 #[test]
-fn joypad_tab_is_fully_inert() {
+fn joypad_tab_live_controls_are_the_functional_ones() {
+    // "configure keyboard" is the only live control on the Joypad tab at this
+    // point (JP7 adds "allow pressing L+R or U+D"); the rest are faithful but
+    // inert (no gamepad/recording/joystick backend).
     let s = Settings::default();
     let content = OptionsState::content_rect(dialog());
+    let live: Vec<_> = controls(OptionsTab::Joypad, &s, content)
+        .into_iter()
+        .filter_map(|c| c.field)
+        .collect();
     assert!(
-        controls(OptionsTab::Joypad, &s, content)
-            .iter()
-            .all(|c| c.field.is_none()),
-        "Joypad tab has no live controls"
+        live.contains(&Field::ConfigureKeyboard),
+        "configure keyboard is live"
     );
+    assert!(
+        live.contains(&Field::AllowOpposing),
+        "allow L+R / U+D is live"
+    );
+}
+
+#[test]
+fn joypad_tab_transcribes_the_capture_controls() {
+    // JP8: the inert chrome matching options-joypad.png is present (dropdowns,
+    // the Mappable-button-records groupbox + its checks, the joystick-ID field).
+    use super::tabs::Kind;
+    let s = Settings::default();
+    let content = OptionsState::content_rect(dialog());
+    let ctrls = controls(OptionsTab::Joypad, &s, content);
+    let has_dropdown = |val: &str| {
+        ctrls.iter().any(|c| {
+            matches!(&c.kind, Kind::Dropdown { value, .. } if value == val) && c.field.is_none()
+        })
+    };
+    assert!(has_dropdown("saves"), "Screenshot button dropdown");
+    assert!(has_dropdown("bmp"), "Screenshots dropdown");
+    assert!(has_dropdown("2 2"), "Rapid speed dropdown");
+    assert!(
+        ctrls
+            .iter()
+            .any(|c| matches!(&c.kind, Kind::GroupBox { label, .. }
+            if *label == "Mappable button records")),
+        "Mappable button records groupbox"
+    );
+    for label in ["Audio", "Video", "Audio channels"] {
+        assert!(
+            ctrls.iter().any(
+                |c| matches!(&c.kind, Kind::Check { label: l, .. } if *l == label)
+                    && c.field.is_none()
+            ),
+            "inert check {label}"
+        );
+    }
+    assert!(
+        ctrls
+            .iter()
+            .any(|c| matches!(&c.kind, Kind::Button { label, .. } if *label == "0")),
+        "joystick-ID field"
+    );
+}
+
+#[test]
+fn allow_opposing_defaults_off_toggles_and_resets() {
+    // bgb default: "allow pressing L+R or U+D" unchecked (filter on).
+    assert!(!Settings::default().allow_opposing);
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Joypad;
+    click_field(&mut st, Field::AllowOpposing);
+    assert!(
+        st.working.allow_opposing,
+        "click toggles the SOCD filter off"
+    );
+    // Defaults restores it (the only live Joypad Settings field).
+    st.press(OptionsButton::Defaults);
+    assert!(!st.working.allow_opposing, "Defaults restores filter on");
 }
 
 #[test]

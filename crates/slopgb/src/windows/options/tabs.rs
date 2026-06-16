@@ -36,6 +36,11 @@ pub(crate) enum Field {
     /// Framerate-limit slider (maps the click fraction to the `FRAMERATE_STEPS`).
     FramerateLimit,
     SchemeCycle,
+    /// Joypad → "configure keyboard": opens the key-rebind wizard (does not
+    /// mutate [`Settings`]; routes a [`super::OptionsOutcome`] out instead).
+    ConfigureKeyboard,
+    /// Joypad → "allow pressing L+R or U+D" (the SOCD filter toggle).
+    AllowOpposing,
 }
 
 /// Fast-forward speed slider range (1..=`FF_SPEED_MAX`).
@@ -184,14 +189,26 @@ pub(crate) fn render(tab: OptionsTab, s: &Settings, c: &mut Canvas, content: Rec
 }
 
 /// Apply a content click: the first live control containing the point fires.
-pub(crate) fn on_content_click(tab: OptionsTab, s: &mut Settings, px: i32, py: i32, content: Rect) {
+/// Most controls mutate `s` and return `None`; a few (e.g. "configure
+/// keyboard") route a [`super::OptionsOutcome`] back to the caller instead.
+pub(crate) fn on_content_click(
+    tab: OptionsTab,
+    s: &mut Settings,
+    px: i32,
+    py: i32,
+    content: Rect,
+) -> Option<super::OptionsOutcome> {
     // Build against an immutable snapshot so the borrow ends before we mutate.
     let hit = controls(tab, s, content)
         .into_iter()
         .find(|ct| ct.field.is_some() && ct.rect.contains(px, py));
-    let Some(ct) = hit else { return };
-    let Some(field) = ct.field else { return };
+    let ct = hit?;
+    let field = ct.field?;
+    if field == Field::ConfigureKeyboard {
+        return Some(super::OptionsOutcome::ConfigureKeyboard);
+    }
     apply(field, s, &ct, px);
+    None
 }
 
 fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
@@ -217,6 +234,9 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
             s.framerate_limit = FRAMERATE_STEPS[idx.min(FRAMERATE_STEPS.len() - 1)];
         }
         Field::SchemeCycle => s.select_scheme((s.scheme + 1) % SCHEMES.len()),
+        Field::AllowOpposing => s.allow_opposing = !s.allow_opposing,
+        // Routed out by `on_content_click` before reaching here.
+        Field::ConfigureKeyboard => {}
     }
 }
 
@@ -238,7 +258,8 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
             s.mono = d.mono;
         }
         OptionsTab::GbColors => s.select_scheme(d.scheme),
-        OptionsTab::Joypad => {}
+        // configure-keyboard is not a Settings field; only the SOCD toggle resets.
+        OptionsTab::Joypad => s.allow_opposing = d.allow_opposing,
         OptionsTab::Misc => {
             s.ff_speed = d.ff_speed;
             s.framerate_limit = d.framerate_limit;
@@ -555,10 +576,19 @@ fn gb_colors(s: &Settings, content: Rect) -> Vec<Ctrl> {
     v
 }
 
-fn joypad(_s: &Settings, content: Rect) -> Vec<Ctrl> {
+fn joypad(s: &Settings, content: Rect) -> Vec<Ctrl> {
+    // Single column: like the Misc tab, slopgb's font is wide enough that bgb's
+    // two-column Joypad layout (`options-joypad.png`) would overlap (the long
+    // "configure game controller" / focus-check labels span the whole width), so
+    // the controls stack vertically — functional 1:1, not pixel. The two live
+    // controls are "configure keyboard" (the key-rebind wizard) and "allow
+    // pressing L+R or U+D" (SOCD toggle); the rest is inert (no gamepad /
+    // WAV-AVI recording / joystick backend under the winit/softbuffer/cpal rule).
     let mut l = Lay::new(content);
     let mut v = Vec::new();
-    // Fully inert: faithful transcription of the capture (no slopgb backend).
+    let btn = |label: &'static str, w: i32| Kind::Button { label, w };
+
+    // The joypad selector.
     v.push(Ctrl::inert(
         Rect::new(l.x, l.y, 110, line_height() + 2),
         Kind::Dropdown {
@@ -566,36 +596,79 @@ fn joypad(_s: &Settings, content: Rect) -> Vec<Ctrl> {
             w: 110,
         },
     ));
-    v.push(Ctrl::inert(
-        rc(l.col(150).at(), "Screenshot button:"),
-        Kind::Label {
-            text: "Screenshot button: saves".into(),
-        },
+    l.row();
+    // "configure keyboard" is live — it opens the key-rebind wizard.
+    v.push(Ctrl::live(
+        Rect::new(l.x, l.y, 150, line_height() + 4),
+        btn("configure keyboard", 150),
+        Field::ConfigureKeyboard,
     ));
     l.row();
-    l.row();
-    for label in [
-        "configure keyboard",
-        "configure game controller",
-        "clear game controller",
-    ] {
+    for label in ["configure game controller", "clear game controller"] {
         v.push(Ctrl::inert(
-            Rect::new(l.x, l.y, 150, line_height() + 4),
-            Kind::Button { label, w: 150 },
+            Rect::new(l.x, l.y, 180, line_height() + 4),
+            btn(label, 180),
         ));
         l.row();
     }
-    l.row();
     v.push(Ctrl::inert(
         rc(l.at(), "configure extra buttons"),
         chk("configure extra buttons", false),
     ));
     l.row();
+
+    // The inert recording/screenshot/rapid-speed combos, each on its own row.
+    draw_label_combo(&mut v, &mut l, "Screenshot button:", "saves");
+    l.row();
+    draw_label_combo(&mut v, &mut l, "Screenshots:", "bmp");
+    l.row();
+    draw_label_combo(&mut v, &mut l, "Rapid speed:", "2 2");
+    l.row();
+
+    // Mappable button records groupbox (Audio / Video / Audio channels).
+    let group_h = 2 * line_height() + 14;
+    let (gx, gy) = (l.x, l.y);
     v.push(Ctrl::inert(
-        rc(l.at(), "allow pressing L+R or U+D"),
-        chk("allow pressing L+R or U+D", false),
+        Rect::new(gx, gy, 200, group_h),
+        Kind::GroupBox {
+            label: "Mappable button records",
+            w: 200,
+            h: group_h,
+        },
+    ));
+    let grow = gy + line_height() + 2;
+    v.push(Ctrl::inert(rc((gx + 8, grow), "Audio"), chk("Audio", true)));
+    v.push(Ctrl::inert(
+        rc((gx + 80, grow), "Video"),
+        chk("Video", true),
+    ));
+    v.push(Ctrl::inert(
+        rc((gx + 8, grow + line_height()), "Audio channels"),
+        chk("Audio channels", false),
+    ));
+    l.y += group_h + 2;
+
+    // The MBC7 joystick-ID field (parenthetical game name dropped to fit slopgb's
+    // wider font — the control's function is unchanged, still inert).
+    v.push(Ctrl::inert(
+        Rect::new(l.x, l.y, 24, line_height() + 2),
+        Kind::Button { label: "0", w: 24 },
+    ));
+    v.push(text_label(
+        (l.x + 32, l.y + 1),
+        "use joystick (ID) for MBC7".to_string(),
     ));
     l.row();
+
+    // "allow pressing L+R or U+D" is live — the SOCD filter toggle.
+    v.push(Ctrl::live(
+        rc(l.at(), "allow pressing L+R or U+D"),
+        chk("allow pressing L+R or U+D", s.allow_opposing),
+        Field::AllowOpposing,
+    ));
+    l.row();
+    // The focus checkboxes (inert — winit only delivers keys to the focused
+    // window, so these are always effectively checked).
     v.push(Ctrl::inert(
         rc(l.at(), "Game controller works only if app has focus"),
         chk("Game controller works only if app has focus", true),
@@ -708,7 +781,7 @@ fn text_label((x, y): (i32, i32), text: String) -> Ctrl {
     let rect = Rect::new(x, y, measure(&text), line_height());
     Ctrl::inert(rect, Kind::Label { text })
 }
-/// Push a "label: [combo]" pair at the cursor (both inert).
+/// Push a `label: combo` pair at the cursor (both inert).
 fn draw_label_combo(v: &mut Vec<Ctrl>, l: &mut Lay, label: &'static str, val: &str) {
     let (x, y) = l.at();
     v.push(Ctrl::inert(

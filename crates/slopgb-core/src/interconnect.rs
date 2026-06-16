@@ -641,6 +641,12 @@ impl Interconnect {
         &mut self.joypad
     }
 
+    /// Read-only joypad handle (debugger/UI; side-effect-free).
+    #[must_use]
+    pub fn joypad(&self) -> &Joypad {
+        &self.joypad
+    }
+
     pub fn cartridge(&self) -> &Cartridge {
         &self.cart
     }

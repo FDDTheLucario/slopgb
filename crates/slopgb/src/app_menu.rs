@@ -11,10 +11,12 @@ use winit::window::Fullscreen;
 use slopgb_core::{CLOCK_HZ, SCREEN_H, SCREEN_W};
 
 use crate::input::Action;
+use crate::keymap::WizardButton;
 use crate::ui::canvas::Rect;
 use crate::windows::mainwin::{
     InfoBox, MainMenu, MenuEffect, SubChoice, SubKind, SubMenu, WindowSizeChoice,
 };
+use crate::windows::options::OptionsOutcome;
 use crate::{App, ui, windows};
 
 impl App {
@@ -24,6 +26,36 @@ impl App {
     /// dismisses (a click off both popups closes them).
     pub(crate) fn on_game_click(&mut self, button: MouseButton, event_loop: &ActiveEventLoop) {
         let (px, py) = self.game_cursor;
+        // The key-rebind wizard floats above everything (incl. Options): only a
+        // left-click on one of its three buttons acts; anything else is swallowed
+        // (a stray click can't leak to the dialog/menu beneath it).
+        if self.key_wizard.is_some() {
+            if button == MouseButton::Left {
+                let area = self.window_area();
+                let hit = self
+                    .key_wizard
+                    .as_ref()
+                    .and_then(|w| w.button_at(area, px, py));
+                match hit {
+                    Some(WizardButton::Cancel) => self.key_wizard = None,
+                    Some(WizardButton::SkipKeep) => {
+                        if let Some(w) = self.key_wizard.as_mut() {
+                            w.skip_keep();
+                        }
+                        self.commit_wizard_if_done();
+                    }
+                    Some(WizardButton::SkipClear) => {
+                        if let Some(w) = self.key_wizard.as_mut() {
+                            w.skip_clear();
+                        }
+                        self.commit_wizard_if_done();
+                    }
+                    None => {}
+                }
+            }
+            self.request_game_redraw();
+            return;
+        }
         // The Options control panel is the topmost modal: only the left button
         // acts (tabs/controls/buttons); a right-click is swallowed so it can't be
         // misread as a left-click toggling a setting. OK/Cancel/Apply applies the
@@ -35,16 +67,22 @@ impl App {
             let area = self.window_area();
             let outcome = self.options.as_mut().and_then(|o| o.on_click(px, py, area));
             if let Some(out) = outcome {
-                // OK/Apply push working live; Cancel/Defaults do not (Defaults only
-                // edits the controls, matching bgb — nothing goes live until OK/Apply).
-                if out.applies() {
-                    if let Some(o) = &self.options {
-                        self.settings = o.working;
+                if out == OptionsOutcome::ConfigureKeyboard {
+                    // Float the key-rebind wizard above the (still-open) dialog.
+                    self.open_key_wizard();
+                } else {
+                    // OK/Apply push working live; Cancel/Defaults do not (Defaults
+                    // only edits the controls, matching bgb — nothing goes live
+                    // until OK/Apply).
+                    if out.applies() {
+                        if let Some(o) = &self.options {
+                            self.settings = o.working;
+                        }
+                        self.apply_settings();
                     }
-                    self.apply_settings();
-                }
-                if out.closes() {
-                    self.options = None;
+                    if out.closes() {
+                        self.options = None;
+                    }
                 }
             }
             self.request_game_redraw();

@@ -77,6 +77,99 @@ fn blank_app_starts_not_loaded_and_loading_flips_the_flag() {
 }
 
 #[test]
+fn default_button_keys_resolve_through_app_bindings_and_drive_the_core() {
+    // JP2: the App owns the rebindable map; every default button key reverse-
+    // resolves to its button and `set_button` drives the real machine without
+    // panicking (press then release, tracked per key).
+    let mut app = blank_app();
+    for b in keymap::WIZARD_ORDER {
+        let code = app.bindings.key_for(b).expect("default binding");
+        assert_eq!(app.bindings.button_for(code), Some(b), "round-trips");
+        app.set_button(code, b, true);
+        app.set_button(code, b, false);
+    }
+}
+
+#[test]
+fn key_wizard_commits_new_bindings_when_it_finishes() {
+    // JP6: open the wizard, bind each of the 8 buttons to a fresh key (mirroring
+    // handle_key's capture), and confirm the live map is rebound + the wizard
+    // closes.
+    let mut app = blank_app();
+    app.open_key_wizard();
+    assert!(app.key_wizard.is_some());
+    let codes = [
+        KeyCode::KeyG,
+        KeyCode::KeyH,
+        KeyCode::KeyI,
+        KeyCode::KeyK,
+        KeyCode::KeyM,
+        KeyCode::KeyN,
+        KeyCode::KeyO,
+        KeyCode::KeyL,
+    ];
+    for &code in &codes {
+        app.key_wizard.as_mut().unwrap().bind_key(code);
+        app.commit_wizard_if_done();
+    }
+    assert!(app.key_wizard.is_none(), "wizard closed after 8 binds");
+    for (b, &code) in keymap::WIZARD_ORDER.iter().zip(&codes) {
+        assert_eq!(app.bindings.button_for(code), Some(*b));
+    }
+}
+
+#[test]
+fn socd_filter_suppresses_then_resurrects_the_opposite_direction() {
+    // JP7 + review fix: with the filter ON (default), the joypad never reports
+    // both L+R; releasing the newer direction returns to the still-held older
+    // one (last-input priority).
+    let mut app = blank_app();
+    assert!(!app.settings.allow_opposing, "filter on by default");
+    let left = app.bindings.key_for(Button::Left).unwrap();
+    let right = app.bindings.key_for(Button::Right).unwrap();
+
+    app.set_button(left, Button::Left, true);
+    assert!(app.session.gb.debug_button(Button::Left));
+    // Press Right while Left is held → Left suppressed, only Right reported.
+    app.set_button(right, Button::Right, true);
+    assert!(app.session.gb.debug_button(Button::Right));
+    assert!(!app.session.gb.debug_button(Button::Left), "L+R never both");
+    // Release Right → Left resurrects (its key is still held).
+    app.set_button(right, Button::Right, false);
+    assert!(
+        app.session.gb.debug_button(Button::Left),
+        "older resurrects"
+    );
+    assert!(!app.session.gb.debug_button(Button::Right));
+}
+
+#[test]
+fn allow_opposing_lets_both_directions_register() {
+    let mut app = blank_app();
+    app.settings.allow_opposing = true;
+    let up = app.bindings.key_for(Button::Up).unwrap();
+    let down = app.bindings.key_for(Button::Down).unwrap();
+    app.set_button(up, Button::Up, true);
+    app.set_button(down, Button::Down, true);
+    assert!(app.session.gb.debug_button(Button::Up));
+    assert!(
+        app.session.gb.debug_button(Button::Down),
+        "filter off = both"
+    );
+}
+
+#[test]
+fn key_wizard_cancel_leaves_bindings_unchanged() {
+    let mut app = blank_app();
+    let before = app.bindings;
+    app.open_key_wizard();
+    app.key_wizard.as_mut().unwrap().bind_key(KeyCode::KeyM); // right := M (uncommitted)
+    // Cancel = drop the wizard without running to completion.
+    app.key_wizard = None;
+    assert_eq!(app.bindings, before, "an aborted wizard discards its edits");
+}
+
+#[test]
 fn frame_duration_matches_hardware_rate() {
     // 70224 / 4194304 s = 16.742706... ms
     assert_eq!(FRAME_DURATION.as_nanos(), 16_742_706);

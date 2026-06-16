@@ -132,6 +132,9 @@ pub struct Settings {
     pub scheme: usize,
     /// GB Colors → the live DMG palette (lightest→darkest).
     pub dmg_palette: [u32; 4],
+    /// Joypad → "allow pressing L+R or U+D". `false` (bgb default) filters
+    /// opposing directions so the joypad never reports both at once.
+    pub allow_opposing: bool,
 }
 
 impl Default for Settings {
@@ -151,6 +154,7 @@ impl Default for Settings {
             pause_on_focus_loss: false,
             scheme: 0,
             dmg_palette: SCHEMES[0].colors,
+            allow_opposing: false,
         }
     }
 }
@@ -229,7 +233,7 @@ pub const DIALOG_W: i32 = 345;
 pub const DIALOG_H: i32 = 361;
 /// Height of one tab row.
 const TAB_ROW_H: i32 = 19;
-/// Tab-label horizontal padding (matches the strip in [`Self::tab_hitboxes`]).
+/// Tab-label horizontal padding (matches the strip in [`OptionsState::tab_hitboxes`]).
 const TAB_PAD: i32 = 6;
 /// Button-row height + button size.
 const BTN_H: i32 = 22;
@@ -276,6 +280,9 @@ pub enum OptionsOutcome {
     StayApply,
     /// Defaults: `working` reset to the tab's defaults; stay open, do NOT apply.
     StayReset,
+    /// Joypad → "configure keyboard": open the key-rebind wizard. Neither
+    /// applies nor closes the dialog (the wizard floats above it).
+    ConfigureKeyboard,
 }
 
 impl OptionsOutcome {
@@ -370,7 +377,8 @@ impl OptionsState {
 
     /// Route a left-click at `(px, py)` (window pixels). Tabs switch the active
     /// tab; buttons return their [`OptionsOutcome`]; content clicks mutate
-    /// `working`. Returns `Some(outcome)` only for a button press.
+    /// `working` (and a few — e.g. "configure keyboard" — return their own
+    /// outcome). Returns `Some(outcome)` for a button press or such a control.
     pub fn on_click(&mut self, px: i32, py: i32, bounds: Rect) -> Option<OptionsOutcome> {
         let dialog = Self::dialog_rect(bounds);
         for (t, r) in self.tab_hitboxes(dialog) {
@@ -385,8 +393,7 @@ impl OptionsState {
             }
         }
         let content = Self::content_rect(dialog);
-        tabs::on_content_click(self.active, &mut self.working, px, py, content);
-        None
+        tabs::on_content_click(self.active, &mut self.working, px, py, content)
     }
 
     /// Apply a button's semantics. OK applies + closes; Cancel reverts + closes;

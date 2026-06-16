@@ -20,6 +20,7 @@ mod audio;
 mod cli;
 mod dbg;
 mod input;
+mod keymap;
 mod pacing;
 mod screenshot;
 mod session;
@@ -124,6 +125,8 @@ struct App {
     turbo: bool,
     /// Per-key hold state, so two keys mapped to one button release cleanly.
     buttons: ButtonTracker,
+    /// Rebindable keyboard → Game Boy button map (Joypad "configure keyboard").
+    bindings: keymap::KeyBindings,
     /// Detects a cpal stream that stopped draining (see [`StallWatchdog`]).
     watchdog: StallWatchdog,
     /// Deadline of the next frame for wall-clock pacing.
@@ -167,6 +170,9 @@ struct App {
     /// The open Options dialog (bgb "Options..."/F11), drawn centred over the
     /// LCD; modal like the info box. `None` when closed.
     options: Option<windows::options::OptionsState>,
+    /// The open key-rebind wizard (Options → Joypad → "configure keyboard"),
+    /// floating above everything; captures all game-window keys while open.
+    key_wizard: Option<keymap::KeyConfigWizard>,
     /// Whether the current pause was auto-induced by focus loss (Options → Misc
     /// → "Pause if losing focus"), so refocus auto-resumes — but a *manual* pause
     /// is never clobbered on refocus.
@@ -197,6 +203,7 @@ impl App {
             blank_frame,
             settings,
             options: None,
+            key_wizard: None,
             paused_by_focus: false,
             last_scale: scale,
             window: None,
@@ -206,6 +213,7 @@ impl App {
             paused: false,
             turbo: false,
             buttons: ButtonTracker::default(),
+            bindings: keymap::KeyBindings::default(),
             watchdog: StallWatchdog::new(),
             next_frame: Instant::now(),
             discard_buf: Vec::new(),
@@ -277,6 +285,7 @@ impl App {
         let info = self.info_box.as_ref();
         let path_dlg = self.path_dialog.as_ref();
         let options = self.options.as_ref();
+        let wizard = self.key_wizard.as_ref();
         let theme = ui::Theme::BGB;
         let stretch = self.window_size == WindowSizeChoice::FullscreenStretched;
         if let Err(e) = video.draw(window, frame, stretch, |canvas| {
@@ -298,6 +307,10 @@ impl App {
             if let Some(o) = options {
                 windows::options::render(canvas, o, &theme);
             }
+            // The key-rebind wizard floats above even the Options dialog.
+            if let Some(w) = wizard {
+                w.render(canvas, &theme);
+            }
         }) {
             eprintln!("slopgb: failed to present frame: {e}");
         }
@@ -312,6 +325,22 @@ impl App {
 
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, key: &KeyEvent, focus: Focus) {
         if key.repeat {
+            return;
+        }
+        // The key-rebind wizard (Joypad → "configure keyboard") is the topmost
+        // game-window modal: every key is captured. Escape cancels the whole
+        // wizard (edits discarded); any other key binds the current button and
+        // advances — finishing commits the new bindings.
+        if focus == Focus::Game && key.state.is_pressed() && self.key_wizard.is_some() {
+            if let PhysicalKey::Code(code) = key.physical_key {
+                if code == KeyCode::Escape {
+                    self.key_wizard = None;
+                } else if let Some(w) = self.key_wizard.as_mut() {
+                    w.bind_key(code);
+                    self.commit_wizard_if_done();
+                }
+            }
+            self.request_game_redraw();
             return;
         }
         // Options control panel is modal: while it's open every key is swallowed
@@ -367,19 +396,17 @@ impl App {
         let PhysicalKey::Code(code) = key.physical_key else {
             return;
         };
+        let pressed = key.state.is_pressed();
+        // Game Boy buttons resolve through the rebindable map first (any focus,
+        // matching bgb's joypad bindings), before the focus-specific actions.
+        if let Some(b) = self.bindings.button_for(code) {
+            self.set_button(code, b, pressed);
+            return;
+        }
         let Some(action) = input::map(code, self.modifiers, focus) else {
             return;
         };
-        let pressed = key.state.is_pressed();
         match action {
-            Action::Button(b) => {
-                if pressed {
-                    self.buttons.press(code, b);
-                    self.session.gb.press(b);
-                } else if self.buttons.release(code, b) {
-                    self.session.gb.release(b);
-                }
-            }
             Action::Turbo => {
                 self.turbo = pressed;
                 if !pressed {
@@ -391,6 +418,47 @@ impl App {
             // menu entry can never diverge.
             _ if pressed => self.run_action(action, event_loop),
             _ => {}
+        }
+    }
+
+    /// Open the Joypad "configure keyboard" wizard seeded from the live map.
+    pub(crate) fn open_key_wizard(&mut self) {
+        self.key_wizard = Some(keymap::KeyConfigWizard::open(self.bindings));
+    }
+
+    /// If the wizard has run through all eight buttons, commit its working map
+    /// to the live `bindings` and close it. Any buttons held under the old map
+    /// are released so a remap can't leave a key stuck down.
+    pub(crate) fn commit_wizard_if_done(&mut self) {
+        if let Some(bindings) = self.key_wizard.as_ref().and_then(|w| w.finished()) {
+            self.bindings = bindings;
+            self.release_all_input();
+            self.key_wizard = None;
+        }
+    }
+
+    /// Press or release a Game Boy `button` resolved from key `code`, tracking
+    /// the held key so two keys mapped to one button release cleanly.
+    fn set_button(&mut self, code: KeyCode, button: Button, pressed: bool) {
+        if pressed {
+            self.buttons.press(code, button);
+            // SOCD filter (Joypad → "allow pressing L+R or U+D" off, the bgb
+            // default): a new direction suppresses its opposite so the joypad
+            // never reports both — last input wins.
+            if let Some(opp) = keymap::socd_suppress(button, self.settings.allow_opposing) {
+                self.session.gb.release(opp);
+            }
+            self.session.gb.press(button);
+        } else if self.buttons.release(code, button) {
+            self.session.gb.release(button);
+            // Resurrection (last-input priority): if the opposite direction is
+            // still physically held, re-press it — releasing the newer key
+            // returns control to the older one that was suppressed.
+            if let Some(opp) = keymap::socd_suppress(button, self.settings.allow_opposing) {
+                if self.buttons.is_held(opp) {
+                    self.session.gb.press(opp);
+                }
+            }
         }
     }
 

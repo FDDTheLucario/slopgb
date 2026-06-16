@@ -27,11 +27,11 @@ pub enum Focus {
     Debugger,
 }
 
-/// What a mapped key does.
+/// What a mapped key does. Game Boy buttons are *not* here: they resolve through
+/// the rebindable [`crate::keymap::KeyBindings`] in `App::handle_key` before this
+/// map is consulted, so the Joypad "configure keyboard" wizard can remap them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
-    /// Press/release a Game Boy button.
-    Button(Button),
     /// Uncapped emulation speed while held.
     Turbo,
     /// Toggle pause (on press).
@@ -138,6 +138,13 @@ impl ButtonTracker {
         !self.held.iter().any(|&(_, b)| b == button)
     }
 
+    /// Whether any currently-held key maps to `button` (for the SOCD filter's
+    /// resurrection of a still-held opposite direction).
+    #[must_use]
+    pub fn is_held(&self, button: Button) -> bool {
+        self.held.iter().any(|&(_, b)| b == button)
+    }
+
     /// Forget all held keys (e.g. on focus loss, when release events for
     /// currently held keys will never arrive).
     pub fn clear(&mut self) {
@@ -147,25 +154,20 @@ impl ButtonTracker {
 
 /// Map a physical key to its action under the current window `focus`, if any.
 ///
-/// Game-button + global keys (turbo/pause/reset/quit, and **F9** break which
-/// stays focus-independent so a frozen machine is always resumable) bind in any
-/// focus. The F-keys then split by focus, matching bgb: in the **game** window
+/// Global keys (turbo/pause/reset/quit, and **F9** break which stays
+/// focus-independent so a frozen machine is always resumable) bind in any focus.
+/// Game Boy *buttons* are not handled here — they resolve through the rebindable
+/// [`crate::keymap::KeyBindings`] before this is called. The F-keys then split
+/// by focus, matching bgb: in the **game** window
 /// F2/F3/F4 open the debugger/VRAM/iomap windows; in the **debugger** window
 /// they become bgb's debugger keys (F2 toggle breakpoint, F3 step over, F4 run
 /// to cursor, F6 jump to cursor, F7 trace, F8 step out, Ctrl+G go to, F5/F10
 /// open VRAM/iomap). Keys for not-yet-built features (F12 load ROM) stay unmapped.
 #[must_use]
 pub fn map(code: KeyCode, mods: ModifiersState, focus: Focus) -> Option<Action> {
-    // Global (any focus): buttons + emulator controls + the break toggle.
+    // Global (any focus): emulator controls + the break toggle. Game Boy
+    // buttons are resolved earlier, through `App.bindings` (rebindable).
     let global = match code {
-        KeyCode::KeyZ => Some(Action::Button(Button::A)),
-        KeyCode::KeyX => Some(Action::Button(Button::B)),
-        KeyCode::Enter => Some(Action::Button(Button::Start)),
-        KeyCode::ShiftRight | KeyCode::Backspace => Some(Action::Button(Button::Select)),
-        KeyCode::ArrowUp => Some(Action::Button(Button::Up)),
-        KeyCode::ArrowDown => Some(Action::Button(Button::Down)),
-        KeyCode::ArrowLeft => Some(Action::Button(Button::Left)),
-        KeyCode::ArrowRight => Some(Action::Button(Button::Right)),
         KeyCode::Tab => Some(Action::Turbo),
         KeyCode::KeyP => Some(Action::Pause),
         KeyCode::KeyR => Some(Action::Reset),
@@ -275,17 +277,15 @@ mod tests {
     }
 
     #[test]
-    fn dpad_maps_to_matching_buttons() {
-        // Buttons are global — same under either focus.
+    fn button_keys_are_not_in_the_action_map() {
+        // Game Boy buttons resolve through `App.bindings` (rebindable) before
+        // `map` is consulted, so the default button keys are unmapped here.
         for f in [Focus::Game, Focus::Debugger] {
-            assert_eq!(
-                map(KeyCode::ArrowUp, NONE, f),
-                Some(Action::Button(Button::Up))
-            );
-            assert_eq!(
-                map(KeyCode::ArrowRight, NONE, f),
-                Some(Action::Button(Button::Right))
-            );
+            assert_eq!(map(KeyCode::ArrowUp, NONE, f), None);
+            assert_eq!(map(KeyCode::ArrowRight, NONE, f), None);
+            assert_eq!(map(KeyCode::KeyZ, NONE, f), None);
+            assert_eq!(map(KeyCode::KeyX, NONE, f), None);
+            assert_eq!(map(KeyCode::Enter, NONE, f), None);
         }
     }
 
@@ -372,6 +372,17 @@ mod tests {
         t.press(KeyCode::KeyX, Button::B);
         assert!(t.release(KeyCode::KeyZ, Button::A));
         assert!(t.release(KeyCode::KeyX, Button::B));
+    }
+
+    #[test]
+    fn tracker_is_held_reports_button_state() {
+        let mut t = ButtonTracker::default();
+        assert!(!t.is_held(Button::Left));
+        t.press(KeyCode::ArrowLeft, Button::Left);
+        assert!(t.is_held(Button::Left));
+        assert!(!t.is_held(Button::Right));
+        t.release(KeyCode::ArrowLeft, Button::Left);
+        assert!(!t.is_held(Button::Left));
     }
 
     #[test]

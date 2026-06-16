@@ -244,6 +244,13 @@ impl GameBoy {
         self.bus.joypad_mut().release(b);
     }
 
+    /// Whether joypad button `b` is currently held (read-only; debugger/UI —
+    /// side-effect-free, never on a golden path).
+    #[must_use]
+    pub fn debug_button(&self, b: Button) -> bool {
+        self.bus.joypad().pressed(b)
+    }
+
     /// Move all pending stereo samples (interleaved L/R, `CLOCK_HZ / 64`-ish
     /// native rate decided by the APU) into `out`.
     pub fn drain_audio(&mut self, out: &mut Vec<(f32, f32)>) {

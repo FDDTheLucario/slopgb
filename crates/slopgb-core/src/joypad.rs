@@ -303,6 +303,15 @@ impl Joypad {
         // Releases only produce rising edges; no interrupt.
     }
 
+    /// Whether `b` is currently held (read-only; debugger/UI). A button reads
+    /// pressed when its active-low line bit is cleared in its column.
+    #[must_use]
+    pub fn pressed(&self, b: Button) -> bool {
+        let (dpad, mask) = b.line();
+        let col = if dpad { self.dpad } else { self.buttons };
+        col & mask == 0
+    }
+
     /// IF bits requested since the last call (bit 4 = joypad), then clears.
     pub fn take_irq(&mut self) -> u8 {
         let irq = self.irq;
