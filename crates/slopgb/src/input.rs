@@ -58,6 +58,8 @@ pub enum Action {
     DbgManageBreakpoints,
     /// Open the watchpoint manager (list) — debugger Ctrl+J, on press.
     DbgManageWatchpoints,
+    /// Re-center the disasm on PC (unpin) — debugger Ctrl+A, on press.
+    DbgGoToPc,
     /// Step out of the current subroutine — debugger F8, on press.
     DbgStepOut,
     /// Open the Go-to address prompt — debugger Ctrl+G, on press.
@@ -149,6 +151,7 @@ pub fn map(code: KeyCode, mods: ModifiersState, focus: Focus) -> Option<Action> 
             KeyCode::KeyG if mods.control_key() => Some(Action::DbgGoto),
             KeyCode::KeyH if mods.control_key() => Some(Action::DbgManageBreakpoints),
             KeyCode::KeyJ if mods.control_key() => Some(Action::DbgManageWatchpoints),
+            KeyCode::KeyA if mods.control_key() => Some(Action::DbgGoToPc),
             _ => None,
         },
         Focus::Game => match code {
@@ -241,6 +244,13 @@ mod tests {
         // They are debugger-only + need Ctrl.
         assert_eq!(map(KeyCode::KeyH, CTRL, Focus::Game), None);
         assert_eq!(d(KeyCode::KeyH), None);
+        // Ctrl+A re-centers the disasm on PC (Search → go to PC).
+        assert_eq!(
+            map(KeyCode::KeyA, CTRL, Focus::Debugger),
+            Some(Action::DbgGoToPc)
+        );
+        assert_eq!(map(KeyCode::KeyA, CTRL, Focus::Game), None);
+        assert_eq!(d(KeyCode::KeyA), None, "needs Ctrl");
     }
 
     #[test]

@@ -915,6 +915,19 @@ fn run_menu_wires_forward_execution_commands() {
 }
 
 #[test]
+fn search_menu_wires_go_to_pc() {
+    use crate::input::Action;
+    // "go to PC" is the last Search item (index 4).
+    assert_eq!(
+        click_menubar_item(1, 4),
+        Some(MenuOutcome::Command(Action::DbgGoToPc)),
+        "go to PC re-centers the disasm"
+    );
+    // The bookmark/search-string items stay greyed.
+    assert_eq!(click_menubar_item(1, 0), None, "Search string greyed");
+}
+
+#[test]
 fn file_menu_wires_the_export_commands() {
     use crate::input::Action;
     assert_eq!(

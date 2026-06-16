@@ -939,7 +939,7 @@ fn search_menu() -> Vec<(MenuItem, MenuChoice)> {
         dis_sc("Continue search", "Ctrl+C"),
         dis_sc("go to next bookmark", "Ctrl+N"),
         dis_sc("go to previous bookmark", "Ctrl+B"),
-        dis_sc("go to PC", "Ctrl+A"),
+        cmd("go to PC", "Ctrl+A", Action::DbgGoToPc),
     ]
 }
 

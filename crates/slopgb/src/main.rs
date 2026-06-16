@@ -679,6 +679,7 @@ impl App {
                 self.refresh_after_step();
             }
             Action::DbgGoto => self.tools.open_debugger_goto(),
+            Action::DbgGoToPc => self.tools.debugger_goto_pc(),
             // bp/wp manager (RM15): build a list popup from the App-owned sets
             // (each row clears its entry) and hand it to the debugger window.
             Action::DbgManageBreakpoints => {

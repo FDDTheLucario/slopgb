@@ -321,6 +321,18 @@ impl ToolWindows {
         }
     }
 
+    /// Re-center the disasm on PC (Search → "go to PC", Ctrl+A): drop the
+    /// stay-on-bank pin so the pane follows PC again. Redraws.
+    pub fn debugger_goto_pc(&mut self) {
+        let Some(view) = self.debugger_view_mut() else {
+            return;
+        };
+        if let WinState::Debugger(s) = &mut view.state {
+            s.pinned = false;
+            view.window.request_redraw();
+        }
+    }
+
     /// Open the debugger's `Go to…` modal on the disasm pane (Ctrl+G).
     pub fn open_debugger_goto(&mut self) {
         let Some(view) = self.debugger_view_mut() else {
