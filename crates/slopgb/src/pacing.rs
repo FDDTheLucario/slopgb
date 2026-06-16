@@ -25,6 +25,10 @@ pub(crate) struct AudioPipe {
     resampler: Resampler,
     /// Queue fill target in device-rate frames (~[`AUDIO_TARGET_MS`]).
     target_fill: usize,
+    /// Master volume gain (Options → Sound → Volume), 0.0..=1.0.
+    gain: f32,
+    /// Mono downmix (Options → Sound → mono output).
+    mono: bool,
     /// Scratch: samples drained from the core (core rate).
     drain_buf: Vec<(f32, f32)>,
     /// Scratch: resampled samples (device rate).
@@ -39,9 +43,17 @@ impl AudioPipe {
             target_fill: usize::try_from(u64::from(rate) * AUDIO_TARGET_MS / 1000)
                 .unwrap_or(usize::MAX),
             out,
+            gain: 1.0,
+            mono: false,
             drain_buf: Vec::new(),
             device_buf: Vec::new(),
         }
+    }
+
+    /// Update the master volume gain + mono downmix (from Options → Sound).
+    pub(crate) fn set_volume(&mut self, gain: f32, mono: bool) {
+        self.gain = gain.clamp(0.0, 1.0);
+        self.mono = mono;
     }
 
     /// Move all pending core samples to the device queue (resampling on the
@@ -51,6 +63,7 @@ impl AudioPipe {
         gb.drain_audio(&mut self.drain_buf);
         self.device_buf.clear();
         self.resampler.run(&self.drain_buf, &mut self.device_buf);
+        apply_gain(&mut self.device_buf, self.gain, self.mono);
         self.out.push(&self.device_buf);
     }
 
@@ -115,6 +128,40 @@ impl StallWatchdog {
 #[must_use]
 pub(crate) fn audio_pacing(has_audio: bool, muted: bool) -> bool {
     has_audio && !muted
+}
+
+/// Target wall-clock interval per emulated frame given the Options framerate
+/// limit. `limit == 0` means "real speed" (the native ~59.7275 Hz `default`);
+/// a positive limit paces to `1/limit` seconds per frame.
+#[must_use]
+pub(crate) fn frame_interval(limit: u32, default: Duration) -> Duration {
+    if limit == 0 {
+        default
+    } else {
+        Duration::from_secs_f64(1.0 / f64::from(limit))
+    }
+}
+
+/// Max frames to emulate per turbo wake, scaling with the Options fast-forward
+/// speed (monotonic; clamped to at least 1 so turbo always advances).
+#[must_use]
+pub(crate) fn turbo_max_frames(ff_speed: u32) -> u32 {
+    ff_speed.max(1)
+}
+
+/// Apply the master volume `gain` (and optional `mono` downmix) to a batch of
+/// stereo frames in place. `gain` 1.0 + `mono` false is the identity.
+pub(crate) fn apply_gain(frames: &mut [(f32, f32)], gain: f32, mono: bool) {
+    let g = gain.clamp(0.0, 1.0);
+    for f in frames.iter_mut() {
+        let (mut l, mut r) = *f;
+        if mono {
+            let m = 0.5 * (l + r);
+            l = m;
+            r = m;
+        }
+        *f = (l * g, r * g);
+    }
 }
 
 #[cfg(test)]

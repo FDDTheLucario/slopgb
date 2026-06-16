@@ -5,15 +5,15 @@
 
 use std::collections::BTreeSet;
 
-use slopgb_core::{Registers, debug};
+use slopgb_core::Registers;
 
-use crate::dbg::{Breakpoints, DebugAction, RegField};
+use crate::dbg::{DebugAction, RegField};
 use crate::input::Action;
 use crate::ui::Theme;
 use crate::ui::canvas::{Canvas, Rect};
 use crate::ui::dialog::{self, DialogKey, DialogResult, InputDialog};
 use crate::ui::menu::{self, MenuItem};
-use crate::ui::text::{draw_text, hex_row, line_height, measure};
+use crate::ui::text::{draw_text, hex_row, line_height};
 use crate::ui::widgets::scroll_list;
 
 /// The four panes of the debugger body, partitioned from the window size to
@@ -55,13 +55,6 @@ impl DebuggerLayout {
     }
 }
 
-/// One decoded disassembly line: its address and the formatted bgb text.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DisasmRow {
-    pub addr: u16,
-    pub text: String,
-}
-
 /// A coarse bank label from the address region. Precise ROM/VRAM/WRAM bank
 /// numbers are a deferred accessor (see handoff); this gives bgb's `ROM0:` for
 /// the fixed bank and a best-effort tag elsewhere.
@@ -79,127 +72,6 @@ fn region_label(addr: u16) -> &'static str {
         0xFF00..=0xFF7F => "I/O ",
         0xFF80..=0xFFFE => "HRAM",
         0xFFFF => "IE  ",
-    }
-}
-
-/// Disassemble `count` instructions from `start`, each formatted as a bgb
-/// disasm line `LABEL:ADDR  bytes  mnemonic  ;m-cycles`. `read(addr)` yields the
-/// byte at `addr` (use `GameBoy::debug_read`). Exact column widths are tuned in
-/// the C8 visual diff; the content (addr/bytes/mnemonic/cycles) is final.
-pub fn disasm_rows(
-    read: impl Fn(u16) -> u8,
-    start: u16,
-    count: usize,
-    data_hints: &BTreeSet<u16>,
-) -> Vec<DisasmRow> {
-    let mut rows = Vec::with_capacity(count);
-    let mut addr = start;
-    for _ in 0..count {
-        // An address marked data renders as a single `db XX` byte (RM9), so the
-        // disassembler doesn't mis-decode an embedded data table as code.
-        if data_hints.contains(&addr) {
-            let b = read(addr);
-            let text = format!(
-                "{}:{addr:04X} {:<9}{:<20};",
-                region_label(addr),
-                format!("{b:02X}"),
-                format!("db {b:02X}")
-            );
-            rows.push(DisasmRow { addr, text });
-            addr = addr.wrapping_add(1);
-            continue;
-        }
-        let bytes = [
-            read(addr),
-            read(addr.wrapping_add(1)),
-            read(addr.wrapping_add(2)),
-        ];
-        let insn = debug::decode(&bytes, addr);
-        let hex: String = bytes[..insn.len as usize]
-            .iter()
-            .map(|b| format!("{b:02X} "))
-            .collect();
-        let text = format!(
-            "{}:{addr:04X} {:<9}{:<20};{}",
-            region_label(addr),
-            hex.trim_end(),
-            insn.text,
-            insn.cycles
-        );
-        rows.push(DisasmRow { addr, text });
-        addr = addr.wrapping_add(u16::from(insn.len.max(1)));
-    }
-    rows
-}
-
-/// Width of the disasm pane's left gutter — holds the red breakpoint dot, and
-/// the current-PC highlight bar extends across it.
-pub const DISASM_GUTTER: i32 = 7;
-
-/// Render the disasm pane: decode from `start` to fill `rect`, draw the rows
-/// past a left gutter with the row at `pc` highlighted (the blue current-PC
-/// bar), and a red dot in the gutter on every row carrying a breakpoint.
-/// Returns the rows so the window can hit-test clicks.
-#[allow(clippy::too_many_arguments)]
-pub fn render_disasm(
-    c: &mut Canvas,
-    rect: Rect,
-    read: impl Fn(u16) -> u8,
-    start: u16,
-    pc: u16,
-    bps: &Breakpoints,
-    data_hints: &BTreeSet<u16>,
-    theme: &Theme,
-) -> Vec<DisasmRow> {
-    let lh = line_height();
-    let count = (rect.h / lh).max(0) as usize + 1;
-    let rows = disasm_rows(read, start, count, data_hints);
-    let texts: Vec<&str> = rows.iter().map(|r| r.text.as_str()).collect();
-    let highlight = rows.iter().position(|r| r.addr == pc);
-    let body = Rect::new(
-        rect.x + DISASM_GUTTER,
-        rect.y,
-        (rect.w - DISASM_GUTTER).max(0),
-        rect.h,
-    );
-    let drawn = scroll_list(c, body, &texts, 0, highlight, theme);
-    // Extend the PC bar across the gutter and stamp breakpoint dots in it.
-    for (i, row) in rows.iter().enumerate().take(drawn) {
-        let y = rect.y + i as i32 * lh;
-        if Some(i) == highlight {
-            c.fill_rect(Rect::new(rect.x, y, DISASM_GUTTER, lh), theme.current);
-        }
-        if bps.contains(row.addr) {
-            let cy = y + lh / 2;
-            c.fill_rect(Rect::new(rect.x + 1, cy - 2, 4, 4), theme.breakpoint);
-        }
-    }
-    rows
-}
-
-/// Overlay per-row execution counts (MB5 profiler) at the right edge of the
-/// disasm pane: each row whose address has a nonzero tally shows `xN`. Only
-/// called while the profiler is logging; the row layout matches
-/// [`render_disasm`] (same `rect`, same `line_height`), so the counts line up.
-pub fn render_profile_counts(
-    c: &mut Canvas,
-    rect: Rect,
-    rows: &[DisasmRow],
-    count: impl Fn(u16) -> u64,
-    theme: &Theme,
-) {
-    let lh = line_height();
-    let visible = (rect.h / lh).max(0) as usize;
-    for (i, row) in rows.iter().enumerate().take(visible) {
-        let n = count(row.addr);
-        if n == 0 {
-            continue;
-        }
-        let label = format!("x{n}");
-        let x = (rect.right() - measure(&label) - 2).max(rect.x);
-        // A muted tone, readable on both the white rows and the blue PC-row
-        // highlight (the standard `current` ink would vanish on the PC row).
-        draw_text(c, x, rect.y + i as i32 * lh, &label, theme.hilight);
     }
 }
 
@@ -358,6 +230,9 @@ pub struct DebuggerState {
     /// Baseline for the regs-pane `cnt` user-clock counter (RM14): `cnt` is
     /// `gb.cycles() - clock_base`; "Set user clocks counter" zeroes it.
     pub clock_base: u64,
+    /// Disasm display options (Options → Debug: lowercase hex / show clocks),
+    /// pushed from `App::apply_settings`.
+    pub disasm_fmt: DisasmFmt,
 }
 
 impl Default for DebuggerState {
@@ -376,6 +251,7 @@ impl Default for DebuggerState {
             bookmarks: [None; 10],
             eval_input: String::new(),
             clock_base: 0,
+            disasm_fmt: DisasmFmt::default(),
         }
     }
 }
@@ -525,7 +401,14 @@ pub fn target_at(
     let lh = line_height().max(1);
     if l.disasm.contains(px, py) {
         let row = ((py - l.disasm.y) / lh) as usize;
-        let rows = disasm_rows(read, st.disasm_start(pc), row + 1, &st.data_hints);
+        // Addresses are format-independent, so the default fmt is fine here.
+        let rows = disasm_rows(
+            read,
+            st.disasm_start(pc),
+            row + 1,
+            &st.data_hints,
+            DisasmFmt::default(),
+        );
         return rows
             .get(row)
             .map_or(ClickTarget::None, |r| ClickTarget::Disasm(r.addr));
@@ -922,6 +805,10 @@ fn resolve_dialog(
 
 // --- menu bar + dropdowns (MB1): see the `menubar` submodule -----------------
 
+pub mod disasm;
+// `DisasmRow` is reachable as `debugger::disasm::DisasmRow`; not re-exported here
+// (no non-test caller names it, and a `pub use` would be an unused-import warning).
+pub use disasm::{DisasmFmt, disasm_rows, render_disasm, render_profile_counts};
 mod menubar;
 pub use menubar::{address_list_menu, menubar_at, menubar_menu, render_menubar};
 mod search;

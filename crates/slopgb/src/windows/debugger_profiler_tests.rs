@@ -1,6 +1,7 @@
 //! Execution-profiler (MB5) tests for the debugger window: the profiler
 //! dropdown's radio modes + live count, and the disasm per-line count overlay.
 
+use super::disasm::DisasmRow;
 use super::*;
 use crate::input::Action;
 use crate::ui::Theme;

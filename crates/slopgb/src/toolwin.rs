@@ -441,15 +441,32 @@ impl ToolWindows {
     pub fn debugger_disasm_dump(&self, gb: &GameBoy) -> String {
         const COUNT: usize = 4096;
         let pc = gb.cpu_regs().pc;
-        let (start, hints) = match self.debugger_view().map(|v| &v.state) {
-            Some(WinState::Debugger(s)) => (s.disasm_start(pc), s.data_hints.clone()),
-            _ => (pc, std::collections::BTreeSet::new()),
+        let (start, hints, fmt) = match self.debugger_view().map(|v| &v.state) {
+            Some(WinState::Debugger(s)) => (s.disasm_start(pc), s.data_hints.clone(), s.disasm_fmt),
+            _ => (
+                pc,
+                std::collections::BTreeSet::new(),
+                debugger::DisasmFmt::default(),
+            ),
         };
-        let rows = debugger::disasm_rows(|a| gb.debug_read(a), start, COUNT, &hints);
+        let rows = debugger::disasm_rows(|a| gb.debug_read(a), start, COUNT, &hints, fmt);
         rows.iter()
             .map(|r| r.text.as_str())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    /// Push the disasm display options (Options → Debug) to the debugger view,
+    /// repainting it if open. Inert when the debugger window isn't built yet.
+    pub fn set_disasm_fmt(&mut self, fmt: debugger::DisasmFmt) {
+        if let Some(view) = self.debugger_view_mut() {
+            if let WinState::Debugger(s) = &mut view.state {
+                if s.disasm_fmt != fmt {
+                    s.disasm_fmt = fmt;
+                    view.window.request_redraw();
+                }
+            }
+        }
     }
 
     /// Open the debugger's `Evaluate expression` modal (RM14).

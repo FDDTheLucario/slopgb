@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use slopgb_core::GameBoy;
 
+use crate::pacing::{frame_interval, turbo_max_frames};
 use crate::{App, FRAME_DURATION, ui};
 
 /// Upper bound on frames emulated per event-loop wake (non-turbo), so a host
@@ -70,12 +71,14 @@ impl App {
         if now.duration_since(self.next_frame) > 8 * FRAME_DURATION {
             self.next_frame = now;
         }
+        // Options → Misc → framerate limit (0 = native ~59.7275 Hz).
+        let interval = frame_interval(self.settings.framerate_limit, FRAME_DURATION);
         let mut frames = 0;
         let mut hit = false;
         while frames < MAX_FRAMES_PER_WAKE && self.next_frame <= now && !hit {
             hit = run_one_frame(&mut self.session.gb, &bps);
             self.discard_audio();
-            self.next_frame += FRAME_DURATION;
+            self.next_frame += interval;
             frames += 1;
         }
         (frames, hit)
@@ -85,10 +88,12 @@ impl App {
     pub(crate) fn run_turbo(&mut self) -> (u32, bool) {
         let bps = self.run_breakpoints();
         let muted = self.muted;
+        // Options → Misc → fast-forward speed caps frames per wake.
+        let cap = turbo_max_frames(self.settings.ff_speed);
         let start = Instant::now();
         let mut frames = 0;
         let mut hit = false;
-        while start.elapsed() < TURBO_BUDGET && !hit {
+        while start.elapsed() < TURBO_BUDGET && frames < cap && !hit {
             hit = run_one_frame(&mut self.session.gb, &bps);
             match &mut self.audio {
                 // The queue keeps ~250 ms and drops the rest.

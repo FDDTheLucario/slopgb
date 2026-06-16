@@ -209,6 +209,8 @@ pub fn map(code: KeyCode, mods: ModifiersState, focus: Focus) -> Option<Action> 
             KeyCode::F2 => Some(Action::ToggleTool(ToolWindow::Debugger)),
             KeyCode::F3 => Some(Action::ToggleTool(ToolWindow::Vram)),
             KeyCode::F4 => Some(Action::ToggleTool(ToolWindow::IoMap)),
+            // bgb's main-menu "Options..." hotkey (F11).
+            KeyCode::F11 => Some(Action::MainOptions),
             _ => None,
         },
     }

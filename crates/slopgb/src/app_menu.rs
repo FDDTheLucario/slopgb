@@ -15,7 +15,7 @@ use crate::ui::canvas::Rect;
 use crate::windows::mainwin::{
     InfoBox, MainMenu, MenuEffect, SubChoice, SubKind, SubMenu, WindowSizeChoice,
 };
-use crate::{App, ui};
+use crate::{App, ui, windows};
 
 impl App {
     /// A left/right press on the game window. Right-click (re)opens the bgb
@@ -24,6 +24,32 @@ impl App {
     /// dismisses (a click off both popups closes them).
     pub(crate) fn on_game_click(&mut self, button: MouseButton, event_loop: &ActiveEventLoop) {
         let (px, py) = self.game_cursor;
+        // The Options control panel is the topmost modal: only the left button
+        // acts (tabs/controls/buttons); a right-click is swallowed so it can't be
+        // misread as a left-click toggling a setting. OK/Cancel/Apply applies the
+        // working settings (Cancel having reverted them first); Close drops it.
+        if self.options.is_some() {
+            if button != MouseButton::Left {
+                return;
+            }
+            let area = self.window_area();
+            let outcome = self.options.as_mut().and_then(|o| o.on_click(px, py, area));
+            if let Some(out) = outcome {
+                // OK/Apply push working live; Cancel/Defaults do not (Defaults only
+                // edits the controls, matching bgb — nothing goes live until OK/Apply).
+                if out.applies() {
+                    if let Some(o) = &self.options {
+                        self.settings = o.working;
+                    }
+                    self.apply_settings();
+                }
+                if out.closes() {
+                    self.options = None;
+                }
+            }
+            self.request_game_redraw();
+            return;
+        }
         // The Load-ROM modal is topmost (MN4): route the click to OK/Cancel.
         if self.path_dialog.is_some() {
             let area = self.window_area();
@@ -157,8 +183,48 @@ impl App {
     /// Apply a "Window size" submenu choice: an integer scale resizes the window
     /// (and leaves fullscreen), a fullscreen mode goes borderless. `window_size`
     /// records the active choice for the submenu check-mark + the stretched blit.
+    /// Push the current `self.settings` to the live machine/frontend after an
+    /// Options OK/Apply: volume, DMG palette, emulated system, and stretch.
+    /// Pacing (fast-forward / framerate) + show-framerate + the debugger display
+    /// flags are read directly from `self.settings`, so they need no push here.
+    pub(crate) fn apply_settings(&mut self) {
+        let s = self.settings;
+        if let Some(pipe) = &mut self.audio {
+            pipe.set_volume(s.volume, s.mono);
+        }
+        // Switch the emulated system FIRST: `set_model` rebuilds the machine from
+        // the ROM, which resets the PPU palette to the power-on default — so the
+        // DMG palette must be (re)applied to the (possibly fresh) machine after.
+        if self.session.set_model(s.model.as_override()) {
+            self.resync_pacing();
+            self.request_game_redraw();
+        }
+        self.session.gb.set_dmg_palette(s.dmg_palette);
+        // Stretch maps onto the Window-size fullscreen-stretched mode.
+        if s.stretch && self.window_size != WindowSizeChoice::FullscreenStretched {
+            self.apply_window_size(WindowSizeChoice::FullscreenStretched);
+        } else if !s.stretch && self.window_size == WindowSizeChoice::FullscreenStretched {
+            self.apply_window_size(WindowSizeChoice::Scale(self.last_scale));
+        }
+        // Debug-tab disasm display flags → the debugger view.
+        self.tools.set_disasm_fmt(windows::debugger::DisasmFmt {
+            lowercase_hex: s.lowercase_hex,
+            show_clocks: s.show_clocks,
+        });
+        self.update_title();
+    }
+
     fn apply_window_size(&mut self, choice: WindowSizeChoice) {
         self.window_size = choice;
+        // Remember the last windowed scale so leaving fullscreen-stretched (via
+        // Options) restores it rather than the launch scale.
+        if let WindowSizeChoice::Scale(n) = choice {
+            self.last_scale = n;
+        }
+        // Keep the Options `stretch` setting in lock-step with the menu-chosen
+        // mode, so a later Options OK/Apply (which reconciles stretch ↔ window
+        // size) can't silently revert a fullscreen-stretched choice made here.
+        self.settings.stretch = choice == WindowSizeChoice::FullscreenStretched;
         let Some(window) = &self.window else {
             return;
         };
@@ -175,15 +241,6 @@ impl App {
             }
         }
         self.request_game_redraw();
-    }
-}
-
-/// A short label for the active window size (Options info box).
-pub(crate) fn scale_label(size: WindowSizeChoice) -> String {
-    match size {
-        WindowSizeChoice::Scale(n) => format!("{n}x"),
-        WindowSizeChoice::Fullscreen => "fullscreen".into(),
-        WindowSizeChoice::FullscreenStretched => "fullscreen (stretched)".into(),
     }
 }
 

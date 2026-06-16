@@ -20,6 +20,27 @@ fn cart_info_lines_parse_the_header() {
 }
 
 #[test]
+fn set_model_reloads_only_on_change() {
+    use slopgb_core::Model;
+    let dir = std::env::temp_dir().join(format!("slopgb-test-model-{}", process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("game.gb");
+    let mut rom = vec![0u8; 0x8000]; // 32 KiB ROM-only cart
+    rom[0x147] = 0x00; // ROM ONLY
+    rom[0x148] = 0x00; // 32 KiB
+    fs::write(&path, &rom).unwrap();
+
+    let mut s = Session::load(&path, Some(Model::Dmg)).expect("load");
+    assert_eq!(s.gb.model(), Model::Dmg);
+    // Switching to CGB rebuilds the machine.
+    assert!(s.set_model(Some(Model::Cgb)));
+    assert_eq!(s.gb.model(), Model::Cgb);
+    // Re-applying the same model is a no-op.
+    assert!(!s.set_model(Some(Model::Cgb)));
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn atomic_write_replaces_existing_file() {
     // Per-process directory so concurrent test runs can't race on it.
     let dir = std::env::temp_dir().join(format!("slopgb-test-sav-{}", process::id()));

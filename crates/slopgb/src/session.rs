@@ -107,6 +107,34 @@ impl Session {
         }
     }
 
+    /// Switch the emulated system (Options → System → Emulated system): rebuild
+    /// the machine from the ROM with `model_override` (`None` = auto-detect),
+    /// reloading battery RAM. A no-op (returns `false`) when the resolved model
+    /// already matches, so re-applying Options doesn't needlessly power-cycle.
+    pub(crate) fn set_model(&mut self, model_override: Option<Model>) -> bool {
+        let model = model_override.unwrap_or_else(|| GameBoy::auto_model(&self.rom_bytes));
+        if model == self.model {
+            return false;
+        }
+        self.flush_save();
+        match GameBoy::new(model, self.rom_bytes.clone()) {
+            Ok(mut gb) => {
+                if let Ok(data) = fs::read(&self.sav_path) {
+                    let _ = gb.load_save_data(&data);
+                }
+                self.gb = gb;
+                self.model = model;
+                self.next_autosave = AUTOSAVE_CYCLES;
+                self.quick_state = None; // a different machine — old snapshot is stale
+                true
+            }
+            Err(e) => {
+                eprintln!("slopgb: model switch failed: {e}");
+                false
+            }
+        }
+    }
+
     /// Write battery RAM to `<rom>.sav` if it changed since the last write.
     pub(crate) fn flush_save(&mut self) {
         let Some(data) = self.gb.save_data() else {

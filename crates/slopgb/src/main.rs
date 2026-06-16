@@ -145,15 +145,41 @@ struct App {
     /// Last cursor position over the game window (physical px), so a right-click
     /// can open the menu where the pointer is.
     game_cursor: (i32, i32),
+    /// The currently-applied Options settings (bgb's Options control panel) —
+    /// the source of truth read by pacing/audio/title/debugger render.
+    settings: windows::options::Settings,
+    /// The open Options dialog (bgb "Options..."/F11), drawn centred over the
+    /// LCD; modal like the info box. `None` when closed.
+    options: Option<windows::options::OptionsState>,
+    /// Whether the current pause was auto-induced by focus loss (Options → Misc
+    /// → "Pause if losing focus"), so refocus auto-resumes — but a *manual* pause
+    /// is never clobbered on refocus.
+    paused_by_focus: bool,
+    /// Last windowed integer scale chosen (CLI or Window-size menu), restored
+    /// when leaving fullscreen-stretched so the menu-picked size isn't lost.
+    last_scale: u32,
 }
 
 impl App {
     fn new(opts: Options, session: Session) -> Self {
         let muted = opts.mute;
-        let window_size = WindowSizeChoice::Scale(opts.scale);
+        let scale = opts.scale;
+        let window_size = WindowSizeChoice::Scale(scale);
+        // Seed Options' model from the persistent `--model` preference (the value
+        // reused for every ROM load), NOT the resolved session model — so it
+        // can't desync when a later ROM auto-detects to a different system, and
+        // Apply with the default (Auto) never force-switches the running game.
+        let settings = windows::options::Settings {
+            model: windows::options::ModelChoice::from_option(opts.model),
+            ..windows::options::Settings::default()
+        };
         Self {
             opts,
             session,
+            settings,
+            options: None,
+            paused_by_focus: false,
+            last_scale: scale,
             window: None,
             video: None,
             audio: None,
@@ -186,8 +212,10 @@ impl App {
                 " (debugging)".to_owned()
             } else if self.paused {
                 " — paused".to_owned()
-            } else {
+            } else if self.settings.show_framerate {
                 format!(" — {:.1} fps", self.fps)
+            } else {
+                String::new()
             };
             window.set_title(&format!("{} — slopgb{state}", self.session.title));
         }
@@ -207,6 +235,7 @@ impl App {
         let sub = self.main_submenu.as_ref();
         let info = self.info_box.as_ref();
         let path_dlg = self.path_dialog.as_ref();
+        let options = self.options.as_ref();
         let theme = ui::Theme::BGB;
         let stretch = self.window_size == WindowSizeChoice::FullscreenStretched;
         if let Err(e) = video.draw(window, frame, stretch, |canvas| {
@@ -224,6 +253,10 @@ impl App {
                 let area = canvas.bounds();
                 dialog::render(canvas, area, d, &theme);
             }
+            // The Options control panel draws on top of everything (modal).
+            if let Some(o) = options {
+                windows::options::render(canvas, o, &theme);
+            }
         }) {
             eprintln!("slopgb: failed to present frame: {e}");
         }
@@ -238,6 +271,19 @@ impl App {
 
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, key: &KeyEvent, focus: Focus) {
         if key.repeat {
+            return;
+        }
+        // Options control panel is modal: while it's open every key is swallowed
+        // (so a hotkey can't fire underneath it); Escape cancels (reverts edits)
+        // and closes, matching a Windows dialog's Esc.
+        if focus == Focus::Game && key.state.is_pressed() && self.options.is_some() {
+            if let PhysicalKey::Code(KeyCode::Escape) = key.physical_key {
+                // Esc = Cancel: just drop the dialog without applying — the live
+                // state already equals the baseline (only OK/Apply push live), so
+                // discarding the unapplied `working` edits is the whole revert.
+                self.options = None;
+                self.request_game_redraw();
+            }
             return;
         }
         // Game-window "Load ROM" modal capture (MN4): every key goes to it while
@@ -349,8 +395,12 @@ impl App {
         self.request_game_redraw();
     }
 
-    /// Record a successfully loaded ROM in the recent list (MN4).
+    /// Record a successfully loaded ROM in the recent list (MN4). Skipped when
+    /// Options → Misc → "freeze recent ROMs menu" is set (bgb pins the list).
     fn push_recent(&mut self, path: &Path) {
+        if self.settings.freeze_recent {
+            return;
+        }
         push_recent_into(&mut self.recent, path);
     }
 
@@ -376,7 +426,11 @@ impl App {
             return;
         }
         match AudioOutput::new() {
-            Ok(out) => self.audio = Some(AudioPipe::new(out)),
+            Ok(out) => {
+                let mut pipe = AudioPipe::new(out);
+                pipe.set_volume(self.settings.volume, self.settings.mono);
+                self.audio = Some(pipe);
+            }
             Err(e) => eprintln!("slopgb: audio disabled: {e}"),
         }
     }
@@ -569,8 +623,27 @@ impl ApplicationHandler for App {
             }
             WindowEvent::DroppedFile(path) => self.load_dropped(&path),
             // Focus loss and occlusion both mean held keys won't get release
-            // events, so drop all input before any button can stick.
-            WindowEvent::Focused(false) | WindowEvent::Occluded(true) => self.release_all_input(),
+            // events, so drop all input before any button can stick. With
+            // Options → Misc → "Pause if losing focus" set, also pause.
+            WindowEvent::Focused(false) | WindowEvent::Occluded(true) => {
+                self.release_all_input();
+                if self.settings.pause_on_focus_loss && !self.paused {
+                    self.paused = true;
+                    self.paused_by_focus = true;
+                    self.session.flush_save();
+                    self.update_title();
+                }
+            }
+            // Refocus auto-resumes, but only a pause we induced — a manual pause
+            // (P) stays put (bgb's "Pause if losing focus" resume behaviour).
+            WindowEvent::Focused(true) | WindowEvent::Occluded(false) => {
+                if self.paused_by_focus && self.paused {
+                    self.paused = false;
+                    self.resync_pacing();
+                    self.update_title();
+                }
+                self.paused_by_focus = false;
+            }
             // Track the pointer (for opening the menu where it sits) and, with a
             // menu open, highlight the hovered row of the frontmost popup.
             WindowEvent::CursorMoved { position, .. } => {

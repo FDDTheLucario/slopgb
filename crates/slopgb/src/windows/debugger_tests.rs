@@ -1,4 +1,5 @@
 use super::*;
+use crate::dbg::Breakpoints;
 use slopgb_core::Registers;
 use std::collections::BTreeSet;
 
@@ -54,67 +55,8 @@ fn layout_panes_tile_the_window_without_overlap() {
     assert!((l.regs.w - w * 33 / 100).abs() <= 1);
 }
 
-#[test]
-fn disasm_rows_decode_format_and_advance() {
-    // 0x100: nop; 0x101: jp 0150 (C3 50 01); 0x104: ld a,FF (3E FF).
-    let mem = |a: u16| match a {
-        0x101 => 0xC3,
-        0x102 => 0x50,
-        0x103 => 0x01,
-        0x104 => 0x3E,
-        0x105 => 0xFF,
-        _ => 0x00, // nop fills the rest
-    };
-    let rows = disasm_rows(mem, 0x100, 3, &BTreeSet::new());
-    assert_eq!(rows.len(), 3);
-
-    assert_eq!(rows[0].addr, 0x100);
-    assert!(rows[0].text.starts_with("ROM0:0100 "), "{}", rows[0].text);
-    assert!(rows[0].text.contains("nop"));
-    assert!(rows[0].text.ends_with(";1"));
-
-    assert_eq!(rows[1].addr, 0x101, "advanced past the 1-byte nop");
-    assert!(rows[1].text.contains("C3 50 01"));
-    assert!(rows[1].text.contains("jp 0150"));
-    assert!(rows[1].text.ends_with(";4"));
-
-    assert_eq!(rows[2].addr, 0x104, "advanced past the 3-byte jp");
-    assert!(rows[2].text.contains("3E FF"));
-    assert!(rows[2].text.contains("ld a,FF"));
-}
-
-#[test]
-fn render_disasm_highlights_the_pc_row() {
-    use crate::ui::Theme;
-    use crate::ui::canvas::Canvas;
-    use crate::ui::text::line_height;
-    let t = Theme::BGB;
-    let lh = line_height() as usize;
-    let (w, h) = (200usize, lh * 4);
-    let mut buf = vec![0x00AA_AAAA_u32; w * h];
-    let mem = |_a: u16| 0x00u8; // all nops
-    let rows;
-    {
-        let mut c = Canvas::new(&mut buf, w, h);
-        // pc = 0x102: nops are 1 byte, so rows are 0x100,0x101,0x102,... -> pc
-        // is the 3rd visible row (viewport index 2).
-        rows = render_disasm(
-            &mut c,
-            Rect::new(0, 0, w as i32, h as i32),
-            mem,
-            0x100,
-            0x102,
-            &Breakpoints::default(),
-            &BTreeSet::new(),
-            &t,
-        );
-    }
-    assert!(rows.iter().any(|r| r.addr == 0x102));
-    // The 3rd row (index 2) carries the blue current-PC bar (the bar reaches
-    // across the gutter to x=0).
-    assert_eq!(buf[(2 * lh) * w], t.current, "PC row highlighted");
-    assert_ne!(buf[0], t.current, "first row not highlighted");
-}
+// `disasm_rows` decode/format + `render_disasm` highlight tests live in
+// `debugger/disasm_tests.rs` (next to the `disasm` submodule).
 
 #[test]
 fn layout_degenerate_sizes_do_not_panic_or_go_negative() {
@@ -205,6 +147,7 @@ fn render_disasm_draws_a_red_gutter_dot_on_breakpoint_rows() {
             0x0100,
             &bps,
             &BTreeSet::new(),
+            DisasmFmt::default(),
             &t,
         );
     }
@@ -645,27 +588,8 @@ fn non_editable_register_row_greys_edit_register() {
 
 // --- code/data hints (RM9) -------------------------------------------------
 
-#[test]
-fn data_hint_renders_db_and_advances_one_byte() {
-    // 0x0150 = C3 50 01 (jp 0150); as code it is 3 bytes, as data one `db C3`.
-    let mem = |a: u16| match a {
-        0x0150 => 0xC3,
-        0x0151 => 0x50,
-        0x0152 => 0x01,
-        _ => 0x00,
-    };
-    let hints: BTreeSet<u16> = [0x0150].into_iter().collect();
-    let rows = disasm_rows(mem, 0x0150, 2, &hints);
-    assert!(rows[0].text.contains("db C3"), "{}", rows[0].text);
-    assert_eq!(
-        rows[1].addr, 0x0151,
-        "a data byte advances by 1, not the jp's 3"
-    );
-    // Without the hint the same address decodes as the 3-byte jp.
-    let code = disasm_rows(mem, 0x0150, 2, &BTreeSet::new());
-    assert!(code[0].text.contains("jp 0150"));
-    assert_eq!(code[1].addr, 0x0153);
-}
+// `disasm_rows` data-hint + format tests live in `debugger/disasm_tests.rs`
+// alongside the `disasm` submodule they cover.
 
 /// Open a pane's menu and click the item at `idx`; returns the state after.
 fn click_menu_item(target_kind: char, idx: usize) -> DebuggerState {

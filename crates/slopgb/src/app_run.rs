@@ -45,6 +45,9 @@ impl App {
         match action {
             Action::Pause => {
                 self.paused = !self.paused;
+                // A manual pause/unpause overrides the focus-loss auto-pause, so
+                // refocus won't auto-resume a deliberately-paused emulator.
+                self.paused_by_focus = false;
                 if self.paused {
                     self.session.flush_save();
                 } else {
@@ -138,18 +141,11 @@ impl App {
             }
             Action::SaveScreenshot => self.save_screenshot(),
             Action::DbgSaveMemDump => self.save_memory_dump(),
-            // bgb's "Options..." / "Cheat..." — partial stubs (the real config /
-            // cheat subsystems aren't built): a read-only info box of the live
-            // settings, and an empty cheat list (MN7).
+            // bgb's "Options..." (F11): open the tabbed control panel, seeded
+            // from the live settings. Routed/applied by `on_game_click` +
+            // `handle_key` like the other modals.
             Action::MainOptions => {
-                self.info_box = Some(InfoBox::new(
-                    "Options",
-                    vec![
-                        format!("sound:  {}", if self.muted { "off" } else { "on" }),
-                        format!("scale:  {}", crate::app_menu::scale_label(self.window_size)),
-                        format!("model:  {:?}", self.session.model),
-                    ],
-                ));
+                self.options = Some(windows::options::OptionsState::new(self.settings));
                 self.request_game_redraw();
             }
             Action::MainCheats => {

@@ -12,6 +12,45 @@ fn audio_pacing_requires_a_live_pipe_and_unmuted_sound() {
 }
 
 #[test]
+fn frame_interval_caps_to_limit() {
+    let real = Duration::from_micros(16742);
+    assert_eq!(frame_interval(0, real), real, "0 = real speed");
+    assert_eq!(
+        frame_interval(30, real),
+        Duration::from_secs_f64(1.0 / 30.0)
+    );
+    // a higher cap is a shorter interval (faster)
+    assert!(frame_interval(120, real) < frame_interval(60, real));
+}
+
+#[test]
+fn turbo_max_frames_scales_and_floors() {
+    assert_eq!(turbo_max_frames(10), 10);
+    assert_eq!(turbo_max_frames(0), 1, "never zero");
+    assert!(turbo_max_frames(20) > turbo_max_frames(5), "monotonic");
+}
+
+#[test]
+fn apply_gain_scales_mutes_and_downmixes() {
+    // identity
+    let mut f = vec![(0.4, -0.6)];
+    apply_gain(&mut f, 1.0, false);
+    assert_eq!(f, vec![(0.4, -0.6)]);
+    // half gain halves amplitude
+    let mut f = vec![(0.4, -0.6)];
+    apply_gain(&mut f, 0.5, false);
+    assert_eq!(f, vec![(0.2, -0.3)]);
+    // zero gain silences
+    let mut f = vec![(0.4, -0.6)];
+    apply_gain(&mut f, 0.0, false);
+    assert_eq!(f, vec![(0.0, 0.0)]);
+    // mono averages L/R (before gain)
+    let mut f = vec![(0.4, 0.8)];
+    apply_gain(&mut f, 1.0, true);
+    assert_eq!(f, vec![(0.6, 0.6)]);
+}
+
+#[test]
 fn watchdog_trips_after_sustained_stall() {
     let mut w = StallWatchdog::new();
     let t0 = Instant::now();

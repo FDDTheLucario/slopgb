@@ -1,0 +1,436 @@
+use super::tabs::{Field, controls};
+use super::*;
+use crate::ui::canvas::Canvas;
+
+const T: Theme = Theme::BGB;
+const BOUNDS: Rect = Rect::new(0, 0, 500, 420);
+
+fn dialog() -> Rect {
+    OptionsState::dialog_rect(BOUNDS)
+}
+
+/// Find the live control driving `field` on `tab`, return its hit-rect.
+fn field_rect(tab: OptionsTab, s: &Settings, field: Field) -> Rect {
+    let content = OptionsState::content_rect(dialog());
+    controls(tab, s, content)
+        .into_iter()
+        .find(|c| c.field == Some(field))
+        .unwrap_or_else(|| panic!("no live control for {field:?} on {tab:?}"))
+        .rect
+}
+
+/// Click the centre of the control driving `field`.
+fn click_field(st: &mut OptionsState, field: Field) {
+    let r = field_rect(st.active, &st.working, field);
+    st.on_click(r.x + r.w / 2, r.y + r.h / 2, BOUNDS);
+}
+
+// --- Task 1: Settings defaults ----------------------------------------------
+
+#[test]
+fn settings_default_matches_spec() {
+    let d = Settings::default();
+    assert_eq!(d.model, ModelChoice::Auto);
+    assert_eq!(d.volume, 1.0);
+    assert_eq!(d.ff_speed, 10);
+    assert_eq!(d.framerate_limit, 0);
+    assert!(!d.show_framerate);
+    assert!(d.lowercase_disasm);
+    assert!(!d.lowercase_hex);
+    assert!(d.show_clocks);
+    assert!(!d.freeze_recent);
+    assert!(!d.pause_on_focus_loss);
+    assert_eq!(d.scheme, 0);
+    assert_eq!(d.dmg_palette, SCHEMES[0].colors);
+}
+
+// --- Task 2: tab labels + groups --------------------------------------------
+
+#[test]
+fn options_tab_labels_and_groups() {
+    let all: Vec<OptionsTab> = OptionsTab::GROUP_A
+        .iter()
+        .chain(&OptionsTab::GROUP_B)
+        .copied()
+        .collect();
+    assert_eq!(all.len(), 8);
+    assert_eq!(
+        all.iter().map(|t| t.label()).collect::<Vec<_>>(),
+        [
+            "Graphics",
+            "System",
+            "Debug",
+            "Exceptions",
+            "Sound",
+            "GB Colors",
+            "Joypad",
+            "Misc"
+        ]
+    );
+    for t in OptionsTab::GROUP_A {
+        assert_eq!(t.group(), 0);
+    }
+    for t in OptionsTab::GROUP_B {
+        assert_eq!(t.group(), 1);
+    }
+}
+
+// --- Task 3: tab switching + two-row swap ------------------------------------
+
+#[test]
+fn tab_click_switches_active() {
+    let mut st = OptionsState::new(Settings::default());
+    let boxes = st.tab_hitboxes(dialog());
+    let (tab, r) = boxes
+        .iter()
+        .find(|(t, _)| *t == OptionsTab::Sound)
+        .cloned()
+        .unwrap();
+    assert_eq!(tab, OptionsTab::Sound);
+    st.on_click(r.x + 2, r.y + 2, BOUNDS);
+    assert_eq!(st.active, OptionsTab::Sound);
+}
+
+#[test]
+fn active_group_sits_on_bottom_row() {
+    // System (group A) active → group A is the bottom row (larger y).
+    let st = OptionsState::new(Settings::default()); // active = System
+    let boxes = st.tab_hitboxes(dialog());
+    let row_y = |want: OptionsTab| boxes.iter().find(|(t, _)| *t == want).unwrap().1.y;
+    assert!(
+        row_y(OptionsTab::System) > row_y(OptionsTab::Sound),
+        "active group A must be the bottom row"
+    );
+
+    // Switch to a group-B tab → group B drops to the bottom.
+    let mut st2 = OptionsState::new(Settings::default());
+    st2.active = OptionsTab::GbColors;
+    let b2 = st2.tab_hitboxes(dialog());
+    let y2 = |want: OptionsTab| b2.iter().find(|(t, _)| *t == want).unwrap().1.y;
+    assert!(
+        y2(OptionsTab::GbColors) > y2(OptionsTab::Graphics),
+        "active group B must be the bottom row"
+    );
+}
+
+// --- Task 4: chrome layout ---------------------------------------------------
+
+#[test]
+fn chrome_button_order() {
+    let rects = OptionsState::button_rects(dialog());
+    assert_eq!(
+        rects.iter().map(|(b, _)| *b).collect::<Vec<_>>(),
+        OptionsButton::ALL.to_vec()
+    );
+    // left-to-right
+    for w in rects.windows(2) {
+        assert!(w[0].1.x < w[1].1.x);
+    }
+}
+
+#[test]
+fn render_does_not_panic_and_draws() {
+    let mut buf = vec![0u32; (BOUNDS.w * BOUNDS.h) as usize];
+    let mut c = Canvas::new(&mut buf, BOUNDS.w as usize, BOUNDS.h as usize);
+    let st = OptionsState::new(Settings::default());
+    render(&mut c, &st, &T);
+    let d = dialog();
+    // The dialog bg (white) was written.
+    let idx = ((d.y + 1) * BOUNDS.w + d.x + 1) as usize;
+    assert_eq!(buf[idx], T.bg);
+    // The button row drew ink (the OK button's border) somewhere on its row.
+    let (_, ok) = OptionsState::button_rects(d)[0];
+    let row_has_ink = (ok.x..ok.right()).any(|x| {
+        let i = ((ok.y + ok.h / 2) * BOUNDS.w + x) as usize;
+        buf[i] == T.text
+    });
+    assert!(row_has_ink, "button row should draw the OK button border");
+}
+
+#[test]
+fn sound_volume_slider_full_range() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Sound;
+    let r = field_rect(OptionsTab::Sound, &st.working, Field::Volume);
+    st.on_click(r.right() - 1, r.y + r.h / 2, BOUNDS);
+    assert!(
+        st.working.volume > 0.9,
+        "right edge = loud, got {}",
+        st.working.volume
+    );
+}
+
+// --- Task 5: scratch / button semantics --------------------------------------
+
+#[test]
+fn scratch_semantics_cancel_reverts() {
+    let mut st = OptionsState::new(Settings::default());
+    st.working.volume = 0.25;
+    let out = st.press(OptionsButton::Cancel);
+    assert_eq!(out, OptionsOutcome::Close);
+    assert_eq!(st.working.volume, 1.0, "Cancel reverts to baseline");
+}
+
+#[test]
+fn scratch_semantics_apply_commits_stays_open() {
+    let mut st = OptionsState::new(Settings::default());
+    st.working.volume = 0.25;
+    let out = st.press(OptionsButton::Apply);
+    assert_eq!(out, OptionsOutcome::StayApply);
+    assert!(out.applies() && !out.closes(), "Apply applies + stays open");
+    assert_eq!(st.baseline.volume, 0.25, "Apply commits baseline");
+    // a subsequent Cancel keeps the committed value
+    st.working.volume = 0.9;
+    st.press(OptionsButton::Cancel);
+    assert_eq!(st.working.volume, 0.25);
+}
+
+#[test]
+fn scratch_semantics_ok_applies_and_closes() {
+    let mut st = OptionsState::new(Settings::default());
+    st.working.mono = true;
+    let out = st.press(OptionsButton::Ok);
+    assert_eq!(out, OptionsOutcome::CloseApply);
+    assert!(out.applies() && out.closes(), "OK applies + closes");
+    assert!(st.baseline.mono);
+}
+
+#[test]
+fn defaults_button_stays_open_without_applying() {
+    // bgb's Defaults only edits the controls — it does not push live until OK/Apply.
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Sound;
+    st.working.volume = 0.3;
+    let out = st.press(OptionsButton::Defaults);
+    assert_eq!(out, OptionsOutcome::StayReset);
+    assert!(!out.applies(), "Defaults does not apply live");
+    assert!(!out.closes(), "Defaults stays open");
+    assert_eq!(st.working.volume, 1.0, "Defaults reset the working control");
+}
+
+#[test]
+fn defaults_resets_only_active_tab() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Sound;
+    st.working.volume = 0.1;
+    st.working.lowercase_hex = true; // a Debug-tab field, must survive
+    st.press(OptionsButton::Defaults);
+    assert_eq!(st.working.volume, 1.0, "Sound Defaults resets volume");
+    assert!(
+        st.working.lowercase_hex,
+        "Debug field untouched by Sound Defaults"
+    );
+}
+
+// --- Tasks 6-13: per-tab live control hit-tests ------------------------------
+
+#[test]
+fn model_choice_from_option_maps_preference() {
+    use slopgb_core::Model;
+    // The persistent --model preference seeds the dialog: None → Auto (bgb
+    // default; never force-switches on Apply), explicit models → their radio.
+    assert_eq!(ModelChoice::from_option(None), ModelChoice::Auto);
+    assert_eq!(ModelChoice::from_option(Some(Model::Dmg)), ModelChoice::Dmg);
+    assert_eq!(ModelChoice::from_option(Some(Model::Cgb)), ModelChoice::Cgb);
+    assert_eq!(
+        ModelChoice::from_option(Some(Model::Agb)),
+        ModelChoice::Cgb,
+        "AGB is CGB-family"
+    );
+}
+
+#[test]
+fn system_tab_model_radios() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::System;
+    click_field(&mut st, Field::Model(ModelChoice::Cgb));
+    assert_eq!(st.working.model, ModelChoice::Cgb);
+    click_field(&mut st, Field::Model(ModelChoice::Dmg));
+    assert_eq!(st.working.model, ModelChoice::Dmg);
+}
+
+#[test]
+fn debug_tab_display_flags_toggle() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Debug;
+    click_field(&mut st, Field::LowercaseHex);
+    assert!(st.working.lowercase_hex);
+    click_field(&mut st, Field::ShowClocks);
+    assert!(!st.working.show_clocks);
+}
+
+#[test]
+fn sound_tab_volume_and_mono() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Sound;
+    // click near the left of the volume slider → low volume
+    let r = field_rect(OptionsTab::Sound, &st.working, Field::Volume);
+    st.on_click(r.x + 2, r.y + r.h / 2, BOUNDS);
+    assert!(
+        st.working.volume < 0.1,
+        "left click = quiet, got {}",
+        st.working.volume
+    );
+    click_field(&mut st, Field::Mono);
+    assert!(st.working.mono);
+}
+
+#[test]
+fn graphics_tab_stretch_toggle() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Graphics;
+    click_field(&mut st, Field::Stretch);
+    assert!(st.working.stretch);
+}
+
+#[test]
+fn exceptions_tab_is_fully_inert() {
+    // slopgb's free-run halts only on PC breakpoints/watchpoints, so every
+    // Exceptions break-condition is an inert stub (no backend).
+    let s = Settings::default();
+    let content = OptionsState::content_rect(dialog());
+    assert!(
+        controls(OptionsTab::Exceptions, &s, content)
+            .iter()
+            .all(|c| c.field.is_none()),
+        "Exceptions tab has no live controls"
+    );
+}
+
+#[test]
+fn gbcolors_scheme_cycles_palette() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::GbColors;
+    assert_eq!(st.working.scheme, 0);
+    click_field(&mut st, Field::SchemeCycle);
+    assert_eq!(st.working.scheme, 1);
+    assert_eq!(st.working.dmg_palette, SCHEMES[1].colors);
+    // Cycle the rest of the way round — the wrap must return to scheme 0.
+    for _ in 1..SCHEMES.len() {
+        click_field(&mut st, Field::SchemeCycle);
+    }
+    assert_eq!(st.working.scheme, 0, "scheme wraps back to 0");
+    assert_eq!(st.working.dmg_palette, SCHEMES[0].colors);
+}
+
+#[test]
+fn defaults_resets_every_tab_only_its_own_fields() {
+    // For each tab, mutate one of its live fields away from default, press
+    // Defaults on that tab, and assert it reset (and an out-of-tab field is
+    // untouched). Covers every reset_defaults branch, not just Sound.
+    type Case = (OptionsTab, fn(&mut Settings), fn(&Settings) -> bool);
+    let cases: &[Case] = &[
+        (OptionsTab::Graphics, |s| s.stretch = true, |s| !s.stretch),
+        (
+            OptionsTab::System,
+            |s| s.model = ModelChoice::Cgb,
+            |s| s.model == ModelChoice::Auto,
+        ),
+        (
+            OptionsTab::Debug,
+            |s| s.lowercase_hex = true,
+            |s| !s.lowercase_hex,
+        ),
+        (OptionsTab::Sound, |s| s.volume = 0.1, |s| s.volume == 1.0),
+        (OptionsTab::GbColors, |s| s.scheme = 2, |s| s.scheme == 0),
+        (OptionsTab::Misc, |s| s.ff_speed = 3, |s| s.ff_speed == 10),
+    ];
+    for (tab, mutate, is_default) in cases {
+        let mut st = OptionsState::new(Settings::default());
+        st.active = *tab;
+        mutate(&mut st.working);
+        st.working.mono = true; // an out-of-tab field (Sound) — survives unless tab==Sound
+        st.press(OptionsButton::Defaults);
+        assert!(
+            is_default(&st.working),
+            "{tab:?} Defaults did not reset its field"
+        );
+        if *tab != OptionsTab::Sound {
+            assert!(
+                st.working.mono,
+                "{tab:?} Defaults clobbered an out-of-tab field"
+            );
+        }
+    }
+}
+
+#[test]
+fn misc_tab_live_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Misc;
+    click_field(&mut st, Field::ShowFramerate);
+    assert!(st.working.show_framerate);
+    click_field(&mut st, Field::FreezeRecent);
+    assert!(st.working.freeze_recent);
+    click_field(&mut st, Field::PauseOnFocusLoss);
+    assert!(st.working.pause_on_focus_loss);
+}
+
+#[test]
+fn misc_tab_pacing_sliders() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Misc;
+    // Right edge of the fast-forward slider → the max speed.
+    let r = field_rect(OptionsTab::Misc, &st.working, Field::FfSpeed);
+    st.on_click(r.right() - 1, r.y + r.h / 2, BOUNDS);
+    assert_eq!(st.working.ff_speed, 20, "ff slider right edge = max");
+    // Left edge → minimum (never 0).
+    let r = field_rect(OptionsTab::Misc, &st.working, Field::FfSpeed);
+    st.on_click(r.x, r.y + r.h / 2, BOUNDS);
+    assert_eq!(st.working.ff_speed, 1, "ff slider left edge = 1");
+    // Framerate slider right edge → the top discrete step.
+    let r = field_rect(OptionsTab::Misc, &st.working, Field::FramerateLimit);
+    st.on_click(r.right() - 1, r.y + r.h / 2, BOUNDS);
+    assert_eq!(
+        st.working.framerate_limit, 300,
+        "framerate slider right edge"
+    );
+    // Left edge → 0 (real speed).
+    let r = field_rect(OptionsTab::Misc, &st.working, Field::FramerateLimit);
+    st.on_click(r.x, r.y + r.h / 2, BOUNDS);
+    assert_eq!(
+        st.working.framerate_limit, 0,
+        "framerate slider left edge = real speed"
+    );
+}
+
+#[test]
+fn joypad_tab_is_fully_inert() {
+    let s = Settings::default();
+    let content = OptionsState::content_rect(dialog());
+    assert!(
+        controls(OptionsTab::Joypad, &s, content)
+            .iter()
+            .all(|c| c.field.is_none()),
+        "Joypad tab has no live controls"
+    );
+}
+
+#[test]
+fn inert_control_click_is_noop() {
+    // Clicking an inert System radio (Super Gameboy) must not change the model.
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::System;
+    let content = OptionsState::content_rect(dialog());
+    let sgb = controls(OptionsTab::System, &st.working, content)
+        .into_iter()
+        .find(|c| matches!(&c.kind, super::tabs::Kind::Radio { label, .. } if *label == "Super Gameboy"))
+        .unwrap();
+    st.on_click(sgb.rect.x + 2, sgb.rect.y + 2, BOUNDS);
+    assert_eq!(
+        st.working.model,
+        ModelChoice::Auto,
+        "inert radio is a no-op"
+    );
+}
+
+// --- slider helper -----------------------------------------------------------
+
+#[test]
+fn slider_frac_maps_position() {
+    let track = Rect::new(10, 0, 100, 10);
+    assert_eq!(slider_frac(track, 10), 0.0);
+    assert_eq!(slider_frac(track, 110), 1.0);
+    assert!((slider_frac(track, 60) - 0.5).abs() < 0.01);
+    assert_eq!(slider_frac(track, -5), 0.0, "clamped");
+}

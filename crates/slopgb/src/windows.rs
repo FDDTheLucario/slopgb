@@ -6,6 +6,7 @@
 pub mod debugger;
 pub mod iomap;
 pub mod mainwin;
+pub mod options;
 pub mod vram;
 
 use slopgb_core::{GameBoy, Model, debug};
@@ -123,6 +124,7 @@ fn render_debugger(
         pc,
         bps,
         &st.data_hints,
+        st.disasm_fmt,
         theme,
     );
     // Profiler: overlay per-line execution counts while logging (MB5).
