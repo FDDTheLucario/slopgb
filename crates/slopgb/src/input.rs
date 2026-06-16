@@ -68,6 +68,9 @@ pub enum Action {
     /// Save the current frame to a BMP (bgb's main-menu "Save screenshot").
     /// Menu-only — no key binds it.
     SaveScreenshot,
+    /// Dump the whole 64 KiB address space to a file (debugger File →
+    /// "save memory_dump..."). Menu-only.
+    DbgSaveMemDump,
 }
 
 /// Tracks which physical keys currently hold each button, so two keys mapped

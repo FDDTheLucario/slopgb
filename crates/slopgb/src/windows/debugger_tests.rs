@@ -898,9 +898,38 @@ fn run_menu_wires_forward_execution_commands() {
             "Run menu item {item} fires {act:?}"
         );
     }
+    // Jump to cursor (F6) + Call cursor are now wired (cursor falls back to PC).
+    assert_eq!(
+        click_menubar_item(2, 12),
+        Some(MenuOutcome::Command(Action::DbgJumpToCursor)),
+        "Jump to cursor"
+    );
+    assert_eq!(
+        click_menubar_item(2, 13),
+        Some(MenuOutcome::Act(DebugAction::Call(0x0100))),
+        "Call cursor acts on the cursor-or-PC"
+    );
     // The reverse / not-yet-built variants stay greyed (no outcome).
     assert_eq!(click_menubar_item(2, 1), None, "Run no break greyed");
     assert_eq!(click_menubar_item(2, 8), None, "Animate greyed");
+}
+
+#[test]
+fn file_menu_wires_the_export_commands() {
+    use crate::input::Action;
+    assert_eq!(
+        click_menubar_item(0, 10),
+        Some(MenuOutcome::Command(Action::SaveScreenshot)),
+        "save screenshot"
+    );
+    assert_eq!(
+        click_menubar_item(0, 11),
+        Some(MenuOutcome::Command(Action::DbgSaveMemDump)),
+        "save memory_dump"
+    );
+    // Load ROM / state ops stay greyed (need a picker / save-state infra).
+    assert_eq!(click_menubar_item(0, 0), None, "Load ROM greyed");
+    assert_eq!(click_menubar_item(0, 8), None, "Save state greyed");
 }
 
 #[test]

@@ -708,7 +708,25 @@ impl App {
                 self.resync_pacing();
             }
             Action::SaveScreenshot => self.save_screenshot(),
+            Action::DbgSaveMemDump => self.save_memory_dump(),
             _ => {}
+        }
+    }
+
+    /// Dump the whole 64 KiB address space (live IO-resolved via `debug_read`)
+    /// to `slopgb-memdump-<unix-millis>.bin` (debugger File → "save
+    /// memory_dump..."); log the path or any I/O error.
+    fn save_memory_dump(&self) {
+        let dump: Vec<u8> = (0..=0xFFFFu16)
+            .map(|a| self.session.gb.debug_read(a))
+            .collect();
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis());
+        let path = format!("slopgb-memdump-{stamp}.bin");
+        match fs::write(&path, &dump) {
+            Ok(()) => eprintln!("saved memory dump to {path}"),
+            Err(e) => eprintln!("error: could not save memory dump: {e}"),
         }
     }
 
