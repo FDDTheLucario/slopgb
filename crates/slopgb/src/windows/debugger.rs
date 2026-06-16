@@ -975,9 +975,46 @@ fn debug_menu(cursor: u16) -> Vec<(MenuItem, MenuChoice)> {
         ),
         disabled("Evaluate expression"),
         disabled("Set user clocks counter"),
-        dis_sc("Breakpoints", "Ctrl+H"),
-        dis_sc("Watchpoints", "Ctrl+J"),
+        cmd("Breakpoints", "Ctrl+H", Action::DbgManageBreakpoints),
+        cmd("Watchpoints", "Ctrl+J", Action::DbgManageWatchpoints),
     ]
+}
+
+/// Build the breakpoint/watchpoint **manager** popup (RM15) listing `addrs`,
+/// one per row; selecting a row toggles (clears) that entry through the normal
+/// menu-click path. bgb's manager is a persistent window — this is the
+/// functional list, reusing the context-menu widget. `watch` picks the clear
+/// action; an empty list shows a single greyed `(none)`.
+#[must_use]
+pub fn address_list_menu(addrs: &[u16], watch: bool, origin: (i32, i32)) -> OpenMenu {
+    let entries: Vec<(MenuItem, MenuChoice)> = if addrs.is_empty() {
+        vec![disabled("(none)")]
+    } else {
+        addrs
+            .iter()
+            .map(|&a| {
+                // An idempotent *clear* (not a toggle) so a row from a stale
+                // snapshot can never re-arm an entry the user cleared elsewhere.
+                let choice = if watch {
+                    MenuChoice::Act(DebugAction::ClearWatchpoint(a))
+                } else {
+                    MenuChoice::Act(DebugAction::ClearBreakpoint(a))
+                };
+                (
+                    MenuItem::new(format!("{}:{a:04X}", region_label(a))),
+                    choice,
+                )
+            })
+            .collect()
+    };
+    let (items, choices) = entries.into_iter().unzip();
+    OpenMenu {
+        origin,
+        items,
+        choices,
+        hovered: None,
+        bar: None,
+    }
 }
 
 fn window_menu() -> Vec<(MenuItem, MenuChoice)> {

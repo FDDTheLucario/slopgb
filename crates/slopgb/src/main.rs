@@ -44,6 +44,9 @@ use video::Video;
 use windows::debugger::MenuOutcome;
 use windows::mainwin::{MainMenu, MenuEffect, SubChoice, SubKind, SubMenu, WindowSizeChoice};
 
+/// Top-left origin of the bp/wp manager list popup, below the debugger menu bar.
+const MANAGER_ORIGIN: (i32, i32) = (40, 30);
+
 const USAGE: &str = "\
 slopgb — Game Boy / Game Boy Color emulator
 
@@ -675,6 +678,24 @@ impl App {
                 self.refresh_after_step();
             }
             Action::DbgGoto => self.tools.open_debugger_goto(),
+            // bp/wp manager (RM15): build a list popup from the App-owned sets
+            // (each row clears its entry) and hand it to the debugger window.
+            Action::DbgManageBreakpoints => {
+                let addrs = self.dbg.breakpoints().pc_list();
+                let menu = windows::debugger::address_list_menu(&addrs, false, MANAGER_ORIGIN);
+                self.tools.set_debugger_menu(menu);
+            }
+            Action::DbgManageWatchpoints => {
+                let addrs: Vec<u16> = self
+                    .dbg
+                    .watchpoints()
+                    .list()
+                    .iter()
+                    .map(|w| w.addr)
+                    .collect();
+                let menu = windows::debugger::address_list_menu(&addrs, true, MANAGER_ORIGIN);
+                self.tools.set_debugger_menu(menu);
+            }
             // bgb's "Enable sound": flip the runtime mute. Unmuting lazily opens
             // the device (so a `--mute` start can still enable sound). Resync
             // pacing so the audio↔timer switch doesn't fast-forward a backlog.

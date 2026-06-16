@@ -43,6 +43,26 @@ fn write_c000_rom() -> Vec<u8> {
 }
 
 #[test]
+fn apply_clear_is_idempotent_never_re_adds() {
+    // The manager's clear (RM15) must be a remove, not a toggle — a stale list
+    // row clicked twice must not re-arm the entry.
+    let mut d = Debugger::default();
+    let mut gb = machine(write_c000_rom());
+    d.apply(&mut gb, DebugAction::ToggleBreakpoint(0x0150));
+    assert!(d.breakpoints().contains(0x0150));
+    d.apply(&mut gb, DebugAction::ClearBreakpoint(0x0150));
+    assert!(!d.breakpoints().contains(0x0150));
+    d.apply(&mut gb, DebugAction::ClearBreakpoint(0x0150)); // again: still gone
+    assert!(!d.breakpoints().contains(0x0150));
+    // Same for watchpoints.
+    d.apply(&mut gb, DebugAction::ToggleWatchpoint(0xC000));
+    assert!(!d.watchpoints().is_empty());
+    d.apply(&mut gb, DebugAction::ClearWatchpoint(0xC000));
+    d.apply(&mut gb, DebugAction::ClearWatchpoint(0xC000));
+    assert!(d.watchpoints().is_empty(), "watchpoint stays cleared");
+}
+
+#[test]
 fn apply_toggle_watchpoint_arms_and_halts_the_free_run() {
     let mut d = Debugger::default();
     let mut gb = machine(write_c000_rom());

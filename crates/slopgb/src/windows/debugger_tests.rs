@@ -544,6 +544,33 @@ fn jump_and_call_cursor_return_their_actions() {
 }
 
 #[test]
+fn address_list_menu_lists_entries_with_clear_choices() {
+    // Breakpoint manager: each row clears (toggles) its breakpoint.
+    let m = address_list_menu(&[0x0150, 0xC000], false, (40, 30));
+    assert_eq!(m.items.len(), 2);
+    assert!(m.items[0].label.contains("0150"));
+    assert_eq!(
+        m.choices[0],
+        MenuChoice::Act(DebugAction::ClearBreakpoint(0x0150))
+    );
+    assert_eq!(
+        m.choices[1],
+        MenuChoice::Act(DebugAction::ClearBreakpoint(0xC000))
+    );
+    // Watchpoint manager uses the watchpoint clear action.
+    let w = address_list_menu(&[0xFF44], true, (40, 30));
+    assert_eq!(
+        w.choices[0],
+        MenuChoice::Act(DebugAction::ClearWatchpoint(0xFF44))
+    );
+    // Empty → a single greyed "(none)".
+    let e = address_list_menu(&[], false, (40, 30));
+    assert_eq!(e.items.len(), 1);
+    assert!(!e.items[0].enabled, "(none) is greyed");
+    assert_eq!(e.choices[0], MenuChoice::None);
+}
+
+#[test]
 fn set_watchpoint_menu_item_returns_a_toggle_action() {
     // "Set watchpoint..." is index 10 (was greyed; now enabled, RM8); cursor 0x0102.
     let (mut st, rects) = open_disasm_menu();

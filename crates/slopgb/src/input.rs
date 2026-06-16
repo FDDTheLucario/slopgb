@@ -54,6 +54,10 @@ pub enum Action {
     DbgRunToCursor,
     /// Jump PC to the cursor without running — debugger F6, on press.
     DbgJumpToCursor,
+    /// Open the breakpoint manager (list) — debugger Ctrl+H, on press.
+    DbgManageBreakpoints,
+    /// Open the watchpoint manager (list) — debugger Ctrl+J, on press.
+    DbgManageWatchpoints,
     /// Step out of the current subroutine — debugger F8, on press.
     DbgStepOut,
     /// Open the Go-to address prompt — debugger Ctrl+G, on press.
@@ -137,6 +141,8 @@ pub fn map(code: KeyCode, mods: ModifiersState, focus: Focus) -> Option<Action> 
             KeyCode::F5 => Some(Action::ToggleTool(ToolWindow::Vram)),
             KeyCode::F10 => Some(Action::ToggleTool(ToolWindow::IoMap)),
             KeyCode::KeyG if mods.control_key() => Some(Action::DbgGoto),
+            KeyCode::KeyH if mods.control_key() => Some(Action::DbgManageBreakpoints),
+            KeyCode::KeyJ if mods.control_key() => Some(Action::DbgManageWatchpoints),
             _ => None,
         },
         Focus::Game => match code {
@@ -217,6 +223,18 @@ mod tests {
             Some(Action::DbgGoto)
         );
         assert_eq!(d(KeyCode::KeyG), None);
+        // Ctrl+H / Ctrl+J open the breakpoint / watchpoint managers (RM15).
+        assert_eq!(
+            map(KeyCode::KeyH, CTRL, Focus::Debugger),
+            Some(Action::DbgManageBreakpoints)
+        );
+        assert_eq!(
+            map(KeyCode::KeyJ, CTRL, Focus::Debugger),
+            Some(Action::DbgManageWatchpoints)
+        );
+        // They are debugger-only + need Ctrl.
+        assert_eq!(map(KeyCode::KeyH, CTRL, Focus::Game), None);
+        assert_eq!(d(KeyCode::KeyH), None);
     }
 
     #[test]

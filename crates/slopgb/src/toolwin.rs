@@ -308,6 +308,19 @@ impl ToolWindows {
         None
     }
 
+    /// Open a prebuilt context menu on the debugger window — the bp/wp manager
+    /// list (RM15), which `main` builds from the App-owned breakpoint/watchpoint
+    /// state and hands here. Redraws.
+    pub fn set_debugger_menu(&mut self, menu: debugger::OpenMenu) {
+        let Some(view) = self.debugger_view_mut() else {
+            return;
+        };
+        if let WinState::Debugger(s) = &mut view.state {
+            s.menu = Some(menu);
+            view.window.request_redraw();
+        }
+    }
+
     /// Open the debugger's `Go to…` modal on the disasm pane (Ctrl+G).
     pub fn open_debugger_goto(&mut self) {
         let Some(view) = self.debugger_view_mut() else {

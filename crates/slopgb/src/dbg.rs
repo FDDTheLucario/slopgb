@@ -36,6 +36,12 @@ impl Breakpoints {
         self.pc.contains(&addr)
     }
 
+    /// Remove the breakpoint at `addr` if present (the manager's clear — an
+    /// idempotent remove, so a stale list row can never re-add one).
+    pub fn remove(&mut self, addr: u16) {
+        self.pc.remove(&addr);
+    }
+
     /// The breakpoint addresses, for [`GameBoy::run_frame_until_breakpoint`].
     #[must_use]
     pub fn pc_list(&self) -> Vec<u16> {
@@ -77,6 +83,11 @@ impl Watchpoints {
     #[must_use]
     pub fn list(&self) -> &[Watchpoint] {
         &self.items
+    }
+
+    /// Remove the watchpoint at `addr` if present (the manager's idempotent clear).
+    pub fn remove(&mut self, addr: u16) {
+        self.items.retain(|w| w.addr != addr);
     }
 
     /// Whether no watchpoint is set (the free-run loop stays a plain `run_frame`).
@@ -131,6 +142,10 @@ pub enum DebugAction {
     SetReg(RegField, u16),
     /// Toggle a write watchpoint at the address (`Set watchpoint`, RM8).
     ToggleWatchpoint(u16),
+    /// Remove the breakpoint at the address (the manager's clear, RM15).
+    ClearBreakpoint(u16),
+    /// Remove the watchpoint at the address (the manager's clear, RM15).
+    ClearWatchpoint(u16),
 }
 
 /// Debugger run-state owned by the event loop. When `broken`, the paced loop
@@ -201,6 +216,11 @@ impl Debugger {
             DebugAction::SetReg(field, value) => gb.debug_set_reg(field.to_core(), value),
             DebugAction::ToggleWatchpoint(addr) => {
                 self.wps.toggle_write(addr);
+                gb.set_watchpoints(self.wps.list());
+            }
+            DebugAction::ClearBreakpoint(addr) => self.bps.remove(addr),
+            DebugAction::ClearWatchpoint(addr) => {
+                self.wps.remove(addr);
                 gb.set_watchpoints(self.wps.list());
             }
         }
