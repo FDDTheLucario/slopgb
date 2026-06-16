@@ -87,6 +87,18 @@ pub enum Action {
     ProfilerStop,
     /// Execution profiler → "clear buffer": zero the tally. Menu-only.
     ProfilerClear,
+    /// Open the Search-string prompt (Search → Search string, Ctrl+F).
+    DbgSearch,
+    /// Re-run the search from after the last hit (Continue search, Ctrl+C).
+    DbgContinueSearch,
+    /// Go to the next bookmark-or-breakpoint (Ctrl+N).
+    DbgNextBookmark,
+    /// Go to the previous bookmark-or-breakpoint (Ctrl+B).
+    DbgPrevBookmark,
+    /// Set numbered bookmark slot N at the cursor (Ctrl+Shift+digit).
+    DbgSetBookmark(u8),
+    /// Jump to numbered bookmark slot N (Ctrl+digit).
+    DbgGotoBookmark(u8),
 }
 
 /// Tracks which physical keys currently hold each button, so two keys mapped
@@ -166,6 +178,19 @@ pub fn map(code: KeyCode, mods: ModifiersState, focus: Focus) -> Option<Action> 
             KeyCode::KeyH if mods.control_key() => Some(Action::DbgManageBreakpoints),
             KeyCode::KeyJ if mods.control_key() => Some(Action::DbgManageWatchpoints),
             KeyCode::KeyA if mods.control_key() => Some(Action::DbgGoToPc),
+            KeyCode::KeyF if mods.control_key() => Some(Action::DbgSearch),
+            KeyCode::KeyC if mods.control_key() => Some(Action::DbgContinueSearch),
+            KeyCode::KeyN if mods.control_key() => Some(Action::DbgNextBookmark),
+            KeyCode::KeyB if mods.control_key() => Some(Action::DbgPrevBookmark),
+            // Ctrl+Shift+digit sets a numbered bookmark; Ctrl+digit jumps to it
+            // (bgb). Placed after the named Ctrl keys so they take precedence.
+            _ if mods.control_key() => digit_of(code).map(|d| {
+                if mods.shift_key() {
+                    Action::DbgSetBookmark(d)
+                } else {
+                    Action::DbgGotoBookmark(d)
+                }
+            }),
             _ => None,
         },
         Focus::Game => match code {
@@ -175,6 +200,24 @@ pub fn map(code: KeyCode, mods: ModifiersState, focus: Focus) -> Option<Action> 
             _ => None,
         },
     }
+}
+
+/// The digit 0-9 a key represents (top-row or numpad), for the numbered-bookmark
+/// shortcuts; `None` for any other key.
+fn digit_of(code: KeyCode) -> Option<u8> {
+    Some(match code {
+        KeyCode::Digit0 | KeyCode::Numpad0 => 0,
+        KeyCode::Digit1 | KeyCode::Numpad1 => 1,
+        KeyCode::Digit2 | KeyCode::Numpad2 => 2,
+        KeyCode::Digit3 | KeyCode::Numpad3 => 3,
+        KeyCode::Digit4 | KeyCode::Numpad4 => 4,
+        KeyCode::Digit5 | KeyCode::Numpad5 => 5,
+        KeyCode::Digit6 | KeyCode::Numpad6 => 6,
+        KeyCode::Digit7 | KeyCode::Numpad7 => 7,
+        KeyCode::Digit8 | KeyCode::Numpad8 => 8,
+        KeyCode::Digit9 | KeyCode::Numpad9 => 9,
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -191,6 +234,30 @@ mod tests {
     /// Map under debugger focus, no modifiers.
     fn d(code: KeyCode) -> Option<Action> {
         map(code, NONE, Focus::Debugger)
+    }
+
+    #[test]
+    fn debugger_ctrl_search_and_bookmark_keys() {
+        let ctrl_shift = ModifiersState::CONTROL | ModifiersState::SHIFT;
+        let dc = |c| map(c, CTRL, Focus::Debugger);
+        assert_eq!(dc(KeyCode::KeyF), Some(Action::DbgSearch));
+        assert_eq!(dc(KeyCode::KeyC), Some(Action::DbgContinueSearch));
+        assert_eq!(dc(KeyCode::KeyN), Some(Action::DbgNextBookmark));
+        assert_eq!(dc(KeyCode::KeyB), Some(Action::DbgPrevBookmark));
+        // Ctrl+digit jumps to a bookmark; Ctrl+Shift+digit sets one.
+        assert_eq!(dc(KeyCode::Digit3), Some(Action::DbgGotoBookmark(3)));
+        assert_eq!(dc(KeyCode::Numpad7), Some(Action::DbgGotoBookmark(7)));
+        assert_eq!(
+            map(KeyCode::Digit3, ctrl_shift, Focus::Debugger),
+            Some(Action::DbgSetBookmark(3))
+        );
+        // A named Ctrl key still wins over the digit catch-all.
+        assert_eq!(dc(KeyCode::KeyA), Some(Action::DbgGoToPc));
+        // Search/bookmark keys are debugger-focus only; the game keeps its map.
+        assert_eq!(map(KeyCode::KeyF, CTRL, Focus::Game), None);
+        assert_eq!(map(KeyCode::Digit3, CTRL, Focus::Game), None);
+        // No modifier: a bare digit is unmapped in the debugger.
+        assert_eq!(d(KeyCode::Digit3), None);
     }
 
     #[test]

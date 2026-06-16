@@ -344,6 +344,96 @@ impl ToolWindows {
         }
     }
 
+    /// Open the debugger's `Search string` modal (MB3, Ctrl+F).
+    pub fn open_debugger_search(&mut self) {
+        let Some(view) = self.debugger_view_mut() else {
+            return;
+        };
+        if let WinState::Debugger(s) = &mut view.state {
+            debugger::open_search(s);
+            view.window.request_redraw();
+        }
+    }
+
+    /// Run the stored Search-string query over the machine (MB3): from just after
+    /// the last hit, or the current disasm base for a fresh search. Pins the
+    /// disasm to a match and remembers it for "Continue search"; a miss leaves
+    /// the view unchanged.
+    pub fn debugger_search(&mut self, gb: &GameBoy) {
+        let pc = gb.cpu_regs().pc;
+        let Some(view) = self.debugger_view_mut() else {
+            return;
+        };
+        if let WinState::Debugger(s) = &mut view.state {
+            if s.search_query.is_empty() {
+                return;
+            }
+            let from = s
+                .search_hit
+                .map_or_else(|| s.disasm_start(pc), |h| h.wrapping_add(1));
+            if let Some(addr) = debugger::find_match(|a| gb.debug_read(a), from, &s.search_query) {
+                s.disasm_base = addr;
+                s.pinned = true;
+                s.search_hit = Some(addr);
+                view.window.request_redraw();
+            }
+        }
+    }
+
+    /// Set numbered bookmark `slot` (0-9) to `addr` (bgb Ctrl+Shift+digit).
+    pub fn set_debugger_bookmark(&mut self, slot: u8, addr: u16) {
+        let Some(view) = self.debugger_view_mut() else {
+            return;
+        };
+        if let WinState::Debugger(s) = &mut view.state {
+            if let Some(b) = s.bookmarks.get_mut(slot as usize) {
+                *b = Some(addr);
+                view.window.request_redraw();
+            }
+        }
+    }
+
+    /// Jump the disasm to numbered bookmark `slot` if set (bgb Ctrl+digit).
+    pub fn goto_debugger_bookmark(&mut self, slot: u8) {
+        let addr = match self.debugger_view().map(|v| &v.state) {
+            Some(WinState::Debugger(s)) => s.bookmarks.get(slot as usize).copied().flatten(),
+            _ => None,
+        };
+        if let Some(addr) = addr {
+            self.debugger_goto_addr(addr);
+        }
+    }
+
+    /// Pin the disasm to `addr` (go-to-bookmark + the next/previous-mark walk).
+    pub fn debugger_goto_addr(&mut self, addr: u16) {
+        let Some(view) = self.debugger_view_mut() else {
+            return;
+        };
+        if let WinState::Debugger(s) = &mut view.state {
+            s.disasm_base = addr;
+            s.pinned = true;
+            view.window.request_redraw();
+        }
+    }
+
+    /// The set bookmark addresses (input to the next/previous-mark walk).
+    #[must_use]
+    pub fn debugger_bookmarks(&self) -> Vec<u16> {
+        match self.debugger_view().map(|v| &v.state) {
+            Some(WinState::Debugger(s)) => s.bookmarks.iter().flatten().copied().collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Where the next/previous-mark walk starts: the current disasm view base.
+    #[must_use]
+    pub fn debugger_disasm_ref(&self, pc: u16) -> u16 {
+        match self.debugger_view().map(|v| &v.state) {
+            Some(WinState::Debugger(s)) => s.disasm_start(pc),
+            _ => pc,
+        }
+    }
+
     /// Clear the remembered cursor when it leaves tool window `id`, so a stale
     /// position can't drive a click and the hover details clear.
     pub fn on_cursor_left(&mut self, id: WindowId) {

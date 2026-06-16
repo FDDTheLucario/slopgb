@@ -923,8 +923,12 @@ fn search_menu_wires_go_to_pc() {
         Some(MenuOutcome::Command(Action::DbgGoToPc)),
         "go to PC re-centers the disasm"
     );
-    // The bookmark/search-string items stay greyed.
-    assert_eq!(click_menubar_item(1, 0), None, "Search string greyed");
+    // Search string + bookmark rows are live now (MB3); see debugger_search_tests.
+    assert_eq!(
+        click_menubar_item(1, 0),
+        Some(MenuOutcome::Command(Action::DbgSearch)),
+        "Search string now opens the prompt"
+    );
 }
 
 #[test]

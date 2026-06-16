@@ -140,10 +140,10 @@ fn file_menu() -> Vec<(MenuItem, MenuChoice)> {
 
 fn search_menu() -> Vec<(MenuItem, MenuChoice)> {
     vec![
-        dis_sc("Search string (eg. 'ld a,')", "Ctrl+F"),
-        dis_sc("Continue search", "Ctrl+C"),
-        dis_sc("go to next bookmark", "Ctrl+N"),
-        dis_sc("go to previous bookmark", "Ctrl+B"),
+        cmd("Search string (eg. 'ld a,')", "Ctrl+F", Action::DbgSearch),
+        cmd("Continue search", "Ctrl+C", Action::DbgContinueSearch),
+        cmd("go to next bookmark", "Ctrl+N", Action::DbgNextBookmark),
+        cmd("go to previous bookmark", "Ctrl+B", Action::DbgPrevBookmark),
         cmd("go to PC", "Ctrl+A", Action::DbgGoToPc),
     ]
 }

@@ -25,7 +25,11 @@ use vram::{VramLayout, VramState, VramTab};
 pub enum WinState {
     Stateless,
     Vram(VramState),
-    Debugger(DebuggerState),
+    // Boxed: `DebuggerState` is much larger than the other variants (disasm/menu/
+    // dialog/bookmark state), and only ever a handful of `WinState`s exist (one
+    // per open tool window), so the indirection costs nothing and keeps the enum
+    // small. Deref coercion makes the box transparent at the match sites.
+    Debugger(Box<DebuggerState>),
 }
 
 impl WinState {
@@ -34,7 +38,7 @@ impl WinState {
     pub fn new(kind: ToolWindow) -> Self {
         match kind {
             ToolWindow::Vram => WinState::Vram(VramState::default()),
-            ToolWindow::Debugger => WinState::Debugger(DebuggerState::default()),
+            ToolWindow::Debugger => WinState::Debugger(Box::default()),
             ToolWindow::IoMap => WinState::Stateless,
         }
     }

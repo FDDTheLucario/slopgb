@@ -343,6 +343,13 @@ pub struct DebuggerState {
     /// Cached profiler state for the Execution-profiler dropdown (MB5), refreshed
     /// from the machine when the menu opens.
     pub prof: ProfilerView,
+    /// Last Search-string query (MB3), reused by "Continue search".
+    pub search_query: String,
+    /// Address of the last search hit; "Continue search" resumes just after it.
+    pub search_hit: Option<u16>,
+    /// Numbered bookmark slots 0-9 (bgb Ctrl+Shift+digit set / Ctrl+digit goto;
+    /// Ctrl+N/Ctrl+B walk these plus the breakpoints).
+    pub bookmarks: [Option<u16>; 10],
 }
 
 impl Default for DebuggerState {
@@ -356,6 +363,9 @@ impl Default for DebuggerState {
             dialog: None,
             data_hints: BTreeSet::new(),
             prof: ProfilerView::default(),
+            search_query: String::new(),
+            search_hit: None,
+            bookmarks: [None; 10],
         }
     }
 }
@@ -383,6 +393,9 @@ pub enum GotoTarget {
 pub enum DialogKind {
     Goto(GotoTarget),
     EditReg(RegField),
+    /// Search-string prompt (MB3): a non-hex text field whose accept stores the
+    /// query and triggers a scan (run where the machine is reachable).
+    SearchString,
 }
 
 /// An open modal: the hex-input box plus what accepting it does.
@@ -758,6 +771,16 @@ pub fn open_goto(st: &mut DebuggerState, target: GotoTarget) {
     });
 }
 
+/// Open the `Search string` text prompt (MB3), closing any open menu. Non-hex
+/// (it accepts mnemonics like `ld a,`); accept stores the query + runs the scan.
+pub fn open_search(st: &mut DebuggerState) {
+    st.menu = None;
+    st.dialog = Some(ModalDialog {
+        input: InputDialog::new("Search string (eg. 'ld a,')", false),
+        kind: DialogKind::SearchString,
+    });
+}
+
 /// Open the `edit register` hex prompt for `field`, seeded with its current
 /// `value` (closing any open menu).
 pub fn open_edit_reg(st: &mut DebuggerState, field: RegField, value: u16) {
@@ -794,6 +817,13 @@ fn accept_dialog(st: &mut DebuggerState, kind: DialogKind, text: &str) -> Option
         }
         DialogKind::EditReg(field) => {
             parsed.map(|v| MenuOutcome::Act(DebugAction::SetReg(field, v)))
+        }
+        // Store the query + reset the cursor, then signal `main` to run the scan
+        // (it needs the machine's memory, which this layer doesn't hold).
+        DialogKind::SearchString => {
+            st.search_query = text.trim().to_owned();
+            st.search_hit = None;
+            (!st.search_query.is_empty()).then_some(MenuOutcome::Command(Action::DbgContinueSearch))
         }
     }
 }
@@ -852,6 +882,8 @@ fn resolve_dialog(
 
 mod menubar;
 pub use menubar::{address_list_menu, menubar_at, menubar_menu, render_menubar};
+mod search;
+pub use search::{find_match, next_mark};
 // `menubar_rects` is exercised only by the debugger tests; the rest of the crate
 // reaches the bar via menubar_at/menubar_menu/render_menubar.
 #[cfg(test)]
@@ -864,3 +896,7 @@ mod tests;
 #[cfg(test)]
 #[path = "debugger_profiler_tests.rs"]
 mod profiler_tests;
+
+#[cfg(test)]
+#[path = "debugger_search_tests.rs"]
+mod search_tests;

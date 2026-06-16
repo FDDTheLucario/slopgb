@@ -177,6 +177,27 @@ impl App {
                 self.session.gb.clear_profile();
                 self.refresh_after_step();
             }
+            // Search menu (MB3). The scan/walk runs here, where the machine
+            // memory (gb) and the App-owned breakpoints are both reachable.
+            Action::DbgSearch => self.tools.open_debugger_search(),
+            Action::DbgContinueSearch => self.tools.debugger_search(&self.session.gb),
+            Action::DbgSetBookmark(slot) => {
+                let addr = self.debug_cursor_or_pc();
+                self.tools.set_debugger_bookmark(slot, addr);
+            }
+            Action::DbgGotoBookmark(slot) => self.tools.goto_debugger_bookmark(slot),
+            // Next/previous bookmark walk over bookmarks ∪ breakpoints (bgb).
+            Action::DbgNextBookmark | Action::DbgPrevBookmark => {
+                let forward = action == Action::DbgNextBookmark;
+                let mut marks = self.tools.debugger_bookmarks();
+                marks.extend(self.dbg.breakpoints().pc_list());
+                let from = self
+                    .tools
+                    .debugger_disasm_ref(self.session.gb.cpu_regs().pc);
+                if let Some(addr) = windows::debugger::next_mark(&marks, from, forward) {
+                    self.tools.debugger_goto_addr(addr);
+                }
+            }
             _ => {}
         }
     }
