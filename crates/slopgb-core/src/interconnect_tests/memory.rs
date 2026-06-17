@@ -60,6 +60,56 @@ fn ff50_reads_ff_and_ignores_writes() {
 }
 
 #[test]
+fn boot_rom_default_inert() {
+    // No boot ROM attached by default → the boot-region read + FF50-disable
+    // branches are never taken (golden-safe).
+    assert!(!ic(Model::Dmg).boot_active());
+}
+
+#[test]
+fn boot_region_reads_boot_then_cart_dmg() {
+    let mut b = ic(Model::Dmg);
+    let boot: Vec<u8> = (0..0x100u16).map(|i| (i as u8) ^ 0xC3).collect();
+    b.attach_boot_rom(boot.clone());
+    assert!(b.boot_active());
+    assert_eq!(b.read(0x0000), boot[0], "boot ROM overlays 0x0000");
+    assert_eq!(b.read(0x00FF), boot[0xFF], "...through 0x00FF");
+    assert_eq!(
+        b.read(0x0100),
+        0x00,
+        "0x0100 is cart (DMG region ends at 0x00FF)"
+    );
+}
+
+#[test]
+fn ff50_disables_boot_rom() {
+    let mut b = ic(Model::Dmg);
+    let boot: Vec<u8> = (0..0x100u16).map(|i| (i as u8) ^ 0xC3).collect();
+    b.attach_boot_rom(boot.clone());
+    assert_eq!(b.read(0x0000), boot[0]);
+    b.write(0xFF50, 0x01); // hand-off
+    assert!(!b.boot_active(), "boot ROM unmapped");
+    assert_eq!(b.read(0x0000), 0x00, "0x0000 now reads cart");
+    assert_eq!(b.read(0xFF50), 0xFF, "FF50 still reads 0xFF");
+}
+
+#[test]
+fn cgb_boot_rom_maps_two_regions_with_header_gap() {
+    let mut b = ic(Model::Cgb);
+    let boot: Vec<u8> = (0..0x900u16).map(|i| (i as u8) ^ 0xC3).collect();
+    b.attach_boot_rom(boot.clone());
+    assert_eq!(b.read(0x0000), boot[0]);
+    assert_eq!(
+        b.read(0x0100),
+        0x00,
+        "0x0100-0x01FF is the cart header (cart)"
+    );
+    assert_eq!(b.read(0x0200), boot[0x200], "0x0200-0x08FF maps boot");
+    assert_eq!(b.read(0x08FF), boot[0x8FF]);
+    assert_eq!(b.read(0x0900), 0x00, "0x0900 is cart");
+}
+
+#[test]
 fn unmapped_io_reads_ff() {
     let mut b = ic(Model::Dmg);
     for addr in [

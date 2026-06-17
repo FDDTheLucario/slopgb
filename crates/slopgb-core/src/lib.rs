@@ -125,6 +125,27 @@ impl GameBoy {
         Ok(Self { cpu, bus })
     }
 
+    /// Build a machine that **executes `boot_rom`** from power-on (bgb's
+    /// opt-in boot ROM: Nintendo logo scroll + chime + header check), instead
+    /// of installing the post-boot state directly. The boot ROM is mapped over
+    /// the low cart region (256 B DMG-class / 2304 B CGB-class) and runs from
+    /// `PC=0x0000` in true power-on state; it writes FF50 to hand off to the
+    /// cartridge. `new` (no boot ROM) is unchanged — this is a separate path,
+    /// so emulation stays byte-identical when no boot ROM is supplied.
+    pub fn new_with_boot(
+        model: Model,
+        rom: Vec<u8>,
+        boot_rom: Vec<u8>,
+    ) -> Result<Self, CartridgeError> {
+        let cart = cartridge::Cartridge::from_bytes(rom)?;
+        let mut bus = interconnect::Interconnect::new(model, cart);
+        // Deliberately NOT apply_post_boot_state: the bus stays at its power-on
+        // constructor state (LCD off, DIV 0, …) and the boot ROM brings it up.
+        bus.attach_boot_rom(boot_rom);
+        let cpu = cpu::Cpu::power_on();
+        Ok(Self { cpu, bus })
+    }
+
     /// Pick the best model for a ROM from its CGB-support header flag
     /// (CGB if the ROM supports or requires it, otherwise DMG). Uses the
     /// same bit-7 predicate as the interconnect's CGB-mode gate
@@ -432,6 +453,13 @@ impl GameBoy {
     /// CPU register snapshot, for test harnesses.
     pub fn cpu_regs(&self) -> Registers {
         self.cpu.regs()
+    }
+
+    /// Whether the opt-in boot ROM is currently mapped (false unless built via
+    /// [`Self::new_with_boot`] and before the boot ROM writes FF50). Test/UI hook.
+    #[must_use]
+    pub fn boot_active(&self) -> bool {
+        self.bus.boot_active()
     }
 
     /// Interrupt master enable (the debugger's `ime`). Pair with

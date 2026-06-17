@@ -122,7 +122,12 @@ impl Interconnect {
             }
         }
         match addr {
-            0x0000..=0x7FFF => self.cart.read_rom(addr),
+            // Boot ROM overlays the low cart region while mapped (opt-in);
+            // `boot_rom_byte` is `None` whenever no boot ROM is active, so this
+            // is exactly `cart.read_rom(addr)` on every golden path.
+            0x0000..=0x7FFF => self
+                .boot_rom_byte(addr)
+                .unwrap_or_else(|| self.cart.read_rom(addr)),
             // cc+2 MID-phase VRAM read: same mode-3→mode-0 unblock edge as
             // OAM below — a second-half unblock is not yet visible here
             // (sub-dot event-phase model, increment 2). Suppressed while an
@@ -226,6 +231,35 @@ impl Interconnect {
         match addr {
             0xFF00..=0xFF7F => self.io_read(addr),
             _ => self.peek(addr),
+        }
+    }
+
+    /// Side-effect-free, time-free view of memory for test harnesses:
+    /// `&self` guarantees no peripheral ticks and no read side effects.
+    ///
+    /// Deliberately omniscient — unlike a CPU read it ignores PPU
+    /// mode-based VRAM/OAM lockout and OAM DMA bus conflicts.
+    /// ROM/VRAM/cart-RAM/WRAM follow the live banking; disabled cart RAM
+    /// still reads $FF like a real access (`Cartridge::read_ram`). IO
+    /// registers (FF00-FF7F) are *not* peekable — their values are
+    /// computed from live peripheral state under the tick-then-access
+    /// contract, and reading them out of band would mislead harnesses —
+    /// and the FEA0-FEFF prohibited area has no stable content; both read
+    /// $FF here.
+    pub(crate) fn peek(&self, addr: u16) -> u8 {
+        match addr {
+            // Show the mapped boot ROM in the debugger views too (inert / cart
+            // when no boot ROM is active — golden-safe).
+            0x0000..=0x7FFF => self
+                .boot_rom_byte(addr)
+                .unwrap_or_else(|| self.cart.read_rom(addr)),
+            0x8000..=0x9FFF => self.ppu.vram_read_raw(addr),
+            0xA000..=0xBFFF => self.cart.read_ram(addr),
+            0xC000..=0xFDFF => self.wram[self.wram_index(addr)],
+            0xFE00..=0xFE9F => self.ppu.oam_read_raw(addr),
+            0xFEA0..=0xFF7F => 0xFF,
+            0xFF80..=0xFFFE => self.hram[usize::from(addr - 0xFF80)],
+            0xFFFF => self.ie,
         }
     }
 
@@ -401,7 +435,11 @@ impl Interconnect {
             0xFF73 if self.model.is_cgb() => self.ff73 = value,
             0xFF74 if self.cgb_mode => self.ff74 = value,
             0xFF75 if self.model.is_cgb() => self.ff75 = value & 0x70,
-            // FF50 boot-disable: we start post-boot; writes are ignored.
+            // FF50 boot-disable: while a boot ROM is mapped (opt-in), a write
+            // with bit 0 set hands off — the boot ROM unmaps itself permanently.
+            // With no boot ROM we start post-boot, so this is never taken and
+            // the write is ignored (golden-safe; `boot_active` false by default).
+            0xFF50 if self.boot_active && value & 1 != 0 => self.boot_active = false,
             _ => {}
         }
     }

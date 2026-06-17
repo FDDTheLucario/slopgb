@@ -44,6 +44,26 @@ impl Registers {
         }
     }
 
+    /// True power-on register state, before any boot ROM runs: every register
+    /// is zero and PC is `0x0000` (the boot ROM's reset vector). Used only by
+    /// the opt-in boot-ROM path (`GameBoy::new_with_boot`); `new` keeps
+    /// [`Self::post_boot`].
+    #[must_use]
+    pub fn power_on() -> Self {
+        Self {
+            a: 0,
+            f: 0,
+            b: 0,
+            c: 0,
+            d: 0,
+            e: 0,
+            h: 0,
+            l: 0,
+            sp: 0,
+            pc: 0,
+        }
+    }
+
     /// F register. Lower 4 bits always read zero.
     pub fn f(&self) -> u8 {
         self.f
@@ -121,6 +141,17 @@ impl Registers {
 #[cfg(test)]
 mod tests {
     use super::Registers;
+
+    #[test]
+    fn power_on_is_all_zero() {
+        let r = Registers::power_on();
+        assert_eq!(r.af(), 0, "AF zero at power-on");
+        assert_eq!(r.bc(), 0);
+        assert_eq!(r.de(), 0);
+        assert_eq!(r.hl(), 0);
+        assert_eq!(r.sp, 0);
+        assert_eq!(r.pc, 0x0000, "PC starts at the reset vector");
+    }
 
     #[test]
     fn pair_accessors_round_trip() {

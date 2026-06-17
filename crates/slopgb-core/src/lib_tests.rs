@@ -661,3 +661,39 @@ fn link_state_is_not_serialized() {
         "link state is not restored from a save"
     );
 }
+
+/// Boot-ROM task 5: `new_with_boot` runs from the boot ROM in power-on state.
+#[test]
+fn new_with_boot_starts_at_power_on() {
+    let boot: Vec<u8> = (0..0x100u16).map(|i| (i as u8) ^ 0xC3).collect();
+    let gb = GameBoy::new_with_boot(Model::Dmg, write_c000_rom(), boot.clone()).unwrap();
+    assert_eq!(gb.cpu_regs().pc, 0x0000, "boots from the reset vector");
+    assert_eq!(gb.cpu_regs().sp, 0, "power-on SP");
+    assert!(gb.boot_active(), "boot ROM mapped");
+    assert_eq!(
+        gb.debug_read(0x0000),
+        boot[0],
+        "first instruction is from the boot ROM"
+    );
+    assert_eq!(
+        gb.debug_read(0xFF40),
+        0x00,
+        "LCD off at power-on (the boot ROM turns it on)"
+    );
+}
+
+/// Boot-ROM task 6 (golden guard): `new` (no boot ROM) is unchanged — no boot
+/// ROM mapped, post-boot entry + registers, exactly as before this feature.
+#[test]
+fn new_without_boot_is_unchanged() {
+    let gb = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
+    assert!(!gb.boot_active(), "no boot ROM mapped on the default path");
+    let r = gb.cpu_regs();
+    let pb = Registers::post_boot(Model::Dmg);
+    assert_eq!(r.pc, 0x0100, "starts post-boot at the cart entry");
+    assert_eq!(
+        (r.af(), r.bc(), r.de(), r.hl(), r.sp, r.pc),
+        (pb.af(), pb.bc(), pb.de(), pb.hl(), pb.sp, pb.pc),
+        "post-boot register state unchanged"
+    );
+}

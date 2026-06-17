@@ -21,6 +21,7 @@ use crate::timer::Timer;
 // The struct, its fields, the sub-dot access machinery (EdgeKind/event_phase/
 // edge_eighth/stamp_blocks/ACCESS_PHASE) and the free helpers stay here.
 mod boot;
+mod boot_rom;
 mod debug;
 mod hdma;
 mod link;
@@ -499,6 +500,13 @@ pub struct Interconnect {
     ff74: u8,
     /// FF75: bits 4-6 writable, others read 1.
     ff75: u8,
+    /// Opt-in boot ROM (256 B DMG-class / 2304 B CGB-class); `None` on every
+    /// golden path. Set only by `new_with_boot`; not serialized. See
+    /// `interconnect/boot_rom.rs`.
+    boot_rom: Option<Vec<u8>>,
+    /// Whether the boot ROM is mapped over the low cart region (false by
+    /// default + after the boot ROM writes FF50 to hand off).
+    boot_active: bool,
 }
 
 /// DMG-compat palettes installed by the CGB boot ROM for DMG carts. The
@@ -580,6 +588,8 @@ impl Interconnect {
             ff73: 0,
             ff74: 0,
             ff75: 0,
+            boot_rom: None,
+            boot_active: false,
         }
     }
 
@@ -659,30 +669,8 @@ impl Interconnect {
         self.serial.take_output()
     }
 
-    /// Side-effect-free, time-free view of memory for test harnesses:
-    /// `&self` guarantees no peripheral ticks and no read side effects.
-    ///
-    /// Deliberately omniscient — unlike a CPU read it ignores PPU
-    /// mode-based VRAM/OAM lockout and OAM DMA bus conflicts.
-    /// ROM/VRAM/cart-RAM/WRAM follow the live banking; disabled cart RAM
-    /// still reads $FF like a real access (`Cartridge::read_ram`). IO
-    /// registers (FF00-FF7F) are *not* peekable — their values are
-    /// computed from live peripheral state under the tick-then-access
-    /// contract, and reading them out of band would mislead harnesses —
-    /// and the FEA0-FEFF prohibited area has no stable content; both read
-    /// $FF here.
-    pub(crate) fn peek(&self, addr: u16) -> u8 {
-        match addr {
-            0x0000..=0x7FFF => self.cart.read_rom(addr),
-            0x8000..=0x9FFF => self.ppu.vram_read_raw(addr),
-            0xA000..=0xBFFF => self.cart.read_ram(addr),
-            0xC000..=0xFDFF => self.wram[self.wram_index(addr)],
-            0xFE00..=0xFE9F => self.ppu.oam_read_raw(addr),
-            0xFEA0..=0xFF7F => 0xFF,
-            0xFF80..=0xFFFE => self.hram[usize::from(addr - 0xFF80)],
-            0xFFFF => self.ie,
-        }
-    }
+    // `peek` (the side-effect-free, time-free memory view for harnesses) lives
+    // in `memory.rs` alongside `debug_read`, which builds on it.
 }
 
 /// Zero bits among the bytes the SGB boot ROM transfers to the SNES: six

@@ -160,6 +160,22 @@ impl Cpu {
         }
     }
 
+    /// True power-on CPU state (PC=0, all regs 0), for the opt-in boot-ROM path
+    /// (`GameBoy::new_with_boot`): the boot ROM runs from the reset vector and
+    /// installs the post-boot register state itself.
+    pub fn power_on() -> Self {
+        Self {
+            regs: Registers::power_on(),
+            ime: false,
+            ime_pending: false,
+            halted: false,
+            stopped: false,
+            halt_bug: false,
+            debug_breakpoint: false,
+            locked: false,
+        }
+    }
+
     /// Run one instruction (including any interrupt dispatch that precedes
     /// it), one idle M-cycle of halt or stop mode, or a halt wake (the
     /// waking cycle plus dispatch and/or the next instruction).
