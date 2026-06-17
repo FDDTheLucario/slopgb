@@ -105,7 +105,9 @@ fn default_button_keys_resolve_through_app_bindings_and_drive_the_core() {
         let code = app.bindings.key_for(b).expect("default binding");
         assert_eq!(app.bindings.button_for(code), Some(b), "round-trips");
         app.set_button(code, b, true);
+        app.apply_pending_input();
         app.set_button(code, b, false);
+        app.apply_pending_input();
     }
 }
 
@@ -147,14 +149,18 @@ fn socd_filter_suppresses_then_resurrects_the_opposite_direction() {
     let left = app.bindings.key_for(Button::Left).unwrap();
     let right = app.bindings.key_for(Button::Right).unwrap();
 
+    // Input is deferred to a sub-frame offset, so flush it after each press.
     app.set_button(left, Button::Left, true);
+    app.apply_pending_input();
     assert!(app.session.gb.debug_button(Button::Left));
     // Press Right while Left is held → Left suppressed, only Right reported.
     app.set_button(right, Button::Right, true);
+    app.apply_pending_input();
     assert!(app.session.gb.debug_button(Button::Right));
     assert!(!app.session.gb.debug_button(Button::Left), "L+R never both");
     // Release Right → Left resurrects (its key is still held).
     app.set_button(right, Button::Right, false);
+    app.apply_pending_input();
     assert!(
         app.session.gb.debug_button(Button::Left),
         "older resurrects"
@@ -169,7 +175,9 @@ fn allow_opposing_lets_both_directions_register() {
     let up = app.bindings.key_for(Button::Up).unwrap();
     let down = app.bindings.key_for(Button::Down).unwrap();
     app.set_button(up, Button::Up, true);
+    app.apply_pending_input();
     app.set_button(down, Button::Down, true);
+    app.apply_pending_input();
     assert!(app.session.gb.debug_button(Button::Up));
     assert!(
         app.session.gb.debug_button(Button::Down),

@@ -11,10 +11,40 @@
 //! is not reachable through the public `GameBoy` API. See the frontend report
 //! for the requested core addition.
 
-use slopgb_core::Button;
+use slopgb_core::{Button, GameBoy};
 use winit::keyboard::{KeyCode, ModifiersState};
 
 use crate::ui::ToolWindow;
+
+/// Apply queued joypad ops (`(button, pressed)`) to the machine at a sub-frame
+/// `offset` (T-cycles into the current frame), draining `ops`. A no-op when
+/// empty.
+///
+/// **Why the offset:** a press changes the joypad register and (on a press
+/// edge) requests the joypad interrupt, which the program services at the
+/// current LCD line (`LY`). If the frontend only ever applied input at frame
+/// boundaries, every press would fire the interrupt at the same `LY` — the
+/// "Incorrect behavior" the `tellinglys` ROM (input-entropy test) reports.
+/// Stepping a wall-clock-derived offset into the frame before the press makes
+/// the interrupt land on a varied line, matching real hardware ("Pass! Joypad
+/// interrupt timing is realistic"). `offset` is kept below one frame so the
+/// caller's `run_frame` then finishes the same frame.
+pub fn apply_input(gb: &mut GameBoy, ops: &mut Vec<(Button, bool)>, offset: u32) {
+    if ops.is_empty() {
+        return;
+    }
+    let target = gb.cycles().wrapping_add(u64::from(offset));
+    while gb.cycles() < target {
+        gb.step();
+    }
+    for (button, pressed) in ops.drain(..) {
+        if pressed {
+            gb.press(button);
+        } else {
+            gb.release(button);
+        }
+    }
+}
 
 /// Which window currently has focus — the key map is focus-dependent, exactly
 /// like bgb (the debugger's F-keys differ from the game window's). Resolved in
@@ -253,9 +283,42 @@ fn digit_of(code: KeyCode) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use slopgb_core::Model;
 
     const NONE: ModifiersState = ModifiersState::empty();
     const CTRL: ModifiersState = ModifiersState::CONTROL;
+
+    /// `apply_input` at varied sub-frame offsets lands the press on varied LCD
+    /// lines (LY) — the input entropy `tellinglys` checks. A frontend that only
+    /// pressed at frame boundaries would read the same LY every time and fail.
+    #[test]
+    fn input_offset_varies_the_joypad_line() {
+        // Post-boot DMG has the LCD on (LCDC = 0x91), so LY advances with cycles.
+        fn rom() -> Vec<u8> {
+            let mut r = vec![0u8; 0x8000];
+            r[0x100..0x102].copy_from_slice(&[0x18, 0xFE]); // jr -2 (idle loop)
+            r
+        }
+        let ly_at = |offset: u32| -> u8 {
+            let mut gb = GameBoy::new(Model::Dmg, rom()).unwrap();
+            let mut ops = vec![(Button::A, true)];
+            apply_input(&mut gb, &mut ops, offset);
+            assert!(ops.is_empty(), "ops drained");
+            gb.debug_read(0xFF44) // LY at the moment the press is applied
+        };
+        // One T-line is 456 T-cycles; sample lines across the frame.
+        let lines: Vec<u8> = [4, 36, 68, 100, 130]
+            .iter()
+            .map(|&l| ly_at(l * 456))
+            .collect();
+        let distinct: std::collections::HashSet<u8> = lines.iter().copied().collect();
+        assert!(
+            distinct.len() >= 4,
+            "varied offsets give varied LY (>=4 distinct): {lines:?}"
+        );
+        // Sanity: an offset of 0 (frame boundary, the old behavior) is the low end.
+        assert!(ly_at(0) < ly_at(100 * 456), "offset advances the line");
+    }
 
     /// Map under game focus, no modifiers (the common case).
     fn g(code: KeyCode) -> Option<Action> {

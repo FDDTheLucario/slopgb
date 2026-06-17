@@ -13,6 +13,7 @@
 //! (or if the device fails to open), a wall-clock loop paces frames at the
 //! hardware rate, 4194304 / 70224 ≈ 59.7275 Hz.
 
+mod app_input;
 mod app_menu;
 mod app_pacing;
 mod app_run;
@@ -168,6 +169,17 @@ struct App {
     buttons: ButtonTracker,
     /// Rebindable keyboard → Game Boy button map (Joypad "configure keyboard").
     bindings: keymap::KeyBindings,
+    /// Joypad ops `(button, pressed)` deferred from the winit event to the next
+    /// emulated frame, applied at [`Self::input_offset`] so the joypad interrupt
+    /// fires at a realistic, varied LCD line (input entropy — see
+    /// [`input::apply_input`]). Empty between presses.
+    input_ops: Vec<(Button, bool)>,
+    /// Sub-frame T-cycle offset at which to apply [`Self::input_ops`], captured
+    /// from the wall-clock phase of the keypress (so consecutive presses land on
+    /// different lines, as on hardware).
+    input_offset: u32,
+    /// Monotonic reference for the keypress wall-clock phase ([`Self::input_offset`]).
+    epoch: Instant,
     /// Detects a cpal stream that stopped draining (see [`StallWatchdog`]).
     watchdog: StallWatchdog,
     /// Deadline of the next frame for wall-clock pacing.
@@ -260,6 +272,9 @@ impl App {
             turbo: false,
             buttons: ButtonTracker::default(),
             bindings: keymap::KeyBindings::default(),
+            input_ops: Vec::new(),
+            input_offset: 0,
+            epoch: Instant::now(),
             watchdog: StallWatchdog::new(),
             next_frame: Instant::now(),
             discard_buf: Vec::new(),
@@ -496,29 +511,6 @@ impl App {
 
     /// Press or release a Game Boy `button` resolved from key `code`, tracking
     /// the held key so two keys mapped to one button release cleanly.
-    fn set_button(&mut self, code: KeyCode, button: Button, pressed: bool) {
-        if pressed {
-            self.buttons.press(code, button);
-            // SOCD filter (Joypad → "allow pressing L+R or U+D" off, the bgb
-            // default): a new direction suppresses its opposite so the joypad
-            // never reports both — last input wins.
-            if let Some(opp) = keymap::socd_suppress(button, self.settings.allow_opposing) {
-                self.session.gb.release(opp);
-            }
-            self.session.gb.press(button);
-        } else if self.buttons.release(code, button) {
-            self.session.gb.release(button);
-            // Resurrection (last-input priority): if the opposite direction is
-            // still physically held, re-press it — releasing the newer key
-            // returns control to the older one that was suppressed.
-            if let Some(opp) = keymap::socd_suppress(button, self.settings.allow_opposing) {
-                if self.buttons.is_held(opp) {
-                    self.session.gb.press(opp);
-                }
-            }
-        }
-    }
-
     /// After a single/over step, repaint the game window (the LCD may have
     /// advanced) and every open tool window so they track the new PC.
     fn refresh_after_step(&mut self) {
@@ -640,29 +632,6 @@ impl App {
                 self.audio = Some(pipe);
             }
             Err(e) => eprintln!("slopgb: audio disabled: {e}"),
-        }
-    }
-
-    /// Focus lost or window occluded: no release events will arrive for keys
-    /// held right now, so release every Game Boy button and drop turbo before
-    /// they stick.
-    fn release_all_input(&mut self) {
-        self.buttons.clear();
-        for b in [
-            Button::A,
-            Button::B,
-            Button::Select,
-            Button::Start,
-            Button::Up,
-            Button::Down,
-            Button::Left,
-            Button::Right,
-        ] {
-            self.session.gb.release(b);
-        }
-        if self.turbo {
-            self.turbo = false;
-            self.resync_pacing();
         }
     }
 
@@ -937,9 +906,16 @@ impl ApplicationHandler for App {
         // its last frame and zero frames are emulated until F9/step. With no ROM
         // loaded the blank machine is likewise frozen (bgb's no-ROM screen).
         if should_idle(self.paused, self.dbg.is_broken(), self.rom_loaded) {
+            // Frozen (paused / no ROM / debugger-broken): drop input queued
+            // while idle — a press on a frozen machine shouldn't register, and
+            // applying it on resume would use a stale (seconds-old) offset.
+            self.input_ops.clear();
             event_loop.set_control_flow(ControlFlow::Wait);
             return;
         }
+        // Apply deferred joypad input at its sub-frame offset before emulating,
+        // so the joypad interrupt lands on a realistic, varied LCD line.
+        self.apply_pending_input();
         let (frames, hit_bp) = if self.turbo {
             self.run_turbo()
         } else if audio_pacing(self.audio.is_some(), self.muted) {

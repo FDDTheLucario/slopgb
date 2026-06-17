@@ -97,12 +97,24 @@ fn connect_to_dead_peer_then_drop_returns_promptly() {
 #[test]
 fn listen_then_disconnect_releases_the_port() {
     // Dropping a listening socket must join its thread and free the port so a
-    // re-listen on the same port succeeds (no leaked accept loop).
+    // re-listen on the same port succeeds (no leaked accept loop). The OS can
+    // take a brief moment to release the port after close (std TcpListener has
+    // no SO_REUSEADDR without a dep), so retry within a bounded window — the
+    // point under test is that the listener is released at all, not instantly.
     let s = LinkSocket::listen(0).expect("bind");
     let port = s.port();
     drop(s); // Drop sets stop + joins the accept thread.
-    let again = LinkSocket::listen(port);
-    assert!(again.is_ok(), "port freed after drop");
+    let mut last_err = None;
+    for _ in 0..100 {
+        match LinkSocket::listen(port) {
+            Ok(_) => return,
+            Err(e) => {
+                last_err = Some(e);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+    panic!("port not freed within 1s after drop: {last_err:?}");
 }
 
 // ---- Task 10: per-frame core pump (packet routing) ----
