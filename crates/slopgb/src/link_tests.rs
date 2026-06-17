@@ -158,12 +158,39 @@ fn apply_sync1_completes_armed_slave_and_replies() {
     assert_eq!(gb.debug_read(0xFF0F) & 0x08, 0x08, "serial IF raised");
 }
 
+/// A ROM that runs a master (internal-clock) transfer: SB <- 0, SC <- 0x81,
+/// then self-loops. The transfer shifts in whatever the link feeds it.
+fn master_xfer_rom() -> Vec<u8> {
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x0100..0x010A].copy_from_slice(&[
+        0x3E, 0x00, // ld a, 0
+        0xE0, 0x01, // ldh (FF01), a   ; SB = 0
+        0x3E, 0x81, // ld a, 0x81
+        0xE0, 0x02, // ldh (FF02), a   ; SC = transfer + internal clock
+        0x18, 0xFE, // jr -2
+    ]);
+    rom
+}
+
 #[test]
-fn apply_sync1_with_no_pending_transfer_stashes_byte_no_reply() {
+fn apply_sync1_with_no_pending_transfer_stashes_byte_for_next_master_read() {
     let mut link = Link::new();
-    let mut gb = GameBoy::new(Model::Dmg, slave_arm_rom(0x00)).unwrap(); // not stepped: idle
+    // A connected port that is NOT an armed slave (it will master a transfer).
+    let mut gb = GameBoy::new(Model::Dmg, master_xfer_rom()).unwrap();
+    gb.link_connect(true);
+    // Peer (the master) sent its byte while we are not an armed slave: no reply,
+    // and the byte is stashed for our next master transfer to shift in.
     let reply = link.apply_packet(&mut gb, Packet::new(cmd::SYNC1, 0x12, 0x80, 0));
-    assert!(reply.is_none(), "idle port sends no reply");
+    assert!(reply.is_none(), "non-slave port sends no reply");
+    // Run our master transfer to completion: it shifts the stashed 0x12 into SB.
+    for _ in 0..2 {
+        gb.run_frame();
+    }
+    assert_eq!(
+        gb.debug_read(0xFF01),
+        0x12,
+        "stashed peer byte shifted into SB on the master transfer"
+    );
 }
 
 #[test]
@@ -215,6 +242,25 @@ fn pump_tears_down_on_peer_disconnect() {
     });
     assert!(!link.is_active(), "dead socket dropped");
     assert!(!link.is_connected() && !link.is_listening());
+}
+
+#[test]
+fn pump_reaps_a_listener_whose_worker_died_without_attaching() {
+    // A listener accepts one peer that connects then closes immediately — the
+    // worker runs and exits (finished) but pump may never observe it connected,
+    // so the attached-edge alone can't reap it. pump must still reap the dead
+    // worker (no zombie "listening :port" with a dead accept thread).
+    let mut link = Link::new();
+    link.listen_on(0).expect("listen");
+    let port = link.port().expect("bound port");
+    let peer = std::net::TcpStream::connect(("127.0.0.1", port)).expect("dial");
+    drop(peer); // connect then close immediately
+    let mut gb = GameBoy::new(Model::Dmg, slave_arm_rom(0x00)).unwrap();
+    wait_until("dead worker reaped", || {
+        link.pump(&mut gb);
+        link.status_label().is_none()
+    });
+    assert!(!link.is_active() && !link.is_listening() && !link.is_connected());
 }
 
 #[test]

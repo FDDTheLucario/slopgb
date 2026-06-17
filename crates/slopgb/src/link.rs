@@ -111,6 +111,11 @@ pub struct LinkSocket {
     in_rx: Receiver<Packet>,
     connected: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
+    /// Set by the worker on every exit path. Lets the UI reap a socket whose
+    /// thread died *without* ever connecting (dial/accept failed, or a peer
+    /// connected then closed between two pumps) — which the connected-edge
+    /// teardown alone can't see.
+    finished: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
     /// The bound (listen) or target (connect) port — shown by the UI.
     port: u16,
@@ -159,13 +164,32 @@ impl LinkSocket {
         let (in_tx, in_rx) = mpsc::sync_channel::<Packet>(IN_QUEUE_CAP);
         let connected = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
-        let (tc, ts) = (Arc::clone(&connected), Arc::clone(&stop));
-        let handle = thread::spawn(move || body(tc, ts, out_rx, in_tx));
+        let finished = Arc::new(AtomicBool::new(false));
+        let (tc, ts, tf) = (
+            Arc::clone(&connected),
+            Arc::clone(&stop),
+            Arc::clone(&finished),
+        );
+        let handle = thread::spawn(move || {
+            // A drop guard marks the worker finished on *every* exit — normal
+            // return OR a panic unwind — so a panicked worker is still reapable
+            // (the UI can't otherwise see it died). The thread sets `connected`
+            // false on its own exit paths, so reap only needs `finished`.
+            struct FinishGuard(Arc<AtomicBool>);
+            impl Drop for FinishGuard {
+                fn drop(&mut self) {
+                    self.0.store(true, Ordering::Relaxed);
+                }
+            }
+            let _guard = FinishGuard(tf);
+            body(tc, ts, out_rx, in_tx);
+        });
         Self {
             out_tx,
             in_rx,
             connected,
             stop,
+            finished,
             handle: Some(handle),
             port: 0,
         }
@@ -181,6 +205,12 @@ impl LinkSocket {
     #[must_use]
     pub fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Relaxed)
+    }
+
+    /// Whether the worker thread has exited (success or failure).
+    #[must_use]
+    pub fn is_finished(&self) -> bool {
+        self.finished.load(Ordering::Relaxed)
     }
 
     /// Non-blocking: the next packet the peer sent, if any.
@@ -427,11 +457,17 @@ impl Link {
     /// byte to the peer, and feed the peer's bytes back into the core. A no-op
     /// when no socket is connected, so it is safe to call every frame.
     pub fn pump(&mut self, gb: &mut GameBoy) {
-        // Peer-initiated disconnect: the socket thread exited (raw close or
-        // error) so the connection flag dropped after we had attached. Tear the
-        // dead link down — detach the core + drop the socket — instead of
-        // leaving a zombie "connected"/"listening" state behind.
-        if self.attached && !self.is_connected() {
+        // Reap a dead link instead of leaving a zombie "connected"/"listening"/
+        // "connecting" state behind: either a peer-initiated disconnect after we
+        // had attached (the connection flag dropped), OR a worker thread that
+        // exited without ever connecting — a failed dial/accept, or a peer that
+        // connected then closed between two pumps (e.g. while paused), which the
+        // attached-edge alone can't see.
+        let worker_died = self
+            .socket
+            .as_ref()
+            .is_some_and(|s| s.is_finished() && !s.is_connected());
+        if (self.attached && !self.is_connected()) || worker_died {
             self.disconnect(gb);
             return;
         }

@@ -59,6 +59,19 @@ impl App {
         input::apply_input(&mut self.session.gb, &mut self.input_ops, self.input_offset);
     }
 
+    /// While frozen (paused / no ROM / debugger-broken) no frame runs, so a
+    /// queued op would otherwise apply with a stale offset on resume. Drop the
+    /// *presses* (a press on a frozen machine shouldn't register), but still
+    /// apply the *releases* directly — else a button physically released while
+    /// paused would stay stuck held when emulation resumes.
+    pub(crate) fn flush_idle_input(&mut self) {
+        for (button, pressed) in self.input_ops.drain(..) {
+            if !pressed {
+                self.session.gb.release(button);
+            }
+        }
+    }
+
     /// Focus lost or window occluded: no release events will arrive for keys
     /// held right now, so release every Game Boy button and drop turbo before
     /// they stick.

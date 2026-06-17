@@ -509,8 +509,6 @@ impl App {
         }
     }
 
-    /// Press or release a Game Boy `button` resolved from key `code`, tracking
-    /// the held key so two keys mapped to one button release cleanly.
     /// After a single/over step, repaint the game window (the LCD may have
     /// advanced) and every open tool window so they track the new PC.
     fn refresh_after_step(&mut self) {
@@ -906,10 +904,11 @@ impl ApplicationHandler for App {
         // its last frame and zero frames are emulated until F9/step. With no ROM
         // loaded the blank machine is likewise frozen (bgb's no-ROM screen).
         if should_idle(self.paused, self.dbg.is_broken(), self.rom_loaded) {
-            // Frozen (paused / no ROM / debugger-broken): drop input queued
-            // while idle — a press on a frozen machine shouldn't register, and
-            // applying it on resume would use a stale (seconds-old) offset.
-            self.input_ops.clear();
+            // Frozen (paused / no ROM / debugger-broken): drop queued presses
+            // (a press on a frozen machine shouldn't register, and applying it
+            // on resume would use a stale offset) but still honor releases, so a
+            // button released while paused doesn't stick held on resume.
+            self.flush_idle_input();
             event_loop.set_control_flow(ControlFlow::Wait);
             return;
         }

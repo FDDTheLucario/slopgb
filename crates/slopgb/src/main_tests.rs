@@ -186,6 +186,31 @@ fn allow_opposing_lets_both_directions_register() {
 }
 
 #[test]
+fn idle_input_drops_presses_but_honors_releases() {
+    // While frozen, a press shouldn't register, but a release must still apply
+    // so a button released while paused doesn't stick held on resume.
+    let mut app = blank_app();
+    let a = app.bindings.key_for(Button::A).unwrap();
+    app.set_button(a, Button::A, true);
+    app.apply_pending_input();
+    assert!(app.session.gb.debug_button(Button::A), "held while running");
+    // Release queued while idle is honored (no stuck button).
+    app.set_button(a, Button::A, false);
+    app.flush_idle_input();
+    assert!(
+        !app.session.gb.debug_button(Button::A),
+        "release honored while idle"
+    );
+    // A press queued while idle is dropped (frozen machine).
+    app.set_button(a, Button::A, true);
+    app.flush_idle_input();
+    assert!(
+        !app.session.gb.debug_button(Button::A),
+        "press dropped while idle"
+    );
+}
+
+#[test]
 fn key_wizard_cancel_leaves_bindings_unchanged() {
     let mut app = blank_app();
     let before = app.bindings;

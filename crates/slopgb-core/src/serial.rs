@@ -295,6 +295,13 @@ impl Serial {
         self.sb = r.u8()?;
         self.sc = r.u8()?;
         self.shifted = r.u8()?;
+        // Live paths keep `shifted` in 0..=7 (reset at 8 + on every SC write); a
+        // tampered/foreign state with `shifted > 7` would make the master shift
+        // `7 - shifted` underflow, so reject it (the load stays atomic — the
+        // machine is restored into a clone, so a rejected file leaves it intact).
+        if self.shifted > 7 {
+            return Err(crate::state::StateError::Truncated);
+        }
         self.master_clock = r.bool()?;
         self.prev_div = r.u16()?;
         self.out_shift = r.u8()?;
@@ -307,6 +314,23 @@ impl Serial {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A save state with `shifted > 7` (only a tampered/foreign file — live
+    /// paths keep it 0..=7) is rejected, so the master shift's `7 - shifted`
+    /// can never underflow-panic with a link peer attached.
+    #[test]
+    fn read_state_rejects_out_of_range_shifted() {
+        let mut w = crate::state::Writer::new();
+        Serial::new(false).write_state(&mut w);
+        let mut bytes = w.into_vec();
+        bytes[3] = 200; // shifted is the 4th field (cgb, sb, sc, shifted)
+        let mut r = crate::state::Reader::new(&bytes);
+        let mut s = Serial::new(false);
+        assert!(matches!(
+            s.read_state(&mut r),
+            Err(crate::state::StateError::Truncated)
+        ));
+    }
 
     /// Advance one M-cycle: bump the external div by 4 and tick.
     fn step(s: &mut Serial, div: &mut u16) -> u8 {
