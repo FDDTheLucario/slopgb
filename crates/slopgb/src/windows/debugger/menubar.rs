@@ -6,6 +6,7 @@
 
 use crate::dbg::DebugAction;
 use crate::input::Action;
+use crate::symbols::SymbolTable;
 use crate::ui::canvas::{Canvas, Rect};
 use crate::ui::font::GLYPH_H;
 use crate::ui::menu::MenuItem;
@@ -200,6 +201,10 @@ fn debug_menu(cursor: u16) -> Vec<(MenuItem, MenuChoice)> {
         ),
         cmd("Breakpoints", "Ctrl+H", Action::DbgManageBreakpoints),
         cmd("Watchpoints", "Ctrl+J", Action::DbgManageWatchpoints),
+        (
+            MenuItem::new("Load symbols..."),
+            MenuChoice::Command(Action::DbgLoadSymbols),
+        ),
     ]
 }
 
@@ -209,7 +214,12 @@ fn debug_menu(cursor: u16) -> Vec<(MenuItem, MenuChoice)> {
 /// functional list, reusing the context-menu widget. `watch` picks the clear
 /// action; an empty list shows a single greyed `(none)`.
 #[must_use]
-pub fn address_list_menu(addrs: &[u16], watch: bool, origin: (i32, i32)) -> OpenMenu {
+pub fn address_list_menu(
+    addrs: &[u16],
+    watch: bool,
+    symbols: &SymbolTable,
+    origin: (i32, i32),
+) -> OpenMenu {
     let entries: Vec<(MenuItem, MenuChoice)> = if addrs.is_empty() {
         vec![disabled("(none)")]
     } else {
@@ -223,10 +233,12 @@ pub fn address_list_menu(addrs: &[u16], watch: bool, origin: (i32, i32)) -> Open
                 } else {
                     MenuChoice::Act(DebugAction::ClearBreakpoint(a))
                 };
-                (
-                    MenuItem::new(format!("{}:{a:04X}", region_label(a))),
-                    choice,
-                )
+                // Append the symbol name when the address is an exact symbol.
+                let label = match symbols.name_at(a) {
+                    Some(name) => format!("{}:{a:04X} {name}", region_label(a)),
+                    None => format!("{}:{a:04X}", region_label(a)),
+                };
+                (MenuItem::new(label), choice)
             })
             .collect()
     };

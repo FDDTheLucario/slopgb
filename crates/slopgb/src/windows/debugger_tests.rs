@@ -1,7 +1,9 @@
 use super::*;
 use crate::dbg::Breakpoints;
+use crate::symbols::SymbolTable;
 use slopgb_core::Registers;
 use std::collections::BTreeSet;
+use std::rc::Rc;
 
 /// Register snapshot for `on_left_click`: the common PC=0x0100 / SP=0xFFFE the
 /// pane tests use (other fields zero — only PC/SP drive disasm/stack clicks).
@@ -176,6 +178,7 @@ fn render_disasm_draws_a_red_gutter_dot_on_breakpoint_rows() {
             &bps,
             &BTreeSet::new(),
             DisasmFmt::default(),
+            &SymbolTable::default(),
             &t,
         );
     }
@@ -366,6 +369,32 @@ fn scroll_memory_moves_the_base_by_rows_and_wraps() {
     assert_eq!(st.mem_base, 0x0000, "wraps past the top of memory");
     st.scroll_memory(-1);
     assert_eq!(st.mem_base, 0xFFF0, "wraps past the bottom");
+}
+
+#[test]
+fn goto_resolves_a_symbol_name_then_hex() {
+    let mut st = DebuggerState {
+        symbols: Rc::new(SymbolTable::parse("00:4000 Reset")),
+        ..DebuggerState::default()
+    };
+    // A symbol name pins the disasm to its address.
+    accept_dialog(&mut st, DialogKind::Goto(GotoTarget::Disasm), "Reset");
+    assert!(st.pinned && st.disasm_base == 0x4000, "name resolved");
+    // Resolution is case-insensitive.
+    let mut st = DebuggerState {
+        symbols: Rc::new(SymbolTable::parse("00:4000 Reset")),
+        ..DebuggerState::default()
+    };
+    accept_dialog(&mut st, DialogKind::Goto(GotoTarget::Memory), "reset");
+    assert_eq!(st.mem_base, 0x4000);
+    // A bare hex address still works (no matching symbol).
+    let mut st = DebuggerState::default();
+    accept_dialog(&mut st, DialogKind::Goto(GotoTarget::Memory), "C000");
+    assert_eq!(st.mem_base, 0xC000);
+    // An unknown name that isn't valid hex changes nothing.
+    let mut st = DebuggerState::default();
+    accept_dialog(&mut st, DialogKind::Goto(GotoTarget::Memory), "nope");
+    assert_eq!(st.mem_base, 0xFF00, "unresolved -> unchanged");
 }
 
 #[test]
@@ -578,7 +607,7 @@ fn jump_and_call_cursor_return_their_actions() {
 #[test]
 fn address_list_menu_lists_entries_with_clear_choices() {
     // Breakpoint manager: each row clears (toggles) its breakpoint.
-    let m = address_list_menu(&[0x0150, 0xC000], false, (40, 30));
+    let m = address_list_menu(&[0x0150, 0xC000], false, &SymbolTable::default(), (40, 30));
     assert_eq!(m.items.len(), 2);
     assert!(m.items[0].label.contains("0150"));
     assert_eq!(
@@ -590,16 +619,25 @@ fn address_list_menu_lists_entries_with_clear_choices() {
         MenuChoice::Act(DebugAction::ClearBreakpoint(0xC000))
     );
     // Watchpoint manager uses the watchpoint clear action.
-    let w = address_list_menu(&[0xFF44], true, (40, 30));
+    let w = address_list_menu(&[0xFF44], true, &SymbolTable::default(), (40, 30));
     assert_eq!(
         w.choices[0],
         MenuChoice::Act(DebugAction::ClearWatchpoint(0xFF44))
     );
     // Empty → a single greyed "(none)".
-    let e = address_list_menu(&[], false, (40, 30));
+    let e = address_list_menu(&[], false, &SymbolTable::default(), (40, 30));
     assert_eq!(e.items.len(), 1);
     assert!(!e.items[0].enabled, "(none) is greyed");
     assert_eq!(e.choices[0], MenuChoice::None);
+}
+
+#[test]
+fn address_list_menu_appends_symbol_names() {
+    let syms = SymbolTable::parse("00:0150 Reset");
+    let m = address_list_menu(&[0x0150, 0xC000], false, &syms, (40, 30));
+    // The known address gets its symbol name appended; the unknown one doesn't.
+    assert!(m.items[0].label.contains("0150") && m.items[0].label.contains("Reset"));
+    assert!(m.items[1].label.contains("C000") && !m.items[1].label.contains("Reset"));
 }
 
 #[test]
@@ -789,7 +827,7 @@ fn menubar_rects_tile_the_bar_left_to_right() {
 fn each_bar_menu_has_the_captured_item_count() {
     let l = DebuggerLayout::for_size(AREA.w, AREA.h);
     let st = DebuggerState::default();
-    let counts = [16, 5, 18, 5, 10, 5]; // File, Search, Run, Debug, Window, Profiler
+    let counts = [16, 5, 18, 6, 10, 5]; // File, Search, Run, Debug, Window, Profiler
     for (idx, &n) in counts.iter().enumerate() {
         let m = menubar_menu(idx, l.menu, &st, 0x0100);
         assert_eq!(m.items.len(), n, "menu {idx} item count");

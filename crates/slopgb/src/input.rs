@@ -149,6 +149,8 @@ pub enum Action {
     /// Open the on-disk Load-state path prompt (debugger File → "Load state...",
     /// Ctrl+L).
     DbgLoadState,
+    /// Open the `.sym` symbol-file load prompt (debugger Debug → "Load symbols...").
+    DbgLoadSymbols,
     /// Copy 16 hex bytes at the cursor to the clipboard (disasm/memory right-click
     /// "Copy data", RM10). Menu-only; carries the clicked address.
     DbgCopyData(u16),

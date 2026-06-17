@@ -28,6 +28,7 @@ mod menupopup;
 mod pacing;
 mod screenshot;
 mod session;
+mod symbols;
 mod toolwin;
 mod ui;
 mod video;
@@ -132,6 +133,8 @@ enum PathPurpose {
     /// Set a bootrom path in the open Options dialog's working scratch
     /// (Options → System → DMG/GBC/SGB bootrom `...`).
     Bootrom(windows::options::BootromSlot),
+    /// Load a `.sym` symbol file from the typed path (debugger labels/go-to).
+    SymbolFile,
 }
 
 /// Resolve the boot ROM bytes from `--boot` or the `SLOPGB_BOOT` env var,
@@ -208,6 +211,9 @@ struct App {
     /// `KeyEvent::repeat` flag is unreliable on some Wayland compositors, so a
     /// held step key would otherwise step repeatedly). See [`input::accept_key`].
     held_keys: HashSet<KeyCode>,
+    /// The loaded `.sym` symbol table (source of truth), shared into the debugger
+    /// view and used for go-to-by-name and the breakpoint-manager labels.
+    symbols: Rc<symbols::SymbolTable>,
     /// The open game-window right-click menu (bgb's `rc-main.png`), if any — its
     /// **own borderless window** (so it can extend past the game window's edge
     /// instead of being clipped), holding the main menu + open submenu.
@@ -296,6 +302,7 @@ impl App {
             dbg: dbg::Debugger::default(),
             modifiers: ModifiersState::empty(),
             held_keys: HashSet::new(),
+            symbols: Rc::new(symbols::SymbolTable::default()),
             info_box: None,
             path_dialog: None,
             path_purpose: PathPurpose::LoadRom,
@@ -617,6 +624,26 @@ impl App {
                     *slot.path_mut(&mut o.working) = path.to_string_lossy().into_owned();
                 }
             }
+            PathPurpose::SymbolFile => self.load_symbols(path),
+        }
+    }
+
+    /// Load a `.sym` symbol file: parse it (tolerant), store as the source of
+    /// truth, and push it to the debugger view. A read error is logged (non-fatal,
+    /// leaving the previous symbols intact).
+    fn load_symbols(&mut self, path: &Path) {
+        match std::fs::read_to_string(path) {
+            Ok(text) => {
+                let table = symbols::SymbolTable::parse(&text);
+                println!(
+                    "slopgb: loaded {} symbols from {}",
+                    table.len(),
+                    path.display()
+                );
+                self.symbols = Rc::new(table);
+                self.tools.set_symbols(self.symbols.clone());
+            }
+            Err(e) => eprintln!("slopgb: load symbols failed: {e}"),
         }
     }
 

@@ -1,5 +1,6 @@
 use super::*;
 use crate::dbg::Breakpoints;
+use crate::symbols::SymbolTable;
 use crate::ui::Theme;
 use crate::ui::canvas::{Canvas, Rect};
 use std::collections::BTreeSet;
@@ -55,6 +56,7 @@ fn render_disasm_highlights_the_pc_row() {
             &Breakpoints::default(),
             &BTreeSet::new(),
             DisasmFmt::default(),
+            &SymbolTable::default(),
             &t,
         );
     }
@@ -138,6 +140,39 @@ fn disasm_fmt_lowercase_hex_and_hide_clocks() {
         "operand hex upper: {}",
         rows[0].text
     );
+}
+
+#[test]
+fn annotate_symbols_inserts_labels_and_substitutes_operands() {
+    // 0x0150: jp $0150 (self-jump, C3 50 01); 0x0150 is the symbol "Loop".
+    let mem = |a: u16| match a {
+        0x0150 => 0xC3,
+        0x0151 => 0x50,
+        0x0152 => 0x01,
+        _ => 0x00,
+    };
+    let syms = SymbolTable::parse("00:0150 Loop");
+    let raw = disasm_rows(mem, 0x0150, 1, &BTreeSet::new(), DisasmFmt::default());
+    let rows = annotate_symbols(raw, &syms, DisasmFmt::default());
+    // A label line precedes the instruction whose address is the symbol.
+    assert!(rows[0].is_label, "row 0 is a label line");
+    assert_eq!(rows[0].text, "Loop:");
+    assert_eq!(rows[0].addr, 0x0150);
+    // The instruction row's operand $0150 became the symbol name; the leading
+    // address label (also "0150") is untouched (last-occurrence replace).
+    let instr = &rows[1];
+    assert!(!instr.is_label && instr.addr == 0x0150);
+    assert!(instr.text.contains("jp Loop"), "{}", instr.text);
+    assert!(instr.text.contains(":0150 "), "addr label intact: {}", instr.text);
+    assert!(!instr.text.contains("jp $0150"));
+}
+
+#[test]
+fn annotate_symbols_empty_table_is_identity() {
+    let mem = |_a: u16| 0x00u8;
+    let raw = disasm_rows(mem, 0x0100, 3, &BTreeSet::new(), DisasmFmt::default());
+    let rows = annotate_symbols(raw.clone(), &SymbolTable::default(), DisasmFmt::default());
+    assert_eq!(rows, raw, "no symbols -> rows unchanged");
 }
 
 #[test]

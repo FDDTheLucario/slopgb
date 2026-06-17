@@ -4,10 +4,12 @@
 //! wiring (B12b) feeds it a real buffer later.
 
 use std::collections::BTreeSet;
+use std::rc::Rc;
 
 use slopgb_core::Registers;
 
 use crate::dbg::{DebugAction, RegField};
+use crate::symbols::SymbolTable;
 use crate::input::Action;
 use crate::ui::Theme;
 use crate::ui::canvas::{Canvas, Rect};
@@ -244,6 +246,9 @@ pub struct DebuggerState {
     /// Disasm display options (Options → Debug: lowercase hex / show clocks),
     /// pushed from `App::apply_settings`.
     pub disasm_fmt: DisasmFmt,
+    /// Loaded `.sym` symbols (shared, cheap to clone), for disasm labels/operands
+    /// and go-to-by-name; empty until a symbol file is loaded.
+    pub symbols: Rc<SymbolTable>,
 }
 
 impl Default for DebuggerState {
@@ -263,6 +268,7 @@ impl Default for DebuggerState {
             eval_input: String::new(),
             clock_base: 0,
             disasm_fmt: DisasmFmt::default(),
+            symbols: Rc::new(SymbolTable::default()),
         }
     }
 }
@@ -418,13 +424,18 @@ pub fn target_at(
     let lh = line_height().max(1);
     if l.disasm.contains(px, py) {
         let row = ((py - l.disasm.y) / lh) as usize;
-        // Addresses are format-independent, so the default fmt is fine here.
-        let rows = disasm_rows(
-            read,
-            st.disasm_start(pc),
-            row + 1,
-            &st.data_hints,
-            DisasmFmt::default(),
+        // Symbol label lines shift rows, so the hit-test annotates the same way
+        // the renderer does (addresses are otherwise format-independent).
+        let rows = annotate_symbols(
+            disasm_rows(
+                read,
+                st.disasm_start(pc),
+                row + 1,
+                &st.data_hints,
+                st.disasm_fmt,
+            ),
+            &st.symbols,
+            st.disasm_fmt,
         );
         return rows
             .get(row)
@@ -709,8 +720,10 @@ pub fn on_right_click(
 /// Open the `Go to…` hex prompt for `target` (closing any open menu).
 pub fn open_goto(st: &mut DebuggerState, target: GotoTarget) {
     st.menu = None;
+    // Free text (not hex-only) so a symbol name can be typed; the accept resolves
+    // a name to its address, falling back to a hex parse.
     st.dialog = Some(ModalDialog {
-        input: InputDialog::new("Go to address", true),
+        input: InputDialog::new("Go to address or symbol", false),
         kind: DialogKind::Goto(target),
     });
 }
@@ -773,7 +786,8 @@ fn accept_dialog(st: &mut DebuggerState, kind: DialogKind, text: &str) -> Option
     let parsed = u16::from_str_radix(text.trim(), 16).ok();
     match kind {
         DialogKind::Goto(target) => {
-            if let Some(addr) = parsed {
+            // A loaded symbol name resolves to its address; else the hex parse.
+            if let Some(addr) = st.symbols.resolve(text.trim()).or(parsed) {
                 apply_goto(st, target, addr);
             }
             None
@@ -854,7 +868,7 @@ fn resolve_dialog(
 pub mod disasm;
 // `DisasmRow` is reachable as `debugger::disasm::DisasmRow`; not re-exported here
 // (no non-test caller names it, and a `pub use` would be an unused-import warning).
-pub use disasm::{DisasmFmt, disasm_rows, render_disasm, render_profile_counts};
+pub use disasm::{DisasmFmt, annotate_symbols, disasm_rows, render_disasm, render_profile_counts};
 mod menubar;
 pub use menubar::{address_list_menu, menubar_at, menubar_menu, render_menubar};
 mod search;

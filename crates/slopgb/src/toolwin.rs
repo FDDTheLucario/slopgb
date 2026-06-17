@@ -572,6 +572,18 @@ impl ToolWindows {
         }
     }
 
+    /// Push a loaded `.sym` symbol table to the debugger view (shared `Rc`),
+    /// repainting it so the disasm labels/operands update. Inert when no
+    /// debugger window is open (the table is re-pushed when one opens).
+    pub fn set_symbols(&mut self, symbols: Rc<crate::symbols::SymbolTable>) {
+        if let Some(view) = self.debugger_view_mut() {
+            if let WinState::Debugger(s) = &mut view.state {
+                s.symbols = symbols;
+                view.window.request_redraw();
+            }
+        }
+    }
+
     /// Open the debugger's `Evaluate expression` modal (RM14).
     pub fn open_debugger_eval(&mut self) {
         let Some(view) = self.debugger_view_mut() else {

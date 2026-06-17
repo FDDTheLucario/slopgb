@@ -154,6 +154,24 @@ fn rgbds_negative_offsets_and_every_opcode_decodes() {
 }
 
 #[test]
+fn target_exposes_branch_and_abs_mem_addresses() {
+    // jr: pc + 2 + signed displacement.
+    assert_eq!(decode(&[0x18, 0x05], 0x0200).target, Some(0x0207));
+    assert_eq!(decode(&[0x20, 0xFC], 0x0170).target, Some(0x016E)); // jr nz, back
+    // jp / call: absolute imm16.
+    assert_eq!(decode(&[0xC3, 0x50, 0x01], 0).target, Some(0x0150));
+    assert_eq!(decode(&[0xCD, 0x34, 0x12], 0).target, Some(0x1234));
+    assert_eq!(decode(&[0xCA, 0x00, 0x40], 0).target, Some(0x4000)); // jp z
+    // Absolute memory data addresses.
+    assert_eq!(decode(&[0xEA, 0x34, 0x12], 0).target, Some(0x1234));
+    assert_eq!(decode(&[0xFA, 0x00, 0xC0], 0).target, Some(0xC000));
+    // No target for everything else.
+    assert_eq!(decode(&[0x00], 0).target, None); // nop
+    assert_eq!(decode(&[0xE9], 0).target, None); // jp hl (indirect)
+    assert_eq!(decode(&[0xCB, 0x16], 0).target, None); // cb op
+}
+
+#[test]
 fn negative_signed_offsets() {
     // 0xFE = -2, 0xFB = -5 — sign + 2-hex magnitude, like bgb.
     assert_eq!(decode(&[0xF8, 0xFE], 0).text, "ld hl,sp-02");

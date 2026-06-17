@@ -29,6 +29,10 @@ pub struct Insn {
     pub len: u8,
     /// M-cycles. Conditional branches report the **not-taken** count, as bgb does.
     pub cycles: u8,
+    /// The absolute address this instruction references, for symbol/label
+    /// substitution: a `jr`/`jp`/`call` code target or an absolute-memory
+    /// (`ld [nn],a` / `ld a,[nn]` / `ld [nn],sp`) data address; `None` otherwise.
+    pub target: Option<u16>,
 }
 
 const R: [&str; 8] = ["b", "c", "d", "e", "h", "l", "(hl)", "a"];
@@ -179,7 +183,28 @@ pub fn decode_with(bytes: &[u8], pc: u16, syntax: Syntax) -> Insn {
             _ => (format!("rst {}", h8((y as u8) * 8)), 1, 4),
         },
     };
-    Insn { text, len, cycles }
+    Insn {
+        text,
+        len,
+        cycles,
+        target: branch_target(op, pc, imm16, b1),
+    }
+}
+
+/// The absolute address a control-flow or absolute-memory op references, for
+/// symbol substitution (`None` for everything else, including CB-prefixed ops).
+fn branch_target(op: u8, pc: u16, imm16: u16, disp: u8) -> Option<u16> {
+    match op {
+        // jr / jr cc: pc + 2 + signed displacement.
+        0x18 | 0x20 | 0x28 | 0x30 | 0x38 => {
+            Some(pc.wrapping_add(2).wrapping_add(disp as i8 as i16 as u16))
+        }
+        // jp / jp cc / call / call cc: absolute imm16.
+        0xC3 | 0xC2 | 0xCA | 0xD2 | 0xDA | 0xCD | 0xC4 | 0xCC | 0xD4 | 0xDC => Some(imm16),
+        // ld [nn],a / ld a,[nn] / ld [nn],sp: absolute data address.
+        0xEA | 0xFA | 0x08 => Some(imm16),
+        _ => None,
+    }
 }
 
 /// CB-prefixed instruction (always 2 bytes). `(hl)` shift/rmw forms cost 4
@@ -200,6 +225,7 @@ fn decode_cb(op: u8, rg: bool) -> Insn {
         text,
         len: 2,
         cycles,
+        target: None,
     }
 }
 

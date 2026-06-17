@@ -13,8 +13,9 @@ fn debug_menu_evaluate_and_clocks_are_live() {
     let l = DebuggerLayout::for_size(AREA.w, AREA.h);
     let st = DebuggerState::default();
     let m = menubar_menu(3, l.menu, &st, 0x0100); // index 3 = Debug
-    // Toggle bp / Evaluate / Set user clocks / Breakpoints / Watchpoints.
-    assert_eq!(m.items.len(), 5);
+    // Toggle bp / Evaluate / Set user clocks / Breakpoints / Watchpoints /
+    // Load symbols.
+    assert_eq!(m.items.len(), 6);
     assert!(
         m.items.iter().all(|it| it.enabled),
         "every Debug row is live"

@@ -27,8 +27,8 @@ byte-identical); no new core deps / no unsafe; every `.rs` < 1000 lines; clippy
 | 1 | haiku | `flip_tile(pixels,xflip,yflip)` pure helper | — | **done** |
 | 2 | haiku | `bgmap_viewport_segments(...)` wrap geometry | — | **done** |
 | 3 | haiku | `window_region_rect(wx,wy,...)` geometry | — | **done** |
-| 4 | sonnet | `.sym` parser `parse_sym(text)->SymbolTable` | — | **done (uncommitted, symbol slice)** |
-| 5 | haiku | SymbolTable `name_at` / `nearest_before` | 4 | **done (uncommitted, symbol slice)** |
+| 4 | sonnet | `.sym` parser `parse_sym(text)->SymbolTable` | — | **done** |
+| 5 | haiku | SymbolTable `name_at` (+ `nearest_before` deferred to task 23) | 4 | **done** |
 | 6 | opus | ANALYSIS: rgbds approach (syntax enum vs structured operands) | — | **done** (enum threaded; decode is off-path → golden-safe) |
 | 7 | opus | core `decode` emits rgbds text under `Syntax::Rgbds` | 6 | **done** |
 | 8 | opus | golden gate: gbtr + mooneye byte-identical post-rgbds | 7 | **done** (gbtr 185 + mooneye green) |
@@ -41,10 +41,10 @@ byte-identical); no new core deps / no unsafe; every `.rs` < 1000 lines; clippy
 | 15 | sonnet | App held-KeyCode repeat guard (held F7/F3 step once) | — | **done** |
 | 16 | sonnet | disasm double-click toggles breakpoint | — | **done** |
 | 17 | sonnet | memory viewer nav: wheel + PgUp/Dn + arrows | — | **done** |
-| 18 | sonnet | symbols in disasm: labels + operand substitution | 4,12 | todo |
-| 19 | sonnet | load `.sym` via path modal (PathPurpose::SymbolFile) | 4 | todo |
-| 20 | sonnet | go-to by symbol name (fallback hex) | 4,5 | todo |
-| 21 | haiku | symbol name beside manager rows | 5,19 | todo |
+| 18 | sonnet | symbols in disasm: labels + operand substitution | 4,12 | **done** |
+| 19 | sonnet | load `.sym` via path modal (PathPurpose::SymbolFile) | 4 | **done** |
+| 20 | sonnet | go-to by symbol name (fallback hex) | 4,5 | **done** |
+| 21 | haiku | symbol name beside manager rows | 5,19 | **done** |
 | 22 | sonnet | standalone Memory-viewer tool window | 17 | todo |
 | 23 | sonnet | memory-window status bar (nearest symbol) | 5,22 | todo |
 | 24 | sonnet | Options toggle: memory viewer in own window | 22 | todo |

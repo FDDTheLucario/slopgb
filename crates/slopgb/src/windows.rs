@@ -127,6 +127,7 @@ fn render_debugger(
         bps,
         &st.data_hints,
         st.disasm_fmt,
+        &st.symbols,
         theme,
     );
     // Profiler: overlay per-line execution counts while logging (MB5).

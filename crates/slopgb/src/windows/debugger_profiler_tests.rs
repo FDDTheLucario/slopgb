@@ -75,10 +75,14 @@ fn profile_counts_overlay_only_rows_with_a_tally() {
         DisasmRow {
             addr: 0x0100,
             text: String::new(),
+            target: None,
+            is_label: false,
         },
         DisasmRow {
             addr: 0x0101,
             text: String::new(),
+            target: None,
+            is_label: false,
         },
     ];
     const BG: u32 = 0x00AA_AAAA;

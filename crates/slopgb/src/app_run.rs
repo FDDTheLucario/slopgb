@@ -63,8 +63,10 @@ impl App {
             Action::ToggleTool(kind) => {
                 self.tools.toggle(event_loop, kind);
                 // A freshly-opened debugger must reflect the current disasm
-                // settings (syntax/hex/clocks), not just `DisasmFmt::default`.
+                // settings (syntax/hex/clocks) and loaded symbols, not just the
+                // `DisasmFmt::default` / empty-table defaults.
                 self.push_disasm_fmt();
+                self.tools.set_symbols(self.symbols.clone());
             }
             // F9 enters a break only with the debugger window up (so the key is
             // inert during normal play), but always *resumes* one — otherwise
@@ -122,7 +124,8 @@ impl App {
             // (each row clears its entry) and hand it to the debugger window.
             Action::DbgManageBreakpoints => {
                 let addrs = self.dbg.breakpoints().pc_list();
-                let menu = windows::debugger::address_list_menu(&addrs, false, MANAGER_ORIGIN);
+                let menu =
+                    windows::debugger::address_list_menu(&addrs, false, &self.symbols, MANAGER_ORIGIN);
                 self.tools.set_debugger_menu(menu);
             }
             Action::DbgManageWatchpoints => {
@@ -133,7 +136,8 @@ impl App {
                     .iter()
                     .map(|w| w.addr)
                     .collect();
-                let menu = windows::debugger::address_list_menu(&addrs, true, MANAGER_ORIGIN);
+                let menu =
+                    windows::debugger::address_list_menu(&addrs, true, &self.symbols, MANAGER_ORIGIN);
                 self.tools.set_debugger_menu(menu);
             }
             // bgb's "Enable sound": flip the runtime mute. Unmuting lazily opens
@@ -211,6 +215,9 @@ impl App {
             }
             Action::DbgLoadState => {
                 self.open_path_prompt("Load state (path)", crate::PathPurpose::LoadState);
+            }
+            Action::DbgLoadSymbols => {
+                self.open_path_prompt("Load symbols (.sym path)", crate::PathPurpose::SymbolFile);
             }
             // Disasm/memory right-click Copy data/code (RM10): build the text and
             // push it to the system clipboard (dep-free shell-out; non-fatal).

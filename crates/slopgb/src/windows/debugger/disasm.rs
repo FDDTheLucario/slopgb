@@ -9,16 +9,21 @@ use slopgb_core::debug;
 
 use super::region_label;
 use crate::dbg::Breakpoints;
+use crate::symbols::SymbolTable;
 use crate::ui::Theme;
 use crate::ui::canvas::{Canvas, Rect};
 use crate::ui::text::{draw_text, line_height, measure};
 use crate::ui::widgets::scroll_list;
 
-/// One decoded disassembly line: its address and the formatted bgb text.
+/// One disassembly line: its address, the formatted text, the absolute address
+/// it references (for symbol substitution), and whether it is a synthetic symbol
+/// label line (`name:`) rather than a real instruction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DisasmRow {
     pub addr: u16,
     pub text: String,
+    pub target: Option<u16>,
+    pub is_label: bool,
 }
 
 /// Display options for the disasm pane (Options → Debug). Defaults: RGBDS
@@ -95,7 +100,12 @@ pub fn disasm_rows(
                 format!("db {prefix}{}", hx2(b)),
                 clk("")
             );
-            rows.push(DisasmRow { addr, text });
+            rows.push(DisasmRow {
+                addr,
+                text,
+                target: None,
+                is_label: false,
+            });
             addr = addr.wrapping_add(1);
             continue;
         }
@@ -127,10 +137,72 @@ pub fn disasm_rows(
             mnem,
             clk(&insn.cycles.to_string())
         );
-        rows.push(DisasmRow { addr, text });
+        rows.push(DisasmRow {
+            addr,
+            text,
+            target: insn.target,
+            is_label: false,
+        });
         addr = addr.wrapping_add(u16::from(insn.len.max(1)));
     }
     rows
+}
+
+/// Annotate disassembly `rows` with a loaded symbol table: insert a `name:` label
+/// line above each row whose address is an exact symbol, and replace a row's
+/// operand target hex (`$0150`/`0150`) with the symbol name when its `target` is a
+/// known symbol. `fmt` must match the dialect/case the rows were rendered with so
+/// the hex token is found. Empty table → rows unchanged (fast path).
+#[must_use]
+pub fn annotate_symbols(rows: Vec<DisasmRow>, syms: &SymbolTable, fmt: DisasmFmt) -> Vec<DisasmRow> {
+    if syms.is_empty() {
+        return rows;
+    }
+    let mut out = Vec::with_capacity(rows.len());
+    for mut row in rows {
+        if !row.is_label {
+            if let Some(name) = syms.name_at(row.addr) {
+                out.push(DisasmRow {
+                    addr: row.addr,
+                    text: format!("{name}:"),
+                    target: None,
+                    is_label: true,
+                });
+            }
+            if let Some((t, n)) = row.target.and_then(|t| syms.name_at(t).map(|n| (t, n))) {
+                // Replace only the *last* hex occurrence (the operand): the same
+                // digits also appear in the row's leading address label.
+                row.text = replace_last(&row.text, &target_hex(t, fmt), n);
+            }
+        }
+        out.push(row);
+    }
+    out
+}
+
+/// Replace the **last** occurrence of `from` in `text` with `to` (the operand
+/// hex is the last hex on a disasm line; the leading address label has the same
+/// digits and must be left alone).
+fn replace_last(text: &str, from: &str, to: &str) -> String {
+    match text.rfind(from) {
+        Some(i) => format!("{}{}{}", &text[..i], to, &text[i + from.len()..]),
+        None => text.to_string(),
+    }
+}
+
+/// The operand hex token for `addr` exactly as [`disasm_rows`] rendered it (case
+/// + RGBDS `$` prefix), so [`annotate_symbols`] can find and replace it.
+fn target_hex(addr: u16, fmt: DisasmFmt) -> String {
+    let body = if fmt.lowercase_hex {
+        format!("{addr:04x}")
+    } else {
+        format!("{addr:04X}")
+    };
+    if fmt.rgbds {
+        format!("${body}")
+    } else {
+        body
+    }
 }
 
 /// Width of the disasm pane's left gutter — holds the red breakpoint dot, and
@@ -152,13 +224,15 @@ pub fn render_disasm(
     bps: &Breakpoints,
     data_hints: &BTreeSet<u16>,
     fmt: DisasmFmt,
+    symbols: &SymbolTable,
     theme: &Theme,
 ) -> Vec<DisasmRow> {
     let lh = line_height();
     let count = (rect.h / lh).max(0) as usize + 1;
-    let rows = disasm_rows(read, start, count, data_hints, fmt);
+    let rows = annotate_symbols(disasm_rows(read, start, count, data_hints, fmt), symbols, fmt);
     let texts: Vec<&str> = rows.iter().map(|r| r.text.as_str()).collect();
-    let highlight = rows.iter().position(|r| r.addr == pc);
+    // Highlight the *instruction* row at PC, not a label line sharing its address.
+    let highlight = rows.iter().position(|r| r.addr == pc && !r.is_label);
     let body = Rect::new(
         rect.x + DISASM_GUTTER,
         rect.y,
@@ -172,7 +246,7 @@ pub fn render_disasm(
         if Some(i) == highlight {
             c.fill_rect(Rect::new(rect.x, y, DISASM_GUTTER, lh), theme.current);
         }
-        if bps.contains(row.addr) {
+        if !row.is_label && bps.contains(row.addr) {
             let cy = y + lh / 2;
             c.fill_rect(Rect::new(rect.x + 1, cy - 2, 4, 4), theme.breakpoint);
         }
@@ -194,6 +268,9 @@ pub fn render_profile_counts(
     let lh = line_height();
     let visible = (rect.h / lh).max(0) as usize;
     for (i, row) in rows.iter().enumerate().take(visible) {
+        if row.is_label {
+            continue;
+        }
         let n = count(row.addr);
         if n == 0 {
             continue;
