@@ -470,17 +470,24 @@ pub fn bgmap_viewport_segments(
 
 /// The on-screen-visible portion of the window layer, as a content-local rect for
 /// the window-map view's `rWX`/`rWY` indicator. The window is displayed from its
-/// own top-left at screen `(WX-7, WY)`, so the visible slice is a box at the map
-/// origin sized `min(160, 167-WX)` × `144-WY`. `None` when the window is wholly
-/// off-screen (`WX ≥ 167` or `WY ≥ 144`).
+/// own top-left at screen `(WX-7, WY)`. For `WX ≥ 7` the visible slice is a box at
+/// the map origin sized `(167-WX)` wide; for `WX < 7` the window starts off the
+/// left edge, so the visible slice shifts right to map-x `7-WX` and is the full
+/// 160 wide. Height is `144-WY`. `None` when wholly off-screen (`WX ≥ 167` or
+/// `WY ≥ 144`).
 #[must_use]
 pub fn window_region_rect(wx: u8, wy: u8, scale: i32) -> Option<Rect> {
-    let w = (167 - i32::from(wx)).clamp(0, 160);
+    let wx = i32::from(wx);
     let h = 144 - i32::from(wy);
+    let (x0, w) = if wx >= 7 {
+        (0, 167 - wx)
+    } else {
+        (7 - wx, 160)
+    };
     if w <= 0 || h <= 0 {
         return None;
     }
-    Some(Rect::new(0, 0, w * scale, h * scale))
+    Some(Rect::new(x0 * scale, 0, w * scale, h * scale))
 }
 
 /// The outline drawn over the BG-map tab: nothing, the screen viewport (SCX/SCY,

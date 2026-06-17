@@ -67,6 +67,12 @@ impl App {
                 // `DisasmFmt::default` / empty-table defaults.
                 self.push_disasm_fmt();
                 self.tools.set_symbols(self.symbols.clone());
+                // Keep the Options "memory viewer in own window" setting in sync
+                // with reality, so a later Apply doesn't fight a menu toggle.
+                if kind == crate::ui::ToolWindow::MemoryViewer {
+                    self.settings.memory_window =
+                        self.tools.is_open(crate::ui::ToolWindow::MemoryViewer);
+                }
             }
             // F9 enters a break only with the debugger window up (so the key is
             // inert during normal play), but always *resumes* one — otherwise

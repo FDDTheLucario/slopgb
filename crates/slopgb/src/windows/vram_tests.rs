@@ -77,6 +77,9 @@ fn window_region_rect_from_wx_wy() {
         window_region_rect(87, 40, 1),
         Some(Rect::new(0, 0, 80, 104))
     );
+    // WX < 7: window starts off the left edge, so the visible slice shifts right
+    // to map-x 7-WX and stays the full 160 wide.
+    assert_eq!(window_region_rect(0, 0, 1), Some(Rect::new(7, 0, 160, 144)));
     // Fully off-screen -> no rect.
     assert_eq!(window_region_rect(167, 0, 1), None);
     assert_eq!(window_region_rect(7, 144, 1), None);

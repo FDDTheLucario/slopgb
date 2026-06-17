@@ -51,6 +51,10 @@ fn goto_resolves_a_symbol_name_then_hex() {
     let mut st = DebuggerState::default();
     accept_dialog(&mut st, DialogKind::Goto(GotoTarget::Memory), "C000");
     assert_eq!(st.mem_base, 0xC000);
+    // The rendered RGBDS `$`-hex form is accepted too.
+    let mut st = DebuggerState::default();
+    accept_dialog(&mut st, DialogKind::Goto(GotoTarget::Memory), "$D000");
+    assert_eq!(st.mem_base, 0xD000);
     // An unknown name that isn't valid hex changes nothing.
     let mut st = DebuggerState::default();
     accept_dialog(&mut st, DialogKind::Goto(GotoTarget::Memory), "nope");

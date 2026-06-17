@@ -779,6 +779,11 @@ impl ApplicationHandler for App {
         if self.tools.owns(window_id) {
             match event {
                 WindowEvent::CloseRequested => {
+                    // A user-closed memory window clears the Options setting so a
+                    // later Apply doesn't reopen it.
+                    if self.tools.kind_of(window_id) == Some(ui::ToolWindow::MemoryViewer) {
+                        self.settings.memory_window = false;
+                    }
                     self.tools.close(window_id);
                 }
                 WindowEvent::RedrawRequested | WindowEvent::Resized(_) => {
@@ -829,10 +834,12 @@ impl ApplicationHandler for App {
                             }
                         }
                     }
+                    // The debugger window gets bgb's debugger keys; the other tool
+                    // windows get the game hotkeys but NOT the joypad (Focus::Viewer).
                     let focus = if self.tools.kind_of(window_id) == Some(ui::ToolWindow::Debugger) {
                         Focus::Debugger
                     } else {
-                        Focus::Game
+                        Focus::Viewer
                     };
                     self.handle_key(event_loop, &event, focus);
                 }

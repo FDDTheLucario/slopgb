@@ -783,7 +783,9 @@ fn apply_goto(st: &mut DebuggerState, target: GotoTarget, addr: u16) {
 /// outcome); `edit register` returns the register write for `main` to apply.
 /// An empty / unparseable entry leaves everything unchanged.
 fn accept_dialog(st: &mut DebuggerState, kind: DialogKind, text: &str) -> Option<MenuOutcome> {
-    let parsed = u16::from_str_radix(text.trim(), 16).ok();
+    // Accept the rendered hex forms too: a leading `$` (RGBDS) or `0x`.
+    let hex = text.trim().trim_start_matches('$').trim_start_matches("0x");
+    let parsed = u16::from_str_radix(hex, 16).ok();
     match kind {
         DialogKind::Goto(target) => {
             // A loaded symbol name resolves to its address; else the hex parse.

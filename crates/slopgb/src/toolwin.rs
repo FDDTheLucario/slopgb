@@ -260,7 +260,13 @@ impl ToolWindows {
                 let action = if consumed {
                     outcome
                 } else if double {
-                    debugger_double_click(s, area, gb, px, py)
+                    // A double-click off a disasm line declines the breakpoint
+                    // toggle; fall through to the normal single-click handling so
+                    // the click still selects.
+                    match debugger_double_click(s, area, gb, px, py) {
+                        Some(o) => Some(o),
+                        None => debugger_left_click(s, area, gb, px, py),
+                    }
                 } else {
                     debugger_left_click(s, area, gb, px, py)
                 };

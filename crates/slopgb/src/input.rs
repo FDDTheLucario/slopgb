@@ -53,8 +53,12 @@ pub fn apply_input(gb: &mut GameBoy, ops: &mut Vec<(Button, bool)>, offset: u32)
 /// `main` from the window the key event arrived on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
-    /// The game LCD window (and the VRAM / I/O-map viewers).
+    /// The game LCD window — the only window that drives the GB joypad.
     Game,
+    /// A non-debugger tool window (VRAM / I/O map / memory viewer): the game-style
+    /// hotkeys apply, but Game Boy buttons do **not** (a viewer must not move the
+    /// joypad).
+    Viewer,
     /// The debugger window.
     Debugger,
 }
@@ -265,7 +269,9 @@ pub fn map(code: KeyCode, mods: ModifiersState, focus: Focus) -> Option<Action> 
             }),
             _ => None,
         },
-        Focus::Game => match code {
+        // The game window and the viewers share the same hotkeys; only the game
+        // window additionally drives the joypad (gated in `App::handle_key`).
+        Focus::Game | Focus::Viewer => match code {
             KeyCode::F2 => Some(Action::ToggleTool(ToolWindow::Debugger)),
             KeyCode::F3 => Some(Action::ToggleTool(ToolWindow::Vram)),
             KeyCode::F4 => Some(Action::ToggleTool(ToolWindow::IoMap)),
@@ -402,6 +408,18 @@ mod tests {
             assert_eq!(map(KeyCode::KeyX, NONE, f), None);
             assert_eq!(map(KeyCode::Enter, NONE, f), None);
         }
+    }
+
+    #[test]
+    fn viewer_focus_has_game_hotkeys_but_no_joypad() {
+        // A non-debugger tool window shares the game hotkeys (F-keys/Options)...
+        let v = |c| map(c, NONE, Focus::Viewer);
+        assert_eq!(v(KeyCode::F3), Some(Action::ToggleTool(ToolWindow::Vram)));
+        assert_eq!(v(KeyCode::F11), Some(Action::MainOptions));
+        // ...but button-mapped keys stay unmapped (handle_key gates the joypad on
+        // Focus::Game, so a viewer never moves the D-pad).
+        assert_eq!(v(KeyCode::ArrowUp), None);
+        assert_eq!(v(KeyCode::KeyZ), None);
     }
 
     #[test]
