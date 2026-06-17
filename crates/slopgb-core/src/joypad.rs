@@ -390,6 +390,14 @@ impl Joypad {
             let ready_for_stop = r.bool()?;
             let player_count = r.u8()?;
             let current_player = r.u8()?;
+            // A corrupt save with player_count 0 would underflow `player_count
+            // - 1` in `joyp_write` (the SGB player-cycle mask) → a debug-build
+            // panic *after* a successful load. Reject out-of-range values so a
+            // bad state can never arm a later panic (state contract: never a
+            // panic on a corrupt save). Real SGB carts only ever store 1/2/4.
+            if player_count == 0 || player_count > 4 || current_player >= player_count {
+                return Err(crate::state::StateError::Truncated);
+            }
             self.sgb = Some(Sgb {
                 command,
                 write_index,

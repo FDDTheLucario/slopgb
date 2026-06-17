@@ -541,7 +541,13 @@ impl App {
             PathPurpose::LoadState => match self.session.load_state_from(path) {
                 Ok(()) => {
                     println!("slopgb: loaded state from {}", path.display());
+                    // A state restores a real running machine — leave the no-ROM
+                    // blank state (else `should_idle` keeps emulation gated and
+                    // the LCD frozen on `blank_frame`).
+                    self.rom_loaded = true;
+                    self.apply_palette();
                     self.resync_pacing();
+                    self.update_title();
                     self.request_game_redraw();
                 }
                 Err(e) => eprintln!("slopgb: load state failed: {e}"),

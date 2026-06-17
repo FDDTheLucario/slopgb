@@ -27,8 +27,8 @@ pub fn dmg_palette_shades(reg: u8) -> [u8; 4] {
     [reg & 3, (reg >> 2) & 3, (reg >> 4) & 3, (reg >> 6) & 3]
 }
 
-/// Naive 15-bit BGR555 word → 8-bit RGB (`channel * 255 / 31`), for a quick
-/// swatch. **Not** bgb's CGB colour correction — match that in the viewer if
+/// Naive 15-bit BGR555 word → 8-bit RGB (`(channel * 255 + 15) / 31`, rounded),
+/// for a quick swatch. **Not** bgb's CGB colour correction — match that in the viewer if
 /// pixel parity is needed (plan C13).
 #[must_use]
 pub fn rgb555_to_rgb888(word: u16) -> (u8, u8, u8) {

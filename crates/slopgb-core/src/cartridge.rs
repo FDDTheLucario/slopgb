@@ -831,8 +831,17 @@ impl Cartridge {
     /// is keyed to, so loading a state from a different ROM is rejected. The
     /// header bytes always exist — a cartridge under 0x150 fails construction.
     pub(crate) fn rom_id(&self) -> Vec<u8> {
-        let mut id = Vec::with_capacity(23);
+        let mut id = Vec::with_capacity(26);
         id.extend_from_slice(&self.rom[0x134..0x144]); // 16-byte title region
+        // Cartridge type + ROM/RAM size pin the *mapper shape* directly: the
+        // mapper variant isn't serialized (read_state dispatches on the live
+        // variant with a per-variant field count), so a different-mapper ROM
+        // that collides on title+checksums+length would otherwise mis-decode.
+        // The header checksum alone isn't enough — slopgb accepts ROMs with a
+        // bad/zero header checksum.
+        id.push(self.rom[0x147]); // cartridge type
+        id.push(self.rom[0x148]); // ROM size
+        id.push(self.rom[0x149]); // RAM size
         id.push(self.rom[0x14D]); // header checksum
         id.push(self.rom[0x14E]); // global checksum hi
         id.push(self.rom[0x14F]); // global checksum lo

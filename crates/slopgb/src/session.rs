@@ -111,14 +111,19 @@ impl Session {
             return false;
         };
         self.gb = (**snap).clone();
+        // The restored machine's cycle counter jumped back; re-anchor the
+        // autosave deadline to it (else periodic battery-RAM flush is suppressed
+        // until emulated time replays past the stale deadline).
+        self.next_autosave = self.gb.cycles().saturating_add(AUTOSAVE_CYCLES);
         true
     }
 
     /// Save state to disk (bgb File / State → Save state): write the serialized
-    /// machine to `path`. Returns an error string (logged by the caller) on an
-    /// I/O failure.
+    /// machine to `path` via a temp-file-then-rename (same durability as the
+    /// battery `.sav` write — an interrupted save can't destroy a prior good
+    /// state file). Returns an error string (logged by the caller) on I/O error.
     pub(crate) fn save_state_to(&self, path: &Path) -> Result<(), String> {
-        fs::write(path, self.gb.save_state()).map_err(|e| format!("{e}"))
+        write_atomic(path, &self.gb.save_state()).map_err(|e| format!("{e}"))
     }
 
     /// Load state from disk (bgb File / State → Load state): read `path` and
@@ -127,7 +132,11 @@ impl Session {
     /// error string (logged by the caller) on I/O or validation failure.
     pub(crate) fn load_state_from(&mut self, path: &Path) -> Result<(), String> {
         let bytes = fs::read(path).map_err(|e| format!("{e}"))?;
-        self.gb.load_state(&bytes).map_err(|e| format!("{e}"))
+        self.gb.load_state(&bytes).map_err(|e| format!("{e}"))?;
+        // Re-anchor autosave to the restored (earlier) cycle counter, as in
+        // `quick_load` / `reset`.
+        self.next_autosave = self.gb.cycles().saturating_add(AUTOSAVE_CYCLES);
+        Ok(())
     }
 
     /// Power-cycle: fresh machine, save RAM reloaded from disk.

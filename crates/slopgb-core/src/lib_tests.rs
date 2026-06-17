@@ -246,47 +246,146 @@ fn assert_machines_match(a: &GameBoy, b: &GameBoy, msg: &str) {
     assert_eq!(a.frame(), b.frame(), "frame diverged: {msg}");
 }
 
-#[test]
-fn save_state_round_trips_the_whole_machine() {
-    let rom = savestate_oracle_rom();
-    // Several save points (mid-frame / many-frames-in) — each must restore a
-    // byte-identical machine that runs identically forward. Any field missed
-    // by a write_state/read_state diverges loudly here.
-    for &warmup in &[777usize, 30_000, 70_111] {
-        let mut a = GameBoy::new(Model::Dmg, rom.clone()).unwrap();
+/// A busier oracle ROM exercising the fields the simple ch1-only DMG oracle
+/// leaves at default: **MBC1 banking + cart RAM**, **all four audio channels +
+/// wave RAM**, and (on a CGB machine) the **CGB IO** — SVBK / VBK / BG+OBJ
+/// palette RAM. Run on both DMG and CGB so a serializer drift in any of those
+/// shows up as a round-trip divergence (the simple oracle can't catch it — both
+/// machines hold identical defaults there). Program lives at 0x0150 (it overruns
+/// the header at 0x0134), reached by a `jp` from the entry point.
+fn comprehensive_oracle_rom(cgb: bool) -> Vec<u8> {
+    fn ldh(p: &mut Vec<u8>, val: u8, port: u8) {
+        p.extend_from_slice(&[0x3E, val, 0xE0, port]); // ld a,val ; ldh (port),a
+    }
+    fn st(p: &mut Vec<u8>, val: u8, addr: u16) {
+        p.extend_from_slice(&[0x3E, val, 0xEA, addr as u8, (addr >> 8) as u8]); // ld (addr),a
+    }
+    let mut p = Vec::new();
+    ldh(&mut p, 0xE3, 0x40); // LCDC on
+    ldh(&mut p, 0x07, 0x07); // TAC
+    ldh(&mut p, 0x02, 0x70); // SVBK = 2 (CGB WRAM bank; DMG: inert)
+    ldh(&mut p, 0x01, 0x4F); // VBK = 1  (CGB VRAM bank; DMG: inert)
+    ldh(&mut p, 0x80, 0x68); // BCPS auto-inc
+    ldh(&mut p, 0x1F, 0x69); // BGPD
+    ldh(&mut p, 0x7C, 0x69);
+    ldh(&mut p, 0x80, 0x6A); // OCPS auto-inc
+    ldh(&mut p, 0x3E, 0x6B); // OGPD
+    ldh(&mut p, 0x11, 0x6B);
+    st(&mut p, 0x05, 0x2000); // MBC1 ROM bank1 = 5
+    st(&mut p, 0x01, 0x4000); // MBC1 bank2 = 1
+    st(&mut p, 0x0A, 0x0000); // MBC1 RAM enable
+    st(&mut p, 0x01, 0x6000); // MBC1 mode 1
+    st(&mut p, 0xAB, 0xA000); // cart RAM write
+    ldh(&mut p, 0x81, 0x26); // NR52 APU on
+    ldh(&mut p, 0x80, 0x11); // ch1 NR11-14
+    ldh(&mut p, 0xF3, 0x12);
+    ldh(&mut p, 0xFF, 0x13);
+    ldh(&mut p, 0x87, 0x14);
+    ldh(&mut p, 0x80, 0x16); // ch2 NR21-24
+    ldh(&mut p, 0xF3, 0x17);
+    ldh(&mut p, 0xFF, 0x18);
+    ldh(&mut p, 0x87, 0x19);
+    ldh(&mut p, 0x80, 0x1A); // ch3 NR30 DAC on
+    ldh(&mut p, 0xFF, 0x1B); // NR31 length
+    ldh(&mut p, 0x20, 0x1C); // NR32 volume
+    ldh(&mut p, 0xA5, 0x30); // wave RAM [0]
+    ldh(&mut p, 0x5A, 0x31); // wave RAM [1]
+    ldh(&mut p, 0xFF, 0x1D); // NR33 freq lo
+    ldh(&mut p, 0x87, 0x1E); // NR34 trigger
+    ldh(&mut p, 0xFF, 0x20); // ch4 NR41 length
+    ldh(&mut p, 0xF3, 0x21); // NR42 envelope
+    ldh(&mut p, 0x55, 0x22); // NR43 clock (LFSR)
+    ldh(&mut p, 0x87, 0x23); // NR44 trigger
+    p.extend_from_slice(&[0x18, 0xFE]); // jr -2 (spin)
+
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x0100..0x0103].copy_from_slice(&[0xC3, 0x50, 0x01]); // jp 0x0150
+    rom[0x0150..0x0150 + p.len()].copy_from_slice(&p);
+    rom[0x134..0x13B].copy_from_slice(b"COMPTST");
+    if cgb {
+        rom[0x143] = 0x80; // CGB-enhanced
+    }
+    rom[0x147] = 0x03; // MBC1 + RAM + BATTERY
+    rom[0x148] = 0x00; // 32 KiB ROM
+    rom[0x149] = 0x02; // 8 KiB RAM
+    rom[0x14D] = 0x99;
+    rom[0x14E] = 0xAB;
+    rom[0x14F] = 0xCD;
+    rom
+}
+
+/// Save `rom` on `model` at each `warmups` step count, restore into a fresh
+/// (perturbed) same-ROM machine, and assert both run byte-identically forward
+/// for `frames` (regs/frame each step, then full memory + audio). Any
+/// write_state/read_state field that is missed/reordered/dropped diverges here.
+fn assert_round_trips(model: Model, rom: &[u8], warmups: &[usize], frames: usize, label: &str) {
+    for &warmup in warmups {
+        let mut a = GameBoy::new(model, rom.to_vec()).unwrap();
         for _ in 0..warmup {
             a.step();
         }
         let bytes = a.save_state();
 
-        // A *different* live machine (perturbed) must be fully overwritten.
-        let mut b = GameBoy::new(Model::Dmg, rom.clone()).unwrap();
+        let mut b = GameBoy::new(model, rom.to_vec()).unwrap();
         for _ in 0..5000 {
             b.step();
         }
         b.load_state(&bytes).unwrap();
-        assert_machines_match(&a, &b, "right after load");
+        assert_machines_match(
+            &a,
+            &b,
+            &format!("{label} right after load (warmup {warmup})"),
+        );
 
-        // Run both forward; they must stay in lock-step.
-        for i in 0..300 {
+        for i in 0..frames {
             a.run_frame();
             b.run_frame();
-            assert_machines_match(&a, &b, &format!("warmup {warmup}, frame {i}"));
+            assert_machines_match(&a, &b, &format!("{label} warmup {warmup} frame {i}"));
         }
-        // Full memory + audio backstop after the run.
         for addr in 0u32..=0xFFFF {
             let addr = addr as u16;
             assert_eq!(
                 a.debug_read(addr),
                 b.debug_read(addr),
-                "memory {addr:#06X} diverged (warmup {warmup})"
+                "{label} memory {addr:#06X} diverged (warmup {warmup})"
             );
         }
         let (mut sa, mut sb) = (Vec::new(), Vec::new());
         a.drain_audio_raw(&mut sa);
         b.drain_audio_raw(&mut sb);
-        assert_eq!(sa, sb, "audio stream diverged (warmup {warmup})");
+        assert_eq!(sa, sb, "{label} audio diverged (warmup {warmup})");
     }
+}
+
+#[test]
+fn save_state_round_trips_the_whole_machine() {
+    // Several save points (mid-frame / many-frames-in) on the simple DMG/ch1
+    // oracle.
+    assert_round_trips(
+        Model::Dmg,
+        &savestate_oracle_rom(),
+        &[777, 30_000, 70_111],
+        300,
+        "dmg",
+    );
+}
+
+#[test]
+fn save_state_round_trips_cgb_mbc_and_all_channels() {
+    // The serializer fields the simple oracle leaves at default — MBC1 banking +
+    // cart RAM, ch2/ch3(wave)/ch4(noise), and (CGB) SVBK/VBK/palette RAM — are
+    // driven non-default here, so a drift in those write_state/read_state pairs
+    // (which the DMG/ch1 oracle would round-trip-pass silently) diverges.
+    let rom = comprehensive_oracle_rom(false);
+    assert_round_trips(Model::Dmg, &rom, &[2000, 40_000], 150, "dmg-comprehensive");
+    let cgb_rom = comprehensive_oracle_rom(true);
+    assert_round_trips(
+        Model::Cgb,
+        &cgb_rom,
+        &[2000, 40_000],
+        150,
+        "cgb-comprehensive",
+    );
 }
 
 #[test]
@@ -315,6 +414,14 @@ fn load_state_rejects_corrupt_or_foreign_states() {
     other_rom[0x134..0x13B].copy_from_slice(b"OTHERXX");
     let other = GameBoy::new(Model::Dmg, other_rom).unwrap().save_state();
     assert_eq!(gb.load_state(&other), Err(StateError::RomMismatch));
+
+    // The ROM fingerprint also pins the cartridge TYPE (0x147): a same-title ROM
+    // with a different mapper is rejected, so a fingerprint collision can't
+    // mis-deserialize the (variant-dispatched) mapper state.
+    let mut diff_mapper = rom.clone();
+    diff_mapper[0x147] = 0x03; // MBC1+RAM+BATTERY vs the original ROM-ONLY (0x00)
+    let other_mapper = GameBoy::new(Model::Dmg, diff_mapper).unwrap().save_state();
+    assert_eq!(gb.load_state(&other_mapper), Err(StateError::RomMismatch));
 
     // A failed load leaves the machine intact (atomic).
     let pc_before = gb.cpu_regs().pc;

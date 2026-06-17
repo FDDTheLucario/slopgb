@@ -67,7 +67,7 @@ pub const EXC_LCD_OFF_VBLANK: u16 = 1 << 3;
 /// Leading bytes of a slopgb save state (see [`GameBoy::save_state`]).
 const STATE_MAGIC: &[u8; 4] = b"SLPS";
 /// Save-state format version (bumped on any layout change).
-const STATE_VERSION: u16 = 1;
+const STATE_VERSION: u16 = 2;
 
 /// A debugger memory watchpoint (bgb's "Set watchpoint"): the free run halts
 /// after the CPU accesses `addr` with a matching access kind. A frontend/
