@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use slopgb_core::GameBoy;
 use winit::dpi::LogicalSize;
 use winit::event_loop::ActiveEventLoop;
+use winit::keyboard::KeyCode;
 use winit::window::{Window, WindowId};
 
 use crate::dbg::Breakpoints;
@@ -75,6 +76,7 @@ fn title(kind: ToolWindow) -> &'static str {
         ToolWindow::Debugger => "slopgb — debugger",
         ToolWindow::Vram => "slopgb — VRAM viewer",
         ToolWindow::IoMap => "slopgb — I/O map",
+        ToolWindow::MemoryViewer => "slopgb — memory",
     }
 }
 
@@ -86,6 +88,8 @@ fn default_size(kind: ToolWindow) -> LogicalSize<f64> {
         ToolWindow::Vram => (560.0, 470.0),
         // Four register columns + the decoded LCDC/STAT/vector/wave panels.
         ToolWindow::IoMap => (600.0, 400.0),
+        // A 16-byte-per-row hex dump + the status bar.
+        ToolWindow::MemoryViewer => (430.0, 360.0),
     };
     LogicalSize::new(w, h)
 }
@@ -227,7 +231,8 @@ impl ToolWindows {
                     }
                 }
             }
-            WinState::Stateless => {}
+            // The memory window has no hover state (just the cursor, tracked above).
+            WinState::Stateless | WinState::Memory(_) => {}
         }
     }
 
@@ -262,7 +267,7 @@ impl ToolWindows {
                 view.window.request_redraw();
                 action
             }
-            WinState::Stateless => None,
+            WinState::Stateless | WinState::Memory(_) => None,
         }
     }
 
@@ -390,17 +395,53 @@ impl ToolWindows {
         let Some(view) = self.views.get_mut(&id) else {
             return;
         };
-        let Some((px, py)) = view.cursor else {
-            return;
-        };
         let area = view.area();
-        if let WinState::Debugger(s) = &mut view.state {
-            let l = debugger::DebuggerLayout::for_size(area.w, area.h);
-            if l.memory.contains(px, py) {
-                s.scroll_memory(-(y_lines.round() as i32) * 3);
+        let cursor = view.cursor;
+        let rows = -(y_lines.round() as i32) * 3;
+        match &mut view.state {
+            WinState::Debugger(s) => {
+                if let Some((px, py)) = cursor {
+                    if debugger::DebuggerLayout::for_size(area.w, area.h)
+                        .memory
+                        .contains(px, py)
+                    {
+                        s.scroll_memory(rows);
+                        view.window.request_redraw();
+                    }
+                }
+            }
+            // The standalone memory window is all memory: the wheel always scrolls.
+            WinState::Memory(s) => {
+                s.scroll(rows);
                 view.window.request_redraw();
             }
+            _ => {}
         }
+    }
+
+    /// Handle a navigation key for the standalone memory window `id` (arrows by a
+    /// row, PageUp/Down by a page); returns whether it was consumed (so the caller
+    /// doesn't also route it as a game button). Repeats are welcome here, so it is
+    /// not behind the key-repeat guard — holding an arrow scrolls continuously.
+    pub fn mem_window_key(&mut self, id: WindowId, code: KeyCode) -> bool {
+        let Some(view) = self.views.get_mut(&id) else {
+            return false;
+        };
+        let area = view.area();
+        let WinState::Memory(s) = &mut view.state else {
+            return false;
+        };
+        let page = (area.h / line_height() - 1).max(1);
+        let rows = match code {
+            KeyCode::ArrowUp => -1,
+            KeyCode::ArrowDown => 1,
+            KeyCode::PageUp => -page,
+            KeyCode::PageDown => page,
+            _ => return false,
+        };
+        s.scroll(rows);
+        view.window.request_redraw();
+        true
     }
 
     /// Open the debugger's `Go to…` modal on the disasm pane (Ctrl+G).
@@ -576,11 +617,13 @@ impl ToolWindows {
     /// repainting it so the disasm labels/operands update. Inert when no
     /// debugger window is open (the table is re-pushed when one opens).
     pub fn set_symbols(&mut self, symbols: Rc<crate::symbols::SymbolTable>) {
-        if let Some(view) = self.debugger_view_mut() {
-            if let WinState::Debugger(s) = &mut view.state {
-                s.symbols = symbols;
-                view.window.request_redraw();
+        for view in self.views.values_mut() {
+            match &mut view.state {
+                WinState::Debugger(s) => s.symbols = symbols.clone(),
+                WinState::Memory(s) => s.symbols = symbols.clone(),
+                _ => continue,
             }
+            view.window.request_redraw();
         }
     }
 

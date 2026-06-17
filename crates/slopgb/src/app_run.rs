@@ -124,8 +124,12 @@ impl App {
             // (each row clears its entry) and hand it to the debugger window.
             Action::DbgManageBreakpoints => {
                 let addrs = self.dbg.breakpoints().pc_list();
-                let menu =
-                    windows::debugger::address_list_menu(&addrs, false, &self.symbols, MANAGER_ORIGIN);
+                let menu = windows::debugger::address_list_menu(
+                    &addrs,
+                    false,
+                    &self.symbols,
+                    MANAGER_ORIGIN,
+                );
                 self.tools.set_debugger_menu(menu);
             }
             Action::DbgManageWatchpoints => {
@@ -136,8 +140,12 @@ impl App {
                     .iter()
                     .map(|w| w.addr)
                     .collect();
-                let menu =
-                    windows::debugger::address_list_menu(&addrs, true, &self.symbols, MANAGER_ORIGIN);
+                let menu = windows::debugger::address_list_menu(
+                    &addrs,
+                    true,
+                    &self.symbols,
+                    MANAGER_ORIGIN,
+                );
                 self.tools.set_debugger_menu(menu);
             }
             // bgb's "Enable sound": flip the runtime mute. Unmuting lazily opens

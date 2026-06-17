@@ -9,9 +9,12 @@ pub mod mainwin;
 pub mod options;
 pub mod vram;
 
+use std::rc::Rc;
+
 use slopgb_core::{GameBoy, debug};
 
 use crate::dbg::Breakpoints;
+use crate::symbols::SymbolTable;
 use crate::ui::canvas::Rect;
 use crate::ui::text::{draw_text, line_height};
 use crate::ui::widgets::{checkbox, radio_group};
@@ -31,6 +34,7 @@ pub enum WinState {
     // per open tool window), so the indirection costs nothing and keeps the enum
     // small. Deref coercion makes the box transparent at the match sites.
     Debugger(Box<DebuggerState>),
+    Memory(MemoryView),
 }
 
 impl WinState {
@@ -41,7 +45,34 @@ impl WinState {
             ToolWindow::Vram => WinState::Vram(VramState::default()),
             ToolWindow::Debugger => WinState::Debugger(Box::default()),
             ToolWindow::IoMap => WinState::Stateless,
+            ToolWindow::MemoryViewer => WinState::Memory(MemoryView::default()),
         }
+    }
+}
+
+/// State for the standalone memory viewer window: the visible base address and
+/// the loaded symbols (for the status bar). Navigated with the wheel / arrows /
+/// PageUp-Down like the debugger's integrated pane.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MemoryView {
+    pub mem_base: u16,
+    pub symbols: Rc<SymbolTable>,
+}
+
+impl Default for MemoryView {
+    fn default() -> Self {
+        Self {
+            mem_base: 0xFF00,
+            symbols: Rc::new(SymbolTable::default()),
+        }
+    }
+}
+
+impl MemoryView {
+    /// Scroll the base by `rows` rows of 16 bytes (negative = lower addresses),
+    /// wrapping the 64 KiB space — same model as the debugger memory pane.
+    pub fn scroll(&mut self, rows: i32) {
+        self.mem_base = self.mem_base.wrapping_add(rows.wrapping_mul(16) as u16);
     }
 }
 
@@ -77,7 +108,31 @@ pub fn render(
             render_vram(gb, c, area, theme, st);
         }
         ToolWindow::IoMap => render_iomap(gb, c, area, theme),
+        ToolWindow::MemoryViewer => {
+            let default = MemoryView::default();
+            let st = match state {
+                WinState::Memory(s) => s,
+                _ => &default,
+            };
+            render_memory_window(gb, c, area, theme, st);
+        }
     }
+}
+
+/// Render the standalone memory viewer: the hex dump from the base address
+/// filling the window above a one-line status bar showing the nearest preceding
+/// symbol (`Name+offset`, or `----` with no symbols loaded).
+fn render_memory_window(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, st: &MemoryView) {
+    let lh = line_height();
+    let body = Rect::new(area.x, area.y, area.w, (area.h - lh).max(0));
+    debugger::render_memory(c, body, |a| gb.debug_read(a), st.mem_base, theme);
+    let bar_y = area.bottom() - lh;
+    c.hline(area.x, bar_y, area.w, theme.border);
+    let status = match st.symbols.nearest_before(st.mem_base) {
+        Some((name, base)) => format!("{:04X}  {name}+{:X}", st.mem_base, st.mem_base - base),
+        None => format!("{:04X}  ----", st.mem_base),
+    };
+    draw_text(c, area.x + 2, bar_y + 1, &status, theme.text);
 }
 
 fn regs_view(gb: &GameBoy, clock_base: u64) -> debugger::RegsView {
@@ -289,7 +344,9 @@ fn obj_palettes(gb: &GameBoy, show_paletted: bool) -> Vec<[u32; 4]> {
             .map(|p| debug::cgb_palette_words(obj, p).map(xrgb))
             .collect()
     } else {
-        let dmg = |reg: u16| debug::dmg_palette_shades(gb.debug_read(reg)).map(|s| vram::GREYS[s as usize]);
+        let dmg = |reg: u16| {
+            debug::dmg_palette_shades(gb.debug_read(reg)).map(|s| vram::GREYS[s as usize])
+        };
         vec![dmg(0xFF48), dmg(0xFF49)]
     }
 }
@@ -362,7 +419,13 @@ fn draw_grid(c: &mut Canvas, content: Rect, cell_w: i32, cell_h: i32, theme: &Th
 
 /// Draw the checkboxes/radios in the details column, reflecting `state`. `cgb`
 /// gates the CGB-only Tiles bank toggle.
-fn render_vram_controls(c: &mut Canvas, l: &VramLayout, state: &VramState, cgb: bool, theme: &Theme) {
+fn render_vram_controls(
+    c: &mut Canvas,
+    l: &VramLayout,
+    state: &VramState,
+    cgb: bool,
+    theme: &Theme,
+) {
     if state.tab == VramTab::Tiles && cgb {
         checkbox(
             c,
@@ -374,7 +437,14 @@ fn render_vram_controls(c: &mut Canvas, l: &VramLayout, state: &VramState, cgb: 
         );
     }
     if state.tab == VramTab::BgMap {
-        checkbox(c, l.win_box.x, l.win_box.y, state.show_window, "window", theme);
+        checkbox(
+            c,
+            l.win_box.x,
+            l.win_box.y,
+            state.show_window,
+            "window",
+            theme,
+        );
         radio_group(
             c,
             l.map_src[0].x,
@@ -454,7 +524,10 @@ fn tile_details(lx: i32, ly: i32, scale: i32) -> Vec<String> {
 /// OAM-tab details: the sprite under `(lx, ly)` in the 8-wide cell grid at `scale`.
 fn oam_details(gb: &GameBoy, lx: i32, ly: i32, scale: i32) -> Vec<String> {
     let tall = gb.debug_read(0xFF40) & 0x04 != 0;
-    let (col, row) = (lx / vram::oam_cell(scale), ly / vram::oam_cell_h(scale, tall));
+    let (col, row) = (
+        lx / vram::oam_cell(scale),
+        ly / vram::oam_cell_h(scale, tall),
+    );
     let idx = (row * 8 + col) as usize;
     if col >= 8 || idx >= 40 {
         return Vec::new();

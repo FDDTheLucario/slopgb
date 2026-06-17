@@ -154,7 +154,11 @@ pub fn disasm_rows(
 /// known symbol. `fmt` must match the dialect/case the rows were rendered with so
 /// the hex token is found. Empty table → rows unchanged (fast path).
 #[must_use]
-pub fn annotate_symbols(rows: Vec<DisasmRow>, syms: &SymbolTable, fmt: DisasmFmt) -> Vec<DisasmRow> {
+pub fn annotate_symbols(
+    rows: Vec<DisasmRow>,
+    syms: &SymbolTable,
+    fmt: DisasmFmt,
+) -> Vec<DisasmRow> {
     if syms.is_empty() {
         return rows;
     }
@@ -198,11 +202,7 @@ fn target_hex(addr: u16, fmt: DisasmFmt) -> String {
     } else {
         format!("{addr:04X}")
     };
-    if fmt.rgbds {
-        format!("${body}")
-    } else {
-        body
-    }
+    if fmt.rgbds { format!("${body}") } else { body }
 }
 
 /// Width of the disasm pane's left gutter — holds the red breakpoint dot, and
@@ -229,7 +229,11 @@ pub fn render_disasm(
 ) -> Vec<DisasmRow> {
     let lh = line_height();
     let count = (rect.h / lh).max(0) as usize + 1;
-    let rows = annotate_symbols(disasm_rows(read, start, count, data_hints, fmt), symbols, fmt);
+    let rows = annotate_symbols(
+        disasm_rows(read, start, count, data_hints, fmt),
+        symbols,
+        fmt,
+    );
     let texts: Vec<&str> = rows.iter().map(|r| r.text.as_str()).collect();
     // Highlight the *instruction* row at PC, not a label line sharing its address.
     let highlight = rows.iter().position(|r| r.addr == pc && !r.is_label);

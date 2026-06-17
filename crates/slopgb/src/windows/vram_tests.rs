@@ -73,7 +73,10 @@ fn window_region_rect_from_wx_wy() {
     // WX=7,WY=0 -> the window fills the whole screen from the map origin.
     assert_eq!(window_region_rect(7, 0, 1), Some(Rect::new(0, 0, 160, 144)));
     // WX=87 -> visible width 167-87=80; WY=40 -> visible height 144-40=104.
-    assert_eq!(window_region_rect(87, 40, 1), Some(Rect::new(0, 0, 80, 104)));
+    assert_eq!(
+        window_region_rect(87, 40, 1),
+        Some(Rect::new(0, 0, 80, 104))
+    );
     // Fully off-screen -> no rect.
     assert_eq!(window_region_rect(167, 0, 1), None);
     assert_eq!(window_region_rect(7, 144, 1), None);
@@ -158,7 +161,11 @@ fn render_oam_draws_present_sprites_and_skips_empty() {
     }
     // Cell 0 shows tile 5 (black); cell 1 (empty sprite) stays untouched.
     assert_eq!(buf[0], GREYS[3], "sprite 0 cell drawn");
-    assert_eq!(buf[oam_cell(scale) as usize], 0x0012_3456, "empty sprite 1 blank");
+    assert_eq!(
+        buf[oam_cell(scale) as usize],
+        0x0012_3456,
+        "empty sprite 1 blank"
+    );
 }
 
 #[test]
@@ -193,7 +200,11 @@ fn render_oam_honors_bank_palette_and_tall() {
     // Bank-1 tile 0 (all index 3) rendered through CGB OBJ palette 0 at the top.
     assert_eq!(buf[0], 0x00FF_0000, "bank-1 top tile via CGB obj palette");
     // 8x16: the lower stacked tile is the odd tile 1 (zeroed -> index 0 = white).
-    assert_eq!(buf[15 * w], 0x00FF_FFFF, "8x16 lower stacked tile is tile|1");
+    assert_eq!(
+        buf[15 * w],
+        0x00FF_FFFF,
+        "8x16 lower stacked tile is tile|1"
+    );
 }
 
 #[test]
@@ -430,12 +441,30 @@ fn click_toggles_checkboxes_and_empty_space_does_nothing() {
     let mut s = VramState::default();
     let l = layout(area);
     assert!(s.grid, "Grid on by default");
-    assert!(on_click(&mut s, area, l.grid_box.x + 1, l.grid_box.y + 1, false));
+    assert!(on_click(
+        &mut s,
+        area,
+        l.grid_box.x + 1,
+        l.grid_box.y + 1,
+        false
+    ));
     assert!(!s.grid, "Grid toggled off");
-    assert!(on_click(&mut s, area, l.grid_box.x + 1, l.grid_box.y + 1, false));
+    assert!(on_click(
+        &mut s,
+        area,
+        l.grid_box.x + 1,
+        l.grid_box.y + 1,
+        false
+    ));
     assert!(s.grid, "Grid toggled back on");
     // A click in dead space (mid-content, no widget) changes nothing.
-    assert!(!on_click(&mut s, area, l.content.x + 1, l.content.y + 1, false));
+    assert!(!on_click(
+        &mut s,
+        area,
+        l.content.x + 1,
+        l.content.y + 1,
+        false
+    ));
 }
 
 #[test]

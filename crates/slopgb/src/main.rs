@@ -16,6 +16,7 @@
 mod app_input;
 mod app_menu;
 mod app_pacing;
+mod app_path;
 mod app_run;
 mod audio;
 mod cli;
@@ -56,7 +57,7 @@ use menupopup::MenuPopup;
 use pacing::{AudioPipe, StallWatchdog, audio_pacing};
 use session::Session;
 use ui::canvas::Rect;
-use ui::dialog::{self, DialogKey, DialogResult, InputDialog};
+use ui::dialog::{self, DialogKey, InputDialog};
 use video::Video;
 use windows::mainwin::{InfoBox, WindowSizeChoice};
 
@@ -214,6 +215,9 @@ struct App {
     /// The loaded `.sym` symbol table (source of truth), shared into the debugger
     /// view and used for go-to-by-name and the breakpoint-manager labels.
     symbols: Rc<symbols::SymbolTable>,
+    /// A pending request (from Options) to open/close the standalone memory
+    /// window, reconciled in `about_to_wait` where the event loop is available.
+    pending_mem_window: Option<bool>,
     /// The open game-window right-click menu (bgb's `rc-main.png`), if any — its
     /// **own borderless window** (so it can extend past the game window's edge
     /// instead of being clipped), holding the main menu + open submenu.
@@ -303,6 +307,7 @@ impl App {
             modifiers: ModifiersState::empty(),
             held_keys: HashSet::new(),
             symbols: Rc::new(symbols::SymbolTable::default()),
+            pending_mem_window: None,
             info_box: None,
             path_dialog: None,
             path_purpose: PathPurpose::LoadRom,
@@ -561,101 +566,6 @@ impl App {
         })
     }
 
-    /// Open the shared path-entry modal for `purpose` over the LCD.
-    pub(crate) fn open_path_prompt(&mut self, title: &str, purpose: PathPurpose) {
-        self.path_purpose = purpose;
-        self.path_dialog = Some(crate::ui::dialog::InputDialog::new(title, false));
-        self.request_game_redraw();
-    }
-
-    /// Apply a path-modal result: accept routes by [`Self::path_purpose`] (a
-    /// blank entry just closes), cancel closes; continue keeps editing.
-    fn resolve_path_dialog(&mut self, result: DialogResult) {
-        match result {
-            DialogResult::Accept(path) => {
-                let purpose = self.path_purpose;
-                self.path_dialog = None;
-                let trimmed = path.trim();
-                if !trimmed.is_empty() {
-                    self.run_path_action(purpose, Path::new(trimmed));
-                }
-            }
-            DialogResult::Cancel => self.path_dialog = None,
-            DialogResult::Continue => {}
-        }
-        self.request_game_redraw();
-    }
-
-    /// Carry out an accepted path entry per its purpose.
-    fn run_path_action(&mut self, purpose: PathPurpose, path: &Path) {
-        match purpose {
-            PathPurpose::LoadRom => self.load_dropped(path),
-            PathPurpose::SaveState => match self.session.save_state_to(path) {
-                Ok(()) => println!("slopgb: saved state to {}", path.display()),
-                Err(e) => eprintln!("slopgb: save state failed: {e}"),
-            },
-            PathPurpose::LoadState => match self.session.load_state_from(path) {
-                Ok(()) => {
-                    println!("slopgb: loaded state from {}", path.display());
-                    // A state restores a real running machine — leave the no-ROM
-                    // blank state (else `should_idle` keeps emulation gated and
-                    // the LCD frozen on `blank_frame`).
-                    self.rom_loaded = true;
-                    self.apply_palette();
-                    self.resync_pacing();
-                    self.update_title();
-                    self.request_game_redraw();
-                }
-                Err(e) => eprintln!("slopgb: load state failed: {e}"),
-            },
-            PathPurpose::LinkConnect => {
-                // The "path" here is the typed host:port (the shared text modal).
-                let (host, port) = link::parse_host_port(&path.to_string_lossy());
-                match self.link.connect(host.clone(), port) {
-                    Ok(()) => println!("slopgb: link connecting to {host}:{port}"),
-                    Err(e) => eprintln!("slopgb: link connect failed: {e}"),
-                }
-                self.update_title(); // reflect the "connecting :port" status at once
-            }
-            PathPurpose::Bootrom(slot) => {
-                // Write the typed path into the open Options dialog's working
-                // scratch; OK/Apply commits it to settings, Cancel reverts.
-                if let Some(o) = &mut self.options {
-                    *slot.path_mut(&mut o.working) = path.to_string_lossy().into_owned();
-                }
-            }
-            PathPurpose::SymbolFile => self.load_symbols(path),
-        }
-    }
-
-    /// Load a `.sym` symbol file: parse it (tolerant), store as the source of
-    /// truth, and push it to the debugger view. A read error is logged (non-fatal,
-    /// leaving the previous symbols intact).
-    fn load_symbols(&mut self, path: &Path) {
-        match std::fs::read_to_string(path) {
-            Ok(text) => {
-                let table = symbols::SymbolTable::parse(&text);
-                println!(
-                    "slopgb: loaded {} symbols from {}",
-                    table.len(),
-                    path.display()
-                );
-                self.symbols = Rc::new(table);
-                self.tools.set_symbols(self.symbols.clone());
-            }
-            Err(e) => eprintln!("slopgb: load symbols failed: {e}"),
-        }
-    }
-
-    /// Record a successfully loaded ROM in the recent list (MN4). Skipped when
-    /// Options → Misc → "freeze recent ROMs menu" is set (bgb pins the list).
-    fn push_recent(&mut self, path: &Path) {
-        if self.settings.freeze_recent {
-            return;
-        }
-        push_recent_into(&mut self.recent, path);
-    }
-
     /// Basenames of the recent ROMs for the Recent ROMs submenu (MN4).
     fn recent_names(&self) -> Vec<String> {
         self.recent
@@ -907,6 +817,18 @@ impl ApplicationHandler for App {
                 // Hotkeys route by focused window kind: the debugger window gets
                 // bgb's debugger keys, the viewers keep the game keymap.
                 WindowEvent::KeyboardInput { event, .. } => {
+                    // The standalone memory window owns its arrow/Page nav keys
+                    // (continuous scroll on hold); they must not reach the game
+                    // joypad or the key-repeat guard.
+                    let mem_win =
+                        self.tools.kind_of(window_id) == Some(ui::ToolWindow::MemoryViewer);
+                    if mem_win && event.state.is_pressed() {
+                        if let PhysicalKey::Code(code) = event.physical_key {
+                            if self.tools.mem_window_key(window_id, code) {
+                                return;
+                            }
+                        }
+                    }
                     let focus = if self.tools.kind_of(window_id) == Some(ui::ToolWindow::Debugger) {
                         Focus::Debugger
                     } else {
@@ -985,6 +907,14 @@ impl ApplicationHandler for App {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_none() {
             return; // not resumed yet
+        }
+        // Reconcile a pending Options "memory viewer in own window" change now
+        // that the event loop is available (open/close the standalone window).
+        if let Some(want) = self.pending_mem_window.take() {
+            if self.tools.is_open(ui::ToolWindow::MemoryViewer) != want {
+                self.tools.toggle(event_loop, ui::ToolWindow::MemoryViewer);
+                self.tools.set_symbols(self.symbols.clone());
+            }
         }
         // A debugger break freezes emulation exactly like pause: the LCD holds
         // its last frame and zero frames are emulated until F9/step. With no ROM

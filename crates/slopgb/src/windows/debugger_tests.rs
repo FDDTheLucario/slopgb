@@ -3,7 +3,6 @@ use crate::dbg::Breakpoints;
 use crate::symbols::SymbolTable;
 use slopgb_core::Registers;
 use std::collections::BTreeSet;
-use std::rc::Rc;
 
 /// Register snapshot for `on_left_click`: the common PC=0x0100 / SP=0xFFFE the
 /// pane tests use (other fields zero — only PC/SP drive disasm/stack clicks).
@@ -352,75 +351,6 @@ fn selecting_set_break_returns_a_toggle_breakpoint_action() {
 }
 
 #[test]
-fn scroll_memory_moves_the_base_by_rows_and_wraps() {
-    let mut st = DebuggerState {
-        mem_base: 0xFF00,
-        ..DebuggerState::default()
-    };
-    st.scroll_memory(-1);
-    assert_eq!(st.mem_base, 0xFEF0, "one row up = -16 bytes");
-    st.scroll_memory(2);
-    assert_eq!(st.mem_base, 0xFF10, "two rows down = +32 bytes");
-    // Page-sized and wrapping moves.
-    st.scroll_memory(8);
-    assert_eq!(st.mem_base, 0xFF90);
-    st.mem_base = 0xFFF0;
-    st.scroll_memory(1);
-    assert_eq!(st.mem_base, 0x0000, "wraps past the top of memory");
-    st.scroll_memory(-1);
-    assert_eq!(st.mem_base, 0xFFF0, "wraps past the bottom");
-}
-
-#[test]
-fn goto_resolves_a_symbol_name_then_hex() {
-    let mut st = DebuggerState {
-        symbols: Rc::new(SymbolTable::parse("00:4000 Reset")),
-        ..DebuggerState::default()
-    };
-    // A symbol name pins the disasm to its address.
-    accept_dialog(&mut st, DialogKind::Goto(GotoTarget::Disasm), "Reset");
-    assert!(st.pinned && st.disasm_base == 0x4000, "name resolved");
-    // Resolution is case-insensitive.
-    let mut st = DebuggerState {
-        symbols: Rc::new(SymbolTable::parse("00:4000 Reset")),
-        ..DebuggerState::default()
-    };
-    accept_dialog(&mut st, DialogKind::Goto(GotoTarget::Memory), "reset");
-    assert_eq!(st.mem_base, 0x4000);
-    // A bare hex address still works (no matching symbol).
-    let mut st = DebuggerState::default();
-    accept_dialog(&mut st, DialogKind::Goto(GotoTarget::Memory), "C000");
-    assert_eq!(st.mem_base, 0xC000);
-    // An unknown name that isn't valid hex changes nothing.
-    let mut st = DebuggerState::default();
-    accept_dialog(&mut st, DialogKind::Goto(GotoTarget::Memory), "nope");
-    assert_eq!(st.mem_base, 0xFF00, "unresolved -> unchanged");
-}
-
-#[test]
-fn double_click_disasm_toggles_a_breakpoint() {
-    let l = DebuggerLayout::for_size(AREA.w, AREA.h);
-    let lh = line_height();
-    let st = DebuggerState::default();
-    // Row 2 of the disasm pane = pc + 2 = 0x0102 (NOPS = 1-byte lines).
-    let (px, py) = (l.disasm.x + 9, l.disasm.y + 2 * lh + 1);
-    assert_eq!(
-        on_double_click(NOPS, AREA, &st, 0x0100, 0xFFFE, px, py),
-        Some(MenuOutcome::Act(DebugAction::ToggleBreakpoint(0x0102))),
-        "double-click on a disasm line toggles its breakpoint"
-    );
-    // Off the disasm pane (the menu bar) it does nothing.
-    assert_eq!(
-        on_double_click(NOPS, AREA, &st, 0x0100, 0xFFFE, l.menu.x + 2, l.menu.y + 1),
-        None
-    );
-    // With a context menu open, a double-click is swallowed.
-    let mut st2 = DebuggerState::default();
-    on_right_click(NOPS, AREA, &mut st2, 0x0100, 0xFFFE, px, py);
-    assert!(on_double_click(NOPS, AREA, &st2, 0x0100, 0xFFFE, px, py).is_none());
-}
-
-#[test]
 fn copy_data_and_code_route_to_clipboard_actions() {
     use crate::input::Action;
     // RM10: the formerly-greyed Copy rows (indices 2/3) are live + carry the
@@ -632,15 +562,6 @@ fn address_list_menu_lists_entries_with_clear_choices() {
 }
 
 #[test]
-fn address_list_menu_appends_symbol_names() {
-    let syms = SymbolTable::parse("00:0150 Reset");
-    let m = address_list_menu(&[0x0150, 0xC000], false, &syms, (40, 30));
-    // The known address gets its symbol name appended; the unknown one doesn't.
-    assert!(m.items[0].label.contains("0150") && m.items[0].label.contains("Reset"));
-    assert!(m.items[1].label.contains("C000") && !m.items[1].label.contains("Reset"));
-}
-
-#[test]
 fn set_watchpoint_menu_item_returns_a_toggle_action() {
     // "Set watchpoint..." is index 10 (was greyed; now enabled, RM8); cursor 0x0102.
     let (mut st, rects) = open_disasm_menu();
@@ -827,7 +748,7 @@ fn menubar_rects_tile_the_bar_left_to_right() {
 fn each_bar_menu_has_the_captured_item_count() {
     let l = DebuggerLayout::for_size(AREA.w, AREA.h);
     let st = DebuggerState::default();
-    let counts = [16, 5, 18, 6, 10, 5]; // File, Search, Run, Debug, Window, Profiler
+    let counts = [16, 5, 18, 6, 11, 5]; // File, Search, Run, Debug, Window, Profiler
     for (idx, &n) in counts.iter().enumerate() {
         let m = menubar_menu(idx, l.menu, &st, 0x0100);
         assert_eq!(m.items.len(), n, "menu {idx} item count");
@@ -1025,12 +946,19 @@ fn window_menu_wires_the_viewer_toggles() {
         "VRAM viewer toggles its window"
     );
     assert_eq!(
-        click_menubar_item(4, 6),
+        click_menubar_item(4, 1),
+        Some(MenuOutcome::Command(Action::ToggleTool(
+            ToolWindow::MemoryViewer
+        ))),
+        "Memory viewer toggles its window"
+    );
+    assert_eq!(
+        click_menubar_item(4, 7),
         Some(MenuOutcome::Command(Action::ToggleTool(ToolWindow::IoMap))),
         "IO map toggles its window"
     );
     // Options (F11) is not built yet — stays greyed.
-    assert_eq!(click_menubar_item(4, 3), None, "Options greyed");
+    assert_eq!(click_menubar_item(4, 4), None, "Options greyed");
 }
 
 #[test]

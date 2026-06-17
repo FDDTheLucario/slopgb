@@ -66,6 +66,14 @@ impl SymbolTable {
         Some(self.syms[i].name.as_str())
     }
 
+    /// The nearest symbol at or before `addr` (name + its address), for the
+    /// standalone memory viewer's status bar ("Name+offset").
+    #[must_use]
+    pub fn nearest_before(&self, addr: u16) -> Option<(&str, u16)> {
+        let end = self.syms.partition_point(|s| s.addr <= addr);
+        self.syms[..end].last().map(|s| (s.name.as_str(), s.addr))
+    }
+
     /// The address of the symbol named `name` (case-insensitive), for `Go to…`.
     #[must_use]
     pub fn resolve(&self, name: &str) -> Option<u16> {

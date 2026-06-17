@@ -16,6 +16,9 @@ pub enum ToolWindow {
     Debugger,
     Vram,
     IoMap,
+    /// A standalone memory hex viewer (the integrated debugger pane popped out;
+    /// opt-in via Options → Debug). A "little departure from bgb".
+    MemoryViewer,
 }
 
 /// Maps each open window's id to the tool it shows. At most one window per

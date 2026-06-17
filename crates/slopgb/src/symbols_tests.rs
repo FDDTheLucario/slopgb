@@ -30,11 +30,16 @@ fn empty_input_is_empty() {
 }
 
 #[test]
-fn lookups_find_exact_and_by_name() {
+fn lookups_find_exact_nearest_and_by_name() {
     let t = SymbolTable::parse("00:4000 Reset\n00:4010 Loop\n00:4030 End");
     // Exact address lookup.
     assert_eq!(t.name_at(0x4010), Some("Loop"));
     assert_eq!(t.name_at(0x4008), None);
+    // Nearest preceding (for the memory-window status bar).
+    assert_eq!(t.nearest_before(0x4008), Some(("Reset", 0x4000)));
+    assert_eq!(t.nearest_before(0x4010), Some(("Loop", 0x4010)));
+    assert_eq!(t.nearest_before(0x402F), Some(("Loop", 0x4010)));
+    assert_eq!(t.nearest_before(0x3FFF), None);
     // By name, case-insensitive.
     assert_eq!(t.resolve("loop"), Some(0x4010));
     assert_eq!(t.resolve("END"), Some(0x4030));

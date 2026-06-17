@@ -26,7 +26,11 @@ fn disasm_rows_decode_format_and_advance() {
 
     assert_eq!(rows[1].addr, 0x101, "advanced past the 1-byte nop");
     assert!(rows[1].text.contains("C3 50 01"));
-    assert!(rows[1].text.contains("jp $0150"), "rgbds default: {}", rows[1].text);
+    assert!(
+        rows[1].text.contains("jp $0150"),
+        "rgbds default: {}",
+        rows[1].text
+    );
     assert!(rows[1].text.ends_with(";4"));
 
     assert_eq!(rows[2].addr, 0x104, "advanced past the 3-byte jp");
@@ -163,7 +167,11 @@ fn annotate_symbols_inserts_labels_and_substitutes_operands() {
     let instr = &rows[1];
     assert!(!instr.is_label && instr.addr == 0x0150);
     assert!(instr.text.contains("jp Loop"), "{}", instr.text);
-    assert!(instr.text.contains(":0150 "), "addr label intact: {}", instr.text);
+    assert!(
+        instr.text.contains(":0150 "),
+        "addr label intact: {}",
+        instr.text
+    );
     assert!(!instr.text.contains("jp $0150"));
 }
 

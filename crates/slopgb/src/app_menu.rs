@@ -333,6 +333,12 @@ impl App {
         }
         // Debug-tab disasm display flags → the debugger view.
         self.push_disasm_fmt();
+        // Defer opening/closing the standalone memory window to `about_to_wait`,
+        // where the event loop is available (only on a real change, so it doesn't
+        // fight a manual close).
+        if self.tools.is_open(crate::ui::ToolWindow::MemoryViewer) != s.memory_window {
+            self.pending_mem_window = Some(s.memory_window);
+        }
         // Exceptions-tab break conditions → the core exception-break mask.
         self.apply_exceptions();
         self.update_title();

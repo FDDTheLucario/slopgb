@@ -240,7 +240,8 @@ impl MenuPopup {
             .window
             .request_inner_size(PhysicalSize::new(w.max(1) as u32, h.max(1) as u32));
         let (ox, oy) = popup_screen_origin(self.anchor, (0, 0), (w, h), self.monitor);
-        self.window.set_outer_position(PhysicalPosition::new(ox, oy));
+        self.window
+            .set_outer_position(PhysicalPosition::new(ox, oy));
     }
 }
 

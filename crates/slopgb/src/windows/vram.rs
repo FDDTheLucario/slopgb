@@ -501,7 +501,9 @@ impl MapOverlay {
             MapOverlay::Screen { scx, scy } => {
                 bgmap_viewport_segments(scx, scy, 160, 144, 256, scale)
             }
-            MapOverlay::Window { wx, wy } => window_region_rect(wx, wy, scale).into_iter().collect(),
+            MapOverlay::Window { wx, wy } => {
+                window_region_rect(wx, wy, scale).into_iter().collect()
+            }
         }
     }
 }

@@ -9,8 +9,8 @@ use std::rc::Rc;
 use slopgb_core::Registers;
 
 use crate::dbg::{DebugAction, RegField};
-use crate::symbols::SymbolTable;
 use crate::input::Action;
+use crate::symbols::SymbolTable;
 use crate::ui::Theme;
 use crate::ui::canvas::{Canvas, Rect};
 use crate::ui::dialog::{self, DialogKey, DialogResult, InputDialog};
@@ -883,6 +883,10 @@ pub use menubar::menubar_rects;
 #[cfg(test)]
 #[path = "debugger_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "debugger_misc_tests.rs"]
+mod misc_tests;
 
 #[cfg(test)]
 #[path = "debugger_profiler_tests.rs"]

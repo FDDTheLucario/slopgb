@@ -1,0 +1,106 @@
+//! `App` path-modal handling: the shared text prompt used for Load ROM / Save &
+//! Load state / Link connect / bootrom paths / `.sym` symbol load, and the
+//! recent-ROMs bookkeeping. Split out of `main.rs` to keep it under the size cap.
+
+use std::path::Path;
+use std::rc::Rc;
+
+use crate::ui::dialog::DialogResult;
+use crate::{App, PathPurpose, link, push_recent_into, symbols};
+
+impl App {
+    /// Open the shared path-entry modal for `purpose` over the LCD.
+    pub(crate) fn open_path_prompt(&mut self, title: &str, purpose: PathPurpose) {
+        self.path_purpose = purpose;
+        self.path_dialog = Some(crate::ui::dialog::InputDialog::new(title, false));
+        self.request_game_redraw();
+    }
+
+    /// Apply a path-modal result: accept routes by [`Self::path_purpose`] (a
+    /// blank entry just closes), cancel closes; continue keeps editing.
+    pub(crate) fn resolve_path_dialog(&mut self, result: DialogResult) {
+        match result {
+            DialogResult::Accept(path) => {
+                let purpose = self.path_purpose;
+                self.path_dialog = None;
+                let trimmed = path.trim();
+                if !trimmed.is_empty() {
+                    self.run_path_action(purpose, Path::new(trimmed));
+                }
+            }
+            DialogResult::Cancel => self.path_dialog = None,
+            DialogResult::Continue => {}
+        }
+        self.request_game_redraw();
+    }
+
+    /// Carry out an accepted path entry per its purpose.
+    fn run_path_action(&mut self, purpose: PathPurpose, path: &Path) {
+        match purpose {
+            PathPurpose::LoadRom => self.load_dropped(path),
+            PathPurpose::SaveState => match self.session.save_state_to(path) {
+                Ok(()) => println!("slopgb: saved state to {}", path.display()),
+                Err(e) => eprintln!("slopgb: save state failed: {e}"),
+            },
+            PathPurpose::LoadState => match self.session.load_state_from(path) {
+                Ok(()) => {
+                    println!("slopgb: loaded state from {}", path.display());
+                    // A state restores a real running machine — leave the no-ROM
+                    // blank state (else `should_idle` keeps emulation gated and
+                    // the LCD frozen on `blank_frame`).
+                    self.rom_loaded = true;
+                    self.apply_palette();
+                    self.resync_pacing();
+                    self.update_title();
+                    self.request_game_redraw();
+                }
+                Err(e) => eprintln!("slopgb: load state failed: {e}"),
+            },
+            PathPurpose::LinkConnect => {
+                // The "path" here is the typed host:port (the shared text modal).
+                let (host, port) = link::parse_host_port(&path.to_string_lossy());
+                match self.link.connect(host.clone(), port) {
+                    Ok(()) => println!("slopgb: link connecting to {host}:{port}"),
+                    Err(e) => eprintln!("slopgb: link connect failed: {e}"),
+                }
+                self.update_title(); // reflect the "connecting :port" status at once
+            }
+            PathPurpose::Bootrom(slot) => {
+                // Write the typed path into the open Options dialog's working
+                // scratch; OK/Apply commits it to settings, Cancel reverts.
+                if let Some(o) = &mut self.options {
+                    *slot.path_mut(&mut o.working) = path.to_string_lossy().into_owned();
+                }
+            }
+            PathPurpose::SymbolFile => self.load_symbols(path),
+        }
+    }
+
+    /// Load a `.sym` symbol file: parse it (tolerant), store as the source of
+    /// truth, and push it to the debugger view. A read error is logged (non-fatal,
+    /// leaving the previous symbols intact).
+    fn load_symbols(&mut self, path: &Path) {
+        match std::fs::read_to_string(path) {
+            Ok(text) => {
+                let table = symbols::SymbolTable::parse(&text);
+                println!(
+                    "slopgb: loaded {} symbols from {}",
+                    table.len(),
+                    path.display()
+                );
+                self.symbols = Rc::new(table);
+                self.tools.set_symbols(self.symbols.clone());
+            }
+            Err(e) => eprintln!("slopgb: load symbols failed: {e}"),
+        }
+    }
+
+    /// Record a successfully loaded ROM in the recent list (MN4). Skipped when
+    /// Options → Misc → "freeze recent ROMs menu" is set (bgb pins the list).
+    pub(crate) fn push_recent(&mut self, path: &Path) {
+        if self.settings.freeze_recent {
+            return;
+        }
+        push_recent_into(&mut self.recent, path);
+    }
+}

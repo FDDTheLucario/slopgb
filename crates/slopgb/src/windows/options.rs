@@ -121,6 +121,8 @@ pub struct Settings {
     pub show_clocks: bool,
     /// Debug → disassemble in RGBDS syntax (vs bgb / no$gmb). Default on.
     pub rgbds_disasm: bool,
+    /// Debug → pop the memory viewer out into its own window (a slopgb extra).
+    pub memory_window: bool,
     /// Misc → fast-forward speed multiplier (turbo), 1..=20.
     pub ff_speed: u32,
     /// Misc → framerate limit (0 = real speed / 60 fps).
@@ -170,6 +172,7 @@ impl Default for Settings {
             lowercase_hex: false,
             show_clocks: true,
             rgbds_disasm: true,
+            memory_window: false,
             ff_speed: 10,
             framerate_limit: 0,
             show_framerate: false,

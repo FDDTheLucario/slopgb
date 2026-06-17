@@ -45,11 +45,14 @@ byte-identical); no new core deps / no unsafe; every `.rs` < 1000 lines; clippy
 | 19 | sonnet | load `.sym` via path modal (PathPurpose::SymbolFile) | 4 | **done** |
 | 20 | sonnet | go-to by symbol name (fallback hex) | 4,5 | **done** |
 | 21 | haiku | symbol name beside manager rows | 5,19 | **done** |
-| 22 | sonnet | standalone Memory-viewer tool window | 17 | todo |
-| 23 | sonnet | memory-window status bar (nearest symbol) | 5,22 | todo |
-| 24 | sonnet | Options toggle: memory viewer in own window | 22 | todo |
+| 22 | sonnet | standalone Memory-viewer tool window | 17 | **done** |
+| 23 | sonnet | memory-window status bar (nearest symbol) | 5,22 | **done** |
+| 24 | sonnet | Options toggle: memory viewer in own window | 22 | **done** |
 | 25 | sonnet | Options action: **Reset to bgb defaults** (pure-bgb revert) | 9,14,24 | todo |
 | 26 | opus | FINAL: full-branch /rust-diff-review + multi-agent review | all | todo |
+
+Note: main.rs path methods split to `app_path.rs`; `debugger_tests.rs` split
+(added tests → `debugger_misc_tests.rs`) to hold the < 1000-line cap.
 
 Critical path: `6→7→8/9` (rgbds), `4→5→{18,20,21,23}` (symbols), `1→{11,12}`
 (attrs), `17→22→{23,24}` (memory window); all converge on `25`/`26`.

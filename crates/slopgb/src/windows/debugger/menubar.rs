@@ -255,6 +255,10 @@ pub fn address_list_menu(
 fn window_menu() -> Vec<(MenuItem, MenuChoice)> {
     vec![
         cmd("VRAM viewer", "F5", Action::ToggleTool(ToolWindow::Vram)),
+        (
+            MenuItem::new("Memory viewer"),
+            MenuChoice::Command(Action::ToggleTool(ToolWindow::MemoryViewer)),
+        ),
         disabled("SGB packets"),
         disabled("log link transfers (to SGB window)"),
         dis_sc("Options", "F11"),

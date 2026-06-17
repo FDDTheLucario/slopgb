@@ -27,6 +27,7 @@ pub(crate) enum Field {
     LowercaseHex,
     ShowClocks,
     RgbdsDisasm,
+    MemoryWindow,
     ShowFramerate,
     FreezeRecent,
     PauseOnFocusLoss,
@@ -236,6 +237,7 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         Field::LowercaseHex => s.lowercase_hex = !s.lowercase_hex,
         Field::ShowClocks => s.show_clocks = !s.show_clocks,
         Field::RgbdsDisasm => s.rgbds_disasm = !s.rgbds_disasm,
+        Field::MemoryWindow => s.memory_window = !s.memory_window,
         Field::ShowFramerate => s.show_framerate = !s.show_framerate,
         Field::FreezeRecent => s.freeze_recent = !s.freeze_recent,
         Field::PauseOnFocusLoss => s.pause_on_focus_loss = !s.pause_on_focus_loss,
@@ -275,6 +277,7 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
             s.lowercase_hex = d.lowercase_hex;
             s.show_clocks = d.show_clocks;
             s.rgbds_disasm = d.rgbds_disasm;
+            s.memory_window = d.memory_window;
         }
         // The four wired break conditions; the rest of the tab is inert.
         OptionsTab::Exceptions => {
@@ -471,6 +474,11 @@ fn debug(s: &Settings, content: Rect) -> Vec<Ctrl> {
         rc(l.row().at(), "RGBDS syntax"),
         chk("RGBDS syntax", s.rgbds_disasm),
         Field::RgbdsDisasm,
+    ));
+    v.push(Ctrl::live(
+        rc(l.row().at(), "memory viewer in own window"),
+        chk("memory viewer in own window", s.memory_window),
+        Field::MemoryWindow,
     ));
     l.row();
     // Inert / always-on debugger settings (bgb black; some checked by default).
