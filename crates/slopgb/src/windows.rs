@@ -266,19 +266,28 @@ fn render_vram(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, state: &
             vram::render_tiles(c, l.content, gb.vram(), bank, &vram::GREYS, g.scale);
         }
         VramTab::Oam => {
-            let pals = obj_palettes(gb, state.show_paletted);
-            vram::render_oam(c, l.content, gb.oam(), gb.vram(), &pals, cgb, tall, g.scale);
+            let (pals, n) = obj_palettes(gb, state.show_paletted);
+            vram::render_oam(
+                c,
+                l.content,
+                gb.oam(),
+                gb.vram(),
+                &pals[..n],
+                cgb,
+                tall,
+                g.scale,
+            );
         }
         VramTab::BgMap => {
             let (base, signed) = bgmap_source(gb, state);
-            let pals = bg_palettes(gb, state.show_paletted);
+            let (pals, n) = bg_palettes(gb, state.show_paletted);
             vram::render_bgmap(
                 c,
                 l.content,
                 gb.vram(),
                 base,
                 signed,
-                &pals,
+                &pals[..n],
                 cgb,
                 g.scale,
                 bgmap_overlay(gb, state),
@@ -318,36 +327,45 @@ fn render_vram(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, state: &
 
 /// The BG-map tab's 8 BG palettes (CGB) or single BGP palette (DMG) as RGB888,
 /// or a single neutral grey ramp when `show_paletted` is off.
-fn bg_palettes(gb: &GameBoy, show_paletted: bool) -> Vec<[u32; 4]> {
-    if !show_paletted {
-        return vec![vram::GREYS];
+/// Expand `cram`'s 8 CGB palettes (BG or OBJ) into `out` as RGB888.
+fn cgb_palettes(cram: &[u8], out: &mut [[u32; 4]; 8]) {
+    for (p, slot) in out.iter_mut().enumerate() {
+        *slot = debug::cgb_palette_words(cram, p).map(xrgb);
     }
-    if gb.model().is_cgb() {
-        let (bg, _obj) = gb.cgb_palette_ram();
-        (0..8)
-            .map(|p| debug::cgb_palette_words(bg, p).map(xrgb))
-            .collect()
+}
+
+/// A DMG palette register (`BGP`/`OBP*`) as four RGB888 shades.
+fn dmg_palette(gb: &GameBoy, reg: u16) -> [u32; 4] {
+    debug::dmg_palette_shades(gb.debug_read(reg)).map(|s| vram::GREYS[s as usize])
+}
+
+fn bg_palettes(gb: &GameBoy, show_paletted: bool) -> ([[u32; 4]; 8], usize) {
+    let mut out = [vram::GREYS; 8];
+    if !show_paletted {
+        (out, 1)
+    } else if gb.model().is_cgb() {
+        cgb_palettes(gb.cgb_palette_ram().0, &mut out);
+        (out, 8)
     } else {
-        vec![debug::dmg_palette_shades(gb.debug_read(0xFF47)).map(|s| vram::GREYS[s as usize])]
+        out[0] = dmg_palette(gb, 0xFF47);
+        (out, 1)
     }
 }
 
 /// The OAM tab's 8 OBJ palettes (CGB) or the OBP0/OBP1 pair (DMG) as RGB888, or
-/// a single neutral grey ramp when `show_paletted` is off.
-fn obj_palettes(gb: &GameBoy, show_paletted: bool) -> Vec<[u32; 4]> {
+/// a single neutral grey ramp when `show_paletted` is off. Returns a fixed array
+/// + the live count (no per-redraw allocation).
+fn obj_palettes(gb: &GameBoy, show_paletted: bool) -> ([[u32; 4]; 8], usize) {
+    let mut out = [vram::GREYS; 8];
     if !show_paletted {
-        return vec![vram::GREYS];
-    }
-    if gb.model().is_cgb() {
-        let (_bg, obj) = gb.cgb_palette_ram();
-        (0..8)
-            .map(|p| debug::cgb_palette_words(obj, p).map(xrgb))
-            .collect()
+        (out, 1)
+    } else if gb.model().is_cgb() {
+        cgb_palettes(gb.cgb_palette_ram().1, &mut out);
+        (out, 8)
     } else {
-        let dmg = |reg: u16| {
-            debug::dmg_palette_shades(gb.debug_read(reg)).map(|s| vram::GREYS[s as usize])
-        };
-        vec![dmg(0xFF48), dmg(0xFF49)]
+        out[0] = dmg_palette(gb, 0xFF48);
+        out[1] = dmg_palette(gb, 0xFF49);
+        (out, 2)
     }
 }
 

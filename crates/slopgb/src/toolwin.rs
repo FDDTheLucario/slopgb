@@ -50,18 +50,30 @@ impl ToolView {
     }
 
     /// Record a left-press at `(px, py)` and report whether it completes a
-    /// double-click: a second press within 400 ms and 3 px of the last. A
-    /// completed double resets the timer so a third press starts fresh.
+    /// double-click ([`is_double_click`]). A completed double resets the timer so
+    /// a third press starts fresh.
     fn note_click(&mut self, px: i32, py: i32) -> bool {
         let now = Instant::now();
-        let double = self.last_click.is_some_and(|(t, lx, ly)| {
-            now.duration_since(t) < Duration::from_millis(400)
-                && (px - lx).abs() <= 3
-                && (py - ly).abs() <= 3
-        });
+        let double = self
+            .last_click
+            .is_some_and(|(t, lx, ly)| is_double_click(now.duration_since(t), px - lx, py - ly));
         self.last_click = if double { None } else { Some((now, px, py)) };
         double
     }
+}
+
+/// A second left-press completes a double-click when it lands within 400 ms and
+/// 3 px of the previous one (winit delivers no double-click event).
+#[must_use]
+fn is_double_click(dt: Duration, dx: i32, dy: i32) -> bool {
+    dt < Duration::from_millis(400) && dx.abs() <= 3 && dy.abs() <= 3
+}
+
+/// The number of fully-visible memory rows in a pane `height` px tall at line
+/// height `lh` — one page of PageUp/PageDown scrolling (at least 1).
+#[must_use]
+fn mem_page_rows(height: i32, lh: i32) -> i32 {
+    (height / lh.max(1) - 1).max(1)
 }
 
 /// The set of open tool windows.
@@ -437,7 +449,7 @@ impl ToolWindows {
         let WinState::Memory(s) = &mut view.state else {
             return false;
         };
-        let page = (area.h / line_height() - 1).max(1);
+        let page = mem_page_rows(area.h, line_height());
         let rows = match code {
             KeyCode::ArrowUp => -1,
             KeyCode::ArrowDown => 1,
@@ -742,4 +754,32 @@ fn debugger_right_click(
 ) {
     let r = gb.cpu_regs();
     debugger::on_right_click(|a| gb.debug_read(a), area, s, r.pc, r.sp, px, py);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_double_click, mem_page_rows};
+    use std::time::Duration;
+
+    #[test]
+    fn double_click_within_window_and_radius() {
+        let ms = Duration::from_millis;
+        assert!(is_double_click(ms(100), 2, 3), "fast + close = double");
+        assert!(
+            is_double_click(ms(399), -3, 0),
+            "just inside the time/radius"
+        );
+        assert!(!is_double_click(ms(401), 0, 0), "too slow");
+        assert!(!is_double_click(ms(50), 4, 0), "too far in x");
+        assert!(!is_double_click(ms(50), 0, 4), "too far in y");
+    }
+
+    #[test]
+    fn mem_page_rows_fits_visible_minus_one() {
+        // 200 px / 10 px rows = 20 rows; a page is 19 (one row of overlap kept).
+        assert_eq!(mem_page_rows(200, 10), 19);
+        // Degenerate sizes never go below one row (and never divide by zero).
+        assert_eq!(mem_page_rows(5, 10), 1);
+        assert_eq!(mem_page_rows(100, 0), 99);
+    }
 }

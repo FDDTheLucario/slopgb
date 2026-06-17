@@ -9,10 +9,16 @@ use crate::ui::dialog::DialogResult;
 use crate::{App, PathPurpose, link, push_recent_into, symbols};
 
 impl App {
-    /// Open the shared path-entry modal for `purpose` over the LCD.
+    /// Open the shared path-entry modal for `purpose` over the LCD. The modal
+    /// lives on the game window and only captures keys there, so raise + focus the
+    /// game window — else a prompt triggered from a tool window (e.g. the debugger
+    /// "Load symbols...") would appear hidden behind it and seem unresponsive.
     pub(crate) fn open_path_prompt(&mut self, title: &str, purpose: PathPurpose) {
         self.path_purpose = purpose;
         self.path_dialog = Some(crate::ui::dialog::InputDialog::new(title, false));
+        if let Some(w) = &self.window {
+            w.focus_window();
+        }
         self.request_game_redraw();
     }
 

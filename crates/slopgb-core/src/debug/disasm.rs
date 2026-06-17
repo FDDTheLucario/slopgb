@@ -148,7 +148,17 @@ pub fn decode_with(bytes: &[u8], pc: u16, syntax: Syntax) -> Insn {
             0 => match y {
                 0..=3 => (format!("ret {}", CC[y]), 1, 2),
                 4 => (ldh_imm(b1, false, rg), 2, 3),
-                5 => (format!("add sp,{}", signed(b1, rg)), 2, 4),
+                5 => {
+                    // RGBDS `add sp` takes a bare signed value (no leading `+`);
+                    // bgb keeps the `+05` form. `ld hl,sp+05` keeps it either way.
+                    let off = signed(b1, rg);
+                    let off = if rg {
+                        off.trim_start_matches('+')
+                    } else {
+                        off.as_str()
+                    };
+                    (format!("add sp,{off}"), 2, 4)
+                }
                 6 => (ldh_imm(b1, true, rg), 2, 3),
                 _ => (format!("ld hl,sp{}", signed(b1, rg)), 2, 3),
             },

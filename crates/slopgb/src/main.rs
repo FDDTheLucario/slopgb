@@ -415,14 +415,25 @@ impl App {
     }
 
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, key: &KeyEvent, focus: Focus) {
-        if key.repeat {
+        // In the debugger, memory-nav keys (arrows / PageUp-Down) auto-repeat so a
+        // held arrow scrolls the memory pane continuously; every other key — and
+        // the same arrows in the game window, where they are the D-pad — is
+        // de-repeated (see the guards below).
+        let nav = focus == Focus::Debugger
+            && matches!(
+                key.physical_key,
+                PhysicalKey::Code(
+                    KeyCode::ArrowUp | KeyCode::ArrowDown | KeyCode::PageUp | KeyCode::PageDown
+                )
+            );
+        if key.repeat && !nav {
             return;
         }
         // Platform-independent key-repeat guard: some Wayland compositors don't
         // set winit's `repeat` flag, so a held step key (F7/F3/F8) would step
         // repeatedly. Drop a press for an already-held key; always honor releases.
         if let PhysicalKey::Code(code) = key.physical_key {
-            if !input::accept_key(&mut self.held_keys, code, key.state.is_pressed()) {
+            if !nav && !input::accept_key(&mut self.held_keys, code, key.state.is_pressed()) {
                 return;
             }
         }
@@ -729,6 +740,7 @@ impl ApplicationHandler for App {
                 "debugger" => Some(ui::ToolWindow::Debugger),
                 "vram" => Some(ui::ToolWindow::Vram),
                 "iomap" => Some(ui::ToolWindow::IoMap),
+                "memory" => Some(ui::ToolWindow::MemoryViewer),
                 _ => None,
             }) {
                 self.tools.toggle(event_loop, kind);
