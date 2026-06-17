@@ -28,6 +28,9 @@ pub(crate) enum Field {
     ShowClocks,
     RgbdsDisasm,
     MemoryWindow,
+    /// Toggle "pure bgb mode": flip every slopgb-departure setting to its
+    /// bgb-faithful value (and back to the slopgb defaults).
+    PureBgb,
     ShowFramerate,
     FreezeRecent,
     PauseOnFocusLoss,
@@ -148,6 +151,12 @@ impl Lay {
     }
 }
 
+/// Whether every slopgb-departure setting is at its bgb-faithful value (i.e.
+/// "pure bgb mode": bgb disasm syntax, the integrated memory pane).
+fn pure_bgb(s: &Settings) -> bool {
+    !s.rgbds_disasm && !s.memory_window
+}
+
 /// Build the active tab's control list.
 pub(crate) fn controls(tab: OptionsTab, s: &Settings, content: Rect) -> Vec<Ctrl> {
     match tab {
@@ -238,6 +247,16 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         Field::ShowClocks => s.show_clocks = !s.show_clocks,
         Field::RgbdsDisasm => s.rgbds_disasm = !s.rgbds_disasm,
         Field::MemoryWindow => s.memory_window = !s.memory_window,
+        Field::PureBgb => {
+            if pure_bgb(s) {
+                // Already bgb-faithful → restore the slopgb defaults.
+                s.rgbds_disasm = true;
+            } else {
+                // Flip every slopgb-departure setting to its bgb value.
+                s.rgbds_disasm = false;
+                s.memory_window = false;
+            }
+        }
         Field::ShowFramerate => s.show_framerate = !s.show_framerate,
         Field::FreezeRecent => s.freeze_recent = !s.freeze_recent,
         Field::PauseOnFocusLoss => s.pause_on_focus_loss = !s.pause_on_focus_loss,
@@ -479,6 +498,13 @@ fn debug(s: &Settings, content: Rect) -> Vec<Ctrl> {
         rc(l.row().at(), "memory viewer in own window"),
         chk("memory viewer in own window", s.memory_window),
         Field::MemoryWindow,
+    ));
+    // "Pure bgb mode": one toggle that flips every slopgb-departure setting to its
+    // bgb-faithful value (checked when already there).
+    v.push(Ctrl::live(
+        rc(l.row().at(), "pure bgb mode (no slopgb extras)"),
+        chk("pure bgb mode (no slopgb extras)", pure_bgb(s)),
+        Field::PureBgb,
     ));
     l.row();
     // Inert / always-on debugger settings (bgb black; some checked by default).

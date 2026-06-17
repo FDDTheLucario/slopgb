@@ -48,7 +48,7 @@ byte-identical); no new core deps / no unsafe; every `.rs` < 1000 lines; clippy
 | 22 | sonnet | standalone Memory-viewer tool window | 17 | **done** |
 | 23 | sonnet | memory-window status bar (nearest symbol) | 5,22 | **done** |
 | 24 | sonnet | Options toggle: memory viewer in own window | 22 | **done** |
-| 25 | sonnet | Options action: **Reset to bgb defaults** (pure-bgb revert) | 9,14,24 | todo |
+| 25 | sonnet | Options action: **Reset to bgb defaults** (pure-bgb revert) | 9,14,24 | **done** |
 | 26 | opus | FINAL: full-branch /rust-diff-review + multi-agent review | all | todo |
 
 Note: main.rs path methods split to `app_path.rs`; `debugger_tests.rs` split

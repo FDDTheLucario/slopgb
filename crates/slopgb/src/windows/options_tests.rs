@@ -366,6 +366,27 @@ fn debug_tab_display_flags_toggle() {
     assert!(st.working.lowercase_hex);
     click_field(&mut st, Field::ShowClocks);
     assert!(!st.working.show_clocks);
+    // RGBDS syntax + memory-window are the slopgb-departure toggles.
+    assert!(st.working.rgbds_disasm, "rgbds on by default");
+    click_field(&mut st, Field::RgbdsDisasm);
+    assert!(!st.working.rgbds_disasm);
+}
+
+#[test]
+fn debug_tab_pure_bgb_toggles_every_departure() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Debug;
+    // Defaults are slopgb-flavored (rgbds on); enabling pure-bgb flips them off.
+    st.working.memory_window = true;
+    click_field(&mut st, Field::PureBgb);
+    assert!(!st.working.rgbds_disasm, "pure bgb -> bgb disasm syntax");
+    assert!(
+        !st.working.memory_window,
+        "pure bgb -> integrated memory pane"
+    );
+    // Toggling it again restores the slopgb defaults.
+    click_field(&mut st, Field::PureBgb);
+    assert!(st.working.rgbds_disasm, "back to slopgb defaults");
 }
 
 #[test]
