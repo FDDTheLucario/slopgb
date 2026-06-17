@@ -12,10 +12,9 @@ use slopgb_core::{CLOCK_HZ, SCREEN_H, SCREEN_W};
 
 use crate::input::Action;
 use crate::keymap::WizardButton;
+use crate::menupopup::{MenuPopup, PopupOutcome};
 use crate::ui::canvas::Rect;
-use crate::windows::mainwin::{
-    InfoBox, MainMenu, MenuEffect, SubChoice, SubKind, SubMenu, WindowSizeChoice,
-};
+use crate::windows::mainwin::{InfoBox, SubChoice, SubKind, SubMenu, WindowSizeChoice};
 use crate::windows::options::OptionsOutcome;
 use crate::{App, ui, windows};
 
@@ -112,41 +111,91 @@ impl App {
             self.request_game_redraw();
             return;
         }
+        // A left-click on the game window while the menu popup is open is a
+        // click-away: dismiss it (the popup's own clicks come through its window).
+        if self.menu_popup.is_some() && button == MouseButton::Left {
+            self.menu_popup = None;
+            return;
+        }
         if button == MouseButton::Right {
-            self.main_submenu = None;
-            self.main_menu = Some(MainMenu::open((px, py), !self.muted));
-            self.request_game_redraw();
-            return;
-        }
-        // A click on the open submenu applies its choice and closes everything.
-        if let Some(sub) = &self.main_submenu {
-            if let Some(choice) = sub.choice_at(px, py) {
-                self.apply_sub_choice(choice, event_loop);
-                self.main_submenu = None;
-                self.main_menu = None;
-                self.request_game_redraw();
-                return;
+            // (Re)open the right-click menu as its own borderless window, at the
+            // pointer, so it can extend past the game window instead of clipping.
+            if let Some(win) = self.window.clone() {
+                self.menu_popup = MenuPopup::open(event_loop, &win, (px, py), !self.muted);
             }
-            // Off the submenu: close it, then let the main menu handle the click.
-            self.main_submenu = None;
         }
-        let Some(menu) = self.main_menu.take() else {
-            return;
+    }
+
+    /// Route an event for the right-click menu's own borderless window
+    /// ([`MenuPopup`]): render, hover, click (→ run an action / open a submenu),
+    /// and dismiss on Escape / focus-loss / close.
+    pub(crate) fn on_popup_event(
+        &mut self,
+        event: winit::event::WindowEvent,
+        event_loop: &ActiveEventLoop,
+    ) {
+        use winit::event::{ElementState, MouseButton, WindowEvent};
+        use winit::keyboard::{KeyCode, PhysicalKey};
+        match event {
+            WindowEvent::RedrawRequested | WindowEvent::Resized(_) => {
+                if let Some(p) = &mut self.menu_popup {
+                    p.redraw();
+                }
+            }
+            // The WM closing the popup dismisses it outright.
+            WindowEvent::CloseRequested => self.menu_popup = None,
+            // Click-away (focus loss) dismisses — but only once the popup has
+            // actually been focused (some WMs deliver a spurious on-map
+            // `Focused(false)` that would otherwise close it instantly).
+            WindowEvent::Focused(f) => {
+                if self.menu_popup.as_mut().is_some_and(|p| p.note_focus(f)) {
+                    self.menu_popup = None;
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                if let Some(p) = &mut self.menu_popup {
+                    p.on_cursor_moved(position.x, position.y);
+                }
+            }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } => self.on_popup_click(event_loop),
+            WindowEvent::KeyboardInput { event, .. } => {
+                if event.state.is_pressed()
+                    && event.physical_key == PhysicalKey::Code(KeyCode::Escape)
+                {
+                    self.menu_popup = None;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Apply a left-click on the menu popup: run a leaf action, apply a submenu
+    /// choice, open a submenu (grown into the same window), or dismiss.
+    fn on_popup_click(&mut self, event_loop: &ActiveEventLoop) {
+        let outcome = match &mut self.menu_popup {
+            Some(p) => p.on_click(),
+            None => return,
         };
-        match menu.effect_at(px, py) {
-            MenuEffect::Run(act) => {
-                self.request_game_redraw();
+        match outcome {
+            PopupOutcome::Run(act) => {
+                self.menu_popup = None;
                 self.run_action(act, event_loop);
             }
-            MenuEffect::Submenu(kind) => {
-                // Keep the main menu open and hang the child off its row.
-                if let Some(row) = menu.row_rect(MenuEffect::Submenu(kind)) {
-                    self.main_submenu = Some(self.open_submenu(kind, row));
-                }
-                self.main_menu = Some(menu);
-                self.request_game_redraw();
+            PopupOutcome::Sub(choice) => {
+                self.menu_popup = None;
+                self.apply_sub_choice(choice, event_loop);
             }
-            MenuEffect::None => self.request_game_redraw(), // dismissed
+            PopupOutcome::OpenSub(kind, row) => {
+                let sub = self.open_submenu(kind, row);
+                if let Some(p) = &mut self.menu_popup {
+                    p.set_submenu(sub);
+                }
+            }
+            PopupOutcome::Close => self.menu_popup = None,
         }
     }
 

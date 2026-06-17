@@ -422,6 +422,48 @@ fn link_items(active: bool, listening: bool) -> Vec<(MenuItem, Option<SubChoice>
     ]
 }
 
+// --- Popup-window geometry (RM-QA: the menu is its own borderless window) ---
+
+/// The popup window's content size in pixels: the bounding box of the main menu
+/// plus the currently-open submenu, both laid out in popup-local coordinates
+/// (the main menu hung at its `origin`, the submenu off its parent row). Reuses
+/// the shared [`menu`] geometry so the borderless window is sized exactly to the
+/// whole menu tree — which can then extend past the game window onto the desktop
+/// (bgb's native-popup behaviour) instead of being clipped by the game window.
+#[must_use]
+pub fn popup_content_size(menu: &MainMenu, sub: Option<&SubMenu>) -> (i32, i32) {
+    let mb = menu::menu_bounds(menu.origin, &menu.items);
+    let (mut right, mut bottom) = (mb.right(), mb.bottom());
+    if let Some(s) = sub {
+        let sb = menu::menu_bounds(s.origin, &s.items);
+        right = right.max(sb.right());
+        bottom = bottom.max(sb.bottom());
+    }
+    (right.max(1), bottom.max(1))
+}
+
+/// Screen-space top-left for the popup window: the game-window-local pointer
+/// `cursor` offset by the game window's `window_outer` position, clamped so a
+/// `popup` (w, h) box stays inside `monitor` (`Some((x, y, w, h))`, the work
+/// area) when that is known — so the menu never opens half-off the screen edge.
+/// Unknown monitor → unclamped (the raw window + cursor sum).
+#[must_use]
+pub fn popup_screen_origin(
+    cursor: (i32, i32),
+    window_outer: (i32, i32),
+    popup: (i32, i32),
+    monitor: Option<(i32, i32, i32, i32)>,
+) -> (i32, i32) {
+    let mut x = window_outer.0 + cursor.0;
+    let mut y = window_outer.1 + cursor.1;
+    if let Some((mx, my, mw, mh)) = monitor {
+        // Pull back to fit, then clamp to the near edge (handles popup > monitor).
+        x = x.min(mx + mw - popup.0).max(mx);
+        y = y.min(my + mh - popup.1).max(my);
+    }
+    (x, y)
+}
+
 // --- Info box (MN5): a centred message overlay over the LCD -----------------
 
 /// A read-only info box (Other → Cart info / System info / About): a centred

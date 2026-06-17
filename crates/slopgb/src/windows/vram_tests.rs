@@ -16,6 +16,38 @@ fn tab_labels_and_render() {
 }
 
 #[test]
+fn fit_scale_is_floored_and_at_least_one() {
+    assert_eq!(
+        fit_scale(100, 100, 128, 192),
+        1,
+        "smaller than natural -> 1"
+    );
+    assert_eq!(fit_scale(256, 384, 128, 192), 2, "exact 2x");
+    assert_eq!(fit_scale(320, 480, 128, 192), 2, "2.5x floors to 2");
+    assert_eq!(fit_scale(384, 576, 128, 192), 3, "exact 3x");
+    assert_eq!(fit_scale(0, 0, 128, 192), 1, "degenerate content -> 1");
+    assert_eq!(
+        fit_scale(1000, 100, 128, 192),
+        1,
+        "limited by the shorter dim"
+    );
+}
+
+#[test]
+fn dmg_palette_rows_map_register_shades_through_grey_ramp() {
+    // BGP 0xE4 = 11_10_01_00 -> color IDs 0..3 map to shades [0,1,2,3].
+    // OBP0 0x1B = 00_01_10_11 -> [3,2,1,0]. OBP1 0xFF -> [3,3,3,3].
+    let rows = dmg_palette_rows(0xE4, 0x1B, 0xFF);
+    assert_eq!(rows.len(), 3);
+    assert_eq!((rows[0].name, rows[0].reg), ("BGP", 0xE4));
+    assert_eq!(rows[0].colors, [GREYS[0], GREYS[1], GREYS[2], GREYS[3]]);
+    assert_eq!((rows[1].name, rows[1].reg), ("OBP0", 0x1B));
+    assert_eq!(rows[1].colors, [GREYS[3], GREYS[2], GREYS[1], GREYS[0]]);
+    assert_eq!((rows[2].name, rows[2].reg), ("OBP1", 0xFF));
+    assert_eq!(rows[2].colors, [GREYS[3]; 4]);
+}
+
+#[test]
 fn render_tiles_blits_tile_zero_into_the_top_left_cell() {
     let mut vram = vec![0u8; 0x4000];
     for b in &mut vram[0..16] {

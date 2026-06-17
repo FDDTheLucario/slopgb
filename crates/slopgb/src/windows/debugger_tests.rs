@@ -87,6 +87,8 @@ fn regs_lines_match_bgb_two_column_layout() {
         iflag: 0xF1,
         double_speed: false,
         cnt: 144,
+        rom_bank: 0x2A,
+        ram_bank: Some(1),
     };
     let l = regs_lines(&v);
     assert_eq!(l[0], "af= 1180   lcdc=91");
@@ -97,7 +99,33 @@ fn regs_lines_match_bgb_two_column_layout() {
     assert_eq!(l[4], "sp= FFFE   ie= 00");
     assert_eq!(l[5], "pc= 0100   if= F1");
     assert_eq!(l[6], "ime=.   spd= 0");
-    assert_eq!(l[7], "ima=.");
+    // The ima line's right column carries the cartridge ROM/RAM bank indicator
+    // (distinct from the VRAM/WRAM banks at FF4F/FF70).
+    assert_eq!(l[7], "ima=.   rom 2A ram 01");
+}
+
+#[test]
+fn regs_lines_show_double_dash_when_ram_bank_disabled() {
+    let v = RegsView {
+        af: 0,
+        bc: 0,
+        de: 0,
+        hl: 0,
+        sp: 0,
+        pc: 0,
+        ime: false,
+        ima: false,
+        lcdc: 0,
+        stat: 0,
+        ly: 0,
+        ie: 0,
+        iflag: 0,
+        double_speed: false,
+        cnt: 0,
+        rom_bank: 1,
+        ram_bank: None,
+    };
+    assert_eq!(regs_lines(&v)[7], "ima=.   rom 01 ram --");
 }
 
 #[test]

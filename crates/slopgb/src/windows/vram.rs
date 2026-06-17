@@ -192,6 +192,18 @@ fn set_if_changed<T: PartialEq>(slot: &mut T, val: T) -> bool {
     }
 }
 
+/// Largest integer scale at which a `natural_w × natural_h` image fits inside a
+/// `content_w × content_h` area — so the VRAM content grows on integer steps as
+/// the window resizes, never fractionally (which would break the 1px tile
+/// borders). Always ≥ 1 so the content is never zero-scaled.
+#[must_use]
+pub fn fit_scale(content_w: i32, content_h: i32, natural_w: i32, natural_h: i32) -> i32 {
+    if natural_w <= 0 || natural_h <= 0 {
+        return 1;
+    }
+    (content_w / natural_w).min(content_h / natural_h).max(1)
+}
+
 /// A neutral 4-grey palette for the tile/BG views when no game palette is
 /// chosen (white → black), matching bgb's default "show paletted off" look.
 pub const GREYS: [u32; 4] = [0x00FF_FFFF, 0x00AA_AAAA, 0x0055_5555, 0x0000_0000];
@@ -224,6 +236,14 @@ pub fn render_tiles(
     c.set_clip(saved);
 }
 
+/// OAM-grid cell pitch at `scale`: an 8-px tile plus a proportional 2-px gap
+/// (so a cell is `10 * scale`; 20 px at the default scale 2, as bgb shows).
+/// Shared by [`render_oam`] and the OAM hover hit-test so they can't drift.
+#[must_use]
+pub fn oam_cell(scale: i32) -> i32 {
+    10 * scale
+}
+
 /// Render the OAM tab: the 40 sprites in an 8×5 grid, each cell its tile (from
 /// `vram` bank 0) drawn through `palette` at `scale`; empty slots (y/x == 0)
 /// are left blank. Clipped to `rect`.
@@ -236,7 +256,7 @@ pub fn render_oam(
     scale: i32,
 ) {
     const COLS: i32 = 8;
-    let cell = 8 * scale + 4;
+    let cell = oam_cell(scale);
     let saved = c.push_clip(rect);
     for (i, s) in debug::oam_sprites(oam).iter().enumerate() {
         let col = i as i32 % COLS;
@@ -246,6 +266,54 @@ pub fn render_oam(
         if s.y != 0 || s.x != 0 {
             let pixels = debug::tile_pixels(vram, 0, s.tile as usize);
             c.blit_tile(px, py, &pixels, palette, scale);
+        }
+    }
+    c.set_clip(saved);
+}
+
+/// One DMG palette row for the Palettes tab: a register (`BGP`/`OBP0`/`OBP1`),
+/// its raw value, and the four shades it maps colour IDs 0..=3 to (through the
+/// [`GREYS`] ramp).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DmgPalRow {
+    pub name: &'static str,
+    pub reg: u8,
+    pub colors: [u32; 4],
+}
+
+/// The three DMG palette registers as swatch rows, so a DMG game's BGP/OBP0/OBP1
+/// shade mappings (`rBGP`/`rOBP`) are inspectable — the CGB palette-RAM rows are
+/// meaningless on DMG. Each colour ID is mapped to its shade via
+/// [`debug::dmg_palette_shades`], then to the neutral [`GREYS`] ramp.
+#[must_use]
+pub fn dmg_palette_rows(bgp: u8, obp0: u8, obp1: u8) -> [DmgPalRow; 3] {
+    [("BGP", bgp), ("OBP0", obp0), ("OBP1", obp1)].map(|(name, reg)| DmgPalRow {
+        name,
+        reg,
+        colors: debug::dmg_palette_shades(reg).map(|s| GREYS[s as usize]),
+    })
+}
+
+/// Render the DMG Palettes tab: the BGP/OBP0/OBP1 rows from [`dmg_palette_rows`],
+/// each a `NAME XX` label then four shade swatches. Clipped to `rect`.
+pub fn render_palettes_dmg(c: &mut Canvas, rect: Rect, bgp: u8, obp0: u8, obp1: u8, theme: &Theme) {
+    use crate::ui::text::draw_text;
+    let sw = 14;
+    let lh = line_height();
+    let label_w = 6 * 8; // room for "OBP0 XX"
+    let saved = c.push_clip(rect);
+    for (i, row) in dmg_palette_rows(bgp, obp0, obp1).iter().enumerate() {
+        let py = rect.y + i as i32 * (sw + 2).max(lh);
+        draw_text(
+            c,
+            rect.x,
+            py,
+            &format!("{} {:02X}", row.name, row.reg),
+            theme.text,
+        );
+        for (ci, &color) in row.colors.iter().enumerate() {
+            let px = rect.x + label_w + ci as i32 * sw;
+            swatch(c, Rect::new(px, py, sw, sw), color, theme);
         }
     }
     c.set_clip(saved);

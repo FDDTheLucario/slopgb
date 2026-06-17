@@ -452,6 +452,22 @@ impl GameBoy {
         self.bus.ppu_mut().set_dmg_palette(palette);
     }
 
+    /// The cartridge ROM bank currently mapped at 0x4000-0x7FFF, for the debug
+    /// bank indicator (distinct from the VRAM/WRAM banks at FF4F/FF70).
+    /// Side-effect-free.
+    #[must_use]
+    pub fn rom_bank(&self) -> usize {
+        self.bus.cartridge().cur_rom_bank()
+    }
+
+    /// The external-RAM bank currently visible at 0xA000, or `None` when RAM is
+    /// disabled/absent (or an RTC register is mapped), for the debug bank
+    /// indicator. Side-effect-free.
+    #[must_use]
+    pub fn ram_bank(&self) -> Option<usize> {
+        self.bus.cartridge().cur_ram_bank()
+    }
+
     /// Battery-backed cartridge RAM (plus RTC state for MBC3), if any.
     pub fn save_data(&self) -> Option<Vec<u8>> {
         self.bus.cartridge().save_data()
@@ -604,6 +620,15 @@ impl GameBoy {
     #[must_use]
     pub fn oam(&self) -> &[u8; 0xA0] {
         self.bus.ppu().debug_oam()
+    }
+
+    /// Raw 16 stored wave-RAM bytes (FF30-FF3F), for the debug I/O viewer's
+    /// wave panel. Bypasses the CPU read gating of [`Self::debug_read`] (which
+    /// returns 0xFF / the volatile current sample byte while channel 3 plays),
+    /// so the panel shows a stable view. Side-effect-free.
+    #[must_use]
+    pub fn wave_ram(&self) -> [u8; 16] {
+        self.bus.apu().wave_ram()
     }
 
     /// Raw CGB palette RAM `(BG, OBJ)`, 64 bytes each (8 palettes × 4 colors ×

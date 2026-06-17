@@ -24,6 +24,7 @@ mod dbg;
 mod input;
 mod keymap;
 mod link;
+mod menupopup;
 mod pacing;
 mod screenshot;
 mod session;
@@ -49,12 +50,13 @@ use winit::window::{Window, WindowId};
 use audio::AudioOutput;
 use cli::{Options, ParseOutcome, USAGE};
 use input::{Action, ButtonTracker, Focus};
+use menupopup::MenuPopup;
 use pacing::{AudioPipe, StallWatchdog, audio_pacing};
 use session::Session;
 use ui::canvas::Rect;
 use ui::dialog::{self, DialogKey, DialogResult, InputDialog};
 use video::Video;
-use windows::mainwin::{InfoBox, MainMenu, SubMenu, WindowSizeChoice};
+use windows::mainwin::{InfoBox, WindowSizeChoice};
 
 /// Wall-clock duration of one emulated frame: 70224 T-cycles at 4194304 Hz
 /// (~59.7275 Hz).
@@ -201,12 +203,10 @@ struct App {
     dbg: dbg::Debugger,
     /// Current keyboard modifiers, for the focus-dependent key map (Ctrl+G).
     modifiers: ModifiersState,
-    /// The open game-window right-click menu (bgb's `rc-main.png`), if any —
-    /// drawn as an overlay over the LCD and routed by the game-window mouse.
-    main_menu: Option<MainMenu>,
-    /// The open child submenu (Window size / Sound channel / Other), drawn to the
-    /// right of its parent row over the main menu.
-    main_submenu: Option<SubMenu>,
+    /// The open game-window right-click menu (bgb's `rc-main.png`), if any — its
+    /// **own borderless window** (so it can extend past the game window's edge
+    /// instead of being clipped), holding the main menu + open submenu.
+    menu_popup: Option<MenuPopup>,
     /// An open info box (Other → Cart info / System info / About), drawn centred
     /// over the LCD; any click or Escape closes it.
     info_box: Option<InfoBox>,
@@ -295,8 +295,7 @@ impl App {
             path_purpose: PathPurpose::LoadRom,
             link: link::Link::new(),
             recent: Vec::new(),
-            main_menu: None,
-            main_submenu: None,
+            menu_popup: None,
             window_size,
             game_cursor: (0, 0),
         };
@@ -356,10 +355,10 @@ impl App {
         } else {
             &self.blank_frame
         };
-        // Overlay the game-window right-click menu + open submenu, if any
-        // (captures locals, not `self`, so the disjoint field borrows stay clean).
-        let menu = self.main_menu.as_ref();
-        let sub = self.main_submenu.as_ref();
+        // The right-click menu is its own window now (see `menupopup`), so it is
+        // not part of the game-window overlay. The remaining overlays (info box /
+        // Options / path modal / key wizard) stay centred/modal here. (Captures
+        // locals, not `self`, so the disjoint field borrows stay clean.)
         let info = self.info_box.as_ref();
         let path_dlg = self.path_dialog.as_ref();
         let options = self.options.as_ref();
@@ -367,12 +366,6 @@ impl App {
         let theme = ui::Theme::BGB;
         let stretch = self.window_size == WindowSizeChoice::FullscreenStretched;
         if let Err(e) = video.draw(window, frame, stretch, |canvas| {
-            if let Some(m) = menu {
-                windows::mainwin::render(canvas, m, &theme);
-            }
-            if let Some(s) = sub {
-                windows::mainwin::render_sub(canvas, s, &theme);
-            }
             // The info box / Load-ROM modal draw on top of everything (modal).
             if let Some(i) = info {
                 windows::mainwin::render_info(canvas, i, &theme);
@@ -449,13 +442,13 @@ impl App {
         }
         // With a game-window overlay open, Escape closes it (rather than quitting
         // the emulator) and is swallowed so it can't also fire a hotkey. The info
-        // box peels first, then an open submenu, then the main menu.
-        let overlay_open =
-            self.info_box.is_some() || self.main_menu.is_some() || self.main_submenu.is_some();
+        // box peels first; the right-click popup (its own window) also closes on
+        // its own Escape, but close it here too in case the game window kept focus.
+        let overlay_open = self.info_box.is_some() || self.menu_popup.is_some();
         if focus == Focus::Game && key.state.is_pressed() && overlay_open {
             if let PhysicalKey::Code(KeyCode::Escape) = key.physical_key {
-                if self.info_box.take().is_none() && self.main_submenu.take().is_none() {
-                    self.main_menu = None;
+                if self.info_box.take().is_none() {
+                    self.menu_popup = None;
                 }
                 self.request_game_redraw();
                 return;
@@ -817,6 +810,15 @@ impl ApplicationHandler for App {
             self.modifiers = m.state();
             return;
         }
+        // The right-click menu popup (its own borderless window) owns its events.
+        if self
+            .menu_popup
+            .as_ref()
+            .is_some_and(|p| p.window_id() == window_id)
+        {
+            self.on_popup_event(event, event_loop);
+            return;
+        }
         // A debug tool window owns its events; the game window path below is
         // untouched. Its close button closes just that window (not the app).
         if self.tools.owns(window_id) {
@@ -894,21 +896,10 @@ impl ApplicationHandler for App {
                 }
                 self.paused_by_focus = false;
             }
-            // Track the pointer (for opening the menu where it sits) and, with a
-            // menu open, highlight the hovered row of the frontmost popup.
+            // Track the pointer so a right-click can open the menu where it sits.
+            // (The menu's own hover highlighting is handled by its own window.)
             WindowEvent::CursorMoved { position, .. } => {
                 self.game_cursor = (position.x as i32, position.y as i32);
-                let (px, py) = self.game_cursor;
-                let changed = if let Some(s) = &mut self.main_submenu {
-                    s.hover_at(px, py)
-                } else if let Some(m) = &mut self.main_menu {
-                    m.hover_at(px, py)
-                } else {
-                    false
-                };
-                if changed {
-                    self.request_game_redraw();
-                }
             }
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,

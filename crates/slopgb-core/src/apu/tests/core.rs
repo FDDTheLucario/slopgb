@@ -176,6 +176,26 @@ fn wave_ram_reads_ff_at_low_frequency_on_dmg() {
 }
 
 #[test]
+fn wave_ram_raw_accessor_ignores_read_gating() {
+    // The I/O viewer needs a STABLE view of wave RAM: `read_ram` is gated (0xFF
+    // at low freq, the volatile current byte at max freq, on DMG), so the debug
+    // accessor must return the raw stored bytes regardless.
+    let mut h = H::dmg();
+    for i in 0..16u16 {
+        h.w(0xFF30 + i, i as u8);
+    }
+    h.w(0xFF1A, 0x80);
+    h.w(0xFF1D, 0x00);
+    h.w(0xFF1E, 0x80); // freq 0: period 4096 — gated reads return 0xFF
+    h.ticks(4);
+    assert_eq!(h.r(0xFF30), 0xFF, "gated read is unreliable");
+    let raw = h.apu.wave_ram();
+    for (i, &b) in raw.iter().enumerate() {
+        assert_eq!(b, i as u8, "raw accessor returns the stored byte");
+    }
+}
+
+#[test]
 fn wave_retrigger_corrupts_ram_on_dmg_only() {
     for cgb in [false, true] {
         let mut h = if cgb { H::cgb() } else { H::dmg() };

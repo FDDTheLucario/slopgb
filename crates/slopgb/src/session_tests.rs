@@ -104,7 +104,10 @@ fn reset_reruns_the_configured_boot_rom() {
     let mut plain = Session::load(&path, Some(Model::Dmg), &BootSpec::NONE).expect("load");
     assert!(!plain.gb.boot_active());
     plain.reset();
-    assert!(!plain.gb.boot_active(), "no boot ROM → reset stays post-boot");
+    assert!(
+        !plain.gb.boot_active(),
+        "no boot ROM → reset stays post-boot"
+    );
 
     // Boot ROM configured: the initial load AND a later reset both run it.
     let mut s = Session::load(&path, Some(Model::Dmg), &BootSpec::cli(Some(&boot))).expect("load");

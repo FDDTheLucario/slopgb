@@ -320,10 +320,12 @@ impl Cartridge {
         self.rom[offset]
     }
 
-    /// Read 0x0000-0x7FFF (banked ROM).
-    pub fn read_rom(&self, addr: u16) -> u8 {
-        let low_area = addr < 0x4000;
-        let bank = match self.mapper {
+    /// The ROM bank number the mapper selects for the given address area
+    /// (`low_area` = 0x0000-0x3FFF vs the switchable 0x4000-0x7FFF), pre-mask.
+    /// Shared by [`read_rom`](Self::read_rom) and the debug
+    /// [`cur_rom_bank`](Self::cur_rom_bank) so the two cannot disagree.
+    fn rom_bank_for(&self, low_area: bool) -> usize {
+        match self.mapper {
             Mapper::None => usize::from(!low_area),
             Mapper::Mbc1 {
                 bank1,
@@ -365,8 +367,40 @@ impl Cartridge {
                     usize::from(romb1) << 8 | usize::from(romb0)
                 }
             }
-        };
-        self.rom_at(bank, addr)
+        }
+    }
+
+    /// Read 0x0000-0x7FFF (banked ROM).
+    pub fn read_rom(&self, addr: u16) -> u8 {
+        self.rom_at(self.rom_bank_for(addr < 0x4000), addr)
+    }
+
+    /// The ROM bank currently mapped at 0x4000-0x7FFF (size-masked the way the
+    /// chip's unconnected address lines wrap), for the debug bank indicator.
+    /// Side-effect-free.
+    #[must_use]
+    pub fn cur_rom_bank(&self) -> usize {
+        self.rom_bank_for(false) & self.rom_bank_mask()
+    }
+
+    /// The external-RAM bank currently visible at 0xA000, or `None` when RAM is
+    /// disabled/absent or an RTC register (not a RAM bank) is mapped instead —
+    /// for the debug bank indicator. Side-effect-free.
+    #[must_use]
+    pub fn cur_ram_bank(&self) -> Option<usize> {
+        // A cart with no RAM chip has no bank to report, even if a mapper would
+        // nominally select one (e.g. the None mapper, or RAMG enabled with no
+        // chip) — the indicator shows "--" rather than a phantom bank 0.
+        if self.ram.is_empty() {
+            return None;
+        }
+        match self.ram_target()? {
+            RamTarget::Ram(bank) => Some(bank),
+            // MBC2 has a single built-in 512×4-bit RAM: "bank 0".
+            RamTarget::Mbc2 => Some(0),
+            // An RTC register is mapped, not a RAM bank.
+            RamTarget::Rtc(_) => None,
+        }
     }
 
     /// Write 0x0000-0x7FFF (mapper registers).

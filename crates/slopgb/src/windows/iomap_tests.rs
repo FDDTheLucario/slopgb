@@ -41,8 +41,17 @@ fn bit_states_decode_msb_first() {
 
 #[test]
 fn wave_row_reads_all_sixteen_bytes() {
-    let read = |a: u16| (a - 0xFF30) as u8; // FF30->0, FF31->1, ...
-    assert_eq!(wave_row(read), "000102030405060708090A0B0C0D0E0F");
+    // Sourced from the raw wave-RAM buffer (`GameBoy::wave_ram`), not the gated
+    // FF3x read path which is unreliable while channel 3 plays.
+    let bytes: [u8; 16] = std::array::from_fn(|i| i as u8);
+    assert_eq!(wave_row(&bytes), "000102030405060708090A0B0C0D0E0F");
+}
+
+#[test]
+fn bank_line_shows_cartridge_rom_and_ram_bank() {
+    // The cartridge MBC banks — distinct from VBK (VRAM) / SVBK (WRAM).
+    assert_eq!(bank_line(0x2A, Some(1)), "ROMB 2A  RAMB 01");
+    assert_eq!(bank_line(1, None), "ROMB 01  RAMB --");
 }
 
 #[test]

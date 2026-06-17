@@ -574,6 +574,14 @@ impl Apu {
         matches!(channel, 1..=4) && self.mute_mask & (1 << (channel - 1)) != 0
     }
 
+    /// The raw 16 stored wave-RAM bytes (FF30-FF3F), for the debug I/O viewer.
+    /// Bypasses the CPU read gating of [`Self::read`] (which returns 0xFF or the
+    /// volatile current sample byte while the channel plays). Side-effect-free.
+    #[must_use]
+    pub fn wave_ram(&self) -> [u8; 16] {
+        self.ch3.ram()
+    }
+
     /// Output sample rate for [`Self::drain_samples`]. Default
     /// [`DEFAULT_SAMPLE_RATE`].
     pub fn set_sample_rate(&mut self, hz: u32) {

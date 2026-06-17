@@ -37,9 +37,10 @@ fn parse_no_rom_starts_blank() {
 
 #[test]
 fn parse_all_options() {
-    let opts =
-        parse_run(&["--model", "cgb", "--scale", "5", "--mute", "--boot", "boot.bin", "x.gbc"])
-            .unwrap();
+    let opts = parse_run(&[
+        "--model", "cgb", "--scale", "5", "--mute", "--boot", "boot.bin", "x.gbc",
+    ])
+    .unwrap();
     assert_eq!(opts.rom, Some(PathBuf::from("x.gbc")));
     assert_eq!(opts.model, Some(Model::Cgb));
     assert_eq!(opts.scale, 5);

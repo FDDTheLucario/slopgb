@@ -117,7 +117,10 @@ fn cgb_boot_rom_maps_two_regions_with_header_gap() {
 #[test]
 fn cgb_boot_enters_cgb_mode_then_key0_locks_dmg_compat() {
     let mut b = ic(Model::Cgb);
-    assert!(!b.cgb_mode, "post-boot precompute is DMG-compat for a DMG cart");
+    assert!(
+        !b.cgb_mode,
+        "post-boot precompute is DMG-compat for a DMG cart"
+    );
     let boot: Vec<u8> = (0..0x900u16).map(|i| (i as u8) ^ 0xC3).collect();
     b.attach_boot_rom(boot);
     assert!(b.cgb_mode, "boot ROM runs in power-on CGB mode");
@@ -125,11 +128,19 @@ fn cgb_boot_enters_cgb_mode_then_key0_locks_dmg_compat() {
     b.write(0xFF68, 0x80); // BCPS: index 0, auto-increment
     b.write(0xFF69, 0x34); // BG palette 0, low byte
     b.write(0xFF68, 0x80);
-    assert_eq!(b.read(0xFF69), 0x34, "compat palette write landed in CGB mode");
+    assert_eq!(
+        b.read(0xFF69),
+        0x34,
+        "compat palette write landed in CGB mode"
+    );
     // KEY0 DMG-lock (FF4C bit 2): the boot ROM locks DMG-compat before hand-off.
     b.write(0xFF4C, 0x04);
     assert!(!b.cgb_mode, "KEY0 locked DMG-compat mode");
-    assert_eq!(b.read(0xFF69), 0xFF, "CGB-only palette register gated off again");
+    assert_eq!(
+        b.read(0xFF69),
+        0xFF,
+        "CGB-only palette register gated off again"
+    );
 }
 
 /// KEY0 (FF4C) is honoured only while a boot ROM is mapped: on a post-boot

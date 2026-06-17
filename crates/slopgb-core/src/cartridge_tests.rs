@@ -106,6 +106,10 @@ fn rom_banking_masked_by_actual_size_not_header() {
     assert_eq!(bank_at(&c, 0x4000), 5 & 3);
 }
 
+// Current ROM/RAM bank indicators live in the `banks` submodule (file-size cap).
+#[path = "cartridge_tests/banks.rs"]
+mod banks;
+
 // --- no MBC ---
 
 #[test]

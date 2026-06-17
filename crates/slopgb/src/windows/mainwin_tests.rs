@@ -19,6 +19,38 @@ const WINDOW_SIZE_ROW: usize = 11;
 const SOUND_CHANNEL_ROW: usize = 10;
 
 #[test]
+fn popup_size_unions_main_menu_and_submenu() {
+    let menu = MainMenu::open((0, 0), true);
+    let main_only = popup_content_size(&menu, None);
+    let mb = crate::ui::menu::menu_bounds(menu.origin, &menu.items);
+    assert_eq!(main_only, (mb.right(), mb.bottom()));
+    // Hang the Window size submenu off its row: the popup widens to cover it.
+    let row = menu
+        .row_rect(MenuEffect::Submenu(SubKind::WindowSize))
+        .unwrap();
+    let sub = SubMenu::window_size(row, WindowSizeChoice::Scale(2));
+    let with_sub = popup_content_size(&menu, Some(&sub));
+    let sb = crate::ui::menu::menu_bounds(sub.origin, &sub.items);
+    assert!(with_sub.0 > main_only.0, "submenu widens the popup");
+    assert_eq!(with_sub.0, mb.right().max(sb.right()));
+    assert_eq!(with_sub.1, mb.bottom().max(sb.bottom()));
+}
+
+#[test]
+fn popup_origin_clamps_to_monitor() {
+    let cursor = (900, 700);
+    let window = (10, 20); // game-window outer position
+    let popup = (200, 300);
+    // No monitor info: raw window + cursor, unclamped.
+    assert_eq!(popup_screen_origin(cursor, window, popup, None), (910, 720));
+    // 1024x768 monitor at the origin: the popup would overflow both edges, so it
+    // shifts left/up to fit entirely on-screen.
+    let (x, y) = popup_screen_origin(cursor, window, popup, Some((0, 0, 1024, 768)));
+    assert_eq!((x, y), (824, 468));
+    assert!(x + popup.0 <= 1024 && y + popup.1 <= 768);
+}
+
+#[test]
 fn menu_has_the_fifteen_rc_main_rows_in_order() {
     let m = MainMenu::open((10, 10), true);
     let labels: Vec<&str> = m.items.iter().map(|i| i.label.as_str()).collect();

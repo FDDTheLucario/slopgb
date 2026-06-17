@@ -102,11 +102,21 @@ pub const INT_VECTORS: [(u16, &str); 5] = [
 ];
 
 /// Wave RAM (FF30–FF3F) as a 32-hex-digit string for the wave-pattern panel.
+/// Sourced from the raw stored bytes ([`slopgb_core::GameBoy::wave_ram`]), not
+/// the gated FF3x read path — that returns 0xFF / a volatile sample byte while
+/// channel 3 plays, so the panel would flicker (QA finding).
 #[must_use]
-pub fn wave_row(read: impl Fn(u16) -> u8) -> String {
-    (0..16)
-        .map(|i| format!("{:02X}", read(0xFF30 + i)))
-        .collect()
+pub fn wave_row(bytes: &[u8; 16]) -> String {
+    bytes.iter().map(|b| format!("{b:02X}")).collect()
+}
+
+/// The current cartridge MBC banks (`ROMB`/`RAMB`) as one line — the bank
+/// mapped at 0x4000-0x7FFF and the external-RAM bank at 0xA000 (`--` when RAM is
+/// disabled/absent). A distinct indicator from VBK (VRAM) / SVBK (WRAM).
+#[must_use]
+pub fn bank_line(rom: usize, ram: Option<usize>) -> String {
+    let ram = ram.map_or_else(|| "--".to_string(), |b| format!("{b:02X}"));
+    format!("ROMB {rom:02X}  RAMB {ram}")
 }
 
 /// One IF/IE vector row: its label (`40 VBlank`, plus ` *` when the `IF` bit is

@@ -97,13 +97,23 @@ pub struct RegsView {
     /// User-clock counter (RM14): emulated cycles since the last "Set user clocks
     /// counter" reset, shown on the `hl` line's right column like bgb.
     pub cnt: u32,
+    /// Cartridge ROM bank currently mapped at 0x4000-0x7FFF
+    /// ([`slopgb_core::GameBoy::rom_bank`]).
+    pub rom_bank: usize,
+    /// External-RAM bank visible at 0xA000, or `None` when RAM is disabled/absent
+    /// ([`slopgb_core::GameBoy::ram_bank`]).
+    pub ram_bank: Option<usize>,
 }
 
-/// The two-column register lines bgb shows (`af= …  lcdc=…`, …). `cnt` and the
-/// ROM-bank field are omitted pending their deferred accessors.
+/// The two-column register lines bgb shows (`af= …  lcdc=…`, …). The `hl` line's
+/// right column carries the user-clock counter (RM14); the `ima` line's carries
+/// the cartridge ROM/RAM bank indicator (distinct from the VRAM/WRAM banks).
 #[must_use]
 pub fn regs_lines(r: &RegsView) -> Vec<String> {
     let flag = |b: bool| if b { '1' } else { '.' };
+    let ram = r
+        .ram_bank
+        .map_or_else(|| "--".to_string(), |b| format!("{b:02X}"));
     vec![
         format!("af= {:04X}   lcdc={:02X}", r.af, r.lcdc),
         format!("bc= {:04X}   stat={:02X}", r.bc, r.stat),
@@ -112,7 +122,7 @@ pub fn regs_lines(r: &RegsView) -> Vec<String> {
         format!("sp= {:04X}   ie= {:02X}", r.sp, r.ie),
         format!("pc= {:04X}   if= {:02X}", r.pc, r.iflag),
         format!("ime={}   spd= {}", flag(r.ime), u8::from(r.double_speed)),
-        format!("ima={}", flag(r.ima)),
+        format!("ima={}   rom {:02X} ram {ram}", flag(r.ima), r.rom_bank),
     ]
 }
 

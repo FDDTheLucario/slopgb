@@ -111,6 +111,13 @@ impl Wave {
         }
     }
 
+    /// The raw 16 stored wave-RAM bytes, bypassing the CPU read gating that
+    /// makes [`read_ram`](Self::read_ram) unreliable while the channel plays —
+    /// for the debug I/O viewer. Side-effect-free.
+    pub(super) fn ram(&self) -> [u8; 16] {
+        self.ram
+    }
+
     pub(super) fn write_ram(&mut self, index: usize, value: u8) {
         if let Some(i) = self.cpu_ram_slot(index) {
             self.ram[i] = value;

@@ -99,6 +99,8 @@ fn regs_view(gb: &GameBoy, clock_base: u64) -> debugger::RegsView {
         double_speed: gb.double_speed(),
         // Emulated cycles since the last user-clock reset (RM14); low 32 bits.
         cnt: gb.cycles().wrapping_sub(clock_base) as u32,
+        rom_bank: gb.rom_bank(),
+        ram_bank: gb.ram_bank(),
     }
 }
 
@@ -144,29 +146,65 @@ fn render_debugger(
     }
 }
 
-/// Tile-grid scale for the Tiles tab, and OAM-cell preview scale.
-const TILE_SCALE: i32 = 2;
-const OAM_SCALE: i32 = 2;
+/// Per-tab VRAM geometry: the integer render scale fitted to the content area
+/// (so content grows on resize), the grid cell pitch, the bounded drawn extent
+/// (so the grid + frame hug the actual map, not the whole content rect — QA "bg
+/// map should be bounded"), and whether the tab has a tile grid.
+struct VramGeom {
+    scale: i32,
+    cell: i32,
+    extent: Rect,
+    grid: bool,
+}
+
+/// Compute [`VramGeom`] for `tab` inside the `content` area. Natural pixel sizes:
+/// Tiles 16×24 tiles (128×192), BG map 32×32 (256×256), OAM an 8×5 grid of
+/// 10-px cells (8-px tile + 2-px gap). Palettes has no grid.
+fn vram_geom(tab: VramTab, content: Rect) -> VramGeom {
+    let tiled = |cols: i32, rows: i32, cell: i32, scale: i32| VramGeom {
+        scale,
+        cell,
+        extent: Rect::new(content.x, content.y, cols * cell, rows * cell),
+        grid: true,
+    };
+    match tab {
+        VramTab::Tiles => {
+            let s = vram::fit_scale(content.w, content.h, 16 * 8, 24 * 8);
+            tiled(16, 24, 8 * s, s)
+        }
+        VramTab::BgMap => {
+            let s = vram::fit_scale(content.w, content.h, 32 * 8, 32 * 8);
+            tiled(32, 32, 8 * s, s)
+        }
+        VramTab::Oam => {
+            let s = vram::fit_scale(content.w, content.h, 8 * 10, 5 * 10);
+            tiled(8, 5, vram::oam_cell(s), s)
+        }
+        VramTab::Palettes => VramGeom {
+            scale: 1,
+            cell: 0,
+            extent: content,
+            grid: false,
+        },
+    }
+}
 
 fn render_vram(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, state: &VramState) {
     let l = vram::layout(area);
     vram::render_tabs(c, area.x + 2, area.y + 2, state.tab, theme);
     let pal = display_palette(gb, state.show_paletted);
-    // Draw the active tab into the content area; `cell` is its grid pitch (0 =
-    // no grid, e.g. Palettes).
-    let cell = match state.tab {
+    let g = vram_geom(state.tab, l.content);
+    match state.tab {
         VramTab::Tiles => {
             // A raw tile has no inherent palette, so bgb renders the Tiles grid
             // in a neutral grey ramp (its "guessed palette" field stays empty)
             // rather than mapping every tile through one game palette — which
             // would tint unrelated tiles with whatever colours BG palette 0
             // happens to hold. Match that: grey regardless of `show paletted`.
-            vram::render_tiles(c, l.content, gb.vram(), 0, &vram::GREYS, TILE_SCALE);
-            8 * TILE_SCALE
+            vram::render_tiles(c, l.content, gb.vram(), 0, &vram::GREYS, g.scale);
         }
         VramTab::Oam => {
-            vram::render_oam(c, l.content, gb.oam(), gb.vram(), &pal, OAM_SCALE);
-            8 * OAM_SCALE + 4
+            vram::render_oam(c, l.content, gb.oam(), gb.vram(), &pal, g.scale);
         }
         VramTab::BgMap => {
             let (base, signed) = bgmap_source(gb, state);
@@ -181,26 +219,39 @@ fn render_vram(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, state: &
                 scx,
                 scy,
                 &pal,
-                1,
+                g.scale,
                 state.scxy,
                 theme,
             );
-            8
         }
         VramTab::Palettes => {
-            let (bg, obj) = gb.cgb_palette_ram();
-            vram::render_palettes(c, l.content, bg, obj, theme);
-            0
+            // On DMG the CGB palette RAM is meaningless; show the BGP/OBP0/OBP1
+            // shade mappings instead (so rBGP/rOBP are inspectable).
+            if gb.model() == Model::Dmg {
+                vram::render_palettes_dmg(
+                    c,
+                    l.content,
+                    gb.debug_read(0xFF47),
+                    gb.debug_read(0xFF48),
+                    gb.debug_read(0xFF49),
+                    theme,
+                );
+            } else {
+                let (bg, obj) = gb.cgb_palette_ram();
+                vram::render_palettes(c, l.content, bg, obj, theme);
+            }
         }
-    };
-    if state.grid && cell > 0 {
-        draw_grid(c, l.content, cell, theme);
     }
-    // bgb frames the grid and the details column as separate panels.
-    c.outline_rect(l.content, theme.border);
+    if state.grid && g.grid {
+        draw_grid(c, g.extent, g.cell, theme);
+    }
+    // bgb frames the grid and the details column as separate panels. The grid
+    // tabs frame the *bounded* extent (so the map doesn't bleed grid lines into
+    // empty space); Palettes frames the whole content area.
+    c.outline_rect(if g.grid { g.extent } else { l.content }, theme.border);
     c.outline_rect(l.details, theme.border);
     render_vram_controls(c, &l, state, theme);
-    render_vram_details(gb, c, &l, state, theme);
+    render_vram_details(gb, c, &l, state, g.scale, theme);
 }
 
 /// The 4-colour display palette: the neutral grey ramp, or — when `show_paletted`
@@ -295,11 +346,14 @@ fn render_vram_controls(c: &mut Canvas, l: &VramLayout, state: &VramState, theme
 }
 
 /// Draw the hovered-cell field list (bgb's right panel) for the active tab.
+/// `scale` is the tab's live render scale ([`vram_geom`]), so the hover hit-test
+/// matches the drawn cell size at any window size.
 fn render_vram_details(
     gb: &GameBoy,
     c: &mut Canvas,
     l: &VramLayout,
     state: &VramState,
+    scale: i32,
     theme: &Theme,
 ) {
     let Some((hx, hy)) = state.hover else {
@@ -310,9 +364,9 @@ fn render_vram_details(
         return;
     }
     let lines = match state.tab {
-        VramTab::Tiles => tile_details(lx, ly),
-        VramTab::Oam => oam_details(gb, lx, ly),
-        VramTab::BgMap => bgmap_details(gb, state, lx, ly),
+        VramTab::Tiles => tile_details(lx, ly, scale),
+        VramTab::Oam => oam_details(gb, lx, ly, scale),
+        VramTab::BgMap => bgmap_details(gb, state, lx, ly, scale),
         VramTab::Palettes => return,
     };
     let mut y = l.details.y;
@@ -322,11 +376,11 @@ fn render_vram_details(
     }
 }
 
-/// Tiles-tab details: the tile under `(lx, ly)` in the 16-wide grid. The content
-/// area is wider than the 256-px grid, so an out-of-column hover has no tile.
-fn tile_details(lx: i32, ly: i32) -> Vec<String> {
-    let col = lx / (8 * TILE_SCALE);
-    let tile = (ly / (8 * TILE_SCALE)) * 16 + col;
+/// Tiles-tab details: the tile under `(lx, ly)` in the 16-wide grid at `scale`.
+/// The content area is wider than the grid, so an out-of-column hover has no tile.
+fn tile_details(lx: i32, ly: i32, scale: i32) -> Vec<String> {
+    let col = lx / (8 * scale);
+    let tile = (ly / (8 * scale)) * 16 + col;
     if col >= 16 || !(0..384).contains(&tile) {
         return Vec::new();
     }
@@ -336,9 +390,9 @@ fn tile_details(lx: i32, ly: i32) -> Vec<String> {
     ]
 }
 
-/// OAM-tab details: the sprite under `(lx, ly)` in the 8-wide cell grid.
-fn oam_details(gb: &GameBoy, lx: i32, ly: i32) -> Vec<String> {
-    let pitch = 8 * OAM_SCALE + 4;
+/// OAM-tab details: the sprite under `(lx, ly)` in the 8-wide cell grid at `scale`.
+fn oam_details(gb: &GameBoy, lx: i32, ly: i32, scale: i32) -> Vec<String> {
+    let pitch = vram::oam_cell(scale);
     let (col, row) = (lx / pitch, ly / pitch);
     let idx = (row * 8 + col) as usize;
     if col >= 8 || idx >= 40 {
@@ -357,9 +411,9 @@ fn oam_details(gb: &GameBoy, lx: i32, ly: i32) -> Vec<String> {
     ]
 }
 
-/// BG-map-tab details: the map cell under `(lx, ly)` in the 32×32 grid.
-fn bgmap_details(gb: &GameBoy, state: &VramState, lx: i32, ly: i32) -> Vec<String> {
-    let (col, row) = (lx / 8, ly / 8);
+/// BG-map-tab details: the map cell under `(lx, ly)` in the 32×32 grid at `scale`.
+fn bgmap_details(gb: &GameBoy, state: &VramState, lx: i32, ly: i32, scale: i32) -> Vec<String> {
+    let (col, row) = (lx / (8 * scale), ly / (8 * scale));
     if col >= 32 || row >= 32 {
         return Vec::new();
     }
@@ -400,7 +454,8 @@ fn render_iomap(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme) {
         theme,
     );
 
-    // Col 1: the "various" registers, then the STAT bit breakdown.
+    // Col 1: the "various" registers, then the STAT bit breakdown, then the
+    // cartridge ROM/RAM bank indicator (distinct from VBK/SVBK above it).
     let after_var = iomap::render_group(c, x(1), y0, &read, iomap::VARIOUS, theme);
     label(c, x(1), after_var + lh, "STAT (FF41)");
     iomap::render_bits(
@@ -411,6 +466,12 @@ fn render_iomap(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme) {
         &iomap::STAT_BITS,
         6,
         theme,
+    );
+    label(
+        c,
+        x(1),
+        after_var + (2 + iomap::STAT_BITS.len() as i32 + 1) * lh,
+        &iomap::bank_line(gb.rom_bank(), gb.ram_bank()),
     );
 
     // Col 2: the sound channels + master control.
@@ -429,10 +490,17 @@ fn render_iomap(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme) {
         theme,
     );
 
-    // Wave pattern (FF30–3F): full-width row along the bottom.
+    // Wave pattern (FF30–3F): full-width row along the bottom. Sourced from the
+    // raw wave-RAM buffer (the gated FF3x read path is unreliable while ch3 plays).
     let wy = area.bottom() - lh - 2;
     label(c, x(0), wy, "wave (FF3x)");
-    draw_text(c, x(0) + 11 * 8, wy, &iomap::wave_row(read), theme.text);
+    draw_text(
+        c,
+        x(0) + 11 * 8,
+        wy,
+        &iomap::wave_row(&gb.wave_ram()),
+        theme.text,
+    );
 }
 
 #[cfg(test)]
