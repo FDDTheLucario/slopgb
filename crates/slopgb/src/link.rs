@@ -28,6 +28,31 @@ use slopgb_core::GameBoy;
 /// bgb's default link port.
 pub const DEFAULT_PORT: u16 = 8765;
 
+/// Parse a `host:port` entry (bgb's Connect prompt). A bare host (or one with
+/// an unparseable / absent port) defaults to [`DEFAULT_PORT`]. A bracketed IPv6
+/// literal — `[::1]` or `[::1]:8765` — is parsed by its closing `]` so the inner
+/// colons aren't taken for the port separator; an unbracketed literal is split
+/// at the *last* colon, so it must be bracketed to carry a port. Total — never
+/// panics.
+#[must_use]
+pub fn parse_host_port(s: &str) -> (String, u16) {
+    if let Some(rest) = s.strip_prefix('[') {
+        if let Some((host, after)) = rest.split_once(']') {
+            let port = after
+                .strip_prefix(':')
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(DEFAULT_PORT);
+            return (host.to_string(), port);
+        }
+    }
+    match s.rsplit_once(':') {
+        Some((host, port)) if !host.is_empty() => {
+            (host.to_string(), port.parse().unwrap_or(DEFAULT_PORT))
+        }
+        _ => (s.to_string(), DEFAULT_PORT),
+    }
+}
+
 /// How long the socket thread blocks on a read before looping to drain the
 /// outgoing queue and re-check the stop flag. Small enough to stay responsive
 /// to the paced loop, large enough not to spin.

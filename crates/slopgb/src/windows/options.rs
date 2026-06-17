@@ -100,9 +100,10 @@ pub const SCHEMES: [Scheme; 4] = [
 ];
 
 /// Every Options setting. Live fields drive a real slopgb capability; the dialog
-/// also carries the (mostly inert) bgb controls implicitly via [`tabs`]. Copied
-/// into [`OptionsState`] as the working + baseline copies.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// also carries the (mostly inert) bgb controls implicitly via [`tabs`]. Cloned
+/// into [`OptionsState`] as the working + baseline copies. (Not `Copy` — it
+/// holds the bootrom path strings.)
+#[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     /// System → Emulated system (applied on reload).
     pub model: ModelChoice,
@@ -143,6 +144,17 @@ pub struct Settings {
     pub break_echo_ram: bool,
     /// Exceptions → "break on disabling LCD outside vblank".
     pub break_lcd_off_vblank: bool,
+    /// System → "bootroms enabled": execute the configured boot ROM on ROM load
+    /// (bgb's checkbox). Off by default — slopgb then boots post-boot.
+    pub bootroms_enabled: bool,
+    /// System → DMG/MGB/SGB bootrom path (empty = none). Used when
+    /// [`Self::bootroms_enabled`] and the loaded model is DMG-class.
+    pub bootrom_dmg: String,
+    /// System → GBC bootrom path (empty = none). Used for CGB/AGB models.
+    pub bootrom_gbc: String,
+    /// System → SGB bootrom path (empty = none). Faithful field; slopgb maps an
+    /// SGB model to the DMG-class 256 B boot ROM, so this feeds the SGB models.
+    pub bootrom_sgb: String,
 }
 
 impl Default for Settings {
@@ -168,6 +180,10 @@ impl Default for Settings {
             break_invalid_op: true,
             break_echo_ram: false,
             break_lcd_off_vblank: false,
+            bootroms_enabled: false,
+            bootrom_dmg: String::new(),
+            bootrom_gbc: String::new(),
+            bootrom_sgb: String::new(),
         }
     }
 }
@@ -261,9 +277,11 @@ impl OptionsTab {
 
 // --- Dialog geometry --------------------------------------------------------
 
-/// bgb's Options dialog is 345×361; we match it for a faithful layout (centred
-/// in the window, clipped if the window is smaller).
-pub const DIALOG_W: i32 = 345;
+/// bgb's Options dialog is 345×361. slopgb's fixed 7px font is wider than bgb's
+/// proportional one, so the System tab's caption-sized box + the right-column
+/// bootrom path fields need a little more width to fit the same layout; 420 keeps
+/// every control visible at the default scale (centred, clipped if smaller).
+pub const DIALOG_W: i32 = 420;
 pub const DIALOG_H: i32 = 361;
 /// Height of one tab row.
 const TAB_ROW_H: i32 = 19;
@@ -317,6 +335,39 @@ pub enum OptionsOutcome {
     /// Joypad → "configure keyboard": open the key-rebind wizard. Neither
     /// applies nor closes the dialog (the wizard floats above it).
     ConfigureKeyboard,
+    /// System → a `...` bootrom-path button: open the shared path modal over the
+    /// dialog to edit that slot's path. Neither applies nor closes.
+    PickBootrom(BootromSlot),
+}
+
+/// Which bootrom-path field (bgb's System tab: DMG / GBC / SGB bootrom). The
+/// loaded model selects the slot (DMG/MGB → Dmg, CGB/AGB → Gbc, SGB/SGB2 → Sgb).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BootromSlot {
+    Dmg,
+    Gbc,
+    Sgb,
+}
+
+impl BootromSlot {
+    /// This slot's path in `settings` (mutable, for the modal to write into).
+    pub(crate) fn path_mut(self, s: &mut Settings) -> &mut String {
+        match self {
+            BootromSlot::Dmg => &mut s.bootrom_dmg,
+            BootromSlot::Gbc => &mut s.bootrom_gbc,
+            BootromSlot::Sgb => &mut s.bootrom_sgb,
+        }
+    }
+
+    /// This slot's path in `settings` (read-only, for rendering).
+    #[must_use]
+    pub(crate) fn path(self, s: &Settings) -> &str {
+        match self {
+            BootromSlot::Dmg => &s.bootrom_dmg,
+            BootromSlot::Gbc => &s.bootrom_gbc,
+            BootromSlot::Sgb => &s.bootrom_sgb,
+        }
+    }
 }
 
 impl OptionsOutcome {
@@ -349,7 +400,7 @@ impl OptionsState {
     pub fn new(settings: Settings) -> Self {
         Self {
             active: OptionsTab::System,
-            working: settings,
+            working: settings.clone(),
             baseline: settings,
         }
     }
@@ -435,15 +486,15 @@ impl OptionsState {
     pub fn press(&mut self, b: OptionsButton) -> OptionsOutcome {
         match b {
             OptionsButton::Ok => {
-                self.baseline = self.working;
+                self.baseline = self.working.clone();
                 OptionsOutcome::CloseApply
             }
             OptionsButton::Cancel => {
-                self.working = self.baseline;
+                self.working = self.baseline.clone();
                 OptionsOutcome::Close
             }
             OptionsButton::Apply => {
-                self.baseline = self.working;
+                self.baseline = self.working.clone();
                 OptionsOutcome::StayApply
             }
             OptionsButton::Defaults => {

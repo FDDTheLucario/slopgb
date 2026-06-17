@@ -45,19 +45,31 @@ fn no_rom_title_is_bare_slopgb() {
 fn parse_host_port_handles_link_connect_forms() {
     let dp = crate::link::DEFAULT_PORT;
     assert_eq!(
-        parse_host_port("127.0.0.1:8765"),
+        crate::link::parse_host_port("127.0.0.1:8765"),
         ("127.0.0.1".into(), 8765)
     );
-    assert_eq!(parse_host_port("localhost"), ("localhost".into(), dp));
+    assert_eq!(
+        crate::link::parse_host_port("localhost"),
+        ("localhost".into(), dp)
+    );
     // Bracketed IPv6 literal: brackets stripped, port honored — and the bare
     // bracketed form (no port) resolves to the inner address at the default.
-    assert_eq!(parse_host_port("[::1]:9000"), ("::1".into(), 9000));
-    assert_eq!(parse_host_port("[::1]"), ("::1".into(), dp));
-    assert_eq!(parse_host_port("[fe80::1]"), ("fe80::1".into(), dp));
+    assert_eq!(
+        crate::link::parse_host_port("[::1]:9000"),
+        ("::1".into(), 9000)
+    );
+    assert_eq!(crate::link::parse_host_port("[::1]"), ("::1".into(), dp));
+    assert_eq!(
+        crate::link::parse_host_port("[fe80::1]"),
+        ("fe80::1".into(), dp)
+    );
     // Unparseable / overflowing port → default; never panics.
-    assert_eq!(parse_host_port("host:notaport"), ("host".into(), dp));
-    assert_eq!(parse_host_port("h:99999"), ("h".into(), dp));
-    assert_eq!(parse_host_port(""), (String::new(), dp));
+    assert_eq!(
+        crate::link::parse_host_port("host:notaport"),
+        ("host".into(), dp)
+    );
+    assert_eq!(crate::link::parse_host_port("h:99999"), ("h".into(), dp));
+    assert_eq!(crate::link::parse_host_port(""), (String::new(), dp));
 }
 
 #[test]

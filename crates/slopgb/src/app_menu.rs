@@ -56,39 +56,9 @@ impl App {
             self.request_game_redraw();
             return;
         }
-        // The Options control panel is the topmost modal: only the left button
-        // acts (tabs/controls/buttons); a right-click is swallowed so it can't be
-        // misread as a left-click toggling a setting. OK/Cancel/Apply applies the
-        // working settings (Cancel having reverted them first); Close drops it.
-        if self.options.is_some() {
-            if button != MouseButton::Left {
-                return;
-            }
-            let area = self.window_area();
-            let outcome = self.options.as_mut().and_then(|o| o.on_click(px, py, area));
-            if let Some(out) = outcome {
-                if out == OptionsOutcome::ConfigureKeyboard {
-                    // Float the key-rebind wizard above the (still-open) dialog.
-                    self.open_key_wizard();
-                } else {
-                    // OK/Apply push working live; Cancel/Defaults do not (Defaults
-                    // only edits the controls, matching bgb — nothing goes live
-                    // until OK/Apply).
-                    if out.applies() {
-                        if let Some(o) = &self.options {
-                            self.settings = o.working;
-                        }
-                        self.apply_settings();
-                    }
-                    if out.closes() {
-                        self.options = None;
-                    }
-                }
-            }
-            self.request_game_redraw();
-            return;
-        }
-        // The Load-ROM modal is topmost (MN4): route the click to OK/Cancel.
+        // A path modal is topmost — it can float over the Options dialog (the
+        // bootrom `...` browse) as well as stand alone (Load ROM / save state),
+        // so it is checked before Options. Route the click to OK/Cancel.
         if self.path_dialog.is_some() {
             let area = self.window_area();
             if let Some(r) = self
@@ -98,6 +68,43 @@ impl App {
             {
                 self.resolve_path_dialog(r);
             }
+            return;
+        }
+        // The Options control panel is the next modal: only the left button acts
+        // (tabs/controls/buttons); a right-click is swallowed so it can't be
+        // misread as a left-click toggling a setting. OK/Cancel/Apply applies the
+        // working settings (Cancel having reverted them first); Close drops it.
+        if self.options.is_some() {
+            if button != MouseButton::Left {
+                return;
+            }
+            let area = self.window_area();
+            let outcome = self.options.as_mut().and_then(|o| o.on_click(px, py, area));
+            if let Some(out) = outcome {
+                match out {
+                    // Float the key-rebind wizard above the (still-open) dialog.
+                    OptionsOutcome::ConfigureKeyboard => self.open_key_wizard(),
+                    // Open the path modal over the dialog to edit a bootrom path.
+                    OptionsOutcome::PickBootrom(slot) => {
+                        self.open_path_prompt("Bootrom path", crate::PathPurpose::Bootrom(slot))
+                    }
+                    // OK/Apply push working live; Cancel/Defaults do not (Defaults
+                    // only edits the controls, matching bgb — nothing goes live
+                    // until OK/Apply).
+                    _ => {
+                        if out.applies() {
+                            if let Some(o) = &self.options {
+                                self.settings = o.working.clone();
+                            }
+                            self.apply_settings();
+                        }
+                        if out.closes() {
+                            self.options = None;
+                        }
+                    }
+                }
+            }
+            self.request_game_redraw();
             return;
         }
         // An open info box is modal: any click dismisses it and is swallowed.
@@ -254,7 +261,7 @@ impl App {
     /// Pacing (fast-forward / framerate) + show-framerate + the debugger display
     /// flags are read directly from `self.settings`, so they need no push here.
     pub(crate) fn apply_settings(&mut self) {
-        let s = self.settings;
+        let s = self.settings.clone();
         if let Some(pipe) = &mut self.audio {
             pipe.set_volume(s.volume, s.mono);
         }

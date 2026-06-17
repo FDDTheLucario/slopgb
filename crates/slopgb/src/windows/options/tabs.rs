@@ -49,6 +49,11 @@ pub(crate) enum Field {
     BreakEchoRam,
     /// Exceptions → "break on disabling LCD outside vblank".
     BreakLcdOffVblank,
+    /// System → "bootroms enabled" checkbox.
+    BootromsEnabled,
+    /// System → a `...` bootrom-path browse button (routes a
+    /// [`super::OptionsOutcome::PickBootrom`] out, like ConfigureKeyboard).
+    PickBootrom(super::BootromSlot),
 }
 
 /// Fast-forward speed slider range (1..=`FF_SPEED_MAX`).
@@ -212,8 +217,12 @@ pub(crate) fn on_content_click(
         .find(|ct| ct.field.is_some() && ct.rect.contains(px, py));
     let ct = hit?;
     let field = ct.field?;
-    if field == Field::ConfigureKeyboard {
-        return Some(super::OptionsOutcome::ConfigureKeyboard);
+    // Fields that open a sub-modal over the dialog route an outcome out instead
+    // of mutating `Settings` here.
+    match field {
+        Field::ConfigureKeyboard => return Some(super::OptionsOutcome::ConfigureKeyboard),
+        Field::PickBootrom(slot) => return Some(super::OptionsOutcome::PickBootrom(slot)),
+        _ => {}
     }
     apply(field, s, &ct, px);
     None
@@ -247,8 +256,9 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         Field::BreakInvalidOp => s.break_invalid_op = !s.break_invalid_op,
         Field::BreakEchoRam => s.break_echo_ram = !s.break_echo_ram,
         Field::BreakLcdOffVblank => s.break_lcd_off_vblank = !s.break_lcd_off_vblank,
+        Field::BootromsEnabled => s.bootroms_enabled = !s.bootroms_enabled,
         // Routed out by `on_content_click` before reaching here.
-        Field::ConfigureKeyboard => {}
+        Field::ConfigureKeyboard | Field::PickBootrom(_) => {}
     }
 }
 
@@ -395,6 +405,43 @@ fn system(s: &Settings, content: Rect) -> Vec<Ctrl> {
         v.push(Ctrl::inert(rc(l.at(), label), chk(label, false)));
         l.row();
     }
+    // --- Boot ROM paths (right column; bgb's System tab, options-system.png) ---
+    // Three labeled path fields each with a "..." browse button, then a live
+    // "bootroms enabled" checkbox. The path box shows the configured path; the
+    // "..." button opens the path modal (routes Field::PickBootrom out).
+    let rx0 = l.x0 + box_w + 12; // just right of the emulated-system box
+    // Fit the path box + 22px "..." button + a small margin within the content.
+    let path_w = (content.x + content.w - rx0 - 30).clamp(40, 150);
+    let mut by = content.y;
+    for (slot, label) in [
+        (super::BootromSlot::Dmg, "DMG bootrom:"),
+        (super::BootromSlot::Gbc, "GBC bootrom:"),
+        (super::BootromSlot::Sgb, "SGB bootrom:"),
+    ] {
+        v.push(text_label((rx0, by), label.to_owned()));
+        by += line_height() + 1;
+        v.push(Ctrl::inert(
+            Rect::new(rx0, by, path_w, line_height() + 2),
+            Kind::Dropdown {
+                value: slot.path(s).to_owned(),
+                w: path_w,
+            },
+        ));
+        v.push(Ctrl::live(
+            Rect::new(rx0 + path_w + 4, by, 22, line_height() + 2),
+            Kind::Button {
+                label: "...",
+                w: 22,
+            },
+            Field::PickBootrom(slot),
+        ));
+        by += step + 4;
+    }
+    v.push(Ctrl::live(
+        rc((rx0, by), "bootroms enabled"),
+        chk("bootroms enabled", s.bootroms_enabled),
+        Field::BootromsEnabled,
+    ));
     v
 }
 

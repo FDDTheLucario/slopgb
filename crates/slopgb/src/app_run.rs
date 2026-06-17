@@ -145,7 +145,7 @@ impl App {
             // from the live settings. Routed/applied by `on_game_click` +
             // `handle_key` like the other modals.
             Action::MainOptions => {
-                self.options = Some(windows::options::OptionsState::new(self.settings));
+                self.options = Some(windows::options::OptionsState::new(self.settings.clone()));
                 self.request_game_redraw();
             }
             Action::MainCheats => {

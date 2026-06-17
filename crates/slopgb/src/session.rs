@@ -56,18 +56,18 @@ impl Session {
     }
 
     /// Load a ROM, pick its model (CLI override beats header auto-detect),
-    /// and restore `<rom>.sav` if present. When `boot` is a boot ROM image of
-    /// the right size for the model, the machine *executes* it from power-on
-    /// (bgb's boot ROM); otherwise it starts post-boot.
+    /// and restore `<rom>.sav` if present. `boot` selects the boot ROM to
+    /// execute from power-on for the resolved model (Options paths over
+    /// `--boot`); none/none-matching starts post-boot.
     pub(crate) fn load(
         path: &Path,
         model_override: Option<Model>,
-        boot: Option<&[u8]>,
+        boot: &BootSpec,
     ) -> Result<Self, String> {
         let rom_bytes =
             fs::read(path).map_err(|e| format!("cannot read ROM '{}': {e}", path.display()))?;
         let model = model_override.unwrap_or_else(|| GameBoy::auto_model(&rom_bytes));
-        let mut gb = build_gb(model, rom_bytes.clone(), boot)
+        let mut gb = build_gb(model, rom_bytes.clone(), boot.resolve(model).as_deref())
             .map_err(|e| format!("cannot load ROM '{}': {e}", path.display()))?;
         let sav_path = path.with_extension("sav");
         let mut last_saved = None;
@@ -301,6 +301,62 @@ pub(crate) fn boot_size_ok(model: Model, len: usize) -> bool {
         len == 0x900
     } else {
         len == 0x100
+    }
+}
+
+/// Which boot ROM to execute on a ROM load. The Options bootrom paths (when
+/// `enabled`) take precedence over the `--boot`/`SLOPGB_BOOT` `fallback`; the
+/// slot is chosen by the resolved model.
+pub(crate) struct BootSpec<'a> {
+    pub enabled: bool,
+    pub dmg: &'a str,
+    pub gbc: &'a str,
+    pub sgb: &'a str,
+    pub fallback: Option<&'a [u8]>,
+}
+
+impl BootSpec<'_> {
+    /// No boot ROM (the default).
+    pub(crate) const NONE: BootSpec<'static> = BootSpec {
+        enabled: false,
+        dmg: "",
+        gbc: "",
+        sgb: "",
+        fallback: None,
+    };
+
+    /// Only the `--boot`/`SLOPGB_BOOT` fallback (no Options paths) — for the
+    /// startup load, before the Options dialog has been touched.
+    pub(crate) fn cli(fallback: Option<&[u8]>) -> BootSpec<'_> {
+        BootSpec {
+            fallback,
+            ..BootSpec::NONE
+        }
+    }
+
+    /// Resolve the boot ROM bytes for `model`: the enabled, size-valid slot path
+    /// read from disk, else the CLI/env fallback, else `None`.
+    fn resolve(&self, model: Model) -> Option<Vec<u8>> {
+        if self.enabled {
+            let path = if model.is_cgb() {
+                self.gbc
+            } else if matches!(model, Model::Sgb | Model::Sgb2) {
+                self.sgb
+            } else {
+                self.dmg
+            };
+            if !path.is_empty() {
+                match fs::read(path) {
+                    Ok(b) if boot_size_ok(model, b.len()) => return Some(b),
+                    Ok(b) => eprintln!(
+                        "slopgb: bootrom '{path}' is {} bytes (wrong for {model:?}); skipping",
+                        b.len()
+                    ),
+                    Err(e) => eprintln!("slopgb: cannot read bootrom '{path}': {e}"),
+                }
+            }
+        }
+        self.fallback.map(<[u8]>::to_vec)
     }
 }
 

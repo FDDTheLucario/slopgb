@@ -81,7 +81,11 @@ fn main() {
     // ROM load. Read once here; a bad path is logged and treated as no boot ROM.
     let boot_rom = resolve_boot_rom(&opts);
     let (session, rom_loaded) = match &opts.rom {
-        Some(rom) => match Session::load(rom, opts.model, boot_rom.as_deref()) {
+        Some(rom) => match Session::load(
+            rom,
+            opts.model,
+            &session::BootSpec::cli(boot_rom.as_deref()),
+        ) {
             Ok(s) => (s, true),
             Err(e) => {
                 eprintln!("error: {e}");
@@ -122,6 +126,9 @@ enum PathPurpose {
     LoadState,
     /// Dial a serial-link peer at the typed `host:port` (bare host → port 8765).
     LinkConnect,
+    /// Set a bootrom path in the open Options dialog's working scratch
+    /// (Options → System → DMG/GBC/SGB bootrom `...`).
+    Bootrom(windows::options::BootromSlot),
 }
 
 /// Resolve the boot ROM bytes from `--boot` or the `SLOPGB_BOOT` env var,
@@ -138,31 +145,6 @@ fn resolve_boot_rom(opts: &Options) -> Option<Vec<u8>> {
             eprintln!("slopgb: cannot read boot ROM '{}': {e}", path.display());
             None
         }
-    }
-}
-
-/// Parse a `host:port` entry (bgb's Connect prompt). A bare host (or one with
-/// an unparseable / absent port) defaults to [`link::DEFAULT_PORT`]. A bracketed
-/// IPv6 literal — `[::1]` or `[::1]:8765` — is parsed by its closing `]` so the
-/// inner colons aren't taken for the port separator; an unbracketed literal is
-/// split at the *last* colon, so it must be bracketed to carry a port. Total —
-/// never panics.
-fn parse_host_port(s: &str) -> (String, u16) {
-    // Bracketed IPv6 first: [host] with an optional :port after the ']'.
-    if let Some(rest) = s.strip_prefix('[') {
-        if let Some((host, after)) = rest.split_once(']') {
-            let port = after
-                .strip_prefix(':')
-                .and_then(|p| p.parse().ok())
-                .unwrap_or(link::DEFAULT_PORT);
-            return (host.to_string(), port);
-        }
-    }
-    match s.rsplit_once(':') {
-        Some((host, port)) if !host.is_empty() => {
-            (host.to_string(), port.parse().unwrap_or(link::DEFAULT_PORT))
-        }
-        _ => (s.to_string(), link::DEFAULT_PORT),
     }
 }
 
@@ -395,13 +377,15 @@ impl App {
             if let Some(i) = info {
                 windows::mainwin::render_info(canvas, i, &theme);
             }
+            // The Options control panel draws on top of the menus/info box.
+            if let Some(o) = options {
+                windows::options::render(canvas, o, &theme);
+            }
+            // A path modal draws above Options too — it can float over the dialog
+            // (the bootrom `...` browse) as well as stand alone.
             if let Some(d) = path_dlg {
                 let area = canvas.bounds();
                 dialog::render(canvas, area, d, &theme);
-            }
-            // The Options control panel draws on top of everything (modal).
-            if let Some(o) = options {
-                windows::options::render(canvas, o, &theme);
             }
             // The key-rebind wizard floats above even the Options dialog.
             if let Some(w) = wizard {
@@ -439,6 +423,17 @@ impl App {
             self.request_game_redraw();
             return;
         }
+        // A path modal captures every key while open (so typing a path can't
+        // fire a hotkey); Enter accepts, Esc cancels. Checked before Options
+        // because it can float over the dialog (the bootrom `...` browse).
+        if focus == Focus::Game && key.state.is_pressed() && self.path_dialog.is_some() {
+            if let Some(dk) = dialog_key_from(key) {
+                if let Some(result) = self.path_dialog.as_mut().map(|d| d.on_key(dk)) {
+                    self.resolve_path_dialog(result);
+                }
+            }
+            return;
+        }
         // Options control panel is modal: while it's open every key is swallowed
         // (so a hotkey can't fire underneath it); Escape cancels (reverts edits)
         // and closes, matching a Windows dialog's Esc.
@@ -449,16 +444,6 @@ impl App {
                 // discarding the unapplied `working` edits is the whole revert.
                 self.options = None;
                 self.request_game_redraw();
-            }
-            return;
-        }
-        // Game-window "Load ROM" modal capture (MN4): every key goes to it while
-        // open (so typing a path can't fire a hotkey); Enter loads, Esc cancels.
-        if focus == Focus::Game && key.state.is_pressed() && self.path_dialog.is_some() {
-            if let Some(dk) = dialog_key_from(key) {
-                if let Some(result) = self.path_dialog.as_mut().map(|d| d.on_key(dk)) {
-                    self.resolve_path_dialog(result);
-                }
             }
             return;
         }
@@ -607,12 +592,19 @@ impl App {
             },
             PathPurpose::LinkConnect => {
                 // The "path" here is the typed host:port (the shared text modal).
-                let (host, port) = parse_host_port(&path.to_string_lossy());
+                let (host, port) = link::parse_host_port(&path.to_string_lossy());
                 match self.link.connect(host.clone(), port) {
                     Ok(()) => println!("slopgb: link connecting to {host}:{port}"),
                     Err(e) => eprintln!("slopgb: link connect failed: {e}"),
                 }
                 self.update_title(); // reflect the "connecting :port" status at once
+            }
+            PathPurpose::Bootrom(slot) => {
+                // Write the typed path into the open Options dialog's working
+                // scratch; OK/Apply commits it to settings, Cancel reverts.
+                if let Some(o) = &mut self.options {
+                    *slot.path_mut(&mut o.working) = path.to_string_lossy().into_owned();
+                }
             }
         }
     }
@@ -657,12 +649,24 @@ impl App {
         }
     }
 
+    /// The boot ROM spec for a ROM load: the Options bootrom paths (when enabled)
+    /// take precedence over the `--boot`/`SLOPGB_BOOT` fallback.
+    fn boot_spec(&self) -> session::BootSpec<'_> {
+        session::BootSpec {
+            enabled: self.settings.bootroms_enabled,
+            dmg: &self.settings.bootrom_dmg,
+            gbc: &self.settings.bootrom_gbc,
+            sgb: &self.settings.bootrom_sgb,
+            fallback: self.boot_rom.as_deref(),
+        }
+    }
+
     fn load_dropped(&mut self, path: &Path) {
         // Persist the outgoing game *before* the new session reads its .sav:
         // if the dropped file is the currently loaded ROM, loading first
         // would resurrect a stale save and later overwrite the fresh one.
         self.session.flush_save();
-        match Session::load(path, self.opts.model, self.boot_rom.as_deref()) {
+        match Session::load(path, self.opts.model, &self.boot_spec()) {
             Ok(new) => {
                 self.session = new;
                 // A loaded ROM starts emulation: leave the no-ROM blank state and
@@ -792,7 +796,7 @@ impl ApplicationHandler for App {
             }
         }
         if let Ok(addr) = env::var("SLOPGB_LINK_CONNECT") {
-            let (host, port) = parse_host_port(&addr);
+            let (host, port) = link::parse_host_port(&addr);
             if let Err(e) = self.link.connect(host, port) {
                 eprintln!("slopgb: link connect failed: {e}");
             }

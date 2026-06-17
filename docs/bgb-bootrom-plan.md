@@ -81,3 +81,21 @@ Tasks 1–6 done (the golden-safe core boot-ROM execution mechanism): `Registers
 and the no-boot golden guard. Empirically golden-safe: **gbtr golden 185/185 byte-identical + mooneye
 0-failed**. Remaining: task 7 (convergence oracle with the real `dmg_boot.bin`), task 8 (`--boot`/
 `SLOPGB_BOOT` CLI/env wiring), task 9 (bgb-faithful Options bootrom-path UI — needs a real bgb capture).
+
+## Task 9 — Options System-tab bootrom-path UI (1:1 with bgb)
+
+Real bgb reference: `docs/bgb-reference/options/options-system.png` — the System tab's RIGHT side has
+**DMG bootrom: / GBC bootrom: / SGB bootrom:** path fields (each a text box + a `...` browse button)
+and a **bootroms enabled** checkbox.
+
+Plan (functional 1:1, dep-free, frontend-only → golden-safe):
+1. `Settings`: `bootroms_enabled: bool` + `bootrom_dmg/gbc/sgb: String` (default off/empty).
+2. `BootromSlot{Dmg,Gbc,Sgb}` + `Field::BootromsEnabled` + `Field::PickBootrom(slot)` +
+   `OptionsOutcome::PickBootrom(slot)`.
+3. `on_click`: the checkbox flips the flag; a `...` button returns the outcome (like ConfigureKeyboard).
+4. `system()` builder: render the bootrom group (3 label+box+`...` rows + checkbox) matching the capture.
+5. Route the outcome: `PathPurpose::Bootrom(slot)` → the shared path modal over the dialog → write the
+   path into `options.working.bootrom_<slot>` (OK/Apply commits, Cancel reverts).
+6. Resolve a Settings boot ROM on ROM load (enabled + model-matched slot path + size-valid → those bytes;
+   overrides `--boot`); re-resolve on apply_settings + each load.
+7. Live-screenshot verify slopgb's System tab vs bgb on :0 (real captures).

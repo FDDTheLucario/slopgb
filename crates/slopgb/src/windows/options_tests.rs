@@ -52,6 +52,64 @@ fn settings_default_matches_spec() {
     assert!(!d.break_ld_b_b);
     assert!(!d.break_echo_ram);
     assert!(!d.break_lcd_off_vblank);
+    // Boot ROMs: off + no paths by default (golden-safe — post-boot install).
+    assert!(!d.bootroms_enabled);
+    assert!(d.bootrom_dmg.is_empty() && d.bootrom_gbc.is_empty() && d.bootrom_sgb.is_empty());
+}
+
+// --- Task 9: System-tab bootrom controls ------------------------------------
+
+#[test]
+fn system_tab_has_bootrom_controls() {
+    // The System tab carries the three labeled bootrom path fields' "..." browse
+    // buttons (live PickBootrom) and the "bootroms enabled" checkbox, matching
+    // options-system.png. A path box shows the configured path.
+    let s = Settings {
+        bootrom_dmg: "boot.bin".into(),
+        ..Settings::default()
+    };
+    let content = OptionsState::content_rect(dialog());
+    let ctrls = controls(OptionsTab::System, &s, content);
+    for slot in [BootromSlot::Dmg, BootromSlot::Gbc, BootromSlot::Sgb] {
+        assert!(
+            ctrls
+                .iter()
+                .any(|c| c.field == Some(Field::PickBootrom(slot))),
+            "missing {slot:?} browse button"
+        );
+    }
+    assert!(
+        ctrls
+            .iter()
+            .any(|c| c.field == Some(Field::BootromsEnabled)),
+        "missing bootroms-enabled checkbox"
+    );
+    // The DMG path box renders the configured path.
+    assert!(
+        ctrls.iter().any(|c| matches!(&c.kind,
+            super::tabs::Kind::Dropdown { value, .. } if value == "boot.bin")),
+        "DMG path box shows the path"
+    );
+}
+
+#[test]
+fn bootrom_checkbox_toggles_and_browse_routes_outcome() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::System;
+    // The "bootroms enabled" checkbox flips the working setting.
+    assert!(!st.working.bootroms_enabled);
+    click_field(&mut st, Field::BootromsEnabled);
+    assert!(st.working.bootroms_enabled, "checkbox toggled the flag");
+    // A "..." browse button routes the PickBootrom outcome without mutating.
+    let before = st.working.clone();
+    let r = field_rect(
+        OptionsTab::System,
+        &st.working,
+        Field::PickBootrom(BootromSlot::Gbc),
+    );
+    let out = st.on_click(r.x + r.w / 2, r.y + r.h / 2, BOUNDS);
+    assert_eq!(out, Some(OptionsOutcome::PickBootrom(BootromSlot::Gbc)));
+    assert_eq!(st.working, before, "browse doesn't mutate settings");
 }
 
 #[test]
@@ -201,7 +259,7 @@ fn sound_volume_slider_full_range() {
 fn configure_keyboard_button_routes_outcome_without_applying_or_closing() {
     let mut st = OptionsState::new(Settings::default());
     st.active = OptionsTab::Joypad;
-    let before = st.working;
+    let before = st.working.clone();
     let r = field_rect(OptionsTab::Joypad, &st.working, Field::ConfigureKeyboard);
     let out = st.on_click(r.x + r.w / 2, r.y + r.h / 2, BOUNDS);
     assert_eq!(out, Some(OptionsOutcome::ConfigureKeyboard));
