@@ -21,13 +21,23 @@ fn main() {
     let frames: u32 = a.next().map_or(30, |s| s.parse().unwrap());
 
     let mut gb = GameBoy::new_with_boot(Model::Cgb, rom.clone(), boot).expect("build");
+    gb.set_sample_rate(44100);
     let mut handed = None;
+    let mut audio: Vec<(f32, f32)> = Vec::new();
+    let mut peak = 0.0f32;
     for fr in 0..frames {
         gb.run_frame();
+        audio.clear();
+        gb.drain_audio(&mut audio);
+        for (l, r) in &audio {
+            peak = peak.max(l.abs()).max(r.abs());
+        }
         if !gb.boot_active() && handed.is_none() {
             handed = Some((fr, gb.cpu_regs()));
         }
     }
+    println!("audio peak amplitude during boot: {peak:.4} ({})",
+        if peak > 0.01 { "chime audible" } else { "SILENT" });
     if let Some((fr, r)) = handed {
         println!(
             "handed off at frame {fr}: pc={:04X} a={:02X} bc={:04X} de={:04X} hl={:04X} sp={:04X}",

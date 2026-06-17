@@ -40,7 +40,7 @@ Options → System bootrom path.
 | P1 | scaffold + minimal init + correct hand-off (game boots) | **done** (cgb-acid-hell: 0/23040 px diff vs direct boot) |
 | P2 | slopgb logo tiles displayed (static) | **done** |
 | P3 | **CGB colored-wipe animation** (palette colour sweep across the logo — the CGB boot effect, *not* the DMG drop-down) | **done** (rainbow sweeps left→right across the columns) |
-| P4 | two-tone CGB chime | todo |
+| P4 | two-tone CGB chime | **done** (square ch1 "di-ding"; audio peak ~0.33) |
 | P5 | CGB palettes: default + title-hash per-game + manual button-combo select | todo |
 
 License: MIT (original work).

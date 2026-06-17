@@ -155,9 +155,48 @@ Main:
     cp 8
     jr nz, .wipe
 
-    ; --- P3: hold on the colored logo (chime + hand-off come later) ---
+    ; --- the two-tone boot chime ---
+    call PlayChime
+
+    ; --- hold on the colored logo (palette features + hand-off come next) ---
 .hold:
     jr .hold
+
+; A two-tone rising chime on square channel 1: a lower note then a higher one,
+; each with a decaying envelope ("di-ding").
+PlayChime:
+    ld a, $77
+    ldh [rNR50], a               ; master volume max, both sides
+    ld a, $11
+    ldh [rNR51], a               ; channel 1 -> left + right
+    ld de, $0706                 ; tone 1 (lower): 11-bit freq, D=hi E=lo
+    call PlayTone
+    ld b, 12
+.c1:
+    call WaitFrame
+    dec b
+    jr nz, .c1
+    ld de, $0759                 ; tone 2 (higher)
+    call PlayTone
+    ld b, 22
+.c2:
+    call WaitFrame
+    dec b
+    jr nz, .c2
+    ret
+
+; Trigger square channel 1 at the 11-bit frequency in DE (D = hi 3 bits, E = lo).
+PlayTone:
+    ld a, $80
+    ldh [rNR11], a               ; 50% duty, length 0
+    ld a, $F3
+    ldh [rNR12], a               ; envelope: volume 15, decrease, period 3
+    ld a, e
+    ldh [rNR13], a               ; frequency lo
+    ld a, d
+    or $80                       ; trigger (bit 7) + frequency hi
+    ldh [rNR14], a
+    ret
 
 ; Set CGB BG palette C's letter colours (indices 1..3) to Hues[C].
 SetHue:
