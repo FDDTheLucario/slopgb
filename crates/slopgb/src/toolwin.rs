@@ -179,6 +179,18 @@ impl ToolWindows {
         self.reg.id_of(kind).is_some()
     }
 
+    /// Raise + focus the debugger window and repaint it — bgb pops the debugger to
+    /// the front when a breakpoint is hit, so the halt is visible even if the game
+    /// window had focus. No-op when the debugger window isn't open.
+    pub fn focus_debugger(&self) {
+        if let Some(id) = self.reg.id_of(ToolWindow::Debugger) {
+            if let Some(view) = self.views.get(&id) {
+                view.window.focus_window();
+                view.window.request_redraw();
+            }
+        }
+    }
+
     /// Render the tool window `id` from the live machine. `bps` (the App-owned
     /// breakpoint set) feeds the debugger's gutter dots; other windows ignore it.
     pub fn redraw(&mut self, id: WindowId, gb: &GameBoy, bps: &Breakpoints) {

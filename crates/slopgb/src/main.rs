@@ -958,9 +958,12 @@ impl ApplicationHandler for App {
             self.run_timer_paced()
         };
         // A free-running breakpoint hit freezes the debugger; the top guard then
-        // idles to `Wait` on the next wake (bgb's halt-at-breakpoint).
+        // idles to `Wait` on the next wake (bgb's halt-at-breakpoint). Pop the
+        // debugger window to the front so the halt is visible even if the game
+        // window had focus (bgb does this).
         if hit_bp {
             self.dbg.set_broken(true);
+            self.tools.focus_debugger();
             self.update_title();
         }
         // A dead stream would otherwise pin `frames` at 0 forever.
