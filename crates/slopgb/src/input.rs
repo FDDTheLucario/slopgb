@@ -12,6 +12,8 @@
 //! for the requested core addition.
 
 use slopgb_core::{Button, GameBoy};
+use std::collections::HashSet;
+
 use winit::keyboard::{KeyCode, ModifiersState};
 
 use crate::ui::ToolWindow;
@@ -153,6 +155,11 @@ pub enum Action {
     /// Copy 16 disassembled rows at the cursor to the clipboard (disasm/memory
     /// right-click "Copy code", RM10). Menu-only; carries the clicked address.
     DbgCopyCode(u16),
+    /// Scroll the debugger memory pane by `n` rows of 16 bytes (arrow keys: ±1).
+    DbgMemScroll(i32),
+    /// Page the debugger memory pane by one visible page in direction `±1`
+    /// (PageUp/PageDown); the page size is the pane's visible row count.
+    DbgMemPage(i32),
 }
 
 /// Tracks which physical keys currently hold each button, so two keys mapped
@@ -240,6 +247,11 @@ pub fn map(code: KeyCode, mods: ModifiersState, focus: Focus) -> Option<Action> 
             KeyCode::KeyB if mods.control_key() => Some(Action::DbgPrevBookmark),
             KeyCode::KeyW if mods.control_key() => Some(Action::DbgSaveState),
             KeyCode::KeyL if mods.control_key() => Some(Action::DbgLoadState),
+            // Memory-pane navigation (bgb): arrows scroll a row, PageUp/Down a page.
+            KeyCode::ArrowUp => Some(Action::DbgMemScroll(-1)),
+            KeyCode::ArrowDown => Some(Action::DbgMemScroll(1)),
+            KeyCode::PageUp => Some(Action::DbgMemPage(-1)),
+            KeyCode::PageDown => Some(Action::DbgMemPage(1)),
             // Ctrl+Shift+digit sets a numbered bookmark; Ctrl+digit jumps to it
             // (bgb). Placed after the named Ctrl keys so they take precedence.
             _ if mods.control_key() => digit_of(code).map(|d| {
@@ -278,6 +290,24 @@ fn digit_of(code: KeyCode) -> Option<u8> {
         KeyCode::Digit9 | KeyCode::Numpad9 => 9,
         _ => return None,
     })
+}
+
+/// Decide whether a key event should be acted on, maintaining `held` (the set of
+/// physically-held keys). A `Pressed` for a key already in `held` is a key-repeat
+/// and returns `false`, so a held step key (F7/F3/F8) fires exactly once — a
+/// platform-independent guard, because winit's [`KeyEvent::repeat`] flag is
+/// unreliable on some Wayland compositors. The first press inserts and returns
+/// `true`; every release removes the key and returns `true` (releases must always
+/// be honored so a button can't stick).
+///
+/// [`KeyEvent::repeat`]: winit::event::KeyEvent::repeat
+pub fn accept_key(held: &mut HashSet<KeyCode>, code: KeyCode, pressed: bool) -> bool {
+    if pressed {
+        held.insert(code)
+    } else {
+        held.remove(&code);
+        true
+    }
 }
 
 #[cfg(test)]
@@ -359,15 +389,28 @@ mod tests {
 
     #[test]
     fn button_keys_are_not_in_the_action_map() {
-        // Game Boy buttons resolve through `App.bindings` (rebindable) before
-        // `map` is consulted, so the default button keys are unmapped here.
+        // In the game window, Game Boy buttons resolve through `App.bindings`
+        // (rebindable) before `map` is consulted, so the default button keys are
+        // unmapped here. (A tool window doesn't drive the joypad — `handle_key`
+        // gates button resolution on `Focus::Game`.)
+        assert_eq!(map(KeyCode::ArrowUp, NONE, Focus::Game), None);
+        assert_eq!(map(KeyCode::ArrowRight, NONE, Focus::Game), None);
         for f in [Focus::Game, Focus::Debugger] {
-            assert_eq!(map(KeyCode::ArrowUp, NONE, f), None);
-            assert_eq!(map(KeyCode::ArrowRight, NONE, f), None);
             assert_eq!(map(KeyCode::KeyZ, NONE, f), None);
             assert_eq!(map(KeyCode::KeyX, NONE, f), None);
             assert_eq!(map(KeyCode::Enter, NONE, f), None);
         }
+    }
+
+    #[test]
+    fn debugger_arrows_and_pages_scroll_memory() {
+        // In the debugger window arrows scroll the memory pane (the game window
+        // would consume them as the D-pad before `map` is reached).
+        let d = |c| map(c, NONE, Focus::Debugger);
+        assert_eq!(d(KeyCode::ArrowUp), Some(Action::DbgMemScroll(-1)));
+        assert_eq!(d(KeyCode::ArrowDown), Some(Action::DbgMemScroll(1)));
+        assert_eq!(d(KeyCode::PageUp), Some(Action::DbgMemPage(-1)));
+        assert_eq!(d(KeyCode::PageDown), Some(Action::DbgMemPage(1)));
     }
 
     #[test]
@@ -488,5 +531,27 @@ mod tests {
         t.press(KeyCode::ShiftRight, Button::Select);
         t.clear();
         assert!(t.release(KeyCode::Backspace, Button::Select));
+    }
+
+    #[test]
+    fn accept_key_filters_held_repeats_but_honors_releases() {
+        let mut held = HashSet::new();
+        assert!(accept_key(&mut held, KeyCode::F7, true), "first press acts");
+        assert!(
+            !accept_key(&mut held, KeyCode::F7, true),
+            "held repeat ignored"
+        );
+        assert!(
+            !accept_key(&mut held, KeyCode::F7, true),
+            "still ignored while held"
+        );
+        assert!(accept_key(&mut held, KeyCode::F7, false), "release acts");
+        assert!(held.is_empty(), "release clears the held entry");
+        assert!(
+            accept_key(&mut held, KeyCode::F7, true),
+            "a fresh press after release acts again"
+        );
+        // A release for a never-pressed key is still honored (no stuck button).
+        assert!(accept_key(&mut held, KeyCode::F3, false));
     }
 }

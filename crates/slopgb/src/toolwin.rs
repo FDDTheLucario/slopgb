@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use slopgb_core::GameBoy;
 use winit::dpi::LogicalSize;
@@ -18,6 +19,7 @@ use winit::window::{Window, WindowId};
 use crate::dbg::Breakpoints;
 use crate::ui::canvas::Rect;
 use crate::ui::dialog::DialogKey;
+use crate::ui::text::line_height;
 use crate::ui::{Canvas, Theme, ToolWindow, WindowRegistry};
 use crate::windows::{self, WinState, debugger, vram};
 use debugger::{GotoTarget, MenuOutcome};
@@ -33,6 +35,9 @@ struct ToolView {
     /// Last cursor position (physical pixels) over this window, for click
     /// hit-testing — `MouseInput` itself carries no coordinates.
     cursor: Option<(i32, i32)>,
+    /// Time + position of the last left-press, for synthesizing double-clicks
+    /// (winit delivers no double-click event).
+    last_click: Option<(Instant, i32, i32)>,
 }
 
 impl ToolView {
@@ -41,6 +46,20 @@ impl ToolView {
     fn area(&self) -> Rect {
         let size = self.window.inner_size();
         Rect::new(0, 0, size.width as i32, size.height as i32)
+    }
+
+    /// Record a left-press at `(px, py)` and report whether it completes a
+    /// double-click: a second press within 400 ms and 3 px of the last. A
+    /// completed double resets the timer so a third press starts fresh.
+    fn note_click(&mut self, px: i32, py: i32) -> bool {
+        let now = Instant::now();
+        let double = self.last_click.is_some_and(|(t, lx, ly)| {
+            now.duration_since(t) < Duration::from_millis(400)
+                && (px - lx).abs() <= 3
+                && (py - ly).abs() <= 3
+        });
+        self.last_click = if double { None } else { Some((now, px, py)) };
+        double
     }
 }
 
@@ -125,6 +144,7 @@ impl ToolWindows {
                 kind,
                 state: WinState::new(kind),
                 cursor: None,
+                last_click: None,
             },
         );
         self.reg.register(id, kind);
@@ -219,6 +239,7 @@ impl ToolWindows {
         let view = self.views.get_mut(&id)?;
         let (px, py) = view.cursor?;
         let area = view.area();
+        let double = view.note_click(px, py);
         match &mut view.state {
             WinState::Vram(s) => {
                 if vram::on_click(s, area, px, py, gb.model().is_cgb()) {
@@ -228,10 +249,13 @@ impl ToolWindows {
             }
             WinState::Debugger(s) => {
                 // An open modal eats the click (OK/Cancel may yield a register
-                // write); else normal routing.
+                // write); else normal routing. A double-click toggles a
+                // breakpoint on the disasm line (bgb); a single click selects it.
                 let (consumed, outcome) = debugger::dialog_click(s, area, px, py);
                 let action = if consumed {
                     outcome
+                } else if double {
+                    debugger_double_click(s, area, gb, px, py)
                 } else {
                     debugger_left_click(s, area, gb, px, py)
                 };
@@ -330,6 +354,52 @@ impl ToolWindows {
         if let WinState::Debugger(s) = &mut view.state {
             s.pinned = false;
             view.window.request_redraw();
+        }
+    }
+
+    /// Scroll the debugger window's memory pane by `rows` rows of 16 bytes
+    /// (arrow keys; negative scrolls toward lower addresses). Redraws.
+    pub fn scroll_debugger_memory(&mut self, rows: i32) {
+        let Some(view) = self.debugger_view_mut() else {
+            return;
+        };
+        if let WinState::Debugger(s) = &mut view.state {
+            s.scroll_memory(rows);
+            view.window.request_redraw();
+        }
+    }
+
+    /// Page the debugger memory pane by one visible page in direction `dir` (±1)
+    /// (PageUp/PageDown); the page is the pane's visible row count. Redraws.
+    pub fn page_debugger_memory(&mut self, dir: i32) {
+        let Some(view) = self.debugger_view_mut() else {
+            return;
+        };
+        let area = view.area();
+        if let WinState::Debugger(s) = &mut view.state {
+            let l = debugger::DebuggerLayout::for_size(area.w, area.h);
+            let rows = (l.memory.h / line_height()).max(1);
+            s.scroll_memory(dir.signum() * rows);
+            view.window.request_redraw();
+        }
+    }
+
+    /// A mouse-wheel notch over tool window `id`'s memory pane scrolls it
+    /// (`y_lines` > 0 = wheel up = toward lower addresses); ignored elsewhere.
+    pub fn on_wheel(&mut self, id: WindowId, y_lines: f32) {
+        let Some(view) = self.views.get_mut(&id) else {
+            return;
+        };
+        let Some((px, py)) = view.cursor else {
+            return;
+        };
+        let area = view.area();
+        if let WinState::Debugger(s) = &mut view.state {
+            let l = debugger::DebuggerLayout::for_size(area.w, area.h);
+            if l.memory.contains(px, py) {
+                s.scroll_memory(-(y_lines.round() as i32) * 3);
+                view.window.request_redraw();
+            }
         }
     }
 
@@ -586,6 +656,19 @@ fn debugger_left_click(
         seen: gb.profile_seen(),
     };
     debugger::on_left_click(|a| gb.debug_read(a), area, s, r, px, py)
+}
+
+/// Glue for [`debugger::on_double_click`] (toggles a breakpoint on a
+/// double-clicked disasm line).
+fn debugger_double_click(
+    s: &debugger::DebuggerState,
+    area: Rect,
+    gb: &GameBoy,
+    px: i32,
+    py: i32,
+) -> Option<MenuOutcome> {
+    let r = gb.cpu_regs();
+    debugger::on_double_click(|a| gb.debug_read(a), area, s, r.pc, r.sp, px, py)
 }
 
 /// Glue for [`debugger::on_right_click`] (opens / dismisses the context menu).

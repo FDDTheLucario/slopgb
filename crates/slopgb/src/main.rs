@@ -33,6 +33,7 @@ mod ui;
 mod video;
 mod windows;
 
+use std::collections::HashSet;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process;
@@ -42,7 +43,7 @@ use std::time::{Duration, Instant};
 use slopgb_core::{Button, CLOCK_HZ, CYCLES_PER_FRAME, SCREEN_H, SCREEN_PIXELS, SCREEN_W};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
+use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
 use winit::window::{Window, WindowId};
@@ -203,6 +204,10 @@ struct App {
     dbg: dbg::Debugger,
     /// Current keyboard modifiers, for the focus-dependent key map (Ctrl+G).
     modifiers: ModifiersState,
+    /// Physically-held keys, for a platform-independent key-repeat guard (winit's
+    /// `KeyEvent::repeat` flag is unreliable on some Wayland compositors, so a
+    /// held step key would otherwise step repeatedly). See [`input::accept_key`].
+    held_keys: HashSet<KeyCode>,
     /// The open game-window right-click menu (bgb's `rc-main.png`), if any — its
     /// **own borderless window** (so it can extend past the game window's edge
     /// instead of being clipped), holding the main menu + open submenu.
@@ -290,6 +295,7 @@ impl App {
             tools: toolwin::ToolWindows::new(),
             dbg: dbg::Debugger::default(),
             modifiers: ModifiersState::empty(),
+            held_keys: HashSet::new(),
             info_box: None,
             path_dialog: None,
             path_purpose: PathPurpose::LoadRom,
@@ -400,6 +406,14 @@ impl App {
         if key.repeat {
             return;
         }
+        // Platform-independent key-repeat guard: some Wayland compositors don't
+        // set winit's `repeat` flag, so a held step key (F7/F3/F8) would step
+        // repeatedly. Drop a press for an already-held key; always honor releases.
+        if let PhysicalKey::Code(code) = key.physical_key {
+            if !input::accept_key(&mut self.held_keys, code, key.state.is_pressed()) {
+                return;
+            }
+        }
         // The key-rebind wizard (Joypad → "configure keyboard") is the topmost
         // game-window modal: every key is captured. Escape cancels the whole
         // wizard (edits discarded); any other key binds the current button and
@@ -471,11 +485,15 @@ impl App {
             return;
         };
         let pressed = key.state.is_pressed();
-        // Game Boy buttons resolve through the rebindable map first (any focus,
-        // matching bgb's joypad bindings), before the focus-specific actions.
-        if let Some(b) = self.bindings.button_for(code) {
-            self.set_button(code, b, pressed);
-            return;
+        // Game Boy buttons resolve through the rebindable map first, before the
+        // focus-specific actions — but only in the game window. A tool window
+        // (e.g. the debugger) must not drive the joypad, so its arrow keys can
+        // scroll the memory pane instead of moving the D-pad.
+        if focus == Focus::Game {
+            if let Some(b) = self.bindings.button_for(code) {
+                self.set_button(code, b, pressed);
+                return;
+            }
         }
         let Some(action) = input::map(code, self.modifiers, focus) else {
             return;
@@ -837,6 +855,14 @@ impl ApplicationHandler for App {
                         .on_cursor_moved(window_id, position.x, position.y);
                 }
                 WindowEvent::CursorLeft { .. } => self.tools.on_cursor_left(window_id),
+                // Mouse wheel scrolls the debugger memory pane (bgb).
+                WindowEvent::MouseWheel { delta, .. } => {
+                    let lines = match delta {
+                        MouseScrollDelta::LineDelta(_, y) => y,
+                        MouseScrollDelta::PixelDelta(p) => (p.y / 16.0) as f32,
+                    };
+                    self.tools.on_wheel(window_id, lines);
+                }
                 WindowEvent::MouseInput {
                     state: ElementState::Pressed,
                     button,
@@ -860,6 +886,12 @@ impl ApplicationHandler for App {
                         Focus::Game
                     };
                     self.handle_key(event_loop, &event, focus);
+                }
+                // No key-release events arrive after a tool window loses focus, so
+                // forget held keys — else a later press reads as a stuck repeat and
+                // is dropped by the key-repeat guard.
+                WindowEvent::Focused(false) | WindowEvent::Occluded(true) => {
+                    self.held_keys.clear();
                 }
                 _ => {}
             }

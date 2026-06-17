@@ -349,6 +349,49 @@ fn selecting_set_break_returns_a_toggle_breakpoint_action() {
 }
 
 #[test]
+fn scroll_memory_moves_the_base_by_rows_and_wraps() {
+    let mut st = DebuggerState {
+        mem_base: 0xFF00,
+        ..DebuggerState::default()
+    };
+    st.scroll_memory(-1);
+    assert_eq!(st.mem_base, 0xFEF0, "one row up = -16 bytes");
+    st.scroll_memory(2);
+    assert_eq!(st.mem_base, 0xFF10, "two rows down = +32 bytes");
+    // Page-sized and wrapping moves.
+    st.scroll_memory(8);
+    assert_eq!(st.mem_base, 0xFF90);
+    st.mem_base = 0xFFF0;
+    st.scroll_memory(1);
+    assert_eq!(st.mem_base, 0x0000, "wraps past the top of memory");
+    st.scroll_memory(-1);
+    assert_eq!(st.mem_base, 0xFFF0, "wraps past the bottom");
+}
+
+#[test]
+fn double_click_disasm_toggles_a_breakpoint() {
+    let l = DebuggerLayout::for_size(AREA.w, AREA.h);
+    let lh = line_height();
+    let st = DebuggerState::default();
+    // Row 2 of the disasm pane = pc + 2 = 0x0102 (NOPS = 1-byte lines).
+    let (px, py) = (l.disasm.x + 9, l.disasm.y + 2 * lh + 1);
+    assert_eq!(
+        on_double_click(NOPS, AREA, &st, 0x0100, 0xFFFE, px, py),
+        Some(MenuOutcome::Act(DebugAction::ToggleBreakpoint(0x0102))),
+        "double-click on a disasm line toggles its breakpoint"
+    );
+    // Off the disasm pane (the menu bar) it does nothing.
+    assert_eq!(
+        on_double_click(NOPS, AREA, &st, 0x0100, 0xFFFE, l.menu.x + 2, l.menu.y + 1),
+        None
+    );
+    // With a context menu open, a double-click is swallowed.
+    let mut st2 = DebuggerState::default();
+    on_right_click(NOPS, AREA, &mut st2, 0x0100, 0xFFFE, px, py);
+    assert!(on_double_click(NOPS, AREA, &st2, 0x0100, 0xFFFE, px, py).is_none());
+}
+
+#[test]
 fn copy_data_and_code_route_to_clipboard_actions() {
     use crate::input::Action;
     // RM10: the formerly-greyed Copy rows (indices 2/3) are live + carry the

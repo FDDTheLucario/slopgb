@@ -274,6 +274,12 @@ impl DebuggerState {
     pub fn disasm_start(&self, pc: u16) -> u16 {
         if self.pinned { self.disasm_base } else { pc }
     }
+
+    /// Scroll the memory pane by `rows` (each row is 16 bytes; negative scrolls to
+    /// lower addresses), wrapping the base around the 64 KiB space.
+    pub fn scroll_memory(&mut self, rows: i32) {
+        self.mem_base = self.mem_base.wrapping_add(rows.wrapping_mul(16) as u16);
+    }
 }
 
 /// Which pane a `Go to…` repositions (RM5).
@@ -595,6 +601,29 @@ pub fn on_left_click(
         st.cursor = Some(a);
     }
     None
+}
+
+/// Handle a left **double**-click: bgb toggles a breakpoint on the double-clicked
+/// disassembly line. Returns the toggle outcome, or `None` when a menu is open or
+/// the click isn't on a disasm line (the paired single-click already moved the
+/// cursor). Pure over `read`, so it tests headless.
+#[must_use]
+pub fn on_double_click(
+    read: impl Fn(u16) -> u8,
+    area: Rect,
+    st: &DebuggerState,
+    pc: u16,
+    sp: u16,
+    px: i32,
+    py: i32,
+) -> Option<MenuOutcome> {
+    if st.menu.is_some() {
+        return None;
+    }
+    match target_at(read, area, st, pc, sp, px, py) {
+        ClickTarget::Disasm(a) => Some(MenuOutcome::Act(DebugAction::ToggleBreakpoint(a))),
+        _ => None,
+    }
 }
 
 /// The current value of a register pair, for seeding the "edit register" prompt.

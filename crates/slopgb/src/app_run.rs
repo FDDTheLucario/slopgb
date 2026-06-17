@@ -111,6 +111,8 @@ impl App {
             }
             Action::DbgGoto => self.tools.open_debugger_goto(),
             Action::DbgGoToPc => self.tools.debugger_goto_pc(),
+            Action::DbgMemScroll(rows) => self.tools.scroll_debugger_memory(rows),
+            Action::DbgMemPage(dir) => self.tools.page_debugger_memory(dir),
             // bp/wp manager (RM15): build a list popup from the App-owned sets
             // (each row clears its entry) and hand it to the debugger window.
             Action::DbgManageBreakpoints => {

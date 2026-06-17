@@ -38,9 +38,9 @@ byte-identical); no new core deps / no unsafe; every `.rs` < 1000 lines; clippy
 | 12 | opus | BG map render: per-tile palette/bank/flip | 1 | **done** |
 | 13 | sonnet | wire viewport wrap into render_bgmap | 2 | **done** |
 | 14 | sonnet | BG⇄WIN toggle + window tilemap + WX/WY box | 3 | **done** |
-| 15 | sonnet | App held-KeyCode repeat guard (held F7/F3 step once) | — | todo |
-| 16 | sonnet | disasm double-click toggles breakpoint | — | todo |
-| 17 | sonnet | memory viewer nav: wheel + PgUp/Dn + arrows | — | todo |
+| 15 | sonnet | App held-KeyCode repeat guard (held F7/F3 step once) | — | **done** |
+| 16 | sonnet | disasm double-click toggles breakpoint | — | **done** |
+| 17 | sonnet | memory viewer nav: wheel + PgUp/Dn + arrows | — | **done** |
 | 18 | sonnet | symbols in disasm: labels + operand substitution | 4,12 | todo |
 | 19 | sonnet | load `.sym` via path modal (PathPurpose::SymbolFile) | 4 | todo |
 | 20 | sonnet | go-to by symbol name (fallback hex) | 4,5 | todo |

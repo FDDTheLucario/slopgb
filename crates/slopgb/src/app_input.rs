@@ -77,6 +77,10 @@ impl App {
     /// they stick.
     pub(crate) fn release_all_input(&mut self) {
         self.buttons.clear();
+        // No release events will arrive for the keys held at focus loss, so forget
+        // them — else a later fresh press would look like a still-held repeat and
+        // be dropped by the key-repeat guard.
+        self.held_keys.clear();
         self.input_ops.clear(); // drop any deferred press; we're releasing all
         for b in [
             Button::A,
