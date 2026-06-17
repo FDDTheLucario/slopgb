@@ -71,49 +71,139 @@ Main:
     or c
     jr nz, .copyLogo
 
-    ; --- CGB BG palette 0: index0 = white, indices 1..3 = black (BGR555), so the
-    ; logo letters show dark whichever shade rgbgfx assigned them ---
-    ld a, $80                    ; auto-increment, index 0
+    ; --- all 8 CGB BG palettes start: index0 white, indices 1..3 black (the
+    ; logo letters start dark; the colored wipe lights each palette's hue in turn)
+    ld a, $80                    ; auto-increment from index 0
     ldh [rBGPI], a
+    ld c, 8                      ; 8 palettes
+.palOuter:
     ld a, $FF                    ; index0 white lo ($7FFF)
     ldh [rBGPD], a
-    ld a, $7F                    ; index0 white hi
+    ld a, $7F
     ldh [rBGPD], a
-    xor a                        ; indices 1..3 = black ($0000)
+    xor a                        ; indices 1..3 = black
     ld b, 6
-.bgpClear:
+.palInner:
     ldh [rBGPD], a
     dec b
-    jr nz, .bgpClear
+    jr nz, .palInner
+    dec c
+    jr nz, .palOuter
 
-    ; --- build the BG tilemap: place the 11x2 logo centred ---
-    ; top-left at col (20-11)/2 = 4, row (18-2)/2 = 8 -> $9800 + 8*32 + 4.
+    ; --- build the BG tilemap (bank 0): the 11x2 logo centred at col 4, row 8 ---
     ld hl, $9800 + 8*32 + 4
     ld d, 1                      ; first logo tile index
     ld c, LOGO_ROWS
-.row:
+.maprow:
     ld b, LOGO_COLS
-.col:
+.mapcol:
     ld a, d
     ld [hl+], a
     inc d
     dec b
-    jr nz, .col
-    ; advance hl to the same column on the next tile row (+32 - LOGO_COLS)
+    jr nz, .mapcol
     push bc
     ld bc, 32 - LOGO_COLS
     add hl, bc
     pop bc
     dec c
-    jr nz, .row
+    jr nz, .maprow
+
+    ; --- BG attribute map (bank 1): each logo column uses palette = column index
+    ; (0..7, the rightmost columns capped at 7) so colour can wipe across them ---
+    ld a, 1
+    ldh [rVBK], a
+    ld hl, $9800 + 8*32 + 4
+    ld c, LOGO_ROWS
+.attrrow:
+    ld b, 0                      ; column counter -> palette index
+.attrcol:
+    ld a, b
+    cp 8
+    jr c, .attrok
+    ld a, 7                      ; cap at palette 7
+.attrok:
+    ld [hl+], a
+    inc b
+    ld a, b
+    cp LOGO_COLS
+    jr nz, .attrcol
+    push bc
+    ld bc, 32 - LOGO_COLS
+    add hl, bc
+    pop bc
+    dec c
+    jr nz, .attrrow
+    xor a
+    ldh [rVBK], a                ; back to bank 0
 
     ; --- LCD on: BG enabled, $8000 tile data, $9800 BG map ---
     ld a, $91
     ldh [rLCDC], a
 
-    ; --- P2: hold on the logo (animation + chime + hand-off come later) ---
+    ; --- CGB colored wipe: light each palette's hue left-to-right ---
+    ld c, 0                      ; palette index 0..7
+.wipe:
+    call SetHue                  ; palette C := Hues[C]
+    ld b, 8                      ; ~8 frames per column band
+.wipeWait:
+    call WaitFrame
+    dec b
+    jr nz, .wipeWait
+    inc c
+    ld a, c
+    cp 8
+    jr nz, .wipe
+
+    ; --- P3: hold on the colored logo (chime + hand-off come later) ---
 .hold:
     jr .hold
+
+; Set CGB BG palette C's letter colours (indices 1..3) to Hues[C].
+SetHue:
+    ld a, c
+    add a, a
+    ld e, a                      ; E = C*2 (index into 2-byte Hues table)
+    ld d, 0
+    ld hl, Hues
+    add hl, de                   ; HL -> Hues[C]
+    ld a, c
+    add a, a
+    add a, a
+    add a, a                     ; A = C*8 (palette base)
+    add a, 2                     ; +2 -> palette index 1
+    or $80                       ; auto-increment
+    ldh [rBGPI], a
+    ld a, [hl+]                  ; colour lo
+    ld d, a
+    ld e, [hl]                   ; colour hi
+    ; write the colour to indices 1,2,3
+    ld b, 3
+.sh:
+    ld a, d
+    ldh [rBGPD], a
+    ld a, e
+    ldh [rBGPD], a
+    dec b
+    jr nz, .sh
+    ret
+
+; Wait for one frame (one rising edge of v-blank, LY 143 -> 144).
+WaitFrame:
+.notVbl:
+    ldh a, [rLY]
+    cp 144
+    jr nz, .notVbl
+.inVbl:
+    ldh a, [rLY]
+    cp 144
+    jr z, .inVbl
+    ret
+
+; 8 rainbow hues (BGR555 little-endian): red, orange, yellow, green, cyan,
+; blue, indigo, magenta — the colour the wipe paints the logo letters.
+Hues:
+    dw $001F, $01FF, $03FF, $03E0, $7FE0, $7C00, $7C0F, $7C1F
 
 SECTION "logo", ROM0[$0300]
 LogoTiles:
