@@ -621,3 +621,43 @@ fn ime_accessors_track_the_ei_delay() {
     assert!(gb.ime(), "IME enabled one instruction after EI");
     assert!(!gb.ime_pending(), "pending cleared once applied");
 }
+
+/// Link task 7: the GameBoy link API is inert when disconnected and toggles
+/// the connection when used.
+#[test]
+fn gameboy_link_api_inert_when_disconnected() {
+    let mut gb = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
+    assert!(!gb.link_connected());
+    assert_eq!(gb.link_take_send(), None);
+    // No slave transfer armed: a delivered byte is a no-op raising no serial IF.
+    assert_eq!(gb.link_slave_transfer(0x12), None);
+    assert_eq!(gb.debug_read(0xFF0F) & 0x08, 0, "no spurious serial IF");
+    gb.link_connect(true);
+    assert!(gb.link_connected());
+    gb.link_connect(false);
+    assert!(!gb.link_connected());
+}
+
+/// Link task 5: link state is transient — never serialized. A save taken with
+/// a peer attached restores into a machine with no peer, and adds no bytes to
+/// the state blob (the on-disk format is unchanged → golden-safe).
+#[test]
+fn link_state_is_not_serialized() {
+    let a = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
+    let baseline = a.save_state();
+    let mut a = a;
+    a.link_connect(true);
+    a.link_push_recv(0xA5);
+    let with_link = a.save_state();
+    assert_eq!(
+        with_link.len(),
+        baseline.len(),
+        "link adds no bytes to the save state"
+    );
+    let mut b = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
+    b.load_state(&with_link).unwrap();
+    assert!(
+        !b.link_connected(),
+        "link state is not restored from a save"
+    );
+}

@@ -56,7 +56,7 @@ impl App {
                 return (0, false);
             };
             while frames < MAX_FRAMES_PER_WAKE && pipe.needs_more() && !hit {
-                hit = run_one_frame(&mut self.session.gb, &bps);
+                hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link);
                 pipe.pump(&mut self.session.gb);
                 frames += 1;
             }
@@ -78,7 +78,7 @@ impl App {
         let mut frames = 0;
         let mut hit = false;
         while frames < MAX_FRAMES_PER_WAKE && self.next_frame <= now && !hit {
-            hit = run_one_frame(&mut self.session.gb, &bps);
+            hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link);
             self.discard_audio();
             self.next_frame += interval;
             frames += 1;
@@ -96,7 +96,7 @@ impl App {
         let mut frames = 0;
         let mut hit = false;
         while start.elapsed() < TURBO_BUDGET && frames < cap && !hit {
-            hit = run_one_frame(&mut self.session.gb, &bps);
+            hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link);
             match &mut self.audio {
                 // The queue keeps ~250 ms and drops the rest.
                 Some(pipe) if !muted => pipe.pump(&mut self.session.gb),
@@ -140,16 +140,24 @@ impl App {
     }
 }
 
-/// Run one frame, halting early at a breakpoint when armed. A free function (not
-/// a method) so the pacers can call it while the audio pipe holds `&mut
-/// self.audio` — borrowing only the machine, not all of `self`. Returns whether
-/// a breakpoint stopped the frame.
-fn run_one_frame(gb: &mut GameBoy, breakpoints: &Option<Vec<u16>>) -> bool {
-    match breakpoints {
+/// Run one frame, halting early at a breakpoint when armed, then pump the serial
+/// link (swap any completed-transfer byte with the peer). A free function (not a
+/// method) so the pacers can call it while the audio pipe holds `&mut
+/// self.audio` — it borrows only the disjoint machine + link fields, not all of
+/// `self`. `link.pump` is a no-op when no peer is connected. Returns whether a
+/// breakpoint stopped the frame.
+fn run_one_frame(
+    gb: &mut GameBoy,
+    breakpoints: &Option<Vec<u16>>,
+    link: &mut crate::link::Link,
+) -> bool {
+    let hit = match breakpoints {
         Some(list) => gb.run_frame_until_breakpoint(list).is_some(),
         None => {
             gb.run_frame();
             false
         }
-    }
+    };
+    link.pump(gb);
+    hit
 }

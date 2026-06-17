@@ -262,3 +262,21 @@ fn serial_transfer_requests_if_bit3() {
     assert_eq!(b.read(0xFF0F) & 0x08, 0x08);
     assert_eq!(b.read(0xFF01), 0xFF);
 }
+
+/// Link task 4: completing an armed external-clock (slave) transfer folds the
+/// serial interrupt (IF bit 3) into the bus's IF register; an idle port raises
+/// none (golden-safe).
+#[test]
+fn link_slave_transfer_raises_serial_if() {
+    let mut b = ic(Model::Dmg);
+    b.write(0xFF01, 0x34); // slave's outgoing byte
+    b.write(0xFF02, 0x80); // armed: bit 7 set, external clock (bit 0 clear)
+    assert_eq!(b.link_slave_transfer(0x12), Some(0x34));
+    assert_eq!(b.read(0xFF0F) & 0x08, 0x08, "serial IF raised");
+    assert_eq!(b.read(0xFF01), 0x12, "slave received the master byte");
+
+    // Idle port (no transfer pending): a delivered byte is a no-op, no IF.
+    let mut idle = ic(Model::Dmg);
+    assert_eq!(idle.link_slave_transfer(0x12), None);
+    assert_eq!(idle.read(0xFF0F) & 0x08, 0, "no spurious serial IF");
+}

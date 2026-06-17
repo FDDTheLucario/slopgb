@@ -26,6 +26,7 @@ pub enum SubKind {
     Other,
     State,
     RecentRoms,
+    Link,
 }
 
 /// What clicking a main-menu row does: run a shared frontend [`Action`], open a
@@ -146,7 +147,10 @@ fn entries(sound_on: bool) -> Vec<(MenuItem, MenuEffect)> {
             MenuItem::new("Window size").submenu(),
             MenuEffect::Submenu(SubKind::WindowSize),
         ),
-        (MenuItem::new("Link").submenu().disabled(), MenuEffect::None),
+        (
+            MenuItem::new("Link").submenu(),
+            MenuEffect::Submenu(SubKind::Link),
+        ),
         (
             MenuItem::new("Recent ROMs").submenu(),
             MenuEffect::Submenu(SubKind::RecentRoms),
@@ -192,6 +196,14 @@ pub enum SubChoice {
     LoadState,
     /// Recent ROMs → load the recent-list entry at this index (MN4).
     LoadRecent(usize),
+    /// Link → "Listen": bind the link port and wait for a peer.
+    LinkListen,
+    /// Link → "Connect": open the host:port modal to dial a peer.
+    LinkConnect,
+    /// Link → "Disconnect": tear down a connected link.
+    LinkDisconnect,
+    /// Link → "Cancel listen": stop a listening (not-yet-connected) link.
+    LinkCancelListen,
 }
 
 /// An open child submenu (Window size or Sound channel): its kind, box origin
@@ -246,6 +258,17 @@ impl SubMenu {
     pub fn recent_roms(parent_row: Rect, names: &[String]) -> Self {
         let (items, choices) = recent_roms_items(names).into_iter().unzip();
         Self::hang(SubKind::RecentRoms, parent_row, items, choices)
+    }
+
+    /// Open the [`SubKind::Link`] submenu (`main-sub-link.png`): Listen /
+    /// Connect / Disconnect / Cancel listen. Rows grey by link state —
+    /// Listen/Connect only while idle, Cancel listen only while `listening`,
+    /// Disconnect whenever a socket is `active` but not listening (so a pending
+    /// dial can be aborted as well as a live connection torn down).
+    #[must_use]
+    pub fn link(parent_row: Rect, active: bool, listening: bool) -> Self {
+        let (items, choices) = link_items(active, listening).into_iter().unzip();
+        Self::hang(SubKind::Link, parent_row, items, choices)
     }
 
     /// Shared constructor: hang a submenu off the right edge of `parent_row`,
@@ -370,6 +393,32 @@ fn state_items() -> Vec<(MenuItem, Option<SubChoice>)> {
         ),
         (MenuItem::new("Load recovery state").disabled(), None),
         (MenuItem::new("Load state..."), Some(SubChoice::LoadState)),
+    ]
+}
+
+/// The Link rows (`main-sub-link.png`): Listen / Connect / Disconnect / Cancel
+/// listen. A row is enabled (carries its [`SubChoice`]) only when meaningful:
+/// Listen/Connect while idle (no socket), Cancel listen while `listening`,
+/// Disconnect whenever a socket is `active` but not listening (a pending dial
+/// or a live connection); the rest render greyed — bgb's enable/grey behavior.
+fn link_items(active: bool, listening: bool) -> Vec<(MenuItem, Option<SubChoice>)> {
+    let idle = !active;
+    let row = |label: &str, enabled: bool, choice: SubChoice| {
+        if enabled {
+            (MenuItem::new(label), Some(choice))
+        } else {
+            (MenuItem::new(label).disabled(), None)
+        }
+    };
+    vec![
+        row("Listen", idle, SubChoice::LinkListen),
+        row("Connect", idle, SubChoice::LinkConnect),
+        row(
+            "Disconnect",
+            active && !listening,
+            SubChoice::LinkDisconnect,
+        ),
+        row("Cancel listen", listening, SubChoice::LinkCancelListen),
     ]
 }
 

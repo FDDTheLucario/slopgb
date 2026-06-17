@@ -92,8 +92,9 @@ fn supported_rows_run_their_action_window_size_opens_a_submenu_rest_none() {
     // Load ROM (MN4) opens the path modal; Recent ROMs (MN4) opens its submenu.
     assert_eq!(m.effects[1], MenuEffect::Run(Action::MainLoadRom));
     assert_eq!(m.effects[13], MenuEffect::Submenu(SubKind::RecentRoms));
-    // Only the Link row stays a not-yet-wired stub.
-    assert_eq!(m.effects[12], MenuEffect::None, "Link is a stub");
+    // Link opens its submenu (rows grey by connection state — see
+    // link_submenu_greys_rows_by_state).
+    assert_eq!(m.effects[12], MenuEffect::Submenu(SubKind::Link));
 }
 
 #[test]
@@ -115,10 +116,7 @@ fn submenu_rows_show_the_arrow_window_size_enabled_others_greyed() {
     assert!(m.items[9].enabled, "Other is wired (MN5)");
     assert!(m.items[8].enabled, "State is wired (MN6)");
     assert!(m.items[13].enabled, "Recent ROMs is wired (MN4)");
-    assert!(
-        !m.items[12].enabled,
-        "Link stays greyed until its milestone"
-    );
+    assert!(m.items[12].enabled, "Link is wired");
     assert!(m.items[1].enabled, "Load ROM is wired (MN4)");
     assert!(
         !m.items[1].submenu,
@@ -142,8 +140,12 @@ fn effect_at_resolves_only_enabled_rows() {
         m.effect_at(at(&m, 1).0, at(&m, 1).1),
         MenuEffect::Run(Action::MainLoadRom)
     );
-    // A still-greyed row (Link) + a point outside the box resolve to None.
-    assert_eq!(m.effect_at(at(&m, 12).0, at(&m, 12).1), MenuEffect::None);
+    // Link (row 12) now opens its submenu; a point outside the box resolves to
+    // None (greyed-row → None is exercised by the submenu tests).
+    assert_eq!(
+        m.effect_at(at(&m, 12).0, at(&m, 12).1),
+        MenuEffect::Submenu(SubKind::Link)
+    );
     assert_eq!(m.effect_at(-50, -50), MenuEffect::None);
 }
 
@@ -169,10 +171,10 @@ fn hover_at_tracks_the_enabled_row_and_reports_changes() {
         "same row → no change"
     );
     assert!(
-        m.hover_at(at(&m, 12).0, at(&m, 12).1),
-        "leaving Pause changes hover"
+        m.hover_at(-50, -50),
+        "leaving Pause for empty space changes hover"
     );
-    assert_eq!(m.hovered, None, "greyed row (Link) is not hovered");
+    assert_eq!(m.hovered, None, "an off-row point is not hovered");
 }
 
 #[test]
@@ -416,4 +418,39 @@ fn recent_roms_submenu_lists_entries_or_a_greyed_placeholder() {
     assert_eq!(s.choices[0], Some(SubChoice::LoadRecent(0)));
     assert_eq!(s.choices[1], Some(SubChoice::LoadRecent(1)));
     assert!(s.items.iter().all(|i| i.enabled));
+}
+
+// --- Link submenu ----------------------------------------------------------
+
+#[test]
+fn link_submenu_greys_rows_by_state() {
+    // `SubMenu::link(active, listening)`. Order matches main-sub-link.png:
+    // Listen / Connect / Disconnect / Cancel listen.
+    let labels = |s: &SubMenu| -> Vec<String> { s.items.iter().map(|i| i.label.clone()).collect() };
+    let idle = SubMenu::link(PARENT, false, false);
+    assert_eq!(idle.kind, SubKind::Link);
+    assert_eq!(
+        labels(&idle),
+        ["Listen", "Connect", "Disconnect", "Cancel listen"]
+    );
+    // Idle (no socket): Listen + Connect enabled; Disconnect + Cancel greyed.
+    assert_eq!(idle.choices[0], Some(SubChoice::LinkListen));
+    assert_eq!(idle.choices[1], Some(SubChoice::LinkConnect));
+    assert_eq!(idle.choices[2], None, "Disconnect greyed when idle");
+    assert_eq!(idle.choices[3], None, "Cancel listen greyed when idle");
+
+    // Active + not listening (dialing or connected): only Disconnect is live —
+    // it both aborts a pending dial and tears down a live connection.
+    let conn = SubMenu::link(PARENT, true, false);
+    assert_eq!(conn.choices[0], None, "Listen greyed while active");
+    assert_eq!(conn.choices[1], None, "Connect greyed while active");
+    assert_eq!(conn.choices[2], Some(SubChoice::LinkDisconnect));
+    assert_eq!(conn.choices[3], None);
+
+    // Listening (active, waiting for a peer): only Cancel listen is live.
+    let listen = SubMenu::link(PARENT, true, true);
+    assert_eq!(listen.choices[0], None, "Listen greyed while listening");
+    assert_eq!(listen.choices[1], None, "Connect greyed while listening");
+    assert_eq!(listen.choices[2], None, "Disconnect greyed while listening");
+    assert_eq!(listen.choices[3], Some(SubChoice::LinkCancelListen));
 }

@@ -152,6 +152,7 @@ impl App {
             SubKind::Other => SubMenu::other(row),
             SubKind::State => SubMenu::state(row),
             SubKind::RecentRoms => SubMenu::recent_roms(row, &self.recent_names()),
+            SubKind::Link => SubMenu::link(row, self.link.is_active(), self.link.is_listening()),
         }
     }
 
@@ -197,6 +198,29 @@ impl App {
                 if let Some(p) = self.recent.get(i).cloned() {
                     self.load_dropped(&p);
                 }
+            }
+            // Link submenu: bind/dial/tear-down the serial link transport. Each
+            // refreshes the title so its link-status suffix tracks immediately
+            // (the connecting→linked transition is async, refreshed by the FPS
+            // tick; these synchronous transitions are reflected at once).
+            SubChoice::LinkListen => {
+                match self.link.listen() {
+                    Ok(()) => println!(
+                        "slopgb: link listening on port {}",
+                        self.link.port().unwrap_or(crate::link::DEFAULT_PORT)
+                    ),
+                    Err(e) => eprintln!("slopgb: link listen failed: {e}"),
+                }
+                self.update_title();
+            }
+            SubChoice::LinkConnect => {
+                self.open_path_prompt("Connect to (host:port)", crate::PathPurpose::LinkConnect);
+            }
+            // Disconnect and Cancel listen both tear the socket down + detach
+            // the core peer (bgb shows them as distinct rows; the effect is one).
+            SubChoice::LinkDisconnect | SubChoice::LinkCancelListen => {
+                self.link.disconnect(&mut self.session.gb);
+                self.update_title();
             }
         }
     }

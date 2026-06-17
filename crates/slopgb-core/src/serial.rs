@@ -20,10 +20,17 @@
 //! raise IF). In CGB double speed the DIV counter itself runs twice as
 //! fast, yielding the documented 16384 Hz / 524288 Hz rates.
 
+use std::collections::VecDeque;
+
 /// Cap on the harness output buffer: a frontend that never calls
 /// `take_output` must not grow it without limit. 64 KiB is far more text
 /// than any test ROM prints; completions past the cap are dropped.
 const OUT_CAPTURE_CAP: usize = 64 * 1024;
+
+/// Cap on each link byte queue. Several transfers can complete (or arrive) in
+/// one emulated frame, so the link bytes are queued — but bounded, so a peer
+/// flooding faster than the frontend drains can't grow them without limit.
+const LINK_QUEUE_CAP: usize = 256;
 
 #[derive(Clone)]
 pub struct Serial {
@@ -45,6 +52,22 @@ pub struct Serial {
     /// Completed internal-clock transfer bytes awaiting [`Self::take_output`]
     /// (test-harness hook: blargg ROMs print via SB/SC).
     out_buf: Vec<u8>,
+    /// --- Link cable (frontend TCP peer; all golden-safe / inert when off) ---
+    /// Whether a link peer is attached. Defaults `false`; only the frontend
+    /// `GameBoy::link_connect` ever sets it, so every golden path keeps it off.
+    link_connected: bool,
+    /// Peer bytes to shift into upcoming internal-clock (master) transfers,
+    /// MSB-first, one consumed per completed transfer. **Empty** ⇒ the no-peer
+    /// path: 1s shift in, exactly as the cable-disconnected hardware. The
+    /// connected incoming-bit branch is gated on the front being present, so a
+    /// disconnected (empty-queue) port is byte-identical. A queue (not a single
+    /// slot) so multiple peer bytes arriving in one frame aren't lost.
+    link_in: VecDeque<u8>,
+    /// Bytes master transfers shifted out, awaiting [`Self::take_link_send`]
+    /// for the frontend to ship to the peer. Only pushed while
+    /// [`Self::link_connected`]; queued (not a single slot) so multiple
+    /// completions in one frame aren't lost.
+    link_out: VecDeque<u8>,
 }
 
 impl Serial {
@@ -60,6 +83,9 @@ impl Serial {
             prev_div: 0,
             out_shift: 0,
             out_buf: Vec::new(),
+            link_connected: false,
+            link_in: VecDeque::new(),
+            link_out: VecDeque::new(),
         }
     }
 
@@ -82,9 +108,16 @@ impl Serial {
         if self.master_clock || self.sc & 0x81 != 0x81 {
             return 0;
         }
-        // MSB out first; no peer, so 1 bits come in.
+        // MSB out first. Incoming bit: the front peer byte shifts in MSB-first
+        // when attached (peeked, stable across the 8 shifts, consumed at
+        // completion); with no peer (`link_in` empty) it is the literal `1` of
+        // the cable-disconnected hardware — the only golden path, byte-identical.
+        let incoming = match self.link_in.front() {
+            Some(&peer) => (peer >> (7 - self.shifted)) & 1,
+            None => 1,
+        };
         self.out_shift = (self.out_shift << 1) | (self.sb >> 7);
-        self.sb = (self.sb << 1) | 1;
+        self.sb = (self.sb << 1) | incoming;
         self.shifted += 1;
         if self.shifted == 8 {
             self.shifted = 0;
@@ -96,6 +129,13 @@ impl Serial {
             if self.out_buf.len() < OUT_CAPTURE_CAP {
                 self.out_buf.push(self.out_shift);
             }
+            // Link: hand the outgoing byte to the frontend and consume the
+            // peer byte (one byte per transfer). Both inert when disconnected
+            // (`link_connected` off + empty queue); bounded so they can't grow.
+            if self.link_connected && self.link_out.len() < LINK_QUEUE_CAP {
+                self.link_out.push_back(self.out_shift);
+            }
+            self.link_in.pop_front();
             return 0x08;
         }
         0
@@ -133,6 +173,58 @@ impl Serial {
     /// (test-harness hook; see [`OUT_CAPTURE_CAP`]).
     pub(crate) fn take_output(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.out_buf)
+    }
+
+    // --- Link cable (frontend TCP peer; inert when disconnected) ------------
+
+    /// Attach/detach a link peer. Detaching also clears any pending peer bytes
+    /// and queued sends so a later reconnect starts clean.
+    pub(crate) fn set_link_connected(&mut self, on: bool) {
+        self.link_connected = on;
+        if !on {
+            self.link_in.clear();
+            self.link_out.clear();
+        }
+    }
+
+    /// Whether a link peer is attached.
+    pub(crate) fn link_connected(&self) -> bool {
+        self.link_connected
+    }
+
+    /// Enqueue a peer byte for an upcoming master transfer to shift in
+    /// (MSB-first, FIFO). Bounded ([`LINK_QUEUE_CAP`]); excess is dropped.
+    pub(crate) fn push_link_in(&mut self, byte: u8) {
+        if self.link_in.len() < LINK_QUEUE_CAP {
+            self.link_in.push_back(byte);
+        }
+    }
+
+    /// Drain the next byte a completed master transfer shifted out (for the
+    /// frontend to ship to the peer), oldest first. `None` when nothing is
+    /// queued.
+    pub(crate) fn take_link_send(&mut self) -> Option<u8> {
+        self.link_out.pop_front()
+    }
+
+    /// Complete a pending **external-clock** (slave) transfer with the peer's
+    /// (master's) byte: a slave is armed when SC bit 7 is set and bit 0 is
+    /// clear (external clock) — with no peer it never advances. Swaps SB with
+    /// `master_byte` (the slave receives the master's byte and its own old SB
+    /// goes back out), clears the transfer-in-progress flag, and returns
+    /// `(outgoing_byte, IF bits)`. When not armed it is a no-op returning
+    /// `(None, 0)` — so a disconnected/idle port is unchanged.
+    pub(crate) fn link_slave_transfer(&mut self, master_byte: u8) -> (Option<u8>, u8) {
+        // Armed slave: transfer in progress (bit 7) on the external clock
+        // (bit 0 clear). On CGB the fast-clock bit (1) is don't-care here.
+        if self.sc & 0x81 != 0x80 {
+            return (None, 0);
+        }
+        let outgoing = self.sb;
+        self.sb = master_byte;
+        self.sc &= 0x7F; // transfer done
+        self.shifted = 0;
+        (Some(outgoing), 0x08)
     }
 
     /// Read FF01/FF02.
@@ -621,6 +713,212 @@ mod tests {
             run_until_irq(&mut s, &mut div, 100).unwrap();
         }
         assert_eq!(s.take_output().len(), 64 * 1024);
+    }
+
+    // ---- link cable ----
+
+    /// Golden-safety: with no peer attached (`link_in` empty) a master transfer
+    /// shifts in 1s exactly as the cable-disconnected hardware. Same assertion
+    /// as `transfer_completes_on_eighth_shift` — guards the new injection
+    /// branch against perturbing the no-peer path.
+    #[test]
+    fn disconnected_master_transfer_byte_identical() {
+        let mut s = Serial::new(false);
+        let mut div = 0u16;
+        s.set_link_connected(true); // connected but no peer byte buffered
+        s.write(0xFF01, 0x00);
+        s.write(0xFF02, 0x81);
+        assert_eq!(run_until_irq(&mut s, &mut div, 2000), Some(8 * 512));
+        assert_eq!(s.read(0xFF01), 0xFF); // 1s shifted in — unchanged
+    }
+
+    /// A connected master transfer shifts the injected peer byte in MSB-first;
+    /// after 8 shifts SB holds the full peer byte.
+    #[test]
+    fn connected_master_shifts_in_peer_byte() {
+        let mut s = Serial::new(false);
+        let mut div = 0u16;
+        s.set_link_connected(true);
+        s.push_link_in(0xA5);
+        s.write(0xFF01, 0x00);
+        s.write(0xFF02, 0x81);
+        run_until_irq(&mut s, &mut div, 2000).unwrap();
+        assert_eq!(s.read(0xFF01), 0xA5);
+    }
+
+    /// Partial MSB-first order: after 4 of 8 shifts of peer 0xF0, SB top
+    /// nibble holds 0xF0's top nibble shifted down (`0x0F`).
+    #[test]
+    fn connected_master_incoming_is_msb_first() {
+        let mut s = Serial::new(false);
+        let mut div = 0u16;
+        s.set_link_connected(true);
+        s.push_link_in(0xF0);
+        s.write(0xFF01, 0x00);
+        s.write(0xFF02, 0x81);
+        while div < 4 * 512 {
+            step(&mut s, &mut div);
+        }
+        assert_eq!(s.read(0xFF01), 0x0F); // four 1s (0xF0 MSBs) in the low bits
+    }
+
+    /// Task 2: a completed master transfer queues its outgoing byte for the
+    /// frontend only while connected; disconnected leaves nothing.
+    #[test]
+    fn connected_master_completion_queues_send() {
+        let mut s = Serial::new(false);
+        let mut div = 0u16;
+        s.set_link_connected(true);
+        s.write(0xFF01, 0x3C);
+        s.write(0xFF02, 0x81);
+        assert_eq!(s.take_link_send(), None, "nothing before completion");
+        run_until_irq(&mut s, &mut div, 2000).unwrap();
+        assert_eq!(s.take_link_send(), Some(0x3C));
+        assert_eq!(s.take_link_send(), None, "take drains");
+    }
+
+    #[test]
+    fn disconnected_take_link_send_is_none() {
+        let mut s = Serial::new(false);
+        let mut div = 0u16;
+        s.write(0xFF01, 0x3C);
+        s.write(0xFF02, 0x81);
+        run_until_irq(&mut s, &mut div, 2000).unwrap();
+        assert_eq!(s.take_link_send(), None);
+    }
+
+    /// The peer byte is consumed per transfer: a second transfer with no fresh
+    /// byte falls back to the 1s path.
+    #[test]
+    fn link_in_consumed_after_one_transfer() {
+        let mut s = Serial::new(false);
+        let mut div = 0u16;
+        s.set_link_connected(true);
+        s.push_link_in(0xA5);
+        s.write(0xFF01, 0x00);
+        s.write(0xFF02, 0x81);
+        run_until_irq(&mut s, &mut div, 2000).unwrap();
+        assert_eq!(s.read(0xFF01), 0xA5);
+        s.write(0xFF01, 0x00);
+        s.write(0xFF02, 0x81); // no new peer byte
+        run_until_irq(&mut s, &mut div, 2000).unwrap();
+        assert_eq!(s.read(0xFF01), 0xFF, "no stale peer byte reused");
+    }
+
+    /// Task 3: an armed external-clock slave completes when the frontend
+    /// delivers the master's byte — SB ↔ master byte, SC bit 7 cleared, IF
+    /// bit 3 raised, the slave's old SB returned for the peer.
+    #[test]
+    fn slave_pending_completes_and_returns_byte() {
+        let mut s = Serial::new(false);
+        s.write(0xFF01, 0x34); // slave's outgoing byte
+        s.write(0xFF02, 0x80); // bit7 set, external clock (bit0 clear): armed
+        let (out, iff) = s.link_slave_transfer(0x12);
+        assert_eq!(out, Some(0x34));
+        assert_eq!(iff, 0x08);
+        assert_eq!(s.read(0xFF01), 0x12, "slave received the master byte");
+        assert_eq!(s.read(0xFF02) & 0x80, 0, "transfer flag cleared");
+    }
+
+    /// An idle/unarmed port (no transfer pending) is a no-op for a delivered
+    /// byte — SB unchanged, no IF.
+    #[test]
+    fn slave_not_pending_returns_none_sb_unchanged() {
+        let mut s = Serial::new(false);
+        s.write(0xFF01, 0x34);
+        s.write(0xFF02, 0x00); // no transfer pending
+        let (out, iff) = s.link_slave_transfer(0x12);
+        assert_eq!(out, None);
+        assert_eq!(iff, 0);
+        assert_eq!(s.read(0xFF01), 0x34, "SB untouched");
+    }
+
+    /// A master (internal-clock, bit 0 set) port is not a slave: delivering a
+    /// byte must not hijack it.
+    #[test]
+    fn internal_clock_port_is_not_a_slave() {
+        let mut s = Serial::new(false);
+        s.write(0xFF01, 0x34);
+        s.write(0xFF02, 0x81); // internal clock pending — a master, not slave
+        let (out, iff) = s.link_slave_transfer(0x12);
+        assert_eq!(out, None);
+        assert_eq!(iff, 0);
+        assert_eq!(s.read(0xFF01), 0x34);
+    }
+
+    /// Detaching the peer clears pending link state.
+    #[test]
+    fn disconnect_clears_link_state() {
+        let mut s = Serial::new(false);
+        s.set_link_connected(true);
+        s.push_link_in(0xA5);
+        s.set_link_connected(false);
+        assert!(!s.link_connected());
+        // No peer byte: a master transfer falls back to 1s.
+        let mut div = 0u16;
+        s.write(0xFF01, 0x00);
+        s.write(0xFF02, 0x81);
+        run_until_irq(&mut s, &mut div, 2000).unwrap();
+        assert_eq!(s.read(0xFF01), 0xFF);
+        assert_eq!(s.take_link_send(), None);
+    }
+
+    /// The link bytes are queued, not single-slotted: several transfers
+    /// completing (or peer bytes arriving) before the frontend drains preserve
+    /// every byte in FIFO order — guards the multi-transfer-per-frame loss.
+    #[test]
+    fn link_queues_multiple_bytes_in_order() {
+        let mut s = Serial::new(false);
+        let mut div = 0u16;
+        s.set_link_connected(true);
+        // Two peer bytes queued before either transfer; two transfers consume
+        // them in order, and both outgoing bytes queue up for the frontend.
+        s.push_link_in(0x11);
+        s.push_link_in(0x22);
+        s.write(0xFF01, 0xA0);
+        s.write(0xFF02, 0x81);
+        run_until_irq(&mut s, &mut div, 2000).unwrap();
+        assert_eq!(s.read(0xFF01), 0x11, "first transfer shifts in 0x11");
+        s.write(0xFF01, 0xB0);
+        s.write(0xFF02, 0x81);
+        run_until_irq(&mut s, &mut div, 2000).unwrap();
+        assert_eq!(s.read(0xFF01), 0x22, "second transfer shifts in 0x22");
+        // Both outgoing bytes are still queued (FIFO), none overwritten.
+        assert_eq!(s.take_link_send(), Some(0xA0));
+        assert_eq!(s.take_link_send(), Some(0xB0));
+        assert_eq!(s.take_link_send(), None);
+    }
+
+    /// Task 6: two Serials wired master ↔ slave exchange a byte both ways with
+    /// no socket — proves the byte-exchange mechanism end to end.
+    #[test]
+    fn loopback_master_slave_byte_exchange() {
+        let mut master = Serial::new(false);
+        let mut slave = Serial::new(false);
+        master.set_link_connected(true);
+        slave.set_link_connected(true);
+        let mut div = 0u16;
+
+        // Slave arms with its byte (external clock), master with its byte.
+        slave.write(0xFF01, 0x34);
+        slave.write(0xFF02, 0x80);
+        master.write(0xFF01, 0x12);
+        // Frontend pre-exchange: feed the master the slave's pending byte.
+        master.push_link_in(0x34);
+        master.write(0xFF02, 0x81); // master clocks the transfer
+
+        let done = run_until_irq(&mut master, &mut div, 2000);
+        assert!(done.is_some(), "master transfer completes");
+        // Master shifted the slave's byte in and its own byte out.
+        assert_eq!(master.read(0xFF01), 0x34);
+        let sent = master.take_link_send().expect("master queued its byte");
+        assert_eq!(sent, 0x12);
+
+        // Deliver the master's byte to the armed slave.
+        let (slave_out, iff) = slave.link_slave_transfer(sent);
+        assert_eq!(slave_out, Some(0x34));
+        assert_eq!(iff, 0x08);
+        assert_eq!(slave.read(0xFF01), 0x12, "slave received the master byte");
     }
 
     /// Clearing SC bit 7 aborts an in-flight transfer (flip-flop low here:

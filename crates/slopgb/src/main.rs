@@ -22,6 +22,7 @@ mod clipboard;
 mod dbg;
 mod input;
 mod keymap;
+mod link;
 mod pacing;
 mod screenshot;
 mod session;
@@ -115,6 +116,33 @@ enum PathPurpose {
     SaveState,
     /// Restore the machine from the typed path (atomic; a bad file is logged).
     LoadState,
+    /// Dial a serial-link peer at the typed `host:port` (bare host → port 8765).
+    LinkConnect,
+}
+
+/// Parse a `host:port` entry (bgb's Connect prompt). A bare host (or one with
+/// an unparseable / absent port) defaults to [`link::DEFAULT_PORT`]. A bracketed
+/// IPv6 literal — `[::1]` or `[::1]:8765` — is parsed by its closing `]` so the
+/// inner colons aren't taken for the port separator; an unbracketed literal is
+/// split at the *last* colon, so it must be bracketed to carry a port. Total —
+/// never panics.
+fn parse_host_port(s: &str) -> (String, u16) {
+    // Bracketed IPv6 first: [host] with an optional :port after the ']'.
+    if let Some(rest) = s.strip_prefix('[') {
+        if let Some((host, after)) = rest.split_once(']') {
+            let port = after
+                .strip_prefix(':')
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(link::DEFAULT_PORT);
+            return (host.to_string(), port);
+        }
+    }
+    match s.rsplit_once(':') {
+        Some((host, port)) if !host.is_empty() => {
+            (host.to_string(), port.parse().unwrap_or(link::DEFAULT_PORT))
+        }
+        _ => (s.to_string(), link::DEFAULT_PORT),
+    }
 }
 
 struct App {
@@ -195,6 +223,9 @@ struct App {
     /// Last windowed integer scale chosen (CLI or Window-size menu), restored
     /// when leaving fullscreen-stretched so the menu-picked size isn't lost.
     last_scale: u32,
+    /// Serial Link-cable transport (bgb's Link submenu). Inert until Listen /
+    /// Connect; pumped once per emulated frame to swap bytes with the peer.
+    link: link::Link,
 }
 
 impl App {
@@ -241,6 +272,7 @@ impl App {
             info_box: None,
             path_dialog: None,
             path_purpose: PathPurpose::LoadRom,
+            link: link::Link::new(),
             recent: Vec::new(),
             main_menu: None,
             main_submenu: None,
@@ -277,7 +309,14 @@ impl App {
             } else {
                 String::new()
             };
-            window.set_title(&window_title(self.rom_loaded, &self.session.title, &state));
+            let mut title = window_title(self.rom_loaded, &self.session.title, &state);
+            // The serial-link status (bgb shows it in the title bar) is appended
+            // after window_title so it shows even at the no-ROM startup screen,
+            // whose title is otherwise a bare "slopgb".
+            if let Some(link) = self.link.status_label() {
+                title.push_str(&format!(" — {link}"));
+            }
+            window.set_title(&title);
         }
     }
 
@@ -552,6 +591,15 @@ impl App {
                 }
                 Err(e) => eprintln!("slopgb: load state failed: {e}"),
             },
+            PathPurpose::LinkConnect => {
+                // The "path" here is the typed host:port (the shared text modal).
+                let (host, port) = parse_host_port(&path.to_string_lossy());
+                match self.link.connect(host.clone(), port) {
+                    Ok(()) => println!("slopgb: link connecting to {host}:{port}"),
+                    Err(e) => eprintln!("slopgb: link connect failed: {e}"),
+                }
+                self.update_title(); // reflect the "connecting :port" status at once
+            }
         }
     }
 
@@ -741,6 +789,21 @@ impl ApplicationHandler for App {
                 _ => None,
             }) {
                 self.tools.toggle(event_loop, kind);
+            }
+        }
+        // Optionally start the serial link at startup — `SLOPGB_LINK_LISTEN=1`
+        // listens, `SLOPGB_LINK_CONNECT=host:port` dials. The Connect path
+        // otherwise needs the keyboard modal, so this enables scripted /
+        // screenshot-verified two-instance linking (mirrors SLOPGB_OPEN_TOOLS).
+        if env::var_os("SLOPGB_LINK_LISTEN").is_some() {
+            if let Err(e) = self.link.listen() {
+                eprintln!("slopgb: link listen failed: {e}");
+            }
+        }
+        if let Ok(addr) = env::var("SLOPGB_LINK_CONNECT") {
+            let (host, port) = parse_host_port(&addr);
+            if let Err(e) = self.link.connect(host, port) {
+                eprintln!("slopgb: link connect failed: {e}");
             }
         }
         self.resync_pacing();

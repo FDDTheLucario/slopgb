@@ -469,6 +469,46 @@ impl GameBoy {
         self.bus.take_serial_output()
     }
 
+    // ---- Link cable (frontend TCP peer; all golden-safe / inert when off) --
+    //
+    // The frontend drives a serial link over a socket: attach a peer, push
+    // bytes it receives, drain bytes to send, and complete slave transfers.
+    // Every method is a no-op / `None` when no peer is attached, so emulation
+    // is byte-identical on every path that never calls `link_connect`.
+
+    /// Attach (`true`) or detach (`false`) a serial link peer. Detaching
+    /// clears any pending link bytes.
+    pub fn link_connect(&mut self, on: bool) {
+        self.bus.link_set_connected(on);
+    }
+
+    /// Whether a link peer is attached.
+    #[must_use]
+    pub fn link_connected(&self) -> bool {
+        self.bus.link_connected()
+    }
+
+    /// Provide the peer byte the next internal-clock (master) transfer shifts
+    /// in (MSB-first). Overwrites a byte not yet consumed.
+    pub fn link_push_recv(&mut self, byte: u8) {
+        self.bus.link_push_recv(byte);
+    }
+
+    /// Drain the byte a completed master transfer shifted out, for the
+    /// frontend to send to the peer. `None` until a transfer completes while
+    /// connected.
+    #[must_use]
+    pub fn link_take_send(&mut self) -> Option<u8> {
+        self.bus.link_take_send()
+    }
+
+    /// Complete a pending external-clock (slave) transfer with the peer's
+    /// (master's) byte: raises the serial interrupt and returns the slave's
+    /// outgoing byte. `None` when no slave transfer is armed (a no-op).
+    pub fn link_slave_transfer(&mut self, master_byte: u8) -> Option<u8> {
+        self.bus.link_slave_transfer(master_byte)
+    }
+
     /// Side-effect-free memory peek: no M-cycle passes and nothing is
     /// mutated (`&self`). Follows live ROM/VRAM/cart-RAM/WRAM banking and
     /// intentionally ignores PPU VRAM/OAM access blocking; IO registers

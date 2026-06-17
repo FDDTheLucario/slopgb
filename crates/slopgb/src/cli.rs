@@ -33,6 +33,8 @@ VRAM viewer / I/O map. Right-click a debugger pane for its context menu.
 
 A ROM file dropped onto the window is loaded in place of the current one.
 Set SLOPGB_OPEN_TOOLS=debugger,vram,iomap to open debug windows at startup.
+Serial link cable: open the game-window right-click Link menu (Listen / Connect),
+or set SLOPGB_LINK_LISTEN=1 / SLOPGB_LINK_CONNECT=host:port to link at startup.
 ";
 
 pub(crate) struct Options {
