@@ -444,8 +444,9 @@ pub fn popup_content_size(menu: &MainMenu, sub: Option<&SubMenu>) -> (i32, i32) 
 
 /// Screen-space top-left for the popup window: the game-window-local pointer
 /// `cursor` offset by the game window's `window_outer` position, clamped so a
-/// `popup` (w, h) box stays inside `monitor` (`Some((x, y, w, h))`, the work
-/// area) when that is known — so the menu never opens half-off the screen edge.
+/// `popup` (w, h) box stays inside `monitor` (`Some((x, y, w, h))`, the full
+/// monitor bounds — winit exposes no work-area API) when that is known — so the
+/// menu never opens half-off the screen edge.
 /// Unknown monitor → unclamped (the raw window + cursor sum).
 #[must_use]
 pub fn popup_screen_origin(

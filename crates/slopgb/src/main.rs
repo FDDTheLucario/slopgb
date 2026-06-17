@@ -865,6 +865,14 @@ impl ApplicationHandler for App {
             }
             return;
         }
+        // Anything else must be the game window. A just-closed popup/tool window
+        // can still have queued events (e.g. a late `Focused(false)` or
+        // `CursorMoved` for the destroyed id); without this guard they'd fall
+        // through and be reinterpreted as game-window focus/mouse/close events
+        // (spuriously releasing input or pausing). Ignore stale ids.
+        if self.window.as_ref().map(|w| w.id()) != Some(window_id) {
+            return;
+        }
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::RedrawRequested => self.redraw(),

@@ -225,9 +225,10 @@ fn render_vram(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, state: &
             );
         }
         VramTab::Palettes => {
-            // On DMG the CGB palette RAM is meaningless; show the BGP/OBP0/OBP1
-            // shade mappings instead (so rBGP/rOBP are inspectable).
-            if gb.model() == Model::Dmg {
+            // On a monochrome model the CGB palette RAM is meaningless; show the
+            // BGP/OBP0/OBP1 shade mappings instead (so rBGP/rOBP are inspectable).
+            // CGB/AGB use the palette RAM path below.
+            if !gb.model().is_cgb() {
                 vram::render_palettes_dmg(
                     c,
                     l.content,

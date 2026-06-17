@@ -6,8 +6,9 @@
 //! side-by-side in popup-local coordinates — a *single* window, so there is no
 //! nested-window focus-dismissal problem).
 //!
-//! Positioning is `game-window outer position + cursor`, clamped to the monitor
-//! work area ([`mainwin::popup_screen_origin`]). **Wayland caveat:** winit cannot
+//! Positioning is `game-window client origin + cursor`, clamped to the monitor
+//! bounds ([`mainwin::popup_screen_origin`]; winit exposes no work-area API, so a
+//! panel/taskbar is not excluded). **Wayland caveat:** winit cannot
 //! place a top-level at an arbitrary global position on Wayland, so there the
 //! compositor chooses the spot — the menu is still an un-clipped separate window
 //! (the actual fix), just not pixel-placed at the cursor.
@@ -29,6 +30,11 @@ use crate::windows::mainwin::{
     self, MainMenu, MenuEffect, SubChoice, SubKind, SubMenu, popup_content_size,
     popup_screen_origin,
 };
+
+/// A screen/popup-local point in physical pixels.
+type Point = (i32, i32);
+/// Monitor bounds `(x, y, w, h)` in physical pixels.
+type MonitorBounds = (i32, i32, i32, i32);
 
 /// What a click on the popup resolves to, for `App` to apply (it owns the live
 /// state the submenus + actions need). `OpenSub` carries the parent row so `App`
@@ -55,6 +61,12 @@ pub struct MenuPopup {
     menu: MainMenu,
     sub: Option<SubMenu>,
     cursor: Option<(i32, i32)>,
+    /// Screen-space anchor (the right-click point in global coords) and the game
+    /// monitor bounds, captured at open. Kept so a submenu that grows the window
+    /// can re-clamp its position to stay on-screen (the open-time clamp only knew
+    /// the main-menu size).
+    anchor: Point,
+    monitor: Option<MonitorBounds>,
     /// Whether the popup has ever held focus. Some WMs deliver a spurious
     /// `Focused(false)` right after mapping a borderless window (before it is
     /// ever focused); dismissing on that would close the menu instantly. So a
@@ -77,7 +89,8 @@ impl MenuPopup {
     ) -> Option<Self> {
         let menu = MainMenu::open((0, 0), sound_on);
         let (pw, ph) = popup_content_size(&menu, None);
-        let (ox, oy) = screen_origin(game_window, cursor, (pw, ph));
+        let (anchor, monitor) = anchor_and_monitor(game_window, cursor);
+        let (ox, oy) = popup_screen_origin(anchor, (0, 0), (pw, ph), monitor);
         let attrs = Window::default_attributes()
             .with_title("slopgb — menu")
             .with_decorations(false)
@@ -117,6 +130,8 @@ impl MenuPopup {
             menu,
             sub: None,
             cursor: None,
+            anchor,
+            monitor,
             focused_once: false,
             theme: Theme::BGB,
         })
@@ -214,25 +229,39 @@ impl MenuPopup {
         self.window.request_redraw();
     }
 
-    /// Resize the window to the current menu-tree extent.
+    /// Resize the window to the current menu-tree extent, re-clamping its screen
+    /// position. A submenu hangs off the parent row's right edge, so opening one
+    /// near the monitor's right/bottom edge would push the grown window
+    /// off-screen — re-running the clamp against the new size pulls it back (the
+    /// open-time clamp only knew the smaller main-menu size).
     fn resize_to_content(&self) {
         let (w, h) = popup_content_size(&self.menu, self.sub.as_ref());
         let _ = self
             .window
             .request_inner_size(PhysicalSize::new(w.max(1) as u32, h.max(1) as u32));
+        let (ox, oy) = popup_screen_origin(self.anchor, (0, 0), (w, h), self.monitor);
+        self.window.set_outer_position(PhysicalPosition::new(ox, oy));
     }
 }
 
-/// Screen-space top-left for the popup: the game window's outer position plus
-/// the local cursor, clamped to its monitor's work area (when winit reports it).
-fn screen_origin(game: &Window, cursor: (i32, i32), popup: (i32, i32)) -> (i32, i32) {
-    let outer = game.outer_position().map_or((0, 0), |p| (p.x, p.y));
+/// The screen-space anchor (the right-click point in global coords) and the game
+/// monitor bounds, for positioning/re-clamping the popup. Uses the game window's
+/// **inner** (client-area) origin — the cursor from `CursorMoved` is
+/// client-relative, so adding it to the *outer* origin would offset the popup by
+/// the title-bar/decoration height — falling back to the outer origin only where
+/// `inner_position` is unsupported. Monitor is the full bounds (winit exposes no
+/// work-area API, so a panel/taskbar is not excluded).
+fn anchor_and_monitor(game: &Window, cursor: (i32, i32)) -> (Point, Option<MonitorBounds>) {
+    let base = game
+        .inner_position()
+        .or_else(|_| game.outer_position())
+        .map_or((0, 0), |p| (p.x, p.y));
     let monitor = game.current_monitor().map(|m| {
         let pos = m.position();
         let sz = m.size();
         (pos.x, pos.y, sz.width as i32, sz.height as i32)
     });
-    popup_screen_origin(cursor, outer, popup, monitor)
+    ((base.0 + cursor.0, base.1 + cursor.1), monitor)
 }
 
 /// Decide whether a focus change dismisses the popup, updating the
