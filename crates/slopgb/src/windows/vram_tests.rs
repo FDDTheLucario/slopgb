@@ -34,6 +34,15 @@ fn fit_scale_is_floored_and_at_least_one() {
 }
 
 #[test]
+fn oam_cell_is_ten_pixels_per_scale() {
+    // OAM grid pitch is 10px/scale (20px at the default scale 2, as bgb shows);
+    // render_oam and the OAM hover hit-test share this so they can't drift.
+    assert_eq!(oam_cell(1), 10);
+    assert_eq!(oam_cell(2), 20);
+    assert_eq!(oam_cell(3), 30);
+}
+
+#[test]
 fn dmg_palette_rows_map_register_shades_through_grey_ramp() {
     // BGP 0xE4 = 11_10_01_00 -> color IDs 0..3 map to shades [0,1,2,3].
     // OBP0 0x1B = 00_01_10_11 -> [3,2,1,0]. OBP1 0xFF -> [3,3,3,3].

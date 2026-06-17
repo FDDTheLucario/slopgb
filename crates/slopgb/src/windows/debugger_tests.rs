@@ -101,7 +101,7 @@ fn regs_lines_match_bgb_two_column_layout() {
     assert_eq!(l[6], "ime=.   spd= 0");
     // The ima line's right column carries the cartridge ROM/RAM bank indicator
     // (distinct from the VRAM/WRAM banks at FF4F/FF70).
-    assert_eq!(l[7], "ima=.   rom 2A ram 01");
+    assert_eq!(l[7], "ima=.   rom 02A ram 01");
 }
 
 #[test]
@@ -125,7 +125,7 @@ fn regs_lines_show_double_dash_when_ram_bank_disabled() {
         rom_bank: 1,
         ram_bank: None,
     };
-    assert_eq!(regs_lines(&v)[7], "ima=.   rom 01 ram --");
+    assert_eq!(regs_lines(&v)[7], "ima=.   rom 001 ram --");
 }
 
 #[test]

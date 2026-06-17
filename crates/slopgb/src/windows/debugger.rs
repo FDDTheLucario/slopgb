@@ -122,7 +122,8 @@ pub fn regs_lines(r: &RegsView) -> Vec<String> {
         format!("sp= {:04X}   ie= {:02X}", r.sp, r.ie),
         format!("pc= {:04X}   if= {:02X}", r.pc, r.iflag),
         format!("ime={}   spd= {}", flag(r.ime), u8::from(r.double_speed)),
-        format!("ima={}   rom {:02X} ram {ram}", flag(r.ima), r.rom_bank),
+        // ROM bank is 3 hex digits: MBC5 banks reach 0x1FF (9-bit).
+        format!("ima={}   rom {:03X} ram {ram}", flag(r.ima), r.rom_bank),
     ]
 }
 

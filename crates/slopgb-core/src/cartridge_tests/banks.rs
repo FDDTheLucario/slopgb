@@ -15,6 +15,11 @@ fn cur_rom_bank_matches_high_area_mapping() {
     c.write_rom(0x4000, 1); // BANK2 = 1
     assert_eq!(c.cur_rom_bank(), 0x25);
     assert_eq!(c.cur_rom_bank(), bank_at(&c, 0x4000) as usize);
+    // MBC2: 4-bit ROMB, selected by an A8=1 write (0x2100).
+    let mut c = cart(0x06, 16, 0);
+    c.write_rom(0x2100, 0x0A);
+    assert_eq!(c.cur_rom_bank(), 0x0A);
+    assert_eq!(c.cur_rom_bank(), bank_at(&c, 0x4000) as usize);
     // MBC3: 7-bit ROMB.
     let mut c = cart(0x11, 128, 0);
     c.write_rom(0x2000, 0x42);
@@ -56,4 +61,29 @@ fn cur_ram_bank_is_none_without_a_ram_chip() {
     let mut c = cart(0x01, 2, 0); // MBC1, RAM size code 0 = no RAM
     c.write_rom(0x0000, 0x0A); // RAMG enable — still no chip
     assert_eq!(c.cur_ram_bank(), None);
+}
+
+#[test]
+fn cur_ram_bank_mbc2_is_single_gated_bank() {
+    // MBC2 has one built-in 512×4-bit RAM, reported as "bank 0" — but only
+    // while RAMG is enabled (disabled reads back 0xFF, so no bank is visible).
+    let mut c = cart(0x06, 4, 0);
+    assert_eq!(c.cur_ram_bank(), None, "MBC2 RAM disabled at power-on");
+    c.write_rom(0x0000, 0x0A); // A8=0 -> RAMG enable
+    assert_eq!(c.cur_ram_bank(), Some(0));
+    c.write_rom(0x0000, 0x00); // RAMG disable
+    assert_eq!(c.cur_ram_bank(), None);
+}
+
+#[test]
+fn cur_ram_bank_mbc3_rtc_register_reports_none() {
+    // MBC3+RTC: a RAM bank reports its index; an RTC register mapped at 0xA000
+    // (RAMB 0x08-0x0C) is not a RAM bank, so the indicator shows None.
+    let mut c = rtc_cart(); // type 0x10, 32 KiB RAM, RAMG enabled
+    c.write_rom(0x4000, 0x02); // RAM bank 2
+    assert_eq!(c.cur_ram_bank(), Some(2));
+    c.write_rom(0x4000, 0x08); // RTC seconds register, not a RAM bank
+    assert_eq!(c.cur_ram_bank(), None);
+    c.write_rom(0x4000, 0x00); // back to a RAM bank
+    assert_eq!(c.cur_ram_bank(), Some(0));
 }

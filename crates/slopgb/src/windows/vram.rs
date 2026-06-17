@@ -297,10 +297,12 @@ pub fn dmg_palette_rows(bgp: u8, obp0: u8, obp1: u8) -> [DmgPalRow; 3] {
 /// Render the DMG Palettes tab: the BGP/OBP0/OBP1 rows from [`dmg_palette_rows`],
 /// each a `NAME XX` label then four shade swatches. Clipped to `rect`.
 pub fn render_palettes_dmg(c: &mut Canvas, rect: Rect, bgp: u8, obp0: u8, obp1: u8, theme: &Theme) {
-    use crate::ui::text::draw_text;
+    use crate::ui::text::{draw_text, measure};
     let sw = 14;
     let lh = line_height();
-    let label_w = 6 * 8; // room for "OBP0 XX"
+    // Widest label is "OBP0 XX" (7 glyphs); the trailing space leaves a one-glyph
+    // gap before the swatches (the font is 7px wide, so a fixed 48 clipped it).
+    let label_w = measure("OBP0 XX ");
     let saved = c.push_clip(rect);
     for (i, row) in dmg_palette_rows(bgp, obp0, obp1).iter().enumerate() {
         let py = rect.y + i as i32 * (sw + 2).max(lh);

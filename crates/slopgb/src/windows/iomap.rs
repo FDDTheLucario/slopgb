@@ -116,7 +116,8 @@ pub fn wave_row(bytes: &[u8; 16]) -> String {
 #[must_use]
 pub fn bank_line(rom: usize, ram: Option<usize>) -> String {
     let ram = ram.map_or_else(|| "--".to_string(), |b| format!("{b:02X}"));
-    format!("ROMB {rom:02X}  RAMB {ram}")
+    // ROM bank is 3 hex digits: MBC5 banks reach 0x1FF (9-bit).
+    format!("ROMB {rom:03X}  RAMB {ram}")
 }
 
 /// One IF/IE vector row: its label (`40 VBlank`, plus ` *` when the `IF` bit is

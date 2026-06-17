@@ -50,8 +50,10 @@ fn wave_row_reads_all_sixteen_bytes() {
 #[test]
 fn bank_line_shows_cartridge_rom_and_ram_bank() {
     // The cartridge MBC banks — distinct from VBK (VRAM) / SVBK (WRAM).
-    assert_eq!(bank_line(0x2A, Some(1)), "ROMB 2A  RAMB 01");
-    assert_eq!(bank_line(1, None), "ROMB 01  RAMB --");
+    assert_eq!(bank_line(0x2A, Some(1)), "ROMB 02A  RAMB 01");
+    assert_eq!(bank_line(1, None), "ROMB 001  RAMB --");
+    // MBC5 ROM banks are 9-bit (up to 0x1FF) — rendered in full.
+    assert_eq!(bank_line(0x105, Some(0x0F)), "ROMB 105  RAMB 0F");
 }
 
 #[test]
