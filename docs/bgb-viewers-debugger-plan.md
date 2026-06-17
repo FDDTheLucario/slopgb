@@ -49,7 +49,7 @@ byte-identical); no new core deps / no unsafe; every `.rs` < 1000 lines; clippy
 | 23 | sonnet | memory-window status bar (nearest symbol) | 5,22 | **done** |
 | 24 | sonnet | Options toggle: memory viewer in own window | 22 | **done** |
 | 25 | sonnet | Options action: **Reset to bgb defaults** (pure-bgb revert) | 9,14,24 | **done** |
-| 26 | opus | FINAL: full-branch /rust-diff-review + multi-agent review | all | todo |
+| 26 | opus | FINAL: full-branch /rust-diff-review + multi-agent review | all | **done** (verdict MERGE, 0 critical/high; fixes in b4d9536) |
 
 Note: main.rs path methods split to `app_path.rs`; `debugger_tests.rs` split
 (added tests → `debugger_misc_tests.rs`) to hold the < 1000-line cap.
