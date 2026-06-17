@@ -8,8 +8,9 @@ fn blank_app() -> App {
         model: None,
         scale: 3,
         mute: true,
+        boot: None,
     };
-    App::new(opts, Session::blank(Model::Dmg), false)
+    App::new(opts, Session::blank(Model::Dmg), false, None)
 }
 
 #[test]

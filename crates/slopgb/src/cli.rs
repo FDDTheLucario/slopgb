@@ -19,6 +19,8 @@ OPTIONS:
                       (default: auto-detect from the ROM header)
     --scale <N>       Initial window scale factor, 1-16 (default: 3)
     --mute            Disable audio output
+    --boot <PATH>     Execute a boot ROM from power-on (logo + chime); 256 B for
+                      DMG/MGB/SGB, 2304 B for CGB/AGB. Also via SLOPGB_BOOT=<path>
     -h, --help        Print this help
 
 KEYS:
@@ -44,6 +46,10 @@ pub(crate) struct Options {
     pub(crate) model: Option<Model>,
     pub(crate) scale: u32,
     pub(crate) mute: bool,
+    /// Optional boot ROM to execute from power-on (bgb's boot ROM: logo + chime).
+    /// `--boot <path>`; falls back to the `SLOPGB_BOOT` env var (resolved in
+    /// `main`). `None` = the direct post-boot install (default).
+    pub(crate) boot: Option<PathBuf>,
 }
 
 /// What a successful argument parse asks the program to do. Printing the
@@ -60,10 +66,15 @@ impl Options {
         let mut model = None;
         let mut scale = 3u32;
         let mut mute = false;
+        let mut boot = None;
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "-h" | "--help" => return Ok(ParseOutcome::Help),
                 "--mute" => mute = true,
+                "--boot" => {
+                    let v = args.next().ok_or("--boot requires a path")?;
+                    boot = Some(PathBuf::from(v));
+                }
                 "--model" => {
                     let v = args.next().ok_or("--model requires a value")?;
                     model = Some(parse_model(&v)?);
@@ -92,6 +103,7 @@ impl Options {
             model,
             scale,
             mute,
+            boot,
         }))
     }
 }

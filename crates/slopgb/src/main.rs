@@ -77,8 +77,11 @@ fn main() {
     // No ROM on the command line → boot to a blank LCD (bgb behaviour); a ROM
     // loads later via drag-drop / the Load ROM... menu. With a ROM, a load error
     // still aborts (the user named a file that can't be read).
+    // Optional boot ROM (--boot / SLOPGB_BOOT): executed from power-on by every
+    // ROM load. Read once here; a bad path is logged and treated as no boot ROM.
+    let boot_rom = resolve_boot_rom(&opts);
     let (session, rom_loaded) = match &opts.rom {
-        Some(rom) => match Session::load(rom, opts.model) {
+        Some(rom) => match Session::load(rom, opts.model, boot_rom.as_deref()) {
             Ok(s) => (s, true),
             Err(e) => {
                 eprintln!("error: {e}");
@@ -97,7 +100,7 @@ fn main() {
             process::exit(1);
         }
     };
-    let mut app = App::new(opts, session, rom_loaded);
+    let mut app = App::new(opts, session, rom_loaded, boot_rom);
     if let Err(e) = event_loop.run_app(&mut app) {
         eprintln!("error: event loop failed: {e}");
         process::exit(1);
@@ -119,6 +122,23 @@ enum PathPurpose {
     LoadState,
     /// Dial a serial-link peer at the typed `host:port` (bare host → port 8765).
     LinkConnect,
+}
+
+/// Resolve the boot ROM bytes from `--boot` or the `SLOPGB_BOOT` env var,
+/// reading the file. A read error is logged and treated as no boot ROM
+/// (non-fatal) — the machine then boots post-boot as usual.
+fn resolve_boot_rom(opts: &Options) -> Option<Vec<u8>> {
+    let path = opts
+        .boot
+        .clone()
+        .or_else(|| env::var_os("SLOPGB_BOOT").map(PathBuf::from))?;
+    match std::fs::read(&path) {
+        Ok(bytes) => Some(bytes),
+        Err(e) => {
+            eprintln!("slopgb: cannot read boot ROM '{}': {e}", path.display());
+            None
+        }
+    }
 }
 
 /// Parse a `host:port` entry (bgb's Connect prompt). A bare host (or one with
@@ -148,6 +168,9 @@ fn parse_host_port(s: &str) -> (String, u16) {
 
 struct App {
     opts: Options,
+    /// Boot ROM bytes (from `--boot`/`SLOPGB_BOOT`), executed from power-on on
+    /// every ROM load. `None` = the direct post-boot install (default).
+    boot_rom: Option<Vec<u8>>,
     session: Session,
     /// Whether a real ROM is loaded. `false` at a no-ROM (bgb-style) startup:
     /// the blank machine is frozen at power-on (emulation gated off) and the LCD
@@ -241,7 +264,7 @@ struct App {
 }
 
 impl App {
-    fn new(opts: Options, session: Session, rom_loaded: bool) -> Self {
+    fn new(opts: Options, session: Session, rom_loaded: bool, boot_rom: Option<Vec<u8>>) -> Self {
         let muted = opts.mute;
         let scale = opts.scale;
         let window_size = WindowSizeChoice::Scale(scale);
@@ -256,6 +279,7 @@ impl App {
         let blank_frame = blank_frame(settings.dmg_palette[0]);
         let mut app = Self {
             opts,
+            boot_rom,
             session,
             rom_loaded,
             blank_frame,
@@ -638,7 +662,7 @@ impl App {
         // if the dropped file is the currently loaded ROM, loading first
         // would resurrect a stale save and later overwrite the fresh one.
         self.session.flush_save();
-        match Session::load(path, self.opts.model) {
+        match Session::load(path, self.opts.model, self.boot_rom.as_deref()) {
             Ok(new) => {
                 self.session = new;
                 // A loaded ROM starts emulation: leave the no-ROM blank state and

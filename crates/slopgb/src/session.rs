@@ -6,7 +6,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use slopgb_core::{CLOCK_HZ, GameBoy, Model};
+use slopgb_core::{CLOCK_HZ, CartridgeError, GameBoy, Model};
 
 /// Autosave battery RAM every 5 seconds of emulated time.
 const AUTOSAVE_CYCLES: u64 = 5 * CLOCK_HZ as u64;
@@ -56,12 +56,18 @@ impl Session {
     }
 
     /// Load a ROM, pick its model (CLI override beats header auto-detect),
-    /// and restore `<rom>.sav` if present.
-    pub(crate) fn load(path: &Path, model_override: Option<Model>) -> Result<Self, String> {
+    /// and restore `<rom>.sav` if present. When `boot` is a boot ROM image of
+    /// the right size for the model, the machine *executes* it from power-on
+    /// (bgb's boot ROM); otherwise it starts post-boot.
+    pub(crate) fn load(
+        path: &Path,
+        model_override: Option<Model>,
+        boot: Option<&[u8]>,
+    ) -> Result<Self, String> {
         let rom_bytes =
             fs::read(path).map_err(|e| format!("cannot read ROM '{}': {e}", path.display()))?;
         let model = model_override.unwrap_or_else(|| GameBoy::auto_model(&rom_bytes));
-        let mut gb = GameBoy::new(model, rom_bytes.clone())
+        let mut gb = build_gb(model, rom_bytes.clone(), boot)
             .map_err(|e| format!("cannot load ROM '{}': {e}", path.display()))?;
         let sav_path = path.with_extension("sav");
         let mut last_saved = None;
@@ -285,6 +291,33 @@ fn cart_type_name(t: u8) -> &'static str {
         0xFE => "HuC3",
         0xFF => "HuC1",
         _ => "?",
+    }
+}
+
+/// Whether a boot ROM of `len` bytes matches the model's class — 256 B for
+/// DMG/MGB/SGB, 2304 B for CGB/AGB (the two boot-ROM sizes slopgb maps).
+pub(crate) fn boot_size_ok(model: Model, len: usize) -> bool {
+    if model.is_cgb() {
+        len == 0x900
+    } else {
+        len == 0x100
+    }
+}
+
+/// Build the machine: **execute** `boot` from power-on (bgb's boot ROM) when it
+/// is present and the right size for `model`, else the direct post-boot install.
+/// A wrong-size boot ROM falls back to no-boot (logged, non-fatal).
+fn build_gb(model: Model, rom: Vec<u8>, boot: Option<&[u8]>) -> Result<GameBoy, CartridgeError> {
+    match boot {
+        Some(b) if boot_size_ok(model, b.len()) => GameBoy::new_with_boot(model, rom, b.to_vec()),
+        Some(b) => {
+            eprintln!(
+                "slopgb: ignoring boot ROM ({} bytes — not 256/2304 for {model:?}); booting post-boot",
+                b.len()
+            );
+            GameBoy::new(model, rom)
+        }
+        None => GameBoy::new(model, rom),
     }
 }
 
