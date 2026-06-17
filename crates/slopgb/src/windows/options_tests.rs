@@ -1,4 +1,4 @@
-use super::tabs::{Field, controls};
+use super::tabs::{Field, Kind, controls};
 use super::*;
 use crate::ui::canvas::Canvas;
 
@@ -370,6 +370,24 @@ fn debug_tab_display_flags_toggle() {
     assert!(st.working.rgbds_disasm, "rgbds on by default");
     click_field(&mut st, Field::RgbdsDisasm);
     assert!(!st.working.rgbds_disasm);
+}
+
+#[test]
+fn debug_tab_syntax_is_a_single_live_dropdown() {
+    // Exactly one live control drives the disasm syntax — the dropdown (no
+    // duplicate "RGBDS syntax" checkbox), and it shows the live value.
+    let s = Settings::default();
+    let content = OptionsState::content_rect(dialog());
+    let ctrls = controls(OptionsTab::Debug, &s, content);
+    let syntax: Vec<_> = ctrls
+        .iter()
+        .filter(|c| c.field == Some(Field::RgbdsDisasm))
+        .collect();
+    assert_eq!(syntax.len(), 1, "one syntax control, not two");
+    match &syntax[0].kind {
+        Kind::Dropdown { value, .. } => assert_eq!(value, "rgbds", "default rgbds shown"),
+        other => panic!("syntax control should be a dropdown, got {other:?}"),
+    }
 }
 
 #[test]

@@ -490,11 +490,6 @@ fn debug(s: &Settings, content: Rect) -> Vec<Ctrl> {
         Field::ShowClocks,
     ));
     v.push(Ctrl::live(
-        rc(l.row().at(), "RGBDS syntax"),
-        chk("RGBDS syntax", s.rgbds_disasm),
-        Field::RgbdsDisasm,
-    ));
-    v.push(Ctrl::live(
         rc(l.row().at(), "memory viewer in own window"),
         chk("memory viewer in own window", s.memory_window),
         Field::MemoryWindow,
@@ -529,8 +524,25 @@ fn debug(s: &Settings, content: Rect) -> Vec<Ctrl> {
         chk("Start in debugger", false),
     ));
     l.row();
-    let syntax = if s.rgbds_disasm { "rgbds" } else { "no$gmb" };
-    draw_label_combo(&mut v, &mut l, "Disasm syntax:", syntax);
+    // The disassembler dialect: a live dropdown (click cycles rgbds ↔ no$gmb).
+    // The single control for the syntax — there is no separate checkbox.
+    let (x, y) = l.at();
+    let label = "Disasm syntax:";
+    v.push(Ctrl::inert(
+        Rect::new(x, y, measure(label), line_height()),
+        Kind::Label {
+            text: label.to_string(),
+        },
+    ));
+    let cx = x + measure(label) + 6;
+    v.push(Ctrl::live(
+        Rect::new(cx, y, 70, line_height() + 2),
+        Kind::Dropdown {
+            value: if s.rgbds_disasm { "rgbds" } else { "no$gmb" }.to_string(),
+            w: 70,
+        },
+        Field::RgbdsDisasm,
+    ));
     v
 }
 
