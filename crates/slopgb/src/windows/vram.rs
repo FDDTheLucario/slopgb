@@ -67,6 +67,11 @@ pub struct VramState {
     pub map_src: u8,
     /// `Tiles` source radio index into [`TILE_SRC`].
     pub tile_src: u8,
+    /// Which CGB VRAM bank the Tiles tab shows (0/1); ignored on DMG.
+    pub tile_bank: u8,
+    /// BG map tab: show the window tilemap (LCDC bit 6 select) + the WX/WY box
+    /// instead of the BG tilemap + the SCX/SCY box. Auto stays BG-only.
+    pub show_window: bool,
     /// Cursor position (window pixels) while it is over the content area, for
     /// the hovered-cell details panel; `None` when outside.
     pub hover: Option<(i32, i32)>,
@@ -82,6 +87,8 @@ impl Default for VramState {
             scxy: true,
             map_src: 0,
             tile_src: 0,
+            tile_bank: 0,
+            show_window: false,
             hover: None,
         }
     }
@@ -100,6 +107,10 @@ pub struct VramLayout {
     pub scxy_box: Rect,
     pub map_src: Vec<Rect>,
     pub tile_src: Vec<Rect>,
+    /// Tiles-tab CGB VRAM-bank-1 toggle.
+    pub tile_bank_box: Rect,
+    /// BG-map-tab BG⇄window toggle.
+    pub win_box: Rect,
 }
 
 /// Compute the VRAM window layout for `area`.
@@ -111,8 +122,13 @@ pub fn layout(area: Rect) -> VramLayout {
     let content = Rect::new(area.x + 2, top, area.w - PANEL_W - 6, area.bottom() - top);
     let dx = content.right() + 4;
     let details = Rect::new(dx, top, area.right() - dx - 2, area.bottom() - top);
-    // Controls fill the lower five rows of the details column, top-down.
-    let mut cy = details.bottom() - 1 - 5 * lh;
+    // Controls fill the lower rows of the details column, top-down. Each tab
+    // shows only the subset that applies (gated in render/click).
+    let mut cy = details.bottom() - 1 - 7 * lh;
+    let tile_bank_box = checkbox_rect(dx, cy, "VRAM bank 1");
+    cy += lh;
+    let win_box = checkbox_rect(dx, cy, "window");
+    cy += lh;
     let map_src = radio_rects(dx, cy, &MAP_SRC);
     cy += lh;
     let tile_src = radio_rects(dx, cy, &TILE_SRC);
@@ -131,13 +147,15 @@ pub fn layout(area: Rect) -> VramLayout {
         scxy_box,
         map_src,
         tile_src,
+        tile_bank_box,
+        win_box,
     }
 }
 
 /// Handle a left-click at window-pixel `(px, py)`: switch tab, toggle a
-/// checkbox, or select a BG-map source radio. Returns whether `state` changed
-/// (i.e. a redraw is needed).
-pub fn on_click(state: &mut VramState, area: Rect, px: i32, py: i32) -> bool {
+/// checkbox, or select a BG-map source radio. `cgb` gates the CGB-only Tiles
+/// bank toggle. Returns whether `state` changed (i.e. a redraw is needed).
+pub fn on_click(state: &mut VramState, area: Rect, px: i32, py: i32, cgb: bool) -> bool {
     let l = layout(area);
     for (i, r) in l.tabs.iter().enumerate() {
         if r.contains(px, py) {
@@ -153,8 +171,18 @@ pub fn on_click(state: &mut VramState, area: Rect, px: i32, py: i32) -> bool {
         state.show_paletted = !state.show_paletted;
         return true;
     }
-    // scxy + the source radios only apply on the BG map tab (where they show).
+    // The Tiles tab's bank toggle is CGB-only (DMG has a single VRAM bank).
+    if state.tab == VramTab::Tiles && cgb && l.tile_bank_box.contains(px, py) {
+        state.tile_bank ^= 1;
+        return true;
+    }
+    // scxy + the source radios + the BG⇄window toggle only apply on the BG map
+    // tab (where they show).
     if state.tab == VramTab::BgMap {
+        if l.win_box.contains(px, py) {
+            state.show_window = !state.show_window;
+            return true;
+        }
         if l.scxy_box.contains(px, py) {
             state.scxy = !state.scxy;
             return true;
@@ -236,35 +264,86 @@ pub fn render_tiles(
     c.set_clip(saved);
 }
 
-/// OAM-grid cell pitch at `scale`: an 8-px tile plus a proportional 2-px gap
-/// (so a cell is `10 * scale`; 20 px at the default scale 2, as bgb shows).
-/// Shared by [`render_oam`] and the OAM hover hit-test so they can't drift.
+/// OAM-grid horizontal cell pitch at `scale`: an 8-px tile plus a proportional
+/// 2-px gap (so a cell is `10 * scale`; 20 px at the default scale 2, as bgb
+/// shows). Shared by [`render_oam`] and the OAM hover hit-test so they can't drift.
 #[must_use]
 pub fn oam_cell(scale: i32) -> i32 {
     10 * scale
 }
 
-/// Render the OAM tab: the 40 sprites in an 8×5 grid, each cell its tile (from
-/// `vram` bank 0) drawn through `palette` at `scale`; empty slots (y/x == 0)
-/// are left blank. Clipped to `rect`.
+/// OAM-grid vertical cell pitch at `scale`: the sprite height (8 or 16 px in
+/// 8×16 mode) plus the 2-px gap, so 8×16 sprites get room for both stacked tiles.
+#[must_use]
+pub fn oam_cell_h(scale: i32, tall: bool) -> i32 {
+    (if tall { 18 } else { 10 }) * scale
+}
+
+/// Mirror an 8×8 tile's pixels horizontally and/or vertically (the OAM/BG-map
+/// attribute X/Y-flip bits). Pure — `pixels[row][col]`, so an x-flip mirrors the
+/// column and a y-flip the row.
+#[must_use]
+pub fn flip_tile(pixels: [[u8; 8]; 8], xflip: bool, yflip: bool) -> [[u8; 8]; 8] {
+    let mut out = [[0u8; 8]; 8];
+    for (r, row) in pixels.iter().enumerate() {
+        let dr = if yflip { 7 - r } else { r };
+        for (c, &px) in row.iter().enumerate() {
+            let dc = if xflip { 7 - c } else { c };
+            out[dr][dc] = px;
+        }
+    }
+    out
+}
+
+/// Render the OAM tab: the 40 sprites in an 8×5 grid, each honoring its OAM
+/// attribute byte — per-sprite VRAM bank (CGB bit 3), X/Y flip (bits 5/6), and
+/// palette: on CGB the OBJ palette (bits 0-2) indexes `palettes`, on DMG the
+/// DMG-palette bit (bit 4) picks `palettes[0/1]` (OBP0/OBP1). `tall` (LCDC bit 2)
+/// draws 8×16 sprites as two stacked tiles (`tile&!1` over `tile|1`, order
+/// swapped on Y-flip). Empty slots (y == x == 0) are blank. Clipped to `rect`.
+#[allow(clippy::too_many_arguments)]
 pub fn render_oam(
     c: &mut Canvas,
     rect: Rect,
     oam: &[u8],
     vram: &[u8],
-    palette: &[u32; 4],
+    palettes: &[[u32; 4]],
+    cgb: bool,
+    tall: bool,
     scale: i32,
 ) {
     const COLS: i32 = 8;
-    let cell = oam_cell(scale);
+    let (cw, ch) = (oam_cell(scale), oam_cell_h(scale, tall));
     let saved = c.push_clip(rect);
     for (i, s) in debug::oam_sprites(oam).iter().enumerate() {
-        let col = i as i32 % COLS;
-        let row = i as i32 / COLS;
-        let px = rect.x + col * cell;
-        let py = rect.y + row * cell;
-        if s.y != 0 || s.x != 0 {
-            let pixels = debug::tile_pixels(vram, 0, s.tile as usize);
+        if s.y == 0 && s.x == 0 {
+            continue;
+        }
+        let px = rect.x + (i as i32 % COLS) * cw;
+        let py = rect.y + (i as i32 / COLS) * ch;
+        let bank = if cgb { usize::from(s.attr >> 3 & 1) } else { 0 };
+        let pal_idx = if cgb {
+            usize::from(s.attr & 0x07)
+        } else {
+            usize::from(s.attr >> 4 & 1)
+        };
+        let Some(palette) = palettes.get(pal_idx).or_else(|| palettes.first()) else {
+            continue;
+        };
+        let (xf, yf) = (s.attr & 0x20 != 0, s.attr & 0x40 != 0);
+        if tall {
+            // Top tile is the even index, bottom the odd; Y-flip swaps them.
+            let halves = if yf {
+                [s.tile | 1, s.tile & !1]
+            } else {
+                [s.tile & !1, s.tile | 1]
+            };
+            for (k, &t) in halves.iter().enumerate() {
+                let pixels = flip_tile(debug::tile_pixels(vram, bank, t as usize), xf, yf);
+                c.blit_tile(px, py + k as i32 * 8 * scale, &pixels, palette, scale);
+            }
+        } else {
+            let pixels = flip_tile(debug::tile_pixels(vram, bank, s.tile as usize), xf, yf);
             c.blit_tile(px, py, &pixels, palette, scale);
         }
     }
@@ -354,10 +433,85 @@ pub fn tile_index(n: u8, signed: bool) -> usize {
     }
 }
 
+/// Split a `start`-anchored `len`-long span over a `modulus`-wide axis into the
+/// 1 or 2 contiguous pieces it occupies once it wraps past the edge.
+fn wrap_spans(start: i32, len: i32, modulus: i32) -> Vec<(i32, i32)> {
+    let start = start.rem_euclid(modulus);
+    if start + len <= modulus {
+        vec![(start, len)]
+    } else {
+        vec![(start, modulus - start), (0, start + len - modulus)]
+    }
+}
+
+/// The screen viewport (a `vw`×`vh` map-pixel box at `(scx, scy)`) split into up
+/// to four `scale`-multiplied rectangles as it wraps around a `map_px`-wide map —
+/// so the box shows both edges of the wrap instead of a single clipped rect.
+/// Rectangles are in content-local pixels (the caller offsets by the pane origin).
+#[must_use]
+pub fn bgmap_viewport_segments(
+    scx: u8,
+    scy: u8,
+    vw: i32,
+    vh: i32,
+    map_px: i32,
+    scale: i32,
+) -> Vec<Rect> {
+    let xs = wrap_spans(i32::from(scx), vw, map_px);
+    let ys = wrap_spans(i32::from(scy), vh, map_px);
+    let mut out = Vec::with_capacity(xs.len() * ys.len());
+    for &(x, w) in &xs {
+        for &(y, h) in &ys {
+            out.push(Rect::new(x * scale, y * scale, w * scale, h * scale));
+        }
+    }
+    out
+}
+
+/// The on-screen-visible portion of the window layer, as a content-local rect for
+/// the window-map view's `rWX`/`rWY` indicator. The window is displayed from its
+/// own top-left at screen `(WX-7, WY)`, so the visible slice is a box at the map
+/// origin sized `min(160, 167-WX)` × `144-WY`. `None` when the window is wholly
+/// off-screen (`WX ≥ 167` or `WY ≥ 144`).
+#[must_use]
+pub fn window_region_rect(wx: u8, wy: u8, scale: i32) -> Option<Rect> {
+    let w = (167 - i32::from(wx)).clamp(0, 160);
+    let h = 144 - i32::from(wy);
+    if w <= 0 || h <= 0 {
+        return None;
+    }
+    Some(Rect::new(0, 0, w * scale, h * scale))
+}
+
+/// The outline drawn over the BG-map tab: nothing, the screen viewport (SCX/SCY,
+/// wrapping at the map edges), or the visible-window region (WX/WY).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MapOverlay {
+    None,
+    Screen { scx: u8, scy: u8 },
+    Window { wx: u8, wy: u8 },
+}
+
+impl MapOverlay {
+    /// The content-local outline rectangles for this overlay at `scale`.
+    #[must_use]
+    pub fn rects(self, scale: i32) -> Vec<Rect> {
+        match self {
+            MapOverlay::None => Vec::new(),
+            MapOverlay::Screen { scx, scy } => {
+                bgmap_viewport_segments(scx, scy, 160, 144, 256, scale)
+            }
+            MapOverlay::Window { wx, wy } => window_region_rect(wx, wy, scale).into_iter().collect(),
+        }
+    }
+}
+
 /// Render the BG map tab: the 32×32 tilemap at `base` (0x9800/0x9C00), each
-/// cell's tile (resolved via the `signed` tile-data area) drawn at `scale`. When
-/// `viewport` is set, the screen rectangle is outlined at `(scx, scy)` (the
-/// `scxy` toggle). Clipped to `rect`.
+/// cell's tile (resolved via the `signed` tile-data area) drawn at `scale`. On
+/// CGB (`cgb`) each cell honors its attribute byte — BG palette (bits 0-2) into
+/// `palettes`, tile VRAM bank (bit 3), and X/Y flip (bits 5/6); on DMG it uses
+/// `palettes[0]` (BGP) with no flips. `overlay` outlines the screen/window box.
+/// Clipped to `rect`.
 #[allow(clippy::too_many_arguments)]
 pub fn render_bgmap(
     c: &mut Canvas,
@@ -365,32 +519,41 @@ pub fn render_bgmap(
     vram: &[u8],
     base: u16,
     signed: bool,
-    scx: u8,
-    scy: u8,
-    palette: &[u32; 4],
+    palettes: &[[u32; 4]],
+    cgb: bool,
     scale: i32,
-    viewport: bool,
+    overlay: MapOverlay,
     theme: &Theme,
 ) {
     let saved = c.push_clip(rect);
     let map = debug::bg_map(vram, base);
     for (i, cell) in map.iter().enumerate() {
-        let col = i as i32 % 32;
-        let row = i as i32 / 32;
-        let px = rect.x + col * 8 * scale;
-        let py = rect.y + row * 8 * scale;
-        let pixels = debug::tile_pixels(vram, 0, tile_index(cell.tile, signed));
+        let px = rect.x + (i as i32 % 32) * 8 * scale;
+        let py = rect.y + (i as i32 / 32) * 8 * scale;
+        let (pal_idx, bank, xf, yf) = if cgb {
+            (
+                usize::from(cell.attr & 0x07),
+                usize::from(cell.attr >> 3 & 1),
+                cell.attr & 0x20 != 0,
+                cell.attr & 0x40 != 0,
+            )
+        } else {
+            (0, 0, false, false)
+        };
+        let Some(palette) = palettes.get(pal_idx).or_else(|| palettes.first()) else {
+            continue;
+        };
+        let pixels = flip_tile(
+            debug::tile_pixels(vram, bank, tile_index(cell.tile, signed)),
+            xf,
+            yf,
+        );
         c.blit_tile(px, py, &pixels, palette, scale);
     }
-    // Screen viewport: 160×144 map pixels at (scx, scy); 1 map pixel = `scale`.
-    if viewport {
+    // Viewport/window outline: 1 map pixel = `scale`; the screen box wraps.
+    for b in overlay.rects(scale) {
         c.outline_rect(
-            Rect::new(
-                rect.x + i32::from(scx) * scale,
-                rect.y + i32::from(scy) * scale,
-                160 * scale,
-                144 * scale,
-            ),
+            Rect::new(rect.x + b.x, rect.y + b.y, b.w, b.h),
             theme.breakpoint,
         );
     }

@@ -9,7 +9,7 @@ pub mod mainwin;
 pub mod options;
 pub mod vram;
 
-use slopgb_core::{GameBoy, Model, debug};
+use slopgb_core::{GameBoy, debug};
 
 use crate::dbg::Breakpoints;
 use crate::ui::canvas::Rect;
@@ -152,7 +152,8 @@ fn render_debugger(
 /// map should be bounded"), and whether the tab has a tile grid.
 struct VramGeom {
     scale: i32,
-    cell: i32,
+    cell_w: i32,
+    cell_h: i32,
     extent: Rect,
     grid: bool,
 }
@@ -160,29 +161,33 @@ struct VramGeom {
 /// Compute [`VramGeom`] for `tab` inside the `content` area. Natural pixel sizes:
 /// Tiles 16×24 tiles (128×192), BG map 32×32 (256×256), OAM an 8×5 grid of
 /// 10-px cells (8-px tile + 2-px gap). Palettes has no grid.
-fn vram_geom(tab: VramTab, content: Rect) -> VramGeom {
-    let tiled = |cols: i32, rows: i32, cell: i32, scale: i32| VramGeom {
+fn vram_geom(tab: VramTab, content: Rect, tall: bool) -> VramGeom {
+    let tiled = |cols: i32, rows: i32, cell_w: i32, cell_h: i32, scale: i32| VramGeom {
         scale,
-        cell,
-        extent: Rect::new(content.x, content.y, cols * cell, rows * cell),
+        cell_w,
+        cell_h,
+        extent: Rect::new(content.x, content.y, cols * cell_w, rows * cell_h),
         grid: true,
     };
     match tab {
         VramTab::Tiles => {
             let s = vram::fit_scale(content.w, content.h, 16 * 8, 24 * 8);
-            tiled(16, 24, 8 * s, s)
+            tiled(16, 24, 8 * s, 8 * s, s)
         }
         VramTab::BgMap => {
             let s = vram::fit_scale(content.w, content.h, 32 * 8, 32 * 8);
-            tiled(32, 32, 8 * s, s)
+            tiled(32, 32, 8 * s, 8 * s, s)
         }
         VramTab::Oam => {
-            let s = vram::fit_scale(content.w, content.h, 8 * 10, 5 * 10);
-            tiled(8, 5, vram::oam_cell(s), s)
+            // 8×16 mode needs a taller row pitch so the stacked tiles don't overlap.
+            let (nw, nh) = (8 * vram::oam_cell(1), 5 * vram::oam_cell_h(1, tall));
+            let s = vram::fit_scale(content.w, content.h, nw, nh);
+            tiled(8, 5, vram::oam_cell(s), vram::oam_cell_h(s, tall), s)
         }
         VramTab::Palettes => VramGeom {
             scale: 1,
-            cell: 0,
+            cell_w: 0,
+            cell_h: 0,
             extent: content,
             grid: false,
         },
@@ -192,35 +197,35 @@ fn vram_geom(tab: VramTab, content: Rect) -> VramGeom {
 fn render_vram(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, state: &VramState) {
     let l = vram::layout(area);
     vram::render_tabs(c, area.x + 2, area.y + 2, state.tab, theme);
-    let pal = display_palette(gb, state.show_paletted);
-    let g = vram_geom(state.tab, l.content);
+    let cgb = gb.model().is_cgb();
+    let tall = gb.debug_read(0xFF40) & 0x04 != 0;
+    let g = vram_geom(state.tab, l.content, tall);
     match state.tab {
         VramTab::Tiles => {
             // A raw tile has no inherent palette, so bgb renders the Tiles grid
             // in a neutral grey ramp (its "guessed palette" field stays empty)
-            // rather than mapping every tile through one game palette — which
-            // would tint unrelated tiles with whatever colours BG palette 0
-            // happens to hold. Match that: grey regardless of `show paletted`.
-            vram::render_tiles(c, l.content, gb.vram(), 0, &vram::GREYS, g.scale);
+            // rather than mapping every tile through one game palette. The CGB
+            // bank toggle picks which 8 KiB half to show (DMG has one bank).
+            let bank = if cgb { usize::from(state.tile_bank) } else { 0 };
+            vram::render_tiles(c, l.content, gb.vram(), bank, &vram::GREYS, g.scale);
         }
         VramTab::Oam => {
-            vram::render_oam(c, l.content, gb.oam(), gb.vram(), &pal, g.scale);
+            let pals = obj_palettes(gb, state.show_paletted);
+            vram::render_oam(c, l.content, gb.oam(), gb.vram(), &pals, cgb, tall, g.scale);
         }
         VramTab::BgMap => {
             let (base, signed) = bgmap_source(gb, state);
-            let scx = gb.debug_read(0xFF43);
-            let scy = gb.debug_read(0xFF42);
+            let pals = bg_palettes(gb, state.show_paletted);
             vram::render_bgmap(
                 c,
                 l.content,
                 gb.vram(),
                 base,
                 signed,
-                scx,
-                scy,
-                &pal,
+                &pals,
+                cgb,
                 g.scale,
-                state.scxy,
+                bgmap_overlay(gb, state),
                 theme,
             );
         }
@@ -244,30 +249,65 @@ fn render_vram(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, state: &
         }
     }
     if state.grid && g.grid {
-        draw_grid(c, g.extent, g.cell, theme);
+        draw_grid(c, g.extent, g.cell_w, g.cell_h, theme);
     }
     // bgb frames the grid and the details column as separate panels. The grid
     // tabs frame the *bounded* extent (so the map doesn't bleed grid lines into
     // empty space); Palettes frames the whole content area.
     c.outline_rect(if g.grid { g.extent } else { l.content }, theme.border);
     c.outline_rect(l.details, theme.border);
-    render_vram_controls(c, &l, state, theme);
+    render_vram_controls(c, &l, state, cgb, theme);
     render_vram_details(gb, c, &l, state, g.scale, theme);
 }
 
-/// The 4-colour display palette: the neutral grey ramp, or — when `show_paletted`
-/// is on — the game's guessed palette (DMG: BGP shades; CGB/AGB: BG palette 0).
-fn display_palette(gb: &GameBoy, show_paletted: bool) -> [u32; 4] {
+/// The BG-map tab's 8 BG palettes (CGB) or single BGP palette (DMG) as RGB888,
+/// or a single neutral grey ramp when `show_paletted` is off.
+fn bg_palettes(gb: &GameBoy, show_paletted: bool) -> Vec<[u32; 4]> {
     if !show_paletted {
-        return vram::GREYS;
+        return vec![vram::GREYS];
     }
-    match gb.model() {
-        Model::Dmg => {
-            debug::dmg_palette_shades(gb.debug_read(0xFF47)).map(|s| vram::GREYS[s as usize])
+    if gb.model().is_cgb() {
+        let (bg, _obj) = gb.cgb_palette_ram();
+        (0..8)
+            .map(|p| debug::cgb_palette_words(bg, p).map(xrgb))
+            .collect()
+    } else {
+        vec![debug::dmg_palette_shades(gb.debug_read(0xFF47)).map(|s| vram::GREYS[s as usize])]
+    }
+}
+
+/// The OAM tab's 8 OBJ palettes (CGB) or the OBP0/OBP1 pair (DMG) as RGB888, or
+/// a single neutral grey ramp when `show_paletted` is off.
+fn obj_palettes(gb: &GameBoy, show_paletted: bool) -> Vec<[u32; 4]> {
+    if !show_paletted {
+        return vec![vram::GREYS];
+    }
+    if gb.model().is_cgb() {
+        let (_bg, obj) = gb.cgb_palette_ram();
+        (0..8)
+            .map(|p| debug::cgb_palette_words(obj, p).map(xrgb))
+            .collect()
+    } else {
+        let dmg = |reg: u16| debug::dmg_palette_shades(gb.debug_read(reg)).map(|s| vram::GREYS[s as usize]);
+        vec![dmg(0xFF48), dmg(0xFF49)]
+    }
+}
+
+/// The BG-map overlay box: the window's WX/WY region in window-view mode, else
+/// the screen's SCX/SCY viewport — both gated by the `scxy` toggle.
+fn bgmap_overlay(gb: &GameBoy, state: &VramState) -> vram::MapOverlay {
+    if !state.scxy {
+        return vram::MapOverlay::None;
+    }
+    if state.show_window {
+        vram::MapOverlay::Window {
+            wx: gb.debug_read(0xFF4B),
+            wy: gb.debug_read(0xFF4A),
         }
-        _ => {
-            let (bg, _obj) = gb.cgb_palette_ram();
-            debug::cgb_palette_words(bg, 0).map(xrgb)
+    } else {
+        vram::MapOverlay::Screen {
+            scx: gb.debug_read(0xFF43),
+            scy: gb.debug_read(0xFF42),
         }
     }
 }
@@ -279,13 +319,19 @@ fn xrgb(word: u16) -> u32 {
 }
 
 /// Resolve the BG-map base + tile-addressing from the source radios, falling
-/// back to LCDC auto-detection (`Auto`).
+/// back to LCDC auto-detection (`Auto`). In window-view mode the auto base is the
+/// window tilemap select (LCDC bit 6) instead of the BG select (bit 3).
 fn bgmap_source(gb: &GameBoy, state: &VramState) -> (u16, bool) {
     let lcdc = gb.debug_read(0xFF40);
+    let auto_select = if state.show_window {
+        lcdc & 0x40 != 0
+    } else {
+        lcdc & 0x08 != 0
+    };
     let base = match state.map_src {
         1 => 0x9800,
         2 => 0x9C00,
-        _ if lcdc & 0x08 != 0 => 0x9C00,
+        _ if auto_select => 0x9C00,
         _ => 0x9800,
     };
     let signed = match state.tile_src {
@@ -296,25 +342,38 @@ fn bgmap_source(gb: &GameBoy, state: &VramState) -> (u16, bool) {
     (base, signed)
 }
 
-/// Overlay grid lines at `cell` pitch over the content area.
-fn draw_grid(c: &mut Canvas, content: Rect, cell: i32, theme: &Theme) {
+/// Overlay grid lines at `cell_w`×`cell_h` pitch over the content area (the OAM
+/// tab's cells are taller than wide in 8×16 mode).
+fn draw_grid(c: &mut Canvas, content: Rect, cell_w: i32, cell_h: i32, theme: &Theme) {
     let saved = c.push_clip(content);
     let mut x = content.x;
-    while x <= content.right() {
+    while x <= content.right() && cell_w > 0 {
         c.vline(x, content.y, content.h, theme.hilight);
-        x += cell;
+        x += cell_w;
     }
     let mut y = content.y;
-    while y <= content.bottom() {
+    while y <= content.bottom() && cell_h > 0 {
         c.hline(content.x, y, content.w, theme.hilight);
-        y += cell;
+        y += cell_h;
     }
     c.set_clip(saved);
 }
 
-/// Draw the checkboxes/radios in the details column, reflecting `state`.
-fn render_vram_controls(c: &mut Canvas, l: &VramLayout, state: &VramState, theme: &Theme) {
+/// Draw the checkboxes/radios in the details column, reflecting `state`. `cgb`
+/// gates the CGB-only Tiles bank toggle.
+fn render_vram_controls(c: &mut Canvas, l: &VramLayout, state: &VramState, cgb: bool, theme: &Theme) {
+    if state.tab == VramTab::Tiles && cgb {
+        checkbox(
+            c,
+            l.tile_bank_box.x,
+            l.tile_bank_box.y,
+            state.tile_bank != 0,
+            "VRAM bank 1",
+            theme,
+        );
+    }
     if state.tab == VramTab::BgMap {
+        checkbox(c, l.win_box.x, l.win_box.y, state.show_window, "window", theme);
         radio_group(
             c,
             l.map_src[0].x,
@@ -393,8 +452,8 @@ fn tile_details(lx: i32, ly: i32, scale: i32) -> Vec<String> {
 
 /// OAM-tab details: the sprite under `(lx, ly)` in the 8-wide cell grid at `scale`.
 fn oam_details(gb: &GameBoy, lx: i32, ly: i32, scale: i32) -> Vec<String> {
-    let pitch = vram::oam_cell(scale);
-    let (col, row) = (lx / pitch, ly / pitch);
+    let tall = gb.debug_read(0xFF40) & 0x04 != 0;
+    let (col, row) = (lx / vram::oam_cell(scale), ly / vram::oam_cell_h(scale, tall));
     let idx = (row * 8 + col) as usize;
     if col >= 8 || idx >= 40 {
         return Vec::new();

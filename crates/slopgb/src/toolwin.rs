@@ -221,7 +221,7 @@ impl ToolWindows {
         let area = view.area();
         match &mut view.state {
             WinState::Vram(s) => {
-                if vram::on_click(s, area, px, py) {
+                if vram::on_click(s, area, px, py, gb.model().is_cgb()) {
                     view.window.request_redraw();
                 }
                 None

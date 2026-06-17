@@ -102,7 +102,7 @@ fn vram_geom_bounds_the_extent_within_a_large_content_area() {
     // bounded map (cols*8*scale), not the whole content rect — QA "bg map should
     // be bounded". 600/256 -> scale 2 -> 512 square, inside 600.
     let content = Rect::new(0, 0, 600, 600);
-    let bg = vram_geom(VramTab::BgMap, content);
+    let bg = vram_geom(VramTab::BgMap, content, false);
     assert_eq!(bg.scale, 2);
     assert_eq!((bg.extent.w, bg.extent.h), (32 * 8 * 2, 32 * 8 * 2));
     assert!(
@@ -110,11 +110,11 @@ fn vram_geom_bounds_the_extent_within_a_large_content_area() {
         "bounded"
     );
     // Tiles: 128x192 natural; 600/128=4, 600/192=3 -> scale 3.
-    let tiles = vram_geom(VramTab::Tiles, content);
+    let tiles = vram_geom(VramTab::Tiles, content, false);
     assert_eq!(tiles.scale, 3);
     assert_eq!((tiles.extent.w, tiles.extent.h), (16 * 8 * 3, 24 * 8 * 3));
     // Palettes has no grid; frames the whole content.
-    let pal = vram_geom(VramTab::Palettes, content);
+    let pal = vram_geom(VramTab::Palettes, content, false);
     assert!(!pal.grid);
     assert_eq!(pal.extent, content);
 }
