@@ -109,6 +109,44 @@ fn cgb_boot_rom_maps_two_regions_with_header_gap() {
     assert_eq!(b.read(0x0900), 0x00, "0x0900 is cart");
 }
 
+/// A DMG cart on CGB hardware: `new`/`ic` precomputes the *post-lock* DMG-compat
+/// mode (cgb_mode false). But the real CGB boot ROM runs in full CGB mode and
+/// writes the DMG-compat palettes/OPRI **before** locking DMG-compat via KEY0
+/// (FF4C). Attaching a boot ROM must enter CGB mode so those writes land, and the
+/// KEY0 write must re-lock DMG-compat before hand-off.
+#[test]
+fn cgb_boot_enters_cgb_mode_then_key0_locks_dmg_compat() {
+    let mut b = ic(Model::Cgb);
+    assert!(!b.cgb_mode, "post-boot precompute is DMG-compat for a DMG cart");
+    let boot: Vec<u8> = (0..0x900u16).map(|i| (i as u8) ^ 0xC3).collect();
+    b.attach_boot_rom(boot);
+    assert!(b.cgb_mode, "boot ROM runs in power-on CGB mode");
+    // A CGB-only palette-data write now lands (was silently dropped pre-fix).
+    b.write(0xFF68, 0x80); // BCPS: index 0, auto-increment
+    b.write(0xFF69, 0x34); // BG palette 0, low byte
+    b.write(0xFF68, 0x80);
+    assert_eq!(b.read(0xFF69), 0x34, "compat palette write landed in CGB mode");
+    // KEY0 DMG-lock (FF4C bit 2): the boot ROM locks DMG-compat before hand-off.
+    b.write(0xFF4C, 0x04);
+    assert!(!b.cgb_mode, "KEY0 locked DMG-compat mode");
+    assert_eq!(b.read(0xFF69), 0xFF, "CGB-only palette register gated off again");
+}
+
+/// KEY0 (FF4C) is honoured only while a boot ROM is mapped: on a post-boot
+/// machine it falls through to the ignored IO arm, so it cannot perturb the
+/// precomputed `cgb_mode` (golden-safe — the no-boot path is byte-identical).
+#[test]
+fn key0_is_inert_without_a_boot_rom() {
+    let mut b = ic(Model::Cgb); // DMG cart on CGB: cgb_mode false
+    assert!(!b.cgb_mode);
+    b.write(0xFF4C, 0x04);
+    assert!(!b.cgb_mode, "FF4C ignored post-boot (DMG-compat unchanged)");
+    let mut b = ic_cgb_mode(); // CGB cart: cgb_mode true
+    assert!(b.cgb_mode);
+    b.write(0xFF4C, 0x04);
+    assert!(b.cgb_mode, "FF4C ignored post-boot (CGB mode unchanged)");
+}
+
 #[test]
 fn unmapped_io_reads_ff() {
     let mut b = ic(Model::Dmg);

@@ -89,6 +89,13 @@ impl Serial {
         }
     }
 
+    /// Switch CGB ↔ DMG serial mode (the fast-clock bit + SC read mask). Only
+    /// the boot ROM's KEY0/FF4C DMG-lock flips this at runtime; otherwise the
+    /// mode is fixed at construction.
+    pub fn set_cgb(&mut self, cgb: bool) {
+        self.cgb = cgb;
+    }
+
     /// DIV counter bit whose falling edges toggle the master flip-flop
     /// (half the shift rate; see the module docs).
     fn clock_mask(&self) -> u16 {

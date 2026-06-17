@@ -1,12 +1,19 @@
 //! Boot-ROM convergence oracle (task 7): running the **real** DMG boot ROM
 //! from power-on must hand off (FF50) to the exact same register state the
 //! direct post-boot install produces — PC=0x0100 + the documented post-boot
-//! registers. Skipped when `bootroms/dmg_boot.bin` is absent (like the test-rom
-//! harness; the boot ROMs are gitignored, not vendored into the repo).
+//! registers. Skipped when `bootroms/dmg_boot.bin` is absent (the boot ROMs are
+//! gitignored, not vendored into the repo) — but, like the mooneye/gbtr harness,
+//! `SLOPGB_REQUIRE_ROMS=1` turns the skip into a hard failure so a configured CI
+//! cannot silently no-op this oracle.
 
 use std::path::PathBuf;
 
 use slopgb_core::{GameBoy, Model};
+
+// Shared test-ROM harness helpers (skip_or_fail). The integration binaries
+// consume different subsets, so the unused-here items are expected.
+#[allow(dead_code)]
+mod common;
 
 /// The 48-byte Nintendo logo the DMG boot ROM verifies at `0x0104-0x0133`; a
 /// mismatch makes the boot ROM lock up instead of handing off.
@@ -47,7 +54,13 @@ fn dmg_boot_rom() -> Option<Vec<u8>> {
 #[test]
 fn dmg_boot_rom_converges_to_post_boot() {
     let Some(boot) = dmg_boot_rom() else {
-        eprintln!("skip: bootroms/dmg_boot.bin not present");
+        // Like the mooneye/gbtr harness: print a skip notice, or panic under
+        // SLOPGB_REQUIRE_ROMS=1 so CI can enforce this oracle when it provides
+        // the (copyrighted, un-vendored) boot ROM.
+        common::skip_or_fail(
+            "dmg_boot_rom_converges_to_post_boot",
+            "bootroms/dmg_boot.bin not present",
+        );
         return;
     };
     assert_eq!(boot.len(), 0x100, "DMG boot ROM is 256 bytes");

@@ -682,6 +682,27 @@ fn new_with_boot_starts_at_power_on() {
     );
 }
 
+/// A wrong-size boot ROM cannot be mapped: `new_with_boot` ignores it and falls
+/// back to the post-boot install (a valid machine, `boot_active` false), rather
+/// than running from a half-mapped, broken power-on state.
+#[test]
+fn new_with_boot_wrong_size_falls_back_to_post_boot() {
+    let direct = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
+    for bad in [0usize, 0x80, 0x200, 0x900] {
+        let gb = GameBoy::new_with_boot(Model::Dmg, write_c000_rom(), vec![0u8; bad]).unwrap();
+        assert!(!gb.boot_active(), "wrong-size ({bad}) boot ROM not mapped");
+        let (r, d) = (gb.cpu_regs(), direct.cpu_regs());
+        assert_eq!(
+            (r.af(), r.bc(), r.de(), r.hl(), r.sp, r.pc),
+            (d.af(), d.bc(), d.de(), d.hl(), d.sp, d.pc),
+            "falls back to the exact post-boot register state ({bad})"
+        );
+    }
+    // CGB class wants 2304 B: a 256 B (DMG-size) image is wrong here too.
+    let gb = GameBoy::new_with_boot(Model::Cgb, write_c000_rom(), vec![0u8; 0x100]).unwrap();
+    assert!(!gb.boot_active(), "256 B boot ROM is wrong for a CGB model");
+}
+
 /// Boot-ROM task 6 (golden guard): `new` (no boot ROM) is unchanged — no boot
 /// ROM mapped, post-boot entry + registers, exactly as before this feature.
 #[test]

@@ -435,6 +435,12 @@ impl Interconnect {
             0xFF73 if self.model.is_cgb() => self.ff73 = value,
             0xFF74 if self.cgb_mode => self.ff74 = value,
             0xFF75 if self.model.is_cgb() => self.ff75 = value & 0x70,
+            // KEY0 (FF4C): the CGB boot ROM writes bit 2 to lock DMG-compat mode
+            // for a DMG cart, AFTER installing the compat palettes/OPRI in CGB
+            // mode. Honoured only while the boot ROM is mapped — on a post-boot/
+            // `new` machine FF4C falls through to the ignored `_` arm (golden-safe;
+            // FF4C is locked out of the normal runtime, `boot_active` false here).
+            0xFF4C if self.boot_active && value & 0x04 != 0 => self.set_cgb_mode(false),
             // FF50 boot-disable: while a boot ROM is mapped (opt-in), a write
             // with bit 0 set hands off — the boot ROM unmaps itself permanently.
             // With no boot ROM we start post-boot, so this is never taken and

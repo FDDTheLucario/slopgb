@@ -39,6 +39,37 @@ fn boot_spec_resolves_by_model_and_falls_back() {
     assert_eq!(off.resolve(Model::Dmg), Some(fallback.clone()));
     // No fallback + no boot → None (the default golden path).
     assert_eq!(BootSpec::NONE.resolve(Model::Dmg), None);
+
+    // A slot path that exists but is the WRONG SIZE is skipped (logged), then
+    // falls through to the fallback — not a hard error, not the bad bytes.
+    let wrong = dir.join("wrong.bin");
+    fs::write(&wrong, vec![0u8; 0x900]).unwrap(); // 2304 B is wrong for DMG
+    let wrong_str = wrong.to_string_lossy().into_owned();
+    let bad_size = BootSpec {
+        enabled: true,
+        dmg: &wrong_str,
+        gbc: "",
+        sgb: "",
+        fallback: Some(&fallback),
+    };
+    assert_eq!(
+        bad_size.resolve(Model::Dmg),
+        Some(fallback.clone()),
+        "wrong-size Options slot falls back to the CLI/env boot ROM"
+    );
+    // ...and with no fallback, a wrong-size slot resolves to None (no boot).
+    let bad_no_fallback = BootSpec {
+        fallback: None,
+        ..bad_size
+    };
+    assert_eq!(bad_no_fallback.resolve(Model::Dmg), None);
+
+    // A slot path that doesn't exist (read error) likewise falls back.
+    let missing = BootSpec {
+        dmg: "/nonexistent/slopgb/bootrom.bin",
+        ..bad_size
+    };
+    assert_eq!(missing.resolve(Model::Dmg), Some(fallback.clone()));
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -55,6 +86,36 @@ fn build_gb_executes_a_matching_boot_rom_else_falls_back() {
     // None → no boot ROM (the default golden path).
     let gb = build_gb(Model::Dmg, rom, None).unwrap();
     assert!(!gb.boot_active());
+}
+
+#[test]
+fn reset_reruns_the_configured_boot_rom() {
+    let dir = std::env::temp_dir().join(format!("slopgb-test-reset-boot-{}", process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("game.gb");
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x147] = 0x00; // ROM ONLY
+    fs::write(&path, &rom).unwrap();
+    // A size-valid (all-NOP) DMG boot ROM: it never writes FF50, so `boot_active`
+    // stays true — exactly what lets us observe whether the boot ROM is running.
+    let boot = vec![0u8; 0x100];
+
+    // No boot configured: a power-cycle replays the post-boot state.
+    let mut plain = Session::load(&path, Some(Model::Dmg), &BootSpec::NONE).expect("load");
+    assert!(!plain.gb.boot_active());
+    plain.reset();
+    assert!(!plain.gb.boot_active(), "no boot ROM → reset stays post-boot");
+
+    // Boot ROM configured: the initial load AND a later reset both run it.
+    let mut s = Session::load(&path, Some(Model::Dmg), &BootSpec::cli(Some(&boot))).expect("load");
+    assert!(s.gb.boot_active(), "boot ROM runs on the initial load");
+    s.gb.run_frame();
+    s.reset();
+    assert!(
+        s.gb.boot_active(),
+        "reset re-runs the boot ROM (power-cycle), not the post-boot replay"
+    );
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]

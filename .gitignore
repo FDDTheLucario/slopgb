@@ -5,5 +5,6 @@
 /test-roms/*.zip
 *.sav
 test-roms-src/
+/bootroms/
 handoff.md
 /.claude/worktrees/

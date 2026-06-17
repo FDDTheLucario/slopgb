@@ -29,6 +29,10 @@ pub(crate) struct Session {
     /// resets to `None`; it deliberately **survives a reset** so a Quick Load can
     /// undo the reset (bgb's behavior — the snapshot is the same ROM).
     quick_state: Option<Box<GameBoy>>,
+    /// Boot-ROM configuration captured at load, so a power-cycle (`reset`) or a
+    /// model switch (`set_model`) re-runs the boot ROM (logo + chime) like bgb,
+    /// instead of silently replaying the post-boot state.
+    boot: OwnedBootSpec,
 }
 
 impl Session {
@@ -52,6 +56,7 @@ impl Session {
             last_saved: None,
             next_autosave: AUTOSAVE_CYCLES,
             quick_state: None,
+            boot: OwnedBootSpec::default(),
         }
     }
 
@@ -100,6 +105,7 @@ impl Session {
             last_saved,
             next_autosave: AUTOSAVE_CYCLES,
             quick_state: None,
+            boot: boot.to_owned(),
         })
     }
 
@@ -145,10 +151,12 @@ impl Session {
         Ok(())
     }
 
-    /// Power-cycle: fresh machine, save RAM reloaded from disk.
+    /// Power-cycle: fresh machine, save RAM reloaded from disk. Re-runs the boot
+    /// ROM (logo + chime) when one is configured for the model, like bgb.
     pub(crate) fn reset(&mut self) {
         self.flush_save();
-        match GameBoy::new(self.model, self.rom_bytes.clone()) {
+        let boot = self.boot.resolve(self.model);
+        match build_gb(self.model, self.rom_bytes.clone(), boot.as_deref()) {
             Ok(mut gb) => {
                 if let Ok(data) = fs::read(&self.sav_path) {
                     let _ = gb.load_save_data(&data); // rejection already warned at load
@@ -171,7 +179,8 @@ impl Session {
             return false;
         }
         self.flush_save();
-        match GameBoy::new(model, self.rom_bytes.clone()) {
+        let boot = self.boot.resolve(model);
+        match build_gb(model, self.rom_bytes.clone(), boot.as_deref()) {
             Ok(mut gb) => {
                 if let Ok(data) = fs::read(&self.sav_path) {
                     let _ = gb.load_save_data(&data);
@@ -358,6 +367,44 @@ impl BootSpec<'_> {
         }
         self.fallback.map(<[u8]>::to_vec)
     }
+
+    /// Capture the (borrowed) spec into an owned copy a [`Session`] can keep, so
+    /// a later `reset`/`set_model` can re-resolve the boot ROM per model.
+    fn to_owned(&self) -> OwnedBootSpec {
+        OwnedBootSpec {
+            enabled: self.enabled,
+            dmg: self.dmg.to_owned(),
+            gbc: self.gbc.to_owned(),
+            sgb: self.sgb.to_owned(),
+            fallback: self.fallback.map(<[u8]>::to_vec),
+        }
+    }
+}
+
+/// An owned [`BootSpec`] a [`Session`] keeps so a power-cycle / model switch can
+/// re-resolve the boot ROM for the (possibly new) model. The default is "no boot
+/// ROM" (matching [`BootSpec::NONE`]).
+#[derive(Clone, Default)]
+pub(crate) struct OwnedBootSpec {
+    enabled: bool,
+    dmg: String,
+    gbc: String,
+    sgb: String,
+    fallback: Option<Vec<u8>>,
+}
+
+impl OwnedBootSpec {
+    /// Resolve the boot ROM bytes for `model` (see [`BootSpec::resolve`]).
+    fn resolve(&self, model: Model) -> Option<Vec<u8>> {
+        BootSpec {
+            enabled: self.enabled,
+            dmg: &self.dmg,
+            gbc: &self.gbc,
+            sgb: &self.sgb,
+            fallback: self.fallback.as_deref(),
+        }
+        .resolve(model)
+    }
 }
 
 /// Build the machine: **execute** `boot` from power-on (bgb's boot ROM) when it
@@ -367,8 +414,9 @@ fn build_gb(model: Model, rom: Vec<u8>, boot: Option<&[u8]>) -> Result<GameBoy, 
     match boot {
         Some(b) if boot_size_ok(model, b.len()) => GameBoy::new_with_boot(model, rom, b.to_vec()),
         Some(b) => {
+            let needs = if model.is_cgb() { 2304 } else { 256 };
             eprintln!(
-                "slopgb: ignoring boot ROM ({} bytes — not 256/2304 for {model:?}); booting post-boot",
+                "slopgb: ignoring boot ROM ({} bytes — {model:?} needs {needs}); booting post-boot",
                 b.len()
             );
             GameBoy::new(model, rom)

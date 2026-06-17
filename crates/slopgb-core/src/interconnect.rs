@@ -599,6 +599,17 @@ impl Interconnect {
         self.cgb_mode
     }
 
+    /// Switch native CGB mode vs DMG-compatibility mode, keeping the PPU and
+    /// serial (whose behavior depends on it) in sync. Only the opt-in boot path
+    /// flips this at runtime — power-on CGB mode, then the boot ROM's KEY0/FF4C
+    /// DMG-lock; on every golden path `cgb_mode` is set once in `new` and never
+    /// touched here, so this is golden-safe.
+    pub(crate) fn set_cgb_mode(&mut self, on: bool) {
+        self.cgb_mode = on;
+        self.ppu.set_dmg_compat(self.model.is_cgb() && !on);
+        self.serial.set_cgb(on);
+    }
+
     /// CGB double-speed (KEY1 bit 7) state, for the debugger registers panel.
     pub(crate) fn double_speed(&self) -> bool {
         self.double_speed

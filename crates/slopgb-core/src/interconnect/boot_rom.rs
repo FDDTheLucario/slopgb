@@ -13,6 +13,17 @@ impl Interconnect {
     pub(crate) fn attach_boot_rom(&mut self, boot_rom: Vec<u8>) {
         self.boot_rom = Some(boot_rom);
         self.boot_active = true;
+        // Real CGB/AGB hardware powers up in full CGB mode regardless of the
+        // cart: the boot ROM writes the DMG-compat palettes + OPRI while still
+        // in CGB mode and only locks DMG-compatibility (KEY0/FF4C) at the very
+        // end. `new` precomputes the post-lock value, so for a DMG cart on CGB
+        // those boot-ROM IO writes would be dropped (cgb_mode false). Enter true
+        // power-on CGB mode here so they land; the FF4C handler re-locks
+        // DMG-compat before hand-off. Only the boot path reaches this — `new` is
+        // untouched, so it stays golden-safe.
+        if self.model.is_cgb() {
+            self.set_cgb_mode(true);
+        }
     }
 
     /// Whether the boot ROM is currently mapped (debug/test view).

@@ -37,11 +37,24 @@ fn parse_no_rom_starts_blank() {
 
 #[test]
 fn parse_all_options() {
-    let opts = parse_run(&["--model", "cgb", "--scale", "5", "--mute", "x.gbc"]).unwrap();
+    let opts =
+        parse_run(&["--model", "cgb", "--scale", "5", "--mute", "--boot", "boot.bin", "x.gbc"])
+            .unwrap();
     assert_eq!(opts.rom, Some(PathBuf::from("x.gbc")));
     assert_eq!(opts.model, Some(Model::Cgb));
     assert_eq!(opts.scale, 5);
     assert!(opts.mute);
+    assert_eq!(opts.boot, Some(PathBuf::from("boot.bin")));
+}
+
+#[test]
+fn parse_boot_path_and_default() {
+    // `--boot <path>` records the boot ROM; absent, it defaults to None.
+    let opts = parse_run(&["--boot", "/roms/dmg_boot.bin", "game.gb"]).unwrap();
+    assert_eq!(opts.boot, Some(PathBuf::from("/roms/dmg_boot.bin")));
+    assert_eq!(parse_run(&["game.gb"]).unwrap().boot, None);
+    // A missing value is an error (like --model/--scale).
+    assert!(parse(&["--boot"]).is_err());
 }
 
 #[test]

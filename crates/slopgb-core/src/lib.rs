@@ -109,6 +109,13 @@ impl GameBoy {
     /// are initialised to the exact post-boot state of `model`.
     pub fn new(model: Model, rom: Vec<u8>) -> Result<Self, CartridgeError> {
         let cart = cartridge::Cartridge::from_bytes(rom)?;
+        Ok(Self::post_boot(model, cart))
+    }
+
+    /// The direct post-boot machine (no boot ROM executed): registers, hardware
+    /// registers and timers installed at the model's post-boot state. The shared
+    /// body of [`Self::new`] and the [`Self::new_with_boot`] wrong-size fallback.
+    fn post_boot(model: Model, cart: cartridge::Cartridge) -> Self {
         let mut bus = interconnect::Interconnect::new(model, cart);
         let mut cpu = cpu::Cpu::new(model);
         bus.apply_post_boot_state();
@@ -122,7 +129,7 @@ impl GameBoy {
             cpu.regs_mut().set_de(0xFF56);
             cpu.regs_mut().set_hl(0x000D);
         }
-        Ok(Self { cpu, bus })
+        Self { cpu, bus }
     }
 
     /// Build a machine that **executes `boot_rom`** from power-on (bgb's
@@ -132,12 +139,24 @@ impl GameBoy {
     /// `PC=0x0000` in true power-on state; it writes FF50 to hand off to the
     /// cartridge. `new` (no boot ROM) is unchanged — this is a separate path,
     /// so emulation stays byte-identical when no boot ROM is supplied.
+    ///
+    /// A `boot_rom` whose length does not match the model class (256 B for
+    /// DMG/MGB/SGB, 2304 B for CGB/AGB) cannot be mapped, so it is **ignored**
+    /// and the machine falls back to the direct post-boot install (identical to
+    /// [`Self::new`]) rather than running from a half-mapped, broken power-on
+    /// state. [`Self::boot_active`] is then `false`.
     pub fn new_with_boot(
         model: Model,
         rom: Vec<u8>,
         boot_rom: Vec<u8>,
     ) -> Result<Self, CartridgeError> {
         let cart = cartridge::Cartridge::from_bytes(rom)?;
+        let expected = if model.is_cgb() { 0x900 } else { 0x100 };
+        if boot_rom.len() != expected {
+            // Wrong size for the model: never produce a broken half-mapped
+            // machine — install the post-boot state directly, as `new` does.
+            return Ok(Self::post_boot(model, cart));
+        }
         let mut bus = interconnect::Interconnect::new(model, cart);
         // Deliberately NOT apply_post_boot_state: the bus stays at its power-on
         // constructor state (LCD off, DIV 0, …) and the boot ROM brings it up.
