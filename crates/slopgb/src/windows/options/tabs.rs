@@ -26,6 +26,7 @@ pub(crate) enum Field {
     Mono,
     LowercaseHex,
     ShowClocks,
+    RgbdsDisasm,
     ShowFramerate,
     FreezeRecent,
     PauseOnFocusLoss,
@@ -234,6 +235,7 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         Field::Mono => s.mono = !s.mono,
         Field::LowercaseHex => s.lowercase_hex = !s.lowercase_hex,
         Field::ShowClocks => s.show_clocks = !s.show_clocks,
+        Field::RgbdsDisasm => s.rgbds_disasm = !s.rgbds_disasm,
         Field::ShowFramerate => s.show_framerate = !s.show_framerate,
         Field::FreezeRecent => s.freeze_recent = !s.freeze_recent,
         Field::PauseOnFocusLoss => s.pause_on_focus_loss = !s.pause_on_focus_loss,
@@ -269,9 +271,10 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
         OptionsTab::Graphics => s.stretch = d.stretch,
         OptionsTab::System => s.model = d.model,
         OptionsTab::Debug => {
-            // Only the two live Debug fields; lowercase_disasm is inert (fixed).
+            // The live Debug fields; lowercase_disasm is inert (fixed).
             s.lowercase_hex = d.lowercase_hex;
             s.show_clocks = d.show_clocks;
+            s.rgbds_disasm = d.rgbds_disasm;
         }
         // The four wired break conditions; the rest of the tab is inert.
         OptionsTab::Exceptions => {
@@ -464,6 +467,11 @@ fn debug(s: &Settings, content: Rect) -> Vec<Ctrl> {
         chk("show counted clocks", s.show_clocks),
         Field::ShowClocks,
     ));
+    v.push(Ctrl::live(
+        rc(l.row().at(), "RGBDS syntax"),
+        chk("RGBDS syntax", s.rgbds_disasm),
+        Field::RgbdsDisasm,
+    ));
     l.row();
     // Inert / always-on debugger settings (bgb black; some checked by default).
     v.push(Ctrl::inert(
@@ -487,7 +495,8 @@ fn debug(s: &Settings, content: Rect) -> Vec<Ctrl> {
         chk("Start in debugger", false),
     ));
     l.row();
-    draw_label_combo(&mut v, &mut l, "Disasm syntax:", "no$gmb");
+    let syntax = if s.rgbds_disasm { "rgbds" } else { "no$gmb" };
+    draw_label_combo(&mut v, &mut l, "Disasm syntax:", syntax);
     v
 }
 

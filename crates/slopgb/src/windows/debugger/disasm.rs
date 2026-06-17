@@ -21,16 +21,19 @@ pub struct DisasmRow {
     pub text: String,
 }
 
-/// Display options for the disasm pane (Options → Debug). Default matches the
-/// historical output: uppercase hex, the counted-clocks column shown.
+/// Display options for the disasm pane (Options → Debug). Defaults: RGBDS
+/// syntax, uppercase hex, the counted-clocks column shown.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DisasmFmt {
     /// Lowercase hex digits (addresses, byte column, and operand hex). The
-    /// no$gmb mnemonics are already lowercase, so lowercasing the decoded text
-    /// only touches its `A-F` hex digits.
+    /// mnemonics are already lowercase, so lowercasing the decoded text only
+    /// touches its `A-F` hex digits.
     pub lowercase_hex: bool,
     /// Show the trailing `;m-cycles` counted-clocks column.
     pub show_clocks: bool,
+    /// Disassemble in RGBDS syntax (`$`-hex, `[mem]`, `ldh`, `db $xx`); when off,
+    /// bgb / no$gmb syntax.
+    pub rgbds: bool,
 }
 
 impl Default for DisasmFmt {
@@ -38,6 +41,7 @@ impl Default for DisasmFmt {
         Self {
             lowercase_hex: false,
             show_clocks: true,
+            rgbds: true,
         }
     }
 }
@@ -82,12 +86,13 @@ pub fn disasm_rows(
         // disassembler doesn't mis-decode an embedded data table as code.
         if data_hints.contains(&addr) {
             let b = read(addr);
+            let prefix = if fmt.rgbds { "$" } else { "" };
             let text = format!(
                 "{}:{} {:<9}{:<20}{}",
                 region_label(addr),
                 addr_s(addr),
                 hx2(b),
-                format!("db {}", hx2(b)),
+                format!("db {prefix}{}", hx2(b)),
                 clk("")
             );
             rows.push(DisasmRow { addr, text });
@@ -99,7 +104,12 @@ pub fn disasm_rows(
             read(addr.wrapping_add(1)),
             read(addr.wrapping_add(2)),
         ];
-        let insn = debug::decode(&bytes, addr);
+        let syntax = if fmt.rgbds {
+            debug::Syntax::Rgbds
+        } else {
+            debug::Syntax::Bgb
+        };
+        let insn = debug::decode_with(&bytes, addr, syntax);
         let hex: String = bytes[..insn.len as usize]
             .iter()
             .map(|b| format!("{} ", hx2(*b)))

@@ -60,7 +60,12 @@ impl App {
                 self.resync_pacing();
             }
             Action::Quit => event_loop.exit(),
-            Action::ToggleTool(kind) => self.tools.toggle(event_loop, kind),
+            Action::ToggleTool(kind) => {
+                self.tools.toggle(event_loop, kind);
+                // A freshly-opened debugger must reflect the current disasm
+                // settings (syntax/hex/clocks), not just `DisasmFmt::default`.
+                self.push_disasm_fmt();
+            }
             // F9 enters a break only with the debugger window up (so the key is
             // inert during normal play), but always *resumes* one — otherwise
             // closing the window while broken would strand the frozen machine.

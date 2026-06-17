@@ -10,6 +10,6 @@ pub mod disasm;
 pub mod palette;
 pub mod vram;
 
-pub use disasm::{Insn, decode};
+pub use disasm::{Insn, Syntax, decode, decode_with};
 pub use palette::{cgb_palette_words, dmg_palette_shades, rgb555_to_rgb888};
 pub use vram::{MapCell, Sprite, bg_map, oam_sprites, tile_pixels};

@@ -86,6 +86,73 @@ fn matches_bgb_ground_truth() {
     }
 }
 
+/// `(bytes, pc, rgbds_text)` — the RGBDS spelling for representative opcodes.
+/// `len`/`cycles` are dialect-independent (checked above), so only text here.
+const RGBDS: &[(&[u8], u16, &str)] = &[
+    (&[0x00], 0, "nop"),
+    (&[0x06, 0x12], 0, "ld b,$12"),
+    (&[0x3E, 0xFF], 0, "ld a,$FF"),
+    (&[0x21, 0x34, 0x12], 0, "ld hl,$1234"),
+    (&[0x7E], 0, "ld a,[hl]"),
+    (&[0x77], 0, "ld [hl],a"),
+    (&[0x34], 0, "inc [hl]"),
+    (&[0x86], 0, "add [hl]"),
+    (&[0xC6, 0x10], 0, "add a,$10"),
+    (&[0x18, 0x02], 0x16E, "jr $0172"),
+    (&[0x20, 0xFC], 0x170, "jr nz,$016E"),
+    (&[0xC3, 0x50, 0x01], 0, "jp $0150"),
+    (&[0xCD, 0x50, 0x01], 0, "call $0150"),
+    (&[0xC7], 0, "rst $00"),
+    (&[0xFF], 0, "rst $38"),
+    (&[0xE0, 0x44], 0, "ldh [$FF44],a"),
+    (&[0xF0, 0x44], 0, "ldh a,[$FF44]"),
+    (&[0xE2], 0, "ldh [c],a"),
+    (&[0xF2], 0, "ldh a,[c]"),
+    (&[0xEA, 0x34, 0x12], 0, "ld [$1234],a"),
+    (&[0xFA, 0x34, 0x12], 0, "ld a,[$1234]"),
+    (&[0x08, 0x34, 0x12], 0, "ld [$1234],sp"),
+    (&[0x22], 0, "ld [hli],a"),
+    (&[0x2A], 0, "ld a,[hli]"),
+    (&[0x32], 0, "ld [hld],a"),
+    (&[0xF8, 0x03], 0, "ld hl,sp+$03"),
+    (&[0xE8, 0x05], 0, "add sp,+$05"),
+    (&[0xCB, 0x16], 0, "rl [hl]"),
+    (&[0xCB, 0x86], 0, "res 0,[hl]"),
+    (&[0xCB, 0x7C], 0, "bit 7,h"),
+    (&[0xD3], 0, "db $D3"),
+    (&[0xDD], 0, "db $DD"),
+];
+
+#[test]
+fn rgbds_syntax_renders_brackets_dollar_hex_and_ldh() {
+    for &(bytes, pc, text) in RGBDS {
+        let got = decode_with(bytes, pc, Syntax::Rgbds);
+        assert_eq!(got.text, text, "rgbds text for {bytes:02X?}");
+        // len/cycles are dialect-independent — must equal the bgb decode.
+        let bgb = decode(bytes, pc);
+        assert_eq!(got.len, bgb.len, "len parity for {bytes:02X?}");
+        assert_eq!(got.cycles, bgb.cycles, "cycles parity for {bytes:02X?}");
+    }
+}
+
+#[test]
+fn rgbds_negative_offsets_and_every_opcode_decodes() {
+    assert_eq!(
+        decode_with(&[0xF8, 0xFE], 0, Syntax::Rgbds).text,
+        "ld hl,sp-$02"
+    );
+    assert_eq!(
+        decode_with(&[0xE8, 0xFB], 0, Syntax::Rgbds).text,
+        "add sp,-$05"
+    );
+    // Every opcode decodes in rgbds without panic; illegal ones become `db $xx`.
+    for op in 0u16..=0xFF {
+        let op = op as u8;
+        let insn = decode_with(&[op, 0, 0], 0, Syntax::Rgbds);
+        assert!((1..=3).contains(&insn.len), "len {op:02X}");
+    }
+}
+
 #[test]
 fn negative_signed_offsets() {
     // 0xFE = -2, 0xFB = -5 — sign + 2-hex magnitude, like bgb.

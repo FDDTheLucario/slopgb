@@ -25,12 +25,12 @@ fn disasm_rows_decode_format_and_advance() {
 
     assert_eq!(rows[1].addr, 0x101, "advanced past the 1-byte nop");
     assert!(rows[1].text.contains("C3 50 01"));
-    assert!(rows[1].text.contains("jp 0150"));
+    assert!(rows[1].text.contains("jp $0150"), "rgbds default: {}", rows[1].text);
     assert!(rows[1].text.ends_with(";4"));
 
     assert_eq!(rows[2].addr, 0x104, "advanced past the 3-byte jp");
     assert!(rows[2].text.contains("3E FF"));
-    assert!(rows[2].text.contains("ld a,FF"));
+    assert!(rows[2].text.contains("ld a,$FF"));
 }
 
 #[test]
@@ -76,14 +76,14 @@ fn data_hint_renders_db_and_advances_one_byte() {
     };
     let hints: BTreeSet<u16> = [0x0150].into_iter().collect();
     let rows = disasm_rows(mem, 0x0150, 2, &hints, DisasmFmt::default());
-    assert!(rows[0].text.contains("db C3"), "{}", rows[0].text);
+    assert!(rows[0].text.contains("db $C3"), "{}", rows[0].text);
     assert_eq!(
         rows[1].addr, 0x0151,
         "a data byte advances by 1, not the jp's 3"
     );
     // Without the hint the same address decodes as the 3-byte jp.
     let code = disasm_rows(mem, 0x0150, 2, &BTreeSet::new(), DisasmFmt::default());
-    assert!(code[0].text.contains("jp 0150"));
+    assert!(code[0].text.contains("jp $0150"));
     assert_eq!(code[1].addr, 0x0153);
 }
 
@@ -98,6 +98,7 @@ fn disasm_fmt_lowercase_hex_and_hide_clocks() {
     let lower = DisasmFmt {
         lowercase_hex: true,
         show_clocks: true,
+        rgbds: false,
     };
     let rows = disasm_rows(mem, 0x0100, 1, &BTreeSet::new(), lower);
     assert!(
@@ -119,6 +120,7 @@ fn disasm_fmt_lowercase_hex_and_hide_clocks() {
     let no_clk = DisasmFmt {
         lowercase_hex: false,
         show_clocks: false,
+        rgbds: false,
     };
     let rows = disasm_rows(mem, 0x0100, 1, &BTreeSet::new(), no_clk);
     assert!(
@@ -135,5 +137,32 @@ fn disasm_fmt_lowercase_hex_and_hide_clocks() {
         rows[0].text.contains("ld a,FF"),
         "operand hex upper: {}",
         rows[0].text
+    );
+}
+
+#[test]
+fn disasm_fmt_rgbds_toggle_switches_syntax() {
+    // 0x0100: ld a,[$1234] (FA 34 12) — a memory load that differs by dialect.
+    let mem = |a: u16| match a {
+        0x0100 => 0xFA,
+        0x0101 => 0x34,
+        0x0102 => 0x12,
+        _ => 0x00,
+    };
+    let rgbds = disasm_rows(mem, 0x0100, 1, &BTreeSet::new(), DisasmFmt::default());
+    assert!(
+        rgbds[0].text.contains("ld a,[$1234]"),
+        "default is rgbds: {}",
+        rgbds[0].text
+    );
+    let bgb = DisasmFmt {
+        rgbds: false,
+        ..DisasmFmt::default()
+    };
+    let bgb = disasm_rows(mem, 0x0100, 1, &BTreeSet::new(), bgb);
+    assert!(
+        bgb[0].text.contains("ld a,(1234)"),
+        "toggled to bgb: {}",
+        bgb[0].text
     );
 }

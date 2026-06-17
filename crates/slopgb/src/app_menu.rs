@@ -332,13 +332,21 @@ impl App {
             self.apply_window_size(WindowSizeChoice::Scale(self.last_scale));
         }
         // Debug-tab disasm display flags → the debugger view.
-        self.tools.set_disasm_fmt(windows::debugger::DisasmFmt {
-            lowercase_hex: s.lowercase_hex,
-            show_clocks: s.show_clocks,
-        });
+        self.push_disasm_fmt();
         // Exceptions-tab break conditions → the core exception-break mask.
         self.apply_exceptions();
         self.update_title();
+    }
+
+    /// Push the Debug-tab disasm display options (syntax / hex case / clocks) to
+    /// any open debugger window. Shared by `apply_settings` and the tool-window
+    /// toggle so a newly-opened debugger matches the current settings.
+    pub(crate) fn push_disasm_fmt(&mut self) {
+        self.tools.set_disasm_fmt(windows::debugger::DisasmFmt {
+            lowercase_hex: self.settings.lowercase_hex,
+            show_clocks: self.settings.show_clocks,
+            rgbds: self.settings.rgbds_disasm,
+        });
     }
 
     /// Push the Options → Exceptions break mask to the live machine. Called

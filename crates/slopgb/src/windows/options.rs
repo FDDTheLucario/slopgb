@@ -119,6 +119,8 @@ pub struct Settings {
     pub lowercase_hex: bool,
     /// Debug → show the counted-clocks column in the disasm pane.
     pub show_clocks: bool,
+    /// Debug → disassemble in RGBDS syntax (vs bgb / no$gmb). Default on.
+    pub rgbds_disasm: bool,
     /// Misc → fast-forward speed multiplier (turbo), 1..=20.
     pub ff_speed: u32,
     /// Misc → framerate limit (0 = real speed / 60 fps).
@@ -167,6 +169,7 @@ impl Default for Settings {
             lowercase_disasm: true,
             lowercase_hex: false,
             show_clocks: true,
+            rgbds_disasm: true,
             ff_speed: 10,
             framerate_limit: 0,
             show_framerate: false,

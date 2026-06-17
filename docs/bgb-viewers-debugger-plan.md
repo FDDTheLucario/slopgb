@@ -27,12 +27,12 @@ byte-identical); no new core deps / no unsafe; every `.rs` < 1000 lines; clippy
 | 1 | haiku | `flip_tile(pixels,xflip,yflip)` pure helper | — | **done** |
 | 2 | haiku | `bgmap_viewport_segments(...)` wrap geometry | — | **done** |
 | 3 | haiku | `window_region_rect(wx,wy,...)` geometry | — | **done** |
-| 4 | sonnet | `.sym` parser `parse_sym(text)->SymbolTable` | — | todo |
-| 5 | haiku | SymbolTable `name_at` / `nearest_before` | 4 | todo |
-| 6 | opus | ANALYSIS: rgbds approach (syntax enum vs structured operands) | — | todo |
-| 7 | opus | core `decode` emits rgbds text under `Syntax::Rgbds` | 6 | todo |
-| 8 | opus | golden gate: gbtr + mooneye byte-identical post-rgbds | 7 | todo |
-| 9 | sonnet | thread `Syntax` → DisasmFmt + Options/Debug toggle (default rgbds) | 7 | todo |
+| 4 | sonnet | `.sym` parser `parse_sym(text)->SymbolTable` | — | **done (uncommitted, symbol slice)** |
+| 5 | haiku | SymbolTable `name_at` / `nearest_before` | 4 | **done (uncommitted, symbol slice)** |
+| 6 | opus | ANALYSIS: rgbds approach (syntax enum vs structured operands) | — | **done** (enum threaded; decode is off-path → golden-safe) |
+| 7 | opus | core `decode` emits rgbds text under `Syntax::Rgbds` | 6 | **done** |
+| 8 | opus | golden gate: gbtr + mooneye byte-identical post-rgbds | 7 | **done** (gbtr 185 + mooneye green) |
+| 9 | sonnet | thread `Syntax` → DisasmFmt + Options/Debug toggle (default rgbds) | 7 | **done** |
 | 10 | sonnet | Tiles tab VRAM bank0/bank1 selector (DMG-inert) | — | **done** |
 | 11 | opus | OAM render: per-sprite bank/8x16/obj-pal/dmg-pal/flip | 1 | **done** |
 | 12 | opus | BG map render: per-tile palette/bank/flip | 1 | **done** |
