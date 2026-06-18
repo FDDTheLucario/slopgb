@@ -15,8 +15,13 @@ DEF LOGO_TILES   EQU LOGO_COLS * LOGO_ROWS
 
 ; CGB compatibility palette tables (factual data, generated — see boot/README.md
 ; + cgb_palette_extract). Included first so its DEFs are visible to the code.
-SECTION "paldata", ROM0[$05E0]
+SECTION "paldata", ROM0
 INCLUDE "cgb_palettes.inc"
+
+; The cart header shows through $0100-$01FF while booting; reserve it so the
+; linker never places boot code/data there (it would be shadowed at runtime).
+SECTION "cartgap", ROM0[$0100]
+    ds $100, $00
 
 SECTION "entry", ROM0[$0000]
 Start:
@@ -76,8 +81,9 @@ Main:
     or c
     jr nz, .copyLogo
 
-    ; --- all 8 CGB BG palettes start: index0 white, indices 1..3 black (the
-    ; logo letters start dark; the colored wipe lights each palette's hue in turn)
+    ; --- all 8 BG palettes: index0 white, indices 1..3 black; the per-palette
+    ; live letter colour (R,G,B, 0..31 each) is tracked in WRAM at $C000 so the
+    ; animation can interpolate it. Start every letter colour black. ---
     ld a, $80                    ; auto-increment from index 0
     ldh [rBGPI], a
     ld c, 8                      ; 8 palettes
@@ -94,6 +100,13 @@ Main:
     jr nz, .palInner
     dec c
     jr nz, .palOuter
+    ld hl, $C000                 ; live RGB per palette (8 x R,G,B), start black
+    ld b, 24
+    xor a
+.clrRgb:
+    ld [hl+], a
+    dec b
+    jr nz, .clrRgb
 
     ; --- build the BG tilemap (bank 0): the 11x2 logo centred at col 4, row 8 ---
     ld hl, $9800 + 8*32 + 4
@@ -146,22 +159,55 @@ Main:
     ld a, $91
     ldh [rLCDC], a
 
-    ; --- CGB colored wipe: light each palette's hue left-to-right ---
-    ld c, 0                      ; palette index 0..7
-.wipe:
-    call SetHue                  ; palette C := Hues[C]
-    ld b, 8                      ; ~8 frames per column band
-.wipeWait:
+    ; --- Phase 1: reveal the letters left-to-right, each column its rainbow hue
+    ld c, 0                      ; palette / column 0..7
+.reveal:
+    push bc
+    ld a, c
+    add a, a
+    add a, c                     ; A = c*3
+    ld e, a
+    ld d, 0
+    ld hl, HueRGB
+    add hl, de                   ; HL -> HueRGB[c]
+    ld a, c
+    add a, a
+    add a, c
+    ld e, a
+    ld d, $C0                    ; DE = $C000 + c*3 (live colour)
+    ld a, [hl+]
+    ld [de], a
+    inc de
+    ld a, [hl+]
+    ld [de], a
+    inc de
+    ld a, [hl]
+    ld [de], a
+    ld b, c
+    call CombineWrite            ; push palette c's colour to BG palette c
+    pop bc
+    push bc
+    ld b, 3                      ; ~3 frames per column
+.revWait:
     call WaitFrame
     dec b
-    jr nz, .wipeWait
+    jr nz, .revWait
+    pop bc
     inc c
     ld a, c
     cp 8
-    jr nz, .wipe
+    jr nz, .reveal
 
-    ; --- the two-tone boot chime ---
+    ; --- Phase 2: settle the rainbow into solid blue ---
+    ld hl, BlueRGB
+    call FadeAll
+
+    ; --- the two-tone boot chime (during the blue hold) ---
     call PlayChime
+
+    ; --- Phase 3: fade the logo out to white ---
+    ld hl, WhiteRGB
+    call FadeAll
 
     ; --- assign the DMG game its CGB compatibility palette, then hand off ---
     call ApplyGamePalette
@@ -375,33 +421,113 @@ PlayChime:
     jr nz, .ring
     ret
 
-; Set CGB BG palette C's letter colours (indices 1..3) to Hues[C].
-SetHue:
-    ld a, c
+; Write BG palette B's letter colours (indices 1..3) from its live RGB at
+; $C000 + B*3, packing the three channels into BGR555.
+CombineWrite:
+    ld a, b
     add a, a
-    ld e, a                      ; E = C*2 (index into 2-byte Hues table)
-    ld d, 0
-    ld hl, Hues
-    add hl, de                   ; HL -> Hues[C]
-    ld a, c
-    add a, a
-    add a, a
-    add a, a                     ; A = C*8 (palette base)
-    add a, 2                     ; +2 -> palette index 1
-    or $80                       ; auto-increment
-    ldh [rBGPI], a
-    ld a, [hl+]                  ; colour lo
+    add a, b                     ; A = B*3
+    ld l, a
+    ld h, $C0                    ; HL = $C000 + B*3
+    ld a, [hl+]                  ; R
+    ld e, a
+    ld a, [hl+]                  ; G
     ld d, a
-    ld e, [hl]                   ; colour hi
-    ; write the colour to indices 1,2,3
-    ld b, 3
-.sh:
+    ld c, [hl]                   ; B (blue channel)
+    ; lo = R | ((G & 7) << 5)
     ld a, d
-    ldh [rBGPD], a
+    and $07
+    add a, a
+    add a, a
+    add a, a
+    add a, a
+    add a, a                     ; (G & 7) << 5
+    or e
+    ld e, a                      ; E = colour lo
+    ; hi = (G >> 3) | (B << 2)
+    ld a, d
+    srl a
+    srl a
+    srl a                        ; G >> 3
+    ld d, a
+    ld a, c
+    add a, a
+    add a, a                     ; B << 2
+    or d
+    ld d, a                      ; D = colour hi
+    ; BGPI = B*8 + 2 (index 1), auto-increment
+    ld a, b
+    add a, a
+    add a, a
+    add a, a                     ; B*8
+    add a, 2
+    or $80
+    ldh [rBGPI], a
+    ld b, 3
+.cw:
     ld a, e
     ldh [rBGPD], a
+    ld a, d
+    ldh [rBGPD], a
     dec b
-    jr nz, .sh
+    jr nz, .cw
+    ret
+
+; Step A one unit toward target D (used to interpolate one colour channel).
+StepCh:
+    cp d
+    ret z
+    jr c, .up
+    dec a
+    ret
+.up:
+    inc a
+    ret
+
+; Interpolate every palette's letter colour toward the target R,G,B at HL over
+; 32 frames (covers the full 0..31 channel range), one step per channel per frame.
+FadeAll:
+    ld a, [hl+]
+    ldh [$FF90], a               ; target R
+    ld a, [hl+]
+    ldh [$FF91], a               ; target G
+    ld a, [hl]
+    ldh [$FF92], a               ; target B
+    ld b, 32
+.faFrame:
+    ld c, 0
+.faPal:
+    ld a, c
+    add a, a
+    add a, c
+    ld l, a
+    ld h, $C0                    ; HL = $C000 + c*3
+    ldh a, [$FF90]
+    ld d, a
+    ld a, [hl]
+    call StepCh
+    ld [hl+], a
+    ldh a, [$FF91]
+    ld d, a
+    ld a, [hl]
+    call StepCh
+    ld [hl+], a
+    ldh a, [$FF92]
+    ld d, a
+    ld a, [hl]
+    call StepCh
+    ld [hl], a
+    push bc                      ; CombineWrite clobbers B,C
+    ld b, c
+    call CombineWrite
+    pop bc
+    inc c
+    ld a, c
+    cp 8
+    jr nz, .faPal
+    call WaitFrame
+    dec b
+    jr nz, .faFrame
     ret
 
 ; Wait for one frame (one rising edge of v-blank, LY 143 -> 144).
@@ -416,11 +542,22 @@ WaitFrame:
     jr z, .inVbl
     ret
 
-; 8 rainbow hues (BGR555 little-endian): red, orange, yellow, green, cyan,
-; blue, indigo, magenta — the colour the wipe paints the logo letters.
-Hues:
-    dw $001F, $01FF, $03FF, $03E0, $7FE0, $7C00, $7C0F, $7C1F
+; 8 rainbow letter colours as R,G,B channels (0..31) — the hues the reveal
+; paints the columns before they settle to blue. Plus the settle/fade targets.
+HueRGB:
+    db 31, 0, 0                  ; red
+    db 31, 12, 0                 ; orange
+    db 31, 28, 0                 ; yellow
+    db 0, 28, 0                  ; green
+    db 0, 28, 28                 ; cyan
+    db 0, 8, 31                  ; blue
+    db 12, 0, 31                 ; indigo
+    db 24, 0, 28                 ; violet
+BlueRGB:
+    db 0, 6, 31                  ; the colour the logo settles to
+WhiteRGB:
+    db 31, 31, 31                ; the fade-out target
 
-SECTION "logo", ROM0[$0470]
+SECTION "logo", ROM0
 LogoTiles:
     INCBIN "logo.2bpp"
