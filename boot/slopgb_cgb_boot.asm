@@ -81,6 +81,9 @@ Main:
     or c
     jr nz, .copyLogo
 
+    ; --- decompress the cart's Nintendo logo into tiles 32+ ($8200) ---
+    call DecompressNintendo
+
     ; --- all 8 BG palettes: index0 white, indices 1..3 black; the per-palette
     ; live letter colour (R,G,B, 0..31 each) is tracked in WRAM at $C000 so the
     ; animation can interpolate it. Start every letter colour black. ---
@@ -127,19 +130,39 @@ Main:
     dec c
     jr nz, .maprow
 
-    ; --- BG attribute map (bank 1): each logo column uses palette = column index
-    ; (0..7, the rightmost columns capped at 7) so colour can wipe across them ---
+    ; --- place the Nintendo logo: 2 rows x 12 tiles (tiles 32..55) at row 11 ---
+    ld hl, $9800 + 11*32 + 4
+    ld d, 32                     ; first Nintendo tile
+    ld c, 2
+.ntmRow:
+    ld b, 12
+.ntmCol:
+    ld a, d
+    ld [hl+], a
+    inc d
+    dec b
+    jr nz, .ntmCol
+    push bc
+    ld bc, 32 - 12
+    add hl, bc
+    pop bc
+    dec c
+    jr nz, .ntmRow
+
+    ; --- BG attribute map (bank 1) ---
     ld a, 1
     ldh [rVBK], a
+    ; slopgb columns use palette = column index, capped at 6 (the animated band);
+    ; palette 7 is reserved for the static-black Nintendo logo.
     ld hl, $9800 + 8*32 + 4
     ld c, LOGO_ROWS
 .attrrow:
     ld b, 0                      ; column counter -> palette index
 .attrcol:
     ld a, b
-    cp 8
+    cp 7
     jr c, .attrok
-    ld a, 7                      ; cap at palette 7
+    ld a, 6                      ; cap at palette 6
 .attrok:
     ld [hl+], a
     inc b
@@ -152,6 +175,22 @@ Main:
     pop bc
     dec c
     jr nz, .attrrow
+    ; Nintendo logo rows -> palette 7 (static black)
+    ld hl, $9800 + 11*32 + 4
+    ld c, 2
+.nattrRow:
+    ld b, 12
+.nattrCol:
+    ld a, 7
+    ld [hl+], a
+    dec b
+    jr nz, .nattrCol
+    push bc
+    ld bc, 32 - 12
+    add hl, bc
+    pop bc
+    dec c
+    jr nz, .nattrRow
     xor a
     ldh [rVBK], a                ; back to bank 0
 
@@ -195,7 +234,7 @@ Main:
     pop bc
     inc c
     ld a, c
-    cp 8
+    cp 7                         ; animate palettes 0..6 (7 is the static logo)
     jr nz, .reveal
 
     ; --- Phase 2: settle the rainbow into solid blue ---
@@ -361,6 +400,44 @@ Copy8ToC:
     jr nz, .cp
     ret
 
+; Decompress the cart's 48-byte Nintendo logo ($0104) into tiles at $8200 by
+; doubling each nibble's bits (the standard logo scaler — a functional algorithm;
+; the logo data itself lives in the cart, never embedded here). VRAM was cleared
+; at power-on, so the unwritten bitplane stays 0 (the logo renders as shade 1).
+DecompressNintendo:
+    ld de, $0104
+    ld hl, $8200
+.dn:
+    ld a, [de]
+    ld b, a
+    call ExpandNib               ; double the high nibble of B
+    call ExpandNib               ; double the (rotated) low nibble of B
+    inc de
+    ld a, e
+    cp $34                       ; through $0133
+    jr nz, .dn
+    ret
+
+; Double the top nibble of B into A (each bit twice), write it to [HL] and [HL+2]
+; (doubling vertically too), advance HL by 4, and shift B left by 4.
+ExpandNib:
+    push de
+    ld d, 4
+.ex:
+    ld e, b
+    rl b
+    rla
+    rl e
+    rla
+    dec d
+    jr nz, .ex
+    pop de
+    ld [hl+], a
+    inc hl
+    ld [hl+], a
+    inc hl
+    ret
+
 ; Read the joypad into C: d-pad in the high nibble (Up $40, Left $20, Down $80,
 ; Right $10), A=$01/B=$02 in the low nibble; a held button reads as 1.
 ReadCombo:
@@ -523,7 +600,7 @@ FadeAll:
     pop bc
     inc c
     ld a, c
-    cp 8
+    cp 7                         ; palettes 0..6 (7 is the static logo)
     jr nz, .faPal
     call WaitFrame
     dec b
