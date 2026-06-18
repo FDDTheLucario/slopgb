@@ -162,40 +162,36 @@ Main:
 .hold:
     jr .hold
 
-; A two-tone rising chime on square channel 1: a lower note then a higher one,
-; each with a decaying envelope ("di-ding").
+; The CGB boot chime ("di-ding"), bit-for-bit the same as the reference ROM:
+; square channel 1, two rising tones (freq $783 then $7C1, an octave apart) two
+; frames apart, sharing the envelope $F3 (vol 15, decrease, period 3). The APU
+; register values are the reference boot ROM's exact writes.
 PlayChime:
-    ld a, $77
-    ldh [rNR50], a               ; master volume max, both sides
-    ld a, $11
-    ldh [rNR51], a               ; channel 1 -> left + right
-    ld de, $0706                 ; tone 1 (lower): 11-bit freq, D=hi E=lo
-    call PlayTone
-    ld b, 12
-.c1:
-    call WaitFrame
-    dec b
-    jr nz, .c1
-    ld de, $0759                 ; tone 2 (higher)
-    call PlayTone
-    ld b, 22
-.c2:
-    call WaitFrame
-    dec b
-    jr nz, .c2
-    ret
-
-; Trigger square channel 1 at the 11-bit frequency in DE (D = hi 3 bits, E = lo).
-PlayTone:
     ld a, $80
-    ldh [rNR11], a               ; 50% duty, length 0
+    ldh [rNR52], a               ; APU on
+    ldh [rNR11], a               ; NR11 = $80: 50% duty, length 0
     ld a, $F3
-    ldh [rNR12], a               ; envelope: volume 15, decrease, period 3
-    ld a, e
-    ldh [rNR13], a               ; frequency lo
-    ld a, d
-    or $80                       ; trigger (bit 7) + frequency hi
-    ldh [rNR14], a
+    ldh [rNR12], a               ; NR12 = $F3: envelope vol 15, decrease, period 3
+    ldh [rNR51], a               ; NR51 = $F3: panning (matches reference)
+    ld a, $77
+    ldh [rNR50], a               ; NR50 = $77: master volume max, both sides
+    ; tone 1: frequency $783
+    ld a, $83
+    ldh [rNR13], a
+    ld a, $87
+    ldh [rNR14], a               ; trigger + freq hi (7)
+    call WaitFrame               ; the reference fires the two tones two steps apart
+    call WaitFrame
+    ; tone 2: frequency $7C1
+    ld a, $C1
+    ldh [rNR13], a
+    ld a, $87
+    ldh [rNR14], a               ; trigger + freq hi (7)
+    ld b, 30                      ; let the envelope ring out
+.ring:
+    call WaitFrame
+    dec b
+    jr nz, .ring
     ret
 
 ; Set CGB BG palette C's letter colours (indices 1..3) to Hues[C].
