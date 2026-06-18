@@ -130,7 +130,7 @@ Main:
     jr nz, .maprow
 
     ; --- place the Nintendo logo: 2 rows x 12 tiles (34..57) at row 11 ---
-    ld hl, $9800 + 11*32 + 4
+    ld hl, $9800 + 13*32 + 4
     ld d, 34                     ; first Nintendo tile
     ld c, 2
 .ntmRow:
@@ -175,7 +175,7 @@ Main:
     dec c
     jr nz, .attrrow
     ; Nintendo logo rows -> palette 7 (static black)
-    ld hl, $9800 + 11*32 + 4
+    ld hl, $9800 + 13*32 + 4
     ld c, 2
 .nattrRow:
     ld b, 12
