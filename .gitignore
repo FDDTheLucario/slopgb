@@ -10,3 +10,4 @@ handoff.md
 /.claude/worktrees/
 boot/boot.o
 boot/*.o
+boot/*.map

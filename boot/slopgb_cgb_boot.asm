@@ -9,11 +9,15 @@
 
 INCLUDE "hardware.inc"
 
-DEF LOGO_COLS    EQU 11        ; the SLOPGB wordmark is 11x3 tiles (88x24 px)
-DEF LOGO_ROWS    EQU 3
+DEF LOGO_COLS    EQU 11        ; the SLOPGB wordmark is 11x3 tiles (88x24 px),
+DEF LOGO_ROWS    EQU 3         ; same per-glyph size as the real GAME BOY logo
 DEF LOGO_TILES   EQU LOGO_COLS * LOGO_ROWS
 DEF LOGO_LOW_BYTES  EQU 13 * 16    ; first 13 tiles (fit the $0029 boot gap)
 DEF LOGO_HIGH_BYTES EQU LOGO_TILES * 16 - LOGO_LOW_BYTES
+DEF LOGO_PALS    EQU 6         ; logo columns share 6 rainbow palettes (2 cols ea)
+DEF NIN_PAL      EQU 7         ; the static Nintendo subtext palette
+DEF NIN_TILE     EQU LOGO_TILES + 1   ; first Nintendo tile (after the wordmark)
+DEF NIN_COLS     EQU 6         ; Nintendo subtext is 6x1 tiles (48x8, native size)
 
 ; CGB compatibility palette tables (factual data, generated — see boot/README.md
 ; + cgb_palette_extract). Included first so its DEFs are visible to the code.
@@ -80,37 +84,29 @@ Main:
     ld bc, LOGO_HIGH_BYTES
     call CopyBytes               ; HL continues into the next tiles
 
-    ; --- decompress the cart's Nintendo logo into tiles 32+ ($8200) ---
+    ; --- render the cart's Nintendo logo (native 6x1 subtext) into tiles 34+ ---
     call DecompressNintendo
 
-    ; --- all 8 BG palettes: index0 white, indices 1..3 black; the per-palette
-    ; live letter colour (R,G,B, 0..31 each) is tracked in WRAM at $C000 so the
-    ; animation can interpolate it. Start every letter colour black. ---
-    ld a, $80                    ; auto-increment from index 0
+    ; --- BG palettes. Every palette's 4 colours start WHITE ($7FFF) so the whole
+    ; screen is blank when the LCD comes on. The Nintendo subtext is painted black
+    ; after a short blank hold, and the logo palettes are painted by the reveal —
+    ; exactly the reference's blank -> Nintendo -> wordmark sequence. ---
+    ld a, $80                    ; auto-increment from colour index 0
     ldh [rBGPI], a
     ld c, 8                      ; 8 palettes
 .palOuter:
-    ld a, $FF                    ; index0 white lo ($7FFF)
+    ld b, 4                      ; 4 colours each
+.palInner:
+    ld a, $FF                    ; $7FFF = white
     ldh [rBGPD], a
     ld a, $7F
-    ldh [rBGPD], a
-    xor a                        ; indices 1..3 = black
-    ld b, 6
-.palInner:
     ldh [rBGPD], a
     dec b
     jr nz, .palInner
     dec c
     jr nz, .palOuter
-    ld hl, $C000                 ; live RGB per palette (8 x R,G,B), start black
-    ld b, 24
-    xor a
-.clrRgb:
-    ld [hl+], a
-    dec b
-    jr nz, .clrRgb
 
-    ; --- build the BG tilemap (bank 0): the 11x2 logo centred at col 4, row 8 ---
+    ; --- build the BG tilemap (bank 0): the 12x3 logo centred at col 4, rows 6-8 ---
     ld hl, $9800 + 6*32 + 4
     ld d, 1                      ; first logo tile index
     ld c, LOGO_ROWS
@@ -129,40 +125,29 @@ Main:
     dec c
     jr nz, .maprow
 
-    ; --- place the Nintendo logo: 2 rows x 12 tiles (34..57) at row 11 ---
-    ld hl, $9800 + 13*32 + 4
-    ld d, 34                     ; first Nintendo tile
-    ld c, 2
-.ntmRow:
-    ld b, 12
+    ; --- place the Nintendo subtext: 1 row x 6 tiles at row 13, centred (col 7) ---
+    ld hl, $9800 + 13*32 + 7
+    ld a, NIN_TILE               ; first Nintendo tile (after the wordmark tiles)
+    ld c, NIN_COLS
 .ntmCol:
-    ld a, d
     ld [hl+], a
-    inc d
-    dec b
-    jr nz, .ntmCol
-    push bc
-    ld bc, 32 - 12
-    add hl, bc
-    pop bc
+    inc a
     dec c
-    jr nz, .ntmRow
+    jr nz, .ntmCol
 
     ; --- BG attribute map (bank 1) ---
     ld a, 1
     ldh [rVBK], a
-    ; slopgb columns use palette = column index, capped at 6 (the animated band);
-    ; palette 7 is reserved for the static-black Nintendo logo.
+    ; logo columns share 6 rainbow palettes, two columns each (palette = col>>1),
+    ; so the reveal sweeps a diagonal rainbow band. Palette 7 stays the static
+    ; Nintendo subtext.
     ld hl, $9800 + 6*32 + 4
     ld c, LOGO_ROWS
 .attrrow:
-    ld b, 0                      ; column counter -> palette index
+    ld b, 0                      ; column counter
 .attrcol:
     ld a, b
-    cp 7
-    jr c, .attrok
-    ld a, 6                      ; cap at palette 6
-.attrok:
+    srl a                        ; palette = column >> 1 (0..5)
     ld [hl+], a
     inc b
     ld a, b
@@ -174,22 +159,14 @@ Main:
     pop bc
     dec c
     jr nz, .attrrow
-    ; Nintendo logo rows -> palette 7 (static black)
-    ld hl, $9800 + 13*32 + 4
-    ld c, 2
-.nattrRow:
-    ld b, 12
+    ; Nintendo subtext -> palette 7 (static black)
+    ld hl, $9800 + 13*32 + 7
+    ld a, NIN_PAL
+    ld c, NIN_COLS
 .nattrCol:
-    ld a, 7
     ld [hl+], a
-    dec b
-    jr nz, .nattrCol
-    push bc
-    ld bc, 32 - 12
-    add hl, bc
-    pop bc
     dec c
-    jr nz, .nattrRow
+    jr nz, .nattrCol
     xor a
     ldh [rVBK], a                ; back to bank 0
 
@@ -197,64 +174,117 @@ Main:
     ld a, $91
     ldh [rLCDC], a
 
-    ; brief hold on just the Nintendo logo before the wordmark wipes in (the
-    ; reference shows 'Nintendo' for ~28 frames first)
-    ld b, 28
+    ; Blank hold: the reference shows a white screen for ~33 frames before the
+    ; Nintendo subtext fades in.
+    ld b, 33
     call DelayFrames
 
-    ; --- Phase 1: reveal the letters left-to-right, each column its rainbow hue
-    ld c, 0                      ; palette / column 0..7
-.reveal:
-    push bc
+    ; Paint the Nintendo subtext black (palette 7 letters), then hold on it alone
+    ; for ~24 frames while the wordmark is still invisible — the reference shows
+    ; 'Nintendo' by itself before the reveal begins.
+    ld de, $0000                 ; black
+    ld b, NIN_PAL
+    call WritePalDE
+    ld b, 24
+    call DelayFrames
+
+    ; --- Reveal: paint the 6 logo palettes left-to-right, each one cycling
+    ; Yellow->Red->Magenta->Green->Blue (the reference's rainbow). A new group is
+    ; revealed every REVEAL frames; every CYCLE frames each revealed group steps
+    ; one colour onward, capping at blue. Earlier groups run ahead, so a diagonal
+    ; rainbow band sweeps across the wordmark and resolves to solid blue.
+    ; WRAM: $C000+g = group g's phase (0..4) or $FF hidden; $C006 revealed count,
+    ;       $C007 reveal timer, $C008 cycle timer. ---
+    ld hl, $C000
+    ld b, LOGO_PALS
+    ld a, $FF
+.rvInit:
+    ld [hl+], a                  ; every group hidden
+    dec b
+    jr nz, .rvInit
+    xor a
+    ld [$C006], a                ; revealed = 0
+    ld a, 1
+    ld [$C007], a                ; reveal the first group on the first frame
+    ld a, 6
+    ld [$C008], a                ; cycle timer
+.rvLoop:
+    ld hl, $C007                 ; reveal timer
+    dec [hl]
+    jr nz, .rvNoReveal
+    ld [hl], 5                   ; a new group every 5 frames
+    ld a, [$C006]
+    cp LOGO_PALS
+    jr nc, .rvNoReveal           ; all groups already revealed
+    ld e, a
+    ld d, $C0
+    xor a
+    ld [de], a                   ; phase[revealed] = 0 (yellow)
+    ld a, [$C006]
+    inc a
+    ld [$C006], a
+.rvNoReveal:
+    ld hl, $C008                 ; cycle timer
+    dec [hl]
+    jr nz, .rvNoCycle
+    ld [hl], 6                   ; advance phases every 6 frames
+    ld hl, $C000
+    ld b, LOGO_PALS
+.rvAdv:
+    ld a, [hl]
+    cp $FF
+    jr z, .rvAdvNext             ; hidden
+    cp 4
+    jr z, .rvAdvNext             ; already blue
+    inc a
+    ld [hl], a
+.rvAdvNext:
+    inc hl
+    dec b
+    jr nz, .rvAdv
+.rvNoCycle:
+    ld c, 0                      ; render each group's current colour
+.rvRender:
     ld a, c
-    add a, a
-    add a, c                     ; A = c*3
+    ld e, a
+    ld d, $C0
+    ld a, [de]                   ; phase
+    cp $FF
+    jr z, .rvRenderNext          ; hidden -> palette stays white (invisible)
+    add a, a                     ; phase*2 = SeqColors offset
     ld e, a
     ld d, 0
-    ld hl, HueRGB
-    add hl, de                   ; HL -> HueRGB[c]
-    ld a, c
-    add a, a
-    add a, c
-    ld e, a
-    ld d, $C0                    ; DE = $C000 + c*3 (live colour)
-    ld a, [hl+]
-    ld [de], a
-    inc de
-    ld a, [hl+]
-    ld [de], a
-    inc de
-    ld a, [hl]
-    ld [de], a
-    ld b, c
-    call CombineWrite            ; push palette c's colour to BG palette c
-    pop bc
+    ld hl, SeqColors
+    add hl, de
+    ld e, [hl]
+    inc hl
+    ld d, [hl]                   ; DE = colour word
+    ld b, c                      ; palette = group index
     push bc
-    ld b, 4                      ; ~4 frames per column
-.revWait:
-    call WaitFrame
-    dec b
-    jr nz, .revWait
+    call WritePalDE
     pop bc
+.rvRenderNext:
     inc c
     ld a, c
-    cp 7                         ; animate palettes 0..6 (7 is the static logo)
-    jr nz, .reveal
+    cp LOGO_PALS
+    jr nz, .rvRender
+    call WaitFrame
+    ; done when every group is revealed and the last group has reached blue
+    ; (groups cycle in lockstep, so the last-revealed group settles last).
+    ld a, [$C006]
+    cp LOGO_PALS
+    jr nz, .rvLoop
+    ld a, [$C000 + LOGO_PALS - 1]   ; phase of the last group
+    cp 4
+    jr nz, .rvLoop
 
-    ; --- Phase 2: settle the rainbow into solid blue ---
-    ld hl, BlueRGB
-    call FadeAll
-
-    ; --- the two-tone boot chime (during the blue hold) ---
+    ; --- the two-tone chime rings out over the solid blue logo; its ~34 frames
+    ; are the reference's blue dwell ---
     call PlayChime
 
-    ; hold on the blue logo a little longer (the reference dwells ~60 frames)
-    ld b, 20
-    call DelayFrames
-
-    ; --- Phase 3: fade the logo out to white ---
-    ld hl, WhiteRGB
-    call FadeAll
+    ; --- Fade: ramp the blue logo and the black Nintendo subtext up to white
+    ; over 31 frames (the reference fades both out together before hand-off) ---
+    call FadeToWhite
 
     ; --- assign the DMG game its CGB compatibility palette, then hand off ---
     call ApplyGamePalette
@@ -419,43 +449,73 @@ CopyBytes:
     jr nz, CopyBytes
     ret
 
-; Decompress the cart's 48-byte Nintendo logo ($0104) into tiles at $8200 by
-; doubling each nibble's bits (the standard logo scaler — a functional algorithm;
-; the logo data itself lives in the cart, never embedded here). VRAM was cleared
-; at power-on, so the unwritten bitplane stays 0 (the logo renders as shade 1).
+; Render the cart's 48-byte Nintendo logo ($0104) at its NATIVE size — 6x1 tiles
+; (48x8), the small subtext size the reference CGB boot shows (the DMG boot
+; doubles it; this is that logo un-doubled). The standard logo data, halved, is
+; exactly two source nibbles per tile-row: for native tile T (0..5) and row y,
+;   byte = (nibble(src[base + 4T + off]) << 4) | nibble(src[base + 4T+2 + off])
+; with base = $0104 + (y>=4 ? 24 : 0), off = (y&2 ? 1 : 0), and the high nibble
+; for even y, the low nibble for odd y. The logo data stays in the cart (this is
+; a functional/interop re-render, never an embedded copy); the hi bitplane stays
+; 0 (VRAM was cleared) so the subtext renders as shade 1.
 DecompressNintendo:
-    ld de, $0104
-    ld hl, $8220                 ; tile 34 (clear of the 33-tile SLOPGB logo)
-.dn:
-    ld a, [de]
-    ld b, a
-    call ExpandNib               ; double the high nibble of B
-    call ExpandNib               ; double the (rotated) low nibble of B
-    inc de
+    ld b, 0                      ; row y (0..7)
+.nrow:
+    ; DE -> the row's left source byte = $0104 + band + off
+    ld a, b
+    and 4                        ; y >= 4 ?
+    ld e, 0
+    jr z, .nband
+    ld e, 24
+.nband:
+    bit 1, b                     ; (y & 2) -> +1
+    jr z, .noff
+    inc e
+.noff:
     ld a, e
-    cp $34                       ; through $0133
-    jr nz, .dn
+    add a, $04
+    ld e, a
+    ld d, $01
+    ; HL = tile 0, row y, plane 0 = $8000 + NIN_TILE*16 + y*2 (no carry into hi)
+    ld a, b
+    add a, a
+    add a, LOW($8000 + NIN_TILE * 16)
+    ld l, a
+    ld h, HIGH($8000 + NIN_TILE * 16)
+    ld c, NIN_COLS               ; tile T (0..5)
+.ntile:
+    ld a, [de]                   ; left source byte
+    call NinNib                  ; left nibble -> low 4 bits
+    swap a                       ; -> high 4 bits
+    ld [hl], a
+    inc de
+    inc de                       ; DE -> right source byte (left + 2)
+    ld a, [de]
+    call NinNib                  ; right nibble -> low 4 bits
+    or [hl]                      ; (left << 4) | right
+    ld [hl], a
+    inc de
+    inc de                       ; DE -> next tile's left (left + 4)
+    push de
+    ld de, 16
+    add hl, de                   ; HL -> next tile, same row
+    pop de
+    dec c
+    jr nz, .ntile
+    inc b
+    ld a, b
+    cp 8
+    jr nz, .nrow
     ret
 
-; Double the top nibble of B into A (each bit twice), write it to two tile-rows
-; plane 0 ([HL] and [HL+2]), advance HL by 4, and shift B left by 4 (the cart
-; logo is designed to be doubled both ways).
-ExpandNib:
-    push de
-    ld d, 4
-.ex:
-    ld e, b
-    rl b
-    rla
-    rl e
-    rla
-    dec d
-    jr nz, .ex
-    pop de
-    ld [hl+], a
-    inc hl
-    ld [hl+], a
-    inc hl
+; Return in A the nibble of A selected by row parity in B: the high nibble when
+; y is even, the low nibble when odd, placed in the low 4 bits.
+NinNib:
+    bit 0, b
+    jr nz, .lo
+    swap a
+.lo:
+    and $0F
     ret
 
 ; Read the joypad into C: d-pad in the high nibble (Up $40, Left $20, Down $80,
@@ -518,113 +578,69 @@ PlayChime:
     jr nz, .ring
     ret
 
-; Write BG palette B's letter colours (indices 1..3) from its live RGB at
-; $C000 + B*3, packing the three channels into BGR555.
-CombineWrite:
-    ld a, b
-    add a, a
-    add a, b                     ; A = B*3
-    ld l, a
-    ld h, $C0                    ; HL = $C000 + B*3
-    ld a, [hl+]                  ; R
-    ld e, a
-    ld a, [hl+]                  ; G
-    ld d, a
-    ld c, [hl]                   ; B (blue channel)
-    ; lo = R | ((G & 7) << 5)
-    ld a, d
-    and $07
-    add a, a
-    add a, a
-    add a, a
-    add a, a
-    add a, a                     ; (G & 7) << 5
-    or e
-    ld e, a                      ; E = colour lo
-    ; hi = (G >> 3) | (B << 2)
-    ld a, d
-    srl a
-    srl a
-    srl a                        ; G >> 3
-    ld d, a
-    ld a, c
-    add a, a
-    add a, a                     ; B << 2
-    or d
-    ld d, a                      ; D = colour hi
-    ; BGPI = B*8 + 2 (index 1), auto-increment
+; Write the BGR555 colour word in DE to BG palette B's letter colours (indices
+; 1,2,3), via BGPI auto-increment. Preserves DE; clobbers A and B.
+WritePalDE:
     ld a, b
     add a, a
     add a, a
     add a, a                     ; B*8
-    add a, 2
-    or $80
+    add a, 2                     ; colour index 1
+    or $80                       ; auto-increment
     ldh [rBGPI], a
-    ld b, 3
-.cw:
+    ld b, 3                      ; indices 1,2,3
+.wp:
     ld a, e
     ldh [rBGPD], a
     ld a, d
     ldh [rBGPD], a
     dec b
-    jr nz, .cw
+    jr nz, .wp
     ret
 
-; Step A one unit toward target D (used to interpolate one colour channel).
-StepCh:
-    cp d
-    ret z
-    jr c, .up
-    dec a
-    ret
-.up:
-    inc a
-    ret
-
-; Interpolate every palette's letter colour toward the target R,G,B at HL over
-; 32 frames (covers the full 0..31 channel range), one step per channel per frame.
-FadeAll:
-    ld a, [hl+]
-    ldh [$FF90], a               ; target R
-    ld a, [hl+]
-    ldh [$FF91], a               ; target G
-    ld a, [hl]
-    ldh [$FF92], a               ; target B
-    ld b, 32
-.faFrame:
-    ld c, 0
-.faPal:
+; Fade the 6 blue logo palettes and the black Nintendo subtext up to white over
+; 31 frames. At level k (1..31) the logo colour is (k,k,31) and the Nintendo
+; colour is (k,k,k); both reach $7FFF (white) at k=31. Packed into BGR555 as
+; lo = k | ((k&7)<<5), hi = (k>>3) | (b<<2).
+FadeToWhite:
+    ld c, 1                      ; ramp level
+.fwLoop:
+    ld a, c                      ; lo byte (shared: R=G=k)
+    and 7
+    swap a
+    add a, a                     ; (k&7)<<5
+    or c                         ; | k
+    ld e, a                      ; E = colour lo
+    ld a, c
+    srl a
+    srl a
+    srl a                        ; A = k>>3 (0..3)
+    or 124                       ; | (31<<2): blue channel full
+    ld d, a                      ; D = logo hi -> DE = (k,k,31)
+    ld b, 0
+.fwLogo:
+    push bc
+    call WritePalDE              ; preserves DE
+    pop bc
+    inc b
+    ld a, b
+    cp LOGO_PALS
+    jr nz, .fwLogo
+    ld a, d                      ; Nintendo hi = (k>>3) | (k<<2)
+    and 3                        ; recover k>>3
+    ld d, a
     ld a, c
     add a, a
-    add a, c
-    ld l, a
-    ld h, $C0                    ; HL = $C000 + c*3
-    ldh a, [$FF90]
-    ld d, a
-    ld a, [hl]
-    call StepCh
-    ld [hl+], a
-    ldh a, [$FF91]
-    ld d, a
-    ld a, [hl]
-    call StepCh
-    ld [hl+], a
-    ldh a, [$FF92]
-    ld d, a
-    ld a, [hl]
-    call StepCh
-    ld [hl], a
-    push bc                      ; CombineWrite clobbers B,C
-    ld b, c
-    call CombineWrite
-    pop bc
+    add a, a                     ; k<<2
+    or d
+    ld d, a                      ; DE = (k,k,k)
+    ld b, NIN_PAL
+    call WritePalDE
+    call WaitFrame
     inc c
     ld a, c
-    cp 7                         ; palettes 0..6 (7 is the static logo)
-    jr nz, .faPal
-    call WaitFrame
-    dec b
-    jr nz, .faFrame
+    cp 32
+    jr nz, .fwLoop
     ret
 
 ; Wait for one frame (one rising edge of v-blank, LY 143 -> 144).
@@ -647,21 +663,15 @@ DelayFrames:
     jr nz, .df
     ret
 
-; 8 rainbow letter colours as R,G,B channels (0..31) — the hues the reveal
-; paints the columns before they settle to blue. Plus the settle/fade targets.
-HueRGB:
-    db 31, 0, 0                  ; red
-    db 31, 12, 0                 ; orange
-    db 31, 28, 0                 ; yellow
-    db 0, 28, 0                  ; green
-    db 0, 28, 28                 ; cyan
-    db 0, 8, 31                  ; blue
-    db 12, 0, 31                 ; indigo
-    db 24, 0, 28                 ; violet
-BlueRGB:
-    db 0, 6, 31                  ; the colour the logo settles to
-WhiteRGB:
-    db 31, 31, 31                ; the fade-out target
+; The reveal's colour cycle as packed BGR555 words: Yellow -> Red -> Magenta ->
+; Green -> Blue, the exact pure hues the reference steps each column through
+; before it settles on blue (measured frame-by-frame from a legal boot ROM).
+SeqColors:
+    dw $03FF                     ; yellow  (31,31,0)
+    dw $001F                     ; red     (31,0,0)
+    dw $7C1F                     ; magenta (31,0,31)
+    dw $03E0                     ; green   (0,31,0)
+    dw $7C00                     ; blue    (0,0,31)
 
 ; The logo tile data is split: the first 13 tiles live in the small free gap
 ; between the entry code and the hand-off stub ($0029-$00F8); the rest floats in
