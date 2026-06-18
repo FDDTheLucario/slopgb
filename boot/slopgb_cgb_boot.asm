@@ -356,8 +356,13 @@ PlayChime:
     ldh [rNR13], a
     ld a, $87
     ldh [rNR14], a               ; trigger + freq hi (7)
-    call WaitFrame               ; the reference fires the two tones two steps apart
+    ; the reference holds tone 1 for ~4 frames before re-triggering ch1 (its
+    ; chime loop is two frames per step; measured from the reference audio)
+    ld b, 4
+.gap:
     call WaitFrame
+    dec b
+    jr nz, .gap
     ; tone 2: frequency $7C1
     ld a, $C1
     ldh [rNR13], a

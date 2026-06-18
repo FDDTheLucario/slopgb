@@ -172,6 +172,34 @@ fn main() {
         return;
     }
 
+    // chimetrace <boot>: per-frame dominant audio frequency (zero-crossings) so
+    // the two chime tones' onsets + durations are visible.
+    if arg2.as_deref() == Some("chimetrace") {
+        let b = std::fs::read(a.next().expect("boot")).expect("read");
+        let cart = synth_cart(0x00, 0x00);
+        let mut gb = GameBoy::new_with_boot(Model::Cgb, cart, b).expect("build");
+        gb.set_sample_rate(44100);
+        let mut buf = Vec::new();
+        for fr in 0..150 {
+            buf.clear();
+            gb.run_frame();
+            gb.drain_audio(&mut buf);
+            // zero crossings on the left channel -> approx dominant frequency
+            let mut zc = 0;
+            for w in buf.windows(2) {
+                if (w[0].0 <= 0.0) != (w[1].0 <= 0.0) {
+                    zc += 1;
+                }
+            }
+            let peak = buf.iter().fold(0f32, |m, s| m.max(s.0.abs()));
+            let hz = if buf.len() > 1 { zc as f32 / 2.0 / (buf.len() as f32 / 44100.0) } else { 0.0 };
+            if peak > 0.02 {
+                println!("fr {fr:3} peak {peak:.3} ~{hz:.0}Hz");
+            }
+        }
+        return;
+    }
+
     if arg2.as_deref() == Some("combos") {
         for (code, btns) in COMBOS {
             let s = assign_held(&boot, btns);
