@@ -9,9 +9,11 @@
 
 INCLUDE "hardware.inc"
 
-DEF LOGO_COLS    EQU 11        ; the slopgb logo is 11x2 tiles (88x16 px)
-DEF LOGO_ROWS    EQU 2
+DEF LOGO_COLS    EQU 11        ; the SLOPGB wordmark is 11x3 tiles (88x24 px)
+DEF LOGO_ROWS    EQU 3
 DEF LOGO_TILES   EQU LOGO_COLS * LOGO_ROWS
+DEF LOGO_LOW_BYTES  EQU 13 * 16    ; first 13 tiles (fit the $0029 boot gap)
+DEF LOGO_HIGH_BYTES EQU LOGO_TILES * 16 - LOGO_LOW_BYTES
 
 ; CGB compatibility palette tables (factual data, generated — see boot/README.md
 ; + cgb_palette_extract). Included first so its DEFs are visible to the code.
@@ -68,18 +70,15 @@ BootEnd:
 
 SECTION "main", ROM0[$0200]
 Main:
-    ; --- copy the slopgb logo tiles to VRAM, starting at tile 1 ($8010) ---
-    ld de, LogoTiles
+    ; --- copy the SLOPGB logo tiles to VRAM (tile 1, $8010). The logo data is
+    ; split across two ROM regions to fit the budget, so copy both parts. ---
+    ld de, LogoTilesLow
     ld hl, $8010                 ; tile 1
-    ld bc, LOGO_TILES * 16
-.copyLogo:
-    ld a, [de]
-    ld [hl+], a
-    inc de
-    dec bc
-    ld a, b
-    or c
-    jr nz, .copyLogo
+    ld bc, LOGO_LOW_BYTES
+    call CopyBytes
+    ld de, LogoTilesHigh
+    ld bc, LOGO_HIGH_BYTES
+    call CopyBytes               ; HL continues into the next tiles
 
     ; --- decompress the cart's Nintendo logo into tiles 32+ ($8200) ---
     call DecompressNintendo
@@ -112,7 +111,7 @@ Main:
     jr nz, .clrRgb
 
     ; --- build the BG tilemap (bank 0): the 11x2 logo centred at col 4, row 8 ---
-    ld hl, $9800 + 8*32 + 4
+    ld hl, $9800 + 6*32 + 4
     ld d, 1                      ; first logo tile index
     ld c, LOGO_ROWS
 .maprow:
@@ -130,9 +129,9 @@ Main:
     dec c
     jr nz, .maprow
 
-    ; --- place the Nintendo logo: 2 rows x 12 tiles (tiles 32..55) at row 11 ---
+    ; --- place the Nintendo logo: 2 rows x 12 tiles (34..57) at row 11 ---
     ld hl, $9800 + 11*32 + 4
-    ld d, 32                     ; first Nintendo tile
+    ld d, 34                     ; first Nintendo tile
     ld c, 2
 .ntmRow:
     ld b, 12
@@ -154,7 +153,7 @@ Main:
     ldh [rVBK], a
     ; slopgb columns use palette = column index, capped at 6 (the animated band);
     ; palette 7 is reserved for the static-black Nintendo logo.
-    ld hl, $9800 + 8*32 + 4
+    ld hl, $9800 + 6*32 + 4
     ld c, LOGO_ROWS
 .attrrow:
     ld b, 0                      ; column counter -> palette index
@@ -198,6 +197,11 @@ Main:
     ld a, $91
     ldh [rLCDC], a
 
+    ; brief hold on just the Nintendo logo before the wordmark wipes in (the
+    ; reference shows 'Nintendo' for ~28 frames first)
+    ld b, 28
+    call DelayFrames
+
     ; --- Phase 1: reveal the letters left-to-right, each column its rainbow hue
     ld c, 0                      ; palette / column 0..7
 .reveal:
@@ -226,7 +230,7 @@ Main:
     call CombineWrite            ; push palette c's colour to BG palette c
     pop bc
     push bc
-    ld b, 3                      ; ~3 frames per column
+    ld b, 4                      ; ~4 frames per column
 .revWait:
     call WaitFrame
     dec b
@@ -243,6 +247,10 @@ Main:
 
     ; --- the two-tone boot chime (during the blue hold) ---
     call PlayChime
+
+    ; hold on the blue logo a little longer (the reference dwells ~60 frames)
+    ld b, 20
+    call DelayFrames
 
     ; --- Phase 3: fade the logo out to white ---
     ld hl, WhiteRGB
@@ -400,13 +408,24 @@ Copy8ToC:
     jr nz, .cp
     ret
 
+; Copy BC bytes from DE to HL.
+CopyBytes:
+    ld a, [de]
+    ld [hl+], a
+    inc de
+    dec bc
+    ld a, b
+    or c
+    jr nz, CopyBytes
+    ret
+
 ; Decompress the cart's 48-byte Nintendo logo ($0104) into tiles at $8200 by
 ; doubling each nibble's bits (the standard logo scaler — a functional algorithm;
 ; the logo data itself lives in the cart, never embedded here). VRAM was cleared
 ; at power-on, so the unwritten bitplane stays 0 (the logo renders as shade 1).
 DecompressNintendo:
     ld de, $0104
-    ld hl, $8200
+    ld hl, $8220                 ; tile 34 (clear of the 33-tile SLOPGB logo)
 .dn:
     ld a, [de]
     ld b, a
@@ -418,8 +437,9 @@ DecompressNintendo:
     jr nz, .dn
     ret
 
-; Double the top nibble of B into A (each bit twice), write it to [HL] and [HL+2]
-; (doubling vertically too), advance HL by 4, and shift B left by 4.
+; Double the top nibble of B into A (each bit twice), write it to two tile-rows
+; plane 0 ([HL] and [HL+2]), advance HL by 4, and shift B left by 4 (the cart
+; logo is designed to be doubled both ways).
 ExpandNib:
     push de
     ld d, 4
@@ -619,6 +639,14 @@ WaitFrame:
     jr z, .inVbl
     ret
 
+; Wait B frames.
+DelayFrames:
+.df:
+    call WaitFrame
+    dec b
+    jr nz, .df
+    ret
+
 ; 8 rainbow letter colours as R,G,B channels (0..31) — the hues the reveal
 ; paints the columns before they settle to blue. Plus the settle/fade targets.
 HueRGB:
@@ -635,6 +663,13 @@ BlueRGB:
 WhiteRGB:
     db 31, 31, 31                ; the fade-out target
 
-SECTION "logo", ROM0
-LogoTiles:
-    INCBIN "logo.2bpp"
+; The logo tile data is split: the first 13 tiles live in the small free gap
+; between the entry code and the hand-off stub ($0029-$00F8); the rest floats in
+; the main region. Both are boot ROM (not the cart-shadowed $0100-$01FF).
+SECTION "logolow", ROM0[$0029]
+LogoTilesLow:
+    INCBIN "logo.2bpp", 0, LOGO_LOW_BYTES
+
+SECTION "logohigh", ROM0
+LogoTilesHigh:
+    INCBIN "logo.2bpp", LOGO_LOW_BYTES, LOGO_HIGH_BYTES

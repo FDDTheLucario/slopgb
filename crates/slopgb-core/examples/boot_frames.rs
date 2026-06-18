@@ -33,4 +33,41 @@ fn main() {
         dump(&gb, &format!("{outdir}/f{:04}.ppm", i * step));
     }
     println!("handoff at ~frame {handoff:?}");
+    if std::env::var("DUMP_TILES").is_ok() {
+        // Decode VRAM tiles 0..56 into a 8-wide strip (shade>0 = black).
+        let v = gb.vram();
+        let n = 56usize;
+        let mut img = vec![255u8; 8 * (n * 8) * 3];
+        for t in 0..n {
+            for y in 0..8 {
+                let lo = v[t * 16 + y * 2];
+                let hi = v[t * 16 + y * 2 + 1];
+                for x in 0..8 {
+                    let bit = 7 - x;
+                    let s = ((lo >> bit) & 1) | (((hi >> bit) & 1) << 1);
+                    if s != 0 {
+                        let px = (y * (n * 8) + t * 8 + x) * 3;
+                        img[px] = 0;
+                        img[px + 1] = 0;
+                        img[px + 2] = 0;
+                    }
+                }
+            }
+        }
+        let mut out = format!("P6\n{} 8\n255\n", n * 8).into_bytes();
+        out.extend_from_slice(&img);
+        std::fs::write("/tmp/tiles.ppm", out).unwrap();
+        println!("wrote /tmp/tiles.ppm (tiles 0..{n})");
+    }
+    if std::env::var("DUMP_MAP").is_ok() {
+        // BG map $9800, rows 4..14, cols 2..18 — tile index per cell.
+        for row in 4..14 {
+            let mut line = format!("r{row:2}: ");
+            for col in 2..18 {
+                let t = gb.debug_read(0x9800 + row * 32 + col);
+                line += &format!("{t:3} ");
+            }
+            println!("{line}");
+        }
+    }
 }
