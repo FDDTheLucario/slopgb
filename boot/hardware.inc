@@ -21,9 +21,11 @@ DEF rOBP0  EQU $FF48
 DEF rOBP1  EQU $FF49
 DEF rWY    EQU $FF4A
 DEF rWX    EQU $FF4B
+DEF rKEY0  EQU $FF4C   ; CGB CPU mode select (bit 2 = lock DMG-compat)
 DEF rVBK   EQU $FF4F   ; CGB VRAM bank
 DEF rBGPI  EQU $FF68   ; CGB BG palette index
 DEF rBGPD  EQU $FF69   ; CGB BG palette data
 DEF rOBPI  EQU $FF6A   ; CGB OBJ palette index
 DEF rOBPD  EQU $FF6B   ; CGB OBJ palette data
+DEF rOPRI  EQU $FF6C   ; CGB object priority mode
 DEF rBOOT  EQU $FF50   ; boot ROM disable

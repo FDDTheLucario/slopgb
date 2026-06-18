@@ -41,6 +41,28 @@ Options → System bootrom path.
 | P2 | slopgb logo tiles displayed (static) | **done** |
 | P3 | **CGB colored-wipe animation** (palette colour sweep across the logo — the CGB boot effect, *not* the DMG drop-down) | **done** (rainbow sweeps left→right across the columns) |
 | P4 | two-tone CGB chime | **done** (square ch1 "di-ding"; audio peak ~0.33) |
-| P5 | CGB palettes: default + title-hash per-game + manual button-combo select | todo |
+| P5 | CGB palettes: default + title-hash per-game + manual button-combo select | **done** (hash colorization byte-identical vs the reference across all checksums; 12 manual combos verified) |
+
+## CGB compatibility palettes (P5) — provenance
+
+The per-game palette assignment is **factual hardware-interop data** (the same
+category as the core's existing `CGB_COMPAT_*` palettes), reproduced clean-room:
+
+1. The selection **algorithm** (checksum = Σ title bytes $0134-$0143 → table search
+   → 4th-letter $0137 collision tiebreak → palette assignment) is from public
+   documentation (Pan Docs "Power-Up Sequence", TCRF) and confirmed against the
+   reference ROM's disassembly.
+2. The palette **values** are recovered by *black-box observation*: synthetic
+   carts are booted through the reference `cgb_boot.bin` and the palette it
+   installs is read back (`crates/slopgb-core/examples/cgb_palette_extract.rs`).
+   No reference ROM code or data layout is copied — only the title→palette
+   function is observed, then re-encoded in our own tables (`cgb_palettes.inc`)
+   and our own lookup code.
+3. `cgb_palette_extract ... verify <our.bin>` boots **every** checksum + collision
+   letter through our boot ROM and diffs the installed palette against the
+   reference — 0 mismatches ⇒ 100% compatible.
+
+`cgb_palettes.inc` is generated; regenerate with
+`cargo run -p slopgb-core --example cgb_palette_extract -- bootroms/cgb_boot.bin emit`.
 
 License: MIT (original work).

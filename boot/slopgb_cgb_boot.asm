@@ -13,6 +13,11 @@ DEF LOGO_COLS    EQU 11        ; the slopgb logo is 11x2 tiles (88x16 px)
 DEF LOGO_ROWS    EQU 2
 DEF LOGO_TILES   EQU LOGO_COLS * LOGO_ROWS
 
+; CGB compatibility palette tables (factual data, generated — see boot/README.md
+; + cgb_palette_extract). Included first so its DEFs are visible to the code.
+SECTION "paldata", ROM0[$05E0]
+INCLUDE "cgb_palettes.inc"
+
 SECTION "entry", ROM0[$0000]
 Start:
     ld sp, $FFFE
@@ -158,9 +163,180 @@ Main:
     ; --- the two-tone boot chime ---
     call PlayChime
 
-    ; --- hold on the colored logo (palette features + hand-off come next) ---
-.hold:
-    jr .hold
+    ; --- assign the DMG game its CGB compatibility palette, then hand off ---
+    call ApplyGamePalette
+    ld a, $11                    ; CGB signature + FF50 bit0 (disable boot)
+    jp BootEnd                   ; $00FE: ldh [rBOOT],a -> PC = cart $0100
+
+; Pick + install the DMG game's compatibility palette (the reference CGB boot
+; ROM's title-checksum scheme; data in cgb_palettes.inc). CGB carts keep their
+; own palettes. The cart header shows through at $0100-$01FF while booting.
+ApplyGamePalette:
+    ld a, [$0143]                ; CGB flag
+    bit 7, a
+    jr z, .dmg
+    ldh [rKEY0], a               ; CGB cart: KEY0 = flag, no compat palette
+    ret
+.dmg:
+    ; LCD off so every CGB palette write lands (mode-3 blocks palette RAM); done
+    ; before the lookup so it can't clobber the computed set index in A.
+    xor a
+    ldh [rLCDC], a
+    ; manual override: a held d-pad direction (+ optional A/B) forces a preset
+    call ReadCombo               ; C = held-combo byte
+    ld a, c
+    or a
+    jr z, .auto                  ; nothing held -> automatic colorization
+    ld hl, CgbCombos
+    ld b, CGB_COMBO_COUNT
+.combo:
+    ld a, [hl+]                  ; combo code
+    cp c
+    jr z, .comboHit
+    inc hl                       ; skip set index
+    dec b
+    jr nz, .combo
+    ; no combo matched -> automatic colorization
+.auto:
+    ; colorize only Nintendo-licensed carts (else the default palette)
+    ld a, [$014B]                ; old licensee
+    cp $01
+    jr z, .lookup                ; $01 = Nintendo (old)
+    cp $33
+    jr nz, .default
+    ld a, [$0144]                ; new licensee "01" = Nintendo
+    cp $30
+    jr nz, .default
+    ld a, [$0145]
+    cp $31
+    jr nz, .default
+.lookup:
+    ; title checksum = sum of the 16 title bytes $0134-$0143
+    ld hl, $0134
+    ld b, 0
+    ld c, 16
+.sum:
+    ld a, [hl+]
+    add b
+    ld b, a
+    dec c
+    jr nz, .sum
+    ; scan rules: checksum, 4th-letter ($00 = wildcard), set index (3 bytes)
+    ld a, [$0137]
+    ld d, a                      ; D = 4th title letter
+    ld hl, CgbRules
+    ld c, CGB_RULE_COUNT
+.scan:
+    ld a, [hl+]                  ; rule checksum
+    cp b
+    jr nz, .skip
+    ld a, [hl]                   ; rule 4th letter
+    or a
+    jr z, .hit                   ; $00 = wildcard
+    cp d
+    jr z, .hit
+.skip:
+    inc hl                       ; past letter
+    inc hl                       ; past set index
+    dec c
+    jr nz, .scan
+.default:
+    ld a, CGB_DEFAULT_SET
+    jr .install
+.hit:
+    inc hl                       ; -> set index
+    ld a, [hl]
+    jr .install
+.comboHit:
+    ld a, [hl]                   ; combo set index
+.install:
+    ; install while still in CGB mode (the data ports reject writes once locked)
+    call InstallSet
+    ld a, $04
+    ldh [rKEY0], a               ; lock DMG-compat (bit 2)
+    ld a, $01
+    ldh [rOPRI], a               ; DMG object priority
+    ret
+
+; Install palette set A: its 3 bytes (BG, OBJ0, OBJ1 palette indices) pick
+; palettes from CgbPalettes into BG palette 0 and OBJ palettes 0 and 1.
+InstallSet:
+    ld c, a
+    add a, a
+    add a, c                     ; A = set * 3
+    ld c, a
+    ld b, 0
+    ld hl, CgbSets
+    add hl, bc                   ; HL = CgbSets + set*3
+    ld a, [hl+]
+    ldh [$FF80], a               ; BG palette index
+    ld a, [hl+]
+    ldh [$FF81], a               ; OBJ0 palette index
+    ld a, [hl]
+    ldh [$FF82], a               ; OBJ1 palette index
+    ldh a, [$FF80]
+    call PalSrc
+    ld a, $80                    ; BG palette 0, colour index 0, auto-increment
+    ldh [rBGPI], a
+    ld c, LOW(rBGPD)
+    call Copy8ToC
+    ldh a, [$FF81]
+    call PalSrc
+    ld a, $80                    ; OBJ palette 0
+    ldh [rOBPI], a
+    ld c, LOW(rOBPD)
+    call Copy8ToC
+    ldh a, [$FF82]
+    call PalSrc
+    ld a, $88                    ; OBJ palette 1 (colour byte 8, auto-increment)
+    ldh [rOBPI], a
+    ld c, LOW(rOBPD)
+    call Copy8ToC
+    ret
+
+; A = palette index -> HL = CgbPalettes + A*8 (one palette = 4 BGR555 colours).
+PalSrc:
+    ld l, a
+    ld h, 0
+    add hl, hl
+    add hl, hl
+    add hl, hl
+    ld de, CgbPalettes
+    add hl, de
+    ret
+
+; Copy 8 bytes from HL to the FF00-page data port in C (BGPD/OBPD, auto-inc).
+Copy8ToC:
+    ld b, 8
+.cp:
+    ld a, [hl+]
+    ldh [c], a
+    dec b
+    jr nz, .cp
+    ret
+
+; Read the joypad into C: d-pad in the high nibble (Up $40, Left $20, Down $80,
+; Right $10), A=$01/B=$02 in the low nibble; a held button reads as 1.
+ReadCombo:
+    ld a, $20
+    ldh [rP1], a                 ; select d-pad
+    ldh a, [rP1]
+    ldh a, [rP1]                 ; let the lines settle
+    cpl                          ; pressed = 1
+    and $0F
+    swap a                       ; d-pad -> high nibble
+    ld b, a
+    ld a, $10
+    ldh [rP1], a                 ; select buttons
+    ldh a, [rP1]
+    ldh a, [rP1]
+    cpl
+    and $0F                      ; A=$01, B=$02 in the low nibble
+    or b
+    ld c, a                      ; C = combo byte
+    ld a, $30
+    ldh [rP1], a                 ; deselect both
+    ret
 
 ; The CGB boot chime ("di-ding"), bit-for-bit the same as the reference ROM:
 ; square channel 1, two rising tones (freq $783 then $7C1, an octave apart) two
@@ -240,9 +416,6 @@ WaitFrame:
 Hues:
     dw $001F, $01FF, $03FF, $03E0, $7FE0, $7C00, $7C0F, $7C1F
 
-SECTION "logo", ROM0[$0300]
+SECTION "logo", ROM0[$0470]
 LogoTiles:
     INCBIN "logo.2bpp"
-
-SECTION "tail", ROM0[$08FF]
-    db $00
