@@ -15,6 +15,7 @@
 //! packet *format* so a future session can complete bgb-wire interop
 //! (timestamp-precise lockstep) without reshaping the transport.
 
+use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
@@ -66,6 +67,11 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 /// Write timeout: a blocked `write_all` to a frozen peer is treated as a
 /// disconnect rather than wedging the socket thread (and a drop join).
 const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long [`Link::pump_blocking`] waits for a peer reply before yielding the
+/// emulated frame (lockstep: a stalled master parks the UI thread here). Long
+/// enough to catch a localhost round-trip (the socket read poll is
+/// [`READ_POLL`]); short enough that a dead peer drops at most one frame.
+const STALL_POLL: Duration = Duration::from_millis(16);
 /// Bound on the inbound packet queue. The UI drains it every emulated frame, so
 /// this is only reached if emulation is paused (or a peer floods) — past it
 /// packets are dropped rather than grown without bound (the link desyncs, but
@@ -244,6 +250,13 @@ impl LinkSocket {
         self.in_rx.try_recv().ok()
     }
 
+    /// Block up to `timeout` for the next packet (lockstep: the UI waits here
+    /// for a stalled master's peer reply). `None` on timeout or a dead channel.
+    #[must_use]
+    pub fn poll_blocking(&self, timeout: Duration) -> Option<Packet> {
+        self.in_rx.recv_timeout(timeout).ok()
+    }
+
     /// Queue a packet for the socket thread to write (never blocks the UI).
     pub fn send(&self, p: Packet) {
         let _ = self.out_tx.send(p);
@@ -387,6 +400,13 @@ pub struct Link {
     attached: bool,
     /// Outgoing-packet timestamp counter (informational for slopgb↔slopgb).
     seq: u32,
+    /// Peer **master** bytes (from SYNC1) that the local port couldn't accept
+    /// yet — it isn't an armed slave and isn't a stalled master. Held in the
+    /// frontend (NOT the core `link_in`, which is the master's *incoming* queue)
+    /// so an early/late SYNC1 can't cross-contaminate a future master transfer.
+    /// Dispatched in FIFO order by [`Self::drain_pending`] once the port can
+    /// take a byte (slave arms → SYNC2 reply, or master stalls → fed in).
+    pending_master: VecDeque<u8>,
 }
 
 impl Link {
@@ -434,6 +454,7 @@ impl Link {
         self.listening = false;
         self.attached = false;
         self.seq = 0;
+        self.pending_master.clear();
     }
 
     /// Whether a listener is waiting for its peer (and not yet connected).
@@ -504,15 +525,20 @@ impl Link {
             gb.link_connect(true);
             self.emit(Packet::new(cmd::VERSION, 1, 4, 0));
         }
-        // Ship our master transfer's outgoing byte(s).
+        // Ship our master transfer's outgoing byte(s) as SYNC1.
         while let Some(byte) = gb.link_take_send() {
             self.emit(Packet::new(cmd::SYNC1, byte, 0x80, 0));
         }
-        // Feed in whatever the peer sent.
+        // Apply whatever the peer sent (buffering SYNC1 it isn't ready for).
         while let Some(p) = self.poll_socket() {
             if let Some(reply) = self.apply_packet(gb, p) {
                 self.emit(reply);
             }
+        }
+        // Dispatch buffered peer bytes now the port may be ready (slave armed /
+        // master stalled). Lockstep: a stalled master is fed here.
+        for reply in self.drain_pending(gb) {
+            self.emit(reply);
         }
     }
 
@@ -520,25 +546,78 @@ impl Link {
         self.socket.as_ref().and_then(LinkSocket::poll)
     }
 
+    /// Block up to [`STALL_POLL`] for the next peer packet, apply it, and
+    /// dispatch buffered bytes — the lockstep resume path for a stalled master.
+    /// Returns whether the local master is **no longer** stalled (ready to
+    /// resume the frame). A no-op returning `false` when not connected.
+    pub fn pump_blocking(&mut self, gb: &mut GameBoy) -> bool {
+        if !self.is_connected() {
+            return false;
+        }
+        if let Some(p) = self.socket.as_ref().and_then(|s| s.poll_blocking(STALL_POLL)) {
+            if let Some(reply) = self.apply_packet(gb, p) {
+                self.emit(reply);
+            }
+        }
+        for reply in self.drain_pending(gb) {
+            self.emit(reply);
+        }
+        !gb.link_stalled()
+    }
+
+    /// Dispatch buffered peer (master) bytes to the local port, oldest first:
+    /// complete an armed slave (returning a SYNC2 reply to send), or feed a
+    /// stalled master (both-master exchange — no reply). Stops at the first byte
+    /// the port can't yet accept, preserving FIFO order.
+    fn drain_pending(&mut self, gb: &mut GameBoy) -> Vec<Packet> {
+        let mut replies = Vec::new();
+        while let Some(&byte) = self.pending_master.front() {
+            if let Some(out) = gb.link_slave_transfer(byte) {
+                self.pending_master.pop_front();
+                replies.push(Packet::new(cmd::SYNC2, out, 0x80, 0));
+            } else if gb.link_stalled() {
+                self.pending_master.pop_front();
+                gb.link_push_recv(byte); // completes the stalled master
+            } else {
+                break; // unarmed slave / no stall — wait for the next pump
+            }
+        }
+        replies
+    }
+
     /// Apply one received packet to the core, returning a reply to send if any.
     /// Pure routing (no socket I/O) so it is unit-testable with a real core.
     pub fn apply_packet(&mut self, gb: &mut GameBoy, p: Packet) -> Option<Packet> {
         match p.cmd {
             cmd::SYNC1 => {
-                // Peer is the master and sent its byte. If we are an armed slave
-                // (external clock, transfer pending), complete and reply with our
-                // byte; otherwise stash it for our next master transfer to read.
-                match gb.link_slave_transfer(p.b2) {
-                    Some(out) => Some(Packet::new(cmd::SYNC2, out, 0x80, 0)),
-                    None => {
-                        gb.link_push_recv(p.b2);
-                        None
+                // Peer is the master and sent its byte. Fast path: if we are an
+                // armed slave AND nothing is already queued, complete now and
+                // reply with our byte. Otherwise buffer it (FIFO) for
+                // `drain_pending` — so it never leaks into the core master queue
+                // and can't overtake an earlier buffered byte.
+                if self.pending_master.is_empty() {
+                    if let Some(out) = gb.link_slave_transfer(p.b2) {
+                        return Some(Packet::new(cmd::SYNC2, out, 0x80, 0));
                     }
                 }
+                // Bounded like the other link queues: a non-lockstep / flooding
+                // peer (a goal for future bgb-wire interop) can't grow it without
+                // limit. Past the cap the byte is dropped (the link desyncs, but
+                // no OOM).
+                if self.pending_master.len() < IN_QUEUE_CAP {
+                    self.pending_master.push_back(p.b2);
+                }
+                None
             }
             cmd::SYNC2 => {
-                // Peer (slave) replied with its byte → our next master read.
-                gb.link_push_recv(p.b2);
+                // Peer (slave) replied to our master's SYNC1 → completes our
+                // stalled master. A SYNC2 with no master stalled is stale (our
+                // transfer was aborted/disconnected after we shipped) or
+                // spurious — drop it, so it can't poison the core's incoming
+                // queue and desync the next transfer.
+                if gb.link_stalled() {
+                    gb.link_push_recv(p.b2);
+                }
                 None
             }
             cmd::DISCONNECT => {

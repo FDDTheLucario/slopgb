@@ -20,19 +20,34 @@ connected.** Concretely:
 - Proof: unit test `disconnected_master_transfer_byte_identical` + a full **gbtr golden byte-identical**
   run (stash the unrelated CGB-WRAM working-tree changes first).
 
-## The byte-exchange model (what bgb/SameBoy/gambatte do over TCP)
+## The byte-exchange model — **byte-level lockstep** (shipped)
 
-Not bit-level lockstep — a per-completed-byte swap, which games tolerate via their own handshaking.
-Real bit-lockstep matters only for the local no-peer path, which we keep byte-identical.
+Byte-level lockstep, not bit-level. The earlier 1-byte-latency model corrupted Pokémon trades: the
+frontend pump runs once per emulated *frame*, but a master clocks many serial transfers *within* a
+frame, each reading an empty `link_in` → shifting in `0xFF` → uniform garbage. The fix makes a
+connected master **stall** at completion until the peer's byte is in hand, and lets `run_frame` yield
+mid-frame so the frontend can pump.
 
-- **Master** (SC=`0x81`, internal clock, completes locally): incoming bits come from the injected peer
-  byte `link_in` MSB-first instead of `1`s; on completion the outgoing byte is queued to `link_out`
-  for the frontend to ship to the peer.
-- **Slave** (SC bit7 set, bit0 clear, external clock — never completes alone): a new `&mut` method
-  `link_slave_transfer(master_byte)` completes it when the frontend delivers the master's byte —
-  swap SB↔master_byte, clear SC bit7, raise serial IF (bit3), return the slave's outgoing byte.
-- **1-byte latency**: TCP delivers the peer byte a transfer late; bgb has the same property. Games
-  (Tetris, Pokémon trade) handshake around it. We do not attempt cycle-bit lockstep.
+- **Master** (SC=`0x81`, internal clock): clocks its 8 bits, ships its outgoing byte to `link_out`
+  (once), then — if no peer byte is buffered — **stalls** (`link_master_waiting`): SC bit7 stays set,
+  IF withheld, further DIV clocking gated. `GameBoy::link_stalled()` is true; `run_frame` /
+  `run_frame_until_breakpoint` return early. `link_push_recv(byte)` completes the stall (SB←byte,
+  clear bit7, raise serial IF). A SC rewrite clears the stall; disconnecting mid-stall completes with
+  the cable-open `0xFF` + IF so the CPU can't hang. All gated on `link_connected` ⇒ golden-safe.
+- **Slave** (SC bit7 set, bit0 clear, external clock — never completes alone): `link_slave_transfer(
+  master_byte)` swaps SB↔master_byte, clears SC bit7, raises serial IF (bit3), returns the slave's
+  outgoing byte.
+- **Frontend lockstep loop** (`link.rs` + `app_pacing.rs`): `pump` ships master bytes as SYNC1, routes
+  incoming SYNC1→armed-slave (reply SYNC2) **or** a new frontend `pending_master` buffer (never the
+  core `link_in` — no cross-contamination), and SYNC2→`push_recv`. `drain_pending` dispatches buffered
+  bytes once the local port is ready (slave arms / master stalls — both-master fed in). `run_one_frame`
+  loops run→pump and, when stalled, `pump_blocking` waits ≤16 ms for the reply then resumes, so a whole
+  frame's serial traffic resolves in one tick; a dead peer times out and yields the partial frame
+  (never completed with garbage).
+- **Latency**: a localhost round-trip (sub-ms; socket read poll 2 ms) per stalled transfer. Verified
+  zero-corruption by an 8-byte real-socket exchange + a 16-byte no-socket loopback. Timestamp-precise
+  bgb-wire lockstep (SYNC3 idle keep-alive + cycle-accurate completion) is still the documented next
+  step.
 
 ## Transport (frontend `crates/slopgb/src/link.rs`, std::net — no Cargo dep)
 

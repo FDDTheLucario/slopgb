@@ -638,6 +638,53 @@ fn gameboy_link_api_inert_when_disconnected() {
     assert!(!gb.link_connected());
 }
 
+/// Link task 3: `run_frame` yields when a connected master stalls (lockstep)
+/// before the frame completes; a disconnected machine never stalls.
+#[test]
+fn run_frame_yields_on_link_stall() {
+    // ld a,$42 ; ldh ($01),a ; ld a,$81 ; ldh ($02),a ; jr -2 (self-loop)
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x0100..0x010A]
+        .copy_from_slice(&[0x3E, 0x42, 0xE0, 0x01, 0x3E, 0x81, 0xE0, 0x02, 0x18, 0xFE]);
+    let mut gb = GameBoy::new(Model::Dmg, rom.clone()).unwrap();
+    gb.link_connect(true);
+    let frame0 = gb.frame_count();
+    gb.run_frame();
+    assert!(gb.link_stalled(), "master stalled awaiting the peer byte");
+    assert_eq!(
+        gb.frame_count(),
+        frame0,
+        "run_frame yielded before finishing the frame"
+    );
+    // Disconnected: the same ROM never stalls; run_frame finishes a full frame.
+    let mut gb2 = GameBoy::new(Model::Dmg, rom).unwrap();
+    let f0 = gb2.frame_count();
+    gb2.run_frame();
+    assert!(!gb2.link_stalled());
+    assert_eq!(gb2.frame_count(), f0 + 1, "disconnected frame runs to completion");
+}
+
+/// Link task 4: disconnecting while a master is stalled folds the serial
+/// interrupt into FF0F so the emulated CPU's serial wait can't hang.
+#[test]
+fn link_disconnect_while_stalled_raises_if() {
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x0100..0x010A]
+        .copy_from_slice(&[0x3E, 0x42, 0xE0, 0x01, 0x3E, 0x81, 0xE0, 0x02, 0x18, 0xFE]);
+    let mut gb = GameBoy::new(Model::Dmg, rom).unwrap();
+    gb.link_connect(true);
+    gb.run_frame(); // master stalls
+    assert!(gb.link_stalled());
+    assert_eq!(gb.debug_read(0xFF0F) & 0x08, 0, "no serial IF while stalled");
+    gb.link_connect(false);
+    assert!(!gb.link_stalled());
+    assert_eq!(
+        gb.debug_read(0xFF0F) & 0x08,
+        0x08,
+        "disconnect raises serial IF (CPU unblocks)"
+    );
+}
+
 /// Link task 5: link state is transient — never serialized. A save taken with
 /// a peer attached restores into a machine with no peer, and adds no bytes to
 /// the state blob (the on-disk format is unchanged → golden-safe).

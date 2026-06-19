@@ -188,6 +188,12 @@ impl GameBoy {
         let deadline = self.bus.cycles().wrapping_add(u64::from(CYCLES_PER_FRAME));
         while self.bus.frame_count() != target && self.bus.cycles() < deadline {
             self.step();
+            // Lockstep: a connected master paused awaiting the peer byte yields
+            // control to the frontend (which pumps the link and delivers it).
+            // Always false when disconnected, so golden runs are unaffected.
+            if self.bus.link_stalled() {
+                break;
+            }
         }
     }
 
@@ -226,6 +232,11 @@ impl GameBoy {
             let pc = self.cpu_regs().pc;
             if breakpoints.contains(&pc) {
                 return Some(pc);
+            }
+            // Lockstep serial stall: yield to the frontend pump (golden-safe —
+            // always false when no link peer is attached).
+            if self.bus.link_stalled() {
+                return None;
             }
         }
         None
@@ -549,6 +560,16 @@ impl GameBoy {
     #[must_use]
     pub fn link_connected(&self) -> bool {
         self.bus.link_connected()
+    }
+
+    /// Whether a connected internal-clock (master) transfer is paused at
+    /// completion awaiting the peer's byte (lockstep stall). [`Self::run_frame`]
+    /// returns early in this state so the frontend can pump the link and deliver
+    /// the byte ([`Self::link_push_recv`]). Always false when disconnected, so
+    /// it is golden-safe.
+    #[must_use]
+    pub fn link_stalled(&self) -> bool {
+        self.bus.link_stalled()
     }
 
     /// Provide the peer byte the next internal-clock (master) transfer shifts

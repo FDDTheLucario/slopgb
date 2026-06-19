@@ -59,6 +59,12 @@ impl App {
                 hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link);
                 pipe.pump(&mut self.session.gb);
                 frames += 1;
+                // A silent link peer left the master stalled (run_one_frame
+                // timed out): stop the wake instead of blocking again per frame
+                // (audio underrun) — the next wake retries.
+                if self.session.gb.link_stalled() {
+                    break;
+                }
             }
         }
         (frames, hit)
@@ -82,6 +88,9 @@ impl App {
             self.discard_audio();
             self.next_frame += interval;
             frames += 1;
+            if self.session.gb.link_stalled() {
+                break; // silent peer: stop the wake (see run_audio_paced)
+            }
         }
         (frames, hit)
     }
@@ -103,6 +112,9 @@ impl App {
                 _ => self.discard_audio(),
             }
             frames += 1;
+            if self.session.gb.link_stalled() {
+                break; // silent peer: stop the wake (see run_audio_paced)
+            }
         }
         self.resync_pacing();
         (frames, hit)
@@ -140,24 +152,48 @@ impl App {
     }
 }
 
+/// Cap on lockstep resume cycles within a single frame, so a flooding/wedged
+/// peer can't spin the UI thread forever. A frame holds ~137 slow-clock byte
+/// transfers (70224 / 512 cycles); the CGB fast clock (128 cycles/byte) allows
+/// ~548, which can hit the cap — harmless, as it just yields a partial frame
+/// (no byte lost) that the next tick resumes.
+const MAX_LOCKSTEP_RESUMES: u32 = 1024;
+
 /// Run one frame, halting early at a breakpoint when armed, then pump the serial
 /// link (swap any completed-transfer byte with the peer). A free function (not a
 /// method) so the pacers can call it while the audio pipe holds `&mut
 /// self.audio` — it borrows only the disjoint machine + link fields, not all of
 /// `self`. `link.pump` is a no-op when no peer is connected. Returns whether a
 /// breakpoint stopped the frame.
+///
+/// **Lockstep:** a connected master transfer that runs out of peer bytes
+/// *stalls* (`gb.link_stalled()`), and `run_frame` yields. We pump, then block
+/// briefly for the peer's reply and resume — looping so a whole frame's serial
+/// traffic resolves in one tick. A peer that never replies times out in
+/// [`crate::link::Link::pump_blocking`] and we yield the partial frame (resumed
+/// next tick); the master is never completed with garbage.
 fn run_one_frame(
     gb: &mut GameBoy,
     breakpoints: &Option<Vec<u16>>,
     link: &mut crate::link::Link,
 ) -> bool {
-    let hit = match breakpoints {
-        Some(list) => gb.run_frame_until_breakpoint(list).is_some(),
-        None => {
-            gb.run_frame();
-            false
+    for _ in 0..MAX_LOCKSTEP_RESUMES {
+        let hit = match breakpoints {
+            Some(list) => gb.run_frame_until_breakpoint(list).is_some(),
+            None => {
+                gb.run_frame();
+                false
+            }
+        };
+        link.pump(gb);
+        if hit || !gb.link_stalled() {
+            return hit; // breakpoint, or the frame finished without a stall
         }
-    };
-    link.pump(gb);
-    hit
+        // Master parked awaiting the peer: wait for the reply, then resume. If
+        // none arrives in time, yield this frame (resumed next tick).
+        if !link.pump_blocking(gb) {
+            return false;
+        }
+    }
+    false
 }

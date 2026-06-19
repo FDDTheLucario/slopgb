@@ -7,9 +7,12 @@
 use super::*;
 
 impl Interconnect {
-    /// Attach/detach a serial link peer (frontend path only).
+    /// Attach/detach a serial link peer (frontend path only). Detaching while a
+    /// master is stalled completes the transfer with the cable-open value and
+    /// folds the resulting serial interrupt into IF, so the CPU can't hang.
     pub(crate) fn link_set_connected(&mut self, on: bool) {
-        self.serial.set_link_connected(on);
+        let iff = self.serial.set_link_connected(on);
+        self.intf |= iff & IF_MASK;
     }
 
     /// Whether a link peer is attached.
@@ -17,9 +20,19 @@ impl Interconnect {
         self.serial.link_connected()
     }
 
-    /// Provide the peer byte the next master transfer shifts in.
+    /// Whether a connected master transfer is paused awaiting the peer byte
+    /// (lockstep stall). Always false when disconnected — the run loop checks
+    /// this to yield control to the frontend pump.
+    pub(crate) fn link_stalled(&self) -> bool {
+        self.serial.link_master_waiting()
+    }
+
+    /// Provide the peer byte the next master transfer shifts in. If a master
+    /// is stalled (lockstep) awaiting it, this completes the transfer and folds
+    /// the resulting serial interrupt into IF.
     pub(crate) fn link_push_recv(&mut self, byte: u8) {
-        self.serial.push_link_in(byte);
+        let iff = self.serial.push_link_in(byte);
+        self.intf |= iff & IF_MASK;
     }
 
     /// Drain the byte a completed master transfer shifted out, for the peer.
