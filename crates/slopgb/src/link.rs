@@ -20,7 +20,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TryRecvError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -67,6 +67,10 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 /// Write timeout: a blocked `write_all` to a frozen peer is treated as a
 /// disconnect rather than wedging the socket thread (and a drop join).
 const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
+/// How often the dedicated writer thread re-checks the stop flag while idle.
+/// Sends themselves are immediate (a queued packet wakes `recv_timeout` at
+/// once); this only bounds how long a `drop`-join waits for an idle writer.
+const WRITE_POLL: Duration = Duration::from_millis(4);
 /// How long [`Link::pump_blocking`] waits for a peer reply before yielding the
 /// emulated frame (lockstep: a stalled master parks the UI thread here). Long
 /// enough to catch a localhost round-trip (the socket read poll is
@@ -161,7 +165,7 @@ impl LinkSocket {
         let bound = listener.local_addr().map_or(port, |a| a.port());
         let mut sock = Self::spawn(move |connected, stop, out_rx, in_tx| {
             if let Some(stream) = accept_one(&listener, &stop) {
-                run_stream(stream, &connected, &stop, &out_rx, &in_tx);
+                run_stream(stream, connected, stop, out_rx, in_tx);
             }
         });
         sock.port = bound;
@@ -175,7 +179,7 @@ impl LinkSocket {
     pub fn connect(host: String, port: u16) -> std::io::Result<Self> {
         let mut sock = Self::spawn(move |connected, stop, out_rx, in_tx| {
             if let Some(stream) = dial(&host, port, &stop) {
-                run_stream(stream, &connected, &stop, &out_rx, &in_tx);
+                run_stream(stream, connected, stop, out_rx, in_tx);
             }
         });
         sock.port = port;
@@ -322,51 +326,51 @@ fn accept_one(listener: &TcpListener, stop: &AtomicBool) -> Option<TcpStream> {
     }
 }
 
-/// The connected read/write loop: drain queued outgoing packets, then read with
-/// a short timeout (partial-read-safe), forwarding complete frames. Exits on
-/// stop, peer close, or a socket error, clearing the connected flag.
+/// The connected endpoint: a dedicated **writer thread** ships queued outgoing
+/// packets the instant they're enqueued (no waiting for a read poll — this is
+/// the link's latency floor for a trade), while this (reader) thread reads with
+/// a short timeout (partial-read-safe) and forwards complete frames. Exits on
+/// stop, peer close, or a socket error, clearing the connected flag and reaping
+/// the writer.
 fn run_stream(
     stream: TcpStream,
-    connected: &AtomicBool,
-    stop: &AtomicBool,
-    out_rx: &Receiver<Packet>,
-    in_tx: &SyncSender<Packet>,
+    connected: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    out_rx: Receiver<Packet>,
+    in_tx: SyncSender<Packet>,
 ) {
     // A read timeout is what lets the loop re-check the stop flag; without it a
     // read blocks forever on an idle peer and a drop join hangs — so bail if it
     // can't be set. A write timeout likewise bounds a write_all to a frozen /
     // partitioned peer (else it blocks for the OS retransmit timeout, wedging a
-    // drop join for minutes); a timed-out write is treated as a disconnect
-    // below. nodelay failing is harmless (latency only).
+    // drop join for minutes); a timed-out write tears the link down. nodelay
+    // failing is harmless (latency only).
     if stream.set_read_timeout(Some(READ_POLL)).is_err()
         || stream.set_write_timeout(Some(WRITE_TIMEOUT)).is_err()
     {
         return;
     }
     stream.set_nodelay(true).ok();
-    let mut writer = match stream.try_clone() {
+    let writer_sock = match stream.try_clone() {
         Ok(w) => w,
         Err(_) => return,
     };
     let mut reader = stream;
     connected.store(true, Ordering::Relaxed);
+
+    // Writer thread: blocks on the outgoing queue and sends immediately. It
+    // honors the stop flag (re-checked every WRITE_POLL while idle) so the
+    // drop-join below stays bounded.
+    let writer = {
+        let stop = Arc::clone(&stop);
+        thread::spawn(move || writer_loop(writer_sock, &stop, &out_rx))
+    };
+
     let mut buf = [0u8; 8];
     let mut filled = 0usize;
-    'outer: loop {
+    loop {
         if stop.load(Ordering::Relaxed) {
             break;
-        }
-        // Drain everything the UI queued.
-        loop {
-            match out_rx.try_recv() {
-                Ok(p) => {
-                    if writer.write_all(&p.encode()).is_err() {
-                        break 'outer;
-                    }
-                }
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => break 'outer,
-            }
         }
         // Read whatever is available; assemble 8-byte frames across reads.
         match reader.read(&mut buf[filled..]) {
@@ -386,7 +390,33 @@ fn run_stream(
             Err(_) => break,
         }
     }
+    // Stop + reap the writer (its recv_timeout wakes within WRITE_POLL).
+    stop.store(true, Ordering::Relaxed);
     connected.store(false, Ordering::Relaxed);
+    let _ = writer.join();
+}
+
+/// Writer half of [`run_stream`] (its own thread): send each queued packet the
+/// moment it arrives. `recv_timeout` returns immediately on a queued packet, so
+/// send latency is the network only; the timeout just bounds the idle stop-flag
+/// re-check (and thus the drop-join). A write error or a closed queue ends it,
+/// and a write error sets `stop` so the reader bails too.
+fn writer_loop(mut sock: TcpStream, stop: &AtomicBool, out_rx: &Receiver<Packet>) {
+    loop {
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
+        match out_rx.recv_timeout(WRITE_POLL) {
+            Ok(p) => {
+                if sock.write_all(&p.encode()).is_err() {
+                    stop.store(true, Ordering::Relaxed); // wake the reader
+                    break;
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
 }
 
 /// High-level link state for the menu + the per-frame core pump. Owns the
@@ -547,9 +577,9 @@ impl Link {
     }
 
     /// Block up to [`STALL_POLL`] for the next peer packet, apply it, and
-    /// dispatch buffered bytes — the lockstep resume path for a stalled master.
-    /// Returns whether the local master is **no longer** stalled (ready to
-    /// resume the frame). A no-op returning `false` when not connected.
+    /// dispatch buffered bytes — the lockstep resume path for a stalled master
+    /// **or** an armed slave. Returns whether the port no longer wants a pump
+    /// (ready to resume the frame). A no-op returning `false` when not connected.
     pub fn pump_blocking(&mut self, gb: &mut GameBoy) -> bool {
         if !self.is_connected() {
             return false;
@@ -562,7 +592,16 @@ impl Link {
         for reply in self.drain_pending(gb) {
             self.emit(reply);
         }
-        !gb.link_stalled()
+        let resumed = !gb.link_wants_pump();
+        // Slave armed but no byte arrived in time (the master is idle, not
+        // clocking): suppress the per-transfer slave yield so the slave runs
+        // full frames instead of freezing one instruction per wake. Any peer
+        // packet re-enables it (see `apply_packet`). A stalled master keeps
+        // waiting (its reply is imminent in an active trade).
+        if !resumed && !gb.link_stalled() {
+            gb.set_link_slave_yield(false);
+        }
+        resumed
     }
 
     /// Dispatch buffered peer (master) bytes to the local port, oldest first:
@@ -588,6 +627,9 @@ impl Link {
     /// Apply one received packet to the core, returning a reply to send if any.
     /// Pure routing (no socket I/O) so it is unit-testable with a real core.
     pub fn apply_packet(&mut self, gb: &mut GameBoy, p: Packet) -> Option<Packet> {
+        // Any peer packet means the link is active again: re-enable the
+        // per-transfer slave yield (a prior idle timeout may have suppressed it).
+        gb.set_link_slave_yield(true);
         match p.cmd {
             cmd::SYNC1 => {
                 // Peer is the master and sent its byte. Fast path: if we are an

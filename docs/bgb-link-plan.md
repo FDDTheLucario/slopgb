@@ -36,18 +36,29 @@ mid-frame so the frontend can pump.
   the cable-open `0xFF` + IF so the CPU can't hang. All gated on `link_connected` ⇒ golden-safe.
 - **Slave** (SC bit7 set, bit0 clear, external clock — never completes alone): `link_slave_transfer(
   master_byte)` swaps SB↔master_byte, clears SC bit7, raises serial IF (bit3), returns the slave's
-  outgoing byte.
+  outgoing byte. An armed slave is **also a yield point** (`link_slave_armed` → `link_wants_pump`), so
+  `run_frame` yields the moment it's waiting and the frontend delivers the master's byte **per-transfer**
+  — not once per frame. (The original ship corrected the corruption but the slave only pumped once per
+  frame ⇒ ~60 bytes/s ⇒ a ~10 s Pokémon trade; the slave yield removes that cap.) **Idle-master
+  fallback**: if a lockstep wait times out with the master not clocking, the frontend disables the slave
+  yield (`set_link_slave_yield(false)`) so the slave runs full frames instead of freezing ~1 instruction
+  per wake; any peer packet re-enables it (`apply_packet`). Keeps a linked game that computes while armed
+  (rare — slaves normally spin-wait) from stuttering.
 - **Frontend lockstep loop** (`link.rs` + `app_pacing.rs`): `pump` ships master bytes as SYNC1, routes
   incoming SYNC1→armed-slave (reply SYNC2) **or** a new frontend `pending_master` buffer (never the
-  core `link_in` — no cross-contamination), and SYNC2→`push_recv`. `drain_pending` dispatches buffered
-  bytes once the local port is ready (slave arms / master stalls — both-master fed in). `run_one_frame`
-  loops run→pump and, when stalled, `pump_blocking` waits ≤16 ms for the reply then resumes, so a whole
-  frame's serial traffic resolves in one tick; a dead peer times out and yields the partial frame
-  (never completed with garbage).
-- **Latency**: a localhost round-trip (sub-ms; socket read poll 2 ms) per stalled transfer. Verified
-  zero-corruption by an 8-byte real-socket exchange + a 16-byte no-socket loopback. Timestamp-precise
-  bgb-wire lockstep (SYNC3 idle keep-alive + cycle-accurate completion) is still the documented next
-  step.
+  core `link_in` — no cross-contamination), and SYNC2→`push_recv` (only when a master is stalled —
+  stale/spurious replies dropped). `drain_pending` dispatches buffered bytes once the local port is
+  ready (slave arms / master stalls — both-master fed in). `run_one_frame` loops run→pump and, while
+  `link_wants_pump()` (master stall **or** armed slave), `pump_blocking` waits ≤16 ms for the packet
+  then resumes, so a whole frame's serial traffic resolves in one tick; a dead peer times out and the
+  pacers yield the partial frame (never completed with garbage).
+- **Transport latency**: the socket worker is split into a **reader thread + a dedicated writer thread**
+  that sends each queued packet immediately (`out_rx.recv_timeout`), instead of the old single loop that
+  only drained sends after its read poll timed out (~2 ms send delay per direction). Both honor the stop
+  flag so `drop`-joins stay bounded. Net per-byte cost ≈ one localhost round-trip.
+- **Verified** zero-corruption by 8- and 64-byte real-socket exchanges + a 16-byte no-socket loopback;
+  golden byte-identical (every link branch gated on `link_connected`). Timestamp-precise bgb-wire
+  lockstep (SYNC3 idle keep-alive + cycle-accurate completion) is still the documented next step.
 
 ## Transport (frontend `crates/slopgb/src/link.rs`, std::net — no Cargo dep)
 

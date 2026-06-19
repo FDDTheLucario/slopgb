@@ -76,6 +76,13 @@ pub struct Serial {
     /// [`Self::link_connected`]; defaults false ⇒ every golden path is
     /// byte-identical. Transient (not serialized).
     link_master_waiting: bool,
+    /// Whether an armed slave is treated as a per-transfer yield point
+    /// ([`Self::link_slave_armed`]). The frontend clears this after a lockstep
+    /// wait times out with the master idle, so a slave whose peer isn't clocking
+    /// runs full frames (no freeze) instead of stalling per instruction; any
+    /// peer packet re-enables it. Default true; only consulted while
+    /// [`Self::link_connected`], so golden-irrelevant. Transient (not serialized).
+    link_slave_yield: bool,
 }
 
 impl Serial {
@@ -95,6 +102,7 @@ impl Serial {
             link_in: VecDeque::new(),
             link_out: VecDeque::new(),
             link_master_waiting: false,
+            link_slave_yield: true,
         }
     }
 
@@ -248,6 +256,22 @@ impl Serial {
     /// this to yield control to the frontend pump. See [`Self::link_master_waiting`].
     pub(crate) fn link_master_waiting(&self) -> bool {
         self.link_master_waiting
+    }
+
+    /// Whether a connected port is an **armed external-clock slave** (SC bit7
+    /// set, bit0 clear) waiting for the master's byte, and the slave yield is
+    /// enabled. A yield point like the master stall, so the frontend can deliver
+    /// the byte per-transfer instead of once per frame (speedup). Always false
+    /// when disconnected — golden-safe.
+    pub(crate) fn link_slave_armed(&self) -> bool {
+        self.link_connected && self.link_slave_yield && self.sc & 0x81 == 0x80
+    }
+
+    /// Enable/disable the armed-slave yield. The frontend disables it when a
+    /// lockstep wait times out (master idle) so the slave runs full frames, and
+    /// re-enables it on any peer packet. Inert when no slave is armed.
+    pub(crate) fn set_link_slave_yield(&mut self, on: bool) {
+        self.link_slave_yield = on;
     }
 
     /// Deliver a peer byte. If a master is **stalled** awaiting it (lockstep),

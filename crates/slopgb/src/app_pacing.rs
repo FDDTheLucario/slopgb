@@ -62,7 +62,7 @@ impl App {
                 // A silent link peer left the master stalled (run_one_frame
                 // timed out): stop the wake instead of blocking again per frame
                 // (audio underrun) — the next wake retries.
-                if self.session.gb.link_stalled() {
+                if self.session.gb.link_wants_pump() {
                     break;
                 }
             }
@@ -88,7 +88,7 @@ impl App {
             self.discard_audio();
             self.next_frame += interval;
             frames += 1;
-            if self.session.gb.link_stalled() {
+            if self.session.gb.link_wants_pump() {
                 break; // silent peer: stop the wake (see run_audio_paced)
             }
         }
@@ -112,7 +112,7 @@ impl App {
                 _ => self.discard_audio(),
             }
             frames += 1;
-            if self.session.gb.link_stalled() {
+            if self.session.gb.link_wants_pump() {
                 break; // silent peer: stop the wake (see run_audio_paced)
             }
         }
@@ -166,12 +166,13 @@ const MAX_LOCKSTEP_RESUMES: u32 = 1024;
 /// `self`. `link.pump` is a no-op when no peer is connected. Returns whether a
 /// breakpoint stopped the frame.
 ///
-/// **Lockstep:** a connected master transfer that runs out of peer bytes
-/// *stalls* (`gb.link_stalled()`), and `run_frame` yields. We pump, then block
-/// briefly for the peer's reply and resume — looping so a whole frame's serial
-/// traffic resolves in one tick. A peer that never replies times out in
-/// [`crate::link::Link::pump_blocking`] and we yield the partial frame (resumed
-/// next tick); the master is never completed with garbage.
+/// **Lockstep:** a connected master that runs out of peer bytes *stalls*, and an
+/// armed slave waits for the master's byte — either makes `gb.link_wants_pump()`
+/// true and `run_frame` yields. We pump, then block briefly for the peer packet
+/// and resume — looping so a whole frame's serial traffic resolves in one tick
+/// (the slave exchanges per-byte, not once per frame). A peer that never replies
+/// times out in [`crate::link::Link::pump_blocking`] and we yield the partial
+/// frame (resumed next tick); a transfer is never completed with garbage.
 fn run_one_frame(
     gb: &mut GameBoy,
     breakpoints: &Option<Vec<u16>>,
@@ -186,11 +187,12 @@ fn run_one_frame(
             }
         };
         link.pump(gb);
-        if hit || !gb.link_stalled() {
-            return hit; // breakpoint, or the frame finished without a stall
+        if hit || !gb.link_wants_pump() {
+            return hit; // breakpoint, or the frame finished without a pending exchange
         }
-        // Master parked awaiting the peer: wait for the reply, then resume. If
-        // none arrives in time, yield this frame (resumed next tick).
+        // Master parked awaiting the peer (or slave awaiting the master's byte):
+        // wait for the packet, then resume. If none arrives in time, yield this
+        // frame (resumed next tick).
         if !link.pump_blocking(gb) {
             return false;
         }
