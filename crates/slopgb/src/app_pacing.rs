@@ -5,7 +5,7 @@
 
 use std::time::{Duration, Instant};
 
-use slopgb_core::GameBoy;
+use slopgb_core::{CYCLES_PER_FRAME, GameBoy};
 
 use crate::pacing::{frame_interval, turbo_max_frames};
 use crate::{App, FRAME_DURATION, ui};
@@ -62,7 +62,7 @@ impl App {
                 // A silent link peer left the master stalled (run_one_frame
                 // timed out): stop the wake instead of blocking again per frame
                 // (audio underrun) — the next wake retries.
-                if self.session.gb.link_wants_pump() {
+                if self.session.gb.link_stalled() {
                     break;
                 }
             }
@@ -88,7 +88,7 @@ impl App {
             self.discard_audio();
             self.next_frame += interval;
             frames += 1;
-            if self.session.gb.link_wants_pump() {
+            if self.session.gb.link_stalled() {
                 break; // silent peer: stop the wake (see run_audio_paced)
             }
         }
@@ -112,7 +112,7 @@ impl App {
                 _ => self.discard_audio(),
             }
             frames += 1;
-            if self.session.gb.link_wants_pump() {
+            if self.session.gb.link_stalled() {
                 break; // silent peer: stop the wake (see run_audio_paced)
             }
         }
@@ -152,12 +152,15 @@ impl App {
     }
 }
 
-/// Cap on lockstep resume cycles within a single frame, so a flooding/wedged
-/// peer can't spin the UI thread forever. A frame holds ~137 slow-clock byte
-/// transfers (70224 / 512 cycles); the CGB fast clock (128 cycles/byte) allows
-/// ~548, which can hit the cap — harmless, as it just yields a partial frame
-/// (no byte lost) that the next tick resumes.
-const MAX_LOCKSTEP_RESUMES: u32 = 1024;
+/// Emulated cycles per chunk when a link peer is connected: the frontend runs a
+/// frame in slices this big, pumping the serial link between each. A slave
+/// exchanges one byte per chunk while still advancing a full chunk of cycles per
+/// byte, so its serial routine has ample time to prepare each reply — too few
+/// cycles per byte and a game's serial handler reads a stale SB and replies with
+/// garbage. ~17 chunks/frame ⇒ ~17× the old once-per-frame slave rate, plenty to
+/// make a Pokémon trade snappy without overrunning the slave (one slow-clock
+/// transfer is 4096 cycles).
+const LINK_CHUNK_CYCLES: u32 = 4096;
 
 /// Run one frame, halting early at a breakpoint when armed, then pump the serial
 /// link (swap any completed-transfer byte with the peer). A free function (not a
@@ -166,35 +169,45 @@ const MAX_LOCKSTEP_RESUMES: u32 = 1024;
 /// `self`. `link.pump` is a no-op when no peer is connected. Returns whether a
 /// breakpoint stopped the frame.
 ///
-/// **Lockstep:** a connected master that runs out of peer bytes *stalls*, and an
-/// armed slave waits for the master's byte — either makes `gb.link_wants_pump()`
-/// true and `run_frame` yields. We pump, then block briefly for the peer packet
-/// and resume — looping so a whole frame's serial traffic resolves in one tick
-/// (the slave exchanges per-byte, not once per frame). A peer that never replies
-/// times out in [`crate::link::Link::pump_blocking`] and we yield the partial
-/// frame (resumed next tick); a transfer is never completed with garbage.
+/// **Lockstep:** a connected master that runs out of peer bytes *stalls* and
+/// `run_slice`/`run_frame` yields; we pump, then block briefly for the peer's
+/// reply. When a peer is connected we run the frame in [`LINK_CHUNK_CYCLES`]
+/// slices, pumping between each, so a slave (which never stalls) exchanges many
+/// bytes per frame while still running a full slice of cycles per byte. With no
+/// peer the path is byte-for-byte the old `run_frame` (golden-safe). The
+/// debugger path stays a single breakpoint-aware frame.
 fn run_one_frame(
     gb: &mut GameBoy,
     breakpoints: &Option<Vec<u16>>,
     link: &mut crate::link::Link,
 ) -> bool {
-    for _ in 0..MAX_LOCKSTEP_RESUMES {
-        let hit = match breakpoints {
-            Some(list) => gb.run_frame_until_breakpoint(list).is_some(),
-            None => {
-                gb.run_frame();
-                false
-            }
-        };
+    // Debugger armed: a single breakpoint-aware frame (breakpoints take priority
+    // over link cadence). A stalled master still pumps for its reply.
+    if let Some(list) = breakpoints {
+        let hit = gb.run_frame_until_breakpoint(list).is_some();
         link.pump(gb);
-        if hit || !gb.link_wants_pump() {
-            return hit; // breakpoint, or the frame finished without a pending exchange
+        if gb.link_stalled() {
+            link.pump_blocking(gb);
         }
-        // Master parked awaiting the peer (or slave awaiting the master's byte):
-        // wait for the packet, then resume. If none arrives in time, yield this
-        // frame (resumed next tick).
-        if !link.pump_blocking(gb) {
-            return false;
+        return hit;
+    }
+    // No peer: unchanged full frame (golden-safe, no chunking overhead).
+    if !link.is_connected() {
+        gb.run_frame();
+        link.pump(gb);
+        return false;
+    }
+    // Linked: run the frame in chunks, pumping between each. The master stall
+    // breaks a chunk early (per-byte); the slave runs full chunks (one byte per
+    // pump, with cycles to spare). A silent peer times out and yields the
+    // partial frame (resumed next tick).
+    let target = gb.frame_count().wrapping_add(1);
+    let deadline = gb.cycles().wrapping_add(u64::from(CYCLES_PER_FRAME));
+    while gb.frame_count() != target && gb.cycles() < deadline {
+        gb.run_slice(LINK_CHUNK_CYCLES);
+        link.pump(gb);
+        if gb.link_stalled() && !link.pump_blocking(gb) {
+            break;
         }
     }
     false

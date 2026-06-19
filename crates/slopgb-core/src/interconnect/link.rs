@@ -27,19 +27,6 @@ impl Interconnect {
         self.serial.link_master_waiting()
     }
 
-    /// Whether the link wants a frontend pump now: a stalled master **or** an
-    /// armed slave (both yield per-transfer so a byte exchanges promptly, not
-    /// once per frame). Always false when disconnected — golden-safe.
-    pub(crate) fn link_wants_pump(&self) -> bool {
-        self.serial.link_master_waiting() || self.serial.link_slave_armed()
-    }
-
-    /// Enable/disable the armed-slave yield (idle-master fallback; see
-    /// [`crate::serial::Serial::set_link_slave_yield`]).
-    pub(crate) fn link_set_slave_yield(&mut self, on: bool) {
-        self.serial.set_link_slave_yield(on);
-    }
-
     /// Provide the peer byte the next master transfer shifts in. If a master
     /// is stalled (lockstep) awaiting it, this completes the transfer and folds
     /// the resulting serial interrupt into IF.

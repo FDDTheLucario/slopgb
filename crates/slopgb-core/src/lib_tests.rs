@@ -638,31 +638,6 @@ fn gameboy_link_api_inert_when_disconnected() {
     assert!(!gb.link_connected());
 }
 
-/// Speedup task 2: a connected machine that has armed an external-clock slave
-/// (SC=0x80) reports `link_wants_pump()` (a yield point) with `link_stalled()`
-/// still false; a disconnected machine never wants a pump.
-#[test]
-fn link_wants_pump_covers_armed_slave() {
-    // ld a,$34 ; ldh ($01),a ; ld a,$80 ; ldh ($02),a ; jr -2 (arms a slave)
-    let mut rom = vec![0u8; 0x8000];
-    rom[0x0100..0x010A]
-        .copy_from_slice(&[0x3E, 0x34, 0xE0, 0x01, 0x3E, 0x80, 0xE0, 0x02, 0x18, 0xFE]);
-    let mut gb = GameBoy::new(Model::Dmg, rom.clone()).unwrap();
-    gb.link_connect(true);
-    for _ in 0..6 {
-        gb.step(); // run the four setup instructions → SC=0x80 armed
-    }
-    assert_eq!(gb.debug_read(0xFF02) & 0x80, 0x80, "slave armed");
-    assert!(gb.link_wants_pump(), "an armed slave is a yield point");
-    assert!(!gb.link_stalled(), "but it is not a master stall");
-    // Disconnected: same ROM never wants a pump (golden-safe).
-    let mut gb2 = GameBoy::new(Model::Dmg, rom).unwrap();
-    for _ in 0..6 {
-        gb2.step();
-    }
-    assert!(!gb2.link_wants_pump(), "disconnected never wants a pump");
-}
-
 /// Link task 3: `run_frame` yields when a connected master stalls (lockstep)
 /// before the frame completes; a disconnected machine never stalls.
 #[test]
@@ -710,25 +685,22 @@ fn link_disconnect_while_stalled_raises_if() {
     );
 }
 
-/// Speedup task 3: `run_frame` yields for an armed slave (per-byte cadence)
-/// before the frame completes; a disconnected machine runs a full frame.
+/// Speedup: `run_slice` runs a bounded number of cycles (the frontend's chunked
+/// link pump), stopping at the cycle budget — and a disconnected machine never
+/// stalls, so a slice is just a cycle-bounded run.
 #[test]
-fn run_frame_yields_for_armed_slave() {
-    // ld a,$34 ; ldh ($01),a ; ld a,$80 ; ldh ($02),a ; jr -2 (arms a slave)
+fn run_slice_runs_bounded_cycles() {
+    // A self-looping ROM (jr -2) so the slice is pure cycle accounting.
     let mut rom = vec![0u8; 0x8000];
-    rom[0x0100..0x010A]
-        .copy_from_slice(&[0x3E, 0x34, 0xE0, 0x01, 0x3E, 0x80, 0xE0, 0x02, 0x18, 0xFE]);
-    let mut gb = GameBoy::new(Model::Dmg, rom.clone()).unwrap();
-    gb.link_connect(true);
-    let f0 = gb.frame_count();
-    gb.run_frame();
-    assert!(gb.link_wants_pump(), "armed slave is a yield point");
-    assert_eq!(gb.frame_count(), f0, "run_frame yielded before the frame finished");
-    // Disconnected: the same ROM runs a full frame (golden-safe).
-    let mut gb2 = GameBoy::new(Model::Dmg, rom).unwrap();
-    let g0 = gb2.frame_count();
-    gb2.run_frame();
-    assert_eq!(gb2.frame_count(), g0 + 1, "disconnected slave runs a full frame");
+    rom[0x0100..0x0102].copy_from_slice(&[0x18, 0xFE]); // jr -2
+    let mut gb = GameBoy::new(Model::Dmg, rom).unwrap();
+    let c0 = gb.cycles();
+    gb.run_slice(4096);
+    let elapsed = gb.cycles() - c0;
+    assert!(
+        (4096..4096 + 24).contains(&elapsed),
+        "ran ~one slice of cycles, got {elapsed}"
+    );
 }
 
 /// Link task 5: link state is transient — never serialized. A save taken with

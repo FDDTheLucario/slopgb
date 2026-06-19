@@ -449,40 +449,6 @@ fn connected_master_stalls_without_peer_byte() {
     assert_eq!(s.take_link_send(), None, "shipped exactly once");
 }
 
-/// Speedup task 1: a connected armed external-clock port (SC=0x80, waiting for
-/// the peer's clock) reports `link_slave_armed()`; a master, an idle port, and
-/// any disconnected port report false (so it's a golden-safe yield point).
-#[test]
-fn link_slave_armed_only_for_connected_armed_external_clock() {
-    let mut s = Serial::new(false);
-    s.set_link_connected(true);
-    s.write(0xFF02, 0x80); // bit7 set, external clock (bit0 clear): armed slave
-    assert!(s.link_slave_armed());
-    s.write(0xFF02, 0x81); // internal clock (master): not a slave
-    assert!(!s.link_slave_armed());
-    s.write(0xFF02, 0x00); // idle
-    assert!(!s.link_slave_armed());
-    // Disconnected armed external clock: never a yield point (golden-safe).
-    let mut d = Serial::new(false);
-    d.write(0xFF02, 0x80);
-    assert!(!d.link_slave_armed(), "disconnected port never wants a pump");
-}
-
-/// Speedup: the armed-slave yield can be suppressed (idle-master fallback) and
-/// re-enabled, without touching the underlying SC arm state.
-#[test]
-fn slave_yield_can_be_suppressed() {
-    let mut s = Serial::new(false);
-    s.set_link_connected(true);
-    s.write(0xFF02, 0x80); // armed slave
-    assert!(s.link_slave_armed());
-    s.set_link_slave_yield(false);
-    assert!(!s.link_slave_armed(), "suppressed → slave runs full frames");
-    assert_eq!(s.read(0xFF02) & 0x80, 0x80, "still armed in hardware");
-    s.set_link_slave_yield(true);
-    assert!(s.link_slave_armed(), "re-enabled → per-transfer yield");
-}
-
 /// Task 2: feeding the peer byte to a stalled master completes it —
 /// SB=peer, SC bit7 clear, serial IF (0x08) returned, stall cleared.
 #[test]

@@ -445,28 +445,9 @@ fn stale_sync2_without_stall_is_dropped() {
     assert!(gb.link_stalled(), "no stale byte fed the master");
 }
 
-/// Speedup task 4: `pump_blocking` resumes an ARMED SLAVE the moment the
-/// master's SYNC1 arrives (per-byte cadence) — not once per frame. After
-/// completion the slave no longer wants a pump.
-#[test]
-fn pump_blocking_resumes_an_armed_slave() {
-    let mut link = Link::new();
-    link.listen_on(0).expect("listen");
-    let port = link.port().unwrap();
-    let peer = LinkSocket::connect("127.0.0.1".into(), port).expect("peer");
-    let mut gb = armed_slave_gb(0x34); // SC=0x80 armed, outgoing 0x34
-    wait_until("connected", || link.is_connected() && peer.is_connected());
-    link.pump(&mut gb); // attaches the core; slave stays armed
-    assert!(gb.link_wants_pump(), "armed slave wants a pump");
-    peer.send(Packet::new(cmd::SYNC1, 0x12, 0x80, 0));
-    wait_until("slave resumes", || link.pump_blocking(&mut gb));
-    assert!(!gb.link_wants_pump(), "slave completed, no longer waiting");
-    assert_eq!(gb.debug_read(0xFF01), 0x12, "slave received the master byte");
-}
-
 /// Speedup task 6: a larger 64-byte block exchanges over a real socket with
-/// zero corruption (throughput + correctness at scale, with the per-byte slave
-/// yield + immediate-send transport).
+/// zero corruption (throughput + correctness at scale, with the chunked-pump
+/// driver + immediate-send transport).
 #[test]
 fn sixtyfour_byte_exchange_over_socket_has_no_corruption() {
     const N: u16 = 64;
@@ -511,34 +492,6 @@ fn sixtyfour_byte_exchange_over_socket_has_no_corruption() {
         (0xA0..0xA0 + N as u8).collect::<Vec<u8>>(),
         "slave received the master's 64 bytes"
     );
-}
-
-/// Speedup (review finding B): an armed slave whose master is idle must not
-/// freeze. After `pump_blocking` times out with no byte, the slave yield is
-/// suppressed (it runs full frames); the next peer packet re-enables it and
-/// delivers the byte.
-#[test]
-fn idle_armed_slave_falls_back_then_recovers() {
-    let mut link = Link::new();
-    link.listen_on(0).expect("listen");
-    let port = link.port().unwrap();
-    let peer = LinkSocket::connect("127.0.0.1".into(), port).expect("peer");
-    let mut gb = armed_slave_gb(0x34);
-    wait_until("connected", || link.is_connected() && peer.is_connected());
-    link.pump(&mut gb); // attach; slave armed
-    assert!(gb.link_wants_pump(), "armed slave yields per-transfer");
-    // Peer stays silent → pump_blocking times out → suppress the yield.
-    assert!(!link.pump_blocking(&mut gb), "no byte: not resumed");
-    assert!(
-        !gb.link_wants_pump(),
-        "idle slave no longer yields (runs full frames, no freeze)"
-    );
-    // Master resumes: a SYNC1 re-enables the yield and completes the slave.
-    peer.send(Packet::new(cmd::SYNC1, 0x12, 0x80, 0));
-    wait_until("byte delivered", || {
-        link.pump(&mut gb);
-        gb.debug_read(0xFF01) == 0x12
-    });
 }
 
 #[test]

@@ -577,9 +577,9 @@ impl Link {
     }
 
     /// Block up to [`STALL_POLL`] for the next peer packet, apply it, and
-    /// dispatch buffered bytes — the lockstep resume path for a stalled master
-    /// **or** an armed slave. Returns whether the port no longer wants a pump
-    /// (ready to resume the frame). A no-op returning `false` when not connected.
+    /// dispatch buffered bytes — the lockstep resume path for a stalled master.
+    /// Returns whether the master is no longer stalled (ready to resume the
+    /// frame). A no-op returning `false` when not connected.
     pub fn pump_blocking(&mut self, gb: &mut GameBoy) -> bool {
         if !self.is_connected() {
             return false;
@@ -592,16 +592,7 @@ impl Link {
         for reply in self.drain_pending(gb) {
             self.emit(reply);
         }
-        let resumed = !gb.link_wants_pump();
-        // Slave armed but no byte arrived in time (the master is idle, not
-        // clocking): suppress the per-transfer slave yield so the slave runs
-        // full frames instead of freezing one instruction per wake. Any peer
-        // packet re-enables it (see `apply_packet`). A stalled master keeps
-        // waiting (its reply is imminent in an active trade).
-        if !resumed && !gb.link_stalled() {
-            gb.set_link_slave_yield(false);
-        }
-        resumed
+        !gb.link_stalled()
     }
 
     /// Dispatch buffered peer (master) bytes to the local port, oldest first:
@@ -627,9 +618,6 @@ impl Link {
     /// Apply one received packet to the core, returning a reply to send if any.
     /// Pure routing (no socket I/O) so it is unit-testable with a real core.
     pub fn apply_packet(&mut self, gb: &mut GameBoy, p: Packet) -> Option<Packet> {
-        // Any peer packet means the link is active again: re-enable the
-        // per-transfer slave yield (a prior idle timeout may have suppressed it).
-        gb.set_link_slave_yield(true);
         match p.cmd {
             cmd::SYNC1 => {
                 // Peer is the master and sent its byte. Fast path: if we are an

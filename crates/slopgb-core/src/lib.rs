@@ -188,11 +188,29 @@ impl GameBoy {
         let deadline = self.bus.cycles().wrapping_add(u64::from(CYCLES_PER_FRAME));
         while self.bus.frame_count() != target && self.bus.cycles() < deadline {
             self.step();
-            // Lockstep: a connected master paused awaiting the peer byte — or an
-            // armed slave waiting for the master's byte — yields control to the
-            // frontend (which pumps the link and exchanges a byte). Always false
-            // when disconnected, so golden runs are unaffected.
-            if self.bus.link_wants_pump() {
+            // Lockstep: a connected master paused awaiting the peer byte yields
+            // control to the frontend (which pumps the link and delivers it).
+            // Always false when disconnected, so golden runs are unaffected.
+            if self.bus.link_stalled() {
+                break;
+            }
+        }
+    }
+
+    /// Run until the frame completes, `max_cycles` elapse, or a connected master
+    /// stalls (lockstep) — the frontend's chunked link pump. Running the link in
+    /// sub-frame slices lets a slave exchange many bytes per frame while still
+    /// advancing a full slice of emulated cycles per byte (so its serial routine
+    /// has time to prepare each reply). Golden-safe: with no peer attached
+    /// `link_stalled()` is always false, so this is just a cycle-bounded
+    /// `run_frame` slice; only the live frontend ever calls it.
+    pub fn run_slice(&mut self, max_cycles: u32) {
+        debug_assert!(max_cycles > 0, "run_slice(0) makes no progress");
+        let target = self.bus.frame_count().wrapping_add(1);
+        let deadline = self.bus.cycles().wrapping_add(u64::from(max_cycles));
+        while self.bus.frame_count() != target && self.bus.cycles() < deadline {
+            self.step();
+            if self.bus.link_stalled() {
                 break;
             }
         }
@@ -234,10 +252,9 @@ impl GameBoy {
             if breakpoints.contains(&pc) {
                 return Some(pc);
             }
-            // Lockstep serial: yield to the frontend pump on a master stall or
-            // an armed slave (golden-safe — always false when no link peer is
-            // attached).
-            if self.bus.link_wants_pump() {
+            // Lockstep serial stall: yield to the frontend pump (golden-safe —
+            // always false when no link peer is attached).
+            if self.bus.link_stalled() {
                 return None;
             }
         }
@@ -572,25 +589,6 @@ impl GameBoy {
     #[must_use]
     pub fn link_stalled(&self) -> bool {
         self.bus.link_stalled()
-    }
-
-    /// Whether the link wants a frontend pump now — a stalled master **or** an
-    /// armed external-clock slave. The run loop yields on this so a byte
-    /// exchanges per-transfer (not once per frame); the frontend pumps then
-    /// resumes. Always false when disconnected → golden-safe. [`Self::link_stalled`]
-    /// stays master-only for transfer-completion logic.
-    #[must_use]
-    pub fn link_wants_pump(&self) -> bool {
-        self.bus.link_wants_pump()
-    }
-
-    /// Enable/disable the armed-slave per-transfer yield (the frontend's
-    /// idle-master fallback): disabled, an armed slave runs full frames instead
-    /// of yielding per instruction, so a slave whose peer isn't clocking doesn't
-    /// freeze; any peer packet re-enables it. No effect unless a slave is armed
-    /// on a connected link, so golden-safe.
-    pub fn set_link_slave_yield(&mut self, on: bool) {
-        self.bus.link_set_slave_yield(on);
     }
 
     /// Provide the peer byte the next internal-clock (master) transfer shifts

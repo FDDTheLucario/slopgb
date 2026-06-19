@@ -36,29 +36,29 @@ mid-frame so the frontend can pump.
   the cable-open `0xFF` + IF so the CPU can't hang. All gated on `link_connected` ⇒ golden-safe.
 - **Slave** (SC bit7 set, bit0 clear, external clock — never completes alone): `link_slave_transfer(
   master_byte)` swaps SB↔master_byte, clears SC bit7, raises serial IF (bit3), returns the slave's
-  outgoing byte. An armed slave is **also a yield point** (`link_slave_armed` → `link_wants_pump`), so
-  `run_frame` yields the moment it's waiting and the frontend delivers the master's byte **per-transfer**
-  — not once per frame. (The original ship corrected the corruption but the slave only pumped once per
-  frame ⇒ ~60 bytes/s ⇒ a ~10 s Pokémon trade; the slave yield removes that cap.) **Idle-master
-  fallback**: if a lockstep wait times out with the master not clocking, the frontend disables the slave
-  yield (`set_link_slave_yield(false)`) so the slave runs full frames instead of freezing ~1 instruction
-  per wake; any peer packet re-enables it (`apply_packet`). Keeps a linked game that computes while armed
-  (rare — slaves normally spin-wait) from stuttering.
-- **Frontend lockstep loop** (`link.rs` + `app_pacing.rs`): `pump` ships master bytes as SYNC1, routes
-  incoming SYNC1→armed-slave (reply SYNC2) **or** a new frontend `pending_master` buffer (never the
-  core `link_in` — no cross-contamination), and SYNC2→`push_recv` (only when a master is stalled —
+  outgoing byte. The slave is driven by **sub-frame chunking** (below), NOT a per-byte yield: a
+  yield-the-instant-it-arms scheme starves the slave — it advanced only a few cycles between bytes, so
+  its serial routine read a stale SB and replied `0xFE` garbage → a live Pokémon trade livelocked
+  ("closed because of inactivity"). The slave needs a *full slice of emulated cycles per byte* to
+  prepare each reply (verified on a real Crystal trade — 2281 clean byte exchanges).
+- **Frontend driver** (`link.rs` + `app_pacing.rs`): `pump` ships master bytes as SYNC1, routes
+  incoming SYNC1→armed-slave (reply SYNC2) **or** a frontend `pending_master` buffer (never the core
+  `link_in` — no cross-contamination), and SYNC2→`push_recv` (only when a master is stalled —
   stale/spurious replies dropped). `drain_pending` dispatches buffered bytes once the local port is
-  ready (slave arms / master stalls — both-master fed in). `run_one_frame` loops run→pump and, while
-  `link_wants_pump()` (master stall **or** armed slave), `pump_blocking` waits ≤16 ms for the packet
-  then resumes, so a whole frame's serial traffic resolves in one tick; a dead peer times out and the
-  pacers yield the partial frame (never completed with garbage).
+  ready (slave arms / master stalls — both-master fed in). `run_one_frame` runs a connected frame in
+  **`LINK_CHUNK_CYCLES` (4096) slices** via `GameBoy::run_slice`, pumping between each: the master stall
+  breaks a slice early (per-byte, `pump_blocking` waits ≤16 ms for the reply), while the slave runs full
+  slices (~17 bytes/frame, ~17× the old once-per-frame rate, with cycles to spare to prepare each reply).
+  No peer ⇒ a plain `run_frame` (golden-safe); the debugger path stays a single breakpoint-aware frame.
+  A dead peer times out and the pacers yield the partial frame (never completed with garbage).
 - **Transport latency**: the socket worker is split into a **reader thread + a dedicated writer thread**
   that sends each queued packet immediately (`out_rx.recv_timeout`), instead of the old single loop that
   only drained sends after its read poll timed out (~2 ms send delay per direction). Both honor the stop
   flag so `drop`-joins stay bounded. Net per-byte cost ≈ one localhost round-trip.
-- **Verified** zero-corruption by 8- and 64-byte real-socket exchanges + a 16-byte no-socket loopback;
-  golden byte-identical (every link branch gated on `link_connected`). Timestamp-precise bgb-wire
-  lockstep (SYNC3 idle keep-alive + cycle-accurate completion) is still the documented next step.
+- **Verified** zero-corruption by 8- and 64-byte real-socket exchanges + a 16-byte no-socket loopback,
+  and a full **live Pokémon Crystal trade** (slopgb↔slopgb, 2281 byte exchanges, completes); golden
+  byte-identical (every link branch gated on `link_connected`). Timestamp-precise bgb-wire lockstep
+  (SYNC3 idle keep-alive + cycle-accurate completion) is still the documented next step.
 
 ## Transport (frontend `crates/slopgb/src/link.rs`, std::net — no Cargo dep)
 
