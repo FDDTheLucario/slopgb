@@ -7,7 +7,7 @@
 
 use crate::ui::Theme;
 use crate::ui::canvas::{Canvas, Rect};
-use crate::ui::font::GLYPH_H;
+use crate::ui::font::{GLYPH_H, GLYPH_W};
 use crate::ui::text::{draw_text, line_height};
 use crate::ui::widgets::button;
 
@@ -49,15 +49,18 @@ pub struct InputDialog {
 }
 
 impl InputDialog {
-    /// A fresh prompt. Hex fields default to a 4-digit cap (a `u16` address);
-    /// text fields to 40 (an expression / condition).
+    /// A fresh prompt. Hex fields cap at a 4-digit `u16` address; text fields
+    /// (paths, expressions, conditions) get a generous cap — long enough for any
+    /// real filesystem path — since [`render`] scrolls the field horizontally so
+    /// a long value never spills past the box (it used to cap at 40, truncating
+    /// most paths and overflowing the box visually).
     #[must_use]
     pub fn new(title: impl Into<String>, hex_only: bool) -> Self {
         Self {
             title: title.into(),
             buffer: String::new(),
             hex_only,
-            max_len: if hex_only { 4 } else { 40 },
+            max_len: if hex_only { HEX_MAX_LEN } else { TEXT_MAX_LEN },
         }
     }
 
@@ -106,6 +109,21 @@ const DIALOG_W: i32 = 232;
 const DIALOG_H: i32 = 78;
 const PAD: i32 = 6;
 const BTN_W: i32 = 56;
+/// A `u16` address is at most four hex digits.
+const HEX_MAX_LEN: usize = 4;
+/// Generous cap for text/path fields — beyond any real path, and the field
+/// scrolls so length is not a visual constraint.
+const TEXT_MAX_LEN: usize = 1024;
+
+/// How many characters to scroll off the left of a field so the caret (at the
+/// buffer's end) stays visible: show the trailing chars that fit, reserving one
+/// cell for the caret. Pure, so the scroll logic is unit-tested without a canvas.
+#[must_use]
+pub fn field_scroll(buffer_chars: usize, visible_chars: usize) -> usize {
+    // Text cells available with one reserved for the caret bar.
+    let text_cells = visible_chars.saturating_sub(1);
+    buffer_chars.saturating_sub(text_cells)
+}
 
 /// Geometry of the modal: the box, the input field, and the OK/Cancel buttons —
 /// a pure function of the window `area`, shared by [`render`] and the click
@@ -159,11 +177,19 @@ pub fn render(c: &mut Canvas, area: Rect, dlg: &InputDialog, theme: &Theme) {
     c.outline_rect(l.boxr, theme.border);
     // Title.
     draw_text(c, l.boxr.x + PAD, l.boxr.y + PAD, &dlg.title, theme.text);
-    // Field: bordered, the buffer text, then a caret bar.
+    // Field: bordered, the buffer text, then a caret bar. The text is clipped to
+    // the field interior and scrolled so a long value keeps its tail (and caret)
+    // visible instead of spilling past the box.
     c.fill_rect(l.field, theme.bg);
     c.outline_rect(l.field, theme.text);
-    let tx = draw_text(c, l.field.x + 2, l.field.y + 2, &dlg.buffer, theme.text);
+    let inner_w = (l.field.w - 4).max(0); // 2px padding each side
+    let visible = (inner_w / GLYPH_W as i32).max(0) as usize;
+    let skip = field_scroll(dlg.buffer.chars().count(), visible);
+    let shown: String = dlg.buffer.chars().skip(skip).collect();
+    let saved = c.push_clip(l.field);
+    let tx = draw_text(c, l.field.x + 2, l.field.y + 2, &shown, theme.text);
     c.vline(tx + 1, l.field.y + 2, GLYPH_H as i32, theme.text);
+    c.set_clip(saved);
     button(c, l.ok, "OK", false, theme);
     button(c, l.cancel, "Cancel", false, theme);
 }

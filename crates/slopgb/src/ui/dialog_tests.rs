@@ -73,6 +73,62 @@ fn text_field_accepts_arbitrary_printable_input() {
 }
 
 #[test]
+fn text_field_admits_long_paths_but_still_caps() {
+    // A real path easily exceeds the old 40-char cap.
+    let mut dlg = InputDialog::new("Load ROM (path)", false);
+    let path = "/home/user/roms/game-boy-test-roms-v7.0/dmg-acid2/dmg-acid2.gb";
+    type_str(&mut dlg, path);
+    assert_eq!(dlg.buffer, path, "long paths are no longer truncated");
+    // Still bounded so the buffer can't grow without limit.
+    let mut big = InputDialog::new("p", false);
+    type_str(&mut big, &"x".repeat(2000));
+    assert_eq!(big.buffer.chars().count(), 1024, "text cap is 1024");
+}
+
+#[test]
+fn field_scroll_keeps_caret_visible() {
+    // Fits: nothing scrolled off.
+    assert_eq!(field_scroll(5, 31), 0);
+    // Exactly fills the visible width: one char scrolled off to leave a caret cell.
+    assert_eq!(field_scroll(31, 31), 1);
+    // Overflow: show the trailing (visible-1) chars; caret column stays < visible.
+    assert_eq!(field_scroll(50, 31), 20);
+    assert!(50 - field_scroll(50, 31) < 31, "caret within field");
+    // Degenerate widths never panic.
+    assert_eq!(field_scroll(10, 1), 10);
+    assert_eq!(field_scroll(10, 0), 10);
+    assert_eq!(field_scroll(0, 31), 0);
+}
+
+#[test]
+fn render_scrolls_long_buffer_inside_the_field_no_overflow() {
+    let area = Rect::new(0, 0, 400, 300);
+    let (w, h) = (400usize, 300usize);
+    let mut buf = vec![BG_FILL; w * h];
+    let mut dlg = InputDialog::new("Load ROM (path)", false);
+    type_str(&mut dlg, &"W".repeat(60)); // far wider than the field
+    {
+        let mut c = Canvas::new(&mut buf, w, h);
+        render(&mut c, area, &dlg, &T);
+    }
+    let l = layout(area);
+    // No field ink lands at or past the field's right border (clip holds).
+    let spill = (l.field.y..l.field.bottom())
+        .flat_map(|y| (l.field.right()..l.boxr.right() + 8).map(move |x| (x, y)))
+        .filter(|&(x, y)| buf[y as usize * w + x as usize] == T.text)
+        .count();
+    assert_eq!(spill, 0, "text must not spill past the field/box");
+    // The scrolled window fits the field width in pixels.
+    let visible = ((l.field.w - 4) / GLYPH_W as i32).max(0) as usize;
+    let skip = field_scroll(dlg.buffer.chars().count(), visible);
+    let shown = dlg.buffer.chars().count() - skip;
+    assert!(
+        shown as i32 * GLYPH_W as i32 <= l.field.w,
+        "drawn substring fits inside the field"
+    );
+}
+
+#[test]
 fn with_initial_prefills_the_buffer() {
     let dlg = InputDialog::new("edit register", true).with_initial("1234");
     assert_eq!(dlg.buffer, "1234");

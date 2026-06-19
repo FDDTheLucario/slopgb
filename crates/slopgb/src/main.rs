@@ -22,6 +22,7 @@ mod audio;
 mod cli;
 mod clipboard;
 mod dbg;
+mod filepicker;
 mod input;
 mod keymap;
 mod link;

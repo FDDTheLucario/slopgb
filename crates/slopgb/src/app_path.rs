@@ -5,15 +5,61 @@
 use std::path::Path;
 use std::rc::Rc;
 
+use crate::filepicker::{self, PickResult};
 use crate::ui::dialog::DialogResult;
 use crate::{App, PathPurpose, link, push_recent_into, symbols};
 
+/// Which native dialog (if any) a path purpose should try before the typed
+/// modal. `LinkConnect` is a `host:port`, not a file, so it never picks; a
+/// `SaveState` writes a new file, so it uses the save dialog; the rest open an
+/// existing file. Pure → unit-tested (it must never offer a file picker for
+/// `LinkConnect`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PickKind {
+    Open,
+    Save,
+    None,
+}
+
+#[must_use]
+pub(crate) fn pick_kind(purpose: PathPurpose) -> PickKind {
+    match purpose {
+        PathPurpose::SaveState => PickKind::Save,
+        PathPurpose::LinkConnect => PickKind::None,
+        _ => PickKind::Open,
+    }
+}
+
 impl App {
-    /// Open the shared path-entry modal for `purpose` over the LCD. The modal
-    /// lives on the game window and only captures keys there, so raise + focus the
-    /// game window — else a prompt triggered from a tool window (e.g. the debugger
-    /// "Load symbols...") would appear hidden behind it and seem unresponsive.
+    /// Open a path entry for `purpose`. Prefer a **native file dialog** (a
+    /// dep-free shell-out, [`crate::filepicker`]); only fall back to the typed
+    /// modal over the LCD when no picker tool is installed (or the purpose isn't
+    /// a file — link `host:port`). A user-cancelled native dialog just closes.
     pub(crate) fn open_path_prompt(&mut self, title: &str, purpose: PathPurpose) {
+        let picked = match pick_kind(purpose) {
+            PickKind::Open => filepicker::pick_open(),
+            PickKind::Save => filepicker::pick_save(),
+            // Not a file (link host:port): go straight to the typed modal.
+            PickKind::None => PickResult::Unavailable,
+        };
+        match picked {
+            PickResult::Picked(path) => {
+                self.run_path_action(purpose, &path);
+                self.request_game_redraw();
+            }
+            // The user backed out of the native dialog — don't nag with the modal.
+            PickResult::Cancelled => self.request_game_redraw(),
+            // No picker available → the typed-path modal (the old behaviour).
+            PickResult::Unavailable => self.open_path_modal(title, purpose),
+        }
+    }
+
+    /// The typed-path modal over the LCD (fallback when no native picker exists).
+    /// It lives on the game window and only captures keys there, so raise + focus
+    /// the game window — else a prompt triggered from a tool window (e.g. the
+    /// debugger "Load symbols...") would appear hidden behind it and seem
+    /// unresponsive.
+    fn open_path_modal(&mut self, title: &str, purpose: PathPurpose) {
         self.path_purpose = purpose;
         self.path_dialog = Some(crate::ui::dialog::InputDialog::new(title, false));
         if let Some(w) = &self.window {
@@ -110,3 +156,7 @@ impl App {
         push_recent_into(&mut self.recent, path);
     }
 }
+
+#[cfg(test)]
+#[path = "app_path_tests.rs"]
+mod tests;
