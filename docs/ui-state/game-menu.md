@@ -12,6 +12,16 @@ like bgb's native popup it now extends onto the desktop.
 - Sized via `mainwin::popup_content_size` (∪ of the menus' `menu_bounds`);
   positioned via `mainwin::popup_screen_origin` (game `outer_position()` + cursor,
   clamped to the monitor). **Wayland caveat:** the compositor places it, not pixel-exact.
+- **Transparent gap.** The window spans the union of the main + submenu boxes, so a
+  short submenu leaves an L-shaped gap (right of the main menu, above/below the
+  submenu). The window is created `.with_transparent(true)`; `redraw` clears the
+  buffer to `0x00000000` and forces opaque alpha **only** over the menu-box rects
+  (`mainwin::popup_menu_boxes`), so the gap shows the desktop — bgb's submenu is a
+  separate floating box, not a filled background.
+  - **Do** clear the gap to `0x00000000`: compositors use premultiplied alpha, so a
+    transparent pixel must have RGB=0. **Don't** clear to `theme.bg` (alpha-0 white)
+    — an invalid premultiplied pixel renders white, not transparent.
+  - A non-compositing WM (no ARGB visual) renders the gap black — an accepted edge case.
 - Routed by `App::on_popup_event`/`on_popup_click`. Dismissed on item activation /
   click-away (a game-window click) / Esc / focus-loss **after** first focus
   (`menupopup::focus_dismiss` ignores the spurious on-map `Focused(false)` some WMs send).
