@@ -20,7 +20,7 @@ const SOUND_CHANNEL_ROW: usize = 10;
 
 #[test]
 fn popup_size_unions_main_menu_and_submenu() {
-    let menu = MainMenu::open((0, 0), true);
+    let menu = MainMenu::open((0, 0), true, false);
     let main_only = popup_content_size(&menu, None);
     let mb = crate::ui::menu::menu_bounds(menu.origin, &menu.items);
     assert_eq!(main_only, (mb.right(), mb.bottom()));
@@ -52,7 +52,7 @@ fn popup_origin_clamps_to_monitor() {
 
 #[test]
 fn menu_has_the_fifteen_rc_main_rows_in_order() {
-    let m = MainMenu::open((10, 10), true);
+    let m = MainMenu::open((10, 10), true, false);
     let labels: Vec<&str> = m.items.iter().map(|i| i.label.as_str()).collect();
     assert_eq!(
         labels,
@@ -78,9 +78,18 @@ fn menu_has_the_fifteen_rc_main_rows_in_order() {
 }
 
 #[test]
+fn pause_row_checks_when_paused() {
+    // BUG-3: bgb check-marks the Pause row while paused; slopgb left it blank.
+    let paused = MainMenu::open((0, 0), true, true);
+    assert!(paused.items[0].checked, "Pause checked while paused");
+    let running = MainMenu::open((0, 0), true, false);
+    assert!(!running.items[0].checked, "Pause unchecked while running");
+}
+
+#[test]
 fn enable_sound_checkmark_tracks_the_sound_state() {
-    let on = MainMenu::open((0, 0), true);
-    let off = MainMenu::open((0, 0), false);
+    let on = MainMenu::open((0, 0), true, false);
+    let off = MainMenu::open((0, 0), false, false);
     assert!(on.items[2].checked, "checked when sound is on");
     assert!(!off.items[2].checked, "unchecked when muted");
     assert_eq!(on.effects[2], MenuEffect::Run(Action::ToggleSound));
@@ -88,7 +97,7 @@ fn enable_sound_checkmark_tracks_the_sound_state() {
 
 #[test]
 fn supported_rows_run_their_action_window_size_opens_a_submenu_rest_none() {
-    let m = MainMenu::open((0, 0), true);
+    let m = MainMenu::open((0, 0), true, false);
     assert_eq!(m.effects[0], MenuEffect::Run(Action::Pause));
     assert_eq!(m.effects[2], MenuEffect::Run(Action::ToggleSound));
     assert_eq!(m.effects[5], MenuEffect::Run(Action::Reset));
@@ -131,7 +140,7 @@ fn supported_rows_run_their_action_window_size_opens_a_submenu_rest_none() {
 
 #[test]
 fn submenu_rows_show_the_arrow_window_size_enabled_others_greyed() {
-    let m = MainMenu::open((0, 0), true);
+    let m = MainMenu::open((0, 0), true, false);
     // All six submenu rows draw the arrow.
     for i in [8, 9, 10, 11, 12, 13] {
         assert!(m.items[i].submenu, "row {i} draws the submenu arrow");
@@ -158,7 +167,7 @@ fn submenu_rows_show_the_arrow_window_size_enabled_others_greyed() {
 
 #[test]
 fn effect_at_resolves_only_enabled_rows() {
-    let m = MainMenu::open((10, 10), true);
+    let m = MainMenu::open((10, 10), true, false);
     assert_eq!(
         m.effect_at(at(&m, 0).0, at(&m, 0).1),
         MenuEffect::Run(Action::Pause)
@@ -183,7 +192,7 @@ fn effect_at_resolves_only_enabled_rows() {
 
 #[test]
 fn row_rect_locates_the_window_size_row_for_its_submenu() {
-    let m = MainMenu::open((10, 10), true);
+    let m = MainMenu::open((10, 10), true, false);
     let r = m
         .row_rect(MenuEffect::Submenu(SubKind::WindowSize))
         .expect("window size row exists");
@@ -192,7 +201,7 @@ fn row_rect_locates_the_window_size_row_for_its_submenu() {
 
 #[test]
 fn hover_at_tracks_the_enabled_row_and_reports_changes() {
-    let mut m = MainMenu::open((10, 10), true);
+    let mut m = MainMenu::open((10, 10), true, false);
     assert!(
         m.hover_at(at(&m, 0).0, at(&m, 0).1),
         "moving onto Pause changes hover"
@@ -213,7 +222,7 @@ fn hover_at_tracks_the_enabled_row_and_reports_changes() {
 fn render_draws_ink_including_the_check_and_arrow_columns() {
     use crate::ui::Canvas;
     use crate::ui::menu::{menu_height, menu_width};
-    let m = MainMenu::open((0, 0), true);
+    let m = MainMenu::open((0, 0), true, false);
     let w = menu_width(&m.items).max(1) as usize;
     let h = menu_height(&m.items).max(1) as usize;
     let mut buf = vec![0x00AA_AAAA_u32; w * h];

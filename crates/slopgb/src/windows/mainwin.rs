@@ -51,10 +51,11 @@ pub struct MainMenu {
 
 impl MainMenu {
     /// Build the menu with its top-left at `origin`; `sound_on` check-marks the
-    /// "Enable sound" row (reflecting the runtime mute state).
+    /// "Enable sound" row and `paused` check-marks "Pause" (reflecting the
+    /// runtime mute / paused state, as bgb does).
     #[must_use]
-    pub fn open(origin: (i32, i32), sound_on: bool) -> Self {
-        let (items, effects) = entries(sound_on).into_iter().unzip();
+    pub fn open(origin: (i32, i32), sound_on: bool, paused: bool) -> Self {
+        let (items, effects) = entries(sound_on, paused).into_iter().unzip();
         Self {
             origin,
             items,
@@ -100,9 +101,12 @@ pub fn render(c: &mut Canvas, m: &MainMenu, theme: &Theme) {
 /// (Load ROM / Options / Cheat / Save screenshot → MN4/later) or a not-yet-wired
 /// submenu row (State / Other / Sound channel / Link / Recent ROMs → MN3–MN7),
 /// which renders its `▶` arrow greyed. **Window size** is live (MN2).
-fn entries(sound_on: bool) -> Vec<(MenuItem, MenuEffect)> {
+fn entries(sound_on: bool, paused: bool) -> Vec<(MenuItem, MenuEffect)> {
     vec![
-        (MenuItem::new("Pause"), MenuEffect::Run(Action::Pause)),
+        (
+            MenuItem::new("Pause").checked(paused),
+            MenuEffect::Run(Action::Pause),
+        ),
         (
             MenuItem::new("Load ROM..."),
             MenuEffect::Run(Action::MainLoadRom),
