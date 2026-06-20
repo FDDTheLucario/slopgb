@@ -374,23 +374,16 @@ fn other_items() -> Vec<(MenuItem, Option<SubChoice>)> {
     ]
 }
 
-/// The State rows (`main-sub-state.png`): Quick Save (F2) / Quick Load (F4) are
-/// the in-memory snapshot; Select / Load recovery / Load state... are greyed
-/// (the on-disk format isn't built).
+/// The State rows (`main-sub-state.png`): Quick Save / Quick Load are the
+/// in-memory snapshot; Select / Load recovery / Load state... are greyed (the
+/// on-disk format isn't built). bgb's F2/F4/F3 accelerators are dropped (BUG-2):
+/// in slopgb those keys open the debugger/VRAM/iomap from the game window, so
+/// the rows are click-only rather than advertising a colliding hotkey.
 fn state_items() -> Vec<(MenuItem, Option<SubChoice>)> {
     vec![
-        (
-            MenuItem::new("Quick Save").shortcut("F2"),
-            Some(SubChoice::QuickSave),
-        ),
-        (
-            MenuItem::new("Quick Load").shortcut("F4"),
-            Some(SubChoice::QuickLoad),
-        ),
-        (
-            MenuItem::new("Select").shortcut("F3").submenu().disabled(),
-            None,
-        ),
+        (MenuItem::new("Quick Save"), Some(SubChoice::QuickSave)),
+        (MenuItem::new("Quick Load"), Some(SubChoice::QuickLoad)),
+        (MenuItem::new("Select").submenu().disabled(), None),
         (MenuItem::new("Load recovery state").disabled(), None),
         (MenuItem::new("Load state..."), Some(SubChoice::LoadState)),
     ]

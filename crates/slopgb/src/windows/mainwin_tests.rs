@@ -421,6 +421,15 @@ fn state_submenu_has_quick_save_load_live_rest_greyed() {
     );
     assert_eq!(s.choices[0], Some(SubChoice::QuickSave));
     assert_eq!(s.choices[1], Some(SubChoice::QuickLoad));
+    // BUG-2: Quick Save/Load/Select carry NO accelerator label — bgb's F2/F4/F3
+    // collide with slopgb's game-window F2/F3/F4 (open debugger/VRAM/iomap), so
+    // the menu rows are click-only rather than advertising a dead/wrong hotkey.
+    for i in [0, 1, 2] {
+        assert_eq!(
+            s.items[i].shortcut, None,
+            "row {i} has no accelerator label"
+        );
+    }
     // Load state... is now live (on-disk save states); Select / Load recovery
     // stay greyed (those subsystems aren't built).
     assert_eq!(s.choices[4], Some(SubChoice::LoadState));
