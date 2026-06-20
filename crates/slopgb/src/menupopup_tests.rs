@@ -29,3 +29,28 @@ fn focus_loss_after_a_gain_dismisses() {
         "later focus loss dismisses"
     );
 }
+
+#[test]
+fn hover_opens_a_submenu_row_unless_already_open() {
+    use crate::input::Action;
+    use crate::windows::mainwin::{MenuEffect, SubKind};
+    // BUG-6: hovering a submenu row auto-opens it (native-menu behaviour).
+    // Nothing open yet -> open the hovered submenu.
+    assert_eq!(
+        hover_open(MenuEffect::Submenu(SubKind::State), None),
+        Some(SubKind::State)
+    );
+    // Already showing this submenu -> don't reopen (no per-pixel rebuild/flicker).
+    assert_eq!(
+        hover_open(MenuEffect::Submenu(SubKind::State), Some(SubKind::State)),
+        None
+    );
+    // A different submenu is open -> switch to the hovered one.
+    assert_eq!(
+        hover_open(MenuEffect::Submenu(SubKind::State), Some(SubKind::Link)),
+        Some(SubKind::State)
+    );
+    // A leaf (Run) row or empty space never opens a submenu.
+    assert_eq!(hover_open(MenuEffect::Run(Action::Pause), None), None);
+    assert_eq!(hover_open(MenuEffect::None, Some(SubKind::State)), None);
+}

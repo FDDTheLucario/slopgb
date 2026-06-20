@@ -154,8 +154,17 @@ impl App {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                if let Some(p) = &mut self.menu_popup {
-                    p.on_cursor_moved(position.x, position.y);
+                // A hover onto a submenu row auto-opens it (BUG-6), the same
+                // OpenSub path a click takes.
+                let outcome = self
+                    .menu_popup
+                    .as_mut()
+                    .and_then(|p| p.on_cursor_moved(position.x, position.y));
+                if let Some(PopupOutcome::OpenSub(kind, row)) = outcome {
+                    let sub = self.open_submenu(kind, row);
+                    if let Some(p) = &mut self.menu_popup {
+                        p.set_submenu(sub);
+                    }
                 }
             }
             WindowEvent::MouseInput {

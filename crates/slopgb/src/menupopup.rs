@@ -25,7 +25,7 @@ use winit::window::{Window, WindowId};
 
 use crate::input::Action;
 use crate::ui::canvas::Rect;
-use crate::ui::{Canvas, Theme};
+use crate::ui::{Canvas, Theme, menu};
 use crate::windows::mainwin::{
     self, MainMenu, MenuEffect, SubChoice, SubKind, SubMenu, popup_content_size,
     popup_screen_origin,
@@ -60,6 +60,9 @@ pub struct MenuPopup {
     surface: softbuffer::Surface<Rc<Window>, Rc<Window>>,
     menu: MainMenu,
     sub: Option<SubMenu>,
+    /// The kind of the currently-open submenu, so a hover over its already-open
+    /// parent row doesn't rebuild it (BUG-6 hover-to-open). Tracks `sub`.
+    open_kind: Option<SubKind>,
     cursor: Option<(i32, i32)>,
     /// Screen-space anchor (the right-click point in global coords) and the game
     /// monitor bounds, captured at open. Kept so a submenu that grows the window
@@ -130,6 +133,7 @@ impl MenuPopup {
             surface,
             menu,
             sub: None,
+            open_kind: None,
             cursor: None,
             anchor,
             monitor,
@@ -182,20 +186,38 @@ impl MenuPopup {
         let _ = buf.present();
     }
 
-    /// Record the popup-local cursor and re-highlight the hovered row (redrawing
-    /// only on a real change). The submenu takes hover priority when open (as
-    /// bgb highlights the active child row).
-    pub fn on_cursor_moved(&mut self, x: f64, y: f64) {
+    /// Record the popup-local cursor, re-highlight the hovered row (redrawing
+    /// only on a real change), and — matching native menus — return an
+    /// [`PopupOutcome::OpenSub`] when the cursor enters a *different* submenu
+    /// row so `App` opens it without a click (BUG-6). The submenu takes hover
+    /// priority when the cursor is over it (bgb highlights the active child row);
+    /// the main menu otherwise.
+    pub fn on_cursor_moved(&mut self, x: f64, y: f64) -> Option<PopupOutcome> {
         let (px, py) = (x as i32, y as i32);
         self.cursor = Some((px, py));
-        let changed = if let Some(s) = &mut self.sub {
-            s.hover_at(px, py)
-        } else {
-            self.menu.hover_at(px, py)
+        // Hover-to-open: a submenu row the cursor enters auto-unfolds (unless it
+        // is already showing — `hover_open` guards that to avoid a per-pixel
+        // rebuild/flicker).
+        if let Some(kind) = hover_open(self.menu.effect_at(px, py), self.open_kind) {
+            if self.menu.hover_at(px, py) {
+                self.window.request_redraw();
+            }
+            if let Some(row) = self.menu.row_rect(MenuEffect::Submenu(kind)) {
+                return Some(PopupOutcome::OpenSub(kind, row));
+            }
+            return None;
+        }
+        // Otherwise re-highlight: the submenu when the cursor is over it (off the
+        // main column), else the main menu.
+        let over_main = menu::item_at(self.menu.origin, &self.menu.items, px, py).is_some();
+        let changed = match (&mut self.sub, over_main) {
+            (Some(s), false) => s.hover_at(px, py),
+            _ => self.menu.hover_at(px, py),
         };
         if changed {
             self.window.request_redraw();
         }
+        None
     }
 
     /// Resolve a left-click at the last cursor position into a [`PopupOutcome`].
@@ -210,6 +232,7 @@ impl MenuPopup {
                 return PopupOutcome::Sub(choice);
             }
             self.sub = None;
+            self.open_kind = None;
             self.resize_to_content();
             self.window.request_redraw();
         }
@@ -225,6 +248,7 @@ impl MenuPopup {
 
     /// Hang `sub` off its parent row, growing the window to cover the whole tree.
     pub fn set_submenu(&mut self, sub: SubMenu) {
+        self.open_kind = Some(sub.kind);
         self.sub = Some(sub);
         self.resize_to_content();
         self.window.request_redraw();
@@ -272,6 +296,21 @@ fn anchor_and_monitor(game: &Window, cursor: (i32, i32)) -> (Point, Option<Monit
 /// `Focused(false)` some WMs deliver before the window is ever focused (which
 /// would otherwise close the menu the instant it opens). Pure, so it is tested
 /// headless (the rest of the winit glue is verified live).
+/// Decide whether hovering the main-menu row carrying `effect` should open a
+/// submenu, given the `open_kind` currently shown (if any). Returns the
+/// [`SubKind`] to open when the row is a submenu opener whose kind is not
+/// already open — so a per-pixel cursor move over the already-open row does not
+/// rebuild it (no flicker). A leaf (`Run`) row or empty space (`None`) never
+/// opens one. Pure, so the hover-to-open decision is tested headless (the winit
+/// glue in [`MenuPopup::on_cursor_moved`] is verified live). See BUG-6.
+#[must_use]
+pub fn hover_open(effect: MenuEffect, open_kind: Option<SubKind>) -> Option<SubKind> {
+    match effect {
+        MenuEffect::Submenu(kind) if open_kind != Some(kind) => Some(kind),
+        _ => None,
+    }
+}
+
 #[must_use]
 pub fn focus_dismiss(focused_once: &mut bool, focused: bool) -> bool {
     if focused {
