@@ -439,6 +439,20 @@ pub fn popup_content_size(menu: &MainMenu, sub: Option<&SubMenu>) -> (i32, i32) 
     (right.max(1), bottom.max(1))
 }
 
+/// The opaque rectangles of the popup window: the main-menu box, and the submenu
+/// box when one is open. The window is sized to the *union* of both, so a short
+/// submenu leaves an L-shaped gap (right of the main menu, above/below the
+/// submenu); bgb draws the submenu as a separate floating box, so that gap must
+/// be **transparent** (desktop shows through), not a filled background.
+/// [`MenuPopup::redraw`](crate::menupopup) forces opaque alpha over exactly these
+/// rects and leaves the gap transparent.
+#[must_use]
+pub fn popup_menu_boxes(menu: &MainMenu, sub: Option<&SubMenu>) -> (Rect, Option<Rect>) {
+    let main = menu::menu_bounds(menu.origin, &menu.items);
+    let sub_box = sub.map(|s| menu::menu_bounds(s.origin, &s.items));
+    (main, sub_box)
+}
+
 /// Screen-space top-left for the popup window: the game-window-local pointer
 /// `cursor` offset by the game window's `window_outer` position, clamped so a
 /// `popup` (w, h) box stays inside `monitor` (`Some((x, y, w, h))`, the full

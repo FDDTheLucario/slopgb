@@ -51,6 +51,43 @@ fn popup_origin_clamps_to_monitor() {
 }
 
 #[test]
+fn popup_gap_around_submenu_is_transparent() {
+    // The popup window is sized to the union of the main menu + the open submenu,
+    // so a short submenu leaves an L-shaped gap (right of the main menu, above /
+    // below the submenu box). bgb's submenu is a separate floating box — that gap
+    // must be transparent (desktop shows through), NOT a filled background.
+    let menu = MainMenu::open((0, 0), true, false);
+    let row = menu
+        .row_rect(MenuEffect::Submenu(SubKind::State))
+        .expect("State row exists");
+    let sub = SubMenu::state(row);
+    let (main_box, sub_box) = popup_menu_boxes(&menu, Some(&sub));
+    let sub_box = sub_box.expect("submenu box present");
+    // Inside the main menu box → opaque.
+    assert!(main_box.contains(2, 2), "main box opaque");
+    // Inside the submenu box → opaque.
+    assert!(
+        sub_box.contains(sub.origin.0 + 2, sub.origin.1 + 2),
+        "sub box opaque"
+    );
+    // The L-gap: right of the main menu (x past its right edge) and above the
+    // submenu's top → inside NEITHER box → transparent (the bug: it was filled).
+    let (gx, gy) = (sub.origin.0 + 2, 2);
+    assert!(
+        !main_box.contains(gx, gy) && !sub_box.contains(gx, gy),
+        "gap right-of-main / above-sub is transparent"
+    );
+    // With no submenu open, there is no second box and anything past the main
+    // box is transparent.
+    let (m2, s2) = popup_menu_boxes(&menu, None);
+    assert!(s2.is_none(), "no submenu → no second opaque box");
+    assert!(
+        !m2.contains(m2.right() + 2, 2),
+        "no-sub: past main is transparent"
+    );
+}
+
+#[test]
 fn menu_has_the_fifteen_rc_main_rows_in_order() {
     let m = MainMenu::open((10, 10), true, false);
     let labels: Vec<&str> = m.items.iter().map(|i| i.label.as_str()).collect();

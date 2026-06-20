@@ -98,6 +98,12 @@ impl MenuPopup {
         let attrs = Window::default_attributes()
             .with_title("slopgb — menu")
             .with_decorations(false)
+            // Transparent so the L-shaped gap around a short submenu shows the
+            // desktop, not a filled background (bgb's submenu is a separate
+            // floating box). The gap pixels are cleared to 0 (see `redraw`); a
+            // compositor renders them transparent, a non-compositing WM (no ARGB
+            // visual) renders them black — an acceptable edge case.
+            .with_transparent(true)
             .with_resizable(false)
             // Request activation so click-away anywhere dismisses via focus-loss
             // (the WM may still decline, e.g. focus-follows-mouse — handled by the
@@ -171,16 +177,30 @@ impl MenuPopup {
         {
             let mut c = Canvas::new(&mut buf, size.width as usize, size.height as usize);
             let area = c.bounds();
-            c.fill_rect(area, self.theme.bg);
+            // Clear to 0x00000000 — fully transparent. Compositors use
+            // premultiplied alpha, so a transparent pixel must have RGB=0 (an
+            // alpha-0 pixel with non-zero RGB renders as that colour, not
+            // transparent). The alpha pass below makes only the menu boxes
+            // opaque; the gap stays 0 → desktop shows through (bgb's submenu is a
+            // separate floating box).
+            c.fill_rect(area, 0x0000_0000);
             mainwin::render(&mut c, &self.menu, &self.theme);
             if let Some(s) = &self.sub {
                 mainwin::render_sub(&mut c, s, &self.theme);
             }
         }
-        // Force opaque alpha (softbuffer leaves the top byte 0 — transparent to
-        // an ARGB compositor), matching the game/tool windows.
-        for px in buf.iter_mut() {
-            *px |= 0xFF00_0000;
+        // Force opaque alpha ONLY over the actual menu boxes (softbuffer leaves
+        // the top byte 0). The gap is never touched, so it stays at alpha 0
+        // (transparent). Can't key off the pixel value — `theme.text` may be pure
+        // black — so use the box geometry.
+        let (w, h) = (size.width as i32, size.height as i32);
+        let (main_box, sub_box) = mainwin::popup_menu_boxes(&self.menu, self.sub.as_ref());
+        for b in std::iter::once(main_box).chain(sub_box) {
+            for y in b.y.max(0)..b.bottom().min(h) {
+                for x in b.x.max(0)..b.right().min(w) {
+                    buf[(y * w + x) as usize] |= 0xFF00_0000;
+                }
+            }
         }
         self.window.pre_present_notify();
         let _ = buf.present();
