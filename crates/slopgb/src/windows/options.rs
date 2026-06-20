@@ -123,6 +123,9 @@ pub struct Settings {
     pub rgbds_disasm: bool,
     /// Debug → pop the memory viewer out into its own window (a slopgb extra).
     pub memory_window: bool,
+    /// Debug → "pressing Esc shows debugger": Esc opens the debugger (bgb's
+    /// behaviour) instead of quitting. Default on. See BUG-1.
+    pub esc_shows_debugger: bool,
     /// Misc → fast-forward speed multiplier (turbo), 1..=20.
     pub ff_speed: u32,
     /// Misc → framerate limit (0 = real speed / 60 fps).
@@ -173,6 +176,7 @@ impl Default for Settings {
             show_clocks: true,
             rgbds_disasm: true,
             memory_window: false,
+            esc_shows_debugger: true,
             ff_speed: 10,
             framerate_limit: 0,
             show_framerate: false,

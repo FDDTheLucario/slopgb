@@ -226,7 +226,9 @@ pub fn map(code: KeyCode, mods: ModifiersState, focus: Focus) -> Option<Action> 
         KeyCode::Tab => Some(Action::Turbo),
         KeyCode::KeyP => Some(Action::Pause),
         KeyCode::KeyR => Some(Action::Reset),
-        KeyCode::Escape => Some(Action::Quit),
+        // Escape is deliberately *not* bound here: bgb shows the debugger on Esc
+        // (never quits). `App::handle_key` intercepts it so it can honour the
+        // "pressing Esc shows debugger" Options flag + the focus. See BUG-1.
         KeyCode::F9 => Some(Action::DbgBreak),
         _ => None,
     };
@@ -497,6 +499,21 @@ mod tests {
         // Resume-safety: F9 toggles break from any focus.
         assert_eq!(g(KeyCode::F9), Some(Action::DbgBreak));
         assert_eq!(d(KeyCode::F9), Some(Action::DbgBreak));
+    }
+
+    #[test]
+    fn escape_is_unmapped_in_every_focus() {
+        // bgb shows the debugger on Esc; it never quits the emulator. `map` no
+        // longer binds Escape at all — `App::handle_key` intercepts it directly
+        // so it can honour the "pressing Esc shows debugger" Options flag and the
+        // focus (the pure map can't see runtime settings). See BUG-1.
+        for f in [Focus::Game, Focus::Viewer, Focus::Debugger] {
+            assert_eq!(
+                map(KeyCode::Escape, NONE, f),
+                None,
+                "Escape unmapped ({f:?})"
+            );
+        }
     }
 
     #[test]

@@ -28,6 +28,9 @@ pub(crate) enum Field {
     ShowClocks,
     RgbdsDisasm,
     MemoryWindow,
+    /// Debug → "pressing Esc shows debugger" (Esc opens the debugger, never
+    /// quits). See BUG-1.
+    EscShowsDebugger,
     /// Toggle "pure bgb mode": flip every slopgb-departure setting to its
     /// bgb-faithful value (and back to the slopgb defaults).
     PureBgb,
@@ -247,6 +250,7 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         Field::ShowClocks => s.show_clocks = !s.show_clocks,
         Field::RgbdsDisasm => s.rgbds_disasm = !s.rgbds_disasm,
         Field::MemoryWindow => s.memory_window = !s.memory_window,
+        Field::EscShowsDebugger => s.esc_shows_debugger = !s.esc_shows_debugger,
         Field::PureBgb => {
             if pure_bgb(s) {
                 // Already bgb-faithful → restore the slopgb defaults.
@@ -297,6 +301,7 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
             s.show_clocks = d.show_clocks;
             s.rgbds_disasm = d.rgbds_disasm;
             s.memory_window = d.memory_window;
+            s.esc_shows_debugger = d.esc_shows_debugger;
         }
         // The four wired break conditions; the rest of the tab is inert.
         OptionsTab::Exceptions => {
@@ -511,9 +516,10 @@ fn debug(s: &Settings, content: Rect) -> Vec<Ctrl> {
         rc(l.row().at(), "Live update memory viewer"),
         chk("Live update memory viewer", true),
     ));
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
         rc(l.row().at(), "pressing Esc shows debugger"),
-        chk("pressing Esc shows debugger", true),
+        chk("pressing Esc shows debugger", s.esc_shows_debugger),
+        Field::EscShowsDebugger,
     ));
     v.push(Ctrl::inert(
         rc(l.row().at(), "GB CPU usage meter"),

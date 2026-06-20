@@ -519,6 +519,17 @@ impl App {
                 return;
             }
         }
+        // bgb shows the debugger on Esc — it never quits the emulator. Handled
+        // here (not in the pure `input::map`) because honouring the Options
+        // "pressing Esc shows debugger" toggle needs the runtime setting. Toggles
+        // from any focus (game/viewer opens, debugger closes); the modal guards
+        // above already consumed Esc where a dialog was open. BUG-1.
+        if code == KeyCode::Escape {
+            if pressed && self.settings.esc_shows_debugger {
+                self.run_action(Action::ToggleTool(ui::ToolWindow::Debugger), event_loop);
+            }
+            return;
+        }
         let Some(action) = input::map(code, self.modifiers, focus) else {
             return;
         };

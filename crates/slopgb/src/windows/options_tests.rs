@@ -40,6 +40,8 @@ fn settings_default_matches_spec() {
     assert!(d.show_clocks);
     assert!(!d.freeze_recent);
     assert!(!d.pause_on_focus_loss);
+    // bgb shows the debugger on Esc by default (BUG-1) — the slopgb-faithful default.
+    assert!(d.esc_shows_debugger);
     assert_eq!(d.scheme, 0);
     assert_eq!(d.dmg_palette, SCHEMES[0].colors);
     // The default scheme is bgb's pale-green LCD ("BGB 0.3"), decoded from
@@ -366,10 +368,31 @@ fn debug_tab_display_flags_toggle() {
     assert!(st.working.lowercase_hex);
     click_field(&mut st, Field::ShowClocks);
     assert!(!st.working.show_clocks);
+    // "pressing Esc shows debugger" is live (BUG-1): on by default, click flips it.
+    assert!(
+        st.working.esc_shows_debugger,
+        "esc-shows-debugger on by default"
+    );
+    click_field(&mut st, Field::EscShowsDebugger);
+    assert!(!st.working.esc_shows_debugger);
     // RGBDS syntax + memory-window are the slopgb-departure toggles.
     assert!(st.working.rgbds_disasm, "rgbds on by default");
     click_field(&mut st, Field::RgbdsDisasm);
     assert!(!st.working.rgbds_disasm);
+}
+
+#[test]
+fn debug_tab_defaults_restores_esc_shows_debugger() {
+    // Turning the toggle off then pressing Defaults on the Debug tab restores it
+    // to the bgb-faithful default (true). BUG-1.
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Debug;
+    st.working.esc_shows_debugger = false;
+    st.press(OptionsButton::Defaults);
+    assert!(
+        st.working.esc_shows_debugger,
+        "Defaults restores esc-shows-debugger"
+    );
 }
 
 #[test]
