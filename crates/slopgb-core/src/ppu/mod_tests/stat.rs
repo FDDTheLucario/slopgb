@@ -211,6 +211,98 @@ fn mode_for_interrupt_vblank_timeline() {
     }
 }
 
+/// S5/A1: SameBoy `ly_for_comparison` (`display.c`) — the *delayed* LY value the
+/// LYC==LY interrupt source compares against, distinct from the live FF44. It is
+/// `-1` ("no line") at line start, latches to the line number a few dots in, and
+/// holds the previous line's value across the first dots of the next line (the
+/// LYC-match tail). Pinned for single speed across DMG / CGB-C / AGB; the field
+/// is computed for the flag-on StatUpdate path (A4), inert flag-off.
+#[test]
+fn ly_for_comparison_visible_line_schedule() {
+    let mut p = dmg();
+    p.write(0xFF40, 0x91);
+    // A steady mid-frame line: dots 0-2 hold the previous line's value
+    // (display.c held until the dot-3 reset), dot 3 is -1, dots 4+ are N.
+    for dot in 0..3u16 {
+        run_to(&mut p, 5, dot);
+        assert_eq!(p.ly_for_comparison(), 4, "line 5 dot {dot}: prev-line carryover");
+    }
+    run_to(&mut p, 5, 3);
+    assert_eq!(p.ly_for_comparison(), -1, "line 5 dot 3: reset to -1 (display.c:1776)");
+    for dot in [4u16, 40, 200] {
+        run_to(&mut p, 5, dot);
+        assert_eq!(p.ly_for_comparison(), 5, "line 5 dot {dot}: latched to N");
+    }
+    // Line 1 dot 3 is -1; dots 0-2 carry line 0's value (0).
+    run_to(&mut p, 1, 0);
+    assert_eq!(p.ly_for_comparison(), 0, "line 1 dot 0: line-0 carryover");
+    run_to(&mut p, 1, 3);
+    assert_eq!(p.ly_for_comparison(), -1, "line 1 dot 3: -1");
+    run_to(&mut p, 1, 4);
+    assert_eq!(p.ly_for_comparison(), 1, "line 1 dot 4: latched to 1");
+}
+
+/// S5/A1: VBlank `ly_for_comparison` is `-1` for the first four dots of every
+/// line (144-152) then latches to the line number (`display.c` 144-152 loop:
+/// `ly_for_comparison = -1` at entry, `= current_line` after GB_SLEEP 26+12).
+#[test]
+fn ly_for_comparison_vblank_schedule() {
+    let mut p = dmg();
+    p.write(0xFF40, 0x91);
+    for line in [144u8, 150] {
+        for dot in 0..4u16 {
+            run_to(&mut p, line, dot);
+            assert_eq!(p.ly_for_comparison(), -1, "vblank line {line} dot {dot}: -1");
+        }
+        run_to(&mut p, line, 4);
+        assert_eq!(p.ly_for_comparison(), i16::from(line), "vblank line {line} dot 4: latched");
+    }
+}
+
+/// S5/A1: line 153's `ly_for_comparison` runs a model-specific micro-sequence
+/// (`display.c` line-153 tail). DMG / CGB-C single speed: `-1` (dots 0-5) ->
+/// `153` (6-7) -> `-1` (8-11) -> `0` (12+) — the brief LYC=153 window and the
+/// early LYC=0 that fire the once-per-frame line-153 LYC sources. AGB
+/// (`model > CGB_C`) shifts the first set two dots earlier and skips the `-1`
+/// gap: `-1` (0-3) -> `153` (4-11) -> `0` (12+).
+#[test]
+fn ly_for_comparison_line_153_schedule() {
+    for (mk, label) in [
+        (Ppu::new(Model::Dmg), "dmg"),
+        (Ppu::new(Model::Cgb), "cgb-c"),
+    ] {
+        let mut p = mk;
+        let _ = label;
+        p.write(0xFF40, 0x91);
+        let expect = |dot: u16| -> i16 {
+            match dot {
+                0..=5 => -1,
+                6..=7 => 153,
+                8..=11 => -1,
+                _ => 0,
+            }
+        };
+        for dot in [0u16, 5, 6, 7, 8, 11, 12, 100] {
+            run_to(&mut p, 153, dot);
+            assert_eq!(p.ly_for_comparison(), expect(dot), "{label} line 153 dot {dot}");
+        }
+    }
+    // AGB shifts earlier, no -1 gap.
+    let mut p = Ppu::new(Model::Agb);
+    p.write(0xFF40, 0x91);
+    let expect = |dot: u16| -> i16 {
+        match dot {
+            0..=3 => -1,
+            4..=11 => 153,
+            _ => 0,
+        }
+    };
+    for dot in [0u16, 3, 4, 8, 11, 12, 100] {
+        run_to(&mut p, 153, dot);
+        assert_eq!(p.ly_for_comparison(), expect(dot), "agb line 153 dot {dot}");
+    }
+}
+
 /// S2c — cycle-exact mode-3 length, validated as a parallel function.
 ///
 /// SameBoy's bare-line (no sprites, no active window) mode-3 length is
