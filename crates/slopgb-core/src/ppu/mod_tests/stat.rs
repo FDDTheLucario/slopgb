@@ -152,6 +152,65 @@ fn mode_for_interrupt_has_no_mode2_lead_on_line_0() {
     );
 }
 
+/// S5-refine: on lines 1-143 the OAM (mode-2) IRQ source is carried across the
+/// *whole* line-start window (dots 0-3), not just pulsed at dot 3. SameBoy sets
+/// `mode_for_interrupt = 2` at the prior line's end (`display.c:2138`, skipped
+/// only for the last visible line `LINES-1`) and re-sets it at the line top
+/// (`display.c:1781`), so the source is high continuously from the prior line's
+/// HBlank exit through this line's OAM-search start — the "OAM int 1 T-cycle
+/// before STAT" lead (`display.c:1778`) seen as a sustained carryover rather
+/// than only the one-dot lead the swing test pins at dot 3. The visible byte
+/// still reads the mode-0 gap (0) across those dots. Inert field; pins the
+/// decoupled model the S5 StatUpdate swap consumes (line 0 is the exception —
+/// no prior-line carryover, see the line-0 test).
+#[test]
+fn mode_for_interrupt_holds_oam_source_across_line_start() {
+    let mut p = dmg();
+    p.write(0xFF40, 0x91); // LCD + BG on, no sprites
+    for dot in 0..4u16 {
+        run_to(&mut p, 5, dot); // a steady mid-frame visible line
+        assert!(!p.glitch_line, "line 5 is a normal visible line");
+        assert_eq!(
+            (p.vis_mode(), p.mode_for_interrupt()),
+            (0, 2),
+            "line 5 dot {dot}: visible mode-0 gap but the OAM IRQ source is carried (2)"
+        );
+    }
+    // Dot 4 (the visible mode→2 edge) drops the source to the OAM-search NONE
+    // body so a later LYC rise can re-fire (`display.c:1799`).
+    run_to(&mut p, 5, 4);
+    assert_eq!(
+        (p.vis_mode(), p.mode_for_interrupt()),
+        (2, crate::stat_update::MODE_FOR_INTERRUPT_NONE),
+        "line 5 dot 4: visible byte reads 2 but the OAM source has fallen to NONE"
+    );
+}
+
+/// S5-refine: the VBlank interrupt-facing mode (`display.c` 144-152 loop +
+/// line-153 tail). Line 144 still reads line 143's HBlank carryover (mode 0)
+/// for its first dots, flips to the VBlank source (mode 1) at the vblank-entry
+/// step (`display.c:2178` `mode_for_interrupt = 1`, ~dot 4), and every later
+/// vblank line (145-153) holds mode 1: there is no mode-2 carryover into vblank
+/// (`display.c:2138` skips `LINES-1`) and no `-1` gap. The per-line DMG OAM
+/// vblank pulses and the line-144 OAM IF pokes are *direct* `IF |= 2` writes in
+/// the STAT engine (`display.c:2160`, `:2185`), not `mode_for_interrupt`
+/// transitions, so they are not modelled in this field.
+#[test]
+fn mode_for_interrupt_vblank_timeline() {
+    let mut p = dmg();
+    p.write(0xFF40, 0x91);
+    for dot in 0..4u16 {
+        run_to(&mut p, 144, dot);
+        assert_eq!(p.mode_for_interrupt(), 0, "line 144 dot {dot}: HBlank carryover");
+    }
+    run_to(&mut p, 144, 4);
+    assert_eq!(p.mode_for_interrupt(), 1, "line 144 dot 4: VBlank source raised");
+    for line in [145u8, 150, 153] {
+        run_to(&mut p, line, 80);
+        assert_eq!(p.mode_for_interrupt(), 1, "vblank line {line}: holds mode 1");
+    }
+}
+
 /// S2c — cycle-exact mode-3 length, validated as a parallel function.
 ///
 /// SameBoy's bare-line (no sprites, no active window) mode-3 length is

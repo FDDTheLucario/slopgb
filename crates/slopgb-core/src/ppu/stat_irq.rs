@@ -526,38 +526,59 @@ impl Ppu {
         self.mode_for_interrupt = if !self.enabled {
             0
         } else if self.line >= 144 || self.glitch_line {
-            // VBlank / glitch line: no anchor swing modelled here yet (the
-            // visible mode is the IRQ mode); refined with the STAT swap (S5).
+            // VBlank / glitch line. The visible mode IS the IRQ mode here:
+            // `vis_mode` already yields line 144's HBlank carryover (mode 0,
+            // dots 0-3) flipping to the VBlank source (mode 1) at the
+            // vblank-entry step (`display.c:2178`, ~dot 4), and mode 1 for every
+            // later vblank line (145-153) — there is no mode-2 carryover into
+            // vblank (`display.c:2138` skips `LINES-1`) and no `-1` gap. The
+            // per-line DMG OAM vblank pulses + the line-144 OAM IF pokes are
+            // direct `IF |= 2` writes (`display.c:2160`, `:2185`), handled in
+            // the STAT engine, not `mode_for_interrupt` transitions. (The glitch
+            // line keeps the visible mode unrefined — STAT swap S5.)
             self.vis_mode()
         } else if self.dot < 84 {
-            // Mode-2 region. SameBoy raises the OAM STAT source as a 1-dot
-            // *pulse* at line start, then sets `mode_for_interrupt = -1`
-            // (NONE) for the rest of the OAM search (`display.c:1781` →
-            // `:1799`) — so the source level falls and a later LYC rise can
-            // re-fire (STAT blocking), rather than the source staying high
-            // across all of mode 2. Lines 1-143 pulse one dot early at dot 3
-            // (the "OAM int 1 T-cycle before STAT" lead; `display.c:1778`),
-            // one dot before the visible byte flips to 2 at dot 4. Line 0 has
-            // no early fire ("except on line 0"), but SameBoy's `GB_SLEEP 7,1`
-            // step (`display.c:1789`) still sets `mode_for_interrupt = 2`
-            // unconditionally (`:1793`) at the same step the visible byte flips
-            // to 2 (`:1792`), so line 0 pulses *at* dot 4 — matching
-            // `ModeTimeline::mode2_irq_offset(0) == 0`. Before the pulse (dots
-            // 0-2, and line 0 dot 3) the mode-0/1 carryover holds; after it the
-            // source is NONE. (Whole-dot caveat for the S5 wiring: SameBoy drops
-            // the source back to -1 at the *same* cycle as the line-0 rise, so
-            // its NONE/re-fire window opens a dot earlier than this 1-dot-min
-            // pulse — revisit if a line-0 dot-4 LYC=0 re-fire ever needs it.)
-            // (Still deferred to the S5 wiring: the VBlank-entry mode-2 source
-            // — `display.c:2138`, the vblank display loop.)
-            if (self.line != 0 && self.dot == 3) || (self.line == 0 && self.dot == 4) {
-                // OAM (mode 2) IRQ pulse: leads the visible byte by one dot on
-                // lines 1-143 (dot 3), but fires AT the visible mode→2 edge on
-                // line 0 (dot 4) — no early lead there (`display.c:1778`
-                // "except on line 0" / the unconditional `:1792` set).
-                2
+            // Mode-2 region. SameBoy holds the OAM STAT source high across the
+            // line-start window, then sets `mode_for_interrupt = -1` (NONE) for
+            // the rest of the OAM search (`display.c:1781` → `:1799`) — so the
+            // source level falls and a later LYC rise can re-fire (STAT
+            // blocking), rather than staying high across all of mode 2. On lines
+            // 1-143 the source is carried high across dots 0-3 (set at the prior
+            // line's end `display.c:2138`, re-set at the line top `:1781`) — the
+            // "OAM int 1 T-cycle before STAT" lead (`display.c:1778`) as a
+            // sustained window, leading the visible mode→2 edge at dot 4. Line 0
+            // has no prior-line carryover and no early lead ("except on line
+            // 0"), but SameBoy's `GB_SLEEP 7,1` step (`display.c:1789`) still
+            // sets `mode_for_interrupt = 2` unconditionally (`:1781`) at the
+            // step the visible byte flips to 2 (`:1792`), so line 0 pulses *at*
+            // dot 4 — matching `ModeTimeline::mode2_irq_offset(0) == 0`. (Whole-
+            // dot caveat for the S5 wiring: SameBoy drops the source back to -1
+            // at the *same* cycle as the line-0 rise, so its NONE/re-fire window
+            // opens a dot earlier than this pulse — revisit if a line-0 dot-4
+            // LYC=0 re-fire ever needs it.)
+            if self.line == 0 {
+                // Line 0: no prior-line OAM carryover (line 153 runs no
+                // `display.c:2138` set) and no early lead (`display.c:1778`
+                // "except on line 0"). Its OWN OAM pulse fires AT the visible
+                // mode→2 edge (dot 4, the unconditional `:1792`/`:1781` set),
+                // then falls to NONE; dots 0-3 keep the line-start carryover.
+                if self.dot == 4 {
+                    2
+                } else if self.dot < 4 {
+                    self.vis_mode()
+                } else {
+                    crate::stat_update::MODE_FOR_INTERRUPT_NONE
+                }
             } else if self.dot < 4 {
-                self.vis_mode() // line-start mode-0/1 carryover
+                // Lines 1-143: the OAM (mode-2) IRQ source is carried high
+                // across the whole line-start window (dots 0-3). SameBoy sets
+                // `mode_for_interrupt = 2` at the prior line's end
+                // (`display.c:2138`, skipped only for `LINES-1`) and re-sets it
+                // at the line top (`display.c:1781`), so the source leads the
+                // visible mode→2 edge (dot 4) by the entire window — the "OAM
+                // int 1 T-cycle before STAT" glitch (`display.c:1778`) seen as a
+                // sustained carryover, not only the dot-3 lead.
+                2
             } else {
                 crate::stat_update::MODE_FOR_INTERRUPT_NONE // OAM-search body: no source
             }
