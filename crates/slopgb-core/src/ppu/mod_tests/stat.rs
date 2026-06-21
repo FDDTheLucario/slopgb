@@ -99,6 +99,59 @@ fn mode_for_interrupt_swings_two_dots_against_the_visible_mode() {
     assert!(lag_seen, "mode-0 lag window observed");
 }
 
+/// S2c — cycle-exact mode-3 length, validated as a parallel function.
+///
+/// SameBoy's bare-line (no sprites, no active window) mode-3 length is
+/// `167 + (SCX & 7)` (`display.c:1493`), so the visible STAT mode flips 3→0
+/// at dot `MODE2_LENGTH + 167 + (SCX & 7)` = `247 + (SCX & 7)`
+/// (`display.c:2091`). The kernel pair renders BG-only, so this closed form
+/// is exact for it. [`crate::mode_timeline::ModeTimeline`] is that function;
+/// this test pins it to the live PPU's actual SCX sweep and measures the
+/// **reclock magnitude** the S2d atomic flip must apply: slopgb's live
+/// `m0_flip_events` flip lands a *constant* 7 dots later than the SameBoy
+/// boundary (a +4 line-start mode-0-window offset plus a +3 longer mode 3),
+/// across every SCX. That fixed delta is exactly what makes the lift a whole
+/// re-clock (it moves the rendered pixel-pop dot, hence the mealybug photos)
+/// rather than a net-zero sub-dot nudge.
+#[test]
+fn sameboy_mode3_length_is_seven_dots_short_of_the_live_flip() {
+    for scx in 0u8..8 {
+        // SameBoy cycle-exact boundary (the parallel function).
+        let sameboy = crate::mode_timeline::ModeTimeline::bare(1, scx).visible_mode0_dot();
+        assert_eq!(
+            sameboy,
+            247 + u16::from(scx & 7),
+            "scx {scx}: SameBoy bare mode-0 dot = 247 + SCX&7"
+        );
+
+        // Live slopgb flip dot for the same bare line.
+        let mut p = dmg();
+        p.write(0xFF43, scx);
+        p.write(0xFF40, 0x91); // LCD + BG on, no sprites/window
+        run_to(&mut p, 1, 0);
+        let mut prev = p.vis_mode();
+        let mut live_flip = None;
+        for _ in 0..400 {
+            p.tick();
+            if p.line != 1 {
+                break;
+            }
+            let v = p.vis_mode();
+            if prev == 3 && v == 0 {
+                live_flip = Some(p.dot);
+                break;
+            }
+            prev = v;
+        }
+        let live = live_flip.expect("bare line flips 3→0 within the line");
+        assert_eq!(
+            i32::from(live) - i32::from(sameboy),
+            7,
+            "scx {scx}: live flip {live} is a constant 7 dots past SameBoy {sameboy}"
+        );
+    }
+}
+
 #[test]
 fn lcdon_ly_table() {
     check_lcdon_table(
