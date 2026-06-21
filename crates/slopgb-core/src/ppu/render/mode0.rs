@@ -153,6 +153,20 @@ impl Ppu {
         // earlier). Gate the OAM-read MID signal to those lines; the
         // sprite/window/glitch phases are later increments.
         let bare_flip = r.fetched == 0 && !r.win_active && !self.glitch_line;
+        // Port Stage S2c — back-date the CPU-visible mode→0 boundary
+        // (`vis_mode`) 3 dots AHEAD of the dispatch flip on the flag-on path,
+        // bare single-speed lines: `vis_early` rises here while `m0_src`/
+        // `line_render_done` (the IRQ dispatch) stay at `proj <= lead` below, so
+        // the visible mode reads 0 at SameBoy's `visible_mode0_dot` (our-line
+        // dot 251) without moving the dispatch — the instrumented kernel-pair
+        // separator (`m0int_m3stat_2` read at our dot 252 reads mode 0, while
+        // `m2int_m3stat_1` at dot 248 stays mode 3). The +3 lead is the measured
+        // bare single-speed back-date (the sprite/window +2-DMG and DS +4 cases
+        // are derived-but-unmeasured and excluded). `leading_edge_reads` is off
+        // in production, so `vis_early` is never set there (byte-identical).
+        if self.leading_edge_reads && bare_flip && !self.ds && !self.vis_early && proj <= lead + 3 {
+            self.vis_early = true;
+        }
         if proj <= lead {
             self.m0_src = true;
             self.m0_rise_dot = true;
@@ -187,6 +201,9 @@ impl Ppu {
             self.m0_src = false;
             self.m0_rise_dot = false;
             self.line_render_done = false;
+            // The visible back-date drops with the dispatch (flag-on only;
+            // always false in production). See the `vis_early` field docs.
+            self.vis_early = false;
         }
     }
 

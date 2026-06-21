@@ -33,7 +33,11 @@ impl Ppu {
             u8::from(self.model.is_cgb() && self.line == 0)
         } else if self.dot < 84 {
             2
-        } else if !self.line_render_done {
+        } else if !(self.line_render_done || self.vis_early) {
+            // `vis_early` back-dates the CPU-visible mode→0 boundary to
+            // SameBoy's frame on the flag-on path (3 dots before the dispatch
+            // flip, bare single-speed lines); always false in production, so
+            // this reads `line_render_done` exactly. See the field docs.
             3
         } else {
             0

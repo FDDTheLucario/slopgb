@@ -316,6 +316,7 @@ impl Ppu {
             // every enable re-arms it; don't leave it stale across off.
             self.frame_skip = false;
             self.line_render_done = true;
+            self.vis_early = false;
             self.render_finished = true;
             self.m0_src = false;
             self.m0_rise_dot = false;
@@ -346,6 +347,7 @@ impl Ppu {
             // after enabling (see `frame_skip`).
             self.frame_skip = true;
             self.line_render_done = false;
+            self.vis_early = false;
             self.render_finished = false;
             self.m0_src = false;
             self.m0_rise_dot = false;

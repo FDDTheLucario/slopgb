@@ -531,46 +531,68 @@ fn cpu_clock_write_first_conserves_with_no_parked_debt() {
 
 #[test]
 fn leading_edge_ff41_reads_pre_tick_mode_at_the_mode0_boundary() {
-    // Same line-1 mode-0 flip geometry as the OAM/VRAM block tests: the flip
-    // lands inside the M-cycle ending at dot `452 + 254 + SCX%8` (SCX = 0).
-    let rise: u32 = 452 + 254;
-    let pos = rise.div_ceil(4) - 1;
+    // Line-1 bare-line mode-0 geometry. The production IRQ-dispatch flip
+    // (`line_render_done`) sits at our dot 254; the flag-on `vis_early`
+    // back-dates the CPU-VISIBLE mode→0 boundary to SameBoy's 251 (3 dots
+    // earlier), decoupled from the dispatch (`ppu/mod.rs` field docs). A
+    // leading-edge (cc+0) read therefore separates by its sample dot.
 
-    // Trailing cc+4 view (production default): the read's M-cycle crosses the
-    // boundary, so FF41 reads mode 0.
+    // Trailing cc+4 view (production default): the read's M-cycle ends past the
+    // 254 boundary, so FF41 reads mode 0.
+    let pos = (452 + 254u32).div_ceil(4) - 1;
     let mut b = ic(Model::Dmg);
     b.write(0xFF40, 0x91); // LCD + BG on
     ticks(&mut b, pos);
     assert_eq!(b.read(0xFF41) & 3, 0, "trailing cc+4 view reads mode 0");
 
-    // Leading-edge cc+0 view: same geometry, flag on → the byte latched
-    // before the tick still reads mode 3.
-    let mut b = ic(Model::Dmg);
-    b.write(0xFF40, 0x91);
-    b.set_leading_edge_reads(true);
-    ticks(&mut b, pos);
-    assert_eq!(b.read(0xFF41) & 3, 3, "leading cc+0 view reads mode 3");
+    // Flag-on leading cc+0 + the vis_early back-date: a read whose leading edge
+    // samples the m2int dot (248, before the back-dated 251 boundary) reads
+    // mode 3; one sampling the m0int dot (252, at/after it) reads mode 0 — the
+    // instrumented kernel-pair separation, at the two ROMs' actual read dots.
+    let read_leading = |sample_dot: u32| -> u8 {
+        // `read` samples FF41 at the M-cycle leading edge (before its tick), so
+        // `pos` M-cycles place the sample on dot `pos * 4` (= 452 + sample_dot).
+        let pos = (452 + sample_dot) / 4;
+        let mut b = ic(Model::Dmg);
+        b.write(0xFF40, 0x91);
+        b.set_leading_edge_reads(true);
+        ticks(&mut b, pos);
+        b.read(0xFF41) & 3
+    };
+    assert_eq!(read_leading(248), 3, "m2int leading read (dot 248): mode 3");
+    assert_eq!(read_leading(252), 0, "m0int leading read (dot 252): mode 0");
 }
 
 #[test]
 fn leading_edge_routes_read_inc_too() {
     // `read_inc` (POP/RET-via-SP, LD A,(HL±)) is wired through the same
-    // leading-edge sample as `read`, so an FF41 read_inc at the boundary
-    // shows the same cc+0 vs cc+4 split. (A regression that forgot to route
-    // read_inc would read mode 0 on both.)
-    let rise: u32 = 452 + 254;
-    let pos = rise.div_ceil(4) - 1;
-
+    // leading-edge sample as `read`, so an FF41 read_inc shows the same cc+0
+    // separation across the back-dated visible boundary. (A regression that
+    // forgot to route read_inc would read the trailing view on both.)
+    let pos = (452 + 254u32).div_ceil(4) - 1;
     let mut b = ic(Model::Dmg);
     b.write(0xFF40, 0x91);
     ticks(&mut b, pos);
     assert_eq!(b.read_inc(0xFF41) & 3, 0, "read_inc trailing cc+4 view: mode 0");
 
-    let mut b = ic(Model::Dmg);
-    b.write(0xFF40, 0x91);
-    b.set_leading_edge_reads(true);
-    ticks(&mut b, pos);
-    assert_eq!(b.read_inc(0xFF41) & 3, 3, "read_inc leading cc+0 view: mode 3");
+    let read_inc_leading = |sample_dot: u32| -> u8 {
+        let pos = (452 + sample_dot) / 4;
+        let mut b = ic(Model::Dmg);
+        b.write(0xFF40, 0x91);
+        b.set_leading_edge_reads(true);
+        ticks(&mut b, pos);
+        b.read_inc(0xFF41) & 3
+    };
+    assert_eq!(
+        read_inc_leading(248),
+        3,
+        "read_inc m2int leading (dot 248): mode 3"
+    );
+    assert_eq!(
+        read_inc_leading(252),
+        0,
+        "read_inc m0int leading (dot 252): mode 0"
+    );
 }
 
 #[test]

@@ -305,6 +305,25 @@ pub struct Ppu {
     /// `m0_flip_events` in render.rs), and can drop back mid-line when
     /// a late write arms a new stall (`m0_unflip`).
     line_render_done: bool,
+    /// Port Stage S2c — the CPU-visible STAT mode→0 boundary back-dated to
+    /// SameBoy's cycle-exact frame, **decoupled from the IRQ-dispatch flip**
+    /// (`line_render_done`/`m0_src`). On the `leading_edge_reads` flag-on path
+    /// this rises 3 dots *before* `line_render_done` on bare single-speed lines,
+    /// so `vis_mode` reads 0 at SameBoy's `ModeTimeline::visible_mode0_dot`
+    /// (our-line dot 251 = 254 − 3) while the dispatch stays at our dot 254 —
+    /// the instrumented separator of the kernel pair (`m2int_m3stat_1` read at
+    /// our dot 248 stays mode 3, `m0int_m3stat_2` at dot 252 reads mode 0;
+    /// `ppu-subdot-ladder.md` "A5 INSTRUMENTED + KERNEL SEPARATED"). Gated to
+    /// **bare single-speed** lines (`r.fetched == 0 && !win_active && !glitch &&
+    /// !ds`), the regime the +3 back-date was measured on; the sprite/window
+    /// (+2 DMG) and double-speed (+4) back-dates are derived-but-unmeasured and
+    /// stay on `line_render_done` for now. **Always `false` on the flag-off
+    /// (production) path** (the set is gated on `leading_edge_reads`), so
+    /// `vis_mode` reads `line_render_done` exactly — byte-identical in
+    /// production. The OAM/VRAM accessibility unblock (`blocking.rs`) keeps the
+    /// `line_render_done` dot for now (the visible-vs-accessibility 3-dot window
+    /// is the S4 back-dating). Reset at line start + on `m0_unflip`.
+    vis_early: bool,
     /// The mode-0 STAT IRQ source level: rises on the visible flip's
     /// dot — 2 dots before the pipe end on a bare line, 1 in double
     /// speed and on window-stalled lines, 0 on DMG window-aborted lines
@@ -657,6 +676,7 @@ impl Ppu {
             stat_lyc_ev_staged: None,
             stat_halt_late: false,
             line_render_done: true,
+            vis_early: false,
             render_finished: true,
             hdma_lead: false,
             wy_latch: false,

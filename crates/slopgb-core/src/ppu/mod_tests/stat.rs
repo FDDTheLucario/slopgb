@@ -405,6 +405,51 @@ fn sameboy_mode3_length_is_seven_dots_short_of_the_live_flip() {
     }
 }
 
+/// S2c — the flag-on visible mode→0 back-date (`vis_early`, the kernel-pair
+/// separator). On the `leading_edge_reads` path a bare single-speed line's
+/// CPU-visible STAT mode flips 3→0 at SameBoy's `visible_mode0_dot` (`+4` past
+/// the live dispatch's `+7`, i.e. **3 dots earlier**), while the IRQ-dispatch
+/// flip (`line_render_done`/`m0_src`) stays at `+7` — the decoupling the
+/// instrumentation showed separates `m2int_m3stat_1` (read at our dot 248,
+/// stays mode 3) from `m0int_m3stat_2` (read at our dot 252, now mode 0). The
+/// flag-OFF leg must stay at `+7` (byte-identical production: `vis_early` is
+/// never set there).
+#[test]
+fn visible_mode0_backdates_three_dots_flag_on_bare_line() {
+    let live_visible_flip = |flag_on: bool| -> u16 {
+        let mut p = dmg();
+        p.set_leading_edge_reads(flag_on);
+        p.write(0xFF43, 0); // SCX 0
+        p.write(0xFF40, 0x91); // LCD + BG on, no sprites/window (bare line)
+        run_to(&mut p, 1, 0);
+        let mut prev = p.vis_mode();
+        for _ in 0..400 {
+            p.tick();
+            if p.line != 1 {
+                break;
+            }
+            let v = p.vis_mode();
+            if prev == 3 && v == 0 {
+                return p.dot;
+            }
+            prev = v;
+        }
+        panic!("bare line flips 3→0 within the line");
+    };
+    let sameboy = crate::mode_timeline::ModeTimeline::bare(1, 0).visible_mode0_dot();
+    assert_eq!(sameboy, 247);
+    assert_eq!(
+        live_visible_flip(false),
+        sameboy + 7,
+        "flag-off: visible flip stays at the live dispatch dot (+7) — byte-identical"
+    );
+    assert_eq!(
+        live_visible_flip(true),
+        sameboy + 4,
+        "flag-on: visible flip back-dated 3 dots to SameBoy's frame (+4)"
+    );
+}
+
 #[test]
 fn lcdon_ly_table() {
     check_lcdon_table(
