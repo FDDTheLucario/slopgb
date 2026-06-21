@@ -21,7 +21,7 @@ fn m0_stat_flip_fires_once_on_a_sprite_line() {
     let mut flip_dot = None;
     for _ in 0..400 {
         p.tick();
-        if p.take_m0_stat_flip() {
+        if p.take_m0_stat_flip().is_some() {
             fired += 1;
             flip_dot = Some(p.dot);
             assert!(p.line_render_done, "flip edge implies mode-0 entry");
@@ -44,7 +44,7 @@ fn m0_stat_flip_is_off_on_a_bare_line() {
     let mut fired = 0;
     for _ in 0..400 {
         p.tick();
-        if p.take_m0_stat_flip() {
+        if p.take_m0_stat_flip().is_some() {
             fired += 1;
         }
     }

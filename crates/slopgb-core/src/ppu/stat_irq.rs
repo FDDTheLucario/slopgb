@@ -70,29 +70,31 @@ impl Ppu {
         std::mem::take(&mut self.m0_rise)
     }
 
-    /// Whether the mode-3→mode-0 OAM/VRAM accessibility unblock fired on
-    /// the dot just stepped (see the `m0_access_flip` field docs). The
-    /// interconnect half-classifies it against the M-cycle's dot-loop
-    /// index so a cc+2 MID-phase OAM read still sees mode 3 when the
-    /// unblock lands in the cycle's second half.
-    pub(crate) fn take_m0_access_flip(&mut self) -> bool {
-        std::mem::take(&mut self.m0_access_flip)
+    /// The mode-3→mode-0 OAM/VRAM accessibility unblock's `lead_eighths`
+    /// `Some(_)` if it fired on the dot just stepped, else `None` (see the
+    /// `m0_access_flip` field docs). The interconnect stamps the edge at
+    /// `event_phase(M0Access, cc, lead)` so a cc+2 MID-phase OAM read still
+    /// sees mode 3 when the unblock lands in the cycle's second half.
+    pub(crate) fn take_m0_access_flip(&mut self) -> Option<i8> {
+        self.m0_access_flip.take()
     }
 
-    /// Whether the CGB palette-RAM unblock fired on the dot just stepped
-    /// (see the `pal_access_flip` field docs). The interconnect
-    /// half-classifies it so a cc+2 MID-phase FF69/FF6B read still reads
-    /// $FF when the unblock lands in the cycle's second half.
-    pub(crate) fn take_pal_access_flip(&mut self) -> bool {
-        std::mem::take(&mut self.pal_access_flip)
+    /// The CGB palette-RAM unblock's `lead_eighths` `Some(_)` if it fired on
+    /// the dot just stepped, else `None` (see the `pal_access_flip` field
+    /// docs). The interconnect stamps the edge at
+    /// `event_phase(PalAccess, cc, lead)` so a cc+2 MID-phase FF69/FF6B read
+    /// still reads $FF while the palette is blocked.
+    pub(crate) fn take_pal_access_flip(&mut self) -> Option<i8> {
+        self.pal_access_flip.take()
     }
 
-    /// Whether the mode-3→mode-0 STAT mode-bit flip fired on the dot just
-    /// stepped (see the `m0_stat_flip` field docs). The interconnect
-    /// half-classifies it so a cc+2 MID-phase FF41 read in double speed
-    /// still reads mode 3 when the flip lands in the M-cycle's second half.
-    pub(crate) fn take_m0_stat_flip(&mut self) -> bool {
-        std::mem::take(&mut self.m0_stat_flip)
+    /// The mode-3→mode-0 STAT mode-bit flip's `lead_eighths` `Some(_)` if it
+    /// fired on the dot just stepped, else `None` (see the `m0_stat_flip`
+    /// field docs). The interconnect stamps the edge at
+    /// `event_phase(StatMode, cc, lead)` so a cc+2 MID-phase FF41 read in
+    /// double speed still reads mode 3 when the flip straddles the M-cycle.
+    pub(crate) fn take_m0_stat_flip(&mut self) -> Option<i8> {
+        self.m0_stat_flip.take()
     }
 
     /// Level of the shared STAT interrupt line for the given enable bits.

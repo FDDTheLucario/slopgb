@@ -335,7 +335,10 @@ pub struct Ppu {
     /// [`Self::take_m0_access_flip`] and half-classifies it against the
     /// dot-loop index (the eighth-grid MID-vs-End comparison; increment 1
     /// of the sub-dot event-phase model — routes only the OAM-read arm).
-    m0_access_flip: bool,
+    /// `Some(lead_eighths)` when the flip lands this dot, carrying its sub-dot
+    /// offset for [`event_phase`](crate::interconnect) (reclock S1; `Some(0)` =
+    /// the net-zero dot-END commit), `None` otherwise.
+    m0_access_flip: Option<i8>,
     /// The CGB palette-RAM unblock fired on the current dot
     /// (`render_finished` set true at the pipe end, one dot after the
     /// HDMA trigger `hdma_lead`). Like `m0_access_flip` but anchored at the
@@ -343,7 +346,10 @@ pub struct Ppu {
     /// MID phase, so it still reads $FF when the unblock lands in the
     /// M-cycle's second half. Drained via [`Self::take_pal_access_flip`]
     /// (sub-dot event-phase model; routes only the CGB palette read).
-    pal_access_flip: bool,
+    /// `Some(lead_eighths)` when the flip lands this dot (reclock S1/S2 carry
+    /// the per-SCX palette-unblock sub-dot offset here; `Some(0)` = net-zero
+    /// whole-M-cycle commit), `None` otherwise.
+    pal_access_flip: Option<i8>,
     /// The mode-3→mode-0 *STAT mode-bit* flip fired on the current dot
     /// (`line_render_done` set true by `m0_flip_events`). Gated to
     /// *sprite-extended* lines (`r.fetched != 0`) — the complement of
@@ -361,7 +367,10 @@ pub struct Ppu {
     /// to double speed; the single-speed read, and DS reads reaching FF41
     /// through other dispatch chains, are the parked multi-chain INC3
     /// problem. Sub-dot event-phase model, increment INC-DS-1.
-    m0_stat_flip: bool,
+    /// `Some(lead_eighths)` when the flip lands this dot (reclock S1/S3 carry the
+    /// flip's sub-dot offset here; `Some(0)` = net-zero whole-M-cycle commit),
+    /// `None` otherwise.
+    m0_stat_flip: Option<i8>,
     /// Dots until a CGB-deferred FF45-write STAT IRQ is emitted (0 =
     /// none). On CGB at single speed an FF45 write whose comparison
     /// raises the STAT line produces its IF bit one M-cycle after the
@@ -593,9 +602,9 @@ impl Ppu {
             m0_src: false,
             m0_rise_dot: false,
             m0_rise: false,
-            m0_access_flip: false,
-            pal_access_flip: false,
-            m0_stat_flip: false,
+            m0_access_flip: None,
+            pal_access_flip: None,
+            m0_stat_flip: None,
             lyc_if_delay: 0,
             lyc_event: 0,
             cmp_irq: false,

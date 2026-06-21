@@ -33,9 +33,12 @@ impl Ppu {
                 // The CGB palette-RAM unblock (this `render_finished` rise)
                 // is half-classified by the interconnect for the cc+2
                 // MID-phase FF69/FF6B read (sub-dot event-phase model);
-                // bare steady-state lines only (see `m0_access_flip`).
+                // bare steady-state lines only (see `m0_access_flip`). The
+                // `lead_eighths` carried here is 0 (net-zero whole-M-cycle
+                // commit) until the reclock S2 sets a per-SCX palette offset.
                 self.pal_access_flip =
-                    self.render.fetched == 0 && !self.render.win_active && !self.glitch_line;
+                    (self.render.fetched == 0 && !self.render.win_active && !self.glitch_line)
+                        .then_some(0i8);
                 if !self.m0_src {
                     // Zero-lead lines (DMG aborted windows) flip at the
                     // pipe end itself; also the safety net for any
@@ -157,7 +160,7 @@ impl Ppu {
             // The accessibility unblock (this `line_render_done` rise) is
             // half-classified by the interconnect for the cc+2 MID-phase
             // OAM read (sub-dot event-phase model, increment 1).
-            self.m0_access_flip = bare_flip;
+            self.m0_access_flip = bare_flip.then_some(0i8);
             // The STAT mode-bit flip routes the double-speed FF41 mode-bit
             // read at the cc+2 MID phase (sub-dot event-phase model,
             // increment INC-DS-1 — gambatte sprites m3stat_ds). Gated to
@@ -167,7 +170,7 @@ impl Ppu {
             // a different sub-cycle offset within the same M-cycle half, so a
             // bare-line override regresses them — the parked multi-chain
             // problem. Sprite lines are the clean, hold-floor-safe subset.
-            self.m0_stat_flip = r.fetched != 0;
+            self.m0_stat_flip = (r.fetched != 0).then_some(0i8);
         }
     }
 
