@@ -51,6 +51,54 @@ fn m0_stat_flip_is_off_on_a_bare_line() {
     assert_eq!(fired, 0, "bare-line flip stays off the STAT-mode override");
 }
 
+/// S2b: the interrupt-facing mode (`mode_for_interrupt`) diverges from the
+/// CPU-visible mode in two one-dot windows on a visible line — the OAM
+/// (mode-2) IRQ leads the visible byte by one dot (dot 3), and the mode-0
+/// IRQ lags it by one dot (the dot after the visible 3→0 flip). That 2-dot
+/// relative swing is what separates the kernel pair (`ppu-timing-map.md` §2).
+/// The field is inert at S2b (the STAT engine still fires on the old path);
+/// this pins the decoupling directly against the visible mode.
+#[test]
+fn mode_for_interrupt_swings_two_dots_against_the_visible_mode() {
+    let mut p = dmg();
+    p.write(0xFF40, 0x91); // LCD + BG on, no sprites
+    run_to(&mut p, 1, 0); // start of a steady visible line
+
+    let mut lead_seen = false; // mode-2 IRQ at dot 3 while visible reads 0
+    let mut lag_seen = false; // mode-0 IRQ holds 3 one dot past visible 0
+    let mut prev_vis = p.vis_mode();
+    for _ in 0..300 {
+        p.tick();
+        if p.line != 1 {
+            break;
+        }
+        let vis = p.vis_mode();
+        let mfi = p.mode_for_interrupt();
+        match p.dot {
+            3 => {
+                assert_eq!((vis, mfi), (0, 2), "dot 3: mode-2 lead (IRQ 2, visible 0)");
+                lead_seen = true;
+            }
+            40 => assert_eq!((vis, mfi), (2, 2), "steady mode 2 agrees"),
+            100 => assert_eq!((vis, mfi), (3, 3), "steady mode 3 agrees"),
+            _ => {}
+        }
+        // The visible 3→0 flip dot: the IRQ mode must still read 3 (the lag).
+        if prev_vis == 3 && vis == 0 {
+            assert_eq!(mfi, 3, "mode-0 lag: IRQ still mode 3 on the visible flip dot");
+            // One dot later it catches up to 0.
+            p.tick();
+            assert_eq!(p.vis_mode(), 0);
+            assert_eq!(p.mode_for_interrupt(), 0, "IRQ mode catches up to 0 after the lag dot");
+            lag_seen = true;
+            break;
+        }
+        prev_vis = vis;
+    }
+    assert!(lead_seen, "mode-2 lead window observed");
+    assert!(lag_seen, "mode-0 lag window observed");
+}
+
 #[test]
 fn lcdon_ly_table() {
     check_lcdon_table(

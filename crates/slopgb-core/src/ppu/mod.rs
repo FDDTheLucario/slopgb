@@ -315,6 +315,27 @@ pub struct Ppu {
     /// `stat_events_tick` this tick is the mode-0 event and carries the
     /// half-cycle halt law (see [`Self::take_m0_rise`]).
     m0_rise_dot: bool,
+    /// Port Stage S2b: the **interrupt-facing** mode, decoupled from the
+    /// CPU-visible `vis_mode` (SameBoy `mode_for_interrupt`, `gb.h:612`).
+    /// On a visible line it diverges from the visible mode in two one-dot
+    /// windows (`ppu-timing-map.md` §2): the OAM (mode-2) IRQ mode goes to 2
+    /// **one dot before** the visible byte does (lines 1-143, `display.c:1787`
+    /// vs `:1792`), and the mode-0 IRQ mode goes to 0 **one dot after** the
+    /// visible byte does (`display.c:2108` vs `:2091`). That 2-dot relative
+    /// swing is what separates the `m2int`/`m0int` kernel pair. **Inert at
+    /// S2b** — maintained every dot but not yet consulted by the STAT IRQ
+    /// engine (that swap is S5) nor by the leading-edge read (S2d); validated
+    /// against the divergence directly. Mirrors `vis_mode` on VBlank / glitch
+    /// lines (anchor swing not modelled there until S5).
+    // Written every dot; read only by the S2b test until the S5 STAT engine
+    // consumes it. Inert staged-port field — see the doc above.
+    #[allow(dead_code)]
+    mode_for_interrupt: u8,
+    /// One-dot-delayed mirror of `line_render_done`, the substrate for the
+    /// mode-0 lag above: `line_render_done` rises on the visible 3→0 flip
+    /// dot, so its previous-dot value is still false there and true one dot
+    /// later — exactly the dot the IRQ-facing mode transitions to 0.
+    mfi_m0_prev: bool,
     /// The STAT IF bit handed out by the last tick came from the mode-0
     /// source rise. The interconnect drains this and applies the
     /// half-cycle halt law: a rise landing in the second half of the
@@ -601,6 +622,8 @@ impl Ppu {
             stat_late: false,
             m0_src: false,
             m0_rise_dot: false,
+            mode_for_interrupt: 0,
+            mfi_m0_prev: false,
             m0_rise: false,
             m0_access_flip: None,
             pal_access_flip: None,
@@ -695,8 +718,54 @@ impl Ppu {
             self.start_line();
         }
         self.step_dot();
+        // S2b: maintain the decoupled interrupt-facing mode (inert — not yet
+        // consulted; the STAT engine swap that reads it is S5). Runs after
+        // step_dot so it sees this dot's `line_render_done` flip.
+        self.update_mode_for_interrupt();
         self.stat_events_tick();
         std::mem::take(&mut self.pending_if)
+    }
+
+    /// S2b interrupt-facing mode ([`Self::mode_for_interrupt`]) for the
+    /// current dot — the decoupled view the S5 STAT engine will read. Exposed
+    /// for the S2b divergence test; not yet consulted in production.
+    #[cfg(test)]
+    pub(crate) fn mode_for_interrupt(&self) -> u8 {
+        self.mode_for_interrupt
+    }
+
+    /// S2b: recompute the interrupt-facing mode ([`Self::mode_for_interrupt`])
+    /// for the current dot, applying the mode-2 lead / mode-0 lag anchor swing
+    /// against the CPU-visible mode. Inert today; the substrate for the S5
+    /// STAT engine and the S2d kernel-pair flip.
+    fn update_mode_for_interrupt(&mut self) {
+        // `mfi_m0_prev` lags `line_render_done` by one dot: read the previous
+        // dot's value for this dot's mode-0 decision, then latch this dot's.
+        let prev_done = self.mfi_m0_prev;
+        self.mfi_m0_prev = self.enabled && self.line <= 143 && self.line_render_done;
+        self.mode_for_interrupt = if !self.enabled {
+            0
+        } else if self.line >= 144 || self.glitch_line {
+            // VBlank / glitch line: no anchor swing modelled here yet (the
+            // visible mode is the IRQ mode); refined with the STAT swap (S5).
+            self.vis_mode()
+        } else if self.dot < 84 {
+            // Mode-2 region. Lines 1-143 fire the OAM STAT IRQ one dot early,
+            // so the IRQ mode is already 2 at dot 3 — one dot before the
+            // visible byte flips to 2 at dot 4 (`display.c:1778-1798`, "except
+            // on line 0"). Line 0 and dots 0-2 mirror the visible mode.
+            if self.line != 0 && self.dot == 3 {
+                2 // OAM (mode 2) IRQ leads the visible byte by one dot
+            } else {
+                self.vis_mode()
+            }
+        } else if !prev_done {
+            // Mode 3 holds for the IRQ side one dot past the visible 3→0 flip
+            // (`display.c:2091` visible vs `:2108` IRQ — the mode-0 lag).
+            3
+        } else {
+            0
+        };
     }
 
     fn start_line(&mut self) {
