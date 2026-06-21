@@ -123,9 +123,10 @@ fn mode_for_interrupt_has_no_mode2_lead_on_line_0() {
     run_to(&mut p, 0, 3); // a steady (frame 2) line 0, at the lead dot
     assert!(!p.glitch_line, "steady line 0, not the enable glitch line");
     assert_eq!(
-        p.mode_for_interrupt(),
-        p.vis_mode(),
-        "line 0 dot 3: no mode-2 lead (IRQ mode mirrors the visible mode)"
+        (p.vis_mode(), p.mode_for_interrupt()),
+        (0, 0),
+        "line 0 dot 3: no mode-2 lead — both still the line-start mode-0 carryover \
+         (a lead would make the IRQ mode read 2 here, as it does on line 1)"
     );
     // Line 0's OWN OAM pulse: at the visible edge (dot 4), not one dot early.
     run_to(&mut p, 0, 4);

@@ -539,11 +539,15 @@ impl Ppu {
             // (the "OAM int 1 T-cycle before STAT" lead; `display.c:1778`),
             // one dot before the visible byte flips to 2 at dot 4. Line 0 has
             // no early fire ("except on line 0"), but SameBoy's `GB_SLEEP 7,1`
-            // step still sets `mode_for_interrupt = 2` unconditionally at the
-            // visible mode→2 edge (`display.c:1792`), so line 0 pulses *at*
-            // dot 4 — matching `ModeTimeline::mode2_irq_offset(0) == 0`. Before
-            // the pulse (dots 0-2, and line 0 dot 3) the mode-0/1 carryover
-            // holds; after it the source is NONE.
+            // step (`display.c:1789`) still sets `mode_for_interrupt = 2`
+            // unconditionally (`:1793`) at the same step the visible byte flips
+            // to 2 (`:1792`), so line 0 pulses *at* dot 4 — matching
+            // `ModeTimeline::mode2_irq_offset(0) == 0`. Before the pulse (dots
+            // 0-2, and line 0 dot 3) the mode-0/1 carryover holds; after it the
+            // source is NONE. (Whole-dot caveat for the S5 wiring: SameBoy drops
+            // the source back to -1 at the *same* cycle as the line-0 rise, so
+            // its NONE/re-fire window opens a dot earlier than this 1-dot-min
+            // pulse — revisit if a line-0 dot-4 LYC=0 re-fire ever needs it.)
             // (Still deferred to the S5 wiring: the VBlank-entry mode-2 source
             // — `display.c:2138`, the vblank display loop.)
             if (self.line != 0 && self.dot == 3) || (self.line == 0 && self.dot == 4) {
