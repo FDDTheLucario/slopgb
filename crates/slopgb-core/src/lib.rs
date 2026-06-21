@@ -18,6 +18,7 @@ pub(crate) mod cpu;
 pub(crate) mod cycle_clock;
 pub(crate) mod interconnect;
 pub(crate) mod joypad;
+pub(crate) mod mode_timeline;
 pub(crate) mod model;
 pub(crate) mod ppu;
 pub(crate) mod serial;
