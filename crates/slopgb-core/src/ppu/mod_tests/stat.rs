@@ -929,6 +929,66 @@ fn vblank_line_oam_pulses_dot12_dmg_only() {
     assert_eq!(ifs & 2, 0, "CGB: no vblank-line OAM pulses");
 }
 
+/// Port Stage A6 — the flag-on [`Ppu::stat_update_tick`] halt-commit-mask
+/// calibration (`ppu-subdot-ladder.md` "A6"). The mode-2 (OAM) line-start pulse
+/// takes the **halt-exit** mask (`stat_halt_late`) but NOT the
+/// interrupt-sample mask (`stat_late`) on the leading-edge (cc+0) path —
+/// unlike the flag-off [`Ppu::stat_events_tick`] engine, which takes both for
+/// its cc+4 frame (`oam_pulse_at_vblank_entry_dmg`). The contrast IS the lift:
+/// the halt mask delays the canonical mooneye `intr_2_mode0_timing` halt-wake
+/// (which then passes flag-on), while dropping the sample mask keeps the
+/// non-halt `m2int_m3stat_1` `ldh a,(FF41)` dispatch in SameBoy's frame so its
+/// read still lands on mode 3 (the separated kernel pair). Applying `stat_late`
+/// here would re-collapse the pair.
+#[test]
+fn stat_update_mode2_pulse_halt_mask_only_flag_on() {
+    let mut p = dmg();
+    p.set_leading_edge_reads(true);
+    p.write(0xFF41, 0x20); // OAM (mode-2) source only — no hblank/lyc
+    p.write(0xFF40, 0x91); // LCD + BG on, bare line
+    // Sit at the end of a visible line; its successor's dot-0 pulse is the
+    // next mode-2 rising edge.
+    run_to(&mut p, 2, 455);
+    p.take_stat_halt_late();
+    p.take_stat_late();
+    let ifs = p.tick(); // advances to line 3 dot 0, fires the OAM pulse
+    assert_eq!(ifs & 2, 2, "mode-2 OAM pulse fires at the visible line start");
+    assert!(
+        p.take_stat_halt_late(),
+        "the mode-2 line-start pulse takes the halt-exit mask"
+    );
+    assert!(
+        !p.take_stat_late(),
+        "but NOT the interrupt-sample mask (the leading-edge dispatch is already framed)"
+    );
+}
+
+/// Port Stage A6 — the flag-on mode-0 (HBlank) source rise carries the
+/// half-cycle halt law (`m0_rise`), the same mask the flag-off engine sets on
+/// its `m0_rise_dot`. (The rise's exact dot is still our cc+4 frame until the
+/// mode-0 dispatch reclock, so this mask is currently neutral on the flag-on
+/// suite; it is wired faithfully so the reclock activates it without a second
+/// edit.)
+#[test]
+fn stat_update_mode0_rise_takes_m0_rise_flag_on() {
+    let mut p = dmg();
+    p.set_leading_edge_reads(true);
+    p.write(0xFF41, 0x08); // HBlank (mode-0) source only
+    p.write(0xFF40, 0x91); // LCD + BG on, bare line
+    run_to(&mut p, 2, 0);
+    p.take_m0_rise();
+    // Drive through the mode-3→0 flip; the rise sets `m0_rise` on its dot.
+    let mut saw_rise = false;
+    for _ in 0..456 {
+        let ifs = p.tick();
+        if ifs & 2 != 0 && p.take_m0_rise() {
+            saw_rise = true;
+            break;
+        }
+    }
+    assert!(saw_rise, "the mode-0 source rise carries the m0_rise halt mask");
+}
+
 #[test]
 fn vblank_source_continuous_through_vblank() {
     let mut p = dmg();

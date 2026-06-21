@@ -364,11 +364,52 @@ impl Ppu {
         if ly != -1 {
             self.lyc_interrupt_line = ly == i16::from(self.lyc);
         }
+        let mfi = self.mode_for_interrupt;
         if self
             .stat_update
-            .update(self.mode_for_interrupt, self.stat_en, self.lyc_interrupt_line)
+            .update(mfi, self.stat_en, self.lyc_interrupt_line)
         {
             self.pending_if |= IF_STAT;
+            self.stat_update_halt_masks(mfi);
+        }
+    }
+
+    /// Port Stage A6 — the halt/interrupt-sample commit masks for the flag-on
+    /// [`Self::stat_update_tick`] rising edge, the leading-edge-frame analogue of
+    /// the per-source `stat_late` / `stat_halt_late` / `m0_rise` masks the
+    /// gambatte [`Self::stat_events_tick`] engine sets (see its truth table).
+    /// `mfi` is the [`Ppu::mode_for_interrupt`] that drove this 0→1 rise, so it
+    /// names the source.
+    ///
+    /// **Calibration (measured, `ppu-subdot-ladder.md` "A6"):** the gambatte
+    /// engine reads FF41/IF at the M-cycle trailing edge (cc+4) and masks the
+    /// mode-2 line-start pulse from BOTH the running CPU's interrupt sample
+    /// (`stat_late`) and the halt-exit sampler (`stat_halt_late`). On the
+    /// leading-edge (cc+0) flag-on path the regular interrupt dispatch is already
+    /// aligned to SameBoy's frame, so the mode-2 pulse needs only the **halt**
+    /// mask (SameBoy `GB_cpu_run` samples the halt exit mid-cycle — `sm83_cpu.c`;
+    /// gbmicrotest `int_oam_*`); applying `stat_late` too would re-delay the
+    /// non-halt `ldh a,(FF41)` dispatch and collapse the separated kernel pair
+    /// (`m2int_m3stat_1` reverts 3→0). With only `stat_halt_late` the canonical
+    /// mooneye `intr_2_mode0_timing` passes flag-on (DMG+CGB) **and** the kernel
+    /// pair stays separated (m2int=3 ∧ m0int=0) — the first config in the port to
+    /// hold both. The mode-0 `m0_rise` mask carries the half-cycle halt law as
+    /// before; it is neutral on the flag-on suite until the mode-0 IRQ dispatch
+    /// is reclocked (its rise still lands at our cc+4 dot, the remaining atomic
+    /// work — see the field docs).
+    fn stat_update_halt_masks(&mut self, mfi: u8) {
+        if mfi == 2 && self.stat_en & STAT_SRC_OAM != 0 {
+            // Mode-2 (OAM) line-start pulse. Lines 1-143 carry it across the
+            // line-start window (the halt-exit sampler misses the rise for one
+            // M-cycle); line 0's pulse (dot 4) takes no halt mask (SameBoy
+            // "except on line 0"). No `stat_late` in the leading-edge frame.
+            if self.line != 0 {
+                self.stat_halt_late = true;
+            }
+        } else if mfi == 0 && self.stat_en & STAT_SRC_HBLANK != 0 {
+            // Mode-0 (HBlank) source rise carries the half-cycle halt law
+            // (`if_late` via the interconnect's second-half check).
+            self.m0_rise = true;
         }
     }
 
