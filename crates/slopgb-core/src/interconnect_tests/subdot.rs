@@ -496,13 +496,28 @@ fn cpu_clock_deferred_commit_conserves_t_count() {
 
 #[test]
 fn cpu_clock_read_inc_and_tick_addr_drive_the_clock() {
-    // read_inc behaves as a leading-edge read; tick_addr as an internal cycle.
+    // Both read_inc and tick_addr are leading-edge cycles (cycle_read /
+    // cycle_oam_bug): each commits the prior debt and reparks 4.
     let mut b = ic(Model::Dmg);
-    b.read_inc(0xFF80); // leading-edge read: park 4
-    b.tick_addr(0x0000); // internal: park +4
+    b.read_inc(0xFF80); // leading-edge read: commit 0, park 4
+    b.tick_addr(0x0000); // cycle_oam_bug: commit 4, park 4
+    assert_eq!((b.cpu_clock_t(), b.cpu_clock_pending()), (4, 4));
     b.flush_pending();
     assert_eq!(b.cpu_clock_t(), 8, "2 M-cycles = 8 T");
     assert_eq!(b.cpu_clock_pending(), 0);
+}
+
+#[test]
+fn cpu_clock_write_first_conserves_with_no_parked_debt() {
+    // A standalone first write (no preceding fetch → pending==0) is the case
+    // the production `write` relaxed from a panic to a saturating commit:
+    // ReadOld commits at the current clock (no advance) and reparks 4, still
+    // conserving the per-M-cycle 4 T. Pins "no panic + conserves".
+    let mut b = ic(Model::Dmg);
+    b.write(0xFF80, 0); // pending was 0
+    assert_eq!((b.cpu_clock_t(), b.cpu_clock_pending()), (0, 4));
+    b.flush_pending();
+    assert_eq!(b.cpu_clock_t(), 4, "one M-cycle = 4 T even when the write is first");
 }
 
 // ---- S2a leading-edge (cc+0) FF41 read ---------------------------------
@@ -535,6 +550,27 @@ fn leading_edge_ff41_reads_pre_tick_mode_at_the_mode0_boundary() {
     b.set_leading_edge_reads(true);
     ticks(&mut b, pos);
     assert_eq!(b.read(0xFF41) & 3, 3, "leading cc+0 view reads mode 3");
+}
+
+#[test]
+fn leading_edge_routes_read_inc_too() {
+    // `read_inc` (POP/RET-via-SP, LD A,(HL±)) is wired through the same
+    // leading-edge sample as `read`, so an FF41 read_inc at the boundary
+    // shows the same cc+0 vs cc+4 split. (A regression that forgot to route
+    // read_inc would read mode 0 on both.)
+    let rise: u32 = 452 + 254;
+    let pos = rise.div_ceil(4) - 1;
+
+    let mut b = ic(Model::Dmg);
+    b.write(0xFF40, 0x91);
+    ticks(&mut b, pos);
+    assert_eq!(b.read_inc(0xFF41) & 3, 0, "read_inc trailing cc+4 view: mode 0");
+
+    let mut b = ic(Model::Dmg);
+    b.write(0xFF40, 0x91);
+    b.set_leading_edge_reads(true);
+    ticks(&mut b, pos);
+    assert_eq!(b.read_inc(0xFF41) & 3, 3, "read_inc leading cc+0 view: mode 3");
 }
 
 #[test]

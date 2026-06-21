@@ -748,9 +748,13 @@ impl Bus for Interconnect {
     }
 
     fn tick_addr(&mut self, value: u16) {
-        // S1 deferred-commit clock: an internal M-cycle (carrying a 16-bit
-        // value for the OAM bug) is `cycle_no_access` — park +4.
-        self.clock.internal();
+        // S1 deferred-commit clock: the OAM-bug-carrying internal M-cycle (a
+        // 16-bit register driven on the address bus) is SameBoy's
+        // `cycle_oam_bug` (`sm83_cpu.c:326`), which — unlike `cycle_no_access`
+        // — commits the previous debt at the leading edge and reparks 4, just
+        // like a read. (Conserves the same 4 T as `internal`; the difference
+        // is the commit *phase*, which matters once S2+ samples on this cycle.)
+        let _leading_edge = self.clock.read();
         self.service_vram_dma();
         self.tick_machine();
         self.maybe_oam_bug(value, OamBugKind::Write);

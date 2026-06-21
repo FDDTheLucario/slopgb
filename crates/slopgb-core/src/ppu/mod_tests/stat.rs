@@ -79,7 +79,17 @@ fn mode_for_interrupt_swings_two_dots_against_the_visible_mode() {
                 assert_eq!((vis, mfi), (0, 2), "dot 3: mode-2 lead (IRQ 2, visible 0)");
                 lead_seen = true;
             }
-            40 => assert_eq!((vis, mfi), (2, 2), "steady mode 2 agrees"),
+            40 => {
+                // The OAM source is a line-start pulse, not a sustained level:
+                // the visible byte reads 2 but the IRQ mode is NONE through the
+                // OAM-search body (display.c:1799) so a later LYC can re-fire.
+                assert_eq!(vis, 2, "visible mode 2 in the OAM search");
+                assert_eq!(
+                    mfi,
+                    crate::stat_update::MODE_FOR_INTERRUPT_NONE,
+                    "mode-2 body: IRQ source is NONE, not a sustained level"
+                );
+            }
             100 => assert_eq!((vis, mfi), (3, 3), "steady mode 3 agrees"),
             _ => {}
         }
@@ -97,6 +107,30 @@ fn mode_for_interrupt_swings_two_dots_against_the_visible_mode() {
     }
     assert!(lead_seen, "mode-2 lead window observed");
     assert!(lag_seen, "mode-0 lag window observed");
+}
+
+/// S2b: the mode-2 lead is suppressed on line 0 — the OAM STAT IRQ does not
+/// fire one dot early there (`display.c:1778` "except on line 0"), so at dot 3
+/// the IRQ mode mirrors the visible mode (no `2` lead), unlike lines 1-143.
+#[test]
+fn mode_for_interrupt_has_no_mode2_lead_on_line_0() {
+    let mut p = dmg();
+    p.write(0xFF40, 0x91); // LCD + BG on
+    run_to(&mut p, 1, 0); // past the LCD-on glitch line 0
+    run_to(&mut p, 0, 3); // a steady (frame 2) line 0, at the lead dot
+    assert!(!p.glitch_line, "steady line 0, not the enable glitch line");
+    assert_eq!(
+        p.mode_for_interrupt(),
+        p.vis_mode(),
+        "line 0 dot 3: no mode-2 lead (IRQ mode mirrors the visible mode)"
+    );
+    // Contrast: the same dot on the next line DOES lead (IRQ 2, visible 0).
+    run_to(&mut p, 1, 3);
+    assert_eq!(
+        (p.vis_mode(), p.mode_for_interrupt()),
+        (0, 2),
+        "line 1 dot 3 leads"
+    );
 }
 
 /// S2c — cycle-exact mode-3 length, validated as a parallel function.
