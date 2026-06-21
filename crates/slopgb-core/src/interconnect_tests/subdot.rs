@@ -504,3 +504,57 @@ fn cpu_clock_read_inc_and_tick_addr_drive_the_clock() {
     assert_eq!(b.cpu_clock_t(), 8, "2 M-cycles = 8 T");
     assert_eq!(b.cpu_clock_pending(), 0);
 }
+
+// ---- S2a leading-edge (cc+0) FF41 read ---------------------------------
+//
+// A leading-edge read latches FF41 at the M-cycle's *leading* edge (before
+// the PPU advances), the slopgb equivalent of SameBoy force-syncing the PPU
+// to the read's access cycle (`ppu-timing-map.md` §6 (i)). At a mode-3→0
+// boundary M-cycle that reads mode 3, where today's trailing cc+4 view reads
+// mode 0. The flag is held off in production (byte-identical); these tests
+// drive it directly. It goes live only at the S2d atomic flip.
+
+#[test]
+fn leading_edge_ff41_reads_pre_tick_mode_at_the_mode0_boundary() {
+    // Same line-1 mode-0 flip geometry as the OAM/VRAM block tests: the flip
+    // lands inside the M-cycle ending at dot `452 + 254 + SCX%8` (SCX = 0).
+    let rise: u32 = 452 + 254;
+    let pos = rise.div_ceil(4) - 1;
+
+    // Trailing cc+4 view (production default): the read's M-cycle crosses the
+    // boundary, so FF41 reads mode 0.
+    let mut b = ic(Model::Dmg);
+    b.write(0xFF40, 0x91); // LCD + BG on
+    ticks(&mut b, pos);
+    assert_eq!(b.read(0xFF41) & 3, 0, "trailing cc+4 view reads mode 0");
+
+    // Leading-edge cc+0 view: same geometry, flag on → the byte latched
+    // before the tick still reads mode 3.
+    let mut b = ic(Model::Dmg);
+    b.write(0xFF40, 0x91);
+    b.set_leading_edge_reads(true);
+    ticks(&mut b, pos);
+    assert_eq!(b.read(0xFF41) & 3, 3, "leading cc+0 view reads mode 3");
+}
+
+#[test]
+fn leading_edge_is_inert_off_boundary_and_for_non_ppu_reads() {
+    // Mid-mode-3, far from any boundary: leading and trailing views agree, so
+    // the flag changes nothing here.
+    let settle = 452 + 120; // line 1, deep in mode 3
+    let pos = settle / 4;
+    for flag in [false, true] {
+        let mut b = ic(Model::Dmg);
+        b.write(0xFF40, 0x91);
+        b.set_leading_edge_reads(flag);
+        ticks(&mut b, pos);
+        assert_eq!(b.read(0xFF41) & 3, 3, "flag {flag}: steady mode 3");
+    }
+    // A non-PPU read (HRAM) is never routed through the leading-edge path.
+    for flag in [false, true] {
+        let mut b = ic(Model::Dmg);
+        b.set_leading_edge_reads(flag);
+        b.write(0xFF80, 0xA5);
+        assert_eq!(b.read(0xFF80), 0xA5, "flag {flag}: HRAM read unaffected");
+    }
+}

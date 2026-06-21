@@ -317,6 +317,17 @@ pub struct Interconnect {
     /// only by the CPU's own M-cycles, never by OAM-DMA / HDMA / STOP-pause
     /// stolen ticks (those call `tick_machine` directly, not through `Bus`).
     clock: CycleClock,
+    /// Port Stage S2a: route PPU-positional reads (FF41 today; OAM/VRAM/
+    /// palette join at S4) through the **leading-edge** (cc+0) sample —
+    /// the byte latched at the M-cycle's leading edge, before `tick_machine`
+    /// advances the PPU — instead of the trailing cc+4 view. This is the
+    /// slopgb equivalent of SameBoy force-syncing the PPU to the access
+    /// cycle (`ppu-timing-map.md` §6 (i)). **Held `false`**: the leading-edge
+    /// path is inert until the S2d atomic flip (decoupled `mode_for_interrupt`
+    /// and the anchor swing) lands with it — alone it would just shift FF41
+    /// one M-cycle early. `false` is byte-identical to the cc+4 model
+    /// ([`Self::leading_edge_sample`] returns `None`).
+    leading_edge_reads: bool,
 
     /// CGB hardware running a CGB-flagged cart. CGB hardware with a DMG
     /// cart runs in DMG compatibility mode: KEY1/SVBK/HDMA/RP/FF74 and the
@@ -527,6 +538,7 @@ impl Interconnect {
             joypad: Joypad::new(sgb_joypad),
             cycles: 0,
             clock: CycleClock::new(),
+            leading_edge_reads: false,
             cgb_mode,
             double_speed: false,
             dot_phase: 0,
@@ -686,10 +698,11 @@ fn sgb_header_zero_bits(cart: &Cartridge) -> u32 {
 impl Bus for Interconnect {
     fn read(&mut self, addr: u16) -> u8 {
         // S1 deferred-commit clock: pay the previous M-cycle's parked debt
-        // and park this read's 4 T-cycles. Write-only scaffold — the sampled
-        // leading-edge position is discarded today (the live read still
-        // samples post-tick at cc+4 below); it routes the read at S2.
+        // and park this read's 4 T-cycles.
         let _leading_edge = self.clock.read();
+        // S2a: latch the leading-edge (cc+0) value for PPU-positional reads
+        // *before* the PPU advances. Inert while the flag is off (`None`).
+        let leading = self.leading_edge_sample(addr);
         self.service_vram_dma();
         self.tick_machine();
         // A trigger inside this very cycle still steals the bus before
@@ -697,7 +710,8 @@ impl Bus for Interconnect {
         // in flight commit first).
         self.service_vram_dma();
         self.maybe_oam_bug(addr, OamBugKind::Read);
-        self.read_no_tick(addr)
+        let trailing = self.read_no_tick(addr);
+        leading.unwrap_or(trailing)
     }
 
     fn write(&mut self, addr: u16, value: u8) {
@@ -745,11 +759,14 @@ impl Bus for Interconnect {
     fn read_inc(&mut self, addr: u16) -> u8 {
         // S1 deferred-commit clock: same leading-edge read as `read`.
         let _leading_edge = self.clock.read();
+        // S2a: leading-edge sample (cc+0), inert while the flag is off.
+        let leading = self.leading_edge_sample(addr);
         self.service_vram_dma();
         self.tick_machine();
         self.service_vram_dma(); // reads yield to a same-cycle trigger
         self.maybe_oam_bug(addr, OamBugKind::ReadIncrease);
-        self.read_no_tick(addr)
+        let trailing = self.read_no_tick(addr);
+        leading.unwrap_or(trailing)
     }
 
     fn pending(&self) -> u8 {
@@ -946,6 +963,31 @@ impl Bus for Interconnect {
 }
 
 impl Interconnect {
+    /// S2a leading-edge (cc+0) read value for a PPU-positional address, or
+    /// `None` when the read should use the trailing cc+4 view (the flag is
+    /// off, or the address is not PPU-positional). Pure (`&self`): called
+    /// *before* `tick_machine`, so it samples the PPU at the M-cycle's
+    /// leading edge. Today only FF41 (the kernel-pair mode read) is routed;
+    /// OAM/VRAM/palette accessibility back-dating lands at S4. `Ppu::read`
+    /// is side-effect-free (`ppu/regs.rs`).
+    fn leading_edge_sample(&self, addr: u16) -> Option<u8> {
+        if !self.leading_edge_reads {
+            return None;
+        }
+        match addr {
+            0xFF41 => Some(self.ppu.read(0xFF41)),
+            _ => None,
+        }
+    }
+
+    /// Test/probe hook: enable leading-edge (cc+0) PPU-positional reads. Held
+    /// off in production until the S2d atomic flip; flipped here only by the
+    /// S2 unit tests and the S2d gap-count measurement.
+    #[cfg(test)]
+    pub(crate) fn set_leading_edge_reads(&mut self, on: bool) {
+        self.leading_edge_reads = on;
+    }
+
     /// Test-only view of the deferred-commit CPU clock's committed position
     /// (CPU T-cycles). Used to assert the S1 net-zero conservation invariant
     /// (`clock.now()` after a boundary flush == 4 × M-cycles executed).
