@@ -624,6 +624,46 @@ fn kernel_pair_matches_sameboy_target() {
     }
 }
 
+/// Port Stage A9 — the SPRITE-line analog of the kernel pair, on the flag-on
+/// path. A sprite-laden line extends mode 3, shifting the visible mode→0
+/// boundary; the `vis_early` back-date for sprite/window lines (`lead + 4`, vs
+/// bare's `lead + 3`) lands it at SameBoy's frame, so the two equal-`ldh`
+/// reads straddle it: `10spritesPrLine_m3stat_1` reads mode 3 (out3) and
+/// `_m3stat_2` reads mode 0 (out0) — the same out3/out0 split the kernel pair
+/// shows on a bare line. Whole-dot production reads BOTH as mode 3 (the
+/// baselined floor); A9 is measured to lift 40 such sprite `m3stat_2` rows
+/// flag-on with zero regression (`ppu-subdot-ladder.md` "A9"). Flag-OFF
+/// (production) is unchanged.
+#[test]
+fn sprite_kernel_pair_matches_sameboy_target() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr("sprite_kernel_pair", "game-boy-test-roms collection not present");
+        return;
+    };
+    let targets = [
+        (
+            "gambatte/sprites/10spritesPrLine_m3stat_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/sprites/10spritesPrLine_m3stat_2_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let path = root.join(rel);
+        let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        for model in [Model::Dmg, Model::Cgb] {
+            let mut gb = harness::boot(&rom, model);
+            gb.set_leading_edge_reads(true);
+            run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+            check_hex_screen(gb.frame(), expect, model.is_cgb()).unwrap_or_else(|e| {
+                panic!("{rel} [{model:?}] expected out{expect} (flag-on): {e}")
+            });
+        }
+    }
+}
+
 /// Self-verifying inventory: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// covers the on-disk ROM set exactly, with the exemptions pinned to the
 /// documented 50-entry list.
