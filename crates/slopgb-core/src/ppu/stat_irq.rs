@@ -650,6 +650,24 @@ impl Ppu {
         // dot's value for this dot's mode-0 decision, then latch this dot's.
         let prev_done = self.mfi_m0_prev;
         self.mfi_m0_prev = self.enabled && self.line <= 143 && self.line_render_done;
+        // Port Stage A8 — on the flag-on path the mode-0 IRQ fires at
+        // `line_render_done` (our dot 254 = the gambatte-calibrated `m0_rise_dot`
+        // frame the mode-0 halt grids pin: gbmicrotest int_hblank_halt, mooneye
+        // hblank_ly_scx_timing), NOT the +1-dot `mfi_m0_prev` lag (255). The lag
+        // models SameBoy's mode-0 IRQ 1 dot after the visible flip
+        // (`display.c:2108` vs `:2091`), but it over-applies in our frame —
+        // `line_render_done` is ALREADY the gambatte IRQ dot here, so the lag put
+        // the `StatUpdate` mode-0 STAT IF one dot late vs `stat_events_tick` and
+        // broke `hblank_ly_scx_timing` flag-on (kernel `m0int` and the canonical
+        // both hold at 254; only the 252 full-SameBoy-frame move regresses them —
+        // see `ppu-subdot-ladder.md` "DISPATCH-RECLOCK"). Flag-OFF keeps the
+        // lagged `prev_done`; `stat_events_tick` never reads `mode_for_interrupt`,
+        // so production is byte-identical.
+        let prev_done = if self.leading_edge_reads {
+            self.enabled && self.line <= 143 && self.line_render_done
+        } else {
+            prev_done
+        };
         self.mode_for_interrupt = if !self.enabled {
             0
         } else if self.line >= 144 || self.glitch_line {

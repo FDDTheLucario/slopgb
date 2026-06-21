@@ -963,6 +963,66 @@ fn stat_update_mode2_pulse_halt_mask_only_flag_on() {
     );
 }
 
+/// Port Stage A8 — the flag-on mode-0 IRQ side fires at `line_render_done` (the
+/// gambatte-calibrated `m0_rise_dot` frame), NOT the +1-dot `mfi_m0_prev` lag.
+/// The lag put the `StatUpdate` mode-0 STAT IF one dot late vs `stat_events_tick`
+/// and broke `hblank_ly_scx_timing` flag-on; flag-OFF keeps the lag
+/// (byte-identical). Pinned by comparing the `mode_for_interrupt` 3→0 dot to the
+/// flag-off visible mode→0 flip (= `line_render_done`).
+#[test]
+fn mode0_irq_fires_at_render_done_flag_on_not_lagged() {
+    // The line_render_done dot = the flag-off visible mode 3→0 flip (bare SCX 0).
+    let render_done_dot = {
+        let mut p = dmg();
+        p.write(0xFF40, 0x91);
+        run_to(&mut p, 1, 0);
+        let mut prev = p.vis_mode();
+        let mut d = None;
+        for _ in 0..400 {
+            p.tick();
+            if p.line != 1 {
+                break;
+            }
+            let v = p.vis_mode();
+            if prev == 3 && v == 0 {
+                d = Some(p.dot);
+                break;
+            }
+            prev = v;
+        }
+        d.expect("bare line flips 3→0")
+    };
+    let mfi_zero_dot = |flag_on: bool| -> u16 {
+        let mut p = dmg();
+        p.set_leading_edge_reads(flag_on);
+        p.write(0xFF40, 0x91);
+        run_to(&mut p, 1, 0);
+        let mut prev = p.mode_for_interrupt();
+        for _ in 0..400 {
+            p.tick();
+            if p.line != 1 {
+                break;
+            }
+            let v = p.mode_for_interrupt();
+            if prev == 3 && v == 0 {
+                return p.dot;
+            }
+            prev = v;
+        }
+        panic!("mode_for_interrupt never flips 3→0");
+    };
+    assert_eq!(
+        mfi_zero_dot(true),
+        render_done_dot,
+        "flag-on: mode-0 IRQ side flips at line_render_done (no lag)"
+    );
+    assert_eq!(
+        mfi_zero_dot(false),
+        render_done_dot + 1,
+        "flag-off: keeps the +1-dot lag (byte-identical engine)"
+    );
+}
+
 /// Port Stage A7 — the flag-on mode-2→3 entry back-date (`ppu-subdot-ladder.md`
 /// "A7"). On the leading-edge path a bare single-speed line's CPU-visible STAT
 /// mode flips 2→3 at dot 80 (the read offset of 4 dots earlier than the flag-off
