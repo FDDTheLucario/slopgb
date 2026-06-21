@@ -578,10 +578,17 @@ fn gambatte_matrix() {
 ///
 /// So the lift is *directional*: make `m2int` read 3 while `m0int` stays 0 —
 /// exactly the `O<E ∧ O≥E` "contradiction" that only the decoupled-edge
-/// rewrite resolves. Ignored until S2d wires that flip; run with
-/// `cargo test --test gbtr -- --ignored kernel_pair` to watch the gap close.
+/// rewrite resolves.
+///
+/// **Un-ignored at port Stage A6 (2026-06-21):** the spec now runs on the
+/// **flag-on** SameBoy cycle-exact path ([`GameBoy::set_leading_edge_reads`] —
+/// leading-edge cc+0 reads + the `StatUpdate` engine + the `vis_early`
+/// back-date + the A6 halt-late masks). With those four pieces the kernel pair
+/// SEPARATES (`m2int`→3 ∧ `m0int`→0) on both models while the canonical mooneye
+/// `intr_2_mode0_timing` also holds flag-on (`ppu-subdot-ladder.md` "A6"). This
+/// is GREEN as a flag-on acceptance test; production (flag-off) is unchanged —
+/// the global default flip + ~7000-row rebaseline is the remaining Phase-B work.
 #[test]
-#[ignore = "S0 red spec: un-ignored at port Stage S2d (kernel-pair convergence)"]
 fn kernel_pair_matches_sameboy_target() {
     let Some(root) = common::gbtr_root() else {
         // The collection is required to evaluate this spec; mirror the
@@ -604,9 +611,15 @@ fn kernel_pair_matches_sameboy_target() {
         let path = root.join(rel);
         let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
         for model in [Model::Dmg, Model::Cgb] {
-            let check = Check::Hex(expect.to_string());
-            run_case(&rom, model, &check, &path)
-                .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected out{expect}: {e}"));
+            // Run the SameBoy cycle-exact flag-on path (the convergence the
+            // whole-dot production model cannot represent); same 16-frame
+            // protocol + OCR as `run_case`'s `Check::Hex` arm.
+            let mut gb = harness::boot(&rom, model);
+            gb.set_leading_edge_reads(true);
+            run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+            check_hex_screen(gb.frame(), expect, model.is_cgb()).unwrap_or_else(|e| {
+                panic!("{rel} [{model:?}] expected out{expect} (flag-on): {e}")
+            });
         }
     }
 }

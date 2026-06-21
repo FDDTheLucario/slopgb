@@ -23,10 +23,11 @@ impl Interconnect {
         }
     }
 
-    /// Test/probe hook: enable leading-edge (cc+0) PPU-positional reads. Held
-    /// off in production until the S2d atomic flip; flipped here only by the
-    /// S2 unit tests and the S2d gap-count measurement.
-    #[cfg(test)]
+    /// Port validation hook: enable leading-edge (cc+0) PPU-positional reads +
+    /// the S5 `StatUpdate` engine + the `vis_early` back-date (the whole flag-on
+    /// path). Held off in production (`new` defaults it false) until the S2d
+    /// atomic flip; exposed through [`crate::GameBoy::set_leading_edge_reads`]
+    /// for the S0 kernel-pair acceptance spec + the S2d gap-count measurement.
     pub(crate) fn set_leading_edge_reads(&mut self, on: bool) {
         self.leading_edge_reads = on;
         // Forward to the PPU so its S5 StatUpdate engine takes over from

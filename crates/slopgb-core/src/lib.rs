@@ -204,6 +204,16 @@ impl GameBoy {
         self.cpu.debug_undefined_hit()
     }
 
+    /// Port validation hook — enable the SameBoy cycle-exact flag-on path
+    /// (leading-edge cc+0 reads + the `StatUpdate` engine + the `vis_early`
+    /// back-date + the A6 halt-late masks). Off in production until the staged
+    /// port flips the default (`docs/sameboy-port/PORT-PLAN.md`); the gbtr S0
+    /// kernel-pair acceptance spec drives it on to measure the convergence.
+    #[doc(hidden)]
+    pub fn set_leading_edge_reads(&mut self, on: bool) {
+        self.bus.set_leading_edge_reads(on);
+    }
+
     /// Drain the raw audio tap: one stereo sample per dot, taken straight
     /// off the APU channel mixer *before* the box-average resampler and the
     /// high-pass "output capacitor" stage (`Apu::output_cycle`). The

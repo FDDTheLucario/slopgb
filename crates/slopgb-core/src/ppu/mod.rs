@@ -780,9 +780,8 @@ impl Ppu {
     /// Forward the interconnect's `leading_edge_reads` master flag to the PPU,
     /// selecting the S5 [`StatUpdate`](crate::stat_update) engine. Off in
     /// production until the atomic flip (which flips the default in `new`, not
-    /// via this probe hook); flipped here only by the S5 unit tests + the
-    /// interconnect's matching test setter.
-    #[cfg(test)]
+    /// via this hook); driven by [`Interconnect::set_leading_edge_reads`] (the
+    /// S5 unit tests + the S0 kernel-pair acceptance spec).
     pub(crate) fn set_leading_edge_reads(&mut self, on: bool) {
         self.leading_edge_reads = on;
     }

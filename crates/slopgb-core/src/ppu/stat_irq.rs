@@ -398,6 +398,14 @@ impl Ppu {
     /// is reclocked (its rise still lands at our cc+4 dot, the remaining atomic
     /// work — see the field docs).
     fn stat_update_halt_masks(&mut self, mfi: u8) {
+        // The rise's source is unambiguous from `mfi` alone: this runs only on a
+        // 0→1 edge, so the line was LOW the previous dot — meaning neither source
+        // held it high. If the mode source is enabled with `mfi` selecting it
+        // (`mfi == 2 && OAM`, or `mfi == 0 && HBlank`), that source is high NOW
+        // yet was low before, so the mode source IS what just rose — it cannot be
+        // a "LYC-only" rise (a held-high mode source would have made the previous
+        // dot high → not an edge). A pure-LYC rise lands where `mfi` is NONE/1/3
+        // (no branch). `stat_lyc_onoff` exercises this flag-on.
         if mfi == 2 && self.stat_en & STAT_SRC_OAM != 0 {
             // Mode-2 (OAM) line-start pulse. Lines 1-143 carry it across the
             // line-start window (the halt-exit sampler misses the rise for one
