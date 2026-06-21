@@ -9,8 +9,19 @@ use super::{Bus, Cpu, flags};
 
 /// Execute one instruction (preceded by interrupt dispatch if one is
 /// pending and IME is set), one idle M-cycle of halt or stop mode, or a
-/// halt wake (the waking cycle plus dispatch and/or the next instruction).
+/// halt wake (the waking cycle plus dispatch and/or the next instruction),
+/// then flush the deferred-commit clock at the instruction boundary.
+///
+/// The flush is placed here, around the whole body, so it fires on *every*
+/// exit path (the locked / halt-stay / halt-wake / stop-idle early returns
+/// included) with a single call — the SameBoy `flush_pending_cycles`
+/// instruction boundary (`sm83_cpu.c:336`). Inert in port Stage S1.
 pub fn step(cpu: &mut Cpu, bus: &mut impl Bus) {
+    run_step(cpu, bus);
+    bus.flush_pending();
+}
+
+fn run_step(cpu: &mut Cpu, bus: &mut impl Bus) {
     if cpu.locked {
         // An illegal opcode hard-locks the CPU; it only burns cycles.
         bus.tick();

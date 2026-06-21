@@ -44,7 +44,15 @@ pub(crate) enum Conflict {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct CycleClock {
     clock: u64,
-    pending: u8,
+    /// Debt of the current M-cycle not yet advanced. In real CPU flow this is
+    /// tiny — `flush` drains it every instruction (≤ ~24 T), so SameBoy holds
+    /// it in a byte. The clock is embedded in an `Interconnect` whose `Bus`
+    /// is also driven *standalone* by memory/blocking unit tests that advance
+    /// hundreds of M-cycles without an instruction-boundary flush; a `u32`
+    /// keeps the parked debt from overflowing across those long unflushed
+    /// runs (the overflow ceiling is then unreachable, not a `u8`'s 63 ticks)
+    /// while [`Self::internal`] still traps a genuine runaway loudly.
+    pending: u32,
 }
 
 impl CycleClock {
@@ -63,7 +71,7 @@ impl CycleClock {
     }
 
     /// Outstanding debt (this M-cycle's un-advanced cycles).
-    pub(crate) fn pending(&self) -> u8 {
+    pub(crate) fn pending(&self) -> u32 {
         self.pending
     }
 
@@ -80,12 +88,19 @@ impl CycleClock {
     /// A conflict-staged IO write (`sm83_cpu.c:113`). Returns the clock position
     /// the value commits at; advances the pre-commit split and re-parks per the
     /// class, conserving the per-M-cycle total of 4.
+    ///
+    /// In real CPU flow a write is never an instruction's first access — a
+    /// fetch always parks debt first — so `pending >= 1` and every class's
+    /// pre-commit split is exact (`sm83_cpu.c:115` asserts this). The clock is
+    /// nonetheless embedded in a [`crate::interconnect::Interconnect`] whose
+    /// `Bus::write` is also driven *standalone* by memory/blocking unit tests
+    /// (no preceding fetch, `pending == 0`); the `saturating_sub` below keeps
+    /// that case underflow-safe in release rather than panicking. A standalone
+    /// write commits at the current clock (`pending == 0` → no advance) and
+    /// reparks its class total, which still conserves the per-M-cycle 4 for the
+    /// `ReadOld` class S1 uses (the `ReadNew`/`WriteCpu` ±1 splits assume the
+    /// real-flow `pending >= 1` and are not wired until S6).
     pub(crate) fn write(&mut self, conflict: Conflict) -> u64 {
-        // A write is never the first access of an instruction — a fetch always
-        // parks debt first — so `pending` is nonzero (SameBoy asserts this,
-        // `sm83_cpu.c:115`). This makes every pre-commit split below underflow-
-        // safe in release without a signed intermediate.
-        assert!(self.pending != 0, "conflict write with no parked debt");
         let repark = match conflict {
             Conflict::ReadOld => {
                 self.clock += u64::from(self.pending);
@@ -93,7 +108,7 @@ impl CycleClock {
             }
             Conflict::ReadNew => {
                 // -1 T: the write lands 1 T early (component reads NEW value).
-                self.clock += u64::from(self.pending - 1);
+                self.clock += u64::from(self.pending.saturating_sub(1));
                 5
             }
             Conflict::WriteCpu => {
@@ -111,8 +126,9 @@ impl CycleClock {
     /// touches no bus — park +4, advance nothing now (the debt is paid by the
     /// next real access).
     pub(crate) fn internal(&mut self) {
-        // `flush` drains the debt every instruction, so this never approaches
-        // u8 overflow in practice — but trap a missing flush loudly rather than
+        // `flush` drains the debt every instruction, so a real CPU never
+        // approaches the u32 ceiling — but trap a genuine runaway (a missing
+        // flush that lets debt accumulate without bound) loudly rather than
         // silently wrapping.
         self.pending = self
             .pending

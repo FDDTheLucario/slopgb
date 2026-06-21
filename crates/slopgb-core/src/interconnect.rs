@@ -11,6 +11,7 @@
 use crate::apu::Apu;
 use crate::cartridge::Cartridge;
 use crate::cpu::Bus;
+use crate::cycle_clock::{Conflict, CycleClock};
 use crate::joypad::Joypad;
 use crate::model::Model;
 use crate::ppu::{OamBugKind, Ppu};
@@ -303,6 +304,19 @@ pub struct Interconnect {
     joypad: Joypad,
     /// Elapsed T-cycles since power-on (normal-speed dots).
     cycles: u64,
+    /// CPU-side deferred-commit clock (SameBoy `pending_cycles`,
+    /// `sm83_cpu.c`). Port Stage S1 scaffold: every CPU-driven M-cycle (the
+    /// five [`Bus`] access methods) parks its 4 T-cycles here and commits the
+    /// previous M-cycle's debt at the *leading* edge, draining at the
+    /// instruction boundary via [`Bus::flush_pending`]. **Write-only today —
+    /// nothing samples it**, so it is provably behaviour-neutral (net-zero
+    /// gate). It becomes load-bearing at S2 when FF41/OAM/VRAM/palette reads
+    /// switch to leading-edge (cc+0) sampling. Counts pure CPU T-cycles
+    /// (4 per M-cycle in *both* speeds — the double-speed factor lives in the
+    /// PPU/APU domain, never here; `cycle_clock.rs` module doc). Advanced
+    /// only by the CPU's own M-cycles, never by OAM-DMA / HDMA / STOP-pause
+    /// stolen ticks (those call `tick_machine` directly, not through `Bus`).
+    clock: CycleClock,
 
     /// CGB hardware running a CGB-flagged cart. CGB hardware with a DMG
     /// cart runs in DMG compatibility mode: KEY1/SVBK/HDMA/RP/FF74 and the
@@ -512,6 +526,7 @@ impl Interconnect {
             serial: Serial::new(cgb_mode),
             joypad: Joypad::new(sgb_joypad),
             cycles: 0,
+            clock: CycleClock::new(),
             cgb_mode,
             double_speed: false,
             dot_phase: 0,
@@ -670,6 +685,11 @@ fn sgb_header_zero_bits(cart: &Cartridge) -> u32 {
 
 impl Bus for Interconnect {
     fn read(&mut self, addr: u16) -> u8 {
+        // S1 deferred-commit clock: pay the previous M-cycle's parked debt
+        // and park this read's 4 T-cycles. Write-only scaffold — the sampled
+        // leading-edge position is discarded today (the live read still
+        // samples post-tick at cc+4 below); it routes the read at S2.
+        let _leading_edge = self.clock.read();
         self.service_vram_dma();
         self.tick_machine();
         // A trigger inside this very cycle still steals the bus before
@@ -681,6 +701,12 @@ impl Bus for Interconnect {
     }
 
     fn write(&mut self, addr: u16, value: u8) {
+        // S1 deferred-commit clock: a plain write commits at the leading edge
+        // like a read and re-parks 4 (`Conflict::ReadOld`). The per-model
+        // conflict-staging map (read-new / write-cpu classes) lands at S6;
+        // until then every write is `ReadOld`, which conserves the
+        // per-M-cycle T-total (net-zero). Write-only scaffold today.
+        let _commit = self.clock.write(Conflict::ReadOld);
         self.service_vram_dma();
         // The CPU drives the data bus during the second half of the write
         // M-cycle (gbctr "Memory access timing"), which the dot-clocked
@@ -700,17 +726,25 @@ impl Bus for Interconnect {
     }
 
     fn tick(&mut self) {
+        // S1 deferred-commit clock: an internal M-cycle parks +4 without
+        // committing (SameBoy `cycle_no_access`); the next access pays it.
+        self.clock.internal();
         self.service_vram_dma();
         self.tick_machine();
     }
 
     fn tick_addr(&mut self, value: u16) {
+        // S1 deferred-commit clock: an internal M-cycle (carrying a 16-bit
+        // value for the OAM bug) is `cycle_no_access` — park +4.
+        self.clock.internal();
         self.service_vram_dma();
         self.tick_machine();
         self.maybe_oam_bug(value, OamBugKind::Write);
     }
 
     fn read_inc(&mut self, addr: u16) -> u8 {
+        // S1 deferred-commit clock: same leading-edge read as `read`.
+        let _leading_edge = self.clock.read();
         self.service_vram_dma();
         self.tick_machine();
         self.service_vram_dma(); // reads yield to a same-cycle trigger
@@ -900,6 +934,30 @@ impl Bus for Interconnect {
 
     fn set_halted(&mut self, halted: bool) {
         self.set_cpu_halted(halted);
+    }
+
+    fn flush_pending(&mut self) {
+        // S1 instruction boundary: drain the deferred-commit clock's parked
+        // debt (SameBoy `flush_pending_cycles`). Net-zero — the clock is
+        // write-only scaffold; this only keeps `clock.now()` exact at
+        // boundaries for the S2 leading-edge port.
+        self.clock.flush();
+    }
+}
+
+impl Interconnect {
+    /// Test-only view of the deferred-commit CPU clock's committed position
+    /// (CPU T-cycles). Used to assert the S1 net-zero conservation invariant
+    /// (`clock.now()` after a boundary flush == 4 × M-cycles executed).
+    #[cfg(test)]
+    pub(crate) fn cpu_clock_t(&self) -> u64 {
+        self.clock.now()
+    }
+
+    /// Test-only view of the clock's outstanding (un-flushed) parked debt.
+    #[cfg(test)]
+    pub(crate) fn cpu_clock_pending(&self) -> u32 {
+        self.clock.pending()
     }
 }
 

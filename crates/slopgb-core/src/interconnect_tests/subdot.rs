@@ -460,3 +460,47 @@ fn access_phase_is_single_constant() {
         "the one CPU-access observer phase is the cc+2 midpoint (net-zero)"
     );
 }
+
+// ---- S1 deferred-commit CPU clock wiring (net-zero) --------------------
+//
+// Every CPU-driven M-cycle (the five `Bus` access methods) drives the
+// `CycleClock`; the instruction boundary `flush_pending` drains it. The
+// clock is write-only scaffold today (nothing samples it), so its only
+// observable property is conservation: after a boundary flush its committed
+// position equals 4 T-cycles × the M-cycle count, in either speed. This pins
+// the wiring; the clock's own arithmetic is unit-tested in `cycle_clock`.
+
+#[test]
+fn cpu_clock_deferred_commit_conserves_t_count() {
+    let mut b = ic(Model::Dmg);
+    // A read latches at the M-cycle leading edge (cc+0) and parks its own 4.
+    assert_eq!(b.read(0xFF80), 0, "fresh HRAM");
+    assert_eq!((b.cpu_clock_t(), b.cpu_clock_pending()), (0, 4));
+    // An internal cycle parks +4 without committing.
+    b.tick();
+    assert_eq!((b.cpu_clock_t(), b.cpu_clock_pending()), (0, 8));
+    // The next access commits the 8 parked T-cycles, then parks 4.
+    b.read(0xFF80);
+    assert_eq!((b.cpu_clock_t(), b.cpu_clock_pending()), (8, 4));
+    // A plain write (Conflict::ReadOld) commits at the leading edge, reparks 4.
+    b.write(0xFF80, 0);
+    assert_eq!((b.cpu_clock_t(), b.cpu_clock_pending()), (12, 4));
+    b.tick();
+    assert_eq!((b.cpu_clock_t(), b.cpu_clock_pending()), (12, 8));
+    // The instruction boundary drains the debt.
+    b.flush_pending();
+    // 5 M-cycles executed → 20 CPU T-cycles, debt fully drained.
+    assert_eq!((b.cpu_clock_t(), b.cpu_clock_pending()), (20, 0));
+    assert_eq!(b.cpu_clock_t(), 4 * 5);
+}
+
+#[test]
+fn cpu_clock_read_inc_and_tick_addr_drive_the_clock() {
+    // read_inc behaves as a leading-edge read; tick_addr as an internal cycle.
+    let mut b = ic(Model::Dmg);
+    b.read_inc(0xFF80); // leading-edge read: park 4
+    b.tick_addr(0x0000); // internal: park +4
+    b.flush_pending();
+    assert_eq!(b.cpu_clock_t(), 8, "2 M-cycles = 8 T");
+    assert_eq!(b.cpu_clock_pending(), 0);
+}

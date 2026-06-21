@@ -106,6 +106,16 @@ pub trait Bus {
     /// no time; calls are idempotent. Defaults to a no-op for `Bus`
     /// implementations that do not model the DMA engine.
     fn set_halted(&mut self, _halted: bool) {}
+
+    /// Instruction boundary: drain the deferred-commit clock's parked debt
+    /// (SameBoy `flush_pending_cycles`, `sm83_cpu.c:336`). Called exactly
+    /// once per [`super::step`] invocation, after the instruction (or idle /
+    /// dispatch step) completes, so the next instruction begins at a clean
+    /// cc+0. Takes no time. Inert in port Stage S1 — the clock it drains is
+    /// write-only scaffold that nothing samples yet; it becomes load-bearing
+    /// at S2 (leading-edge reads). Defaults to a no-op for `Bus`
+    /// implementations without a cycle clock.
+    fn flush_pending(&mut self) {}
 }
 
 /// SM83 CPU. Owns architectural registers, IME, halt state.

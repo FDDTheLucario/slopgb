@@ -51,6 +51,13 @@ struct TestBus {
     /// new level) — pins exactly when halt/stop engage and release the
     /// core clock gate.
     halt_calls: Vec<(usize, bool)>,
+    /// `Bus::flush_pending` calls — the instruction-boundary hook fires
+    /// exactly once per `step`, on every exit path (S1 deferred-commit
+    /// clock).
+    flush_count: u32,
+    /// M-cycle count (`cycles`) captured at each `flush_pending` call — the
+    /// boundary must arrive *after* the instruction's last M-cycle.
+    flush_at: Vec<usize>,
 }
 
 impl TestBus {
@@ -66,6 +73,8 @@ impl TestBus {
             late_if: false,
             halted_state: false,
             halt_calls: Vec::new(),
+            flush_count: 0,
+            flush_at: Vec::new(),
         }
     }
 
@@ -156,6 +165,11 @@ impl Bus for TestBus {
             self.halted_state = halted;
             self.halt_calls.push((self.cycles, halted));
         }
+    }
+
+    fn flush_pending(&mut self) {
+        self.flush_count += 1;
+        self.flush_at.push(self.cycles);
     }
 }
 
