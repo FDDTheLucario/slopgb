@@ -29,6 +29,9 @@ impl Interconnect {
     #[cfg(test)]
     pub(crate) fn set_leading_edge_reads(&mut self, on: bool) {
         self.leading_edge_reads = on;
+        // Forward to the PPU so its S5 StatUpdate engine takes over from
+        // `stat_events_tick` on the same flag.
+        self.ppu.set_leading_edge_reads(on);
     }
 
     /// Test-only view of the deferred-commit CPU clock's committed position

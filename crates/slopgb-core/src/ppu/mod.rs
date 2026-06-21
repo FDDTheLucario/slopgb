@@ -323,20 +323,34 @@ pub struct Ppu {
     /// **one dot before** the visible byte does (lines 1-143, `display.c:1787`
     /// vs `:1792`), and the mode-0 IRQ mode goes to 0 **one dot after** the
     /// visible byte does (`display.c:2108` vs `:2091`). That 2-dot relative
-    /// swing is what separates the `m2int`/`m0int` kernel pair. **Inert at
-    /// S2b** — maintained every dot but not yet consulted by the STAT IRQ
-    /// engine (that swap is S5) nor by the leading-edge read (S2d); validated
-    /// against the divergence directly. Mirrors `vis_mode` on VBlank / glitch
-    /// lines (anchor swing not modelled there until S5).
-    // Written every dot; read only by the S2b test until the S5 STAT engine
-    // consumes it. Inert staged-port field — see the doc above.
-    #[allow(dead_code)]
+    /// swing is what separates the `m2int`/`m0int` kernel pair. Consumed by the
+    /// S5 [`StatUpdate`](crate::stat_update) engine on the flag-on path
+    /// (`stat_update_tick`); on the flag-off (production) path it is maintained
+    /// every dot but read only by the S2b decoupling test. Mirrors `vis_mode` on
+    /// VBlank / glitch lines (anchor swing not modelled there until S5).
     mode_for_interrupt: u8,
     /// One-dot-delayed mirror of `line_render_done`, the substrate for the
     /// mode-0 lag above: `line_render_done` rises on the visible 3→0 flip
     /// dot, so its previous-dot value is still false there and true one dot
     /// later — exactly the dot the IRQ-facing mode transitions to 0.
     mfi_m0_prev: bool,
+    /// Port Stage S5 (flag-on path only): SameBoy's `GB_STAT_update`
+    /// rising-edge STAT interrupt line ([`StatUpdate`](crate::stat_update)),
+    /// driven each dot from `mode_for_interrupt` | the LYC latch and replacing
+    /// `stat_events_tick` when `leading_edge_reads` is on. Inert (never read)
+    /// while the flag is off, so it changes nothing in production.
+    stat_update: crate::stat_update::StatUpdate,
+    /// SameBoy `lyc_interrupt_line` (`display.c:534`): the LYC==LY STAT source
+    /// as a *latch* — re-evaluated to `ly_for_comparison == LYC` whenever
+    /// `ly_for_comparison` is a real line, and HELD across the `-1` "no line"
+    /// gaps (so a match survives the line-boundary dot). The LYC input
+    /// `stat_update` consumes on the flag-on path.
+    lyc_interrupt_line: bool,
+    /// PPU-side copy of the interconnect's `leading_edge_reads` master flag,
+    /// selecting the S5 [`StatUpdate`](crate::stat_update) engine over
+    /// `stat_events_tick`. Off in production until the atomic flip (S2+S3);
+    /// forwarded by [`Interconnect::set_leading_edge_reads`].
+    leading_edge_reads: bool,
     /// The STAT IF bit handed out by the last tick came from the mode-0
     /// source rise. The interconnect drains this and applies the
     /// half-cycle halt law: a rise landing in the second half of the
@@ -625,6 +639,9 @@ impl Ppu {
             m0_rise_dot: false,
             mode_for_interrupt: 0,
             mfi_m0_prev: false,
+            stat_update: crate::stat_update::StatUpdate::new(),
+            lyc_interrupt_line: false,
+            leading_edge_reads: false,
             m0_rise: false,
             m0_access_flip: None,
             pal_access_flip: None,
@@ -694,6 +711,12 @@ impl Ppu {
             }
         }
         if !self.enabled {
+            // S5 flag-on engine: with the LCD off `GB_STAT_update` returns
+            // early (`display.c:525`) and the interrupt line is held low, so a
+            // re-enable edge-detects from a clean low. Inert flag-off (the
+            // fields are unread), so this changes nothing in production.
+            self.stat_update = crate::stat_update::StatUpdate::new();
+            self.lyc_interrupt_line = false;
             return std::mem::take(&mut self.pending_if);
         }
         if self.lyc_if_delay > 0 {
@@ -723,8 +746,25 @@ impl Ppu {
         // consulted; the STAT engine swap that reads it is S5). Runs after
         // step_dot so it sees this dot's `line_render_done` flip.
         self.update_mode_for_interrupt();
-        self.stat_events_tick();
+        if self.leading_edge_reads {
+            // S5 flag-on path: the SameBoy `GB_STAT_update` rising-edge engine
+            // off the decoupled `mode_for_interrupt` + the LYC latch.
+            self.stat_update_tick();
+        } else {
+            // Production path: the gambatte-derived per-source event engine.
+            self.stat_events_tick();
+        }
         std::mem::take(&mut self.pending_if)
+    }
+
+    /// Forward the interconnect's `leading_edge_reads` master flag to the PPU,
+    /// selecting the S5 [`StatUpdate`](crate::stat_update) engine. Off in
+    /// production until the atomic flip (which flips the default in `new`, not
+    /// via this probe hook); flipped here only by the S5 unit tests + the
+    /// interconnect's matching test setter.
+    #[cfg(test)]
+    pub(crate) fn set_leading_edge_reads(&mut self, on: bool) {
+        self.leading_edge_reads = on;
     }
 
 

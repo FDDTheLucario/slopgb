@@ -323,6 +323,51 @@ impl Ppu {
         self.pending_if |= fired;
     }
 
+    /// Port Stage S5 — SameBoy `GB_STAT_update` (`display.c:523`), the flag-on
+    /// replacement for [`Self::stat_events_tick`]. There is a single STAT
+    /// interrupt *line* — the OR of the one mode source selected by
+    /// `mode_for_interrupt` and the LYC source — and `IF |= STAT` fires only on
+    /// its 0→1 rising edge (the classic STAT-blocking model: a second source
+    /// joining an already-high line raises nothing). Driven by
+    /// [`StatUpdate`](crate::stat_update); the LYC input is the
+    /// [`Self::lyc_interrupt_line`] latch, re-evaluated from
+    /// [`Self::ly_for_comparison`] whenever that is a real line and held across
+    /// the `-1` gaps (`display.c:534-544`).
+    ///
+    /// The OAM-DMA mode-2 guard (`display.c:526`) clears only the *visible*
+    /// STAT mode bits, not the IRQ line (which reads `mode_for_interrupt`), so
+    /// it does not affect this rising edge; the visible-mode side is handled by
+    /// the interconnect's OAM-DMA freeze. The LCD-off guard is the tick's
+    /// `!enabled` early-return, which holds the line low.
+    ///
+    /// Still uses [`Self::refresh_cmp`] for the *readable* FF41 mode/LYC bits so
+    /// register reads stay identical to the flag-off path; only the IRQ event
+    /// source changes. The per-source emission masks (`stat_late` /
+    /// `stat_halt_late` / `m0_rise`) that the gambatte engine sets for the
+    /// halt-wake interaction have no `GB_STAT_update` equivalent — they are part
+    /// of the remaining atomic-flip work and are left unset here (so the flag-on
+    /// path does not yet reproduce the halt-late commit timing).
+    pub(super) fn stat_update_tick(&mut self) {
+        // Keep the readable comparison/mode flags + the legacy level current
+        // (FF41 reads, the write-edge baseline) exactly as the flag-off path.
+        self.refresh_cmp(true);
+        // Drain the one-shot mode-0 event flag the gambatte engine would have
+        // consumed this dot, so it does not leak into a later flag-off tick.
+        let _ = std::mem::take(&mut self.m0_rise_dot);
+        // `lyc_interrupt_line` latch: re-evaluate only when `ly_for_comparison`
+        // names a real line; hold across the `-1` gaps (`display.c:534`).
+        let ly = self.ly_for_comparison();
+        if ly != -1 {
+            self.lyc_interrupt_line = ly == i16::from(self.lyc);
+        }
+        if self
+            .stat_update
+            .update(self.mode_for_interrupt, self.stat_en, self.lyc_interrupt_line)
+        {
+            self.pending_if |= IF_STAT;
+        }
+    }
+
     /// gambatte `statChangeTriggersStatIrqDmg`: the DMG STAT-write glitch
     /// — the write momentarily enables every source (Pan Docs "STAT
     /// bug"), raising IF from the hblank/vblank levels and the held LYC
@@ -514,6 +559,13 @@ impl Ppu {
         self.mode_for_interrupt
     }
 
+    /// Test view of the S5 [`StatUpdate`](crate::stat_update) interrupt-line
+    /// level (the flag-on engine's `stat_interrupt_line`).
+    #[cfg(test)]
+    pub(crate) fn stat_update_line(&self) -> bool {
+        self.stat_update.line()
+    }
+
     /// S2b: recompute the interrupt-facing mode ([`Ppu::mode_for_interrupt`])
     /// for the current dot, applying the mode-2 lead / mode-0 lag anchor swing
     /// against the CPU-visible [`Self::vis_mode`]. Inert today; the substrate
@@ -605,7 +657,6 @@ impl Ppu {
     /// (inert, so it changes no observable behaviour until the flip recalibrates
     /// it). The LCD-enable glitch line returns `-1` (its LY/LYC view is the live
     /// flag-off path's concern, `lcdon_*` tables).
-    #[allow(dead_code)] // Consumed at the S5 StatUpdate wiring (flag-on path).
     pub(super) fn ly_for_comparison(&self) -> i16 {
         if !self.enabled || self.glitch_line {
             return -1;

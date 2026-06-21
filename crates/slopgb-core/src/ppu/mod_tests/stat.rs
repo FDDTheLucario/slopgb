@@ -303,6 +303,55 @@ fn ly_for_comparison_line_153_schedule() {
     }
 }
 
+/// S5/A4: the flag-on path drives the SameBoy `GB_STAT_update` rising-edge
+/// engine (`stat_update_tick`) instead of `stat_events_tick`. With only the LYC
+/// source enabled (LYC=2), the engine raises exactly one STAT IF per frame — on
+/// the rising edge when `ly_for_comparison` reaches 2 — and the held match
+/// across the line-2→3 carryover does not re-fire (STAT blocking). The flag-off
+/// path must agree for this case where both engines fire the same single LYC
+/// interrupt (a net-parity anchor).
+#[test]
+fn stat_update_engine_fires_lyc_once_per_frame() {
+    let count_lyc_if = |flag_on: bool| -> u32 {
+        let mut p = dmg();
+        p.set_leading_edge_reads(flag_on);
+        p.write(0xFF45, 2); // LYC = 2
+        p.write(0xFF41, 0x40); // LYC interrupt enable only (no mode sources)
+        p.write(0xFF40, 0x91); // LCD on
+        run_to(&mut p, 1, 0); // past the LCD-on glitch line
+        let mut fired = 0;
+        // One full frame (line 1 → line 1 next frame is ~154 lines of dots).
+        for _ in 0..(154 * 456) {
+            if p.tick() & 0x02 != 0 {
+                fired += 1;
+            }
+        }
+        fired
+    };
+    assert_eq!(count_lyc_if(true), 1, "flag-on: one LYC=2 STAT IF per frame");
+    assert_eq!(count_lyc_if(false), 1, "flag-off: same single LYC=2 STAT IF (parity)");
+}
+
+/// S5/A4: the flag-on engine's interrupt line is held low while the LCD is off
+/// (SameBoy `GB_STAT_update` early-returns, `display.c:525`), so a re-enable
+/// edge-detects from a clean low. A held-high line at the off transition is
+/// cleared.
+#[test]
+fn stat_update_engine_lcd_off_holds_line_low() {
+    let mut p = dmg();
+    p.set_leading_edge_reads(true);
+    p.write(0xFF45, 3);
+    p.write(0xFF41, 0x40); // LYC enable
+    p.write(0xFF40, 0x91);
+    // Drive to the LYC=3 match so the engine line is high.
+    run_to(&mut p, 3, 4);
+    assert!(p.stat_update_line(), "engine line high on the LYC=3 match");
+    // Turn the LCD off: the next tick resets the engine line low.
+    p.write(0xFF40, 0x00);
+    p.tick();
+    assert!(!p.stat_update_line(), "engine line forced low with the LCD off");
+}
+
 /// S2c — cycle-exact mode-3 length, validated as a parallel function.
 ///
 /// SameBoy's bare-line (no sprites, no active window) mode-3 length is
