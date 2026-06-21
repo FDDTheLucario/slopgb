@@ -122,6 +122,7 @@
 // its fields, the enums, the consts, and the core driver (new/tick/step_dot/
 // start_line) stay here.
 mod blocking;
+mod line_setup;
 mod lyc;
 mod regs;
 mod render;
@@ -726,97 +727,6 @@ impl Ppu {
         std::mem::take(&mut self.pending_if)
     }
 
-    /// S2b interrupt-facing mode ([`Self::mode_for_interrupt`]) for the
-    /// current dot — the decoupled view the S5 STAT engine will read. Exposed
-    /// for the S2b divergence test; not yet consulted in production.
-    #[cfg(test)]
-    pub(crate) fn mode_for_interrupt(&self) -> u8 {
-        self.mode_for_interrupt
-    }
-
-    /// S2b: recompute the interrupt-facing mode ([`Self::mode_for_interrupt`])
-    /// for the current dot, applying the mode-2 lead / mode-0 lag anchor swing
-    /// against the CPU-visible mode. Inert today; the substrate for the S5
-    /// STAT engine and the S2d kernel-pair flip.
-    fn update_mode_for_interrupt(&mut self) {
-        // `mfi_m0_prev` lags `line_render_done` by one dot: read the previous
-        // dot's value for this dot's mode-0 decision, then latch this dot's.
-        let prev_done = self.mfi_m0_prev;
-        self.mfi_m0_prev = self.enabled && self.line <= 143 && self.line_render_done;
-        self.mode_for_interrupt = if !self.enabled {
-            0
-        } else if self.line >= 144 || self.glitch_line {
-            // VBlank / glitch line: no anchor swing modelled here yet (the
-            // visible mode is the IRQ mode); refined with the STAT swap (S5).
-            self.vis_mode()
-        } else if self.dot < 84 {
-            // Mode-2 region. SameBoy raises the OAM STAT source as a 1-dot
-            // *pulse* at line start, then sets `mode_for_interrupt = -1`
-            // (NONE) for the rest of the OAM search (`display.c:1781` →
-            // `:1799`) — so the source level falls and a later LYC rise can
-            // re-fire (STAT blocking), rather than the source staying high
-            // across all of mode 2. Lines 1-143 pulse one dot early at dot 3
-            // (the "OAM int 1 T-cycle before STAT" lead; `display.c:1778`),
-            // one dot before the visible byte flips to 2 at dot 4. Before the
-            // pulse (dots 0-2, and the whole line-0 line-start window) the
-            // mode-0/1 carryover holds; after it the source is NONE.
-            // (Deferred to the S5 wiring: line-0's own OAM pulse dot and the
-            // VBlank-entry mode-2 source — `display.c:2138`.)
-            if self.line != 0 && self.dot == 3 {
-                2 // OAM (mode 2) IRQ leads the visible byte by one dot
-            } else if self.dot < 4 {
-                self.vis_mode() // line-start mode-0/1 carryover
-            } else {
-                crate::stat_update::MODE_FOR_INTERRUPT_NONE // OAM-search body: no source
-            }
-        } else if !prev_done {
-            // Mode 3 holds for the IRQ side one dot past the visible 3→0 flip
-            // (`display.c:2091` visible vs `:2108` IRQ — the mode-0 lag).
-            3
-        } else {
-            0
-        };
-    }
-
-    fn start_line(&mut self) {
-        match self.line {
-            0 => {
-                self.ly = 0;
-                // The WY latch is *assigned* at line 0 dot 2 (see
-                // `step_dot`) — that sample is the frame reset.
-                // gambatte M2_Ly0::f0: winYPos = 0xFF — the first
-                // activation of the frame increments it to row 0.
-                self.win_line = 0xFF;
-                self.line_render_done = false;
-                self.render_finished = false;
-                self.hdma_lead = false;
-                self.render.active = false;
-            }
-            1..=143 => {
-                self.ly = self.line;
-                self.line_render_done = false;
-                self.render_finished = false;
-                self.hdma_lead = false;
-                self.render.active = false;
-            }
-            144 => {
-                self.ly = 144;
-                self.frame_count += 1;
-                if self.frame_skip {
-                    // The first frame after an LCD enable is not displayed
-                    // (Pan Docs "LCDC.7"; SameBoy display.c
-                    // `GB_FRAMESKIP_LCD_TURNED_ON`): drop the rendered
-                    // frame and present blank/white instead.
-                    self.frame_skip = false;
-                    let white = self.white();
-                    self.front.fill(white);
-                } else {
-                    std::mem::swap(&mut self.front, &mut self.back);
-                }
-            }
-            _ => self.ly = self.line,
-        }
-    }
 
     fn step_dot(&mut self) {
         // CGB: the line-start LYC event's delayed FF45 copy catches up
