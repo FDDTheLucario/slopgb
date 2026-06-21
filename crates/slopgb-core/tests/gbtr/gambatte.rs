@@ -564,6 +564,53 @@ fn gambatte_matrix() {
     harness::assert_against_baseline("gambatte", &results, &harness::parse_baseline(BASELINE_TXT));
 }
 
+/// Port Stage S0 — the executable red spec for the kernel pair, the
+/// convergence target of S2 (`docs/sameboy-port/PORT-PLAN.md`,
+/// `ppu-timing-map.md` §6). Both ROMs reduce to the *same* `ldh a,(FF41)`;
+/// SameBoy's cycle-exact frame separates them with no CPU-call-stack
+/// discriminator (leading-edge cc+0 sampling + a decoupled `mode_for_interrupt`
+/// + the mode-2(−1)/mode-0(+1) anchor swing):
+///   - `m2int_m3stat_1` → out3 (mode 3) — anchored off a *mode-2* STAT IRQ;
+///     slopgb's whole-dot model currently reads mode 0 here, so this is the
+///     one baselined floor row (`tests/gbtr/baselines/gambatte.txt`).
+///   - `m0int_m3stat_2` → out0 (mode 0) — anchored off a *mode-0* STAT IRQ;
+///     slopgb already passes this, and the port must keep it passing.
+///
+/// So the lift is *directional*: make `m2int` read 3 while `m0int` stays 0 —
+/// exactly the `O<E ∧ O≥E` "contradiction" that only the decoupled-edge
+/// rewrite resolves. Ignored until S2d wires that flip; run with
+/// `cargo test --test gbtr -- --ignored kernel_pair` to watch the gap close.
+#[test]
+#[ignore = "S0 red spec: un-ignored at port Stage S2d (kernel-pair convergence)"]
+fn kernel_pair_matches_sameboy_target() {
+    let Some(root) = common::gbtr_root() else {
+        // The collection is required to evaluate this spec; mirror the
+        // suite's REQUIRE_ROMS contract rather than silently passing.
+        common::skip_or_fail_gbtr("kernel_pair", "game-boy-test-roms collection not present");
+        return;
+    };
+    // (relative ROM path, expected FF41 mode both models)
+    let targets = [
+        (
+            "gambatte/m2int_m3stat/m2int_m3stat_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/m0int_m3stat/m0int_m3stat_2_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let path = root.join(rel);
+        let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        for model in [Model::Dmg, Model::Cgb] {
+            let check = Check::Hex(expect.to_string());
+            run_case(&rom, model, &check, &path)
+                .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected out{expect}: {e}"));
+        }
+    }
+}
+
 /// Self-verifying inventory: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// covers the on-disk ROM set exactly, with the exemptions pinned to the
 /// documented 50-entry list.
