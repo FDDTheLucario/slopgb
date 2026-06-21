@@ -963,6 +963,37 @@ fn stat_update_mode2_pulse_halt_mask_only_flag_on() {
     );
 }
 
+/// Port Stage A7 — the flag-on mode-2→3 entry back-date (`ppu-subdot-ladder.md`
+/// "A7"). On the leading-edge path a bare single-speed line's CPU-visible STAT
+/// mode flips 2→3 at dot 80 (the read offset of 4 dots earlier than the flag-off
+/// dot 84), making the cc+0 FF41 read observationally neutral for the mode-2→3
+/// entry (mooneye `intr_2_mode3_timing` passes flag-on). Flag-OFF stays at 84
+/// (byte-identical production).
+#[test]
+fn mode3_entry_backdates_four_dots_flag_on() {
+    let entry = |flag_on: bool| -> u16 {
+        let mut p = dmg();
+        p.set_leading_edge_reads(flag_on);
+        p.write(0xFF40, 0x91); // LCD + BG on, bare line
+        run_to(&mut p, 1, 0);
+        let mut prev = p.vis_mode();
+        for _ in 0..200 {
+            p.tick();
+            if p.line != 1 {
+                break;
+            }
+            let v = p.vis_mode();
+            if prev == 2 && v == 3 {
+                return p.dot;
+            }
+            prev = v;
+        }
+        panic!("bare line never flips 2→3");
+    };
+    assert_eq!(entry(false), 84, "flag-off: mode-3 entry at dot 84");
+    assert_eq!(entry(true), 80, "flag-on: back-dated 4 dots to dot 80");
+}
+
 /// Port Stage A6 — the flag-on mode-0 (HBlank) source rise carries the
 /// half-cycle halt law (`m0_rise`), the same mask the flag-off engine sets on
 /// its `m0_rise_dot`. (The rise's exact dot is still our cc+4 frame until the
