@@ -98,3 +98,55 @@ fn kernel_pair_separates_on_the_decoupled_grid() {
         "the kernel pair the whole-dot model collapses onto one value is separable here"
     );
 }
+
+/// The kernel separation pinned to the EMULATOR-MEASURED read dots (2026-06-21
+/// instrumentation, `ppu-subdot-ladder.md` "A5 INSTRUMENTED + KERNEL
+/// SEPARATED"): under the flag-on leading-edge path the two ROMs' `ldh a,(FF41)`
+/// land at our-line dots **248** (`m2int_m3stat_1`) and **252**
+/// (`m0int_m3stat_2`) on a bare CGB line (SCX 0). Mapped onto this
+/// `ModeTimeline` (whose dot 0 = the mode-2 start, i.e. our-line dot
+/// [`OUR_MODE2_START`]), those reads straddle [`ModeTimeline::visible_mode0_dot`]
+/// — proving the *faithful SameBoy frame* separates the pair the whole-dot model
+/// collapses, with no call-stack discriminator. It also pins the residual: our
+/// PRODUCTION visible flip sits at our-line dot 254 (= mt 250), **3 dots later**
+/// than SameBoy's mt-247 boundary — so in production both reads land before the
+/// flip (both mode 3); the lift is to back-date the visible flip those 3 dots
+/// (and reclock the dispatch, the remaining atomic work) so it slots between the
+/// two reads.
+#[test]
+fn measured_kernel_reads_straddle_sameboy_visible_boundary() {
+    // Our `vis_mode` puts the visible mode-2 start at our-line dot 4 (dots 0-3
+    // are the line-start window); the `ModeTimeline` spine starts at its dot 0.
+    const OUR_MODE2_START: u16 = 4;
+    // The flag-on leading-edge read dots measured this session (bare, SCX 0).
+    const M2INT_READ_OUR_DOT: u16 = 248;
+    const M0INT_READ_OUR_DOT: u16 = 252;
+    // Our production visible mode→0 flip dot (pipe end 256 − 2; `m0_flip_events`).
+    const OUR_VISIBLE_FLIP_DOT: u16 = 254;
+
+    let t = ModeTimeline::bare(1, 0);
+    let m2_mt = M2INT_READ_OUR_DOT - OUR_MODE2_START;
+    let m0_mt = M0INT_READ_OUR_DOT - OUR_MODE2_START;
+
+    // On the faithful frame the two equal-`ldh` reads land on opposite sides of
+    // the visible 3→0 boundary — m2int reads 3 (out3), m0int reads 0 (out0).
+    assert_eq!(t.visible_mode(m2_mt), MODE_XFER, "m2int → mode 3 (out3)");
+    assert_eq!(t.visible_mode(m0_mt), MODE_HBLANK, "m0int → mode 0 (out0)");
+
+    // The boundary sits strictly between the two reads — the open interval
+    // (m2int, m0int] the back-dated visible flip must land in.
+    let b = t.visible_mode0_dot();
+    assert!(
+        m2_mt < b && b <= m0_mt,
+        "SameBoy visible_mode0_dot {b} separates the reads ({m2_mt}, {m0_mt}]"
+    );
+
+    // Residual: our production flip (mt 250) is 3 dots past SameBoy's (mt 247),
+    // which collapses BOTH measured reads onto mode 3 (the whole-dot floor).
+    let our_flip_mt = OUR_VISIBLE_FLIP_DOT - OUR_MODE2_START;
+    assert_eq!(our_flip_mt - b, 3, "production visible flip is 3 dots late");
+    assert!(
+        m2_mt < our_flip_mt && m0_mt < our_flip_mt,
+        "at the production flip dot both reads are still mode 3 (the collapse)"
+    );
+}
