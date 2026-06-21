@@ -40,6 +40,21 @@
 #    (recalibrates ~6028 green dot-level cases incl. mealybug photos / the
 #    mode-3 fetch grid / the window machine) — separate architecture, not a
 #    revert-on-regression increment.
+#    UPDATE 2026-06-20 (R3 single-speed MID read CLOSED, end-to-end): the
+#    single-speed FF41 mode-bit read at cc+2 MID was re-measured + classified
+#    across the FULL battery (global spike + a DMG-gated attempt, both reverted)
+#    — NOT a harvestable lift on either model. The gambatte +19/−23 splits by
+#    model (model IS a read-site discriminator), so a !is_cgb gate isolates a
+#    DMG slice = gambatte +4/−1; but that DMG slice is the CROSS-ORACLE swap
+#    this project rejects: it also lifts +16 wilbertpol intr_2_mode0_*_nops
+#    (class E, 2016-era) while REGRESSING 4 currently-green gbmicrotest
+#    ppu_sprite0_scx{1,2,5,6}_b [Dmg] (class H — "don't chase one-sidedly"),
+#    i.e. dropping SameBoy-aligned hardware rows (forbidden). The CGB slice is
+#    the −22 class-A/B flip-POSITION swap m0_flip_events carries no render state
+#    to correct → the pixel-pipe reclock above. Golden drift stayed confined to
+#    the STAT/mode-0 cluster (zero photo/game/fetch-grid drift). Pinned closed
+#    by the unit test single_speed_ff41_keeps_end_view_under_every_edge (both
+#    models); full write-up in docs/hardware-state/ppu-subdot-ladder.md.
 # B. Speed-switch / HDMA sub-M-cycle seam — the dma/ + speedchange/ +
 #    oamdma *speedchange* rows (~165 here) plus mealybug hdma_timing-C
 #    and the four age spsw-* rows. A/B sweeps over the pause constant

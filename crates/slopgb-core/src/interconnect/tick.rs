@@ -73,7 +73,8 @@ impl Interconnect {
                 // int_oam_* grids pin the law).
                 self.if_late |= IF_STAT_BIT;
             }
-            if self.ppu.take_m0_rise() && obs_pre_edge(MID_PHASE, event_phase(EdgeKind::M0Rise, cc))
+            if self.ppu.take_m0_rise()
+                && obs_pre_edge(MID_PHASE, event_phase(EdgeKind::M0Rise, cc, 0))
             {
                 // The mode-0 STAT rise carries the second-half halt law
                 // — the same shape as the line-start OAM pulses — but
@@ -102,14 +103,14 @@ impl Interconnect {
                 // blocking against the single CPU-access observer phase
                 // [`ACCESS_PHASE`] ([`stamp_blocks`]). Sub-dot event-phase
                 // model, increment 1.
-                self.m0_access_edge = Some(event_phase(EdgeKind::M0Access, cc));
+                self.m0_access_edge = Some(event_phase(EdgeKind::M0Access, cc, 0));
             }
             if self.ppu.take_pal_access_flip() {
                 // The CGB palette-RAM unblock commits at the M-cycle end
                 // ([`event_phase`] gives `PalAccess` the whole-M-cycle block):
                 // the FF69/FF6B read stays $FF for the entire straddle M-cycle,
                 // not just its second half (gambatte cgbpal_m3end). INC-G3 task 5.
-                self.pal_access_edge = Some(event_phase(EdgeKind::PalAccess, cc));
+                self.pal_access_edge = Some(event_phase(EdgeKind::PalAccess, cc, 0));
             }
             if self.ppu.take_m0_stat_flip() {
                 // A sprite-line m3→m0 flip holds the double-speed FF41 mode bits
@@ -131,7 +132,7 @@ impl Interconnect {
                 // edge stamps the whole-M-cycle END phase ([`event_phase`]); the
                 // FF41 read blocks against the single CPU-access observer phase
                 // [`ACCESS_PHASE`] ([`stamp_blocks`]).
-                self.stat_mode_edge = Some(event_phase(EdgeKind::StatMode, cc));
+                self.stat_mode_edge = Some(event_phase(EdgeKind::StatMode, cc, 0));
             }
             // Dot-exact mode-0 entry: each visible line's hblank start
             // requests one HBlank DMA block, serviced at the head of the

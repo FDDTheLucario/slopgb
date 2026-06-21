@@ -139,15 +139,21 @@ enum EdgeKind {
 }
 
 /// The commit phase (eighths of an M-cycle) of boundary event `kind` on the
-/// dot that ticks at cc `cc` (1..=4 — see [`dot_ticks_on_cc`]). Most kinds
-/// commit at their dot-END eighth ([`cc_eighth`]); `PalAccess`/`StatMode` are
-/// calibrated off it (INC-G3 tasks 5/6) — their per-event offset is exactly
-/// what [`EdgeKind`] keys, so the others stay dot-clocked while one event
-/// moves. cc-granular: the cc the event's dot ticks on already carries the
-/// sub-dot (`dot_phase`) offset, so no separate `i`/`dots` parameter.
+/// dot that ticks at cc `cc` (1..=4 — see [`dot_ticks_on_cc`]), shifted by a
+/// per-event `lead_eighths` sub-dot offset (signed; positive = commit later,
+/// negative = earlier). Most kinds commit at their dot-END eighth
+/// ([`cc_eighth`]); `PalAccess`/`StatMode` at the M-cycle END (INC-G3 tasks
+/// 5/6). `lead_eighths` is the eighth-grid reclock hook: at `lead_eighths == 0`
+/// the result is identical to the pre-reclock fixed phase (net-zero —
+/// `event_phase_lead_zero_is_identity`); a non-zero lead lets one event carry
+/// its own sub-dot commit position (e.g. the per-SCX CGB palette unblock) WITHOUT
+/// moving the whole-dot pixel pipe. The result is clamped to `0..=END_PHASE`:
+/// `0` never blocks an `ACCESS_PHASE` observer, `END_PHASE` blocks the whole
+/// straddle M-cycle (the stamp resets each tick, so a cross-M-cycle lead is
+/// indistinguishable from `END_PHASE`).
 #[inline]
-fn event_phase(kind: EdgeKind, cc: u8) -> u8 {
-    match kind {
+fn event_phase(kind: EdgeKind, cc: u8, lead_eighths: i8) -> u8 {
+    let base = match kind {
         // The CGB palette-RAM unblock commits at the M-cycle END (phase 8 =
         // cc+4), one observer grid later than OAM/VRAM's dot-split: a cc+2 MID
         // FF69/FF6B read stays blocked for the ENTIRE straddle M-cycle and reads
@@ -178,7 +184,8 @@ fn event_phase(kind: EdgeKind, cc: u8) -> u8 {
         EdgeKind::StatMode => END_PHASE,
         // Every other event commits at its dot-END eighth (net-zero scaffold).
         _ => cc_eighth(cc),
-    }
+    };
+    (i16::from(base) + i16::from(lead_eighths)).clamp(0, i16::from(END_PHASE)) as u8
 }
 
 /// The single sub-cc phase (eighths) at which every CPU bus access samples the

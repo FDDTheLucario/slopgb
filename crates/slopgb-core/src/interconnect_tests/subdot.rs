@@ -144,7 +144,7 @@ fn stat_mode_read_forces_mode3_whole_mcycle_in_double_speed() {
     // cc+2 MID observer does NOT precede (the half-split left it readable as
     // mode 0). `event_phase(StatMode)` now returns END_PHASE, so the whole
     // straddle M-cycle blocks regardless of which cc the flip lands on.
-    b.stat_mode_edge = Some(event_phase(EdgeKind::StatMode, 2));
+    b.stat_mode_edge = Some(event_phase(EdgeKind::StatMode, 2, 0));
     assert_eq!(
         b.stat_mode_edge,
         Some(END_PHASE),
@@ -193,7 +193,7 @@ fn stat_mode_override_requires_double_speed() {
     assert_eq!(end_view, 0, "end-view mode bits are 0");
     // A live sprite-line whole-M-cycle stamp (set identically for both
     // speeds — the same value the cc-loop stamps).
-    b.stat_mode_edge = Some(event_phase(EdgeKind::StatMode, 2));
+    b.stat_mode_edge = Some(event_phase(EdgeKind::StatMode, 2, 0));
     // Single speed: the override is gated off — the read shows the unforced
     // PPU end view, matching the green single-speed m3stat direct polls.
     b.double_speed = false;
@@ -209,6 +209,60 @@ fn stat_mode_override_requires_double_speed() {
         3,
         "DS read holds mode 3 (the override fires)"
     );
+}
+
+/// R3 closure pin — the single-speed FF41 STAT mode-bit read at cc+2 MID stays
+/// CLOSED on BOTH models (CC-RECLOCK Phase-0 + R3, ppu-subdot-ladder.md). The
+/// abandoned R3 override (force the FF41 mode bits to 3 when a bare-line
+/// mode-3→mode-0 flip lands in the read M-cycle's second half, reusing the
+/// `m0_access_edge` half-split, the single-speed analog of the double-speed
+/// `stat_mode_edge` override) was re-measured + classified END-TO-END this
+/// session and is NOT shippable on either model. The CGB slice is a −22
+/// read-site swap — class-A `lcd_offset` / class-B `speedchange` / window /
+/// display-start flip-POSITION errors our CGB `m0_flip_events` projection gets
+/// wrong (the out-of-scope pixel-pipe reclock, gambatte.txt class-A header),
+/// with no read-site discriminator separating the few clean CGB lifts from
+/// those regressors. The DMG slice looked like a clean gambatte +4/−1, but it
+/// is the CROSS-ORACLE swap the project rejected — it lifts +16 wilbertpol
+/// `intr_2_mode0_*_nops` (class-E 2016-era expectations) while REGRESSING 4
+/// currently-green gbmicrotest `ppu_sprite0_scx{1,2,5,6}_b` [Dmg] (class-H
+/// one-dot conflicts the mode-0 grid pins — "don't chase one-sidedly",
+/// gbmicrotest.txt header), i.e. dropping SameBoy-aligned hardware rows to gain
+/// the rejected wilbertpol side, which violates the oracle policy (CLAUDE.md:
+/// never drop a test SameBoy passes).
+///
+/// So the single-speed FF41 read keeps the PPU end view on every model no matter
+/// which sub-dot edge is stamped this M-cycle — only the double-speed StatMode
+/// override (pinned above) ever moves the mode bits. Fails the moment any
+/// single-speed FF41 sub-dot override (e.g. via `m0_access_edge`) is introduced.
+#[test]
+fn single_speed_ff41_keeps_end_view_under_every_edge() {
+    for model in [Model::Dmg, Model::Cgb] {
+        let mut b = ic(model);
+        b.write(0xFF40, 0x80);
+        assert!(b.ppu.lcd_enabled(), "{model:?}: lcd on");
+        b.double_speed = false;
+        let end_view = b.ppu.read(0xFF41) & 0x03;
+        // The end view must NOT already be mode 3, or this would pass vacuously
+        // while an override (which forces 3) was live.
+        assert_ne!(end_view, 3, "{model:?}: end view differs from the forced 3");
+        // Stamp all three sub-dot edges live + blocking: a second-half
+        // `M0Access` (cc 3 → eighth 6 > MID 4) + the whole-M-cycle
+        // `PalAccess`/`StatMode` END-phase edges. Each WOULD block its own
+        // consumer (OAM/VRAM, palette RAM, the double-speed FF41 read).
+        b.m0_access_edge = Some(event_phase(EdgeKind::M0Access, 3, 0));
+        b.pal_access_edge = Some(event_phase(EdgeKind::PalAccess, 2, 0));
+        b.stat_mode_edge = Some(event_phase(EdgeKind::StatMode, 2, 0));
+        assert!(
+            stamp_blocks(b.m0_access_edge, ACCESS_PHASE),
+            "{model:?}: edge is live"
+        );
+        assert_eq!(
+            b.read_no_tick(0xFF41) & 0x03,
+            end_view,
+            "{model:?}: single-speed FF41 keeps the end view (R3 stays closed)"
+        );
+    }
 }
 
 /// The cc-granular reclock's `dot_phase` starts at 0 — the fixed even-cc
@@ -332,7 +386,7 @@ fn event_phase_net_zero_except_pal_and_stat() {
     for kind in [EdgeKind::M0Rise, EdgeKind::M0Access] {
         for cc in 1..=4u8 {
             assert_eq!(
-                event_phase(kind, cc),
+                event_phase(kind, cc, 0),
                 cc_eighth(cc),
                 "kind={kind:?} cc={cc}"
             );
@@ -344,9 +398,32 @@ fn event_phase_net_zero_except_pal_and_stat() {
     // the old mode 3).
     for kind in [EdgeKind::PalAccess, EdgeKind::StatMode] {
         for cc in 1..=4u8 {
-            assert_eq!(event_phase(kind, cc), END_PHASE, "kind={kind:?} cc={cc}");
+            assert_eq!(event_phase(kind, cc, 0), END_PHASE, "kind={kind:?} cc={cc}");
         }
     }
+}
+
+/// The eighth-grid reclock hook (INC-G3 / pixel-pipe reclock S0): a non-zero
+/// `lead_eighths` shifts an event's commit phase by that many eighths (signed —
+/// negative pulls it earlier toward unblock, positive later), clamped to
+/// `0..=END_PHASE`. This is the per-event sub-dot offset the reclock lifts use
+/// (e.g. the per-SCX CGB palette unblock — S2) WITHOUT moving the whole-dot
+/// pixel pipe; `lead_eighths == 0` is the net-zero identity already pinned by
+/// `event_phase_net_zero_except_pal_and_stat`. The clamp keeps the result a
+/// valid phase: `0` never blocks an `ACCESS_PHASE` observer, `END_PHASE` blocks
+/// the whole straddle M-cycle (the stamp resets each tick, so a larger lead is
+/// indistinguishable from `END_PHASE`).
+#[test]
+fn event_phase_lead_shifts_and_clamps() {
+    // cc_eighth(4) == 8: a negative lead pulls a dot-END kind earlier.
+    assert_eq!(event_phase(EdgeKind::M0Access, 4, 0), 8);
+    assert_eq!(event_phase(EdgeKind::M0Access, 4, -2), 6);
+    assert_eq!(event_phase(EdgeKind::M0Access, 4, -4), 4);
+    // Clamp below 0 (cc_eighth(1) == 2; 2 - 8 -> 0) and above END (8 + 4 -> 8).
+    assert_eq!(event_phase(EdgeKind::M0Access, 1, -8), 0);
+    assert_eq!(event_phase(EdgeKind::PalAccess, 1, 4), END_PHASE);
+    // A negative lead pulls the whole-M-cycle PalAccess off END.
+    assert_eq!(event_phase(EdgeKind::PalAccess, 1, -1), 7);
 }
 
 /// INC-G3 task 5: the CGB palette-RAM unblock commits at the M-cycle END
@@ -359,7 +436,7 @@ fn event_phase_net_zero_except_pal_and_stat() {
 #[test]
 fn pal_access_blocks_whole_mcycle() {
     for cc in 1..=4u8 {
-        let e = event_phase(EdgeKind::PalAccess, cc);
+        let e = event_phase(EdgeKind::PalAccess, cc, 0);
         // Pin the exact commit phase, not just "blocks": the unblock commits
         // at the M-cycle END regardless of which cc lx==160 lands on.
         assert_eq!(e, END_PHASE, "palette commits at M-cycle end: cc={cc}");
