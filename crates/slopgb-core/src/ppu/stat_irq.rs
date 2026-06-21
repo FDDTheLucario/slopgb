@@ -537,13 +537,21 @@ impl Ppu {
             // re-fire (STAT blocking), rather than the source staying high
             // across all of mode 2. Lines 1-143 pulse one dot early at dot 3
             // (the "OAM int 1 T-cycle before STAT" lead; `display.c:1778`),
-            // one dot before the visible byte flips to 2 at dot 4. Before the
-            // pulse (dots 0-2, and the whole line-0 line-start window) the
-            // mode-0/1 carryover holds; after it the source is NONE.
-            // (Deferred to the S5 wiring: line-0's own OAM pulse dot and the
-            // VBlank-entry mode-2 source — `display.c:2138`.)
-            if self.line != 0 && self.dot == 3 {
-                2 // OAM (mode 2) IRQ leads the visible byte by one dot
+            // one dot before the visible byte flips to 2 at dot 4. Line 0 has
+            // no early fire ("except on line 0"), but SameBoy's `GB_SLEEP 7,1`
+            // step still sets `mode_for_interrupt = 2` unconditionally at the
+            // visible mode→2 edge (`display.c:1792`), so line 0 pulses *at*
+            // dot 4 — matching `ModeTimeline::mode2_irq_offset(0) == 0`. Before
+            // the pulse (dots 0-2, and line 0 dot 3) the mode-0/1 carryover
+            // holds; after it the source is NONE.
+            // (Still deferred to the S5 wiring: the VBlank-entry mode-2 source
+            // — `display.c:2138`, the vblank display loop.)
+            if (self.line != 0 && self.dot == 3) || (self.line == 0 && self.dot == 4) {
+                // OAM (mode 2) IRQ pulse: leads the visible byte by one dot on
+                // lines 1-143 (dot 3), but fires AT the visible mode→2 edge on
+                // line 0 (dot 4) — no early lead there (`display.c:1778`
+                // "except on line 0" / the unconditional `:1792` set).
+                2
             } else if self.dot < 4 {
                 self.vis_mode() // line-start mode-0/1 carryover
             } else {

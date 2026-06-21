@@ -109,9 +109,12 @@ fn mode_for_interrupt_swings_two_dots_against_the_visible_mode() {
     assert!(lag_seen, "mode-0 lag window observed");
 }
 
-/// S2b: the mode-2 lead is suppressed on line 0 — the OAM STAT IRQ does not
-/// fire one dot early there (`display.c:1778` "except on line 0"), so at dot 3
-/// the IRQ mode mirrors the visible mode (no `2` lead), unlike lines 1-143.
+/// S2b/S5-refine: the mode-2 lead is suppressed on line 0 — the OAM STAT IRQ
+/// does not fire one dot early there (`display.c:1778` "except on line 0"), so
+/// at dot 3 the IRQ mode mirrors the visible mode (no `2` lead), unlike lines
+/// 1-143. Line 0 instead pulses the OAM source *at* the visible mode→2 edge
+/// (dot 4, `display.c:1792`'s unconditional set), then falls to NONE —
+/// `ModeTimeline::mode2_irq_offset(0) == 0`.
 #[test]
 fn mode_for_interrupt_has_no_mode2_lead_on_line_0() {
     let mut p = dmg();
@@ -124,7 +127,22 @@ fn mode_for_interrupt_has_no_mode2_lead_on_line_0() {
         p.vis_mode(),
         "line 0 dot 3: no mode-2 lead (IRQ mode mirrors the visible mode)"
     );
-    // Contrast: the same dot on the next line DOES lead (IRQ 2, visible 0).
+    // Line 0's OWN OAM pulse: at the visible edge (dot 4), not one dot early.
+    run_to(&mut p, 0, 4);
+    assert_eq!(
+        (p.vis_mode(), p.mode_for_interrupt()),
+        (2, 2),
+        "line 0 dot 4: OAM pulse at the visible edge (no lead)"
+    );
+    // Then the source falls to NONE for the OAM-search body (so a later LYC
+    // rise can re-fire — STAT blocking), like every other line.
+    run_to(&mut p, 0, 5);
+    assert_eq!(
+        p.mode_for_interrupt(),
+        crate::stat_update::MODE_FOR_INTERRUPT_NONE,
+        "line 0 dot 5: OAM source falls to NONE after its 1-dot pulse"
+    );
+    // Contrast: the same dot-3 lead on the next line DOES fire early.
     run_to(&mut p, 1, 3);
     assert_eq!(
         (p.vis_mode(), p.mode_for_interrupt()),
