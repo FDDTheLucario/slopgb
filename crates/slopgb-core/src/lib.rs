@@ -15,6 +15,7 @@
 pub(crate) mod apu;
 pub(crate) mod cartridge;
 pub(crate) mod cpu;
+pub(crate) mod cycle_clock;
 pub(crate) mod interconnect;
 pub(crate) mod joypad;
 pub(crate) mod model;
