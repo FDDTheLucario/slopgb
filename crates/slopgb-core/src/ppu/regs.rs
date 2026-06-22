@@ -282,10 +282,40 @@ impl Ppu {
                 // The comparison retriggers immediately on LYC writes while
                 // the comparison clock runs (`stat_lyc_onoff`).
                 if self.enabled && old != value {
+                    let before = self.pending_if;
                     if self.model.is_cgb() {
                         self.write_lyc_cgb(old, value);
                     } else {
                         self.write_lyc_dmg(old, value);
+                    }
+                    if self.leading_edge_reads && (self.pending_if & !before) & IF_STAT != 0 {
+                        // `& !before` keys on a NEWLY-set STAT bit (the trigger
+                        // fired this call), not one already pending from an
+                        // earlier tick this M-cycle — so the sync only fires for
+                        // the double-fire case and never over-suppresses a
+                        // legitimate dot-engine rise (the un-gated form dropped
+                        // 15 SameBoy-passing rows, A11).
+                        // Port Stage A12 — the FF45 analogue of A11. The
+                        // gambatte LYC-write trigger above just fired; re-derive
+                        // `lyc_interrupt_line` for the NEW LYC (the engine's LYC
+                        // input, normally latched in `stat_update_tick`) and
+                        // re-sync the `StatUpdate` line so the next dot-clocked
+                        // tick does NOT re-fire the same match as a 0→1 rise
+                        // (`ff45_match_fires_once_flag_on`). Gated on the
+                        // trigger having fired — a write that does not trigger
+                        // here leaves the line for the dot engine to raise
+                        // legitimately next tick. The edge is discarded.
+                        // Read-frame-independent, flag-gated → byte-identical
+                        // flag-OFF.
+                        let ly = self.ly_for_comparison();
+                        if ly != -1 {
+                            self.lyc_interrupt_line = ly == i16::from(self.lyc);
+                        }
+                        let _ = self.stat_update.update(
+                            self.mode_for_interrupt,
+                            self.stat_en,
+                            self.lyc_interrupt_line,
+                        );
                     }
                 } else {
                     self.lyc_event = value;

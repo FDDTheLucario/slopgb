@@ -1021,6 +1021,38 @@ fn ff41_enable_lyc_fires_once_flag_on() {
     );
 }
 
+/// Port Stage A12 — an FF45 (LYC) write that creates a match fires the STAT IF
+/// exactly ONCE on the flag-on path, the FF45 analogue of A11. `write_lyc_*`
+/// fires the gambatte LYC-write trigger; without A12 the dot-clocked
+/// `stat_update_tick` then re-sees `lyc_interrupt_line` rise next tick and
+/// double-fires (flag-off fires 1, flag-on fired 2). The fix re-derives
+/// `lyc_interrupt_line` for the new LYC and re-syncs the `StatUpdate` line when
+/// the write-trigger fired, so the next tick sees no fresh rise.
+#[test]
+fn ff45_match_fires_once_flag_on() {
+    let count = |flag_on: bool| -> u32 {
+        let mut p = dmg();
+        p.set_leading_edge_reads(flag_on);
+        p.write(0xFF40, 0x91);
+        p.write(0xFF41, 0x40); // enable the LYC source
+        run_to(&mut p, 5, 100); // line 5, mode-3 region, no match yet
+        let w = p.write(0xFF45, 5); // create the LYC=5 match
+        let mut fires = u32::from(w & 2 != 0);
+        for _ in 0..12 {
+            if p.tick() & 2 != 0 {
+                fires += 1;
+            }
+        }
+        fires
+    };
+    assert_eq!(count(false), 1, "flag-off: one IF for the LYC-match write");
+    assert_eq!(
+        count(true),
+        1,
+        "flag-on: one IF (write-trigger fires; A12 blocks the StatUpdate re-fire)"
+    );
+}
+
 /// Port Stage A10 — the DMG 145-153 dot-12 vblank OAM pulses are DEFERRED on
 /// the flag-on path (only the 144:0 entry pulse banks). The flag-off
 /// `stat_events_tick` engine fires them (`vblank_line_oam_pulses_dot12_dmg_only`
