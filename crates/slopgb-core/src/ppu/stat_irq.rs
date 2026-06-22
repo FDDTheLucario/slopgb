@@ -18,7 +18,24 @@ impl Ppu {
                 1
             }
         } else if self.glitch_line {
-            if self.dot < GLITCH_MODE3_START || self.line_render_done {
+            // Leading-edge (cc+0) reads sample the PPU 4 dots before the
+            // trailing cc+4 view, so the glitch line's mode-3 window must be
+            // back-dated the same 4 dots (single speed) to stay
+            // observationally neutral: the ENTRY boundary (mode 0→3) moves
+            // 78→74 and the EXIT (`line_render_done`, the visible 3→0 flip)
+            // is anticipated by `vis_early` rising 4 dots early (the glitch
+            // line takes the +4 `early_lead` in `m0_flip_events`). Both are
+            // exactly the A7 read-offset back-date, restricted to `vis_mode`
+            // — the OAM/VRAM/palette accessibility reads keep the raw
+            // `GLITCH_MODE3_START` (they are byte-identical flag-on,
+            // `lcdon_timing-GS` OAM/VRAM legs). Always 78 / never-`vis_early`
+            // flag-OFF, so production is byte-identical.
+            let start = if self.leading_edge_reads && !self.ds {
+                GLITCH_MODE3_START - 4
+            } else {
+                GLITCH_MODE3_START
+            };
+            if self.dot < start || self.line_render_done || self.vis_early {
                 0
             } else {
                 3

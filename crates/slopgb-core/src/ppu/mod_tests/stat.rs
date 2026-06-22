@@ -1197,6 +1197,41 @@ fn mode3_entry_backdates_four_dots_flag_on() {
     assert_eq!(entry(true), 80, "flag-on: back-dated 4 dots to dot 80");
 }
 
+/// Port Stage A13 — the flag-on LCD-enable glitch-line mode-3 boundary
+/// back-dates (`ppu-subdot-ladder.md` "A13"). On the leading-edge path the
+/// glitch first line's CPU-visible STAT mode-3 window is back-dated the full
+/// single-speed read offset (4 dots, like A7): the mode-0→3 ENTRY moves 78→74
+/// and the 3→0 EXIT (the `line_render_done` flip at dot 252) is anticipated by
+/// `vis_early` rising at dot 248, so the cc+0 FF41 read reproduces the flag-off
+/// cc+4 view (`lcdon_timing-GS` STAT tables; gambatte enable_display). Flag-OFF
+/// stays at (78, 252) — byte-identical production.
+#[test]
+fn glitch_line_mode3_backdates_four_dots_flag_on() {
+    // (entry, exit) dots of the glitch line's visible 0→3→0 STAT-mode window.
+    let window = |flag_on: bool| -> (u16, u16) {
+        let mut p = dmg();
+        p.set_leading_edge_reads(flag_on);
+        p.write(0xFF40, 0x81); // LCD off→on: line 0 is the glitch line
+        assert!(p.glitch_line, "FF40 enable must arm the glitch line");
+        let mut prev = p.vis_mode();
+        let mut entry = None;
+        for _ in 0..456 {
+            p.tick();
+            assert!(p.glitch_line, "exit must land before the glitch line ends");
+            let v = p.vis_mode();
+            if prev == 0 && v == 3 {
+                entry = Some(p.dot);
+            } else if prev == 3 && v == 0 {
+                return (entry.expect("entry before exit"), p.dot);
+            }
+            prev = v;
+        }
+        panic!("glitch line never completed a 0→3→0 mode window");
+    };
+    assert_eq!(window(false), (78, 252), "flag-off: entry 78, exit 252");
+    assert_eq!(window(true), (74, 248), "flag-on: both back-dated 4 dots");
+}
+
 /// Port Stage A6 — the flag-on mode-0 (HBlank) source rise carries the
 /// half-cycle halt law (`m0_rise`), the same mask the flag-off engine sets on
 /// its `m0_rise_dot`. (The rise's exact dot is still our cc+4 frame until the

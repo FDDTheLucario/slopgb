@@ -160,21 +160,23 @@ impl Ppu {
         // at SameBoy's `visible_mode0_dot` without moving the dispatch — the
         // instrumented kernel-pair separator (`m0int_m3stat_2` read reads mode 0,
         // `m2int_m3stat_1` stays mode 3). Bare lines use `lead + 3` (the S2c
-        // measurement, our-line dot 251); sprite/window lines use `lead + 4`
-        // (A9): their sprite-extended mode-3 geometry shifts the boundary, and
-        // +4 lands it at SameBoy's frame there — measured to lift the gambatte
-        // sprite `m3stat_2` reads (the sprite analogs of the kernel m0int, +40
-        // single-speed flag-on / 0 regress) + mooneye `intr_2_mode0_timing_
-        // sprites`, window reads neutral. Glitch + DS excluded (the DS read
-        // offset is 2, deferred). `leading_edge_reads` is off in production, so
-        // `vis_early` is never set there (byte-identical).
+        // measurement, our-line dot 251, the kernel −1 net shift); sprite/window
+        // lines use `lead + 4` (A9): their sprite-extended mode-3 geometry shifts
+        // the boundary, and +4 lands it at SameBoy's frame there — measured to
+        // lift the gambatte sprite `m3stat_2` reads (the sprite analogs of the
+        // kernel m0int, +40 single-speed flag-on / 0 regress) + mooneye
+        // `intr_2_mode0_timing_sprites`, window reads neutral. The LCD-enable
+        // glitch line (A13) also takes `lead + 4`: there +4 is the *full*
+        // single-speed read offset, so the visible mode→0 EXIT is observationally
+        // neutral — `vis_early` anticipates `line_render_done` by the same 4 dots
+        // the cc+0 read samples early, and `vis_mode`'s glitch branch (paired with
+        // its 78→74 entry back-date) reproduces the flag-off cc+4 view
+        // (`lcdon_timing-GS` STAT tables; gambatte enable_display / post-enable
+        // m3stat). `bare_flip` is false on the glitch line, so it lands in the +4
+        // arm. DS excluded (the DS read offset is 2, deferred). `leading_edge_reads`
+        // is off in production, so `vis_early` is never set there (byte-identical).
         let early_lead = if bare_flip { 3 } else { 4 };
-        if self.leading_edge_reads
-            && !self.glitch_line
-            && !self.ds
-            && !self.vis_early
-            && proj <= lead + early_lead
-        {
+        if self.leading_edge_reads && !self.ds && !self.vis_early && proj <= lead + early_lead {
             self.vis_early = true;
         }
         if proj <= lead {
