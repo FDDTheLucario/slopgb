@@ -1264,6 +1264,38 @@ fn glitch_line_mode3_backdates_four_dots_flag_on() {
     assert_eq!(window(true), (74, 248), "flag-on: both back-dated 4 dots");
 }
 
+/// Port Stage A14 — the glitch line's LYC *readable* compare back-dates 4
+/// dots on the leading-edge single-speed path, like A13's mode-3 window: a
+/// glitch-line FF41 read in the last 4 dots (≥ GLITCH_LINE_DOTS−4 = 448) is
+/// the cc+0 view of what its cc+4 trailing edge sees 4 dots later — the next
+/// line (line 1) at dots 0-3 (the −4 read offset). There the DMG readable
+/// coincidence flag is forced invalid (no-match), so the glitch compare drops
+/// Some(0)→None for those 4 dots. Flag-OFF stays Some(0) the whole glitch line
+/// (byte-identical production). The IRQ side is untouched (the glitch line's
+/// `ly_for_comparison` is −1, so `cmp_irq`/the flag-on STAT engine never re-see
+/// the match).
+#[test]
+fn glitch_line_lyc_compare_backdates_four_dots_flag_on() {
+    let compare_at = |flag_on: bool, dot: u16| -> Option<u8> {
+        let mut p = dmg();
+        p.set_leading_edge_reads(flag_on);
+        p.write(0xFF40, 0x81); // LCD off→on: line 0 is the glitch line
+        assert!(p.glitch_line, "FF40 enable must arm the glitch line");
+        run_to(&mut p, 0, dot);
+        assert!(p.glitch_line, "dot {dot} must still be on the glitch line");
+        p.compare_ly()
+    };
+    // Before the last 4 dots: LY=0 compare both paths (no back-date).
+    assert_eq!(compare_at(false, 447), Some(0), "flag-off dot 447");
+    assert_eq!(compare_at(true, 447), Some(0), "flag-on dot 447 (before window)");
+    // Last 4 dots map to line-1 dots 0-3: flag-off holds Some(0); flag-on DMG
+    // back-dates to the line-1 no-match (None).
+    for dot in 448..=451 {
+        assert_eq!(compare_at(false, dot), Some(0), "flag-off glitch dot {dot}");
+        assert_eq!(compare_at(true, dot), None, "flag-on glitch dot {dot}");
+    }
+}
+
 /// Port Stage A6 — the flag-on mode-0 (HBlank) source rise carries the
 /// half-cycle halt law (`m0_rise`), the same mask the flag-off engine sets on
 /// its `m0_rise_dot`. (The rise's exact dot is still our cc+4 frame until the

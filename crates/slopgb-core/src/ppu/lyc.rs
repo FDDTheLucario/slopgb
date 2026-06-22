@@ -8,6 +8,19 @@ impl Ppu {
     /// docs. The IRQ-side comparison uses [`Self::compare_ly_irq`].
     pub(super) fn compare_ly(&self) -> Option<u8> {
         if self.glitch_line {
+            // On the leading-edge (cc+0) read frame, a glitch-line FF41
+            // read in the last 4 dots is the cc+0 view of what its cc+4
+            // trailing edge sees 4 dots later — the *next* line (line 1)
+            // at dots 0-3 (the −4 read offset, exactly A7/A13's mode
+            // back-date). Back-date the readable compare to that line-1
+            // dots-0-3 value: DMG forces the coincidence flag invalid
+            // there (None), CGB holds 0 (its readable flag = LY−1 = 0
+            // across dots 0-3, so no change). Single-speed only (the DS
+            // read offset differs); gated `leading_edge_reads`, so flag-off
+            // production stays Some(0) the whole glitch line (byte-identical).
+            if self.leading_edge_reads && !self.ds && self.dot >= GLITCH_LINE_DOTS - 4 {
+                return if self.model.is_cgb() { Some(0) } else { None };
+            }
             // LCD enable: the comparison runs immediately with LY=0
             // (`stat_lyc_onoff` rounds 1-4).
             return Some(0);
