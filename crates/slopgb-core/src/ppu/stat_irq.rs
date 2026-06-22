@@ -394,6 +394,62 @@ impl Ppu {
             self.pending_if |= IF_STAT;
             self.stat_update_halt_masks(mfi);
         }
+        self.stat_update_vblank_oam_pulses();
+    }
+
+    /// Port Stage A10 — the vblank-entry OAM (mode-2) STAT pulse the flag-on
+    /// rising-edge [`Self::stat_update_tick`] engine does not emit.
+    ///
+    /// In vblank [`Self::update_mode_for_interrupt`] mirrors [`Self::vis_mode`]
+    /// (mode 0 across 144:0-3, mode 1 from 144:4), so `mode_for_interrupt` never
+    /// selects the OAM (mode-2) source there and the `GB_STAT_update` line never
+    /// rises for it. SameBoy raises the 144-entry pulse as a **direct `IF |= 2`
+    /// poke** (`display.c:2160`), independent of `stat_interrupt_line`, NOT a
+    /// line rise. This reproduces it on the flag-on path with the *same* guard
+    /// and commit masks the flag-off [`Self::stat_events_tick`] engine uses (the
+    /// `vblank_stat_intr-GS` DMG / `-C` CGB lift; flag-on it recovers 5 mooneye
+    /// combos and 8 gambatte rows with zero SameBoy-passing rows lost — see
+    /// `ppu-subdot-ladder.md` "A10").
+    ///
+    /// The visible-line m2 pulses (lines 1-143 dot 0) are already covered by the
+    /// rising-edge engine — its level-OR naturally reproduces `m2_pulse_fires`'
+    /// `¬HBlank` / `¬held-LYC` blocking (a held source keeps the line high → no
+    /// edge) — so only the 144:0 slot `mode_for_interrupt` skips is added here,
+    /// and it cannot double-fire with the engine (at 144:0 `mfi==0`, and
+    /// `m2_pulse_fires` requires HBlank disabled, so a held HBlank that would
+    /// raise the engine line is exactly the case the pulse is suppressed). The
+    /// DMG 145-153 dot-12 pulses are deferred (see below).
+    fn stat_update_vblank_oam_pulses(&mut self) {
+        // 144-entry OAM pulse (`display.c:2160`), one M-cycle before the vblank
+        // IF, on both families. The DMG commit is halt- *and* dispatch-late so
+        // `vblank_stat_intr-GS` observes it together with the vblank IF; the CGB
+        // 144 entry is exempt and is visible in its own cycle
+        // (`vblank_stat_intr-C`). Same `!glitch_line` + `m2_pulse_fires` guards
+        // as the flag-off line-start pulse (the previous line's held LYC compare
+        // blocks it; a glitched LCD-enable line runs no OAM scan, no pulse).
+        if !self.glitch_line
+            && self.line == 144
+            && self.dot == 0
+            && self.m2_pulse_fires(self.stat_en)
+        {
+            self.pending_if |= IF_STAT;
+            if !self.model.is_cgb() {
+                self.stat_late = true;
+                self.stat_halt_late = true;
+            }
+        }
+        // The DMG per-line vblank OAM pulses at dot 12 (`display.c:2185`;
+        // `stat_events_tick`'s 145-153 block; `intr_1_2_timing-GS`) are
+        // DEFERRED with the rest of the atomic read-frame work. Adding them on
+        // the flag-on path was MEASURED net-negative (`ppu-subdot-ladder.md`
+        // "A10"): the extra dot-12 IF regresses 6 SameBoy-PASSING rows
+        // (gambatte ly0/lycint152_m2irq, lycm2int/lyc0m2int_m2irq,
+        // window/late_enable_afterVblank ×4 — all in the SameBoy gap list).
+        // SameBoy fires these pulses too, so they are faithful, but flag-on's
+        // cc+4 read/halt frame mis-places the resulting read until the global
+        // reclock lands — exactly the atomic-convergence trap. The 144:0
+        // entry pulse above does NOT have this problem (zero lift lost,
+        // +8 gambatte / +5 mooneye), so it banks standalone.
     }
 
     /// Port Stage A6 — the halt/interrupt-sample commit masks for the flag-on

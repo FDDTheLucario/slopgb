@@ -929,6 +929,83 @@ fn vblank_line_oam_pulses_dot12_dmg_only() {
     assert_eq!(ifs & 2, 0, "CGB: no vblank-line OAM pulses");
 }
 
+/// Port Stage A10 — the vblank-ENTRY OAM (mode-2) STAT pulse on the flag-on
+/// [`Ppu::stat_update_tick`] path. The `GB_STAT_update` rising-edge engine
+/// mirrors `vis_mode` in vblank (mode 0 at 144:0-3, mode 1 from 144:4), so it
+/// never selects the OAM source there and emits no 144:0 pulse — SameBoy raises
+/// it as a direct `IF |= 2` poke (`display.c:2160`), not a line rise. These
+/// flag-on variants of `oam_pulse_at_vblank_entry_dmg` / `_cgb_not_halt_late`
+/// pin the pulse (and its DMG halt/dispatch-late masks, the CGB 144 exemption)
+/// against the flag-off engine — the `vblank_stat_intr-GS`/`-C` lift. The DMG
+/// 145-153 dot-12 pulses are deferred (measured net-negative flag-on, see
+/// `Ppu::stat_update_vblank_oam_pulses`).
+#[test]
+fn vblank_oam_pulse_144_entry_dmg_flag_on() {
+    let mut p = dmg();
+    p.set_leading_edge_reads(true);
+    p.write(0xFF41, 0x20);
+    p.write(0xFF40, 0x81);
+    run_to(&mut p, 143, 455);
+    p.take_stat_halt_late();
+    p.take_stat_late();
+    assert_eq!(p.tick(), 0x02, "flag-on DMG OAM pulse at 144:0");
+    assert!(
+        p.take_stat_halt_late(),
+        "flag-on DMG 144:0 pulse is halt-late"
+    );
+    assert!(
+        p.take_stat_late(),
+        "flag-on DMG 144:0 pulse is dispatch-late too"
+    );
+    tick_n(&mut p, 3);
+    assert_eq!(p.tick() & 1, 1, "vblank IF at 144:4");
+}
+
+#[test]
+fn vblank_oam_pulse_144_entry_cgb_flag_on_not_halt_late() {
+    let mut c = cgb();
+    c.set_leading_edge_reads(true);
+    c.write(0xFF41, 0x20);
+    c.write(0xFF40, 0x81);
+    run_to(&mut c, 143, 300);
+    let ifs = run_to(&mut c, 143, 455);
+    assert_eq!(ifs & 2, 0, "no OAM edge between the flip and 144:0");
+    c.take_stat_halt_late();
+    c.take_stat_late();
+    assert_eq!(
+        tick_n(&mut c, 2) & 2,
+        2,
+        "flag-on CGB OAM pulse in 144:0 cycle"
+    );
+    assert!(
+        !c.take_stat_halt_late(),
+        "flag-on CGB 144:0 pulse is not halt-late"
+    );
+    assert!(
+        !c.take_stat_late(),
+        "flag-on CGB 144:0 pulse dispatches in its own cycle"
+    );
+}
+
+/// Port Stage A10 — the DMG 145-153 dot-12 vblank OAM pulses are DEFERRED on
+/// the flag-on path (only the 144:0 entry pulse banks). The flag-off
+/// `stat_events_tick` engine fires them (`vblank_line_oam_pulses_dot12_dmg_only`
+/// above) and SameBoy raises them too (`display.c:2185`), but adding them
+/// flag-on was measured net-negative — it regresses 6 SameBoy-passing rows
+/// whose cc+4 read frame mis-places the resulting read (atomic, lands at the
+/// Phase-B reclock). This pins that the flag-on engine stays silent at dot 12
+/// until then, guarding against re-adding the pulse prematurely.
+#[test]
+fn vblank_line_oam_pulses_dot12_deferred_flag_on() {
+    let mut p = dmg();
+    p.set_leading_edge_reads(true);
+    p.write(0xFF41, 0x20);
+    p.write(0xFF40, 0x81);
+    run_to(&mut p, 145, 0);
+    let ifs = run_to(&mut p, 153, 450);
+    assert_eq!(ifs & 2, 0, "flag-on DMG: dot-12 vblank OAM pulses deferred");
+}
+
 /// Port Stage A6 — the flag-on [`Ppu::stat_update_tick`] halt-commit-mask
 /// calibration (`ppu-subdot-ladder.md` "A6"). The mode-2 (OAM) line-start pulse
 /// takes the **halt-exit** mask (`stat_halt_late`) but NOT the
