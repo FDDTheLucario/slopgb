@@ -1053,6 +1053,38 @@ fn ff45_match_fires_once_flag_on() {
     );
 }
 
+/// Write-coherence guard (the FF40 leg of the A11/A12 systematic sweep) — an
+/// FF40 LCD-enable that raises the STAT line (LYC source pre-enabled, LY=0=LYC
+/// matches on the glitch line) fires the STAT IF exactly ONCE on BOTH paths,
+/// with NO fix needed (unlike FF41/FF45). `write_lcdc`'s enable path runs
+/// `legacy_level_edge` (the gambatte STAT edge), but the flag-on dot-clocked
+/// `stat_update_tick` does NOT double-fire it: the rise lands on the glitch
+/// line, where the engine's LYC input is inert (`ly_for_comparison` returns
+/// -1, so the LYC latch never re-sees the match) — and the disable path is a
+/// non-issue (LCD off → `stat_update_tick`'s `!enabled` early-return holds the
+/// engine low). So FF40 needs no A11/A12-style gated re-sync; this pins that
+/// (a future change that made the engine fire LYC on the glitch line would
+/// re-introduce the double-fire and trip here).
+#[test]
+fn ff40_enable_lyc_match_fires_once_flag_on() {
+    let count = |flag_on: bool| -> u32 {
+        let mut p = dmg();
+        p.set_leading_edge_reads(flag_on);
+        p.write(0xFF45, 0); // LYC = 0 (matches LY=0 on the enable glitch line)
+        p.write(0xFF41, 0x40); // enable the LYC source (LCD still off)
+        let w = p.write(0xFF40, 0x91); // enable the LCD → STAT line rises
+        let mut fires = u32::from(w & 2 != 0);
+        for _ in 0..12 {
+            if p.tick() & 2 != 0 {
+                fires += 1;
+            }
+        }
+        fires
+    };
+    assert_eq!(count(false), 1, "flag-off: one IF for the enabling LCDC write");
+    assert_eq!(count(true), 1, "flag-on: one IF (no StatUpdate double-fire)");
+}
+
 /// Port Stage A10 — the DMG 145-153 dot-12 vblank OAM pulses are DEFERRED on
 /// the flag-on path (only the 144:0 entry pulse banks). The flag-off
 /// `stat_events_tick` engine fires them (`vblank_line_oam_pulses_dot12_dmg_only`
