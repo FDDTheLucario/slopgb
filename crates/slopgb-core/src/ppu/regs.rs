@@ -221,6 +221,31 @@ impl Ppu {
                     self.stat_en = data;
                     self.stage_stat_copies();
                     self.refresh_cmp(false);
+                    if self.leading_edge_reads && fire {
+                        // Port Stage A11 — when the gambatte write-trigger
+                        // fired (`fire`), re-sync the flag-on [`StatUpdate`]
+                        // line to the post-write level so the next dot-clocked
+                        // `stat_update_tick` does NOT re-fire the SAME edge.
+                        // Without this, enabling a source whose condition is
+                        // already met fires IF twice flag-on: once here, again
+                        // when the dot engine re-sees the new enable as a 0→1
+                        // rise (`ff41_enable_lyc_fires_once_flag_on`). The edge
+                        // is discarded — the write-trigger keeps gambatte's
+                        // position-exact fire (replacing it wholesale with the
+                        // rising edge is net-negative in our cc+4 frame,
+                        // `ppu-subdot-ladder.md` "A11"); this only seeds the
+                        // line level. Gated on `fire`: a write that does NOT
+                        // trigger here must leave the line untouched so a
+                        // legitimate dot-engine rise next tick still fires (the
+                        // un-gated sync suppressed 15 such lifts — measured).
+                        // Read-frame-independent, flag-gated → byte-identical
+                        // flag-OFF.
+                        let _ = self.stat_update.update(
+                            self.mode_for_interrupt,
+                            data,
+                            self.lyc_interrupt_line,
+                        );
+                    }
                 } else {
                     self.stat_en = data;
                     self.flush_stat_copies();

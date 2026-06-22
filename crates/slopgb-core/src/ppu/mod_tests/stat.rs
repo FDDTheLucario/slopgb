@@ -987,6 +987,40 @@ fn vblank_oam_pulse_144_entry_cgb_flag_on_not_halt_late() {
     );
 }
 
+/// Port Stage A11 — an FF41 write that enables a source whose condition is
+/// already met fires the STAT IF exactly ONCE on the flag-on path. SameBoy
+/// computes the write-fire through `GB_STAT_update` (the rising-edge engine)
+/// after `write_stat` (`display.c`); the flag-on path must do the same instead
+/// of *also* running the gambatte `stat_write_trigger`, which would double-fire
+/// (once on the write, again on the next dot-clocked `stat_update_tick` rising
+/// edge re-seeing the new enable). Flag-off keeps the gambatte write-trigger and
+/// fires once (its dot-clocked `stat_events_tick` LYC event already passed). The
+/// double-fire is read-frame-independent, so this banks standalone.
+#[test]
+fn ff41_enable_lyc_fires_once_flag_on() {
+    let count = |flag_on: bool| -> u32 {
+        let mut p = dmg();
+        p.set_leading_edge_reads(flag_on);
+        p.write(0xFF45, 2); // LYC = 2
+        p.write(0xFF40, 0x91);
+        run_to(&mut p, 2, 100); // line 2 (LYC matches), mode-3 region
+        let w = p.write(0xFF41, 0x40); // enable the LYC source
+        let mut fires = u32::from(w & 2 != 0);
+        for _ in 0..12 {
+            if p.tick() & 2 != 0 {
+                fires += 1;
+            }
+        }
+        fires
+    };
+    assert_eq!(count(false), 1, "flag-off: one IF for the enabling write");
+    assert_eq!(
+        count(true),
+        1,
+        "flag-on: one IF (the rising-edge engine, no write-trigger double-fire)"
+    );
+}
+
 /// Port Stage A10 — the DMG 145-153 dot-12 vblank OAM pulses are DEFERRED on
 /// the flag-on path (only the 144:0 entry pulse banks). The flag-off
 /// `stat_events_tick` engine fires them (`vblank_line_oam_pulses_dot12_dmg_only`
