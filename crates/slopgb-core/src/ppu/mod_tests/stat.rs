@@ -1264,6 +1264,60 @@ fn glitch_line_mode3_backdates_four_dots_flag_on() {
     assert_eq!(window(true), (74, 248), "flag-on: both back-dated 4 dots");
 }
 
+/// Port Stage A15 — the LCD-enable glitch line raises NO mode-0 (HBlank) STAT
+/// IRQ in its line-start prefix (single speed). The glitch prefix shows visible
+/// mode 0 but it is the LCD-enable glitch, not a real hblank, so
+/// `stat_line_level` / `stat_write_trigger_dmg` suppress the HBlank source there.
+/// The rising-edge engine's glitch `mode_for_interrupt` used to mirror `vis_mode`
+/// (mode 0 in the prefix) and fired a spurious m0 IRQ at the first glitch dot
+/// (`enable_display/ly0_m0irq_trigger` rendered E2 flag-on vs SameBoy/gambatte's
+/// out0). Now the SS prefix selects NONE; only the real post-render glitch m0
+/// fires. (`dmg()` is single speed, so the `!ds` gate is active here.) Flag-OFF
+/// is byte-identical (`mode_for_interrupt` is unread there).
+#[test]
+fn glitch_line_prefix_suppresses_m0_irq_flag_on() {
+    // mode_for_interrupt across the glitch line with HBlank enabled (single speed).
+    let mut p = dmg();
+    p.set_leading_edge_reads(true);
+    p.write(0xFF41, 0x08); // HBlank (mode-0) source only
+    p.write(0xFF40, 0x81); // LCD off→on: line 0 is the glitch line
+    assert!(p.glitch_line, "FF40 enable must arm the glitch line");
+    let none = crate::stat_update::MODE_FOR_INTERRUPT_NONE;
+    // Count the STAT IF emissions across the whole glitch line and record the
+    // prefix `mode_for_interrupt`.
+    let mut fires = 0u32;
+    let mut prefix_mfi_seen_none = false;
+    let mut prefix_mfi_seen_zero = false;
+    for _ in 0..456 {
+        let ifs = p.tick();
+        if !p.glitch_line {
+            break;
+        }
+        if ifs & 2 != 0 {
+            fires += 1;
+        }
+        if p.dot < GLITCH_MODE3_START {
+            match p.mode_for_interrupt() {
+                m if m == none => prefix_mfi_seen_none = true,
+                0 => prefix_mfi_seen_zero = true,
+                _ => {}
+            }
+        }
+    }
+    assert!(
+        prefix_mfi_seen_none,
+        "the glitch prefix must select NONE (no mode source)"
+    );
+    assert!(
+        !prefix_mfi_seen_zero,
+        "the glitch prefix must NOT select mode 0 (would fire a spurious m0 IRQ)"
+    );
+    assert_eq!(
+        fires, 1,
+        "exactly one glitch-line m0 IRQ (the real post-render flip), not a prefix double-fire"
+    );
+}
+
 /// Port Stage A14 — the glitch line's LYC *readable* compare back-dates 4
 /// dots on the leading-edge single-speed path, like A13's mode-3 window: a
 /// glitch-line FF41 read in the last 4 dots (≥ GLITCH_LINE_DOTS−4 = 448) is

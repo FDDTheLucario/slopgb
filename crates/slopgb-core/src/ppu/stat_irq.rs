@@ -743,17 +743,50 @@ impl Ppu {
         };
         self.mode_for_interrupt = if !self.enabled {
             0
-        } else if self.line >= 144 || self.glitch_line {
-            // VBlank / glitch line. The visible mode IS the IRQ mode here:
-            // `vis_mode` already yields line 144's HBlank carryover (mode 0,
-            // dots 0-3) flipping to the VBlank source (mode 1) at the
-            // vblank-entry step (`display.c:2178`, ~dot 4), and mode 1 for every
-            // later vblank line (145-153) — there is no mode-2 carryover into
-            // vblank (`display.c:2138` skips `LINES-1`) and no `-1` gap. The
-            // per-line DMG OAM vblank pulses + the line-144 OAM IF pokes are
-            // direct `IF |= 2` writes (`display.c:2160`, `:2185`), handled in
-            // the STAT engine, not `mode_for_interrupt` transitions. (The glitch
-            // line keeps the visible mode unrefined — STAT swap S5.)
+        } else if self.glitch_line {
+            // Port Stage A15 — the LCD-enable glitch line. `vis_mode` yields
+            // mode 0 in TWO regions: the line-start PREFIX (`dot < GLITCH_MODE3_START`,
+            // before the glitch mode-3 window) and the post-render tail
+            // (`line_render_done`/`vis_early`). Only the tail is a real hblank;
+            // the prefix is the LCD-enable glitch, which raises NO mode-0 STAT
+            // IRQ — `stat_line_level` and `stat_write_trigger_dmg` both suppress
+            // the HBlank source there with `!(glitch_line && dot < GLITCH_MODE3_START)`.
+            // The rising-edge engine had no such guard: with HBlank enabled it
+            // saw mode 0 in the prefix and fired a spurious m0 IRQ at the first
+            // glitch dot (SameBoy + gambatte render outE0; the bare engine gave
+            // E2 — `enable_display/ly0_m0irq`, `irq_precedence/late_m0irq_retrigger`).
+            // Select NONE in the prefix so no mode source contributes (LYC still
+            // can — `level` ORs them); keep `vis_mode` (the real post-render m0,
+            // or mode 3) elsewhere. `mode_for_interrupt` is inert flag-OFF
+            // (`stat_events_tick` never reads it), so production is byte-identical.
+            //
+            // SINGLE SPEED only (`!ds`): the recovered slice is the single-speed
+            // `enable_display/ly0_m0irq_trigger` (+2 flag-on, SameBoy-confirmed
+            // out0). The double-speed `ly0_m0irq_scxN_ds_{1,2}` reads BRACKET the
+            // glitch m0 IRQ dot (`_1` wants outE0 / read before, `_2` wants outE2
+            // / read after), which our whole-dot model misframes (fires at the
+            // prefix AND the post-render dot, never the DS mid-line dot SameBoy
+            // hits) — so suppressing the DS prefix is a read-frame A/B swap that
+            // drops the SameBoy-passing `ly0_m0irq_scx0_ds_2` (outE2). That DS
+            // slice is part of the atomic Phase-B reclock, deferred. Measured
+            // (`ppu-subdot-ladder.md` "A15"): SS-gated = +2 / 0 regress / 0 lift
+            // lost; universal = +6 / 0 regress / −1 SameBoy-passing drop.
+            let vm = self.vis_mode();
+            if vm == 0 && !self.ds && !(self.line_render_done || self.vis_early) {
+                crate::stat_update::MODE_FOR_INTERRUPT_NONE
+            } else {
+                vm
+            }
+        } else if self.line >= 144 {
+            // VBlank. The visible mode IS the IRQ mode here: `vis_mode` already
+            // yields line 144's HBlank carryover (mode 0, dots 0-3) flipping to
+            // the VBlank source (mode 1) at the vblank-entry step
+            // (`display.c:2178`, ~dot 4), and mode 1 for every later vblank line
+            // (145-153) — there is no mode-2 carryover into vblank
+            // (`display.c:2138` skips `LINES-1`) and no `-1` gap. The per-line
+            // DMG OAM vblank pulses + the line-144 OAM IF pokes are direct
+            // `IF |= 2` writes (`display.c:2160`, `:2185`), handled in the STAT
+            // engine, not `mode_for_interrupt` transitions.
             self.vis_mode()
         } else if self.dot < 84 {
             // Mode-2 region. SameBoy holds the OAM STAT source high across the
