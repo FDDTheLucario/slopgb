@@ -63,9 +63,29 @@ impl GameBoy {
     /// No boot ROM is executed: CPU registers, hardware registers and timers
     /// are initialised to the exact post-boot state of `model`.
     pub fn new(model: Model, rom: Vec<u8>) -> Result<Self, CartridgeError> {
+        Self::new_inner(model, rom, false)
+    }
+
+    /// Like [`Self::new`], but enables the Stage-B Tier-2 reclock *before* the
+    /// post-boot state is applied, so the deferred-frame DIV phase
+    /// re-calibration (`interconnect/boot.rs`, the `boot_div`/`boot_sclk` fix)
+    /// lands at hand-off. This mirrors the production path once the port flips
+    /// the construction default; the runtime [`Self::set_tier2_reclock`] toggle
+    /// cannot reproduce it because boot has already run by the time it is
+    /// called. Off-path (and `set_tier2_reclock`-only) construction is
+    /// unchanged.
+    #[doc(hidden)]
+    pub fn new_with_reclock(model: Model, rom: Vec<u8>) -> Result<Self, CartridgeError> {
+        Self::new_inner(model, rom, true)
+    }
+
+    fn new_inner(model: Model, rom: Vec<u8>, tier2: bool) -> Result<Self, CartridgeError> {
         let cart = cartridge::Cartridge::from_bytes(rom)?;
         let mut bus = interconnect::Interconnect::new(model, cart);
         let mut cpu = cpu::Cpu::new(model);
+        if tier2 {
+            bus.set_tier2_reclock(true);
+        }
         bus.apply_post_boot_state();
         if bus.cgb_mode() {
             // CGB-flagged cart: the CGB/AGB boot ROM hands off DE=$FF56

@@ -739,6 +739,53 @@ fn tier2_intr_2_sprites_passes() {
     }
 }
 
+/// Port Stage B C0 — the deferred-frame DIV/serial re-calibration. The
+/// post-boot `div_counter` constants (`model.rs`) are calibrated for the eager
+/// tick-then-access frame (register reads sample the timer at cc+4); the
+/// deferred-commit reclock samples every read at the M-cycle leading edge
+/// (cc+0), one M-cycle earlier, so the boot hand-off DIV phase advances 4 T
+/// under `tier2_reclock` (`interconnect/boot.rs`) to land on SameBoy's
+/// leading-edge frame. Without it `boot_div-*` reads positioned just after a
+/// DIV-byte increment lose 1, and the DIV-derived serial clock fails
+/// `boot_sclk_align`. SameBoy passes all of these reading at cc+0 (its
+/// `div_counter` rides the same +1-M-cycle timeline). Production (flag-off) is
+/// byte-identical — the +4 is gated on `tier2_reclock`, and leading-edge-only
+/// leaves DIV at cc+4.
+#[test]
+fn tier2_boot_div_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr("tier2_boot_div", "game-boy-test-roms collection not present");
+        return;
+    };
+    // (rel path under the mooneye-test-suite, model legs the suffix runs on).
+    let legs: &[(&str, &[Model])] = &[
+        ("acceptance/boot_div-dmgABCmgb.gb", &[Model::Dmg, Model::Mgb]),
+        ("acceptance/boot_div-dmg0.gb", &[Model::Dmg0]),
+        ("acceptance/boot_div-S.gb", &[Model::Sgb, Model::Sgb2]),
+        ("acceptance/boot_div2-S.gb", &[Model::Sgb, Model::Sgb2]),
+        ("misc/boot_div-A.gb", &[Model::Agb]),
+        ("misc/boot_div-cgbABCDE.gb", &[Model::Cgb]),
+        (
+            "acceptance/serial/boot_sclk_align-dmgABCmgb.gb",
+            &[Model::Dmg, Model::Mgb],
+        ),
+    ];
+    for (rel, models) in legs {
+        let path = root.join("mooneye-test-suite").join(rel);
+        let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        for &model in *models {
+            // boot_div's DIV phase is decided at hand-off, so the reclock must
+            // be on *before* the post-boot state lands — the runtime toggle is
+            // too late (see `harness::boot_with_reclock`).
+            let mut gb = harness::boot_with_reclock(&rom, model);
+            harness::run_until_breakpoint(&mut gb, 30_000_000)
+                .unwrap_or_else(|e| panic!("{rel} [{model:?}] (tier2 flag-on): {e}"));
+            harness::check_fib(&gb)
+                .unwrap_or_else(|e| panic!("{rel} [{model:?}] (tier2 flag-on): {e}"));
+        }
+    }
+}
+
 /// Self-verifying inventory: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// covers the on-disk ROM set exactly, with the exemptions pinned to the
 /// documented 50-entry list.
