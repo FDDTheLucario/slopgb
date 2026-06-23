@@ -786,6 +786,32 @@ fn tier2_boot_div_passes() {
     }
 }
 
+/// Port Stage B C1 — mooneye `intr_2_mode3_timing` on the deferred reclock.
+/// The test counts STAT-read polls from the mode-2 IRQ to the mode-3 read;
+/// the CPU-visible 2→3 entry boundary (`mode3_entry_dot`) was back-dated 4
+/// dots (80) for the leading-edge-only frame, but the Tier-2 deferred read
+/// samples the entry at the trailing frame, so 80 made it see mode 3 one
+/// M-cycle early (`test_iter 2` → 1 poll, want 2). Restoring the flag-off 84
+/// under `tier2_reclock` passes it both models. Production (flag-off) is
+/// byte-identical — the tier2 branch only fires on the reclock path.
+#[test]
+fn tier2_intr_2_mode3_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr("tier2_intr_2_mode3", "game-boy-test-roms collection not present");
+        return;
+    };
+    let rel = "mooneye-test-suite/acceptance/ppu/intr_2_mode3_timing.gb";
+    let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+    for model in [Model::Dmg, Model::Cgb] {
+        let mut gb = harness::boot(&rom, model);
+        gb.set_tier2_reclock(true);
+        harness::run_until_breakpoint(&mut gb, 30_000_000)
+            .unwrap_or_else(|e| panic!("{rel} [{model:?}] (tier2 flag-on): {e}"));
+        harness::check_fib(&gb)
+            .unwrap_or_else(|e| panic!("{rel} [{model:?}] (tier2 flag-on): {e}"));
+    }
+}
+
 /// Self-verifying inventory: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// covers the on-disk ROM set exactly, with the exemptions pinned to the
 /// documented 50-entry list.

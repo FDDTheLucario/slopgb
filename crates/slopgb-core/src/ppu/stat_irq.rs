@@ -63,20 +63,28 @@ impl Ppu {
 
     /// The dot the CPU-visible STAT mode flips 2→3 (the mode-2 OAM scan end).
     ///
-    /// Port Stage A7 — on the leading-edge (cc+0) flag-on path the boundary is
-    /// back-dated by the read offset (4 dots, single speed) to dot 80, so the
-    /// cc+0 FF41 read reproduces the flag-off cc+4 mode-3 detection timing: the
-    /// leading-edge read latches the PPU 4 dots before the trailing view, and
-    /// moving the boundary the same 4 dots makes that read **observationally
-    /// neutral** for the mode-2→3 entry (mooneye `intr_2_mode3_timing` passes
-    /// flag-on). This contrasts with the mode-0 *exit*, which `vis_early`
-    /// back-dates one dot LESS than the read offset (3, not 4) precisely so the
-    /// −1 net shift lands `m0int_m3stat_2`'s read on mode 0 (the kernel
-    /// separation). Single speed only (the DS read offset is 2, deferred with the
-    /// rest of the DS back-dating); always 84 flag-OFF, so production is
-    /// byte-identical.
+    /// Port Stage A7 — on the **leading-edge-only** (cc+0 read, eager machine)
+    /// flag-on path the boundary is back-dated by the read offset (4 dots,
+    /// single speed) to dot 80, so the cc+0 FF41 read reproduces the flag-off
+    /// cc+4 mode-3 detection timing: the leading-edge read latches the PPU 4
+    /// dots before the trailing view, and moving the boundary the same 4 dots
+    /// makes that read **observationally neutral** for the mode-2→3 entry
+    /// (mooneye `intr_2_mode3_timing` passes LE-only).
+    ///
+    /// Port Stage B C1 — the **Tier-2 deferred-commit** frame does NOT take
+    /// that back-date (84, the flag-off value). The deferred read pays the
+    /// previous M-cycle's parked debt — advancing the PPU to this cycle's
+    /// leading edge — then samples; for the 2→3 ENTRY that lands the read at
+    /// the trailing (cc+4) frame, not LE-only's 4-dots-early peek, so dot 80
+    /// makes the deferred read see mode 3 a full M-cycle early (`test_iter 2`
+    /// counts one poll, want two). 84 restores it (`intr_2_mode3_timing` passes
+    /// flag-on, both models). The mode-0 *exit* differs (`early_lead`, gated on
+    /// `tier2_reclock` in `m0_flip_events`): it keeps a back-date because the
+    /// kernel separation needs the −1 net shift. Single speed only (the DS read
+    /// offset is deferred with the rest of the DS back-dating); always 84
+    /// flag-OFF, so production is byte-identical.
     fn mode3_entry_dot(&self) -> u16 {
-        if self.leading_edge_reads && !self.ds {
+        if self.leading_edge_reads && !self.tier2_reclock && !self.ds {
             80
         } else {
             84
