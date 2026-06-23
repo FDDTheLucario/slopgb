@@ -93,3 +93,27 @@ core (recalibrating it touches the whole cc-phase cluster + the ~7000-row
 rebaseline). The window `early_lead` slice was the one corner where a
 tier2-gated `vis_early`-only nudge sufficed without crossing the kernel frame;
 the SCX-extended bare-line m3stat reads do NOT have that slack.
+
+## halt `*_m0stat_*` — ATTEMPTED + proven the sub-M-cycle wall (2026-06-23 #11e)
+
+The post-mode-0-halt-wake FF41-mode read (`want=0 got=2`, 20 DMG rows). Measured
+(tracer + slopgb `read_deferred` FF41 trace): SameBoy reads at **ly2 cfl0
+mode0**, slopgb at **line2 dot4 mode2** — a uniform +4-dot DMG over-advance of
+the deferred wake (CGB samples cc+0, no over-advance — gating CGB out2 rows
+broke; matches the int_hblank DMG-only law). Built the full C1.3-analogue
+(`halt_vis_back` carry set on the mode-0 wake, DMG-only, first post-wake FF41
+read in `[4,8)` → mode 0): **+11 DMG fixed, but −3** (`scx5_2`×2 + `scx3_2b`,
+all `want=2`, SameBoy-passing) → net A/B, NOT shippable.
+
+Tried to gate by the rise's `cc` (the C1.3 discriminator): **REFUTED — cc does
+not separate them.** Measured `cc` at the wake: scx2→cc4, scx3_2→cc1, scx4→cc2
+(all `want=0`, over-advance), scx5→cc3 (`want=2`). BUT `scx3_2b` (`want=2`) is
+ALSO **cc=1** — the same `cc` as `scx3_2` (`want=0`). Two configs with OPPOSITE
+expected modes collapse to identical slopgb `(line2, dot4, cc1)` state. `cc` is
+the finest phase slopgb's M-cycle-quantized deferred clock has; the
+distinguisher is the sub-cc (T-within-M) wake phase it quantizes away. So the
+halt m0stat family is **genuinely unresolvable at this resolution** (any gate
+fixing scx3_2/cc1/want0 also breaks scx3_2b/cc1/want2) — the deep S7
+deferred-halt-wake residual, the same wall C1.3 only partly climbed for the LY
+read. Needs the sub-M-cycle wake clock (record the IRQ rise at its T-phase, not
+the M-cycle boundary). REVERTED (can't drop SameBoy-passing rows).
