@@ -520,6 +520,40 @@ fn cpu_clock_write_first_conserves_with_no_parked_debt() {
     assert_eq!(b.cpu_clock_t(), 4, "one M-cycle = 4 T even when the write is first");
 }
 
+#[test]
+fn cpu_clock_write_routes_through_the_per_model_conflict_class() {
+    // `Bus::write` selects the SameBoy conflict class via `write_conflict`
+    // (A3, byte-identical because the commit position is still discarded).
+    // The class's re-park is observable on the deferred-commit clock: a
+    // fetch parks 4, then the write re-parks per class. (Same pattern as
+    // `cpu_clock_deferred_commit_conserves_t_count`; here we vary the address
+    // so the class — not just `ReadOld` — drives the re-park.)
+    let repark = |model: Model, addr: u16| {
+        let mut b = ic(model);
+        b.read(0xFF80); // fetch: parks 4
+        b.write(addr, 0);
+        b.cpu_clock_pending()
+    };
+    // (model, addr, repark, class). DMG map (sm83_cpu.c:56) vs CGB
+    // (sm83_cpu.c:31) differ on LYC (ReadOld vs WriteCpu) and SCX (SCX vs
+    // ReadOld) — pinning that the lookup keys on the model, not the address.
+    for (model, addr, want, class) in [
+        (Model::Dmg, 0xFF80u16, 4u32, "HRAM ReadOld"),
+        (Model::Dmg, 0xFF0F, 3, "DMG IF WriteCpu"),
+        (Model::Dmg, 0xFF43, 6, "DMG SCX EarlyTwo"),
+        (Model::Dmg, 0xFF40, 5, "DMG LCDC ReadNew"),
+        (Model::Dmg, 0xFF4B, 3, "DMG WX WxHold"),
+        (Model::Dmg, 0xFF45, 4, "DMG LYC ReadOld"),
+        (Model::Cgb, 0xFF45, 3, "CGB LYC WriteCpu"),
+        (Model::Cgb, 0xFF43, 4, "CGB SCX ReadOld"),
+        // CGB LCDC's value-dependent tile-sel glitch is deferred to S6, so it
+        // stays ReadOld(4) here — pins the documented deferral, not WxHold(3).
+        (Model::Cgb, 0xFF40, 4, "CGB LCDC ReadOld S6"),
+    ] {
+        assert_eq!(repark(model, addr), want, "{class}");
+    }
+}
+
 // ---- S2a leading-edge (cc+0) FF41 read ---------------------------------
 //
 // A leading-edge read latches FF41 at the M-cycle's *leading* edge (before

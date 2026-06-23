@@ -716,12 +716,13 @@ impl Bus for Interconnect {
     }
 
     fn write(&mut self, addr: u16, value: u8) {
-        // S1 deferred-commit clock: a plain write commits at the leading edge
-        // like a read and re-parks 4 (`Conflict::ReadOld`). The per-model
-        // conflict-staging map (read-new / write-cpu classes) lands at S6;
-        // until then every write is `ReadOld`, which conserves the
-        // per-M-cycle T-total (net-zero). Write-only scaffold today.
-        let _commit = self.clock.write(Conflict::ReadOld);
+        // S1 deferred-commit clock: a write commits per its per-model
+        // conflict class (`write_conflict`, the SameBoy `cycle_write` map).
+        // The commit position is still discarded — write-only scaffold —
+        // so swapping `ReadOld` for the real class is byte-identical; the
+        // architectural-commit move that consumes it lands at Stage S6.
+        let conflict = self.write_conflict(addr);
+        let _commit = self.clock.write(conflict);
         self.service_vram_dma();
         // The CPU drives the data bus during the second half of the write
         // M-cycle (gbctr "Memory access timing"), which the dot-clocked

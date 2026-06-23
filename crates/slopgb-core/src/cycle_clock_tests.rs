@@ -46,7 +46,13 @@ fn internal_cycle_defers_four() {
 /// instruction timing is unchanged while the sub-M-cycle commit point varies.
 #[test]
 fn conflict_write_conserves_total() {
-    for conflict in [Conflict::ReadOld, Conflict::ReadNew, Conflict::WriteCpu] {
+    for conflict in [
+        Conflict::ReadOld,
+        Conflict::ReadNew,
+        Conflict::WriteCpu,
+        Conflict::EarlyTwo,
+        Conflict::WxHold,
+    ] {
         let mut c = CycleClock::new();
         c.read(); // M-cycle 1: parks 4
         c.write(conflict); // M-cycle 2: conflict-staged commit
@@ -56,7 +62,10 @@ fn conflict_write_conserves_total() {
 }
 
 /// `cpu-timing-map.md` §3: the commit point itself shifts per class — `ReadNew`
-/// lands 1 T early, `WriteCpu` 1 T late, `ReadOld` at the leading edge.
+/// lands 1 T early, `WriteCpu` 1 T late, `ReadOld` at the leading edge,
+/// `EarlyTwo` (PALETTE_CGB≥D / SCX) 2 T early, `WxHold` (WX_DMG / LCDC tile-sel
+/// glitch) at the leading edge like `ReadOld` but with the M-cycle holding one
+/// extra T after the commit.
 #[test]
 fn conflict_write_commit_point_shifts() {
     let commit = |conflict| {
@@ -71,6 +80,27 @@ fn conflict_write_commit_point_shifts() {
     );
     assert_eq!(commit(Conflict::ReadNew), 3, "READ_NEW commits 1 T early");
     assert_eq!(commit(Conflict::WriteCpu), 5, "WRITE_CPU commits 1 T late");
+    assert_eq!(commit(Conflict::EarlyTwo), 2, "EARLY_TWO commits 2 T early");
+    assert_eq!(
+        commit(Conflict::WxHold),
+        4,
+        "WX_HOLD commits the value at the leading edge"
+    );
+}
+
+/// `sm83_cpu.c:262` `GB_CONFLICT_WX_DMG` (and the LCDC tile-sel glitch,
+/// `:271`): the value writes at the leading edge, then one extra T elapses
+/// (the `wx_just_changed` / `tile_sel_glitch` window) before re-parking 3 —
+/// so the running clock advances past the commit while only 3 T stay parked,
+/// still conserving the per-M-cycle 4.
+#[test]
+fn wx_hold_advances_one_t_past_the_commit() {
+    let mut c = CycleClock::new();
+    c.read(); // parks 4
+    let commit = c.write(Conflict::WxHold);
+    assert_eq!(commit, 4, "value commits at the leading edge");
+    assert_eq!(c.now(), 5, "the clock advances one T past the commit");
+    assert_eq!(c.pending(), 3, "only 3 T stay parked for the next M-cycle");
 }
 
 /// `cpu-timing-map.md` §6: the interrupt-dispatch vector retime

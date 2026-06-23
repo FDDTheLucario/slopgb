@@ -35,8 +35,26 @@ pub(crate) enum Conflict {
     /// write lands 1 T early, the component reads the NEW value.
     ReadNew,
     /// `GB_CONFLICT_WRITE_CPU` (`:143`): advance `pending+1`, re-park 3 — the
-    /// CPU wins a same-cycle write (e.g. IF), landing 1 T late.
+    /// CPU wins a same-cycle write (e.g. IF), landing 1 T late. Also the clock
+    /// phase of the two-stage `GB_CONFLICT_STAT_*` classes (`:150,170,180`),
+    /// whose final value write lands at the same `+1` point (the intermediate
+    /// `0xFF`/masked write is a memory effect deferred to Stage S6).
     WriteCpu,
+    /// Advance `pending-2`, re-park 6 — the write commits 2 T early.
+    /// `GB_CONFLICT_PALETTE_CGB` on model ≥ CGB-D (`:205`) and
+    /// `GB_CONFLICT_SCX_DMG_AND_CGB_DOUBLE` (`:297`). (Model < CGB-D palette is
+    /// the 1-T-early `ReadNew` phase instead.)
+    EarlyTwo,
+    /// `GB_CONFLICT_WX_DMG` (`:262`) and the `GB_CONFLICT_LCDC_CGB` tile-sel
+    /// glitch (`:271`): the value commits at the leading edge (like `ReadOld`),
+    /// then one extra T elapses — the `wx_just_changed` / `tile_sel_glitch`
+    /// one-T window — before re-parking 3. So the running clock advances past
+    /// the commit while only 3 T stay parked, conserving the per-M-cycle 4.
+    /// Today [`Interconnect::write_conflict`] routes only WX_DMG here; the
+    /// value-dependent LCDC tile-sel glitch (`((~value & old) & TILE_SEL)`)
+    /// can't be decided from the address alone, so CGB LCDC stays `ReadOld`
+    /// until its memory effect lands at Stage S6.
+    WxHold,
 }
 
 /// The deferred-commit clock. `clock` is the running CPU T-cycle position;
@@ -97,9 +115,12 @@ impl CycleClock {
     /// (no preceding fetch, `pending == 0`); the `saturating_sub` below keeps
     /// that case underflow-safe in release rather than panicking. A standalone
     /// write commits at the current clock (`pending == 0` → no advance) and
-    /// reparks its class total, which still conserves the per-M-cycle 4 for the
-    /// `ReadOld` class S1 uses (the `ReadNew`/`WriteCpu` ±1 splits assume the
-    /// real-flow `pending >= 1` and are not wired until S6).
+    /// reparks its class total, which still conserves the per-M-cycle 4. Every
+    /// class's commit position is nonetheless still **discarded** by the live
+    /// `Bus::write` (`interconnect.rs`); the per-model class *lookup*
+    /// ([`Interconnect::write_conflict`]) is wired at Stage A3 (byte-identical,
+    /// the clock is write-only scaffold), and the architectural-commit *move*
+    /// that consumes the position lands at Stage S6.
     pub(crate) fn write(&mut self, conflict: Conflict) -> u64 {
         let repark = match conflict {
             Conflict::ReadOld => {
@@ -115,6 +136,23 @@ impl CycleClock {
                 // +1 T: the CPU wins a same-cycle write, landing 1 T late.
                 self.clock += u64::from(self.pending) + 1;
                 3
+            }
+            Conflict::EarlyTwo => {
+                // -2 T: the write commits 2 T early (PALETTE_CGB≥D / SCX).
+                self.clock += u64::from(self.pending.saturating_sub(2));
+                6
+            }
+            Conflict::WxHold => {
+                // The value commits at the leading edge, then one extra T
+                // elapses before re-parking 3 (the wx_just_changed /
+                // tile_sel_glitch window). Return the leading-edge commit, not
+                // the post-window clock — the value lands at `clock`, the +1
+                // is dead time the next M-cycle inherits via the short repark.
+                self.clock += u64::from(self.pending);
+                let commit = self.clock;
+                self.clock += 1;
+                self.pending = 3;
+                return commit;
             }
         };
         let commit = self.clock;
