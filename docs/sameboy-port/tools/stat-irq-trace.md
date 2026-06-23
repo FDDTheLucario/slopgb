@@ -60,3 +60,36 @@ dispatch dots — they are the ISR's FF41-mode READ (the cc+0 leading-edge
 length being wrong under the deferred read-frame. This is the SAME class the
 window `early_lead` fix (#11e) addressed, not a dispatch reclock. `frame_*_count`
 is a separate DELIVERY/halt-mask issue (dispatch dot is correct).
+
+## FF41-READ ground truth (decisive, 2026-06-23 #11e)
+
+Add the same `SB_TRACE` gate at `read_high_memory`'s `case GB_IO_STAT` (the FFxx
+read, `Core/memory.c:629`): `fprintf(stderr, "SBREAD ff41 ly=%d cfl=%d dc=%d
+mode=%d\n", gb->current_line, gb->cycles_for_line, gb->display_cycles,
+gb->io_registers[GB_IO_STAT] & 3);`. slopgb side: the tier2 read goes through
+`Interconnect::read_deferred` (`cycle.rs`, NOT `leading_edge_sample` — that's the
+LE-only path) — trace its `read_no_tick(0xFF41)` + `ppu.line_dot()`. Filter to
+visible lines (`ly < 144`) to skip the vblank polling reads; the m3stat
+measurement read is on ly 1.
+
+| ROM (want) | SameBoy READ | slopgb READ | slopgb boundary |
+|---|---|---|---|
+| kernel m2int scx0 (3) | ly1 **cfl=256** mode 3 | ly1 dot **252** mode 3 ✓ | ~256 |
+| m0int scx0 (0) | ly1 **cfl=261** mode 0 | ly1 dot **256** mode 0 ✓ | ~256 |
+| m2int **scx3** (0) | ly1 **cfl=260** mode 0 | ly1 dot **256** mode **3** ✗ | ~259 (256+SCX&7) |
+
+**ROOT CAUSE (hard-measured):** slopgb's deferred FF41 read lands **~4–5 dots
+EARLIER** than SameBoy's (kernel Δ+4, m0int Δ+5, scx3 Δ+4), and slopgb's read
+dot does NOT shift with SCX (scx0 and scx3 both read at dot 256; SameBoy reads
+261 vs 260). slopgb's mode-3 boundary DOES extend by SCX&7 (scx3 ≈ 259), so its
+early read at 256 falls just BEFORE the boundary → mode 3, while SameBoy's later
+read at 260 falls AFTER → mode 0. The read frame and the boundary are each
+self-consistent within slopgb's (cc+4-derived) frame and within SameBoy's
+(cc+0) frame, offset ~4 dots — **shifting either one alone breaks the scx0
+kernel pin** (slopgb reads kernel@252 vs boundary@256; +4 read → 256 ≈ boundary
+→ flips to mode 0, kernel fails). This is the **atomic read-frame↔boundary
+reclock** — confirmed here with exact dot numbers, the documented multi-session
+core (recalibrating it touches the whole cc-phase cluster + the ~7000-row
+rebaseline). The window `early_lead` slice was the one corner where a
+tier2-gated `vis_early`-only nudge sufficed without crossing the kernel frame;
+the SCX-extended bare-line m3stat reads do NOT have that slack.
