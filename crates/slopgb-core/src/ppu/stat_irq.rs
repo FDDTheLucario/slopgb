@@ -30,7 +30,12 @@ impl Ppu {
             // `GLITCH_MODE3_START` (they are byte-identical flag-on,
             // `lcdon_timing-GS` OAM/VRAM legs). Always 78 / never-`vis_early`
             // flag-OFF, so production is byte-identical.
-            let start = if self.leading_edge_reads && !self.ds {
+            // C1.2: the −4 glitch back-date is LEADING-EDGE-ONLY (like
+            // `mode3_entry_dot`). The Tier-2 deferred read samples the glitch
+            // 0→3 entry at the trailing frame, so it takes no back-date — dot 74
+            // made the deferred `lcdon_timing-GS` STAT read see mode 3 a full
+            // M-cycle early (round-1 STAT $87 vs $84). 78 restores it.
+            let start = if self.leading_edge_reads && !self.tier2_reclock && !self.ds {
                 GLITCH_MODE3_START - 4
             } else {
                 GLITCH_MODE3_START

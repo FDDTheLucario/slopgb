@@ -117,7 +117,18 @@ impl Interconnect {
                     // mid-cycle). Reached only on the reclock path (`tier2_reclock`),
                     // so production is byte-identical.
                     self.if_late |= IF_STAT_BIT;
-                    self.m0_halt_hold = 1 + u8::from(cc == 4);
+                    // C1.2: base 0 (was 1). The C0 boot-DIV +4 (the deferred
+                    // hand-off frame the real flip installs at construction)
+                    // advances the timer phase one M-cycle, which shifts this
+                    // TIMA-counted halt-wake +1; dropping the uniform mask from
+                    // 2 M-cycles to 1 (this cycle + `m0_halt_hold = cc==4`)
+                    // restores the `int_hblank_halt_scx0-7` DMG grid
+                    // (62,62,62,63,63,63,63,64) under the construction-time
+                    // reclock. The prior `1 +` was calibrated against the
+                    // set-after-boot path that does NOT apply the +4 — see the
+                    // `tier2_int_hblank_halt_passes_dmg` pin (now boots with the
+                    // reclock).
+                    self.m0_halt_hold = u8::from(cc == 4);
                 } else if second_half {
                     // The mode-0 STAT rise carries the second-half halt law
                     // — the same shape as the line-start OAM pulses — but

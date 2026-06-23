@@ -211,8 +211,11 @@ fn tier2_int_hblank_halt_passes_dmg() {
     for scx in 0..8u8 {
         let rel = format!("gbmicrotest/int_hblank_halt_scx{scx}.gb");
         let rom = std::fs::read(root.join(&rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        let mut gb = harness::boot(&rom, Model::Dmg);
-        gb.set_tier2_reclock(true);
+        // Boot WITH the reclock (construction-time), so the C0 boot-DIV +4 frame
+        // the real flip installs is active — the TIMA-counted halt-wake depends
+        // on it (the set-after-boot path would skip the +4 and mis-pass at the
+        // pre-C1.2 mask). The `m0_halt_hold` base was re-derived for this frame.
+        let mut gb = harness::boot_with_reclock(&rom, Model::Dmg);
         // Same fixed-point protocol as `run_case` (two frames, then the
         // verdict deadline), on the Tier-2 reclock path.
         let deadline = gb.cycles().saturating_add(DEADLINE_TCYCLES);

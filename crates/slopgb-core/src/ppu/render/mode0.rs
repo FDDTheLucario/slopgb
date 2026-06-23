@@ -213,7 +213,14 @@ impl Ppu {
             if has_sprites {
                 0
             } else if bare_flip {
-                1
+                // C1.2: 0, not 1. The bare-line visible mode→0 boundary lands at
+                // `line_render_done` (dispatch dot, no anticipation). The kernel
+                // separation only needs the boundary in (252, 256] — both 253
+                // (lead+1) and 254 (lead+0) satisfy m2int@252=3 ∧ m0int@256=0 —
+                // but `lcdon_timing-GS`'s post-glitch line-1 STAT read lands AT
+                // dot 253 and must read mode 3, so the boundary must be 254
+                // (lead+0). intr_2_mode0/mode3 + the kernel all hold at 0.
+                0
             } else {
                 2
             }

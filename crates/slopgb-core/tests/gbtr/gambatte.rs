@@ -812,6 +812,35 @@ fn tier2_intr_2_mode3_passes() {
     }
 }
 
+/// Port Stage B C1.2 — mooneye `lcdon_timing-GS` on the deferred reclock. The
+/// test reads LY/STAT/OAM/VRAM at fixed cycle counts after an LCD enable. Three
+/// glitch/post-glitch frame corrections, all the same shape as C1.1 (the
+/// Tier-2 deferred read does not take the leading-edge-only −4 back-date):
+/// the glitch mode-3 ENTRY (`stat_irq.rs`, 74→78), the glitch LYC readable
+/// compare (`lyc.rs`, drop the last-4-dots line-1 view), and the bare-line
+/// mode-0 EXIT (`mode0.rs early_lead` 1→0, the post-glitch line-1 STAT read).
+/// Passes DMG + SGB (the -GS models; CGB/AGB fail on hardware per the ROM
+/// header). Production (flag-off) byte-identical — all three gated on
+/// `tier2_reclock`. Must boot WITH the reclock (the bare-line exit is decided
+/// during rendering, not at hand-off, but the construction path matches the
+/// real flip).
+#[test]
+fn tier2_lcdon_timing_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr("tier2_lcdon", "game-boy-test-roms collection not present");
+        return;
+    };
+    let rel = "mooneye-test-suite/acceptance/ppu/lcdon_timing-GS.gb";
+    let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+    for model in [Model::Dmg, Model::Sgb] {
+        let mut gb = harness::boot_with_reclock(&rom, model);
+        harness::run_until_breakpoint(&mut gb, 30_000_000)
+            .unwrap_or_else(|e| panic!("{rel} [{model:?}] (tier2 flag-on): {e}"));
+        harness::check_fib(&gb)
+            .unwrap_or_else(|e| panic!("{rel} [{model:?}] (tier2 flag-on): {e}"));
+    }
+}
+
 /// Self-verifying inventory: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// covers the on-disk ROM set exactly, with the exemptions pinned to the
 /// documented 50-entry list.
