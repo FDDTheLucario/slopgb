@@ -97,6 +97,20 @@ impl Interconnect {
     }
 
     pub(super) fn read_no_tick(&mut self, addr: u16) -> u8 {
+        // Port Stage B C1.3 (S7) — one-shot post-mode-0-halt-wake LY phase
+        // carry. The mode-0 halt-wake set `halt_ly_phase` to the sub-M-cycle
+        // carry; the FIRST post-wake FF44 read (hblank's measurement read)
+        // back-dates the line by it, then clears. The pre-halt `wait_ly` poll
+        // never sees it (it ran before the wake), so — unlike a uniform LY
+        // back-date — the poll is uncorrupted. See `Interconnect::halt_ly_phase`.
+        if addr == 0xFF44 && self.tier2_reclock && self.halt_ly_phase > 0 {
+            let off = u16::from(self.halt_ly_phase);
+            self.halt_ly_phase = 0;
+            let (line, dot) = self.ppu.line_dot();
+            if (1..=143).contains(&line) && dot < off {
+                return line - 1;
+            }
+        }
         if let Some(c) = self.dma_conflict {
             // OAM (and the prohibited area behind it) reads $FF while a DMA
             // byte is in flight (gbctr OAM DMA).

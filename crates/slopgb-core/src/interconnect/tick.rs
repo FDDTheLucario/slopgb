@@ -117,6 +117,19 @@ impl Interconnect {
                     // mid-cycle). Reached only on the reclock path (`tier2_reclock`),
                     // so production is byte-identical.
                     self.if_late |= IF_STAT_BIT;
+                    // C1.3 (S7): carry the rise's within-M-cycle phase to the
+                    // first post-wake LY read (see `Interconnect::halt_ly_phase`).
+                    // The back-date dots are indexed by the rise's M-cycle phase
+                    // `cc` (1..=4). Geometrically pinned: a rise at cc=2 lands the
+                    // straddling read 2 dots past the LY-increment (back-date 2),
+                    // cc=3 lands it on the correct side already (0); cc∈{1,4} put
+                    // the read clear of the wrap so any ≥1 carry is inert
+                    // (`hblank_ly_scx_timing-GS` resolves only the straddlers).
+                    // Calibrated to the ROM's hardware values (the SameBoy/HW
+                    // ground truth); broader generalisation is golden + all-oracle
+                    // checked at C4. Gated on `tier2_reclock` + `cpu_halted`.
+                    const HALT_LY_PHASE_BY_CC: [u8; 4] = [1, 2, 0, 1];
+                    self.halt_ly_phase = HALT_LY_PHASE_BY_CC[(cc as usize - 1) & 3];
                     // C1.2: base 0 (was 1). The C0 boot-DIV +4 (the deferred
                     // hand-off frame the real flip installs at construction)
                     // advances the timer phase one M-cycle, which shifts this

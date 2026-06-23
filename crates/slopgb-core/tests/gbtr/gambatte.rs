@@ -841,6 +841,34 @@ fn tier2_lcdon_timing_passes() {
     }
 }
 
+/// Port Stage B C1.3 (S7) — mooneye `hblank_ly_scx_timing-GS` on the deferred
+/// reclock, the last mooneye gate-blocker. The test reads LY at a fixed delay
+/// after a mode-0 STAT IRQ halt-wake and checks the LY-increment latency vs
+/// SCX. slopgb's M-cycle-quantized halt-wake collapsed the sub-M-cycle wake
+/// phase (SCX pairs that wake 1 clock apart read the same LY); the fix carries
+/// the rise's within-M-cycle phase to the first post-wake FF44 read
+/// (`Interconnect::halt_ly_phase`, one-shot, so the pre-halt `wait_ly` poll is
+/// untouched). Passes DMG + SGB (the -GS models). Production (flag-off)
+/// byte-identical (gated on `tier2_reclock`); int_hblank (TIMA) and intr_2
+/// (mode-2 wake) are unaffected. Must boot WITH the reclock (the wake is
+/// timer/halt-coupled to the C0 +4 frame the flip installs at construction).
+#[test]
+fn tier2_hblank_ly_scx_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr("tier2_hblank", "game-boy-test-roms collection not present");
+        return;
+    };
+    let rel = "mooneye-test-suite/acceptance/ppu/hblank_ly_scx_timing-GS.gb";
+    let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+    for model in [Model::Dmg, Model::Sgb] {
+        let mut gb = harness::boot_with_reclock(&rom, model);
+        harness::run_until_breakpoint(&mut gb, 30_000_000)
+            .unwrap_or_else(|e| panic!("{rel} [{model:?}] (tier2 flag-on): {e}"));
+        harness::check_fib(&gb)
+            .unwrap_or_else(|e| panic!("{rel} [{model:?}] (tier2 flag-on): {e}"));
+    }
+}
+
 /// Self-verifying inventory: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// covers the on-disk ROM set exactly, with the exemptions pinned to the
 /// documented 50-entry list.

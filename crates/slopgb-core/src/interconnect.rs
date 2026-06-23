@@ -399,6 +399,21 @@ pub struct Interconnect {
     /// Inert flag-off (only set under `tier2_reclock`), so production is
     /// byte-identical.
     m0_halt_hold: u8,
+    /// Port Stage B C1.3 (S7 sub-M-cycle halt-wake) — the post-mode-0-halt-wake
+    /// LY read-phase carry. SameBoy's DMG halt-wake resumes the CPU at the
+    /// IRQ's sub-M-cycle clock, so the CPU's M-cycle phase is offset from the
+    /// PPU dot grid by the IRQ's within-M-cycle position. slopgb's deferred
+    /// clock is M-cycle-quantized (CPU+PPU advance together), which collapses
+    /// that offset — so a post-wake LY read that straddles the LY-increment
+    /// (`hblank_ly_scx_timing-GS`) reads the wrapped line where hardware, on
+    /// its sub-M-cycle phase, still reads the previous line. This field, set on
+    /// the mode-0 halt-wake to the carry (indexed by the rise's M-cycle phase
+    /// `cc`), back-dates exactly the first post-wake FF44 read by that many
+    /// dots (one-shot), reproducing the sub-M-cycle phase WITHOUT touching the
+    /// pre-halt `wait_ly` poll (which runs before the wake sets it) — the
+    /// reason a uniform `vis_ly` back-date fails. int_hblank (TIMA, not LY) and
+    /// intr_2 (mode-2 wake) are untouched. Cleared one-shot at the read.
+    halt_ly_phase: u8,
     /// STAT IF bit raised by the PPU in the *current* M-cycle's second
     /// half (line-0 OAM rise): readable via FF0F at once, but the CPU's
     /// interrupt sample for this cycle must not see it
@@ -589,6 +604,7 @@ impl Interconnect {
             ie: 0,
             if_late: 0,
             m0_halt_hold: 0,
+            halt_ly_phase: 0,
             if_stat_late: 0,
             m0_access_edge: None,
             pal_access_edge: None,

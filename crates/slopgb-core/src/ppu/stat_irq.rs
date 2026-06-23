@@ -102,6 +102,12 @@ impl Ppu {
         self.vis_mode()
     }
 
+    /// Current (line, dot) — the rendering-FSM position, for the interconnect's
+    /// C1.3 post-halt-wake LY read-phase carry (`Interconnect::halt_ly_phase`).
+    pub(crate) fn line_dot(&self) -> (u8, u16) {
+        (self.line, self.dot)
+    }
+
     /// Whether the STAT IF bit handed out by the last [`Self::tick`] came
     /// from the line-0 OAM rise and must miss the CPU's interrupt sample
     /// for the current M-cycle (see `stat_events_tick`).
