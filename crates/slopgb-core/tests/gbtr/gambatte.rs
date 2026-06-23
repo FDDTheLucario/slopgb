@@ -1104,3 +1104,8 @@ fn gambatte_blank_verdict() {
     logo[70 * SCREEN_W + 4] = 0x0000_0000;
     check_blank(&logo).unwrap();
 }
+
+// Session-local S5 measurement aid (see the module's doc); `#[ignore]`'d so it
+// never runs in the gate.
+#[path = "gambatte_flagon_probe.rs"]
+mod flagon_probe;

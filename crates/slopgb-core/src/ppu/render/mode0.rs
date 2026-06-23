@@ -221,8 +221,20 @@ impl Ppu {
                 // dot 253 and must read mode 3, so the boundary must be 254
                 // (lead+0). intr_2_mode0/mode3 + the kernel all hold at 0.
                 0
-            } else {
+            } else if self.glitch_line {
+                // The LCD-enable glitch line keeps the +2 anticipation: its
+                // post-glitch line-1 STAT read (lcdon_timing-GS) is calibrated
+                // against it; see the C1.2 pin.
                 2
+            } else {
+                // C2/S5 — window lines take the SAME deferred-read law as bare
+                // (C1.2): the Tier-2 deferred read pays the parked debt then
+                // samples at the trailing frame, so it takes NO anticipation
+                // (`early_lead = 0`). The window mode-3 EXTENSION is already in
+                // `proj`/`lead`; anticipating `vis_early` by +2 flipped the
+                // CPU-visible mode→0 two dots early on window lines, so the
+                // `window/arg/late_wy_*` m3stat reads saw mode 0 a poll early.
+                0
             }
         } else if bare_flip {
             3
