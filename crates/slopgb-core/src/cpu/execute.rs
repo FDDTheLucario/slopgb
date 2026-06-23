@@ -155,19 +155,36 @@ fn dispatch_interrupt(cpu: &mut Cpu, bus: &mut impl Bus) {
     bus.write(cpu.regs.sp, (pc >> 8) as u8);
     // IE & IF are re-evaluated *after* the high push: the push itself may
     // have overwritten IE (SP near 0x0000) and cancelled or redirected the
-    // dispatch (mooneye acceptance/interrupts/ie_push). The chosen IF bit is
-    // acknowledged here, before the low push; on cancellation nothing is
-    // acknowledged and the CPU ends up at 0x0000 with IME left disabled.
+    // dispatch (mooneye acceptance/interrupts/ie_push). On cancellation
+    // (pending == 0) nothing is acknowledged and the CPU ends up at 0x0000
+    // with IME left disabled.
     let pending = bus.pending();
-    let target = if pending == 0 {
-        0x0000
+    let (target, ack_bit) = if pending == 0 {
+        (0x0000, None)
     } else {
         let bit = pending.trailing_zeros() as u8;
-        bus.ack(bit);
-        0x0040 + (u16::from(bit) << 3)
+        (0x0040 + (u16::from(bit) << 3), Some(bit))
     };
-    cpu.regs.sp = cpu.regs.sp.wrapping_sub(1);
-    bus.write(cpu.regs.sp, pc as u8);
+    if bus.dispatch_reclock() {
+        // Port Stage B (Tier 2): the IF-ack / vector latch lands AFTER the low
+        // push (SameBoy sm83_cpu.c:1690, the M5+2 latch), and the dispatch
+        // reclock re-parks pending=2 there so the vector fetch + first handler
+        // reads sample 2 dots early ("re-frames every read").
+        cpu.regs.sp = cpu.regs.sp.wrapping_sub(1);
+        bus.write(cpu.regs.sp, pc as u8);
+        bus.dispatch_retime();
+        if let Some(bit) = ack_bit {
+            bus.ack(bit);
+        }
+    } else {
+        // Eager path (byte-identical): the chosen IF bit is acknowledged
+        // before the low push, exactly as before the port.
+        if let Some(bit) = ack_bit {
+            bus.ack(bit);
+        }
+        cpu.regs.sp = cpu.regs.sp.wrapping_sub(1);
+        bus.write(cpu.regs.sp, pc as u8);
+    }
     cpu.regs.pc = target;
 }
 

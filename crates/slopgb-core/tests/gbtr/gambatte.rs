@@ -664,6 +664,49 @@ fn sprite_kernel_pair_matches_sameboy_target() {
     }
 }
 
+/// Port Stage B (Tier 2) — the kernel pair on the FULL deferred-commit reclock
+/// (`set_tier2_reclock`: B1 deferred machine advance + B2 dispatch retime + B3
+/// `early_lead`−2), NOT just the Tier-1 leading-edge hybrid the spec above
+/// runs. This is the make-or-break thesis result: the deferred reclock makes
+/// the two equal `ldh a,(FF41)` reads SEPARATE — `m2int_m3stat_1` reads mode 3
+/// (out3) and `m0int_m3stat_2` reads mode 0 (out0) — *while* mooneye
+/// `intr_2_mode0_timing` simultaneously passes flag-on
+/// (measured, `ppu-subdot-ladder.md` "PHASE B"). That dissolves the A8
+/// mutual-exclusion the prior verdict claimed ("m0int=0 forces intr_2 FAIL in
+/// the cc+4 frame"): m0int=0 and intr_2 now co-hold. Production (both flags
+/// off) is byte-identical; the global default flip + ~7000-row rebaseline + the
+/// two residuals (sprite-line dispatch lead + the deferred halt-wake cc+2 mask)
+/// are the remaining Phase-B work.
+#[test]
+fn tier2_kernel_pair_matches_sameboy_target() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr("tier2_kernel_pair", "game-boy-test-roms collection not present");
+        return;
+    };
+    let targets = [
+        (
+            "gambatte/m2int_m3stat/m2int_m3stat_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/m0int_m3stat/m0int_m3stat_2_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let path = root.join(rel);
+        let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        for model in [Model::Dmg, Model::Cgb] {
+            let mut gb = harness::boot(&rom, model);
+            gb.set_tier2_reclock(true);
+            run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+            check_hex_screen(gb.frame(), expect, model.is_cgb()).unwrap_or_else(|e| {
+                panic!("{rel} [{model:?}] expected out{expect} (tier2 flag-on): {e}")
+            });
+        }
+    }
+}
+
 /// Self-verifying inventory: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// covers the on-disk ROM set exactly, with the exemptions pinned to the
 /// documented 50-entry list.

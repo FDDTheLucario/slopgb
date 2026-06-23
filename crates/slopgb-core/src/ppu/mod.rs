@@ -370,6 +370,12 @@ pub struct Ppu {
     /// `stat_events_tick`. Off in production until the atomic flip (S2+S3);
     /// forwarded by [`Interconnect::set_leading_edge_reads`].
     leading_edge_reads: bool,
+    /// PPU-side copy of the interconnect's `tier2_reclock` flag (port Stage B,
+    /// the −2 dispatch reclock). Gates the B3 mode-0 IRQ dispatch move
+    /// (254→252) so the leading-edge-only S0 specs (which set
+    /// `leading_edge_reads` but NOT this) keep the validated Tier-1 frame.
+    /// Forwarded by [`Interconnect::set_tier2_reclock`].
+    tier2_reclock: bool,
     /// The STAT IF bit handed out by the last tick came from the mode-0
     /// source rise. The interconnect drains this and applies the
     /// half-cycle halt law: a rise landing in the second half of the
@@ -661,6 +667,7 @@ impl Ppu {
             stat_update: crate::stat_update::StatUpdate::new(),
             lyc_interrupt_line: false,
             leading_edge_reads: false,
+            tier2_reclock: false,
             m0_rise: false,
             m0_access_flip: None,
             pal_access_flip: None,
@@ -784,6 +791,12 @@ impl Ppu {
     /// S5 unit tests + the S0 kernel-pair acceptance spec).
     pub(crate) fn set_leading_edge_reads(&mut self, on: bool) {
         self.leading_edge_reads = on;
+    }
+
+    /// Forward the interconnect's `tier2_reclock` flag (port Stage B). Gates
+    /// the B3 mode-0 IRQ dispatch move; implies `leading_edge_reads`.
+    pub(crate) fn set_tier2_reclock(&mut self, on: bool) {
+        self.tier2_reclock = on;
     }
 
 

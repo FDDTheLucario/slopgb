@@ -64,6 +64,30 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // Thesis hooks (port Stage B): SLOPGB_TIER2=1 enables the full reclock
+    // (implies leading-edge); SLOPGB_LE=1 enables leading-edge only.
+    if std::env::var("SLOPGB_TIER2").is_ok() {
+        gb.set_tier2_reclock(true);
+    } else if std::env::var("SLOPGB_LE").is_ok() {
+        gb.set_leading_edge_reads(true);
+    }
+    // gbmicrotest verdict mode (port-validation tooling): run ~0.7 emulated s
+    // then print $FF80/$FF81/$FF82 ($FF82==0x01 is PASS). Lets the Stage-B
+    // flag-on (SLOPGB_TIER2) reclock be measured against gbmicrotest's cc+4
+    // counter ROMs (e.g. int_hblank_halt) without the full gbtr matrix.
+    if std::env::var("SLOPGB_GBMICRO").is_ok() {
+        let deadline = gb.cycles().saturating_add(3_000_000);
+        while gb.cycles() < deadline {
+            gb.step();
+        }
+        println!(
+            "GBMICRO {rom_path}: FF82={:02X} FF80(actual)={:02X} FF81(expected)={:02X}",
+            gb.peek(0xFF82),
+            gb.peek(0xFF80),
+            gb.peek(0xFF81),
+        );
+        return ExitCode::from(0);
+    }
     let mut timed_out = false;
     while !gb.debug_breakpoint_hit() {
         if gb.cycles() > TIMEOUT_TCYCLES {

@@ -107,6 +107,22 @@ pub trait Bus {
     /// implementations that do not model the DMA engine.
     fn set_halted(&mut self, _halted: bool) {}
 
+    /// Whether the port Stage-B Tier-2 dispatch reclock is active. When `true`,
+    /// the interrupt dispatch latches the IF-ack / vector AFTER the low push
+    /// (SameBoy `sm83_cpu.c:1690`, the M5+2 latch) and calls
+    /// [`dispatch_retime`](Bus::dispatch_retime) there; when `false` (the
+    /// default, and production) the dispatch acks before the low push exactly
+    /// as before — byte-identical. Takes no time.
+    fn dispatch_reclock(&self) -> bool {
+        false
+    }
+    /// Port Stage B (Tier 2): the interrupt-dispatch vector retime
+    /// (`sm83_cpu.c:1690` `pending -= 2; flush; pending = 2`) — re-parks the
+    /// clock so the vector fetch + first handler reads sample 2 dots early, and
+    /// advances the deferred machine by the 2 T it commits. Called only when
+    /// [`dispatch_reclock`](Bus::dispatch_reclock) is true, after the low push
+    /// commits (`pending == 4 > 2`). Defaults to a no-op.
+    fn dispatch_retime(&mut self) {}
     /// Instruction boundary: drain the deferred-commit clock's parked debt
     /// (SameBoy `flush_pending_cycles`, `sm83_cpu.c:336`). Called exactly
     /// once per [`super::step`] invocation, after the instruction (or idle /

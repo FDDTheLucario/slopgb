@@ -214,6 +214,15 @@ impl GameBoy {
         self.bus.set_leading_edge_reads(on);
     }
 
+    /// Port validation hook — enable the Stage-B Tier-2 dispatch reclock
+    /// (deferred-commit machine advance + the −2 interrupt-dispatch retime).
+    /// Implies [`Self::set_leading_edge_reads`]. Off in production; the
+    /// make-or-break thesis measurement drives it on (`PORT-PLAN.md` Tier 2).
+    #[doc(hidden)]
+    pub fn set_tier2_reclock(&mut self, on: bool) {
+        self.bus.set_tier2_reclock(on);
+    }
+
     /// Drain the raw audio tap: one stereo sample per dot, taken straight
     /// off the APU channel mixer *before* the box-average resampler and the
     /// high-pass "output capacitor" stage (`Apu::output_cycle`). The

@@ -82,6 +82,13 @@ fn main() {
     };
     let rom = std::fs::read(&rom_path).expect("read rom");
     let mut gb = GameBoy::new(model, rom).expect("load rom");
+    // Thesis hooks: SLOPGB_TIER2=1 enables the full Stage-B reclock
+    // (implies leading-edge); SLOPGB_LE=1 enables leading-edge only.
+    if std::env::var("SLOPGB_TIER2").is_ok() {
+        gb.set_tier2_reclock(true);
+    } else if std::env::var("SLOPGB_LE").is_ok() {
+        gb.set_leading_edge_reads(true);
+    }
     let target = 16 * u64::from(CYCLES_PER_FRAME);
     while gb.cycles() < target {
         gb.step();

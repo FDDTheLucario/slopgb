@@ -47,6 +47,24 @@ impl Interconnect {
             if !dot_ticks_on_cc(cc, self.double_speed, self.dot_phase) {
                 continue;
             }
+            self.tick_machine_dot(cc);
+        }
+        let div = self.timer.div_counter();
+        self.apu.tick(div, self.double_speed);
+        self.intf |= self.serial.tick(div) & IF_MASK & !tick_squash;
+        self.intf |= self.joypad.take_irq() & IF_MASK;
+        // RTC wall time is dot time (2 dots per M-cycle in double speed).
+        self.cart.tick_rtc(dots as u32);
+    }
+
+    /// One PPU dot of `tick_machine`'s per-dot work (the body of its `for cc`
+    /// loop): tick the PPU, fold its IF / second-half halt-late masks
+    /// (`stat_late`/`stat_halt_late`/`m0_rise`) and the accessibility/STAT edge
+    /// stamps for cc `cc` (1..=4), and pump the dot-exact HBlank-DMA level
+    /// detector. Shared by the eager whole-M-cycle `tick_machine` and the port
+    /// Stage-B deferred per-T advance ([`Self::advance_machine_t`]).
+    fn tick_machine_dot(&mut self, cc: u8) {
+        {
             // STAT/VBlank rises in the first 2 dots after the ack are
             // consumed too (gambatte ackIrq lcd_.update(cc + 2); in
             // double speed the window spans the whole tick — see `ack`).
@@ -151,12 +169,72 @@ impl Interconnect {
             }
             self.hdma_prev_hblank = hb;
         }
-        let div = self.timer.div_counter();
-        self.apu.tick(div, self.double_speed);
-        self.intf |= self.serial.tick(div) & IF_MASK & !tick_squash;
-        self.intf |= self.joypad.take_irq() & IF_MASK;
-        // RTC wall time is dot time (2 dots per M-cycle in double speed).
-        self.cart.tick_rtc(dots as u32);
+    }
+
+    /// Port Stage B (Tier 2) — the deferred-commit machine advance. Advances the
+    /// PPU/timer/APU/serial across the half-open CPU-T-cycle span `[from_t,
+    /// to_t)` (the debt the deferred-commit clock just paid), instead of a flat
+    /// whole-M-cycle quantum. With the dispatch reclock re-parking `pending=2`
+    /// (B2), the vector fetch + first handler reads advance only 2 T before
+    /// sampling, so they land 2 dots early ("re-frames every read";
+    /// `docs/sameboy-port/PORT-PLAN.md` Tier 2).
+    ///
+    /// Mirrors `tick_machine`'s per-M-cycle structure but T-by-T: each M-cycle's
+    /// first T (`phase==0`) does the timer reset / OAM-DMA / edge-reset /
+    /// squash-latch pre-work; every T runs one timer substep + (on a
+    /// dot-ticking cc) one PPU dot via `tick_machine_dot`; the last T
+    /// (`phase==3`) runs APU/serial/joypad/RTC. M-cycle boundaries are at
+    /// multiples of 4 T from the clock origin, so the phase is `t % 4` — a
+    /// fractional advance (the retime's 2 T) simply suspends mid-M-cycle and the
+    /// next advance completes it, the `deferred_squash` latch carrying the
+    /// per-M-cycle squash across the split. Conserves the per-M-cycle 4-T total.
+    pub(super) fn advance_machine_t(&mut self, from_t: u64, to_t: u64) {
+        for pos in from_t..to_t {
+            let phase = (pos % 4) as u8; // 0..=3 within the M-cycle
+            if phase == 0 {
+                // M-cycle pre-work (the head of `tick_machine`): latch this
+                // M-cycle's timer/serial squash window, run the OAM-DMA engine,
+                // reset the per-M-cycle late masks + accessibility edge stamps.
+                self.deferred_squash = if self.ack_squash_ticks > 0 {
+                    self.ack_squash_ticks -= 1;
+                    self.ack_squash_mask & 0x0C
+                } else {
+                    0
+                };
+                self.timer.begin_mcycle();
+                self.oam_dma_tick();
+                self.if_late = 0;
+                self.if_stat_late = 0;
+                self.m0_access_edge = None;
+                self.pal_access_edge = None;
+                self.stat_mode_edge = None;
+            }
+            // Timer substep (T-granular): the second-half commit feeds the
+            // `if_late` halt-wake mask exactly as `tick_machine`'s assignment.
+            let (tiff, tlate) = self.timer.tick_substep(phase);
+            let t_iff = tiff & IF_MASK & !self.deferred_squash;
+            self.intf |= t_iff;
+            if tlate {
+                self.if_late |= t_iff;
+            }
+            // One PPU dot on a dot-ticking cc (single speed every cc; double
+            // speed two of four — `dot_ticks_on_cc`). `cycles` (the dot clock)
+            // advances per actual dot, matching `tick_machine`'s `+= dots`.
+            let cc = phase + 1;
+            if dot_ticks_on_cc(cc, self.double_speed, self.dot_phase) {
+                self.tick_machine_dot(cc);
+                self.cycles += 1;
+            }
+            if phase == 3 {
+                // M-cycle tail (the foot of `tick_machine`): APU, serial,
+                // joypad, RTC, all reading the post-timer DIV.
+                let div = self.timer.div_counter();
+                self.apu.tick(div, self.double_speed);
+                self.intf |= self.serial.tick(div) & IF_MASK & !self.deferred_squash;
+                self.intf |= self.joypad.take_irq() & IF_MASK;
+                self.cart.tick_rtc(if self.double_speed { 2 } else { 4 });
+            }
+        }
     }
 
     /// Gate (true) or ungate (false) the OAM DMA controller's clock.

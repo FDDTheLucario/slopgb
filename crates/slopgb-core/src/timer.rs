@@ -103,24 +103,48 @@ impl Timer {
         let mut iff = 0;
         let mut late = false;
         for substep in 0..4 {
-            // The reload pipeline runs first so the T-cycle that caused the
-            // overflow does not consume one of the 4 delay T-cycles.
-            if self.reload_in > 0 {
-                self.reload_in -= 1;
-                if self.reload_in == 0 {
-                    self.tima = self.tma;
-                    self.reloaded = true;
-                    iff |= 0x04;
-                    late = substep >= 2;
-                }
-            }
-            let before = self.mux_out();
-            self.div = self.div.wrapping_add(1);
-            if before && !self.mux_out() {
-                self.clock_tima();
-            }
+            let (i, l) = self.tick_substep(substep);
+            iff |= i;
+            late |= l;
         }
         TimerTick { iff, late }
+    }
+
+    /// Advance one T-cycle (one of the 4 substeps of an M-cycle), returning the
+    /// IF bit set this T (bit 2 = timer) and whether it committed in the
+    /// M-cycle's second half (`substep >= 2`, the `late` halt-wake mask). The
+    /// per-substep primitive `tick` is built from; the port Stage-B deferred
+    /// machine advance ([`crate::interconnect::Interconnect`]) drives the timer
+    /// T-by-T through this so a sub-M-cycle dispatch reclock re-frames the timer
+    /// with the PPU. `reloaded` is reset per M-cycle by the caller (`tick`
+    /// inlines it; the deferred path resets it at each M-cycle's first substep).
+    pub fn tick_substep(&mut self, substep: u8) -> (u8, bool) {
+        let mut iff = 0;
+        let mut late = false;
+        // The reload pipeline runs first so the T-cycle that caused the
+        // overflow does not consume one of the 4 delay T-cycles.
+        if self.reload_in > 0 {
+            self.reload_in -= 1;
+            if self.reload_in == 0 {
+                self.tima = self.tma;
+                self.reloaded = true;
+                iff |= 0x04;
+                late = substep >= 2;
+            }
+        }
+        let before = self.mux_out();
+        self.div = self.div.wrapping_add(1);
+        if before && !self.mux_out() {
+            self.clock_tima();
+        }
+        (iff, late)
+    }
+
+    /// Reset the per-M-cycle `reloaded` latch (the deferred machine advance
+    /// calls this at each M-cycle's first substep, mirroring [`Self::tick`]'s
+    /// inline reset).
+    pub fn begin_mcycle(&mut self) {
+        self.reloaded = false;
     }
 
     /// Read FF04-FF07.
@@ -213,6 +237,33 @@ mod tests {
             iff |= t.tick().iff;
         }
         iff
+    }
+
+    /// The per-substep primitive [`Timer::tick_substep`] composes back into the
+    /// whole-M-cycle [`Timer::tick`]: driving two identically-initialised
+    /// timers in lockstep — one through `tick`, the other through 4
+    /// `tick_substep` calls per M-cycle (after a `begin_mcycle` reset, exactly
+    /// as the port Stage-B deferred machine advance does) — yields byte-identical
+    /// IF / `late` / div / TIMA across an overflow + reload window. Pins the
+    /// refactor that made `tick` byte-identical to the T-granular advance.
+    #[test]
+    fn tick_substep_composes_into_tick() {
+        let mut whole = timer_with(0x05, 0xFD, 0x37); // enabled, freq bit 3, near overflow
+        let mut split = timer_with(0x05, 0xFD, 0x37);
+        for m in 0..600u32 {
+            let tw = whole.tick();
+            split.begin_mcycle();
+            let (mut iff, mut late) = (0u8, false);
+            for s in 0..4 {
+                let (i, l) = split.tick_substep(s);
+                iff |= i;
+                late |= l;
+            }
+            assert_eq!(tw.iff, iff, "iff mismatch at M-cycle {m}");
+            assert_eq!(tw.late, late, "late mismatch at M-cycle {m}");
+            assert_eq!(whole.div_counter(), split.div_counter(), "div at {m}");
+            assert_eq!(whole.read(0xFF05), split.read(0xFF05), "tima at {m}");
+        }
     }
 
     #[test]

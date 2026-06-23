@@ -105,6 +105,72 @@ impl Interconnect {
         self.ppu.set_leading_edge_reads(on);
     }
 
+    /// Port Stage B (Tier 2) hook: enable the deferred-commit machine advance
+    /// (B1) + the −2 interrupt-dispatch reclock (B2/B3). Implies
+    /// [`Self::set_leading_edge_reads`] — the cc+0 reads are the frame the
+    /// reclock recalibrates against. Held off in production and in the S0
+    /// kernel-pair specs (which set only `leading_edge`); the make-or-break
+    /// thesis measurement sets it through [`crate::GameBoy::set_tier2_reclock`].
+    pub(crate) fn set_tier2_reclock(&mut self, on: bool) {
+        self.tier2_reclock = on;
+        if on {
+            self.set_leading_edge_reads(true);
+        }
+        self.ppu.set_tier2_reclock(on);
+    }
+
+    /// Port Stage B (Tier 2) deferred-commit read: pay the previous M-cycle's
+    /// parked debt — advancing the whole machine to this M-cycle's leading edge
+    /// (cc+0) — then sample. Unlike the eager [`Bus::read`] (which advances a
+    /// full M-cycle *after* a single FF41 leading-edge peek and otherwise
+    /// trails at cc+4), every read here samples at the leading edge, and the
+    /// dispatch reclock's `pending=2` lands the vector/handler reads 2 dots
+    /// early.
+    pub(super) fn read_deferred(&mut self, addr: u16, kind: OamBugKind) -> u8 {
+        let before = self.clock.now();
+        let _ = self.clock.read(); // clock += old pending; park 4
+        self.advance_machine_t(before, self.clock.now());
+        self.service_vram_dma();
+        self.maybe_oam_bug(addr, kind);
+        self.read_no_tick(addr)
+    }
+
+    /// Port Stage B deferred-commit write: the value commits at the leading edge
+    /// per its conflict class ([`Self::write_conflict`]), advancing the machine
+    /// by the class's pre-commit split.
+    pub(super) fn write_deferred(&mut self, addr: u16, value: u8) {
+        let conflict = self.write_conflict(addr);
+        let before = self.clock.now();
+        let _ = self.clock.write(conflict);
+        self.advance_machine_t(before, self.clock.now());
+        self.service_vram_dma();
+        if let 0xFF40 | 0xFF42 | 0xFF43 | 0xFF47..=0xFF4B = addr {
+            let dots = if self.double_speed { 1 } else { 2 };
+            self.ppu.stage_write(addr, value, dots);
+        }
+        self.maybe_oam_bug(addr, OamBugKind::Write);
+        self.write_no_tick(addr, value);
+    }
+
+    /// Port Stage B deferred-commit internal M-cycle (`cycle_no_access`): park
+    /// +4 and advance nothing now — the debt is paid by the next real access.
+    pub(super) fn tick_deferred(&mut self) {
+        let before = self.clock.now();
+        self.clock.internal();
+        self.advance_machine_t(before, self.clock.now()); // delta 0 (deferred)
+        self.service_vram_dma();
+    }
+
+    /// Port Stage B deferred-commit `cycle_oam_bug` (`tick_addr`): commits the
+    /// previous debt at the leading edge and reparks 4, like a read.
+    pub(super) fn tick_addr_deferred(&mut self, value: u16) {
+        let before = self.clock.now();
+        let _ = self.clock.read();
+        self.advance_machine_t(before, self.clock.now());
+        self.service_vram_dma();
+        self.maybe_oam_bug(value, OamBugKind::Write);
+    }
+
     /// Test-only view of the deferred-commit CPU clock's committed position
     /// (CPU T-cycles). Used to assert the S1 net-zero conservation invariant
     /// (`clock.now()` after a boundary flush == 4 × M-cycles executed).

@@ -175,7 +175,18 @@ impl Ppu {
         // m3stat). `bare_flip` is false on the glitch line, so it lands in the +4
         // arm. DS excluded (the DS read offset is 2, deferred). `leading_edge_reads`
         // is off in production, so `vis_early` is never set there (byte-identical).
-        let early_lead = if bare_flip { 3 } else { 4 };
+        // Port Stage B3 — re-derive the `vis_early` lead for the −2 dispatch
+        // reclock. The lead was calibrated against the cc+4 dispatch (our dot
+        // 254): vis_early fires ~dot 251 so the kernel m2int read (cc+0 dot 248)
+        // sees mode 3 and m0int (dot 252) sees mode 0. The deferred Tier-2 frame
+        // (B1+B2) samples those reads at dots 252 / 256, so the dot-251 vis_early
+        // makes m2int@252 read mode 0 (wrong, wants 3). Lowering the lead by 2
+        // fires vis_early 2 dots LATER (a lower `proj` threshold fires later as
+        // the pipe drains), landing the visible mode→0 boundary in (252, 256] so
+        // m2int@252 reads mode 3 and m0int@256 reads mode 0. Gated on
+        // `tier2_reclock`; the leading-edge-only path keeps the validated leads.
+        let early_lead =
+            (if bare_flip { 3 } else { 4 }) - if self.tier2_reclock { 2 } else { 0 };
         if self.leading_edge_reads && !self.ds && !self.vis_early && proj <= lead + early_lead {
             self.vis_early = true;
         }

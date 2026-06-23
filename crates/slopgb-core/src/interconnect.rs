@@ -330,6 +330,20 @@ pub struct Interconnect {
     /// ([`Self::leading_edge_sample`] returns `None`).
     leading_edge_reads: bool,
 
+    /// Port Stage B (Tier 2): the −2 sub-M-cycle **dispatch reclock**. When on
+    /// (implies [`Self::leading_edge_reads`]), `tick_machine` advances the
+    /// PPU/timer/APU/serial deferred — slaved to the deferred-commit
+    /// [`CycleClock`]'s parked debt instead of a flat 4-dot quantum (B1) — and
+    /// the interrupt dispatch re-parks `pending=2` ([`Bus::dispatch_retime`],
+    /// B2) so the vector fetch + first handler reads sample 2 dots early
+    /// ("re-frames every read"; `docs/sameboy-port/PORT-PLAN.md` Tier 2).
+    /// **Held `false`** — the deferred path is red until the whole reclock
+    /// converges, so it sits behind its OWN flag, separate from
+    /// `leading_edge_reads`: the S0 kernel-pair gate specs run `leading_edge`
+    /// only, keeping them on the validated Tier-1 frame while this lands. The
+    /// thesis hook ([`crate::GameBoy::set_tier2_reclock`]) sets both.
+    tier2_reclock: bool,
+
     /// CGB hardware running a CGB-flagged cart. CGB hardware with a DMG
     /// cart runs in DMG compatibility mode: KEY1/SVBK/HDMA/RP/FF74 and the
     /// palette data ports are disabled (misc/boot_hwio-C).
@@ -432,6 +446,13 @@ pub struct Interconnect {
     ack_squash_mask: u8,
     ack_squash_ticks: u8,
     ack_squash_dots: u8,
+
+    /// Port Stage B (Tier 2) — the `tick_squash` mask (`ack_squash_mask & 0x0C`,
+    /// the timer/serial squash) latched at the current deferred M-cycle's first
+    /// T, so it persists across the T-by-T [`Self::advance_machine_t`] loop even
+    /// when the −2 dispatch reclock splits one M-cycle across two advances. Unused
+    /// on the eager path (which recomputes it per `tick_machine` call).
+    deferred_squash: u8,
 
     /// FF46 readback is simply the last written value
     /// (acceptance/oam_dma/reg_read).
@@ -540,6 +561,7 @@ impl Interconnect {
             cycles: 0,
             clock: CycleClock::new(),
             leading_edge_reads: false,
+            tier2_reclock: false,
             cgb_mode,
             double_speed: false,
             dot_phase: 0,
@@ -557,6 +579,7 @@ impl Interconnect {
             ack_squash_mask: 0,
             ack_squash_ticks: 0,
             ack_squash_dots: 0,
+            deferred_squash: 0,
             dma_reg: 0,
             dma_run: None,
             dma_start: None,
@@ -698,6 +721,11 @@ fn sgb_header_zero_bits(cart: &Cartridge) -> u32 {
 
 impl Bus for Interconnect {
     fn read(&mut self, addr: u16) -> u8 {
+        if self.tier2_reclock {
+            // Port Stage B: the deferred-commit reclock advances the machine to
+            // this M-cycle's leading edge before sampling.
+            return self.read_deferred(addr, OamBugKind::Read);
+        }
         // S1 deferred-commit clock: pay the previous M-cycle's parked debt
         // and park this read's 4 T-cycles.
         let _leading_edge = self.clock.read();
@@ -716,6 +744,9 @@ impl Bus for Interconnect {
     }
 
     fn write(&mut self, addr: u16, value: u8) {
+        if self.tier2_reclock {
+            return self.write_deferred(addr, value);
+        }
         // S1 deferred-commit clock: a write commits per its per-model
         // conflict class (`write_conflict`, the SameBoy `cycle_write` map).
         // The commit position is still discarded — write-only scaffold —
@@ -742,6 +773,9 @@ impl Bus for Interconnect {
     }
 
     fn tick(&mut self) {
+        if self.tier2_reclock {
+            return self.tick_deferred();
+        }
         // S1 deferred-commit clock: an internal M-cycle parks +4 without
         // committing (SameBoy `cycle_no_access`); the next access pays it.
         self.clock.internal();
@@ -750,6 +784,9 @@ impl Bus for Interconnect {
     }
 
     fn tick_addr(&mut self, value: u16) {
+        if self.tier2_reclock {
+            return self.tick_addr_deferred(value);
+        }
         // S1 deferred-commit clock: the OAM-bug-carrying internal M-cycle (a
         // 16-bit register driven on the address bus) is SameBoy's
         // `cycle_oam_bug` (`sm83_cpu.c:326`), which — unlike `cycle_no_access`
@@ -763,6 +800,9 @@ impl Bus for Interconnect {
     }
 
     fn read_inc(&mut self, addr: u16) -> u8 {
+        if self.tier2_reclock {
+            return self.read_deferred(addr, OamBugKind::ReadIncrease);
+        }
         // S1 deferred-commit clock: same leading-edge read as `read`.
         let _leading_edge = self.clock.read();
         // S2a: leading-edge sample (cc+0), inert while the flag is off.
@@ -959,7 +999,31 @@ impl Bus for Interconnect {
         self.set_cpu_halted(halted);
     }
 
+    fn dispatch_reclock(&self) -> bool {
+        self.tier2_reclock
+    }
+
+    fn dispatch_retime(&mut self) {
+        // Port Stage B (Tier 2): re-park the clock 2 T early (SameBoy
+        // sm83_cpu.c:1690) and advance the deferred machine by the 2 T it
+        // commits, so the vector fetch + first handler reads sample 2 dots
+        // early. Only reached on the reclock path (`dispatch_reclock`), after
+        // the low push parked 4 (`pending == 4 > 2`).
+        let before = self.clock.now();
+        let _ = self.clock.dispatch_vector_retime();
+        self.advance_machine_t(before, self.clock.now());
+    }
+
     fn flush_pending(&mut self) {
+        if self.tier2_reclock {
+            // Port Stage B: drain the parked debt AND advance the machine to
+            // catch up, so the deferred −2 read shift is reabsorbed at the
+            // instruction boundary (SameBoy `flush_pending_cycles`).
+            let before = self.clock.now();
+            self.clock.flush();
+            self.advance_machine_t(before, self.clock.now());
+            return;
+        }
         // S1 instruction boundary: drain the deferred-commit clock's parked
         // debt (SameBoy `flush_pending_cycles`). Net-zero — the clock is
         // write-only scaffold; this only keeps `clock.now()` exact at
