@@ -187,6 +187,52 @@ fn gbmicrotest_dmg_matrix() {
     );
 }
 
+/// Port Stage B (Tier 2), L1 of the Phase-B thesis — `int_hblank_halt_scx0-7`
+/// on the deferred-commit reclock (`ppu-subdot-ladder.md` THESIS RESULT #9).
+/// The test times the mode-0 STAT IRQ **halt-wake** via TIMA; the deferred halt
+/// loop samples `pending_halt_wake` at cc+0, ~2 M-cycles before SameBoy's
+/// `GB_cpu_run` DMG mid-cycle sample (`sm83_cpu.c:1621-1628`). The re-derived
+/// `if_late` halt mask (2 uniform M-cycles + the `mask{rise cc==4}` second-half
+/// term for the deferred `cc = eager+1` rotation; `interconnect/tick.rs`)
+/// restores the baked `$FF80` = 62,62,62,63,63,63,63,64 target, so all eight
+/// pass **flag-on** on DMG — clearing the L1 residual while the kernel pair and
+/// `intr_2_mode0_timing` keep passing (they do not halt-wake on mode 0).
+/// Production (flag-off) is byte-identical (the mask is gated on
+/// `tier2_reclock`); SameBoy itself passes these (`tools/hramdump.c`).
+#[test]
+fn tier2_int_hblank_halt_passes_dmg() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_int_hblank",
+            &format!("test-roms/{} not present", common::GBTR_DIR),
+        );
+        return;
+    };
+    for scx in 0..8u8 {
+        let rel = format!("gbmicrotest/int_hblank_halt_scx{scx}.gb");
+        let rom = std::fs::read(root.join(&rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot(&rom, Model::Dmg);
+        gb.set_tier2_reclock(true);
+        // Same fixed-point protocol as `run_case` (two frames, then the
+        // verdict deadline), on the Tier-2 reclock path.
+        let deadline = gb.cycles().saturating_add(DEADLINE_TCYCLES);
+        harness::run_for_frames(&mut gb, 2);
+        if gb.peek(0xFF82) == 0 {
+            while gb.cycles() < deadline {
+                gb.step();
+            }
+        }
+        assert_eq!(
+            gb.peek(0xFF82),
+            0x01,
+            "{rel} (tier2 flag-on): FF82={:#04X} actual FF80={:#04X} expected FF81={:#04X}",
+            gb.peek(0xFF82),
+            gb.peek(0xFF80),
+            gb.peek(0xFF81),
+        );
+    }
+}
+
 /// Self-verifying coverage: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// equals the on-disk ROM set, with the suite size and testbench count
 /// pinned so a changed checkout or a typo in [`TESTBENCHES`] fails loudly.

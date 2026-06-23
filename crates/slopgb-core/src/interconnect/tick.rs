@@ -91,22 +91,48 @@ impl Interconnect {
                 // int_oam_* grids pin the law).
                 self.if_late |= IF_STAT_BIT;
             }
-            if self.ppu.take_m0_rise()
-                && obs_pre_edge(MID_PHASE, event_phase(EdgeKind::M0Rise, cc, 0))
-            {
-                // The mode-0 STAT rise carries the second-half halt law
-                // — the same shape as the line-start OAM pulses — but
-                // its dot moves with SCX/sprites/window, so the half is
-                // decided here against the CPU's M-cycle: a rise in the
-                // second half (PPU dots 3-4 within the cycle; the last
-                // dot in double speed) is readable at once and fully
-                // visible to the running CPU's interrupt sample, yet
-                // missed by the halt-exit sampler for one M-cycle
-                // (SameBoy GB_cpu_run samples the halt exit mid-cycle).
-                // mooneye hblank_ly_scx_timing-GS and the gbmicrotest
-                // int_hblank_halt_scx0-7 grid pin all eight SCX phases
-                // between them.
-                self.if_late |= IF_STAT_BIT;
+            if self.ppu.take_m0_rise() {
+                let second_half = obs_pre_edge(MID_PHASE, event_phase(EdgeKind::M0Rise, cc, 0));
+                if self.tier2_reclock && self.cpu_halted {
+                    // Port Stage B — re-derive the mode-0 halt-wake mask for the
+                    // deferred cc+0 frame (the `int_hblank_halt_scx0-7` DMG grid;
+                    // `ppu-subdot-ladder.md` THESIS RESULT #8/#9). The deferred
+                    // halt loop samples `pending_halt_wake` at cc+0, ~2 M-cycles
+                    // before SameBoy's `GB_cpu_run` DMG mid-cycle sample
+                    // (`sm83_cpu.c:1621-1628`, advance-2 → sample → advance-2)
+                    // plus the dispatch-retime's const −1 TIMA phase. A forward
+                    // advance before the sample is MEASURED WORSE (the IRQ
+                    // becomes visible earlier → wake earlier → lower count), so
+                    // the delay is supplied as extra `if_late` masking, not an
+                    // advance. The 2 uniform M-cycles = this cycle (masked here) +
+                    // one countdown cycle (`m0_halt_hold = 1`); the per-SCX
+                    // `mask{rise cc==4}` second-half term adds the 8th-scx +1, at
+                    // cc==4 because the deferred frame rotates the rise cc to
+                    // `eager_cc + 1` (the eager cc==3 second half becomes the
+                    // M-cycle-END cc==4). This recovers `int_hblank` to the baked
+                    // 62,62,62,63,63,63,63,64 target on DMG while the kernel pair
+                    // (FF41 reads) and `intr_2` (mode-2 OAM halt-wake) — which do
+                    // not halt-wake on mode 0 — stay byte-identical; CGB is
+                    // empirically unchanged (its `GB_cpu_run` samples cc+0, no
+                    // mid-cycle). Reached only on the reclock path (`tier2_reclock`),
+                    // so production is byte-identical.
+                    self.if_late |= IF_STAT_BIT;
+                    self.m0_halt_hold = 1 + u8::from(cc == 4);
+                } else if second_half {
+                    // The mode-0 STAT rise carries the second-half halt law
+                    // — the same shape as the line-start OAM pulses — but
+                    // its dot moves with SCX/sprites/window, so the half is
+                    // decided here against the CPU's M-cycle: a rise in the
+                    // second half (PPU dots 3-4 within the cycle; the last
+                    // dot in double speed) is readable at once and fully
+                    // visible to the running CPU's interrupt sample, yet
+                    // missed by the halt-exit sampler for one M-cycle
+                    // (SameBoy GB_cpu_run samples the halt exit mid-cycle).
+                    // mooneye hblank_ly_scx_timing-GS and the gbmicrotest
+                    // int_hblank_halt_scx0-7 grid pin all eight SCX phases
+                    // between them.
+                    self.if_late |= IF_STAT_BIT;
+                }
             }
             if let Some(lead) = self.ppu.take_m0_access_flip() {
                 // The OAM/VRAM accessibility unblock trails the IRQ rise by
@@ -204,6 +230,15 @@ impl Interconnect {
                 self.timer.begin_mcycle();
                 self.oam_dma_tick();
                 self.if_late = 0;
+                // Carry the deferred mode-0 halt-wake delay across the following
+                // M-cycles (see `m0_halt_hold`): one extra masked cycle each.
+                // `advance_machine_t` is itself only reached on the reclock path,
+                // so the `tier2_reclock` guard is redundant here — kept explicit
+                // to pin the byte-identical-OFF invariant at the use site.
+                if self.tier2_reclock && self.m0_halt_hold > 0 {
+                    self.m0_halt_hold -= 1;
+                    self.if_late |= IF_STAT_BIT;
+                }
                 self.if_stat_late = 0;
                 self.m0_access_edge = None;
                 self.pal_access_edge = None;
@@ -281,6 +316,9 @@ impl Interconnect {
         }
         self.engage_halt_gate(halted);
         if !halted {
+            // Clear any unspent deferred mode-0 halt-wake delay so it cannot
+            // leak into a later halt (the wake consumed the IRQ this masked).
+            self.m0_halt_hold = 0;
             // The halt-mode wake restarts the OAM DMA controller's clock
             // one M-cycle ahead of the CPU pipeline: a single catch-up
             // cycle runs at the wake itself, before the CPU's first

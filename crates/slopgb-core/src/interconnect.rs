@@ -383,6 +383,22 @@ pub struct Interconnect {
     /// see them immediately ([`Bus::pending_halt_wake`]; `Timer::tick`'s
     /// `late`).
     if_late: u8,
+    /// Port Stage B (Tier 2) — the deferred-frame mode-0 STAT halt-wake delay.
+    /// The deferred halt loop samples `pending_halt_wake` at this M-cycle's cc+0
+    /// (after paying the previous M-cycle's debt), ~2 M-cycles before SameBoy's
+    /// `GB_cpu_run` DMG mid-cycle sample (`sm83_cpu.c:1621-1628`, advance-2 →
+    /// sample → advance-2) plus the dispatch-retime's const −1 TIMA phase. A
+    /// forward advance before the sample was measured WORSE (the IRQ becomes
+    /// visible earlier → wake earlier → lower count); the delay is supplied as
+    /// extra `if_late` masking instead (the mandate's "delay via if_late, NOT
+    /// advance"). Set when the mode-0 rise is taken during halt on the reclock
+    /// path; counts down one mask per following M-cycle. Only the
+    /// `int_hblank_halt`/`hblank_ly_scx` mode-0 halt grids observe it (intr_2
+    /// wakes on the mode-2 OAM source, the kernel reads FF41 — neither halt-wakes
+    /// on mode 0), so it is free to recalibrate w.r.t. the rest of the triad.
+    /// Inert flag-off (only set under `tier2_reclock`), so production is
+    /// byte-identical.
+    m0_halt_hold: u8,
     /// STAT IF bit raised by the PPU in the *current* M-cycle's second
     /// half (line-0 OAM rise): readable via FF0F at once, but the CPU's
     /// interrupt sample for this cycle must not see it
@@ -572,6 +588,7 @@ impl Interconnect {
             intf: 0,
             ie: 0,
             if_late: 0,
+            m0_halt_hold: 0,
             if_stat_late: 0,
             m0_access_edge: None,
             pal_access_edge: None,
