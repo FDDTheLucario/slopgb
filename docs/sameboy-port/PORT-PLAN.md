@@ -66,6 +66,7 @@ The TDD task list (`/tdd-test-plan` output, this session) maps onto these:
   after their visible edges; mode-3 length = `167 + SCX&7` + penalties. Un-ignore
   S0. This is the convergence point — kernel pair lifts, mooneye + golden hold.
   (TDD #3+#4) Seams: `ppu/stat_irq.rs:vis_mode`, `ppu/render/mode0.rs:m0_flip_events`.
+  **Executable recipe with the measured dot offsets: [`atomic-reclock-recipe.md`](atomic-reclock-recipe.md)** (2026-06-23 #11e — the read frame lands ~4 dots before SameBoy's; read + every tier2 boundary move +4 together or the kernel pin fails / the suite is red).
 - **S4 — accessibility back-dating.** OAM/VRAM unblock at the visible boundary,
   CGB palette 2-dot HBlank pulse (`display.c:2090-2121`); retire the
   `m0_access_flip`/`pal_access_flip`/`stat_mode_edge` stamps. Lifts cgbpal_m3end
