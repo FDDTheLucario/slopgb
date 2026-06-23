@@ -707,6 +707,38 @@ fn tier2_kernel_pair_matches_sameboy_target() {
     }
 }
 
+/// Port Stage B5 (L2) — the LONE Phase-B residual cleared: mooneye
+/// `intr_2_mode0_timing_sprites` passes on the FULL deferred reclock
+/// (`set_tier2_reclock`) for BOTH models. The test resolves each sprite
+/// config's mode-3 length to whole M-cycles; our `proj` tracks a finer per-X
+/// staircase that the cc+4 read quantizes back into the right buckets
+/// (production passes every config), but the cc+0 leading-edge read exposes
+/// the sub-M-cycle dispatch phase. The fix (`ppu/render/mode0.rs`) snaps the
+/// sprite-line dispatch + `vis_early` to the CPU read grid (dot ≡ 0 mod 4)
+/// with `early_lead = 0`, reproducing the cc+4 quantization — verified to pass
+/// all 105 configs both models while the bare kernel pair, `intr_2_mode0_timing`
+/// and `int_hblank_halt` keep passing (4/4 thesis triad). Production (flag-off)
+/// is byte-identical: the snap is gated on `tier2_reclock` and `vis_early` is
+/// never set without `leading_edge_reads`. SameBoy passes this ROM
+/// (header `pass: DMG..AGS`).
+#[test]
+fn tier2_intr_2_sprites_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr("tier2_intr_2_sprites", "game-boy-test-roms collection not present");
+        return;
+    };
+    let rel = "mooneye-test-suite/acceptance/ppu/intr_2_mode0_timing_sprites.gb";
+    let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+    for model in [Model::Dmg, Model::Cgb] {
+        let mut gb = harness::boot(&rom, model);
+        gb.set_tier2_reclock(true);
+        harness::run_until_breakpoint(&mut gb, 30_000_000)
+            .unwrap_or_else(|e| panic!("{rel} [{model:?}] (tier2 flag-on): {e}"));
+        harness::check_fib(&gb)
+            .unwrap_or_else(|e| panic!("{rel} [{model:?}] (tier2 flag-on): {e}"));
+    }
+}
+
 /// Self-verifying inventory: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// covers the on-disk ROM set exactly, with the exemptions pinned to the
 /// documented 50-entry list.

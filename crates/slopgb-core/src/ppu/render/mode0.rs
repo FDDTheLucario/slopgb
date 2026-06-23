@@ -175,22 +175,63 @@ impl Ppu {
         // m3stat). `bare_flip` is false on the glitch line, so it lands in the +4
         // arm. DS excluded (the DS read offset is 2, deferred). `leading_edge_reads`
         // is off in production, so `vis_early` is never set there (byte-identical).
-        // Port Stage B3 — re-derive the `vis_early` lead for the −2 dispatch
-        // reclock. The lead was calibrated against the cc+4 dispatch (our dot
-        // 254): vis_early fires ~dot 251 so the kernel m2int read (cc+0 dot 248)
-        // sees mode 3 and m0int (dot 252) sees mode 0. The deferred Tier-2 frame
-        // (B1+B2) samples those reads at dots 252 / 256, so the dot-251 vis_early
-        // makes m2int@252 read mode 0 (wrong, wants 3). Lowering the lead by 2
-        // fires vis_early 2 dots LATER (a lower `proj` threshold fires later as
-        // the pipe drains), landing the visible mode→0 boundary in (252, 256] so
-        // m2int@252 reads mode 3 and m0int@256 reads mode 0. Gated on
-        // `tier2_reclock`; the leading-edge-only path keeps the validated leads.
-        let early_lead =
-            (if bare_flip { 3 } else { 4 }) - if self.tier2_reclock { 2 } else { 0 };
-        if self.leading_edge_reads && !self.ds && !self.vis_early && proj <= lead + early_lead {
+        // Port Stage B3 — re-derive the BARE-line `vis_early` lead for the −2
+        // dispatch reclock (the kernel separator). The Tier-1 lead was calibrated
+        // against the cc+4 dispatch (our dot 254): vis_early fires ~dot 251 so the
+        // kernel m2int read (cc+0 dot 248) sees mode 3 and m0int (dot 252) sees
+        // mode 0. The deferred Tier-2 frame (B1+B2) samples those reads at dots
+        // 252 / 256, so the dot-251 vis_early makes m2int@252 read mode 0 (wrong,
+        // wants 3). Lowering the bare lead by 2 (`lead + 3` → `lead + 1`) fires
+        // vis_early 2 dots LATER, landing the visible mode→0 boundary in (252,
+        // 256] so m2int@252 reads mode 3 and m0int@256 reads mode 0. Sprite lines
+        // take the separate B5 grid-snap below (their finer mode-3 geometry needs
+        // a per-config re-grid, not a uniform −2). Gated on `tier2_reclock`.
+        // Port Stage B5 (L2) — sprite-line visible mode→0 RE-GRID for the
+        // deferred Tier-2 frame. The `intr_2_mode0_timing_sprites` test resolves
+        // the mode-3 length to whole M-cycles (a NOP-count delay then an FF41
+        // poll): hardware buckets configs that share an `extra` to the same
+        // value (e.g. 10 sprites at X=0 and X=1 both extend by 16), but our
+        // `proj` formula tracks a finer per-X staircase (X=0→dispatch dot 318,
+        // X=1→317, …). At cc+4 the CPU read's own M-cycle quantization snaps that
+        // staircase back onto the right buckets, so production passes every
+        // config; at cc+0 the leading-edge read no longer hides the sub-M-cycle
+        // dispatch phase, so configs whose dispatch dot straddles a read-grid
+        // boundary mis-bucket (e.g. X=1's dot 317 reads mode 0 one poll early).
+        // Fix: on sprite lines (`has_sprites`, including OAM sprites pushed fully
+        // off-screen at X≥168 that take the bare `lead`), snap BOTH the dispatch
+        // and the coincident `vis_early` to the CPU read grid — the next dot
+        // ≡ 0 (mod 4), one dot below the read dots (≡ 1) — so all configs in a
+        // bucket land on the same grid dot and reproduce the cc+4 quantization.
+        // `early_lead = 0` makes `vis_early` coincide with the snapped dispatch
+        // (a negative sprite lead is structurally dead — the dispatch sets
+        // `m0_src` and early-returns). Bare lines keep `lead + 1` (the kernel /
+        // int_hblank −1 shift, no snap); window/glitch lines keep `lead + 2`.
+        // All gated on `tier2_reclock`; production (`!leading_edge_reads`) never
+        // sets `vis_early` and the snap is inert, so it is byte-identical OFF.
+        let has_sprites = r.n_sprites > 0;
+        let early_lead = if self.tier2_reclock {
+            if has_sprites {
+                0
+            } else if bare_flip {
+                1
+            } else {
+                2
+            }
+        } else if bare_flip {
+            3
+        } else {
+            4
+        };
+        let snap_ok = !(self.tier2_reclock && has_sprites) || self.dot % 4 == 0;
+        if self.leading_edge_reads
+            && !self.ds
+            && !self.vis_early
+            && proj <= lead + early_lead
+            && snap_ok
+        {
             self.vis_early = true;
         }
-        if proj <= lead {
+        if proj <= lead && snap_ok {
             self.m0_src = true;
             self.m0_rise_dot = true;
             self.line_render_done = true;
