@@ -64,3 +64,14 @@
 # VERDICT: no clean one-slice win remains; flip = multi-session port across
 #   window-geometry + sprite-geometry + m1/lyc-delivery + the S7 sub-dot wall.
 #   Each needs SameBoy per-config ground truth + a tier2-gated parallel calc.
+
+# ===== SameBoy mode-3 EXIT ground truth (SBMODE trace, 2026-06-24) =====
+# Added a visible-mode transition trace to SameBoy GB_STAT_update (SB_TRACE):
+#   fprintf "SBMODE ly cfl dc vis" on every STAT&3 change. Gives the mode-3->0
+#   EXIT dot per config (the window length ground truth, no curve-fit).
+# DMG ly1: m2int_wx00 AND late_wy_10to0 BOTH exit mode-3 at cfl257 (= bare).
+#   => wx00 (WX<7) does NOT extend mode-3 in SameBoy; slopgb OVER-extends it
+#      (reads dot260 mode3, boundary >260 vs SameBoy 257) -> wrongly adds the
+#      window penalty for low WX. The window-length fix is per-config proj/lead
+#      vs SameBoy SBMODE (low-WX no-extend, late-WY restart, scx&7), tier2-gated
+#      (proj/lead is production-shared + bare-exit kernel-pinned). Multi-config.

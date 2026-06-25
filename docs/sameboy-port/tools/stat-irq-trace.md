@@ -50,6 +50,18 @@ m2int read ly1 cfl256/dot252 mode3, m0int cfl261/dot256 mode0; dispatch
 m2int@0, m0int slopgb dot254 / SameBoy cfl257). See the recipe's 2026-06-24 box
 (`../atomic-reclock-recipe.md`) for the refutation of the literal "read +4".
 
+**SBMODE trace (the mode-3 EXIT ground truth, the window-length lever):** add to
+SameBoy `GB_STAT_update` (after the DMA-mode-2 clear) a `SB_TRACE`-gated
+`fprintf(stderr, "SBMODE ly=%d cfl=%d dc=%d vis=%d\n", current_line,
+cycles_for_line, display_cycles, io_registers[GB_IO_STAT] & 3)` guarded by a
+static `prevmode`/`prevline` so it logs only on a visible-mode change (`ly<144`).
+This pins the per-config mode-3→0 EXIT dot (e.g. DMG ly1 m2int_wx00 + late_wy
+both exit at **cfl257** = the bare value → low-WX does NOT extend mode-3; slopgb
+over-extends). The slopgb counterpart (not yet added): trace the `m0_src`/
+`line_render_done` visible flip dot in `render/mode0.rs` (the dispatch tracer
+only logs IRQ rises, so window mode-2-only lines need this separate flip trace).
+Detail: `measurements/flip-regr-2026-06-24-summary.txt`.
+
 ## Findings (2026-06-23 #11e, DMG)
 
 | ROM | SameBoy dispatch | source | slopgb |
