@@ -57,6 +57,12 @@ impl Ppu {
             // mode-3 start only if the window is enabled by then.
             self.win_start_pending = true;
         }
+        if win_match && self.line < 144 && crate::ppu::s5dbg_on() {
+            eprintln!(
+                "SLOPGB winmatch ly={} dot={} lx={} wx={} wy_ok={wy_ok} en={win_en_now} active={}",
+                self.line, self.dot, self.render.lx, wx, self.render.win_active
+            );
+        }
         if win_match && wy_ok && win_en_now {
             if !self.render.win_active {
                 // Activation: the window line counter advances *here*

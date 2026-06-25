@@ -249,6 +249,26 @@ impl Ppu {
             && snap_ok
         {
             self.vis_early = true;
+            // S5 visible-mode→0 flip tracer (`SLOPGB_S5DBG`; byte-identical when
+            // unset). The dispatch tracer in `stat_update_tick` only logs IRQ
+            // rises, so window mode-2-only lines (no mode-0 STAT source) need this
+            // separate trace to pin the CPU-visible mode-3→0 EXIT dot — the
+            // window-length ground-truth counterpart to SameBoy's SBMODE.
+            if crate::ppu::s5dbg_on() && self.line < 144 {
+                let kind = if bare_flip {
+                    "bare"
+                } else if has_sprites {
+                    "spr"
+                } else if self.glitch_line {
+                    "glitch"
+                } else {
+                    "win"
+                };
+                eprintln!(
+                    "SLOPGB visflip ly={} dot={} kind={kind} proj={proj} lead={lead} el={early_lead}",
+                    self.line, self.dot
+                );
+            }
         }
         if proj <= lead && snap_ok {
             self.m0_src = true;
