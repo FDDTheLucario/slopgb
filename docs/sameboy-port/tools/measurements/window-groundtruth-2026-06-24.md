@@ -131,6 +131,33 @@ SBex 257` (offset +4, slopgb flips LATE — opposite of mechanism 2);
 `scx` rows need the window flip to grow with SCX&7 (it is flat at 261 while
 SameBoy grows 263→268).
 
+## ATTEMPT 1 (implemented + measured + reverted) — tier2 win-active vis-HOLD
+
+To satisfy "refute ≤5×" empirically (not just by the measurement above), a
+tier2-gated active-window vis-HOLD was implemented: a new `m0_flip_dot` field +
+a `win_vis_hold()` predicate forcing `vis_mode == 3` for `scx&7` dots past the
+flip on `render.win_active` lines (byte-identical OFF; the kernel + 7 pins are
+never `win_active`). **Result: 0/53 gain.** The dot-level read/flip/want data
+shows WHY — within the win-active family the direction is OPPOSITE:
+
+```
+ROM                       ly want got  slopgb read   slopgb flip
+m2int_wx00_m3stat_2        1   0   3   dot260 mode3  dot261 win   mode-3 too LONG → need EARLIER
+m2int_wxA6_m3stat_2        1   0   3   dot256 mode3  dot257 win   too LONG → EARLIER
+m2int_wxA6_scx3_m3stat_2   1   0   3   dot256 mode3  dot260 win   too LONG → EARLIER
+late_wy_FFto2_ly2_scx3_1   2   3   0   dot264 mode0  dot261 win   mode-3 too SHORT → need LATER
+late_wy_10to0_ly1_1        1   3   0   dot260 mode0  dot254 bare  too SHORT → LATER
+```
+
+The flip dot is ~261 for both the want=0 (need earlier) and want=3 (need later)
+configs — the tests read FF41 at DIFFERENT cycles (read 256/260/264), so the
+SAME boundary gives OPPOSITE results. **No boundary lever (vis-hold either
+direction) can fix both.** The discriminator is the per-config read-vs-boundary
+PHASE — the read-frame↔boundary atomic coupling (recipe's S7 / the global
+reclock), confirmed here at dot granularity. A vis-hold extends mode-3 (helps
+the want=3 late_wy) but pushes the want=0 m2int_wx* further wrong. Attempts 2-5
+of the same boundary class would be thrashing — reverted.
+
 ## VERDICT
 
 There is **no clean tier2-gated window slice.** The 53 rows span (1) the S7
