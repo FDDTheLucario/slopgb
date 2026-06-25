@@ -150,3 +150,63 @@ Pinned by gbtr `tier2_m1_vblank_rearm_passes` (both models). mooneye flag-on
 91/91, 7→8 tier2 pins, gbtr+mooneye OFF byte-identical. **Root 2 (SPURIOUS
 ly153→ly0 wrap / late-disable; the lone family target `m2m1irq_ifw_2` want1 got3
 stays) + the 7 read-frame rows remain for mech 1 / mech 3 root 2.**
+
+## #11k (2026-06-25) — mech 3 root 2 (SUB-CASE) SHIPPED: the line-0 VBlank carry
+
+Implemented + landed flag-gated (byte-identical OFF). The first **SPURIOUS**-side
+fix (#11h root 2). Root 2 splits into ≥2 sub-cases by *what held SameBoy's line
+high across the wrap*; this session ships the **VBlank-overlap** sub-case.
+
+**Ground truth (SBLEVEL/SBTRACE, DMG).** SameBoy's `stat_interrupt_line`
+(`display.c:546-556`) is NOT a wired-OR — it is the SINGLE mode source selected
+by `mode_for_interrupt` (case 0/1/2), OR the LYC source. And SameBoy **never
+re-sets `mode_for_interrupt`** between the line-144 entry (`:2215`, `= 1`) and
+line 0's `GB_SLEEP 7,1` OAM step (`:1828`, `= 2`). So with VBlank enabled the
+line stays **continuously HIGH** from line 144 through vblank AND through line
+0's OAM rise — the dot-4 OAM pulse joins an already-high line → **no fresh 0→1
+edge on line 0**.
+
+| ROM (DMG) | SameBoy STAT_IRQ | slopgb (before) | class |
+|---|---|---|---|
+| `m1/m2m1irq_ifw_2` (want1) | ly1-143 (cfl0 mfi2) + ly144·m1; **NO ly0** | spurious `ly0 dot4 mfi2` | VBlank-overlap |
+| `lycEnable/lycwirq_trigger_ly00_stat50_1` (E0) | ly144/151/153 m1; **NO ly0** | spurious `ly0 dot1 mfi0` (HBlank) | VBlank-overlap |
+
+slopgb's `update_mode_for_interrupt` read `vis_mode` (mode **0** for DMG) across
+line 0 dots 0-3, dropping the line at dot 0 and re-raising it at the dot-4 OAM
+pulse (or a held HBlank) → a spurious line-0 STAT edge.
+
+**Fix** (`stat_irq.rs::update_mode_for_interrupt`, line-0 `dot < 4` arm, LE/Tier-2
+only): return **1** (VBlank source), not `self.vis_mode()`. CGB already read 1
+there (`vis_mode` CGB line-0 dot<4 = 1) → **DMG-only change, CGB byte-identical**.
+Decoupled from the visible FF41 mode (still 0 for DMG). With VBlank disabled the
+carried mode-1 source contributes nothing → line low into dot 4 → the OAM pulse
+fires its real edge (matches SameBoy's vblank-off rows).
+
+**Result** (measured flag-on, gambatte): **+4 / −0**, zero SameBoy-passing rows
+dropped.
+- 6-family probe (1092 rows): 783→786 (+3): `ly0/lycint152_m0irq_1`,
+  `lycEnable/lycwirq_trigger_ly00_stat50_1`, `m2enable/late_m1disable_ly0_3` (all
+  [Dmg]); 0 newly broken.
+- Non-family DMG diff (2876 rows): +1 `lcdirq_precedence/m2irq_ly00_lcdstat30`
+  [Dmg]; 0 newly broken. CGB byte-identical (no change).
+
+Pinned `tier2_line0_vblank_carry_passes` (DMG `lycwirq_trigger_ly00_stat50_1`
+outE0). mooneye flag-on 91/91; 9 tier2 pins; gbtr+mooneye OFF byte-identical;
+lib 658; clippy -D clean. Unit test `mode_for_interrupt_has_no_mode2_lead_on_
+line_0` re-pinned `(vis,mfi)=(0,1)` at line 0 dot 3.
+
+**Named target `m2m1irq_ifw_2` (want1 got3): DISPATCH now correct** (spurious ly0
+gone, fires ly1-143 like SameBoy) but OCR still `got=3` — the residual is the
+deferred-read placement (**mech 1 read-frame**), the convergence trap, NOT root 2.
+
+**Root 2 RESIDUALS (banked, NOT this session's lever):**
+- **LYC-source / late-write sub-case** (`lycwirq_trigger_ly00_stat50_2`,
+  `lyc0_late_ff45_enable_3`, both still E2). Here SameBoy's **LYC=0 source** (not
+  VBlank) holds the line high across ly153→ly0→ly1cfl0; slopgb fires a spurious
+  `ly1 dot0 mfi2` because the **FF45=0 write timing** vs `ly_for_comparison` at
+  the line-1 carryover differs (slopgb line-1 dots 0-2 lyfc=0 matches; SameBoy's
+  line-1 setup sets lyfc=-1 then 1, and the write lands differently). This is the
+  write-trigger / `ly_for_comparison`-wrap lever — a separate mechanism.
+- **CGB side** of the lycwirq E2 rows (byte-identical here; own residual).
+- **Late-disable** (`m2enable/late_enable_m0disable_2`) — suppress an already-
+  armed source on late FF45/m1/m2 disable; untouched.

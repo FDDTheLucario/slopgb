@@ -868,11 +868,31 @@ impl Ppu {
                 // `display.c:2138` set) and no early lead (`display.c:1778`
                 // "except on line 0"). Its OWN OAM pulse fires AT the visible
                 // mode→2 edge (dot 4, the unconditional `:1792`/`:1781` set),
-                // then falls to NONE; dots 0-3 keep the line-start carryover.
+                // then falls to NONE.
+                //
+                // Mech 3 root 2 (S5 engine-driver) — the line-0 VBlank carry.
+                // Dots 0-3 carry the **VBlank (mode-1) source**, not `vis_mode`.
+                // SameBoy never re-sets `mode_for_interrupt` between the line-144
+                // entry (`display.c:2215`, `= 1`) and line 0's `GB_SLEEP 7,1` OAM
+                // step (`:1828`, `= 2`): it holds 1 across all of vblank AND line
+                // 0's first dots. So when VBlank is enabled the STAT line stays
+                // continuously HIGH from line 144 through the line-0 OAM rise —
+                // the dot-4 OAM pulse joins an already-high line and raises NO
+                // fresh 0→1 edge (`m1/m2m1irq_ifw_2`: SameBoy fires ly1-143, NOT
+                // ly0; slopgb's `vis_mode`=0 here dropped the line at dot 0 and
+                // re-raised it at dot 4 → spurious ly0 OAM IRQ → `got=3` for
+                // `want=1`). With VBlank disabled the carried mode-1 source
+                // contributes nothing, so the line is low into dot 4 and the OAM
+                // pulse fires its real edge (matching SameBoy's vblank-off rows).
+                // `vis_mode` differs only for DMG (CGB line-0 dots 0-3 already
+                // read mode 1); the IRQ side is decoupled from the FF41 read, so
+                // the visible DMG line-0 mode-0 window is untouched. LE/Tier-2
+                // only — `mode_for_interrupt` is inert flag-off, production
+                // byte-identical.
                 if self.dot == 4 {
                     2
                 } else if self.dot < 4 {
-                    self.vis_mode()
+                    1
                 } else {
                     crate::stat_update::MODE_FOR_INTERRUPT_NONE
                 }

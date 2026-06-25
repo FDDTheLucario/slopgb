@@ -898,6 +898,34 @@ fn tier2_m1_vblank_rearm_passes() {
     }
 }
 
+/// Port Stage C / S5 (mech 3 root 2) — the line-0 VBlank carry suppresses the
+/// spurious line-0 STAT edge on the deferred reclock. `lycwirq_trigger_ly00_
+/// stat50_1` enables LYC (LYC=0) + VBlank with the STAT line held high across
+/// the ly153→ly0 wrap; SameBoy never re-sets `mode_for_interrupt` between the
+/// line-144 entry (`= 1`) and line 0's OAM step (`= 2`), so its STAT line stays
+/// continuously high and raises NO fresh edge on line 0 (`out=E0`). slopgb's
+/// `mode_for_interrupt` had read `vis_mode` (mode 0) across line 0 dots 0-3,
+/// dropping the line so a line-0 source rise became a spurious edge (`out=E2`).
+/// The fix carries the VBlank source (mode 1) there (`stat_irq.rs::update_mode_
+/// for_interrupt`), decoupled from the visible FF41 mode-0. Production (flag-off)
+/// byte-identical — `mode_for_interrupt` is inert there. DMG-only: CGB reads
+/// mode 1 across line-0 dots 0-3 already (byte-identical, a separate residual).
+/// SameBoy passes the DMG `out=E0` side.
+#[test]
+fn tier2_line0_vblank_carry_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr("tier2_line0_vblank", "game-boy-test-roms collection not present");
+        return;
+    };
+    let rel = "gambatte/lycEnable/lycwirq_trigger_ly00_stat50_1_dmg08_cgb04c_outE0.gbc";
+    let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+    let model = Model::Dmg;
+    let mut gb = harness::boot_with_reclock(&rom, model);
+    run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+    check_hex_screen(gb.frame(), "E0", model.is_cgb())
+        .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected outE0 (tier2 flag-on): {e}"));
+}
+
 /// Self-verifying inventory: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// covers the on-disk ROM set exactly, with the exemptions pinned to the
 /// documented 50-entry list.

@@ -111,10 +111,16 @@ fn mode_for_interrupt_swings_two_dots_against_the_visible_mode() {
 
 /// S2b/S5-refine: the mode-2 lead is suppressed on line 0 — the OAM STAT IRQ
 /// does not fire one dot early there (`display.c:1778` "except on line 0"), so
-/// at dot 3 the IRQ mode mirrors the visible mode (no `2` lead), unlike lines
-/// 1-143. Line 0 instead pulses the OAM source *at* the visible mode→2 edge
-/// (dot 4, `display.c:1792`'s unconditional set), then falls to NONE —
-/// `ModeTimeline::mode2_irq_offset(0) == 0`.
+/// at dot 3 the IRQ mode does NOT read `2` (no lead), unlike lines 1-143. Line 0
+/// instead pulses the OAM source *at* the visible mode→2 edge (dot 4,
+/// `display.c:1792`'s unconditional set), then falls to NONE.
+///
+/// Mech 3 root 2: line 0's dots 0-3 carry the VBlank source (mode 1), NOT the
+/// visible mode (0). SameBoy never re-sets `mode_for_interrupt` between the
+/// line-144 entry (`= 1`) and line 0's OAM step (`= 2`), so the IRQ mode holds 1
+/// across vblank and into line 0's first dots — keeping the STAT line high when
+/// VBlank is enabled, so the line-0 OAM rise raises no spurious edge
+/// (`m1/m2m1irq_ifw_2`). It is decoupled from the visible FF41 mode (still 0).
 #[test]
 fn mode_for_interrupt_has_no_mode2_lead_on_line_0() {
     let mut p = dmg();
@@ -124,9 +130,10 @@ fn mode_for_interrupt_has_no_mode2_lead_on_line_0() {
     assert!(!p.glitch_line, "steady line 0, not the enable glitch line");
     assert_eq!(
         (p.vis_mode(), p.mode_for_interrupt()),
-        (0, 0),
-        "line 0 dot 3: no mode-2 lead — both still the line-start mode-0 carryover \
-         (a lead would make the IRQ mode read 2 here, as it does on line 1)"
+        (0, 1),
+        "line 0 dot 3: no mode-2 lead — the IRQ mode carries the VBlank source \
+         (mode 1) from line 144, decoupled from the visible mode-0 carryover; a \
+         lead would make it read 2 here, as it does on line 1"
     );
     // Line 0's OWN OAM pulse: at the visible edge (dot 4), not one dot early.
     run_to(&mut p, 0, 4);
