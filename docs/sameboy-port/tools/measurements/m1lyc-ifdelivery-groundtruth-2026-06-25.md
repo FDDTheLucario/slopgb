@@ -1,0 +1,107 @@
+# m1 / lycEnable IF-delivery family — FF0F ground truth (S5 engine-dispatch)
+
+2026-06-25 (#11h). The diagnostic the #11g handoff scoped: the m1/lycEnable
+"want=3↔1 / want=E0↔E2" rows observe the STAT-vs-vblank IRQ delivery by reading
+**FF0F (IF)**, not FF41 — so the committed FF41/`SLOPGB ff41` tracer is blind to
+them. Built the matching **FF0F read tracer on both emulators**, swept the whole
+DMG family dual-emulator, and pinned the mechanism. **No fix shipped** (this is
+the atomic S5 engine core, all-or-nothing). Tracers byte-identical OFF.
+
+## Tracers added (this session)
+
+- **slopgb** `interconnect/cycle.rs::read_deferred`: `SLOPGB ff0f ly/dot/if`
+  alongside the existing `ff41` block, gated `s5dbg_on()`, **NOT** gated to
+  `ly<144` (the IF reads that matter land at ly143–153). Byte-identical OFF.
+- **SameBoy** `Core/memory.c` `read_high_memory` `case GB_IO_IF`: `SBREAD ff0f
+  ly/cfl/dc/if`, `SB_TRACE`-gated, mirroring the `case GB_IO_STAT` (`ff41`)
+  patch. `/tmp/sbbuild` tester rebuilt (`make tester`).
+- Run: slopgb `SLOPGB_ROWLIST=row SLOPGB_S5DBG=1 <gbtr-bin> --ignored
+  flagon_probe --nocapture 2>&1 >/dev/null`. SameBoy `SB_TRACE=1
+  sameboy_tester --dmg --length 2 ROM 2>&1 >/dev/null`. The slopgb probe runs
+  exactly the gambatte protocol → the single non-`if=00` read **is** the
+  measurement read (no rare-count isolation needed); SameBoy's `--length 2`
+  loops, so its measurement read is the **count-1** `if=` value (setup frames
+  repeat a different one). Sweep script left at `/tmp/sweep.sh`.
+
+## The two ground-truth rows (decisive)
+
+### A — `m1/lycint143_m1irq_2` [Dmg] (want=3 got=1) — MISSING re-arm
+LYC=143, mode-1(vblank) STAT enabled. SameBoy IF read **ly=144 cfl=0 if=03**
+(vblank bit0 + STAT bit1, count-1 measurement; setup frames read if=01). slopgb
+IF read **ly=144 dot=4 if=01** (STAT bit MISSING).
+
+- SameBoy STAT IRQ set: **ly143 cfl0 mfi=2** (mode-2 ∧ LYC=143) **and ly144 cfl0
+  mfi=1** (mode-1). Two rising edges; bit1 set, never auto-cleared.
+- slopgb STAT dispatch set: **ly143 dot4 only** (mfi=255/LYC). **No ly144 fire.**
+- **Mechanism (airtight):** IME is on; the CPU **services** the ly143 LYC-STAT
+  IRQ (vectors $48, clears IF bit1). SameBoy then **re-raises** bit1 at ly144
+  cfl0 via the mode-1 line rise, so the post-service read sees bit1 again →
+  if=03. slopgb produces **no ly144 mode-1 edge**, so after the service nothing
+  restores bit1 → if=01. The 4-dot read offset (slopgb dot4 vs SameBoy cfl0) is
+  NOT the cause — a ±4-dot read shift cannot restore a bit that was never
+  re-raised a full line earlier. **Engine, not read-frame.**
+
+### B — `lycEnable/lycwirq_trigger_ly00_stat50_2` [Dmg] (want=E0 got=E2) — SPURIOUS re-arm
+STAT=0x50 (LYC int + OAM int), LYC=0. SameBoy STAT IRQ set: **ly144/151/153
+mfi=1; NO ly0**. slopgb dispatch: **ly1 dot0** (spurious). SameBoy's STAT line
+stays high across the ly153→ly0 LYC handoff (the internal ly=0 window during
+ly153) → no fresh 0→1 edge at ly0; slopgb **re-arms** at the ly0/ly1 wrap →
+spurious STAT bit → got E2.
+
+## Full DMG family sweep (17 regr rows)
+
+`OFF` = production verdict; `LE` = leading-edge engine verdict (the flip
+switches `stat_events_tick`→`stat_update_tick`). **Every row PASSES OFF.**
+
+| row | want/got | OFF | LE | slopgb vs SameBoy dispatch | class |
+|---|---|---|---|---|---|
+| `m1/lycint143_m1irq_2` | 3/1 | ✓ | ✗ | ly143 only / ly143+**ly144·m1** | **MISSING m1 re-arm** |
+| `m1/lycint143_m1irq_ifw_1` | 3/1 | ✓ | ✗ | ly143 / ly143+**ly144·m1** | MISSING m1 re-arm |
+| `m1/lycint143_m1irq_late_retrigger_1` | 3/1 | ✓ | ✗ | ly143 / ly143+**ly144·m1** | MISSING m1 re-arm |
+| `m1/m1irq_m2enable_lyc_3` | 3/1 | ✓ | ✗ | ly0-143 / ly1-143+**ly144·m1** | MISSING m1 re-arm (+ly0 extra) |
+| `lycEnable/lycwirq_trigger_ly00_stat50_1` | E0/E2 | ✓ | ✗ | **ly0+ly1** / ly144,151,153 (no ly0) | SPURIOUS wrap |
+| `lycEnable/lycwirq_trigger_ly00_stat50_2` | E0/E2 | ✓ | ✗ | **ly1** / ly144,151,153 (no ly0) | SPURIOUS wrap |
+| `lycEnable/lyc0_late_ff45_enable_3` | E0/E2 | ✓ | ✗ | **ly1** / ly0(·-1),150,152,153 | SPURIOUS wrap |
+| `lycEnable/late_ff45_enable_3` | 1/3 | ✓ | ✗ | ly5,6,**7** / ly5,6 | SPURIOUS (extra ly7) |
+| `m1/m2m1irq_ifw_2` | 1/3 | ✓ | ✗ | ly0-143 / ly1-143+ly144·m1 | SPURIOUS (extra ly0) |
+| `m2enable/late_enable_m0disable_2` | 0/2 | ✓ | ✗ | ly0-143 / ly0·m2+m3,ly1·m0+m2,… | SPURIOUS (late-disable) |
+| `m2enable/late_m1disable_ly0_3` | 0/2 | ✓ | ✗ | ly0-143 / ly0·m2,ly1-143·m2,150/152·m1 | SPURIOUS (late-disable) |
+| `miscmstatirq/lycstatwirq…ly44_lyc44` | E0/E2 | ✓ | ✗ | ly68,69 / ly68·m0+m2,ly69·m2 | SPURIOUS/delivery |
+| `miscmstatirq/lycwirq…m0_late_ly44` | E0/E2 | ✓ | ✗ | ly0-143 / ly0-143·m0+**ly68·m2** | SPURIOUS/delivery |
+| `lycEnable/ff45_enable_weirdpoint_3` | 1/3 | ✓ | ✗ | ly5,6 / ly5,6 (**SAME set**) | DELIVERY (same dispatch, diff result) |
+| `m1/lycint_m1intirq_1` | 3/**∅** | ✓ | ✗ | ly143 / ly143+ly144·m1 | MISSING + **blank OCR** |
+| `m1/lycint_m1intirq_2` | 1/**∅** | ✓ | ✗ | ly143 / ly143+ly144·m1 | MISSING + **blank OCR** |
+| `lycEnable/ff40_disable_2` | 2/0 | ✓ | **✓** | (no dispatch) / ly145,147,148·m1 | **tier2-only** (NOT engine) |
+
+## The two engine-dispatch roots (the atomic S5 work — concrete sub-targets)
+
+1. **MISSING m1 re-arm — the vblank-entry mode-1 line rise.** SameBoy raises a
+   mode-1 STAT edge at **ly144 cfl0** (`SBTRACE STAT_IRQ ly=144 cfl=0 mfi=1`).
+   slopgb's `update_mode_for_interrupt` (stat_irq.rs:805-815) sets vblank `mfi =
+   vis_mode()`, and `vis_mode` (stat_irq.rs:14-15) holds **mode 0 across ly144
+   dot0-3**, mode 1 only from dot4 (`display.c:2178` ~dot4). Combined with the
+   LYC-143 carry holding the line high through ly143, slopgb's line never
+   dips-and-rises at vblank entry the way SameBoy's does → **no ly144 edge**.
+   After the CPU services the ly143 LYC-STAT, bit1 is never restored. Fix lives
+   in the vblank-entry `mode_for_interrupt`/LYC-latch-drop phase (atomic engine).
+
+2. **SPURIOUS re-arm — the ly153→ly0 LYC wrap + late-disable level.** slopgb
+   fires a fresh STAT edge at the ly153→ly0/ly1 wrap where SameBoy's line was
+   held high across the internal-ly=0 window (no edge), and on late FF45/m1/m2
+   disable where SameBoy suppresses the already-armed source. Both are the
+   `lyc_interrupt_line` wrap re-evaluation + the level-carry across source
+   handoffs in the `stat_update_tick` driver.
+
+## Verdict
+
+The whole family is **engine-dispatch core** (16/17 fail LE-only; only
+`ff40_disable_2` is tier2/read-frame). **No clean read-frame slice exists** —
+re-confirms #11g with direct FF0F evidence and SHARPENS it: the family splits
+into exactly two driver bugs (missing vblank-entry m1 edge; spurious wrap/
+late-disable edge), both in how `stat_update_tick` is **driven**
+(`mode_for_interrupt` vblank phase + `lyc_interrupt_line` wrap), NOT in the
+`StatUpdate::level` OR-model (which faithfully matches `display.c:545-556`) and
+NOT in the FF41/FF0F read frame. These land with the atomic reclock — touching
+the vblank-entry mfi phase or the LYC wrap in isolation moves SameBoy-passing
+rows. 2 rows (`lycint_m1intirq_{1,2}`) additionally render a **blank** result
+under LE (got=∅) — a separate render/OCR effect to isolate next.

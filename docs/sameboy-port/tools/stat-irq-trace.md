@@ -89,6 +89,24 @@ fires a spurious `ly0 dot1 mfi0` edge. Buried in steady-state volume → isolate
 the measurement frame as for SBMODE. 12/13 m1+lyc DMG rows fail LE-only (the
 engine core, not render-frame).
 
+**SBREAD ff0f trace (the IF-delivery ground truth — the m1/lycEnable family):**
+the `want=3↔1`/`want=E0↔E2` m1+lycEnable rows observe the STAT-vs-vblank IRQ
+delivery by reading **FF0F (IF)**, not FF41 — the `SBREAD ff41` patch is blind
+to them. Add the same `SB_TRACE` gate at `read_high_memory`'s `case GB_IO_IF`
+(`Core/memory.c:626`): `fprintf(stderr, "SBREAD ff0f ly=%d cfl=%d dc=%d
+if=%02x\n", current_line, cycles_for_line, display_cycles, io_registers[GB_IO_IF]
+& 0x1f)`. slopgb counterpart is **committed** (`SLOPGB ff0f ly/dot/if` in
+`cycle.rs::read_deferred`, `SLOPGB_S5DBG`, byte-identical OFF, NOT gated `ly<144`
+since the reads that matter land at ly143–153). The slopgb probe runs exactly the
+gambatte protocol so its single non-`if=00` read is the measurement read;
+SameBoy `--length 2` loops, so the measurement read is the **count-1** `if=`
+value. Full family ground truth (17 DMG rows classified): the m1/lyc family is
+the engine-dispatch core (16/17 fail LE-only), splitting into a MISSING
+vblank-entry mode-1 re-arm (`ly144 cfl0 mfi=1` SameBoy fires; slopgb's
+`update_mode_for_interrupt` vblank `mfi=vis_mode` holds mode 0 across ly144
+dot0-3) and a SPURIOUS ly153→ly0 LYC-wrap / late-disable re-arm. See
+`measurements/m1lyc-ifdelivery-groundtruth-2026-06-25.md`.
+
 Detail: `measurements/flip-regr-2026-06-24-summary.txt`,
 `measurements/window-groundtruth-2026-06-24.md`.
 

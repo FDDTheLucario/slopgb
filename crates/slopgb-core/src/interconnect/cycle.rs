@@ -142,6 +142,14 @@ impl Interconnect {
                 eprintln!("SLOPGB ff41 ly={line} dot={dot} mode={}", v & 3);
             }
         }
+        // S5 IF-delivery tracer: the m1/lycEnable family observes the STAT-vs-
+        // vblank IRQ delivery by reading FF0F (IF), not FF41 — the FF41 tracer
+        // is blind to them. NOT gated to `ly < 144`: the vblank-entry reads
+        // that matter land at ly 143–153 (`SLOPGB_S5DBG`, byte-identical unset).
+        if addr == 0xFF0F && crate::ppu::s5dbg_on() {
+            let (line, dot) = self.ppu.scan_pos();
+            eprintln!("SLOPGB ff0f ly={line} dot={dot} if={:02x}", v & 0x1f);
+        }
         v
     }
 
