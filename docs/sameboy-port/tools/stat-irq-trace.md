@@ -55,12 +55,42 @@ SameBoy `GB_STAT_update` (after the DMA-mode-2 clear) a `SB_TRACE`-gated
 `fprintf(stderr, "SBMODE ly=%d cfl=%d dc=%d vis=%d\n", current_line,
 cycles_for_line, display_cycles, io_registers[GB_IO_STAT] & 3)` guarded by a
 static `prevmode`/`prevline` so it logs only on a visible-mode change (`ly<144`).
-This pins the per-config mode-3→0 EXIT dot (e.g. DMG ly1 m2int_wx00 + late_wy
-both exit at **cfl257** = the bare value → low-WX does NOT extend mode-3; slopgb
-over-extends). The slopgb counterpart (not yet added): trace the `m0_src`/
-`line_render_done` visible flip dot in `render/mode0.rs` (the dispatch tracer
-only logs IRQ rises, so window mode-2-only lines need this separate flip trace).
-Detail: `measurements/flip-regr-2026-06-24-summary.txt`.
+This pins the per-config mode-3→0 EXIT dot.
+
+> **2026-06-24 #11g — the "cfl257 = bare / low-WX over-extends" reading was a
+> MEASUREMENT ARTIFACT and is REFUTED.** gambatte window ROMs loop ~15 frames;
+> the SETUP frames render the line bare (exit cfl257), and ONE late frame writes
+> WY/LCDC so the window triggers on the target line. The exit to compare is the
+> **measurement-frame** exit, isolated as the per-`ly` `vis=0` cfl that occurs
+> **once** (count 1; the 115×-repeated cfl is setup-bare). Fresh measurement:
+> **SameBoy extends ALL window measurement lines to ≈263+SCX&7** (wx00/wxA5/
+> late_wy/late_disable alike) — NO low-WX no-extend; slopgb UNDER-extends most.
+> Full 53-row table + 4-mechanism map: `measurements/window-groundtruth-2026-06-24.md`.
+
+The slopgb counterpart is now **committed** (`SLOPGB_S5DBG`, byte-identical OFF):
+`render/mode0.rs` logs `SLOPGB visflip ly/dot/kind` at the `vis_early` rise (the
+CPU-visible mode-3→0 flip — window mode-2-only lines have no mode-0 dispatch, so
+the dispatch tracer can't see their flip), and `render/window.rs` logs
+`SLOPGB winmatch ly/dot/wx/wy_ok/en/active` at the WX comparator.
+
+**SBLEVEL trace (the rising-edge LEVEL engine ground truth — the S5
+engine-dispatch / spurious-IRQ lever):** the IF|=2 tracer logs only the rising
+EDGE; to characterize WHY SameBoy fires (or doesn't) — the `stat_interrupt_line`
+level transitions vs slopgb's `stat_update` engine — add to `GB_STAT_update`,
+just before the `if (stat_interrupt_line && !previous_interrupt_line)` block, a
+`SB_TRACE`-gated `fprintf(stderr, "SBLEVEL ly=%d cfl=%d %d->%d mfi=%d
+lyc_line=%d stat=%02x\n", current_line, cycles_for_line, previous_interrupt_line,
+stat_interrupt_line, (int8_t)mode_for_interrupt, lyc_interrupt_line,
+io_registers[GB_IO_STAT])` guarded by `stat_interrupt_line != previous_interrupt_line`
+(`current_line < 154`). #11g use: the m1/lycEnable `want=E0 got=E2` spurious-IRQ
+rows (e.g. `lycwirq_trigger_ly00_stat50`) — SameBoy dispatches NO STAT IRQ at ly0
+(the LYC source level stays HIGH across ly153→ly0); slopgb's engine re-arms and
+fires a spurious `ly0 dot1 mfi0` edge. Buried in steady-state volume → isolate
+the measurement frame as for SBMODE. 12/13 m1+lyc DMG rows fail LE-only (the
+engine core, not render-frame).
+
+Detail: `measurements/flip-regr-2026-06-24-summary.txt`,
+`measurements/window-groundtruth-2026-06-24.md`.
 
 ## Findings (2026-06-23 #11e, DMG)
 
