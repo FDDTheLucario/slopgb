@@ -1,5 +1,24 @@
 # The atomic read-frame reclock — implementation recipe (the S5 core)
 
+> **2026-06-25 (#11i) — the C-stage is NOT one reclock; it is ≥3 distinct
+> sub-M-cycle/engine mechanisms (direct SameBoy `dc` evidence).**
+> `tools/measurements/halt-vs-m3stat-dc-split-2026-06-25.md` measured the sub-dot
+> (`display_cycles`) read position on SameBoy for the canonical want-pairs:
+> (1) **read-observer** (`m2int_m3stat` + window-length/m0enable/vram_m3/oam_access)
+> — the want-pair reads land at DIFFERENT (`cfl`,`dc`); the read frame samples the
+> wrong side of a per-config mode-3 boundary → the read-frame reclock below, with
+> the eighth grid ordering same-dot ties. (2) **wake-clock** (halt `*_m0stat_*`)
+> — the want-0 and want-2 reads land at the IDENTICAL (`cfl0 dc0`) on SameBoy yet
+> read mode 0 vs 2; **the read-observer/eighth-grid lever CANNOT fix this** (proven:
+> SameBoy's own finest `dc` gives the same read coordinate). Its lever is the
+> sub-M-cycle WAKE clock (record the IRQ rise / CPU resume at its T-phase). The
+> slopgb split is whether the wake lands before/after `vis_mode`'s dot0-3 line-start
+> mode-hold (the SAME hold as #11h's m1/lyc root). (3) **engine-driver** (m1/lyc,
+> #11h). Each moves SameBoy-passing rows alone → all land together in the flip;
+> a perfect read-frame reclock still leaves halt + m1/lyc red. Step 3 below
+> ("eighth-grid read-observer for the m3stat family") is correct but scoped to (1)
+> ONLY — do not expect it to touch the halt or m1/lyc families.
+>
 > **2026-06-24 — REPRODUCED, then the literal "read frame +4" REFUTED. Read this
 > box before executing step 1.** The /tmp tooling was rebuilt from scratch this
 > session (SameBoy 1.0.2 instrumented tester + slopgb `SLOPGB_S5DBG` read-dot
