@@ -422,6 +422,37 @@ impl Ppu {
         if ly != -1 {
             self.lyc_interrupt_line = ly == i16::from(self.lyc);
         }
+        // Mech 3 root 1 (S5 engine-driver) — the vblank-entry LYC-latch drop.
+        // A held visible-line LYC match (e.g. LYC=143 carried high from line 143)
+        // stays latched across line 144's `ly_for_comparison == -1` line-start
+        // gap, so the STAT line never dips at vblank entry — and when
+        // `mode_for_interrupt` flips to the VBlank (mode-1) source at dot 4 the
+        // fall of LYC fuses into the rise of mode-1, producing no fresh 0→1 edge
+        // (the missing m1 re-arm: gambatte `m1/lycint143_m1irq_*` read if=01,
+        // want if=03 — the serviced ly143 LYC-STAT bit is never restored).
+        // SameBoy releases the latch at vblank entry (measured `SBLEVEL ly=144
+        // cfl=0 lyc_line 1->0` then `0->1 mfi=1`, IF|=2): the line dips, then the
+        // mode-1 source re-arms a fresh edge. Drop ONLY a held-true match that no
+        // longer applies at line 144 (the pure carry-release); never force-set a
+        // fresh match here — for LYC=144 the latch is set by the natural dot-4
+        // `ly_for_comparison` re-evaluation, and front-running it to dot 0 would
+        // suppress the LYC-source edge those rows need (`m1/m1irq_enable_after_
+        // lyc144_*`). Gate on the VBlank (mode-1) source being ENABLED: SameBoy
+        // drops the latch unconditionally, but the line only re-rises into a
+        // fresh edge when mode 1 is armed to take over at dot 4 — the dip-and-
+        // rise this whole-dot model reproduces. With mode 1 disabled SameBoy's
+        // line dips and stays low (no IF), which a whole-dot drop would mis-frame
+        // against the deferred read (`m1/lyc143_late_m0enable_lycdisable_*`,
+        // VBlank off). LE/Tier-2 only — `stat_update_tick` never runs flag-off,
+        // so production is byte-identical.
+        if self.line == 144
+            && self.dot == 0
+            && self.lyc_interrupt_line
+            && i16::from(self.lyc) != 144
+            && self.stat_en & STAT_SRC_VBLANK != 0
+        {
+            self.lyc_interrupt_line = false;
+        }
         let mfi = self.mode_for_interrupt;
         if self
             .stat_update

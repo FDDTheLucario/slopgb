@@ -869,6 +869,35 @@ fn tier2_hblank_ly_scx_passes() {
     }
 }
 
+/// Port Stage C / S5 (mech 3 root 1) — the vblank-entry mode-1 STAT re-arm on
+/// the deferred reclock. `lycint143_m1irq_2` enables the mode-1 (VBlank) STAT
+/// source with LYC=143: hardware services the ly143 LYC-STAT IRQ, then the
+/// mode-1 line rises again at line-144 entry (SameBoy `SBLEVEL ly=144 cfl=0`
+/// `lyc_line 1->0` then `0->1 mfi=1`, `IF |= 2`), so the post-service read sees
+/// STAT bit 1 again (`if=03`, screen `3`). slopgb's `stat_update_tick` held the
+/// ly143 LYC match latched across line 144's `ly_for_comparison == -1` gap, so
+/// the line never dipped and the mode-1 rise produced no fresh edge (read
+/// `if=01`, screen `1`). The fix drops that carried-over LYC match at line 144
+/// entry when VBlank is armed (`stat_irq.rs`); the natural dot-4 mode-1 rise is
+/// then a real 0→1 edge. Production (flag-off) byte-identical — `stat_update_tick`
+/// runs only on the leading-edge / Tier-2 path. SameBoy passes this ROM.
+#[test]
+fn tier2_m1_vblank_rearm_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr("tier2_m1_rearm", "game-boy-test-roms collection not present");
+        return;
+    };
+    let rel = "gambatte/m1/lycint143_m1irq_2_dmg08_cgb04c_out3.gbc";
+    let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+    for model in [Model::Dmg, Model::Cgb] {
+        let mut gb = harness::boot_with_reclock(&rom, model);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), "3", model.is_cgb()).unwrap_or_else(|e| {
+            panic!("{rel} [{model:?}] expected out3 (tier2 flag-on): {e}")
+        });
+    }
+}
+
 /// Self-verifying inventory: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// covers the on-disk ROM set exactly, with the exemptions pinned to the
 /// documented 50-entry list.

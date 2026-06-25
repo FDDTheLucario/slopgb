@@ -105,3 +105,48 @@ NOT in the FF41/FF0F read frame. These land with the atomic reclock — touching
 the vblank-entry mfi phase or the LYC wrap in isolation moves SameBoy-passing
 rows. 2 rows (`lycint_m1intirq_{1,2}`) additionally render a **blank** result
 under LE (got=∅) — a separate render/OCR effect to isolate next.
+
+## #11j (2026-06-25) — mech 3 root 1 SHIPPED (the vblank-entry LYC-latch drop)
+
+Implemented + landed flag-gated (byte-identical OFF). Root 1 ("MISSING m1
+re-arm") is **not** a missing mfi edge — it is a missing LYC-latch DIP. Direct
+SameBoy `SBLEVEL` (the rising/falling level engine ground truth, two transitions
+logged at line-144 entry):
+
+| ROM | SameBoy at ly144 cfl0 | VBlank en | re-arms? |
+|---|---|---|---|
+| `lycint143_m1irq_2` (want3) | `1->0 mfi=0 lyc_line=0 stat=d0` then `0->1 mfi=1` IF\|=2 | yes (d0 bit4=1) | YES |
+| `m1irq_m2enable_lyc_1` (want1) | `1->0 mfi=0` then `0->1 mfi=1 dc=6` IF\|=2 | yes (f0 bit4=1) | YES |
+| `m1irq_m2disable_lycdisable_3` (want1) | `0->1 mfi=1 dc=6` IF\|=2 | yes (91 bit4=1) | YES |
+| `lyc143_late_m0enable_lycdisable_2` (want1) | `1->0 mfi=1 lyc_line=0 stat=89` **no re-rise** | **no** (89 bit4=0) | NO |
+
+**Mechanism.** At line-144 entry SameBoy releases the held visible-line LYC match
+(`lyc_line 1->0`); the STAT line dips, then the decoupled mode-1 source re-rises
+(`0->1 mfi=1`) → a fresh `IF |= 2` edge, restoring the bit the CPU cleared
+servicing the ly143 LYC-STAT. slopgb held the ly143 match latched across line
+144's `ly_for_comparison == -1` line-start gap (`stat_update_tick`: the latch is
+re-evaluated only when `ly != -1`), so the line never dipped and the natural
+dot-4 mode-1 rise fused into the LYC fall → no edge → `if=01`.
+
+**Fix** (`stat_irq.rs::stat_update_tick`, LE/Tier-2 only): at `line==144 dot==0`,
+drop a held-true LYC match that no longer applies (`lyc != 144`) **iff VBlank
+(mode-1) is armed** (`stat_en & STAT_SRC_VBLANK`). The VBlank gate is the
+measured discriminator: with mode 1 disabled SameBoy's line dips and stays low
+(no IF, last row above) — a whole-dot drop there only mis-frames the deferred
+read (`lyc143_late_m0enable_lycdisable_*`, VBlank off). Never force-set a match
+(LYC=144 rows re-arm via the natural dot-4 re-eval; front-running breaks
+`m1irq_enable_after_lyc144_*`).
+
+**Result** (gambatte m1/lycEnable/lycm2int/miscmstatirq/m2enable/ly0 family probe,
+1092 rows, flag-on): **774→783 pass (+9): 16 fixed, 7 moved.** The 16 fixed are
+the MISSING-m1-rearm rows (`lycint143_m1irq_*`, `m1irq_m2enable_lyc_{2,3}`, both
+models) **including the two `lycint_m1intirq_{1,2}` BLANK-OCR rows** (the #11h
+"render BLANK" loose end — they were blank precisely because the missing re-arm
+left the result line empty; with the edge restored they render 3/1). The 7 moved
+are all `want=1 got=3`: SameBoy fires the **same** ly144 mode-1 edge (verified for
+3 of them), so the dispatch is now correct — the `got=3`-vs-`want=1` is the
+deferred-read placement (mech 1 read-frame), the all-or-nothing convergence trap.
+Pinned by gbtr `tier2_m1_vblank_rearm_passes` (both models). mooneye flag-on
+91/91, 7→8 tier2 pins, gbtr+mooneye OFF byte-identical. **Root 2 (SPURIOUS
+ly153→ly0 wrap / late-disable; the lone family target `m2m1irq_ifw_2` want1 got3
+stays) + the 7 read-frame rows remain for mech 1 / mech 3 root 2.**
