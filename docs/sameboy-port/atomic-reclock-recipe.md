@@ -1,5 +1,63 @@
 # The atomic read-frame reclock — implementation recipe (the S5 core)
 
+> **2026-06-24 — REPRODUCED, then the literal "read frame +4" REFUTED. Read this
+> box before executing step 1.** The /tmp tooling was rebuilt from scratch this
+> session (SameBoy 1.0.2 instrumented tester + slopgb `SLOPGB_S5DBG` read-dot
+> tracer, both verified to reproduce every dot below *exactly*). Two hard results
+> change the plan:
+>
+> 1. **A uniform whole-dot +4 of read AND boundary is a NO-OP.** It preserves
+>    every read-vs-boundary relative ordering, so it changes no observable. The
+>    "+4 together" framing only *aligns frames* — it cannot fix a single regr row.
+> 2. **"Read +4" cannot mean "sample 4 dots later" (= cc+4 = the trailing edge =
+>    production's tick-then-access read).** Measured: production (flag-off, cc+4)
+>    **FAILS the kernel `m2int_m3stat_1`** (reads mode 0 at the FF41 poll, want 3;
+>    `m0int` passes). Only the flag-on cc+0 *leading-edge* read passes both. So
+>    moving the read to cc+4 reverts to production and breaks the kernel. The cc+0
+>    leading-edge sample is the flag-on path's whole value and must NOT move.
+>    **EXECUTED 2026-06-24 (not just reasoned): wired step 1 literally** (FF41
+>    `read_deferred` flush→sample at cc+4) → kernel m2int OCR **3→0 FAILS**, read
+>    dot 252→256 past the boundary 254; m0int 256→260 still mode0. Recovering
+>    m2int needs the mode-0 boundary >256, but the bare boundary is **structurally
+>    capped at the pipe end** (`advance_lx` lx==160 = dot 256) — a local
+>    "boundary +4" cannot exceed it. Only moving the whole line geometry +4 (the
+>    pipe end, which cascades to the counter-pinned mooneye `intr_2_mode0`/DIV)
+>    recovers it = the global rebaseline, NOT a local boundary tweak. So step 2's
+>    "every boundary +4" is not a local lever for the bare kernel line.
+>
+> What the measurements actually show (slopgb dot ↔ SameBoy cfl, line-start
+> aligned — both dispatch mode-2 at dot/cfl 0): the residual is a **~2-dot
+> SUB-M-cycle read-vs-boundary phase**, not a whole-dot frame shift. slopgb's
+> deferred read sits 2 dots *closer* to the mode-0 boundary than SameBoy's
+> (slopgb m0int: dispatch 254, read 256 → gap 2; SameBoy: dispatch 257, read 261
+> → gap 4). Closing that 2-dot gap is the real lever and it lives at the
+> **eighth-grid (`event_phase`/`lead_eighths`, port S7)**, because the deferred
+> read samples at the M-cycle *leading edge* (cc+0) and so cannot order a read
+> against a boundary *within the same M-cycle* — the documented cc-collapse wall
+> (`stat-irq-trace.md` halt family), now confirmed to also gate the bare/window
+> `m2int_wx*_scx*_m3stat` FF41 reads (e.g. `m2int_wxA6_scx3_m3stat_2` [Dmg]:
+> slopgb read dot 256 mode 3 / SameBoy cfl 260 mode 0 — reproduced exactly).
+>
+> **Real flip-regr distribution measured this session** (all 6844 gambatte rows,
+> probe ON−OFF = 430 true regr; `tools/measurements/flip-regr-2026-06-24*.txt`):
+> window 107, sprites 87, halt 32, m1 26, lycEnable 26, enable_display 14,
+> speedchange 13 (DS), m0enable 12, vram_m3 11, oam_access 11, m2int_m3stat 11, …
+> **Per-family diagnosis (dual-emulator traced — see
+> `tools/measurements/flip-regr-2026-06-24-summary.txt`):** the window 107 is
+> NOT the read-wall and NOT `early_lead`-tunable — it is per-config mode-3 LENGTH
+> geometry with opposite-direction errors (`m2int_wx00` mode-3 too long: slopgb
+> dot260 mode3 / SameBoy cfl265 mode0; `late_wy_10to0` mode-3 too short: slopgb
+> dot260 mode0 / **SameBoy cfl260** mode3 — read dots MATCH → pure length bug).
+> Fix = a tier2-gated window mode-3 length port (proj/lead per wx/scx/late-WY)
+> vs SameBoy, NOT a uniform `early_lead`. m1+lycEnable 52 = mode-1/LYC/IF-delivery
+> (want=E0↔E2 spurious/missed STAT IRQ + mode-bit 3↔1). sprites 87 = L2 geometry.
+> halt 32 + scx-extended m3stat = the cc-collapse sub-M-cycle wall (S7).
+> **Next session: per-config geometry ports (window length, sprite L2) + the
+> IF-delivery re-arm for m1/lyc + the eighth-grid sub-dot read-observer phase for
+> the m3stat family — NOT a whole-dot read+4.** Each needs SameBoy per-config
+> ground truth + a tier2-gated parallel calc. Steps 1–2 below are kept for history
+> but step 1 (move the read +4) is refuted.
+
 The C-stage flip is blocked on one thing: the bulk of the flag-on gambatte
 regressions (DMG ~84, CGB 248 — `tools/cgb-groundtruth.md`) are slopgb-LE bugs
 where the **FF41-mode read lands at the wrong dot**, not where the IRQ

@@ -35,9 +35,20 @@ SB_TRACE=1 sameboy_tester --dmg --length 2 ROM.gbc 2>&1 >/dev/null \
   | grep "SBTRACE STAT_IRQ" | awk '{print $3,$4,$6}' | sort | uniq -c | sort -rn
 ```
 
-The slopgb side: re-add the matching one-shot edge trace in
-`ppu/stat_irq.rs::stat_update_tick` (after `pending_if |= IF_STAT`) logging
-`line`/`dot`/`mfi`, gated on an env (see THESIS RESULT #11e), boot flag-on.
+The slopgb side: the matching tracer is now **committed** (not session-local),
+gated on `SLOPGB_S5DBG` (byte-identical when unset; `ppu::s5dbg_on()` caches the
+env once). Two sites: `ppu/stat_irq.rs::stat_update_tick` (after
+`pending_if |= IF_STAT`) logs `SLOPGB dispatch ly/dot/mfi`, and
+`interconnect/cycle.rs::read_deferred` logs `SLOPGB ff41 ly/dot/mode` for the
+deferred FF41 read. Drive it flag-on via the example runner:
+`SLOPGB_TIER2=1 SLOPGB_S5DBG=1 cargo run -p slopgb-core --example run_gambatte
+--release -- <rom> dmg 2>trace.log` (OCRs to stdout, traces to stderr).
+
+**2026-06-24:** the SameBoy tester + this tracer were both rebuilt from a cold
+`/tmp` and verified to reproduce every dot in the tables below exactly (kernel
+m2int read ly1 cfl256/dot252 mode3, m0int cfl261/dot256 mode0; dispatch
+m2int@0, m0int slopgb dot254 / SameBoy cfl257). See the recipe's 2026-06-24 box
+(`../atomic-reclock-recipe.md`) for the refutation of the literal "read +4".
 
 ## Findings (2026-06-23 #11e, DMG)
 

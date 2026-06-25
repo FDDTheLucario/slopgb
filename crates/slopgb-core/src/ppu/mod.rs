@@ -539,6 +539,17 @@ pub struct Ppu {
     dmg_palette: [u32; 4],
 }
 
+/// S5 read-dot tracer gate: true iff `SLOPGB_S5DBG` is set in the environment.
+/// Cached once (the dispatch trace runs every dot, so a per-tick `getenv` would
+/// dominate the probe run-time). Byte-identical when unset — the tracer is a
+/// session-local measurement aid for the atomic read-frame reclock; see
+/// `docs/sameboy-port/tools/stat-irq-trace.md`.
+pub(crate) fn s5dbg_on() -> bool {
+    use std::sync::OnceLock;
+    static F: OnceLock<bool> = OnceLock::new();
+    *F.get_or_init(|| std::env::var_os("SLOPGB_S5DBG").is_some())
+}
+
 fn pixel_buffer(fill: u32) -> Box<[u32; SCREEN_PIXELS]> {
     vec![fill; SCREEN_PIXELS]
         .into_boxed_slice()
@@ -1018,6 +1029,14 @@ impl Ppu {
     /// LCDC bit 7 as committed (architectural view).
     pub(crate) fn lcd_enabled(&self) -> bool {
         self.enabled
+    }
+
+    /// S5 read-dot tracer position: the PPU's current `(line, dot)` scan
+    /// position. Pure accessor (no behaviour), used by the `SLOPGB_S5DBG`
+    /// FF41-read trace in [`crate::interconnect::Interconnect::read_deferred`]
+    /// to line slopgb's read dot up against SameBoy's `cycles_for_line`.
+    pub(crate) fn scan_pos(&self) -> (u8, u16) {
+        (self.line, self.dot)
     }
 
     /// XRGB8888 pixels of the most recently *completed* frame.

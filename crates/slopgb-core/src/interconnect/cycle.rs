@@ -132,7 +132,17 @@ impl Interconnect {
         self.advance_machine_t(before, self.clock.now());
         self.service_vram_dma();
         self.maybe_oam_bug(addr, kind);
-        self.read_no_tick(addr)
+        let v = self.read_no_tick(addr);
+        // S5 read-dot tracer: line slopgb's deferred FF41 read dot up against
+        // SameBoy's `read_high_memory` cfl (`SLOPGB_S5DBG`; byte-identical when
+        // unset). FF41 reads are infrequent, so the gate check is cheap here.
+        if addr == 0xFF41 && crate::ppu::s5dbg_on() {
+            let (line, dot) = self.ppu.scan_pos();
+            if line < 144 {
+                eprintln!("SLOPGB ff41 ly={line} dot={dot} mode={}", v & 3);
+            }
+        }
+        v
     }
 
     /// Port Stage B deferred-commit write: the value commits at the leading edge
