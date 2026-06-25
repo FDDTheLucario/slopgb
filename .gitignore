@@ -6,4 +6,5 @@
 *.sav
 test-roms-src/
 handoff.md
+goal.md
 /.claude/worktrees/
