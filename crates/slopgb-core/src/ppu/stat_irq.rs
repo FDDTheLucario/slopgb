@@ -419,7 +419,20 @@ impl Ppu {
         // `lyc_interrupt_line` latch: re-evaluate only when `ly_for_comparison`
         // names a real line; hold across the `-1` gaps (`display.c:534`).
         let ly = self.ly_for_comparison();
-        if ly != -1 {
+        // Mech 3 root 2 (S5) — the line-start LYC-carryover hold. SameBoy
+        // re-evaluates `lyc_interrupt_line` only at the `GB_SLEEP` steps that set
+        // `ly_for_comparison` (`display.c:1811` state-6 `= -1` holds; `:1830`
+        // state-7 `= N` re-latch) — NOT during the held carryover before state-6,
+        // where it still names the previous line (lines 1-143, dots 0-2 = `line
+        // - 1`). A late FF45 write whose new LYC equals that carryover raises no
+        // fresh edge (writes land at state-7, `lyfc=-1`/`0`); slopgb's per-dot
+        // engine re-latched it → a spurious `ly1 dot0` (`got=E2`, want E0). Hold
+        // like the `-1` gap (a legit LYC=N-1 tail is already latched true at line
+        // N-1). DMG-family only (CGB lcd-offset banked); LE/Tier-2 only. Detail:
+        // `m1lyc-ifdelivery-groundtruth-2026-06-25.md` "#11l".
+        let line_start_carryover =
+            !self.model.is_cgb() && (1..=143).contains(&self.line) && self.dot <= 2;
+        if ly != -1 && !line_start_carryover {
             self.lyc_interrupt_line = ly == i16::from(self.lyc);
         }
         // Mech 3 root 1 (S5 engine-driver) — the vblank-entry LYC-latch drop.

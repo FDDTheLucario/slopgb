@@ -107,6 +107,20 @@ vblank-entry mode-1 re-arm (`ly144 cfl0 mfi=1` SameBoy fires; slopgb's
 dot0-3) and a SPURIOUS ly153→ly0 LYC-wrap / late-disable re-arm. See
 `measurements/m1lyc-ifdelivery-groundtruth-2026-06-25.md`.
 
+**SBWRITE ff45 trace (the late-LYC-write-timing ground truth — the mech-3 root-2
+LYC-write sub-case):** the `lyc0_late_ff45_enable_*` / `lycwirq_trigger_ly00_*`
+rows turn on a spurious wrap edge that depends on WHEN the FF45=0 write lands vs
+`ly_for_comparison` at the line-start carryover. Add to SameBoy `Core/memory.c`
+`write_high_memory`'s `case GB_IO_LYC` (before the `display_state == 29` hack),
+`SB_TRACE`-gated: `fprintf(stderr, "SBWRITE ff45 ly=%d cfl=%d dc=%d val=%d
+lyfc=%d ds=%d\n", current_line, cycles_for_line, display_cycles, value,
+(int16_t)ly_for_comparison, display_state)`. #11l use: the DMG late writes land at
+the state-7 step (`ds=7`) — `lyc0_late_ff45_enable_3` at `ly1 lyfc=-1` (no match),
+`lycwirq_trigger_ly00_stat50_2` at `ly0 lyfc=0` (joins the held line) — so SameBoy
+raises NO fresh LYC edge, while slopgb's per-dot engine re-latched the carryover
+`line-1` against the new LYC → spurious `ly1 dot0`. Pinned the line-start
+carryover hold (`measurements/m1lyc-ifdelivery-groundtruth-2026-06-25.md` "#11l").
+
 Detail: `measurements/flip-regr-2026-06-24-summary.txt`,
 `measurements/window-groundtruth-2026-06-24.md`.
 

@@ -210,3 +210,75 @@ deferred-read placement (**mech 1 read-frame**), the convergence trap, NOT root 
 - **CGB side** of the lycwirq E2 rows (byte-identical here; own residual).
 - **Late-disable** (`m2enable/late_enable_m0disable_2`) — suppress an already-
   armed source on late FF45/m1/m2 disable; untouched.
+
+## #11l (2026-06-25) — mech 3 root 2 LYC-WRITE sub-case SHIPPED: the line-start LYC-carryover hold
+
+Implemented + landed flag-gated (byte-identical OFF, gate green, defaults NOT
+flipped). The follow-on to #11k's VBlank-overlap sub-case: the OTHER spurious-wrap
+sub-case, where SameBoy's **LYC source** (not VBlank) determines the wrap edge.
+
+**Ground truth (new `SBWRITE ff45` tracer + `SBLEVEL`, DMG).** SameBoy's per-line
+start sets `ly_for_comparison` in two `GB_SLEEP` steps (`display.c:1805-1830`):
+state-6 (`:1811`, `= current_line ? -1 : 0`) then state-7 (`:1830`,
+`= current_line`). `GB_STAT_update` (which re-evaluates `lyc_interrupt_line`,
+`display.c:533-544`) runs at those two steps and on CPU register writes — but
+NOT during the **held carryover** before state-6, where `ly_for_comparison`
+still names the *previous* line. The late FF45=0 writes land at the state-7 step:
+
+| ROM (DMG) | SBWRITE | SBLEVEL at the wrap | dispatch |
+|---|---|---|---|
+| `lyc0_late_ff45_enable_3` | `ly=1 cfl=0 lyfc=-1 val=0` | rise `ly153 cfl0` (LYC), fall `ly1 cfl0` | NO ly0/ly1 edge |
+| `lycwirq_trigger_ly00_stat50_2` | `ly=0 cfl=0 lyfc=0 val=0` | held high (VBlank), fall `ly1 cfl0` | NO ly0/ly1 edge |
+
+So the write at `lyfc=-1` (r3) latches no match, and at `lyfc=0` (r2) joins an
+already-high line — **no fresh LYC edge** either way. slopgb's per-dot
+`stat_update_tick` re-latched `lyc_interrupt_line` against the line-start
+carryover (`ly_for_comparison = line - 1 = 0` at the ly0→ly1 wrap, dots 0-2) the
+moment LYC became 0 → a spurious `ly1 dot0 mfi2` rise (`SLOPGB lvl ly=0 dot=4
+1->0` then `ly=1 dot=0 0->1 lyc_line=1`) → `got=E2`, want E0.
+
+**Fix** (`stat_irq.rs::stat_update_tick`, LE/Tier-2 only): HOLD the latch across
+the line-start carryover dots (lines 1-143, `dot <= 2`) like the `-1` gap — only
+re-latch at the dot-4 (`=N`) step and the `-1` hold. A legitimate LYC=N-1 *tail*
+was already latched true at line N-1, so holding preserves it; only the spurious
+fresh match (latch low coming in, carryover number == freshly-written LYC) is
+suppressed — SameBoy's "no re-latch during the held carryover".
+
+**DMG-family only.** On CGB the LCD-offset rows shift SameBoy's whole grid: the
+offset-shifted LYC edge SameBoy raises one line *earlier*
+(`late_ff45_enable_lcdoffset1_1`: SameBoy `ly6 cfl0`, slopgb `ly7 dot0`) lands on
+slopgb's carryover dot as a **mis-dotted but REAL** edge, so the hold drops a STAT
+SameBoy delivers (out2→0). slopgb models no `lcd_offset`, so the spurious wrap and
+the offset-shifted real edge are indistinguishable here without porting the CGB
+write-state / lcd-offset timing — banked (the goal scopes CGB lycwirq as its own
+residual). DMG is the clean single-speed case.
+
+**Result** (full gambatte BEFORE/AFTER, both models, two gbtr bins — fix in
+`target/gbtr`, reverted in `target/lint`): with the DMG-family gate, **+4 DMG / −0
+SameBoy-passing dropped**: `lyc0_late_ff45_enable_3`, `late_ff45_enable_3`,
+`ff45_enable_weirdpoint_3`, `miscmstatirq/lycwirq_trigger_m0_late_ly44_4` (all
+[Dmg]). (The UNGATED change was +9/−2; the 2 breaks were the CGB `lcdoffset1`
+rows above — hence the gate. The 5 CGB fixes it also gave up — incl. CGB `r3`/`r2`
+and 2 DS rows — are real but ride with the CGB lcd-offset port.) Pinned
+`tier2_lyc_carryover_late_ff45_passes` (DMG `lyc0_late_ff45_enable_3` outE0) +
+unit test `lyc_latch_holds_across_line_start_carryover_flag_on` (fails without the
+hold). mooneye flag-on 91/91; 10 tier2 pins; gbtr+mooneye OFF byte-identical; lib
+661; clippy -D clean.
+
+**Named target `lycwirq_trigger_ly00_stat50_2` [Dmg] (want E0): the spurious `ly1`
+edge is GONE** (carryover hold), but it still fails — its residual is a SEPARATE
+mechanism: slopgb fires the VBlank STAT IRQ at `ly144 dot4`, SameBoy at `ly144
+cfl0` (read-frame Δ4), and the HALT-wake/read diverges (slopgb reads `ly0 dot20
+if=02`, SameBoy `ly144 cfl0 if=01`) — **mech 1 read-frame / mech 2 wake-clock**,
+not the carryover lever.
+
+**Tracer added (kept, documented in `tools/stat-irq-trace.md`):** SameBoy
+`memory.c` `case GB_IO_LYC` → `SBWRITE ff45 ly/cfl/dc/val/lyfc/ds`, `SB_TRACE`-
+gated. The FF45-write-timing ground truth (when + at what `ly_for_comparison` the
+late LYC write lands). slopgb temp `SLOPGB_LVL` level-transition tracer in
+`stat_update_tick` (reverted; recipe in the handoff).
+
+**Remaining root 2:** the CGB lcd-offset carryover (the 5 given-up CGB fixes +
+the 2 lcdoffset breaks — needs the CGB write-state/lcd_offset port);
+`lycwirq_trigger_ly00_stat50_2` [Dmg] vblank-delivery residual (mech 1/2);
+late-disable (`m2enable/late_enable_m0disable_2`).

@@ -1060,6 +1060,51 @@ fn ff45_match_fires_once_flag_on() {
     );
 }
 
+/// Port Stage C / S5 (mech 3 root 2) — `stat_update_tick` HOLDS
+/// `lyc_interrupt_line` across the line-start LYC carryover (lines 1-143, dots
+/// 0-2, where [`Ppu::ly_for_comparison`] still names the PREVIOUS line). SameBoy
+/// re-evaluates `lyc_interrupt_line` only at the `GB_SLEEP` steps that *set*
+/// `ly_for_comparison` — state-6 (`= -1`, holds) and state-7 (`= current_line`,
+/// re-latch) — and does NOT call `GB_STAT_update` during the held carryover. So
+/// a late FF45 write whose new LYC equals that carryover number raises NO fresh
+/// LYC edge there (`lyc0_late_ff45_enable_3`, `lycwirq_trigger_ly00_stat50_2`).
+/// slopgb's per-dot engine used to re-latch the carryover match → a spurious
+/// `ly1 dot0` STAT edge (`got=E2`, want E0). This pins the hold: a freshly-set
+/// LYC matching the carryover with the latch low must stay low across dots 0-2
+/// and raise no IF (a legitimate LYC=N-1 *tail* is already latched true at line
+/// N-1, so the hold preserves it — tested by the steady-state family rows). LE
+/// path only.
+#[test]
+fn lyc_latch_holds_across_line_start_carryover_flag_on() {
+    let mut p = dmg();
+    p.set_leading_edge_reads(true);
+    p.write(0xFF40, 0x91); // LCD on
+    p.write(0xFF41, 0x40); // LYC source enabled (OAM/mode sources off)
+    // Line 5 dot 0: the carryover `ly_for_comparison` reads 4 (line 4). LYC is
+    // still 0 (default), so the latch is low (line 4 never matched).
+    run_to(&mut p, 5, 0);
+    assert!(!p.lyc_interrupt_line, "latch low entering line 5 (LYC=0, no match)");
+    // Simulate the late write landing at the line-5 start: LYC := 4, the
+    // carryover number. With the hold the engine must NOT re-latch it across the
+    // carryover dots — no spurious edge. (Without the hold, dots 0-2 re-latch
+    // 4==4 → a 0→1 LYC rise → IF bit 1.)
+    p.lyc = 4;
+    let mut fires = 0u32;
+    for _ in 0..6 {
+        // dots 1..6 — covers the carryover (0-2), the `-1` gap (3), and the
+        // dot-4 re-latch (ly_for_comparison = 5 ≠ LYC 4 → stays low).
+        if p.tick() & 2 != 0 {
+            fires += 1;
+        }
+        assert!(
+            !p.lyc_interrupt_line,
+            "latch held low across line-start carryover at line {} dot {}",
+            p.line, p.dot
+        );
+    }
+    assert_eq!(fires, 0, "no spurious LYC STAT edge during the line-start carryover");
+}
+
 /// Write-coherence guard (the FF40 leg of the A11/A12 systematic sweep) — an
 /// FF40 LCD-enable that raises the STAT line (LYC source pre-enabled, LY=0=LYC
 /// matches on the glitch line) fires the STAT IF exactly ONCE on BOTH paths,

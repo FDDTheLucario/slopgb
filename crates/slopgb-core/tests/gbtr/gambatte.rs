@@ -926,6 +926,39 @@ fn tier2_line0_vblank_carry_passes() {
         .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected outE0 (tier2 flag-on): {e}"));
 }
 
+/// Port Stage C / S5 (mech 3 root 2 — the LYC-write sub-case) — the line-start
+/// LYC-carryover hold suppresses a spurious wrap edge on the deferred reclock.
+/// `lyc0_late_ff45_enable_3` enables the LYC source (LYC=0) and writes FF45=0
+/// late, at the ly0→ly1 wrap. SameBoy re-evaluates `lyc_interrupt_line` only at
+/// the line-start `GB_SLEEP` steps that *set* `ly_for_comparison` (state-6 = -1
+/// holds, state-7 = N re-latch) — never during the HELD carryover where
+/// `ly_for_comparison` still names the previous line — so the late write
+/// (landing at `ly1` with `ly_for_comparison == -1`, `SBWRITE ff45 ly=1 lyfc=-1
+/// val=0`) raises no fresh LYC edge (`out=E0`). slopgb's per-dot
+/// `stat_update_tick` re-latched the carryover `line - 1` (= 0) against the
+/// freshly-written LYC=0 → a spurious `ly1 dot0` STAT edge (`out=E2`). The fix
+/// holds the latch across the carryover dots 0-2 like the `-1` gap
+/// (`stat_irq.rs::stat_update_tick`). Production (flag-off) byte-identical —
+/// `stat_update_tick` runs only on the leading-edge / Tier-2 path. DMG-family
+/// only: on CGB the LCD-offset rows shift SameBoy's grid so the offset-shifted
+/// LYC edge lands on slopgb's carryover dot as a mis-dotted *real* edge (not a
+/// spurious one); without a `lcd_offset` port the hold can't tell them apart, so
+/// CGB stays a residual. SameBoy passes the DMG `out=E0` side.
+#[test]
+fn tier2_lyc_carryover_late_ff45_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr("tier2_lyc_carryover", "game-boy-test-roms collection not present");
+        return;
+    };
+    let rel = "gambatte/lycEnable/lyc0_late_ff45_enable_3_dmg08_cgb04c_outE0.gbc";
+    let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+    let model = Model::Dmg;
+    let mut gb = harness::boot_with_reclock(&rom, model);
+    run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+    check_hex_screen(gb.frame(), "E0", model.is_cgb())
+        .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected outE0 (tier2 flag-on): {e}"));
+}
+
 /// Self-verifying inventory: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// covers the on-disk ROM set exactly, with the exemptions pinned to the
 /// documented 50-entry list.
