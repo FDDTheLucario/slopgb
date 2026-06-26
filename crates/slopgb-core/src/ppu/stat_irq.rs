@@ -458,6 +458,22 @@ impl Ppu {
             return false;
         }
         let lyc_fire = lyc_high && data & STAT_SRC_LYC != 0;
+        // Port Stage C / S5 (mech 3 — the dispatch-class write-trigger, the LYC
+        // sub-family). The lcd-offset shifts `late_ff41_enable_lcdoffset1_1`'s
+        // LYC-source enable into the line-start carryover (dots 0-3 of lines
+        // 1-143, which on the gambatte grid still belong to the previous line):
+        // it sets LYC = ly-1 and enables LYC at `ly7 dot3`, where SameBoy fires
+        // via the carryover compare (LYC matched the previous line) while
+        // `cmp_cgb` has already switched to the new line (so `lyc_high` is false).
+        // Under Tier-2 a fresh LYC enable matching the PREVIOUS line fires in the
+        // carryover; `cmp_cgb` (pinning the new-line compare for the calibrated
+        // m1statwirq/lyc_ff41_enable_3 rows) is untouched. Byte-identical OFF.
+        let lyc_carryover = self.leading_edge_reads
+            && (1..=143).contains(&self.line)
+            && self.dot < 4
+            && old & STAT_SRC_LYC == 0
+            && data & STAT_SRC_LYC != 0
+            && self.lyc == self.line - 1;
         // m2 sub-trigger window (kept from the pre-port calibration;
         // gambatte's ly==143 and ly==153 branches are empty at single
         // speed, so the (144,0) and (0,0) cells never fire it).
@@ -520,14 +536,24 @@ impl Ppu {
             // still suppresses a written lyc condition there (gambatte's
             // `old & m1irqen` arm; miscmstatirq
             // lycstatwirq_trigger_ly00_10_50_1 reads E0).
-            let m1_tail = self.line == 0 && self.dot < 4;
+            // Port Stage C / S5 (mech 3 — the dispatch-class write-trigger, the
+            // VBlank sub-family). The gambatte `m1_tail` (line 0 dots 0-3 = mode
+            // 1's last M-cycle) suppresses a freshly-written m1 enable; but the
+            // lcd-offset shifts `m1irq_late_enable_lcdoffset1_1`'s FF41 enable
+            // into exactly that tail (`ly0 dot3`), where SameBoy fires the fresh
+            // VBlank enable (out2) — slopgb delivered `if=00`. Under Tier-2
+            // (`leading_edge_reads`) drop the `m1_tail` suppression so the fresh
+            // VBlank enable raises IF; the `old & STAT_SRC_VBLANK` suppression and
+            // the lyc arm (the #11k `lycstatwirq_trigger_ly00` E0 rows) are
+            // untouched. Never set in production / LE-only → byte-identical OFF.
+            let m1_tail = self.line == 0 && self.dot < 4 && !self.leading_edge_reads;
             if old & STAT_SRC_VBLANK != 0 {
                 false
             } else {
                 (data & STAT_SRC_VBLANK != 0 && !m1_tail) || lyc_fire
             }
         };
-        main || m2
+        main || m2 || lyc_carryover
     }
 
     /// Stage the delayed event-register FF41 copies after a write

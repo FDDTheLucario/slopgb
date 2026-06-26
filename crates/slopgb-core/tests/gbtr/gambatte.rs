@@ -1205,6 +1205,40 @@ fn tier2_m0enable_late_lcdoffset_passes() {
     }
 }
 
+/// Port Stage C / S5 (mech 3 — CGB lcd-offset, the dispatch-class VBlank + LYC
+/// write-triggers) — the lcd-offset shifts these late STAT enables into the
+/// line-start dots-0-3 carryover, where the base gambatte logic suppresses them.
+/// `m1/m1irq_late_enable_lcdoffset1_1` enables the VBlank source at `ly0 dot3`
+/// (the `m1_tail` suppression, `stat_irq.rs`); `lycEnable/late_ff41_enable_lcdoffset1_1`
+/// enables the LYC source at `ly7 dot3` with `LYC=ly-1` (the carryover compare —
+/// `cmp_cgb` has switched to the new line so `lyc_high` is false). SameBoy fires
+/// both at the write; slopgb delivered `if=00` (out0) instead of out2. The fix
+/// (Tier-2, `stat_write_trigger_cgb`): drop the `m1_tail` suppression for a fresh
+/// VBlank enable, and fire a fresh LYC enable whose LYC matches the PREVIOUS line
+/// in the carryover. CGB-only. Probe (654 CGB rows, flag-on): +2/−0, the #11k/#11l
+/// line-0/lyc pins held.
+#[test]
+fn tier2_m1_lyc_late_lcdoffset_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_m1_lyc_late_lcdoffset",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        "gambatte/m1/m1irq_late_enable_lcdoffset1_1_cgb04c_out2.gbc",
+        "gambatte/lycEnable/late_ff41_enable_lcdoffset1_1_cgb04c_out2.gbc",
+    ];
+    for rel in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), "2", true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out2 (tier2 flag-on): {e}"));
+    }
+}
+
 /// Self-verifying inventory: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// covers the on-disk ROM set exactly, with the exemptions pinned to the
 /// documented 50-entry list.
