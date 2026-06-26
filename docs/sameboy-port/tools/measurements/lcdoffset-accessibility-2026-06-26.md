@@ -1,12 +1,19 @@
 # CGB lcd-offset batch — accessibility ground truth (2026-06-26, #11q)
 
-The C-stage mech-3 CGB lcd-offset batch. **Three clean tier2 slices shipped,
-+7/−0 total:** (1) OAM line-start read window +1, (2) palette m3-start read+write
-window +2, (3) the **dispatch-class HBlank write-trigger +4** (the lever the
-goal's "build a tier2-gated dispatch reclock" called for — a live build-measure
-REFUTED the premature "floored to C2" verdict). The remaining dispatch rows
-(m1/lycEnable sub-families) + window / pure-`_ds` / HDMA are floored to the
-delicate line-0/lyc engine (#11k/#11l) or render / S6.
+The C-stage mech-3 CGB lcd-offset batch. **Four clean tier2 slices shipped,
++9/−0 total:** (1) OAM line-start read window +1, (2) palette m3-start read+write
+window +2, (3) dispatch-class HBlank write-trigger +4, (4) dispatch-class
+VBlank+LYC write-triggers +2. Slices 3-4 ARE the goal's "build a tier2-gated
+dispatch reclock" deliverable — **the entire single-speed lcd-offset dispatch
+`late_enable` class is now built** (m0/m1/lyc). A live build-measure REFUTED a
+premature "floored to C2 / atomic reclock" verdict on each: every dispatch
+sub-family had a clean tier2 write-trigger lever, discriminated by a real slopgb
+state (`vis_mode==0` carryover / `m1_tail` / `lyc==line-1` carryover) — NOT the
+per-config offset I wrongly assumed unresolvable. **Lesson: build-measure a
+dispatch sub-family before flooring it.** Remaining lcdoffset fails: lyc153-wrap /
+lycwirq-spurious / ff45-weirdpoint (the #11k/#11l deep lyc engine — next-session
+build-measure candidates, NOT floored on reasoning), window late_enable/late_wy
+(render = C2), and pure-`_ds` / HDMA (S6).
 
 ## What lcd-offset does (CORRECTED — it is NOT a mode-boundary shift)
 
@@ -139,17 +146,28 @@ separates the post-m0 carryover (fire) from the pre-m0 line-start tail (defer) �
 a real slopgb state difference, like the #11n eighth-grid / #11o accessibility
 levers.
 
-**Remaining dispatch rows (m1 + lycEnable sub-families) — harder, entangled,
-floored for now.** Both ALSO land at `dot3` (the same carryover tail) but hit
-DIFFERENT source suppressions with no clean `vis_mode` discriminator:
-`m1/m1irq_late_enable_lcdoffset1_1` enables the VBlank source at `ly0 dot3`, hitting
-the `m1_tail = line==0 && dot<4` suppression (`stat_irq.rs:523`) that #11k's
-line-0 VBlank-carry work pins (`lycstatwirq_trigger_ly00` reads E0); `lycEnable/
-late_ff41_enable_lcdoffset1_1` enables a non-HBlank (LYC) source whose `cmp_cgb`
-compare at the `dot3` tail is the #11l lyc-carryover territory. Lifting those tail
-suppressions risks the pinned #11k/#11l line-0/lyc rows and has no measured
-discriminator yet → ground-truth-first + anti-thrash: floored, the next dispatch
-slices. The `window / late_wy / dma / pure-_ds` lcdoffset rows remain render / S6.
+**m1 (VBlank) + lycEnable (LYC) sub-families — ALSO BUILT (`ae1f580`, +2/−0).**
+Build-measure refuted the floor on these too. Both land at the same `dot3`
+carryover tail but hit different source suppressions, each with a real
+discriminator: `m1/m1irq_late_enable_lcdoffset1_1` enables VBlank at `ly0 dot3`
+(the `m1_tail = line==0 && dot<4` suppression) — under tier2 a fresh VBlank
+enable fires there (the `old & STAT_SRC_VBLANK` suppression + the lyc arm that
+pin #11k's `lycstatwirq_trigger_ly00` E0 rows are untouched, so they held);
+`lycEnable/late_ff41_enable_lcdoffset1_1` sets `LYC=ly-1` and enables LYC at
+`ly7 dot3` — under tier2 a fresh LYC enable matching the PREVIOUS line fires in
+the carryover (the calibrated `cmp_cgb` new-line compare untouched, so the
+#11l rows held). Two-bin +2/−0, the #11k/#11l/#11j pins green. Pin
+`tier2_m1_lyc_late_lcdoffset_passes`. **The single-speed lcd-offset dispatch
+`late_enable` class is COMPLETE.**
+
+**Remaining lcdoffset fails (next-session build-measure candidates, NOT floored
+on reasoning — the lesson):** lyc153-wrap (`lyc153_late_ff41/ff45_enable_lcdoffset1_1`
+outE2 got E0), lycwirq-spurious (`lycwirq_trigger_ly00_stat50_lcdoffset1_1` wantE0
+got E2), ff45-weirdpoint (`ff45_enable_weirdpoint_lcdoffset1_2` want0 got2) — the
+#11k/#11l deep lyc-wrap/spurious engine, each its own sub-family to build-measure.
+`window late_enable_afterVblank / late_wy` (want3/want0) are render-level (the
+#11g/#11p window floor) = C2. Pure-`_ds` (S6 double-speed) + `dma/hdma` (S6) +
+the VRAM render floor + OAM prewrite genuine floor remain as documented above.
 
 ## Full-sweep triage (38 baselined lcdoffset [Cgb] rows, flag-on after both fixes)
 
