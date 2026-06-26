@@ -78,6 +78,44 @@ but the same lever regresses the want=0 m2int_wx_2 siblings. Plus mechanisms 3
 window never triggers) → no flip lever reaches them; those are render-level
 WY-latch / abort bugs (production-shared) = C2.
 
+## ATTEMPT 2 (this session) — own build of the vis-HOLD primitive, refined law, 0/233, reverted
+
+To answer the goal's "build it" directly (not just cite #11g's ATTEMPT 1), the
+primitive was **implemented this session** with the *refined* window-length law
+(an ABSOLUTE `263 + SCX&7` exit, vs ATTEMPT 1's `scx&7`-past-flip relative
+hold), measured, and reverted:
+
+- `vis_hold_until: u16` field (mod.rs) — symmetric inverse of `vis_early`; reset
+  per-line alongside `vis_early` (line_setup.rs ×2, regs.rs ×2, `m0_unflip`).
+- `m0_flip_events` (mode0.rs): on the dispatch (`proj <= lead`), under
+  `tier2_reclock && render.win_active`, set `vis_hold_until = 263 + (scx & 7)`.
+- `vis_mode` (stat_irq.rs): after the `line_render_done || vis_early → 0` branch,
+  `else if self.dot < self.vis_hold_until { 3 }` — keeps mode 3 past the
+  dispatch without moving `line_render_done`. Always 0 in production
+  (byte-identical OFF by construction).
+
+**Result: 0 fixed / 0 broke over the 233-row window+scx_during_m3 probe** (same
+net as ATTEMPT 1, now with the correct absolute law). The hold ACTIVATES
+correctly (win-active rows get `vis_hold_until = 263+SCX&7`), but it is INERT
+because of WHERE the failing rows actually sit:
+
+- The want=3 rows that *would* use a later boundary (`late_wy_FFto2_ly2_scx5_*`
+  etc.) render BARE on the measurement frame — `wy_ok=false`, `win_active=false`
+  (the #11g table: `late_wy_FFto2_ly2_scx5_1` = `dot=259/bare`). The window
+  never enters slopgb's render there (mechanism 3, WY-latch), so a `win_active`
+  hold cannot reach them. The win@261 flips seen in an early trace were OTHER
+  frames, not the ly2 measurement line.
+- The win-active fails (`m2int_wx00_m3stat_2`, want=0) read BEFORE the dispatch
+  (dot260 < flip261 → already mode3, already failing); extending mode-3 LATER
+  leaves them mode3 (no change, no regression). They need EARLIER, not later.
+
+So the win-active vis-HOLD is the wrong half of the fix: the rows need either
+the WY-latch render trigger (mechanism 3, production-shared) or the read-collapse
+read-frame (mechanism 2/S7) — neither is a CPU-visible-mode hold. **Reverted**
+(scattered inert hot-path code earns no place; the C2 window-length model will
+re-add the precise primitive it needs). This is the own-measured confirmation of
+#11g, with the refined law and the exact root cause.
+
 ## Probe summary (233 baselined window+scx_during_m3 rows, flag-on vs flag-off)
 
 - **58** rows fail OFF → pass ON (read-phase wins already harvested: #11n
