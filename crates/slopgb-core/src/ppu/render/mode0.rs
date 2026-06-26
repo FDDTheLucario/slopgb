@@ -213,14 +213,50 @@ impl Ppu {
             if has_sprites {
                 0
             } else if bare_flip {
-                // C1.2: 0, not 1. The bare-line visible mode→0 boundary lands at
-                // `line_render_done` (dispatch dot, no anticipation). The kernel
-                // separation only needs the boundary in (252, 256] — both 253
-                // (lead+1) and 254 (lead+0) satisfy m2int@252=3 ∧ m0int@256=0 —
+                // C1.2 baseline: 0, not 1. The bare-line visible mode→0 boundary
+                // lands at `line_render_done` (dispatch dot, no anticipation). The
+                // kernel separation only needs the boundary in (252, 256] — both
+                // 253 (lead+1) and 254 (lead+0) satisfy m2int@252=3 ∧ m0int@256=0 —
                 // but `lcdon_timing-GS`'s post-glitch line-1 STAT read lands AT
                 // dot 253 and must read mode 3, so the boundary must be 254
                 // (lead+0). intr_2_mode0/mode3 + the kernel all hold at 0.
-                0
+                //
+                // Mech-1 (S5 read-observer, eighth-grid): EXCEPT when the dispatch
+                // dot lands at cc2 of its M-cycle (dot ≡1 mod 4). A leading-edge
+                // FF41 read samples at its M-cycle START (dot ≡0 mod 4) and observes
+                // the mode-0 flip at the cc+2 phase, so a read landing IN the
+                // dispatch's M-cycle should see mode 0. cc1 (dispatch == the M-cycle
+                // start) is already caught by `line_render_done`; but a cc2 dispatch
+                // commits one dot PAST that start, so the whole-dot `line_render_done`
+                // leaves the same-M-cycle read (at the start) at mode 3. Anticipate
+                // `vis_early` by 1 dot to the M-cycle start (el=1) so it reads mode 0
+                // — the gambatte `m2int_scx3`/`nobg_scx7` `m3stat_2` reads (dispatch
+                // 257/261 ≡1 mod 4, read at 256/260; SameBoy reads mode 0 in the same
+                // M-cycle). cc3/cc4 (≡2/3) KEEP el=0: their same-M-cycle read precedes
+                // the boundary (→ mode 3, e.g. the kernel m2int@252 with dispatch
+                // 254 ≡2, and lcdon's 253 read), and the NEXT M-cycle's read sees
+                // mode 0 via `line_render_done`. The IRQ side (`mode_for_interrupt`/
+                // `prev_done`, reclock.rs) keys on `line_render_done`, not `vis_early`,
+                // so the counter-pinned dispatch dot is untouched. Tier2-gated;
+                // `vis_early` is never set in production, so byte-identical OFF.
+                //
+                // Restricted to TRUE bare lines untouched by the window (no WY
+                // latch / WY-match, no stall/abort). A late-window-DISABLE line is
+                // `bare_flip` at flip time (`!win_active`) but its two test reads
+                // land 1 cycle apart and COLLAPSE onto the same slopgb read dot
+                // (SameBoy distinguishes them at sub-dot — `window/late_disable_*`
+                // _1 reads mode 0, _2 reads mode 3, BOTH SameBoy-passing). slopgb
+                // can render only one digit for the pair, so the cc2 anticipation
+                // just flips WHICH sibling passes — an A/B swap that DROPS the
+                // SameBoy-passing `_2`. `wy_latch`/`wy2==ly` stay set across a
+                // window-disable (only the LCD-on path clears them), so they mark
+                // every window-involved line; m2int/scx are window-free (wy_latch
+                // false, wx 0). Window length is its own sub-family (parallel model
+                // + vis-HOLD); leave it to that work.
+                let dispatch_dot = self.dot + proj.saturating_sub(lead);
+                let clean_bare =
+                    !self.wy_latch && self.wy2 != self.ly && !r.win_stalled && !r.win_aborted;
+                u16::from((dispatch_dot & 3) == 1 && clean_bare)
             } else if self.glitch_line {
                 // The LCD-enable glitch line keeps the +2 anticipation: its
                 // post-glitch line-1 STAT read (lcdon_timing-GS) is calibrated

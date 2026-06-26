@@ -959,6 +959,51 @@ fn tier2_lyc_carryover_late_ff45_passes() {
         .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected outE0 (tier2 flag-on): {e}"));
 }
 
+/// Port Stage C / S5 (mech 1 — the read-observer eighth-grid) — the bare-line
+/// `m2int_m3stat` reads converge flag-on when the mode-0 dispatch lands at cc2 of
+/// its M-cycle (dot ≡ 1 mod 4 ⇔ SCX&7 ∈ {3,7}). A leading-edge FF41 read samples
+/// at its M-cycle START and observes the flip at cc+2, so a same-M-cycle read
+/// should see mode 0; the cc2 dispatch commits one dot past the start, so
+/// `vis_early` is anticipated 1 dot (`early_lead = 1`) to that start
+/// (`ppu/render/mode0.rs`). `m2int_scx3_m3stat_2` (DMG+CGB, dispatch 257, read
+/// 256) and `m2int_nobg_scx7_m3stat_2` (CGB, dispatch 261, read 260) read mode 0
+/// (out0); SameBoy reads mode 0 in the same M-cycle. cc1/cc3/cc4 keep el=0 so the
+/// kernel (`m2int@252` dispatch 254 ≡2) and `lcdon` hold; the IRQ dispatch keys
+/// on `line_render_done`, not `vis_early`, so it is untouched. Restricted to
+/// window-free bare lines (`!wy_latch`), so the `window/late_disable_*` read-
+/// collapse A/B pairs (both SameBoy-passing, slopgb renders one digit) are not
+/// disturbed. Production (flag-off) byte-identical — `vis_early` never set there.
+#[test]
+fn tier2_m2int_m3stat_scx3_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr("tier2_m2int_m3stat", "game-boy-test-roms collection not present");
+        return;
+    };
+    // (rel, expect, models) — scx3 both models, nobg_scx7 CGB-only (cgb04c tag).
+    let targets: [(&str, &str, &[Model]); 2] = [
+        (
+            "gambatte/m2int_m3stat/scx/m2int_scx3_m3stat_2_dmg08_cgb04c_out0.gbc",
+            "0",
+            &[Model::Dmg, Model::Cgb],
+        ),
+        (
+            "gambatte/m2int_m3stat/nobg/m2int_nobg_scx7_m3stat_2_cgb04c_out0.gbc",
+            "0",
+            &[Model::Cgb],
+        ),
+    ];
+    for (rel, expect, models) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        for &model in models {
+            let mut gb = harness::boot_with_reclock(&rom, model);
+            run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+            check_hex_screen(gb.frame(), expect, model.is_cgb()).unwrap_or_else(|e| {
+                panic!("{rel} [{model:?}] expected out{expect} (tier2 flag-on): {e}")
+            });
+        }
+    }
+}
+
 /// Self-verifying inventory: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// covers the on-disk ROM set exactly, with the exemptions pinned to the
 /// documented 50-entry list.
