@@ -2,6 +2,11 @@
 
 use super::*;
 
+/// Tier-2 CGB single-speed line-start OAM-read window length (T-cycles), the
+/// dots `0..N` over which SameBoy keeps OAM readable before the mode-2 lock
+/// engages (`display.c:1805-1810`). See [`Ppu::cgb_linestart_oam_open`].
+const CGB_LINESTART_OAM_OPEN: u16 = 4;
+
 impl Ppu {
     pub(crate) fn oam_read_blocked(&self) -> bool {
         self.enabled
@@ -15,6 +20,31 @@ impl Ppu {
             // SameBoy reads accessible (oam_access/vram_m3 postread_scx3). Release
             // on `vis_early`. Never set in production → byte-identical OFF.
             && !(self.tier2_reclock && self.vis_early)
+            // Tier-2 CGB line-start OAM-read window: SameBoy keeps
+            // `oam_read_blocked = false` for the first few T-cycles of each
+            // visible line (`display.c:1805-1810` — the mode-0/HBlank tail runs
+            // 2+1 cycles before the mode-2 OAM lock engages at state 7, on CGB
+            // single-speed where `oam_read_blocked = !cgb_double_speed`). A
+            // deferred cc+0 read landing at line start (the lcd-offset-shifted
+            // `oam_access/preread_lcdoffset1_1` read, slopgb `ly2 dot2` vs
+            // SameBoy `ly2 cfl0 blk0`) then sees OAM accessible; slopgb locks
+            // from dot 0. Release dots `0..K` on CGB single-speed under tier2.
+            // Line 0 excluded (post-enable FSM has its own window). Never set in
+            // production -> byte-identical OFF.
+            && !self.cgb_linestart_oam_open()
+    }
+
+    /// Tier-2 (cc+0) CGB single-speed line-start OAM-read window — see
+    /// [`Self::oam_read_blocked`]. SameBoy carries `oam_read_blocked = false`
+    /// from the previous HBlank across the first `CGB_LINESTART_OAM_OPEN`
+    /// T-cycles of a visible line until the mode-2 lock engages. Never true in
+    /// production / LE-only (`tier2_reclock` gate) -> byte-identical OFF.
+    fn cgb_linestart_oam_open(&self) -> bool {
+        self.tier2_reclock
+            && self.model.is_cgb()
+            && !self.ds
+            && self.line != 0
+            && self.dot < CGB_LINESTART_OAM_OPEN
     }
 
     pub(crate) fn oam_write_blocked(&self) -> bool {

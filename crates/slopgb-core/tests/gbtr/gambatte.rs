@@ -1094,6 +1094,35 @@ fn tier2_oam_vram_postwrite_scx3_passes() {
     }
 }
 
+/// Port Stage C / S5 (mech 3 — CGB lcd-offset, the line-start OAM-read window) —
+/// on CGB single-speed SameBoy keeps `oam_read_blocked = false` for the first few
+/// T-cycles of each visible line (`display.c:1805-1810`: the mode-0/HBlank tail
+/// runs 2+1 cycles before the mode-2 OAM lock engages at state 7). The lcd-offset
+/// shifts the `oam_access/preread_lcdoffset1_1` deferred read into that window
+/// (slopgb `ly2 dot2` vs SameBoy `ly2 cfl0 blk=0`), where slopgb — locking OAM
+/// from dot 0 — read "3" (blocked) instead of out0 (accessible). The fix releases
+/// `oam_read_blocked` for dots `0..CGB_LINESTART_OAM_OPEN` on CGB single-speed
+/// under Tier-2 (`ppu/blocking.rs::cgb_linestart_oam_open`). CGB-only, single-
+/// speed (the `_ds_` siblings are S6, the DMG base reads in real mode-0 already).
+/// Production (flag-off) byte-identical — the window is never open there. Probe
+/// (654 CGB baseline rows, flag-on): +1/−0.
+#[test]
+fn tier2_oam_preread_lcdoffset1_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_oam_preread_lcdoffset1",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let rel = "gambatte/oam_access/preread_lcdoffset1_1_cgb04c_out0.gbc";
+    let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+    let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+    run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+    check_hex_screen(gb.frame(), "0", true)
+        .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out0 (tier2 flag-on): {e}"));
+}
+
 /// Self-verifying inventory: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// covers the on-disk ROM set exactly, with the exemptions pinned to the
 /// documented 50-entry list.
