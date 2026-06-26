@@ -310,6 +310,20 @@ impl Ppu {
             self.m0_src = true;
             self.m0_rise_dot = true;
             self.line_render_done = true;
+            // Port Stage C/S5 mech-1 — the window vis-HOLD foundation. SameBoy
+            // extends a TRIGGERING window's CPU-visible mode-3 to ≈ `263 + SCX&7`
+            // (the measured window-length law), PAST this counter-pinned dispatch
+            // dot; slopgb's window flip is flat at ~261. Record the hold target so
+            // `vis_mode` keeps reading mode 3 until it, WITHOUT moving the dispatch
+            // (`line_render_done`). Win-active lines only (`bare_flip` lines keep
+            // the #11n eighth-grid lever); tier2-gated, so `vis_hold_until` stays 0
+            // in production (byte-identical OFF). Currently inert on its own (the
+            // want=3 rows render bare via the WY-latch, mechanism 3); it is the
+            // visible-mode half of the C2 parallel window-length model. See the
+            // `vis_hold_until` field docs.
+            if self.tier2_reclock && self.render.win_active {
+                self.vis_hold_until = 263 + u16::from(self.eff.scx & 7);
+            }
             // The accessibility unblock (this `line_render_done` rise) is
             // half-classified by the interconnect for the cc+2 MID-phase
             // OAM read (sub-dot event-phase model, increment 1).
@@ -343,6 +357,7 @@ impl Ppu {
             // The visible back-date drops with the dispatch (flag-on only;
             // always false in production). See the `vis_early` field docs.
             self.vis_early = false;
+            self.vis_hold_until = 0;
         }
     }
 

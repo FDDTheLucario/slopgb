@@ -16,6 +16,7 @@ impl Ppu {
                 self.win_line = 0xFF;
                 self.line_render_done = false;
                 self.vis_early = false;
+                self.vis_hold_until = 0;
                 self.render_finished = false;
                 self.hdma_lead = false;
                 self.render.active = false;
@@ -24,6 +25,7 @@ impl Ppu {
                 self.ly = self.line;
                 self.line_render_done = false;
                 self.vis_early = false;
+                self.vis_hold_until = 0;
                 self.render_finished = false;
                 self.hdma_lead = false;
                 self.render.active = false;

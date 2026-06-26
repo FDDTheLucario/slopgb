@@ -372,6 +372,7 @@ impl Ppu {
             self.frame_skip = false;
             self.line_render_done = true;
             self.vis_early = false;
+            self.vis_hold_until = 0;
             self.render_finished = true;
             self.m0_src = false;
             self.m0_rise_dot = false;
@@ -403,6 +404,7 @@ impl Ppu {
             self.frame_skip = true;
             self.line_render_done = false;
             self.vis_early = false;
+            self.vis_hold_until = 0;
             self.render_finished = false;
             self.m0_src = false;
             self.m0_rise_dot = false;

@@ -111,10 +111,18 @@ because of WHERE the failing rows actually sit:
 
 So the win-active vis-HOLD is the wrong half of the fix: the rows need either
 the WY-latch render trigger (mechanism 3, production-shared) or the read-collapse
-read-frame (mechanism 2/S7) — neither is a CPU-visible-mode hold. **Reverted**
-(scattered inert hot-path code earns no place; the C2 window-length model will
-re-add the precise primitive it needs). This is the own-measured confirmation of
-#11g, with the refined law and the exact root cause.
+read-frame (mechanism 2/S7) — neither is a CPU-visible-mode hold. This is the
+own-measured confirmation of #11g, with the refined law and the exact root cause.
+
+**SHIPPED as a validated-inert foundation** (`vis_hold_until: u16` + a unit-test
+pin `vis_hold_extends_visible_mode3_past_the_dispatch`), matching the project's
+`cycle_clock.rs` / `mode_timeline.rs` precedent (inert port foundations wired
+for later stages). It is the visible-mode half of the C2 parallel window-length
+model; the other half (the WY-latch render trigger that makes the want=3 window
+lines enter slopgb's render so the hold can reach them) is the remaining C2
+work. Byte-identical OFF (`vis_hold_until` is never set when `tier2_reclock` is
+false): gate green gbtr 198/0 + mooneye 91/0 OFF, mooneye flag-on 91/91, lib
+660, 13 tier2 pins.
 
 ## Probe summary (233 baselined window+scx_during_m3 rows, flag-on vs flag-off)
 

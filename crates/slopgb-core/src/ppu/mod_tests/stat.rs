@@ -1580,3 +1580,36 @@ fn frame_count_steady_period() {
     tick_n(&mut p, 70_224);
     assert_eq!(p.frame_count(), 2, "70224 dots per steady frame");
 }
+
+/// Port Stage C/S5 mech-1 — the window vis-HOLD foundation (`vis_hold_until`)
+/// keeps the CPU-visible STAT mode at 3 PAST the dispatch flip
+/// (`line_render_done`/`vis_early`) until SameBoy's `263 + SCX&7` window-length
+/// exit, WITHOUT moving the dispatch. Always 0 (no hold) in production, so it is
+/// byte-identical with the flag-off `line_render_done` read. (Validated
+/// foundation for the C2 window-length model — see the `vis_hold_until` docs.)
+#[test]
+fn vis_hold_extends_visible_mode3_past_the_dispatch() {
+    let mut p = dmg();
+    p.write(0xFF40, 0x91); // LCD + BG on
+    run_to(&mut p, 1, 0); // steady-state line 1 (glitch cleared)
+    p.line_render_done = true; // the dispatch flip already fired
+    p.vis_early = true;
+    // SCX 5 window: SameBoy holds mode 3 until dot 268 (= 263 + 5).
+    p.vis_hold_until = 268;
+    p.dot = 264;
+    assert_eq!(p.vis_mode(), 3, "held: dot < vis_hold_until reads mode 3");
+    p.dot = 268;
+    assert_eq!(
+        p.vis_mode(),
+        0,
+        "released: dot >= vis_hold_until reads mode 0"
+    );
+    // No hold (production / non-win-active): the dispatch read is mode 0.
+    p.vis_hold_until = 0;
+    p.dot = 264;
+    assert_eq!(
+        p.vis_mode(),
+        0,
+        "no hold: dispatch flip reads mode 0 (byte-identical)"
+    );
+}

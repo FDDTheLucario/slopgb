@@ -61,6 +61,12 @@ impl Ppu {
             // flip, bare single-speed lines); always false in production, so
             // this reads `line_render_done` exactly. See the field docs.
             3
+        } else if self.dot < self.vis_hold_until {
+            // Window vis-HOLD: a triggering window extends the CPU-visible
+            // mode-3 PAST the dispatch flip to SameBoy's `263 + SCX&7` exit
+            // (`vis_hold_until`, set in `m0_flip_events`). 0 (no hold) in
+            // production, so byte-identical OFF. See the `vis_hold_until` docs.
+            3
         } else {
             0
         }

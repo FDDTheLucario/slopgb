@@ -326,6 +326,30 @@ pub struct Ppu {
     /// `line_render_done` dot for now (the visible-vs-accessibility 3-dot window
     /// is the S4 back-dating). Reset at line start + on `m0_unflip`.
     vis_early: bool,
+    /// Port Stage C/S5 mech-1 — the window vis-HOLD: the dot until which the
+    /// CPU-visible STAT mode stays 3 on a `win_active` line, EVEN AFTER
+    /// `line_render_done`/`vis_early`. The symmetric inverse of `vis_early`
+    /// (which only ANTICIPATES the visible flip earlier): SameBoy extends a
+    /// TRIGGERING window's mode-3 to ≈ `263 + SCX&7` (the measured window-length
+    /// law, `window-groundtruth-2026-06-24.md`), past the counter-pinned
+    /// dispatch dot, while slopgb's window flip is flat at ~261. Set in
+    /// `m0_flip_events` when the flip fires on a `win_active` line under
+    /// `tier2_reclock` (0 = no hold); consumed only by `vis_mode` — the IRQ
+    /// dispatch (`line_render_done`) is NOT moved.
+    ///
+    /// **Validated foundation, currently INERT** (like `cycle_clock`/
+    /// `mode_timeline`): the rows it targets are blocked on a SEPARATE missing
+    /// piece — the want=3 window rows render BARE on the measurement frame
+    /// (`wy_ok=false`, a render-level WY-latch trigger gap, `win_active=false`
+    /// so the hold cannot reach them) and the win-active fails read BEFORE the
+    /// dispatch (want=0, need the opposite direction). Measured 0/233 alone;
+    /// it is the visible-mode half of the C2 parallel window-length model
+    /// (which must also replicate the WY-latch trigger to drive it). See
+    /// `measurements/vis-hold-target-exhaustion-2026-06-26.md`. **Always 0 on
+    /// the flag-off path** (never set when `tier2_reclock` is false) →
+    /// byte-identical in production. Reset at line start + on `m0_unflip`, like
+    /// `vis_early`.
+    vis_hold_until: u16,
     /// The mode-0 STAT IRQ source level: rises on the visible flip's
     /// dot — 2 dots before the pipe end on a bare line, 1 in double
     /// speed and on window-stalled lines, 0 on DMG window-aborted lines
@@ -697,6 +721,7 @@ impl Ppu {
             stat_halt_late: false,
             line_render_done: true,
             vis_early: false,
+            vis_hold_until: 0,
             render_finished: true,
             hdma_lead: false,
             wy_latch: false,
