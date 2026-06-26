@@ -141,8 +141,23 @@ mode 2); slopgb collapses the pair to identical `ly2 dot4 / cc1` (no finer-than-
 `cc` field) → FALL BACK. Full table + decision:
 `measurements/wake-clock-groundtruth-2026-06-25.md` "#11m".
 
+**SLOPGB oam/vram trace (the accessibility read-observer ground truth — the
+`oam_access`/`vram_m3` postread families):** the OAM (FE00-FE9F) / VRAM
+(8000-9FFF) accessibility reads do NOT go through `vis_mode` (FF41) — they gate on
+`stamp_blocks(m0_access_edge, ACCESS_PHASE)` (the eighth-grid) plus the PPU's base
+mode block, so the FF41 tracer is blind to them. slopgb counterpart committed
+(`SLOPGB oam/vram ly/dot/v` in `cycle.rs::read_deferred`, `v=ff` = blocked,
+`SLOPGB_S5DBG`, byte-identical OFF, deferred-path only). #11n finding: the
+`postread_scx2/3/5_2` reads land on **sprite/window lines** (`visflip el=2`, NOT
+`bare_flip`), so the #11n bare-line cc2 `vis_early` lever does NOT apply — the
+accessibility family is the `m0_access_edge` eighth-grid (`lead_eighths`) lever on
+non-bare geometry, its own sub-family (needs the SameBoy OAM/VRAM-read counterpart
++ the per-config m0_access boundary). scx2 read@256 / scx5 read@260, both `v=ff`
+(blocked) where SameBoy unblocks — a tier2-regression (OFF passes all).
+
 Detail: `measurements/flip-regr-2026-06-24-summary.txt`,
-`measurements/window-groundtruth-2026-06-24.md`.
+`measurements/window-groundtruth-2026-06-24.md`,
+`measurements/m2int-m3stat-eighthgrid-2026-06-25.md`.
 
 ## Findings (2026-06-23 #11e, DMG)
 

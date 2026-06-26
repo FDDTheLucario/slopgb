@@ -150,6 +150,18 @@ impl Interconnect {
             let (line, dot) = self.ppu.scan_pos();
             eprintln!("SLOPGB ff0f ly={line} dot={dot} if={:02x}", v & 0x1f);
         }
+        // S5 accessibility read-dot tracer (mech-1 read-observer, OAM/VRAM
+        // postread families): logs the deferred OAM (FE00-FE9F) / VRAM
+        // (8000-9FFF) read's dot + value (0xFF = blocked) on visible lines, the
+        // counterpart to SameBoy's OAM/VRAM-read instrumentation. `SLOPGB_S5DBG`,
+        // byte-identical when unset.
+        if matches!(addr, 0xFE00..=0xFE9F | 0x8000..=0x9FFF) && crate::ppu::s5dbg_on() {
+            let (line, dot) = self.ppu.scan_pos();
+            if line < 144 {
+                let kind = if addr < 0xA000 { "vram" } else { "oam" };
+                eprintln!("SLOPGB {kind} ly={line} dot={dot} v={v:02x}");
+            }
+        }
         v
     }
 
