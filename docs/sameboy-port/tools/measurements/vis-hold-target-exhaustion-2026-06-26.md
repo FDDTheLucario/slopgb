@@ -128,6 +128,40 @@ re-add the precise primitive it needs). This is the own-measured confirmation of
   (want=2 sprite). All map to the goal's pre-classified render-level / S7
   mechanisms.
 
+## FULL read-observer sweep — mech-1 DMG slices comprehensively EXHAUSTED
+
+To be sure the exhaustion is not specific to the two goal targets, probed ALL
+remaining read-observer families flag-on (238 baselined rows: scx_during_m3,
+enable_display, m0enable, bgtiledata, bgtilemap, scy, oam_access, vram_m3) and
+triaged every fail by want/got direction.
+
+**The ONLY in-scope DMG (non-ds, non-lcdoffset) read-observer fail across the
+entire space is `scx_m3_extend_1` — the pixel floor.** Every other fail is
+out-of-scope:
+
+- **oam_access / vram_m3 `want=0 got=3`** (the #11o accessibility-release
+  direction, the one clean-lever shape left): all 4 are CGB AND lcdoffset/ds —
+  `preread_ds_1`, `preread_ds_lcdoffset1_1`, `preread_lcdoffset1_1`,
+  `vram_m3/preread_lcdoffset2_1`. = mech-3 CGB lcd-offset (needs the lcd_offset
+  port), NOT a DMG eighth-grid slice.
+- **m0enable `want=2 got=0`** (6): all CGB `_ds_`/`lcdoffset1` (mode-2 read
+  under lcd-offset / double-speed).
+- **enable_display**: CGB cgbpr/cgbpw/vramw + frame*_m*stat_count = CGB
+  lcd-offset + frame-count (S6/mech-3).
+- **scy / bgtiledata / bgtilemap**: 0 fails (confirmed pass flag-on).
+
+So the proven #11n eighth-grid / #11o accessibility levers (which DID ship +18)
+have **no remaining DMG target** — every want=0-got=3 (anticipate-earlier) row
+is CGB lcd-offset, and the lone DMG want=3-got=0 row is the pixel floor. The
+C-stage residual is entirely the big-infra levers:
+
+1. **mech-3 CGB lcd-offset** (lcd_offset port) — the largest, most concentrated
+   batch (oam_access preread, m0enable, enable_display cgbp). Likely the most
+   tractable next lever: a coherent group an lcd_offset port would unlock.
+2. **mech-2 halt wake-clock** (S7 sub-cc clock) — #11m measured, fell back.
+3. **C2 render rebaseline** (scx_m3_extend hunt re-open + window WY-latch /
+   parallel window-length model) — production-shared, A/B-swept.
+
 ## VERDICT — do NOT build the vis-HOLD primitive
 
 Both proposed targets are dead: scx_m3_extend is a pixel test (this session),
