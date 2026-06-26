@@ -1123,6 +1123,45 @@ fn tier2_oam_preread_lcdoffset1_passes() {
         .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out0 (tier2 flag-on): {e}"));
 }
 
+/// Port Stage C / S5 (mech 3 — CGB lcd-offset, the m3-start palette-RAM window) —
+/// SameBoy keeps `cgb_palettes_blocked = false` for 3 T-cycles INTO mode 3
+/// (`display.c:1867` false → `:1877` true, a 3-cycle SLEEP between), so a deferred
+/// palette access landing at the mode-3 entry stays accessible. The lcd-offset
+/// shifts the `cgbpal_m3/*_m3start_lcdoffset1_1` access into that window (slopgb
+/// `ly1 dot86` vs SameBoy's ~cfl87 lock), where slopgb — locking palette RAM at
+/// dot 84 — read FF / dropped the write. The fix extends the `pal_ram_blocked`
+/// mode-3 lock by `PAL_M3START_OPEN` on CGB single-speed under Tier-2
+/// (`ppu/blocking.rs`), covering both the read (out00) and write (out01) legs.
+/// Production (flag-off) byte-identical. Probe (654 CGB baseline rows, flag-on):
+/// +2/−0.
+#[test]
+fn tier2_cgbpal_m3start_lcdoffset1_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_cgbpal_m3start_lcdoffset1",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        (
+            "gambatte/cgbpal_m3/cgbpal_read_m3start_lcdoffset1_1_cgb04c_out00.gbc",
+            "00",
+        ),
+        (
+            "gambatte/cgbpal_m3/cgbpal_write_m3start_lcdoffset1_1_cgb04c_out01.gbc",
+            "01",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 /// Self-verifying inventory: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// covers the on-disk ROM set exactly, with the exemptions pinned to the
 /// documented 50-entry list.

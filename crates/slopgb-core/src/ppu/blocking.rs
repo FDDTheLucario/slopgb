@@ -7,6 +7,12 @@ use super::*;
 /// engages (`display.c:1805-1810`). See [`Ppu::cgb_linestart_oam_open`].
 const CGB_LINESTART_OAM_OPEN: u16 = 4;
 
+/// Tier-2 CGB single-speed palette-RAM accessible window INTO mode 3
+/// (T-cycles), the extra dots past the dot-84 mode-3 anchor over which SameBoy
+/// keeps `cgb_palettes_blocked = false` before the lock engages
+/// (`display.c:1867` false → `:1877` true). See [`Ppu::pal_ram_blocked`].
+const PAL_M3START_OPEN: u16 = 3;
+
 impl Ppu {
     pub(crate) fn oam_read_blocked(&self) -> bool {
         self.enabled
@@ -129,12 +135,22 @@ impl Ppu {
         if !self.enabled || self.line > 143 || self.render_finished {
             return false;
         }
-        self.dot
-            >= if self.glitch_line {
-                GLITCH_MODE3_START
-            } else {
-                84
-            }
+        let lock = if self.glitch_line {
+            GLITCH_MODE3_START
+        } else if self.tier2_reclock && self.model.is_cgb() && !self.ds {
+            // Tier-2 CGB m3-start palette window: SameBoy keeps
+            // `cgb_palettes_blocked = false` for `PAL_M3START_OPEN` T-cycles
+            // INTO mode 3 (`display.c:1867` false → `:1877` true, a 3-cycle
+            // SLEEP between), so a deferred read/write landing at the mode-3
+            // entry (the lcd-offset-shifted `cgbpal_m3/*_m3start_lcdoffset1_1`
+            // access — slopgb `ly1 dot86` vs SameBoy's ~cfl87 lock) still sees
+            // palettes accessible. slopgb locks at dot 84; extend the lock.
+            // Never extended in production / LE-only → byte-identical OFF.
+            84 + PAL_M3START_OPEN
+        } else {
+            84
+        };
+        self.dot >= lock
     }
 
     /// Byte base (8..=0x98) of the OAM row the mode-2 scan makes
