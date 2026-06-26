@@ -1,10 +1,12 @@
 # CGB lcd-offset batch — accessibility ground truth (2026-06-26, #11q)
 
-The C-stage mech-3 CGB lcd-offset batch (38 baselined `lcdoffset` [Cgb] rows).
-The goal's START = the accessibility-class rows. Two clean tier2 slices shipped
-(OAM line-start read window +1, palette m3-start read+write window +2 = +3/−0);
-the rest of the batch (24 residual) rigorously triaged to floor (render /
-genuine / atomic read-frame reclock = C2) or S6 (double-speed / HDMA).
+The C-stage mech-3 CGB lcd-offset batch. **Three clean tier2 slices shipped,
++7/−0 total:** (1) OAM line-start read window +1, (2) palette m3-start read+write
+window +2, (3) the **dispatch-class HBlank write-trigger +4** (the lever the
+goal's "build a tier2-gated dispatch reclock" called for — a live build-measure
+REFUTED the premature "floored to C2" verdict). The remaining dispatch rows
+(m1/lycEnable sub-families) + window / pure-`_ds` / HDMA are floored to the
+delicate line-0/lyc engine (#11k/#11l) or render / S6.
 
 ## What lcd-offset does (CORRECTED — it is NOT a mode-boundary shift)
 
@@ -108,40 +110,46 @@ floor.
   want1 is real-hardware behavior SameBoy misses too → NOT SameBoy-passing,
   genuine floor. Leave baselined. (Same for `vram_m3/prewrite_lcdoffset2_1`.)
 
-## DISPATCH-CLASS — the atomic read-frame reclock (rigorously floored, C2)
+## DISPATCH-CLASS — the HBlank sub-family BUILT (+4/−0); the prior "floor" was WRONG
 
 `m0enable/late_enable_lcdoffset1_1` (want2 got0), `m1/m1irq_late_enable_lcdoffset1_1`
 (want2 got0), `lycEnable/late_ff41_enable_lcdoffset1_1` (want2 got0),
-`m1/ly143_late_m0enable_lcdoffset1_1` (want3 got1). Clean offset-isolation (the
-non-offset `late_enable_1/2` bases pass OFF/ON, not baselined). These enable a
-STAT source late (FF41/FF45 write near a mode edge) and read FF0F to check the
-IRQ; slopgb delivers `if=00` (no STAT IRQ) where SameBoy fires.
+`m1/ly143_late_m0enable_lcdoffset1_1` (want3 got1). Clean offset-isolation. These
+enable a STAT source late (FF41 write) and read FF0F to check the IRQ; slopgb
+delivered `if=00` where SameBoy fires.
 
-**Rigorous floor proof (the Stop-hook challenge answered with hard evidence):**
+**CORRECTION — the dispatch class is NOT one atomic-reclock floor; it splits by
+SOURCE, and the HBlank sub-family is a CLEAN tier2 write-trigger lever (`06f369b`,
++4/−0).** The earlier "floored to C2 / read-frame atomic reclock" verdict was a
+premature inference; a live build-measure refuted it. Hard trace:
+`late_enable_lcdoffset1_1` writes FF41 (enabling the HBlank/mode-0 source) at
+**`ly130 dot3`** — inside the line-start hblank carryover (dots 0-3, `vis_mode==0`,
+the PREVIOUS line's mode-0 already passed) — then reads FF0F at `ly130 dot14`. In
+`stat_write_trigger_cgb` the `tail = dot < 4` branch defers a fresh m0 enable to
+the scheduled m0irq event; but in the carryover that event points at the NEXT
+line's mode-0 (beyond the LY increment, dot254 ≫ read dot14), so the deferral
+**loses the IRQ**. SameBoy raises IF AT the write. **Fix:** under tier2, a fresh
+m0 enable in the carryover tail (`vis_mode==0`, glitch excluded) raises IF
+immediately. Two-bin (654 CGB rows, flag-on): **+4/−0** —
+`m0enable/late_enable_lcdoffset1_1`, `m1/ly143_late_m0enable_lcdoffset1_1`, plus
+double-speed `late_enable_ds_1` and `late_enable_ds_lcdoffset1_1` riding the same
+lever. Pin `tier2_m0enable_late_lcdoffset_passes`. The discriminator that makes it
+clean (not the per-config offset I wrongly assumed unresolvable): `vis_mode==0`
+separates the post-m0 carryover (fire) from the pre-m0 line-start tail (defer) —
+a real slopgb state difference, like the #11n eighth-grid / #11o accessibility
+levers.
 
-1. SameBoy mode timeline IDENTICAL base==offset (cfl84/cfl257, above) — so the
-   edge is NOT offset-shifted; the earlier "lands near the offset-shifted edge"
-   framing was WRONG.
-2. slopgb dispatches mode-0 at dot254 (≡ SameBoy cfl257 in the cc+0 frame, the
-   known ~3-dot read-frame offset); the dispatch DOT is already aligned.
-3. The base ROM PASSES flag-on (slopgb delivers the IRQ); the offset ROM fails
-   purely because its different LCD-enable cycle shifts the CPU access relative
-   to slopgb's slightly-off deferred read/delivery frame, landing the FF0F read
-   on the wrong side of the delivery.
-
-So this is the SAME read-frame ↔ delivery atomic reclock that blocks the whole
-C-stage (mech-1 #11e "atomic read-frame↔boundary reclock" + the `frame_*_count` /
-m1lyc IF-delivery residuals), exposed by the offset ROMs — NOT a separate
-lcd-offset mechanism. It is unfixable by any local tier2 lever: slopgb has no
-`display_cycles`/enable-phase field and no per-line offset hook in
-`stat_update_tick` (`reclock.rs`) or `read_deferred` (`cycle.rs`) to gate a
-retime on; and a uniform dispatch/read-frame shift is pinned RED by the kernel
-`m2int/m0int_m3stat` pair + gbmicrotest `int_hblank` + mooneye `intr_2_mode0`.
-The fix = the global atomic reclock / the ~7000-row C2 rebaseline (multi-session,
-production-shared, A/B-swept). Independently adversarially confirmed (Explore
-audit of `atomic-reclock-recipe.md` + `reclock.rs` + the m1lyc IF-delivery doc:
-no existing hook, requires the shared-grid `lcd_offset` port = C2). The window /
-late_wy / dma / `_ds_` lcdoffset rows are the render / S6 tail of the same port.
+**Remaining dispatch rows (m1 + lycEnable sub-families) — harder, entangled,
+floored for now.** Both ALSO land at `dot3` (the same carryover tail) but hit
+DIFFERENT source suppressions with no clean `vis_mode` discriminator:
+`m1/m1irq_late_enable_lcdoffset1_1` enables the VBlank source at `ly0 dot3`, hitting
+the `m1_tail = line==0 && dot<4` suppression (`stat_irq.rs:523`) that #11k's
+line-0 VBlank-carry work pins (`lycstatwirq_trigger_ly00` reads E0); `lycEnable/
+late_ff41_enable_lcdoffset1_1` enables a non-HBlank (LYC) source whose `cmp_cgb`
+compare at the `dot3` tail is the #11l lyc-carryover territory. Lifting those tail
+suppressions risks the pinned #11k/#11l line-0/lyc rows and has no measured
+discriminator yet → ground-truth-first + anti-thrash: floored, the next dispatch
+slices. The `window / late_wy / dma / pure-_ds` lcdoffset rows remain render / S6.
 
 ## Full-sweep triage (38 baselined lcdoffset [Cgb] rows, flag-on after both fixes)
 
