@@ -121,6 +121,26 @@ raises NO fresh LYC edge, while slopgb's per-dot engine re-latched the carryover
 `line-1` against the new LYC → spurious `ly1 dot0`. Pinned the line-start
 carryover hold (`measurements/m1lyc-ifdelivery-groundtruth-2026-06-25.md` "#11l").
 
+**SBWAKE / SBCYR trace (the halt-wake sub-dot ground truth — the mech-2
+wake-clock lever):** the halt `*_m0stat_*` want-0/want-2 split is decided not by
+the FF41 read position (#11i: identical `cfl0 dc0`) but by the CPU's *sub-dot*
+wake phase, which slides the deferred read's 4-cycle flush across the `ly2`
+mode-2 commit. The read-side tracers are blind to it; two NEW `Core/sm83_cpu.c`
+probes, both `SB_TRACE`-gated, expose it. **SBWAKE** at the two HALT-exit
+branches of `GB_cpu_run` (`gb->halted = false`: `noisr` `:1643`, `isr` `:1654`):
+`fprintf(stderr, "SBWAKE %s ly=%d cfl=%d dc=%d pc=%d stat=%d mfi=%d iq=%02x\n",
+TAG, current_line, cycles_for_line, display_cycles, pending_cycles,
+io_registers[GB_IO_STAT]&3, (int8_t)mode_for_interrupt, interrupt_queue)`.
+**SBCYR** in `cycle_read`, gated `addr==0xFF41`, logged BOTH before the
+`pending_cycles` flush (`pre`, with `pend=`) and after the flush+`GB_read_memory`
+(`post`) — the `pre`→`post` pair brackets the deferred read window so the
+`SBMODE` line landing between them shows whether the flush crossed the mode-2
+commit. #11m use: every want-0 read flush ends at `ly2 dc2` (inside the mode-0
+line-start hold → mode 0), every want-2 at `ly2 dc8` (at the mode-2 commit →
+mode 2); slopgb collapses the pair to identical `ly2 dot4 / cc1` (no finer-than-
+`cc` field) → FALL BACK. Full table + decision:
+`measurements/wake-clock-groundtruth-2026-06-25.md` "#11m".
+
 Detail: `measurements/flip-regr-2026-06-24-summary.txt`,
 `measurements/window-groundtruth-2026-06-24.md`.
 
