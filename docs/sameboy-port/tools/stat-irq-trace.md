@@ -159,6 +159,28 @@ Detail: `measurements/flip-regr-2026-06-24-summary.txt`,
 `measurements/window-groundtruth-2026-06-24.md`,
 `measurements/m2int-m3stat-eighthgrid-2026-06-25.md`.
 
+**SBOAMW / SBVRAMW write tracers (#11o, the accessibility WRITE direction —
+`postwrite`/`vramw_m3end`; re-add if `/tmp` rebuilt cold):** the SameBoy
+counterparts of the OAM/VRAM-write block (`blk=0` = the write LANDS). Both
+`SB_TRACE`-gated, `static int trc`.
+
+- **SBOAMW** — `Core/memory.c::write_high_memory`, in the `addr < 0xFF00` block
+  right after `GB_display_sync(gb);` and before `if (gb->oam_write_blocked)`,
+  gated `if (addr < 0xFEA0)`: `fprintf(stderr, "SBOAMW ly=%d cfl=%d dc=%d
+  blk=%d\n", gb->current_line, gb->cycles_for_line, gb->display_cycles,
+  gb->oam_write_blocked)`.
+- **SBVRAMW** — `Core/memory.c::write_vram`, right after `GB_display_sync(gb);`
+  and before `if (unlikely(gb->vram_write_blocked))`: same line with `"SBVRAMW
+  ..."` and `gb->vram_write_blocked`.
+
+slopgb counterpart = a temp trace in `cycle.rs::write_deferred` after
+`write_no_tick` (revert after measuring): print `ppu.scan_pos()` + the
+`ppu.oam_write_blocked()` predicate for OAM/VRAM addresses, `SLOPGB_S5DBG`-gated,
+`ly < 144`. #11o measured: SameBoy lands `postwrite_2_scx3` at `ly1 cfl260 blk=0`,
+slopgb blocks at `ly1 dot256 oam_write_blocked=true` (`vis_early` at dot254,
+`line_render_done` later) → the `write_unblocked_early` (`vis_early`) release.
+Detail: `measurements/oam-vram-accessibility-2026-06-26.md`.
+
 ## Findings (2026-06-23 #11e, DMG)
 
 | ROM | SameBoy dispatch | source | slopgb |

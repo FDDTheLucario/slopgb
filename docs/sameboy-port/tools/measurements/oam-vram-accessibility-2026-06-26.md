@@ -59,3 +59,32 @@ at the dot the visible flip lands.
 
 `tier2_oam_vram_postread_scx3_passes` — vram_m3 (D+C), oam_access (C). 12 tier2
 pins total.
+
+## Write side (`d6a1b7f`, +4/−0)
+
+The SEPARATE write-direction target, ground-truthed and fixed by the SAME lever.
+
+**Ground truth** (new SameBoy `SBOAMW`/`SBVRAMW` write tracers, recipe in
+`../stat-irq-trace.md`):
+
+| ROM | SameBoy write | slopgb write | want | was |
+|---|---|---|---|---|
+| `oam_access/postwrite_2_scx3` | ly1 cfl260 `blk=0` (lands) | ly1 dot256 `oam_write_blocked=true` | out1 | out0 |
+| `vramw_m3end/vramw_m3end_scx3_5` | ly1 cfl260 `blk=0` (lands) | ly1 dot256 (blocked) | out3 | out0 |
+
+(For comparison the `_3` sibling, already fixed read-side, writes at SameBoy
+cfl252 `blk=1` = blocked.) Same ~4-dot deferred offset (slopgb dot256 ≡ SameBoy
+cfl260). slopgb's `vis_early` (visible flip) fires dot254 but `line_render_done`
+(dispatch) is later, so the write at dot256 sees `!line_render_done` → blocked,
+where SameBoy unblocks coincident with the visible flip.
+
+**Fix** (`ppu/blocking.rs`, `write_unblocked_early() = tier2_reclock && vis_early
+&& !glitch_line`): release the mode3→0 end term of `oam_write_blocked` (DMG + CGB
+branches) and `vram_write_blocked` (non-glitch) on `vis_early`. Glitch lines
+excluded so `lcdon_write_timing-GS` (the line-start dots 80-83 write gap) is
+untouched.
+
+**Two-bin (read+write vs read-only d524267): +4/−0** — `postwrite_2_scx3` (D+C),
+`vramw_m3end_scx3_5` (D+C), zero SameBoy-passing dropped. Production
+byte-identical (gbtr 198/0, mooneye 91/0). Pin
+`tier2_oam_vram_postwrite_scx3_passes` (both models); 13 tier2 pins total.
