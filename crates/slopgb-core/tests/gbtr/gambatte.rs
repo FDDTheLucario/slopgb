@@ -1162,6 +1162,49 @@ fn tier2_cgbpal_m3start_lcdoffset1_passes() {
     }
 }
 
+/// Port Stage C / S5 (mech 3 — CGB lcd-offset, the dispatch-class HBlank
+/// write-trigger) — a fresh mode-0 (HBlank) STAT enable written in the
+/// line-start hblank carryover (dots 0-3, `vis_mode==0`, the previous line's
+/// mode-0 already passed) must raise IF AT the write: the gambatte logic there
+/// defers to the scheduled m0irq event, but in the carryover that event points
+/// at the next line's mode-0 (beyond the LY increment), so the deferral loses
+/// the IRQ before the cc+0 read. The lcd-offset shifts these late enables into
+/// that carryover tail (`late_enable_lcdoffset1_1` writes FF41 at `ly dot3`),
+/// where SameBoy raises IF at the write — slopgb delivered `if=00` (out0)
+/// instead of out2/out3. The fix raises IF for a fresh carryover-tail m0 enable
+/// under Tier-2 (`ppu/stat_irq.rs::stat_write_trigger_cgb`, glitch excluded).
+/// CGB-only (the DMG trigger is a separate fn → byte-identical). Probe (654 CGB
+/// baseline rows, flag-on): +4/−0 (`m0enable/late_enable_lcdoffset1_1`,
+/// `m1/ly143_late_m0enable_lcdoffset1_1`, + double-speed `late_enable_ds_1` and
+/// `late_enable_ds_lcdoffset1_1` riding the same lever).
+#[test]
+fn tier2_m0enable_late_lcdoffset_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_m0enable_late_lcdoffset",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        (
+            "gambatte/m0enable/late_enable_lcdoffset1_1_cgb04c_out2.gbc",
+            "2",
+        ),
+        (
+            "gambatte/m1/ly143_late_m0enable_lcdoffset1_1_cgb04c_out3.gbc",
+            "3",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 /// Self-verifying inventory: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// covers the on-disk ROM set exactly, with the exemptions pinned to the
 /// documented 50-entry list.

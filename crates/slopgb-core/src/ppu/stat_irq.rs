@@ -485,6 +485,28 @@ impl Ppu {
             let m0_pending = !crossed && (old | data) & STAT_SRC_HBLANK != 0;
             // Line-boundary tail (`timeToNextLy <= 4 + 4*ds`).
             let tail = self.dot < 4;
+            // Port Stage C / S5 (mech 3 — the dispatch-class write-trigger, the
+            // HBlank sub-family). At the dots-0-3 line-start tail the gambatte
+            // logic defers a fresh m0 enable to the scheduled m0irq event; but
+            // when the PREVIOUS line's mode-0 has already passed (`vis_mode==0`
+            // hblank carryover, not the pre-mode-0 tail), that scheduled event
+            // points at the NEXT line's mode-0 — beyond the LY increment — so
+            // the deferral loses the IRQ before the cc+0 read samples it. The
+            // lcd-offset shifts these late enables into exactly this carryover
+            // tail (`late_enable_lcdoffset1_1` writes FF41 at `ly dot3`), where
+            // SameBoy raises IF at the write. Under Tier-2 (`leading_edge_reads`)
+            // a fresh m0 enable in the carryover tail raises IF immediately;
+            // glitch lines excluded (the LCD-enable prefix is not a real
+            // hblank). Never set in production / LE-only → byte-identical OFF.
+            if self.leading_edge_reads
+                && tail
+                && !self.glitch_line
+                && self.vis_mode() == 0
+                && old & STAT_SRC_HBLANK == 0
+                && data & STAT_SRC_HBLANK != 0
+            {
+                return true;
+            }
             if m0_pending || tail {
                 lyc_fire
             } else if old & STAT_SRC_HBLANK != 0 {
