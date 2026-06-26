@@ -1050,6 +1050,50 @@ fn tier2_oam_vram_postread_scx3_passes() {
     }
 }
 
+/// Port Stage C / S5 (mech 1 — the read-observer accessibility coupling, WRITE
+/// side) — the OAM/VRAM write-unblock at the mode3→0 boundary coincides with the
+/// visible mode→0 flip (`vis_early`) on SameBoy, one dot before the render-done
+/// dispatch (`line_render_done`). The deferred cc+0 write at the SCX&7=3 boundary's
+/// M-cycle (slopgb dot 256 / SameBoy cfl 260) otherwise stays blocked
+/// (`!line_render_done`) where SameBoy lands it (`blk=0`). The fix releases
+/// `oam_write_blocked`/`vram_write_blocked` on `vis_early` under Tier-2, excluding
+/// glitch lines (`write_unblocked_early`) so `lcdon_write_timing-GS` (the
+/// line-start dots 80-83 gap) is untouched. `oam_access/postwrite_2_scx3` (out1)
+/// and `vramw_m3end/vramw_m3end_scx3_5` (out3), both DMG+CGB. Production (flag-off)
+/// byte-identical — `vis_early` is never set there.
+#[test]
+fn tier2_oam_vram_postwrite_scx3_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_oam_vram_postwrite_scx3",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str, &[Model]); 2] = [
+        (
+            "gambatte/oam_access/postwrite_2_scx3_dmg08_cgb04c_out1.gbc",
+            "1",
+            &[Model::Dmg, Model::Cgb],
+        ),
+        (
+            "gambatte/vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3.gbc",
+            "3",
+            &[Model::Dmg, Model::Cgb],
+        ),
+    ];
+    for (rel, expect, models) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        for &model in models {
+            let mut gb = harness::boot_with_reclock(&rom, model);
+            run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+            check_hex_screen(gb.frame(), expect, model.is_cgb()).unwrap_or_else(|e| {
+                panic!("{rel} [{model:?}] expected out{expect} (tier2 flag-on): {e}")
+            });
+        }
+    }
+}
+
 /// Self-verifying inventory: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// covers the on-disk ROM set exactly, with the exemptions pinned to the
 /// documented 50-entry list.

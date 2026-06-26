@@ -35,11 +35,24 @@ impl Ppu {
             return if self.dot < 4 {
                 self.line != 0
             } else {
-                self.dot < 84 || !self.line_render_done
+                // Tier-2: the mode3→0 write-unblock coincides with the visible
+                // mode→0 flip (`vis_early`), one dot before `line_render_done` —
+                // the same coupling as the read side (see `oam_read_blocked`).
+                self.dot < 84 || (!self.line_render_done && !self.write_unblocked_early())
             };
         }
         // Writes pass during dots 0-3 and 80-83 (`lcdon_write_timing-GS`).
-        (4..80).contains(&self.dot) || (self.dot >= 84 && !self.line_render_done)
+        (4..80).contains(&self.dot)
+            || (self.dot >= 84 && !self.line_render_done && !self.write_unblocked_early())
+    }
+
+    /// Tier-2 mode3→0 write-unblock coincides with the visible mode→0 flip
+    /// (`vis_early`), one dot before the render-done dispatch (`line_render_done`)
+    /// — the same coupling as [`Self::oam_read_blocked`], for writes. Glitch
+    /// lines excluded so `lcdon_write_timing-GS` (the line-start dots 80-83 gap)
+    /// is untouched. Never set in production / LE-only → byte-identical OFF.
+    fn write_unblocked_early(&self) -> bool {
+        self.tier2_reclock && self.vis_early && !self.glitch_line
     }
 
     pub(crate) fn vram_read_blocked(&self) -> bool {
@@ -72,8 +85,9 @@ impl Ppu {
             self.dot >= GLITCH_MODE3_START
         } else {
             // Write locking begins 4 dots after read locking
-            // (`lcdon_write_timing-GS`: a write at line dot 80 still lands).
-            self.dot >= 84
+            // (`lcdon_write_timing-GS`: a write at line dot 80 still lands), and
+            // ends on the visible mode→0 flip under Tier-2 (`write_unblocked_early`).
+            self.dot >= 84 && !self.write_unblocked_early()
         }
     }
 
