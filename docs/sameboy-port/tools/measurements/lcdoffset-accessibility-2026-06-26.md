@@ -47,6 +47,37 @@ single-speed, line != 0. **Two-bin (654 CGB baseline rows, flag-on): +1/−0**
 Pin `tier2_oam_preread_lcdoffset1_passes`. Byte-identical OFF (window never open
 in production). Commit `457955e`.
 
+## SHIPPED — m3-start palette-RAM window (clean +2/−0)
+
+`cgbpal_m3/cgbpal_read_m3start_lcdoffset1_1_cgb04c_out00` [Cgb] (want00 got=FF,
+read blocked) + `cgbpal_write_m3start_lcdoffset1_1_cgb04c_out01` [Cgb] (want01
+got00, write dropped). Same clean isolation: the non-offset base
+`cgbpal_read/write_m3start_1` PASS flag-on (slopgb accesses `ly1 dot80`,
+pre-lock); only the offset variants fail.
+
+| source | palette read | accessible? |
+|---|---|---|
+| slopgb flag-on (base read) | ly1 dot80 | v=00 — passes |
+| slopgb flag-on (offset read) | ly1 dot86 | v=ff (blocked) — FAILS |
+
+Root: SameBoy keeps `cgb_palettes_blocked = false` for 3 T-cycles INTO mode 3
+(`display.c:1867` false → 3-cycle `GB_SLEEP` → `:1877` true) — palette RAM stays
+accessible at the mode-3 entry before the lock engages, even though the visible
+mode is already 3. The lcd-offset shifts slopgb's access from dot80 to dot86
+(+6, same shift as OAM), past slopgb's sharp dot-84 mode-3 palette anchor.
+SameBoy's lock is at ~cfl87 (mode-3 entry cfl84 + 3).
+
+Fix (`ppu/blocking.rs::pal_ram_blocked`, tier2-gated): extend the mode-3 lock by
+`PAL_M3START_OPEN`(=3) → dot 87 on CGB single-speed (`pal_ram_blocked` gates both
+read and write, so both legs land). **Two-bin (654 CGB baseline rows, flag-on):
++2/−0.** Pin `tier2_cgbpal_m3start_lcdoffset1_passes`. Commit `e8c1257`.
+
+NOTE the asymmetry with the OAM/VRAM WRITE floor: palette RAM has a mode-3-entry
+accessible window for BOTH read and write (the single `cgb_palettes_blocked`
+flag), so the offset write lands; OAM/VRAM writes are blocked from line-start
+(`display.c:1802`, no read-style window) so the offset OAM write is a genuine
+floor.
+
 ## FLOORED (measured, not a clean tier2 lever)
 
 - **`vram_m3/preread_lcdoffset2_1` [Cgb] (want0 got3) — render/readback floor.**
@@ -80,12 +111,35 @@ PPU phase in the shared engine/render grid (mode-3 at cfl84 not 80) — the
 grid), A/B-swept → C2 / the full mech-3 engine reclock, not a local tier2 slice.
 The window/cgbpal_m3/dma lcdoffset rows are the harder render-coupled tail.
 
+## Full-sweep triage (38 baselined lcdoffset [Cgb] rows, flag-on after both fixes)
+
+14 pass (incl. the 3 fixes), 24 fail. The 24 residual, all needing the full
+lcd_offset port / out-of-scope infra:
+
+- **engine-dispatch (~13):** `m0enable/late_enable`, `m1/{m1irq_late_enable,
+  ly143_late_m0enable, ly143_late_m2enable}`, `lycEnable/{late_ff41, lyc153_late_ff41,
+  lyc153_late_ff45, lycwirq_trigger_ly00, ff45_enable_weirdpoint}`,
+  `miscmstatirq/lycstatwirq` — want2/E0/E2/3 IRQ-delivery swaps; slopgb's un-offset
+  `stat_update_tick` mis-frames the offset-shifted mode edge. = C2/engine port.
+- **render/window (4):** `window/{late_enable_afterVblank, late_wy, late_wy_1toFF}`
+  — render-level WY-latch/abort (the #11g/#11p window floor), shifted. = C2.
+- **double-speed `_ds` (~4):** `oam_access/preread_ds_lcdoffset1`,
+  `dma/hdma_late_m0halt_ds`, `m0enable/late_enable_ds`, `m1/ly143_late_m2enable_ds`
+  — the same levers but on the double-speed clock = S6/S7.
+- **HDMA / render floors (3):** `dma/hdma_late_enable_lcdoffset3`,
+  `vram_m3/{preread, prewrite}_lcdoffset2`, `oam_access/prewrite_lcdoffset1` — S6
+  HDMA / render-readback / genuine write floor (above).
+
 ## Verdict
 
-The clean local accessibility lever in the 43-row lcd-offset batch is exactly
-the OAM line-start read window (+1, shipped). The write side is a genuine floor
-(both emulators block per the FSM), the VRAM read is a render floor, and the
-dispatch class is the engine-dispatch core that needs the full lcd-offset PPU
-phase model (shared grid → C2). This matches #11p's prediction: mech-3 lcd-offset
-is the largest batch but mostly needs the lcd_offset port; the one extractable
-slice that doesn't is the line-start accessibility window. Defaults NOT flipped.
+The clean local accessibility levers in the lcd-offset batch are the two
+sub-dot-window slices: the **line-start OAM-read window** (+1) and the
+**m3-start palette-RAM read+write window** (+2) — **+3/−0 total, shipped +
+pinned**. Both are SameBoy mode-boundary accessible windows (OAM: 3 cycles before
+the mode-2 lock; palette: 3 cycles into mode 3) that slopgb lacked; the lcd-offset
+moves the deferred access into them. Everything else in the batch needs the full
+lcd_offset PPU-phase model in the shared engine/render grid (engine-dispatch,
+window) or the double-speed/HDMA clock (S6) → C2. This matches #11p's prediction:
+mech-3 lcd-offset is the largest batch but mostly needs the lcd_offset port; the
+extractable slices that don't are the two mode-boundary accessibility windows.
+Defaults NOT flipped.
