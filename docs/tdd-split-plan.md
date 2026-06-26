@@ -105,6 +105,12 @@ captured green at `3378864`.
     <done>stat_irq.rs holds the per-source predicate engine; ppu/mod.rs shrinks; suite byte-identical.</done>
     <why>Densest interdependence in the codebase (delayed FF41/FF45 copies, per-source predicates, halt-late commits); highest drift risk.</why>
   </task>
+  <task id="B6b" model="opus" deps="B6">
+    <do>stat_irq.rs hit the 999-line cap (S5 reclock growth). Split the S5/tier2 StatUpdate-driver into ppu/stat_irq/reclock.rs (second `impl Ppu` via `use super::*`; declared `#[path] mod reclock;` in ppu/mod.rs so `super == ppu`): stat_update_tick, stat_update_vblank_oam_pulses, stat_update_halt_masks, update_mode_for_interrupt, ly_for_comparison/_line_153, mode_for_interrupt/stat_update_line (test views). Parent keeps the legacy gambatte event engine + shared accessors.</do>
+    <test>Pure cut-and-paste, byte-identical reconstruction; gbtr 195/0 + mooneye 91/0 + mooneye flag-on 91/91 + lib 661; ratchet unchanged.</test>
+    <done>stat_irq.rs 570 lines (legacy engine), stat_irq/reclock.rs 441 lines (flag-on driver); both under 1000; suite byte-identical.</done>
+    <why>Seam = stat_events_tick (flag-off) vs stat_update_tick (flag-on) — splitting on it unblocks future S5 engine work.</why>
+  </task>
   <task id="B7" model="sonnet" deps="B6">
     <do>Extract LYC machinery into ppu/lyc.rs (write_lyc_dmg/write_lyc_cgb, compare_ly/compare_ly_irq, lyc_cmp_held/lyc_period).</do>
     <test>gbtr age ly/ly-ncm + wilbertpol -C LY + mooneye LYC rows unchanged; ratchet green.</test>
