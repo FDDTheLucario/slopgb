@@ -8,6 +8,13 @@ impl Ppu {
             && self.line <= 143
             && !self.line_render_done
             && (!self.glitch_line || self.dot >= GLITCH_MODE3_START)
+            // Tier-2 (cc+0 leading-edge): SameBoy unblocks OAM/VRAM reads
+            // COINCIDENT with the visible mode→0 flip (`vis_early`), not at the
+            // render-done dispatch (`line_render_done`) 1 dot later. The deferred
+            // cc+0 read then sees mode 0 yet OAM still locked, rendering "3" where
+            // SameBoy reads accessible (oam_access/vram_m3 postread_scx3). Release
+            // on `vis_early`. Never set in production → byte-identical OFF.
+            && !(self.tier2_reclock && self.vis_early)
     }
 
     pub(crate) fn oam_write_blocked(&self) -> bool {
@@ -36,7 +43,13 @@ impl Ppu {
     }
 
     pub(crate) fn vram_read_blocked(&self) -> bool {
-        if !self.enabled || self.line > 143 || self.line_render_done {
+        if !self.enabled
+            || self.line > 143
+            || self.line_render_done
+            // Tier-2: VRAM unblocks coincident with the visible mode→0 flip
+            // (`vis_early`); see `oam_read_blocked`. Byte-identical OFF.
+            || (self.tier2_reclock && self.vis_early)
+        {
             return false;
         }
         // CGB read locking starts 3 dots later than DMG — a read at

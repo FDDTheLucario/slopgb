@@ -1004,6 +1004,52 @@ fn tier2_m2int_m3stat_scx3_passes() {
     }
 }
 
+/// Port Stage C / S5 (mech 1 — the read-observer accessibility coupling) — the
+/// OAM/VRAM read-accessibility unblock COINCIDES with the visible mode→0 flip
+/// (`vis_early`) on SameBoy, not with the render-done dispatch (`line_render_done`)
+/// one dot later. The deferred cc+0 read otherwise sees mode 0 yet OAM/VRAM still
+/// locked, rendering "3" where SameBoy reads accessible (out0). The fix releases
+/// `oam_read_blocked`/`vram_read_blocked` on `vis_early` under Tier-2
+/// (`ppu/blocking.rs`). `vram_m3/postread_scx3_2` (DMG+CGB) and
+/// `oam_access/postread_scx3_2` (CGB; the DMG leg is `xout1`-exempt) all read the
+/// SCX&7=3 cc2 boundary at the M-cycle the visible flip lands. Production
+/// (flag-off) byte-identical — `vis_early` is never set there. The `scx2`/`scx5`
+/// siblings stay floored (el=0 read-collapse, the read lands a sub-dot before the
+/// boundary's M-cycle start, which `vis_early` cannot release).
+#[test]
+fn tier2_oam_vram_postread_scx3_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_oam_vram_postread_scx3",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    // (rel, expect, models) — vram_m3 both models, oam_access CGB-only (DMG xout1).
+    let targets: [(&str, &str, &[Model]); 2] = [
+        (
+            "gambatte/vram_m3/postread_scx3_2_dmg08_cgb04c_out0.gbc",
+            "0",
+            &[Model::Dmg, Model::Cgb],
+        ),
+        (
+            "gambatte/oam_access/postread_scx3_2_dmg08_xout1_cgb04c_out0.gbc",
+            "0",
+            &[Model::Cgb],
+        ),
+    ];
+    for (rel, expect, models) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        for &model in models {
+            let mut gb = harness::boot_with_reclock(&rom, model);
+            run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+            check_hex_screen(gb.frame(), expect, model.is_cgb()).unwrap_or_else(|e| {
+                panic!("{rel} [{model:?}] expected out{expect} (tier2 flag-on): {e}")
+            });
+        }
+    }
+}
+
 /// Self-verifying inventory: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// covers the on-disk ROM set exactly, with the exemptions pinned to the
 /// documented 50-entry list.
