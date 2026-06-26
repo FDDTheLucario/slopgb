@@ -1,22 +1,34 @@
 # CGB lcd-offset batch — accessibility ground truth (2026-06-26, #11q)
 
-The C-stage mech-3 CGB lcd-offset batch (43 baselined `lcdoffset` rows). The
-goal's START = the accessibility-class rows. Ground truth measured for the
-START targets; one clean tier2 slice shipped (the OAM line-start read window);
-the rest of the batch triaged to floor / engine-dispatch.
+The C-stage mech-3 CGB lcd-offset batch (38 baselined `lcdoffset` [Cgb] rows).
+The goal's START = the accessibility-class rows. Two clean tier2 slices shipped
+(OAM line-start read window +1, palette m3-start read+write window +2 = +3/−0);
+the rest of the batch (24 residual) rigorously triaged to floor (render /
+genuine / atomic read-frame reclock = C2) or S6 (double-speed / HDMA).
 
-## What lcd-offset does (SameBoy `display_cycles`)
+## What lcd-offset does (CORRECTED — it is NOT a mode-boundary shift)
 
-On CGB, certain enable/timing writes leave the PPU's internal `display_cycles`
-phase offset from the M-cycle line counter `cycles_for_line` (cfl). SBMODE for
-`oam_access/preread_lcdoffset1_1` shows the mode timeline shifted: at every
-visible line **`cfl=0 dc=2 vis=0`** (mode-0 / HBlank tail still active) →
-**`cfl=0 dc=8 vis=2`** (mode-2 engages a few sub-dots in); mode-3 at **cfl=84**
-(not 80, +4), mode-0 at **cfl=257**. So the visible mode-0→mode-2 transition is
-delayed past the nominal line boundary by the offset, and the deferred cc+0
-read/dispatch samples at a position shifted vs slopgb's un-offset dot grid.
-slopgb does NOT model the offset (its mode timeline is the un-shifted DMG grid),
-so the lcdoffset rows mis-sample.
+**Decisive measurement (do not re-chase the wrong framing):** SameBoy's
+per-line PPU mode timeline is **IDENTICAL** between the non-offset base ROM and
+the lcd-offset ROM — both show mode-3 entry **cfl84**, mode-2 **cfl0**, mode-0
+**cfl257** (SBMODE `late_enable_1` vs `late_enable_lcdoffset1_1`, 33118 counts
+each). cfl84 (= `MODE2_LENGTH + 4`) / cfl257 are SameBoy's NORMAL mode timing,
+NOT an offset effect. So the lcd-offset does **not** shift the cfl-referenced
+mode boundaries.
+
+What the lcd-offset actually does: the LCD was turned on at a different CPU
+cycle, shifting the whole frame's **CPU-instruction ↔ PPU-phase alignment**. The
+test's measurement access (designed to hit a specific PPU phase, e.g. line-start
+`cfl0`) still lands at that phase on SameBoy in both base and offset variants;
+but slopgb — whose PPU-vs-CPU alignment after enable does not reproduce
+SameBoy's sub-dot enable phase (slopgb tracks no `display_cycles`/enable-phase
+offset) — lands the deferred access at a DIFFERENT PPU dot in the offset variant
+(e.g. OAM read base `ly1 dot452` → offset `ly2 dot2`). The "windows" SameBoy
+exposes (line-start OAM, m3-start palette) are UNIVERSAL CGB mode-boundary
+accessible windows present on every line in BOTH variants; the offset merely
+moves slopgb's deferred access INTO them, exposing that slopgb lacked the
+windows. (The `cfl=0 dc=2 vis=0 → dc=8 vis=2` line-start transition IS the
+universal mode-0-tail OAM window, not an offset artifact.)
 
 ## SHIPPED — OAM line-start read window (clean +1/−0)
 
@@ -96,20 +108,40 @@ floor.
   want1 is real-hardware behavior SameBoy misses too → NOT SameBoy-passing,
   genuine floor. Leave baselined. (Same for `vram_m3/prewrite_lcdoffset2_1`.)
 
-## DISPATCH-CLASS — engine-dispatch core (needs the full offset port)
+## DISPATCH-CLASS — the atomic read-frame reclock (rigorously floored, C2)
 
 `m0enable/late_enable_lcdoffset1_1` (want2 got0), `m1/m1irq_late_enable_lcdoffset1_1`
 (want2 got0), `lycEnable/late_ff41_enable_lcdoffset1_1` (want2 got0),
 `m1/ly143_late_m0enable_lcdoffset1_1` (want3 got1). Clean offset-isolation (the
-non-offset `late_enable_1/2` bases pass OFF/ON, not baselined), but these are the
-IRQ-delivery class: slopgb delivers `if=00` (no STAT IRQ at all) where SameBoy
-fires. The late enable lands near the offset-shifted mode-2/mode-0 edge (cfl84 /
-cfl257); slopgb's engine (`stat_update_tick`), running the un-offset grid,
-doesn't catch the rising edge. Fixing this needs slopgb to model the lcd-offset
-PPU phase in the shared engine/render grid (mode-3 at cfl84 not 80) — the
-"lcd_offset port" #11p named, production-shared (the StatUpdate engine + render
-grid), A/B-swept → C2 / the full mech-3 engine reclock, not a local tier2 slice.
-The window/cgbpal_m3/dma lcdoffset rows are the harder render-coupled tail.
+non-offset `late_enable_1/2` bases pass OFF/ON, not baselined). These enable a
+STAT source late (FF41/FF45 write near a mode edge) and read FF0F to check the
+IRQ; slopgb delivers `if=00` (no STAT IRQ) where SameBoy fires.
+
+**Rigorous floor proof (the Stop-hook challenge answered with hard evidence):**
+
+1. SameBoy mode timeline IDENTICAL base==offset (cfl84/cfl257, above) — so the
+   edge is NOT offset-shifted; the earlier "lands near the offset-shifted edge"
+   framing was WRONG.
+2. slopgb dispatches mode-0 at dot254 (≡ SameBoy cfl257 in the cc+0 frame, the
+   known ~3-dot read-frame offset); the dispatch DOT is already aligned.
+3. The base ROM PASSES flag-on (slopgb delivers the IRQ); the offset ROM fails
+   purely because its different LCD-enable cycle shifts the CPU access relative
+   to slopgb's slightly-off deferred read/delivery frame, landing the FF0F read
+   on the wrong side of the delivery.
+
+So this is the SAME read-frame ↔ delivery atomic reclock that blocks the whole
+C-stage (mech-1 #11e "atomic read-frame↔boundary reclock" + the `frame_*_count` /
+m1lyc IF-delivery residuals), exposed by the offset ROMs — NOT a separate
+lcd-offset mechanism. It is unfixable by any local tier2 lever: slopgb has no
+`display_cycles`/enable-phase field and no per-line offset hook in
+`stat_update_tick` (`reclock.rs`) or `read_deferred` (`cycle.rs`) to gate a
+retime on; and a uniform dispatch/read-frame shift is pinned RED by the kernel
+`m2int/m0int_m3stat` pair + gbmicrotest `int_hblank` + mooneye `intr_2_mode0`.
+The fix = the global atomic reclock / the ~7000-row C2 rebaseline (multi-session,
+production-shared, A/B-swept). Independently adversarially confirmed (Explore
+audit of `atomic-reclock-recipe.md` + `reclock.rs` + the m1lyc IF-delivery doc:
+no existing hook, requires the shared-grid `lcd_offset` port = C2). The window /
+late_wy / dma / `_ds_` lcdoffset rows are the render / S6 tail of the same port.
 
 ## Full-sweep triage (38 baselined lcdoffset [Cgb] rows, flag-on after both fixes)
 
