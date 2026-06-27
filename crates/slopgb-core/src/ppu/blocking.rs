@@ -68,12 +68,21 @@ impl Ppu {
         // `oam_access/preread_ds_lcdoffset1_1` reads `ly2 dot0` (slopgb blocked)
         // where SameBoy reads `ly2 cfl0 rdblk=0` accessible; its render-floor
         // `_2` sibling reads `dot2` and must stay blocked (digit 3).
-        let window = if self.ds {
-            CGB_LINESTART_OAM_OPEN_DS
+        // Single speed EXCLUDES dot 0: the base `oam_access/preread_2` reads
+        // `ly2 dot0` and wants BLOCKED (out3) — SameBoy's mode-2 OAM lock has
+        // engaged by then — while the lcd-offset variant `preread_lcdoffset1_1`
+        // reads `ly2 dot2` and wants OPEN (the offset shifts its read off the
+        // line start). Opening dots 0-3 served the offset read but wrongly opened
+        // the base's dot-0 read; opening only dots 1-3 separates them. Double
+        // speed keeps dot 0 open (the DS read grid is 2 dots earlier — the DS
+        // `preread_ds_lcdoffset1_1` reads `ly2 dot0` and wants OPEN; the DS base
+        // is its own S6/S7 grid).
+        let in_window = if self.ds {
+            self.dot < CGB_LINESTART_OAM_OPEN_DS
         } else {
-            CGB_LINESTART_OAM_OPEN
+            (1..CGB_LINESTART_OAM_OPEN).contains(&self.dot)
         };
-        self.tier2_reclock && self.model.is_cgb() && self.line != 0 && self.dot < window
+        self.tier2_reclock && self.model.is_cgb() && self.line != 0 && in_window
     }
 
     pub(crate) fn oam_write_blocked(&self) -> bool {
