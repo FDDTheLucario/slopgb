@@ -59,6 +59,22 @@ there.
 
 `late_scx4_2` (the genuine read-collapse, _1/_2 same dot), `oam_access/preread_2`
 (want3 got0, the opposite direction), `prewrite_lcdoffset1_1`, `vram_m3/preread`,
-the `cgbpal_m3start/m3end` A/B-pinned window — still the sub-M-cycle read-phase
-class (the cc-exact lift). #11w is the boundary-COINCIDENT subset that the whole-dot
-stamp could express; the genuinely sub-dot ones remain.
+the `cgbpal_m3start/m3end` window — still the sub-M-cycle read-phase class (the
+cc-exact lift). #11w is the boundary-COINCIDENT subset that the whole-dot stamp
+could express; the genuinely sub-dot ones remain.
+
+## Tried + parked: the PALETTE analogue (pal_access_flip release) = +3/−1, NOT clean
+
+Applied the same `-8` lead release to `pal_access_flip` (`render/mode0.rs` lx==160,
+the `PalAccess` END_PHASE stamp) under `tier2 && !ds`: cgbpal family **+3/−1** —
+fixes `cgbpal_m3end_scx2/scx3/scx5_2` (want0/accessible) but REGRESSES
+`cgbpal_m3end_1` (want7/blocked → got0). Unlike OAM/VRAM, the palette boundary read
+wants BLOCKED (the unblock physically lags the pipe end — INC-G3 task5's reason for
+END_PHASE), so a blanket release over-unblocks. `cgbpal_m3end_1` is in the floor
+baseline, so the −1 MAY be a gambatte-reference floor (SameBoy renders 0, not 7) —
+in which case +3/−1 is +3/0-SameBoy-drop and shippable. NOT verified (needs SameBoy
+direct OCR of `cgbpal_m3end_1`; the tester renders the palette read result). PARKED:
+verify SameBoy's `cgbpal_m3end_1` digit; if 0 → ship the pal release as a separate
+slice; if 7 → it's a SameBoy-pass, keep the END_PHASE block and the m3end_2 rows
+need the sub-dot lift. The `cgbpal_m3start` read/write rows are the #11u A/B-pinned
+lcd-offset window (pin `tier2_cgbpal_m3start_lcdoffset1_passes`), untouched here.
