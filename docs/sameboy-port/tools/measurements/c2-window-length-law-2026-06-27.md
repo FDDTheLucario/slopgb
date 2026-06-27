@@ -47,6 +47,25 @@ correctly EXPOSES the read-frame error. A clean window slice needs BOTH the
 `260+SCX&7` length AND the cc-exact read-frame, co-landed. This is the atomic reclock,
 demonstrated with a concrete +12/−6 and the de-masking mechanism — not asserted.
 
+## CORRECTION (post-measurement, honesty) — the −6 mechanism is NOT verified read-frame
+
+Follow-up trace: `late_wy_2` (one of the −6) has **NO traced ly1 read** (no FF41/OAM/
+VRAM `SLOPGB_S5DBG` hit at ly1 on either oracle) — it is a pixel-render row (or reads
+the mode via an untraced path, e.g. FEA0-FEFF). And `vis_mode` feeds `mode_for_interrupt`
+ONLY on glitch/vblank lines (`reclock.rs:303,319`), NOT normal window lines. So HOW the
+`vis_mode` length change regresses `late_wy_2` is **unidentified** — the "read-frame
+de-masking" attribution above is a hypothesis, NOT measured. What IS solid:
+- The `260+SCX&7` law CLEANLY fixes the `m2int_wx*_m3stat` windows (those DO read FF41
+  at the window line; the law is correct and validated for them).
+- The −6 are baseline-confirmed SameBoy-passes (asserted) that the law-change regresses
+  → the window-length change cannot ship alone = atomicity (this conclusion holds
+  regardless of the −6's exact coupling).
+The OPEN question for next session: identify the `late_wy_2` mode-read path (trace
+FEA0-FEFF + the render coupling) — if it's a separable render/prohibited path, a gate
+may isolate the clean `m2int_wx` subset (+8ish) WITHOUT the −6; if it's the read-frame,
+it co-lands with the cc-exact read. Build-measure before concluding (this correction is
+itself the lesson: the read-frame attribution was inferred, not traced).
+
 ## Consequence
 
 The window-length law `260 + SCX&7` is **validated and ready** (the visible-mode
