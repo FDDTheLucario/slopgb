@@ -474,6 +474,26 @@ impl Ppu {
             && old & STAT_SRC_LYC == 0
             && data & STAT_SRC_LYC != 0
             && self.lyc == self.line - 1;
+        // Port Stage C / S5 (mech 3 — the dispatch-class write-trigger, the ly153
+        // LYC-WRAP sub-family). The lcd-offset shifts
+        // `lyc153_late_ff41_enable_lcdoffset1_1`'s LYC enable into the ly153 LY=0
+        // wrap window (dots 8-11), where `cmp_cgb`'s `(153, _) => 0` arm has
+        // already wrapped to 0 (≠ lyc=153) so `lyc_high` is false — yet the held
+        // `lyc_interrupt_line` latch is still TRUE there (SameBoy holds it across
+        // the line-153 `ly_for_comparison == -1` gaps, `display.c:534`; the latch
+        // matched 153 at the dot-6 step and only drops at the dot-12 LY=0 step).
+        // SameBoy fires the fresh enable at `ly153 cfl0 lyc_line=1` (measured
+        // `SBLEVEL 0->1 stat=c5`); slopgb's `cmp_cgb`-snapshot `lyc_fire` missed
+        // it. Under Tier-2 a fresh LYC enable at line 153 with the held latch high
+        // (the real-state discriminator, not the offset) fires; `cmp_cgb` (pinning
+        // the dot-6 base `lyc153_late_ff41_enable_1` compare) is untouched.
+        // Byte-identical OFF.
+        let lyc_wrap_153 = self.leading_edge_reads
+            && self.line == 153
+            && self.lyc_interrupt_line
+            && !lyc_high
+            && old & STAT_SRC_LYC == 0
+            && data & STAT_SRC_LYC != 0;
         // m2 sub-trigger window (kept from the pre-port calibration;
         // gambatte's ly==143 and ly==153 branches are empty at single
         // speed, so the (144,0) and (0,0) cells never fire it).
@@ -553,7 +573,7 @@ impl Ppu {
                 (data & STAT_SRC_VBLANK != 0 && !m1_tail) || lyc_fire
             }
         };
-        main || m2 || lyc_carryover
+        main || m2 || lyc_carryover || lyc_wrap_153
     }
 
     /// Stage the delayed event-register FF41 copies after a write

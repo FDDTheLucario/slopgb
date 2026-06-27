@@ -1239,6 +1239,66 @@ fn tier2_m1_lyc_late_lcdoffset_passes() {
     }
 }
 
+/// Port Stage C / S5 (mech 3 — CGB lcd-offset, the lyc-engine dispatch tail; #11r).
+/// Four clean Tier-2 levers, +4/−0 flag-on, all in the line-153 wrap / line-start
+/// `-1` gap the lcd-offset shifts the LYC write/enable into:
+/// * `lyc153_late_ff41_enable_lcdoffset1_1` (outE2) — the FF41 LYC enable lands at
+///   `ly153 dot11` where `cmp_cgb` wrapped to 0; the held `lyc_interrupt_line`
+///   latch (153, dropped at dot 12) is still high, so the fresh enable fires
+///   (`stat_irq.rs::stat_write_trigger_cgb` `lyc_wrap_153`).
+/// * `lyc153_late_ff45_enable_lcdoffset1_1` (outE2) — the FF45 write (LYC=153)
+///   lands at `ly153 dot7` where the gambatte `target` wraps to Some(0); the
+///   reclock `ly_for_comparison` is still 153, so it fires (`lyc.rs` `lyc_write_wrap_153`).
+/// * `ff45_enable_weirdpoint_lcdoffset1_2` (out0) — the FF45 write lands in the
+///   `ly_for_comparison == -1` line-start gap (dot 3), where SameBoy makes no fresh
+///   match; the gambatte `target` Some(line) would spuriously fire — suppressed
+///   (`lyc.rs` `tier2_minus1_gap`, lines 1-143).
+/// * `lyc0_late_ff45_enable_3` (outE0, CGB) — the ly0→ly1 LYC=0 wrap: slopgb's
+///   offset-shifted write leaves ly0 unmatched, then re-rises at the ly1 dot-0
+///   carryover (`ly_for_comparison=line-1=0`); the line-1 carryover hold
+///   (`reclock.rs::stat_update_tick`, CGB line 1 only) drops the spurious re-latch.
+///
+/// CGB-only; production (flag-off) byte-identical. The named `lycwirq_trigger_ly00_
+/// stat50_lcdoffset1_1` (outE0) stays floored: its dispatch now matches SameBoy
+/// (spurious ly0/ly1 gone) but the legit LYC=153 IRQ's dispatch dot (slopgb dot6
+/// vs SameBoy cfl0) + the offset-shifted FF0F read position are the mech-1 read-
+/// frame residual (C2). Probe (676 CGB engine-family rows, flag-on): +4/−0.
+#[test]
+fn tier2_lyc_wrap_lcdoffset_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_lyc_wrap_lcdoffset",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        (
+            "gambatte/lycEnable/lyc153_late_ff41_enable_lcdoffset1_1_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        (
+            "gambatte/lycEnable/lyc153_late_ff45_enable_lcdoffset1_1_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        (
+            "gambatte/lycEnable/ff45_enable_weirdpoint_lcdoffset1_2_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/lycEnable/lyc0_late_ff45_enable_3_dmg08_cgb04c_outE0.gbc",
+            "E0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 /// Self-verifying inventory: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// covers the on-disk ROM set exactly, with the exemptions pinned to the
 /// documented 50-entry list.

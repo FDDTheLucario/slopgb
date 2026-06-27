@@ -53,10 +53,28 @@ impl Ppu {
         // fresh edge (writes land at state-7, `lyfc=-1`/`0`); slopgb's per-dot
         // engine re-latched it → a spurious `ly1 dot0` (`got=E2`, want E0). Hold
         // like the `-1` gap (a legit LYC=N-1 tail is already latched true at line
-        // N-1). DMG-family only (CGB lcd-offset banked); LE/Tier-2 only. Detail:
-        // `m1lyc-ifdelivery-groundtruth-2026-06-25.md` "#11l".
-        let line_start_carryover =
-            !self.model.is_cgb() && (1..=143).contains(&self.line) && self.dot <= 2;
+        // N-1). DMG-family for the general lines-1-143 hold; LE/Tier-2 only.
+        // Detail: `m1lyc-ifdelivery-groundtruth-2026-06-25.md` "#11l".
+        //
+        // S5 mech 3 (#11r) — the CGB ly0→ly1 LYC=0 wrap. The CGB lcd-offset shifts
+        // `lycwirq_trigger_ly00_stat50_lcdoffset1_1`'s FF45=0 write to land at the
+        // ly0→ly1 boundary (not ly0 cfl0 like SameBoy), so slopgb's line never
+        // matches LYC=0 across ly0 (stays low) and then RE-RISES at the ly1 dot-0
+        // carryover (`ly_for_comparison = line-1 = 0` matches the fresh LYC=0) — a
+        // spurious `ly1 dot0` STAT edge (`got=E2`, want E0). SameBoy holds the line
+        // HIGH across ly153→ly0 (LYC=0 matched at ly0 cfl0) and only FALLS at ly1
+        // cfl0 (measured `SBLEVEL ly1 cfl0 1->0 lyc_line=0`), raising no edge. A
+        // REAL LYC=0 always matches at ly0 first on SameBoy (ly_for_comparison=0
+        // there), so no genuine fresh LYC=0 edge can exist at ly1 — holding the
+        // line-1 carryover (the ly0→ly1 wrap only, NOT the lines-2-143 carryover
+        // that #11l's ungated CGB hold broke at ly6/ly7) drops nothing SameBoy
+        // delivers. CGB line 1 only; LE/Tier-2 only (`stat_update_tick` never runs
+        // flag-off → byte-identical OFF).
+        let line_start_carryover = if self.model.is_cgb() {
+            self.line == 1 && self.dot <= 2
+        } else {
+            (1..=143).contains(&self.line) && self.dot <= 2
+        };
         if ly != -1 && !line_start_carryover {
             self.lyc_interrupt_line = ly == i16::from(self.lyc);
         }
