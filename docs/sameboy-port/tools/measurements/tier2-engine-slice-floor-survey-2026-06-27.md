@@ -114,3 +114,43 @@ flipped. Gate unchanged (no code touched): gbtr+mooneye OFF byte-identical, 21
 tier2 pins held, mooneye flag-on 91/91.
 
 Rows + traces: `scratchpad/classify_out.txt`, `classify2_out.txt` (this session).
+
+## ADDENDUM — full edge-set sweep of all 26 non-ds lyc/m1 rows (per-row, not representatives)
+
+After the representative pass, swept ALL 26 non-ds rows of the START slice
+(lycEnable 13 + m1 8 + ly0 2 + lyc153int_m2irq 3) comparing slopgb-ON's STAT
+edge-set (every dispatch fire-line) against SameBoy's STAT_IRQ edge-set at
+`--length 4` (`scratchpad/sweep_edges.sh` → `sweep_edges_out.txt`). The slice
+splits cleanly into TWO floor classes, both = the C2 global reclock:
+
+### (A) read-frame floors — slopgb edge-set MATCHES SameBoy exactly
+`m1irq_m2enable_lyc_1`, `m2m1irq_ifw_2`, `lyc153int_m2irq_{1,ifw_1,late_retrigger_1}`,
+`ly143_late_m0enable_2`, `lyc143_late_m0enable_lycdisable_2`: slopgb fires the
+SAME per-line OAM (mfi2 cfl0/dot0) / mode-0 (mfi0 cfl257/dot254) / ly144 vblank
+(mfi1) edges SameBoy does — every line, same set. Only the deferred cc+0
+measurement read lands at a different frame position. = mech-1 read-frame = C2.
+
+### (B) write-frame floors — a SPURIOUS `ly152 dot4 mfi=1` (LYC=152 match) cluster
+**~10 rows** fire a spurious line-152 LYC edge SameBoy never fires:
+`lyc0_ff41_disable_2`, `lyc0_ff45_disable_2`, `lyc0_late_ff45_enable_2`,
+`lyc0_m1disable_2`, `lyc153_late_enable_m1disable_2`, `lyc153_late_ff41_enable_2`,
+`lyc153_late_m1disable_2`, `lycint152_lyc153irq_2`, `lycint152_lyc153irq_ifw_2`,
+`m1irq_late_enable_2` (+ the `m1irq_m{0,2}disable` / `ff4{1,5}_disable` siblings
+fire spurious ly5/6/7 / ly142/143 by the same mechanism). At the edge: **en=0x40
+(LYC), lyc=152** — a legit LYC=152 match at line 152 dot 4 in slopgb's frame.
+**Root (SBWH-confirmed):** the test writes FF45 to change/clear LYC at line 152
+`cfl0` (e.g. `lyc0_ff41_disable_2` SameBoy `SBWH ff45 val=00 ly152 cfl0` → LYC=0
+BEFORE its dot-4 `ly_for_comparison`=152 compare → no match → no edge). slopgb is
+**tick-then-access**: the PPU dot-4 `stat_update_tick` (compare, sees stale
+LYC=152 → match → edge) runs BEFORE the CPU's FF45 write commits (cc+4, end of
+M-cycle). SameBoy is leading-edge: write at cc+0 THEN compare. So the write that
+should preempt the line-start LYC match commits one M-cycle too late in slopgb.
+= the **write-side** of the C2 reclock (FF45/FF41 commit cc+4 vs SameBoy cc+0).
+Not fixable in tier2 without reordering writes ahead of the per-dot tick (breaks
+tick-then-access + the counter-pinned dispatch); retracting the already-fired
+dot-4 edge on the later write would be a curve-fit. = C2 write-side.
+
+**Conclusion stands and is sharpened: the lyc/m1 START slice is read-frame floors
+(A) + write-frame floors (B), BOTH the C2 global reclock (read-side + write-side).
+No clean tier2 ADD lever. The write-side is a NEW, concrete C2 sub-target: a
+leading-edge FF41/FF45 write commit will fix the ~10-row (B) cluster.**
