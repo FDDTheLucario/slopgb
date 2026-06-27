@@ -154,3 +154,20 @@ dot-4 edge on the later write would be a curve-fit. = C2 write-side.
 (A) + write-frame floors (B), BOTH the C2 global reclock (read-side + write-side).
 No clean tier2 ADD lever. The write-side is a NEW, concrete C2 sub-target: a
 leading-edge FF41/FF45 write commit will fix the ~10-row (B) cluster.**
+
+## ADDENDUM 2 — the (B) write-side sub-target BUILD-MEASURED → REFUTED (#11v, 2026-06-27)
+
+The (B) "leading-edge FF41/FF45 write commit" sub-target above was **built and
+two-bin measured: net −3/+0, REFUTED.** The (B) ROOT diagnosis ("slopgb tick-then-
+access runs the dot-4 compare BEFORE the FF45 write commits cc+4") is the **flag-OFF**
+behaviour; on the **flag-on** path the deferred `write_deferred` already commits
+writes at the leading edge (`advance_machine_t(before, before+pending+δ)` pays the
+PREVIOUS M-cycle's debt THEN `write_no_tick` → value live at ≈`before+pending` =
+cc+0). A leading-edge split only moved the commit by the WriteCpu `+1` (one dot):
+(B) cluster 6/14→6/14 (0 change), lyc/m1 family 364→361 (−3, zero fixes). The (B)
+rows are dispatch/read-frame + STAT line-level continuity across the line boundary,
+NOT write timing (`lyc153_late_m1disable_2`: slopgb fires a FRESH `ly153 dot6` LYC
+edge where SameBoy holds the line HIGH across the ly152→153 VBlank→LYC handoff; the
+SameBoy `SBWH` cfl that grounded the (B) root is lazy-synced = stale line-start, not
+the commit dot). **No separable write-side lever; (B) collapses into the same atomic
+read-frame/dispatch reclock as (A).** Full: `c2-writeside-leadingedge-refuted-2026-06-27.md`.
