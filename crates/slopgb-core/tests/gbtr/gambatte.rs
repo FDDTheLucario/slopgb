@@ -1295,6 +1295,70 @@ fn tier2_m0enable_late_ds_lcdoffset_passes() {
     }
 }
 
+/// Port Stage C / S5 (mech 1 read-observer — the DOUBLE-SPEED sprite m3stat
+/// read-grid snap). The single-speed sprite read-grid snap (#10 B5) snaps the
+/// sprite-line mode-0 dispatch to the CPU read grid (`dot % 4 == 0`); that
+/// `snap_ok` term applied in DOUBLE speed too. But the DS sprite-line FF41
+/// mode-bit read does not use `vis_early` (which is `!self.ds`-gated, the wrong
+/// direction here — these reads want the LAGGING mode 3, not an anticipated 0).
+/// It rides the PRODUCTION `stat_mode_edge` override (INC-DS-1 / INC-G3 task 6,
+/// `interconnect/memory.rs`: a DS sprite-line m3→m0 flip holds the FF41 mode
+/// bits at 3 for the read M-cycle), which is armed by the `m0_stat_flip` stamp
+/// that ONLY `m0_flip_events` sets. The mod-4 snap pushed the DS sprite dispatch
+/// past the pipe end (`advance_lx` lx=160), where the pipe-end fallback set
+/// `m0_src` first and `m0_flip_events` early-returned — so the stamp was never
+/// armed and the deferred cc+0 read saw the already-flipped visible mode 0 (digit
+/// 0 where SameBoy reads 3). Fix (`render/mode0.rs`): gate the dispatch snap to
+/// single speed (`snap_ok = !(tier2 && has_sprites && !ds) || dot % 4 == 0`), so
+/// DS sprite lines flip at the natural dot, arm the stamp, and the deferred read
+/// straddles the override. SameBoy verified: `..._ds_1` read mode 3, the in-cluster
+/// `late_sizechange_*_ds_2` (out3) join the lift; the 3 `late_sizechange_*_ds_1`
+/// (out0) are gambatte-reference floors (SameBoy reads mode 3, already baselined in
+/// production). CGB DS only; vis_early untouched; byte-identical OFF. Probe (3524
+/// CGB rows, flag-on): +87/−3 (net +84), 0 SameBoy-passing rows dropped.
+#[test]
+fn tier2_sprite_m3stat_ds_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_sprite_m3stat_ds",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        // The DS sprite m3stat lift (want the lagging mode 3).
+        (
+            "gambatte/sprites/8spritesPrLine_m3stat_ds_1_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/sprites/10spritesprline_1xposa7_m3stat_ds_1_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/sprites/1spritesPrLine_1sprite8pBgPrior_m3stat_ds_1_cgb04c_out3.gbc",
+            "3",
+        ),
+        // The in-cluster A/B winner (size-change `_2`, out3) — joins the lift.
+        (
+            "gambatte/sprites/late_sizechange_sp00_ds_2_cgb04c_out3.gbc",
+            "3",
+        ),
+        // The `_2` mode-0 sibling is the regression guard (must stay out0).
+        (
+            "gambatte/sprites/8spritesPrLine_m3stat_ds_2_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 /// Port Stage C / S5 (mech 3 — CGB lcd-offset, the dispatch-class VBlank + LYC
 /// write-triggers) — the lcd-offset shifts these late STAT enables into the
 /// line-start dots-0-3 carryover, where the base gambatte logic suppresses them.

@@ -277,7 +277,21 @@ impl Ppu {
         } else {
             4
         };
-        let snap_ok = !(self.tier2_reclock && has_sprites) || self.dot % 4 == 0;
+        // Single-speed ONLY (`!self.ds`). In DOUBLE speed the sprite-line FF41
+        // mode-bit read rides the production `stat_mode_edge` override
+        // (INC-DS-1 / INC-G3 task 6, `interconnect/memory.rs`: a DS sprite m3→m0
+        // flip holds the FF41 bits at 3 for the read M-cycle), armed by the
+        // `m0_stat_flip` stamp that only `m0_flip_events` sets. Snapping the DS
+        // dispatch to the `% 4` grid pushed it past the pipe end, where
+        // `advance_lx`'s fallback flips `m0_src` first and `m0_flip_events`
+        // early-returns — so the stamp never armed and the deferred cc+0 read
+        // saw the already-flipped mode 0. Gating the snap to single speed lets DS
+        // sprite lines flip at the natural dot, arm the stamp, and the deferred
+        // read straddle the override (gambatte sprites `*_m3stat_ds_1` want the
+        // lagging 3). `vis_early` stays `!self.ds`-gated (it anticipates mode 0,
+        // the wrong direction for these reads). See
+        // `tier2_sprite_m3stat_ds_passes`.
+        let snap_ok = !(self.tier2_reclock && has_sprites && !self.ds) || self.dot % 4 == 0;
         if self.leading_edge_reads
             && !self.ds
             && !self.vis_early
