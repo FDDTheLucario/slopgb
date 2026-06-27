@@ -1123,6 +1123,46 @@ fn tier2_oam_preread_lcdoffset1_passes() {
         .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out0 (tier2 flag-on): {e}"));
 }
 
+/// Port Stage C / S5 (mech 3 — CGB lcd-offset, the line-start OAM-read window,
+/// DOUBLE-SPEED sibling of [`tier2_oam_preread_lcdoffset1_passes`]). Under DS the
+/// deferred cc+0 read lands 2 dots earlier in the dot grid, so the accessible
+/// `preread_ds*_1` read shifts to `dot0` and the slopgb-side window narrows with
+/// it ([`CGB_LINESTART_OAM_OPEN_DS`] = 2). Both the base `preread_ds_1` and the
+/// offset `preread_ds_lcdoffset1_1` read accessible (out0); their `_2` siblings
+/// read `dot2` and stay blocked (out3 — a lcd-offset RENDER shift slopgb matches
+/// via its mode-3 OAM block, NOT the OAM read, so the window must NOT extend to
+/// them). The `_2` legs are pinned here as regression guards against a
+/// widened window. Probe (3524 CGB rows, flag-on): +2/−0. Byte-identical OFF.
+#[test]
+fn tier2_oam_preread_ds_lcdoffset1_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_oam_preread_ds_lcdoffset1",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        ("gambatte/oam_access/preread_ds_1_cgb04c_out0.gbc", "0"),
+        ("gambatte/oam_access/preread_ds_2_cgb04c_out3.gbc", "3"),
+        (
+            "gambatte/oam_access/preread_ds_lcdoffset1_1_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/oam_access/preread_ds_lcdoffset1_2_cgb04c_out3.gbc",
+            "3",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 /// Port Stage C / S5 (mech 3 — CGB lcd-offset, the m3-start palette-RAM window) —
 /// SameBoy keeps `cgb_palettes_blocked = false` for 3 T-cycles INTO mode 3
 /// (`display.c:1867` false → `:1877` true, a 3-cycle SLEEP between), so a deferred
@@ -1193,6 +1233,56 @@ fn tier2_m0enable_late_lcdoffset_passes() {
         ),
         (
             "gambatte/m1/ly143_late_m0enable_lcdoffset1_1_cgb04c_out3.gbc",
+            "3",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// Port Stage C / S5 (mech 3 — CGB lcd-offset, the dispatch-class HBlank
+/// write-trigger, DOUBLE-SPEED window). Sibling of
+/// [`tier2_m0enable_late_lcdoffset_passes`]: under double speed the deferred cc+0
+/// write lands 2 dots earlier, so the carryover fire window halves (`carryover_tail
+/// = dot < 2` in DS, `stat_irq.rs::stat_write_trigger_cgb`). The `_ds*_1` enable
+/// lands `dot0` (fires, out1/out2/out3) while the `_2` sibling lands `dot2` —
+/// where SameBoy's fire is early/cleared by the test, so it must NOT be delivered
+/// (out0). A `dot < 4` window over-fired the `_2` enable; halving fixed it plus
+/// the base `late_enable_ds_2` and the `lyc143_late_m0enable_lycdisable_ds_1`
+/// bonus rows. The `_2` legs are pinned as regression guards. CGB DS only,
+/// byte-identical OFF. Probe (3524 CGB rows, flag-on): +3/−0.
+#[test]
+fn tier2_m0enable_late_ds_lcdoffset_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_m0enable_late_ds_lcdoffset",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        // The +3 fixed by the DS carryover-window halving.
+        (
+            "gambatte/m0enable/late_enable_ds_lcdoffset1_2_cgb04c_out0.gbc",
+            "0",
+        ),
+        ("gambatte/m0enable/late_enable_ds_2_cgb04c_out1.gbc", "1"),
+        (
+            "gambatte/m1/lyc143_late_m0enable_lycdisable_ds_1_cgb04c_out1.gbc",
+            "1",
+        ),
+        // The `_1` siblings that must keep firing (dot0 still inside `< 2`).
+        (
+            "gambatte/m0enable/late_enable_ds_lcdoffset1_1_cgb04c_out2.gbc",
+            "2",
+        ),
+        (
+            "gambatte/m1/ly143_late_m0enable_ds_lcdoffset1_1_cgb04c_out3.gbc",
             "3",
         ),
     ];

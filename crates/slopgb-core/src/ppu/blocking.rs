@@ -7,6 +7,21 @@ use super::*;
 /// engages (`display.c:1805-1810`). See [`Ppu::cgb_linestart_oam_open`].
 const CGB_LINESTART_OAM_OPEN: u16 = 4;
 
+/// Tier-2 CGB double-speed line-start OAM-read window length (dots). Under
+/// double speed the deferred cc+0 read lands 2 dots earlier in the dot grid
+/// (the CPU runs at 2×), so the slopgb-side window shifts down with it to keep
+/// the read-position calibration: the accessible `oam_access/preread_ds*_1`
+/// read lands `dot0` (open `<2`) while its render-floor `_2` sibling lands
+/// `dot2` and stays blocked. SameBoy itself keeps `oam_read_blocked = false`
+/// further into DS (`display.c:1789` `!cgb_double_speed` is false, so the lock
+/// only engages at the unconditional `:1804`, ~dot8), reading the `_2` access
+/// accessible too — but the `_2` digit is the lcd-offset RENDER shift, not the
+/// OAM read, so matching SameBoy's wider DS accessibility would corrupt that
+/// render-floor output; the window tracks the slopgb read grid that reproduces
+/// the SameBoy-passing digits (`_1` → 0, `_2` → 3). See
+/// [`Ppu::cgb_linestart_oam_open`].
+const CGB_LINESTART_OAM_OPEN_DS: u16 = 2;
+
 /// Tier-2 CGB single-speed palette-RAM accessible window INTO mode 3
 /// (T-cycles), the extra dots past the dot-84 mode-3 anchor over which SameBoy
 /// keeps `cgb_palettes_blocked = false` before the lock engages
@@ -29,28 +44,36 @@ impl Ppu {
             // Tier-2 CGB line-start OAM-read window: SameBoy keeps
             // `oam_read_blocked = false` for the first few T-cycles of each
             // visible line (`display.c:1805-1810` — the mode-0/HBlank tail runs
-            // 2+1 cycles before the mode-2 OAM lock engages at state 7, on CGB
-            // single-speed where `oam_read_blocked = !cgb_double_speed`). A
-            // deferred cc+0 read landing at line start (the lcd-offset-shifted
+            // 2+1 cycles before the mode-2 OAM lock engages at state 7, where
+            // `oam_read_blocked = !cgb_double_speed`). A deferred cc+0 read
+            // landing at line start (the lcd-offset-shifted
             // `oam_access/preread_lcdoffset1_1` read, slopgb `ly2 dot2` vs
             // SameBoy `ly2 cfl0 blk0`) then sees OAM accessible; slopgb locks
-            // from dot 0. Release dots `0..K` on CGB single-speed under tier2.
-            // Line 0 excluded (post-enable FSM has its own window). Never set in
-            // production -> byte-identical OFF.
+            // from dot 0. Release dots `0..K` on CGB under tier2 (the DS window
+            // is narrower — the read grid shifts earlier; see
+            // `cgb_linestart_oam_open`). Line 0 excluded (post-enable FSM has its
+            // own window). Never set in production -> byte-identical OFF.
             && !self.cgb_linestart_oam_open()
     }
 
-    /// Tier-2 (cc+0) CGB single-speed line-start OAM-read window — see
+    /// Tier-2 (cc+0) CGB line-start OAM-read window — see
     /// [`Self::oam_read_blocked`]. SameBoy carries `oam_read_blocked = false`
-    /// from the previous HBlank across the first `CGB_LINESTART_OAM_OPEN`
-    /// T-cycles of a visible line until the mode-2 lock engages. Never true in
-    /// production / LE-only (`tier2_reclock` gate) -> byte-identical OFF.
+    /// from the previous HBlank across the first few dots of a visible line until
+    /// the mode-2 lock engages ([`CGB_LINESTART_OAM_OPEN`] single speed /
+    /// [`CGB_LINESTART_OAM_OPEN_DS`] double speed). Never true in production /
+    /// LE-only (`tier2_reclock` gate) -> byte-identical OFF.
     fn cgb_linestart_oam_open(&self) -> bool {
-        self.tier2_reclock
-            && self.model.is_cgb()
-            && !self.ds
-            && self.line != 0
-            && self.dot < CGB_LINESTART_OAM_OPEN
+        // Double speed shifts the read grid 2 dots earlier, so the window does
+        // too ([`CGB_LINESTART_OAM_OPEN_DS`]). Verified:
+        // `oam_access/preread_ds_lcdoffset1_1` reads `ly2 dot0` (slopgb blocked)
+        // where SameBoy reads `ly2 cfl0 rdblk=0` accessible; its render-floor
+        // `_2` sibling reads `dot2` and must stay blocked (digit 3).
+        let window = if self.ds {
+            CGB_LINESTART_OAM_OPEN_DS
+        } else {
+            CGB_LINESTART_OAM_OPEN
+        };
+        self.tier2_reclock && self.model.is_cgb() && self.line != 0 && self.dot < window
     }
 
     pub(crate) fn oam_write_blocked(&self) -> bool {

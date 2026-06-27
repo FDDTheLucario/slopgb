@@ -534,8 +534,17 @@ impl Ppu {
             // a fresh m0 enable in the carryover tail raises IF immediately;
             // glitch lines excluded (the LCD-enable prefix is not a real
             // hblank). Never set in production / LE-only → byte-identical OFF.
+            //
+            // Double speed HALVES the carryover window: the deferred cc+0 write
+            // lands 2 dots earlier in the dot grid (the CPU runs at 2×), so the
+            // `_ds_lcdoffset1_1` enable that fires lands `dot0` while its `_2`
+            // sibling lands `dot2` — and at `dot2` SameBoy's fire is *early*
+            // (cleared by the test's IF-clear) so it must NOT be delivered. A
+            // `dot < 4` window would over-fire the `_2` enable; halve to `< 2`
+            // (mirrors the `m2`/`stage_stat_copies` DS halving). LE-only.
+            let carryover_tail = self.dot < if self.ds { 2 } else { 4 };
             if self.leading_edge_reads
-                && tail
+                && carryover_tail
                 && !self.glitch_line
                 && self.vis_mode() == 0
                 && old & STAT_SRC_HBLANK == 0
