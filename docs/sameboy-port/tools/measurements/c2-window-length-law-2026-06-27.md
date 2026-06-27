@@ -66,6 +66,26 @@ may isolate the clean `m2int_wx` subset (+8ish) WITHOUT the −6; if it's the re
 it co-lands with the cc-exact read. Build-measure before concluding (this correction is
 itself the lesson: the read-frame attribution was inferred, not traced).
 
+## RESOLUTION — the read-frame IS the coupling (isolation test, CONFIRMED)
+
+Built `vis_mode_read()` = `vis_mode` + the window law, applied ONLY to the FF41
+register read (`regs.rs:119`), leaving `vis_mode` (→ `stat_line_level`/`refresh_cmp`
+→ the STAT line/IRQ; `mode_bits`; `update_mode_for_interrupt`) UNCHANGED. **Result:
++12/−6 IDENTICAL to the shared-`vis_mode` version.** So the −6 late_wy regress via the
+**FF41-read mode**, NOT the STAT-line level — i.e. `late_wy_2` DOES read FF41, and its
+read lands LATER than SameBoy's (mode 0 where SameBoy reads mode 3). The "read-frame"
+attribution is therefore CORRECT (the prior CORRECTION's doubt was over-cautious; the
+isolation experiment resolves it — the late_wy reads were just not caught by the
+`ly1`-filtered tracer). The `vis_mode_read` split is architecturally clean (decouples
+the FF41-read mode from the STAT-line IRQ) but does NOT enable a separable slice: the
+m2int_wx and late_wy windows BOTH read FF41, and the law fixes the former while
+de-masking the latter's read-frame — inseparable, exactly the atomic co-landing.
+
+So the resolved picture: the `260+SCX&7` length law is the validated visible-mode-3
+read exit; it lands with the **cc-exact read sample** (moving the late_wy reads to
+SameBoy's dot) as ONE atomic step. Next: build the cc-exact read sample (the
+read-collapse machinery) — that converts the −6 to +6 and the window converges.
+
 ## Consequence
 
 The window-length law `260 + SCX&7` is **validated and ready** (the visible-mode
