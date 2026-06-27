@@ -63,6 +63,29 @@ the `cgbpal_m3start/m3end` window — still the sub-M-cycle read-phase class (th
 cc-exact lift). #11w is the boundary-COINCIDENT subset that the whole-dot stamp
 could express; the genuinely sub-dot ones remain.
 
+## The clean boundary-coincident render slice is EXHAUSTED at #11w (full triage)
+
+Build-measured every remaining non-ds render floor → #11w is the ONE clean
+boundary-coincident lever; the rest are genuine floors needing bigger C2 machinery:
+- **scx2/scx5 postread (oam+vram)** — #11w, CLEAN +4/−0 (shipped).
+- **cgbpal_m3end_2** — palette analogue +3/−1 (palette unblock physically LAGS the
+  pipe end, so the boundary read correctly BLOCKS; wrong-direction, see below).
+- **preread_2** (want3 got0) — slopgb reads OAM at `ly2 dot0` ACCESSIBLE (the
+  `cgb_linestart_oam_open` window, #11q) where SameBoy reads blocked. The window
+  serves the lcd-offset variant (`preread_lcdoffset1_1`, wants open) but over-opens
+  the BASE `preread_2` (wants blocked) — the #11q **lcd-offset A/B floor**: both read
+  at line start, want opposite; only the lcd-offset model (shifting the offset read
+  off dot0) resolves it. NOT a clean slice.
+- **DS postread_scx5_ds / postwrite_scx1_ds** — +3 but the same `m0_access_edge`
+  stamp gates the DS VRAM-WRITE path → `vramw_m3end_scx5_ds` regresses (−2), and the
+  DS writes are themselves mixed (`postwrite` wants release, `vramw` wants block) →
+  no read/write split helps; = the DS S6/S7 reclock.
+- **late_scx4_2** — the genuine read-collapse (`_1`/`_2` same slopgb dot) → cc-exact
+  sub-dot read sample (the big lift).
+
+So the next C2 forward work is the bigger machinery (the lcd-offset render model, the
+cc-exact T-granular read sample, the DS reclock), NOT more whole-dot boundary slices.
+
 ## Tried + parked: the PALETTE analogue (pal_access_flip release) = +3/−1, NOT clean
 
 Applied the same `-8` lead release to `pal_access_flip` (`render/mode0.rs` lx==160,
