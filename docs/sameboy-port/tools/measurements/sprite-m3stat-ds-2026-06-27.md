@@ -82,6 +82,24 @@ This is the same in-cluster A/B swap the production INC-G3 task-6 lift made
   637-976 one-liners untouched).
 - New pin `tier2_sprite_m3stat_ds_passes` (21 tier2 pins).
 
+## Remaining 30 sprite fails — ALL build-measure-confirmed floors (NONE a tier2 slice)
+
+Flag-OFF probe of the 30 post-fix sprite fails: **pass=0 fail=30** → flag-OFF ==
+flag-ON for every one ⇒ baselined production floors, NOT tier2 read-frame
+regressions. All 30 are in `baselines/gambatte.txt`. SameBoy spot-traced:
+
+| cluster (~count) | floor class | evidence |
+|---|---|---|
+| `space/*wx*_m3stat_ds` (~16) | **C2 window-length render** | SameBoy passes (`9pos8_wx08_ds_1` cfl322 mode3; `wx0_ds_2` cfl325 mode0) but slopgb reads INVERTED in BOTH flag states (`_1`→0, `_2`→3). The INC-DS-1 known floor: a window line's mode-3 flip goes through `advance_lx` (silent), which never sets `m0_stat_flip`, so the override can't arm — AND slopgb's window mode-3 LENGTH differs from SameBoy. Render-level = the C2 parallel window-length model, not a read-frame snap. |
+| `late_disable_ds_{1,3}` (~2) | **C2 render** (aborted-extend) | SameBoy `ly2 cfl358/364 mode3`, slopgb reads 0 both modes — the late sprite-disable aborts slopgb's mode-3 early; SameBoy keeps it. |
+| `late_sizechange*_ds` (~7) | gambatte-reference + render | `late_sizechange_ds_1` (out0): SameBoy `cfl360 mode3` == slopgb 3 (both modes) ≠ gambatte out0 → gambatte-reference floor (slopgb already SameBoy-correct). `late_sizechange2_*_ds_1` (out3): mode-3-length / size-change render. |
+| `*_dmg08*`, `*_m0irq_2_dmg08*` (~4) | out of DS scope | DMG-derived ROMs on CGB; the `!self.ds` change does not touch them; pre-existing baselined. |
+
+So the DS sprite m3stat **read-frame regression** batch is EXHAUSTED at +87/−3. The
+window/late-disable/size-change residue is C2 render (production-level, would break
+byte-identical OFF) — the goal's separately-scoped "window family, render C2" work,
+not a tier2 read-grid slice.
+
 ## Tooling
 
 - slopgb trace: `target/trace/release/examples/run_gambatte <rom> cgb`,
