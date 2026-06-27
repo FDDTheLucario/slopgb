@@ -115,10 +115,10 @@ impl Ppu {
             .update(mfi, self.stat_en, self.lyc_interrupt_line)
         {
             self.pending_if |= IF_STAT;
-            if super::s5dbg_on() && self.line < 144 {
+            if super::s5dbg_on() && self.line < 154 {
                 eprintln!(
-                    "SLOPGB dispatch ly={} dot={} mfi={}",
-                    self.line, self.dot, mfi
+                    "SLOPGB dispatch ly={} dot={} mfi={} lycln={}",
+                    self.line, self.dot, mfi, self.lyc_interrupt_line as u8
                 );
             }
             self.stat_update_halt_masks(mfi);

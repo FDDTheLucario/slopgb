@@ -171,8 +171,22 @@ impl Interconnect {
     pub(super) fn write_deferred(&mut self, addr: u16, value: u8) {
         let conflict = self.write_conflict(addr);
         let before = self.clock.now();
+        // S5/C2 write-frame tracer: the FF41/FF45 register-write's leading-edge
+        // (cc+0) dot vs its commit (cc+4) dot — the write-side analogue of the
+        // `read_deferred` FF41 read tracer. `SLOPGB_S5DBG`, byte-identical unset.
+        let le_pos = if matches!(addr, 0xFF41 | 0xFF45) && crate::ppu::s5dbg_on() {
+            Some(self.ppu.scan_pos())
+        } else {
+            None
+        };
         let _ = self.clock.write(conflict);
         self.advance_machine_t(before, self.clock.now());
+        if let Some((lly, ldot)) = le_pos {
+            let (cly, cdot) = self.ppu.scan_pos();
+            eprintln!(
+                "SLOPGB w{addr:04x} val={value:02x} lead ly={lly} dot={ldot} commit ly={cly} dot={cdot}"
+            );
+        }
         self.service_vram_dma();
         if let 0xFF40 | 0xFF42 | 0xFF43 | 0xFF47..=0xFF4B = addr {
             let dots = if self.double_speed { 1 } else { 2 };
