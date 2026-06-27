@@ -259,3 +259,22 @@ fixing scx3_2/cc1/want0 also breaks scx3_2b/cc1/want2) — the deep S7
 deferred-halt-wake residual, the same wall C1.3 only partly climbed for the LY
 read. Needs the sub-M-cycle wake clock (record the IRQ rise at its T-phase, not
 the M-cycle boundary). REVERTED (can't drop SameBoy-passing rows).
+
+## CGB tester LENGTH (#11u, 2026-06-27) — load-bearing tooling gotcha
+
+`sameboy_tester` needs **`--cgb --length 4`** for CGB gambatte ROMs (DMG
+`--length 2`). The gambatte setup runs slower on CGB; at length 2-3 it has not
+finished — SameBoy spins pre-setup (reads IF=01 in a loop, never writes
+FF41/FF45, STAT line constant) and **SBLEVEL/STAT_IRQ/SBWRITE all trace ZERO**,
+which looks exactly like "SameBoy does nothing / register state diverges" and
+yields a FALSE floor diagnosis. Confirmed: `lycint143_m1irq_2` SBLEVEL 0(len1) →
+143(len2) → 383(len3); `lyc153int_m2irq_1` CGB needs len4 (len2/3 = 0; len4 =
+real en=0x60 / LYC=153 that MATCHES slopgb). **Always confirm SBWH/SBLEVEL is
+non-zero before trusting a trace; bump `--length` until the register writes
+appear.**
+
+Tracer `SBWH addr=.. val=.. ly=.. cfl=..` at `memory.c::write_high_memory` entry
+(`addr==0xFF41||0xFF45`, `SB_TRACE`-gated) — FF41/FF45 register-write timing, the
+fastest way to confirm the ROM finished setup and to read the en/LYC SameBoy
+actually programs. `SBU ly=.. mfi=.. stat=.. lycln=.. line=..` (env `SB_DBGU`)
+per `GB_STAT_update` for `current_line<=2` — the per-step mfi/stat dump.
