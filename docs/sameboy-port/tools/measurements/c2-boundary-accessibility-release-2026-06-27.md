@@ -86,6 +86,22 @@ boundary-coincident lever; the rest are genuine floors needing bigger C2 machine
 So the next C2 forward work is the bigger machinery (the lcd-offset render model, the
 cc-exact T-granular read sample, the DS reclock), NOT more whole-dot boundary slices.
 
+### CLINCHER — the residual is UNIFORMLY sub-M-cycle `dc`, proven on `preread_2`
+
+`oam_access/preread_2` (want3/blocked): slopgb reads OAM at `ly2 dot0` ACCESSIBLE
+(the `cgb_linestart_oam_open` window). SameBoy's SBMODE at the SAME dot shows the
+mode transition WITHIN the dot: `cfl0 dc2 vis=0` (mode-0 carryover) → `cfl0 dc8
+vis=2` (mode-2 lock). slopgb reads at cfl0's START (≈dc2, open); SameBoy's read lands
+at the later `dc8` (mode-2, blocked). **Same dot (cfl0), different `dc`** — a
+sub-M-cycle distinction slopgb's whole-dot read sample cannot make. This is the same
+`dc`-level resolution `late_scx4` (sub-dot SCX boundary) and the read-collapse class
+need. #11w was the ONE floor where the whole-dot boundary stamp happened to align
+with SameBoy's `dc`; every other residual floor genuinely needs the **dc-resolved
+clock** — the PPU mode flips at a `dc` (not a dot) AND the read samples at its true
+`dc` (from `cycle_clock.rs`'s T-position, not the M-cycle-rounded leading edge). That
+is the atomic reclock: a fundamental sub-dot upgrade to the PPU mode timeline + the
+read path, not incremental tier2 slices.
+
 ## Tried + parked: the PALETTE analogue (pal_access_flip release) = +3/−1, NOT clean
 
 Applied the same `-8` lead release to `pal_access_flip` (`render/mode0.rs` lx==160,
