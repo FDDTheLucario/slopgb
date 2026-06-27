@@ -1014,8 +1014,9 @@ fn tier2_m2int_m3stat_scx3_passes() {
 /// `oam_access/postread_scx3_2` (CGB; the DMG leg is `xout1`-exempt) all read the
 /// SCX&7=3 cc2 boundary at the M-cycle the visible flip lands. Production
 /// (flag-off) byte-identical — `vis_early` is never set there. The `scx2`/`scx5`
-/// siblings stay floored (el=0 read-collapse, the read lands a sub-dot before the
-/// boundary's M-cycle start, which `vis_early` cannot release).
+/// siblings (the read lands ON the boundary M-cycle, blocked by the cc+2-MID
+/// `m0_access_edge` stamp `vis_early` cannot release) are resolved separately by
+/// `tier2_oam_vram_postread_scx2_scx5_passes` (the boundary-coincident release).
 #[test]
 fn tier2_oam_vram_postread_scx3_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -1080,6 +1081,62 @@ fn tier2_oam_vram_postwrite_scx3_passes() {
             "gambatte/vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3.gbc",
             "3",
             &[Model::Dmg, Model::Cgb],
+        ),
+    ];
+    for (rel, expect, models) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        for &model in models {
+            let mut gb = harness::boot_with_reclock(&rom, model);
+            run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+            check_hex_screen(gb.frame(), expect, model.is_cgb()).unwrap_or_else(|e| {
+                panic!("{rel} [{model:?}] expected out{expect} (tier2 flag-on): {e}")
+            });
+        }
+    }
+}
+
+/// Port Stage C2 (mech 1 — the read-observer accessibility coupling, the
+/// BOUNDARY-COINCIDENT release) — the `scx2`/`scx5` siblings the scx3 pin left
+/// "floored". Their deferred cc+0 OAM/VRAM read lands on the EXACT dot
+/// `line_render_done` fires (the unblock M-cycle), where the production cc+2-MID
+/// `m0_access_edge` stamp still reports the second-half unblock as blocked (mode 3)
+/// — but SameBoy unblocks AT the boundary (reads accessible, out0). The `_1`
+/// sibling reads 4 dots earlier (a different M-cycle, no stamp) and stays blocked,
+/// so releasing only the boundary M-cycle's stamp is a clean separation (full-CGB
+/// two-bin +4/−0 single speed). The fix pushes the M0Access edge to phase 0 under
+/// Tier-2 single speed (`render/mode0.rs` `access_lead`); double speed is excluded
+/// (the stamp gates the DS VRAM-WRITE path too — `vramw_m3end_scx5_ds` — the DS
+/// read grid is its own S6/S7 reclock). Production (flag-off) byte-identical —
+/// `bare_flip`/`tier2_reclock` never release it there.
+#[test]
+fn tier2_oam_vram_postread_scx2_scx5_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_oam_vram_postread_scx2_scx5",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str, &[Model]); 4] = [
+        (
+            "gambatte/vram_m3/postread_scx2_2_dmg08_cgb04c_out0.gbc",
+            "0",
+            &[Model::Cgb],
+        ),
+        (
+            "gambatte/vram_m3/postread_scx5_2_dmg08_cgb04c_out0.gbc",
+            "0",
+            &[Model::Cgb],
+        ),
+        (
+            "gambatte/oam_access/postread_scx2_2_dmg08_cgb04c_out0.gbc",
+            "0",
+            &[Model::Cgb],
+        ),
+        (
+            "gambatte/oam_access/postread_scx5_2_dmg08_cgb04c_out0.gbc",
+            "0",
+            &[Model::Cgb],
         ),
     ];
     for (rel, expect, models) in targets {

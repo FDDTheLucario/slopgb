@@ -341,7 +341,30 @@ impl Ppu {
             // The accessibility unblock (this `line_render_done` rise) is
             // half-classified by the interconnect for the cc+2 MID-phase
             // OAM read (sub-dot event-phase model, increment 1).
-            self.m0_access_flip = bare_flip.then_some(0i8);
+            //
+            // C2 (tier2, single speed) — boundary-coincident accessibility
+            // release. The production stamp blocks an OAM/VRAM access landing in
+            // the unblock M-cycle's SECOND HALF (`event_phase` commit eighth >
+            // ACCESS_PHASE) — the cc+2 MID-frame model. But under the cc+0
+            // deferred read SameBoy unblocks AT the boundary: `vram_m3`/
+            // `oam_access` `postread_scx2/scx5_2` read ACCESSIBLE on the dot
+            // `line_render_done` fires, not the trailing mode 3. A read 4 dots
+            // earlier (`_1`, a different M-cycle) sees no stamp and stays blocked,
+            // so releasing the boundary M-cycle's stamp is a clean separation
+            // (full-CGB two-bin +7/−0 single speed). Push the M0Access edge to
+            // phase 0 (`lead = -8` clamps there) so the leading-edge access is
+            // never pre-empted. SINGLE SPEED only: the same release in double
+            // speed unblocks the DS VRAM-WRITE path too (the stamp gates writes
+            // at `memory.rs` `0x8000..=0x9FFF if stamp_blocks`), regressing the
+            // `vramw_m3end_scx5_ds_{2,4}` write-end floors — the DS read grid is
+            // its own S6/S7 reclock. Tier2 + bare lines + `!ds`; `bare_flip` is
+            // false in production → byte-identical OFF.
+            let access_lead = if self.tier2_reclock && !self.ds {
+                -8i8
+            } else {
+                0i8
+            };
+            self.m0_access_flip = bare_flip.then_some(access_lead);
             // The STAT mode-bit flip routes the double-speed FF41 mode-bit
             // read at the cc+2 MID phase (sub-dot event-phase model,
             // increment INC-DS-1 — gambatte sprites m3stat_ds). Gated to
