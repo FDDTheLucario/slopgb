@@ -185,8 +185,9 @@ pub(super) struct Render {
     /// The window was aborted mid-line by an LCDC.5 clear: on DMG the
     /// resumed BG fetch trails at the line tail, dropping the flip lead
     /// to 0 (gambatte window/late_disable_* rows carry dmg08_out3 vs
-    /// cgb04c_out0 split expectations for the same read).
-    win_aborted: bool,
+    /// cgb04c_out0 split expectations for the same read). `pub(super)` for
+    /// the C2 #11y window-length read law (`stat_irq.rs::vis_mode_read`).
+    pub(super) win_aborted: bool,
     /// WX comparator output on the previous dot: activations and
     /// reactivations fire on the rising edge only (the match holds while
     /// lx is frozen during the start stall and must not re-fire).

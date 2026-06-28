@@ -1194,6 +1194,46 @@ fn tier2_oam_preread_lcdoffset1_passes() {
     }
 }
 
+/// Port Stage C2 #11y — the window visible-mode-3 LENGTH law (the FF41-read half
+/// of the atomic reclock). A triggering window's SameBoy mode-3→0 exit is `SBex =
+/// 263 + SCX&7` (cfl); slopgb dot = cfl − 3 (the dot254≡cfl257 dispatch offset) →
+/// the CPU-visible FF41 exit is `260 + SCX&7`, DECOUPLED from `line_render_done`
+/// (the counter-pinned dispatch, which is config-dependently mis-positioned vs SBex
+/// so slopgb over-extends ~1 dot — the `m2int_wx*_m3stat_2` reads see mode 3 where
+/// SameBoy reads 0). Applied ONLY to the FF41 register read
+/// (`stat_irq.rs::vis_mode_read`, NOT the STAT-line `vis_mode` consumers), CGB
+/// normal-trigger ly≥1 windows (`win_active && !win_aborted && wy2!=ly && wy2<=143
+/// && wx<0xA0 && !ds`). Line 0 / late-WY / WY-disable windows are EXCLUDED — their
+/// reads de-mask an entangled read-frame error (the window length + read-frame
+/// co-land in the atomic step; #11y); the normal windows have a correct read-frame,
+/// so the length law fixes them cleanly. Full-CGB two-bin flag-on +7/−0. Production
+/// byte-identical OFF (`win_active`/`tier2` never fire there). The DMG legs keep
+/// their floor (the +3 offset is CGB-measured; `is_cgb` gate).
+#[test]
+fn tier2_window_m3stat_length_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_window_m3stat_length",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    // All [Cgb] out0 — the normal-trigger window mode-3 read exits at 260+SCX&7.
+    let rels = [
+        "gambatte/window/m2int_wx00_m3stat_2_dmg08_cgb04c_out0.gbc",
+        "gambatte/window/m2int_wx03_m3stat_2_dmg08_cgb04c_out0.gbc",
+        "gambatte/window/m2int_wx03_scx3_m3stat_2_dmg08_cgb04c_out0.gbc",
+        "gambatte/window/m2int_wx07_scx2_m3stat_2_dmg08_cgb04c_out0.gbc",
+    ];
+    for rel in rels {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), "0", true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out0 (tier2 flag-on): {e}"));
+    }
+}
+
 /// Port Stage C / S5 (mech 3 — CGB lcd-offset, the line-start OAM-read window,
 /// DOUBLE-SPEED sibling of [`tier2_oam_preread_lcdoffset1_passes`]). Under DS the
 /// deferred cc+0 read lands 2 dots earlier in the dot grid, so the accessible

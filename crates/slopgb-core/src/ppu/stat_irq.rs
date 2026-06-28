@@ -7,6 +7,35 @@ impl Ppu {
     /// state machine: mode reads 0 during the first 4 dots of every line
     /// (and during 144:0-3), and mode 3 appears 4 dots after VRAM read
     /// locking (`lcdon_timing-GS` tables).
+    /// FF41-read STAT mode = [`Self::vis_mode`] + the C2 #11y window mode-3
+    /// length law, applied ONLY to the FF41 register read (`regs.rs`), NOT the
+    /// internal `vis_mode` consumers (`stat_line_level`/IRQ, `mode_bits`,
+    /// `update_mode_for_interrupt`). A triggering window's SameBoy mode-3 exit is
+    /// `SBex = 263 + SCX&7` (cfl) → slopgb CPU-visible exit `260 + SCX&7`
+    /// (cfl − 3), DECOUPLED from the counter-pinned `line_render_done`. LINE 0
+    /// EXCLUDED: the first window line (the WY-latch just matched) extends mode 3
+    /// later than the steady law — its read is at `ly0` and wants mode 3 past
+    /// dot 260 (the `late_wy_*` rows; #11y). Tier2 + normal-trigger ly>=1 windows;
+    /// production byte-identical OFF.
+    pub(super) fn vis_mode_read(&self) -> u8 {
+        let m = self.vis_mode();
+        if self.tier2_reclock
+            && self.render.win_active
+            && !self.ds
+            && self.model.is_cgb()
+            && self.line >= 1
+            && self.eff.wx < 0xA0
+            && !self.render.win_aborted
+            && self.wy2 != self.ly
+            && self.wy2 <= 143
+            && m == 3
+            && self.dot >= 260 + u16::from(self.eff.scx & 7)
+        {
+            return 0;
+        }
+        m
+    }
+
     pub(super) fn vis_mode(&self) -> u8 {
         if !self.enabled {
             return 0;
