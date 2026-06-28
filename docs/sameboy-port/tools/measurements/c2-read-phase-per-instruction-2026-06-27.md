@@ -1,0 +1,52 @@
+# C2 — the cc-exact read phase is PER-INSTRUCTION (the read half's precise mechanism, #11y)
+
+2026-06-27, after the #11y window-length law shipped (+7/−0). Pinning the read half of
+the atomic reclock to its exact mechanism via direct SBREAD measurement.
+
+## The finding
+
+Direct `SBREAD ff41` (SameBoy) vs `SLOPGB ff41` (slopgb) for the window m3stat reads:
+- `m2int_wx03_m3stat_2`: slopgb reads **ly1 dot260**; SameBoy reads **ly1 cfl265**
+  (mode 0). Offset = **+5**.
+- The DISPATCH offset is **+3** (slopgb `line_render_done` dot254 ≡ SameBoy mode-0
+  IRQ cfl257, counter-pinned both models).
+
+So the FF41 READ offset (+5) ≠ the DISPATCH offset (+3): the window read samples **2
+dots later** than the dispatch-aligned frame would put it. Since slopgb's deferred
+read samples at the M-cycle LEADING edge (cc+0), SameBoy is sampling this read at
+≈**cc+2** (the data-access phase), 2 dots into the read M-cycle.
+
+But the KERNEL `m2int_m3stat` FF41 read PASSES at slopgb's cc+0 (the pinned
+`tier2_kernel_pair_matches_sameboy_target`). So **the FF41 read phase VARIES per
+instruction**: the kernel's `ldh a,(FF41)` samples at cc+0, the window-line m3stat
+read samples at cc+2. slopgb's uniform cc+0 deferred read collapses this — it reads
+every FF41 at the leading edge, so reads SameBoy resolves at different sub-M-cycle
+phases land at the same slopgb dot.
+
+## Why the #11y window length law still ships clean (+7/−0)
+
+The law fixes the window reads that land mode 0 BOTH ways: m2int_wx reads at/after the
+exit (slopgb dot260 ≥ the law exit 260 → mode 0; SameBoy cfl265 > exit cfl263 → mode
+0). The excluded rows (late_wy/DMG) read on the OTHER side of the exit, where the +2
+read-phase difference flips the result — those need the per-instruction phase, not a
+uniform offset (a +2 shift breaks the kernel cc+0 reads).
+
+## The cc-exact read sample (the precise next step)
+
+The read half is now pinned to its mechanism: the deferred read must sample FF41 (and
+the accessibility/IF reads) at the **per-instruction sub-M-cycle phase** SameBoy uses,
+not the uniform cc+0 leading edge. The phase source is the `cycle_clock.rs`
+deferred-commit machine's conflict-class / `pending` model (the same per-instruction
+sub-M-cycle phase the WRITE side uses via `write_conflict`). The build: route the FF41
+read through a conflict-class-aware sample point (cc+0 vs cc+2 per the read's
+instruction context) instead of `clock.now()`'s rounded leading edge, then the
+excluded window/DMG rows converge with the validated `260+SCX&7` length law and the
+kernel reads stay at cc+0.
+
+This requires dual-emulator per-instruction read-cycle instrumentation to map which
+reads sample at which phase (the kernel `ldh a,(FF41)` after a dispatched interrupt
+vs the window m3stat read in a tight poll), then the conflict-class routing — a deep,
+focused architectural change to `interconnect/cycle.rs::read_deferred`. It is NOT a
+uniform read-frame shift (the +5 vs +3 + the kernel cc+0 prove that). It is the read
+half of the atomic reclock, now characterized to the exact lever (the per-instruction
+read phase) rather than "the read frame is off".
