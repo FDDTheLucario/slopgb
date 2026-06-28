@@ -128,6 +128,7 @@ impl Interconnect {
     /// early.
     pub(super) fn read_deferred(&mut self, addr: u16, kind: OamBugKind) -> u8 {
         let before = self.clock.now();
+        let pend_dbg = self.clock.pending(); // C2 cc-exact: the debt paid before this read
         let _ = self.clock.read(); // clock += old pending; park 4
         self.advance_machine_t(before, self.clock.now());
         self.service_vram_dma();
@@ -139,7 +140,7 @@ impl Interconnect {
         if addr == 0xFF41 && crate::ppu::s5dbg_on() {
             let (line, dot) = self.ppu.scan_pos();
             if line < 144 {
-                eprintln!("SLOPGB ff41 ly={line} dot={dot} mode={}", v & 3);
+                eprintln!("SLOPGB ff41 ly={line} dot={dot} mode={} pend={pend_dbg}", v & 3);
             }
         }
         // S5 IF-delivery tracer: the m1/lycEnable family observes the STAT-vs-

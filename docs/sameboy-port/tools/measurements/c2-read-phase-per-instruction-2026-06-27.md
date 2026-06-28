@@ -1,5 +1,23 @@
 # C2 — the cc-exact read phase is PER-INSTRUCTION (the read half's precise mechanism, #11y)
 
+## RESOLUTION 2 (pending traced) — NOT pending either; it's a PER-TEST frame/lcd-offset.
+
+Added a `pend=` field to the FF41 read tracer (`read_deferred`). Measured: the window
+read (`m2int_wx03` ly1 dot260) AND the kernel read (`m2int_m3stat_1` ly1 dot252) BOTH
+have **`pend=4`** (the normal post-fetch debt). So slopgb's `pending` is identical for
+both — the +2 is NOT a pending difference. Both at cc+0, both pend=4, yet the window
+read offset is +5 (dot260/cfl265) and the kernel's is +3 (dot252/cfl≈255). The frame
+offset (slopgb dot ↔ SameBoy cfl) therefore differs **PER-TEST**: the window ROM and
+the kernel ROM turn the LCD on at different cycles → different CPU↔PPU frame alignment
+= the **lcd-offset** (the #11q mechanism), NOT the read mechanics (read phase REFUTED,
+pending REFUTED). The window-length law ships clean (+7/−0) because the m2int_wx reads
+land mode 0 on BOTH sides of the +2; the excluded late_wy/DMG read across the boundary
+where the per-test lcd-offset flips the result. So the cc-exact "read half" is really
+the **lcd-offset / per-test frame model** (#11q lineage — line-start OAM windows
+already model part of it) applied to the window/m3stat read frame, NOT a sub-M-cycle
+read clock. That reframes the next step: extend the #11q lcd-offset frame model to the
+window m3stat reads, not build a new read-phase clock.
+
 ## CORRECTION (source-checked) — SameBoy reads at cc+0, SAME as slopgb. The "cc+2 read phase" below is REFUTED.
 
 `Core/sm83_cpu.c::cycle_read` (verified): `if (pending_cycles) GB_advance_cycles(pending_cycles); ret = GB_read_memory(addr); pending_cycles = 4;` — advance the previous debt, sample at the LEADING edge, park 4. This is BYTE-FOR-BYTE slopgb's `read_deferred` (`clock.read()` = `clock += pending; sample; pending = 4`). So SameBoy reads FF41 at **cc+0**, exactly like slopgb. **There is NO per-instruction read-phase difference (no cc+2).** The "≈cc+2 / per-instruction read phase" mechanism hypothesized below is REFUTED by the source. (Third over-interpretation this session the build-measure discipline caught — after the "read-frame de-mask" and the line-0-length-term, both also walked back. The lesson holds: infer nothing the source/measurement doesn't show.)
