@@ -1194,21 +1194,24 @@ fn tier2_oam_preread_lcdoffset1_passes() {
     }
 }
 
-/// Port Stage C2 #11y — the window visible-mode-3 LENGTH law (the FF41-read half
-/// of the atomic reclock). A triggering window's SameBoy mode-3→0 exit is `SBex =
-/// 263 + SCX&7` (cfl); slopgb dot = cfl − 3 (the dot254≡cfl257 dispatch offset) →
-/// the CPU-visible FF41 exit is `260 + SCX&7`, DECOUPLED from `line_render_done`
-/// (the counter-pinned dispatch, which is config-dependently mis-positioned vs SBex
-/// so slopgb over-extends ~1 dot — the `m2int_wx*_m3stat_2` reads see mode 3 where
-/// SameBoy reads 0). Applied ONLY to the FF41 register read
+/// Port Stage C2 #11y/#11z — the window visible-mode-3 LENGTH law (the FF41-read
+/// half of the atomic reclock). A triggering window's SameBoy mode-3→0 exit is
+/// `SBex = 263 + SCX&7` (cfl); the CPU-visible FF41 exit is `SBex − read_offset`.
+/// **#11z: the deferred FF41 read samples +4 dots before SameBoy's read (MEASURED:
+/// `m2int_wx03_scx5_m3stat_2` slopgb dot264 ↔ SameBoy cfl268=SBex), NOT the +3
+/// dispatch frame** — so the exit is `259 + SCX&7`. DECOUPLED from
+/// `line_render_done` (the counter-pinned dispatch, config-dependently
+/// mis-positioned vs SBex so slopgb over-extends — the `m2int_wx*_m3stat_2` reads
+/// see mode 3 where SameBoy reads 0). Applied ONLY to the FF41 register read
 /// (`stat_irq.rs::vis_mode_read`, NOT the STAT-line `vis_mode` consumers), CGB
 /// normal-trigger ly≥1 windows (`win_active && !win_aborted && wy2!=ly && wy2<=143
 /// && wx<0xA0 && !ds`). Line 0 / late-WY / WY-disable windows are EXCLUDED — their
 /// reads de-mask an entangled read-frame error (the window length + read-frame
 /// co-land in the atomic step; #11y); the normal windows have a correct read-frame,
-/// so the length law fixes them cleanly. Full-CGB two-bin flag-on +7/−0. Production
+/// so the length law fixes them cleanly. Full-CGB two-bin flag-on +9/−0 (#11y +7
+/// at exit 260, #11z +2 more at 259 — the scx5 `_2` over-extend rows). Production
 /// byte-identical OFF (`win_active`/`tier2` never fire there). The DMG legs keep
-/// their floor (the +3 offset is CGB-measured; `is_cgb` gate).
+/// their floor (the offset is CGB-measured; `is_cgb` gate).
 #[test]
 fn tier2_window_m3stat_length_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -1218,10 +1221,13 @@ fn tier2_window_m3stat_length_passes() {
         );
         return;
     };
-    // All [Cgb] out0 — the normal-trigger window mode-3 read exits at 260+SCX&7.
+    // All [Cgb] out0 — the normal-trigger window mode-3 read exits at 259+SCX&7
+    // (#11z: SBex 263+SCX&7 − the measured +4 read offset). The scx5 `_2` legs
+    // pin the 259 (vs 260) calibration; the scx0 legs read past the exit either way.
     let rels = [
         "gambatte/window/m2int_wx00_m3stat_2_dmg08_cgb04c_out0.gbc",
         "gambatte/window/m2int_wx03_m3stat_2_dmg08_cgb04c_out0.gbc",
+        "gambatte/window/m2int_wx03_scx5_m3stat_2_dmg08_cgb04c_out0.gbc",
         "gambatte/window/m2int_wx03_scx3_m3stat_2_dmg08_cgb04c_out0.gbc",
         "gambatte/window/m2int_wx07_scx2_m3stat_2_dmg08_cgb04c_out0.gbc",
     ];

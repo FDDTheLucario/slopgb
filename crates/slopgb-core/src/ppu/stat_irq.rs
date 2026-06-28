@@ -7,16 +7,25 @@ impl Ppu {
     /// state machine: mode reads 0 during the first 4 dots of every line
     /// (and during 144:0-3), and mode 3 appears 4 dots after VRAM read
     /// locking (`lcdon_timing-GS` tables).
-    /// FF41-read STAT mode = [`Self::vis_mode`] + the C2 #11y window mode-3
+    /// FF41-read STAT mode = [`Self::vis_mode`] + the C2 #11y/#11z window mode-3
     /// length law, applied ONLY to the FF41 register read (`regs.rs`), NOT the
     /// internal `vis_mode` consumers (`stat_line_level`/IRQ, `mode_bits`,
     /// `update_mode_for_interrupt`). A triggering window's SameBoy mode-3 exit is
-    /// `SBex = 263 + SCX&7` (cfl) → slopgb CPU-visible exit `260 + SCX&7`
-    /// (cfl − 3), DECOUPLED from the counter-pinned `line_render_done`. LINE 0
-    /// EXCLUDED: the first window line (the WY-latch just matched) extends mode 3
-    /// later than the steady law — its read is at `ly0` and wants mode 3 past
-    /// dot 260 (the `late_wy_*` rows; #11y). Tier2 + normal-trigger ly>=1 windows;
-    /// production byte-identical OFF.
+    /// `SBex = 263 + SCX&7` (cfl), DECOUPLED from the counter-pinned
+    /// `line_render_done`. The CPU-visible exit is `SBex − read_offset`: the
+    /// deferred FF41 read samples the PPU `read_offset` dots BEFORE SameBoy reads
+    /// the same `ldh a,(FF41)`. **#11z: that offset is +4 for the window m3stat
+    /// reads (MEASURED — `m2int_wx03_scx5_m3stat_2` slopgb dot264 ↔ SameBoy
+    /// cfl268 = SBex; `m2int_wx03_scx2_m3stat_1` dot260 ↔ cfl264), NOT the +3
+    /// dispatch frame the #11y `260 + SCX&7` first used.** So the exit is
+    /// `263 − 4 + SCX&7 = 259 + SCX&7`: it converts the scx5 `_2` over-extend
+    /// rows (read dot264, want 0 — was mode 3 at exit 265) to mode 0, +2/−0
+    /// full-CGB. The scx0 `_2` rows read robustly PAST the exit either way
+    /// (dot260, SameBoy cfl265 > 263) so 259 vs 260 is invisible to them.
+    /// LINE 0 EXCLUDED: the first window line (the WY-latch just matched) extends
+    /// mode 3 later than the steady law and its `ly0` read frame differs (the
+    /// `late_wy_*` rows; #11y). Tier2 + normal-trigger ly>=1 windows; production
+    /// byte-identical OFF.
     pub(super) fn vis_mode_read(&self) -> u8 {
         let m = self.vis_mode();
         if self.tier2_reclock
@@ -29,7 +38,7 @@ impl Ppu {
             && self.wy2 != self.ly
             && self.wy2 <= 143
             && m == 3
-            && self.dot >= 260 + u16::from(self.eff.scx & 7)
+            && self.dot >= 259 + u16::from(self.eff.scx & 7)
         {
             return 0;
         }

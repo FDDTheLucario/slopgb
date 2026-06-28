@@ -81,14 +81,21 @@ fn main() {
         _ => Model::Cgb,
     };
     let rom = std::fs::read(&rom_path).expect("read rom");
-    let mut gb = GameBoy::new(model, rom).expect("load rom");
-    // Thesis hooks: SLOPGB_TIER2=1 enables the full Stage-B reclock
-    // (implies leading-edge); SLOPGB_LE=1 enables leading-edge only.
-    if std::env::var("SLOPGB_TIER2").is_ok() {
-        gb.set_tier2_reclock(true);
-    } else if std::env::var("SLOPGB_LE").is_ok() {
-        gb.set_leading_edge_reads(true);
-    }
+    // Thesis hooks: SLOPGB_TIER2=1 enables the full Stage-B reclock via
+    // `new_with_reclock` (the flag set *before* boot hand-off, so the C0 DIV+4
+    // re-calibration lands — this MATCHES the gbtr/`flagon_probe`
+    // `boot_with_reclock` frame; a post-boot `set_tier2_reclock` toggle skips
+    // the +4 and mis-frames every window/late_wy read by the DIV phase).
+    // SLOPGB_LE=1 enables leading-edge only.
+    let mut gb = if std::env::var("SLOPGB_TIER2").is_ok() {
+        GameBoy::new_with_reclock(model, rom).expect("load rom")
+    } else {
+        let mut gb = GameBoy::new(model, rom).expect("load rom");
+        if std::env::var("SLOPGB_LE").is_ok() {
+            gb.set_leading_edge_reads(true);
+        }
+        gb
+    };
     let target = 16 * u64::from(CYCLES_PER_FRAME);
     while gb.cycles() < target {
         gb.step();
