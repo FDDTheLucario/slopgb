@@ -1,5 +1,14 @@
 # C2 — the cc-exact read phase is PER-INSTRUCTION (the read half's precise mechanism, #11y)
 
+## CORRECTION (source-checked) — SameBoy reads at cc+0, SAME as slopgb. The "cc+2 read phase" below is REFUTED.
+
+`Core/sm83_cpu.c::cycle_read` (verified): `if (pending_cycles) GB_advance_cycles(pending_cycles); ret = GB_read_memory(addr); pending_cycles = 4;` — advance the previous debt, sample at the LEADING edge, park 4. This is BYTE-FOR-BYTE slopgb's `read_deferred` (`clock.read()` = `clock += pending; sample; pending = 4`). So SameBoy reads FF41 at **cc+0**, exactly like slopgb. **There is NO per-instruction read-phase difference (no cc+2).** The "≈cc+2 / per-instruction read phase" mechanism hypothesized below is REFUTED by the source. (Third over-interpretation this session the build-measure discipline caught — after the "read-frame de-mask" and the line-0-length-term, both also walked back. The lesson holds: infer nothing the source/measurement doesn't show.)
+
+The SOLID residual: the window FF41 read offset is +5 (slopgb dot260 / SameBoy cfl265) vs the +3 IF-rise/dispatch offset — a real **+2 discrepancy** between the read frame and the dispatch frame, with BOTH emulators sampling at cc+0. Since the read sample is `before + pending` in both, the +2 is in the **`pending` (the M-cycle debt advanced before the read)** or a non-uniform frame offset — NOT the read phase. Resolving it needs tracing the exact `pending` at the window read in both emulators (does slopgb's pending differ from SameBoy's by 2 there?), which is the genuine cc-exact-read investigation — but it is a `pending`/frame question, not the read-phase model described below.
+
+---
+
+
 2026-06-27, after the #11y window-length law shipped (+7/−0). Pinning the read half of
 the atomic reclock to its exact mechanism via direct SBREAD measurement.
 
