@@ -55,6 +55,37 @@ goal stages; #11y (+7) / #11z (+2) shipped the boundary-law families whose offse
 uniform, and this experiment implements + measures the read-frame core that converges
 the rest.
 
+## REFUTATION (build-measured) — the +4 is NOT a missing CPU M-cycle; the `bus.tick()` lever is WRONG-DIRECTION
+
+Tried to SHIP the model: gated the `bus.tick()` on `tier2_reclock` (not env) + exit 263,
+ran the full mooneye flag-on gate. **It breaks ~54 interrupt-timing rom×model combos**
+(acceptance/ppu 38/62 + acceptance 16/187): `di_timing`, `halt_ime0_nointr_timing`,
+`intr_1_2_timing`, `intr_2_0_timing`, `intr_2_mode0/mode3/oam_ok_timing`,
+`hblank_ly_scx` — ALL register `B=C=…=42` (the test never completes). These count the
+**5-M-cycle interrupt service EXACTLY**; the `bus.tick()` made it 6 M-cycles, a
+CPU-observable timing change that `di_timing`/`halt_ime0_nointr_timing` pin directly.
+
+**So the +4 read offset is NOT a missing CPU M-cycle** (`di_timing` proves the service
+is correctly 5 M-cycles; adding one breaks it). The earlier "missing post-dispatch
+M-cycle" framing is REFUTED. The +4 is a **PPU-advance lag**: between the aligned
+dispatch (slopgb dot0 ≡ SameBoy cfl0) and the kernel read, slopgb's PPU advances 252
+dots while SameBoy's advances 256 — for the SAME CPU cycle count. slopgb's deferred
+dispatch under-advances the PPU by 4 dots (1 M-cycle) **without** a CPU-cycle deficit
+(the CPU service is the correct 5 M-cycles). `bus.tick()` "worked" on the kernel read
+only because it added a whole M-cycle (CPU + PPU); the CPU half is the bug.
+
+**Corrected lever (for the next session): advance the PPU +4 during the dispatch
+WITHOUT a CPU cycle** — a PPU-only nudge in `interconnect.rs::dispatch_retime`
+(`advance_machine_t` the machine 4 extra T while the `clock` stays put), or a per-read
+PPU read-position offset in `read_deferred` (sample `vis_mode` at `self.dot + 4` for
+post-dispatch reads). This keeps `di_timing` (CPU timing unchanged) while landing the
+ISR read at SameBoy's PPU dot. CAUTION: desyncing the PPU from the deferred `clock`
+risks the next read's `advance_machine_t(before, now)` going backward — needs the PPU
+position tracked separately or the offset applied only at the mode SAMPLE, not the
+machine advance. Build-measure against `di_timing` (must stay 5 M-cycle) AND the window
+(must reach 68) BEFORE concluding — this is the third wrong-direction lever this branch
+caught (write-side #11v, vis_early #11t, the CPU-tick here).
+
 ## Next session — the bare-line boundary co-move (recover the 2 mooneye groups)
 
 With `SLOPGB_ISR_TICK` ON, the kernel read is at dot256 (SameBoy cfl256, mode 3 wanted)
