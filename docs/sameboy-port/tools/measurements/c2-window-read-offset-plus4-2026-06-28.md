@@ -78,3 +78,17 @@ at the scx2/scx5 boundary but the late_wy/late_disable/wxA6 families carry the #
 length terms AND a non-uniform offset). No single `vis_mode_read` boundary separates
 them. That is the global read-frame reclock (C2 atomic), not a length-law tweak.
 #11z is the one clean dot the corrected read offset buys.
+
+## Next-target probe (late_disable, build-measured — NOT a read-law slice)
+
+The `late_disable` want0-got3 rows (slopgb over-extends, reads mode 3): probe-internal
+reads — `late_disable_scx2_1`/`scx5_1` ly1 dot260 mode3, `late_disable_early_scx03_wx0f_1`
+ly1 dot256 mode3 — all want mode 0. They are NOT covered by the #11z law: the disable
+sets `win_aborted` (the law's gate excludes it) and, more fundamentally, slopgb's
+NATIVE `vis_mode` (= `line_render_done`, the dispatch) STILL reports mode 3 at dot260
+for a disabled window — i.e. the window abort does not shorten `line_render_done`.
+SameBoy's window mode-3 aborts early on disable (exit ≈ the bare-line position), so its
+read at cfl260+ lands mode 0. So this is the #11g **render-coupled** `late_disable`
+term (the abort must shorten the visible mode-3), not a read-law exit tweak — a
+production-render change (breaks byte-identical OFF) on the C2 render-model path, NOT
+a `vis_mode_read` one-liner. Floored for #11z; carried to the render model.
