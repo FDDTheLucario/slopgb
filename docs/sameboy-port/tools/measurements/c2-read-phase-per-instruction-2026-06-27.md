@@ -1,5 +1,22 @@
 # C2 — the cc-exact read phase is PER-INSTRUCTION (the read half's precise mechanism, #11y)
 
+## SCOPE CORRECTION — this is the READ SAMPLE, NOT a ~7000-row frame rebaseline.
+
+Re-examining the offsets: the DISPATCH/RENDER frame is ALREADY correct — dot254 ≡
+cfl257 (+3), and the 21 tier2 pins (kernel pair, intr_2, int_hblank, hblank_ly_scx,
+lcdon, the #11w/#11x/#11y reads) all PASS at that frame. The +4/+5 are the READS
+sampling +1/+2 dots EARLIER than the +3 dispatch frame would put them. So the residual
+is NOT "shift the whole frame and rebaseline ~7000 rows" (the dispatch/render frame is
+right) — it is the **cc-exact READ SAMPLE**: specific FF41/accessibility reads land
+1-2 dots before SameBoy's read of the same event, and the boundary-sensitive rows flip
+on it. (My "~7000-row atomic frame rebaseline" framing in the handoff/ladder was an
+over-statement — the 5th characterization corrected this session. The frame is mostly
+right; the reads are the narrow residual.) The cc-exact read is a targeted change to
+`read_deferred`'s sample position for the boundary reads, NOT a global rebaseline —
+materially smaller scope, though still needing the per-read offset model (why a uniform
++1/+2 shift can't work: kernel wants +1, window +2, and the length law already
+compensates the m2int_wx reads).
+
 ## RESOLUTION 3 (kernel read cfl MEASURED) — the read offset VARIES PER-TEST by ~1 dot; +3 was a wrong assumption.
 
 Measured SameBoy's kernel read directly (not assumed): `m2int_m3stat_1` reads **ly1
