@@ -86,6 +86,33 @@ machine advance. Build-measure against `di_timing` (must stay 5 M-cycle) AND the
 (must reach 68) BEFORE concluding — this is the third wrong-direction lever this branch
 caught (write-side #11v, vis_early #11t, the CPU-tick here).
 
+## The `in_isr` read-frame discriminator — BUILT, but inert (the polled window rows are RENDER-blocked)
+
+Since the +4 is in-ISR-only (the polled `late_wy` reads are +0), built the per-read
+frame discriminator WITHOUT touching the interrupt clock: a bus flag `cpu_in_isr` (set
+in `dispatch_retime`, cleared on RETI via a new `Bus::end_isr`), forwarded to
+`Ppu::cpu_in_isr`, selecting the window read exit `win_read_exit()` = `259` (in-ISR) vs
+`263` (polled) `+ SCX&7`, with `vis_mode_read` made TWO-SIDED (extend mode0→3 below the
+exit, shorten above). This is di_timing-safe (only the FF41 mode SAMPLE moves, not the
+clock) and is the goal's per-read frame-offset model on the read path.
+
+**Result: NO-OP (window flag-on 79 = #11z, 0 fixed / 0 regressed).** Traced why:
+- `late_wy_FFto2_ly2_*` (wy2==ly): excluded by the `wy2 != ly` gate. Removing it →
+  **−2/+0** (regresses `late_wx_late_wy_FFto2_ly2_2` + `late_wy_FFto2_ly2_wx00_1`), no
+  fix — so the gate must stay.
+- `late_wy_10to0_ly1_1` (wy2!=ly): reaches the gate but reads native mode 0 because
+  **`render.win_active` is FALSE** — slopgb does NOT activate the window when it should
+  (the #11g WY-latch render bug, `wy_ok=false`). The law's `win_active` gate then skips
+  it, and even the two-sided EXTEND can't fire.
+
+So the polled `late_wy` window reads are blocked by the **render-level WY-latch**
+(`win_active`), NOT (only) the read frame. The `in_isr` read-exit is correct and
+ready but inert until the WY-latch fix lands (which breaks byte-identical OFF →
+production render, golden-protected). Reverted (no observable benefit → no pin → not
+shippable per the discipline). The discriminator design is the foundation for when the
+render WY-latch + the bare-line atomic reclock co-land. (3 byte-identical-OFF read-law
+slices shipped — #11y/#11z; the rest of the window is render + atomic, not read-law.)
+
 ## Next session — the bare-line boundary co-move (recover the 2 mooneye groups)
 
 With `SLOPGB_ISR_TICK` ON, the kernel read is at dot256 (SameBoy cfl256, mode 3 wanted)
