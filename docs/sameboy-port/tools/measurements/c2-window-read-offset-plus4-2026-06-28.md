@@ -79,37 +79,47 @@ length terms AND a non-uniform offset). No single `vis_mode_read` boundary separ
 them. That is the global read-frame reclock (C2 atomic), not a length-law tweak.
 #11z is the one clean dot the corrected read offset buys.
 
-## The read offset is PER-ROM (the lcd-offset), NOT per-event/per-line — boundary law EXHAUSTED
+## The read offset is INTERRUPT-DRIVEN (+4) vs POLLED (+0) — the interrupt-service frame, NOT an lcd-offset
 
 Followed the collapse to the late_wy family (probe-internal slopgb + SameBoy, correct
-frame). Three STEADY-line ly1 window reads, three different offsets:
+frame) and checked for a dispatch on the read line:
 
-| ROM (want) | slopgb read | SameBoy read | SameBoy exit | offset |
-|---|---|---|---|---|
-| `m2int_wx03_scx5_m3stat_2` (0) | ly1 dot264 | ly1 cfl268 | cfl268 | **+4** |
-| `m2int_wx03_m3stat_2` scx0 (0) | ly1 dot260 | ly1 cfl265 | cfl263 | **+5** |
-| `late_wy_10to0_ly1_1` (3) | ly1 dot260 | ly1 cfl260 | cfl263 | **+0** |
+| ROM (want) | slopgb read | SameBoy read | SameBoy exit | offset | read kind |
+|---|---|---|---|---|---|
+| `m2int_wx03_scx5_m3stat_2` (0) | ly1 dot264 | ly1 cfl268 | cfl268 | **+4** | INT (mode-2 dispatch ly1 dot0) |
+| `m2int_wx03_m3stat_2` scx0 (0) | ly1 dot260 | ly1 cfl265 | cfl263 | **+5** | INT |
+| kernel `m2int_m3stat_1` (3) | ly1 dot252 | ly1 cfl256 | — | **+4** | INT (dispatch ly1 dot0) |
+| `late_wy_10to0_ly1_1` (3) | ly1 dot260 | ly1 cfl260 | cfl263 | **+0** | POLLED (NO dispatch ly1-2) |
 
 The concrete COLLAPSE: `late_wy_10to0_ly1_1` (want 3) and `late_wy_1toFF_1` (want 0)
-BOTH read slopgb **ly1 dot260**, opposite wanted modes. They are NOT separable by
-slopgb window state: 10to0's WY=0 matches on ly0 so ly1 is a STEADY line (`wy_latch`
-true, `wy2 != ly`) — the same window state m2int_wx presents — yet its read offset is
-+0 vs m2int_wx's +4/+5. The only difference is the ROM's lcd-on cycle (the CPU↔PPU
-phase = #11q lcd-offset). slopgb reads both at dot260 because its deferred read clock
-is the same; SameBoy reads them at cfl260 vs cfl265+ because its CPU↔PPU phase differs
-per ROM.
+BOTH read slopgb **ly1 dot260**, opposite wanted modes. The discriminator is NOT
+window state (both are steady `wy_latch`, `wy2 != ly`) and NOT a per-ROM lcd-offset —
+it is **whether the read is INTERRUPT-DRIVEN or POLLED**: the m2int reads follow a
+mode-2 STAT dispatch (the FF41 read is in the ISR), the late_wy reads are a direct
+poll with no dispatch on the line. The PPU EVENT (the dispatch / IF-raise) ALIGNS in
+both emulators (slopgb dot0 ≡ SameBoy cfl0); only the CPU-side ISR read diverges +4.
 
-**So the per-read frame-offset model (the goal's START) reduces to the per-ROM
-lcd-offset: slopgb must read FF41 where SameBoy reads it, which means slopgb's lcd-on
-CPU↔PPU phase must match SameBoy's.** That is the GLOBAL reclock (it shifts every
-read AND the counter-pinned dispatch/boundary together — the kernel reads dot252 and
-PASSES only because its boundary is unshifted; a uniform read shift breaks it), = C2
-atomic → C3. A `vis_mode_read` boundary law keyed on slopgb dot CANNOT supply a
-per-ROM offset. **The boundary-law approach is build-measured to EXHAUSTION: #11y (+7)
-+ #11z (+2) extracted the families whose offset is uniform (+4/+5, robust m2int_wx);
-the residual 79 are the lcd-offset families (+0..+5 per ROM), reachable only by the
-read-frame reclock — not another exit term.** (The #11z `259` is correct for the +4
-m2int_wx family it ships; it does not — and cannot — fix the +0 late_wy reads.)
+**So the +4 is the INTERRUPT-SERVICE FRAME: slopgb's post-dispatch ISR reads land 1
+M-cycle (4 dots) EARLIER than SameBoy's** (the dispatch→read latency: kernel SameBoy
+cfl0→cfl256 = 256 dots, slopgb dot0→dot252 = 252). The deferred-clock dispatch retime
+(`dispatch_vector_retime`: `pending -= 2; flush; pending = 2`, `cycle_clock.rs:187`)
+re-parks 2 after the vector latch, sampling the post-dispatch reads early; the net
+ISR-frame divergence is one M-cycle. The POLLED reads (no dispatch) are already
+ALIGNED (+0).
+
+**This relocates the per-read frame-offset model from a global lcd-offset to a bounded
+CPU-timing seam: the interrupt-service / post-dispatch read frame.** Implication for
+the window family: the m2int reads (+4, the #11y/#11z `260`/`259` law families) and
+the late_wy POLLED reads (+0, want exit 263) need DIFFERENT exits ONLY because the
+interrupt reads are mis-framed by the ISR +4. Fixing the interrupt-service frame
+(post-dispatch reads land at SameBoy's +0, like polled) would let a UNIFORM exit
+(263 = +0) serve BOTH families — but it shifts the counter-pinned interrupt tests
+(`intr_2_mode0_timing`, `int_hblank_halt`) that currently pass at the +4 frame, so it
+is the atomic reclock (the dispatch retime + boundary co-move), NOT a flag-gated
+read-only nudge. Still, the lever is now LOCALIZED: `dispatch_interrupt` /
+`dispatch_vector_retime` (the ISR read frame), not a global per-ROM lcd phase. The
+`vis_mode_read` boundary-law approach is exhausted (it can't see CPU read-kind);
+#11y (+7) + #11z (+2) shipped the interrupt-read families whose +4/+5 is uniform.
 
 ## Next-target probe (late_disable, build-measured — NOT a read-law slice)
 
