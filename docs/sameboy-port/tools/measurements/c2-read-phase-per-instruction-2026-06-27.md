@@ -1,5 +1,26 @@
 # C2 — the cc-exact read phase is PER-INSTRUCTION (the read half's precise mechanism, #11y)
 
+## RESOLUTION 3 (kernel read cfl MEASURED) — the read offset VARIES PER-TEST by ~1 dot; +3 was a wrong assumption.
+
+Measured SameBoy's kernel read directly (not assumed): `m2int_m3stat_1` reads **ly1
+cfl256** (slopgb dot252, mode 3) → offset **+4**. The window `m2int_wx03` reads **ly1
+cfl265** (slopgb dot260, mode 0) → offset **+5**. The DISPATCH (mode-0 IRQ) is +3
+(dot254≡cfl257). So the slopgb-dot ↔ SameBoy-cfl offset is NOT a single constant — it
+is **+3 (dispatch), +4 (kernel read), +5 (window read)**, varying per-event and
+per-test by ~1 dot. (My "+3 everywhere" was an unmeasured assumption — the 4th
+correction this session.) Both reads PASS because each lands on the correct side of
+its own boundary (kernel before its exit = mode 3; window after = mode 0); the FAILING
+rows (late_wy/DMG) read where the ±1 per-test offset variation flips the result.
+
+So the read half is the **per-test/per-event frame-offset model**: the CPU↔PPU frame
+alignment differs by ~1 dot between tests (LCD-on timing, the read M-cycle's phase vs
+the dispatch M-cycle), and the boundary-sensitive rows need it modelled. This is NOT a
+uniform read shift, NOT a read phase (cc+0 both), NOT pending (4 both) — it is the
+genuine per-test frame variation, the deepest characterization of the read residual.
+The shipped `260+SCX&7` length law converges with it once the per-test offset is
+modelled; the next step is to instrument the LCD-on cycle + the read M-cycle phase per
+test and derive the offset, then apply it to the window/m3stat read frame.
+
 ## RESOLUTION 2 (pending traced) — NOT pending either; it's a PER-TEST frame/lcd-offset.
 
 Added a `pend=` field to the FF41 read tracer (`read_deferred`). Measured: the window
