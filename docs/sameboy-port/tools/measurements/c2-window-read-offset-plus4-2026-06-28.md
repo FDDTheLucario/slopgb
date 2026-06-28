@@ -79,6 +79,38 @@ length terms AND a non-uniform offset). No single `vis_mode_read` boundary separ
 them. That is the global read-frame reclock (C2 atomic), not a length-law tweak.
 #11z is the one clean dot the corrected read offset buys.
 
+## The read offset is PER-ROM (the lcd-offset), NOT per-event/per-line — boundary law EXHAUSTED
+
+Followed the collapse to the late_wy family (probe-internal slopgb + SameBoy, correct
+frame). Three STEADY-line ly1 window reads, three different offsets:
+
+| ROM (want) | slopgb read | SameBoy read | SameBoy exit | offset |
+|---|---|---|---|---|
+| `m2int_wx03_scx5_m3stat_2` (0) | ly1 dot264 | ly1 cfl268 | cfl268 | **+4** |
+| `m2int_wx03_m3stat_2` scx0 (0) | ly1 dot260 | ly1 cfl265 | cfl263 | **+5** |
+| `late_wy_10to0_ly1_1` (3) | ly1 dot260 | ly1 cfl260 | cfl263 | **+0** |
+
+The concrete COLLAPSE: `late_wy_10to0_ly1_1` (want 3) and `late_wy_1toFF_1` (want 0)
+BOTH read slopgb **ly1 dot260**, opposite wanted modes. They are NOT separable by
+slopgb window state: 10to0's WY=0 matches on ly0 so ly1 is a STEADY line (`wy_latch`
+true, `wy2 != ly`) — the same window state m2int_wx presents — yet its read offset is
++0 vs m2int_wx's +4/+5. The only difference is the ROM's lcd-on cycle (the CPU↔PPU
+phase = #11q lcd-offset). slopgb reads both at dot260 because its deferred read clock
+is the same; SameBoy reads them at cfl260 vs cfl265+ because its CPU↔PPU phase differs
+per ROM.
+
+**So the per-read frame-offset model (the goal's START) reduces to the per-ROM
+lcd-offset: slopgb must read FF41 where SameBoy reads it, which means slopgb's lcd-on
+CPU↔PPU phase must match SameBoy's.** That is the GLOBAL reclock (it shifts every
+read AND the counter-pinned dispatch/boundary together — the kernel reads dot252 and
+PASSES only because its boundary is unshifted; a uniform read shift breaks it), = C2
+atomic → C3. A `vis_mode_read` boundary law keyed on slopgb dot CANNOT supply a
+per-ROM offset. **The boundary-law approach is build-measured to EXHAUSTION: #11y (+7)
++ #11z (+2) extracted the families whose offset is uniform (+4/+5, robust m2int_wx);
+the residual 79 are the lcd-offset families (+0..+5 per ROM), reachable only by the
+read-frame reclock — not another exit term.** (The #11z `259` is correct for the +4
+m2int_wx family it ships; it does not — and cannot — fix the +0 late_wy reads.)
+
 ## Next-target probe (late_disable, build-measured — NOT a read-law slice)
 
 The `late_disable` want0-got3 rows (slopgb over-extends, reads mode 3): probe-internal
