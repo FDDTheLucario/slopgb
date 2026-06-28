@@ -140,7 +140,10 @@ impl Interconnect {
         if addr == 0xFF41 && crate::ppu::s5dbg_on() {
             let (line, dot) = self.ppu.scan_pos();
             if line < 144 {
-                eprintln!("SLOPGB ff41 ly={line} dot={dot} mode={} pend={pend_dbg}", v & 3);
+                eprintln!(
+                    "SLOPGB ff41 ly={line} dot={dot} mode={} pend={pend_dbg}",
+                    v & 3
+                );
             }
         }
         // S5 IF-delivery tracer: the m1/lycEnable family observes the STAT-vs-
