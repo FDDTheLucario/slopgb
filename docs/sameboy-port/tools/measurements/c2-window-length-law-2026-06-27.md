@@ -1,5 +1,22 @@
 # C2 #11y — the window-length law VALIDATED + the atomicity PROVEN (convergence trap)
 
+## UPDATE — SHIPPED the clean normal-window subset (+7/−0, `7163d37`)
+
+The +12/−6 was the UNGATED law. Gating to **CGB normal-trigger ly≥1 windows**
+(`win_active && !ds && is_cgb && line>=1 && wx<0xA0 && !win_aborted && wy2!=ly &&
+wy2<=143`) isolates the clean subset: **+7/−0 full-CGB** (`m2int_wx00/03/07_m3stat_2`
++ scx variants). The excluded rows are exactly the −6 + line 0: line 0 (first window
+line extends mode 3 later), late-WY (`wy2==ly`), and WY-disable (`wy2==0xFF`) windows
+— their reads de-mask the entangled read-frame (they co-land with the cc-exact read
+sample). The normal windows have a CORRECT read-frame, so the length law fixes them
+ALONE. Applied via a new `vis_mode_read` (FF41 read only, decoupled from the STAT
+line). Pin `tier2_window_m3stat_length_passes`; byte-identical OFF; DMG floored (the
++3 offset is CGB-measured). The remaining window rows (late_wy/late_disable/line-0/
+DMG/wxA6) carry the #11g mechanism terms + the cc-exact read co-landing.
+
+---
+
+
 2026-06-27. Built the principled tier2 window visible-mode-3 length model from
 #11g's ground-truth and measured it. **Result: the law is correct (fixes the normal
 m2int_wx windows) but CANNOT ship alone — it de-masks the entangled read-frame
