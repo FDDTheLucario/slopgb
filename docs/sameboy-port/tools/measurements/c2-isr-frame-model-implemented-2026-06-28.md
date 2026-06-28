@@ -1,5 +1,34 @@
 # C2 #11z' — the per-read frame-offset model IMPLEMENTED + measured: it converges the window, atomically
 
+## RESOLUTION (the per-read frame model IS #11z — algebraic + empirical)
+
+The goal's START is "route the deferred read sample to SameBoy's per-read dot instead
+of the uniform leading edge." Build-measured to its end, every realization of that
+reduces to one of two things:
+
+1. **The byte-identical-OFF form is ALGEBRAICALLY the boundary law #11z.** SameBoy reads
+   mode 3 iff `cfl < SBex(263+SCX&7)`; slopgb's read at dot `D` corresponds to SameBoy
+   `cfl = D + offset` (offset +4 for the in-ISR window reads). "Route the sample to
+   `D+offset`" → mode 3 iff `(D+4) < 263+SCX&7` ⇔ `D < 259+SCX&7` — which is EXACTLY
+   #11z's exit. So **#11z IS the per-read frame-offset model**, expressed in the only
+   form the deferred read clock permits byte-identical OFF (the read sample cannot be
+   physically moved: a CPU-cycle shift breaks `di_timing`, a PPU-only advance
+   double-counts, and a co-moved sample+boundary cancels). Confirmed EMPIRICALLY: the
+   `in_isr` "pure sample-route" two-sided law is a no-op (window 79 = #11z's 79).
+
+2. **The only lever that moved MORE rows (`bus.tick`, window→68) breaks `di_timing`** —
+   it adds a CPU M-cycle (the atomic reclock), not a read-frame change.
+
+So there is NO separate, unshipped, byte-identical-OFF "per-read frame-offset model"
+distinct from #11z. The window rows #11z leaves are NOT read-frame residual — they are
+(a) RENDER-blocked (`win_active`=false, the #11g WY-latch — production render, breaks
+byte-identical OFF) and (b) the in-ISR ATOMIC frame (the +4 read↔boundary co-move that
+breaks ~54 counter-pinned interrupt tests). Both are out of the byte-identical-OFF
+read+length scope by the goal's own staging (Phase 3 render / C2-atomic → C3).
+
+---
+
+
 2026-06-28. The goal's START ("a per-read frame-offset model on `read_deferred`,
 converging the window/DMG rows") implemented as an experiment and build-measured. The
 model is CORRECT and converges the window; it is ATOMIC (the read frame and the
