@@ -531,6 +531,22 @@ pub struct Ppu {
     wy2: u8,
     /// Dots until `wy2` catches up with the architectural WY (CGB only).
     wy2_delay: u8,
+    /// **C2 #11af shadow WY-trigger (tier2 + CGB only; byte-identical OFF —
+    /// these fields are never updated nor read on the production path).**
+    /// SameBoy latches `wy_triggered` from a *continuous* `WY == LY` compare
+    /// during the visible frame (`display.c` `wy_check`), whereas slopgb's
+    /// production `wy_latch` samples only at the three gambatte weMaster dots
+    /// (line 0 dot 2, dots 450/454) — so a mid-line late-WY write that SameBoy
+    /// catches is missed by slopgb's discrete sampler. This sticky latch
+    /// re-derives SameBoy's decision for the FF41-read window-length law
+    /// ([`Self::vis_mode_read`]) without touching `line_render_done` / the
+    /// render. Reset at line 0; set the first dot `win_en && wy2 == ly`.
+    wy_trig_sb: bool,
+    /// The (line, dot) the shadow latch was set — the window extends mode 3 on
+    /// a line iff the latch was set on an earlier line OR on this line at/before
+    /// the WX-activation dot ([`Render::wx_match_dot`]). See `wy_trig_sb`.
+    wy_trig_sb_line: u8,
+    wy_trig_sb_dot: u16,
     /// The most recent staged rendering write was double-speed (1-dot)
     /// staging — used to pick the wy2 catch-up delay.
     staged_ds: bool,
@@ -727,6 +743,9 @@ impl Ppu {
             wy_latch: false,
             wy2: 0,
             wy2_delay: 0,
+            wy_trig_sb: false,
+            wy_trig_sb_line: 0,
+            wy_trig_sb_dot: 0,
             staged_ds: false,
             ds: false,
             win_line: 0xFF,
@@ -837,7 +856,6 @@ impl Ppu {
         self.tier2_reclock = on;
     }
 
-
     fn step_dot(&mut self) {
         // CGB: the line-start LYC event's delayed FF45 copy catches up
         // outside the 4-dot lead-in of each event — dot 4, and 153:12
@@ -862,6 +880,26 @@ impl Ppu {
             // `m0_flip_events`) drops when the mode-2 window becomes
             // visible.
             self.m0_src = false;
+        }
+        // C2 #11af shadow WY-trigger (tier2 + CGB only; byte-identical OFF).
+        // SameBoy's `wy_triggered` is a continuous `WY == LY` latch, sticky for
+        // the frame; reset it at the frame top (line 0 dot 0) and set it the
+        // first dot the compare holds on any visible line. See `wy_trig_sb`.
+        if self.tier2_reclock && self.model.is_cgb() {
+            if self.line == 0 && self.dot == 0 {
+                self.wy_trig_sb = false;
+            }
+            if self.line < 144 && !self.wy_trig_sb && win_en && self.wy2 == self.ly {
+                self.wy_trig_sb = true;
+                self.wy_trig_sb_line = self.ly;
+                self.wy_trig_sb_dot = self.dot;
+                if crate::ppu::s5dbg_on() {
+                    eprintln!(
+                        "SLOPGB wytrigset ly={} dot={} wy2={}",
+                        self.ly, self.dot, self.wy2
+                    );
+                }
+            }
         }
         if self.line == 0 && self.dot == 2 {
             // Line 0: assignment, not OR — this is the frame reset

@@ -201,6 +201,13 @@ pub(super) struct Render {
     /// comparator for sprites with OAM X 0-7 — an OBJ fetch freezes the
     /// walk (the SCX hunt pauses during an X<8 sprite fetch).
     prefill_pos: u8,
+    /// **C2 #11af shadow WX-activation dot (tier2 + CGB only; 0 = no match
+    /// yet).** The dot the raw WX comparator first matched this line,
+    /// recorded *before* the `wy_ok`/`win_en` activation gate — so it is
+    /// available even on a bare line the window never enters. The shadow
+    /// WY-trigger ([`Ppu::wy_trig_sb`]) only extends mode 3 on a line where
+    /// it was set at/before this dot (the SameBoy activation deadline).
+    pub(super) wx_match_dot: u16,
 }
 
 impl Render {
@@ -237,6 +244,7 @@ impl Render {
             win_aborted: false,
             win_match_prev: false,
             prefill_pos: 0,
+            wx_match_dot: 0,
         }
     }
 }
@@ -290,6 +298,7 @@ impl Ppu {
         r.win_aborted = false;
         r.win_match_prev = false;
         r.prefill_pos = 0;
+        r.wx_match_dot = 0;
         if self.glitch_line {
             // No OAM scan ran on the glitched LCD-enable line: no sprites.
             r.n_sprites = 0;

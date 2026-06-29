@@ -637,7 +637,10 @@ fn kernel_pair_matches_sameboy_target() {
 #[test]
 fn sprite_kernel_pair_matches_sameboy_target() {
     let Some(root) = common::gbtr_root() else {
-        common::skip_or_fail_gbtr("sprite_kernel_pair", "game-boy-test-roms collection not present");
+        common::skip_or_fail_gbtr(
+            "sprite_kernel_pair",
+            "game-boy-test-roms collection not present",
+        );
         return;
     };
     let targets = [
@@ -680,7 +683,10 @@ fn sprite_kernel_pair_matches_sameboy_target() {
 #[test]
 fn tier2_kernel_pair_matches_sameboy_target() {
     let Some(root) = common::gbtr_root() else {
-        common::skip_or_fail_gbtr("tier2_kernel_pair", "game-boy-test-roms collection not present");
+        common::skip_or_fail_gbtr(
+            "tier2_kernel_pair",
+            "game-boy-test-roms collection not present",
+        );
         return;
     };
     let targets = [
@@ -724,7 +730,10 @@ fn tier2_kernel_pair_matches_sameboy_target() {
 #[test]
 fn tier2_intr_2_sprites_passes() {
     let Some(root) = common::gbtr_root() else {
-        common::skip_or_fail_gbtr("tier2_intr_2_sprites", "game-boy-test-roms collection not present");
+        common::skip_or_fail_gbtr(
+            "tier2_intr_2_sprites",
+            "game-boy-test-roms collection not present",
+        );
         return;
     };
     let rel = "mooneye-test-suite/acceptance/ppu/intr_2_mode0_timing_sprites.gb";
@@ -754,12 +763,18 @@ fn tier2_intr_2_sprites_passes() {
 #[test]
 fn tier2_boot_div_passes() {
     let Some(root) = common::gbtr_root() else {
-        common::skip_or_fail_gbtr("tier2_boot_div", "game-boy-test-roms collection not present");
+        common::skip_or_fail_gbtr(
+            "tier2_boot_div",
+            "game-boy-test-roms collection not present",
+        );
         return;
     };
     // (rel path under the mooneye-test-suite, model legs the suffix runs on).
     let legs: &[(&str, &[Model])] = &[
-        ("acceptance/boot_div-dmgABCmgb.gb", &[Model::Dmg, Model::Mgb]),
+        (
+            "acceptance/boot_div-dmgABCmgb.gb",
+            &[Model::Dmg, Model::Mgb],
+        ),
         ("acceptance/boot_div-dmg0.gb", &[Model::Dmg0]),
         ("acceptance/boot_div-S.gb", &[Model::Sgb, Model::Sgb2]),
         ("acceptance/boot_div2-S.gb", &[Model::Sgb, Model::Sgb2]),
@@ -797,7 +812,10 @@ fn tier2_boot_div_passes() {
 #[test]
 fn tier2_intr_2_mode3_passes() {
     let Some(root) = common::gbtr_root() else {
-        common::skip_or_fail_gbtr("tier2_intr_2_mode3", "game-boy-test-roms collection not present");
+        common::skip_or_fail_gbtr(
+            "tier2_intr_2_mode3",
+            "game-boy-test-roms collection not present",
+        );
         return;
     };
     let rel = "mooneye-test-suite/acceptance/ppu/intr_2_mode3_timing.gb";
@@ -884,7 +902,10 @@ fn tier2_hblank_ly_scx_passes() {
 #[test]
 fn tier2_m1_vblank_rearm_passes() {
     let Some(root) = common::gbtr_root() else {
-        common::skip_or_fail_gbtr("tier2_m1_rearm", "game-boy-test-roms collection not present");
+        common::skip_or_fail_gbtr(
+            "tier2_m1_rearm",
+            "game-boy-test-roms collection not present",
+        );
         return;
     };
     let rel = "gambatte/m1/lycint143_m1irq_2_dmg08_cgb04c_out3.gbc";
@@ -892,9 +913,8 @@ fn tier2_m1_vblank_rearm_passes() {
     for model in [Model::Dmg, Model::Cgb] {
         let mut gb = harness::boot_with_reclock(&rom, model);
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
-        check_hex_screen(gb.frame(), "3", model.is_cgb()).unwrap_or_else(|e| {
-            panic!("{rel} [{model:?}] expected out3 (tier2 flag-on): {e}")
-        });
+        check_hex_screen(gb.frame(), "3", model.is_cgb())
+            .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected out3 (tier2 flag-on): {e}"));
     }
 }
 
@@ -914,7 +934,10 @@ fn tier2_m1_vblank_rearm_passes() {
 #[test]
 fn tier2_line0_vblank_carry_passes() {
     let Some(root) = common::gbtr_root() else {
-        common::skip_or_fail_gbtr("tier2_line0_vblank", "game-boy-test-roms collection not present");
+        common::skip_or_fail_gbtr(
+            "tier2_line0_vblank",
+            "game-boy-test-roms collection not present",
+        );
         return;
     };
     let rel = "gambatte/lycEnable/lycwirq_trigger_ly00_stat50_1_dmg08_cgb04c_outE0.gbc";
@@ -946,7 +969,10 @@ fn tier2_line0_vblank_carry_passes() {
 #[test]
 fn tier2_glitch_m0irq_dispatch_passes() {
     let Some(root) = common::gbtr_root() else {
-        common::skip_or_fail_gbtr("tier2_glitch_m0irq", "game-boy-test-roms collection not present");
+        common::skip_or_fail_gbtr(
+            "tier2_glitch_m0irq",
+            "game-boy-test-roms collection not present",
+        );
         return;
     };
     for (rel, want) in [
@@ -988,7 +1014,10 @@ fn tier2_glitch_m0irq_dispatch_passes() {
 #[test]
 fn tier2_lyc_carryover_late_ff45_passes() {
     let Some(root) = common::gbtr_root() else {
-        common::skip_or_fail_gbtr("tier2_lyc_carryover", "game-boy-test-roms collection not present");
+        common::skip_or_fail_gbtr(
+            "tier2_lyc_carryover",
+            "game-boy-test-roms collection not present",
+        );
         return;
     };
     let rel = "gambatte/lycEnable/lyc0_late_ff45_enable_3_dmg08_cgb04c_outE0.gbc";
@@ -1017,7 +1046,10 @@ fn tier2_lyc_carryover_late_ff45_passes() {
 #[test]
 fn tier2_m2int_m3stat_scx3_passes() {
     let Some(root) = common::gbtr_root() else {
-        common::skip_or_fail_gbtr("tier2_m2int_m3stat", "game-boy-test-roms collection not present");
+        common::skip_or_fail_gbtr(
+            "tier2_m2int_m3stat",
+            "game-boy-test-roms collection not present",
+        );
         return;
     };
     // (rel, expect, models) — scx3 both models, nobg_scx7 CGB-only (cgb04c tag).
@@ -1223,7 +1255,10 @@ fn tier2_oam_preread_lcdoffset1_passes() {
     // (rel, expect) — the lcd-offset variant reads accessible (dot2, open), the
     // base reads blocked (dot0, excluded from the window).
     let targets: [(&str, &str); 2] = [
-        ("gambatte/oam_access/preread_lcdoffset1_1_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/oam_access/preread_lcdoffset1_1_cgb04c_out0.gbc",
+            "0",
+        ),
         ("gambatte/oam_access/preread_2_dmg08_cgb04c_out3.gbc", "3"),
     ];
     for (rel, expect) in targets {
@@ -1283,6 +1318,90 @@ fn tier2_window_m3stat_length_passes() {
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), "0", true)
             .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out0 (tier2 flag-on): {e}"));
+    }
+}
+
+/// Port Stage C2 #11af — the window render-level **shadow WY-trigger** (the
+/// late-WY half of the #11g window model). SameBoy latches `wy_triggered` from a
+/// *continuous* `WY == LY` compare (`display.c` `wy_check`), but slopgb's
+/// production `wy_latch` samples only at the three gambatte weMaster dots (line 0
+/// dot 2, dots 450/454) — so a *mid-line* late-WY write that SameBoy catches is
+/// MISSED by slopgb's discrete sampler, and slopgb renders the line BARE where
+/// SameBoy's window triggered and extended mode 3 to `263 + SCX&7` (the POLLED
+/// read exit, +0). The shadow [`Ppu::wy_trig_sb`] re-derives SameBoy's decision
+/// — sticky `WY == LY` latch + the WX-activation deadline ([`Render::wx_match_dot`]
+/// `+ 2`, the wy2-copy phase slack) — purely for the FF41-read law
+/// ([`Ppu::vis_mode_read`]), NOT `line_render_done`/the render. Fires ONLY when
+/// the trigger latched on THIS line (`trig_line == ly`): the cross-line
+/// (`trig_line < ly`) latch is left bare because (a) the line-boundary late-WY
+/// writes (`10to0`/`FFto0`) land a line later in the deferred frame so the shadow
+/// never latches them, and (b) a `!win_active` cross-line latch means the window
+/// was aborted / its WX/LCDC.5 toggled late (`late_wx`/`late_reenable`/
+/// `late_enable`) — SameBoy renders THOSE bare. Full-CGB two-bin flag-on **+5/−0**
+/// (the `_1` mid-line late-WY rows; the `_2`/`_3` siblings + the toggled-window
+/// rows stay bare). Production byte-identical OFF (`tier2`/`is_cgb` gated).
+#[test]
+fn tier2_window_late_wy_extend_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_window_late_wy_extend",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    // (rel, expected). The `_1` mid-line late-WY rows now extend mode 3 (out3);
+    // the `_2` deadline siblings + the cross-line toggled-window rows stay bare
+    // (out0) — the regression guards against an over-aggressive shadow (the +2
+    // slack boundary, and the `trig_line == ly` gate that excludes late_wx /
+    // late_reenable).
+    let targets = [
+        // FIXED — the shadow extends the missed mid-line late-WY trigger.
+        (
+            "gambatte/window/arg/late_wy_10to1_ly1_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto2_ly2_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto2_ly2_scx2_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto2_ly2_scx3_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto2_ly2_wx0f_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        // GUARD — the `_2` siblings miss the deadline (+2 slack): stay bare.
+        (
+            "gambatte/window/arg/late_wy_10to1_ly1_2_dmg08_out3_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto2_ly2_2_dmg08_out3_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto2_ly2_scx2_2_dmg08_out3_cgb04c_out0.gbc",
+            "0",
+        ),
+        // GUARD — cross-line toggled-window rows: the shadow must NOT extend.
+        ("gambatte/window/late_wx_1_dmg08_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/window/late_reenable_scx5_3_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
     }
 }
 

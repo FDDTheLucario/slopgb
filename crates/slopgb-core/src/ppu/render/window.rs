@@ -40,6 +40,13 @@ impl Ppu {
         let prev_match = std::mem::replace(&mut self.render.win_match_prev, win_match);
         let win_match = win_match && !prev_match;
         let win_en_now = self.eff.lcdc & LCDC_WIN_ENABLE != 0;
+        // C2 #11af: record the raw WX-comparator match dot for the shadow
+        // WY-trigger's activation deadline — *before* the `wy_ok`/`win_en`
+        // gate, so a bare line the window never enters still pins the dot the
+        // window *would* have activated. Tier2 + CGB only; never read OFF.
+        if win_match && self.render.wx_match_dot == 0 && self.tier2_reclock && self.model.is_cgb() {
+            self.render.wx_match_dot = self.dot;
+        }
         if win_match
             && !win_en_now
             && self.wy_latch

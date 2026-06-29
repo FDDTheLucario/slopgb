@@ -56,7 +56,57 @@ impl Ppu {
         {
             return 0;
         }
+        // C2 #11af shadow late-WY extend (tier2 + CGB; polled reads). slopgb's
+        // discrete `wy_latch` sampler misses the mid-line late-WY write that
+        // SameBoy's continuous compare catches, so slopgb renders the line BARE
+        // (native `m == 0` at the polled read dot) where SameBoy's window
+        // triggered and extended mode 3 to `263 + SCX&7` (the POLLED exit, +0
+        // ISR offset — these reads carry no mode-2 dispatch, #11z). The shadow
+        // [`Self::win_extends_sb`] re-derives SameBoy's trigger decision; when
+        // it holds, the FF41 read sees mode 3 to the polled exit. Disjoint from
+        // the `win_active` law above (that gate requires the window already in
+        // slopgb's render; this one fires only when it is NOT).
+        if self.tier2_reclock
+            && self.model.is_cgb()
+            && !self.ds
+            && self.line >= 1
+            && self.line < 144
+            && m == 0
+            && !self.render.win_active
+            && self.win_extends_sb()
+            && self.dot < 263 + u16::from(self.eff.scx & 7)
+        {
+            return 3;
+        }
         m
+    }
+
+    /// C2 #11af shadow window-extend predicate (tier2 + CGB only). Fires ONLY
+    /// for the mid-line late-WY trigger that slopgb's discrete `wy_latch`
+    /// sampler missed: the WY-trigger ([`Self::wy_trig_sb`]) latched on THIS
+    /// line, at/before the WX-activation dot ([`Render::wx_match_dot`]).
+    ///
+    /// The cross-line case (`trig_line < line`) is deliberately NOT handled:
+    /// (a) the late-WY rows that trigger on an earlier line (`10to0`/`FFto0`/
+    /// `FFto1` — WY written at the line boundary) land their write a line later
+    /// in slopgb's deferred frame, so the shadow never latches them anyway; and
+    /// (b) a window that genuinely latched earlier and draws every line is
+    /// already `win_active` in slopgb's render (excluded by the caller), so a
+    /// `!win_active` cross-line latch means the window was aborted / its WX or
+    /// LCDC.5 toggled late (`late_wx`/`late_reenable`/`late_enable`) — SameBoy
+    /// renders THOSE bare (`cfl 257`), so extending them is wrong.
+    pub(super) fn win_extends_sb(&self) -> bool {
+        self.wy_trig_sb
+            && self.eff.lcdc & LCDC_WIN_ENABLE != 0
+            && self.wy_trig_sb_line == self.ly
+            && self.render.wx_match_dot != 0
+            // The trigger must beat the WX-activation dot. The +2 slack is the
+            // wy2-copy phase difference: slopgb's `wy2` lags the WY write by 6
+            // dots (CGB), SameBoy's `wy_check` catches it at write + ~4, so the
+            // shadow `trigdot` runs 2 dots behind SameBoy's detection — the
+            // late-WY `_1` (extend) vs `_2`/`_3` (miss) split sits exactly on
+            // this 2-dot phase (`_1` trigdot = wxmatch + 1, `_2` = wxmatch + 5).
+            && self.wy_trig_sb_dot <= self.render.wx_match_dot + 2
     }
 
     pub(super) fn vis_mode(&self) -> u8 {
