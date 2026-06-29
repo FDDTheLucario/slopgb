@@ -926,6 +926,47 @@ fn tier2_line0_vblank_carry_passes() {
         .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected outE0 (tier2 flag-on): {e}"));
 }
 
+/// Port Stage C / S5 — the CGB LCD-enable glitch-line mode-0 IRQ dispatch
+/// reclock (`stat_irq.rs::update_mode_for_interrupt`). The glitch-line mode-0
+/// STAT IRQ now keys on `line_render_done` (the dispatch dot, dot 254 = SameBoy
+/// cfl=257), NOT on `vis_early` (dot 252) as `vis_mode` does — the bare-line
+/// law. `enable_display/frame0_m0irq_count` polls FF0F at a calibrated dot ~252
+/// each line expecting the mode-0 STAT bit NOT yet set (the loop runs until the
+/// VBlank bit at LY=144 → renders 0x90); keying the engine on the early
+/// `vis_early` raised the bit a poll early on the glitch line, so the dot-252
+/// poll observed it and the ROM branched to read LY=0 (`out=00`). SameBoy
+/// renders 90 (it raises the glitch-line mode-0 at the same cfl=257 as every
+/// bare line). `ly0_m0irq_scx1` is the sibling (`outE0`). Production (flag-off)
+/// byte-identical — `mode_for_interrupt` is inert there. **CGB-only**: on DMG
+/// this is a genuine multi-mechanism atomic (the same glitch-line rise drives
+/// the poll path AND the `int_hblank_halt` halt-wake grid, which want the rise
+/// at conflicting dots — SameBoy resolves it sub-T-cycle), so the DMG row stays
+/// a baselined floor and DMG is byte-identical (`int_hblank_halt` green). See
+/// the source comment + `ppu-subdot-ladder.md` "#11ad".
+#[test]
+fn tier2_glitch_m0irq_dispatch_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr("tier2_glitch_m0irq", "game-boy-test-roms collection not present");
+        return;
+    };
+    for (rel, want) in [
+        (
+            "gambatte/enable_display/frame0_m0irq_count_scx2_1_dmg08_cgb04c_out90.gbc",
+            "90",
+        ),
+        (
+            "gambatte/enable_display/ly0_m0irq_scx1_1_dmg08_cgb04c_outE0.gbc",
+            "E0",
+        ),
+    ] {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), want, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{want} (tier2 flag-on): {e}"));
+    }
+}
+
 /// Port Stage C / S5 (mech 3 root 2 — the LYC-write sub-case) — the line-start
 /// LYC-carryover hold suppresses a spurious wrap edge on the deferred reclock.
 /// `lyc0_late_ff45_enable_3` enables the LYC source (LYC=0) and writes FF45=0

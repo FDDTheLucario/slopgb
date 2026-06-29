@@ -300,11 +300,61 @@ impl Ppu {
             // slice is part of the atomic Phase-B reclock, deferred. Measured
             // (`ppu-subdot-ladder.md` "A15"): SS-gated = +2 / 0 regress / 0 lift
             // lost; universal = +6 / 0 regress / −1 SameBoy-passing drop.
-            let vm = self.vis_mode();
-            if vm == 0 && !self.ds && !(self.line_render_done || self.vis_early) {
-                crate::stat_update::MODE_FOR_INTERRUPT_NONE
+            if self.tier2_reclock && !self.ds && self.model.is_cgb() {
+                // Port Stage C/S5 — the Tier-2 SS glitch-line mode-0 IRQ
+                // dispatch reclock. The IRQ side keys on `line_render_done`
+                // (the dispatch dot, our dot 254 = SameBoy `cfl=257`), NOT on
+                // `vis_early` (dot 252) the way `vis_mode` does — exactly the
+                // bare-line law (`m0_flip_events`: "The IRQ side keys on
+                // `line_render_done`, not `vis_early`"). `vis_early` back-dates
+                // the CPU-visible FF41 mode→0 for the `lcdon_timing-GS` reads,
+                // but the mode-0 STAT IRQ must fire at the standard dispatch
+                // dot: SameBoy raises the glitch-line mode-0 STAT at the same
+                // cfl=257 as every bare line. Keying the engine on `vis_early`
+                // dispatched it 2 dots early, so the deferred dot-252 IF poll in
+                // `enable_display/frame0_m0irq_count` observed the bit a poll
+                // early and the ROM mis-measured (read LY=0, want LY=144). The
+                // FF41 *read* side (`vis_mode`/`vis_early`) is untouched — only
+                // the STAT-IRQ source moves. The prefix (`dot < GLITCH_MODE3_START`)
+                // still raises NO mode-0 (the LCD-enable glitch, A15); mode 3
+                // holds for the IRQ until `line_render_done`, then mode 0.
+                //
+                // CGB ONLY — a genuine multi-mechanism atomic on DMG (the
+                // measured negative, this session). On CGB the glitch
+                // `line_render_done` already lands at dot 254 (= SameBoy
+                // cfl=257), so keying the IRQ on it is exactly right and there
+                // is no DMG-style mode-0 halt pin on the glitch line to
+                // conflict. On DMG the glitch `line_render_done` lands at dot
+                // 252, and the SAME glitch-line mode-0 rise drives both the
+                // poll path (`enable_display/frame0_m0irq_count`, SameBoy
+                // renders 90 → wants the rise PAST the dot-252 poll) AND the
+                // halt-wake path (`gbmicrotest int_hblank_halt_scx*`, the
+                // 62,62,62,63,63,63,63,64 grid, calibrated at the dot-252
+                // frame): moving the DMG glitch dispatch +2 lands the poll but
+                // breaks int_hblank +1 (and vice-versa). SameBoy resolves both
+                // at its sub-T-cycle IF-raise phase (cfl=257 = a specific T
+                // within the M-cycle, seen by the mid-cycle halt sampler but not
+                // the leading-edge poll read); slopgb's whole-dot raise cannot
+                // place a single dot that satisfies both — so the DMG
+                // `frame0_m0irq_count` (a baselined floor; production renders
+                // 00) stays unfixed and DMG is byte-identical here. Gating to
+                // CGB keeps int_hblank green while landing the CGB poll rows.
+                // Detail: `ppu-subdot-ladder.md` "#11ad".
+                if self.dot < GLITCH_MODE3_START {
+                    crate::stat_update::MODE_FOR_INTERRUPT_NONE
+                } else if self.line_render_done {
+                    0
+                } else {
+                    3
+                }
             } else {
-                vm
+                // LE-only / DS: the original A15 vis_mode (vis_early) path.
+                let vm = self.vis_mode();
+                if vm == 0 && !self.ds && !(self.line_render_done || self.vis_early) {
+                    crate::stat_update::MODE_FOR_INTERRUPT_NONE
+                } else {
+                    vm
+                }
             }
         } else if self.line >= 144 {
             // VBlank. The visible mode IS the IRQ mode here: `vis_mode` already
