@@ -1224,12 +1224,17 @@ fn tier2_window_m3stat_length_passes() {
     // All [Cgb] out0 — the normal-trigger window mode-3 read exits at 259+SCX&7
     // (#11z: SBex 263+SCX&7 − the measured +4 read offset). The scx5 `_2` legs
     // pin the 259 (vs 260) calibration; the scx0 legs read past the exit either way.
+    // The wxA5/wxA6 legs pin the #11ac off-screen-window extension (the same
+    // 259+SCX&7 exit applies to the off-screen-trigger window; sprite-free).
     let rels = [
         "gambatte/window/m2int_wx00_m3stat_2_dmg08_cgb04c_out0.gbc",
         "gambatte/window/m2int_wx03_m3stat_2_dmg08_cgb04c_out0.gbc",
         "gambatte/window/m2int_wx03_scx5_m3stat_2_dmg08_cgb04c_out0.gbc",
         "gambatte/window/m2int_wx03_scx3_m3stat_2_dmg08_cgb04c_out0.gbc",
         "gambatte/window/m2int_wx07_scx2_m3stat_2_dmg08_cgb04c_out0.gbc",
+        "gambatte/window/m2int_wxA6_m3stat_3_dmg08_cgb04c_out0.gbc",
+        "gambatte/window/m2int_wxA5_m3stat_2_dmg08_cgb04c_out0.gbc",
+        "gambatte/window/m2int_wxA6_scx5_m3stat_3_dmg08_cgb04c_out0.gbc",
     ];
     for rel in rels {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));

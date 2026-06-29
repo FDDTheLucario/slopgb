@@ -33,7 +33,15 @@ impl Ppu {
             && !self.ds
             && self.model.is_cgb()
             && self.line >= 1
-            && self.eff.wx < 0xA0
+            // #11z extended to the off-screen window range (wx 0xA0..=0xA6,
+            // wxA5/wxA6): SameBoy extends a triggering off-screen window's
+            // mode-3 to the same `263 + SCX&7` exit, so the read-side law
+            // applies. The off-screen extension carries NO sprite penalty in
+            // the exit, so restrict the extended range to sprite-free lines
+            // (a sprite pushes the real mode-3 end past `259+SCX&7`, and the
+            // bare law would mis-shorten it — `m2int_wxA6_spxA7_m3stat_2`).
+            && self.eff.wx <= 0xA6
+            && (self.eff.wx < 0xA0 || self.render.n_sprites == 0)
             && !self.render.win_aborted
             && self.wy2 != self.ly
             && self.wy2 <= 143

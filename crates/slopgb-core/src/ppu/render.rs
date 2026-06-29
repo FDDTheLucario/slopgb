@@ -167,7 +167,10 @@ pub(super) struct Render {
 
     // Sprites (selected during OAM scan).
     sprites: [Sprite; 10],
-    n_sprites: u8,
+    /// `pub(super)` so the `vis_mode_read` window-length law (`stat_irq.rs`)
+    /// can exclude sprite-extended lines from the off-screen-window range
+    /// (the bare `259+SCX&7` exit does not carry the sprite penalty).
+    pub(super) n_sprites: u8,
     fetched: u16,
     /// BG tiles that already paid the first-sprite alignment penalty,
     /// keyed by (x + SCX) / 8.
