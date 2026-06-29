@@ -49,3 +49,19 @@ int_hblank (mode-0 halt, passing) / mooneye2022 / gbmicrotest tests that pin the
 re-frame of the engine's IF-raise vs the deferred read (not a blind nudge).
 Localized: `interconnect/tick.rs` (`m0_rise`/`if_late`/`if_stat_late`) +
 `reclock.rs::stat_update_tick` (the `pending_if` raise) + the dispatch retime.
+
+## SCX-latch fixed-dot read-law — BUILD-MEASURED NEGATIVE (do-not-re-chase)
+
+Attempted (#11ad, REVERTED): a bare-line read-law that latches `SCX&7` at a fixed
+mode-3-entry dot and reads mode 0 at the latched-SCX exit when `eff.scx&7` changed
+mid-line (the `late_scx4`/`late_disable_early` over-extension). Implemented (field
+`scx_at_m3` + dot-88 capture + `vis_mode_read` law). Measured: dot-84 latch regressed
+`late_scx4_1` (want3, a SameBoy-pass — both _1/_2 write SCX after dot-84 via the 2-dot
+stage delay → both latch 0). Dot-88 latch fixed `late_scx4_2` + `late_scx_late_disable_0/1`
+(+3) but REGRESSED `late_scx_late_disable_2` (want3, a SameBoy-pass, classifier-confirmed
+BUG=sb==want3) — its SCX latches LATER than dot-88. **No fixed latch dot is clean: late_scx4
+needs the deadline EARLY (miss _2's write), late_scx_late_disable needs it LATE (catch _2's
+write) — they conflict.** This is the sub-dot SCX-latch (the discard-point deadline is
+sub-M-cycle, config-dependent on the exact write timing + window geometry). A fixed-dot
+version always drops a SameBoy-pass → reverted. Needs the genuine sub-dot fetcher SCX
+latch (the render port), not a read-law. The clean +7 (window length law) stands.
