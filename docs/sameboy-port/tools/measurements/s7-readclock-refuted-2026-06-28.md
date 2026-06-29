@@ -188,3 +188,27 @@ of the late-WY → window-trigger lever, both whole-M-cycle register-write timin
 is the render half of C3; no read clock, no eighth grid. The complete read-collapse
 residual is now mapped: whole-M-cycle apart (read frame, mostly already resolved) OR
 co-temporal (render length/trigger, the remaining work).
+
+## late_scx4 — the precise render-length spec (SCX&7 latched at mode-3 START)
+
+SameBoy `SBWSCX` (FF43) write timing for the SCX=4 write on the measurement line:
+
+| ROM | SCX=4 write (cfl,dc)→unified | mode-3 start | latched? | exit |
+|---|---|---|---|---|
+| `late_scx4_1` (3) | (89,-2)→**176** | 176 | YES (write AT mode-3 start) | 528 (+4) |
+| `late_scx4_2` (0) | (92,0)→**184** | 176 | NO (8 half-dots = 4 dots late) | 520 |
+
+Mode-3 starts at unified 176 (SBMODE vis=3 @ cfl84/dc8 = 176). **SameBoy samples SCX&7
+for the mode-3 length (the fine-scroll discard) AT mode-3 start.** `_1`'s write lands at
+176 (latched → +4); `_2`'s at 184 (after → SCX&7=0, no extension). The writes are a
+whole M-cycle apart at the boundary.
+
+slopgb OVER-extends `_2`: it uses the 2-dot-delayed `eff.scx` (which captures `_2`'s
+late write) for the mode-3 length → both `_1`/`_2` flip at slopgb dot258 (measurement
+frame, +4 vs steady dot254) → both read dot256 mode 3. **Fix:** latch SCX&7 for the
+mode-3 length at mode-3 start (so a write after mode-3 start does not extend the current
+line). This shifts `line_render_done` → counter-pinned (int_hblank/hblank_ly_scx) →
+breaks byte-id OFF → atomic with C3 (the render half). Precise, whole-M-cycle, no read
+clock. This is the render-length analogue of the late-WY → window-trigger lever; both
+co-temporal-read families reduce to "latch the late register write at the
+fetch-relevant dot."
