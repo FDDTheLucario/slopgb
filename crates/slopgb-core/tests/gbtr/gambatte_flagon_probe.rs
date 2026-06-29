@@ -90,7 +90,19 @@ fn flagon_probe() {
         } else {
             harness::boot_with_reclock(&rom, model)
         };
-        while gb.cycles() < RUN_DOTS + u64::from(CYCLES_PER_FRAME) {
+        // Frame-alignment probe: SLOPGB_FRAME_DELTA shifts the OCR capture
+        // point by N frames (signed) to test whether a regression is an
+        // OCR-capture-frame mis-alignment (cheap global fix) vs a genuine
+        // render/engine bug.
+        let fdelta: i64 = std::env::var("SLOPGB_FRAME_DELTA")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let target = (RUN_DOTS as i64
+            + i64::from(CYCLES_PER_FRAME)
+            + fdelta * i64::from(CYCLES_PER_FRAME))
+        .max(0) as u64;
+        while gb.cycles() < target {
             gb.step();
         }
         let got = read_hex_screen(gb.frame(), model.is_cgb());
