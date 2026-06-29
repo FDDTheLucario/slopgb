@@ -31,3 +31,21 @@ is the next tooling step to get the precise fix-list.
 
 ## Read-law clean-slice space: now EXHAUSTED (window length fully extended wx<=0xA6).
 The rest needs render (abort/trigger) + the engine delivery core + DS = multi-session.
+
+## Engine m0-delivery core — localized concretely (frame0_m0irq_count=0)
+
+Traced `frame0_m0irq_count_scx2_1` (want90 got00): the flag-on engine
+(`stat_update_tick`) FIRES **2299 mode-0 dispatches** (mfi=0, ~144/frame × ~16
+frames) — `pending_if |= IF_STAT` on every mode-0 STAT rise. So the engine is NOT
+silent; the CPU just never COUNTS them. ROOT (confirmed): the engine raises
+`pending_if` at the dot END (`stat_update_tick`, after `step_dot`), but the CPU's
+deferred read samples IF at cc+0 (the M-cycle leading edge) — a ~4-dot/1-M-cycle
+read-phase gap, plus the `if_late`/`second_half` halt masking. This is the
+"dispatch↔read-phase miss" — the hard atomic core (the ~40-row engine cluster:
+halt/lycEnable/m2enable/ly0/misc). Fixing it must NOT break the counter-pinned
+int_hblank (mode-0 halt, passing) / mooneye2022 / gbmicrotest tests that pin the
+5-M-cycle service + the halt-wake grid — so it needs a dot-level SameBoy
+`GB_STAT_update` IF-write tracer + a slopgb CPU-IF-delivery trace, then a careful
+re-frame of the engine's IF-raise vs the deferred read (not a blind nudge).
+Localized: `interconnect/tick.rs` (`m0_rise`/`if_late`/`if_stat_late`) +
+`reclock.rs::stat_update_tick` (the `pending_if` raise) + the dispatch retime.
