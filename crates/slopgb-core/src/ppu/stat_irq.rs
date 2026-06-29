@@ -30,7 +30,6 @@ impl Ppu {
         let m = self.vis_mode();
         if self.tier2_reclock
             && self.render.win_active
-            && !self.ds
             && self.model.is_cgb()
             && self.line >= 1
             // #11z extended to the off-screen window range (wx 0xA0..=0xA6,
@@ -42,6 +41,13 @@ impl Ppu {
             // bare law would mis-shorten it — `m2int_wxA6_spxA7_m3stat_2`).
             && self.eff.wx <= 0xA6
             && (self.eff.wx < 0xA0 || self.render.n_sprites == 0)
+            // #11ag DS: also exclude SPRITE-laden lines under double speed (SS
+            // keeps allowing on-screen sprites — byte-identical). With sprites
+            // the real mode-3 end extends PAST `260 + SCX&7`, and the DS read
+            // frame straddles it so the bare exit mis-shortens the want-3 read
+            // (`sprites/space/10spritesPrLine_wx*_m3stat_ds_1`, a SameBoy-pass).
+            // The DS sprite-window exit is the #11t DS sprite read-grid, separate.
+            && (!self.ds || self.render.n_sprites == 0)
             && !self.render.win_aborted
             // The first window line (wy2==ly) is excluded for ON-screen windows
             // (their mode-3 extends LATER than the steady 259+SCX&7 law on the
@@ -52,7 +58,13 @@ impl Ppu {
             && (self.wy2 != self.ly || self.eff.wx >= 0xA0)
             && self.wy2 <= 143
             && m == 3
-            && self.dot >= 259 + u16::from(self.eff.scx & 7)
+            // #11ag DS: the FF41-read exit is `260 + SCX&7` in double speed (the
+            // deferred cc+0 ISR read lands +3 dots before SameBoy's `SBex=263`,
+            // vs the SS +4 → 259); MEASURED — `m2int_wxA6_scx5_m3stat_ds` reads
+            // `_1` dot264 / `_2` dot266 so only exit 265 (=260+5) separates them
+            // (the on-screen scx0 `_2` rows read dot260 robustly past either, so
+            // 259 vs 260 is invisible to them — the SS legs stay byte-identical).
+            && self.dot >= 259 + u16::from(self.eff.scx & 7) + u16::from(self.ds)
         {
             return 0;
         }
@@ -68,13 +80,18 @@ impl Ppu {
         // slopgb's render; this one fires only when it is NOT).
         if self.tier2_reclock
             && self.model.is_cgb()
-            && !self.ds
             && self.line >= 1
             && self.line < 144
             && m == 0
             && !self.render.win_active
+            // #11ag DS: exclude sprite-laden lines (same as the length law) — the
+            // shadow's bare exit does not carry the sprite mode-3 penalty.
+            && (!self.ds || self.render.n_sprites == 0)
             && self.win_extends_sb()
-            && self.dot < 263 + u16::from(self.eff.scx & 7)
+            // #11ag DS exit `264 + SCX&7` (the polled read lands +1 vs SS in DS:
+            // `late_wy_FFto2_ly2_scx5_ds_1` reads dot268 / wants mode 3, so the
+            // exit must clear 268 = 264+5; SS stays 263 — byte-identical).
+            && self.dot < 263 + u16::from(self.eff.scx & 7) + u16::from(self.ds)
         {
             return 3;
         }
@@ -106,7 +123,10 @@ impl Ppu {
             // shadow `trigdot` runs 2 dots behind SameBoy's detection — the
             // late-WY `_1` (extend) vs `_2`/`_3` (miss) split sits exactly on
             // this 2-dot phase (`_1` trigdot = wxmatch + 1, `_2` = wxmatch + 5).
-            && self.wy_trig_sb_dot <= self.render.wx_match_dot + 2
+            // #11ag DS: the slack is +4 (the DS wy2-copy lands the shadow trigdot
+            // 2 dots later relative to the WX match — `late_wy_FFto2_ly2_ds` `_1`
+            // trigdot 101 / `_2` 103 vs wxmatch 97, so 4 separates them).
+            && self.wy_trig_sb_dot <= self.render.wx_match_dot + 2 + 2 * u16::from(self.ds)
     }
 
     pub(super) fn vis_mode(&self) -> u8 {

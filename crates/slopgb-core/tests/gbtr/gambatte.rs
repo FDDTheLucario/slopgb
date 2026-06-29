@@ -1405,6 +1405,88 @@ fn tier2_window_late_wy_extend_passes() {
     }
 }
 
+/// Port Stage C2 #11ag — the WINDOW family ported to DOUBLE-SPEED: the #11y/#11z
+/// length law AND the #11af shadow WY-trigger, with the DS exit/deadline
+/// recalibrated. The `vis_mode_read` length law (the `m2int_wx*_m3stat` shorten)
+/// and the late-WY shadow extend were both `!ds`-gated; under DS the deferred
+/// cc+0 FF41 read lands +1 dot vs SS (the ISR read offset is +3 not +4), so the
+/// **length-law exit is `260 + SCX&7`** (`259 + ds`) and the **shadow exit is
+/// `264 + SCX&7`** (`263 + ds`). MEASURED: `m2int_wxA6_scx5_m3stat_ds` reads `_1`
+/// dot264 / `_2` dot266 → only exit 265 (=260+5) separates them (and does NOT
+/// drop the off-screen `_1` SameBoy-pass); `late_wy_FFto2_ly2_scx5_ds_1` reads
+/// dot268 → the shadow exit must clear it. The shadow **deadline slack is +4** in
+/// DS (the wy2-copy lands the trigdot 2 dots later: `late_wy_FFto2_ly2_ds` `_1`
+/// trigdot 101 / `_2` 103 vs wxmatch 97). DS additionally **excludes
+/// sprite-laden lines** from BOTH laws (`!ds || n_sprites == 0`) — with sprites
+/// the real mode-3 end extends past the bare exit and the DS read frame straddles
+/// it (`sprites/space/10spritesPrLine_wx*_m3stat_ds_1` would drop, a SameBoy-pass;
+/// that is the #11t DS sprite read-grid, separate). Full-CGB two-bin flag-on
+/// **+8/−0** (7 length-law `_2` + the shadow `FFto2_ly2_ds_1`). SS legs
+/// byte-identical (the `ds` terms are 0 in single speed); production byte-identical
+/// OFF. The `scx5_ds_1` length `_1` rows + `late_wy_*_ds` boundary/disable rows
+/// stay atomic (the same SCX-non-linear deadline / deferred-frame walls as #11af).
+#[test]
+fn tier2_window_ds_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_window_ds",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        // FIXED — DS length law (`m2int_wx*_m3stat_ds_2`, want0): shorten at 260+SCX&7.
+        (
+            "gambatte/window/m2int_wx03_m3stat_ds_2_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/m2int_wx07_m3stat_ds_2_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/m2int_wxDefault_m3stat_ds_2_cgb04c_out0.gbc",
+            "0",
+        ),
+        // FIXED — the off-screen wxA6 DS pair (`_2` shortens; `_1` must stay mode3).
+        (
+            "gambatte/window/m2int_wxA6_m3stat_ds_2_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/m2int_wxA6_scx5_m3stat_ds_2_cgb04c_out0.gbc",
+            "0",
+        ),
+        // GUARD — the off-screen `_1` (exit 265 separates it from `_2` dot266).
+        (
+            "gambatte/window/m2int_wxA6_scx5_m3stat_ds_1_cgb04c_out3.gbc",
+            "3",
+        ),
+        // FIXED — DS shadow WY-trigger (`late_wy_FFto2_ly2_ds_1`, want3): extend.
+        (
+            "gambatte/window/arg/late_wy_FFto2_ly2_ds_1_cgb04c_out3.gbc",
+            "3",
+        ),
+        // GUARD — the DS `_2` deadline sibling stays bare (slack +4 boundary).
+        (
+            "gambatte/window/arg/late_wy_FFto2_ly2_ds_2_cgb04c_out0.gbc",
+            "0",
+        ),
+        // GUARD — the DS-sprite exclusion: this `_1` (want3) must NOT be shortened.
+        (
+            "gambatte/sprites/space/10spritesPrLine_wx0_m3stat_ds_1_cgb04c_out3.gbc",
+            "3",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 /// Port Stage C / S5 (mech 3 — CGB lcd-offset, the line-start OAM-read window,
 /// DOUBLE-SPEED sibling of [`tier2_oam_preread_lcdoffset1_passes`]). Under DS the
 /// deferred cc+0 read lands 2 dots earlier in the dot grid, so the accessible
