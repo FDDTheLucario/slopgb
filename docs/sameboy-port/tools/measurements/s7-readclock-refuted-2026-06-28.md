@@ -212,3 +212,46 @@ breaks byte-id OFF → atomic with C3 (the render half). Precise, whole-M-cycle,
 clock. This is the render-length analogue of the late-WY → window-trigger lever; both
 co-temporal-read families reduce to "latch the late register write at the
 fetch-relevant dot."
+
+## FINAL refinement — the +4 frame is ALSO not a lever; the residual is PURELY render (+DS)
+
+Two further build-measured findings collapse the goal's C3 "frame co-move (+4 PPU-advance)"
+as well:
+
+**1. The +4 read frame is REDUNDANT (already absorbed by #11z).** The kernel passes because
+slopgb's whole frame is internally consistent — its in-ISR read AND its bare-line mode-3
+exit are BOTH 4 dots earlier than SameBoy's, so the read-vs-exit RELATIONSHIP (and thus the
+mode) is correct (kernel m2int_1 reads dot252 < exit dot254 → mode 3 ✓). The +4 is a
+LABEL offset, not a bug. The single-speed window m2int_wx<A0 rows that DID need accounting
+are already handled by #11z's exit law (`259+SCX = SBex−4`), which back-dates the boundary
+into slopgb's read frame. Implementing the +4 PPU-advance would shift the read out of that
+consistent frame and BREAK the kernel — it is not a remaining lever.
+
+**2. The 79 window fails bucket as PURE RENDER + DS (NOT frame):**
+| bucket | ~count | mechanism |
+|---|---|---|
+| `late_wy_*` | ~18 | render: WY-trigger timing + LCDC window-enable frame-phase |
+| `m2int_wxA6/wxA5_*` | ~12 | short/off-screen window render (excluded by #11z's `wx<0xA0` gate) |
+| `m2int_wx*_ds` | ~8 | double-speed read grid (S6/S7) |
+| `late_scx_*` / `late_disable_*` | ~6 | render: SCX&7-latch / window-abort mode-3 length |
+
+The single-speed `m2int_wx<A0` rows are GREEN (#11z). The residual is the RENDER MODEL
+(window activation + mode-3 length responding to late WY/SCX/LCDC writes) plus the DS read
+grid — exactly the "tier2 parallel window-length model + vis-HOLD primitive" #11g flagged
+as not-yet-built.
+
+## Phase B residual — the COMPLETE, build-measured map (no false levers left)
+
+| former "lever" | verdict |
+|---|---|
+| S7 sub-M-cycle read clock | REFUTED (reads co-temporal / whole-M-cycle; #11ab) |
+| +4 ISR read frame (PPU-advance) | REDUNDANT (absorbed by #11z; breaks the kernel) |
+| eighth-grid scaffold | UNNECESSARY (retire) |
+
+The ONLY remaining work to the flip is the **render model** (window activation: late-WY
+trigger + LCDC frame-phase; mode-3 length: late-SCX latch at the discard point, window
+abort) for the ~248 CGB + DMG "BUG-fix" rows, plus the **DS read grid** (S6/S7), then the
+gambatte rebaseline (39 genuine floors + 6 DIFF) + flip + C4. This is a render-model port,
+multi-session in scope, but now with ZERO frame/sub-dot architecture and a precise per-bucket
+work list. Both the goal's prescribed START (S7) and its C3 frame lever (+4) are
+build-measure removed; the path is purely render + rebaseline.
