@@ -118,3 +118,46 @@ off-by-one (LCDC-enable on the wrong frame) and (2) a whole-M-cycle WY-write→r
 trigger — BOTH render/frame, both whole-dot. There is no sub-dot read component
 anywhere in the chain. The C3 atomic frame reclock (which co-moves the whole-frame
 phase) is the lever; S7 is not on the path.
+
+## GENERALIZED — the sub-dot read-clock premise collapses across EVERY measured family
+
+The S7 refutation is not specific to `late_wy`. Measured `SBREAD ff41` cfl+dc for the
+canonical "read-collapse" families the branch attributed to a sub-M-cycle read clock
+(unified = `cfl*2 + dc`):
+
+| family (geometry) | `_1` want3 (cfl,dc)→unified | `_2` want0 (cfl,dc)→unified | relation |
+|---|---|---|---|
+| kernel m2int/m0int (scx0) | (256,0)→**512** | (261,-2)→**520** | 1 M-cycle apart |
+| m2int_scx2 (bare) | (256,0)→**512** | (261,-2)→**520** | 1 M-cycle apart |
+| late_scx4 (bare) | (260,0)→**520** | (261,-2)→**520** | co-temporal |
+| late_wy (window) | (260,0)→**520** | (261,-2)→**520** | co-temporal |
+
+**Every want-0 read lands at unified 520; `dc` is only ever 0 or −2** — the lazy-advance
+remainder (`gb->display_cycles`, exactly as #11x already established: "dc is a
+LAZY-ADVANCE accumulator, NOT a sub-dot"). The two reads of a pair are EITHER:
+- **co-temporal (both 520)** — the mode difference is a RENDER mode-3 length/extension
+  difference (late-SCX write timing, window trigger), driven by a whole-M-cycle
+  register-write timing; OR
+- **a whole M-cycle apart (512 vs 520)** — slopgb collapses them only because its
+  deferred ISR read frame is mis-framed by the +4 interrupt-service offset; the fix is
+  the whole-M-cycle +4 PPU-advance read frame.
+
+**No measured family is sub-half-dot.** The eighth-grid scaffold
+(`event_phase`/`lead_eighths`/`ACCESS_PHASE`/`edge_eighth`) is NOT needed for the C2/C3
+residual and can be retired. The branch's recurring "read-collapse / sub-M-cycle read
+clock" diagnosis (INC1 2026-06-13 onward, and the goal's S7 START) is a **cfl-only
+measurement artifact** — reading `cfl` 260 vs 261 as a "1-dot read difference" while
+`dc` (0 vs −2) makes them the SAME instant. #11x flagged dc-as-lazy-advance; this
+generalizes it to the whole read-collapse class.
+
+## Net consequence for Phase B
+
+The remaining C2/C3 work is entirely WHOLE-M-CYCLE:
+1. the **+4 interrupt-service read frame** (PPU-advance, NOT `bus.tick` — di_timing),
+   which separates the kernel/m2int_scx2 reads (512 vs 520);
+2. the **render mode-3 length / window trigger / frame-phase** co-move, which fixes the
+   co-temporal pairs (late_scx4 / late_wy);
+3. the counter-pinned mask re-derive + gambatte rebaseline + flip.
+
+There is no sub-half-dot architecture on the path. S7 (the eighth-grid read clock) is
+removed from Phase B entirely — a significant de-risking of the atomic lift.

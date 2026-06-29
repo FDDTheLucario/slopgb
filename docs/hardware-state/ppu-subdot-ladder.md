@@ -158,3 +158,18 @@ clock). The `event_phase`/`lead_eighths`/`ACCESS_PHASE` eighth-grid scaffold is 
 lever for the window family. Detail: `measurements/s7-readclock-refuted-2026-06-28.md`.
 This is a multi-session lift (the C3 atomic frame reclock + ~7000-row rebaseline);
 shipped this session = the refutation + the `wff40`/`wff4a` write tracer (byte-id OFF).
+
+**#11ab GENERALIZED (the sub-dot read-clock premise collapses branch-wide):** measured
+SBREAD cfl+dc (unified=`cfl*2+dc`) for EVERY "read-collapse" family — kernel m2int/m0int
+(512 vs 520), m2int_scx2 (512 vs 520), late_scx4 (520/520 co-temporal), late_wy (520/520
+co-temporal). Every want-0 read = unified 520; dc only ever 0 or −2 (= `display_cycles`
+LAZY-ADVANCE remainder, #11x's finding). NO family is sub-half-dot: pairs are either
+co-temporal (render mode-3 length/extension differs, whole-M-cycle write timing) or a
+whole M-cycle apart (512 vs 520, slopgb's +4 ISR-frame collapse). The recurring
+"sub-M-cycle read clock / S7" diagnosis (INC1 2026-06-13 → the goal's START) is a
+cfl-ONLY artifact (reading cfl 260 vs 261 as 1-dot apart while dc 0/−2 makes them one
+instant). **The eighth-grid scaffold (`event_phase`/`lead_eighths`/`ACCESS_PHASE`) is
+unnecessary for the C2/C3 residual — retire it.** Remaining Phase B is whole-M-cycle:
+(1) +4 ISR read frame (PPU-advance, NOT bus.tick — di_timing) separates kernel/m2int_scx2;
+(2) render mode-3 length/window-trigger/frame-phase co-move fixes the co-temporal pairs;
+(3) mask re-derive + rebaseline + flip. NO sub-half-dot architecture on the path.
