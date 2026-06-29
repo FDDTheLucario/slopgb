@@ -161,3 +161,30 @@ The remaining C2/C3 work is entirely WHOLE-M-CYCLE:
 
 There is no sub-half-dot architecture on the path. S7 (the eighth-grid read clock) is
 removed from Phase B entirely — a significant de-risking of the atomic lift.
+
+## slopgb-side confirmation — the residual is RENDER mode-3 length, not a read frame
+
+slopgb reads (current reclock HEAD, `flagon_probe` + `SLOPGB_S5DBG`):
+
+| ROM | slopgb read | result |
+|---|---|---|
+| `m2int_scx2_m3stat_1` (3) | ly1 **dot252** mode 3 | PASS |
+| `m2int_scx2_m3stat_2` (0) | ly1 **dot256** mode 0 | PASS |
+| `late_scx4_1` (3) | ly1 **dot256** mode 3 | PASS |
+| `late_scx4_2` (0) | ly1 **dot256** mode 3 | FAIL (wants 0) |
+
+- **m2int_scx2 already PASSES** — slopgb reads `_1`/`_2` a whole M-cycle apart
+  (dot252 vs dot256), matching SameBoy's 512 vs 520. The whole-M-cycle case is
+  resolved (the memory's "m2int_scx2 collapses" note is stale, pre-#11n/#11z).
+- **late_scx4 collapses** at dot256 (both mode 3) — the CO-TEMPORAL case. SameBoy
+  (SBMODE measurement frame): `_1` extends the mode-3 exit to unified **528**
+  (cfl261/dc6, +4 dots = SCX&7=4 latched), `_2` stays **520** (cfl257, no latch).
+  Both reads at 520 → `_1` mode 3 (520<528), `_2` mode 0 (520≥520). slopgb applies the
+  SAME mode-3 length to both → both mode 3.
+
+The fix is a **render mode-3 LENGTH** that responds to the late-SCX write timing
+(latch SCX&7 only if the write lands before the fetch samples it) — the exact analogue
+of the late-WY → window-trigger lever, both whole-M-cycle register-write timing. This
+is the render half of C3; no read clock, no eighth grid. The complete read-collapse
+residual is now mapped: whole-M-cycle apart (read frame, mostly already resolved) OR
+co-temporal (render length/trigger, the remaining work).
