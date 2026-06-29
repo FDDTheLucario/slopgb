@@ -89,3 +89,32 @@ misses. The fix is to make those commits' ORDERING relative to the match dot pre
 
 Both (2) and (3) are whole-M-cycle render/frame levers — the C3 atomic reclock — with
 NO sub-half-dot read clock. This removes S7 from the critical path entirely.
+
+## Follow-up — the slopgb failure is render + FRAME-PHASE, both whole-dot (no read clock)
+
+Ordered traces (slopgb `wff40`/`wff4a` write tracer added to `write_deferred`;
+SameBoy `SBWLCDC`/`SBWWY`/`SBWYTRIG`) pin slopgb's two whole-dot failures on the
+`late_wy_FFto2_ly2_1` measurement frame:
+
+**1. LCDC window-enable frame-phase (off-by-one).** Both emulators toggle LCDC
+`0xb1` (win ENABLED, ly151 of a setup frame) ↔ `0x91` (win disabled, ly0). SameBoy's
+`0x91`-disable lands on the NEXT setup frame, AFTER the measurement read — so the
+measurement frame stays `0xb1` (window enabled) through ly2, and `wy_check` (gated on
+WIN_ENABLE) fires. slopgb applies the `0x91`-disable on ly0 of the SAME measurement
+frame, BEFORE the read → window DISABLED at ly2 → `win_match` fires at dot97 with
+`en=false` → never activates → reads bare mode 0. This is a **frame-phase off-by-one**
+(the test's setup↔measurement loop is one frame out of phase under the current
+reclock frame) = the goal's "CGB-OCR frame-alignment", not a window-machine bug.
+
+**2. WY-write→trigger→which-line render (the `_1`/`_2` separator).** Given the window
+enabled, the SameBoy `_1`/`_2` split is purely the WY-write M-cycle timing:
+`_1` writes WY=2 @ly2 cfl92 → `wy_triggered` cfl96 → renders ly2 (mode3 +6);
+`_2` writes WY=2 @ly2 cfl96 → `wy_triggered` cfl100 → renders ly3 (ly2 unextended).
+Both have the window enabled and both trigger; the 1-M-cycle write difference decides
+whether the trigger beats the ly2 window-fetch dot (≈ slopgb dot97). Whole-M-cycle.
+
+**Conclusion reinforced:** the smoking-gun config is gated by (1) a frame-phase
+off-by-one (LCDC-enable on the wrong frame) and (2) a whole-M-cycle WY-write→render-line
+trigger — BOTH render/frame, both whole-dot. There is no sub-dot read component
+anywhere in the chain. The C3 atomic frame reclock (which co-moves the whole-frame
+phase) is the lever; S7 is not on the path.

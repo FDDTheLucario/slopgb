@@ -194,6 +194,17 @@ impl Interconnect {
         self.service_vram_dma();
         if let 0xFF40 | 0xFF42 | 0xFF43 | 0xFF47..=0xFF4B = addr {
             let dots = if self.double_speed { 1 } else { 2 };
+            // C2 #11ab window-trigger tracer: the LCDC (FF40) window-enable and
+            // WY (FF4A) writes drive SameBoy's `wy_check` (window mode-3
+            // extension). Lines slopgb's write (line, dot) up against SameBoy's
+            // `SBWLCDC`/`SBWWY` to diagnose the late_wy window-trigger / LCDC
+            // frame-phase residual (`measurements/s7-readclock-refuted-2026-06-28.md`).
+            // NOT `ly < 144`-gated: the VBlank LCDC-enable/disable writes are the
+            // frame-phase evidence. `SLOPGB_S5DBG`, byte-identical when unset.
+            if matches!(addr, 0xFF40 | 0xFF4A) && crate::ppu::s5dbg_on() {
+                let (l, d) = self.ppu.scan_pos();
+                eprintln!("SLOPGB w{addr:04x} val={value:02x} ly={l} dot={d}");
+            }
             self.ppu.stage_write(addr, value, dots);
         }
         self.maybe_oam_bug(addr, OamBugKind::Write);
