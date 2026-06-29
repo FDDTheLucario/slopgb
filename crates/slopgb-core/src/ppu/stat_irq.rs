@@ -43,7 +43,13 @@ impl Ppu {
             && self.eff.wx <= 0xA6
             && (self.eff.wx < 0xA0 || self.render.n_sprites == 0)
             && !self.render.win_aborted
-            && self.wy2 != self.ly
+            // The first window line (wy2==ly) is excluded for ON-screen windows
+            // (their mode-3 extends LATER than the steady 259+SCX&7 law on the
+            // trigger line; #11y late_wy). But an OFF-SCREEN window (wx>=0xA0)
+            // renders nothing, so its first line does NOT extend (SameBoy exit =
+            // the bare 259+SCX&7) — the law applies there too (#11ac
+            // `m2int_wxA6_firstline_m3stat_3`).
+            && (self.wy2 != self.ly || self.eff.wx >= 0xA0)
             && self.wy2 <= 143
             && m == 3
             && self.dot >= 259 + u16::from(self.eff.scx & 7)
