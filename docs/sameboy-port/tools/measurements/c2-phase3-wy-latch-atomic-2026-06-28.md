@@ -58,3 +58,26 @@ length, and the per-config read-frame all CO-LAND in the atomic global reclock (
 the gambatte rebaseline). The `wy_recheck_on_write` code is validated and ready to land
 WITH that atomic step (it is a real bug fix, just not separable). The clean read+length
 slices (#11w/x/y/z, +14) are exhausted; the window residual is the C3 atomic reclock.
+
+## SMOKING GUN — the collapse is SUB-M-CYCLE (`_1`/`_2` read the SAME slopgb dot)
+
+With the WY-latch fix applied (window active), traced both variants of one config
+(probe-internal, correct frame):
+
+| row (want) | slopgb read | SameBoy |
+|---|---|---|
+| `late_wy_FFto2_ly2_1` (3) | ly2 **dot260** mode 3 | reads its window mid (mode 3) |
+| `late_wy_FFto2_ly2_2` (0) | ly2 **dot260** mode 3 | reads past its window exit (mode 0) |
+
+**Both read the IDENTICAL slopgb dot260, opposite wanted modes.** The `_2` ROM times
+its read ~one M-cycle later than `_1` (to land past the window exit), but slopgb's
+M-cycle-quantized deferred read collapses BOTH to dot260. SameBoy's T-granular clock
+resolves them apart. **NO exit law, frame shift, or render fix can give a different mode
+to two reads at the same dot** — this is the sub-M-cycle read-collapse, the S7
+(T-granular / eighth-grid) read clock. The window family residual (read side C2 AND
+render side Phase 3) reduces to S7: the deepest multi-session architectural lift, the
+half-dot grid the port retired at Stage S7 as "the class-A lift condition: re-clock
+observable event commits to a finer grid." Until S7, slopgb cannot place `_1`/`_2`
+apart, so the window family cannot fully converge — by the hardware/quantization, not
+by any boundary or frame choice. This is the floor for the clean-slice + atomic-frame
+approaches alike; C3's frame co-move is necessary but NOT sufficient without S7.
