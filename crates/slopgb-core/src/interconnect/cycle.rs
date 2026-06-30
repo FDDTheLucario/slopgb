@@ -126,11 +126,30 @@ impl Interconnect {
     /// trails at cc+4), every read here samples at the leading edge, and the
     /// dispatch reclock's `pending=2` lands the vector/handler reads 2 dots
     /// early.
+    /// TEMP (#11an+) per-bus-op ISR T-sequence trace: log the deferred access's
+    /// sample position (ly, dot, clk, pend) on the measurement-line window, the
+    /// slopgb counterpart to SameBoy's `SB2`. `SLOPGB_ISRTRACE`, byte-identical
+    /// when unset.
+    fn dbg_isr(&self, tag: &str, addr: u16) {
+        if !crate::ppu::isrtrace_on() {
+            return;
+        }
+        let (line, dot) = self.ppu.scan_pos();
+        if (134..=138).contains(&line) || line <= 3 {
+            eprintln!(
+                "SL2 {tag} a={addr:04x} ly={line} dot={dot} clk={} pend={}",
+                self.clock.now(),
+                self.clock.pending()
+            );
+        }
+    }
+
     pub(super) fn read_deferred(&mut self, addr: u16, kind: OamBugKind) -> u8 {
         let before = self.clock.now();
         let pend_dbg = self.clock.pending(); // C2 cc-exact: the debt paid before this read
         let _ = self.clock.read(); // clock += old pending; park 4
         self.advance_machine_t(before, self.clock.now());
+        self.dbg_isr("rd", addr);
         self.service_vram_dma();
         self.maybe_oam_bug(addr, kind);
         let v = self.read_no_tick(addr);
@@ -142,7 +161,8 @@ impl Interconnect {
             if line < 144 {
                 let (wa, ve, lrd, vh, vm, ns) = self.ppu.dbg_read_state();
                 eprintln!(
-                    "SLOPGB ff41 ly={line} dot={dot} mode={} pend={pend_dbg} wa={wa} ve={ve} lrd={lrd} vh={vh} vm={vm} ns={ns}",
+                    "SLOPGB ff41 ly={line} dot={dot} clk={} mode={} pend={pend_dbg} wa={wa} ve={ve} lrd={lrd} vh={vh} vm={vm} ns={ns}",
+                    self.clock.now(),
                     v & 3
                 );
             }
@@ -186,6 +206,7 @@ impl Interconnect {
         };
         let _ = self.clock.write(conflict);
         self.advance_machine_t(before, self.clock.now());
+        self.dbg_isr("wr", addr);
         if let Some((lly, ldot)) = le_pos {
             let (cly, cdot) = self.ppu.scan_pos();
             eprintln!(
@@ -218,6 +239,7 @@ impl Interconnect {
         let before = self.clock.now();
         self.clock.internal();
         self.advance_machine_t(before, self.clock.now()); // delta 0 (deferred)
+        self.dbg_isr("na", 0);
         self.service_vram_dma();
     }
 
@@ -227,6 +249,7 @@ impl Interconnect {
         let before = self.clock.now();
         let _ = self.clock.read();
         self.advance_machine_t(before, self.clock.now());
+        self.dbg_isr("ob", value);
         self.service_vram_dma();
         self.maybe_oam_bug(value, OamBugKind::Write);
     }

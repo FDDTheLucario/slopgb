@@ -1045,6 +1045,18 @@ impl Bus for Interconnect {
         let before = self.clock.now();
         let _ = self.clock.dispatch_vector_retime();
         self.advance_machine_t(before, self.clock.now());
+        // S6/S7 ISR read-position diagnostic: log the vector-latch PPU position
+        // + clock, the analogue of SameBoy's SBVEC (`sm83_cpu.c:1694`). The
+        // delta vector→read isolates the handler's PPU advance from the dispatch
+        // entry. `SLOPGB_S5DBG`, byte-identical when unset.
+        if crate::ppu::s5dbg_on() {
+            let (line, dot) = self.ppu.scan_pos();
+            eprintln!(
+                "SLOPGB vec ly={line} dot={dot} clk={} pend={}",
+                self.clock.now(),
+                self.clock.pending()
+            );
+        }
     }
 
     fn flush_pending(&mut self) {

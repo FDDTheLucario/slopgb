@@ -592,6 +592,16 @@ pub(crate) fn s5dbg_on() -> bool {
     *F.get_or_init(|| std::env::var_os("SLOPGB_S5DBG").is_some())
 }
 
+/// TEMP (#11an+) per-bus-op ISR T-sequence trace gate (`SLOPGB_ISRTRACE`):
+/// logs every deferred read/write/internal access's (addr, ly, dot, clk, pend)
+/// so the handler advance can be lined up against SameBoy's `SB2` per-access
+/// trace. Byte-identical when unset; never read in production.
+pub(crate) fn isrtrace_on() -> bool {
+    use std::sync::OnceLock;
+    static F: OnceLock<bool> = OnceLock::new();
+    *F.get_or_init(|| std::env::var_os("SLOPGB_ISRTRACE").is_some())
+}
+
 /// TEMP (#11an) experiment gate for the unified bare-line FF41 read-frame law
 /// (`SLOPGB_BARELAW`). Lets the flagon_probe two-bin the new vis_mode_read
 /// branch against tier2-ON-without-it. Will become unconditional under tier2
@@ -600,6 +610,22 @@ pub(crate) fn barelaw_on() -> bool {
     use std::sync::OnceLock;
     static F: OnceLock<bool> = OnceLock::new();
     *F.get_or_init(|| std::env::var_os("SLOPGB_BARELAW").is_some())
+}
+
+/// TEMP (#11ao) experiment gate for the DOUBLE-SPEED mode-2 (OAM) STAT-IRQ
+/// dispatch delay (`SLOPGB_DSM2DELAY`). The per-ISR read-position model:
+/// slopgb's DS mode-2 handler reads 2 dots earlier than SameBoy (read_offset
+/// 4-5 vs the mode-0 2-3) because the DS mode-2 OAM-IRQ dispatch lands 1
+/// M-cycle (2 dots) too early. SameBoy delays the OAM STAT IRQ a cycle on ALL
+/// lines (slopgb only line-0); applying that `stat_late` dispatch-delay in DS
+/// pushes the handler read +2 dots. SS-EXEMPT (the prior all-speed attempt
+/// collapsed the SS kernel `m2int_m3stat_1`; SS needs +2 dots = half an
+/// M-cycle, unreachable by a whole-M-cycle delay, and already passes). Two-bin
+/// gates it before becoming tier2-unconditional.
+pub(crate) fn dsm2delay_on() -> bool {
+    use std::sync::OnceLock;
+    static F: OnceLock<bool> = OnceLock::new();
+    *F.get_or_init(|| std::env::var_os("SLOPGB_DSM2DELAY").is_some())
 }
 
 fn pixel_buffer(fill: u32) -> Box<[u32; SCREEN_PIXELS]> {
