@@ -71,22 +71,33 @@ impl Ppu {
         // delivers. CGB line 1 only; LE/Tier-2 only (`stat_update_tick` never runs
         // flag-off → byte-identical OFF).
         let line_start_carryover = if self.model.is_cgb() {
-            // S5 mech 3 root 2 (#11al) — the CGB line-0→1 wrap, the line-END half.
-            // The #11r line-1 dots-0-2 hold covers a late LYC write landing on
-            // line 1's carryover; but slopgb's leading-edge write frame commits a
-            // last-M-cycle (dot >= 452) FF45 write 1 M-cycle EARLIER, on line 0's
-            // tail, where it maps to SameBoy's line-1 cfl0 (the held carryover, no
-            // re-latch). SameBoy: `lyc0_late_ff45_enable_2`'s write lands `ly1
-            // cfl0` (no fresh edge); `_1`'s lands `ly0 cfl0` (fires) — measured.
-            // slopgb fired `_2`'s late write at ly0 dot453 (LYC=0 matches lyfc=0)
-            // → spurious `got=E2`, want E0. Hold the latch across the line-0 last
-            // M-cycle so a freshly-matching just-written LYC there is NOT
-            // re-latched (it carries into line 1 unchanged); `_1`'s dot-449 write
-            // (< 452, before the last M-cycle) still re-latches and fires. The
-            // `dot >= 452` boundary is the same last-M-cycle threshold
-            // `write_lyc_cgb`'s lyc_event protection uses. CGB only; LE/Tier-2
+            // S5 mech 3 root 2 (#11al) — the CGB last-M-cycle LYC-write hold (the
+            // line-END half of the #11l/#11r line-START carryover hold). slopgb's
+            // leading-edge write frame commits a last-M-cycle (dot >= 452) FF45
+            // write 1 M-cycle EARLIER than SameBoy, on the CURRENT line's tail,
+            // where it maps to SameBoy's NEXT line's cfl0 (the held carryover, no
+            // re-latch). A freshly-matching just-written LYC there re-latched
+            // `lyc_interrupt_line` → a spurious last-dot STAT edge SameBoy never
+            // fires. Measured (SBWRITE/SBLEVEL): `lyc0_late_ff45_enable_2`'s write
+            // lands `ly1 cfl0` (no edge) where its `_1` sibling lands `ly0 cfl0`
+            // (fires) — slopgb fired `_2` at ly0 dot453; `late_ff45_enable_2`'s
+            // write lands `ly7 cfl0` (no edge) — slopgb fired it at ly6 dot453;
+            // both spurious. Hold the latch across the last M-cycle so the
+            // just-written LYC carries into the next line unchanged; a write
+            // before dot 452 (e.g. `_1`'s dot 449) still re-latches and fires.
+            // `dot >= 452` is the same last-M-cycle boundary `write_lyc_cgb`'s
+            // lyc_event protection uses. SINGLE-SPEED only: at double speed the
+            // last M-cycle is 2 dots (the leading-edge write offset is +1, not
+            // +4), so `dot >= 452` over-covers the DS grid and inverts the
+            // SameBoy-passing `_ds_1` siblings (`lyc153_late_ff45_enable_ds_1`,
+            // `lyc1_m2irq_late_lyc255_ds_1`) — the DS last-M-cycle hold is the S6
+            // DS-grid stage, parked. This is the line-END complement of the
+            // line-START carryover hold (#11l's lines-2-143 START hold stays
+            // REFUTED on CGB: the lcd-offset shifts a REAL edge onto the START
+            // carryover dot — but NOT onto the line-END last M-cycle, where lyfc
+            // is fixed and only a fresh write moves the latch). CGB only; LE/Tier-2
             // only (production byte-identical).
-            (self.line == 1 && self.dot <= 2) || (self.line == 0 && self.dot >= 452)
+            (self.line == 1 && self.dot <= 2) || (self.dot >= 452 && !self.ds)
         } else {
             (1..=143).contains(&self.line) && self.dot <= 2
         };

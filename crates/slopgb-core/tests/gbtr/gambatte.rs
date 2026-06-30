@@ -1029,21 +1029,24 @@ fn tier2_lyc_carryover_late_ff45_passes() {
         .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected outE0 (tier2 flag-on): {e}"));
 }
 
-/// Port Stage C / S5 (mech 3 root 2 — the CGB line-0→1 wrap, line-END half,
-/// #11al) — the CGB analogue of [`tier2_lyc_carryover_late_ff45_passes`]'s DMG
-/// line-START hold. `lyc0_late_ff45_enable_2` (LYC=0, late FF45=0 at the wrap)
-/// renders `outE0` on CGB (SameBoy fires no fresh edge: its write lands `ly1
-/// cfl0`, the held line-1 carryover, no re-latch — measured SBWRITE/SBLEVEL).
-/// slopgb's leading-edge write frame committed that write 1 M-cycle earlier, on
-/// line 0's last M-cycle (dot 453), where the freshly-matching LYC=0 re-latched
-/// `lyc_interrupt_line` → a spurious `ly0 dot453` STAT edge (`outE2`). The fix
-/// holds the latch across line 0's last M-cycle (`dot >= 452`, the same
-/// boundary-write threshold `write_lyc_cgb` uses) so the just-written LYC
-/// carries into line 1 unchanged. The `_1` sibling (`outE2`) writes at dot 449
-/// (< 452, before the last M-cycle) and still re-latches/fires — pinned implicitly
-/// by the +1/−0 full-CGB two-bin. CGB-only / LE-Tier2-only; production
-/// byte-identical. See `reclock.rs::stat_update_tick` + `ppu-subdot-ladder.md`
-/// "#11al".
+/// Port Stage C / S5 (mech 3 root 2 — the CGB last-M-cycle LYC-write hold,
+/// #11al) — the line-END complement of [`tier2_lyc_carryover_late_ff45_passes`]'s
+/// DMG line-START carryover hold. A late FF45 write in slopgb's leading-edge
+/// write frame commits 1 M-cycle earlier than SameBoy, on the current line's
+/// last M-cycle (dot >= 452), where the freshly-matching just-written LYC
+/// re-latched `lyc_interrupt_line` → a spurious last-dot STAT edge SameBoy never
+/// fires (its write lands the NEXT line's `cfl0`, the held carryover / `lyfc=-1`
+/// — measured SBWRITE/SBLEVEL). Holding the latch across the last M-cycle
+/// (`dot >= 452`, the boundary-write threshold `write_lyc_cgb` uses) carries the
+/// just-written LYC into the next line unchanged; an earlier write (e.g.
+/// `lyc0_late_ff45_enable_1`'s dot 449) still re-latches/fires. Three CGB rows,
+/// three lines (0/6→7/1→2): `lyc0_late_ff45_enable_2` (LYC=0, wrap, outE0),
+/// `lyc153_late_ff45_enable_2` (LYC=153 at the vblank wrap, outE0),
+/// `m2enable/lyc1_m2irq_late_lyc255_2` (late LYC=255 disabling the match, out0).
+/// Single-speed-only (the DS last M-cycle is 2 dots, +1 offset — `dot >= 452`
+/// inverts the SameBoy-passing `_ds_1` siblings); CGB-only; LE-Tier2-only;
+/// production byte-identical. See `reclock.rs::stat_update_tick` +
+/// `ppu-subdot-ladder.md` "#11al".
 #[test]
 fn tier2_lyc_carryover_late_ff45_cgb_wrap_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -1053,13 +1056,29 @@ fn tier2_lyc_carryover_late_ff45_cgb_wrap_passes() {
         );
         return;
     };
-    let rel = "gambatte/lycEnable/lyc0_late_ff45_enable_2_dmg08_outE2_cgb04c_outE0.gbc";
-    let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+    let targets: [(&str, &str); 3] = [
+        (
+            "gambatte/lycEnable/lyc0_late_ff45_enable_2_dmg08_outE2_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        (
+            "gambatte/lycEnable/lyc153_late_ff45_enable_2_dmg08_outE2_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        (
+            "gambatte/m2enable/lyc1_m2irq_late_lyc255_2_dmg08_out2_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
     let model = Model::Cgb;
-    let mut gb = harness::boot_with_reclock(&rom, model);
-    run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
-    check_hex_screen(gb.frame(), "E0", model.is_cgb())
-        .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected cgb04c outE0 (tier2 flag-on): {e}"));
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, model);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, model.is_cgb()).unwrap_or_else(|e| {
+            panic!("{rel} [{model:?}] expected cgb04c out{expect} (tier2 flag-on): {e}")
+        });
+    }
 }
 
 /// Port Stage C / S5 (mech 1 — the read-observer eighth-grid) — the bare-line
