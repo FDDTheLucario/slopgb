@@ -231,6 +231,17 @@ impl Ppu {
     /// is reclocked (its rise still lands at our cc+4 dot, the remaining atomic
     /// work — see the field docs).
     fn stat_update_halt_masks(&mut self, mfi: u8) {
+        // #11aq (C2 read-position carry): record whether THIS STAT 0→1 edge — the
+        // one setting the currently-pending STAT bit — is the mode-2 OAM
+        // line-start rise. Sticky until the next STAT edge (a held STAT bit
+        // raises no new edge, so the flag keeps naming the source of the pending
+        // bit). The interconnect's `dispatch_retime` keys the per-ISR deferred
+        // read carry on it (`SLOPGB_M2CARRY`). Line 0's OAM pulse takes no carry
+        // (its read frame already matches — same exemption as the halt mask).
+        self.stat_rise_oam = mfi == 2 && self.stat_en & STAT_SRC_OAM != 0 && self.line != 0;
+        // #11aq: the mode-0 HBlank ISR read is +2 dots early (half the mode-2 +4);
+        // tagged so `dispatch_retime` carries it the matching +2.
+        self.stat_rise_m0 = mfi == 0 && self.stat_en & STAT_SRC_HBLANK != 0;
         // The rise's source is unambiguous from `mfi` alone: this runs only on a
         // 0→1 edge, so the line was LOW the previous dot — meaning neither source
         // held it high. If the mode source is enabled with `mfi` selecting it

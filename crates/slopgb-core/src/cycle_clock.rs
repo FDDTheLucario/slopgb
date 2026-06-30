@@ -174,6 +174,20 @@ impl CycleClock {
             .expect("pending debt overflow — flush missing");
     }
 
+    /// #11aq (C2 per-ISR read-position carry): add `t` CPU T-cycles of extra
+    /// parked debt to be paid (advanced) by the next bus op *before* it samples,
+    /// shifting that read — and every subsequent handler read — `t` T later
+    /// WITHOUT moving the current clock position (the IF-ack latch already
+    /// committed). Used by `dispatch_retime` to carry the OAM-IRQ source's
+    /// sub-M-cycle phase into the ISR handler reads, decoupled from the dispatch
+    /// dot (`cpu-timing-map.md §7.1`). Inert unless `SLOPGB_M2CARRY`.
+    pub(crate) fn carry_read(&mut self, t: u32) {
+        self.pending = self
+            .pending
+            .checked_add(t)
+            .expect("pending debt overflow — flush missing");
+    }
+
     /// `flush_pending_cycles` (`sm83_cpu.c:336`): drain the debt and park 0;
     /// called at every instruction boundary.
     pub(crate) fn flush(&mut self) {

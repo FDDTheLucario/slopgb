@@ -1045,6 +1045,34 @@ impl Bus for Interconnect {
         let before = self.clock.now();
         let _ = self.clock.dispatch_vector_retime();
         self.advance_machine_t(before, self.clock.now());
+        // #11aq (C2 per-ISR read-position carry, `SLOPGB_M2CARRY`): if this
+        // dispatch is a mode-2 OAM STAT IRQ in double speed, carry +1 M-cycle
+        // (4 T) of read debt into the handler. The retime already flushed to the
+        // IF-ack latch (the counter-pinned dispatch dot), so the carry shifts
+        // ONLY the vector fetch + subsequent handler reads (+2 dots DS), not the
+        // ack — the read↔dispatch decoupling DSM2DELAY's dispatch delay can't
+        // give (`cpu-timing-map.md §7.1`). The dispatched bit is STAT iff it is
+        // the lowest pending bit (VBlank, bit 0, out-prioritizes STAT); guarding
+        // on that keeps a coincident vblank/timer dispatch carry-free.
+        if self.double_speed
+            && crate::ppu::m2carry_on()
+            && self.pending().trailing_zeros() == 1
+        {
+            // Per-ISR-SOURCE read carry: the mode-2 OAM ISR read lands +4 dots
+            // early, the mode-0 HBlank ISR read +2 (MEASURED — `cpu-timing-map.md
+            // §7.1`). Carrying each by its own offset lands BOTH at SameBoy's
+            // absolute cfl so the single SBex exit law (`m2hold_on`) serves them.
+            let carry = if self.ppu.stat_rise_oam() {
+                crate::ppu::m2carry_t()
+            } else if self.ppu.stat_rise_m0() {
+                crate::ppu::m0carry_t()
+            } else {
+                0
+            };
+            if carry > 0 {
+                self.clock.carry_read(carry);
+            }
+        }
         // S6/S7 ISR read-position diagnostic: log the vector-latch PPU position
         // + clock, the analogue of SameBoy's SBVEC (`sm83_cpu.c:1694`). The
         // delta vector→read isolates the handler's PPU advance from the dispatch

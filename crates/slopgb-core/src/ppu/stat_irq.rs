@@ -154,6 +154,35 @@ impl Ppu {
         {
             return 3;
         }
+        // C2 #11aq CARRY-FRAME bare-line exit HOLD (env-gated `SLOPGB_M2HOLD`;
+        // co-lands with the `SLOPGB_M2CARRY` +4-dot read-position carry). The
+        // carry moves the DS mode-2 OAM-ISR FF41 read to SameBoy's *absolute*
+        // cfl (measured: `m2int_m3stat_ds_1/_2` reads land slopgb dot 256/258 =
+        // SameBoy cfl 256/258 at carry_t 8), so the read FRAME offset is now 0
+        // and the verdict is SameBoy's mode AT that cfl: mode 3 iff cfl < SameBoy
+        // bare exit `SBex = 257 + SCX&7` (+1 DS = 258 at scx0, MEASURED `SBMODE
+        // cfl257 dc2`). slopgb's NATIVE `vis_mode` flips to 0 at its own exit
+        // `255 + SCX&7` — 2-3 dots BELOW SameBoy's — so for the carried read it
+        // reports mode 0 too early. HOLD mode 3 in the `[native_exit, SBex)` gap.
+        // This is the BARELAW (#11an) with read_offset 0 (the carry replaces the
+        // −4): the render-length (a) half of the (a)+(b) co-land — anchored to
+        // SameBoy's exit, NOT slopgb's render. DS-only (paired with the DS-only
+        // carry); bare non-sprite CGB lines.
+        if crate::ppu::m2hold_on()
+            && self.tier2_reclock
+            && self.model.is_cgb()
+            && self.ds
+            && self.line >= 1
+            && self.line < 144
+            && m == 0
+            && self.dot >= 250
+            && self.dot < 257 + u16::from(self.eff.scx & 7) + u16::from(self.ds)
+            && !self.render.win_active
+            && !self.glitch_line
+            && self.render.n_sprites == 0
+        {
+            return 3;
+        }
         m
     }
 
@@ -308,6 +337,21 @@ impl Ppu {
     /// interconnect into its `if_late` halt-wake mask.
     pub(crate) fn take_stat_halt_late(&mut self) -> bool {
         std::mem::take(&mut self.stat_halt_late)
+    }
+
+    /// #11aq (C2 read-position carry): whether the currently-pending STAT IRQ
+    /// was raised by the mode-2 OAM line-start rise (vs mode-0/LYC). A sticky
+    /// level read (not drained) by the interconnect's `dispatch_retime` to key
+    /// the per-ISR deferred-read carry (see the [`Ppu::stat_rise_oam`] field +
+    /// [`crate::ppu::m2carry_on`]).
+    pub(crate) fn stat_rise_oam(&self) -> bool {
+        self.stat_rise_oam
+    }
+
+    /// #11aq: whether the currently-pending STAT IRQ was the mode-0 HBlank rise
+    /// (the +2-dot ISR read carry). See [`Ppu::stat_rise_m0`].
+    pub(crate) fn stat_rise_m0(&self) -> bool {
+        self.stat_rise_m0
     }
 
     /// Whether the STAT IF bit handed out by the last [`Self::tick`] came

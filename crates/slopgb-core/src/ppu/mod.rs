@@ -302,6 +302,20 @@ pub struct Ppu {
     /// the wilbertpol intr_2_timing halt roundings pin the law). Drained by
     /// the interconnect via [`Self::take_stat_halt_late`].
     stat_halt_late: bool,
+    /// #11aq (C2 read-position carry): the source of the STAT IRQ that set the
+    /// currently-pending STAT bit was the mode-2 OAM line-start rise (`mfi==2`),
+    /// not a mode-0/LYC rise. A sticky level updated on every STAT 0→1 edge in
+    /// [`Self::stat_update_halt_masks`]; the interconnect's `dispatch_retime`
+    /// reads it to apply the per-ISR deferred-read carry (the OAM-ISR handler's
+    /// reads land 1 M-cycle = 2 dots DS later than the mode-0-ISR's, decoupled
+    /// from the IF-delivery ack — `cpu-timing-map.md §7.1`). Inert unless
+    /// `SLOPGB_M2CARRY`; production never reaches `stat_update_halt_masks`.
+    stat_rise_oam: bool,
+    /// #11aq: the currently-pending STAT IRQ was the mode-0 HBlank rise
+    /// (`mfi==0`). The mode-0 ISR read lands +2 dots early (vs the mode-2 +4),
+    /// so its carry is half. Mutually exclusive with [`Self::stat_rise_oam`]
+    /// (one source per 0→1 edge); both false for a pure-LYC rise.
+    stat_rise_m0: bool,
     /// The externally visible mode-0 flip (STAT mode bits, OAM/VRAM
     /// unblock): rises with `m0_src` ahead of the pipe end (see
     /// `m0_flip_events` in render.rs), and can drop back mid-line when
@@ -646,6 +660,67 @@ pub(crate) fn hdexit_on() -> bool {
     *F.get_or_init(|| std::env::var_os("SLOPGB_HDEXIT").is_some())
 }
 
+/// TEMP (#11aq) experiment gate for the per-ISR deferred-read POSITION carry
+/// (`SLOPGB_M2CARRY`) — the goal's single sharpest lever. Unlike `DSM2DELAY`
+/// (which delays the DS mode-2 OAM-IRQ *dispatch*, dragging the IF delivery +
+/// every deferred read frame), this carries the OAM-vs-mode-0 source's
+/// sub-M-cycle phase into ONLY the ISR-handler reads (the `dispatch_retime`
+/// repark debt, paid by the vector fetch), AFTER the IF ack has already landed
+/// at the counter-pinned dispatch dot. So the m2int handler's FF41 read shifts
+/// +1 M-cycle (2 dots DS) past the mode-3 exit (`m2int_m3stat_ds_2` want 0)
+/// while the mode-0-ISR read and the IF-delivery position stay put
+/// (`cpu-timing-map.md §7.1`; `c2-halfdot-exit-parity-built` collision). DS-only
+/// (the SS kernel pair `m2int_m3stat_1/_2` already pass + must stay neutral);
+/// keyed on [`Ppu::stat_rise_oam`]. Two-bin gates it before tier2-unconditional.
+pub(crate) fn m2carry_on() -> bool {
+    use std::sync::OnceLock;
+    static F: OnceLock<bool> = OnceLock::new();
+    *F.get_or_init(|| std::env::var_os("SLOPGB_M2CARRY").is_some())
+}
+
+/// #11aq carry magnitude in CPU T-cycles (`SLOPGB_M2CARRY_T`, default 4 = a
+/// whole M-cycle = +2 dots DS). Sweepable to probe whether a sub-M-cycle carry
+/// (+2 T = +1 dot DS) crosses the `_ds_2` boundary without over-shooting the
+/// `_ds_1` siblings (the read-frame A/B trade).
+pub(crate) fn m2carry_t() -> u32 {
+    use std::sync::OnceLock;
+    static F: OnceLock<u32> = OnceLock::new();
+    *F.get_or_init(|| {
+        std::env::var("SLOPGB_M2CARRY_T")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(4)
+    })
+}
+
+/// #11aq gate for the CARRY-FRAME bare-line exit HOLD (`SLOPGB_M2HOLD`) — the
+/// render-length (a) half of the read-position-carry (b) co-land. With the
+/// +4-dot carry landing the DS mode-2 read at SameBoy's absolute cfl, this
+/// holds mode 3 to SameBoy's bare exit `257+SCX&7(+ds)` (vs slopgb's lower
+/// native `255+SCX&7`). Tested co-landed with `SLOPGB_M2CARRY_T=8`.
+pub(crate) fn m2hold_on() -> bool {
+    use std::sync::OnceLock;
+    static F: OnceLock<bool> = OnceLock::new();
+    *F.get_or_init(|| std::env::var_os("SLOPGB_M2HOLD").is_some())
+}
+
+/// #11aq mode-0 (HBlank) ISR read-position carry magnitude in T-cycles
+/// (`SLOPGB_M0CARRY_T`, default 4 = +2 dots DS). The mode-0 ISR read lands +2
+/// dots early vs SameBoy (half the mode-2 +4); carrying it lets the single
+/// [`m2hold_on`] SBex exit law serve BOTH the m0int and m2int families. Gated
+/// by [`m2carry_on`] (0 disables the mode-0 carry, leaving the mode-2-only
+/// lever).
+pub(crate) fn m0carry_t() -> u32 {
+    use std::sync::OnceLock;
+    static F: OnceLock<u32> = OnceLock::new();
+    *F.get_or_init(|| {
+        std::env::var("SLOPGB_M0CARRY_T")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(4)
+    })
+}
+
 fn pixel_buffer(fill: u32) -> Box<[u32; SCREEN_PIXELS]> {
     vec![fill; SCREEN_PIXELS]
         .into_boxed_slice()
@@ -789,6 +864,8 @@ impl Ppu {
             stat_lyc_ev: 0,
             stat_lyc_ev_staged: None,
             stat_halt_late: false,
+            stat_rise_oam: false,
+            stat_rise_m0: false,
             line_render_done: true,
             vis_early: false,
             vis_hold_until: 0,
