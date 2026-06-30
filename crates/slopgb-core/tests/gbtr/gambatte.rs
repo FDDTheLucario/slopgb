@@ -1029,6 +1029,39 @@ fn tier2_lyc_carryover_late_ff45_passes() {
         .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected outE0 (tier2 flag-on): {e}"));
 }
 
+/// Port Stage C / S5 (mech 3 root 2 — the CGB line-0→1 wrap, line-END half,
+/// #11al) — the CGB analogue of [`tier2_lyc_carryover_late_ff45_passes`]'s DMG
+/// line-START hold. `lyc0_late_ff45_enable_2` (LYC=0, late FF45=0 at the wrap)
+/// renders `outE0` on CGB (SameBoy fires no fresh edge: its write lands `ly1
+/// cfl0`, the held line-1 carryover, no re-latch — measured SBWRITE/SBLEVEL).
+/// slopgb's leading-edge write frame committed that write 1 M-cycle earlier, on
+/// line 0's last M-cycle (dot 453), where the freshly-matching LYC=0 re-latched
+/// `lyc_interrupt_line` → a spurious `ly0 dot453` STAT edge (`outE2`). The fix
+/// holds the latch across line 0's last M-cycle (`dot >= 452`, the same
+/// boundary-write threshold `write_lyc_cgb` uses) so the just-written LYC
+/// carries into line 1 unchanged. The `_1` sibling (`outE2`) writes at dot 449
+/// (< 452, before the last M-cycle) and still re-latches/fires — pinned implicitly
+/// by the +1/−0 full-CGB two-bin. CGB-only / LE-Tier2-only; production
+/// byte-identical. See `reclock.rs::stat_update_tick` + `ppu-subdot-ladder.md`
+/// "#11al".
+#[test]
+fn tier2_lyc_carryover_late_ff45_cgb_wrap_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_lyc_carryover_cgb",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let rel = "gambatte/lycEnable/lyc0_late_ff45_enable_2_dmg08_outE2_cgb04c_outE0.gbc";
+    let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+    let model = Model::Cgb;
+    let mut gb = harness::boot_with_reclock(&rom, model);
+    run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+    check_hex_screen(gb.frame(), "E0", model.is_cgb())
+        .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected cgb04c outE0 (tier2 flag-on): {e}"));
+}
+
 /// Port Stage C / S5 (mech 1 — the read-observer eighth-grid) — the bare-line
 /// `m2int_m3stat` reads converge flag-on when the mode-0 dispatch lands at cc2 of
 /// its M-cycle (dot ≡ 1 mod 4 ⇔ SCX&7 ∈ {3,7}). A leading-edge FF41 read samples
