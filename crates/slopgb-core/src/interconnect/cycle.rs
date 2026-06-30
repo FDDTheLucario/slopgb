@@ -140,8 +140,9 @@ impl Interconnect {
         if addr == 0xFF41 && crate::ppu::s5dbg_on() {
             let (line, dot) = self.ppu.scan_pos();
             if line < 144 {
+                let (wa, ve, lrd, vh, vm, ns) = self.ppu.dbg_read_state();
                 eprintln!(
-                    "SLOPGB ff41 ly={line} dot={dot} mode={} pend={pend_dbg}",
+                    "SLOPGB ff41 ly={line} dot={dot} mode={} pend={pend_dbg} wa={wa} ve={ve} lrd={lrd} vh={vh} vm={vm} ns={ns}",
                     v & 3
                 );
             }

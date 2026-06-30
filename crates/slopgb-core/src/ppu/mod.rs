@@ -592,6 +592,16 @@ pub(crate) fn s5dbg_on() -> bool {
     *F.get_or_init(|| std::env::var_os("SLOPGB_S5DBG").is_some())
 }
 
+/// TEMP (#11an) experiment gate for the unified bare-line FF41 read-frame law
+/// (`SLOPGB_BARELAW`). Lets the flagon_probe two-bin the new vis_mode_read
+/// branch against tier2-ON-without-it. Will become unconditional under tier2
+/// if it proves a clean +N/−0; revert otherwise.
+pub(crate) fn barelaw_on() -> bool {
+    use std::sync::OnceLock;
+    static F: OnceLock<bool> = OnceLock::new();
+    *F.get_or_init(|| std::env::var_os("SLOPGB_BARELAW").is_some())
+}
+
 fn pixel_buffer(fill: u32) -> Box<[u32; SCREEN_PIXELS]> {
     vec![fill; SCREEN_PIXELS]
         .into_boxed_slice()
@@ -938,6 +948,24 @@ impl Ppu {
             // Visible mode-0 flip + IRQ-source rise (after the dot's
             // render step so the projection sees this dot's state).
             self.m0_flip_events();
+            // TEMP measurement scaffold (#11an genuine-length vs read-frame
+            // split): trace the EFFECTIVE CPU-visible mode-3→0 EXIT dot — the
+            // dot `vis_mode_read()` (what the FF41 register read returns,
+            // incl. the window law / vis_hold / m0_unflip re-projection)
+            // actually flips 3→0. This is the slopgb ground-truth exit to
+            // line up against SameBoy SBMODE, robust to `vis_early` resets the
+            // `visflip` tracer can't see. `SLOPGB_S5DBG`, byte-identical unset.
+            if crate::ppu::s5dbg_on() {
+                use std::cell::Cell;
+                thread_local!(static PREV: Cell<u8> = const { Cell::new(255) });
+                let vm = self.vis_mode_read();
+                PREV.with(|p| {
+                    if p.get() == 3 && vm == 0 {
+                        eprintln!("SLOPGB visexit ly={} dot={}", self.line, self.dot);
+                    }
+                    p.set(vm);
+                });
+            }
         }
         if self.model.is_cgb() && !self.ds && self.line == 152 && self.dot == 454 {
             // CGB-C single speed loads LY=153 two dots before line 153
@@ -1102,6 +1130,22 @@ impl Ppu {
     /// to line slopgb's read dot up against SameBoy's `cycles_for_line`.
     pub(crate) fn scan_pos(&self) -> (u8, u16) {
         (self.line, self.dot)
+    }
+
+    /// TEMP (#11an) read-state probe for the genuine-length/read-frame split:
+    /// `(win_active, vis_early, line_render_done, vis_hold_until, raw vis_mode,
+    /// n_sprites)` at the deferred FF41 read. Lets the `SLOPGB ff41` trace show
+    /// WHY the read sees its mode (window still active → extended mode 3 vs a
+    /// bare re-projection). Pure accessor; revert with the tracer.
+    pub(crate) fn dbg_read_state(&self) -> (bool, bool, bool, u16, u8, u8) {
+        (
+            self.render.win_active,
+            self.vis_early,
+            self.line_render_done,
+            self.vis_hold_until,
+            self.vis_mode(),
+            self.render.n_sprites,
+        )
     }
 
     /// XRGB8888 pixels of the most recently *completed* frame.

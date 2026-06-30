@@ -95,6 +95,33 @@ impl Ppu {
         {
             return 3;
         }
+        // C2 #11an UNIFIED bare-line read-frame law (EXPERIMENT, env-gated).
+        // The dual-emulator trace (kernel m2int_m3stat_1/_2 + DS _2 +
+        // late_disable) showed every FF41 mode read obeys:
+        //   slopgb read at dot D  ⟺  SameBoy read at cfl D + read_offset
+        // with read_offset = 4 (SS) / 3 (DS). So slopgb reproduces SameBoy's
+        // verdict by comparing D against SameBoy's CONFIG render exit minus the
+        // offset. The triggering-window law above is this with SBex = 263+SCX&7
+        // (`259+SCX&7` SS). The BARE-line exit is SBex = 257 + SCX&7, so the
+        // read-frame boundary is `257 + SCX&7 − read_offset = 253+SCX&7` (SS) /
+        // `254+SCX&7` (DS). Anchored to SameBoy's CONFIG exit, NOT slopgb's own
+        // render — so it also corrects late_disable, where slopgb's render
+        // OVER-extends (window was active then disabled) but SameBoy renders the
+        // line bare (exit 257). Bare non-sprite lines only for this first cut
+        // (sprites push SBex past 257 — the penalty term is the next slice).
+        if crate::ppu::barelaw_on()
+            && self.tier2_reclock
+            && self.model.is_cgb()
+            && self.line >= 1
+            && self.line < 144
+            && m == 3
+            && !self.render.win_active
+            && !self.glitch_line
+            && self.render.n_sprites == 0
+            && self.dot >= 253 + u16::from(self.eff.scx & 7) + u16::from(self.ds)
+        {
+            return 0;
+        }
         m
     }
 
