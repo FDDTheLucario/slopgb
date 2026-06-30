@@ -127,6 +127,44 @@ Lifts the class-H/A sub-dot floor incrementally: keep the pixel pipe dot-clocked
 - **DISPATCH-RECLOCK REFUTED 2026-06-21 (the prior "next: move the dispatch to ~252" hypothesis is MEASURED-FALSE; A6's halt-mask is the correct resolution at the UNMOVED frame; probe reverted, branch byte-identical to `a89fdf9`).** Tested the long-assumed next lever — move the mode-0 IRQ DISPATCH (`mode_for_interrupt→0` via `mfi_m0_prev`) from our cc+4 dot 255 to SameBoy's `mode0_irq_dot` (our 252) by re-anchoring `mfi_m0_prev` to `vis_early` (dot 251 → IRQ at 252) on the flag-on path (`SLOPGB_DISP` probe). **Measured (flag-on, `run_mooneye`/`run_gambatte`, all reverted): net-NEGATIVE A/B swap.** Canonical `intr_2_mode0_timing` HELD PASS (it never needed the dispatch move — A6's halt-only mask already fixes it at the 254 frame); but **kernel `m0int_m3stat_2` REGRESSED 0→3** (m0int is itself a *mode-0-dispatched* read — moving its IRQ moves its `ldh a,(FF41)` off the post-flip dot) and **`intr_2_0_timing` REGRESSED PASS→FAIL** (the mode-2→mode-0 IRQ distance shortens by 3 dots), while **`hblank_ly_scx_timing-GS` STAYED FAIL** (so the dispatch dot is NOT its blocker). **CONCLUSION (the proof the goal asked for): the mode-0 dispatch dot is ATOMIC/ENTANGLED — it cannot move on the flag-on path without regressing every mode-0-*dispatched* read (m0int, intr_2_0) that is pinned to our 254 frame; only the global cc-exact reclock (which re-frames ALL those reads together + the ~7000 rebaseline) can move it. The premise "the canonical needs the dispatch at 252" was WRONG — A6's `halt`-only mask resolves the canonical at the UNMOVED 254 frame, and the 254 frame is exactly where m0int reads its post-flip mode 0.** So the residual flag-on failures are NOT a dispatch-dot problem: `hblank_ly_scx`/gbmicrotest `int_hblank_halt` need the **`m0_rise` mask phase** (the new engine's m0 rise lands at dot 255 vs the gambatte engine's `m0_rise_dot` 254 — a sub-dot second-half-determination mismatch, a separate lever); `intr_2_mode3_timing` the mode-2→3 entry-boundary back-date; `intr_2_mode0_timing_sprites` the sprite/window `vis_early`; `vblank_stat_intr-GS` the line-144/DMG-vblank OAM pulses the mfi-engine doesn't emit. Each is its own flag-gated piece on top of A6; the global default flip + rebaseline (Phase B) is the terminal all-or-nothing step.
 - **A5a SHIPPED 2026-06-21 (the visible/dispatch decouple banked as flag-gated production machinery; byte-identical flag-OFF, gate exit 0, kernel separates flag-ON).** Acting on the "bank a green foundation piece" mandate, the measured separator from the bullet above is now real (not a probe): a new `Ppu::vis_early` field (`ppu/mod.rs`) back-dates the **CPU-visible** STAT mode→0 boundary (`vis_mode`) to SameBoy's `ModeTimeline::visible_mode0_dot` frame — 3 dots ahead of the IRQ-dispatch flip (`line_render_done`/`m0_src`) — **on the flag-on path only, bare single-speed lines** (`m0_flip_events`: `leading_edge_reads && bare_flip && !ds && proj <= lead + 3`). `vis_mode` reads `line_render_done || vis_early`; since the set is gated on `leading_edge_reads` (off in prod), `vis_early` is **always false flag-OFF**, so `vis_mode == line_render_done` exactly — byte-identical (full gbtr+mooneye gate **exit 0**, 644 lib green, clippy clean). The dispatch (`m0_src`/`mode_for_interrupt`) is unmoved, so this decouples the visible read from the IRQ dot. **Flag-ON verified**: `run_gambatte cgb` on the kernel pair = **m2int_m3stat_1 → 3 ∧ m0int_m3stat_2 → 0** (both correct — the kernel SEPARATES with the real machinery, not just the probe). Tests: `visible_mode0_backdates_three_dots_flag_on_bare_line` (flag-on flip at SameBoy+4 / our 251, flag-off stays at +7 / 254) + the two `leading_edge_*` subdot tests rewritten to pin the separation at the two read dots (leading sample at our dot 248 → mode 3, 252 → mode 0). **Scope/residuals (deliberately excluded, derived-but-unmeasured): the +3 back-date is the bare single-speed value; sprite/window lines want +2 (DMG) and DS +4, left on `line_render_done`. OAM/VRAM accessibility (`blocking.rs`) keeps the dispatch dot — the visible-vs-accessibility 3-dot window is the S4 back-dating. This is the visible-frame HALF of the atomic flip; the canonical mooneye `intr_2_mode0_timing` still breaks flag-on because the DISPATCH is still cc+4-framed (our 254, not SameBoy's ~252) — the dispatch reclock + ~7000 rebaseline is the remaining atomic work. A5a is the A1/A2/A4-pattern foundation piece: individually faithful, byte-identical OFF, validated ON.**
 
+### #11aq (2026-06-30) — the per-ISR read-POSITION CARRY BUILT (decoupled from the IF dispatch); the #11ap "co-temporal/unseparable" verdict REVERSED, the (a)+(b) co-land PROVEN at family level. ESCAPE on the GLOBAL read↔exit consistency; code in `phase-b-s7`, `pixel-pipe-reclock` core byte-identical OFF, defaults NOT flipped.
+
+Executed the goal's single sharpest lever: build the per-ISR deferred FF41-read
+POSITION decoupled from the IF dispatch. The CARRY = `dispatch_retime` adds
+`carry` T of read debt AFTER the IF-ack latch (`CycleClock::carry_read`), so the
+vector fetch + handler reads shift `carry` T later WITHOUT moving the dispatch dot
+or IF delivery — the decoupling DSM2DELAY's *dispatch* delay could not give.
+
+**The decisive measurement OVERTURNS #11ap.** The m0int/m2int reads were NEVER
+collapsed: slopgb base reads `m2int_m3stat_ds_1` dot252 / `_2` dot254 (2 dots
+apart); SameBoy reads cfl256/258. slopgb's whole frame is a **uniform +4 dots
+EARLIER** for the DS mode-2 ISR (`carry_t=8` lands them EXACTLY at SameBoy's
+256/258, verified) and **+2 dots** for the DS mode-0 ISR (`m0int` dot254↔cfl256).
+The only error is the EXIT relative to the reads: slopgb's `255+SCX&7` sits ABOVE
+both; SameBoy's `257+SCX&7(+ds)=258` sits BETWEEN them.
+
+**The (a)+(b) co-land PROVEN.** Per-source carry (mode-2 `+4`/mode-0 `+2`) +
+ONE SBex exit-hold (`257+SCX&7+ds`, the read_offset-0 BARELAW, `SLOPGB_M2HOLD`)
+converges **BOTH the m0int AND m2int m3stat DS families 21/22** (only the
+separate `late_scx4` late-write mechanism remains). The recipe is the goal's
+thesis realized: read → SameBoy's per-ISR cfl + SameBoy's exit.
+
+**Why it ESCAPES — the global consistency barrier.** Full-CGB two-bin vs base
+(mooneye 91/91 EVERY variant — the dispatch dot is NOT moved, counter-pins
+intact): carry mode-2 `+2dot` = +28/−22 · `+1dot` = +22/−7 · dual-carry+M2HOLD =
++22/−50. The `M2HOLD` blanket exit law drops 50 SameBoy-passing rows because only
+the STAT-ISR reads are CARRIED — the non-carried bare-DS reads (polled, other
+ISRs) stay at slopgb's lower frame and the SBex hold mis-frames them. The read
+frame and the exit law must be GLOBALLY consistent: carry EVERY deferred read by
+its per-ISR offset, then ONE SBex law. A flag-gated SUBSET is an A/B swap.
+
+**The lever is no longer "impossible/co-temporal" — it is a validated mechanism
+with measured per-source offsets and a family-verified recipe; the only barrier
+is that it must land ATOMICALLY (all reads + one exit law together).** Scaffold
+(`SLOPGB_M2CARRY`/`_T`/`M0CARRY_T`/`M2HOLD`, `stat_rise_oam`/`stat_rise_m0`,
+`carry_read`) env-gated, byte-identical OFF, on `phase-b-s7`. Map:
+`docs/sameboy-port/tools/measurements/c2-readpos-carry-built-2026-06-30.md`.
+
 ### #11ap (2026-06-30) — the HALF-DOT exit BUILT as a clean `scx&1` PARITY term (resolves the #11ao scx-parity); but the half-dot exit is NOT the blocker — the m0int/m2int read-POSITION COLLISION is, and it is co-temporal. ESCAPE; code in `phase-b-s7` (`09a8b6c`), `pixel-pipe-reclock` core byte-identical OFF, defaults NOT flipped.
 
 Executed the goal's lever: build the half-dot (8 MHz) read-vs-exit resolution. Result =

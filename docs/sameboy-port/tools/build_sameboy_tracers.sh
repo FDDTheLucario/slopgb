@@ -16,7 +16,8 @@ SRCTGZ="$HOME/.cache/yay/sameboy/sameboy-1.0.2.tar.gz"
 DIR=/tmp/sbbuild/SameBoy-1.0.2
 TESTER="$DIR/build/bin/tester/sameboy_tester"
 
-if [ -x "$TESTER" ] && grep -q SBMODE "$DIR/Core/display.c" 2>/dev/null; then
+if [ -x "$TESTER" ] && grep -q SBMODE "$DIR/Core/display.c" 2>/dev/null \
+   && grep -q SBDISP "$DIR/Core/sm83_cpu.c" 2>/dev/null; then
   echo "tester already built + patched: $TESTER"; exit 0
 fi
 
@@ -87,6 +88,33 @@ if "SBREAD ff41" not in mem:
                 return gb->io_registers[GB_IO_STAT] | 0x80;""")
     open(d+"/Core/memory.c","w").write(mem)
     print("patched memory.c")
+
+# sm83_cpu.c — the per-ISR dispatch (SBDISP, at the vector-PC latch) + the
+# halt-wake sample position (SBWAKE), for the #11aq read-position-carry trace.
+cpu=open(d+"/Core/sm83_cpu.c").read()
+if "SBDISP" not in cpu:
+    cpu=cpu.replace(
+"""            gb->io_registers[GB_IO_IF] &= ~(1 << interrupt_bit);
+            gb->pc = interrupt_bit * 8 + 0x40;""",
+"""            gb->io_registers[GB_IO_IF] &= ~(1 << interrupt_bit);
+            gb->pc = interrupt_bit * 8 + 0x40;
+            { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+              if(trc) fprintf(stderr,"SBDISP ly=%d cfl=%d dc=%d bit=%d stat=%02x mfi=%d\\n",
+                gb->current_line, gb->cycles_for_line, gb->display_cycles, interrupt_bit,
+                gb->io_registers[GB_IO_STAT]&0x7f, (int8_t)gb->mode_for_interrupt); }""")
+    cpu=cpu.replace(
+"""    if (gb->halted) {
+        GB_advance_cycles(gb, (GB_is_cgb(gb) || gb->just_halted) ? 4 : 2);
+    }""",
+"""    if (gb->halted) {
+        { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+          if(trc && interrupt_queue) fprintf(stderr,"SBWAKE ly=%d cfl=%d dc=%d iq=%02x stat=%02x\\n",
+            gb->current_line, gb->cycles_for_line, gb->display_cycles, interrupt_queue,
+            gb->io_registers[GB_IO_STAT]&0x7f); }
+        GB_advance_cycles(gb, (GB_is_cgb(gb) || gb->just_halted) ? 4 : 2);
+    }""")
+    open(d+"/Core/sm83_cpu.c","w").write(cpu)
+    print("patched sm83_cpu.c")
 PY
 
 cd "$DIR" && make tester -j"$(nproc)"
