@@ -122,6 +122,38 @@ impl Ppu {
         {
             return 0;
         }
+        // C2 #11ap HALF-DOT bare-line exit, RAISE-ODD (DS, env-gated
+        // `SLOPGB_HDEXIT`; co-lands with `SLOPGB_DSM2DELAY`). The #11ao
+        // scx-parity refutation localized the residual to a sub-dot exit.
+        // The DSM2DELAY dispatch delay shifts the DS mode-2 FF41 read +2 dots,
+        // separating it from the mode-0 (m0int) ISR read it otherwise collides
+        // with (both land slopgb dot 254 at scx0, opposite wants — no exit
+        // threshold can split them). With that read-position separation, EVEN
+        // SCX resolves on the native exit `255 + SCX&7`; but the shifted ODD-SCX
+        // `_ds_1` read lands EXACTLY on the native exit (read == exit → mode 0,
+        // want 3). SameBoy's CPU-visible exit rounds UP to the even read grid:
+        // `255 + SCX&7 + (SCX&1)`, so odd SCX stays mode 3 one dot longer. This
+        // RAISE-odd override returns mode 3 in the `[native_exit, raised_exit)`
+        // gap — a no-op for even SCX (whose gap is empty: the even reads never
+        // hit the odd `255+SCX&7` boundary). The half-dot resolution expressed
+        // on slopgb's whole (even) read grid as a `+(SCX&1)` parity term.
+        // MEASURED m2int_m3stat DS scx0-7 both legs (DSM2DELAY=1). DS-only: SS
+        // reads already resolve. Bare non-sprite CGB lines.
+        if crate::ppu::hdexit_on()
+            && self.tier2_reclock
+            && self.model.is_cgb()
+            && self.ds
+            && self.line >= 1
+            && self.line < 144
+            && m == 0
+            && self.dot >= 250
+            && self.dot < 255 + u16::from(self.eff.scx & 7) + u16::from(self.eff.scx & 1)
+            && !self.render.win_active
+            && !self.glitch_line
+            && self.render.n_sprites == 0
+        {
+            return 3;
+        }
         m
     }
 

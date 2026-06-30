@@ -628,6 +628,24 @@ pub(crate) fn dsm2delay_on() -> bool {
     *F.get_or_init(|| std::env::var_os("SLOPGB_DSM2DELAY").is_some())
 }
 
+/// TEMP (#11ap) experiment gate for the HALF-DOT bare-line FF41 read-frame
+/// exit (`SLOPGB_HDEXIT`). The #11ao scx-parity refutation localized the bug
+/// to a sub-dot exit: slopgb's deferred DS FF41 read lands on EVEN dots (DS
+/// M-cycle = 2 dots) while its native mode-3 exit `255 + SCX&7` is LINEAR in
+/// SCX, so for even SCX the exit sits 1 dot above the read grid (read returns
+/// mode 3, want 0). SameBoy's CPU-visible exit rounds to the read grid:
+/// `254 + SCX&7 + (SCX&1)` (= SCX&7 rounded up to even). The `+(SCX&1)` parity
+/// term is the half-dot resolution expressed on slopgb's whole (even) read
+/// grid — it lowers ONLY the even-SCX exit, fixing even-SCX `_ds_2` while
+/// leaving odd-SCX `_ds_1` untouched (the DSM2DELAY/BARELAW whole-dot levers
+/// dropped those). MEASURED m2int_m3stat DS scx0-7 both legs; SS untouched
+/// (SS reads already correct, this is DS-only). Two-bin gates it.
+pub(crate) fn hdexit_on() -> bool {
+    use std::sync::OnceLock;
+    static F: OnceLock<bool> = OnceLock::new();
+    *F.get_or_init(|| std::env::var_os("SLOPGB_HDEXIT").is_some())
+}
+
 fn pixel_buffer(fill: u32) -> Box<[u32; SCREEN_PIXELS]> {
     vec![fill; SCREEN_PIXELS]
         .into_boxed_slice()
