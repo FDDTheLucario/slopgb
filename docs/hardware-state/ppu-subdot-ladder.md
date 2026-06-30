@@ -127,6 +127,50 @@ Lifts the class-H/A sub-dot floor incrementally: keep the pixel pipe dot-clocked
 - **DISPATCH-RECLOCK REFUTED 2026-06-21 (the prior "next: move the dispatch to ~252" hypothesis is MEASURED-FALSE; A6's halt-mask is the correct resolution at the UNMOVED frame; probe reverted, branch byte-identical to `a89fdf9`).** Tested the long-assumed next lever — move the mode-0 IRQ DISPATCH (`mode_for_interrupt→0` via `mfi_m0_prev`) from our cc+4 dot 255 to SameBoy's `mode0_irq_dot` (our 252) by re-anchoring `mfi_m0_prev` to `vis_early` (dot 251 → IRQ at 252) on the flag-on path (`SLOPGB_DISP` probe). **Measured (flag-on, `run_mooneye`/`run_gambatte`, all reverted): net-NEGATIVE A/B swap.** Canonical `intr_2_mode0_timing` HELD PASS (it never needed the dispatch move — A6's halt-only mask already fixes it at the 254 frame); but **kernel `m0int_m3stat_2` REGRESSED 0→3** (m0int is itself a *mode-0-dispatched* read — moving its IRQ moves its `ldh a,(FF41)` off the post-flip dot) and **`intr_2_0_timing` REGRESSED PASS→FAIL** (the mode-2→mode-0 IRQ distance shortens by 3 dots), while **`hblank_ly_scx_timing-GS` STAYED FAIL** (so the dispatch dot is NOT its blocker). **CONCLUSION (the proof the goal asked for): the mode-0 dispatch dot is ATOMIC/ENTANGLED — it cannot move on the flag-on path without regressing every mode-0-*dispatched* read (m0int, intr_2_0) that is pinned to our 254 frame; only the global cc-exact reclock (which re-frames ALL those reads together + the ~7000 rebaseline) can move it. The premise "the canonical needs the dispatch at 252" was WRONG — A6's `halt`-only mask resolves the canonical at the UNMOVED 254 frame, and the 254 frame is exactly where m0int reads its post-flip mode 0.** So the residual flag-on failures are NOT a dispatch-dot problem: `hblank_ly_scx`/gbmicrotest `int_hblank_halt` need the **`m0_rise` mask phase** (the new engine's m0 rise lands at dot 255 vs the gambatte engine's `m0_rise_dot` 254 — a sub-dot second-half-determination mismatch, a separate lever); `intr_2_mode3_timing` the mode-2→3 entry-boundary back-date; `intr_2_mode0_timing_sprites` the sprite/window `vis_early`; `vblank_stat_intr-GS` the line-144/DMG-vblank OAM pulses the mfi-engine doesn't emit. Each is its own flag-gated piece on top of A6; the global default flip + rebaseline (Phase B) is the terminal all-or-nothing step.
 - **A5a SHIPPED 2026-06-21 (the visible/dispatch decouple banked as flag-gated production machinery; byte-identical flag-OFF, gate exit 0, kernel separates flag-ON).** Acting on the "bank a green foundation piece" mandate, the measured separator from the bullet above is now real (not a probe): a new `Ppu::vis_early` field (`ppu/mod.rs`) back-dates the **CPU-visible** STAT mode→0 boundary (`vis_mode`) to SameBoy's `ModeTimeline::visible_mode0_dot` frame — 3 dots ahead of the IRQ-dispatch flip (`line_render_done`/`m0_src`) — **on the flag-on path only, bare single-speed lines** (`m0_flip_events`: `leading_edge_reads && bare_flip && !ds && proj <= lead + 3`). `vis_mode` reads `line_render_done || vis_early`; since the set is gated on `leading_edge_reads` (off in prod), `vis_early` is **always false flag-OFF**, so `vis_mode == line_render_done` exactly — byte-identical (full gbtr+mooneye gate **exit 0**, 644 lib green, clippy clean). The dispatch (`m0_src`/`mode_for_interrupt`) is unmoved, so this decouples the visible read from the IRQ dot. **Flag-ON verified**: `run_gambatte cgb` on the kernel pair = **m2int_m3stat_1 → 3 ∧ m0int_m3stat_2 → 0** (both correct — the kernel SEPARATES with the real machinery, not just the probe). Tests: `visible_mode0_backdates_three_dots_flag_on_bare_line` (flag-on flip at SameBoy+4 / our 251, flag-off stays at +7 / 254) + the two `leading_edge_*` subdot tests rewritten to pin the separation at the two read dots (leading sample at our dot 248 → mode 3, 252 → mode 0). **Scope/residuals (deliberately excluded, derived-but-unmeasured): the +3 back-date is the bare single-speed value; sprite/window lines want +2 (DMG) and DS +4, left on `line_render_done`. OAM/VRAM accessibility (`blocking.rs`) keeps the dispatch dot — the visible-vs-accessibility 3-dot window is the S4 back-dating. This is the visible-frame HALF of the atomic flip; the canonical mooneye `intr_2_mode0_timing` still breaks flag-on because the DISPATCH is still cc+4-framed (our 254, not SameBoy's ~252) — the dispatch reclock + ~7000 rebaseline is the remaining atomic work. A5a is the A1/A2/A4-pattern foundation piece: individually faithful, byte-identical OFF, validated ON.**
 
+### #11al (2026-06-30) — the ENGINE-IF class build-measured: 1 clean engine mechanism DRAINED (the CGB last-M-cycle LYC-write spurious re-latch, 3 rows, SS, `+3/−0`); the rest of the 64 are READ-FRAME. SHIPPED flag-gated, byte-identical OFF, 26→27 pins.
+
+The goal: DRAIN the 64-row ENGINE-IF class (the "C2 flip BLOCKED on S5 engine
+completion" core), shipping +N/−0 slices from the named roots and overturning the
+#11ae/#11ah "atomic" verdict by build-measure. **Result: the class is mostly
+read-frame, not a separable IF-lifecycle bug — but one genuinely-engine mechanism
+(slopgb firing a STAT edge SameBoy entirely lacks) DOES slice clean.**
+
+- **SHIPPED — the CGB last-M-cycle LYC-write hold** (`reclock.rs::stat_update_tick`,
+  `(line==1 && dot<=2) || (dot>=452 && !ds)`). A late FF45 write in slopgb's
+  leading-edge frame commits 1 M-cycle EARLIER than SameBoy, on the current line's
+  last M-cycle (dot≥452), where the freshly-matching just-written LYC re-latched
+  `lyc_interrupt_line` → a spurious last-dot STAT edge. SameBoy's write lands the
+  NEXT line's `cfl0` (held carryover / `lyfc=-1`) → no fresh edge (measured
+  SBWRITE/SBLEVEL). Hold the latch across the last M-cycle so the just-written LYC
+  carries into the next line unchanged; a write before dot 452 (the `_1` sibling)
+  still fires. **+3/−0 full-CGB two-bin:** `lyc0_late_ff45_enable_2` (E0),
+  `lyc153_late_ff45_enable_2` (E0), `m2enable/lyc1_m2irq_late_lyc255_2` (out0).
+  Commits `69abb81` (line-0 wrap +1) + `115b01a` (broadened all lines SS +3). Pin
+  `tier2_lyc_carryover_late_ff45_cgb_wrap_passes`. The line-END complement of the
+  #11l/#11r line-START hold; clean because `ly_for_comparison` is FIXED in the last
+  M-cycle (only a fresh write moves the latch, never a carryover/lcd-offset edge —
+  which is why the line-START hold stays REFUTED on CGB lines 2-143).
+- **DS is the S6 grid (build-confirmed atomic):** `dot>=452` over-covers DS (last
+  M-cycle = 2 dots, write offset +1) → inverts the SameBoy-passing `_ds_1`. A
+  tighter `dot>=454 && ds` BUILT + measured: breaks both `_ds_1` AND fixes zero
+  `_ds_2`. Parked (S6).
+- **THE SHARPENED BOUNDARY (the #11ae/#11ah verdict refined).** Build-measured all
+  7 named root families (3-mode probe + SameBoy SBLEVEL/SBWRITE/STAT_IRQ): the
+  remaining 61 are READ-FRAME, not IF-lifecycle. slopgb and SameBoy fire the SAME
+  edges, a few dots apart, and the measurement read straddles the gap. lycEnable
+  disable/enable: both fire ly152+ly153, slopgb ly153 `dot12` vs SameBoy `cfl0`,
+  the FF41/FF45 disable races the dot-12 fire. m1 `want1 got3`: same ly143+ly144
+  lines (#11k). m0enable: mode-0 every line `dot254` vs `cfl257`. m2enable:
+  mode-2 every line `dot0`==`cfl0` (IDENTICAL) → pure read straddle. miscmstatirq:
+  per-line mode-0 `dot254`↔`cfl257`. ly0/lyc153int_m2irq: `_2`/`_ifw_2` pairs with
+  IDENTICAL dispatch + OPPOSITE wants = textbook read-frame A/B. **The #11ae
+  "dispatch-dot-correct / IF-lifecycle-wrong / blocking-level" framing is REFINED:
+  there is no separable blocking-level bug — the dispatch/match DOT is a few dots
+  off (the LYC-153 match `dot6`↔`cfl0` pinned by wilbertpol ly_lyc_153-C; the
+  bare-line mode-0 `dot254`↔`cfl257`) and the ISR read lands between, = the
+  read-frame / dispatch reclock, atomic with the C-stage.** Map:
+  `measurements/engine-if-class-drained-2026-06-30.md`.
+
 ### #11ai (2026-06-29) — C2 read-frame co-move BUILT + measured: option A & the C0-DIV serial diagnosis REFUTED; the read↔dispatch coupling NAILED. ESCAPE (no byte-identical lever holds mooneye 91/91). NO code shipped, byte-identical OFF, 26 pins held
 
 The goal's C2 START (build the ISR-frame read-frame co-land, converge flag-on at
