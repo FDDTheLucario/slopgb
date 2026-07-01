@@ -168,16 +168,35 @@ impl Ppu {
         // polled reads whose native frame was already right. `SBex = 257 + SCX&7
         // + ds` (+ the #11ap `SCX&1` half-dot parity on the even DS read grid).
         // DS-only (the carry is DS-only); bare non-sprite non-glitch CGB lines.
-        // The `m == 3` guard is load-bearing: it fires ONLY for reads that
-        // natively see mode 3 (the m3stat family, reading near the mode-3→0
-        // exit). The other STAT-ISR tests read FF41 in mode 2 (m2stat, OAM scan)
-        // or mode 0 (m0stat, post-exit); excluding them by native mode keeps
-        // their correct native verdict (they probe a DIFFERENT boundary, which
-        // one SBex cannot serve). The offset is a per-source PEEK on the FF41
-        // verdict only (no machine advance), so it never disturbs those reads'
-        // timing — `dot + off` is compared to SameBoy's bare exit `SBex`.
-        if self.read_carried
-            && self.tier2_reclock
+        // C2 #11ar-full — the FULL per-read carry + ONE SBex exit (the goal's
+        // "carry EVERY deferred read to SameBoy's cfl + one render-length exit,
+        // globally consistent"). Applies the SBex verdict to EVERY bare mode-3
+        // FF41 read — carried STAT-ISR reads AND polled reads alike — via a
+        // transient read-frame offset (a PEEK, no machine advance, so the
+        // counter-pinned dispatch dot + IF delivery stay put, mooneye 91/91):
+        //
+        //   off = (read_carried && HBlank-source) ? 2 : 4      // the deferred
+        //         cc+0 read lands 4 dots before SameBoy's cc+4 frame (the leading-
+        //         edge default); only the mode-0 (HBlank) STAT-ISR read is +2
+        //         (MEASURED — #11aq: OAM ISR +4, HBlank ISR +2; polled = +4).
+        //   verdict = (dot + off) < SBex ? 3 : 0                // SBex = SameBoy's
+        //         bare mode-3 exit 257 + SCX&7 + ds (+ the #11ap SCX&1 half-dot
+        //         parity on the even DS read grid).
+        //
+        // This UNIFIES the two shipped scoped peeks (m2int_m3stat +6, the carried
+        // read; the dma polled reads +2) into one global law: the POLLED_OFF
+        // sweep is +7/−0 at off 0-3, **+9/−0 at off 4-5** (the clean plateau —
+        // gdma_cycles_long_ds_2 + hdma_cycles_ds_2 land at SameBoy's frame),
+        // A/B-swapping only at off ≥ 6 (the co-temporal dma `_ds_1` siblings). The
+        // guards keep it exact: bare (`!win_active`/`!win_aborted`/`!wy_trig_sb`
+        // excludes the co-temporal late_disable + window render-length A/B pairs),
+        // non-glitch, non-sprite, DS, CGB, `m == 3` (mode-3 reads only — the
+        // m0stat/m2stat reads probe a different boundary and keep native). The
+        // residual 123 blockers are NOT bare-mode-3 FF41 reads (FF0F IF-delivery /
+        // VRAM/OAM/palette accessibility / co-temporal wake) — structurally
+        // unreachable by any FF41 verdict law, needing the S4/S6/IF-lifecycle
+        // ports. Tier2-unconditional; byte-identical flag-OFF.
+        if self.tier2_reclock
             && self.model.is_cgb()
             && self.ds
             && self.line >= 1
@@ -185,24 +204,15 @@ impl Ppu {
             && m == 3
             && !self.render.win_active
             && !self.render.win_aborted
-            // Exclude any frame where a window was triggered (`wy_trig_sb` is a
-            // sticky per-frame `WY == LY` latch, held even after the window is
-            // disabled). The `late_disable_*` family enables then disables the
-            // window: SameBoy still extends mode 3 on the disabled line, so its
-            // `_ds_1`/`_ds_2` pair reads the IDENTICAL slopgb dot with OPPOSITE
-            // wants (a co-temporal render-length A/B, not a read-position gap —
-            // MEASURED both at ly1 dot254). Those need the render mode-3 length
-            // port, not this read-position peek; a `WY == LY` frame never hosts a
-            // pure bare m3stat read, so this excludes them without cost.
             && !self.wy_trig_sb
             && !self.glitch_line
             && self.render.n_sprites == 0
         {
-            // Per-source read-position offset (dots, DS): mode-2 OAM ISR read
-            // lands +4 dots before SameBoy's cfl, mode-0/LYC ISR +2 (#11aq
-            // MEASURED). Peek the verdict at `dot + off` vs `SBex = 257 + SCX&7 +
-            // ds` (+ the #11ap `SCX&1` half-dot parity on the even DS read grid).
-            let off = if self.stat_rise_oam { 4 } else { 2 };
+            let off = if self.read_carried && self.stat_rise_m0 {
+                2
+            } else {
+                4
+            };
             let sbex = 257
                 + u16::from(self.eff.scx & 7)
                 + u16::from(self.ds)
