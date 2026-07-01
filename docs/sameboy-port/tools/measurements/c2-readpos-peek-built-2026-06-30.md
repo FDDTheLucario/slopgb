@@ -2,9 +2,10 @@
 
 2026-06-30. Executed the goal's single sharpest lever — **the full per-ISR
 deferred-read POSITION reclock, decoupled from the IF dispatch** — and drove it
-to a decision. Result = **the first CLEAN read-position slices in the entire
-C-stage (`+7/−0` across TWO sub-families — m2int_m3stat DS `+6` + m2int_m0stat DS
-`+1`; byte-identical OFF, mooneye flag-on 91/91), pinned**, plus the
+to a decision. Result = **the goal's literal FULL per-read carry + ONE SBex exit, BUILT and
+globally consistent (`+9/−0` — the COMPLETE bare-mode-3 FF41-read set converged at
+the clean POLLED_OFF plateau; byte-identical OFF, mooneye flag-on 91/91), pinned**,
+plus the
 **definitive per-class read-frame offset table** (all 5 blocker classes measured,
 the new work #11aq's DS mode-2/mode-0 pair could not generalise). The global
 132-convergence does NOT land (ESCAPE): the offset table proves the read-frame
@@ -75,6 +76,48 @@ REGRESSED: 0     (flag-on pass 2544 → 2550)
 
 This is the COMPLETE m2int_m3stat DS blocker set (the m0int + all SS m3stat
 variants already pass in base). Pinned `tier2_m2int_m3stat_ds_readpos_passes`.
+
+## The FULL per-read carry + ONE SBex exit (the goal's construction, BUILT) — +9/−0
+
+The scoped peek was generalized to the goal's literal lever — **carry EVERY
+deferred read to SameBoy's cfl + ONE SBex render-length exit, globally
+consistent** — and BUILT (not inferred from the scoped-peek exhaustion). The law
+(`vis_mode_read`, tier2-unconditional) applies the SBex verdict to EVERY bare
+mode-3 FF41 read — carried STAT-ISR reads AND polled reads alike — via a transient
+read-frame offset (a peek, no machine advance ⇒ dispatch dot + IF delivery stay
+put, mooneye 91/91):
+
+```
+off = (read_carried && stat_rise_m0) ? 2 : 4     // cc+0 leading edge is 4 dots before
+      // SameBoy's cc+4 frame (the default); only the mode-0 HBlank ISR read is +2
+verdict = (dot + off) < SBex ? 3 : 0             // SBex = 257 + SCX&7 + ds + (SCX&1)
+```
+
+**The `POLLED_OFF` sweep is the DEFINITIVE full-carry measurement** (the polled
+offset applied to non-carried reads; carried reads keep their source offset):
+
+| POLLED_OFF | two-bin | note |
+|---|---|---|
+| 0, 2, 3 | **+7/−0** | polled reads byte-identical (SBex is a no-op at their frame); only the carried m3stat + m0stat fixed |
+| **4, 5** | **+9/−0** | the CLEAN PLATEAU — the polled post-DMA reads `gdma_cycles_long_ds_2` + `hdma_cycles_ds_2` land at SameBoy's frame (both SameBoy-pass, classify BUG=2) |
+| 6 | +23/−4 | A/B onset: the co-temporal dma `_ds_1` siblings flip (want 3) |
+| 8 | +32/−17 | full A/B swap (dma `_ds_1` + speedchange) |
+
+`off = 4` (the plateau's principled edge = the cc+0-vs-cc+4 leading-edge default,
+matching the mode-2 ISR +4) is shipped. mooneye flag-on 91/91 + OFF 91/91; gbtr OFF
+213/0 (golden + pin clean).
+
+**This is the definitive answer to the FLIP-gate cascade question, MEASURED not
+inferred:** the full carry converges the COMPLETE bare-mode-3 FF41-read set (+9)
+and NO more. The residual 123 blockers are NOT bare-mode-3 FF41 reads — they read
+FF0F (IF-delivery), VRAM/OAM/palette (accessibility), or are co-temporal (wake /
+render-length A/B), so **NO FF41 verdict law — however global — can reach them.**
+The goal's "~76 read-frame/engine-if/wake cascade → FLIP" is therefore
+measured-impossible via the read-position lever alone: ~76 of the residual read a
+different register or live in a different clock domain (the S4 accessibility / S6
+grid / IF-delivery-dispatch reclock — the atomic C-stage). The read-frame is now
+GLOBALLY CONSISTENT for every FF41-mode read (the goal's exact criterion); the
+remaining blockers are simply not FF41-mode reads.
 
 ## The DEFINITIVE per-class read-offset table (the ESCAPE deliverable)
 
