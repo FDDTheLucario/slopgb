@@ -1336,6 +1336,46 @@ fn tier2_oam_vram_postread_scx2_scx5_passes() {
     }
 }
 
+/// Port Stage C2 (the render mode-3 LENGTH port, #11as — the DS line-END OAM-read
+/// release). Under CGB double speed SameBoy releases the mode-3 OAM read-lock one
+/// cycle later than single speed: it SKIPS the `if (!cgb_double_speed)` early
+/// unblock (`display.c:2104-2111`) and drops through to `:2118`, which lands the
+/// deferred cc+0 read's unblock at slopgb dot `254 + SCX&7`. slopgb's production
+/// block ran to `line_render_done` (~2 dots later), so `oam_access/postread_ds_2`
+/// (`ly135 dot254`, SameBoy accessible) read "3" (blocked) while its `_1` sibling
+/// (dot252, still blocked) passed. The fix releases OAM reads at that anchor on
+/// bare non-sprite non-window non-glitch DS lines (`ppu/blocking.rs::
+/// ds_lineend_read_open`). OAM-only: the VRAM twin (`vram_m3/postread_ds_2`) is
+/// co-temporal with the `vramw_m3end_ds_2` write-readback at the same dot254 (the
+/// vramw write costs a CPU M-cycle SameBoy spreads across the read but slopgb's
+/// deferred frame collapses), so a VRAM release is an A/B swap — the VRAM DS read
+/// grid is the parked S6 reclock. Full-CGB two-bin flag-on +1/−0; production
+/// (flag-off) byte-identical (`tier2_reclock`/`ds` gated). The `_1` sibling is
+/// asserted below as the regression guard.
+#[test]
+fn tier2_oam_postread_ds_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_oam_postread_ds",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 2] = [
+        // The fix: DS line-end OAM read at dot254 reads accessible (out0).
+        ("gambatte/oam_access/postread_ds_2_cgb04c_out0.gbc", "0"),
+        // Regression guard: the `_1` read (dot252) is still blocked (out3).
+        ("gambatte/oam_access/postread_ds_1_cgb04c_out3.gbc", "3"),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 /// Port Stage C / S5 (mech 3 — CGB lcd-offset, the line-start OAM-read window) —
 /// on CGB single-speed SameBoy keeps `oam_read_blocked = false` for the first few
 /// T-cycles of each visible line (`display.c:1805-1810`: the mode-0/HBlank tail
