@@ -573,6 +573,18 @@ pub struct Ppu {
     /// the WX-activation dot ([`Render::wx_match_dot`]). See `wy_trig_sb`.
     wy_trig_sb_line: u8,
     wy_trig_sb_dot: u16,
+    /// C2 #11aw — the IMMEDIATE-WY twin of [`Self::wy_trig_sb`]. SameBoy's
+    /// `wy_check` compares LY against the immediate WY register
+    /// (`io_registers[GB_IO_WY]`), NOT the 6-dot-lagged `wy2` copy slopgb's
+    /// render (and `wy_trig_sb`) use. A late WY→(non-LY) write (`late_wy_1toFF`)
+    /// UN-triggers SameBoy's window (raw WY != LY at the line-start compare)
+    /// while slopgb — comparing the still-lagged `wy2` — triggers it and renders
+    /// the window (`win_active`). This sticky latch (set the first dot
+    /// `win_en && self.wy == ly`, immediate WY) re-derives SameBoy's trigger;
+    /// when slopgb's render triggered (`win_active`) but this did NOT
+    /// (`!wy_trig_sb_raw`), the line is SameBoy-bare and the FF41 read law
+    /// ([`Self::vis_mode_read`]) forces mode 0. Reset at line 0. tier2 + CGB.
+    wy_trig_sb_raw: bool,
     /// The most recent staged rendering write was double-speed (1-dot)
     /// staging — used to pick the wy2 catch-up delay.
     staged_ds: bool,
@@ -900,6 +912,7 @@ impl Ppu {
             wy_trig_sb: false,
             wy_trig_sb_line: 0,
             wy_trig_sb_dot: 0,
+            wy_trig_sb_raw: false,
             staged_ds: false,
             ds: false,
             win_line: 0xFF,
@@ -1042,6 +1055,23 @@ impl Ppu {
         if self.tier2_reclock && self.model.is_cgb() {
             if self.line == 0 && self.dot == 0 {
                 self.wy_trig_sb = false;
+                self.wy_trig_sb_raw = false;
+            }
+            // #11aw — the raw-WY sticky latch (immediate `self.wy`, SameBoy's
+            // `wy_check` input), the un-trigger discriminator. Gated `dot >= 4`
+            // (the mode-2 OAM-scan compare window SameBoy runs `wy_check` in):
+            // a line-start (dot 0) WY write commits AFTER slopgb's dot-0 PPU tick
+            // (the tick runs before `write_no_tick`), so a dot-0 compare would
+            // read the OLD WY and mis-latch; `dot >= 4` samples the settled WY,
+            // matching SameBoy's post-write compare (`late_wy_1toFF_1` WY→FF at
+            // dot 0 → WY=FF by dot 4 → never latches → SameBoy-bare).
+            if self.line < 144
+                && self.dot >= 4
+                && !self.wy_trig_sb_raw
+                && win_en
+                && self.wy == self.ly
+            {
+                self.wy_trig_sb_raw = true;
             }
             if self.line < 144 && !self.wy_trig_sb && win_en && self.wy2 == self.ly {
                 self.wy_trig_sb = true;

@@ -184,6 +184,34 @@ impl Ppu {
         {
             return 0;
         }
+        // C2 #11aw — the CGB late-WY UN-trigger bare law (SS). SameBoy's
+        // `wy_check` compares LY against the IMMEDIATE WY; a late WY→(non-LY)
+        // write (`late_wy_1toFF`/`2toFF`) un-triggers its window (raw WY != LY at
+        // the line-start compare → the line renders BARE), while slopgb — its
+        // render + `wy_trig_sb` reading the 6-dot-lagged `wy2` — TRIGGERS the
+        // window (`win_active`) and over-extends mode 3. The immediate-WY shadow
+        // [`Ppu::wy_trig_sb_raw`] re-derives SameBoy's trigger: when slopgb's
+        // render triggered (`win_active`) but SameBoy's raw compare did NOT
+        // (`!wy_trig_sb_raw`), the line is SameBoy-bare → the FF41 read reads the
+        // bare mode-0 exit. MEASURED — `late_wy_{1toFF,2toFF}_1` (WY→FF at dot0,
+        // before the compare) read out0; the `_3` siblings (WY→FF at dot8, after
+        // the window latched, sticky) keep mode 3 (`wy_trig_sb_raw` true). Bare
+        // non-sprite non-glitch CGB lines; SS (the DS un-trigger = the S6 grid).
+        // `win_active` + `!wy_trig_sb_raw` (never both flag-off) → byte-identical.
+        if self.tier2_reclock
+            && self.model.is_cgb()
+            && !self.ds
+            && self.render.win_active
+            && !self.wy_trig_sb_raw
+            && self.line >= 1
+            && self.line < 144
+            && m == 3
+            && !self.glitch_line
+            && self.render.n_sprites == 0
+            && self.dot + 4 >= 257 + u16::from(self.eff.scx & 7)
+        {
+            return 0;
+        }
         // C2 #11an UNIFIED bare-line read-frame law (EXPERIMENT, env-gated).
         // The dual-emulator trace (kernel m2int_m3stat_1/_2 + DS _2 +
         // late_disable) showed every FF41 mode read obeys:

@@ -1464,6 +1464,43 @@ fn tier2_window_reenable_passes() {
     }
 }
 
+/// Port Stage C / S5 #11aw — the CGB late-WY UN-trigger bare slice
+/// (`stat_irq.rs::vis_mode_read`, `Ppu::wy_trig_sb_raw`). SameBoy's `wy_check`
+/// compares LY against the IMMEDIATE WY; a late WY→(non-LY) write un-triggers its
+/// window (raw WY != LY at the mode-2 compare → bare line), while slopgb's render +
+/// `wy_trig_sb` read the 6-dot-lagged `wy2` and trigger it (over-extend mode 3). The
+/// raw-WY sticky shadow (immediate `self.wy`, gated `dot >= 4` = the settled-WY
+/// compare window) re-derives SameBoy's trigger; `win_active && !wy_trig_sb_raw` forces
+/// the bare mode-0 exit. `late_wy_{1toFF,2toFF}_1` (WY→FF at dot0) read out0 flag-on
+/// (+3/−0); the `_3` siblings (WY→FF at dot8, sticky-triggered) keep mode 3. CGB SS.
+#[test]
+fn tier2_window_late_wy_untrigger_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_window_late_wy_untrigger",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 2] = [
+        (
+            "gambatte/window/arg/late_wy_1toFF_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/arg/late_wy_2toFF_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 /// Port Stage C / S5 (mech 3 — CGB lcd-offset, the line-start OAM-read window) —
 /// on CGB single-speed SameBoy keeps `oam_read_blocked = false` for the first few
 /// T-cycles of each visible line (`display.c:1805-1810`: the mode-0/HBlank tail
