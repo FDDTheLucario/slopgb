@@ -206,6 +206,14 @@ pub(super) struct Render {
     /// the pre-draw class (an abort 1 M-cycle later catches the window's first
     /// tile → extends past the bare exit), so the read law thresholds on it.
     pub(super) win_predraw_abort_dot: u16,
+    /// C2 #11au — the dot a mid-mode-3 LCDC.5 RE-enable landed (0 if none this
+    /// line), for the shadow window-reenable mode-3 length law (`stat_irq.rs::
+    /// vis_mode_read`). A `late_reenable` window redraws from the re-enable
+    /// point; its mode-3 extends past the read iff the re-enable beat the WX
+    /// match (`re-enable_dot <= wx_match_dot - 3` — the redraw-start deadline).
+    /// slopgb's whole-dot render collapses the re-enable-dot dependence. Reset
+    /// per line. `pub(super)` for the read law.
+    pub(super) win_reenable_dot: u16,
     /// WX comparator output on the previous dot: activations and
     /// reactivations fire on the rising edge only (the match holds while
     /// lx is frozen during the start stall and must not re-fire).
@@ -259,6 +267,7 @@ impl Render {
             win_aborted: false,
             win_predraw_abort: false,
             win_predraw_abort_dot: 0,
+            win_reenable_dot: 0,
             win_match_prev: false,
             prefill_pos: 0,
             wx_match_dot: 0,
@@ -315,6 +324,7 @@ impl Ppu {
         r.win_aborted = false;
         r.win_predraw_abort = false;
         r.win_predraw_abort_dot = 0;
+        r.win_reenable_dot = 0;
         r.win_match_prev = false;
         r.prefill_pos = 0;
         r.wx_match_dot = 0;

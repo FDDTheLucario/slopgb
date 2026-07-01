@@ -63,6 +63,23 @@ impl Ppu {
                     // vis_mode_read`). See `window_abort` + `win_predraw_abort`.
                     self.window_abort();
                 }
+                // C2 #11au — latch a mid-mode-3 LCDC.5 RE-enable dot for the CGB
+                // shadow window-REENABLE mode-3 length law (`stat_irq.rs::
+                // vis_mode_read`). A window disabled then re-enabled mid-line
+                // (`late_reenable`) redraws from the re-enable point; whether its
+                // mode-3 EXTENDS past the read depends on the re-enable dot vs the
+                // WX match (the redraw start): re-enable at/before the match →
+                // extends (mode3); after → the redraw starts too late, bare exit
+                // (mode0). slopgb's whole-dot render collapses both to mode3 at
+                // the read dot. Latched tier2+CGB while `render.active`.
+                if old & LCDC_WIN_ENABLE == 0
+                    && value & LCDC_WIN_ENABLE != 0
+                    && self.render.active
+                    && self.tier2_reclock
+                    && self.model.is_cgb()
+                {
+                    self.render.win_reenable_dot = self.dot;
+                }
             }
             0xFF42 => self.eff.scy = value,
             0xFF43 => self.eff.scx = value,

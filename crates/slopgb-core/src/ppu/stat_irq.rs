@@ -143,6 +143,47 @@ impl Ppu {
         {
             return 0;
         }
+        // C2 #11au — the CGB window-REENABLE mode-3 length shadow (SS). A window
+        // disabled then RE-enabled mid-mode-3 (`Render::win_reenable_dot`,
+        // latched in `regs.rs::commit_eff`) redraws from the re-enable point; its
+        // mode-3 EXTENDS past the read iff the re-enable beat the window's redraw
+        // start (the WX match): re-enable at/before `wx_match_dot - 3` → extends
+        // (native mode3, correct); LATER → the redraw starts too late to reach
+        // the read, SameBoy renders the tail BARE (mode0). slopgb's whole-dot
+        // render collapses both to mode3 at the read dot (the re-enable WRITE
+        // lands a whole M-cycle apart — `_1`/`_2` are NOT co-temporal, slopgb
+        // resolves the write; only the render is insensitive). MEASURED — the
+        // boundary is `wx_match_dot - 3` uniformly (base wxmatch97: `_1` reen92
+        // extend / `_2` reen96 bare; wx0f wxmatch105: reen100 extend / reen104
+        // bare). Force mode0 for the LATE re-enable. Guarded to the re-active
+        // window (`win_active`, `LCDC_WIN_ENABLE != 0`) below the triggering-
+        // window law's `259+SCX&7` exit + bare non-sprite non-glitch CGB lines.
+        // SS only (the DS re-enable = the S6 read grid). Tier2-gated; the dot is
+        // 0 flag-off → byte-identical.
+        if self.tier2_reclock
+            && self.model.is_cgb()
+            && !self.ds
+            && self.render.win_reenable_dot != 0
+            && self.render.wx_match_dot != 0
+            && self.render.win_reenable_dot + 3 > self.render.wx_match_dot
+            // SCX&7 <= 3 only: at high SCX the fine-scroll shifts the redraw
+            // deadline above `wx_match - 3` (MEASURED — scx5 boundary 98 not 94:
+            // `reen96` is bare at scx3 but extends at scx5), a fine-scroll term
+            // this bare law does not model. scx5+ pass natively (`scx5_2` already
+            // out0); excluding them drops nothing. The fine-scroll deadline is
+            // the atomic render reclock's.
+            && self.eff.scx & 7 <= 3
+            && self.eff.lcdc & LCDC_WIN_ENABLE != 0
+            && self.render.win_active
+            && self.line >= 1
+            && self.line < 144
+            && m == 3
+            && !self.glitch_line
+            && self.render.n_sprites == 0
+            && self.dot + 4 >= 257
+        {
+            return 0;
+        }
         // C2 #11an UNIFIED bare-line read-frame law (EXPERIMENT, env-gated).
         // The dual-emulator trace (kernel m2int_m3stat_1/_2 + DS _2 +
         // late_disable) showed every FF41 mode read obeys:

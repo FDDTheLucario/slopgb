@@ -1422,6 +1422,48 @@ fn tier2_window_predraw_abort_passes() {
     }
 }
 
+/// Port Stage C / S5 #11au — the CGB window-REENABLE mode-3 length slice
+/// (`stat_irq.rs::vis_mode_read`, `Render::win_reenable_dot`). A window disabled
+/// then re-enabled mid-mode-3 (`late_reenable`) redraws from the re-enable point;
+/// its mode-3 extends past the read iff the re-enable beat the WX-match redraw
+/// start (`re-enable_dot <= wx_match_dot - 3`, MEASURED). A LATE re-enable renders
+/// the tail bare (mode0). slopgb's whole-dot render collapsed both legs to mode3.
+/// `late_reenable_{2,scx2_2,scx3_2,wx0f_2}` read out0 flag-on (+4/−0). SCX&7 <= 3
+/// (the fine-scroll deadline shift at high SCX is the atomic reclock's; scx5+
+/// pass natively). CGB single-speed.
+#[test]
+fn tier2_window_reenable_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_window_reenable",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 4] = [
+        ("gambatte/window/late_reenable_2_dmg08_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/window/late_reenable_scx2_2_dmg08_out3_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_reenable_scx3_2_dmg08_out3_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_reenable_wx0f_2_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 /// Port Stage C / S5 (mech 3 — CGB lcd-offset, the line-start OAM-read window) —
 /// on CGB single-speed SameBoy keeps `oam_read_blocked = false` for the first few
 /// T-cycles of each visible line (`display.c:1805-1810`: the mode-0/HBlank tail
