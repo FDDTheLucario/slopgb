@@ -316,6 +316,18 @@ pub struct Ppu {
     /// so its carry is half. Mutually exclusive with [`Self::stat_rise_oam`]
     /// (one source per 0→1 edge); both false for a pure-LYC rise.
     stat_rise_m0: bool,
+    /// #11ar (C2 SCOPED carried-read exit override): set by the interconnect's
+    /// `dispatch_retime` when it carried a STAT-ISR read (`carry_read`), so the
+    /// FIRST FF41 mode read of the handler — now landed at SameBoy's absolute
+    /// cfl — resolves its verdict against SameBoy's bare exit `SBex` instead of
+    /// slopgb's native mode (a full 3↔0 override, both directions). Cleared by
+    /// the interconnect after that FF41 read (one-shot). This SCOPING is the
+    /// #11aq global-consistency fix: the blanket `M2HOLD` exit law fired for
+    /// non-carried polled/other-ISR reads too (dropping 50 SameBoy-passes whose
+    /// native frame was already correct); gating the SBex override on
+    /// `read_carried` confines it to exactly the reads the carry moved to
+    /// SameBoy's frame. Inert unless `SLOPGB_M2CARRY`.
+    read_carried: bool,
     /// The externally visible mode-0 flip (STAT mode bits, OAM/VRAM
     /// unblock): rises with `m0_src` ahead of the pipe end (see
     /// `m0_flip_events` in render.rs), and can drop back mid-line when
@@ -866,6 +878,7 @@ impl Ppu {
             stat_halt_late: false,
             stat_rise_oam: false,
             stat_rise_m0: false,
+            read_carried: false,
             line_render_done: true,
             vis_early: false,
             vis_hold_until: 0,

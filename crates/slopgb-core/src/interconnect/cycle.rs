@@ -153,6 +153,12 @@ impl Interconnect {
         self.service_vram_dma();
         self.maybe_oam_bug(addr, kind);
         let v = self.read_no_tick(addr);
+        // #11ar: the SCOPED carried-read exit override is one-shot — clear the
+        // arm after the STAT-ISR handler's first FF41 mode read has resolved (its
+        // `vis_mode_read` already consumed `read_carried` inside `read_no_tick`).
+        if addr == 0xFF41 {
+            self.ppu.set_read_carried(false);
+        }
         // S5 read-dot tracer: line slopgb's deferred FF41 read dot up against
         // SameBoy's `read_high_memory` cfl (`SLOPGB_S5DBG`; byte-identical when
         // unset). FF41 reads are infrequent, so the gate check is cheap here.

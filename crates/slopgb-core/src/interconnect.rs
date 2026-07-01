@@ -1045,32 +1045,37 @@ impl Bus for Interconnect {
         let before = self.clock.now();
         let _ = self.clock.dispatch_vector_retime();
         self.advance_machine_t(before, self.clock.now());
-        // #11aq (C2 per-ISR read-position carry, `SLOPGB_M2CARRY`): if this
-        // dispatch is a mode-2 OAM STAT IRQ in double speed, carry +1 M-cycle
-        // (4 T) of read debt into the handler. The retime already flushed to the
-        // IF-ack latch (the counter-pinned dispatch dot), so the carry shifts
-        // ONLY the vector fetch + subsequent handler reads (+2 dots DS), not the
-        // ack — the read↔dispatch decoupling DSM2DELAY's dispatch delay can't
-        // give (`cpu-timing-map.md §7.1`). The dispatched bit is STAT iff it is
-        // the lowest pending bit (VBlank, bit 0, out-prioritizes STAT); guarding
-        // on that keeps a coincident vblank/timer dispatch carry-free.
-        if self.double_speed
-            && crate::ppu::m2carry_on()
-            && self.pending().trailing_zeros() == 1
-        {
-            // Per-ISR-SOURCE read carry: the mode-2 OAM ISR read lands +4 dots
-            // early, the mode-0 HBlank ISR read +2 (MEASURED — `cpu-timing-map.md
-            // §7.1`). Carrying each by its own offset lands BOTH at SameBoy's
-            // absolute cfl so the single SBex exit law (`m2hold_on`) serves them.
-            let carry = if self.ppu.stat_rise_oam() {
-                crate::ppu::m2carry_t()
-            } else if self.ppu.stat_rise_m0() {
-                crate::ppu::m0carry_t()
-            } else {
-                0
-            };
-            if carry > 0 {
-                self.clock.carry_read(carry);
+        // #11ar (C2 per-ISR read-position PEEK): if this dispatch is a DS OAM/
+        // HBlank STAT IRQ, arm the SCOPED carried-read override for the handler's
+        // first FF41 read (cleared in `read_deferred`). The override
+        // (`vis_mode_read`) shifts ONLY that read's mode VERDICT by the IRQ
+        // source's read-position offset (mode-2 OAM +4 dots / mode-0 HBlank +2,
+        // MEASURED — `cpu-timing-map.md §7.1`) — a transient PEEK, NOT a machine
+        // advance — so it decouples the read from the counter-pinned dispatch dot
+        // + IF delivery without disturbing the non-m3stat STAT-ISR reads
+        // (m0stat/m2stat/enable) a real clock carry would mis-position. Tier2-
+        // unconditional (the reclock frame the flip turns on). The dispatched bit
+        // is STAT iff it is the lowest pending bit (VBlank, bit 0, out-prioritizes
+        // STAT); guarding on that keeps a coincident vblank/timer dispatch clear.
+        if self.double_speed && self.pending().trailing_zeros() == 1 {
+            if self.ppu.stat_rise_oam() || self.ppu.stat_rise_m0() {
+                self.ppu.set_read_carried(true);
+            }
+            // The REFUTED machine-advancing carry (#11aq `SLOPGB_M2CARRY`): a real
+            // `pending` debt that advances the whole machine, so it mis-positions
+            // the non-m3stat STAT-ISR reads (+29/−58 two-bin). Kept env-gated for
+            // A/B reference; the peek override above replaces it (+6/−0).
+            if crate::ppu::m2carry_on() {
+                let carry = if self.ppu.stat_rise_oam() {
+                    crate::ppu::m2carry_t()
+                } else if self.ppu.stat_rise_m0() {
+                    crate::ppu::m0carry_t()
+                } else {
+                    0
+                };
+                if carry > 0 {
+                    self.clock.carry_read(carry);
+                }
             }
         }
         // S6/S7 ISR read-position diagnostic: log the vector-latch PPU position

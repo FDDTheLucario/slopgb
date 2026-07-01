@@ -993,6 +993,45 @@ fn tier2_glitch_m0irq_dispatch_passes() {
     }
 }
 
+/// Port Stage C / S5 (#11ar — the per-ISR read-POSITION PEEK). The first CLEAN
+/// read-position-decoupled C-stage slice: the double-speed OAM-STAT-ISR
+/// (`m2int`) FF41 mode read lands +4 dots before SameBoy's cfl, so slopgb's
+/// leading-edge read sees mode 3 (`got=3`) where SameBoy — reading 4 dots later,
+/// past its bare mode-3 exit — sees mode 0 (`want=0`). The peek
+/// (`stat_irq.rs::vis_mode_read`, armed by `interconnect.rs::dispatch_retime`
+/// via `Ppu::read_carried`) shifts ONLY that read's VERDICT to `dot + off < SBex`
+/// (`off` = the per-source offset, `SBex = 257 + SCX&7 + ds` the SameBoy bare
+/// exit) — a transient sample, NOT a machine advance — so the counter-pinned
+/// dispatch dot and IF delivery stay put (mooneye flag-on 91/91). SCOPED to the
+/// carried read (`read_carried` one-shot), native mode 3 (excludes the m0stat/
+/// m2stat/enable reads that probe a different boundary), and a non-window
+/// (`!wy_trig_sb`) non-sprite bare line (excludes the co-temporal `late_disable`
+/// render-length A/B pair). +6/−0 full-CGB two-bin; production (flag-off)
+/// byte-identical. See `ppu-subdot-ladder.md` "#11ar" +
+/// `measurements/c2-readpos-peek-built-2026-06-30.md`.
+#[test]
+fn tier2_m2int_m3stat_ds_readpos_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_m2int_m3stat_ds_readpos",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    for rel in [
+        "gambatte/m2int_m3stat/m2int_m3stat_ds_2_cgb04c_out0.gbc",
+        "gambatte/m2int_m3stat/scx/m2int_scx2_m3stat_ds_2_cgb04c_out0.gbc",
+        "gambatte/m2int_m3stat/scx/m2int_scx8_m3stat_ds_2_cgb04c_out0.gbc",
+        "gambatte/speedchange/m2int_m3stat_lcdoffds_2_cgb04c_out0.gbc",
+    ] {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), "0", true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out0 (tier2 flag-on): {e}"));
+    }
+}
+
 /// Port Stage C / S5 (mech 3 root 2 — the LYC-write sub-case) — the line-start
 /// LYC-carryover hold suppresses a spurious wrap edge on the deferred reclock.
 /// `lyc0_late_ff45_enable_3` enables the LYC source (LYC=0) and writes FF45=0

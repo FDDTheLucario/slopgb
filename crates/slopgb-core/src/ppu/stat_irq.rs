@@ -154,6 +154,61 @@ impl Ppu {
         {
             return 3;
         }
+        // C2 #11ar SCOPED carried-read exit OVERRIDE (env-gated `SLOPGB_CARRYOVR`,
+        // co-lands with `SLOPGB_M2CARRY`). The carry moved THIS read (an OAM/
+        // HBlank STAT-ISR handler read, flagged by `read_carried`) to SameBoy's
+        // absolute cfl, so the read-frame offset is 0 and the verdict is
+        // SameBoy's mode AT that cfl: `mode 3 iff cfl < SBex`, a FULL 3↔0
+        // override of slopgb's native mode. This unifies the two prior
+        // half-laws — `M2HOLD` (holds 3 for a native-0 read past slopgb's low
+        // exit, e.g. m2int_ds_1) and `BARELAW` (forces 0 for a native-3
+        // over-extended render, e.g. late_disable_ds_1) — which at the SAME
+        // carried dot want OPPOSITE directions. Crucially SCOPED to `read_carried`
+        // (the #11aq −50 fix): the blanket exit hold mis-framed non-carried
+        // polled reads whose native frame was already right. `SBex = 257 + SCX&7
+        // + ds` (+ the #11ap `SCX&1` half-dot parity on the even DS read grid).
+        // DS-only (the carry is DS-only); bare non-sprite non-glitch CGB lines.
+        // The `m == 3` guard is load-bearing: it fires ONLY for reads that
+        // natively see mode 3 (the m3stat family, reading near the mode-3→0
+        // exit). The other STAT-ISR tests read FF41 in mode 2 (m2stat, OAM scan)
+        // or mode 0 (m0stat, post-exit); excluding them by native mode keeps
+        // their correct native verdict (they probe a DIFFERENT boundary, which
+        // one SBex cannot serve). The offset is a per-source PEEK on the FF41
+        // verdict only (no machine advance), so it never disturbs those reads'
+        // timing — `dot + off` is compared to SameBoy's bare exit `SBex`.
+        if self.read_carried
+            && self.tier2_reclock
+            && self.model.is_cgb()
+            && self.ds
+            && self.line >= 1
+            && self.line < 144
+            && m == 3
+            && !self.render.win_active
+            && !self.render.win_aborted
+            // Exclude any frame where a window was triggered (`wy_trig_sb` is a
+            // sticky per-frame `WY == LY` latch, held even after the window is
+            // disabled). The `late_disable_*` family enables then disables the
+            // window: SameBoy still extends mode 3 on the disabled line, so its
+            // `_ds_1`/`_ds_2` pair reads the IDENTICAL slopgb dot with OPPOSITE
+            // wants (a co-temporal render-length A/B, not a read-position gap —
+            // MEASURED both at ly1 dot254). Those need the render mode-3 length
+            // port, not this read-position peek; a `WY == LY` frame never hosts a
+            // pure bare m3stat read, so this excludes them without cost.
+            && !self.wy_trig_sb
+            && !self.glitch_line
+            && self.render.n_sprites == 0
+        {
+            // Per-source read-position offset (dots, DS): mode-2 OAM ISR read
+            // lands +4 dots before SameBoy's cfl, mode-0/LYC ISR +2 (#11aq
+            // MEASURED). Peek the verdict at `dot + off` vs `SBex = 257 + SCX&7 +
+            // ds` (+ the #11ap `SCX&1` half-dot parity on the even DS read grid).
+            let off = if self.stat_rise_oam { 4 } else { 2 };
+            let sbex = 257
+                + u16::from(self.eff.scx & 7)
+                + u16::from(self.ds)
+                + u16::from(self.eff.scx & 1);
+            return if self.dot + off < sbex { 3 } else { 0 };
+        }
         // C2 #11aq CARRY-FRAME bare-line exit HOLD (env-gated `SLOPGB_M2HOLD`;
         // co-lands with the `SLOPGB_M2CARRY` +4-dot read-position carry). The
         // carry moves the DS mode-2 OAM-ISR FF41 read to SameBoy's *absolute*
@@ -352,6 +407,14 @@ impl Ppu {
     /// (the +2-dot ISR read carry). See [`Ppu::stat_rise_m0`].
     pub(crate) fn stat_rise_m0(&self) -> bool {
         self.stat_rise_m0
+    }
+
+    /// #11ar: arm/disarm the SCOPED carried-read exit override (see the
+    /// [`Ppu::read_carried`] field). `dispatch_retime` sets it after a STAT-ISR
+    /// read carry; the interconnect clears it once the handler's FF41 read has
+    /// resolved (one-shot).
+    pub(crate) fn set_read_carried(&mut self, v: bool) {
+        self.read_carried = v;
     }
 
     /// Whether the STAT IF bit handed out by the last [`Self::tick`] came
