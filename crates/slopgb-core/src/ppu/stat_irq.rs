@@ -230,6 +230,26 @@ impl Ppu {
         {
             return 0;
         }
+        // C2 #11ar-m0stat READ-FRAME slice (the second clean read-position slice,
+        // +1/−0). The m2int mode-2 OAM ISR reads FF41 at line-start checking the
+        // mode0→2 (HBlank→OAM) flip: slopgb's native flip lags SameBoy's, which
+        // flips at 8 MHz pos 4 = dot 2 (the DS mode-bits lag). Peek the line-start
+        // verdict at SameBoy's dot-2 flip. Scoped: carried mode-2 ISR read
+        // (`stat_rise_oam`), native mode 0, line-start dot < 4 — the exhaustive
+        // per-class characterization flagged the shared mode0→2 boundary as A/B
+        // risk, but the two-bin is +1/−0 (the scope confines it to `m2int_m0stat`).
+        if self.read_carried
+            && self.stat_rise_oam
+            && self.tier2_reclock
+            && self.model.is_cgb()
+            && self.ds
+            && self.line >= 1
+            && self.line < 144
+            && m == 0
+            && self.dot < 4
+        {
+            return if self.dot >= 2 { 2 } else { 0 };
+        }
         // C2 #11aq CARRY-FRAME bare-line exit HOLD (env-gated `SLOPGB_M2HOLD`;
         // co-lands with the `SLOPGB_M2CARRY` +4-dot read-position carry). The
         // carry moves the DS mode-2 OAM-ISR FF41 read to SameBoy's *absolute*

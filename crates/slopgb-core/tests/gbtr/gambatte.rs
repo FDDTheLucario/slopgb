@@ -1030,6 +1030,14 @@ fn tier2_m2int_m3stat_ds_readpos_passes() {
         check_hex_screen(gb.frame(), "0", true)
             .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out0 (tier2 flag-on): {e}"));
     }
+    // The #11ar-m0stat READ-FRAME slice: the m2int mode-2 OAM ISR line-start
+    // mode0→2 flip peek (dot ≥ 2 → mode 2), +1/−0 (`m2int_m0stat_ds_2` wants 2).
+    let rel = "gambatte/m2int_m0stat/m2int_m0stat_ds_2_cgb04c_out2.gbc";
+    let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+    let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+    run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+    check_hex_screen(gb.frame(), "2", true)
+        .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out2 (tier2 flag-on): {e}"));
 }
 
 /// Port Stage C / S5 (mech 3 root 2 — the LYC-write sub-case) — the line-start
