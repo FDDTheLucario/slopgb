@@ -102,17 +102,26 @@ window), which isolates exactly the 4 scx03 blockers with 0 suite-wide drops. Th
   non-sprite non-glitch + `dot + 4 >= 257` → mode0).
 - pin `tests/gbtr/gambatte.rs::tier2_window_predraw_abort_passes`.
 
-## WAKE-CLOCK re-confirmed co-temporal (this session)
+## WAKE-CLOCK — the goal's #2 lever `halt_mode_phase` BUILT + REFUTED (#11av)
 
-Measured the `halt m0stat` family: the clean scx2 pairs read DIFFERENT slopgb dots
-(`_1`/`a` want0 → dot4; `_2`/`b` want2 → dot8), so they are NOT co-temporal in
-slopgb's grid — BUT the family-wide want-0/want-2 split does NOT correlate with the
-read dot (WAKEPEEK dot 1-4→0 was +3/−13, #11ar), and the mode-0 rise cc is IDENTICAL
-across the co-temporal legs (same scx → same rise dot), so a `halt_ly_phase`-style
-cc-keyed lever CANNOT split them. The discriminator is the sub-M-cycle halt-ENTRY/
-CPU-resume T-phase (SameBoy reads BOTH at `ly2 cfl0 dc0` — the same half-dot — but
-returns mode0 vs mode2 from a sub-dc STAT-update T). Needs the T-granular halt clock
-(the atomic reclock). `halt_mode_phase` REFUTED as a whole-dot/cc lever.
+Built the goal's named #2 lever — `halt_mode_phase`, the FF41-mode twin of the shipped
+`halt_ly_phase` (`interconnect.rs` field + `tick.rs` set at the mode-0 halt-wake +
+`memory.rs` one-shot back-date of the first post-wake FF41 read: native mode 2 at
+`dot < 4 + phase` → mode 0). The re-measurement supported it — the clean scx2 pairs
+read DIFFERENT slopgb dots (`_1`/`a` want0 → dot4; `_2`/`b` want2 → dot8), so a
+one-shot halt-wake-scoped back-date (unlike the un-scoped WAKEPEEK force) *looked*
+separable. **REFUTED full-CGB two-bin: +5/−13** (`classify_cgb_regr.py` — all 13 are
+`m0int/m0irq_m0stat_scx{3,4,5}_2` want-mode-2 rows forced to mode0). The reads SHIFT
+with SCX (the mode-0 rise dot is `254 + SCX&7`, so the wake-resume dot moves): the
+scx2 want-0 legs read dot4, but the scx3/4/5 want-2 legs ALSO read dot4-7 — no fixed
+back-date window separates them, and the rise cc is IDENTICAL across each co-temporal
+pair (same scx → same rise dot), so the `halt_ly_phase` cc-indexing cannot scope it
+either. **CONFIRMED: WAKE-CLOCK is genuinely atomic** — the discriminator is the
+sub-M-cycle halt-ENTRY/CPU-resume T-phase (SameBoy reads want-0 and want-2 at the
+IDENTICAL `ly2 cfl0 dc0` half-dot, returning mode0 vs mode2 from a sub-dc STAT-update
+T). Needs the T-granular halt clock (the atomic reclock). Code built + measured +
+reverted-to-green (byte-identical OFF). The goal's #2 lever is REFUTED as a whole-dot/
+cc back-date — same result class as WAKEPEEK (#11ar).
 
 ## Residual (120 SameBoy-pass blockers)
 
