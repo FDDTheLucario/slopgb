@@ -121,10 +121,16 @@ impl Ppu {
             && self.render.win_predraw_abort
             // The pre-draw abort is fully BARE (exit cfl257) only when it lands
             // before the window's first tile ships (MEASURED ~dot106 for the
-            // scx03 early setup); a 1-M-cycle-later abort (`_2`, dot108) catches
-            // the first tile and EXTENDS mode 3 (want mode3) — a per-config
-            // window-tile-completion length the atomic render reclock owns, NOT
-            // this bare law. `<= 105` scopes to the pre-first-tile aborts.
+            // scx03 early setup: `_1` abort104 bare / `_2` abort108 extend, for
+            // ALL wx0f-12 — the abort dot is wx-INDEPENDENT); a 1-M-cycle-later
+            // abort catches the first tile and EXTENDS mode 3 (want mode3) — a
+            // per-config window-tile-completion length the atomic render reclock
+            // owns, NOT this bare law. `<= 105` scopes to the scx03 pre-first-tile
+            // aborts. NOT `wx_match_dot`-relative (MEASURED REFUTED: the abort dot
+            // is fixed 104/108 across wx while wx_match moves with WX, so
+            // `wx_match+1` re-includes the higher-wx `_2` extends — +6/−4). The
+            // late_scx_late_disable family (abort 124-132, boundary ~130) is a
+            // distinct config constant left to the render reclock.
             && self.render.win_predraw_abort_dot <= 105
             && self.eff.lcdc & LCDC_WIN_ENABLE == 0
             && self.line >= 1
