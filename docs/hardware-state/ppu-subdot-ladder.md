@@ -142,9 +142,19 @@ tick, so a dot-0 compare mis-latches the OLD WY) re-derives SameBoy's trigger;
 triggered) keep mode 3. Pin `tier2_window_late_wy_untrigger_passes`. flag-on 458→455;
 classify 117→115 SameBoy-pass, 0 dropped. gbtr OFF 217/0; mooneye 91/91 ON+OFF.
 **Session cumulative: 124 → 115 (3 clean write-side slices).** The immediate-vs-lagged
-register discriminator generalizes; the late_wy TRIGGER direction (FFto0/FFto1/10to0,
-cross-line WY-latch) + late_scx/late_wx are the next candidates. The trigger direction
-is the #11af `win_extends_sb` domain (subtler cross-line latch).
+register discriminator generalizes for the UN-trigger; the TRIGGER direction does NOT.
+**REFUTED (do-not-re-chase):** the raw-WY TRIGGER extend (`!win_active &&
+wy_trig_sb_raw && m0 → mode3`, `SLOPGB_WYTRIG`) = **+1/−27** — `wy_trig_sb_raw` is
+sticky, so it fires on every later line where a window triggered earlier but is
+legitimately BARE now (disabled/aborted/WX-off), forcing spurious mode 3. The FFto0/
+FFto1/10to0 cross-line cases (WY written at the prior line's dot452) are ALSO the
+deferred-frame WY-write-position collapse, not reachable by an on-line shadow.
+`late_wx` has no traced WX-write discriminator (marginal, 1 row). The remaining
+render-length (late_scx fine-scroll · cgbpal palette-register · enable_display
+dispatch-count · the co-temporal post-draw extends) + the 74 hard-atomic (ENGINE-IF
+counter-pinned dispatch · S6-DS sub-half-dot · READ-FRAME S6-completion · WAKE-CLOCK
+sub-M-cycle) need the atomic dispatch/wake/completion reclock — the multi-session
+rewrite. The write-side lever's clean read-law extent is the 3 shipped slices.
 
 ### #11av (2026-07-01) — the goal's #2 lever `halt_mode_phase` (the `halt_ly_phase` FF41-mode twin) BUILT + REFUTED (+5/−13); WAKE-CLOCK confirmed genuinely atomic. Code built + measured + reverted-to-green, core byte-identical OFF.
 
