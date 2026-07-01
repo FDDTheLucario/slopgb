@@ -173,6 +173,15 @@ impl Interconnect {
                 );
             }
         }
+        // C2 #11ax S5 palette read-dot tracer (cgbpal_m3 / enable_display
+        // late-cgbpw families): CGB palette reads (FF68-FF6B) are those tests'
+        // measurement read; log the deferred read dot + value (0xFF = blocked in
+        // mode 3), paired with SameBoy's `SBPALR`. `SLOPGB_S5DBG`, byte-identical
+        // when unset.
+        if matches!(addr, 0xFF68..=0xFF6B) && crate::ppu::s5dbg_on() {
+            let (line, dot) = self.ppu.scan_pos();
+            eprintln!("SLOPGB pal{addr:04x} ly={line} dot={dot} v={v:02x}");
+        }
         // S5 IF-delivery tracer: the m1/lycEnable family observes the STAT-vs-
         // vblank IRQ delivery by reading FF0F (IF), not FF41 — the FF41 tracer
         // is blind to them. NOT gated to `ly < 144`: the vblank-entry reads
@@ -218,6 +227,12 @@ impl Interconnect {
             eprintln!(
                 "SLOPGB w{addr:04x} val={value:02x} lead ly={lly} dot={ldot} commit ly={cly} dot={cdot}"
             );
+        }
+        // C2 #11ax palette-write commit-dot tracer (cgbpal write leg / late-cgbpw):
+        // pairs with SameBoy's `SBPALW blocked=`. `SLOPGB_S5DBG`, byte-identical.
+        if matches!(addr, 0xFF68..=0xFF6B) && crate::ppu::s5dbg_on() {
+            let (cly, cdot) = self.ppu.scan_pos();
+            eprintln!("SLOPGB palw{addr:04x} val={value:02x} ly={cly} dot={cdot}");
         }
         self.service_vram_dma();
         if let 0xFF40 | 0xFF42 | 0xFF43 | 0xFF47..=0xFF4B = addr {
