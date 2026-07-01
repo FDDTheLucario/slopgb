@@ -1,4 +1,21 @@
-# C2 #11at — the write-side render-length lever's FIRST clean slice: the CGB pre-draw window-abort bare-exit (+4/−0) + the #11as "co-temporal write collapse" diagnosis CORRECTED
+# C2 #11at/#11au — the write-side render-length lever's TWO clean slices (pre-draw window-abort +4/−0, window-reenable +4/−0) + the #11as "co-temporal write collapse" diagnosis CORRECTED
+
+**UPDATE #11au:** a SECOND clean slice landed by the same method — the CGB
+window-REENABLE bare-tail (`+4/−0`, `late_reenable_{2,scx2_2,scx3_2,wx0f_2}`, pin
+`tier2_window_reenable_passes`, commit `9c8420b`). Cumulative this session:
+**124 → 117 SameBoy-pass blockers** (7 fixed across 2 slices, 0 dropped). Both slices
+exploit the SAME correction: the "co-temporal" LCDC-toggle families are NOT co-temporal
+— the toggle WRITE lands a whole M-cycle apart (slopgb resolves it), only the render
+collapses. **#11au reenable:** a window disabled then re-enabled mid-mode-3 redraws
+from the re-enable point; its mode-3 extends past the read iff the re-enable beat the
+WX-match redraw start (`re-enable_dot <= wx_match_dot − 3`, MEASURED uniform: base
+wxmatch97/boundary94, wx0f wxmatch105/boundary102). SCX&7 ≤ 3 (the fine-scroll shifts
+the boundary at high SCX — scx5 boundary 98 not 94, MEASURED — the atomic reclock's).
+The rest of the write-side (late_wy WY-latch / cgbpal palette-reg / late_scx boundary
+constant / DS sub-half-dot / post-draw extend) stays atomic; details below.
+
+---
+
 
 2026-07-01, `phase-b-s7`. Executed the goal's PRIMARY lever — **the write-side
 render-length reclock** — on the `late_disable` window family. Result: the first
