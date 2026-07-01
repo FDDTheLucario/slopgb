@@ -171,6 +171,18 @@ impl Ppu {
     /// output position rather than re-showing skipped columns.
     pub(in crate::ppu) fn window_abort(&mut self) {
         if !self.render.win_mode {
+            // C2 #11at — PRE-DRAW abort: LCDC.5 cleared (caller's guard:
+            // `render.active` + window was enabled) before the window's first
+            // fetch (`win_mode` not yet set — `late_disable_early_*_1`, WX/WY
+            // not yet matched). SameBoy renders the line BARE but DROPS the SCX
+            // fine-scroll penalty (mattcurrie §WIN_EN) → mode-3 exit cfl257.
+            // Flags the CGB shadow bare-exit read law (`stat_irq.rs::
+            // vis_mode_read`). CGB-only (DMG uses `win_aborted`); `!win_mode`
+            // is the pre-draw discriminator regs.rs cannot see (private field).
+            if self.tier2_reclock && self.model.is_cgb() {
+                self.render.win_predraw_abort = true;
+                self.render.win_predraw_abort_dot = self.dot;
+            }
             return;
         }
         let cgb = self.model.is_cgb();

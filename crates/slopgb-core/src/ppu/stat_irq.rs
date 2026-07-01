@@ -95,6 +95,48 @@ impl Ppu {
         {
             return 3;
         }
+        // C2 #11at — the CGB PRE-DRAW window-abort BARE-exit shadow (SS). When
+        // a window enabled at line start is disabled by an LCDC.5 clear BEFORE
+        // it draws (`Render::win_predraw_abort`, set in `regs.rs::commit_eff`),
+        // SameBoy renders the line BARE but DROPS the SCX fine-scroll penalty
+        // (mattcurrie §WIN_EN: the BG resumes on a tile boundary, SCX&7 has no
+        // effect) → mode-3 exit cfl257, NOT the normal bare 257+SCX&7. slopgb's
+        // whole-dot render over-extends (mode3 at the read dot). The deferred
+        // cc+0 read (read_offset 4 SS) reads mode0 iff dot + 4 >= 257.
+        // MEASURED — `late_disable_early_scx03_wx{0f,10,11,12}_1`: LCDC.5 cleared
+        // at dot104 while `!win_mode` (WX/WY not yet matched), SameBoy exit
+        // cfl257, read at cfl260 → mode0 (want0); the `_2` siblings clear at
+        // dot108 AFTER the window began drawing (`win_mode`, POST-draw, NOT
+        // flagged), so their mode-3 EXTENDS by the drawn tiles (read mode3,
+        // want3 — left to the atomic render-length reclock, since the extend is
+        // a per-config length not a function of the abort dot: early_scx03
+        // abort104→exit257 but non-early late_scx0 abort100→exit>260 at the same
+        // read dot). Guarded to the currently-DISABLED window (excludes
+        // late_reenable) + bare non-sprite non-glitch CGB lines. SS only (the DS
+        // pre-draw abort = the S6 read grid). Tier2-gated; the flag is false
+        // flag-off → byte-identical.
+        if self.tier2_reclock
+            && self.model.is_cgb()
+            && !self.ds
+            && self.render.win_predraw_abort
+            // The pre-draw abort is fully BARE (exit cfl257) only when it lands
+            // before the window's first tile ships (MEASURED ~dot106 for the
+            // scx03 early setup); a 1-M-cycle-later abort (`_2`, dot108) catches
+            // the first tile and EXTENDS mode 3 (want mode3) — a per-config
+            // window-tile-completion length the atomic render reclock owns, NOT
+            // this bare law. `<= 105` scopes to the pre-first-tile aborts.
+            && self.render.win_predraw_abort_dot <= 105
+            && self.eff.lcdc & LCDC_WIN_ENABLE == 0
+            && self.line >= 1
+            && self.line < 144
+            && m == 3
+            && !self.render.win_active
+            && !self.glitch_line
+            && self.render.n_sprites == 0
+            && self.dot + 4 >= 257
+        {
+            return 0;
+        }
         // C2 #11an UNIFIED bare-line read-frame law (EXPERIMENT, env-gated).
         // The dual-emulator trace (kernel m2int_m3stat_1/_2 + DS _2 +
         // late_disable) showed every FF41 mode read obeys:

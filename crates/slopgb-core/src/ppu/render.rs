@@ -191,6 +191,21 @@ pub(super) struct Render {
     /// cgb04c_out0 split expectations for the same read). `pub(super)` for
     /// the C2 #11y window-length read law (`stat_irq.rs::vis_mode_read`).
     pub(super) win_aborted: bool,
+    /// C2 #11at — a window enabled at line start was disabled by a mid-line
+    /// LCDC.5 clear BEFORE it began drawing (`!win_mode` at the clear, set in
+    /// `regs.rs::commit_eff`). SameBoy renders such a line BARE but with the
+    /// SCX fine-scroll penalty DROPPED (mattcurrie §WIN_EN) → mode-3 exit
+    /// cfl257, not 257+SCX&7; slopgb's whole-dot render over-extends it. The
+    /// CGB-visible flag for the shadow bare-exit law (`stat_irq.rs::
+    /// vis_mode_read`) — `win_aborted` is DMG-only. A POST-draw abort is NOT
+    /// flagged (its exit extends by the tiles drawn, a per-config length the
+    /// atomic render reclock owns). Reset per line. `pub(super)` for the law.
+    pub(super) win_predraw_abort: bool,
+    /// C2 #11at — the dot of a pre-draw window abort (see [`Self::
+    /// win_predraw_abort`]). The bare exit still tracks the abort dot within
+    /// the pre-draw class (an abort 1 M-cycle later catches the window's first
+    /// tile → extends past the bare exit), so the read law thresholds on it.
+    pub(super) win_predraw_abort_dot: u16,
     /// WX comparator output on the previous dot: activations and
     /// reactivations fire on the rising edge only (the match holds while
     /// lx is frozen during the start stall and must not re-fire).
@@ -242,6 +257,8 @@ impl Render {
             win_active: false,
             win_stalled: false,
             win_aborted: false,
+            win_predraw_abort: false,
+            win_predraw_abort_dot: 0,
             win_match_prev: false,
             prefill_pos: 0,
             wx_match_dot: 0,
@@ -296,6 +313,8 @@ impl Ppu {
         r.win_active = false;
         r.win_stalled = false;
         r.win_aborted = false;
+        r.win_predraw_abort = false;
+        r.win_predraw_abort_dot = 0;
         r.win_match_prev = false;
         r.prefill_pos = 0;
         r.wx_match_dot = 0;

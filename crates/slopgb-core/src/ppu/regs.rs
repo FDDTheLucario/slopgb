@@ -57,6 +57,10 @@ impl Ppu {
                 // — see `window_abort`).
                 if old & LCDC_WIN_ENABLE != 0 && value & LCDC_WIN_ENABLE == 0 && self.render.active
                 {
+                    // C2 #11at — a mid-mode-3 LCDC.5 clear: `window_abort` flags
+                    // a PRE-DRAW abort (window disabled before its first fetch)
+                    // for the CGB shadow bare-exit law (`stat_irq.rs::
+                    // vis_mode_read`). See `window_abort` + `win_predraw_abort`.
                     self.window_abort();
                 }
             }

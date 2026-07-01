@@ -1376,6 +1376,52 @@ fn tier2_oam_postread_ds_passes() {
     }
 }
 
+/// Port Stage C / S5 #11at — the CGB pre-draw window-abort BARE-exit slice
+/// (`stat_irq.rs::vis_mode_read`, `regs.rs`/`render/window.rs` `win_predraw_abort`).
+/// An LCDC.5 clear that lands BEFORE the enabled window's first fetch renders the
+/// line bare on SameBoy but with the SCX fine-scroll penalty DROPPED (mattcurrie
+/// §WIN_EN) → mode-3 exit cfl257, not 257+SCX&7; slopgb's whole-dot render
+/// over-extended it. `late_disable_early_scx03_wx{0f,10,11,12}_1` (LCDC.5 cleared
+/// at dot104, pre-first-tile) read out0 flag-on (+4/−0, MEASURED). The `_2`
+/// siblings (dot108, post-first-tile) EXTEND mode 3 (want out3) — a per-config
+/// window-tile-completion length left to the atomic render reclock, excluded by
+/// the `win_predraw_abort_dot <= 105` pre-first-tile scope. CGB single-speed only.
+#[test]
+fn tier2_window_predraw_abort_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_window_predraw_abort",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 4] = [
+        (
+            "gambatte/window/late_disable_early_scx03_wx0f_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx03_wx10_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx03_wx11_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx03_wx12_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 /// Port Stage C / S5 (mech 3 — CGB lcd-offset, the line-start OAM-read window) —
 /// on CGB single-speed SameBoy keeps `oam_read_blocked = false` for the first few
 /// T-cycles of each visible line (`display.c:1805-1810`: the mode-0/HBlank tail
