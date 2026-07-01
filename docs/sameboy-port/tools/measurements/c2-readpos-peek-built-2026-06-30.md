@@ -2,8 +2,9 @@
 
 2026-06-30. Executed the goal's single sharpest lever — **the full per-ISR
 deferred-read POSITION reclock, decoupled from the IF dispatch** — and drove it
-to a decision. Result = **the first CLEAN read-position slice in the entire
-C-stage (`+6/−0`, byte-identical OFF, mooneye flag-on 91/91), pinned**, plus the
+to a decision. Result = **the first CLEAN read-position slices in the entire
+C-stage (`+7/−0` across TWO sub-families — m2int_m3stat DS `+6` + m2int_m0stat DS
+`+1`; byte-identical OFF, mooneye flag-on 91/91), pinned**, plus the
 **definitive per-class read-frame offset table** (all 5 blocker classes measured,
 the new work #11aq's DS mode-2/mode-0 pair could not generalise). The global
 132-convergence does NOT land (ESCAPE): the offset table proves the read-frame
@@ -107,12 +108,14 @@ excluded.
    mode-3 START for an accessibility read). This is why "RENDER-LENGTH" is not one
    lever: the deferred-clock↔PPU-dot phase error is a function of the read's
    absolute line position, so a constant per-source carry is insufficient.
-4. **Only the m2int_m3stat DS +4 subset is cleanly fixable.** It is the ONLY
-   sub-family where (a) the offset is uniform (+4), (b) the `_1`/`_2` reads are
-   genuinely 2 dots apart (dot252/254 — NOT co-temporal), and (c) the exit is the
-   bare exit (not window/sprite/accessibility-extended). Every other sub-family
-   fails ≥1: late_disable is co-temporal (b); late_wy needs the extended exit (c);
-   accessibility reads a different register at a different position (a); ENGINE-IF
+4. **Only two FF41-mode sub-families are cleanly fixable** (the +7 shipped): the
+   m2int_m3stat DS +4 exit peek (6 rows) and the m2int_m0stat DS +2 line-start
+   mode0→2 flip peek (1 row). Each is a sub-family where (a) the reads are FF41-mode
+   at a SameBoy-geometry boundary, (b) the `_1`/`_2` legs are genuinely separable
+   (NOT co-temporal), and (c) the boundary is a clean SameBoy exit/flip position.
+   Every other sub-family fails ≥1: late_disable is co-temporal (b); late_wy needs
+   the extended exit (c); accessibility reads a different register at a different
+   position (a); ENGINE-IF
    is IF-delivery not mode; WAKE-CLOCK is mode-0 at the wrong clock.
 
 ## Why the 132 do NOT converge (the residual, by class)
@@ -134,40 +137,62 @@ S6-DS + READ-FRAME (≈76) needing the IF-delivery / wake-clock / S6-completion
 reclocks — the atomic C-stage, re-confirmed. The peek is a genuine dent (the
 first read-position win), not the whole lever.
 
-## The single sharpest remaining lever (refined)
+## The single sharpest remaining lever (refined — read-position peek EXHAUSTED)
 
-**The WAKE-CLOCK mode-0 peek** — the same transient-verdict mechanism as this
-slice, applied to the halt m0stat family (the uniform `−4` cluster, 7 rows):
-peek the FF41 mode-0 verdict at the sub-M-cycle wake clock instead of slopgb's
-M-cycle-quantized wake. It is the next-most-uniform offset cluster and the only
-other one with a single dominant value. The FF0F ENGINE-IF class (30, IF-delivery)
-is the largest but needs the interrupt-lifecycle reclock (not a mode peek), and
-is entangled with the counter-pinned dispatch — the true atomic core.
+The read-position PEEK is now exhausted: two clean FF41-mode slices shipped (+7),
+and the 6-agent sweep proved every remaining blocker is either a non-FF41 register
+or co-temporal with a SameBoy-pass. The WAKE-CLOCK mode-0 peek (my first guess) was
+BUILT and REFUTED (`SLOPGB_WAKEPEEK` +3/−13): the want-0/want-2 halt reads are
+co-temporal (every observable field identical), so it needs the sub-M-cycle
+`halt_mode_phase` (a C1.3-style wake-clock rewrite), NOT a verdict peek. The three
+genuinely-distinct remaining levers, each an architectural port stage:
+1. **The render mode-3 LENGTH port** (the RENDER-window/S6-DS/late_disable FF41
+   co-temporal families): a parallel tier2 window/speedchange mode-3-length model +
+   a vis-HOLD primitive — the largest FF41 dent, but needs the render engine, not a
+   read peek. The S6-DS speedchange rows are entangled with the SHIPPED pin (drop-
+   the-pin risk), so this must land WITH a speedchange-penalty discriminator.
+2. **The IF-delivery/dispatch reclock** (ENGINE-IF 30 + READ-FRAME FF0F): SameBoy
+   sets/clears the STAT IF bit at a T-position the deferred cc+0 FF0F read straddles;
+   the fix is the dispatch↔read-frame reclock, atomic with the counter-pinned
+   dispatch — the true C-stage core.
+3. **The S4 accessibility model** (RENDER-accessibility): the mode-3 VRAM/OAM/palette
+   blocking window (PORT-PLAN S4), a different read path entirely.
+None is a scoped byte-identical slice; all three are the atomic C-stage the port
+has always named. The read-position peek has drained everything cleanly extractable.
 
-## Per-class BUILD-ATTEMPT results (all 5 classes attempted, build-measure)
+## Per-class BUILD-ATTEMPT results (ALL 5 classes attempted + a 6-agent exhaustive two-bin sweep)
 
-Each read-position class was ATTEMPTED (built a peek + two-binned, or measured the
-read to prove the peek does not apply), not just offset-measured:
+Each read-position class was ATTEMPTED (built a peek + two-binned, or exhaustively
+measured every blocker on both emulators to prove the peek cannot apply). A
+6-agent parallel workflow independently characterized every remaining blocker
+(register read, `_1`/`_2` separability, co-temporality with SameBoy-passing
+siblings) — corroborating the single-row verdicts and surfacing the one extra
+clean row (`m2int_m0stat_ds_2`) beyond the m3stat family.
 
 | class | attempt | two-bin | verdict |
 |---|---|---|---|
 | RENDER-LENGTH (m2int_m3stat DS) | FF41 mode peek `dot+off<SBex` | **+6/−0** | **SHIPPED** (tier2-uncond, pinned) |
-| RENDER-LENGTH (late_disable) | (excluded from the peek) | co-temporal | MEASURED `_1`/`_2` same `ly1 dot254` opposite-wants → render-length A/B, not read-position |
-| WAKE-CLOCK | FF41 line-start mode-2→0 peek (`SLOPGB_WAKEPEEK`) | **+3/−13** | **A/B SWAP** — want-0/want-2 read the identical line-start mode-2 dot; needs the sub-M-cycle `halt_mode_phase` table (C1.3 `halt_ly_phase` analogue), NOT a whole-dot force |
-| ENGINE-IF | (measured, peek N/A) | — | reads **FF0F=IF** (slopgb `if=00` dot8 ↔ SameBoy `if=02` cfl0), NOT FF41 — the IF-DELIVERY lifecycle; #11al already build-measured it as a read-frame A/B swap |
-| RENDER-LENGTH (accessibility +18) | (measured, peek N/A) | — | reads **VRAM `8000`/OAM `FE00`/palette `FF69`**, NOT FF41 — the S4 accessibility (mode-3 blocking-window) model |
-| S6-DS / READ-FRAME | (measured, peek N/A) | — | DS read-grid / conflict-write / serial-tima S6-completion — a different clock domain (PORT-PLAN S6), not a mode read |
+| READ-FRAME (m2int_m0stat DS) | FF41 line-start mode0→2 peek (`dot≥2 → 2`) | **+1/−0** | **SHIPPED** — the m2int OAM-ISR reads FF41 at the line-start mode0→2 flip (SameBoy flips at 8 MHz pos 4 = dot 2); scoped to the carried mode-2 ISR native-0 read. The ONLY other cleanly-fixable FF41 row |
+| READ-FRAME (m2int_m2stat + 4 FF0F) | measured | — | m2stat `dot82` is 4 dots below SameBoy's mode2→3 flip at `dot86` = curve-fit A/B; the other 4 read **FF0F=IF** (IF-delivery/S6-completion) |
+| RENDER-LENGTH (late_disable) | excluded (`!wy_trig_sb`) | co-temporal | `_1`/`_2` same `ly1 dot254` opposite-wants → render-length A/B, not read-position |
+| WAKE-CLOCK | FF41 line-start mode-2→0 peek (`SLOPGB_WAKEPEEK`) | **+3/−13** | **A/B SWAP** — want-0/want-2 read the IDENTICAL `ly2 dot4 mode2` (every field identical: ly/dot/clk/mode/pend/wa/ve/lrd/vh/vm/ns); needs the sub-M-cycle `halt_mode_phase` (C1.3 analogue) |
+| ENGINE-IF | exhaustive measure, peek N/A | — | all 13 read **FF0F=IF** (the value IS the IF bit, no mode verdict); 2 pairs strictly co-temporal — the IF-delivery/dispatch reclock |
+| S6-DS | exhaustive measure | (A/B) | the only FF41 rows (speedchange scx2/scx4 `_2`) are **CO-TEMPORAL with the PINNED `m2int_scxN_m3stat_ds_1`** (identical `dot254/256 mode3`, opposite wants) — a naive fix DROPS the pin; rest read VRAM/FF0F/frame-count |
+| RENDER-accessibility (+18) | exhaustive measure, peek N/A | — | all read **VRAM `8000`/OAM `FE00`/palette `FF69`**, NOT FF41 — S4 accessibility; 2 pairs co-temporal |
+| RENDER-window (late_wy/reenable/wx) | exhaustive measure | (A/B) | every FF41 blocker CO-TEMPORAL with a SameBoy-PASS sibling (reproduces the refuted M2HOLD +22/−50 / BARELAW +23/−27); the 1 separable pair reads FF0F |
 
 **The decisive structural result: the read-position PEEK is a FF41-MODE-READ
-mechanism, and only ONE sub-family (m2int_m3stat DS) is cleanly served by it.** Of
-the 5 classes: RENDER-LENGTH m2int is the shipped peek; WAKE-CLOCK is FF41 but
-CO-TEMPORAL (whole-dot force = A/B swap, needs the sub-M-cycle wake clock);
-ENGINE-IF/accessibility/S6-DS/READ-FRAME read DIFFERENT registers or live in a
-different clock domain, so the FF41 verdict peek fundamentally cannot address them
-— each is its own port stage (IF-lifecycle / S4 accessibility / S6 grid). This is
-why "carry EVERY deferred read to SameBoy's cfl + ONE SBex exit" (#11aq) cannot
-land as one lever: the reads are not all FF41-mode reads, and even among the FF41
-ones the offset is co-temporal outside the m2int family. The `SLOPGB_WAKEPEEK`
+mechanism, and exactly TWO sub-families are cleanly served (m2int_m3stat DS +6,
+m2int_m0stat DS +1 = the +7 shipped).** Of the remaining reads: WAKE-CLOCK is FF41
+but CO-TEMPORAL (every observable field identical — the sub-M-cycle wake clock);
+S6-DS/RENDER-window FF41 rows are CO-TEMPORAL with SameBoy-passing siblings (a peek
+drops a SameBoy-pass — the refuted M2HOLD/BARELAW shape, and S6-DS would drop the
+shipped pin); ENGINE-IF/accessibility/READ-FRAME-FF0F read DIFFERENT registers
+(FF0F IF-delivery / VRAM / OAM / palette) the FF41 verdict peek cannot reach — each
+its own port stage (IF-lifecycle / S4 accessibility / S6 grid). This is why "carry
+EVERY deferred read to SameBoy's cfl + ONE SBex exit" (#11aq) cannot land as one
+lever: the reads are not all FF41-mode reads, and even among the FF41 ones the
+verdict is co-temporal outside the two m2int sub-families. The `SLOPGB_WAKEPEEK`
 attempt is committed env-gated (byte-identical OFF) as the documented refutation.
 
 ## Gate (END CLEAN — production unchanged)
