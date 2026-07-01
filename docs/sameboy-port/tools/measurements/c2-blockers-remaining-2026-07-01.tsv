@@ -1,4 +1,4 @@
-# 124 SameBoy-pass flip blockers remaining after #11as (base phase-b-s7 de41a65).
+# 120 SameBoy-pass flip blockers remaining after #11at (base phase-b-s7 69a3a69; -4 pre-draw window-abort, #11at).
 # class	rel	(regenerate: flagon_probe ON vs OFF two-bin -> classify_cgb_regr.py)
 RENDER-LENGTH	gambatte/cgbpal_m3/cgbpal_m3end_ds_2_cgb04c_out0.gbc
 RENDER-LENGTH	gambatte/cgbpal_m3/cgbpal_m3end_scx2_2_cgb04c_out0.gbc
@@ -35,10 +35,6 @@ RENDER-LENGTH	gambatte/window/late_disable_early_scx00_wx0f_ds_1_cgb04c_out0.gbc
 RENDER-LENGTH	gambatte/window/late_disable_early_scx00_wx10_ds_1_cgb04c_out0.gbc
 RENDER-LENGTH	gambatte/window/late_disable_early_scx00_wx11_ds_1_cgb04c_out0.gbc
 RENDER-LENGTH	gambatte/window/late_disable_early_scx00_wx12_ds_1_cgb04c_out0.gbc
-RENDER-LENGTH	gambatte/window/late_disable_early_scx03_wx0f_1_dmg08_cgb04c_out0.gbc
-RENDER-LENGTH	gambatte/window/late_disable_early_scx03_wx10_1_dmg08_cgb04c_out0.gbc
-RENDER-LENGTH	gambatte/window/late_disable_early_scx03_wx11_1_dmg08_cgb04c_out0.gbc
-RENDER-LENGTH	gambatte/window/late_disable_early_scx03_wx12_1_dmg08_cgb04c_out0.gbc
 RENDER-LENGTH	gambatte/window/late_disable_spx10_wx0f_2_dmg08_cgb04c_out3.gbc
 RENDER-LENGTH	gambatte/window/late_enable_ly0_ds_2_cgb04c_out0.gbc
 RENDER-LENGTH	gambatte/window/late_reenable_2_dmg08_cgb04c_out0.gbc

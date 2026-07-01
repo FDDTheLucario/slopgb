@@ -127,6 +127,49 @@ Lifts the class-H/A sub-dot floor incrementally: keep the pixel pipe dot-clocked
 - **DISPATCH-RECLOCK REFUTED 2026-06-21 (the prior "next: move the dispatch to ~252" hypothesis is MEASURED-FALSE; A6's halt-mask is the correct resolution at the UNMOVED frame; probe reverted, branch byte-identical to `a89fdf9`).** Tested the long-assumed next lever — move the mode-0 IRQ DISPATCH (`mode_for_interrupt→0` via `mfi_m0_prev`) from our cc+4 dot 255 to SameBoy's `mode0_irq_dot` (our 252) by re-anchoring `mfi_m0_prev` to `vis_early` (dot 251 → IRQ at 252) on the flag-on path (`SLOPGB_DISP` probe). **Measured (flag-on, `run_mooneye`/`run_gambatte`, all reverted): net-NEGATIVE A/B swap.** Canonical `intr_2_mode0_timing` HELD PASS (it never needed the dispatch move — A6's halt-only mask already fixes it at the 254 frame); but **kernel `m0int_m3stat_2` REGRESSED 0→3** (m0int is itself a *mode-0-dispatched* read — moving its IRQ moves its `ldh a,(FF41)` off the post-flip dot) and **`intr_2_0_timing` REGRESSED PASS→FAIL** (the mode-2→mode-0 IRQ distance shortens by 3 dots), while **`hblank_ly_scx_timing-GS` STAYED FAIL** (so the dispatch dot is NOT its blocker). **CONCLUSION (the proof the goal asked for): the mode-0 dispatch dot is ATOMIC/ENTANGLED — it cannot move on the flag-on path without regressing every mode-0-*dispatched* read (m0int, intr_2_0) that is pinned to our 254 frame; only the global cc-exact reclock (which re-frames ALL those reads together + the ~7000 rebaseline) can move it. The premise "the canonical needs the dispatch at 252" was WRONG — A6's `halt`-only mask resolves the canonical at the UNMOVED 254 frame, and the 254 frame is exactly where m0int reads its post-flip mode 0.** So the residual flag-on failures are NOT a dispatch-dot problem: `hblank_ly_scx`/gbmicrotest `int_hblank_halt` need the **`m0_rise` mask phase** (the new engine's m0 rise lands at dot 255 vs the gambatte engine's `m0_rise_dot` 254 — a sub-dot second-half-determination mismatch, a separate lever); `intr_2_mode3_timing` the mode-2→3 entry-boundary back-date; `intr_2_mode0_timing_sprites` the sprite/window `vis_early`; `vblank_stat_intr-GS` the line-144/DMG-vblank OAM pulses the mfi-engine doesn't emit. Each is its own flag-gated piece on top of A6; the global default flip + rebaseline (Phase B) is the terminal all-or-nothing step.
 - **A5a SHIPPED 2026-06-21 (the visible/dispatch decouple banked as flag-gated production machinery; byte-identical flag-OFF, gate exit 0, kernel separates flag-ON).** Acting on the "bank a green foundation piece" mandate, the measured separator from the bullet above is now real (not a probe): a new `Ppu::vis_early` field (`ppu/mod.rs`) back-dates the **CPU-visible** STAT mode→0 boundary (`vis_mode`) to SameBoy's `ModeTimeline::visible_mode0_dot` frame — 3 dots ahead of the IRQ-dispatch flip (`line_render_done`/`m0_src`) — **on the flag-on path only, bare single-speed lines** (`m0_flip_events`: `leading_edge_reads && bare_flip && !ds && proj <= lead + 3`). `vis_mode` reads `line_render_done || vis_early`; since the set is gated on `leading_edge_reads` (off in prod), `vis_early` is **always false flag-OFF**, so `vis_mode == line_render_done` exactly — byte-identical (full gbtr+mooneye gate **exit 0**, 644 lib green, clippy clean). The dispatch (`m0_src`/`mode_for_interrupt`) is unmoved, so this decouples the visible read from the IRQ dot. **Flag-ON verified**: `run_gambatte cgb` on the kernel pair = **m2int_m3stat_1 → 3 ∧ m0int_m3stat_2 → 0** (both correct — the kernel SEPARATES with the real machinery, not just the probe). Tests: `visible_mode0_backdates_three_dots_flag_on_bare_line` (flag-on flip at SameBoy+4 / our 251, flag-off stays at +7 / 254) + the two `leading_edge_*` subdot tests rewritten to pin the separation at the two read dots (leading sample at our dot 248 → mode 3, 252 → mode 0). **Scope/residuals (deliberately excluded, derived-but-unmeasured): the +3 back-date is the bare single-speed value; sprite/window lines want +2 (DMG) and DS +4, left on `line_render_done`. OAM/VRAM accessibility (`blocking.rs`) keeps the dispatch dot — the visible-vs-accessibility 3-dot window is the S4 back-dating. This is the visible-frame HALF of the atomic flip; the canonical mooneye `intr_2_mode0_timing` still breaks flag-on because the DISPATCH is still cc+4-framed (our 254, not SameBoy's ~252) — the dispatch reclock + ~7000 rebaseline is the remaining atomic work. A5a is the A1/A2/A4-pattern foundation piece: individually faithful, byte-identical OFF, validated ON.**
 
+### #11at (2026-07-01) — the write-side render-LENGTH lever's FIRST clean slice: the CGB pre-draw window-abort bare-exit (`+4/−0`, pinned) + the #11as "co-temporal write collapse" diagnosis CORRECTED. Code in `phase-b-s7` (`dd89941`/`69a3a69`), core byte-identical OFF, 120 SameBoy-pass blockers (was 124), defaults NOT flipped.
+
+Executed the goal's #1 lever (write-side render-length) on the `late_disable` window
+family. **DECISIVE CORRECTION to #11as:** the `late_disable_early_scx03_wx*` `_1`/`_2`
+legs are NOT co-temporal — build-measured (both emulators, `SLOPGB_S5DBG` write tracer
++ SameBoy `SBREAD`/`SBMODE`) their LCDC.5-clear WRITES land a whole M-cycle apart
+(slopgb dot104 `_1` / dot108 `_2`), which slopgb RESOLVES via `advance_machine_t`. The
+collapse #11as attributed to "the deferred write lands both at the same dot" is wrong:
+the WRITES differ; the RENDER is insensitive (both render mode3 at the shared read
+dot256, but SameBoy reads mode0 for `_1` / mode3 for `_2` at the identical cfl260 —
+the dot108 disable catches the window's first tile → extends mode 3).
+
+**SHIPPED — the PRE-DRAW abort bare-exit (`+4/−0`).** A window enabled at line start
+disabled BEFORE its first fetch (`!win_mode` at the clear → `window_abort`
+early-returns) renders BARE on SameBoy but DROPS the SCX fine-scroll penalty
+(mattcurrie §WIN_EN) → mode-3 exit cfl257, not 257+SCX&7; slopgb over-extends.
+`Render::win_predraw_abort{,_dot}` (flagged in `window_abort`'s `!win_mode` path,
+tier2+CGB) feeds `stat_irq.rs::vis_mode_read` (SS, bare non-sprite non-glitch,
+`LCDC_WIN_ENABLE==0` excludes late_reenable, `win_abort_dot <= 105`, `dot+4 >= 257` →
+mode0). Fixes `late_disable_early_scx03_wx{0f,10,11,12}_1`; pin
+`tier2_window_predraw_abort_passes`. flag-on 466→462; classify 124→120 SameBoy-pass, 0
+dropped.
+
+**The bare/extend boundary is a FIXED per-config constant (~106 scx03), NOT a function
+of (abort_dot, scx, read_dot) NOR `wx_match_dot`-relative — REFUTED:** `wx_match+1`
+gives +6/−4 (the abort dot is wx-INDEPENDENT 104/108 while `wx_match` moves with WX, so
+higher-wx `_2` extends get re-included); cross-family non-monotonic (early_scx03
+abort104→bare vs non-early late_scx0 abort100→extend at the same read). The post-draw
+extend / late_reenable / late_wx / late_scx (boundary ~130) / cgbpal / DS-accessibility
+rows need the per-config window-tile-completion LENGTH model — which moves
+`line_render_done` → the counter-pinned dispatch = the atomic render reclock.
+
+**WAKE-CLOCK re-confirmed co-temporal** (this session): the clean `halt m0stat` scx2
+pairs read DIFFERENT slopgb dots (`_1` dot4 / `_2` dot8) but the family-wide want-0/
+want-2 split does NOT correlate with the read dot (WAKEPEEK +3/−13, #11ar) and the
+mode-0 rise cc is IDENTICAL across legs (same scx→same rise dot 256), so
+`halt_mode_phase` (a cc-keyed `halt_ly_phase` twin) CANNOT split them; the discriminator
+is the sub-M-cycle halt-ENTRY/CPU-resume T-phase (SameBoy reads both at `ly2 cfl0 dc0`
+— the same half-dot — returning mode0 vs mode2 from a sub-dc STAT-update T). **DS
+pre-draw twin genuinely co-temporal** (both read slopgb dot254 mode3; SameBoy cfl 516
+both → sub-half-dot, the S6-DS grid). Map:
+`measurements/c2-window-predraw-abort-2026-07-01.md`.
+
 ### #11as (2026-07-01) — the RENDER MODE-3 LENGTH port BUILT + build-measured: 1 clean DS accessibility slice (`+1/−0`, pinned) + the DEFINITIVE co-temporal barrier. ESCAPE on the 125-convergence. Code in `phase-b-s7` (`de41a65`), `pixel-pipe-reclock` core byte-identical OFF, defaults NOT flipped.
 
 Drove the goal's PRIMARY lever — the render mode-3 LENGTH port (make slopgb's
