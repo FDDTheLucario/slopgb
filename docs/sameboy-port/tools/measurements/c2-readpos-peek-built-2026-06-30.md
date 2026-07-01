@@ -144,6 +144,32 @@ other one with a single dominant value. The FF0F ENGINE-IF class (30, IF-deliver
 is the largest but needs the interrupt-lifecycle reclock (not a mode peek), and
 is entangled with the counter-pinned dispatch — the true atomic core.
 
+## Per-class BUILD-ATTEMPT results (all 5 classes attempted, build-measure)
+
+Each read-position class was ATTEMPTED (built a peek + two-binned, or measured the
+read to prove the peek does not apply), not just offset-measured:
+
+| class | attempt | two-bin | verdict |
+|---|---|---|---|
+| RENDER-LENGTH (m2int_m3stat DS) | FF41 mode peek `dot+off<SBex` | **+6/−0** | **SHIPPED** (tier2-uncond, pinned) |
+| RENDER-LENGTH (late_disable) | (excluded from the peek) | co-temporal | MEASURED `_1`/`_2` same `ly1 dot254` opposite-wants → render-length A/B, not read-position |
+| WAKE-CLOCK | FF41 line-start mode-2→0 peek (`SLOPGB_WAKEPEEK`) | **+3/−13** | **A/B SWAP** — want-0/want-2 read the identical line-start mode-2 dot; needs the sub-M-cycle `halt_mode_phase` table (C1.3 `halt_ly_phase` analogue), NOT a whole-dot force |
+| ENGINE-IF | (measured, peek N/A) | — | reads **FF0F=IF** (slopgb `if=00` dot8 ↔ SameBoy `if=02` cfl0), NOT FF41 — the IF-DELIVERY lifecycle; #11al already build-measured it as a read-frame A/B swap |
+| RENDER-LENGTH (accessibility +18) | (measured, peek N/A) | — | reads **VRAM `8000`/OAM `FE00`/palette `FF69`**, NOT FF41 — the S4 accessibility (mode-3 blocking-window) model |
+| S6-DS / READ-FRAME | (measured, peek N/A) | — | DS read-grid / conflict-write / serial-tima S6-completion — a different clock domain (PORT-PLAN S6), not a mode read |
+
+**The decisive structural result: the read-position PEEK is a FF41-MODE-READ
+mechanism, and only ONE sub-family (m2int_m3stat DS) is cleanly served by it.** Of
+the 5 classes: RENDER-LENGTH m2int is the shipped peek; WAKE-CLOCK is FF41 but
+CO-TEMPORAL (whole-dot force = A/B swap, needs the sub-M-cycle wake clock);
+ENGINE-IF/accessibility/S6-DS/READ-FRAME read DIFFERENT registers or live in a
+different clock domain, so the FF41 verdict peek fundamentally cannot address them
+— each is its own port stage (IF-lifecycle / S4 accessibility / S6 grid). This is
+why "carry EVERY deferred read to SameBoy's cfl + ONE SBex exit" (#11aq) cannot
+land as one lever: the reads are not all FF41-mode reads, and even among the FF41
+ones the offset is co-temporal outside the m2int family. The `SLOPGB_WAKEPEEK`
+attempt is committed env-gated (byte-identical OFF) as the documented refutation.
+
 ## Gate (END CLEAN — production unchanged)
 
 mooneye flag-on 91/91 (no lever env — the peek is tier2-unconditional) + OFF
