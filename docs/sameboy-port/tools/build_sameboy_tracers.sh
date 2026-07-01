@@ -17,7 +17,8 @@ DIR=/tmp/sbbuild/SameBoy-1.0.2
 TESTER="$DIR/build/bin/tester/sameboy_tester"
 
 if [ -x "$TESTER" ] && grep -q SBMODE "$DIR/Core/display.c" 2>/dev/null \
-   && grep -q SBDISP "$DIR/Core/sm83_cpu.c" 2>/dev/null; then
+   && grep -q SBDISP "$DIR/Core/sm83_cpu.c" 2>/dev/null \
+   && grep -q SBPALR "$DIR/Core/memory.c" 2>/dev/null; then
   echo "tester already built + patched: $TESTER"; exit 0
 fi
 
@@ -88,6 +89,48 @@ if "SBREAD ff41" not in mem:
                 return gb->io_registers[GB_IO_STAT] | 0x80;""")
     open(d+"/Core/memory.c","w").write(mem)
     print("patched memory.c")
+
+# C2 #11ax: CGB palette (BGPD/OBPD = FF69/FF6B) access tracer — SBPALR (read)
+# + SBPALW (write) print cgb_palettes_blocked at every access, the ground truth
+# for the cgbpal_m3 / enable_display late-cgbpw palette-lock lcd_offset inversion.
+mem2=open(d+"/Core/memory.c").read()
+if "SBPALR" not in mem2:
+    # read side (read_high_memory): the accessible-return path
+    mem2=mem2.replace(
+"""            case GB_IO_BGPD:
+            case GB_IO_OBPD:
+            {
+                if (!gb->cgb_mode && gb->boot_rom_finished) {
+                    return 0xFF;
+                }
+                if (gb->cgb_palettes_blocked) {
+                    return 0xFF;
+                }""",
+"""            case GB_IO_BGPD:
+            case GB_IO_OBPD:
+            {
+                { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+                  if(trc) fprintf(stderr,"SBPALR ly=%d cfl=%d dc=%d blocked=%d\\n",
+                    gb->current_line, gb->cycles_for_line, gb->display_cycles, gb->cgb_palettes_blocked); }
+                if (!gb->cgb_mode && gb->boot_rom_finished) {
+                    return 0xFF;
+                }
+                if (gb->cgb_palettes_blocked) {
+                    return 0xFF;
+                }""")
+    # write side (write_high_memory): just before the blocked branch
+    mem2=mem2.replace(
+"""                uint8_t index_reg = (addr & 0xFF) - 1;
+                if (gb->cgb_palettes_blocked) {
+                    if (gb->io_registers[index_reg] & 0x80) {""",
+"""                uint8_t index_reg = (addr & 0xFF) - 1;
+                { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+                  if(trc) fprintf(stderr,"SBPALW ly=%d cfl=%d dc=%d blocked=%d val=%02x\\n",
+                    gb->current_line, gb->cycles_for_line, gb->display_cycles, gb->cgb_palettes_blocked, value); }
+                if (gb->cgb_palettes_blocked) {
+                    if (gb->io_registers[index_reg] & 0x80) {""")
+    open(d+"/Core/memory.c","w").write(mem2)
+    print("patched memory.c (SBPALR/SBPALW)")
 
 # sm83_cpu.c — the per-ISR dispatch (SBDISP, at the vector-PC latch) + the
 # halt-wake sample position (SBWAKE), for the #11aq read-position-carry trace.
