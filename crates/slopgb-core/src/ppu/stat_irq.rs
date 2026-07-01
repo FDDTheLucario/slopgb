@@ -209,6 +209,27 @@ impl Ppu {
                 + u16::from(self.eff.scx & 1);
             return if self.dot + off < sbex { 3 } else { 0 };
         }
+        // C2 #11ar-wake ATTEMPT (WAKE-CLOCK class, env-gated `SLOPGB_WAKEPEEK`).
+        // The mode-0-source (HBlank) STAT-ISR halt-wake FF41 read resumes at a
+        // line-start dot ~4 reading mode 2 (OAM), where SameBoy — reading at cfl0
+        // (its mode bits lag the OAM flip by 4 T) — sees mode 0 (the HBlank tail).
+        // Force line-start mode-2→0 for the carried mode-0-source wake read.
+        // Scoped to `stat_rise_m0` (excludes the m2int OAM reads that legitimately
+        // want mode 2) + native `m == 2` (excludes the want-2 `scx3_3b` which reads
+        // mode 0 already, and the `dec` want-6 which reads mode 3). Two-binned.
+        if crate::ppu::wakepeek_on()
+            && self.read_carried
+            && self.stat_rise_m0
+            && self.tier2_reclock
+            && self.model.is_cgb()
+            && m == 2
+            && self.line >= 2
+            && self.line < 144
+            && self.dot >= 1
+            && self.dot <= 4
+        {
+            return 0;
+        }
         // C2 #11aq CARRY-FRAME bare-line exit HOLD (env-gated `SLOPGB_M2HOLD`;
         // co-lands with the `SLOPGB_M2CARRY` +4-dot read-position carry). The
         // carry moves the DS mode-2 OAM-ISR FF41 read to SameBoy's *absolute*

@@ -716,6 +716,16 @@ pub(crate) fn m2hold_on() -> bool {
     *F.get_or_init(|| std::env::var_os("SLOPGB_M2HOLD").is_some())
 }
 
+/// #11ar-wake ATTEMPT gate (`SLOPGB_WAKEPEEK`) — the WAKE-CLOCK class probe: the
+/// mode-0-ISR halt-wake FF41 read lands at line-start dot ~4 reading mode 2 where
+/// SameBoy (reading cfl0, the lagged mode-bits view) sees mode 0. Two-binned in
+/// isolation from the shipped m3stat peek before any promotion.
+pub(crate) fn wakepeek_on() -> bool {
+    use std::sync::OnceLock;
+    static F: OnceLock<bool> = OnceLock::new();
+    *F.get_or_init(|| std::env::var_os("SLOPGB_WAKEPEEK").is_some())
+}
+
 /// #11aq mode-0 (HBlank) ISR read-position carry magnitude in T-cycles
 /// (`SLOPGB_M0CARRY_T`, default 4 = +2 dots DS). The mode-0 ISR read lands +2
 /// dots early vs SameBoy (half the mode-2 +4); carrying it lets the single
