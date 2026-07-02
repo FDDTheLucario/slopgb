@@ -1,19 +1,43 @@
 # The half-dot (8 MHz) pixel-pipe reclock — constructive build plan
 
-Status (2026-07-01 #11az): **the terminal lever, specified from the current code
-state.** This is the executable "how to build it" that `PORT-PLAN.md` (the S0–S7
-stage roadmap, written pre-slice at #11e) does not carry: it maps the extracted
-SameBoy per-tick order onto the *exact functions that change today*, names the
-seven accreted `vis_mode_read` shadow laws that collapse, gives the boundary-
-constant re-derivation table, and proves the atomicity with a worked example.
+Status (2026-07-02 #11ba): **Part A-infra (the half-dot grain) LANDED — the first
+structural reclock code since C1.3, byte-identical, `phase-b-s7` `5622329`.** The
+8 MHz half-dot advance is now wired on the tier2 deferred path (`Ppu::tick_half`
++ `dhalf`; `advance_machine_t` runs the PPU per half-dot via `fold_ppu_events` on
+the dot-completing half — reproducing the old `dot_ticks_on_cc` grid exactly);
+production (`tick_machine`, whole-dot `tick`) untouched. Gate all-green: lib
+660/660; 32 tier2 pins; mooneye flag-on 91/91; gbtr OFF 217/0 (production
+byte-identical + 146 golden); flag-on two-bin ON 455 / OFF 486 (= base `6f375fe`,
+unchanged). `sub_dot()` exposes the mid-dot read position (the Part B seam,
+`#[allow(dead_code)]` until consumed). **The grain is the load-bearing foundation
+the coupled render+read+write half-dot rewrite (Parts A-render/B/C/D, §3) stands
+on — no prior session had it (they worked whole-dot).**
 
-This session (#11az) confirmed the base (`6f375fe`): flag-on 455 fail / off 486
-→ 165 flip-BUGs = **115 SameBoy-pass (MUST FIX) + 50 rebaseline**
-(`classify_cgb_regr.py`); mooneye flag-on 91/91; 27 tier2 pins green; production
-byte-identical. It extracted the definitive SameBoy porting spec (§1) and
-produced this plan. **No slopgb code shipped — the build is a coupled atomic
-rewrite that cannot land zero-drop in one session (§5), so the honorable escape
-is this spec + a clean tree.** Read it before touching the pixel pipe.
+**The DS m3stat convergence mechanism, pinned empirically this session (dual-trace
+`late_scx4_ds` + `m2int_scx4_ds`, `fp`):** slopgb COLLAPSES both legs of every
+`_1`/`_2` pair to ONE read (both → slopgb `ly135 dot256 clk1264 mode3`,
+identical), while SameBoy SEPARATES them across a HALF-DOT-resolved flip. Two
+distinct DS sub-mechanisms, both needing the half-dot grain:
+- **`late_scx4_ds`** = the mode-3 **LENGTH** differs (the late SCX write's half-dot
+  commit lands on opposite sides of the fine-scroll comparator sample): `_1` read
+  `cfl260 mode3 fp…848`, `_2` read `cfl261 dc-2 mode0 fp…850` — reads **2 fp
+  apart**, the exit MOVES between them. Needs the half-dot **write-strobe**
+  (`regs.rs::strobe_tick`/`commit_eff`) + half-dot fine-scroll sample (Part A-render + D).
+- **`m2int_scx4_ds`** = the **READ POSITION** differs (same exit `cfl257 dc6`,
+  both legs): `_1` read `cfl260 mode3 fp…848`, `_2` read `cfl263 dc-2 mode0
+  fp…854` — reads **6 fp apart**, straddling the fixed flip. Needs the half-dot
+  **read** landing each leg at its `fp` (Part B).
+The SameBoy visible mode-3→0 flip lands at a genuine HALF-DOT (`SBMODE … cfl257
+dc=2` for `late_scx4`, `dc=6` for `m2int_scx4` — the `dc` = `display_cycles`
+half-dot remainder), which slopgb's whole-dot `line_render_done`/`visexit dot254`
+cannot represent. **This is the direct empirical confirmation of §5's atomicity:
+neither the read (`m2int_scx4`) nor the length (`late_scx4`) lever converges its
+pair alone, and both live below the whole-dot grid — exactly what the half-dot
+render+read+write rewrite (Part A-render + B + C + D) lands together.**
+
+Prior status (2026-07-01 #11az): confirmed the base (`6f375fe`): flag-on 455 /
+off 486 → 165 flip-BUGs = **115 SameBoy-pass + 50 rebaseline**; extracted the
+definitive SameBoy porting spec (§1) and produced this plan.
 
 `fp = absolute_debugger_ticks − display_cycles` is the SameBoy time axis for
 every measurement (NEVER `cfl*2+dc`, which is non-monotonic — #11ay).
@@ -220,10 +244,15 @@ The convergence is atomic, but the build is testable in an order that keeps the
 flag-off path byte-identical throughout and validates each part against `fp`
 before the joint landing:
 
-1. **A-infra (byte-identical):** wire `dot_phase` so `advance_machine_t` +
-   `Ppu::tick` advance in half-dots with **all transitions still on whole-dot
-   positions** — flag-on == today flag-on. Net-zero gate (mooneye 91/91, two-bin
-   unchanged, 27 pins green). Establishes the grain.
+1. **A-infra (byte-identical): ✅ LANDED #11ba (`5622329`).** `advance_machine_t`
+   now advances the PPU in half-dots (`Ppu::tick_half` + `dhalf`,
+   `fold_ppu_events` on the completing half); all transitions still whole-dot →
+   flag-on == today flag-on. Net-zero gate met (mooneye 91/91, two-bin 455/486
+   unchanged, 32 pins green, gbtr OFF 217/0 byte-identical). `sub_dot()` = the
+   Part B seam. **Do NOT use `dot_phase` for the initial offset — it stays 0 (the
+   aligned even-cc grid); the grain is carried by `dhalf` on the PPU, persisted
+   across the fractional `advance_machine_t` spans so a DS mid-dot read lands at
+   `dhalf==1`.**
 2. **B (read sync):** resolve `read_deferred` to the half-dot; validate the FF41
    read dot lands at SameBoy's `fp` on the kernel + m2int_m3stat via single-ROM
    dual-trace. Expect an A/B two-bin (that is the point — it is half the pair).
