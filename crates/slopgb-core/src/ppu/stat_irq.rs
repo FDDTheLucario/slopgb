@@ -242,65 +242,6 @@ impl Ppu {
         {
             return 0;
         }
-        // C2 #11an UNIFIED bare-line read-frame law (EXPERIMENT, env-gated).
-        // The dual-emulator trace (kernel m2int_m3stat_1/_2 + DS _2 +
-        // late_disable) showed every FF41 mode read obeys:
-        //   slopgb read at dot D  ⟺  SameBoy read at cfl D + read_offset
-        // with read_offset = 4 (SS) / 3 (DS). So slopgb reproduces SameBoy's
-        // verdict by comparing D against SameBoy's CONFIG render exit minus the
-        // offset. The triggering-window law above is this with SBex = 263+SCX&7
-        // (`259+SCX&7` SS). The BARE-line exit is SBex = 257 + SCX&7, so the
-        // read-frame boundary is `257 + SCX&7 − read_offset = 253+SCX&7` (SS) /
-        // `254+SCX&7` (DS). Anchored to SameBoy's CONFIG exit, NOT slopgb's own
-        // render — so it also corrects late_disable, where slopgb's render
-        // OVER-extends (window was active then disabled) but SameBoy renders the
-        // line bare (exit 257). Bare non-sprite lines only for this first cut
-        // (sprites push SBex past 257 — the penalty term is the next slice).
-        if crate::ppu::barelaw_on()
-            && self.tier2_reclock
-            && self.model.is_cgb()
-            && self.line >= 1
-            && self.line < 144
-            && m == 3
-            && !self.render.win_active
-            && !self.glitch_line
-            && self.render.n_sprites == 0
-            && self.dot >= 253 + u16::from(self.scx & 7) + u16::from(self.ds)
-        {
-            return 0;
-        }
-        // C2 #11ap HALF-DOT bare-line exit, RAISE-ODD (DS, env-gated
-        // `SLOPGB_HDEXIT`; co-lands with `SLOPGB_DSM2DELAY`). The #11ao
-        // scx-parity refutation localized the residual to a sub-dot exit.
-        // The DSM2DELAY dispatch delay shifts the DS mode-2 FF41 read +2 dots,
-        // separating it from the mode-0 (m0int) ISR read it otherwise collides
-        // with (both land slopgb dot 254 at scx0, opposite wants — no exit
-        // threshold can split them). With that read-position separation, EVEN
-        // SCX resolves on the native exit `255 + SCX&7`; but the shifted ODD-SCX
-        // `_ds_1` read lands EXACTLY on the native exit (read == exit → mode 0,
-        // want 3). SameBoy's CPU-visible exit rounds UP to the even read grid:
-        // `255 + SCX&7 + (SCX&1)`, so odd SCX stays mode 3 one dot longer. This
-        // RAISE-odd override returns mode 3 in the `[native_exit, raised_exit)`
-        // gap — a no-op for even SCX (whose gap is empty: the even reads never
-        // hit the odd `255+SCX&7` boundary). The half-dot resolution expressed
-        // on slopgb's whole (even) read grid as a `+(SCX&1)` parity term.
-        // MEASURED m2int_m3stat DS scx0-7 both legs (DSM2DELAY=1). DS-only: SS
-        // reads already resolve. Bare non-sprite CGB lines.
-        if crate::ppu::hdexit_on()
-            && self.tier2_reclock
-            && self.model.is_cgb()
-            && self.ds
-            && self.line >= 1
-            && self.line < 144
-            && m == 0
-            && self.dot >= 250
-            && self.dot < 255 + u16::from(self.scx & 7) + u16::from(self.scx & 1)
-            && !self.render.win_active
-            && !self.glitch_line
-            && self.render.n_sprites == 0
-        {
-            return 3;
-        }
         // C2 #11ar SCOPED carried-read exit OVERRIDE (env-gated `SLOPGB_CARRYOVR`,
         // co-lands with `SLOPGB_M2CARRY`). The carry moved THIS read (an OAM/
         // HBlank STAT-ISR handler read, flagged by `read_carried`) to SameBoy's
@@ -366,27 +307,6 @@ impl Ppu {
                 + u16::from(self.scx & 1);
             return if self.dot + off < sbex { 3 } else { 0 };
         }
-        // C2 #11ar-wake ATTEMPT (WAKE-CLOCK class, env-gated `SLOPGB_WAKEPEEK`).
-        // The mode-0-source (HBlank) STAT-ISR halt-wake FF41 read resumes at a
-        // line-start dot ~4 reading mode 2 (OAM), where SameBoy — reading at cfl0
-        // (its mode bits lag the OAM flip by 4 T) — sees mode 0 (the HBlank tail).
-        // Force line-start mode-2→0 for the carried mode-0-source wake read.
-        // Scoped to `stat_rise_m0` (excludes the m2int OAM reads that legitimately
-        // want mode 2) + native `m == 2` (excludes the want-2 `scx3_3b` which reads
-        // mode 0 already, and the `dec` want-6 which reads mode 3). Two-binned.
-        if crate::ppu::wakepeek_on()
-            && self.read_carried
-            && self.stat_rise_m0
-            && self.tier2_reclock
-            && self.model.is_cgb()
-            && m == 2
-            && self.line >= 2
-            && self.line < 144
-            && self.dot >= 1
-            && self.dot <= 4
-        {
-            return 0;
-        }
         // C2 #11ar-m0stat READ-FRAME slice (the second clean read-position slice,
         // +1/−0). The m2int mode-2 OAM ISR reads FF41 at line-start checking the
         // mode0→2 (HBlank→OAM) flip: slopgb's native flip lags SameBoy's, which
@@ -406,35 +326,6 @@ impl Ppu {
             && self.dot < 4
         {
             return if self.dot >= 2 { 2 } else { 0 };
-        }
-        // C2 #11aq CARRY-FRAME bare-line exit HOLD (env-gated `SLOPGB_M2HOLD`;
-        // co-lands with the `SLOPGB_M2CARRY` +4-dot read-position carry). The
-        // carry moves the DS mode-2 OAM-ISR FF41 read to SameBoy's *absolute*
-        // cfl (measured: `m2int_m3stat_ds_1/_2` reads land slopgb dot 256/258 =
-        // SameBoy cfl 256/258 at carry_t 8), so the read FRAME offset is now 0
-        // and the verdict is SameBoy's mode AT that cfl: mode 3 iff cfl < SameBoy
-        // bare exit `SBex = 257 + SCX&7` (+1 DS = 258 at scx0, MEASURED `SBMODE
-        // cfl257 dc2`). slopgb's NATIVE `vis_mode` flips to 0 at its own exit
-        // `255 + SCX&7` — 2-3 dots BELOW SameBoy's — so for the carried read it
-        // reports mode 0 too early. HOLD mode 3 in the `[native_exit, SBex)` gap.
-        // This is the BARELAW (#11an) with read_offset 0 (the carry replaces the
-        // −4): the render-length (a) half of the (a)+(b) co-land — anchored to
-        // SameBoy's exit, NOT slopgb's render. DS-only (paired with the DS-only
-        // carry); bare non-sprite CGB lines.
-        if crate::ppu::m2hold_on()
-            && self.tier2_reclock
-            && self.model.is_cgb()
-            && self.ds
-            && self.line >= 1
-            && self.line < 144
-            && m == 0
-            && self.dot >= 250
-            && self.dot < 257 + u16::from(self.scx & 7) + u16::from(self.ds)
-            && !self.render.win_active
-            && !self.glitch_line
-            && self.render.n_sprites == 0
-        {
-            return 3;
         }
         m
     }

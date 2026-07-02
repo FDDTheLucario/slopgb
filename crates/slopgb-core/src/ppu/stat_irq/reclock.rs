@@ -257,18 +257,6 @@ impl Ppu {
             // "except on line 0"). No `stat_late` in the leading-edge frame.
             if self.line != 0 {
                 self.stat_halt_late = true;
-                // #11ao EXPERIMENT (`SLOPGB_DSM2DELAY`): DS-only mode-2 dispatch
-                // delay. slopgb's DS mode-2 handler read lands 2 dots early
-                // (read_offset 4-5 vs the mode-0 2-3); the OAM STAT IRQ
-                // dispatches 1 M-cycle (= 2 dots DS) too early. SameBoy delays
-                // the OAM STAT IRQ a cycle on all lines; applying the dispatch
-                // `stat_late` mask in DS pushes the handler read +2. SS-EXEMPT:
-                // the prior all-speed `stat_late` collapsed the SS kernel
-                // `m2int_m3stat_1` (a whole SS M-cycle = 4 dots over-delays it);
-                // DS needs exactly the +2 a whole DS M-cycle provides.
-                if self.ds && super::dsm2delay_on() {
-                    self.stat_late = true;
-                }
             }
         } else if mfi == 0 && self.stat_en & STAT_SRC_HBLANK != 0 {
             // Mode-0 (HBlank) source rise carries the half-cycle halt law

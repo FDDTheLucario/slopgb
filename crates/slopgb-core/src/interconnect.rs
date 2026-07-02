@@ -1088,22 +1088,6 @@ impl Bus for Interconnect {
         {
             self.ppu.set_read_carried(true);
         }
-        // The REFUTED machine-advancing carry (#11aq `SLOPGB_M2CARRY`, DS-only): a
-        // real `pending` debt that advances the whole machine, so it mis-positions
-        // the non-m3stat STAT-ISR reads (+29/−58 two-bin). Kept env-gated for A/B
-        // reference; the peek override above replaces it (+6/−0).
-        if self.double_speed && self.pending().trailing_zeros() == 1 && crate::ppu::m2carry_on() {
-            let carry = if self.ppu.stat_rise_oam() {
-                crate::ppu::m2carry_t()
-            } else if self.ppu.stat_rise_m0() {
-                crate::ppu::m0carry_t()
-            } else {
-                0
-            };
-            if carry > 0 {
-                self.clock.carry_read(carry);
-            }
-        }
         // S6/S7 ISR read-position diagnostic: log the vector-latch PPU position
         // + clock, the analogue of SameBoy's SBVEC (`sm83_cpu.c:1694`). The
         // delta vector→read isolates the handler's PPU advance from the dispatch
