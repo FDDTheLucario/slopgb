@@ -62,6 +62,21 @@ SBREAD ff41 (`memory.c:634`), SBPALR (`memory.c:709`); folded into
   fix is the **per-config mode-3 render length** (move `line_render_done` for `_2` but
   not `_1`), which moves the counter-pinned mode-0 IRQ dispatch → the atomic render
   reclock. **This is RENDER-LENGTH, cleanly — NOT a sub-T operation-order tie.**
+- **The discriminating WRITE is observable but the fix stays counter-pinned (new lead,
+  build-measured feasibility):** traced the SCX writes (SBWSCX `fp`) — `_1` writes
+  SCX=4 at `ly1 cfl89` (fp 26179474), `_2` at `ly1 cfl92` (fp 26179480), **3 dots
+  apart, straddling the fine-scroll drop (~cfl90-91)**. `_1`'s early write is caught by
+  the drop (`position_in_line&7 == SCX&7`, `display.c:700`) → +SCX&7 penalty → longer
+  mode 3; `_2`'s late write misses it → bare exit. So unlike the shipped window shadows
+  (`wy_trig_sb`/`win_predraw_abort`, keyed on a clean on/off write like LCDC.5), a
+  late_scx4 shadow would key on the SCX-write-vs-drop **sub-dot timing** — and slopgb's
+  SCX fine-scroll comparator (`render.rs:388` `hunt_idx == eff.scx&7`, reading the
+  +2-dot-staged `eff.scx` over mode-3 dots 5-12) is **counter-pinned by mooneye
+  `hblank_ly_scx_timing`** (a convergence-gate test). A read shadow would be a
+  per-SCX-value curve-fit threshold on that pinned render-timing (high A/B risk); the
+  clean fix is to recalibrate the whole SCX-write→drop timing to SameBoy (the cc+0
+  write commit vs the +2 stage delay) in the atomic render reclock, where the pinned
+  `hblank_ly_scx` co-moves. NOT a standalone slice.
 
 ### 2. `halt/late_m0irq_halt_m0stat_scx*` — sub-M-cycle WAKE (spread across the mode-0→2 boundary)
 

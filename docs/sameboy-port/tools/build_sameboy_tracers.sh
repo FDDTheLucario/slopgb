@@ -30,7 +30,8 @@ TESTER="$DIR/build/bin/tester/sameboy_tester"
 # the pre-#11ay (cfl*2+dc-only) tracers is re-patched rather than skipped.
 if [ -x "$TESTER" ] && grep -q 'SBMODE ly=%d cfl=%d dc=%d vis=%d fp=' "$DIR/Core/display.c" 2>/dev/null \
    && grep -q SBDISP "$DIR/Core/sm83_cpu.c" 2>/dev/null \
-   && grep -q SBPALR "$DIR/Core/memory.c" 2>/dev/null; then
+   && grep -q SBPALR "$DIR/Core/memory.c" 2>/dev/null \
+   && grep -q SBWSCX "$DIR/Core/memory.c" 2>/dev/null; then
   echo "tester already built + patched: $TESTER"; exit 0
 fi
 
@@ -143,6 +144,44 @@ if "SBPALR" not in mem2:
                     if (gb->io_registers[index_reg] & 0x80) {""")
     open(d+"/Core/memory.c","w").write(mem2)
     print("patched memory.c (SBPALR/SBPALW)")
+
+# C2 #11ay: SCX (FF43) write tracer — SBWSCX prints the write's fp + value, the
+# ground truth for the late_scx4 / scx_during_m3 render-LENGTH families (the SCX
+# write's timing vs the fine-scroll drop decides the mode-3 penalty).
+mem3=open(d+"/Core/memory.c").read()
+if "SBWSCX" not in mem3:
+    mem3=mem3.replace(
+"""            case GB_IO_IF:
+            case GB_IO_SCX:
+            case GB_IO_SCY:
+            case GB_IO_BGP:
+            case GB_IO_OBP0:
+            case GB_IO_OBP1:
+            case GB_IO_SB:
+            case GB_IO_PSWX:
+            case GB_IO_PSWY:
+            case GB_IO_PSW:
+            case GB_IO_PGB:
+                gb->io_registers[addr & 0xFF] = value;
+                return;""",
+"""            case GB_IO_IF:
+            case GB_IO_SCX:
+            case GB_IO_SCY:
+            case GB_IO_BGP:
+            case GB_IO_OBP0:
+            case GB_IO_OBP1:
+            case GB_IO_SB:
+            case GB_IO_PSWX:
+            case GB_IO_PSWY:
+            case GB_IO_PSW:
+            case GB_IO_PGB:
+                { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+                  if(trc && (addr&0xFF)==GB_IO_SCX) fprintf(stderr,"SBWSCX ly=%d cfl=%d dc=%d val=%02x fp=%lld\\n",
+                    gb->current_line, gb->cycles_for_line, gb->display_cycles, value, (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }
+                gb->io_registers[addr & 0xFF] = value;
+                return;""")
+    open(d+"/Core/memory.c","w").write(mem3)
+    print("patched memory.c (SBWSCX)")
 
 # sm83_cpu.c — the per-ISR dispatch (SBDISP, at the vector-PC latch) + the
 # halt-wake sample position (SBWAKE), for the #11aq read-position-carry trace.
