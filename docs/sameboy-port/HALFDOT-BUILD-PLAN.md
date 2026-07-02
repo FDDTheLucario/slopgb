@@ -1,6 +1,25 @@
 # The half-dot (8 MHz) pixel-pipe reclock — constructive build plan
 
-Status (2026-07-02 #11ba): **Part A-infra (the half-dot grain) LANDED — the first
+Status (2026-07-02 #11bc): **the THREE PORTS are BUILT on the grain+write-strobe
+(`phase-b-s7`): PORT 1 the unified half-dot bare-exit comparison (the #11ar DS
+law rewritten exactly on the `2*dot + dhalf + carry < exit_hd` grid + the NEW
+SS arm with the EMERGENT exit `2*flip + 2` from the render's own
+`flip_dot`/`flip_projection`), PORT 2 the sub-M-cycle WAKE clock (the DMG halt
+loop samples per 2 T like `GB_cpu_run`; a mid wake forgives the idle tail and
+the skew is consumed by the handler's first FF41 read), PORT 3 the S6
+completion frame (per-T serial completion + the exact SameBoy ack-squash
+T-threshold). Flag-on two-bin 445→437 (+8/−0 ZERO drops), DMG halt 21→13
+(+11/−3, CGB-two-bin-blind), 35 pins, mooneye 91/91 ON+OFF, gbtr OFF 220/0.
+Defaults NOT flipped.** The measured w-couplings (the SS HOLD direction + the
+m2-ISR carry + STOPADV leave-only w=4's +14/−11 vs the lcd-offset-frame
+constants) pin the NEXT lever precisely: the Part-D lcd-offset constant
+re-derivation on the +2-dot post-leave frame, co-landing w=4 + the E-hold +
+the m2 carry (all three built, disabled, and documented at their sites).
+Remaining blocker classes after the ports: window/wy_check race,
+ENGINE-IF (~30 FF0F read-frame), lcd_offset (9), cgbpal/vram accessibility,
+S6-DS conflict — see `ppu-subdot-ladder.md` "#11bc".
+
+Prior status (2026-07-02 #11ba): **Part A-infra (the half-dot grain) LANDED — the first
 structural reclock code since C1.3, byte-identical, `phase-b-s7` `5622329`.** The
 8 MHz half-dot advance is now wired on the tier2 deferred path (`Ppu::tick_half`
 + `dhalf`; `advance_machine_t` runs the PPU per half-dot via `fold_ppu_events` on
