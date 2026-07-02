@@ -898,6 +898,19 @@ impl Bus for Interconnect {
         // head like SameBoy's `just_halted` 4-T step). Production and the
         // LE-only path take the default (plain `pending_halt_wake`) —
         // byte-identical OFF.
+        if crate::ppu::s5dbg_on() && self.cpu_halted {
+            let w = self.pending_halt_wake();
+            if w != 0 {
+                let (l, d) = self.ppu.scan_pos();
+                eprintln!(
+                    "SLOPGB wake ly={l} dot={d} clk={} w={w:02x} intf={:02x} late={:02x} hold={}",
+                    self.clock.now(),
+                    self.intf,
+                    self.if_late,
+                    self.m0_halt_hold
+                );
+            }
+        }
         if self.tier2_reclock
             && !self.model.is_cgb()
             && self.cpu_halted

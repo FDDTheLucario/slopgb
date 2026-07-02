@@ -177,7 +177,22 @@ impl Interconnect {
                         .ok()
                         .and_then(|v| v.parse().ok())
                         .unwrap_or(u8::from(!self.model.is_cgb()));
-                    self.m0_halt_hold = p2hh + u8::from(cc == 4);
+                    // #11bd item 2 — the cc==4 hold is DMG-ONLY: it models the
+                    // mid-cycle (w2) sampler's frame rotation, which does not
+                    // exist on CGB (head sampler). The CGB dual-trace
+                    // (`m0int_m0stat_scx2_{1,2}`): SameBoy wakes both legs at
+                    // cfl261 (= rise+1 check slot); slopgb's mask alone lands
+                    // the wake in the same slot (dot260-check), while the cc==4
+                    // hold pushed it +1 M (dot264) -> the `_1`/`_a` want-0 legs
+                    // read ly2 dot4 (mode 2) instead of dot0 (mode 0). The
+                    // mask itself stays on CGB (it compensates slopgb's ~1-M-
+                    // early m0-rise emission; skipping it wholesale was the
+                    // measured -6).
+                    // Double speed KEEPS the hold (its 2-dot M grid re-rotates
+                    // the rise onto the boundary; dropping it broke the
+                    // `m0int/m0irq_m0stat_scx3_ds_2` want-2 legs, measured).
+                    self.m0_halt_hold =
+                        p2hh + u8::from(cc == 4 && (!self.model.is_cgb() || self.double_speed));
                 } else if second_half {
                     // The mode-0 STAT rise carries the second-half halt law
                     // — the same shape as the line-start OAM pulses — but
