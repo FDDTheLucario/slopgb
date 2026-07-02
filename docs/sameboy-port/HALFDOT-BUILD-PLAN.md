@@ -10,12 +10,14 @@ cc==4 hold is DMG/DS-only), the boundary-WY cross-line window extend
 (item 4, +4/−0, pin 36) and the tier2 VRAM read-frame laws (item 5,
 5 blockers → 1). Item 3 (ENGINE-IF FF0F) build-measured ATOMIC: the sub-M
 FF0F sample + read-view visibility delay both A/B-swap (per-source offsets
-{−4..−16} re-confirmed at mechanism level; scaffold deleted). Flag-on
-two-bin 437→415; blockers 104→83 (+45 rebaseline); 36 pins; mooneye 91/91
-ON+OFF; gbtr OFF 221/0. One documented bonus-loss
-(`speedchange2_nop_m2int_m3stat_scx1_1`, read-frame atomic). The remaining
-83 sit in the measured-atomic classes — the next constructive lever is
-Part A-render+B proper. Detail: `ppu-subdot-ladder.md` "#11bd".**
+{−4..−16} re-confirmed at mechanism level; scaffold deleted). Plus item 5b
+(`521fe8d`): the first-frame palette lock (84) + the DS glitch-line m0-IRQ
+arm (+5/−1). Flag-on two-bin 437→411; blockers **104→78** (+45 rebaseline);
+36 pins; mooneye 91/91 ON+OFF; gbtr OFF 221/0. Two documented bonus-losses
+(`speedchange2_nop_m2int_m3stat_scx1_1` + `ly0_m0irq_scx0_ds_2`, both
+read-frame atomic). The remaining 78 sit in the measured-atomic classes —
+the next constructive lever is Part A-render+B proper. Detail:
+`ppu-subdot-ladder.md` "#11bd".**
 
 Prior status (2026-07-02 #11bc): **the THREE PORTS are BUILT on the grain+write-strobe
 (`phase-b-s7`): PORT 1 the unified half-dot bare-exit comparison (the #11ar DS
