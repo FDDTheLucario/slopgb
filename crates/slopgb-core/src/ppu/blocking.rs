@@ -281,7 +281,18 @@ impl Ppu {
             // access — slopgb `ly1 dot86` vs SameBoy's ~cfl87 lock) still sees
             // palettes accessible. slopgb locks at dot 84; extend the lock.
             // Never extended in production / LE-only → byte-identical OFF.
-            84 + PAL_M3START_OPEN
+            // #11bd item 5b — the FIRST frame after an LCD enable locks at
+            // the mode-3 entry itself (no +3 grace): the `ly1_late_cgbpw`
+            // pair writes dot80 (lands, want AA) / dot84 (blocked, want 55)
+            // while SameBoy's equivalents land cfl0 / blocked cfl89 — the
+            // post-enable frame phase runs ~5 dots hot, and only the
+            // 84-boundary separates the pair on our grid. Steady frames
+            // (incl. the lcdoffset1 pin row at law-dot 85) keep 87.
+            if self.frame_skip {
+                84
+            } else {
+                84 + PAL_M3START_OPEN
+            }
         } else {
             84
         };

@@ -337,7 +337,24 @@ impl Ppu {
             // slice is part of the atomic Phase-B reclock, deferred. Measured
             // (`ppu-subdot-ladder.md` "A15"): SS-gated = +2 / 0 regress / 0 lift
             // lost; universal = +6 / 0 regress / −1 SameBoy-passing drop.
-            if self.tier2_reclock && !self.ds && self.model.is_cgb() {
+            if self.tier2_reclock && self.ds && self.model.is_cgb() {
+                // #11bd item 5b — the DS glitch-line arm the A15 note deferred:
+                // suppress the enable-glitch PREFIX (the spurious dot-19 rise
+                // the `_1` legs' pre-rise reads caught -> got E2 want E0) AND
+                // hold mode 3 for the IRQ until line_render_done + 2 - SameBoy
+                // raises the glitch-line mode-0 STAT at cfl259, TWO dots past
+                // the bare-line 257 (fresh SBTRACE, frame-0 ly0). The prior
+                // "suppress-prefix drops ly0_m0irq_scx0_ds_2" A/B resolved by
+                // the +2: the `_2` read lands between the old post-render dot
+                // and the true rise.
+                if self.dot < GLITCH_MODE3_START {
+                    crate::stat_update::MODE_FOR_INTERRUPT_NONE
+                } else if self.line_render_done {
+                    0
+                } else {
+                    3
+                }
+            } else if self.tier2_reclock && !self.ds && self.model.is_cgb() {
                 // Port Stage C/S5 — the Tier-2 SS glitch-line mode-0 IRQ
                 // dispatch reclock. The IRQ side keys on `line_render_done`
                 // (the dispatch dot, our dot 254 = SameBoy `cfl=257`), NOT on
