@@ -116,7 +116,7 @@ impl Interconnect {
         match self.halt_hdma {
             HaltHdmaState::Requested => self.vram_dma_req = Some(VramDmaReq::HblankUnhalt),
             HaltHdmaState::Low
-                if self.hdma_mode == HdmaMode::ArmedLcdOn && self.ppu.hdma_period() =>
+                if self.hdma_mode == HdmaMode::ArmedLcdOn && self.ppu.hdma_period_law() =>
             {
                 self.vram_dma_req = Some(VramDmaReq::Hblank);
             }
@@ -162,7 +162,14 @@ impl Interconnect {
             // block fires at once only inside the hblank window.
             if self.ppu.lcd_enabled() {
                 self.hdma_mode = HdmaMode::ArmedLcdOn;
-                if self.ppu.hdma_period() {
+                if crate::ppu::s5dbg_on() {
+                    let (l, d) = self.ppu.scan_pos();
+                    eprintln!(
+                        "SLOPGB wff55 arm ly={l} dot={d} period={}",
+                        self.ppu.hdma_period_law()
+                    );
+                }
+                if self.ppu.hdma_period_law() {
                     self.vram_dma_req = Some(VramDmaReq::Hblank);
                 }
             } else {

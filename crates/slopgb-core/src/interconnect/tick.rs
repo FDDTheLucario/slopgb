@@ -410,11 +410,19 @@ impl Interconnect {
             // already active so the same hblank cannot retrigger at wake.
             self.halt_hdma = if self.vram_dma_req.take().is_some() {
                 HaltHdmaState::Requested
-            } else if self.hdma_mode == HdmaMode::ArmedLcdOn && self.ppu.hdma_period() {
+            } else if self.hdma_mode == HdmaMode::ArmedLcdOn && self.ppu.hdma_period_law() {
                 HaltHdmaState::High
             } else {
                 HaltHdmaState::Low
             };
+            if crate::ppu::s5dbg_on() && self.hdma_mode == HdmaMode::ArmedLcdOn {
+                let (l, d) = self.ppu.scan_pos();
+                eprintln!(
+                    "SLOPGB halt-hdma ly={l} dot={d} st={:?} period={}",
+                    self.halt_hdma,
+                    self.ppu.hdma_period_law()
+                );
+            }
         }
         self.engage_halt_gate(halted);
         if !halted {

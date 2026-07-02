@@ -1310,6 +1310,26 @@ impl Ppu {
         self.hdma_trigger_level() && self.dot + 3 < len
     }
 
+    /// #11bd — [`Self::hdma_period`] classified on the un-shifted frame for
+    /// CPU-instant consults (FF55 arming, halt-entry snapshot, wake re-eval,
+    /// STOP window): a shifted entry near the line end mis-reads the 3-dot
+    /// margin (`hdma_late_m0halt_lcdoffset3_1` enters halt at dot 455 where
+    /// the un-shifted frame is dot 452 — still inside). Cross-line law
+    /// positions keep the conservative false. Identity when unshifted; the
+    /// per-dot machine edge detector keeps the real [`Self::hdma_period`].
+    pub(crate) fn hdma_period_law(&self) -> bool {
+        if self.lcd_shift_dots == 0 {
+            return self.hdma_period();
+        }
+        let len = if self.glitch_line {
+            GLITCH_LINE_DOTS
+        } else {
+            LINE_DOTS
+        };
+        let (ll, ld) = self.law_pos();
+        self.hdma_trigger_level() && ll == self.line && ld + 3 < len
+    }
+
     /// LCDC bit 7 as committed (architectural view).
     pub(crate) fn lcd_enabled(&self) -> bool {
         self.enabled

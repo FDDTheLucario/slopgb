@@ -186,10 +186,14 @@ impl Ppu {
         // `lineCycles + ds < 76 + 3*cgb`; SameBoy keeps vram_read_blocked
         // false through the OAM scan on CGB; age vram-read-cgbBCE).
         let late = if self.model.is_cgb() { 3 } else { 0 };
+        // #11bd: shifted ROMs classify the lock on the un-shifted frame
+        // (`vram_m3/preread_lcdoffset1_1` reads dot83 after the +1-dot machine
+        // advance where SameBoy still reads open; identity otherwise).
+        let d = if self.tier2_reclock { self.law_pos().1 } else { self.dot };
         if self.glitch_line {
-            self.dot >= GLITCH_MODE3_START + late
+            d >= GLITCH_MODE3_START + late
         } else {
-            self.dot >= 80 + late
+            d >= 80 + late
         }
     }
 

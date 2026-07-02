@@ -1027,7 +1027,7 @@ impl Bus for Interconnect {
         // with the count latched (dma()'s halted path; pinned by
         // hdma_transition_speedchange_hdmalen*_hdma5 → $80|len vs
         // hdma_late_m3speedchange_hdma5_*_ds_1 → still active).
-        let in_window = self.hdma_mode == HdmaMode::ArmedLcdOn && self.ppu.hdma_period();
+        let in_window = self.hdma_mode == HdmaMode::ArmedLcdOn && self.ppu.hdma_period_law();
         let pending_req = self.vram_dma_req.take();
         if switching && !entering_ds {
             // Leaving double speed: the PPU/APU re-pace from the cycle
