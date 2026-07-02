@@ -63,7 +63,7 @@ impl Interconnect {
     /// stamps for cc `cc` (1..=4), and pump the dot-exact HBlank-DMA level
     /// detector. Shared by the eager whole-M-cycle `tick_machine` and the port
     /// Stage-B deferred per-T advance ([`Self::advance_machine_t`]).
-    fn tick_machine_dot(&mut self, cc: u8) {
+    pub(super) fn tick_machine_dot(&mut self, cc: u8) {
         let ppu_if = self.ppu.tick();
         self.fold_ppu_events(ppu_if, cc);
     }
@@ -74,7 +74,7 @@ impl Interconnect {
     /// the whole-dot [`Self::tick_machine_dot`] and the half-dot deferred
     /// [`Self::advance_machine_t`] (which calls it only on a dot-completing
     /// half-dot, so the fold still runs exactly once per PPU dot).
-    fn fold_ppu_events(&mut self, ppu_if: u8, cc: u8) {
+    pub(super) fn fold_ppu_events(&mut self, ppu_if: u8, cc: u8) {
         {
             // STAT/VBlank rises in the first 2 dots after the ack are
             // consumed too (gambatte ackIrq lcd_.update(cc + 2); in

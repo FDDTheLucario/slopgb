@@ -1023,6 +1023,28 @@ impl Bus for Interconnect {
         while self.cycles < target && self.intf & self.ie & IF_MASK == 0 {
             self.tick_machine();
         }
+        // #11bb (tier2) — post-switch CPU↔PPU realignment sweep (env-gated
+        // measurement scaffold): SameBoy's STOP withholds 5 T from the PPU
+        // feed (`speed_switch_freeze`, sm83_cpu.c:435/timing.c:469) while
+        // slopgb's gambatte-modeled pause runs the PPU throughout, leaving
+        // the post-switch read frame ~2 dots off SameBoy's
+        // (`speedchange2_m2int_m3stat_scx2_2` reads dot254 where SameBoy's
+        // frame reads past the exit). Advance the PPU K extra dots per
+        // switching STOP to measure the alignment.
+        if self.tier2_reclock {
+            // K in 8 MHz HALF-dots (the grain): odd K leaves the PPU on a
+            // half-dot skew relative to the CPU grid (`dhalf` persists), the
+            // odd-mode alignment SameBoy's whole-freeze cannot represent.
+            if let Ok(k) = std::env::var("SLOPGB_STOPADV").map(|v| v.parse::<u32>().unwrap_or(0)) {
+                for _ in 0..k {
+                    let ppu_if = self.ppu.tick_half();
+                    if self.ppu.dot_completed() {
+                        self.fold_ppu_events(ppu_if, 4);
+                        self.cycles += 1;
+                    }
+                }
+            }
+        }
         self.engage_halt_gate(false);
         self.vram_dma_unhalt();
         true
