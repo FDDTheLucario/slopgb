@@ -80,7 +80,9 @@ impl Ppu {
         // slopgb's render; this one fires only when it is NOT).
         if self.tier2_reclock
             && self.model.is_cgb()
-            && self.line >= 1
+            // #11bd item 4: line 0 INCLUDED (`late_wy_FFto0_ly0_1` — WY->0 at
+            // ly0 dot92 mid-line, extend wanted; the #11y ly0 caveat applies
+            // to the LENGTH law, not this bare->extend shadow).
             && self.line < 144
             && m == 0
             && !self.render.win_active
@@ -241,6 +243,50 @@ impl Ppu {
             && self.dot + 4 >= 257 + u16::from(self.scx & 7)
         {
             return 0;
+        }
+        // #11bd item 4 — the CGB BOUNDARY-WY cross-line extend (the #11af
+        // shadow's deliberately-excluded half, now gated on the RAW latch +
+        // the committed enable). The `arg/late_wy_{10to0,FFto0,FFto1}` rows
+        // write WY at the line BOUNDARY (ly0 dot452): SameBoy's `wy_check`
+        // (immediate WY, enable-committed compare) latches `wy_triggered`
+        // there and every later line renders the window (polled FF41 reads
+        // mode 3 to `263 + SCX&7`); slopgb's render (`wy_latch`) and the
+        // wy2-lagged same-line shadow both miss the boundary write, so it
+        // renders BARE. Fire on the RAW sticky latch (`wy_trig_sb_raw`,
+        // which samples the immediate WY gated on the committed LCDC.5 at
+        // the compare instant — the enable-frame calibration that keeps
+        // `late_enable_afterVblank` bare) for lines the render did NOT
+        // trigger, window still enabled + on-screen WX. Env-gated OFF via
+        // SLOPGB_NOXLINE for measurement.
+        if self.tier2_reclock
+            && self.model.is_cgb()
+            && self.line >= 1
+            && self.line < 144
+            && m == 0
+            && !self.render.win_active
+            && !self.render.win_aborted
+            && self.wy_xline_trig
+            && self.eff.lcdc & LCDC_WIN_ENABLE != 0
+            && self.eff.wx <= 0xA6
+            // The WX comparator must have matched THIS line (the render's
+            // own per-line decision input): a late off-screen WX write or an
+            // enable that missed the line's match window renders SameBoy-bare
+            // (`late_wx_ff_*_2`, `late_enable_afterVblank_2`).
+            && self.render.wx_match_dot != 0
+            && !self.glitch_line
+            && (!self.ds || self.render.n_sprites == 0)
+            // The exit is read-class-dependent (#11z): POLLED reads sit at
+            // +0 of SameBoy's 263 + SCX&7 window exit; a carried STAT-ISR
+            // read sits +4 (SS) -> 259. The broken-then-classified
+            // `late_reenable_*`/`afterVblank_2` want-0 rows are ISR reads
+            // landing past 259 where SameBoy already reads 0.
+            && self.dot
+                < if self.read_carried { 259 } else { 263 }
+                    + u16::from(self.scx & 7)
+                    + u16::from(self.ds)
+            && std::env::var("SLOPGB_NOXLINE").is_err()
+        {
+            return 3;
         }
         // PORT 1 (#11bc) — the unified HALF-DOT bare-line mode-3 EXIT: one
         // comparison on the 8 MHz half-dot grid replaces the whole-dot bare

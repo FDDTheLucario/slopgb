@@ -1784,6 +1784,61 @@ fn tier2_window_m3stat_length_passes() {
 /// was aborted / its WX/LCDC.5 toggled late (`late_wx`/`late_reenable`/
 /// `late_enable`) — SameBoy renders THOSE bare. Full-CGB two-bin flag-on **+5/−0**
 /// (the `_1` mid-line late-WY rows; the `_2`/`_3` siblings + the toggled-window
+/// #11bd item 4 — the BOUNDARY-WY cross-line window extend
+/// (`Ppu::wy_xline_trig`): a WY write landing in a line's tail/head whose
+/// value matches the CURRENT line latches SameBoy's `wy_triggered`
+/// (scheduled `wy_check`, old `current_line` compare); every later bare
+/// line reads mode 3 to the polled window exit. The ly0 mid-line row rides
+/// the same-line shadow's new line-0 inclusion. Guards: the boundary write
+/// with a NON-matching value + the late-toggled window stay bare.
+#[test]
+fn tier2_window_boundary_wy_xline_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_window_boundary_wy_xline",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        // FIXED — boundary-WY writes matching the old line extend cross-line.
+        (
+            "gambatte/window/arg/late_wy_10to0_ly1_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto0_ly2_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto1_ly2_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        // FIXED — the ly0 mid-line late-WY trigger (line-0 shadow inclusion).
+        (
+            "gambatte/window/arg/late_wy_FFto0_ly0_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        // GUARD — the toggled-window want-0 rows stay bare (the xline latch
+        // requires a boundary WY write, not an LCDC enable).
+        (
+            "gambatte/window/late_enable_afterVblank_2_dmg08_out3_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_reenable_scx5_2_dmg08_out3_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 /// rows stay bare). Production byte-identical OFF (`tier2`/`is_cgb` gated).
 #[test]
 fn tier2_window_late_wy_extend_passes() {

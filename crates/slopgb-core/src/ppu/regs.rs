@@ -307,6 +307,19 @@ impl Ppu {
             0xFF44 => {} // LY is read-only.
             0xFF4A => {
                 self.wy = value;
+                // #11bd item 4 — the boundary-WY cross-line latch (see
+                // `Ppu::wy_xline_trig`): a tail/head write matching the
+                // current line, window enabled at the commit.
+                if self.tier2_reclock
+                    && self.model.is_cgb()
+                    && self.enabled
+                    && (self.dot >= 452 || self.dot < 4)
+                    && self.line < 144
+                    && value == self.ly
+                    && self.eff.lcdc & LCDC_WIN_ENABLE != 0
+                {
+                    self.wy_xline_trig = true;
+                }
                 // The live window-trigger comparison uses a delayed WY
                 // copy — see `wy2`.
                 if self.enabled {

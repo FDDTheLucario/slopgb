@@ -634,6 +634,15 @@ pub struct Ppu {
     /// (`!wy_trig_sb_raw`), the line is SameBoy-bare and the FF41 read law
     /// ([`Self::vis_mode_read`]) forces mode 0. Reset at line 0. tier2 + CGB.
     wy_trig_sb_raw: bool,
+    /// #11bd item 4 — the BOUNDARY-WY cross-line trigger: a WY write
+    /// committing in a line's tail (dot >= 452) or head (dot < 4) whose
+    /// value matches the CURRENT (old) line latches SameBoy's
+    /// `wy_triggered` (its scheduled `wy_check` still compares the old
+    /// `current_line`), while slopgb's render (`wy_latch`) and the
+    /// wy2-lagged shadow both miss it — every later line renders bare
+    /// where SameBoy draws the window. Frame-sticky like `wy_triggered`;
+    /// reset at the frame top. Tier2 + CGB only (byte-identical OFF).
+    wy_xline_trig: bool,
     /// The most recent staged rendering write was double-speed (1-dot)
     /// staging — used to pick the wy2 catch-up delay.
     staged_ds: bool,
@@ -852,6 +861,7 @@ impl Ppu {
             wy_trig_sb_line: 0,
             wy_trig_sb_dot: 0,
             wy_trig_sb_raw: false,
+            wy_xline_trig: false,
             staged_ds: false,
             ds: false,
             win_line: 0xFF,
@@ -1073,6 +1083,7 @@ impl Ppu {
             if self.line == 0 && self.dot == 0 {
                 self.wy_trig_sb = false;
                 self.wy_trig_sb_raw = false;
+                self.wy_xline_trig = false;
             }
             // #11aw — the raw-WY sticky latch (immediate `self.wy`, SameBoy's
             // `wy_check` input), the un-trigger discriminator. Gated `dot >= 4`
