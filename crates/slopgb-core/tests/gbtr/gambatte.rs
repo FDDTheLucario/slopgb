@@ -1053,6 +1053,53 @@ fn tier2_m2int_m3stat_ds_readpos_passes() {
         .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out2 (tier2 flag-on): {e}"));
 }
 
+/// Half-dot reclock Part A (#11bb) — the tier2 SCX write-strobe render-frame
+/// deferral. The deferred clock lands pipeline-register writes at SameBoy's
+/// true commit instant, but the production render geometry (the fine-scroll
+/// comparator hunt at dots 89-96) is calibrated to the cc+4 frame, 4 dots
+/// late of that instant — so the pipeline-view SCX commit must lag the same
+/// 4 dots (`write_deferred` stages 3 dots under tier2, the stage surviving
+/// the architectural write) for a mid-hunt SCX write to straddle the
+/// comparator like hardware. `late_scx4`: the `_1` leg's write beats the
+/// first comparator sample (picks up SCX=4, mode 3 extends +4, read=3), the
+/// `_2` leg (one M-cycle later) misses it (matches at 0, bare, read=0);
+/// slopgb collapsed both onto the leading edge so both extended. SS+DS + the
+/// scx_during_m3 extend + the late_scx_late_disable window pair — full-CGB
+/// two-bin `+6/−0`. The glitch line keeps the immediate commit (its render
+/// geometry carries its own C1.2 offsets: `ly0_late_scx7_m3stat_*`), and the
+/// FF41-read shadow laws sample the ARCHITECTURAL `scx` (their calibration
+/// frame) rather than the lagged pipeline view.
+#[test]
+fn tier2_late_scx_writestrobe_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_late_scx_writestrobe",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    for (rel, want) in [
+        // The straddle pair, both speeds: `_1` extends (want 3), `_2` bare.
+        ("gambatte/m2int_m3stat/scx/late_scx4_1_dmg08_cgb04c_out3.gbc", "3"),
+        ("gambatte/m2int_m3stat/scx/late_scx4_2_dmg08_cgb04c_out0.gbc", "0"),
+        ("gambatte/m2int_m3stat/scx/late_scx4_ds_1_cgb04c_out3.gbc", "3"),
+        ("gambatte/m2int_m3stat/scx/late_scx4_ds_2_cgb04c_out0.gbc", "0"),
+        // A mid-mode-3 SCX write extending the fine scroll (want 3).
+        ("gambatte/scx_during_m3/scx_m3_extend_1_dmg08_cgb04c_out3.gbc", "3"),
+        // The glitch-line immediate-commit guard (want mode 3 + LYC = 87).
+        (
+            "gambatte/enable_display/ly0_late_scx7_m3stat_scx3_1_dmg08_cgb04c_out87.gbc",
+            "87",
+        ),
+    ] {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), want, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{want} (tier2 flag-on): {e}"));
+    }
+}
+
 /// Port Stage C / S5 (mech 3 root 2 — the LYC-write sub-case) — the line-start
 /// LYC-carryover hold suppresses a spurious wrap edge on the deferred reclock.
 /// `lyc0_late_ff45_enable_3` enables the LYC source (LYC=0) and writes FF45=0

@@ -1351,6 +1351,16 @@ impl Ppu {
         (self.line, self.dot)
     }
 
+    /// Whether the PPU is on the LCD-enable glitch line (452 dots, dot-82
+    /// pipe). The tier2 SCX write-strobe deferral (#11bb) keeps the
+    /// production staging there — the glitch line's render geometry carries
+    /// its own C1.2-calibrated offsets (`GLITCH_MODE3_START` 78 entry, +2
+    /// `early_lead`), and the +4 render-frame lag mis-frames its fine-scroll
+    /// hunt (`enable_display/ly0_late_scx7_m3stat_*`, measured).
+    pub(crate) fn glitch_active(&self) -> bool {
+        self.glitch_line
+    }
+
     /// TEMP (#11an) read-state probe for the genuine-length/read-frame split:
     /// `(win_active, vis_early, line_render_done, vis_hold_until, raw vis_mode,
     /// n_sprites)` at the deferred FF41 read. Lets the `SLOPGB ff41` trace show

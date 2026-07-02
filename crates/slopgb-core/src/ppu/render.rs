@@ -388,6 +388,15 @@ impl Ppu {
                 if self.render.hunt_idx == self.eff.scx & 7 {
                     self.render.hunt_done = true;
                     self.render.discard = pos;
+                    // TEMP #11bb hunt tracer (`SLOPGB_S5DBG`; byte-identical
+                    // unset): pin the fine-scroll match dot + discard against
+                    // SameBoy's SCX-write straddle (`late_scx4`).
+                    if crate::ppu::s5dbg_on() && (130..144).contains(&self.line) {
+                        eprintln!(
+                            "SLOPGB hunt ly={} dot={} scx={} discard={pos}",
+                            self.line, self.dot, self.eff.scx
+                        );
+                    }
                 } else {
                     self.render.hunt_idx = (self.render.hunt_idx + 1) & 7;
                 }

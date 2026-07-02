@@ -64,7 +64,7 @@ impl Ppu {
             // `_1` dot264 / `_2` dot266 so only exit 265 (=260+5) separates them
             // (the on-screen scx0 `_2` rows read dot260 robustly past either, so
             // 259 vs 260 is invisible to them — the SS legs stay byte-identical).
-            && self.dot >= 259 + u16::from(self.eff.scx & 7) + u16::from(self.ds)
+            && self.dot >= 259 + u16::from(self.scx & 7) + u16::from(self.ds)
         {
             return 0;
         }
@@ -91,7 +91,7 @@ impl Ppu {
             // #11ag DS exit `264 + SCX&7` (the polled read lands +1 vs SS in DS:
             // `late_wy_FFto2_ly2_scx5_ds_1` reads dot268 / wants mode 3, so the
             // exit must clear 268 = 264+5; SS stays 263 — byte-identical).
-            && self.dot < 263 + u16::from(self.eff.scx & 7) + u16::from(self.ds)
+            && self.dot < 263 + u16::from(self.scx & 7) + u16::from(self.ds)
         {
             return 3;
         }
@@ -172,7 +172,7 @@ impl Ppu {
             // this bare law does not model. scx5+ pass natively (`scx5_2` already
             // out0); excluding them drops nothing. The fine-scroll deadline is
             // the atomic render reclock's.
-            && self.eff.scx & 7 <= 3
+            && self.scx & 7 <= 3
             && self.eff.lcdc & LCDC_WIN_ENABLE != 0
             && self.render.win_active
             && self.line >= 1
@@ -208,7 +208,7 @@ impl Ppu {
             && m == 3
             && !self.glitch_line
             && self.render.n_sprites == 0
-            && self.dot + 4 >= 257 + u16::from(self.eff.scx & 7)
+            && self.dot + 4 >= 257 + u16::from(self.scx & 7)
         {
             return 0;
         }
@@ -235,7 +235,7 @@ impl Ppu {
             && !self.render.win_active
             && !self.glitch_line
             && self.render.n_sprites == 0
-            && self.dot >= 253 + u16::from(self.eff.scx & 7) + u16::from(self.ds)
+            && self.dot >= 253 + u16::from(self.scx & 7) + u16::from(self.ds)
         {
             return 0;
         }
@@ -264,7 +264,7 @@ impl Ppu {
             && self.line < 144
             && m == 0
             && self.dot >= 250
-            && self.dot < 255 + u16::from(self.eff.scx & 7) + u16::from(self.eff.scx & 1)
+            && self.dot < 255 + u16::from(self.scx & 7) + u16::from(self.scx & 1)
             && !self.render.win_active
             && !self.glitch_line
             && self.render.n_sprites == 0
@@ -331,9 +331,9 @@ impl Ppu {
                 4
             };
             let sbex = 257
-                + u16::from(self.eff.scx & 7)
+                + u16::from(self.scx & 7)
                 + u16::from(self.ds)
-                + u16::from(self.eff.scx & 1);
+                + u16::from(self.scx & 1);
             return if self.dot + off < sbex { 3 } else { 0 };
         }
         // C2 #11ar-wake ATTEMPT (WAKE-CLOCK class, env-gated `SLOPGB_WAKEPEEK`).
@@ -399,7 +399,7 @@ impl Ppu {
             && self.line < 144
             && m == 0
             && self.dot >= 250
-            && self.dot < 257 + u16::from(self.eff.scx & 7) + u16::from(self.ds)
+            && self.dot < 257 + u16::from(self.scx & 7) + u16::from(self.ds)
             && !self.render.win_active
             && !self.glitch_line
             && self.render.n_sprites == 0

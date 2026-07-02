@@ -236,7 +236,44 @@ impl Interconnect {
         }
         self.service_vram_dma();
         if let 0xFF40 | 0xFF42 | 0xFF43 | 0xFF47..=0xFF4B = addr {
-            let dots = if self.double_speed { 1 } else { 2 };
+            // Half-dot reclock Part A (write-strobe, #11bb): the deferred
+            // clock already advanced the machine to SameBoy's exact commit
+            // instant per conflict class (`write_conflict` — e.g. SCX
+            // EarlyTwo), but the production RENDER geometry (fine-scroll hunt
+            // at dots 89-96, window/WX matches, …) is calibrated to the cc+4
+            // read frame — 4 dots LATE of the hardware's absolute positions
+            // (the same +4 the deferred FF41 read laws carry). A pipeline
+            // write committing at its true instant therefore lands 4 dots
+            // EARLY relative to the render's decisions, collapsing every
+            // mid-mode-3 straddle pair (late_scx4: the SCX write must land
+            // before/after the fine-scroll comparator's first sample — dual
+            // traced, both legs extended). Under tier2 the pipeline-view
+            // commit is deferred by that render-frame offset: stage 3 dots →
+            // `commit_eff` visible from `step(L+4)` (strobe commits on the
+            // 4th tick after the stage), and `Ppu::write` lets the stage
+            // survive (see the `staged_pending` skip). Production keeps the
+            // gambatte mid-cycle staging ({2 SS, 1 DS}) — byte-identical OFF.
+            let dots = if self.tier2_reclock && addr == 0xFF43 && !self.ppu.glitch_active() {
+                // SCX takes the full +4 render-frame deferral (visible from
+                // `step(L+4)`): PROVEN by late_scx4 SS+DS + scx_m3_extend —
+                // the fine-scroll comparator hunt (dots 89-96) is calibrated
+                // to the production cc+4 frame, 4 dots late of the deferred
+                // write's true instant, so the pipeline-view SCX must lag the
+                // same 4 dots for the straddle pairs to separate. LCDC +4 was
+                // BUILT + MEASURED NET-NEGATIVE (A/B-inverts the
+                // sprites/late_sizechange pairs and pushes the late_disable
+                // pre-draw aborts into post-draw); WX/WY likewise keep the
+                // production frame (late_wx/late_wy `_1` legs) — write-vs-
+                // render-event races already compare in a consistent frame,
+                // only the hunt's absolute-dot anchor needs the lag. The
+                // per-register split mirrors SameBoy's per-register conflict
+                // maps (each register carries its own commit class).
+                3
+            } else if self.double_speed {
+                1
+            } else {
+                2
+            };
             // C2 #11ab window-trigger tracer: the LCDC (FF40) window-enable and
             // WY (FF4A) writes drive SameBoy's `wy_check` (window mode-3
             // extension). Lines slopgb's write (line, dot) up against SameBoy's
@@ -244,7 +281,7 @@ impl Interconnect {
             // frame-phase residual (`measurements/s7-readclock-refuted-2026-06-28.md`).
             // NOT `ly < 144`-gated: the VBlank LCDC-enable/disable writes are the
             // frame-phase evidence. `SLOPGB_S5DBG`, byte-identical when unset.
-            if matches!(addr, 0xFF40 | 0xFF4A) && crate::ppu::s5dbg_on() {
+            if matches!(addr, 0xFF40 | 0xFF43 | 0xFF4A) && crate::ppu::s5dbg_on() {
                 let (l, d) = self.ppu.scan_pos();
                 eprintln!("SLOPGB w{addr:04x} val={value:02x} ly={l} dot={d}");
             }

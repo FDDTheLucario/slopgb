@@ -336,7 +336,7 @@ impl Ppu {
             // visible-mode half of the C2 parallel window-length model. See the
             // `vis_hold_until` field docs.
             if self.tier2_reclock && self.render.win_active {
-                self.vis_hold_until = 263 + u16::from(self.eff.scx & 7);
+                self.vis_hold_until = 263 + u16::from(self.scx & 7);
             }
             // The accessibility unblock (this `line_render_done` rise) is
             // half-classified by the interconnect for the cc+2 MID-phase

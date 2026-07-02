@@ -30,8 +30,10 @@ impl Ppu {
         // the dmg palette path).
         let dots = if addr == 0xFF4B { dots + 1 } else { dots };
         // Speed hint for the FF4A wy2 scheduling below (1-dot staging
-        // only happens in double speed).
-        self.staged_ds = dots <= 1;
+        // only happens in double speed; the tier2 write-strobe stages 3
+        // dots at either speed, so there the hint comes from the live
+        // `ds` flag instead — #11bb).
+        self.staged_ds = dots <= 1 || (self.tier2_reclock && self.ds);
         // One bus op per M-cycle: a previous stage has always expired or
         // been architecturally committed by now; flush defensively if not.
         if let Some(s) = self.staged.take() {
@@ -180,10 +182,37 @@ impl Ppu {
         // registers (the staged copy of this same write may already have
         // expired into it — see `stage_write`; writes that never went
         // through the staging path land in both views here).
-        if self.staged.as_ref().is_some_and(|s| s.addr == addr) {
-            self.staged = None;
+        //
+        // Half-dot reclock Part A (write-strobe, #11bb): on the tier2
+        // deferred path the stage SURVIVES the architectural write and the
+        // pipeline view commits via `strobe_tick` at SameBoy's frame instead
+        // (the io write lands at the write M-cycle's END — `GB_advance_cycles`
+        // runs the display coroutine BEFORE the write commits, memory.c /
+        // sm83_cpu.c — so the pixel pipe sees the new value only from the
+        // next dot after the M-cycle). The eager production path ticks the
+        // machine BEFORE this call, so its stage has already expired and this
+        // immediate convergence is what commits it; the deferred path calls
+        // this at the leading edge with zero dots ticked, so the immediate
+        // convergence was collapsing every mid-mode-3 register write onto the
+        // write's leading edge — the measured "deferred WRITE collapse"
+        // behind the late_scx/late_disable/late_wx render-length pairs
+        // (`late_scx4`: SameBoy separates the legs by whether the SCX commit
+        // lands before/after the fine-scroll comparator's first sample;
+        // slopgb collapsed both legs onto the leading edge). Production
+        // (`!tier2_reclock`) is byte-identical.
+        let staged_pending = self.tier2_reclock
+            && addr == 0xFF43
+            && !self.glitch_line
+            && self
+                .staged
+                .as_ref()
+                .is_some_and(|s| s.addr == addr && s.value == value);
+        if !staged_pending {
+            if self.staged.as_ref().is_some_and(|s| s.addr == addr) {
+                self.staged = None;
+            }
+            self.commit_eff(addr, value);
         }
-        self.commit_eff(addr, value);
         match addr {
             0x8000..=0x9FFF => {
                 if !self.vram_write_blocked() {

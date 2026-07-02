@@ -89,7 +89,7 @@ impl Ppu {
             && !self.glitch_line
             && self.render.n_sprites == 0
             && !self.render.win_active
-            && self.dot >= 254 + u16::from(self.eff.scx & 7)
+            && self.dot >= 254 + u16::from(self.scx & 7)
     }
 
     /// Tier-2 (cc+0) CGB line-start OAM-read window — see
