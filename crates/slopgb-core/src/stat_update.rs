@@ -56,6 +56,14 @@ impl StatUpdate {
         self.line
     }
 
+    /// #11bd — silently force the line level (no edge detection). Used by the
+    /// shifted-ROM FF45-commit re-latch: the engine registered a latch drop one
+    /// step before the write landed (SameBoy's line never fell there), so the
+    /// corrected level must not edge-fire on the next tick.
+    pub(crate) fn force_level(&mut self, level: bool) {
+        self.line = level;
+    }
+
     /// The level the STAT line *would* hold for these inputs, without mutating
     /// or edge-detecting — the pure OR of the selected mode source and the LYC
     /// source (`display.c:545-556`).

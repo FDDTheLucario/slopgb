@@ -493,39 +493,46 @@ impl Ppu {
     /// it). The LCD-enable glitch line returns `-1` (its LY/LYC view is the live
     /// flag-off path's concern, `lcdon_*` tables).
     pub(super) fn ly_for_comparison(&self) -> i16 {
+        self.ly_for_comparison_at(self.line, self.dot)
+    }
+
+    /// [`Self::ly_for_comparison`] evaluated at an explicit (line, dot) — the
+    /// #11bd law-frame variant (write-instant classifications on shifted ROMs
+    /// pass [`Ppu::law_pos`]).
+    pub(super) fn ly_for_comparison_at(&self, at_line: u8, at_dot: u16) -> i16 {
         if !self.enabled || self.glitch_line {
             return -1;
         }
-        let line = i16::from(self.line);
-        if self.line <= 143 {
+        let line = i16::from(at_line);
+        if at_line <= 143 {
             // Visible line: prev-line carryover (dots 0-2) → -1 at the dot-3
             // reset (`display.c:1776`, `current_line ? -1 : 0`) → N at dot 4
             // (`display.c:1786`). Line 0's predecessor (line 153) ends holding 0.
-            if self.dot >= 4 {
+            if at_dot >= 4 {
                 line
-            } else if self.dot == 3 {
-                if self.line == 0 { 0 } else { -1 }
-            } else if self.line == 0 {
+            } else if at_dot == 3 {
+                if at_line == 0 { 0 } else { -1 }
+            } else if at_line == 0 {
                 0
             } else {
                 line - 1
             }
-        } else if self.line <= 152 {
+        } else if at_line <= 152 {
             // VBlank 144-152: `-1` set at line entry, `= current_line` after
             // GB_SLEEP 26+12 (≈dot 4) (`display.c` 144-152 loop).
-            if self.dot >= 4 { line } else { -1 }
+            if at_dot >= 4 { line } else { -1 }
         } else {
-            self.ly_for_comparison_line_153()
+            self.ly_for_comparison_line_153_at(at_dot)
         }
     }
 
     /// Line 153's model-specific `ly_for_comparison` micro-sequence (the
     /// `display.c` line-153 tail). See [`Self::ly_for_comparison`].
-    fn ly_for_comparison_line_153(&self) -> i16 {
+    fn ly_for_comparison_line_153_at(&self, at_dot: u16) -> i16 {
         if self.model == Model::Agb {
             // `model > CGB_C`: GB_SLEEP(14,2) lands the first set at dot 4, and
             // `model>CGB_C||ds` keeps it 153 through the LY=0 step; no -1 gap.
-            match self.dot {
+            match at_dot {
                 0..=3 => -1,
                 4..=11 => 153,
                 _ => 0,
@@ -535,7 +542,7 @@ impl Ppu {
             // GB_SLEEP(14,4) delays the first set to dot 6, then the LY=0 step
             // drops `ly_for_comparison` back to -1 (the `model>CGB_C||ds` arm is
             // false) before the final = 0 at dot 12. (DS placeholder, see above.)
-            match self.dot {
+            match at_dot {
                 0..=5 => -1,
                 6..=7 => 153,
                 8..=11 => -1,

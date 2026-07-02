@@ -446,6 +446,9 @@ impl Ppu {
             self.line = 0;
             self.dot = 0;
             self.ly = 0;
+            // #11bd: the alignment shadow re-anchors at enable, like
+            // SameBoy's `double_speed_alignment = 0` (memory.c:1510).
+            self.sb_dsa8 = 0;
             // The event comparator's delayed FF45 copy restarts in sync
             // (gambatte lycIrq.lcdReset).
             self.lyc_event = self.lyc;

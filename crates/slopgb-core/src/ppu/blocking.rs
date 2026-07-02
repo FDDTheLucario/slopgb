@@ -113,10 +113,12 @@ impl Ppu {
         // speed keeps dot 0 open (the DS read grid is 2 dots earlier — the DS
         // `preread_ds_lcdoffset1_1` reads `ly2 dot0` and wants OPEN; the DS base
         // is its own S6/S7 grid).
+        // #11bd: shifted ROMs classify on the un-shifted frame (law_pos).
+        let (_, ld) = self.law_pos();
         let in_window = if self.ds {
-            self.dot < CGB_LINESTART_OAM_OPEN_DS
+            ld < CGB_LINESTART_OAM_OPEN_DS
         } else {
-            (1..CGB_LINESTART_OAM_OPEN).contains(&self.dot)
+            (1..CGB_LINESTART_OAM_OPEN).contains(&ld)
         };
         self.tier2_reclock && self.model.is_cgb() && self.line != 0 && in_window
     }
@@ -228,6 +230,12 @@ impl Ppu {
         } else {
             84
         };
+        // #11bd: shifted ROMs classify the access on the un-shifted frame
+        // (the machine STOPADV advance; identity otherwise).
+        if self.tier2_reclock && self.model.is_cgb() && !self.ds {
+            let (_, ld) = self.law_pos();
+            return ld >= lock;
+        }
         self.dot >= lock
     }
 

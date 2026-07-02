@@ -128,11 +128,14 @@ impl Ppu {
         // lycEnable/lyc153_late_ff45_enable_2 cgb04c_outE0 pins the
         // cell — the matching write at (152,452) misses the (153,4)
         // event while its DMG sibling fires).
-        let upcoming = if self.line == 152 { 153 } else { self.line + 1 };
+        // #11bd: classify the write on the un-shifted calibrated frame
+        // (identity for never-switched ROMs; see `Ppu::law_pos`).
+        let (ll, ld) = self.law_pos();
+        let upcoming = if ll == 152 { 153 } else { ll + 1 };
         let protected = !self.glitch_line
-            && (self.dot < 4
-                || (self.line == 153 && (8..12).contains(&self.dot))
-                || (self.line <= 152 && self.dot >= 452 && value == upcoming));
+            && (ld < 4
+                || (ll == 153 && (8..12).contains(&ld))
+                || (ll <= 152 && ld >= 452 && value == upcoming));
         if !protected {
             self.lyc_event = value;
         }
@@ -152,8 +155,8 @@ impl Ppu {
         // goes low -> no trigger").
         let target = if self.glitch_line {
             Some(0)
-        } else if self.line == 153 {
-            match self.dot {
+        } else if ll == 153 {
+            match ld {
                 // Line-152 tail: the upcoming line is 153.
                 0..=3 => Some(153),
                 // incLy(153) = 0, with the exception while ret > 2.
@@ -161,13 +164,13 @@ impl Ppu {
                 _ => Some(0),
             }
         } else {
-            match self.dot {
+            match ld {
                 // Tail of the previous line / last M-cycle of this one:
                 // the upcoming line's number.
-                0..=3 => Some(self.line),
-                452..=455 if old == self.line => None,
-                452..=455 => Some(if self.line == 152 { 153 } else { self.line + 1 }),
-                _ => Some(self.line),
+                0..=3 => Some(ll),
+                452..=455 if old == ll => None,
+                452..=455 => Some(if ll == 152 { 153 } else { ll + 1 }),
+                _ => Some(ll),
             }
         };
         // The trigger is an event, not a line edge: it fires even while
@@ -178,14 +181,14 @@ impl Ppu {
         // already-matching lyc level (the old value's match means the
         // target comparison fails, handled by `target` above; an
         // unchanged-source rise needs `stat_line` low).
-        let blocked = if self.line <= 143 && !self.glitch_line {
+        let blocked = if ll <= 143 && !self.glitch_line {
             // Blocked only once this line's mode-0 IRQ has passed (the
             // write sits in the hblank): gambatte checks the next m0irq
             // event lying beyond the line end. Writes earlier in the
             // line fire (lycwirq_trigger_m0_early_ly44 rows).
-            self.stat_en & STAT_SRC_HBLANK != 0 && self.m0_src && value == self.line
+            self.stat_en & STAT_SRC_HBLANK != 0 && self.m0_src && value == ll
         } else {
-            self.stat_en & STAT_SRC_VBLANK != 0 && !(self.line == 153 && self.dot >= 452)
+            self.stat_en & STAT_SRC_VBLANK != 0 && !(ll == 153 && ld >= 452)
         };
         let lyc_level_high = self.stat_line && self.stat_line_level(STAT_SRC_LYC & self.stat_en);
         // Port Stage C / S5 (mech 3 — the ly153 LYC-WRITE wrap, the FF45 sibling
@@ -202,8 +205,8 @@ impl Ppu {
         // `target` table (pinning the base `lyc153_late_ff45_enable_{1,2}` cells)
         // is untouched. Byte-identical OFF.
         let lyc_write_wrap_153 = self.leading_edge_reads
-            && self.line == 153
-            && self.ly_for_comparison() == i16::from(value)
+            && ll == 153
+            && self.ly_for_comparison_at(ll, ld) == i16::from(value)
             && !blocked
             && !lyc_level_high;
         // Port Stage C / S5 (mech 3 — the FF45 "weirdpoint", `ff45_enable_
@@ -221,11 +224,39 @@ impl Ppu {
         // (`lyc153_late_ff45_enable_3` outE2) — suppressing there drops a real
         // edge. Byte-identical OFF.
         let tier2_minus1_gap = self.leading_edge_reads
-            && (1..=143).contains(&self.line)
-            && self.ly_for_comparison() == -1;
+            && (1..=143).contains(&ll)
+            && self.ly_for_comparison_at(ll, ld) == -1;
         let fire = !tier2_minus1_gap
             && self.stat_en & STAT_SRC_LYC != 0
             && ((target == Some(value) && !blocked && !lyc_level_high) || lyc_write_wrap_153);
+        if crate::ppu::s5dbg_on() {
+            eprintln!(
+                "SLOPGB wlyc ly={} dot={} ll={ll} ld={ld} old={old:02x} val={value:02x} prot={protected} tgt={target:?} blk={blocked} lvl={lyc_level_high} fire={fire}",
+                self.line, self.dot
+            );
+        }
+        // #11bd: a SHIFTED write whose law position is the line-start tail
+        // (ld < 4) commits after the engine's dot-4 re-latch already ran with
+        // the OLD value, dropping a held match SameBoy never drops (its write
+        // lands before that step) — the next engine tick would then re-latch
+        // the NEW match as a spurious rising edge. Re-latch silently at the
+        // commit so the OLD-match → NEW-match transition has no intermediate
+        // drop. Identity for unshifted ROMs (lcd_shift_dots == 0).
+        if self.leading_edge_reads && self.lcd_shift_dots > 0 && ld < 4 && self.dot >= 4 {
+            let lyfc = self.ly_for_comparison();
+            if lyfc != -1 {
+                self.lyc_interrupt_line = lyfc == i16::from(value);
+                // The engine's same-dot step already pushed the dropped level
+                // into the edge detector; restore the corrected level QUIETLY
+                // so the next tick sees no rise (SameBoy's line never fell).
+                let lvl = crate::stat_update::StatUpdate::level(
+                    self.mode_for_interrupt,
+                    self.stat_en,
+                    self.lyc_interrupt_line,
+                );
+                self.stat_update.force_level(lvl);
+            }
+        }
         // Converge the readable flag and the line level (no edge — the
         // trigger decision above is the only write-path IF source).
         self.refresh_cmp(false);

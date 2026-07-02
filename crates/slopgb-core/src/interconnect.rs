@@ -1006,6 +1006,18 @@ impl Bus for Interconnect {
     fn stop(&mut self, skipped_addr: u16, interrupt_pending: bool) -> bool {
         let switching = self.cgb_mode && self.key1_armed;
         let entering_ds = switching && !self.double_speed;
+        // #11bd lcd_offset dual-trace: the STOP decision point on the machine
+        // clock (SameBoy `SBSTOP fp=` analogue). `SLOPGB_S5DBG`-gated.
+        if crate::ppu::s5dbg_on() {
+            let (l, d) = self.ppu.scan_pos();
+            eprintln!(
+                "SLOPGB stop ly={l} dot={d} clk={} sw={} from_ds={} ip={}",
+                self.cycles,
+                u8::from(switching),
+                u8::from(self.double_speed),
+                u8::from(interrupt_pending)
+            );
+        }
         // gambatte Memory::stop snapshots the HDMA situation at the
         // pre-read cc: a block request still pending when STOP executes
         // (flagged mid-instruction — no boundary came) is deferred when
@@ -1153,10 +1165,39 @@ impl Bus for Interconnect {
             // else {4}` (leave-only) once the lcd-offset constants are
             // re-derived on the +2-dot frame — the Part-D table row this
             // measurement adds.
-            let k = std::env::var("SLOPGB_STOPADV")
-                .ok()
-                .and_then(|v| v.parse::<u32>().ok())
-                .unwrap_or(0);
+            // #11bd: STOPADV is LEAVE-ONLY, default w=2 (enter stays 0 — the
+            // fresh enable-phase dual-trace confirms enter contributes 0: the
+            // `_ds`-measured offset1 rows sit at the same +2 missing as the
+            // SS rows, refuting the enter −2 split; and the DS suite is
+            // calibrated on the w=0 enter frame). The MACHINE epoch truth is
+            // +2 hd per leave (the lcd_offset enable-phase dual-traces; the
+            // 2-trip offset2 count rows fix at w=2 and stay broken at w=4
+            // where the two leaves fold to +8 ≡ 0 mod 8). The m3stat READ
+            // laws additionally want +2 hd per leave on top (the w=4
+            // speedchange empirics, 62→51 with the same m3stat set) — that
+            // law-side surplus is the carried `lcd_phase_hd` (= 4 − k per
+            // leave), consumed by the PORT-1 comparison so the read frame
+            // matches the w=4-derived constants while polls/counts/LY see
+            // the true +2 epoch.
+            // The leave shift is ALIGNMENT-DEPENDENT (the `sb_dsa8` shadow of
+            // SameBoy's `double_speed_alignment`): the dsa7=4 leaves need +6
+            // (offset3, build-measured — only k=6 fixes its count rows) while
+            // dsa7∈{0,6} leaves need +2 (offset1/offset2-leave2/speedchange).
+            let k = if entering_ds {
+                0
+            } else {
+                std::env::var("SLOPGB_STOPADV")
+                    .ok()
+                    .and_then(|v| v.parse::<u32>().ok())
+                    .unwrap_or(if self.ppu.sb_dsa() & 7 == 4 { 6 } else { 2 })
+            };
+            if !entering_ds {
+                let ph = std::env::var("SLOPGB_LCDPH")
+                    .ok()
+                    .and_then(|v| v.parse::<i16>().ok())
+                    .unwrap_or(0);
+                self.ppu.add_lcd_phase(ph);
+            }
             for _ in 0..k {
                 let ppu_if = self.ppu.tick_half();
                 if self.ppu.dot_completed() {
@@ -1164,6 +1205,14 @@ impl Bus for Interconnect {
                     self.cycles += 1;
                 }
             }
+            // Every switching STOP's pause (enter AND leave) leaves the
+            // alignment shadow −4 mod 8 of SameBoy's (pause-length + freeze
+            // withholding delta; calibrated on the offset1/offset2/offset3
+            // SBSTOP dsa values — all three close exactly with the uniform
+            // correction). Applied AFTER the k-advance so the NEXT leave
+            // reads the corrected alignment.
+            self.ppu.add_lcd_shift((k / 2) as u16);
+            self.ppu.dsa_pause_correction();
         }
         self.engage_halt_gate(false);
         self.vram_dma_unhalt();

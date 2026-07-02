@@ -290,17 +290,16 @@ impl Ppu {
                 !self.wy_latch
                     && self.wy2 != self.ly
                     && !self.render.win_stalled
-                    // FORCE-0 direction only (`m == 3`, like the shipped DS
-                    // arm): the HOLD direction (returning 3 for a native-0
-                    // read just past the flip) is derivable only in the
-                    // STOPADV-advanced post-switch frame (E = 2*flip + 2
-                    // with reads at SameBoy's cfl − 4); at w = 0 it is
-                    // IRRECONCILABLE — the kernel m2int@252 needs E > 508
-                    // while the post-switch polled read@flip and the CGB
-                    // halt post-flip ISR reads need E ≤ 508 (both measured
-                    // broken, −6 speedchange). The hold re-lands with the w
-                    // co-land (the lcd-offset Part-D re-derivation).
-                    && m == 3
+                    // BOTH directions (#11bd, the w=4 co-land): the true exit
+                    // sits ±1 dot around the whole-dot flip, so the HOLD
+                    // direction (returning 3 for a native-0 read just past
+                    // the flip) fires together with the force-0. At w = 0
+                    // this was IRRECONCILABLE (the kernel m2int@252 needs
+                    // E > 508 while the post-switch polled read@flip and the
+                    // CGB halt post-flip ISR reads need E ≤ 508); on the
+                    // STOPADV leave-only w=4 frame the post-switch reads
+                    // shift +4 hd and E = 2*flip + 2 serves both.
+                    && (m == 3 || m == 0)
                     // The emergent exit needs either the recorded flip or a
                     // live render to project from.
                     && (self.line_render_done || self.render.active)
@@ -315,17 +314,16 @@ impl Ppu {
                 };
                 (508 + 2 * scx + 2 * i32::from(self.scx & 1), c)
             } else {
-                // SS m2-ISR-carried reads are EXCLUDED until the STOPADV w
-                // frame co-lands: their flip-relative position is w-coupled
+                // SS m2-ISR carry +4 (#11bd, the w=4 co-land): the mode-2
+                // OAM-ISR handler's first FF41 read sits +4 hd late of the
+                // polled frame (#11aq measured). At w = 0 this was excluded
                 // (post-switch `speedchange2 *m2int_m3stat_scx1_1` reads
                 // flip−1 wanting 3 while the no-switch `m2int_scx3` reads
-                // flip−1 wanting 0 — no (E, carry) fits both at w = 0,
-                // MEASURED). They keep the base path (the #11n cc2
-                // `early_lead` arm still serves `m2int_scx3`).
-                if self.read_carried && self.stat_rise_oam {
-                    return m;
-                }
-                let c = if self.read_carried && self.stat_rise_m0 {
+                // flip−1 wanting 0 — no (E, carry) fit both); the leave-only
+                // w=4 advance separates the post-switch reads.
+                let c = if self.read_carried && self.stat_rise_oam {
+                    4
+                } else if self.read_carried && self.stat_rise_m0 {
                     2
                 } else {
                     0
@@ -347,7 +345,12 @@ impl Ppu {
                 };
                 (2 * i32::from(flip) + 2, c)
             };
-            let read_hd = 2 * i32::from(self.dot) + i32::from(self.dhalf) + carry;
+            // #11bd: SS reads add the carried LCD phase (the per-leave m3stat
+            // read-frame surplus over the machine epoch; 0 for never-switched
+            // ROMs). DS keeps 0 — the DS post-leave segments are epoch-only
+            // (the offset1 `_ds` count rows), measured.
+            let phase = if self.ds { 0 } else { i32::from(self.lcd_phase_hd) };
+            let read_hd = 2 * i32::from(self.dot) + i32::from(self.dhalf) + carry + phase;
             return if read_hd < exit_hd { 3 } else { 0 };
         }
         // C2 #11ar-m0stat READ-FRAME slice (the second clean read-position slice,
@@ -863,10 +866,14 @@ impl Ppu {
         // enable at the line boundary because the LYC=148 period has
         // ended, while lycEnable lyc_ff41_enable_3's same-cell enable
         // still matches its own line and fires).
+        // #11bd: classify the write on the un-shifted calibrated frame (the
+        // machine STOPADV advance moved post-leave writes deeper into the
+        // frame; identity for never-switched ROMs).
+        let (ll, ld) = self.law_pos();
         let cmp_cgb = if self.glitch_line {
             0
         } else {
-            match (self.line, self.dot) {
+            match (ll, ld) {
                 (0, _) => 0,
                 (153, 0..=7) => 153,
                 (153, _) => 0,
@@ -889,11 +896,11 @@ impl Ppu {
         // carryover; `cmp_cgb` (pinning the new-line compare for the calibrated
         // m1statwirq/lyc_ff41_enable_3 rows) is untouched. Byte-identical OFF.
         let lyc_carryover = self.leading_edge_reads
-            && (1..=143).contains(&self.line)
-            && self.dot < 4
+            && (1..=143).contains(&ll)
+            && ld < 4
             && old & STAT_SRC_LYC == 0
             && data & STAT_SRC_LYC != 0
-            && self.lyc == self.line - 1;
+            && self.lyc == ll - 1;
         // Port Stage C / S5 (mech 3 — the dispatch-class write-trigger, the ly153
         // LYC-WRAP sub-family). The lcd-offset shifts
         // `lyc153_late_ff41_enable_lcdoffset1_1`'s LYC enable into the ly153 LY=0
@@ -908,9 +915,19 @@ impl Ppu {
         // (the real-state discriminator, not the offset) fires; `cmp_cgb` (pinning
         // the dot-6 base `lyc153_late_ff41_enable_1` compare) is untouched.
         // Byte-identical OFF.
+        // #11bd: on a shifted ROM the held latch is engine state at the REAL
+        // instant — the write that law-lands inside the dots-6..11 latch window
+        // arrives after the real latch dropped, so re-derive the latch at the
+        // law position (LYC=153 matched at the dot-6 step, drops at the dot-12
+        // LY=0 step).
+        let latch_at_law = if self.lcd_shift_dots == 0 {
+            self.lyc_interrupt_line
+        } else {
+            self.lyc_interrupt_line || (self.lyc == 153 && (6..12).contains(&ld))
+        };
         let lyc_wrap_153 = self.leading_edge_reads
-            && self.line == 153
-            && self.lyc_interrupt_line
+            && ll == 153
+            && latch_at_law
             && !lyc_high
             && old & STAT_SRC_LYC == 0
             && data & STAT_SRC_LYC != 0;
@@ -919,14 +936,13 @@ impl Ppu {
         // speed, so the (144,0) and (0,0) cells never fire it).
         let m2 = old & STAT_SRC_OAM == 0
             && data & (STAT_SRC_OAM | STAT_SRC_HBLANK) == STAT_SRC_OAM
-            && (1..=143).contains(&self.line)
-            && self.dot < 2 + 2 * u16::from(self.ds);
+            && (1..=143).contains(&ll)
+            && ld < 2 + 2 * u16::from(self.ds);
         // gambatte's ly-region split on our grid: dots 0-3 still belong
         // to the previous line, so (0, 0-3) is mode 1's tail and
         // (144, 0-3) line 143's hblank (an m0 enable written there still
         // fires: m1/ly143_late_m0enable_ds_1 cgb04c_out3).
-        let vis = (self.line <= 143 && !(self.line == 0 && self.dot < 4))
-            || (self.line == 144 && self.dot < 4);
+        let vis = (ll <= 143 && !(ll == 0 && ld < 4)) || (ll == 144 && ld < 4);
         let main = if vis {
             // A scheduled mode-0 event still ahead within this line
             // (gambatte `eventTimes_(memevent_m0irq) <
@@ -940,7 +956,7 @@ impl Ppu {
             let crossed = self.m0_src && !(self.glitch_line && self.dot < GLITCH_MODE3_START);
             let m0_pending = !crossed && (old | data) & STAT_SRC_HBLANK != 0;
             // Line-boundary tail (`timeToNextLy <= 4 + 4*ds`).
-            let tail = self.dot < 4;
+            let tail = ld < 4;
             // Port Stage C / S5 (mech 3 — the dispatch-class write-trigger, the
             // HBlank sub-family). At the dots-0-3 line-start tail the gambatte
             // logic defers a fresh m0 enable to the scheduled m0irq event; but
@@ -962,11 +978,19 @@ impl Ppu {
             // (cleared by the test's IF-clear) so it must NOT be delivered. A
             // `dot < 4` window would over-fire the `_2` enable; halve to `< 2`
             // (mirrors the `m2`/`stage_stat_copies` DS halving). LE-only.
-            let carryover_tail = self.dot < if self.ds { 2 } else { 4 };
+            let carryover_tail = ld < if self.ds { 2 } else { 4 };
+            // At a shifted position the vis check evaluates on the law frame
+            // (ld < 4 at line start is always the mode-0 hold on non-glitch
+            // lines); un-shifted keeps the live view.
+            let vis0 = if self.lcd_shift_dots == 0 {
+                self.vis_mode() == 0
+            } else {
+                true
+            };
             if self.leading_edge_reads
                 && carryover_tail
                 && !self.glitch_line
-                && self.vis_mode() == 0
+                && vis0
                 && old & STAT_SRC_HBLANK == 0
                 && data & STAT_SRC_HBLANK != 0
             {
@@ -995,7 +1019,7 @@ impl Ppu {
             // VBlank enable raises IF; the `old & STAT_SRC_VBLANK` suppression and
             // the lyc arm (the #11k `lycstatwirq_trigger_ly00` E0 rows) are
             // untouched. Never set in production / LE-only → byte-identical OFF.
-            let m1_tail = self.line == 0 && self.dot < 4 && !self.leading_edge_reads;
+            let m1_tail = ll == 0 && ld < 4 && !self.leading_edge_reads;
             if old & STAT_SRC_VBLANK != 0 {
                 false
             } else {

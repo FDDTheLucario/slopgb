@@ -281,6 +281,36 @@ pub struct Ppu {
     /// landing on an odd CPU-T resolves here — the sub-dot read position Part B
     /// samples). See [`Self::sub_dot`].
     dhalf: u8,
+    /// #11bd — the persistent LCD phase residual, in 8 MHz half-dots: the
+    /// accumulated difference between SameBoy's CPU-grid shift at each STOP
+    /// speed-switch LEAVE (+2 hd per leave, measured by the lcd_offset
+    /// enable-phase dual-traces) and the machine advance the STOPADV default
+    /// applied (w=4). Carried across LCD disable/enable (the phase is a
+    /// CPU-grid-vs-PPU displacement, not a frame property — the lcd_offset
+    /// ROMs re-enable the LCD after their excursions and the offset
+    /// persists). Consumed by the tier2 offset-sensitive laws
+    /// (accessibility windows / write-triggers / the P1 comparison); always 0
+    /// flag-off (only written from the tier2 STOP path) so production is
+    /// byte-identical.
+    lcd_phase_hd: i16,
+    /// #11bd — shadow of SameBoy's `double_speed_alignment` (mod 8): the LCD
+    /// age in 8 MHz half-dots since the last enable (+2 per dot while the LCD
+    /// is on, reset at enable), with a −4 correction per STOP pause (the
+    /// measured SameBoy-vs-slopgb pause-length + freeze-withholding delta,
+    /// calibrated on the offset1 enter→leave segment: SameBoy Δdsa 24 vs
+    /// slopgb Δage 28 mod 8). The DS→SS leave shift depends on this
+    /// alignment (`2 + (sb_dsa8 & 4)`: dsa7=0 rows need +2, the dsa7=4
+    /// offset3 rows need +6 — build-measured). Increment is unconditional
+    /// (mod-8 counter, unobservable flag-off); consumed tier2-only.
+    sb_dsa8: u8,
+    /// #11bd — total machine STOPADV advance applied this ROM, in DOTS
+    /// (Σ k/2 over the DS→SS leaves). The frame-anchored write/read-instant
+    /// law windows (line-start tails, line-153 wrap, LY holds) were
+    /// calibrated on unshifted ROMs; a post-leave CPU access lands
+    /// `lcd_shift_dots` deeper in the frame (the advance moved the enable
+    /// anchor and the LY-polls re-sync), so those laws classify against
+    /// [`Self::law_pos`]. 0 for never-switched ROMs and flag-off.
+    lcd_shift_dots: u16,
     /// First line after LCD enable (no OAM scan, shifted mode 3, 452 dots).
     glitch_line: bool,
     /// The frame currently being rendered is the first one after an LCD
@@ -775,6 +805,9 @@ impl Ppu {
             line: 0,
             dot: 0,
             dhalf: 0,
+            lcd_phase_hd: 0,
+            sb_dsa8: 0,
+            lcd_shift_dots: 0,
             glitch_line: false,
             frame_skip: false,
             cmp: false,
@@ -883,6 +916,8 @@ impl Ppu {
                 self.pending_if |= IF_STAT;
             }
         }
+        // #11bd: the SameBoy `double_speed_alignment` shadow (see `sb_dsa8`).
+        self.sb_dsa8 = (self.sb_dsa8 + 2) & 7;
         self.dot += 1;
         let len = if self.glitch_line {
             GLITCH_LINE_DOTS
@@ -947,6 +982,47 @@ impl Ppu {
     #[allow(dead_code)] // Part B seam (HALFDOT-BUILD-PLAN.md §3B); consumed next stage.
     pub(crate) fn sub_dot(&self) -> u8 {
         self.dhalf
+    }
+
+    /// #11bd — accumulate the LCD phase residual at a STOP speed-switch leave
+    /// (see [`Self::lcd_phase_hd`]). Tier2 STOP path only.
+    pub(crate) fn add_lcd_phase(&mut self, hd: i16) {
+        self.lcd_phase_hd += hd;
+    }
+
+    /// #11bd — the SameBoy `double_speed_alignment` shadow, mod 8 (see
+    /// [`Self::sb_dsa8`]). Read by the STOP leave shift; the −4-per-pause
+    /// correction is applied by [`Self::dsa_pause_correction`].
+    pub(crate) fn sb_dsa(&self) -> u8 {
+        self.sb_dsa8
+    }
+
+    /// #11bd — apply the per-STOP-pause alignment correction (−4 mod 8, the
+    /// measured SameBoy-vs-slopgb pause delta). Tier2 STOP path only.
+    pub(crate) fn dsa_pause_correction(&mut self) {
+        self.sb_dsa8 = (self.sb_dsa8 + 4) & 7;
+    }
+
+    /// #11bd — record a machine STOPADV advance (see [`Self::lcd_shift_dots`]).
+    pub(crate) fn add_lcd_shift(&mut self, dots: u16) {
+        self.lcd_shift_dots += dots;
+    }
+
+    /// #11bd — the current access position mapped back onto the un-shifted
+    /// calibrated frame (see [`Self::lcd_shift_dots`]): subtract the machine
+    /// advance, wrapping across the line boundary. Identity when no advance
+    /// was applied (never-switched ROMs, production).
+    pub(super) fn law_pos(&self) -> (u8, u16) {
+        let s = self.lcd_shift_dots;
+        if s == 0 {
+            return (self.line, self.dot);
+        }
+        if self.dot >= s {
+            (self.line, self.dot - s)
+        } else {
+            let prev = if self.line == 0 { 153 } else { self.line - 1 };
+            (prev, LINE_DOTS - (s - self.dot))
+        }
     }
 
     /// Forward the interconnect's `leading_edge_reads` master flag to the PPU,

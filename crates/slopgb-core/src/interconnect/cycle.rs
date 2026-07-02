@@ -311,7 +311,14 @@ impl Interconnect {
             // frame-phase evidence. `SLOPGB_S5DBG`, byte-identical when unset.
             if matches!(addr, 0xFF40 | 0xFF43 | 0xFF4A) && crate::ppu::s5dbg_on() {
                 let (l, d) = self.ppu.scan_pos();
-                eprintln!("SLOPGB w{addr:04x} val={value:02x} ly={l} dot={d}");
+                // #11bd: clk (machine dots) + ds pin the CPU-grid phase of the
+                // write on the absolute clock — the lcd_offset enable-phase
+                // dual-trace axis (SameBoy `SBWLCDC fp=`).
+                eprintln!(
+                    "SLOPGB w{addr:04x} val={value:02x} ly={l} dot={d} clk={} ds={}",
+                    self.cycles,
+                    u8::from(self.double_speed)
+                );
             }
             self.ppu.stage_write(addr, value, dots);
         }
