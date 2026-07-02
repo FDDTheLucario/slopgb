@@ -126,6 +126,22 @@ impl Interconnect {
     /// trails at cc+4), every read here samples at the leading edge, and the
     /// dispatch reclock's `pending=2` lands the vector/handler reads 2 dots
     /// early.
+    ///
+    /// **Part B (HALFDOT-BUILD-PLAN.md §3B) — the `GB_display_sync` analogue.**
+    /// `advance_machine_t` is T-granular and drives the PPU per 8 MHz half-dot
+    /// (`Ppu::tick_half`), so by the time the sample below runs the PPU is
+    /// resolved to the read's EXACT half-dot: a DS read landing on an odd CPU-T
+    /// sits mid-dot (`Ppu::sub_dot() == 1`), exactly like SameBoy's zero-cycle
+    /// force-run (`sync_ppu_if_needed → GB_display_run(gb, 0, true)`,
+    /// memory.c:540 / display.h:51) draining the display coroutine to the
+    /// read's T before returning `STAT&3`. The FF41/FF44/accessibility
+    /// verdicts sampled here are therefore "as of that true half-dot"; the
+    /// half-dot read-position laws compare [`Ppu::read_pos_hd`] (+ the per-ISR
+    /// carry [`Ppu::isr_read_carry_hd`]) against half-dot boundaries. The
+    /// frame mapping to SameBoy is `slopgb dot D ↔ SameBoy cfl D+4` (single
+    /// speed) / `D+3` (double speed — the odd offset is why the mid-dot
+    /// position is load-bearing there), validated by the `SLOPGB ff41` ↔
+    /// `SBREAD fp=` dual-trace on the kernel pair + `m2int_m3stat` (+ DS legs).
     /// TEMP (#11an+) per-bus-op ISR T-sequence trace: log the deferred access's
     /// sample position (ly, dot, clk, pend) on the measurement-line window, the
     /// slopgb counterpart to SameBoy's `SB2`. `SLOPGB_ISRTRACE`, byte-identical
@@ -195,9 +211,11 @@ impl Interconnect {
             if line < 144 {
                 let (wa, ve, lrd, vh, vm, ns) = self.ppu.dbg_read_state();
                 eprintln!(
-                    "SLOPGB ff41 ly={line} dot={dot} clk={} mode={} pend={pend_dbg} wa={wa} ve={ve} lrd={lrd} vh={vh} vm={vm} ns={ns}",
+                    "SLOPGB ff41 ly={line} dot={dot} clk={} mode={} pend={pend_dbg} wa={wa} ve={ve} lrd={lrd} vh={vh} vm={vm} ns={ns} dh={} mclk={}",
                     self.clock.now(),
-                    v & 3
+                    v & 3,
+                    self.ppu.sub_dot(),
+                    self.cycles
                 );
             }
         }

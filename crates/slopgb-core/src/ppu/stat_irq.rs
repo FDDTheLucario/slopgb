@@ -352,28 +352,22 @@ impl Ppu {
             })
         {
             let scx = i32::from(self.scx & 7);
-            let (exit_hd, carry) = if self.ds {
-                let c = if self.read_carried && self.stat_rise_m0 {
-                    -4
-                } else {
-                    0
-                };
-                (508 + 2 * scx + 2 * i32::from(self.scx & 1), c)
+            // Part B: the read's exact half-dot position + the per-ISR carry
+            // come from the shared read-position API ([`Ppu::read_pos_hd`] +
+            // [`Ppu::isr_read_carry_hd`]) — the same values the shipped law
+            // carried inline (m2-ISR +4 / m0-ISR +2 SS, m0-ISR −4 DS).
+            let carry = self.isr_read_carry_hd();
+            let exit_hd = if self.ds {
+                508 + 2 * scx + 2 * i32::from(self.scx & 1)
             } else {
                 // SS m2-ISR carry +4 (#11bd, the w=4 co-land): the mode-2
                 // OAM-ISR handler's first FF41 read sits +4 hd late of the
-                // polled frame (#11aq measured). At w = 0 this was excluded
-                // (post-switch `speedchange2 *m2int_m3stat_scx1_1` reads
-                // flip−1 wanting 3 while the no-switch `m2int_scx3` reads
-                // flip−1 wanting 0 — no (E, carry) fit both); the leave-only
-                // w=4 advance separates the post-switch reads.
-                let c = if self.read_carried && self.stat_rise_oam {
-                    4
-                } else if self.read_carried && self.stat_rise_m0 {
-                    2
-                } else {
-                    0
-                };
+                // polled frame (#11aq measured; now [`Ppu::isr_read_carry_hd`]).
+                // At w = 0 this was excluded (post-switch `speedchange2
+                // *m2int_m3stat_scx1_1` reads flip−1 wanting 3 while the
+                // no-switch `m2int_scx3` reads flip−1 wanting 0 — no (E, carry)
+                // fit both); the leave-only w=4 advance separates the
+                // post-switch reads.
                 // The SS exit is EMERGENT from the render — `2*flip + 2`
                 // anchored to the actual recorded flip (post-flip reads) or
                 // the render's own projection (pre-flip reads), NOT a
@@ -389,14 +383,14 @@ impl Ppu {
                     let (proj, lead) = self.flip_projection();
                     self.dot + proj.saturating_sub(lead)
                 };
-                (2 * i32::from(flip) + 2, c)
+                2 * i32::from(flip) + 2
             };
             // #11bd: SS reads add the carried LCD phase (the per-leave m3stat
             // read-frame surplus over the machine epoch; 0 for never-switched
             // ROMs). DS keeps 0 — the DS post-leave segments are epoch-only
             // (the offset1 `_ds` count rows), measured.
             let phase = if self.ds { 0 } else { i32::from(self.lcd_phase_hd) };
-            let read_hd = 2 * i32::from(self.dot) + i32::from(self.dhalf) + carry + phase;
+            let read_hd = self.read_pos_hd() + carry + phase;
             return if read_hd < exit_hd { 3 } else { 0 };
         }
         // C2 #11ar-m0stat READ-FRAME slice (the second clean read-position slice,

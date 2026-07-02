@@ -997,10 +997,49 @@ impl Ppu {
     /// The current half-dot phase (0 = at a dot boundary, 1 = mid-dot). Part B
     /// samples this to resolve a deferred read to the exact 8 MHz half-dot the
     /// CPU-T lands on (a DS read on an odd CPU-T sits mid-dot). Always 0 on the
-    /// whole-dot production path.
-    #[allow(dead_code)] // Part B seam (HALFDOT-BUILD-PLAN.md §3B); consumed next stage.
+    /// whole-dot production path. Consumed by [`Self::read_pos_hd`] (Part B,
+    /// HALFDOT-BUILD-PLAN.md §3B) and the `read_deferred` dual-trace.
     pub(crate) fn sub_dot(&self) -> u8 {
         self.dhalf
+    }
+
+    /// Part B (HALFDOT-BUILD-PLAN.md §3B) — the deferred read's EXACT half-dot
+    /// position within the current line: `2*dot + dhalf` on the 8 MHz grid.
+    /// [`Interconnect::read_deferred`] advances the machine T-granularly to the
+    /// read's leading edge (the `GB_display_sync` analogue), so at the sample
+    /// instant this IS the read's true half-dot — a DS read landing on an odd
+    /// CPU-T resolves mid-dot (`dhalf == 1`), which the whole-dot `self.dot`
+    /// alone cannot represent (the "+3 not +4" DS ISR read offset). Every
+    /// half-dot read-position law compares against this ONE value; the per-ISR
+    /// sub-M-cycle carry is [`Self::isr_read_carry_hd`], kept separate so
+    /// polled reads stay uncarried. Production reads never resolve mid-dot
+    /// (`dhalf` stays 0 flag-off) and no flag-off law consumes this.
+    pub(crate) fn read_pos_hd(&self) -> i32 {
+        2 * i32::from(self.dot) + i32::from(self.dhalf)
+    }
+
+    /// Part B — the per-ISR deferred-read sub-M-cycle carry (8 MHz half-dots),
+    /// applied ON TOP of [`Self::read_pos_hd`] by the laws that model a
+    /// STAT-ISR handler's first FF41 read. The #11aq/#11ar measured offsets:
+    /// a carried (`read_carried`) mode-2 OAM-ISR read sits +4 hd late of the
+    /// polled frame at single speed, a mode-0 HBlank-ISR read +2 hd; in double
+    /// speed only the mode-0-ISR read differs (−4 hd — the #11ar full-carry
+    /// law's `off = m0 ? 2 : 4` rewritten on the half-dot grid, exit-folded).
+    /// 0 for polled/uncarried reads. Byte-identical OFF (`read_carried` is
+    /// only armed on the tier2 dispatch path).
+    pub(super) fn isr_read_carry_hd(&self) -> i32 {
+        if !self.read_carried {
+            return 0;
+        }
+        if self.ds {
+            if self.stat_rise_m0 { -4 } else { 0 }
+        } else if self.stat_rise_oam {
+            4
+        } else if self.stat_rise_m0 {
+            2
+        } else {
+            0
+        }
     }
 
     /// #11bd — accumulate the LCD phase residual at a STOP speed-switch leave
