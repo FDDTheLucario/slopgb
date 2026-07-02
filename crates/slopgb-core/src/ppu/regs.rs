@@ -215,6 +215,11 @@ impl Ppu {
         }
         match addr {
             0x8000..=0x9FFF => {
+                // #11bd item 5: record the attempt for the DS line-end VRAM
+                // read release (blocked attempts too — the M-cycle cost is
+                // what SameBoy spreads).
+                self.vram_wr_line = self.line;
+                self.vram_wr_dot = self.dot;
                 if !self.vram_write_blocked() {
                     self.vram[self.vram_index(addr)] = value;
                 }

@@ -643,6 +643,13 @@ pub struct Ppu {
     /// where SameBoy draws the window. Frame-sticky like `wy_triggered`;
     /// reset at the frame top. Tier2 + CGB only (byte-identical OFF).
     wy_xline_trig: bool,
+    /// #11bd item 5 — the last CPU VRAM write ATTEMPT's (line, dot), for the
+    /// DS line-end VRAM read release: a readback following a same-line write
+    /// within ~2 DS M-cycles keeps the SS view (SameBoy spreads the write's
+    /// M-cycle cost across the readback — `vramw_m3end_ds_2` wants BLOCKED
+    /// at the dot where the write-free `prewrite_ds` readback is open).
+    vram_wr_line: u8,
+    vram_wr_dot: u16,
     /// The most recent staged rendering write was double-speed (1-dot)
     /// staging — used to pick the wy2 catch-up delay.
     staged_ds: bool,
@@ -862,6 +869,8 @@ impl Ppu {
             wy_trig_sb_dot: 0,
             wy_trig_sb_raw: false,
             wy_xline_trig: false,
+            vram_wr_line: 0xFF,
+            vram_wr_dot: 0,
             staged_ds: false,
             ds: false,
             win_line: 0xFF,

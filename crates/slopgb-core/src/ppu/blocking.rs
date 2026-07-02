@@ -190,6 +190,45 @@ impl Ppu {
         // (`vram_m3/preread_lcdoffset1_1` reads dot83 after the +1-dot machine
         // advance where SameBoy still reads open; identity otherwise).
         let d = if self.tier2_reclock { self.law_pos().1 } else { self.dot };
+        // #11bd item 5 — the DS tier2 VRAM read frame: (a) the deferred cc+0
+        // read's true DS sample sits +3 T late, so the mode-3 entry lock
+        // covers it from dot 80 (the SS +3 CGB grace does not apply on the
+        // DS grid: `preread_ds_2` reads dot82 wanting BLOCKED); (b) the
+        // line-END release mirrors the #11as OAM release at 254 + SCX&7,
+        // EXCEPT within 8 dots of a same-line CPU VRAM write attempt (the
+        // write's M-cycle cost SameBoy spreads across the readback —
+        // `vramw_m3end_ds_2` stays blocked where the write-free
+        // `prewrite_ds`/`postread_ds` readbacks are open).
+        if self.tier2_reclock && self.model.is_cgb() && !self.glitch_line {
+            // Line-END VRAM read release at the bare exit, BOTH speeds: the
+            // #11as SS refusal ("co-temporal with vramw_m3end") is resolved
+            // by the wr_recent discriminator — the vramw readback follows
+            // its own VRAM write within 2 M-cycles (the write's M-cycle
+            // cost SameBoy spreads across the readback) and stays blocked,
+            // while the write-free postread/prewrite readbacks open
+            // (`postread_scx5_ds_2` measures in SINGLE speed at dot260).
+            let wr_recent = self.vram_wr_line == self.line
+                && self.dot >= self.vram_wr_dot
+                && self.dot - self.vram_wr_dot < 8;
+            if self.line >= 1
+                && self.line <= 143
+                && self.render.n_sprites == 0
+                && !self.render.win_active
+                && d >= 254 + u16::from(self.scx & 7)
+                && !wr_recent
+            {
+                return false;
+            }
+            if self.ds {
+                // The `preread_ds_1`/`_2` pair straddles the entry lock (dot80
+                // open / dot82 blocked): lock from 82 on the DS grid. Shifted
+                // ROMs' polls land +3 dots for the +1-dot machine advance (the
+                // poll quantum), so their law frame under-corrects by 1: the
+                // boundary moves to 83 (`preread_ds_lcdoffset1_1` law-dot82
+                // wants OPEN where the unshifted `_2` real-dot82 wants BLOCKED).
+                return d >= 82 + u16::from(self.lcd_shift_dots > 0);
+            }
+        }
         if self.glitch_line {
             d >= GLITCH_MODE3_START + late
         } else {
@@ -204,6 +243,18 @@ impl Ppu {
         if self.glitch_line {
             self.dot >= GLITCH_MODE3_START
         } else {
+            // #11bd item 5 — DS tier2: the deferred write's true DS sample
+            // sits later on the dot grid, so the mode-3 write lock covers it
+            // from dot 82 (`prewrite_ds_2` wants its ~dot82 write BLOCKED
+            // while `_1`'s earlier write lands).
+            if self.tier2_reclock && self.model.is_cgb() && self.ds {
+                // Same shifted-poll-quantum +1 as the read lock. (A line-END
+                // write release twin was built + REVERTED: it fixed nothing
+                // and broke a vramw_m3end want-dropped write, measured.)
+                let (_, wd) = self.law_pos();
+                return wd >= 82 + u16::from(self.lcd_shift_dots > 0)
+                    && !self.write_unblocked_early();
+            }
             // Write locking begins 4 dots after read locking
             // (`lcdon_write_timing-GS`: a write at line dot 80 still lands), and
             // ends on the visible mode→0 flip under Tier-2 (`write_unblocked_early`).
