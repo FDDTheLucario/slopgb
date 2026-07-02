@@ -31,7 +31,10 @@ TESTER="$DIR/build/bin/tester/sameboy_tester"
 if [ -x "$TESTER" ] && grep -q 'SBMODE ly=%d cfl=%d dc=%d vis=%d fp=' "$DIR/Core/display.c" 2>/dev/null \
    && grep -q SBDISP "$DIR/Core/sm83_cpu.c" 2>/dev/null \
    && grep -q SBPALR "$DIR/Core/memory.c" 2>/dev/null \
-   && grep -q SBWSCX "$DIR/Core/memory.c" 2>/dev/null; then
+   && grep -q SBWSCX "$DIR/Core/memory.c" 2>/dev/null \
+   && grep -q SBWLCDC "$DIR/Core/memory.c" 2>/dev/null \
+   && grep -q SBSTOP "$DIR/Core/sm83_cpu.c" 2>/dev/null \
+   && grep -q SBSPD "$DIR/Core/timing.c" 2>/dev/null; then
   echo "tester already built + patched: $TESTER"; exit 0
 fi
 
@@ -183,8 +186,95 @@ if "SBWSCX" not in mem3:
     open(d+"/Core/memory.c","w").write(mem3)
     print("patched memory.c (SBWSCX)")
 
+# #11bd: the LCD-phase-origin tracers — SBWLCDC (every FF40 write: old/new value,
+# double_speed_alignment, speed, fp), SBWKEY1 (FF4D arm), SBSTOP (the STOP
+# speed-switch decision point: direction, alignment&7, interrupt_pending, fp) and
+# SBSPD (the actual cgb_double_speed flip instants in GB_advance_cycles, fp).
+# Together they pin WHERE the lcd_offset ROMs' CPU<->PPU phase establishes
+# (enable-vs-switch sequencing) for the item-1 phase representation.
+mem4=open(d+"/Core/memory.c").read()
+if "SBWLCDC" not in mem4:
+    mem4=mem4.replace(
+"""                gb->io_registers[GB_IO_LCDC] = value;
+                gb->wy_check_scheduled = true;
+                return;""",
+"""                { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+                  if(trc) fprintf(stderr,"SBWLCDC ly=%d cfl=%d dc=%d old=%02x new=%02x dsa=%d ds=%d fp=%lld\\n",
+                    gb->current_line, gb->cycles_for_line, gb->display_cycles,
+                    gb->io_registers[GB_IO_LCDC], value, gb->double_speed_alignment,
+                    gb->cgb_double_speed, (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }
+                gb->io_registers[GB_IO_LCDC] = value;
+                gb->wy_check_scheduled = true;
+                return;""")
+    mem4=mem4.replace(
+"""            case GB_IO_KEY1:
+                if (!gb->cgb_mode) {
+                    return;
+                }
+                gb->io_registers[GB_IO_KEY1] = value;
+                return;""",
+"""            case GB_IO_KEY1:
+                if (!gb->cgb_mode) {
+                    return;
+                }
+                { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+                  if(trc) fprintf(stderr,"SBWKEY1 ly=%d cfl=%d dc=%d val=%02x fp=%lld\\n",
+                    gb->current_line, gb->cycles_for_line, gb->display_cycles, value,
+                    (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }
+                gb->io_registers[GB_IO_KEY1] = value;
+                return;""")
+    open(d+"/Core/memory.c","w").write(mem4)
+    print("patched memory.c (SBWLCDC/SBWKEY1)")
+
+tim=open(d+"/Core/timing.c").read()
+if "SBSPD" not in tim:
+    tim=tim.replace(
+"""        if (gb->speed_switch_countdown == cycles) {
+            gb->cgb_double_speed ^= true;
+            gb->speed_switch_countdown = 0;
+        }""",
+"""        if (gb->speed_switch_countdown == cycles) {
+            gb->cgb_double_speed ^= true;
+            { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+              if(trc) fprintf(stderr,"SBSPD ly=%d cfl=%d dc=%d ds=%d dsa=%d fp=%lld\\n",
+                gb->current_line, gb->cycles_for_line, gb->display_cycles, gb->cgb_double_speed,
+                gb->double_speed_alignment, (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }
+            gb->speed_switch_countdown = 0;
+        }""")
+    tim=tim.replace(
+"""            GB_advance_cycles(gb, old_cycles);
+            gb->cgb_double_speed ^= true;
+        }""",
+"""            GB_advance_cycles(gb, old_cycles);
+            gb->cgb_double_speed ^= true;
+            { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+              if(trc) fprintf(stderr,"SBSPD ly=%d cfl=%d dc=%d ds=%d dsa=%d fp=%lld\\n",
+                gb->current_line, gb->cycles_for_line, gb->display_cycles, gb->cgb_double_speed,
+                gb->double_speed_alignment, (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }
+        }""")
+    open(d+"/Core/timing.c","w").write(tim)
+    print("patched timing.c (SBSPD)")
+
 # sm83_cpu.c — the per-ISR dispatch (SBDISP, at the vector-PC latch) + the
 # halt-wake sample position (SBWAKE), for the #11aq read-position-carry trace.
+cpu0=open(d+"/Core/sm83_cpu.c").read()
+if "SBSTOP" not in cpu0:
+    cpu0=cpu0.replace(
+"""    if (speed_switch) {
+        flush_pending_cycles(gb);
+        
+        if (gb->io_registers[GB_IO_LCDC] & GB_LCDC_ENABLE && gb->cgb_double_speed) {""",
+"""    if (speed_switch) {
+        flush_pending_cycles(gb);
+        { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+          if(trc) fprintf(stderr,"SBSTOP ly=%d cfl=%d dc=%d from_ds=%d dsa=%d dsa7=%d ip=%d fp=%lld\\n",
+            gb->current_line, gb->cycles_for_line, gb->display_cycles, gb->cgb_double_speed,
+            gb->double_speed_alignment, gb->double_speed_alignment & 7, interrupt_pending,
+            (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }
+        if (gb->io_registers[GB_IO_LCDC] & GB_LCDC_ENABLE && gb->cgb_double_speed) {""")
+    open(d+"/Core/sm83_cpu.c","w").write(cpu0)
+    print("patched sm83_cpu.c (SBSTOP)")
+
 cpu=open(d+"/Core/sm83_cpu.c").read()
 if "SBDISP" not in cpu:
     cpu=cpu.replace(

@@ -1,6 +1,23 @@
 # The half-dot (8 MHz) pixel-pipe reclock — constructive build plan
 
-Status (2026-07-02 #11bc): **the THREE PORTS are BUILT on the grain+write-strobe
+Status (2026-07-02 #11bd): **the goal.md ONE-SESSION convergence run LANDED
+five slices across attack items 1-5 (`phase-b-s7` `931e629`..`5bf6e69`):
+the LCD-offset PHASE REPRESENTATION (item 1 keystone — `sb_dsa8` shadow of
+SameBoy's `double_speed_alignment`, alignment-dependent leave advance
+k = dsa7==4 ? 6 : 2, `lcd_shift_dots` + `law_pos()` un-shifted-frame law
+classification, PORT-1 halves re-enabled), the CGB halt wake (item 2 — the
+cc==4 hold is DMG/DS-only), the boundary-WY cross-line window extend
+(item 4, +4/−0, pin 36) and the tier2 VRAM read-frame laws (item 5,
+5 blockers → 1). Item 3 (ENGINE-IF FF0F) build-measured ATOMIC: the sub-M
+FF0F sample + read-view visibility delay both A/B-swap (per-source offsets
+{−4..−16} re-confirmed at mechanism level; scaffold deleted). Flag-on
+two-bin 437→415; blockers 104→83 (+45 rebaseline); 36 pins; mooneye 91/91
+ON+OFF; gbtr OFF 221/0. One documented bonus-loss
+(`speedchange2_nop_m2int_m3stat_scx1_1`, read-frame atomic). The remaining
+83 sit in the measured-atomic classes — the next constructive lever is
+Part A-render+B proper. Detail: `ppu-subdot-ladder.md` "#11bd".**
+
+Prior status (2026-07-02 #11bc): **the THREE PORTS are BUILT on the grain+write-strobe
 (`phase-b-s7`): PORT 1 the unified half-dot bare-exit comparison (the #11ar DS
 law rewritten exactly on the `2*dot + dhalf + carry < exit_hd` grid + the NEW
 SS arm with the EMERGENT exit `2*flip + 2` from the render's own
