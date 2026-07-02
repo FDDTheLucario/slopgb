@@ -995,3 +995,45 @@ unnecessary for the C2/C3 residual — retire it.** Remaining Phase B is whole-M
 (1) +4 ISR read frame (PPU-advance, NOT bus.tick — di_timing) separates kernel/m2int_scx2;
 (2) render mode-3 length/window-trigger/frame-phase co-move fixes the co-temporal pairs;
 (3) mask re-derive + rebaseline + flip. NO sub-half-dot architecture on the path.
+
+## #11az (2026-07-01) — the half-dot build SPECIFIED from the current code state; ESCAPE (multi-session atomic), tree clean-green, defaults NOT flipped
+
+Session goal: build the half-dot pixel-pipe reclock and land the C2/C3 flip in
+one session. Result: **ESCAPE** — the build is a coupled atomic rewrite that
+cannot converge 115 zero-drop in one session (re-confirmed with fresh code +
+a newly-extracted SameBoy per-tick spec, not deference to history). NO slopgb
+code shipped; base `6f375fe` byte-identical; mooneye flag-on 91/91; 27 pins green.
+
+**Confirmed base:** flag-on 455 / off 486 → 165 flip-BUGs = **115 SameBoy-pass +
+50 rebaseline** (`classify_cgb_regr.py`); families window 17 / halt 12 /
+lycEnable 11 / speedchange 7 / lcd_offset 7 / cgbpal 7 / enable_display 6 / dma 6
+/ vram 5 / miscmstatirq 5 / … (SS 64 / DS 50). Matches the goal's baseline exactly.
+
+**Extracted the definitive SameBoy porting spec** (agent over `Core/timing.c` +
+`display.c` + `memory.c`): PPU = divisor-2 8 MHz coroutine (dot-rate fixed across
+speed; DS changes only input pre-doubling); FF41 read = `GB_display_sync`
+(0-cycle force-run to the exact half-dot) → `STAT&3`; `STAT&3` and
+`mode_for_interrupt` are TWO latches 1 dot apart (mode 3 never sources a STAT
+IRQ); mode-2 IRQ 1 dot before / mode-0 IRQ 1 dot after the visible edge (SS);
+mode-3 length emergent (`pos==160`), closed-form `167+SCX&7` for trivial lines.
+
+**Atomicity re-proven from code (not asserted), `late_scx4` worked example:** the
+two legs read 2 half-dots apart, flip 8 apart. Half-dot render length ALONE →
+whole-dot reads both land one side → A/B swap. Half-dot read ALONE → both legs
+render one whole-dot length → A/B swap. BOTH jointly required; generalises across
+all 5 classes × 3422 rows (per-class offsets span `{−20..+18}`, opposite-signed
+by register). This is why every bounded lever measured an A/B swap (BARELAW
++23/−27, M2HOLD −50, DSM2DELAY +29/−26, WAKEPEEK +3/−13, read-position carry +9/−0
+then exhausted, …). The dispatch dot is counter-pinned (moving it HANGS mooneye).
+
+**Deliverable — the constructive build plan** (`docs/sameboy-port/HALFDOT-BUILD-PLAN.md`):
+the SameBoy per-tick order mapped onto the exact current-code transformation —
+`render_step`→half-dot pipe, the `early_lead` case-tower (`mode0.rs:212`) + the
+SEVEN accreted `vis_mode_read` shadow laws (window-length/late-WY/pre-draw-abort/
+reenable/un-trigger/carried-read/m0stat) collapsing into ONE half-dot visible-mode
+boundary, `read_deferred`→exact-half-dot sync, the boundary-constant re-derivation
+table, per-class landing, and the multi-session staging (A-infra byte-identical →
+B read-sync → A-render+C collapse = convergence → WAKE/READ-FRAME/ENGINE-IF →
+S6-DS → flip). `PORT-PLAN.md`'s S0–S7 (pre-slice #11e) is superseded for the
+render/read/flip parts by this plan. Blocker inventory:
+`tools/measurements/c2-halfdot-build-plan-2026-07-01.md`. USE `fp`, never `cfl*2+dc`.
