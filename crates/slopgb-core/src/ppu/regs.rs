@@ -421,6 +421,7 @@ impl Ppu {
             // every enable re-arms it; don't leave it stale across off.
             self.frame_skip = false;
             self.line_render_done = true;
+            self.flip_dot = 0;
             self.vis_early = false;
             self.vis_hold_until = 0;
             self.render_finished = true;
@@ -453,6 +454,7 @@ impl Ppu {
             // after enabling (see `frame_skip`).
             self.frame_skip = true;
             self.line_render_done = false;
+            self.flip_dot = 0;
             self.vis_early = false;
             self.vis_hold_until = 0;
             self.render_finished = false;

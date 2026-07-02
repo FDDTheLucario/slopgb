@@ -342,6 +342,16 @@ pub struct Ppu {
     /// `m0_flip_events` in render.rs), and can drop back mid-line when
     /// a late write arms a new stall (`m0_unflip`).
     line_render_done: bool,
+    /// PORT 1 (#11bc) — the dot `line_render_done` fired on this line (0 =
+    /// not fired yet / dropped by `m0_unflip`). The half-dot bare-exit law
+    /// (`vis_mode_read`) anchors the CPU-visible mode-3→0 exit to the RENDER's
+    /// actual flip (`exit_hd = 2*flip_dot + 2`), so a mid-line SCX write moves
+    /// the exit exactly as the fine-scroll hunt resolved it (late_scx4 /
+    /// scx_m3_extend — a live-`scx` closed form mis-frames the missed-hunt
+    /// leg). Recorded on both fire paths (projection + the `advance_lx` pipe-
+    /// end fallback); reset at line start, `m0_unflip`, and LCD transitions.
+    /// Only read under `tier2_reclock` → production byte-identical.
+    flip_dot: u16,
     /// Port Stage S2c — the CPU-visible STAT mode→0 boundary back-dated to
     /// SameBoy's cycle-exact frame, **decoupled from the IRQ-dispatch flip**
     /// (`line_render_done`/`m0_src`). On the `leading_edge_reads` flag-on path
@@ -797,6 +807,7 @@ impl Ppu {
             stat_rise_m0: false,
             read_carried: false,
             line_render_done: true,
+            flip_dot: 0,
             vis_early: false,
             vis_hold_until: 0,
             render_finished: true,

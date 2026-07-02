@@ -144,7 +144,30 @@ impl Interconnect {
         }
     }
 
+    /// PORT 2 (#11bc): repay the outstanding sub-M-cycle wake skew — the
+    /// next access pays the extra T and lands back on the aligned 4-T grid.
+    pub(super) fn repay_wake_skew(&mut self) {
+        self.clock.carry_read(std::mem::take(&mut self.wake_skew));
+    }
+
     pub(super) fn read_deferred(&mut self, addr: u16, kind: OamBugKind) -> u8 {
+        // PORT 2 (#11bc): an outstanding sub-M-cycle wake skew is consumed by
+        // the handler's FIRST FF41 read — the `halt *_m0stat` measurement
+        // read samples the STAT mode at the wake's true sub-M-cycle T (2 T
+        // early) — and REPAID before any other IO/PPU-positional read, so
+        // the TIMA-counted (`int_hblank_halt`) and LY-straddle
+        // (`hblank_ly_scx`, the C1.3 carry) wake grids keep their aligned
+        // calibration. One-shot; also repaid at the next halt entry
+        // (`set_cpu_halted`) as the backstop.
+        if self.tier2_reclock
+            && self.wake_skew != 0
+            && addr & 0xFF80 == 0xFF00
+            && addr != 0xFF41
+        {
+            // IO-page reads other than FF41 re-align first (ROM/RAM fetches
+            // ride the skew — the handler's code path must not consume it).
+            self.repay_wake_skew();
+        }
         let before = self.clock.now();
         let pend_dbg = self.clock.pending(); // C2 cc-exact: the debt paid before this read
         let _ = self.clock.read(); // clock += old pending; park 4
@@ -158,6 +181,11 @@ impl Interconnect {
         // `vis_mode_read` already consumed `read_carried` inside `read_no_tick`).
         if addr == 0xFF41 {
             self.ppu.set_read_carried(false);
+            // PORT 2: the wake skew is consumed by this read — repay it so
+            // everything after runs on the aligned grid.
+            if self.tier2_reclock && self.wake_skew != 0 {
+                self.repay_wake_skew();
+            }
         }
         // S5 read-dot tracer: line slopgb's deferred FF41 read dot up against
         // SameBoy's `read_high_memory` cfl (`SLOPGB_S5DBG`; byte-identical when

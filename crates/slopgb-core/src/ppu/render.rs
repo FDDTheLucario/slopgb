@@ -184,7 +184,9 @@ pub(super) struct Render {
     /// (gambatte window/late_* m3stat rows pin the later flip; the
     /// gbmicrotest win*_b line-1 grid prefers a 2-dot lead there and
     /// stays in the baseline — a documented one-dot conflict).
-    win_stalled: bool,
+    /// `pub(super)` for the PORT 1 half-dot bare-exit law's clean-bare
+    /// guard (`stat_irq.rs::vis_mode_read`).
+    pub(super) win_stalled: bool,
     /// The window was aborted mid-line by an LCDC.5 clear: on DMG the
     /// resumed BG fetch trails at the line tail, dropping the flip lead
     /// to 0 (gambatte window/late_disable_* rows carry dmg08_out3 vs

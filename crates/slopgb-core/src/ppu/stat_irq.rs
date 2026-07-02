@@ -242,70 +242,113 @@ impl Ppu {
         {
             return 0;
         }
-        // C2 #11ar SCOPED carried-read exit OVERRIDE (env-gated `SLOPGB_CARRYOVR`,
-        // co-lands with `SLOPGB_M2CARRY`). The carry moved THIS read (an OAM/
-        // HBlank STAT-ISR handler read, flagged by `read_carried`) to SameBoy's
-        // absolute cfl, so the read-frame offset is 0 and the verdict is
-        // SameBoy's mode AT that cfl: `mode 3 iff cfl < SBex`, a FULL 3↔0
-        // override of slopgb's native mode. This unifies the two prior
-        // half-laws — `M2HOLD` (holds 3 for a native-0 read past slopgb's low
-        // exit, e.g. m2int_ds_1) and `BARELAW` (forces 0 for a native-3
-        // over-extended render, e.g. late_disable_ds_1) — which at the SAME
-        // carried dot want OPPOSITE directions. Crucially SCOPED to `read_carried`
-        // (the #11aq −50 fix): the blanket exit hold mis-framed non-carried
-        // polled reads whose native frame was already right. `SBex = 257 + SCX&7
-        // + ds` (+ the #11ap `SCX&1` half-dot parity on the even DS read grid).
-        // DS-only (the carry is DS-only); bare non-sprite non-glitch CGB lines.
-        // C2 #11ar-full — the FULL per-read carry + ONE SBex exit (the goal's
-        // "carry EVERY deferred read to SameBoy's cfl + one render-length exit,
-        // globally consistent"). Applies the SBex verdict to EVERY bare mode-3
-        // FF41 read — carried STAT-ISR reads AND polled reads alike — via a
-        // transient read-frame offset (a PEEK, no machine advance, so the
-        // counter-pinned dispatch dot + IF delivery stay put, mooneye 91/91):
+        // PORT 1 (#11bc) — the unified HALF-DOT bare-line mode-3 EXIT: one
+        // comparison on the 8 MHz half-dot grid replaces the whole-dot bare
+        // verdict laws. The FF41 read's true position is `2*dot + dhalf`
+        // half-dots plus a per-ISR read CARRY (the #11aq/#11ar measured
+        // sub-M-cycle offsets of a STAT-ISR handler's first FF41 read,
+        // applied as READ POSITION, not a verdict override); the CPU-visible
+        // bare mode-3→0 exit is a per-speed half-dot line constant:
         //
-        //   off = (read_carried && HBlank-source) ? 2 : 4      // the deferred
-        //         cc+0 read lands 4 dots before SameBoy's cc+4 frame (the leading-
-        //         edge default); only the mode-0 (HBlank) STAT-ISR read is +2
-        //         (MEASURED — #11aq: OAM ISR +4, HBlank ISR +2; polled = +4).
-        //   verdict = (dot + off) < SBex ? 3 : 0                // SBex = SameBoy's
-        //         bare mode-3 exit 257 + SCX&7 + ds (+ the #11ap SCX&1 half-dot
-        //         parity on the even DS read grid).
+        //   SS: exit_hd = 510 + 2*(SCX&7)              carry: m2-ISR +4, m0-ISR +2, polled 0
+        //   DS: exit_hd = 508 + 2*(SCX&7) + 2*(SCX&1)  carry: m0-ISR −4, else 0
         //
-        // This UNIFIES the two shipped scoped peeks (m2int_m3stat +6, the carried
-        // read; the dma polled reads +2) into one global law: the POLLED_OFF
-        // sweep is +7/−0 at off 0-3, **+9/−0 at off 4-5** (the clean plateau —
-        // gdma_cycles_long_ds_2 + hdma_cycles_ds_2 land at SameBoy's frame),
-        // A/B-swapping only at off ≥ 6 (the co-temporal dma `_ds_1` siblings). The
-        // guards keep it exact: bare (`!win_active`/`!win_aborted`/`!wy_trig_sb`
-        // excludes the co-temporal late_disable + window render-length A/B pairs),
-        // non-glitch, non-sprite, DS, CGB, `m == 3` (mode-3 reads only — the
-        // m0stat/m2stat reads probe a different boundary and keep native). The
-        // residual 123 blockers are NOT bare-mode-3 FF41 reads (FF0F IF-delivery /
-        // VRAM/OAM/palette accessibility / co-temporal wake) — structurally
-        // unreachable by any FF41 verdict law, needing the S4/S6/IF-lifecycle
-        // ports. Tier2-unconditional; byte-identical flag-OFF.
+        //   verdict = (2*dot + dhalf + carry) < exit_hd ? 3 : 0
+        //
+        // The DS arm is the EXACT rewrite of the shipped #11ar full-carry law
+        // (`dot + off < 257 + SCX&7 + ds + (SCX&1)`, off = m0-ISR?2:4 —
+        // multiply by 2, fold the polled offset 8 into the exit; the exit is
+        // EVEN so the dhalf term cannot flip a verdict → byte-identical,
+        // pinned by `tier2_m2int_m3stat_ds_readpos_passes`). The SS arm is
+        // NEW (#11bc): derived by closing the algebra over six pinned
+        // constraints — the kernel pair (m2int@252→3 ∧ m0int@256→0, scx0),
+        // lcdon's polled dot-253→3, the #11n cc2-arm rows
+        // (m2int_scx3@256→0 through the m2-ISR +4 carry), and the
+        // speedchange4 post-switch pairs' SameBoy fp dual-trace (scx1 flip
+        // fp == read_2 fp, scx2 flip = read_1 + 2 fp → E(scx) = 510 + 2*scx
+        // EXACTLY, with the STOPADV +2-half-dot-per-switch alignment). The
+        // #11n `early_lead` cc2-arm is this law's whole-dot shadow and is
+        // READ-shadowed here (its `vis_early` stays live for the OAM/VRAM
+        // accessibility release only — Part D migrates that). SS fires on
+        // native m ∈ {3, 0} — the true exit sits ±1 dot around the whole-dot
+        // flip, BOTH directions needed (speedchange4 scx2_1 reads AT the
+        // native flip dot and must still read 3); DS keeps the shipped
+        // `m == 3` gate. Bare non-sprite non-window non-glitch lines, ARCH
+        // `self.scx` (the #11bb write-strobe rule). Tier2-gated; production
+        // is byte-identical.
         if self.tier2_reclock
-            && self.model.is_cgb()
-            && self.ds
             && self.line >= 1
             && self.line < 144
-            && m == 3
             && !self.render.win_active
             && !self.render.win_aborted
             && !self.wy_trig_sb
             && !self.glitch_line
             && self.render.n_sprites == 0
-        {
-            let off = if self.read_carried && self.stat_rise_m0 {
-                2
+            && (if self.ds {
+                self.model.is_cgb() && m == 3
             } else {
-                4
+                !self.wy_latch
+                    && self.wy2 != self.ly
+                    && !self.render.win_stalled
+                    // FORCE-0 direction only (`m == 3`, like the shipped DS
+                    // arm): the HOLD direction (returning 3 for a native-0
+                    // read just past the flip) is derivable only in the
+                    // STOPADV-advanced post-switch frame (E = 2*flip + 2
+                    // with reads at SameBoy's cfl − 4); at w = 0 it is
+                    // IRRECONCILABLE — the kernel m2int@252 needs E > 508
+                    // while the post-switch polled read@flip and the CGB
+                    // halt post-flip ISR reads need E ≤ 508 (both measured
+                    // broken, −6 speedchange). The hold re-lands with the w
+                    // co-land (the lcd-offset Part-D re-derivation).
+                    && m == 3
+                    // The emergent exit needs either the recorded flip or a
+                    // live render to project from.
+                    && (self.line_render_done || self.render.active)
+            })
+        {
+            let scx = i32::from(self.scx & 7);
+            let (exit_hd, carry) = if self.ds {
+                let c = if self.read_carried && self.stat_rise_m0 {
+                    -4
+                } else {
+                    0
+                };
+                (508 + 2 * scx + 2 * i32::from(self.scx & 1), c)
+            } else {
+                // SS m2-ISR-carried reads are EXCLUDED until the STOPADV w
+                // frame co-lands: their flip-relative position is w-coupled
+                // (post-switch `speedchange2 *m2int_m3stat_scx1_1` reads
+                // flip−1 wanting 3 while the no-switch `m2int_scx3` reads
+                // flip−1 wanting 0 — no (E, carry) fits both at w = 0,
+                // MEASURED). They keep the base path (the #11n cc2
+                // `early_lead` arm still serves `m2int_scx3`).
+                if self.read_carried && self.stat_rise_oam {
+                    return m;
+                }
+                let c = if self.read_carried && self.stat_rise_m0 {
+                    2
+                } else {
+                    0
+                };
+                // The SS exit is EMERGENT from the render — `2*flip + 2`
+                // anchored to the actual recorded flip (post-flip reads) or
+                // the render's own projection (pre-flip reads), NOT a
+                // live-`scx` closed form: a mid-line SCX write moves the exit
+                // exactly as the fine-scroll hunt resolved it (late_scx4 `_2`
+                // missed the hunt → bare 254 exit while live scx already
+                // reads 4 — the closed form broke it, measured). For a clean
+                // steady line this equals 510 + 2*(SCX&7) (flip 254+SCX&7),
+                // the constant the six-pin algebra derived.
+                let flip = if self.line_render_done && self.flip_dot != 0 {
+                    self.flip_dot
+                } else {
+                    let (proj, lead) = self.flip_projection();
+                    self.dot + proj.saturating_sub(lead)
+                };
+                (2 * i32::from(flip) + 2, c)
             };
-            let sbex = 257
-                + u16::from(self.scx & 7)
-                + u16::from(self.ds)
-                + u16::from(self.scx & 1);
-            return if self.dot + off < sbex { 3 } else { 0 };
+            let read_hd = 2 * i32::from(self.dot) + i32::from(self.dhalf) + carry;
+            return if read_hd < exit_hd { 3 } else { 0 };
         }
         // C2 #11ar-m0stat READ-FRAME slice (the second clean read-position slice,
         // +1/−0). The m2int mode-2 OAM ISR reads FF41 at line-start checking the

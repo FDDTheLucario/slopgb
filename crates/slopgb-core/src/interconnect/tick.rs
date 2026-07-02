@@ -140,7 +140,14 @@ impl Interconnect {
                     // ground truth); broader generalisation is golden + all-oracle
                     // checked at C4. Gated on `tier2_reclock` + `cpu_halted`.
                     const HALT_LY_PHASE_BY_CC: [u8; 4] = [1, 2, 0, 1];
-                    self.halt_ly_phase = HALT_LY_PHASE_BY_CC[(cc as usize - 1) & 3];
+                    // PORT 2 sweep knob (`SLOPGB_P2TBL`, temporary): the carry
+                    // table re-derived for the mid-sample wake frame.
+                    self.halt_ly_phase = match std::env::var("SLOPGB_P2TBL") {
+                        Ok(t) if t.len() == 4 => {
+                            t.as_bytes()[(cc as usize - 1) & 3] - b'0'
+                        }
+                        _ => HALT_LY_PHASE_BY_CC[(cc as usize - 1) & 3],
+                    };
                     // C1.2: base 0 (was 1). The C0 boot-DIV +4 (the deferred
                     // hand-off frame the real flip installs at construction)
                     // advances the timer phase one M-cycle, which shifts this
@@ -152,7 +159,25 @@ impl Interconnect {
                     // set-after-boot path that does NOT apply the +4 — see the
                     // `tier2_int_hblank_halt_passes_dmg` pin (now boots with the
                     // reclock).
-                    self.m0_halt_hold = u8::from(cc == 4);
+                    // PORT 2 (#11bc): +1 uniform mask cycle re-derived under
+                    // the mid-cycle (w2) wake sample — the w2 advance runs the
+                    // following M-cycle's phase-0 mask bookkeeping 2 T early,
+                    // consuming one hold a half-cycle sooner; the extra cycle
+                    // restores the C1.2-calibrated visibility (measured: the
+                    // full 33-pin gate incl. `int_hblank_halt_scx0-7`'s
+                    // 62,62,62,63,63,63,63,64 grid AND `hblank_ly_scx` with
+                    // the unchanged C1.3 carry table passes ONLY at +1).
+                    // `SLOPGB_P2HH` overrides for measurement.
+                    // DMG-only: the +1 compensates the mid-cycle (w2)
+                    // sampler's early phase-0 mask consumption, which only
+                    // exists on the DMG path — on CGB it is a pure +1 wake
+                    // delay (broke the CGB `halt *_m0stat` want-0 legs,
+                    // measured −15 on the two-bin).
+                    let p2hh: u8 = std::env::var("SLOPGB_P2HH")
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(u8::from(!self.model.is_cgb()));
+                    self.m0_halt_hold = p2hh + u8::from(cc == 4);
                 } else if second_half {
                     // The mode-0 STAT rise carries the second-half halt law
                     // — the same shape as the line-start OAM pulses — but
@@ -279,14 +304,33 @@ impl Interconnect {
                 self.pal_access_edge = None;
                 self.stat_mode_edge = None;
             }
+            // PORT 3 (#11bc, the S6 completion frame): the deferred path's
+            // timer/serial ack-squash window is the EXACT SameBoy
+            // T-threshold (`updateTimaIrq(cc + 2 + isCgb())` /
+            // `updateSerial(cc + 3 + isCgb())` before `ackIrq`), not the
+            // whole-M-cycle `deferred_squash` latch — a re-set committing
+            // past the threshold is DELIVERED (`tima/tc00_irq_late_
+            // retrigger_1` wants E4) while one inside it is consumed (the
+            // `_2` sibling wants E0). `pos` is the commit T.
+            let squash_t = if pos < self.ack_squash_deadline_t {
+                self.ack_squash_mask & 0x0C
+            } else {
+                0
+            };
             // Timer substep (T-granular): the second-half commit feeds the
             // `if_late` halt-wake mask exactly as `tick_machine`'s assignment.
             let (tiff, tlate) = self.timer.tick_substep(phase);
-            let t_iff = tiff & IF_MASK & !self.deferred_squash;
+            let t_iff = tiff & IF_MASK & !squash_t;
             self.intf |= t_iff;
             if tlate {
                 self.if_late |= t_iff;
             }
+            // PORT 3: the serial completion commits at its true T — the
+            // DIV-edge falls are detected per T-substep on the deferred path
+            // (the eager `tick_machine` keeps the M-cycle-tail sample; the
+            // detector is a falling-edge compare, so the finer cadence finds
+            // the same edges at their exact T).
+            self.intf |= self.serial.tick(self.timer.div_counter()) & IF_MASK & !squash_t;
             // Half-dot PPU advance (HALFDOT-BUILD-PLAN.md Part A): each CPU-T is
             // 2 8-MHz half-dots (single speed) or 1 (double speed); the PPU runs
             // per half-dot via [`Ppu::tick_half`]. A whole dot completes every
@@ -306,11 +350,10 @@ impl Interconnect {
                 }
             }
             if phase == 3 {
-                // M-cycle tail (the foot of `tick_machine`): APU, serial,
-                // joypad, RTC, all reading the post-timer DIV.
+                // M-cycle tail (the foot of `tick_machine`): APU, joypad,
+                // RTC (the serial moved to the per-T substep above).
                 let div = self.timer.div_counter();
                 self.apu.tick(div, self.double_speed);
-                self.intf |= self.serial.tick(div) & IF_MASK & !self.deferred_squash;
                 self.intf |= self.joypad.take_irq() & IF_MASK;
                 self.cart.tick_rtc(if self.double_speed { 2 } else { 4 });
             }
@@ -346,6 +389,20 @@ impl Interconnect {
             return;
         }
         if halted {
+            // PORT 2 (#11bc): repay an outstanding sub-M-cycle wake skew
+            // before the next halt round begins, re-aligning the CPU to the
+            // machine's 4-T grid — the skew lives from the mid-cycle wake
+            // through the WHOLE handler (its measurement reads sample at the
+            // wake's true sub-M-cycle T) and dies at the next halt entry, so
+            // each round starts from the calibrated aligned frame (an
+            // unbounded skew was measured to hang the multi-round mooneye
+            // `hblank_ly_scx_timing-GS`, B=42).
+            if self.tier2_reclock && self.wake_skew != 0 {
+                let before = self.clock.now();
+                self.clock.carry_read(std::mem::take(&mut self.wake_skew));
+                self.clock.flush();
+                self.advance_machine_t(before, self.clock.now());
+            }
             // gambatte Memory::halt: a flagged-but-unserviced block
             // request is deferred (hdma_requested) and re-flagged at
             // wake — HBlank DMA never proceeds while the core clock is

@@ -1423,6 +1423,91 @@ fn tier2_oam_postread_ds_passes() {
     }
 }
 
+/// PORT 3 (#11bc) — the S6 completion frame (`interconnect/tick.rs`
+/// `advance_machine_t`): the deferred path detects serial completions per
+/// T-substep (the DIV-edge fall's true T) and squashes a dispatch-ack'd
+/// timer/serial re-set by SameBoy's EXACT T-threshold
+/// (`updateTimaIrq(cc + 2 + isCgb())` / `updateSerial(cc + 3 + isCgb())`)
+/// instead of the whole-M-cycle window. Converges BOTH legs of the
+/// `tima/tc00_irq_late_retrigger` and `serial/start_wait_trigger_int8_read_if`
+/// pairs (SS+DS, 8 rows, MEASURED +8/−0): the `_1` re-set commits past the
+/// threshold and is DELIVERED (E4/E8), the `_2` inside it is consumed (E0).
+#[test]
+fn tier2_serial_tima_completion_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_serial_tima_completion",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 4] = [
+        (
+            "gambatte/tima/tc00_irq_late_retrigger_1_dmg08_cgb04c_outE4.gbc",
+            "E4",
+        ),
+        (
+            "gambatte/tima/tc00_irq_late_retrigger_2_dmg08_outE4_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        (
+            "gambatte/serial/start_wait_trigger_int8_read_if_1_dmg08_cgb04c_outE8.gbc",
+            "E8",
+        ),
+        (
+            "gambatte/serial/start_wait_trigger_int8_read_if_2_dmg08_outE8_cgb04c_outE0.gbc",
+            "E0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// PORT 2 (#11bc) — the sub-M-cycle WAKE clock (`Bus::pending_halt_wake_mid`,
+/// `interconnect.rs`): the DMG tier2 halt loop samples the wake condition at
+/// the M-cycle head AND mid-cycle (SameBoy `GB_cpu_run` advance-2 → sample →
+/// advance-2, `sm83_cpu.c:1621-1628`); a mid wake resumes the CPU 2 T into
+/// the idle cycle and the handler's first FF41 read samples the STAT mode at
+/// that true sub-M-cycle T (the `wake_skew`, consumed by the FF41 read /
+/// repaid before any other IO read so the TIMA-counted `int_hblank_halt` and
+/// LY-straddle `hblank_ly_scx` grids keep their aligned calibration).
+/// MEASURED +11/−3 on the DMG `halt *_m0stat` wake-clock class. Pins two
+/// fixed want-0 legs (the post-wake read lands on the line-start mode-0
+/// window it previously missed) + a passing want-2 guard leg.
+#[test]
+fn tier2_halt_m0stat_wake_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_halt_m0stat_wake",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 3] = [
+        // Fixed by the mid-cycle wake: the read lands in the line-start
+        // mode-0 window (want 0).
+        ("gambatte/halt/m0int_m0stat_scx2_1_dmg08_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/halt/m0irq_m0stat_scx4_2_dmg08_out0_cgb04c_out2.gbc",
+            "0",
+        ),
+        // Regression guard: the want-2 sibling stays mode 2.
+        ("gambatte/halt/m0int_m0stat_scx2_2_dmg08_cgb04c_out2.gbc", "2"),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Dmg);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, false)
+            .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 /// Port Stage C / S5 #11at — the CGB pre-draw window-abort BARE-exit slice
 /// (`stat_irq.rs::vis_mode_read`, `regs.rs`/`render/window.rs` `win_predraw_abort`).
 /// An LCDC.5 clear that lands BEFORE the enabled window's first fetch renders the

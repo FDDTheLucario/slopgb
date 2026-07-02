@@ -54,7 +54,7 @@ fn run_step(cpu: &mut Cpu, bus: &mut impl Bus) {
         // the CPU halted one more cycle. The same sample feeds both the
         // IME=1 dispatch and the IME=0 resume (SameBoy sm83_cpu.c,
         // `GB_cpu_run`: one `interrupt_queue` sample serves both paths).
-        if bus.pending_halt_wake() == 0 {
+        if bus.pending_halt_wake_mid() == 0 {
             cpu.regs.pc = pc_before;
             // Staying halted: gate the core clock (and with it the OAM DMA
             // controller) off. The gate engages only now — *after* the

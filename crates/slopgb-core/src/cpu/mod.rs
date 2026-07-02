@@ -78,6 +78,20 @@ pub trait Bus {
     fn pending_halt_wake(&self) -> u8 {
         self.pending()
     }
+    /// PORT 2 (#11bc, the sub-M-cycle WAKE clock) — the halt loop's wake
+    /// sample, allowed to advance the machine to its true sample T first.
+    /// SameBoy's DMG halt loop advances 2 T, samples `interrupt_queue`,
+    /// then advances the remaining 2 (`GB_cpu_run`, `sm83_cpu.c:1621-1628`),
+    /// so the halt-exit check runs on a HALF-M-cycle grid and a wake resumes
+    /// the CPU — and its whole dispatch + handler read stream — at that
+    /// sub-M-cycle T (the deferred clock keeps the 2-T offset until the
+    /// machine re-aligns). The default (production, and every
+    /// non-interconnect test bus) is the plain end-sampled
+    /// [`pending_halt_wake`](Bus::pending_halt_wake); the interconnect
+    /// overrides it on the tier2 deferred path for the DMG family.
+    fn pending_halt_wake_mid(&mut self) -> u8 {
+        self.pending_halt_wake()
+    }
     /// Clear bit `bit` (0..=4) of IF. Takes no time.
     fn ack(&mut self, bit: u8);
     /// CPU executed STOP: if a speed switch is armed (CGB KEY1.0), perform

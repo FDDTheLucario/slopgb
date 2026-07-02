@@ -399,6 +399,31 @@ pub struct Interconnect {
     /// Inert flag-off (only set under `tier2_reclock`), so production is
     /// byte-identical.
     m0_halt_hold: u8,
+    /// PORT 3 (#11bc, the S6 completion frame) — the deferred-path
+    /// timer/serial ack-squash deadline in CPU T (0 = no window open).
+    /// SameBoy's dispatch-ack consumes a re-set of the acked source only up
+    /// to an exact T past the ack (`updateTimaIrq(cc + 2 + isCgb())` /
+    /// `updateSerial(cc + 3 + isCgb())` before `ackIrq`); the deferred
+    /// path's whole-M-cycle `ack_squash_ticks` window over-covers by up to
+    /// 3 T, swallowing the `tima/tc00_irq_late_retrigger_1` re-set SameBoy
+    /// delivers (reads E0, wants E4) while its `_2` sibling (inside the
+    /// true window) is rightly consumed. Set by `ack` on the tier2 path
+    /// alongside the production counters; consumed at the exact commit T in
+    /// `advance_machine_t`. Production (eager path) keeps the tick counters
+    /// — byte-identical OFF.
+    ack_squash_deadline_t: u64,
+    /// PORT 2 (#11bc) — outstanding sub-M-cycle wake skew (T). Set to 2 by a
+    /// mid-cycle (w2) halt wake: the dispatch + the first handler instruction
+    /// run 2 T early (their deferred reads land at the wake's true
+    /// sub-M-cycle T); the next instruction-boundary flush repays it,
+    /// re-aligning the CPU to the machine's 4-T grid so the per-M-cycle mask
+    /// calibrations (if_late lifecycle, rise-cc tables) hold for everything
+    /// after — the goal's "clock-park offset consumed by all post-wake
+    /// accesses until the next instruction-boundary flush". An UNBOUNDED
+    /// skew was measured to hang the multi-round mooneye
+    /// `hblank_ly_scx_timing-GS` (B=42): every later round's halt entry
+    /// lands off-grid and the whole calibrated mask map mis-frames.
+    wake_skew: u32,
     /// Port Stage B C1.3 (S7 sub-M-cycle halt-wake) — the post-mode-0-halt-wake
     /// LY read-phase carry. SameBoy's DMG halt-wake resumes the CPU at the
     /// IRQ's sub-M-cycle clock, so the CPU's M-cycle phase is offset from the
@@ -604,6 +629,8 @@ impl Interconnect {
             ie: 0,
             if_late: 0,
             m0_halt_hold: 0,
+            ack_squash_deadline_t: 0,
+            wake_skew: 0,
             halt_ly_phase: 0,
             if_stat_late: 0,
             m0_access_edge: None,
@@ -852,6 +879,63 @@ impl Bus for Interconnect {
         self.intf & self.ie & IF_MASK & !self.if_stat_late
     }
 
+    fn pending_halt_wake_mid(&mut self) -> u8 {
+        // PORT 2 (#11bc) — the sub-M-cycle WAKE clock. SameBoy's DMG halt
+        // loop advances 2 T, samples `interrupt_queue`, then advances the
+        // remaining 2 (`GB_cpu_run`, `sm83_cpu.c:1621-1628` — CGB samples at
+        // the M-cycle head, no mid-step), so the halt-exit check runs on a
+        // HALF-M-cycle grid: an IRQ rising in the first half of the idle
+        // M-cycle wakes at its own half, and the resumed CPU's dispatch +
+        // handler reads carry that 2-T offset (the deferred clock's reduced
+        // park) until the stream re-aligns — the WAKE-CLOCK class's
+        // discriminator (`halt *_m0stat` `Na`/`Nb` sub-legs share the read
+        // POSITION; the wake INSTANT separates them, `#11ay`/`#11av`). The
+        // machine's own 4-T grid (timer/OAM-DMA/APU in `advance_machine_t`,
+        // keyed on ABSOLUTE `pos % 4`) is untouched, so the TIMA-counted
+        // wake grids (`int_hblank_halt`) keep their frame. Gated to the
+        // tier2 deferred path + DMG family + an already-engaged halt gate
+        // (`cpu_halted` — the FIRST idle prefetch samples at the M-cycle
+        // head like SameBoy's `just_halted` 4-T step). Production and the
+        // LE-only path take the default (plain `pending_halt_wake`) —
+        // byte-identical OFF.
+        if self.tier2_reclock
+            && !self.model.is_cgb()
+            && self.cpu_halted
+            && self.clock.pending() >= 2
+        {
+            // Sample 1 — the M-cycle head (4k+0), exactly the pre-port wake
+            // check: an IRQ already visible here wakes ALIGNED (the idle
+            // cycle's debt stays parked, the dispatch pays it as before —
+            // byte-identical to the M-quantized model for these wakes).
+            let w0 = self.pending_halt_wake();
+            if w0 != 0 {
+                return w0;
+            }
+            // Sample 2 — the DMG mid-cycle point (4k+2): advance the first
+            // 2 T of the idle cycle and re-check. An IRQ rising in the
+            // cycle's FIRST HALF wakes here, 2 T after its rise: the idle
+            // iteration was genuinely 2 T long (SameBoy
+            // `GB_advance_cycles(gb, 2)`), so the un-run tail is dropped and
+            // the resumed CPU's dispatch + handler read stream carries the
+            // 2-T sub-M-cycle offset (the WAKE-CLOCK port).
+            let before = self.clock.now();
+            self.clock.advance_pending(2);
+            self.advance_machine_t(before, self.clock.now());
+            // The mid wake is scoped to the MODE-0 STAT rise (the WAKE-CLOCK
+            // blocker class): the mode-2 line-start pulse and the timer/
+            // vblank sources keep the aligned w0 grid their calibrations
+            // (mooneye intr_2_* / the tima halt rows) are pinned on.
+            let w2 = self.pending_halt_wake();
+            if w2 != 0 && (w2 & IF_STAT_BIT == 0 || self.ppu.stat_rise_m0()) {
+                self.clock.forgive(2);
+                self.wake_skew = 2;
+                return w2;
+            }
+            return 0;
+        }
+        self.pending_halt_wake()
+    }
+
     fn pending_halt_wake(&self) -> u8 {
         // The halt-exit logic samples IE & IF *within* the M-cycle, not at
         // its end (SameBoy sm83_cpu.c `GB_cpu_run`: DMG samples mid-cycle
@@ -905,6 +989,15 @@ impl Bus for Interconnect {
                 self.ack_squash_mask = 1 << bit;
                 self.ack_squash_ticks = if self.model.is_cgb() { 2 } else { 1 };
                 self.ack_squash_dots = 0;
+                // PORT 3 (#11bc): on the deferred path the window is the
+                // EXACT SameBoy T-threshold instead (see
+                // `ack_squash_deadline_t`); the tick counters above are
+                // still set but unused there.
+                if self.tier2_reclock {
+                    let cgb = u64::from(self.model.is_cgb());
+                    self.ack_squash_deadline_t =
+                        self.clock.now() + if bit == 2 { 2 } else { 3 } + cgb;
+                }
             }
             _ => {}
         }
@@ -1023,25 +1116,52 @@ impl Bus for Interconnect {
         while self.cycles < target && self.intf & self.ie & IF_MASK == 0 {
             self.tick_machine();
         }
-        // #11bb (tier2) — post-switch CPU↔PPU realignment sweep (env-gated
-        // measurement scaffold): SameBoy's STOP withholds 5 T from the PPU
-        // feed (`speed_switch_freeze`, sm83_cpu.c:435/timing.c:469) while
-        // slopgb's gambatte-modeled pause runs the PPU throughout, leaving
-        // the post-switch read frame ~2 dots off SameBoy's
-        // (`speedchange2_m2int_m3stat_scx2_2` reads dot254 where SameBoy's
-        // frame reads past the exit). Advance the PPU K extra dots per
-        // switching STOP to measure the alignment.
+        // PORT 1 (#11bc, was the #11bb env scaffold) — post-switch CPU↔PPU
+        // realignment, now the tier2 DEFAULT at K = 2 half-dots per switching
+        // STOP. SameBoy's STOP withholds 5 T from the PPU feed
+        // (`speed_switch_freeze`, sm83_cpu.c:435/timing.c:469) while slopgb's
+        // gambatte-modeled pause runs the PPU throughout; the measured net
+        // alignment on the gambatte cgb04c pause calibration is +2 half-dots
+        // per switch (the speedchange4 dual-trace: with K=2/switch the
+        // post-switch polled reads land exactly at SameBoy's read cfl − 4,
+        // and the half-dot bare exit E(scx) = 510 + 2*scx closes all four
+        // scx1/scx2 `_1`/`_2` pairs — the #11bb +21/−8 A/B resolves by the
+        // CO-LAND with that exit, `stat_irq.rs` PORT 1). `SLOPGB_STOPADV`
+        // still overrides for measurement. Tier2-only; production
+        // byte-identical.
         if self.tier2_reclock {
             // K in 8 MHz HALF-dots (the grain): odd K leaves the PPU on a
             // half-dot skew relative to the CPU grid (`dhalf` persists), the
             // odd-mode alignment SameBoy's whole-freeze cannot represent.
-            if let Ok(k) = std::env::var("SLOPGB_STOPADV").map(|v| v.parse::<u32>().unwrap_or(0)) {
-                for _ in 0..k {
-                    let ppu_if = self.ppu.tick_half();
-                    if self.ppu.dot_completed() {
-                        self.fold_ppu_events(ppu_if, 4);
-                        self.cycles += 1;
-                    }
+            //
+            // LEAVE-only (DS→SS): the per-switch K=2 default was measured to
+            // rebase the ENTIRE DS suite (every `_ds` row's boot STOP shifted
+            // +1 dot, breaking ~20 halt/lycEnable/lcd_offset/DS rows whose
+            // tier2 constants were calibrated on the existing frame) — the DS
+            // calibration already ABSORBS the entering switch's frame error,
+            // so advancing there double-counts it. Only the post-switch
+            // SINGLE-SPEED frame (after leaving DS) carries the un-absorbed
+            // gambatte-pause error the speedchange m3stat reads expose.
+            //
+            // DEFAULT 0 (#11bc): leave-only w=4 was two-bin-measured
+            // +14/−11 SameBoy-pass — the +14 (speedchange `_2` legs + 3
+            // lcd_offset counts, with the half-dot exit co-land) A/B against
+            // 11 lcd-offset-frame rows whose tier2 law constants sit on the
+            // w=0 frame (8 absorbable by re-derivation; the offset1
+            // m0stat/m2stat COUNTS + `hdma_late_m0halt_lcdoffset3` have no
+            // absorbing law). The default flips to `if double_speed {0}
+            // else {4}` (leave-only) once the lcd-offset constants are
+            // re-derived on the +2-dot frame — the Part-D table row this
+            // measurement adds.
+            let k = std::env::var("SLOPGB_STOPADV")
+                .ok()
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(0);
+            for _ in 0..k {
+                let ppu_if = self.ppu.tick_half();
+                if self.ppu.dot_completed() {
+                    self.fold_ppu_events(ppu_if, 4);
+                    self.cycles += 1;
                 }
             }
         }
