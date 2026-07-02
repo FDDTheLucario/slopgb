@@ -272,6 +272,15 @@ pub struct Ppu {
     /// Dot within the line; the value is the "current time" T so that after
     /// D calls to [`Self::tick`] the observable state is state(D).
     dot: u16,
+    /// Half-dot phase within the current dot (0 or 1), the 8 MHz sub-dot grain
+    /// of the pixel-pipe reclock (HALFDOT-BUILD-PLAN.md Part A). Advanced by
+    /// [`Self::tick_half`] on the tier2 deferred path only; production
+    /// ([`Self::tick`], the whole-dot advance) never touches it and leaves it 0
+    /// so the flag-off path is byte-identical. `dhalf == 0` after a
+    /// dot-completing half-dot (the whole-dot work ran), `1` mid-dot (a DS read
+    /// landing on an odd CPU-T resolves here — the sub-dot read position Part B
+    /// samples). See [`Self::sub_dot`].
+    dhalf: u8,
     /// First line after LCD enable (no OAM scan, shifted mode 3, 452 dots).
     glitch_line: bool,
     /// The frame currently being rendered is the first one after an LCD
@@ -870,6 +879,7 @@ impl Ppu {
             enabled: false,
             line: 0,
             dot: 0,
+            dhalf: 0,
             glitch_line: false,
             frame_skip: false,
             cmp: false,
@@ -1006,6 +1016,41 @@ impl Ppu {
             self.stat_events_tick();
         }
         std::mem::take(&mut self.pending_if)
+    }
+
+    /// Advance one 8 MHz HALF-dot (HALFDOT-BUILD-PLAN.md Part A). The pixel-pipe
+    /// reclock's grain: two half-dots per whole dot (single speed = 2 half-dots
+    /// per CPU-T; double speed = 1). The first half of a dot (`dhalf 0→1`) does
+    /// no structural work and the second (`dhalf 1→0`) runs the whole-dot
+    /// [`Self::tick`] body, so a run of aligned half-dots is byte-identical to
+    /// the whole-dot advance (Stage 1); the seam is that later stages move a
+    /// mode-3-exit / read boundary onto the odd half-dot. Called only on the
+    /// tier2 deferred path ([`Interconnect::advance_machine_t`]); production
+    /// never calls it, so the flag-off path is untouched. Returns the IF bits
+    /// produced (0 on the non-completing half).
+    pub(crate) fn tick_half(&mut self) -> u8 {
+        if self.dhalf == 0 {
+            self.dhalf = 1;
+            return 0;
+        }
+        self.dhalf = 0;
+        self.tick()
+    }
+
+    /// Whether the half-dot just advanced by [`Self::tick_half`] completed a
+    /// whole dot (the whole-dot body ran). The caller folds the PPU's IF /
+    /// accessibility edges only on a completing half.
+    pub(crate) fn dot_completed(&self) -> bool {
+        self.dhalf == 0
+    }
+
+    /// The current half-dot phase (0 = at a dot boundary, 1 = mid-dot). Part B
+    /// samples this to resolve a deferred read to the exact 8 MHz half-dot the
+    /// CPU-T lands on (a DS read on an odd CPU-T sits mid-dot). Always 0 on the
+    /// whole-dot production path.
+    #[allow(dead_code)] // Part B seam (HALFDOT-BUILD-PLAN.md §3B); consumed next stage.
+    pub(crate) fn sub_dot(&self) -> u8 {
+        self.dhalf
     }
 
     /// Forward the interconnect's `leading_edge_reads` master flag to the PPU,

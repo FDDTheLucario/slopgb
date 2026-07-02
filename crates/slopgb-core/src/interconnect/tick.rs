@@ -64,6 +64,17 @@ impl Interconnect {
     /// detector. Shared by the eager whole-M-cycle `tick_machine` and the port
     /// Stage-B deferred per-T advance ([`Self::advance_machine_t`]).
     fn tick_machine_dot(&mut self, cc: u8) {
+        let ppu_if = self.ppu.tick();
+        self.fold_ppu_events(ppu_if, cc);
+    }
+
+    /// Fold a completed PPU dot's IF bits, halt-late masks, accessibility/STAT
+    /// edge stamps and the HBlank-DMA level detector into the machine state for
+    /// cc `cc` (1..=4). `ppu_if` is the raw IF the PPU tick returned. Shared by
+    /// the whole-dot [`Self::tick_machine_dot`] and the half-dot deferred
+    /// [`Self::advance_machine_t`] (which calls it only on a dot-completing
+    /// half-dot, so the fold still runs exactly once per PPU dot).
+    fn fold_ppu_events(&mut self, ppu_if: u8, cc: u8) {
         {
             // STAT/VBlank rises in the first 2 dots after the ack are
             // consumed too (gambatte ackIrq lcd_.update(cc + 2); in
@@ -74,7 +85,7 @@ impl Interconnect {
             } else {
                 0
             };
-            self.intf |= self.ppu.tick() & IF_MASK & !dot_squash;
+            self.intf |= ppu_if & IF_MASK & !dot_squash;
             if self.ppu.take_stat_late() {
                 // The line-0 OAM STAT rise sits in the second half of the
                 // M-cycle: the IF bit is readable at once, but this
@@ -276,13 +287,23 @@ impl Interconnect {
             if tlate {
                 self.if_late |= t_iff;
             }
-            // One PPU dot on a dot-ticking cc (single speed every cc; double
-            // speed two of four — `dot_ticks_on_cc`). `cycles` (the dot clock)
-            // advances per actual dot, matching `tick_machine`'s `+= dots`.
+            // Half-dot PPU advance (HALFDOT-BUILD-PLAN.md Part A): each CPU-T is
+            // 2 8-MHz half-dots (single speed) or 1 (double speed); the PPU runs
+            // per half-dot via [`Ppu::tick_half`]. A whole dot completes every
+            // 2nd half-dot (single speed → 1 dot per T; double speed → 1 dot per
+            // 2 T), and the fold + the `cycles` dot-clock bump run only on that
+            // completing half — reproducing the old whole-dot `dot_ticks_on_cc`
+            // grid exactly (single speed every cc; double speed the even cc), so
+            // Stage 1 is byte-identical while the grain is now half-dot. `cc` of
+            // the completing dot = `phase + 1`, matching the whole-dot fold.
             let cc = phase + 1;
-            if dot_ticks_on_cc(cc, self.double_speed, self.dot_phase) {
-                self.tick_machine_dot(cc);
-                self.cycles += 1;
+            let half_dots = if self.double_speed { 1 } else { 2 };
+            for _ in 0..half_dots {
+                let ppu_if = self.ppu.tick_half();
+                if self.ppu.dot_completed() {
+                    self.fold_ppu_events(ppu_if, cc);
+                    self.cycles += 1;
+                }
             }
             if phase == 3 {
                 // M-cycle tail (the foot of `tick_machine`): APU, serial,
