@@ -35,6 +35,39 @@ neither the read (`m2int_scx4`) nor the length (`late_scx4`) lever converges its
 pair alone, and both live below the whole-dot grid — exactly what the half-dot
 render+read+write rewrite (Part A-render + B + C + D) lands together.**
 
+**#11bb (2026-07-02, same session): the WRITE-STROBE half of Part A/D LANDED +
+Part C's DELETE executed. Five commits on `phase-b-s7` (`8c7e0bb` `4737011`
+`d2c29a4` `724b9b4` after the grain `5622329`): flag-on 455→445, ZERO
+SameBoy-pass drops, 33 pins, mooneye 91/91, gbtr OFF 217/0.** What landed:
+- **Write-strobe render-frame deferral (Part A/D partial):** the #11as
+  "deferred WRITE collapse" root-caused (`Ppu::write` cancelled the deferred
+  stage → eff committed at the leading edge vs the +4-late-calibrated render
+  geometry). FF43 stages 3 dots tier2, stage survives the arch write →
+  **`late_scx4` SS+DS CONVERGED** (§5's flagship). Per-register: LCDC+4
+  measured NET-NEGATIVE, WY inert — the deferral is SCX-only until the
+  per-config exits land. Laws sample ARCH `self.scx`; glitch lines immediate.
+- **DS pre-draw abort law:** boundary `(89+WX)&!1` (wx-DEPENDENT, the
+  first-fetch M-cycle start on the DS 2-dot grid).
+- **`SLOPGB_STOPADV` scaffold + the SameBoy STOP spec** (freeze=5T PPU
+  withhold; single→double never reads `double_speed_alignment`; forced-even):
+  K=2 half-dots = +21/−8 on speedchange — the residual is the per-scx
+  HALF-DOT mode-3 exit (the #11ao parity wall) at the post-switch frame;
+  odd-K (true `dhalf` skew) net-worse. **The clean lift = the per-scx
+  half-dot exit port co-landing with the alignment.**
+- **Part C DELETE (first half):** the five refuted env experiments removed
+  (~250 lines; stat_irq.rs 1109→1030). The seven SHIPPED laws remain — they
+  collapse only when the per-config render exits land (Part A-render).
+**What blocks the flip (measured this session, not assumed):** the remaining
+~112 SameBoy-pass blockers sit behind (a) the per-scx half-dot mode-3 exit
+port (speedchange/window/m3stat parity pairs — every whole-dot lever built
+this session A/B-swapped on scx parity), (b) the WY-write↔`wy_check` race
+inside the render trigger (late_wy — the fallback vis-HOLD was +4/−4), (c)
+the FF0F IF-delivery read-frame (ENGINE-IF ~30, offsets −4..−16 non-uniform),
+(d) the sub-M-cycle halt wake (12), (e) S6-DS conflict/completion (~20).
+(a) is now BUILDABLE on the shipped grain + write-strobe: the render exits
+must move to per-config half-dot positions WITH the read at its true
+half-dot — Part A-render + B proper, the next session's single target.
+
 Prior status (2026-07-01 #11az): confirmed the base (`6f375fe`): flag-on 455 /
 off 486 → 165 flip-BUGs = **115 SameBoy-pass + 50 rebaseline**; extracted the
 definitive SameBoy porting spec (§1) and produced this plan.
