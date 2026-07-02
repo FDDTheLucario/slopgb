@@ -1442,7 +1442,7 @@ fn tier2_window_predraw_abort_passes() {
         );
         return;
     };
-    let targets: [(&str, &str); 4] = [
+    let targets: [(&str, &str); 12] = [
         (
             "gambatte/window/late_disable_early_scx03_wx0f_1_dmg08_cgb04c_out0.gbc",
             "0",
@@ -1458,6 +1458,42 @@ fn tier2_window_predraw_abort_passes() {
         (
             "gambatte/window/late_disable_early_scx03_wx12_1_dmg08_cgb04c_out0.gbc",
             "0",
+        ),
+        // #11bb — the DOUBLE-SPEED twin (the `(89 + WX) & !1` first-fetch
+        // M-cycle boundary; `_1` aborts commit before it → bare, `_2` at/
+        // after → extends). All 8 legs pinned: the `_2` extends guard the
+        // boundary from both sides.
+        (
+            "gambatte/window/late_disable_early_scx00_wx0f_ds_1_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx00_wx10_ds_1_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx00_wx11_ds_1_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx00_wx12_ds_1_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx00_wx0f_ds_2_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx00_wx10_ds_2_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx00_wx11_ds_2_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx00_wx12_ds_2_cgb04c_out3.gbc",
+            "3",
         ),
     ];
     for (rel, expect) in targets {

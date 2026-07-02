@@ -143,6 +143,36 @@ impl Ppu {
         {
             return 0;
         }
+        // #11bb — the DOUBLE-SPEED twin of the pre-draw abort law above. The
+        // DS legs (`late_disable_early_scx00_wx0f-12_ds_1`) clear LCDC.5 at
+        // dot 102 (commit 103, the DS production staging) before the window's
+        // first fetch; SameBoy renders BARE with the fine-scroll penalty
+        // dropped — exit `cfl257 dc2` (measured, the DS half-dot bare exit) —
+        // and its read lands at/past it (slopgb read dot254 ↔ SameBoy
+        // cfl≈257.5 at the DS frame). Same shape as SS with the exit raised
+        // by the DS dot (`258`). The abort boundary is the window's first-
+        // fetch M-CYCLE start, `(89 + WX) & !1` (projected WX match at
+        // `89 + WX`, floored to the DS 2-dot M-cycle grid): an abort commit
+        // (LCDC keeps the deferred path's immediate `commit_eff`) strictly
+        // before it renders bare (`_1` 102 < 104 @wx0f/10, 104 < 106
+        // @wx11/12), at/after it extends (`_2` 104 @wx0f/10, 106 @wx11/12 —
+        // want 3). Measured across all 8 wx0f-12 legs.
+        if self.tier2_reclock
+            && self.model.is_cgb()
+            && self.ds
+            && self.render.win_predraw_abort
+            && self.render.win_predraw_abort_dot < (89 + u16::from(self.wx)) & !1
+            && self.eff.lcdc & LCDC_WIN_ENABLE == 0
+            && self.line >= 1
+            && self.line < 144
+            && m == 3
+            && !self.render.win_active
+            && !self.glitch_line
+            && self.render.n_sprites == 0
+            && self.dot + 4 >= 258
+        {
+            return 0;
+        }
         // C2 #11au — the CGB window-REENABLE mode-3 length shadow (SS). A window
         // disabled then RE-enabled mid-mode-3 (`Render::win_reenable_dot`,
         // latched in `regs.rs::commit_eff`) redraws from the re-enable point; its
