@@ -198,7 +198,7 @@ impl Interconnect {
         // `Ppu::ff0f_stat_peek`). Verdict-only: `intf` is untouched, the rise
         // still folds at its own dot.
         let v = if addr == 0xFF0F {
-            v | self.ppu.ff0f_stat_peek()
+            (v | self.ppu.ff0f_stat_peek()) & !self.ppu.ff0f_ly0_pulse_mask()
         } else {
             v
         };

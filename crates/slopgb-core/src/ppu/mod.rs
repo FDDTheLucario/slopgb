@@ -292,6 +292,14 @@ pub struct Ppu {
     /// the acked bit. Tier-2 only (never armed flag-off).
     ack_squash_ppu_mask: u8,
     ack_squash_ppu: u8,
+    /// #11bh group E — the line-0 dot-4 OAM pulse's read-view age: armed (1)
+    /// when that pulse's engine rise fires, decremented per dot. A deferred
+    /// FF0F read landing on the SAME dot masks the just-folded bit from its
+    /// VERDICT (CPU-read-first at the shared instant — measured on SameBoy:
+    /// `SBREAD ff0f` at the rise fp reads clear; `lyc153int_m2irq_1` reads
+    /// line-0 dot 4 co-instant with the pulse and wants 0, its `_2` sibling
+    /// reads 4 dots later and sees it). Verdict-only; `intf` keeps the bit.
+    ly0_pulse_age: u8,
     scy: u8,
     scx: u8,
     /// LY as read through FF44 (153-quirk aware).
@@ -878,6 +886,7 @@ impl Ppu {
             stat_if_squash: 0,
             ack_squash_ppu_mask: 0,
             ack_squash_ppu: 0,
+            ly0_pulse_age: 0,
             scy: 0,
             scx: 0,
             ly: 0,
@@ -1062,6 +1071,7 @@ impl Ppu {
         // the tier2 path; a saturating decrement of an always-0 counter is
         // byte-identical flag-off).
         self.ack_squash_ppu = self.ack_squash_ppu.saturating_sub(1);
+        self.ly0_pulse_age = self.ly0_pulse_age.saturating_sub(1);
         std::mem::take(&mut self.pending_if)
     }
 

@@ -357,6 +357,14 @@ impl Ppu {
                 }
             } else {
                 self.pending_if |= IF_STAT;
+                // #11bh group E — tag the line-0 dot-4 OAM pulse for the
+                // co-instant FF0F read-view mask (`ly0_pulse_age`).
+                if self.line == 0 && self.dot == 4 && mfi == 2 {
+                    // 2: survives this tick's own end-of-tick decrement so
+                    // the post-advance deferred read on the same dot sees it
+                    // (the dot==4 gate keeps later dots out regardless).
+                    self.ly0_pulse_age = 2;
+                }
                 if super::s5dbg_on() && self.line < 154 {
                     eprintln!(
                         "SLOPGB dispatch ly={} dot={} mfi={} lycln={}",
@@ -825,6 +833,25 @@ impl Ppu {
     /// Tier-2 caller only → production byte-identical OFF.
     pub(crate) fn arm_ff0f_if_squash(&mut self) {
         self.stat_if_squash = 2;
+    }
+
+    /// #11bh group E — the co-instant line-0 dot-4 OAM-pulse read-view mask
+    /// (see the `ly0_pulse_age` field doc): a deferred FF0F read landing on
+    /// the pulse's own dot returns the bit CLEAR (CPU-read-first at the
+    /// shared instant, SameBoy-measured). Verdict-only.
+    pub(crate) fn ff0f_ly0_pulse_mask(&self) -> u8 {
+        // LYC==153 names the anchor: only the LYC-153 ISR's read lands
+        // BEFORE the pulse in SameBoy's frame (line-0 dot 3, rise −1;
+        // `lyc153int_m2irq_1` want 0). The LYC-152 ISR's `_2` read — the
+        // same slopgb dot-4 collapse — lands 4 dots AFTER the rise on
+        // SameBoy (SBREAD fp = rise fp + 8) and must SEE it
+        // (`lycint152_m2irq_2`/`_ds_2` want E2, measured A/B without this
+        // guard).
+        if self.ly0_pulse_age > 0 && self.line == 0 && self.dot == 4 && self.lyc == 153 {
+            IF_STAT
+        } else {
+            0
+        }
     }
 
     /// #11bh group C — arm the dispatch-ack squash window for the acked IF

@@ -3261,6 +3261,48 @@ fn tier2_glitch_hunt_carryover_passes() {
     }
 }
 
+/// S5 #11bh group E — the co-instant line-0 dot-4 OAM-pulse FF0F read-view
+/// mask, LYC-153-anchored: the LYC-153 ISR's IF read lands BEFORE the line-0
+/// pulse in SameBoy's frame (dot 3, rise −1) while slopgb's deferred read
+/// collapses onto the pulse dot and saw the just-folded bit. CPU-read-first
+/// at the shared instant (SameBoy-measured: SBREAD ff0f at the rise fp reads
+/// clear). The LYC-152 ISR's same-dot-4 collapse lands 4 dots AFTER the rise
+/// on SameBoy and must SEE it — the `self.lyc == 153` anchor guard (built
+/// unguarded first: +1/−2 A/B, measured).
+#[test]
+fn tier2_ly0_pulse_readview_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_ly0_pulse_readview",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        (
+            "gambatte/lyc153int_m2irq/lyc153int_m2irq_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        // GUARD — one M later sees the folded pulse.
+        (
+            "gambatte/lyc153int_m2irq/lyc153int_m2irq_2_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+        // GUARDs — the LYC-152-anchored reads keep seeing it (the anchor
+        // guard's measured discriminator).
+        ("gambatte/ly0/lycint152_m2irq_2_dmg08_cgb04c_outE2.gbc", "E2"),
+        ("gambatte/ly0/lycint152_m2irq_ds_2_cgb04c_outE2.gbc", "E2"),
+        ("gambatte/ly0/lycint152_m2irq_1_dmg08_cgb04c_outE0.gbc", "E0"),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 // Session-local S5 measurement aid (see the module's doc); `#[ignore]`'d so it
 // never runs in the gate.
 #[path = "gambatte_flagon_probe.rs"]
