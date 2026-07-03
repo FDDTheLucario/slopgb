@@ -1108,6 +1108,13 @@ impl Bus for Interconnect {
     fn stop(&mut self, skipped_addr: u16, interrupt_pending: bool) -> bool {
         let switching = self.cgb_mode && self.key1_armed;
         let entering_ds = switching && !self.double_speed;
+        // #11bi — pin the post-switch exit-table anchor: the FIRST LCD-on
+        // switching STOP since the last enable classifies the dance
+        // (mid-frame speedchange anchor vs the VBlank/boot prologue frame
+        // the tier2 suite constants absorb). Tier2-only, byte-identical OFF.
+        if self.tier2_reclock && switching {
+            self.ppu.note_switch_stop();
+        }
         // #11bd lcd_offset dual-trace: the STOP decision point on the machine
         // clock (SameBoy `SBSTOP fp=` analogue). `SLOPGB_S5DBG`-gated.
         if crate::ppu::s5dbg_on() {
@@ -1293,6 +1300,23 @@ impl Bus for Interconnect {
                     .and_then(|v| v.parse::<u32>().ok())
                     .unwrap_or(if self.ppu.sb_dsa() & 7 == 4 { 6 } else { 2 })
             };
+            // #11bi leave-instant tracer (alignment + chosen k), the SBSTOP
+            // dual-trace partner. `SLOPGB_S5DBG`-gated, byte-identical unset.
+            if crate::ppu::s5dbg_on() && !entering_ds {
+                let (l, d) = self.ppu.scan_pos();
+                eprintln!(
+                    "SLOPGB leave ly={l} dot={d} clk={} dsa={} dsa7={} k={k}",
+                    self.cycles,
+                    self.ppu.sb_dsa(),
+                    self.ppu.sb_dsa() & 7
+                );
+            }
+            // #11bi — record the leave for the post-switch exit table (the
+            // leave k is the table's class variable; LCD checked at the
+            // pause-end instant, so the lcdoff2 off-leave stays excluded).
+            if !entering_ds {
+                self.ppu.note_switch_leave(k as u8);
+            }
             if !entering_ds {
                 let ph = std::env::var("SLOPGB_LCDPH")
                     .ok()

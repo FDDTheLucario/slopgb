@@ -1440,6 +1440,68 @@ fn tier2_oam_postread_ds_passes() {
     }
 }
 
+/// #11bi — the POST-SWITCH bare-exit 4-variable table (the #11bh park,
+/// BUILT): `ppu/stat_irq.rs::vis_exit_hd` replaces the emergent bare exit
+/// with `E = 504 + leave_k − 4*[lcd_enable_in_ds] + 2*(SCX&7)` rp (SS) /
+/// `502 + leave_k + 2*(SCX&7)` (DS) for dances whose FIRST LCD-on switching
+/// STOP sits mid-frame (`Ppu::stop_anchor_midframe`) — the speedchange
+/// v1/2/3/4/5 anchor; the VBlank/boot-prologue frame every other tier2
+/// constant absorbs is excluded (kernel `_ds`, lcd_offset, gdma all anchor
+/// ly144, measured). All 120 family m3stat legs dual-traced (SBSTOP/SBACK/
+/// SBREAD/SBMODE ↔ SLOPGB stop/leave/ff41/visexit): 120/120 offline fit,
+/// zero conflicts; family probe +31/−0 (the 4 census blockers + 27 bonus;
+/// the sole non-fix `speedchange2_nop_m2int_m3stat_scx1_1` is the
+/// VBlank-anchored pre-seeded #11bd rebaseline joiner, out of scope).
+/// lcd_offset/m2int_m3stat/dma guard probes byte-identical.
+/// `measurements/speedchange-postswitch-exit-2026-07-03.md`.
+#[test]
+fn tier2_speedchange_postswitch_exit_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_speedchange_postswitch_exit",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 5] = [
+        // The census quartet (SS lcdoff class, `E = 502 + 2*scx`): the `_2`
+        // read (rp 506) now sits AT the exit → mode 0.
+        (
+            "gambatte/speedchange/speedchange2_lcdoff_m2int_m3stat_scx2_2_cgb04c_out0.gbc",
+            "0",
+        ),
+        // Regression guard: the `_1` read (rp 498) stays below it → mode 3.
+        (
+            "gambatte/speedchange/speedchange2_lcdoff_m2int_m3stat_scx2_1_cgb04c_out3.gbc",
+            "3",
+        ),
+        // The k=6 (dsa7==4 leave) class guard: `E = 506 + 2*scx` — the #11bh
+        // blanket's first casualty class, must keep reading 3.
+        (
+            "gambatte/speedchange/speedchange2_lcdoff_nop_m2int_m3stat_scx1_1_cgb04c_out3.gbc",
+            "3",
+        ),
+        // The DS arm (v1: enter-only mid-frame dance, `E = 504 + 2*scx`).
+        (
+            "gambatte/speedchange/speedchange_ly44_m3_m3stat_2_cgb04c_outC0.gbc",
+            "C0",
+        ),
+        // The replace-semantics witness: native-0 read the emergent m==0
+        // hold over-held to 3 (rp 512 == law exit 512).
+        (
+            "gambatte/speedchange/speedchange4_ly44_m3_nop_m3stat_scx3_2_cgb04c_outC0.gbc",
+            "C0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 /// PORT 3 (#11bc) — the S6 completion frame (`interconnect/tick.rs`
 /// `advance_machine_t`): the deferred path detects serial completions per
 /// T-substep (the DIV-edge fall's true T) and squashes a dispatch-ack'd

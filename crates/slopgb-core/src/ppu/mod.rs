@@ -717,6 +717,38 @@ pub struct Ppu {
     /// the WX-activation dot ([`Render::wx_match_dot`]). See `wy_trig_sb`.
     wy_trig_sb_line: u8,
     wy_trig_sb_dot: u16,
+    /// #11bi — the POST-SWITCH bare-exit law latches (tier2-only writers;
+    /// byte-identical OFF). The speedchange m3stat 4-variable exit table
+    /// (`measurements/speedchange-postswitch-exit-2026-07-03.md`, all 120
+    /// legs dual-traced) collapses to per-class rp-frame exits
+    /// `E = C + 2*(SCX&7)` consumed by [`Self::vis_exit_hd`]:
+    ///   SS post-leave: `C = 504 + leave_k − 4*[lcd_enable_in_ds]`
+    ///   DS post-enter: `C = 502 + leave_k` (leave_k = 2 when never left)
+    /// scoped to dances whose FIRST LCD-on switching STOP sits MID-FRAME
+    /// (line < 144): the whole tier2 DS/SS suite is calibrated on the
+    /// VBlank/boot-prologue frame (kernel `_ds`, lcd_offset offset1-3,
+    /// gdma_cycles all anchor at ly144 — measured), which already absorbs
+    /// the switch error; only the mid-frame-anchored speedchange dances
+    /// (v1/2/3/4/5 ly44 + m2int lcdoff variants, first STOP at ly68/ly133)
+    /// expose the true post-switch exit. `stop_anchor_midframe` is the
+    /// first-LCD-on-STOP-since-enable position latch, taken at the STOP
+    /// DECISION instant (the lcdoff dances anchor at their STOP#2 decision,
+    /// ly0 dot12 — the DS re-enable reset the line counter); an LCD enable
+    /// re-anchors the frame and clears it (SameBoy `double_speed_alignment
+    /// = 0` at enable — the e-law: the DS enable quantizes the phase).
+    stop_anchor_set: bool,
+    stop_anchor_midframe: bool,
+    /// A DS→SS STOP leave completed with the LCD enabled (the SameBoy
+    /// freeze path the exit table measures). Cleared at LCD off/on.
+    stop_leave_lcd_on: bool,
+    /// The leave advance k (half-dots, 2 or 6 = the `sb_dsa8`-branched
+    /// #11bd keystone) of the most recent LCD-on leave; 2 when never left.
+    stop_leave_k: u8,
+    /// The most recent LCD enable happened in double speed (the lcdoff
+    /// dances re-enable in DS; the −4 rp class term — the DS enable
+    /// re-anchors the PPU frame where a run-through LCD keeps the SS
+    /// boot phase).
+    lcd_enable_in_ds: bool,
     /// C2 #11aw — the IMMEDIATE-WY twin of [`Self::wy_trig_sb`]. SameBoy's
     /// `wy_check` compares LY against the immediate WY register
     /// (`io_registers[GB_IO_WY]`), NOT the 6-dot-lagged `wy2` copy slopgb's
@@ -974,6 +1006,11 @@ impl Ppu {
             wy_trig_sb_line: 0,
             wy_trig_sb_dot: 0,
             wy_trig_sb_raw: false,
+            stop_anchor_set: false,
+            stop_anchor_midframe: false,
+            stop_leave_lcd_on: false,
+            stop_leave_k: 2,
+            lcd_enable_in_ds: false,
             wy_xline_trig: false,
             vram_wr_line: 0xFF,
             vram_wr_dot: 0,
@@ -1184,6 +1221,26 @@ impl Ppu {
     /// #11bd — record a machine STOPADV advance (see [`Self::lcd_shift_dots`]).
     pub(crate) fn add_lcd_shift(&mut self, dots: u16) {
         self.lcd_shift_dots += dots;
+    }
+
+    /// #11bi — latch the post-switch exit-table anchor at a switching STOP
+    /// (see [`Self::stop_anchor_midframe`]). Called at the STOP decision
+    /// point, tier2 only; the FIRST LCD-on switching STOP since the last
+    /// LCD enable pins the dance's calibration class.
+    pub(crate) fn note_switch_stop(&mut self) {
+        if self.enabled && !self.stop_anchor_set {
+            self.stop_anchor_set = true;
+            self.stop_anchor_midframe = self.line < 144;
+        }
+    }
+
+    /// #11bi — record a DS→SS STOP leave (see [`Self::stop_leave_lcd_on`]);
+    /// `k` = the applied leave advance in half-dots. Tier2 only.
+    pub(crate) fn note_switch_leave(&mut self, k: u8) {
+        if self.enabled {
+            self.stop_leave_lcd_on = true;
+            self.stop_leave_k = k;
+        }
     }
 
     /// #11bd — the current access position mapped back onto the un-shifted

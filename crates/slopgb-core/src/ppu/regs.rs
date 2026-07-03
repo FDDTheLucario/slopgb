@@ -623,6 +623,13 @@ impl Ppu {
             self.render.active = false;
             self.render.win_active = false;
             self.win_start_pending = false;
+            // #11bi — the post-switch exit-table latches die with the LCD
+            // (the frame they classify is gone; SameBoy's freeze path is
+            // LCD-bound). Inert flag-off: only tier2 STOPs set them.
+            self.stop_anchor_set = false;
+            self.stop_anchor_midframe = false;
+            self.stop_leave_lcd_on = false;
+            self.stop_leave_k = 2;
             let white = self.white();
             self.front.fill(white);
             self.legacy_level_edge();
@@ -637,6 +644,15 @@ impl Ppu {
             // #11bd: the alignment shadow re-anchors at enable, like
             // SameBoy's `double_speed_alignment = 0` (memory.c:1510).
             self.sb_dsa8 = 0;
+            // #11bi — an enable re-anchors the PPU frame (the e-law: the DS
+            // enable quantizes the phase to the 4-dot grid), so the
+            // post-switch exit-table latches restart; record the enable's
+            // speed (the lcdoff-dance −4 rp class term). Inert flag-off.
+            self.stop_anchor_set = false;
+            self.stop_anchor_midframe = false;
+            self.stop_leave_lcd_on = false;
+            self.stop_leave_k = 2;
+            self.lcd_enable_in_ds = self.ds;
             // The event comparator's delayed FF45 copy restarts in sync
             // (gambatte lycIrq.lcdReset).
             self.lyc_event = self.lyc;

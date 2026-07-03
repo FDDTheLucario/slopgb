@@ -433,10 +433,29 @@ impl Ppu {
                     } else {
                         255 + u16::from(self.scx & 7)
                     };
-                    fold(
-                        &mut exit,
-                        2 * i32::from(flip) - 2 + 2 * i32::from(self.scx & 1) - carry,
-                    );
+                    // #11bi — the DS post-switch bare exit (the 4-variable
+                    // table's DS arm): a mid-frame-anchored speed dance
+                    // (speedchange v1/3/5 ly44) lands the true post-switch
+                    // frame the emergent exit's absorbed calibration
+                    // misses; in scope the law REPLACES the emergent exit.
+                    // `E = 502 + leave_k + 2*(SCX&7)` rp, LINEAR in scx
+                    // (the (SCX&1) parity term measured OUT for these
+                    // dances), leave_k = 2 when never left (v1). The
+                    // VBlank/boot-anchored suite (kernel `_ds`, offset1,
+                    // gdma — all first-STOP at ly144) and the DS-enable
+                    // dances (lcdoffds — `lcd_enable_in_ds`, sits exactly
+                    // on the emergent exit) are excluded. All 120 family
+                    // legs dual-traced: 120/120 offline fit, ZERO
+                    // constraint conflicts
+                    // (`speedchange-postswitch-exit-2026-07-03.md`).
+                    if self.stop_anchor_midframe && !self.lcd_enable_in_ds {
+                        fold(&mut exit, 502 + i32::from(self.stop_leave_k) + 2 * scx7);
+                    } else {
+                        fold(
+                            &mut exit,
+                            2 * i32::from(flip) - 2 + 2 * i32::from(self.scx & 1) - carry,
+                        );
+                    }
                 }
             } else if !self.wy_latch
                 && self.wy2 != self.ly
@@ -450,19 +469,38 @@ impl Ppu {
                     let (proj, lead) = self.flip_projection();
                     self.dot + proj.saturating_sub(lead)
                 };
-                let phase = i32::from(self.lcd_phase_hd);
-                fold(&mut exit, 2 * i32::from(flip) + 2 - carry - phase);
-                // (#11bh item 7 — a POST-SWITCH bare-exit law
-                // `E(scx) = 502 + 2·(SCX&7)` rp-frame, scoped to an LCD-on
-                // DS→SS STOP leave, was BUILT + MEASURED here: it fixes all
-                // four `speedchange2*_m2int_m3stat_scx2_2` blockers + 5 ly44
-                // `_2` legs but drops 14 SameBoy-passing `_1` legs across
-                // scx1/3/4 and the ly44 family — the blanket is the
-                // #11bb/#11bc half-dot A/B swap re-measured. The per-leg
-                // resolution needs the (nop-slide s, SCX, `sb_dsa8`-at-leave,
-                // ISR-carry) 4-variable exit table — the full S6 co-land.
-                // Parked with the numbers:
-                // `measurements/speedchange-postswitch-law-2026-07-03.md`.)
+                // #11bi — the SS post-switch bare exit: the #11bh park's
+                // 4-variable table, BUILT from the 120-leg dual-trace
+                // (`speedchange-postswitch-exit-2026-07-03.md`; 120/120
+                // offline fit, zero conflicts). `E = 504 + leave_k −
+                // 4*[lcd_enable_in_ds] + 2*(SCX&7)` rp — the leave k
+                // (dsa7-branched, 2/6) and the enable-in-DS re-anchor are
+                // the two class variables; ISR carry measured OUT (the
+                // carried m2int and polled ly44 legs share constants).
+                // Scoped to mid-frame-anchored dances post-LCD-on-leave
+                // (`stop_anchor_midframe`): the #11bh blanket's 14
+                // SameBoy-pass drops were the VBlank/boot-anchored classes
+                // (base/frame1/nop m2int + offset2/3 counts) this anchor
+                // excludes; the emergent arm still serves those. In scope
+                // the law REPLACES the emergent exit for BOTH directions —
+                // the emergent `2*flip + 2` m==0 hold over-holds the
+                // post-switch frame by up to 6 rp
+                // (`speedchange4_ly44_m3_nop_m3stat_scx3_2` reads rp 512
+                // native-0, true exit 512, emergent hold 518 — a fold
+                // cannot override a max-hold). The one out-of-scope
+                // hold-direction row (`speedchange2_nop_m2int_m3stat_
+                // scx1_1`, VBlank-anchored) stays the pre-seeded #11bd
+                // rebaseline joiner.
+                if self.stop_anchor_midframe && self.stop_leave_lcd_on {
+                    let en = if self.lcd_enable_in_ds { 4 } else { 0 };
+                    fold(
+                        &mut exit,
+                        504 + i32::from(self.stop_leave_k) - en + 2 * scx7,
+                    );
+                } else {
+                    let phase = i32::from(self.lcd_phase_hd);
+                    fold(&mut exit, 2 * i32::from(flip) + 2 - carry - phase);
+                }
             }
         }
         exit
