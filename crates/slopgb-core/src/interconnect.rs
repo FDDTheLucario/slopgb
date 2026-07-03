@@ -993,9 +993,10 @@ impl Bus for Interconnect {
             // sample) waking on the m0-origin STAT also re-fetches — the
             // woken instruction is a fresh `cycle_read` after the jh
             // advance(4), one M-cycle later than the reused idle prefetch.
+            let dmg_first = !self.model.is_cgb() && !self.cpu_halted;
+            let cgb_any = self.model.is_cgb() && !self.double_speed;
             if self.tier2_reclock
-                && !self.model.is_cgb()
-                && !self.cpu_halted
+                && (dmg_first || cgb_any)
                 && w & IF_STAT_BIT != 0
                 && self.ppu.stat_rise_m0()
             {
@@ -1031,10 +1032,10 @@ impl Bus for Interconnect {
         // package.
         let w = (self.intf & !self.if_late) & self.ie & IF_MASK;
         // #11bf: the m0-origin STAT rise's halt visibility is the T-deadline
-        // (covers the halt-entry first check too). Tier2 DMG only.
+        // (covers the halt-entry first check too). Tier2 DMG (+CGB sweep).
         if w & IF_STAT_BIT != 0
             && self.tier2_reclock
-            && !self.model.is_cgb()
+            && (!self.model.is_cgb() || !self.double_speed)
             && self.ppu.stat_rise_m0()
             && self.clock.now() < self.stat_vis_from_t
         {
@@ -1361,11 +1362,12 @@ impl Bus for Interconnect {
         // halt; the following byte runs twice) while slopgb halted and woke
         // on the first idle check — one M-cycle short (the `_3b`
         // skip-path). Flush the debt, then sample.
-        // DMG-only for now: the CGB entry-check frame is entangled with the
-        // CGB halt-mask calibrations (moving it alone A/B-swaps — fixes the
-        // dec pair, drops lycirq_m2stat_2/m1int_ly_2/ifandie, measured);
-        // it lands with the CGB head-sample-grid port.
-        if self.tier2_reclock && !self.model.is_cgb() {
+        // DMG + single-speed CGB (#11bf: the CGB-SS extension with the rise
+        // deadline lands the whole set together — full-CGB two-bin +3/−0;
+        // the entry flush ALONE was the measured A/B swap. Double speed
+        // keeps the old masks: its 2-dot M grid re-frames the rise, the DS
+        // legs regressed under the deadline model).
+        if self.tier2_reclock && (!self.model.is_cgb() || !self.double_speed) {
             let before = self.clock.now();
             self.clock.flush();
             self.advance_machine_t(before, self.clock.now());
@@ -1386,13 +1388,23 @@ impl Bus for Interconnect {
         // fetch M-cycle falsely arms the halt-bug.
         if w & IF_STAT_BIT != 0
             && self.tier2_reclock
-            && !self.model.is_cgb()
+            && (!self.model.is_cgb() || !self.double_speed)
             && self.ppu.stat_rise_m0()
             && self.clock.now() < self.stat_vis_from_t
         {
             return w & !IF_STAT_BIT;
         }
         w
+    }
+
+    fn halt_entry_rewind(&mut self) -> bool {
+        // #11bf — the IME=1 halt-entry rewind (SameBoy `halt()`), on the
+        // same tier2 DMG/CGB-single-speed scope as the entry check; the
+        // t0+4 flushed + deadline-masked view decides.
+        if !self.tier2_reclock || (self.model.is_cgb() && self.double_speed) {
+            return false;
+        }
+        self.pending_halt_entry() != 0
     }
 
     fn pending_dispatch(&mut self) -> u8 {
@@ -1406,7 +1418,7 @@ impl Bus for Interconnect {
         let w = self.pending();
         if w & IF_STAT_BIT != 0
             && self.tier2_reclock
-            && !self.model.is_cgb()
+            && (!self.model.is_cgb() || !self.double_speed)
             && self.ppu.stat_rise_m0()
             && self.clock.now() < self.stat_vis_from_t
         {

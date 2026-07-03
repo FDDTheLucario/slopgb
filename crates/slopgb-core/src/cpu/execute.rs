@@ -456,11 +456,28 @@ fn op_halt(cpu: &mut Cpu, bus: &mut impl Bus) {
     // the next opcode fetch fails to increment PC (gbctr). An EI directly
     // before HALT behaves like the IME=1 case instead, because the delayed
     // enable commits while halting (mooneye acceptance/halt_ime0_ei).
-    if !cpu.ime && !cpu.ime_pending && bus.pending_halt_entry() != 0 {
-        cpu.halt_bug = true;
-    } else {
-        cpu.halted = true;
+    if !cpu.ime && !cpu.ime_pending {
+        if bus.pending_halt_entry() != 0 {
+            cpu.halt_bug = true;
+        } else {
+            cpu.halted = true;
+        }
+        return;
     }
+    // #11bf — IME=1 (or EI-pending) with IE & IF already nonzero at the
+    // entry view: the halt is NOT entered and PC rewinds to the HALT
+    // itself, so the dispatched ISR returns INTO the halt and it
+    // re-executes with the IF bit consumed (SameBoy halt()
+    // sm83_cpu.c:1043-1047: `halted = false; pc--`). The prior
+    // halted+first-check-wake path pushed halt+1 — the ISR skipped the
+    // re-halt and the whole post-wake stream ran one halt round early
+    // (`late_m0int_halt_m0stat_*` dual-traced). Tier2-gated inside
+    // `halt_entry_rewind` (production keeps the halted+wake shape).
+    if bus.halt_entry_rewind() {
+        cpu.regs.pc = cpu.regs.pc.wrapping_sub(1);
+        return;
+    }
+    cpu.halted = true;
 }
 
 fn op_stop(cpu: &mut Cpu, bus: &mut impl Bus) {

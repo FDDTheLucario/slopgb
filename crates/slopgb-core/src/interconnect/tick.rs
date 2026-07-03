@@ -112,7 +112,7 @@ impl Interconnect {
                         u8::from(self.cpu_halted)
                     );
                 }
-                if self.tier2_reclock && !self.model.is_cgb() {
+                if self.tier2_reclock && (!self.model.is_cgb() || !self.double_speed) {
                     // #11bf — the mode-0 rise's halt-wake visibility is a
                     // T-deadline on the SameBoy-exact 4k+2 sample grid — no
                     // M-quantized `if_late`/`m0_halt_hold` masking, and no

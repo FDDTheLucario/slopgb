@@ -114,6 +114,15 @@ pub trait Bus {
     fn pending_dispatch(&mut self) -> u8 {
         self.pending()
     }
+    /// #11bf — whether HALT executed with IME set (or EI-pending) while
+    /// IE & IF is already nonzero at the entry view should NOT halt and
+    /// instead rewind PC into the HALT (SameBoy `halt()`
+    /// sm83_cpu.c:1043-1047), so the dispatched ISR returns into the halt.
+    /// Default false (production keeps the halted+first-check-wake shape);
+    /// the interconnect enables it on the tier2 deferred path.
+    fn halt_entry_rewind(&mut self) -> bool {
+        false
+    }
     /// Clear bit `bit` (0..=4) of IF. Takes no time.
     fn ack(&mut self, bit: u8);
     /// CPU executed STOP: if a speed switch is armed (CGB KEY1.0), perform
