@@ -3303,6 +3303,60 @@ fn tier2_ly0_pulse_readview_passes() {
     }
 }
 
+/// S5 #11bh item-7 count-row slice — the SHIFTED-frame (post-STOP) co-instant
+/// visibility deadline: the lcd_offset count rows' first poll lands ON the
+/// mode-0 rise/flip dot in slopgb's whole-dot frame where the hardware event
+/// is a half-dot PAST the sample (the §2 law: F1 = L + 1.5, uniform ½-dot
+/// margins). Two verdict-only arms, `lcd_shift_dots != 0` scoped (inert
+/// un-switched): the FF0F poll masks a same-dot mode-0 rise
+/// (`m0irq_count`); the FF41 poll holds mode 3 on the recorded flip's own
+/// dot (`m0stat_count`). The error is ONE-SIDED — the `_2` siblings read 2
+/// dots past the event and keep their verdicts (guards).
+#[test]
+fn tier2_lcd_offset_count_deadline_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_lcd_offset_count",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        (
+            "gambatte/lcd_offset/offset1_lyc99int_m0irq_count_scx2_ds_1_cgb04c_out90.gbc",
+            "90",
+        ),
+        (
+            "gambatte/lcd_offset/offset1_lyc99int_m0stat_count_scx2_ds_1_cgb04c_out90.gbc",
+            "90",
+        ),
+        (
+            "gambatte/lcd_offset/offset3_lyc99int_m0stat_count_scx1_1_cgb04c_out90.gbc",
+            "90",
+        ),
+        // GUARDs — the one-M-later polls keep their verdicts.
+        (
+            "gambatte/lcd_offset/offset1_lyc99int_m0irq_count_scx2_ds_2_cgb04c_out90.gbc",
+            "90",
+        ),
+        (
+            "gambatte/lcd_offset/offset1_lyc99int_m0stat_count_scx2_ds_2_cgb04c_out90.gbc",
+            "90",
+        ),
+        (
+            "gambatte/lcd_offset/offset3_lyc99int_m0stat_count_scx0_2_cgb04c_out90.gbc",
+            "90",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 // Session-local S5 measurement aid (see the module's doc); `#[ignore]`'d so it
 // never runs in the gate.
 #[path = "gambatte_flagon_probe.rs"]

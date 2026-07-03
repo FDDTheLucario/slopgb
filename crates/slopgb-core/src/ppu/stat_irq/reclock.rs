@@ -333,9 +333,9 @@ impl Ppu {
             let w_ack = if self.ack_squash_ppu_mask & IF_STAT != 0 {
                 if m0_rise {
                     u8::from(self.ds)
-                } else if m2_rise {
-                    0
-                } else if self.ds {
+                } else if m2_rise || self.ds {
+                    // mode-2 pulses (both speeds) and every DS non-m0 rise
+                    // sit on the far side of the ack in SameBoy's frame.
                     0
                 } else {
                     2
@@ -488,6 +488,12 @@ impl Ppu {
             // Mode-0 (HBlank) source rise carries the half-cycle halt law
             // (`if_late` via the interconnect's second-half check).
             self.m0_rise = true;
+            // #11bh item-7 count-row slice — tag the SHIFTED-frame rise for
+            // the co-instant FF0F read-view mask (`m0sh_age` field doc).
+            if self.lcd_shift_dots != 0 {
+                self.m0sh_age = 2;
+                self.m0sh_dot = self.dot;
+            }
         }
     }
 
@@ -847,7 +853,11 @@ impl Ppu {
         // SameBoy (SBREAD fp = rise fp + 8) and must SEE it
         // (`lycint152_m2irq_2`/`_ds_2` want E2, measured A/B without this
         // guard).
-        if self.ly0_pulse_age > 0 && self.line == 0 && self.dot == 4 && self.lyc == 153 {
+        // Second arm: the shifted-frame co-instant mode-0 rise
+        // (#11bh item-7 count-row slice, see `m0sh_age`).
+        if (self.ly0_pulse_age > 0 && self.line == 0 && self.dot == 4 && self.lyc == 153)
+            || (self.m0sh_age > 0 && self.dot == self.m0sh_dot && self.lcd_shift_dots != 0)
+        {
             IF_STAT
         } else {
             0

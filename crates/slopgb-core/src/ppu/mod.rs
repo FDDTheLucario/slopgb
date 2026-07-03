@@ -300,6 +300,16 @@ pub struct Ppu {
     /// line-0 dot 4 co-instant with the pulse and wants 0, its `_2` sibling
     /// reads 4 dots later and sees it). Verdict-only; `intf` keeps the bit.
     ly0_pulse_age: u8,
+    /// #11bh item-7 count-row slice — the SHIFTED-frame (post-STOP,
+    /// `lcd_shift_dots != 0`) mode-0 rise's read-view age + dot: a deferred
+    /// FF0F poll landing on the rise's own dot reads the bit CLEAR
+    /// (CPU-first at the shared instant; the lcd_offset count rows'
+    /// first-poll law — `offset1_lyc99int_m0irq_count_scx2_ds_1` polls
+    /// dot 257 co-instant with the rise, wants E0; the error is ONE-SIDED,
+    /// the `_2` siblings read 2 dots later and keep seeing it).
+    /// Verdict-only.
+    m0sh_age: u8,
+    m0sh_dot: u16,
     scy: u8,
     scx: u8,
     /// LY as read through FF44 (153-quirk aware).
@@ -887,6 +897,8 @@ impl Ppu {
             ack_squash_ppu_mask: 0,
             ack_squash_ppu: 0,
             ly0_pulse_age: 0,
+            m0sh_age: 0,
+            m0sh_dot: 0,
             scy: 0,
             scx: 0,
             ly: 0,
@@ -1072,6 +1084,7 @@ impl Ppu {
         // byte-identical flag-off).
         self.ack_squash_ppu = self.ack_squash_ppu.saturating_sub(1);
         self.ly0_pulse_age = self.ly0_pulse_age.saturating_sub(1);
+        self.m0sh_age = self.m0sh_age.saturating_sub(1);
         std::mem::take(&mut self.pending_if)
     }
 

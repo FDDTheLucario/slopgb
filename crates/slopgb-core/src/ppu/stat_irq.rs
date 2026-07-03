@@ -63,6 +63,24 @@ impl Ppu {
         {
             return if self.dot + 2 >= 84 { 3 } else { 2 };
         }
+        // #11bh item-7 count-row slice — the SHIFTED-frame hold-until-sample
+        // FF41 arm: a post-STOP (`lcd_shift_dots != 0`) poll landing on the
+        // recorded flip's own dot still reads mode 3 (the lcd_offset count
+        // law: the flip is a half-dot PAST the sample — F1 = L + 1.5, uniform
+        // ½-dot margins; slopgb's whole-dot flip lands ON the poll dot and
+        // read 0 — `offset1_lyc99int_m0stat_count_scx2_ds_1` DS poll 257 /
+        // `offset3_..._scx1_1` SS poll 255, both want 0x83; the `_2` siblings
+        // read 2 dots past the flip and keep 0x80 — the ONE-SIDED error).
+        if self.lcd_shift_dots != 0
+            && self.model.is_cgb()
+            && self.line < 144
+            && m == 0
+            && self.line_render_done
+            && self.flip_dot != 0
+            && self.dot == self.flip_dot
+        {
+            return 3;
+        }
         let Some(exit_adj) = self.vis_exit_hd(m) else {
             return m;
         };
