@@ -216,6 +216,15 @@ pub(super) struct Render {
     /// slopgb's whole-dot render collapses the re-enable-dot dependence. Reset
     /// per line. `pub(super)` for the read law.
     pub(super) win_reenable_dot: u16,
+    /// #11bf item 3a — the dot a mid-line LCDC.5 FIRST enable landed (0 if
+    /// none this line; distinct from [`Self::win_reenable_dot`]: latched only
+    /// when the window was neither active nor aborted, i.e. the enable IS the
+    /// window trigger). A late-ENABLE-triggered first window line takes the
+    /// STEADY mode-3 exit (`259+SCX&7+ds`) where a late-WY-triggered one
+    /// extends later (#11y) — the trigger SOURCE is the arm-1 first-line
+    /// discriminator (`late_enable_ly0_ds` want-pair straddles the steady
+    /// exit). Reset per line; tier2+CGB only (read law input).
+    pub(super) win_enable_dot: u16,
     /// WX comparator output on the previous dot: activations and
     /// reactivations fire on the rising edge only (the match holds while
     /// lx is frozen during the start stall and must not re-fire).
@@ -270,6 +279,7 @@ impl Render {
             win_predraw_abort: false,
             win_predraw_abort_dot: 0,
             win_reenable_dot: 0,
+            win_enable_dot: 0,
             win_match_prev: false,
             prefill_pos: 0,
             wx_match_dot: 0,
@@ -327,6 +337,7 @@ impl Ppu {
         r.win_predraw_abort = false;
         r.win_predraw_abort_dot = 0;
         r.win_reenable_dot = 0;
+        r.win_enable_dot = 0;
         r.win_match_prev = false;
         r.prefill_pos = 0;
         r.wx_match_dot = 0;

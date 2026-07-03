@@ -117,6 +117,26 @@ impl Ppu {
         {
             fold(&mut exit, 2 * (259 + scx7 + ds1));
         }
+        // #11bf item 3a — a late-ENABLE-triggered window (the mid-line
+        // LCDC.5 write IS the trigger, `Render::win_enable_dot`) whose
+        // enable lands past the line's fetch-catch deadline renders BARE on
+        // SameBoy — the window misses this line entirely — while slopgb's
+        // whole-dot render still activates and extends (`late_enable_ly0_ds`
+        // want-pair: enable dot 94 → native extend holds (want 3, no arm);
+        // dot 96 → SameBoy bare (want 0), both legs reading the identical
+        // dot 260 — the enable dot is the only discriminator). DS-scoped,
+        // bare-sprite-free lines; the DS bare exit form (PORT 1).
+        if self.ds
+            && self.render.win_enable_dot > 94
+            && self.render.win_active
+            && self.model.is_cgb()
+            && self.render.n_sprites == 0
+            && !self.render.win_aborted
+            && self.wy2 <= 143
+            && m == 3
+        {
+            fold(&mut exit, 508 + 2 * scx7 + 2 * i32::from(self.scx & 1));
+        }
         // Arm 2 — the shadow late-WY extend (#11af; line 0 included #11bd).
         // slopgb's discrete `wy_latch` sampler misses the mid-line late-WY
         // write SameBoy's continuous `wy_check` catches, so slopgb renders the

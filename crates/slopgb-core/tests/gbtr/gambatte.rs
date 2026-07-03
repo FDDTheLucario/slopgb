@@ -2610,6 +2610,81 @@ fn tier2_halt_wake_grid_passes() {
     }
 }
 
+/// #11bf item 2a — a racing DMA-register write (FF51-FF55 counters/arm, FF70
+/// WRAM bank, FF4F VRAM bank) beats a same-advance HBlank-DMA steal: SameBoy
+/// runs `GB_hdma_run` only after the current instruction completes
+/// (sm83_cpu.c:1718), so the racing write's store is visible to the block.
+/// slopgb's deferred write head-serviced the request flagged during the
+/// write's own machine advance BEFORE the store (`hdma_late_destl_1`
+/// dual-traced with the new SBWHDMA tracer: SameBoy order w54 → run dst=8010;
+/// slopgb ran the block with the stale dst=8000). The steal now defers past
+/// the scoped registers' store; a request already pending at the op's entry
+/// still steals first. The scope is load-bearing: a GENERAL post-store
+/// service broke `irq_precedence/hdma_vs_m0_scx2_halt` (base-passing) and
+/// 60+ hdma rows. Pinned: destl `_1` (write wins) + `_2` (block-first
+/// sibling), `wrambank_1` (the FF70 source-bank race), `disable_ds_2` (the
+/// FF55 disarm race, DS). Full-CGB two-bin +5/−0; production byte-identical
+/// (`write_deferred` is tier2-only).
+#[test]
+fn tier2_hdma_write_race_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_hdma_write_race",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 4] = [
+        ("gambatte/dma/hdma_late_destl_1_cgb04c_out0.gbc", "0"),
+        ("gambatte/dma/hdma_late_destl_2_cgb04c_out1.gbc", "1"),
+        ("gambatte/dma/hdma_late_wrambank_1_cgb04c_out0.gbc", "0"),
+        ("gambatte/dma/hdma_late_disable_ds_2_cgb04c_out1.gbc", "1"),
+    ];
+    let model = Model::Cgb;
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, model);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, model.is_cgb()).unwrap_or_else(|e| {
+            panic!("{rel} [{model:?}] expected cgb04c out{expect} (tier2 flag-on): {e}")
+        });
+    }
+}
+
+/// #11bf item 3a — a late-ENABLE-triggered window whose LCDC.5 write lands
+/// past the line's fetch-catch deadline (dot > 94, DS) renders BARE on
+/// SameBoy (the window misses the line) while slopgb's whole-dot render still
+/// activates and extends. The `late_enable_ly0_ds` want-pair reads the
+/// IDENTICAL dot 260 with opposite wants — the enable dot (94 vs 96) is the
+/// only discriminator, so this is a render-length law keyed on
+/// `Render::win_enable_dot` (a FIRST enable: window neither active nor
+/// aborted), not a read-position one. `_1` (enable 94) holds natively; `_2`
+/// (enable 96) takes the DS bare exit. +1/−0 on the window family;
+/// production byte-identical (tier2+CGB+DS law input only).
+#[test]
+fn tier2_window_enable_deadline_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_window_enable_deadline",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 2] = [
+        ("gambatte/window/late_enable_ly0_ds_1_cgb04c_out3.gbc", "3"),
+        ("gambatte/window/late_enable_ly0_ds_2_cgb04c_out0.gbc", "0"),
+    ];
+    let model = Model::Cgb;
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, model);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, model.is_cgb()).unwrap_or_else(|e| {
+            panic!("{rel} [{model:?}] expected cgb04c out{expect} (tier2 flag-on): {e}")
+        });
+    }
+}
+
 // Session-local S5 measurement aid (see the module's doc); `#[ignore]`'d so it
 // never runs in the gate.
 #[path = "gambatte_flagon_probe.rs"]

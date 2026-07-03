@@ -81,6 +81,12 @@ impl Ppu {
                     && self.model.is_cgb()
                 {
                     self.render.win_reenable_dot = self.dot;
+                    // #11bf item 3a — a FIRST enable (window neither active
+                    // nor aborted this line) IS the window trigger; see
+                    // `Render::win_enable_dot`.
+                    if !self.render.win_active && !self.render.win_aborted {
+                        self.render.win_enable_dot = self.dot;
+                    }
                 }
             }
             0xFF42 => self.eff.scy = value,
