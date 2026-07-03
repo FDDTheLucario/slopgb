@@ -3140,6 +3140,73 @@ fn tier2_ack_squash_reclock_passes() {
     }
 }
 
+/// S5 #11bh — three window-line slices off one root cause: the win-line
+/// render clock sits +2 late in slopgb's frame; the FF41 `vis_mode_read` laws
+/// already compensate but three OTHER flip consumers read the raw render
+/// clock (dual-traced fp both emulators, 2026-07-03). (1) the win-line mode-0
+/// ENGINE rise now leads the flip 2 dots (`m2int_wxA5_m0irq_2`); (2) the
+/// wxA6 quirk-window VRAM read release co-moves with the CGB visible exit
+/// (`259 + SCX&7`), wxA6-scoped — the generic release was the vramw A/B, and
+/// the m0 IF rise fires while VRAM is still locked so it must not key the
+/// release (`m2int_wxA6_vrambusyread_3`); (3) the sprite-at-window-X
+/// abort-slot removal: an object at OAM X = WX+1 occupies the fetcher's
+/// GET_TILE_T1 after the window restart, removing the late CGB abort slot,
+/// so an LCDC.5 clear at wx_match−1 leaves the line fully extended
+/// (`late_disable_spx10_wx0f_2`).
+#[test]
+fn tier2_window_line_flip_consumers_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_window_line_flip",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        ("gambatte/window/m2int_wxA5_m0irq_2_dmg08_cgb04c_out2.gbc", "2"),
+        // GUARD — the one-M-earlier read stays clear of the led rise.
+        ("gambatte/window/m2int_wxA5_m0irq_1_dmg08_cgb04c_out0.gbc", "0"),
+        // GUARDs — the FF41 read law was already right; must not double-move.
+        ("gambatte/window/m2int_wxA5_m3stat_1_dmg08_cgb04c_out3.gbc", "3"),
+        ("gambatte/window/m2int_wxA5_m3stat_2_dmg08_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/window/m2int_wxA6_vrambusyread_3_dmg08_cgb04c_out5.gbc",
+            "5",
+        ),
+        // GUARDs — the two earlier reads stay blocked (the CGB exit is one
+        // bucket later than DMG; the release must not fire early).
+        (
+            "gambatte/window/m2int_wxA6_vrambusyread_2_dmg08_out5_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/m2int_wxA6_vrambusyread_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_disable_spx10_wx0f_2_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        // GUARD — the one-slot-earlier clear genuinely aborts.
+        (
+            "gambatte/window/late_disable_spx10_wx0f_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        // Bonus lift (the wxA6+sprite enable row rides the same rise lead).
+        (
+            "gambatte/m0enable/enable_wxA6_2x_spxA7_1_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 // Session-local S5 measurement aid (see the module's doc); `#[ignore]`'d so it
 // never runs in the gate.
 #[path = "gambatte_flagon_probe.rs"]

@@ -239,6 +239,24 @@ impl Ppu {
             {
                 return false;
             }
+            // #11bh — the wxA6 window line-END VRAM read release, SS. The
+            // WX=166 quirk window "activates during HBlank" (SameBoy
+            // `wx_166_interrupt_glitch`); its VRAM unblock CO-MOVES with the
+            // CGB visible exit (asm_window_gdma Row 6: unblock ∈
+            // (T0+256,T0+260], measured slopgb-frame 259) — one bucket LATER
+            // than DMG, and NOT keyed to the m0 IF rise (which fires while
+            // VRAM is still locked). slopgb held the lock to
+            // `line_render_done` (261) so `m2int_wxA6_vrambusyread_3`'s
+            // dot-260 read stayed blocked (want open, out5). wxA6-SCOPED —
+            // the generic win-line release was the vramw A/B (#11as).
+            if !self.ds
+                && (1..=143).contains(&self.line)
+                && self.render.win_active
+                && self.eff.wx == 0xA6
+                && d >= 259 + u16::from(self.scx & 7)
+            {
+                return false;
+            }
             if self.ds {
                 // The `preread_ds_1`/`_2` pair straddles the entry lock (dot80
                 // open / dot82 blocked): lock from 82 on the DS grid. Shifted

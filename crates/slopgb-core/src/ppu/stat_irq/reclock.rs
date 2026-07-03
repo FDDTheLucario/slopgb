@@ -521,7 +521,30 @@ impl Ppu {
         // lagged `prev_done`; `stat_events_tick` never reads `mode_for_interrupt`,
         // so production is byte-identical.
         let prev_done = if self.leading_edge_reads {
-            self.enabled && self.line <= 143 && self.line_render_done
+            self.enabled
+                && self.line <= 143
+                && (self.line_render_done
+                    // #11bh — the WINDOW-line mode-0 engine rise leads the
+                    // render flip by 2 dots (SS CGB): the win-line render
+                    // clock sits uniformly +2 late in slopgb's frame (the
+                    // FF41 `vis_mode_read` window laws already compensate;
+                    // the ENGINE still read the raw flip). SameBoy raises
+                    // the win-line mode-0 IF at the same instant as its
+                    // visible flip (dual-traced `m2int_wxA5_m0irq_2`: SB
+                    // rise = flip fp = slopgb-frame 259, slopgb rise 261 →
+                    // the `_2` dot-260 FF0F read missed it; the `_1`
+                    // dot-256 read stays clear). Projection-based so
+                    // mid-line SCX/WX writes track.
+                    || (self.tier2_reclock
+                        && self.model.is_cgb()
+                        && !self.ds
+                        && self.render.win_active
+                        && !self.glitch_line
+                        && self.render.active
+                        && {
+                            let (proj, lead) = self.flip_projection();
+                            proj.saturating_sub(lead) <= 2
+                        }))
         } else {
             prev_done
         };

@@ -38,7 +38,8 @@ mod window;
 #[derive(Clone, Copy, Default)]
 pub(super) struct Sprite {
     y: u8,
-    x: u8,
+    /// `pub(super)` for the #11bh Arm-3b sprite-at-window-X check.
+    pub(super) x: u8,
     tile: u8,
     flags: u8,
     idx: u8,
@@ -165,8 +166,9 @@ pub(super) struct Render {
     t_lo: u8,
     t_hi: u8,
 
-    // Sprites (selected during OAM scan).
-    sprites: [Sprite; 10],
+    // Sprites (selected during OAM scan). `pub(super)` for the #11bh Arm-3b
+    // sprite-at-window-X check (`stat_irq.rs`), like `n_sprites` below.
+    pub(super) sprites: [Sprite; 10],
     /// `pub(super)` so the `vis_mode_read` window-length law (`stat_irq.rs`)
     /// can exclude sprite-extended lines from the off-screen-window range
     /// (the bare `259+SCX&7` exit does not carry the sprite penalty).

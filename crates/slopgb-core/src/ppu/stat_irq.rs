@@ -219,6 +219,37 @@ impl Ppu {
         {
             fold(&mut exit, 2 * 253);
         }
+        // Arm 3b — the sprite-at-window-X abort-slot removal, SS CGB (#11bh,
+        // asm_window_gdma Row 4). With an object at the window's screen X
+        // (OAM X = WX+1) the window activation precedes the object fetch and
+        // the sprite fetch then OCCUPIES the fetcher's next GET_TILE_T1 —
+        // removing the late CGB abort slot, so an LCDC.5 clear landing in
+        // that last slot (commit ≥ wx_match−4; `late_disable_spx10_wx0f_2`
+        // clear 104, match 105) leaves the window+sprite line fully extended
+        // (SameBoy flip 272 → slopgb-frame exit 270). slopgb's whole-dot
+        // en-sample at the match suppressed the start → native bare+sprite
+        // abort exit 264, read 264 → 0 (want 3). The `_1` clear (100) lands
+        // a slot earlier and genuinely aborts (native, stays 0). Dual-traced
+        // fp both emulators, 2026-07-03.
+        if self.model.is_cgb()
+            && !self.ds
+            && self.render.win_predraw_abort
+            && self.render.wx_match_dot != 0
+            && self.render.win_predraw_abort_dot + 4 >= self.render.wx_match_dot
+            && self.render.win_predraw_abort_dot < self.render.wx_match_dot
+            && self.eff.lcdc & LCDC_WIN_ENABLE == 0
+            && self.line >= 1
+            && self.line < 144
+            && m == 0
+            && !self.render.win_active
+            && !self.glitch_line
+            && self.render.n_sprites > 0
+            && self.render.sprites[..usize::from(self.render.n_sprites)]
+                .iter()
+                .any(|s| u16::from(s.x) == u16::from(self.eff.wx) + 1)
+        {
+            fold(&mut exit, 2 * 270);
+        }
         // Arm 4 — the DS pre-draw abort twin (#11bb). SameBoy renders the
         // early aborts bare with the penalty dropped, exit `cfl257 dc2` (the
         // DS half-dot bare exit) = slopgb 254. The DS abort boundary is
