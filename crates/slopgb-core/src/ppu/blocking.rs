@@ -29,6 +29,20 @@ const CGB_LINESTART_OAM_OPEN_DS: u16 = 2;
 const PAL_M3START_OPEN: u16 = 3;
 
 impl Ppu {
+    /// Part C — a CPU VRAM write ATTEMPT landed on this line within the last
+    /// 8 dots (the #11as co-temporality discriminator, also used by the DS
+    /// line-END release arm in [`Self::vram_read_blocked`]): the write's
+    /// M-cycle cost is what SameBoy spreads across the following readback, so
+    /// a read this close behind a write keeps the straddle-blocked view (the
+    /// `vramw_m3end` want-blocked readbacks) while write-free reads resolve at
+    /// their exact deferred position. Consumed by the interconnect's tier2
+    /// VRAM-read stamp bypass (`memory.rs`).
+    pub(crate) fn vram_wr_recent(&self) -> bool {
+        self.vram_wr_line == self.line
+            && self.dot >= self.vram_wr_dot
+            && self.dot - self.vram_wr_dot < 8
+    }
+
     pub(crate) fn oam_read_blocked(&self) -> bool {
         self.enabled
             && self.line <= 143
@@ -63,24 +77,25 @@ impl Ppu {
             // `postread_ds_2` read (`ly135 dot254`, SameBoy accessible) stayed
             // blocked. See [`Self::ds_lineend_read_open`]. `!ds` in production
             // + `tier2` gate → byte-identical OFF.
-            && !self.ds_lineend_read_open()
+            && !self.ds_lineend_open()
     }
 
-    /// Tier-2 CGB double-speed line-END OAM-read-unblock window — see
-    /// [`Self::oam_read_blocked`]. SameBoy's DS mode-3 read-lock releases one
-    /// cycle after the SS release (it skips the `if (!cgb_double_speed)` early
-    /// unblock at `display.c:2104-2111` and drops through to `:2118`), so the
-    /// deferred cc+0 read observes OAM accessible from slopgb dot `254 + SCX&7`.
-    /// slopgb's production block ran to `line_render_done` (~2 dots later), so
-    /// the `oam_access/postread_ds_2` read (`ly135 dot254`, SameBoy accessible)
-    /// stayed blocked while its `_1` sibling (dot252, blocked) passed. Bare
-    /// non-sprite non-window non-glitch lines only (a sprite/window mode-3
-    /// extension pushes the real release later — those keep `line_render_done`).
-    /// APPLIED TO OAM ONLY: the VRAM twin (`vram_m3/postread_ds_2`) is
-    /// co-temporal with the `vramw_m3end` write-readback at the same dot254 (see
-    /// `vram_read_blocked`), so a VRAM release is an A/B swap. `tier2_reclock`
-    /// gate + `!leading_edge_reads` in production → byte-identical OFF.
-    fn ds_lineend_read_open(&self) -> bool {
+    /// Tier-2 CGB double-speed line-END OAM unblock window — see
+    /// [`Self::oam_read_blocked`] + [`Self::oam_write_blocked`]. SameBoy's DS
+    /// mode-3 lock releases one cycle after the SS release (it skips the
+    /// `if (!cgb_double_speed)` early unblock at `display.c:2104-2111` and
+    /// drops through to `:2118`), so the deferred cc+0 access observes OAM
+    /// accessible from slopgb dot `254 + SCX&7`. slopgb's production block ran
+    /// to `line_render_done` (~2 dots later), so the `oam_access/postread_ds_2`
+    /// read (`ly135 dot254`, SameBoy accessible) stayed blocked while its `_1`
+    /// sibling (dot252, blocked) passed. Part C extends the SAME boundary to
+    /// OAM WRITES (`postwrite_ds_2` write@254 lands / `_1` @252 dropped;
+    /// `postwrite_scx1_ds` 256/254 — the write release rides the identical
+    /// `254 + SCX&7` law). Bare non-sprite non-window non-glitch lines only (a
+    /// sprite/window mode-3 extension pushes the real release later — those
+    /// keep `line_render_done`). `tier2_reclock` gate + `!leading_edge_reads`
+    /// in production → byte-identical OFF.
+    fn ds_lineend_open(&self) -> bool {
         self.tier2_reclock
             && self.model.is_cgb()
             && self.ds
@@ -143,8 +158,13 @@ impl Ppu {
             } else {
                 // Tier-2: the mode3→0 write-unblock coincides with the visible
                 // mode→0 flip (`vis_early`), one dot before `line_render_done` —
-                // the same coupling as the read side (see `oam_read_blocked`).
-                self.dot < 84 || (!self.line_render_done && !self.write_unblocked_early())
+                // the same coupling as the read side (see `oam_read_blocked`);
+                // the DS line-END release rides the same `254 + SCX&7` law as
+                // reads ([`Self::ds_lineend_open`], Part C).
+                self.dot < 84
+                    || (!self.line_render_done
+                        && !self.write_unblocked_early()
+                        && !self.ds_lineend_open())
             };
         }
         // Writes pass during dots 0-3 and 80-83 (`lcdon_write_timing-GS`).
@@ -267,31 +287,49 @@ impl Ppu {
     /// end (dot D), not the visible mode-0 read flip 3 dots earlier — the
     /// gambatte cgbpal_m3 write-window calibration sits on this anchor.
     pub(super) fn pal_ram_blocked(&self) -> bool {
-        if !self.enabled || self.line > 143 || self.render_finished {
+        if !self.enabled || self.line > 143 {
             return false;
+        }
+        if self.render_finished {
+            // Part C/D (tier2) — the palette-RAM unblock trails the pipe end
+            // by 1 dot at single speed / 0 in double speed on the deferred
+            // (cc+0) frame. The full `cgbpal_m3end` constraint table
+            // (`c-palette-rederive-2026-07-02.md`): SS reads at
+            // `pipe_end` are blocked (`m3end_1` @256, `scx2_1` @256,
+            // `scx5_1` @260) while reads at/past `pipe_end + 1` are open
+            // (`_2` @260 with pipe 256/258/259, `scx5_2` @264 with 261 —
+            // Δ = +2 is REFUTED by `scx3_2` read@260 pipe 259); DS reads
+            // open AT the pipe end (`m3end_ds_2` @256 pipe 256,
+            // `scx5_ds_2` @262 pipe 261) while pre-pipe reads stay blocked
+            // (`ds_1` @254, `scx5_ds_1` @260 < 261). The production path
+            // returns open here (the whole-M-cycle `pal_access_edge` stamp in
+            // `interconnect/memory.rs` carries its cc+4 straddle law);
+            // `pal_open_dot` is never read flag-off → byte-identical.
+            return self.tier2_reclock
+                && self.model.is_cgb()
+                && !self.glitch_line
+                && self.pal_open_dot != 0
+                && self.dot < self.pal_open_dot + u16::from(!self.ds);
         }
         let lock = if self.glitch_line {
             GLITCH_MODE3_START
         } else if self.tier2_reclock && self.model.is_cgb() && !self.ds {
-            // Tier-2 CGB m3-start palette window: SameBoy keeps
-            // `cgb_palettes_blocked = false` for `PAL_M3START_OPEN` T-cycles
-            // INTO mode 3 (`display.c:1867` false → `:1877` true, a 3-cycle
-            // SLEEP between), so a deferred read/write landing at the mode-3
-            // entry (the lcd-offset-shifted `cgbpal_m3/*_m3start_lcdoffset1_1`
-            // access — slopgb `ly1 dot86` vs SameBoy's ~cfl87 lock) still sees
-            // palettes accessible. slopgb locks at dot 84; extend the lock.
-            // Never extended in production / LE-only → byte-identical OFF.
-            // #11bd item 5b — the FIRST frame after an LCD enable locks at
-            // the mode-3 entry itself (no +3 grace): the `ly1_late_cgbpw`
-            // pair writes dot80 (lands, want AA) / dot84 (blocked, want 55)
-            // while SameBoy's equivalents land cfl0 / blocked cfl89 — the
-            // post-enable frame phase runs ~5 dots hot, and only the
-            // 84-boundary separates the pair on our grid. Steady frames
-            // (incl. the lcdoffset1 pin row at law-dot 85) keep 87.
-            if self.frame_skip {
-                84
-            } else {
+            // Part C/D re-derivation — the tier2 SS mode-3 entry lock is the
+            // mode-3 anchor 84 itself: the `*_m3start_2` triplet (SameBoy-pass)
+            // accesses at dot 84 and wants BLOCKED (read FF / write dropped)
+            // while the `_1` legs at dot 80 land — so the base boundary is 84,
+            // NOT the previous `84 + PAL_M3START_OPEN` grace, which sacrificed
+            // the triplet to serve the STOP-shifted rows. The +3 grace applies
+            // ONLY to shifted ROMs (`cgbpal_m3/*_m3start_lcdoffset1_1`'s
+            // law-dot-85 access must stay open — the shifted poll lands +3
+            // dots per +1-dot machine advance, the #11bd poll-quantum law, so
+            // its law frame under-corrects and the boundary sits at 87 there).
+            // This also subsumes the #11bd item 5b first-frame (`frame_skip`)
+            // arm — 84 is now the base for every unshifted frame.
+            if self.lcd_shift_dots > 0 {
                 84 + PAL_M3START_OPEN
+            } else {
+                84
             }
         } else {
             84

@@ -220,11 +220,30 @@ impl Ppu {
                 // what SameBoy spreads).
                 self.vram_wr_line = self.line;
                 self.vram_wr_dot = self.dot;
+                // S5 accessibility write-attempt tracer (`SLOPGB_S5DBG`,
+                // byte-identical unset): the vramw/oam postwrite families'
+                // measurement WRITE dot + blocked verdict.
+                if crate::ppu::s5dbg_on() && self.line < 144 {
+                    eprintln!(
+                        "SLOPGB vramw ly={} dot={} blk={}",
+                        self.line,
+                        self.dot,
+                        u8::from(self.vram_write_blocked())
+                    );
+                }
                 if !self.vram_write_blocked() {
                     self.vram[self.vram_index(addr)] = value;
                 }
             }
             0xFE00..=0xFE9F => {
+                if crate::ppu::s5dbg_on() && self.line < 144 {
+                    eprintln!(
+                        "SLOPGB oamw ly={} dot={} blk={}",
+                        self.line,
+                        self.dot,
+                        u8::from(self.oam_write_blocked())
+                    );
+                }
                 if !self.oam_write_blocked() {
                     self.oam[usize::from(addr - 0xFE00)] = value;
                 }

@@ -20,6 +20,7 @@ impl Ppu {
                 self.vis_hold_until = 0;
                 self.render_finished = false;
                 self.hdma_lead = false;
+                self.pal_open_dot = 0;
                 self.render.active = false;
             }
             1..=143 => {
@@ -30,6 +31,7 @@ impl Ppu {
                 self.vis_hold_until = 0;
                 self.render_finished = false;
                 self.hdma_lead = false;
+                self.pal_open_dot = 0;
                 self.render.active = false;
             }
             144 => {

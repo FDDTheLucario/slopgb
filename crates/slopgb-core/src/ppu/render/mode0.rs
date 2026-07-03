@@ -30,6 +30,9 @@ impl Ppu {
             160 => {
                 self.render.active = false;
                 self.render_finished = true;
+                // Part C/D: record the pipe-end dot for the tier2 palette
+                // unblock law (see `Ppu::pal_open_dot`).
+                self.pal_open_dot = self.dot;
                 // The CGB palette-RAM unblock (this `render_finished` rise)
                 // is half-classified by the interconnect for the cc+2
                 // MID-phase FF69/FF6B read (sub-dot event-phase model);
@@ -153,67 +156,42 @@ impl Ppu {
         // All gated on `tier2_reclock`; production (`!leading_edge_reads`) never
         // sets `vis_early` and the snap is inert, so it is byte-identical OFF.
         let has_sprites = r.n_sprites > 0;
+        // Part C (HALFDOT-BUILD-PLAN) — the tier2 `early_lead` case-tower is
+        // COLLAPSED to its two physical residues; everything else is 0 (the
+        // visible flip coincides with the dispatch, and the FF41 read's finer
+        // placement is the ONE half-dot comparison in `vis_exit_hd`):
+        //
+        // 1. The LCD-enable GLITCH line keeps +2 — the glitch frame's visible
+        //    mode→0 offset (452-dot line, dot-82 pipe); `lcdon_timing-GS`'s
+        //    post-glitch reads are calibrated against it (C1.2 pin).
+        // 2. The bare-line cc2 READ-GRID parity (+1 iff the dispatch dot lands
+        //    ≡ 1 mod 4 on a clean bare line): a leading-edge access in the
+        //    dispatch's own M-cycle observes the flip at the cc+2 phase, which
+        //    the whole-dot `line_render_done` misses only for the cc2 parity
+        //    (#11n; `m2int_scx3`/`nobg_scx7` m3stat_2). Its FF41 side is
+        //    subsumed by the PORT-1 carry law (`vis_exit_hd` arm 8 — the
+        //    m2-ISR +4 hd carry reproduces the same verdict, #11bc); the
+        //    residue survives for the OAM/VRAM ACCESSIBILITY release + the
+        //    non-PORT-1 fallback reads (line 0, CGB `wy_trig_sb`-bare), the
+        //    Part-D migration target. Scoped to clean bare lines — on a
+        //    late-window-DISABLE line the anticipation is an A/B swap that
+        //    drops the SameBoy-passing `_2` sibling (measured, #11n).
+        //
+        // The IRQ side (`mode_for_interrupt`/`prev_done`, reclock.rs) keys on
+        // `line_render_done`, never `vis_early` — the counter-pinned dispatch
+        // dot is untouched. `vis_early` is never set in production
+        // (`leading_edge_reads` off) → byte-identical OFF.
         let early_lead = if self.tier2_reclock {
-            if has_sprites {
-                0
-            } else if bare_flip {
-                // C1.2 baseline: 0, not 1. The bare-line visible mode→0 boundary
-                // lands at `line_render_done` (dispatch dot, no anticipation). The
-                // kernel separation only needs the boundary in (252, 256] — both
-                // 253 (lead+1) and 254 (lead+0) satisfy m2int@252=3 ∧ m0int@256=0 —
-                // but `lcdon_timing-GS`'s post-glitch line-1 STAT read lands AT
-                // dot 253 and must read mode 3, so the boundary must be 254
-                // (lead+0). intr_2_mode0/mode3 + the kernel all hold at 0.
-                //
-                // Mech-1 (S5 read-observer, eighth-grid): EXCEPT when the dispatch
-                // dot lands at cc2 of its M-cycle (dot ≡1 mod 4). A leading-edge
-                // FF41 read samples at its M-cycle START (dot ≡0 mod 4) and observes
-                // the mode-0 flip at the cc+2 phase, so a read landing IN the
-                // dispatch's M-cycle should see mode 0. cc1 (dispatch == the M-cycle
-                // start) is already caught by `line_render_done`; but a cc2 dispatch
-                // commits one dot PAST that start, so the whole-dot `line_render_done`
-                // leaves the same-M-cycle read (at the start) at mode 3. Anticipate
-                // `vis_early` by 1 dot to the M-cycle start (el=1) so it reads mode 0
-                // — the gambatte `m2int_scx3`/`nobg_scx7` `m3stat_2` reads (dispatch
-                // 257/261 ≡1 mod 4, read at 256/260; SameBoy reads mode 0 in the same
-                // M-cycle). cc3/cc4 (≡2/3) KEEP el=0: their same-M-cycle read precedes
-                // the boundary (→ mode 3, e.g. the kernel m2int@252 with dispatch
-                // 254 ≡2, and lcdon's 253 read), and the NEXT M-cycle's read sees
-                // mode 0 via `line_render_done`. The IRQ side (`mode_for_interrupt`/
-                // `prev_done`, reclock.rs) keys on `line_render_done`, not `vis_early`,
-                // so the counter-pinned dispatch dot is untouched. Tier2-gated;
-                // `vis_early` is never set in production, so byte-identical OFF.
-                //
-                // Restricted to TRUE bare lines untouched by the window (no WY
-                // latch / WY-match, no stall/abort). A late-window-DISABLE line is
-                // `bare_flip` at flip time (`!win_active`) but its two test reads
-                // land 1 cycle apart and COLLAPSE onto the same slopgb read dot
-                // (SameBoy distinguishes them at sub-dot — `window/late_disable_*`
-                // _1 reads mode 0, _2 reads mode 3, BOTH SameBoy-passing). slopgb
-                // can render only one digit for the pair, so the cc2 anticipation
-                // just flips WHICH sibling passes — an A/B swap that DROPS the
-                // SameBoy-passing `_2`. `wy_latch`/`wy2==ly` stay set across a
-                // window-disable (only the LCD-on path clears them), so they mark
-                // every window-involved line; m2int/scx are window-free (wy_latch
-                // false, wx 0). Window length is its own sub-family (parallel model
-                // + vis-HOLD); leave it to that work.
+            if self.glitch_line {
+                2
+            } else if bare_flip && !has_sprites {
                 let dispatch_dot = self.dot + proj.saturating_sub(lead);
                 let clean_bare =
                     !self.wy_latch && self.wy2 != self.ly && !r.win_stalled && !r.win_aborted;
                 u16::from((dispatch_dot & 3) == 1 && clean_bare)
-            } else if self.glitch_line {
-                // The LCD-enable glitch line keeps the +2 anticipation: its
-                // post-glitch line-1 STAT read (lcdon_timing-GS) is calibrated
-                // against it; see the C1.2 pin.
-                2
             } else {
-                // C2/S5 — window lines take the SAME deferred-read law as bare
-                // (C1.2): the Tier-2 deferred read pays the parked debt then
-                // samples at the trailing frame, so it takes NO anticipation
-                // (`early_lead = 0`). The window mode-3 EXTENSION is already in
-                // `proj`/`lead`; anticipating `vis_early` by +2 flipped the
-                // CPU-visible mode→0 two dots early on window lines, so the
-                // `window/arg/late_wy_*` m3stat reads saw mode 0 a poll early.
+                // Sprite lines (B5 grid-snap below) and window lines (their
+                // mode-3 extension is already in `proj`/`lead`) take 0.
                 0
             }
         } else if bare_flip {

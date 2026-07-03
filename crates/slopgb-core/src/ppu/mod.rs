@@ -588,6 +588,14 @@ pub struct Ppu {
     /// the dma/hdma_start and hdma_late_* `_1`/`_2` adjacent-cycle pairs
     /// pin the lead). See [`Self::hdma_trigger_level`].
     hdma_lead: bool,
+    /// Part C/D (tier2) — the dot the render pipe ended this line (pixel 160
+    /// shipped, `render_finished` rise; 0 = not yet this line). The CGB
+    /// palette-RAM read/write unblock trails it by 1 dot at single speed and
+    /// is coincident in double speed on the deferred (cc+0) frame — the
+    /// `cgbpal_m3end` constraint table (`c-palette-rederive-2026-07-02.md`).
+    /// Consumed only by the tier2 arm of [`Self::pal_ram_blocked`]; reset per
+    /// line, so production (which never reads it) is byte-identical.
+    pal_open_dot: u16,
 
     // Window state.
     /// The frame-sticky WY condition (gambatte ppu.cpp weMaster). NOT a
@@ -861,6 +869,7 @@ impl Ppu {
             vis_hold_until: 0,
             render_finished: true,
             hdma_lead: false,
+            pal_open_dot: 0,
             wy_latch: false,
             wy2: 0,
             wy2_delay: 0,
