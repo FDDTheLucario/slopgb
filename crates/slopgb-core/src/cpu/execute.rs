@@ -127,7 +127,7 @@ fn run_step(cpu: &mut Cpu, bus: &mut impl Bus) {
     // pin the aborting behavior on hardware.
     let pc_before = cpu.regs.pc;
     let mut opcode = fetch_opcode(cpu, bus);
-    if cpu.ime && bus.pending() != 0 {
+    if cpu.ime && bus.pending_dispatch() != 0 {
         cpu.regs.pc = pc_before;
         dispatch_interrupt(cpu, bus);
         opcode = fetch_opcode(cpu, bus);
@@ -456,7 +456,7 @@ fn op_halt(cpu: &mut Cpu, bus: &mut impl Bus) {
     // the next opcode fetch fails to increment PC (gbctr). An EI directly
     // before HALT behaves like the IME=1 case instead, because the delayed
     // enable commits while halting (mooneye acceptance/halt_ime0_ei).
-    if !cpu.ime && !cpu.ime_pending && bus.pending() != 0 {
+    if !cpu.ime && !cpu.ime_pending && bus.pending_halt_entry() != 0 {
         cpu.halt_bug = true;
     } else {
         cpu.halted = true;

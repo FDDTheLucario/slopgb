@@ -424,6 +424,16 @@ pub struct Interconnect {
     /// `hblank_ly_scx_timing-GS` (B=42): every later round's halt entry
     /// lands off-grid and the whole calibrated mask map mis-frames.
     wake_skew: u32,
+    /// #11bf WAKE-INSTANT experiment (`SLOPGB_P2GRID`) — the machine T the
+    /// deferred advance is currently executing (set per-T by
+    /// `advance_machine_t`; only read by the p2grid visibility deadline).
+    machine_now: u64,
+    /// #11bf (`SLOPGB_P2GRID`) — the mode-0 STAT rise's halt-wake visibility
+    /// deadline in machine T: the halt sampler masks IF_STAT while
+    /// `clock.now() < stat_vis_from_t`. Replaces the M-cycle-quantized
+    /// `if_late`/`m0_halt_hold` masking for the mode-0 rise under the
+    /// SameBoy-exact 4k+2 sample grid (rise T + `SLOPGB_P2DELTA`).
+    stat_vis_from_t: u64,
     /// Port Stage B C1.3 (S7 sub-M-cycle halt-wake) — the post-mode-0-halt-wake
     /// LY read-phase carry. SameBoy's DMG halt-wake resumes the CPU at the
     /// IRQ's sub-M-cycle clock, so the CPU's M-cycle phase is offset from the
@@ -594,6 +604,22 @@ const CGB_COMPAT_BG_PALETTE: [u16; 4] = [0x7FFF, 0x1BEF, 0x6180, 0x0000];
 const CGB_COMPAT_OBJ_PALETTE: [u16; 4] = [0x7FFF, 0x421F, 0x1CF2, 0x0000];
 
 impl Interconnect {
+    /// `SLOPGB_S5DBG` wake-instant tracer: which sample path woke, at which
+    /// machine position (the SBWAKE `fp=` analogue). Debug-only, env-gated.
+    fn dbg_wake(&mut self, path: &str, w: u8) {
+        if crate::ppu::s5dbg_on() {
+            let (l, d) = self.ppu.scan_pos();
+            eprintln!(
+                "SLOPGB wake[{path}] ly={l} dot={d} clk={} pend={} w={w:02x} intf={:02x} late={:02x} hold={}",
+                self.clock.now(),
+                self.clock.pending(),
+                self.intf,
+                self.if_late,
+                self.m0_halt_hold
+            );
+        }
+    }
+
     pub fn new(model: Model, cart: Cartridge) -> Self {
         // CGB mode iff the hardware is a CGB/AGB *and* the cart opts in via
         // header byte 0x143 bit 7 (same predicate `GameBoy::auto_model`
@@ -631,6 +657,8 @@ impl Interconnect {
             m0_halt_hold: 0,
             ack_squash_deadline_t: 0,
             wake_skew: 0,
+            machine_now: 0,
+            stat_vis_from_t: 0,
             halt_ly_phase: 0,
             if_stat_late: 0,
             m0_access_edge: None,
@@ -898,55 +926,84 @@ impl Bus for Interconnect {
         // head like SameBoy's `just_halted` 4-T step). Production and the
         // LE-only path take the default (plain `pending_halt_wake`) —
         // byte-identical OFF.
-        if crate::ppu::s5dbg_on() && self.cpu_halted {
-            let w = self.pending_halt_wake();
-            if w != 0 {
-                let (l, d) = self.ppu.scan_pos();
-                eprintln!(
-                    "SLOPGB wake ly={l} dot={d} clk={} w={w:02x} intf={:02x} late={:02x} hold={}",
-                    self.clock.now(),
-                    self.intf,
-                    self.if_late,
-                    self.m0_halt_hold
-                );
-            }
-        }
         if self.tier2_reclock
             && !self.model.is_cgb()
             && self.cpu_halted
             && self.clock.pending() >= 2
         {
-            // Sample 1 — the M-cycle head (4k+0), exactly the pre-port wake
-            // check: an IRQ already visible here wakes ALIGNED (the idle
-            // cycle's debt stays parked, the dispatch pays it as before —
-            // byte-identical to the M-quantized model for these wakes).
+            // #11bf — the SameBoy-exact wake grid, SCOPED to the
+            // mode-0-origin STAT rise (`GB_cpu_run` sm83_cpu.c:1629-1642:
+            // one iq sample per iteration at the mid point 4k+2; the
+            // post-sample advance(2) COMPLETES the M-cycle so the wake
+            // resumes aligned at 4k+4). Every other source keeps the
+            // calibrated w0/w2 semantics unchanged. An m0-origin STAT
+            // never wakes at the head sample — its visibility is the
+            // T-deadline (`stat_vis_from_t`) consulted at the +2 grid
+            // (and by the plain first-check sample at halt entry).
+            let m0_head = self.ppu.stat_rise_m0();
             let w0 = self.pending_halt_wake();
-            if w0 != 0 {
-                return w0;
+            let w0m = if m0_head { w0 & !IF_STAT_BIT } else { w0 };
+            if w0m != 0 {
+                self.dbg_wake("w0", w0m);
+                return w0m;
             }
-            // Sample 2 — the DMG mid-cycle point (4k+2): advance the first
-            // 2 T of the idle cycle and re-check. An IRQ rising in the
-            // cycle's FIRST HALF wakes here, 2 T after its rise: the idle
-            // iteration was genuinely 2 T long (SameBoy
-            // `GB_advance_cycles(gb, 2)`), so the un-run tail is dropped and
-            // the resumed CPU's dispatch + handler read stream carries the
-            // 2-T sub-M-cycle offset (the WAKE-CLOCK port).
             let before = self.clock.now();
             self.clock.advance_pending(2);
             self.advance_machine_t(before, self.clock.now());
-            // The mid wake is scoped to the MODE-0 STAT rise (the WAKE-CLOCK
-            // blocker class): the mode-2 line-start pulse and the timer/
-            // vblank sources keep the aligned w0 grid their calibrations
-            // (mooneye intr_2_* / the tima halt rows) are pinned on.
             let w2 = self.pending_halt_wake();
-            if w2 != 0 && (w2 & IF_STAT_BIT == 0 || self.ppu.stat_rise_m0()) {
+            // Re-sample the rise origin AFTER the advance — the rise may
+            // have fired during these 2 T (the head value is stale).
+            if w2 & IF_STAT_BIT != 0
+                && self.ppu.stat_rise_m0()
+                && self.clock.now() >= self.stat_vis_from_t
+            {
+                // The SameBoy-exact m0 wake: complete the idle M-cycle,
+                // resume aligned — no forgiven tail, no skew. Then the
+                // RE-FETCH M-cycle: SameBoy's halt loop performs no
+                // prefetch (pure `GB_advance_cycles`), so the woken
+                // instruction (IME=0 run path) or the dispatch's aborted
+                // prefetch (IME=1) is a FRESH `cycle_read` after the
+                // post-sample advance — one M-cycle later than slopgb's
+                // reused idle prefetch. Carried as read debt so the
+                // resumed stream shifts +4 T without moving the wake
+                // sample or machine time (`GB_cpu_run` sm83_cpu.c:1706+).
+                let before = self.clock.now();
+                self.clock.advance_pending(2);
+                self.advance_machine_t(before, self.clock.now());
+                self.clock.carry_read(4);
+                self.dbg_wake("g2", w2);
+                return w2;
+            }
+            // Non-STAT sources keep the calibrated mid-sample semantics:
+            // forgiven tail + 2-T wake skew (mooneye intr_2_* / the tima
+            // halt rows pin them; the mode-2 line-start pulse stays on the
+            // w0 grid via its `if_late` mask).
+            let w2n = w2 & !IF_STAT_BIT;
+            if w2n != 0 {
                 self.clock.forgive(2);
                 self.wake_skew = 2;
-                return w2;
+                self.dbg_wake("w2", w2n);
+                return w2n;
             }
             return 0;
         }
-        self.pending_halt_wake()
+        let w = self.pending_halt_wake();
+        if w != 0 {
+            // #11bf: the first idle check (SameBoy's `just_halted` head
+            // sample) waking on the m0-origin STAT also re-fetches — the
+            // woken instruction is a fresh `cycle_read` after the jh
+            // advance(4), one M-cycle later than the reused idle prefetch.
+            if self.tier2_reclock
+                && !self.model.is_cgb()
+                && !self.cpu_halted
+                && w & IF_STAT_BIT != 0
+                && self.ppu.stat_rise_m0()
+            {
+                self.clock.carry_read(4);
+            }
+            self.dbg_wake(if self.cpu_halted { "plain" } else { "first" }, w);
+        }
+        w
     }
 
     fn pending_halt_wake(&self) -> u8 {
@@ -972,7 +1029,18 @@ impl Bus for Interconnect {
         // gambatte halt/*_cgb04c split rows): landing it requires a
         // per-model widening of the halt-late mask, a separate work
         // package.
-        (self.intf & !self.if_late) & self.ie & IF_MASK
+        let w = (self.intf & !self.if_late) & self.ie & IF_MASK;
+        // #11bf: the m0-origin STAT rise's halt visibility is the T-deadline
+        // (covers the halt-entry first check too). Tier2 DMG only.
+        if w & IF_STAT_BIT != 0
+            && self.tier2_reclock
+            && !self.model.is_cgb()
+            && self.ppu.stat_rise_m0()
+            && self.clock.now() < self.stat_vis_from_t
+        {
+            return w & !IF_STAT_BIT;
+        }
+        w
     }
 
     fn ack(&mut self, bit: u8) {
@@ -1282,6 +1350,69 @@ impl Bus for Interconnect {
                 self.clock.pending()
             );
         }
+    }
+
+    fn pending_halt_entry(&mut self) -> u8 {
+        // #11bf (`SLOPGB_P2HE`) — SameBoy's `halt()` checks IE & IF *after*
+        // the prefetch `cycle_read` advanced the machine through the HALT
+        // fetch M-cycle (t0+4), where the deferred leading-edge `pending()`
+        // view sits at t0 (sm83_cpu.c:1036-1058). A mode-0 rise landing
+        // inside the fetch M-cycle therefore arms SameBoy's halt-bug (no
+        // halt; the following byte runs twice) while slopgb halted and woke
+        // on the first idle check — one M-cycle short (the `_3b`
+        // skip-path). Flush the debt, then sample.
+        // DMG-only for now: the CGB entry-check frame is entangled with the
+        // CGB halt-mask calibrations (moving it alone A/B-swaps — fixes the
+        // dec pair, drops lycirq_m2stat_2/m1int_ly_2/ifandie, measured);
+        // it lands with the CGB head-sample-grid port.
+        if self.tier2_reclock && !self.model.is_cgb() {
+            let before = self.clock.now();
+            self.clock.flush();
+            self.advance_machine_t(before, self.clock.now());
+        }
+        let w = self.pending();
+        if crate::ppu::s5dbg_on() {
+            let (l, d) = self.ppu.scan_pos();
+            eprintln!(
+                "SLOPGB hentry ly={l} dot={d} clk={} w={w:02x} m0={} vis_from={}",
+                self.clock.now(),
+                u8::from(self.ppu.stat_rise_m0()),
+                self.stat_vis_from_t
+            );
+        }
+        // #11bf: the entry decision observes the machine genuinely — the
+        // m0-origin STAT rise's frame offset (the same T-deadline the wake
+        // sampler consults) applies here too, else a rise landing in the
+        // fetch M-cycle falsely arms the halt-bug.
+        if w & IF_STAT_BIT != 0
+            && self.tier2_reclock
+            && !self.model.is_cgb()
+            && self.ppu.stat_rise_m0()
+            && self.clock.now() < self.stat_vis_from_t
+        {
+            return w & !IF_STAT_BIT;
+        }
+        w
+    }
+
+    fn pending_dispatch(&mut self) -> u8 {
+        // #11bf — the running CPU's end-of-fetch dispatch check: the machine
+        // is already flushed to the boundary (the previous step's
+        // `flush_pending`), so `pending()` sees every rise before it — the
+        // SameBoy view. Only the m0-rise visibility deadline (the same frame
+        // offset the halt samples consult) applies on top; a flush here was
+        // measured to shift the deferred operand frame of every following
+        // instruction (8 pins broken) and is NOT SameBoy's semantics.
+        let w = self.pending();
+        if w & IF_STAT_BIT != 0
+            && self.tier2_reclock
+            && !self.model.is_cgb()
+            && self.ppu.stat_rise_m0()
+            && self.clock.now() < self.stat_vis_from_t
+        {
+            return w & !IF_STAT_BIT;
+        }
+        w
     }
 
     fn flush_pending(&mut self) {

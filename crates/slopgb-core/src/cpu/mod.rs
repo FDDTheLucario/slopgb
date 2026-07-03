@@ -92,6 +92,28 @@ pub trait Bus {
     fn pending_halt_wake_mid(&mut self) -> u8 {
         self.pending_halt_wake()
     }
+    /// #11bf — `IF & IE & 0x1F` as seen by HALT's own entry decision (the
+    /// halt-bug / no-halt arm). SameBoy's `halt()` performs the prefetch
+    /// `cycle_read` (advancing the machine through the HALT opcode-fetch
+    /// M-cycle) and then checks IE & IF, so the entry decision observes the
+    /// machine at the fetch's END (t0+4), one M-cycle past the deferred
+    /// leading-edge view `pending()` gives (sm83_cpu.c:1036-1058). The
+    /// default (production, non-interconnect buses) keeps `pending()`; the
+    /// interconnect overrides it on the tier2 deferred path.
+    fn pending_halt_entry(&mut self) -> u8 {
+        self.pending()
+    }
+    /// #11bf — `IF & IE & 0x1F` as seen by the running CPU's end-of-fetch
+    /// dispatch check. SameBoy's `cycle_read` advances the machine through
+    /// the opcode-fetch M-cycle before `GB_cpu_run`'s interrupt check reads
+    /// IF, so a rise landing INSIDE the fetch M-cycle still dispatches at
+    /// that boundary; the deferred leading-edge `pending()` view is one
+    /// M-cycle stale there. The default (production, non-interconnect
+    /// buses) keeps `pending()`; the interconnect overrides it on the tier2
+    /// deferred path.
+    fn pending_dispatch(&mut self) -> u8 {
+        self.pending()
+    }
     /// Clear bit `bit` (0..=4) of IF. Takes no time.
     fn ack(&mut self, bit: u8);
     /// CPU executed STOP: if a speed switch is armed (CGB KEY1.0), perform

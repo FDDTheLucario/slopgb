@@ -2553,6 +2553,63 @@ fn gambatte_blank_verdict() {
     check_blank(&logo).unwrap();
 }
 
+/// #11bf (S7, the WAKE-INSTANT port) — the SameBoy-exact DMG halt-wake grid
+/// for the mode-0 STAT rise: one iq sample per iteration at the mid point
+/// (4k+2; the `just_halted` head sample has NO +2 slot — the jh gap), the
+/// post-sample advance COMPLETES the M-cycle, and the woken instruction
+/// RE-FETCHES (SameBoy's halt loop performs no prefetch — `GB_cpu_run`
+/// sm83_cpu.c:1629-1642 + halt() :1036-1058). The rise's visibility is a
+/// T-deadline (+4 on the LCD-enable glitch line, whose engine rise is emitted
+/// at visexit where normal lines emit at visexit−3); HALT's own entry
+/// IF-check observes the machine at the fetch's END (t0+4), arming the
+/// halt-bug exactly when SameBoy does. Together these replace the M-quantized
+/// `if_late`/`m0_halt_hold`/w2-skew model for the m0 rise AND dissolve the
+/// C1.3 `halt_ly_phase` carry (its only passing table under the exact grid is
+/// all-zero). Full-DMG two-bin 167→158 (+9/−0); the four pinned rows cover
+/// the four mechanisms: the jh-gap/steady-grid pair
+/// (`late_m0irq_halt_m0stat_scx3_2b` want 2 · `m0irq_m0stat_scx3_2` want 0 —
+/// same rise, same read distance, straddling wake slots), the re-fetch
+/// (`m0int_m0stat_scx5_2`), and the entry check (`late_m0irq_halt_dec_scx2_2`
+/// — the halt-bug's double-DEC). DMG-only; CGB byte-identical (its
+/// head-sample grid is a separate port); production byte-identical.
+#[test]
+fn tier2_halt_wake_grid_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_halt_wake_grid",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 4] = [
+        (
+            "gambatte/halt/late_m0irq_halt_m0stat_scx3_2b_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+        (
+            "gambatte/halt/m0irq_m0stat_scx3_2_dmg08_out0_cgb04c_out2.gbc",
+            "0",
+        ),
+        (
+            "gambatte/halt/m0int_m0stat_scx5_2_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+        (
+            "gambatte/halt/late_m0irq_halt_dec_scx2_2_dmg08_cgb04c_out6.gbc",
+            "6",
+        ),
+    ];
+    let model = Model::Dmg;
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, model);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, model.is_cgb()).unwrap_or_else(|e| {
+            panic!("{rel} [{model:?}] expected dmg08 out{expect} (tier2 flag-on): {e}")
+        });
+    }
+}
+
 // Session-local S5 measurement aid (see the module's doc); `#[ignore]`'d so it
 // never runs in the gate.
 #[path = "gambatte_flagon_probe.rs"]

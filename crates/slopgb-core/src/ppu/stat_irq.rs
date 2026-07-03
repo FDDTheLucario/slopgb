@@ -500,6 +500,15 @@ impl Ppu {
         self.stat_rise_m0
     }
 
+    /// #11bf (`SLOPGB_P2GRID`): whether the current line is the LCD-enable
+    /// glitch line — its mode-0 engine rise is emitted at a different offset
+    /// from the true (SameBoy) commit than normal lines' (rise == visexit vs
+    /// visexit − 3, dual-trace measured), so the halt-wake visibility
+    /// deadline carries a per-shape correction.
+    pub(crate) fn glitch_line_now(&self) -> bool {
+        self.glitch_line
+    }
+
     /// #11ar: arm/disarm the SCOPED carried-read exit override (see the
     /// [`Ppu::read_carried`] field). `dispatch_retime` sets it after a STAT-ISR
     /// read carry; the interconnect clears it once the handler's FF41 read has

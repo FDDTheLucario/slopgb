@@ -104,7 +104,32 @@ impl Interconnect {
             }
             if self.ppu.take_m0_rise() {
                 let second_half = obs_pre_edge(MID_PHASE, event_phase(EdgeKind::M0Rise, cc, 0));
-                if self.tier2_reclock && self.cpu_halted {
+                if crate::ppu::s5dbg_on() {
+                    let (l, d) = self.ppu.scan_pos();
+                    eprintln!(
+                        "SLOPGB m0rise ly={l} dot={d} cc={cc} mnow={} halted={}",
+                        self.machine_now,
+                        u8::from(self.cpu_halted)
+                    );
+                }
+                if self.tier2_reclock && !self.model.is_cgb() {
+                    // #11bf — the mode-0 rise's halt-wake visibility is a
+                    // T-deadline on the SameBoy-exact 4k+2 sample grid — no
+                    // M-quantized `if_late`/`m0_halt_hold` masking, and no
+                    // C1.3 LY-phase carry (the exact grid + the post-wake
+                    // re-fetch land the first FF44 read correctly on their
+                    // own — `hblank_ly_scx_timing-GS` re-swept, the carry
+                    // table's only passing value is all-zero). Set on EVERY
+                    // rise (a halt entered inside the rise's M-cycle consults
+                    // it at the entry check + the first idle sample). The
+                    // glitch (LCD-enable) line's engine rise is emitted at
+                    // visexit where normal lines emit at visexit − 3
+                    // (dual-trace measured), so its deadline carries the
+                    // per-shape +4 correction (`int_hblank_halt_scx0-7`
+                    // wakes on the glitch line and pins it).
+                    let gl = if self.ppu.glitch_line_now() { 4 } else { 0 };
+                    self.stat_vis_from_t = self.machine_now + gl;
+                } else if self.tier2_reclock && self.cpu_halted {
                     // Port Stage B — re-derive the mode-0 halt-wake mask for the
                     // deferred cc+0 frame (the `int_hblank_halt_scx0-7` DMG grid;
                     // `ppu-subdot-ladder.md` THESIS RESULT #8/#9). The deferred
@@ -291,6 +316,8 @@ impl Interconnect {
     /// per-M-cycle squash across the split. Conserves the per-M-cycle 4-T total.
     pub(super) fn advance_machine_t(&mut self, from_t: u64, to_t: u64) {
         for pos in from_t..to_t {
+            // #11bf: the T being executed, for the p2grid visibility deadline.
+            self.machine_now = pos;
             let phase = (pos % 4) as u8; // 0..=3 within the M-cycle
             if phase == 0 {
                 // M-cycle pre-work (the head of `tick_machine`): latch this
