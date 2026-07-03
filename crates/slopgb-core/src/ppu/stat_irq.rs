@@ -117,6 +117,28 @@ impl Ppu {
         {
             fold(&mut exit, 2 * (259 + scx7 + ds1));
         }
+        // #11bf item 3c — a mid-line WX rewrite committing AT/BEFORE the WX
+        // match dot un-catches the window on SameBoy (`late_wx_scx5_1`: the
+        // FF4B:=FF write and the match both at dot 97 → SameBoy bare; `_2`
+        // at 101 → caught, extends) while slopgb's whole-dot render catches
+        // first and extends both. SS, bare-sprite-free; the SS bare exit.
+        // SCX&7 == 5 ONLY (measured: at scx0/2/3 SameBoy still catches the
+        // same write≤match race — `late_wx_2`/`_scx2_2`/`_scx3_2`/`_ff_*_1`
+        // all want 3; the un-scoped arm dropped all 8. The scx5 fine-scroll
+        // phase is what pushes the effective catch past the write).
+        if !self.ds
+            && scx7 == 5
+            && self.render.wx_write_dot != 0
+            && self.render.wx_match_dot != 0
+            && self.render.wx_write_dot <= self.render.wx_match_dot
+            && self.render.win_active
+            && self.model.is_cgb()
+            && self.render.n_sprites == 0
+            && !self.render.win_aborted
+            && m == 3
+        {
+            fold(&mut exit, 2 * (253 + scx7));
+        }
         // #11bf item 3a — a late-ENABLE-triggered window (the mid-line
         // LCDC.5 write IS the trigger, `Render::win_enable_dot`) whose
         // enable lands past the line's fetch-catch deadline renders BARE on

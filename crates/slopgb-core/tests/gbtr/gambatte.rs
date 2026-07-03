@@ -2685,6 +2685,39 @@ fn tier2_window_enable_deadline_passes() {
     }
 }
 
+/// #11bf item 3c — a mid-line FF4B (WX) rewrite committing AT/BEFORE the WX
+/// match dot un-catches the window on SameBoy at SCX&7 == 5 (the fine-scroll
+/// phase pushes the effective catch past the write): `late_wx_scx5_1` (write
+/// and match both dot 97) renders BARE (want 0) where slopgb's whole-dot
+/// render catches and extends; `_2` (write dot 101) is caught on both. The
+/// scope is measured: at scx0/2/3 SameBoy still catches the same
+/// write≤match race (the un-scoped arm dropped 8 want-3 rows).
+/// `Render::wx_write_dot` + the SS bare-exit arm; +1/−0; production
+/// byte-identical.
+#[test]
+fn tier2_window_late_wx_uncatch_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_window_late_wx_uncatch",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 2] = [
+        ("gambatte/window/late_wx_scx5_1_dmg08_cgb04c_out0.gbc", "0"),
+        ("gambatte/window/late_wx_scx5_2_dmg08_cgb04c_out3.gbc", "3"),
+    ];
+    let model = Model::Cgb;
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, model);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, model.is_cgb()).unwrap_or_else(|e| {
+            panic!("{rel} [{model:?}] expected cgb04c out{expect} (tier2 flag-on): {e}")
+        });
+    }
+}
+
 // Session-local S5 measurement aid (see the module's doc); `#[ignore]`'d so it
 // never runs in the gate.
 #[path = "gambatte_flagon_probe.rs"]

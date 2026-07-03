@@ -346,7 +346,7 @@ impl Interconnect {
             // frame-phase residual (`measurements/s7-readclock-refuted-2026-06-28.md`).
             // NOT `ly < 144`-gated: the VBlank LCDC-enable/disable writes are the
             // frame-phase evidence. `SLOPGB_S5DBG`, byte-identical when unset.
-            if matches!(addr, 0xFF40 | 0xFF43 | 0xFF4A) && crate::ppu::s5dbg_on() {
+            if matches!(addr, 0xFF40 | 0xFF43 | 0xFF4A | 0xFF4B) && crate::ppu::s5dbg_on() {
                 let (l, d) = self.ppu.scan_pos();
                 // #11bd: clk (machine dots) + ds pin the CPU-grid phase of the
                 // write on the absolute clock — the lcd_offset enable-phase

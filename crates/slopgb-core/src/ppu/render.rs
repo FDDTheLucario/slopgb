@@ -225,6 +225,13 @@ pub(super) struct Render {
     /// discriminator (`late_enable_ly0_ds` want-pair straddles the steady
     /// exit). Reset per line; tier2+CGB only (read law input).
     pub(super) win_enable_dot: u16,
+    /// #11bf item 3c — the dot a mid-line FF4B (WX) rewrite committed while
+    /// the render was active (0 if none this line). A rewrite landing
+    /// AT/BEFORE the WX match dot un-catches the window on SameBoy (the
+    /// `late_wx_scx5` pair: write at the match dot 97 → bare, at 101 →
+    /// extends) while slopgb's whole-dot render catches first. Reset per
+    /// line; tier2+CGB law input only.
+    pub(super) wx_write_dot: u16,
     /// WX comparator output on the previous dot: activations and
     /// reactivations fire on the rising edge only (the match holds while
     /// lx is frozen during the start stall and must not re-fire).
@@ -280,6 +287,7 @@ impl Render {
             win_predraw_abort_dot: 0,
             win_reenable_dot: 0,
             win_enable_dot: 0,
+            wx_write_dot: 0,
             win_match_prev: false,
             prefill_pos: 0,
             wx_match_dot: 0,
@@ -338,6 +346,7 @@ impl Ppu {
         r.win_predraw_abort_dot = 0;
         r.win_reenable_dot = 0;
         r.win_enable_dot = 0;
+        r.wx_write_dot = 0;
         r.win_match_prev = false;
         r.prefill_pos = 0;
         r.wx_match_dot = 0;

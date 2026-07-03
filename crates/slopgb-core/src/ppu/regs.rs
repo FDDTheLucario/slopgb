@@ -95,7 +95,14 @@ impl Ppu {
             0xFF48 => self.eff.obp0 = value,
             0xFF49 => self.eff.obp1 = value,
             0xFF4A => self.eff.wy = value,
-            0xFF4B => self.eff.wx = value,
+            0xFF4B => {
+                // #11bf item 3c — latch a mid-line WX rewrite for the
+                // un-catch law (see `Render::wx_write_dot`).
+                if self.render.active && self.tier2_reclock && self.model.is_cgb() {
+                    self.render.wx_write_dot = self.dot;
+                }
+                self.eff.wx = value;
+            }
             _ => {}
         }
     }
