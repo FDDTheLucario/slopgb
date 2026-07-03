@@ -266,6 +266,10 @@ impl Ppu {
                             && old & STAT_SRC_HBLANK == 0
                             && !self.m2_pulse_fires(old)
                             && self.m2_pulse_fires(data);
+                        // (The FF45-write edge-only engine-line guard does
+                        // NOT port here: the FF41 retro/m2 pulse reach is
+                        // event-like in the pinned m2enable cells — the guard
+                        // was built + measured +3 fails there.)
                         retro || self.stat_write_trigger_cgb(old, data)
                     } else {
                         // The glitch trigger, plus the DMG pulse reach:

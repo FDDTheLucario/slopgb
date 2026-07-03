@@ -226,7 +226,30 @@ impl Ppu {
         let tier2_minus1_gap = self.leading_edge_reads
             && (1..=143).contains(&ll)
             && self.ly_for_comparison_at(ll, ld) == -1;
+        // Part C stage 4 — the FF45-write fire is suppressed under the tier2
+        // engine when a NON-LYC source holds the line: SameBoy's
+        // `GB_STAT_update` raises IF only on the line's 0→1 edge, and a line
+        // held by an enabled MODE source (the VBlank source carried across
+        // the ly153→ly0 wrap: `lycwirq_trigger_ly00_stat50_1`, LYC:=0 commits
+        // ly0 dot1 with STAT=$50, SameBoy line continuously high mode-1 → no
+        // edge, want E0; slopgb fired E2 — dual-traced) never dips for a LYC
+        // rewrite. A line held only by the LYC source does NOT suppress:
+        // SameBoy's dot-4 re-latch against the OLD LYC dips it before the
+        // (+4-later) write lands, so its write re-rise IS an edge — slopgb's
+        // early write frame never sees the dip, and the event-like fire is
+        // its stand-in (`ff45_enable_weirdpoint_3` / `lyc153_late_ff45_
+        // enable_3`, both SameBoy-pass, dropped by the blanket engine-line
+        // guard — measured). LE/Tier-2 only → byte-identical OFF.
+        let mode_src_en = match self.mode_for_interrupt {
+            0 => self.stat_en & STAT_SRC_HBLANK,
+            1 => self.stat_en & STAT_SRC_VBLANK,
+            2 => self.stat_en & STAT_SRC_OAM,
+            _ => 0,
+        };
+        let engine_line_high =
+            self.leading_edge_reads && self.stat_update.line() && mode_src_en != 0;
         let fire = !tier2_minus1_gap
+            && !engine_line_high
             && self.stat_en & STAT_SRC_LYC != 0
             && ((target == Some(value) && !blocked && !lyc_level_high) || lyc_write_wrap_153);
         if crate::ppu::s5dbg_on() {

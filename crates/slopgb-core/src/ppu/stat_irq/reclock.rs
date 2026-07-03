@@ -97,12 +97,53 @@ impl Ppu {
             // carryover dot — but NOT onto the line-END last M-cycle, where lyfc
             // is fixed and only a fresh write moves the latch). CGB only; LE/Tier-2
             // only (production byte-identical).
-            (self.line == 1 && self.dot <= 2) || (self.dot >= 452 && !self.ds)
+            // Part C stage 4 (ENGINE-IF re-measure) — the CGB line-START
+            // carryover hold GENERALIZED to lines 1-143 (was line 1 only):
+            // SameBoy re-latches `lyc_interrupt_line` ONLY at the state-6/-7
+            // GB_SLEEP steps (dot 3 → -1/hold, dot 4 → line), never during
+            // the dots-0-2 carryover where `ly_for_comparison` still names
+            // line-1 — so a late FF45 write whose new LYC equals the PREVIOUS
+            // line raises no fresh edge there (`late_ff45_enable_2/_3`:
+            // slopgb's per-dot re-latch caught LYC=6 against the ly7 dots-0-2
+            // carryover value 6 → spurious edge, if=03 where SameBoy reads
+            // 01 — dual-traced). The #11l refutation of this hold predates
+            // `law_pos`/#11bd; re-measured with the full family set this
+            // session (lycEnable/m1/m2enable/miscmstatirq/ly0/lcd_offset).
+            // UNSHIFTED frames only for lines 2-143: on STOP-shifted ROMs
+            // the write's law position in this window is one poll quantum
+            // ambiguous (the #11bd under-correction), and the shifted
+            // `late_ff45_enable_lcdoffset1_1`/`ff45_enable_weirdpoint_
+            // lcdoffset1_1` SameBoy-passes need their carryover re-latch
+            // (measured drop without the gate — the #11l refutation shape,
+            // now confined to the shifted frame). Line 1 keeps the
+            // unconditional #11r wrap hold.
+            ((1..=143).contains(&self.line) && self.dot <= 2 && self.lcd_shift_dots == 0)
+                || (self.line == 1 && self.dot <= 2)
+                || (self.dot >= 452 && !self.ds)
         } else {
             (1..=143).contains(&self.line) && self.dot <= 2
         };
         if ly != -1 && !line_start_carryover {
-            self.lyc_interrupt_line = ly == i16::from(self.lyc);
+            // Part C stage 4 — the engine's LYC compare takes the DELAYED
+            // FF45 view for the DISABLE direction: the deferred write commits
+            // ~4 dots (SS) EARLY of SameBoy's instant, so a LYC rewrite
+            // landing in dots 0-3 kills the dot-4 match slopgb-side while
+            // SameBoy's edge fires first (`ff45_disable_2` want out3: LYC 6→FF
+            // commits ly6 dot1, SameBoy fires the ly6 edge with LYC still 6,
+            // then the disable lands). `lyc_event` (the production engine's
+            // delayed FF45 copy, protected through dots 1-4) IS that view —
+            // OR-ing it in delays disables while a fresh MATCH (enable
+            // direction) stays live via `self.lyc` (the A12 write-trigger
+            // discipline is untouched). DMG's `lyc_event` mirrors `lyc`
+            // immediately → DMG unchanged.
+            // SS + unshifted only: the DS write frame is +1 dot (the
+            // `lyc_event` protected window over-covers it — the OR broke the
+            // `*_ff45_disable_ds_1` legs, measured) and shifted frames
+            // mis-map the window (`ff45_enable_weirdpoint_lcdoffset1_1`).
+            self.lyc_interrupt_line = ly == i16::from(self.lyc)
+                || (!self.ds
+                    && self.lcd_shift_dots == 0
+                    && ly == i16::from(self.lyc_event));
         }
         // Mech 3 root 1 (S5 engine-driver) — the vblank-entry LYC-latch drop.
         // A held visible-line LYC match (e.g. LYC=143 carried high from line 143)
@@ -136,6 +177,11 @@ impl Ppu {
             self.lyc_interrupt_line = false;
         }
         let mfi = self.mode_for_interrupt;
+        // (A blanket delayed-enable view `stat_en | stat_ev` was BUILT +
+        // MEASURED here: it fixes `ff41_disable_2` but over-delays the
+        // m2enable/m1 disable families — +5/+1 fails — the mode-source
+        // disables are pinned LIVE while only the LYC-source disable rides
+        // the delayed copy. The LYC side lands via `lyc_event` above.)
         if self
             .stat_update
             .update(mfi, self.stat_en, self.lyc_interrupt_line)
