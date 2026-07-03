@@ -127,6 +127,67 @@ Lifts the class-H/A sub-dot floor incrementally: keep the pixel pipe dot-clocked
 - **DISPATCH-RECLOCK REFUTED 2026-06-21 (the prior "next: move the dispatch to ~252" hypothesis is MEASURED-FALSE; A6's halt-mask is the correct resolution at the UNMOVED frame; probe reverted, branch byte-identical to `a89fdf9`).** Tested the long-assumed next lever — move the mode-0 IRQ DISPATCH (`mode_for_interrupt→0` via `mfi_m0_prev`) from our cc+4 dot 255 to SameBoy's `mode0_irq_dot` (our 252) by re-anchoring `mfi_m0_prev` to `vis_early` (dot 251 → IRQ at 252) on the flag-on path (`SLOPGB_DISP` probe). **Measured (flag-on, `run_mooneye`/`run_gambatte`, all reverted): net-NEGATIVE A/B swap.** Canonical `intr_2_mode0_timing` HELD PASS (it never needed the dispatch move — A6's halt-only mask already fixes it at the 254 frame); but **kernel `m0int_m3stat_2` REGRESSED 0→3** (m0int is itself a *mode-0-dispatched* read — moving its IRQ moves its `ldh a,(FF41)` off the post-flip dot) and **`intr_2_0_timing` REGRESSED PASS→FAIL** (the mode-2→mode-0 IRQ distance shortens by 3 dots), while **`hblank_ly_scx_timing-GS` STAYED FAIL** (so the dispatch dot is NOT its blocker). **CONCLUSION (the proof the goal asked for): the mode-0 dispatch dot is ATOMIC/ENTANGLED — it cannot move on the flag-on path without regressing every mode-0-*dispatched* read (m0int, intr_2_0) that is pinned to our 254 frame; only the global cc-exact reclock (which re-frames ALL those reads together + the ~7000 rebaseline) can move it. The premise "the canonical needs the dispatch at 252" was WRONG — A6's `halt`-only mask resolves the canonical at the UNMOVED 254 frame, and the 254 frame is exactly where m0int reads its post-flip mode 0.** So the residual flag-on failures are NOT a dispatch-dot problem: `hblank_ly_scx`/gbmicrotest `int_hblank_halt` need the **`m0_rise` mask phase** (the new engine's m0 rise lands at dot 255 vs the gambatte engine's `m0_rise_dot` 254 — a sub-dot second-half-determination mismatch, a separate lever); `intr_2_mode3_timing` the mode-2→3 entry-boundary back-date; `intr_2_mode0_timing_sprites` the sprite/window `vis_early`; `vblank_stat_intr-GS` the line-144/DMG-vblank OAM pulses the mfi-engine doesn't emit. Each is its own flag-gated piece on top of A6; the global default flip + rebaseline (Phase B) is the terminal all-or-nothing step.
 - **A5a SHIPPED 2026-06-21 (the visible/dispatch decouple banked as flag-gated production machinery; byte-identical flag-OFF, gate exit 0, kernel separates flag-ON).** Acting on the "bank a green foundation piece" mandate, the measured separator from the bullet above is now real (not a probe): a new `Ppu::vis_early` field (`ppu/mod.rs`) back-dates the **CPU-visible** STAT mode→0 boundary (`vis_mode`) to SameBoy's `ModeTimeline::visible_mode0_dot` frame — 3 dots ahead of the IRQ-dispatch flip (`line_render_done`/`m0_src`) — **on the flag-on path only, bare single-speed lines** (`m0_flip_events`: `leading_edge_reads && bare_flip && !ds && proj <= lead + 3`). `vis_mode` reads `line_render_done || vis_early`; since the set is gated on `leading_edge_reads` (off in prod), `vis_early` is **always false flag-OFF**, so `vis_mode == line_render_done` exactly — byte-identical (full gbtr+mooneye gate **exit 0**, 644 lib green, clippy clean). The dispatch (`m0_src`/`mode_for_interrupt`) is unmoved, so this decouples the visible read from the IRQ dot. **Flag-ON verified**: `run_gambatte cgb` on the kernel pair = **m2int_m3stat_1 → 3 ∧ m0int_m3stat_2 → 0** (both correct — the kernel SEPARATES with the real machinery, not just the probe). Tests: `visible_mode0_backdates_three_dots_flag_on_bare_line` (flag-on flip at SameBoy+4 / our 251, flag-off stays at +7 / 254) + the two `leading_edge_*` subdot tests rewritten to pin the separation at the two read dots (leading sample at our dot 248 → mode 3, 252 → mode 0). **Scope/residuals (deliberately excluded, derived-but-unmeasured): the +3 back-date is the bare single-speed value; sprite/window lines want +2 (DMG) and DS +4, left on `line_render_done`. OAM/VRAM accessibility (`blocking.rs`) keeps the dispatch dot — the visible-vs-accessibility 3-dot window is the S4 back-dating. This is the visible-frame HALF of the atomic flip; the canonical mooneye `intr_2_mode0_timing` still breaks flag-on because the DISPATCH is still cc+4-framed (our 254, not SameBoy's ~252) — the dispatch reclock + ~7000 rebaseline is the remaining atomic work. A5a is the A1/A2/A4-pattern foundation piece: individually faithful, byte-identical OFF, validated ON.**
 
+### #11bg (2026-07-03) — the ENGINE-IF asm-method run: the CGB FF41 TWO-PHASE engine write + the DS line-153 lyfc table. The #11al "read-frame A/B atomic" verdict PARTIALLY REVERSED for the FF41-write families. Two-bin 373→357 (+24/−8; the 8 new are ALL classify-FLOOR — SameBoy fails them too — ZERO SameBoy-pass drops); must-fix blockers **47→30**. DMG two-bin 154→154 (all levers CGB-gated). 42 pins (+2); mooneye 91/91 ON+OFF; gbtr OFF 227/0 byte-identical; lib 660; clippy clean. Defaults NOT flipped.
+
+Full mechanism + refutation map: `docs/sameboy-port/tools/measurements/engineif-ff41-twophase-2026-07-03.md`. Method: a 7-agent gambatte-hwtests-asm fan-out (one constraint analysis per family, worktree `scratchpad/asm_*.md`) + the new **SBWRITE** tracer (FF41/FF45 write instants with `lyfc=`/`fp=`, banked in `build_sameboy_tracers.sh`) — the #11bf halt recipe applied to the write side.
+
+- **Mechanism 1 — the CGB SS FF41 write is TWO-PHASE** (`GB_CONFLICT_STAT_CGB`
+  sm83_cpu.c:168): T0 commits `(old&0x40)|(new&~0x40)` — the LYC-enable bit
+  lags the mode bits by 1 T (DS: bit 3). The `ff41_disable_2` want-pair
+  straddles exactly this lag (SBWRITE prints the phase pair with the ly6
+  LYC-latch STAT_IRQ between them). Ported as the engine's staged FF41 view
+  (`Ppu::eng_stat`/`eng_stat_pending`, consumed only by `stat_update_tick`):
+  old → phase-1 (mode-new, bit6-old) @commit+2 (=T0, Δ=+2 dual-traced) →
+  final @commit+4 evaluated against the T0-instant `mode_for_interrupt` (the
+  sub-dot dip that re-fires `lyc1_m2irq_late_lycdisable_1`'s next-line OAM
+  rise); phase-1 rises fire / falls silent; the final rise is
+  continuity-gated (pre-write-LOW — the m1→LYC handoff
+  `lyc153_late_enable_m1disable_3` reads E0 on hardware where SameBoy's
+  intersection phase dips and reads E2, a measured hw-vs-SameBoy divergence)
+  and delivered through `lyc_if_delay` (3 — the FF41 twin of the FF45-write
+  delay); a stage past T0 FAST-FORWARDS at the line's m0-flip with a forced
+  dip when the LYC hold dies (`m0enable/lycdisable_ff41_scx1-3_1`). The
+  write-instant gambatte LYC arms stay for MID-LINE writes (the
+  `lyc_ff41_trigger_delay` pair collapses to ONE deferred commit dot — only
+  the calibrated arm splits it); the engine owns the boundary (law-pos
+  outside 16..448). Unshifted CGB SS only; shifted frames keep the arms.
+- **Mechanism 2 — the CGB DS line-153 `ly_for_comparison` table** (the
+  documented SS placeholder replaced): 153 latches at **dot 4** (not 6),
+  live through 7, **[8,12) is the -1 gap** (a held match carries; a fresh
+  LYC write does NOT re-latch — `lyc153_late_ff45_enable_ds_6`), 0 from 12 —
+  the unique whole-dot solution to the four `lyc153_m1disable_ds` /
+  `lyc0_m1disable_ds` dip-vs-seamless handoff constraints, with the DS
+  engine view immediate (the two-phase window is sub-dot at 2 dots/M).
+  **The dot-4 wake cascades through every LYC=153-anchored DS test**: the
+  gdma_cycles pairs (both scx5 `_1` blockers + the plain `_2` legs via the
+  arm-8 bare-law line-0 extension), the lcd_offset offset1 scx1 counts, and
+  the late_wy trio. Rode along: the #11ag shadow-WY DS slack +4→+2; the
+  **DS trigger-line WY un-latch** (an un-matching FF4A at commit ≤ dot 4
+  beats SameBoy's per-line `wy_check` ~dot 2-5 that production `wy_latch`
+  pre-latches at the previous line's 450/454 samples — releases the latch +
+  the #11af shadow + commits `wy2` immediately; threads the
+  `late_wy_1toFF_ds_1` A/B).
+- Fixed blockers by family: lycEnable 5/5 · ly0 2/4 (the SS legs remain) ·
+  m2enable 2/2 · miscmstatirq 2/3 · window late_wy 3 · gdma 2/2 ·
+  lcd_offset 2/5 (+ m0enable/disable + FFto0 + m2irq_count_ds_2 rebaselines).
+  The 8 documented floor-losses (SameBoy-fail, rebaseline at flip): the 4
+  DS-lcdoffset/retrigger rows whose law tables sit on the old dot-6 frame
+  (`lycwirq`/`lycstatwirq`/`m1irq_late_enable` `_ds_lcdoffset1_2`,
+  `lycint152_lyc153irq_late_retrigger_ds_1`), `late_wy_ds_1`+`_lcdoffset1_1`
+  (SameBoy also triggers, sb=3), and the 2 `m2stat/m3stat_count_ds_2`
+  count-loops (sb=00).
+- **Remaining 30 by family:** speedchange 4 (S6) · window 4 (spx10 ·
+  wxA5/A6 · 1toFF_ds_2) · lcd_offset 3 · m1 3 · m2int_m0irq 3 ·
+  m2int_m2stat 2 · ly0 2 (SS legs) · lyc153int 2 · irq_precedence 2 ·
+  m0enable 2 · m2int_m2irq 1 · miscmstatirq 1 · enable_display 1. Census
+  30 ≥ ~25 → NO C3 checklist (the goal's condition).
+- METHOD: the base-373 two-bin list was NOT preserved from #11bf — rebuilt
+  from a stashed base build; two "regressions" (`m2irq_count_ds_1`,
+  `late_wy_1toFF_ds_2`) turned out base-failing (comm on full FAIL lines
+  with moved `got=` values mis-reports fixed/new — ALWAYS name-level-diff,
+  method lock 6, bit again). Pin sample-frames can disagree with the probe
+  (`late_wy_1toFF_ds_2` is frame-phase-marginal — pin only stable rows).
+
 ### #11bf-b (2026-07-02, same session) — items 2a + 3a + 3c landed: the racing DMA-register write beats the steal (+5/−0), the late-ENABLE window fetch-catch deadline (+1/−0), and the late-WX scx5 un-catch (+1/−0). Session two-bin total 386→373 (+13/−0, ZERO drops); must-fix blockers **58→47**. 40 pins; mooneye 91/91 ON+OFF; gbtr OFF 225/0. Defaults NOT flipped.
 
 Code commits (`phase-b-s7`): `d3bc31f` (dma) + `de02b9d` (window 3a).

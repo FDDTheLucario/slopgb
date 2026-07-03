@@ -37,7 +37,8 @@ if [ -x "$TESTER" ] && grep -q 'SBMODE ly=%d cfl=%d dc=%d vis=%d fp=' "$DIR/Core
    && grep -q 'SBWAKE.*fp=' "$DIR/Core/sm83_cpu.c" 2>/dev/null \
    && grep -q 'SBDISP.*fp=' "$DIR/Core/sm83_cpu.c" 2>/dev/null \
    && grep -q SBWHDMA "$DIR/Core/memory.c" 2>/dev/null \
-   && grep -q SBSPD "$DIR/Core/timing.c" 2>/dev/null; then
+   && grep -q SBSPD "$DIR/Core/timing.c" 2>/dev/null \
+   && grep -q SBWRITE "$DIR/Core/memory.c" 2>/dev/null; then
   echo "tester already built + patched: $TESTER"; exit 0
 fi
 
@@ -372,6 +373,38 @@ if 'SBDISP ly=%d cfl=%d dc=%d bit=%d stat=%02x mfi=%d\\n' in cpu:
     open(d+"/Core/sm83_cpu.c","w").write(cpu)
     print("patched sm83_cpu.c (SBDISP fp)")
 PY
+
+# #11bg -- SBWRITE: FF41 (STAT) + FF45 (LYC) write instants with lyfc + fp (synced:
+# both writes run after the GB_display_sync of the IO-write prelude).
+python3 - "$DIR" <<'PYW'
+import sys
+d=sys.argv[1]
+p=d+"/Core/memory.c"
+mem=open(p).read()
+if "SBWRITE" not in mem:
+    old_stat="""            case GB_IO_STAT:
+                gb->io_registers[GB_IO_STAT] &= 7;"""
+    new_stat="""            case GB_IO_STAT:
+                { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+                  if(trc) fprintf(stderr,"SBWRITE ff41 ly=%d cfl=%d dc=%d val=%02x lyfc=%d fp=%lld\\n",
+                    gb->current_line, gb->cycles_for_line, gb->display_cycles, value,
+                    (int)(int16_t)gb->ly_for_comparison, (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }
+                gb->io_registers[GB_IO_STAT] &= 7;"""
+    assert old_stat in mem, "STAT write anchor missing"
+    mem=mem.replace(old_stat,new_stat,1)
+    old_lyc="""            case GB_IO_LYC:
+                /* TODO: Probably completely wrong in double speed mode */"""
+    new_lyc="""            case GB_IO_LYC:
+                { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+                  if(trc) fprintf(stderr,"SBWRITE ff45 ly=%d cfl=%d dc=%d val=%02x lyfc=%d fp=%lld\\n",
+                    gb->current_line, gb->cycles_for_line, gb->display_cycles, value,
+                    (int)(int16_t)gb->ly_for_comparison, (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }
+                /* TODO: Probably completely wrong in double speed mode */"""
+    assert old_lyc in mem, "LYC write anchor missing"
+    mem=mem.replace(old_lyc,new_lyc,1)
+    open(p,"w").write(mem)
+    print("patched SBWRITE")
+PYW
 
 cd "$DIR" && make tester -j"$(nproc)"
 echo "BUILT: $TESTER"
