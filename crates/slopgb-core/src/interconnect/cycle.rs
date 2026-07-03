@@ -221,11 +221,12 @@ impl Interconnect {
             if line < 144 {
                 let (wa, ve, lrd, vh, vm, ns) = self.ppu.dbg_read_state();
                 eprintln!(
-                    "SLOPGB ff41 ly={line} dot={dot} clk={} mode={} pend={pend_dbg} wa={wa} ve={ve} lrd={lrd} vh={vh} vm={vm} ns={ns} dh={} mclk={}",
+                    "SLOPGB ff41 ly={line} dot={dot} clk={} mode={} pend={pend_dbg} wa={wa} ve={ve} lrd={lrd} vh={vh} vm={vm} ns={ns} dh={} mclk={} dsa={}",
                     self.clock.now(),
                     v & 3,
                     self.ppu.sub_dot(),
-                    self.cycles
+                    self.cycles,
+                    self.ppu.sb_dsa()
                 );
             }
         }

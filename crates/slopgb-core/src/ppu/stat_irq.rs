@@ -71,10 +71,23 @@ impl Ppu {
         // read 0 — `offset1_lyc99int_m0stat_count_scx2_ds_1` DS poll 257 /
         // `offset3_..._scx1_1` SS poll 255, both want 0x83; the `_2` siblings
         // read 2 dots past the flip and keep 0x80 — the ONE-SIDED error).
+        // POLLED (`!read_carried`) + LYC-0x99-anchored (= 153, the line-153
+        // wake the lcd_offset dances all ride): the count loops run
+        // with the lyc99int anchor armed through every per-line poll (the
+        // group-E `lyc == 153` anchor-discriminator shape). Needed because
+        // `speedchange3_nop_ly44_m3_m3stat_scx2_2` (LYC anchor 44) polls the
+        // IDENTICAL whole-dot shape — ly27 dot 257 == flip, dsa 6, uncarried
+        // — with the OPPOSITE want (C0, SameBoy-pass; +1/−1 measured), and
+        // the m2int ISR reads (`speedchange2*_m3stat_scx3_2`, carried) sit
+        // one more collision over (+3/−4 with the unanchored arm, all
+        // SameBoy-pass). The whole-dot frame carries NO other observable —
+        // the true split is the sub-dot poll phase the S6 co-land owns.
         if self.lcd_shift_dots != 0
             && self.model.is_cgb()
             && self.line < 144
             && m == 0
+            && !self.read_carried
+            && self.lyc == 0x99
             && self.line_render_done
             && self.flip_dot != 0
             && self.dot == self.flip_dot
