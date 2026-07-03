@@ -192,6 +192,16 @@ impl Interconnect {
         self.service_vram_dma();
         self.maybe_oam_bug(addr, kind);
         let v = self.read_no_tick(addr);
+        // #11bh — FF0F group-A read peek: the deferred IF read's verdict
+        // includes the deterministically-imminent STAT engine rise SameBoy's
+        // events-first read frame has already folded (see
+        // `Ppu::ff0f_stat_peek`). Verdict-only: `intf` is untouched, the rise
+        // still folds at its own dot.
+        let v = if addr == 0xFF0F {
+            v | self.ppu.ff0f_stat_peek()
+        } else {
+            v
+        };
         // #11ar: the SCOPED carried-read exit override is one-shot — clear the
         // arm after the STAT-ISR handler's first FF41 mode read has resolved (its
         // `vis_mode_read` already consumed `read_carried` inside `read_no_tick`).
@@ -261,7 +271,7 @@ impl Interconnect {
         // S5/C2 write-frame tracer: the FF41/FF45 register-write's leading-edge
         // (cc+0) dot vs its commit (cc+4) dot — the write-side analogue of the
         // `read_deferred` FF41 read tracer. `SLOPGB_S5DBG`, byte-identical unset.
-        let le_pos = if matches!(addr, 0xFF41 | 0xFF45 | 0xFF51..=0xFF55) && crate::ppu::s5dbg_on() {
+        let le_pos = if matches!(addr, 0xFF0F | 0xFF41 | 0xFF45 | 0xFF51..=0xFF55) && crate::ppu::s5dbg_on() {
             Some(self.ppu.scan_pos())
         } else {
             None
@@ -360,6 +370,12 @@ impl Interconnect {
             self.ppu.stage_write(addr, value, dots);
         }
         self.maybe_oam_bug(addr, OamBugKind::Write);
+        // #11bh group B — a bit1-clearing FF0F write consumes a STAT engine
+        // rise landing within the next 2 dots (see `Ppu::arm_ff0f_if_squash`
+        // + the consumption site in `stat_update_tick`).
+        if addr == 0xFF0F && value & 0x02 == 0 {
+            self.ppu.arm_ff0f_if_squash();
+        }
         self.write_no_tick(addr, value);
         if defer_steal {
             self.service_vram_dma();

@@ -2911,6 +2911,94 @@ fn tier2_ds_line153_lyfc_passes() {
     }
 }
 
+/// S5 #11bh — the FF0F read PEEK (group A) + write-race squash (group B), the
+/// IF-register analogues of the #11ar FF41 verdict peek: verdict-only, no
+/// machine advance, no dispatch move (the refuted #11bd sub-M FF0F sampling
+/// moved the machine).
+///
+/// Group A: the deferred cc+0 FF0F read's verdict includes a deterministically
+/// imminent STAT engine rise SameBoy's events-first `read_high_memory` frame
+/// has already folded — the DS mode-0 flip one dot ahead (mode-2-ISR-anchored
+/// reads only, `stat_rise_oam`) and the LYC latch half an M-cycle ahead
+/// (`Ppu::ff0f_stat_peek`). Group B: a bit1-clearing FF0F write consumes a
+/// STAT rise landing within the per-source window (DS mode-0 2 dots, SS LYC
+/// 1 dot; everything else 0 — `GB_CONFLICT_WRITE_CPU`, strict-edge
+/// no-re-raise). All windows dual-traced (SBIF/SBACK/SBREAD-ff0f fp vs
+/// SLOPGB wff0f/ff0f/dispatch, 2026-07-03).
+#[test]
+fn tier2_ff0f_groupab_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_ff0f_groupab",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        // Group A: the DS mode-0 rise one dot past the read (rise 255, read 254).
+        ("gambatte/m2int_m0irq/m2int_m0irq_ds_2_cgb04c_out3.gbc", "3"),
+        // GUARD — one M earlier (read 252) stays clear.
+        ("gambatte/m2int_m0irq/m2int_m0irq_ds_1_cgb04c_out1.gbc", "1"),
+        // GUARD — the identical dot-254/rise-255 geometry from an
+        // LYC-anchored ISR reads clear (the `stat_rise_oam` anchor gate).
+        ("gambatte/lyc0int_m0irq/lyc0int_m0irq_ds_1_cgb04c_out0.gbc", "0"),
+        // Group A: the SS LYC=153 latch two dots past the read (rise 6, read 4).
+        (
+            "gambatte/ly0/lycint152_lyc153irq_2_dmg08_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        // GUARDs — reads at dot 0 (SS) / dot 2 (DS) stay clear.
+        (
+            "gambatte/ly0/lycint152_lyc153irq_1_dmg08_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        ("gambatte/ly0/lycint152_lyc153irq_ds_1_cgb04c_outE0.gbc", "E0"),
+        // Group B: the DS mode-0 write-race (write 1-2 dots before the rise
+        // consumes it; the strict edge never re-raises).
+        (
+            "gambatte/m2int_m0irq/m2int_m0irq_scx3_ifw_ds_2_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/m2int_m0irq/m2int_m0irq_scx4_ifw_ds_2_cgb04c_out0.gbc",
+            "0",
+        ),
+        // GUARD — 3-4 dots clear survives.
+        (
+            "gambatte/m2int_m0irq/m2int_m0irq_scx3_ifw_ds_1_cgb04c_out2.gbc",
+            "2",
+        ),
+        // GUARD — the SS mode-0 write-race window is 0 (Δ=1 survives).
+        (
+            "gambatte/m2int_m0irq/m2int_m0irq_scx4_ifw_1_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+        // Group B: the SS LYC write-race (write at dot 5, rise 6 — consumed).
+        (
+            "gambatte/ly0/lycint152_lyc153irq_ifw_2_dmg08_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        // GUARDs — Δ=5 (SS) survives; the DS LYC window is 0 (Δ=2 survives);
+        // the mode-2 pulse window is 0.
+        (
+            "gambatte/ly0/lycint152_lyc153irq_ifw_1_dmg08_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        (
+            "gambatte/ly0/lycint152_lyc153irq_ifw_ds_1_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        ("gambatte/m2int_m2irq/m2int_m2irq_ifw_ds_1_cgb04c_out2.gbc", "2"),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 // Session-local S5 measurement aid (see the module's doc); `#[ignore]`'d so it
 // never runs in the gate.
 #[path = "gambatte_flagon_probe.rs"]

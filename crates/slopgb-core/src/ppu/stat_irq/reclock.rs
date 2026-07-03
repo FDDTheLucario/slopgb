@@ -294,15 +294,58 @@ impl Ppu {
             .stat_update
             .update(mfi, self.eng_stat, self.lyc_interrupt_line)
         {
-            self.pending_if |= IF_STAT;
-            if super::s5dbg_on() && self.line < 154 {
-                eprintln!(
-                    "SLOPGB dispatch ly={} dot={} mfi={} lycln={}",
-                    self.line, self.dot, mfi, self.lyc_interrupt_line as u8
-                );
+            // #11bh group B — the FF0F write-race: a bit1-clearing FF0F write
+            // committed within the last 2 dots CONSUMES this rise (SameBoy
+            // `GB_CONFLICT_WRITE_CPU`: the CPU's IF write lands +1 T after its
+            // leading edge and beats a co/prior-instant PPU rise in SameBoy's
+            // frame — slopgb's deferred write commits ~2 dots early of that
+            // frame, so the raced rise lands 1-2 slopgb-dots AFTER the
+            // commit). The line still went high (`update` latched it), so the
+            // edge is spent: no level-re-raise (`m2int_m0irq_scx{3,4}_ifw_ds_2`
+            // want 0, `lycint152_lyc153irq_ifw_2` want E0; the `_1` siblings'
+            // writes sit 3-5 dots clear and stay live). One-shot.
+            // Per-source consume window (dots since the write commit,
+            // Δ = 3 − counter): DS mode-0 rise w=2 (`scx3`/`scx4_ifw_ds_2`
+            // consume at Δ 1-2, `_ds_1` survive at 3-4) · SS LYC rise w=1
+            // (`lyc153irq_ifw_2` consumes at Δ=1, `_ifw_1` survives at 5) ·
+            // everything else w=0 — the SS mode-0 (`scx4_ifw_1` survives
+            // Δ=1), DS LYC (`lyc153irq_ifw_ds_1` survives Δ=2), mode-2
+            // (`m2int_m2irq_ifw_ds_1`) and mode-1 rises sit on the other
+            // side of the write in SameBoy's frame (all measured, this
+            // session's family probe).
+            let m0_rise = mfi == 0 && self.eng_stat & STAT_SRC_HBLANK != 0;
+            let m2_rise = mfi == 2 && self.eng_stat & STAT_SRC_OAM != 0;
+            let lyc_rise = !m0_rise
+                && !m2_rise
+                && self.eng_stat & STAT_SRC_LYC != 0
+                && self.lyc_interrupt_line;
+            let w = if self.ds && m0_rise {
+                2
+            } else if !self.ds && lyc_rise {
+                1
+            } else {
+                0
+            };
+            if w > 0 && self.stat_if_squash >= 3 - w {
+                self.stat_if_squash = 0;
+                if super::s5dbg_on() && self.line < 154 {
+                    eprintln!(
+                        "SLOPGB dispatch ly={} dot={} mfi={} lycln={} (ifw squashed)",
+                        self.line, self.dot, mfi, self.lyc_interrupt_line as u8
+                    );
+                }
+            } else {
+                self.pending_if |= IF_STAT;
+                if super::s5dbg_on() && self.line < 154 {
+                    eprintln!(
+                        "SLOPGB dispatch ly={} dot={} mfi={} lycln={}",
+                        self.line, self.dot, mfi, self.lyc_interrupt_line as u8
+                    );
+                }
+                self.stat_update_halt_masks(mfi);
             }
-            self.stat_update_halt_masks(mfi);
         }
+        self.stat_if_squash = self.stat_if_squash.saturating_sub(1);
         self.stat_update_vblank_oam_pulses();
     }
 
@@ -647,6 +690,97 @@ impl Ppu {
         } else {
             0
         };
+    }
+
+    /// #11bh — FF0F group-A read PEEK (the #11ar FF41-peek shape on the IF
+    /// register): the deferred cc+0 FF0F read's VERDICT includes a STAT engine
+    /// rise whose emission dot is deterministically known at read time and
+    /// lands within the read's SameBoy-frame sample window — verdict-only, no
+    /// machine advance, no IF commit (the refuted #11bd sub-M FF0F sampling
+    /// moved the machine and broke the want-early `_1` legs; this never moves
+    /// anything). SameBoy's `read_high_memory` samples IF after
+    /// `GB_display_sync` runs the PPU to the exact read half-dot with
+    /// PPU-events-first ordering; slopgb's deferred machine advance stops a
+    /// hair short of that frame, so a rise at the very next dot(s) that
+    /// SameBoy has already folded reads as clear. Dual-traced (SBIF/SBREAD
+    /// ff0f fp vs SLOPGB ff0f/dispatch):
+    ///
+    /// - mode-0 (HBlank) arm, window +1 dot: `m2int_m0irq_ds_2` reads dot 254
+    ///   with the rise at 255 (SameBoy reads 2 dots AFTER its rise, if=03);
+    ///   the `_ds_1`/`scx5_ds_1` guards read 3/2 dots shy (rise 255/260 vs
+    ///   252+1/258+1 — stay clear). On the SS 4-dot read grid the arm is
+    ///   provably inert (reads land ≡0 mod 4, the rise ≡2 mod 4, window 1).
+    /// - LYC arm, window = half an M-cycle (2 dots SS / 1 dot DS):
+    ///   `lycint152_lyc153irq_2` reads line-153 dot 4 with the LYC=153 latch
+    ///   at dot 6 (SameBoy reads 4 dots after its rise, if=02); the `_1`
+    ///   (dot 0 → lyfc −1 at 1..2) and `_ds_1` (dot 2 → lyfc −1 at 3) guards
+    ///   stay clear, `_ds_2` (read dot 4 = the DS latch dot) is already
+    ///   folded. Skips the lines-1-143 dots ≤ 2 carryover window (the engine's
+    ///   `line_start_carryover` does not re-latch there) and never crosses the
+    ///   line boundary.
+    ///
+    /// The mode-2 pulse is deliberately NOT peeked: the `m2int_m2irq_1/_2`
+    /// legs read 1 M apart around the next line's pulse and pass on the
+    /// current frame — a +window peek would flip the `_1` legs.
+    /// Tier2-only caller (`read_deferred`) → production byte-identical OFF.
+    pub(crate) fn ff0f_stat_peek(&self) -> u8 {
+        if !self.enabled || self.glitch_line || self.stat_update.line() {
+            return 0;
+        }
+        // (a) the mode-0 flip rise, one dot ahead. DOUBLE-SPEED only: the DS
+        // read grid (≡0 mod 2) straddles the odd rise dot one dot shy where
+        // SameBoy's frame has folded it (`m2int_m0irq_ds_2`); on the SS 4-dot
+        // grid the scx3 rows (rise 257, `_1` read 256, want 0 — SameBoy reads
+        // clear there) sit at the same +1 geometry with the OPPOSITE verdict,
+        // so the SS window is 0 (measured: +1-dot SS peek flips
+        // `m2int_m0irq_scx3_{,ei_,reti_}1`).
+        // Anchored to the mode-2-rise-dispatched ISR read frame
+        // (`stat_rise_oam`, the #11aq/#11ar per-ISR source tag — sticky since
+        // the dispatching edge): `lyc0int_m0irq_ds_1` reads the IDENTICAL
+        // dot-254/rise-255 geometry from an LYC-anchored ISR with the OPPOSITE
+        // want (SameBoy's per-ISR read position separates them; slopgb
+        // collapses both to one dot — measured, this session's two-bin).
+        // Unshifted frames only (the lcd_offset STOP dances re-phase the poll
+        // grid: `offset1_lyc99int_m0irq_count_scx1_ds_1` polls rise−1 and
+        // must stay clear).
+        if self.ds
+            && self.stat_rise_oam
+            && self.lcd_shift_dots == 0
+            && self.eng_stat & STAT_SRC_HBLANK != 0
+            && self.line <= 143
+            && !self.line_render_done
+            && self.render.active
+        {
+            let (proj, lead) = self.flip_projection();
+            let rise = self.dot + proj.saturating_sub(lead);
+            if rise <= self.dot + 1 {
+                return IF_STAT;
+            }
+        }
+        // (b) the LYC latch rise, half an M-cycle ahead.
+        if self.eng_stat & STAT_SRC_LYC != 0 && !self.lyc_interrupt_line {
+            let kmax = if self.ds { 1 } else { 2 };
+            for k in 1..=kmax {
+                let d = self.dot + k;
+                if d >= 456 || ((1..=143).contains(&self.line) && d <= 2) {
+                    continue;
+                }
+                let ly = self.ly_for_comparison_at(self.line, d);
+                if ly != -1 && ly == i16::from(self.lyc) {
+                    return IF_STAT;
+                }
+            }
+        }
+        0
+    }
+
+    /// #11bh group B — arm the FF0F write-race squash window (see the
+    /// `stat_if_squash` field doc + the consumption site in
+    /// [`Self::stat_update_tick`]). Called by the interconnect at the deferred
+    /// FF0F write's commit instant, only when the written value clears bit 1.
+    /// Tier-2 caller only → production byte-identical OFF.
+    pub(crate) fn arm_ff0f_if_squash(&mut self) {
+        self.stat_if_squash = 2;
     }
 
     /// SameBoy `ly_for_comparison` (`display.c`) — the *delayed* LY value the

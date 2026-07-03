@@ -273,6 +273,13 @@ pub struct Ppu {
     /// drop-then-rise into one seamless tick; the flip tick consumes this
     /// to force the sub-dot dip (`m0enable/lycdisable_ff41_ds_1` want 2).
     ff41_ds_drop: Option<(u8, u16)>,
+    /// #11bh — FF0F group-B write-race squash: dots remaining in which a STAT
+    /// engine rise is CONSUMED by a just-committed bit1-clearing FF0F write
+    /// (SameBoy `GB_CONFLICT_WRITE_CPU`: the IF write lands leading-edge +1 T
+    /// and beats a co/prior-instant rise; a consumed rise does not
+    /// level-re-raise — strict edge). Armed to 2 at the deferred FF0F write,
+    /// decremented per engine dot, one-shot on consumption. Tier-2 only.
+    stat_if_squash: u8,
     scy: u8,
     scx: u8,
     /// LY as read through FF44 (153-quirk aware).
@@ -856,6 +863,7 @@ impl Ppu {
             eng_stat_pending: None,
             eng_mfi_prev: 0,
             ff41_ds_drop: None,
+            stat_if_squash: 0,
             scy: 0,
             scx: 0,
             ly: 0,
@@ -994,6 +1002,7 @@ impl Ppu {
             self.eng_stat = self.stat_en;
             self.eng_stat_pending = None;
             self.ff41_ds_drop = None;
+            self.stat_if_squash = 0;
             return std::mem::take(&mut self.pending_if);
         }
         if self.lyc_if_delay > 0 {
