@@ -1,22 +1,24 @@
 # C3 FLIP CHECKLIST — the tier2/leading-edge default flip
 
-Written at census 21 (#11bh, 2026-07-03; the goal's <~25 trigger). Update the
+Written at census 21 (#11bh, 2026-07-03; the goal's <~25 trigger); census
+now **4** at session end (#11bh final — the `speedchange2*_m2int_m3stat_
+scx2_2` quartet, parked on the measured `E(scx)` A/B:
+`measurements/speedchange-postswitch-law-2026-07-03.md`). Update the
 numbers as levers land; execute top-to-bottom in ONE session when census
 reaches the flip bar. Do NOT flip defaults in any pushed commit until every
 step below is green.
 
 ## 0. State at writing (2026-07-03, #11bh)
 
-- Worktree `.claude/worktrees/phase-b-s7`, branch `phase-b-s7` @ `91a5553`
-  (FF0F groups A+B `c9f9621` + group D `91a5553` on top of #11bg `c3d1991`).
-- Flag-on two-bin: ON **348** / OFF 486 (`scratchpad/on_11bh_abd.txt` = the
-  preserved ON list; diff name-level against `scratchpad/base354_n.txt`).
-- Must-fix (SameBoy-pass) blockers: **21** = speedchange 4 · lcd_offset 3 ·
-  window 4 · FF0F group C (ack-deadline/retrigger) 6 · enable_display 1 ·
-  miscmstatirq 1 · m0enable 1 · lyc153int_m2irq_1 1 (group E — SameBoy
-  PASSES it, the asm_ly0 §2 static-fail prediction is refuted by the run).
-- 44 tier2 pins; mooneye 91/91 flag-on AND flag-off; gbtr OFF 228/0; lib 660;
-  clippy `-D warnings` clean.
+- Worktree `.claude/worktrees/phase-b-s7`, branch `phase-b-s7` @ `873b2e9`
+  (the 9 #11bh commits on top of #11bg `c3d1991`).
+- Flag-on two-bin: ON **323** / OFF 486 (`scratchpad/on_11bh_final3.txt` =
+  the preserved ON list; diff name-level against `scratchpad/base354_n.txt`
+  — 31 fixed [23 must-fix + 8 bonus], ZERO new vs the #11bg base).
+- Must-fix (SameBoy-pass) blockers: **4** = the `speedchange2*_m2int_
+  m3stat_scx2_2` quartet (the S6 co-land, parked with the measured A/B).
+- 50 tier2 pins; mooneye 91/91 flag-on AND flag-off; gbtr OFF 234/0; lib
+  660; clippy `-D warnings` clean.
 
 ## 1. Preconditions (all fresh, same tree)
 

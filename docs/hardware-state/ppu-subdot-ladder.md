@@ -1305,3 +1305,67 @@ B read-sync → A-render+C collapse = convergence → WAKE/READ-FRAME/ENGINE-IF 
 S6-DS → flip). `PORT-PLAN.md`'s S0–S7 (pre-slice #11e) is superseded for the
 render/read/flip parts by this plan. Blocker inventory:
 `tools/measurements/c2-halfdot-build-plan-2026-07-01.md`. USE `fp`, never `cfl*2+dc`.
+
+## #11bh — the FF0F ORDER levers sweep the census 27 → 4 (2026-07-03)
+
+**The one-session convergence run on the #11bg base: 23 of the 27 must-fix
+blockers fixed across 9 flag-gated commits (`c9f9621` → `873b2e9`,
+`phase-b-s7`), ZERO SameBoy-pass drops end-state; flag-on two-bin 354 →
+323 (31 fixed, ZERO new of any class); 50 tier2 pins; mooneye 91/91 ON+OFF every commit; gbtr OFF
+byte-identical throughout. The remaining 4 = the `speedchange2*` scx2_2
+quartet, parked on a fresh measured A/B.** Full mechanism map:
+`measurements/ff0f-order-levers-2026-07-03.md`; the park:
+`measurements/speedchange-postswitch-law-2026-07-03.md`.
+
+The goal's thesis held: every FF0F blocker fell to a per-event ORDER lever
+(peek / write-race / ack-window / co-instant mask) that never moves the
+machine, the dispatch, or the IF lifecycle — where the #11bd machine-moving
+FF0F sampling was refuted. New tracers banked: SBACK (the synced-fp ack
+instant), SBIF (every display.c IF raise, 4 sites), SBREAD-ff0f fp.
+
+- **Group A read PEEK** (+2): the deferred FF0F verdict includes the
+  deterministically-imminent rise SameBoy's events-first frame folded — DS
+  m0 flip +1 dot (`stat_rise_oam`-anchored: `lyc0int_m0irq_ds_1` reads the
+  identical geometry with the opposite want; unshifted-only) + LYC latch
+  half-M (2 SS / 1 DS) via `ly_for_comparison_at`.
+- **Group B write-race** (+3): a bit1-clearing FF0F write consumes a rise
+  within per-source windows (DS m0 2 · SS LYC 1 · else 0); strict edge, no
+  re-raise.
+- **Group C ack reclock** (+10): the production 2-dot bit-0/1 ack squash
+  (gambatte cc+4 ackIrq) replaced under tier2 by per-source windows (m0
+  (0,1) · m2 (0,0) · LYC/m1/vblank (2,0)) — all six retrigger rows + 4 DS
+  twins; SameBoy's ack is the bare IF clear at the flushed pending−2 T.
+- **Group D + late_enable** (+2): the carryover-tail m0-enable write fire
+  gains the held-LYC pre-write-high suppression AND hands unshifted CGB SS
+  to the two-phase engine (`!eng_lyc`) — the phase-1-at-OAM-carry IS the
+  hardware `ttnl > 4` dead-tail.
+- **Group E** (+1): `lyc153int_m2irq_1` — the asm_ly0 "SameBoy statically
+  fails it" prediction REFUTED by classify (SameBoy passes); fixed by the
+  LYC-153-anchored co-instant ly0-dot4 pulse read-view mask (CPU-first at
+  the shared instant, fp-measured; the LYC-152 anchor reads +4 and must see
+  it — unguarded = +1/−2).
+- **Window/glitch/misc slices** (+6 +5 bonus): the W1 root cause (the
+  win-line render clock +2 late; three non-FF41 flip consumers fixed: m0
+  engine rise projection-led, wxA6 VRAM release at `259+SCX&7`,
+  sprite-at-window-X abort-slot removal) · the glitch-line SCX same-dot
+  hunt re-open (`D(scx_init) = 83 + scx_init` inclusive) · the DS
+  line-start carryover level hold (suppress + `force_level(true)`) · the
+  WY per-trigger-line un-latch deadline (≤2 lines ≥1 / ≤6 line 0 — also
+  fixes two rows SameBoy itself fails, hardware-true per asm) · the
+  count-row co-instant deadline (shifted-frame FF0F same-dot m0 mask +
+  FF41 `dot == flip_dot` hold — item 7's separable slice, F1 = L + 1.5).
+- **Item 7 park**: `E(scx) = 502 + 2·scx` (rp-frame) on the LCD-on-leave
+  frame fixes the quartet + 5 ly44 legs but drops 14 SameBoy-passing `_1`
+  legs (classify 14/14 BUG) — the half-dot A/B swap at a third operating
+  point. The law-side `LCDPH=2` single knob also re-refuted (61→63). The
+  residual = the (s, SCX, dsa-at-leave, carry) 4-variable exit table = the
+  S6 co-land proper. NOTE: SBSTOP measures dsa7=0 where the asm brief said
+  4 for the s-even class — re-derive the class map first next time.
+
+C3-FLIP-CHECKLIST.md written at census 21 (the <25 trigger), census now 4.
+Method note: the group-A/B/C windows were all derived wrong-first from
+whole-dot assumptions and corrected by the guard-leg probes within minutes —
+the 14-leg constraint tables from the fp dual-traces are what made each
+narrowing terminate; and `vis_exit_hd`/`read_pos_hd` run in the rp = 2·dot
+frame WITHOUT the +8 offset (the #11bh law's first build missed by exactly
+that 8).
