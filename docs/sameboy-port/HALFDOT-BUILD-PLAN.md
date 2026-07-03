@@ -1,6 +1,34 @@
 # The half-dot (8 MHz) pixel-pipe reclock — constructive build plan
 
-Status (2026-07-02 #11bd): **the goal.md ONE-SESSION convergence run LANDED
+Status (2026-07-02 #11be): **§6 steps 2-4 EXECUTED (stages 2-4 of the goal.md
+run). Part B is COMPLETE: `read_deferred` is the `GB_display_sync` analogue
+(the grain resolves the PPU to the read's exact half-dot; `Ppu::read_pos_hd`
++ `isr_read_carry_hd` are THE read-position API), fp-dual-trace-gated — the
+frame mapping is a UNIFORM +8 hd in-line BOTH speeds (the "+3 DS" was a
+cfl-only artifact; §3B's read side needs no further motion). Part C is
+COLLAPSED: the seven `vis_mode_read` shadow laws are ONE comparison
+`read_pos_hd < vis_exit_hd(config)` (arms fold min/max per verdict class) and
+the `early_lead` tower is two named residues (glitch +2, bare-cc2 parity);
+the §2 law table is retired. Part A-render landed as the EMERGENT exit model
+(SS `2*flip+2`, DS `2*flip−2+2*(SCX&1)` — anchored to the render's own
+flip/projection, tracking mid-line SCX extends) rather than a mechanical
+half-dot FSM re-step (no consumer needs sub-dot FSM transitions yet; the
+grain + read API + exit model capture the physics). Part D re-derivations:
+palette entry 84/release pipe_end+1 SS +0 DS; the straddle STAMPS
+(PalAccess + M0Access reads + OAM write) bypassed tier2 — they are cc+4-frame
+devices; DS line-END release extended to OAM writes; the CGB carryover hold
+generalized (unshifted); the LYC-disable delayed view; the FF45 fire
+edge-only under a non-LYC-held line. Result: two-bin 411→386 (−25/+0 ZERO
+drops), blockers 78→58; 36 pins, mooneye 91/91 ON+OFF every commit, gbtr OFF
+221/0. Stage 4's re-measure verdict: ENGINE-IF was NOT one class — three
+clean write-frame slices came out (lycEnable −9, miscmstatirq −2); the
+residue (58) is the S6/S7 core: WAKE-instant (halt 13 DMG + 5 CGB,
+#11ay-confirmed 8-hd split), the window render-trigger race (late_wy_ds
+co-temporal pairs), S6-DS (dma/speedchange/lcd_offset), and the ly0/lyc153
+LYC-153 read-straddles. Detail: `ppu-subdot-ladder.md` "#11be" + the three
+`measurements/*-2026-07-02.md` maps.**
+
+Prior status (2026-07-02 #11bd): **the goal.md ONE-SESSION convergence run LANDED
 five slices across attack items 1-5 (`phase-b-s7` `931e629`..`5bf6e69`):
 the LCD-offset PHASE REPRESENTATION (item 1 keystone — `sb_dsa8` shadow of
 SameBoy's `double_speed_alignment`, alignment-dependent leave advance
