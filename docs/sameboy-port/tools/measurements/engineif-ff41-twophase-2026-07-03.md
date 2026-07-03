@@ -141,6 +141,13 @@ sub-dot grid: the count poll and the m0 rise land on the SAME dot
 fixed by the wake), where SameBoy's post-3-STOP half-dot phase separates
 them.
 
+Also re-refuted post-#11bg: the line-end mfi=2 WRITE-VIEW applied to the
+phase application levels only (the `m0enable/late_enable_2` want-0 lever):
+m2enable +2 (the line-end m2-ENABLE applications now fire at k2 where
+hardware fires the next-line pulse), one pin broken, and the target row
+not fixed — its commit dot sits below 454 in our frame. `late_enable_2`
+stays with the S6 boundary-frame work.
+
 ## Tooling banked
 
 `SBWRITE` (FF41/FF45 write instants, `lyfc=` + synced `fp=`) in
