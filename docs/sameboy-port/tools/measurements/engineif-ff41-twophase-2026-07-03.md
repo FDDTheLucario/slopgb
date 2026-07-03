@@ -80,11 +80,15 @@ lcd_offset offset1 scx1 count legs (first-poll mode), and the late_wy trio
 
 ## Results (all gates green at commit)
 
-- 47-blocker list: **30 remain (−17)** — lycEnable 5/5, m2enable 2/2,
+- Mechanism 3 (late addition): the DS carried mode2→3 ENTRY read frame —
+  the #11ar +2 peek applied at the visible mode-3 entry (slopgb dot 84);
+  `m2int_m2stat_ds_1/_2` straddle at dots 80/82 (want 2/3, SCX-independent).
+  +2 blockers, 0 drops; the #11ar readpos pin extended.
+- 47-blocker list: **28 remain (−19)** — lycEnable 5/5, m2enable 2/2,
   ly0 2/4 (DS legs), miscmstatirq 2/3, plus the gdma pair, the late_wy trio
   and the lcd_offset scx1 pair via the wake cascade (m0enable's 2 blockers
   remain).
-- Full-CGB two-bin: 373 → **357** flag-on = +24 fixed / −8 new, the 8 all
+- Full-CGB two-bin: 373 → **355** flag-on = +26 fixed / −8 new, the 8 all
   classify-FLOOR (SameBoy fails them too) → ZERO SameBoy-pass drops. DMG
   two-bin: 154 → 154 (all levers CGB-gated). The base-373 list was rebuilt
   from a stashed base build (not preserved from #11bf); two apparent
@@ -120,6 +124,22 @@ lcd_offset offset1 scx1 count legs (first-poll mode), and the late_wy trio
   COLLAPSE (identical commit dots), only the write-instant arm splits it.
 - wy2_delay +2 (tier2-DS): breaks `late_wy_FFto2_ly2_ds_1` + a pin — the
   un-latch is a discrete race, not a copy-phase shift.
+
+## Post-#11bg re-measure: the goal-item-2/3 joint STOPADV lever (still blocked)
+
+`SLOPGB_STOPADV` sweep on lcd_offset+speedchange under the new wake frame:
+w=6 nets −6 (speedchange 57→49, lcd_offset 21→23) but it is the SAME
+#11bb/#11bc A/B swap — 19 `_2` legs fixed vs 11 `_1` legs broken, all
+inside the `ly44_m3 m3stat_scx*` half-dot straddle pairs, PLUS
+`speedchange2[_frame1]_m2int_m3stat_scx2_2` ×2 (both classify-BUG =
+SameBoy-pass) and 2 lcd_offset count rows. The per-scx HALF-DOT
+post-switch mode-3 exit is still the blocker; the joint "w + constants
+re-derivation" cannot land without it (the #11ao parity wall at the
+post-switch frame). The remaining lcd_offset scx2 legs are the same
+sub-dot grid: the count poll and the m0 rise land on the SAME dot
+(dual-traced: scx2 poll 257 == rise 257; scx1 poll 255 < rise 256 —
+fixed by the wake), where SameBoy's post-3-STOP half-dot phase separates
+them.
 
 ## Tooling banked
 
