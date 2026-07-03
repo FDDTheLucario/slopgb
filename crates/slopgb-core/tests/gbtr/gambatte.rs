@@ -2814,6 +2814,18 @@ fn tier2_ff41_twophase_engine_passes() {
             "gambatte/lycEnable/lyc_ff41_trigger_delay_2_dmg08_cgb04c_out2.gbc",
             "2",
         ),
+        // The DS immediate-view analogue of the m0-flip dip: a bit6-drop
+        // committing within one M of the DS mode-3→0 flip dies before the
+        // mode-0 rise (fresh edge); the `_2` sibling drops after the flip
+        // (seamless).
+        (
+            "gambatte/m0enable/lycdisable_ff41_ds_1_cgb04c_out2.gbc",
+            "2",
+        ),
+        (
+            "gambatte/m0enable/lycdisable_ff41_ds_2_cgb04c_out0.gbc",
+            "0",
+        ),
     ];
     for (rel, expect) in targets {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));

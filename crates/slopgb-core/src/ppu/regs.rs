@@ -341,6 +341,16 @@ impl Ppu {
                     } else {
                         self.eng_stat = data;
                         self.eng_stat_pending = None;
+                        // #11bg — record a DS LYC-enable DROP for the
+                        // m0-flip dip (see `ff41_ds_drop`).
+                        if self.leading_edge_reads
+                            && self.model.is_cgb()
+                            && self.ds
+                            && old & STAT_SRC_LYC != 0
+                            && data & STAT_SRC_LYC == 0
+                        {
+                            self.ff41_ds_drop = Some((self.line, self.dot));
+                        }
                     }
                     self.stage_stat_copies();
                     self.refresh_cmp(false);

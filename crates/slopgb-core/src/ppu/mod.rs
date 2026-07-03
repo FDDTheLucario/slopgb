@@ -266,6 +266,13 @@ pub struct Ppu {
     /// Previous engine tick's `mode_for_interrupt` (m0-flip detection for
     /// the fast-forward above). Tier-2/LE only.
     eng_mfi_prev: u8,
+    /// #11bg — the DS analogue of the m0-flip fast-forward dip: the (line,
+    /// dot) of the last DS FF41 commit that DROPPED the LYC enable. At DS
+    /// the engine view is immediate (no stage), so a bit6-drop landing on
+    /// the dot before the mode-3→0 flip collapses the hardware's
+    /// drop-then-rise into one seamless tick; the flip tick consumes this
+    /// to force the sub-dot dip (`m0enable/lycdisable_ff41_ds_1` want 2).
+    ff41_ds_drop: Option<(u8, u16)>,
     scy: u8,
     scx: u8,
     /// LY as read through FF44 (153-quirk aware).
@@ -848,6 +855,7 @@ impl Ppu {
             eng_stat: 0,
             eng_stat_pending: None,
             eng_mfi_prev: 0,
+            ff41_ds_drop: None,
             scy: 0,
             scx: 0,
             ly: 0,
@@ -985,6 +993,7 @@ impl Ppu {
             // gap and apply at a stale tick after re-enable.
             self.eng_stat = self.stat_en;
             self.eng_stat_pending = None;
+            self.ff41_ds_drop = None;
             return std::mem::take(&mut self.pending_if);
         }
         if self.lyc_if_delay > 0 {

@@ -120,6 +120,25 @@ impl Ppu {
                 }
             }
         }
+        // #11bg — the DS m0-flip dip (the immediate-view analogue of the
+        // fast-forward above): a bit6-DROPPING FF41 commit within one M of
+        // the mode-3→0 flip means hardware's LYC-hold death precedes the
+        // mode-0 IF rise sub-dot; slopgb's whole-dot view collapsed them
+        // into a seamless LYC→m0 handoff. Force the dip so the flip tick's
+        // main update() re-edges (`m0enable/lycdisable_ff41_ds_1` want 2;
+        // the `_2` sibling's drop commits after the flip and stays seamless).
+        if self.ds && self.mode_for_interrupt == 0 && self.eng_mfi_prev == 3 {
+            if let Some((l, d)) = self.ff41_ds_drop.take() {
+                if l == self.line
+                    && self.dot.wrapping_sub(d) <= 2
+                    && self.lyc_interrupt_line
+                    && self.eng_stat & STAT_SRC_LYC == 0
+                    && self.stat_update.line()
+                {
+                    self.stat_update.force_level(false);
+                }
+            }
+        }
         self.eng_mfi_prev = self.mode_for_interrupt;
         // Keep the readable comparison/mode flags + the legacy level current
         // (FF41 reads, the write-edge baseline) exactly as the flag-off path.
