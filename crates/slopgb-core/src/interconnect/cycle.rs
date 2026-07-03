@@ -256,11 +256,12 @@ impl Interconnect {
     /// by the class's pre-commit split.
     pub(super) fn write_deferred(&mut self, addr: u16, value: u8) {
         let conflict = self.write_conflict(addr);
+        self.vram_dma_req_pre = self.vram_dma_req.is_some();
         let before = self.clock.now();
         // S5/C2 write-frame tracer: the FF41/FF45 register-write's leading-edge
         // (cc+0) dot vs its commit (cc+4) dot — the write-side analogue of the
         // `read_deferred` FF41 read tracer. `SLOPGB_S5DBG`, byte-identical unset.
-        let le_pos = if matches!(addr, 0xFF41 | 0xFF45) && crate::ppu::s5dbg_on() {
+        let le_pos = if matches!(addr, 0xFF41 | 0xFF45 | 0xFF51..=0xFF55) && crate::ppu::s5dbg_on() {
             Some(self.ppu.scan_pos())
         } else {
             None
@@ -280,7 +281,25 @@ impl Interconnect {
             let (cly, cdot) = self.ppu.scan_pos();
             eprintln!("SLOPGB palw{addr:04x} val={value:02x} ly={cly} dot={cdot}");
         }
-        self.service_vram_dma();
+        // #11bf item 2a — a racing DMA-register write beats a same-advance
+        // HBlank-DMA steal: SameBoy runs `GB_hdma_run` only after the
+        // current instruction completes (sm83_cpu.c:1718), so the write's
+        // store is visible to the block (`hdma_late_destl_1` dual-traced:
+        // SameBoy order w54 → run dst=8010; the deferred head-service ran
+        // the block with the stale dst=8000; likewise `_length`/`_wrambank`/
+        // `_disable`). SCOPED to the registers the block itself consumes
+        // (FF51-FF55 counters/arm + FF70 WRAM bank + FF4F VRAM bank): the
+        // steal defers past their store. A GENERAL post-store service was
+        // measured to break `irq_precedence/hdma_vs_m0_scx2_halt` (a
+        // base-passing row) and 60+ hdma rows in the first cut; a request
+        // already pending at the op's entry still steals first even for
+        // the scoped registers. Production (eager) untouched: its head
+        // service runs before the write's own tick flags the request.
+        let defer_steal =
+            self.cgb_mode && matches!(addr, 0xFF51..=0xFF55 | 0xFF70 | 0xFF4F);
+        if !defer_steal || self.vram_dma_req_pre {
+            self.service_vram_dma();
+        }
         if let 0xFF40 | 0xFF42 | 0xFF43 | 0xFF47..=0xFF4B = addr {
             // Half-dot reclock Part A (write-strobe, #11bb): the deferred
             // clock already advanced the machine to SameBoy's exact commit
@@ -342,6 +361,9 @@ impl Interconnect {
         }
         self.maybe_oam_bug(addr, OamBugKind::Write);
         self.write_no_tick(addr, value);
+        if defer_steal {
+            self.service_vram_dma();
+        }
     }
 
     /// Port Stage B deferred-commit internal M-cycle (`cycle_no_access`): park

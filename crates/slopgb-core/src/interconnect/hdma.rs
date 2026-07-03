@@ -35,6 +35,17 @@ impl Interconnect {
         let Some(req) = self.vram_dma_req.take() else {
             return;
         };
+        // #11bf item 2a HDMA dual-trace (`SLOPGB_S5DBG`): the block-run
+        // instant, the slopgb counterpart of SameBoy's `SBWHDMA run`.
+        if crate::ppu::s5dbg_on() {
+            let (l, d) = self.ppu.scan_pos();
+            eprintln!(
+                "SLOPGB hdmarun ly={l} dot={d} clk={} req={req:?} src={:04x} dst={:04x}",
+                self.clock.now(),
+                self.hdma_src,
+                self.hdma_dst
+            );
+        }
         self.vram_dma_stall = true;
         let mut remaining = (usize::from(self.hdma5 & 0x7F) + 1) * 0x10;
         let mut length = if req == VramDmaReq::Gdma {

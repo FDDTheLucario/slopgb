@@ -428,6 +428,8 @@ pub struct Interconnect {
     /// deferred advance is currently executing (set per-T by
     /// `advance_machine_t`; only read by the p2grid visibility deadline).
     machine_now: u64,
+    /// #11bf item 2a sweep scratch: request pending at write_deferred entry.
+    vram_dma_req_pre: bool,
     /// #11bf (`SLOPGB_P2GRID`) — the mode-0 STAT rise's halt-wake visibility
     /// deadline in machine T: the halt sampler masks IF_STAT while
     /// `clock.now() < stat_vis_from_t`. Replaces the M-cycle-quantized
@@ -658,6 +660,7 @@ impl Interconnect {
             ack_squash_deadline_t: 0,
             wake_skew: 0,
             machine_now: 0,
+            vram_dma_req_pre: false,
             stat_vis_from_t: 0,
             halt_ly_phase: 0,
             if_stat_late: 0,
