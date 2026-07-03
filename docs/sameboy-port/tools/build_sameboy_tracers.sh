@@ -38,7 +38,10 @@ if [ -x "$TESTER" ] && grep -q 'SBMODE ly=%d cfl=%d dc=%d vis=%d fp=' "$DIR/Core
    && grep -q 'SBDISP.*fp=' "$DIR/Core/sm83_cpu.c" 2>/dev/null \
    && grep -q SBWHDMA "$DIR/Core/memory.c" 2>/dev/null \
    && grep -q SBSPD "$DIR/Core/timing.c" 2>/dev/null \
-   && grep -q SBWRITE "$DIR/Core/memory.c" 2>/dev/null; then
+   && grep -q SBWRITE "$DIR/Core/memory.c" 2>/dev/null \
+   && grep -q SBACK "$DIR/Core/sm83_cpu.c" 2>/dev/null \
+   && grep -q 'SBREAD ff0f.*fp=' "$DIR/Core/memory.c" 2>/dev/null \
+   && grep -q SBIF "$DIR/Core/display.c" 2>/dev/null; then
   echo "tester already built + patched: $TESTER"; exit 0
 fi
 
@@ -405,6 +408,98 @@ if "SBWRITE" not in mem:
     open(p,"w").write(mem)
     print("patched SBWRITE")
 PYW
+
+# #11bh -- SBREAD ff0f fp upgrade: the FF0F read gets the absolute fp clock
+# (keyed on the fp-less old format so a pre-#11bh tree is re-patched in place).
+python3 - "$DIR" <<'PYF'
+import sys
+d=sys.argv[1]
+p=d+"/Core/memory.c"
+mem=open(p).read()
+if 'SBREAD ff0f ly=%d cfl=%d dc=%d if=%02x\\n' in mem:
+    mem=mem.replace(
+'"SBREAD ff0f ly=%d cfl=%d dc=%d if=%02x\\n",\n                    gb->current_line, gb->cycles_for_line, gb->display_cycles, gb->io_registers[GB_IO_IF]&0x1f); }',
+'"SBREAD ff0f ly=%d cfl=%d dc=%d if=%02x fp=%lld\\n",\n                    gb->current_line, gb->cycles_for_line, gb->display_cycles, gb->io_registers[GB_IO_IF]&0x1f, (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }')
+    open(p,"w").write(mem)
+    print("patched SBREAD ff0f fp")
+PYF
+
+# #11bh -- SBACK: the dispatch IF-acknowledge instant (sm83_cpu.c vector pick:
+# pending_cycles-2 flush has JUST run, so fp here is SYNCED to the exact ack
+# instant, unlike SBDISP whose fp context is the post-latch print). Prints the
+# pre-clear IF + IE. SBIF: every IF|=2 raise in display.c with SYNCED fp
+# (coroutine context, the SBMODE precedent): "su" = GB_STAT_update:572,
+# "m1oam" = the ly144 dot-2 STAT&0x20 raise (:2175), "vbl"/"vbloam" = the
+# vblank-entry IF|=1 + IF|=2 pair (:2190-2192).
+python3 - "$DIR" <<'PYA'
+import sys
+d=sys.argv[1]
+p=d+"/Core/sm83_cpu.c"
+cpu=open(p).read()
+if "SBACK" not in cpu:
+    old="""            gb->pending_cycles = 2;
+            gb->io_registers[GB_IO_IF] &= ~(1 << interrupt_bit);"""
+    new="""            gb->pending_cycles = 2;
+            { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+              if(trc) fprintf(stderr,"SBACK ly=%d cfl=%d dc=%d bit=%d if=%02x ie=%02x fp=%lld\\n",
+                gb->current_line, gb->cycles_for_line, gb->display_cycles, interrupt_bit,
+                gb->io_registers[GB_IO_IF]&0x1f, gb->interrupt_enable&0x1f,
+                (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }
+            gb->io_registers[GB_IO_IF] &= ~(1 << interrupt_bit);"""
+    assert old in cpu, "SBACK anchor missing"
+    cpu=cpu.replace(old,new,1)
+    open(p,"w").write(cpu)
+    print("patched SBACK")
+p=d+"/Core/display.c"
+disp=open(p).read()
+if "SBIF" not in disp:
+    old="""            (int8_t)gb->mode_for_interrupt, gb->io_registers[GB_IO_STAT], gb->lyc_interrupt_line); }
+        gb->io_registers[GB_IO_IF] |= 2;"""
+    new="""            (int8_t)gb->mode_for_interrupt, gb->io_registers[GB_IO_STAT], gb->lyc_interrupt_line); }
+        { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+          if(trc) fprintf(stderr,"SBIF su ly=%d cfl=%d dc=%d mfi=%d lyc_line=%d stat=%02x if=%02x fp=%lld\\n",
+            gb->current_line, gb->cycles_for_line, gb->display_cycles, (int8_t)gb->mode_for_interrupt,
+            gb->lyc_interrupt_line, gb->io_registers[GB_IO_STAT]&0x7f, gb->io_registers[GB_IO_IF]&0x1f,
+            (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }
+        gb->io_registers[GB_IO_IF] |= 2;"""
+    assert old in disp, "SBIF su anchor missing"
+    disp=disp.replace(old,new,1)
+    old="""            if (gb->current_line == LINES && !gb->stat_interrupt_line && (gb->io_registers[GB_IO_STAT] & 0x20)) {
+                gb->io_registers[GB_IO_IF] |= 2;
+            }"""
+    new="""            if (gb->current_line == LINES && !gb->stat_interrupt_line && (gb->io_registers[GB_IO_STAT] & 0x20)) {
+                { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+                  if(trc) fprintf(stderr,"SBIF m1oam ly=%d cfl=%d dc=%d stat=%02x if=%02x fp=%lld\\n",
+                    gb->current_line, gb->cycles_for_line, gb->display_cycles,
+                    gb->io_registers[GB_IO_STAT]&0x7f, gb->io_registers[GB_IO_IF]&0x1f,
+                    (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }
+                gb->io_registers[GB_IO_IF] |= 2;
+            }"""
+    assert old in disp, "SBIF m1oam anchor missing"
+    disp=disp.replace(old,new,1)
+    old="""                gb->io_registers[GB_IO_IF] |= 1;
+                if (!gb->stat_interrupt_line && (gb->io_registers[GB_IO_STAT] & 0x20)) {
+                    gb->io_registers[GB_IO_IF] |= 2;
+                }"""
+    new="""                { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+                  if(trc) fprintf(stderr,"SBIF vbl ly=%d cfl=%d dc=%d stat=%02x if=%02x fp=%lld\\n",
+                    gb->current_line, gb->cycles_for_line, gb->display_cycles,
+                    gb->io_registers[GB_IO_STAT]&0x7f, gb->io_registers[GB_IO_IF]&0x1f,
+                    (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }
+                gb->io_registers[GB_IO_IF] |= 1;
+                if (!gb->stat_interrupt_line && (gb->io_registers[GB_IO_STAT] & 0x20)) {
+                    { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+                      if(trc) fprintf(stderr,"SBIF vbloam ly=%d cfl=%d dc=%d stat=%02x if=%02x fp=%lld\\n",
+                        gb->current_line, gb->cycles_for_line, gb->display_cycles,
+                        gb->io_registers[GB_IO_STAT]&0x7f, gb->io_registers[GB_IO_IF]&0x1f,
+                        (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }
+                    gb->io_registers[GB_IO_IF] |= 2;
+                }"""
+    assert old in disp, "SBIF vbl anchor missing"
+    disp=disp.replace(old,new,1)
+    open(p,"w").write(disp)
+    print("patched SBIF (su/m1oam/vbl/vbloam)")
+PYA
 
 cd "$DIR" && make tester -j"$(nproc)"
 echo "BUILT: $TESTER"
