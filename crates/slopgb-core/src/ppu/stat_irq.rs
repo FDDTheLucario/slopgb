@@ -1033,12 +1033,22 @@ impl Ppu {
             } else {
                 true
             };
+            // #11bh group D — the held-LYC pre-write-high suppression: a
+            // carryover-tail m0 enable whose OLD value armed LYC with the
+            // latch still held (the lines-1-143 / line-144 lyfc-gap hold)
+            // rewrites a line that is already HIGH — no 0→1 edge on hardware
+            // (`m1/lyc143_late_m0enable_lycdisable_2` want 1: old=0x40, the
+            // LYC=143 hold spans line-144 dots 0-3; `ly143_late_m0enable_ds_1`
+            // old=0x00 keeps firing). The top-of-fn `lyc_high` check misses
+            // this: `cmp_cgb` has switched to the new line while the ENGINE
+            // latch still names the old match.
             if self.leading_edge_reads
                 && carryover_tail
                 && !self.glitch_line
                 && vis0
                 && old & STAT_SRC_HBLANK == 0
                 && data & STAT_SRC_HBLANK != 0
+                && !(old & STAT_SRC_LYC != 0 && self.lyc_interrupt_line)
             {
                 return true;
             }

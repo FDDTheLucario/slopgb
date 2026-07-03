@@ -2999,6 +2999,59 @@ fn tier2_ff0f_groupab_passes() {
     }
 }
 
+/// S5 #11bh group D — the held-LYC pre-write-high suppression on the Tier-2
+/// carryover-tail m0-enable write fire (`stat_write_trigger_cgb`): a line-144
+/// dots-0-3 FF41 write whose OLD value armed LYC with the engine latch still
+/// held (the lyfc-gap hold) rewrites an already-HIGH line — no 0→1 edge on
+/// hardware. `cmp_cgb` has switched to the new line so the top-of-fn
+/// `lyc_high` check misses the held latch.
+#[test]
+fn tier2_m1_lycdisable_boundary_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_m1_lycdisable_boundary",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        // The boundary write (line-144 dot ~1-2, old=0x40 held): silent.
+        (
+            "gambatte/m1/lyc143_late_m0enable_lycdisable_2_dmg08_cgb04c_out1.gbc",
+            "1",
+        ),
+        // GUARDs — the earlier/later legs stay silent for their own reasons
+        // (line-143 tail deferral / past the carryover window).
+        (
+            "gambatte/m1/lyc143_late_m0enable_lycdisable_1_dmg08_cgb04c_out1.gbc",
+            "1",
+        ),
+        (
+            "gambatte/m1/lyc143_late_m0enable_lycdisable_3_dmg08_out3_cgb04c_out1.gbc",
+            "1",
+        ),
+        (
+            "gambatte/m1/lyc143_late_m0enable_lycdisable_ds_1_cgb04c_out1.gbc",
+            "1",
+        ),
+        (
+            "gambatte/m1/lyc143_late_m0enable_lycdisable_ds_2_cgb04c_out1.gbc",
+            "1",
+        ),
+        // GUARD — an old=0x00 carryover-tail enable still fires. (The SS
+        // `ly143_late_m0enable_2` sibling is a pre-existing flag-on fail —
+        // not pinnable.)
+        ("gambatte/m1/ly143_late_m0enable_ds_1_cgb04c_out3.gbc", "3"),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 // Session-local S5 measurement aid (see the module's doc); `#[ignore]`'d so it
 // never runs in the gate.
 #[path = "gambatte_flagon_probe.rs"]
