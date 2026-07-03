@@ -3357,6 +3357,43 @@ fn tier2_lcd_offset_count_deadline_passes() {
     }
 }
 
+/// S5 #11bh — the UNSHIFTED CGB SS carryover-tail m0-enable hand-off: with
+/// the two-phase engine view owning FF41 writes (`eng_lyc`), a line-boundary
+/// m0 enable committing on the next line's dots 0-1 catches nothing — the
+/// phase-1 evaluation lands where `mode_for_interrupt` reads the line-start
+/// OAM carry (hardware's `ttnl > 4` dead-tail, asm_enable ROW 3). The
+/// write-instant carryover fire stays for the SHIFTED frames it was built on
+/// and DS.
+#[test]
+fn tier2_late_enable_dead_tail_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_late_enable_dead_tail",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        (
+            "gambatte/m0enable/late_enable_2_dmg08_out2_cgb04c_out0.gbc",
+            "0",
+        ),
+        // GUARDs — the mid-line enable still fires (via the engine phase-1);
+        // the next-line mode-2-zone commit stays silent; the DS boundary
+        // enable keeps the write-instant fire.
+        ("gambatte/m0enable/late_enable_1_dmg08_cgb04c_out2.gbc", "2"),
+        ("gambatte/m0enable/late_enable_3_dmg08_cgb04c_out0.gbc", "0"),
+        ("gambatte/m1/ly143_late_m0enable_ds_1_cgb04c_out3.gbc", "3"),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 // Session-local S5 measurement aid (see the module's doc); `#[ignore]`'d so it
 // never runs in the gate.
 #[path = "gambatte_flagon_probe.rs"]

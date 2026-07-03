@@ -439,6 +439,17 @@ impl Ppu {
                 };
                 let phase = i32::from(self.lcd_phase_hd);
                 fold(&mut exit, 2 * i32::from(flip) + 2 - carry - phase);
+                // (#11bh item 7 — a POST-SWITCH bare-exit law
+                // `E(scx) = 502 + 2·(SCX&7)` rp-frame, scoped to an LCD-on
+                // DS→SS STOP leave, was BUILT + MEASURED here: it fixes all
+                // four `speedchange2*_m2int_m3stat_scx2_2` blockers + 5 ly44
+                // `_2` legs but drops 14 SameBoy-passing `_1` legs across
+                // scx1/3/4 and the ly44 family — the blanket is the
+                // #11bb/#11bc half-dot A/B swap re-measured. The per-leg
+                // resolution needs the (nop-slide s, SCX, `sb_dsa8`-at-leave,
+                // ISR-carry) 4-variable exit table — the full S6 co-land.
+                // Parked with the numbers:
+                // `measurements/speedchange-postswitch-law-2026-07-03.md`.)
             }
         }
         exit
@@ -1101,7 +1112,18 @@ impl Ppu {
             // old=0x00 keeps firing). The top-of-fn `lyc_high` check misses
             // this: `cmp_cgb` has switched to the new line while the ENGINE
             // latch still names the old match.
+            // #11bh — UNSHIFTED CGB SS (`eng_lyc`) hands the carryover-tail
+            // m0-enable fire to the two-phase ENGINE view, whose phase-1
+            // lands at commit+2 where `mode_for_interrupt` already reads the
+            // line-start OAM carry (mfi=2) — hardware's dead-tail: an enable
+            // committing in the last M-cycle / next line's dots 0-1 catches
+            // nothing on CGB (`m0enable/late_enable_2` want 0, commit ly+1
+            // dot 1; `_1` commits mid-line 449 and fires via phase-1; the
+            // asm ROW 3 `ttnl > 4` cutoff). The write-instant fire stays for
+            // the SHIFTED frames it was built on (`late_enable_lcdoffset1_1`,
+            // eng_lyc false) and DS.
             if self.leading_edge_reads
+                && !eng_lyc
                 && carryover_tail
                 && !self.glitch_line
                 && vis0
