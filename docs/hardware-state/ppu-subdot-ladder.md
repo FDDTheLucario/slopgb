@@ -127,6 +127,66 @@ Lifts the class-H/A sub-dot floor incrementally: keep the pixel pipe dot-clocked
 - **DISPATCH-RECLOCK REFUTED 2026-06-21 (the prior "next: move the dispatch to ~252" hypothesis is MEASURED-FALSE; A6's halt-mask is the correct resolution at the UNMOVED frame; probe reverted, branch byte-identical to `a89fdf9`).** Tested the long-assumed next lever — move the mode-0 IRQ DISPATCH (`mode_for_interrupt→0` via `mfi_m0_prev`) from our cc+4 dot 255 to SameBoy's `mode0_irq_dot` (our 252) by re-anchoring `mfi_m0_prev` to `vis_early` (dot 251 → IRQ at 252) on the flag-on path (`SLOPGB_DISP` probe). **Measured (flag-on, `run_mooneye`/`run_gambatte`, all reverted): net-NEGATIVE A/B swap.** Canonical `intr_2_mode0_timing` HELD PASS (it never needed the dispatch move — A6's halt-only mask already fixes it at the 254 frame); but **kernel `m0int_m3stat_2` REGRESSED 0→3** (m0int is itself a *mode-0-dispatched* read — moving its IRQ moves its `ldh a,(FF41)` off the post-flip dot) and **`intr_2_0_timing` REGRESSED PASS→FAIL** (the mode-2→mode-0 IRQ distance shortens by 3 dots), while **`hblank_ly_scx_timing-GS` STAYED FAIL** (so the dispatch dot is NOT its blocker). **CONCLUSION (the proof the goal asked for): the mode-0 dispatch dot is ATOMIC/ENTANGLED — it cannot move on the flag-on path without regressing every mode-0-*dispatched* read (m0int, intr_2_0) that is pinned to our 254 frame; only the global cc-exact reclock (which re-frames ALL those reads together + the ~7000 rebaseline) can move it. The premise "the canonical needs the dispatch at 252" was WRONG — A6's `halt`-only mask resolves the canonical at the UNMOVED 254 frame, and the 254 frame is exactly where m0int reads its post-flip mode 0.** So the residual flag-on failures are NOT a dispatch-dot problem: `hblank_ly_scx`/gbmicrotest `int_hblank_halt` need the **`m0_rise` mask phase** (the new engine's m0 rise lands at dot 255 vs the gambatte engine's `m0_rise_dot` 254 — a sub-dot second-half-determination mismatch, a separate lever); `intr_2_mode3_timing` the mode-2→3 entry-boundary back-date; `intr_2_mode0_timing_sprites` the sprite/window `vis_early`; `vblank_stat_intr-GS` the line-144/DMG-vblank OAM pulses the mfi-engine doesn't emit. Each is its own flag-gated piece on top of A6; the global default flip + rebaseline (Phase B) is the terminal all-or-nothing step.
 - **A5a SHIPPED 2026-06-21 (the visible/dispatch decouple banked as flag-gated production machinery; byte-identical flag-OFF, gate exit 0, kernel separates flag-ON).** Acting on the "bank a green foundation piece" mandate, the measured separator from the bullet above is now real (not a probe): a new `Ppu::vis_early` field (`ppu/mod.rs`) back-dates the **CPU-visible** STAT mode→0 boundary (`vis_mode`) to SameBoy's `ModeTimeline::visible_mode0_dot` frame — 3 dots ahead of the IRQ-dispatch flip (`line_render_done`/`m0_src`) — **on the flag-on path only, bare single-speed lines** (`m0_flip_events`: `leading_edge_reads && bare_flip && !ds && proj <= lead + 3`). `vis_mode` reads `line_render_done || vis_early`; since the set is gated on `leading_edge_reads` (off in prod), `vis_early` is **always false flag-OFF**, so `vis_mode == line_render_done` exactly — byte-identical (full gbtr+mooneye gate **exit 0**, 644 lib green, clippy clean). The dispatch (`m0_src`/`mode_for_interrupt`) is unmoved, so this decouples the visible read from the IRQ dot. **Flag-ON verified**: `run_gambatte cgb` on the kernel pair = **m2int_m3stat_1 → 3 ∧ m0int_m3stat_2 → 0** (both correct — the kernel SEPARATES with the real machinery, not just the probe). Tests: `visible_mode0_backdates_three_dots_flag_on_bare_line` (flag-on flip at SameBoy+4 / our 251, flag-off stays at +7 / 254) + the two `leading_edge_*` subdot tests rewritten to pin the separation at the two read dots (leading sample at our dot 248 → mode 3, 252 → mode 0). **Scope/residuals (deliberately excluded, derived-but-unmeasured): the +3 back-date is the bare single-speed value; sprite/window lines want +2 (DMG) and DS +4, left on `line_render_done`. OAM/VRAM accessibility (`blocking.rs`) keeps the dispatch dot — the visible-vs-accessibility 3-dot window is the S4 back-dating. This is the visible-frame HALF of the atomic flip; the canonical mooneye `intr_2_mode0_timing` still breaks flag-on because the DISPATCH is still cc+4-framed (our 254, not SameBoy's ~252) — the dispatch reclock + ~7000 rebaseline is the remaining atomic work. A5a is the A1/A2/A4-pattern foundation piece: individually faithful, byte-identical OFF, validated ON.**
 
+### #11bf (2026-07-02) — the WAKE-INSTANT port (goal item 1): the SameBoy-exact halt-wake machine, THREE levers landed. The halt family CONVERGES: DMG 13→0, CGB must-fix 5→0 (full-DMG two-bin 167→154 +13/−0; full-CGB two-bin 386→383 +3/−0, zero drops both). 37 pins (+`tier2_halt_wake_grid_passes`); mooneye 91/91 ON+OFF; gbtr OFF 222/0 byte-identical. Defaults NOT flipped.
+
+Code commits (`phase-b-s7`): `c0ecfd9` (lever 1, DMG) → lever 2+3 (this entry). The
+gambatte hwtests **sources** (gambatte-core `test/hwtests/halt/*.asm`, cloned to
+`/tmp/sbbuild/gambatte-src`) were the decisive tool — the `_Na/_Nb` leg structure
+(halt position / read position ±1 M) turns every want into an exact machine
+constraint; dual-traced against SBWAKE/SBDISP/SBREAD **fp** (SBWAKE/SBDISP now
+carry `fp=`, banked in `build_sameboy_tracers.sh`).
+
+- **Lever 1 — the DMG wake grid (`c0ecfd9`).** SameBoy's DMG halt loop
+  (`GB_cpu_run` sm83_cpu.c:1629-1642) = ONE iq sample per iteration at the mid
+  point (4k+2), post-sample advance(2) COMPLETES the M-cycle (resume aligned,
+  no forgiven tail/skew), and the `just_halted` head iteration advances 4 with
+  NO +2 slot (the **jh gap** — samples at T_h+{0,6,10,…}). The woken
+  instruction **RE-FETCHES** (the halt loop performs no prefetch; slopgb's
+  reused idle prefetch ran the resumed stream one M-cycle early) — carried as
+  read debt (`carry_read(4)`), dispatch dot untouched. The rise's CPU
+  visibility is a **T-deadline** at the emission machine-T (+4 on the
+  LCD-enable glitch line: its engine rise is emitted at visexit where normal
+  lines emit at visexit−3, dual-traced — `int_hblank_halt_scx0-7` wakes on the
+  glitch line and pins the +4). HALT's own entry IF-check observes the machine
+  at the fetch's END (t0+4 flushed view — SameBoy `halt()` runs `cycle_read`
+  then checks), arming the halt-bug exactly when SameBoy does (the `_dec`
+  double-DEC pairs + the `_3b` skip path). **The C1.3 `halt_ly_phase` carry
+  DISSOLVES** — under the exact grid its only passing table is all-zero
+  (`hblank_ly_scx_timing-GS` passes with no carry at all), the hack evaporating
+  under the true mechanism. The jh gap is what separates `late_*_halt_*` legs
+  (halt entered AT the rise → no T_h+2 sample) from steady `m0irq/m0int` legs
+  (same rise, wake slots one M apart) — no read law can reach this, confirming
+  #11av/#11ay.
+- **Lever 2 — the CGB-SS extension.** The same pieces (entry flush + deadline +
+  wake re-fetch) on the CGB single-speed head-sample grid (`GB_cpu_run` CGB:
+  sample at the M head, advance 4). Full-CGB two-bin **+3/−0** (`dec` pair +
+  `late_m0irq_halt_m0stat_scx3_3b`). The entry flush ALONE was the measured A/B
+  swap (#11bd item 2's caution confirmed); the deadline model is what makes it
+  land. **Double speed keeps the old masks** (its 2-dot M grid re-frames the
+  rise; the DS legs regressed under the deadline model — the S6-DS grid).
+- **Lever 3 — the IME=1 halt-entry REWIND.** SameBoy `halt()` with IME set and
+  IE&IF already nonzero does `halted=false; pc--` (sm83_cpu.c:1043-1047): the
+  halt is NOT entered and the dispatched ISR **returns INTO the halt**, which
+  re-executes with the IF consumed and sleeps to the NEXT rise. slopgb's
+  halted+first-check-wake path pushed halt+1 — the ISR skipped the re-halt and
+  the whole post-wake stream ran ONE HALT ROUND early (`late_m0int_*_3a` read
+  ly2's mode-2 region instead of ly3's line start; ISRTRACE dual-traced). New
+  `Bus::halt_entry_rewind` (tier2 DMG/CGB-SS; production keeps the old shape,
+  byte-identical). Fixes the whole `m0int _3a/_3b` residue + `ifandie_ei_halt_sra`
+  (DMG+CGB) + `lycirq_m2stat`-adjacent CGB rows.
+- **Also #11bf: `pending_dispatch`** — the running CPU's end-of-fetch dispatch
+  check gets the m0-rise deadline mask (the machine is already flushed to the
+  boundary, so `pending()` was correct EXCEPT the rise frame). A full flush
+  there was measured to shift the deferred operand frame of every following
+  instruction (8 pins) — NOT SameBoy semantics; reverted to the mask-only form.
+- Remaining halt rows: 2 CGB rebaseline (`lycirq_m2stat_2`, `m1int_ly_2` —
+  gambatte-ref, SameBoy disagrees) + the CGB-DS legs under the old masks.
+- METHOD locks re-confirmed the hard way: cwd drifted to the MAIN repo twice
+  mid-session (stale binaries measured as "results" — `cd` the worktree in
+  EVERY call, `md5sum` the binary); zsh `$E` env-string non-splitting bit AGAIN
+  (inline `VAR=val` only); SBDISP `fp` is display-lagged (no sync before the
+  print) — trust SBREAD/SBWAKE fp, not SBDISP's.
+
 ### #11be (2026-07-02) — the goal.md HALFDOT stage 2-4 run: Part B read-position API landed + the Part C LAW COLLAPSE (seven shadow laws + the early_lead tower → ONE half-dot comparison) + three re-derivation batches. Two-bin 411→386 (**−25/+0, ZERO SameBoy-pass drops**); must-fix blockers **78→58**. 36 pins; mooneye 91/91 ON+OFF at every commit; gbtr OFF 221/0 byte-identical. Defaults NOT flipped.
 
 Code commits (`phase-b-s7`): `2cc7fb8` (stage 2) → `a1763f3` (stage 3) → stage 4 (this entry). Docs: `b-readsync-dualtrace-2026-07-02.md`, `c-palette-rederive-2026-07-02.md`, `c-engineif-remeasure-2026-07-02.md`.

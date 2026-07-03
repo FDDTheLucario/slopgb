@@ -34,6 +34,9 @@ if [ -x "$TESTER" ] && grep -q 'SBMODE ly=%d cfl=%d dc=%d vis=%d fp=' "$DIR/Core
    && grep -q SBWSCX "$DIR/Core/memory.c" 2>/dev/null \
    && grep -q SBWLCDC "$DIR/Core/memory.c" 2>/dev/null \
    && grep -q SBSTOP "$DIR/Core/sm83_cpu.c" 2>/dev/null \
+   && grep -q 'SBWAKE.*fp=' "$DIR/Core/sm83_cpu.c" 2>/dev/null \
+   && grep -q 'SBDISP.*fp=' "$DIR/Core/sm83_cpu.c" 2>/dev/null \
+   && grep -q SBWHDMA "$DIR/Core/memory.c" 2>/dev/null \
    && grep -q SBSPD "$DIR/Core/timing.c" 2>/dev/null; then
   echo "tester already built + patched: $TESTER"; exit 0
 fi
@@ -299,6 +302,75 @@ if "SBDISP" not in cpu:
     }""")
     open(d+"/Core/sm83_cpu.c","w").write(cpu)
     print("patched sm83_cpu.c")
+
+# #11bf — upgrade SBWAKE/SBDISP with the absolute `fp=` clock (the #11ay axis):
+# SBWAKE prints at the halt-loop iq sample (nonzero iq = the wake decision
+# instant); SBDISP at the vector-PC latch. Keyed on the fp-less old format so a
+# pre-#11bf tree is re-patched in place.
+cpu=open(d+"/Core/sm83_cpu.c").read()
+if 'SBWAKE ly=%d cfl=%d dc=%d iq=%02x stat=%02x\\n' in cpu:
+    cpu=cpu.replace(
+'"SBWAKE ly=%d cfl=%d dc=%d iq=%02x stat=%02x\\n",\n            gb->current_line, gb->cycles_for_line, gb->display_cycles, interrupt_queue,\n            gb->io_registers[GB_IO_STAT]&0x7f); }',
+'"SBWAKE ly=%d cfl=%d dc=%d iq=%02x stat=%02x jh=%d fp=%lld\\n",\n            gb->current_line, gb->cycles_for_line, gb->display_cycles, interrupt_queue,\n            gb->io_registers[GB_IO_STAT]&0x7f, gb->just_halted, (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }')
+    open(d+"/Core/sm83_cpu.c","w").write(cpu)
+    print("patched sm83_cpu.c (SBWAKE fp)")
+# #11bf item 2a — SBWHDMA: FF51-FF55 writes + the HDMA run's block boundaries,
+# all with the absolute `fp=` clock (the hdma_late_* write-instant vs
+# hblank-transfer-trigger race + the gdma_cycles S6 commit position).
+mem=open(d+"/Core/memory.c").read()
+if "SBWHDMA" not in mem:
+    mem=mem.replace(
+"""            case GB_IO_HDMA5:
+                if (!gb->cgb_mode) return;
+                gb->hdma_steps_left = (value & 0x7F) + 1;""",
+"""            case GB_IO_HDMA5:
+                if (!gb->cgb_mode) return;
+                { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+                  if(trc) fprintf(stderr,"SBWHDMA w55 ly=%d cfl=%d dc=%d val=%02x src=%04x dst=%04x fp=%lld\\n",
+                    gb->current_line, gb->cycles_for_line, gb->display_cycles, value,
+                    gb->hdma_current_src, gb->hdma_current_dest,
+                    (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }
+                gb->hdma_steps_left = (value & 0x7F) + 1;""")
+    for reg,name in (("GB_IO_HDMA1","w51"),("GB_IO_HDMA2","w52"),("GB_IO_HDMA3","w53"),("GB_IO_HDMA4","w54")):
+        mem=mem.replace(
+"""            case %s:
+                if (gb->cgb_mode) {""" % reg,
+"""            case %s:
+                { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+                  if(trc) fprintf(stderr,"SBWHDMA %s ly=%%d cfl=%%d dc=%%d val=%%02x fp=%%lld\\n",
+                    gb->current_line, gb->cycles_for_line, gb->display_cycles, value,
+                    (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }
+                if (gb->cgb_mode) {""" % (reg, name))
+    mem=mem.replace(
+"""    gb->addr_for_hdma_conflict = 0xFFFF;
+    uint16_t vram_base = gb->cgb_vram_bank? 0x2000 : 0;
+    gb->hdma_in_progress = true;""",
+"""    gb->addr_for_hdma_conflict = 0xFFFF;
+    uint16_t vram_base = gb->cgb_vram_bank? 0x2000 : 0;
+    { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+      if(trc) fprintf(stderr,"SBWHDMA run ly=%d cfl=%d dc=%d src=%04x dst=%04x steps=%d fp=%lld\\n",
+        gb->current_line, gb->cycles_for_line, gb->display_cycles,
+        gb->hdma_current_src, gb->hdma_current_dest, gb->hdma_steps_left,
+        (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }
+    gb->hdma_in_progress = true;""")
+    mem=mem.replace(
+"""    gb->hdma_in_progress = false; // TODO: timing? (affects VRAM reads)""",
+"""    { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+      if(trc) fprintf(stderr,"SBWHDMA end ly=%d cfl=%d dc=%d src=%04x dst=%04x steps=%d fp=%lld\\n",
+        gb->current_line, gb->cycles_for_line, gb->display_cycles,
+        gb->hdma_current_src, gb->hdma_current_dest, gb->hdma_steps_left,
+        (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }
+    gb->hdma_in_progress = false; // TODO: timing? (affects VRAM reads)""")
+    open(d+"/Core/memory.c","w").write(mem)
+    print("patched memory.c (SBWHDMA)")
+
+cpu=open(d+"/Core/sm83_cpu.c").read()
+if 'SBDISP ly=%d cfl=%d dc=%d bit=%d stat=%02x mfi=%d\\n' in cpu:
+    cpu=cpu.replace(
+'"SBDISP ly=%d cfl=%d dc=%d bit=%d stat=%02x mfi=%d\\n",\n                gb->current_line, gb->cycles_for_line, gb->display_cycles, interrupt_bit,\n                gb->io_registers[GB_IO_STAT]&0x7f, (int8_t)gb->mode_for_interrupt); }',
+'"SBDISP ly=%d cfl=%d dc=%d bit=%d stat=%02x mfi=%d fp=%lld\\n",\n                gb->current_line, gb->cycles_for_line, gb->display_cycles, interrupt_bit,\n                gb->io_registers[GB_IO_STAT]&0x7f, (int8_t)gb->mode_for_interrupt, (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }')
+    open(d+"/Core/sm83_cpu.c","w").write(cpu)
+    print("patched sm83_cpu.c (SBDISP fp)")
 PY
 
 cd "$DIR" && make tester -j"$(nproc)"
