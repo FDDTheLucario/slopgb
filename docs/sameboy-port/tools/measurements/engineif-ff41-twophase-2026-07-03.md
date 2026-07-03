@@ -84,11 +84,17 @@ lcd_offset offset1 scx1 count legs (first-poll mode), and the late_wy trio
   the #11ar +2 peek applied at the visible mode-3 entry (slopgb dot 84);
   `m2int_m2stat_ds_1/_2` straddle at dots 80/82 (want 2/3, SCX-independent).
   +2 blockers, 0 drops; the #11ar readpos pin extended.
-- 47-blocker list: **28 remain (−19)** — lycEnable 5/5, m2enable 2/2,
+- Mechanism 4 (late addition): the DS m0-flip bit6-drop dip — the
+  immediate-view analogue of the SS fast-forward (`Ppu::ff41_ds_drop`): a
+  DS FF41 commit dropping the LYC enable within one M of the mode-3→0
+  flip forces the sub-dot dip so the mode-0 rise re-edges
+  (`lycdisable_ff41_ds_1` want 2; the `_2` sibling drops post-flip,
+  seamless). +1 blocker, 0 drops.
+- 47-blocker list: **27 remain (−20)** — lycEnable 5/5, m2enable 2/2,
   ly0 2/4 (DS legs), miscmstatirq 2/3, plus the gdma pair, the late_wy trio
   and the lcd_offset scx1 pair via the wake cascade (m0enable's 2 blockers
   remain).
-- Full-CGB two-bin: 373 → **355** flag-on = +26 fixed / −8 new, the 8 all
+- Full-CGB two-bin: 373 → **354** flag-on = +27 fixed / −8 new, the 8 all
   classify-FLOOR (SameBoy fails them too) → ZERO SameBoy-pass drops. DMG
   two-bin: 154 → 154 (all levers CGB-gated). The base-373 list was rebuilt
   from a stashed base build (not preserved from #11bf); two apparent
