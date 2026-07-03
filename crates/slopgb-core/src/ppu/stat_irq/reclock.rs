@@ -326,8 +326,29 @@ impl Ppu {
             } else {
                 0
             };
-            if w > 0 && self.stat_if_squash >= 3 - w {
+            // #11bh group C — the dispatch-ack squash (per-source windows, see
+            // the `ack_squash_ppu` field doc): a rise of the just-acked STAT
+            // bit inside the window merges into the dispatch; past it, it
+            // survives and re-sets IF (the retrigger `_1` legs).
+            let w_ack = if self.ack_squash_ppu_mask & IF_STAT != 0 {
+                if m0_rise {
+                    u8::from(self.ds)
+                } else if m2_rise {
+                    0
+                } else if self.ds {
+                    0
+                } else {
+                    2
+                }
+            } else {
+                0
+            };
+            let ack_consumed = w_ack > 0 && self.ack_squash_ppu >= 3 - w_ack;
+            if (w > 0 && self.stat_if_squash >= 3 - w) || ack_consumed {
                 self.stat_if_squash = 0;
+                if ack_consumed {
+                    self.ack_squash_ppu = 0;
+                }
                 if super::s5dbg_on() && self.line < 154 {
                     eprintln!(
                         "SLOPGB dispatch ly={} dot={} mfi={} lycln={} (ifw squashed)",
@@ -781,6 +802,15 @@ impl Ppu {
     /// Tier-2 caller only → production byte-identical OFF.
     pub(crate) fn arm_ff0f_if_squash(&mut self) {
         self.stat_if_squash = 2;
+    }
+
+    /// #11bh group C — arm the dispatch-ack squash window for the acked IF
+    /// bit (see the `ack_squash_ppu` field doc + the consumption sites in
+    /// [`Self::stat_update_tick`] and the vblank raise). Called by the
+    /// interconnect's `ack` on the tier2 path only.
+    pub(crate) fn arm_ack_squash(&mut self, bit: u8) {
+        self.ack_squash_ppu_mask = 1 << bit;
+        self.ack_squash_ppu = 2;
     }
 
     /// SameBoy `ly_for_comparison` (`display.c`) — the *delayed* LY value the

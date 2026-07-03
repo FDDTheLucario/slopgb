@@ -280,6 +280,18 @@ pub struct Ppu {
     /// level-re-raise — strict edge). Armed to 2 at the deferred FF0F write,
     /// decremented per engine dot, one-shot on consumption. Tier-2 only.
     stat_if_squash: u8,
+    /// #11bh group C — the deferred-path dispatch-ack squash, the PPU-side
+    /// replacement for the interconnect's whole-dot bit-0/1 `ack_squash_dots`
+    /// (zeroed under tier2). A rise of the acked bit landing within the
+    /// per-SOURCE window after the ack is merged into the dispatch (SameBoy:
+    /// the rise fp at/before the SBACK fp was already in the sampled IF);
+    /// past it, it survives and re-sets IF (the six `late_*_retrigger` rows).
+    /// Windows in dots (SS, DS), dual-traced 2026-07-03: mode-0 (0, 1) ·
+    /// mode-2 pulse (0, 0) · LYC / mode-1 / vblank-IF (2, 0). Armed to 2 at
+    /// `ack`, decremented per dot, consumed as `ctr >= 3 − W`. `mask` names
+    /// the acked bit. Tier-2 only (never armed flag-off).
+    ack_squash_ppu_mask: u8,
+    ack_squash_ppu: u8,
     scy: u8,
     scx: u8,
     /// LY as read through FF44 (153-quirk aware).
@@ -864,6 +876,8 @@ impl Ppu {
             eng_mfi_prev: 0,
             ff41_ds_drop: None,
             stat_if_squash: 0,
+            ack_squash_ppu_mask: 0,
+            ack_squash_ppu: 0,
             scy: 0,
             scx: 0,
             ly: 0,
@@ -1003,6 +1017,8 @@ impl Ppu {
             self.eng_stat_pending = None;
             self.ff41_ds_drop = None;
             self.stat_if_squash = 0;
+            self.ack_squash_ppu = 0;
+            self.ack_squash_ppu_mask = 0;
             return std::mem::take(&mut self.pending_if);
         }
         if self.lyc_if_delay > 0 {
@@ -1042,6 +1058,10 @@ impl Ppu {
             // Production path: the gambatte-derived per-source event engine.
             self.stat_events_tick();
         }
+        // #11bh group C — age the dispatch-ack squash window (armed only on
+        // the tier2 path; a saturating decrement of an always-0 counter is
+        // byte-identical flag-off).
+        self.ack_squash_ppu = self.ack_squash_ppu.saturating_sub(1);
         std::mem::take(&mut self.pending_if)
     }
 
@@ -1318,7 +1338,21 @@ impl Ppu {
         if self.line == 144 && self.dot == 4 {
             // VBlank interrupt: 4 dots after LY becomes 144, together with
             // the visible mode 1 (TCAGBD; `vblank_stat_intr-GS`).
-            self.pending_if |= IF_VBLANK;
+            // #11bh group C — a vblank-vector ack 1-2 dots earlier (SS)
+            // merges this raise into the dispatch it interrupted
+            // (`lycint_vblankirq_late_retrigger_2` want 0: ack 144:2, raise
+            // 144:4 consumed; the `_ds_1` ack at 144:3 DELIVERS — DS window
+            // 0). Never armed flag-off → production byte-identical.
+            let w = if self.ack_squash_ppu_mask & IF_VBLANK != 0 && !self.ds {
+                2
+            } else {
+                0
+            };
+            if w > 0 && self.ack_squash_ppu >= 3 - w {
+                self.ack_squash_ppu = 0;
+            } else {
+                self.pending_if |= IF_VBLANK;
+            }
         }
     }
 

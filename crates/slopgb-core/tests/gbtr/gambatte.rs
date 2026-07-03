@@ -3052,6 +3052,94 @@ fn tier2_m1_lycdisable_boundary_passes() {
     }
 }
 
+/// S5 #11bh group C — the dispatch-ack squash reclock: under tier2 the
+/// whole-dot bit-0/1 `ack_squash_dots = 2` window is replaced by the PPU-side
+/// per-SOURCE windows (`Ppu::ack_squash_ppu`, dots (SS, DS): mode-0 (0, 1) ·
+/// mode-2 pulse (0, 0) · LYC / mode-1 / vblank-IF (2, 0) — all dual-traced
+/// SBACK/SBIF fp vs SLOPGB vec/dispatch). SameBoy's ack is the bare IF clear
+/// at the flushed pending−2 instant; a rise past the window survives and
+/// re-sets IF (the retrigger `_1` legs), a rise inside it merges into the
+/// dispatch (the `_2` legs).
+#[test]
+fn tier2_ack_squash_reclock_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_ack_squash",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        // The six #11bh group-C blockers: rise past the ack window survives.
+        (
+            "gambatte/irq_precedence/late_m0irq_retrigger_ds_1_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        (
+            "gambatte/irq_precedence/late_m0irq_retrigger_scx1_1_dmg08_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        (
+            "gambatte/m2int_m2irq/m2int_m2irq_late_retrigger_1_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+        (
+            "gambatte/lyc153int_m2irq/lyc153int_m2irq_late_retrigger_1_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+        (
+            "gambatte/m1/lycint143_m1irq_late_retrigger_ds_1_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/m1/lycint_vblankirq_late_retrigger_ds_1_cgb04c_out1.gbc",
+            "1",
+        ),
+        // Bonus lifts (the DS twins the whole-dot squash also ate).
+        (
+            "gambatte/ly0/lycint152_lyc0irq_late_retrigger_ds_1_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        (
+            "gambatte/m2int_m2irq/m2int_m2irq_late_retrigger_ds_1_cgb04c_out2.gbc",
+            "2",
+        ),
+        // GUARDs — a rise inside the per-source window stays consumed.
+        (
+            "gambatte/irq_precedence/late_m0irq_retrigger_scx1_ds_2_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        (
+            "gambatte/ly0/lycint152_lyc0irq_late_retrigger_2_dmg08_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        (
+            "gambatte/m1/lycint143_m1irq_late_retrigger_2_dmg08_cgb04c_out1.gbc",
+            "1",
+        ),
+        (
+            "gambatte/m1/lycint_vblankirq_late_retrigger_2_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        // GUARDs — a rise folded at/before the ack is cleared by it.
+        (
+            "gambatte/irq_precedence/late_m0irq_retrigger_ds_2_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        (
+            "gambatte/m2int_m2irq/m2int_m2irq_late_retrigger_2_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 // Session-local S5 measurement aid (see the module's doc); `#[ignore]`'d so it
 // never runs in the gate.
 #[path = "gambatte_flagon_probe.rs"]

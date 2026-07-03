@@ -1063,7 +1063,24 @@ impl Bus for Interconnect {
                 // dots stay OUT of reach — see the field docs.
                 self.ack_squash_mask = 1 << bit;
                 self.ack_squash_ticks = 0;
-                self.ack_squash_dots = 2;
+                // #11bh group C — the deferred path takes NO post-ack squash
+                // for the LCD bits: SameBoy's ack is the bare IF clear at the
+                // flushed pending−2 instant (sm83_cpu.c, the SBACK-traced
+                // point) with no source re-sync window, so a STAT/VBlank rise
+                // 1-2 dots past the ack is DELIVERED (the six retrigger rows:
+                // `late_m0irq_retrigger_ds_1` rise ack+2 · `_scx1_1` ack+1 ·
+                // `m2int_m2irq_late_retrigger_1` next-line pulse ack+2 ·
+                // `lyc153int_m2irq_late_retrigger_1` line-0 pulse ack+2 ·
+                // `lycint143_m1irq_late_retrigger_ds_1` m1 re-rise ack+1 ·
+                // `lycint_vblankirq_late_retrigger_ds_1` vblank IF ack+1..2 —
+                // all dual-traced; the 2-dot squash ate exactly that fold). A
+                // rise at/before the ack still loses: it folded during the
+                // dispatch advance and the ack clears it (the `_2` siblings).
+                // Production keeps gambatte's cc+4-frame 2-dot window.
+                self.ack_squash_dots = if self.tier2_reclock { 0 } else { 2 };
+                if self.tier2_reclock {
+                    self.ppu.arm_ack_squash(bit);
+                }
             }
             2 | 3 => {
                 // updateTimaIrq(cc + 2 + isCgb()) / updateSerial(cc + 3 +
