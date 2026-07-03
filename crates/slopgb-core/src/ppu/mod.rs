@@ -223,6 +223,49 @@ pub struct Ppu {
     lcdc: u8,
     /// STAT bits 3-6 (interrupt source enables).
     stat_en: u8,
+    /// #11bg — the S5 engine's FF41 enable view (SameBoy reads the two-phase
+    /// `io_registers[GB_IO_STAT]` itself in `GB_STAT_update`). Mirrors
+    /// `stat_en` everywhere except the staged window after a CGB FF41 write
+    /// on the tier2/LE path: SameBoy's `GB_CONFLICT_STAT_CGB[_DOUBLE]`
+    /// (sm83_cpu.c:168-188) commits the write in TWO phases — at T0 every bit
+    /// lands EXCEPT the LYC enable (bit 6, single speed) / the HBlank enable
+    /// (bit 3, double speed), which hold their OLD value one more T-cycle.
+    /// The failing lycEnable want-pairs straddle exactly that lag (a disable
+    /// whose phase-1 window covers the `ly_for_comparison` latch dot still
+    /// fires the LYC edge — `ff41_disable_2` dual-traced: SBWRITE val=40
+    /// phase-1 then the ly6 STAT_IRQ then val=00). Production/flag-off never
+    /// reads this (only `stat_update_tick` consumes it) → byte-identical OFF.
+    eng_stat: u8,
+    /// Pending [`Self::eng_stat`] transition from a CGB single-speed FF41
+    /// write: `(phase1, final, pre_write_line_high, mfi_at_t0,
+    /// ticks_since_write)`. Schedule (engine ticks after the deferred commit
+    /// dot D; SameBoy T0 ≈ D+2, dual-traced):
+    /// * tick D+1: the OLD view;
+    /// * tick D+2 (T0): `phase1` = mode bits NEW, **bit6 OLD**
+    ///   (`GB_CONFLICT_STAT_CGB` holds the LYC enable one T past the mode
+    ///   bits). A rise here is a mode-source enable reaching its effective
+    ///   instant and fires; a fall is forced silently. The tick's
+    ///   `mode_for_interrupt` is saved as `mfi_at_t0`;
+    /// * tick D+3: externals still edge against phase-1 (`ff41_disable_2`'s
+    ///   ly6 dot-4 LYC latch rise against the armed old bit6);
+    /// * tick D+4: the final value, EVALUATED against `mfi_at_t0` (the
+    ///   T0+1T-instant mode — the sub-dot dip `lyc1_m2irq_late_lycdisable_1`
+    ///   pins: the line falls before the next line's OAM carryover, so the
+    ///   ly2 mode-2 rise re-fires). A fall forces the line low silently; a
+    ///   rise (the bit6-late enable) fires iff the line was LOW at the write
+    ///   (the m1→LYC handoff `lyc153_late_enable_m1disable_3` stays silent —
+    ///   hardware is hazard-free where SameBoy's intersection phase dips,
+    ///   E0-vs-E2 measured), delivered through the CGB `lyc_if_delay` (the
+    ///   FF41 twin of the FF45-write delay — `lyc_ff41_trigger_delay`).
+    /// * At the line's mode-3→0 flip a stage past T0 FAST-FORWARDS to final
+    ///   (the flip sits later than T0+1T in SameBoy's frame), with a forced
+    ///   dip when the final value cannot hold the line
+    ///   (`m0enable/lycdisable_ff41_scx*`: the dying LYC hold and the mode-0
+    ///   rise are separated on hardware, collapsed by slopgb's early flip).
+    eng_stat_pending: Option<(u8, u8, bool, u8, u8)>,
+    /// Previous engine tick's `mode_for_interrupt` (m0-flip detection for
+    /// the fast-forward above). Tier-2/LE only.
+    eng_mfi_prev: u8,
     scy: u8,
     scx: u8,
     /// LY as read through FF44 (153-quirk aware).
@@ -802,6 +845,9 @@ impl Ppu {
             frame_count: 0,
             lcdc: 0,
             stat_en: 0,
+            eng_stat: 0,
+            eng_stat_pending: None,
+            eng_mfi_prev: 0,
             scy: 0,
             scx: 0,
             ly: 0,
@@ -935,6 +981,10 @@ impl Ppu {
             // fields are unread), so this changes nothing in production.
             self.stat_update = crate::stat_update::StatUpdate::new();
             self.lyc_interrupt_line = false;
+            // #11bg — a staged FF41 engine view must not survive an LCD-off
+            // gap and apply at a stale tick after re-enable.
+            self.eng_stat = self.stat_en;
+            self.eng_stat_pending = None;
             return std::mem::take(&mut self.pending_if);
         }
         if self.lyc_if_delay > 0 {

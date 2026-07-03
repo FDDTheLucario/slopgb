@@ -46,6 +46,23 @@ impl Ppu {
         {
             return if self.dot >= 2 { 2 } else { 0 };
         }
+        // #11bg — the DS mode-2 ISR read at the mode2→3 ENTRY boundary: the
+        // same +2 carried-read frame as the line-start arm above, applied to
+        // the visible mode-3 entry (slopgb 84; the carried read's SameBoy
+        // instant is dot+2). `m2int_m2stat_ds_1/_2` straddle it at dots
+        // 80/82 (want 2/3); the entry is SCX-independent (`m2int_scx4_
+        // m2stat_ds` — asm-pinned).
+        if self.read_carried
+            && self.stat_rise_oam
+            && self.model.is_cgb()
+            && self.ds
+            && self.line >= 1
+            && self.line < 144
+            && m == 2
+            && (80..84).contains(&self.dot)
+        {
+            return if self.dot + 2 >= 84 { 3 } else { 2 };
+        }
         let Some(exit_adj) = self.vis_exit_hd(m) else {
             return m;
         };
@@ -321,7 +338,11 @@ impl Ppu {
         // SS reads add the carried LCD phase (the per-leave m3stat read-frame
         // surplus over the machine epoch; 0 for never-switched ROMs); DS
         // keeps 0 — the DS post-leave segments are epoch-only (measured).
-        if self.line >= 1
+        // #11bg — the DS branch includes LINE 0: the gdma_cycles post-stall
+        // polls land at ly0 (the corrected DS line-153 wake moved them −2
+        // onto the flip straddle: `_1` dot252 want3 / `_2` dot254 want0 —
+        // exactly the emergent exit 508 hd). SS keeps `line >= 1`.
+        if (self.line >= 1 || self.ds)
             && self.line < 144
             && !self.render.win_active
             && !self.render.win_aborted
@@ -399,10 +420,13 @@ impl Ppu {
             // shadow `trigdot` runs 2 dots behind SameBoy's detection — the
             // late-WY `_1` (extend) vs `_2`/`_3` (miss) split sits exactly on
             // this 2-dot phase (`_1` trigdot = wxmatch + 1, `_2` = wxmatch + 5).
-            // #11ag DS: the slack is +4 (the DS wy2-copy lands the shadow trigdot
-            // 2 dots later relative to the WX match — `late_wy_FFto2_ly2_ds` `_1`
-            // trigdot 101 / `_2` 103 vs wxmatch 97, so 4 separates them).
-            && self.wy_trig_sb_dot <= self.render.wx_match_dot + 2 + 2 * u16::from(self.ds)
+            // #11ag DS: the slack was +4 (`_1` trigdot 101 / `_2` 103 vs
+            // wxmatch 97). #11bg: the corrected DS line-153 lyfc table moves
+            // the LYC=153 wake — and with it every ISR-timed WY write in this
+            // family — 2 dots earlier (`_1` 99 / `_2` 101), so the DS slack
+            // re-derives to the SS value (+2); the same shift is what fixes
+            // the `late_wy_ds` blocker trio outright.
+            && self.wy_trig_sb_dot <= self.render.wx_match_dot + 2
     }
 
     pub(super) fn vis_mode(&self) -> u8 {
@@ -891,7 +915,20 @@ impl Ppu {
         if lyc_high && old & STAT_SRC_LYC != 0 {
             return false;
         }
-        let lyc_fire = lyc_high && data & STAT_SRC_LYC != 0;
+        // #11bg — unshifted CGB single-speed Tier-2: the engine's two-phase
+        // FF41 view (`eng_stat_pending`) owns the LYC-source write fires (the
+        // bit6-late continuity fire at commit+4 + external edges against the
+        // armed old bit6), replacing the write-instant lyc arms below. The
+        // shifted (lcd-offset) frames keep the calibrated arms — their write
+        // law positions are one poll quantum ambiguous (#11bd).
+        let eng_lyc = self.leading_edge_reads && !self.ds && self.lcd_shift_dots == 0;
+        // The engine owns the LINE-BOUNDARY region (where the staged view +
+        // the lyfc schedule decide); a MID-LINE enable keeps gambatte's
+        // write-instant fire — the `lyc_ff41_trigger_delay` pair collapses to
+        // one deferred commit dot (both legs dot 77, measured), so only the
+        // calibrated write-instant arm can satisfy it.
+        let eng_boundary = eng_lyc && !(16..448).contains(&ld);
+        let lyc_fire = !eng_boundary && lyc_high && data & STAT_SRC_LYC != 0;
         // Port Stage C / S5 (mech 3 — the dispatch-class write-trigger, the LYC
         // sub-family). The lcd-offset shifts `late_ff41_enable_lcdoffset1_1`'s
         // LYC-source enable into the line-start carryover (dots 0-3 of lines
@@ -903,6 +940,7 @@ impl Ppu {
         // carryover; `cmp_cgb` (pinning the new-line compare for the calibrated
         // m1statwirq/lyc_ff41_enable_3 rows) is untouched. Byte-identical OFF.
         let lyc_carryover = self.leading_edge_reads
+            && !eng_lyc
             && (1..=143).contains(&ll)
             && ld < 4
             && old & STAT_SRC_LYC == 0
@@ -933,6 +971,7 @@ impl Ppu {
             self.lyc_interrupt_line || (self.lyc == 153 && (6..12).contains(&ld))
         };
         let lyc_wrap_153 = self.leading_edge_reads
+            && !eng_lyc
             && ll == 153
             && latch_at_law
             && !lyc_high
@@ -1008,7 +1047,13 @@ impl Ppu {
             } else if old & STAT_SRC_HBLANK != 0 {
                 false
             } else {
-                data & STAT_SRC_HBLANK != 0 || lyc_fire
+                // #11bg -- under the two-phase engine view (unshifted CGB
+                // SS Tier-2) the fresh-m0-enable fire moves to the ENGINE
+                // (the phase-1 rise at its effective instant, where the
+                // line-end OAM carryover in `update_mode_for_interrupt`
+                // provides the hardware cutoff); the write-instant fire
+                // would double up or fire enables the carryover blocks.
+                (data & STAT_SRC_HBLANK != 0 && !eng_lyc) || lyc_fire
             }
         } else {
             // Vblank region. Mode 1's last M-cycle (line 0 dots 0-3)

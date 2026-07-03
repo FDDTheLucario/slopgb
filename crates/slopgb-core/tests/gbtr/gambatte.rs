@@ -1051,6 +1051,23 @@ fn tier2_m2int_m3stat_ds_readpos_passes() {
     run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
     check_hex_screen(gb.frame(), "2", true)
         .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out2 (tier2 flag-on): {e}"));
+    // #11bg — the same carried-read frame at the mode2→3 ENTRY (slopgb dot
+    // 84): the DS mode-2 ISR pair straddles it at dots 80/82 (+2 carry →
+    // 82/84, want 2/3); the entry is SCX-independent (`m2int_scx4_m2stat_ds`).
+    for (rel, expect) in [
+        ("gambatte/m2int_m2stat/m2int_m2stat_ds_1_cgb04c_out2.gbc", "2"),
+        ("gambatte/m2int_m2stat/m2int_m2stat_ds_2_cgb04c_out3.gbc", "3"),
+        (
+            "gambatte/m2int_m2stat/m2int_scx4_m2stat_ds_2_cgb04c_out3.gbc",
+            "3",
+        ),
+    ] {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
 }
 
 /// Half-dot reclock Part A (#11bb) — the tier2 SCX write-strobe render-frame
@@ -2715,6 +2732,170 @@ fn tier2_window_late_wx_uncatch_passes() {
         check_hex_screen(gb.frame(), expect, model.is_cgb()).unwrap_or_else(|e| {
             panic!("{rel} [{model:?}] expected cgb04c out{expect} (tier2 flag-on): {e}")
         });
+    }
+}
+
+/// S5 #11bg — the CGB single-speed FF41 two-phase ENGINE write
+/// (`GB_CONFLICT_STAT_CGB` seen from the hardware side): the S5 engine's FF41
+/// view (`Ppu::eng_stat`) transitions old → phase-1 (mode bits new, LYC enable
+/// bit OLD) at commit+2 → final at commit+4, with hazard-free applications
+/// (falls silent, the final rise continuity-gated + delivered through the CGB
+/// `lyc_if_delay`) and externals edging against the armed phase-1
+/// (`ff41_disable_2`\u{2019}s ly6 dot-4 LYC latch rise). The write-instant
+/// gambatte LYC arms stay for MID-LINE writes (the `lyc_ff41_trigger_delay`
+/// pair collapses to one deferred commit dot — only the calibrated arm splits
+/// it); the engine owns the line-boundary region. All rows dual-traced
+/// (SBWRITE two-phase prints + slopgb wff41/dispatch). CGB SS unshifted
+/// Tier-2/LE only; production byte-identical OFF.
+#[test]
+fn tier2_ff41_twophase_engine_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_ff41_twophase",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        // bit6-disable stays armed through the lyfc latch rise (fires).
+        (
+            "gambatte/lycEnable/ff41_disable_2_dmg08_out0_cgb04c_out2.gbc",
+            "2",
+        ),
+        (
+            "gambatte/lycEnable/lyc0_ff41_disable_2_dmg08_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        // bit6-enable lands one T late and misses the closed match window.
+        (
+            "gambatte/lycEnable/late_ff41_enable_2_dmg08_out2_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/lycEnable/lyc153_late_ff41_enable_2_dmg08_outE2_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        // GUARD — the one-M-earlier sibling still catches the held latch.
+        (
+            "gambatte/lycEnable/lyc153_late_ff41_enable_1_dmg08_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        // The m1→LYC handoff is hazard-free on hardware (SameBoy\u{2019}s
+        // intersection form dips and reads E2 — hardware-truth row).
+        (
+            "gambatte/lycEnable/lyc153_late_enable_m1disable_3_dmg08_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        // The final value evaluates at the T0+1T-instant mode: the sub-dot
+        // dip re-fires the next line\u{2019}s OAM carryover rise.
+        (
+            "gambatte/m2enable/lyc1_m2irq_late_lycdisable_1_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+        // m0-flip fast-forward: the dying LYC hold dips before the mode-0
+        // rise re-edges.
+        (
+            "gambatte/m0enable/lycdisable_ff41_scx1_1_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+        // GUARD — a stage still within a dot of the flip keeps the OLD view
+        // (the dying enable catches its own rise).
+        (
+            "gambatte/m0enable/disable_2_dmg08_out0_cgb04c_out2.gbc",
+            "2",
+        ),
+        // GUARD — the mid-line write-instant arm splits the trigger-delay
+        // pair the deferred frame collapses.
+        (
+            "gambatte/lycEnable/lyc_ff41_trigger_delay_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/lycEnable/lyc_ff41_trigger_delay_2_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// S5 #11bg — the CGB double-speed line-153 `ly_for_comparison` table (the
+/// documented SS placeholder replaced): 153 latches at dot 4 (not 6), holds
+/// live through dot 7, the [8,12) window is the `-1` GAP (held for a latched
+/// match, no fresh LYC-write re-latch — `lyc153_late_ff45_enable_ds_6`), 0
+/// from dot 12 — the unique whole-dot solution to the four
+/// `lyc153_m1disable_ds` / `lyc0_m1disable_ds` dip-vs-seamless handoff
+/// constraints, with the DS engine view immediate (the two-phase window is
+/// sub-dot at 2 dots/M). The dot-4 wake cascades through every
+/// LYC=153-anchored DS test: the gdma_cycles read frame, the lcd_offset
+/// count-loop first poll, and the late_wy write instants (whose un-matching
+/// write now beats the hardware `wy_check` — the trigger-line WY un-latch).
+#[test]
+fn tier2_ds_line153_lyfc_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_ds_line153",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        (
+            "gambatte/lycEnable/lyc153_m1disable_ds_2_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        // GUARDs — the dip legs still fire.
+        (
+            "gambatte/lycEnable/lyc153_m1disable_ds_1_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        (
+            "gambatte/lycEnable/lyc0_m1disable_ds_1_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        // The [8,12) gap takes no fresh LYC-write re-latch.
+        (
+            "gambatte/lycEnable/lyc153_late_ff45_enable_ds_6_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        (
+            "gambatte/ly0/lycint152_lyc153irq_ds_2_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        (
+            "gambatte/ly0/lycint152_lyc153irq_ifw_ds_2_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        // The dot-4 wake cascades.
+        (
+            "gambatte/dma/gdma_cycles_short_scx5_ds_1_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/lcd_offset/offset1_lyc99int_m0irq_count_scx1_ds_1_cgb04c_out90.gbc",
+            "90",
+        ),
+        ("gambatte/window/late_wy_ds_2_cgb04c_out3.gbc", "3"),
+        // The trigger-line WY un-latch (write beats the check at commit
+        // dot <= 4). Its `_2` sibling (keeps the trigger, out3) is
+        // frame-phase-sensitive at this pin's sample point — covered by the
+        // two-bin instead.
+        (
+            "gambatte/window/arg/late_wy_1toFF_ds_1_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
     }
 }
 

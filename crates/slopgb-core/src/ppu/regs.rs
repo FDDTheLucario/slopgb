@@ -310,6 +310,38 @@ impl Ppu {
                         self.pending_if |= IF_STAT;
                     }
                     self.stat_en = data;
+                    // #11bg — the CGB FF41 two-phase write for the S5 engine
+                    // view (see `eng_stat_pending` for the full schedule):
+                    // phase-1 (mode bits new, bit6 old) applies at engine
+                    // tick commit+2 (= SameBoy T0), the final value at
+                    // commit+4, externals in between edging against the
+                    // armed phase-1.
+                    if self.leading_edge_reads
+                        && self.model.is_cgb()
+                        && !self.ds
+                        && self.lcd_shift_dots == 0
+                    {
+                        // Single speed: the two-phase engine view (see the
+                        // `eng_stat_pending` field doc for the schedule).
+                        // phase-1 = mode bits NEW, LYC enable (bit 6) OLD —
+                        // SameBoy `GB_CONFLICT_STAT_CGB` holds bit 6 one T
+                        // past the mode bits.
+                        //
+                        // Double speed: 1 T = half a dot — the whole window is
+                        // sub-dot, and the deferred DS write commit (+1 dot)
+                        // already lands at the hardware instant: the engine
+                        // sees the new value from the next tick (immediate),
+                        // with the write-after-tick order giving the
+                        // display-step-first collision semantics the
+                        // `lyc0_m1disable_ds` / `lyc153_m1disable_ds` pairs
+                        // pin (together with the DS line-153 lyfc table).
+                        let phase1 = (old & STAT_SRC_LYC) | (data & !STAT_SRC_LYC);
+                        self.eng_stat_pending =
+                            Some((phase1, data, self.stat_update.line(), 0, 0));
+                    } else {
+                        self.eng_stat = data;
+                        self.eng_stat_pending = None;
+                    }
                     self.stage_stat_copies();
                     self.refresh_cmp(false);
                     if self.leading_edge_reads && fire {
@@ -339,6 +371,8 @@ impl Ppu {
                     }
                 } else {
                     self.stat_en = data;
+                    self.eng_stat = data;
+                    self.eng_stat_pending = None;
                     self.flush_stat_copies();
                     self.legacy_level_edge();
                 }
@@ -347,6 +381,7 @@ impl Ppu {
             0xFF43 => self.scx = value,
             0xFF44 => {} // LY is read-only.
             0xFF4A => {
+                let old_wy = self.wy;
                 self.wy = value;
                 // #11bd item 4 — the boundary-WY cross-line latch (see
                 // `Ppu::wy_xline_trig`): a tail/head write matching the
@@ -360,6 +395,40 @@ impl Ppu {
                     && self.eff.lcdc & LCDC_WIN_ENABLE != 0
                 {
                     self.wy_xline_trig = true;
+                }
+                // #11bg — the DS trigger-line WY un-latch: SameBoy's per-line
+                // `wy_check` for line N runs ~dot 2-5, but slopgb's
+                // production `wy_latch` pre-latches at the PREVIOUS line's
+                // dot-450/454 samples — so an un-matching WY write landing
+                // before the hardware check (commit dot <= 4 of the fresh
+                // trigger line) must release the latch the check would never
+                // have acquired (`late_wy_1toFF_ds_1` renders bare on
+                // hardware AND SameBoy; its `_2` sibling commits at dot 5
+                // and keeps the trigger). Tier-2 + CGB + DS only.
+                if self.tier2_reclock
+                    && self.model.is_cgb()
+                    && self.ds
+                    && self.enabled
+                    && self.wy_latch
+                    && !self.render.win_active
+                    && self.line < 144
+                    && self.dot <= 4
+                    && old_wy == self.ly
+                    && value != self.ly
+                {
+                    self.wy_latch = false;
+                    // The #11af shadow latched the same pre-check compare
+                    // (wy2 still old at line start) — release it with the
+                    // render latch so the read law's extend arm follows, and
+                    // commit the wy2 copy immediately (the write BEAT the
+                    // hardware check: every later compare this line reads the
+                    // new value; the stale copy re-latched the shadow at the
+                    // next dot, measured).
+                    if self.wy_trig_sb && self.wy_trig_sb_line == self.ly {
+                        self.wy_trig_sb = false;
+                    }
+                    self.wy2 = value;
+                    self.wy2_delay = 0;
                 }
                 // The live window-trigger comparison uses a delayed WY
                 // copy — see `wy2`.
