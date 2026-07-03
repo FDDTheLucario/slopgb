@@ -3207,6 +3207,60 @@ fn tier2_window_line_flip_consumers_passes() {
     }
 }
 
+/// S5 #11bh slices (c)+(d) — the glitch-line same-dot SCX hunt re-open + the
+/// DS line-start carryover-enable level hold. (c): the LCD-enable glitch
+/// line's CGB fine-scroll sample deadline is `83 + scx_init` INCLUSIVE — a
+/// same-dot FF43 commit lands after that dot's render tick but hardware's
+/// live comparator still honors it; re-opening the hunt lets it cycle to the
+/// new SCX&7 (asm_enable ROW 5). (d): a DS dots-0-1 fresh LYC enable whose
+/// old value armed HBlank joins a line still latched HIGH from the previous
+/// line's mode-0 (SameBoy's natural 1→0 lands at dot 2) — no edge; the
+/// engine level is seeded high so the next tick stays silent
+/// (asm_m1_misc Rows 5-6). The (e) WY-deadline rows are frame-phase-marginal
+/// and deliberately unpinned (two-bin covered).
+#[test]
+fn tier2_glitch_hunt_carryover_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_glitch_hunt_carryover",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        (
+            "gambatte/enable_display/ly0_late_scx7_m3stat_scx1_1_dmg08_cgb04c_out87.gbc",
+            "87",
+        ),
+        // GUARD — one M later misses the re-open window.
+        (
+            "gambatte/enable_display/ly0_late_scx7_m3stat_scx1_2_dmg08_cgb04c_out84.gbc",
+            "84",
+        ),
+        (
+            "gambatte/miscmstatirq/lycstatwirq_trigger_m0_late_ly44_lyc44_08_40_ds_2_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        // GUARDs — the dot-2 write lands after the natural drop and fires;
+        // the dot-4 write finds both masks low.
+        (
+            "gambatte/miscmstatirq/lycstatwirq_trigger_m0_late_ly44_lyc44_08_40_ds_3_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        (
+            "gambatte/miscmstatirq/lycstatwirq_trigger_m0_late_ly44_lyc44_08_40_ds_4_cgb04c_outE0.gbc",
+            "E0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 // Session-local S5 measurement aid (see the module's doc); `#[ignore]`'d so it
 // never runs in the gate.
 #[path = "gambatte_flagon_probe.rs"]

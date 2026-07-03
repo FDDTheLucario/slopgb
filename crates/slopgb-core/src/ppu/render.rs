@@ -131,9 +131,17 @@ pub(super) struct Render {
     /// schedule is fixed (SameBoy render_pixel_if_possible: `(position &
     /// 7) == (SCX & 7) -> position = -8`, with the -9 -> -16 wrap when
     /// the match was missed; gambatte scx_during_m3 sweeps).
-    hunt_idx: u8,
+    /// (`pub(super)` with `hunt_done` for the #11bh glitch re-open, `regs.rs`.)
+    pub(super) hunt_idx: u8,
     /// The comparator matched: the fine-scroll discard is locked in.
-    hunt_done: bool,
+    pub(super) hunt_done: bool,
+    /// #11bh — the machine dot of the fine-scroll comparator match (0 =
+    /// none yet). The glitch-line same-dot SCX-write hunt re-open keys on
+    /// it (`regs.rs` FF43): a write landing on the match dot committed
+    /// AFTER that dot's render tick, where hardware's comparator still
+    /// sees the new value. Tier-2 only consumer; written unconditionally
+    /// (inert flag-off).
+    pub(super) hunt_match_dot: u16,
     /// Pipeline frozen for this many dots (sprite fetches).
     stall: u16,
     /// While a sprite-fetch stall runs, the BG fetcher keeps stepping in
@@ -263,6 +271,7 @@ impl Render {
             pos_dot: 0,
             hunt_idx: 0,
             hunt_done: false,
+            hunt_match_dot: 0,
             stall: 0,
             fetch_run: 0,
             bg_lo: 0,
@@ -331,6 +340,7 @@ impl Ppu {
         r.pos_dot = 0;
         r.hunt_idx = 0;
         r.hunt_done = false;
+        r.hunt_match_dot = 0;
         r.stall = 0;
         r.fetch_run = 0;
         r.bg_count = 0;
@@ -412,6 +422,7 @@ impl Ppu {
                 if self.render.hunt_idx == self.eff.scx & 7 {
                     self.render.hunt_done = true;
                     self.render.discard = pos;
+                    self.render.hunt_match_dot = self.dot;
                     // TEMP #11bb hunt tracer (`SLOPGB_S5DBG`; byte-identical
                     // unset): pin the fine-scroll match dot + discard against
                     // SameBoy's SCX-write straddle (`late_scx4`).

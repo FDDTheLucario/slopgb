@@ -226,6 +226,30 @@ impl Ppu {
             }
             self.commit_eff(addr, value);
         }
+        // #11bh — the glitch-line same-dot SCX-write hunt RE-OPEN (asm_enable
+        // ROW 5): the LCD-enable glitch line's fine-scroll hunt closes at
+        // machine dot `83 + scx_init` on CGB, but a same-dot FF43 commit lands
+        // AFTER that dot's render tick — hardware's comparator (SameBoy
+        // `render_pixel_if_possible`, live per-dot compare) still honors the
+        // new value: the CGB sample deadline is `D(scx_init) = 83 + scx_init`
+        // inclusive (`ly0_late_scx7_m3stat_scx1_1` writes SCX=7 at dot 84 with
+        // scx_init=1 — hunt matched dot 84 — and must read mode 3 at 252, exit
+        // E(7)=257; `scx0_2` writes dot 84 with match dot 83, stays missed;
+        // `scx1_2`/`scx3_2` write past the window). Re-opening lets the
+        // comparator cycle to the new SCX&7 (re-match dot ~90, discard 7) —
+        // the exit arithmetic is already right when honored. Glitch + Tier-2
+        // + CGB only; production and non-glitch lines (the late_scx4
+        // write-strobe calibration) untouched.
+        if addr == 0xFF43
+            && self.tier2_reclock
+            && self.model.is_cgb()
+            && self.glitch_line
+            && self.render.hunt_done
+            && self.render.hunt_match_dot == self.dot
+            && value & 7 != self.render.hunt_idx
+        {
+            self.render.hunt_done = false;
+        }
         match addr {
             0x8000..=0x9FFF => {
                 // #11bd item 5: record the attempt for the DS line-end VRAM
@@ -308,6 +332,26 @@ impl Ppu {
                     };
                     if fire {
                         self.pending_if |= IF_STAT;
+                    }
+                    // #11bh slice (d) — seed the held-high engine level for
+                    // the suppressed DS line-start carryover enable (the
+                    // `lyc_carryover` DS dots-0-1 suppression in
+                    // `stat_write_trigger_cgb`): hardware's line is still
+                    // HIGH from the previous line's mode-0 there, so the
+                    // post-write level (fresh bit6 + the held carryover
+                    // match) continues it — without the seed the next dot's
+                    // engine tick re-fires the same edge as a spurious 0→1.
+                    if self.leading_edge_reads
+                        && self.model.is_cgb()
+                        && self.ds
+                        && self.dot < 2
+                        && old & STAT_SRC_HBLANK != 0
+                        && old & STAT_SRC_LYC == 0
+                        && data & STAT_SRC_LYC != 0
+                        && (1..=143).contains(&self.line)
+                        && self.lyc == self.line - 1
+                    {
+                        self.stat_update.force_level(true);
                     }
                     self.stat_en = data;
                     // #11bg — the CGB FF41 two-phase write for the S5 engine
@@ -422,7 +466,18 @@ impl Ppu {
                     && self.wy_latch
                     && !self.render.win_active
                     && self.line < 144
-                    && self.dot <= 4
+                    // #11bh — the un-latch deadline is PER-TRIGGER-LINE
+                    // (asm_window_gdma Rows 1-2, all 8 DS cells dual-traced):
+                    // lines >= 1 run the lyfc-path check at the mode-2 entry
+                    // (~internal dot 3-4) → a commit <= 2 beats it
+                    // (`late_wy_1toFF_ds_1` dot 2 bare / `_ds_2` dot 4 keeps
+                    // the latch, extended); line 0's check sits ~4 dots later
+                    // (lyfc becomes 0 only at dot 3) → commit <= 6
+                    // (`late_wy_ds_1` dot 6 bare on HARDWARE — SameBoy
+                    // mis-times the line-0 check and fails that row itself /
+                    // `_ds_2` dot 8 keeps). The old single `<= 4` split both
+                    // brackets wrong.
+                    && self.dot <= if self.ly == 0 { 6 } else { 2 }
                     && old_wy == self.ly
                     && value != self.ly
                 {

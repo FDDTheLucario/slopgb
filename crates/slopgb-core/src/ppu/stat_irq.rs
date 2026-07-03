@@ -976,7 +976,17 @@ impl Ppu {
             && ld < 4
             && old & STAT_SRC_LYC == 0
             && data & STAT_SRC_LYC != 0
-            && self.lyc == ll - 1;
+            && self.lyc == ll - 1
+            // #11bh slice (d) — a DS line-start (dots 0-1) fresh bit6 enable
+            // whose OLD value armed HBlank joins a line still latched HIGH
+            // from the previous line's mode-0 (SameBoy holds the level until
+            // the ~dot-2 mfi re-eval; SBLEVEL: the natural 1→0 lands at dot 2
+            // and only THEN does a fresh enable edge —
+            // `lycstatwirq_trigger_m0_late_ly44_lyc44_08_40_ds_2` commit
+            // dot 0 silent E0 / `_ds_3` commit dot 2 fires E2). The engine
+            // level is seeded high by the write path (`regs.rs`) so the
+            // next tick raises no spurious edge either.
+            && !(self.ds && old & STAT_SRC_HBLANK != 0 && ld < 2);
         // Port Stage C / S5 (mech 3 — the dispatch-class write-trigger, the ly153
         // LYC-WRAP sub-family). The lcd-offset shifts
         // `lyc153_late_ff41_enable_lcdoffset1_1`'s LYC enable into the ly153 LY=0
