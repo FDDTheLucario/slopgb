@@ -72,19 +72,31 @@ OFF 100/100, ON 0/100 (the flip-blocker set).
   mixer (render-only). On CGB the draw-side mixer read takes `render_lcdc` (DMG
   keeps its eager one-dot-ahead mixer calibration). +1 (m3_lcdc_obj_en, CGB).
 
-## The 11 residuals (classified, not shipped)
+## The 11 residuals (classified, not shipped) — all HALF-DOT precision
 
-| leg(s) | count | class | why not a render-defer slice |
+Deep-traced each one (`gambatte_pixel_probe` frame dump + `wpop`/`palwr`/`winmatch`/
+`windisc` tracers). Every residual needs SUB-DOT (half-dot) render/write
+precision that a whole-dot flag-gated defer cannot provide — exactly the
+`HALFDOT-BUILD-PLAN` Part A-render / A-D class. Traced findings:
+
+| leg(s) | count | traced root | why no whole-dot slice fits |
 |---|---|---|---|
-| m3_wx_5/6_change, m3_window_timing, m3_window_timing_wx_0 (Dmg), late_wx_ds (Cgb) | 5 | **WX window-trigger / length** | the WX-match dot IS the window activation = the mode-3 length; a swept FF4B defer that fixed the render broke `tier2_window_late_wx_uncatch` (the un-catch law rides the same eager commit) — lands with the render-length port |
-| m3_bgp_change, m3_bgp_change_sprites, m3_obp0_change (Dmg) | 3 | **palette OR-quirk render-atomic** | the DMG "old\|new for one dot" torture pattern (rapid per-M-cycle BGP writes); NO defer amount fixes both dmgpalette AND the mealybug boundary (swept PALD 1-5), NOR does shifting the strobe OR-quirk position (swept ORQ 0-2 — only breaks dmgpalette) — needs the finer per-write blend model |
-| m3_lcdc_win_en_change_multiple (Dmg+Cgb) | 2 | **window-enable / length** | bit5 toggled multiple times mid-mode-3 = the window-length model |
-| scy_during_m3_spx08_2 (Dmg) | 1 | **sprite-penalty grid** | the sprite prefill stall shifts the SCY refetch sample by a penalty-grid dot, not a uniform frame offset |
+| m3_bgp_change, m3_bgp_change_sprites, m3_obp0_change, **m3_window_timing, m3_window_timing_wx_0** (Dmg) | 5 | **palette pop-grid half-dot** | m3_window_timing is a BGP test, NOT a window test — traced: its window render (activation dot, discard, pops, colour indices) is BYTE-IDENTICAL flag-on/off; only `eff.bgp` at the pop dot differs (OFF `ff` / ON `00` at the col-9 pop). The render's pixel-pop samples the palette at a half-dot SameBoy commits at; dmgpalette wants whole-dot defer 3, the mealybug legs want 2 (swept PALD) — but both write at the SAME phase (cycmod4=3, dhalf=0 aligned in SS), so the difference is the render POP grid being sub-dot, not the write. m3_bgp adds the rapid per-M-cycle "old\|new for one dot" torture (swept ORQ 0-2 doesn't fix it). |
+| m3_wx_5/6_change (Dmg), late_wx_ds (Cgb) | 3 | **WX reactivation / length** | the mid-mode-3 WX rewrite's reactivation inserts zero-pixels (`output_pixel(0)`+`advance_lx` = +1 dot each), so the reactivation COUNT = the mode-3 length; a swept FF4B defer that fixed the render dropped `tier2_window_late_wx_uncatch` (the un-catch law rides the same eager commit). |
+| m3_lcdc_win_en_change_multiple (Dmg+Cgb) | 2 | **window-enable / length** | bit5 toggled multiple times mid-mode-3 = the window-length model (activation/abort). |
+| scy_during_m3_spx08_2 (Dmg) | 1 | **sprite-penalty grid** | the sprite prefill stall shifts the SCY refetch sample by a penalty-grid dot, not a uniform frame offset. |
 
-The WX + window-enable + sprite residuals are the **render-length / sprite-grid
-atomic** class the goal expected to land WITH the length port; the palette
-OR-quirk needs the finer one-dot-blend render model (measured atomic, not a
-defer/position lever).
+**The decisive finding (m3_window_timing):** the window render is byte-identical
+flag-on/off — the ONLY difference is the palette value the pop grid samples, off
+by one whole-dot because the deferred clock commits the palette at a whole-dot
+while SameBoy commits it at the write's exact half-dot AND the render pops at a
+half-dot. dmgpalette (defer 3) and these (defer 2) can't both be satisfied at
+whole-dot resolution — the render pop grid must go half-dot (Part A-render). This
+is the SAME lever the WX/window-enable/sprite legs need. **89/100 is the clean
+whole-dot flag-gated ceiling; the last 11 land with the coordinated half-dot
+render reclock (the C3 flip's own work — `HALFDOT-BUILD-PLAN.md` Part A-render +
+A/D + C), which breaks byte-identical OFF and re-derives the read laws, so it is
+NOT a flag-gated slice.**
 
 ## Gates (every commit)
 
