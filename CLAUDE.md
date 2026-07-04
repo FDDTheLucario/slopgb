@@ -43,7 +43,7 @@ Parallel cargo runs: set `CARGO_TARGET_DIR=target/<name>` to dodge lock contenti
 
 Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 3,5,8,13,21,34. Model from filename suffix (see ARCHITECTURE.md §Mooneye). Timeout 120 emulated s.
 
-## State (2026-07-04, #11bo)
+## State (2026-07-04, #11bp)
 
 - **Baseline (all-green, defaults NOT flipped):** mooneye 439/439 rom×model;
   gbtr v7.0 battery green vs ratcheted baselines (full run 237/0); lib 660
@@ -58,11 +58,36 @@ Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 
   #11bm — the DMG window + hblank-IF + poweron + co-instant arms are all
   `!is_cgb()`-scoped, CGB two-bin 291/291 zero-drift; **#11bo added the mode-3
   RENDER reclock, also 291/291 zero-drift — its CGB slices (LCDC BG-addr, SCX-DS,
-  BG-priority) touch only the pixel view, never an OCR verdict**); 59 tier2 pins;
+  BG-priority) touch only the pixel view, never an OCR verdict; **#11bp added the
+  DMG palette half-dot commit pop-grid, DMG-only + render-only, CGB 291/291
+  zero-drift**); 60 tier2 pins;
   mooneye 91/91 flag-on (`SLOPGB_MOONEYE_RECLOCK=1`) AND flag-off AND with defaults
   temp-flipped.
+- **#11bp — the DMG palette HALF-DOT commit pop-grid SHIPPED (+5 pixel legs,
+  pixel two-bin 89→94).** The 5 palette-timing legs #11bo parked as "half-dot
+  precision" (`m3_bgp_change`/`_sprites`, `m3_obp0_change`, `m3_window_timing`/
+  `_wx_0` — the last two are BGP tests, not window ones: their window render is
+  byte-identical flag-on/off, only `eff.bgp` at the pop differs) land WITHOUT any
+  half-dot FSM — the sub-dot info is recovered by a whole-dot PARITY term.
+  Dual-traced (slopgb pop/strobe/stage tracers vs SameBoy SBPOP/SBWPAL): SameBoy
+  commits the palette at the write M-cycle's exact fp and pops per dot; single
+  speed is whole-dot aligned so the commit sits on an EVEN (CPU-M-cycle) dot,
+  visible +2 from the pop; an ODD leading edge rounds the M-cycle boundary up one
+  dot → +3. All the mealybug BGP/OBP writes land EVEN leading edges (want +2 —
+  the flip's mech1 defer=3 rendered every boundary one column late), the gambatte
+  dmgpalette writes ODD (want +3, held). Fix: `dots = 2 + (leading_edge & 1)` for
+  FF47-49 (`cycle.rs::write_deferred`), `tier2`+`!is_cgb`+`!glitch` scoped. DMG
+  only (CGB palettes are FF68-6B, no FF47-49 render path / no BGP OR-quirk — keeps
+  the plain +3); render-only (colour selection, no length/read-law coupling):
+  pixel OFF 100/100 byte-identical, CGB two-bin 291/291 IDENTICAL SET, mooneye
+  91/91 ON+OFF, gbtr OFF 0 failed. Pin
+  `tier2_dmg_m3_render_palette_halfdot_passes` (`f45ab02`). The 6 remaining pixel
+  residuals (WX `m3_wx_5/6`+`late_wx_ds`, window-enable `win_en_multiple` ×2,
+  sprite-grid `scy_spx08_2`) need the genuine WX/window-length/sprite half-dot
+  render FSM (the C3 flip's own work), not a parity term. Map:
+  `measurements/dmg-m3-render-reclock-2026-07-04.md` (#11bp update).
 - **#11bo — the tier2 MODE-3 PIXEL-RENDER reclock SHIPPED: 89/100 render-atomic
-  legs in 5 flag-gated slices; 11 residuals classified.** The read-frame vein
+  legs in 5 flag-gated slices; 11 residuals classified (→94/6 after #11bp).** The read-frame vein
   (#11bk/bl/bm) drained to reach the DIFFERENT subsystem — the pixel fetcher, not
   the read laws. Root cause: the tier2 deferred write path advances the render to
   the write's leading edge (cc+0) BEFORE the eager `commit_eff`, landing a
@@ -177,8 +202,8 @@ Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 
   timer/serial-completion + dispatch-count + render-length + co-temporal)** +
   the engine 43 residual (dispatch-atomic; #11bk shipped 16 + #11bl shipped 20
   of the 79 — the `hblank_int` `if_c`/`if_d` read-frame legs and the 20
-  `poweron_*` boot-read rows) + the 100 render-atomic pixel blockers + golden
-  regen.
+  `poweron_*` boot-read rows) + the pixel blockers (#11bo shipped 89 + #11bp +5 =
+  94/100; 6 render-length/WX/sprite-grid residual) + golden regen.
   Execute
   `docs/sameboy-port/C3-FLIP-CHECKLIST.md` top-to-bottom when §3b clears; do
   NOT flip defaults in any pushed commit. Maps:

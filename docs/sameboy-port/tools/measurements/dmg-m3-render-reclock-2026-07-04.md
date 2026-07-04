@@ -2,10 +2,51 @@
 
 Ported the RENDER half of §3b — the 100 SameBoy-PASS mode-3 pixel-reference
 flip-blockers (`pixel-classify-2026-07-03.md`) — as flag-gated, production
-byte-identical render slices. **89 of 100 legs shipped in five mechanisms;
-11 residuals classified.** This is the different-subsystem lever the read-frame
-vein (#11bk/bl/bm) was drained to reach: the pixel fetcher, not the FF41/FF0F
-read laws.
+byte-identical render slices. **94 of 100 legs shipped in six mechanisms;
+6 residuals classified.** (89 shipped #11bo whole-dot; +5 #11bp the DMG palette
+half-dot commit pop-grid — the update below.) This is the different-subsystem
+lever the read-frame vein (#11bk/bl/bm) was drained to reach: the pixel
+fetcher, not the FF41/FF0F read laws.
+
+## #11bp update (2026-07-04) — the DMG palette half-dot pop-grid SHIPPED (+5)
+
+The 5 palette-timing legs #11bo classified as needing "half-dot precision"
+(`m3_bgp_change`, `m3_bgp_change_sprites`, `m3_obp0_change`, `m3_window_timing`,
+`m3_window_timing_wx_0`) SHIPPED without any actual half-dot FSM — the half-dot
+resolution is recovered by a **whole-dot parity term** on the commit defer.
+
+Dual-traced (slopgb OFF/ON pop+strobe+stage tracers vs SameBoy SBPOP/SBWPAL,
+`build_sameboy_tracers.sh` + a temporary `render_pixel_if_possible` pop tracer):
+- SameBoy commits the palette at the write M-cycle's exact fp and pops per dot;
+  for `m3_window_timing` ly0 the BGP=ff write lands fp=335479436 == the lcdx=3
+  pop's fp, so lcdx=3 reads the NEW value → boundary at column 3 (== slopgb OFF).
+- slopgb OFF (defer=2) reproduces that boundary; the flip's mech1 defer=3
+  rendered it one column late (lcdx=4) — EVERY mealybug BGP/OBP boundary shifted
+  +1 (m3_bgp_change all 6 transitions +1). `dmgpalette_during_m3` (defer=3) is
+  correct and MUST stay.
+- The discriminator: **the write's leading-edge dot parity.** All the mealybug
+  BGP/OBP writes land EVEN leading edges (m3_window_timing LE=104,
+  m3_bgp_change 80/96/108/168/180/240/252), the gambatte dmgpalette writes ODD
+  (LE=183). Single speed is whole-dot aligned so SameBoy's commit sits on an
+  EVEN (CPU-M-cycle) dot, visible +2 from the pop; an ODD leading edge means the
+  M-cycle boundary rounds up one dot → visible +3 (round_up_even(LE)+2). So
+  `dots = 2 + (leading_edge & 1)` (was fixed 3) — EVEN→+2 (mealybug), ODD→+3
+  (dmgpalette held).
+
+Mechanism (`interconnect/cycle.rs::write_deferred`, the FF47-49 dots calc):
+`2 + (self.ppu.scan_pos().1 & 1)`, gated tier2 + `!is_cgb` + `!glitch_active`.
+DMG only (CGB palettes are FF68-6B, no FF47-49 render path, no BGP OR-quirk —
+keeps the plain +3). Render-only (pure colour selection, no mode-3-length or
+FF41-read-law coupling). Gates: pixel two-bin ON 89→94 (+5 / 0 dropped), OFF
+100/100 byte-identical; CGB two-bin 291/291 IDENTICAL SET (0 new / 0 fixed);
+mooneye 91/91 ON+OFF; 60 tier2 pins; lib 660; clippy clean; gbtr OFF 0 failed.
+Pin `tier2_dmg_m3_render_palette_halfdot_passes` (phase-b-s7 `f45ab02`).
+
+The 6 remaining residuals (WX reactivation `m3_wx_5/6_change` + `late_wx_ds`,
+window-enable `m3_lcdc_win_en_change_multiple` ×2, sprite-penalty grid
+`scy_during_m3_spx08_2`) are NOT palette — they need the WX/window-length or
+sprite-penalty half-dot grid, a genuine half-dot render FSM (the C3 flip's own
+work), not a parity term.
 
 ## The bug (why the flip renders mid-mode-3 register changes at the wrong column)
 
@@ -81,7 +122,7 @@ precision that a whole-dot flag-gated defer cannot provide — exactly the
 
 | leg(s) | count | traced root | why no whole-dot slice fits |
 |---|---|---|---|
-| m3_bgp_change, m3_bgp_change_sprites, m3_obp0_change, **m3_window_timing, m3_window_timing_wx_0** (Dmg) | 5 | **palette pop-grid half-dot** | m3_window_timing is a BGP test, NOT a window test — traced: its window render (activation dot, discard, pops, colour indices) is BYTE-IDENTICAL flag-on/off; only `eff.bgp` at the pop dot differs (OFF `ff` / ON `00` at the col-9 pop). The render's pixel-pop samples the palette at a half-dot SameBoy commits at; dmgpalette wants whole-dot defer 3, the mealybug legs want 2 (swept PALD) — but both write at the SAME phase (cycmod4=3, dhalf=0 aligned in SS), so the difference is the render POP grid being sub-dot, not the write. m3_bgp adds the rapid per-M-cycle "old\|new for one dot" torture (swept ORQ 0-2 doesn't fix it). |
+| ~~m3_bgp_change, m3_bgp_change_sprites, m3_obp0_change, m3_window_timing, m3_window_timing_wx_0~~ **SHIPPED #11bp** | 5 | **palette pop-grid half-dot → parity term** | m3_window_timing is a BGP test, NOT a window test — traced: its window render (activation dot, discard, pops, colour indices) is BYTE-IDENTICAL flag-on/off; only `eff.bgp` at the pop dot differs (OFF `ff` / ON `00` at the col-9 pop). The render's pixel-pop samples the palette at a half-dot SameBoy commits at; dmgpalette wants whole-dot defer 3, the mealybug legs want 2 (swept PALD) — but both write at the SAME phase (cycmod4=3, dhalf=0 aligned in SS), so the difference is the render POP grid being sub-dot, not the write. m3_bgp adds the rapid per-M-cycle "old\|new for one dot" torture (swept ORQ 0-2 doesn't fix it). |
 | m3_wx_5/6_change (Dmg), late_wx_ds (Cgb) | 3 | **WX reactivation / length** | the mid-mode-3 WX rewrite's reactivation inserts zero-pixels (`output_pixel(0)`+`advance_lx` = +1 dot each), so the reactivation COUNT = the mode-3 length; a swept FF4B defer that fixed the render dropped `tier2_window_late_wx_uncatch` (the un-catch law rides the same eager commit). |
 | m3_lcdc_win_en_change_multiple (Dmg+Cgb) | 2 | **window-enable / length** | bit5 toggled multiple times mid-mode-3 = the window-length model (activation/abort). |
 | scy_during_m3_spx08_2 (Dmg) | 1 | **sprite-penalty grid** | the sprite prefill stall shifts the SCY refetch sample by a penalty-grid dot, not a uniform frame offset. |
@@ -90,13 +131,16 @@ precision that a whole-dot flag-gated defer cannot provide — exactly the
 flag-on/off — the ONLY difference is the palette value the pop grid samples, off
 by one whole-dot because the deferred clock commits the palette at a whole-dot
 while SameBoy commits it at the write's exact half-dot AND the render pops at a
-half-dot. dmgpalette (defer 3) and these (defer 2) can't both be satisfied at
-whole-dot resolution — the render pop grid must go half-dot (Part A-render). This
-is the SAME lever the WX/window-enable/sprite legs need. **89/100 is the clean
-whole-dot flag-gated ceiling; the last 11 land with the coordinated half-dot
-render reclock (the C3 flip's own work — `HALFDOT-BUILD-PLAN.md` Part A-render +
-A/D + C), which breaks byte-identical OFF and re-derives the read laws, so it is
-NOT a flag-gated slice.**
+half-dot. dmgpalette (defer 3) and these (defer 2) can't both be satisfied at a FIXED
+whole-dot defer. **RESOLVED #11bp (see the update at the top): the sub-dot
+information is the write's leading-edge dot PARITY — `dots = 2 + (LE & 1)`
+recovers which side of the even CPU-M-cycle grid the commit sits on, so
+dmgpalette (odd LE, +3) and mealybug (even LE, +2) both land without any half-dot
+FSM.** The other 6 residuals (WX/window-enable/sprite grid) genuinely need the
+coordinated half-dot render reclock (the C3 flip's own work —
+`HALFDOT-BUILD-PLAN.md` Part A-render + A/D + C), which breaks byte-identical OFF
+and re-derives the read laws, so they are NOT a flag-gated slice. **94/100 is the
+new flag-gated ceiling.**
 
 ## Gates (every commit)
 
@@ -109,8 +153,8 @@ AND flag-off; `tier2_boot_div_passes` + all tier2 pins (55 → 59); lib 660; cli
 
 ## §3b after this class
 
-The RENDER half of §3b is ported (89/100). §3b residual = the 11 render-length /
-OR-quirk / sprite-grid legs above + the 43-row engine dispatch-atomic core (the
-C3 flip's IRQ-dispatch retime). The render legs that stayed are the same
-length-coupled class the engine core lands with — one dispatch-retime session from
-the flip.
+The RENDER half of §3b is ported (94/100 after #11bp). §3b residual = the 6
+render-length / WX / window-enable / sprite-grid legs above + the 43-row engine
+dispatch-atomic core (the C3 flip's IRQ-dispatch retime). The render legs that
+stayed are the same length-coupled class the engine core lands with — one
+dispatch-retime session from the flip.
