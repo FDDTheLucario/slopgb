@@ -220,8 +220,10 @@ impl Interconnect {
             let (line, dot) = self.ppu.scan_pos();
             if line < 144 {
                 let (wa, ve, lrd, vh, vm, ns) = self.ppu.dbg_read_state();
+                let (wab, wpa, wpad, wxm, scx7d, wxscx) = self.ppu.dbg_abort_state();
+                let (wend, wren, wxwd) = self.ppu.dbg_win_dots();
                 eprintln!(
-                    "SLOPGB ff41 ly={line} dot={dot} clk={} mode={} pend={pend_dbg} wa={wa} ve={ve} lrd={lrd} vh={vh} vm={vm} ns={ns} dh={} mclk={} dsa={}",
+                    "SLOPGB ff41 ly={line} dot={dot} clk={} mode={} pend={pend_dbg} wa={wa} ve={ve} lrd={lrd} vh={vh} vm={vm} ns={ns} wab={wab} wpa={wpa} wpad={wpad} wxm={wxm} scx7={scx7d} wxscx={wxscx} wend={wend} wren={wren} wxwd={wxwd} dh={} mclk={} dsa={}",
                     self.clock.now(),
                     v & 3,
                     self.ppu.sub_dot(),

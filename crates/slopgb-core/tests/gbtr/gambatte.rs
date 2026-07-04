@@ -1984,6 +1984,124 @@ fn tier2_window_late_wy_extend_passes() {
     }
 }
 
+/// Port Stage C2 #11bj — the DMG WINDOW-LAW PORT. The CGB `vis_mode_read`
+/// window arms (`model.is_cgb()`-gated length/shadow/pre-draw-abort/reenable/
+/// un-catch/boundary laws) are re-derived on the DMG frame: the DMG deferred
+/// FF41 read shares the SS −4 polled offset, but the DMG `wy2` lag (+2 vs CGB
+/// +6) and the DMG-specific per-WX/SCX ship deadlines make the model DIVERGE
+/// from CGB (the `_2` legs that render bare on CGB extend on DMG). 56 of the
+/// 62 DMG window flip-blockers fixed (dual-traced 2026-07-03,
+/// `measurements/dmg-window-port-2026-07-03.md`); the 6 residual are the same
+/// atomic classes CGB parks (wxA6/wxA5 carried-read sub-dot wall · scx5
+/// non-linear deadline · mid-frame-SCX-rewrite `late_scx` · the render-trigger
+/// late_enable/reenable-scx5 extend). Each new arm is `!is_cgb()`-scoped →
+/// CGB two-bin byte-identical (291/0-new); production byte-identical OFF.
+#[test]
+fn tier2_dmg_window_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr("tier2_dmg_window", "game-boy-test-roms collection not present");
+        return;
+    };
+    // (rel, expected DMG out). Representatives of each shipped DMG arm + guard
+    // rows (the parked-atomic residual stays at its native verdict).
+    let targets = [
+        // Arm D1 — the DMG triggering-window length law (259 + SCX&7 exit).
+        ("gambatte/window/m2int_wx00_m3stat_2_dmg08_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/window/m2int_wx07_scx3_m3stat_2_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/m2int_wxA6_m3stat_2_dmg08_out0_cgb04c_out3.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/m2int_wxA6_spxA7_m3stat_2_dmg08_out0_cgb04c_out3.gbc",
+            "0",
+        ),
+        // Arm D2 — the DMG mid-line late-WY shadow extend (263 + SCX&7).
+        (
+            "gambatte/window/arg/late_wy_FFto2_ly2_2_dmg08_out3_cgb04c_out0.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto2_ly2_wx0f_2_dmg08_out3_cgb04c_out0.gbc",
+            "3",
+        ),
+        // Arm D6 — the DMG late-WY UN-trigger bare exit + the WY→FF release.
+        (
+            "gambatte/window/arg/late_wy_1toFF_2_dmg08_out0_cgb04c_out3.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/arg/late_wy_2toFF_2_dmg08_out0_cgb04c_out3.gbc",
+            "0",
+        ),
+        // GUARD — the WY→FF `_3` sibling flips FF a compare later: extends.
+        (
+            "gambatte/window/arg/late_wy_1toFF_3_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        // Arm D3 — the DMG pre-draw window-abort (bare 253 / extend 259).
+        (
+            "gambatte/window/late_disable_1_dmg08_out3_cgb04c_out0.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx03_wx0f_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_disable_late_scx03_wx0f_2_dmg08_out3_cgb04c_out0.gbc",
+            "3",
+        ),
+        // GUARD — the SCX-delayed pre-match clear kills a low-WX window (bare).
+        (
+            "gambatte/window/late_disable_scx3_0_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        // Arm D3-spr — a pre-draw abort with an object on the window line.
+        (
+            "gambatte/window/late_disable_spx10_wx0f_2_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        // Arm D5 — the DMG reenable-too-late bare exit (SCX-termed deadline).
+        ("gambatte/window/late_reenable_2_dmg08_cgb04c_out0.gbc", "0"),
+        // GUARD — the SCX2 reenable at the same dot still catches: extends.
+        (
+            "gambatte/window/late_reenable_scx2_2_dmg08_out3_cgb04c_out0.gbc",
+            "3",
+        ),
+        // Arm D-wx — the DMG WX-rewrite un-catch (scx ≥ 3 → bare).
+        (
+            "gambatte/window/late_wx_scx3_2_dmg08_out0_cgb04c_out3.gbc",
+            "0",
+        ),
+        // Arm D7 (boundary head-latch) — a WY head-write matching the finished
+        // line triggers the cross-line window (extends every later line).
+        (
+            "gambatte/window/arg/late_wy_10to0_ly1_2_dmg08_out3_cgb04c_out0.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto1_ly2_2_dmg08_out3_cgb04c_out0.gbc",
+            "3",
+        ),
+        // GUARD — the `_3` sibling commits past the head (dot 4): stays bare.
+        (
+            "gambatte/window/arg/late_wy_10to0_ly1_3_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Dmg);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, false)
+            .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 /// Port Stage C2 #11ag — the WINDOW family ported to DOUBLE-SPEED: the #11y/#11z
 /// length law AND the #11af shadow WY-trigger, with the DS exit/deadline
 /// recalibrated. The `vis_mode_read` length law (the `m2int_wx*_m3stat` shorten)

@@ -44,8 +44,9 @@ impl Ppu {
         // WY-trigger's activation deadline — *before* the `wy_ok`/`win_en`
         // gate, so a bare line the window never enters still pins the dot the
         // window *would* have activated. Tier2 + CGB only; never read OFF.
-        if win_match && self.render.wx_match_dot == 0 && self.tier2_reclock && self.model.is_cgb() {
+        if win_match && self.render.wx_match_dot == 0 && self.tier2_reclock {
             self.render.wx_match_dot = self.dot;
+            self.render.wx_match_scx = self.eff.scx & 7;
         }
         if win_match
             && !win_en_now
@@ -176,10 +177,11 @@ impl Ppu {
             // fetch (`win_mode` not yet set — `late_disable_early_*_1`, WX/WY
             // not yet matched). SameBoy renders the line BARE but DROPS the SCX
             // fine-scroll penalty (mattcurrie §WIN_EN) → mode-3 exit cfl257.
-            // Flags the CGB shadow bare-exit read law (`stat_irq.rs::
-            // vis_mode_read`). CGB-only (DMG uses `win_aborted`); `!win_mode`
-            // is the pre-draw discriminator regs.rs cannot see (private field).
-            if self.tier2_reclock && self.model.is_cgb() {
+            // Flags the shadow bare-exit read law (`stat_irq.rs::
+            // vis_mode_read`); `!win_mode` is the pre-draw discriminator
+            // regs.rs cannot see (private field). #11bj: recorded on DMG too
+            // (the in-draw path additionally sets DMG `win_aborted`).
+            if self.tier2_reclock {
                 self.render.win_predraw_abort = true;
                 self.render.win_predraw_abort_dot = self.dot;
             }

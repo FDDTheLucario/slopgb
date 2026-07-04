@@ -173,6 +173,126 @@ impl Ppu {
         {
             fold(&mut exit, 2 * (259 + scx7 + ds1));
         }
+        // Arm D1 (#11bj) — the DMG triggering-window exit family, the arm-1
+        // port. All 24 want-pair legs dual-traced 2026-07-03
+        // (`dmg-window-port-2026-07-03.md`): the deferred read samples +4 dots
+        // before SameBoy reads the same `ldh a,(FF41)` (slopgb dot D ↔ SameBoy
+        // cfl D+4 across the m2int family, same as CGB SS), and SameBoy's DMG
+        // window exits split by WX class:
+        //   wx <= 0xA5:  SBex = 263 + SCX&7 (the CGB length law verbatim —
+        //                slopgb's native effective exit already matches, only
+        //                the read frame differs) → exit 259 + SCX&7;
+        //   wx == 0xA6, no sprites: the off-screen window renders NOTHING on
+        //                DMG — SameBoy exits BARE (257 + SCX&7), while
+        //                slopgb's render still activates and over-extends
+        //                (`m2int_wxA6_*_m3stat` want-0 legs) → exit 253+SCX&7;
+        //   wx == 0xA6 + object at WX+1 (`spxA7`): the sprite fetch extends
+        //                mode 3 to SBex 263 → exit 259.
+        // First-window-line EXCLUDED for on-screen WX (trigger-line mode 3
+        // extends later, the #11y CGB rule holds on DMG: `late_wy_*_1`
+        // trigger-line reads at 260 stay 3) but INCLUDED for wx >= 0xA0
+        // (`m2int_wxA6_firstline` fits the same 253+SCX&7 — measured).
+        if !self.model.is_cgb()
+            && self.render.win_active
+            && self.line >= 1
+            && self.eff.wx <= 0xA6
+            && !self.render.win_aborted
+            && (self.wy2 != self.ly || self.eff.wx >= 0xA0)
+            && self.wy2 <= 143
+            && m == 3
+        {
+            if self.eff.wx < 0xA6 {
+                fold(&mut exit, 2 * (259 + scx7));
+            } else if self.render.n_sprites == 0 {
+                fold(&mut exit, 2 * (253 + scx7));
+            } else if self.render.sprites[..usize::from(self.render.n_sprites)]
+                .iter()
+                .any(|s| u16::from(s.x) == u16::from(self.eff.wx) + 1)
+            {
+                fold(&mut exit, 2 * 259);
+            }
+        }
+        // Arm D6 (#11bj) — the DMG late-WY UN-trigger bare exit, the arm-6
+        // port. SameBoy's continuous `wy_check` reads the IMMEDIATE WY: a
+        // WY→FF write landing before the line's compare window un-triggers
+        // the window (line renders BARE, SBex 257 + SCX&7) while slopgb's
+        // wy2-lagged render still draws it (`late_wy_1toFF_1/_2`,
+        // `late_wy_2toFF_1/_2`, `late_scx_late_wy_FFto4_ly4_wx20_3` — the
+        // `_3` keep-siblings latch `wy_trig_sb_raw` at dot 4 before the
+        // write commits, the measured discriminator). The polled read sits
+        // at +0 of SameBoy's exit; a carried STAT-ISR read at +4 → 253.
+        if !self.model.is_cgb()
+            && self.render.win_active
+            && !self.wy_trig_sb_raw
+            && self.line >= 1
+            && self.line < 144
+            && m == 3
+            && !self.glitch_line
+            && self.render.n_sprites == 0
+        {
+            let base = if self.read_carried { 253 } else { 257 };
+            fold(&mut exit, 2 * (base + scx7));
+        }
+        // Arm D3 (#11bj) — the DMG PRE-DRAW window-abort exit, the arm-3/4
+        // port. An LCDC.5 clear before the window's first fetch
+        // (`win_predraw_abort`, `!win_mode`) leaves the line's mode-3 length
+        // decided by WHERE the clear landed vs the window's WX-fetch ship
+        // deadline (`wx_match_dot − 3 + min(fetch_scx, 2)`), dual-traced
+        // 2026-07-03 across the 8 wx0f-12 legs + the 4 SCX legs:
+        //   clear before the ship deadline: the window ships NOTHING →
+        //     SameBoy renders BARE, the SCX penalty KEPT (unlike CGB arm-3
+        //     which drops it) → SBex `257 + SCX&7`; slopgb's whole-dot render
+        //     over-extends → force 0. `early_scx03_wx0f/10/11/12_1`+`wx12_2`
+        //     (clear 103, wx_match 108, scx3); `late_disable_scx2/3/5_0`
+        //     (clear 95, wx_match 97 — the fetch SCX pushes the deadline past
+        //     95 where scx0 catches it).
+        //   clear at/after the deadline: the first tile shipped and the full
+        //     mode-3 cost bakes in → SameBoy extends `263 + SCX&7`; slopgb's
+        //     render aborted to bare → hold 3. `late_disable_1`/`wx0f_1`
+        //     (clear 95, wx_match 97, scx0); `late_scx03_wx0f/10/11_2`.
+        // Fetch SCX (`wx_match_scx`), NOT the read-time SCX, sets BOTH the
+        // deadline and the exit fine-scroll (`late_scx_late_disable` rewrites
+        // SCX 0→4 mid-line AFTER the window fetched — read SCX 4 but the
+        // window's length used SCX 0). The −4 polled read frame folds into
+        // both exits: bare `253 + fetch_scx`, extend `259 + fetch_scx`. The
+        // `min(fetch_scx, 2)` deadline cap is the measured fetch-latency
+        // saturation (scx2/3/5 share the +2 deadline; scx0 the +0).
+        let fscx = i32::from(self.render.wx_match_scx);
+        let wxm = self.render.wx_match_dot;
+        let abd = self.render.win_predraw_abort_dot;
+        // Extend once the clear lands within 3 dots of the WX match (the
+        // first tile has shipped). EXCEPT a low-WX (near-left) window whose
+        // SCX fine-scroll pushes the fetch well past the match: there a clear
+        // BEFORE the match (`abd < wxm`) definitively kills it → bare
+        // (`late_disable_scx2/3/5_0`, wxm 97, clear 95, fetch SCX ≥ 1; the
+        // scx0 sibling `late_disable_1` fetches immediately at the match and
+        // still extends). The `wxm <= 100` bound is the near-left window
+        // where the fine-scroll delay dominates (WX ≳ 0x10 windows extend a
+        // pre-match clear regardless — `wx0f/10/11_2`, wxm ≥ 108).
+        let scx_kills_early = fscx >= 1 && wxm <= 100 && abd < wxm;
+        if !self.model.is_cgb()
+            && self.render.win_predraw_abort
+            && wxm != 0
+            && self.render.scx_write_dot == 0
+            && self.eff.lcdc & LCDC_WIN_ENABLE == 0
+            && self.line >= 1
+            && self.line < 144
+            && !self.render.win_active
+            && !self.glitch_line
+        {
+            let extend = abd + 3 >= wxm && !scx_kills_early;
+            if self.render.n_sprites == 0 {
+                fold(&mut exit, 2 * (if extend { 259 } else { 253 } + fscx));
+            } else if extend {
+                // Arm D3-spr — a pre-draw abort with an object on the window
+                // line (`late_disable_spx10_wx0f_2`, ns=1): the sprite fetch
+                // extends mode 3 past the bare exit → SBex 274 (`263 + 11`
+                // one-object penalty); the early-abort sprite sibling (`_1`)
+                // genuinely aborts (native bare, rebaselined). −4 read frame
+                // → 270.
+                fold(&mut exit, 2 * 270);
+            }
+        }
         // #11bf item 3c — a mid-line WX rewrite committing AT/BEFORE the WX
         // match dot un-catches the window on SameBoy (`late_wx_scx5_1`: the
         // FF4B:=FF write and the match both at dot 97 → SameBoy bare; `_2`
@@ -189,6 +309,26 @@ impl Ppu {
             && self.render.wx_write_dot <= self.render.wx_match_dot
             && self.render.win_active
             && self.model.is_cgb()
+            && self.render.n_sprites == 0
+            && !self.render.win_aborted
+            && m == 3
+        {
+            fold(&mut exit, 2 * (253 + scx7));
+        }
+        // Arm D-wx (#11bj) — the DMG WX-rewrite un-catch. Same mechanism as
+        // the CGB arm above, but the un-catch boundary sits LOWER on DMG:
+        // `scx&7 >= 3` un-catches (`late_wx_scx3_2`/`scx5_1`, write ≤ match →
+        // SameBoy bare), where CGB only un-catches at scx5 (the DMG fetch
+        // phase is 1 fine-scroll step ahead — the same ±1-dot re-derivation
+        // the #11ag DS port needed). scx0/2 still catch on DMG (`late_wx_2`
+        // want 3). Dual-traced 2026-07-03.
+        if !self.ds
+            && !self.model.is_cgb()
+            && scx7 >= 3
+            && self.render.wx_write_dot != 0
+            && self.render.wx_match_dot != 0
+            && self.render.wx_write_dot <= self.render.wx_match_dot
+            && self.render.win_active
             && self.render.n_sprites == 0
             && !self.render.win_aborted
             && m == 3
@@ -224,8 +364,16 @@ impl Ppu {
         // [`Self::win_extends_sb`] re-derives SameBoy's trigger decision.
         // Sprite-laden DS lines excluded (the shadow's bare exit carries no
         // sprite penalty).
-        if self.model.is_cgb()
-            && self.line < 144
+        //
+        // #11bj — DMG shares this arm verbatim: the mid-line late-WY family
+        // (`FFto2_ly2_2`/`_scx*`/`_wx0f_2`, `10to1_ly1_2`, `FFto0_ly0_2`)
+        // extends on DMG where CGB stays bare — the SAME `wx_match_dot + 2`
+        // deadline, the model-dependent `wy2` lag alone splitting the two
+        // (DMG shadow latches +2 dots after the WY write, CGB +6, so a write
+        // at wx_match−1 clears the DMG deadline but misses the CGB one).
+        // Dual-traced 2026-07-03: FFto2_ly2 `_2` latch 98 ≤ 99 (extend) /
+        // `_3` latch 102 > 99 (bare), wx0f `_2` 106 ≤ 107 / `_3` 110 > 107.
+        if self.line < 144
             && m == 0
             && !self.render.win_active
             && (!self.ds || self.render.n_sprites == 0)
@@ -334,6 +482,30 @@ impl Ppu {
         {
             fold(&mut exit, 2 * 253);
         }
+        // Arm D5 (#11bj) — the DMG window-REENABLE-too-late bare exit, the
+        // arm-5 port. The redraw deadline carries an SCX term absent on CGB:
+        // bare iff `reen + 3 > wx_match + SCX&7` (the fine-scroll delays the
+        // redraw start, so a higher-SCX re-enable at the same dot still
+        // catches the tile). `late_reenable_2` reen 95 / match 97 / scx0 →
+        // bare; `scx2_2` reen 95 / scx2 → extend (98 ≤ 99); `scx2_3` reen 99
+        // → bare (102 > 99); `wx0f_2` reen 103 / match 105 → bare. Dual-traced
+        // 2026-07-03 (CGB arm-5 above is SCX-flat, scx ≤ 3 — the ±1 fetch
+        // phase again, cf. #11ag).
+        if !self.model.is_cgb()
+            && !self.ds
+            && self.render.win_reenable_dot != 0
+            && self.render.wx_match_dot != 0
+            && i32::from(self.render.win_reenable_dot) + 3 > i32::from(self.render.wx_match_dot) + scx7
+            && self.eff.lcdc & LCDC_WIN_ENABLE != 0
+            && self.render.win_active
+            && self.line >= 1
+            && self.line < 144
+            && m == 3
+            && !self.glitch_line
+            && self.render.n_sprites == 0
+        {
+            fold(&mut exit, 2 * 253);
+        }
         // Arm 6 — the CGB late-WY UN-trigger bare exit, SS (#11aw). SameBoy's
         // `wy_check` compares the IMMEDIATE WY; a late WY→(non-LY) write
         // un-triggers its window (line renders BARE) while slopgb — its
@@ -366,8 +538,15 @@ impl Ppu {
         // NOT taken, 7 want-0 legs SameBoy-PASS bare). The exit is
         // read-class-dependent (#11z): POLLED reads sit at +0 of SameBoy's
         // `263 + SCX&7` exit; a carried STAT-ISR read at +4 → 259.
-        if self.model.is_cgb()
-            && self.line >= 1
+        //
+        // #11bj — the DMG twin shares this arm verbatim: the boundary-WY
+        // family (`late_wy_10to0_ly1`, `FFto0_ly2`, `FFto1_ly2` `_1`/`_2`)
+        // fits the identical polled 263 + SCX&7 exit (SameBoy extends every
+        // later line; slopgb's discrete sampler misses the seam write —
+        // dual-traced 2026-07-03). The DMG latch adds the tail-write
+        // next-line case in `regs.rs` (SameBoy's continuous check vs the
+        // 450/454 old-value samples).
+        if self.line >= 1
             && self.line < 144
             && m == 0
             && !self.render.win_active

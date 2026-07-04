@@ -1302,11 +1302,13 @@ impl Ppu {
             // visible.
             self.m0_src = false;
         }
-        // C2 #11af shadow WY-trigger (tier2 + CGB only; byte-identical OFF).
+        // C2 #11af shadow WY-trigger (tier2-only; byte-identical OFF).
         // SameBoy's `wy_triggered` is a continuous `WY == LY` latch, sticky for
         // the frame; reset it at the frame top (line 0 dot 0) and set it the
         // first dot the compare holds on any visible line. See `wy_trig_sb`.
-        if self.tier2_reclock && self.model.is_cgb() {
+        // #11bj: recording widened to DMG (was CGB-only) for the DMG window
+        // law port — the DMG arms in `read_laws.rs` read the same latches.
+        if self.tier2_reclock {
             if self.line == 0 && self.dot == 0 {
                 self.wy_trig_sb = false;
                 self.wy_trig_sb_raw = false;
@@ -1618,6 +1620,33 @@ impl Ppu {
             self.vis_hold_until,
             self.vis_mode(),
             self.render.n_sprites,
+        )
+    }
+
+    /// #11bj measurement accessor — window-abort state at the deferred FF41
+    /// read: `(win_aborted, win_predraw_abort, win_predraw_abort_dot,
+    /// wx_match_dot)`. Lets the `SLOPGB ff41` trace show which abort class a
+    /// disabled-window line took (pre-draw bare vs in-draw kept-cost). Pure
+    /// accessor; reverts with the tracer.
+    pub(crate) fn dbg_abort_state(&self) -> (bool, bool, u16, u16, u8, u8) {
+        (
+            self.render.win_aborted,
+            self.render.win_predraw_abort,
+            self.render.win_predraw_abort_dot,
+            self.render.wx_match_dot,
+            self.eff.scx & 7,
+            self.render.wx_match_scx,
+        )
+    }
+
+    /// #11bj measurement accessor — window enable/re-enable/WX-write commit
+    /// dots at the deferred FF41 read: `(win_enable_dot, win_reenable_dot,
+    /// wx_write_dot)`. For the late-enable / re-enable / late-WX law fits.
+    pub(crate) fn dbg_win_dots(&self) -> (u16, u16, u16) {
+        (
+            self.render.win_enable_dot,
+            self.render.win_reenable_dot,
+            self.render.wx_write_dot,
         )
     }
 

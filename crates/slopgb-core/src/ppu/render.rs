@@ -242,6 +242,14 @@ pub(super) struct Render {
     /// extends) while slopgb's whole-dot render catches first. Reset per
     /// line; tier2+CGB law input only.
     pub(super) wx_write_dot: u16,
+    /// #11bj — dot of a mid-mode-3 FF43 (SCX) rewrite, 0 = none this line.
+    /// Flags the `late_scx_late_disable` anomaly: a mid-line SCX change shifts
+    /// both the deferred read frame (−5 not −4) and moves the bare exit's
+    /// fine-scroll off the read-time SCX, which the whole-dot pre-draw-abort
+    /// law (`read_laws.rs` arm D3) cannot represent — so the arm is skipped
+    /// on such lines (the row keeps its native verdict, parked). Reset per
+    /// line; tier2 law input only.
+    pub(super) scx_write_dot: u16,
     /// WX comparator output on the previous dot: activations and
     /// reactivations fire on the rising edge only (the match holds while
     /// lx is frozen during the start stall and must not re-fire).
@@ -259,6 +267,13 @@ pub(super) struct Render {
     /// WY-trigger ([`Ppu::wy_trig_sb`]) only extends mode 3 on a line where
     /// it was set at/before this dot (the SameBoy activation deadline).
     pub(super) wx_match_dot: u16,
+    /// #11bj — `scx & 7` at the WX-comparator match dot (the SCX effective at
+    /// the window's fetch/activation, which sets its mode-3 fine-scroll
+    /// length). Steady lines: equal to the read-time SCX. A mid-line SCX
+    /// rewrite (`late_scx_late_disable`) diverges — the DMG pre-draw-abort
+    /// exit must use THIS value, not the read-time SCX (dual-traced
+    /// 2026-07-03: `late_scx_late_disable` fetch SCX 0 vs read SCX 4).
+    pub(super) wx_match_scx: u8,
 }
 
 impl Render {
@@ -299,9 +314,11 @@ impl Render {
             win_reenable_dot: 0,
             win_enable_dot: 0,
             wx_write_dot: 0,
+            scx_write_dot: 0,
             win_match_prev: false,
             prefill_pos: 0,
             wx_match_dot: 0,
+            wx_match_scx: 0,
         }
     }
 }
@@ -359,9 +376,11 @@ impl Ppu {
         r.win_reenable_dot = 0;
         r.win_enable_dot = 0;
         r.wx_write_dot = 0;
+        r.scx_write_dot = 0;
         r.win_match_prev = false;
         r.prefill_pos = 0;
         r.wx_match_dot = 0;
+        r.wx_match_scx = 0;
         if self.glitch_line {
             // No OAM scan ran on the glitched LCD-enable line: no sprites.
             r.n_sprites = 0;

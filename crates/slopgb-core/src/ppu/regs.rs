@@ -52,6 +52,15 @@ impl Ppu {
             0xFF40 => {
                 let old = self.eff.lcdc;
                 self.eff.lcdc = value;
+                // #11bj measurement tracer — the LCDC pipeline-commit instant
+                // (window enable/disable dot for the abort/reenable law fits;
+                // lines up against SBWLCDC). Byte-identical unset.
+                if (old ^ value) & LCDC_WIN_ENABLE != 0 && crate::ppu::s5dbg_on() {
+                    eprintln!(
+                        "SLOPGB wlcdc ly={} dot={} old={old:02x} new={value:02x}",
+                        self.line, self.dot
+                    );
+                }
                 // LCDC.5 cleared while the window machine is drawing:
                 // the window aborts at the pipeline view's commit point
                 // (gambatte ppu.cpp setLcdc clears win_draw_started
@@ -73,12 +82,12 @@ impl Ppu {
                 // WX match (the redraw start): re-enable at/before the match →
                 // extends (mode3); after → the redraw starts too late, bare exit
                 // (mode0). slopgb's whole-dot render collapses both to mode3 at
-                // the read dot. Latched tier2+CGB while `render.active`.
+                // the read dot. Latched tier2 while `render.active` (#11bj:
+                // widened to DMG for the DMG window-law port).
                 if old & LCDC_WIN_ENABLE == 0
                     && value & LCDC_WIN_ENABLE != 0
                     && self.render.active
                     && self.tier2_reclock
-                    && self.model.is_cgb()
                 {
                     self.render.win_reenable_dot = self.dot;
                     // #11bf item 3a — a FIRST enable (window neither active
@@ -90,15 +99,22 @@ impl Ppu {
                 }
             }
             0xFF42 => self.eff.scy = value,
-            0xFF43 => self.eff.scx = value,
+            0xFF43 => {
+                // #11bj — flag a mid-mode-3 SCX rewrite (`late_scx_*`); see
+                // `Render::scx_write_dot`.
+                if self.render.active && self.tier2_reclock && (self.eff.scx & 7) != (value & 7) {
+                    self.render.scx_write_dot = self.dot;
+                }
+                self.eff.scx = value;
+            }
             0xFF47 => self.eff.bgp = value,
             0xFF48 => self.eff.obp0 = value,
             0xFF49 => self.eff.obp1 = value,
             0xFF4A => self.eff.wy = value,
             0xFF4B => {
                 // #11bf item 3c — latch a mid-line WX rewrite for the
-                // un-catch law (see `Render::wx_write_dot`).
-                if self.render.active && self.tier2_reclock && self.model.is_cgb() {
+                // un-catch law (see `Render::wx_write_dot`; #11bj: DMG too).
+                if self.render.active && self.tier2_reclock {
                     self.render.wx_write_dot = self.dot;
                 }
                 self.eff.wx = value;
@@ -437,15 +453,46 @@ impl Ppu {
             0xFF4A => {
                 let old_wy = self.wy;
                 self.wy = value;
+                // #11bj measurement tracer — the WY architectural-commit
+                // instant (the xline/raw-latch discriminator the SameBoy
+                // SBWWY trace lines up against). Byte-identical unset.
+                if crate::ppu::s5dbg_on() {
+                    eprintln!(
+                        "SLOPGB wwy ly={} dot={} old={old_wy:02x} new={value:02x}",
+                        self.line, self.dot
+                    );
+                }
                 // #11bd item 4 — the boundary-WY cross-line latch (see
                 // `Ppu::wy_xline_trig`): a tail/head write matching the
-                // current line, window enabled at the commit.
+                // current line, window enabled at the commit (#11bj: DMG too —
+                // the DMG arm-7 twin reads the same latch).
                 if self.tier2_reclock
-                    && self.model.is_cgb()
                     && self.enabled
                     && (self.dot >= 452 || self.dot < 4)
                     && self.line < 144
                     && value == self.ly
+                    && self.eff.lcdc & LCDC_WIN_ENABLE != 0
+                {
+                    self.wy_xline_trig = true;
+                }
+                // #11bj DMG — a HEAD write (dot < 4) matching the JUST-FINISHED
+                // line: slopgb's deferred frame lands a line-boundary WY write
+                // a full line late (SameBoy applies it at `ly N−1 cfl0` and its
+                // continuous `wy_check` triggers on line N−1; slopgb commits at
+                // `ly N dot0`, past that line's weMaster sample). If the value
+                // matches the previous line (`value + 1 == line`), SameBoy
+                // triggered there → the window is sticky-active for every later
+                // line → set the cross-line latch. `late_wy_10to0/FFto0/FFto1`
+                // `_2` (commit ly1/ly2 dot0) extend; the `_3` siblings commit
+                // at dot 4 (past the head) → no trigger, bare. Dual-traced
+                // 2026-07-03.
+                if self.tier2_reclock
+                    && !self.model.is_cgb()
+                    && self.enabled
+                    && self.dot < 4
+                    && self.line >= 1
+                    && self.line < 144
+                    && u16::from(value) + 1 == u16::from(self.line)
                     && self.eff.lcdc & LCDC_WIN_ENABLE != 0
                 {
                     self.wy_xline_trig = true;
@@ -494,6 +541,27 @@ impl Ppu {
                     }
                     self.wy2 = value;
                     self.wy2_delay = 0;
+                }
+                // #11bj — the DMG SS trigger-line WY→(non-LY) un-latch: a
+                // WY write that MATCHED at the line's mode-2 compare then
+                // flips away by dot 4 un-triggers the window on SameBoy
+                // (`wy_check` reads the settled WY) while slopgb's raw sticky
+                // latch (`wy_trig_sb_raw`, set at dot ≥ 4) already caught the
+                // brief match. Releasing it lets the D6 un-trigger arm fire.
+                // `late_wy_1toFF_2`/`2toFF_2` (FF at dot 4 → bare) vs `_3`
+                // (FF at dot 8, past the compare → the window drew, extends).
+                // Dual-traced 2026-07-03. SS + DMG; the CGB path is the DS
+                // block above (`wy_latch`/`wy_trig_sb`).
+                if self.tier2_reclock
+                    && !self.model.is_cgb()
+                    && !self.ds
+                    && self.enabled
+                    && self.line < 144
+                    && self.dot <= 4
+                    && old_wy == self.ly
+                    && value != self.ly
+                {
+                    self.wy_trig_sb_raw = false;
                 }
                 // The live window-trigger comparison uses a delayed WY
                 // copy — see `wy2`.
