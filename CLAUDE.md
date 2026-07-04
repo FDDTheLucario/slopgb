@@ -43,7 +43,7 @@ Parallel cargo runs: set `CARGO_TARGET_DIR=target/<name>` to dodge lock contenti
 
 Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 3,5,8,13,21,34. Model from filename suffix (see ARCHITECTURE.md §Mooneye). Timeout 120 emulated s.
 
-## State (2026-07-04, #11bq)
+## State (2026-07-04, #11br)
 
 - **Baseline (all-green, defaults NOT flipped):** mooneye 439/439 rom×model;
   gbtr v7.0 battery green vs ratcheted baselines (full run 237/0); lib 660
@@ -248,6 +248,39 @@ Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 
   `dmg-hblank-if-2026-07-03.md` (#11bk) +
   `dmg-poweron-boot-read-2026-07-04.md` (#11bl) +
   `dmg-ocr-singles-2026-07-04.md` (#11bm).
+- **#11br — the ENGINE DISPATCH-ATOMIC CORE re-characterized + the dispatch
+  lever BUILD-MEASURED ATOMIC (Task #4; NO code shipped, tree byte-identical,
+  defaults NOT flipped).** Fresh worktree two-bin (`gbmicro_flagon_probe` ON
+  445/68 vs OFF, `wilbertpol_flagon_probe`): the residual dispatch core = **31
+  gbmicro flip-blockers** (`hblank_int if_b`×8 + `nops_a/b`×14 + `scx7`×1 +
+  `hblank_scx3 a/int_a`×2 = 27 dispatch-frame; `int_timer_halt`×2 = S6;
+  `stat_write_glitch`×2 = engine glitch-IF) + **wilbertpol 7** (`ly_lyc_153_write`
+  GS×3/C×1 dispatch-frame + `timer_if`×3 S6-completion, B=48) + **age 1**
+  (`halt-m0-interrupt`) ≈ 39 (the "43" re-censused). Mechanism (code-grounded):
+  the reclock's deferred boundary sits at the fetch's cc+0 (`dispatch_pending_impl`
+  reads the flushed `pending()`), 4 dots behind production/SameBoy's cc+4 — a
+  mode-0 rise `R=254+SCX&7` landing INSIDE the fetch M-cycle is missed, so
+  `if_b`'s STAT dispatch is LOST before the following `DI` clears IME (got E0
+  want FF). **BUILT the imminent-rise dispatch FOLD** (`Ppu::dmg_m0_dispatch_imminent`
+  `R∈(dot,dot+4]` + `dispatch_pending_impl` peek, tier2/`!is_cgb`/SS-scoped, no
+  machine advance): gbmicro **+22** (all `if_b`+`nops`) but **DROPPED 9 gbmicro
+  SameBoy-passes** (`hblank_int_scx{0,1,2,4,5,6}`/`l1`/`l2` count + `di_timing_b`)
+  AND broke **mooneye `intr_2_0_timing` B=42** on Dmg/Mgb/Sgb/Sgb2. **Decisive
+  diagnosis: the fold samples the dispatch at cc+4 while the READS stay cc+0 → an
+  INCOHERENT frame; `intr_2_0_timing` (times the dispatch via register reads) +
+  the gbmicro count rows detect the mismatch. No bus-observable discriminator
+  separates a presence test (`if_b`) from a count test using the same rise → no
+  tighter slice.** Confirms the multi-session atomic verdict with this-session
+  measurement: the dispatch must CO-MOVE with the read frame (one coherent
+  retime). REVERTED; tree byte-identical @ d3d7d40. **The coherent fix = HALFDOT
+  Part A** (PPU eager per-T, CPU clock deferred — SameBoy's `GB_advance_cycles`
+  + `pending_cycles` split): the dispatch/halt checks read the exact-T PPU
+  (production's dispatch M-cycle → mooneye holds) while reads stay cc+0 (SameBoy
+  frame); the `stat_vis_from_t`/`if_late`/#11bk read-frame laws retire into it.
+  Orthogonal residual (not the dispatch dot): S6 timer-completion (5, #11ai
+  DO-NOT-RETRY) + `stat_write_glitch` glitch-IF (2) + `hblank_scx3` read-frame
+  gap (2). Plan + measurements:
+  `measurements/dispatch-retime-plan-2026-07-04.md`.
 - **History:** per-session port narrative in
   [`docs/sameboy-port/STATE-HISTORY.md`](docs/sameboy-port/STATE-HISTORY.md)
   (verbatim archive) and
