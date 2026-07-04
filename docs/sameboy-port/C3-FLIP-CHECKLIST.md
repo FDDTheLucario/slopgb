@@ -101,10 +101,12 @@ window blocker set is **62**, not 29; the rebuilt `--dmg` classifier
       `!is_cgb`+`glitch_line`-scoped; corrects the #11ad "DMG floor"). **60
       measured parks:** tima 45 + serial 1 = S6 timer/serial-completion (#11ai,
       C0-DIV refuted); `frame*_m0irq_count` 6 = dispatch-COUNT; sprites 2 =
-      inverted IF lifecycle; miscmstatirq 1 = glitch `mfi=3` dispatch; m2enable
-      1 + lycwirq_stat50 1 = line-start service co-temporal; ff40_disable 1 =
-      LCD-disable timing; `ly0_late_scx7_m3stat` 2 = render-length atomic. All
-      land with the flip's dispatch/render reclock, NOT a §3b lever. Map:
+      inverted IF lifecycle; the line-start STAT service class (m2enable 1 +
+      lycwirq_stat50 1 + miscmstatirq 1) = **BUILD-MEASURED dispatch-coupled**
+      (the LYC service-clear candidate #11bn dropped 38 SameBoy-passes wanting
+      E2 from the identical gate/latch state; m2enable co-temporal); ff40_disable
+      1 = LCD-disable timing; `ly0_late_scx7_m3stat` 2 = render-length atomic.
+      All land with the flip's dispatch/render reclock, NOT a §3b lever. Map:
       `measurements/dmg-ocr-singles-2026-07-04.md`.
 - [~] **DMG ENGINE SET — 36 SHIPPED (#11bk 16 + #11bl 20), 43 residual atomic**
       (#11bj `measurements/dmg-engine-set-classify-2026-07-03.md` + #11bk

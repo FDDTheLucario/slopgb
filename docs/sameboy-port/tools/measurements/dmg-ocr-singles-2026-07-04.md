@@ -13,7 +13,10 @@ parks.** The read-frame vein for the non-window DMG singles is nearly drained �
 unlike hblank (#11bk +16) and poweron (#11bl +20), only ONE clean read-frame
 leg (the glitch-line mode-0 co-instant read mask) remained; the rest are
 timer/serial-completion (S6), dispatch-count, render-length, or co-temporal
-dispatch legs whose read frame cannot separate the A/B.
+dispatch legs whose read frame cannot separate the A/B. The strongest read-frame
+CANDIDATE (the LYC line-start service-clear) was BUILT and two-binned per the
+build-measure-before-flooring rule — it drops 38 SameBoy-passes (the drop-proof
+below), not reasoned into a park.
 
 ## Census (flag-on-vs-off, then classify_dmg SameBoy-pass)
 
@@ -95,28 +98,34 @@ clear→set. An INVERTED IF lifecycle (not a read-frame shift, which preserves
 direction) — the sprite-extended mode-3 length is render-reclock atomic (the
 pixel-classify "mode-3 RENDER-RECLOCK" class).
 
-### miscmstatirq `lycwirq_trigger_m0_early_ly44_2` (1) — glitch mfi=3 dispatch
-Read ly68 dot256, want E2. SameBoy dispatches a STAT-WRITE-GLITCH interrupt
-(`mfi=3`, mode 3) at cfl252 that slopgb does not replicate; slopgb's mode-0 rise
-R=254 mis-anchors it, so the #11bk service-clear even MIS-FIRES here (`sc=true`,
-gate=true → returns 00, want E2). Dispatch-frame — the edge itself differs.
+### The LINE-START STAT service class (3: m2enable 1 + lycEnable 1 + miscmstatirq 1) — BUILD-MEASURED dispatch-coupled
 
-### m2enable `late_enable_m0disable_2` (1) — co-temporal, read-frame ambiguous
-`_1` (want E2) and `_2` (want 0) BOTH read ly2 dot20 with `intf=02`, `ie=02`
-(IDENTICAL slopgb read state), OPPOSITE wants. The discriminator (whether the
-mode-2 STAT was serviced) is NOT observable in the read frame — a read-value
-fold cannot separate them. IME cannot help: it is cleared on dispatch, so the
-serviced `_2` has IME=false at its ISR read, same as the `_1` DI poll.
-Dispatch-frame.
+`m2enable/late_enable_m0disable_2` (mode-2, want 0), `lycEnable/lycwirq_trigger_
+ly00_stat50_2` (LYC, want E0), `miscmstatirq/lycwirq_trigger_m0_early_ly44_2`
+(LYC/mode-0 glitch, want E2). All read FF0F at a line-start dot with the STAT
+interrupt pending+enabled (`intf & ie & STAT` gate TRUE), wanting the SERVICED
+(or, for miscmstatirq, the glitch-DELIVERED) value slopgb's cc+0 read misframes.
 
-### lycEnable `lycwirq_trigger_ly00_stat50_2` (1) — line-start LYC service
-Read ly0 dot20, gate=true, want E0 (serviced). `_1` reads dot16 (gate=false,
-bit not yet risen, E0). The LYC-STAT rise sits between; `_2` should read the
-SERVICED value. The anchor is the line-start LYC rise, not the mode-0 flip — a
-line-start service-clear would need the LYC-rise dot and shares the m2enable
-line-start-service ambiguity (a gate-based clear breaks the mode-2 `m2enable_1`
-poll that wants E2 at the same dot20/gate=true). Dispatch-coupled; parked with
-m2enable as the line-start-STAT-service class.
+**Co-temporal proof (m2enable):** `_1` (want E2) and `_2` (want 0) read the
+IDENTICAL slopgb state — ly2 dot20, `intf=02 ie=02` gate=true, `lyc_interrupt_line=false`,
+`stat_rise_oam=true rc=true`, `eng_stat=20` — with OPPOSITE wants. NO
+slopgb-observable field separates them. IME cannot help: it is cleared on
+dispatch, so the serviced `_2` has IME=false at its ISR read, same as the `_1`
+DI poll.
+
+**Build-measured drop-proof (LYC service-clear, #11bn candidate, REVERTED):**
+a LYC-source line-start service-clear (`ff0f_dmg_lyc_service_clear`: gate +
+`STAT_SRC_LYC` + `lyc_interrupt_line` + `!stat_rise_oam && !stat_rise_m0`,
+scoped to exclude the mode-2 ISR) was BUILT and two-binned on the full DMG list:
+**FIXED 0 net / REGRESSED 38** (lycEnable 15 + miscmstatirq 18 + lcdirq_precedence
+4 + lycint_lycirq 1). The 38 dropped rows want E2 (a poll of the latched LYC bit)
+from the IDENTICAL slopgb state (gate=true, `lyc_interrupt_line=true`, LYC-source)
+as the want-E0 serviced case — the read frame provably cannot distinguish
+"serviced" from "pending poll" (it also does not even fix `stat50_2`, whose want
+E0 = `0xE0` needs a `& !IF_STAT` mask, not the whole-byte-0 service-clear; but
+that mask would drop the same 38). Dispatch-coupled, MEASURED. `miscmstatirq
+m0_early_ly44_2` is the same class + a glitch `mfi=3` STAT-write dispatch (cfl252)
+slopgb does not replicate (the #11bk mode-0 service-clear even MIS-fires there).
 
 ### lycEnable `ff40_disable_2` (1) — LCD-disable timing
 Read ly0 dot0, `intf=00`; the OCR verdict is not the mode-0/FF0F read the fold

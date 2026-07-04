@@ -113,12 +113,14 @@ Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 
   445 held; pin `tier2_dmg_m0_coincident_passes`. The 60 parks (measured):
   tima 45 + serial 1 = S6 timer/serial-completion (#11ai, C0-DIV refuted);
   `frame*_m0irq_count` 6 = dispatch-COUNT (cc+0 loses the mode-0 dispatch);
-  sprites 2 = inverted IF lifecycle (render-reclock); miscmstatirq 1 = glitch
-  `mfi=3` STAT-write dispatch slopgb lacks; m2enable 1 + lycEnable
-  `lycwirq_stat50` 1 = line-start STAT service co-temporal (`_1`/`_2` identical
-  read state, opposite want — IME cleared on dispatch can't split); ff40_disable
-  1 = LCD-disable timing; `ly0_late_scx7_m3stat` 2 = render-length atomic
-  (identical read state, opposite want). `reclock.rs` split (→848) with the FF0F
+  sprites 2 = inverted IF lifecycle (render-reclock); the line-start STAT
+  service class (m2enable 1 + lycEnable `lycwirq_stat50` 1 + miscmstatirq 1) =
+  **BUILD-MEASURED dispatch-coupled** (the LYC service-clear candidate #11bn
+  BUILT + two-binned = REGRESSED 38 SameBoy-passes wanting E2 from the identical
+  gate=true/`lyc_interrupt_line` state; m2enable `_1`/`_2` co-temporal identical
+  read state — reverted); ff40_disable 1 = LCD-disable timing;
+  `ly0_late_scx7_m3stat` 2 = render-length atomic (identical read state, opposite
+  want). `reclock.rs` split (→848) with the FF0F
   read-view/squash family to `ppu/stat_irq/ff0f.rs` (<1000 cap). Map:
   `measurements/dmg-ocr-singles-2026-07-04.md`.
 - **C3 flip status (#11bj — the §3b DMG side worked):** the §3b DMG-OCR
