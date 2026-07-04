@@ -79,12 +79,23 @@ For EVERY row failing with defaults flipped:
 
 ## 3b. Dry-run-found flip blockers (must clear before §2 executes)
 
-From the #11bi dry run — all OUTSIDE the CGB-OCR census universe:
+From the #11bi dry run — all OUTSIDE the CGB-OCR census universe.
+**#11bj UPDATE:** the DMG-OCR window count was UNDER-reported (the census
+want-regex missed 33 shared-want `dmg08_cgb04c_out*` rows → the true DMG
+window blocker set is **62**, not 29; the rebuilt `--dmg` classifier
+`tools/classify_dmg.py` reclassifies them). Ported 56/62 (#11bj commit
+`phase-b-s7 28eb69b`); see `measurements/dmg-window-port-2026-07-03.md`.
 
-- [ ] gambatte DMG-OCR: **37 SameBoy-PASS legs**
-      (`scratchpad/flip_dmgocr_buglist.txt`) — window 29 (the CGB
-      `vis_exit_hd` window laws are `is_cgb()`-gated; port to DMG) +
-      sprites 2 + 6 singles.
+- [~] gambatte DMG-OCR window: **56 of 62 SameBoy-PASS legs FIXED** (#11bj
+      `tier2_dmg_window_passes`; the CGB `vis_exit_hd` arms ported to DMG,
+      every arm `!is_cgb()`-scoped so CGB two-bin stays 291/0). **6 residual
+      parked** on the atomic classes CGB also parks: wxA6/wxA5 carried-read
+      sub-dot wall (5), scx5 non-linear deadline (1), mid-frame SCX rewrite
+      (1), render-trigger late_enable/reenable-scx5 (2). **3 rebaseline**
+      (SameBoy-FAIL: `late_wy_1` ×2, `m2int_wxA6_spxA7_m0irq_2`).
+- [ ] gambatte DMG-OCR non-window singles: **8** (sprites 2 + tima/serial/
+      miscmstatirq/m2enable/lycEnable/enable_display 1 each) — the
+      ENGINE-IF/read-frame DMG face (Phase 2 territory).
 - [ ] gbmicrotest DMG: **68** `hblank_int_scx*` legs (the DMG mode-0 IF
       engine on the cc+0 frame).
 - [ ] wilbertpol: **10** (`ly_lyc_153_write-C/-GS` ×6 + `timer_if` ×4).
