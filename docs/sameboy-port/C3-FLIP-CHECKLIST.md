@@ -96,21 +96,25 @@ window blocker set is **62**, not 29; the rebuilt `--dmg` classifier
 - [ ] gambatte DMG-OCR non-window singles: **8** (sprites 2 + tima/serial/
       miscmstatirq/m2enable/lycEnable/enable_display 1 each) — the
       ENGINE-IF/read-frame DMG face (Phase 2 territory).
-- [~] **DMG ENGINE SET — 16 SHIPPED (#11bk), 63 residual atomic** (#11bj
-      `measurements/dmg-engine-set-classify-2026-07-03.md` + #11bk
-      `measurements/dmg-hblank-if-2026-07-03.md`; probes
-      `gbmicro_flagon_probe`/`wilbertpol_flagon_probe`): gbmicrotest **68**
+- [~] **DMG ENGINE SET — 36 SHIPPED (#11bk 16 + #11bl 20), 43 residual atomic**
+      (#11bj `measurements/dmg-engine-set-classify-2026-07-03.md` + #11bk
+      `dmg-hblank-if-2026-07-03.md` + #11bl `dmg-poweron-boot-read-2026-07-04.md`;
+      probes `gbmicro_flagon_probe`/`wilbertpol_flagon_probe`): gbmicrotest **68**
       (hblank_int mode-0 IF-delivery read-frame straddle over the
-      counter-pinned rise + poweron_* boot-DIV chain + timer), wilbertpol
+      counter-pinned rise + poweron_* boot-read chain + timer), wilbertpol
       **10** (`ly_lyc_153_write`/`timer_if`, all B=48 dispatch shift), age
       **1** (halt-m0-interrupt). **#11bk: the `hblank_int` `if_c`/`if_d`
       READ-frame legs (16) SHIPPED** — the mode-0 STAT-IF two-latch (DELIVER
       `[R-4,R)` + SERVICE-CLEAR `[R,R+4)`, `tier2_dmg_hblank_if_passes`,
-      `!is_cgb`-scoped); the READ side decouples from the dispatch like
-      `vis_mode_read`. The remaining **63** (`if_b`/`nops`/`hblank_scx3`/
-      `int_scx7` + poweron boot-DIV + wilbertpol + age) are the counter-pinned
-      dispatch/boot-frame atomic core — NO flag-gated slice; they fix WITH the
-      flip's global dispatch reclock (the C3 event itself), not a §3b lever.
+      `!is_cgb`-scoped). **#11bl: the 20 `poweron_*` boot-read rows SHIPPED** —
+      the pristine-boot-frame FF41/OAM/VRAM/LY read at its true cc+4 position
+      (`Ppu::boot_read`, +4-dot shift, `tier2_dmg_poweron_passes`, `!is_cgb` +
+      `frame_count<=2` + `!lcd_regs_written`); the boot READ frame decouples
+      from the `+4` boot DIV (`boot_div` HELD — MEASURED separable, the twin of
+      #11bk one frame earlier). The remaining **43** (`if_b`/`nops`/`hblank_scx3`/
+      `int_scx7` + wilbertpol + age) are the counter-pinned dispatch atomic core
+      — NO flag-gated slice; they fix WITH the flip's global dispatch reclock
+      (the C3 event itself), not a §3b lever.
 - [~] **PIXEL-REFERENCE LEGS — CLASSIFIED** (#11bj `tools/classify_pixel.py`,
       `measurements/pixel-classify-2026-07-03.md`): 125 legs (gambatte 103 +
       mealybug 20 [the "mealybug 20" row] + age 2) →
