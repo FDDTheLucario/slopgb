@@ -1369,3 +1369,55 @@ the 14-leg constraint tables from the fp dual-traces are what made each
 narrowing terminate; and `vis_exit_hd`/`read_pos_hd` run in the rp = 2·dot
 frame WITHOUT the +8 offset (the #11bh law's first build missed by exactly
 that 8).
+
+## #11bi — the 4-variable post-switch exit table lands: census 4 → 0; the C3 dry run; the splits (2026-07-03)
+
+Worktree commits `9fe3ddf` (the table) + `faa47f1` (the splits); docs
+`9746b28`/`091e2ce`/`b3b6066`. Two-bin 323 → **291** (32 fixed / 0 new);
+51 pins; mooneye 91/91 ON+OFF; gbtr OFF 236/0; defaults NOT flipped.
+
+- **The table** (the #11bh item-7 park resolved): all 120 speedchange
+  m3stat legs dual-traced in ONE 6-agent fan-out (`spd_measure2.sh` runs
+  both emulators per leg; new permanent `SLOPGB leave` tracer prints the
+  pause-end ly/dot/clk/dsa/dsa7/k). The fit fell out clean at first
+  offline pass — 120/120, zero conflicts:
+  `E = C + 2·(SCX&7)` rp with SS `C = 504 + leave_k − 4·[enable-in-DS]`
+  ({502,506,510}) and DS `C = 502 + leave_k` ({504,508}, LINEAR — the
+  (SCX&1) parity term of the standing DS arm measured OUT here).
+- **The two surprises vs the park's prediction**: ISR carry drops OUT
+  (the carried m2int and polled ly44 legs read the same rp with the same
+  wants per class), and the class variable pair is (leave-k,
+  LCD-enabled-in-DS) — not (s, dsa7) directly: s only matters through the
+  leave-k branch, and the DS-enable re-anchor is worth exactly −4 rp.
+- **The scope discriminator** (what the #11bh blanket lacked):
+  `stop_anchor_midframe` — the FIRST LCD-on switching STOP since enable,
+  latched line<144 at the STOP DECISION instant. Every speedchange dance
+  anchors mid-frame (ly68; lcdoff at ly0 dot12 post-DS-enable); the whole
+  calibrated tier2 suite anchors at the ly144 VBlank/boot prologue
+  (kernel `_ds`, lcd_offset offset1-3, gdma_cycles — all measured) and
+  keeps the emergent arm. lcdoff2 excluded by the LCD-off leave;
+  lcdoffds by `lcd_enable_in_ds` (it sits exactly on the emergent exit).
+- **REPLACE, not fold**: in scope the law replaces the emergent exit in
+  BOTH directions — `speedchange4_ly44_m3_nop_m3stat_scx3_2` reads rp 512
+  native-0 with true exit 512 while the emergent m==0 hold said 518; a
+  fold-max cannot lower a hold. The first (fold, m==3-only) build left
+  exactly that leg failing.
+- **The C3 dry run** (step 3 of the checklist, at census 0): temp-flip →
+  full battery → classify → revert. mooneye FULL matrix **91/91
+  flipped**; blargg/acid/mooneye2022/same_suite/smallsuites flip-clean;
+  gambatte 276 new-fail / 332 now-pass; the 37 CGB-OCR flip-BUGs ==
+  the probe set, **37/37 classify SameBoy-FAIL — zero forbidden CGB
+  drops**. The remaining flip wall is all outside the census universe
+  (checklist §3b): gambatte DMG-OCR 37 SameBoy-PASS (window 29 = the
+  `is_cgb()`-gated window laws' DMG port, the next big lever) +
+  gbmicrotest 68 + wilbertpol 10 + mealybug 20 + age 3 + 195 pixel legs
+  unclassified + golden 985 (C4). Built the `--dmg` classifier variant
+  (OCR x-shift 0/1 + `dmg08_out(…)(?:_cgb|\.gb)`).
+- **Method lock (bit us twice)**: main-repo stale `target/probe2`/
+  `target/gbtr` binaries carry IDENTICAL hash-names to the worktree's —
+  a cwd drift silently runs the WRONG TREE. md5 the binary against the
+  intended tree before EVERY measurement; use absolute paths in every
+  background command.
+- **Splits** (§5 done): `stat_irq.rs` 755 + `stat_irq/read_laws.rs` 550;
+  `interconnect.rs` 978 + `interconnect/speed.rs` 566 (trait-fn bodies →
+  `pub(super)` `_impl` delegates).
