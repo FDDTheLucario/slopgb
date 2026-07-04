@@ -2282,15 +2282,19 @@ fn tier2_dmg_m3_render_scx_ds_passes() {
     }
 }
 
-/// #11bo — the mode-3 render reclock, mechanism 4 (BG-priority bit): the LCDC
-/// bit0 (BG/window priority) read in the sprite↔BG mixer samples the DEFERRED
-/// render view (`eff.render_lcdc`), like mechanism 2's BG-fetch addressing bits,
-/// so a mid-mode-3 bit0 toggle (m3_lcdc_bg_en / bgoff_bgon) strips BG priority
-/// at the production/SameBoy column instead of the leading edge. bit0 carries no
-/// mode-3-length coupling (the BG fetch still runs), so it is render-only;
-/// OBJ-enable (bit1) keeps the eager `eff.lcdc` (it gates the sprite fetch /
-/// length). Fixes m3_lcdc_bg_en_change/_change2 + bgoff_bgon_sprite_below_window
-/// (all CGB). CGB two-bin zero-drift, mooneye 91/91, production byte-identical OFF.
+/// #11bo — the mode-3 render reclock, mechanisms 4+5 (mixer render-view LCDC
+/// bits): the sprite↔BG mixer (`output_pixel`) reads its render-only LCDC bits
+/// from the DEFERRED view (`eff.render_lcdc`), like mechanism 2's BG-fetch
+/// addressing bits, so a mid-mode-3 toggle lands its column at the
+/// production/SameBoy dot instead of the leading edge. Mech4 is bit0 (BG/window
+/// priority): it strips BG priority at the toggle column
+/// (m3_lcdc_bg_en_change/_change2 + bgoff_bgon_sprite_below_window). Mech5 is
+/// bit1 (OBJ-enable draw-side): it suppresses an already-fetched sprite pixel at
+/// the mix (m3_lcdc_obj_en_change, CGB only — DMG keeps the eager one-dot-ahead
+/// mixer calibration). Both bits are render-only (bit0's BG fetch still runs;
+/// bit1's draw-side is past the sprite fetch — the FETCH-side OBJ enable gating
+/// the stall/length stays eager in `render.rs`). CGB two-bin zero-drift, mooneye
+/// 91/91, production byte-identical OFF.
 #[test]
 fn tier2_dmg_m3_render_bg_priority_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -2304,6 +2308,7 @@ fn tier2_dmg_m3_render_bg_priority_passes() {
         ("mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change.gb", Model::Cgb),
         ("mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change2.gb", Model::Cgb),
         ("gambatte/bgen/bgoff_bgon_sprite_below_window.gbc", Model::Cgb),
+        ("mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change.gb", Model::Cgb),
     ];
     for (rel, model) in targets {
         assert_pixel_leg_flagon(&root, rel, model);

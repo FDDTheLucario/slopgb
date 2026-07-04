@@ -225,27 +225,34 @@ impl Ppu {
         // the FIFO stop showing on dots where the OBJ enable reads low
         // (mealybug m3_lcdc_obj_en_change: sprites fetched during the
         // prefill turn into background mid-glyph at the disable commit).
-        // The DMG mixer samples the bit one dot ahead of the eff view
-        // (the fetch-lead timing — the blob photos put each band's
-        // suppression boundary one column left of the eff commit);
-        // CGB-C samples eff (its leg is pixel-exact on eff).
-        if self.eff.lcdc & LCDC_OBJ_ENABLE == 0 {
+        let cgb = self.model.is_cgb();
+        // #11bo mech4/5 — the mixer's render-only LCDC bits sample the DEFERRED
+        // view (`render_lcdc`), like the BG fetch's map/data bits: a mid-mode-3
+        // toggle lands its column at the production/SameBoy dot, not the flip's
+        // leading edge. `render_lcdc` == `eff.lcdc` in production
+        // (byte-identical OFF). Only the pixel-draw bits ride it — the
+        // fetch-side / mode-3-length reads keep the eager `eff.lcdc`.
+        let render_lcdc = self.eff.render_lcdc;
+        // LCDC.1 also gates sprite pixels at the mix: pixels already in the
+        // FIFO stop showing on dots where the OBJ enable reads low (mealybug
+        // m3_lcdc_obj_en_change: sprites fetched during the prefill turn into
+        // background mid-glyph at the disable commit). The DMG mixer samples the
+        // bit one dot ahead of the eff view (the fetch-lead timing — the blob
+        // photos put each band's suppression boundary one column left of the eff
+        // commit); CGB-C samples eff, pixel-exact. #11bo mech5 — on CGB the
+        // draw-side suppression is render-only (the sprite is already fetched;
+        // the FETCH-side OBJ enable gating the stall/length stays eager in
+        // `render.rs`), so it rides the deferred `render_lcdc`; DMG keeps the
+        // eager eff view (its one-dot-ahead calibration is pinned to it).
+        let obj_en_view = if cgb { render_lcdc } else { self.eff.lcdc };
+        if obj_en_view & LCDC_OBJ_ENABLE == 0 {
             sp = EMPTY_SPRITE_PIXEL;
         }
 
-        let cgb = self.model.is_cgb();
         // DMG LCDC bit 0: BG and window disabled — they show as white
         // (color 0 for sprite priority purposes). DMG compatibility mode on
-        // CGB behaves the same way (integration addition).
-        // #11bo mech4 — the BG-priority bit (LCDC bit0) samples the DEFERRED
-        // render view (`render_lcdc`), like the BG fetch's map/data bits: a
-        // mid-mode-3 bit0 toggle (m3_lcdc_bg_en / bgoff_bgon) strips BG
-        // priority at the production/SameBoy column instead of the leading
-        // edge. bit0 carries no mode-3-length coupling (the fetch still runs),
-        // so this is render-only; OBJ-enable (bit1) keeps the eager `eff.lcdc`
-        // (it gates the sprite fetch / length). `render_lcdc` == `eff.lcdc` in
-        // production (byte-identical OFF).
-        let render_lcdc = self.eff.render_lcdc;
+        // CGB behaves the same way (integration addition). #11bo mech4 — the
+        // BG-priority bit (LCDC bit0) rides `render_lcdc` (no length coupling).
         let bg_off = (!cgb || self.dmg_compat) && render_lcdc & LCDC_BG_ENABLE == 0;
         let bg_c = if bg_off { 0 } else { bg_c };
 
