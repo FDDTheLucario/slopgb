@@ -1,24 +1,31 @@
 # C3 FLIP CHECKLIST — the tier2/leading-edge default flip
 
 Written at census 21 (#11bh, 2026-07-03; the goal's <~25 trigger); census
-now **4** at session end (#11bh final — the `speedchange2*_m2int_m3stat_
-scx2_2` quartet, parked on the measured `E(scx)` A/B:
-`measurements/speedchange-postswitch-law-2026-07-03.md`). Update the
-numbers as levers land; execute top-to-bottom in ONE session when census
-reaches the flip bar. Do NOT flip defaults in any pushed commit until every
-step below is green.
+**0** since #11bi (the speedchange quartet fell to the post-switch exit
+table: `measurements/speedchange-postswitch-exit-2026-07-03.md`). The
+step-3 dry run RAN 2026-07-03
+(`measurements/c3-dryrun-flip-classify-2026-07-03.md`): the CGB-OCR bar
+HOLDS (37/37 flip-BUGs classify SameBoy-FAIL), but the flip is still
+blocked by the DMG side — see §3b. Update the numbers as levers land;
+execute top-to-bottom in ONE session when §3b clears. Do NOT flip defaults
+in any pushed commit until every step below is green.
 
-## 0. State at writing (2026-07-03, #11bh)
+Census bar (amended #11bi): **≤ 4, with any residue classified
+SameBoy-pass known-BUG and listed by name** — at 4 the dry run still runs,
+carrying the residue as known-BUG; at 0 (current) it ran clean.
 
-- Worktree `.claude/worktrees/phase-b-s7`, branch `phase-b-s7` @ `873b2e9`
-  (the 9 #11bh commits on top of #11bg `c3d1991`).
-- Flag-on two-bin: ON **323** / OFF 486 (`scratchpad/on_11bh_final3.txt` =
-  the preserved ON list; diff name-level against `scratchpad/base354_n.txt`
-  — 31 fixed [23 must-fix + 8 bonus], ZERO new vs the #11bg base).
-- Must-fix (SameBoy-pass) blockers: **4** = the `speedchange2*_m2int_
-  m3stat_scx2_2` quartet (the S6 co-land, parked with the measured A/B).
-- 50 tier2 pins; mooneye 91/91 flag-on AND flag-off; gbtr OFF 234/0; lib
-  660; clippy `-D warnings` clean.
+## 0. State at writing (2026-07-03, #11bi)
+
+- Worktree `.claude/worktrees/phase-b-s7`, branch `phase-b-s7` @ `9fe3ddf`
+  (+ the phase-3 split commits after it).
+- Flag-on two-bin: ON **291** / OFF 486 (`scratchpad/on_11bi{,_n}.txt` =
+  the preserved ON list; diff name-level against
+  `scratchpad/on_11bh_final3.txt` — 32 fixed, ZERO new).
+- Must-fix (SameBoy-pass) blockers: **0** (CGB-OCR universe; the dry run
+  confirms 37/37 CGB flip-BUGs rebaseline-OK).
+- 51 tier2 pins; mooneye 91/91 flag-on AND flag-off (and 91/91 with the
+  defaults FLIPPED — dry-run measured); gbtr OFF **236/0**; lib 660;
+  clippy `-D warnings` clean.
 
 ## 1. Preconditions (all fresh, same tree)
 
@@ -60,10 +67,34 @@ For EVERY row failing with defaults flipped:
 - [ ] Pre-seeded rebaseline joiners (already classified SameBoy-fail):
       the 8 #11bg floor-losses · the #11am 51-row rebaseline set · the 2
       #11bd bonus-losses (`speedchange2_nop_m2int_m3stat_scx1_1`,
-      `ly0_m0irq_scx0_ds_2`).
-- [ ] At census 0, BEFORE the real flip: temp-flip locally, run the full
-      battery, classify the entire flip-on fail set, revert — the dry run
-      that lets the flip session start with a complete rebaseline list.
+      `ly0_m0irq_scx0_ds_2`) — SUPERSEDED by the #11bi dry-run fresh
+      classification (`c3-dryrun-flip-classify-2026-07-03.md`): the 37
+      CGB-OCR joiners are `scratchpad/flipregr_cgb_ocr.txt` (37/37
+      SameBoy-fail), the 7 DMG-OCR joiners
+      `scratchpad/flip_dmgocr_floorlist.txt`; the two #11bd bonus-losses
+      fail ON **and** OFF (already-floored shared floor, no flip action).
+- [x] At census 0, BEFORE the real flip: temp-flip locally, run the full
+      battery, classify the entire flip-on fail set, revert — RAN
+      2026-07-03 (#11bi): `c3-dryrun-flip-classify-2026-07-03.md`.
+
+## 3b. Dry-run-found flip blockers (must clear before §2 executes)
+
+From the #11bi dry run — all OUTSIDE the CGB-OCR census universe:
+
+- [ ] gambatte DMG-OCR: **37 SameBoy-PASS legs**
+      (`scratchpad/flip_dmgocr_buglist.txt`) — window 29 (the CGB
+      `vis_exit_hd` window laws are `is_cgb()`-gated; port to DMG) +
+      sprites 2 + 6 singles.
+- [ ] gbmicrotest DMG: **68** `hblank_int_scx*` legs (the DMG mode-0 IF
+      engine on the cc+0 frame).
+- [ ] wilbertpol: **10** (`ly_lyc_153_write-C/-GS` ×6 + `timer_if` ×4).
+- [ ] mealybug: **20** `m3_*` mid-scanline pixel legs; age: **3**.
+- [ ] gambatte pixel-reference rows: **195** unclassified (44 CGB + 151
+      DMG) — classify via SameBoy-frame-vs-reference comparison or the C4
+      golden review (`scratchpad/flip_gambatte_newfail.txt`).
+- Flip FIXES banked for the rebaseline: gambatte 332 now-pass legs +
+  non-gambatte 59 (incl. wilbertpol 44) + mooneye/blargg/acid/same_suite/
+  smallsuites flip-clean.
 
 ## 4. Harness re-anchor
 
@@ -77,10 +108,12 @@ For EVERY row failing with defaults flipped:
 
 ## 5. Line caps
 
-- [ ] Every touched `.rs` under 1000 lines. Risks at writing:
-      `ppu/stat_irq.rs` (~1160) and `interconnect.rs` (~1460) are ALREADY
-      over — the flip session must split them (seam map:
-      `docs/tdd-split-plan.md`) before or with the flip commit.
+- [x] Every touched `.rs` under 1000 lines — DONE #11bi phase 3:
+      `ppu/stat_irq.rs` 755 + `ppu/stat_irq/read_laws.rs` 550 (the FF41
+      read-law engine split out) and `interconnect.rs` 978 +
+      `interconnect/speed.rs` 566 (the stop/halt-wake/ack/dispatch-retime
+      trait-fn bodies as `pub(super)` `_impl` delegates — a trait impl
+      cannot split across files). Suite-gated behavior-identical.
 
 ## 6. C4 gates (after the flip commit, before deleting scaffolding)
 
