@@ -43,7 +43,7 @@ Parallel cargo runs: set `CARGO_TARGET_DIR=target/<name>` to dodge lock contenti
 
 Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 3,5,8,13,21,34. Model from filename suffix (see ARCHITECTURE.md §Mooneye). Timeout 120 emulated s.
 
-## State (2026-07-04, #11bm)
+## State (2026-07-04, #11bo)
 
 - **Baseline (all-green, defaults NOT flipped):** mooneye 439/439 rom×model;
   gbtr v7.0 battery green vs ratcheted baselines (full run 237/0); lib 660
@@ -56,9 +56,44 @@ Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 
   OFF. Flag-on two-bin: ON 291 / OFF 486 on the 3422-row full-CGB list;
   **census of SameBoy-pass CGB blockers = 0** (unchanged by #11bj/#11bk/#11bl/
   #11bm — the DMG window + hblank-IF + poweron + co-instant arms are all
-  `!is_cgb()`-scoped, CGB two-bin 291/291 zero-drift); 55 tier2 pins; mooneye
-  91/91 flag-on (`SLOPGB_MOONEYE_RECLOCK=1`) AND flag-off AND with defaults
+  `!is_cgb()`-scoped, CGB two-bin 291/291 zero-drift; **#11bo added the mode-3
+  RENDER reclock, also 291/291 zero-drift — its CGB slices (LCDC BG-addr, SCX-DS,
+  BG-priority) touch only the pixel view, never an OCR verdict**); 59 tier2 pins;
+  mooneye 91/91 flag-on (`SLOPGB_MOONEYE_RECLOCK=1`) AND flag-off AND with defaults
   temp-flipped.
+- **#11bo — the tier2 MODE-3 PIXEL-RENDER reclock SHIPPED: 88/100 render-atomic
+  legs in 4 flag-gated slices; 12 residuals classified.** The read-frame vein
+  (#11bk/bl/bm) drained to reach the DIFFERENT subsystem — the pixel fetcher, not
+  the read laws. Root cause: the tier2 deferred write path advances the render to
+  the write's leading edge (cc+0) BEFORE the eager `commit_eff`, landing a
+  mid-mode-3 SCY/SCX/BGP/OBP/LCDC change into the pixel view `eff` 4 dots EARLY of
+  the render's cc+4-calibrated fetch grid (`dmgpalette`/`scy`/`bgtiledata`/
+  `bgtilemap`/`m3_lcdc_*` boundary-column shift). SEPARABLE from the read laws (they
+  sample ARCH `self.scy`/`self.lcdc`; the render samples `eff`), so each slice is
+  render-only — CGB two-bin 291/291 IDENTICAL SET, mooneye 91/91 ON+OFF, byte-
+  identical OFF. **Mech1** SCY/palette (FF42/FF47-49): SCX's `dots=3` survive-defer
+  (`staged_pending` skip) — dmgpalette 6 + scy 26 = **+32** (`cef8471`,
+  `tier2_dmg_m3_render_scy_palette_passes`). **Mech2** LCDC BG-addr (FF40 bit3/4):
+  a SPLIT view — `eff.lcdc` stays eager (window bit5 abort/reenable laws + FF41
+  reads + OBJ-enable/length), a new `eff.render_lcdc` read only by the BG fetcher
+  lags `RENDER_LCDC_DELAY=3` (a full LCDC defer regressed 5 window pins — #11bb
+  "LCDC +4 net-neg") — bgtiledata 21 + bgtilemap 26 + m3_lcdc_tile_sel = **+48**
+  (`c26efdf`, `tier2_dmg_m3_render_lcdc_passes`). **Mech3** SCX double-speed
+  (FF43 DS): dots=**2** not 3 (DS M-cycle = 2 dots, offset halves) — the single
+  value straddling both the render AND `late_scx4`'s DS read law — scx_during_m3_ds
+  **+5** (`380cbcd`, `tier2_dmg_m3_render_scx_ds_passes`). **Mech4** LCDC bit0
+  BG-priority (mixer): reads `render_lcdc` too (no length coupling) — m3_lcdc_bg_en
+  ×2 + bgoff_bgon = **+3** (`e1cd243`, `tier2_dmg_m3_render_bg_priority_passes`).
+  Pixel two-bin `gambatte_pixel_probe` (flag-on framebuffer ↔ reference PNG via the
+  suite comparator): OFF 100/100, ON 88/100. **12 residuals CLASSIFIED (not
+  shipped):** WX window-trigger/length 5 (m3_wx_5/6, m3_window_timing×2, late_wx_ds
+  — the WX-match dot IS the window activation = length; a swept defer broke
+  `tier2_window_late_wx_uncatch`) + palette OR-quirk 3 (m3_bgp/obp — the DMG
+  "old|new for one dot" boundary; no palette-dots value fixes both dmgpalette AND
+  the OR-quirk column) + window-enable/length 2 (m3_lcdc_win_en_multiple) + OBJ-
+  enable/length 1 (m3_lcdc_obj_en, bit1 gates the sprite fetch) + sprite-penalty
+  grid 1 (scy_spx08_2). All are the render-length / sprite-grid class that lands
+  WITH the length port. Map: `measurements/dmg-m3-render-reclock-2026-07-04.md`.
 - **#11bk — DMG hblank_int mode-0 STAT-IF two-latch SHIPPED (+16 flag-on).**
   The §3b engine `hblank_int` family the #11bj classification called "atomic /
   single-edge peek" is REFINED: the `if_c`/`if_d` legs' READ frame decouples
