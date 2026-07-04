@@ -1421,3 +1421,39 @@ Worktree commits `9fe3ddf` (the table) + `faa47f1` (the splits); docs
 - **Splits** (§5 done): `stat_irq.rs` 755 + `stat_irq/read_laws.rs` 550;
   `interconnect.rs` 978 + `interconnect/speed.rs` 566 (trait-fn bodies →
   `pub(super)` `_impl` delegates).
+
+## #11bj — the §3b DMG side: window port 56/62, engine + pixel classified atomic (2026-07-03)
+
+Executed the §3b flip wall (biggest lever first). Worktree `phase-b-s7`
+(`28eb69b` window + `5b0b0f3` probes); docs main `pixel-pipe-reclock`.
+
+- **PHASE 1 — DMG window-law port, 56/62 blockers FIXED** (pin
+  `tier2_dmg_window_passes`, 52 pins). The #11bi census UNDER-reported the DMG
+  window count: its want-regex missed 33 shared-want `dmg08_cgb04c_out*` rows
+  → true count 62 (rebuilt `tools/classify_dmg.py`). Ported the CGB
+  `vis_mode_read` arms to DMG, all `!is_cgb()`-scoped → **CGB two-bin 291/291
+  zero-drift**; gbtr OFF 237/0; mooneye 91/91 flag-on+off. DMG family two-bin
+  ON 115→171. Arms: D1 length, D2 shadow, D3 pre-draw abort (+spr), D5
+  reenable, D-wx un-catch, D6 un-trigger + WY→FF release, D7 boundary
+  head-latch. **DMG≠CGB re-derivation, not transplant:** `wy2` lag +2 vs +6
+  (same `+2` deadline, opposite verdict); per-WX/SCX ship deadlines; pre-draw
+  penalty KEPT (CGB drops); new `wx_match_scx`/`scx_write_dot`. 6 residual +
+  3 rebaseline. `measurements/dmg-window-port-2026-07-03.md`.
+- **PHASE 2 — engine set (gbmicrotest 68 + wilbertpol 10 + age 1) = ATOMIC,
+  parked.** Flag-on probes `gbmicro_flagon_probe`/`wilbertpol_flagon_probe`.
+  hblank_int `_a/_b/_c/_d` read dots 244/248/252/256 STRADDLE the
+  counter-pinned mode-0 rise (dot254) with opposite wants; poweron_stat chain
+  want[N]==got[N+1] (boot-DIV); wilbertpol all B=48. No flag-gated slice.
+  `measurements/dmg-engine-set-classify-2026-07-03.md`.
+- **PHASE 3 — pixel classifier** `tools/classify_pixel.py` (SameBoy BMP vs ref
+  PNG, luminance-RANK; raw RGB false-mismatched thousands — SameBoy DMG is
+  yellow-tinted, CGB has its own colour correction). 125 legs → 100
+  SameBoy-PASS flip-blockers (ALL mode-3 render-reclock atomic, NONE
+  law-reachable), 13 DMG rebaseline, 12 golden-review.
+  `measurements/pixel-classify-2026-07-03.md`.
+- **Fresh dry-run re-census** (temp-flip, reverted): gambatte 276→220 (−56 =
+  the window rows exactly), all other suites unchanged →
+  the window arms are FF41-read-only. **VERDICT: the §3b LAW-shaped levers are
+  DRAINED** — the residual (6 window + 8 singles + 79 engine + 100
+  render-pixel) is the counter-pinned dispatch/render reclock = the C3 flip
+  event itself. Defaults NOT flipped.
