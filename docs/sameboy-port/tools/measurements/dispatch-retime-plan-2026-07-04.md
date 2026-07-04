@@ -179,3 +179,101 @@ deferred) — exactly SameBoy's `GB_advance_cycles` + `pending_cycles` split.
   quartet). Build the worktree crate with an explicit `--manifest-path
   <worktree>/Cargo.toml` (a git worktree + a bare `cargo` can resolve the wrong
   workspace root).
+
+## 8. REFUTED — the eager-PPU/deferred-CPU split reproduces the incoherent-frame drop (2026-07-04, #11bs)
+
+The §4 build plan was **IMPLEMENTED and BUILD-MEASURED. It does not converge:
+the eager split fixes the 22 `if_b`/`nops` presence rows but DROPS 53
+count/timing rows that pass on production AND the deferred reclock AND
+SameBoy, and breaks mooneye (88/91). The §4 claim "the two frames are now ONE
+(PPU eager, CPU deferred)" is false for the dispatch-COUNT tests — dispatch at
+cc+4 with ISR reads at cc+0 is INCOHERENT. Tree reverted to `d3d7d40`
+byte-identical; every gate back to baseline (mooneye ON 91/91, gbmicro ON 445,
+pixel 123/123).** This is the DMG-single-speed, full-split confirmation of the
+#11ai C2ADV / #11br fold atomicity — a third independent refutation.
+
+### What was built (clean, byte-identical OFF, then reverted)
+
+- `Interconnect::machine_t` + `advance_machine_to(target)` — a never-rewind
+  choke point every deferred advance routes through (`machine_t == clock.now()`
+  after every op → byte-identical to the old `advance_machine_t(before,
+  clock.now())`; verified mooneye 91/91 ON+OFF, gbmicro ON 445 with the wrapper
+  in and `eager_ppu` off).
+- `eager_ppu_presample()` — advances the machine to `clock.now() + pending`
+  (the fetch M-cycle's cc+4) at `dispatch_pending_impl`, so an imminent STAT
+  rise inside the fetch is GENUINELY folded (not a peek); the `stat_vis_from_t`
+  deadline mask bypassed under the flag. Gated behind `SLOPGB_EAGER`.
+- KEY property confirmed: the eager pre-advance changes ONLY the dispatch-check
+  view. A non-dispatching instruction is byte-identical (its operand reads still
+  sample at the same cc+0 — the wrapper's no-rewind absorbs the pre-advance).
+  So the read frame is provably untouched; only the dispatch check moves +4.
+
+### The measurement (running-dispatch eager only, `SLOPGB_EAGER=1`)
+
+- gbmicro flag-on **445 → 416** (+24 fixed / **−53 dropped**).
+- mooneye flag-on **91 → 88**: `acceptance/ppu` 10 fails, `acceptance/serial` 2,
+  `acceptance` root 8 (`intr_2`/`di_timing`/`hblank`-family — the counter-pinned
+  dispatch, B=42).
+- **+24 fixed** = all 22 `hblank_int_scx*_{if_b,nops_a,nops_b}` + `line_144_oam_int_b/d`.
+- **−53 dropped** = `int_hblank_incs/nops_scx0-7`, `int_oam/lyc/timer/vblank{1,2}_
+  incs/nops`, `hblank_int_scx0-6` (bare INC-A count), `hblank_int_l0/l1/l2`,
+  `hblank_int_di_timing_b`, `lcdon_to_{lyc1-3,oam}_int`, `*_int_inc_sled`,
+  `*_int_nops_b`. **All 53 verified SameBoy-PASS** (patched `sameboy_tester`
+  FF82 dump, `--dmg --length 2`: 53/53 `ff82=01`) AND production-pass AND
+  deferred-reclock-pass. So the split regresses 53 rows correct on every oracle
+  to recover 24 tight-dispatch rows.
+
+### The root — why cc+4 dispatch ∧ cc+0 reads is INCOHERENT (measured, not argued)
+
+The dropped rows are dispatch-**COUNT** tests: the ISR reads a counter/DIV/STAT
+in a loop and the verdict is the dispatch instant measured RELATIVE to those
+reads. The deferred reclock keeps dispatch AND ISR reads both on the cc+0 frame
+(dispatch "one M-cycle late", reads "4 dots early" — internally coherent → the
+counts land) and passes them. The eager split moves the dispatch to cc+4
+(production's frame) but leaves the ISR reads at cc+0 → the dispatch-to-read
+offset shifts 4 dots → the count is off by ~1 → drop. There is NO PPU-observable
+discriminator between a PRESENCE row (`if_b`, wants the fold) and a COUNT row
+(`int_hblank_incs`, wants no fold) using the same mode-0 rise `R` — exactly §3's
+"no bus-observable discriminator". Production passes both ONLY because its READS
+are also cc+4 (coherent). To make the counts coherent under the eager split the
+ISR reads must ALSO move to cc+4 — i.e. production, which drops the CGB
+leading-edge read-frame rows the whole reclock exists to fix. No middle ground.
+
+### The target set was mis-scoped — `if_b`/`nops` are NOT achievable, and are SameBoy-FAILS
+
+Patched-`sameboy_tester` FF82 (DMG, length 2, stable at length ≥2):
+
+| rows | SameBoy-emu | production/HW | deferred reclock | class |
+|---|---|---|---|---|
+| `hblank_int_scx*_if_b` (8) | **FAIL** (ff82=ff, main path e0) | PASS | FAIL | NOT a target |
+| `hblank_int_scx*_nops_a/b` (14) | **FAIL** | PASS | FAIL | NOT a target |
+| `int_hblank_incs/nops`, `int_oam/lyc/timer/vblank`, bare `hblank_int_scxN`, l0-l2 (53) | PASS | PASS | PASS | eager DROPS these |
+| shipped `if_c`/`if_d`/`poweron_*` | **FAIL** (ff82=ff) | PASS | PASS (shipped #11bk/#11bl) | reclock matches **HW**, not SameBoy-emu |
+
+Two corrections to the §1 map:
+1. The gbmicro ground truth is **HARDWARE** (the ROM's FF82), NOT SameBoy-emu —
+   SameBoy-emu FAILS the shipped `if_c`/`if_d`/`poweron` that slopgb-tier2 makes
+   PASS. #11bk/#11bl match hardware via read-VALUE laws (no dispatch move), which
+   is achievable; `if_b` needs the dispatch to MOVE, which is not.
+2. The §1 "30 pure dispatch-frame" set is 22 `if_b`/`nops` (unachievable — the
+   dispatch cannot move off the leading-edge frame without dropping the 53
+   coherent counts + hanging `intr_2`) + only ~3 gbmicro genuinely-open
+   (`hblank_int_scx7` count, `hblank_scx3_if_a`/`int_a`) + wilbertpol/age. The
+   `if_b`/`nops` **BASELINE at C3** — the flip installs the leading-edge frame,
+   which fails them exactly as SameBoy-emu does. They are not convergence work.
+
+### Verdict / refined next lever
+
+The eager-PPU/deferred-CPU split is REFUTED as a lever for the DMG dispatch
+rows: the dispatch dot is welded to the read frame by the count tests, so ANY
+dispatch-frame move (fold #11br, C2ADV #11ai, or the genuine eager advance
+#11bs) drops the coherent counts. The `machine_t`/`advance_machine_to`
+never-rewind substrate is proven and byte-identical — bank it — but it has no
+consumer that converges. Do NOT re-attempt a DMG dispatch-frame retime. The
+real flip-blockers are the **CGB two-bin** render/read-frame/wake/S6 residual
+(the ~291 rows), which do NOT touch the DMG dispatch dot; that is where the
+SameBoy-pass blockers actually live. Reproduction: patched tester (add
+`fprintf(stderr,"FF82RESULT %s ff82=%02x ...", filename, GB_read_memory(&gb,
+0xFF82), ...)` before `GB_free` in `Tester/main.c`, `make tester`); the eager
+build sits behind `SLOPGB_EAGER` (reverted, but the shape is in this session's
+transcript).
