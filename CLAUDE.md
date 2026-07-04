@@ -43,10 +43,10 @@ Parallel cargo runs: set `CARGO_TARGET_DIR=target/<name>` to dodge lock contenti
 
 Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 3,5,8,13,21,34. Model from filename suffix (see ARCHITECTURE.md §Mooneye). Timeout 120 emulated s.
 
-## State (2026-07-03, #11bi)
+## State (2026-07-03, #11bj)
 
 - **Baseline (all-green, defaults NOT flipped):** mooneye 439/439 rom×model;
-  gbtr v7.0 battery green vs ratcheted baselines (full run 236/0); lib 660
+  gbtr v7.0 battery green vs ratcheted baselines (full run 237/0); lib 660
   unit tests; clippy `-D warnings` clean. Missing ROMs skip silently unless
   `SLOPGB_REQUIRE_ROMS=1` — run `test-roms/download.sh` first. Six class-F
   defect cases exempted (defective suites/reference legs) — never drop a
@@ -54,16 +54,28 @@ Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 
 - **SameBoy cycle-exact port (Phase B / S5):** flag-gated behind
   `tier2_reclock` (implies `leading_edge_reads`); production byte-identical
   OFF. Flag-on two-bin: ON 291 / OFF 486 on the 3422-row full-CGB list;
-  **census of SameBoy-pass CGB blockers = 0** (#11bi post-switch exit
-  table); 51 tier2 pins; mooneye 91/91 flag-on (`SLOPGB_MOONEYE_RECLOCK=1`)
-  AND flag-off AND with defaults temp-flipped.
-- **C3 flip status:** the step-3 dry run RAN (2026-07-03) — CGB-OCR bar
-  holds (37/37 flip-regressions classify SameBoy-fail); the flip is blocked
-  by the §3b DMG-side set (gambatte DMG-OCR 37 [window 29 = the
-  `is_cgb()`-gated window laws' DMG port, biggest lever] + gbmicrotest 68 +
-  wilbertpol 10 + mealybug 20 + age 3 + 195 unclassified pixel legs +
-  golden regen). Execute `docs/sameboy-port/C3-FLIP-CHECKLIST.md`
-  top-to-bottom when §3b clears; do NOT flip defaults in any pushed commit.
+  **census of SameBoy-pass CGB blockers = 0** (unchanged by #11bj — the DMG
+  window arms are all `!is_cgb()`-scoped, CGB two-bin 291/291 zero-drift);
+  52 tier2 pins; mooneye 91/91 flag-on (`SLOPGB_MOONEYE_RECLOCK=1`) AND
+  flag-off AND with defaults temp-flipped.
+- **C3 flip status (#11bj — the §3b DMG side worked):** the §3b DMG-OCR
+  window blocker count was UNDER-reported by the #11bi census (want-regex
+  missed 33 shared-want rows → true count 62). **Ported 56/62 DMG window
+  blockers** (`tier2_dmg_window_passes`; the CGB `vis_mode_read` arms
+  re-derived on the DMG frame — DMG `wy2` lag +2 vs CGB +6, per-WX/SCX ship
+  deadlines; all `!is_cgb()`-scoped). **The §3b engine set (gbmicrotest 68 +
+  wilbertpol 10 + age 1) MEASURED as the counter-pinned dispatch/boot-frame/
+  read-clock atomic core** — no flag-gated slice; they land with the flip's
+  global dispatch reclock. **The 195 pixel-reference legs CLASSIFIED**
+  (`tools/classify_pixel.py`): 100 SameBoy-PASS flip-blockers (all mode-3
+  render-reclock atomic, none law-reachable), 13 DMG rebaseline, 12
+  golden-review. §3b now = 6 residual DMG window (atomic, same classes CGB
+  parks) + 8 non-window DMG-OCR singles + the engine 79 (dispatch-atomic) +
+  the 100 render-atomic pixel blockers + golden regen. Execute
+  `docs/sameboy-port/C3-FLIP-CHECKLIST.md` top-to-bottom when §3b clears; do
+  NOT flip defaults in any pushed commit. Maps:
+  `measurements/dmg-window-port-2026-07-03.md` +
+  `dmg-engine-set-classify-2026-07-03.md` + `pixel-classify-2026-07-03.md`.
 - **History:** per-session port narrative in
   [`docs/sameboy-port/STATE-HISTORY.md`](docs/sameboy-port/STATE-HISTORY.md)
   (verbatim archive) and

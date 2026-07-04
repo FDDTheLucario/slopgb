@@ -96,13 +96,24 @@ window blocker set is **62**, not 29; the rebuilt `--dmg` classifier
 - [ ] gambatte DMG-OCR non-window singles: **8** (sprites 2 + tima/serial/
       miscmstatirq/m2enable/lycEnable/enable_display 1 each) — the
       ENGINE-IF/read-frame DMG face (Phase 2 territory).
-- [ ] gbmicrotest DMG: **68** `hblank_int_scx*` legs (the DMG mode-0 IF
-      engine on the cc+0 frame).
-- [ ] wilbertpol: **10** (`ly_lyc_153_write-C/-GS` ×6 + `timer_if` ×4).
-- [ ] mealybug: **20** `m3_*` mid-scanline pixel legs; age: **3**.
-- [ ] gambatte pixel-reference rows: **195** unclassified (44 CGB + 151
-      DMG) — classify via SameBoy-frame-vs-reference comparison or the C4
-      golden review (`scratchpad/flip_gambatte_newfail.txt`).
+- [P] **DMG ENGINE SET — measured atomic, PARKED** (#11bj
+      `measurements/dmg-engine-set-classify-2026-07-03.md`; probes
+      `gbmicro_flagon_probe`/`wilbertpol_flagon_probe`): gbmicrotest **68**
+      (hblank_int mode-0 IF-delivery read-frame straddle over the
+      counter-pinned rise + poweron_* boot-DIV chain + timer), wilbertpol
+      **10** (`ly_lyc_153_write`/`timer_if`, all B=48 dispatch shift), age
+      **1** (halt-m0-interrupt). ALL the counter-pinned dispatch/boot-frame/
+      read-clock atomic core — NO flag-gated slice; they fix WITH the flip's
+      global dispatch reclock (the C3 event itself), not as a §3b lever.
+- [~] **PIXEL-REFERENCE LEGS — CLASSIFIED** (#11bj `tools/classify_pixel.py`,
+      `measurements/pixel-classify-2026-07-03.md`): 125 legs (gambatte 103 +
+      mealybug 20 [the "mealybug 20" row] + age 2) →
+      **100 SameBoy-PASS flip-blockers** (all mode-3 RENDER-RECLOCK atomic:
+      scy/bgtiledata/bgtilemap/dmgpalette/mealybug m3_*/scx_during_m3 — NONE
+      law-reachable; fix WITH the production render reclock at the flip) +
+      **13 DMG rebaseline** (`scratchpad/pixel_rebaseline_dmg.txt`) +
+      **12 golden-review** (2 DMG-uncertain mm<64 + 8 CGB colour-confound +
+      2 age m3-bg — resolve at C4). Supersedes the "195 unclassified" row.
 - Flip FIXES banked for the rebaseline: gambatte 332 now-pass legs +
   non-gambatte 59 (incl. wilbertpol 44) + mooneye/blargg/acid/same_suite/
   smallsuites flip-clean.
