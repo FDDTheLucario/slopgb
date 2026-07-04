@@ -43,7 +43,7 @@ Parallel cargo runs: set `CARGO_TARGET_DIR=target/<name>` to dodge lock contenti
 
 Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 3,5,8,13,21,34. Model from filename suffix (see ARCHITECTURE.md §Mooneye). Timeout 120 emulated s.
 
-## State (2026-07-03, #11bj)
+## State (2026-07-03, #11bk)
 
 - **Baseline (all-green, defaults NOT flipped):** mooneye 439/439 rom×model;
   gbtr v7.0 battery green vs ratcheted baselines (full run 237/0); lib 660
@@ -54,10 +54,25 @@ Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 
 - **SameBoy cycle-exact port (Phase B / S5):** flag-gated behind
   `tier2_reclock` (implies `leading_edge_reads`); production byte-identical
   OFF. Flag-on two-bin: ON 291 / OFF 486 on the 3422-row full-CGB list;
-  **census of SameBoy-pass CGB blockers = 0** (unchanged by #11bj — the DMG
-  window arms are all `!is_cgb()`-scoped, CGB two-bin 291/291 zero-drift);
-  52 tier2 pins; mooneye 91/91 flag-on (`SLOPGB_MOONEYE_RECLOCK=1`) AND
-  flag-off AND with defaults temp-flipped.
+  **census of SameBoy-pass CGB blockers = 0** (unchanged by #11bj/#11bk — the
+  DMG window + hblank-IF arms are all `!is_cgb()`-scoped, CGB two-bin 291/291
+  zero-drift); 53 tier2 pins; mooneye 91/91 flag-on
+  (`SLOPGB_MOONEYE_RECLOCK=1`) AND flag-off AND with defaults temp-flipped.
+- **#11bk — DMG hblank_int mode-0 STAT-IF two-latch SHIPPED (+16 flag-on).**
+  The §3b engine `hblank_int` family the #11bj classification called "atomic /
+  single-edge peek" is REFINED: the `if_c`/`if_d` legs' READ frame decouples
+  from the counter-pinned dispatch (like `vis_mode_read`), needing the
+  two-latch DELIVER + SERVICE-CLEAR edges. The tier2 deferred `ldh a,(FF0F)`
+  reads cc+0 (4 dots before production's cc+4), straddling the mode-0 rise
+  `R = 254 + SCX&7`: DELIVER `[R-4, R)` returns the STAT bit set (the read's
+  true cc+4 position crossed R — `ff0f_stat_peek` arm a-dmg, `if_c`);
+  SERVICE-CLEAR `[R, R+4)` returns 0 (the dispatch clears IF at the read's own
+  cycle — `if_d`, ISR `CP 0`), gated on `intf & ie & STAT` to separate the
+  pure poll `hblank_scx2_if_a` (DI+IE=0, wants the bit set). verdict-only,
+  `tier2`+`!is_cgb`+SS scoped → production/CGB byte-identical. gbmicrotest DMG
+  flag-on 409→425 (ZERO of 513 regressed); pin `tier2_dmg_hblank_if_passes`.
+  The `if_b`/`nops`/`hblank_scx3`/`int_scx7` siblings (27) need the dispatch
+  to MOVE (parked). Map: `measurements/dmg-hblank-if-2026-07-03.md`.
 - **C3 flip status (#11bj — the §3b DMG side worked):** the §3b DMG-OCR
   window blocker count was UNDER-reported by the #11bi census (want-regex
   missed 33 shared-want rows → true count 62). **Ported 56/62 DMG window
@@ -70,12 +85,15 @@ Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 
   (`tools/classify_pixel.py`): 100 SameBoy-PASS flip-blockers (all mode-3
   render-reclock atomic, none law-reachable), 13 DMG rebaseline, 12
   golden-review. §3b now = 6 residual DMG window (atomic, same classes CGB
-  parks) + 8 non-window DMG-OCR singles + the engine 79 (dispatch-atomic) +
-  the 100 render-atomic pixel blockers + golden regen. Execute
+  parks) + 8 non-window DMG-OCR singles + the engine 63 residual
+  (dispatch-atomic; #11bk shipped 16 of the 79 — the `hblank_int` `if_c`/`if_d`
+  read-frame legs) + the 100 render-atomic pixel blockers + golden regen.
+  Execute
   `docs/sameboy-port/C3-FLIP-CHECKLIST.md` top-to-bottom when §3b clears; do
   NOT flip defaults in any pushed commit. Maps:
   `measurements/dmg-window-port-2026-07-03.md` +
-  `dmg-engine-set-classify-2026-07-03.md` + `pixel-classify-2026-07-03.md`.
+  `dmg-engine-set-classify-2026-07-03.md` + `pixel-classify-2026-07-03.md` +
+  `dmg-hblank-if-2026-07-03.md` (#11bk).
 - **History:** per-session port narrative in
   [`docs/sameboy-port/STATE-HISTORY.md`](docs/sameboy-port/STATE-HISTORY.md)
   (verbatim archive) and

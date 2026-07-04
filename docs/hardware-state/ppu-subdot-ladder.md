@@ -1457,3 +1457,38 @@ Executed the §3b flip wall (biggest lever first). Worktree `phase-b-s7`
   DRAINED** — the residual (6 window + 8 singles + 79 engine + 100
   render-pixel) is the counter-pinned dispatch/render reclock = the C3 flip
   event itself. Defaults NOT flipped.
+
+## #11bk — the hblank_int mode-0 STAT-IF two-latch: the "engine atomic" verdict REFINED, +16 SHIPPED (2026-07-03)
+
+The #11bj "engine set = 100% atomic" verdict for the `hblank_int` `if_c`/`if_d`
+legs is CORRECTED — the READ frame decouples from the counter-pinned dispatch
+(exactly like `vis_mode_read`), it needed the TWO-latch edges, not one peek.
+Worktree `phase-b-s7 26b8c48` (signed, pushed). **+16 flag-on, zero
+regressions, all gates green; defaults NOT flipped.**
+
+- **The ground truth (re-measured, not the #11bj single-PEEK read):** the ROMs
+  are NOT identical — each hardcodes an expected IF value and its `$48` ISR
+  does `CP $XX`. The `ldh a,(FF0F)` value flows into `A`; pass ⇔ `A == XX`. The
+  reclock reads cc+0, **4 dots before production's cc+4 read of the same load**,
+  so around the mode-0 rise `R = 254 + SCX&7` each leg reads one rung early:
+  `if_a`(R−10, E0, no-disp) · `if_b`(R−6, E0, **disp LOST**) ·
+  `if_c`(R−2, want **E2** delivered, disp) · `if_d`(R+2, want **00** serviced,
+  disp). `rd−R` is constant across scx0-7 → ONE window fits every scx.
+- **DELIVER `[R-4, R)`** (`ff0f_stat_peek` arm a-dmg, `if_c`): the read's TRUE
+  cc+4 position `dot+4` crossed R → return the STAT bit set. The SameBoy
+  visible-IF-leads-dispatch fold (already CGB-DS), generalised to DMG SS —
+  restores the value cc+0 lost. Principled, `intf` untouched.
+- **SERVICE-CLEAR `[R, R+4)`** (`ff0f_dmg_service_clear`, `if_d`): the mode-0
+  dispatch clears IF at the read's own cycle so `ldh` returns 0 (ISR `CP 0`).
+  **Gated on `intf & ie & STAT`** (pending AND enabled, in `interconnect/
+  cycle.rs`) — the co-temporal discriminator vs the pure poll `hblank_scx2_if_a`
+  (`DI`+`IE=0`, wants the bit STILL set; the enable gate separates them
+  exactly, the "opposite-edge collapse" resolved rather than parked).
+- **Parked 27 (dispatch-frame, counter-pinned):** `if_b` (dispatch LOST — read
+  value already correct, no service) + `nops` scx1-7 (ISR reads DIV, needs the
+  dispatch) + `hblank_scx3`/`int_scx7` (dispatch-timing). All fix WITH the
+  flip's global dispatch reclock (moving R hangs mooneye `intr_2_*` B=42).
+- **Gates:** gbmicrotest DMG flag-on 409→425 (+16, ZERO of 513 regressed);
+  hblank 51→67; CGB two-bin 291/291 (my-run == clean base-run); mooneye 91/91
+  ON+OFF; gbtr OFF 237/0; lib 660; clippy. Pin `tier2_dmg_hblank_if_passes`
+  (16 legs, 3×) → 53 pins. Map: `measurements/dmg-hblank-if-2026-07-03.md`.

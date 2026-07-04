@@ -96,15 +96,21 @@ window blocker set is **62**, not 29; the rebuilt `--dmg` classifier
 - [ ] gambatte DMG-OCR non-window singles: **8** (sprites 2 + tima/serial/
       miscmstatirq/m2enable/lycEnable/enable_display 1 each) — the
       ENGINE-IF/read-frame DMG face (Phase 2 territory).
-- [P] **DMG ENGINE SET — measured atomic, PARKED** (#11bj
-      `measurements/dmg-engine-set-classify-2026-07-03.md`; probes
+- [~] **DMG ENGINE SET — 16 SHIPPED (#11bk), 63 residual atomic** (#11bj
+      `measurements/dmg-engine-set-classify-2026-07-03.md` + #11bk
+      `measurements/dmg-hblank-if-2026-07-03.md`; probes
       `gbmicro_flagon_probe`/`wilbertpol_flagon_probe`): gbmicrotest **68**
       (hblank_int mode-0 IF-delivery read-frame straddle over the
       counter-pinned rise + poweron_* boot-DIV chain + timer), wilbertpol
       **10** (`ly_lyc_153_write`/`timer_if`, all B=48 dispatch shift), age
-      **1** (halt-m0-interrupt). ALL the counter-pinned dispatch/boot-frame/
-      read-clock atomic core — NO flag-gated slice; they fix WITH the flip's
-      global dispatch reclock (the C3 event itself), not as a §3b lever.
+      **1** (halt-m0-interrupt). **#11bk: the `hblank_int` `if_c`/`if_d`
+      READ-frame legs (16) SHIPPED** — the mode-0 STAT-IF two-latch (DELIVER
+      `[R-4,R)` + SERVICE-CLEAR `[R,R+4)`, `tier2_dmg_hblank_if_passes`,
+      `!is_cgb`-scoped); the READ side decouples from the dispatch like
+      `vis_mode_read`. The remaining **63** (`if_b`/`nops`/`hblank_scx3`/
+      `int_scx7` + poweron boot-DIV + wilbertpol + age) are the counter-pinned
+      dispatch/boot-frame atomic core — NO flag-gated slice; they fix WITH the
+      flip's global dispatch reclock (the C3 event itself), not a §3b lever.
 - [~] **PIXEL-REFERENCE LEGS — CLASSIFIED** (#11bj `tools/classify_pixel.py`,
       `measurements/pixel-classify-2026-07-03.md`): 125 legs (gambatte 103 +
       mealybug 20 [the "mealybug 20" row] + age 2) →
