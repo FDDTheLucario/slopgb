@@ -407,7 +407,13 @@ impl Ppu {
         // fetch residue stays documented in baselines/mealybug.txt.)
         // The fine-scroll comparator hunt and the pop side have their
         // own anchors and never read these.
-        let lcdc = self.eff.lcdc;
+        // #11bo mech2 — the BG/window fetcher samples the DEFERRED addressing
+        // view (`render_lcdc`, bit3 BG map / bit4 tile-data / bit6 win map): a
+        // mid-mode-3 bgtilemap/bgtiledata toggle reaches the fetch grid at the
+        // production dot under tier2. OBJ-enable / mode-3-length reads keep the
+        // eager `eff.lcdc` (they must not move the length). `render_lcdc` ==
+        // `eff.lcdc` in production (byte-identical).
+        let lcdc = self.eff.render_lcdc;
         let (scy, scx) = (self.eff.scy, self.eff.scx);
         match self.render.phase {
             FetchPhase::TileNoWait => self.render.phase = FetchPhase::TileNo,

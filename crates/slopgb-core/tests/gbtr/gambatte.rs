@@ -2175,26 +2175,67 @@ fn tier2_dmg_m3_render_scy_palette_passes() {
         ("gambatte/scy/scx3/scy_during_m3_5.gbc", Model::Dmg),
     ];
     for (rel, model) in targets {
-        let path = root.join(rel);
-        let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        let mut gb = harness::boot_with_reclock(&rom, model);
-        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
-        let (dmg, cgb) = plan_rom_on_disk(&path);
-        let Some(Check::Png(suffix)) = (if model.is_cgb() { cgb } else { dmg }) else {
-            panic!("{rel} [{model:?}] is not a Png-reference leg");
-        };
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-        let png = path
-            .parent()
-            .unwrap_or(Path::new(""))
-            .join(format!("{stem}{suffix}.png"));
-        let map = if model.is_cgb() {
-            CgbColorMap::Gambatte
-        } else {
-            CgbColorMap::Identity
-        };
-        harness::expect_frame_png(&gb, &png, map)
-            .unwrap_or_else(|e| panic!("{rel} [{model:?}] tier2 flag-on render: {e}"));
+        assert_pixel_leg_flagon(&root, rel, model);
+    }
+}
+
+/// Boot a gambatte pixel-reference ROM flag-on (tier2 render reclock), render a
+/// frame, and assert it matches the sibling reference PNG via the suite's own
+/// comparator — the pin form of the `gambatte_pixel_probe` two-bin. Panics with
+/// the frame diff on mismatch (#11bo render-reclock pins).
+fn assert_pixel_leg_flagon(root: &Path, rel: &str, model: Model) {
+    let path = root.join(rel);
+    let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+    let mut gb = harness::boot_with_reclock(&rom, model);
+    run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+    let (dmg, cgb) = plan_rom_on_disk(&path);
+    let Some(Check::Png(suffix)) = (if model.is_cgb() { cgb } else { dmg }) else {
+        panic!("{rel} [{model:?}] is not a Png-reference leg");
+    };
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    let png = path
+        .parent()
+        .unwrap_or(Path::new(""))
+        .join(format!("{stem}{suffix}.png"));
+    let map = if model.is_cgb() {
+        CgbColorMap::Gambatte
+    } else {
+        CgbColorMap::Identity
+    };
+    harness::expect_frame_png(&gb, &png, map)
+        .unwrap_or_else(|e| panic!("{rel} [{model:?}] tier2 flag-on render: {e}"));
+}
+
+/// #11bo — the mode-3 render reclock, mechanism 2 (LCDC BG addressing): the BG/
+/// window fetcher samples a DEFERRED LCDC view (`eff.render_lcdc`, bit3 BG map /
+/// bit4 tile-data / bit6 win map) that lags the eager control commit by the
+/// render frame (`RENDER_LCDC_DELAY`), so a mid-mode-3 bgtilemap/bgtiledata
+/// toggle reaches the fetch grid at the production dot instead of the leading
+/// edge. The window bit5 (abort/reenable/enable) side-effects + the FF41 read
+/// laws keep the eager `eff.lcdc` (their tier2 window pins are calibrated to the
+/// cc+0 control commit — a full LCDC defer regressed them); OBJ-enable / mode-3
+/// length reads also keep the eager view (must not move the length). Fixes the
+/// `bgtiledata` (21) + `bgtilemap` (26) pixel-reference flip-blockers + mealybug
+/// `m3_lcdc_tile_sel_change`. Render-only slice: CGB two-bin 291/291 zero-drift,
+/// mooneye 91/91 ON+OFF, tier2 window pins intact, production byte-identical OFF.
+#[test]
+fn tier2_dmg_m3_render_lcdc_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_dmg_m3_render_lcdc",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        ("gambatte/bgtiledata/bgtiledata_spx08_1.gbc", Model::Dmg),
+        ("gambatte/bgtiledata/bgtiledata_spx09_2.gbc", Model::Dmg),
+        ("gambatte/bgtiledata/bgtiledata_spx08_2.gbc", Model::Cgb),
+        ("gambatte/bgtilemap/bgtilemap_spx08_1.gbc", Model::Dmg),
+        ("gambatte/bgtilemap/bgtilemap_spx08_1.gbc", Model::Cgb),
+    ];
+    for (rel, model) in targets {
+        assert_pixel_leg_flagon(&root, rel, model);
     }
 }
 

@@ -52,6 +52,22 @@ impl Ppu {
             0xFF40 => {
                 let old = self.eff.lcdc;
                 self.eff.lcdc = value;
+                // #11bo mech2 — the BG fetcher's addressing view (bit3 BG map /
+                // bit4 tile-data select) lags the eager control commit by the
+                // render frame under tier2, so a mid-mode-3 bgtilemap/bgtiledata
+                // toggle reaches the fetch grid at the production/SameBoy dot
+                // instead of the leading edge. Window bit5 (abort/reenable/
+                // enable) + the FF41 read laws keep the eager `eff.lcdc` set
+                // above — their tier2 pins are calibrated to the cc+0 control
+                // commit. Production (and non-render / glitch lines) set the
+                // view in lockstep — byte-identical OFF.
+                let defer = crate::ppu::render_lcdc_delay();
+                if self.tier2_reclock && self.render.active && !self.glitch_line && defer > 0 {
+                    self.render_lcdc_pending = Some((value, defer));
+                } else {
+                    self.eff.render_lcdc = value;
+                    self.render_lcdc_pending = None;
+                }
                 // #11bj measurement tracer — the LCDC pipeline-commit instant
                 // (window enable/disable dot for the abort/reenable law fits;
                 // lines up against SBWLCDC). Byte-identical unset.
@@ -231,9 +247,10 @@ impl Ppu {
         // (`!tier2_reclock`) is byte-identical.
         // #11bo — the mode-3 render regs (SCY/SCX/BGP/OBP) survive the arch
         // write so they strobe-commit at the render frame instead of the
-        // leading edge (see the dots calc in `cycle.rs::write_deferred`). LCDC/
-        // WX ride the `pxdots` experiment until measured.
-        let px_reg = crate::ppu::pxdots().is_some() && matches!(addr, 0xFF40 | 0xFF4B);
+        // leading edge (see the dots calc in `cycle.rs::write_deferred`). LCDC
+        // lands via the split `render_lcdc` view (mech2); WX rides the `pxdots`
+        // experiment until measured.
+        let px_reg = crate::ppu::pxdots().is_some() && addr == 0xFF4B;
         let staged_pending = self.tier2_reclock
             && (matches!(addr, 0xFF42 | 0xFF43 | 0xFF47..=0xFF49) || px_reg)
             && !self.glitch_line

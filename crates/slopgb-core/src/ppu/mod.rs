@@ -200,6 +200,15 @@ const IF_STAT: u8 = 0x02;
 /// See [`Ppu::stage_write`].
 struct PipeRegs {
     lcdc: u8,
+    /// #11bo mech2 — the BG fetcher's LCDC addressing view (map/data select).
+    /// Tracks `lcdc` in lockstep in production (byte-identical), but under the
+    /// tier2 render reclock it lags the eager control commit by the +4
+    /// render-frame offset (see `render_lcdc_pending`), so a mid-mode-3 LCDC
+    /// bit3/bit4 write (bgtilemap/bgtiledata) reaches the fetch grid at the
+    /// production/SameBoy dot instead of the leading edge. The window bit5
+    /// (abort/reenable/enable) side-effects + the FF41 read laws keep the eager
+    /// `lcdc` — their tier2 pins are calibrated to the cc+0 control commit.
+    render_lcdc: u8,
     scy: u8,
     scx: u8,
     bgp: u8,
@@ -818,6 +827,12 @@ pub struct Ppu {
     /// Rendering-register write in flight on the bus (see
     /// [`Self::stage_write`]).
     staged: Option<StagedWrite>,
+    /// #11bo mech2 — a mid-mode-3 LCDC write's deferred render-view commit
+    /// `(value, dots_left)`: the tier2 render reclock lags the BG fetcher's
+    /// `eff.render_lcdc` behind the eager control commit by the render frame
+    /// (`RENDER_LCDC_DELAY` dots). `None` outside a pending defer; production
+    /// never schedules one (byte-identical).
+    render_lcdc_pending: Option<(u8, u8)>,
 
     render: Render,
 
@@ -849,6 +864,27 @@ pub(crate) fn pxdots() -> Option<u8> {
         std::env::var("SLOPGB_PXDOTS")
             .ok()
             .and_then(|s| s.trim().parse().ok())
+    })
+}
+
+/// #11bo mech2 — the BG-fetcher LCDC render-view defer, in PPU dots: the eager
+/// control commit lands at the write's leading edge (cc+0), the render fetch
+/// grid is calibrated +4 late, so the addressing view re-commits this many
+/// `Ppu::tick`s later. Measured against the pixel two-bin (bgtiledata/bgtilemap
+/// 47/47).
+const RENDER_LCDC_DELAY: u8 = 3;
+
+/// #11bo mech2 — the BG-fetcher LCDC render-view defer (dots). `SLOPGB_LCDCD`
+/// overrides the baked [`RENDER_LCDC_DELAY`] for the pixel-two-bin sweep; unset
+/// = the baked value. Removed once the offset is banked.
+pub(crate) fn render_lcdc_delay() -> u8 {
+    use std::sync::OnceLock;
+    static F: OnceLock<u8> = OnceLock::new();
+    *F.get_or_init(|| {
+        std::env::var("SLOPGB_LCDCD")
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(RENDER_LCDC_DELAY)
     })
 }
 
@@ -1051,6 +1087,7 @@ impl Ppu {
             win_start_pending: false,
             eff: PipeRegs {
                 lcdc: 0,
+                render_lcdc: 0,
                 scy: 0,
                 scx: 0,
                 bgp: 0,
@@ -1060,6 +1097,7 @@ impl Ppu {
                 wx: 0,
             },
             staged: None,
+            render_lcdc_pending: None,
             render: Render::new(),
             front: pixel_buffer(0xFF_FFFF),
             back: pixel_buffer(0xFF_FFFF),
@@ -1071,6 +1109,18 @@ impl Ppu {
     /// (bit 0 = vblank, bit 1 = STAT), 0 if none.
     pub fn tick(&mut self) -> u8 {
         self.strobe_tick();
+        // #11bo mech2 — the deferred BG-fetcher LCDC render view catches up
+        // (like the `stat_ev` staged copies): applied before this dot's
+        // `render_step` so a bit3/bit4 write staged K dots ago drives the fetch
+        // grid from dot W+K. Only scheduled under the tier2 reclock during an
+        // active render (byte-identical OFF).
+        if let Some((value, dots)) = &mut self.render_lcdc_pending {
+            *dots -= 1;
+            if *dots == 0 {
+                self.eff.render_lcdc = *value;
+                self.render_lcdc_pending = None;
+            }
+        }
         // Delayed event-register copies catch up (see `stat_ev`); applied
         // before this dot's events so a value staged K dots ago becomes
         // visible to events from dot W+K on.

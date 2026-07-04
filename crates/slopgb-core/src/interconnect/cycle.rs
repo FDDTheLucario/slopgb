@@ -385,12 +385,12 @@ impl Interconnect {
             // two-bin / mooneye / OCR all unaffected. Measured against the
             // pixel two-bin: dmgpalette 6/6 + scy 26/27 at dots=3 (the
             // sprite-stalled scy_spx08_2 is a separate penalty-grid case).
-            // LCDC/WX stay the `pxdots` experiment (they couple to window
-            // length / the abort law — #11bb "LCDC +4 net-negative" for the
-            // read frame) until their render-frame offset is measured. Glitch
-            // lines commit immediately (no deferred fetch grid).
+            // WX (FF4B) stays the `pxdots` experiment (its render-frame offset
+            // is not yet measured); LCDC (FF40) lands via the split
+            // `render_lcdc` view (#11bo mech2, `regs.rs`), not this full defer.
+            // Glitch lines commit immediately (no deferred fetch grid).
             let px = crate::ppu::pxdots();
-            let dots = if let (Some(n), true, 0xFF40 | 0xFF4B) =
+            let dots = if let (Some(n), true, 0xFF4B) =
                 (px, self.tier2_reclock && !self.ppu.glitch_active(), addr)
             {
                 n
