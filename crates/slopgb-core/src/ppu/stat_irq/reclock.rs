@@ -815,6 +815,25 @@ impl Ppu {
                 return IF_STAT;
             }
         }
+        // (a-dmg) #11bk — the DMG single-speed mode-0 STAT-IF DELIVER window.
+        // The tier2 deferred FF0F read samples the leading edge (cc+0), 4 dots
+        // before production's cc+4 read of the SAME `ldh a,(FF0F)`, so a read
+        // whose TRUE (cc+4) position `dot + 4` has crossed the counter-pinned
+        // mode-0 rise R observes the STAT bit SameBoy's events-first frame has
+        // already folded, while slopgb's whole-dot cc+0 read still sees it
+        // clear (`hblank_int_scx*_if_c`: read R-2, want E2 — the delivered bit —
+        // slopgb reads E0). Deliver iff `dot` in [R-4, R): the read's cc+4
+        // position has reached R but the raw read dot has not. `intf` and the
+        // R dispatch are UNTOUCHED (verdict-only; the bit was going to rise at
+        // R regardless — this restores the production/SameBoy read value the
+        // cc+0 frame lost, NOT a new edge). `!is_cgb`/SS-scoped via
+        // [`Self::dmg_m0_if_rise`] (CGB uses the DS (a) arm above / its native
+        // frame; production byte-identical — the arm is tier2-gated).
+        if let Some(r) = self.dmg_m0_if_rise() {
+            if self.dot + 4 >= r && self.dot < r {
+                return IF_STAT;
+            }
+        }
         // (b) the LYC latch rise, half an M-cycle ahead.
         if self.eng_stat & STAT_SRC_LYC != 0 && !self.lyc_interrupt_line {
             let kmax = if self.ds { 1 } else { 2 };
@@ -830,6 +849,56 @@ impl Ppu {
             }
         }
         0
+    }
+
+    /// #11bk — the DMG single-speed mode-0 (HBlank) STAT-IF two-latch window
+    /// anchor: the mode-0 rise dot R for the current bare DMG line, or `None`
+    /// when out of scope. R is the render's own recorded flip (`flip_dot` once
+    /// the visible mode-3→0 flip has fired) or its projection
+    /// ([`Self::flip_projection`]) — the same anchor `vis_exit_hd` /
+    /// `ff0f_stat_peek` arm (a) use. Scoped to the tier2 DMG single-speed
+    /// path with the mode-0 STAT source armed on a visible non-glitch line;
+    /// production and CGB take neither the DELIVER ([`Self::ff0f_stat_peek`]
+    /// arm a-dmg) nor the SERVICE-CLEAR ([`Self::ff0f_dmg_service_clear`])
+    /// override → byte-identical.
+    fn dmg_m0_if_rise(&self) -> Option<u16> {
+        if !self.tier2_reclock
+            || self.model.is_cgb()
+            || self.ds
+            || !self.enabled
+            || self.glitch_line
+            || self.eng_stat & STAT_SRC_HBLANK == 0
+            || !(1..=143).contains(&self.line)
+        {
+            return None;
+        }
+        if self.line_render_done && self.flip_dot != 0 {
+            Some(self.flip_dot)
+        } else if self.render.active {
+            let (proj, lead) = self.flip_projection();
+            Some(self.dot + proj.saturating_sub(lead))
+        } else {
+            None
+        }
+    }
+
+    /// #11bk — the DMG mode-0 STAT-IF SERVICE-CLEAR window: a tier2 deferred
+    /// FF0F read whose raw dot has crossed the counter-pinned mode-0 rise R
+    /// returns 0 (the whole byte), the read-frame proxy for SameBoy's dispatch
+    /// PREEMPTING the instruction's own `ldh a,(FF0F)` — on hardware the
+    /// interrupt is serviced before the load commits, so the handler observes
+    /// the pre-read accumulator (0), never the set bit. slopgb's deferred read
+    /// DOES commit (its machine advance let it sneak in before the R dispatch),
+    /// loading the set bit; returning 0 restores the serviced-frame value
+    /// (`hblank_int_scx*_if_d`: read R+2, ISR compares A==0, slopgb reads E2 →
+    /// want 0). Window [R, R+4) — if_d reads land R+1..R+3 across scx0-7; the
+    /// deliver arm owns [R-4, R). Verdict-only (the R dispatch/`intf`
+    /// untouched); consumed by the FF0F read path in `interconnect/cycle.rs`.
+    pub(crate) fn ff0f_dmg_service_clear(&self) -> bool {
+        let Some(r) = self.dmg_m0_if_rise() else {
+            return false;
+        };
+        self.dot >= r && self.dot < r + 4
     }
 
     /// #11bh group B — arm the FF0F write-race squash window (see the

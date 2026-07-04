@@ -198,7 +198,19 @@ impl Interconnect {
         // `Ppu::ff0f_stat_peek`). Verdict-only: `intf` is untouched, the rise
         // still folds at its own dot.
         let v = if addr == 0xFF0F {
-            (v | self.ppu.ff0f_stat_peek()) & !self.ppu.ff0f_ly0_pulse_mask()
+            // #11bk — the DMG mode-0 STAT-IF SERVICE-CLEAR: a deferred read that
+            // crossed the counter-pinned mode-0 rise returns 0 when the STAT
+            // interrupt is pending AND enabled (`intf & ie & STAT`) — the CPU is
+            // servicing it, and on hardware the dispatch clears IF at the read's
+            // cycle so the `ldh a,(FF0F)` observes 0 (`hblank_int_scx*_if_d`,
+            // ISR CP A==0). The `intf & ie` gate is the discriminator vs a pure
+            // poll of the same dot (`hblank_scx2_if_a`: DI + IE=0, no dispatch →
+            // the bit stays set, want E2). See `Ppu::ff0f_dmg_service_clear`.
+            if self.intf & self.ie & IF_STAT_BIT != 0 && self.ppu.ff0f_dmg_service_clear() {
+                0
+            } else {
+                (v | self.ppu.ff0f_stat_peek()) & !self.ppu.ff0f_ly0_pulse_mask()
+            }
         } else {
             v
         };

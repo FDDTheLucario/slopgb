@@ -295,6 +295,54 @@ fn tier2_int_hblank_halt_passes_dmg() {
     }
 }
 
+/// #11bk — the DMG `hblank_int` mode-0 STAT-IF two-latch (DELIVER +
+/// SERVICE-CLEAR). The reclock's cc+0 deferred `ldh a,(FF0F)` samples 4 dots
+/// before production's cc+4 read of the same load, straddling the
+/// counter-pinned mode-0 rise `R = 254 + SCX&7`. The `if_c` legs read
+/// `[R-4, R)` and must observe the imminent rise DELIVERED (`ISR CP E2`); the
+/// `if_d` legs read `[R, R+4)` where on hardware the mode-0 dispatch clears IF
+/// at the read's own cycle so the load returns 0 (`ISR CP 00`) — gated on
+/// `intf & ie & STAT` (pending + enabled) to separate the pure poll
+/// `hblank_scx2_if_a` (DI + IE=0, wants the bit still set). All 16 pass
+/// flag-on. The `if_b`/`nops`/`hblank_scx3` siblings need the counter-pinned
+/// dispatch to move (parked; `dmg-hblank-if-2026-07-03.md`). Production
+/// (flag-off) byte-identical — the law is `tier2_reclock` + `!is_cgb`-gated;
+/// SameBoy passes these on real DMG.
+#[test]
+fn tier2_dmg_hblank_if_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_dmg_hblank_if",
+            &format!("test-roms/{} not present", common::GBTR_DIR),
+        );
+        return;
+    };
+    for scx in 0..8u8 {
+        for leg in ["if_c", "if_d"] {
+            let rel = format!("gbmicrotest/hblank_int_scx{scx}_{leg}.gb");
+            let rom = std::fs::read(root.join(&rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+            // Boot WITH the reclock at construction (the flag-on frame the flip
+            // installs) — same protocol as `tier2_int_hblank_halt_passes_dmg`.
+            let mut gb = harness::boot_with_reclock(&rom, Model::Dmg);
+            let deadline = gb.cycles().saturating_add(DEADLINE_TCYCLES);
+            harness::run_for_frames(&mut gb, 2);
+            if gb.peek(0xFF82) == 0 {
+                while gb.cycles() < deadline {
+                    gb.step();
+                }
+            }
+            assert_eq!(
+                gb.peek(0xFF82),
+                0x01,
+                "{rel} (tier2 flag-on): FF82={:#04X} actual FF80={:#04X} expected FF81={:#04X}",
+                gb.peek(0xFF82),
+                gb.peek(0xFF80),
+                gb.peek(0xFF81),
+            );
+        }
+    }
+}
+
 /// Self-verifying coverage: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// equals the on-disk ROM set, with the suite size and testbench count
 /// pinned so a changed checkout or a typo in [`TESTBENCHES`] fails loudly.
