@@ -404,6 +404,32 @@ impl Interconnect {
                 // two-bin zero-drift.
                 2
             } else if self.tier2_reclock
+                && !self.model.is_cgb()
+                && matches!(addr, 0xFF47..=0xFF49)
+                && !self.ppu.glitch_active()
+            {
+                // #11bp — the DMG palette (BGP/OBP FF47-49) commit anchors to
+                // the EVEN (CPU-M-cycle) dot grid, resolving the sub-dot render
+                // POP grid that the whole-dot defer=3 could not. SameBoy commits
+                // the palette at the write M-cycle's exact half-dot and the
+                // pixel pops at a half-dot; single speed is whole-dot aligned so
+                // the write commit lands at a whole (EVEN) dot, from which the
+                // pop is visible +2 dots. The tier2 deferred write's leading
+                // edge (`scan_pos().1` — the machine already advanced there
+                // above) is whole-dot but loses which side of the even grid it
+                // sits on: an ODD leading edge means the M-cycle boundary rounds
+                // up one dot so the commit is visible +3 (round_up_even(LE)+2),
+                // an EVEN one +2. Dual-traced (m3_window_timing LE=104→want +2,
+                // dmgpalette_during_m3 LE=183→want +3): the mealybug BGP/OBP legs
+                // all land EVEN leading edges (want +2 — the flip's +3 rendered
+                // the change one column late), the gambatte dmgpalette legs ODD
+                // (want +3, held). DMG only — CGB has no FF47-49 render path (its
+                // palettes are FF68-6B) and no BGP OR-quirk, so it keeps the
+                // plain +3. Render-only (pure colour selection, no mode-3-length
+                // or FF41-read-law coupling): production byte-identical OFF, CGB
+                // two-bin unaffected.
+                2 + (self.ppu.scan_pos().1 & 1) as u8
+            } else if self.tier2_reclock
                 && matches!(addr, 0xFF42 | 0xFF43 | 0xFF47..=0xFF49)
                 && !self.ppu.glitch_active()
             {

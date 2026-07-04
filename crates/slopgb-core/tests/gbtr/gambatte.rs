@@ -2315,6 +2315,44 @@ fn tier2_dmg_m3_render_bg_priority_passes() {
     }
 }
 
+/// #11bp — the DMG palette (BGP/OBP FF47-49) commit half-dot pop-grid: the last
+/// palette-timing pixel-reference flip-blockers the whole-dot render-defer could
+/// not land (89/100 was the whole-dot ceiling; #11bo classified these 5 as
+/// half-dot-precision). The mealybug `m3_bgp_change`/`_sprites`, `m3_obp0_change`
+/// and `m3_window_timing`/`_wx_0` legs are BGP/OBP torture (m3_window_timing is a
+/// BGP test, not a window one — its window render is byte-identical flag-on/off,
+/// only `eff.bgp` at the pixel-pop differs). SameBoy commits the palette at the
+/// write M-cycle's exact half-dot and the pixel pops at a half-dot; single speed
+/// is whole-dot aligned so the commit lands at a whole (EVEN) dot, visible +2
+/// dots from the pop. The tier2 deferred write's whole-dot leading edge loses
+/// which side of the even grid it sits on — `dots = 2 + (leading_edge & 1)`
+/// (`cycle.rs::write_deferred`) recovers it: EVEN leading edges (all the mealybug
+/// legs, dual-traced LE=104) want +2, ODD (the gambatte dmgpalette legs, LE=183)
+/// want +3, so the shared dots=3 was one column late for the mealybug set. DMG
+/// only, render-only (colour selection, no length/read-law coupling): CGB two-bin
+/// 291/291 zero-drift, mooneye 91/91 ON+OFF, all shipped dmgpalette/scy render
+/// pins held, production byte-identical OFF. Pixel two-bin 89→94 (+5 / 0 dropped).
+#[test]
+fn tier2_dmg_m3_render_palette_halfdot_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_dmg_m3_render_palette_halfdot",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        ("mealybug-tearoom-tests/ppu/m3_bgp_change.gb", Model::Dmg),
+        ("mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb", Model::Dmg),
+        ("mealybug-tearoom-tests/ppu/m3_obp0_change.gb", Model::Dmg),
+        ("mealybug-tearoom-tests/ppu/m3_window_timing.gb", Model::Dmg),
+        ("mealybug-tearoom-tests/ppu/m3_window_timing_wx_0.gb", Model::Dmg),
+    ];
+    for (rel, model) in targets {
+        assert_pixel_leg_flagon(&root, rel, model);
+    }
+}
+
 /// Port Stage C2 #11ag — the WINDOW family ported to DOUBLE-SPEED: the #11y/#11z
 /// length law AND the #11af shadow WY-trigger, with the DS exit/deadline
 /// recalibrated. The `vis_mode_read` length law (the `m2int_wx*_m3stat` shorten)
