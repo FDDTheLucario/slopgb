@@ -2,8 +2,8 @@
 
 Ported the RENDER half of §3b — the 100 SameBoy-PASS mode-3 pixel-reference
 flip-blockers (`pixel-classify-2026-07-03.md`) — as flag-gated, production
-byte-identical render slices. **88 of 100 legs shipped in four mechanisms;
-12 residuals classified.** This is the different-subsystem lever the read-frame
+byte-identical render slices. **89 of 100 legs shipped in five mechanisms;
+11 residuals classified.** This is the different-subsystem lever the read-frame
 vein (#11bk/bl/bm) was drained to reach: the pixel fetcher, not the FF41/FF0F
 read laws.
 
@@ -40,7 +40,7 @@ a real suite PASS. `SLOPGB_PROBE_OFF=1` for the production baseline. Handles bot
 gambatte (`_dmg08`/`_cgb04c`) and mealybug (`_dmg_blob`/`_cgb_c`) legs. Baseline:
 OFF 100/100, ON 0/100 (the flip-blocker set).
 
-## Shipped mechanisms (88 legs)
+## Shipped mechanisms (89 legs)
 
 | # | mechanism | reg | offset | legs | pin |
 |---|---|---|---|---|---|
@@ -48,6 +48,7 @@ OFF 100/100, ON 0/100 (the flip-blocker set).
 | 2 | LCDC BG addressing | FF40 bit3/4/6 | `render_lcdc` +3 | bgtiledata 21 + bgtilemap 26 + m3_lcdc_tile_sel 1 = **48** | `tier2_dmg_m3_render_lcdc_passes` |
 | 3 | SCX double-speed | FF43 (DS) | dots=2 (not 3) | scx_during_m3_ds **5** | `tier2_dmg_m3_render_scx_ds_passes` |
 | 4 | BG-priority bit | FF40 bit0 (mixer) | `render_lcdc` +3 | m3_lcdc_bg_en ×2 + bgoff_bgon = **3** | `tier2_dmg_m3_render_bg_priority_passes` |
+| 5 | OBJ-enable draw-side | FF40 bit1 (mixer, CGB) | `render_lcdc` +3 | m3_lcdc_obj_en **1** | (same pin) |
 
 - **Mech 1** — SCY/palette are pure colour/row selection (no length, no read-law
   coupling). Give them SCX's `dots=3` survive-and-defer (`cycle.rs` +
@@ -65,33 +66,38 @@ OFF 100/100, ON 0/100 (the flip-blocker set).
   dots=3 broke the render — dots=2 is the single value that straddles both). +5.
 - **Mech 4** — LCDC bit0 (BG/window priority) in the sprite↔BG mixer
   (`render/sprite.rs::output_pixel`) reads `render_lcdc` too (bit0 has no length
-  coupling; OBJ-enable bit1 stays eager). +3 (all CGB).
+  coupling). +3 (all CGB).
+- **Mech 5** — LCDC bit1 (OBJ enable) has two effects: it gates the sprite FETCH
+  (a stall = length, stays eager in `render.rs`) and the sprite pixel DRAW at the
+  mixer (render-only). On CGB the draw-side mixer read takes `render_lcdc` (DMG
+  keeps its eager one-dot-ahead mixer calibration). +1 (m3_lcdc_obj_en, CGB).
 
-## The 12 residuals (classified, not shipped)
+## The 11 residuals (classified, not shipped)
 
 | leg(s) | count | class | why not a render-defer slice |
 |---|---|---|---|
 | m3_wx_5/6_change, m3_window_timing, m3_window_timing_wx_0 (Dmg), late_wx_ds (Cgb) | 5 | **WX window-trigger / length** | the WX-match dot IS the window activation = the mode-3 length; a swept FF4B defer that fixed the render broke `tier2_window_late_wx_uncatch` (the un-catch law rides the same eager commit) — lands with the render-length port |
-| m3_bgp_change, m3_bgp_change_sprites, m3_obp0_change (Dmg) | 3 | **palette OR-quirk render-atomic** | the DMG "old\|new for one dot" quirk column; no single palette-dots value fixes both the gambatte dmgpalette (wants 3) and the mealybug OR-quirk boundary (swept 1-5, co-temporal) |
+| m3_bgp_change, m3_bgp_change_sprites, m3_obp0_change (Dmg) | 3 | **palette OR-quirk render-atomic** | the DMG "old\|new for one dot" torture pattern (rapid per-M-cycle BGP writes); NO defer amount fixes both dmgpalette AND the mealybug boundary (swept PALD 1-5), NOR does shifting the strobe OR-quirk position (swept ORQ 0-2 — only breaks dmgpalette) — needs the finer per-write blend model |
 | m3_lcdc_win_en_change_multiple (Dmg+Cgb) | 2 | **window-enable / length** | bit5 toggled multiple times mid-mode-3 = the window-length model |
-| m3_lcdc_obj_en_change (Cgb) | 1 | **OBJ-enable / length** | bit1 gates the sprite fetch → mode-3 length (eager, must not move) |
-| scy_during_m3_spx08_2 (Dmg) | 1 | **sprite-penalty grid** | the sprite stall shifts the SCY refetch sample by a penalty-grid dot, not a uniform frame offset |
+| scy_during_m3_spx08_2 (Dmg) | 1 | **sprite-penalty grid** | the sprite prefill stall shifts the SCY refetch sample by a penalty-grid dot, not a uniform frame offset |
 
-The WX + window-enable + obj-enable + sprite residuals are the **render-length /
-sprite-grid atomic** class the goal expected to land WITH the length port; the
-palette OR-quirk needs the finer one-dot-blend render model.
+The WX + window-enable + sprite residuals are the **render-length / sprite-grid
+atomic** class the goal expected to land WITH the length port; the palette
+OR-quirk needs the finer one-dot-blend render model (measured atomic, not a
+defer/position lever).
 
 ## Gates (every commit)
 
 Pixel two-bin +N / 0 dropped; CGB two-bin 291/291 IDENTICAL SET (base-diff vs
 clean HEAD `6990c09` `flagon_probe`); mooneye 91/91 flag-on (`SLOPGB_MOONEYE_RECLOCK`)
 AND flag-off; `tier2_boot_div_passes` + all tier2 pins (55 → 59); lib 660; clippy
-`-D warnings`; production byte-identical OFF (pixel probe OFF 100/100). Commits
-`cef8471` (mech1) · `c26efdf` (mech2) · `380cbcd` (mech3) · mech4.
+`-D warnings`; full gbtr OFF 244/0; production byte-identical OFF (pixel probe OFF
+100/100). Commits `cef8471` (mech1) · `c26efdf` (mech2) · `380cbcd` (mech3) ·
+`e1cd243` (mech4) · `5fe88d5` (cleanup) · `04d4425` (mech5).
 
 ## §3b after this class
 
-The RENDER half of §3b is ported (88/100). §3b residual = the 12 render-length /
+The RENDER half of §3b is ported (89/100). §3b residual = the 11 render-length /
 OR-quirk / sprite-grid legs above + the 43-row engine dispatch-atomic core (the
 C3 flip's IRQ-dispatch retime). The render legs that stayed are the same
 length-coupled class the engine core lands with — one dispatch-retime session from

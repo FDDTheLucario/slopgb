@@ -132,13 +132,14 @@ window blocker set is **62**, not 29; the rebuilt `--dmg` classifier
       `measurements/pixel-classify-2026-07-03.md`; #11bo port →
       `measurements/dmg-m3-render-reclock-2026-07-04.md`.) The 100 SameBoy-PASS
       flip-blockers are NOT all "fix WITH the flip" — the tier2 mode-3 RENDER
-      reclock ported **88** as flag-gated, byte-identical-OFF slices (mech1
-      SCY/palette 32, mech2 LCDC BG-addr 48, mech3 SCX-DS 5, mech4 BG-priority 3;
-      pins `tier2_dmg_m3_render_{scy_palette,lcdc,scx_ds,bg_priority}_passes`).
-      The **12 residual** (WX/window-trigger 5, palette OR-quirk 3, window-enable
-      2, OBJ-enable 1, sprite-grid 1) are the render-LENGTH / sprite-grid class
-      that DOES land with the flip's length port. Verify with the pixel two-bin
-      (`gambatte_pixel_probe`, `SLOPGB_ROWLIST`): OFF 100/100, ON 88/100.
+      reclock ported **89** as flag-gated, byte-identical-OFF slices (mech1
+      SCY/palette 32, mech2 LCDC BG-addr 48, mech3 SCX-DS 5, mech4 BG-priority 3,
+      mech5 OBJ-enable draw-side 1; pins
+      `tier2_dmg_m3_render_{scy_palette,lcdc,scx_ds,bg_priority}_passes`).
+      The **11 residual** (WX/window-trigger 5, palette OR-quirk 3, window-enable
+      2, sprite-grid 1) are the render-LENGTH / sprite-grid class that DOES land
+      with the flip's length port. Verify with the pixel two-bin
+      (`gambatte_pixel_probe`, `SLOPGB_ROWLIST`): OFF 100/100, ON 89/100.
       **13 DMG rebaseline** (`scratchpad/pixel_rebaseline_dmg.txt`) +
       **12 golden-review** (2 DMG-uncertain mm<64 + 8 CGB colour-confound +
       2 age m3-bg — resolve at C4). Supersedes the "195 unclassified" row.

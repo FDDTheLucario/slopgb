@@ -61,8 +61,8 @@ Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 
   BG-priority) touch only the pixel view, never an OCR verdict**); 59 tier2 pins;
   mooneye 91/91 flag-on (`SLOPGB_MOONEYE_RECLOCK=1`) AND flag-off AND with defaults
   temp-flipped.
-- **#11bo — the tier2 MODE-3 PIXEL-RENDER reclock SHIPPED: 88/100 render-atomic
-  legs in 4 flag-gated slices; 12 residuals classified.** The read-frame vein
+- **#11bo — the tier2 MODE-3 PIXEL-RENDER reclock SHIPPED: 89/100 render-atomic
+  legs in 5 flag-gated slices; 11 residuals classified.** The read-frame vein
   (#11bk/bl/bm) drained to reach the DIFFERENT subsystem — the pixel fetcher, not
   the read laws. Root cause: the tier2 deferred write path advances the render to
   the write's leading edge (cc+0) BEFORE the eager `commit_eff`, landing a
@@ -84,14 +84,16 @@ Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 
   **+5** (`380cbcd`, `tier2_dmg_m3_render_scx_ds_passes`). **Mech4** LCDC bit0
   BG-priority (mixer): reads `render_lcdc` too (no length coupling) — m3_lcdc_bg_en
   ×2 + bgoff_bgon = **+3** (`e1cd243`, `tier2_dmg_m3_render_bg_priority_passes`).
-  Pixel two-bin `gambatte_pixel_probe` (flag-on framebuffer ↔ reference PNG via the
-  suite comparator): OFF 100/100, ON 88/100. **12 residuals CLASSIFIED (not
-  shipped):** WX window-trigger/length 5 (m3_wx_5/6, m3_window_timing×2, late_wx_ds
-  — the WX-match dot IS the window activation = length; a swept defer broke
-  `tier2_window_late_wx_uncatch`) + palette OR-quirk 3 (m3_bgp/obp — the DMG
-  "old|new for one dot" boundary; no palette-dots value fixes both dmgpalette AND
-  the OR-quirk column) + window-enable/length 2 (m3_lcdc_win_en_multiple) + OBJ-
-  enable/length 1 (m3_lcdc_obj_en, bit1 gates the sprite fetch) + sprite-penalty
+  **Mech5** LCDC bit1 OBJ-enable DRAW-side (mixer, CGB — the fetch-side length
+  gate stays eager): m3_lcdc_obj_en = **+1** (`04d4425`, same pin). Cleanup
+  `5fe88d5` removed the sweep env. Pixel two-bin `gambatte_pixel_probe` (flag-on
+  framebuffer ↔ reference PNG via the suite comparator): OFF 100/100, ON 89/100.
+  **11 residuals CLASSIFIED (not shipped):** WX window-trigger/length 5 (m3_wx_5/6,
+  m3_window_timing×2, late_wx_ds — the WX-match dot IS the window activation =
+  length; a swept defer broke `tier2_window_late_wx_uncatch`) + palette OR-quirk 3
+  (m3_bgp/obp — the DMG "old|new for one dot" torture pattern; NO defer amount
+  (PALD 1-5) NOR OR-quirk position (ORQ 0-2) fixes both dmgpalette AND the mealybug
+  boundary) + window-enable/length 2 (m3_lcdc_win_en_multiple) + sprite-penalty
   grid 1 (scy_spx08_2). All are the render-length / sprite-grid class that lands
   WITH the length port. Map: `measurements/dmg-m3-render-reclock-2026-07-04.md`.
 - **#11bk — DMG hblank_int mode-0 STAT-IF two-latch SHIPPED (+16 flag-on).**
