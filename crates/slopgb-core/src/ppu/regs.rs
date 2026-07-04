@@ -126,14 +126,7 @@ impl Ppu {
             0xFF48 => self.eff.obp0 = value,
             0xFF49 => self.eff.obp1 = value,
             0xFF4A => self.eff.wy = value,
-            0xFF4B => {
-                // #11bf item 3c — latch a mid-line WX rewrite for the
-                // un-catch law (see `Render::wx_write_dot`; #11bj: DMG too).
-                if self.render.active && self.tier2_reclock {
-                    self.render.wx_write_dot = self.dot;
-                }
-                self.eff.wx = value;
-            }
+            0xFF4B => self.eff.wx = value,
             _ => {}
         }
     }
@@ -249,7 +242,7 @@ impl Ppu {
         // leading edge (see the dots calc in `cycle.rs::write_deferred`). LCDC
         // lands via the split `render_lcdc` view (mech2).
         let staged_pending = self.tier2_reclock
-            && matches!(addr, 0xFF42 | 0xFF43 | 0xFF47..=0xFF49)
+            && matches!(addr, 0xFF42 | 0xFF43 | 0xFF47..=0xFF49 | 0xFF4B)
             && !self.glitch_line
             && self
                 .staged
@@ -651,7 +644,21 @@ impl Ppu {
             0xFF47 => self.bgp = value,
             0xFF48 => self.obp0 = value,
             0xFF49 => self.obp1 = value,
-            0xFF4B => self.wx = value,
+            0xFF4B => {
+                // #11bf item 3c / #11bq — latch a mid-line WX rewrite for the
+                // un-catch law (see `Render::wx_write_dot`; #11bj: DMG too) at
+                // the EAGER (cc+0) leading edge here, NOT in `commit_eff`. #11bq
+                // defers the render-VIEW `eff.wx` (a WX survive-stage, for the
+                // window activation/reactivation comparator — `late_wx_ds`,
+                // m3_wx_*), so `commit_eff` now runs at the deferred strobe dot;
+                // the un-catch read law (`tier2_window_late_wx_uncatch_passes`)
+                // is calibrated to the write's cc+0 dot, so its input stays here.
+                // The SPLIT: length/read-law input eager, render view deferred.
+                if self.render.active && self.tier2_reclock {
+                    self.render.wx_write_dot = self.dot;
+                }
+                self.wx = value;
+            }
             0xFF4F if self.model.is_cgb() => self.vbk = value & 1,
             0xFF68 if self.model.is_cgb() => self.bcps = value & 0xBF,
             0xFF69 if self.model.is_cgb() => {

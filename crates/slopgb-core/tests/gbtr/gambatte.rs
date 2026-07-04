@@ -2353,6 +2353,81 @@ fn tier2_dmg_m3_render_palette_halfdot_passes() {
     }
 }
 
+/// #11bq — the SCY (FF42) commit takes the DMG palette's EVEN-dot parity anchor
+/// (`dots = 2 + (leading_edge & 1)`, `cycle.rs::write_deferred`), resolving the
+/// sub-dot render-fetch grid the whole-dot defer=3 could not on a sprite-stalled
+/// line. A sprite prefill stall (`scy_during_m3_spx08_2`, an X=8 OBJ) shifts the
+/// BG fetch grid so a tile's Lo/Hi data read (`bg_tile_addr`, fine row = LY+SCY
+/// & 7) lands EXACTLY on the deferred SCY-commit dot; production/SameBoy commits
+/// the write at the M-cycle mid-point (visible +2 from an EVEN leading edge, +3
+/// from ODD — the same round_up_even(LE)+2 the palette derives), so the per-tile
+/// data read re-samples the NEW scroll while the latched tile NUMBER keeps the old
+/// (the mealybug m3_scy_change mixed-fetch behaviour). Dual-traced: the sprite leg
+/// lands an EVEN LE=236 → +2 (the flat defer=3 rendered the change one column
+/// late); the objectless `scy_during_m3_{1,4,5,6}` writes land ODD LEs → +3 (held,
+/// a flat +2 broke all 8). SCY is pure row selection (no length / FF41-read-law
+/// coupling), so render-only: CGB two-bin 291/291 zero-drift (the CGB `spx08_2`
+/// held), mooneye 91/91 ON+OFF, production byte-identical OFF. Pixel two-bin +1.
+#[test]
+fn tier2_dmg_m3_render_scy_spx08_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_dmg_m3_render_scy_spx08",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        // FIXED — the sprite-stalled SCY leg (even LE → parity +2).
+        ("gambatte/scy/scy_during_m3_spx08_2.gbc", Model::Dmg),
+        // HELD — the CGB sprite leg (already passed at defer=3, unperturbed).
+        ("gambatte/scy/scy_during_m3_spx08_2.gbc", Model::Cgb),
+        // HELD — an odd-LE objectless leg (parity +3, a flat +2 would drop it).
+        ("gambatte/scy/scx3/scy_during_m3_4.gbc", Model::Dmg),
+    ];
+    for (rel, model) in targets {
+        assert_pixel_leg_flagon(&root, rel, model);
+    }
+}
+
+/// #11bq — the WX (FF4B) render-VIEW defer + the un-catch SPLIT. In tier2 the
+/// eager `Ppu::write` committed `eff.wx` at the write's leading edge (cc+0), 2-4
+/// dots early of the render's per-dot WX comparator, so a mid-mode-3 WX rewrite
+/// reached the window activation/reactivation gate at the wrong dot: `late_wx_ds`
+/// (DS) — the eager cc+0 WX=255 pre-empted the wx=7 window activation at the next
+/// dot → the window never drew (bare cols 0-7); `m3_wx_6` (SS) — the un-catch
+/// straddle (a WX 6→5 rewrite must split the `pos_dot==wx+6` compares at pos_dot
+/// 11/12 so neither matches) needs the change at the production frame, not early.
+/// Fix: `eff.wx` now SURVIVES the arch write (`regs.rs` `staged_pending`) and
+/// strobe-commits at leading+1 (the strobe runs at tick-start before `dot += 1`,
+/// so the value is visible to `render_step` from leading+2 == production, both
+/// speeds; `cycle.rs` FF4B → dots 0, +1 for the FF4B palette-class offset). The
+/// SPLIT keeps the un-catch READ law's `wx_write_dot` (FF41 mode-3 length) at its
+/// cc+0 leading edge (`regs.rs` `Ppu::write` FF4B, not `commit_eff`) so
+/// `tier2_window_late_wx_uncatch_passes` is unperturbed. Render-view only: CGB
+/// two-bin 291/291 zero-drift, mooneye 91/91 ON+OFF, production byte-identical OFF.
+/// Pixel two-bin +3 (`late_wx_ds_1` Cgb + `m3_wx_5`/`m3_wx_6` Dmg).
+#[test]
+fn tier2_dmg_m3_render_wx_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_dmg_m3_render_wx",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        // FIXED — the DS window-activation pre-empt (Cgb).
+        ("gambatte/window/on_screen/late_wx_ds_1.gbc", Model::Cgb),
+        // FIXED — the SS mid-draw reactivation / un-catch straddle (Dmg).
+        ("mealybug-tearoom-tests/ppu/m3_wx_5_change.gb", Model::Dmg),
+        ("mealybug-tearoom-tests/ppu/m3_wx_6_change.gb", Model::Dmg),
+    ];
+    for (rel, model) in targets {
+        assert_pixel_leg_flagon(&root, rel, model);
+    }
+}
+
 /// Port Stage C2 #11ag — the WINDOW family ported to DOUBLE-SPEED: the #11y/#11z
 /// length law AND the #11af shadow WY-trigger, with the DS exit/deadline
 /// recalibrated. The `vis_mode_read` length law (the `m2int_wx*_m3stat` shorten)
