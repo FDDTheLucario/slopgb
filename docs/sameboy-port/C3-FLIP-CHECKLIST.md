@@ -93,9 +93,19 @@ window blocker set is **62**, not 29; the rebuilt `--dmg` classifier
       sub-dot wall (5), scx5 non-linear deadline (1), mid-frame SCX rewrite
       (1), render-trigger late_enable/reenable-scx5 (2). **3 rebaseline**
       (SameBoy-FAIL: `late_wy_1` ×2, `m2int_wxA6_spxA7_m0irq_2`).
-- [ ] gambatte DMG-OCR non-window singles: **8** (sprites 2 + tima/serial/
-      miscmstatirq/m2enable/lycEnable/enable_display 1 each) — the
-      ENGINE-IF/read-frame DMG face (Phase 2 territory).
+- [~] gambatte DMG-OCR non-window singles: **CHARACTERIZED #11bm — true count
+      61** (the #11bi "8" was an under-count, same want-regex miss as window
+      29→62). **+1 read-frame leg SHIPPED** (`enable_display/ly0_m0irq_scx1_1`,
+      the glitch-line mode-0 co-instant FF0F read mask
+      `Ppu::ff0f_dmg_m0_coincident_mask`, `tier2_dmg_m0_coincident_passes`,
+      `!is_cgb`+`glitch_line`-scoped; corrects the #11ad "DMG floor"). **60
+      measured parks:** tima 45 + serial 1 = S6 timer/serial-completion (#11ai,
+      C0-DIV refuted); `frame*_m0irq_count` 6 = dispatch-COUNT; sprites 2 =
+      inverted IF lifecycle; miscmstatirq 1 = glitch `mfi=3` dispatch; m2enable
+      1 + lycwirq_stat50 1 = line-start service co-temporal; ff40_disable 1 =
+      LCD-disable timing; `ly0_late_scx7_m3stat` 2 = render-length atomic. All
+      land with the flip's dispatch/render reclock, NOT a §3b lever. Map:
+      `measurements/dmg-ocr-singles-2026-07-04.md`.
 - [~] **DMG ENGINE SET — 36 SHIPPED (#11bk 16 + #11bl 20), 43 residual atomic**
       (#11bj `measurements/dmg-engine-set-classify-2026-07-03.md` + #11bk
       `dmg-hblank-if-2026-07-03.md` + #11bl `dmg-poweron-boot-read-2026-07-04.md`;
