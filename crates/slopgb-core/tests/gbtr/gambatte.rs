@@ -2179,28 +2179,44 @@ fn tier2_dmg_m3_render_scy_palette_passes() {
     }
 }
 
-/// Boot a gambatte pixel-reference ROM flag-on (tier2 render reclock), render a
-/// frame, and assert it matches the sibling reference PNG via the suite's own
-/// comparator — the pin form of the `gambatte_pixel_probe` two-bin. Panics with
-/// the frame diff on mismatch (#11bo render-reclock pins).
+/// Boot a gambatte or mealybug pixel-reference ROM flag-on (tier2 render
+/// reclock), render a frame, and assert it matches the sibling reference PNG via
+/// the suite's own comparator — the pin form of the `gambatte_pixel_probe`
+/// two-bin. Panics with the frame diff on mismatch (#11bo render-reclock pins).
 fn assert_pixel_leg_flagon(root: &Path, rel: &str, model: Model) {
     let path = root.join(rel);
     let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
     let mut gb = harness::boot_with_reclock(&rom, model);
-    run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
-    let (dmg, cgb) = plan_rom_on_disk(&path);
-    let Some(Check::Png(suffix)) = (if model.is_cgb() { cgb } else { dmg }) else {
-        panic!("{rel} [{model:?}] is not a Png-reference leg");
-    };
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-    let png = path
-        .parent()
-        .unwrap_or(Path::new(""))
-        .join(format!("{stem}{suffix}.png"));
-    let map = if model.is_cgb() {
-        CgbColorMap::Gambatte
+    let (png, map) = if rel.starts_with("mealybug-tearoom-tests/") {
+        // Mealybug protocol: run to LD B,B then one settled frame; Identity map.
+        harness::run_until_breakpoint(&mut gb, common::TIMEOUT_TCYCLES)
+            .unwrap_or_else(|e| panic!("{rel} [{model:?}] no breakpoint: {e}"));
+        harness::run_for_frames(&mut gb, 1);
+        let suffix = if model.is_cgb() { "_cgb_c" } else { "_dmg_blob" };
+        (
+            path.with_file_name(format!("{stem}{suffix}.png")),
+            CgbColorMap::Identity,
+        )
     } else {
-        CgbColorMap::Identity
+        // Gambatte protocol: 15-frame warmup + 1 evaluated frame; Png ref via
+        // `plan_rom_on_disk`; DMG Identity, CGB Gambatte colour map.
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        let (dmg, cgb) = plan_rom_on_disk(&path);
+        let Some(Check::Png(suffix)) = (if model.is_cgb() { cgb } else { dmg }) else {
+            panic!("{rel} [{model:?}] is not a Png-reference leg");
+        };
+        let map = if model.is_cgb() {
+            CgbColorMap::Gambatte
+        } else {
+            CgbColorMap::Identity
+        };
+        (
+            path.parent()
+                .unwrap_or(Path::new(""))
+                .join(format!("{stem}{suffix}.png")),
+            map,
+        )
     };
     harness::expect_frame_png(&gb, &png, map)
         .unwrap_or_else(|e| panic!("{rel} [{model:?}] tier2 flag-on render: {e}"));
@@ -2260,6 +2276,34 @@ fn tier2_dmg_m3_render_scx_ds_passes() {
         ("gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_5.gbc", Model::Cgb),
         ("gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_8.gbc", Model::Cgb),
         ("gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_5.gbc", Model::Cgb),
+    ];
+    for (rel, model) in targets {
+        assert_pixel_leg_flagon(&root, rel, model);
+    }
+}
+
+/// #11bo — the mode-3 render reclock, mechanism 4 (BG-priority bit): the LCDC
+/// bit0 (BG/window priority) read in the sprite↔BG mixer samples the DEFERRED
+/// render view (`eff.render_lcdc`), like mechanism 2's BG-fetch addressing bits,
+/// so a mid-mode-3 bit0 toggle (m3_lcdc_bg_en / bgoff_bgon) strips BG priority
+/// at the production/SameBoy column instead of the leading edge. bit0 carries no
+/// mode-3-length coupling (the BG fetch still runs), so it is render-only;
+/// OBJ-enable (bit1) keeps the eager `eff.lcdc` (it gates the sprite fetch /
+/// length). Fixes m3_lcdc_bg_en_change/_change2 + bgoff_bgon_sprite_below_window
+/// (all CGB). CGB two-bin zero-drift, mooneye 91/91, production byte-identical OFF.
+#[test]
+fn tier2_dmg_m3_render_bg_priority_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_dmg_m3_render_bg_priority",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        ("mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change.gb", Model::Cgb),
+        ("mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change2.gb", Model::Cgb),
+        ("gambatte/bgen/bgoff_bgon_sprite_below_window.gbc", Model::Cgb),
     ];
     for (rel, model) in targets {
         assert_pixel_leg_flagon(&root, rel, model);

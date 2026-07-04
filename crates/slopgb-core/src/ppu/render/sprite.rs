@@ -237,7 +237,16 @@ impl Ppu {
         // DMG LCDC bit 0: BG and window disabled — they show as white
         // (color 0 for sprite priority purposes). DMG compatibility mode on
         // CGB behaves the same way (integration addition).
-        let bg_off = (!cgb || self.dmg_compat) && self.eff.lcdc & LCDC_BG_ENABLE == 0;
+        // #11bo mech4 — the BG-priority bit (LCDC bit0) samples the DEFERRED
+        // render view (`render_lcdc`), like the BG fetch's map/data bits: a
+        // mid-mode-3 bit0 toggle (m3_lcdc_bg_en / bgoff_bgon) strips BG
+        // priority at the production/SameBoy column instead of the leading
+        // edge. bit0 carries no mode-3-length coupling (the fetch still runs),
+        // so this is render-only; OBJ-enable (bit1) keeps the eager `eff.lcdc`
+        // (it gates the sprite fetch / length). `render_lcdc` == `eff.lcdc` in
+        // production (byte-identical OFF).
+        let render_lcdc = self.eff.render_lcdc;
+        let bg_off = (!cgb || self.dmg_compat) && render_lcdc & LCDC_BG_ENABLE == 0;
         let bg_c = if bg_off { 0 } else { bg_c };
 
         let sprite_wins = sp.color != 0
@@ -245,7 +254,7 @@ impl Ppu {
                 // CGB: BG color 0 always loses; LCDC bit 0 clear strips all
                 // BG priority; else BG attribute bit 7 or OAM bit 7 wins.
                 bg_c == 0
-                    || self.eff.lcdc & LCDC_BG_ENABLE == 0
+                    || render_lcdc & LCDC_BG_ENABLE == 0
                     || !(bg_attr & 0x80 != 0 || sp.bg_priority)
             } else {
                 !(sp.bg_priority && bg_c != 0)
