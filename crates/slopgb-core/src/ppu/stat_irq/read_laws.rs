@@ -1,0 +1,550 @@
+//! FF41 read-law engine (Part C, HALFDOT-BUILD-PLAN): the CPU-visible mode
+//! readout `vis_mode_read` and its per-config mode-3-exit law table
+//! `vis_exit_hd` (window length/shadow arms · pre-draw/reenable aborts ·
+//! the #11bi post-switch exit table · the unified bare exit) + the shadow
+//! window-extend predicate. Second `impl Ppu` block split out of
+//! `stat_irq.rs` for the CLAUDE.md <1000-line cap (like `reclock.rs`);
+//! verdict-only laws — the counter-pinned IRQ dispatch lives in the parent
+//! and `reclock.rs`. Production (`tier2_reclock` off) returns the native
+//! [`Ppu::vis_mode`] untouched.
+
+use super::*;
+
+impl Ppu {
+    /// STAT mode bits as read through FF41 — the CPU-visible side of the
+    /// two-latch model (HALFDOT-BUILD-PLAN Part C). This is *not* the rendering
+    /// state machine: mode reads 0 during the first 4 dots of every line
+    /// (and during 144:0-3), and mode 3 appears 4 dots after VRAM read
+    /// locking (`lcdon_timing-GS` tables).
+    ///
+    /// **Part C (the law collapse):** under `tier2_reclock` the FF41 read's
+    /// mode-3→0 verdict is ONE comparison — the read's exact half-dot position
+    /// ([`Ppu::read_pos_hd`]) against the per-config CPU-visible mode-3 exit
+    /// ([`Ppu::vis_exit_hd`]) — replacing the seven accreted shadow laws
+    /// (#11z/#11ag window length · #11af/#11bd late-WY + boundary-WY ·
+    /// #11at/#11bb pre-draw aborts · #11au reenable · #11aw un-trigger ·
+    /// #11bc/#11ar unified bare exit + carries). The exit is DECOUPLED from
+    /// the counter-pinned IRQ dispatch (`line_render_done` /
+    /// `mode_for_interrupt`), which never moves (SameBoy `GB_STAT_update`
+    /// two-latch model, display.c:523-574). Production is byte-identical
+    /// (`tier2_reclock` off → native [`Self::vis_mode`]).
+    pub(super) fn vis_mode_read(&self) -> u8 {
+        let m = self.vis_mode();
+        if !self.tier2_reclock {
+            return m;
+        }
+        // C2 #11ar — the DS mode-2 ISR line-start read probes the mode0→2
+        // (HBlank→OAM) LINE-START boundary, not the mode-3 exit: slopgb's
+        // native flip lags SameBoy's, which flips at 8 MHz pos 4 = dot 2 (the
+        // DS mode-bits lag). Scoped to the carried mode-2 ISR read
+        // (`stat_rise_oam`), native mode 0, line-start dot < 4 (+1/−0
+        // measured; the exhaustive per-class characterization flagged the
+        // shared mode0→2 boundary as A/B risk, the scope confines it to
+        // `m2int_m0stat`). Checked first: no mode-3-exit arm can match at
+        // dot < 4 (the window arms need a same-line WX match ≥ ~dot 89; the
+        // bare DS arm needs m == 3).
+        if self.read_carried
+            && self.stat_rise_oam
+            && self.model.is_cgb()
+            && self.ds
+            && self.line >= 1
+            && self.line < 144
+            && m == 0
+            && self.dot < 4
+        {
+            return if self.dot >= 2 { 2 } else { 0 };
+        }
+        // #11bg — the DS mode-2 ISR read at the mode2→3 ENTRY boundary: the
+        // same +2 carried-read frame as the line-start arm above, applied to
+        // the visible mode-3 entry (slopgb 84; the carried read's SameBoy
+        // instant is dot+2). `m2int_m2stat_ds_1/_2` straddle it at dots
+        // 80/82 (want 2/3); the entry is SCX-independent (`m2int_scx4_
+        // m2stat_ds` — asm-pinned).
+        if self.read_carried
+            && self.stat_rise_oam
+            && self.model.is_cgb()
+            && self.ds
+            && self.line >= 1
+            && self.line < 144
+            && m == 2
+            && (80..84).contains(&self.dot)
+        {
+            return if self.dot + 2 >= 84 { 3 } else { 2 };
+        }
+        // #11bh item-7 count-row slice — the SHIFTED-frame hold-until-sample
+        // FF41 arm: a post-STOP (`lcd_shift_dots != 0`) poll landing on the
+        // recorded flip's own dot still reads mode 3 (the lcd_offset count
+        // law: the flip is a half-dot PAST the sample — F1 = L + 1.5, uniform
+        // ½-dot margins; slopgb's whole-dot flip lands ON the poll dot and
+        // read 0 — `offset1_lyc99int_m0stat_count_scx2_ds_1` DS poll 257 /
+        // `offset3_..._scx1_1` SS poll 255, both want 0x83; the `_2` siblings
+        // read 2 dots past the flip and keep 0x80 — the ONE-SIDED error).
+        // POLLED (`!read_carried`) + LYC-0x99-anchored (= 153, the line-153
+        // wake the lcd_offset dances all ride): the count loops run
+        // with the lyc99int anchor armed through every per-line poll (the
+        // group-E `lyc == 153` anchor-discriminator shape). Needed because
+        // `speedchange3_nop_ly44_m3_m3stat_scx2_2` (LYC anchor 44) polls the
+        // IDENTICAL whole-dot shape — ly27 dot 257 == flip, dsa 6, uncarried
+        // — with the OPPOSITE want (C0, SameBoy-pass; +1/−1 measured), and
+        // the m2int ISR reads (`speedchange2*_m3stat_scx3_2`, carried) sit
+        // one more collision over (+3/−4 with the unanchored arm, all
+        // SameBoy-pass). The whole-dot frame carries NO other observable —
+        // the true split is the sub-dot poll phase the S6 co-land owns.
+        if self.lcd_shift_dots != 0
+            && self.model.is_cgb()
+            && self.line < 144
+            && m == 0
+            && !self.read_carried
+            && self.lyc == 0x99
+            && self.line_render_done
+            && self.flip_dot != 0
+            && self.dot == self.flip_dot
+        {
+            return 3;
+        }
+        let Some(exit_adj) = self.vis_exit_hd(m) else {
+            return m;
+        };
+        if self.read_pos_hd() < exit_adj { 3 } else { 0 }
+    }
+
+    /// Part C — the per-config CPU-visible mode-3→0 exit for the current FF41
+    /// read, in 8 MHz half-dots on slopgb's line frame, with the read's own
+    /// per-ISR carry ([`Ppu::isr_read_carry_hd`]) and the carried LCD phase
+    /// (`lcd_phase_hd`, SS) already FOLDED (subtracted) so the caller compares
+    /// plain [`Ppu::read_pos_hd`] `< exit`. `None` = no half-dot exit model
+    /// for this config (the read returns the native [`Self::vis_mode`]).
+    ///
+    /// slopgb-frame constants relate to SameBoy's by the uniform +8 hd frame
+    /// offset (`b-readsync-dualtrace-2026-07-02.md`: slopgb dot D ↔ SameBoy
+    /// cfl·2+dc = 2D+8, both speeds). A read can match SEVERAL arms (e.g. a
+    /// re-enabled triggering window matches the length arm AND the reenable
+    /// arm); the source laws were ordered fall-through blocks, whose combined
+    /// verdict folds to: `m == 3` arms (force-0 past their exit) take the
+    /// MINIMUM matching exit, `m == 0` arms (hold-3 below their exit) the
+    /// MAXIMUM. Each arm keeps the guards its source law was measured under:
+    ///
+    /// | arm | config | exit (slopgb dots) | source |
+    /// |---|---|---|---|
+    /// | 1 | active triggering window | `259 + SCX&7 + ds` | #11z/#11ag (SameBoy `SBex = 263 + SCX&7`, read offset +4) |
+    /// | 2 | shadow late-WY extend (render bare, SameBoy window) | `263 + SCX&7 + ds` (polled) | #11af/#11ag/#11bd |
+    /// | 3 | CGB pre-draw window-abort, SS | `253` (SCX penalty DROPPED, mattcurrie §WIN_EN) | #11at |
+    /// | 4 | CGB pre-draw window-abort, DS | `254`; abort boundary `(89+WX)&!1` | #11bb |
+    /// | 5 | CGB window re-enable too late to redraw | `253` | #11au |
+    /// | 6 | CGB late-WY UN-trigger (SameBoy bare, slopgb window) | `253 + SCX&7` | #11aw |
+    /// | 7 | boundary-WY cross-line extend | `263 + SCX&7 + ds` polled / `259 …` carried | #11bd item 4 |
+    /// | 8 | bare line | SS: emergent `2*flip + 2` hd − carry − phase; DS: `508 + 2*(SCX&7) + 2*(SCX&1)` hd − carry | PORT 1 #11bc/#11ar |
+    fn vis_exit_hd(&self, m: u8) -> Option<i32> {
+        let scx7 = i32::from(self.scx & 7);
+        let ds1 = i32::from(self.ds);
+        let mut exit: Option<i32> = None;
+        // Fold a matching arm's exit: min for the m==3 (force-0) class, max
+        // for the m==0 (hold-3) class — the source laws' fall-through order.
+        let fold = |exit: &mut Option<i32>, e: i32| {
+            *exit = Some(match *exit {
+                Some(cur) if m == 3 => cur.min(e),
+                Some(cur) => cur.max(e),
+                None => e,
+            });
+        };
+        // Arm 1 — the triggering-window mode-3 length law (#11z, DS #11ag).
+        // A triggering window's SameBoy exit is `SBex = 263 + SCX&7`; the
+        // deferred read samples the PPU +4 dots before SameBoy reads the same
+        // `ldh a,(FF41)` (MEASURED — `m2int_wx03_scx5_m3stat_2` slopgb dot264
+        // ↔ SameBoy cfl268 = SBex), so the CPU-visible exit is `259 + SCX&7`
+        // (+1 in DS: the deferred cc+0 ISR read lands +1 dot vs SS). LINE-0 /
+        // first-window-line (wy2 == ly) excluded for ON-screen windows (their
+        // trigger-line mode-3 extends LATER than the steady law; #11y) but
+        // NOT for off-screen wx >= 0xA0 (renders nothing, no extend; #11ac).
+        // Off-screen windows (wx A0-A6) extend with NO sprite penalty →
+        // sprite-free lines only there; DS excludes sprite-laden lines
+        // entirely (the real mode-3 end extends past the bare exit;
+        // `10spritesPrLine_wx*_m3stat_ds_1` SameBoy-passes).
+        if self.render.win_active
+            && self.model.is_cgb()
+            && self.line >= 1
+            && self.eff.wx <= 0xA6
+            && (self.eff.wx < 0xA0 || self.render.n_sprites == 0)
+            && (!self.ds || self.render.n_sprites == 0)
+            && !self.render.win_aborted
+            && (self.wy2 != self.ly || self.eff.wx >= 0xA0)
+            && self.wy2 <= 143
+            && m == 3
+        {
+            fold(&mut exit, 2 * (259 + scx7 + ds1));
+        }
+        // #11bf item 3c — a mid-line WX rewrite committing AT/BEFORE the WX
+        // match dot un-catches the window on SameBoy (`late_wx_scx5_1`: the
+        // FF4B:=FF write and the match both at dot 97 → SameBoy bare; `_2`
+        // at 101 → caught, extends) while slopgb's whole-dot render catches
+        // first and extends both. SS, bare-sprite-free; the SS bare exit.
+        // SCX&7 == 5 ONLY (measured: at scx0/2/3 SameBoy still catches the
+        // same write≤match race — `late_wx_2`/`_scx2_2`/`_scx3_2`/`_ff_*_1`
+        // all want 3; the un-scoped arm dropped all 8. The scx5 fine-scroll
+        // phase is what pushes the effective catch past the write).
+        if !self.ds
+            && scx7 == 5
+            && self.render.wx_write_dot != 0
+            && self.render.wx_match_dot != 0
+            && self.render.wx_write_dot <= self.render.wx_match_dot
+            && self.render.win_active
+            && self.model.is_cgb()
+            && self.render.n_sprites == 0
+            && !self.render.win_aborted
+            && m == 3
+        {
+            fold(&mut exit, 2 * (253 + scx7));
+        }
+        // #11bf item 3a — a late-ENABLE-triggered window (the mid-line
+        // LCDC.5 write IS the trigger, `Render::win_enable_dot`) whose
+        // enable lands past the line's fetch-catch deadline renders BARE on
+        // SameBoy — the window misses this line entirely — while slopgb's
+        // whole-dot render still activates and extends (`late_enable_ly0_ds`
+        // want-pair: enable dot 94 → native extend holds (want 3, no arm);
+        // dot 96 → SameBoy bare (want 0), both legs reading the identical
+        // dot 260 — the enable dot is the only discriminator). DS-scoped,
+        // bare-sprite-free lines; the DS bare exit form (PORT 1).
+        if self.ds
+            && self.render.win_enable_dot > 94
+            && self.render.win_active
+            && self.model.is_cgb()
+            && self.render.n_sprites == 0
+            && !self.render.win_aborted
+            && self.wy2 <= 143
+            && m == 3
+        {
+            fold(&mut exit, 508 + 2 * scx7 + 2 * i32::from(self.scx & 1));
+        }
+        // Arm 2 — the shadow late-WY extend (#11af; line 0 included #11bd).
+        // slopgb's discrete `wy_latch` sampler misses the mid-line late-WY
+        // write SameBoy's continuous `wy_check` catches, so slopgb renders the
+        // line BARE (native m == 0) where SameBoy's window triggered and
+        // extended mode 3 to the POLLED exit `263 + SCX&7` (+0 ISR offset —
+        // these reads carry no mode-2 dispatch; #11z). The shadow
+        // [`Self::win_extends_sb`] re-derives SameBoy's trigger decision.
+        // Sprite-laden DS lines excluded (the shadow's bare exit carries no
+        // sprite penalty).
+        if self.model.is_cgb()
+            && self.line < 144
+            && m == 0
+            && !self.render.win_active
+            && (!self.ds || self.render.n_sprites == 0)
+            && self.win_extends_sb()
+        {
+            fold(&mut exit, 2 * (263 + scx7 + ds1));
+        }
+        // Arm 3 — the CGB PRE-DRAW window-abort bare exit, SS (#11at). A
+        // window disabled by an LCDC.5 clear BEFORE its first fetch renders
+        // BARE on SameBoy with the SCX fine-scroll penalty DROPPED
+        // (mattcurrie §WIN_EN) → exit cfl257 = slopgb 253, NOT 257+SCX&7;
+        // slopgb's whole-dot render over-extends. Boundary: the abort must
+        // land before the window's first tile ships (~dot 106 for the scx03
+        // early setup — `_1` abort104 bare / `_2` abort108 extend, ALL
+        // wx0f-12; wx-INDEPENDENT, `wx_match+1`-relative REFUTED +6/−4). A
+        // later abort catches the first tile and EXTENDS (per-config length —
+        // the atomic render reclock's). Currently-DISABLED window only
+        // (excludes late_reenable); bare non-sprite non-glitch CGB lines.
+        if self.model.is_cgb()
+            && !self.ds
+            && self.render.win_predraw_abort
+            && self.render.win_predraw_abort_dot <= 105
+            && self.eff.lcdc & LCDC_WIN_ENABLE == 0
+            && self.line >= 1
+            && self.line < 144
+            && m == 3
+            && !self.render.win_active
+            && !self.glitch_line
+            && self.render.n_sprites == 0
+        {
+            fold(&mut exit, 2 * 253);
+        }
+        // Arm 3b — the sprite-at-window-X abort-slot removal, SS CGB (#11bh,
+        // asm_window_gdma Row 4). With an object at the window's screen X
+        // (OAM X = WX+1) the window activation precedes the object fetch and
+        // the sprite fetch then OCCUPIES the fetcher's next GET_TILE_T1 —
+        // removing the late CGB abort slot, so an LCDC.5 clear landing in
+        // that last slot (commit ≥ wx_match−4; `late_disable_spx10_wx0f_2`
+        // clear 104, match 105) leaves the window+sprite line fully extended
+        // (SameBoy flip 272 → slopgb-frame exit 270). slopgb's whole-dot
+        // en-sample at the match suppressed the start → native bare+sprite
+        // abort exit 264, read 264 → 0 (want 3). The `_1` clear (100) lands
+        // a slot earlier and genuinely aborts (native, stays 0). Dual-traced
+        // fp both emulators, 2026-07-03.
+        if self.model.is_cgb()
+            && !self.ds
+            && self.render.win_predraw_abort
+            && self.render.wx_match_dot != 0
+            && self.render.win_predraw_abort_dot + 4 >= self.render.wx_match_dot
+            && self.render.win_predraw_abort_dot < self.render.wx_match_dot
+            && self.eff.lcdc & LCDC_WIN_ENABLE == 0
+            && self.line >= 1
+            && self.line < 144
+            && m == 0
+            && !self.render.win_active
+            && !self.glitch_line
+            && self.render.n_sprites > 0
+            && self.render.sprites[..usize::from(self.render.n_sprites)]
+                .iter()
+                .any(|s| u16::from(s.x) == u16::from(self.eff.wx) + 1)
+        {
+            fold(&mut exit, 2 * 270);
+        }
+        // Arm 4 — the DS pre-draw abort twin (#11bb). SameBoy renders the
+        // early aborts bare with the penalty dropped, exit `cfl257 dc2` (the
+        // DS half-dot bare exit) = slopgb 254. The DS abort boundary is
+        // wx-DEPENDENT: `(89 + WX) & !1` — the window's first-fetch M-cycle
+        // start on the DS 2-dot grid (measured across all 8 wx0f-12 legs;
+        // three candidates built + refuted first).
+        if self.model.is_cgb()
+            && self.ds
+            && self.render.win_predraw_abort
+            && self.render.win_predraw_abort_dot < (89 + u16::from(self.wx)) & !1
+            && self.eff.lcdc & LCDC_WIN_ENABLE == 0
+            && self.line >= 1
+            && self.line < 144
+            && m == 3
+            && !self.render.win_active
+            && !self.glitch_line
+            && self.render.n_sprites == 0
+        {
+            fold(&mut exit, 2 * 254);
+        }
+        // Arm 5 — the CGB window-REENABLE length, SS (#11au). A window
+        // disabled then RE-enabled mid-mode-3 redraws from the re-enable
+        // point; mode 3 extends past the read iff the re-enable beat the WX
+        // redraw start (`reen <= wx_match − 3`, uniform — base wxmatch97:
+        // reen92 extend / reen96 bare; wx0f wxmatch105: 100/104). The LATE
+        // re-enable renders the tail BARE (exit 253); slopgb collapses both
+        // to mode 3. SCX&7 <= 3 only (the fine-scroll shifts the redraw
+        // deadline at high SCX — scx5 boundary 98 not 94, measured; scx5+
+        // pass natively).
+        if self.model.is_cgb()
+            && !self.ds
+            && self.render.win_reenable_dot != 0
+            && self.render.wx_match_dot != 0
+            && self.render.win_reenable_dot + 3 > self.render.wx_match_dot
+            && self.scx & 7 <= 3
+            && self.eff.lcdc & LCDC_WIN_ENABLE != 0
+            && self.render.win_active
+            && self.line >= 1
+            && self.line < 144
+            && m == 3
+            && !self.glitch_line
+            && self.render.n_sprites == 0
+        {
+            fold(&mut exit, 2 * 253);
+        }
+        // Arm 6 — the CGB late-WY UN-trigger bare exit, SS (#11aw). SameBoy's
+        // `wy_check` compares the IMMEDIATE WY; a late WY→(non-LY) write
+        // un-triggers its window (line renders BARE) while slopgb — its
+        // render + `wy_trig_sb` reading the 6-dot-lagged `wy2` — triggers and
+        // over-extends. When slopgb's render triggered (`win_active`) but the
+        // raw compare did NOT (`!wy_trig_sb_raw`), the line is SameBoy-bare:
+        // exit `253 + SCX&7`.
+        if self.model.is_cgb()
+            && !self.ds
+            && self.render.win_active
+            && !self.wy_trig_sb_raw
+            && self.line >= 1
+            && self.line < 144
+            && m == 3
+            && !self.glitch_line
+            && self.render.n_sprites == 0
+        {
+            fold(&mut exit, 2 * (253 + scx7));
+        }
+        // Arm 7 — the boundary-WY cross-line extend (#11bd item 4). A WY
+        // write committing in a line's tail (dot >= 452) or head (dot < 4)
+        // matching the CURRENT (old) line latches SameBoy's `wy_triggered`
+        // (its scheduled `wy_check` compares the old `current_line`); every
+        // later line renders the window where slopgb's render + wy2-lagged
+        // shadow both miss it. Fires on the RAW sticky latch for lines the
+        // render did NOT trigger, window still enabled + on-screen WX + a
+        // same-line WX match (a late off-screen WX write or an enable that
+        // missed the match window renders SameBoy-bare — `late_wx_ff_*_2`,
+        // `late_enable_afterVblank_2`; the LCDC-enable latch is deliberately
+        // NOT taken, 7 want-0 legs SameBoy-PASS bare). The exit is
+        // read-class-dependent (#11z): POLLED reads sit at +0 of SameBoy's
+        // `263 + SCX&7` exit; a carried STAT-ISR read at +4 → 259.
+        if self.model.is_cgb()
+            && self.line >= 1
+            && self.line < 144
+            && m == 0
+            && !self.render.win_active
+            && !self.render.win_aborted
+            && self.wy_xline_trig
+            && self.eff.lcdc & LCDC_WIN_ENABLE != 0
+            && self.eff.wx <= 0xA6
+            && self.render.wx_match_dot != 0
+            && !self.glitch_line
+            && (!self.ds || self.render.n_sprites == 0)
+            && std::env::var("SLOPGB_NOXLINE").is_err()
+        {
+            let base = if self.read_carried { 259 } else { 263 };
+            fold(&mut exit, 2 * (base + scx7 + ds1));
+        }
+        // Arm 8 — PORT 1 (#11bc): the unified half-dot BARE-line mode-3 exit.
+        // The read position is `read_pos_hd + isr_read_carry_hd + lcd_phase`
+        // (folded into the returned exit); the exit is a per-speed half-dot
+        // line constant:
+        //
+        //   SS: exit_hd = 2*flip + 2, EMERGENT from the render's own recorded
+        //       flip (`flip_dot`) or its projection — NOT a live-`scx` closed
+        //       form: a mid-line SCX write moves the exit exactly as the
+        //       fine-scroll hunt resolved it (late_scx4 / scx_m3_extend; a
+        //       closed form broke them, measured). For a clean steady line
+        //       this equals `510 + 2*(SCX&7)` (flip 254+SCX&7), the constant
+        //       the #11bc six-pin algebra derived (kernel pair + lcdon@253 +
+        //       #11n m2int_scx3 + the speedchange4 fp dual-trace).
+        //   DS: exit_hd = 508 + 2*(SCX&7) + 2*(SCX&1) — the #11ar full-carry
+        //       law rewritten exactly on the half-dot grid.
+        //
+        // SS fires on native m ∈ {3, 0} — the true exit sits ±1 dot around
+        // the whole-dot flip, BOTH directions needed (#11bd: the HOLD
+        // direction is derivable only on the STOPADV-advanced frame;
+        // speedchange4 scx2_1 reads AT the native flip dot and must still
+        // read 3); DS keeps the `m == 3` gate. Bare non-sprite non-window
+        // non-glitch lines, ARCH `self.scx` (the #11bb write-strobe rule).
+        // SS reads add the carried LCD phase (the per-leave m3stat read-frame
+        // surplus over the machine epoch; 0 for never-switched ROMs); DS
+        // keeps 0 — the DS post-leave segments are epoch-only (measured).
+        // #11bg — the DS branch includes LINE 0: the gdma_cycles post-stall
+        // polls land at ly0 (the corrected DS line-153 wake moved them −2
+        // onto the flip straddle: `_1` dot252 want3 / `_2` dot254 want0 —
+        // exactly the emergent exit 508 hd). SS keeps `line >= 1`.
+        if (self.line >= 1 || self.ds)
+            && self.line < 144
+            && !self.render.win_active
+            && !self.render.win_aborted
+            && !self.wy_trig_sb
+            && !self.glitch_line
+            && self.render.n_sprites == 0
+        {
+            let carry = self.isr_read_carry_hd();
+            if self.ds {
+                if self.model.is_cgb() && m == 3 {
+                    // Part C — the DS exit re-expressed EMERGENT (like SS):
+                    // `2*flip − 2 + 2*(SCX&1)`, anchored to the render's own
+                    // recorded/projected flip. For a steady bare DS line the
+                    // flip is `255 + SCX&7` (DS lead 1), so this equals the
+                    // shipped #11ar closed form `508 + 2*(SCX&7) + 2*(SCX&1)`
+                    // exactly — byte-identical there — while a mid-line SCX
+                    // rewrite that re-arms the fine-scroll hunt EXTENDS the
+                    // exit with the render (`scx_m3_extend_ds`: SameBoy reads
+                    // hd 660 want 3 / 664 want 0, slopgb frame — the closed
+                    // form forced both to 0).
+                    let flip = if self.line_render_done && self.flip_dot != 0 {
+                        self.flip_dot
+                    } else if self.render.active {
+                        let (proj, lead) = self.flip_projection();
+                        self.dot + proj.saturating_sub(lead)
+                    } else {
+                        255 + u16::from(self.scx & 7)
+                    };
+                    // #11bi — the DS post-switch bare exit (the 4-variable
+                    // table's DS arm): a mid-frame-anchored speed dance
+                    // (speedchange v1/3/5 ly44) lands the true post-switch
+                    // frame the emergent exit's absorbed calibration
+                    // misses; in scope the law REPLACES the emergent exit.
+                    // `E = 502 + leave_k + 2*(SCX&7)` rp, LINEAR in scx
+                    // (the (SCX&1) parity term measured OUT for these
+                    // dances), leave_k = 2 when never left (v1). The
+                    // VBlank/boot-anchored suite (kernel `_ds`, offset1,
+                    // gdma — all first-STOP at ly144) and the DS-enable
+                    // dances (lcdoffds — `lcd_enable_in_ds`, sits exactly
+                    // on the emergent exit) are excluded. All 120 family
+                    // legs dual-traced: 120/120 offline fit, ZERO
+                    // constraint conflicts
+                    // (`speedchange-postswitch-exit-2026-07-03.md`).
+                    if self.stop_anchor_midframe && !self.lcd_enable_in_ds {
+                        fold(&mut exit, 502 + i32::from(self.stop_leave_k) + 2 * scx7);
+                    } else {
+                        fold(
+                            &mut exit,
+                            2 * i32::from(flip) - 2 + 2 * i32::from(self.scx & 1) - carry,
+                        );
+                    }
+                }
+            } else if !self.wy_latch
+                && self.wy2 != self.ly
+                && !self.render.win_stalled
+                && (m == 3 || m == 0)
+                && (self.line_render_done || self.render.active)
+            {
+                let flip = if self.line_render_done && self.flip_dot != 0 {
+                    self.flip_dot
+                } else {
+                    let (proj, lead) = self.flip_projection();
+                    self.dot + proj.saturating_sub(lead)
+                };
+                // #11bi — the SS post-switch bare exit: the #11bh park's
+                // 4-variable table, BUILT from the 120-leg dual-trace
+                // (`speedchange-postswitch-exit-2026-07-03.md`; 120/120
+                // offline fit, zero conflicts). `E = 504 + leave_k −
+                // 4*[lcd_enable_in_ds] + 2*(SCX&7)` rp — the leave k
+                // (dsa7-branched, 2/6) and the enable-in-DS re-anchor are
+                // the two class variables; ISR carry measured OUT (the
+                // carried m2int and polled ly44 legs share constants).
+                // Scoped to mid-frame-anchored dances post-LCD-on-leave
+                // (`stop_anchor_midframe`): the #11bh blanket's 14
+                // SameBoy-pass drops were the VBlank/boot-anchored classes
+                // (base/frame1/nop m2int + offset2/3 counts) this anchor
+                // excludes; the emergent arm still serves those. In scope
+                // the law REPLACES the emergent exit for BOTH directions —
+                // the emergent `2*flip + 2` m==0 hold over-holds the
+                // post-switch frame by up to 6 rp
+                // (`speedchange4_ly44_m3_nop_m3stat_scx3_2` reads rp 512
+                // native-0, true exit 512, emergent hold 518 — a fold
+                // cannot override a max-hold). The one out-of-scope
+                // hold-direction row (`speedchange2_nop_m2int_m3stat_
+                // scx1_1`, VBlank-anchored) stays the pre-seeded #11bd
+                // rebaseline joiner.
+                if self.stop_anchor_midframe && self.stop_leave_lcd_on {
+                    let en = if self.lcd_enable_in_ds { 4 } else { 0 };
+                    fold(
+                        &mut exit,
+                        504 + i32::from(self.stop_leave_k) - en + 2 * scx7,
+                    );
+                } else {
+                    let phase = i32::from(self.lcd_phase_hd);
+                    fold(&mut exit, 2 * i32::from(flip) + 2 - carry - phase);
+                }
+            }
+        }
+        exit
+    }
+
+    /// C2 #11af shadow window-extend predicate (tier2 + CGB only). Fires ONLY
+    /// for the mid-line late-WY trigger that slopgb's discrete `wy_latch`
+    /// sampler missed: the WY-trigger ([`Self::wy_trig_sb`]) latched on THIS
+    /// line, at/before the WX-activation dot ([`Render::wx_match_dot`]).
+    ///
+    /// The cross-line case (`trig_line < line`) is deliberately NOT handled:
+    /// (a) the late-WY rows that trigger on an earlier line (`10to0`/`FFto0`/
+    /// `FFto1` — WY written at the line boundary) land their write a line later
+    /// in slopgb's deferred frame, so the shadow never latches them anyway; and
+    /// (b) a window that genuinely latched earlier and draws every line is
+    /// already `win_active` in slopgb's render (excluded by the caller), so a
+    /// `!win_active` cross-line latch means the window was aborted / its WX or
+    /// LCDC.5 toggled late (`late_wx`/`late_reenable`/`late_enable`) — SameBoy
+    /// renders THOSE bare (`cfl 257`), so extending them is wrong.
+    pub(super) fn win_extends_sb(&self) -> bool {
+        self.wy_trig_sb
+            && self.eff.lcdc & LCDC_WIN_ENABLE != 0
+            && self.wy_trig_sb_line == self.ly
+            && self.render.wx_match_dot != 0
+            // The trigger must beat the WX-activation dot. The +2 slack is the
+            // wy2-copy phase difference: slopgb's `wy2` lags the WY write by 6
+            // dots (CGB), SameBoy's `wy_check` catches it at write + ~4, so the
+            // shadow `trigdot` runs 2 dots behind SameBoy's detection — the
+            // late-WY `_1` (extend) vs `_2`/`_3` (miss) split sits exactly on
+            // this 2-dot phase (`_1` trigdot = wxmatch + 1, `_2` = wxmatch + 5).
+            // #11ag DS: the slack was +4 (`_1` trigdot 101 / `_2` 103 vs
+            // wxmatch 97). #11bg: the corrected DS line-153 lyfc table moves
+            // the LYC=153 wake — and with it every ISR-timed WY write in this
+            // family — 2 dots earlier (`_1` 99 / `_2` 101), so the DS slack
+            // re-derives to the SS value (+2); the same shift is what fixes
+            // the `late_wy_ds` blocker trio outright.
+            && self.wy_trig_sb_dot <= self.render.wx_match_dot + 2
+    }
+}

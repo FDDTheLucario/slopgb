@@ -124,6 +124,8 @@
 mod blocking;
 mod line_setup;
 mod lyc;
+#[path = "stat_irq/read_laws.rs"]
+mod stat_irq_read_laws;
 #[path = "stat_irq/reclock.rs"]
 mod reclock;
 mod regs;
