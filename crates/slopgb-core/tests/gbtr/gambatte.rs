@@ -2141,6 +2141,63 @@ fn tier2_dmg_window_passes() {
     }
 }
 
+/// #11bo — the mode-3 render reclock, mechanism 1 (SCY/palette): the pure-render
+/// mid-mode-3 registers (SCY FF42, BGP/OBP FF47-FF49) take SCX's +4 render-frame
+/// defer (dots=3) on the tier2 deferred write path. The deferred clock advances
+/// the machine to the write's leading edge (cc+0) before the write; the eager
+/// `commit_eff` there landed the value 4 dots EARLY of the render's
+/// cc+4-calibrated fetch grid, so the pixel pipeline sampled the new SCY/palette
+/// too soon (the `dmgpalette_during_m3` / `scy_during_m3` pixel-reference
+/// flip-blockers). Staging 3 dots lets the strobe re-commit at the render frame
+/// (the `regs.rs` `staged_pending` survive skip keeps `Ppu::write` from
+/// clobbering it). SCY/palette are pure colour/row selection — no mode-3-length
+/// or FF41-read-law coupling (those sample ARCH `self.scy`/`self.bgp`) — so this
+/// is a render-only slice: CGB two-bin 291/291 zero-drift, mooneye 91/91 ON+OFF,
+/// production byte-identical OFF. Verified against the pixel two-bin
+/// (`gambatte_pixel_probe`, `SLOPGB_ROWLIST`): dmgpalette 6/6 + scy 26/27
+/// flag-on (the sprite-stalled `scy_during_m3_spx08_2` is a separate penalty-grid
+/// case). Representatives asserted via the suite's own frame comparator
+/// (`expect_frame_png`), flag-on.
+#[test]
+fn tier2_dmg_m3_render_scy_palette_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_dmg_m3_render_scy_palette",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        ("gambatte/dmgpalette_during_m3/dmgpalette_during_m3_1.gb", Model::Dmg),
+        ("gambatte/dmgpalette_during_m3/scx3/dmgpalette_during_m3_3.gb", Model::Dmg),
+        ("gambatte/scy/scy_during_m3_1.gbc", Model::Dmg),
+        ("gambatte/scy/scy_during_m3_1.gbc", Model::Cgb),
+        ("gambatte/scy/scx3/scy_during_m3_5.gbc", Model::Dmg),
+    ];
+    for (rel, model) in targets {
+        let path = root.join(rel);
+        let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, model);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        let (dmg, cgb) = plan_rom_on_disk(&path);
+        let Some(Check::Png(suffix)) = (if model.is_cgb() { cgb } else { dmg }) else {
+            panic!("{rel} [{model:?}] is not a Png-reference leg");
+        };
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        let png = path
+            .parent()
+            .unwrap_or(Path::new(""))
+            .join(format!("{stem}{suffix}.png"));
+        let map = if model.is_cgb() {
+            CgbColorMap::Gambatte
+        } else {
+            CgbColorMap::Identity
+        };
+        harness::expect_frame_png(&gb, &png, map)
+            .unwrap_or_else(|e| panic!("{rel} [{model:?}] tier2 flag-on render: {e}"));
+    }
+}
+
 /// Port Stage C2 #11ag — the WINDOW family ported to DOUBLE-SPEED: the #11y/#11z
 /// length law AND the #11af shadow WY-trigger, with the DS exit/deadline
 /// recalibrated. The `vis_mode_read` length law (the `m2int_wx*_m3stat` shorten)
@@ -3617,3 +3674,7 @@ fn tier2_late_enable_dead_tail_passes() {
 // never runs in the gate.
 #[path = "gambatte_flagon_probe.rs"]
 mod flagon_probe;
+
+// Session-local PIXEL two-bin (mode-3 render reclock, goal.md); `#[ignore]`'d.
+#[path = "gambatte_pixel_probe.rs"]
+mod pixel_probe;

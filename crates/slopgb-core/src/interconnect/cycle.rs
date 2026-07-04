@@ -369,7 +369,35 @@ impl Interconnect {
             // 4th tick after the stage), and `Ppu::write` lets the stage
             // survive (see the `staged_pending` skip). Production keeps the
             // gambatte mid-cycle staging ({2 SS, 1 DS}) — byte-identical OFF.
-            let dots = if self.tier2_reclock && addr == 0xFF43 && !self.ppu.glitch_active() {
+            // #11bo — the mode-3 render reclock: the pure-render mid-mode-3
+            // registers (SCY FF42, BGP/OBP FF47-FF49) take SCX's +4
+            // render-frame deferral (dots=3) on the tier2 deferred write path.
+            // The deferred clock advances the machine to the write's leading
+            // edge (cc+0) BEFORE the write; the eager `commit_eff` there lands
+            // the value 4 dots EARLY of the render's cc+4-calibrated fetch
+            // grid, so the pixel pipeline sampled the new SCY/palette 4 dots
+            // too soon (dmgpalette_during_m3 / scy_during_m3 flip-blockers).
+            // Staging 3 dots lets the strobe re-commit at the render frame
+            // (the `staged_pending` survive skip keeps `Ppu::write` from
+            // clobbering it). SCY/palette are pure colour/row selection — no
+            // mode-3-length or FF41-read-law coupling (those sample ARCH
+            // `self.scy`/`self.bgp`) — so this is a render-only slice, CGB
+            // two-bin / mooneye / OCR all unaffected. Measured against the
+            // pixel two-bin: dmgpalette 6/6 + scy 26/27 at dots=3 (the
+            // sprite-stalled scy_spx08_2 is a separate penalty-grid case).
+            // LCDC/WX stay the `pxdots` experiment (they couple to window
+            // length / the abort law — #11bb "LCDC +4 net-negative" for the
+            // read frame) until their render-frame offset is measured. Glitch
+            // lines commit immediately (no deferred fetch grid).
+            let px = crate::ppu::pxdots();
+            let dots = if let (Some(n), true, 0xFF40 | 0xFF4B) =
+                (px, self.tier2_reclock && !self.ppu.glitch_active(), addr)
+            {
+                n
+            } else if self.tier2_reclock
+                && matches!(addr, 0xFF42 | 0xFF43 | 0xFF47..=0xFF49)
+                && !self.ppu.glitch_active()
+            {
                 // SCX takes the full +4 render-frame deferral (visible from
                 // `step(L+4)`): PROVEN by late_scx4 SS+DS + scx_m3_extend —
                 // the fine-scroll comparator hunt (dots 89-96) is calibrated

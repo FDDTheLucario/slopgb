@@ -229,8 +229,13 @@ impl Ppu {
         // lands before/after the fine-scroll comparator's first sample;
         // slopgb collapsed both legs onto the leading edge). Production
         // (`!tier2_reclock`) is byte-identical.
+        // #11bo — the mode-3 render regs (SCY/SCX/BGP/OBP) survive the arch
+        // write so they strobe-commit at the render frame instead of the
+        // leading edge (see the dots calc in `cycle.rs::write_deferred`). LCDC/
+        // WX ride the `pxdots` experiment until measured.
+        let px_reg = crate::ppu::pxdots().is_some() && matches!(addr, 0xFF40 | 0xFF4B);
         let staged_pending = self.tier2_reclock
-            && addr == 0xFF43
+            && (matches!(addr, 0xFF42 | 0xFF43 | 0xFF47..=0xFF49) || px_reg)
             && !self.glitch_line
             && self
                 .staged

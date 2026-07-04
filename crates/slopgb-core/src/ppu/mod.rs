@@ -837,6 +837,21 @@ pub(crate) fn s5dbg_on() -> bool {
     *F.get_or_init(|| std::env::var_os("SLOPGB_S5DBG").is_some())
 }
 
+/// TEMP experiment (goal.md #11bo — the mode-3 render reclock): the per-dot
+/// deferral applied to the DMG render registers (FF42/FF47-FF49) on the tier2
+/// deferred write path, via `SLOPGB_PXDOTS=<n>`. `None` = experiment off
+/// (byte-identical). Swept against the pixel two-bin to find each mechanism's
+/// render-frame offset, then baked in and removed.
+pub(crate) fn pxdots() -> Option<u8> {
+    use std::sync::OnceLock;
+    static F: OnceLock<Option<u8>> = OnceLock::new();
+    *F.get_or_init(|| {
+        std::env::var("SLOPGB_PXDOTS")
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+    })
+}
+
 /// TEMP (#11an+) per-bus-op ISR T-sequence trace gate (`SLOPGB_ISRTRACE`):
 /// logs every deferred read/write/internal access's (addr, ly, dot, clk, pend)
 /// so the handler advance can be lined up against SameBoy's `SB2` per-access
