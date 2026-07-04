@@ -2239,6 +2239,33 @@ fn tier2_dmg_m3_render_lcdc_passes() {
     }
 }
 
+/// #11bo — the mode-3 render reclock, mechanism 3 (SCX double-speed): SCX's
+/// render-frame defer is +2 dots in double speed vs +4 (dots=3) in single speed
+/// — the DS M-cycle is 2 PPU dots (vs 4), so the write-commit-to-fetch-grid
+/// offset halves. dots=2 fixes the 5 `scx_during_m3_ds` fine-scroll pixel legs
+/// AND holds `late_scx4`'s DS FF41 read law (see
+/// `tier2_late_scx_writestrobe_passes`) — the single value that satisfies both
+/// the render straddle and the read-verdict straddle. CGB two-bin zero-drift,
+/// production byte-identical OFF.
+#[test]
+fn tier2_dmg_m3_render_scx_ds_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_dmg_m3_render_scx_ds",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        ("gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_5.gbc", Model::Cgb),
+        ("gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_8.gbc", Model::Cgb),
+        ("gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_5.gbc", Model::Cgb),
+    ];
+    for (rel, model) in targets {
+        assert_pixel_leg_flagon(&root, rel, model);
+    }
+}
+
 /// Port Stage C2 #11ag — the WINDOW family ported to DOUBLE-SPEED: the #11y/#11z
 /// length law AND the #11af shadow WY-trigger, with the DS exit/deadline
 /// recalibrated. The `vis_mode_read` length law (the `m2int_wx*_m3stat` shorten)

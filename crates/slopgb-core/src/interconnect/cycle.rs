@@ -394,6 +394,20 @@ impl Interconnect {
                 (px, self.tier2_reclock && !self.ppu.glitch_active(), addr)
             {
                 n
+            } else if let (0xFF43, true, true) =
+                (addr, self.tier2_reclock && !self.ppu.glitch_active(), self.double_speed)
+            {
+                // #11bo mech3 — SCX in DOUBLE SPEED takes a +2 render-frame
+                // defer, not single speed's +4 (dots=3): the DS M-cycle is 2 PPU
+                // dots (vs 4), so the write-commit-to-fetch-grid offset halves.
+                // dots=2 fixes the 5 `scx_during_m3_ds` fine-scroll pixel legs
+                // AND holds `late_scx4`'s DS read law (the fine-scroll comparator
+                // straddle) — a swept dots=1 broke the read law
+                // (`tier2_late_scx_writestrobe`), dots=3 broke the render.
+                // SCY/palette keep dots=3 in DS (no DS pixel legs, and their
+                // timing never reaches an OCR verdict). Measured: full CGB
+                // two-bin zero-drift.
+                2
             } else if self.tier2_reclock
                 && matches!(addr, 0xFF42 | 0xFF43 | 0xFF47..=0xFF49)
                 && !self.ppu.glitch_active()
