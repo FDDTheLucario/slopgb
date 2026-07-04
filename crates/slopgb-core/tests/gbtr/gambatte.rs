@@ -960,12 +960,17 @@ fn tier2_line0_vblank_carry_passes() {
 /// poll observed it and the ROM branched to read LY=0 (`out=00`). SameBoy
 /// renders 90 (it raises the glitch-line mode-0 at the same cfl=257 as every
 /// bare line). `ly0_m0irq_scx1` is the sibling (`outE0`). Production (flag-off)
-/// byte-identical — `mode_for_interrupt` is inert there. **CGB-only**: on DMG
-/// this is a genuine multi-mechanism atomic (the same glitch-line rise drives
-/// the poll path AND the `int_hblank_halt` halt-wake grid, which want the rise
-/// at conflicting dots — SameBoy resolves it sub-T-cycle), so the DMG row stays
-/// a baselined floor and DMG is byte-identical (`int_hblank_halt` green). See
-/// the source comment + `ppu-subdot-ladder.md` "#11ad".
+/// byte-identical — `mode_for_interrupt` is inert there. This pin covers the
+/// **CGB** side of both rows; the DMG side splits: `frame0_m0irq_count` DMG
+/// stays a baselined floor (a dispatch-COUNT the reclock's cc+0 frame loses —
+/// the poll at ~dot252 never sees the rise it must count), while the DMG
+/// `ly0_m0irq_scx1_1` READ-frame half SHIPPED #11bm (`tier2_dmg_m0_coincident_passes`)
+/// — a verdict-only co-instant read-view mask ([`Ppu::ff0f_dmg_m0_coincident_mask`],
+/// [`Ppu::ff0f_stat_peek`]'s file) that clears the bit for a read landing EXACTLY
+/// on the flip dot WITHOUT moving the rise, so the `int_hblank_halt` halt-wake
+/// grid (which needs the rise at its dispatch dot) is untouched (`int_hblank_halt`
+/// + gbmicro 445 green). See the source comment + `ppu-subdot-ladder.md` "#11ad"
+/// + `measurements/dmg-ocr-singles-2026-07-04.md`.
 #[test]
 fn tier2_glitch_m0irq_dispatch_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -991,6 +996,40 @@ fn tier2_glitch_m0irq_dispatch_passes() {
         check_hex_screen(gb.frame(), want, true)
             .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{want} (tier2 flag-on): {e}"));
     }
+}
+
+/// Port Stage C / S5 (#11bm) — the DMG LCD-enable glitch-line mode-0 co-instant
+/// FF0F read-view mask ([`Ppu::ff0f_dmg_m0_coincident_mask`]). The third
+/// read-frame pass (after #11bk hblank +16 / #11bl poweron +20): the DMG face of
+/// the read-frame half the #11ad `tier2_glitch_m0irq_dispatch_passes` doc parked
+/// as "a genuine multi-mechanism atomic ... byte-identical DMG floor". Corrected:
+/// `enable_display/ly0_m0irq_scx1_1` polls FF0F (DI, `IE=0`) on the glitch line
+/// with the mode-0 STAT armed, reading EXACTLY on the recorded mode-0 flip dot
+/// (slopgb `dot253 == flip_dot253`, == SameBoy cfl257). SameBoy's `read_high_memory`
+/// orders the CPU read BEFORE the STAT rise at that shared instant → E0 (the bit
+/// not yet risen); slopgb's whole-dot frame folds the rise first and commits the
+/// set bit → E2. The mask clears the STAT bit for a read AT the flip dot — EXACT,
+/// never a window: the `_2` sibling reads dot257 > flip (poll after the rise, E2)
+/// and `scx0_2` reads flip+1 (E2), so both are untouched. **Verdict-only** — the
+/// rise/dispatch never moves, so the co-located `int_hblank_halt` halt-wake grid
+/// (which the #11ad park cited as the conflicting-dot atomicity) stays green, the
+/// exact #11bk/#11bl decoupling. `frame0_m0irq_count` DMG (the dispatch-COUNT
+/// sibling, poll at dot252 ≠ flip) stays a floor. +1 full-DMG two-bin
+/// (0 SameBoy-pass dropped); `tier2` + `!is_cgb` + `glitch_line` + SS scoped →
+/// production and CGB byte-identical. Map:
+/// `measurements/dmg-ocr-singles-2026-07-04.md`.
+#[test]
+fn tier2_dmg_m0_coincident_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr("tier2_dmg_m0_coincident", "collection not present");
+        return;
+    };
+    let rel = "gambatte/enable_display/ly0_m0irq_scx1_1_dmg08_cgb04c_outE0.gbc";
+    let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+    let mut gb = harness::boot_with_reclock(&rom, Model::Dmg);
+    run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+    check_hex_screen(gb.frame(), "E0", false)
+        .unwrap_or_else(|e| panic!("{rel} [Dmg] expected outE0 (tier2 flag-on): {e}"));
 }
 
 /// Port Stage C / S5 (#11ar — the per-ISR read-POSITION PEEK). The first CLEAN

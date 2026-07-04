@@ -128,6 +128,8 @@ mod lyc;
 mod stat_irq_read_laws;
 #[path = "stat_irq/reclock.rs"]
 mod reclock;
+#[path = "stat_irq/ff0f.rs"]
+mod stat_irq_ff0f;
 mod regs;
 mod render;
 mod stat_irq;

@@ -216,7 +216,14 @@ impl Interconnect {
             if self.intf & self.ie & IF_STAT_BIT != 0 && self.ppu.ff0f_dmg_service_clear() {
                 0
             } else {
-                (v | self.ppu.ff0f_stat_peek()) & !self.ppu.ff0f_ly0_pulse_mask()
+                // #11bm — the glitch-line mode-0 co-instant read-view mask (a
+                // read landing on the flip dot precedes the rise on hardware;
+                // `Ppu::ff0f_dmg_m0_coincident_mask`) joins the #11bh group-E
+                // OAM-pulse mask; both clear a bit slopgb's whole-dot frame
+                // folded a dot too early.
+                (v | self.ppu.ff0f_stat_peek())
+                    & !self.ppu.ff0f_ly0_pulse_mask()
+                    & !self.ppu.ff0f_dmg_m0_coincident_mask()
             }
         } else {
             v
