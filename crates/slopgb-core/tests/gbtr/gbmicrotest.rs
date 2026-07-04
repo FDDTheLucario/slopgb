@@ -115,6 +115,65 @@ fn run_case(rom: &[u8]) -> Result<(), String> {
     }
 }
 
+/// #11bj session-local measurement aid: run an explicit list of gbmicrotest
+/// ROMs on the **flag-on** reclock and report the $FF82 verdict — the fast
+/// iteration loop for the Phase-2 DMG engine port. `#[ignore]`'d. Usage:
+/// `SLOPGB_ROWLIST=/tmp/rows.txt cargo test -p slopgb-core --test gbtr
+/// --release -- --ignored gbmicro_flagon_probe --nocapture`. Each row is
+/// `gbmicrotest/<name>.gb [Dmg]` (extra columns ignored). `SLOPGB_PROBE_OFF=1`
+/// A/Bs against production.
+#[test]
+#[ignore = "session-local Phase-2 measurement aid; needs SLOPGB_ROWLIST"]
+fn gbmicro_flagon_probe() {
+    let Ok(list_path) = std::env::var("SLOPGB_ROWLIST") else {
+        eprintln!("SLOPGB_ROWLIST unset");
+        return;
+    };
+    let Some(root) = common::gbtr_root() else {
+        panic!("gbtr collection not present");
+    };
+    let off = std::env::var("SLOPGB_PROBE_OFF").is_ok();
+    let body = std::fs::read_to_string(&list_path).expect("read rowlist");
+    let (mut pass, mut fail, mut skip) = (0u32, 0u32, 0u32);
+    for line in body.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let rel = line.split_whitespace().next().unwrap_or("");
+        if !rel.starts_with("gbmicrotest/") {
+            continue;
+        }
+        let Ok(rom) = std::fs::read(root.join(rel)) else {
+            skip += 1;
+            continue;
+        };
+        let mut gb = if off {
+            harness::boot(&rom, Model::Dmg)
+        } else {
+            harness::boot_with_reclock(&rom, Model::Dmg)
+        };
+        let deadline = gb.cycles().saturating_add(DEADLINE_TCYCLES);
+        harness::run_for_frames(&mut gb, 2);
+        if gb.peek(0xFF82) == 0 {
+            while gb.cycles() < deadline {
+                gb.step();
+            }
+        }
+        let (v, a, e) = (gb.peek(0xFF82), gb.peek(0xFF80), gb.peek(0xFF81));
+        if v == 0x01 {
+            pass += 1;
+        } else {
+            fail += 1;
+            println!("FAIL {rel} verdict={v:#04X} got={a:#04X} want={e:#04X}");
+        }
+    }
+    println!(
+        "gbmicro_flagon_probe[{}] pass={pass} fail={fail} skip={skip}",
+        if off { "OFF" } else { "ON" }
+    );
+}
+
 /// Enumerate the suite directory as collection-relative forward-slash
 /// paths, sorted (via `collect_roms`). Panics on a missing/unreadable
 /// directory — callers check `gbtr_root()` first.
