@@ -83,11 +83,20 @@ impl Ppu {
                 // — see `window_abort`).
                 if old & LCDC_WIN_ENABLE != 0 && value & LCDC_WIN_ENABLE == 0 && self.render.active
                 {
-                    // C2 #11at — a mid-mode-3 LCDC.5 clear: `window_abort` flags
-                    // a PRE-DRAW abort (window disabled before its first fetch)
-                    // for the CGB shadow bare-exit law (`stat_irq.rs::
-                    // vis_mode_read`). See `window_abort` + `win_predraw_abort`.
-                    self.window_abort();
+                    // C2 #11at — a mid-mode-3 LCDC.5 clear: the read-law FLAG half
+                    // (`win_predraw_abort` pre-draw / DMG `win_aborted`) fires
+                    // eagerly here for the shadow bare-exit / length read laws
+                    // (`stat_irq.rs::vis_mode_read`), calibrated to the cc+0 dot.
+                    self.window_abort_flags();
+                    // #11bq — the RENDER re-anchor (drawn-window end + BG-fetch
+                    // tile-boundary) defers to the `render_lcdc` bit5 1→0 catch-up
+                    // (`ppu/mod.rs`) under the tier2 reclock, so the window stops
+                    // at the render frame (`m3_lcdc_win_en_change_multiple`: the
+                    // eager clear ended it 2 dots early). Production / glitch lines
+                    // (no `render_lcdc` defer) run it synchronously — byte-identical.
+                    if !self.tier2_reclock || self.glitch_line {
+                        self.window_abort_render();
+                    }
                 }
                 // C2 #11au — latch a mid-mode-3 LCDC.5 RE-enable dot for the CGB
                 // shadow window-REENABLE mode-3 length law (`stat_irq.rs::

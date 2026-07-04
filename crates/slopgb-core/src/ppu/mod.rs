@@ -1085,11 +1085,25 @@ impl Ppu {
         // `render_step` so a bit3/bit4 write staged K dots ago drives the fetch
         // grid from dot W+K. Only scheduled under the tier2 reclock during an
         // active render (byte-identical OFF).
-        if let Some((value, dots)) = &mut self.render_lcdc_pending {
+        let apply_render_lcdc = if let Some((_, dots)) = &mut self.render_lcdc_pending {
             *dots -= 1;
-            if *dots == 0 {
-                self.eff.render_lcdc = *value;
-                self.render_lcdc_pending = None;
+            *dots == 0
+        } else {
+            false
+        };
+        if apply_render_lcdc {
+            let value = self.render_lcdc_pending.take().map_or(0, |(v, _)| v);
+            let old = self.eff.render_lcdc;
+            self.eff.render_lcdc = value;
+            // #11bq — a mid-mode-3 LCDC.5 clear's RENDER re-anchor fires HERE, at
+            // the deferred render frame, when the deferred bit5 view falls 1→0
+            // (the read-law flag half already fired eagerly in
+            // `regs.rs::commit_eff`). So the drawn window ends at the render dot,
+            // not the eager cc+0 (`m3_lcdc_win_en_change_multiple`). Only reached
+            // under the tier2 `render_lcdc` defer (production sets the view in
+            // lockstep with no pending) — byte-identical OFF.
+            if old & LCDC_WIN_ENABLE != 0 && value & LCDC_WIN_ENABLE == 0 && self.render.active {
+                self.window_abort_render();
             }
         }
         // Delayed event-register copies catch up (see `stat_ev`); applied

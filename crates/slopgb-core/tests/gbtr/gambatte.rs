@@ -2428,6 +2428,41 @@ fn tier2_dmg_m3_render_wx_passes() {
     }
 }
 
+/// #11bq — the window-ABORT render/read-law SPLIT: a mid-mode-3 LCDC.5 clear ends
+/// the drawn window's RENDER re-anchor at the deferred render frame while its
+/// mode-3-length READ-LAW flags fire at the eager cc+0. In tier2 `eff.lcdc`
+/// committed the bit5 clear at the write's leading edge (cc+0), so `window_abort`
+/// ended the drawn window 2 dots / 2 pixels early of production
+/// (`m3_lcdc_win_en_change_multiple`: the abort at lx≈51 stopped the window at
+/// cols 50-51 instead of 52-53). Fix: `window_abort` is split — `window_abort_flags`
+/// (`win_predraw_abort` / DMG `win_aborted`, the FF41 read-law inputs calibrated
+/// to cc+0) stays eager in `regs.rs::commit_eff`; `window_abort_render` (the
+/// drawn-window end + BG-fetch tile-boundary re-anchor) fires at the `render_lcdc`
+/// bit5 1→0 catch-up (`ppu/mod.rs`), the same deferred fetch view mech2 uses. The
+/// window ACTIVATION gate + `win_reenable_dot`/`win_enable_dot` stay eager (a
+/// render-view activation defer was BUILT + REFUTED — it dropped
+/// `late_enable_ly0_ds_2` / `late_reenable_scx2_2`, SameBoy-passes: the activation
+/// dot IS the mode-3 length). Render-only: CGB two-bin 291/291 IDENTICAL SET,
+/// mooneye 91/91 ON+OFF, `tier2_window_enable_deadline` + `tier2_dmg_window` held,
+/// production byte-identical OFF. Pixel two-bin +2 (Dmg + Cgb) → the full 100/100.
+#[test]
+fn tier2_dmg_m3_render_win_abort_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_dmg_m3_render_win_abort",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        ("mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple.gb", Model::Dmg),
+        ("mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple.gb", Model::Cgb),
+    ];
+    for (rel, model) in targets {
+        assert_pixel_leg_flagon(&root, rel, model);
+    }
+}
+
 /// Port Stage C2 #11ag — the WINDOW family ported to DOUBLE-SPEED: the #11y/#11z
 /// length law AND the #11af shadow WY-trigger, with the DS exit/deadline
 /// recalibrated. The `vis_mode_read` length law (the `m2int_wx*_m3stat` shorten)
