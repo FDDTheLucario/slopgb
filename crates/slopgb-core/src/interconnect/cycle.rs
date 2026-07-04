@@ -192,6 +192,13 @@ impl Interconnect {
         self.service_vram_dma();
         self.maybe_oam_bug(addr, kind);
         let v = self.read_no_tick(addr);
+        // #11bl — DMG power-on boot-frame read law: the tier2 deferred FF41/
+        // FF44/OAM/VRAM read samples cc+0, 4 dots before production's cc+4 read
+        // of the same `LD A,(nn)`, so a boot read straddling a mode transition
+        // returns the pre-transition value; restore the read's true (cc+4)
+        // verdict (`Ppu::boot_read`). Verdict-only, `!is_cgb`/first-frame scoped
+        // → `None` (byte-identical) off the boot frame and in production.
+        let v = self.ppu.boot_read(addr).unwrap_or(v);
         // #11bh — FF0F group-A read peek: the deferred IF read's verdict
         // includes the deterministically-imminent STAT engine rise SameBoy's
         // events-first read frame has already folded (see
@@ -280,6 +287,18 @@ impl Interconnect {
     /// per its conflict class ([`Self::write_conflict`]), advancing the machine
     /// by the class's pre-commit split.
     pub(super) fn write_deferred(&mut self, addr: u16, value: u8) {
+        // #11bl — a CPU write to any LCD register (FF40-FF4B) ends the pristine
+        // boot hand-off frame, so the DMG boot-frame read law (`Ppu::boot_read`)
+        // no longer applies. The `poweron_*` ROMs read the untouched boot frame
+        // (pure NOP sled, no PPU write); every other early reader configures the
+        // PPU first — `lcdon_to_*`/`oam_read`/`sprite`/`win` turn the LCD off/on
+        // (FF40), the gambatte kernel/halt STAT-ISR tests arm a mode interrupt
+        // (FF41) — and reads its own frame at cc+0. Boot's own register install
+        // goes through the direct `ppu.write`/`write_no_tick` paths, not this
+        // CPU write path, so it does not trip the flag.
+        if matches!(addr, 0xFF40..=0xFF4B) {
+            self.ppu.mark_lcd_reg_written();
+        }
         let conflict = self.write_conflict(addr);
         self.vram_dma_req_pre = self.vram_dma_req.is_some();
         let before = self.clock.now();

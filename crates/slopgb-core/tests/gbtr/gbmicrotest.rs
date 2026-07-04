@@ -343,6 +343,70 @@ fn tier2_dmg_hblank_if_passes() {
     }
 }
 
+/// #11bl — the DMG power-on boot-frame read law (`Ppu::boot_read`): the tier2
+/// deferred read samples the PPU at cc+0, 4 dots before production's cc+4 read
+/// of the same `LD A,(nn)`, so the `poweron_*` ROMs (a NOP sled timing a single
+/// direct read of STAT/OAM/VRAM/LY on the pristine boot hand-off frame) read the
+/// pre-transition value; restoring the read's true (cc+4) verdict — the current
+/// (line, dot) advanced 4 dots — fixes all 20 at once. Scoped to the boot frame
+/// (`frame_count <= 2` AND no CPU LCD-register write, so a program that
+/// reconfigures the PPU reverts to cc+0), `tier2_reclock` + `!is_cgb` +
+/// verdict-only → the `+4` boot DIV (`boot_div`) and CGB stay byte-identical.
+/// SameBoy passes these on real DMG (they pass flag-OFF too — the whole 20 are
+/// reclock flip-blockers). Map: `dmg-poweron-boot-read-2026-07-04.md`.
+#[test]
+fn tier2_dmg_poweron_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_dmg_poweron",
+            &format!("test-roms/{} not present", common::GBTR_DIR),
+        );
+        return;
+    };
+    const ROWS: [&str; 20] = [
+        "poweron_ly_120",
+        "poweron_ly_234",
+        "poweron_oam_006",
+        "poweron_oam_070",
+        "poweron_oam_120",
+        "poweron_oam_184",
+        "poweron_oam_234",
+        "poweron_stat_006",
+        "poweron_stat_007",
+        "poweron_stat_027",
+        "poweron_stat_070",
+        "poweron_stat_120",
+        "poweron_stat_121",
+        "poweron_stat_141",
+        "poweron_stat_184",
+        "poweron_stat_235",
+        "poweron_vram_026",
+        "poweron_vram_070",
+        "poweron_vram_140",
+        "poweron_vram_184",
+    ];
+    for name in ROWS {
+        let rel = format!("gbmicrotest/{name}.gb");
+        let rom = std::fs::read(root.join(&rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Dmg);
+        let deadline = gb.cycles().saturating_add(DEADLINE_TCYCLES);
+        harness::run_for_frames(&mut gb, 2);
+        if gb.peek(0xFF82) == 0 {
+            while gb.cycles() < deadline {
+                gb.step();
+            }
+        }
+        assert_eq!(
+            gb.peek(0xFF82),
+            0x01,
+            "{rel} (tier2 flag-on): FF82={:#04X} actual FF80={:#04X} expected FF81={:#04X}",
+            gb.peek(0xFF82),
+            gb.peek(0xFF80),
+            gb.peek(0xFF81),
+        );
+    }
+}
+
 /// Self-verifying coverage: claimed ∩ exempted = ∅ and claimed ∪ exempted
 /// equals the on-disk ROM set, with the suite size and testbench count
 /// pinned so a changed checkout or a typo in [`TESTBENCHES`] fails loudly.

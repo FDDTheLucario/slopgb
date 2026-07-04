@@ -90,7 +90,7 @@ impl Ppu {
     /// kernel separation needs the −1 net shift. Single speed only (the DS read
     /// offset is deferred with the rest of the DS back-dating); always 84
     /// flag-OFF, so production is byte-identical.
-    fn mode3_entry_dot(&self) -> u16 {
+    pub(super) fn mode3_entry_dot(&self) -> u16 {
         if self.leading_edge_reads && !self.tier2_reclock && !self.ds {
             80
         } else {

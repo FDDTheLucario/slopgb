@@ -221,6 +221,17 @@ pub struct Ppu {
     model: Model,
     frame_count: u64,
 
+    /// The CPU has written an LCD register (FF40-FF4B) since power-on — the boot
+    /// hand-off PPU frame is no longer pristine. Gates the DMG boot-frame read
+    /// law ([`Self::boot_read`]): the `poweron_*` ROMs read the untouched boot
+    /// frame (pure NOP sled, no PPU write), while every other early reader
+    /// configures the PPU first — `lcdon_to_*`/`oam_read`/`sprite`/`win` toggle
+    /// the LCD (FF40), the gambatte kernel/halt STAT-ISR tests arm a mode
+    /// interrupt (FF41) — and reads its own frame at cc+0. Set on the tier2 CPU
+    /// write path only (`interconnect/cycle.rs`), so the boot ROM's own register
+    /// install does not trip it; never read in production → byte-identical OFF.
+    lcd_regs_written: bool,
+
     // Registers.
     lcdc: u8,
     /// STAT bits 3-6 (interrupt source enables).
@@ -921,6 +932,7 @@ impl Ppu {
         Self {
             model,
             frame_count: 0,
+            lcd_regs_written: false,
             lcdc: 0,
             stat_en: 0,
             eng_stat: 0,
@@ -1659,6 +1671,13 @@ impl Ppu {
     /// advancing; `GameBoy::run_frame` falls back to a cycle deadline.
     pub fn frame_count(&self) -> u64 {
         self.frame_count
+    }
+
+    /// Record a CPU write to an LCD register (FF40-FF4B): the boot hand-off
+    /// frame is no longer pristine, disabling the DMG boot-frame read law
+    /// ([`Self::boot_read`]). Called from the tier2 CPU write path only.
+    pub(crate) fn mark_lcd_reg_written(&mut self) {
+        self.lcd_regs_written = true;
     }
 
     /// Map DMG shades 0..=3 to XRGB8888 (frontend palette option).
