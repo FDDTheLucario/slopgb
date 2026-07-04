@@ -43,7 +43,7 @@ Parallel cargo runs: set `CARGO_TARGET_DIR=target/<name>` to dodge lock contenti
 
 Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 3,5,8,13,21,34. Model from filename suffix (see ARCHITECTURE.md §Mooneye). Timeout 120 emulated s.
 
-## State (2026-07-04, #11bp)
+## State (2026-07-04, #11bq)
 
 - **Baseline (all-green, defaults NOT flipped):** mooneye 439/439 rom×model;
   gbtr v7.0 battery green vs ratcheted baselines (full run 237/0); lib 660
@@ -60,9 +60,45 @@ Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 
   RENDER reclock, also 291/291 zero-drift — its CGB slices (LCDC BG-addr, SCX-DS,
   BG-priority) touch only the pixel view, never an OCR verdict; **#11bp added the
   DMG palette half-dot commit pop-grid, DMG-only + render-only, CGB 291/291
-  zero-drift**); 60 tier2 pins;
+  zero-drift; #11bq added the last 6 pixel legs (SCY parity + WX defer/split +
+  window-abort split) — render-view only, CGB 291/291 zero-drift TWICE**); 63
+  tier2 pins;
   mooneye 91/91 flag-on (`SLOPGB_MOONEYE_RECLOCK=1`) AND flag-off AND with defaults
   temp-flipped.
+- **#11bq — the LAST 6 pixel-render residuals SHIPPED; §3b RENDER half COMPLETE
+  (pixel two-bin 94→100).** The 6 legs #11bp parked as "need the genuine
+  WX/window-length/sprite half-dot render FSM" all land as flag-gated,
+  production byte-identical slices — the same whole-dot/parity/split discipline
+  as #11bp, three mechanisms (`09a9f5e` + `d3d7d40`). **(1) SCY parity (+1
+  `scy_during_m3_spx08_2`):** the same EVEN-dot parity anchor as the palette
+  (`dots = 2 + (leading_edge & 1)` for FF42 SS). A sprite prefill stall (X=8 OBJ,
+  ~11-dot fetch) shifts the BG fetch grid so a tile's Lo data read
+  (`bg_tile_addr`, fine row = LY+SCY & 7) lands EXACTLY on the deferred SCY→0
+  commit; production commits mid-M-cycle (even LE → +2) so the read re-samples the
+  NEW scroll while the latched tile NUMBER keeps the old (mealybug m3_scy_change
+  mixed-fetch), the flat defer=3 was one column late; the objectless
+  `scy_during_m3_{1,4,5,6}` land ODD LEs → +3 (held, a flat +2 dropped all 8).
+  **(2) WX render-view defer + un-catch SPLIT (+3 `late_wx_ds_1`, `m3_wx_5/6`):**
+  `eff.wx` SURVIVES the arch write (`regs.rs` `staged_pending` += FF4B) and
+  strobe-commits at leading+2 (== production) instead of the eager cc+0, so a
+  mid-mode-3 WX rewrite reaches the window activation/reactivation comparator at
+  the right dot (`late_wx_ds` DS pre-empt; `m3_wx_6` SS un-catch straddle); the
+  un-catch READ law's `wx_write_dot` (FF41 length) stays at cc+0 in `Ppu::write`
+  (the SPLIT) → `tier2_window_late_wx_uncatch` unperturbed. **(3) window-abort
+  render/read-law SPLIT (+2 `m3_lcdc_win_en_change_multiple`):** a mid-mode-3
+  LCDC.5 clear's `window_abort` is split — `window_abort_flags`
+  (`win_predraw_abort`/DMG `win_aborted`, the FF41 read-law inputs) stays EAGER,
+  `window_abort_render` (drawn-window end + BG re-anchor) fires at the
+  `render_lcdc` bit5 1→0 catch-up, so the window stops at the render frame (the
+  eager clear ended it 2 px early). **The activation gate stays eager — a
+  render-view activation defer was BUILT + REFUTED, dropping `late_enable_ly0_ds_2`
+  / `late_reenable_scx2_2`: the activation dot IS the mode-3 length; ONLY the
+  drawn-window END was separable.** Gates: pixel ON 94→100 (+6/0 dropped), OFF
+  100/100; CGB two-bin **291/291 IDENTICAL SET** (twice); mooneye 91/91 ON+OFF; 63
+  tier2 pins (+`scy_spx08`/`_wx`/`_win_abort`); lib 660; clippy clean; gbtr OFF 0
+  failed. §3b residual = the engine dispatch-atomic core (the C3 flip's
+  IRQ-dispatch retime), NOT the pixel fetcher. Map:
+  `measurements/dmg-m3-render-reclock-2026-07-04.md` (#11bq update).
 - **#11bp — the DMG palette HALF-DOT commit pop-grid SHIPPED (+5 pixel legs,
   pixel two-bin 89→94).** The 5 palette-timing legs #11bo parked as "half-dot
   precision" (`m3_bgp_change`/`_sprites`, `m3_obp0_change`, `m3_window_timing`/

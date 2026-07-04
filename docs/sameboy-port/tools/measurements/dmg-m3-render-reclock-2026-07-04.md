@@ -2,11 +2,72 @@
 
 Ported the RENDER half of §3b — the 100 SameBoy-PASS mode-3 pixel-reference
 flip-blockers (`pixel-classify-2026-07-03.md`) — as flag-gated, production
-byte-identical render slices. **94 of 100 legs shipped in six mechanisms;
-6 residuals classified.** (89 shipped #11bo whole-dot; +5 #11bp the DMG palette
-half-dot commit pop-grid — the update below.) This is the different-subsystem
-lever the read-frame vein (#11bk/bl/bm) was drained to reach: the pixel
-fetcher, not the FF41/FF0F read laws.
+byte-identical render slices. **ALL 100 legs shipped; pixel two-bin 100/100.**
+(89 shipped #11bo whole-dot; +5 #11bp the DMG palette half-dot commit pop-grid;
++6 #11bq the SCY parity + WX render-view defer/split + window-abort split — the
+top update.) This is the different-subsystem lever the read-frame vein
+(#11bk/bl/bm) was drained to reach: the pixel fetcher, not the FF41/FF0F read
+laws. The #11bp/#11bq legs the #11bo classification called "half-dot precision"
+all landed WITHOUT a half-dot FSM — recovered by a whole-dot PARITY term, a
+render-view register survive-defer, or an eager-flag/deferred-render SPLIT.
+
+## #11bq update (2026-07-04) — the last 6 residuals SHIPPED (94→100)
+
+The 6 legs #11bp parked as "need the genuine WX/window-length/sprite half-dot
+render FSM" all landed as flag-gated, production byte-identical slices — the same
+disciplined whole-dot/parity/split levers as #11bp, three mechanisms
+(`phase-b-s7` `09a9f5e` + `d3d7d40`):
+
+**1. SCY parity (+1: `scy_during_m3_spx08_2` Dmg).** Same EVEN-dot parity anchor
+as the #11bp palette: `dots = 2 + (leading_edge & 1)` for FF42 SS
+(`cycle.rs::write_deferred`). The sprite prefill stall (X=8 OBJ, ~11-dot fetch)
+shifts the BG fetch grid so tile fx=17's Lo data read (`bg_tile_addr`, fine row
+= LY+SCY & 7) lands EXACTLY on the deferred SCY→0 commit dot. Dual-traced:
+OFF/production commits the write at the M-cycle mid-point (dot 238, LE=236 even →
++2), so the data read at dot 239 re-samples the NEW scroll (fine=1) while the
+already-latched tile NUMBER keeps the old (the mealybug m3_scy_change mixed-fetch
+behaviour); the flat defer=3 committed at dot 239 → the read saw the OLD scroll
+(fine=0), one column late. The objectless `scy_during_m3_{1,4,5,6}` writes land
+ODD leading edges (want +3, held — a flat +2 dropped all 8). Render-only.
+
+**2. WX render-view defer + un-catch SPLIT (+3: `late_wx_ds_1` Cgb, `m3_wx_5`,
+`m3_wx_6` Dmg).** In tier2 `eff.wx` committed eagerly at cc+0, 2-4 dots early of
+the render's per-dot WX comparator. Fix: `eff.wx` now SURVIVES the arch write
+(`regs.rs` `staged_pending` += FF4B) and strobe-commits at leading+2 (== the
+production render frame; `cycle.rs` FF4B → dots 0, +1 for the FF4B palette-class
+offset → strobe logs leading+1, visible to `render_step` from leading+2 because
+`strobe_tick` runs at tick-start BEFORE `dot += 1`). Dual-traced: `late_wx_ds`
+(DS) — the eager cc+0 WX=255 committed at dot 96 pre-empted the wx=7 activation at
+dot 97 → the window never drew (bare cols 0-7); deferring to dot 98 (visible from
+99) lets the wx=7 activation catch. `m3_wx_6` (SS) — the un-catch straddle: a WX
+6→5 rewrite must split the `pos_dot==wx+6` compares (wx=6 at pos_dot 11 no-match /
+wx=5 at pos_dot 12 no-match), which needs the change visible to `render_step` at
+dot 96 (== leading+2). The SPLIT keeps the un-catch READ law's `wx_write_dot`
+(FF41 mode-3 length) at its cc+0 leading edge (moved to `regs.rs::Ppu::write`
+FF4B, not `commit_eff`) → `tier2_window_late_wx_uncatch` unperturbed.
+
+**3. Window-abort render/read-law SPLIT (+2: `m3_lcdc_win_en_change_multiple`
+Dmg+Cgb).** A mid-mode-3 LCDC.5 clear ended the drawn window at the eager cc+0
+(dot 148), 2 dots / 2 pixels early of production (dot 150); the abort lands at
+lx≈51 → cols 50-51 showed BG instead of window. Split `window_abort`:
+`window_abort_flags` (`win_predraw_abort` / DMG `win_aborted`, the FF41 read-law
+inputs calibrated to cc+0) stays EAGER in `commit_eff`; `window_abort_render` (the
+drawn-window end + BG-fetch tile-boundary re-anchor) fires at the `render_lcdc`
+bit5 1→0 catch-up (`ppu/mod.rs`), the deferred fetch view mech2 already carries.
+**The activation gate + `win_reenable_dot`/`win_enable_dot` stay eager — a
+render-view activation defer (`win_en_now` via `render_lcdc`) was BUILT + REFUTED,
+dropping `late_enable_ly0_ds_2` / `late_reenable_scx2_2` (SameBoy-passes: the
+activation dot IS the mode-3 length). ONLY the drawn-window END was separable.**
+
+Gates (both commits): pixel two-bin ON 94→98→100 (+6 / 0 dropped), OFF 100/100
+byte-identical; CGB two-bin **291/291 IDENTICAL SET** (0 new / 0 fixed vs clean
+HEAD, twice); mooneye 91/91 flag-on AND flag-off; 63 tier2 pins
+(+`tier2_dmg_m3_render_scy_spx08`, `_wx`, `_win_abort`); lib 660; clippy clean;
+gbtr OFF 0 failed. **§3b's RENDER half is COMPLETE (100/100).** The residual §3b
+work is the engine dispatch-atomic core (the C3 flip's IRQ-dispatch retime), not
+the pixel fetcher.
+
+## #11bp update (2026-07-04) — the DMG palette half-dot pop-grid SHIPPED (+5)
 
 ## #11bp update (2026-07-04) — the DMG palette half-dot pop-grid SHIPPED (+5)
 
