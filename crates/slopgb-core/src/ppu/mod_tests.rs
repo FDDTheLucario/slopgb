@@ -85,3 +85,12 @@ mod oam_bug;
 
 #[path = "mod_tests/stat.rs"]
 mod stat;
+
+#[path = "mod_tests/stat_lyc.rs"]
+mod stat_lyc;
+
+#[path = "mod_tests/stat_oam.rs"]
+mod stat_oam;
+
+#[path = "mod_tests/stat_engine.rs"]
+mod stat_engine;
