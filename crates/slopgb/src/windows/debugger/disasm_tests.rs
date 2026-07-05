@@ -176,6 +176,28 @@ fn annotate_symbols_inserts_labels_and_substitutes_operands() {
 }
 
 #[test]
+fn annotate_symbols_blank_spacer_above_midlist_label() {
+    // Two NOPs; 0x0101 is the symbol "Foo". The label is NOT at the top of the
+    // pane, so it gets a blank spacer above it for breathing room; the top row
+    // (0x0100) keeps no leading blank (the !out.is_empty() guard).
+    let mem = |_a: u16| 0x00u8; // NOP
+    let syms = SymbolTable::parse("00:0101 Foo");
+    let raw = disasm_rows(mem, 0x0100, 2, &BTreeSet::new(), DisasmFmt::default());
+    let rows = annotate_symbols(raw, &syms, DisasmFmt::default());
+    // rows: [instr@0100, <blank>, "Foo:", instr@0101]
+    assert!(!rows[0].is_label, "top instruction row, no leading blank");
+    let label = rows
+        .iter()
+        .position(|r| r.text == "Foo:")
+        .expect("Foo label present");
+    let spacer = &rows[label - 1];
+    assert!(
+        spacer.is_label && spacer.text.is_empty(),
+        "blank spacer precedes the mid-list label"
+    );
+}
+
+#[test]
 fn annotate_symbols_empty_table_is_identity() {
     let mem = |_a: u16| 0x00u8;
     let raw = disasm_rows(mem, 0x0100, 3, &BTreeSet::new(), DisasmFmt::default());

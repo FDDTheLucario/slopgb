@@ -166,6 +166,16 @@ pub fn annotate_symbols(
     for mut row in rows {
         if !row.is_label {
             if let Some(name) = syms.name_at(row.addr) {
+                // Blank spacer above the label for breathing room (bgb parity),
+                // skipped when the label is the very top row of the pane.
+                if !out.is_empty() {
+                    out.push(DisasmRow {
+                        addr: row.addr,
+                        text: String::new(),
+                        target: None,
+                        is_label: true,
+                    });
+                }
                 out.push(DisasmRow {
                     addr: row.addr,
                     text: format!("{name}:"),
