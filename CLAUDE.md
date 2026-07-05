@@ -43,7 +43,7 @@ Parallel cargo runs: set `CARGO_TARGET_DIR=target/<name>` to dodge lock contenti
 
 Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 3,5,8,13,21,34. Model from filename suffix (see ARCHITECTURE.md §Mooneye). Timeout 120 emulated s.
 
-## State (2026-07-04, #11br)
+## State (2026-07-04, #11bu)
 
 - **Baseline (all-green, defaults NOT flipped):** mooneye 439/439 rom×model;
   gbtr v7.0 battery green vs ratcheted baselines (full run 237/0); lib 660
@@ -281,6 +281,32 @@ Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L = 
   DO-NOT-RETRY) + `stat_write_glitch` glitch-IF (2) + `hblank_scx3` read-frame
   gap (2). Plan + measurements:
   `measurements/dispatch-retime-plan-2026-07-04.md`.
+- **#11bu — the S6 TIMER/SERIAL COMPLETION family BUILD-MEASURED as
+  READ-FRAME-WELDED; the LAST flag-gated slice is EXHAUSTED (NO code shipped,
+  tree byte-identical @ d3d7d40, defaults NOT flipped).** The #11bt census's
+  lever-2 (tima 45 + serial 1 gambatte-OCR + gbmicro `int_timer_halt` ×2 +
+  wilbertpol `timer_if` ×4 ≈ 52), the only un-attempted C3 lever, is refuted.
+  Mechanism (dual-traced): the tier2 deferred FF0F/FF05/FF06 read samples the
+  timer at cc+0, one M-cycle before production's cc+4 read — TIMA one increment
+  behind, an imminent reload/overflow not yet fired. A clone-advance completion
+  peek (`SLOPGB_S6PEEK`, `pending` T forward on a Timer/Serial clone)
+  reconstructs the clean reload reads (`tc00_ff_tma_3`→FE, `tc00_irq_2`→E4) but
+  is WELDED: `full` +21/−28, and even the minimal OR-only fold of the imminent
+  timer IF into FF0F (`tif`, the exact `ff0f_stat_peek` shape) fixes 4 `irq_2`
+  rows and DROPS `tc00_late_div_write_if_1a` (SameBoy-pass, want E0). **Decisive
+  co-temporal proof:** `tc00_irq_2` (want E4) and `tc00_late_div_write_if_1a`
+  (want E0) have IDENTICAL timer read-state (rin=4 tima=00 tma=fe ahead_if=04);
+  `tc00_ff_tma_3` (want FE) vs `tc00_late_tc01_5` (want 00) are identical AND
+  BOTH large-div — NO read-time discriminator (timer state OR div magnitude)
+  separates fix from drop. Root = the completion's TRIGGER is desynced: the C0
+  DIV +4 shifts the DIV-derived overflow, AND the deferred write-commit shifts
+  `reload_in` itself (a `late_div_write` overflow fires at cc+0 vs a later cc),
+  so a peek reconstructs flag-on's OWN cc+4, not production's. Serial separately
+  welded (9 `_1` legs, the #11ah A/B on DMG). The flip-gated attack surface is
+  now confirmed exhausted across all three families (render DONE, dispatch
+  atomic #11bs, S6 completion welded #11bu); the flip is gated SOLELY on the
+  coherent per-T retime (HALFDOT Part A). Flip-bar census UNCHANGED at 98
+  (0 shippable). Map: `measurements/s6-completion-weld-refuted-2026-07-04.md`.
 - **History:** per-session port narrative in
   [`docs/sameboy-port/STATE-HISTORY.md`](docs/sameboy-port/STATE-HISTORY.md)
   (verbatim archive) and

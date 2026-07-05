@@ -149,7 +149,19 @@ it or abort.* There are **98** such rows. None is fixable:
 2. **S6 timer/serial completion** (tima 45 + serial 1 + gbmicro `int_timer_halt`
    ×2 + wilbertpol `timer_if` ×4): a timer-domain deferred-completion advance,
    not the PPU dispatch; the C0-DIV sweep `{−4..12}` has zero effect (#11ai
-   DO-NOT-RETRY). Orthogonal, still unbuilt.
+   DO-NOT-RETRY). **BUILT + REFUTED (#11bu, `s6-completion-weld-refuted-2026-07-04.md`):**
+   a clone-advance completion peek (reconstruct production's cc+4 timer view at
+   the deferred FF0F/FF05/FF06 read) is READ-FRAME-WELDED — even the minimal
+   OR-only fold of the imminent timer IF into FF0F fixes 4 `irq_2` rows but
+   DROPS `tc00_late_div_write_if_1a` (a SameBoy-pass, want E0). The decisive
+   proof: `tc00_irq_2` (want E4) and `tc00_late_div_write_if_1a` (want E0) have
+   IDENTICAL timer read-state (rin=4 tima=00 tma=fe), and `tc00_ff_tma_3` (want
+   FE) vs `tc00_late_tc01_5` (want 00) are identical AND both large-div — NO
+   read-time discriminator. Root: the C0 DIV +4 shifts the DIV-derived
+   overflow trigger AND the deferred write-commit shifts `reload_in` itself, so
+   flag-on's completion frame ≠ production's; a peek reconstructs flag-on's own
+   cc+4, not production's. Serial separately welded (9 `_1` legs). Needs the
+   coherent per-T retime, not a flag-gated slice. Tree byte-identical @ d3d7d40.
 3. **Engine glitch-IF** (gbmicro `stat_write_glitch` ×2): slopgb-flip fires a
    spurious STAT edge SameBoy suppresses — a separate glitch-suppression lever.
 
