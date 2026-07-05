@@ -118,6 +118,12 @@ impl Interconnect {
         self.ppu.set_tier2_reclock(on);
     }
 
+    /// Repay the outstanding sub-M-cycle wake skew — the next access pays the
+    /// extra T and lands back on the aligned 4-T grid.
+    pub(super) fn repay_wake_skew(&mut self) {
+        self.clock.carry_read(std::mem::take(&mut self.wake_skew));
+    }
+
     /// Deferred-commit read: pay the previous M-cycle's parked debt —
     /// advancing the whole machine to this M-cycle's leading edge (cc+0) — then
     /// sample. Unlike the eager [`Bus::read`] (which advances a full M-cycle
@@ -128,7 +134,7 @@ impl Interconnect {
     /// The `GB_display_sync` analogue: `advance_machine_t` is T-granular and
     /// drives the PPU per 8 MHz half-dot (`Ppu::tick_half`), so by the time the
     /// sample below runs the PPU is resolved to the read's EXACT half-dot: a DS
-    /// read landing on an odd CPU-T sits mid-dot (`Ppu::sub_dot() == 1`),
+    /// read landing on an odd CPU-T sits mid-dot (half-dot phase 1),
     /// exactly like SameBoy's zero-cycle force-run
     /// (`sync_ppu_if_needed → GB_display_run(gb, 0, true)`,
     /// memory.c:540 / display.h:51) draining the display coroutine to the
@@ -139,26 +145,6 @@ impl Interconnect {
     /// frame mapping to SameBoy is `slopgb dot D ↔ SameBoy cfl D+4` (single
     /// speed) / `D+3` (double speed — the odd offset is why the mid-dot
     /// position is load-bearing there).
-    fn dbg_isr(&self, tag: &str, addr: u16) {
-        if !crate::ppu::isrtrace_on() {
-            return;
-        }
-        let (line, dot) = self.ppu.scan_pos();
-        if (134..=138).contains(&line) || line <= 3 {
-            eprintln!(
-                "SL2 {tag} a={addr:04x} ly={line} dot={dot} clk={} pend={}",
-                self.clock.now(),
-                self.clock.pending()
-            );
-        }
-    }
-
-    /// Repay the outstanding sub-M-cycle wake skew — the next access pays the
-    /// extra T and lands back on the aligned 4-T grid.
-    pub(super) fn repay_wake_skew(&mut self) {
-        self.clock.carry_read(std::mem::take(&mut self.wake_skew));
-    }
-
     pub(super) fn read_deferred(&mut self, addr: u16, kind: OamBugKind) -> u8 {
         // An outstanding sub-M-cycle wake skew is consumed by the handler's
         // FIRST FF41 read — that read samples the STAT mode at the wake's true
@@ -177,10 +163,8 @@ impl Interconnect {
             self.repay_wake_skew();
         }
         let before = self.clock.now();
-        let pend_dbg = self.clock.pending(); // the debt paid before this read
         let _ = self.clock.read(); // clock += old pending; park 4
         self.advance_machine_t(before, self.clock.now());
-        self.dbg_isr("rd", addr);
         self.service_vram_dma();
         self.maybe_oam_bug(addr, kind);
         let v = self.read_no_tick(addr);
@@ -230,37 +214,6 @@ impl Interconnect {
                 self.repay_wake_skew();
             }
         }
-        if addr == 0xFF41 && crate::ppu::s5dbg_on() {
-            let (line, dot) = self.ppu.scan_pos();
-            if line < 144 {
-                let (wa, ve, lrd, vh, vm, ns) = self.ppu.dbg_read_state();
-                let (wab, wpa, wpad, wxm, scx7d, wxscx) = self.ppu.dbg_abort_state();
-                let (wend, wren, wxwd) = self.ppu.dbg_win_dots();
-                eprintln!(
-                    "SLOPGB ff41 ly={line} dot={dot} clk={} mode={} pend={pend_dbg} wa={wa} ve={ve} lrd={lrd} vh={vh} vm={vm} ns={ns} wab={wab} wpa={wpa} wpad={wpad} wxm={wxm} scx7={scx7d} wxscx={wxscx} wend={wend} wren={wren} wxwd={wxwd} dh={} mclk={} dsa={}",
-                    self.clock.now(),
-                    v & 3,
-                    self.ppu.sub_dot(),
-                    self.cycles,
-                    self.ppu.sb_dsa()
-                );
-            }
-        }
-        if matches!(addr, 0xFF68..=0xFF6B) && crate::ppu::s5dbg_on() {
-            let (line, dot) = self.ppu.scan_pos();
-            eprintln!("SLOPGB pal{addr:04x} ly={line} dot={dot} v={v:02x}");
-        }
-        if addr == 0xFF0F && crate::ppu::s5dbg_on() {
-            let (line, dot) = self.ppu.scan_pos();
-            eprintln!("SLOPGB ff0f ly={line} dot={dot} if={:02x}", v & 0x1f);
-        }
-        if matches!(addr, 0xFE00..=0xFE9F | 0x8000..=0x9FFF) && crate::ppu::s5dbg_on() {
-            let (line, dot) = self.ppu.scan_pos();
-            if line < 144 {
-                let kind = if addr < 0xA000 { "vram" } else { "oam" };
-                eprintln!("SLOPGB {kind} ly={line} dot={dot} v={v:02x}");
-            }
-        }
         v
     }
 
@@ -283,24 +236,8 @@ impl Interconnect {
         let conflict = self.write_conflict(addr);
         self.vram_dma_req_pre = self.vram_dma_req.is_some();
         let before = self.clock.now();
-        let le_pos = if matches!(addr, 0xFF0F | 0xFF41 | 0xFF45 | 0xFF51..=0xFF55) && crate::ppu::s5dbg_on() {
-            Some(self.ppu.scan_pos())
-        } else {
-            None
-        };
         let _ = self.clock.write(conflict);
         self.advance_machine_t(before, self.clock.now());
-        self.dbg_isr("wr", addr);
-        if let Some((lly, ldot)) = le_pos {
-            let (cly, cdot) = self.ppu.scan_pos();
-            eprintln!(
-                "SLOPGB w{addr:04x} val={value:02x} lead ly={lly} dot={ldot} commit ly={cly} dot={cdot}"
-            );
-        }
-        if matches!(addr, 0xFF68..=0xFF6B) && crate::ppu::s5dbg_on() {
-            let (cly, cdot) = self.ppu.scan_pos();
-            eprintln!("SLOPGB palw{addr:04x} val={value:02x} ly={cly} dot={cdot}");
-        }
         // A racing DMA-register write beats a same-advance
         // HBlank-DMA steal: SameBoy runs `GB_hdma_run` only after the
         // current instruction completes (sm83_cpu.c:1718), so the write's
@@ -456,14 +393,6 @@ impl Interconnect {
             } else {
                 2
             };
-            if matches!(addr, 0xFF40 | 0xFF43 | 0xFF4A | 0xFF4B) && crate::ppu::s5dbg_on() {
-                let (l, d) = self.ppu.scan_pos();
-                eprintln!(
-                    "SLOPGB w{addr:04x} val={value:02x} ly={l} dot={d} clk={} ds={}",
-                    self.cycles,
-                    u8::from(self.double_speed)
-                );
-            }
             self.ppu.stage_write(addr, value, dots);
         }
         self.maybe_oam_bug(addr, OamBugKind::Write);
@@ -485,7 +414,6 @@ impl Interconnect {
         let before = self.clock.now();
         self.clock.internal();
         self.advance_machine_t(before, self.clock.now()); // delta 0 (deferred)
-        self.dbg_isr("na", 0);
         self.service_vram_dma();
     }
 
@@ -495,7 +423,6 @@ impl Interconnect {
         let before = self.clock.now();
         let _ = self.clock.read();
         self.advance_machine_t(before, self.clock.now());
-        self.dbg_isr("ob", value);
         self.service_vram_dma();
         self.maybe_oam_bug(value, OamBugKind::Write);
     }

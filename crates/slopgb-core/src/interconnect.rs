@@ -362,8 +362,7 @@ pub struct Interconnect {
     /// offset a STOP speed switch can establish (the LCD dot clock runs on
     /// continuously across the switch while the CPU's M-cycle grid is re-paced).
     /// **Held at 0**: setting it at the speed switch was measured to lift ZERO
-    /// gambatte DS rows (env probe `SLOPGB_DOTPHASE`, all of const-1 / cycle-
-    /// parity candidates over 287 baselined rows). The m3stat / speedchange
+    /// gambatte DS rows. The m3stat / speedchange
     /// `_2` reads are served by the cc-invariant `END_PHASE` StatMode/PalAccess
     /// overrides, and their correct answer needs the pixel-pipe END *dot* to
     /// move (a full pixel-pipe reclock), not the M-cycle's sample phase. The
@@ -439,7 +438,7 @@ pub struct Interconnect {
     /// deadline in machine T: the halt sampler masks IF_STAT while
     /// `clock.now() < stat_vis_from_t`. Replaces the M-cycle-quantized
     /// `if_late`/`m0_halt_hold` masking for the mode-0 rise under the
-    /// SameBoy-exact 4k+2 sample grid (rise T + `SLOPGB_P2DELTA`).
+    /// SameBoy-exact 4k+2 sample grid (rise T).
     stat_vis_from_t: u64,
     /// The post-mode-0-halt-wake
     /// LY read-phase carry. SameBoy's DMG halt-wake resumes the CPU at the
@@ -640,22 +639,6 @@ const CGB_COMPAT_BG_PALETTE: [u16; 4] = [0x7FFF, 0x1BEF, 0x6180, 0x0000];
 const CGB_COMPAT_OBJ_PALETTE: [u16; 4] = [0x7FFF, 0x421F, 0x1CF2, 0x0000];
 
 impl Interconnect {
-    /// `SLOPGB_S5DBG` wake-instant tracer: which sample path woke, at which
-    /// machine position. Debug-only, env-gated.
-    fn dbg_wake(&mut self, path: &str, w: u8) {
-        if crate::ppu::s5dbg_on() {
-            let (l, d) = self.ppu.scan_pos();
-            eprintln!(
-                "SLOPGB wake[{path}] ly={l} dot={d} clk={} pend={} w={w:02x} intf={:02x} late={:02x} hold={}",
-                self.clock.now(),
-                self.clock.pending(),
-                self.intf,
-                self.if_late,
-                self.m0_halt_hold
-            );
-        }
-    }
-
     pub fn new(model: Model, cart: Cartridge) -> Self {
         // CGB mode iff the hardware is a CGB/AGB *and* the cart opts in via
         // header byte 0x143 bit 7 (same predicate `GameBoy::auto_model`

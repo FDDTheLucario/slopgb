@@ -1,16 +1,17 @@
 //! Deferred-commit ("lazy-advance") CPU clock — the validated foundation for
 //! the SameBoy cycle-exact timing port.
 //!
-//! **This module is committed but not yet wired into the live `Bus`.** It is
+//! This module is wired into `Interconnect` as its CPU `clock`. It is
 //! the executable, unit-tested encoding of SameBoy 1.0.2's `pending_cycles`
 //! deferred-commit clock (`sm83_cpu.c`), the load-bearing primitive the floor
 //! lift depends on. Today the live core uses tick-then-access (a read samples
 //! peripheral state at the M-cycle's *trailing* edge, cc+4); this clock samples
 //! at the *leading* edge (cc+0) and defers the M-cycle's own 4 T-cycles, which
 //! is what lands a STAT/OAM/VRAM read on the correct side of a mode-3→mode-0
-//! boundary. Wiring it is the atomic reclock stage of the port (NOT net-zero —
-//! the PPU boundary dots shift to SameBoy's frame together), so it stays inert
-//! here, validated against the spec's worked numbers, until that stage lands.
+//! boundary. Leading-edge sampling and the atomic reclock deltas (the −2
+//! dispatch retime + the boundary-dot shift, NOT net-zero — the PPU boundary
+//! dots shift to SameBoy's frame together) are gated behind
+//! `tier2_reclock`/`leading_edge_reads`, held off in production.
 //!
 //! Model (CPU T-cycles, 4 = one M-cycle, in both speeds — the double-speed
 //! factor is applied once, centrally, only to the PPU/APU domain, never
@@ -18,7 +19,6 @@
 //! `pending` debt, (2) samples/commits at the now-current clock (the leading
 //! edge of *this* M-cycle), (3) parks a fresh debt for this M-cycle's own
 //! cycles. `flush` drains the debt at the instruction boundary.
-#![allow(dead_code)] // Inert port foundation; see the module doc above.
 
 /// SameBoy's per-IO-write conflict classes (`sm83_cpu.c:131-318`). Each splits
 /// the M-cycle's 4 T-cycles into a pre-commit advance and a re-parked debt so
@@ -179,7 +179,8 @@ impl CycleClock {
     /// WITHOUT moving the current clock position (the IF-ack latch already
     /// committed). Used by `dispatch_retime` to carry the OAM-IRQ source's
     /// sub-M-cycle phase into the ISR handler reads, decoupled from the dispatch
-    /// dot. Inert unless `SLOPGB_M2CARRY`.
+    /// dot. Reached only under `tier2_reclock`; production (tier2 off) never
+    /// reaches it.
     pub(crate) fn carry_read(&mut self, t: u32) {
         self.pending = self
             .pending

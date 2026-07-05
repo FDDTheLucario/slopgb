@@ -74,12 +74,6 @@ impl Ppu {
                     if lvl && !self.stat_update.line() {
                         self.pending_if |= IF_STAT;
                         self.stat_update_halt_masks(mfi_now);
-                        if super::s5dbg_on() && self.line < 154 {
-                            eprintln!(
-                                "SLOPGB dispatch ly={} dot={} mfi={} lycln={} (ff41 t0)",
-                                self.line, self.dot, mfi_now, self.lyc_interrupt_line as u8
-                            );
-                        }
                     }
                     self.stat_update.force_level(lvl);
                     self.eng_stat_pending = Some((phase1, fin, pre_high, mfi_now, k));
@@ -105,12 +99,6 @@ impl Ppu {
                     } else if !self.stat_update.line() {
                         if !pre_high {
                             self.lyc_if_delay = self.lyc_if_delay.max(3);
-                            if super::s5dbg_on() && self.line < 154 {
-                                eprintln!(
-                                    "SLOPGB dispatch ly={} dot={} mfi={} lycln={} (ff41 fin delayed)",
-                                    self.line, self.dot, mfi_t0, self.lyc_interrupt_line as u8
-                                );
-                            }
                         }
                         self.stat_update.force_level(true);
                     }
@@ -341,12 +329,6 @@ impl Ppu {
                 if ack_consumed {
                     self.ack_squash_ppu = 0;
                 }
-                if super::s5dbg_on() && self.line < 154 {
-                    eprintln!(
-                        "SLOPGB dispatch ly={} dot={} mfi={} lycln={} (ifw squashed)",
-                        self.line, self.dot, mfi, self.lyc_interrupt_line as u8
-                    );
-                }
             } else {
                 self.pending_if |= IF_STAT;
                 // Tag the line-0 dot-4 OAM pulse for the
@@ -356,12 +338,6 @@ impl Ppu {
                     // the post-advance deferred read on the same dot sees it
                     // (the dot==4 gate keeps later dots out regardless).
                     self.ly0_pulse_age = 2;
-                }
-                if super::s5dbg_on() && self.line < 154 {
-                    eprintln!(
-                        "SLOPGB dispatch ly={} dot={} mfi={} lycln={}",
-                        self.line, self.dot, mfi, self.lyc_interrupt_line as u8
-                    );
                 }
                 self.stat_update_halt_masks(mfi);
             }
@@ -452,7 +428,7 @@ impl Ppu {
         // line-start rise. Sticky until the next STAT edge (a held STAT bit
         // raises no new edge, so the flag keeps naming the source of the pending
         // bit). The interconnect's `dispatch_retime` keys the per-ISR deferred
-        // read carry on it (`SLOPGB_M2CARRY`). Line 0's OAM pulse takes no carry
+        // read carry on it. Line 0's OAM pulse takes no carry
         // (its read frame already matches — same exemption as the halt mask).
         self.stat_rise_oam = mfi == 2 && self.eng_stat & STAT_SRC_OAM != 0 && self.line != 0;
         // The mode-0 HBlank ISR read is +2 dots early (half the mode-2 +4);

@@ -443,12 +443,6 @@ impl Ppu {
                     self.render.hunt_done = true;
                     self.render.discard = pos;
                     self.render.hunt_match_dot = self.dot;
-                    if crate::ppu::s5dbg_on() && (130..144).contains(&self.line) {
-                        eprintln!(
-                            "SLOPGB hunt ly={} dot={} scx={} discard={pos}",
-                            self.line, self.dot, self.eff.scx
-                        );
-                    }
                 } else {
                     self.render.hunt_idx = (self.render.hunt_idx + 1) & 7;
                 }

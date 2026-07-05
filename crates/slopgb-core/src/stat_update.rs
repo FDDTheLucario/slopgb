@@ -1,7 +1,7 @@
-//! SameBoy `GB_STAT_update` rising-edge STAT-interrupt line — the validated,
-//! inert foundation for the STAT IRQ reclock.
+//! SameBoy `GB_STAT_update` rising-edge STAT-interrupt line — wired into the
+//! PPU as `Ppu.stat_update`, the STAT-line tracker for the leading-edge path.
 //!
-//! **Committed but not yet wired into the live PPU.** Today the STAT IRQ is
+//! On the flag-off (production) path the STAT IRQ is
 //! raised by the gambatte-derived per-source event engine
 //! (`ppu/stat_irq.rs::stat_events_tick`), a set of mode/LYC *pulse* predicates.
 //! SameBoy instead keeps a single **level** — `stat_interrupt_line` = the OR of
@@ -16,10 +16,9 @@
 //! [`Ppu::mode_for_interrupt`](crate::ppu) field) plus the STAT register's
 //! enable bits and the LYC match — exactly the inputs SameBoy reads — so the
 //! swap is "drive this from the decoupled mode each dot and OR its return
-//! into IF" rather than a from-scratch rewrite. It stays inert here, validated
-//! against `display.c`'s worked behaviour, until that stage lands together
-//! with the leading-edge read and the cc-exact boundary (the atomic reclock).
-#![allow(dead_code)] // Inert port foundation; see the module doc above.
+//! into IF" rather than a from-scratch rewrite. It drives the STAT line on the
+//! flag-on (`leading_edge_reads`) path; production keeps that flag off, so it
+//! changes nothing there.
 
 /// `mode_for_interrupt == -1`: the deliberate "no mode source" state SameBoy
 /// uses to force the STAT line low between transitions (`display.c:1799`,

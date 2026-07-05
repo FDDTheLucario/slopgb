@@ -394,7 +394,7 @@ pub struct Ppu {
     /// so the flag-off path is byte-identical. `dhalf == 0` after a
     /// dot-completing half-dot (the whole-dot work ran), `1` mid-dot (a DS read
     /// landing on an odd CPU-T resolves here — the sub-dot read position
-    /// samples). See [`Self::sub_dot`].
+    /// samples).
     dhalf: u8,
     /// The persistent LCD phase residual, in 8 MHz half-dots: the
     /// accumulated difference between SameBoy's CPU-grid shift at each STOP
@@ -462,8 +462,8 @@ pub struct Ppu {
     /// [`Self::stat_update_halt_masks`]; the interconnect's `dispatch_retime`
     /// reads it to apply the per-ISR deferred-read carry (the OAM-ISR handler's
     /// reads land 1 M-cycle = 2 dots DS later than the mode-0-ISR's, decoupled
-    /// from the IF-delivery ack). Inert unless
-    /// `SLOPGB_M2CARRY`; production never reaches `stat_update_halt_masks`.
+    /// from the IF-delivery ack). Reached only under `tier2_reclock` (via
+    /// `dispatch_retime`); production (tier2 off) never reaches it.
     stat_rise_oam: bool,
     /// The currently-pending STAT IRQ was the mode-0 HBlank rise
     /// (`mfi==0`). The mode-0 ISR read lands +2 dots early (vs the mode-2 +4),
@@ -480,7 +480,8 @@ pub struct Ppu {
     /// non-carried polled/other-ISR reads too (dropping 50 SameBoy-passes whose
     /// native frame was already correct); gating the SBex override on
     /// `read_carried` confines it to exactly the reads the carry moved to
-    /// SameBoy's frame. Inert unless `SLOPGB_M2CARRY`.
+    /// SameBoy's frame. Reached only under `tier2_reclock` (via
+    /// `dispatch_retime`); production (tier2 off) never reaches it.
     read_carried: bool,
     /// The externally visible mode-0 flip (STAT mode bits, OAM/VRAM
     /// unblock): rises with `m0_src` ahead of the pipe end (see
@@ -844,30 +845,11 @@ pub struct Ppu {
     dmg_palette: [u32; 4],
 }
 
-/// Read-dot tracer gate: true iff `SLOPGB_S5DBG` is set in the environment.
-/// Cached once (the trace runs every dot, so a per-tick `getenv` would
-/// dominate the probe run-time). Byte-identical when unset.
-pub(crate) fn s5dbg_on() -> bool {
-    use std::sync::OnceLock;
-    static F: OnceLock<bool> = OnceLock::new();
-    *F.get_or_init(|| std::env::var_os("SLOPGB_S5DBG").is_some())
-}
-
 /// The BG-fetcher LCDC render-view defer, in PPU dots: the eager
 /// control commit lands at the write's leading edge (cc+0), the render fetch
 /// grid is calibrated +4 late, so the addressing view re-commits this many
 /// `Ppu::tick`s later.
 const RENDER_LCDC_DELAY: u8 = 3;
-
-/// Per-bus-op ISR trace gate: true iff `SLOPGB_ISRTRACE` is set. Logs every
-/// deferred read/write/internal access's (addr, ly, dot, clk, pend) so the
-/// handler advance can be lined up against SameBoy's per-access trace.
-/// Byte-identical when unset; never read in production.
-pub(crate) fn isrtrace_on() -> bool {
-    use std::sync::OnceLock;
-    static F: OnceLock<bool> = OnceLock::new();
-    *F.get_or_init(|| std::env::var_os("SLOPGB_ISRTRACE").is_some())
-}
 
 fn pixel_buffer(fill: u32) -> Box<[u32; SCREEN_PIXELS]> {
     vec![fill; SCREEN_PIXELS]
@@ -1217,15 +1199,6 @@ impl Ppu {
         self.dhalf == 0
     }
 
-    /// The current half-dot phase (0 = at a dot boundary, 1 = mid-dot).
-    /// Used to resolve a deferred read to the exact 8 MHz half-dot the
-    /// CPU-T lands on (a DS read on an odd CPU-T sits mid-dot). Always 0 on the
-    /// whole-dot production path. Consumed by [`Self::read_pos_hd`] and the
-    /// `read_deferred` path.
-    pub(crate) fn sub_dot(&self) -> u8 {
-        self.dhalf
-    }
-
     /// The deferred read's EXACT half-dot
     /// position within the current line: `2*dot + dhalf` on the 8 MHz grid.
     /// [`Interconnect::read_deferred`] advances the machine T-granularly to the
@@ -1263,12 +1236,6 @@ impl Ppu {
         } else {
             0
         }
-    }
-
-    /// Accumulate the LCD phase residual at a STOP speed-switch leave
-    /// (see [`Self::lcd_phase_hd`]). Tier2 STOP path only.
-    pub(crate) fn add_lcd_phase(&mut self, hd: i16) {
-        self.lcd_phase_hd += hd;
     }
 
     /// The SameBoy `double_speed_alignment` shadow, mod 8 (see
@@ -1398,12 +1365,6 @@ impl Ppu {
                 self.wy_trig_sb = true;
                 self.wy_trig_sb_line = self.ly;
                 self.wy_trig_sb_dot = self.dot;
-                if crate::ppu::s5dbg_on() {
-                    eprintln!(
-                        "SLOPGB wytrigset ly={} dot={} wy2={}",
-                        self.ly, self.dot, self.wy2
-                    );
-                }
             }
         }
         if self.line == 0 && self.dot == 2 {
@@ -1443,22 +1404,6 @@ impl Ppu {
             // Visible mode-0 flip + IRQ-source rise (after the dot's
             // render step so the projection sees this dot's state).
             self.m0_flip_events();
-            // Trace the EFFECTIVE CPU-visible mode-3→0 EXIT dot — the dot
-            // `vis_mode_read()` (what the FF41 register read returns, incl.
-            // the window law / vis_hold / m0_unflip re-projection) actually
-            // flips 3→0, to line up against SameBoy's mode trace.
-            // `SLOPGB_S5DBG`, byte-identical unset.
-            if crate::ppu::s5dbg_on() {
-                use std::cell::Cell;
-                thread_local!(static PREV: Cell<u8> = const { Cell::new(255) });
-                let vm = self.vis_mode_read();
-                PREV.with(|p| {
-                    if p.get() == 3 && vm == 0 {
-                        eprintln!("SLOPGB visexit ly={} dot={}", self.line, self.dot);
-                    }
-                    p.set(vm);
-                });
-            }
         }
         if self.model.is_cgb() && !self.ds && self.line == 152 && self.dot == 454 {
             // CGB-C single speed loads LY=153 two dots before line 153
@@ -1670,10 +1615,9 @@ impl Ppu {
         self.enabled
     }
 
-    /// Read-dot tracer position: the PPU's current `(line, dot)` scan
-    /// position. Pure accessor (no behaviour), used by the `SLOPGB_S5DBG`
-    /// FF41-read trace in [`crate::interconnect::Interconnect::read_deferred`]
-    /// to line slopgb's read dot up against SameBoy's `cycles_for_line`.
+    /// The PPU's current `(line, dot)` scan position. Pure accessor (no
+    /// behaviour); the deferred-read position laws line slopgb's read dot up
+    /// against SameBoy's `cycles_for_line`.
     pub(crate) fn scan_pos(&self) -> (u8, u16) {
         (self.line, self.dot)
     }
@@ -1686,48 +1630,6 @@ impl Ppu {
     /// hunt (`enable_display/ly0_late_scx7_m3stat_*`).
     pub(crate) fn glitch_active(&self) -> bool {
         self.glitch_line
-    }
-
-    /// Read-state probe at the deferred FF41 read:
-    /// `(win_active, vis_early, line_render_done, vis_hold_until, raw vis_mode,
-    /// n_sprites)`. Lets a trace show WHY the read sees its mode (window still
-    /// active → extended mode 3 vs a bare re-projection). Pure accessor.
-    pub(crate) fn dbg_read_state(&self) -> (bool, bool, bool, u16, u8, u8) {
-        (
-            self.render.win_active,
-            self.vis_early,
-            self.line_render_done,
-            self.vis_hold_until,
-            self.vis_mode(),
-            self.render.n_sprites,
-        )
-    }
-
-    /// Window-abort state at the deferred FF41
-    /// read: `(win_aborted, win_predraw_abort, win_predraw_abort_dot,
-    /// wx_match_dot)`. Lets a trace show which abort class a
-    /// disabled-window line took (pre-draw bare vs in-draw kept-cost). Pure
-    /// accessor.
-    pub(crate) fn dbg_abort_state(&self) -> (bool, bool, u16, u16, u8, u8) {
-        (
-            self.render.win_aborted,
-            self.render.win_predraw_abort,
-            self.render.win_predraw_abort_dot,
-            self.render.wx_match_dot,
-            self.eff.scx & 7,
-            self.render.wx_match_scx,
-        )
-    }
-
-    /// Window enable/re-enable/WX-write commit
-    /// dots at the deferred FF41 read: `(win_enable_dot, win_reenable_dot,
-    /// wx_write_dot)`. For the late-enable / re-enable / late-WX law fits.
-    pub(crate) fn dbg_win_dots(&self) -> (u16, u16, u16) {
-        (
-            self.render.win_enable_dot,
-            self.render.win_reenable_dot,
-            self.render.wx_write_dot,
-        )
     }
 
     /// XRGB8888 pixels of the most recently *completed* frame.

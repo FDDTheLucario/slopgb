@@ -67,12 +67,6 @@ impl Ppu {
                     self.eff.render_lcdc = value;
                     self.render_lcdc_pending = None;
                 }
-                if (old ^ value) & LCDC_WIN_ENABLE != 0 && crate::ppu::s5dbg_on() {
-                    eprintln!(
-                        "SLOPGB wlcdc ly={} dot={} old={old:02x} new={value:02x}",
-                        self.line, self.dot
-                    );
-                }
                 // LCDC.5 cleared while the window machine is drawing:
                 // the window aborts at the pipeline view's commit point
                 // (gambatte ppu.cpp setLcdc clears win_draw_started
@@ -290,27 +284,11 @@ impl Ppu {
                 // spreads).
                 self.vram_wr_line = self.line;
                 self.vram_wr_dot = self.dot;
-                if crate::ppu::s5dbg_on() && self.line < 144 {
-                    eprintln!(
-                        "SLOPGB vramw ly={} dot={} blk={}",
-                        self.line,
-                        self.dot,
-                        u8::from(self.vram_write_blocked())
-                    );
-                }
                 if !self.vram_write_blocked() {
                     self.vram[self.vram_index(addr)] = value;
                 }
             }
             0xFE00..=0xFE9F => {
-                if crate::ppu::s5dbg_on() && self.line < 144 {
-                    eprintln!(
-                        "SLOPGB oamw ly={} dot={} blk={}",
-                        self.line,
-                        self.dot,
-                        u8::from(self.oam_write_blocked())
-                    );
-                }
                 if !self.oam_write_blocked() {
                     self.oam[usize::from(addr - 0xFE00)] = value;
                 }
@@ -467,12 +445,6 @@ impl Ppu {
             0xFF4A => {
                 let old_wy = self.wy;
                 self.wy = value;
-                if crate::ppu::s5dbg_on() {
-                    eprintln!(
-                        "SLOPGB wwy ly={} dot={} old={old_wy:02x} new={value:02x}",
-                        self.line, self.dot
-                    );
-                }
                 // The boundary-WY cross-line latch (see `Ppu::wy_xline_trig`):
                 // a tail/head write matching the current line, window enabled
                 // at the commit (DMG too — the DMG arm-7 twin reads the same

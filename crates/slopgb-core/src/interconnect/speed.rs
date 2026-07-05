@@ -48,7 +48,6 @@ impl Interconnect {
             let w0 = self.pending_halt_wake();
             let w0m = if m0_head { w0 & !IF_STAT_BIT } else { w0 };
             if w0m != 0 {
-                self.dbg_wake("w0", w0m);
                 return w0m;
             }
             let before = self.clock.now();
@@ -75,7 +74,6 @@ impl Interconnect {
                 self.clock.advance_pending(2);
                 self.advance_machine_t(before, self.clock.now());
                 self.clock.carry_read(4);
-                self.dbg_wake("g2", w2);
                 return w2;
             }
             // Non-STAT sources keep the calibrated mid-sample semantics:
@@ -86,7 +84,6 @@ impl Interconnect {
             if w2n != 0 {
                 self.clock.forgive(2);
                 self.wake_skew = 2;
-                self.dbg_wake("w2", w2n);
                 return w2n;
             }
             return 0;
@@ -106,7 +103,6 @@ impl Interconnect {
             {
                 self.clock.carry_read(4);
             }
-            self.dbg_wake(if self.cpu_halted { "plain" } else { "first" }, w);
         }
         w
     }
@@ -215,16 +211,6 @@ impl Interconnect {
         // the tier2 suite constants absorb). Tier2-only, byte-identical OFF.
         if self.tier2_reclock && switching {
             self.ppu.note_switch_stop();
-        }
-        if crate::ppu::s5dbg_on() {
-            let (l, d) = self.ppu.scan_pos();
-            eprintln!(
-                "SLOPGB stop ly={l} dot={d} clk={} sw={} from_ds={} ip={}",
-                self.cycles,
-                u8::from(switching),
-                u8::from(self.double_speed),
-                u8::from(interrupt_pending)
-            );
         }
         // gambatte Memory::stop snapshots the HDMA situation at the
         // pre-read cc: a block request still pending when STOP executes
@@ -344,8 +330,7 @@ impl Interconnect {
         // +2 half-dots per switch (with K=2/switch the post-switch polled
         // reads land exactly at SameBoy's read cfl − 4, and the half-dot bare
         // exit E(scx) = 510 + 2*scx closes all four scx1/scx2 `_1`/`_2` pairs,
-        // co-landing with that exit). `SLOPGB_STOPADV` still overrides for
-        // measurement. Tier2-only; production byte-identical.
+        // co-landing with that exit). Tier2-only; production byte-identical.
         if self.tier2_reclock {
             // K in 8 MHz HALF-dots (the grain): odd K leaves the PPU on a
             // half-dot skew relative to the CPU grid (`dhalf` persists), the
@@ -389,33 +374,16 @@ impl Interconnect {
             // leaves need +2 (offset1/offset2-leave2/speedchange).
             let k = if entering_ds {
                 0
+            } else if self.ppu.sb_dsa() & 7 == 4 {
+                6
             } else {
-                std::env::var("SLOPGB_STOPADV")
-                    .ok()
-                    .and_then(|v| v.parse::<u32>().ok())
-                    .unwrap_or(if self.ppu.sb_dsa() & 7 == 4 { 6 } else { 2 })
+                2
             };
-            if crate::ppu::s5dbg_on() && !entering_ds {
-                let (l, d) = self.ppu.scan_pos();
-                eprintln!(
-                    "SLOPGB leave ly={l} dot={d} clk={} dsa={} dsa7={} k={k}",
-                    self.cycles,
-                    self.ppu.sb_dsa(),
-                    self.ppu.sb_dsa() & 7
-                );
-            }
             // Record the leave for the post-switch exit table (the leave k
             // is the table's class variable; LCD checked at the pause-end
             // instant, so the lcdoff2 off-leave stays excluded).
             if !entering_ds {
                 self.ppu.note_switch_leave(k as u8);
-            }
-            if !entering_ds {
-                let ph = std::env::var("SLOPGB_LCDPH")
-                    .ok()
-                    .and_then(|v| v.parse::<i16>().ok())
-                    .unwrap_or(0);
-                self.ppu.add_lcd_phase(ph);
             }
             for _ in 0..k {
                 let ppu_if = self.ppu.tick_half();
@@ -468,14 +436,6 @@ impl Interconnect {
         {
             self.ppu.set_read_carried(true);
         }
-        if crate::ppu::s5dbg_on() {
-            let (line, dot) = self.ppu.scan_pos();
-            eprintln!(
-                "SLOPGB vec ly={line} dot={dot} clk={} pend={}",
-                self.clock.now(),
-                self.clock.pending()
-            );
-        }
     }
 
     pub(super) fn halt_entry_impl(&mut self) -> u8 {
@@ -498,15 +458,6 @@ impl Interconnect {
             self.advance_machine_t(before, self.clock.now());
         }
         let w = self.pending();
-        if crate::ppu::s5dbg_on() {
-            let (l, d) = self.ppu.scan_pos();
-            eprintln!(
-                "SLOPGB hentry ly={l} dot={d} clk={} w={w:02x} m0={} vis_from={}",
-                self.clock.now(),
-                u8::from(self.ppu.stat_rise_m0()),
-                self.stat_vis_from_t
-            );
-        }
         // The entry decision observes the machine genuinely — the
         // m0-origin STAT rise's frame offset (the same T-deadline the wake
         // sampler consults) applies here too, else a rise landing in the

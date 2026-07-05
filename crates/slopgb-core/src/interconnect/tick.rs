@@ -104,14 +104,6 @@ impl Interconnect {
             }
             if self.ppu.take_m0_rise() {
                 let second_half = obs_pre_edge(MID_PHASE, event_phase(EdgeKind::M0Rise, cc, 0));
-                if crate::ppu::s5dbg_on() {
-                    let (l, d) = self.ppu.scan_pos();
-                    eprintln!(
-                        "SLOPGB m0rise ly={l} dot={d} cc={cc} mnow={} halted={}",
-                        self.machine_now,
-                        u8::from(self.cpu_halted)
-                    );
-                }
                 if self.tier2_reclock && (!self.model.is_cgb() || !self.double_speed) {
                     // The mode-0 rise's halt-wake visibility is a
                     // T-deadline on the SameBoy-exact 4k+2 sample grid — no
@@ -164,14 +156,7 @@ impl Interconnect {
                     // ground truth); broader generalisation is golden + all-oracle
                     // checked. Gated on `tier2_reclock` + `cpu_halted`.
                     const HALT_LY_PHASE_BY_CC: [u8; 4] = [1, 2, 0, 1];
-                    // `SLOPGB_P2TBL` overrides the carry table for measurement
-                    // sweeps of the mid-sample wake frame.
-                    self.halt_ly_phase = match std::env::var("SLOPGB_P2TBL") {
-                        Ok(t) if t.len() == 4 => {
-                            t.as_bytes()[(cc as usize - 1) & 3] - b'0'
-                        }
-                        _ => HALT_LY_PHASE_BY_CC[(cc as usize - 1) & 3],
-                    };
+                    self.halt_ly_phase = HALT_LY_PHASE_BY_CC[(cc as usize - 1) & 3];
                     // Base 0 (was 1). The boot-DIV +4 (the deferred hand-off
                     // frame installed at construction)
                     // advances the timer phase one M-cycle, which shifts this
@@ -191,16 +176,12 @@ impl Interconnect {
                     // full 33-pin gate incl. `int_hblank_halt_scx0-7`'s
                     // 62,62,62,63,63,63,63,64 grid AND `hblank_ly_scx` with
                     // the unchanged carry table passes ONLY at +1).
-                    // `SLOPGB_P2HH` overrides for measurement.
                     // DMG-only: the +1 compensates the mid-cycle (w2)
                     // sampler's early phase-0 mask consumption, which only
                     // exists on the DMG path — on CGB it is a pure +1 wake
                     // delay (broke the CGB `halt *_m0stat` want-0 legs,
                     // measured −15 on the two-bin).
-                    let p2hh: u8 = std::env::var("SLOPGB_P2HH")
-                        .ok()
-                        .and_then(|v| v.parse().ok())
-                        .unwrap_or(u8::from(!self.model.is_cgb()));
+                    let p2hh: u8 = u8::from(!self.model.is_cgb());
                     // The cc==4 hold is DMG-ONLY: it models the
                     // mid-cycle (w2) sampler's frame rotation, which does not
                     // exist on CGB (head sampler). For the CGB
@@ -453,14 +434,6 @@ impl Interconnect {
             } else {
                 HaltHdmaState::Low
             };
-            if crate::ppu::s5dbg_on() && self.hdma_mode == HdmaMode::ArmedLcdOn {
-                let (l, d) = self.ppu.scan_pos();
-                eprintln!(
-                    "SLOPGB halt-hdma ly={l} dot={d} st={:?} period={}",
-                    self.halt_hdma,
-                    self.ppu.hdma_period_law()
-                );
-            }
         }
         self.engage_halt_gate(halted);
         if !halted {
