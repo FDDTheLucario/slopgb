@@ -487,6 +487,17 @@ fn debug_call_pushes_return_addr_and_jumps() {
 }
 
 #[test]
+fn debug_write_round_trips_through_debug_read() {
+    // Live-debugger byte poke (memory-viewer edit / freeze): write a byte
+    // time-free and read it back. WRAM lands unconditionally.
+    let mut gb = GameBoy::new(Model::Dmg, rom_with_cgb_flag(0x00)).unwrap();
+    gb.debug_write(0xC000, 0x42);
+    assert_eq!(gb.debug_read(0xC000), 0x42, "written byte reads back");
+    gb.debug_write(0xC000, 0x00);
+    assert_eq!(gb.debug_read(0xC000), 0x00, "overwrite reads back");
+}
+
+#[test]
 fn channel_mute_round_trips_and_defaults_off() {
     let mut gb = GameBoy::new(Model::Dmg, rom_with_cgb_flag(0x00)).unwrap();
     for ch in 1..=4 {

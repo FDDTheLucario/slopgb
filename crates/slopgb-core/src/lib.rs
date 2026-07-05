@@ -509,6 +509,17 @@ impl GameBoy {
         r.pc = target;
     }
 
+    /// Write a byte time-free for the bgb-style memory-viewer edit and the
+    /// freeze list — the write counterpart of [`Self::debug_read`]. Routes
+    /// through `write_no_tick`, so it follows live banking and honors the same
+    /// PPU/MBC access rules a CPU store would (VRAM/OAM dropped during a locked
+    /// PPU mode; cart-RAM ignored while disabled). Live-debugger-only `&mut`,
+    /// never invoked on a golden/test run, so the golden gate is untouched
+    /// (same caveat as [`Self::debug_set_reg`]).
+    pub fn debug_write(&mut self, addr: u16, value: u8) {
+        self.bus.debug_write(addr, value);
+    }
+
     /// Map the four DMG shades to XRGB8888 colors (ignored on CGB models).
     pub fn set_dmg_palette(&mut self, palette: [u32; 4]) {
         self.bus.ppu_mut().set_dmg_palette(palette);
