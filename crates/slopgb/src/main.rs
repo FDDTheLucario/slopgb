@@ -648,6 +648,12 @@ impl App {
                 self.apply_exceptions();
                 self.paused = false;
                 self.push_recent(path);
+                // Auto-load a sidecar `.sym` (foo.gb -> foo.sym) if present, so
+                // symbols reach the disassembler and memory viewer without a
+                // manual load. Absent sidecar = silent no-op.
+                if let Some(sym) = crate::app_path::sym_sidecar(path) {
+                    self.load_symbols(&sym);
+                }
                 self.resync_pacing();
                 self.update_title();
                 if let Some(window) = &self.window {

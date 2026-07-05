@@ -2,7 +2,7 @@
 //! Load state / Link connect / bootrom paths / `.sym` symbol load, and the
 //! recent-ROMs bookkeeping. Split out of `main.rs` to keep it under the size cap.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::filepicker::{self, PickResult};
@@ -28,6 +28,15 @@ pub(crate) fn pick_kind(purpose: PathPurpose) -> PickKind {
         PathPurpose::LinkConnect => PickKind::None,
         _ => PickKind::Open,
     }
+}
+
+/// The sidecar `.sym` beside a ROM (`rom.with_extension("sym")`), returned only
+/// when that file exists. Backs auto-load of symbols on ROM load. Pure → unit
+/// tested. `None` keeps auto-load a silent no-op when no sidecar is present.
+#[must_use]
+pub(crate) fn sym_sidecar(rom: &Path) -> Option<PathBuf> {
+    let sym = rom.with_extension("sym");
+    sym.exists().then_some(sym)
 }
 
 impl App {
@@ -131,7 +140,7 @@ impl App {
     /// Load a `.sym` symbol file: parse it (tolerant), store as the source of
     /// truth, and push it to the debugger view. A read error is logged (non-fatal,
     /// leaving the previous symbols intact).
-    fn load_symbols(&mut self, path: &Path) {
+    pub(crate) fn load_symbols(&mut self, path: &Path) {
         match std::fs::read_to_string(path) {
             Ok(text) => {
                 let table = symbols::SymbolTable::parse(&text);
