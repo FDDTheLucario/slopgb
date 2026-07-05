@@ -92,6 +92,22 @@ automatically (`app_path::sym_sidecar`, `exists()`-gated silent no-op), applied 
 the disassembler and the memory viewer via the existing `set_symbols` fan-out. Also
 loaded manually via Debug→"Load symbols..." (`PathPurpose::SymbolFile`).
 
+## CDL (code/data logging)
+
+FCEUX-style per-byte access log. Core: `cdl: Option<Box<[u8;65536]>>` on
+`Interconnect` (**golden-safe**, `None`-gated like the profiler — R=1/W=2/X=4 set
+by `check_access` (r/w) + `profile_pc` (x), no-op when off, excluded from
+save-state, never read back so it can't perturb a cycle;
+`set_cdl`/`cdl_flag`/`cdl_flags`/`cdl_clear`/`load_cdl` on `GameBoy`). **v1 keys by
+CPU address** (colors the whole viewer, no bank map); operands get R via the fetch
+path (opcode-only X). Debug menu: **CDL logging** (Ctrl+D toggle) / Clear CDL /
+Save CDL... / Load CDL.... The **standalone Memory Viewer** tints each visited
+byte's cell background (`cdl::cdl_color`: X=red, W=green, R=blue, combos blend),
+drawn before the dump text so glyphs stay readable; off = no tint. Save/load use
+the path modal (`PathPurpose::CdlSave/CdlLoad`) with a std-only RLE codec
+(`cdl::rle_encode/decode`, 64 KiB all-zero → 6 bytes; wrong-length file rejected).
+Follow-ups: integrated-pane coloring; FCEUX-accurate physical `.cdl` export.
+
 ## Freeze
 
 App-owned `dbg::FreezeList` (`addr → value`, beside breakpoints/watchpoints) re-applied
