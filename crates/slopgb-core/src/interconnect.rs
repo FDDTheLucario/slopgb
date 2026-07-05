@@ -22,11 +22,15 @@ use crate::timer::Timer;
 // The struct, its fields, the sub-dot access machinery (EdgeKind/event_phase/
 // edge_eighth/stamp_blocks/ACCESS_PHASE) and the free helpers stay here.
 mod boot;
+mod boot_rom;
 mod cycle;
+mod debug;
 mod hdma;
+mod link;
 mod memory;
 mod oam_dma;
 mod speed;
+mod state;
 mod tick;
 
 /// The five implemented interrupt sources: IF/IE bits 0-4 (VBlank, STAT,
@@ -246,6 +250,7 @@ struct DmaConflict {
 
 /// A freshly written FF46 value waiting out its 1 M-cycle setup delay
 /// (acceptance/oam_dma_start: the cycle after the write still reads OAM).
+#[derive(Clone)]
 struct OamDmaStart {
     src: u16,
     delay: u8,
@@ -296,6 +301,7 @@ enum HaltHdmaState {
     Requested,
 }
 
+#[derive(Clone)]
 pub struct Interconnect {
     model: Model,
     cart: Cartridge,
@@ -593,6 +599,36 @@ pub struct Interconnect {
     ff74: u8,
     /// FF75: bits 4-6 writable, others read 1.
     ff75: u8,
+
+    // ---- Debugger-only state (all inert on every golden/test path) ----
+    /// Memory watchpoints (bgb's "Set watchpoint", RM8). Empty by default —
+    /// an empty list is a zero-overhead no-op in `check_access`, so the golden
+    /// path is byte-identical.
+    watchpoints: Vec<crate::Watchpoint>,
+    /// The most recent watchpoint hit address, consumed by the run loop.
+    watch_hit: Option<u16>,
+    /// The execution profiler tally (bgb's logging mode, MB5). `None` (off) by
+    /// default; a `None` tally makes `profile_pc` a no-op, so golden is
+    /// byte-identical.
+    prof: Option<std::collections::BTreeMap<u16, u64>>,
+    /// Profiler break mode: halt the free run on each address's first execution.
+    prof_break: bool,
+    /// The pending profiler break hit address, consumed by the run loop.
+    prof_break_hit: Option<u16>,
+    /// Exception-break mask (bgb's Options → Exceptions, the `EXC_*` bits).
+    /// `0` (disarmed) by default — every exec/access check early-outs, so the
+    /// golden path is byte-identical.
+    exc_mask: u16,
+    /// The pending exception-break hit address, consumed by the run loop.
+    exc_hit: Option<u16>,
+
+    // ---- Opt-in boot ROM (golden-safe: `boot_active` false by default) ----
+    /// A boot ROM attached by `GameBoy::new_with_boot`, overlaying the low cart
+    /// region until FF50. `None` on every `new` (no-boot) / golden path.
+    boot_rom: Option<Vec<u8>>,
+    /// Whether the boot ROM is currently mapped (false unless a boot ROM was
+    /// attached and has not yet written FF50).
+    boot_active: bool,
 }
 
 /// DMG-compat palettes installed by the CGB boot ROM for DMG carts. The
@@ -694,6 +730,15 @@ impl Interconnect {
             ff73: 0,
             ff74: 0,
             ff75: 0,
+            watchpoints: Vec::new(),
+            watch_hit: None,
+            prof: None,
+            prof_break: false,
+            prof_break_hit: None,
+            exc_mask: 0,
+            exc_hit: None,
+            boot_rom: None,
+            boot_active: false,
         }
     }
 
@@ -727,8 +772,34 @@ impl Interconnect {
         &mut self.apu
     }
 
+    /// Read-only APU view (debugger wave/channel panels). Side-effect-free.
+    pub fn apu(&self) -> &Apu {
+        &self.apu
+    }
+
     pub fn joypad_mut(&mut self) -> &mut Joypad {
         &mut self.joypad
+    }
+
+    /// Read-only joypad view (debugger button state). Side-effect-free.
+    pub fn joypad(&self) -> &Joypad {
+        &self.joypad
+    }
+
+    /// CGB double-speed mode (KEY1 bit 7) — the debugger's `spd` view.
+    pub(crate) fn double_speed(&self) -> bool {
+        self.double_speed
+    }
+
+    /// Enter (`true`) / leave (`false`) native CGB mode. Used by the opt-in
+    /// boot-ROM path (`attach_boot_rom`) to run the CGB boot ROM in true
+    /// power-on CGB mode and by the FF4C DMG-compat lock at hand-off; mirrors
+    /// the DMG-compat routing `Interconnect::new` precomputes. Never reached on
+    /// a `new` (no-boot) path, so it is golden-safe.
+    pub(crate) fn set_cgb_mode(&mut self, on: bool) {
+        self.cgb_mode = on;
+        self.ppu.set_dmg_compat(self.model.is_cgb() && !on);
+        self.serial.set_cgb(on);
     }
 
     pub fn cartridge(&self) -> &Cartridge {
@@ -745,6 +816,14 @@ impl Interconnect {
         self.serial.take_output()
     }
 
+    /// Debugger memory write: store `value` at `addr` with no M-cycle timing
+    /// (the symmetric counterpart of [`Self::peek`] / the debug read path).
+    /// Used by [`crate::GameBoy::debug_call`] to push a return address — a
+    /// live-debugger-only `&mut` path, never on a golden/test run.
+    pub fn debug_write(&mut self, addr: u16, value: u8) {
+        self.write_no_tick(addr, value);
+    }
+
     /// Side-effect-free, time-free view of memory for test harnesses:
     /// `&self` guarantees no peripheral ticks and no read side effects.
     ///
@@ -759,7 +838,11 @@ impl Interconnect {
     /// $FF here.
     pub(crate) fn peek(&self, addr: u16) -> u8 {
         match addr {
-            0x0000..=0x7FFF => self.cart.read_rom(addr),
+            // Show the mapped boot ROM in the debugger views too (inert / cart
+            // when no boot ROM is active — golden-safe).
+            0x0000..=0x7FFF => self
+                .boot_rom_byte(addr)
+                .unwrap_or_else(|| self.cart.read_rom(addr)),
             0x8000..=0x9FFF => self.ppu.vram_read_raw(addr),
             0xA000..=0xBFFF => self.cart.read_ram(addr),
             0xC000..=0xFDFF => self.wram[self.wram_index(addr)],
@@ -831,6 +914,7 @@ impl Bus for Interconnect {
         // in flight commit first).
         self.service_vram_dma();
         self.maybe_oam_bug(addr, OamBugKind::Read);
+        self.check_access(addr, false);
         let trailing = self.read_no_tick(addr);
         leading.unwrap_or(trailing)
     }
@@ -861,6 +945,10 @@ impl Bus for Interconnect {
         // Corruption first, then the (mode-blocked) write attempt — during
         // the scan the CPU byte never lands (oam_write_blocked).
         self.maybe_oam_bug(addr, OamBugKind::Write);
+        self.check_access(addr, true);
+        // Exception break: disabling the LCD outside vblank — sample the *old*
+        // LCDC (`write_no_tick` commits the new one below).
+        self.check_exc_lcd(addr, value);
         self.write_no_tick(addr, value);
     }
 
@@ -903,8 +991,31 @@ impl Bus for Interconnect {
         self.tick_machine();
         self.service_vram_dma(); // reads yield to a same-cycle trigger
         self.maybe_oam_bug(addr, OamBugKind::ReadIncrease);
+        self.check_access(addr, false);
         let trailing = self.read_no_tick(addr);
         leading.unwrap_or(trailing)
+    }
+
+    /// Inert unless the live debugger enabled profiling — `prof` is `None` on
+    /// every golden/test path, so this records nothing and the emulated state
+    /// (and the fingerprint) is byte-identical.
+    fn profile_pc(&mut self, pc: u16) {
+        if let Some(m) = &mut self.prof {
+            let count = m.entry(pc).or_insert(0);
+            let first_seen = *count == 0;
+            *count += 1;
+            // Break mode: remember an address's first execution so the free run
+            // can halt there (consumed by `take_prof_break_hit`).
+            if first_seen && self.prof_break {
+                self.prof_break_hit = Some(pc);
+            }
+        }
+    }
+
+    /// Inert unless an opcode exception was armed (`exc_mask == 0` on every
+    /// golden/test path), so this is byte-identical there.
+    fn check_exec(&mut self, pc: u16, opcode: u8) {
+        self.exec_exception(pc, opcode);
     }
 
     fn pending(&self) -> u8 {

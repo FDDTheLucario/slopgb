@@ -11,6 +11,7 @@
 
 use super::length::LengthCounter;
 
+#[derive(Clone)]
 pub(super) struct Wave {
     cgb: bool,
     pub(super) enabled: bool,
@@ -110,6 +111,13 @@ impl Wave {
         }
     }
 
+    /// The raw 16 stored wave-RAM bytes, bypassing the CPU read gating that
+    /// makes [`read_ram`](Self::read_ram) unreliable while the channel plays —
+    /// for the debug I/O viewer. Side-effect-free.
+    pub(super) fn ram(&self) -> [u8; 16] {
+        self.ram
+    }
+
     pub(super) fn write_ram(&mut self, index: usize, value: u8) {
         if let Some(i) = self.cpu_ram_slot(index) {
             self.ram[i] = value;
@@ -151,6 +159,40 @@ impl Wave {
         self.freq = 0;
         self.length.power_off(clear_length_counter);
         // Wave RAM survives power off.
+    }
+}
+
+// --- Save state (see `crate::state`) ---
+impl Wave {
+    pub(super) fn write_state(&self, w: &mut crate::state::Writer) {
+        w.bool(self.cgb);
+        w.bool(self.enabled);
+        w.bool(self.dac);
+        w.u8(self.volume_code);
+        w.u16(self.freq);
+        self.length.write_state(w);
+        w.u32(self.timer);
+        w.u8(self.position);
+        w.u8(self.sample_byte);
+        w.bytes(&self.ram);
+        w.u32(self.t_since_fetch);
+    }
+    pub(super) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        self.cgb = r.bool()?;
+        self.enabled = r.bool()?;
+        self.dac = r.bool()?;
+        self.volume_code = r.u8()?;
+        self.freq = r.u16()?;
+        self.length.read_state(r)?;
+        self.timer = r.u32()?;
+        self.position = r.u8()?;
+        self.sample_byte = r.u8()?;
+        r.bytes_into(&mut self.ram)?;
+        self.t_since_fetch = r.u32()?;
+        Ok(())
     }
 }
 

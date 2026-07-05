@@ -138,7 +138,12 @@ impl Interconnect {
             }
         }
         match addr {
-            0x0000..=0x7FFF => self.cart.read_rom(addr),
+            // Boot ROM overlays the low cart region while mapped (opt-in);
+            // `boot_rom_byte` is `None` whenever no boot ROM is active, so this
+            // is exactly `cart.read_rom(addr)` on every golden path.
+            0x0000..=0x7FFF => self
+                .boot_rom_byte(addr)
+                .unwrap_or_else(|| self.cart.read_rom(addr)),
             // cc+2 MID-phase VRAM read: same mode-3→mode-0 unblock edge as
             // OAM below — a second-half unblock is not yet visible here
             // (sub-dot event-phase model, increment 2). Part C: tier2 BYPASSES
@@ -249,6 +254,18 @@ impl Interconnect {
             0xFF00..=0xFF7F => self.io_write(addr, value),
             0xFF80..=0xFFFE => self.hram[usize::from(addr - 0xFF80)] = value,
             0xFFFF => self.ie = value,
+        }
+    }
+
+    /// Read for the debugger views: like [`Self::peek`] but resolves the IO
+    /// registers (FF00-FF7F) to their live hardware values via [`Self::io_read`]
+    /// — the bgb debugger/IO-map want to *show* register state, not the `$FF`
+    /// `peek` returns to keep test harnesses from reading IO out of band.
+    /// Side-effect-free (`&self`); the value is what the CPU would read now.
+    pub(crate) fn debug_read(&self, addr: u16) -> u8 {
+        match addr {
+            0xFF00..=0xFF7F => self.io_read(addr),
+            _ => self.peek(addr),
         }
     }
 
@@ -432,7 +449,17 @@ impl Interconnect {
             0xFF73 if self.model.is_cgb() => self.ff73 = value,
             0xFF74 if self.cgb_mode => self.ff74 = value,
             0xFF75 if self.model.is_cgb() => self.ff75 = value & 0x70,
-            // FF50 boot-disable: we start post-boot; writes are ignored.
+            // KEY0 (FF4C): the CGB boot ROM writes bit 2 to lock DMG-compat mode
+            // for a DMG cart, AFTER installing the compat palettes/OPRI in CGB
+            // mode. Honoured only while the boot ROM is mapped — on a post-boot/
+            // `new` machine FF4C falls through to the ignored `_` arm (golden-safe;
+            // FF4C is locked out of the normal runtime, `boot_active` false here).
+            0xFF4C if self.boot_active && value & 0x04 != 0 => self.set_cgb_mode(false),
+            // FF50 boot-disable: while a boot ROM is mapped (opt-in), a write
+            // with bit 0 set hands off — the boot ROM unmaps itself permanently.
+            // With no boot ROM we start post-boot, so this is never taken and
+            // the write is ignored (golden-safe; `boot_active` false by default).
+            0xFF50 if self.boot_active && value & 1 != 0 => self.boot_active = false,
             _ => {}
         }
     }

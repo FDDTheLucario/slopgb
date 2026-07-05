@@ -6,6 +6,7 @@
 //! 03-trigger, gbdev wiki "Game Boy Sound Operation", Obscure Behavior)
 //! are implemented in [`LengthCounter::write_nrx4`].
 
+#[derive(Clone)]
 pub(super) struct LengthCounter {
     /// 64 for pulse/noise, 256 for wave.
     pub(super) max: u16,
@@ -90,6 +91,24 @@ impl LengthCounter {
         if clear_counter {
             self.counter = 0;
         }
+    }
+}
+
+// --- Save state (see `crate::state`) ---
+impl LengthCounter {
+    pub(super) fn write_state(&self, w: &mut crate::state::Writer) {
+        w.u16(self.max);
+        w.u16(self.counter);
+        w.bool(self.enabled);
+    }
+    pub(super) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        self.max = r.u16()?;
+        self.counter = r.u16()?;
+        self.enabled = r.bool()?;
+        Ok(())
     }
 }
 

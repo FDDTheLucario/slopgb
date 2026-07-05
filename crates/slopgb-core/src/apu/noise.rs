@@ -16,6 +16,7 @@
 use super::envelope::Envelope;
 use super::length::LengthCounter;
 
+#[derive(Clone)]
 pub(super) struct Noise {
     pub(super) enabled: bool,
     pub(super) dac: bool,
@@ -335,6 +336,54 @@ impl Noise {
         *self = Self::new();
         self.length = length;
         self.length.power_off(clear_length_counter);
+    }
+}
+
+// --- Save state (see `crate::state`) ---
+impl Noise {
+    pub(super) fn write_state(&self, w: &mut crate::state::Writer) {
+        w.bool(self.enabled);
+        w.bool(self.dac);
+        self.length.write_state(w);
+        self.envelope.write_state(w);
+        w.u8(self.clock_shift);
+        w.bool(self.width7);
+        w.u8(self.divisor_code);
+        w.u16(self.counter);
+        w.u16(self.counter_countdown);
+        w.bool(self.background_counting);
+        w.bool(self.counter_active);
+        w.bool(self.started_with_dac_disabled);
+        w.bool(self.did_step_counter);
+        w.bool(self.countdown_reloaded);
+        w.u8(self.alignment);
+        w.u8(self.dmg_delayed_start);
+        w.u16(self.lfsr);
+        w.u8(self.current_sample);
+    }
+    pub(super) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        self.enabled = r.bool()?;
+        self.dac = r.bool()?;
+        self.length.read_state(r)?;
+        self.envelope.read_state(r)?;
+        self.clock_shift = r.u8()?;
+        self.width7 = r.bool()?;
+        self.divisor_code = r.u8()?;
+        self.counter = r.u16()?;
+        self.counter_countdown = r.u16()?;
+        self.background_counting = r.bool()?;
+        self.counter_active = r.bool()?;
+        self.started_with_dac_disabled = r.bool()?;
+        self.did_step_counter = r.bool()?;
+        self.countdown_reloaded = r.bool()?;
+        self.alignment = r.u8()?;
+        self.dmg_delayed_start = r.u8()?;
+        self.lfsr = r.u16()?;
+        self.current_sample = r.u8()?;
+        Ok(())
     }
 }
 

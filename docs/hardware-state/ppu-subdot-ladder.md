@@ -1492,3 +1492,225 @@ regressions, all gates green; defaults NOT flipped.**
   hblank 51→67; CGB two-bin 291/291 (my-run == clean base-run); mooneye 91/91
   ON+OFF; gbtr OFF 237/0; lib 660; clippy. Pin `tier2_dmg_hblank_if_passes`
   (16 legs, 3×) → 53 pins. Map: `measurements/dmg-hblank-if-2026-07-03.md`.
+
+---
+
+> **Legacy INC-based ladder (below).** The dated `#11*` session entries above are the current Phase B cc-exact port narrative. The increment-numbered (`INC*` / `CC-RECLOCK`) ladder that follows is the earlier half-dot / eighth-grid event-phase work it grew out of — superseded but retained for its per-increment history, oracle offsets, and parked/disproven results.
+
+## Model & strategy
+
+Lifts the class-H/A sub-dot floor incrementally: keep the pixel pipe dot-clocked, add sub-dot resolution only on the **EVENT layer** (observers sample at their own phase, events commit at their own phase).
+
+Full per-increment history (incl. dead-ends) is in memory `slopgb-subdot-eventphase-ladder.md`.
+
+### Oracle access offsets (the model must reproduce both)
+
+| Oracle | Access offset |
+|---|---|
+| gambatte hwtests | evaluate at a `cc+2` access offset |
+| our tick-then-access | `cc+4` (M-cycle end) |
+| gbmicrotest (also hardware) | `cc+4` |
+
+### Phase constants (eighth grid; 8 eighths per M-cycle)
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `MID_PHASE` | 4 of 8 eighths | `cc+2` MID observer (2 dots before the tick-then-access end view) |
+| `END_PHASE` | 8 | `cc+4` = M-cycle end |
+| `ACCESS_PHASE` | `= MID_PHASE` | the single fixed CPU bus-access phase (INC-G3 corrected premise) |
+| `O` | 2 eighths = `cc+1` | the G2c per-chain dispatch offset (reverted, see below) |
+
+### Increment status overview
+
+| Increment | Subject | Status |
+|---|---|---|
+| INC1 | cc+2 OAM read accessibility | DONE |
+| INC2 | cc+2 VRAM read accessibility | DONE |
+| INC3 | STAT mode-bit read at MID | DEFERRED — parked (multi-chain) |
+| INC4 | cgbpal/dmgpalette/scx/scy during_m3 | remaining (needs g-anchor) |
+| INC5 (atomic) | CGB/AGB halt-wake whole-cycle mask + g-anchored HDMA service-seam re-flag | remaining (AXIS-1) |
+| INC6 | class-A DS half-dot offsets | remaining |
+| INC-DS-1 | CGB DS STAT mode-bit read at cc+2 MID | DONE (+43) |
+| INC-DS-2 | the 9+2 window/scx bare m3stat cases | PARKED 2026-06-14 |
+| INC-G1 | eighth-grid scaffold | DONE (net-zero) |
+| INC-G2-PROBE | m2-dispatch FF41 observer-offset probe | DONE (probe) |
+| INC-G2a+b | edge-stamp + observer-phase plumbing | DONE (net-zero) |
+| INC-G2c | dispatch FF41 tag | IMPLEMENTED + REVERTED 2026-06-14 |
+| INC-G3 | real sub-cc CPU↔PPU phase model | FEASIBILITY + TDD-PLANNED |
+| INC-G3 scaffold (tasks 2-4) | `event_phase`/`ACCESS_PHASE` foundation | DONE (net-zero) |
+| INC-G3 task 5 | whole-M-cycle CGB palette block | DONE (+3) |
+| INC-G3 task 6 (single-speed) | single-speed m3stat | BLOCKED 2026-06-14 |
+| INC-G3 task 6 (double-speed) | double-speed m3stat whole-M-cycle block | DONE (+84) |
+| INC-G3 task 7 | IF-flop set/read race | OUT OF SCOPE — cross-oracle irreducible |
+| CC-RECLOCK foundation | net-zero cc-granular tick | DONE (net-zero) |
+| CC-RECLOCK Phase-0 + R3 | golden net + single-speed FF41 MID read | MEASURED 2026-06-15 (R3 reverted) |
+| CC-RECLOCK LIFT (event-layer phase) | `dot_phase` shift probe | PROBED + DEAD-END (reverted) |
+
+---
+
+## Done increments
+
+### INC1-2 — cc+2 OAM + VRAM read accessibility
+
+- The mode-3→mode-0 OAM/VRAM accessibility unblock trails the m0 IRQ rise by one half-dot (gambatte m0Time xpos+7 vs IRQ xpos+6); a CPU OAM/VRAM read samples at the cc+2 MID phase (2 dots before the tick-then-access end view), so it still reads `$FF` when the unblock lands in the M-cycle's 2nd half.
+- `Ppu::m0_access_flip` (set in `m0_flip_events` for STEADY-STATE BARE-line flips only — sprite/window/glitch-line phases deferred) → `Interconnect::m0_access_edge` (an `Option<u8>` edge-stamp of the flip's dot-END commit eighth; `stamp_blocks(stamp, obs_phase(addr))` vs the MID observer = the old half-split).
+- This override applies ONLY to:
+  - the FE00-FE9F OAM read + CGB FEA0-FEFF mirror (INC1);
+  - the 8000-9FFF VRAM read (INC2, suppressed while an HDMA is armed — the HDMA service seam writes VRAM at the same mode-0 entry, deferred to INC5);
+  - the OAM/VRAM WRITE (dropped at cc+2 MID, same gate).
+- Everything else keeps the end view (net-zero except the straddle).
+- A SECOND edge (`Ppu::pal_access_flip` → `Interconnect::pal_access_edge`) anchors the CGB palette-RAM unblock at the pipe end (`render_finished`, 1 dot after the m0 flip / the hdma_lead trigger), routing the FF69/FF6B read at MID.
+- **Lifted**: gambatte oam_access read+write + vram_m3/postread_scx2/scx5_1 (+ds) + vramw_m3end + cgbpal_m3end_ds_1/scx3_1.
+- The clean 2-phase read/write accessibility wedges are largely EXHAUSTED (residual cgbpal_m3end rows want render_finished+2).
+
+### INC-DS-1 — CGB double-speed STAT mode-bit read at cc+2 MID (the biggest cluster) — DONE, +43
+
+- The CGB double-speed STAT mode-bit (FF41 bits 0-1) read at cc+2 MID: a third edge `Ppu::m0_stat_flip` (set in `m0_flip_events`, gated to SPRITE-extended lines `r.fetched != 0`, the complement of `m0_access_flip`'s bare gate) → `Interconnect::stat_mode_edge` (the flip's dot-END commit eighth; `stamp_blocks` vs the MID observer = the old half-split) forces the FF41 mode bits to 3 (old mode) when a sprite-line m3→m0 flip lands in the read M-cycle's second half AND `double_speed` AND `lcd_enabled`.
+- Lifted 43 gambatte sprites `m3stat_ds_1` rows (961→918), zero regressions.
+- **Parked: dropping the half-split (whole-M-cycle override)** — lifts ~84 more but regresses 21 green DS reads wanting mode 0. (Later revisited and committed under INC-G3 task 6 DS once the net-positive trade policy applied.)
+- **Parked: dropping the sprite gate** — regresses 5 bare-line reads (dma gdma/hdma_cycles_scx5_ds_2, lcd_offset m0stat_count); both reach FF41 through the m2-dispatch/DMA/lcd-offset chains at a different sub-cycle offset (the parked multi-chain problem).
+- Remaining m3stat_ds: 9 window (`wx`) cases + the m2int/speedchange dispatch reads + the dropped 21/5.
+
+### INC-G1 — eighth-grid scaffold — DONE 2026-06-14 (net-zero)
+
+- The four dot-loop `2*(i+1)>dots` half-splits are now `obs_pre_edge(MID_PHASE, edge_eighth(i, dots))` (interconnect.rs; MID_PHASE=4 of 8 eighths/M-cycle, dot-END edge commit), provably bit-identical (`eighth_grid_predicate_matches_half_split`) — net-zero.
+- Worth: converts the parked one-boolean conflation (when the edge committed vs the single cc+2 observer) into per-edge sub-dot offsets + per-read-chain observer phases.
+- **Honest ceiling (design workflow wnbtdfr1m)**: granularity was never the constraint, CALIBRATION is — the ~100-row sprites+window m3stat cluster is NOT cleanly solvable; addressable pool ≈ low TENS of rows and some chains may be PPU-phase-dependent (no constant offset → net-worse → revert).
+- **Parked (no grid at any resolution lifts)**: the FF0F-vs-FF0F m2int_m0irq double-read IF-flop race + win*_b/ppu_sprite0 + STAT-mode through non-direct read chains.
+
+### INC-G2-PROBE — m2-dispatch FF41 observer offset — DONE 2026-06-14 (probe)
+
+- Instrumented vs gambatte: the m2-dispatch (interrupt-ISR) FF41 STAT read has a CLEAN CONSTANT observer offset **O=2 eighths (cc+1)** vs the direct-poll/DS MID=4 (the flip lands inside the read M-cycle at edge_eighth∈{4,6,8}; O=2 blocks all, MID leaves edge=4 unblocked) — confirmed across m2int_m3stat base+scx2+scx5 × DMG+CGB.
+- **Blocker**: m2-dispatch and direct-poll SS reads are bus-indistinguishable yet want OPPOSITE results at edge=4, so the lift needs CPU→bus chain tagging (the dispatch tags its ISR FF41 reads O=2, gate dropped for tagged reads only).
+
+### INC-G2a+b — edge-stamp + observer-phase plumbing — DONE (commit 323b327, net-zero)
+
+- The three `*_mid_blocked` booleans are now `Option<u8>` edge-stamps (`m0_access_edge`/`pal_access_edge`/`stat_mode_edge`) storing the flip's `edge_eighth`, consumed via `stamp_blocks(stamp, self.obs_phase(addr))`; `obs_phase` returns MID for every chain (`stamp_blocks_matches_half_split` + `default_observer_phase_is_mid`).
+- **THIS is the eighth-grid scaffold's terminal deliverable.**
+
+### INC-G3 scaffold (TDD-plan tasks 2-4) — DONE (net-zero)
+
+The `event_phase`/`ACCESS_PHASE` foundation, before any lift:
+
+- `EdgeKind` enum (`M0Rise`/`M0Access`/`PalAccess`/`StatMode`) + `event_phase(kind,i,dots)` returning `edge_eighth(i,dots)` for every kind (the dot-loop now stamps `Some(event_phase(EdgeKind::X, i, dots))`; the `kind` arg is the seam a per-event sub-dot lead/lag hangs on later — e.g. m0Time=xpos+7 vs IRQ+6).
+- `const ACCESS_PHASE = MID_PHASE` replacing the per-address `obs_phase(addr)` method at all 7 read/write consumer sites.
+- **Corrected premise** (baked in): every CPU bus access samples at ONE fixed phase (`ACCESS_PHASE`), so the discriminator between read chains is the EVENT's sub-dot position (`event_phase` per kind), NOT a per-chain observer phase (G2c's reverted mistake).
+- Tests `event_phase_net_zero_except_pal` (the scaffold kinds ≡ `edge_eighth`, both speeds, every dot) + `access_phase_is_single_constant` (`ACCESS_PHASE == MID_PHASE`); the removed `default_observer_phase_is_mid` no longer applies. clippy/fmt/`/rust-diff-review` clean.
+- **NEXT** = the per-cluster lift tasks (5 cgbpal / 6 m3stat / 7 IF-flop race), each full-gbtr-gated, revert-on-regression — honest pool low tens of rows, real A/B risk; the scaffold is the safe foundation, the lifts are the gamble.
+
+### INC-G3 task 5 — whole-M-cycle CGB palette block — DONE, +3 rows, zero cross-suite regression
+
+- The first lift on the `event_phase` seam. `event_phase(EdgeKind::PalAccess, ..)` returns `END_PHASE` (8 = cc+4 = M-cycle end) instead of the dot-END `edge_eighth`, so the CGB FF69/FF6B palette read stays `$FF` for the ENTIRE straddle M-cycle (readable only next M-cycle) — one observer grid later than OAM/VRAM's dot-split, because the palette unblock physically lags the pixel-pipe end (gambatte cgbpAccessible vs m0Time).
+- The earlier half-split under-blocked the geometries where the lx==160 pipe-end falls in the M-cycle's FIRST half.
+- **Lifted** gambatte cgbpal_m3end `scx2_1`/`scx5_1`/`scx5_ds_1` (out7); NOT an A/B swap — full gbtr confirmed zero cross-suite regression (mealybug photos, age/wilbertpol, every CGB palette read green).
+- Probe path: env-gated `SLOPGB_PALOFF` eighth-offset sweep over the cgbpal glob (`/tmp/calib_g2c.py`) found off≥3 = always-block saturates at +3 lifts/0 cgbpal-regress; off≤2 (dot-dependent half-split variants) only reach +2 → scx2_1's pipe-end lands in the M-cycle's 1st half, so ONLY whole-M-cycle blocking catches it.
+- Counts: 599 lib + 439 mooneye + 184/184 gbtr.
+- Residual cgbpal floored: the m3end `_3` (out0) rounds + plain `_1/_2/_3` + m3start/read/write_m3start (different read offset / write cell, not the straddle block).
+- Tests `pal_access_blocks_whole_mcycle` + the updated `cgb_palette_read_mid_override_returns_ff`.
+
+### INC-G3 task 6 (double-speed m3stat whole-M-cycle block) — DONE, +84 rows 2026-06-14
+
+- `event_phase(EdgeKind::StatMode)` now returns `END_PHASE` (like `PalAccess`/task 5) instead of the dot-END `edge_eighth`, so a sprite-line m3→m0 flip holds the cc+2 FF41 mode bits at the pre-flip mode 3 for the WHOLE straddle M-cycle, not only when the flip lands in the M-cycle's 2nd half.
+- INC-DS-1's half-split caught only the +43 2nd-half-flip rows; the whole-M-cycle block adds the +84 residual sprite `m3stat_ds_1` (out3) rows whose flip lands in the FIRST half.
+- Full-gbtr ratchet = **+84 / −3** (gambatte floor 915→831, total gbtr floor 1103→1019; net −84): the only regressions are the 3 `late_sizechange_sp00/01/39_ds_1` (out0), a net-neutral in-cluster A/B swap — their `_ds_2` siblings (out3) are in the lift, and whole-M-cycle forces both same-line size-change reads to mode 3 (the `_2` want it, the `_1` do not; no `event_phase` offset separates two reads in one M-cycle).
+- ZERO cross-suite cascade (age/mealybug/gbmicrotest/mooneye2022/blargg/wilbertpol green; 439 mooneye + 600 lib green).
+- The half-dot-grid branch's net-positive-trades policy is what makes this commitable (INC-DS-1 had MEASURED the same +84 but kept the zero-regression endpoint for main's hold-floor).
+- Kept gates: sprite-line (`m0_stat_flip = r.fetched != 0`) and **`double_speed` (load-bearing — single-speed shares this stamp but wants mode 0, the blocked sub-axis below; pinned by `stat_mode_override_requires_double_speed`)**.
+- Residual m3stat_ds floored: window `wx` (silent advance_lx flip path, `m0_stat_flip` never set), m2int/speedchange dispatch reads, speedchange `_2` (dot-±1-off).
+
+### CC-RECLOCK foundation — net-zero cc-granular tick — DONE 2026-06-14
+
+- The documented class-A lift mechanism ("re-clock observable event commits to a half-dot (8 MHz) grid", gambatte.txt floor-class A) — its safe scaffold.
+- **Problem**: the dot loop (`interconnect/tick.rs`) was `for i in 0..dots` (dots=4 single / 2 double speed), which LOCKS the CPU↔PPU phase: in double speed PPU dot boundaries land only at even cc within the M-cycle ({2,4}, eighths {4,8}), so events can never sit at odd cc.
+- **Reclock**: the M-cycle advances one CPU cc at a time — `for cc in 1..=4` gated by `dot_ticks_on_cc(cc, ds, dot_phase)` (single speed ticks a dot every cc; double speed ticks 2 dots, the even cc {2,4} at phase 0, the odd cc {1,3} at phase 1) — each dot stamping its `cc_eighth(cc)` (= the single-speed dot-END `edge_eighth`, so the cc grid IS the single-speed dot grid).
+- `event_phase(kind, cc)` replaces `event_phase(kind, i, dots)`; a new `Interconnect::dot_phase: u8` field (default 0, not yet set anywhere) carries the offset.
+- **Net-zero proof**: phase 0 reproduces the old loop's dot-tick set + eighth sequence exactly (`cc_grid_matches_dot_loop`); full gbtr 184/184 ZERO baseline delta + 439 mooneye + 602 lib + clippy `-D` + fmt clean.
+- `/rust-diff-review` (mine + independent cavecrew-reviewer, which re-traced the SS/DS mapping by hand) = 1 🔵 (cc helpers lacked `edge_eighth`'s `debug_assert!` contract guard — `cc_eighth(0)` would underflow) → fixed; re-review clean. Net-zero confirmed on commit 22ee6fc.
+
+---
+
+## Remaining ladder (not yet attempted)
+
+Each is its own TDD+matrix+revert-on-any-non-target-green-regression round.
+
+- **INC4** — cgbpal/dmgpalette/scx/scy during_m3 (cgbpal_m3 is hdma_start-anchored → needs the g-anchor first).
+- **INC5 (atomic)** — CGB/AGB halt-wake whole-cycle mask + the g-anchored HDMA service-seam re-flag (AXIS-1, see [cpu-interrupts.md](cpu-interrupts.md) halt wake — the 13-row dma trap is the guard; gate to single speed, the 9 ds regressions are class-A/INC6).
+- **INC6** — the class-A DS half-dot offsets, one cluster at a time.
+
+The clean accessibility-read wedges (OAM/VRAM) are EXHAUSTED — INC4/5 both need the HDMA-seam g-anchor foundation.
+
+---
+
+## Parked / disproven / out-of-scope
+
+### INC3 — STAT mode-bit read at MID — DEFERRED (parked)
+
+- **Parked: a naive `FF41|0x03` at MID** — lifts ~48 (incl. wilbertpol intr_2_mode0_nops) but regresses ~32: FF41 is read by many chains with different sub-cycle offsets, so it's the PARKED CPU↔PPU-phase problem, not a clean read analog.
+
+### INC-DS-2 — the 9+2 window/scx bare m3stat cases — PARKED 2026-06-14
+
+- **Parked: every `m0_stat_flip` gate/half-split variant** — none lifts them (drop sprite-gate = 0 lift / 2 regress; whole-M-cycle = 0 lift / 2 regress).
+- Their read line is BARE (no sprite/window active at the flip), the flip fires via the SILENT `advance_lx` pipe-end path (so `m0_stat_flip` is never set), and the targets need the flip a half-dot LATER while the 5 known regressors are already 2nd-half but want mode 0 — an INVERSE relationship only the read-chain sub-cycle phase resolves.
+- The window `m2int_wx*_scx*_m3stat` cluster fails in BOTH SS and DS (not a DS-only sub-dot issue).
+
+### INC-G2c — dispatch FF41 tag — IMPLEMENTED + REVERTED 2026-06-14
+
+- Built the full mechanism: `isr_ff41_obs` countdown armed by `ack(STAT bit 1)`, `obs_phase(0xFF41)`=O2 while live; a bare-line stamp `stat_mode_edge_bare` (PPU `m0_stat_flip_bare`) consulted ONLY by tagged reads (sprite stamp kept MID+DS-only, so untagged dma/lcd_offset bare polls stay green); dispatch override single-speed-gated.
+- **Calibration failure**: the m2int ISR pads ~60 M-cycles from dispatch to its `ldh a,(FF41)` read at the mode-0 flip, so the tag needs a magic lifetime L≈64 — NOT a hardware constant, test-ROM-specific = curve-fitting.
+- Authoritative full gbtr = **+57 lifts / −34 regressions**: the lifts are the wilbertpol `intr_2_mode0_scxN_timing_nops` chains (the documented A/B swaps the mode-0 grid note says DON'T chase) + gambatte m2int_m3stat `_1`; the regressions BREAK the canonical `intr_2_mode0_timing(+sprites)` mooneye test in BOTH wilbertpol and mooneye2022 (×6 models) — the dispatch tag broadly perturbs the whole STAT-dispatch read chain, flipping the parked mode-0 A/B.
+- **REVERTED** — the honest-ceiling "PPU-phase-dependent → net-worse → revert" outcome. **Do**: don't re-attempt the FF41 dispatch tag without a real sub-cc CPU↔PPU phase model (not a magic ack-countdown).
+
+### INC-G3 — real sub-cc CPU↔PPU phase model — FEASIBILITY + TDD-PLANNED, NOT IMPLEMENTED 2026-06-14
+
+The model G2c lacked. **POSSIBLE in a scoped form**:
+
+- cc-exact boundary-event positions (from the gambatte xpos formulas already encoded as dot-leads in render.rs `m0_flip_events`: m0 IRQ/flip lead pipe-end by 2 dots / 1 in DS; m0Time=xpos lcd_hres+7, IRQ +6) +
+- a SINGLE fixed CPU-access observer phase (NOT per-chain — G2c's per-chain O=2 was the wrong premise; all accesses sample at the same M-cycle cc-offset since M-cycles are dot-aligned to the PPU) +
+- an IF flip-flop set/read sub-cc RACE (the m2int_m0irq double-read + wilbertpol intr_2_mode0_*_nops cluster).
+
+**Hard ceiling**: lifts ONLY geometries where the dot-clocked projection already places the pipe-end DOT correctly; geometries with the dot ±1 off (speedchange `_2`, some scx/sprite/window combos) need a full cc-granular pixel-pipe RECLOCK — OUT OF SCOPE (would recalibrate ~5941 green dot-level cases incl. mealybug photos, mode-3 fetch grid, window machine).
+
+TDD plan = net-zero `EdgeKind`/`event_phase` + single `ACCESS_PHASE` scaffold (now done, above), then per-cluster calibration (cgbpal palette-offset, m3stat, IF-flop race), each full-gbtr-gated with revert-on-regression.
+
+- **Parked: cgbpal probe (reverted)** — a whole-dot `pal_access_delay` (render_finished+N) is A/B: N=1 lifts scx2_1/scx5_ds_1 but regresses ds_1 (an INC4-partial green); ds_1(scx0) wants +0, scx5_ds_1 wants +1 → the palette unblock's sub-dot position depends on SCX%8, only a per-SCX sub-dot offset (the real model) could condition it, and that is itself A/B-risky. Honest-ceiling holds.
+
+### INC-G3 task 6 (single-speed m3stat) — probed + BLOCKED 2026-06-14
+
+- **Parked: dropping the `double_speed` gate on the FF41 STAT-mode override** (to extend INC-DS-1's block to single speed) — measures **LIFT=0 / REGRESS=30** over the m3stat suites (env probe `SLOPGB_STATSS` + `/tmp/calib_g2c.py`, reverted, nothing committed).
+- Single- and double-speed FF41 reads share ONE `stat_mode_edge` stamp and `event_phase` is speed-agnostic, so the green single-speed direct-poll reads (enable_display, sprite-count, m0int_m3stat, ine_m3stat) — which want mode 0 — get wrongly forced to mode 3.
+- Isolating single speed needs a speed/chain-conditioned phase = the per-read-chain CPU→bus tagging G2c proved breaks the canonical `intr_2_mode0_timing` mooneye test. This is the SINGLE-speed sub-axis of task 6; it stays blocked. (The DOUBLE-speed sub-axis was the actual lift — see INC-G3 task 6 DS in Done increments.)
+
+### CC-RECLOCK Phase-0 (golden net) + R3 (single-speed FF41 MID read) — MEASURED 2026-06-15
+
+Pursuing SameBoy parity (the 79 wilbertpol rows — 66 intr_2_mode0_*_nops + 8 hblank + 4 ly_*-C + 1 defect; mooneye 439 + blargg already at SameBoy's bar).
+
+- **Phase-0 committed (a77a011)**: `tests/gbtr/golden.rs` — a per-ROM frame-hash (FNV-1a) + audio verdict for all 9020 (rom×model) cases under the 16-frame protocol; `SLOPGB_GOLDEN=capture` writes the snapshot, default diffs + fails on drift; deterministic. The drift net the reclock needs (baselines catch pass/fail; this catches silent pixel drift).
+- **Spike (task 0, env `SLOPGB_STATK`, reverted) RESOLVED the architecture crux**: sweeping the FF41 mode read's intra-M-cycle dot K on DMG:
+
+  | K | result |
+  |---|---|
+  | K=0/4 (end view) | 2/8 scx_nops |
+  | K=1 | 8/8 but BREAKS the canonical |
+  | K=2 (cc+2 MID) | 6/8 with the canonical safe |
+
+  So the cc-event/access-phase model is net-positive in principle (frames untouched → golden green); NOT the feared full pixel-RENDER reclock.
+- **Parked: R3 (single-speed bare-line FF41 mode read at cc+2 MID via the existing `m0_access_edge`, bare-gated so `intr_2_mode0_timing_sprites` stays green)** — MEASURED on full gbtr = **+19 / −23 A/B swap** (reverted). The lifts are the well-positioned `_1` families (m2int_m3stat, scx_during_m3 — clean, no sibling regress); the −23 are speedchange/lcd_offset/window `_2`/`_3` rows wanting mode 0 that now read mode 3 — because **our mode-0 flip lands one M-cycle too late in those geometries**, so the `_2` read (one M-cycle after `_1`) wrongly hits the flip's M-cycle.
+- **VERDICT**: the MID read is necessary but not sufficient — full parity needs the cc-exact flip POSITION (the pixel-pipe-end reclock) so `_1`/`_2` separate by their M-cycle, with the MID read on top. The MID read EXPOSES pre-existing flip-position errors (masked by the end-view read) in speedchange/lcd_offset/window/CGB.
+- **NEXT**: fix those flip positions (per-geometry, golden-gated) so the read-phase ships clean; then re-apply R3. mooneye stayed 439 green under R3 (bare-gate works); 603 lib.
+
+### CC-RECLOCK LIFT (event-layer phase) — PROBED + DEAD-END 2026-06-14 (probe reverted, nothing committed)
+
+The gating measurement (TDD-plan task 4):
+
+- **Parked: wiring `dot_phase` at the entering-DS STOP path** (env probe `SLOPGB_DOTPHASE` = const-1 / `cycles`-parity / `cycles/2`-parity) and sweeping run_gambatte + a baseline-aware classifier over the speedchange/`_ds`/m3stat/wx CGB rows — **RESULT: LIFT = 0 across ALL phase candidates** (287 baselined rows), **REGRESS = 0** over 1002 currently-passing DS rows.
+- The probe IS active (verified: it fires at the switch and *does* change the speedchange `_2` output — e.g. `_outC0` becomes `C3…`, the FF41 read returns mode 3 when mode 0 is wanted), but never to the CORRECT value.
+- **Root cause (the honest ceiling, now confirmed end-to-end)**: the m3stat / speedchange `_2` reads are served by the **cc-invariant `END_PHASE` StatMode/PalAccess overrides** (tasks 5/6), so shifting WHICH cc the M-cycle samples doesn't touch them; and the discriminator (`_2` wants mode 0, the dot-clocked projection gives mode 3) is the **pixel-pipe END dot position**, which `dot_phase` does NOT move — it only shifts when the M-cycle samples the (unchanged) pipe.
+- Moving the pipe-end dot is the **full pixel-pipe cc-granular reclock** — recalibrates ~6028 green dot-level cases (mealybug photos, the mode-3 fetch grid, the window machine) — a separate architecture, NOT a revert-on-regression increment.
+- **Conclusion**: the event-layer reclock (the committed foundation) is the terminal deliverable; the EVENT-phase lift vein is empty. The pixel-pipe reclock remains the only lever and is out of scope. The IF-flop intr_2_mode0_nops / m2int_m0irq cluster stays baselined regardless (cross-oracle irreducible — siding with gambatte forfeits 46 gbmicrotest + 117 gambatte rows; pinned by `stat_mode_override_requires_double_speed`).
+
+### INC-G3 task 7 (IF-flop set/read race) — OUT OF SCOPE — cross-oracle irreducible, ceiling pinned 2026-06-14
+
+- The single-speed m2int_m0irq / wilbertpol intr_2_mode0_*_nops cluster is a fully-characterized cross-oracle swap, not a missing calibration — gbmicrotest hblank_int_scx*_if pins the very FF0F dots gambatte's m2int reads contradict (siding with gambatte forfeits 46 gbmicrotest + 117 gambatte + 2 mealybug + 2 age rows, see wilbertpol.txt intr_2_mode0 note), and G2c proved the ack-countdown tag that lifts the gambatte side breaks the canonical `intr_2_mode0_timing` mooneye test.
+- It needs a real sub-cc IF flip-flop race model or a full cc-granular pixel-pipe reclock (recalibrates ~5944 green dot-level cases incl. mealybug photos), NOT an `event_phase` offset.
+- Not attempted; the executable ceiling pin is `stat_mode_override_requires_double_speed` (the same single-stamp/opposite-wants ceiling task 6's single-speed axis hits).
+- **The `event_phase` lift vein**: task 5 (+3 cgbpal) + task 6 DS (+84 m3stat); the single-speed/IF-flop axes hold at the cross-oracle ceiling.

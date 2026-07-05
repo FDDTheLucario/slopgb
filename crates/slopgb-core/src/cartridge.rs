@@ -164,6 +164,7 @@ impl Rtc {
     }
 }
 
+#[derive(Clone)]
 enum Mapper {
     /// 0x00, 0x08, 0x09: ROM directly mapped, optional always-enabled RAM.
     None,
@@ -201,6 +202,7 @@ enum Mapper {
     },
 }
 
+#[derive(Clone)]
 pub struct Cartridge {
     /// ROM image, padded with 0xFF to a power of two (>= 32 KiB) so the bank
     /// mask mirrors reads the way unconnected high ROM address lines do.
@@ -318,10 +320,12 @@ impl Cartridge {
         self.rom[offset]
     }
 
-    /// Read 0x0000-0x7FFF (banked ROM).
-    pub fn read_rom(&self, addr: u16) -> u8 {
-        let low_area = addr < 0x4000;
-        let bank = match self.mapper {
+    /// The ROM bank number the mapper selects for the given address area
+    /// (`low_area` = 0x0000-0x3FFF vs the switchable 0x4000-0x7FFF), pre-mask.
+    /// Shared by [`read_rom`](Self::read_rom) and the debug
+    /// [`cur_rom_bank`](Self::cur_rom_bank) so the two cannot disagree.
+    fn rom_bank_for(&self, low_area: bool) -> usize {
+        match self.mapper {
             Mapper::None => usize::from(!low_area),
             Mapper::Mbc1 {
                 bank1,
@@ -363,8 +367,40 @@ impl Cartridge {
                     usize::from(romb1) << 8 | usize::from(romb0)
                 }
             }
-        };
-        self.rom_at(bank, addr)
+        }
+    }
+
+    /// Read 0x0000-0x7FFF (banked ROM).
+    pub fn read_rom(&self, addr: u16) -> u8 {
+        self.rom_at(self.rom_bank_for(addr < 0x4000), addr)
+    }
+
+    /// The ROM bank currently mapped at 0x4000-0x7FFF (size-masked the way the
+    /// chip's unconnected address lines wrap), for the debug bank indicator.
+    /// Side-effect-free.
+    #[must_use]
+    pub fn cur_rom_bank(&self) -> usize {
+        self.rom_bank_for(false) & self.rom_bank_mask()
+    }
+
+    /// The external-RAM bank currently visible at 0xA000, or `None` when RAM is
+    /// disabled/absent or an RTC register (not a RAM bank) is mapped instead —
+    /// for the debug bank indicator. Side-effect-free.
+    #[must_use]
+    pub fn cur_ram_bank(&self) -> Option<usize> {
+        // A cart with no RAM chip has no bank to report, even if a mapper would
+        // nominally select one (e.g. the None mapper, or RAMG enabled with no
+        // chip) — the indicator shows "--" rather than a phantom bank 0.
+        if self.ram.is_empty() {
+            return None;
+        }
+        match self.ram_target()? {
+            RamTarget::Ram(bank) => Some(bank),
+            // MBC2 has a single built-in 512×4-bit RAM: "bank 0".
+            RamTarget::Mbc2 => Some(0),
+            // An RTC register is mapped, not a RAM bank.
+            RamTarget::Rtc(_) => None,
+        }
     }
 
     /// Write 0x0000-0x7FFF (mapper registers).
@@ -681,6 +717,189 @@ fn detect_mbc1_multicart(rom: &[u8], orig_len: usize) -> bool {
         .filter(|chunk| chunk[0x104..0x104 + NINTENDO_LOGO.len()] == NINTENDO_LOGO)
         .count();
     logos >= 2
+}
+
+// --- Save state (manual serialization; see `crate::state`) ---
+// ROM bytes + ROM-derived flags (has_battery, multicart/mbc30/rumble_cart, the
+// mapper variant) are NOT serialized: a state loads into a machine already
+// built from the same ROM, so only volatile RAM + banking + RTC are restored.
+impl Rtc {
+    fn write_state(&self, w: &mut crate::state::Writer) {
+        w.bytes(&self.regs);
+        w.bytes(&self.latched);
+        w.u32(self.subsec);
+        w.u8(self.latch_prev);
+    }
+    fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        r.bytes_into(&mut self.regs)?;
+        r.bytes_into(&mut self.latched)?;
+        self.subsec = r.u32()?;
+        self.latch_prev = r.u8()?;
+        Ok(())
+    }
+}
+
+impl Mapper {
+    fn write_state(&self, w: &mut crate::state::Writer) {
+        match self {
+            Mapper::None => {}
+            Mapper::Mbc1 {
+                ramg,
+                bank1,
+                bank2,
+                mode,
+                ..
+            } => {
+                w.bool(*ramg);
+                w.u8(*bank1);
+                w.u8(*bank2);
+                w.bool(*mode);
+            }
+            Mapper::Mbc2 { ramg, romb } => {
+                w.bool(*ramg);
+                w.u8(*romb);
+            }
+            Mapper::Mbc3 {
+                ramg,
+                romb,
+                ramb,
+                rtc,
+                ..
+            } => {
+                w.bool(*ramg);
+                w.u8(*romb);
+                w.u8(*ramb);
+                match rtc {
+                    Some(rt) => {
+                        w.bool(true);
+                        rt.write_state(w);
+                    }
+                    None => w.bool(false),
+                }
+            }
+            Mapper::Mbc5 {
+                ramg,
+                romb0,
+                romb1,
+                ramb,
+                rumble,
+                ..
+            } => {
+                w.bool(*ramg);
+                w.u8(*romb0);
+                w.u8(*romb1);
+                w.u8(*ramb);
+                w.bool(*rumble);
+            }
+        }
+    }
+    fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        match self {
+            Mapper::None => {}
+            Mapper::Mbc1 {
+                ramg,
+                bank1,
+                bank2,
+                mode,
+                ..
+            } => {
+                *ramg = r.bool()?;
+                *bank1 = r.u8()?;
+                *bank2 = r.u8()?;
+                *mode = r.bool()?;
+            }
+            Mapper::Mbc2 { ramg, romb } => {
+                *ramg = r.bool()?;
+                *romb = r.u8()?;
+            }
+            Mapper::Mbc3 {
+                ramg,
+                romb,
+                ramb,
+                rtc,
+                ..
+            } => {
+                *ramg = r.bool()?;
+                *romb = r.u8()?;
+                *ramb = r.u8()?;
+                if r.bool()? {
+                    let mut rt = rtc.take().unwrap_or(Rtc {
+                        regs: [0; 5],
+                        latched: [0; 5],
+                        subsec: 0,
+                        latch_prev: 0,
+                    });
+                    rt.read_state(r)?;
+                    *rtc = Some(rt);
+                } else {
+                    *rtc = None;
+                }
+            }
+            Mapper::Mbc5 {
+                ramg,
+                romb0,
+                romb1,
+                ramb,
+                rumble,
+                ..
+            } => {
+                *ramg = r.bool()?;
+                *romb0 = r.u8()?;
+                *romb1 = r.u8()?;
+                *ramb = r.u8()?;
+                *rumble = r.bool()?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Cartridge {
+    /// A short ROM fingerprint (title region + checksums + length) a save state
+    /// is keyed to, so loading a state from a different ROM is rejected. The
+    /// header bytes always exist — a cartridge under 0x150 fails construction.
+    pub(crate) fn rom_id(&self) -> Vec<u8> {
+        let mut id = Vec::with_capacity(26);
+        id.extend_from_slice(&self.rom[0x134..0x144]); // 16-byte title region
+        // Cartridge type + ROM/RAM size pin the *mapper shape* directly: the
+        // mapper variant isn't serialized (read_state dispatches on the live
+        // variant with a per-variant field count), so a different-mapper ROM
+        // that collides on title+checksums+length would otherwise mis-decode.
+        // The header checksum alone isn't enough — slopgb accepts ROMs with a
+        // bad/zero header checksum.
+        id.push(self.rom[0x147]); // cartridge type
+        id.push(self.rom[0x148]); // ROM size
+        id.push(self.rom[0x149]); // RAM size
+        id.push(self.rom[0x14D]); // header checksum
+        id.push(self.rom[0x14E]); // global checksum hi
+        id.push(self.rom[0x14F]); // global checksum lo
+        id.extend_from_slice(&(self.rom.len() as u32).to_le_bytes());
+        id
+    }
+
+    pub(crate) fn write_state(&self, w: &mut crate::state::Writer) {
+        w.u32(self.ram.len() as u32);
+        w.bytes(&self.ram);
+        self.mapper.write_state(w);
+    }
+    pub(crate) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        let n = r.u32()? as usize;
+        if n != self.ram.len() {
+            return Err(crate::state::StateError::RomMismatch);
+        }
+        r.bytes_into(&mut self.ram)?;
+        self.mapper.read_state(r)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

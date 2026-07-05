@@ -30,6 +30,7 @@ pub struct TimerTick {
     pub late: bool,
 }
 
+#[derive(Clone)]
 pub struct Timer {
     div: u16,
     tima: u8,
@@ -211,6 +212,30 @@ impl Timer {
 impl Default for Timer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// --- Save state (manual serialization; see `crate::state`) ---
+impl Timer {
+    pub(crate) fn write_state(&self, w: &mut crate::state::Writer) {
+        w.u16(self.div);
+        w.u8(self.tima);
+        w.u8(self.tma);
+        w.u8(self.tac);
+        w.u8(self.reload_in);
+        w.bool(self.reloaded);
+    }
+    pub(crate) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        self.div = r.u16()?;
+        self.tima = r.u8()?;
+        self.tma = r.u8()?;
+        self.tac = r.u8()?;
+        self.reload_in = r.u8()?;
+        self.reloaded = r.bool()?;
+        Ok(())
     }
 }
 

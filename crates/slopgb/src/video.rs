@@ -7,6 +7,8 @@ use std::rc::Rc;
 use slopgb_core::{SCREEN_H, SCREEN_PIXELS, SCREEN_W};
 use winit::window::Window;
 
+use crate::ui::Canvas;
+
 /// Owns the softbuffer context + surface for one window.
 pub struct Video {
     /// Kept alive alongside the surface (softbuffer's display connection).
@@ -27,13 +29,19 @@ impl Video {
         })
     }
 
-    /// Present `frame` at the largest integer scale that fits the window,
-    /// centered on black. The core frame and the softbuffer pixel format are
-    /// both `0x00RRGGBB` u32s, so pixels are copied verbatim.
+    /// Present `frame`, then let `overlay` draw on top (the bgb-style popup menu —
+    /// pass a no-op closure when there is nothing to overlay). With `stretch` the
+    /// frame fills the whole window (bgb's "Fullscreen stretched", aspect not
+    /// preserved); otherwise it is the largest integer scale, centered on black.
+    /// The core frame and the softbuffer pixel format are both `0x00RRGGBB` u32s,
+    /// so pixels are copied verbatim; the opaque-alpha pass runs *after* the
+    /// overlay so menu pixels (drawn with a 0 top byte) become opaque too.
     pub fn draw(
         &mut self,
         window: &Window,
         frame: &[u32; SCREEN_PIXELS],
+        stretch: bool,
+        overlay: impl FnOnce(&mut Canvas),
     ) -> Result<(), softbuffer::SoftBufferError> {
         let size = window.inner_size();
         let (Some(w), Some(h)) = (NonZeroU32::new(size.width), NonZeroU32::new(size.height)) else {
@@ -41,7 +49,22 @@ impl Video {
         };
         self.surface.resize(w, h)?;
         let mut buffer = self.surface.buffer_mut()?;
-        blit(&mut buffer, size.width, size.height, frame, &mut self.row);
+        if stretch {
+            blit_stretch(&mut buffer, size.width, size.height, frame);
+        } else {
+            blit(&mut buffer, size.width, size.height, frame, &mut self.row);
+        }
+        {
+            let mut canvas = Canvas::new(&mut buffer, size.width as usize, size.height as usize);
+            overlay(&mut canvas);
+        }
+        // Force opaque alpha: softbuffer leaves the top byte 0, which a 32-bit
+        // ARGB compositor reads as fully transparent (the window would show the
+        // desktop through it). softbuffer itself ignores the top byte. Runs last
+        // so both the LCD and the overlay end up opaque.
+        for px in buffer.iter_mut() {
+            *px |= 0xFF00_0000;
+        }
         window.pre_present_notify();
         buffer.present()
     }
@@ -84,6 +107,25 @@ fn blit(dst: &mut [u32], dst_w: u32, dst_h: u32, frame: &[u32; SCREEN_PIXELS], r
         dst[line..off].fill(0);
         dst[off..off + img_w as usize].copy_from_slice(row);
         dst[off + img_w as usize..line + dst_w as usize].fill(0);
+    }
+}
+
+/// Nearest-neighbor stretch of `frame` to fill the entire `dst` (no letterbox),
+/// for bgb's "Fullscreen stretched". Aspect ratio is not preserved. Every dst
+/// pixel maps to the proportional source pixel; `dy*SCREEN_H/dst_h` and
+/// `dx*SCREEN_W/dst_w` stay in-bounds for all `dy<dst_h`, `dx<dst_w`.
+fn blit_stretch(dst: &mut [u32], dst_w: u32, dst_h: u32, frame: &[u32; SCREEN_PIXELS]) {
+    if dst_w == 0 || dst_h == 0 {
+        return;
+    }
+    for dy in 0..dst_h {
+        let sy = (dy * SCREEN_H as u32 / dst_h) as usize;
+        let srow = &frame[sy * SCREEN_W..][..SCREEN_W];
+        let drow = &mut dst[(dy * dst_w) as usize..][..dst_w as usize];
+        for (dx, px) in drow.iter_mut().enumerate() {
+            let sx = (dx as u32 * SCREEN_W as u32 / dst_w) as usize;
+            *px = srow[sx];
+        }
     }
 }
 
@@ -140,6 +182,25 @@ mod tests {
         let mut row = Vec::new();
         blit(&mut dst, w, h, &frame, &mut row);
         assert!(dst.iter().all(|&px| px != u32::MAX));
+    }
+
+    #[test]
+    fn blit_stretch_fills_every_pixel_and_maps_corners() {
+        let frame = test_frame();
+        let (w, h) = (500u32, 300u32); // non-integer, non-aspect-preserving
+        let mut dst = vec![u32::MAX; (w * h) as usize];
+        blit_stretch(&mut dst, w, h, &frame);
+        // No letterbox: every pixel written (none left as the sentinel).
+        assert!(dst.iter().all(|&px| px != u32::MAX), "whole window filled");
+        // Corners map to the frame corners.
+        assert_eq!(dst[0], frame[0], "top-left");
+        assert_eq!(dst[(w - 1) as usize], frame[SCREEN_W - 1], "top-right");
+        let bottom_left = ((h - 1) * w) as usize;
+        assert_eq!(
+            dst[bottom_left],
+            frame[(SCREEN_H - 1) * SCREEN_W],
+            "bottom-left"
+        );
     }
 
     #[test]

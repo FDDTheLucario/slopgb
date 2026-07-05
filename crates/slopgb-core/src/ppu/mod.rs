@@ -133,6 +133,7 @@ mod stat_irq_ff0f;
 mod regs;
 mod render;
 mod stat_irq;
+mod state;
 
 use crate::SCREEN_PIXELS;
 use crate::model::Model;
@@ -198,6 +199,7 @@ const IF_STAT: u8 = 0x02;
 /// architectural registers — every mooneye anchor was calibrated there,
 /// and nothing mooneye can observe resolves below 4-dot granularity.
 /// See [`Ppu::stage_write`].
+#[derive(Clone)]
 struct PipeRegs {
     lcdc: u8,
     /// #11bo mech2 — the BG fetcher's LCDC addressing view (map/data select).
@@ -221,6 +223,7 @@ struct PipeRegs {
 /// An IO write in flight on the bus: staged by the interconnect before the
 /// write M-cycle ticks, expiring into [`PipeRegs`] mid-cycle (see
 /// [`Ppu::stage_write`]).
+#[derive(Clone)]
 struct StagedWrite {
     addr: u16,
     value: u8,
@@ -228,6 +231,7 @@ struct StagedWrite {
     dots_left: u8,
 }
 
+#[derive(Clone)]
 pub struct Ppu {
     model: Model,
     frame_count: u64,
@@ -1584,6 +1588,25 @@ impl Ppu {
     /// interconnect's side-effect-free `peek`.
     pub(crate) fn oam_read_raw(&self, addr: u16) -> u8 {
         self.oam[usize::from(addr - 0xFE00)]
+    }
+
+    /// Whole 16 KiB VRAM for the debug VRAM viewer (bank 0 in `[..0x2000]`,
+    /// bank 1 in `[0x2000..]`). Side-effect-free.
+    pub(crate) fn debug_vram(&self) -> &[u8; 0x4000] {
+        &self.vram
+    }
+
+    /// Raw 160-byte OAM (40 sprites x 4 bytes), for the debug OAM viewer.
+    /// Side-effect-free.
+    pub(crate) fn debug_oam(&self) -> &[u8; 0xA0] {
+        &self.oam
+    }
+
+    /// Raw CGB palette RAM `(BG, OBJ)`, for the debug I/O viewer. Unlike
+    /// [`Self::palette_ram`] (test-only) this is available in non-test builds.
+    /// Side-effect-free.
+    pub(crate) fn debug_palette_ram(&self) -> (&[u8; 64], &[u8; 64]) {
+        (&self.bg_pal_ram, &self.obj_pal_ram)
     }
 
     /// VRAM write for CGB HDMA.

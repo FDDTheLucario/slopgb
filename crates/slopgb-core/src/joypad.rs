@@ -54,6 +54,7 @@ const SGB_COMMAND_MAX: usize = SGB_PACKET_BYTES * 7;
 /// only MLT_REQ is executed — every other SGB command affects the
 /// SNES-side presentation (palettes, borders, sound) and has no effect
 /// observable from the Game Boy bus.
+#[derive(Clone)]
 struct Sgb {
     /// Accumulated command bits (LSB-first within each byte).
     command: [u8; SGB_COMMAND_MAX],
@@ -230,6 +231,7 @@ impl Sgb {
     }
 }
 
+#[derive(Clone)]
 pub struct Joypad {
     /// P1 bits 4-5 as last written (active low; 1 = column not selected).
     select: u8,
@@ -301,6 +303,13 @@ impl Joypad {
         // Releases only produce rising edges; no interrupt.
     }
 
+    /// Whether `b` is currently held, for the debugger's joypad view.
+    pub fn pressed(&self, b: Button) -> bool {
+        let (dpad, mask) = b.line();
+        let col = if dpad { self.dpad } else { self.buttons };
+        col & mask == 0
+    }
+
     /// IF bits requested since the last call (bit 4 = joypad), then clears.
     pub fn take_irq(&mut self) -> u8 {
         let irq = self.irq;
@@ -338,6 +347,68 @@ impl Joypad {
 impl Default for Joypad {
     fn default() -> Self {
         Self::new(false)
+    }
+}
+
+// --- Save state (manual serialization; see `crate::state`) ---
+impl Joypad {
+    pub(crate) fn write_state(&self, w: &mut crate::state::Writer) {
+        w.u8(self.select);
+        w.u8(self.dpad);
+        w.u8(self.buttons);
+        w.u8(self.irq);
+        match &self.sgb {
+            Some(s) => {
+                w.bool(true);
+                w.bytes(&s.command);
+                w.u32(s.write_index as u32);
+                w.bool(s.ready_for_pulse);
+                w.bool(s.ready_for_write);
+                w.bool(s.ready_for_stop);
+                w.u8(s.player_count);
+                w.u8(s.current_player);
+            }
+            None => w.bool(false),
+        }
+    }
+    pub(crate) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        self.select = r.u8()?;
+        self.dpad = r.u8()?;
+        self.buttons = r.u8()?;
+        self.irq = r.u8()?;
+        if r.bool()? {
+            let mut command = [0u8; SGB_COMMAND_MAX];
+            r.bytes_into(&mut command)?;
+            let write_index = r.u32()? as usize;
+            let ready_for_pulse = r.bool()?;
+            let ready_for_write = r.bool()?;
+            let ready_for_stop = r.bool()?;
+            let player_count = r.u8()?;
+            let current_player = r.u8()?;
+            // A corrupt save with player_count 0 would underflow `player_count
+            // - 1` in `joyp_write` (the SGB player-cycle mask) → a debug-build
+            // panic *after* a successful load. Reject out-of-range values so a
+            // bad state can never arm a later panic (state contract: never a
+            // panic on a corrupt save). Real SGB carts only ever store 1/2/4.
+            if player_count == 0 || player_count > 4 || current_player >= player_count {
+                return Err(crate::state::StateError::Truncated);
+            }
+            self.sgb = Some(Sgb {
+                command,
+                write_index,
+                ready_for_pulse,
+                ready_for_write,
+                ready_for_stop,
+                player_count,
+                current_player,
+            });
+        } else {
+            self.sgb = None;
+        }
+        Ok(())
     }
 }
 

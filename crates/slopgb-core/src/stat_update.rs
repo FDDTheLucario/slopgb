@@ -98,6 +98,20 @@ impl StatUpdate {
     }
 }
 
+// --- Save state (manual serialization; see `crate::state`) ---
+impl StatUpdate {
+    pub(crate) fn write_state(&self, w: &mut crate::state::Writer) {
+        w.bool(self.line);
+    }
+    pub(crate) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        self.line = r.bool()?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 #[path = "stat_update_tests.rs"]
 mod tests;

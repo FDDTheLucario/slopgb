@@ -59,6 +59,21 @@ pub trait Bus {
     fn read_inc(&mut self, addr: u16) -> u8 {
         self.read(addr)
     }
+    /// Record that the instruction at `pc` is about to execute — the execution
+    /// profiler's per-PC tally hook (MB5). Takes no emulated time and has no
+    /// architectural effect. The default is a no-op; only the real
+    /// [`Interconnect`](crate::interconnect::Interconnect) bus implements it,
+    /// and even there it is inert unless profiling was explicitly enabled, so a
+    /// golden/test run is byte-identical.
+    fn profile_pc(&mut self, _pc: u16) {}
+    /// Check the instruction at `pc` (opcode `opcode`, about to execute) against
+    /// the debugger exception-break mask (bgb's Options → Exceptions: break on
+    /// `LD B,B` / invalid opcode). Takes no time and has no architectural
+    /// effect. The default is a no-op; only the real
+    /// [`Interconnect`](crate::interconnect::Interconnect) implements it, and
+    /// even there it is inert unless an exception was armed, so a golden/test
+    /// run is byte-identical.
+    fn check_exec(&mut self, _pc: u16, _opcode: u8) {}
     /// `IF & IE & 0x1F` right now. Takes no time.
     fn pending(&self) -> u8;
     /// `IF & IE & 0x1F` as seen by the halted CPU's wake check (both the
@@ -180,6 +195,7 @@ pub trait Bus {
 }
 
 /// SM83 CPU. Owns architectural registers, IME, halt state.
+#[derive(Clone)]
 pub struct Cpu {
     regs: Registers,
     /// Interrupt master enable.
@@ -230,6 +246,33 @@ impl Cpu {
         &mut self.regs
     }
 
+    /// True power-on CPU state (PC=0, all regs 0), for the opt-in boot-ROM path
+    /// (`GameBoy::new_with_boot`): the boot ROM runs from the reset vector and
+    /// installs the post-boot register state itself.
+    pub fn power_on() -> Self {
+        Self {
+            regs: Registers::power_on(),
+            ime: false,
+            ime_pending: false,
+            halted: false,
+            stopped: false,
+            halt_bug: false,
+            debug_breakpoint: false,
+            locked: false,
+        }
+    }
+
+    /// Interrupt master enable, for the debugger registers panel.
+    pub fn ime(&self) -> bool {
+        self.ime
+    }
+
+    /// `EI` has executed but its IME-enable is still one instruction away
+    /// (the EI delay). For the debugger registers panel.
+    pub fn ime_pending(&self) -> bool {
+        self.ime_pending
+    }
+
     pub fn debug_breakpoint_hit(&self) -> bool {
         self.debug_breakpoint
     }
@@ -240,5 +283,37 @@ impl Cpu {
     /// fork ends its tests with 0xED.
     pub fn debug_undefined_hit(&self) -> bool {
         self.locked
+    }
+}
+
+// --- Save state (manual serialization; see `crate::state`) ---
+impl Cpu {
+    pub(crate) fn write_state(&self, w: &mut crate::state::Writer) {
+        self.regs.write_state(w);
+        for b in [
+            self.ime,
+            self.ime_pending,
+            self.halted,
+            self.stopped,
+            self.halt_bug,
+            self.debug_breakpoint,
+            self.locked,
+        ] {
+            w.bool(b);
+        }
+    }
+    pub(crate) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        self.regs.read_state(r)?;
+        self.ime = r.bool()?;
+        self.ime_pending = r.bool()?;
+        self.halted = r.bool()?;
+        self.stopped = r.bool()?;
+        self.halt_bug = r.bool()?;
+        self.debug_breakpoint = r.bool()?;
+        self.locked = r.bool()?;
+        Ok(())
     }
 }

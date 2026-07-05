@@ -44,6 +44,7 @@ enum SkipDivEvent {
     Skipped,
 }
 
+#[derive(Clone)]
 pub struct Apu {
     cgb: bool,
     /// NR52 bit 7.
@@ -54,6 +55,11 @@ pub struct Apu {
     ch4: Noise,
     nr50: u8,
     nr51: u8,
+    /// Per-channel mute mask: bit `(channel-1)` set => channel silenced in
+    /// [`Self::mix`]. A frontend/debugger control (bgb's "Sound channel"
+    /// submenu), NOT hardware — it survives NR52 power cycles and defaults
+    /// to 0 (all audible) so it never perturbs golden output.
+    mute_mask: u8,
     /// DIV-APU event divider (3 bits), incremented at the start of each
     /// event like SameBoy's `div_divider`: lengths clock on odd values,
     /// sweep at `divider&3 == 3`, envelope countdowns at `divider&7 == 7`.
@@ -180,6 +186,7 @@ impl Apu {
             ch4: Noise::new(),
             nr50: 0,
             nr51: 0,
+            mute_mask: 0,
             div_divider: 0,
             skip_div_event: SkipDivEvent::Inactive,
             phase: 2,
@@ -546,6 +553,35 @@ impl Apu {
         self.ch3.sample_byte = 0;
     }
 
+    /// Mute or un-mute one APU channel (1-4) in the mixer. A frontend/
+    /// debugger control, not hardware: see [`Self::mute_mask`]. Channels
+    /// outside 1..=4 are ignored.
+    pub fn set_channel_mute(&mut self, channel: u8, muted: bool) {
+        if let 1..=4 = channel {
+            let bit = 1u8 << (channel - 1);
+            if muted {
+                self.mute_mask |= bit;
+            } else {
+                self.mute_mask &= !bit;
+            }
+        }
+    }
+
+    /// Whether channel `channel` (1-4) is currently muted by
+    /// [`Self::set_channel_mute`]. Out-of-range channels read `false`.
+    #[must_use]
+    pub fn channel_muted(&self, channel: u8) -> bool {
+        matches!(channel, 1..=4) && self.mute_mask & (1 << (channel - 1)) != 0
+    }
+
+    /// The raw 16 stored wave-RAM bytes (FF30-FF3F), for the debug I/O viewer.
+    /// Bypasses the CPU read gating of [`Self::read`] (which returns 0xFF or the
+    /// volatile current sample byte while the channel plays). Side-effect-free.
+    #[must_use]
+    pub fn wave_ram(&self) -> [u8; 16] {
+        self.ch3.ram()
+    }
+
     /// Output sample rate for [`Self::drain_samples`]. Default
     /// [`DEFAULT_SAMPLE_RATE`].
     pub fn set_sample_rate(&mut self, hz: u32) {
@@ -633,8 +669,9 @@ impl Apu {
     /// Sum one channel into the stereo accumulators per NR51 routing.
     /// `ch` is the channel index 0-3 selecting the NR51 bits.
     fn mix_channel(&self, dac: bool, digital: u8, ch: u8, left: &mut f32, right: &mut f32) {
-        if !dac {
-            // DAC off: the channel contributes nothing at all.
+        if !dac || self.mute_mask & (1 << ch) != 0 {
+            // DAC off, or muted by the frontend ([`Self::mute_mask`]): the
+            // channel contributes nothing at all.
             return;
         }
         // DAC: digital 0-15 to analog with a *negative* slope — Pan
@@ -666,6 +703,97 @@ impl Apu {
         let rvol = f32::from(self.nr50 & 7) + 1.0;
         (left * lvol / 32.0, right * rvol / 32.0)
     }
+}
+
+// --- Save state (see `crate::state`). The output-stage config
+// (cycles_per_sample / max_samples) is NOT serialized: it is re-derived from
+// the live sample rate, so a state loads at the host's current rate. ---
+impl Apu {
+    pub(super) fn write_state(&self, w: &mut crate::state::Writer) {
+        w.bool(self.cgb);
+        w.bool(self.power);
+        self.ch1.write_state(w);
+        self.ch2.write_state(w);
+        self.ch3.write_state(w);
+        self.ch4.write_state(w);
+        w.u8(self.nr50);
+        w.u8(self.nr51);
+        w.u8(self.mute_mask);
+        w.u8(self.div_divider);
+        w.u8(match self.skip_div_event {
+            SkipDivEvent::Inactive => 0,
+            SkipDivEvent::Skip => 1,
+            SkipDivEvent::Skipped => 2,
+        });
+        w.u8(self.phase);
+        w.u16(self.prev_div);
+        w.bool(self.last_double_speed);
+        w.u64(self.sample_frac.to_bits());
+        w.u32(self.sum_l.to_bits());
+        w.u32(self.sum_r.to_bits());
+        w.u32(self.sum_count);
+        w.u32(self.hp_charge.to_bits());
+        w.u32(self.hp_cap_l.to_bits());
+        w.u32(self.hp_cap_r.to_bits());
+        write_sample_buf(w, &self.samples);
+        write_sample_buf(w, &self.raw_samples);
+    }
+    pub(super) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        self.cgb = r.bool()?;
+        self.power = r.bool()?;
+        self.ch1.read_state(r)?;
+        self.ch2.read_state(r)?;
+        self.ch3.read_state(r)?;
+        self.ch4.read_state(r)?;
+        self.nr50 = r.u8()?;
+        self.nr51 = r.u8()?;
+        self.mute_mask = r.u8()?;
+        self.div_divider = r.u8()?;
+        self.skip_div_event = match r.u8()? {
+            0 => SkipDivEvent::Inactive,
+            1 => SkipDivEvent::Skip,
+            _ => SkipDivEvent::Skipped,
+        };
+        self.phase = r.u8()?;
+        self.prev_div = r.u16()?;
+        self.last_double_speed = r.bool()?;
+        self.sample_frac = f64::from_bits(r.u64()?);
+        self.sum_l = f32::from_bits(r.u32()?);
+        self.sum_r = f32::from_bits(r.u32()?);
+        self.sum_count = r.u32()?;
+        self.hp_charge = f32::from_bits(r.u32()?);
+        self.hp_cap_l = f32::from_bits(r.u32()?);
+        self.hp_cap_r = f32::from_bits(r.u32()?);
+        self.samples = read_sample_buf(r)?;
+        self.raw_samples = read_sample_buf(r)?;
+        Ok(())
+    }
+}
+
+fn write_sample_buf(w: &mut crate::state::Writer, buf: &[(f32, f32)]) {
+    w.u32(buf.len() as u32);
+    for (l, rr) in buf {
+        w.u32(l.to_bits());
+        w.u32(rr.to_bits());
+    }
+}
+
+fn read_sample_buf(
+    r: &mut crate::state::Reader<'_>,
+) -> Result<Vec<(f32, f32)>, crate::state::StateError> {
+    let n = r.u32()? as usize;
+    // No speculative pre-alloc: each pair is read (and bounds-checked) before
+    // it is pushed, so a corrupt length errors instead of allocating.
+    let mut buf = Vec::new();
+    for _ in 0..n {
+        let l = f32::from_bits(r.u32()?);
+        let rr = f32::from_bits(r.u32()?);
+        buf.push((l, rr));
+    }
+    Ok(buf)
 }
 
 #[cfg(test)]

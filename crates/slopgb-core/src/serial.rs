@@ -20,11 +20,19 @@
 //! raise IF). In CGB double speed the DIV counter itself runs twice as
 //! fast, yielding the documented 16384 Hz / 524288 Hz rates.
 
+use std::collections::VecDeque;
+
 /// Cap on the harness output buffer: a frontend that never calls
 /// `take_output` must not grow it without limit. 64 KiB is far more text
 /// than any test ROM prints; completions past the cap are dropped.
 const OUT_CAPTURE_CAP: usize = 64 * 1024;
 
+/// Cap on each link byte queue. Several transfers can complete (or arrive) in
+/// one emulated frame, so the link bytes are queued — but bounded, so a peer
+/// flooding faster than the frontend drains can't grow them without limit.
+const LINK_QUEUE_CAP: usize = 256;
+
+#[derive(Clone)]
 pub struct Serial {
     cgb: bool,
     sb: u8,
@@ -44,6 +52,30 @@ pub struct Serial {
     /// Completed internal-clock transfer bytes awaiting [`Self::take_output`]
     /// (test-harness hook: blargg ROMs print via SB/SC).
     out_buf: Vec<u8>,
+    /// --- Link cable (frontend TCP peer; all golden-safe / inert when off) ---
+    /// Whether a link peer is attached. Defaults `false`; only the frontend
+    /// `GameBoy::link_connect` ever sets it, so every golden path keeps it off.
+    link_connected: bool,
+    /// Peer bytes to shift into upcoming internal-clock (master) transfers,
+    /// MSB-first, one consumed per completed transfer. **Empty** ⇒ the no-peer
+    /// path: 1s shift in, exactly as the cable-disconnected hardware. The
+    /// connected incoming-bit branch is gated on the front being present, so a
+    /// disconnected (empty-queue) port is byte-identical. A queue (not a single
+    /// slot) so multiple peer bytes arriving in one frame aren't lost.
+    link_in: VecDeque<u8>,
+    /// Bytes master transfers shifted out, awaiting [`Self::take_link_send`]
+    /// for the frontend to ship to the peer. Only pushed while
+    /// [`Self::link_connected`]; queued (not a single slot) so multiple
+    /// completions in one frame aren't lost.
+    link_out: VecDeque<u8>,
+    /// Lockstep stall: a connected internal-clock master clocked all 8 bits but
+    /// had no peer byte buffered, so the transfer is **paused** at completion —
+    /// SC bit 7 still set, IF not yet raised — until the frontend delivers the
+    /// peer's byte ([`Self::push_link_in`]). Gates further DIV clocking so the
+    /// master holds exactly one byte-time. Only ever set while
+    /// [`Self::link_connected`]; defaults false ⇒ every golden path is
+    /// byte-identical. Transient (not serialized).
+    link_master_waiting: bool,
 }
 
 impl Serial {
@@ -59,7 +91,18 @@ impl Serial {
             prev_div: 0,
             out_shift: 0,
             out_buf: Vec::new(),
+            link_connected: false,
+            link_in: VecDeque::new(),
+            link_out: VecDeque::new(),
+            link_master_waiting: false,
         }
+    }
+
+    /// Switch CGB ↔ DMG serial mode (the fast-clock bit + SC read mask). Only
+    /// the boot ROM's KEY0/FF4C DMG-lock flips this at runtime; otherwise the
+    /// mode is fixed at construction.
+    pub fn set_cgb(&mut self, cgb: bool) {
+        self.cgb = cgb;
     }
 
     /// DIV counter bit whose falling edges toggle the master flip-flop
@@ -78,16 +121,24 @@ impl Serial {
     /// transfer never advances) shifts one bit. Returns IF bits (bit 3).
     fn master_edge(&mut self) -> u8 {
         self.master_clock = !self.master_clock;
-        if self.master_clock || self.sc & 0x81 != 0x81 {
+        // A stalled lockstep master holds at completion: keep toggling the
+        // flip-flop (phase) but shift nothing until the peer byte arrives.
+        if self.master_clock || self.sc & 0x81 != 0x81 || self.link_master_waiting {
             return 0;
         }
-        // MSB out first; no peer, so 1 bits come in.
+        // MSB out first. Incoming bit: the front peer byte shifts in MSB-first
+        // when attached (peeked, stable across the 8 shifts, consumed at
+        // completion); with no peer (`link_in` empty) it is the literal `1` of
+        // the cable-disconnected hardware — the only golden path, byte-identical.
+        let incoming = match self.link_in.front() {
+            Some(&peer) => (peer >> (7 - self.shifted)) & 1,
+            None => 1,
+        };
         self.out_shift = (self.out_shift << 1) | (self.sb >> 7);
-        self.sb = (self.sb << 1) | 1;
+        self.sb = (self.sb << 1) | incoming;
         self.shifted += 1;
         if self.shifted == 8 {
             self.shifted = 0;
-            self.sc &= 0x7F; // transfer-in-progress flag clears itself
             // Only internal-clock transfers reach completion: capture the
             // outgoing byte for the harness. An SC rewrite mid-transfer
             // restarts the bit counter, so the captured byte is the last
@@ -95,6 +146,32 @@ impl Serial {
             if self.out_buf.len() < OUT_CAPTURE_CAP {
                 self.out_buf.push(self.out_shift);
             }
+            if self.link_connected {
+                // Link: ship the outgoing byte to the frontend (once), then
+                // either complete with the buffered peer byte or **stall**
+                // until the frontend delivers it (lockstep — see
+                // `link_master_waiting`). Both queues are inert when
+                // disconnected, so this whole branch is golden-safe.
+                if self.link_out.len() < LINK_QUEUE_CAP {
+                    self.link_out.push_back(self.out_shift);
+                }
+                match self.link_in.pop_front() {
+                    Some(peer) => {
+                        // Peer byte was ready: overwrite SB with it (robust no
+                        // matter when in the transfer it arrived) and complete.
+                        self.sb = peer;
+                        self.sc &= 0x7F;
+                        return 0x08;
+                    }
+                    None => {
+                        // No peer byte yet: pause at completion, IF withheld.
+                        self.link_master_waiting = true;
+                        return 0;
+                    }
+                }
+            }
+            // Disconnected (golden path): the 1s shifted in stay in SB.
+            self.sc &= 0x7F; // transfer-in-progress flag clears itself
             return 0x08;
         }
         0
@@ -132,6 +209,91 @@ impl Serial {
     /// (test-harness hook; see [`OUT_CAPTURE_CAP`]).
     pub(crate) fn take_output(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.out_buf)
+    }
+
+    // --- Link cable (frontend TCP peer; inert when disconnected) ------------
+
+    /// Attach/detach a link peer. Detaching also clears any pending peer bytes
+    /// and queued sends so a later reconnect starts clean. If a master was
+    /// **stalled** awaiting the peer (lockstep), unplugging completes that
+    /// transfer with the cable-open value (SB ← 0xFF, SC bit7 cleared) and
+    /// returns the serial IF bits (`0x08`) so the emulated CPU's serial wait
+    /// can't hang; otherwise returns `0`.
+    pub(crate) fn set_link_connected(&mut self, on: bool) -> u8 {
+        self.link_connected = on;
+        if on {
+            return 0;
+        }
+        let iff = if self.link_master_waiting {
+            self.sb = 0xFF; // open cable reads 1s
+            self.sc &= 0x7F;
+            self.shifted = 0;
+            self.link_master_waiting = false;
+            0x08
+        } else {
+            0
+        };
+        self.link_in.clear();
+        self.link_out.clear();
+        iff
+    }
+
+    /// Whether a link peer is attached.
+    pub(crate) fn link_connected(&self) -> bool {
+        self.link_connected
+    }
+
+    /// Whether a connected master transfer is paused awaiting the peer byte
+    /// (lockstep stall). Always false when disconnected — the run loop uses
+    /// this to yield control to the frontend pump. See [`Self::link_master_waiting`].
+    pub(crate) fn link_master_waiting(&self) -> bool {
+        self.link_master_waiting
+    }
+
+    /// Deliver a peer byte. If a master is **stalled** awaiting it (lockstep),
+    /// complete that transfer now — SB ← `byte`, clear SC bit 7, clear the
+    /// stall — and return the serial IF bits (`0x08`). Otherwise enqueue it
+    /// (MSB-first, FIFO; bounded by [`LINK_QUEUE_CAP`]) for an upcoming master
+    /// transfer to shift in, returning `0`.
+    pub(crate) fn push_link_in(&mut self, byte: u8) -> u8 {
+        if self.link_master_waiting {
+            self.sb = byte;
+            self.sc &= 0x7F; // transfer done
+            self.shifted = 0;
+            self.link_master_waiting = false;
+            return 0x08;
+        }
+        if self.link_in.len() < LINK_QUEUE_CAP {
+            self.link_in.push_back(byte);
+        }
+        0
+    }
+
+    /// Drain the next byte a completed master transfer shifted out (for the
+    /// frontend to ship to the peer), oldest first. `None` when nothing is
+    /// queued.
+    pub(crate) fn take_link_send(&mut self) -> Option<u8> {
+        self.link_out.pop_front()
+    }
+
+    /// Complete a pending **external-clock** (slave) transfer with the peer's
+    /// (master's) byte: a slave is armed when SC bit 7 is set and bit 0 is
+    /// clear (external clock) — with no peer it never advances. Swaps SB with
+    /// `master_byte` (the slave receives the master's byte and its own old SB
+    /// goes back out), clears the transfer-in-progress flag, and returns
+    /// `(outgoing_byte, IF bits)`. When not armed it is a no-op returning
+    /// `(None, 0)` — so a disconnected/idle port is unchanged.
+    pub(crate) fn link_slave_transfer(&mut self, master_byte: u8) -> (Option<u8>, u8) {
+        // Armed slave: transfer in progress (bit 7) on the external clock
+        // (bit 0 clear). On CGB the fast-clock bit (1) is don't-care here.
+        if self.sc & 0x81 != 0x80 {
+            return (None, 0);
+        }
+        let outgoing = self.sb;
+        self.sb = master_byte;
+        self.sc &= 0x7F; // transfer done
+        self.shifted = 0;
+        (Some(outgoing), 0x08)
     }
 
     /// Read FF01/FF02.
@@ -175,437 +337,53 @@ impl Serial {
                 }
                 let mask = if self.cgb { 0x83 } else { 0x81 };
                 self.sc = value & mask;
+                // A SC write redefines the transfer (restart or abort): clear
+                // any lockstep stall so the fresh transfer is not frozen by the
+                // clocking gate. Inert unless a master was waiting (link only).
+                self.link_master_waiting = false;
             }
             _ => {}
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Advance one M-cycle: bump the external div by 4 and tick.
-    fn step(s: &mut Serial, div: &mut u16) -> u8 {
-        *div = div.wrapping_add(4);
-        s.tick(*div)
+// --- Save state (manual serialization; see `crate::state`) ---
+impl Serial {
+    pub(crate) fn write_state(&self, w: &mut crate::state::Writer) {
+        w.bool(self.cgb);
+        w.u8(self.sb);
+        w.u8(self.sc);
+        w.u8(self.shifted);
+        w.bool(self.master_clock);
+        w.u16(self.prev_div);
+        w.u8(self.out_shift);
+        w.u32(self.out_buf.len() as u32);
+        w.bytes(&self.out_buf);
     }
-
-    /// Run until tick returns IF bits; returns the div value at completion.
-    fn run_until_irq(s: &mut Serial, div: &mut u16, max_mcycles: u32) -> Option<u16> {
-        for _ in 0..max_mcycles {
-            if step(s, div) != 0 {
-                return Some(*div);
-            }
+    pub(crate) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        self.cgb = r.bool()?;
+        self.sb = r.u8()?;
+        self.sc = r.u8()?;
+        self.shifted = r.u8()?;
+        // Live paths keep `shifted` in 0..=7 (reset at 8 + on every SC write); a
+        // tampered/foreign state with `shifted > 7` would make the master shift
+        // `7 - shifted` underflow, so reject it (the load stays atomic — the
+        // machine is restored into a clone, so a rejected file leaves it intact).
+        if self.shifted > 7 {
+            return Err(crate::state::StateError::Truncated);
         }
-        None
-    }
-
-    #[test]
-    fn sb_readback() {
-        let mut s = Serial::new(false);
-        s.write(0xFF01, 0x5A);
-        assert_eq!(s.read(0xFF01), 0x5A);
-    }
-
-    #[test]
-    fn sc_unused_bits_read_one_dmg() {
-        let mut s = Serial::new(false);
-        s.write(0xFF02, 0x00);
-        assert_eq!(s.read(0xFF02), 0x7E);
-        s.write(0xFF02, 0x01);
-        assert_eq!(s.read(0xFF02), 0x7F);
-        s.write(0xFF02, 0x80);
-        assert_eq!(s.read(0xFF02), 0xFE);
-    }
-
-    #[test]
-    fn sc_unused_bits_read_one_cgb() {
-        let mut s = Serial::new(true);
-        s.write(0xFF02, 0x00);
-        assert_eq!(s.read(0xFF02), 0x7C);
-        s.write(0xFF02, 0x02);
-        assert_eq!(s.read(0xFF02), 0x7E);
-        s.write(0xFF02, 0x83);
-        assert_eq!(s.read(0xFF02), 0xFF);
-    }
-
-    /// A transfer started at div = 0 shifts every 512 T-cycles starting at
-    /// div = 512 (second bit-7 falling edge) and completes with IF bit 3 on
-    /// the 8th shift.
-    #[test]
-    fn transfer_completes_on_eighth_shift() {
-        let mut s = Serial::new(false);
-        let mut div = 0u16;
-        s.write(0xFF01, 0x00);
-        s.write(0xFF02, 0x81);
-        assert_eq!(run_until_irq(&mut s, &mut div, 2000), Some(8 * 512));
-        assert_eq!(s.read(0xFF01), 0xFF); // 1s shifted in (no peer)
-        assert_eq!(s.read(0xFF02), 0x7F); // bit 7 cleared
-    }
-
-    /// Shifts move the MSB out first and pull 1s in.
-    #[test]
-    fn shifts_msb_first_with_incoming_ones() {
-        let mut s = Serial::new(false);
-        let mut div = 0u16;
-        s.write(0xFF01, 0b1010_0000);
-        s.write(0xFF02, 0x81);
-        while div < 512 {
-            assert_eq!(step(&mut s, &mut div), 0);
-        }
-        assert_eq!(s.read(0xFF01), 0b0100_0001);
-        while div < 1024 {
-            step(&mut s, &mut div);
-        }
-        assert_eq!(s.read(0xFF01), 0b1000_0011);
-    }
-
-    /// The SC write resets the master flip-flop, so the first shift lands
-    /// on the *second* DIV-bit-7 falling edge after the write — for a write
-    /// at div = 600 (bit 7 next falls at 768) that is div = 1024, with
-    /// completion 7 * 512 later (mooneye boot_sclk_align measures the same
-    /// alignment; gambatte memory.cpp: completion =
-    /// `cc - (cc - div_reset) % 0x100 + 0x200 * 8` = 600 - 88 + 4096).
-    #[test]
-    fn transfer_alignment_depends_on_div_phase() {
-        let mut s = Serial::new(false);
-        let mut div = 0u16;
-        while div < 600 {
-            step(&mut s, &mut div);
-        }
-        s.write(0xFF02, 0x81);
-        assert_eq!(run_until_irq(&mut s, &mut div, 2000), Some(600 - 88 + 4096));
-    }
-
-    /// Discriminator against a bit-8 falling-edge model: a transfer started
-    /// while DIV bit 8 is high (div = 300) must *not* shift at the upcoming
-    /// bit-8 falling edge (div = 512) but at the second bit-7 falling edge
-    /// (div = 768), completing at 300 - 44 + 4096 = 4352, not 4096
-    /// (gambatte serial/nopx*_start_wait_read_if_*; SameBoy
-    /// GB_serial_master_edge divide-by-2 of bit-7 edges).
-    #[test]
-    fn start_in_high_bit8_phase_shifts_a_half_period_later() {
-        let mut s = Serial::new(false);
-        let mut div = 0u16;
-        while div < 300 {
-            step(&mut s, &mut div);
-        }
-        s.write(0xFF01, 0x00);
-        s.write(0xFF02, 0x81);
-        while div < 768 {
-            assert_eq!(step(&mut s, &mut div), 0);
-        }
-        assert_eq!(s.read(0xFF01), 0x01, "first shift exactly at div = 768");
-        assert_eq!(run_until_irq(&mut s, &mut div, 2000), Some(4352));
-    }
-
-    /// An edge in the M-cycle *before* SC is written does not count: the
-    /// write happens after that cycle's tick.
-    #[test]
-    fn edge_before_sc_write_does_not_shift() {
-        let mut s = Serial::new(false);
-        let mut div = 252u16;
-        s.tick(div); // seed prev_div with bit 7 high (252 = 0xFC)
-        div = 256;
-        s.tick(div); // falling edge: master flip-flop toggles high
-        s.write(0xFF01, 0x00);
-        s.write(0xFF02, 0x81); // forces the flip-flop low again (no shift:
-        // no transfer was active)
-        assert_eq!(run_until_irq(&mut s, &mut div, 2000), Some(768 + 7 * 512));
-    }
-
-    /// External clock (SC bit 0 = 0) with no peer: nothing ever happens and
-    /// the transfer flag stays set.
-    #[test]
-    fn external_clock_never_completes() {
-        let mut s = Serial::new(false);
-        let mut div = 0u16;
-        s.write(0xFF01, 0x42);
-        s.write(0xFF02, 0x80);
-        assert_eq!(run_until_irq(&mut s, &mut div, 20_000), None);
-        assert_eq!(s.read(0xFF01), 0x42);
-        assert_eq!(s.read(0xFF02), 0xFE); // bit 7 still set
-    }
-
-    /// Clock edges with no transfer in progress do nothing.
-    #[test]
-    fn idle_edges_do_nothing() {
-        let mut s = Serial::new(false);
-        let mut div = 0u16;
-        s.write(0xFF01, 0x42);
-        for _ in 0..2000 {
-            assert_eq!(step(&mut s, &mut div), 0);
-        }
-        assert_eq!(s.read(0xFF01), 0x42);
-    }
-
-    /// CGB fast clock (SC bit 1): master edges on DIV bit 2, i.e. a shift
-    /// every 16 T-cycles, full transfer in 128.
-    #[test]
-    fn cgb_fast_clock_uses_bit2() {
-        let mut s = Serial::new(true);
-        let mut div = 0u16;
-        s.write(0xFF02, 0x83);
-        assert_eq!(run_until_irq(&mut s, &mut div, 100), Some(8 * 16));
-        assert_eq!(s.read(0xFF01), 0xFF);
-    }
-
-    /// DMG has no fast-clock bit; writing it is ignored.
-    #[test]
-    fn dmg_ignores_fast_clock_bit() {
-        let mut s = Serial::new(false);
-        let mut div = 0u16;
-        s.write(0xFF02, 0x83);
-        assert_eq!(run_until_irq(&mut s, &mut div, 2000), Some(8 * 512));
-    }
-
-    /// A DIV counter reset (DIV write) that drops the clock bit from 1 to 0
-    /// is a falling edge and toggles the master flip-flop; with the
-    /// flip-flop high (one bit-7 edge since the SC write) that toggle is a
-    /// shift, like the timer's falling-edge glitch.
-    #[test]
-    fn div_reset_can_clock_shifter() {
-        let mut s = Serial::new(false);
-        let mut div = 0u16;
-        s.write(0xFF01, 0x00);
-        s.write(0xFF02, 0x81);
-        while div < 400 {
-            step(&mut s, &mut div); // div = 400 (0x190): bit 7 high,
-            // flip-flop high since div = 256
-        }
-        assert_eq!(s.div_write(div), 0); // flip-flop high->low: one shift
-        assert_eq!(s.read(0xFF01), 0x01);
-        // The next sampled tick (counter 0 -> 4) must not double-count.
-        assert_eq!(s.tick(4), 0);
-        assert_eq!(s.read(0xFF01), 0x01);
-    }
-
-    /// Fast-clock variant: DIV bit 2 has period 8, so it is high again by
-    /// the M-cycle after the write — only the dedicated `div_write` path
-    /// can see the reset edge (gambatte serial/start83_late_div_write_*).
-    #[test]
-    fn cgb_fast_clock_div_reset_edge_is_not_missed() {
-        let mut s = Serial::new(true);
-        let mut div = 0u16;
-        s.write(0xFF02, 0x83);
-        step(&mut s, &mut div); // 4
-        step(&mut s, &mut div); // 8: bit-2 falling edge, flip-flop high
-        step(&mut s, &mut div); // 12: rising
-        assert_eq!(s.div_write(div), 0); // bit 2 of 12 high: edge -> shift
-        assert_eq!(s.read(0xFF01), 0x01);
-        // 0 -> 4 next cycle is a rising edge: no double count.
-        assert_eq!(s.tick(4), 0);
-        assert_eq!(s.read(0xFF01), 0x01);
-    }
-
-    /// A DIV reset with the clock bit low is no edge at all.
-    #[test]
-    fn div_reset_with_low_clock_bit_does_nothing() {
-        let mut s = Serial::new(false);
-        let mut div = 0u16;
-        s.write(0xFF01, 0x00);
-        s.write(0xFF02, 0x81);
-        while div < 300 {
-            step(&mut s, &mut div); // 300 (0x12C): bit 7 low
-        }
-        assert_eq!(s.div_write(div), 0);
-        assert_eq!(s.read(0xFF01), 0x00, "no shift");
-    }
-
-    /// A DIV reset while the flip-flop is low only toggles it high (no
-    /// shift); the transfer then continues on the post-reset edge grid.
-    /// This is the gambatte `serial/start_late_div_write_wait_read_if_2b`
-    /// scenario: SC at div = 44, 7 bits shifted by div = 3712 (shifts at
-    /// 512..3584), DIV reset at 3712 (bit 7 high -> edge, flip-flop
-    /// low->high), 8th shift and IF on the first post-reset bit-7 falling
-    /// edge at counter 256.
-    #[test]
-    fn div_reset_during_low_flip_flop_delays_completion_to_post_reset_grid() {
-        let mut s = Serial::new(false);
-        let mut div = 0u16;
-        while div < 44 {
-            step(&mut s, &mut div);
-        }
-        s.write(0xFF01, 0x00);
-        s.write(0xFF02, 0x81);
-        while div < 3712 {
-            assert_eq!(step(&mut s, &mut div), 0, "no IF before the DIV reset");
-        }
-        assert_eq!(s.read(0xFF01), 0x7F); // 7 of 8 bits shifted
-        // DIV write: counter 3712 (bit 7 high) resets -> falling edge,
-        // flip-flop toggles low->high without a shift.
-        assert_eq!(s.div_write(div), 0);
-        div = 4;
-        s.tick(div);
-        assert_eq!(s.read(0xFF01), 0x7F, "reset edge alone must not shift");
-        // First post-reset bit-7 falling edge: counter 252 -> 256.
-        assert_eq!(run_until_irq(&mut s, &mut div, 100), Some(256));
-        assert_eq!(s.read(0xFF01), 0xFF);
-    }
-
-    /// Rewriting SC with bit 7 set mid-transfer restarts the bit counter:
-    /// 8 more shifts are needed before completion, and SB keeps the
-    /// partially shifted contents (SameBoy Core/memory.c resets its serial
-    /// bit counter on every SC write). The flip-flop is low at the rewrite
-    /// (a shift just happened), so no forced shift occurs here.
-    #[test]
-    fn sc_rewrite_mid_transfer_restarts_bit_counter() {
-        let mut s = Serial::new(false);
-        let mut div = 0u16;
-        s.write(0xFF01, 0x00);
-        s.write(0xFF02, 0x81);
-        while div < 1024 {
-            step(&mut s, &mut div); // two bits shifted (at 512, 1024)
-        }
-        assert_eq!(s.read(0xFF01), 0x03);
-        s.write(0xFF02, 0x81); // restart mid-transfer
-        assert_eq!(s.read(0xFF01), 0x03, "SB keeps the partial shift");
-        while div < 1536 {
-            step(&mut s, &mut div); // next edge continues from partial SB
-        }
-        assert_eq!(s.read(0xFF01), 0x07);
-        // 8 fresh shifts from the rewrite: completion at 1024 + 8 * 512,
-        // not at the original 8 * 512.
-        assert_eq!(
-            run_until_irq(&mut s, &mut div, 20_000),
-            Some(1024 + 8 * 512)
-        );
-        assert_eq!(s.read(0xFF01), 0xFF);
-        assert_eq!(s.read(0xFF02), 0x7F); // bit 7 cleared on completion
-    }
-
-    /// An SC rewrite while the flip-flop is *high* forces a master edge
-    /// first (SameBoy GB_IO_SC): the old transfer shifts one bit
-    /// immediately — counted toward the restarted transfer's 8 because the
-    /// bit counter was reset before the forced edge — and completion lands
-    /// 7 shifts later. The forced edge itself can never raise IF.
-    #[test]
-    fn sc_rewrite_with_high_flip_flop_shifts_immediately() {
-        let mut s = Serial::new(false);
-        let mut div = 0u16;
-        s.write(0xFF01, 0x00);
-        s.write(0xFF02, 0x81);
-        while div < 800 {
-            step(&mut s, &mut div); // shift at 512, flip-flop high at 768
-        }
-        assert_eq!(s.read(0xFF01), 0x01);
-        s.write(0xFF02, 0x81); // forced edge: immediate second shift
-        assert_eq!(s.read(0xFF01), 0x03);
-        // 7 more shifts: flip-flop high at 1024, shifts at 1280..1280+6*512.
-        assert_eq!(
-            run_until_irq(&mut s, &mut div, 20_000),
-            Some(1280 + 6 * 512)
-        );
-        assert_eq!(s.read(0xFF01), 0xFF);
-    }
-
-    /// Aborting (bit 7 clear) while the flip-flop is high also forces the
-    /// edge: one last glitch bit shifts out of the old transfer, then the
-    /// port is idle and IF never fires.
-    #[test]
-    fn sc_abort_with_high_flip_flop_shifts_one_glitch_bit() {
-        let mut s = Serial::new(false);
-        let mut div = 0u16;
-        s.write(0xFF01, 0x00);
-        s.write(0xFF02, 0x81);
-        while div < 800 {
-            step(&mut s, &mut div);
-        }
-        assert_eq!(s.read(0xFF01), 0x01);
-        s.write(0xFF02, 0x01); // abort; flip-flop high -> forced shift
-        assert_eq!(s.read(0xFF01), 0x03);
-        assert_eq!(run_until_irq(&mut s, &mut div, 20_000), None);
-        assert_eq!(s.read(0xFF01), 0x03);
-    }
-
-    // ---- harness output capture ----
-
-    /// A completed internal-clock transfer captures the byte that was
-    /// shifted out (MSB first) — what a link-cable peer would have
-    /// received. This is how blargg test ROMs print: SB <- byte, SC <- $81.
-    #[test]
-    fn internal_transfer_capture() {
-        let mut s = Serial::new(false);
-        let mut div = 0u16;
-        s.write(0xFF01, 0x5A);
-        s.write(0xFF02, 0x81);
-        assert_eq!(s.take_output(), [], "nothing captured before completion");
-        run_until_irq(&mut s, &mut div, 20_000).unwrap();
-        assert_eq!(s.take_output(), [0x5A]);
-        assert_eq!(s.take_output(), [], "take drains the buffer");
-    }
-
-    #[test]
-    fn capture_accumulates_across_transfers() {
-        let mut s = Serial::new(false);
-        let mut div = 0u16;
-        for byte in [0xAB, 0x00, 0xFF] {
-            s.write(0xFF01, byte);
-            s.write(0xFF02, 0x81);
-            run_until_irq(&mut s, &mut div, 20_000).unwrap();
-        }
-        assert_eq!(s.take_output(), [0xAB, 0x00, 0xFF]);
-    }
-
-    /// External-clock transfers (SC = $80) never advance without a peer
-    /// and must capture nothing.
-    #[test]
-    fn external_clock_captures_nothing() {
-        let mut s = Serial::new(false);
-        let mut div = 0u16;
-        s.write(0xFF01, 0x42);
-        s.write(0xFF02, 0x80);
-        assert_eq!(run_until_irq(&mut s, &mut div, 20_000), None);
-        assert_eq!(s.take_output(), []);
-    }
-
-    /// A mid-transfer SC rewrite restarts the bit counter
-    /// (`sc_rewrite_mid_transfer_restarts_bit_counter`); the captured byte
-    /// is the last 8 bits that actually shifted out, not the original SB.
-    #[test]
-    fn capture_reflects_outgoing_bits_after_restart() {
-        let mut s = Serial::new(false);
-        let mut div = 0u16;
-        s.write(0xFF01, 0x00);
-        s.write(0xFF02, 0x81);
-        while div < 1024 {
-            step(&mut s, &mut div); // two 0 bits out, SB now 0x03
-        }
-        s.write(0xFF02, 0x81); // restart: 8 fresh shifts
-        run_until_irq(&mut s, &mut div, 20_000).unwrap();
-        // Outgoing bits after the restart: six 0s (SB top bits), then the
-        // two 1s shifted in earlier reach bit 7.
-        assert_eq!(s.take_output(), [0x03]);
-    }
-
-    /// The capture buffer is bounded: a harness that never drains cannot
-    /// grow it without limit; completions past the cap are dropped.
-    #[test]
-    fn capture_buffer_is_bounded() {
-        let mut s = Serial::new(true);
-        let mut div = 0u16;
-        for _ in 0..(64 * 1024 + 8) {
-            s.write(0xFF02, 0x83); // CGB fast clock: 128 T per transfer
-            run_until_irq(&mut s, &mut div, 100).unwrap();
-        }
-        assert_eq!(s.take_output().len(), 64 * 1024);
-    }
-
-    /// Clearing SC bit 7 aborts an in-flight transfer (flip-flop low here:
-    /// no forced shift).
-    #[test]
-    fn sc_write_aborts_transfer() {
-        let mut s = Serial::new(false);
-        let mut div = 0u16;
-        s.write(0xFF01, 0x00);
-        s.write(0xFF02, 0x81);
-        while div < 1024 {
-            step(&mut s, &mut div); // two bits shifted
-        }
-        assert_eq!(s.read(0xFF01), 0x03);
-        s.write(0xFF02, 0x01);
-        assert_eq!(run_until_irq(&mut s, &mut div, 20_000), None);
-        assert_eq!(s.read(0xFF01), 0x03); // partial data kept
+        self.master_clock = r.bool()?;
+        self.prev_div = r.u16()?;
+        self.out_shift = r.u8()?;
+        let n = r.u32()? as usize;
+        self.out_buf = r.bytes_vec(n)?;
+        Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "serial_tests.rs"]
+mod tests;

@@ -241,6 +241,22 @@ impl CycleClock {
     }
 }
 
+// --- Save state (manual serialization; see `crate::state`) ---
+impl CycleClock {
+    pub(crate) fn write_state(&self, w: &mut crate::state::Writer) {
+        w.u64(self.clock);
+        w.u32(self.pending);
+    }
+    pub(crate) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        self.clock = r.u64()?;
+        self.pending = r.u32()?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 #[path = "cycle_clock_tests.rs"]
 mod tests;

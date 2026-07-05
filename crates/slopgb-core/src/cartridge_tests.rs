@@ -28,6 +28,9 @@ fn bank_at(c: &Cartridge, base: u16) -> u16 {
     u16::from(c.read_rom(base)) | (u16::from(c.read_rom(base + 1)) << 8)
 }
 
+#[path = "cartridge_tests/banks.rs"]
+mod banks;
+
 // --- header parsing ---
 
 #[test]

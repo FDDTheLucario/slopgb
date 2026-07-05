@@ -87,6 +87,55 @@ impl Registers {
     pub fn set_hl(&mut self, v: u16) {
         [self.h, self.l] = v.to_be_bytes();
     }
+
+    /// True power-on register state, before any boot ROM runs: every register
+    /// is zero and PC is `0x0000` (the boot ROM's reset vector). Used only by
+    /// the opt-in boot-ROM path (`GameBoy::new_with_boot`); `new` keeps
+    /// [`Self::post_boot`].
+    #[must_use]
+    pub fn power_on() -> Self {
+        Self {
+            a: 0,
+            f: 0,
+            b: 0,
+            c: 0,
+            d: 0,
+            e: 0,
+            h: 0,
+            l: 0,
+            sp: 0,
+            pc: 0,
+        }
+    }
+}
+
+// --- Save state (manual serialization; see `crate::state`) ---
+impl Registers {
+    pub(crate) fn write_state(&self, w: &mut crate::state::Writer) {
+        for b in [
+            self.a, self.f, self.b, self.c, self.d, self.e, self.h, self.l,
+        ] {
+            w.u8(b);
+        }
+        w.u16(self.sp);
+        w.u16(self.pc);
+    }
+    pub(crate) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        self.a = r.u8()?;
+        self.f = r.u8()?;
+        self.b = r.u8()?;
+        self.c = r.u8()?;
+        self.d = r.u8()?;
+        self.e = r.u8()?;
+        self.h = r.u8()?;
+        self.l = r.u8()?;
+        self.sp = r.u16()?;
+        self.pc = r.u16()?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

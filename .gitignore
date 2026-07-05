@@ -8,3 +8,7 @@ test-roms-src/
 handoff.md
 goal.md
 /.claude/worktrees/
+/bootroms/
+boot/boot.o
+boot/*.o
+boot/*.map
