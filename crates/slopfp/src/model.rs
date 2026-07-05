@@ -197,10 +197,23 @@ impl Picker {
     /// wrong.
     #[must_use]
     pub(crate) fn path_completion(&self) -> Option<String> {
-        if let Some(parent) = Path::new(&self.path_edit).parent() {
-            if !parent.as_os_str().is_empty() && parent != self.cwd {
-                return None;
-            }
+        // Split into (directory-including-trailing-sep, final component) by the
+        // last separator, rather than `Path::parent()` — `parent()` returns
+        // `None` for a bare root `"/"` (skipping the gate entirely) and strips
+        // an extra component for a trailing separator (`"/home/user/"` ->
+        // `"/home"`), both wrong here.
+        let sep = std::path::MAIN_SEPARATOR;
+        let dir_str = match self.path_edit.rfind(sep) {
+            Some(i) => &self.path_edit[..=i],
+            None => "",
+        };
+        // A bare component (no separator typed) is cwd-relative by definition.
+        // Otherwise the typed directory must equal the loaded cwd; comparing as
+        // `Path`s ignores a trailing separator, so "/home/user/" == cwd
+        // "/home/user" and "/" == cwd "/".
+        let dir_ok = dir_str.is_empty() || Path::new(dir_str) == self.cwd.as_path();
+        if !dir_ok {
+            return None;
         }
         let start = final_component_start(&self.path_edit);
         let prefix = &self.path_edit[start..];

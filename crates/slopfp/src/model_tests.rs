@@ -256,6 +256,36 @@ fn path_completion_none_when_typed_dir_differs_from_cwd() {
     assert_eq!(p.path_completion(), None);
 }
 
+#[test]
+fn path_completion_bare_root_does_not_complete_against_cwd() {
+    // `Path::new("/").parent()` is `None`, which used to skip the dir-gate
+    // entirely and complete a bare "/" against whatever cwd happened to be
+    // loaded. The typed dir "/" must equal cwd, and here it doesn't.
+    let mut p = Picker::with_entries(Mode::Open, "/home/user", vec![file("document.txt", 1, 1)]);
+    p.focus = Focus::PathBar;
+    p.path_edit = "/".to_string();
+    assert_eq!(p.path_completion(), None);
+}
+
+#[test]
+fn path_completion_trailing_slash_equal_to_cwd_completes() {
+    // `Path::new("/x/").parent()` is `Some("/")`, one component short of cwd
+    // "/x" — the trailing separator must not strip an extra component.
+    let mut p =
+        Picker::with_entries(Mode::Open, "/x", vec![file("doc1.txt", 1, 1), file("doc2.txt", 1, 1)]);
+    p.focus = Focus::PathBar;
+    p.path_edit = "/x/".to_string();
+    assert_eq!(p.path_completion(), Some("doc".to_string()));
+}
+
+#[test]
+fn path_completion_root_cwd() {
+    let mut p = Picker::with_entries(Mode::Open, "/", vec![dir("bin"), dir("boot")]);
+    p.focus = Focus::PathBar;
+    p.path_edit = "/".to_string();
+    assert_eq!(p.path_completion(), Some("b".to_string()));
+}
+
 // ---- esc two-stage + save two-stage -----------------------------------------
 
 #[test]
