@@ -1,21 +1,21 @@
-//! FF0F (IF register) read-view + squash family (port Stage S5/tier2): the
-//! deferred cc+0 FF0F read's verdict laws — the group-A STAT engine-rise PEEK,
-//! the #11bk DMG mode-0 two-latch DELIVER anchor + SERVICE-CLEAR, the #11bm
-//! glitch-line co-instant read-view mask, and the #11bh group-B/C/E write-race
-//! / dispatch-ack / OAM-pulse squash arms. A third `impl Ppu` block split out
-//! of `reclock.rs` for the CLAUDE.md <1000-line cap (`use super::*` == the
-//! `ppu` module, like `reclock.rs`/`read_laws.rs`); every arm is tier2-gated
-//! so production (`tier2_reclock` off) is byte-identical. Consumed by the
-//! deferred FF0F read/ack path in `interconnect/cycle.rs`.
+//! FF0F (IF register) read-view + squash family: the deferred cc+0 FF0F read's
+//! verdict laws — the group-A STAT engine-rise PEEK, the DMG mode-0 two-latch
+//! DELIVER anchor + SERVICE-CLEAR, the glitch-line co-instant read-view mask,
+//! and the group-B/C/E write-race / dispatch-ack / OAM-pulse squash arms. A
+//! third `impl Ppu` block split out of `reclock.rs` for the <1000-line cap
+//! (`use super::*` == the `ppu` module, like `reclock.rs`/`read_laws.rs`);
+//! every arm is tier2-gated so production (`tier2_reclock` off) is
+//! byte-identical. Consumed by the deferred FF0F read/ack path in
+//! `interconnect/cycle.rs`.
 
 use super::*;
 
 impl Ppu {
-    /// #11bh — FF0F group-A read PEEK (the #11ar FF41-peek shape on the IF
+    /// FF0F group-A read PEEK (the FF41-peek shape on the IF
     /// register): the deferred cc+0 FF0F read's VERDICT includes a STAT engine
     /// rise whose emission dot is deterministically known at read time and
     /// lands within the read's SameBoy-frame sample window — verdict-only, no
-    /// machine advance, no IF commit (the refuted #11bd sub-M FF0F sampling
+    /// machine advance, no IF commit (the refuted sub-M FF0F sampling
     /// moved the machine and broke the want-early `_1` legs; this never moves
     /// anything). SameBoy's `read_high_memory` samples IF after
     /// `GB_display_sync` runs the PPU to the exact read half-dot with
@@ -54,11 +54,11 @@ impl Ppu {
         // so the SS window is 0 (measured: +1-dot SS peek flips
         // `m2int_m0irq_scx3_{,ei_,reti_}1`).
         // Anchored to the mode-2-rise-dispatched ISR read frame
-        // (`stat_rise_oam`, the #11aq/#11ar per-ISR source tag — sticky since
+        // (`stat_rise_oam`, the per-ISR source tag — sticky since
         // the dispatching edge): `lyc0int_m0irq_ds_1` reads the IDENTICAL
         // dot-254/rise-255 geometry from an LYC-anchored ISR with the OPPOSITE
         // want (SameBoy's per-ISR read position separates them; slopgb
-        // collapses both to one dot — measured, this session's two-bin).
+        // collapses both to one dot — measured).
         // Unshifted frames only (the lcd_offset STOP dances re-phase the poll
         // grid: `offset1_lyc99int_m0irq_count_scx1_ds_1` polls rise−1 and
         // must stay clear).
@@ -76,7 +76,7 @@ impl Ppu {
                 return IF_STAT;
             }
         }
-        // (a-dmg) #11bk — the DMG single-speed mode-0 STAT-IF DELIVER window.
+        // (a-dmg) the DMG single-speed mode-0 STAT-IF DELIVER window.
         // The tier2 deferred FF0F read samples the leading edge (cc+0), 4 dots
         // before production's cc+4 read of the SAME `ldh a,(FF0F)`, so a read
         // whose TRUE (cc+4) position `dot + 4` has crossed the counter-pinned
@@ -112,7 +112,7 @@ impl Ppu {
         0
     }
 
-    /// #11bk — the DMG single-speed mode-0 (HBlank) STAT-IF two-latch window
+    /// The DMG single-speed mode-0 (HBlank) STAT-IF two-latch window
     /// anchor: the mode-0 rise dot R for the current bare DMG line, or `None`
     /// when out of scope. R is the render's own recorded flip (`flip_dot` once
     /// the visible mode-3→0 flip has fired) or its projection
@@ -143,7 +143,7 @@ impl Ppu {
         }
     }
 
-    /// #11bk — the DMG mode-0 STAT-IF SERVICE-CLEAR window: a tier2 deferred
+    /// The DMG mode-0 STAT-IF SERVICE-CLEAR window: a tier2 deferred
     /// FF0F read whose raw dot has crossed the counter-pinned mode-0 rise R
     /// returns 0 (the whole byte), the read-frame proxy for SameBoy's dispatch
     /// PREEMPTING the instruction's own `ldh a,(FF0F)` — on hardware the
@@ -162,7 +162,7 @@ impl Ppu {
         self.dot >= r && self.dot < r + 4
     }
 
-    /// #11bm — the DMG glitch-line mode-0 co-instant read-view mask. On the
+    /// The DMG glitch-line mode-0 co-instant read-view mask. On the
     /// first line after an LCD enable (`glitch_line`) an `enable_display` ROM
     /// polls FF0F (DI, `IE=0`) with the mode-0 STAT source armed; a deferred
     /// read landing EXACTLY on the recorded mode-0 flip dot reads the PRE-rise
@@ -196,7 +196,7 @@ impl Ppu {
         }
     }
 
-    /// #11bh group B — arm the FF0F write-race squash window (see the
+    /// Arm the FF0F write-race squash window (see the
     /// `stat_if_squash` field doc + the consumption site in
     /// [`Self::stat_update_tick`]). Called by the interconnect at the deferred
     /// FF0F write's commit instant, only when the written value clears bit 1.
@@ -205,7 +205,7 @@ impl Ppu {
         self.stat_if_squash = 2;
     }
 
-    /// #11bh group E — the co-instant line-0 dot-4 OAM-pulse read-view mask
+    /// The co-instant line-0 dot-4 OAM-pulse read-view mask
     /// (see the `ly0_pulse_age` field doc): a deferred FF0F read landing on
     /// the pulse's own dot returns the bit CLEAR (CPU-read-first at the
     /// shared instant, SameBoy-measured). Verdict-only.
@@ -218,7 +218,7 @@ impl Ppu {
         // (`lycint152_m2irq_2`/`_ds_2` want E2, measured A/B without this
         // guard).
         // Second arm: the shifted-frame co-instant mode-0 rise
-        // (#11bh item-7 count-row slice, see `m0sh_age`).
+        // (see `m0sh_age`).
         if (self.ly0_pulse_age > 0 && self.line == 0 && self.dot == 4 && self.lyc == 153)
             || (self.m0sh_age > 0 && self.dot == self.m0sh_dot && self.lcd_shift_dots != 0)
         {
@@ -228,7 +228,7 @@ impl Ppu {
         }
     }
 
-    /// #11bh group C — arm the dispatch-ack squash window for the acked IF
+    /// Arm the dispatch-ack squash window for the acked IF
     /// bit (see the `ack_squash_ppu` field doc + the consumption sites in
     /// [`Self::stat_update_tick`] and the vblank raise). Called by the
     /// interconnect's `ack` on the tier2 path only.

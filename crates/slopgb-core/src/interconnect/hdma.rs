@@ -35,8 +35,6 @@ impl Interconnect {
         let Some(req) = self.vram_dma_req.take() else {
             return;
         };
-        // #11bf item 2a HDMA dual-trace (`SLOPGB_S5DBG`): the block-run
-        // instant, the slopgb counterpart of SameBoy's `SBWHDMA run`.
         if crate::ppu::s5dbg_on() {
             let (l, d) = self.ppu.scan_pos();
             eprintln!(

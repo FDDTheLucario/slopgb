@@ -21,12 +21,12 @@ impl Ppu {
             // 78→74 and the EXIT (`line_render_done`, the visible 3→0 flip)
             // is anticipated by `vis_early` rising 4 dots early (the glitch
             // line takes the +4 `early_lead` in `m0_flip_events`). Both are
-            // exactly the A7 read-offset back-date, restricted to `vis_mode`
+            // exactly the read-offset back-date, restricted to `vis_mode`
             // — the OAM/VRAM/palette accessibility reads keep the raw
             // `GLITCH_MODE3_START` (they are byte-identical flag-on,
             // `lcdon_timing-GS` OAM/VRAM legs). Always 78 / never-`vis_early`
             // flag-OFF, so production is byte-identical.
-            // C1.2: the −4 glitch back-date is LEADING-EDGE-ONLY (like
+            // The −4 glitch back-date is LEADING-EDGE-ONLY (like
             // `mode3_entry_dot`). The Tier-2 deferred read samples the glitch
             // 0→3 entry at the trailing frame, so it takes no back-date — dot 74
             // made the deferred `lcdon_timing-GS` STAT read see mode 3 a full
@@ -70,7 +70,7 @@ impl Ppu {
 
     /// The dot the CPU-visible STAT mode flips 2→3 (the mode-2 OAM scan end).
     ///
-    /// Port Stage A7 — on the **leading-edge-only** (cc+0 read, eager machine)
+    /// On the **leading-edge-only** (cc+0 read, eager machine)
     /// flag-on path the boundary is back-dated by the read offset (4 dots,
     /// single speed) to dot 80, so the cc+0 FF41 read reproduces the flag-off
     /// cc+4 mode-3 detection timing: the leading-edge read latches the PPU 4
@@ -78,7 +78,7 @@ impl Ppu {
     /// makes that read **observationally neutral** for the mode-2→3 entry
     /// (mooneye `intr_2_mode3_timing` passes LE-only).
     ///
-    /// Port Stage B C1 — the **Tier-2 deferred-commit** frame does NOT take
+    /// The **Tier-2 deferred-commit** frame does NOT take
     /// that back-date (84, the flag-off value). The deferred read pays the
     /// previous M-cycle's parked debt — advancing the PPU to this cycle's
     /// leading edge — then samples; for the 2→3 ENTRY that lands the read at
@@ -105,7 +105,7 @@ impl Ppu {
     }
 
     /// Current (line, dot) — the rendering-FSM position, for the interconnect's
-    /// C1.3 post-halt-wake LY read-phase carry (`Interconnect::halt_ly_phase`).
+    /// post-halt-wake LY read-phase carry (`Interconnect::halt_ly_phase`).
     pub(crate) fn line_dot(&self) -> (u8, u16) {
         (self.line, self.dot)
     }
@@ -125,7 +125,7 @@ impl Ppu {
         std::mem::take(&mut self.stat_halt_late)
     }
 
-    /// #11aq (C2 read-position carry): whether the currently-pending STAT IRQ
+    /// Whether the currently-pending STAT IRQ
     /// was raised by the mode-2 OAM line-start rise (vs mode-0/LYC). A sticky
     /// level read (not drained) by the interconnect's `dispatch_retime` to key
     /// the per-ISR deferred-read carry (see the [`Ppu::stat_rise_oam`] field +
@@ -134,13 +134,13 @@ impl Ppu {
         self.stat_rise_oam
     }
 
-    /// #11aq: whether the currently-pending STAT IRQ was the mode-0 HBlank rise
+    /// Whether the currently-pending STAT IRQ was the mode-0 HBlank rise
     /// (the +2-dot ISR read carry). See [`Ppu::stat_rise_m0`].
     pub(crate) fn stat_rise_m0(&self) -> bool {
         self.stat_rise_m0
     }
 
-    /// #11bf (`SLOPGB_P2GRID`): whether the current line is the LCD-enable
+    /// Whether the current line is the LCD-enable
     /// glitch line — its mode-0 engine rise is emitted at a different offset
     /// from the true (SameBoy) commit than normal lines' (rise == visexit vs
     /// visexit − 3, dual-trace measured), so the halt-wake visibility
@@ -149,7 +149,7 @@ impl Ppu {
         self.glitch_line
     }
 
-    /// #11ar: arm/disarm the SCOPED carried-read exit override (see the
+    /// Arm/disarm the SCOPED carried-read exit override (see the
     /// [`Ppu::read_carried`] field). `dispatch_retime` sets it after a STAT-ISR
     /// read carry; the interconnect clears it once the handler's FF41 read has
     /// resolved (one-shot).
@@ -471,7 +471,7 @@ impl Ppu {
         // enable at the line boundary because the LYC=148 period has
         // ended, while lycEnable lyc_ff41_enable_3's same-cell enable
         // still matches its own line and fires).
-        // #11bd: classify the write on the un-shifted calibrated frame (the
+        // Classify the write on the un-shifted calibrated frame (the
         // machine STOPADV advance moved post-leave writes deeper into the
         // frame; identity for never-switched ROMs).
         let (ll, ld) = self.law_pos();
@@ -489,12 +489,12 @@ impl Ppu {
         if lyc_high && old & STAT_SRC_LYC != 0 {
             return false;
         }
-        // #11bg — unshifted CGB single-speed Tier-2: the engine's two-phase
+        // Unshifted CGB single-speed Tier-2: the engine's two-phase
         // FF41 view (`eng_stat_pending`) owns the LYC-source write fires (the
         // bit6-late continuity fire at commit+4 + external edges against the
         // armed old bit6), replacing the write-instant lyc arms below. The
         // shifted (lcd-offset) frames keep the calibrated arms — their write
-        // law positions are one poll quantum ambiguous (#11bd).
+        // law positions are one poll quantum ambiguous.
         let eng_lyc = self.leading_edge_reads && !self.ds && self.lcd_shift_dots == 0;
         // The engine owns the LINE-BOUNDARY region (where the staged view +
         // the lyfc schedule decide); a MID-LINE enable keeps gambatte's
@@ -503,8 +503,8 @@ impl Ppu {
         // calibrated write-instant arm can satisfy it.
         let eng_boundary = eng_lyc && !(16..448).contains(&ld);
         let lyc_fire = !eng_boundary && lyc_high && data & STAT_SRC_LYC != 0;
-        // Port Stage C / S5 (mech 3 — the dispatch-class write-trigger, the LYC
-        // sub-family). The lcd-offset shifts `late_ff41_enable_lcdoffset1_1`'s
+        // The dispatch-class write-trigger, LYC sub-family. The lcd-offset
+        // shifts `late_ff41_enable_lcdoffset1_1`'s
         // LYC-source enable into the line-start carryover (dots 0-3 of lines
         // 1-143, which on the gambatte grid still belong to the previous line):
         // it sets LYC = ly-1 and enables LYC at `ly7 dot3`, where SameBoy fires
@@ -520,7 +520,7 @@ impl Ppu {
             && old & STAT_SRC_LYC == 0
             && data & STAT_SRC_LYC != 0
             && self.lyc == ll - 1
-            // #11bh slice (d) — a DS line-start (dots 0-1) fresh bit6 enable
+            // A DS line-start (dots 0-1) fresh bit6 enable
             // whose OLD value armed HBlank joins a line still latched HIGH
             // from the previous line's mode-0 (SameBoy holds the level until
             // the ~dot-2 mfi re-eval; SBLEVEL: the natural 1→0 lands at dot 2
@@ -530,8 +530,8 @@ impl Ppu {
             // level is seeded high by the write path (`regs.rs`) so the
             // next tick raises no spurious edge either.
             && !(self.ds && old & STAT_SRC_HBLANK != 0 && ld < 2);
-        // Port Stage C / S5 (mech 3 — the dispatch-class write-trigger, the ly153
-        // LYC-WRAP sub-family). The lcd-offset shifts
+        // The dispatch-class write-trigger, ly153 LYC-WRAP sub-family. The
+        // lcd-offset shifts
         // `lyc153_late_ff41_enable_lcdoffset1_1`'s LYC enable into the ly153 LY=0
         // wrap window (dots 8-11), where `cmp_cgb`'s `(153, _) => 0` arm has
         // already wrapped to 0 (≠ lyc=153) so `lyc_high` is false — yet the held
@@ -544,7 +544,7 @@ impl Ppu {
         // (the real-state discriminator, not the offset) fires; `cmp_cgb` (pinning
         // the dot-6 base `lyc153_late_ff41_enable_1` compare) is untouched.
         // Byte-identical OFF.
-        // #11bd: on a shifted ROM the held latch is engine state at the REAL
+        // On a shifted ROM the held latch is engine state at the REAL
         // instant — the write that law-lands inside the dots-6..11 latch window
         // arrives after the real latch dropped, so re-derive the latch at the
         // law position (LYC=153 matched at the dot-6 step, drops at the dot-12
@@ -587,8 +587,8 @@ impl Ppu {
             let m0_pending = !crossed && (old | data) & STAT_SRC_HBLANK != 0;
             // Line-boundary tail (`timeToNextLy <= 4 + 4*ds`).
             let tail = ld < 4;
-            // Port Stage C / S5 (mech 3 — the dispatch-class write-trigger, the
-            // HBlank sub-family). At the dots-0-3 line-start tail the gambatte
+            // The dispatch-class write-trigger, HBlank sub-family. At the
+            // dots-0-3 line-start tail the gambatte
             // logic defers a fresh m0 enable to the scheduled m0irq event; but
             // when the PREVIOUS line's mode-0 has already passed (`vis_mode==0`
             // hblank carryover, not the pre-mode-0 tail), that scheduled event
@@ -617,7 +617,7 @@ impl Ppu {
             } else {
                 true
             };
-            // #11bh group D — the held-LYC pre-write-high suppression: a
+            // The held-LYC pre-write-high suppression: a
             // carryover-tail m0 enable whose OLD value armed LYC with the
             // latch still held (the lines-1-143 / line-144 lyfc-gap hold)
             // rewrites a line that is already HIGH — no 0→1 edge on hardware
@@ -626,7 +626,7 @@ impl Ppu {
             // old=0x00 keeps firing). The top-of-fn `lyc_high` check misses
             // this: `cmp_cgb` has switched to the new line while the ENGINE
             // latch still names the old match.
-            // #11bh — UNSHIFTED CGB SS (`eng_lyc`) hands the carryover-tail
+            // UNSHIFTED CGB SS (`eng_lyc`) hands the carryover-tail
             // m0-enable fire to the two-phase ENGINE view, whose phase-1
             // lands at commit+2 where `mode_for_interrupt` already reads the
             // line-start OAM carry (mfi=2) — hardware's dead-tail: an enable
@@ -652,7 +652,7 @@ impl Ppu {
             } else if old & STAT_SRC_HBLANK != 0 {
                 false
             } else {
-                // #11bg -- under the two-phase engine view (unshifted CGB
+                // Under the two-phase engine view (unshifted CGB
                 // SS Tier-2) the fresh-m0-enable fire moves to the ENGINE
                 // (the phase-1 rise at its effective instant, where the
                 // line-end OAM carryover in `update_mode_for_interrupt`
@@ -666,15 +666,15 @@ impl Ppu {
             // still suppresses a written lyc condition there (gambatte's
             // `old & m1irqen` arm; miscmstatirq
             // lycstatwirq_trigger_ly00_10_50_1 reads E0).
-            // Port Stage C / S5 (mech 3 — the dispatch-class write-trigger, the
-            // VBlank sub-family). The gambatte `m1_tail` (line 0 dots 0-3 = mode
+            // The dispatch-class write-trigger, VBlank sub-family. The gambatte
+            // `m1_tail` (line 0 dots 0-3 = mode
             // 1's last M-cycle) suppresses a freshly-written m1 enable; but the
             // lcd-offset shifts `m1irq_late_enable_lcdoffset1_1`'s FF41 enable
             // into exactly that tail (`ly0 dot3`), where SameBoy fires the fresh
             // VBlank enable (out2) — slopgb delivered `if=00`. Under Tier-2
             // (`leading_edge_reads`) drop the `m1_tail` suppression so the fresh
             // VBlank enable raises IF; the `old & STAT_SRC_VBLANK` suppression and
-            // the lyc arm (the #11k `lycstatwirq_trigger_ly00` E0 rows) are
+            // the lyc arm (the `lycstatwirq_trigger_ly00` E0 rows) are
             // untouched. Never set in production / LE-only → byte-identical OFF.
             let m1_tail = ll == 0 && ld < 4 && !self.leading_edge_reads;
             if old & STAT_SRC_VBLANK != 0 {

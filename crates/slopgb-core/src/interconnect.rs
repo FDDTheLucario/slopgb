@@ -52,7 +52,7 @@ const MID_PHASE: u8 = 4;
 /// The M-cycle END phase (cc+4 = 8 eighths) — [`edge_eighth`]'s last-dot value
 /// for both speeds. An event committing here is past every observer (it blocks
 /// the whole M-cycle and is visible only next M-cycle); the CGB palette unblock
-/// commits here (`event_phase(EdgeKind::PalAccess, ..)`, INC-G3 task 5).
+/// commits here (`event_phase(EdgeKind::PalAccess, ..)`).
 const END_PHASE: u8 = 8;
 
 /// The dot-END commit phase (in eighths of an M-cycle) of an event that
@@ -114,10 +114,10 @@ fn obs_pre_edge(obs: u8, edge: u8) -> bool {
 /// commit eighth (`Some(edge)` from [`edge_eighth`]; `None` = no edge this
 /// M-cycle). The edge-stamp replaces the old precomputed boolean: storing the
 /// raw commit eighth (rather than `obs_pre_edge(MID_PHASE, edge)`) is what lets
-/// an EVENT carry its own sub-dot position via [`event_phase`] — the INC-G3
+/// an EVENT carry its own sub-dot position via [`event_phase`] — the
 /// discriminator between read chains, since every CPU access observes at the
-/// one [`ACCESS_PHASE`] (the reverted G2c per-read-chain observer phase was the
-/// wrong premise). `stamp_blocks(Some(edge), MID_PHASE)` is bit-identical to
+/// one [`ACCESS_PHASE`] (a per-read-chain observer phase was the wrong
+/// premise). `stamp_blocks(Some(edge), MID_PHASE)` is bit-identical to
 /// the legacy half-split for every dot/speed (`stamp_blocks_matches_half_split`).
 #[inline]
 fn stamp_blocks(stamp: Option<u8>, obs: u8) -> bool {
@@ -127,7 +127,7 @@ fn stamp_blocks(stamp: Option<u8>, obs: u8) -> bool {
 /// The boundary events that commit a per-M-cycle sub-cc edge. Each PPU edge
 /// commits at its own dot-END eighth today ([`event_phase`] returns
 /// [`edge_eighth`] for every kind — net-zero), so the kinds are
-/// interchangeable; the enum is the seam a later INC-G3 increment uses to give
+/// interchangeable; the enum is the seam a later increment uses to give
 /// one event its own sub-dot lead/lag (the cc-exact boundary positions from
 /// the gambatte xpos formulas — e.g. the CGB palette unblock trails the mode-0
 /// IRQ rise by a half-dot, m0Time=xpos+7 vs IRQ+6) without recalibrating the
@@ -141,7 +141,7 @@ enum EdgeKind {
     /// The CGB palette-RAM pipe-end unblock (`pal_access_edge`).
     PalAccess,
     /// The double-speed FF41 STAT mode-bit flip (`stat_mode_edge`); commits at
-    /// the whole-M-cycle END phase (INC-G3 task 6), like `PalAccess`.
+    /// the whole-M-cycle END phase, like `PalAccess`.
     StatMode,
 }
 
@@ -149,8 +149,8 @@ enum EdgeKind {
 /// dot that ticks at cc `cc` (1..=4 — see [`dot_ticks_on_cc`]), shifted by a
 /// per-event `lead_eighths` sub-dot offset (signed; positive = commit later,
 /// negative = earlier). Most kinds commit at their dot-END eighth
-/// ([`cc_eighth`]); `PalAccess`/`StatMode` at the M-cycle END (INC-G3 tasks
-/// 5/6). `lead_eighths` is the eighth-grid reclock hook: at `lead_eighths == 0`
+/// ([`cc_eighth`]); `PalAccess`/`StatMode` at the M-cycle END.
+/// `lead_eighths` is the eighth-grid reclock hook: at `lead_eighths == 0`
 /// the result is identical to the pre-reclock fixed phase (net-zero —
 /// `event_phase_lead_zero_is_identity`); a non-zero lead lets one event carry
 /// its own sub-dot commit position (e.g. the per-SCX CGB palette unblock) WITHOUT
@@ -170,12 +170,12 @@ fn event_phase(kind: EdgeKind, cc: u8, lead_eighths: i8) -> u8 {
         // scx2_1/scx5_1/scx5_ds_1 (out7) pin the late effect across SCX. The
         // palette unblock physically lags the pixel-pipe end (gambatte
         // cgbpAccessible vs m0Time), so it gets the whole-M-cycle block where
-        // OAM/VRAM only get the second half. INC-G3 task 5.
+        // OAM/VRAM only get the second half.
         EdgeKind::PalAccess => END_PHASE,
         // The double-speed FF41 STAT mode-bit block also commits at the
-        // M-cycle END (INC-G3 task 6): a sprite-line m3→m0 flip anywhere in the
+        // M-cycle END: a sprite-line m3→m0 flip anywhere in the
         // straddle M-cycle holds the cc+2 read at the old mode 3, not only a
-        // 2nd-half flip. The INC-DS-1 dot-END half-split caught the +43 rows
+        // 2nd-half flip. The earlier dot-END half-split caught the +43 rows
         // whose flip lands in the M-cycle's second half; promoting StatMode to
         // the whole-M-cycle block lifts the +84 residual `m3stat_ds_1` rows
         // whose flip lands in the FIRST half (gambatte sprites). The full-gbtr
@@ -186,21 +186,21 @@ fn event_phase(kind: EdgeKind, cc: u8, lead_eighths: i8) -> u8 {
         // the straddle line to mode 3; the `_2` want it, the `_1` do not, and no
         // `event_phase` offset separates two reads in the same M-cycle (the
         // parked multi-chain CPU↔PPU phase problem). Taken on the half-dot-grid
-        // branch (net-positive trades OK); see the task-6 swap note in
+        // branch (net-positive trades OK); see the swap note in
         // tests/gbtr/baselines/gambatte.txt.
         EdgeKind::StatMode => END_PHASE,
-        // Every other event commits at its dot-END eighth (net-zero scaffold).
+        // Every other event commits at its dot-END eighth.
         _ => cc_eighth(cc),
     };
     (i16::from(base) + i16::from(lead_eighths)).clamp(0, i16::from(END_PHASE)) as u8
 }
 
 /// The single sub-cc phase (eighths) at which every CPU bus access samples the
-/// accessibility/STAT edge stamps. INC-G3 corrects the reverted G2c premise (a
-/// per-read-chain observer phase): M-cycles are dot-aligned to the PPU, so all
+/// accessibility/STAT edge stamps. M-cycles are dot-aligned to the PPU, so all
 /// CPU accesses sample at the SAME M-cycle cc-offset — the discriminator
 /// between read chains is the EVENT's sub-dot position ([`event_phase`]), not
-/// the observer's. Equals [`MID_PHASE`] (cc+2), so the scaffold is net-zero
+/// the observer's (a per-read-chain observer phase was the wrong premise).
+/// Equals [`MID_PHASE`] (cc+2), so this is net-zero
 /// (`access_phase_is_single_constant`).
 const ACCESS_PHASE: u8 = MID_PHASE;
 
@@ -313,42 +313,41 @@ pub struct Interconnect {
     /// Elapsed T-cycles since power-on (normal-speed dots).
     cycles: u64,
     /// CPU-side deferred-commit clock (SameBoy `pending_cycles`,
-    /// `sm83_cpu.c`). Port Stage S1 scaffold: every CPU-driven M-cycle (the
+    /// `sm83_cpu.c`). Every CPU-driven M-cycle (the
     /// five [`Bus`] access methods) parks its 4 T-cycles here and commits the
     /// previous M-cycle's debt at the *leading* edge, draining at the
-    /// instruction boundary via [`Bus::flush_pending`]. **Write-only today —
-    /// nothing samples it**, so it is provably behaviour-neutral (net-zero
-    /// gate). It becomes load-bearing at S2 when FF41/OAM/VRAM/palette reads
+    /// instruction boundary via [`Bus::flush_pending`]. Behaviour-neutral
+    /// while nothing samples it; load-bearing once FF41/OAM/VRAM/palette reads
     /// switch to leading-edge (cc+0) sampling. Counts pure CPU T-cycles
     /// (4 per M-cycle in *both* speeds — the double-speed factor lives in the
     /// PPU/APU domain, never here; `cycle_clock.rs` module doc). Advanced
     /// only by the CPU's own M-cycles, never by OAM-DMA / HDMA / STOP-pause
     /// stolen ticks (those call `tick_machine` directly, not through `Bus`).
     clock: CycleClock,
-    /// Port Stage S2a: route PPU-positional reads (FF41 today; OAM/VRAM/
-    /// palette join at S4) through the **leading-edge** (cc+0) sample —
+    /// Route PPU-positional reads (FF41 today; OAM/VRAM/palette join later)
+    /// through the **leading-edge** (cc+0) sample —
     /// the byte latched at the M-cycle's leading edge, before `tick_machine`
     /// advances the PPU — instead of the trailing cc+4 view. This is the
     /// slopgb equivalent of SameBoy force-syncing the PPU to the access
-    /// cycle (`ppu-timing-map.md` §6 (i)). **Held `false`**: the leading-edge
-    /// path is inert until the S2d atomic flip (decoupled `mode_for_interrupt`
+    /// cycle. **Held `false`**: the leading-edge
+    /// path is inert until the atomic flip (decoupled `mode_for_interrupt`
     /// and the anchor swing) lands with it — alone it would just shift FF41
     /// one M-cycle early. `false` is byte-identical to the cc+4 model
     /// ([`Self::leading_edge_sample`] returns `None`).
     leading_edge_reads: bool,
 
-    /// Port Stage B (Tier 2): the −2 sub-M-cycle **dispatch reclock**. When on
+    /// The −2 sub-M-cycle **dispatch reclock**. When on
     /// (implies [`Self::leading_edge_reads`]), `tick_machine` advances the
     /// PPU/timer/APU/serial deferred — slaved to the deferred-commit
-    /// [`CycleClock`]'s parked debt instead of a flat 4-dot quantum (B1) — and
-    /// the interrupt dispatch re-parks `pending=2` ([`Bus::dispatch_retime`],
-    /// B2) so the vector fetch + first handler reads sample 2 dots early
-    /// ("re-frames every read"; `docs/sameboy-port/PORT-PLAN.md` Tier 2).
+    /// [`CycleClock`]'s parked debt instead of a flat 4-dot quantum — and
+    /// the interrupt dispatch re-parks `pending=2` ([`Bus::dispatch_retime`])
+    /// so the vector fetch + first handler reads sample 2 dots early
+    /// ("re-frames every read").
     /// **Held `false`** — the deferred path is red until the whole reclock
     /// converges, so it sits behind its OWN flag, separate from
-    /// `leading_edge_reads`: the S0 kernel-pair gate specs run `leading_edge`
-    /// only, keeping them on the validated Tier-1 frame while this lands. The
-    /// thesis hook ([`crate::GameBoy::set_tier2_reclock`]) sets both.
+    /// `leading_edge_reads`: the kernel-pair gate specs run `leading_edge`
+    /// only, keeping them on the validated frame while this lands. The
+    /// hook ([`crate::GameBoy::set_tier2_reclock`]) sets both.
     tier2_reclock: bool,
 
     /// CGB hardware running a CGB-flagged cart. CGB hardware with a DMG
@@ -367,8 +366,8 @@ pub struct Interconnect {
     /// parity candidates over 287 baselined rows). The m3stat / speedchange
     /// `_2` reads are served by the cc-invariant `END_PHASE` StatMode/PalAccess
     /// overrides, and their correct answer needs the pixel-pipe END *dot* to
-    /// move (a full pixel-pipe reclock), not the M-cycle's sample phase — see
-    /// docs/hardware-state/ppu-subdot-ladder.md. The field is the cc-granular
+    /// move (a full pixel-pipe reclock), not the M-cycle's sample phase. The
+    /// field is the cc-granular
     /// substrate that reclock would drive; 0 is bit-identical to the dot loop
     /// (`cc_grid_matches_dot_loop`).
     dot_phase: u8,
@@ -390,15 +389,15 @@ pub struct Interconnect {
     /// see them immediately ([`Bus::pending_halt_wake`]; `Timer::tick`'s
     /// `late`).
     if_late: u8,
-    /// Port Stage B (Tier 2) — the deferred-frame mode-0 STAT halt-wake delay.
+    /// The deferred-frame mode-0 STAT halt-wake delay.
     /// The deferred halt loop samples `pending_halt_wake` at this M-cycle's cc+0
     /// (after paying the previous M-cycle's debt), ~2 M-cycles before SameBoy's
     /// `GB_cpu_run` DMG mid-cycle sample (`sm83_cpu.c:1621-1628`, advance-2 →
     /// sample → advance-2) plus the dispatch-retime's const −1 TIMA phase. A
     /// forward advance before the sample was measured WORSE (the IRQ becomes
     /// visible earlier → wake earlier → lower count); the delay is supplied as
-    /// extra `if_late` masking instead (the mandate's "delay via if_late, NOT
-    /// advance"). Set when the mode-0 rise is taken during halt on the reclock
+    /// extra `if_late` masking instead (delay via `if_late`, NOT
+    /// advance). Set when the mode-0 rise is taken during halt on the reclock
     /// path; counts down one mask per following M-cycle. Only the
     /// `int_hblank_halt`/`hblank_ly_scx` mode-0 halt grids observe it (intr_2
     /// wakes on the mode-2 OAM source, the kernel reads FF41 — neither halt-wakes
@@ -406,8 +405,8 @@ pub struct Interconnect {
     /// Inert flag-off (only set under `tier2_reclock`), so production is
     /// byte-identical.
     m0_halt_hold: u8,
-    /// PORT 3 (#11bc, the S6 completion frame) — the deferred-path
-    /// timer/serial ack-squash deadline in CPU T (0 = no window open).
+    /// The deferred-path timer/serial ack-squash deadline in CPU T (0 = no
+    /// window open).
     /// SameBoy's dispatch-ack consumes a re-set of the acked source only up
     /// to an exact T past the ack (`updateTimaIrq(cc + 2 + isCgb())` /
     /// `updateSerial(cc + 3 + isCgb())` before `ackIrq`); the deferred
@@ -419,31 +418,30 @@ pub struct Interconnect {
     /// `advance_machine_t`. Production (eager path) keeps the tick counters
     /// — byte-identical OFF.
     ack_squash_deadline_t: u64,
-    /// PORT 2 (#11bc) — outstanding sub-M-cycle wake skew (T). Set to 2 by a
+    /// Outstanding sub-M-cycle wake skew (T). Set to 2 by a
     /// mid-cycle (w2) halt wake: the dispatch + the first handler instruction
     /// run 2 T early (their deferred reads land at the wake's true
     /// sub-M-cycle T); the next instruction-boundary flush repays it,
     /// re-aligning the CPU to the machine's 4-T grid so the per-M-cycle mask
     /// calibrations (if_late lifecycle, rise-cc tables) hold for everything
-    /// after — the goal's "clock-park offset consumed by all post-wake
-    /// accesses until the next instruction-boundary flush". An UNBOUNDED
+    /// after — the clock-park offset consumed by all post-wake
+    /// accesses until the next instruction-boundary flush. An UNBOUNDED
     /// skew was measured to hang the multi-round mooneye
     /// `hblank_ly_scx_timing-GS` (B=42): every later round's halt entry
     /// lands off-grid and the whole calibrated mask map mis-frames.
     wake_skew: u32,
-    /// #11bf WAKE-INSTANT experiment (`SLOPGB_P2GRID`) — the machine T the
-    /// deferred advance is currently executing (set per-T by
-    /// `advance_machine_t`; only read by the p2grid visibility deadline).
+    /// The machine T the deferred advance is currently executing (set per-T by
+    /// `advance_machine_t`; only read by the mode-0 rise visibility deadline).
     machine_now: u64,
-    /// #11bf item 2a sweep scratch: request pending at write_deferred entry.
+    /// Request pending at write_deferred entry.
     vram_dma_req_pre: bool,
-    /// #11bf (`SLOPGB_P2GRID`) — the mode-0 STAT rise's halt-wake visibility
+    /// The mode-0 STAT rise's halt-wake visibility
     /// deadline in machine T: the halt sampler masks IF_STAT while
     /// `clock.now() < stat_vis_from_t`. Replaces the M-cycle-quantized
     /// `if_late`/`m0_halt_hold` masking for the mode-0 rise under the
     /// SameBoy-exact 4k+2 sample grid (rise T + `SLOPGB_P2DELTA`).
     stat_vis_from_t: u64,
-    /// Port Stage B C1.3 (S7 sub-M-cycle halt-wake) — the post-mode-0-halt-wake
+    /// The post-mode-0-halt-wake
     /// LY read-phase carry. SameBoy's DMG halt-wake resumes the CPU at the
     /// IRQ's sub-M-cycle clock, so the CPU's M-cycle phase is offset from the
     /// PPU dot grid by the IRQ's within-M-cycle position. slopgb's deferred
@@ -479,8 +477,8 @@ pub struct Interconnect {
     /// As `m0_access_edge` but for the CGB palette-RAM unblock (anchored at
     /// the pipe end / `render_finished`, one dot after the m0 flip). Unlike
     /// OAM/VRAM, the palette unblock commits at the M-cycle END
-    /// ([`event_phase`] gives `PalAccess` phase 8 = the whole-M-cycle block,
-    /// INC-G3 task 5): a cc+2 MID-phase FF69/FF6B read reads $FF for the
+    /// ([`event_phase`] gives `PalAccess` phase 8 = the whole-M-cycle block):
+    /// a cc+2 MID-phase FF69/FF6B read reads $FF for the
     /// ENTIRE straddle M-cycle, not just its second half (gambatte
     /// `cgbpal_m3end` `scx2_1`/`scx5_1`/`scx5_ds_1`). See `Ppu::pal_access_flip`.
     pal_access_edge: Option<u8>,
@@ -491,8 +489,7 @@ pub struct Interconnect {
     /// the flip lands late (gambatte sprites `m3stat_ds_1`). The FF41 override
     /// consults this only in double speed; the single-speed STAT-mode read,
     /// and the first-half/other-chain DS reads, are the parked multi-chain
-    /// problem (see the dot-loop comment). See `Ppu::m0_stat_flip` (sub-dot
-    /// event-phase model, increment INC-DS-1).
+    /// problem (see the dot-loop comment). See `Ppu::m0_stat_flip`.
     stat_mode_edge: Option<u8>,
     /// Dispatch-ack source sync-ahead (gambatte-core memory.cpp
     /// `Memory::ackIrq`): the IF clear of an interrupt dispatch happens
@@ -522,7 +519,7 @@ pub struct Interconnect {
     ack_squash_ticks: u8,
     ack_squash_dots: u8,
 
-    /// Port Stage B (Tier 2) — the `tick_squash` mask (`ack_squash_mask & 0x0C`,
+    /// The `tick_squash` mask (`ack_squash_mask & 0x0C`,
     /// the timer/serial squash) latched at the current deferred M-cycle's first
     /// T, so it persists across the T-by-T [`Self::advance_machine_t`] loop even
     /// when the −2 dispatch reclock splits one M-cycle across two advances. Unused
@@ -644,7 +641,7 @@ const CGB_COMPAT_OBJ_PALETTE: [u16; 4] = [0x7FFF, 0x421F, 0x1CF2, 0x0000];
 
 impl Interconnect {
     /// `SLOPGB_S5DBG` wake-instant tracer: which sample path woke, at which
-    /// machine position (the SBWAKE `fp=` analogue). Debug-only, env-gated.
+    /// machine position. Debug-only, env-gated.
     fn dbg_wake(&mut self, path: &str, w: u8) {
         if crate::ppu::s5dbg_on() {
             let (l, d) = self.ppu.scan_pos();
@@ -897,14 +894,14 @@ fn sgb_header_zero_bits(cart: &Cartridge) -> u32 {
 impl Bus for Interconnect {
     fn read(&mut self, addr: u16) -> u8 {
         if self.tier2_reclock {
-            // Port Stage B: the deferred-commit reclock advances the machine to
+            // The deferred-commit reclock advances the machine to
             // this M-cycle's leading edge before sampling.
             return self.read_deferred(addr, OamBugKind::Read);
         }
-        // S1 deferred-commit clock: pay the previous M-cycle's parked debt
+        // Deferred-commit clock: pay the previous M-cycle's parked debt
         // and park this read's 4 T-cycles.
         let _leading_edge = self.clock.read();
-        // S2a: latch the leading-edge (cc+0) value for PPU-positional reads
+        // Latch the leading-edge (cc+0) value for PPU-positional reads
         // *before* the PPU advances. Inert while the flag is off (`None`).
         let leading = self.leading_edge_sample(addr);
         self.service_vram_dma();
@@ -923,11 +920,11 @@ impl Bus for Interconnect {
         if self.tier2_reclock {
             return self.write_deferred(addr, value);
         }
-        // S1 deferred-commit clock: a write commits per its per-model
+        // Deferred-commit clock: a write commits per its per-model
         // conflict class (`write_conflict`, the SameBoy `cycle_write` map).
         // The commit position is still discarded — write-only scaffold —
         // so swapping `ReadOld` for the real class is byte-identical; the
-        // architectural-commit move that consumes it lands at Stage S6.
+        // architectural-commit move that consumes it lands later.
         let conflict = self.write_conflict(addr);
         let _commit = self.clock.write(conflict);
         self.service_vram_dma();
@@ -956,7 +953,7 @@ impl Bus for Interconnect {
         if self.tier2_reclock {
             return self.tick_deferred();
         }
-        // S1 deferred-commit clock: an internal M-cycle parks +4 without
+        // Deferred-commit clock: an internal M-cycle parks +4 without
         // committing (SameBoy `cycle_no_access`); the next access pays it.
         self.clock.internal();
         self.service_vram_dma();
@@ -967,12 +964,13 @@ impl Bus for Interconnect {
         if self.tier2_reclock {
             return self.tick_addr_deferred(value);
         }
-        // S1 deferred-commit clock: the OAM-bug-carrying internal M-cycle (a
+        // Deferred-commit clock: the OAM-bug-carrying internal M-cycle (a
         // 16-bit register driven on the address bus) is SameBoy's
         // `cycle_oam_bug` (`sm83_cpu.c:326`), which — unlike `cycle_no_access`
         // — commits the previous debt at the leading edge and reparks 4, just
         // like a read. (Conserves the same 4 T as `internal`; the difference
-        // is the commit *phase*, which matters once S2+ samples on this cycle.)
+        // is the commit *phase*, which matters once a later stage samples on
+        // this cycle.)
         let _leading_edge = self.clock.read();
         self.service_vram_dma();
         self.tick_machine();
@@ -983,9 +981,9 @@ impl Bus for Interconnect {
         if self.tier2_reclock {
             return self.read_deferred(addr, OamBugKind::ReadIncrease);
         }
-        // S1 deferred-commit clock: same leading-edge read as `read`.
+        // Deferred-commit clock: same leading-edge read as `read`.
         let _leading_edge = self.clock.read();
-        // S2a: leading-edge sample (cc+0), inert while the flag is off.
+        // Leading-edge sample (cc+0), inert while the flag is off.
         let leading = self.leading_edge_sample(addr);
         self.service_vram_dma();
         self.tick_machine();
@@ -1064,7 +1062,7 @@ impl Bus for Interconnect {
 
     fn flush_pending(&mut self) {
         if self.tier2_reclock {
-            // Port Stage B: drain the parked debt AND advance the machine to
+            // Drain the parked debt AND advance the machine to
             // catch up, so the deferred −2 read shift is reabsorbed at the
             // instruction boundary (SameBoy `flush_pending_cycles`).
             let before = self.clock.now();
@@ -1072,10 +1070,10 @@ impl Bus for Interconnect {
             self.advance_machine_t(before, self.clock.now());
             return;
         }
-        // S1 instruction boundary: drain the deferred-commit clock's parked
+        // Instruction boundary: drain the deferred-commit clock's parked
         // debt (SameBoy `flush_pending_cycles`). Net-zero — the clock is
         // write-only scaffold; this only keeps `clock.now()` exact at
-        // boundaries for the S2 leading-edge port.
+        // boundaries for the leading-edge port.
         self.clock.flush();
     }
 }

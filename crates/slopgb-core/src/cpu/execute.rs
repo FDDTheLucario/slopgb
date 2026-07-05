@@ -15,7 +15,7 @@ use super::{Bus, Cpu, flags};
 /// The flush is placed here, around the whole body, so it fires on *every*
 /// exit path (the locked / halt-stay / halt-wake / stop-idle early returns
 /// included) with a single call — the SameBoy `flush_pending_cycles`
-/// instruction boundary (`sm83_cpu.c:336`). Inert in port Stage S1.
+/// instruction boundary (`sm83_cpu.c:336`). Currently inert.
 pub fn step(cpu: &mut Cpu, bus: &mut impl Bus) {
     run_step(cpu, bus);
     bus.flush_pending();
@@ -179,10 +179,10 @@ fn dispatch_interrupt(cpu: &mut Cpu, bus: &mut impl Bus) {
         (0x0040 + (u16::from(bit) << 3), Some(bit))
     };
     if bus.dispatch_reclock() {
-        // Port Stage B (Tier 2): the IF-ack / vector latch lands AFTER the low
-        // push (SameBoy sm83_cpu.c:1690, the M5+2 latch), and the dispatch
-        // reclock re-parks pending=2 there so the vector fetch + first handler
-        // reads sample 2 dots early ("re-frames every read").
+        // The IF-ack / vector latch lands AFTER the low push (SameBoy
+        // sm83_cpu.c:1690, the M5+2 latch), and the dispatch reclock re-parks
+        // pending=2 there so the vector fetch + first handler reads sample 2
+        // dots early ("re-frames every read").
         cpu.regs.sp = cpu.regs.sp.wrapping_sub(1);
         bus.write(cpu.regs.sp, pc as u8);
         bus.dispatch_retime();
@@ -477,14 +477,14 @@ fn op_halt(cpu: &mut Cpu, bus: &mut impl Bus) {
         }
         return;
     }
-    // #11bf — IME=1 (or EI-pending) with IE & IF already nonzero at the
+    // IME=1 (or EI-pending) with IE & IF already nonzero at the
     // entry view: the halt is NOT entered and PC rewinds to the HALT
     // itself, so the dispatched ISR returns INTO the halt and it
     // re-executes with the IF bit consumed (SameBoy halt()
     // sm83_cpu.c:1043-1047: `halted = false; pc--`). The prior
     // halted+first-check-wake path pushed halt+1 — the ISR skipped the
     // re-halt and the whole post-wake stream ran one halt round early
-    // (`late_m0int_halt_m0stat_*` dual-traced). Tier2-gated inside
+    // (`late_m0int_halt_m0stat_*`). Tier2-gated inside
     // `halt_entry_rewind` (production keeps the halted+wake shape).
     if bus.halt_entry_rewind() {
         cpu.regs.pc = cpu.regs.pc.wrapping_sub(1);

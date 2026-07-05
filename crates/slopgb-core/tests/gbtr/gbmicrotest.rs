@@ -115,9 +115,9 @@ fn run_case(rom: &[u8]) -> Result<(), String> {
     }
 }
 
-/// #11bj session-local measurement aid: run an explicit list of gbmicrotest
-/// ROMs on the **flag-on** reclock and report the $FF82 verdict — the fast
-/// iteration loop for the Phase-2 DMG engine port. `#[ignore]`'d. Usage:
+/// Run an explicit list of gbmicrotest ROMs on the **flag-on** reclock and
+/// report the $FF82 verdict — the fast iteration loop for the DMG engine
+/// reclock. `#[ignore]`'d. Usage:
 /// `SLOPGB_ROWLIST=/tmp/rows.txt cargo test -p slopgb-core --test gbtr
 /// --release -- --ignored gbmicro_flagon_probe --nocapture`. Each row is
 /// `gbmicrotest/<name>.gb [Dmg]` (extra columns ignored). `SLOPGB_PROBE_OFF=1`
@@ -201,7 +201,7 @@ fn is_testbench(rel: &str) -> bool {
     TESTBENCHES.contains(&name)
 }
 
-/// Inventory hook for the Phase B2 coverage guard: (claimed, exempted)
+/// Inventory hook for the coverage guard: (claimed, exempted)
 /// collection-relative paths of every `.gb`/`.gbc` under `gbmicrotest/`.
 /// Exempted = the documented no-verdict testbenches ([`TESTBENCHES`]);
 /// everything else produces exactly one DMG case.
@@ -246,18 +246,17 @@ fn gbmicrotest_dmg_matrix() {
     );
 }
 
-/// Port Stage B (Tier 2), L1 of the Phase-B thesis — `int_hblank_halt_scx0-7`
-/// on the deferred-commit reclock (`ppu-subdot-ladder.md` THESIS RESULT #9).
-/// The test times the mode-0 STAT IRQ **halt-wake** via TIMA; the deferred halt
-/// loop samples `pending_halt_wake` at cc+0, ~2 M-cycles before SameBoy's
-/// `GB_cpu_run` DMG mid-cycle sample (`sm83_cpu.c:1621-1628`). The re-derived
-/// `if_late` halt mask (2 uniform M-cycles + the `mask{rise cc==4}` second-half
-/// term for the deferred `cc = eager+1` rotation; `interconnect/tick.rs`)
-/// restores the baked `$FF80` = 62,62,62,63,63,63,63,64 target, so all eight
-/// pass **flag-on** on DMG — clearing the L1 residual while the kernel pair and
-/// `intr_2_mode0_timing` keep passing (they do not halt-wake on mode 0).
-/// Production (flag-off) is byte-identical (the mask is gated on
-/// `tier2_reclock`); SameBoy itself passes these (`tools/hramdump.c`).
+/// `int_hblank_halt_scx0-7` on the deferred-commit reclock. The test times the
+/// mode-0 STAT IRQ **halt-wake** via TIMA; the deferred halt loop samples
+/// `pending_halt_wake` at cc+0, ~2 M-cycles before SameBoy's `GB_cpu_run` DMG
+/// mid-cycle sample (`sm83_cpu.c:1621-1628`). The re-derived `if_late` halt
+/// mask (2 uniform M-cycles + the `mask{rise cc==4}` second-half term for the
+/// deferred `cc = eager+1` rotation; `interconnect/tick.rs`) restores the baked
+/// `$FF80` = 62,62,62,63,63,63,63,64 target, so all eight pass **flag-on** on
+/// DMG — clearing the residual while the kernel pair and `intr_2_mode0_timing`
+/// keep passing (they do not halt-wake on mode 0). Production (flag-off) is
+/// byte-identical (the mask is gated on `tier2_reclock`); SameBoy itself passes
+/// these (`tools/hramdump.c`).
 #[test]
 fn tier2_int_hblank_halt_passes_dmg() {
     let Some(root) = common::gbtr_root() else {
@@ -270,10 +269,10 @@ fn tier2_int_hblank_halt_passes_dmg() {
     for scx in 0..8u8 {
         let rel = format!("gbmicrotest/int_hblank_halt_scx{scx}.gb");
         let rom = std::fs::read(root.join(&rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        // Boot WITH the reclock (construction-time), so the C0 boot-DIV +4 frame
+        // Boot WITH the reclock (construction-time), so the boot-DIV +4 frame
         // the real flip installs is active — the TIMA-counted halt-wake depends
         // on it (the set-after-boot path would skip the +4 and mis-pass at the
-        // pre-C1.2 mask). The `m0_halt_hold` base was re-derived for this frame.
+        // old mask). The `m0_halt_hold` base was re-derived for this frame.
         let mut gb = harness::boot_with_reclock(&rom, Model::Dmg);
         // Same fixed-point protocol as `run_case` (two frames, then the
         // verdict deadline), on the Tier-2 reclock path.
@@ -295,19 +294,18 @@ fn tier2_int_hblank_halt_passes_dmg() {
     }
 }
 
-/// #11bk — the DMG `hblank_int` mode-0 STAT-IF two-latch (DELIVER +
-/// SERVICE-CLEAR). The reclock's cc+0 deferred `ldh a,(FF0F)` samples 4 dots
-/// before production's cc+4 read of the same load, straddling the
-/// counter-pinned mode-0 rise `R = 254 + SCX&7`. The `if_c` legs read
-/// `[R-4, R)` and must observe the imminent rise DELIVERED (`ISR CP E2`); the
-/// `if_d` legs read `[R, R+4)` where on hardware the mode-0 dispatch clears IF
-/// at the read's own cycle so the load returns 0 (`ISR CP 00`) — gated on
-/// `intf & ie & STAT` (pending + enabled) to separate the pure poll
-/// `hblank_scx2_if_a` (DI + IE=0, wants the bit still set). All 16 pass
-/// flag-on. The `if_b`/`nops`/`hblank_scx3` siblings need the counter-pinned
-/// dispatch to move (parked; `dmg-hblank-if-2026-07-03.md`). Production
-/// (flag-off) byte-identical — the law is `tier2_reclock` + `!is_cgb`-gated;
-/// SameBoy passes these on real DMG.
+/// The DMG `hblank_int` mode-0 STAT-IF two-latch (DELIVER + SERVICE-CLEAR).
+/// The reclock's cc+0 deferred `ldh a,(FF0F)` samples 4 dots before
+/// production's cc+4 read of the same load, straddling the counter-pinned
+/// mode-0 rise `R = 254 + SCX&7`. The `if_c` legs read `[R-4, R)` and must
+/// observe the imminent rise DELIVERED (`ISR CP E2`); the `if_d` legs read
+/// `[R, R+4)` where on hardware the mode-0 dispatch clears IF at the read's own
+/// cycle so the load returns 0 (`ISR CP 00`) — gated on `intf & ie & STAT`
+/// (pending + enabled) to separate the pure poll `hblank_scx2_if_a` (DI + IE=0,
+/// wants the bit still set). All 16 pass flag-on. The
+/// `if_b`/`nops`/`hblank_scx3` siblings need the counter-pinned dispatch to
+/// move (parked). Production (flag-off) byte-identical — the law is
+/// `tier2_reclock` + `!is_cgb`-gated; SameBoy passes these on real DMG.
 #[test]
 fn tier2_dmg_hblank_if_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -343,17 +341,17 @@ fn tier2_dmg_hblank_if_passes() {
     }
 }
 
-/// #11bl — the DMG power-on boot-frame read law (`Ppu::boot_read`): the tier2
-/// deferred read samples the PPU at cc+0, 4 dots before production's cc+4 read
-/// of the same `LD A,(nn)`, so the `poweron_*` ROMs (a NOP sled timing a single
-/// direct read of STAT/OAM/VRAM/LY on the pristine boot hand-off frame) read the
+/// The DMG power-on boot-frame read law (`Ppu::boot_read`): the tier2 deferred
+/// read samples the PPU at cc+0, 4 dots before production's cc+4 read of the
+/// same `LD A,(nn)`, so the `poweron_*` ROMs (a NOP sled timing a single direct
+/// read of STAT/OAM/VRAM/LY on the pristine boot hand-off frame) read the
 /// pre-transition value; restoring the read's true (cc+4) verdict — the current
 /// (line, dot) advanced 4 dots — fixes all 20 at once. Scoped to the boot frame
 /// (`frame_count <= 2` AND no CPU LCD-register write, so a program that
 /// reconfigures the PPU reverts to cc+0), `tier2_reclock` + `!is_cgb` +
 /// verdict-only → the `+4` boot DIV (`boot_div`) and CGB stay byte-identical.
 /// SameBoy passes these on real DMG (they pass flag-OFF too — the whole 20 are
-/// reclock flip-blockers). Map: `dmg-poweron-boot-read-2026-07-04.md`.
+/// reclock flip-blockers).
 #[test]
 fn tier2_dmg_poweron_passes() {
     let Some(root) = common::gbtr_root() else {

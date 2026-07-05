@@ -1,6 +1,5 @@
 //! SameBoy `GB_STAT_update` rising-edge STAT-interrupt line — the validated,
-//! inert foundation for port Stage S5 (`docs/sameboy-port/PORT-PLAN.md`,
-//! `ppu-timing-map.md` §4).
+//! inert foundation for the STAT IRQ reclock.
 //!
 //! **Committed but not yet wired into the live PPU.** Today the STAT IRQ is
 //! raised by the gambatte-derived per-source event engine
@@ -13,15 +12,14 @@
 //! no new interrupt.
 //!
 //! This module is the executable, unit-tested encoding of that rising-edge
-//! core. It is a pure function of the *decoupled* interrupt mode (the S2b
+//! core. It is a pure function of the *decoupled* interrupt mode (the
 //! [`Ppu::mode_for_interrupt`](crate::ppu) field) plus the STAT register's
 //! enable bits and the LYC match — exactly the inputs SameBoy reads — so the
-//! S5 swap is "drive this from the decoupled mode each dot and OR its return
+//! swap is "drive this from the decoupled mode each dot and OR its return
 //! into IF" rather than a from-scratch rewrite. It stays inert here, validated
 //! against `display.c`'s worked behaviour, until that stage lands together
-//! with the leading-edge read (S2a) and the cc-exact boundary (the atomic
-//! Stage S2+S3 reclock — see `ppu-subdot-ladder.md`).
-#![allow(dead_code)] // Inert staged-port foundation; see the module doc above.
+//! with the leading-edge read and the cc-exact boundary (the atomic reclock).
+#![allow(dead_code)] // Inert port foundation; see the module doc above.
 
 /// `mode_for_interrupt == -1`: the deliberate "no mode source" state SameBoy
 /// uses to force the STAT line low between transitions (`display.c:1799`,
@@ -56,7 +54,7 @@ impl StatUpdate {
         self.line
     }
 
-    /// #11bd — silently force the line level (no edge detection). Used by the
+    /// Silently force the line level (no edge detection). Used by the
     /// shifted-ROM FF45-commit re-latch: the engine registered a latch drop one
     /// step before the write landed (SameBoy's line never fell there), so the
     /// corrected level must not edge-fire on the next tick.

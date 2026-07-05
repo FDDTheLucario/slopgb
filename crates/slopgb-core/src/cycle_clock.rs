@@ -1,5 +1,5 @@
 //! Deferred-commit ("lazy-advance") CPU clock — the validated foundation for
-//! the SameBoy cycle-exact timing port (Stage S1 of `docs/sameboy-port/PORT-PLAN.md`).
+//! the SameBoy cycle-exact timing port.
 //!
 //! **This module is committed but not yet wired into the live `Bus`.** It is
 //! the executable, unit-tested encoding of SameBoy 1.0.2's `pending_cycles`
@@ -8,24 +8,23 @@
 //! peripheral state at the M-cycle's *trailing* edge, cc+4); this clock samples
 //! at the *leading* edge (cc+0) and defers the M-cycle's own 4 T-cycles, which
 //! is what lands a STAT/OAM/VRAM read on the correct side of a mode-3→mode-0
-//! boundary (`docs/sameboy-port/cpu-timing-map.md` §2, §7). Wiring it is the
-//! atomic Stage S2+S3 of the port (NOT net-zero — the PPU boundary dots shift to
-//! SameBoy's frame together), so it stays inert here, validated against the
-//! spec's worked numbers, until that stage lands.
+//! boundary. Wiring it is the atomic reclock stage of the port (NOT net-zero —
+//! the PPU boundary dots shift to SameBoy's frame together), so it stays inert
+//! here, validated against the spec's worked numbers, until that stage lands.
 //!
 //! Model (CPU T-cycles, 4 = one M-cycle, in both speeds — the double-speed
-//! factor is applied once, centrally, only to the PPU/APU domain, never here;
-//! `cpu-timing-map.md` §5): a bus op (1) advances the *previous* M-cycle's
+//! factor is applied once, centrally, only to the PPU/APU domain, never
+//! here): a bus op (1) advances the *previous* M-cycle's
 //! `pending` debt, (2) samples/commits at the now-current clock (the leading
 //! edge of *this* M-cycle), (3) parks a fresh debt for this M-cycle's own
 //! cycles. `flush` drains the debt at the instruction boundary.
-#![allow(dead_code)] // Inert staged-port foundation; see the module doc above.
+#![allow(dead_code)] // Inert port foundation; see the module doc above.
 
 /// SameBoy's per-IO-write conflict classes (`sm83_cpu.c:131-318`). Each splits
 /// the M-cycle's 4 T-cycles into a pre-commit advance and a re-parked debt so
 /// the *sub-M-cycle* commit point varies while the per-M-cycle total is
 /// conserved. Only the cases needed to validate the conservation invariant are
-/// modelled here; the full per-model maps land with Stage S6.
+/// modelled here; the remaining per-model maps are not yet modelled.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Conflict {
     /// `GB_CONFLICT_READ_OLD` (`sm83_cpu.c:131`): plain write, commits at the
@@ -38,7 +37,7 @@ pub(crate) enum Conflict {
     /// CPU wins a same-cycle write (e.g. IF), landing 1 T late. Also the clock
     /// phase of the two-stage `GB_CONFLICT_STAT_*` classes (`:150,170,180`),
     /// whose final value write lands at the same `+1` point (the intermediate
-    /// `0xFF`/masked write is a memory effect deferred to Stage S6).
+    /// `0xFF`/masked write is a memory effect deferred to a later stage).
     WriteCpu,
     /// Advance `pending-2`, re-park 6 — the write commits 2 T early.
     /// `GB_CONFLICT_PALETTE_CGB` on model ≥ CGB-D (`:205`) and
@@ -53,7 +52,7 @@ pub(crate) enum Conflict {
     /// Today [`Interconnect::write_conflict`] routes only WX_DMG here; the
     /// value-dependent LCDC tile-sel glitch (`((~value & old) & TILE_SEL)`)
     /// can't be decided from the address alone, so CGB LCDC stays `ReadOld`
-    /// until its memory effect lands at Stage S6.
+    /// until its memory effect lands in a later stage.
     WxHold,
 }
 
@@ -118,9 +117,9 @@ impl CycleClock {
     /// reparks its class total, which still conserves the per-M-cycle 4. Every
     /// class's commit position is nonetheless still **discarded** by the live
     /// `Bus::write` (`interconnect.rs`); the per-model class *lookup*
-    /// ([`Interconnect::write_conflict`]) is wired at Stage A3 (byte-identical,
+    /// ([`Interconnect::write_conflict`]) is already wired (byte-identical,
     /// the clock is write-only scaffold), and the architectural-commit *move*
-    /// that consumes the position lands at Stage S6.
+    /// that consumes the position lands in a later stage.
     pub(crate) fn write(&mut self, conflict: Conflict) -> u64 {
         let repark = match conflict {
             Conflict::ReadOld => {
@@ -174,13 +173,13 @@ impl CycleClock {
             .expect("pending debt overflow — flush missing");
     }
 
-    /// #11aq (C2 per-ISR read-position carry): add `t` CPU T-cycles of extra
+    /// Per-ISR read-position carry: add `t` CPU T-cycles of extra
     /// parked debt to be paid (advanced) by the next bus op *before* it samples,
     /// shifting that read — and every subsequent handler read — `t` T later
     /// WITHOUT moving the current clock position (the IF-ack latch already
     /// committed). Used by `dispatch_retime` to carry the OAM-IRQ source's
     /// sub-M-cycle phase into the ISR handler reads, decoupled from the dispatch
-    /// dot (`cpu-timing-map.md §7.1`). Inert unless `SLOPGB_M2CARRY`.
+    /// dot. Inert unless `SLOPGB_M2CARRY`.
     pub(crate) fn carry_read(&mut self, t: u32) {
         self.pending = self
             .pending
@@ -188,7 +187,7 @@ impl CycleClock {
             .expect("pending debt overflow — flush missing");
     }
 
-    /// PORT 2 (#11bc, the sub-M-cycle WAKE clock): commit `t` of the parked
+    /// The sub-M-cycle WAKE clock: commit `t` of the parked
     /// debt NOW — advance the clock by `t` and reduce the debt by the same,
     /// conserving the per-M-cycle total. The DMG halt loop samples the wake
     /// condition mid-M-cycle (SameBoy `GB_cpu_run`, `sm83_cpu.c:1621-1628`:
@@ -204,13 +203,13 @@ impl CycleClock {
         self.pending -= t;
     }
 
-    /// PORT 2: drop `t` of the parked debt WITHOUT advancing — the un-run
+    /// Drop `t` of the parked debt WITHOUT advancing — the un-run
     /// tail of a halt idle iteration that woke at its mid-M-cycle sample.
     /// SameBoy's DMG halt loop iterations are genuinely 2 T long
     /// (`GB_advance_cycles(gb, 2)`), so a wake at the mid sample means the
     /// remaining 2 T of the idle "M-cycle" never happen: the resumed CPU's
     /// next op starts at the wake T and every subsequent M-cycle boundary
-    /// carries the 2-T offset — the sub-M-cycle resume the WAKE-CLOCK class
+    /// carries the 2-T offset — the sub-M-cycle resume the wake clock
     /// needs. Only the CPU↔machine alignment shifts; machine time itself
     /// stays continuous.
     pub(crate) fn forgive(&mut self, t: u32) {

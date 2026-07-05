@@ -2,17 +2,17 @@
 //! `Bus` trait impl in the parent delegates here — a trait impl cannot
 //! split across files; CLAUDE.md <1000-line cap, seam per
 //! `docs/tdd-split-plan.md` B5). Pure cut-and-paste of the trait-fn
-//! bodies: `stop` (the STOP dance: gambatte pause + the PORT-1 leave
-//! advance + the #11bi exit-table latches), the halt-wake samplers
-//! (PORT 2 wake grid), the IF ack (the #11bh per-source ack windows),
-//! the dispatch retime (#11aq carried-read arming) and the halt-entry
+//! bodies: `stop` (the STOP dance: gambatte pause + the leave
+//! advance + the exit-table latches), the halt-wake samplers
+//! (wake grid), the IF ack (per-source ack windows),
+//! the dispatch retime (carried-read arming) and the halt-entry
 //! view. Behavior-identical; suite-gated.
 
 use super::*;
 
 impl Interconnect {
     pub(super) fn halt_wake_mid_impl(&mut self) -> u8 {
-        // PORT 2 (#11bc) — the sub-M-cycle WAKE clock. SameBoy's DMG halt
+        // The sub-M-cycle WAKE clock. SameBoy's DMG halt
         // loop advances 2 T, samples `interrupt_queue`, then advances the
         // remaining 2 (`GB_cpu_run`, `sm83_cpu.c:1621-1628` — CGB samples at
         // the M-cycle head, no mid-step), so the halt-exit check runs on a
@@ -21,7 +21,7 @@ impl Interconnect {
         // handler reads carry that 2-T offset (the deferred clock's reduced
         // park) until the stream re-aligns — the WAKE-CLOCK class's
         // discriminator (`halt *_m0stat` `Na`/`Nb` sub-legs share the read
-        // POSITION; the wake INSTANT separates them, `#11ay`/`#11av`). The
+        // POSITION; the wake INSTANT separates them). The
         // machine's own 4-T grid (timer/OAM-DMA/APU in `advance_machine_t`,
         // keyed on ABSOLUTE `pos % 4`) is untouched, so the TIMA-counted
         // wake grids (`int_hblank_halt`) keep their frame. Gated to the
@@ -35,7 +35,7 @@ impl Interconnect {
             && self.cpu_halted
             && self.clock.pending() >= 2
         {
-            // #11bf — the SameBoy-exact wake grid, SCOPED to the
+            // The SameBoy-exact wake grid, SCOPED to the
             // mode-0-origin STAT rise (`GB_cpu_run` sm83_cpu.c:1629-1642:
             // one iq sample per iteration at the mid point 4k+2; the
             // post-sample advance(2) COMPLETES the M-cycle so the wake
@@ -93,7 +93,7 @@ impl Interconnect {
         }
         let w = self.pending_halt_wake();
         if w != 0 {
-            // #11bf: the first idle check (SameBoy's `just_halted` head
+            // The first idle check (SameBoy's `just_halted` head
             // sample) waking on the m0-origin STAT also re-fetches — the
             // woken instruction is a fresh `cycle_read` after the jh
             // advance(4), one M-cycle later than the reused idle prefetch.
@@ -135,7 +135,7 @@ impl Interconnect {
         // per-model widening of the halt-late mask, a separate work
         // package.
         let w = (self.intf & !self.if_late) & self.ie & IF_MASK;
-        // #11bf: the m0-origin STAT rise's halt visibility is the T-deadline
+        // The m0-origin STAT rise's halt visibility is the T-deadline
         // (covers the halt-entry first check too). Tier2 DMG (+CGB sweep).
         if w & IF_STAT_BIT != 0
             && self.tier2_reclock
@@ -164,10 +164,10 @@ impl Interconnect {
                 // dots stay OUT of reach — see the field docs.
                 self.ack_squash_mask = 1 << bit;
                 self.ack_squash_ticks = 0;
-                // #11bh group C — the deferred path takes NO post-ack squash
+                // The deferred path takes NO post-ack squash
                 // for the LCD bits: SameBoy's ack is the bare IF clear at the
-                // flushed pending−2 instant (sm83_cpu.c, the SBACK-traced
-                // point) with no source re-sync window, so a STAT/VBlank rise
+                // flushed pending−2 instant (sm83_cpu.c) with no source
+                // re-sync window, so a STAT/VBlank rise
                 // 1-2 dots past the ack is DELIVERED (the six retrigger rows:
                 // `late_m0irq_retrigger_ds_1` rise ack+2 · `_scx1_1` ack+1 ·
                 // `m2int_m2irq_late_retrigger_1` next-line pulse ack+2 ·
@@ -192,7 +192,7 @@ impl Interconnect {
                 self.ack_squash_mask = 1 << bit;
                 self.ack_squash_ticks = if self.model.is_cgb() { 2 } else { 1 };
                 self.ack_squash_dots = 0;
-                // PORT 3 (#11bc): on the deferred path the window is the
+                // On the deferred path the window is the
                 // EXACT SameBoy T-threshold instead (see
                 // `ack_squash_deadline_t`); the tick counters above are
                 // still set but unused there.
@@ -209,15 +209,13 @@ impl Interconnect {
     pub(super) fn stop_impl(&mut self, skipped_addr: u16, interrupt_pending: bool) -> bool {
         let switching = self.cgb_mode && self.key1_armed;
         let entering_ds = switching && !self.double_speed;
-        // #11bi — pin the post-switch exit-table anchor: the FIRST LCD-on
+        // Pin the post-switch exit-table anchor: the FIRST LCD-on
         // switching STOP since the last enable classifies the dance
         // (mid-frame speedchange anchor vs the VBlank/boot prologue frame
         // the tier2 suite constants absorb). Tier2-only, byte-identical OFF.
         if self.tier2_reclock && switching {
             self.ppu.note_switch_stop();
         }
-        // #11bd lcd_offset dual-trace: the STOP decision point on the machine
-        // clock (SameBoy `SBSTOP fp=` analogue). `SLOPGB_S5DBG`-gated.
         if crate::ppu::s5dbg_on() {
             let (l, d) = self.ppu.scan_pos();
             eprintln!(
@@ -338,19 +336,16 @@ impl Interconnect {
         while self.cycles < target && self.intf & self.ie & IF_MASK == 0 {
             self.tick_machine();
         }
-        // PORT 1 (#11bc, was the #11bb env scaffold) — post-switch CPU↔PPU
-        // realignment, now the tier2 DEFAULT at K = 2 half-dots per switching
-        // STOP. SameBoy's STOP withholds 5 T from the PPU feed
-        // (`speed_switch_freeze`, sm83_cpu.c:435/timing.c:469) while slopgb's
-        // gambatte-modeled pause runs the PPU throughout; the measured net
-        // alignment on the gambatte cgb04c pause calibration is +2 half-dots
-        // per switch (the speedchange4 dual-trace: with K=2/switch the
-        // post-switch polled reads land exactly at SameBoy's read cfl − 4,
-        // and the half-dot bare exit E(scx) = 510 + 2*scx closes all four
-        // scx1/scx2 `_1`/`_2` pairs — the #11bb +21/−8 A/B resolves by the
-        // CO-LAND with that exit, `stat_irq.rs` PORT 1). `SLOPGB_STOPADV`
-        // still overrides for measurement. Tier2-only; production
-        // byte-identical.
+        // Post-switch CPU↔PPU realignment, the tier2 DEFAULT at K = 2
+        // half-dots per switching STOP. SameBoy's STOP withholds 5 T from
+        // the PPU feed (`speed_switch_freeze`, sm83_cpu.c:435/timing.c:469)
+        // while slopgb's gambatte-modeled pause runs the PPU throughout; the
+        // measured net alignment on the gambatte cgb04c pause calibration is
+        // +2 half-dots per switch (with K=2/switch the post-switch polled
+        // reads land exactly at SameBoy's read cfl − 4, and the half-dot bare
+        // exit E(scx) = 510 + 2*scx closes all four scx1/scx2 `_1`/`_2` pairs,
+        // co-landing with that exit). `SLOPGB_STOPADV` still overrides for
+        // measurement. Tier2-only; production byte-identical.
         if self.tier2_reclock {
             // K in 8 MHz HALF-dots (the grain): odd K leaves the PPU on a
             // half-dot skew relative to the CPU grid (`dhalf` persists), the
@@ -365,18 +360,17 @@ impl Interconnect {
             // SINGLE-SPEED frame (after leaving DS) carries the un-absorbed
             // gambatte-pause error the speedchange m3stat reads expose.
             //
-            // DEFAULT 0 (#11bc): leave-only w=4 was two-bin-measured
-            // +14/−11 SameBoy-pass — the +14 (speedchange `_2` legs + 3
-            // lcd_offset counts, with the half-dot exit co-land) A/B against
-            // 11 lcd-offset-frame rows whose tier2 law constants sit on the
-            // w=0 frame (8 absorbable by re-derivation; the offset1
-            // m0stat/m2stat COUNTS + `hdma_late_m0halt_lcdoffset3` have no
-            // absorbing law). The default flips to `if double_speed {0}
-            // else {4}` (leave-only) once the lcd-offset constants are
-            // re-derived on the +2-dot frame — the Part-D table row this
-            // measurement adds.
-            // #11bd: STOPADV is LEAVE-ONLY, default w=2 (enter stays 0 — the
-            // fresh enable-phase dual-trace confirms enter contributes 0: the
+            // Leave-only w=4 was measured +14/−11 SameBoy-pass — the +14
+            // (speedchange `_2` legs + 3 lcd_offset counts, with the half-dot
+            // exit co-land) A/B against 11 lcd-offset-frame rows whose tier2
+            // law constants sit on the w=0 frame (8 absorbable by
+            // re-derivation; the offset1 m0stat/m2stat COUNTS +
+            // `hdma_late_m0halt_lcdoffset3` have no absorbing law). The
+            // default flips to `if double_speed {0} else {4}` (leave-only)
+            // once the lcd-offset constants are re-derived on the +2-dot
+            // frame.
+            // STOPADV is LEAVE-ONLY, default w=2 (enter stays 0 — the
+            // enable-phase dual-trace confirms enter contributes 0: the
             // `_ds`-measured offset1 rows sit at the same +2 missing as the
             // SS rows, refuting the enter −2 split; and the DS suite is
             // calibrated on the w=0 enter frame). The MACHINE epoch truth is
@@ -384,15 +378,15 @@ impl Interconnect {
             // 2-trip offset2 count rows fix at w=2 and stay broken at w=4
             // where the two leaves fold to +8 ≡ 0 mod 8). The m3stat READ
             // laws additionally want +2 hd per leave on top (the w=4
-            // speedchange empirics, 62→51 with the same m3stat set) — that
+            // speedchange empirics, with the same m3stat set) — that
             // law-side surplus is the carried `lcd_phase_hd` (= 4 − k per
-            // leave), consumed by the PORT-1 comparison so the read frame
+            // leave), consumed by the read comparison so the read frame
             // matches the w=4-derived constants while polls/counts/LY see
             // the true +2 epoch.
             // The leave shift is ALIGNMENT-DEPENDENT (the `sb_dsa8` shadow of
             // SameBoy's `double_speed_alignment`): the dsa7=4 leaves need +6
-            // (offset3, build-measured — only k=6 fixes its count rows) while
-            // dsa7∈{0,6} leaves need +2 (offset1/offset2-leave2/speedchange).
+            // (offset3 — only k=6 fixes its count rows) while dsa7∈{0,6}
+            // leaves need +2 (offset1/offset2-leave2/speedchange).
             let k = if entering_ds {
                 0
             } else {
@@ -401,8 +395,6 @@ impl Interconnect {
                     .and_then(|v| v.parse::<u32>().ok())
                     .unwrap_or(if self.ppu.sb_dsa() & 7 == 4 { 6 } else { 2 })
             };
-            // #11bi leave-instant tracer (alignment + chosen k), the SBSTOP
-            // dual-trace partner. `SLOPGB_S5DBG`-gated, byte-identical unset.
             if crate::ppu::s5dbg_on() && !entering_ds {
                 let (l, d) = self.ppu.scan_pos();
                 eprintln!(
@@ -412,9 +404,9 @@ impl Interconnect {
                     self.ppu.sb_dsa() & 7
                 );
             }
-            // #11bi — record the leave for the post-switch exit table (the
-            // leave k is the table's class variable; LCD checked at the
-            // pause-end instant, so the lcdoff2 off-leave stays excluded).
+            // Record the leave for the post-switch exit table (the leave k
+            // is the table's class variable; LCD checked at the pause-end
+            // instant, so the lcdoff2 off-leave stays excluded).
             if !entering_ds {
                 self.ppu.note_switch_leave(k as u8);
             }
@@ -435,7 +427,7 @@ impl Interconnect {
             // Every switching STOP's pause (enter AND leave) leaves the
             // alignment shadow −4 mod 8 of SameBoy's (pause-length + freeze
             // withholding delta; calibrated on the offset1/offset2/offset3
-            // SBSTOP dsa values — all three close exactly with the uniform
+            // dsa values — all three close exactly with the uniform
             // correction). Applied AFTER the k-advance so the NEXT leave
             // reads the corrected alignment.
             self.ppu.add_lcd_shift((k / 2) as u16);
@@ -447,7 +439,7 @@ impl Interconnect {
     }
 
     pub(super) fn dispatch_retime_impl(&mut self) {
-        // Port Stage B (Tier 2): re-park the clock 2 T early (SameBoy
+        // Re-park the clock 2 T early (SameBoy
         // sm83_cpu.c:1690) and advance the deferred machine by the 2 T it
         // commits, so the vector fetch + first handler reads sample 2 dots
         // early. Only reached on the reclock path (`dispatch_reclock`), after
@@ -455,13 +447,13 @@ impl Interconnect {
         let before = self.clock.now();
         let _ = self.clock.dispatch_vector_retime();
         self.advance_machine_t(before, self.clock.now());
-        // #11ar (C2 per-ISR read-position PEEK): if this dispatch is a DS OAM/
-        // HBlank STAT IRQ, arm the SCOPED carried-read override for the handler's
-        // first FF41 read (cleared in `read_deferred`). The override
-        // (`vis_mode_read`) shifts ONLY that read's mode VERDICT by the IRQ
-        // source's read-position offset (mode-2 OAM +4 dots / mode-0 HBlank +2,
-        // MEASURED — `cpu-timing-map.md §7.1`) — a transient PEEK, NOT a machine
-        // advance — so it decouples the read from the counter-pinned dispatch dot
+        // If this dispatch is a DS OAM/HBlank STAT IRQ, arm the SCOPED
+        // carried-read override for the handler's first FF41 read (cleared in
+        // `read_deferred`). The override (`vis_mode_read`) shifts ONLY that
+        // read's mode VERDICT by the IRQ source's read-position offset
+        // (mode-2 OAM +4 dots / mode-0 HBlank +2) — a transient PEEK, NOT a
+        // machine advance — so it decouples the read from the counter-pinned
+        // dispatch dot
         // + IF delivery without disturbing the non-m3stat STAT-ISR reads
         // (m0stat/m2stat/enable) a real clock carry would mis-position. Tier2-
         // unconditional (the reclock frame the flip turns on). The dispatched bit
@@ -476,10 +468,6 @@ impl Interconnect {
         {
             self.ppu.set_read_carried(true);
         }
-        // S6/S7 ISR read-position diagnostic: log the vector-latch PPU position
-        // + clock, the analogue of SameBoy's SBVEC (`sm83_cpu.c:1694`). The
-        // delta vector→read isolates the handler's PPU advance from the dispatch
-        // entry. `SLOPGB_S5DBG`, byte-identical when unset.
         if crate::ppu::s5dbg_on() {
             let (line, dot) = self.ppu.scan_pos();
             eprintln!(
@@ -491,7 +479,7 @@ impl Interconnect {
     }
 
     pub(super) fn halt_entry_impl(&mut self) -> u8 {
-        // #11bf (`SLOPGB_P2HE`) — SameBoy's `halt()` checks IE & IF *after*
+        // SameBoy's `halt()` checks IE & IF *after*
         // the prefetch `cycle_read` advanced the machine through the HALT
         // fetch M-cycle (t0+4), where the deferred leading-edge `pending()`
         // view sits at t0 (sm83_cpu.c:1036-1058). A mode-0 rise landing
@@ -499,9 +487,9 @@ impl Interconnect {
         // halt; the following byte runs twice) while slopgb halted and woke
         // on the first idle check — one M-cycle short (the `_3b`
         // skip-path). Flush the debt, then sample.
-        // DMG + single-speed CGB (#11bf: the CGB-SS extension with the rise
-        // deadline lands the whole set together — full-CGB two-bin +3/−0;
-        // the entry flush ALONE was the measured A/B swap. Double speed
+        // DMG + single-speed CGB (the CGB-SS extension with the rise
+        // deadline lands the whole set together; the entry flush ALONE was
+        // the measured A/B swap. Double speed
         // keeps the old masks: its 2-dot M grid re-frames the rise, the DS
         // legs regressed under the deadline model).
         if self.tier2_reclock && (!self.model.is_cgb() || !self.double_speed) {
@@ -519,7 +507,7 @@ impl Interconnect {
                 self.stat_vis_from_t
             );
         }
-        // #11bf: the entry decision observes the machine genuinely — the
+        // The entry decision observes the machine genuinely — the
         // m0-origin STAT rise's frame offset (the same T-deadline the wake
         // sampler consults) applies here too, else a rise landing in the
         // fetch M-cycle falsely arms the halt-bug.
@@ -535,7 +523,7 @@ impl Interconnect {
     }
 
     pub(super) fn halt_entry_rewind_impl(&mut self) -> bool {
-        // #11bf — the IME=1 halt-entry rewind (SameBoy `halt()`), on the
+        // The IME=1 halt-entry rewind (SameBoy `halt()`), on the
         // same tier2 DMG/CGB-single-speed scope as the entry check; the
         // t0+4 flushed + deadline-masked view decides.
         if !self.tier2_reclock || (self.model.is_cgb() && self.double_speed) {
@@ -545,7 +533,7 @@ impl Interconnect {
     }
 
     pub(super) fn dispatch_pending_impl(&mut self) -> u8 {
-        // #11bf — the running CPU's end-of-fetch dispatch check: the machine
+        // The running CPU's end-of-fetch dispatch check: the machine
         // is already flushed to the boundary (the previous step's
         // `flush_pending`), so `pending()` sees every rise before it — the
         // SameBoy view. Only the m0-rise visibility deadline (the same frame

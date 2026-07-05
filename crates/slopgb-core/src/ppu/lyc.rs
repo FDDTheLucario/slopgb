@@ -18,7 +18,7 @@ impl Ppu {
             // across dots 0-3, so no change). Single-speed only (the DS
             // read offset differs); gated `leading_edge_reads`, so flag-off
             // production stays Some(0) the whole glitch line (byte-identical).
-            // C1.2: the −4 glitch readable-compare back-date is
+            // The −4 glitch readable-compare back-date is
             // LEADING-EDGE-ONLY. The Tier-2 deferred read samples at the
             // trailing frame, so the glitch line holds Some(0) the whole line
             // (no line-1-dots-0-3 forced-invalid view) — the −4 made
@@ -128,7 +128,7 @@ impl Ppu {
         // lycEnable/lyc153_late_ff45_enable_2 cgb04c_outE0 pins the
         // cell — the matching write at (152,452) misses the (153,4)
         // event while its DMG sibling fires).
-        // #11bd: classify the write on the un-shifted calibrated frame
+        // Classify the write on the un-shifted calibrated frame
         // (identity for never-switched ROMs; see `Ppu::law_pos`).
         let (ll, ld) = self.law_pos();
         let upcoming = if ll == 152 { 153 } else { ll + 1 };
@@ -191,15 +191,14 @@ impl Ppu {
             self.stat_en & STAT_SRC_VBLANK != 0 && !(ll == 153 && ld >= 452)
         };
         let lyc_level_high = self.stat_line && self.stat_line_level(STAT_SRC_LYC & self.stat_en);
-        // Port Stage C / S5 (mech 3 — the ly153 LYC-WRITE wrap, the FF45 sibling
-        // of the FF41 `lyc_wrap_153` write-trigger). The lcd-offset shifts a late
+        // The ly153 LYC-WRITE wrap, the FF45 sibling
+        // of the FF41 `lyc_wrap_153` write-trigger. The lcd-offset shifts a late
         // FF45 write (new LYC = 153) out of the line-153 dots-0-3 carryover (where
         // `target` = Some(153) and the gambatte path fires) into the dots-6-7
         // window, where the `target` table wraps to Some(0) (the LY=0 increment)
         // so `target == Some(value)` fails. But SameBoy's `ly_for_comparison` is
         // still 153 there (`ly_for_comparison_line_153`: 153 at dots 6-7) — the
-        // write makes a fresh LYC=153 match and `GB_STAT_update` fires (measured
-        // SBWRITE `ly153 cfl0 lyfc=153`, SBLEVEL `0->1 lyc_line=1`). Under Tier-2,
+        // write makes a fresh LYC=153 match and `GB_STAT_update` fires. Under Tier-2,
         // a late FF45 write whose value matches the held `ly_for_comparison`
         // (the real-state discriminator, not the offset) fires; the gambatte
         // `target` table (pinning the base `lyc153_late_ff45_enable_{1,2}` cells)
@@ -209,13 +208,12 @@ impl Ppu {
             && self.ly_for_comparison_at(ll, ld) == i16::from(value)
             && !blocked
             && !lyc_level_high;
-        // Port Stage C / S5 (mech 3 — the FF45 "weirdpoint", `ff45_enable_
-        // weirdpoint_lcdoffset1_2`). The lcd-offset shifts a late FF45 write into
+        // The FF45 "weirdpoint" (`ff45_enable_weirdpoint_lcdoffset1_2`).
+        // The lcd-offset shifts a late FF45 write into
         // the `ly_for_comparison == -1` line-start gap (dot 3 on lines 1-143). At
         // `lyfc == -1` SameBoy's `GB_STAT_update` leaves `lyc_interrupt_line`
         // unchanged (`display.c:534` only clears the visible bit, never re-latches
-        // a match) — the write raises NO fresh LYC edge (measured SBWRITE `ly6
-        // cfl0 lyfc=-1`, no STAT_IRQ at the write). slopgb's gambatte `target`
+        // a match) — the write raises NO fresh LYC edge. slopgb's gambatte `target`
         // table treats line-start dots 0-3 as the upcoming-line match (Some(line))
         // and would fire (`got=2`, want 0). Under Tier-2 (the SameBoy/reclock
         // grid), suppress the FF45 fire in the `-1` gap on visible lines 1-143.
@@ -226,20 +224,20 @@ impl Ppu {
         let tier2_minus1_gap = self.leading_edge_reads
             && (1..=143).contains(&ll)
             && self.ly_for_comparison_at(ll, ld) == -1;
-        // Part C stage 4 — the FF45-write fire is suppressed under the tier2
+        // The FF45-write fire is suppressed under the tier2
         // engine when a NON-LYC source holds the line: SameBoy's
         // `GB_STAT_update` raises IF only on the line's 0→1 edge, and a line
         // held by an enabled MODE source (the VBlank source carried across
         // the ly153→ly0 wrap: `lycwirq_trigger_ly00_stat50_1`, LYC:=0 commits
         // ly0 dot1 with STAT=$50, SameBoy line continuously high mode-1 → no
-        // edge, want E0; slopgb fired E2 — dual-traced) never dips for a LYC
+        // edge, want E0; slopgb fired E2) never dips for a LYC
         // rewrite. A line held only by the LYC source does NOT suppress:
         // SameBoy's dot-4 re-latch against the OLD LYC dips it before the
         // (+4-later) write lands, so its write re-rise IS an edge — slopgb's
         // early write frame never sees the dip, and the event-like fire is
         // its stand-in (`ff45_enable_weirdpoint_3` / `lyc153_late_ff45_
         // enable_3`, both SameBoy-pass, dropped by the blanket engine-line
-        // guard — measured). LE/Tier-2 only → byte-identical OFF.
+        // guard). LE/Tier-2 only → byte-identical OFF.
         let mode_src_en = match self.mode_for_interrupt {
             0 => self.stat_en & STAT_SRC_HBLANK,
             1 => self.stat_en & STAT_SRC_VBLANK,
@@ -258,7 +256,7 @@ impl Ppu {
                 self.line, self.dot
             );
         }
-        // #11bd: a SHIFTED write whose law position is the line-start tail
+        // A SHIFTED write whose law position is the line-start tail
         // (ld < 4) commits after the engine's dot-4 re-latch already ran with
         // the OLD value, dropping a held match SameBoy never drops (its write
         // lands before that step) — the next engine tick would then re-latch

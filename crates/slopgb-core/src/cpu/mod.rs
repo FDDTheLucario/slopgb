@@ -93,8 +93,8 @@ pub trait Bus {
     fn pending_halt_wake(&self) -> u8 {
         self.pending()
     }
-    /// PORT 2 (#11bc, the sub-M-cycle WAKE clock) — the halt loop's wake
-    /// sample, allowed to advance the machine to its true sample T first.
+    /// The sub-M-cycle WAKE clock — the halt loop's wake sample, allowed to
+    /// advance the machine to its true sample T first.
     /// SameBoy's DMG halt loop advances 2 T, samples `interrupt_queue`,
     /// then advances the remaining 2 (`GB_cpu_run`, `sm83_cpu.c:1621-1628`),
     /// so the halt-exit check runs on a HALF-M-cycle grid and a wake resumes
@@ -107,7 +107,7 @@ pub trait Bus {
     fn pending_halt_wake_mid(&mut self) -> u8 {
         self.pending_halt_wake()
     }
-    /// #11bf — `IF & IE & 0x1F` as seen by HALT's own entry decision (the
+    /// `IF & IE & 0x1F` as seen by HALT's own entry decision (the
     /// halt-bug / no-halt arm). SameBoy's `halt()` performs the prefetch
     /// `cycle_read` (advancing the machine through the HALT opcode-fetch
     /// M-cycle) and then checks IE & IF, so the entry decision observes the
@@ -118,7 +118,7 @@ pub trait Bus {
     fn pending_halt_entry(&mut self) -> u8 {
         self.pending()
     }
-    /// #11bf — `IF & IE & 0x1F` as seen by the running CPU's end-of-fetch
+    /// `IF & IE & 0x1F` as seen by the running CPU's end-of-fetch
     /// dispatch check. SameBoy's `cycle_read` advances the machine through
     /// the opcode-fetch M-cycle before `GB_cpu_run`'s interrupt check reads
     /// IF, so a rise landing INSIDE the fetch M-cycle still dispatches at
@@ -129,7 +129,7 @@ pub trait Bus {
     fn pending_dispatch(&mut self) -> u8 {
         self.pending()
     }
-    /// #11bf — whether HALT executed with IME set (or EI-pending) while
+    /// Whether HALT executed with IME set (or EI-pending) while
     /// IE & IF is already nonzero at the entry view should NOT halt and
     /// instead rewind PC into the HALT (SameBoy `halt()`
     /// sm83_cpu.c:1043-1047), so the dispatched ISR returns into the halt.
@@ -167,7 +167,7 @@ pub trait Bus {
     /// implementations that do not model the DMA engine.
     fn set_halted(&mut self, _halted: bool) {}
 
-    /// Whether the port Stage-B Tier-2 dispatch reclock is active. When `true`,
+    /// Whether the Tier-2 dispatch reclock is active. When `true`,
     /// the interrupt dispatch latches the IF-ack / vector AFTER the low push
     /// (SameBoy `sm83_cpu.c:1690`, the M5+2 latch) and calls
     /// [`dispatch_retime`](Bus::dispatch_retime) there; when `false` (the
@@ -176,7 +176,7 @@ pub trait Bus {
     fn dispatch_reclock(&self) -> bool {
         false
     }
-    /// Port Stage B (Tier 2): the interrupt-dispatch vector retime
+    /// The interrupt-dispatch vector retime
     /// (`sm83_cpu.c:1690` `pending -= 2; flush; pending = 2`) — re-parks the
     /// clock so the vector fetch + first handler reads sample 2 dots early, and
     /// advances the deferred machine by the 2 T it commits. Called only when
@@ -187,9 +187,9 @@ pub trait Bus {
     /// (SameBoy `flush_pending_cycles`, `sm83_cpu.c:336`). Called exactly
     /// once per [`super::step`] invocation, after the instruction (or idle /
     /// dispatch step) completes, so the next instruction begins at a clean
-    /// cc+0. Takes no time. Inert in port Stage S1 — the clock it drains is
+    /// cc+0. Takes no time. Currently inert — the clock it drains is
     /// write-only scaffold that nothing samples yet; it becomes load-bearing
-    /// at S2 (leading-edge reads). Defaults to a no-op for `Bus`
+    /// once leading-edge reads are wired. Defaults to a no-op for `Bus`
     /// implementations without a cycle clock.
     fn flush_pending(&mut self) {}
 }

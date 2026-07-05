@@ -180,10 +180,10 @@ fn madness_shade(rgb: [u8; 3]) -> Result<u8, String> {
 
 /// One undefined-opcode protocol case: run to the 0xED exit (howto "Exit
 /// Condition"), then check the Fibonacci signature.
-/// #11bj session-local measurement aid: run an explicit list of wilbertpol
-/// ROMs on the **flag-on** reclock and report the fib pass/fail — the Phase-2
-/// classifier for the DMG line-153/timer engine rows. `#[ignore]`'d. Rowlist
-/// lines: `<suite>/<rel>.gb [Model]`; `SLOPGB_PROBE_OFF=1` A/Bs production.
+/// Run an explicit list of wilbertpol ROMs on the **flag-on** reclock and
+/// report the fib pass/fail — the classifier for the DMG line-153/timer engine
+/// rows. `#[ignore]`'d. Rowlist lines: `<suite>/<rel>.gb [Model]`;
+/// `SLOPGB_PROBE_OFF=1` A/Bs production.
 #[test]
 #[ignore = "session-local Phase-2 measurement aid; needs SLOPGB_ROWLIST"]
 fn wilbertpol_flagon_probe() {
@@ -353,7 +353,7 @@ fn run_rom(rom_path: &Path, rel: &str) -> Vec<CaseResult> {
     }
 }
 
-/// Phase B2 inventory hook: collection-relative forward-slash paths of
+/// Inventory hook: collection-relative forward-slash paths of
 /// every `.gb`/`.gbc` file under the suite directory, split into (claimed,
 /// exempted). Claimed ROMs produce at least one rom×model case in
 /// [`wilbertpol_matrix`]; exempted ones are documented never-run (the
@@ -450,7 +450,7 @@ fn wilbertpol_matrix() {
     );
 }
 
-/// Self-check of the inventory hook ahead of the global Phase B2 guard:
+/// Self-check of the inventory hook ahead of the global coverage guard:
 /// claimed ∩ exempted = ∅, claimed ∪ exempted = the on-disk ROM set, and
 /// the exemptions are exactly the documented ones.
 #[test]

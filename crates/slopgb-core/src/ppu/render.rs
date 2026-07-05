@@ -38,7 +38,7 @@ mod window;
 #[derive(Clone, Copy, Default)]
 pub(super) struct Sprite {
     y: u8,
-    /// `pub(super)` for the #11bh Arm-3b sprite-at-window-X check.
+    /// `pub(super)` for the sprite-at-window-X check.
     pub(super) x: u8,
     tile: u8,
     flags: u8,
@@ -132,11 +132,11 @@ pub(super) struct Render {
     /// schedule is fixed (SameBoy render_pixel_if_possible: `(position &
     /// 7) == (SCX & 7) -> position = -8`, with the -9 -> -16 wrap when
     /// the match was missed; gambatte scx_during_m3 sweeps).
-    /// (`pub(super)` with `hunt_done` for the #11bh glitch re-open, `regs.rs`.)
+    /// (`pub(super)` with `hunt_done` for the glitch re-open, `regs.rs`.)
     pub(super) hunt_idx: u8,
     /// The comparator matched: the fine-scroll discard is locked in.
     pub(super) hunt_done: bool,
-    /// #11bh — the machine dot of the fine-scroll comparator match (0 =
+    /// The machine dot of the fine-scroll comparator match (0 =
     /// none yet). The glitch-line same-dot SCX-write hunt re-open keys on
     /// it (`regs.rs` FF43): a write landing on the match dot committed
     /// AFTER that dot's render tick, where hardware's comparator still
@@ -175,7 +175,7 @@ pub(super) struct Render {
     t_lo: u8,
     t_hi: u8,
 
-    // Sprites (selected during OAM scan). `pub(super)` for the #11bh Arm-3b
+    // Sprites (selected during OAM scan). `pub(super)` for the
     // sprite-at-window-X check (`stat_irq.rs`), like `n_sprites` below.
     pub(super) sprites: [Sprite; 10],
     /// `pub(super)` so the `vis_mode_read` window-length law (`stat_irq.rs`)
@@ -195,16 +195,16 @@ pub(super) struct Render {
     /// (gambatte window/late_* m3stat rows pin the later flip; the
     /// gbmicrotest win*_b line-1 grid prefers a 2-dot lead there and
     /// stays in the baseline — a documented one-dot conflict).
-    /// `pub(super)` for the PORT 1 half-dot bare-exit law's clean-bare
+    /// `pub(super)` for the half-dot bare-exit law's clean-bare
     /// guard (`stat_irq.rs::vis_mode_read`).
     pub(super) win_stalled: bool,
     /// The window was aborted mid-line by an LCDC.5 clear: on DMG the
     /// resumed BG fetch trails at the line tail, dropping the flip lead
     /// to 0 (gambatte window/late_disable_* rows carry dmg08_out3 vs
     /// cgb04c_out0 split expectations for the same read). `pub(super)` for
-    /// the C2 #11y window-length read law (`stat_irq.rs::vis_mode_read`).
+    /// the window-length read law (`stat_irq.rs::vis_mode_read`).
     pub(super) win_aborted: bool,
-    /// C2 #11at — a window enabled at line start was disabled by a mid-line
+    /// A window enabled at line start was disabled by a mid-line
     /// LCDC.5 clear BEFORE it began drawing (`!win_mode` at the clear, set in
     /// `regs.rs::commit_eff`). SameBoy renders such a line BARE but with the
     /// SCX fine-scroll penalty DROPPED (mattcurrie §WIN_EN) → mode-3 exit
@@ -214,12 +214,12 @@ pub(super) struct Render {
     /// flagged (its exit extends by the tiles drawn, a per-config length the
     /// atomic render reclock owns). Reset per line. `pub(super)` for the law.
     pub(super) win_predraw_abort: bool,
-    /// C2 #11at — the dot of a pre-draw window abort (see [`Self::
+    /// The dot of a pre-draw window abort (see [`Self::
     /// win_predraw_abort`]). The bare exit still tracks the abort dot within
     /// the pre-draw class (an abort 1 M-cycle later catches the window's first
     /// tile → extends past the bare exit), so the read law thresholds on it.
     pub(super) win_predraw_abort_dot: u16,
-    /// C2 #11au — the dot a mid-mode-3 LCDC.5 RE-enable landed (0 if none this
+    /// The dot a mid-mode-3 LCDC.5 RE-enable landed (0 if none this
     /// line), for the shadow window-reenable mode-3 length law (`stat_irq.rs::
     /// vis_mode_read`). A `late_reenable` window redraws from the re-enable
     /// point; its mode-3 extends past the read iff the re-enable beat the WX
@@ -227,23 +227,23 @@ pub(super) struct Render {
     /// slopgb's whole-dot render collapses the re-enable-dot dependence. Reset
     /// per line. `pub(super)` for the read law.
     pub(super) win_reenable_dot: u16,
-    /// #11bf item 3a — the dot a mid-line LCDC.5 FIRST enable landed (0 if
+    /// The dot a mid-line LCDC.5 FIRST enable landed (0 if
     /// none this line; distinct from [`Self::win_reenable_dot`]: latched only
     /// when the window was neither active nor aborted, i.e. the enable IS the
     /// window trigger). A late-ENABLE-triggered first window line takes the
     /// STEADY mode-3 exit (`259+SCX&7+ds`) where a late-WY-triggered one
-    /// extends later (#11y) — the trigger SOURCE is the arm-1 first-line
+    /// extends later — the trigger SOURCE is the arm-1 first-line
     /// discriminator (`late_enable_ly0_ds` want-pair straddles the steady
     /// exit). Reset per line; tier2+CGB only (read law input).
     pub(super) win_enable_dot: u16,
-    /// #11bf item 3c — the dot a mid-line FF4B (WX) rewrite committed while
+    /// The dot a mid-line FF4B (WX) rewrite committed while
     /// the render was active (0 if none this line). A rewrite landing
     /// AT/BEFORE the WX match dot un-catches the window on SameBoy (the
     /// `late_wx_scx5` pair: write at the match dot 97 → bare, at 101 →
     /// extends) while slopgb's whole-dot render catches first. Reset per
     /// line; tier2+CGB law input only.
     pub(super) wx_write_dot: u16,
-    /// #11bj — dot of a mid-mode-3 FF43 (SCX) rewrite, 0 = none this line.
+    /// Dot of a mid-mode-3 FF43 (SCX) rewrite, 0 = none this line.
     /// Flags the `late_scx_late_disable` anomaly: a mid-line SCX change shifts
     /// both the deferred read frame (−5 not −4) and moves the bare exit's
     /// fine-scroll off the read-time SCX, which the whole-dot pre-draw-abort
@@ -261,19 +261,19 @@ pub(super) struct Render {
     /// comparator for sprites with OAM X 0-7 — an OBJ fetch freezes the
     /// walk (the SCX hunt pauses during an X<8 sprite fetch).
     prefill_pos: u8,
-    /// **C2 #11af shadow WX-activation dot (tier2 + CGB only; 0 = no match
+    /// **Shadow WX-activation dot (tier2 + CGB only; 0 = no match
     /// yet).** The dot the raw WX comparator first matched this line,
     /// recorded *before* the `wy_ok`/`win_en` activation gate — so it is
     /// available even on a bare line the window never enters. The shadow
     /// WY-trigger ([`Ppu::wy_trig_sb`]) only extends mode 3 on a line where
     /// it was set at/before this dot (the SameBoy activation deadline).
     pub(super) wx_match_dot: u16,
-    /// #11bj — `scx & 7` at the WX-comparator match dot (the SCX effective at
+    /// `scx & 7` at the WX-comparator match dot (the SCX effective at
     /// the window's fetch/activation, which sets its mode-3 fine-scroll
     /// length). Steady lines: equal to the read-time SCX. A mid-line SCX
     /// rewrite (`late_scx_late_disable`) diverges — the DMG pre-draw-abort
-    /// exit must use THIS value, not the read-time SCX (dual-traced
-    /// 2026-07-03: `late_scx_late_disable` fetch SCX 0 vs read SCX 4).
+    /// exit must use THIS value, not the read-time SCX
+    /// (`late_scx_late_disable` fetch SCX 0 vs read SCX 4).
     pub(super) wx_match_scx: u8,
 }
 
@@ -443,9 +443,6 @@ impl Ppu {
                     self.render.hunt_done = true;
                     self.render.discard = pos;
                     self.render.hunt_match_dot = self.dot;
-                    // TEMP #11bb hunt tracer (`SLOPGB_S5DBG`; byte-identical
-                    // unset): pin the fine-scroll match dot + discard against
-                    // SameBoy's SCX-write straddle (`late_scx4`).
                     if crate::ppu::s5dbg_on() && (130..144).contains(&self.line) {
                         eprintln!(
                             "SLOPGB hunt ly={} dot={} scx={} discard={pos}",

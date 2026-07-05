@@ -1,13 +1,12 @@
-//! Session-local PIXEL two-bin (goal.md #11bo — the mode-3 render reclock).
-//! Runs the §3b pixel-reference flip-blocker legs (the 100 SameBoy-PASS
-//! `pixel-classify-2026-07-03.md` rows: scy/scx_during_m3 · bgtiledata ·
-//! bgtilemap · dmgpalette · mealybug m3_* · bgen · window) on the **flag-on**
-//! deferred render reclock and compares the rendered 160×144 framebuffer
-//! against the sibling reference PNG with the suite's OWN comparator
-//! (`harness::expect_frame_png` — the exact check `run_case` uses, so a probe
-//! PASS is a real suite PASS). Production (OFF) passes all 100; the flip
-//! (ON) breaks them; a mode-3 render slice is landed when its legs pass ON
-//! with zero OFF-passing legs dropped.
+//! Session-local PIXEL two-bin for the mode-3 render reclock.
+//! Runs the pixel-reference flip-blocker legs (the 100 SameBoy-PASS rows:
+//! scy/scx_during_m3 · bgtiledata · bgtilemap · dmgpalette · mealybug m3_* ·
+//! bgen · window) on the **flag-on** deferred render reclock and compares the
+//! rendered 160×144 framebuffer against the sibling reference PNG with the
+//! suite's OWN comparator (`harness::expect_frame_png` — the exact check
+//! `run_case` uses, so a probe PASS is a real suite PASS). Production (OFF)
+//! passes all 100; the flip (ON) breaks them; a mode-3 render slice is landed
+//! when its legs pass ON with zero OFF-passing legs dropped.
 //!
 //! `#[ignore]`'d — never runs in the gate.
 //!

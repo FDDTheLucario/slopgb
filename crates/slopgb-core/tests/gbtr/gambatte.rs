@@ -564,12 +564,10 @@ fn gambatte_matrix() {
     harness::assert_against_baseline("gambatte", &results, &harness::parse_baseline(BASELINE_TXT));
 }
 
-/// Port Stage S0 — the executable red spec for the kernel pair, the
-/// convergence target of S2 (`docs/sameboy-port/PORT-PLAN.md`,
-/// `ppu-timing-map.md` §6). Both ROMs reduce to the *same* `ldh a,(FF41)`;
-/// SameBoy's cycle-exact frame separates them with no CPU-call-stack
-/// discriminator (leading-edge cc+0 sampling + a decoupled `mode_for_interrupt`
-/// + the mode-2(−1)/mode-0(+1) anchor swing):
+/// The executable red spec for the kernel pair. Both ROMs reduce to the
+/// *same* `ldh a,(FF41)`; SameBoy's cycle-exact frame separates them with no
+/// CPU-call-stack discriminator (leading-edge cc+0 sampling + a decoupled
+/// `mode_for_interrupt` + the mode-2(−1)/mode-0(+1) anchor swing):
 ///   - `m2int_m3stat_1` → out3 (mode 3) — anchored off a *mode-2* STAT IRQ;
 ///     slopgb's whole-dot model currently reads mode 0 here, so this is the
 ///     one baselined floor row (`tests/gbtr/baselines/gambatte.txt`).
@@ -580,14 +578,14 @@ fn gambatte_matrix() {
 /// exactly the `O<E ∧ O≥E` "contradiction" that only the decoupled-edge
 /// rewrite resolves.
 ///
-/// **Un-ignored at port Stage A6 (2026-06-21):** the spec now runs on the
-/// **flag-on** SameBoy cycle-exact path ([`GameBoy::set_leading_edge_reads`] —
-/// leading-edge cc+0 reads + the `StatUpdate` engine + the `vis_early`
-/// back-date + the A6 halt-late masks). With those four pieces the kernel pair
-/// SEPARATES (`m2int`→3 ∧ `m0int`→0) on both models while the canonical mooneye
-/// `intr_2_mode0_timing` also holds flag-on (`ppu-subdot-ladder.md` "A6"). This
-/// is GREEN as a flag-on acceptance test; production (flag-off) is unchanged —
-/// the global default flip + ~7000-row rebaseline is the remaining Phase-B work.
+/// The spec runs on the **flag-on** SameBoy cycle-exact path
+/// ([`GameBoy::set_leading_edge_reads`] — leading-edge cc+0 reads + the
+/// `StatUpdate` engine + the `vis_early` back-date + the halt-late masks). With
+/// those four pieces the kernel pair SEPARATES (`m2int`→3 ∧ `m0int`→0) on both
+/// models while the canonical mooneye `intr_2_mode0_timing` also holds flag-on.
+/// This is GREEN as a flag-on acceptance test; production (flag-off) is
+/// unchanged — the global default flip + ~7000-row rebaseline is the remaining
+/// work.
 #[test]
 fn kernel_pair_matches_sameboy_target() {
     let Some(root) = common::gbtr_root() else {
@@ -624,16 +622,15 @@ fn kernel_pair_matches_sameboy_target() {
     }
 }
 
-/// Port Stage A9 — the SPRITE-line analog of the kernel pair, on the flag-on
-/// path. A sprite-laden line extends mode 3, shifting the visible mode→0
-/// boundary; the `vis_early` back-date for sprite/window lines (`lead + 4`, vs
-/// bare's `lead + 3`) lands it at SameBoy's frame, so the two equal-`ldh`
-/// reads straddle it: `10spritesPrLine_m3stat_1` reads mode 3 (out3) and
-/// `_m3stat_2` reads mode 0 (out0) — the same out3/out0 split the kernel pair
-/// shows on a bare line. Whole-dot production reads BOTH as mode 3 (the
-/// baselined floor); A9 is measured to lift 40 such sprite `m3stat_2` rows
-/// flag-on with zero regression (`ppu-subdot-ladder.md` "A9"). Flag-OFF
-/// (production) is unchanged.
+/// The SPRITE-line analog of the kernel pair, on the flag-on path. A
+/// sprite-laden line extends mode 3, shifting the visible mode→0 boundary; the
+/// `vis_early` back-date for sprite/window lines (`lead + 4`, vs bare's
+/// `lead + 3`) lands it at SameBoy's frame, so the two equal-`ldh` reads
+/// straddle it: `10spritesPrLine_m3stat_1` reads mode 3 (out3) and `_m3stat_2`
+/// reads mode 0 (out0) — the same out3/out0 split the kernel pair shows on a
+/// bare line. Whole-dot production reads BOTH as mode 3 (the baselined floor);
+/// this lifts 40 such sprite `m3stat_2` rows flag-on with zero regression.
+/// Flag-OFF (production) is unchanged.
 #[test]
 fn sprite_kernel_pair_matches_sameboy_target() {
     let Some(root) = common::gbtr_root() else {
@@ -667,19 +664,17 @@ fn sprite_kernel_pair_matches_sameboy_target() {
     }
 }
 
-/// Port Stage B (Tier 2) — the kernel pair on the FULL deferred-commit reclock
-/// (`set_tier2_reclock`: B1 deferred machine advance + B2 dispatch retime + B3
-/// `early_lead`−2), NOT just the Tier-1 leading-edge hybrid the spec above
-/// runs. This is the make-or-break thesis result: the deferred reclock makes
-/// the two equal `ldh a,(FF41)` reads SEPARATE — `m2int_m3stat_1` reads mode 3
-/// (out3) and `m0int_m3stat_2` reads mode 0 (out0) — *while* mooneye
-/// `intr_2_mode0_timing` simultaneously passes flag-on
-/// (measured, `ppu-subdot-ladder.md` "PHASE B"). That dissolves the A8
-/// mutual-exclusion the prior verdict claimed ("m0int=0 forces intr_2 FAIL in
-/// the cc+4 frame"): m0int=0 and intr_2 now co-hold. Production (both flags
-/// off) is byte-identical; the global default flip + ~7000-row rebaseline + the
-/// two residuals (sprite-line dispatch lead + the deferred halt-wake cc+2 mask)
-/// are the remaining Phase-B work.
+/// The kernel pair on the FULL deferred-commit reclock (`set_tier2_reclock`:
+/// deferred machine advance + dispatch retime + `early_lead`−2), NOT just the
+/// leading-edge hybrid the spec above runs. This is the make-or-break thesis
+/// result: the deferred reclock makes the two equal `ldh a,(FF41)` reads
+/// SEPARATE — `m2int_m3stat_1` reads mode 3 (out3) and `m0int_m3stat_2` reads
+/// mode 0 (out0) — *while* mooneye `intr_2_mode0_timing` simultaneously passes
+/// flag-on. That dissolves the mutual-exclusion the prior verdict claimed
+/// ("m0int=0 forces intr_2 FAIL in the cc+4 frame"): m0int=0 and intr_2 now
+/// co-hold. Production (both flags off) is byte-identical; the global default
+/// flip + ~7000-row rebaseline + the two residuals (sprite-line dispatch lead +
+/// the deferred halt-wake cc+2 mask) are the remaining work.
 #[test]
 fn tier2_kernel_pair_matches_sameboy_target() {
     let Some(root) = common::gbtr_root() else {
@@ -713,8 +708,7 @@ fn tier2_kernel_pair_matches_sameboy_target() {
     }
 }
 
-/// Port Stage B5 (L2) — the LONE Phase-B residual cleared: mooneye
-/// `intr_2_mode0_timing_sprites` passes on the FULL deferred reclock
+/// Mooneye `intr_2_mode0_timing_sprites` passes on the FULL deferred reclock
 /// (`set_tier2_reclock`) for BOTH models. The test resolves each sprite
 /// config's mode-3 length to whole M-cycles; our `proj` tracks a finer per-X
 /// staircase that the cc+4 read quantizes back into the right buckets
@@ -748,7 +742,7 @@ fn tier2_intr_2_sprites_passes() {
     }
 }
 
-/// Port Stage B C0 — the deferred-frame DIV/serial re-calibration. The
+/// The deferred-frame DIV/serial re-calibration. The
 /// post-boot `div_counter` constants (`model.rs`) are calibrated for the eager
 /// tick-then-access frame (register reads sample the timer at cc+4); the
 /// deferred-commit reclock samples every read at the M-cycle leading edge
@@ -801,7 +795,7 @@ fn tier2_boot_div_passes() {
     }
 }
 
-/// Port Stage B C1 — mooneye `intr_2_mode3_timing` on the deferred reclock.
+/// Mooneye `intr_2_mode3_timing` on the deferred reclock.
 /// The test counts STAT-read polls from the mode-2 IRQ to the mode-3 read;
 /// the CPU-visible 2→3 entry boundary (`mode3_entry_dot`) was back-dated 4
 /// dots (80) for the leading-edge-only frame, but the Tier-2 deferred read
@@ -830,9 +824,9 @@ fn tier2_intr_2_mode3_passes() {
     }
 }
 
-/// Port Stage B C1.2 — mooneye `lcdon_timing-GS` on the deferred reclock. The
+/// Mooneye `lcdon_timing-GS` on the deferred reclock. The
 /// test reads LY/STAT/OAM/VRAM at fixed cycle counts after an LCD enable. Three
-/// glitch/post-glitch frame corrections, all the same shape as C1.1 (the
+/// glitch/post-glitch frame corrections, all the same shape (the
 /// Tier-2 deferred read does not take the leading-edge-only −4 back-date):
 /// the glitch mode-3 ENTRY (`stat_irq.rs`, 74→78), the glitch LYC readable
 /// compare (`lyc.rs`, drop the last-4-dots line-1 view), and the bare-line
@@ -859,7 +853,7 @@ fn tier2_lcdon_timing_passes() {
     }
 }
 
-/// Port Stage B C1.3 (S7) — mooneye `hblank_ly_scx_timing-GS` on the deferred
+/// Mooneye `hblank_ly_scx_timing-GS` on the deferred
 /// reclock, the last mooneye gate-blocker. The test reads LY at a fixed delay
 /// after a mode-0 STAT IRQ halt-wake and checks the LY-increment latency vs
 /// SCX. slopgb's M-cycle-quantized halt-wake collapsed the sub-M-cycle wake
@@ -887,7 +881,7 @@ fn tier2_hblank_ly_scx_passes() {
     }
 }
 
-/// Port Stage C / S5 (mech 3 root 1) — the vblank-entry mode-1 STAT re-arm on
+/// The vblank-entry mode-1 STAT re-arm on
 /// the deferred reclock. `lycint143_m1irq_2` enables the mode-1 (VBlank) STAT
 /// source with LYC=143: hardware services the ly143 LYC-STAT IRQ, then the
 /// mode-1 line rises again at line-144 entry (SameBoy `SBLEVEL ly=144 cfl=0`
@@ -918,7 +912,7 @@ fn tier2_m1_vblank_rearm_passes() {
     }
 }
 
-/// Port Stage C / S5 (mech 3 root 2) — the line-0 VBlank carry suppresses the
+/// The line-0 VBlank carry suppresses the
 /// spurious line-0 STAT edge on the deferred reclock. `lycwirq_trigger_ly00_
 /// stat50_1` enables LYC (LYC=0) + VBlank with the STAT line held high across
 /// the ly153→ly0 wrap; SameBoy never re-sets `mode_for_interrupt` between the
@@ -949,7 +943,7 @@ fn tier2_line0_vblank_carry_passes() {
         .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected outE0 (tier2 flag-on): {e}"));
 }
 
-/// Port Stage C / S5 — the CGB LCD-enable glitch-line mode-0 IRQ dispatch
+/// The CGB LCD-enable glitch-line mode-0 IRQ dispatch
 /// reclock (`stat_irq.rs::update_mode_for_interrupt`). The glitch-line mode-0
 /// STAT IRQ now keys on `line_render_done` (the dispatch dot, dot 254 = SameBoy
 /// cfl=257), NOT on `vis_early` (dot 252) as `vis_mode` does — the bare-line
@@ -964,13 +958,12 @@ fn tier2_line0_vblank_carry_passes() {
 /// **CGB** side of both rows; the DMG side splits: `frame0_m0irq_count` DMG
 /// stays a baselined floor (a dispatch-COUNT the reclock's cc+0 frame loses —
 /// the poll at ~dot252 never sees the rise it must count), while the DMG
-/// `ly0_m0irq_scx1_1` READ-frame half SHIPPED #11bm (`tier2_dmg_m0_coincident_passes`)
+/// `ly0_m0irq_scx1_1` READ-frame half ships in `tier2_dmg_m0_coincident_passes`
 /// — a verdict-only co-instant read-view mask ([`Ppu::ff0f_dmg_m0_coincident_mask`],
 /// [`Ppu::ff0f_stat_peek`]'s file) that clears the bit for a read landing EXACTLY
 /// on the flip dot WITHOUT moving the rise, so the `int_hblank_halt` halt-wake
 /// grid (which needs the rise at its dispatch dot) is untouched (`int_hblank_halt`
-/// + gbmicro 445 green). See the source comment + `ppu-subdot-ladder.md` "#11ad"
-/// + `measurements/dmg-ocr-singles-2026-07-04.md`.
+/// + gbmicro 445 green).
 #[test]
 fn tier2_glitch_m0irq_dispatch_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -998,10 +991,10 @@ fn tier2_glitch_m0irq_dispatch_passes() {
     }
 }
 
-/// Port Stage C / S5 (#11bm) — the DMG LCD-enable glitch-line mode-0 co-instant
+/// The DMG LCD-enable glitch-line mode-0 co-instant
 /// FF0F read-view mask ([`Ppu::ff0f_dmg_m0_coincident_mask`]). The third
-/// read-frame pass (after #11bk hblank +16 / #11bl poweron +20): the DMG face of
-/// the read-frame half the #11ad `tier2_glitch_m0irq_dispatch_passes` doc parked
+/// read-frame pass (after the hblank +16 / poweron +20 passes): the DMG face of
+/// the read-frame half the `tier2_glitch_m0irq_dispatch_passes` doc parked
 /// as "a genuine multi-mechanism atomic ... byte-identical DMG floor". Corrected:
 /// `enable_display/ly0_m0irq_scx1_1` polls FF0F (DI, `IE=0`) on the glitch line
 /// with the mode-0 STAT armed, reading EXACTLY on the recorded mode-0 flip dot
@@ -1012,12 +1005,11 @@ fn tier2_glitch_m0irq_dispatch_passes() {
 /// never a window: the `_2` sibling reads dot257 > flip (poll after the rise, E2)
 /// and `scx0_2` reads flip+1 (E2), so both are untouched. **Verdict-only** — the
 /// rise/dispatch never moves, so the co-located `int_hblank_halt` halt-wake grid
-/// (which the #11ad park cited as the conflicting-dot atomicity) stays green, the
-/// exact #11bk/#11bl decoupling. `frame0_m0irq_count` DMG (the dispatch-COUNT
-/// sibling, poll at dot252 ≠ flip) stays a floor. +1 full-DMG two-bin
-/// (0 SameBoy-pass dropped); `tier2` + `!is_cgb` + `glitch_line` + SS scoped →
-/// production and CGB byte-identical. Map:
-/// `measurements/dmg-ocr-singles-2026-07-04.md`.
+/// (the conflicting-dot atomicity the dispatch doc cited) stays green, the same
+/// decoupling as the hblank/poweron passes. `frame0_m0irq_count` DMG (the
+/// dispatch-COUNT sibling, poll at dot252 ≠ flip) stays a floor. +1 full-DMG
+/// two-bin (0 SameBoy-pass dropped); `tier2` + `!is_cgb` + `glitch_line` + SS
+/// scoped → production and CGB byte-identical.
 #[test]
 fn tier2_dmg_m0_coincident_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -1032,8 +1024,8 @@ fn tier2_dmg_m0_coincident_passes() {
         .unwrap_or_else(|e| panic!("{rel} [Dmg] expected outE0 (tier2 flag-on): {e}"));
 }
 
-/// Port Stage C / S5 (#11ar — the per-ISR read-POSITION PEEK). The first CLEAN
-/// read-position-decoupled C-stage slice: the double-speed OAM-STAT-ISR
+/// The per-ISR read-POSITION PEEK. The first clean
+/// read-position-decoupled slice: the double-speed OAM-STAT-ISR
 /// (`m2int`) FF41 mode read lands +4 dots before SameBoy's cfl, so slopgb's
 /// leading-edge read sees mode 3 (`got=3`) where SameBoy — reading 4 dots later,
 /// past its bare mode-3 exit — sees mode 0 (`want=0`). The peek
@@ -1046,8 +1038,7 @@ fn tier2_dmg_m0_coincident_passes() {
 /// m2stat/enable reads that probe a different boundary), and a non-window
 /// (`!wy_trig_sb`) non-sprite bare line (excludes the co-temporal `late_disable`
 /// render-length A/B pair). +6/−0 full-CGB two-bin; production (flag-off)
-/// byte-identical. See `ppu-subdot-ladder.md` "#11ar" +
-/// `measurements/c2-readpos-peek-built-2026-06-30.md`.
+/// byte-identical.
 #[test]
 fn tier2_m2int_m3stat_ds_readpos_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -1069,7 +1060,7 @@ fn tier2_m2int_m3stat_ds_readpos_passes() {
         check_hex_screen(gb.frame(), "0", true)
             .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out0 (tier2 flag-on): {e}"));
     }
-    // The #11ar-full FULL per-read carry also converges the polled post-DMA FF41
+    // The full per-read carry also converges the polled post-DMA FF41
     // mode-3 reads (`off = 4` = the leading-edge default): gdma/hdma_cycles _ds_2
     // want 0. These are the +2 the global law adds over the carried-only peek.
     for rel in [
@@ -1082,7 +1073,7 @@ fn tier2_m2int_m3stat_ds_readpos_passes() {
         check_hex_screen(gb.frame(), "0", true)
             .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out0 (tier2 flag-on): {e}"));
     }
-    // The #11ar-m0stat READ-FRAME slice: the m2int mode-2 OAM ISR line-start
+    // The m0stat READ-FRAME slice: the m2int mode-2 OAM ISR line-start
     // mode0→2 flip peek (dot ≥ 2 → mode 2), +1/−0 (`m2int_m0stat_ds_2` wants 2).
     let rel = "gambatte/m2int_m0stat/m2int_m0stat_ds_2_cgb04c_out2.gbc";
     let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
@@ -1090,7 +1081,7 @@ fn tier2_m2int_m3stat_ds_readpos_passes() {
     run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
     check_hex_screen(gb.frame(), "2", true)
         .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out2 (tier2 flag-on): {e}"));
-    // #11bg — the same carried-read frame at the mode2→3 ENTRY (slopgb dot
+    // The same carried-read frame at the mode2→3 ENTRY (slopgb dot
     // 84): the DS mode-2 ISR pair straddles it at dots 80/82 (+2 carry →
     // 82/84, want 2/3); the entry is SCX-independent (`m2int_scx4_m2stat_ds`).
     for (rel, expect) in [
@@ -1109,7 +1100,7 @@ fn tier2_m2int_m3stat_ds_readpos_passes() {
     }
 }
 
-/// Half-dot reclock Part A (#11bb) — the tier2 SCX write-strobe render-frame
+/// The tier2 SCX write-strobe render-frame
 /// deferral. The deferred clock lands pipeline-register writes at SameBoy's
 /// true commit instant, but the production render geometry (the fine-scroll
 /// comparator hunt at dots 89-96) is calibrated to the cc+4 frame, 4 dots
@@ -1122,7 +1113,7 @@ fn tier2_m2int_m3stat_ds_readpos_passes() {
 /// slopgb collapsed both onto the leading edge so both extended. SS+DS + the
 /// scx_during_m3 extend + the late_scx_late_disable window pair — full-CGB
 /// two-bin `+6/−0`. The glitch line keeps the immediate commit (its render
-/// geometry carries its own C1.2 offsets: `ly0_late_scx7_m3stat_*`), and the
+/// geometry carries its own glitch-line offsets: `ly0_late_scx7_m3stat_*`), and the
 /// FF41-read shadow laws sample the ARCHITECTURAL `scx` (their calibration
 /// frame) rather than the lagged pipeline view.
 #[test]
@@ -1156,7 +1147,7 @@ fn tier2_late_scx_writestrobe_passes() {
     }
 }
 
-/// Port Stage C / S5 (mech 3 root 2 — the LYC-write sub-case) — the line-start
+/// The LYC-write sub-case: the line-start
 /// LYC-carryover hold suppresses a spurious wrap edge on the deferred reclock.
 /// `lyc0_late_ff45_enable_3` enables the LYC source (LYC=0) and writes FF45=0
 /// late, at the ly0→ly1 wrap. SameBoy re-evaluates `lyc_interrupt_line` only at
@@ -1192,8 +1183,8 @@ fn tier2_lyc_carryover_late_ff45_passes() {
         .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected outE0 (tier2 flag-on): {e}"));
 }
 
-/// Port Stage C / S5 (mech 3 root 2 — the CGB last-M-cycle LYC-write hold,
-/// #11al) — the line-END complement of [`tier2_lyc_carryover_late_ff45_passes`]'s
+/// The CGB last-M-cycle LYC-write hold: the line-END complement of
+/// [`tier2_lyc_carryover_late_ff45_passes`]'s
 /// DMG line-START carryover hold. A late FF45 write in slopgb's leading-edge
 /// write frame commits 1 M-cycle earlier than SameBoy, on the current line's
 /// last M-cycle (dot >= 452), where the freshly-matching just-written LYC
@@ -1208,8 +1199,7 @@ fn tier2_lyc_carryover_late_ff45_passes() {
 /// `m2enable/lyc1_m2irq_late_lyc255_2` (late LYC=255 disabling the match, out0).
 /// Single-speed-only (the DS last M-cycle is 2 dots, +1 offset — `dot >= 452`
 /// inverts the SameBoy-passing `_ds_1` siblings); CGB-only; LE-Tier2-only;
-/// production byte-identical. See `reclock.rs::stat_update_tick` +
-/// `ppu-subdot-ladder.md` "#11al".
+/// production byte-identical (`reclock.rs::stat_update_tick`).
 #[test]
 fn tier2_lyc_carryover_late_ff45_cgb_wrap_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -1244,7 +1234,7 @@ fn tier2_lyc_carryover_late_ff45_cgb_wrap_passes() {
     }
 }
 
-/// Port Stage C / S5 (mech 1 — the read-observer eighth-grid) — the bare-line
+/// The read-observer eighth-grid: the bare-line
 /// `m2int_m3stat` reads converge flag-on when the mode-0 dispatch lands at cc2 of
 /// its M-cycle (dot ≡ 1 mod 4 ⇔ SCX&7 ∈ {3,7}). A leading-edge FF41 read samples
 /// at its M-cycle START and observes the flip at cc+2, so a same-M-cycle read
@@ -1292,7 +1282,7 @@ fn tier2_m2int_m3stat_scx3_passes() {
     }
 }
 
-/// Port Stage C / S5 (mech 1 — the read-observer accessibility coupling) — the
+/// The read-observer accessibility coupling: the
 /// OAM/VRAM read-accessibility unblock COINCIDES with the visible mode→0 flip
 /// (`vis_early`) on SameBoy, not with the render-done dispatch (`line_render_done`)
 /// one dot later. The deferred cc+0 read otherwise sees mode 0 yet OAM/VRAM still
@@ -1339,8 +1329,8 @@ fn tier2_oam_vram_postread_scx3_passes() {
     }
 }
 
-/// Port Stage C / S5 (mech 1 — the read-observer accessibility coupling, WRITE
-/// side) — the OAM/VRAM write-unblock at the mode3→0 boundary coincides with the
+/// The read-observer accessibility coupling, WRITE
+/// side: the OAM/VRAM write-unblock at the mode3→0 boundary coincides with the
 /// visible mode→0 flip (`vis_early`) on SameBoy, one dot before the render-done
 /// dispatch (`line_render_done`). The deferred cc+0 write at the SCX&7=3 boundary's
 /// M-cycle (slopgb dot 256 / SameBoy cfl 260) otherwise stays blocked
@@ -1383,8 +1373,8 @@ fn tier2_oam_vram_postwrite_scx3_passes() {
     }
 }
 
-/// Port Stage C2 (mech 1 — the read-observer accessibility coupling, the
-/// BOUNDARY-COINCIDENT release) — the `scx2`/`scx5` siblings the scx3 pin left
+/// The read-observer accessibility coupling, the
+/// BOUNDARY-COINCIDENT release: the `scx2`/`scx5` siblings the scx3 pin left
 /// "floored". Their deferred cc+0 OAM/VRAM read lands on the EXACT dot
 /// `line_render_done` fires (the unblock M-cycle), where the production cc+2-MID
 /// `m0_access_edge` stamp still reports the second-half unblock as blocked (mode 3)
@@ -1394,7 +1384,7 @@ fn tier2_oam_vram_postwrite_scx3_passes() {
 /// two-bin +4/−0 single speed). The fix pushes the M0Access edge to phase 0 under
 /// Tier-2 single speed (`render/mode0.rs` `access_lead`); double speed is excluded
 /// (the stamp gates the DS VRAM-WRITE path too — `vramw_m3end_scx5_ds` — the DS
-/// read grid is its own S6/S7 reclock). Production (flag-off) byte-identical —
+/// read grid is its own separate reclock). Production (flag-off) byte-identical —
 /// `bare_flip`/`tier2_reclock` never release it there.
 #[test]
 fn tier2_oam_vram_postread_scx2_scx5_passes() {
@@ -1439,8 +1429,8 @@ fn tier2_oam_vram_postread_scx2_scx5_passes() {
     }
 }
 
-/// Port Stage C2 (the render mode-3 LENGTH port, #11as — the DS line-END OAM-read
-/// release). Under CGB double speed SameBoy releases the mode-3 OAM read-lock one
+/// The render mode-3 LENGTH port, the DS line-END OAM-read
+/// release. Under CGB double speed SameBoy releases the mode-3 OAM read-lock one
 /// cycle later than single speed: it SKIPS the `if (!cgb_double_speed)` early
 /// unblock (`display.c:2104-2111`) and drops through to `:2118`, which lands the
 /// deferred cc+0 read's unblock at slopgb dot `254 + SCX&7`. slopgb's production
@@ -1452,7 +1442,7 @@ fn tier2_oam_vram_postread_scx2_scx5_passes() {
 /// co-temporal with the `vramw_m3end_ds_2` write-readback at the same dot254 (the
 /// vramw write costs a CPU M-cycle SameBoy spreads across the read but slopgb's
 /// deferred frame collapses), so a VRAM release is an A/B swap — the VRAM DS read
-/// grid is the parked S6 reclock. Full-CGB two-bin flag-on +1/−0; production
+/// grid is a separate parked reclock. Full-CGB two-bin flag-on +1/−0; production
 /// (flag-off) byte-identical (`tier2_reclock`/`ds` gated). The `_1` sibling is
 /// asserted below as the regression guard.
 #[test]
@@ -1479,8 +1469,8 @@ fn tier2_oam_postread_ds_passes() {
     }
 }
 
-/// #11bi — the POST-SWITCH bare-exit 4-variable table (the #11bh park,
-/// BUILT): `ppu/stat_irq.rs::vis_exit_hd` replaces the emergent bare exit
+/// The POST-SWITCH bare-exit 4-variable table:
+/// `ppu/stat_irq.rs::vis_exit_hd` replaces the emergent bare exit
 /// with `E = 504 + leave_k − 4*[lcd_enable_in_ds] + 2*(SCX&7)` rp (SS) /
 /// `502 + leave_k + 2*(SCX&7)` (DS) for dances whose FIRST LCD-on switching
 /// STOP sits mid-frame (`Ppu::stop_anchor_midframe`) — the speedchange
@@ -1490,9 +1480,8 @@ fn tier2_oam_postread_ds_passes() {
 /// SBREAD/SBMODE ↔ SLOPGB stop/leave/ff41/visexit): 120/120 offline fit,
 /// zero conflicts; family probe +31/−0 (the 4 census blockers + 27 bonus;
 /// the sole non-fix `speedchange2_nop_m2int_m3stat_scx1_1` is the
-/// VBlank-anchored pre-seeded #11bd rebaseline joiner, out of scope).
+/// VBlank-anchored pre-seeded rebaseline joiner, out of scope).
 /// lcd_offset/m2int_m3stat/dma guard probes byte-identical.
-/// `measurements/speedchange-postswitch-exit-2026-07-03.md`.
 #[test]
 fn tier2_speedchange_postswitch_exit_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -1514,8 +1503,8 @@ fn tier2_speedchange_postswitch_exit_passes() {
             "gambatte/speedchange/speedchange2_lcdoff_m2int_m3stat_scx2_1_cgb04c_out3.gbc",
             "3",
         ),
-        // The k=6 (dsa7==4 leave) class guard: `E = 506 + 2*scx` — the #11bh
-        // blanket's first casualty class, must keep reading 3.
+        // The k=6 (dsa7==4 leave) class guard: `E = 506 + 2*scx` — the earlier
+        // blanket law's first casualty class, must keep reading 3.
         (
             "gambatte/speedchange/speedchange2_lcdoff_nop_m2int_m3stat_scx1_1_cgb04c_out3.gbc",
             "3",
@@ -1541,7 +1530,7 @@ fn tier2_speedchange_postswitch_exit_passes() {
     }
 }
 
-/// PORT 3 (#11bc) — the S6 completion frame (`interconnect/tick.rs`
+/// The serial/timer completion frame (`interconnect/tick.rs`
 /// `advance_machine_t`): the deferred path detects serial completions per
 /// T-substep (the DIV-edge fall's true T) and squashes a dispatch-ack'd
 /// timer/serial re-set by SameBoy's EXACT T-threshold
@@ -1586,7 +1575,7 @@ fn tier2_serial_tima_completion_passes() {
     }
 }
 
-/// PORT 2 (#11bc) — the sub-M-cycle WAKE clock (`Bus::pending_halt_wake_mid`,
+/// The sub-M-cycle WAKE clock (`Bus::pending_halt_wake_mid`,
 /// `interconnect.rs`): the DMG tier2 halt loop samples the wake condition at
 /// the M-cycle head AND mid-cycle (SameBoy `GB_cpu_run` advance-2 → sample →
 /// advance-2, `sm83_cpu.c:1621-1628`); a mid wake resumes the CPU 2 T into
@@ -1626,7 +1615,7 @@ fn tier2_halt_m0stat_wake_passes() {
     }
 }
 
-/// Port Stage C / S5 #11at — the CGB pre-draw window-abort BARE-exit slice
+/// The CGB pre-draw window-abort BARE-exit slice
 /// (`stat_irq.rs::vis_mode_read`, `regs.rs`/`render/window.rs` `win_predraw_abort`).
 /// An LCDC.5 clear that lands BEFORE the enabled window's first fetch renders the
 /// line bare on SameBoy but with the SCX fine-scroll penalty DROPPED (mattcurrie
@@ -1662,7 +1651,7 @@ fn tier2_window_predraw_abort_passes() {
             "gambatte/window/late_disable_early_scx03_wx12_1_dmg08_cgb04c_out0.gbc",
             "0",
         ),
-        // #11bb — the DOUBLE-SPEED twin (the `(89 + WX) & !1` first-fetch
+        // The DOUBLE-SPEED twin (the `(89 + WX) & !1` first-fetch
         // M-cycle boundary; `_1` aborts commit before it → bare, `_2` at/
         // after → extends). All 8 legs pinned: the `_2` extends guard the
         // boundary from both sides.
@@ -1708,7 +1697,7 @@ fn tier2_window_predraw_abort_passes() {
     }
 }
 
-/// Port Stage C / S5 #11au — the CGB window-REENABLE mode-3 length slice
+/// The CGB window-REENABLE mode-3 length slice
 /// (`stat_irq.rs::vis_mode_read`, `Render::win_reenable_dot`). A window disabled
 /// then re-enabled mid-mode-3 (`late_reenable`) redraws from the re-enable point;
 /// its mode-3 extends past the read iff the re-enable beat the WX-match redraw
@@ -1750,7 +1739,7 @@ fn tier2_window_reenable_passes() {
     }
 }
 
-/// Port Stage C / S5 #11aw — the CGB late-WY UN-trigger bare slice
+/// The CGB late-WY UN-trigger bare slice
 /// (`stat_irq.rs::vis_mode_read`, `Ppu::wy_trig_sb_raw`). SameBoy's `wy_check`
 /// compares LY against the IMMEDIATE WY; a late WY→(non-LY) write un-triggers its
 /// window (raw WY != LY at the mode-2 compare → bare line), while slopgb's render +
@@ -1787,7 +1776,7 @@ fn tier2_window_late_wy_untrigger_passes() {
     }
 }
 
-/// Port Stage C / S5 (mech 3 — CGB lcd-offset, the line-start OAM-read window) —
+/// CGB lcd-offset, the line-start OAM-read window:
 /// on CGB single-speed SameBoy keeps `oam_read_blocked = false` for the first few
 /// T-cycles of each visible line (`display.c:1805-1810`: the mode-0/HBlank tail
 /// runs 2+1 cycles before the mode-2 OAM lock engages at state 7). The lcd-offset
@@ -1796,10 +1785,11 @@ fn tier2_window_late_wy_untrigger_passes() {
 /// from dot 0 — read "3" (blocked) instead of out0 (accessible). The fix releases
 /// `oam_read_blocked` for dots `1..CGB_LINESTART_OAM_OPEN` on CGB single-speed
 /// under Tier-2 (`ppu/blocking.rs::cgb_linestart_oam_open`). CGB-only, single-
-/// speed (the `_ds_` siblings are S6, the DMG base reads in real mode-0 already).
-/// Production (flag-off) byte-identical — the window is never open there.
+/// speed (the `_ds_` siblings are handled separately, the DMG base reads in real
+/// mode-0 already). Production (flag-off) byte-identical — the window is never
+/// open there.
 ///
-/// C2 #11x — the window EXCLUDES dot 0: the BASE `oam_access/preread_2` reads
+/// The window EXCLUDES dot 0: the BASE `oam_access/preread_2` reads
 /// `ly2 dot0` and wants BLOCKED (out3 — SameBoy's mode-2 OAM lock has engaged by
 /// then; SBMODE `ly2 cfl0 dc8 vis=2`), while the lcd-offset variant's read is
 /// shifted off the line start to `dot2`. Opening dots 0-3 served the offset read
@@ -1833,12 +1823,12 @@ fn tier2_oam_preread_lcdoffset1_passes() {
     }
 }
 
-/// Port Stage C2 #11y/#11z — the window visible-mode-3 LENGTH law (the FF41-read
+/// The window visible-mode-3 LENGTH law (the FF41-read
 /// half of the atomic reclock). A triggering window's SameBoy mode-3→0 exit is
 /// `SBex = 263 + SCX&7` (cfl); the CPU-visible FF41 exit is `SBex − read_offset`.
-/// **#11z: the deferred FF41 read samples +4 dots before SameBoy's read (MEASURED:
+/// The deferred FF41 read samples +4 dots before SameBoy's read (MEASURED:
 /// `m2int_wx03_scx5_m3stat_2` slopgb dot264 ↔ SameBoy cfl268=SBex), NOT the +3
-/// dispatch frame** — so the exit is `259 + SCX&7`. DECOUPLED from
+/// dispatch frame — so the exit is `259 + SCX&7`. DECOUPLED from
 /// `line_render_done` (the counter-pinned dispatch, config-dependently
 /// mis-positioned vs SBex so slopgb over-extends — the `m2int_wx*_m3stat_2` reads
 /// see mode 3 where SameBoy reads 0). Applied ONLY to the FF41 register read
@@ -1846,9 +1836,9 @@ fn tier2_oam_preread_lcdoffset1_passes() {
 /// normal-trigger ly≥1 windows (`win_active && !win_aborted && wy2!=ly && wy2<=143
 /// && wx<0xA0 && !ds`). Line 0 / late-WY / WY-disable windows are EXCLUDED — their
 /// reads de-mask an entangled read-frame error (the window length + read-frame
-/// co-land in the atomic step; #11y); the normal windows have a correct read-frame,
-/// so the length law fixes them cleanly. Full-CGB two-bin flag-on +9/−0 (#11y +7
-/// at exit 260, #11z +2 more at 259 — the scx5 `_2` over-extend rows). Production
+/// co-land in the atomic step); the normal windows have a correct read-frame,
+/// so the length law fixes them cleanly. Full-CGB two-bin flag-on +9/−0 (+7
+/// at exit 260, +2 more at 259 — the scx5 `_2` over-extend rows). Production
 /// byte-identical OFF (`win_active`/`tier2` never fire there). The DMG legs keep
 /// their floor (the offset is CGB-measured; `is_cgb` gate).
 #[test]
@@ -1861,9 +1851,9 @@ fn tier2_window_m3stat_length_passes() {
         return;
     };
     // All [Cgb] out0 — the normal-trigger window mode-3 read exits at 259+SCX&7
-    // (#11z: SBex 263+SCX&7 − the measured +4 read offset). The scx5 `_2` legs
+    // (SBex 263+SCX&7 − the measured +4 read offset). The scx5 `_2` legs
     // pin the 259 (vs 260) calibration; the scx0 legs read past the exit either way.
-    // The wxA5/wxA6 legs pin the #11ac off-screen-window extension (the same
+    // The wxA5/wxA6 legs pin the off-screen-window extension (the same
     // 259+SCX&7 exit applies to the off-screen-trigger window; sprite-free).
     let rels = [
         "gambatte/window/m2int_wx00_m3stat_2_dmg08_cgb04c_out0.gbc",
@@ -1884,8 +1874,8 @@ fn tier2_window_m3stat_length_passes() {
     }
 }
 
-/// Port Stage C2 #11af — the window render-level **shadow WY-trigger** (the
-/// late-WY half of the #11g window model). SameBoy latches `wy_triggered` from a
+/// The window render-level **shadow WY-trigger** (the
+/// late-WY half of the window model). SameBoy latches `wy_triggered` from a
 /// *continuous* `WY == LY` compare (`display.c` `wy_check`), but slopgb's
 /// production `wy_latch` samples only at the three gambatte weMaster dots (line 0
 /// dot 2, dots 450/454) — so a *mid-line* late-WY write that SameBoy catches is
@@ -1902,7 +1892,7 @@ fn tier2_window_m3stat_length_passes() {
 /// was aborted / its WX/LCDC.5 toggled late (`late_wx`/`late_reenable`/
 /// `late_enable`) — SameBoy renders THOSE bare. Full-CGB two-bin flag-on **+5/−0**
 /// (the `_1` mid-line late-WY rows; the `_2`/`_3` siblings + the toggled-window
-/// #11bd item 4 — the BOUNDARY-WY cross-line window extend
+/// case — the BOUNDARY-WY cross-line window extend
 /// (`Ppu::wy_xline_trig`): a WY write landing in a line's tail/head whose
 /// value matches the CURRENT line latches SameBoy's `wy_triggered`
 /// (scheduled `wy_check`, old `current_line` compare); every later bare
@@ -2023,14 +2013,13 @@ fn tier2_window_late_wy_extend_passes() {
     }
 }
 
-/// Port Stage C2 #11bj — the DMG WINDOW-LAW PORT. The CGB `vis_mode_read`
+/// The DMG WINDOW-LAW PORT. The CGB `vis_mode_read`
 /// window arms (`model.is_cgb()`-gated length/shadow/pre-draw-abort/reenable/
 /// un-catch/boundary laws) are re-derived on the DMG frame: the DMG deferred
 /// FF41 read shares the SS −4 polled offset, but the DMG `wy2` lag (+2 vs CGB
 /// +6) and the DMG-specific per-WX/SCX ship deadlines make the model DIVERGE
 /// from CGB (the `_2` legs that render bare on CGB extend on DMG). 56 of the
-/// 62 DMG window flip-blockers fixed (dual-traced 2026-07-03,
-/// `measurements/dmg-window-port-2026-07-03.md`); the 6 residual are the same
+/// 62 DMG window flip-blockers fixed; the 6 residual are the same
 /// atomic classes CGB parks (wxA6/wxA5 carried-read sub-dot wall · scx5
 /// non-linear deadline · mid-frame-SCX-rewrite `late_scx` · the render-trigger
 /// late_enable/reenable-scx5 extend). Each new arm is `!is_cgb()`-scoped →
@@ -2141,7 +2130,7 @@ fn tier2_dmg_window_passes() {
     }
 }
 
-/// #11bo — the mode-3 render reclock, mechanism 1 (SCY/palette): the pure-render
+/// The mode-3 render reclock, mechanism 1 (SCY/palette): the pure-render
 /// mid-mode-3 registers (SCY FF42, BGP/OBP FF47-FF49) take SCX's +4 render-frame
 /// defer (dots=3) on the tier2 deferred write path. The deferred clock advances
 /// the machine to the write's leading edge (cc+0) before the write; the eager
@@ -2182,7 +2171,7 @@ fn tier2_dmg_m3_render_scy_palette_passes() {
 /// Boot a gambatte or mealybug pixel-reference ROM flag-on (tier2 render
 /// reclock), render a frame, and assert it matches the sibling reference PNG via
 /// the suite's own comparator — the pin form of the `gambatte_pixel_probe`
-/// two-bin. Panics with the frame diff on mismatch (#11bo render-reclock pins).
+/// two-bin. Panics with the frame diff on mismatch (render-reclock pins).
 fn assert_pixel_leg_flagon(root: &Path, rel: &str, model: Model) {
     let path = root.join(rel);
     let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
@@ -2222,7 +2211,7 @@ fn assert_pixel_leg_flagon(root: &Path, rel: &str, model: Model) {
         .unwrap_or_else(|e| panic!("{rel} [{model:?}] tier2 flag-on render: {e}"));
 }
 
-/// #11bo — the mode-3 render reclock, mechanism 2 (LCDC BG addressing): the BG/
+/// The mode-3 render reclock, mechanism 2 (LCDC BG addressing): the BG/
 /// window fetcher samples a DEFERRED LCDC view (`eff.render_lcdc`, bit3 BG map /
 /// bit4 tile-data / bit6 win map) that lags the eager control commit by the
 /// render frame (`RENDER_LCDC_DELAY`), so a mid-mode-3 bgtilemap/bgtiledata
@@ -2255,7 +2244,7 @@ fn tier2_dmg_m3_render_lcdc_passes() {
     }
 }
 
-/// #11bo — the mode-3 render reclock, mechanism 3 (SCX double-speed): SCX's
+/// The mode-3 render reclock, mechanism 3 (SCX double-speed): SCX's
 /// render-frame defer is +2 dots in double speed vs +4 (dots=3) in single speed
 /// — the DS M-cycle is 2 PPU dots (vs 4), so the write-commit-to-fetch-grid
 /// offset halves. dots=2 fixes the 5 `scx_during_m3_ds` fine-scroll pixel legs
@@ -2282,7 +2271,7 @@ fn tier2_dmg_m3_render_scx_ds_passes() {
     }
 }
 
-/// #11bo — the mode-3 render reclock, mechanisms 4+5 (mixer render-view LCDC
+/// The mode-3 render reclock, mechanisms 4+5 (mixer render-view LCDC
 /// bits): the sprite↔BG mixer (`output_pixel`) reads its render-only LCDC bits
 /// from the DEFERRED view (`eff.render_lcdc`), like mechanism 2's BG-fetch
 /// addressing bits, so a mid-mode-3 toggle lands its column at the
@@ -2315,10 +2304,10 @@ fn tier2_dmg_m3_render_bg_priority_passes() {
     }
 }
 
-/// #11bp — the DMG palette (BGP/OBP FF47-49) commit half-dot pop-grid: the last
+/// The DMG palette (BGP/OBP FF47-49) commit half-dot pop-grid: the last
 /// palette-timing pixel-reference flip-blockers the whole-dot render-defer could
-/// not land (89/100 was the whole-dot ceiling; #11bo classified these 5 as
-/// half-dot-precision). The mealybug `m3_bgp_change`/`_sprites`, `m3_obp0_change`
+/// not land (89/100 was the whole-dot ceiling; these 5 need
+/// half-dot precision). The mealybug `m3_bgp_change`/`_sprites`, `m3_obp0_change`
 /// and `m3_window_timing`/`_wx_0` legs are BGP/OBP torture (m3_window_timing is a
 /// BGP test, not a window one — its window render is byte-identical flag-on/off,
 /// only `eff.bgp` at the pixel-pop differs). SameBoy commits the palette at the
@@ -2353,7 +2342,7 @@ fn tier2_dmg_m3_render_palette_halfdot_passes() {
     }
 }
 
-/// #11bq — the SCY (FF42) commit takes the DMG palette's EVEN-dot parity anchor
+/// The SCY (FF42) commit takes the DMG palette's EVEN-dot parity anchor
 /// (`dots = 2 + (leading_edge & 1)`, `cycle.rs::write_deferred`), resolving the
 /// sub-dot render-fetch grid the whole-dot defer=3 could not on a sprite-stalled
 /// line. A sprite prefill stall (`scy_during_m3_spx08_2`, an X=8 OBJ) shifts the
@@ -2390,7 +2379,7 @@ fn tier2_dmg_m3_render_scy_spx08_passes() {
     }
 }
 
-/// #11bq — the WX (FF4B) render-VIEW defer + the un-catch SPLIT. In tier2 the
+/// The WX (FF4B) render-VIEW defer + the un-catch SPLIT. In tier2 the
 /// eager `Ppu::write` committed `eff.wx` at the write's leading edge (cc+0), 2-4
 /// dots early of the render's per-dot WX comparator, so a mid-mode-3 WX rewrite
 /// reached the window activation/reactivation gate at the wrong dot: `late_wx_ds`
@@ -2428,7 +2417,7 @@ fn tier2_dmg_m3_render_wx_passes() {
     }
 }
 
-/// #11bq — the window-ABORT render/read-law SPLIT: a mid-mode-3 LCDC.5 clear ends
+/// The window-ABORT render/read-law SPLIT: a mid-mode-3 LCDC.5 clear ends
 /// the drawn window's RENDER re-anchor at the deferred render frame while its
 /// mode-3-length READ-LAW flags fire at the eager cc+0. In tier2 `eff.lcdc`
 /// committed the bit5 clear at the write's leading edge (cc+0), so `window_abort`
@@ -2463,8 +2452,8 @@ fn tier2_dmg_m3_render_win_abort_passes() {
     }
 }
 
-/// Port Stage C2 #11ag — the WINDOW family ported to DOUBLE-SPEED: the #11y/#11z
-/// length law AND the #11af shadow WY-trigger, with the DS exit/deadline
+/// The WINDOW family ported to DOUBLE-SPEED: the visible-mode-3
+/// length law AND the shadow WY-trigger, with the DS exit/deadline
 /// recalibrated. The `vis_mode_read` length law (the `m2int_wx*_m3stat` shorten)
 /// and the late-WY shadow extend were both `!ds`-gated; under DS the deferred
 /// cc+0 FF41 read lands +1 dot vs SS (the ISR read offset is +3 not +4), so the
@@ -2478,11 +2467,12 @@ fn tier2_dmg_m3_render_win_abort_passes() {
 /// sprite-laden lines** from BOTH laws (`!ds || n_sprites == 0`) — with sprites
 /// the real mode-3 end extends past the bare exit and the DS read frame straddles
 /// it (`sprites/space/10spritesPrLine_wx*_m3stat_ds_1` would drop, a SameBoy-pass;
-/// that is the #11t DS sprite read-grid, separate). Full-CGB two-bin flag-on
+/// that is the DS sprite read-grid, separate). Full-CGB two-bin flag-on
 /// **+8/−0** (7 length-law `_2` + the shadow `FFto2_ly2_ds_1`). SS legs
 /// byte-identical (the `ds` terms are 0 in single speed); production byte-identical
 /// OFF. The `scx5_ds_1` length `_1` rows + `late_wy_*_ds` boundary/disable rows
-/// stay atomic (the same SCX-non-linear deadline / deferred-frame walls as #11af).
+/// stay atomic (the same SCX-non-linear deadline / deferred-frame walls as the
+/// single-speed shadow WY-trigger).
 #[test]
 fn tier2_window_ds_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -2545,8 +2535,8 @@ fn tier2_window_ds_passes() {
     }
 }
 
-/// Port Stage C / S5 (mech 3 — CGB lcd-offset, the line-start OAM-read window,
-/// DOUBLE-SPEED sibling of [`tier2_oam_preread_lcdoffset1_passes`]). Under DS the
+/// CGB lcd-offset, the line-start OAM-read window,
+/// DOUBLE-SPEED sibling of [`tier2_oam_preread_lcdoffset1_passes`]. Under DS the
 /// deferred cc+0 read lands 2 dots earlier in the dot grid, so the accessible
 /// `preread_ds*_1` read shifts to `dot0` and the slopgb-side window narrows with
 /// it ([`CGB_LINESTART_OAM_OPEN_DS`] = 2). Both the base `preread_ds_1` and the
@@ -2585,7 +2575,7 @@ fn tier2_oam_preread_ds_lcdoffset1_passes() {
     }
 }
 
-/// Port Stage C / S5 (mech 3 — CGB lcd-offset, the m3-start palette-RAM window) —
+/// CGB lcd-offset, the m3-start palette-RAM window:
 /// SameBoy keeps `cgb_palettes_blocked = false` for 3 T-cycles INTO mode 3
 /// (`display.c:1867` false → `:1877` true, a 3-cycle SLEEP between), so a deferred
 /// palette access landing at the mode-3 entry stays accessible. The lcd-offset
@@ -2624,8 +2614,8 @@ fn tier2_cgbpal_m3start_lcdoffset1_passes() {
     }
 }
 
-/// Port Stage C / S5 (mech 3 — CGB lcd-offset, the dispatch-class HBlank
-/// write-trigger) — a fresh mode-0 (HBlank) STAT enable written in the
+/// CGB lcd-offset, the dispatch-class HBlank
+/// write-trigger: a fresh mode-0 (HBlank) STAT enable written in the
 /// line-start hblank carryover (dots 0-3, `vis_mode==0`, the previous line's
 /// mode-0 already passed) must raise IF AT the write: the gambatte logic there
 /// defers to the scheduled m0irq event, but in the carryover that event points
@@ -2667,8 +2657,8 @@ fn tier2_m0enable_late_lcdoffset_passes() {
     }
 }
 
-/// Port Stage C / S5 (mech 3 — CGB lcd-offset, the dispatch-class HBlank
-/// write-trigger, DOUBLE-SPEED window). Sibling of
+/// CGB lcd-offset, the dispatch-class HBlank
+/// write-trigger, DOUBLE-SPEED window. Sibling of
 /// [`tier2_m0enable_late_lcdoffset_passes`]: under double speed the deferred cc+0
 /// write lands 2 dots earlier, so the carryover fire window halves (`carryover_tail
 /// = dot < 2` in DS, `stat_irq.rs::stat_write_trigger_cgb`). The `_ds*_1` enable
@@ -2717,14 +2707,14 @@ fn tier2_m0enable_late_ds_lcdoffset_passes() {
     }
 }
 
-/// Port Stage C / S5 (mech 1 read-observer — the DOUBLE-SPEED sprite m3stat
-/// read-grid snap). The single-speed sprite read-grid snap (#10 B5) snaps the
+/// The read-observer DOUBLE-SPEED sprite m3stat
+/// read-grid snap. The single-speed sprite read-grid snap snaps the
 /// sprite-line mode-0 dispatch to the CPU read grid (`dot % 4 == 0`); that
 /// `snap_ok` term applied in DOUBLE speed too. But the DS sprite-line FF41
 /// mode-bit read does not use `vis_early` (which is `!self.ds`-gated, the wrong
 /// direction here — these reads want the LAGGING mode 3, not an anticipated 0).
-/// It rides the PRODUCTION `stat_mode_edge` override (INC-DS-1 / INC-G3 task 6,
-/// `interconnect/memory.rs`: a DS sprite-line m3→m0 flip holds the FF41 mode
+/// It rides the PRODUCTION `stat_mode_edge` override
+/// (`interconnect/memory.rs`: a DS sprite-line m3→m0 flip holds the FF41 mode
 /// bits at 3 for the read M-cycle), which is armed by the `m0_stat_flip` stamp
 /// that ONLY `m0_flip_events` sets. The mod-4 snap pushed the DS sprite dispatch
 /// past the pipe end (`advance_lx` lx=160), where the pipe-end fallback set
@@ -2781,8 +2771,8 @@ fn tier2_sprite_m3stat_ds_passes() {
     }
 }
 
-/// Port Stage C / S5 (mech 3 — CGB lcd-offset, the dispatch-class VBlank + LYC
-/// write-triggers) — the lcd-offset shifts these late STAT enables into the
+/// CGB lcd-offset, the dispatch-class VBlank + LYC
+/// write-triggers: the lcd-offset shifts these late STAT enables into the
 /// line-start dots-0-3 carryover, where the base gambatte logic suppresses them.
 /// `m1/m1irq_late_enable_lcdoffset1_1` enables the VBlank source at `ly0 dot3`
 /// (the `m1_tail` suppression, `stat_irq.rs`); `lycEnable/late_ff41_enable_lcdoffset1_1`
@@ -2791,7 +2781,7 @@ fn tier2_sprite_m3stat_ds_passes() {
 /// both at the write; slopgb delivered `if=00` (out0) instead of out2. The fix
 /// (Tier-2, `stat_write_trigger_cgb`): drop the `m1_tail` suppression for a fresh
 /// VBlank enable, and fire a fresh LYC enable whose LYC matches the PREVIOUS line
-/// in the carryover. CGB-only. Probe (654 CGB rows, flag-on): +2/−0, the #11k/#11l
+/// in the carryover. CGB-only. Probe (654 CGB rows, flag-on): +2/−0, the
 /// line-0/lyc pins held.
 #[test]
 fn tier2_m1_lyc_late_lcdoffset_passes() {
@@ -2815,7 +2805,7 @@ fn tier2_m1_lyc_late_lcdoffset_passes() {
     }
 }
 
-/// Port Stage C / S5 (mech 3 — CGB lcd-offset, the lyc-engine dispatch tail; #11r).
+/// CGB lcd-offset, the lyc-engine dispatch tail.
 /// Four clean Tier-2 levers, +4/−0 flag-on, all in the line-153 wrap / line-start
 /// `-1` gap the lcd-offset shifts the LYC write/enable into:
 /// * `lyc153_late_ff41_enable_lcdoffset1_1` (outE2) — the FF41 LYC enable lands at
@@ -2837,8 +2827,8 @@ fn tier2_m1_lyc_late_lcdoffset_passes() {
 /// CGB-only; production (flag-off) byte-identical. The named `lycwirq_trigger_ly00_
 /// stat50_lcdoffset1_1` (outE0) stays floored: its dispatch now matches SameBoy
 /// (spurious ly0/ly1 gone) but the legit LYC=153 IRQ's dispatch dot (slopgb dot6
-/// vs SameBoy cfl0) + the offset-shifted FF0F read position are the mech-1 read-
-/// frame residual (C2). Probe (676 CGB engine-family rows, flag-on): +4/−0.
+/// vs SameBoy cfl0) + the offset-shifted FF0F read position are the read-observer
+/// read-frame residual. Probe (676 CGB engine-family rows, flag-on): +4/−0.
 #[test]
 fn tier2_lyc_wrap_lcdoffset_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -3111,7 +3101,7 @@ fn gambatte_blank_verdict() {
     check_blank(&logo).unwrap();
 }
 
-/// #11bf (S7, the WAKE-INSTANT port) — the SameBoy-exact DMG halt-wake grid
+/// The SameBoy-exact DMG halt-wake grid
 /// for the mode-0 STAT rise: one iq sample per iteration at the mid point
 /// (4k+2; the `just_halted` head sample has NO +2 slot — the jh gap), the
 /// post-sample advance COMPLETES the M-cycle, and the woken instruction
@@ -3122,7 +3112,7 @@ fn gambatte_blank_verdict() {
 /// IF-check observes the machine at the fetch's END (t0+4), arming the
 /// halt-bug exactly when SameBoy does. Together these replace the M-quantized
 /// `if_late`/`m0_halt_hold`/w2-skew model for the m0 rise AND dissolve the
-/// C1.3 `halt_ly_phase` carry (its only passing table under the exact grid is
+/// `halt_ly_phase` carry (its only passing table under the exact grid is
 /// all-zero). Full-DMG two-bin 167→158 (+9/−0); the four pinned rows cover
 /// the four mechanisms: the jh-gap/steady-grid pair
 /// (`late_m0irq_halt_m0stat_scx3_2b` want 2 · `m0irq_m0stat_scx3_2` want 0 —
@@ -3168,7 +3158,7 @@ fn tier2_halt_wake_grid_passes() {
     }
 }
 
-/// #11bf item 2a — a racing DMA-register write (FF51-FF55 counters/arm, FF70
+/// A racing DMA-register write (FF51-FF55 counters/arm, FF70
 /// WRAM bank, FF4F VRAM bank) beats a same-advance HBlank-DMA steal: SameBoy
 /// runs `GB_hdma_run` only after the current instruction completes
 /// (sm83_cpu.c:1718), so the racing write's store is visible to the block.
@@ -3209,7 +3199,7 @@ fn tier2_hdma_write_race_passes() {
     }
 }
 
-/// #11bf item 3a — a late-ENABLE-triggered window whose LCDC.5 write lands
+/// A late-ENABLE-triggered window whose LCDC.5 write lands
 /// past the line's fetch-catch deadline (dot > 94, DS) renders BARE on
 /// SameBoy (the window misses the line) while slopgb's whole-dot render still
 /// activates and extends. The `late_enable_ly0_ds` want-pair reads the
@@ -3243,7 +3233,7 @@ fn tier2_window_enable_deadline_passes() {
     }
 }
 
-/// #11bf item 3c — a mid-line FF4B (WX) rewrite committing AT/BEFORE the WX
+/// A mid-line FF4B (WX) rewrite committing AT/BEFORE the WX
 /// match dot un-catches the window on SameBoy at SCX&7 == 5 (the fine-scroll
 /// phase pushes the effective catch past the write): `late_wx_scx5_1` (write
 /// and match both dot 97) renders BARE (want 0) where slopgb's whole-dot
@@ -3276,8 +3266,8 @@ fn tier2_window_late_wx_uncatch_passes() {
     }
 }
 
-/// S5 #11bg — the CGB single-speed FF41 two-phase ENGINE write
-/// (`GB_CONFLICT_STAT_CGB` seen from the hardware side): the S5 engine's FF41
+/// The CGB single-speed FF41 two-phase ENGINE write
+/// (`GB_CONFLICT_STAT_CGB` seen from the hardware side): the engine's FF41
 /// view (`Ppu::eng_stat`) transitions old → phase-1 (mode bits new, LYC enable
 /// bit OLD) at commit+2 → final at commit+4, with hazard-free applications
 /// (falls silent, the final rise continuity-gated + delivered through the CGB
@@ -3377,7 +3367,7 @@ fn tier2_ff41_twophase_engine_passes() {
     }
 }
 
-/// S5 #11bg — the CGB double-speed line-153 `ly_for_comparison` table (the
+/// The CGB double-speed line-153 `ly_for_comparison` table (the
 /// documented SS placeholder replaced): 153 latches at dot 4 (not 6), holds
 /// live through dot 7, the [8,12) window is the `-1` GAP (held for a latched
 /// match, no fresh LYC-write re-latch — `lyc153_late_ff45_enable_ds_6`), 0
@@ -3452,9 +3442,9 @@ fn tier2_ds_line153_lyfc_passes() {
     }
 }
 
-/// S5 #11bh — the FF0F read PEEK (group A) + write-race squash (group B), the
-/// IF-register analogues of the #11ar FF41 verdict peek: verdict-only, no
-/// machine advance, no dispatch move (the refuted #11bd sub-M FF0F sampling
+/// The FF0F read PEEK (group A) + write-race squash (group B), the
+/// IF-register analogues of the FF41 verdict peek: verdict-only, no
+/// machine advance, no dispatch move (the refuted sub-M FF0F sampling
 /// moved the machine).
 ///
 /// Group A: the deferred cc+0 FF0F read's verdict includes a deterministically
@@ -3540,7 +3530,7 @@ fn tier2_ff0f_groupab_passes() {
     }
 }
 
-/// S5 #11bh group D — the held-LYC pre-write-high suppression on the Tier-2
+/// The held-LYC pre-write-high suppression on the Tier-2
 /// carryover-tail m0-enable write fire (`stat_write_trigger_cgb`): a line-144
 /// dots-0-3 FF41 write whose OLD value armed LYC with the engine latch still
 /// held (the lyfc-gap hold) rewrites an already-HIGH line — no 0→1 edge on
@@ -3593,7 +3583,7 @@ fn tier2_m1_lycdisable_boundary_passes() {
     }
 }
 
-/// S5 #11bh group C — the dispatch-ack squash reclock: under tier2 the
+/// The dispatch-ack squash reclock: under tier2 the
 /// whole-dot bit-0/1 `ack_squash_dots = 2` window is replaced by the PPU-side
 /// per-SOURCE windows (`Ppu::ack_squash_ppu`, dots (SS, DS): mode-0 (0, 1) ·
 /// mode-2 pulse (0, 0) · LYC / mode-1 / vblank-IF (2, 0) — all dual-traced
@@ -3611,7 +3601,7 @@ fn tier2_ack_squash_reclock_passes() {
         return;
     };
     let targets = [
-        // The six #11bh group-C blockers: rise past the ack window survives.
+        // The six blockers: rise past the ack window survives.
         (
             "gambatte/irq_precedence/late_m0irq_retrigger_ds_1_cgb04c_outE2.gbc",
             "E2",
@@ -3681,7 +3671,7 @@ fn tier2_ack_squash_reclock_passes() {
     }
 }
 
-/// S5 #11bh — three window-line slices off one root cause: the win-line
+/// Three window-line slices off one root cause: the win-line
 /// render clock sits +2 late in slopgb's frame; the FF41 `vis_mode_read` laws
 /// already compensate but three OTHER flip consumers read the raw render
 /// clock (dual-traced fp both emulators, 2026-07-03). (1) the win-line mode-0
@@ -3748,7 +3738,7 @@ fn tier2_window_line_flip_consumers_passes() {
     }
 }
 
-/// S5 #11bh slices (c)+(d) — the glitch-line same-dot SCX hunt re-open + the
+/// The glitch-line same-dot SCX hunt re-open + the
 /// DS line-start carryover-enable level hold. (c): the LCD-enable glitch
 /// line's CGB fine-scroll sample deadline is `83 + scx_init` INCLUSIVE — a
 /// same-dot FF43 commit lands after that dot's render tick but hardware's
@@ -3802,7 +3792,7 @@ fn tier2_glitch_hunt_carryover_passes() {
     }
 }
 
-/// S5 #11bh group E — the co-instant line-0 dot-4 OAM-pulse FF0F read-view
+/// The co-instant line-0 dot-4 OAM-pulse FF0F read-view
 /// mask, LYC-153-anchored: the LYC-153 ISR's IF read lands BEFORE the line-0
 /// pulse in SameBoy's frame (dot 3, rise −1) while slopgb's deferred read
 /// collapses onto the pulse dot and saw the just-folded bit. CPU-read-first
@@ -3844,10 +3834,10 @@ fn tier2_ly0_pulse_readview_passes() {
     }
 }
 
-/// S5 #11bh item-7 count-row slice — the SHIFTED-frame (post-STOP) co-instant
+/// The SHIFTED-frame (post-STOP) co-instant
 /// visibility deadline: the lcd_offset count rows' first poll lands ON the
 /// mode-0 rise/flip dot in slopgb's whole-dot frame where the hardware event
-/// is a half-dot PAST the sample (the §2 law: F1 = L + 1.5, uniform ½-dot
+/// is a half-dot PAST the sample (F1 = L + 1.5, uniform ½-dot
 /// margins). Two verdict-only arms, `lcd_shift_dots != 0` scoped (inert
 /// un-switched): the FF0F poll masks a same-dot mode-0 rise
 /// (`m0irq_count`); the FF41 poll holds mode 3 on the recorded flip's own
@@ -3898,7 +3888,7 @@ fn tier2_lcd_offset_count_deadline_passes() {
     }
 }
 
-/// S5 #11bh — the UNSHIFTED CGB SS carryover-tail m0-enable hand-off: with
+/// The UNSHIFTED CGB SS carryover-tail m0-enable hand-off: with
 /// the two-phase engine view owning FF41 writes (`eng_lyc`), a line-boundary
 /// m0 enable committing on the next line's dots 0-1 catches nothing — the
 /// phase-1 evaluation lands where `mode_for_interrupt` reads the line-start
@@ -3935,11 +3925,10 @@ fn tier2_late_enable_dead_tail_passes() {
     }
 }
 
-// Session-local S5 measurement aid (see the module's doc); `#[ignore]`'d so it
-// never runs in the gate.
+// Flag-on read-trace probe module; `#[ignore]`'d so it never runs in the gate.
 #[path = "gambatte_flagon_probe.rs"]
 mod flagon_probe;
 
-// Session-local PIXEL two-bin (mode-3 render reclock, goal.md); `#[ignore]`'d.
+// Pixel two-bin probe (mode-3 render reclock); `#[ignore]`'d.
 #[path = "gambatte_pixel_probe.rs"]
 mod pixel_probe;

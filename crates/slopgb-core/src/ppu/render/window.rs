@@ -40,7 +40,7 @@ impl Ppu {
         let prev_match = std::mem::replace(&mut self.render.win_match_prev, win_match);
         let win_match = win_match && !prev_match;
         let win_en_now = self.eff.lcdc & LCDC_WIN_ENABLE != 0;
-        // C2 #11af: record the raw WX-comparator match dot for the shadow
+        // Record the raw WX-comparator match dot for the shadow
         // WY-trigger's activation deadline — *before* the `wy_ok`/`win_en`
         // gate, so a bare line the window never enters still pins the dot the
         // window *would* have activated. Tier2 + CGB only; never read OFF.
@@ -176,13 +176,13 @@ impl Ppu {
     /// runs at the eager control commit (`regs.rs::commit_eff`), NEVER deferred:
     /// the late_disable read laws are calibrated to the write's cc+0 dot. The
     /// RENDER re-anchor (`window_abort_render`) is a separate, deferrable half
-    /// (#11bq) so the drawn window ends at the render frame, not cc+0.
+    /// so the drawn window ends at the render frame, not cc+0.
     pub(in crate::ppu) fn window_abort_flags(&mut self) {
         if !self.render.win_mode {
-            // C2 #11at — PRE-DRAW abort: LCDC.5 cleared before the window's
-            // first fetch (`win_mode` not yet set — `late_disable_early_*_1`).
-            // SameBoy renders BARE but DROPS the SCX fine-scroll penalty → exit
-            // cfl257. `!win_mode` is the pre-draw discriminator. #11bj: DMG too.
+            // PRE-DRAW abort: LCDC.5 cleared before the window's first fetch
+            // (`win_mode` not yet set — `late_disable_early_*_1`). SameBoy
+            // renders BARE but DROPS the SCX fine-scroll penalty → exit
+            // cfl257. `!win_mode` is the pre-draw discriminator. DMG too.
             if self.tier2_reclock {
                 self.render.win_predraw_abort = true;
                 self.render.win_predraw_abort_dot = self.dot;

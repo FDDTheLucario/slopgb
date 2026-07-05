@@ -226,8 +226,8 @@ impl Ppu {
         // (mealybug m3_lcdc_obj_en_change: sprites fetched during the
         // prefill turn into background mid-glyph at the disable commit).
         let cgb = self.model.is_cgb();
-        // #11bo mech4/5 — the mixer's render-only LCDC bits sample the DEFERRED
-        // view (`render_lcdc`), like the BG fetch's map/data bits: a mid-mode-3
+        // The mixer's render-only LCDC bits sample the DEFERRED view
+        // (`render_lcdc`), like the BG fetch's map/data bits: a mid-mode-3
         // toggle lands its column at the production/SameBoy dot, not the flip's
         // leading edge. `render_lcdc` == `eff.lcdc` in production
         // (byte-identical OFF). Only the pixel-draw bits ride it — the
@@ -239,7 +239,7 @@ impl Ppu {
         // background mid-glyph at the disable commit). The DMG mixer samples the
         // bit one dot ahead of the eff view (the fetch-lead timing — the blob
         // photos put each band's suppression boundary one column left of the eff
-        // commit); CGB-C samples eff, pixel-exact. #11bo mech5 — on CGB the
+        // commit); CGB-C samples eff, pixel-exact. On CGB the
         // draw-side suppression is render-only (the sprite is already fetched;
         // the FETCH-side OBJ enable gating the stall/length stays eager in
         // `render.rs`), so it rides the deferred `render_lcdc`; DMG keeps the
@@ -251,8 +251,8 @@ impl Ppu {
 
         // DMG LCDC bit 0: BG and window disabled — they show as white
         // (color 0 for sprite priority purposes). DMG compatibility mode on
-        // CGB behaves the same way (integration addition). #11bo mech4 — the
-        // BG-priority bit (LCDC bit0) rides `render_lcdc` (no length coupling).
+        // CGB behaves the same way (integration addition). The BG-priority
+        // bit (LCDC bit0) rides `render_lcdc` (no length coupling).
         let bg_off = (!cgb || self.dmg_compat) && render_lcdc & LCDC_BG_ENABLE == 0;
         let bg_c = if bg_off { 0 } else { bg_c };
 

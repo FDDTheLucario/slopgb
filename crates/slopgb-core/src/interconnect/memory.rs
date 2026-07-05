@@ -99,7 +99,7 @@ impl Interconnect {
     }
 
     pub(super) fn read_no_tick(&mut self, addr: u16) -> u8 {
-        // Port Stage B C1.3 (S7) — one-shot post-mode-0-halt-wake LY phase
+        // One-shot post-mode-0-halt-wake LY phase
         // carry. The mode-0 halt-wake set `halt_ly_phase` to the sub-M-cycle
         // carry; the FIRST post-wake FF44 read (hblank's measurement read)
         // back-dates the line by it, then clears. The pre-halt `wait_ly` poll
@@ -146,7 +146,7 @@ impl Interconnect {
                 .unwrap_or_else(|| self.cart.read_rom(addr)),
             // cc+2 MID-phase VRAM read: same mode-3→mode-0 unblock edge as
             // OAM below — a second-half unblock is not yet visible here
-            // (sub-dot event-phase model, increment 2). Part C: tier2 BYPASSES
+            // (sub-dot event-phase model). tier2 BYPASSES
             // every M0Access straddle stamp (all five sites) — the deferred
             // (cc+0) access is resolved to its exact half-dot before sampling,
             // so the cc+4 straddle-M-cycle approximation double-blocks
@@ -154,7 +154,7 @@ impl Interconnect {
             // `postread_scx5_ds_2` SameBoy-passes); the deferred frame's
             // release laws live in `Ppu::{oam,vram}_read_blocked` /
             // `ds_lineend_open`. EXCEPT a readback within 8 dots of a
-            // same-line VRAM write ATTEMPT (`vram_wr_recent`, the #11as
+            // same-line VRAM write ATTEMPT (`vram_wr_recent`, the
             // co-temporality): the write's M-cycle cost is what SameBoy
             // spreads across the readback, so those keep the straddle stamp
             // (`vramw_m3end_scx5_ds_{2,4}` SameBoy-passes, measured drop
@@ -175,7 +175,7 @@ impl Interconnect {
             0xFE00..=0xFE9F => {
                 // cc+2 MID-phase OAM read: a mode-3→mode-0 unblock landing
                 // in this M-cycle's second half is not yet visible here
-                // (sub-dot event-phase model, increment 1).
+                // (sub-dot event-phase model).
                 if !self.tier2_reclock && stamp_blocks(self.m0_access_edge, ACCESS_PHASE) {
                     0xFF
                 } else {
@@ -232,7 +232,7 @@ impl Interconnect {
             // phase as the OAM/VRAM read (sub-dot event-phase model).
             // The VRAM WRITE straddle stamp stays on BOTH paths: the tier2
             // bypass here dropped the SameBoy-passing `vramw_m3end_scx5_ds_4`
-            // (measured — the write side of the #11as co-temporality; only
+            // (measured — the write side of the co-temporality; only
             // the READ sites + the OAM write resolve at the deferred frame).
             0x8000..=0x9FFF if stamp_blocks(self.m0_access_edge, ACCESS_PHASE) => {}
             0x8000..=0x9FFF => self.intf |= self.ppu.write(addr, value) & IF_MASK,
@@ -280,7 +280,7 @@ impl Interconnect {
             // The STAT mode bits read at the cc+2 MID phase: in double speed
             // a read whose M-cycle straddles a sprite-line mode-3→mode-0 flip
             // still reads mode 3 for the WHOLE straddle M-cycle
-            // (`event_phase(StatMode)=END_PHASE`, INC-G3 task 6 — not only a
+            // (`event_phase(StatMode)=END_PHASE` — not only a
             // 2nd-half flip), where the whole-dot end view has already flipped
             // to mode 0 (gambatte sprites m3stat_ds). Only the low mode bits
             // move; the enable bits and the live LYC compare keep the end view.
@@ -291,7 +291,7 @@ impl Interconnect {
             // belt-and-braces: the flag is only set by a live flip (LCD on) and
             // reset every tick, so an LCD-off read can never carry it, but the
             // guard keeps the override from ever forcing mode 3 over the LCD-off
-            // mode 0. Sub-dot event-phase model, INC-DS-1 + INC-G3 task 6.
+            // mode 0.
             0xFF41
                 if stamp_blocks(self.stat_mode_edge, ACCESS_PHASE)
                     && self.double_speed
@@ -319,7 +319,7 @@ impl Interconnect {
             // the M-cycle end (whole-M-cycle block, see `pal_access_edge` /
             // [`event_phase`]), so the read stays $FF for the entire straddle
             // M-cycle and becomes readable only next M-cycle (sub-dot
-            // event-phase model, INC-G3 task 5). Tier-2 BYPASSES the stamp:
+            // event-phase model). tier2 BYPASSES the stamp:
             // the deferred (cc+0) read is resolved to its exact half-dot
             // BEFORE sampling, so the straddle-M-cycle approximation would
             // re-block a read landing legitimately past the unblock (the

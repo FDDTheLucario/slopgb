@@ -29,8 +29,8 @@ const CGB_LINESTART_OAM_OPEN_DS: u16 = 2;
 const PAL_M3START_OPEN: u16 = 3;
 
 impl Ppu {
-    /// Part C — a CPU VRAM write ATTEMPT landed on this line within the last
-    /// 8 dots (the #11as co-temporality discriminator, also used by the DS
+    /// A CPU VRAM write ATTEMPT landed on this line within the last
+    /// 8 dots (the co-temporality discriminator, also used by the DS
     /// line-END release arm in [`Self::vram_read_blocked`]): the write's
     /// M-cycle cost is what SameBoy spreads across the following readback, so
     /// a read this close behind a write keeps the straddle-blocked view (the
@@ -69,7 +69,7 @@ impl Ppu {
             // own window). Never set in production -> byte-identical OFF.
             && !self.cgb_linestart_oam_open()
             // Tier-2 CGB double-speed line-END OAM-read release (the render
-            // mode-3 LENGTH port, C2 #11as). SameBoy releases oam/vram reads at
+            // mode-3 LENGTH port). SameBoy releases oam/vram reads at
             // the mode-0 transition (`display.c:2118`, one cycle after the
             // `!cgb_double_speed` block SKIPPED under DS), which lands the
             // deferred cc+0 read's unblock at slopgb dot `254 + SCX&7`. slopgb's
@@ -88,7 +88,7 @@ impl Ppu {
     /// accessible from slopgb dot `254 + SCX&7`. slopgb's production block ran
     /// to `line_render_done` (~2 dots later), so the `oam_access/postread_ds_2`
     /// read (`ly135 dot254`, SameBoy accessible) stayed blocked while its `_1`
-    /// sibling (dot252, blocked) passed. Part C extends the SAME boundary to
+    /// sibling (dot252, blocked) passed. Extends the SAME boundary to
     /// OAM WRITES (`postwrite_ds_2` write@254 lands / `_1` @252 dropped;
     /// `postwrite_scx1_ds` 256/254 — the write release rides the identical
     /// `254 + SCX&7` law). Bare non-sprite non-window non-glitch lines only (a
@@ -127,8 +127,8 @@ impl Ppu {
         // the base's dot-0 read; opening only dots 1-3 separates them. Double
         // speed keeps dot 0 open (the DS read grid is 2 dots earlier — the DS
         // `preread_ds_lcdoffset1_1` reads `ly2 dot0` and wants OPEN; the DS base
-        // is its own S6/S7 grid).
-        // #11bd: shifted ROMs classify on the un-shifted frame (law_pos).
+        // is its own grid).
+        // Shifted ROMs classify on the un-shifted frame (law_pos).
         let (_, ld) = self.law_pos();
         let in_window = if self.ds {
             ld < CGB_LINESTART_OAM_OPEN_DS
@@ -160,7 +160,7 @@ impl Ppu {
                 // mode→0 flip (`vis_early`), one dot before `line_render_done` —
                 // the same coupling as the read side (see `oam_read_blocked`);
                 // the DS line-END release rides the same `254 + SCX&7` law as
-                // reads ([`Self::ds_lineend_open`], Part C).
+                // reads ([`Self::ds_lineend_open`]).
                 self.dot < 84
                     || (!self.line_render_done
                         && !self.write_unblocked_early()
@@ -188,7 +188,7 @@ impl Ppu {
             // Tier-2: VRAM unblocks coincident with the visible mode→0 flip
             // (`vis_early`); see `oam_read_blocked`. Byte-identical OFF.
             || (self.tier2_reclock && self.vis_early)
-            // NOTE (C2 #11as): the DS line-END read release is NOT applied to
+            // NOTE: the DS line-END read release is NOT applied to
             // VRAM. `vram_m3/postread_ds_2` (want accessible @dot254) is
             // CO-TEMPORAL with `vramw_m3end/vramw_m3end_ds_2` (want the readback
             // BLOCKED @dot254): the vramw write costs a CPU M-cycle that shifts
@@ -197,7 +197,7 @@ impl Ppu {
             // release is an A/B swap (+1 postread / −1 vramw). OAM has no
             // write-end readback at that dot, so its release ([`Self::
             // ds_lineend_read_open`], wired only into `oam_read_blocked`) is
-            // clean. The VRAM DS read grid is the parked S6 reclock.
+            // clean. The VRAM DS read grid is the parked reclock.
         {
             return false;
         }
@@ -206,22 +206,22 @@ impl Ppu {
         // `lineCycles + ds < 76 + 3*cgb`; SameBoy keeps vram_read_blocked
         // false through the OAM scan on CGB; age vram-read-cgbBCE).
         let late = if self.model.is_cgb() { 3 } else { 0 };
-        // #11bd: shifted ROMs classify the lock on the un-shifted frame
+        // Shifted ROMs classify the lock on the un-shifted frame
         // (`vram_m3/preread_lcdoffset1_1` reads dot83 after the +1-dot machine
         // advance where SameBoy still reads open; identity otherwise).
         let d = if self.tier2_reclock { self.law_pos().1 } else { self.dot };
-        // #11bd item 5 — the DS tier2 VRAM read frame: (a) the deferred cc+0
+        // The DS tier2 VRAM read frame: (a) the deferred cc+0
         // read's true DS sample sits +3 T late, so the mode-3 entry lock
         // covers it from dot 80 (the SS +3 CGB grace does not apply on the
         // DS grid: `preread_ds_2` reads dot82 wanting BLOCKED); (b) the
-        // line-END release mirrors the #11as OAM release at 254 + SCX&7,
+        // line-END release mirrors the OAM release at 254 + SCX&7,
         // EXCEPT within 8 dots of a same-line CPU VRAM write attempt (the
         // write's M-cycle cost SameBoy spreads across the readback —
         // `vramw_m3end_ds_2` stays blocked where the write-free
         // `prewrite_ds`/`postread_ds` readbacks are open).
         if self.tier2_reclock && self.model.is_cgb() && !self.glitch_line {
             // Line-END VRAM read release at the bare exit, BOTH speeds: the
-            // #11as SS refusal ("co-temporal with vramw_m3end") is resolved
+            // SS refusal ("co-temporal with vramw_m3end") is resolved
             // by the wr_recent discriminator — the vramw readback follows
             // its own VRAM write within 2 M-cycles (the write's M-cycle
             // cost SameBoy spreads across the readback) and stays blocked,
@@ -239,7 +239,7 @@ impl Ppu {
             {
                 return false;
             }
-            // #11bh — the wxA6 window line-END VRAM read release, SS. The
+            // The wxA6 window line-END VRAM read release, SS. The
             // WX=166 quirk window "activates during HBlank" (SameBoy
             // `wx_166_interrupt_glitch`); its VRAM unblock CO-MOVES with the
             // CGB visible exit (asm_window_gdma Row 6: unblock ∈
@@ -248,7 +248,7 @@ impl Ppu {
             // VRAM is still locked). slopgb held the lock to
             // `line_render_done` (261) so `m2int_wxA6_vrambusyread_3`'s
             // dot-260 read stayed blocked (want open, out5). wxA6-SCOPED —
-            // the generic win-line release was the vramw A/B (#11as).
+            // the generic win-line release was the vramw A/B.
             if !self.ds
                 && (1..=143).contains(&self.line)
                 && self.render.win_active
@@ -281,7 +281,7 @@ impl Ppu {
         if self.glitch_line {
             self.dot >= GLITCH_MODE3_START
         } else {
-            // #11bd item 5 — DS tier2: the deferred write's true DS sample
+            // DS tier2: the deferred write's true DS sample
             // sits later on the dot grid, so the mode-3 write lock covers it
             // from dot 82 (`prewrite_ds_2` wants its ~dot82 write BLOCKED
             // while `_1`'s earlier write lands).
@@ -309,10 +309,10 @@ impl Ppu {
             return false;
         }
         if self.render_finished {
-            // Part C/D (tier2) — the palette-RAM unblock trails the pipe end
+            // The palette-RAM unblock trails the pipe end
             // by 1 dot at single speed / 0 in double speed on the deferred
-            // (cc+0) frame. The full `cgbpal_m3end` constraint table
-            // (`c-palette-rederive-2026-07-02.md`): SS reads at
+            // (cc+0) frame. The full `cgbpal_m3end` constraint table:
+            // SS reads at
             // `pipe_end` are blocked (`m3end_1` @256, `scx2_1` @256,
             // `scx5_1` @260) while reads at/past `pipe_end + 1` are open
             // (`_2` @260 with pipe 256/258/259, `scx5_2` @264 with 261 —
@@ -332,7 +332,7 @@ impl Ppu {
         let lock = if self.glitch_line {
             GLITCH_MODE3_START
         } else if self.tier2_reclock && self.model.is_cgb() && !self.ds {
-            // Part C/D re-derivation — the tier2 SS mode-3 entry lock is the
+            // The tier2 SS mode-3 entry lock is the
             // mode-3 anchor 84 itself: the `*_m3start_2` triplet (SameBoy-pass)
             // accesses at dot 84 and wants BLOCKED (read FF / write dropped)
             // while the `_1` legs at dot 80 land — so the base boundary is 84,
@@ -340,9 +340,9 @@ impl Ppu {
             // the triplet to serve the STOP-shifted rows. The +3 grace applies
             // ONLY to shifted ROMs (`cgbpal_m3/*_m3start_lcdoffset1_1`'s
             // law-dot-85 access must stay open — the shifted poll lands +3
-            // dots per +1-dot machine advance, the #11bd poll-quantum law, so
+            // dots per +1-dot machine advance, the poll-quantum law, so
             // its law frame under-corrects and the boundary sits at 87 there).
-            // This also subsumes the #11bd item 5b first-frame (`frame_skip`)
+            // This also subsumes the first-frame (`frame_skip`)
             // arm — 84 is now the base for every unshifted frame.
             if self.lcd_shift_dots > 0 {
                 84 + PAL_M3START_OPEN
@@ -352,7 +352,7 @@ impl Ppu {
         } else {
             84
         };
-        // #11bd: shifted ROMs classify the access on the un-shifted frame
+        // Shifted ROMs classify the access on the un-shifted frame
         // (the machine STOPADV advance; identity otherwise).
         if self.tier2_reclock && self.model.is_cgb() && !self.ds {
             let (_, ld) = self.law_pos();

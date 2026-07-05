@@ -61,8 +61,8 @@ impl Interconnect {
     /// loop): tick the PPU, fold its IF / second-half halt-late masks
     /// (`stat_late`/`stat_halt_late`/`m0_rise`) and the accessibility/STAT edge
     /// stamps for cc `cc` (1..=4), and pump the dot-exact HBlank-DMA level
-    /// detector. Shared by the eager whole-M-cycle `tick_machine` and the port
-    /// Stage-B deferred per-T advance ([`Self::advance_machine_t`]).
+    /// detector. Shared by the eager whole-M-cycle `tick_machine` and the
+    /// deferred per-T advance ([`Self::advance_machine_t`]).
     pub(super) fn tick_machine_dot(&mut self, cc: u8) {
         let ppu_if = self.ppu.tick();
         self.fold_ppu_events(ppu_if, cc);
@@ -113,26 +113,25 @@ impl Interconnect {
                     );
                 }
                 if self.tier2_reclock && (!self.model.is_cgb() || !self.double_speed) {
-                    // #11bf — the mode-0 rise's halt-wake visibility is a
+                    // The mode-0 rise's halt-wake visibility is a
                     // T-deadline on the SameBoy-exact 4k+2 sample grid — no
                     // M-quantized `if_late`/`m0_halt_hold` masking, and no
-                    // C1.3 LY-phase carry (the exact grid + the post-wake
+                    // LY-phase carry (the exact grid + the post-wake
                     // re-fetch land the first FF44 read correctly on their
                     // own — `hblank_ly_scx_timing-GS` re-swept, the carry
                     // table's only passing value is all-zero). Set on EVERY
                     // rise (a halt entered inside the rise's M-cycle consults
                     // it at the entry check + the first idle sample). The
                     // glitch (LCD-enable) line's engine rise is emitted at
-                    // visexit where normal lines emit at visexit − 3
-                    // (dual-trace measured), so its deadline carries the
-                    // per-shape +4 correction (`int_hblank_halt_scx0-7`
-                    // wakes on the glitch line and pins it).
+                    // visexit where normal lines emit at visexit − 3, so its
+                    // deadline carries the per-shape +4 correction
+                    // (`int_hblank_halt_scx0-7` wakes on the glitch line and
+                    // pins it).
                     let gl = if self.ppu.glitch_line_now() { 4 } else { 0 };
                     self.stat_vis_from_t = self.machine_now + gl;
                 } else if self.tier2_reclock && self.cpu_halted {
-                    // Port Stage B — re-derive the mode-0 halt-wake mask for the
-                    // deferred cc+0 frame (the `int_hblank_halt_scx0-7` DMG grid;
-                    // `ppu-subdot-ladder.md` THESIS RESULT #8/#9). The deferred
+                    // Re-derive the mode-0 halt-wake mask for the deferred cc+0
+                    // frame (the `int_hblank_halt_scx0-7` DMG grid). The deferred
                     // halt loop samples `pending_halt_wake` at cc+0, ~2 M-cycles
                     // before SameBoy's `GB_cpu_run` DMG mid-cycle sample
                     // (`sm83_cpu.c:1621-1628`, advance-2 → sample → advance-2)
@@ -153,8 +152,8 @@ impl Interconnect {
                     // mid-cycle). Reached only on the reclock path (`tier2_reclock`),
                     // so production is byte-identical.
                     self.if_late |= IF_STAT_BIT;
-                    // C1.3 (S7): carry the rise's within-M-cycle phase to the
-                    // first post-wake LY read (see `Interconnect::halt_ly_phase`).
+                    // Carry the rise's within-M-cycle phase to the first
+                    // post-wake LY read (see `Interconnect::halt_ly_phase`).
                     // The back-date dots are indexed by the rise's M-cycle phase
                     // `cc` (1..=4). Geometrically pinned: a rise at cc=2 lands the
                     // straddling read 2 dots past the LY-increment (back-date 2),
@@ -163,18 +162,18 @@ impl Interconnect {
                     // (`hblank_ly_scx_timing-GS` resolves only the straddlers).
                     // Calibrated to the ROM's hardware values (the SameBoy/HW
                     // ground truth); broader generalisation is golden + all-oracle
-                    // checked at C4. Gated on `tier2_reclock` + `cpu_halted`.
+                    // checked. Gated on `tier2_reclock` + `cpu_halted`.
                     const HALT_LY_PHASE_BY_CC: [u8; 4] = [1, 2, 0, 1];
-                    // PORT 2 sweep knob (`SLOPGB_P2TBL`, temporary): the carry
-                    // table re-derived for the mid-sample wake frame.
+                    // `SLOPGB_P2TBL` overrides the carry table for measurement
+                    // sweeps of the mid-sample wake frame.
                     self.halt_ly_phase = match std::env::var("SLOPGB_P2TBL") {
                         Ok(t) if t.len() == 4 => {
                             t.as_bytes()[(cc as usize - 1) & 3] - b'0'
                         }
                         _ => HALT_LY_PHASE_BY_CC[(cc as usize - 1) & 3],
                     };
-                    // C1.2: base 0 (was 1). The C0 boot-DIV +4 (the deferred
-                    // hand-off frame the real flip installs at construction)
+                    // Base 0 (was 1). The boot-DIV +4 (the deferred hand-off
+                    // frame installed at construction)
                     // advances the timer phase one M-cycle, which shifts this
                     // TIMA-counted halt-wake +1; dropping the uniform mask from
                     // 2 M-cycles to 1 (this cycle + `m0_halt_hold = cc==4`)
@@ -184,14 +183,14 @@ impl Interconnect {
                     // set-after-boot path that does NOT apply the +4 — see the
                     // `tier2_int_hblank_halt_passes_dmg` pin (now boots with the
                     // reclock).
-                    // PORT 2 (#11bc): +1 uniform mask cycle re-derived under
+                    // +1 uniform mask cycle re-derived under
                     // the mid-cycle (w2) wake sample — the w2 advance runs the
                     // following M-cycle's phase-0 mask bookkeeping 2 T early,
                     // consuming one hold a half-cycle sooner; the extra cycle
-                    // restores the C1.2-calibrated visibility (measured: the
+                    // restores the calibrated visibility (the
                     // full 33-pin gate incl. `int_hblank_halt_scx0-7`'s
                     // 62,62,62,63,63,63,63,64 grid AND `hblank_ly_scx` with
-                    // the unchanged C1.3 carry table passes ONLY at +1).
+                    // the unchanged carry table passes ONLY at +1).
                     // `SLOPGB_P2HH` overrides for measurement.
                     // DMG-only: the +1 compensates the mid-cycle (w2)
                     // sampler's early phase-0 mask consumption, which only
@@ -202,10 +201,10 @@ impl Interconnect {
                         .ok()
                         .and_then(|v| v.parse().ok())
                         .unwrap_or(u8::from(!self.model.is_cgb()));
-                    // #11bd item 2 — the cc==4 hold is DMG-ONLY: it models the
+                    // The cc==4 hold is DMG-ONLY: it models the
                     // mid-cycle (w2) sampler's frame rotation, which does not
-                    // exist on CGB (head sampler). The CGB dual-trace
-                    // (`m0int_m0stat_scx2_{1,2}`): SameBoy wakes both legs at
+                    // exist on CGB (head sampler). For the CGB
+                    // `m0int_m0stat_scx2_{1,2}` legs: SameBoy wakes both at
                     // cfl261 (= rise+1 check slot); slopgb's mask alone lands
                     // the wake in the same slot (dot260-check), while the cc==4
                     // hold pushed it +1 M (dot264) -> the `_1`/`_a` want-0 legs
@@ -245,22 +244,21 @@ impl Interconnect {
                 // (gambatte oam_access/postread_*). The edge is stamped with
                 // its dot-END commit eighth ([`event_phase`]); the read decides
                 // blocking against the single CPU-access observer phase
-                // [`ACCESS_PHASE`] ([`stamp_blocks`]). Sub-dot event-phase
-                // model, increment 1.
+                // [`ACCESS_PHASE`] ([`stamp_blocks`]).
                 self.m0_access_edge = Some(event_phase(EdgeKind::M0Access, cc, lead));
             }
             if let Some(lead) = self.ppu.take_pal_access_flip() {
                 // The CGB palette-RAM unblock commits at the M-cycle end
                 // ([`event_phase`] gives `PalAccess` the whole-M-cycle block):
                 // the FF69/FF6B read stays $FF for the entire straddle M-cycle,
-                // not just its second half (gambatte cgbpal_m3end). INC-G3 task 5.
+                // not just its second half (gambatte cgbpal_m3end).
                 self.pal_access_edge = Some(event_phase(EdgeKind::PalAccess, cc, lead));
             }
             if let Some(lead) = self.ppu.take_m0_stat_flip() {
                 // A sprite-line m3→m0 flip holds the double-speed FF41 mode bits
                 // at the pre-flip mode 3 for the WHOLE straddle M-cycle
-                // (`event_phase(StatMode)=END_PHASE`, INC-G3 task 6): INC-DS-1's
-                // dot-END half-split caught only the +43 rows whose flip lands in
+                // (`event_phase(StatMode)=END_PHASE`): the earlier dot-END
+                // half-split caught only the +43 rows whose flip lands in
                 // the M-cycle's second half; the whole-M-cycle block adds the +84
                 // residual `m3stat_ds_1` rows whose flip lands in the first half
                 // (gambatte sprites). Net-positive A/B trade (full-gbtr +84/−3,
@@ -297,13 +295,12 @@ impl Interconnect {
         }
     }
 
-    /// Port Stage B (Tier 2) — the deferred-commit machine advance. Advances the
+    /// The deferred-commit machine advance. Advances the
     /// PPU/timer/APU/serial across the half-open CPU-T-cycle span `[from_t,
     /// to_t)` (the debt the deferred-commit clock just paid), instead of a flat
-    /// whole-M-cycle quantum. With the dispatch reclock re-parking `pending=2`
-    /// (B2), the vector fetch + first handler reads advance only 2 T before
-    /// sampling, so they land 2 dots early ("re-frames every read";
-    /// `docs/sameboy-port/PORT-PLAN.md` Tier 2).
+    /// whole-M-cycle quantum. With the dispatch reclock re-parking `pending=2`,
+    /// the vector fetch + first handler reads advance only 2 T before
+    /// sampling, so they land 2 dots early ("re-frames every read").
     ///
     /// Mirrors `tick_machine`'s per-M-cycle structure but T-by-T: each M-cycle's
     /// first T (`phase==0`) does the timer reset / OAM-DMA / edge-reset /
@@ -316,7 +313,7 @@ impl Interconnect {
     /// per-M-cycle squash across the split. Conserves the per-M-cycle 4-T total.
     pub(super) fn advance_machine_t(&mut self, from_t: u64, to_t: u64) {
         for pos in from_t..to_t {
-            // #11bf: the T being executed, for the p2grid visibility deadline.
+            // The T being executed, for the mode-0 rise visibility deadline.
             self.machine_now = pos;
             let phase = (pos % 4) as u8; // 0..=3 within the M-cycle
             if phase == 0 {
@@ -346,9 +343,8 @@ impl Interconnect {
                 self.pal_access_edge = None;
                 self.stat_mode_edge = None;
             }
-            // PORT 3 (#11bc, the S6 completion frame): the deferred path's
-            // timer/serial ack-squash window is the EXACT SameBoy
-            // T-threshold (`updateTimaIrq(cc + 2 + isCgb())` /
+            // The deferred path's timer/serial ack-squash window is the EXACT
+            // SameBoy T-threshold (`updateTimaIrq(cc + 2 + isCgb())` /
             // `updateSerial(cc + 3 + isCgb())` before `ackIrq`), not the
             // whole-M-cycle `deferred_squash` latch — a re-set committing
             // past the threshold is DELIVERED (`tima/tc00_irq_late_
@@ -367,20 +363,20 @@ impl Interconnect {
             if tlate {
                 self.if_late |= t_iff;
             }
-            // PORT 3: the serial completion commits at its true T — the
+            // The serial completion commits at its true T — the
             // DIV-edge falls are detected per T-substep on the deferred path
             // (the eager `tick_machine` keeps the M-cycle-tail sample; the
             // detector is a falling-edge compare, so the finer cadence finds
             // the same edges at their exact T).
             self.intf |= self.serial.tick(self.timer.div_counter()) & IF_MASK & !squash_t;
-            // Half-dot PPU advance (HALFDOT-BUILD-PLAN.md Part A): each CPU-T is
+            // Half-dot PPU advance: each CPU-T is
             // 2 8-MHz half-dots (single speed) or 1 (double speed); the PPU runs
             // per half-dot via [`Ppu::tick_half`]. A whole dot completes every
             // 2nd half-dot (single speed → 1 dot per T; double speed → 1 dot per
             // 2 T), and the fold + the `cycles` dot-clock bump run only on that
             // completing half — reproducing the old whole-dot `dot_ticks_on_cc`
             // grid exactly (single speed every cc; double speed the even cc), so
-            // Stage 1 is byte-identical while the grain is now half-dot. `cc` of
+            // it stays byte-identical while the grain is now half-dot. `cc` of
             // the completing dot = `phase + 1`, matching the whole-dot fold.
             let cc = phase + 1;
             let half_dots = if self.double_speed { 1 } else { 2 };
@@ -431,7 +427,7 @@ impl Interconnect {
             return;
         }
         if halted {
-            // PORT 2 (#11bc): repay an outstanding sub-M-cycle wake skew
+            // Repay an outstanding sub-M-cycle wake skew
             // before the next halt round begins, re-aligning the CPU to the
             // machine's 4-T grid — the skew lives from the mid-cycle wake
             // through the WHOLE handler (its measurement reads sample at the
