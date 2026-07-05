@@ -14,8 +14,8 @@ fn debug_menu_evaluate_and_clocks_are_live() {
     let st = DebuggerState::default();
     let m = menubar_menu(3, l.menu, &st, 0x0100); // index 3 = Debug
     // Toggle bp / Evaluate / Set user clocks / Breakpoints / Watchpoints /
-    // Freezes / Load symbols.
-    assert_eq!(m.items.len(), 7);
+    // Freezes / CDL logging / Clear CDL / Save CDL / Load CDL / Load symbols.
+    assert_eq!(m.items.len(), 11);
     assert!(
         m.items.iter().all(|it| it.enabled),
         "every Debug row is live"

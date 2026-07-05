@@ -107,6 +107,44 @@ fn memory_view_cursor_move_autoscrolls_and_cancels_edit() {
 }
 
 #[test]
+fn memory_window_tints_cdl_flagged_bytes() {
+    let mut gb = machine();
+    let base = 0xC000u16;
+    let mut fixture = [0u8; 65536];
+    fixture[base as usize] = 4; // X → red at column 0
+    gb.load_cdl(&fixture);
+    // Cursor left at the default 0xFF00 (off-screen from base) so its overlay
+    // can't cover the tinted cell.
+    let st = WinState::Memory(MemoryView {
+        mem_base: base,
+        ..MemoryView::default()
+    });
+    let (w, h) = (430usize, 360usize);
+    let mut buf = vec![0u32; w * h];
+    {
+        let mut c = Canvas::new(&mut buf, w, h);
+        render(
+            ToolWindow::MemoryViewer,
+            &gb,
+            &mut c,
+            &Theme::BGB,
+            &st,
+            &Breakpoints::default(),
+        );
+    }
+    let gw = crate::ui::font::GLYPH_W;
+    let lh = crate::ui::text::line_height() as usize;
+    let want = crate::cdl::cdl_color(4).unwrap();
+    let cell_has = |cx: usize, color: u32| {
+        (0..lh).any(|y| (cx..cx + 2 * gw).any(|x| buf[y * w + x] == color))
+    };
+    // Column 0 hex starts at char 10; the flagged byte's cell is tinted.
+    assert!(cell_has(10 * gw, want), "flagged byte cell tinted");
+    // Column 1 (char 13) is unflagged → not tinted.
+    assert!(!cell_has(13 * gw, want), "unflagged byte not tinted");
+}
+
+#[test]
 fn memory_window_status_bar_shows_nearest_symbol() {
     use crate::symbols::SymbolTable;
     use std::rc::Rc;

@@ -774,7 +774,7 @@ fn menubar_rects_tile_the_bar_left_to_right() {
 fn each_bar_menu_has_the_captured_item_count() {
     let l = DebuggerLayout::for_size(AREA.w, AREA.h);
     let st = DebuggerState::default();
-    let counts = [16, 5, 18, 7, 11, 5]; // File, Search, Run, Debug, Window, Profiler
+    let counts = [16, 5, 18, 11, 11, 5]; // File, Search, Run, Debug, Window, Profiler
     for (idx, &n) in counts.iter().enumerate() {
         let m = menubar_menu(idx, l.menu, &st, 0x0100);
         assert_eq!(m.items.len(), n, "menu {idx} item count");

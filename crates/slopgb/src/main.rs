@@ -20,6 +20,7 @@ mod app_pacing;
 mod app_path;
 mod app_run;
 mod audio;
+mod cdl;
 mod cli;
 mod clipboard;
 mod dbg;
@@ -136,6 +137,10 @@ enum PathPurpose {
     Bootrom(windows::options::BootromSlot),
     /// Load a `.sym` symbol file from the typed path (debugger labels/go-to).
     SymbolFile,
+    /// Save the CDL flags to the typed path (RLE-compressed).
+    CdlSave,
+    /// Load CDL flags from the typed path.
+    CdlLoad,
 }
 
 /// Resolve the boot ROM bytes from `--boot` or the `SLOPGB_BOOT` env var,

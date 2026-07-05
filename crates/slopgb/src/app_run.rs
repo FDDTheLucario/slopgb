@@ -11,7 +11,7 @@ use winit::event_loop::ActiveEventLoop;
 use crate::input::Action;
 use crate::windows::debugger::MenuOutcome;
 use crate::windows::mainwin::InfoBox;
-use crate::{App, dbg, screenshot, ui, windows};
+use crate::{App, PathPurpose, dbg, screenshot, ui, windows};
 
 /// Top-left origin of the bp/wp manager list popup, below the debugger menu bar.
 const MANAGER_ORIGIN: (i32, i32) = (40, 30);
@@ -164,6 +164,15 @@ impl App {
                 );
                 self.tools.set_debugger_menu(menu);
             }
+            // CDL (code/data logging): toggle logging, clear the buffer, or
+            // save/load the flags (compressed) via the shared path modal.
+            Action::DbgToggleCdl => {
+                let on = self.session.gb.cdl_flags().is_none();
+                self.session.gb.set_cdl(on);
+            }
+            Action::DbgClearCdl => self.session.gb.cdl_clear(),
+            Action::DbgSaveCdl => self.open_path_prompt("Save CDL", PathPurpose::CdlSave),
+            Action::DbgLoadCdl => self.open_path_prompt("Load CDL", PathPurpose::CdlLoad),
             // bgb's "Enable sound": flip the runtime mute. Unmuting lazily opens
             // the device (so a `--mute` start can still enable sound). Resync
             // pacing so the audio↔timer switch doesn't fast-forward a backlog.

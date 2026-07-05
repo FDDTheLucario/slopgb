@@ -206,6 +206,19 @@ pub fn render(
 fn render_memory_window(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, st: &MemoryView) {
     let lh = line_height();
     let body = Rect::new(area.x, area.y, area.w, (area.h - lh).max(0));
+    // CDL: tint each visited byte's cell background (R/W/X) before the dump text
+    // draws over it. Off (all flags 0 / log disabled) = no tint = unchanged view.
+    let vis_rows = (body.h / lh).max(0);
+    for row in 0..vis_rows {
+        for col in 0..16i32 {
+            let addr = st.mem_base.wrapping_add((row * 16 + col) as u16);
+            if let Some(bg) = crate::cdl::cdl_color(gb.cdl_flag(addr)) {
+                let cch = 10 + 3 * col + i32::from(col >= 8);
+                let (cx, cy) = (body.x + cch * GLYPH_W as i32, body.y + row * lh);
+                c.fill_rect(Rect::new(cx, cy, 2 * GLYPH_W as i32, lh), bg);
+            }
+        }
+    }
     debugger::render_memory(c, body, |a| gb.debug_read(a), st.mem_base, theme, &st.symbols);
     // In-place edit cursor: highlight the byte at `cursor` when it is visible in
     // the dump, overprinting its value (or the pending high nibble mid-edit).

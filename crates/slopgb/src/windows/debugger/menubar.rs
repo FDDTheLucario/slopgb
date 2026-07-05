@@ -202,6 +202,10 @@ fn debug_menu(cursor: u16) -> Vec<(MenuItem, MenuChoice)> {
         cmd("Breakpoints", "Ctrl+H", Action::DbgManageBreakpoints),
         cmd("Watchpoints", "Ctrl+J", Action::DbgManageWatchpoints),
         cmd("Freezes", "Ctrl+K", Action::DbgManageFreezes),
+        cmd("CDL logging", "Ctrl+D", Action::DbgToggleCdl),
+        cmd("Clear CDL", "", Action::DbgClearCdl),
+        cmd("Save CDL...", "", Action::DbgSaveCdl),
+        cmd("Load CDL...", "", Action::DbgLoadCdl),
         (
             MenuItem::new("Load symbols..."),
             MenuChoice::Command(Action::DbgLoadSymbols),

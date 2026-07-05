@@ -1,0 +1,107 @@
+//! CDL (code/data logging) frontend helpers: the per-flag background tint for
+//! the memory viewer, and a std-only RLE codec for the compressed save file.
+//! The core owns the golden-safe flag store; this is pure display + file glue.
+
+/// Background tint (XRGB) for a byte whose CDL access `flag` is `R=1/W=2/X=4`,
+/// or `None` for an unvisited byte (flag 0 → no tint). Each channel maps one
+/// access so combos read as distinct blends: X(code)→red, W(write)→green,
+/// R(read)→blue (X|R = magenta, X|W = yellow, R|W = cyan, all three = grey).
+#[must_use]
+pub fn cdl_color(flag: u8) -> Option<u32> {
+    match flag & 0x07 {
+        0 => None,
+        f => {
+            let red = u32::from(f & 4 != 0) * 0xC0; // execute
+            let green = u32::from(f & 2 != 0) * 0xC0; // write
+            let blue = u32::from(f & 1 != 0) * 0xC0; // read
+            Some((red << 16) | (green << 8) | blue)
+        }
+    }
+}
+
+/// Run-length encode `data` as `(value, count_le_u16)` triples — tuned for the
+/// mostly-zero CDL flag array (a 64 KiB all-zero buffer → 6 bytes). Runs cap at
+/// `u16::MAX`; a longer run splits into consecutive triples.
+#[must_use]
+pub fn rle_encode(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < data.len() {
+        let v = data[i];
+        let mut run = 1usize;
+        while i + run < data.len() && data[i + run] == v && run < u16::MAX as usize {
+            run += 1;
+        }
+        out.push(v);
+        out.extend_from_slice(&(run as u16).to_le_bytes());
+        i += run;
+    }
+    out
+}
+
+/// Decode [`rle_encode`] output. A trailing partial triple (corrupt/truncated
+/// file) is ignored rather than panicking.
+#[must_use]
+pub fn rle_decode(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i + 3 <= bytes.len() {
+        let v = bytes[i];
+        let count = u16::from_le_bytes([bytes[i + 1], bytes[i + 2]]) as usize;
+        out.resize(out.len() + count, v);
+        i += 3;
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cdl_color_none_for_unvisited_and_distinct_per_combo() {
+        assert_eq!(cdl_color(0), None, "unvisited → no tint");
+        let colors: Vec<u32> = (1..=7).map(|f| cdl_color(f).unwrap()).collect();
+        let mut uniq = colors.clone();
+        uniq.sort_unstable();
+        uniq.dedup();
+        assert_eq!(uniq.len(), 7, "each r/w/x combo has a distinct color");
+        // High bits (bit 3+) are ignored — only r/w/x matter.
+        assert_eq!(cdl_color(0xF0), None);
+        assert_eq!(cdl_color(0x84), cdl_color(4));
+    }
+
+    #[test]
+    fn rle_round_trips_and_compresses_zeros() {
+        let zero = vec![0u8; 65536];
+        let enc = rle_encode(&zero);
+        assert!(enc.len() < 16, "all-zero compresses hard: {} bytes", enc.len());
+        assert_eq!(rle_decode(&enc), zero);
+
+        let mut sparse = vec![0u8; 65536];
+        sparse[0x0100] = 4;
+        sparse[0xC000] = 3;
+        sparse[0xFFFF] = 1;
+        assert_eq!(rle_decode(&rle_encode(&sparse)), sparse);
+
+        let dense: Vec<u8> = (0..2000u32).map(|n| (n * 7 % 8) as u8).collect();
+        assert_eq!(rle_decode(&rle_encode(&dense)), dense);
+
+        assert_eq!(rle_decode(&rle_encode(&[])), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn cdl_save_load_pipeline_reconstructs_flags() {
+        use slopgb_core::{GameBoy, Model};
+        // The full save→load data path (minus fs): encode → decode → load_cdl.
+        let mut fixture = [0u8; 65536];
+        fixture[0x0100] = 4; // X
+        fixture[0xC000] = 3; // R|W
+        let dec = rle_decode(&rle_encode(&fixture));
+        let arr = <[u8; 65536]>::try_from(dec.as_slice()).unwrap();
+        let mut gb = GameBoy::new(Model::Dmg, vec![0u8; 0x8000]).unwrap();
+        gb.load_cdl(&arr);
+        assert_eq!(gb.cdl_flag(0x0100), 4);
+        assert_eq!(gb.cdl_flag(0xC000), 3);
+    }
+}

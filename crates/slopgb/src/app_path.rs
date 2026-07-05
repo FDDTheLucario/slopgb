@@ -24,7 +24,7 @@ pub(crate) enum PickKind {
 #[must_use]
 pub(crate) fn pick_kind(purpose: PathPurpose) -> PickKind {
     match purpose {
-        PathPurpose::SaveState => PickKind::Save,
+        PathPurpose::SaveState | PathPurpose::CdlSave => PickKind::Save,
         PathPurpose::LinkConnect => PickKind::None,
         _ => PickKind::Open,
     }
@@ -134,6 +134,26 @@ impl App {
                 }
             }
             PathPurpose::SymbolFile => self.load_symbols(path),
+            PathPurpose::CdlSave => match self.session.gb.cdl_flags() {
+                Some(flags) => match std::fs::write(path, crate::cdl::rle_encode(flags)) {
+                    Ok(()) => println!("slopgb: saved CDL to {}", path.display()),
+                    Err(e) => eprintln!("slopgb: save CDL failed: {e}"),
+                },
+                None => eprintln!("slopgb: CDL not enabled — nothing to save"),
+            },
+            PathPurpose::CdlLoad => match std::fs::read(path) {
+                Ok(bytes) => {
+                    let dec = crate::cdl::rle_decode(&bytes);
+                    match <[u8; 65536]>::try_from(dec.as_slice()) {
+                        Ok(arr) => {
+                            self.session.gb.load_cdl(&arr);
+                            println!("slopgb: loaded CDL from {}", path.display());
+                        }
+                        Err(_) => eprintln!("slopgb: bad CDL file (expected 64 KiB of flags)"),
+                    }
+                }
+                Err(e) => eprintln!("slopgb: load CDL failed: {e}"),
+            },
         }
     }
 
