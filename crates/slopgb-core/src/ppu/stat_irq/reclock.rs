@@ -74,6 +74,12 @@ impl Ppu {
                     if lvl && !self.stat_update.line() {
                         self.pending_if |= IF_STAT;
                         self.stat_update_halt_masks(mfi_now);
+                        probe!(if crate::probe::s5dbg_on() && self.line < 154 {
+                            eprintln!(
+                                "SLOPGB dispatch ly={} dot={} mfi={} lycln={} (ff41 t0)",
+                                self.line, self.dot, mfi_now, self.lyc_interrupt_line as u8
+                            );
+                        });
                     }
                     self.stat_update.force_level(lvl);
                     self.eng_stat_pending = Some((phase1, fin, pre_high, mfi_now, k));
@@ -99,6 +105,12 @@ impl Ppu {
                     } else if !self.stat_update.line() {
                         if !pre_high {
                             self.lyc_if_delay = self.lyc_if_delay.max(3);
+                            probe!(if crate::probe::s5dbg_on() && self.line < 154 {
+                                eprintln!(
+                                    "SLOPGB dispatch ly={} dot={} mfi={} lycln={} (ff41 fin delayed)",
+                                    self.line, self.dot, mfi_t0, self.lyc_interrupt_line as u8
+                                );
+                            });
                         }
                         self.stat_update.force_level(true);
                     }
@@ -329,6 +341,12 @@ impl Ppu {
                 if ack_consumed {
                     self.ack_squash_ppu = 0;
                 }
+                probe!(if crate::probe::s5dbg_on() && self.line < 154 {
+                    eprintln!(
+                        "SLOPGB dispatch ly={} dot={} mfi={} lycln={} (ifw squashed)",
+                        self.line, self.dot, mfi, self.lyc_interrupt_line as u8
+                    );
+                });
             } else {
                 self.pending_if |= IF_STAT;
                 // Tag the line-0 dot-4 OAM pulse for the
@@ -339,6 +357,12 @@ impl Ppu {
                     // (the dot==4 gate keeps later dots out regardless).
                     self.ly0_pulse_age = 2;
                 }
+                probe!(if crate::probe::s5dbg_on() && self.line < 154 {
+                    eprintln!(
+                        "SLOPGB dispatch ly={} dot={} mfi={} lycln={}",
+                        self.line, self.dot, mfi, self.lyc_interrupt_line as u8
+                    );
+                });
                 self.stat_update_halt_masks(mfi);
             }
         }

@@ -12,6 +12,9 @@
 //! access of that cycle is performed. See `docs/ARCHITECTURE.md` for the full
 //! contract.
 
+#[macro_use]
+pub(crate) mod probe;
+
 pub(crate) mod apu;
 pub(crate) mod cartridge;
 pub(crate) mod cpu;

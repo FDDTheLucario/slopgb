@@ -7,6 +7,13 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+# Opt-in SameBoy-port measurement harness (read/wake/ISR traces + tier2 sweep
+# knobs). Off by default so the production build stays byte-identical. See
+# src/probe.rs.
+port_probe = []
+
 [dependencies]
 # Intentionally empty. The core stays dependency-free.
 

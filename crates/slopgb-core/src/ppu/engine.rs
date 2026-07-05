@@ -428,6 +428,12 @@ impl Ppu {
                 self.wy_trig_sb = true;
                 self.wy_trig_sb_line = self.ly;
                 self.wy_trig_sb_dot = self.dot;
+                probe!(if crate::probe::s5dbg_on() {
+                    eprintln!(
+                        "SLOPGB wytrigset ly={} dot={} wy2={}",
+                        self.ly, self.dot, self.wy2
+                    );
+                });
             }
         }
         if self.line == 0 && self.dot == 2 {
@@ -467,6 +473,21 @@ impl Ppu {
             // Visible mode-0 flip + IRQ-source rise (after the dot's
             // render step so the projection sees this dot's state).
             self.m0_flip_events();
+            // Trace the EFFECTIVE CPU-visible mode-3→0 EXIT dot — the dot
+            // `vis_mode_read()` (what the FF41 register read returns, incl.
+            // the window law / vis_hold / m0_unflip re-projection) actually
+            // flips 3→0, to line up against SameBoy's mode trace.
+            probe!(if crate::probe::s5dbg_on() {
+                use std::cell::Cell;
+                thread_local!(static PREV: Cell<u8> = const { Cell::new(255) });
+                let vm = self.vis_mode_read();
+                PREV.with(|p| {
+                    if p.get() == 3 && vm == 0 {
+                        eprintln!("SLOPGB visexit ly={} dot={}", self.line, self.dot);
+                    }
+                    p.set(vm);
+                });
+            });
         }
         if self.model.is_cgb() && !self.ds && self.line == 152 && self.dot == 454 {
             // CGB-C single speed loads LY=153 two dots before line 153

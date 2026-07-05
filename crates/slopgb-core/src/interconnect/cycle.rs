@@ -165,6 +165,7 @@ impl Interconnect {
         let before = self.clock.now();
         let _ = self.clock.read(); // clock += old pending; park 4
         self.advance_machine_t(before, self.clock.now());
+        probe!(self.dbg_isr("rd", addr));
         self.service_vram_dma();
         self.maybe_oam_bug(addr, kind);
         let v = self.read_no_tick(addr);
@@ -214,6 +215,21 @@ impl Interconnect {
                 self.repay_wake_skew();
             }
         }
+        probe!(if matches!(addr, 0xFF68..=0xFF6B) && crate::probe::s5dbg_on() {
+            let (line, dot) = self.ppu.scan_pos();
+            eprintln!("SLOPGB pal{addr:04x} ly={line} dot={dot} v={v:02x}");
+        });
+        probe!(if addr == 0xFF0F && crate::probe::s5dbg_on() {
+            let (line, dot) = self.ppu.scan_pos();
+            eprintln!("SLOPGB ff0f ly={line} dot={dot} if={:02x}", v & 0x1f);
+        });
+        probe!(if matches!(addr, 0xFE00..=0xFE9F | 0x8000..=0x9FFF) && crate::probe::s5dbg_on() {
+            let (line, dot) = self.ppu.scan_pos();
+            if line < 144 {
+                let kind = if addr < 0xA000 { "vram" } else { "oam" };
+                eprintln!("SLOPGB {kind} ly={line} dot={dot} v={v:02x}");
+            }
+        });
         v
     }
 
@@ -238,6 +254,11 @@ impl Interconnect {
         let before = self.clock.now();
         let _ = self.clock.write(conflict);
         self.advance_machine_t(before, self.clock.now());
+        probe!(self.dbg_isr("wr", addr));
+        probe!(if matches!(addr, 0xFF68..=0xFF6B) && crate::probe::s5dbg_on() {
+            let (cly, cdot) = self.ppu.scan_pos();
+            eprintln!("SLOPGB palw{addr:04x} val={value:02x} ly={cly} dot={cdot}");
+        });
         // A racing DMA-register write beats a same-advance
         // HBlank-DMA steal: SameBoy runs `GB_hdma_run` only after the
         // current instruction completes (sm83_cpu.c:1718), so the write's
@@ -393,6 +414,14 @@ impl Interconnect {
             } else {
                 2
             };
+            probe!(if matches!(addr, 0xFF40 | 0xFF43 | 0xFF4A | 0xFF4B) && crate::probe::s5dbg_on() {
+                let (l, d) = self.ppu.scan_pos();
+                eprintln!(
+                    "SLOPGB w{addr:04x} val={value:02x} ly={l} dot={d} clk={} ds={}",
+                    self.cycles,
+                    u8::from(self.double_speed)
+                );
+            });
             self.ppu.stage_write(addr, value, dots);
         }
         self.maybe_oam_bug(addr, OamBugKind::Write);
@@ -414,6 +443,7 @@ impl Interconnect {
         let before = self.clock.now();
         self.clock.internal();
         self.advance_machine_t(before, self.clock.now()); // delta 0 (deferred)
+        probe!(self.dbg_isr("na", 0));
         self.service_vram_dma();
     }
 
@@ -423,6 +453,7 @@ impl Interconnect {
         let before = self.clock.now();
         let _ = self.clock.read();
         self.advance_machine_t(before, self.clock.now());
+        probe!(self.dbg_isr("ob", value));
         self.service_vram_dma();
         self.maybe_oam_bug(value, OamBugKind::Write);
     }
@@ -439,5 +470,24 @@ impl Interconnect {
     #[cfg(test)]
     pub(crate) fn cpu_clock_pending(&self) -> u32 {
         self.clock.pending()
+    }
+}
+
+/// SameBoy-port per-access ISR trace. Compiled only under `--features
+/// port_probe` and gated at runtime by `SLOPGB_ISRTRACE`; see [`crate::probe`].
+#[cfg(feature = "port_probe")]
+impl Interconnect {
+    fn dbg_isr(&self, tag: &str, addr: u16) {
+        if !crate::probe::isrtrace_on() {
+            return;
+        }
+        let (line, dot) = self.ppu.scan_pos();
+        if (134..=138).contains(&line) || line <= 3 {
+            eprintln!(
+                "SL2 {tag} a={addr:04x} ly={line} dot={dot} clk={} pend={}",
+                self.clock.now(),
+                self.clock.pending()
+            );
+        }
     }
 }

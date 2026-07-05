@@ -250,6 +250,12 @@ impl Ppu {
             && !engine_line_high
             && self.stat_en & STAT_SRC_LYC != 0
             && ((target == Some(value) && !blocked && !lyc_level_high) || lyc_write_wrap_153);
+        probe!(if crate::probe::s5dbg_on() {
+            eprintln!(
+                "SLOPGB wlyc ly={} dot={} ll={ll} ld={ld} old={old:02x} val={value:02x} prot={protected} tgt={target:?} blk={blocked} lvl={lyc_level_high} fire={fire}",
+                self.line, self.dot
+            );
+        });
         // A SHIFTED write whose law position is the line-start tail
         // (ld < 4) commits after the engine's dot-4 re-latch already ran with
         // the OLD value, dropping a held match SameBoy never drops (its write

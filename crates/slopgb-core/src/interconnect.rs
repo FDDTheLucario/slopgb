@@ -905,6 +905,25 @@ impl Bus for Interconnect {
     }
 }
 
+/// SameBoy-port measurement traces. Compiled only under `--features port_probe`
+/// and gated at runtime by `SLOPGB_S5DBG`; see [`crate::probe`].
+#[cfg(feature = "port_probe")]
+impl Interconnect {
+    pub(crate) fn dbg_wake(&mut self, path: &str, w: u8) {
+        if crate::probe::s5dbg_on() {
+            let (l, d) = self.ppu.scan_pos();
+            eprintln!(
+                "SLOPGB wake[{path}] ly={l} dot={d} clk={} pend={} w={w:02x} intf={:02x} late={:02x} hold={}",
+                self.clock.now(),
+                self.clock.pending(),
+                self.intf,
+                self.if_late,
+                self.m0_halt_hold
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "interconnect_tests.rs"]
 mod tests;
