@@ -17,6 +17,7 @@ use crate::dbg::Breakpoints;
 use crate::symbols::SymbolTable;
 use crate::ui::canvas::Rect;
 use crate::ui::dialog::InputDialog;
+use crate::ui::font::GLYPH_W;
 use crate::ui::text::{draw_text, line_height};
 use crate::ui::widgets::{checkbox, radio_group};
 use crate::ui::{Canvas, Theme, ToolWindow};
@@ -61,6 +62,12 @@ pub struct MemoryView {
     /// Open `Go to…` prompt (Ctrl+G); `None` when idle. Mirrors the integrated
     /// debugger pane's modal, scoped to this standalone window.
     pub goto: Option<InputDialog>,
+    /// The byte-edit cursor (bgb-style in-place editing): arrows move it, hex
+    /// digits type over the byte at this address.
+    pub cursor: u16,
+    /// A pending high nibble mid-edit (`Some` after the first hex digit, before
+    /// the second commits the byte); `None` when not typing.
+    pub edit_hi: Option<u8>,
 }
 
 impl Default for MemoryView {
@@ -69,6 +76,8 @@ impl Default for MemoryView {
             mem_base: 0xFF00,
             symbols: Rc::new(SymbolTable::default()),
             goto: None,
+            cursor: 0xFF00,
+            edit_hi: None,
         }
     }
 }
@@ -82,17 +91,69 @@ impl MemoryView {
 
     /// Apply a `Go to…` entry: a loaded symbol name resolves to its address,
     /// else a hex parse (accepting `$`/`0x` prefixes). Returns whether the entry
-    /// resolved; an empty/garbage entry leaves `mem_base` unchanged. Mirrors the
-    /// integrated pane's accept_dialog Goto arm.
+    /// resolved; an empty/garbage entry leaves the view unchanged. Positions the
+    /// cursor at the target too. Mirrors the integrated pane's accept_dialog Goto.
     pub fn apply_goto(&mut self, text: &str) -> bool {
         let t = text.trim();
         let hex = t.trim_start_matches('$').trim_start_matches("0x");
         if let Some(addr) = self.symbols.resolve(t).or_else(|| u16::from_str_radix(hex, 16).ok()) {
             self.mem_base = addr;
+            self.cursor = addr;
+            self.edit_hi = None;
             true
         } else {
             false
         }
+    }
+
+    /// Move the byte-edit cursor by `delta` bytes (wrapping 64 KiB), cancelling
+    /// any pending edit, then scroll so it stays within `visible_rows` rows.
+    pub fn move_cursor(&mut self, delta: i32, visible_rows: i32) {
+        self.edit_hi = None;
+        self.cursor = (i32::from(self.cursor) + delta).rem_euclid(0x1_0000) as u16;
+        self.ensure_cursor_visible(visible_rows);
+    }
+
+    /// Scroll `mem_base` so the cursor stays within a window of `visible_rows`
+    /// 16-byte rows — minimal one-edge scroll, wrapping the 64 KiB space.
+    pub fn ensure_cursor_visible(&mut self, visible_rows: i32) {
+        let vr = visible_rows.max(1);
+        let cur = i32::from(self.cursor / 16); // cursor row, 0..4095
+        let top = i32::from(self.mem_base / 16); // window top row
+        let rel = (cur - top).rem_euclid(4096); // rows below top (wrapping)
+        let new_top = if rel < vr {
+            top // already visible
+        } else if rel < 4096 - vr {
+            cur - (vr - 1) // below the window: bring cursor to the last row
+        } else {
+            cur // above the window: bring cursor to the top row
+        };
+        self.mem_base = (new_top.rem_euclid(4096) as u16) * 16;
+    }
+
+    /// Feed a hex digit (0..=15) to the in-place editor. The first digit is held
+    /// as the high nibble; the second completes the byte — returns `Some((addr,
+    /// value))` for the caller to write, and advances the cursor. Otherwise `None`.
+    pub fn edit_hex_digit(&mut self, d: u8) -> Option<(u16, u8)> {
+        match self.edit_hi {
+            None => {
+                self.edit_hi = Some(d & 0x0F);
+                None
+            }
+            Some(hi) => {
+                let value = (hi << 4) | (d & 0x0F);
+                let addr = self.cursor;
+                self.edit_hi = None;
+                self.cursor = self.cursor.wrapping_add(1);
+                Some((addr, value))
+            }
+        }
+    }
+
+    /// Cancel a pending edit (Esc). Returns whether an edit was in progress (so
+    /// the key is consumed only then).
+    pub fn cancel_edit(&mut self) -> bool {
+        self.edit_hi.take().is_some()
     }
 }
 
@@ -146,6 +207,29 @@ fn render_memory_window(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme,
     let lh = line_height();
     let body = Rect::new(area.x, area.y, area.w, (area.h - lh).max(0));
     debugger::render_memory(c, body, |a| gb.debug_read(a), st.mem_base, theme, &st.symbols);
+    // In-place edit cursor: highlight the byte at `cursor` when it is visible in
+    // the dump, overprinting its value (or the pending high nibble mid-edit).
+    let off = st.cursor.wrapping_sub(st.mem_base);
+    let (row, col) = (i32::from(off / 16), i32::from(off % 16));
+    if row < (body.h / lh).max(0) {
+        let gw = GLYPH_W as i32;
+        // Fixed 9-char row label ("RRRR:AAAA"): byte `col`'s hex starts at char
+        // 10 + 3*col, plus one for the extra gap before byte 8 (see `hex_row`).
+        let cch = 10 + 3 * col + i32::from(col >= 8);
+        let (cx, cy) = (body.x + cch * gw, body.y + row * lh);
+        let accent = if st.edit_hi.is_some() {
+            theme.current
+        } else {
+            theme.hilight
+        };
+        c.fill_rect(Rect::new(cx, cy, 2 * gw, lh), accent);
+        let cur = gb.debug_read(st.cursor);
+        let text = match st.edit_hi {
+            Some(hi) => format!("{hi:X}{:X}", cur & 0x0F),
+            None => format!("{cur:02X}"),
+        };
+        draw_text(c, cx, cy, &text, theme.bg);
+    }
     let bar_y = area.bottom() - lh;
     c.hline(area.x, bar_y, area.w, theme.border);
     let status = match st.symbols.nearest_before(st.mem_base) {

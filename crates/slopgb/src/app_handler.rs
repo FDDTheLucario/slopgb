@@ -180,6 +180,30 @@ impl ApplicationHandler for App {
                             self.tools.open_mem_goto(window_id);
                             return;
                         }
+                        // Esc cancels a pending in-place edit (before the global
+                        // esc-shows-debugger toggle); if not editing, fall through.
+                        if event.physical_key == PhysicalKey::Code(KeyCode::Escape)
+                            && self.tools.mem_cancel_edit(window_id)
+                        {
+                            return;
+                        }
+                        // A hex digit types over the cursor byte in place (never
+                        // with Ctrl, so Ctrl+<letter> hotkeys are unaffected).
+                        if !self.modifiers.control_key() {
+                            if let Some(d) = event
+                                .text
+                                .as_ref()
+                                .and_then(|t| t.chars().next())
+                                .and_then(|ch| ch.to_digit(16))
+                            {
+                                if let Some((addr, val)) =
+                                    self.tools.mem_edit_digit(window_id, d as u8)
+                                {
+                                    self.session.gb.debug_write(addr, val);
+                                }
+                                return;
+                            }
+                        }
                         // Otherwise the window owns its arrow/Page nav keys.
                         if let PhysicalKey::Code(code) = event.physical_key {
                             if self.tools.mem_window_key(window_id, code) {

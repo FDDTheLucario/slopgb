@@ -72,8 +72,11 @@ fn is_double_click(dt: Duration, dx: i32, dy: i32) -> bool {
 /// The number of fully-visible memory rows in a pane `height` px tall at line
 /// height `lh` — one page of PageUp/PageDown scrolling (at least 1).
 #[must_use]
-fn mem_page_rows(height: i32, lh: i32) -> i32 {
-    (height / lh.max(1) - 1).max(1)
+/// Full 16-byte rows visible in the standalone memory window's dump body (the
+/// window height less the one-line status bar), used for cursor auto-scroll.
+fn mem_visible_rows(height: i32) -> i32 {
+    let lh = line_height();
+    ((height - lh) / lh.max(1)).max(1)
 }
 
 /// The set of open tool windows.
@@ -501,20 +504,53 @@ impl ToolWindows {
             return false;
         };
         let area = view.area();
+        let visible = mem_visible_rows(area.h);
         let WinState::Memory(s) = &mut view.state else {
             return false;
         };
-        let page = mem_page_rows(area.h, line_height());
-        let rows = match code {
-            KeyCode::ArrowUp => -1,
-            KeyCode::ArrowDown => 1,
-            KeyCode::PageUp => -page,
-            KeyCode::PageDown => page,
+        // Arrows move the byte-edit cursor (a row / a byte); Page by a window.
+        let delta = match code {
+            KeyCode::ArrowUp => -16,
+            KeyCode::ArrowDown => 16,
+            KeyCode::ArrowLeft => -1,
+            KeyCode::ArrowRight => 1,
+            KeyCode::PageUp => -visible * 16,
+            KeyCode::PageDown => visible * 16,
             _ => return false,
         };
-        s.scroll(rows);
+        s.move_cursor(delta, visible);
         view.window.request_redraw();
         true
+    }
+
+    /// Type a hex digit into the standalone memory window's in-place editor;
+    /// returns `Some((addr, value))` to write when the byte completes. Redraws.
+    pub fn mem_edit_digit(&mut self, id: WindowId, d: u8) -> Option<(u16, u8)> {
+        let view = self.views.get_mut(&id)?;
+        let visible = mem_visible_rows(view.area().h);
+        let WinState::Memory(s) = &mut view.state else {
+            return None;
+        };
+        let out = s.edit_hex_digit(d);
+        s.ensure_cursor_visible(visible);
+        view.window.request_redraw();
+        out
+    }
+
+    /// Cancel a pending in-place edit on the memory window (Esc). Returns whether
+    /// an edit was in progress (so the key is consumed only then). Redraws.
+    pub fn mem_cancel_edit(&mut self, id: WindowId) -> bool {
+        let Some(view) = self.views.get_mut(&id) else {
+            return false;
+        };
+        let WinState::Memory(s) = &mut view.state else {
+            return false;
+        };
+        let cancelled = s.cancel_edit();
+        if cancelled {
+            view.window.request_redraw();
+        }
+        cancelled
     }
 
     /// Open the debugger's `Go to…` modal on the disasm pane (Ctrl+G).
@@ -813,7 +849,7 @@ fn debugger_right_click(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_double_click, mem_page_rows};
+    use super::is_double_click;
     use std::time::Duration;
 
     #[test]
@@ -827,14 +863,5 @@ mod tests {
         assert!(!is_double_click(ms(401), 0, 0), "too slow");
         assert!(!is_double_click(ms(50), 4, 0), "too far in x");
         assert!(!is_double_click(ms(50), 0, 4), "too far in y");
-    }
-
-    #[test]
-    fn mem_page_rows_fits_visible_minus_one() {
-        // 200 px / 10 px rows = 20 rows; a page is 19 (one row of overlap kept).
-        assert_eq!(mem_page_rows(200, 10), 19);
-        // Degenerate sizes never go below one row (and never divide by zero).
-        assert_eq!(mem_page_rows(5, 10), 1);
-        assert_eq!(mem_page_rows(100, 0), 99);
     }
 }

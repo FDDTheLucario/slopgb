@@ -70,6 +70,43 @@ fn memory_view_goto_resolves_hex_symbol_and_ignores_junk() {
 }
 
 #[test]
+fn memory_view_edit_two_nibbles_commit_a_byte_and_advance() {
+    let mut v = MemoryView::default();
+    v.cursor = 0xC000;
+    // First nibble is held, no write yet.
+    assert_eq!(v.edit_hex_digit(0xA), None);
+    assert_eq!(v.edit_hi, Some(0xA));
+    // Second nibble completes 0xA5, returns the write, advances the cursor.
+    assert_eq!(v.edit_hex_digit(0x5), Some((0xC000, 0xA5)));
+    assert_eq!(v.edit_hi, None);
+    assert_eq!(v.cursor, 0xC001, "cursor advanced to the next byte");
+}
+
+#[test]
+fn memory_view_cancel_edit_discards_pending_nibble() {
+    let mut v = MemoryView::default();
+    assert!(!v.cancel_edit(), "nothing to cancel when idle");
+    v.edit_hex_digit(0xF);
+    assert!(v.cancel_edit(), "a pending edit is cancelled");
+    assert_eq!(v.edit_hi, None);
+    assert!(!v.cancel_edit(), "already cancelled");
+}
+
+#[test]
+fn memory_view_cursor_move_autoscrolls_and_cancels_edit() {
+    let mut v = MemoryView::default(); // mem_base = cursor = 0xFF00
+    v.edit_hex_digit(0xC); // start an edit
+    v.move_cursor(-16, 8); // up one row cancels the edit and scrolls the view
+    assert_eq!(v.edit_hi, None, "moving cancels a pending edit");
+    assert_eq!(v.cursor, 0xFEF0);
+    assert_eq!(v.mem_base, 0xFEF0, "scrolled up so the cursor stays visible");
+    // Moving within the visible window does not scroll.
+    v.move_cursor(16, 8);
+    assert_eq!(v.cursor, 0xFF00);
+    assert_eq!(v.mem_base, 0xFEF0, "cursor still visible, no scroll");
+}
+
+#[test]
 fn memory_window_status_bar_shows_nearest_symbol() {
     use crate::symbols::SymbolTable;
     use std::rc::Rc;
@@ -79,6 +116,8 @@ fn memory_window_status_bar_shows_nearest_symbol() {
         mem_base: 0x4008,
         symbols: Rc::new(SymbolTable::parse("00:4000 Reset")),
         goto: None,
+        cursor: 0x4008,
+        edit_hi: None,
     });
     let (w, h) = (430usize, 360usize);
     let mut buf = vec![0u32; w * h];
