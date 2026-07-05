@@ -49,6 +49,7 @@ impl App {
     /// the frame count and whether a breakpoint halted emulation.
     pub(crate) fn run_audio_paced(&mut self) -> (u32, bool) {
         let bps = self.run_breakpoints();
+        let freeze = self.dbg.freezes().list();
         let mut frames = 0;
         let mut hit = false;
         {
@@ -56,7 +57,7 @@ impl App {
                 return (0, false);
             };
             while frames < MAX_FRAMES_PER_WAKE && pipe.needs_more() && !hit {
-                hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link);
+                hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link, &freeze);
                 pipe.pump(&mut self.session.gb);
                 frames += 1;
                 // A silent link peer left the master stalled (run_one_frame
@@ -73,6 +74,7 @@ impl App {
     /// Emulate frames owed according to the wall clock at ~59.7275 Hz.
     pub(crate) fn run_timer_paced(&mut self) -> (u32, bool) {
         let bps = self.run_breakpoints();
+        let freeze = self.dbg.freezes().list();
         let now = Instant::now();
         // If we fell far behind (stall, drag, debugger), resync instead of
         // fast-forwarding through the backlog.
@@ -84,7 +86,7 @@ impl App {
         let mut frames = 0;
         let mut hit = false;
         while frames < MAX_FRAMES_PER_WAKE && self.next_frame <= now && !hit {
-            hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link);
+            hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link, &freeze);
             self.discard_audio();
             self.next_frame += interval;
             frames += 1;
@@ -98,6 +100,7 @@ impl App {
     /// Turbo: emulate as much as fits in a small wall-clock budget.
     pub(crate) fn run_turbo(&mut self) -> (u32, bool) {
         let bps = self.run_breakpoints();
+        let freeze = self.dbg.freezes().list();
         let muted = self.muted;
         // Options → Misc → fast-forward speed caps frames per wake.
         let cap = turbo_max_frames(self.settings.ff_speed);
@@ -105,7 +108,7 @@ impl App {
         let mut frames = 0;
         let mut hit = false;
         while start.elapsed() < TURBO_BUDGET && frames < cap && !hit {
-            hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link);
+            hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link, &freeze);
             match &mut self.audio {
                 // The queue keeps ~250 ms and drops the rest.
                 Some(pipe) if !muted => pipe.pump(&mut self.session.gb),
@@ -176,7 +179,24 @@ const LINK_CHUNK_CYCLES: u32 = 4096;
 /// bytes per frame while still running a full slice of cycles per byte. With no
 /// peer the path is byte-for-byte the old `run_frame` (golden-safe). The
 /// debugger path stays a single breakpoint-aware frame.
+/// Emulate one frame, then re-apply the freeze list (bgb's frozen values). An
+/// empty `freeze` writes nothing, so the golden path stays byte-identical; a
+/// non-empty list re-forces each locked byte at the frame boundary via the
+/// golden-safe `debug_write`.
 fn run_one_frame(
+    gb: &mut GameBoy,
+    breakpoints: &Option<Vec<u16>>,
+    link: &mut crate::link::Link,
+    freeze: &[(u16, u8)],
+) -> bool {
+    let hit = advance_frame(gb, breakpoints, link);
+    for &(addr, value) in freeze {
+        gb.debug_write(addr, value);
+    }
+    hit
+}
+
+fn advance_frame(
     gb: &mut GameBoy,
     breakpoints: &Option<Vec<u16>>,
     link: &mut crate::link::Link,

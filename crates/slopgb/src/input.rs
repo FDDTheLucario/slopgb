@@ -94,6 +94,8 @@ pub enum Action {
     DbgManageBreakpoints,
     /// Open the watchpoint manager (list) — debugger Ctrl+J, on press.
     DbgManageWatchpoints,
+    /// Open the freeze manager (list) — debugger Ctrl+K, on press.
+    DbgManageFreezes,
     /// Re-center the disasm on PC (unpin) — debugger Ctrl+A, on press.
     DbgGoToPc,
     /// Step out of the current subroutine — debugger F8, on press.
@@ -248,6 +250,7 @@ pub fn map(code: KeyCode, mods: ModifiersState, focus: Focus) -> Option<Action> 
             KeyCode::KeyG if mods.control_key() => Some(Action::DbgGoto),
             KeyCode::KeyH if mods.control_key() => Some(Action::DbgManageBreakpoints),
             KeyCode::KeyJ if mods.control_key() => Some(Action::DbgManageWatchpoints),
+            KeyCode::KeyK if mods.control_key() => Some(Action::DbgManageFreezes),
             KeyCode::KeyA if mods.control_key() => Some(Action::DbgGoToPc),
             KeyCode::KeyF if mods.control_key() => Some(Action::DbgSearch),
             KeyCode::KeyC if mods.control_key() => Some(Action::DbgContinueSearch),

@@ -559,6 +559,12 @@ fn disasm_entries(addr: u16, st: &DebuggerState, is_disasm: bool) -> Vec<(MenuIt
         MenuItem::new("Call cursor"),
         MenuChoice::Act(DebugAction::Call(addr)),
     ));
+    if !is_disasm {
+        v.push((
+            MenuItem::new("Freeze value"),
+            MenuChoice::Act(DebugAction::ToggleFreeze(addr)),
+        ));
+    }
     v.push((
         MenuItem::new("Set watchpoint..."),
         MenuChoice::Act(DebugAction::ToggleWatchpoint(addr)),

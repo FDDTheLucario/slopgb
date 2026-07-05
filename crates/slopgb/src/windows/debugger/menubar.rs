@@ -201,6 +201,7 @@ fn debug_menu(cursor: u16) -> Vec<(MenuItem, MenuChoice)> {
         ),
         cmd("Breakpoints", "Ctrl+H", Action::DbgManageBreakpoints),
         cmd("Watchpoints", "Ctrl+J", Action::DbgManageWatchpoints),
+        cmd("Freezes", "Ctrl+K", Action::DbgManageFreezes),
         (
             MenuItem::new("Load symbols..."),
             MenuChoice::Command(Action::DbgLoadSymbols),
@@ -208,15 +209,15 @@ fn debug_menu(cursor: u16) -> Vec<(MenuItem, MenuChoice)> {
     ]
 }
 
-/// Build the breakpoint/watchpoint **manager** popup (RM15) listing `addrs`,
-/// one per row; selecting a row toggles (clears) that entry through the normal
+/// Build the breakpoint/watchpoint/freeze **manager** popup (RM15) listing
+/// `addrs`, one per row; selecting a row clears that entry through the normal
 /// menu-click path. bgb's manager is a persistent window — this is the
-/// functional list, reusing the context-menu widget. `watch` picks the clear
-/// action; an empty list shows a single greyed `(none)`.
+/// functional list, reusing the context-menu widget. `clear` builds the row's
+/// clear action; an empty list shows a single greyed `(none)`.
 #[must_use]
 pub fn address_list_menu(
     addrs: &[u16],
-    watch: bool,
+    clear: fn(u16) -> DebugAction,
     symbols: &SymbolTable,
     origin: (i32, i32),
 ) -> OpenMenu {
@@ -228,11 +229,7 @@ pub fn address_list_menu(
             .map(|&a| {
                 // An idempotent *clear* (not a toggle) so a row from a stale
                 // snapshot can never re-arm an entry the user cleared elsewhere.
-                let choice = if watch {
-                    MenuChoice::Act(DebugAction::ClearWatchpoint(a))
-                } else {
-                    MenuChoice::Act(DebugAction::ClearBreakpoint(a))
-                };
+                let choice = MenuChoice::Act(clear(a));
                 // Append the symbol name when the address is an exact symbol.
                 let label = match symbols.name_at(a) {
                     Some(name) => format!("{}:{a:04X} {name}", region_label(a)),

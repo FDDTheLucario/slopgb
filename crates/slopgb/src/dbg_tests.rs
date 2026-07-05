@@ -80,6 +80,29 @@ fn apply_toggle_watchpoint_arms_and_halts_the_free_run() {
 }
 
 #[test]
+fn freeze_toggle_locks_the_live_value_and_reapply_reforces_it() {
+    let mut d = Debugger::default();
+    let mut gb = machine(write_c000_rom());
+    assert!(d.freezes().list().is_empty());
+    // Freeze reads the live byte value at toggle time.
+    gb.debug_write(0xC000, 0x42);
+    d.apply(&mut gb, DebugAction::ToggleFreeze(0xC000));
+    assert_eq!(d.freezes().list(), vec![(0xC000, 0x42)], "locked at 0x42");
+    // A later (game) write is undone by re-applying the freeze list — exactly
+    // what run_one_frame does each frame.
+    gb.debug_write(0xC000, 0x99);
+    for (addr, val) in d.freezes().list() {
+        gb.debug_write(addr, val);
+    }
+    assert_eq!(gb.debug_read(0xC000), 0x42, "freeze re-forces the value");
+    // Toggling again unfreezes; ClearFreeze is an idempotent remove.
+    d.apply(&mut gb, DebugAction::ToggleFreeze(0xC000));
+    assert!(d.freezes().list().is_empty(), "toggled off");
+    d.apply(&mut gb, DebugAction::ClearFreeze(0xC000));
+    assert!(d.freezes().list().is_empty(), "clear is idempotent");
+}
+
+#[test]
 fn apply_set_reg_set_pc_and_call_mutate_the_machine() {
     let mut d = Debugger::default();
     let mut gb = machine(call_rom());

@@ -6,7 +6,7 @@
 //! `run_until_breakpoint` (run to a return address) — no test-only paths, so the
 //! golden gate is untouched (it never breaks).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use slopgb_core::{DebugReg, GameBoy, Watchpoint, debug};
 
@@ -97,6 +97,40 @@ impl Watchpoints {
     }
 }
 
+/// The debugger's frozen memory values: each address is re-written to its locked
+/// value after every emulated frame (bgb's "freeze"). App-owned beside
+/// [`Breakpoints`] because the paced run loop applies them. **Empty by default →
+/// the run loop writes nothing → byte-identical to no freeze** (the golden-safe
+/// inert-when-empty law shared with breakpoints/watchpoints).
+#[derive(Default, Clone, Debug)]
+pub struct FreezeList {
+    items: BTreeMap<u16, u8>,
+}
+
+impl FreezeList {
+    /// Toggle a freeze at `addr`: lock it to `value` if unfrozen, else unfreeze.
+    /// Returns whether it is now frozen.
+    pub fn toggle(&mut self, addr: u16, value: u8) -> bool {
+        if self.items.remove(&addr).is_some() {
+            false
+        } else {
+            self.items.insert(addr, value);
+            true
+        }
+    }
+
+    /// Remove the freeze at `addr` if present (the manager's idempotent clear).
+    pub fn remove(&mut self, addr: u16) {
+        self.items.remove(&addr);
+    }
+
+    /// The `(addr, value)` pairs the run loop re-applies each frame.
+    #[must_use]
+    pub fn list(&self) -> Vec<(u16, u8)> {
+        self.items.iter().map(|(&a, &v)| (a, v)).collect()
+    }
+}
+
 /// A 16-bit CPU register pair the registers pane can edit ("edit register",
 /// rc-registers.png). Maps to the core's [`DebugReg`]; the frontend keeps its
 /// own copy so `windows`/`dbg` don't leak the core enum into hit-test results.
@@ -146,6 +180,11 @@ pub enum DebugAction {
     ClearBreakpoint(u16),
     /// Remove the watchpoint at the address (the manager's clear, RM15).
     ClearWatchpoint(u16),
+    /// Toggle a freeze at the address, locking it to its current value
+    /// (`Freeze value`); the value is read from the machine when frozen.
+    ToggleFreeze(u16),
+    /// Remove the freeze at the address (the freeze list's clear).
+    ClearFreeze(u16),
 }
 
 /// Debugger run-state owned by the event loop. When `broken`, the paced loop
@@ -155,6 +194,7 @@ pub struct Debugger {
     broken: bool,
     bps: Breakpoints,
     wps: Watchpoints,
+    freeze: FreezeList,
 }
 
 /// Upper bound on instructions a single step-over runs before giving up, so a
@@ -200,6 +240,12 @@ impl Debugger {
         &self.wps
     }
 
+    /// The freeze list (read — for the per-frame re-apply + the manager popup).
+    #[must_use]
+    pub fn freezes(&self) -> &FreezeList {
+        &self.freeze
+    }
+
     /// Apply a [`DebugAction`] from a menu item or pane click against the live
     /// machine. `Run to cursor` halts at the cursor afterward (bgb's behavior).
     pub fn apply(&mut self, gb: &mut GameBoy, action: DebugAction) {
@@ -223,6 +269,12 @@ impl Debugger {
                 self.wps.remove(addr);
                 gb.set_watchpoints(self.wps.list());
             }
+            DebugAction::ToggleFreeze(addr) => {
+                // Lock to the byte's current value (read live); unfreeze if set.
+                let value = gb.debug_read(addr);
+                self.freeze.toggle(addr, value);
+            }
+            DebugAction::ClearFreeze(addr) => self.freeze.remove(addr),
         }
     }
 

@@ -87,7 +87,7 @@ fn double_click_disasm_toggles_a_breakpoint() {
 #[test]
 fn address_list_menu_appends_symbol_names() {
     let syms = SymbolTable::parse("00:0150 Reset");
-    let m = address_list_menu(&[0x0150, 0xC000], false, &syms, (40, 30));
+    let m = address_list_menu(&[0x0150, 0xC000], DebugAction::ClearBreakpoint, &syms, (40, 30));
     // The known address gets its symbol name appended; the unknown one doesn't.
     assert!(m.items[0].label.contains("0150") && m.items[0].label.contains("Reset"));
     assert!(m.items[1].label.contains("C000") && !m.items[1].label.contains("Reset"));

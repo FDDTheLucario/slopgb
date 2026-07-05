@@ -132,7 +132,7 @@ impl App {
                 let addrs = self.dbg.breakpoints().pc_list();
                 let menu = windows::debugger::address_list_menu(
                     &addrs,
-                    false,
+                    dbg::DebugAction::ClearBreakpoint,
                     &self.symbols,
                     MANAGER_ORIGIN,
                 );
@@ -148,7 +148,17 @@ impl App {
                     .collect();
                 let menu = windows::debugger::address_list_menu(
                     &addrs,
-                    true,
+                    dbg::DebugAction::ClearWatchpoint,
+                    &self.symbols,
+                    MANAGER_ORIGIN,
+                );
+                self.tools.set_debugger_menu(menu);
+            }
+            Action::DbgManageFreezes => {
+                let addrs: Vec<u16> = self.dbg.freezes().list().iter().map(|&(a, _)| a).collect();
+                let menu = windows::debugger::address_list_menu(
+                    &addrs,
+                    dbg::DebugAction::ClearFreeze,
                     &self.symbols,
                     MANAGER_ORIGIN,
                 );

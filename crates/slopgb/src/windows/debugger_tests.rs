@@ -303,7 +303,7 @@ fn right_click_opens_the_matching_pane_menu_and_sets_the_cursor() {
         l.memory.x + 9,
         l.memory.y + lh,
     );
-    assert_eq!(st.menu.as_ref().unwrap().items.len(), 11);
+    assert_eq!(st.menu.as_ref().unwrap().items.len(), 12);
     // Stack -> 4, registers -> 1.
     let mut st = DebuggerState::default();
     on_right_click(
@@ -548,7 +548,12 @@ fn jump_and_call_cursor_return_their_actions() {
 #[test]
 fn address_list_menu_lists_entries_with_clear_choices() {
     // Breakpoint manager: each row clears (toggles) its breakpoint.
-    let m = address_list_menu(&[0x0150, 0xC000], false, &SymbolTable::default(), (40, 30));
+    let m = address_list_menu(
+        &[0x0150, 0xC000],
+        DebugAction::ClearBreakpoint,
+        &SymbolTable::default(),
+        (40, 30),
+    );
     assert_eq!(m.items.len(), 2);
     assert!(m.items[0].label.contains("0150"));
     assert_eq!(
@@ -560,13 +565,23 @@ fn address_list_menu_lists_entries_with_clear_choices() {
         MenuChoice::Act(DebugAction::ClearBreakpoint(0xC000))
     );
     // Watchpoint manager uses the watchpoint clear action.
-    let w = address_list_menu(&[0xFF44], true, &SymbolTable::default(), (40, 30));
+    let w = address_list_menu(
+        &[0xFF44],
+        DebugAction::ClearWatchpoint,
+        &SymbolTable::default(),
+        (40, 30),
+    );
     assert_eq!(
         w.choices[0],
         MenuChoice::Act(DebugAction::ClearWatchpoint(0xFF44))
     );
     // Empty → a single greyed "(none)".
-    let e = address_list_menu(&[], false, &SymbolTable::default(), (40, 30));
+    let e = address_list_menu(
+        &[],
+        DebugAction::ClearBreakpoint,
+        &SymbolTable::default(),
+        (40, 30),
+    );
     assert_eq!(e.items.len(), 1);
     assert!(!e.items[0].enabled, "(none) is greyed");
     assert_eq!(e.choices[0], MenuChoice::None);
@@ -759,7 +774,7 @@ fn menubar_rects_tile_the_bar_left_to_right() {
 fn each_bar_menu_has_the_captured_item_count() {
     let l = DebuggerLayout::for_size(AREA.w, AREA.h);
     let st = DebuggerState::default();
-    let counts = [16, 5, 18, 6, 11, 5]; // File, Search, Run, Debug, Window, Profiler
+    let counts = [16, 5, 18, 7, 11, 5]; // File, Search, Run, Debug, Window, Profiler
     for (idx, &n) in counts.iter().enumerate() {
         let m = menubar_menu(idx, l.menu, &st, 0x0100);
         assert_eq!(m.items.len(), n, "menu {idx} item count");
