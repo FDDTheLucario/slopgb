@@ -85,8 +85,9 @@ impl Picker {
     /// The buffer only ever clears on a nav key (see the `search.clear()` calls
     /// throughout this file) or an explicit [`Picker::clear_search`] — this
     /// crate is std-only with no clock, so it never times a buffer out itself.
-    /// A host that wants "pause then a new letter starts a fresh search" should
-    /// call `clear_search` after its own idle timeout.
+    /// A host MAY call `clear_search` after its own idle timeout to get a
+    /// "pause then a new letter starts a fresh search" effect; it's opt-in
+    /// and this crate never calls it on its own.
     pub(crate) fn typeahead(&mut self, ch: char) {
         self.search.push(ch);
         let query = self.search.to_lowercase();
@@ -124,9 +125,12 @@ impl Picker {
     }
 
     /// Empty the type-ahead buffer without moving the selection. Every nav key
-    /// already does this internally (see [`Self::typeahead`]'s doc); this is
-    /// the explicit hook for a host that wants to time a search out itself
-    /// (this crate is std-only with no clock, so it can't do that on its own).
+    /// already does this internally (see [`Self::typeahead`]'s doc). This is
+    /// an opt-in hook: a host MAY call it after its own idle timeout to start
+    /// a fresh search on the next keystroke (this crate is std-only with no
+    /// clock, so it never times a buffer out itself). Nothing in this crate
+    /// calls it — a host that doesn't wire it up simply keeps the buffer
+    /// until the next nav key clears it.
     pub fn clear_search(&mut self) {
         self.search.clear();
     }
@@ -185,9 +189,19 @@ impl Picker {
     // ---- path bar (editable) -------------------------------------------
 
     /// Longest common prefix of visible names that start with the path bar's
-    /// final component — used by Tab completion.
+    /// final component — used by Tab completion. Only offers a completion
+    /// when the typed text's directory portion is `self.cwd` (a bare final
+    /// component with no separator counts as cwd-relative): `self.visible()`
+    /// is the loaded cwd's listing, so completing a path that points
+    /// elsewhere (e.g. `/etc/pas` while cwd is `/home`) against it would be
+    /// wrong.
     #[must_use]
     pub(crate) fn path_completion(&self) -> Option<String> {
+        if let Some(parent) = Path::new(&self.path_edit).parent() {
+            if !parent.as_os_str().is_empty() && parent != self.cwd {
+                return None;
+            }
+        }
         let start = final_component_start(&self.path_edit);
         let prefix = &self.path_edit[start..];
         let candidates: Vec<&str> = self
@@ -207,6 +221,7 @@ impl Picker {
 
     /// Feed one semantic key. Dispatch by `self.focus`; see the `on_key_*`
     /// helpers below for each focus's behavior.
+    #[must_use]
     pub fn on_key(&mut self, key: Key) -> Outcome {
         match self.focus {
             Focus::Browse => self.on_key_browse(key),
@@ -264,6 +279,11 @@ impl Picker {
                 // type-ahead search (see doc comment above).
                 if self.mode == Mode::Save {
                     self.focus = Focus::SaveName;
+                    // This arm only ever runs while `focus == Browse` (see
+                    // `on_key`'s dispatch above), so every hit is the
+                    // Browse->SaveName transition — clear a stale buffer left
+                    // by an earlier type-then-Cancel round before this first char.
+                    self.save_name.clear();
                     self.save_name.push(c);
                 } else {
                     self.typeahead(c);
@@ -366,6 +386,10 @@ impl Picker {
                     return Outcome::None;
                 }
                 let target = self.cwd.join(&self.save_name);
+                // ponytail: case-sensitive compare (Linux-correct); on a
+                // case-insensitive FS a different-case name skips this
+                // confirm. No std-only fix exists — this crate can't detect
+                // whether the target filesystem is case-sensitive.
                 let exists_as_file =
                     self.entries.iter().any(|e| !e.is_dir && e.name == self.save_name);
                 if exists_as_file && !self.overwrite_pending {
@@ -395,8 +419,14 @@ impl Picker {
     }
 
     /// Mouse: activate (double-click / open) the visible row at `idx` — same
-    /// effect as selecting it then pressing Enter.
+    /// effect as selecting it then pressing Enter. No-op (same contract as
+    /// [`Self::on_click`]) if `idx` is out of range, rather than running
+    /// `execute_enter` against a stale selection.
+    #[must_use]
     pub fn on_activate(&mut self, idx: usize) -> Outcome {
+        if idx >= self.visible().len() {
+            return Outcome::None;
+        }
         self.on_click(idx);
         self.execute_enter()
     }
@@ -481,12 +511,12 @@ fn name_key(e: &Entry) -> String {
     e.name.to_lowercase()
 }
 
-/// Lowercased extension (chars after the last '.'), empty string if none.
+/// Lowercased extension, empty string if none. Delegates to
+/// `Path::extension`, which (unlike a bare `rfind('.')`) treats a leading dot
+/// with no other `.` as "no extension" — `.gitignore` and `Makefile` are both
+/// `""`, `rom.gb` is `"gb"`.
 fn extension(name: &str) -> String {
-    match name.rfind('.') {
-        Some(i) => name[i + 1..].to_lowercase(),
-        None => String::new(),
-    }
+    Path::new(name).extension().and_then(|s| s.to_str()).map(str::to_ascii_lowercase).unwrap_or_default()
 }
 
 fn key_order(key: SortKey, a: &Entry, b: &Entry) -> std::cmp::Ordering {

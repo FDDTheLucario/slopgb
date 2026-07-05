@@ -142,7 +142,7 @@ fn scroll_follows_selection() {
     assert_eq!(p.sel, 19);
     assert_eq!(p.offset, 15); // max_offset = 20 - 5
 
-    p.on_key(Key::Home);
+    assert_eq!(p.on_key(Key::Home), Outcome::None);
     assert_eq!(p.on_key(Key::PageDown), Outcome::None);
     assert_eq!(p.sel, 5);
     assert_eq!(p.offset, 1);
@@ -230,7 +230,7 @@ fn on_key_enter_picks_file_in_open_mode() {
 fn path_bar_tab_complete_lcp() {
     let mut p = Picker::with_entries(
         Mode::Open,
-        "/x",
+        "/home/user",
         vec![file("document.txt", 1, 1), file("documentation.md", 1, 1), dir("downloads")],
     );
     p.focus = Focus::PathBar;
@@ -242,6 +242,17 @@ fn path_bar_tab_complete_lcp() {
 
     // Typed component already equals a full name -> no further completion.
     p.path_edit = "/home/user/downloads".to_string();
+    assert_eq!(p.path_completion(), None);
+}
+
+#[test]
+fn path_completion_none_when_typed_dir_differs_from_cwd() {
+    // cwd is "/home" (its listing has "passwd"), but the typed path bar text
+    // points into "/etc" — completing against the loaded "/home" listing
+    // would be wrong, so no completion is offered at all.
+    let mut p = Picker::with_entries(Mode::Open, "/home", vec![file("passwd", 1, 1)]);
+    p.focus = Focus::PathBar;
+    p.path_edit = "/etc/pas".to_string();
     assert_eq!(p.path_completion(), None);
 }
 
@@ -283,6 +294,22 @@ fn save_empty_name_enter_is_noop() {
     assert!(!p.overwrite_pending);
 }
 
+#[test]
+fn save_name_starts_fresh_after_cancel() {
+    let mut p = Picker::with_entries(Mode::Save, "/tmp", vec![]);
+    for c in "abc".chars() {
+        assert_eq!(p.on_key(Key::Char(c)), Outcome::None);
+    }
+    assert_eq!(p.save_name, "abc");
+
+    assert_eq!(p.on_key(Key::Cancel), Outcome::None);
+    assert_eq!(p.focus, Focus::Browse);
+
+    // Re-entering via a fresh Char must not concatenate onto the old buffer.
+    assert_eq!(p.on_key(Key::Char('x')), Outcome::None);
+    assert_eq!(p.save_name, "x");
+}
+
 // ---- toggles / sort / focus (Browse) ----------------------------------------
 
 #[test]
@@ -301,19 +328,19 @@ fn on_key_toggles_hidden_all_files_sort_and_focus_path() {
     assert!(!p.all_files);
 
     assert_eq!(p.sort_key, SortKey::Name);
-    p.on_key(Key::CycleSort);
+    assert_eq!(p.on_key(Key::CycleSort), Outcome::None);
     assert_eq!(p.sort_key, SortKey::Size);
-    p.on_key(Key::CycleSort);
+    assert_eq!(p.on_key(Key::CycleSort), Outcome::None);
     assert_eq!(p.sort_key, SortKey::Mtime);
-    p.on_key(Key::CycleSort);
+    assert_eq!(p.on_key(Key::CycleSort), Outcome::None);
     assert_eq!(p.sort_key, SortKey::Kind);
-    p.on_key(Key::CycleSort);
+    assert_eq!(p.on_key(Key::CycleSort), Outcome::None);
     assert_eq!(p.sort_key, SortKey::Name);
 
     assert_eq!(p.sort_dir, SortDir::Asc);
-    p.on_key(Key::ToggleSortDir);
+    assert_eq!(p.on_key(Key::ToggleSortDir), Outcome::None);
     assert_eq!(p.sort_dir, SortDir::Desc);
-    p.on_key(Key::ToggleSortDir);
+    assert_eq!(p.on_key(Key::ToggleSortDir), Outcome::None);
     assert_eq!(p.sort_dir, SortDir::Asc);
 
     assert_eq!(p.on_key(Key::FocusPath), Outcome::None);
@@ -343,6 +370,13 @@ fn on_activate_picks_file() {
     assert_eq!(p.on_activate(1), Outcome::Picked(PathBuf::from("/x/b")));
 }
 
+#[test]
+fn on_activate_out_of_range_is_none() {
+    let mut p = Picker::with_entries(Mode::Open, "/x", vec![file("a", 1, 1)]);
+    assert_eq!(p.on_activate(50), Outcome::None);
+    assert_eq!(p.sel, 0, "stale selection must not move on an out-of-range activate");
+}
+
 // ---- view model ---------------------------------------------------------------
 
 #[test]
@@ -362,6 +396,15 @@ fn view_reflects_state() {
     p.move_sel(5);
     let v = p.view(3);
     assert_eq!(v.highlight.map(|h| h + v.offset), Some(p.sel));
+}
+
+// ---- extension() free helper -------------------------------------------------
+
+#[test]
+fn extension_of_dotfile_is_empty() {
+    assert_eq!(extension(".gitignore"), "");
+    assert_eq!(extension("rom.gb"), "gb");
+    assert_eq!(extension("Makefile"), "");
 }
 
 // ---- formatting helpers ------------------------------------------------------

@@ -82,6 +82,10 @@ impl FallbackPicker {
         let panel = Rect::new((window_w - w) / 2, (window_h - h) / 2, w, h);
         c.fill_rect(panel, theme.bg);
         c.outline_rect(panel, theme.border);
+        // The fixed text lines below are drawn with `draw_text`, which clips
+        // to the whole canvas, not the panel — at small window scales they'd
+        // otherwise overflow the panel into the game area behind it.
+        let prev_clip = c.push_clip(panel);
 
         let lh = line_height();
         let content_x = panel.x + PAD;
@@ -131,6 +135,8 @@ impl FallbackPicker {
             "^L path  ^K sort  ^R rev  ^H hidden  ^A all  Tab complete",
             theme.hilight,
         );
+
+        c.set_clip(prev_clip);
 
         self.list_rect = list_rect;
         self.last_offset = v.offset;
