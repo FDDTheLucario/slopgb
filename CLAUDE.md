@@ -36,7 +36,7 @@ This file is a lean index. Implementation-state narratives live in dedicated dir
 | [`docs/hardware-state/`](docs/hardware-state/README.md) | **core** per-subsystem state, quirks, parked/disproven approaches (one file per subsystem) |
 | [`docs/ui-state/`](docs/ui-state/README.md) | **frontend / bgb-UI** per-area state (menus, debugger, options, viewers, save-states + link, startup + boot, layout) |
 | [`docs/bgb-reference/`](docs/bgb-reference/README.md) | real bgb screenshots + capture rig — **never invent bgb's UI, capture it** |
-| [`docs/sameboy-port/`](docs/sameboy-port/PORT-PLAN.md) | the SameBoy cycle-exact port: `PORT-PLAN`, `STATE-HISTORY`, `C3-FLIP-CHECKLIST`, per-session measurement maps under `tools/measurements/` |
+| [`docs/sameboy-port/`](docs/sameboy-port/PORT-PLAN.md) | the SameBoy cycle-exact port: `PORT-PLAN`, `STATE-HISTORY`, `C3-FLIP-CHECKLIST`, `PROBE-HARNESS` (the `--features port_probe` measurement traces/knobs), per-session measurement maps under `tools/measurements/` |
 | `docs/*-plan.md` | forward-looking plans (clone/rclick-menu/menu-design/link/bootrom/exceptions/joypad/savestate/copy-clipboard/noload-startup/qa-fixes) |
 | `crates/slopgb-core/tests/gbtr/baselines/gambatte.txt` header | floor-class index (A–H + lift conditions) — read before touching baselined behavior |
 

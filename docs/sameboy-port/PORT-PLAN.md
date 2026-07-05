@@ -4,6 +4,11 @@ Status: **port begun** (2026-06-21). The spec is complete and verified; the
 implementation is an atomic, multi-session rewrite. This file is the durable
 roadmap that sequences it.
 
+> **Measurement harness:** the `SLOPGB_*` read/wake traces and constant-sweep
+> knobs used throughout this port are off by default and compile out of the
+> production build. Arm them with `--features port_probe` + the env vars — see
+> [`PROBE-HARNESS.md`](PROBE-HARNESS.md).
+
 ## Why a port (verified finding)
 
 SameBoy passes ~420 of slopgb's baselined-failing gambatte rows via a
