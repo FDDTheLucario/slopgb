@@ -125,7 +125,7 @@ pub fn render(
 fn render_memory_window(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, st: &MemoryView) {
     let lh = line_height();
     let body = Rect::new(area.x, area.y, area.w, (area.h - lh).max(0));
-    debugger::render_memory(c, body, |a| gb.debug_read(a), st.mem_base, theme);
+    debugger::render_memory(c, body, |a| gb.debug_read(a), st.mem_base, theme, &st.symbols);
     let bar_y = area.bottom() - lh;
     c.hline(area.x, bar_y, area.w, theme.border);
     let status = match st.symbols.nearest_before(st.mem_base) {
@@ -192,7 +192,7 @@ fn render_debugger(
     debugger::render_regs(c, l.regs, &regs_view(gb, st.clock_base), theme);
     let stack_rows = (l.stack.h / line_height()).max(0) as usize;
     debugger::render_stack(c, l.stack, &gb.stack(stack_rows), theme);
-    debugger::render_memory(c, l.memory, |a| gb.debug_read(a), st.mem_base, theme);
+    debugger::render_memory(c, l.memory, |a| gb.debug_read(a), st.mem_base, theme, &st.symbols);
     // The open context menu / modal draws last, on top of every pane.
     if let Some(om) = &st.menu {
         crate::ui::menu::render(c, om.origin, &om.items, om.hovered, theme);

@@ -141,10 +141,21 @@ fn stack_lines_label_and_format_words() {
 #[test]
 fn memory_rows_dump_sixteen_bytes_per_line() {
     let read = |a: u16| (a & 0xFF) as u8; // byte value = low addr byte
-    let rows = memory_rows(read, 0x0000, 2);
+    let rows = memory_rows(read, 0x0000, 2, &SymbolTable::default());
     assert_eq!(rows.len(), 2);
     assert!(rows[0].starts_with("ROM0:0000 00 01 02 03 04 05 06 07  08"));
     assert!(rows[1].starts_with("ROM0:0010 10 11 12 13"));
+}
+
+#[test]
+fn memory_rows_append_symbol_name_at_row_base() {
+    let read = |a: u16| (a & 0xFF) as u8;
+    let syms = SymbolTable::parse("00:0010 WorkVar");
+    let rows = memory_rows(read, 0x0000, 2, &syms);
+    // Row base 0x0000 has no symbol -> unchanged.
+    assert!(!rows[0].contains("WorkVar"));
+    // Row base 0x0010 == symbol WorkVar -> name appended to that row.
+    assert!(rows[1].contains("WorkVar"), "{}", rows[1]);
 }
 
 // --- interaction (RM4 / RM6 / RM7 / RM12) ---------------------------------

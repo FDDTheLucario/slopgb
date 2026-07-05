@@ -163,14 +163,27 @@ pub fn render_stack(c: &mut Canvas, rect: Rect, stack: &[(u16, u16)], theme: &Th
 }
 
 /// Memory-pane rows: `count` hex-dump lines of 16 bytes each from `start`,
-/// via [`hex_row`] over `read` (use `GameBoy::debug_read`).
+/// via [`hex_row`] over `read` (use `GameBoy::debug_read`). When a row's base
+/// address is an exact symbol, its name is appended to the line (bgb parity);
+/// appending keeps the row's fixed 16-byte layout so the click hit-test math is
+/// untouched. Empty table → names never appended.
 #[must_use]
-pub fn memory_rows(read: impl Fn(u16) -> u8, start: u16, count: usize) -> Vec<String> {
+pub fn memory_rows(
+    read: impl Fn(u16) -> u8,
+    start: u16,
+    count: usize,
+    syms: &SymbolTable,
+) -> Vec<String> {
     (0..count)
         .map(|i| {
             let base = start.wrapping_add((i * 16) as u16);
             let bytes: Vec<u8> = (0..16).map(|j| read(base.wrapping_add(j))).collect();
-            hex_row(&format!("{}:{base:04X}", region_label(base)), &bytes)
+            let mut row = hex_row(&format!("{}:{base:04X}", region_label(base)), &bytes);
+            if let Some(name) = syms.name_at(base) {
+                row.push(' ');
+                row.push_str(name);
+            }
+            row
         })
         .collect()
 }
@@ -182,9 +195,10 @@ pub fn render_memory(
     read: impl Fn(u16) -> u8,
     start: u16,
     theme: &Theme,
+    syms: &SymbolTable,
 ) {
     let count = (rect.h / line_height()).max(0) as usize + 1;
-    let rows = memory_rows(read, start, count);
+    let rows = memory_rows(read, start, count, syms);
     let texts: Vec<&str> = rows.iter().map(String::as_str).collect();
     scroll_list(c, rect, &texts, 0, None, theme);
 }
