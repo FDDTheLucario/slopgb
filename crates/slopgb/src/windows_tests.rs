@@ -149,6 +149,36 @@ fn tile_details_has_no_phantom_tile_right_of_the_grid() {
 }
 
 #[test]
+fn tiles_two_col_splits_content_into_nonoverlapping_left_right() {
+    let content = Rect::new(10, 20, 400, 400);
+    let (left, right, s) = tiles_two_col(content);
+    assert!(s >= 1);
+    assert_eq!((left.x, left.y), (10, 20), "left grid at content origin");
+    assert_eq!((left.w, left.h), (16 * 8 * s, 24 * 8 * s), "left is a 16x24 grid");
+    assert_eq!((right.w, right.h), (left.w, left.h), "same size grids");
+    assert!(right.x >= left.x + left.w, "no horizontal overlap");
+    assert!(
+        right.x + right.w <= content.x + content.w,
+        "right grid fits inside content"
+    );
+}
+
+#[test]
+fn tile_details_two_maps_hover_to_bank_and_prints_real_bank() {
+    let content = Rect::new(0, 0, 400, 400);
+    let (left, right, s) = tiles_two_col(content);
+    // Hover inside the left grid -> bank 0.
+    let d0 = tile_details_two(4, 4, left, right, s);
+    assert!(d0[1].starts_with("Tile Address 0:"), "{d0:?}");
+    // Hover inside the right grid -> bank 1 (real bank in the label).
+    let rx = (right.x - left.x) + 4; // content-relative x just inside right grid
+    let d1 = tile_details_two(rx, 4, left, right, s);
+    assert!(d1[1].starts_with("Tile Address 1:"), "{d1:?}");
+    // Hover in the gutter between the grids -> no tile.
+    assert!(tile_details_two(left.w + 1, 4, left, right, s).is_empty());
+}
+
+#[test]
 fn tile_details_track_the_live_scale() {
     // The same hover pixel resolves to a different tile at a different scale, so
     // the details hit-test must use the live (fitted) scale, not a fixed one.

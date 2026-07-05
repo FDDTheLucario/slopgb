@@ -273,20 +273,41 @@ fn vram_geom(tab: VramTab, content: Rect, tall: bool) -> VramGeom {
     }
 }
 
+/// Two-column Tiles layout (CGB): bank 0 grid left, bank 1 grid right, each a
+/// 16×24 tile grid fitted to half the `content` width with a small gutter
+/// between. Returns `(left, right, scale)`. Shared by the render and the hover
+/// hit-test so they can't drift.
+fn tiles_two_col(content: Rect) -> (Rect, Rect, i32) {
+    const GUTTER: i32 = 6;
+    let half_w = (content.w - GUTTER).max(0) / 2;
+    let s = vram::fit_scale(half_w, content.h, 16 * 8, 24 * 8);
+    let (gw, gh) = (16 * 8 * s, 24 * 8 * s);
+    let left = Rect::new(content.x, content.y, gw, gh);
+    let right = Rect::new(content.x + half_w + GUTTER, content.y, gw, gh);
+    (left, right, s)
+}
+
 fn render_vram(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, state: &VramState) {
     let l = vram::layout(area);
     vram::render_tabs(c, area.x + 2, area.y + 2, state.tab, theme);
     let cgb = gb.model().is_cgb();
     let tall = gb.debug_read(0xFF40) & 0x04 != 0;
     let g = vram_geom(state.tab, l.content, tall);
+    // CGB has two VRAM banks; the Tiles tab shows both side by side (bank 0 left,
+    // bank 1 right), so its geometry differs from the single-grid vram_geom (each
+    // grid fits half the content width). DMG has one bank → None.
+    let tiles_two = (state.tab == VramTab::Tiles && cgb).then(|| tiles_two_col(l.content));
     match state.tab {
         VramTab::Tiles => {
             // A raw tile has no inherent palette, so bgb renders the Tiles grid
-            // in a neutral grey ramp (its "guessed palette" field stays empty)
-            // rather than mapping every tile through one game palette. The CGB
-            // bank toggle picks which 8 KiB half to show (DMG has one bank).
-            let bank = if cgb { usize::from(state.tile_bank) } else { 0 };
-            vram::render_tiles(c, l.content, gb.vram(), bank, &vram::GREYS, g.scale);
+            // in a neutral grey ramp rather than through one game palette. On CGB
+            // both banks show at once (bank 0 left, bank 1 right); DMG has one.
+            if let Some((left, right, s)) = tiles_two {
+                vram::render_tiles(c, left, gb.vram(), 0, &vram::GREYS, s);
+                vram::render_tiles(c, right, gb.vram(), 1, &vram::GREYS, s);
+            } else {
+                vram::render_tiles(c, l.content, gb.vram(), 0, &vram::GREYS, g.scale);
+            }
         }
         VramTab::Oam => {
             let (pals, n) = obj_palettes(gb, state.show_paletted);
@@ -336,16 +357,27 @@ fn render_vram(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, state: &
             }
         }
     }
-    if state.grid && g.grid {
-        draw_grid(c, g.extent, g.cell_w, g.cell_h, theme);
-    }
     // bgb frames the grid and the details column as separate panels. The grid
     // tabs frame the *bounded* extent (so the map doesn't bleed grid lines into
-    // empty space); Palettes frames the whole content area.
-    c.outline_rect(if g.grid { g.extent } else { l.content }, theme.border);
+    // empty space); Palettes frames the whole content area. The two-bank Tiles
+    // view frames each grid separately.
+    if let Some((left, right, s)) = tiles_two {
+        let cell = 8 * s;
+        if state.grid {
+            draw_grid(c, left, cell, cell, theme);
+            draw_grid(c, right, cell, cell, theme);
+        }
+        c.outline_rect(left, theme.border);
+        c.outline_rect(right, theme.border);
+    } else {
+        if state.grid && g.grid {
+            draw_grid(c, g.extent, g.cell_w, g.cell_h, theme);
+        }
+        c.outline_rect(if g.grid { g.extent } else { l.content }, theme.border);
+    }
     c.outline_rect(l.details, theme.border);
     render_vram_controls(c, &l, state, cgb, theme);
-    render_vram_details(gb, c, &l, state, g.scale, theme);
+    render_vram_details(gb, c, &l, state, g.scale, tiles_two, theme);
 }
 
 /// The BG-map tab's 8 BG palettes (CGB) or single BGP palette (DMG) as RGB888,
@@ -526,6 +558,7 @@ fn render_vram_details(
     l: &VramLayout,
     state: &VramState,
     scale: i32,
+    tiles_two: Option<(Rect, Rect, i32)>,
     theme: &Theme,
 ) {
     let Some((hx, hy)) = state.hover else {
@@ -536,7 +569,10 @@ fn render_vram_details(
         return;
     }
     let lines = match state.tab {
-        VramTab::Tiles => tile_details(lx, ly, scale),
+        VramTab::Tiles => match tiles_two {
+            Some((left, right, s)) => tile_details_two(lx, ly, left, right, s),
+            None => tile_details(lx, ly, scale),
+        },
         VramTab::Oam => oam_details(gb, lx, ly, scale),
         VramTab::BgMap => bgmap_details(gb, state, lx, ly, scale),
         VramTab::Palettes => return,
@@ -559,6 +595,32 @@ fn tile_details(lx: i32, ly: i32, scale: i32) -> Vec<String> {
     vec![
         format!("Tile No. {tile}"),
         format!("Tile Address 0:{:04X}", 0x8000 + tile * 16),
+    ]
+}
+
+/// Two-bank Tiles hover (CGB): resolve content-relative `(lx, ly)` to a tile in
+/// the left (bank 0) or right (bank 1) grid — geometry from [`tiles_two_col`] —
+/// and print the real bank in the `bank:addr` label. A hover in the gutter or
+/// off-grid yields no tile.
+fn tile_details_two(lx: i32, ly: i32, left: Rect, right: Rect, scale: i32) -> Vec<String> {
+    let (bank, gx) = if lx < left.w {
+        (0, lx)
+    } else {
+        let rx = lx - (right.x - left.x);
+        if (0..right.w).contains(&rx) {
+            (1, rx)
+        } else {
+            return Vec::new(); // gutter between the two grids
+        }
+    };
+    let col = gx / (8 * scale);
+    let tile = (ly / (8 * scale)) * 16 + col;
+    if col >= 16 || !(0..384).contains(&tile) {
+        return Vec::new();
+    }
+    vec![
+        format!("Tile No. {tile}"),
+        format!("Tile Address {bank}:{:04X}", 0x8000 + tile * 16),
     ]
 }
 
