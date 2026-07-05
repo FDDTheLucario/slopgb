@@ -26,6 +26,7 @@ mod cycle;
 mod hdma;
 mod memory;
 mod oam_dma;
+mod speed;
 mod tick;
 
 /// The five implemented interrupt sources: IF/IE bits 0-4 (VBlank, STAT,
@@ -399,6 +400,43 @@ pub struct Interconnect {
     /// Inert flag-off (only set under `tier2_reclock`), so production is
     /// byte-identical.
     m0_halt_hold: u8,
+    /// PORT 3 (#11bc, the S6 completion frame) — the deferred-path
+    /// timer/serial ack-squash deadline in CPU T (0 = no window open).
+    /// SameBoy's dispatch-ack consumes a re-set of the acked source only up
+    /// to an exact T past the ack (`updateTimaIrq(cc + 2 + isCgb())` /
+    /// `updateSerial(cc + 3 + isCgb())` before `ackIrq`); the deferred
+    /// path's whole-M-cycle `ack_squash_ticks` window over-covers by up to
+    /// 3 T, swallowing the `tima/tc00_irq_late_retrigger_1` re-set SameBoy
+    /// delivers (reads E0, wants E4) while its `_2` sibling (inside the
+    /// true window) is rightly consumed. Set by `ack` on the tier2 path
+    /// alongside the production counters; consumed at the exact commit T in
+    /// `advance_machine_t`. Production (eager path) keeps the tick counters
+    /// — byte-identical OFF.
+    ack_squash_deadline_t: u64,
+    /// PORT 2 (#11bc) — outstanding sub-M-cycle wake skew (T). Set to 2 by a
+    /// mid-cycle (w2) halt wake: the dispatch + the first handler instruction
+    /// run 2 T early (their deferred reads land at the wake's true
+    /// sub-M-cycle T); the next instruction-boundary flush repays it,
+    /// re-aligning the CPU to the machine's 4-T grid so the per-M-cycle mask
+    /// calibrations (if_late lifecycle, rise-cc tables) hold for everything
+    /// after — the goal's "clock-park offset consumed by all post-wake
+    /// accesses until the next instruction-boundary flush". An UNBOUNDED
+    /// skew was measured to hang the multi-round mooneye
+    /// `hblank_ly_scx_timing-GS` (B=42): every later round's halt entry
+    /// lands off-grid and the whole calibrated mask map mis-frames.
+    wake_skew: u32,
+    /// #11bf WAKE-INSTANT experiment (`SLOPGB_P2GRID`) — the machine T the
+    /// deferred advance is currently executing (set per-T by
+    /// `advance_machine_t`; only read by the p2grid visibility deadline).
+    machine_now: u64,
+    /// #11bf item 2a sweep scratch: request pending at write_deferred entry.
+    vram_dma_req_pre: bool,
+    /// #11bf (`SLOPGB_P2GRID`) — the mode-0 STAT rise's halt-wake visibility
+    /// deadline in machine T: the halt sampler masks IF_STAT while
+    /// `clock.now() < stat_vis_from_t`. Replaces the M-cycle-quantized
+    /// `if_late`/`m0_halt_hold` masking for the mode-0 rise under the
+    /// SameBoy-exact 4k+2 sample grid (rise T + `SLOPGB_P2DELTA`).
+    stat_vis_from_t: u64,
     /// Port Stage B C1.3 (S7 sub-M-cycle halt-wake) — the post-mode-0-halt-wake
     /// LY read-phase carry. SameBoy's DMG halt-wake resumes the CPU at the
     /// IRQ's sub-M-cycle clock, so the CPU's M-cycle phase is offset from the
@@ -569,6 +607,22 @@ const CGB_COMPAT_BG_PALETTE: [u16; 4] = [0x7FFF, 0x1BEF, 0x6180, 0x0000];
 const CGB_COMPAT_OBJ_PALETTE: [u16; 4] = [0x7FFF, 0x421F, 0x1CF2, 0x0000];
 
 impl Interconnect {
+    /// `SLOPGB_S5DBG` wake-instant tracer: which sample path woke, at which
+    /// machine position (the SBWAKE `fp=` analogue). Debug-only, env-gated.
+    fn dbg_wake(&mut self, path: &str, w: u8) {
+        if crate::ppu::s5dbg_on() {
+            let (l, d) = self.ppu.scan_pos();
+            eprintln!(
+                "SLOPGB wake[{path}] ly={l} dot={d} clk={} pend={} w={w:02x} intf={:02x} late={:02x} hold={}",
+                self.clock.now(),
+                self.clock.pending(),
+                self.intf,
+                self.if_late,
+                self.m0_halt_hold
+            );
+        }
+    }
+
     pub fn new(model: Model, cart: Cartridge) -> Self {
         // CGB mode iff the hardware is a CGB/AGB *and* the cart opts in via
         // header byte 0x143 bit 7 (same predicate `GameBoy::auto_model`
@@ -604,6 +658,11 @@ impl Interconnect {
             ie: 0,
             if_late: 0,
             m0_halt_hold: 0,
+            ack_squash_deadline_t: 0,
+            wake_skew: 0,
+            machine_now: 0,
+            vram_dma_req_pre: false,
+            stat_vis_from_t: 0,
             halt_ly_phase: 0,
             if_stat_late: 0,
             m0_access_edge: None,
@@ -852,180 +911,20 @@ impl Bus for Interconnect {
         self.intf & self.ie & IF_MASK & !self.if_stat_late
     }
 
+    fn pending_halt_wake_mid(&mut self) -> u8 {
+        self.halt_wake_mid_impl()
+    }
+
     fn pending_halt_wake(&self) -> u8 {
-        // The halt-exit logic samples IE & IF *within* the M-cycle, not at
-        // its end (SameBoy sm83_cpu.c `GB_cpu_run`: DMG samples mid-cycle
-        // after 2 of 4 T-cycles, CGB/AGB at the start of the cycle), so a
-        // timer reload + IF commit — which lands on the last T-substep
-        // under the hardware DIV phase (div ≡ 0 mod 4 at boundaries) — is
-        // missed until the next cycle: the halt wake comes one M-cycle
-        // later than a running-CPU dispatch would (gambatte tima/tc*_irq_*
-        // on both models; wilbertpol timer_if rounds 5/6 vs 3/4).
-        //
-        // The STAT bit joins the mask per event, not wholesale: the PPU
-        // flags its second-half IF commits (line-start OAM pulses, mode-0
-        // rises on dots ≡ 3,0 mod 4) via `Ppu::take_stat_halt_late`, which
-        // ORs IF_STAT into `if_late` for exactly those cycles — the
-        // gbmicrotest int_oam_*/int_hblank_halt_scx* grids and the
-        // mooneye/wilbertpol hblank halt groupings pin the law, while
-        // first-half STAT commits and the vblank IF stay live
-        // (halt_ime1_timing2-GS, vblank, DMG). The known unmodelled
-        // remainder is the CGB/AGB start-of-cycle staleness for first-half
-        // PPU commits (halt_ime1_timing2-GS's "fail: CGB, AGB, AGS";
-        // gambatte halt/*_cgb04c split rows): landing it requires a
-        // per-model widening of the halt-late mask, a separate work
-        // package.
-        (self.intf & !self.if_late) & self.ie & IF_MASK
+        self.halt_wake_impl()
     }
 
     fn ack(&mut self, bit: u8) {
-        self.intf &= !(1 << bit);
-        // gambatte Memory::ackIrq syncs the acked bit's source a few
-        // T-cycles past the ack point before clearing, so a hardware
-        // re-set landing just after the dispatch's IF clear is consumed
-        // by it (see the `ack_squash_*` field docs for the window
-        // derivation and the pinning ROMs).
-        match bit {
-            0 | 1 => {
-                // lcd_.update(cc + 2), no isCgb term: 2 dots into the
-                // next machine tick on both families and at both speeds
-                // (in double speed that is the whole 2-dot tick). The
-                // line-anchored rises' single-speed second-half emission
-                // dots stay OUT of reach — see the field docs.
-                self.ack_squash_mask = 1 << bit;
-                self.ack_squash_ticks = 0;
-                self.ack_squash_dots = 2;
-            }
-            2 | 3 => {
-                // updateTimaIrq(cc + 2 + isCgb()) / updateSerial(cc + 3 +
-                // isCgb()): with the timer IF on the last T-substep and
-                // the serial IF on the DIV-edge boundary, both windows
-                // cover the set produced by the next machine tick on the
-                // DMG family and the next two on CGB/AGB.
-                self.ack_squash_mask = 1 << bit;
-                self.ack_squash_ticks = if self.model.is_cgb() { 2 } else { 1 };
-                self.ack_squash_dots = 0;
-            }
-            _ => {}
-        }
+        self.ack_impl(bit)
     }
 
     fn stop(&mut self, skipped_addr: u16, interrupt_pending: bool) -> bool {
-        let switching = self.cgb_mode && self.key1_armed;
-        let entering_ds = switching && !self.double_speed;
-        // gambatte Memory::stop snapshots the HDMA situation at the
-        // pre-read cc: a block request still pending when STOP executes
-        // (flagged mid-instruction — no boundary came) is deferred when
-        // leaving double speed (haltHdmaState_ = hdma_requested +
-        // ackDmaReq) but stays flagged when entering it, firing *inside*
-        // the pause where the gated core clock aborts the HBlank transfer
-        // with the count latched (dma()'s halted path; pinned by
-        // hdma_transition_speedchange_hdmalen*_hdma5 → $80|len vs
-        // hdma_late_m3speedchange_hdma5_*_ds_1 → still active).
-        let in_window = self.hdma_mode == HdmaMode::ArmedLcdOn && self.ppu.hdma_period();
-        let pending_req = self.vram_dma_req.take();
-        if switching && !entering_ds {
-            // Leaving double speed: the PPU/APU re-pace from the cycle
-            // right after the STOP opcode fetch (gambatte lcd_/psg_
-            // .speedChange at cc_ = cc + 8 * !isDoubleSpeed(): offset 0
-            // leaving, +8 entering), so the toggle precedes the
-            // skipped-byte read below; entering double speed it lands
-            // after the read + internal cycle instead.
-            self.double_speed = false;
-            self.ppu.set_double_speed(false);
-        }
-        if !interrupt_pending {
-            // The skipped byte costs one real read M-cycle (SameBoy
-            // stop(): `cycle_read(gb, gb->pc++)`, gated on no pending
-            // interrupt). The value is discarded; the address still
-            // drives the bus (OAM bug).
-            self.tick_machine();
-            self.maybe_oam_bug(skipped_addr, OamBugKind::Read);
-            let _ = self.read_no_tick(skipped_addr);
-        }
-        // STOP resets DIV on every model (Pan Docs "FF04 — DIV"),
-        // committing like a write occupying the skipped-byte read slot:
-        // gambatte Memory::stop timestamps `nontrivial_ff_write(0x04, 0,
-        // cc)` at the slot's *start* cc, and gambatte write timestamps are
-        // start-of-cycle (cpu.cpp FF_WRITE advances cc afterwards) where
-        // ours commit after the tick — so the reset lands here, after that
-        // cycle's tick (the gambatte speedchange tima/div a/b phase pairs
-        // pin the TIMA falling-edge quirk to this cell). Modelled as a DIV
-        // write so the falling-edge effects apply (frame-sequencer edge
-        // included, `Apu::div_write` — the speedchange ch2_nr52 families).
-        self.apu.div_write(self.double_speed);
-        self.timer.write(0xFF04, 0);
-        if !switching {
-            // Deep stop: hand a still-pending block request back — the
-            // CPU's stop idle engages the halt gate, which defers it
-            // (gambatte's non-switch stop path calls Memory::halt).
-            self.vram_dma_req = pending_req.or(self.vram_dma_req);
-            return false;
-        }
-        self.key1_armed = false;
-        if interrupt_pending {
-            // With IE & IF pending the switch is instantaneous: no
-            // skipped-byte read, no pause (SameBoy stop() gates the halt
-            // countdown on !interrupt_pending; age caution/
-            // spsw-interrupts).
-            if entering_ds {
-                self.double_speed = true;
-                self.ppu.set_double_speed(true);
-            }
-            self.vram_dma_req = pending_req.or(self.vram_dma_req);
-            return true;
-        }
-        // The OAM DMA controller freezes after the read cycle (gambatte
-        // Memory::stop: updateOamDma(cc + 4), then intreq_.halt()); the
-        // halt-hdma snapshot below is installed first so the wake path
-        // can re-evaluate it.
-        self.halt_hdma = if pending_req.is_some() && !entering_ds {
-            HaltHdmaState::Requested
-        } else if in_window {
-            HaltHdmaState::High
-        } else {
-            HaltHdmaState::Low
-        };
-        self.engage_halt_gate(true);
-        // One internal M-cycle before the pause (gambatte Memory::stop
-        // returns cc + 8: the operand read plus one cycle), still at the
-        // old PPU/APU pace when entering double speed.
-        self.tick_machine();
-        if entering_ds {
-            self.double_speed = true;
-            self.ppu.set_double_speed(true);
-        }
-        // Mode-0 entries seen by the two cycles above never flag a block:
-        // gambatte defers all LCD events into the pause, where the halted
-        // gate suppresses the flag; the live window is re-checked at wake.
-        self.vram_dma_req = None;
-        // The pause: the CPU sleeps for 0x7FFF more M-cycles on the *new*
-        // clock — with the read + internal cycles that totals 0x8001
-        // M-cycles ≙ gambatte's unhalt event at cc + 0x20000 + 4 (cc
-        // counts 4 per M-cycle at either speed) — while PPU/APU/timer run
-        // on. IE & IF != 0 ends it early, exactly like halt mode
-        // (gambatte's pause *is* a halt: the halted intevent_interrupts
-        // path unhalts; SameBoy keeps gb->halted under
-        // speed_switch_halt_countdown). SameBoy instead uses a flat
-        // 0x20008 8-MHz-clock countdown — half the pause when leaving
-        // double speed; gambatte's cgb04c expectations are this suite's
-        // oracle, and the speedchange2/3/4/5 (DS→single) LY families
-        // confirm its doubled length.
-        let dots_per_m: u64 = if self.double_speed { 2 } else { 4 };
-        let target = self.cycles + 0x7FFF * dots_per_m;
-        if entering_ds && pending_req.is_some() {
-            // The surviving block request fires at the first event check
-            // inside the pause: the halted service aborts the transfer
-            // (see run_vram_dma). Its stall counts toward the pause.
-            self.vram_dma_req = pending_req;
-            self.run_vram_dma();
-        }
-        while self.cycles < target && self.intf & self.ie & IF_MASK == 0 {
-            self.tick_machine();
-        }
-        self.engage_halt_gate(false);
-        self.vram_dma_unhalt();
-        true
+        self.stop_impl(skipped_addr, interrupt_pending)
     }
 
     fn set_halted(&mut self, halted: bool) {
@@ -1037,14 +936,19 @@ impl Bus for Interconnect {
     }
 
     fn dispatch_retime(&mut self) {
-        // Port Stage B (Tier 2): re-park the clock 2 T early (SameBoy
-        // sm83_cpu.c:1690) and advance the deferred machine by the 2 T it
-        // commits, so the vector fetch + first handler reads sample 2 dots
-        // early. Only reached on the reclock path (`dispatch_reclock`), after
-        // the low push parked 4 (`pending == 4 > 2`).
-        let before = self.clock.now();
-        let _ = self.clock.dispatch_vector_retime();
-        self.advance_machine_t(before, self.clock.now());
+        self.dispatch_retime_impl()
+    }
+
+    fn pending_halt_entry(&mut self) -> u8 {
+        self.halt_entry_impl()
+    }
+
+    fn halt_entry_rewind(&mut self) -> bool {
+        self.halt_entry_rewind_impl()
+    }
+
+    fn pending_dispatch(&mut self) -> u8 {
+        self.dispatch_pending_impl()
     }
 
     fn flush_pending(&mut self) {

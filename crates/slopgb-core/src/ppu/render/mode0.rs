@@ -30,6 +30,9 @@ impl Ppu {
             160 => {
                 self.render.active = false;
                 self.render_finished = true;
+                // Part C/D: record the pipe-end dot for the tier2 palette
+                // unblock law (see `Ppu::pal_open_dot`).
+                self.pal_open_dot = self.dot;
                 // The CGB palette-RAM unblock (this `render_finished` rise)
                 // is half-classified by the interconnect for the cc+2
                 // MID-phase FF69/FF6B read (sub-dot event-phase model);
@@ -46,6 +49,7 @@ impl Ppu {
                     self.m0_src = true;
                     self.m0_rise_dot = true;
                     self.line_render_done = true;
+                    self.flip_dot = self.dot;
                 }
             }
             _ => {}
@@ -83,65 +87,8 @@ impl Ppu {
         if self.m0_src || !self.render.active {
             return;
         }
+        let (proj, lead) = self.flip_projection();
         let r = &self.render;
-        let mut proj = r.stall + (160 - u16::from(r.lx));
-        // Dots until the FIFO can pop again (it refills mid-fetch only
-        // after a window start in the final tile).
-        if r.bg_count == 0 {
-            proj += match r.phase {
-                FetchPhase::TileNoWait => 6,
-                FetchPhase::TileNo => 5,
-                FetchPhase::LoWait => 4,
-                FetchPhase::Lo => 3,
-                FetchPhase::HiWait => 2,
-                FetchPhase::Hi | FetchPhase::Push => 1,
-            };
-        }
-        // Sprite fetches still ahead of the output position: the base
-        // cost plus the first-per-tile alignment penalty (mirrors the
-        // fetch path without committing the tile set).
-        if self.eff.lcdc & LCDC_OBJ_ENABLE != 0 {
-            let mut tiles = r.penalty_tiles;
-            let mut fetched = r.fetched;
-            for i in 0..usize::from(r.n_sprites) {
-                if r.fetched & (1 << i) != 0 {
-                    continue;
-                }
-                let x = r.sprites[i].x;
-                if (8..168).contains(&x) && x - 8 >= r.lx {
-                    proj += obj_fetch_base(self.model.is_cgb(), fetched);
-                    fetched |= 1 << i;
-                    let v = u16::from(x) + u16::from(self.eff.scx);
-                    if tiles & (1u64 << (v >> 3)) == 0 {
-                        tiles |= 1u64 << (v >> 3);
-                        proj += 5u16.saturating_sub(v & 7);
-                    }
-                }
-            }
-        }
-        // A window start still ahead: 6 dots (FIFO restart), or the 2-dot
-        // DMG WX=166 aborted-start freeze. A reactivation zero pixel
-        // (±1 dot, boundary-dependent) is not projected.
-        let wx = self.eff.wx;
-        if self.eff.lcdc & LCDC_WIN_ENABLE != 0
-            && (self.wy_latch || self.wy2 == self.ly)
-            && (7..=166).contains(&wx)
-            && wx - 7 >= r.lx
-        {
-            let dmg_166 = !self.model.is_cgb() && wx == 166;
-            if !r.win_active {
-                proj += if dmg_166 { 2 } else { 6 };
-            } else if dmg_166 && !self.win_start_pending {
-                proj += 2;
-            }
-        }
-        // Sprite-laden DMG lines flip 3 dots before the pipe end: the
-        // blob's 6-dot first OBJ fetch (see `obj_fetch_base`) extends the
-        // pipe by one dot more than the old 5-dot model, and the flip
-        // stays on its mooneye/gbmicrotest-frozen dot (the photographs
-        // move the pixels, the IRQ grids hold the flip).
-        let lead = (2 + u16::from(r.fetched != 0 && !self.model.is_cgb()) - u16::from(self.ds))
-            .saturating_sub(u16::from(r.win_stalled) + u16::from(r.win_aborted));
         // Increment 1 of the sub-dot event-phase model calibrates the
         // accessibility-unblock sub-dot phase for STEADY-STATE BARE-line
         // flips only. Sprite/window mode-3 extensions push the visible
@@ -209,67 +156,42 @@ impl Ppu {
         // All gated on `tier2_reclock`; production (`!leading_edge_reads`) never
         // sets `vis_early` and the snap is inert, so it is byte-identical OFF.
         let has_sprites = r.n_sprites > 0;
+        // Part C (HALFDOT-BUILD-PLAN) — the tier2 `early_lead` case-tower is
+        // COLLAPSED to its two physical residues; everything else is 0 (the
+        // visible flip coincides with the dispatch, and the FF41 read's finer
+        // placement is the ONE half-dot comparison in `vis_exit_hd`):
+        //
+        // 1. The LCD-enable GLITCH line keeps +2 — the glitch frame's visible
+        //    mode→0 offset (452-dot line, dot-82 pipe); `lcdon_timing-GS`'s
+        //    post-glitch reads are calibrated against it (C1.2 pin).
+        // 2. The bare-line cc2 READ-GRID parity (+1 iff the dispatch dot lands
+        //    ≡ 1 mod 4 on a clean bare line): a leading-edge access in the
+        //    dispatch's own M-cycle observes the flip at the cc+2 phase, which
+        //    the whole-dot `line_render_done` misses only for the cc2 parity
+        //    (#11n; `m2int_scx3`/`nobg_scx7` m3stat_2). Its FF41 side is
+        //    subsumed by the PORT-1 carry law (`vis_exit_hd` arm 8 — the
+        //    m2-ISR +4 hd carry reproduces the same verdict, #11bc); the
+        //    residue survives for the OAM/VRAM ACCESSIBILITY release + the
+        //    non-PORT-1 fallback reads (line 0, CGB `wy_trig_sb`-bare), the
+        //    Part-D migration target. Scoped to clean bare lines — on a
+        //    late-window-DISABLE line the anticipation is an A/B swap that
+        //    drops the SameBoy-passing `_2` sibling (measured, #11n).
+        //
+        // The IRQ side (`mode_for_interrupt`/`prev_done`, reclock.rs) keys on
+        // `line_render_done`, never `vis_early` — the counter-pinned dispatch
+        // dot is untouched. `vis_early` is never set in production
+        // (`leading_edge_reads` off) → byte-identical OFF.
         let early_lead = if self.tier2_reclock {
-            if has_sprites {
-                0
-            } else if bare_flip {
-                // C1.2 baseline: 0, not 1. The bare-line visible mode→0 boundary
-                // lands at `line_render_done` (dispatch dot, no anticipation). The
-                // kernel separation only needs the boundary in (252, 256] — both
-                // 253 (lead+1) and 254 (lead+0) satisfy m2int@252=3 ∧ m0int@256=0 —
-                // but `lcdon_timing-GS`'s post-glitch line-1 STAT read lands AT
-                // dot 253 and must read mode 3, so the boundary must be 254
-                // (lead+0). intr_2_mode0/mode3 + the kernel all hold at 0.
-                //
-                // Mech-1 (S5 read-observer, eighth-grid): EXCEPT when the dispatch
-                // dot lands at cc2 of its M-cycle (dot ≡1 mod 4). A leading-edge
-                // FF41 read samples at its M-cycle START (dot ≡0 mod 4) and observes
-                // the mode-0 flip at the cc+2 phase, so a read landing IN the
-                // dispatch's M-cycle should see mode 0. cc1 (dispatch == the M-cycle
-                // start) is already caught by `line_render_done`; but a cc2 dispatch
-                // commits one dot PAST that start, so the whole-dot `line_render_done`
-                // leaves the same-M-cycle read (at the start) at mode 3. Anticipate
-                // `vis_early` by 1 dot to the M-cycle start (el=1) so it reads mode 0
-                // — the gambatte `m2int_scx3`/`nobg_scx7` `m3stat_2` reads (dispatch
-                // 257/261 ≡1 mod 4, read at 256/260; SameBoy reads mode 0 in the same
-                // M-cycle). cc3/cc4 (≡2/3) KEEP el=0: their same-M-cycle read precedes
-                // the boundary (→ mode 3, e.g. the kernel m2int@252 with dispatch
-                // 254 ≡2, and lcdon's 253 read), and the NEXT M-cycle's read sees
-                // mode 0 via `line_render_done`. The IRQ side (`mode_for_interrupt`/
-                // `prev_done`, reclock.rs) keys on `line_render_done`, not `vis_early`,
-                // so the counter-pinned dispatch dot is untouched. Tier2-gated;
-                // `vis_early` is never set in production, so byte-identical OFF.
-                //
-                // Restricted to TRUE bare lines untouched by the window (no WY
-                // latch / WY-match, no stall/abort). A late-window-DISABLE line is
-                // `bare_flip` at flip time (`!win_active`) but its two test reads
-                // land 1 cycle apart and COLLAPSE onto the same slopgb read dot
-                // (SameBoy distinguishes them at sub-dot — `window/late_disable_*`
-                // _1 reads mode 0, _2 reads mode 3, BOTH SameBoy-passing). slopgb
-                // can render only one digit for the pair, so the cc2 anticipation
-                // just flips WHICH sibling passes — an A/B swap that DROPS the
-                // SameBoy-passing `_2`. `wy_latch`/`wy2==ly` stay set across a
-                // window-disable (only the LCD-on path clears them), so they mark
-                // every window-involved line; m2int/scx are window-free (wy_latch
-                // false, wx 0). Window length is its own sub-family (parallel model
-                // + vis-HOLD); leave it to that work.
+            if self.glitch_line {
+                2
+            } else if bare_flip && !has_sprites {
                 let dispatch_dot = self.dot + proj.saturating_sub(lead);
                 let clean_bare =
                     !self.wy_latch && self.wy2 != self.ly && !r.win_stalled && !r.win_aborted;
                 u16::from((dispatch_dot & 3) == 1 && clean_bare)
-            } else if self.glitch_line {
-                // The LCD-enable glitch line keeps the +2 anticipation: its
-                // post-glitch line-1 STAT read (lcdon_timing-GS) is calibrated
-                // against it; see the C1.2 pin.
-                2
             } else {
-                // C2/S5 — window lines take the SAME deferred-read law as bare
-                // (C1.2): the Tier-2 deferred read pays the parked debt then
-                // samples at the trailing frame, so it takes NO anticipation
-                // (`early_lead = 0`). The window mode-3 EXTENSION is already in
-                // `proj`/`lead`; anticipating `vis_early` by +2 flipped the
-                // CPU-visible mode→0 two dots early on window lines, so the
-                // `window/arg/late_wy_*` m3stat reads saw mode 0 a poll early.
+                // Sprite lines (B5 grid-snap below) and window lines (their
+                // mode-3 extension is already in `proj`/`lead`) take 0.
                 0
             }
         } else if bare_flip {
@@ -324,6 +246,7 @@ impl Ppu {
             self.m0_src = true;
             self.m0_rise_dot = true;
             self.line_render_done = true;
+            self.flip_dot = self.dot;
             // Port Stage C/S5 mech-1 — the window vis-HOLD foundation. SameBoy
             // extends a TRIGGERING window's CPU-visible mode-3 to ≈ `263 + SCX&7`
             // (the measured window-length law), PAST this counter-pinned dispatch
@@ -336,7 +259,7 @@ impl Ppu {
             // visible-mode half of the C2 parallel window-length model. See the
             // `vis_hold_until` field docs.
             if self.tier2_reclock && self.render.win_active {
-                self.vis_hold_until = 263 + u16::from(self.eff.scx & 7);
+                self.vis_hold_until = 263 + u16::from(self.scx & 7);
             }
             // The accessibility unblock (this `line_render_done` rise) is
             // half-classified by the interconnect for the cc+2 MID-phase
@@ -378,6 +301,80 @@ impl Ppu {
         }
     }
 
+
+    /// PORT 1 (#11bc) — the pure flip projection `(proj, lead)` exactly as
+    /// [`Self::m0_flip_events`] evaluates it each mode-3 dot: the dispatch
+    /// fires when `proj <= lead`, so the PROJECTED dispatch dot from any
+    /// mid-render read position is `dot + proj - lead`. Split out so the
+    /// half-dot bare-exit law (`stat_irq.rs::vis_mode_read`, tier2-only) can
+    /// anchor the CPU-visible mode-3→0 exit to the render's own projected
+    /// flip BEFORE it fires — which tracks mid-line SCX writes through the
+    /// fine-scroll hunt (late_scx4 / scx_m3_extend) where a live-`scx`
+    /// closed form cannot. Pure (`&self`); byte-identical refactor for the
+    /// production caller.
+    pub(in crate::ppu) fn flip_projection(&self) -> (u16, u16) {
+        let r = &self.render;
+        let mut proj = r.stall + (160 - u16::from(r.lx));
+        // Dots until the FIFO can pop again (it refills mid-fetch only
+        // after a window start in the final tile).
+        if r.bg_count == 0 {
+            proj += match r.phase {
+                FetchPhase::TileNoWait => 6,
+                FetchPhase::TileNo => 5,
+                FetchPhase::LoWait => 4,
+                FetchPhase::Lo => 3,
+                FetchPhase::HiWait => 2,
+                FetchPhase::Hi | FetchPhase::Push => 1,
+            };
+        }
+        // Sprite fetches still ahead of the output position: the base
+        // cost plus the first-per-tile alignment penalty (mirrors the
+        // fetch path without committing the tile set).
+        if self.eff.lcdc & LCDC_OBJ_ENABLE != 0 {
+            let mut tiles = r.penalty_tiles;
+            let mut fetched = r.fetched;
+            for i in 0..usize::from(r.n_sprites) {
+                if r.fetched & (1 << i) != 0 {
+                    continue;
+                }
+                let x = r.sprites[i].x;
+                if (8..168).contains(&x) && x - 8 >= r.lx {
+                    proj += obj_fetch_base(self.model.is_cgb(), fetched);
+                    fetched |= 1 << i;
+                    let v = u16::from(x) + u16::from(self.eff.scx);
+                    if tiles & (1u64 << (v >> 3)) == 0 {
+                        tiles |= 1u64 << (v >> 3);
+                        proj += 5u16.saturating_sub(v & 7);
+                    }
+                }
+            }
+        }
+        // A window start still ahead: 6 dots (FIFO restart), or the 2-dot
+        // DMG WX=166 aborted-start freeze. A reactivation zero pixel
+        // (±1 dot, boundary-dependent) is not projected.
+        let wx = self.eff.wx;
+        if self.eff.lcdc & LCDC_WIN_ENABLE != 0
+            && (self.wy_latch || self.wy2 == self.ly)
+            && (7..=166).contains(&wx)
+            && wx - 7 >= r.lx
+        {
+            let dmg_166 = !self.model.is_cgb() && wx == 166;
+            if !r.win_active {
+                proj += if dmg_166 { 2 } else { 6 };
+            } else if dmg_166 && !self.win_start_pending {
+                proj += 2;
+            }
+        }
+        // Sprite-laden DMG lines flip 3 dots before the pipe end: the
+        // blob's 6-dot first OBJ fetch (see `obj_fetch_base`) extends the
+        // pipe by one dot more than the old 5-dot model, and the flip
+        // stays on its mooneye/gbmicrotest-frozen dot (the photographs
+        // move the pixels, the IRQ grids hold the flip).
+        let lead = (2 + u16::from(r.fetched != 0 && !self.model.is_cgb()) - u16::from(self.ds))
+            .saturating_sub(u16::from(r.win_stalled) + u16::from(r.win_aborted));
+        (proj, lead)
+    }
+
     /// A stall source engaged after the mode-0 flip already fired (a
     /// late WY/WX/LCDC write armed a window start or sprite fetch inside
     /// the final tile): the flip is a combinational level on hardware —
@@ -391,6 +388,7 @@ impl Ppu {
             self.m0_src = false;
             self.m0_rise_dot = false;
             self.line_render_done = false;
+            self.flip_dot = 0;
             // The visible back-date drops with the dispatch (flag-on only;
             // always false in production). See the `vis_early` field docs.
             self.vis_early = false;
@@ -409,7 +407,13 @@ impl Ppu {
         // fetch residue stays documented in baselines/mealybug.txt.)
         // The fine-scroll comparator hunt and the pop side have their
         // own anchors and never read these.
-        let lcdc = self.eff.lcdc;
+        // #11bo mech2 — the BG/window fetcher samples the DEFERRED addressing
+        // view (`render_lcdc`, bit3 BG map / bit4 tile-data / bit6 win map): a
+        // mid-mode-3 bgtilemap/bgtiledata toggle reaches the fetch grid at the
+        // production dot under tier2. OBJ-enable / mode-3-length reads keep the
+        // eager `eff.lcdc` (they must not move the length). `render_lcdc` ==
+        // `eff.lcdc` in production (byte-identical).
+        let lcdc = self.eff.render_lcdc;
         let (scy, scx) = (self.eff.scy, self.eff.scx);
         match self.render.phase {
             FetchPhase::TileNoWait => self.render.phase = FetchPhase::TileNo,

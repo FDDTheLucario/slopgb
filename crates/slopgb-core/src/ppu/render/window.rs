@@ -44,8 +44,9 @@ impl Ppu {
         // WY-trigger's activation deadline — *before* the `wy_ok`/`win_en`
         // gate, so a bare line the window never enters still pins the dot the
         // window *would* have activated. Tier2 + CGB only; never read OFF.
-        if win_match && self.render.wx_match_dot == 0 && self.tier2_reclock && self.model.is_cgb() {
+        if win_match && self.render.wx_match_dot == 0 && self.tier2_reclock {
             self.render.wx_match_dot = self.dot;
+            self.render.wx_match_scx = self.eff.scx & 7;
         }
         if win_match
             && !win_en_now
@@ -169,15 +170,42 @@ impl Ppu {
     /// addressing, and the next BG map read uses the live column
     /// `(scx + xpos + 1 - cgb) / 8` — re-anchoring the tile grid to the
     /// output position rather than re-showing skipped columns.
-    pub(in crate::ppu) fn window_abort(&mut self) {
+    /// A mid-mode-3 LCDC.5 clear: the read-law FLAG half of the abort (the
+    /// cc+0-calibrated `win_predraw_abort` / DMG `win_aborted` inputs the FF41
+    /// mode-3-length read laws consume — `stat_irq.rs::vis_mode_read`). Always
+    /// runs at the eager control commit (`regs.rs::commit_eff`), NEVER deferred:
+    /// the late_disable read laws are calibrated to the write's cc+0 dot. The
+    /// RENDER re-anchor (`window_abort_render`) is a separate, deferrable half
+    /// (#11bq) so the drawn window ends at the render frame, not cc+0.
+    pub(in crate::ppu) fn window_abort_flags(&mut self) {
+        if !self.render.win_mode {
+            // C2 #11at — PRE-DRAW abort: LCDC.5 cleared before the window's
+            // first fetch (`win_mode` not yet set — `late_disable_early_*_1`).
+            // SameBoy renders BARE but DROPS the SCX fine-scroll penalty → exit
+            // cfl257. `!win_mode` is the pre-draw discriminator. #11bj: DMG too.
+            if self.tier2_reclock {
+                self.render.win_predraw_abort = true;
+                self.render.win_predraw_abort_dot = self.dot;
+            }
+        } else if !self.model.is_cgb() {
+            self.render.win_aborted = true;
+        }
+    }
+
+    /// The RENDER half of a mid-mode-3 LCDC.5 clear: end the drawn window and
+    /// re-anchor the BG fetch to a tile boundary. Under tier2 this fires at the
+    /// deferred render frame (the `render_lcdc` bit5 1→0 catch-up, `ppu/mod.rs`),
+    /// not the eager cc+0 — so the window stops at the same column SameBoy/
+    /// production draws (`m3_lcdc_win_en_change_multiple`: the eager clear ended
+    /// it 2 dots / 2 pixels early). In production (no `render_lcdc` defer) it runs
+    /// synchronously from `commit_eff`, byte-identical. Idempotent: a no-op if the
+    /// window already left `win_mode` (a natural end in the defer gap).
+    pub(in crate::ppu) fn window_abort_render(&mut self) {
         if !self.render.win_mode {
             return;
         }
         let cgb = self.model.is_cgb();
         let r = &mut self.render;
-        if !cgb {
-            r.win_aborted = true;
-        }
         r.win_mode = false;
         // Re-arms the trigger: re-enabling with WX pointing at a pixel
         // not yet drawn retriggers the window (doc §WIN_EN).

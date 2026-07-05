@@ -115,6 +115,65 @@ fn run_case(rom: &[u8]) -> Result<(), String> {
     }
 }
 
+/// #11bj session-local measurement aid: run an explicit list of gbmicrotest
+/// ROMs on the **flag-on** reclock and report the $FF82 verdict — the fast
+/// iteration loop for the Phase-2 DMG engine port. `#[ignore]`'d. Usage:
+/// `SLOPGB_ROWLIST=/tmp/rows.txt cargo test -p slopgb-core --test gbtr
+/// --release -- --ignored gbmicro_flagon_probe --nocapture`. Each row is
+/// `gbmicrotest/<name>.gb [Dmg]` (extra columns ignored). `SLOPGB_PROBE_OFF=1`
+/// A/Bs against production.
+#[test]
+#[ignore = "session-local Phase-2 measurement aid; needs SLOPGB_ROWLIST"]
+fn gbmicro_flagon_probe() {
+    let Ok(list_path) = std::env::var("SLOPGB_ROWLIST") else {
+        eprintln!("SLOPGB_ROWLIST unset");
+        return;
+    };
+    let Some(root) = common::gbtr_root() else {
+        panic!("gbtr collection not present");
+    };
+    let off = std::env::var("SLOPGB_PROBE_OFF").is_ok();
+    let body = std::fs::read_to_string(&list_path).expect("read rowlist");
+    let (mut pass, mut fail, mut skip) = (0u32, 0u32, 0u32);
+    for line in body.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let rel = line.split_whitespace().next().unwrap_or("");
+        if !rel.starts_with("gbmicrotest/") {
+            continue;
+        }
+        let Ok(rom) = std::fs::read(root.join(rel)) else {
+            skip += 1;
+            continue;
+        };
+        let mut gb = if off {
+            harness::boot(&rom, Model::Dmg)
+        } else {
+            harness::boot_with_reclock(&rom, Model::Dmg)
+        };
+        let deadline = gb.cycles().saturating_add(DEADLINE_TCYCLES);
+        harness::run_for_frames(&mut gb, 2);
+        if gb.peek(0xFF82) == 0 {
+            while gb.cycles() < deadline {
+                gb.step();
+            }
+        }
+        let (v, a, e) = (gb.peek(0xFF82), gb.peek(0xFF80), gb.peek(0xFF81));
+        if v == 0x01 {
+            pass += 1;
+        } else {
+            fail += 1;
+            println!("FAIL {rel} verdict={v:#04X} got={a:#04X} want={e:#04X}");
+        }
+    }
+    println!(
+        "gbmicro_flagon_probe[{}] pass={pass} fail={fail} skip={skip}",
+        if off { "OFF" } else { "ON" }
+    );
+}
+
 /// Enumerate the suite directory as collection-relative forward-slash
 /// paths, sorted (via `collect_roms`). Panics on a missing/unreadable
 /// directory — callers check `gbtr_root()` first.
@@ -218,6 +277,118 @@ fn tier2_int_hblank_halt_passes_dmg() {
         let mut gb = harness::boot_with_reclock(&rom, Model::Dmg);
         // Same fixed-point protocol as `run_case` (two frames, then the
         // verdict deadline), on the Tier-2 reclock path.
+        let deadline = gb.cycles().saturating_add(DEADLINE_TCYCLES);
+        harness::run_for_frames(&mut gb, 2);
+        if gb.peek(0xFF82) == 0 {
+            while gb.cycles() < deadline {
+                gb.step();
+            }
+        }
+        assert_eq!(
+            gb.peek(0xFF82),
+            0x01,
+            "{rel} (tier2 flag-on): FF82={:#04X} actual FF80={:#04X} expected FF81={:#04X}",
+            gb.peek(0xFF82),
+            gb.peek(0xFF80),
+            gb.peek(0xFF81),
+        );
+    }
+}
+
+/// #11bk — the DMG `hblank_int` mode-0 STAT-IF two-latch (DELIVER +
+/// SERVICE-CLEAR). The reclock's cc+0 deferred `ldh a,(FF0F)` samples 4 dots
+/// before production's cc+4 read of the same load, straddling the
+/// counter-pinned mode-0 rise `R = 254 + SCX&7`. The `if_c` legs read
+/// `[R-4, R)` and must observe the imminent rise DELIVERED (`ISR CP E2`); the
+/// `if_d` legs read `[R, R+4)` where on hardware the mode-0 dispatch clears IF
+/// at the read's own cycle so the load returns 0 (`ISR CP 00`) — gated on
+/// `intf & ie & STAT` (pending + enabled) to separate the pure poll
+/// `hblank_scx2_if_a` (DI + IE=0, wants the bit still set). All 16 pass
+/// flag-on. The `if_b`/`nops`/`hblank_scx3` siblings need the counter-pinned
+/// dispatch to move (parked; `dmg-hblank-if-2026-07-03.md`). Production
+/// (flag-off) byte-identical — the law is `tier2_reclock` + `!is_cgb`-gated;
+/// SameBoy passes these on real DMG.
+#[test]
+fn tier2_dmg_hblank_if_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_dmg_hblank_if",
+            &format!("test-roms/{} not present", common::GBTR_DIR),
+        );
+        return;
+    };
+    for scx in 0..8u8 {
+        for leg in ["if_c", "if_d"] {
+            let rel = format!("gbmicrotest/hblank_int_scx{scx}_{leg}.gb");
+            let rom = std::fs::read(root.join(&rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+            // Boot WITH the reclock at construction (the flag-on frame the flip
+            // installs) — same protocol as `tier2_int_hblank_halt_passes_dmg`.
+            let mut gb = harness::boot_with_reclock(&rom, Model::Dmg);
+            let deadline = gb.cycles().saturating_add(DEADLINE_TCYCLES);
+            harness::run_for_frames(&mut gb, 2);
+            if gb.peek(0xFF82) == 0 {
+                while gb.cycles() < deadline {
+                    gb.step();
+                }
+            }
+            assert_eq!(
+                gb.peek(0xFF82),
+                0x01,
+                "{rel} (tier2 flag-on): FF82={:#04X} actual FF80={:#04X} expected FF81={:#04X}",
+                gb.peek(0xFF82),
+                gb.peek(0xFF80),
+                gb.peek(0xFF81),
+            );
+        }
+    }
+}
+
+/// #11bl — the DMG power-on boot-frame read law (`Ppu::boot_read`): the tier2
+/// deferred read samples the PPU at cc+0, 4 dots before production's cc+4 read
+/// of the same `LD A,(nn)`, so the `poweron_*` ROMs (a NOP sled timing a single
+/// direct read of STAT/OAM/VRAM/LY on the pristine boot hand-off frame) read the
+/// pre-transition value; restoring the read's true (cc+4) verdict — the current
+/// (line, dot) advanced 4 dots — fixes all 20 at once. Scoped to the boot frame
+/// (`frame_count <= 2` AND no CPU LCD-register write, so a program that
+/// reconfigures the PPU reverts to cc+0), `tier2_reclock` + `!is_cgb` +
+/// verdict-only → the `+4` boot DIV (`boot_div`) and CGB stay byte-identical.
+/// SameBoy passes these on real DMG (they pass flag-OFF too — the whole 20 are
+/// reclock flip-blockers). Map: `dmg-poweron-boot-read-2026-07-04.md`.
+#[test]
+fn tier2_dmg_poweron_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_dmg_poweron",
+            &format!("test-roms/{} not present", common::GBTR_DIR),
+        );
+        return;
+    };
+    const ROWS: [&str; 20] = [
+        "poweron_ly_120",
+        "poweron_ly_234",
+        "poweron_oam_006",
+        "poweron_oam_070",
+        "poweron_oam_120",
+        "poweron_oam_184",
+        "poweron_oam_234",
+        "poweron_stat_006",
+        "poweron_stat_007",
+        "poweron_stat_027",
+        "poweron_stat_070",
+        "poweron_stat_120",
+        "poweron_stat_121",
+        "poweron_stat_141",
+        "poweron_stat_184",
+        "poweron_stat_235",
+        "poweron_vram_026",
+        "poweron_vram_070",
+        "poweron_vram_140",
+        "poweron_vram_184",
+    ];
+    for name in ROWS {
+        let rel = format!("gbmicrotest/{name}.gb");
+        let rom = std::fs::read(root.join(&rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Dmg);
         let deadline = gb.cycles().saturating_add(DEADLINE_TCYCLES);
         harness::run_for_frames(&mut gb, 2);
         if gb.peek(0xFF82) == 0 {

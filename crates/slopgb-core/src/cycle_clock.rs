@@ -174,6 +174,50 @@ impl CycleClock {
             .expect("pending debt overflow — flush missing");
     }
 
+    /// #11aq (C2 per-ISR read-position carry): add `t` CPU T-cycles of extra
+    /// parked debt to be paid (advanced) by the next bus op *before* it samples,
+    /// shifting that read — and every subsequent handler read — `t` T later
+    /// WITHOUT moving the current clock position (the IF-ack latch already
+    /// committed). Used by `dispatch_retime` to carry the OAM-IRQ source's
+    /// sub-M-cycle phase into the ISR handler reads, decoupled from the dispatch
+    /// dot (`cpu-timing-map.md §7.1`). Inert unless `SLOPGB_M2CARRY`.
+    pub(crate) fn carry_read(&mut self, t: u32) {
+        self.pending = self
+            .pending
+            .checked_add(t)
+            .expect("pending debt overflow — flush missing");
+    }
+
+    /// PORT 2 (#11bc, the sub-M-cycle WAKE clock): commit `t` of the parked
+    /// debt NOW — advance the clock by `t` and reduce the debt by the same,
+    /// conserving the per-M-cycle total. The DMG halt loop samples the wake
+    /// condition mid-M-cycle (SameBoy `GB_cpu_run`, `sm83_cpu.c:1621-1628`:
+    /// advance-2 → sample → advance-2); committing the first 2 T before the
+    /// sample lands the sample — and, on a wake, the whole subsequent
+    /// dispatch + handler read stream — at the rise's sub-M-cycle T until
+    /// the machine re-aligns. The remaining debt is paid by the next bus op
+    /// as usual.
+    pub(crate) fn advance_pending(&mut self, t: u32) {
+        debug_assert!(t <= self.pending, "advance_pending exceeds parked debt");
+        let t = t.min(self.pending);
+        self.clock += u64::from(t);
+        self.pending -= t;
+    }
+
+    /// PORT 2: drop `t` of the parked debt WITHOUT advancing — the un-run
+    /// tail of a halt idle iteration that woke at its mid-M-cycle sample.
+    /// SameBoy's DMG halt loop iterations are genuinely 2 T long
+    /// (`GB_advance_cycles(gb, 2)`), so a wake at the mid sample means the
+    /// remaining 2 T of the idle "M-cycle" never happen: the resumed CPU's
+    /// next op starts at the wake T and every subsequent M-cycle boundary
+    /// carries the 2-T offset — the sub-M-cycle resume the WAKE-CLOCK class
+    /// needs. Only the CPU↔machine alignment shifts; machine time itself
+    /// stays continuous.
+    pub(crate) fn forgive(&mut self, t: u32) {
+        debug_assert!(t <= self.pending, "forgive exceeds parked debt");
+        self.pending -= t.min(self.pending);
+    }
+
     /// `flush_pending_cycles` (`sm83_cpu.c:336`): drain the debt and park 0;
     /// called at every instruction boundary.
     pub(crate) fn flush(&mut self) {

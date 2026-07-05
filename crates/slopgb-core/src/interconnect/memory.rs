@@ -70,7 +70,9 @@ impl Interconnect {
                 // The CGB FEA0-FEFF extra OAM RAM mirrors OAM read
                 // blocking, including the cc+2 MID-phase second-half
                 // unblock view (sub-dot event-phase model).
-                if self.ppu.oam_read_blocked() || stamp_blocks(self.m0_access_edge, ACCESS_PHASE) {
+                if self.ppu.oam_read_blocked()
+                    || (!self.tier2_reclock && stamp_blocks(self.m0_access_edge, ACCESS_PHASE))
+                {
                     0xFF
                 } else {
                     self.extra_oam[Self::extra_oam_index(addr)]
@@ -139,12 +141,25 @@ impl Interconnect {
             0x0000..=0x7FFF => self.cart.read_rom(addr),
             // cc+2 MID-phase VRAM read: same mode-3→mode-0 unblock edge as
             // OAM below — a second-half unblock is not yet visible here
-            // (sub-dot event-phase model, increment 2). Suppressed while an
+            // (sub-dot event-phase model, increment 2). Part C: tier2 BYPASSES
+            // every M0Access straddle stamp (all five sites) — the deferred
+            // (cc+0) access is resolved to its exact half-dot before sampling,
+            // so the cc+4 straddle-M-cycle approximation double-blocks
+            // accesses landing legitimately past the unblock (the DS
+            // `postread_scx5_ds_2` SameBoy-passes); the deferred frame's
+            // release laws live in `Ppu::{oam,vram}_read_blocked` /
+            // `ds_lineend_open`. EXCEPT a readback within 8 dots of a
+            // same-line VRAM write ATTEMPT (`vram_wr_recent`, the #11as
+            // co-temporality): the write's M-cycle cost is what SameBoy
+            // spreads across the readback, so those keep the straddle stamp
+            // (`vramw_m3end_scx5_ds_{2,4}` SameBoy-passes, measured drop
+            // without the guard). Suppressed while an
             // HDMA is armed: the HDMA service seam writes VRAM at the same
             // mode-0 entry and its read-back interaction (gambatte
             // dma/hdma_start_*) is the HDMA-seam increment's job.
             0x8000..=0x9FFF
-                if stamp_blocks(self.m0_access_edge, ACCESS_PHASE)
+                if (!self.tier2_reclock || self.ppu.vram_wr_recent())
+                    && stamp_blocks(self.m0_access_edge, ACCESS_PHASE)
                     && self.hdma_mode == HdmaMode::Disabled =>
             {
                 0xFF
@@ -156,7 +171,7 @@ impl Interconnect {
                 // cc+2 MID-phase OAM read: a mode-3→mode-0 unblock landing
                 // in this M-cycle's second half is not yet visible here
                 // (sub-dot event-phase model, increment 1).
-                if stamp_blocks(self.m0_access_edge, ACCESS_PHASE) {
+                if !self.tier2_reclock && stamp_blocks(self.m0_access_edge, ACCESS_PHASE) {
                     0xFF
                 } else {
                     self.ppu.read(addr)
@@ -210,6 +225,10 @@ impl Interconnect {
             // this M-cycle's second half is not yet visible here, so the
             // write is still locked out (dropped) — same edge/sub-dot
             // phase as the OAM/VRAM read (sub-dot event-phase model).
+            // The VRAM WRITE straddle stamp stays on BOTH paths: the tier2
+            // bypass here dropped the SameBoy-passing `vramw_m3end_scx5_ds_4`
+            // (measured — the write side of the #11as co-temporality; only
+            // the READ sites + the OAM write resolve at the deferred frame).
             0x8000..=0x9FFF if stamp_blocks(self.m0_access_edge, ACCESS_PHASE) => {}
             0x8000..=0x9FFF => self.intf |= self.ppu.write(addr, value) & IF_MASK,
             0xA000..=0xBFFF => self.cart.write_ram(addr, value),
@@ -220,7 +239,9 @@ impl Interconnect {
             0xFE00..=0xFE9F => {
                 // CPU OAM writes are dropped while DMA owns OAM, and while
                 // the cc+2 MID view still reads mode 3 (sub-dot phase).
-                if self.dma_conflict.is_none() && !stamp_blocks(self.m0_access_edge, ACCESS_PHASE) {
+                if self.dma_conflict.is_none()
+                    && (self.tier2_reclock || !stamp_blocks(self.m0_access_edge, ACCESS_PHASE))
+                {
                     self.intf |= self.ppu.write(addr, value) & IF_MASK;
                 }
             }
@@ -281,9 +302,17 @@ impl Interconnect {
             // the M-cycle end (whole-M-cycle block, see `pal_access_edge` /
             // [`event_phase`]), so the read stays $FF for the entire straddle
             // M-cycle and becomes readable only next M-cycle (sub-dot
-            // event-phase model, INC-G3 task 5).
+            // event-phase model, INC-G3 task 5). Tier-2 BYPASSES the stamp:
+            // the deferred (cc+0) read is resolved to its exact half-dot
+            // BEFORE sampling, so the straddle-M-cycle approximation would
+            // re-block a read landing legitimately past the unblock (the
+            // `cgbpal_m3end_scx*_2` SameBoy-passes); the deferred frame's
+            // trailing unblock lives in `Ppu::pal_ram_blocked` instead
+            // (`pal_open_dot` + 1 dot SS / + 0 DS).
             0xFF69 | 0xFF6B
-                if self.cgb_mode && stamp_blocks(self.pal_access_edge, ACCESS_PHASE) =>
+                if self.cgb_mode
+                    && !self.tier2_reclock
+                    && stamp_blocks(self.pal_access_edge, ACCESS_PHASE) =>
             {
                 0xFF
             }

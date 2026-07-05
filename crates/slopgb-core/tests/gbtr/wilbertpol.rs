@@ -180,6 +180,62 @@ fn madness_shade(rgb: [u8; 3]) -> Result<u8, String> {
 
 /// One undefined-opcode protocol case: run to the 0xED exit (howto "Exit
 /// Condition"), then check the Fibonacci signature.
+/// #11bj session-local measurement aid: run an explicit list of wilbertpol
+/// ROMs on the **flag-on** reclock and report the fib pass/fail — the Phase-2
+/// classifier for the DMG line-153/timer engine rows. `#[ignore]`'d. Rowlist
+/// lines: `<suite>/<rel>.gb [Model]`; `SLOPGB_PROBE_OFF=1` A/Bs production.
+#[test]
+#[ignore = "session-local Phase-2 measurement aid; needs SLOPGB_ROWLIST"]
+fn wilbertpol_flagon_probe() {
+    let Ok(list_path) = std::env::var("SLOPGB_ROWLIST") else {
+        eprintln!("SLOPGB_ROWLIST unset");
+        return;
+    };
+    let Some(root) = common::gbtr_root() else {
+        panic!("gbtr collection not present");
+    };
+    let off = std::env::var("SLOPGB_PROBE_OFF").is_ok();
+    let body = std::fs::read_to_string(&list_path).expect("read rowlist");
+    let (mut pass, mut fail) = (0u32, 0u32);
+    for line in body.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut it = line.split_whitespace();
+        let rel = it.next().unwrap_or("");
+        let model = match it.next() {
+            Some("[Dmg]") => Model::Dmg,
+            Some("[Cgb]") => Model::Cgb,
+            Some("[Mgb]") => Model::Mgb,
+            Some("[Sgb]") | Some("[Sgb2]") => Model::Sgb,
+            Some("[Agb]") => Model::Agb,
+            _ => Model::Dmg,
+        };
+        let Ok(rom) = std::fs::read(root.join(rel)) else {
+            continue;
+        };
+        let mut gb = if off {
+            harness::boot(&rom, model)
+        } else {
+            harness::boot_with_reclock(&rom, model)
+        };
+        let r = harness::run_until_undefined(&mut gb, TIMEOUT_TCYCLES)
+            .and_then(|()| harness::check_fib(&gb));
+        match r {
+            Ok(()) => pass += 1,
+            Err(e) => {
+                fail += 1;
+                println!("FAIL {rel} [{model:?}] {e}");
+            }
+        }
+    }
+    println!(
+        "wilbertpol_flagon_probe[{}] pass={pass} fail={fail}",
+        if off { "OFF" } else { "ON" }
+    );
+}
+
 fn run_protocol_case(rom: &[u8], model: Model) -> Result<(), String> {
     let mut gb = harness::boot(rom, model);
     harness::run_until_undefined(&mut gb, TIMEOUT_TCYCLES)?;

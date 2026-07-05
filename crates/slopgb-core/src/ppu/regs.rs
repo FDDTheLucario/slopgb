@@ -30,8 +30,10 @@ impl Ppu {
         // the dmg palette path).
         let dots = if addr == 0xFF4B { dots + 1 } else { dots };
         // Speed hint for the FF4A wy2 scheduling below (1-dot staging
-        // only happens in double speed).
-        self.staged_ds = dots <= 1;
+        // only happens in double speed; the tier2 write-strobe stages 3
+        // dots at either speed, so there the hint comes from the live
+        // `ds` flag instead — #11bb).
+        self.staged_ds = dots <= 1 || (self.tier2_reclock && self.ds);
         // One bus op per M-cycle: a previous stage has always expired or
         // been architecturally committed by now; flush defensively if not.
         if let Some(s) = self.staged.take() {
@@ -50,6 +52,30 @@ impl Ppu {
             0xFF40 => {
                 let old = self.eff.lcdc;
                 self.eff.lcdc = value;
+                // #11bo mech2 — the BG fetcher's addressing view (bit3 BG map /
+                // bit4 tile-data select) lags the eager control commit by the
+                // render frame under tier2, so a mid-mode-3 bgtilemap/bgtiledata
+                // toggle reaches the fetch grid at the production/SameBoy dot
+                // instead of the leading edge. Window bit5 (abort/reenable/
+                // enable) + the FF41 read laws keep the eager `eff.lcdc` set
+                // above — their tier2 pins are calibrated to the cc+0 control
+                // commit. Production (and non-render / glitch lines) set the
+                // view in lockstep — byte-identical OFF.
+                if self.tier2_reclock && self.render.active && !self.glitch_line {
+                    self.render_lcdc_pending = Some((value, RENDER_LCDC_DELAY));
+                } else {
+                    self.eff.render_lcdc = value;
+                    self.render_lcdc_pending = None;
+                }
+                // #11bj measurement tracer — the LCDC pipeline-commit instant
+                // (window enable/disable dot for the abort/reenable law fits;
+                // lines up against SBWLCDC). Byte-identical unset.
+                if (old ^ value) & LCDC_WIN_ENABLE != 0 && crate::ppu::s5dbg_on() {
+                    eprintln!(
+                        "SLOPGB wlcdc ly={} dot={} old={old:02x} new={value:02x}",
+                        self.line, self.dot
+                    );
+                }
                 // LCDC.5 cleared while the window machine is drawing:
                 // the window aborts at the pipeline view's commit point
                 // (gambatte ppu.cpp setLcdc clears win_draw_started
@@ -57,11 +83,54 @@ impl Ppu {
                 // — see `window_abort`).
                 if old & LCDC_WIN_ENABLE != 0 && value & LCDC_WIN_ENABLE == 0 && self.render.active
                 {
-                    self.window_abort();
+                    // C2 #11at — a mid-mode-3 LCDC.5 clear: the read-law FLAG half
+                    // (`win_predraw_abort` pre-draw / DMG `win_aborted`) fires
+                    // eagerly here for the shadow bare-exit / length read laws
+                    // (`stat_irq.rs::vis_mode_read`), calibrated to the cc+0 dot.
+                    self.window_abort_flags();
+                    // #11bq — the RENDER re-anchor (drawn-window end + BG-fetch
+                    // tile-boundary) defers to the `render_lcdc` bit5 1→0 catch-up
+                    // (`ppu/mod.rs`) under the tier2 reclock, so the window stops
+                    // at the render frame (`m3_lcdc_win_en_change_multiple`: the
+                    // eager clear ended it 2 dots early). Production / glitch lines
+                    // (no `render_lcdc` defer) run it synchronously — byte-identical.
+                    if !self.tier2_reclock || self.glitch_line {
+                        self.window_abort_render();
+                    }
+                }
+                // C2 #11au — latch a mid-mode-3 LCDC.5 RE-enable dot for the CGB
+                // shadow window-REENABLE mode-3 length law (`stat_irq.rs::
+                // vis_mode_read`). A window disabled then re-enabled mid-line
+                // (`late_reenable`) redraws from the re-enable point; whether its
+                // mode-3 EXTENDS past the read depends on the re-enable dot vs the
+                // WX match (the redraw start): re-enable at/before the match →
+                // extends (mode3); after → the redraw starts too late, bare exit
+                // (mode0). slopgb's whole-dot render collapses both to mode3 at
+                // the read dot. Latched tier2 while `render.active` (#11bj:
+                // widened to DMG for the DMG window-law port).
+                if old & LCDC_WIN_ENABLE == 0
+                    && value & LCDC_WIN_ENABLE != 0
+                    && self.render.active
+                    && self.tier2_reclock
+                {
+                    self.render.win_reenable_dot = self.dot;
+                    // #11bf item 3a — a FIRST enable (window neither active
+                    // nor aborted this line) IS the window trigger; see
+                    // `Render::win_enable_dot`.
+                    if !self.render.win_active && !self.render.win_aborted {
+                        self.render.win_enable_dot = self.dot;
+                    }
                 }
             }
             0xFF42 => self.eff.scy = value,
-            0xFF43 => self.eff.scx = value,
+            0xFF43 => {
+                // #11bj — flag a mid-mode-3 SCX rewrite (`late_scx_*`); see
+                // `Render::scx_write_dot`.
+                if self.render.active && self.tier2_reclock && (self.eff.scx & 7) != (value & 7) {
+                    self.render.scx_write_dot = self.dot;
+                }
+                self.eff.scx = value;
+            }
             0xFF47 => self.eff.bgp = value,
             0xFF48 => self.eff.obp0 = value,
             0xFF49 => self.eff.obp1 = value,
@@ -159,17 +228,96 @@ impl Ppu {
         // registers (the staged copy of this same write may already have
         // expired into it — see `stage_write`; writes that never went
         // through the staging path land in both views here).
-        if self.staged.as_ref().is_some_and(|s| s.addr == addr) {
-            self.staged = None;
+        //
+        // Half-dot reclock Part A (write-strobe, #11bb): on the tier2
+        // deferred path the stage SURVIVES the architectural write and the
+        // pipeline view commits via `strobe_tick` at SameBoy's frame instead
+        // (the io write lands at the write M-cycle's END — `GB_advance_cycles`
+        // runs the display coroutine BEFORE the write commits, memory.c /
+        // sm83_cpu.c — so the pixel pipe sees the new value only from the
+        // next dot after the M-cycle). The eager production path ticks the
+        // machine BEFORE this call, so its stage has already expired and this
+        // immediate convergence is what commits it; the deferred path calls
+        // this at the leading edge with zero dots ticked, so the immediate
+        // convergence was collapsing every mid-mode-3 register write onto the
+        // write's leading edge — the measured "deferred WRITE collapse"
+        // behind the late_scx/late_disable/late_wx render-length pairs
+        // (`late_scx4`: SameBoy separates the legs by whether the SCX commit
+        // lands before/after the fine-scroll comparator's first sample;
+        // slopgb collapsed both legs onto the leading edge). Production
+        // (`!tier2_reclock`) is byte-identical.
+        // #11bo — the mode-3 render regs (SCY/SCX/BGP/OBP) survive the arch
+        // write so they strobe-commit at the render frame instead of the
+        // leading edge (see the dots calc in `cycle.rs::write_deferred`). LCDC
+        // lands via the split `render_lcdc` view (mech2).
+        let staged_pending = self.tier2_reclock
+            && matches!(addr, 0xFF42 | 0xFF43 | 0xFF47..=0xFF49 | 0xFF4B)
+            && !self.glitch_line
+            && self
+                .staged
+                .as_ref()
+                .is_some_and(|s| s.addr == addr && s.value == value);
+        if !staged_pending {
+            if self.staged.as_ref().is_some_and(|s| s.addr == addr) {
+                self.staged = None;
+            }
+            self.commit_eff(addr, value);
         }
-        self.commit_eff(addr, value);
+        // #11bh — the glitch-line same-dot SCX-write hunt RE-OPEN (asm_enable
+        // ROW 5): the LCD-enable glitch line's fine-scroll hunt closes at
+        // machine dot `83 + scx_init` on CGB, but a same-dot FF43 commit lands
+        // AFTER that dot's render tick — hardware's comparator (SameBoy
+        // `render_pixel_if_possible`, live per-dot compare) still honors the
+        // new value: the CGB sample deadline is `D(scx_init) = 83 + scx_init`
+        // inclusive (`ly0_late_scx7_m3stat_scx1_1` writes SCX=7 at dot 84 with
+        // scx_init=1 — hunt matched dot 84 — and must read mode 3 at 252, exit
+        // E(7)=257; `scx0_2` writes dot 84 with match dot 83, stays missed;
+        // `scx1_2`/`scx3_2` write past the window). Re-opening lets the
+        // comparator cycle to the new SCX&7 (re-match dot ~90, discard 7) —
+        // the exit arithmetic is already right when honored. Glitch + Tier-2
+        // + CGB only; production and non-glitch lines (the late_scx4
+        // write-strobe calibration) untouched.
+        if addr == 0xFF43
+            && self.tier2_reclock
+            && self.model.is_cgb()
+            && self.glitch_line
+            && self.render.hunt_done
+            && self.render.hunt_match_dot == self.dot
+            && value & 7 != self.render.hunt_idx
+        {
+            self.render.hunt_done = false;
+        }
         match addr {
             0x8000..=0x9FFF => {
+                // #11bd item 5: record the attempt for the DS line-end VRAM
+                // read release (blocked attempts too — the M-cycle cost is
+                // what SameBoy spreads).
+                self.vram_wr_line = self.line;
+                self.vram_wr_dot = self.dot;
+                // S5 accessibility write-attempt tracer (`SLOPGB_S5DBG`,
+                // byte-identical unset): the vramw/oam postwrite families'
+                // measurement WRITE dot + blocked verdict.
+                if crate::ppu::s5dbg_on() && self.line < 144 {
+                    eprintln!(
+                        "SLOPGB vramw ly={} dot={} blk={}",
+                        self.line,
+                        self.dot,
+                        u8::from(self.vram_write_blocked())
+                    );
+                }
                 if !self.vram_write_blocked() {
                     self.vram[self.vram_index(addr)] = value;
                 }
             }
             0xFE00..=0xFE9F => {
+                if crate::ppu::s5dbg_on() && self.line < 144 {
+                    eprintln!(
+                        "SLOPGB oamw ly={} dot={} blk={}",
+                        self.line,
+                        self.dot,
+                        u8::from(self.oam_write_blocked())
+                    );
+                }
                 if !self.oam_write_blocked() {
                     self.oam[usize::from(addr - 0xFE00)] = value;
                 }
@@ -192,6 +340,10 @@ impl Ppu {
                             && old & STAT_SRC_HBLANK == 0
                             && !self.m2_pulse_fires(old)
                             && self.m2_pulse_fires(data);
+                        // (The FF45-write edge-only engine-line guard does
+                        // NOT port here: the FF41 retro/m2 pulse reach is
+                        // event-like in the pinned m2enable cells — the guard
+                        // was built + measured +3 fails there.)
                         retro || self.stat_write_trigger_cgb(old, data)
                     } else {
                         // The glitch trigger, plus the DMG pulse reach:
@@ -218,7 +370,69 @@ impl Ppu {
                     if fire {
                         self.pending_if |= IF_STAT;
                     }
+                    // #11bh slice (d) — seed the held-high engine level for
+                    // the suppressed DS line-start carryover enable (the
+                    // `lyc_carryover` DS dots-0-1 suppression in
+                    // `stat_write_trigger_cgb`): hardware's line is still
+                    // HIGH from the previous line's mode-0 there, so the
+                    // post-write level (fresh bit6 + the held carryover
+                    // match) continues it — without the seed the next dot's
+                    // engine tick re-fires the same edge as a spurious 0→1.
+                    if self.leading_edge_reads
+                        && self.model.is_cgb()
+                        && self.ds
+                        && self.dot < 2
+                        && old & STAT_SRC_HBLANK != 0
+                        && old & STAT_SRC_LYC == 0
+                        && data & STAT_SRC_LYC != 0
+                        && (1..=143).contains(&self.line)
+                        && self.lyc == self.line - 1
+                    {
+                        self.stat_update.force_level(true);
+                    }
                     self.stat_en = data;
+                    // #11bg — the CGB FF41 two-phase write for the S5 engine
+                    // view (see `eng_stat_pending` for the full schedule):
+                    // phase-1 (mode bits new, bit6 old) applies at engine
+                    // tick commit+2 (= SameBoy T0), the final value at
+                    // commit+4, externals in between edging against the
+                    // armed phase-1.
+                    if self.leading_edge_reads
+                        && self.model.is_cgb()
+                        && !self.ds
+                        && self.lcd_shift_dots == 0
+                    {
+                        // Single speed: the two-phase engine view (see the
+                        // `eng_stat_pending` field doc for the schedule).
+                        // phase-1 = mode bits NEW, LYC enable (bit 6) OLD —
+                        // SameBoy `GB_CONFLICT_STAT_CGB` holds bit 6 one T
+                        // past the mode bits.
+                        //
+                        // Double speed: 1 T = half a dot — the whole window is
+                        // sub-dot, and the deferred DS write commit (+1 dot)
+                        // already lands at the hardware instant: the engine
+                        // sees the new value from the next tick (immediate),
+                        // with the write-after-tick order giving the
+                        // display-step-first collision semantics the
+                        // `lyc0_m1disable_ds` / `lyc153_m1disable_ds` pairs
+                        // pin (together with the DS line-153 lyfc table).
+                        let phase1 = (old & STAT_SRC_LYC) | (data & !STAT_SRC_LYC);
+                        self.eng_stat_pending =
+                            Some((phase1, data, self.stat_update.line(), 0, 0));
+                    } else {
+                        self.eng_stat = data;
+                        self.eng_stat_pending = None;
+                        // #11bg — record a DS LYC-enable DROP for the
+                        // m0-flip dip (see `ff41_ds_drop`).
+                        if self.leading_edge_reads
+                            && self.model.is_cgb()
+                            && self.ds
+                            && old & STAT_SRC_LYC != 0
+                            && data & STAT_SRC_LYC == 0
+                        {
+                            self.ff41_ds_drop = Some((self.line, self.dot));
+                        }
+                    }
                     self.stage_stat_copies();
                     self.refresh_cmp(false);
                     if self.leading_edge_reads && fire {
@@ -248,6 +462,8 @@ impl Ppu {
                     }
                 } else {
                     self.stat_en = data;
+                    self.eng_stat = data;
+                    self.eng_stat_pending = None;
                     self.flush_stat_copies();
                     self.legacy_level_edge();
                 }
@@ -256,7 +472,118 @@ impl Ppu {
             0xFF43 => self.scx = value,
             0xFF44 => {} // LY is read-only.
             0xFF4A => {
+                let old_wy = self.wy;
                 self.wy = value;
+                // #11bj measurement tracer — the WY architectural-commit
+                // instant (the xline/raw-latch discriminator the SameBoy
+                // SBWWY trace lines up against). Byte-identical unset.
+                if crate::ppu::s5dbg_on() {
+                    eprintln!(
+                        "SLOPGB wwy ly={} dot={} old={old_wy:02x} new={value:02x}",
+                        self.line, self.dot
+                    );
+                }
+                // #11bd item 4 — the boundary-WY cross-line latch (see
+                // `Ppu::wy_xline_trig`): a tail/head write matching the
+                // current line, window enabled at the commit (#11bj: DMG too —
+                // the DMG arm-7 twin reads the same latch).
+                if self.tier2_reclock
+                    && self.enabled
+                    && (self.dot >= 452 || self.dot < 4)
+                    && self.line < 144
+                    && value == self.ly
+                    && self.eff.lcdc & LCDC_WIN_ENABLE != 0
+                {
+                    self.wy_xline_trig = true;
+                }
+                // #11bj DMG — a HEAD write (dot < 4) matching the JUST-FINISHED
+                // line: slopgb's deferred frame lands a line-boundary WY write
+                // a full line late (SameBoy applies it at `ly N−1 cfl0` and its
+                // continuous `wy_check` triggers on line N−1; slopgb commits at
+                // `ly N dot0`, past that line's weMaster sample). If the value
+                // matches the previous line (`value + 1 == line`), SameBoy
+                // triggered there → the window is sticky-active for every later
+                // line → set the cross-line latch. `late_wy_10to0/FFto0/FFto1`
+                // `_2` (commit ly1/ly2 dot0) extend; the `_3` siblings commit
+                // at dot 4 (past the head) → no trigger, bare. Dual-traced
+                // 2026-07-03.
+                if self.tier2_reclock
+                    && !self.model.is_cgb()
+                    && self.enabled
+                    && self.dot < 4
+                    && self.line >= 1
+                    && self.line < 144
+                    && u16::from(value) + 1 == u16::from(self.line)
+                    && self.eff.lcdc & LCDC_WIN_ENABLE != 0
+                {
+                    self.wy_xline_trig = true;
+                }
+                // #11bg — the DS trigger-line WY un-latch: SameBoy's per-line
+                // `wy_check` for line N runs ~dot 2-5, but slopgb's
+                // production `wy_latch` pre-latches at the PREVIOUS line's
+                // dot-450/454 samples — so an un-matching WY write landing
+                // before the hardware check (commit dot <= 4 of the fresh
+                // trigger line) must release the latch the check would never
+                // have acquired (`late_wy_1toFF_ds_1` renders bare on
+                // hardware AND SameBoy; its `_2` sibling commits at dot 5
+                // and keeps the trigger). Tier-2 + CGB + DS only.
+                if self.tier2_reclock
+                    && self.model.is_cgb()
+                    && self.ds
+                    && self.enabled
+                    && self.wy_latch
+                    && !self.render.win_active
+                    && self.line < 144
+                    // #11bh — the un-latch deadline is PER-TRIGGER-LINE
+                    // (asm_window_gdma Rows 1-2, all 8 DS cells dual-traced):
+                    // lines >= 1 run the lyfc-path check at the mode-2 entry
+                    // (~internal dot 3-4) → a commit <= 2 beats it
+                    // (`late_wy_1toFF_ds_1` dot 2 bare / `_ds_2` dot 4 keeps
+                    // the latch, extended); line 0's check sits ~4 dots later
+                    // (lyfc becomes 0 only at dot 3) → commit <= 6
+                    // (`late_wy_ds_1` dot 6 bare on HARDWARE — SameBoy
+                    // mis-times the line-0 check and fails that row itself /
+                    // `_ds_2` dot 8 keeps). The old single `<= 4` split both
+                    // brackets wrong.
+                    && self.dot <= if self.ly == 0 { 6 } else { 2 }
+                    && old_wy == self.ly
+                    && value != self.ly
+                {
+                    self.wy_latch = false;
+                    // The #11af shadow latched the same pre-check compare
+                    // (wy2 still old at line start) — release it with the
+                    // render latch so the read law's extend arm follows, and
+                    // commit the wy2 copy immediately (the write BEAT the
+                    // hardware check: every later compare this line reads the
+                    // new value; the stale copy re-latched the shadow at the
+                    // next dot, measured).
+                    if self.wy_trig_sb && self.wy_trig_sb_line == self.ly {
+                        self.wy_trig_sb = false;
+                    }
+                    self.wy2 = value;
+                    self.wy2_delay = 0;
+                }
+                // #11bj — the DMG SS trigger-line WY→(non-LY) un-latch: a
+                // WY write that MATCHED at the line's mode-2 compare then
+                // flips away by dot 4 un-triggers the window on SameBoy
+                // (`wy_check` reads the settled WY) while slopgb's raw sticky
+                // latch (`wy_trig_sb_raw`, set at dot ≥ 4) already caught the
+                // brief match. Releasing it lets the D6 un-trigger arm fire.
+                // `late_wy_1toFF_2`/`2toFF_2` (FF at dot 4 → bare) vs `_3`
+                // (FF at dot 8, past the compare → the window drew, extends).
+                // Dual-traced 2026-07-03. SS + DMG; the CGB path is the DS
+                // block above (`wy_latch`/`wy_trig_sb`).
+                if self.tier2_reclock
+                    && !self.model.is_cgb()
+                    && !self.ds
+                    && self.enabled
+                    && self.line < 144
+                    && self.dot <= 4
+                    && old_wy == self.ly
+                    && value != self.ly
+                {
+                    self.wy_trig_sb_raw = false;
+                }
                 // The live window-trigger comparison uses a delayed WY
                 // copy — see `wy2`.
                 if self.enabled {
@@ -326,7 +653,21 @@ impl Ppu {
             0xFF47 => self.bgp = value,
             0xFF48 => self.obp0 = value,
             0xFF49 => self.obp1 = value,
-            0xFF4B => self.wx = value,
+            0xFF4B => {
+                // #11bf item 3c / #11bq — latch a mid-line WX rewrite for the
+                // un-catch law (see `Render::wx_write_dot`; #11bj: DMG too) at
+                // the EAGER (cc+0) leading edge here, NOT in `commit_eff`. #11bq
+                // defers the render-VIEW `eff.wx` (a WX survive-stage, for the
+                // window activation/reactivation comparator — `late_wx_ds`,
+                // m3_wx_*), so `commit_eff` now runs at the deferred strobe dot;
+                // the un-catch read law (`tier2_window_late_wx_uncatch_passes`)
+                // is calibrated to the write's cc+0 dot, so its input stays here.
+                // The SPLIT: length/read-law input eager, render view deferred.
+                if self.render.active && self.tier2_reclock {
+                    self.render.wx_write_dot = self.dot;
+                }
+                self.wx = value;
+            }
             0xFF4F if self.model.is_cgb() => self.vbk = value & 1,
             0xFF68 if self.model.is_cgb() => self.bcps = value & 0xBF,
             0xFF69 if self.model.is_cgb() => {
@@ -371,6 +712,7 @@ impl Ppu {
             // every enable re-arms it; don't leave it stale across off.
             self.frame_skip = false;
             self.line_render_done = true;
+            self.flip_dot = 0;
             self.vis_early = false;
             self.vis_hold_until = 0;
             self.render_finished = true;
@@ -384,6 +726,13 @@ impl Ppu {
             self.render.active = false;
             self.render.win_active = false;
             self.win_start_pending = false;
+            // #11bi — the post-switch exit-table latches die with the LCD
+            // (the frame they classify is gone; SameBoy's freeze path is
+            // LCD-bound). Inert flag-off: only tier2 STOPs set them.
+            self.stop_anchor_set = false;
+            self.stop_anchor_midframe = false;
+            self.stop_leave_lcd_on = false;
+            self.stop_leave_k = 2;
             let white = self.white();
             self.front.fill(white);
             self.legacy_level_edge();
@@ -395,6 +744,18 @@ impl Ppu {
             self.line = 0;
             self.dot = 0;
             self.ly = 0;
+            // #11bd: the alignment shadow re-anchors at enable, like
+            // SameBoy's `double_speed_alignment = 0` (memory.c:1510).
+            self.sb_dsa8 = 0;
+            // #11bi — an enable re-anchors the PPU frame (the e-law: the DS
+            // enable quantizes the phase to the 4-dot grid), so the
+            // post-switch exit-table latches restart; record the enable's
+            // speed (the lcdoff-dance −4 rp class term). Inert flag-off.
+            self.stop_anchor_set = false;
+            self.stop_anchor_midframe = false;
+            self.stop_leave_lcd_on = false;
+            self.stop_leave_k = 2;
+            self.lcd_enable_in_ds = self.ds;
             // The event comparator's delayed FF45 copy restarts in sync
             // (gambatte lycIrq.lcdReset).
             self.lyc_event = self.lyc;
@@ -403,6 +764,7 @@ impl Ppu {
             // after enabling (see `frame_skip`).
             self.frame_skip = true;
             self.line_render_done = false;
+            self.flip_dot = 0;
             self.vis_early = false;
             self.vis_hold_until = 0;
             self.render_finished = false;

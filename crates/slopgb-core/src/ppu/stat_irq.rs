@@ -3,132 +3,6 @@
 use super::*;
 
 impl Ppu {
-    /// STAT mode bits as read through FF41. This is *not* the rendering
-    /// state machine: mode reads 0 during the first 4 dots of every line
-    /// (and during 144:0-3), and mode 3 appears 4 dots after VRAM read
-    /// locking (`lcdon_timing-GS` tables).
-    /// FF41-read STAT mode = [`Self::vis_mode`] + the C2 #11y/#11z window mode-3
-    /// length law, applied ONLY to the FF41 register read (`regs.rs`), NOT the
-    /// internal `vis_mode` consumers (`stat_line_level`/IRQ, `mode_bits`,
-    /// `update_mode_for_interrupt`). A triggering window's SameBoy mode-3 exit is
-    /// `SBex = 263 + SCX&7` (cfl), DECOUPLED from the counter-pinned
-    /// `line_render_done`. The CPU-visible exit is `SBex − read_offset`: the
-    /// deferred FF41 read samples the PPU `read_offset` dots BEFORE SameBoy reads
-    /// the same `ldh a,(FF41)`. **#11z: that offset is +4 for the window m3stat
-    /// reads (MEASURED — `m2int_wx03_scx5_m3stat_2` slopgb dot264 ↔ SameBoy
-    /// cfl268 = SBex; `m2int_wx03_scx2_m3stat_1` dot260 ↔ cfl264), NOT the +3
-    /// dispatch frame the #11y `260 + SCX&7` first used.** So the exit is
-    /// `263 − 4 + SCX&7 = 259 + SCX&7`: it converts the scx5 `_2` over-extend
-    /// rows (read dot264, want 0 — was mode 3 at exit 265) to mode 0, +2/−0
-    /// full-CGB. The scx0 `_2` rows read robustly PAST the exit either way
-    /// (dot260, SameBoy cfl265 > 263) so 259 vs 260 is invisible to them.
-    /// LINE 0 EXCLUDED: the first window line (the WY-latch just matched) extends
-    /// mode 3 later than the steady law and its `ly0` read frame differs (the
-    /// `late_wy_*` rows; #11y). Tier2 + normal-trigger ly>=1 windows; production
-    /// byte-identical OFF.
-    pub(super) fn vis_mode_read(&self) -> u8 {
-        let m = self.vis_mode();
-        if self.tier2_reclock
-            && self.render.win_active
-            && self.model.is_cgb()
-            && self.line >= 1
-            // #11z extended to the off-screen window range (wx 0xA0..=0xA6,
-            // wxA5/wxA6): SameBoy extends a triggering off-screen window's
-            // mode-3 to the same `263 + SCX&7` exit, so the read-side law
-            // applies. The off-screen extension carries NO sprite penalty in
-            // the exit, so restrict the extended range to sprite-free lines
-            // (a sprite pushes the real mode-3 end past `259+SCX&7`, and the
-            // bare law would mis-shorten it — `m2int_wxA6_spxA7_m3stat_2`).
-            && self.eff.wx <= 0xA6
-            && (self.eff.wx < 0xA0 || self.render.n_sprites == 0)
-            // #11ag DS: also exclude SPRITE-laden lines under double speed (SS
-            // keeps allowing on-screen sprites — byte-identical). With sprites
-            // the real mode-3 end extends PAST `260 + SCX&7`, and the DS read
-            // frame straddles it so the bare exit mis-shortens the want-3 read
-            // (`sprites/space/10spritesPrLine_wx*_m3stat_ds_1`, a SameBoy-pass).
-            // The DS sprite-window exit is the #11t DS sprite read-grid, separate.
-            && (!self.ds || self.render.n_sprites == 0)
-            && !self.render.win_aborted
-            // The first window line (wy2==ly) is excluded for ON-screen windows
-            // (their mode-3 extends LATER than the steady 259+SCX&7 law on the
-            // trigger line; #11y late_wy). But an OFF-SCREEN window (wx>=0xA0)
-            // renders nothing, so its first line does NOT extend (SameBoy exit =
-            // the bare 259+SCX&7) — the law applies there too (#11ac
-            // `m2int_wxA6_firstline_m3stat_3`).
-            && (self.wy2 != self.ly || self.eff.wx >= 0xA0)
-            && self.wy2 <= 143
-            && m == 3
-            // #11ag DS: the FF41-read exit is `260 + SCX&7` in double speed (the
-            // deferred cc+0 ISR read lands +3 dots before SameBoy's `SBex=263`,
-            // vs the SS +4 → 259); MEASURED — `m2int_wxA6_scx5_m3stat_ds` reads
-            // `_1` dot264 / `_2` dot266 so only exit 265 (=260+5) separates them
-            // (the on-screen scx0 `_2` rows read dot260 robustly past either, so
-            // 259 vs 260 is invisible to them — the SS legs stay byte-identical).
-            && self.dot >= 259 + u16::from(self.eff.scx & 7) + u16::from(self.ds)
-        {
-            return 0;
-        }
-        // C2 #11af shadow late-WY extend (tier2 + CGB; polled reads). slopgb's
-        // discrete `wy_latch` sampler misses the mid-line late-WY write that
-        // SameBoy's continuous compare catches, so slopgb renders the line BARE
-        // (native `m == 0` at the polled read dot) where SameBoy's window
-        // triggered and extended mode 3 to `263 + SCX&7` (the POLLED exit, +0
-        // ISR offset — these reads carry no mode-2 dispatch, #11z). The shadow
-        // [`Self::win_extends_sb`] re-derives SameBoy's trigger decision; when
-        // it holds, the FF41 read sees mode 3 to the polled exit. Disjoint from
-        // the `win_active` law above (that gate requires the window already in
-        // slopgb's render; this one fires only when it is NOT).
-        if self.tier2_reclock
-            && self.model.is_cgb()
-            && self.line >= 1
-            && self.line < 144
-            && m == 0
-            && !self.render.win_active
-            // #11ag DS: exclude sprite-laden lines (same as the length law) — the
-            // shadow's bare exit does not carry the sprite mode-3 penalty.
-            && (!self.ds || self.render.n_sprites == 0)
-            && self.win_extends_sb()
-            // #11ag DS exit `264 + SCX&7` (the polled read lands +1 vs SS in DS:
-            // `late_wy_FFto2_ly2_scx5_ds_1` reads dot268 / wants mode 3, so the
-            // exit must clear 268 = 264+5; SS stays 263 — byte-identical).
-            && self.dot < 263 + u16::from(self.eff.scx & 7) + u16::from(self.ds)
-        {
-            return 3;
-        }
-        m
-    }
-
-    /// C2 #11af shadow window-extend predicate (tier2 + CGB only). Fires ONLY
-    /// for the mid-line late-WY trigger that slopgb's discrete `wy_latch`
-    /// sampler missed: the WY-trigger ([`Self::wy_trig_sb`]) latched on THIS
-    /// line, at/before the WX-activation dot ([`Render::wx_match_dot`]).
-    ///
-    /// The cross-line case (`trig_line < line`) is deliberately NOT handled:
-    /// (a) the late-WY rows that trigger on an earlier line (`10to0`/`FFto0`/
-    /// `FFto1` — WY written at the line boundary) land their write a line later
-    /// in slopgb's deferred frame, so the shadow never latches them anyway; and
-    /// (b) a window that genuinely latched earlier and draws every line is
-    /// already `win_active` in slopgb's render (excluded by the caller), so a
-    /// `!win_active` cross-line latch means the window was aborted / its WX or
-    /// LCDC.5 toggled late (`late_wx`/`late_reenable`/`late_enable`) — SameBoy
-    /// renders THOSE bare (`cfl 257`), so extending them is wrong.
-    pub(super) fn win_extends_sb(&self) -> bool {
-        self.wy_trig_sb
-            && self.eff.lcdc & LCDC_WIN_ENABLE != 0
-            && self.wy_trig_sb_line == self.ly
-            && self.render.wx_match_dot != 0
-            // The trigger must beat the WX-activation dot. The +2 slack is the
-            // wy2-copy phase difference: slopgb's `wy2` lags the WY write by 6
-            // dots (CGB), SameBoy's `wy_check` catches it at write + ~4, so the
-            // shadow `trigdot` runs 2 dots behind SameBoy's detection — the
-            // late-WY `_1` (extend) vs `_2`/`_3` (miss) split sits exactly on
-            // this 2-dot phase (`_1` trigdot = wxmatch + 1, `_2` = wxmatch + 5).
-            // #11ag DS: the slack is +4 (the DS wy2-copy lands the shadow trigdot
-            // 2 dots later relative to the WX match — `late_wy_FFto2_ly2_ds` `_1`
-            // trigdot 101 / `_2` 103 vs wxmatch 97, so 4 separates them).
-            && self.wy_trig_sb_dot <= self.render.wx_match_dot + 2 + 2 * u16::from(self.ds)
-    }
-
     pub(super) fn vis_mode(&self) -> u8 {
         if !self.enabled {
             return 0;
@@ -216,7 +90,7 @@ impl Ppu {
     /// kernel separation needs the −1 net shift. Single speed only (the DS read
     /// offset is deferred with the rest of the DS back-dating); always 84
     /// flag-OFF, so production is byte-identical.
-    fn mode3_entry_dot(&self) -> u16 {
+    pub(super) fn mode3_entry_dot(&self) -> u16 {
         if self.leading_edge_reads && !self.tier2_reclock && !self.ds {
             80
         } else {
@@ -249,6 +123,38 @@ impl Ppu {
     /// interconnect into its `if_late` halt-wake mask.
     pub(crate) fn take_stat_halt_late(&mut self) -> bool {
         std::mem::take(&mut self.stat_halt_late)
+    }
+
+    /// #11aq (C2 read-position carry): whether the currently-pending STAT IRQ
+    /// was raised by the mode-2 OAM line-start rise (vs mode-0/LYC). A sticky
+    /// level read (not drained) by the interconnect's `dispatch_retime` to key
+    /// the per-ISR deferred-read carry (see the [`Ppu::stat_rise_oam`] field +
+    /// [`crate::ppu::m2carry_on`]).
+    pub(crate) fn stat_rise_oam(&self) -> bool {
+        self.stat_rise_oam
+    }
+
+    /// #11aq: whether the currently-pending STAT IRQ was the mode-0 HBlank rise
+    /// (the +2-dot ISR read carry). See [`Ppu::stat_rise_m0`].
+    pub(crate) fn stat_rise_m0(&self) -> bool {
+        self.stat_rise_m0
+    }
+
+    /// #11bf (`SLOPGB_P2GRID`): whether the current line is the LCD-enable
+    /// glitch line — its mode-0 engine rise is emitted at a different offset
+    /// from the true (SameBoy) commit than normal lines' (rise == visexit vs
+    /// visexit − 3, dual-trace measured), so the halt-wake visibility
+    /// deadline carries a per-shape correction.
+    pub(crate) fn glitch_line_now(&self) -> bool {
+        self.glitch_line
+    }
+
+    /// #11ar: arm/disarm the SCOPED carried-read exit override (see the
+    /// [`Ppu::read_carried`] field). `dispatch_retime` sets it after a STAT-ISR
+    /// read carry; the interconnect clears it once the handler's FF41 read has
+    /// resolved (one-shot).
+    pub(crate) fn set_read_carried(&mut self, v: bool) {
+        self.read_carried = v;
     }
 
     /// Whether the STAT IF bit handed out by the last [`Self::tick`] came
@@ -565,10 +471,14 @@ impl Ppu {
         // enable at the line boundary because the LYC=148 period has
         // ended, while lycEnable lyc_ff41_enable_3's same-cell enable
         // still matches its own line and fires).
+        // #11bd: classify the write on the un-shifted calibrated frame (the
+        // machine STOPADV advance moved post-leave writes deeper into the
+        // frame; identity for never-switched ROMs).
+        let (ll, ld) = self.law_pos();
         let cmp_cgb = if self.glitch_line {
             0
         } else {
-            match (self.line, self.dot) {
+            match (ll, ld) {
                 (0, _) => 0,
                 (153, 0..=7) => 153,
                 (153, _) => 0,
@@ -579,7 +489,20 @@ impl Ppu {
         if lyc_high && old & STAT_SRC_LYC != 0 {
             return false;
         }
-        let lyc_fire = lyc_high && data & STAT_SRC_LYC != 0;
+        // #11bg — unshifted CGB single-speed Tier-2: the engine's two-phase
+        // FF41 view (`eng_stat_pending`) owns the LYC-source write fires (the
+        // bit6-late continuity fire at commit+4 + external edges against the
+        // armed old bit6), replacing the write-instant lyc arms below. The
+        // shifted (lcd-offset) frames keep the calibrated arms — their write
+        // law positions are one poll quantum ambiguous (#11bd).
+        let eng_lyc = self.leading_edge_reads && !self.ds && self.lcd_shift_dots == 0;
+        // The engine owns the LINE-BOUNDARY region (where the staged view +
+        // the lyfc schedule decide); a MID-LINE enable keeps gambatte's
+        // write-instant fire — the `lyc_ff41_trigger_delay` pair collapses to
+        // one deferred commit dot (both legs dot 77, measured), so only the
+        // calibrated write-instant arm can satisfy it.
+        let eng_boundary = eng_lyc && !(16..448).contains(&ld);
+        let lyc_fire = !eng_boundary && lyc_high && data & STAT_SRC_LYC != 0;
         // Port Stage C / S5 (mech 3 — the dispatch-class write-trigger, the LYC
         // sub-family). The lcd-offset shifts `late_ff41_enable_lcdoffset1_1`'s
         // LYC-source enable into the line-start carryover (dots 0-3 of lines
@@ -591,11 +514,22 @@ impl Ppu {
         // carryover; `cmp_cgb` (pinning the new-line compare for the calibrated
         // m1statwirq/lyc_ff41_enable_3 rows) is untouched. Byte-identical OFF.
         let lyc_carryover = self.leading_edge_reads
-            && (1..=143).contains(&self.line)
-            && self.dot < 4
+            && !eng_lyc
+            && (1..=143).contains(&ll)
+            && ld < 4
             && old & STAT_SRC_LYC == 0
             && data & STAT_SRC_LYC != 0
-            && self.lyc == self.line - 1;
+            && self.lyc == ll - 1
+            // #11bh slice (d) — a DS line-start (dots 0-1) fresh bit6 enable
+            // whose OLD value armed HBlank joins a line still latched HIGH
+            // from the previous line's mode-0 (SameBoy holds the level until
+            // the ~dot-2 mfi re-eval; SBLEVEL: the natural 1→0 lands at dot 2
+            // and only THEN does a fresh enable edge —
+            // `lycstatwirq_trigger_m0_late_ly44_lyc44_08_40_ds_2` commit
+            // dot 0 silent E0 / `_ds_3` commit dot 2 fires E2). The engine
+            // level is seeded high by the write path (`regs.rs`) so the
+            // next tick raises no spurious edge either.
+            && !(self.ds && old & STAT_SRC_HBLANK != 0 && ld < 2);
         // Port Stage C / S5 (mech 3 — the dispatch-class write-trigger, the ly153
         // LYC-WRAP sub-family). The lcd-offset shifts
         // `lyc153_late_ff41_enable_lcdoffset1_1`'s LYC enable into the ly153 LY=0
@@ -610,9 +544,20 @@ impl Ppu {
         // (the real-state discriminator, not the offset) fires; `cmp_cgb` (pinning
         // the dot-6 base `lyc153_late_ff41_enable_1` compare) is untouched.
         // Byte-identical OFF.
+        // #11bd: on a shifted ROM the held latch is engine state at the REAL
+        // instant — the write that law-lands inside the dots-6..11 latch window
+        // arrives after the real latch dropped, so re-derive the latch at the
+        // law position (LYC=153 matched at the dot-6 step, drops at the dot-12
+        // LY=0 step).
+        let latch_at_law = if self.lcd_shift_dots == 0 {
+            self.lyc_interrupt_line
+        } else {
+            self.lyc_interrupt_line || (self.lyc == 153 && (6..12).contains(&ld))
+        };
         let lyc_wrap_153 = self.leading_edge_reads
-            && self.line == 153
-            && self.lyc_interrupt_line
+            && !eng_lyc
+            && ll == 153
+            && latch_at_law
             && !lyc_high
             && old & STAT_SRC_LYC == 0
             && data & STAT_SRC_LYC != 0;
@@ -621,14 +566,13 @@ impl Ppu {
         // speed, so the (144,0) and (0,0) cells never fire it).
         let m2 = old & STAT_SRC_OAM == 0
             && data & (STAT_SRC_OAM | STAT_SRC_HBLANK) == STAT_SRC_OAM
-            && (1..=143).contains(&self.line)
-            && self.dot < 2 + 2 * u16::from(self.ds);
+            && (1..=143).contains(&ll)
+            && ld < 2 + 2 * u16::from(self.ds);
         // gambatte's ly-region split on our grid: dots 0-3 still belong
         // to the previous line, so (0, 0-3) is mode 1's tail and
         // (144, 0-3) line 143's hblank (an m0 enable written there still
         // fires: m1/ly143_late_m0enable_ds_1 cgb04c_out3).
-        let vis = (self.line <= 143 && !(self.line == 0 && self.dot < 4))
-            || (self.line == 144 && self.dot < 4);
+        let vis = (ll <= 143 && !(ll == 0 && ld < 4)) || (ll == 144 && ld < 4);
         let main = if vis {
             // A scheduled mode-0 event still ahead within this line
             // (gambatte `eventTimes_(memevent_m0irq) <
@@ -642,7 +586,7 @@ impl Ppu {
             let crossed = self.m0_src && !(self.glitch_line && self.dot < GLITCH_MODE3_START);
             let m0_pending = !crossed && (old | data) & STAT_SRC_HBLANK != 0;
             // Line-boundary tail (`timeToNextLy <= 4 + 4*ds`).
-            let tail = self.dot < 4;
+            let tail = ld < 4;
             // Port Stage C / S5 (mech 3 — the dispatch-class write-trigger, the
             // HBlank sub-family). At the dots-0-3 line-start tail the gambatte
             // logic defers a fresh m0 enable to the scheduled m0irq event; but
@@ -664,13 +608,42 @@ impl Ppu {
             // (cleared by the test's IF-clear) so it must NOT be delivered. A
             // `dot < 4` window would over-fire the `_2` enable; halve to `< 2`
             // (mirrors the `m2`/`stage_stat_copies` DS halving). LE-only.
-            let carryover_tail = self.dot < if self.ds { 2 } else { 4 };
+            let carryover_tail = ld < if self.ds { 2 } else { 4 };
+            // At a shifted position the vis check evaluates on the law frame
+            // (ld < 4 at line start is always the mode-0 hold on non-glitch
+            // lines); un-shifted keeps the live view.
+            let vis0 = if self.lcd_shift_dots == 0 {
+                self.vis_mode() == 0
+            } else {
+                true
+            };
+            // #11bh group D — the held-LYC pre-write-high suppression: a
+            // carryover-tail m0 enable whose OLD value armed LYC with the
+            // latch still held (the lines-1-143 / line-144 lyfc-gap hold)
+            // rewrites a line that is already HIGH — no 0→1 edge on hardware
+            // (`m1/lyc143_late_m0enable_lycdisable_2` want 1: old=0x40, the
+            // LYC=143 hold spans line-144 dots 0-3; `ly143_late_m0enable_ds_1`
+            // old=0x00 keeps firing). The top-of-fn `lyc_high` check misses
+            // this: `cmp_cgb` has switched to the new line while the ENGINE
+            // latch still names the old match.
+            // #11bh — UNSHIFTED CGB SS (`eng_lyc`) hands the carryover-tail
+            // m0-enable fire to the two-phase ENGINE view, whose phase-1
+            // lands at commit+2 where `mode_for_interrupt` already reads the
+            // line-start OAM carry (mfi=2) — hardware's dead-tail: an enable
+            // committing in the last M-cycle / next line's dots 0-1 catches
+            // nothing on CGB (`m0enable/late_enable_2` want 0, commit ly+1
+            // dot 1; `_1` commits mid-line 449 and fires via phase-1; the
+            // asm ROW 3 `ttnl > 4` cutoff). The write-instant fire stays for
+            // the SHIFTED frames it was built on (`late_enable_lcdoffset1_1`,
+            // eng_lyc false) and DS.
             if self.leading_edge_reads
+                && !eng_lyc
                 && carryover_tail
                 && !self.glitch_line
-                && self.vis_mode() == 0
+                && vis0
                 && old & STAT_SRC_HBLANK == 0
                 && data & STAT_SRC_HBLANK != 0
+                && !(old & STAT_SRC_LYC != 0 && self.lyc_interrupt_line)
             {
                 return true;
             }
@@ -679,7 +652,13 @@ impl Ppu {
             } else if old & STAT_SRC_HBLANK != 0 {
                 false
             } else {
-                data & STAT_SRC_HBLANK != 0 || lyc_fire
+                // #11bg -- under the two-phase engine view (unshifted CGB
+                // SS Tier-2) the fresh-m0-enable fire moves to the ENGINE
+                // (the phase-1 rise at its effective instant, where the
+                // line-end OAM carryover in `update_mode_for_interrupt`
+                // provides the hardware cutoff); the write-instant fire
+                // would double up or fire enables the carryover blocks.
+                (data & STAT_SRC_HBLANK != 0 && !eng_lyc) || lyc_fire
             }
         } else {
             // Vblank region. Mode 1's last M-cycle (line 0 dots 0-3)
@@ -697,7 +676,7 @@ impl Ppu {
             // VBlank enable raises IF; the `old & STAT_SRC_VBLANK` suppression and
             // the lyc arm (the #11k `lycstatwirq_trigger_ly00` E0 rows) are
             // untouched. Never set in production / LE-only → byte-identical OFF.
-            let m1_tail = self.line == 0 && self.dot < 4 && !self.leading_edge_reads;
+            let m1_tail = ll == 0 && ld < 4 && !self.leading_edge_reads;
             if old & STAT_SRC_VBLANK != 0 {
                 false
             } else {

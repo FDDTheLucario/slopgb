@@ -35,6 +35,111 @@ impl Ppu {
     /// of the remaining atomic-flip work and are left unset here (so the flag-on
     /// path does not yet reproduce the halt-late commit timing).
     pub(super) fn stat_update_tick(&mut self) {
+        // #11bg — resolve the staged CGB SS FF41 two-phase engine view (see
+        // the `eng_stat_pending` field doc): phase-1 rises fire (a mode
+        // enable at its effective instant), falls are silent; the final
+        // value fires only a genuine enable (pre-write line LOW), through
+        // the CGB delivery delay.
+        if let Some((phase1, fin, pre_high, mfi_t0, k)) = self.eng_stat_pending {
+            let mfi_now = self.mode_for_interrupt;
+            // m0-flip fast-forward (stored k >= 1, i.e. the flip tick is >= D+2 = T0): slopgb's mode-3→0
+            // flip sits LATER than T0+1T in SameBoy's frame, so a stage past
+            // T0 at the flip has fully committed on hardware — resolve it.
+            // When the final value cannot hold the line (the LYC hold dies)
+            // the sub-dot dip is forced so the mode-0 rise re-edges
+            // (`m0enable/lycdisable_ff41_scx*` want 2). A stage with k < 1
+            // (write committed within a dot of the flip) keeps the OLD view
+            // through the flip (`m0enable/disable_2` scx0 want 2: the dying
+            // enable still catches the rise).
+            if mfi_now == 0 && self.eng_mfi_prev == 3 && k >= 1 {
+                self.eng_stat = fin;
+                self.eng_stat_pending = None;
+                if self.stat_update.line()
+                    && !(fin & STAT_SRC_LYC != 0 && self.lyc_interrupt_line)
+                {
+                    self.stat_update.force_level(false);
+                }
+                // The main update() below evaluates the flip against `fin`.
+            } else {
+                let k = k + 1;
+                if k == 2 {
+                    self.eng_stat = phase1;
+                    let lvl = crate::stat_update::StatUpdate::level(
+                        mfi_now,
+                        self.eng_stat,
+                        self.lyc_interrupt_line,
+                    );
+                    // A rise at T0 is a mode-source enable reaching its
+                    // effective instant (bit6 is OLD in phase-1, it cannot
+                    // rise here) — fire immediately. A fall is silent.
+                    if lvl && !self.stat_update.line() {
+                        self.pending_if |= IF_STAT;
+                        self.stat_update_halt_masks(mfi_now);
+                        if super::s5dbg_on() && self.line < 154 {
+                            eprintln!(
+                                "SLOPGB dispatch ly={} dot={} mfi={} lycln={} (ff41 t0)",
+                                self.line, self.dot, mfi_now, self.lyc_interrupt_line as u8
+                            );
+                        }
+                    }
+                    self.stat_update.force_level(lvl);
+                    self.eng_stat_pending = Some((phase1, fin, pre_high, mfi_now, k));
+                } else if k >= 4 {
+                    self.eng_stat = fin;
+                    self.eng_stat_pending = None;
+                    // Evaluate the final value at the T0+1T-instant mode
+                    // (`mfi_t0`) — the sub-dot dip: a fall forces the line
+                    // low silently and any later natural rise re-fires
+                    // per-dot (`lyc1_m2irq_late_lycdisable_1`). A rise (the
+                    // bit6-late enable) fires iff the line was LOW at the
+                    // write (continuity — the m1→LYC handoff
+                    // `lyc153_late_enable_m1disable_3` stays silent), through
+                    // the CGB delivery delay (`lyc_if_delay`, the FF41 twin
+                    // of the FF45-write delay — `lyc_ff41_trigger_delay`).
+                    let lvl = crate::stat_update::StatUpdate::level(
+                        mfi_t0,
+                        self.eng_stat,
+                        self.lyc_interrupt_line,
+                    );
+                    if !lvl {
+                        self.stat_update.force_level(false);
+                    } else if !self.stat_update.line() {
+                        if !pre_high {
+                            self.lyc_if_delay = self.lyc_if_delay.max(3);
+                            if super::s5dbg_on() && self.line < 154 {
+                                eprintln!(
+                                    "SLOPGB dispatch ly={} dot={} mfi={} lycln={} (ff41 fin delayed)",
+                                    self.line, self.dot, mfi_t0, self.lyc_interrupt_line as u8
+                                );
+                            }
+                        }
+                        self.stat_update.force_level(true);
+                    }
+                } else {
+                    self.eng_stat_pending = Some((phase1, fin, pre_high, mfi_t0, k));
+                }
+            }
+        }
+        // #11bg — the DS m0-flip dip (the immediate-view analogue of the
+        // fast-forward above): a bit6-DROPPING FF41 commit within one M of
+        // the mode-3→0 flip means hardware's LYC-hold death precedes the
+        // mode-0 IF rise sub-dot; slopgb's whole-dot view collapsed them
+        // into a seamless LYC→m0 handoff. Force the dip so the flip tick's
+        // main update() re-edges (`m0enable/lycdisable_ff41_ds_1` want 2;
+        // the `_2` sibling's drop commits after the flip and stays seamless).
+        if self.ds && self.mode_for_interrupt == 0 && self.eng_mfi_prev == 3 {
+            if let Some((l, d)) = self.ff41_ds_drop.take() {
+                if l == self.line
+                    && self.dot.wrapping_sub(d) <= 2
+                    && self.lyc_interrupt_line
+                    && self.eng_stat & STAT_SRC_LYC == 0
+                    && self.stat_update.line()
+                {
+                    self.stat_update.force_level(false);
+                }
+            }
+        }
+        self.eng_mfi_prev = self.mode_for_interrupt;
         // Keep the readable comparison/mode flags + the legacy level current
         // (FF41 reads, the write-edge baseline) exactly as the flag-off path.
         self.refresh_cmp(true);
@@ -97,12 +202,53 @@ impl Ppu {
             // carryover dot — but NOT onto the line-END last M-cycle, where lyfc
             // is fixed and only a fresh write moves the latch). CGB only; LE/Tier-2
             // only (production byte-identical).
-            (self.line == 1 && self.dot <= 2) || (self.dot >= 452 && !self.ds)
+            // Part C stage 4 (ENGINE-IF re-measure) — the CGB line-START
+            // carryover hold GENERALIZED to lines 1-143 (was line 1 only):
+            // SameBoy re-latches `lyc_interrupt_line` ONLY at the state-6/-7
+            // GB_SLEEP steps (dot 3 → -1/hold, dot 4 → line), never during
+            // the dots-0-2 carryover where `ly_for_comparison` still names
+            // line-1 — so a late FF45 write whose new LYC equals the PREVIOUS
+            // line raises no fresh edge there (`late_ff45_enable_2/_3`:
+            // slopgb's per-dot re-latch caught LYC=6 against the ly7 dots-0-2
+            // carryover value 6 → spurious edge, if=03 where SameBoy reads
+            // 01 — dual-traced). The #11l refutation of this hold predates
+            // `law_pos`/#11bd; re-measured with the full family set this
+            // session (lycEnable/m1/m2enable/miscmstatirq/ly0/lcd_offset).
+            // UNSHIFTED frames only for lines 2-143: on STOP-shifted ROMs
+            // the write's law position in this window is one poll quantum
+            // ambiguous (the #11bd under-correction), and the shifted
+            // `late_ff45_enable_lcdoffset1_1`/`ff45_enable_weirdpoint_
+            // lcdoffset1_1` SameBoy-passes need their carryover re-latch
+            // (measured drop without the gate — the #11l refutation shape,
+            // now confined to the shifted frame). Line 1 keeps the
+            // unconditional #11r wrap hold.
+            ((1..=143).contains(&self.line) && self.dot <= 2 && self.lcd_shift_dots == 0)
+                || (self.line == 1 && self.dot <= 2)
+                || (self.dot >= 452 && !self.ds)
         } else {
             (1..=143).contains(&self.line) && self.dot <= 2
         };
         if ly != -1 && !line_start_carryover {
-            self.lyc_interrupt_line = ly == i16::from(self.lyc);
+            // Part C stage 4 — the engine's LYC compare takes the DELAYED
+            // FF45 view for the DISABLE direction: the deferred write commits
+            // ~4 dots (SS) EARLY of SameBoy's instant, so a LYC rewrite
+            // landing in dots 0-3 kills the dot-4 match slopgb-side while
+            // SameBoy's edge fires first (`ff45_disable_2` want out3: LYC 6→FF
+            // commits ly6 dot1, SameBoy fires the ly6 edge with LYC still 6,
+            // then the disable lands). `lyc_event` (the production engine's
+            // delayed FF45 copy, protected through dots 1-4) IS that view —
+            // OR-ing it in delays disables while a fresh MATCH (enable
+            // direction) stays live via `self.lyc` (the A12 write-trigger
+            // discipline is untouched). DMG's `lyc_event` mirrors `lyc`
+            // immediately → DMG unchanged.
+            // SS + unshifted only: the DS write frame is +1 dot (the
+            // `lyc_event` protected window over-covers it — the OR broke the
+            // `*_ff45_disable_ds_1` legs, measured) and shifted frames
+            // mis-map the window (`ff45_enable_weirdpoint_lcdoffset1_1`).
+            self.lyc_interrupt_line = ly == i16::from(self.lyc)
+                || (!self.ds
+                    && self.lcd_shift_dots == 0
+                    && ly == i16::from(self.lyc_event));
         }
         // Mech 3 root 1 (S5 engine-driver) — the vblank-entry LYC-latch drop.
         // A held visible-line LYC match (e.g. LYC=143 carried high from line 143)
@@ -131,24 +277,104 @@ impl Ppu {
             && self.dot == 0
             && self.lyc_interrupt_line
             && i16::from(self.lyc) != 144
-            && self.stat_en & STAT_SRC_VBLANK != 0
+            && self.eng_stat & STAT_SRC_VBLANK != 0
         {
             self.lyc_interrupt_line = false;
         }
         let mfi = self.mode_for_interrupt;
+        // (A blanket delayed-enable view `stat_en | stat_ev` was BUILT +
+        // MEASURED here: it fixes `ff41_disable_2` but over-delays the
+        // m2enable/m1 disable families — +5/+1 fails — the mode-source
+        // disables are pinned LIVE while only the LYC-source disable rides
+        // the delayed copy. The LYC side lands via `lyc_event` above. #11bg
+        // supersedes the write side: the engine reads `eng_stat`, the CGB
+        // two-phase FF41 write view — per-bit exact where the blanket OR
+        // over-delayed.)
         if self
             .stat_update
-            .update(mfi, self.stat_en, self.lyc_interrupt_line)
+            .update(mfi, self.eng_stat, self.lyc_interrupt_line)
         {
-            self.pending_if |= IF_STAT;
-            if super::s5dbg_on() && self.line < 154 {
-                eprintln!(
-                    "SLOPGB dispatch ly={} dot={} mfi={} lycln={}",
-                    self.line, self.dot, mfi, self.lyc_interrupt_line as u8
-                );
+            // #11bh group B — the FF0F write-race: a bit1-clearing FF0F write
+            // committed within the last 2 dots CONSUMES this rise (SameBoy
+            // `GB_CONFLICT_WRITE_CPU`: the CPU's IF write lands +1 T after its
+            // leading edge and beats a co/prior-instant PPU rise in SameBoy's
+            // frame — slopgb's deferred write commits ~2 dots early of that
+            // frame, so the raced rise lands 1-2 slopgb-dots AFTER the
+            // commit). The line still went high (`update` latched it), so the
+            // edge is spent: no level-re-raise (`m2int_m0irq_scx{3,4}_ifw_ds_2`
+            // want 0, `lycint152_lyc153irq_ifw_2` want E0; the `_1` siblings'
+            // writes sit 3-5 dots clear and stay live). One-shot.
+            // Per-source consume window (dots since the write commit,
+            // Δ = 3 − counter): DS mode-0 rise w=2 (`scx3`/`scx4_ifw_ds_2`
+            // consume at Δ 1-2, `_ds_1` survive at 3-4) · SS LYC rise w=1
+            // (`lyc153irq_ifw_2` consumes at Δ=1, `_ifw_1` survives at 5) ·
+            // everything else w=0 — the SS mode-0 (`scx4_ifw_1` survives
+            // Δ=1), DS LYC (`lyc153irq_ifw_ds_1` survives Δ=2), mode-2
+            // (`m2int_m2irq_ifw_ds_1`) and mode-1 rises sit on the other
+            // side of the write in SameBoy's frame (all measured, this
+            // session's family probe).
+            let m0_rise = mfi == 0 && self.eng_stat & STAT_SRC_HBLANK != 0;
+            let m2_rise = mfi == 2 && self.eng_stat & STAT_SRC_OAM != 0;
+            let lyc_rise = !m0_rise
+                && !m2_rise
+                && self.eng_stat & STAT_SRC_LYC != 0
+                && self.lyc_interrupt_line;
+            let w = if self.ds && m0_rise {
+                2
+            } else if !self.ds && lyc_rise {
+                1
+            } else {
+                0
+            };
+            // #11bh group C — the dispatch-ack squash (per-source windows, see
+            // the `ack_squash_ppu` field doc): a rise of the just-acked STAT
+            // bit inside the window merges into the dispatch; past it, it
+            // survives and re-sets IF (the retrigger `_1` legs).
+            let w_ack = if self.ack_squash_ppu_mask & IF_STAT != 0 {
+                if m0_rise {
+                    u8::from(self.ds)
+                } else if m2_rise || self.ds {
+                    // mode-2 pulses (both speeds) and every DS non-m0 rise
+                    // sit on the far side of the ack in SameBoy's frame.
+                    0
+                } else {
+                    2
+                }
+            } else {
+                0
+            };
+            let ack_consumed = w_ack > 0 && self.ack_squash_ppu >= 3 - w_ack;
+            if (w > 0 && self.stat_if_squash >= 3 - w) || ack_consumed {
+                self.stat_if_squash = 0;
+                if ack_consumed {
+                    self.ack_squash_ppu = 0;
+                }
+                if super::s5dbg_on() && self.line < 154 {
+                    eprintln!(
+                        "SLOPGB dispatch ly={} dot={} mfi={} lycln={} (ifw squashed)",
+                        self.line, self.dot, mfi, self.lyc_interrupt_line as u8
+                    );
+                }
+            } else {
+                self.pending_if |= IF_STAT;
+                // #11bh group E — tag the line-0 dot-4 OAM pulse for the
+                // co-instant FF0F read-view mask (`ly0_pulse_age`).
+                if self.line == 0 && self.dot == 4 && mfi == 2 {
+                    // 2: survives this tick's own end-of-tick decrement so
+                    // the post-advance deferred read on the same dot sees it
+                    // (the dot==4 gate keeps later dots out regardless).
+                    self.ly0_pulse_age = 2;
+                }
+                if super::s5dbg_on() && self.line < 154 {
+                    eprintln!(
+                        "SLOPGB dispatch ly={} dot={} mfi={} lycln={}",
+                        self.line, self.dot, mfi, self.lyc_interrupt_line as u8
+                    );
+                }
+                self.stat_update_halt_masks(mfi);
             }
-            self.stat_update_halt_masks(mfi);
         }
+        self.stat_if_squash = self.stat_if_squash.saturating_sub(1);
         self.stat_update_vblank_oam_pulses();
     }
 
@@ -185,7 +411,7 @@ impl Ppu {
         if !self.glitch_line
             && self.line == 144
             && self.dot == 0
-            && self.m2_pulse_fires(self.stat_en)
+            && self.m2_pulse_fires(self.eng_stat)
         {
             self.pending_if |= IF_STAT;
             if !self.model.is_cgb() {
@@ -231,6 +457,17 @@ impl Ppu {
     /// is reclocked (its rise still lands at our cc+4 dot, the remaining atomic
     /// work — see the field docs).
     fn stat_update_halt_masks(&mut self, mfi: u8) {
+        // #11aq (C2 read-position carry): record whether THIS STAT 0→1 edge — the
+        // one setting the currently-pending STAT bit — is the mode-2 OAM
+        // line-start rise. Sticky until the next STAT edge (a held STAT bit
+        // raises no new edge, so the flag keeps naming the source of the pending
+        // bit). The interconnect's `dispatch_retime` keys the per-ISR deferred
+        // read carry on it (`SLOPGB_M2CARRY`). Line 0's OAM pulse takes no carry
+        // (its read frame already matches — same exemption as the halt mask).
+        self.stat_rise_oam = mfi == 2 && self.eng_stat & STAT_SRC_OAM != 0 && self.line != 0;
+        // #11aq: the mode-0 HBlank ISR read is +2 dots early (half the mode-2 +4);
+        // tagged so `dispatch_retime` carries it the matching +2.
+        self.stat_rise_m0 = mfi == 0 && self.eng_stat & STAT_SRC_HBLANK != 0;
         // The rise's source is unambiguous from `mfi` alone: this runs only on a
         // 0→1 edge, so the line was LOW the previous dot — meaning neither source
         // held it high. If the mode source is enabled with `mfi` selecting it
@@ -239,7 +476,7 @@ impl Ppu {
         // a "LYC-only" rise (a held-high mode source would have made the previous
         // dot high → not an edge). A pure-LYC rise lands where `mfi` is NONE/1/3
         // (no branch). `stat_lyc_onoff` exercises this flag-on.
-        if mfi == 2 && self.stat_en & STAT_SRC_OAM != 0 {
+        if mfi == 2 && self.eng_stat & STAT_SRC_OAM != 0 {
             // Mode-2 (OAM) line-start pulse. Lines 1-143 carry it across the
             // line-start window (the halt-exit sampler misses the rise for one
             // M-cycle); line 0's pulse (dot 4) takes no halt mask (SameBoy
@@ -247,10 +484,16 @@ impl Ppu {
             if self.line != 0 {
                 self.stat_halt_late = true;
             }
-        } else if mfi == 0 && self.stat_en & STAT_SRC_HBLANK != 0 {
+        } else if mfi == 0 && self.eng_stat & STAT_SRC_HBLANK != 0 {
             // Mode-0 (HBlank) source rise carries the half-cycle halt law
             // (`if_late` via the interconnect's second-half check).
             self.m0_rise = true;
+            // #11bh item-7 count-row slice — tag the SHIFTED-frame rise for
+            // the co-instant FF0F read-view mask (`m0sh_age` field doc).
+            if self.lcd_shift_dots != 0 {
+                self.m0sh_age = 2;
+                self.m0sh_dot = self.dot;
+            }
         }
     }
 
@@ -292,7 +535,30 @@ impl Ppu {
         // lagged `prev_done`; `stat_events_tick` never reads `mode_for_interrupt`,
         // so production is byte-identical.
         let prev_done = if self.leading_edge_reads {
-            self.enabled && self.line <= 143 && self.line_render_done
+            self.enabled
+                && self.line <= 143
+                && (self.line_render_done
+                    // #11bh — the WINDOW-line mode-0 engine rise leads the
+                    // render flip by 2 dots (SS CGB): the win-line render
+                    // clock sits uniformly +2 late in slopgb's frame (the
+                    // FF41 `vis_mode_read` window laws already compensate;
+                    // the ENGINE still read the raw flip). SameBoy raises
+                    // the win-line mode-0 IF at the same instant as its
+                    // visible flip (dual-traced `m2int_wxA5_m0irq_2`: SB
+                    // rise = flip fp = slopgb-frame 259, slopgb rise 261 →
+                    // the `_2` dot-260 FF0F read missed it; the `_1`
+                    // dot-256 read stays clear). Projection-based so
+                    // mid-line SCX/WX writes track.
+                    || (self.tier2_reclock
+                        && self.model.is_cgb()
+                        && !self.ds
+                        && self.render.win_active
+                        && !self.glitch_line
+                        && self.render.active
+                        && {
+                            let (proj, lead) = self.flip_projection();
+                            proj.saturating_sub(lead) <= 2
+                        }))
         } else {
             prev_done
         };
@@ -326,7 +592,24 @@ impl Ppu {
             // slice is part of the atomic Phase-B reclock, deferred. Measured
             // (`ppu-subdot-ladder.md` "A15"): SS-gated = +2 / 0 regress / 0 lift
             // lost; universal = +6 / 0 regress / −1 SameBoy-passing drop.
-            if self.tier2_reclock && !self.ds && self.model.is_cgb() {
+            if self.tier2_reclock && self.ds && self.model.is_cgb() {
+                // #11bd item 5b — the DS glitch-line arm the A15 note deferred:
+                // suppress the enable-glitch PREFIX (the spurious dot-19 rise
+                // the `_1` legs' pre-rise reads caught -> got E2 want E0) AND
+                // hold mode 3 for the IRQ until line_render_done + 2 - SameBoy
+                // raises the glitch-line mode-0 STAT at cfl259, TWO dots past
+                // the bare-line 257 (fresh SBTRACE, frame-0 ly0). The prior
+                // "suppress-prefix drops ly0_m0irq_scx0_ds_2" A/B resolved by
+                // the +2: the `_2` read lands between the old post-render dot
+                // and the true rise.
+                if self.dot < GLITCH_MODE3_START {
+                    crate::stat_update::MODE_FOR_INTERRUPT_NONE
+                } else if self.line_render_done {
+                    0
+                } else {
+                    3
+                }
+            } else if self.tier2_reclock && !self.ds && self.model.is_cgb() {
                 // Port Stage C/S5 — the Tier-2 SS glitch-line mode-0 IRQ
                 // dispatch reclock. The IRQ side keys on `line_render_done`
                 // (the dispatch dot, our dot 254 = SameBoy `cfl=257`), NOT on
@@ -482,39 +765,69 @@ impl Ppu {
     /// it). The LCD-enable glitch line returns `-1` (its LY/LYC view is the live
     /// flag-off path's concern, `lcdon_*` tables).
     pub(super) fn ly_for_comparison(&self) -> i16 {
+        self.ly_for_comparison_at(self.line, self.dot)
+    }
+
+    /// [`Self::ly_for_comparison`] evaluated at an explicit (line, dot) — the
+    /// #11bd law-frame variant (write-instant classifications on shifted ROMs
+    /// pass [`Ppu::law_pos`]).
+    pub(super) fn ly_for_comparison_at(&self, at_line: u8, at_dot: u16) -> i16 {
         if !self.enabled || self.glitch_line {
             return -1;
         }
-        let line = i16::from(self.line);
-        if self.line <= 143 {
+        let line = i16::from(at_line);
+        if at_line <= 143 {
             // Visible line: prev-line carryover (dots 0-2) → -1 at the dot-3
             // reset (`display.c:1776`, `current_line ? -1 : 0`) → N at dot 4
             // (`display.c:1786`). Line 0's predecessor (line 153) ends holding 0.
-            if self.dot >= 4 {
+            if at_dot >= 4 {
                 line
-            } else if self.dot == 3 {
-                if self.line == 0 { 0 } else { -1 }
-            } else if self.line == 0 {
+            } else if at_dot == 3 {
+                if at_line == 0 { 0 } else { -1 }
+            } else if at_line == 0 {
                 0
             } else {
                 line - 1
             }
-        } else if self.line <= 152 {
+        } else if at_line <= 152 {
             // VBlank 144-152: `-1` set at line entry, `= current_line` after
             // GB_SLEEP 26+12 (≈dot 4) (`display.c` 144-152 loop).
-            if self.dot >= 4 { line } else { -1 }
+            if at_dot >= 4 { line } else { -1 }
         } else {
-            self.ly_for_comparison_line_153()
+            self.ly_for_comparison_line_153_at(at_dot)
         }
     }
 
     /// Line 153's model-specific `ly_for_comparison` micro-sequence (the
     /// `display.c` line-153 tail). See [`Self::ly_for_comparison`].
-    fn ly_for_comparison_line_153(&self) -> i16 {
+    fn ly_for_comparison_line_153_at(&self, at_dot: u16) -> i16 {
+        if self.ds && self.model.is_cgb() {
+            // #11bg — the CGB double-speed line-153 schedule (replacing the
+            // documented SS placeholder): `ly_for_comparison` latches 153
+            // EARLY (dot 4) and holds through the LY=0 step with NO -1 gap
+            // (`display.c:2246` keeps 153 when `cgb_double_speed`), dropping
+            // to 0 at dot 12. The dot-4 rise + the immediate DS engine view
+            // is the unique whole-dot solution to the four
+            // `lyc153_m1disable_ds` / `lyc0_m1disable_ds` leg constraints
+            // (dip-vs-seamless m1→LYC handoffs bracketing dots 4 and 12 —
+            // asm-derived, dual-traced); the SS dot-6 table stays pinned by
+            // wilbertpol ly_lyc_153-C.
+            // The [8,12) window is the `-1` GAP, not live 153: a fresh LYC
+            // write landing there must NOT re-latch (`lyc153_late_ff45_
+            // enable_ds_6` E0 — SameBoy's "writing to LYC during this period
+            // has side effects" zone) while a HELD true match carries through
+            // it (the m1disable seamless handoffs).
+            return match at_dot {
+                0..=3 => -1,
+                4..=7 => 153,
+                8..=11 => -1,
+                _ => 0,
+            };
+        }
         if self.model == Model::Agb {
             // `model > CGB_C`: GB_SLEEP(14,2) lands the first set at dot 4, and
             // `model>CGB_C||ds` keeps it 153 through the LY=0 step; no -1 gap.
-            match self.dot {
+            match at_dot {
                 0..=3 => -1,
                 4..=11 => 153,
                 _ => 0,
@@ -524,7 +837,7 @@ impl Ppu {
             // GB_SLEEP(14,4) delays the first set to dot 6, then the LY=0 step
             // drops `ly_for_comparison` back to -1 (the `model>CGB_C||ds` arm is
             // false) before the final = 0 at dot 12. (DS placeholder, see above.)
-            match self.dot {
+            match at_dot {
                 0..=5 => -1,
                 6..=7 => 153,
                 8..=11 => -1,

@@ -54,7 +54,7 @@ fn run_step(cpu: &mut Cpu, bus: &mut impl Bus) {
         // the CPU halted one more cycle. The same sample feeds both the
         // IME=1 dispatch and the IME=0 resume (SameBoy sm83_cpu.c,
         // `GB_cpu_run`: one `interrupt_queue` sample serves both paths).
-        if bus.pending_halt_wake() == 0 {
+        if bus.pending_halt_wake_mid() == 0 {
             cpu.regs.pc = pc_before;
             // Staying halted: gate the core clock (and with it the OAM DMA
             // controller) off. The gate engages only now — *after* the
@@ -127,7 +127,7 @@ fn run_step(cpu: &mut Cpu, bus: &mut impl Bus) {
     // pin the aborting behavior on hardware.
     let pc_before = cpu.regs.pc;
     let mut opcode = fetch_opcode(cpu, bus);
-    if cpu.ime && bus.pending() != 0 {
+    if cpu.ime && bus.pending_dispatch() != 0 {
         cpu.regs.pc = pc_before;
         dispatch_interrupt(cpu, bus);
         opcode = fetch_opcode(cpu, bus);
@@ -456,11 +456,28 @@ fn op_halt(cpu: &mut Cpu, bus: &mut impl Bus) {
     // the next opcode fetch fails to increment PC (gbctr). An EI directly
     // before HALT behaves like the IME=1 case instead, because the delayed
     // enable commits while halting (mooneye acceptance/halt_ime0_ei).
-    if !cpu.ime && !cpu.ime_pending && bus.pending() != 0 {
-        cpu.halt_bug = true;
-    } else {
-        cpu.halted = true;
+    if !cpu.ime && !cpu.ime_pending {
+        if bus.pending_halt_entry() != 0 {
+            cpu.halt_bug = true;
+        } else {
+            cpu.halted = true;
+        }
+        return;
     }
+    // #11bf — IME=1 (or EI-pending) with IE & IF already nonzero at the
+    // entry view: the halt is NOT entered and PC rewinds to the HALT
+    // itself, so the dispatched ISR returns INTO the halt and it
+    // re-executes with the IF bit consumed (SameBoy halt()
+    // sm83_cpu.c:1043-1047: `halted = false; pc--`). The prior
+    // halted+first-check-wake path pushed halt+1 — the ISR skipped the
+    // re-halt and the whole post-wake stream ran one halt round early
+    // (`late_m0int_halt_m0stat_*` dual-traced). Tier2-gated inside
+    // `halt_entry_rewind` (production keeps the halted+wake shape).
+    if bus.halt_entry_rewind() {
+        cpu.regs.pc = cpu.regs.pc.wrapping_sub(1);
+        return;
+    }
+    cpu.halted = true;
 }
 
 fn op_stop(cpu: &mut Cpu, bus: &mut impl Bus) {

@@ -35,6 +35,17 @@ impl Interconnect {
         let Some(req) = self.vram_dma_req.take() else {
             return;
         };
+        // #11bf item 2a HDMA dual-trace (`SLOPGB_S5DBG`): the block-run
+        // instant, the slopgb counterpart of SameBoy's `SBWHDMA run`.
+        if crate::ppu::s5dbg_on() {
+            let (l, d) = self.ppu.scan_pos();
+            eprintln!(
+                "SLOPGB hdmarun ly={l} dot={d} clk={} req={req:?} src={:04x} dst={:04x}",
+                self.clock.now(),
+                self.hdma_src,
+                self.hdma_dst
+            );
+        }
         self.vram_dma_stall = true;
         let mut remaining = (usize::from(self.hdma5 & 0x7F) + 1) * 0x10;
         let mut length = if req == VramDmaReq::Gdma {
@@ -116,7 +127,7 @@ impl Interconnect {
         match self.halt_hdma {
             HaltHdmaState::Requested => self.vram_dma_req = Some(VramDmaReq::HblankUnhalt),
             HaltHdmaState::Low
-                if self.hdma_mode == HdmaMode::ArmedLcdOn && self.ppu.hdma_period() =>
+                if self.hdma_mode == HdmaMode::ArmedLcdOn && self.ppu.hdma_period_law() =>
             {
                 self.vram_dma_req = Some(VramDmaReq::Hblank);
             }
@@ -162,7 +173,14 @@ impl Interconnect {
             // block fires at once only inside the hblank window.
             if self.ppu.lcd_enabled() {
                 self.hdma_mode = HdmaMode::ArmedLcdOn;
-                if self.ppu.hdma_period() {
+                if crate::ppu::s5dbg_on() {
+                    let (l, d) = self.ppu.scan_pos();
+                    eprintln!(
+                        "SLOPGB wff55 arm ly={l} dot={d} period={}",
+                        self.ppu.hdma_period_law()
+                    );
+                }
+                if self.ppu.hdma_period_law() {
                     self.vram_dma_req = Some(VramDmaReq::Hblank);
                 }
             } else {

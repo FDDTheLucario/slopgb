@@ -15,19 +15,23 @@ impl Ppu {
                 // activation of the frame increments it to row 0.
                 self.win_line = 0xFF;
                 self.line_render_done = false;
+                self.flip_dot = 0;
                 self.vis_early = false;
                 self.vis_hold_until = 0;
                 self.render_finished = false;
                 self.hdma_lead = false;
+                self.pal_open_dot = 0;
                 self.render.active = false;
             }
             1..=143 => {
                 self.ly = self.line;
                 self.line_render_done = false;
+                self.flip_dot = 0;
                 self.vis_early = false;
                 self.vis_hold_until = 0;
                 self.render_finished = false;
                 self.hdma_lead = false;
+                self.pal_open_dot = 0;
                 self.render.active = false;
             }
             144 => {

@@ -124,8 +124,12 @@
 mod blocking;
 mod line_setup;
 mod lyc;
+#[path = "stat_irq/read_laws.rs"]
+mod stat_irq_read_laws;
 #[path = "stat_irq/reclock.rs"]
 mod reclock;
+#[path = "stat_irq/ff0f.rs"]
+mod stat_irq_ff0f;
 mod regs;
 mod render;
 mod stat_irq;
@@ -196,6 +200,15 @@ const IF_STAT: u8 = 0x02;
 /// See [`Ppu::stage_write`].
 struct PipeRegs {
     lcdc: u8,
+    /// #11bo mech2 — the BG fetcher's LCDC addressing view (map/data select).
+    /// Tracks `lcdc` in lockstep in production (byte-identical), but under the
+    /// tier2 render reclock it lags the eager control commit by the +4
+    /// render-frame offset (see `render_lcdc_pending`), so a mid-mode-3 LCDC
+    /// bit3/bit4 write (bgtilemap/bgtiledata) reaches the fetch grid at the
+    /// production/SameBoy dot instead of the leading edge. The window bit5
+    /// (abort/reenable/enable) side-effects + the FF41 read laws keep the eager
+    /// `lcdc` — their tier2 pins are calibrated to the cc+0 control commit.
+    render_lcdc: u8,
     scy: u8,
     scx: u8,
     bgp: u8,
@@ -219,10 +232,108 @@ pub struct Ppu {
     model: Model,
     frame_count: u64,
 
+    /// The CPU has written an LCD register (FF40-FF4B) since power-on — the boot
+    /// hand-off PPU frame is no longer pristine. Gates the DMG boot-frame read
+    /// law ([`Self::boot_read`]): the `poweron_*` ROMs read the untouched boot
+    /// frame (pure NOP sled, no PPU write), while every other early reader
+    /// configures the PPU first — `lcdon_to_*`/`oam_read`/`sprite`/`win` toggle
+    /// the LCD (FF40), the gambatte kernel/halt STAT-ISR tests arm a mode
+    /// interrupt (FF41) — and reads its own frame at cc+0. Set on the tier2 CPU
+    /// write path only (`interconnect/cycle.rs`), so the boot ROM's own register
+    /// install does not trip it; never read in production → byte-identical OFF.
+    lcd_regs_written: bool,
+
     // Registers.
     lcdc: u8,
     /// STAT bits 3-6 (interrupt source enables).
     stat_en: u8,
+    /// #11bg — the S5 engine's FF41 enable view (SameBoy reads the two-phase
+    /// `io_registers[GB_IO_STAT]` itself in `GB_STAT_update`). Mirrors
+    /// `stat_en` everywhere except the staged window after a CGB FF41 write
+    /// on the tier2/LE path: SameBoy's `GB_CONFLICT_STAT_CGB[_DOUBLE]`
+    /// (sm83_cpu.c:168-188) commits the write in TWO phases — at T0 every bit
+    /// lands EXCEPT the LYC enable (bit 6, single speed) / the HBlank enable
+    /// (bit 3, double speed), which hold their OLD value one more T-cycle.
+    /// The failing lycEnable want-pairs straddle exactly that lag (a disable
+    /// whose phase-1 window covers the `ly_for_comparison` latch dot still
+    /// fires the LYC edge — `ff41_disable_2` dual-traced: SBWRITE val=40
+    /// phase-1 then the ly6 STAT_IRQ then val=00). Production/flag-off never
+    /// reads this (only `stat_update_tick` consumes it) → byte-identical OFF.
+    eng_stat: u8,
+    /// Pending [`Self::eng_stat`] transition from a CGB single-speed FF41
+    /// write: `(phase1, final, pre_write_line_high, mfi_at_t0,
+    /// ticks_since_write)`. Schedule (engine ticks after the deferred commit
+    /// dot D; SameBoy T0 ≈ D+2, dual-traced):
+    /// * tick D+1: the OLD view;
+    /// * tick D+2 (T0): `phase1` = mode bits NEW, **bit6 OLD**
+    ///   (`GB_CONFLICT_STAT_CGB` holds the LYC enable one T past the mode
+    ///   bits). A rise here is a mode-source enable reaching its effective
+    ///   instant and fires; a fall is forced silently. The tick's
+    ///   `mode_for_interrupt` is saved as `mfi_at_t0`;
+    /// * tick D+3: externals still edge against phase-1 (`ff41_disable_2`'s
+    ///   ly6 dot-4 LYC latch rise against the armed old bit6);
+    /// * tick D+4: the final value, EVALUATED against `mfi_at_t0` (the
+    ///   T0+1T-instant mode — the sub-dot dip `lyc1_m2irq_late_lycdisable_1`
+    ///   pins: the line falls before the next line's OAM carryover, so the
+    ///   ly2 mode-2 rise re-fires). A fall forces the line low silently; a
+    ///   rise (the bit6-late enable) fires iff the line was LOW at the write
+    ///   (the m1→LYC handoff `lyc153_late_enable_m1disable_3` stays silent —
+    ///   hardware is hazard-free where SameBoy's intersection phase dips,
+    ///   E0-vs-E2 measured), delivered through the CGB `lyc_if_delay` (the
+    ///   FF41 twin of the FF45-write delay — `lyc_ff41_trigger_delay`).
+    /// * At the line's mode-3→0 flip a stage past T0 FAST-FORWARDS to final
+    ///   (the flip sits later than T0+1T in SameBoy's frame), with a forced
+    ///   dip when the final value cannot hold the line
+    ///   (`m0enable/lycdisable_ff41_scx*`: the dying LYC hold and the mode-0
+    ///   rise are separated on hardware, collapsed by slopgb's early flip).
+    eng_stat_pending: Option<(u8, u8, bool, u8, u8)>,
+    /// Previous engine tick's `mode_for_interrupt` (m0-flip detection for
+    /// the fast-forward above). Tier-2/LE only.
+    eng_mfi_prev: u8,
+    /// #11bg — the DS analogue of the m0-flip fast-forward dip: the (line,
+    /// dot) of the last DS FF41 commit that DROPPED the LYC enable. At DS
+    /// the engine view is immediate (no stage), so a bit6-drop landing on
+    /// the dot before the mode-3→0 flip collapses the hardware's
+    /// drop-then-rise into one seamless tick; the flip tick consumes this
+    /// to force the sub-dot dip (`m0enable/lycdisable_ff41_ds_1` want 2).
+    ff41_ds_drop: Option<(u8, u16)>,
+    /// #11bh — FF0F group-B write-race squash: dots remaining in which a STAT
+    /// engine rise is CONSUMED by a just-committed bit1-clearing FF0F write
+    /// (SameBoy `GB_CONFLICT_WRITE_CPU`: the IF write lands leading-edge +1 T
+    /// and beats a co/prior-instant rise; a consumed rise does not
+    /// level-re-raise — strict edge). Armed to 2 at the deferred FF0F write,
+    /// decremented per engine dot, one-shot on consumption. Tier-2 only.
+    stat_if_squash: u8,
+    /// #11bh group C — the deferred-path dispatch-ack squash, the PPU-side
+    /// replacement for the interconnect's whole-dot bit-0/1 `ack_squash_dots`
+    /// (zeroed under tier2). A rise of the acked bit landing within the
+    /// per-SOURCE window after the ack is merged into the dispatch (SameBoy:
+    /// the rise fp at/before the SBACK fp was already in the sampled IF);
+    /// past it, it survives and re-sets IF (the six `late_*_retrigger` rows).
+    /// Windows in dots (SS, DS), dual-traced 2026-07-03: mode-0 (0, 1) ·
+    /// mode-2 pulse (0, 0) · LYC / mode-1 / vblank-IF (2, 0). Armed to 2 at
+    /// `ack`, decremented per dot, consumed as `ctr >= 3 − W`. `mask` names
+    /// the acked bit. Tier-2 only (never armed flag-off).
+    ack_squash_ppu_mask: u8,
+    ack_squash_ppu: u8,
+    /// #11bh group E — the line-0 dot-4 OAM pulse's read-view age: armed (1)
+    /// when that pulse's engine rise fires, decremented per dot. A deferred
+    /// FF0F read landing on the SAME dot masks the just-folded bit from its
+    /// VERDICT (CPU-read-first at the shared instant — measured on SameBoy:
+    /// `SBREAD ff0f` at the rise fp reads clear; `lyc153int_m2irq_1` reads
+    /// line-0 dot 4 co-instant with the pulse and wants 0, its `_2` sibling
+    /// reads 4 dots later and sees it). Verdict-only; `intf` keeps the bit.
+    ly0_pulse_age: u8,
+    /// #11bh item-7 count-row slice — the SHIFTED-frame (post-STOP,
+    /// `lcd_shift_dots != 0`) mode-0 rise's read-view age + dot: a deferred
+    /// FF0F poll landing on the rise's own dot reads the bit CLEAR
+    /// (CPU-first at the shared instant; the lcd_offset count rows'
+    /// first-poll law — `offset1_lyc99int_m0irq_count_scx2_ds_1` polls
+    /// dot 257 co-instant with the rise, wants E0; the error is ONE-SIDED,
+    /// the `_2` siblings read 2 dots later and keep seeing it).
+    /// Verdict-only.
+    m0sh_age: u8,
+    m0sh_dot: u16,
     scy: u8,
     scx: u8,
     /// LY as read through FF44 (153-quirk aware).
@@ -272,6 +383,45 @@ pub struct Ppu {
     /// Dot within the line; the value is the "current time" T so that after
     /// D calls to [`Self::tick`] the observable state is state(D).
     dot: u16,
+    /// Half-dot phase within the current dot (0 or 1), the 8 MHz sub-dot grain
+    /// of the pixel-pipe reclock (HALFDOT-BUILD-PLAN.md Part A). Advanced by
+    /// [`Self::tick_half`] on the tier2 deferred path only; production
+    /// ([`Self::tick`], the whole-dot advance) never touches it and leaves it 0
+    /// so the flag-off path is byte-identical. `dhalf == 0` after a
+    /// dot-completing half-dot (the whole-dot work ran), `1` mid-dot (a DS read
+    /// landing on an odd CPU-T resolves here — the sub-dot read position Part B
+    /// samples). See [`Self::sub_dot`].
+    dhalf: u8,
+    /// #11bd — the persistent LCD phase residual, in 8 MHz half-dots: the
+    /// accumulated difference between SameBoy's CPU-grid shift at each STOP
+    /// speed-switch LEAVE (+2 hd per leave, measured by the lcd_offset
+    /// enable-phase dual-traces) and the machine advance the STOPADV default
+    /// applied (w=4). Carried across LCD disable/enable (the phase is a
+    /// CPU-grid-vs-PPU displacement, not a frame property — the lcd_offset
+    /// ROMs re-enable the LCD after their excursions and the offset
+    /// persists). Consumed by the tier2 offset-sensitive laws
+    /// (accessibility windows / write-triggers / the P1 comparison); always 0
+    /// flag-off (only written from the tier2 STOP path) so production is
+    /// byte-identical.
+    lcd_phase_hd: i16,
+    /// #11bd — shadow of SameBoy's `double_speed_alignment` (mod 8): the LCD
+    /// age in 8 MHz half-dots since the last enable (+2 per dot while the LCD
+    /// is on, reset at enable), with a −4 correction per STOP pause (the
+    /// measured SameBoy-vs-slopgb pause-length + freeze-withholding delta,
+    /// calibrated on the offset1 enter→leave segment: SameBoy Δdsa 24 vs
+    /// slopgb Δage 28 mod 8). The DS→SS leave shift depends on this
+    /// alignment (`2 + (sb_dsa8 & 4)`: dsa7=0 rows need +2, the dsa7=4
+    /// offset3 rows need +6 — build-measured). Increment is unconditional
+    /// (mod-8 counter, unobservable flag-off); consumed tier2-only.
+    sb_dsa8: u8,
+    /// #11bd — total machine STOPADV advance applied this ROM, in DOTS
+    /// (Σ k/2 over the DS→SS leaves). The frame-anchored write/read-instant
+    /// law windows (line-start tails, line-153 wrap, LY holds) were
+    /// calibrated on unshifted ROMs; a post-leave CPU access lands
+    /// `lcd_shift_dots` deeper in the frame (the advance moved the enable
+    /// anchor and the LY-polls re-sync), so those laws classify against
+    /// [`Self::law_pos`]. 0 for never-switched ROMs and flag-off.
+    lcd_shift_dots: u16,
     /// First line after LCD enable (no OAM scan, shifted mode 3, 452 dots).
     glitch_line: bool,
     /// The frame currently being rendered is the first one after an LCD
@@ -302,11 +452,47 @@ pub struct Ppu {
     /// the wilbertpol intr_2_timing halt roundings pin the law). Drained by
     /// the interconnect via [`Self::take_stat_halt_late`].
     stat_halt_late: bool,
+    /// #11aq (C2 read-position carry): the source of the STAT IRQ that set the
+    /// currently-pending STAT bit was the mode-2 OAM line-start rise (`mfi==2`),
+    /// not a mode-0/LYC rise. A sticky level updated on every STAT 0→1 edge in
+    /// [`Self::stat_update_halt_masks`]; the interconnect's `dispatch_retime`
+    /// reads it to apply the per-ISR deferred-read carry (the OAM-ISR handler's
+    /// reads land 1 M-cycle = 2 dots DS later than the mode-0-ISR's, decoupled
+    /// from the IF-delivery ack — `cpu-timing-map.md §7.1`). Inert unless
+    /// `SLOPGB_M2CARRY`; production never reaches `stat_update_halt_masks`.
+    stat_rise_oam: bool,
+    /// #11aq: the currently-pending STAT IRQ was the mode-0 HBlank rise
+    /// (`mfi==0`). The mode-0 ISR read lands +2 dots early (vs the mode-2 +4),
+    /// so its carry is half. Mutually exclusive with [`Self::stat_rise_oam`]
+    /// (one source per 0→1 edge); both false for a pure-LYC rise.
+    stat_rise_m0: bool,
+    /// #11ar (C2 SCOPED carried-read exit override): set by the interconnect's
+    /// `dispatch_retime` when it carried a STAT-ISR read (`carry_read`), so the
+    /// FIRST FF41 mode read of the handler — now landed at SameBoy's absolute
+    /// cfl — resolves its verdict against SameBoy's bare exit `SBex` instead of
+    /// slopgb's native mode (a full 3↔0 override, both directions). Cleared by
+    /// the interconnect after that FF41 read (one-shot). This SCOPING is the
+    /// #11aq global-consistency fix: the blanket `M2HOLD` exit law fired for
+    /// non-carried polled/other-ISR reads too (dropping 50 SameBoy-passes whose
+    /// native frame was already correct); gating the SBex override on
+    /// `read_carried` confines it to exactly the reads the carry moved to
+    /// SameBoy's frame. Inert unless `SLOPGB_M2CARRY`.
+    read_carried: bool,
     /// The externally visible mode-0 flip (STAT mode bits, OAM/VRAM
     /// unblock): rises with `m0_src` ahead of the pipe end (see
     /// `m0_flip_events` in render.rs), and can drop back mid-line when
     /// a late write arms a new stall (`m0_unflip`).
     line_render_done: bool,
+    /// PORT 1 (#11bc) — the dot `line_render_done` fired on this line (0 =
+    /// not fired yet / dropped by `m0_unflip`). The half-dot bare-exit law
+    /// (`vis_mode_read`) anchors the CPU-visible mode-3→0 exit to the RENDER's
+    /// actual flip (`exit_hd = 2*flip_dot + 2`), so a mid-line SCX write moves
+    /// the exit exactly as the fine-scroll hunt resolved it (late_scx4 /
+    /// scx_m3_extend — a live-`scx` closed form mis-frames the missed-hunt
+    /// leg). Recorded on both fire paths (projection + the `advance_lx` pipe-
+    /// end fallback); reset at line start, `m0_unflip`, and LCD transitions.
+    /// Only read under `tier2_reclock` → production byte-identical.
+    flip_dot: u16,
     /// Port Stage S2c — the CPU-visible STAT mode→0 boundary back-dated to
     /// SameBoy's cycle-exact frame, **decoupled from the IRQ-dispatch flip**
     /// (`line_render_done`/`m0_src`). On the `leading_edge_reads` flag-on path
@@ -513,6 +699,14 @@ pub struct Ppu {
     /// the dma/hdma_start and hdma_late_* `_1`/`_2` adjacent-cycle pairs
     /// pin the lead). See [`Self::hdma_trigger_level`].
     hdma_lead: bool,
+    /// Part C/D (tier2) — the dot the render pipe ended this line (pixel 160
+    /// shipped, `render_finished` rise; 0 = not yet this line). The CGB
+    /// palette-RAM read/write unblock trails it by 1 dot at single speed and
+    /// is coincident in double speed on the deferred (cc+0) frame — the
+    /// `cgbpal_m3end` constraint table (`c-palette-rederive-2026-07-02.md`).
+    /// Consumed only by the tier2 arm of [`Self::pal_ram_blocked`]; reset per
+    /// line, so production (which never reads it) is byte-identical.
+    pal_open_dot: u16,
 
     // Window state.
     /// The frame-sticky WY condition (gambatte ppu.cpp weMaster). NOT a
@@ -547,6 +741,66 @@ pub struct Ppu {
     /// the WX-activation dot ([`Render::wx_match_dot`]). See `wy_trig_sb`.
     wy_trig_sb_line: u8,
     wy_trig_sb_dot: u16,
+    /// #11bi — the POST-SWITCH bare-exit law latches (tier2-only writers;
+    /// byte-identical OFF). The speedchange m3stat 4-variable exit table
+    /// (`measurements/speedchange-postswitch-exit-2026-07-03.md`, all 120
+    /// legs dual-traced) collapses to per-class rp-frame exits
+    /// `E = C + 2*(SCX&7)` consumed by [`Self::vis_exit_hd`]:
+    ///   SS post-leave: `C = 504 + leave_k − 4*[lcd_enable_in_ds]`
+    ///   DS post-enter: `C = 502 + leave_k` (leave_k = 2 when never left)
+    /// scoped to dances whose FIRST LCD-on switching STOP sits MID-FRAME
+    /// (line < 144): the whole tier2 DS/SS suite is calibrated on the
+    /// VBlank/boot-prologue frame (kernel `_ds`, lcd_offset offset1-3,
+    /// gdma_cycles all anchor at ly144 — measured), which already absorbs
+    /// the switch error; only the mid-frame-anchored speedchange dances
+    /// (v1/2/3/4/5 ly44 + m2int lcdoff variants, first STOP at ly68/ly133)
+    /// expose the true post-switch exit. `stop_anchor_midframe` is the
+    /// first-LCD-on-STOP-since-enable position latch, taken at the STOP
+    /// DECISION instant (the lcdoff dances anchor at their STOP#2 decision,
+    /// ly0 dot12 — the DS re-enable reset the line counter); an LCD enable
+    /// re-anchors the frame and clears it (SameBoy `double_speed_alignment
+    /// = 0` at enable — the e-law: the DS enable quantizes the phase).
+    stop_anchor_set: bool,
+    stop_anchor_midframe: bool,
+    /// A DS→SS STOP leave completed with the LCD enabled (the SameBoy
+    /// freeze path the exit table measures). Cleared at LCD off/on.
+    stop_leave_lcd_on: bool,
+    /// The leave advance k (half-dots, 2 or 6 = the `sb_dsa8`-branched
+    /// #11bd keystone) of the most recent LCD-on leave; 2 when never left.
+    stop_leave_k: u8,
+    /// The most recent LCD enable happened in double speed (the lcdoff
+    /// dances re-enable in DS; the −4 rp class term — the DS enable
+    /// re-anchors the PPU frame where a run-through LCD keeps the SS
+    /// boot phase).
+    lcd_enable_in_ds: bool,
+    /// C2 #11aw — the IMMEDIATE-WY twin of [`Self::wy_trig_sb`]. SameBoy's
+    /// `wy_check` compares LY against the immediate WY register
+    /// (`io_registers[GB_IO_WY]`), NOT the 6-dot-lagged `wy2` copy slopgb's
+    /// render (and `wy_trig_sb`) use. A late WY→(non-LY) write (`late_wy_1toFF`)
+    /// UN-triggers SameBoy's window (raw WY != LY at the line-start compare)
+    /// while slopgb — comparing the still-lagged `wy2` — triggers it and renders
+    /// the window (`win_active`). This sticky latch (set the first dot
+    /// `win_en && self.wy == ly`, immediate WY) re-derives SameBoy's trigger;
+    /// when slopgb's render triggered (`win_active`) but this did NOT
+    /// (`!wy_trig_sb_raw`), the line is SameBoy-bare and the FF41 read law
+    /// ([`Self::vis_mode_read`]) forces mode 0. Reset at line 0. tier2 + CGB.
+    wy_trig_sb_raw: bool,
+    /// #11bd item 4 — the BOUNDARY-WY cross-line trigger: a WY write
+    /// committing in a line's tail (dot >= 452) or head (dot < 4) whose
+    /// value matches the CURRENT (old) line latches SameBoy's
+    /// `wy_triggered` (its scheduled `wy_check` still compares the old
+    /// `current_line`), while slopgb's render (`wy_latch`) and the
+    /// wy2-lagged shadow both miss it — every later line renders bare
+    /// where SameBoy draws the window. Frame-sticky like `wy_triggered`;
+    /// reset at the frame top. Tier2 + CGB only (byte-identical OFF).
+    wy_xline_trig: bool,
+    /// #11bd item 5 — the last CPU VRAM write ATTEMPT's (line, dot), for the
+    /// DS line-end VRAM read release: a readback following a same-line write
+    /// within ~2 DS M-cycles keeps the SS view (SameBoy spreads the write's
+    /// M-cycle cost across the readback — `vramw_m3end_ds_2` wants BLOCKED
+    /// at the dot where the write-free `prewrite_ds` readback is open).
+    vram_wr_line: u8,
+    vram_wr_dot: u16,
     /// The most recent staged rendering write was double-speed (1-dot)
     /// staging — used to pick the wy2 catch-up delay.
     staged_ds: bool,
@@ -573,6 +827,12 @@ pub struct Ppu {
     /// Rendering-register write in flight on the bus (see
     /// [`Self::stage_write`]).
     staged: Option<StagedWrite>,
+    /// #11bo mech2 — a mid-mode-3 LCDC write's deferred render-view commit
+    /// `(value, dots_left)`: the tier2 render reclock lags the BG fetcher's
+    /// `eff.render_lcdc` behind the eager control commit by the render frame
+    /// (`RENDER_LCDC_DELAY` dots). `None` outside a pending defer; production
+    /// never schedules one (byte-identical).
+    render_lcdc_pending: Option<(u8, u8)>,
 
     render: Render,
 
@@ -590,6 +850,23 @@ pub(crate) fn s5dbg_on() -> bool {
     use std::sync::OnceLock;
     static F: OnceLock<bool> = OnceLock::new();
     *F.get_or_init(|| std::env::var_os("SLOPGB_S5DBG").is_some())
+}
+
+/// #11bo mech2 — the BG-fetcher LCDC render-view defer, in PPU dots: the eager
+/// control commit lands at the write's leading edge (cc+0), the render fetch
+/// grid is calibrated +4 late, so the addressing view re-commits this many
+/// `Ppu::tick`s later. Measured against the pixel two-bin (bgtiledata/bgtilemap
+/// 47/47).
+const RENDER_LCDC_DELAY: u8 = 3;
+
+/// TEMP (#11an+) per-bus-op ISR T-sequence trace gate (`SLOPGB_ISRTRACE`):
+/// logs every deferred read/write/internal access's (addr, ly, dot, clk, pend)
+/// so the handler advance can be lined up against SameBoy's `SB2` per-access
+/// trace. Byte-identical when unset; never read in production.
+pub(crate) fn isrtrace_on() -> bool {
+    use std::sync::OnceLock;
+    static F: OnceLock<bool> = OnceLock::new();
+    *F.get_or_init(|| std::env::var_os("SLOPGB_ISRTRACE").is_some())
 }
 
 fn pixel_buffer(fill: u32) -> Box<[u32; SCREEN_PIXELS]> {
@@ -679,8 +956,19 @@ impl Ppu {
         Self {
             model,
             frame_count: 0,
+            lcd_regs_written: false,
             lcdc: 0,
             stat_en: 0,
+            eng_stat: 0,
+            eng_stat_pending: None,
+            eng_mfi_prev: 0,
+            ff41_ds_drop: None,
+            stat_if_squash: 0,
+            ack_squash_ppu_mask: 0,
+            ack_squash_ppu: 0,
+            ly0_pulse_age: 0,
+            m0sh_age: 0,
+            m0sh_dot: 0,
             scy: 0,
             scx: 0,
             ly: 0,
@@ -707,6 +995,10 @@ impl Ppu {
             enabled: false,
             line: 0,
             dot: 0,
+            dhalf: 0,
+            lcd_phase_hd: 0,
+            sb_dsa8: 0,
+            lcd_shift_dots: 0,
             glitch_line: false,
             frame_skip: false,
             cmp: false,
@@ -735,23 +1027,38 @@ impl Ppu {
             stat_lyc_ev: 0,
             stat_lyc_ev_staged: None,
             stat_halt_late: false,
+            stat_rise_oam: false,
+            stat_rise_m0: false,
+            read_carried: false,
             line_render_done: true,
+            flip_dot: 0,
             vis_early: false,
             vis_hold_until: 0,
             render_finished: true,
             hdma_lead: false,
+            pal_open_dot: 0,
             wy_latch: false,
             wy2: 0,
             wy2_delay: 0,
             wy_trig_sb: false,
             wy_trig_sb_line: 0,
             wy_trig_sb_dot: 0,
+            wy_trig_sb_raw: false,
+            stop_anchor_set: false,
+            stop_anchor_midframe: false,
+            stop_leave_lcd_on: false,
+            stop_leave_k: 2,
+            lcd_enable_in_ds: false,
+            wy_xline_trig: false,
+            vram_wr_line: 0xFF,
+            vram_wr_dot: 0,
             staged_ds: false,
             ds: false,
             win_line: 0xFF,
             win_start_pending: false,
             eff: PipeRegs {
                 lcdc: 0,
+                render_lcdc: 0,
                 scy: 0,
                 scx: 0,
                 bgp: 0,
@@ -761,6 +1068,7 @@ impl Ppu {
                 wx: 0,
             },
             staged: None,
+            render_lcdc_pending: None,
             render: Render::new(),
             front: pixel_buffer(0xFF_FFFF),
             back: pixel_buffer(0xFF_FFFF),
@@ -772,6 +1080,32 @@ impl Ppu {
     /// (bit 0 = vblank, bit 1 = STAT), 0 if none.
     pub fn tick(&mut self) -> u8 {
         self.strobe_tick();
+        // #11bo mech2 — the deferred BG-fetcher LCDC render view catches up
+        // (like the `stat_ev` staged copies): applied before this dot's
+        // `render_step` so a bit3/bit4 write staged K dots ago drives the fetch
+        // grid from dot W+K. Only scheduled under the tier2 reclock during an
+        // active render (byte-identical OFF).
+        let apply_render_lcdc = if let Some((_, dots)) = &mut self.render_lcdc_pending {
+            *dots -= 1;
+            *dots == 0
+        } else {
+            false
+        };
+        if apply_render_lcdc {
+            let value = self.render_lcdc_pending.take().map_or(0, |(v, _)| v);
+            let old = self.eff.render_lcdc;
+            self.eff.render_lcdc = value;
+            // #11bq — a mid-mode-3 LCDC.5 clear's RENDER re-anchor fires HERE, at
+            // the deferred render frame, when the deferred bit5 view falls 1→0
+            // (the read-law flag half already fired eagerly in
+            // `regs.rs::commit_eff`). So the drawn window ends at the render dot,
+            // not the eager cc+0 (`m3_lcdc_win_en_change_multiple`). Only reached
+            // under the tier2 `render_lcdc` defer (production sets the view in
+            // lockstep with no pending) — byte-identical OFF.
+            if old & LCDC_WIN_ENABLE != 0 && value & LCDC_WIN_ENABLE == 0 && self.render.active {
+                self.window_abort_render();
+            }
+        }
         // Delayed event-register copies catch up (see `stat_ev`); applied
         // before this dot's events so a value staged K dots ago becomes
         // visible to events from dot W+K on.
@@ -801,6 +1135,14 @@ impl Ppu {
             // fields are unread), so this changes nothing in production.
             self.stat_update = crate::stat_update::StatUpdate::new();
             self.lyc_interrupt_line = false;
+            // #11bg — a staged FF41 engine view must not survive an LCD-off
+            // gap and apply at a stale tick after re-enable.
+            self.eng_stat = self.stat_en;
+            self.eng_stat_pending = None;
+            self.ff41_ds_drop = None;
+            self.stat_if_squash = 0;
+            self.ack_squash_ppu = 0;
+            self.ack_squash_ppu_mask = 0;
             return std::mem::take(&mut self.pending_if);
         }
         if self.lyc_if_delay > 0 {
@@ -810,6 +1152,8 @@ impl Ppu {
                 self.pending_if |= IF_STAT;
             }
         }
+        // #11bd: the SameBoy `double_speed_alignment` shadow (see `sb_dsa8`).
+        self.sb_dsa8 = (self.sb_dsa8 + 2) & 7;
         self.dot += 1;
         let len = if self.glitch_line {
             GLITCH_LINE_DOTS
@@ -838,7 +1182,148 @@ impl Ppu {
             // Production path: the gambatte-derived per-source event engine.
             self.stat_events_tick();
         }
+        // #11bh group C — age the dispatch-ack squash window (armed only on
+        // the tier2 path; a saturating decrement of an always-0 counter is
+        // byte-identical flag-off).
+        self.ack_squash_ppu = self.ack_squash_ppu.saturating_sub(1);
+        self.ly0_pulse_age = self.ly0_pulse_age.saturating_sub(1);
+        self.m0sh_age = self.m0sh_age.saturating_sub(1);
         std::mem::take(&mut self.pending_if)
+    }
+
+    /// Advance one 8 MHz HALF-dot (HALFDOT-BUILD-PLAN.md Part A). The pixel-pipe
+    /// reclock's grain: two half-dots per whole dot (single speed = 2 half-dots
+    /// per CPU-T; double speed = 1). The first half of a dot (`dhalf 0→1`) does
+    /// no structural work and the second (`dhalf 1→0`) runs the whole-dot
+    /// [`Self::tick`] body, so a run of aligned half-dots is byte-identical to
+    /// the whole-dot advance (Stage 1); the seam is that later stages move a
+    /// mode-3-exit / read boundary onto the odd half-dot. Called only on the
+    /// tier2 deferred path ([`Interconnect::advance_machine_t`]); production
+    /// never calls it, so the flag-off path is untouched. Returns the IF bits
+    /// produced (0 on the non-completing half).
+    pub(crate) fn tick_half(&mut self) -> u8 {
+        if self.dhalf == 0 {
+            self.dhalf = 1;
+            return 0;
+        }
+        self.dhalf = 0;
+        self.tick()
+    }
+
+    /// Whether the half-dot just advanced by [`Self::tick_half`] completed a
+    /// whole dot (the whole-dot body ran). The caller folds the PPU's IF /
+    /// accessibility edges only on a completing half.
+    pub(crate) fn dot_completed(&self) -> bool {
+        self.dhalf == 0
+    }
+
+    /// The current half-dot phase (0 = at a dot boundary, 1 = mid-dot). Part B
+    /// samples this to resolve a deferred read to the exact 8 MHz half-dot the
+    /// CPU-T lands on (a DS read on an odd CPU-T sits mid-dot). Always 0 on the
+    /// whole-dot production path. Consumed by [`Self::read_pos_hd`] (Part B,
+    /// HALFDOT-BUILD-PLAN.md §3B) and the `read_deferred` dual-trace.
+    pub(crate) fn sub_dot(&self) -> u8 {
+        self.dhalf
+    }
+
+    /// Part B (HALFDOT-BUILD-PLAN.md §3B) — the deferred read's EXACT half-dot
+    /// position within the current line: `2*dot + dhalf` on the 8 MHz grid.
+    /// [`Interconnect::read_deferred`] advances the machine T-granularly to the
+    /// read's leading edge (the `GB_display_sync` analogue), so at the sample
+    /// instant this IS the read's true half-dot — a DS read landing on an odd
+    /// CPU-T resolves mid-dot (`dhalf == 1`), which the whole-dot `self.dot`
+    /// alone cannot represent (the "+3 not +4" DS ISR read offset). Every
+    /// half-dot read-position law compares against this ONE value; the per-ISR
+    /// sub-M-cycle carry is [`Self::isr_read_carry_hd`], kept separate so
+    /// polled reads stay uncarried. Production reads never resolve mid-dot
+    /// (`dhalf` stays 0 flag-off) and no flag-off law consumes this.
+    pub(crate) fn read_pos_hd(&self) -> i32 {
+        2 * i32::from(self.dot) + i32::from(self.dhalf)
+    }
+
+    /// Part B — the per-ISR deferred-read sub-M-cycle carry (8 MHz half-dots),
+    /// applied ON TOP of [`Self::read_pos_hd`] by the laws that model a
+    /// STAT-ISR handler's first FF41 read. The #11aq/#11ar measured offsets:
+    /// a carried (`read_carried`) mode-2 OAM-ISR read sits +4 hd late of the
+    /// polled frame at single speed, a mode-0 HBlank-ISR read +2 hd; in double
+    /// speed only the mode-0-ISR read differs (−4 hd — the #11ar full-carry
+    /// law's `off = m0 ? 2 : 4` rewritten on the half-dot grid, exit-folded).
+    /// 0 for polled/uncarried reads. Byte-identical OFF (`read_carried` is
+    /// only armed on the tier2 dispatch path).
+    pub(super) fn isr_read_carry_hd(&self) -> i32 {
+        if !self.read_carried {
+            return 0;
+        }
+        if self.ds {
+            if self.stat_rise_m0 { -4 } else { 0 }
+        } else if self.stat_rise_oam {
+            4
+        } else if self.stat_rise_m0 {
+            2
+        } else {
+            0
+        }
+    }
+
+    /// #11bd — accumulate the LCD phase residual at a STOP speed-switch leave
+    /// (see [`Self::lcd_phase_hd`]). Tier2 STOP path only.
+    pub(crate) fn add_lcd_phase(&mut self, hd: i16) {
+        self.lcd_phase_hd += hd;
+    }
+
+    /// #11bd — the SameBoy `double_speed_alignment` shadow, mod 8 (see
+    /// [`Self::sb_dsa8`]). Read by the STOP leave shift; the −4-per-pause
+    /// correction is applied by [`Self::dsa_pause_correction`].
+    pub(crate) fn sb_dsa(&self) -> u8 {
+        self.sb_dsa8
+    }
+
+    /// #11bd — apply the per-STOP-pause alignment correction (−4 mod 8, the
+    /// measured SameBoy-vs-slopgb pause delta). Tier2 STOP path only.
+    pub(crate) fn dsa_pause_correction(&mut self) {
+        self.sb_dsa8 = (self.sb_dsa8 + 4) & 7;
+    }
+
+    /// #11bd — record a machine STOPADV advance (see [`Self::lcd_shift_dots`]).
+    pub(crate) fn add_lcd_shift(&mut self, dots: u16) {
+        self.lcd_shift_dots += dots;
+    }
+
+    /// #11bi — latch the post-switch exit-table anchor at a switching STOP
+    /// (see [`Self::stop_anchor_midframe`]). Called at the STOP decision
+    /// point, tier2 only; the FIRST LCD-on switching STOP since the last
+    /// LCD enable pins the dance's calibration class.
+    pub(crate) fn note_switch_stop(&mut self) {
+        if self.enabled && !self.stop_anchor_set {
+            self.stop_anchor_set = true;
+            self.stop_anchor_midframe = self.line < 144;
+        }
+    }
+
+    /// #11bi — record a DS→SS STOP leave (see [`Self::stop_leave_lcd_on`]);
+    /// `k` = the applied leave advance in half-dots. Tier2 only.
+    pub(crate) fn note_switch_leave(&mut self, k: u8) {
+        if self.enabled {
+            self.stop_leave_lcd_on = true;
+            self.stop_leave_k = k;
+        }
+    }
+
+    /// #11bd — the current access position mapped back onto the un-shifted
+    /// calibrated frame (see [`Self::lcd_shift_dots`]): subtract the machine
+    /// advance, wrapping across the line boundary. Identity when no advance
+    /// was applied (never-switched ROMs, production).
+    pub(super) fn law_pos(&self) -> (u8, u16) {
+        let s = self.lcd_shift_dots;
+        if s == 0 {
+            return (self.line, self.dot);
+        }
+        if self.dot >= s {
+            (self.line, self.dot - s)
+        } else {
+            let prev = if self.line == 0 { 153 } else { self.line - 1 };
+            (prev, LINE_DOTS - (s - self.dot))
+        }
     }
 
     /// Forward the interconnect's `leading_edge_reads` master flag to the PPU,
@@ -881,13 +1366,33 @@ impl Ppu {
             // visible.
             self.m0_src = false;
         }
-        // C2 #11af shadow WY-trigger (tier2 + CGB only; byte-identical OFF).
+        // C2 #11af shadow WY-trigger (tier2-only; byte-identical OFF).
         // SameBoy's `wy_triggered` is a continuous `WY == LY` latch, sticky for
         // the frame; reset it at the frame top (line 0 dot 0) and set it the
         // first dot the compare holds on any visible line. See `wy_trig_sb`.
-        if self.tier2_reclock && self.model.is_cgb() {
+        // #11bj: recording widened to DMG (was CGB-only) for the DMG window
+        // law port — the DMG arms in `read_laws.rs` read the same latches.
+        if self.tier2_reclock {
             if self.line == 0 && self.dot == 0 {
                 self.wy_trig_sb = false;
+                self.wy_trig_sb_raw = false;
+                self.wy_xline_trig = false;
+            }
+            // #11aw — the raw-WY sticky latch (immediate `self.wy`, SameBoy's
+            // `wy_check` input), the un-trigger discriminator. Gated `dot >= 4`
+            // (the mode-2 OAM-scan compare window SameBoy runs `wy_check` in):
+            // a line-start (dot 0) WY write commits AFTER slopgb's dot-0 PPU tick
+            // (the tick runs before `write_no_tick`), so a dot-0 compare would
+            // read the OLD WY and mis-latch; `dot >= 4` samples the settled WY,
+            // matching SameBoy's post-write compare (`late_wy_1toFF_1` WY→FF at
+            // dot 0 → WY=FF by dot 4 → never latches → SameBoy-bare).
+            if self.line < 144
+                && self.dot >= 4
+                && !self.wy_trig_sb_raw
+                && win_en
+                && self.wy == self.ly
+            {
+                self.wy_trig_sb_raw = true;
             }
             if self.line < 144 && !self.wy_trig_sb && win_en && self.wy2 == self.ly {
                 self.wy_trig_sb = true;
@@ -938,6 +1443,24 @@ impl Ppu {
             // Visible mode-0 flip + IRQ-source rise (after the dot's
             // render step so the projection sees this dot's state).
             self.m0_flip_events();
+            // TEMP measurement scaffold (#11an genuine-length vs read-frame
+            // split): trace the EFFECTIVE CPU-visible mode-3→0 EXIT dot — the
+            // dot `vis_mode_read()` (what the FF41 register read returns,
+            // incl. the window law / vis_hold / m0_unflip re-projection)
+            // actually flips 3→0. This is the slopgb ground-truth exit to
+            // line up against SameBoy SBMODE, robust to `vis_early` resets the
+            // `visflip` tracer can't see. `SLOPGB_S5DBG`, byte-identical unset.
+            if crate::ppu::s5dbg_on() {
+                use std::cell::Cell;
+                thread_local!(static PREV: Cell<u8> = const { Cell::new(255) });
+                let vm = self.vis_mode_read();
+                PREV.with(|p| {
+                    if p.get() == 3 && vm == 0 {
+                        eprintln!("SLOPGB visexit ly={} dot={}", self.line, self.dot);
+                    }
+                    p.set(vm);
+                });
+            }
         }
         if self.model.is_cgb() && !self.ds && self.line == 152 && self.dot == 454 {
             // CGB-C single speed loads LY=153 two dots before line 153
@@ -963,7 +1486,21 @@ impl Ppu {
         if self.line == 144 && self.dot == 4 {
             // VBlank interrupt: 4 dots after LY becomes 144, together with
             // the visible mode 1 (TCAGBD; `vblank_stat_intr-GS`).
-            self.pending_if |= IF_VBLANK;
+            // #11bh group C — a vblank-vector ack 1-2 dots earlier (SS)
+            // merges this raise into the dispatch it interrupted
+            // (`lycint_vblankirq_late_retrigger_2` want 0: ack 144:2, raise
+            // 144:4 consumed; the `_ds_1` ack at 144:3 DELIVERS — DS window
+            // 0). Never armed flag-off → production byte-identical.
+            let w = if self.ack_squash_ppu_mask & IF_VBLANK != 0 && !self.ds {
+                2
+            } else {
+                0
+            };
+            if w > 0 && self.ack_squash_ppu >= 3 - w {
+                self.ack_squash_ppu = 0;
+            } else {
+                self.pending_if |= IF_VBLANK;
+            }
         }
     }
 
@@ -1091,6 +1628,26 @@ impl Ppu {
         self.hdma_trigger_level() && self.dot + 3 < len
     }
 
+    /// #11bd — [`Self::hdma_period`] classified on the un-shifted frame for
+    /// CPU-instant consults (FF55 arming, halt-entry snapshot, wake re-eval,
+    /// STOP window): a shifted entry near the line end mis-reads the 3-dot
+    /// margin (`hdma_late_m0halt_lcdoffset3_1` enters halt at dot 455 where
+    /// the un-shifted frame is dot 452 — still inside). Cross-line law
+    /// positions keep the conservative false. Identity when unshifted; the
+    /// per-dot machine edge detector keeps the real [`Self::hdma_period`].
+    pub(crate) fn hdma_period_law(&self) -> bool {
+        if self.lcd_shift_dots == 0 {
+            return self.hdma_period();
+        }
+        let len = if self.glitch_line {
+            GLITCH_LINE_DOTS
+        } else {
+            LINE_DOTS
+        };
+        let (ll, ld) = self.law_pos();
+        self.hdma_trigger_level() && ll == self.line && ld + 3 < len
+    }
+
     /// LCDC bit 7 as committed (architectural view).
     pub(crate) fn lcd_enabled(&self) -> bool {
         self.enabled
@@ -1104,6 +1661,59 @@ impl Ppu {
         (self.line, self.dot)
     }
 
+    /// Whether the PPU is on the LCD-enable glitch line (452 dots, dot-82
+    /// pipe). The tier2 SCX write-strobe deferral (#11bb) keeps the
+    /// production staging there — the glitch line's render geometry carries
+    /// its own C1.2-calibrated offsets (`GLITCH_MODE3_START` 78 entry, +2
+    /// `early_lead`), and the +4 render-frame lag mis-frames its fine-scroll
+    /// hunt (`enable_display/ly0_late_scx7_m3stat_*`, measured).
+    pub(crate) fn glitch_active(&self) -> bool {
+        self.glitch_line
+    }
+
+    /// TEMP (#11an) read-state probe for the genuine-length/read-frame split:
+    /// `(win_active, vis_early, line_render_done, vis_hold_until, raw vis_mode,
+    /// n_sprites)` at the deferred FF41 read. Lets the `SLOPGB ff41` trace show
+    /// WHY the read sees its mode (window still active → extended mode 3 vs a
+    /// bare re-projection). Pure accessor; revert with the tracer.
+    pub(crate) fn dbg_read_state(&self) -> (bool, bool, bool, u16, u8, u8) {
+        (
+            self.render.win_active,
+            self.vis_early,
+            self.line_render_done,
+            self.vis_hold_until,
+            self.vis_mode(),
+            self.render.n_sprites,
+        )
+    }
+
+    /// #11bj measurement accessor — window-abort state at the deferred FF41
+    /// read: `(win_aborted, win_predraw_abort, win_predraw_abort_dot,
+    /// wx_match_dot)`. Lets the `SLOPGB ff41` trace show which abort class a
+    /// disabled-window line took (pre-draw bare vs in-draw kept-cost). Pure
+    /// accessor; reverts with the tracer.
+    pub(crate) fn dbg_abort_state(&self) -> (bool, bool, u16, u16, u8, u8) {
+        (
+            self.render.win_aborted,
+            self.render.win_predraw_abort,
+            self.render.win_predraw_abort_dot,
+            self.render.wx_match_dot,
+            self.eff.scx & 7,
+            self.render.wx_match_scx,
+        )
+    }
+
+    /// #11bj measurement accessor — window enable/re-enable/WX-write commit
+    /// dots at the deferred FF41 read: `(win_enable_dot, win_reenable_dot,
+    /// wx_write_dot)`. For the late-enable / re-enable / late-WX law fits.
+    pub(crate) fn dbg_win_dots(&self) -> (u16, u16, u16) {
+        (
+            self.render.win_enable_dot,
+            self.render.win_reenable_dot,
+            self.render.wx_write_dot,
+        )
+    }
+
     /// XRGB8888 pixels of the most recently *completed* frame.
     pub fn frame(&self) -> &[u32; SCREEN_PIXELS] {
         &self.front
@@ -1113,6 +1723,13 @@ impl Ppu {
     /// advancing; `GameBoy::run_frame` falls back to a cycle deadline.
     pub fn frame_count(&self) -> u64 {
         self.frame_count
+    }
+
+    /// Record a CPU write to an LCD register (FF40-FF4B): the boot hand-off
+    /// frame is no longer pristine, disabling the DMG boot-frame read law
+    /// ([`Self::boot_read`]). Called from the tier2 CPU write path only.
+    pub(crate) fn mark_lcd_reg_written(&mut self) {
+        self.lcd_regs_written = true;
     }
 
     /// Map DMG shades 0..=3 to XRGB8888 (frontend palette option).

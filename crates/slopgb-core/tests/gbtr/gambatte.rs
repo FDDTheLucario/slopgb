@@ -960,12 +960,17 @@ fn tier2_line0_vblank_carry_passes() {
 /// poll observed it and the ROM branched to read LY=0 (`out=00`). SameBoy
 /// renders 90 (it raises the glitch-line mode-0 at the same cfl=257 as every
 /// bare line). `ly0_m0irq_scx1` is the sibling (`outE0`). Production (flag-off)
-/// byte-identical — `mode_for_interrupt` is inert there. **CGB-only**: on DMG
-/// this is a genuine multi-mechanism atomic (the same glitch-line rise drives
-/// the poll path AND the `int_hblank_halt` halt-wake grid, which want the rise
-/// at conflicting dots — SameBoy resolves it sub-T-cycle), so the DMG row stays
-/// a baselined floor and DMG is byte-identical (`int_hblank_halt` green). See
-/// the source comment + `ppu-subdot-ladder.md` "#11ad".
+/// byte-identical — `mode_for_interrupt` is inert there. This pin covers the
+/// **CGB** side of both rows; the DMG side splits: `frame0_m0irq_count` DMG
+/// stays a baselined floor (a dispatch-COUNT the reclock's cc+0 frame loses —
+/// the poll at ~dot252 never sees the rise it must count), while the DMG
+/// `ly0_m0irq_scx1_1` READ-frame half SHIPPED #11bm (`tier2_dmg_m0_coincident_passes`)
+/// — a verdict-only co-instant read-view mask ([`Ppu::ff0f_dmg_m0_coincident_mask`],
+/// [`Ppu::ff0f_stat_peek`]'s file) that clears the bit for a read landing EXACTLY
+/// on the flip dot WITHOUT moving the rise, so the `int_hblank_halt` halt-wake
+/// grid (which needs the rise at its dispatch dot) is untouched (`int_hblank_halt`
+/// + gbmicro 445 green). See the source comment + `ppu-subdot-ladder.md` "#11ad"
+/// + `measurements/dmg-ocr-singles-2026-07-04.md`.
 #[test]
 fn tier2_glitch_m0irq_dispatch_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -983,6 +988,164 @@ fn tier2_glitch_m0irq_dispatch_passes() {
         (
             "gambatte/enable_display/ly0_m0irq_scx1_1_dmg08_cgb04c_outE0.gbc",
             "E0",
+        ),
+    ] {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), want, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{want} (tier2 flag-on): {e}"));
+    }
+}
+
+/// Port Stage C / S5 (#11bm) — the DMG LCD-enable glitch-line mode-0 co-instant
+/// FF0F read-view mask ([`Ppu::ff0f_dmg_m0_coincident_mask`]). The third
+/// read-frame pass (after #11bk hblank +16 / #11bl poweron +20): the DMG face of
+/// the read-frame half the #11ad `tier2_glitch_m0irq_dispatch_passes` doc parked
+/// as "a genuine multi-mechanism atomic ... byte-identical DMG floor". Corrected:
+/// `enable_display/ly0_m0irq_scx1_1` polls FF0F (DI, `IE=0`) on the glitch line
+/// with the mode-0 STAT armed, reading EXACTLY on the recorded mode-0 flip dot
+/// (slopgb `dot253 == flip_dot253`, == SameBoy cfl257). SameBoy's `read_high_memory`
+/// orders the CPU read BEFORE the STAT rise at that shared instant → E0 (the bit
+/// not yet risen); slopgb's whole-dot frame folds the rise first and commits the
+/// set bit → E2. The mask clears the STAT bit for a read AT the flip dot — EXACT,
+/// never a window: the `_2` sibling reads dot257 > flip (poll after the rise, E2)
+/// and `scx0_2` reads flip+1 (E2), so both are untouched. **Verdict-only** — the
+/// rise/dispatch never moves, so the co-located `int_hblank_halt` halt-wake grid
+/// (which the #11ad park cited as the conflicting-dot atomicity) stays green, the
+/// exact #11bk/#11bl decoupling. `frame0_m0irq_count` DMG (the dispatch-COUNT
+/// sibling, poll at dot252 ≠ flip) stays a floor. +1 full-DMG two-bin
+/// (0 SameBoy-pass dropped); `tier2` + `!is_cgb` + `glitch_line` + SS scoped →
+/// production and CGB byte-identical. Map:
+/// `measurements/dmg-ocr-singles-2026-07-04.md`.
+#[test]
+fn tier2_dmg_m0_coincident_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr("tier2_dmg_m0_coincident", "collection not present");
+        return;
+    };
+    let rel = "gambatte/enable_display/ly0_m0irq_scx1_1_dmg08_cgb04c_outE0.gbc";
+    let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+    let mut gb = harness::boot_with_reclock(&rom, Model::Dmg);
+    run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+    check_hex_screen(gb.frame(), "E0", false)
+        .unwrap_or_else(|e| panic!("{rel} [Dmg] expected outE0 (tier2 flag-on): {e}"));
+}
+
+/// Port Stage C / S5 (#11ar — the per-ISR read-POSITION PEEK). The first CLEAN
+/// read-position-decoupled C-stage slice: the double-speed OAM-STAT-ISR
+/// (`m2int`) FF41 mode read lands +4 dots before SameBoy's cfl, so slopgb's
+/// leading-edge read sees mode 3 (`got=3`) where SameBoy — reading 4 dots later,
+/// past its bare mode-3 exit — sees mode 0 (`want=0`). The peek
+/// (`stat_irq.rs::vis_mode_read`, armed by `interconnect.rs::dispatch_retime`
+/// via `Ppu::read_carried`) shifts ONLY that read's VERDICT to `dot + off < SBex`
+/// (`off` = the per-source offset, `SBex = 257 + SCX&7 + ds` the SameBoy bare
+/// exit) — a transient sample, NOT a machine advance — so the counter-pinned
+/// dispatch dot and IF delivery stay put (mooneye flag-on 91/91). SCOPED to the
+/// carried read (`read_carried` one-shot), native mode 3 (excludes the m0stat/
+/// m2stat/enable reads that probe a different boundary), and a non-window
+/// (`!wy_trig_sb`) non-sprite bare line (excludes the co-temporal `late_disable`
+/// render-length A/B pair). +6/−0 full-CGB two-bin; production (flag-off)
+/// byte-identical. See `ppu-subdot-ladder.md` "#11ar" +
+/// `measurements/c2-readpos-peek-built-2026-06-30.md`.
+#[test]
+fn tier2_m2int_m3stat_ds_readpos_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_m2int_m3stat_ds_readpos",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    for rel in [
+        "gambatte/m2int_m3stat/m2int_m3stat_ds_2_cgb04c_out0.gbc",
+        "gambatte/m2int_m3stat/scx/m2int_scx2_m3stat_ds_2_cgb04c_out0.gbc",
+        "gambatte/m2int_m3stat/scx/m2int_scx8_m3stat_ds_2_cgb04c_out0.gbc",
+        "gambatte/speedchange/m2int_m3stat_lcdoffds_2_cgb04c_out0.gbc",
+    ] {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), "0", true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out0 (tier2 flag-on): {e}"));
+    }
+    // The #11ar-full FULL per-read carry also converges the polled post-DMA FF41
+    // mode-3 reads (`off = 4` = the leading-edge default): gdma/hdma_cycles _ds_2
+    // want 0. These are the +2 the global law adds over the carried-only peek.
+    for rel in [
+        "gambatte/dma/gdma_cycles_long_ds_2_cgb04c_out0.gbc",
+        "gambatte/dma/hdma_cycles_ds_2_cgb04c_out0.gbc",
+    ] {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), "0", true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out0 (tier2 flag-on): {e}"));
+    }
+    // The #11ar-m0stat READ-FRAME slice: the m2int mode-2 OAM ISR line-start
+    // mode0→2 flip peek (dot ≥ 2 → mode 2), +1/−0 (`m2int_m0stat_ds_2` wants 2).
+    let rel = "gambatte/m2int_m0stat/m2int_m0stat_ds_2_cgb04c_out2.gbc";
+    let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+    let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+    run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+    check_hex_screen(gb.frame(), "2", true)
+        .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out2 (tier2 flag-on): {e}"));
+    // #11bg — the same carried-read frame at the mode2→3 ENTRY (slopgb dot
+    // 84): the DS mode-2 ISR pair straddles it at dots 80/82 (+2 carry →
+    // 82/84, want 2/3); the entry is SCX-independent (`m2int_scx4_m2stat_ds`).
+    for (rel, expect) in [
+        ("gambatte/m2int_m2stat/m2int_m2stat_ds_1_cgb04c_out2.gbc", "2"),
+        ("gambatte/m2int_m2stat/m2int_m2stat_ds_2_cgb04c_out3.gbc", "3"),
+        (
+            "gambatte/m2int_m2stat/m2int_scx4_m2stat_ds_2_cgb04c_out3.gbc",
+            "3",
+        ),
+    ] {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// Half-dot reclock Part A (#11bb) — the tier2 SCX write-strobe render-frame
+/// deferral. The deferred clock lands pipeline-register writes at SameBoy's
+/// true commit instant, but the production render geometry (the fine-scroll
+/// comparator hunt at dots 89-96) is calibrated to the cc+4 frame, 4 dots
+/// late of that instant — so the pipeline-view SCX commit must lag the same
+/// 4 dots (`write_deferred` stages 3 dots under tier2, the stage surviving
+/// the architectural write) for a mid-hunt SCX write to straddle the
+/// comparator like hardware. `late_scx4`: the `_1` leg's write beats the
+/// first comparator sample (picks up SCX=4, mode 3 extends +4, read=3), the
+/// `_2` leg (one M-cycle later) misses it (matches at 0, bare, read=0);
+/// slopgb collapsed both onto the leading edge so both extended. SS+DS + the
+/// scx_during_m3 extend + the late_scx_late_disable window pair — full-CGB
+/// two-bin `+6/−0`. The glitch line keeps the immediate commit (its render
+/// geometry carries its own C1.2 offsets: `ly0_late_scx7_m3stat_*`), and the
+/// FF41-read shadow laws sample the ARCHITECTURAL `scx` (their calibration
+/// frame) rather than the lagged pipeline view.
+#[test]
+fn tier2_late_scx_writestrobe_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_late_scx_writestrobe",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    for (rel, want) in [
+        // The straddle pair, both speeds: `_1` extends (want 3), `_2` bare.
+        ("gambatte/m2int_m3stat/scx/late_scx4_1_dmg08_cgb04c_out3.gbc", "3"),
+        ("gambatte/m2int_m3stat/scx/late_scx4_2_dmg08_cgb04c_out0.gbc", "0"),
+        ("gambatte/m2int_m3stat/scx/late_scx4_ds_1_cgb04c_out3.gbc", "3"),
+        ("gambatte/m2int_m3stat/scx/late_scx4_ds_2_cgb04c_out0.gbc", "0"),
+        // A mid-mode-3 SCX write extending the fine scroll (want 3).
+        ("gambatte/scx_during_m3/scx_m3_extend_1_dmg08_cgb04c_out3.gbc", "3"),
+        // The glitch-line immediate-commit guard (want mode 3 + LYC = 87).
+        (
+            "gambatte/enable_display/ly0_late_scx7_m3stat_scx3_1_dmg08_cgb04c_out87.gbc",
+            "87",
         ),
     ] {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
@@ -1276,6 +1439,354 @@ fn tier2_oam_vram_postread_scx2_scx5_passes() {
     }
 }
 
+/// Port Stage C2 (the render mode-3 LENGTH port, #11as — the DS line-END OAM-read
+/// release). Under CGB double speed SameBoy releases the mode-3 OAM read-lock one
+/// cycle later than single speed: it SKIPS the `if (!cgb_double_speed)` early
+/// unblock (`display.c:2104-2111`) and drops through to `:2118`, which lands the
+/// deferred cc+0 read's unblock at slopgb dot `254 + SCX&7`. slopgb's production
+/// block ran to `line_render_done` (~2 dots later), so `oam_access/postread_ds_2`
+/// (`ly135 dot254`, SameBoy accessible) read "3" (blocked) while its `_1` sibling
+/// (dot252, still blocked) passed. The fix releases OAM reads at that anchor on
+/// bare non-sprite non-window non-glitch DS lines (`ppu/blocking.rs::
+/// ds_lineend_read_open`). OAM-only: the VRAM twin (`vram_m3/postread_ds_2`) is
+/// co-temporal with the `vramw_m3end_ds_2` write-readback at the same dot254 (the
+/// vramw write costs a CPU M-cycle SameBoy spreads across the read but slopgb's
+/// deferred frame collapses), so a VRAM release is an A/B swap — the VRAM DS read
+/// grid is the parked S6 reclock. Full-CGB two-bin flag-on +1/−0; production
+/// (flag-off) byte-identical (`tier2_reclock`/`ds` gated). The `_1` sibling is
+/// asserted below as the regression guard.
+#[test]
+fn tier2_oam_postread_ds_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_oam_postread_ds",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 2] = [
+        // The fix: DS line-end OAM read at dot254 reads accessible (out0).
+        ("gambatte/oam_access/postread_ds_2_cgb04c_out0.gbc", "0"),
+        // Regression guard: the `_1` read (dot252) is still blocked (out3).
+        ("gambatte/oam_access/postread_ds_1_cgb04c_out3.gbc", "3"),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// #11bi — the POST-SWITCH bare-exit 4-variable table (the #11bh park,
+/// BUILT): `ppu/stat_irq.rs::vis_exit_hd` replaces the emergent bare exit
+/// with `E = 504 + leave_k − 4*[lcd_enable_in_ds] + 2*(SCX&7)` rp (SS) /
+/// `502 + leave_k + 2*(SCX&7)` (DS) for dances whose FIRST LCD-on switching
+/// STOP sits mid-frame (`Ppu::stop_anchor_midframe`) — the speedchange
+/// v1/2/3/4/5 anchor; the VBlank/boot-prologue frame every other tier2
+/// constant absorbs is excluded (kernel `_ds`, lcd_offset, gdma all anchor
+/// ly144, measured). All 120 family m3stat legs dual-traced (SBSTOP/SBACK/
+/// SBREAD/SBMODE ↔ SLOPGB stop/leave/ff41/visexit): 120/120 offline fit,
+/// zero conflicts; family probe +31/−0 (the 4 census blockers + 27 bonus;
+/// the sole non-fix `speedchange2_nop_m2int_m3stat_scx1_1` is the
+/// VBlank-anchored pre-seeded #11bd rebaseline joiner, out of scope).
+/// lcd_offset/m2int_m3stat/dma guard probes byte-identical.
+/// `measurements/speedchange-postswitch-exit-2026-07-03.md`.
+#[test]
+fn tier2_speedchange_postswitch_exit_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_speedchange_postswitch_exit",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 5] = [
+        // The census quartet (SS lcdoff class, `E = 502 + 2*scx`): the `_2`
+        // read (rp 506) now sits AT the exit → mode 0.
+        (
+            "gambatte/speedchange/speedchange2_lcdoff_m2int_m3stat_scx2_2_cgb04c_out0.gbc",
+            "0",
+        ),
+        // Regression guard: the `_1` read (rp 498) stays below it → mode 3.
+        (
+            "gambatte/speedchange/speedchange2_lcdoff_m2int_m3stat_scx2_1_cgb04c_out3.gbc",
+            "3",
+        ),
+        // The k=6 (dsa7==4 leave) class guard: `E = 506 + 2*scx` — the #11bh
+        // blanket's first casualty class, must keep reading 3.
+        (
+            "gambatte/speedchange/speedchange2_lcdoff_nop_m2int_m3stat_scx1_1_cgb04c_out3.gbc",
+            "3",
+        ),
+        // The DS arm (v1: enter-only mid-frame dance, `E = 504 + 2*scx`).
+        (
+            "gambatte/speedchange/speedchange_ly44_m3_m3stat_2_cgb04c_outC0.gbc",
+            "C0",
+        ),
+        // The replace-semantics witness: native-0 read the emergent m==0
+        // hold over-held to 3 (rp 512 == law exit 512).
+        (
+            "gambatte/speedchange/speedchange4_ly44_m3_nop_m3stat_scx3_2_cgb04c_outC0.gbc",
+            "C0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// PORT 3 (#11bc) — the S6 completion frame (`interconnect/tick.rs`
+/// `advance_machine_t`): the deferred path detects serial completions per
+/// T-substep (the DIV-edge fall's true T) and squashes a dispatch-ack'd
+/// timer/serial re-set by SameBoy's EXACT T-threshold
+/// (`updateTimaIrq(cc + 2 + isCgb())` / `updateSerial(cc + 3 + isCgb())`)
+/// instead of the whole-M-cycle window. Converges BOTH legs of the
+/// `tima/tc00_irq_late_retrigger` and `serial/start_wait_trigger_int8_read_if`
+/// pairs (SS+DS, 8 rows, MEASURED +8/−0): the `_1` re-set commits past the
+/// threshold and is DELIVERED (E4/E8), the `_2` inside it is consumed (E0).
+#[test]
+fn tier2_serial_tima_completion_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_serial_tima_completion",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 4] = [
+        (
+            "gambatte/tima/tc00_irq_late_retrigger_1_dmg08_cgb04c_outE4.gbc",
+            "E4",
+        ),
+        (
+            "gambatte/tima/tc00_irq_late_retrigger_2_dmg08_outE4_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        (
+            "gambatte/serial/start_wait_trigger_int8_read_if_1_dmg08_cgb04c_outE8.gbc",
+            "E8",
+        ),
+        (
+            "gambatte/serial/start_wait_trigger_int8_read_if_2_dmg08_outE8_cgb04c_outE0.gbc",
+            "E0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// PORT 2 (#11bc) — the sub-M-cycle WAKE clock (`Bus::pending_halt_wake_mid`,
+/// `interconnect.rs`): the DMG tier2 halt loop samples the wake condition at
+/// the M-cycle head AND mid-cycle (SameBoy `GB_cpu_run` advance-2 → sample →
+/// advance-2, `sm83_cpu.c:1621-1628`); a mid wake resumes the CPU 2 T into
+/// the idle cycle and the handler's first FF41 read samples the STAT mode at
+/// that true sub-M-cycle T (the `wake_skew`, consumed by the FF41 read /
+/// repaid before any other IO read so the TIMA-counted `int_hblank_halt` and
+/// LY-straddle `hblank_ly_scx` grids keep their aligned calibration).
+/// MEASURED +11/−3 on the DMG `halt *_m0stat` wake-clock class. Pins two
+/// fixed want-0 legs (the post-wake read lands on the line-start mode-0
+/// window it previously missed) + a passing want-2 guard leg.
+#[test]
+fn tier2_halt_m0stat_wake_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_halt_m0stat_wake",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 3] = [
+        // Fixed by the mid-cycle wake: the read lands in the line-start
+        // mode-0 window (want 0).
+        ("gambatte/halt/m0int_m0stat_scx2_1_dmg08_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/halt/m0irq_m0stat_scx4_2_dmg08_out0_cgb04c_out2.gbc",
+            "0",
+        ),
+        // Regression guard: the want-2 sibling stays mode 2.
+        ("gambatte/halt/m0int_m0stat_scx2_2_dmg08_cgb04c_out2.gbc", "2"),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Dmg);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, false)
+            .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// Port Stage C / S5 #11at — the CGB pre-draw window-abort BARE-exit slice
+/// (`stat_irq.rs::vis_mode_read`, `regs.rs`/`render/window.rs` `win_predraw_abort`).
+/// An LCDC.5 clear that lands BEFORE the enabled window's first fetch renders the
+/// line bare on SameBoy but with the SCX fine-scroll penalty DROPPED (mattcurrie
+/// §WIN_EN) → mode-3 exit cfl257, not 257+SCX&7; slopgb's whole-dot render
+/// over-extended it. `late_disable_early_scx03_wx{0f,10,11,12}_1` (LCDC.5 cleared
+/// at dot104, pre-first-tile) read out0 flag-on (+4/−0, MEASURED). The `_2`
+/// siblings (dot108, post-first-tile) EXTEND mode 3 (want out3) — a per-config
+/// window-tile-completion length left to the atomic render reclock, excluded by
+/// the `win_predraw_abort_dot <= 105` pre-first-tile scope. CGB single-speed only.
+#[test]
+fn tier2_window_predraw_abort_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_window_predraw_abort",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 12] = [
+        (
+            "gambatte/window/late_disable_early_scx03_wx0f_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx03_wx10_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx03_wx11_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx03_wx12_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        // #11bb — the DOUBLE-SPEED twin (the `(89 + WX) & !1` first-fetch
+        // M-cycle boundary; `_1` aborts commit before it → bare, `_2` at/
+        // after → extends). All 8 legs pinned: the `_2` extends guard the
+        // boundary from both sides.
+        (
+            "gambatte/window/late_disable_early_scx00_wx0f_ds_1_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx00_wx10_ds_1_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx00_wx11_ds_1_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx00_wx12_ds_1_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx00_wx0f_ds_2_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx00_wx10_ds_2_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx00_wx11_ds_2_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx00_wx12_ds_2_cgb04c_out3.gbc",
+            "3",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// Port Stage C / S5 #11au — the CGB window-REENABLE mode-3 length slice
+/// (`stat_irq.rs::vis_mode_read`, `Render::win_reenable_dot`). A window disabled
+/// then re-enabled mid-mode-3 (`late_reenable`) redraws from the re-enable point;
+/// its mode-3 extends past the read iff the re-enable beat the WX-match redraw
+/// start (`re-enable_dot <= wx_match_dot - 3`, MEASURED). A LATE re-enable renders
+/// the tail bare (mode0). slopgb's whole-dot render collapsed both legs to mode3.
+/// `late_reenable_{2,scx2_2,scx3_2,wx0f_2}` read out0 flag-on (+4/−0). SCX&7 <= 3
+/// (the fine-scroll deadline shift at high SCX is the atomic reclock's; scx5+
+/// pass natively). CGB single-speed.
+#[test]
+fn tier2_window_reenable_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_window_reenable",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 4] = [
+        ("gambatte/window/late_reenable_2_dmg08_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/window/late_reenable_scx2_2_dmg08_out3_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_reenable_scx3_2_dmg08_out3_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_reenable_wx0f_2_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// Port Stage C / S5 #11aw — the CGB late-WY UN-trigger bare slice
+/// (`stat_irq.rs::vis_mode_read`, `Ppu::wy_trig_sb_raw`). SameBoy's `wy_check`
+/// compares LY against the IMMEDIATE WY; a late WY→(non-LY) write un-triggers its
+/// window (raw WY != LY at the mode-2 compare → bare line), while slopgb's render +
+/// `wy_trig_sb` read the 6-dot-lagged `wy2` and trigger it (over-extend mode 3). The
+/// raw-WY sticky shadow (immediate `self.wy`, gated `dot >= 4` = the settled-WY
+/// compare window) re-derives SameBoy's trigger; `win_active && !wy_trig_sb_raw` forces
+/// the bare mode-0 exit. `late_wy_{1toFF,2toFF}_1` (WY→FF at dot0) read out0 flag-on
+/// (+3/−0); the `_3` siblings (WY→FF at dot8, sticky-triggered) keep mode 3. CGB SS.
+#[test]
+fn tier2_window_late_wy_untrigger_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_window_late_wy_untrigger",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 2] = [
+        (
+            "gambatte/window/arg/late_wy_1toFF_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/arg/late_wy_2toFF_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 /// Port Stage C / S5 (mech 3 — CGB lcd-offset, the line-start OAM-read window) —
 /// on CGB single-speed SameBoy keeps `oam_read_blocked = false` for the first few
 /// T-cycles of each visible line (`display.c:1805-1810`: the mode-0/HBlank tail
@@ -1391,6 +1902,61 @@ fn tier2_window_m3stat_length_passes() {
 /// was aborted / its WX/LCDC.5 toggled late (`late_wx`/`late_reenable`/
 /// `late_enable`) — SameBoy renders THOSE bare. Full-CGB two-bin flag-on **+5/−0**
 /// (the `_1` mid-line late-WY rows; the `_2`/`_3` siblings + the toggled-window
+/// #11bd item 4 — the BOUNDARY-WY cross-line window extend
+/// (`Ppu::wy_xline_trig`): a WY write landing in a line's tail/head whose
+/// value matches the CURRENT line latches SameBoy's `wy_triggered`
+/// (scheduled `wy_check`, old `current_line` compare); every later bare
+/// line reads mode 3 to the polled window exit. The ly0 mid-line row rides
+/// the same-line shadow's new line-0 inclusion. Guards: the boundary write
+/// with a NON-matching value + the late-toggled window stay bare.
+#[test]
+fn tier2_window_boundary_wy_xline_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_window_boundary_wy_xline",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        // FIXED — boundary-WY writes matching the old line extend cross-line.
+        (
+            "gambatte/window/arg/late_wy_10to0_ly1_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto0_ly2_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto1_ly2_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        // FIXED — the ly0 mid-line late-WY trigger (line-0 shadow inclusion).
+        (
+            "gambatte/window/arg/late_wy_FFto0_ly0_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        // GUARD — the toggled-window want-0 rows stay bare (the xline latch
+        // requires a boundary WY write, not an LCDC enable).
+        (
+            "gambatte/window/late_enable_afterVblank_2_dmg08_out3_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_reenable_scx5_2_dmg08_out3_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 /// rows stay bare). Production byte-identical OFF (`tier2`/`is_cgb` gated).
 #[test]
 fn tier2_window_late_wy_extend_passes() {
@@ -1454,6 +2020,446 @@ fn tier2_window_late_wy_extend_passes() {
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), expect, true)
             .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// Port Stage C2 #11bj — the DMG WINDOW-LAW PORT. The CGB `vis_mode_read`
+/// window arms (`model.is_cgb()`-gated length/shadow/pre-draw-abort/reenable/
+/// un-catch/boundary laws) are re-derived on the DMG frame: the DMG deferred
+/// FF41 read shares the SS −4 polled offset, but the DMG `wy2` lag (+2 vs CGB
+/// +6) and the DMG-specific per-WX/SCX ship deadlines make the model DIVERGE
+/// from CGB (the `_2` legs that render bare on CGB extend on DMG). 56 of the
+/// 62 DMG window flip-blockers fixed (dual-traced 2026-07-03,
+/// `measurements/dmg-window-port-2026-07-03.md`); the 6 residual are the same
+/// atomic classes CGB parks (wxA6/wxA5 carried-read sub-dot wall · scx5
+/// non-linear deadline · mid-frame-SCX-rewrite `late_scx` · the render-trigger
+/// late_enable/reenable-scx5 extend). Each new arm is `!is_cgb()`-scoped →
+/// CGB two-bin byte-identical (291/0-new); production byte-identical OFF.
+#[test]
+fn tier2_dmg_window_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr("tier2_dmg_window", "game-boy-test-roms collection not present");
+        return;
+    };
+    // (rel, expected DMG out). Representatives of each shipped DMG arm + guard
+    // rows (the parked-atomic residual stays at its native verdict).
+    let targets = [
+        // Arm D1 — the DMG triggering-window length law (259 + SCX&7 exit).
+        ("gambatte/window/m2int_wx00_m3stat_2_dmg08_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/window/m2int_wx07_scx3_m3stat_2_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/m2int_wxA6_m3stat_2_dmg08_out0_cgb04c_out3.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/m2int_wxA6_spxA7_m3stat_2_dmg08_out0_cgb04c_out3.gbc",
+            "0",
+        ),
+        // Arm D2 — the DMG mid-line late-WY shadow extend (263 + SCX&7).
+        (
+            "gambatte/window/arg/late_wy_FFto2_ly2_2_dmg08_out3_cgb04c_out0.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto2_ly2_wx0f_2_dmg08_out3_cgb04c_out0.gbc",
+            "3",
+        ),
+        // Arm D6 — the DMG late-WY UN-trigger bare exit + the WY→FF release.
+        (
+            "gambatte/window/arg/late_wy_1toFF_2_dmg08_out0_cgb04c_out3.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/arg/late_wy_2toFF_2_dmg08_out0_cgb04c_out3.gbc",
+            "0",
+        ),
+        // GUARD — the WY→FF `_3` sibling flips FF a compare later: extends.
+        (
+            "gambatte/window/arg/late_wy_1toFF_3_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        // Arm D3 — the DMG pre-draw window-abort (bare 253 / extend 259).
+        (
+            "gambatte/window/late_disable_1_dmg08_out3_cgb04c_out0.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/late_disable_early_scx03_wx0f_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_disable_late_scx03_wx0f_2_dmg08_out3_cgb04c_out0.gbc",
+            "3",
+        ),
+        // GUARD — the SCX-delayed pre-match clear kills a low-WX window (bare).
+        (
+            "gambatte/window/late_disable_scx3_0_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        // Arm D3-spr — a pre-draw abort with an object on the window line.
+        (
+            "gambatte/window/late_disable_spx10_wx0f_2_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        // Arm D5 — the DMG reenable-too-late bare exit (SCX-termed deadline).
+        ("gambatte/window/late_reenable_2_dmg08_cgb04c_out0.gbc", "0"),
+        // GUARD — the SCX2 reenable at the same dot still catches: extends.
+        (
+            "gambatte/window/late_reenable_scx2_2_dmg08_out3_cgb04c_out0.gbc",
+            "3",
+        ),
+        // Arm D-wx — the DMG WX-rewrite un-catch (scx ≥ 3 → bare).
+        (
+            "gambatte/window/late_wx_scx3_2_dmg08_out0_cgb04c_out3.gbc",
+            "0",
+        ),
+        // Arm D7 (boundary head-latch) — a WY head-write matching the finished
+        // line triggers the cross-line window (extends every later line).
+        (
+            "gambatte/window/arg/late_wy_10to0_ly1_2_dmg08_out3_cgb04c_out0.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto1_ly2_2_dmg08_out3_cgb04c_out0.gbc",
+            "3",
+        ),
+        // GUARD — the `_3` sibling commits past the head (dot 4): stays bare.
+        (
+            "gambatte/window/arg/late_wy_10to0_ly1_3_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Dmg);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, false)
+            .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// #11bo — the mode-3 render reclock, mechanism 1 (SCY/palette): the pure-render
+/// mid-mode-3 registers (SCY FF42, BGP/OBP FF47-FF49) take SCX's +4 render-frame
+/// defer (dots=3) on the tier2 deferred write path. The deferred clock advances
+/// the machine to the write's leading edge (cc+0) before the write; the eager
+/// `commit_eff` there landed the value 4 dots EARLY of the render's
+/// cc+4-calibrated fetch grid, so the pixel pipeline sampled the new SCY/palette
+/// too soon (the `dmgpalette_during_m3` / `scy_during_m3` pixel-reference
+/// flip-blockers). Staging 3 dots lets the strobe re-commit at the render frame
+/// (the `regs.rs` `staged_pending` survive skip keeps `Ppu::write` from
+/// clobbering it). SCY/palette are pure colour/row selection — no mode-3-length
+/// or FF41-read-law coupling (those sample ARCH `self.scy`/`self.bgp`) — so this
+/// is a render-only slice: CGB two-bin 291/291 zero-drift, mooneye 91/91 ON+OFF,
+/// production byte-identical OFF. Verified against the pixel two-bin
+/// (`gambatte_pixel_probe`, `SLOPGB_ROWLIST`): dmgpalette 6/6 + scy 26/27
+/// flag-on (the sprite-stalled `scy_during_m3_spx08_2` is a separate penalty-grid
+/// case). Representatives asserted via the suite's own frame comparator
+/// (`expect_frame_png`), flag-on.
+#[test]
+fn tier2_dmg_m3_render_scy_palette_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_dmg_m3_render_scy_palette",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        ("gambatte/dmgpalette_during_m3/dmgpalette_during_m3_1.gb", Model::Dmg),
+        ("gambatte/dmgpalette_during_m3/scx3/dmgpalette_during_m3_3.gb", Model::Dmg),
+        ("gambatte/scy/scy_during_m3_1.gbc", Model::Dmg),
+        ("gambatte/scy/scy_during_m3_1.gbc", Model::Cgb),
+        ("gambatte/scy/scx3/scy_during_m3_5.gbc", Model::Dmg),
+    ];
+    for (rel, model) in targets {
+        assert_pixel_leg_flagon(&root, rel, model);
+    }
+}
+
+/// Boot a gambatte or mealybug pixel-reference ROM flag-on (tier2 render
+/// reclock), render a frame, and assert it matches the sibling reference PNG via
+/// the suite's own comparator — the pin form of the `gambatte_pixel_probe`
+/// two-bin. Panics with the frame diff on mismatch (#11bo render-reclock pins).
+fn assert_pixel_leg_flagon(root: &Path, rel: &str, model: Model) {
+    let path = root.join(rel);
+    let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+    let mut gb = harness::boot_with_reclock(&rom, model);
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    let (png, map) = if rel.starts_with("mealybug-tearoom-tests/") {
+        // Mealybug protocol: run to LD B,B then one settled frame; Identity map.
+        harness::run_until_breakpoint(&mut gb, common::TIMEOUT_TCYCLES)
+            .unwrap_or_else(|e| panic!("{rel} [{model:?}] no breakpoint: {e}"));
+        harness::run_for_frames(&mut gb, 1);
+        let suffix = if model.is_cgb() { "_cgb_c" } else { "_dmg_blob" };
+        (
+            path.with_file_name(format!("{stem}{suffix}.png")),
+            CgbColorMap::Identity,
+        )
+    } else {
+        // Gambatte protocol: 15-frame warmup + 1 evaluated frame; Png ref via
+        // `plan_rom_on_disk`; DMG Identity, CGB Gambatte colour map.
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        let (dmg, cgb) = plan_rom_on_disk(&path);
+        let Some(Check::Png(suffix)) = (if model.is_cgb() { cgb } else { dmg }) else {
+            panic!("{rel} [{model:?}] is not a Png-reference leg");
+        };
+        let map = if model.is_cgb() {
+            CgbColorMap::Gambatte
+        } else {
+            CgbColorMap::Identity
+        };
+        (
+            path.parent()
+                .unwrap_or(Path::new(""))
+                .join(format!("{stem}{suffix}.png")),
+            map,
+        )
+    };
+    harness::expect_frame_png(&gb, &png, map)
+        .unwrap_or_else(|e| panic!("{rel} [{model:?}] tier2 flag-on render: {e}"));
+}
+
+/// #11bo — the mode-3 render reclock, mechanism 2 (LCDC BG addressing): the BG/
+/// window fetcher samples a DEFERRED LCDC view (`eff.render_lcdc`, bit3 BG map /
+/// bit4 tile-data / bit6 win map) that lags the eager control commit by the
+/// render frame (`RENDER_LCDC_DELAY`), so a mid-mode-3 bgtilemap/bgtiledata
+/// toggle reaches the fetch grid at the production dot instead of the leading
+/// edge. The window bit5 (abort/reenable/enable) side-effects + the FF41 read
+/// laws keep the eager `eff.lcdc` (their tier2 window pins are calibrated to the
+/// cc+0 control commit — a full LCDC defer regressed them); OBJ-enable / mode-3
+/// length reads also keep the eager view (must not move the length). Fixes the
+/// `bgtiledata` (21) + `bgtilemap` (26) pixel-reference flip-blockers + mealybug
+/// `m3_lcdc_tile_sel_change`. Render-only slice: CGB two-bin 291/291 zero-drift,
+/// mooneye 91/91 ON+OFF, tier2 window pins intact, production byte-identical OFF.
+#[test]
+fn tier2_dmg_m3_render_lcdc_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_dmg_m3_render_lcdc",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        ("gambatte/bgtiledata/bgtiledata_spx08_1.gbc", Model::Dmg),
+        ("gambatte/bgtiledata/bgtiledata_spx09_2.gbc", Model::Dmg),
+        ("gambatte/bgtiledata/bgtiledata_spx08_2.gbc", Model::Cgb),
+        ("gambatte/bgtilemap/bgtilemap_spx08_1.gbc", Model::Dmg),
+        ("gambatte/bgtilemap/bgtilemap_spx08_1.gbc", Model::Cgb),
+    ];
+    for (rel, model) in targets {
+        assert_pixel_leg_flagon(&root, rel, model);
+    }
+}
+
+/// #11bo — the mode-3 render reclock, mechanism 3 (SCX double-speed): SCX's
+/// render-frame defer is +2 dots in double speed vs +4 (dots=3) in single speed
+/// — the DS M-cycle is 2 PPU dots (vs 4), so the write-commit-to-fetch-grid
+/// offset halves. dots=2 fixes the 5 `scx_during_m3_ds` fine-scroll pixel legs
+/// AND holds `late_scx4`'s DS FF41 read law (see
+/// `tier2_late_scx_writestrobe_passes`) — the single value that satisfies both
+/// the render straddle and the read-verdict straddle. CGB two-bin zero-drift,
+/// production byte-identical OFF.
+#[test]
+fn tier2_dmg_m3_render_scx_ds_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_dmg_m3_render_scx_ds",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        ("gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_5.gbc", Model::Cgb),
+        ("gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_8.gbc", Model::Cgb),
+        ("gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_5.gbc", Model::Cgb),
+    ];
+    for (rel, model) in targets {
+        assert_pixel_leg_flagon(&root, rel, model);
+    }
+}
+
+/// #11bo — the mode-3 render reclock, mechanisms 4+5 (mixer render-view LCDC
+/// bits): the sprite↔BG mixer (`output_pixel`) reads its render-only LCDC bits
+/// from the DEFERRED view (`eff.render_lcdc`), like mechanism 2's BG-fetch
+/// addressing bits, so a mid-mode-3 toggle lands its column at the
+/// production/SameBoy dot instead of the leading edge. Mech4 is bit0 (BG/window
+/// priority): it strips BG priority at the toggle column
+/// (m3_lcdc_bg_en_change/_change2 + bgoff_bgon_sprite_below_window). Mech5 is
+/// bit1 (OBJ-enable draw-side): it suppresses an already-fetched sprite pixel at
+/// the mix (m3_lcdc_obj_en_change, CGB only — DMG keeps the eager one-dot-ahead
+/// mixer calibration). Both bits are render-only (bit0's BG fetch still runs;
+/// bit1's draw-side is past the sprite fetch — the FETCH-side OBJ enable gating
+/// the stall/length stays eager in `render.rs`). CGB two-bin zero-drift, mooneye
+/// 91/91, production byte-identical OFF.
+#[test]
+fn tier2_dmg_m3_render_bg_priority_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_dmg_m3_render_bg_priority",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        ("mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change.gb", Model::Cgb),
+        ("mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change2.gb", Model::Cgb),
+        ("gambatte/bgen/bgoff_bgon_sprite_below_window.gbc", Model::Cgb),
+        ("mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change.gb", Model::Cgb),
+    ];
+    for (rel, model) in targets {
+        assert_pixel_leg_flagon(&root, rel, model);
+    }
+}
+
+/// #11bp — the DMG palette (BGP/OBP FF47-49) commit half-dot pop-grid: the last
+/// palette-timing pixel-reference flip-blockers the whole-dot render-defer could
+/// not land (89/100 was the whole-dot ceiling; #11bo classified these 5 as
+/// half-dot-precision). The mealybug `m3_bgp_change`/`_sprites`, `m3_obp0_change`
+/// and `m3_window_timing`/`_wx_0` legs are BGP/OBP torture (m3_window_timing is a
+/// BGP test, not a window one — its window render is byte-identical flag-on/off,
+/// only `eff.bgp` at the pixel-pop differs). SameBoy commits the palette at the
+/// write M-cycle's exact half-dot and the pixel pops at a half-dot; single speed
+/// is whole-dot aligned so the commit lands at a whole (EVEN) dot, visible +2
+/// dots from the pop. The tier2 deferred write's whole-dot leading edge loses
+/// which side of the even grid it sits on — `dots = 2 + (leading_edge & 1)`
+/// (`cycle.rs::write_deferred`) recovers it: EVEN leading edges (all the mealybug
+/// legs, dual-traced LE=104) want +2, ODD (the gambatte dmgpalette legs, LE=183)
+/// want +3, so the shared dots=3 was one column late for the mealybug set. DMG
+/// only, render-only (colour selection, no length/read-law coupling): CGB two-bin
+/// 291/291 zero-drift, mooneye 91/91 ON+OFF, all shipped dmgpalette/scy render
+/// pins held, production byte-identical OFF. Pixel two-bin 89→94 (+5 / 0 dropped).
+#[test]
+fn tier2_dmg_m3_render_palette_halfdot_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_dmg_m3_render_palette_halfdot",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        ("mealybug-tearoom-tests/ppu/m3_bgp_change.gb", Model::Dmg),
+        ("mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb", Model::Dmg),
+        ("mealybug-tearoom-tests/ppu/m3_obp0_change.gb", Model::Dmg),
+        ("mealybug-tearoom-tests/ppu/m3_window_timing.gb", Model::Dmg),
+        ("mealybug-tearoom-tests/ppu/m3_window_timing_wx_0.gb", Model::Dmg),
+    ];
+    for (rel, model) in targets {
+        assert_pixel_leg_flagon(&root, rel, model);
+    }
+}
+
+/// #11bq — the SCY (FF42) commit takes the DMG palette's EVEN-dot parity anchor
+/// (`dots = 2 + (leading_edge & 1)`, `cycle.rs::write_deferred`), resolving the
+/// sub-dot render-fetch grid the whole-dot defer=3 could not on a sprite-stalled
+/// line. A sprite prefill stall (`scy_during_m3_spx08_2`, an X=8 OBJ) shifts the
+/// BG fetch grid so a tile's Lo/Hi data read (`bg_tile_addr`, fine row = LY+SCY
+/// & 7) lands EXACTLY on the deferred SCY-commit dot; production/SameBoy commits
+/// the write at the M-cycle mid-point (visible +2 from an EVEN leading edge, +3
+/// from ODD — the same round_up_even(LE)+2 the palette derives), so the per-tile
+/// data read re-samples the NEW scroll while the latched tile NUMBER keeps the old
+/// (the mealybug m3_scy_change mixed-fetch behaviour). Dual-traced: the sprite leg
+/// lands an EVEN LE=236 → +2 (the flat defer=3 rendered the change one column
+/// late); the objectless `scy_during_m3_{1,4,5,6}` writes land ODD LEs → +3 (held,
+/// a flat +2 broke all 8). SCY is pure row selection (no length / FF41-read-law
+/// coupling), so render-only: CGB two-bin 291/291 zero-drift (the CGB `spx08_2`
+/// held), mooneye 91/91 ON+OFF, production byte-identical OFF. Pixel two-bin +1.
+#[test]
+fn tier2_dmg_m3_render_scy_spx08_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_dmg_m3_render_scy_spx08",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        // FIXED — the sprite-stalled SCY leg (even LE → parity +2).
+        ("gambatte/scy/scy_during_m3_spx08_2.gbc", Model::Dmg),
+        // HELD — the CGB sprite leg (already passed at defer=3, unperturbed).
+        ("gambatte/scy/scy_during_m3_spx08_2.gbc", Model::Cgb),
+        // HELD — an odd-LE objectless leg (parity +3, a flat +2 would drop it).
+        ("gambatte/scy/scx3/scy_during_m3_4.gbc", Model::Dmg),
+    ];
+    for (rel, model) in targets {
+        assert_pixel_leg_flagon(&root, rel, model);
+    }
+}
+
+/// #11bq — the WX (FF4B) render-VIEW defer + the un-catch SPLIT. In tier2 the
+/// eager `Ppu::write` committed `eff.wx` at the write's leading edge (cc+0), 2-4
+/// dots early of the render's per-dot WX comparator, so a mid-mode-3 WX rewrite
+/// reached the window activation/reactivation gate at the wrong dot: `late_wx_ds`
+/// (DS) — the eager cc+0 WX=255 pre-empted the wx=7 window activation at the next
+/// dot → the window never drew (bare cols 0-7); `m3_wx_6` (SS) — the un-catch
+/// straddle (a WX 6→5 rewrite must split the `pos_dot==wx+6` compares at pos_dot
+/// 11/12 so neither matches) needs the change at the production frame, not early.
+/// Fix: `eff.wx` now SURVIVES the arch write (`regs.rs` `staged_pending`) and
+/// strobe-commits at leading+1 (the strobe runs at tick-start before `dot += 1`,
+/// so the value is visible to `render_step` from leading+2 == production, both
+/// speeds; `cycle.rs` FF4B → dots 0, +1 for the FF4B palette-class offset). The
+/// SPLIT keeps the un-catch READ law's `wx_write_dot` (FF41 mode-3 length) at its
+/// cc+0 leading edge (`regs.rs` `Ppu::write` FF4B, not `commit_eff`) so
+/// `tier2_window_late_wx_uncatch_passes` is unperturbed. Render-view only: CGB
+/// two-bin 291/291 zero-drift, mooneye 91/91 ON+OFF, production byte-identical OFF.
+/// Pixel two-bin +3 (`late_wx_ds_1` Cgb + `m3_wx_5`/`m3_wx_6` Dmg).
+#[test]
+fn tier2_dmg_m3_render_wx_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_dmg_m3_render_wx",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        // FIXED — the DS window-activation pre-empt (Cgb).
+        ("gambatte/window/on_screen/late_wx_ds_1.gbc", Model::Cgb),
+        // FIXED — the SS mid-draw reactivation / un-catch straddle (Dmg).
+        ("mealybug-tearoom-tests/ppu/m3_wx_5_change.gb", Model::Dmg),
+        ("mealybug-tearoom-tests/ppu/m3_wx_6_change.gb", Model::Dmg),
+    ];
+    for (rel, model) in targets {
+        assert_pixel_leg_flagon(&root, rel, model);
+    }
+}
+
+/// #11bq — the window-ABORT render/read-law SPLIT: a mid-mode-3 LCDC.5 clear ends
+/// the drawn window's RENDER re-anchor at the deferred render frame while its
+/// mode-3-length READ-LAW flags fire at the eager cc+0. In tier2 `eff.lcdc`
+/// committed the bit5 clear at the write's leading edge (cc+0), so `window_abort`
+/// ended the drawn window 2 dots / 2 pixels early of production
+/// (`m3_lcdc_win_en_change_multiple`: the abort at lx≈51 stopped the window at
+/// cols 50-51 instead of 52-53). Fix: `window_abort` is split — `window_abort_flags`
+/// (`win_predraw_abort` / DMG `win_aborted`, the FF41 read-law inputs calibrated
+/// to cc+0) stays eager in `regs.rs::commit_eff`; `window_abort_render` (the
+/// drawn-window end + BG-fetch tile-boundary re-anchor) fires at the `render_lcdc`
+/// bit5 1→0 catch-up (`ppu/mod.rs`), the same deferred fetch view mech2 uses. The
+/// window ACTIVATION gate + `win_reenable_dot`/`win_enable_dot` stay eager (a
+/// render-view activation defer was BUILT + REFUTED — it dropped
+/// `late_enable_ly0_ds_2` / `late_reenable_scx2_2`, SameBoy-passes: the activation
+/// dot IS the mode-3 length). Render-only: CGB two-bin 291/291 IDENTICAL SET,
+/// mooneye 91/91 ON+OFF, `tier2_window_enable_deadline` + `tier2_dmg_window` held,
+/// production byte-identical OFF. Pixel two-bin +2 (Dmg + Cgb) → the full 100/100.
+#[test]
+fn tier2_dmg_m3_render_win_abort_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_dmg_m3_render_win_abort",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        ("mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple.gb", Model::Dmg),
+        ("mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple.gb", Model::Cgb),
+    ];
+    for (rel, model) in targets {
+        assert_pixel_leg_flagon(&root, rel, model);
     }
 }
 
@@ -2105,7 +3111,835 @@ fn gambatte_blank_verdict() {
     check_blank(&logo).unwrap();
 }
 
+/// #11bf (S7, the WAKE-INSTANT port) — the SameBoy-exact DMG halt-wake grid
+/// for the mode-0 STAT rise: one iq sample per iteration at the mid point
+/// (4k+2; the `just_halted` head sample has NO +2 slot — the jh gap), the
+/// post-sample advance COMPLETES the M-cycle, and the woken instruction
+/// RE-FETCHES (SameBoy's halt loop performs no prefetch — `GB_cpu_run`
+/// sm83_cpu.c:1629-1642 + halt() :1036-1058). The rise's visibility is a
+/// T-deadline (+4 on the LCD-enable glitch line, whose engine rise is emitted
+/// at visexit where normal lines emit at visexit−3); HALT's own entry
+/// IF-check observes the machine at the fetch's END (t0+4), arming the
+/// halt-bug exactly when SameBoy does. Together these replace the M-quantized
+/// `if_late`/`m0_halt_hold`/w2-skew model for the m0 rise AND dissolve the
+/// C1.3 `halt_ly_phase` carry (its only passing table under the exact grid is
+/// all-zero). Full-DMG two-bin 167→158 (+9/−0); the four pinned rows cover
+/// the four mechanisms: the jh-gap/steady-grid pair
+/// (`late_m0irq_halt_m0stat_scx3_2b` want 2 · `m0irq_m0stat_scx3_2` want 0 —
+/// same rise, same read distance, straddling wake slots), the re-fetch
+/// (`m0int_m0stat_scx5_2`), and the entry check (`late_m0irq_halt_dec_scx2_2`
+/// — the halt-bug's double-DEC). DMG-only; CGB byte-identical (its
+/// head-sample grid is a separate port); production byte-identical.
+#[test]
+fn tier2_halt_wake_grid_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_halt_wake_grid",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 4] = [
+        (
+            "gambatte/halt/late_m0irq_halt_m0stat_scx3_2b_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+        (
+            "gambatte/halt/m0irq_m0stat_scx3_2_dmg08_out0_cgb04c_out2.gbc",
+            "0",
+        ),
+        (
+            "gambatte/halt/m0int_m0stat_scx5_2_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+        (
+            "gambatte/halt/late_m0irq_halt_dec_scx2_2_dmg08_cgb04c_out6.gbc",
+            "6",
+        ),
+    ];
+    let model = Model::Dmg;
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, model);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, model.is_cgb()).unwrap_or_else(|e| {
+            panic!("{rel} [{model:?}] expected dmg08 out{expect} (tier2 flag-on): {e}")
+        });
+    }
+}
+
+/// #11bf item 2a — a racing DMA-register write (FF51-FF55 counters/arm, FF70
+/// WRAM bank, FF4F VRAM bank) beats a same-advance HBlank-DMA steal: SameBoy
+/// runs `GB_hdma_run` only after the current instruction completes
+/// (sm83_cpu.c:1718), so the racing write's store is visible to the block.
+/// slopgb's deferred write head-serviced the request flagged during the
+/// write's own machine advance BEFORE the store (`hdma_late_destl_1`
+/// dual-traced with the new SBWHDMA tracer: SameBoy order w54 → run dst=8010;
+/// slopgb ran the block with the stale dst=8000). The steal now defers past
+/// the scoped registers' store; a request already pending at the op's entry
+/// still steals first. The scope is load-bearing: a GENERAL post-store
+/// service broke `irq_precedence/hdma_vs_m0_scx2_halt` (base-passing) and
+/// 60+ hdma rows. Pinned: destl `_1` (write wins) + `_2` (block-first
+/// sibling), `wrambank_1` (the FF70 source-bank race), `disable_ds_2` (the
+/// FF55 disarm race, DS). Full-CGB two-bin +5/−0; production byte-identical
+/// (`write_deferred` is tier2-only).
+#[test]
+fn tier2_hdma_write_race_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_hdma_write_race",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 4] = [
+        ("gambatte/dma/hdma_late_destl_1_cgb04c_out0.gbc", "0"),
+        ("gambatte/dma/hdma_late_destl_2_cgb04c_out1.gbc", "1"),
+        ("gambatte/dma/hdma_late_wrambank_1_cgb04c_out0.gbc", "0"),
+        ("gambatte/dma/hdma_late_disable_ds_2_cgb04c_out1.gbc", "1"),
+    ];
+    let model = Model::Cgb;
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, model);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, model.is_cgb()).unwrap_or_else(|e| {
+            panic!("{rel} [{model:?}] expected cgb04c out{expect} (tier2 flag-on): {e}")
+        });
+    }
+}
+
+/// #11bf item 3a — a late-ENABLE-triggered window whose LCDC.5 write lands
+/// past the line's fetch-catch deadline (dot > 94, DS) renders BARE on
+/// SameBoy (the window misses the line) while slopgb's whole-dot render still
+/// activates and extends. The `late_enable_ly0_ds` want-pair reads the
+/// IDENTICAL dot 260 with opposite wants — the enable dot (94 vs 96) is the
+/// only discriminator, so this is a render-length law keyed on
+/// `Render::win_enable_dot` (a FIRST enable: window neither active nor
+/// aborted), not a read-position one. `_1` (enable 94) holds natively; `_2`
+/// (enable 96) takes the DS bare exit. +1/−0 on the window family;
+/// production byte-identical (tier2+CGB+DS law input only).
+#[test]
+fn tier2_window_enable_deadline_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_window_enable_deadline",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 2] = [
+        ("gambatte/window/late_enable_ly0_ds_1_cgb04c_out3.gbc", "3"),
+        ("gambatte/window/late_enable_ly0_ds_2_cgb04c_out0.gbc", "0"),
+    ];
+    let model = Model::Cgb;
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, model);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, model.is_cgb()).unwrap_or_else(|e| {
+            panic!("{rel} [{model:?}] expected cgb04c out{expect} (tier2 flag-on): {e}")
+        });
+    }
+}
+
+/// #11bf item 3c — a mid-line FF4B (WX) rewrite committing AT/BEFORE the WX
+/// match dot un-catches the window on SameBoy at SCX&7 == 5 (the fine-scroll
+/// phase pushes the effective catch past the write): `late_wx_scx5_1` (write
+/// and match both dot 97) renders BARE (want 0) where slopgb's whole-dot
+/// render catches and extends; `_2` (write dot 101) is caught on both. The
+/// scope is measured: at scx0/2/3 SameBoy still catches the same
+/// write≤match race (the un-scoped arm dropped 8 want-3 rows).
+/// `Render::wx_write_dot` + the SS bare-exit arm; +1/−0; production
+/// byte-identical.
+#[test]
+fn tier2_window_late_wx_uncatch_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_window_late_wx_uncatch",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 2] = [
+        ("gambatte/window/late_wx_scx5_1_dmg08_cgb04c_out0.gbc", "0"),
+        ("gambatte/window/late_wx_scx5_2_dmg08_cgb04c_out3.gbc", "3"),
+    ];
+    let model = Model::Cgb;
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, model);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, model.is_cgb()).unwrap_or_else(|e| {
+            panic!("{rel} [{model:?}] expected cgb04c out{expect} (tier2 flag-on): {e}")
+        });
+    }
+}
+
+/// S5 #11bg — the CGB single-speed FF41 two-phase ENGINE write
+/// (`GB_CONFLICT_STAT_CGB` seen from the hardware side): the S5 engine's FF41
+/// view (`Ppu::eng_stat`) transitions old → phase-1 (mode bits new, LYC enable
+/// bit OLD) at commit+2 → final at commit+4, with hazard-free applications
+/// (falls silent, the final rise continuity-gated + delivered through the CGB
+/// `lyc_if_delay`) and externals edging against the armed phase-1
+/// (`ff41_disable_2`\u{2019}s ly6 dot-4 LYC latch rise). The write-instant
+/// gambatte LYC arms stay for MID-LINE writes (the `lyc_ff41_trigger_delay`
+/// pair collapses to one deferred commit dot — only the calibrated arm splits
+/// it); the engine owns the line-boundary region. All rows dual-traced
+/// (SBWRITE two-phase prints + slopgb wff41/dispatch). CGB SS unshifted
+/// Tier-2/LE only; production byte-identical OFF.
+#[test]
+fn tier2_ff41_twophase_engine_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_ff41_twophase",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        // bit6-disable stays armed through the lyfc latch rise (fires).
+        (
+            "gambatte/lycEnable/ff41_disable_2_dmg08_out0_cgb04c_out2.gbc",
+            "2",
+        ),
+        (
+            "gambatte/lycEnable/lyc0_ff41_disable_2_dmg08_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        // bit6-enable lands one T late and misses the closed match window.
+        (
+            "gambatte/lycEnable/late_ff41_enable_2_dmg08_out2_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/lycEnable/lyc153_late_ff41_enable_2_dmg08_outE2_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        // GUARD — the one-M-earlier sibling still catches the held latch.
+        (
+            "gambatte/lycEnable/lyc153_late_ff41_enable_1_dmg08_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        // The m1→LYC handoff is hazard-free on hardware (SameBoy\u{2019}s
+        // intersection form dips and reads E2 — hardware-truth row).
+        (
+            "gambatte/lycEnable/lyc153_late_enable_m1disable_3_dmg08_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        // The final value evaluates at the T0+1T-instant mode: the sub-dot
+        // dip re-fires the next line\u{2019}s OAM carryover rise.
+        (
+            "gambatte/m2enable/lyc1_m2irq_late_lycdisable_1_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+        // m0-flip fast-forward: the dying LYC hold dips before the mode-0
+        // rise re-edges.
+        (
+            "gambatte/m0enable/lycdisable_ff41_scx1_1_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+        // GUARD — a stage still within a dot of the flip keeps the OLD view
+        // (the dying enable catches its own rise).
+        (
+            "gambatte/m0enable/disable_2_dmg08_out0_cgb04c_out2.gbc",
+            "2",
+        ),
+        // GUARD — the mid-line write-instant arm splits the trigger-delay
+        // pair the deferred frame collapses.
+        (
+            "gambatte/lycEnable/lyc_ff41_trigger_delay_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/lycEnable/lyc_ff41_trigger_delay_2_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+        // The DS immediate-view analogue of the m0-flip dip: a bit6-drop
+        // committing within one M of the DS mode-3→0 flip dies before the
+        // mode-0 rise (fresh edge); the `_2` sibling drops after the flip
+        // (seamless).
+        (
+            "gambatte/m0enable/lycdisable_ff41_ds_1_cgb04c_out2.gbc",
+            "2",
+        ),
+        (
+            "gambatte/m0enable/lycdisable_ff41_ds_2_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// S5 #11bg — the CGB double-speed line-153 `ly_for_comparison` table (the
+/// documented SS placeholder replaced): 153 latches at dot 4 (not 6), holds
+/// live through dot 7, the [8,12) window is the `-1` GAP (held for a latched
+/// match, no fresh LYC-write re-latch — `lyc153_late_ff45_enable_ds_6`), 0
+/// from dot 12 — the unique whole-dot solution to the four
+/// `lyc153_m1disable_ds` / `lyc0_m1disable_ds` dip-vs-seamless handoff
+/// constraints, with the DS engine view immediate (the two-phase window is
+/// sub-dot at 2 dots/M). The dot-4 wake cascades through every
+/// LYC=153-anchored DS test: the gdma_cycles read frame, the lcd_offset
+/// count-loop first poll, and the late_wy write instants (whose un-matching
+/// write now beats the hardware `wy_check` — the trigger-line WY un-latch).
+#[test]
+fn tier2_ds_line153_lyfc_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_ds_line153",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        (
+            "gambatte/lycEnable/lyc153_m1disable_ds_2_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        // GUARDs — the dip legs still fire.
+        (
+            "gambatte/lycEnable/lyc153_m1disable_ds_1_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        (
+            "gambatte/lycEnable/lyc0_m1disable_ds_1_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        // The [8,12) gap takes no fresh LYC-write re-latch.
+        (
+            "gambatte/lycEnable/lyc153_late_ff45_enable_ds_6_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        (
+            "gambatte/ly0/lycint152_lyc153irq_ds_2_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        (
+            "gambatte/ly0/lycint152_lyc153irq_ifw_ds_2_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        // The dot-4 wake cascades.
+        (
+            "gambatte/dma/gdma_cycles_short_scx5_ds_1_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/lcd_offset/offset1_lyc99int_m0irq_count_scx1_ds_1_cgb04c_out90.gbc",
+            "90",
+        ),
+        ("gambatte/window/late_wy_ds_2_cgb04c_out3.gbc", "3"),
+        // The trigger-line WY un-latch (write beats the check at commit
+        // dot <= 4). Its `_2` sibling (keeps the trigger, out3) is
+        // frame-phase-sensitive at this pin's sample point — covered by the
+        // two-bin instead.
+        (
+            "gambatte/window/arg/late_wy_1toFF_ds_1_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// S5 #11bh — the FF0F read PEEK (group A) + write-race squash (group B), the
+/// IF-register analogues of the #11ar FF41 verdict peek: verdict-only, no
+/// machine advance, no dispatch move (the refuted #11bd sub-M FF0F sampling
+/// moved the machine).
+///
+/// Group A: the deferred cc+0 FF0F read's verdict includes a deterministically
+/// imminent STAT engine rise SameBoy's events-first `read_high_memory` frame
+/// has already folded — the DS mode-0 flip one dot ahead (mode-2-ISR-anchored
+/// reads only, `stat_rise_oam`) and the LYC latch half an M-cycle ahead
+/// (`Ppu::ff0f_stat_peek`). Group B: a bit1-clearing FF0F write consumes a
+/// STAT rise landing within the per-source window (DS mode-0 2 dots, SS LYC
+/// 1 dot; everything else 0 — `GB_CONFLICT_WRITE_CPU`, strict-edge
+/// no-re-raise). All windows dual-traced (SBIF/SBACK/SBREAD-ff0f fp vs
+/// SLOPGB wff0f/ff0f/dispatch, 2026-07-03).
+#[test]
+fn tier2_ff0f_groupab_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_ff0f_groupab",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        // Group A: the DS mode-0 rise one dot past the read (rise 255, read 254).
+        ("gambatte/m2int_m0irq/m2int_m0irq_ds_2_cgb04c_out3.gbc", "3"),
+        // GUARD — one M earlier (read 252) stays clear.
+        ("gambatte/m2int_m0irq/m2int_m0irq_ds_1_cgb04c_out1.gbc", "1"),
+        // GUARD — the identical dot-254/rise-255 geometry from an
+        // LYC-anchored ISR reads clear (the `stat_rise_oam` anchor gate).
+        ("gambatte/lyc0int_m0irq/lyc0int_m0irq_ds_1_cgb04c_out0.gbc", "0"),
+        // Group A: the SS LYC=153 latch two dots past the read (rise 6, read 4).
+        (
+            "gambatte/ly0/lycint152_lyc153irq_2_dmg08_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        // GUARDs — reads at dot 0 (SS) / dot 2 (DS) stay clear.
+        (
+            "gambatte/ly0/lycint152_lyc153irq_1_dmg08_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        ("gambatte/ly0/lycint152_lyc153irq_ds_1_cgb04c_outE0.gbc", "E0"),
+        // Group B: the DS mode-0 write-race (write 1-2 dots before the rise
+        // consumes it; the strict edge never re-raises).
+        (
+            "gambatte/m2int_m0irq/m2int_m0irq_scx3_ifw_ds_2_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/m2int_m0irq/m2int_m0irq_scx4_ifw_ds_2_cgb04c_out0.gbc",
+            "0",
+        ),
+        // GUARD — 3-4 dots clear survives.
+        (
+            "gambatte/m2int_m0irq/m2int_m0irq_scx3_ifw_ds_1_cgb04c_out2.gbc",
+            "2",
+        ),
+        // GUARD — the SS mode-0 write-race window is 0 (Δ=1 survives).
+        (
+            "gambatte/m2int_m0irq/m2int_m0irq_scx4_ifw_1_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+        // Group B: the SS LYC write-race (write at dot 5, rise 6 — consumed).
+        (
+            "gambatte/ly0/lycint152_lyc153irq_ifw_2_dmg08_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        // GUARDs — Δ=5 (SS) survives; the DS LYC window is 0 (Δ=2 survives);
+        // the mode-2 pulse window is 0.
+        (
+            "gambatte/ly0/lycint152_lyc153irq_ifw_1_dmg08_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        (
+            "gambatte/ly0/lycint152_lyc153irq_ifw_ds_1_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        ("gambatte/m2int_m2irq/m2int_m2irq_ifw_ds_1_cgb04c_out2.gbc", "2"),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// S5 #11bh group D — the held-LYC pre-write-high suppression on the Tier-2
+/// carryover-tail m0-enable write fire (`stat_write_trigger_cgb`): a line-144
+/// dots-0-3 FF41 write whose OLD value armed LYC with the engine latch still
+/// held (the lyfc-gap hold) rewrites an already-HIGH line — no 0→1 edge on
+/// hardware. `cmp_cgb` has switched to the new line so the top-of-fn
+/// `lyc_high` check misses the held latch.
+#[test]
+fn tier2_m1_lycdisable_boundary_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_m1_lycdisable_boundary",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        // The boundary write (line-144 dot ~1-2, old=0x40 held): silent.
+        (
+            "gambatte/m1/lyc143_late_m0enable_lycdisable_2_dmg08_cgb04c_out1.gbc",
+            "1",
+        ),
+        // GUARDs — the earlier/later legs stay silent for their own reasons
+        // (line-143 tail deferral / past the carryover window).
+        (
+            "gambatte/m1/lyc143_late_m0enable_lycdisable_1_dmg08_cgb04c_out1.gbc",
+            "1",
+        ),
+        (
+            "gambatte/m1/lyc143_late_m0enable_lycdisable_3_dmg08_out3_cgb04c_out1.gbc",
+            "1",
+        ),
+        (
+            "gambatte/m1/lyc143_late_m0enable_lycdisable_ds_1_cgb04c_out1.gbc",
+            "1",
+        ),
+        (
+            "gambatte/m1/lyc143_late_m0enable_lycdisable_ds_2_cgb04c_out1.gbc",
+            "1",
+        ),
+        // GUARD — an old=0x00 carryover-tail enable still fires. (The SS
+        // `ly143_late_m0enable_2` sibling is a pre-existing flag-on fail —
+        // not pinnable.)
+        ("gambatte/m1/ly143_late_m0enable_ds_1_cgb04c_out3.gbc", "3"),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// S5 #11bh group C — the dispatch-ack squash reclock: under tier2 the
+/// whole-dot bit-0/1 `ack_squash_dots = 2` window is replaced by the PPU-side
+/// per-SOURCE windows (`Ppu::ack_squash_ppu`, dots (SS, DS): mode-0 (0, 1) ·
+/// mode-2 pulse (0, 0) · LYC / mode-1 / vblank-IF (2, 0) — all dual-traced
+/// SBACK/SBIF fp vs SLOPGB vec/dispatch). SameBoy's ack is the bare IF clear
+/// at the flushed pending−2 instant; a rise past the window survives and
+/// re-sets IF (the retrigger `_1` legs), a rise inside it merges into the
+/// dispatch (the `_2` legs).
+#[test]
+fn tier2_ack_squash_reclock_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_ack_squash",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        // The six #11bh group-C blockers: rise past the ack window survives.
+        (
+            "gambatte/irq_precedence/late_m0irq_retrigger_ds_1_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        (
+            "gambatte/irq_precedence/late_m0irq_retrigger_scx1_1_dmg08_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        (
+            "gambatte/m2int_m2irq/m2int_m2irq_late_retrigger_1_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+        (
+            "gambatte/lyc153int_m2irq/lyc153int_m2irq_late_retrigger_1_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+        (
+            "gambatte/m1/lycint143_m1irq_late_retrigger_ds_1_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/m1/lycint_vblankirq_late_retrigger_ds_1_cgb04c_out1.gbc",
+            "1",
+        ),
+        // Bonus lifts (the DS twins the whole-dot squash also ate).
+        (
+            "gambatte/ly0/lycint152_lyc0irq_late_retrigger_ds_1_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        (
+            "gambatte/m2int_m2irq/m2int_m2irq_late_retrigger_ds_1_cgb04c_out2.gbc",
+            "2",
+        ),
+        // GUARDs — a rise inside the per-source window stays consumed.
+        (
+            "gambatte/irq_precedence/late_m0irq_retrigger_scx1_ds_2_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        (
+            "gambatte/ly0/lycint152_lyc0irq_late_retrigger_2_dmg08_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        (
+            "gambatte/m1/lycint143_m1irq_late_retrigger_2_dmg08_cgb04c_out1.gbc",
+            "1",
+        ),
+        (
+            "gambatte/m1/lycint_vblankirq_late_retrigger_2_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        // GUARDs — a rise folded at/before the ack is cleared by it.
+        (
+            "gambatte/irq_precedence/late_m0irq_retrigger_ds_2_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        (
+            "gambatte/m2int_m2irq/m2int_m2irq_late_retrigger_2_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// S5 #11bh — three window-line slices off one root cause: the win-line
+/// render clock sits +2 late in slopgb's frame; the FF41 `vis_mode_read` laws
+/// already compensate but three OTHER flip consumers read the raw render
+/// clock (dual-traced fp both emulators, 2026-07-03). (1) the win-line mode-0
+/// ENGINE rise now leads the flip 2 dots (`m2int_wxA5_m0irq_2`); (2) the
+/// wxA6 quirk-window VRAM read release co-moves with the CGB visible exit
+/// (`259 + SCX&7`), wxA6-scoped — the generic release was the vramw A/B, and
+/// the m0 IF rise fires while VRAM is still locked so it must not key the
+/// release (`m2int_wxA6_vrambusyread_3`); (3) the sprite-at-window-X
+/// abort-slot removal: an object at OAM X = WX+1 occupies the fetcher's
+/// GET_TILE_T1 after the window restart, removing the late CGB abort slot,
+/// so an LCDC.5 clear at wx_match−1 leaves the line fully extended
+/// (`late_disable_spx10_wx0f_2`).
+#[test]
+fn tier2_window_line_flip_consumers_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_window_line_flip",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        ("gambatte/window/m2int_wxA5_m0irq_2_dmg08_cgb04c_out2.gbc", "2"),
+        // GUARD — the one-M-earlier read stays clear of the led rise.
+        ("gambatte/window/m2int_wxA5_m0irq_1_dmg08_cgb04c_out0.gbc", "0"),
+        // GUARDs — the FF41 read law was already right; must not double-move.
+        ("gambatte/window/m2int_wxA5_m3stat_1_dmg08_cgb04c_out3.gbc", "3"),
+        ("gambatte/window/m2int_wxA5_m3stat_2_dmg08_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/window/m2int_wxA6_vrambusyread_3_dmg08_cgb04c_out5.gbc",
+            "5",
+        ),
+        // GUARDs — the two earlier reads stay blocked (the CGB exit is one
+        // bucket later than DMG; the release must not fire early).
+        (
+            "gambatte/window/m2int_wxA6_vrambusyread_2_dmg08_out5_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/m2int_wxA6_vrambusyread_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_disable_spx10_wx0f_2_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        // GUARD — the one-slot-earlier clear genuinely aborts.
+        (
+            "gambatte/window/late_disable_spx10_wx0f_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        // Bonus lift (the wxA6+sprite enable row rides the same rise lead).
+        (
+            "gambatte/m0enable/enable_wxA6_2x_spxA7_1_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// S5 #11bh slices (c)+(d) — the glitch-line same-dot SCX hunt re-open + the
+/// DS line-start carryover-enable level hold. (c): the LCD-enable glitch
+/// line's CGB fine-scroll sample deadline is `83 + scx_init` INCLUSIVE — a
+/// same-dot FF43 commit lands after that dot's render tick but hardware's
+/// live comparator still honors it; re-opening the hunt lets it cycle to the
+/// new SCX&7 (asm_enable ROW 5). (d): a DS dots-0-1 fresh LYC enable whose
+/// old value armed HBlank joins a line still latched HIGH from the previous
+/// line's mode-0 (SameBoy's natural 1→0 lands at dot 2) — no edge; the
+/// engine level is seeded high so the next tick stays silent
+/// (asm_m1_misc Rows 5-6). The (e) WY-deadline rows are frame-phase-marginal
+/// and deliberately unpinned (two-bin covered).
+#[test]
+fn tier2_glitch_hunt_carryover_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_glitch_hunt_carryover",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        (
+            "gambatte/enable_display/ly0_late_scx7_m3stat_scx1_1_dmg08_cgb04c_out87.gbc",
+            "87",
+        ),
+        // GUARD — one M later misses the re-open window.
+        (
+            "gambatte/enable_display/ly0_late_scx7_m3stat_scx1_2_dmg08_cgb04c_out84.gbc",
+            "84",
+        ),
+        (
+            "gambatte/miscmstatirq/lycstatwirq_trigger_m0_late_ly44_lyc44_08_40_ds_2_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        // GUARDs — the dot-2 write lands after the natural drop and fires;
+        // the dot-4 write finds both masks low.
+        (
+            "gambatte/miscmstatirq/lycstatwirq_trigger_m0_late_ly44_lyc44_08_40_ds_3_cgb04c_outE2.gbc",
+            "E2",
+        ),
+        (
+            "gambatte/miscmstatirq/lycstatwirq_trigger_m0_late_ly44_lyc44_08_40_ds_4_cgb04c_outE0.gbc",
+            "E0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// S5 #11bh group E — the co-instant line-0 dot-4 OAM-pulse FF0F read-view
+/// mask, LYC-153-anchored: the LYC-153 ISR's IF read lands BEFORE the line-0
+/// pulse in SameBoy's frame (dot 3, rise −1) while slopgb's deferred read
+/// collapses onto the pulse dot and saw the just-folded bit. CPU-read-first
+/// at the shared instant (SameBoy-measured: SBREAD ff0f at the rise fp reads
+/// clear). The LYC-152 ISR's same-dot-4 collapse lands 4 dots AFTER the rise
+/// on SameBoy and must SEE it — the `self.lyc == 153` anchor guard (built
+/// unguarded first: +1/−2 A/B, measured).
+#[test]
+fn tier2_ly0_pulse_readview_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_ly0_pulse_readview",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        (
+            "gambatte/lyc153int_m2irq/lyc153int_m2irq_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        // GUARD — one M later sees the folded pulse.
+        (
+            "gambatte/lyc153int_m2irq/lyc153int_m2irq_2_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+        // GUARDs — the LYC-152-anchored reads keep seeing it (the anchor
+        // guard's measured discriminator).
+        ("gambatte/ly0/lycint152_m2irq_2_dmg08_cgb04c_outE2.gbc", "E2"),
+        ("gambatte/ly0/lycint152_m2irq_ds_2_cgb04c_outE2.gbc", "E2"),
+        ("gambatte/ly0/lycint152_m2irq_1_dmg08_cgb04c_outE0.gbc", "E0"),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// S5 #11bh item-7 count-row slice — the SHIFTED-frame (post-STOP) co-instant
+/// visibility deadline: the lcd_offset count rows' first poll lands ON the
+/// mode-0 rise/flip dot in slopgb's whole-dot frame where the hardware event
+/// is a half-dot PAST the sample (the §2 law: F1 = L + 1.5, uniform ½-dot
+/// margins). Two verdict-only arms, `lcd_shift_dots != 0` scoped (inert
+/// un-switched): the FF0F poll masks a same-dot mode-0 rise
+/// (`m0irq_count`); the FF41 poll holds mode 3 on the recorded flip's own
+/// dot (`m0stat_count`). The error is ONE-SIDED — the `_2` siblings read 2
+/// dots past the event and keep their verdicts (guards).
+#[test]
+fn tier2_lcd_offset_count_deadline_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_lcd_offset_count",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        (
+            "gambatte/lcd_offset/offset1_lyc99int_m0irq_count_scx2_ds_1_cgb04c_out90.gbc",
+            "90",
+        ),
+        (
+            "gambatte/lcd_offset/offset1_lyc99int_m0stat_count_scx2_ds_1_cgb04c_out90.gbc",
+            "90",
+        ),
+        (
+            "gambatte/lcd_offset/offset3_lyc99int_m0stat_count_scx1_1_cgb04c_out90.gbc",
+            "90",
+        ),
+        // GUARDs — the one-M-later polls keep their verdicts.
+        (
+            "gambatte/lcd_offset/offset1_lyc99int_m0irq_count_scx2_ds_2_cgb04c_out90.gbc",
+            "90",
+        ),
+        (
+            "gambatte/lcd_offset/offset1_lyc99int_m0stat_count_scx2_ds_2_cgb04c_out90.gbc",
+            "90",
+        ),
+        (
+            "gambatte/lcd_offset/offset3_lyc99int_m0stat_count_scx0_2_cgb04c_out90.gbc",
+            "90",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// S5 #11bh — the UNSHIFTED CGB SS carryover-tail m0-enable hand-off: with
+/// the two-phase engine view owning FF41 writes (`eng_lyc`), a line-boundary
+/// m0 enable committing on the next line's dots 0-1 catches nothing — the
+/// phase-1 evaluation lands where `mode_for_interrupt` reads the line-start
+/// OAM carry (hardware's `ttnl > 4` dead-tail, asm_enable ROW 3). The
+/// write-instant carryover fire stays for the SHIFTED frames it was built on
+/// and DS.
+#[test]
+fn tier2_late_enable_dead_tail_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_late_enable_dead_tail",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        (
+            "gambatte/m0enable/late_enable_2_dmg08_out2_cgb04c_out0.gbc",
+            "0",
+        ),
+        // GUARDs — the mid-line enable still fires (via the engine phase-1);
+        // the next-line mode-2-zone commit stays silent; the DS boundary
+        // enable keeps the write-instant fire.
+        ("gambatte/m0enable/late_enable_1_dmg08_cgb04c_out2.gbc", "2"),
+        ("gambatte/m0enable/late_enable_3_dmg08_cgb04c_out0.gbc", "0"),
+        ("gambatte/m1/ly143_late_m0enable_ds_1_cgb04c_out3.gbc", "3"),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_with_reclock(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
 // Session-local S5 measurement aid (see the module's doc); `#[ignore]`'d so it
 // never runs in the gate.
 #[path = "gambatte_flagon_probe.rs"]
 mod flagon_probe;
+
+// Session-local PIXEL two-bin (mode-3 render reclock, goal.md); `#[ignore]`'d.
+#[path = "gambatte_pixel_probe.rs"]
+mod pixel_probe;
