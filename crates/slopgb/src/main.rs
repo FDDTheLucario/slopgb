@@ -24,6 +24,7 @@ mod cdl;
 mod cli;
 mod clipboard;
 mod dbg;
+mod fallback_picker;
 mod filepicker;
 mod input;
 mod keymap;
@@ -235,6 +236,15 @@ struct App {
     path_dialog: Option<InputDialog>,
     /// What the open [`Self::path_dialog`] does on accept.
     path_purpose: PathPurpose,
+    /// The in-app fallback file browser ([`fallback_picker::FallbackPicker`]),
+    /// opened instead of [`Self::path_dialog`] for FILE purposes when no
+    /// native picker tool is installed (`PickKind::None` — the link
+    /// host:port prompt — always keeps the typed modal).
+    fallback_picker: Option<fallback_picker::FallbackPicker>,
+    /// Time + position of the last left-press on [`Self::fallback_picker`]'s
+    /// list, for synthesizing a double-click (winit delivers no such event;
+    /// mirrors `toolwin::ToolView::note_click`).
+    fallback_last_click: Option<(Instant, i32, i32)>,
     /// Recently loaded ROM paths (MN4), most-recent first, deduped, capped — the
     /// Recent ROMs submenu. In-memory only (on-disk persistence deferred).
     recent: Vec<PathBuf>,
@@ -316,6 +326,8 @@ impl App {
             info_box: None,
             path_dialog: None,
             path_purpose: PathPurpose::LoadRom,
+            fallback_picker: None,
+            fallback_last_click: None,
             link: link::Link::new(),
             recent: Vec::new(),
             menu_popup: None,
@@ -384,6 +396,12 @@ impl App {
         // locals, not `self`, so the disjoint field borrows stay clean.)
         let info = self.info_box.as_ref();
         let path_dlg = self.path_dialog.as_ref();
+        // `&mut` (not `&ref`, unlike the other overlays): the picker's `view()`
+        // is a live widget call, not a plain read — see `fallback_picker.rs`.
+        // Still a disjoint field borrow from `video`/`options`/etc above, and
+        // `video.draw`'s overlay is `FnOnce`, so moving this `Option<&mut _>`
+        // into the closure (called exactly once) borrow-checks cleanly.
+        let fallback = self.fallback_picker.as_mut();
         let options = self.options.as_ref();
         let wizard = self.key_wizard.as_ref();
         let theme = ui::Theme::BGB;
@@ -402,6 +420,12 @@ impl App {
             if let Some(d) = path_dlg {
                 let area = canvas.bounds();
                 dialog::render(canvas, area, d, &theme);
+            }
+            // The in-app fallback file browser is the same kind of standalone
+            // overlay as the path modal (never open at the same time as it).
+            if let Some(fp) = fallback {
+                let area = canvas.bounds();
+                fp.render(canvas, area.w, area.h, &theme);
             }
             // The key-rebind wizard floats above even the Options dialog.
             if let Some(w) = wizard {
@@ -465,6 +489,20 @@ impl App {
             if let Some(dk) = dialog_key_from(key) {
                 if let Some(result) = self.path_dialog.as_mut().map(|d| d.on_key(dk)) {
                     self.resolve_path_dialog(result);
+                }
+            }
+            return;
+        }
+        // The in-app fallback file browser (no native picker tool installed):
+        // same capture rule as the path modal above, translated through
+        // `fallback_picker::winit_key_to_picker` instead of `dialog_key_from`.
+        if focus == Focus::Game && key.state.is_pressed() && self.fallback_picker.is_some() {
+            if let PhysicalKey::Code(code) = key.physical_key {
+                if let Some(pk) =
+                    fallback_picker::winit_key_to_picker(code, key.text.as_deref(), self.modifiers)
+                {
+                    let outcome = self.fallback_picker.as_mut().map(|fp| fp.feed_key(pk));
+                    self.resolve_fallback_picker(outcome);
                 }
             }
             return;

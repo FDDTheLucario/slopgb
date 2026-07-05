@@ -1,5 +1,21 @@
 use super::*;
+use crate::cli::Options;
+use crate::session::Session;
 use crate::windows::options::BootromSlot;
+use slopgb_core::Model;
+
+/// A blank no-ROM `App`, mirroring `main_tests::blank_app` (private to that
+/// module, so this file needs its own copy).
+fn blank_app() -> App {
+    let opts = Options {
+        rom: None,
+        model: None,
+        scale: 3,
+        mute: true,
+        boot: None,
+    };
+    App::new(opts, Session::blank(Model::Dmg), false, None)
+}
 
 #[test]
 fn sym_sidecar_found_only_when_the_file_exists() {
@@ -39,4 +55,40 @@ fn file_purposes_use_the_open_dialog() {
         pick_kind(PathPurpose::Bootrom(BootromSlot::Dmg)),
         PickKind::Open
     );
+}
+
+// ---- fallback_last_click reset (double-click state doesn't leak across a
+// picker open/close) --------------------------------------------------------
+
+#[test]
+fn opening_the_fallback_picker_clears_a_stale_double_click_timer() {
+    let mut app = blank_app();
+    app.fallback_last_click = Some((std::time::Instant::now(), 10, 10));
+    app.open_fallback_picker("Load ROM", PathPurpose::LoadRom, PickKind::Open);
+    assert!(
+        app.fallback_last_click.is_none(),
+        "a single click right after reopen must not be read as a double-click"
+    );
+}
+
+#[test]
+fn cancelling_the_fallback_picker_clears_the_double_click_timer() {
+    let mut app = blank_app();
+    app.open_fallback_picker("Load ROM", PathPurpose::LoadRom, PickKind::Open);
+    app.fallback_last_click = Some((std::time::Instant::now(), 10, 10));
+    app.resolve_fallback_picker(Some(PickerOutcome::Cancelled));
+    assert!(app.fallback_picker.is_none());
+    assert!(app.fallback_last_click.is_none());
+}
+
+#[test]
+fn picking_from_the_fallback_picker_clears_the_double_click_timer() {
+    let mut app = blank_app();
+    app.open_fallback_picker("Load state", PathPurpose::LoadState, PickKind::Open);
+    app.fallback_last_click = Some((std::time::Instant::now(), 10, 10));
+    // A nonexistent path: `run_path_action`'s `LoadState` arm just logs and
+    // returns on error, so this stays a pure state check.
+    app.resolve_fallback_picker(Some(PickerOutcome::Picked(PathBuf::from("/does/not/exist"))));
+    assert!(app.fallback_picker.is_none());
+    assert!(app.fallback_last_click.is_none());
 }

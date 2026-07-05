@@ -71,8 +71,10 @@ fn memory_view_goto_resolves_hex_symbol_and_ignores_junk() {
 
 #[test]
 fn memory_view_edit_two_nibbles_commit_a_byte_and_advance() {
-    let mut v = MemoryView::default();
-    v.cursor = 0xC000;
+    let mut v = MemoryView {
+        cursor: 0xC000,
+        ..Default::default()
+    };
     // First nibble is held, no write yet.
     assert_eq!(v.edit_hex_digit(0xA), None);
     assert_eq!(v.edit_hi, Some(0xA));

@@ -63,9 +63,11 @@ impl ToolView {
 }
 
 /// A second left-press completes a double-click when it lands within 400 ms and
-/// 3 px of the previous one (winit delivers no double-click event).
+/// 3 px of the previous one (winit delivers no double-click event). `pub(crate)`
+/// so `app_menu`'s game-window fallback-picker click routing can reuse the same
+/// rule instead of re-deriving it.
 #[must_use]
-fn is_double_click(dt: Duration, dx: i32, dy: i32) -> bool {
+pub(crate) fn is_double_click(dt: Duration, dx: i32, dy: i32) -> bool {
     dt < Duration::from_millis(400) && dx.abs() <= 3 && dy.abs() <= 3
 }
 

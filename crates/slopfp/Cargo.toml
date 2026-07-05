@@ -1,0 +1,12 @@
+[package]
+name = "slopfp"
+description = "Std-only, framework-agnostic file-picker state machine + view-model (no rendering, no deps)."
+# Concrete (not workspace-inherited) so the crate directory is liftable into any
+# project by copy-paste — that portability is the whole point of this crate.
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+
+[dependencies]
+# Intentionally empty. std only, forever. See lib.rs `forbid(unsafe_code)`.
