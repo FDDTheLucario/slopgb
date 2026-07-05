@@ -19,6 +19,31 @@ use super::*;
 const BOOT_READ_FRAME: u64 = 2;
 
 impl Ppu {
+    /// The render's projected mode-3→0 flip dot: the flip projection applied
+    /// to the current dot. Shared by the window/boot exit laws here and the
+    /// DMG mode-0 STAT-IF windows (`stat_irq/ff0f.rs`).
+    pub(in crate::ppu) fn projected_flip_dot(&self) -> u16 {
+        let (proj, lead) = self.flip_projection();
+        self.dot + proj.saturating_sub(lead)
+    }
+
+    /// A visible (line 1–143), non-glitch, sprite-free line currently in
+    /// mode 3 — the bare window-exit precondition shared by the DMG/CGB
+    /// window arms of [`Self::vis_exit_hd`].
+    fn bare_m3_visible(&self, m: u8) -> bool {
+        self.line >= 1
+            && self.line < 144
+            && m == 3
+            && !self.glitch_line
+            && self.render.n_sprites == 0
+    }
+
+    /// A non-glitch, sprite-free line — the [`Self::bare_m3_visible`] sub-pair
+    /// reused where the surrounding arm supplies its own mode/line guards.
+    fn bare_sprite_free(&self) -> bool {
+        !self.glitch_line && self.render.n_sprites == 0
+    }
+
     /// STAT mode bits as read through FF41 — the CPU-visible side of the
     /// two-latch model. This is *not* the rendering
     /// state machine: mode reads 0 during the first 4 dots of every line
@@ -228,11 +253,7 @@ impl Ppu {
         if !self.model.is_cgb()
             && self.render.win_active
             && !self.wy_trig_sb_raw
-            && self.line >= 1
-            && self.line < 144
-            && m == 3
-            && !self.glitch_line
-            && self.render.n_sprites == 0
+            && self.bare_m3_visible(m)
         {
             let base = if self.read_carried { 253 } else { 257 };
             fold(&mut exit, 2 * (base + scx7));
@@ -404,8 +425,7 @@ impl Ppu {
             && self.line < 144
             && m == 3
             && !self.render.win_active
-            && !self.glitch_line
-            && self.render.n_sprites == 0
+            && self.bare_sprite_free()
         {
             fold(&mut exit, 2 * 253);
         }
@@ -453,8 +473,7 @@ impl Ppu {
             && self.line < 144
             && m == 3
             && !self.render.win_active
-            && !self.glitch_line
-            && self.render.n_sprites == 0
+            && self.bare_sprite_free()
         {
             fold(&mut exit, 2 * 254);
         }
@@ -475,11 +494,7 @@ impl Ppu {
             && self.scx & 7 <= 3
             && self.eff.lcdc & LCDC_WIN_ENABLE != 0
             && self.render.win_active
-            && self.line >= 1
-            && self.line < 144
-            && m == 3
-            && !self.glitch_line
-            && self.render.n_sprites == 0
+            && self.bare_m3_visible(m)
         {
             fold(&mut exit, 2 * 253);
         }
@@ -498,11 +513,7 @@ impl Ppu {
             && i32::from(self.render.win_reenable_dot) + 3 > i32::from(self.render.wx_match_dot) + scx7
             && self.eff.lcdc & LCDC_WIN_ENABLE != 0
             && self.render.win_active
-            && self.line >= 1
-            && self.line < 144
-            && m == 3
-            && !self.glitch_line
-            && self.render.n_sprites == 0
+            && self.bare_m3_visible(m)
         {
             fold(&mut exit, 2 * 253);
         }
@@ -517,11 +528,7 @@ impl Ppu {
             && !self.ds
             && self.render.win_active
             && !self.wy_trig_sb_raw
-            && self.line >= 1
-            && self.line < 144
-            && m == 3
-            && !self.glitch_line
-            && self.render.n_sprites == 0
+            && self.bare_m3_visible(m)
         {
             fold(&mut exit, 2 * (253 + scx7));
         }
@@ -592,8 +599,7 @@ impl Ppu {
             && !self.render.win_active
             && !self.render.win_aborted
             && !self.wy_trig_sb
-            && !self.glitch_line
-            && self.render.n_sprites == 0
+            && self.bare_sprite_free()
         {
             let carry = self.isr_read_carry_hd();
             if self.ds {
@@ -611,8 +617,7 @@ impl Ppu {
                     let flip = if self.line_render_done && self.flip_dot != 0 {
                         self.flip_dot
                     } else if self.render.active {
-                        let (proj, lead) = self.flip_projection();
-                        self.dot + proj.saturating_sub(lead)
+                        self.projected_flip_dot()
                     } else {
                         255 + u16::from(self.scx & 7)
                     };
@@ -646,8 +651,7 @@ impl Ppu {
                 let flip = if self.line_render_done && self.flip_dot != 0 {
                     self.flip_dot
                 } else {
-                    let (proj, lead) = self.flip_projection();
-                    self.dot + proj.saturating_sub(lead)
+                    self.projected_flip_dot()
                 };
                 // The SS post-switch bare exit: a
                 // 4-variable table. `E = 504 + leave_k −
@@ -780,8 +784,8 @@ impl Ppu {
     fn boot_shift4(&self) -> (u8, u16) {
         let mut d = self.dot + 4;
         let mut l = u16::from(self.line);
-        if d >= 456 {
-            d -= 456;
+        if d >= LINE_DOTS {
+            d -= LINE_DOTS;
             l += 1;
         }
         if l >= 154 {
@@ -827,8 +831,7 @@ impl Ppu {
         if !self.render.active {
             return false;
         }
-        let (proj, lead) = self.flip_projection();
-        d >= self.dot + proj.saturating_sub(lead)
+        d >= self.projected_flip_dot()
     }
 
     /// DMG OAM read-block at a boot-frame shifted position: blocked across the

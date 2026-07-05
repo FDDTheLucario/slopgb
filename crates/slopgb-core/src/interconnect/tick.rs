@@ -3,6 +3,30 @@
 use super::*;
 
 impl Interconnect {
+    /// Consume this M-cycle's dispatch-ack timer/serial squash mask: the
+    /// `ack_squash_mask & 0x0C` while the sync-ahead window is open (stepping
+    /// its countdown), else 0. Shared by the eager `tick_machine` (stores it
+    /// in a local) and the deferred `advance_machine_t` (stores it in
+    /// `deferred_squash`).
+    fn take_ack_squash_tick_mask(&mut self) -> u8 {
+        if self.ack_squash_ticks > 0 {
+            self.ack_squash_ticks -= 1;
+            self.ack_squash_mask & 0x0C
+        } else {
+            0
+        }
+    }
+
+    /// Clear the per-M-cycle late-mask + accessibility/STAT edge stamps at the
+    /// M-cycle head. Shared by the eager `tick_machine` and the deferred
+    /// `advance_machine_t` phase-0 head.
+    fn reset_mcycle_edges(&mut self) {
+        self.if_stat_late = 0;
+        self.m0_access_edge = None;
+        self.pal_access_edge = None;
+        self.stat_mode_edge = None;
+    }
+
     /// Advance the whole machine by one CPU M-cycle (docs/ARCHITECTURE.md
     /// §Timing: timer, OAM DMA engine, PPU dots, VRAM DMA, APU, serial,
     /// joypad; IF bits OR-ed in as produced).
@@ -12,12 +36,7 @@ impl Interconnect {
         // Dispatch-ack sync-ahead window for this tick (see `ack`):
         // timer/serial sets produced by an in-window tick are consumed
         // by the preceding ack instead of re-raising IF.
-        let tick_squash = if self.ack_squash_ticks > 0 {
-            self.ack_squash_ticks -= 1;
-            self.ack_squash_mask & 0x0C
-        } else {
-            0
-        };
+        let tick_squash = self.take_ack_squash_tick_mask();
         let t = self.timer.tick();
         // IF reads must see a second-half commit within its own cycle
         // (mooneye tima_reload access sequences) — only the halt-exit
@@ -26,10 +45,7 @@ impl Interconnect {
         self.intf |= t_iff;
         self.if_late = if t.late { t_iff } else { 0 };
         self.oam_dma_tick();
-        self.if_stat_late = 0;
-        self.m0_access_edge = None;
-        self.pal_access_edge = None;
-        self.stat_mode_edge = None;
+        self.reset_mcycle_edges();
         // cc-granular reclock: advance the M-cycle one CPU cc at a time
         // (cc=1..=4), ticking a whole PPU dot only on the cc's
         // [`dot_ticks_on_cc`] selects for this speed + `dot_phase`. At phase 0
@@ -301,12 +317,7 @@ impl Interconnect {
                 // M-cycle pre-work (the head of `tick_machine`): latch this
                 // M-cycle's timer/serial squash window, run the OAM-DMA engine,
                 // reset the per-M-cycle late masks + accessibility edge stamps.
-                self.deferred_squash = if self.ack_squash_ticks > 0 {
-                    self.ack_squash_ticks -= 1;
-                    self.ack_squash_mask & 0x0C
-                } else {
-                    0
-                };
+                self.deferred_squash = self.take_ack_squash_tick_mask();
                 self.timer.begin_mcycle();
                 self.oam_dma_tick();
                 self.if_late = 0;
@@ -319,10 +330,7 @@ impl Interconnect {
                     self.m0_halt_hold -= 1;
                     self.if_late |= IF_STAT_BIT;
                 }
-                self.if_stat_late = 0;
-                self.m0_access_edge = None;
-                self.pal_access_edge = None;
-                self.stat_mode_edge = None;
+                self.reset_mcycle_edges();
             }
             // The deferred path's timer/serial ack-squash window is the EXACT
             // SameBoy T-threshold (`updateTimaIrq(cc + 2 + isCgb())` /

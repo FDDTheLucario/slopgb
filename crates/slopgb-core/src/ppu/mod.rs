@@ -1137,11 +1137,7 @@ impl Ppu {
         // The SameBoy `double_speed_alignment` shadow (see `sb_dsa8`).
         self.sb_dsa8 = (self.sb_dsa8 + 2) & 7;
         self.dot += 1;
-        let len = if self.glitch_line {
-            GLITCH_LINE_DOTS
-        } else {
-            LINE_DOTS
-        };
+        let len = self.line_len();
         if self.dot == len {
             self.dot = 0;
             self.glitch_line = false;
@@ -1581,12 +1577,18 @@ impl Ppu {
     /// from the same led `predictedNextM0Time` anchor). The interconnect
     /// consults this when HBlank DMA is enabled mid-window and when a
     /// halt/stop wake re-evaluates a pending block.
-    pub(crate) fn hdma_period(&self) -> bool {
-        let len = if self.glitch_line {
+    /// This line's dot length: 452 on the LCD-enable glitch line, else 456.
+    #[inline]
+    fn line_len(&self) -> u16 {
+        if self.glitch_line {
             GLITCH_LINE_DOTS
         } else {
             LINE_DOTS
-        };
+        }
+    }
+
+    pub(crate) fn hdma_period(&self) -> bool {
+        let len = self.line_len();
         self.hdma_trigger_level() && self.dot + 3 < len
     }
 
@@ -1601,11 +1603,7 @@ impl Ppu {
         if self.lcd_shift_dots == 0 {
             return self.hdma_period();
         }
-        let len = if self.glitch_line {
-            GLITCH_LINE_DOTS
-        } else {
-            LINE_DOTS
-        };
+        let len = self.line_len();
         let (ll, ld) = self.law_pos();
         self.hdma_trigger_level() && ll == self.line && ld + 3 < len
     }

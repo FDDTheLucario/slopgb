@@ -107,6 +107,22 @@ impl Interconnect {
         w
     }
 
+    /// Mask the mode-0-origin STAT rise bit out of an interrupt word `w`
+    /// while it is not yet visible on the T-deadline (the same frame offset
+    /// the halt/dispatch samples consult). Tier2 DMG (+CGB single-speed);
+    /// production leaves `w` untouched (flag-gated OFF → byte-identical).
+    fn mask_hidden_m0_stat(&self, w: u8) -> u8 {
+        if w & IF_STAT_BIT != 0
+            && self.tier2_reclock
+            && (!self.model.is_cgb() || !self.double_speed)
+            && self.ppu.stat_rise_m0()
+            && self.clock.now() < self.stat_vis_from_t
+        {
+            return w & !IF_STAT_BIT;
+        }
+        w
+    }
+
     pub(super) fn halt_wake_impl(&self) -> u8 {
         // The halt-exit logic samples IE & IF *within* the M-cycle, not at
         // its end (SameBoy sm83_cpu.c `GB_cpu_run`: DMG samples mid-cycle
@@ -133,15 +149,7 @@ impl Interconnect {
         let w = (self.intf & !self.if_late) & self.ie & IF_MASK;
         // The m0-origin STAT rise's halt visibility is the T-deadline
         // (covers the halt-entry first check too). Tier2 DMG (+CGB sweep).
-        if w & IF_STAT_BIT != 0
-            && self.tier2_reclock
-            && (!self.model.is_cgb() || !self.double_speed)
-            && self.ppu.stat_rise_m0()
-            && self.clock.now() < self.stat_vis_from_t
-        {
-            return w & !IF_STAT_BIT;
-        }
-        w
+        self.mask_hidden_m0_stat(w)
     }
 
     pub(super) fn ack_impl(&mut self, bit: u8) {
@@ -462,15 +470,7 @@ impl Interconnect {
         // m0-origin STAT rise's frame offset (the same T-deadline the wake
         // sampler consults) applies here too, else a rise landing in the
         // fetch M-cycle falsely arms the halt-bug.
-        if w & IF_STAT_BIT != 0
-            && self.tier2_reclock
-            && (!self.model.is_cgb() || !self.double_speed)
-            && self.ppu.stat_rise_m0()
-            && self.clock.now() < self.stat_vis_from_t
-        {
-            return w & !IF_STAT_BIT;
-        }
-        w
+        self.mask_hidden_m0_stat(w)
     }
 
     pub(super) fn halt_entry_rewind_impl(&mut self) -> bool {
@@ -492,14 +492,6 @@ impl Interconnect {
         // measured to shift the deferred operand frame of every following
         // instruction (8 pins broken) and is NOT SameBoy's semantics.
         let w = self.pending();
-        if w & IF_STAT_BIT != 0
-            && self.tier2_reclock
-            && (!self.model.is_cgb() || !self.double_speed)
-            && self.ppu.stat_rise_m0()
-            && self.clock.now() < self.stat_vis_from_t
-        {
-            return w & !IF_STAT_BIT;
-        }
-        w
+        self.mask_hidden_m0_stat(w)
     }
 }

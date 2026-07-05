@@ -70,8 +70,7 @@ impl Ppu {
             && !self.line_render_done
             && self.render.active
         {
-            let (proj, lead) = self.flip_projection();
-            let rise = self.dot + proj.saturating_sub(lead);
+            let rise = self.projected_flip_dot();
             if rise <= self.dot + 1 {
                 return IF_STAT;
             }
@@ -100,7 +99,7 @@ impl Ppu {
             let kmax = if self.ds { 1 } else { 2 };
             for k in 1..=kmax {
                 let d = self.dot + k;
-                if d >= 456 || ((1..=143).contains(&self.line) && d <= 2) {
+                if d >= LINE_DOTS || ((1..=143).contains(&self.line) && d <= 2) {
                     continue;
                 }
                 let ly = self.ly_for_comparison_at(self.line, d);
@@ -136,8 +135,7 @@ impl Ppu {
         if self.line_render_done && self.flip_dot != 0 {
             Some(self.flip_dot)
         } else if self.render.active {
-            let (proj, lead) = self.flip_projection();
-            Some(self.dot + proj.saturating_sub(lead))
+            Some(self.projected_flip_dot())
         } else {
             None
         }

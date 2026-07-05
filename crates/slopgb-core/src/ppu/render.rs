@@ -418,6 +418,19 @@ impl Ppu {
     }
 
     /// One mode-3 dot.
+    /// Commit the sprite the fetch loop just picked at slot `i`: charge the
+    /// object-fetch base + per-sprite X penalty onto `stall`, mark it fetched
+    /// and run the fetch. The identical tail of both the prefill and mid-line
+    /// sprite loops.
+    fn fetch_picked_sprite(&mut self, i: usize) {
+        let s = self.render.sprites[i];
+        let base = obj_fetch_base(self.model.is_cgb(), self.render.fetched);
+        self.render.fetched |= 1 << i;
+        let wait = self.sprite_penalty(s.x);
+        self.fetch_sprite(i);
+        self.render.stall += base + wait;
+    }
+
     pub(super) fn render_step(&mut self) {
         self.render.mode3_dot += 1;
         if self.render.stall > 0 {
@@ -473,12 +486,7 @@ impl Ppu {
                         }
                     }
                     let Some(i) = pick else { break };
-                    let s = self.render.sprites[i];
-                    let base = obj_fetch_base(self.model.is_cgb(), self.render.fetched);
-                    self.render.fetched |= 1 << i;
-                    let wait = self.sprite_penalty(s.x);
-                    self.fetch_sprite(i);
-                    self.render.stall += base + wait;
+                    self.fetch_picked_sprite(i);
                 }
                 if self.render.stall > 0 {
                     self.render.fetch_run = self.render.stall;
@@ -534,12 +542,7 @@ impl Ppu {
                     }
                 }
                 let Some(i) = pick else { break };
-                let s = self.render.sprites[i];
-                let base = obj_fetch_base(self.model.is_cgb(), self.render.fetched);
-                self.render.fetched |= 1 << i;
-                let wait = self.sprite_penalty(s.x);
-                self.fetch_sprite(i);
-                self.render.stall += base + wait;
+                self.fetch_picked_sprite(i);
                 self.m0_unflip();
             }
             if self.render.stall > 0 {
