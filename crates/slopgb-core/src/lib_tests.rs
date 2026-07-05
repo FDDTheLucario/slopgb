@@ -498,6 +498,74 @@ fn debug_write_round_trips_through_debug_read() {
 }
 
 #[test]
+fn cdl_load_restores_a_flag_buffer() {
+    let mut gb = GameBoy::new(Model::Dmg, rom_with_cgb_flag(0x00)).unwrap();
+    let mut fixture = [0u8; 65536];
+    fixture[0x0150] = 4; // X
+    fixture[0xC000] = 3; // R|W
+    gb.load_cdl(&fixture);
+    assert_eq!(gb.cdl_flag(0x0150), 4);
+    assert_eq!(gb.cdl_flag(0xC000), 3);
+    assert_eq!(gb.cdl_flags().map(<[u8]>::len), Some(65536), "log enabled");
+}
+
+#[test]
+fn cdl_records_read_write_execute_only_when_armed() {
+    // write_c000_rom: 0100 `ld a,42` (X@0100, operand R@0101), 0102 `ld (C000),a`
+    // (X@0102, W@C000), 0105 `jr -2`.
+    let mut gb = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
+    gb.set_cdl(true);
+    for _ in 0..4 {
+        gb.step();
+    }
+    assert!(gb.cdl_flag(0x0100) & 4 != 0, "X at the first opcode");
+    assert!(gb.cdl_flag(0x0102) & 4 != 0, "X at the store opcode");
+    assert!(gb.cdl_flag(0x0101) & 1 != 0, "R at the immediate operand byte");
+    assert!(gb.cdl_flag(0xC000) & 2 != 0, "W at the stored address");
+    // Disarmed: a fresh run logs nothing.
+    let mut off = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
+    for _ in 0..4 {
+        off.step();
+    }
+    assert_eq!(off.cdl_flag(0x0100), 0, "no log when CDL is off");
+    assert_eq!(off.cdl_flag(0xC000), 0);
+}
+
+#[test]
+fn cdl_logging_does_not_perturb_emulation() {
+    // The same ROM + steps with CDL off vs on must leave identical machine state
+    // (recording is write-only from the machine's view — golden-safe).
+    let run = |cdl: bool| {
+        let mut gb = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
+        gb.set_cdl(cdl);
+        for _ in 0..200 {
+            gb.step();
+        }
+        let r = gb.cpu_regs();
+        (r.af(), r.bc(), r.pc, r.sp, gb.debug_read(0xC000), gb.cycles())
+    };
+    assert_eq!(run(false), run(true), "CDL recording must not change emulation");
+}
+
+#[test]
+fn cdl_defaults_off_toggles_and_survives_a_state_load() {
+    let mut gb = GameBoy::new(Model::Dmg, rom_with_cgb_flag(0x00)).unwrap();
+    assert_eq!(gb.cdl_flag(0x0100), 0, "off: flag reads 0");
+    assert!(gb.cdl_flags().is_none(), "off: no buffer");
+    gb.set_cdl(true);
+    assert_eq!(gb.cdl_flags().map(<[u8]>::len), Some(65536), "on: 64 KiB buffer");
+    assert!(gb.cdl_flags().unwrap().iter().all(|&f| f == 0), "on: all clear");
+    // A save-state load leaves the CDL untouched — it is live UI state, not
+    // serialized — so the buffer stays enabled across a load.
+    let snap = gb.save_state();
+    gb.load_state(&snap).unwrap();
+    assert!(gb.cdl_flags().is_some(), "CDL survives a state load");
+    gb.set_cdl(false);
+    assert!(gb.cdl_flags().is_none(), "off drops the buffer");
+    assert_eq!(gb.cdl_flag(0x0100), 0);
+}
+
+#[test]
 fn channel_mute_round_trips_and_defaults_off() {
     let mut gb = GameBoy::new(Model::Dmg, rom_with_cgb_flag(0x00)).unwrap();
     for ch in 1..=4 {

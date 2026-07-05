@@ -14,6 +14,11 @@ impl Interconnect {
     /// no-op on every golden path (golden-safe). Replaces the former
     /// `check_watch`, called from the ticked `Bus` read/read_inc/write.
     pub(super) fn check_access(&mut self, addr: u16, is_write: bool) {
+        // CDL: record a CPU read/write of this byte (R=1, W=2). `None` when the
+        // log is off → no-op, so the golden path is byte-identical.
+        if let Some(b) = &mut self.cdl {
+            b[addr as usize] |= if is_write { 2 } else { 1 };
+        }
         if !self.watchpoints.is_empty()
             && self
                 .watchpoints
@@ -133,6 +138,42 @@ impl Interconnect {
         if let Some(m) = &mut self.prof {
             m.clear();
         }
+    }
+
+    /// Enable/disable the code/data log (CDL). Enabling allocates the 64 KiB flag
+    /// buffer (preserving an existing one); disabling drops it. Live-debugger-only,
+    /// golden-safe (a `None` log is a no-op in every CDL hook).
+    pub fn set_cdl(&mut self, on: bool) {
+        match (on, self.cdl.is_some()) {
+            (true, false) => self.cdl = Some(Box::new([0u8; 65536])),
+            (false, true) => self.cdl = None,
+            _ => {}
+        }
+    }
+
+    /// The CDL access flags at `addr` (R=1, W=2, X=4), or 0 when the log is
+    /// off/the byte is unvisited.
+    #[must_use]
+    pub fn cdl_flag(&self, addr: u16) -> u8 {
+        self.cdl.as_ref().map_or(0, |b| b[addr as usize])
+    }
+
+    /// The whole 64 KiB flag buffer (for a save), or `None` when the log is off.
+    #[must_use]
+    pub fn cdl_flags(&self) -> Option<&[u8]> {
+        self.cdl.as_deref().map(|b| &b[..])
+    }
+
+    /// Zero the CDL flags without disabling logging (bgb's "clear buffer").
+    pub fn cdl_clear(&mut self) {
+        if let Some(b) = &mut self.cdl {
+            b.fill(0);
+        }
+    }
+
+    /// Load a CDL flag buffer (a loaded `.cdl` file), enabling the log.
+    pub fn load_cdl(&mut self, flags: &[u8; 65536]) {
+        self.cdl = Some(Box::new(*flags));
     }
 
     /// Whether the profiler is currently logging.

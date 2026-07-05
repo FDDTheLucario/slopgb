@@ -451,6 +451,10 @@ pub struct Interconnect {
     /// default; a `None` tally makes `profile_pc` a no-op, so golden is
     /// byte-identical.
     prof: Option<std::collections::BTreeMap<u16, u64>>,
+    /// FCEUX-style code/data log: per-CPU-address access flags (R=1, W=2, X=4).
+    /// `None` (off) by default; a `None` log makes every CDL hook a no-op, so the
+    /// golden path is byte-identical. Excluded from save-state (live UI state).
+    cdl: Option<Box<[u8; 65536]>>,
     /// Profiler break mode: halt the free run on each address's first execution.
     prof_break: bool,
     /// The pending profiler break hit address, consumed by the run loop.
@@ -557,6 +561,7 @@ impl Interconnect {
             watchpoints: Vec::new(),
             watch_hit: None,
             prof: None,
+            cdl: None,
             prof_break: false,
             prof_break_hit: None,
             exc_mask: 0,
@@ -825,6 +830,12 @@ impl Bus for Interconnect {
     /// every golden/test path, so this records nothing and the emulated state
     /// (and the fingerprint) is byte-identical.
     fn profile_pc(&mut self, pc: u16) {
+        // CDL: mark the executed instruction's opcode byte as code (X=4). Operand
+        // bytes are marked R by the fetch read path (acceptable over-approx).
+        // `None` when the log is off → no-op, so golden is byte-identical.
+        if let Some(b) = &mut self.cdl {
+            b[pc as usize] |= 4;
+        }
         if let Some(m) = &mut self.prof {
             let count = m.entry(pc).or_insert(0);
             let first_seen = *count == 0;

@@ -379,6 +379,35 @@ impl GameBoy {
         self.bus.clear_profile();
     }
 
+    /// Enable/disable the FCEUX-style code/data log (CDL): per-CPU-address R/W/X
+    /// access flags. Off by default and never set on a golden/test path, so it is
+    /// golden-safe (a `None` log is a zero-overhead no-op in every access hook).
+    pub fn set_cdl(&mut self, on: bool) {
+        self.bus.set_cdl(on);
+    }
+
+    /// The CDL access flags at `addr` (R=1, W=2, X=4), 0 when off/unvisited.
+    #[must_use]
+    pub fn cdl_flag(&self, addr: u16) -> u8 {
+        self.bus.cdl_flag(addr)
+    }
+
+    /// The whole CDL flag buffer (for a save), or `None` when the log is off.
+    #[must_use]
+    pub fn cdl_flags(&self) -> Option<&[u8]> {
+        self.bus.cdl_flags()
+    }
+
+    /// Zero the CDL flags without disabling logging.
+    pub fn cdl_clear(&mut self) {
+        self.bus.cdl_clear();
+    }
+
+    /// Load a CDL flag buffer (a loaded `.cdl` file), enabling the log.
+    pub fn load_cdl(&mut self, flags: &[u8; 65536]) {
+        self.bus.load_cdl(flags);
+    }
+
     /// Arm/disarm profiler "break mode": the free run halts the first time each
     /// address executes (bgb's coverage break). Only meaningful with profiling
     /// on; live-debugger-only, golden-safe.
