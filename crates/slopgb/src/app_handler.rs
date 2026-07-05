@@ -15,7 +15,7 @@ use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
-use winit::keyboard::PhysicalKey;
+use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 use crate::input::Focus;
@@ -164,6 +164,23 @@ impl ApplicationHandler for App {
                     let mem_win =
                         self.tools.kind_of(window_id) == Some(ui::ToolWindow::MemoryViewer);
                     if mem_win && event.state.is_pressed() {
+                        // An open Go to… dialog captures every key (so typing an
+                        // address can't scroll the pane or trigger a hotkey).
+                        if self.tools.mem_dialog_active(window_id) {
+                            if let Some(dk) = crate::dialog_key_from(&event) {
+                                self.tools.feed_mem_dialog(window_id, dk);
+                            }
+                            return;
+                        }
+                        // Ctrl+G opens the Go to… dialog (bgb parity; the
+                        // integrated pane already has this via input::map).
+                        if self.modifiers.control_key()
+                            && event.physical_key == PhysicalKey::Code(KeyCode::KeyG)
+                        {
+                            self.tools.open_mem_goto(window_id);
+                            return;
+                        }
+                        // Otherwise the window owns its arrow/Page nav keys.
                         if let PhysicalKey::Code(code) = event.physical_key {
                             if self.tools.mem_window_key(window_id, code) {
                                 return;

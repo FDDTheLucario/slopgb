@@ -16,6 +16,7 @@ use slopgb_core::{GameBoy, debug};
 use crate::dbg::Breakpoints;
 use crate::symbols::SymbolTable;
 use crate::ui::canvas::Rect;
+use crate::ui::dialog::InputDialog;
 use crate::ui::text::{draw_text, line_height};
 use crate::ui::widgets::{checkbox, radio_group};
 use crate::ui::{Canvas, Theme, ToolWindow};
@@ -57,6 +58,9 @@ impl WinState {
 pub struct MemoryView {
     pub mem_base: u16,
     pub symbols: Rc<SymbolTable>,
+    /// Open `Go to…` prompt (Ctrl+G); `None` when idle. Mirrors the integrated
+    /// debugger pane's modal, scoped to this standalone window.
+    pub goto: Option<InputDialog>,
 }
 
 impl Default for MemoryView {
@@ -64,6 +68,7 @@ impl Default for MemoryView {
         Self {
             mem_base: 0xFF00,
             symbols: Rc::new(SymbolTable::default()),
+            goto: None,
         }
     }
 }
@@ -73,6 +78,21 @@ impl MemoryView {
     /// wrapping the 64 KiB space — same model as the debugger memory pane.
     pub fn scroll(&mut self, rows: i32) {
         self.mem_base = self.mem_base.wrapping_add(rows.wrapping_mul(16) as u16);
+    }
+
+    /// Apply a `Go to…` entry: a loaded symbol name resolves to its address,
+    /// else a hex parse (accepting `$`/`0x` prefixes). Returns whether the entry
+    /// resolved; an empty/garbage entry leaves `mem_base` unchanged. Mirrors the
+    /// integrated pane's accept_dialog Goto arm.
+    pub fn apply_goto(&mut self, text: &str) -> bool {
+        let t = text.trim();
+        let hex = t.trim_start_matches('$').trim_start_matches("0x");
+        if let Some(addr) = self.symbols.resolve(t).or_else(|| u16::from_str_radix(hex, 16).ok()) {
+            self.mem_base = addr;
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -133,6 +153,9 @@ fn render_memory_window(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme,
         None => format!("{:04X}  ----", st.mem_base),
     };
     draw_text(c, area.x + 2, bar_y + 1, &status, theme.text);
+    if let Some(dlg) = &st.goto {
+        crate::ui::dialog::render(c, area, dlg, theme);
+    }
 }
 
 fn regs_view(gb: &GameBoy, clock_base: u64) -> debugger::RegsView {

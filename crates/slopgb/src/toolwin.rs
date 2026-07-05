@@ -19,7 +19,7 @@ use winit::window::{Window, WindowId};
 
 use crate::dbg::Breakpoints;
 use crate::ui::canvas::Rect;
-use crate::ui::dialog::DialogKey;
+use crate::ui::dialog::{DialogKey, DialogResult, InputDialog};
 use crate::ui::text::line_height;
 use crate::ui::{Canvas, Theme, ToolWindow, WindowRegistry};
 use crate::windows::{self, WinState, debugger, vram};
@@ -453,6 +453,49 @@ impl ToolWindows {
     /// row, PageUp/Down by a page); returns whether it was consumed (so the caller
     /// doesn't also route it as a game button). Repeats are welcome here, so it is
     /// not behind the key-repeat guard — holding an arrow scrolls continuously.
+    /// Whether the standalone memory window `id` has an open `Go to…` dialog
+    /// (so the key path routes keys to it instead of scrolling/hotkeys).
+    #[must_use]
+    pub fn mem_dialog_active(&self, id: WindowId) -> bool {
+        matches!(
+            self.views.get(&id).map(|v| &v.state),
+            Some(WinState::Memory(s)) if s.goto.is_some()
+        )
+    }
+
+    /// Open the `Go to…` dialog on the standalone memory window `id` (Ctrl+G).
+    pub fn open_mem_goto(&mut self, id: WindowId) {
+        if let Some(view) = self.views.get_mut(&id) {
+            if let WinState::Memory(s) = &mut view.state {
+                s.goto = Some(InputDialog::new("Go to address or symbol", false));
+                view.window.request_redraw();
+            }
+        }
+    }
+
+    /// Feed a key to the standalone memory window's `Go to…` dialog: apply the
+    /// address on Accept, close on Accept/Cancel. Redraws.
+    pub fn feed_mem_dialog(&mut self, id: WindowId, key: DialogKey) {
+        let Some(view) = self.views.get_mut(&id) else {
+            return;
+        };
+        let WinState::Memory(s) = &mut view.state else {
+            return;
+        };
+        let Some(dlg) = &mut s.goto else {
+            return;
+        };
+        match dlg.on_key(key) {
+            DialogResult::Continue => {}
+            DialogResult::Accept(text) => {
+                s.apply_goto(&text);
+                s.goto = None;
+            }
+            DialogResult::Cancel => s.goto = None,
+        }
+        view.window.request_redraw();
+    }
+
     pub fn mem_window_key(&mut self, id: WindowId, code: KeyCode) -> bool {
         let Some(view) = self.views.get_mut(&id) else {
             return false;

@@ -703,7 +703,7 @@ fn push_recent_into(recent: &mut Vec<PathBuf>, path: &Path) {
 /// Translate a winit key event into an abstract [`DialogKey`] for the modal
 /// prompt: the named editing keys (backspace / enter / escape), else the typed
 /// character.
-fn dialog_key_from(key: &KeyEvent) -> Option<DialogKey> {
+pub(crate) fn dialog_key_from(key: &KeyEvent) -> Option<DialogKey> {
     if let PhysicalKey::Code(code) = key.physical_key {
         match code {
             KeyCode::Backspace => return Some(DialogKey::Backspace),

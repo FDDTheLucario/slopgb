@@ -53,6 +53,23 @@ fn memory_view_scroll_wraps_by_rows() {
 }
 
 #[test]
+fn memory_view_goto_resolves_hex_symbol_and_ignores_junk() {
+    use crate::symbols::SymbolTable;
+    use std::rc::Rc;
+    let mut v = MemoryView::default();
+    assert!(v.apply_goto("C000"));
+    assert_eq!(v.mem_base, 0xC000);
+    assert!(v.apply_goto("$8000"), "accepts $ prefix");
+    assert_eq!(v.mem_base, 0x8000);
+    assert!(!v.apply_goto("zzz"), "garbage rejected");
+    assert_eq!(v.mem_base, 0x8000, "junk leaves base unchanged");
+    // A loaded symbol name resolves to its address.
+    v.symbols = Rc::new(SymbolTable::parse("00:1234 Foo"));
+    assert!(v.apply_goto("Foo"));
+    assert_eq!(v.mem_base, 0x1234);
+}
+
+#[test]
 fn memory_window_status_bar_shows_nearest_symbol() {
     use crate::symbols::SymbolTable;
     use std::rc::Rc;
@@ -61,6 +78,7 @@ fn memory_window_status_bar_shows_nearest_symbol() {
     let st = WinState::Memory(MemoryView {
         mem_base: 0x4008,
         symbols: Rc::new(SymbolTable::parse("00:4000 Reset")),
+        goto: None,
     });
     let (w, h) = (430usize, 360usize);
     let mut buf = vec![0u32; w * h];
