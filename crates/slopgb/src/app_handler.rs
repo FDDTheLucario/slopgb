@@ -139,7 +139,7 @@ impl ApplicationHandler for App {
                         MouseScrollDelta::LineDelta(_, y) => y,
                         MouseScrollDelta::PixelDelta(p) => (p.y / 16.0) as f32,
                     };
-                    self.tools.on_wheel(window_id, lines);
+                    self.tools.on_wheel(window_id, lines, &self.session.gb);
                 }
                 WindowEvent::MouseInput {
                     state: ElementState::Pressed,

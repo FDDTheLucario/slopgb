@@ -311,7 +311,13 @@ fn render_debugger(
     }
     debugger::render_regs(c, l.regs, &regs_view(gb, st.clock_base), theme);
     let stack_rows = (l.stack.h / line_height()).max(0) as usize;
-    debugger::render_stack(c, l.stack, &gb.stack(stack_rows), theme);
+    debugger::render_stack(
+        c,
+        l.stack,
+        &gb.stack(st.stack_off + stack_rows),
+        st.stack_off,
+        theme,
+    );
     debugger::render_memory(c, l.memory, |a| gb.debug_read(a), st.mem_base, theme, &st.symbols);
     // The open context menu / modal draws last, on top of every pane.
     if let Some(om) = &st.menu {
@@ -384,6 +390,19 @@ fn tiles_two_col(content: Rect) -> (Rect, Rect, i32) {
     (left, right, s)
 }
 
+/// Two-column BG-map layout: BG tilemap left, window tilemap right, each a 32×32
+/// tile grid fitted to half the `content` width with a small gutter. Mirrors
+/// [`tiles_two_col`]; shared by the render and the hover hit-test.
+fn bgmap_two_col(content: Rect) -> (Rect, Rect, i32) {
+    const GUTTER: i32 = 6;
+    let half_w = (content.w - GUTTER).max(0) / 2;
+    let s = vram::fit_scale(half_w, content.h, 32 * 8, 32 * 8);
+    let g = 32 * 8 * s;
+    let left = Rect::new(content.x, content.y, g, g);
+    let right = Rect::new(content.x + half_w + GUTTER, content.y, g, g);
+    (left, right, s)
+}
+
 fn render_vram(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, state: &VramState) {
     let l = vram::layout(area);
     vram::render_tabs(c, area.x + 2, area.y + 2, state.tab, theme);
@@ -394,6 +413,9 @@ fn render_vram(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, state: &
     // bank 1 right), so its geometry differs from the single-grid vram_geom (each
     // grid fits half the content width). DMG has one bank → None.
     let tiles_two = (state.tab == VramTab::Tiles && cgb).then(|| tiles_two_col(l.content));
+    // The BG-map tab shows the BG tilemap (left) and window tilemap (right) side
+    // by side, like the two-bank Tiles view.
+    let bgmap_two = (state.tab == VramTab::BgMap).then(|| bgmap_two_col(l.content));
     match state.tab {
         VramTab::Tiles => {
             // A raw tile has no inherent palette, so bgb renders the Tiles grid
@@ -420,19 +442,18 @@ fn render_vram(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, state: &
             );
         }
         VramTab::BgMap => {
-            let (base, signed) = bgmap_source(gb, state);
+            let (bg_base, win_base, signed) = bgmap_bases(gb, state);
             let (pals, n) = bg_palettes(gb, state.show_paletted);
+            let (left, right, s) = bgmap_two.expect("bgmap_two set on the BG map tab");
+            // Left = BG tilemap with the screen viewport box; right = window
+            // tilemap with the WX/WY region box (both gated by `scxy`).
             vram::render_bgmap(
-                c,
-                l.content,
-                gb.vram(),
-                base,
-                signed,
-                &pals[..n],
-                cgb,
-                g.scale,
-                bgmap_overlay(gb, state),
-                theme,
+                c, left, gb.vram(), bg_base, signed, &pals[..n], cgb, s,
+                screen_overlay(gb, state.scxy), theme,
+            );
+            vram::render_bgmap(
+                c, right, gb.vram(), win_base, signed, &pals[..n], cgb, s,
+                window_overlay(gb, state.scxy), theme,
             );
         }
         VramTab::Palettes => {
@@ -456,9 +477,10 @@ fn render_vram(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, state: &
     }
     // bgb frames the grid and the details column as separate panels. The grid
     // tabs frame the *bounded* extent (so the map doesn't bleed grid lines into
-    // empty space); Palettes frames the whole content area. The two-bank Tiles
-    // view frames each grid separately.
-    if let Some((left, right, s)) = tiles_two {
+    // empty space); Palettes frames the whole content area. The two-grid Tiles /
+    // BG-map views frame each grid separately.
+    let two = tiles_two.or(bgmap_two);
+    if let Some((left, right, s)) = two {
         let cell = 8 * s;
         if state.grid {
             draw_grid(c, left, cell, cell, theme);
@@ -474,7 +496,7 @@ fn render_vram(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, state: &
     }
     c.outline_rect(l.details, theme.border);
     render_vram_controls(c, &l, state, cgb, theme);
-    render_vram_details(gb, c, &l, state, g.scale, tiles_two, theme);
+    render_vram_details(gb, c, &l, state, g.scale, two, theme);
 }
 
 /// The BG-map tab's 8 BG palettes (CGB) or single BGP palette (DMG) as RGB888,
@@ -521,22 +543,27 @@ fn obj_palettes(gb: &GameBoy, show_paletted: bool) -> ([[u32; 4]; 8], usize) {
     }
 }
 
-/// The BG-map overlay box: the window's WX/WY region in window-view mode, else
-/// the screen's SCX/SCY viewport — both gated by the `scxy` toggle.
-fn bgmap_overlay(gb: &GameBoy, state: &VramState) -> vram::MapOverlay {
-    if !state.scxy {
-        return vram::MapOverlay::None;
+/// The BG grid's screen viewport (SCX/SCY) box when `on`, else no overlay.
+fn screen_overlay(gb: &GameBoy, on: bool) -> vram::MapOverlay {
+    if on {
+        vram::MapOverlay::Screen {
+            scx: gb.debug_read(0xFF43),
+            scy: gb.debug_read(0xFF42),
+        }
+    } else {
+        vram::MapOverlay::None
     }
-    if state.show_window {
+}
+
+/// The window grid's WX/WY region box when `on`, else no overlay.
+fn window_overlay(gb: &GameBoy, on: bool) -> vram::MapOverlay {
+    if on {
         vram::MapOverlay::Window {
             wx: gb.debug_read(0xFF4B),
             wy: gb.debug_read(0xFF4A),
         }
     } else {
-        vram::MapOverlay::Screen {
-            scx: gb.debug_read(0xFF43),
-            scy: gb.debug_read(0xFF42),
-        }
+        vram::MapOverlay::None
     }
 }
 
@@ -546,20 +573,18 @@ fn xrgb(word: u16) -> u32 {
     (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b)
 }
 
-/// Resolve the BG-map base + tile-addressing from the source radios, falling
-/// back to LCDC auto-detection (`Auto`). In window-view mode the auto base is the
-/// window tilemap select (LCDC bit 6) instead of the BG select (bit 3).
-fn bgmap_source(gb: &GameBoy, state: &VramState) -> (u16, bool) {
+/// Resolve the two BG-map bases (BG tilemap, window tilemap) + shared tile
+/// addressing from the source radios, falling back to LCDC auto-detection: BG uses
+/// the BG tilemap select (bit 3), window the window tilemap select (bit 6).
+// ponytail: an explicit `Map` radio (9800/9C00) forces BOTH grids to that base
+// (they then show the same region) — `Auto` is the useful default that shows the
+// two distinct maps.
+fn bgmap_bases(gb: &GameBoy, state: &VramState) -> (u16, u16, bool) {
     let lcdc = gb.debug_read(0xFF40);
-    let auto_select = if state.show_window {
-        lcdc & 0x40 != 0
-    } else {
-        lcdc & 0x08 != 0
-    };
-    let base = match state.map_src {
+    let base_of = |auto_9c00: bool| match state.map_src {
         1 => 0x9800,
         2 => 0x9C00,
-        _ if auto_select => 0x9C00,
+        _ if auto_9c00 => 0x9C00,
         _ => 0x9800,
     };
     let signed = match state.tile_src {
@@ -567,7 +592,7 @@ fn bgmap_source(gb: &GameBoy, state: &VramState) -> (u16, bool) {
         2 => false,
         _ => lcdc & 0x10 == 0,
     };
-    (base, signed)
+    (base_of(lcdc & 0x08 != 0), base_of(lcdc & 0x40 != 0), signed)
 }
 
 /// Overlay grid lines at `cell_w`×`cell_h` pitch over the content area (the OAM
@@ -607,14 +632,6 @@ fn render_vram_controls(
         );
     }
     if state.tab == VramTab::BgMap {
-        checkbox(
-            c,
-            l.win_box.x,
-            l.win_box.y,
-            state.show_window,
-            "window",
-            theme,
-        );
         radio_group(
             c,
             l.map_src[0].x,
@@ -655,7 +672,7 @@ fn render_vram_details(
     l: &VramLayout,
     state: &VramState,
     scale: i32,
-    tiles_two: Option<(Rect, Rect, i32)>,
+    two: Option<(Rect, Rect, i32)>,
     theme: &Theme,
 ) {
     let Some((hx, hy)) = state.hover else {
@@ -666,12 +683,15 @@ fn render_vram_details(
         return;
     }
     let lines = match state.tab {
-        VramTab::Tiles => match tiles_two {
+        VramTab::Tiles => match two {
             Some((left, right, s)) => tile_details_two(lx, ly, left, right, s),
             None => tile_details(lx, ly, scale),
         },
         VramTab::Oam => oam_details(gb, lx, ly, scale),
-        VramTab::BgMap => bgmap_details(gb, state, lx, ly, scale),
+        VramTab::BgMap => match two {
+            Some((left, right, s)) => bgmap_details_two(gb, state, lx, ly, left, right, s),
+            None => Vec::new(),
+        },
         VramTab::Palettes => return,
     };
     let mut y = l.details.y;
@@ -745,18 +765,41 @@ fn oam_details(gb: &GameBoy, lx: i32, ly: i32, scale: i32) -> Vec<String> {
     ]
 }
 
-/// BG-map-tab details: the map cell under `(lx, ly)` in the 32×32 grid at `scale`.
-fn bgmap_details(gb: &GameBoy, state: &VramState, lx: i32, ly: i32, scale: i32) -> Vec<String> {
-    let (col, row) = (lx / (8 * scale), ly / (8 * scale));
+/// BG-map-tab details: resolve content-relative `(lx, ly)` to a cell in the left
+/// (BG tilemap) or right (window tilemap) grid — geometry from [`bgmap_two_col`] —
+/// and print which map it is + its address. A hover in the gutter or off-grid
+/// yields no cell.
+#[allow(clippy::too_many_arguments)]
+fn bgmap_details_two(
+    gb: &GameBoy,
+    state: &VramState,
+    lx: i32,
+    ly: i32,
+    left: Rect,
+    right: Rect,
+    scale: i32,
+) -> Vec<String> {
+    let (is_window, gx) = if lx < left.w {
+        (false, lx)
+    } else {
+        let rx = lx - (right.x - left.x);
+        if (0..right.w).contains(&rx) {
+            (true, rx)
+        } else {
+            return Vec::new(); // gutter between the two grids
+        }
+    };
+    let (col, row) = (gx / (8 * scale), ly / (8 * scale));
     if col >= 32 || row >= 32 {
         return Vec::new();
     }
-    let (base, signed) = bgmap_source(gb, state);
+    let (bg_base, win_base, signed) = bgmap_bases(gb, state);
+    let base = if is_window { win_base } else { bg_base };
     let idx = (row * 32 + col) as usize;
     let cell = debug::bg_map(gb.vram(), base)[idx];
     let tile = vram::tile_index(cell.tile, signed);
     vec![
-        format!("X {col}  Y {row}"),
+        format!("{}  X {col}  Y {row}", if is_window { "Window" } else { "BG" }),
         format!("Tile No. {}", cell.tile),
         format!("Attribute {:02X}", cell.attr),
         format!("Map address {:04X}", base as usize + idx),

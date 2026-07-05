@@ -69,9 +69,6 @@ pub struct VramState {
     pub tile_src: u8,
     /// Which CGB VRAM bank the Tiles tab shows (0/1); ignored on DMG.
     pub tile_bank: u8,
-    /// BG map tab: show the window tilemap (LCDC bit 6 select) + the WX/WY box
-    /// instead of the BG tilemap + the SCX/SCY box. Auto stays BG-only.
-    pub show_window: bool,
     /// Cursor position (window pixels) while it is over the content area, for
     /// the hovered-cell details panel; `None` when outside.
     pub hover: Option<(i32, i32)>,
@@ -88,7 +85,6 @@ impl Default for VramState {
             map_src: 0,
             tile_src: 0,
             tile_bank: 0,
-            show_window: false,
             hover: None,
         }
     }
@@ -109,8 +105,6 @@ pub struct VramLayout {
     pub tile_src: Vec<Rect>,
     /// Tiles-tab CGB VRAM-bank-1 toggle.
     pub tile_bank_box: Rect,
-    /// BG-map-tab BG⇄window toggle.
-    pub win_box: Rect,
 }
 
 /// Compute the VRAM window layout for `area`.
@@ -124,10 +118,8 @@ pub fn layout(area: Rect) -> VramLayout {
     let details = Rect::new(dx, top, area.right() - dx - 2, area.bottom() - top);
     // Controls fill the lower rows of the details column, top-down. Each tab
     // shows only the subset that applies (gated in render/click).
-    let mut cy = details.bottom() - 1 - 7 * lh;
+    let mut cy = details.bottom() - 1 - 6 * lh;
     let tile_bank_box = checkbox_rect(dx, cy, "VRAM bank 1");
-    cy += lh;
-    let win_box = checkbox_rect(dx, cy, "window");
     cy += lh;
     let map_src = radio_rects(dx, cy, &MAP_SRC);
     cy += lh;
@@ -148,7 +140,6 @@ pub fn layout(area: Rect) -> VramLayout {
         map_src,
         tile_src,
         tile_bank_box,
-        win_box,
     }
 }
 
@@ -176,13 +167,8 @@ pub fn on_click(state: &mut VramState, area: Rect, px: i32, py: i32, cgb: bool) 
         state.tile_bank ^= 1;
         return true;
     }
-    // scxy + the source radios + the BG⇄window toggle only apply on the BG map
-    // tab (where they show).
+    // scxy + the source radios only apply on the BG map tab (where they show).
     if state.tab == VramTab::BgMap {
-        if l.win_box.contains(px, py) {
-            state.show_window = !state.show_window;
-            return true;
-        }
         if l.scxy_box.contains(px, py) {
             state.scxy = !state.scxy;
             return true;

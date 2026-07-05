@@ -154,12 +154,14 @@ pub fn stack_lines(stack: &[(u16, u16)]) -> Vec<String> {
         .collect()
 }
 
-/// Draw the stack pane; the top (SP) row gets the highlight bar, as in bgb.
-pub fn render_stack(c: &mut Canvas, rect: Rect, stack: &[(u16, u16)], theme: &Theme) {
+/// Draw the stack pane scrolled `offset` words below SP; the SP row (index 0)
+/// gets the highlight bar as in bgb — shown only while it is in view (offset 0).
+/// `stack` must hold `offset + visible` rows (SP-descending).
+pub fn render_stack(c: &mut Canvas, rect: Rect, stack: &[(u16, u16)], offset: usize, theme: &Theme) {
     let lines = stack_lines(stack);
     let texts: Vec<&str> = lines.iter().map(String::as_str).collect();
     let highlight = (!texts.is_empty()).then_some(0);
-    scroll_list(c, rect, &texts, 0, highlight, theme);
+    scroll_list(c, rect, &texts, offset, highlight, theme);
 }
 
 /// Memory-pane rows: `count` hex-dump lines of 16 bytes each from `start`,
@@ -230,6 +232,8 @@ pub struct DebuggerState {
     pub disasm_base: u16,
     /// Memory-dump view base.
     pub mem_base: u16,
+    /// Stack-pane scroll offset in 16-bit words below SP (0 = SP at the top row).
+    pub stack_off: usize,
     /// Last-clicked address (the menu's cursor).
     pub cursor: Option<u16>,
     /// "Stay on bank and address": the disasm view stays put instead of
@@ -270,6 +274,7 @@ impl Default for DebuggerState {
         Self {
             disasm_base: 0x0100,
             mem_base: 0xFF00,
+            stack_off: 0,
             cursor: None,
             pinned: false,
             menu: None,
@@ -288,17 +293,85 @@ impl Default for DebuggerState {
 }
 
 impl DebuggerState {
-    /// The address the disasm pane starts at: the pinned base, or PC when
-    /// following.
+    /// The address the disasm pane starts at. [`disasm_base`](Self::disasm_base)
+    /// is authoritative — [`disasm_follow`](Self::disasm_follow) keeps it tracking
+    /// PC (unless pinned) before each render, so this is just the base.
     #[must_use]
-    pub fn disasm_start(&self, pc: u16) -> u16 {
-        if self.pinned { self.disasm_base } else { pc }
+    pub fn disasm_start(&self, _pc: u16) -> u16 {
+        self.disasm_base
+    }
+
+    /// Keep the disasm view in place while stepping: re-base to `pc` only when the
+    /// view is unpinned AND `pc` falls outside the `visible` decoded rows from the
+    /// current base (so single-stepping doesn't scroll the listing until PC leaves
+    /// the pane). Called once per redraw with the live PC + pane row count.
+    // ponytail: counts instructions from `disasm_rows`, not label-annotated rows,
+    // so with symbols loaded the window is a hair larger than what's drawn — the
+    // view just re-pages one step late. Fine; exactness would need the annotated
+    // count threaded in.
+    pub fn disasm_follow(&mut self, pc: u16, read: impl Fn(u16) -> u8, visible: usize) {
+        if self.pinned {
+            return;
+        }
+        let rows = disasm_rows(&read, self.disasm_base, visible, &self.data_hints, self.disasm_fmt);
+        if rows.iter().any(|r| r.addr == pc) {
+            return;
+        }
+        self.disasm_base = pc;
+    }
+
+    /// Scroll the disasm pane by `rows` instructions (negative = toward lower
+    /// addresses). Detaches follow ([`pinned`](Self::pinned)) like a Go-to, since a
+    /// manual scroll means "stop tracking PC".
+    pub fn scroll_disasm(&mut self, rows: i32, read: impl Fn(u16) -> u8) {
+        self.pinned = true;
+        for _ in 0..rows.unsigned_abs() {
+            self.disasm_base = if rows >= 0 {
+                self.next_disasm_addr(&read, self.disasm_base)
+            } else {
+                self.prev_disasm_addr(&read, self.disasm_base)
+            };
+        }
+    }
+
+    /// Address of the instruction *after* the one at `addr` (decodes one insn,
+    /// honoring data hints; falls back to +1 if the stream can't advance).
+    fn next_disasm_addr(&self, read: impl Fn(u16) -> u8, addr: u16) -> u16 {
+        disasm_rows(read, addr, 2, &self.data_hints, self.disasm_fmt)
+            .get(1)
+            .map_or(addr.wrapping_add(1), |r| r.addr)
+    }
+
+    /// Address of the instruction *before* the one at `addr`: back-scan the 1..=3
+    /// preceding bytes (GB max instruction length is 3) and pick the longest decode
+    /// that lands exactly on `addr`; fall back to `addr - 1`.
+    fn prev_disasm_addr(&self, read: impl Fn(u16) -> u8, addr: u16) -> u16 {
+        for back in [3u16, 2, 1] {
+            let cand = addr.wrapping_sub(back);
+            if self.next_disasm_addr(&read, cand) == addr {
+                return cand;
+            }
+        }
+        addr.wrapping_sub(1)
     }
 
     /// Scroll the memory pane by `rows` (each row is 16 bytes; negative scrolls to
     /// lower addresses), wrapping the base around the 64 KiB space.
     pub fn scroll_memory(&mut self, rows: i32) {
         self.mem_base = self.mem_base.wrapping_add(rows.wrapping_mul(16) as u16);
+    }
+
+    /// Scroll the stack pane by `rows` words (negative = back toward SP), clamped
+    /// to `[0, STACK_OFF_MAX]` so SP never scrolls above the top and the pane's
+    /// `gb.stack(off + rows)` fetch stays bounded.
+    pub fn scroll_stack(&mut self, rows: i32) {
+        // ponytail: 4 KiB of stack depth is far past any real SP excursion; the
+        // cap just stops a held wheel from growing the per-redraw stack Vec.
+        const STACK_OFF_MAX: usize = 0x800;
+        self.stack_off = self
+            .stack_off
+            .saturating_add_signed(rows as isize)
+            .min(STACK_OFF_MAX);
     }
 }
 
@@ -460,7 +533,7 @@ pub fn target_at(
         return ClickTarget::Memory(st.mem_base.wrapping_add(row.wrapping_mul(16)));
     }
     if l.stack.contains(px, py) {
-        let row = ((py - l.stack.y) / lh) as u16;
+        let row = ((py - l.stack.y) / lh) as u16 + st.stack_off as u16;
         return ClickTarget::Stack(sp.wrapping_sub(row.wrapping_mul(2)));
     }
     if l.regs.contains(px, py) {

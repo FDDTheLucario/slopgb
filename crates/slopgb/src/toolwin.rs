@@ -212,6 +212,13 @@ impl ToolWindows {
         let Ok(mut buf) = view.surface.buffer_mut() else {
             return;
         };
+        // Keep the disasm view tracking PC (unless pinned) before drawing, so
+        // single-stepping doesn't scroll the listing until PC leaves the pane.
+        if let WinState::Debugger(s) = &mut view.state {
+            let l = debugger::DebuggerLayout::for_size(size.width as i32, size.height as i32);
+            let visible = (l.disasm.h / line_height()).max(0) as usize;
+            s.disasm_follow(gb.cpu_regs().pc, |a| gb.debug_read(a), visible);
+        }
         {
             let mut canvas = Canvas::new(&mut buf, size.width as usize, size.height as usize);
             windows::render(view.kind, gb, &mut canvas, &self.theme, &view.state, bps);
@@ -424,9 +431,10 @@ impl ToolWindows {
         }
     }
 
-    /// A mouse-wheel notch over tool window `id`'s memory pane scrolls it
-    /// (`y_lines` > 0 = wheel up = toward lower addresses); ignored elsewhere.
-    pub fn on_wheel(&mut self, id: WindowId, y_lines: f32) {
+    /// A mouse-wheel notch over tool window `id` scrolls the pane under the cursor
+    /// (`y_lines` > 0 = wheel up = toward lower addresses): the debugger's disasm,
+    /// stack, or memory pane, or the standalone memory window; ignored elsewhere.
+    pub fn on_wheel(&mut self, id: WindowId, y_lines: f32, gb: &GameBoy) {
         let Some(view) = self.views.get_mut(&id) else {
             return;
         };
@@ -436,13 +444,17 @@ impl ToolWindows {
         match &mut view.state {
             WinState::Debugger(s) => {
                 if let Some((px, py)) = cursor {
-                    if debugger::DebuggerLayout::for_size(area.w, area.h)
-                        .memory
-                        .contains(px, py)
-                    {
+                    let l = debugger::DebuggerLayout::for_size(area.w, area.h);
+                    if l.memory.contains(px, py) {
                         s.scroll_memory(rows);
-                        view.window.request_redraw();
+                    } else if l.disasm.contains(px, py) {
+                        s.scroll_disasm(rows, |a| gb.debug_read(a));
+                    } else if l.stack.contains(px, py) {
+                        s.scroll_stack(rows);
+                    } else {
+                        return;
                     }
+                    view.window.request_redraw();
                 }
             }
             // The standalone memory window is all memory: the wheel always scrolls.

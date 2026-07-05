@@ -78,6 +78,22 @@ stays a `Bgb` wrapper so the bgb ground-truth + gbtr fingerprint stay byte-ident
 **RGBDS syntax** checkbox (`Settings.rgbds_disasm`/`DisasmFmt.rgbds`, default on)
 flips it live.
 
+## Pane scrolling (mouse wheel)
+
+The wheel scrolls whichever debugger pane the cursor is over (`toolwin::on_wheel`,
+3 notches/step): **memory** (`scroll_memory`, 16 bytes/row), **disasm**
+(`scroll_disasm`, per-instruction — forward decodes one insn, backward back-scans
+the 1..=3 preceding bytes for the decode that lands exactly on the base; detaches
+follow like a Go-to by setting `pinned`), and **stack** (`scroll_stack`, words below
+SP, clamped `[0, 0x800]`; the SP highlight shows only at offset 0). `DebuggerState`
+holds `disasm_base` (authoritative disasm top) + `stack_off`.
+
+**Disasm follows PC in place:** each redraw calls `DebuggerState::disasm_follow`,
+which re-bases to PC only when unpinned AND PC has scrolled outside the visible
+decoded window — so single-stepping keeps the listing fixed until PC leaves the
+pane, then re-pages (vs. the old PC-pinned-to-top that shifted every step). `pinned`
+(stay-on-bank / Go-to / a manual scroll) freezes it entirely.
+
 ## .sym symbols
 
 `symbols::SymbolTable` (tolerant `BB:AAAA name` parser): `debugger::annotate_symbols`

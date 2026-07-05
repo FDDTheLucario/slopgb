@@ -22,9 +22,15 @@ take `scale`; `vram::oam_cell` = `10*scale`.
   and the hover maps to the correct bank + prints the real `bank:addr`
   (`tile_details_two`). DMG stays single-grid (bank 0). The old bank-0/1 checkbox is now
   vestigial on CGB (both always show) — follow-up to hide/repurpose.
-- BG-map **SCX/SCY box wraps** the 256×256 map (`vram::bgmap_viewport_segments`,
-  ≤4 segments); a **BG⇄window toggle** shows the window tilemap (LCDC bit 6) + the
-  WX/WY box (`vram::window_region_rect`, `vram::MapOverlay`).
+- **BG map: BG + window tilemaps side by side** (like the CGB two-bank Tiles view) —
+  BG tilemap left (LCDC bit 3), window tilemap right (bit 6), each fitted to half the
+  content via `windows::bgmap_two_col` (shared by render + hover). The left grid gets
+  the **SCX/SCY viewport box** (wraps the 256×256 map, `vram::bgmap_viewport_segments`,
+  ≤4 segments), the right the **WX/WY window box** (`vram::window_region_rect`), both
+  gated by `scxy`. Hover maps to the grid under the cursor and prints `BG`/`Window` +
+  the map address (`windows::bgmap_details_two`). Bases from `windows::bgmap_bases`
+  (`Auto` = each grid's LCDC bit; the `Map` radio forces both to 9800/9C00). The old
+  BG⇄window toggle checkbox is **gone** (both always show).
 
 ### Palettes tab
 

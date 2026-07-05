@@ -487,22 +487,6 @@ fn click_tiles_bank_toggle_is_cgb_only() {
 }
 
 #[test]
-fn click_window_toggle_acts_on_bg_map_tab() {
-    let area = Rect::new(0, 0, 520, 440);
-    let mut s = VramState {
-        tab: VramTab::BgMap,
-        ..VramState::default()
-    };
-    let l = layout(area);
-    let (wx, wy) = (l.win_box.x + 1, l.win_box.y + 1);
-    assert!(!s.show_window);
-    assert!(on_click(&mut s, area, wx, wy, false));
-    assert!(s.show_window, "BG⇄window toggled on");
-    assert!(on_click(&mut s, area, wx, wy, false));
-    assert!(!s.show_window, "toggled back off");
-}
-
-#[test]
 fn click_source_radio_only_acts_on_bg_map_tab() {
     let area = Rect::new(0, 0, 520, 440);
     let l = layout(area);

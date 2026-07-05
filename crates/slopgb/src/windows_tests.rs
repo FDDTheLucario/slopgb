@@ -243,6 +243,56 @@ fn tiles_two_col_splits_content_into_nonoverlapping_left_right() {
 }
 
 #[test]
+fn bgmap_two_col_splits_content_into_nonoverlapping_left_right() {
+    let content = Rect::new(10, 20, 600, 300);
+    let (left, right, s) = bgmap_two_col(content);
+    assert!(s >= 1);
+    assert_eq!((left.x, left.y), (10, 20), "left grid at content origin");
+    assert_eq!((left.w, left.h), (32 * 8 * s, 32 * 8 * s), "left is a 32x32 grid");
+    assert_eq!((right.w, right.h), (left.w, left.h), "same size grids");
+    assert!(right.x >= left.x + left.w, "no horizontal overlap");
+    assert!(
+        right.x + right.w <= content.x + content.w,
+        "right grid fits inside content"
+    );
+}
+
+#[test]
+fn bgmap_bases_derive_bg_from_bit3_and_window_from_bit6() {
+    let mut gb = machine();
+    // Auto: LCDC bit3 (BG select) and bit6 (window select) pick each grid's base.
+    // Zeroed ROM leaves LCDC=0 → both auto to 0x9800; flip bit6 → window to 0x9C00.
+    gb.debug_write(0xFF40, 0x40); // window tilemap select on, BG select off
+    let s = VramState {
+        tab: VramTab::BgMap,
+        ..VramState::default()
+    };
+    let (bg, win, _signed) = bgmap_bases(&gb, &s);
+    assert_eq!(bg, 0x9800, "BG grid uses LCDC bit3 (off)");
+    assert_eq!(win, 0x9C00, "window grid uses LCDC bit6 (on)");
+}
+
+#[test]
+fn bgmap_details_two_maps_hover_to_bg_or_window_grid() {
+    let gb = machine();
+    let s = VramState {
+        tab: VramTab::BgMap,
+        ..VramState::default()
+    };
+    let content = Rect::new(0, 0, 600, 300);
+    let (left, right, sc) = bgmap_two_col(content);
+    // Hover inside the left grid -> BG map.
+    let d0 = bgmap_details_two(&gb, &s, 4, 4, left, right, sc);
+    assert!(d0[0].starts_with("BG"), "{d0:?}");
+    // Hover inside the right grid -> Window map.
+    let rx = (right.x - left.x) + 4;
+    let d1 = bgmap_details_two(&gb, &s, rx, 4, left, right, sc);
+    assert!(d1[0].starts_with("Window"), "{d1:?}");
+    // Hover in the gutter -> no cell.
+    assert!(bgmap_details_two(&gb, &s, left.w + 1, 4, left, right, sc).is_empty());
+}
+
+#[test]
 fn tile_details_two_maps_hover_to_bank_and_prints_real_bank() {
     let content = Rect::new(0, 0, 400, 400);
     let (left, right, s) = tiles_two_col(content);
