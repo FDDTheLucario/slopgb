@@ -16,7 +16,12 @@ take `scale`; `vram::oam_cell` = `10*scale`.
   Y-flip; tall-aware `vram::oam_cell_h` pitch).
 - CGB OBJ/BG palette (attr bits 0-2) vs DMG (OBP bit 4 / BGP); X/Y flip
   (`vram::flip_tile`).
-- **Tiles bank-0/1 selector** (DMG-inert).
+- **Tiles: both VRAM banks side by side on CGB** — bank 0 (left) + bank 1 (right),
+  each a 16×24 grid fitted to half the content width via `windows::tiles_two_col`
+  (shared by render + hover so they can't drift); each grid gets its own overlay/frame,
+  and the hover maps to the correct bank + prints the real `bank:addr`
+  (`tile_details_two`). DMG stays single-grid (bank 0). The old bank-0/1 checkbox is now
+  vestigial on CGB (both always show) — follow-up to hide/repurpose.
 - BG-map **SCX/SCY box wraps** the 256×256 map (`vram::bgmap_viewport_segments`,
   ≤4 segments); a **BG⇄window toggle** shows the window tilemap (LCDC bit 6) + the
   WX/WY box (`vram::window_region_rect`, `vram::MapOverlay`).
