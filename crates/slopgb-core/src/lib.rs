@@ -718,15 +718,16 @@ impl GameBoy {
     /// mutated (`&self`). Follows live ROM/VRAM/cart-RAM/WRAM banking and
     /// intentionally ignores PPU VRAM/OAM access blocking; IO registers
     /// (FF00-FF7F) are not peekable and read $FF (see
-    /// `Interconnect::peek`).
+    /// `Interconnect::peek_no_io`).
     #[doc(hidden)]
     pub fn peek_no_io(&self, addr: u16) -> u8 {
         self.bus.peek_no_io(addr)
     }
 
-    /// Read for the bgb-style debugger views: like [`Self::peek`] but resolves
-    /// the IO registers (FF00-FF7F) to their live hardware values instead of
-    /// the `$FF` `peek` returns. Side-effect-free; the value is what the CPU
+    /// Read for the bgb-style debugger views: like [`Self::peek_no_io`] but
+    /// resolves the IO registers (FF00-FF7F) to their live hardware values
+    /// instead of the `$FF` `peek_no_io` returns. Side-effect-free; the value
+    /// is what the CPU
     /// would read at this instant. Use this for the memory dump and I/O map.
     #[must_use]
     pub fn debug_read(&self, addr: u16) -> u8 {

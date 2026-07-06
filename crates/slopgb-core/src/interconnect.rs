@@ -649,7 +649,7 @@ impl Interconnect {
     }
 
     /// Debugger memory write: store `value` at `addr` with no M-cycle timing
-    /// (the symmetric counterpart of [`Self::peek`] / the debug read path).
+    /// (the symmetric counterpart of [`Self::peek_no_io`] / the debug read path).
     /// Used by [`crate::GameBoy::debug_call`] to push a return address — a
     /// live-debugger-only `&mut` path, never on a golden/test run.
     pub fn debug_write(&mut self, addr: u16, value: u8) {

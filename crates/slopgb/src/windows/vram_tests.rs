@@ -152,16 +152,14 @@ fn render_oam_draws_present_sprites_and_skips_empty() {
     {
         let mut c = Canvas::new(&mut buf, w, h);
         render_oam(
-            &mut VramRenderCtx {
-                c: &mut c,
-                rect: Rect::new(0, 0, w as i32, h as i32),
-                vram: &vram,
-                palettes: &[GREYS],
-                cgb: false,
-                scale,
-            },
+            &mut c,
+            Rect::new(0, 0, w as i32, h as i32),
             &oam,
+            &vram,
+            &[GREYS],
             false,
+            false,
+            scale,
         );
     }
     // Cell 0 shows tile 5 (black); cell 1 (empty sprite) stays untouched.
@@ -192,16 +190,14 @@ fn render_oam_honors_bank_palette_and_tall() {
     {
         let mut c = Canvas::new(&mut buf, w, h);
         render_oam(
-            &mut VramRenderCtx {
-                c: &mut c,
-                rect: Rect::new(0, 0, w as i32, h as i32),
-                vram: &vram,
-                palettes: &[pal0],
-                cgb: true, // bank + palette from attr
-                scale,
-            },
+            &mut c,
+            Rect::new(0, 0, w as i32, h as i32),
             &oam,
+            &vram,
+            &[pal0],
+            true, // cgb: bank + palette from attr
             true, // 8x16
+            scale,
         );
     }
     // Bank-1 tile 0 (all index 3) rendered through CGB OBJ palette 0 at the top.
@@ -238,16 +234,14 @@ fn render_bgmap_draws_cells_and_the_viewport_outline() {
     {
         let mut c = Canvas::new(&mut buf, w, h);
         render_bgmap(
-            &mut VramRenderCtx {
-                c: &mut c,
-                rect: Rect::new(0, 0, w as i32, h as i32),
-                vram: &vram,
-                palettes: &[GREYS],
-                cgb: false,
-                scale,
-            },
+            &mut c,
+            Rect::new(0, 0, w as i32, h as i32),
+            &vram,
             0x9800,
             false,
+            &[GREYS],
+            false,
+            scale,
             MapOverlay::Screen { scx: 8, scy: 16 },
             &T,
         );
@@ -269,16 +263,14 @@ fn render_bgmap_omits_the_viewport_when_disabled() {
     {
         let mut c = Canvas::new(&mut buf, w, h);
         render_bgmap(
-            &mut VramRenderCtx {
-                c: &mut c,
-                rect: Rect::new(0, 0, w as i32, h as i32),
-                vram: &vram,
-                palettes: &[GREYS],
-                cgb: false,
-                scale: 1,
-            },
+            &mut c,
+            Rect::new(0, 0, w as i32, h as i32),
+            &vram,
             0x9800,
             false,
+            &[GREYS],
+            false,
+            1,
             MapOverlay::None,
             &T,
         );
@@ -305,16 +297,14 @@ fn render_bgmap_cgb_per_tile_palette_and_bank() {
     {
         let mut c = Canvas::new(&mut buf, w, h);
         render_bgmap(
-            &mut VramRenderCtx {
-                c: &mut c,
-                rect: Rect::new(0, 0, w as i32, h as i32),
-                vram: &vram,
-                palettes: &pals,
-                cgb: true,
-                scale: 1,
-            },
+            &mut c,
+            Rect::new(0, 0, w as i32, h as i32),
+            &vram,
             0x9800,
             false,
+            &pals,
+            true, // cgb
+            1,
             MapOverlay::None,
             &T,
         );
@@ -336,16 +326,14 @@ fn render_bgmap_cgb_x_flip_mirrors_the_cell() {
     {
         let mut c = Canvas::new(&mut buf, w, h);
         render_bgmap(
-            &mut VramRenderCtx {
-                c: &mut c,
-                rect: Rect::new(0, 0, w as i32, h as i32),
-                vram: &vram,
-                palettes: &[GREYS; 8],
-                cgb: true,
-                scale: 1,
-            },
+            &mut c,
+            Rect::new(0, 0, w as i32, h as i32),
+            &vram,
             0x9800,
             false,
+            &[GREYS; 8],
+            true,
+            1,
             MapOverlay::None,
             &T,
         );
@@ -364,16 +352,14 @@ fn render_bgmap_screen_viewport_wraps_to_the_opposite_edge() {
         let mut c = Canvas::new(&mut buf, w, h);
         // scx=200 -> the 160-wide box wraps; a segment appears at column 0.
         render_bgmap(
-            &mut VramRenderCtx {
-                c: &mut c,
-                rect: Rect::new(0, 0, w as i32, h as i32),
-                vram: &vram,
-                palettes: &[GREYS],
-                cgb: false,
-                scale: 1,
-            },
+            &mut c,
+            Rect::new(0, 0, w as i32, h as i32),
+            &vram,
             0x9800,
             false,
+            &[GREYS],
+            false,
+            1,
             MapOverlay::Screen { scx: 200, scy: 0 },
             &T,
         );
@@ -391,16 +377,14 @@ fn render_bgmap_window_overlay_draws_visible_region() {
         {
             let mut c = Canvas::new(&mut buf, w, h);
             render_bgmap(
-                &mut VramRenderCtx {
-                    c: &mut c,
-                    rect: Rect::new(0, 0, w as i32, h as i32),
-                    vram: &vram,
-                    palettes: &[GREYS],
-                    cgb: false,
-                    scale: 1,
-                },
+                &mut c,
+                Rect::new(0, 0, w as i32, h as i32),
+                &vram,
                 0x9800,
                 false,
+                &[GREYS],
+                false,
+                1,
                 overlay,
                 &T,
             );
