@@ -27,6 +27,7 @@ pub(crate) enum Field {
     LowercaseHex,
     ShowClocks,
     RgbdsDisasm,
+    TileHex8bit,
     MemoryWindow,
     /// Debug → "pressing Esc shows debugger" (Esc opens the debugger, never
     /// quits). See BUG-1.
@@ -155,9 +156,9 @@ impl Lay {
 }
 
 /// Whether every slopgb-departure setting is at its bgb-faithful value (i.e.
-/// "pure bgb mode": bgb disasm syntax, the integrated memory pane).
+/// "pure bgb mode": bgb disasm syntax, the integrated memory pane, full tile hex).
 fn pure_bgb(s: &Settings) -> bool {
-    !s.rgbds_disasm && !s.memory_window
+    !s.rgbds_disasm && !s.memory_window && !s.tile_hex_8bit
 }
 
 /// Build the active tab's control list.
@@ -249,6 +250,7 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         Field::LowercaseHex => s.lowercase_hex = !s.lowercase_hex,
         Field::ShowClocks => s.show_clocks = !s.show_clocks,
         Field::RgbdsDisasm => s.rgbds_disasm = !s.rgbds_disasm,
+        Field::TileHex8bit => s.tile_hex_8bit = !s.tile_hex_8bit,
         Field::MemoryWindow => s.memory_window = !s.memory_window,
         Field::EscShowsDebugger => s.esc_shows_debugger = !s.esc_shows_debugger,
         Field::PureBgb => {
@@ -259,6 +261,7 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
                 // Flip every slopgb-departure setting to its bgb value.
                 s.rgbds_disasm = false;
                 s.memory_window = false;
+                s.tile_hex_8bit = false;
             }
         }
         Field::ShowFramerate => s.show_framerate = !s.show_framerate,
@@ -300,6 +303,7 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
             s.lowercase_hex = d.lowercase_hex;
             s.show_clocks = d.show_clocks;
             s.rgbds_disasm = d.rgbds_disasm;
+            s.tile_hex_8bit = d.tile_hex_8bit;
             s.memory_window = d.memory_window;
             s.esc_shows_debugger = d.esc_shows_debugger;
         }
@@ -493,6 +497,11 @@ fn debug(s: &Settings, content: Rect) -> Vec<Ctrl> {
         rc(l.row().at(), "show counted clocks"),
         chk("show counted clocks", s.show_clocks),
         Field::ShowClocks,
+    ));
+    v.push(Ctrl::live(
+        rc(l.row().at(), "8-bit tile hex ($7F not $17F)"),
+        chk("8-bit tile hex ($7F not $17F)", s.tile_hex_8bit),
+        Field::TileHex8bit,
     ));
     v.push(Ctrl::live(
         rc(l.row().at(), "memory viewer in own window"),

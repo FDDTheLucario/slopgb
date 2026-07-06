@@ -288,28 +288,34 @@ fn vram_render_routes_each_tab_and_shows_hover_details() {
 fn tile_details_has_no_phantom_tile_right_of_the_grid() {
     // At scale 2 the 16-col grid spans 256 px; the content area is wider. A
     // hover left of the edge resolves a tile; at/beyond column 16 there is none.
-    assert!(!tile_details(0, 0, 2).is_empty(), "col 0 -> tile 0");
-    assert!(!tile_details(255, 0, 2).is_empty(), "col 15 still in grid");
-    assert!(tile_details(256, 0, 2).is_empty(), "col 16 is blank space");
-    assert!(tile_details(400, 0, 2).is_empty(), "far right is blank");
+    assert!(!tile_details(0, 0, 2, false).is_empty(), "col 0 -> tile 0");
+    assert!(!tile_details(255, 0, 2, false).is_empty(), "col 15 still in grid");
+    assert!(tile_details(256, 0, 2, false).is_empty(), "col 16 is blank space");
+    assert!(tile_details(400, 0, 2, false).is_empty(), "far right is blank");
     // Below the 24-row bank-0 grid there is no tile either.
-    assert!(tile_details(0, 384, 2).is_empty(), "row 24 past tile 383");
+    assert!(tile_details(0, 384, 2, false).is_empty(), "row 24 past tile 383");
 }
 
 #[test]
 fn dec_hex_shows_decimal_and_uppercase_hex() {
-    assert_eq!(dec_hex(10), "10 ($0A)");
-    assert_eq!(dec_hex(0), "0 ($00)");
-    assert_eq!(dec_hex(255), "255 ($FF)");
-    assert_eq!(dec_hex(383), "383 ($17F)", "widens past two hex digits");
+    assert_eq!(dec_hex(10, false), "10 ($0A)");
+    assert_eq!(dec_hex(0, false), "0 ($00)");
+    assert_eq!(dec_hex(255, false), "255 ($FF)");
+    assert_eq!(dec_hex(383, false), "383 ($17F)", "widens past two hex digits");
+    // mask8 (Options "8-bit tile hex") wraps the hex to the low byte.
+    assert_eq!(dec_hex(383, true), "383 ($7F)", "$17F & 0xFF -> $7F");
+    assert_eq!(dec_hex(256, true), "256 ($00)");
+    assert_eq!(dec_hex(10, true), "10 ($0A)", "sub-256 unchanged by the mask");
 }
 
 #[test]
 fn tile_details_appends_hex_to_the_tile_number() {
     // scale 2 -> 16 px/cell. Top-left tile 0.
-    assert_eq!(tile_details(0, 0, 2)[0], "Tile No. 0 ($00)");
+    assert_eq!(tile_details(0, 0, 2, false)[0], "Tile No. 0 ($00)");
     // col 15, row 23 -> tile 23*16+15 = 383 -> three hex digits.
-    assert_eq!(tile_details(15 * 16, 23 * 16, 2)[0], "Tile No. 383 ($17F)");
+    assert_eq!(tile_details(15 * 16, 23 * 16, 2, false)[0], "Tile No. 383 ($17F)");
+    // With the 8-bit-hex option the same tile wraps to $7F.
+    assert_eq!(tile_details(15 * 16, 23 * 16, 2, true)[0], "Tile No. 383 ($7F)");
 }
 
 #[test]
@@ -367,14 +373,14 @@ fn bgmap_details_two_maps_hover_to_bg_or_window_grid() {
     let content = Rect::new(0, 0, 600, 300);
     let (left, right, sc) = bgmap_two_col(content);
     // Hover inside the left grid -> BG map.
-    let d0 = bgmap_details_two(&gb, &s, 4, 4, left, right, sc);
+    let d0 = bgmap_details_two(&gb, &s, 4, 4, left, right, sc, false);
     assert!(d0[0].starts_with("BG"), "{d0:?}");
     // Hover inside the right grid -> Window map.
     let rx = (right.x - left.x) + 4;
-    let d1 = bgmap_details_two(&gb, &s, rx, 4, left, right, sc);
+    let d1 = bgmap_details_two(&gb, &s, rx, 4, left, right, sc, false);
     assert!(d1[0].starts_with("Window"), "{d1:?}");
     // Hover in the gutter -> no cell.
-    assert!(bgmap_details_two(&gb, &s, left.w + 1, 4, left, right, sc).is_empty());
+    assert!(bgmap_details_two(&gb, &s, left.w + 1, 4, left, right, sc, false).is_empty());
 }
 
 #[test]
@@ -382,14 +388,14 @@ fn tile_details_two_maps_hover_to_bank_and_prints_real_bank() {
     let content = Rect::new(0, 0, 400, 400);
     let (left, right, s) = tiles_two_col(content);
     // Hover inside the left grid -> bank 0.
-    let d0 = tile_details_two(4, 4, left, right, s);
+    let d0 = tile_details_two(4, 4, left, right, s, false);
     assert!(d0[1].starts_with("Tile Address 0:"), "{d0:?}");
     // Hover inside the right grid -> bank 1 (real bank in the label).
     let rx = (right.x - left.x) + 4; // content-relative x just inside right grid
-    let d1 = tile_details_two(rx, 4, left, right, s);
+    let d1 = tile_details_two(rx, 4, left, right, s, false);
     assert!(d1[1].starts_with("Tile Address 1:"), "{d1:?}");
     // Hover in the gutter between the grids -> no tile.
-    assert!(tile_details_two(left.w + 1, 4, left, right, s).is_empty());
+    assert!(tile_details_two(left.w + 1, 4, left, right, s, false).is_empty());
 }
 
 #[test]
@@ -397,12 +403,12 @@ fn tile_details_track_the_live_scale() {
     // The same hover pixel resolves to a different tile at a different scale, so
     // the details hit-test must use the live (fitted) scale, not a fixed one.
     assert_eq!(
-        tile_details(32, 0, 2)[0],
+        tile_details(32, 0, 2, false)[0],
         "Tile No. 2 ($02)",
         "16px/tile at scale 2"
     );
     assert_eq!(
-        tile_details(32, 0, 3)[0],
+        tile_details(32, 0, 3, false)[0],
         "Tile No. 1 ($01)",
         "24px/tile at scale 3"
     );

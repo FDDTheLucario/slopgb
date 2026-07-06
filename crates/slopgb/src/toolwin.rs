@@ -862,6 +862,19 @@ impl ToolWindows {
         }
     }
 
+    /// Push the "8-bit tile hex" display option (Options → Debug) to the VRAM
+    /// viewer, repainting it on change. Inert when no VRAM window is open.
+    pub fn set_tile_hex_8bit(&mut self, on: bool) {
+        for view in self.views.values_mut() {
+            if let WinState::Vram(s) = &mut view.state {
+                if s.tile_hex_8bit != on {
+                    s.tile_hex_8bit = on;
+                    view.window.request_redraw();
+                }
+            }
+        }
+    }
+
     /// Push a loaded `.sym` symbol table to the debugger view (shared `Rc`),
     /// repainting it so the disasm labels/operands update. Inert when no
     /// debugger window is open (the table is re-pushed when one opens).

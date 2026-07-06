@@ -121,6 +121,9 @@ pub struct Settings {
     pub show_clocks: bool,
     /// Debug → disassemble in RGBDS syntax (vs bgb / no$gmb). Default on.
     pub rgbds_disasm: bool,
+    /// Debug → show VRAM-viewer tile-number hex masked to the low byte
+    /// (`383` → `$7F`), matching some GB tools, vs the full value (`$17F`).
+    pub tile_hex_8bit: bool,
     /// Debug → pop the memory viewer out into its own window (a slopgb extra).
     pub memory_window: bool,
     /// Debug → "pressing Esc shows debugger": Esc opens the debugger (bgb's
@@ -175,6 +178,7 @@ impl Default for Settings {
             lowercase_hex: false,
             show_clocks: true,
             rgbds_disasm: true,
+            tile_hex_8bit: false,
             memory_window: false,
             esc_shows_debugger: true,
             ff_speed: 10,

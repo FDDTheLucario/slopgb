@@ -359,6 +359,8 @@ impl App {
         }
         // Debug-tab disasm display flags → the debugger view.
         self.push_disasm_fmt();
+        // Debug-tab "8-bit tile hex" → the VRAM viewer.
+        self.tools.set_tile_hex_8bit(self.settings.tile_hex_8bit);
         // Defer opening/closing the standalone memory window to `about_to_wait`,
         // where the event loop is available (only on a real change, so it doesn't
         // fight a manual close).

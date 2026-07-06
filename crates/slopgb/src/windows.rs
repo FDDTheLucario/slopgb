@@ -741,14 +741,15 @@ fn render_vram_details(
     if lx < 0 || ly < 0 {
         return;
     }
+    let m8 = state.tile_hex_8bit;
     let lines = match state.tab {
         VramTab::Tiles => match two {
-            Some((left, right, s)) => tile_details_two(lx, ly, left, right, s),
-            None => tile_details(lx, ly, scale),
+            Some((left, right, s)) => tile_details_two(lx, ly, left, right, s, m8),
+            None => tile_details(lx, ly, scale, m8),
         },
-        VramTab::Oam => oam_details(gb, lx, ly, scale),
+        VramTab::Oam => oam_details(gb, lx, ly, scale, m8),
         VramTab::BgMap => match two {
-            Some((left, right, s)) => bgmap_details_two(gb, state, lx, ly, left, right, s),
+            Some((left, right, s)) => bgmap_details_two(gb, state, lx, ly, left, right, s, m8),
             None => Vec::new(),
         },
         VramTab::Palettes => return,
@@ -761,21 +762,24 @@ fn render_vram_details(
 }
 
 /// A count shown decimal with its hex in parens, bgb-style: `10 ($0A)`,
-/// `383 ($17F)`. Min two hex digits, widening as needed (tiles reach 383).
-fn dec_hex(n: u32) -> String {
-    format!("{n} (${n:02X})")
+/// `383 ($17F)`. Min two hex digits, widening as needed (tiles reach 383). When
+/// `mask8` (Options → Debug "8-bit tile hex", matching tools that show the raw
+/// tilemap byte) the hex wraps to the low 8 bits, so `383 ($7F)`.
+fn dec_hex(n: u32, mask8: bool) -> String {
+    let hex = if mask8 { n & 0xFF } else { n };
+    format!("{n} (${hex:02X})")
 }
 
 /// Tiles-tab details: the tile under `(lx, ly)` in the 16-wide grid at `scale`.
 /// The content area is wider than the grid, so an out-of-column hover has no tile.
-fn tile_details(lx: i32, ly: i32, scale: i32) -> Vec<String> {
+fn tile_details(lx: i32, ly: i32, scale: i32, mask8: bool) -> Vec<String> {
     let col = lx / (8 * scale);
     let tile = (ly / (8 * scale)) * 16 + col;
     if col >= 16 || !(0..384).contains(&tile) {
         return Vec::new();
     }
     vec![
-        format!("Tile No. {}", dec_hex(tile as u32)),
+        format!("Tile No. {}", dec_hex(tile as u32, mask8)),
         format!("Tile Address 0:{:04X}", 0x8000 + tile * 16),
     ]
 }
@@ -784,7 +788,7 @@ fn tile_details(lx: i32, ly: i32, scale: i32) -> Vec<String> {
 /// the left (bank 0) or right (bank 1) grid — geometry from [`tiles_two_col`] —
 /// and print the real bank in the `bank:addr` label. A hover in the gutter or
 /// off-grid yields no tile.
-fn tile_details_two(lx: i32, ly: i32, left: Rect, right: Rect, scale: i32) -> Vec<String> {
+fn tile_details_two(lx: i32, ly: i32, left: Rect, right: Rect, scale: i32, mask8: bool) -> Vec<String> {
     let (bank, gx) = if lx < left.w {
         (0, lx)
     } else {
@@ -801,13 +805,13 @@ fn tile_details_two(lx: i32, ly: i32, left: Rect, right: Rect, scale: i32) -> Ve
         return Vec::new();
     }
     vec![
-        format!("Tile No. {}", dec_hex(tile as u32)),
+        format!("Tile No. {}", dec_hex(tile as u32, mask8)),
         format!("Tile Address {bank}:{:04X}", 0x8000 + tile * 16),
     ]
 }
 
 /// OAM-tab details: the sprite under `(lx, ly)` in the 8-wide cell grid at `scale`.
-fn oam_details(gb: &GameBoy, lx: i32, ly: i32, scale: i32) -> Vec<String> {
+fn oam_details(gb: &GameBoy, lx: i32, ly: i32, scale: i32, mask8: bool) -> Vec<String> {
     let tall = gb.debug_read(0xFF40) & 0x04 != 0;
     let (col, row) = (
         lx / vram::oam_cell(scale),
@@ -822,7 +826,7 @@ fn oam_details(gb: &GameBoy, lx: i32, ly: i32, scale: i32) -> Vec<String> {
         format!("OAM addr FE{:02X}", idx * 4),
         format!("X-loc {}", s.x),
         format!("Y-loc {}", s.y),
-        format!("Tile No {}", dec_hex(u32::from(s.tile))),
+        format!("Tile No {}", dec_hex(u32::from(s.tile), mask8)),
         format!("Attribute {:02X}", s.attr),
         format!("X-flip {}", u8::from(s.attr & 0x20 != 0)),
         format!("Y-flip {}", u8::from(s.attr & 0x40 != 0)),
@@ -843,6 +847,7 @@ fn bgmap_details_two(
     left: Rect,
     right: Rect,
     scale: i32,
+    mask8: bool,
 ) -> Vec<String> {
     let (is_window, gx) = if lx < left.w {
         (false, lx)
@@ -865,7 +870,7 @@ fn bgmap_details_two(
     let tile = vram::tile_index(cell.tile, signed);
     vec![
         format!("{}  X {col}  Y {row}", if is_window { "Window" } else { "BG" }),
-        format!("Tile No. {}", dec_hex(u32::from(cell.tile))),
+        format!("Tile No. {}", dec_hex(u32::from(cell.tile), mask8)),
         format!("Attribute {:02X}", cell.attr),
         format!("Map address {:04X}", base as usize + idx),
         format!("Tile address 0:{:04X}", 0x8000 + tile * 16),

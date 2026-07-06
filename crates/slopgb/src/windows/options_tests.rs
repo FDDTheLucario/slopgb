@@ -379,6 +379,10 @@ fn debug_tab_display_flags_toggle() {
     assert!(st.working.rgbds_disasm, "rgbds on by default");
     click_field(&mut st, Field::RgbdsDisasm);
     assert!(!st.working.rgbds_disasm);
+    // "8-bit tile hex" is off by default; the click turns it on.
+    assert!(!st.working.tile_hex_8bit, "8-bit tile hex off by default");
+    click_field(&mut st, Field::TileHex8bit);
+    assert!(st.working.tile_hex_8bit);
 }
 
 #[test]
@@ -419,12 +423,14 @@ fn debug_tab_pure_bgb_toggles_every_departure() {
     st.active = OptionsTab::Debug;
     // Defaults are slopgb-flavored (rgbds on); enabling pure-bgb flips them off.
     st.working.memory_window = true;
+    st.working.tile_hex_8bit = true;
     click_field(&mut st, Field::PureBgb);
     assert!(!st.working.rgbds_disasm, "pure bgb -> bgb disasm syntax");
     assert!(
         !st.working.memory_window,
         "pure bgb -> integrated memory pane"
     );
+    assert!(!st.working.tile_hex_8bit, "pure bgb -> full tile hex ($17F)");
     // Toggling it again restores the slopgb defaults.
     click_field(&mut st, Field::PureBgb);
     assert!(st.working.rgbds_disasm, "back to slopgb defaults");

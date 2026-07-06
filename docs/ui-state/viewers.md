@@ -10,7 +10,11 @@ bleed grid lines into empty space — QA finding). Hit-tests (`tile/oam/bgmap_de
 take `scale`; `vram::oam_cell` = `10*scale`. Tile-number detail lines show decimal
 + hex, bgb-style (`windows::dec_hex`: `Tile No. 10 ($0A)`, `383 ($17F)` — widens
 past two hex digits for the 0-383 range); addresses/attributes stay hex, small
-enums (palette 0-7, flips) stay decimal.
+enums (palette 0-7, flips) stay decimal. Options → Debug **"8-bit tile hex"**
+(`Settings.tile_hex_8bit` → `VramState.tile_hex_8bit` via `set_tile_hex_8bit`,
+mirroring the `DisasmFmt` push on Apply + window-open) masks the hex to the low
+byte like some GB tools, so tile 383 reads `$7F` instead of `$17F`; off by
+default.
 
 ### CGB-attribute-aware
 

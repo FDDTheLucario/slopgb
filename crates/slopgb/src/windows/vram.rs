@@ -72,6 +72,10 @@ pub struct VramState {
     /// Cursor position (window pixels) while it is over the content area, for
     /// the hovered-cell details panel; `None` when outside.
     pub hover: Option<(i32, i32)>,
+    /// Options → Debug "8-bit tile hex": show the tile number's hex masked to the
+    /// low byte (`383` → `$7F`) like some GB tools, vs the full value (`$17F`).
+    /// Pushed from settings (`set_tile_hex_8bit`); a display preference only.
+    pub tile_hex_8bit: bool,
 }
 
 impl Default for VramState {
@@ -86,6 +90,7 @@ impl Default for VramState {
             tile_src: 0,
             tile_bank: 0,
             hover: None,
+            tile_hex_8bit: false,
         }
     }
 }
