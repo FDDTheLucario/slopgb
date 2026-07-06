@@ -10,6 +10,7 @@ use winit::window::Fullscreen;
 
 use slopgb_core::{CLOCK_HZ, SCREEN_H, SCREEN_W};
 
+use crate::cheat_ui::{self, CheatButton, CheatHit};
 use crate::input::Action;
 use crate::keymap::WizardButton;
 use crate::menupopup::{MenuPopup, PopupOutcome};
@@ -83,6 +84,17 @@ impl App {
                 let outcome = self.fallback_picker.as_mut().map(|fp| fp.on_click(px, py, double));
                 self.resolve_fallback_picker(outcome);
             }
+            return;
+        }
+        // The Cheat dialog (main menu "Cheat.../F10"): only the left button acts.
+        // An open Add/Edit entry captures input (keyboard), so dialog clicks are
+        // ignored then; otherwise a click selects a row or fires a button.
+        if self.cheat_dialog.is_some() {
+            if button == MouseButton::Left {
+                let area = self.window_area();
+                self.on_cheat_click(area, px, py);
+            }
+            self.request_game_redraw();
             return;
         }
         // The Options control panel is the next modal: only the left button acts
@@ -227,6 +239,57 @@ impl App {
 
     /// Build the child submenu for `kind`, seeding its check-marks from the
     /// live state (current window size / per-channel mute), hung off `row`.
+    /// Route a left-click inside the open Cheat dialog to a row selection or a
+    /// button action. An open Add/Edit entry is keyboard-driven, so it's ignored.
+    fn on_cheat_click(&mut self, area: Rect, px: i32, py: i32) {
+        if self.cheat_dialog.as_ref().is_some_and(cheat_ui::CheatDialog::input_open) {
+            return;
+        }
+        match cheat_ui::hit(area, &self.cheats, px, py) {
+            Some(CheatHit::Row(i)) => {
+                if let Some(d) = &mut self.cheat_dialog {
+                    d.sel = i;
+                }
+            }
+            Some(CheatHit::Button(b)) => self.cheat_button(b),
+            None => {}
+        }
+    }
+
+    /// Act on a Cheat-dialog button (bgb's Add/Edit/Delete/Enable/Disable/
+    /// Enable all/Disable all/Poke; Close drops the dialog).
+    fn cheat_button(&mut self, b: CheatButton) {
+        let sel = self.cheat_dialog.as_ref().map_or(0, |d| d.sel);
+        match b {
+            CheatButton::Add => {
+                if let Some(d) = &mut self.cheat_dialog {
+                    d.open_add();
+                }
+            }
+            CheatButton::Edit => {
+                if let Some(c) = self.cheats.items().get(sel).cloned() {
+                    if let Some(d) = &mut self.cheat_dialog {
+                        d.open_edit(sel, &c.comment, &c.code);
+                    }
+                }
+            }
+            CheatButton::Delete => {
+                self.cheats.remove(sel);
+                self.clamp_cheat_sel();
+            }
+            CheatButton::Enable => self.cheats.set_enabled(sel, true),
+            CheatButton::Disable => self.cheats.set_enabled(sel, false),
+            CheatButton::EnableAll => self.cheats.enable_all(),
+            CheatButton::DisableAll => self.cheats.disable_all(),
+            CheatButton::Poke => {
+                if let Some((a, v)) = self.cheats.poke_once(sel) {
+                    self.session.gb.debug_write(a, v);
+                }
+            }
+            CheatButton::Close => self.cheat_dialog = None,
+        }
+    }
+
     fn open_submenu(&self, kind: SubKind, row: Rect) -> SubMenu {
         match kind {
             SubKind::WindowSize => SubMenu::window_size(row, self.window_size),

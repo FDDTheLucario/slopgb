@@ -63,4 +63,15 @@ Each child is one `SubMenu` type with a `SubChoice` variant per kind.
   (`cart_info_lines`/`cart_type_name`).
 - **Load ROM...** opens a path-entry text modal over the LCD
   (`App.path_dialog: Option<InputDialog>`); accept loads via the existing `load_dropped`.
-- **Cheat...** stays a read-only info-box stub.
+- **Cheat...** opens a functional cheat dialog (`App.cheat_dialog`,
+  `cheat_ui::CheatDialog`), modeled on bgb's Cheat window
+  ([`../bgb-reference/cheat/`](../bgb-reference/cheat/README.md)): a cheat list +
+  a button grid (Add / Edit / Delete / Enable / Disable / Enable all /
+  Disable all / Poke / Close) + an Add/Edit text entry. Rows show
+  `[x] CODE  (addr)=val  comment` (bgb's Advanced decode). Model in
+  `cheat.rs` (`CheatList`: GameShark `01vvaaaa` → RAM poke, addr little-endian;
+  Game Genie recognized, not applied). Enabled GameShark pokes re-apply each
+  frame via `debug_write` in `app_pacing::run_one_frame` — the golden-safe path
+  the freeze list uses. Left-click selects rows/fires buttons; keys drive the
+  Add/Edit entry + arrows/Space/Delete/Esc. In-memory (not persisted);
+  Load/Save `.cht` deferred.

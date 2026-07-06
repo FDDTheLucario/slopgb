@@ -21,6 +21,8 @@ mod app_path;
 mod app_run;
 mod audio;
 mod cdl;
+mod cheat;
+mod cheat_ui;
 mod cli;
 mod clipboard;
 mod dbg;
@@ -236,6 +238,11 @@ struct App {
     /// An open info box (Other → Cart info / System info / About), drawn centred
     /// over the LCD; any click or Escape closes it.
     info_box: Option<InfoBox>,
+    /// GameShark/Game-Genie cheat list (bgb's Cheat dialog). Enabled RAM pokes
+    /// re-applied each frame by the run loop.
+    cheats: cheat::CheatList,
+    /// The open Cheat dialog (main menu "Cheat.../F10"), drawn over the LCD.
+    cheat_dialog: Option<cheat_ui::CheatDialog>,
     /// The open path-entry modal, drawn centred over the LCD; accept routes by
     /// [`Self::path_purpose`] (Load ROM / Save state / Load state), Escape closes.
     path_dialog: Option<InputDialog>,
@@ -336,6 +343,8 @@ impl App {
             symbols: Rc::new(symbols::SymbolTable::default()),
             pending_mem_window: None,
             info_box: None,
+            cheats: cheat::CheatList::default(),
+            cheat_dialog: None,
             path_dialog: None,
             path_purpose: PathPurpose::LoadRom,
             fallback_picker: None,
@@ -407,6 +416,8 @@ impl App {
         // Options / path modal / key wizard) stay centred/modal here. (Captures
         // locals, not `self`, so the disjoint field borrows stay clean.)
         let info = self.info_box.as_ref();
+        let cheat = self.cheat_dialog.as_ref();
+        let cheat_list = &self.cheats;
         let path_dlg = self.path_dialog.as_ref();
         // `&mut` (not `&ref`, unlike the other overlays): the picker's `view()`
         // is a live widget call, not a plain read — see `fallback_picker.rs`.
@@ -422,6 +433,10 @@ impl App {
             // The info box / Load-ROM modal draw on top of everything (modal).
             if let Some(i) = info {
                 windows::mainwin::render_info(canvas, i, &theme);
+            }
+            // The Cheat dialog draws as a modal over the LCD.
+            if let Some(cd) = cheat {
+                cheat_ui::render(canvas, cd, cheat_list, &theme);
             }
             // The Options control panel draws on top of the menus/info box.
             if let Some(o) = options {
@@ -445,6 +460,24 @@ impl App {
             }
         }) {
             eprintln!("slopgb: failed to present frame: {e}");
+        }
+    }
+
+    /// Apply an accepted Cheat Add/Edit entry to the cheat list.
+    fn apply_cheat_edit(&mut self, e: &cheat_ui::CheatEdit) {
+        match e.editing {
+            Some(i) => self.cheats.edit(i, &e.comment, &e.code),
+            None => {
+                self.cheats.add(&e.comment, &e.code);
+            }
+        }
+    }
+
+    /// Keep the Cheat dialog selection in range after a delete.
+    fn clamp_cheat_sel(&mut self) {
+        let n = self.cheats.len();
+        if let Some(d) = &mut self.cheat_dialog {
+            d.sel = d.sel.min(n.saturating_sub(1));
         }
     }
 
@@ -517,6 +550,45 @@ impl App {
                     self.resolve_fallback_picker(outcome);
                 }
             }
+            return;
+        }
+        // The Cheat dialog captures keys while open. An open Add/Edit entry takes
+        // every key (typing a code can't fire a hotkey); otherwise arrows move the
+        // selection, Space toggles enable, Delete removes, Escape closes.
+        if focus == Focus::Game && key.state.is_pressed() && self.cheat_dialog.is_some() {
+            if self.cheat_dialog.as_ref().is_some_and(cheat_ui::CheatDialog::input_open) {
+                if let Some(dk) = dialog_key_from(key) {
+                    let edit = self.cheat_dialog.as_mut().and_then(|d| d.input_key(dk));
+                    if let Some(e) = edit {
+                        self.apply_cheat_edit(&e);
+                    }
+                }
+            } else if let PhysicalKey::Code(code) = key.physical_key {
+                let sel = self.cheat_dialog.as_ref().map_or(0, |d| d.sel);
+                match code {
+                    KeyCode::Escape => self.cheat_dialog = None,
+                    KeyCode::ArrowUp => {
+                        if let Some(d) = &mut self.cheat_dialog {
+                            d.sel = d.sel.saturating_sub(1);
+                        }
+                    }
+                    KeyCode::ArrowDown => {
+                        let n = self.cheats.len();
+                        if let Some(d) = &mut self.cheat_dialog {
+                            d.sel = (d.sel + 1).min(n.saturating_sub(1));
+                        }
+                    }
+                    KeyCode::Space => {
+                        self.cheats.toggle(sel);
+                    }
+                    KeyCode::Delete => {
+                        self.cheats.remove(sel);
+                        self.clamp_cheat_sel();
+                    }
+                    _ => {}
+                }
+            }
+            self.request_game_redraw();
             return;
         }
         // Options control panel is modal: while it's open every key is swallowed

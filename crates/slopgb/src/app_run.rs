@@ -10,7 +10,7 @@ use winit::event_loop::ActiveEventLoop;
 
 use crate::input::Action;
 use crate::windows::debugger::MenuOutcome;
-use crate::windows::mainwin::InfoBox;
+use crate::cheat_ui;
 use crate::{App, PathPurpose, dbg, screenshot, ui, windows};
 
 /// Top-left origin of the bp/wp manager list popup, below the debugger menu bar.
@@ -202,7 +202,8 @@ impl App {
                 self.request_game_redraw();
             }
             Action::MainCheats => {
-                self.info_box = Some(InfoBox::new("Cheats", vec!["(no cheats loaded)".into()]));
+                self.cheat_dialog = Some(cheat_ui::CheatDialog::default());
+                self.request_game_redraw();
                 self.request_game_redraw();
             }
             // Execution profiler (MB5): the three radio modes + clear buffer.

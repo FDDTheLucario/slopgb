@@ -50,6 +50,7 @@ impl App {
     pub(crate) fn run_audio_paced(&mut self) -> (u32, bool) {
         let bps = self.run_breakpoints();
         let freeze = self.dbg.freezes().list();
+        let cheats = self.cheats.pokes();
         let mut frames = 0;
         let mut hit = false;
         {
@@ -57,7 +58,7 @@ impl App {
                 return (0, false);
             };
             while frames < MAX_FRAMES_PER_WAKE && pipe.needs_more() && !hit {
-                hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link, &freeze);
+                hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link, &freeze, &cheats);
                 pipe.pump(&mut self.session.gb);
                 frames += 1;
                 // A silent link peer left the master stalled (run_one_frame
@@ -75,6 +76,7 @@ impl App {
     pub(crate) fn run_timer_paced(&mut self) -> (u32, bool) {
         let bps = self.run_breakpoints();
         let freeze = self.dbg.freezes().list();
+        let cheats = self.cheats.pokes();
         let now = Instant::now();
         // If we fell far behind (stall, drag, debugger), resync instead of
         // fast-forwarding through the backlog.
@@ -86,7 +88,7 @@ impl App {
         let mut frames = 0;
         let mut hit = false;
         while frames < MAX_FRAMES_PER_WAKE && self.next_frame <= now && !hit {
-            hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link, &freeze);
+            hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link, &freeze, &cheats);
             self.discard_audio();
             self.next_frame += interval;
             frames += 1;
@@ -101,6 +103,7 @@ impl App {
     pub(crate) fn run_turbo(&mut self) -> (u32, bool) {
         let bps = self.run_breakpoints();
         let freeze = self.dbg.freezes().list();
+        let cheats = self.cheats.pokes();
         let muted = self.muted;
         // Options → Misc → fast-forward speed caps frames per wake.
         let cap = turbo_max_frames(self.settings.ff_speed);
@@ -108,7 +111,7 @@ impl App {
         let mut frames = 0;
         let mut hit = false;
         while start.elapsed() < TURBO_BUDGET && frames < cap && !hit {
-            hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link, &freeze);
+            hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link, &freeze, &cheats);
             match &mut self.audio {
                 // The queue keeps ~250 ms and drops the rest.
                 Some(pipe) if !muted => pipe.pump(&mut self.session.gb),
@@ -188,9 +191,12 @@ fn run_one_frame(
     breakpoints: &Option<Vec<u16>>,
     link: &mut crate::link::Link,
     freeze: &[(u16, u8)],
+    cheats: &[(u16, u8)],
 ) -> bool {
     let hit = advance_frame(gb, breakpoints, link);
-    for &(addr, value) in freeze {
+    // Re-apply freezes + enabled GameShark cheats each frame (same golden-safe
+    // debug_write path).
+    for &(addr, value) in freeze.iter().chain(cheats) {
         gb.debug_write(addr, value);
     }
     hit
