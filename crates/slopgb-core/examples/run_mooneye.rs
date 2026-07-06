@@ -82,9 +82,9 @@ fn main() -> ExitCode {
         }
         println!(
             "GBMICRO {rom_path}: FF82={:02X} FF80(actual)={:02X} FF81(expected)={:02X}",
-            gb.peek(0xFF82),
-            gb.peek(0xFF80),
-            gb.peek(0xFF81),
+            gb.peek_no_io(0xFF82),
+            gb.peek_no_io(0xFF80),
+            gb.peek_no_io(0xFF81),
         );
         return ExitCode::from(0);
     }
@@ -100,7 +100,7 @@ fn main() -> ExitCode {
     if std::env::var("SLOPGB_HRAMDUMP").is_ok() {
         print!("HRAM");
         for a in 0xFF80u16..=0xFF90 {
-            print!(" {a:04X}={:02X}", gb.peek(a));
+            print!(" {a:04X}={:02X}", gb.peek_no_io(a));
         }
         println!();
     }

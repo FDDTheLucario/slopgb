@@ -226,7 +226,6 @@ impl AudioOutput {
 /// matching sample type. Every integer and float format cpal exposes is
 /// handled via `FromSample<f32>`, so devices that negotiate e.g. I32 or U8
 /// still get audio instead of falling back to timer pacing.
-#[allow(clippy::too_many_arguments)]
 fn build_for_format(
     format: cpal::SampleFormat,
     device: &cpal::Device,

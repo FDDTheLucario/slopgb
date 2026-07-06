@@ -735,8 +735,11 @@ impl Apu {
         w.u32(self.hp_charge.to_bits());
         w.u32(self.hp_cap_l.to_bits());
         w.u32(self.hp_cap_r.to_bits());
-        write_sample_buf(w, &self.samples);
-        write_sample_buf(w, &self.raw_samples);
+        // `samples`/`raw_samples` are the drained-per-frame OUTPUT queues, not
+        // emulation state — a save must not carry them (raw_samples alone caps
+        // at ~2 frames ≈ 1 MB of transient audio). Reset empty on load; the
+        // stream resumes fresh, an imperceptible gap. (cf. `cycles_per_sample`,
+        // also re-derived not serialized.)
     }
     pub(super) fn read_state(
         &mut self,
@@ -767,33 +770,11 @@ impl Apu {
         self.hp_charge = f32::from_bits(r.u32()?);
         self.hp_cap_l = f32::from_bits(r.u32()?);
         self.hp_cap_r = f32::from_bits(r.u32()?);
-        self.samples = read_sample_buf(r)?;
-        self.raw_samples = read_sample_buf(r)?;
+        // Output queues are not serialized (see `write_state`) — start fresh.
+        self.samples.clear();
+        self.raw_samples.clear();
         Ok(())
     }
-}
-
-fn write_sample_buf(w: &mut crate::state::Writer, buf: &[(f32, f32)]) {
-    w.u32(buf.len() as u32);
-    for (l, rr) in buf {
-        w.u32(l.to_bits());
-        w.u32(rr.to_bits());
-    }
-}
-
-fn read_sample_buf(
-    r: &mut crate::state::Reader<'_>,
-) -> Result<Vec<(f32, f32)>, crate::state::StateError> {
-    let n = r.u32()? as usize;
-    // No speculative pre-alloc: each pair is read (and bounds-checked) before
-    // it is pushed, so a corrupt length errors instead of allocating.
-    let mut buf = Vec::new();
-    for _ in 0..n {
-        let l = f32::from_bits(r.u32()?);
-        let rr = f32::from_bits(r.u32()?);
-        buf.push((l, rr));
-    }
-    Ok(buf)
 }
 
 #[cfg(test)]

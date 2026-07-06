@@ -265,7 +265,7 @@ impl Interconnect {
     pub(crate) fn debug_read(&self, addr: u16) -> u8 {
         match addr {
             0xFF00..=0xFF7F => self.io_read(addr),
-            _ => self.peek(addr),
+            _ => self.peek_no_io(addr),
         }
     }
 

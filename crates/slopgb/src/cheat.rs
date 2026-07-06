@@ -39,7 +39,7 @@ pub fn parse_code(code: &str) -> Option<Effect> {
     // Game Genie: 6 (`AAA-BBB`, unconditional) or 9 (`AAA-BBB-CCC`, with compare)
     // hex digits — the standard GB Game Genie decode (same as bgb/mGBA/VBA).
     if clean.len() == 6 || clean.len() == 9 {
-        let n: Vec<u8> = clean.chars().map(|c| c.to_digit(16).unwrap() as u8).collect();
+        let n: Vec<u8> = clean.chars().map(|c| Some(c.to_digit(16)? as u8)).collect::<Option<_>>()?;
         let value = (n[0] << 4) | n[1];
         // Address: nibbles 2-4 are the low 12 bits; nibble 5 (XOR 0xF) is the top.
         let addr = u16::from(n[5] ^ 0xF) << 12

@@ -109,7 +109,7 @@ fn fill_oam_distinct(b: &mut Interconnect) {
 fn oam_snapshot(b: &Interconnect) -> [u8; 0xA0] {
     let mut snap = [0u8; 0xA0];
     for (i, byte) in snap.iter_mut().enumerate() {
-        *byte = b.peek(0xFE00 + i as u16);
+        *byte = b.peek_no_io(0xFE00 + i as u16);
     }
     snap
 }

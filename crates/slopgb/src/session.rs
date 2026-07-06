@@ -226,9 +226,15 @@ impl Session {
 
 /// Write `data` to `path` via a temp file, fsync and rename, so a crash —
 /// of the process or the whole machine — mid-write never truncates an
-/// existing save: the data blocks are durable before the rename can commit.
+/// existing file: the data blocks are durable before the rename can commit.
+/// Creates the parent dir if missing.
 pub(crate) fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    let tmp = path.with_extension("sav.tmp");
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        fs::create_dir_all(dir)?;
+    }
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
     let mut file = fs::File::create(&tmp)?;
     file.write_all(data)?;
     file.sync_all()?;

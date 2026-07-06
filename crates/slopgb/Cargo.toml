@@ -13,3 +13,6 @@ slopfp = { path = "../slopfp" }
 winit = "0.30"
 softbuffer = "0.4"
 cpal = "0.16"
+
+[lints]
+workspace = true

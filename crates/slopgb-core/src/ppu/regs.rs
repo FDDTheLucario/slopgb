@@ -410,8 +410,13 @@ impl Ppu {
                         // `lyc0_m1disable_ds` / `lyc153_m1disable_ds` pairs
                         // pin (together with the DS line-153 lyfc table).
                         let phase1 = (old & STAT_SRC_LYC) | (data & !STAT_SRC_LYC);
-                        self.eng_stat_pending =
-                            Some((phase1, data, self.stat_update.line(), 0, 0));
+                        self.eng_stat_pending = Some(EngStatPending {
+                            phase1,
+                            fin: data,
+                            pre_high: self.stat_update.line(),
+                            mfi_t0: 0,
+                            k: 0,
+                        });
                     } else {
                         self.eng_stat = data;
                         self.eng_stat_pending = None;

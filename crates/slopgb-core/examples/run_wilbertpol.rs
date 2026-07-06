@@ -66,7 +66,7 @@ fn main() -> ExitCode {
         if addr % 16 == 0 {
             print!("\n  {addr:04X}:");
         }
-        print!(" {:02X}", gb.peek(addr));
+        print!(" {:02X}", gb.peek_no_io(addr));
     }
     println!();
     ExitCode::from(u8::from(!pass))

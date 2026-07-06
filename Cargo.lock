@@ -1407,6 +1407,9 @@ dependencies = [
 [[package]]
 name = "slopgb-core"
 version = "0.1.0"
+dependencies = [
+ "slopgb-core",
+]
 
 [[package]]
 name = "smallvec"

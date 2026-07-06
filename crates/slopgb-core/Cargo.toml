@@ -17,5 +17,14 @@ port_probe = []
 [dependencies]
 # Intentionally empty. The core stays dependency-free.
 
-[lints.rust]
-unsafe_code = "forbid"
+[dev-dependencies]
+# Self-reference enabling `port_probe` for THIS crate's own tests + examples
+# only (the SameBoy-port harness + the tier2 flip hooks live behind it). The
+# frontend depends on slopgb-core without this feature, so the flip setters are
+# `#[cfg(...)]`-compiled out of the production build — the golden-safe law is
+# compile-enforced, not reviewer-enforced. Resolver v3 keeps dev-dep features
+# out of the frontend's normal build.
+slopgb-core = { path = ".", features = ["port_probe"] }
+
+[lints]
+workspace = true

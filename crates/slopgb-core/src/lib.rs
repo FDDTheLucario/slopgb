@@ -72,8 +72,9 @@ pub const EXC_LCD_OFF_VBLANK: u16 = 1 << 3;
 
 /// Leading bytes of a slopgb save state (see [`GameBoy::save_state`]).
 const STATE_MAGIC: &[u8; 4] = b"SLPS";
-/// Save-state format version (bumped on any layout change).
-const STATE_VERSION: u16 = 2;
+/// Save-state format version (bumped on any layout change). v3 dropped the
+/// APU output queues (`samples`/`raw_samples`) from the payload.
+const STATE_VERSION: u16 = 3;
 
 /// A debugger memory watchpoint (bgb's "Set watchpoint"): the free run halts
 /// after the CPU accesses `addr` with a matching access kind. A frontend/
@@ -125,7 +126,12 @@ impl GameBoy {
     /// cannot reproduce it because boot has already run by the time it is
     /// called. Off-path (and `set_tier2_reclock`-only) construction is
     /// unchanged.
+    ///
+    /// Compiled only under `cfg(test)` or `--features port_probe` — the
+    /// production frontend build cannot reference it, so the tier2 reclock can
+    /// never be armed in a shipped binary (the golden-safe law, compile-enforced).
     #[doc(hidden)]
+    #[cfg(any(test, feature = "port_probe"))]
     pub fn new_with_reclock(model: Model, rom: Vec<u8>) -> Result<Self, CartridgeError> {
         Self::new_inner(model, rom, true)
     }
@@ -714,8 +720,8 @@ impl GameBoy {
     /// (FF00-FF7F) are not peekable and read $FF (see
     /// `Interconnect::peek`).
     #[doc(hidden)]
-    pub fn peek(&self, addr: u16) -> u8 {
-        self.bus.peek(addr)
+    pub fn peek_no_io(&self, addr: u16) -> u8 {
+        self.bus.peek_no_io(addr)
     }
 
     /// Read for the bgb-style debugger views: like [`Self::peek`] but resolves
@@ -810,7 +816,11 @@ impl GameBoy {
     /// back-date + the A6 halt-late masks). Off in production until the staged
     /// port flips the default (`docs/sameboy-port/PORT-PLAN.md`); the gbtr S0
     /// kernel-pair acceptance spec drives it on to measure the convergence.
+    ///
+    /// Compiled only under `cfg(test)` / `--features port_probe` (see
+    /// [`Self::new_with_reclock`]) — the production build cannot arm it.
     #[doc(hidden)]
+    #[cfg(any(test, feature = "port_probe"))]
     pub fn set_leading_edge_reads(&mut self, on: bool) {
         self.bus.set_leading_edge_reads(on);
     }
@@ -819,9 +829,20 @@ impl GameBoy {
     /// (deferred-commit machine advance + the −2 interrupt-dispatch retime).
     /// Implies [`Self::set_leading_edge_reads`]. Off in production; the
     /// make-or-break thesis measurement drives it on (`PORT-PLAN.md` Tier 2).
+    ///
+    /// Compiled only under `cfg(test)` / `--features port_probe` (see
+    /// [`Self::new_with_reclock`]) — the production build cannot arm it.
     #[doc(hidden)]
+    #[cfg(any(test, feature = "port_probe"))]
     pub fn set_tier2_reclock(&mut self, on: bool) {
         self.bus.set_tier2_reclock(on);
+    }
+
+    /// `(leading_edge_reads, tier2_reclock)` construction flags. Read-only
+    /// introspection for the golden-safe guard test only.
+    #[cfg(test)]
+    pub(crate) fn reclock_flags(&self) -> (bool, bool) {
+        self.bus.reclock_flags()
     }
 
     /// Drain the raw audio tap: one stereo sample per dot, taken straight

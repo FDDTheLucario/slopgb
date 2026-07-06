@@ -165,7 +165,7 @@ fn oam_bug_inert_outside_the_scan_window() {
     // blargg oam_bug/6-timing_no_bug: accesses bracketing the per-line
     // window, hammering vblank, and with the LCD off are all clean.
     let access_all = |b: &mut Interconnect| {
-        let keep = b.peek(0xFE00);
+        let keep = b.peek_no_io(0xFE00);
         b.read(0xFE00);
         Bus::tick_addr(b, 0xFE00);
         Bus::read_inc(b, 0xFE00);

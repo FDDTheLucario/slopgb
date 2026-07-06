@@ -255,11 +255,11 @@ fn peek_reads_plain_memory_without_time() {
     b.write_no_tick(0xFE05, 0x33);
     b.write_no_tick(0xFFFF, 0xE4);
     let cycles = b.cycles();
-    assert_eq!(b.peek(0xC123), 0x11);
-    assert_eq!(b.peek(0xE123), 0x11, "echo");
-    assert_eq!(b.peek(0xFF80), 0x22);
-    assert_eq!(b.peek(0xFE05), 0x33);
-    assert_eq!(b.peek(0xFFFF), 0xE4);
+    assert_eq!(b.peek_no_io(0xC123), 0x11);
+    assert_eq!(b.peek_no_io(0xE123), 0x11, "echo");
+    assert_eq!(b.peek_no_io(0xFF80), 0x22);
+    assert_eq!(b.peek_no_io(0xFE05), 0x33);
+    assert_eq!(b.peek_no_io(0xFFFF), 0xE4);
     assert_eq!(b.cycles(), cycles, "no time passed");
 }
 
@@ -275,8 +275,8 @@ fn peek_ignores_ppu_access_blocking() {
     ticks(&mut b, (452 + 120) / 4);
     assert_eq!(b.read(0x8500), 0xFF, "real VRAM read: locked");
     assert_eq!(b.read(0xFE00), 0xFF, "real OAM read: locked");
-    assert_eq!(b.peek(0x8500), 0x44);
-    assert_eq!(b.peek(0xFE00), 0x55);
+    assert_eq!(b.peek_no_io(0x8500), 0x44);
+    assert_eq!(b.peek_no_io(0xFE00), 0x55);
 }
 
 /// IO registers are not peekable; the whole FF00-FF7F range (and the
@@ -286,10 +286,10 @@ fn peek_io_reads_ff() {
     let mut b = ic(Model::Dmg);
     b.write(0xFF40, 0x91);
     assert_eq!(b.read(0xFF40), 0x91, "real IO read works");
-    assert_eq!(b.peek(0xFF40), 0xFF, "peek does not");
-    assert_eq!(b.peek(0xFF00), 0xFF);
-    assert_eq!(b.peek(0xFF0F), 0xFF);
-    assert_eq!(b.peek(0xFEA0), 0xFF);
+    assert_eq!(b.peek_no_io(0xFF40), 0xFF, "peek does not");
+    assert_eq!(b.peek_no_io(0xFF00), 0xFF);
+    assert_eq!(b.peek_no_io(0xFF0F), 0xFF);
+    assert_eq!(b.peek_no_io(0xFEA0), 0xFF);
 }
 
 /// `peek` follows the live VBK/SVBK banking on CGB.
@@ -299,15 +299,15 @@ fn peek_follows_cgb_banking() {
     b.write(0x8000, 0x11);
     b.write(0xFF4F, 0x01);
     b.write(0x8000, 0x22);
-    assert_eq!(b.peek(0x8000), 0x22, "active VRAM bank");
+    assert_eq!(b.peek_no_io(0x8000), 0x22, "active VRAM bank");
     b.write(0xFF4F, 0x00);
-    assert_eq!(b.peek(0x8000), 0x11);
+    assert_eq!(b.peek_no_io(0x8000), 0x11);
     b.write(0xFF70, 0x03);
     b.write(0xD000, 0x33);
     b.write(0xFF70, 0x04);
     b.write(0xD000, 0x44);
-    assert_eq!(b.peek(0xD000), 0x44, "active WRAM bank");
-    assert_eq!(b.peek(0xF000), 0x44, "echo follows the bank");
+    assert_eq!(b.peek_no_io(0xD000), 0x44, "active WRAM bank");
+    assert_eq!(b.peek_no_io(0xF000), 0x44, "echo follows the bank");
     b.write(0xFF70, 0x03);
-    assert_eq!(b.peek(0xD000), 0x33);
+    assert_eq!(b.peek_no_io(0xD000), 0x33);
 }

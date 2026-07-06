@@ -196,6 +196,26 @@ const IF_VBLANK: u8 = 0x01;
 /// IF bit 1: STAT interrupt.
 const IF_STAT: u8 = 0x02;
 
+/// Pending [`Ppu::eng_stat`] transition staged by a CGB single-speed FF41
+/// write on the tier2/LE engine path (was a bare `(u8, u8, bool, u8, u8)`).
+/// The tick-by-tick two-phase-commit schedule this drives lives on the
+/// [`Ppu::eng_stat_pending`] field doc.
+#[derive(Clone, Copy)]
+pub(crate) struct EngStatPending {
+    /// Phase-1 view: mode bits are NEW, bit6 (the LYC enable) still OLD.
+    pub phase1: u8,
+    /// The final committed FF41 STAT-source value.
+    pub fin: u8,
+    /// The pre-write STAT line was HIGH (gates whether the delayed final rise
+    /// may fire).
+    pub pre_high: bool,
+    /// `mode_for_interrupt` sampled at the T0+1T instant — what `fin` is
+    /// evaluated against.
+    pub mfi_t0: u8,
+    /// Engine ticks elapsed since the deferred commit dot (the stage counter).
+    pub k: u8,
+}
+
 /// The pixel pipeline's live view of the rendering registers.
 ///
 /// Identical to the architectural registers except inside a write M-cycle:
@@ -298,7 +318,7 @@ pub struct Ppu {
     ///   dip when the final value cannot hold the line
     ///   (`m0enable/lycdisable_ff41_scx*`: the dying LYC hold and the mode-0
     ///   rise are separated on hardware, collapsed by slopgb's early flip).
-    eng_stat_pending: Option<(u8, u8, bool, u8, u8)>,
+    eng_stat_pending: Option<EngStatPending>,
     /// Previous engine tick's `mode_for_interrupt` (m0-flip detection for
     /// the fast-forward above). Tier-2/LE only.
     eng_mfi_prev: u8,

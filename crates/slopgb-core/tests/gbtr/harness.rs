@@ -90,8 +90,8 @@ pub fn check_fib(gb: &GameBoy) -> Result<(), String> {
 /// DE B0 61 sit at $A001-$A003 ($A000 = $80 while running, $00 = pass,
 /// anything else = failure code; see blargg readmes).
 pub fn blargg_signature_status(gb: &GameBoy) -> Option<u8> {
-    (gb.peek(0xA001) == 0xDE && gb.peek(0xA002) == 0xB0 && gb.peek(0xA003) == 0x61)
-        .then(|| gb.peek(0xA000))
+    (gb.peek_no_io(0xA001) == 0xDE && gb.peek_no_io(0xA002) == 0xB0 && gb.peek_no_io(0xA003) == 0x61)
+        .then(|| gb.peek_no_io(0xA000))
 }
 
 /// The NUL-terminated result text blargg ROMs leave at $A004 (only
@@ -99,7 +99,7 @@ pub fn blargg_signature_status(gb: &GameBoy) -> Option<u8> {
 pub fn blargg_signature_text(gb: &GameBoy) -> String {
     let mut text = String::new();
     for addr in 0xA004..0xC000u16 {
-        match gb.peek(addr) {
+        match gb.peek_no_io(addr) {
             0 => break,
             b => text.push(char::from(b)),
         }

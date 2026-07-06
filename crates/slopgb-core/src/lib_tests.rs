@@ -6,6 +6,23 @@ fn rom_with_cgb_flag(flag: u8) -> Vec<u8> {
     rom
 }
 
+/// The golden-safe law, guarded without ROMs: every production `GameBoy::new`
+/// must construct with BOTH tier2 flags OFF. A flipped `interconnect.rs`
+/// default (the single "never do this in a pushed commit" rule) fails here
+/// immediately — unlike the gbtr golden hash, this needs no ROM bundle and
+/// always runs. `new_with_reclock` (the intentional ON path) is test/probe-only.
+#[test]
+fn production_new_is_reclock_off() {
+    for model in [Model::Dmg, Model::Cgb, Model::Agb] {
+        let gb = GameBoy::new(model, rom_with_cgb_flag(0x00)).unwrap();
+        assert_eq!(
+            gb.reclock_flags(),
+            (false, false),
+            "{model:?}: production GameBoy::new must have (leading_edge, tier2) OFF"
+        );
+    }
+}
+
 /// Pan Docs "CPU registers" (Power-Up Sequence): on CGB/AGB hardware
 /// the boot ROM hands a CGB-flagged cart off with DE=$FF56 HL=$000D;
 /// a DMG cart gets DE=$0008 HL=$007C (mooneye misc/boot_regs-cgb/-A —
@@ -324,6 +341,11 @@ fn assert_round_trips(model: Model, rom: &[u8], warmups: &[usize], frames: usize
         for _ in 0..warmup {
             a.step();
         }
+        // Pending APU output is not part of the savestate contract (v3 stopped
+        // serializing the `raw_samples`/`samples` queues) — drain a's backlog
+        // so it starts the post-save run with an empty queue, matching b after
+        // load. Draining only empties the output vec; emulation state is intact.
+        a.drain_audio_raw(&mut Vec::new());
         let bytes = a.save_state();
 
         let mut b = GameBoy::new(model, rom.to_vec()).unwrap();
@@ -636,16 +658,16 @@ fn debug_read_resolves_io_but_peek_does_not() {
     // peek keeps IO out of band ($FF); debug_read returns the live value.
     // Post-boot LY is a valid scanline (0..=153), so it can't be the $FF
     // peek hands back — proving debug_read took the io_read path.
-    assert_eq!(gb.peek(0xFF44), 0xFF, "peek must not read IO");
+    assert_eq!(gb.peek_no_io(0xFF44), 0xFF, "peek must not read IO");
     assert!(
         gb.debug_read(0xFF44) <= 153,
         "debug_read should give live LY"
     );
     // Outside IO, debug_read is identical to peek (and to ROM contents).
-    assert_eq!(gb.debug_read(0x0143), gb.peek(0x0143));
+    assert_eq!(gb.debug_read(0x0143), gb.peek_no_io(0x0143));
     assert_eq!(gb.debug_read(0x0143), 0x00); // the CGB flag we wrote
     for addr in [0x0000u16, 0x4000, 0xC000, 0xFF80, 0xFFFF] {
-        assert_eq!(gb.debug_read(addr), gb.peek(addr), "non-IO {addr:#06x}");
+        assert_eq!(gb.debug_read(addr), gb.peek_no_io(addr), "non-IO {addr:#06x}");
     }
 }
 

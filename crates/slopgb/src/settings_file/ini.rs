@@ -7,78 +7,87 @@
 //! user's bgb config. Only keys we [`set`](Ini::set) are re-rendered; everything
 //! else round-trips byte-for-byte. See `docs/settings-persistence-plan.md`.
 
-/// One physical line: a recognized `key=value` pair, or a verbatim passthrough
-/// (comment / blank / anything without a `=`).
+/// The content of one physical line: a recognized `key=value` pair, or a
+/// verbatim passthrough (comment / blank / anything without a `=`).
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Line {
+enum LineKind {
     Pair { key: String, val: String },
     Raw(String),
 }
 
-/// A parsed bgb-style INI, preserving line order + terminator + trailing EOL so
-/// an unmodified file serializes byte-identically.
+/// One physical line: its content plus the terminator that followed it in the
+/// source — `"\r\n"`, `"\n"`, or `""` for the final line of a file with no
+/// trailing newline. The terminator is stored PER LINE (not once per file) so a
+/// mixed-ending file round-trips byte-for-byte: bgb writes CRLF, but a line
+/// hand-edited on a Unix tool can be lone-LF, and both must survive verbatim.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Line {
+    kind: LineKind,
+    eol: &'static str,
+}
+
+/// A parsed bgb-style INI, preserving line order + each line's terminator so an
+/// unmodified file serializes byte-identically.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ini {
     lines: Vec<Line>,
-    /// The file's line terminator (`\r\n` for bgb, `\n` otherwise).
-    eol: &'static str,
-    /// Whether the source ended with a trailing terminator (bgb's does).
-    trailing_eol: bool,
+    /// Terminator for lines appended by [`set`](Self::set) (a key bgb didn't
+    /// have): the file's dominant style — `\r\n` if any CRLF is present, else
+    /// `\n`.
+    default_eol: &'static str,
 }
 
 impl Ini {
     /// Parse `text` into the ordered-line model. A line splits into a `Pair` at
     /// the first `=` (bgb writes `key=val` with no spaces); a line with no `=`
-    /// is kept as `Raw`. The terminator is detected from the text (`\r\n` if any
-    /// CRLF is present, else `\n`).
+    /// is kept as `Raw`. Each line records its own terminator (CRLF or LF), so
+    /// both endings — even mixed within one file — round-trip verbatim.
     #[must_use]
     pub fn parse(text: &str) -> Self {
-        let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
-        let trailing_eol = text.ends_with('\n');
-        // Split on '\n' and strip a trailing '\r' so both CRLF and LF work; the
-        // final empty segment from a trailing newline is dropped (re-added on
-        // serialize via `trailing_eol`).
-        let mut raw: Vec<&str> = text.split('\n').collect();
-        if trailing_eol {
-            raw.pop();
-        }
-        let lines = raw
-            .into_iter()
-            .map(|l| {
-                let l = l.strip_suffix('\r').unwrap_or(l);
-                match l.split_once('=') {
+        let default_eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
+        // `split_inclusive` keeps each line's trailing '\n'; the final segment
+        // has none iff the file did not end with a newline. An empty input
+        // yields no segments (serializes back to "").
+        let lines = text
+            .split_inclusive('\n')
+            .map(|seg| {
+                let (content, eol) = if let Some(c) = seg.strip_suffix("\r\n") {
+                    (c, "\r\n")
+                } else if let Some(c) = seg.strip_suffix('\n') {
+                    (c, "\n")
+                } else {
+                    (seg, "")
+                };
+                let kind = match content.split_once('=') {
                     // A leading '=' (empty key) is not a real pair — keep raw.
-                    Some((k, v)) if !k.is_empty() => Line::Pair {
+                    Some((k, v)) if !k.is_empty() => LineKind::Pair {
                         key: k.to_string(),
                         val: v.to_string(),
                     },
-                    _ => Line::Raw(l.to_string()),
-                }
+                    _ => LineKind::Raw(content.to_string()),
+                };
+                Line { kind, eol }
             })
             .collect();
-        Self { lines, eol, trailing_eol }
+        Self { lines, default_eol }
     }
 
     /// Serialize back to text, byte-identical to the parsed source for any line
-    /// not touched by [`set`](Self::set).
+    /// not touched by [`set`](Self::set) — each line re-emits its own stored
+    /// terminator.
     #[must_use]
     pub fn serialize(&self) -> String {
         let mut out = String::new();
-        for (i, line) in self.lines.iter().enumerate() {
-            if i > 0 {
-                out.push_str(self.eol);
-            }
-            match line {
-                Line::Pair { key, val } => {
+        for line in &self.lines {
+            match &line.kind {
+                LineKind::Pair { key, val } => {
                     out.push_str(key);
                     out.push('=');
                     out.push_str(val);
                 }
-                Line::Raw(r) => out.push_str(r),
+                LineKind::Raw(r) => out.push_str(r),
             }
-        }
-        if self.trailing_eol {
-            out.push_str(self.eol);
+            out.push_str(line.eol);
         }
         out
     }
@@ -86,27 +95,41 @@ impl Ini {
     /// The value of the first `key` occurrence, or `None`.
     #[must_use]
     pub fn get(&self, key: &str) -> Option<&str> {
-        self.lines.iter().find_map(|l| match l {
-            Line::Pair { key: k, val } if k == key => Some(val.as_str()),
+        self.lines.iter().find_map(|l| match &l.kind {
+            LineKind::Pair { key: k, val } if k == key => Some(val.as_str()),
             _ => None,
         })
     }
 
     /// Set `key` to `val`: overwrite the first occurrence in place (preserving
-    /// its position), or append a new pair at the end. Only touched keys change;
-    /// the rest of the file is untouched.
+    /// its position AND its terminator), or append a new pair at the end. Only
+    /// touched keys change; the rest of the file is untouched.
     pub fn set(&mut self, key: &str, val: &str) {
         for line in &mut self.lines {
-            if let Line::Pair { key: k, val: v } = line {
+            if let LineKind::Pair { key: k, val: v } = &mut line.kind {
                 if k == key {
                     *v = val.to_string();
                     return;
                 }
             }
         }
-        self.lines.push(Line::Pair {
-            key: key.to_string(),
-            val: val.to_string(),
+        // Absent → append, preserving the file's trailing-newline state: if the
+        // last line lacked a terminator, give it one (so the new pair stands
+        // alone) and leave the new pair unterminated; otherwise terminate the
+        // new pair the file's dominant way.
+        let eol = match self.lines.last_mut() {
+            Some(last) if last.eol.is_empty() => {
+                last.eol = self.default_eol;
+                ""
+            }
+            _ => self.default_eol,
+        };
+        self.lines.push(Line {
+            kind: LineKind::Pair {
+                key: key.to_string(),
+                val: val.to_string(),
+            },
+            eol,
         });
     }
 }

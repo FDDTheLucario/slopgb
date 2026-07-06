@@ -118,6 +118,13 @@ impl Interconnect {
         self.ppu.set_tier2_reclock(on);
     }
 
+    /// `(leading_edge_reads, tier2_reclock)` — read-only, for the golden-safe
+    /// "production defaults OFF" guard test.
+    #[cfg(test)]
+    pub(crate) fn reclock_flags(&self) -> (bool, bool) {
+        (self.leading_edge_reads, self.tier2_reclock)
+    }
+
     /// Repay the outstanding sub-M-cycle wake skew — the next access pays the
     /// extra T and lands back on the aligned 4-T grid.
     pub(super) fn repay_wake_skew(&mut self) {

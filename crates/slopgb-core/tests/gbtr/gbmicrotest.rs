@@ -104,14 +104,14 @@ fn run_case(rom: &[u8]) -> Result<(), String> {
     let mut gb = harness::boot(rom, Model::Dmg);
     let deadline = gb.cycles().saturating_add(DEADLINE_TCYCLES);
     harness::run_for_frames(&mut gb, 2);
-    if gb.peek(0xFF82) == 0 {
+    if gb.peek_no_io(0xFF82) == 0 {
         while gb.cycles() < deadline {
             gb.step();
         }
     }
-    match gb.peek(0xFF82) {
+    match gb.peek_no_io(0xFF82) {
         0 => Err("no $FF82 verdict within 0.6 emulated seconds".into()),
-        status => verdict(gb.peek(0xFF80), gb.peek(0xFF81), status),
+        status => verdict(gb.peek_no_io(0xFF80), gb.peek_no_io(0xFF81), status),
     }
 }
 
@@ -155,12 +155,12 @@ fn gbmicro_flagon_probe() {
         };
         let deadline = gb.cycles().saturating_add(DEADLINE_TCYCLES);
         harness::run_for_frames(&mut gb, 2);
-        if gb.peek(0xFF82) == 0 {
+        if gb.peek_no_io(0xFF82) == 0 {
             while gb.cycles() < deadline {
                 gb.step();
             }
         }
-        let (v, a, e) = (gb.peek(0xFF82), gb.peek(0xFF80), gb.peek(0xFF81));
+        let (v, a, e) = (gb.peek_no_io(0xFF82), gb.peek_no_io(0xFF80), gb.peek_no_io(0xFF81));
         if v == 0x01 {
             pass += 1;
         } else {
@@ -278,18 +278,18 @@ fn tier2_int_hblank_halt_passes_dmg() {
         // verdict deadline), on the Tier-2 reclock path.
         let deadline = gb.cycles().saturating_add(DEADLINE_TCYCLES);
         harness::run_for_frames(&mut gb, 2);
-        if gb.peek(0xFF82) == 0 {
+        if gb.peek_no_io(0xFF82) == 0 {
             while gb.cycles() < deadline {
                 gb.step();
             }
         }
         assert_eq!(
-            gb.peek(0xFF82),
+            gb.peek_no_io(0xFF82),
             0x01,
             "{rel} (tier2 flag-on): FF82={:#04X} actual FF80={:#04X} expected FF81={:#04X}",
-            gb.peek(0xFF82),
-            gb.peek(0xFF80),
-            gb.peek(0xFF81),
+            gb.peek_no_io(0xFF82),
+            gb.peek_no_io(0xFF80),
+            gb.peek_no_io(0xFF81),
         );
     }
 }
@@ -324,18 +324,18 @@ fn tier2_dmg_hblank_if_passes() {
             let mut gb = harness::boot_with_reclock(&rom, Model::Dmg);
             let deadline = gb.cycles().saturating_add(DEADLINE_TCYCLES);
             harness::run_for_frames(&mut gb, 2);
-            if gb.peek(0xFF82) == 0 {
+            if gb.peek_no_io(0xFF82) == 0 {
                 while gb.cycles() < deadline {
                     gb.step();
                 }
             }
             assert_eq!(
-                gb.peek(0xFF82),
+                gb.peek_no_io(0xFF82),
                 0x01,
                 "{rel} (tier2 flag-on): FF82={:#04X} actual FF80={:#04X} expected FF81={:#04X}",
-                gb.peek(0xFF82),
-                gb.peek(0xFF80),
-                gb.peek(0xFF81),
+                gb.peek_no_io(0xFF82),
+                gb.peek_no_io(0xFF80),
+                gb.peek_no_io(0xFF81),
             );
         }
     }
@@ -389,18 +389,18 @@ fn tier2_dmg_poweron_passes() {
         let mut gb = harness::boot_with_reclock(&rom, Model::Dmg);
         let deadline = gb.cycles().saturating_add(DEADLINE_TCYCLES);
         harness::run_for_frames(&mut gb, 2);
-        if gb.peek(0xFF82) == 0 {
+        if gb.peek_no_io(0xFF82) == 0 {
             while gb.cycles() < deadline {
                 gb.step();
             }
         }
         assert_eq!(
-            gb.peek(0xFF82),
+            gb.peek_no_io(0xFF82),
             0x01,
             "{rel} (tier2 flag-on): FF82={:#04X} actual FF80={:#04X} expected FF81={:#04X}",
-            gb.peek(0xFF82),
-            gb.peek(0xFF80),
-            gb.peek(0xFF81),
+            gb.peek_no_io(0xFF82),
+            gb.peek_no_io(0xFF80),
+            gb.peek_no_io(0xFF81),
         );
     }
 }

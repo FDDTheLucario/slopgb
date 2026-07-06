@@ -39,7 +39,14 @@ impl Ppu {
         // enable at its effective instant), falls are silent; the final
         // value fires only a genuine enable (pre-write line LOW), through
         // the CGB delivery delay.
-        if let Some((phase1, fin, pre_high, mfi_t0, k)) = self.eng_stat_pending {
+        if let Some(EngStatPending {
+            phase1,
+            fin,
+            pre_high,
+            mfi_t0,
+            k,
+        }) = self.eng_stat_pending
+        {
             let mfi_now = self.mode_for_interrupt;
             // m0-flip fast-forward (stored k >= 1, i.e. the flip tick is >= D+2 = T0): slopgb's mode-3→0
             // flip sits LATER than T0+1T in SameBoy's frame, so a stage past
@@ -82,7 +89,13 @@ impl Ppu {
                         });
                     }
                     self.stat_update.force_level(lvl);
-                    self.eng_stat_pending = Some((phase1, fin, pre_high, mfi_now, k));
+                    self.eng_stat_pending = Some(EngStatPending {
+                        phase1,
+                        fin,
+                        pre_high,
+                        mfi_t0: mfi_now,
+                        k,
+                    });
                 } else if k >= 4 {
                     self.eng_stat = fin;
                     self.eng_stat_pending = None;
@@ -115,7 +128,13 @@ impl Ppu {
                         self.stat_update.force_level(true);
                     }
                 } else {
-                    self.eng_stat_pending = Some((phase1, fin, pre_high, mfi_t0, k));
+                    self.eng_stat_pending = Some(EngStatPending {
+                        phase1,
+                        fin,
+                        pre_high,
+                        mfi_t0,
+                        k,
+                    });
                 }
             }
         }

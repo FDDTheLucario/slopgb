@@ -39,10 +39,13 @@ fn fnv1a(mut h: u64, bytes: &[u8]) -> u64 {
     h
 }
 
-/// `(frame_hash, audio)` where audio is 0 = silent, 1 = sound, 2 = no samples;
-/// the sentinel `(0, 9)` marks a ROM the model rejected or that panicked — a
-/// stable marker so drift in *that* is caught too.
-fn fingerprint(rom: &[u8], model: Model) -> (u64, u8) {
+/// `(frame_hash, audio_hash)`: a 64-bit FNV-1a over frame 16's XRGB bytes and a
+/// second FNV-1a over frame 16's whole raw stereo sample stream (length +
+/// every sample's bits). The stream hash catches any waveform drift — the old
+/// 0/1/2 "silent/sound/none" sentinel missed every change that kept a frame
+/// merely non-silent. The sentinel `(0, 0)` marks a ROM the model rejected or
+/// that panicked — a stable marker so drift in *that* is caught too.
+fn fingerprint(rom: &[u8], model: Model) -> (u64, u64) {
     let rom = rom.to_vec();
     let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
         let mut gb = GameBoy::new(model, rom).ok()?;
@@ -63,16 +66,18 @@ fn fingerprint(rom: &[u8], model: Model) -> (u64, u8) {
         for &px in gb.frame().iter() {
             h = fnv1a(h, &px.to_le_bytes());
         }
-        let bits = |(l, r): (f32, f32)| (l.to_bits(), r.to_bits());
-        let audio = match s.first() {
-            Some(&f) => u8::from(s.iter().any(|&x| bits(x) != bits(f))),
-            None => 2u8,
-        };
-        Some((h, audio))
+        // Full-waveform audio hash: length first (so "no samples" differs from
+        // a silent-but-present frame), then every stereo sample's raw bits.
+        let mut ah = fnv1a(FNV_OFFSET, &(s.len() as u64).to_le_bytes());
+        for &(l, r) in &s {
+            ah = fnv1a(ah, &l.to_bits().to_le_bytes());
+            ah = fnv1a(ah, &r.to_bits().to_le_bytes());
+        }
+        Some((h, ah))
     }));
     match run {
         Ok(Some(fp)) => fp,
-        _ => (0, 9),
+        _ => (0, 0),
     }
 }
 
@@ -104,7 +109,7 @@ fn capture(root: &Path) -> Vec<String> {
                         for model in [Model::Dmg, Model::Cgb] {
                             let (h, a) = fingerprint(&bytes, model);
                             out.push(format!(
-                                "{} | {h:016x} | {a}",
+                                "{} | {h:016x} | {a:016x}",
                                 harness::case_key(&rel, model)
                             ));
                         }

@@ -327,16 +327,16 @@ fn peek_observes_mbc1_state_without_side_effects() {
     ];
     rom[0x100..0x100 + program.len()].copy_from_slice(program);
     let mut gb = GameBoy::new(Model::Dmg, rom).unwrap();
-    assert_eq!(gb.peek(0x4000), 0xB1, "MBC1 boots with ROM bank 1 mapped");
-    assert_eq!(gb.peek(0x0000), 0xB0, "fixed bank area");
+    assert_eq!(gb.peek_no_io(0x4000), 0xB1, "MBC1 boots with ROM bank 1 mapped");
+    assert_eq!(gb.peek_no_io(0x0000), 0xB0, "fixed bank area");
     run_to_breakpoint(&mut gb, 100);
     let cycles = gb.cycles();
-    assert_eq!(gb.peek(0xA000), 0x77, "CPU-written cart RAM byte");
-    assert_eq!(gb.peek(0x4000), 0xB3, "switched ROM bank");
+    assert_eq!(gb.peek_no_io(0xA000), 0x77, "CPU-written cart RAM byte");
+    assert_eq!(gb.peek_no_io(0x4000), 0xB3, "switched ROM bank");
     assert_eq!(gb.cycles(), cycles, "peek advanced no time");
     gb.step(); // xor a
     gb.step(); // ld ($0000),a
-    assert_eq!(gb.peek(0xA000), 0xFF, "RAM disabled: open bus, like a read");
+    assert_eq!(gb.peek_no_io(0xA000), 0xFF, "RAM disabled: open bus, like a read");
 }
 
 /// 0xED — the opcode wilbertpol's mooneye fork ends tests with — hard-locks

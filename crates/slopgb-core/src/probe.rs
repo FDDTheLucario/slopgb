@@ -66,7 +66,11 @@ pub(crate) fn tune_stopadv(default: u32) -> u32 {
 #[cfg(feature = "port_probe")]
 pub(crate) fn tune_p2tbl(default: u8, cc: u8) -> u8 {
     match std::env::var("SLOPGB_P2TBL") {
-        Ok(t) if t.len() == 4 => t.as_bytes()[(cc as usize - 1) & 3] - b'0',
+        Ok(t) if t.len() == 4 => {
+            let b = t.as_bytes()[(cc as usize - 1) & 3];
+            // Non-digit char in the knob → fall back rather than wrap-subtract.
+            if b.is_ascii_digit() { b - b'0' } else { default }
+        }
         _ => default,
     }
 }

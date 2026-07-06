@@ -668,7 +668,10 @@ impl Interconnect {
     /// contract, and reading them out of band would mislead harnesses —
     /// and the FEA0-FEFF prohibited area has no stable content; both read
     /// $FF here.
-    pub(crate) fn peek(&self, addr: u16) -> u8 {
+    ///
+    /// For live IO-register values (FF00-FF7F resolved from peripheral state)
+    /// use [`Self::debug_read`], which delegates the non-IO ranges back here.
+    pub(crate) fn peek_no_io(&self, addr: u16) -> u8 {
         match addr {
             // Show the mapped boot ROM in the debugger views too (inert / cart
             // when no boot ROM is active — golden-safe).

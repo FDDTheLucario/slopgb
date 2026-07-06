@@ -227,6 +227,14 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
 /// Update `d` in place from `settings` + `recent`: set the version + every mapped
 /// key, preserving any unknown keys/sections already present.
 pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
+    let Settings {
+        model: _, stretch: _, volume: _, mono: _, lowercase_disasm: _, lowercase_hex: _,
+        show_clocks: _, rgbds_disasm: _, tile_hex_8bit: _, memory_window: _, esc_shows_debugger: _,
+        ff_speed: _, framerate_limit: _, show_framerate: _, freeze_recent: _, pause_on_focus_loss: _,
+        scheme: _, dmg_palette: _, allow_opposing: _, break_ld_b_b: _, break_invalid_op: _,
+        break_echo_ram: _, break_lcd_off_vblank: _, bootroms_enabled: _, bootrom_dmg: _,
+        bootrom_gbc: _, bootrom_sgb: _,
+    } = settings;
     let fb = |b: bool| if b { "true" } else { "false" };
     d.set("", "version", &VERSION.to_string());
     d.set("system", "model", match settings.model {

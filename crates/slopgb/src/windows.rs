@@ -489,16 +489,15 @@ fn render_vram(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, state: &
         }
         VramTab::Oam => {
             let (pals, n) = obj_palettes(gb, state.show_paletted);
-            vram::render_oam(
-                c,
-                l.content,
-                gb.oam(),
-                gb.vram(),
-                &pals[..n],
+            let mut ctx = vram::VramRenderCtx {
+                c: &mut *c,
+                rect: l.content,
+                vram: gb.vram(),
+                palettes: &pals[..n],
                 cgb,
-                tall,
-                g.scale,
-            );
+                scale: g.scale,
+            };
+            vram::render_oam(&mut ctx, gb.oam(), tall);
         }
         VramTab::BgMap => {
             let (bg_base, win_base, signed) = bgmap_bases(gb, state);
@@ -506,14 +505,17 @@ fn render_vram(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, state: &
             let (left, right, s) = bgmap_two.expect("bgmap_two set on the BG map tab");
             // Left = BG tilemap with the screen viewport box; right = window
             // tilemap with the WX/WY region box (both gated by `scxy`).
-            vram::render_bgmap(
-                c, left, gb.vram(), bg_base, signed, &pals[..n], cgb, s,
-                screen_overlay(gb, state.scxy), theme,
-            );
-            vram::render_bgmap(
-                c, right, gb.vram(), win_base, signed, &pals[..n], cgb, s,
-                window_overlay(gb, state.scxy), theme,
-            );
+            let mut ctx = vram::VramRenderCtx {
+                c: &mut *c,
+                rect: left,
+                vram: gb.vram(),
+                palettes: &pals[..n],
+                cgb,
+                scale: s,
+            };
+            vram::render_bgmap(&mut ctx, bg_base, signed, screen_overlay(gb, state.scxy), theme);
+            ctx.rect = right;
+            vram::render_bgmap(&mut ctx, win_base, signed, window_overlay(gb, state.scxy), theme);
         }
         VramTab::Palettes => {
             // On a monochrome model the CGB palette RAM is meaningless; show the

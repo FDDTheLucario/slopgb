@@ -9,6 +9,12 @@ rust-version = "1.85"
 license = "MIT"
 repository = "https://github.com/FDDTheLucario/slopgb"
 
+[workspace.lints.rust]
+# forbid unsafe across every workspace crate (core, frontend, slopfp). Crates
+# opt in with `[lints] workspace = true`. slopfp keeps its own inline
+# `#![forbid(unsafe_code)]` too, so it stays liftable standalone.
+unsafe_code = "forbid"
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

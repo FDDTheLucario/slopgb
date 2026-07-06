@@ -15,12 +15,12 @@ fn gdma_steals_the_next_machine_cycle_plus_teardown() {
     let before = b.cycles();
     b.write(0xFF55, 0x03); // 4 blocks = 64 bytes, requested
     assert_eq!(b.cycles() - before, 4, "the write cycle only flags");
-    assert_eq!(b.peek(0x8000), 0x00, "nothing copied yet");
+    assert_eq!(b.peek_no_io(0x8000), 0x00, "nothing copied yet");
     let before = b.cycles();
     b.tick(); // the steal precedes this op's own cycle
     assert_eq!(b.cycles() - before, (4 * 8 + 1 + 1) * 4, "stall + teardown");
-    assert_eq!(b.peek(0x8000), 0x40);
-    assert_eq!(b.peek(0x803F), 0x7F);
+    assert_eq!(b.peek_no_io(0x8000), 0x40);
+    assert_eq!(b.peek_no_io(0x803F), 0x7F);
     assert_eq!(b.read(0xFF55), 0xFF, "completed");
     // HDMA1-4 are write-only.
     assert_eq!(b.read(0xFF51), 0xFF);
@@ -99,9 +99,9 @@ fn gdma_terminates_at_dest_0x10000_crossing() {
     setup_gdma_regs(&mut b, 0xC000, 0xFFF0);
     b.write(0xFF55, 0x01); // 2 blocks requested, only one fits
     b.tick();
-    assert_eq!(b.peek(0x9FF0), 0x40, "dest 0xFFF0 masks to VRAM 0x1FF0");
-    assert_eq!(b.peek(0x9FFF), 0x4F);
-    assert_eq!(b.peek(0x8000), 0x00, "no wrap into a second block");
+    assert_eq!(b.peek_no_io(0x9FF0), 0x40, "dest 0xFFF0 masks to VRAM 0x1FF0");
+    assert_eq!(b.peek_no_io(0x9FFF), 0x4F);
+    assert_eq!(b.peek_no_io(0x8000), 0x00, "no wrap into a second block");
     // With the display off the truncated GDMA still retires its whole
     // length (gambatte dma(): `if (!(lcdc & en) && gdmaReqFlagged)
     // dmaLength = 0`), reading back $FF.
@@ -116,19 +116,19 @@ fn hblank_dma_one_block_per_hblank() {
     b.write(0xFF40, 0x91); // LCD on: glitched line, hblank from ~dot 250
     b.write(0xFF55, 0x81); // hblank DMA, 2 blocks (PPU at dot 4)
     assert_eq!(b.read(0xFF55), 0x01, "2 blocks remaining reads 1");
-    assert_eq!(b.peek(0x8000), 0x00, "nothing copied before hblank");
+    assert_eq!(b.peek_no_io(0x8000), 0x00, "nothing copied before hblank");
     // Run into the glitched line's hblank; the block transfer steals
     // 8 M-cycles + 1 teardown at the next boundary.
     ticks(&mut b, 90); // ~dot 400 incl. the stall
     assert_eq!(b.read(0xFF55), 0x00, "one block left");
-    assert_eq!(b.peek(0x8000), 0x40);
-    assert_eq!(b.peek(0x800F), 0x4F);
-    assert_eq!(b.peek(0x8010), 0x00, "second block waits for next hblank");
+    assert_eq!(b.peek_no_io(0x8000), 0x40);
+    assert_eq!(b.peek_no_io(0x800F), 0x4F);
+    assert_eq!(b.peek_no_io(0x8010), 0x00, "second block waits for next hblank");
     // Run well into line 1's hblank.
     ticks(&mut b, 100);
     assert_eq!(b.read(0xFF55), 0xFF, "done");
-    assert_eq!(b.peek(0x8010), 0x50);
-    assert_eq!(b.peek(0x801F), 0x5F);
+    assert_eq!(b.peek_no_io(0x8010), 0x50);
+    assert_eq!(b.peek_no_io(0x801F), 0x5F);
 }
 
 /// Cancelling latches bit 7 plus the *written* length bits — the
@@ -147,7 +147,7 @@ fn hblank_dma_cancel_sets_bit7_and_latches_written_length() {
     b.write(0xFF55, 0x02); // cancel, writing length bits 0x02
     assert_eq!(b.read(0xFF55), 0x82, "bit 7 + the written length bits");
     ticks(&mut b, 101); // into line 1's hblank
-    assert_eq!(b.peek(0x8010), 0x00, "no further blocks after cancel");
+    assert_eq!(b.peek_no_io(0x8010), 0x00, "no further blocks after cancel");
 }
 
 /// Enabling HBlank DMA with the LCD off copies one block immediately
@@ -161,15 +161,15 @@ fn hblank_enable_with_lcd_off_copies_one_block_immediately() {
     setup_gdma_regs(&mut b, 0xC000, 0x0000);
     b.write(0xFF55, 0x81); // LCD is off
     b.tick();
-    assert_eq!(b.peek(0x8000), 0x40);
-    assert_eq!(b.peek(0x800F), 0x4F);
-    assert_eq!(b.peek(0x8010), 0x00, "exactly one block");
+    assert_eq!(b.peek_no_io(0x8000), 0x40);
+    assert_eq!(b.peek_no_io(0x800F), 0x4F);
+    assert_eq!(b.peek_no_io(0x8010), 0x00, "exactly one block");
     assert_eq!(b.read(0xFF55), 0x00, "armed, one block left");
     // The remaining block fires at the first mode-0 entry after the
     // display comes on.
     b.write(0xFF40, 0x91);
     ticks(&mut b, 90);
-    assert_eq!(b.peek(0x8010), 0x50);
+    assert_eq!(b.peek_no_io(0x8010), 0x50);
     assert_eq!(b.read(0xFF55), 0xFF, "completed");
 }
 
@@ -189,7 +189,7 @@ fn hblank_enable_inside_window_fires_immediately() {
     }
     b.write(0xFF55, 0x80); // 1 block, enabled mid-hblank
     b.tick();
-    assert_eq!(b.peek(0x8000), 0x40);
+    assert_eq!(b.peek_no_io(0x8000), 0x40);
     assert_eq!(b.read(0xFF55), 0xFF, "completed in the same hblank");
 }
 
@@ -210,11 +210,11 @@ fn hblank_enable_past_window_cutoff_waits() {
     assert!(b.ppu.hblank_active(), "still in the glitch line's hblank");
     b.write(0xFF55, 0x80); // PPU at dot 450: 2 dots left < 3-dot margin
     b.tick();
-    assert_eq!(b.peek(0x8000), 0x00, "no block this close to line end");
+    assert_eq!(b.peek_no_io(0x8000), 0x00, "no block this close to line end");
     assert_eq!(b.read(0xFF55), 0x00, "armed, nothing copied");
     // The next line's mode-0 entry fires it.
     ticks(&mut b, 250);
-    assert_eq!(b.peek(0x8000), 0x40);
+    assert_eq!(b.peek_no_io(0x8000), 0x40);
 }
 
 /// The block/CPU-access race has M-cycle granularity: a block flagged
@@ -248,8 +248,8 @@ fn hblank_block_race_has_machine_cycle_granularity() {
     b.write(0xFF55, 0x80);
     ticks(&mut b, lead_ticks);
     b.write(0xFF53, 0x90);
-    assert_eq!(b.peek(0x8000), 0x40, "block first: old dest");
-    assert_eq!(b.peek(0x9000), 0x00);
+    assert_eq!(b.peek_no_io(0x8000), 0x40, "block first: old dest");
+    assert_eq!(b.peek_no_io(0x9000), 0x00);
     // Trigger inside the write's own tick: the write commits first
     // and the block uses the new destination.
     let mut b = ic_cgb_mode();
@@ -260,8 +260,8 @@ fn hblank_block_race_has_machine_cycle_granularity() {
     ticks(&mut b, lead_ticks - 1);
     b.write(0xFF53, 0x90); // this op's tick contains the trigger
     b.tick(); // the steal happens here
-    assert_eq!(b.peek(0x9000), 0x40, "write first: new dest");
-    assert_eq!(b.peek(0x8000), 0x00);
+    assert_eq!(b.peek_no_io(0x9000), 0x40, "write first: new dest");
+    assert_eq!(b.peek_no_io(0x8000), 0x00);
 }
 
 /// HBlank DMA never proceeds while the core clock is gated: a block
@@ -285,13 +285,13 @@ fn hblank_block_defers_while_core_clock_gated() {
     }
     b.set_cpu_halted(true);
     ticks(&mut b, 300); // crosses further hblanks: nothing copies
-    assert_eq!(b.peek(0x8000), 0x00);
+    assert_eq!(b.peek_no_io(0x8000), 0x00);
     assert_eq!(b.read_no_tick(0xFF55), 0x00, "still armed");
     b.set_cpu_halted(false); // wake re-flags the deferred block
     let before = b.cycles();
     b.tick(); // the steal heads this op
     assert_eq!(b.cycles() - before, (8 + 1) * 4, "no teardown cycle");
-    assert_eq!(b.peek(0x8000), 0x40);
+    assert_eq!(b.peek_no_io(0x8000), 0x40);
     assert_eq!(b.read_no_tick(0xFF55), 0xFF);
 }
 
@@ -312,7 +312,7 @@ fn halt_wake_inside_hblank_window_fires_block_once() {
     }
     b.set_cpu_halted(false); // wake inside the window: block fires
     b.tick();
-    assert_eq!(b.peek(0x8000), 0x40);
+    assert_eq!(b.peek_no_io(0x8000), 0x40);
     // Re-arm inside the same hblank, halt, wake immediately: the halt
     // began inside the window (state High) — no retrigger.
     setup_gdma_regs(&mut b, 0xC000, 0x0010);
@@ -320,7 +320,7 @@ fn halt_wake_inside_hblank_window_fires_block_once() {
     b.write(0xFF55, 0x80);
     // (the enable itself fired a request: let it run, then re-halt)
     b.tick();
-    assert_eq!(b.peek(0x8010), 0x40);
+    assert_eq!(b.peek_no_io(0x8010), 0x40);
 }
 
 /// Disabling the display kills an armed HBlank transfer: FF55 keeps
@@ -337,11 +337,11 @@ fn lcd_disable_kills_hblank_arming_but_not_ff55() {
     b.write(0xFF55, 0x81); // armed with the LCD on, before any hblank
     b.write(0xFF40, 0x11); // display off
     ticks(&mut b, 300);
-    assert_eq!(b.peek(0x8000), 0x00, "arming died with the display");
+    assert_eq!(b.peek_no_io(0x8000), 0x00, "arming died with the display");
     assert_eq!(b.read(0xFF55), 0x01, "FF55 reads active (stale)");
     b.write(0xFF40, 0x91); // re-enabling does not revive it
     ticks(&mut b, 500);
-    assert_eq!(b.peek(0x8000), 0x00);
+    assert_eq!(b.peek_no_io(0x8000), 0x00);
 }
 
 /// The pending-block × speed-switch matrix (gambatte Memory::stop):
@@ -364,11 +364,11 @@ fn speed_switch_aborts_pending_hblank_block_entering_double_speed() {
     // The request flagged during the last tick is still pending when
     // STOP executes (gambatte: prefetched = hdmaReqFlagged).
     assert!(b.stop(0x0000, false));
-    assert_eq!(b.peek(0x8000), 0x40, "the block still copied");
-    assert_eq!(b.peek(0x800F), 0x4F);
+    assert_eq!(b.peek_no_io(0x8000), 0x40, "the block still copied");
+    assert_eq!(b.peek_no_io(0x800F), 0x4F);
     assert_eq!(b.read(0xFF55), 0x81, "aborted: bit 7 + armed count");
     ticks(&mut b, 300);
-    assert_eq!(b.peek(0x8010), 0x00, "no further blocks");
+    assert_eq!(b.peek_no_io(0x8010), 0x00, "no further blocks");
 }
 
 #[test]
@@ -386,9 +386,9 @@ fn speed_switch_defers_pending_hblank_block_leaving_double_speed() {
     }
     assert!(b.stop(0x0000, false)); // back to normal speed, with pause
     assert_eq!(b.read_no_tick(0xFF55), 0x01, "still active");
-    assert_eq!(b.peek(0x8000), 0x00, "block deferred across the pause");
+    assert_eq!(b.peek_no_io(0x8000), 0x00, "block deferred across the pause");
     b.tick();
-    assert_eq!(b.peek(0x8000), 0x40);
+    assert_eq!(b.peek_no_io(0x8000), 0x40);
     assert_eq!(b.read_no_tick(0xFF55), 0x00);
 }
 
@@ -419,29 +419,29 @@ fn vram_dma_steal_advances_oam_dma_capturing_the_bus() {
     }
     let rom = |i: u8| i ^ 0x5A;
     // Positions copied normally before the steal, even slots: kept.
-    assert_eq!(b.peek(0xFE00), 0x50);
-    assert_eq!(b.peek(0xFE02), 0x52);
-    assert_eq!(b.peek(0xFE04), 0x54);
+    assert_eq!(b.peek_no_io(0xFE00), 0x50);
+    assert_eq!(b.peek_no_io(0xFE02), 0x52);
+    assert_eq!(b.peek_no_io(0xFE04), 0x54);
     // Captures land at OAM[src & 0xFF] of the second stolen byte of
     // each M-cycle — the odd HDMA source offsets — overwriting the
     // earlier normal copies of idx 1/3.
-    assert_eq!(b.peek(0xFE01), rom(0x01), "capture over earlier copy");
-    assert_eq!(b.peek(0xFE03), rom(0x03), "capture over earlier copy");
+    assert_eq!(b.peek_no_io(0xFE01), rom(0x01), "capture over earlier copy");
+    assert_eq!(b.peek_no_io(0xFE03), rom(0x03), "capture over earlier copy");
     // Positions 5..12 advanced during the steal without copying their
     // own source: odd ones hold captures, even ones keep the prefill.
-    assert_eq!(b.peek(0xFE05), rom(0x05));
-    assert_eq!(b.peek(0xFE07), rom(0x07));
-    assert_eq!(b.peek(0xFE09), rom(0x09));
-    assert_eq!(b.peek(0xFE0B), rom(0x0B));
+    assert_eq!(b.peek_no_io(0xFE05), rom(0x05));
+    assert_eq!(b.peek_no_io(0xFE07), rom(0x07));
+    assert_eq!(b.peek_no_io(0xFE09), rom(0x09));
+    assert_eq!(b.peek_no_io(0xFE0B), rom(0x0B));
     for i in [0x06u16, 0x08, 0x0A, 0x0C] {
-        assert_eq!(b.peek(0xFE00 + i), 0xF0, "idx {i:#x} skipped");
+        assert_eq!(b.peek_no_io(0xFE00 + i), 0xF0, "idx {i:#x} skipped");
     }
     // Captures at offsets 0x0D/0x0F are overwritten again by the
     // normal copies resuming at idx 13 (teardown cycle onward).
-    assert_eq!(b.peek(0xFE0D), 0x5D);
-    assert_eq!(b.peek(0xFE0F), 0x5F);
-    assert_eq!(b.peek(0xFE10), 0x60);
-    assert_eq!(b.peek(0xFE9F), 0xEF);
+    assert_eq!(b.peek_no_io(0xFE0D), 0x5D);
+    assert_eq!(b.peek_no_io(0xFE0F), 0x5F);
+    assert_eq!(b.peek_no_io(0xFE10), 0x60);
+    assert_eq!(b.peek_no_io(0xFE9F), 0xEF);
 }
 
 /// A captured bus byte whose address low byte is ≥ 0xA0 lands in the
@@ -493,14 +493,14 @@ fn vram_dma_steal_captures_every_byte_in_double_speed() {
     // normal copies are overwritten; positions 5..=20 advanced during
     // the steal, so none of the captures is re-copied afterwards.
     for i in 0..16u16 {
-        assert_eq!(b.peek(0xFE00 + i), (i as u8) ^ 0x5A, "offset {i:#x}");
+        assert_eq!(b.peek_no_io(0xFE00 + i), (i as u8) ^ 0x5A, "offset {i:#x}");
     }
     // Positions 16..=20 advanced during the steal too: no capture
     // (the block only drove offsets 0..=15), no copy — prefill stays.
     for i in 16..21u16 {
-        assert_eq!(b.peek(0xFE00 + i), 0xF0, "idx {i:#x} skipped");
+        assert_eq!(b.peek_no_io(0xFE00 + i), 0xF0, "idx {i:#x} skipped");
     }
-    assert_eq!(b.peek(0xFE15), 0x65, "normal copies resume at idx 21");
+    assert_eq!(b.peek_no_io(0xFE15), 0x65, "normal copies resume at idx 21");
 }
 
 /// A block serviced while the core clock is gated (the speed-switch
@@ -519,13 +519,13 @@ fn vram_dma_steal_does_not_advance_a_halt_frozen_oam_dma() {
     b.set_cpu_halted(true);
     b.vram_dma_req = Some(VramDmaReq::Gdma);
     b.run_vram_dma();
-    assert_eq!(b.peek(0xFE01), 0x51, "no capture while frozen");
-    assert_eq!(b.peek(0xFE05), 0xF0, "no position consumed");
+    assert_eq!(b.peek_no_io(0xFE01), 0x51, "no capture while frozen");
+    assert_eq!(b.peek_no_io(0xFE05), 0xF0, "no position consumed");
     assert_eq!(b.dma_run.unwrap().idx, 4, "frozen position kept");
     b.set_cpu_halted(false);
     ticks(&mut b, 170);
-    assert_eq!(b.peek(0xFE05), 0x55, "transfer resumed normally");
-    assert_eq!(b.peek(0xFE9F), 0xEF);
+    assert_eq!(b.peek_no_io(0xFE05), 0x55, "transfer resumed normally");
+    assert_eq!(b.peek_no_io(0xFE9F), 0xEF);
 }
 
 /// The OAM DMA setup delay keeps counting during a steal: the start
@@ -550,11 +550,11 @@ fn vram_dma_steal_counts_oam_dma_startup_delay() {
     // consumed by the capture at OAM[1]. Advances 2..8: idx 1..7
     // consumed, captures at offsets 3/5/7/9/B/D/F. Normal copies
     // resume at idx 8 (teardown cycle), overwriting captures 9/B/D/F.
-    assert_eq!(b.peek(0xFE00), 0xF0, "byte 0's copy was stolen");
-    assert_eq!(b.peek(0xFE01), 0x01 ^ 0x5A, "capture during promote");
-    assert_eq!(b.peek(0xFE03), 0x03 ^ 0x5A);
-    assert_eq!(b.peek(0xFE02), 0xF0, "idx 2 skipped (capture at 3)");
-    assert_eq!(b.peek(0xFE07), 0x07 ^ 0x5A);
-    assert_eq!(b.peek(0xFE08), 0x58, "normal copies resume at idx 8");
-    assert_eq!(b.peek(0xFE09), 0x59, "capture at 9 re-copied");
+    assert_eq!(b.peek_no_io(0xFE00), 0xF0, "byte 0's copy was stolen");
+    assert_eq!(b.peek_no_io(0xFE01), 0x01 ^ 0x5A, "capture during promote");
+    assert_eq!(b.peek_no_io(0xFE03), 0x03 ^ 0x5A);
+    assert_eq!(b.peek_no_io(0xFE02), 0xF0, "idx 2 skipped (capture at 3)");
+    assert_eq!(b.peek_no_io(0xFE07), 0x07 ^ 0x5A);
+    assert_eq!(b.peek_no_io(0xFE08), 0x58, "normal copies resume at idx 8");
+    assert_eq!(b.peek_no_io(0xFE09), 0x59, "capture at 9 re-copied");
 }

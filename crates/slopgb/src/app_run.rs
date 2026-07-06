@@ -204,7 +204,6 @@ impl App {
             Action::MainCheats => {
                 self.cheat_dialog = Some(cheat_ui::CheatDialog::default());
                 self.request_game_redraw();
-                self.request_game_redraw();
             }
             // Execution profiler (MB5): the three radio modes + clear buffer.
             // "logging" and "break" both enable the tally; break also halts the

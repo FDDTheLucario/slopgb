@@ -42,7 +42,7 @@ pub fn from_ini(f: &Ini) -> Settings {
         // slopgb's fullscreen-stretch has no bgb equivalent (bgb's `stretch` is a
         // video-scaling dropdown, not a mode), so it's a `Slopgb` extra.
         stretch: boolean("SlopgbStretch", d.stretch),
-        volume: (int("Volume", 100) as f32 / 100.0).clamp(0.0, 1.0),
+        volume: (int("Volume", (d.volume * 100.0) as i64) as f32 / 100.0).clamp(0.0, 1.0),
         mono: boolean("SoundMono", d.mono),
         lowercase_disasm: boolean("DebugLowercase", d.lowercase_disasm),
         lowercase_hex: boolean("DebugHexLower", d.lowercase_hex),
@@ -72,8 +72,16 @@ pub fn from_ini(f: &Ini) -> Settings {
 
 /// Update `f` in place to reflect `s`: overwrite the mapped bgb keys + our
 /// `Slopgb*` extras (bgb ignores unknown keys), preserving every other line.
-/// `model`/`SystemMode` is left untouched (see module doc).
+/// `model` is written to bgb's `SystemMode` (see module doc).
 pub fn to_ini(s: &Settings, f: &mut Ini) {
+    let Settings {
+        model: _, stretch: _, volume: _, mono: _, lowercase_disasm: _, lowercase_hex: _,
+        show_clocks: _, rgbds_disasm: _, tile_hex_8bit: _, memory_window: _, esc_shows_debugger: _,
+        ff_speed: _, framerate_limit: _, show_framerate: _, freeze_recent: _, pause_on_focus_loss: _,
+        scheme: _, dmg_palette: _, allow_opposing: _, break_ld_b_b: _, break_invalid_op: _,
+        break_echo_ram: _, break_lcd_off_vblank: _, bootroms_enabled: _, bootrom_dmg: _,
+        bootrom_gbc: _, bootrom_sgb: _,
+    } = s;
     f.set(
         "SystemMode",
         match s.model {

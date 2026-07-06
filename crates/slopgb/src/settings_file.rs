@@ -134,22 +134,11 @@ fn load_bgb(path: &Path) -> Loaded {
     Loaded { settings: bgb::from_ini(&ini), recent }
 }
 
-/// Write `text` to `path` atomically (temp file + rename), creating the parent
-/// dir. Errors are logged, not fatal.
+/// Write `text` to `path` durably (temp file + fsync + rename, creating the
+/// parent dir). Errors are logged, not fatal.
 fn write_atomic(path: &Path, text: &str) {
-    if let Some(dir) = path.parent() {
-        if let Err(e) = std::fs::create_dir_all(dir) {
-            eprintln!("slopgb: settings dir create failed: {e}");
-            return;
-        }
-    }
-    let tmp = path.with_extension("tmp");
-    if let Err(e) = std::fs::write(&tmp, text.as_bytes()) {
+    if let Err(e) = crate::session::write_atomic(path, text.as_bytes()) {
         eprintln!("slopgb: settings write failed: {e}");
-        return;
-    }
-    if let Err(e) = std::fs::rename(&tmp, path) {
-        eprintln!("slopgb: settings rename failed: {e}");
     }
 }
 

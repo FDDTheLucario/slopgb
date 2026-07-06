@@ -50,27 +50,36 @@ fn read_opt_u8_u16(r: &mut Reader<'_>) -> Result<Option<(u8, u16)>, StateError> 
     })
 }
 
-/// A `Option<(u8, u8, bool, u8, u8)>` staged-event slot (presence byte +
-/// payload) — [`Ppu::eng_stat_pending`]'s shape.
-/// [`Ppu::eng_stat_pending`]'s payload shape.
-type EngStatPending = (u8, u8, bool, u8, u8);
-
+/// An `Option<EngStatPending>` staged-event slot (presence byte + payload).
+/// Field order below is the on-disk layout — keep it stable.
 fn write_opt_eng_stat_pending(w: &mut Writer, o: Option<EngStatPending>) {
     match o {
-        Some((a, b, c, d, e)) => {
+        Some(EngStatPending {
+            phase1,
+            fin,
+            pre_high,
+            mfi_t0,
+            k,
+        }) => {
             w.bool(true);
-            w.u8(a);
-            w.u8(b);
-            w.bool(c);
-            w.u8(d);
-            w.u8(e);
+            w.u8(phase1);
+            w.u8(fin);
+            w.bool(pre_high);
+            w.u8(mfi_t0);
+            w.u8(k);
         }
         None => w.bool(false),
     }
 }
 fn read_opt_eng_stat_pending(r: &mut Reader<'_>) -> Result<Option<EngStatPending>, StateError> {
     Ok(if r.bool()? {
-        Some((r.u8()?, r.u8()?, r.bool()?, r.u8()?, r.u8()?))
+        Some(EngStatPending {
+            phase1: r.u8()?,
+            fin: r.u8()?,
+            pre_high: r.bool()?,
+            mfi_t0: r.u8()?,
+            k: r.u8()?,
+        })
     } else {
         None
     })

@@ -286,39 +286,42 @@ pub fn flip_tile(pixels: [[u8; 8]; 8], xflip: bool, yflip: bool) -> [[u8; 8]; 8]
     out
 }
 
+/// Shared parameters for the VRAM-grid renderers ([`render_oam`],
+/// [`render_bgmap`]): the target `c`anvas + `rect`, plus the `vram` bytes,
+/// `palettes` table, `cgb` flag and pixel `scale` used to decode each cell.
+/// Grouped so the renderers take one borrow instead of six positional args.
+pub struct VramRenderCtx<'a, 'c> {
+    pub c: &'a mut Canvas<'c>,
+    pub rect: Rect,
+    pub vram: &'a [u8],
+    pub palettes: &'a [[u32; 4]],
+    pub cgb: bool,
+    pub scale: i32,
+}
+
 /// Render the OAM tab: the 40 sprites in an 8×5 grid, each honoring its OAM
 /// attribute byte — per-sprite VRAM bank (CGB bit 3), X/Y flip (bits 5/6), and
 /// palette: on CGB the OBJ palette (bits 0-2) indexes `palettes`, on DMG the
 /// DMG-palette bit (bit 4) picks `palettes[0/1]` (OBP0/OBP1). `tall` (LCDC bit 2)
 /// draws 8×16 sprites as two stacked tiles (`tile&!1` over `tile|1`, order
 /// swapped on Y-flip). Empty slots (y == x == 0) are blank. Clipped to `rect`.
-#[allow(clippy::too_many_arguments)]
-pub fn render_oam(
-    c: &mut Canvas,
-    rect: Rect,
-    oam: &[u8],
-    vram: &[u8],
-    palettes: &[[u32; 4]],
-    cgb: bool,
-    tall: bool,
-    scale: i32,
-) {
+pub fn render_oam(ctx: &mut VramRenderCtx, oam: &[u8], tall: bool) {
     const COLS: i32 = 8;
-    let (cw, ch) = (oam_cell(scale), oam_cell_h(scale, tall));
-    let saved = c.push_clip(rect);
+    let (cw, ch) = (oam_cell(ctx.scale), oam_cell_h(ctx.scale, tall));
+    let saved = ctx.c.push_clip(ctx.rect);
     for (i, s) in debug::oam_sprites(oam).iter().enumerate() {
         if s.y == 0 && s.x == 0 {
             continue;
         }
-        let px = rect.x + (i as i32 % COLS) * cw;
-        let py = rect.y + (i as i32 / COLS) * ch;
-        let bank = if cgb { usize::from(s.attr >> 3 & 1) } else { 0 };
-        let pal_idx = if cgb {
+        let px = ctx.rect.x + (i as i32 % COLS) * cw;
+        let py = ctx.rect.y + (i as i32 / COLS) * ch;
+        let bank = if ctx.cgb { usize::from(s.attr >> 3 & 1) } else { 0 };
+        let pal_idx = if ctx.cgb {
             usize::from(s.attr & 0x07)
         } else {
             usize::from(s.attr >> 4 & 1)
         };
-        let Some(palette) = palettes.get(pal_idx).or_else(|| palettes.first()) else {
+        let Some(palette) = ctx.palettes.get(pal_idx).or_else(|| ctx.palettes.first()) else {
             continue;
         };
         let (xf, yf) = (s.attr & 0x20 != 0, s.attr & 0x40 != 0);
@@ -330,15 +333,16 @@ pub fn render_oam(
                 [s.tile & !1, s.tile | 1]
             };
             for (k, &t) in halves.iter().enumerate() {
-                let pixels = flip_tile(debug::tile_pixels(vram, bank, t as usize), xf, yf);
-                c.blit_tile(px, py + k as i32 * 8 * scale, &pixels, palette, scale);
+                let pixels = flip_tile(debug::tile_pixels(ctx.vram, bank, t as usize), xf, yf);
+                ctx.c
+                    .blit_tile(px, py + k as i32 * 8 * ctx.scale, &pixels, palette, ctx.scale);
             }
         } else {
-            let pixels = flip_tile(debug::tile_pixels(vram, bank, s.tile as usize), xf, yf);
-            c.blit_tile(px, py, &pixels, palette, scale);
+            let pixels = flip_tile(debug::tile_pixels(ctx.vram, bank, s.tile as usize), xf, yf);
+            ctx.c.blit_tile(px, py, &pixels, palette, ctx.scale);
         }
     }
-    c.set_clip(saved);
+    ctx.c.set_clip(saved);
 }
 
 /// One DMG palette row for the Palettes tab: a register (`BGP`/`OBP0`/`OBP1`),
@@ -512,25 +516,19 @@ impl MapOverlay {
 /// `palettes`, tile VRAM bank (bit 3), and X/Y flip (bits 5/6); on DMG it uses
 /// `palettes[0]` (BGP) with no flips. `overlay` outlines the screen/window box.
 /// Clipped to `rect`.
-#[allow(clippy::too_many_arguments)]
 pub fn render_bgmap(
-    c: &mut Canvas,
-    rect: Rect,
-    vram: &[u8],
+    ctx: &mut VramRenderCtx,
     base: u16,
     signed: bool,
-    palettes: &[[u32; 4]],
-    cgb: bool,
-    scale: i32,
     overlay: MapOverlay,
     theme: &Theme,
 ) {
-    let saved = c.push_clip(rect);
-    let map = debug::bg_map(vram, base);
+    let saved = ctx.c.push_clip(ctx.rect);
+    let map = debug::bg_map(ctx.vram, base);
     for (i, cell) in map.iter().enumerate() {
-        let px = rect.x + (i as i32 % 32) * 8 * scale;
-        let py = rect.y + (i as i32 / 32) * 8 * scale;
-        let (pal_idx, bank, xf, yf) = if cgb {
+        let px = ctx.rect.x + (i as i32 % 32) * 8 * ctx.scale;
+        let py = ctx.rect.y + (i as i32 / 32) * 8 * ctx.scale;
+        let (pal_idx, bank, xf, yf) = if ctx.cgb {
             (
                 usize::from(cell.attr & 0x07),
                 usize::from(cell.attr >> 3 & 1),
@@ -540,24 +538,24 @@ pub fn render_bgmap(
         } else {
             (0, 0, false, false)
         };
-        let Some(palette) = palettes.get(pal_idx).or_else(|| palettes.first()) else {
+        let Some(palette) = ctx.palettes.get(pal_idx).or_else(|| ctx.palettes.first()) else {
             continue;
         };
         let pixels = flip_tile(
-            debug::tile_pixels(vram, bank, tile_index(cell.tile, signed)),
+            debug::tile_pixels(ctx.vram, bank, tile_index(cell.tile, signed)),
             xf,
             yf,
         );
-        c.blit_tile(px, py, &pixels, palette, scale);
+        ctx.c.blit_tile(px, py, &pixels, palette, ctx.scale);
     }
     // Viewport/window outline: 1 map pixel = `scale`; the screen box wraps.
-    for b in overlay.rects(scale) {
-        c.outline_rect(
-            Rect::new(rect.x + b.x, rect.y + b.y, b.w, b.h),
+    for b in overlay.rects(ctx.scale) {
+        ctx.c.outline_rect(
+            Rect::new(ctx.rect.x + b.x, ctx.rect.y + b.y, b.w, b.h),
             theme.breakpoint,
         );
     }
-    c.set_clip(saved);
+    ctx.c.set_clip(saved);
 }
 
 #[cfg(test)]
