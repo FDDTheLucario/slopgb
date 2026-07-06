@@ -500,13 +500,61 @@ fn debug_write_round_trips_through_debug_read() {
 #[test]
 fn cdl_load_restores_a_flag_buffer() {
     let mut gb = GameBoy::new(Model::Dmg, rom_with_cgb_flag(0x00)).unwrap();
-    let mut fixture = [0u8; 65536];
-    fixture[0x0150] = 4; // X
-    fixture[0xC000] = 3; // R|W
-    gb.load_cdl(&fixture);
+    // The buffer is sized to the machine's physical layout, not a flat 64 KiB.
+    gb.set_cdl(true);
+    let n = gb.cdl_flags().unwrap().len();
+    gb.set_cdl(false);
+    let mut fixture = vec![0u8; n];
+    fixture[0x0150] = 4; // ROM offset 0x150 (bank 0 low area) -> X
+    assert!(gb.load_cdl(&fixture), "matching-size buffer loads");
     assert_eq!(gb.cdl_flag(0x0150), 4);
-    assert_eq!(gb.cdl_flag(0xC000), 3);
-    assert_eq!(gb.cdl_flags().map(<[u8]>::len), Some(65536), "log enabled");
+    assert_eq!(gb.cdl_flags().unwrap(), &fixture[..], "buffer restored verbatim");
+    assert!(!gb.load_cdl(&[0u8; 8]), "wrong-size buffer is rejected");
+}
+
+/// A 4-bank MBC1 ROM (no RAM), for exercising bank-aware address translation.
+fn mbc1_4bank_rom() -> Vec<u8> {
+    let mut rom = vec![0u8; 4 * 0x4000];
+    rom[0x147] = 0x01; // MBC1
+    rom[0x148] = 0x01; // 4 banks
+    rom
+}
+
+#[test]
+fn cdl_is_rom_bank_aware() {
+    // The flat-64K store collapsed every ROM bank onto 0x4000-0x7FFF; the
+    // physical store keys each bank to its own slot (mark and read share the
+    // same translation, so cdl_flag reads back what a mark would set).
+    let mut gb = GameBoy::new(Model::Dmg, mbc1_4bank_rom()).unwrap();
+    gb.set_cdl(true);
+    let n = gb.cdl_flags().unwrap().len();
+    let mut fx = vec![0u8; n];
+    fx[0x4000] = 4; // bank 1 @ 0x4000 physical offset (1 * 0x4000)
+    fx[0x8000] = 1; // bank 2 @ 0x4000 physical offset (2 * 0x4000)
+    assert!(gb.load_cdl(&fx));
+    gb.debug_write(0x2000, 1); // BANK1 = 1
+    assert_eq!(gb.cdl_flag(0x4000), 4, "0x4000 tint follows ROM bank 1");
+    gb.debug_write(0x2000, 2); // BANK1 = 2
+    assert_eq!(gb.cdl_flag(0x4000), 1, "same address, distinct bank-2 slot");
+}
+
+#[test]
+fn cdl_is_wram_bank_aware_and_skips_absent_sram() {
+    // CGB WRAM banks (SVBK) get distinct slots; a disabled/absent-SRAM access
+    // maps to no physical byte (cdl_index None -> no phantom mark).
+    let mut gb = GameBoy::new(Model::Cgb, rom_with_cgb_flag(0x80)).unwrap();
+    gb.set_cdl(true);
+    let n = gb.cdl_flags().unwrap().len();
+    let mut fx = vec![0u8; n];
+    let wbase = 0x8000 + 0x4000; // rom_len + VRAM, SRAM len 0 on this ROM-only cart
+    fx[wbase + 0x1000] = 2; // WRAM bank 1 @ 0xD000 (wram_index = 1 * 0x1000)
+    fx[wbase + 0x2000] = 3; // WRAM bank 2 @ 0xD000
+    assert!(gb.load_cdl(&fx));
+    gb.debug_write(0xFF70, 1); // SVBK = 1
+    assert_eq!(gb.cdl_flag(0xD000), 2);
+    gb.debug_write(0xFF70, 2); // SVBK = 2
+    assert_eq!(gb.cdl_flag(0xD000), 3, "0xD000 tint follows the WRAM bank");
+    assert_eq!(gb.cdl_flag(0xA000), 0, "absent SRAM maps to no byte");
 }
 
 #[test]
@@ -553,7 +601,7 @@ fn cdl_defaults_off_toggles_and_survives_a_state_load() {
     assert_eq!(gb.cdl_flag(0x0100), 0, "off: flag reads 0");
     assert!(gb.cdl_flags().is_none(), "off: no buffer");
     gb.set_cdl(true);
-    assert_eq!(gb.cdl_flags().map(<[u8]>::len), Some(65536), "on: 64 KiB buffer");
+    assert!(gb.cdl_flags().is_some_and(|b| !b.is_empty()), "on: buffer allocated");
     assert!(gb.cdl_flags().unwrap().iter().all(|&f| f == 0), "on: all clear");
     // A save-state load leaves the CDL untouched — it is live UI state, not
     // serialized — so the buffer stays enabled across a load.

@@ -200,6 +200,21 @@ pub fn render(
     }
 }
 
+/// The live bank label for the banked region `base` sits in (ROM/VRAM/SRAM/
+/// WRAM), or `None` in the fixed/unbanked regions — for the memory-viewer
+/// status bar, so the CDL tint's bank is named. C000-CFFF is always WRAM
+/// bank 0; D000-DFFF follows SVBK.
+pub(crate) fn mem_bank_label(gb: &GameBoy, base: u16) -> Option<String> {
+    match base {
+        0x4000..=0x7FFF => Some(format!("ROM{:02X}", gb.rom_bank())),
+        0x8000..=0x9FFF => Some(format!("VRM{}", gb.vram_bank())),
+        0xA000..=0xBFFF => gb.ram_bank().map(|b| format!("SRM{b:02X}")),
+        0xC000..=0xCFFF => Some("WRM0".to_string()),
+        0xD000..=0xDFFF => Some(format!("WRM{}", gb.wram_bank())),
+        _ => None,
+    }
+}
+
 /// Render the standalone memory viewer: the hex dump from the base address
 /// filling the window above a one-line status bar showing the nearest preceding
 /// symbol (`Name+offset`, or `----` with no symbols loaded).
@@ -245,9 +260,15 @@ fn render_memory_window(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme,
     }
     let bar_y = area.bottom() - lh;
     c.hline(area.x, bar_y, area.w, theme.border);
-    let status = match st.symbols.nearest_before(st.mem_base) {
+    let loc = match st.symbols.nearest_before(st.mem_base) {
         Some((name, base)) => format!("{:04X}  {name}+{:X}", st.mem_base, st.mem_base - base),
         None => format!("{:04X}  ----", st.mem_base),
+    };
+    // Prefix the live bank of the banked region the view sits in (BGB-style),
+    // so the CDL tint's bank is named: "ROM05:4000  Name+X".
+    let status = match mem_bank_label(gb, st.mem_base) {
+        Some(b) => format!("{b}:{loc}"),
+        None => loc,
     };
     draw_text(c, area.x + 2, bar_y + 1, &status, theme.text);
     if let Some(dlg) = &st.goto {

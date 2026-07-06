@@ -93,15 +93,17 @@ mod tests {
     #[test]
     fn cdl_save_load_pipeline_reconstructs_flags() {
         use slopgb_core::{GameBoy, Model};
-        // The full save→load data path (minus fs): encode → decode → load_cdl.
-        let mut fixture = [0u8; 65536];
-        fixture[0x0100] = 4; // X
-        fixture[0xC000] = 3; // R|W
-        let dec = rle_decode(&rle_encode(&fixture));
-        let arr = <[u8; 65536]>::try_from(dec.as_slice()).unwrap();
+        // The full save→load data path (minus fs): encode → decode → load_cdl,
+        // with the buffer sized to the machine's physical layout.
         let mut gb = GameBoy::new(Model::Dmg, vec![0u8; 0x8000]).unwrap();
-        gb.load_cdl(&arr);
+        gb.set_cdl(true);
+        let mut fixture = gb.cdl_flags().unwrap().to_vec();
+        fixture[0x0100] = 4; // X at ROM offset 0x100 (bank 0)
+        let dec = rle_decode(&rle_encode(&fixture));
+        assert!(gb.load_cdl(&dec), "round-tripped buffer matches the layout");
         assert_eq!(gb.cdl_flag(0x0100), 4);
-        assert_eq!(gb.cdl_flag(0xC000), 3);
+        assert_eq!(gb.cdl_flags().unwrap(), &fixture[..]);
+        // A wrong-length (foreign-cart) buffer is rejected.
+        assert!(!gb.load_cdl(&[0u8; 100]));
     }
 }

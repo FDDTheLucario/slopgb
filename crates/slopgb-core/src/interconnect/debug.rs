@@ -16,9 +16,7 @@ impl Interconnect {
     pub(super) fn check_access(&mut self, addr: u16, is_write: bool) {
         // CDL: record a CPU read/write of this byte (R=1, W=2). `None` when the
         // log is off → no-op, so the golden path is byte-identical.
-        if let Some(b) = &mut self.cdl {
-            b[addr as usize] |= if is_write { 2 } else { 1 };
-        }
+        self.cdl_mark(addr, if is_write { 2 } else { 1 });
         if !self.watchpoints.is_empty()
             && self
                 .watchpoints
@@ -140,28 +138,84 @@ impl Interconnect {
         }
     }
 
-    /// Enable/disable the code/data log (CDL). Enabling allocates the 64 KiB flag
-    /// buffer (preserving an existing one); disabling drops it. Live-debugger-only,
-    /// golden-safe (a `None` log is a no-op in every CDL hook).
+    /// Cumulative base offsets of the bank-aware CDL buffer's physical regions
+    /// (ROM | VRAM | SRAM | WRAM | tail `0xFE00-0xFFFF`) and its total size.
+    /// Fixed for a machine's lifetime, so the buffer sized to `total` at
+    /// enable/load never needs re-indexing.
+    fn cdl_layout(&self) -> CdlLayout {
+        let vram = self.cart.rom_len();
+        let sram = vram + CDL_VRAM_LEN;
+        let wram = sram + self.cart.ram_len();
+        let tail = wram + self.wram.len();
+        CdlLayout {
+            rom: 0,
+            vram,
+            sram,
+            wram,
+            total: tail + CDL_TAIL_LEN,
+        }
+    }
+
+    /// Translate a CPU address to its index in the physical CDL buffer, or
+    /// `None` when the access lands on no physical byte (disabled/absent SRAM,
+    /// or an RTC register). Shared by the mark hook and `cdl_flag` so the record
+    /// and the display can't disagree (the `rom_bank_for` pattern). `&self`.
+    fn cdl_index(&self, addr: u16) -> Option<usize> {
+        let l = self.cdl_layout();
+        Some(match addr {
+            0x0000..=0x7FFF => l.rom + self.cart.rom_offset(addr),
+            0x8000..=0x9FFF => {
+                l.vram + self.ppu.vram_bank() * 0x2000 + usize::from(addr & 0x1FFF)
+            }
+            0xA000..=0xBFFF => l.sram + self.cart.ram_offset(addr)?,
+            0xC000..=0xFDFF => l.wram + self.wram_index(addr),
+            // 0xFE00-0xFFFF tail (OAM/IO/HRAM/IE), unbanked.
+            _ => l.wram + self.wram.len() + usize::from(addr - 0xFE00),
+        })
+    }
+
+    /// Mark a CPU access to `addr` with `flag` (R=1/W=2/X=4) in the bank-aware
+    /// CDL. The `is_none()` early-out keeps this the same no-op it was when the
+    /// log is off, so golden paths stay byte-identical; the index is resolved
+    /// via `&self` before the `&mut self.cdl` borrow.
+    pub(super) fn cdl_mark(&mut self, addr: u16, flag: u8) {
+        if self.cdl.is_none() {
+            return;
+        }
+        if let Some(i) = self.cdl_index(addr) {
+            if let Some(b) = &mut self.cdl {
+                b[i] |= flag;
+            }
+        }
+    }
+
+    /// Enable/disable the code/data log (CDL). Enabling allocates the physical
+    /// flag buffer sized to the machine (preserving an existing one); disabling
+    /// drops it. Live-debugger-only, golden-safe (a `None` log is a no-op).
     pub fn set_cdl(&mut self, on: bool) {
         match (on, self.cdl.is_some()) {
-            (true, false) => self.cdl = Some(Box::new([0u8; 65536])),
+            (true, false) => self.cdl = Some(vec![0u8; self.cdl_layout().total].into()),
             (false, true) => self.cdl = None,
             _ => {}
         }
     }
 
-    /// The CDL access flags at `addr` (R=1, W=2, X=4), or 0 when the log is
-    /// off/the byte is unvisited.
+    /// The CDL access flags for the byte `addr` currently maps to (R=1, W=2,
+    /// X=4), or 0 when the log is off / the byte is unvisited / no physical byte
+    /// is mapped. Follows live banking, so it tints the currently-mapped bank.
     #[must_use]
     pub fn cdl_flag(&self, addr: u16) -> u8 {
-        self.cdl.as_ref().map_or(0, |b| b[addr as usize])
+        match (&self.cdl, self.cdl_index(addr)) {
+            (Some(b), Some(i)) => b[i],
+            _ => 0,
+        }
     }
 
-    /// The whole 64 KiB flag buffer (for a save), or `None` when the log is off.
+    /// The whole physical flag buffer (for a save), or `None` when the log is
+    /// off. Its length is `cdl_layout().total` (ROM+VRAM+SRAM+WRAM+tail).
     #[must_use]
     pub fn cdl_flags(&self) -> Option<&[u8]> {
-        self.cdl.as_deref().map(|b| &b[..])
+        self.cdl.as_deref()
     }
 
     /// Zero the CDL flags without disabling logging (bgb's "clear buffer").
@@ -171,9 +225,33 @@ impl Interconnect {
         }
     }
 
-    /// Load a CDL flag buffer (a loaded `.cdl` file), enabling the log.
-    pub fn load_cdl(&mut self, flags: &[u8; 65536]) {
-        self.cdl = Some(Box::new(*flags));
+    /// Load a physical CDL flag buffer (a decoded `.cdl` file), enabling the
+    /// log. Rejects (returns false) a buffer whose length doesn't match this
+    /// machine's layout — i.e. a `.cdl` from a different ROM/RAM configuration.
+    #[must_use]
+    pub fn load_cdl(&mut self, flags: &[u8]) -> bool {
+        if flags.len() != self.cdl_layout().total {
+            return false;
+        }
+        self.cdl = Some(flags.into());
+        true
+    }
+
+    /// The live WRAM bank mapped at `0xD000-0xDFFF` (CGB SVBK, always 1 on DMG;
+    /// `0xC000-0xCFFF` is always bank 0), for the memory-viewer bank indicator.
+    #[must_use]
+    pub fn wram_bank(&self) -> usize {
+        if self.model.is_cgb() {
+            usize::from(self.svbk & 7).max(1)
+        } else {
+            1
+        }
+    }
+
+    /// The live VRAM bank (CGB VBK; always 0 on DMG), for the viewer indicator.
+    #[must_use]
+    pub fn vram_bank(&self) -> usize {
+        self.ppu.vram_bank()
     }
 
     /// Whether the profiler is currently logging.
@@ -197,4 +275,21 @@ impl Interconnect {
             .as_ref()
             .map_or(0, std::collections::BTreeMap::len)
     }
+}
+
+/// VRAM slice of the bank-aware CDL buffer: both CGB banks (2×0x2000), so DMG
+/// and CGB share one layout.
+const CDL_VRAM_LEN: usize = 0x4000;
+/// Tail slice covering `0xFE00-0xFFFF` (OAM/unusable/IO/HRAM/IE), unbanked —
+/// keeps HRAM-executed code (OAM-DMA wait loops) tinted.
+const CDL_TAIL_LEN: usize = 0x200;
+
+/// Cumulative base offsets of the physical CDL regions plus the total buffer
+/// size (see [`Interconnect::cdl_layout`]).
+struct CdlLayout {
+    rom: usize,
+    vram: usize,
+    sram: usize,
+    wram: usize,
+    total: usize,
 }

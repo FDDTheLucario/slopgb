@@ -76,6 +76,48 @@ fn cur_ram_bank_mbc2_is_single_gated_bank() {
 }
 
 #[test]
+fn rom_offset_indexes_the_byte_read_rom_returns() {
+    // High area follows the mapped bank; low area is fixed bank 0.
+    let mut c = cart(0x01, 64, 0);
+    c.write_rom(0x2000, 5); // BANK1 = 5
+    c.write_rom(0x4000, 1); // BANK2 = 1 -> high-area bank 0x25
+    assert_eq!(c.rom_offset(0x0000), 0, "low area = bank 0 offset 0");
+    assert_eq!(c.rom_offset(0x4000), 0x25 * 0x4000, "high area = cur_rom_bank");
+    assert_eq!(c.rom_offset(0x4001), 0x25 * 0x4000 + 1);
+    // The offset indexes the same byte read_rom returns (make_rom stamps the
+    // bank index at each bank's start).
+    assert_eq!(c.rom_len(), 64 * 0x4000, "rom_len is the padded ROM size");
+    // MBC1 mode-1 maps bank 0x20/0x40/0x60 into the LOW area (128 banks so
+    // bank 0x40 isn't masked away by the size-mask).
+    let mut c = cart(0x01, 128, 3);
+    c.write_rom(0x4000, 2); // BANK2 = 2
+    c.write_rom(0x6000, 1); // mode 1
+    assert_eq!(c.rom_offset(0x0000), 0x40 * 0x4000, "mode-1 low area = bank2<<5");
+}
+
+#[test]
+fn ram_offset_none_when_no_byte_addressed() {
+    // Disabled RAM / RTC register -> no physical byte -> None.
+    let mut c = cart(0x03, 4, 3); // MBC1 + 32 KiB RAM
+    assert_eq!(c.ram_offset(0xA000), None, "RAM disabled at power-on");
+    c.write_rom(0x0000, 0x0A); // RAMG enable
+    c.write_rom(0x4000, 2); // BANK2 = 2
+    c.write_rom(0x6000, 0x01); // mode 1 -> RAM bank 2
+    assert_eq!(c.ram_offset(0xA000), Some(2 * 0x2000));
+    assert_eq!(c.ram_offset(0xA005), Some(2 * 0x2000 + 5));
+    assert_eq!(c.ram_len(), 4 * 0x2000);
+    // MBC2 built-in 512×4-bit RAM: mirrors at addr & 0x1FF.
+    let mut c = cart(0x06, 4, 0);
+    c.write_rom(0x0000, 0x0A); // RAMG enable
+    assert_eq!(c.ram_offset(0xA200), Some(0x200 & 0x1FF));
+    assert_eq!(c.ram_len(), 512, "MBC2 RAM is 512 bytes");
+    // MBC3 RTC register -> None.
+    let mut c = rtc_cart();
+    c.write_rom(0x4000, 0x08); // RTC seconds
+    assert_eq!(c.ram_offset(0xA000), None);
+}
+
+#[test]
 fn cur_ram_bank_mbc3_rtc_register_reports_none() {
     // MBC3+RTC: a RAM bank reports its index; an RTC register mapped at 0xA000
     // (RAMB 0x08-0x0C) is not a RAM bank, so the indicator shows None.

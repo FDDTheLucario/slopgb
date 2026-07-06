@@ -403,9 +403,26 @@ impl GameBoy {
         self.bus.cdl_clear();
     }
 
-    /// Load a CDL flag buffer (a loaded `.cdl` file), enabling the log.
-    pub fn load_cdl(&mut self, flags: &[u8; 65536]) {
-        self.bus.load_cdl(flags);
+    /// Load a physical CDL flag buffer (a decoded `.cdl` file), enabling the
+    /// log. Returns false (leaving the log unchanged) if the buffer's length
+    /// doesn't match this machine's layout — a `.cdl` from another ROM/RAM
+    /// configuration.
+    #[must_use]
+    pub fn load_cdl(&mut self, flags: &[u8]) -> bool {
+        self.bus.load_cdl(flags)
+    }
+
+    /// The live WRAM bank at `0xD000-0xDFFF` (CGB SVBK, 1 on DMG), for the
+    /// memory-viewer bank indicator.
+    #[must_use]
+    pub fn wram_bank(&self) -> usize {
+        self.bus.wram_bank()
+    }
+
+    /// The live VRAM bank (CGB VBK, 0 on DMG), for the viewer bank indicator.
+    #[must_use]
+    pub fn vram_bank(&self) -> usize {
+        self.bus.vram_bank()
     }
 
     /// Arm/disarm profiler "break mode": the free run halts the first time each

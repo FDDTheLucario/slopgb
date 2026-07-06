@@ -114,15 +114,26 @@ FCEUX-style per-byte access log. Core: `cdl: Option<Box<[u8;65536]>>` on
 `Interconnect` (**golden-safe**, `None`-gated like the profiler — R=1/W=2/X=4 set
 by `check_access` (r/w) + `profile_pc` (x), no-op when off, excluded from
 save-state, never read back so it can't perturb a cycle;
-`set_cdl`/`cdl_flag`/`cdl_flags`/`cdl_clear`/`load_cdl` on `GameBoy`). **v1 keys by
-CPU address** (colors the whole viewer, no bank map); operands get R via the fetch
-path (opcode-only X). Debug menu: **CDL logging** (Ctrl+D toggle) / Clear CDL /
-Save CDL... / Load CDL.... The **standalone Memory Viewer** tints each visited
-byte's cell background (`cdl::cdl_color`: X=red, W=green, R=blue, combos blend),
-drawn before the dump text so glyphs stay readable; off = no tint. Save/load use
-the path modal (`PathPurpose::CdlSave/CdlLoad`) with a std-only RLE codec
-(`cdl::rle_encode/decode`, 64 KiB all-zero → 6 bytes; wrong-length file rejected).
-Follow-ups: integrated-pane coloring; FCEUX-accurate physical `.cdl` export.
+`set_cdl`/`cdl_flag`/`cdl_flags`/`cdl_clear`/`load_cdl` on `GameBoy`). **Bank-aware:
+keyed by physical offset**, not CPU address — the buffer is sized to the machine
+(`ROM | VRAM | SRAM | WRAM | tail 0xFE00-0xFFFF`, `Interconnect::cdl_layout`), and
+one shared `cdl_index(addr)` translates the live banking for *both* the mark hooks
+and `cdl_flag` (the `rom_bank_for` no-divergence pattern). So 0x4000-0x7FFF maps to
+the real ROM bank, and SRAM/WRAM/VRAM banking is per physical byte; an access to
+disabled/absent SRAM (or an RTC register) maps to no byte and logs nothing.
+Offsets come from `Cartridge::rom_offset`/`ram_offset` + `wram_index` +
+`Ppu::vram_bank`. Operands get R via the fetch path (opcode-only X). Debug menu:
+**CDL logging** (Ctrl+D toggle) / Clear CDL / Save CDL... / Load CDL.... The
+**standalone Memory Viewer** tints each visited byte's cell background
+(`cdl::cdl_color`: X=red, W=green, R=blue, combos blend), drawn before the dump
+text so glyphs stay readable; off = no tint; the status bar names the tint's live
+bank (`mem_bank_label`, e.g. `ROM05:4000`). Save/load use the path modal
+(`PathPurpose::CdlSave/CdlLoad`) with a std-only RLE codec (`cdl::rle_encode/decode`,
+all-zero → 6 bytes). `load_cdl` validates the buffer length against the machine's
+layout and rejects a foreign `.cdl` (`#[must_use]` bool). Ponytail ceiling:
+length-only guard — a same-size ROM/RAM config would still load; embed the cart
+header checksum in the file if it bites. Follow-ups: integrated-pane coloring;
+an arbitrary-bank browser (viewer shows the live-mapped bank only).
 
 ## Freeze
 

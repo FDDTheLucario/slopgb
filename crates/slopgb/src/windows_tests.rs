@@ -111,10 +111,13 @@ fn memory_view_cursor_move_autoscrolls_and_cancels_edit() {
 #[test]
 fn memory_window_tints_cdl_flagged_bytes() {
     let mut gb = machine();
-    let base = 0xC000u16;
-    let mut fixture = [0u8; 65536];
+    // ROM low area (bank 0): the physical CDL index equals the GB address, so
+    // the fixture index is unambiguous under the bank-aware layout.
+    let base = 0x0100u16;
+    gb.set_cdl(true);
+    let mut fixture = gb.cdl_flags().unwrap().to_vec();
     fixture[base as usize] = 4; // X → red at column 0
-    gb.load_cdl(&fixture);
+    assert!(gb.load_cdl(&fixture));
     // Cursor left at the default 0xFF00 (off-screen from base) so its overlay
     // can't cover the tinted cell.
     let st = WinState::Memory(MemoryView {
@@ -144,6 +147,32 @@ fn memory_window_tints_cdl_flagged_bytes() {
     assert!(cell_has(10 * gw, want), "flagged byte cell tinted");
     // Column 1 (char 13) is unflagged → not tinted.
     assert!(!cell_has(13 * gw, want), "unflagged byte not tinted");
+}
+
+#[test]
+fn mem_bank_label_names_the_live_banked_region() {
+    let gb = machine(); // DMG, ROM-only (no MBC, no external RAM)
+    assert_eq!(mem_bank_label(&gb, 0x0100), None, "fixed ROM bank 0");
+    assert_eq!(mem_bank_label(&gb, 0x4000).as_deref(), Some("ROM01"), "None-mapper high bank");
+    assert_eq!(mem_bank_label(&gb, 0x8000).as_deref(), Some("VRM0"));
+    assert_eq!(mem_bank_label(&gb, 0xA000), None, "no RAM chip");
+    assert_eq!(mem_bank_label(&gb, 0xC000).as_deref(), Some("WRM0"));
+    assert_eq!(mem_bank_label(&gb, 0xD000).as_deref(), Some("WRM1"), "DMG WRAM bank 1");
+    assert_eq!(mem_bank_label(&gb, 0xFF80), None, "HRAM unbanked");
+}
+
+#[test]
+fn mem_bank_label_follows_cgb_wram_and_mbc_rom_banks() {
+    let mut rom = vec![0u8; 8 * 0x4000];
+    rom[0x143] = 0x80; // CGB
+    rom[0x147] = 0x19; // MBC5
+    rom[0x148] = 0x03; // 8 banks
+    let mut gb = GameBoy::new(Model::Cgb, rom).unwrap();
+    gb.debug_write(0x2000, 5); // MBC5 ROMB0 = 5
+    assert_eq!(mem_bank_label(&gb, 0x4000).as_deref(), Some("ROM05"));
+    gb.debug_write(0xFF70, 3); // SVBK = 3
+    assert_eq!(mem_bank_label(&gb, 0xD000).as_deref(), Some("WRM3"));
+    assert_eq!(mem_bank_label(&gb, 0x8000).as_deref(), Some("VRM0"));
 }
 
 #[test]

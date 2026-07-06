@@ -206,12 +206,15 @@ impl App {
             PathPurpose::CdlLoad => match std::fs::read(path) {
                 Ok(bytes) => {
                     let dec = crate::cdl::rle_decode(&bytes);
-                    match <[u8; 65536]>::try_from(dec.as_slice()) {
-                        Ok(arr) => {
-                            self.session.gb.load_cdl(&arr);
-                            println!("slopgb: loaded CDL from {}", path.display());
-                        }
-                        Err(_) => eprintln!("slopgb: bad CDL file (expected 64 KiB of flags)"),
+                    // load_cdl validates the length against this machine's
+                    // physical layout (ROM+VRAM+SRAM+WRAM+tail).
+                    // ponytail: length-only guard — a .cdl from a *same-size*
+                    // ROM/RAM config would still load; embed the cart header
+                    // checksum in the file if that ever bites.
+                    if self.session.gb.load_cdl(&dec) {
+                        println!("slopgb: loaded CDL from {}", path.display());
+                    } else {
+                        eprintln!("slopgb: CDL file doesn't match this ROM/RAM layout — not loaded");
                     }
                 }
                 Err(e) => eprintln!("slopgb: load CDL failed: {e}"),

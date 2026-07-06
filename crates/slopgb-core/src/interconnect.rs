@@ -454,7 +454,10 @@ pub struct Interconnect {
     /// FCEUX-style code/data log: per-CPU-address access flags (R=1, W=2, X=4).
     /// `None` (off) by default; a `None` log makes every CDL hook a no-op, so the
     /// golden path is byte-identical. Excluded from save-state (live UI state).
-    cdl: Option<Box<[u8; 65536]>>,
+    /// Bank-aware code/data log: physical-offset flag buffer (R=1/W=2/X=4),
+    /// sized to the machine (ROM|VRAM|SRAM|WRAM|tail — see `cdl_layout`), or
+    /// `None` when off. Debugger-only; `None` on every golden/test path.
+    cdl: Option<Box<[u8]>>,
     /// Profiler break mode: halt the free run on each address's first execution.
     prof_break: bool,
     /// The pending profiler break hit address, consumed by the run loop.
@@ -833,9 +836,7 @@ impl Bus for Interconnect {
         // CDL: mark the executed instruction's opcode byte as code (X=4). Operand
         // bytes are marked R by the fetch read path (acceptable over-approx).
         // `None` when the log is off → no-op, so golden is byte-identical.
-        if let Some(b) = &mut self.cdl {
-            b[pc as usize] |= 4;
-        }
+        self.cdl_mark(pc, 4);
         if let Some(m) = &mut self.prof {
             let count = m.entry(pc).or_insert(0);
             let first_seen = *count == 0;

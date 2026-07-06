@@ -403,6 +403,42 @@ impl Cartridge {
         }
     }
 
+    /// Physical ROM offset for a CPU address in 0x0000-0x7FFF (bank-resolved and
+    /// size-masked, so it indexes the same byte [`read_rom`](Self::read_rom)
+    /// returns) — for the bank-aware CDL. Side-effect-free.
+    #[must_use]
+    pub fn rom_offset(&self, addr: u16) -> usize {
+        (self.rom_bank_for(addr < 0x4000) & self.rom_bank_mask()) * ROM_BANK_SIZE
+            + usize::from(addr & 0x3FFF)
+    }
+
+    /// Physical external-RAM offset for a CPU address in 0xA000-0xBFFF, or `None`
+    /// when no RAM byte is addressed there (RAM disabled/absent, or an RTC
+    /// register mapped) — for the bank-aware CDL. Side-effect-free.
+    #[must_use]
+    pub fn ram_offset(&self, addr: u16) -> Option<usize> {
+        match self.ram_target()? {
+            RamTarget::Ram(bank) => self.ram_index(bank, addr),
+            // MBC2's 512×4-bit RAM mirrors across the window at addr & 0x1FF.
+            RamTarget::Mbc2 => Some(usize::from(addr & 0x1FF)),
+            // An RTC register is not a RAM byte.
+            RamTarget::Rtc(_) => None,
+        }
+    }
+
+    /// Physical ROM size in bytes (power-of-two padded), for the CDL layout.
+    #[must_use]
+    pub fn rom_len(&self) -> usize {
+        self.rom.len()
+    }
+
+    /// Physical external-RAM size in bytes (0 when the cart has no RAM chip),
+    /// for the CDL layout.
+    #[must_use]
+    pub fn ram_len(&self) -> usize {
+        self.ram.len()
+    }
+
     /// Write 0x0000-0x7FFF (mapper registers).
     pub fn write_rom(&mut self, addr: u16, value: u8) {
         match &mut self.mapper {

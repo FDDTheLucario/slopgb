@@ -212,9 +212,11 @@ fn cgb_mode_vbk_banks_vram() {
     b.write(0xFF4F, 0x01);
     assert_eq!(b.read(0xFF4F), 0xFF);
     assert_eq!(b.read(0x8000), 0x00);
+    assert_eq!(b.ppu().vram_bank(), 1);
     b.write(0x8000, 0x22);
     b.write(0xFF4F, 0xFE); // only bit 0 matters
     assert_eq!(b.read(0x8000), 0x11);
+    assert_eq!(b.ppu().vram_bank(), 0);
     b.write(0xFF4F, 0x01);
     assert_eq!(b.read(0x8000), 0x22);
 }

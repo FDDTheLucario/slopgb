@@ -18,6 +18,12 @@ impl Ppu {
         usize::from(self.vbk) * 0x2000 + usize::from(addr & 0x1FFF)
     }
 
+    /// The live CGB VRAM bank (FF4F bit 0; always 0 on DMG), for the bank-aware
+    /// CDL layout. Side-effect-free.
+    pub(crate) fn vram_bank(&self) -> usize {
+        usize::from(self.vbk & 1)
+    }
+
     /// OAM write from the DMA engine: ignores mode-based blocking.
     pub fn oam_dma_write(&mut self, index: u8, value: u8) {
         if usize::from(index) < self.oam.len() {
