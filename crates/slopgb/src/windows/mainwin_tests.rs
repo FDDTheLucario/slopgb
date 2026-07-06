@@ -401,6 +401,8 @@ fn other_submenu_has_the_captured_rows_live_and_greyed() {
             "Cart info",
             "System info",
             "VRAM viewer",
+            "Import bgb.ini...",
+            "Export bgb.ini...",
             "cheat searcher",
             "Camera control...",
             "clear recent roms list",
@@ -412,9 +414,11 @@ fn other_submenu_has_the_captured_rows_live_and_greyed() {
     assert_eq!(s.choices[0], Some(SubChoice::CartInfo));
     assert_eq!(s.choices[1], Some(SubChoice::SystemInfo));
     assert_eq!(s.choices[2], Some(SubChoice::OpenVram));
-    assert_eq!(s.choices[8], Some(SubChoice::About));
+    assert_eq!(s.choices[3], Some(SubChoice::ImportBgb));
+    assert_eq!(s.choices[4], Some(SubChoice::ExportBgb));
+    assert_eq!(s.choices[10], Some(SubChoice::About));
     // The not-built rows are greyed with no choice.
-    for i in [3, 4, 5, 6, 7] {
+    for i in [5, 6, 7, 8, 9] {
         assert!(!s.items[i].enabled, "row {i} greyed");
         assert_eq!(s.choices[i], None, "row {i} has no choice");
     }
@@ -427,7 +431,9 @@ fn other_choice_at_resolves_only_enabled_rows() {
     let centre = |i: usize| (rects[i].x + rects[i].w / 2, rects[i].y + rects[i].h / 2);
     let (xc, yc) = centre(0); // "Cart info"
     assert_eq!(s.choice_at(xc, yc), Some(SubChoice::CartInfo));
-    let (xg, yg) = centre(3); // "cheat searcher" (greyed)
+    let (xi, yi) = centre(3); // "Import bgb.ini..." (live)
+    assert_eq!(s.choice_at(xi, yi), Some(SubChoice::ImportBgb));
+    let (xg, yg) = centre(5); // "cheat searcher" (greyed)
     assert_eq!(s.choice_at(xg, yg), None, "greyed row resolves to None");
 }
 

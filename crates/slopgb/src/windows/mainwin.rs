@@ -192,6 +192,10 @@ pub enum SubChoice {
     SystemInfo,
     /// Other → "About...": show the version info box.
     About,
+    /// Other → "Import bgb.ini...": load settings from a bgb-format file.
+    ImportBgb,
+    /// Other → "Export bgb.ini...": write settings to a bgb-format file.
+    ExportBgb,
     /// State → "Quick Save": snapshot the machine.
     QuickSave,
     /// State → "Quick Load": restore the last snapshot.
@@ -369,6 +373,8 @@ fn other_items() -> Vec<(MenuItem, Option<SubChoice>)> {
         live("Cart info", SubChoice::CartInfo),
         live("System info", SubChoice::SystemInfo),
         live("VRAM viewer", SubChoice::OpenVram),
+        live("Import bgb.ini...", SubChoice::ImportBgb),
+        live("Export bgb.ini...", SubChoice::ExportBgb),
         greyed("cheat searcher"),
         greyed("Camera control..."),
         greyed("clear recent roms list"),

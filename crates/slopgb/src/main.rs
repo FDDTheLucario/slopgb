@@ -143,6 +143,10 @@ enum PathPurpose {
     CdlSave,
     /// Load CDL flags from the typed path.
     CdlLoad,
+    /// Import settings from a bgb-format ini at the typed path.
+    SettingsImportBgb,
+    /// Export settings to a bgb-format ini at the typed path.
+    SettingsExportBgb,
 }
 
 /// Resolve the boot ROM bytes from `--boot` or the `SLOPGB_BOOT` env var,

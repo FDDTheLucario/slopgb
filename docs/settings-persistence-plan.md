@@ -162,6 +162,20 @@ preserved verbatim but not acted on (the plan's "preserve where we don't map").
 
 ## Phase 2 — modern native format
 
+**STATUS (2026-07-06): CORE SHIPPED.** `crates/slopgb/src/settings_file/native.rs`
+— a versioned sectioned text format (`slopgb.conf`): `version = 1`, `[system]`/
+`[sound]`/`[graphics]`/`[debug]`/`[misc]`/`[exceptions]`/`[recent]`, values
+`true`/`false`, decimal, `0xRRGGBB` colors (natural order, not bgb's BGR),
+comma-list palette, numbered `[recent]` paths (POSIX). Parser preserves unknown
+keys/sections + comments; missing keys default; `version` reserved for future
+migrations. `settings_file::load()` precedence: native file wins → else migrate a
+phase-1 `bgb.ini` into the native store (once) → else defaults; `save()` writes
+native. bgb.ini demoted to **Import/Export** (game menu → Other → "Import/Export
+bgb.ini...", via `import_bgb`/`export_bgb`). Native parse is tolerant (never
+hard-fails), so the planned `.bak` recovery is moot. Remaining: task 6 Options
+polish (settings-file path display / "Reset all to defaults" / "Open config
+folder") — cosmetic.
+
 ```xml
 <plan goal="A versioned sectioned std-only settings format as the default store; bgb.ini demoted to import/export">
 

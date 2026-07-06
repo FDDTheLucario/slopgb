@@ -4,6 +4,7 @@
 
 mod bgb;
 mod ini;
+mod native;
 
 use std::path::{Path, PathBuf};
 
@@ -42,30 +43,83 @@ fn config_dir() -> Option<PathBuf> {
         .map(|h| PathBuf::from(h).join(".config").join("slopgb"))
 }
 
-/// Path to the bgb-format settings file in the config dir.
+/// Path to the native settings file (phase 2 default store).
+fn native_path() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("slopgb.conf"))
+}
+
+/// Path to the bgb-format settings file (import/export interop).
 fn bgb_ini_path() -> Option<PathBuf> {
     config_dir().map(|d| d.join("bgb.ini"))
 }
 
-/// Load persisted settings + recent ROMs (defaults/empty when no file /
-/// unreadable / no config dir).
+/// Load persisted settings + recent ROMs. Precedence: the native file wins; if
+/// it's absent but a `bgb.ini` exists, import it and write the native file
+/// (one-time migration); otherwise defaults.
 #[must_use]
 pub fn load() -> Loaded {
-    bgb_ini_path().map_or_else(
-        || Loaded { settings: Settings::default(), recent: Vec::new() },
-        |p| load_from(&p),
-    )
+    load_from_paths(native_path().as_deref(), bgb_ini_path().as_deref())
 }
 
-/// Persist `settings` + `recent`, preserving any unknown keys already in the
-/// file. No-op if no config dir is discoverable; a write failure is logged.
+/// Persist `settings` + `recent` to the native file (preserving unknown
+/// keys/sections), atomically. No-op without a config dir; errors are logged.
 pub fn save(settings: &Settings, recent: &[PathBuf]) {
-    if let Some(path) = bgb_ini_path() {
-        save_to(&path, settings, recent);
+    if let Some(path) = native_path() {
+        save_native(&path, settings, recent);
     }
 }
 
-fn load_from(path: &Path) -> Loaded {
+/// Precedence: native file wins; else migrate a phase-1 bgb.ini into the native
+/// store (once); else defaults. Path-injected for tests.
+fn load_from_paths(native: Option<&Path>, bgb: Option<&Path>) -> Loaded {
+    if let Some(np) = native {
+        if np.exists() {
+            return load_native(np);
+        }
+        if let Some(bp) = bgb {
+            if bp.exists() {
+                let loaded = load_bgb(bp);
+                save_native(np, &loaded.settings, &loaded.recent);
+                return loaded;
+            }
+        }
+    }
+    Loaded { settings: Settings::default(), recent: Vec::new() }
+}
+
+fn save_native(path: &Path, settings: &Settings, recent: &[PathBuf]) {
+    let mut doc = std::fs::read_to_string(path).map_or_else(|_| native::Doc::parse(""), |t| native::Doc::parse(&t));
+    let recent_str: Vec<String> = recent.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+    native::to_doc(settings, &recent_str, &mut doc);
+    write_atomic(path, &doc.serialize());
+}
+
+/// Export the current `settings` + `recent` to a bgb-format ini at `path`
+/// (merging over any existing bgb.ini so its unknown keys survive). For the
+/// "Export bgb.ini" menu action.
+pub fn export_bgb(path: &Path, settings: &Settings, recent: &[PathBuf]) {
+    let mut ini = std::fs::read_to_string(path).map_or_else(|_| ini::Ini::parse(""), |t| ini::Ini::parse(&t));
+    bgb::to_ini(settings, &mut ini);
+    for i in 0..RECENT_MAX {
+        let val = recent.get(i).map(|p| posix_to_bgb_path(p)).unwrap_or_default();
+        ini.set(&format!("Recent{i}"), &val);
+    }
+    write_atomic(path, &ini.serialize());
+}
+
+/// Import a bgb-format ini at `path`. For the "Import bgb.ini" menu action.
+#[must_use]
+pub fn import_bgb(path: &Path) -> Loaded {
+    load_bgb(path)
+}
+
+fn load_native(path: &Path) -> Loaded {
+    let doc = std::fs::read_to_string(path).map_or_else(|_| native::Doc::parse(""), |t| native::Doc::parse(&t));
+    let (settings, recent) = native::from_doc(&doc);
+    Loaded { settings, recent: recent.into_iter().map(PathBuf::from).collect() }
+}
+
+fn load_bgb(path: &Path) -> Loaded {
     let ini = std::fs::read_to_string(path).map_or_else(|_| ini::Ini::parse(""), |t| ini::Ini::parse(&t));
     let recent = (0..RECENT_MAX)
         .filter_map(|i| ini.get(&format!("Recent{i}")).filter(|v| !v.is_empty()))
@@ -74,27 +128,16 @@ fn load_from(path: &Path) -> Loaded {
     Loaded { settings: bgb::from_ini(&ini), recent }
 }
 
-/// Write to the bgb.ini at `path`, merging over the existing file (unknown keys
-/// preserved) and writing atomically (temp file + rename).
-fn save_to(path: &Path, settings: &Settings, recent: &[PathBuf]) {
-    // Merge over the current file so bgb's unmodelled keys survive; start blank
-    // if there's no file yet.
-    let mut doc = std::fs::read_to_string(path).map_or_else(|_| ini::Ini::parse(""), |t| ini::Ini::parse(&t));
-    bgb::to_ini(settings, &mut doc);
-    // Recent0..9: filled slots as wine paths, the rest blank (bgb's shape).
-    for i in 0..RECENT_MAX {
-        let val = recent.get(i).map(|p| posix_to_bgb_path(p)).unwrap_or_default();
-        doc.set(&format!("Recent{i}"), &val);
-    }
-    let text = doc.serialize();
-
+/// Write `text` to `path` atomically (temp file + rename), creating the parent
+/// dir. Errors are logged, not fatal.
+fn write_atomic(path: &Path, text: &str) {
     if let Some(dir) = path.parent() {
         if let Err(e) = std::fs::create_dir_all(dir) {
             eprintln!("slopgb: settings dir create failed: {e}");
             return;
         }
     }
-    let tmp = path.with_extension("ini.tmp");
+    let tmp = path.with_extension("tmp");
     if let Err(e) = std::fs::write(&tmp, text.as_bytes()) {
         eprintln!("slopgb: settings write failed: {e}");
         return;

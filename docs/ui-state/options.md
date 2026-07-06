@@ -90,19 +90,28 @@ buttons (`Field::PickBootrom`→`OptionsOutcome::PickBootrom`→a path modal ove
 dialog) + a live "bootroms enabled" checkbox. `Settings` is no longer `Copy` (holds
 the path strings); `DIALOG_W` 345→420 for slopgb's wider fixed font.
 
-## Persistence (bgb.ini, phase 1)
+## Persistence (`crates/slopgb/src/settings_file/`)
 
-`App.settings` persists to disk in **bgb's own `bgb.ini` format** so the config
-interops with real bgb (`crates/slopgb/src/settings_file/`). Loaded at startup
-(seeds `settings`; CLI `--model` still wins the session), saved on Options
-Apply/OK and on Quit. Path: `$XDG_CONFIG_HOME/slopgb/bgb.ini` else
-`~/.config/slopgb/bgb.ini` (`%APPDATA%\slopgb\` on Windows), atomic write
-(temp+rename). The `ini` module keeps an **ordered-line model** that preserves
-every key we don't map (bgb's ~250 audio/RTC/link/etc. keys survive verbatim —
-the real bgb.ini round-trips byte-identically). Codecs: 0/1 bools, decimal
-ints, `Color0..3` BGR-hex palette. slopgb-only fields (`tile_hex_8bit`,
-`memory_window`, break_ld_b_b/echo, show_framerate) are stored under a `Slopgb`
-prefix bgb ignores. `model` maps to bgb `SystemMode` (System-tab radio index:
+`App.settings` + recent ROMs persist to disk. Loaded at startup (seeds
+`settings`/`recent`; CLI `--model` still wins the session), saved on Options
+Apply/OK, ROM load, and Quit. Atomic write (temp+rename) in the config dir
+(`$XDG_CONFIG_HOME/slopgb/` else `~/.config/slopgb/`; `%APPDATA%\slopgb\` on
+Windows).
+
+**Native format (phase 2, default):** `slopgb.conf` — a versioned sectioned
+text file (`native.rs`): `version = 1`, `[system]`/`[sound]`/`[graphics]`/
+`[debug]`/`[misc]`/`[exceptions]`/`[recent]`, `true`/`false`, `0xRRGGBB` colors,
+comma-list palette, numbered `[recent]` POSIX paths. Unknown keys/sections +
+comments preserved; missing keys default.
+
+**bgb.ini (phase 1, import/export):** the `ini` module keeps an ordered-line
+model that round-trips a real bgb.ini byte-identically (bgb's ~250 unmodelled
+keys survive verbatim); `bgb.rs` maps ~19 keys (`DisasmSyntax`, `DebugHexLower`,
+`Volume`, `SystemMode`↔model, `Color0..3` BGR-hex, `Recent0..9` with wine
+`Z:\`↔POSIX). slopgb-only fields go under a `Slopgb` prefix bgb ignores.
+**Precedence:** native wins; else a bgb.ini is migrated into the native store
+once; else defaults. Game menu → Other → **Import/Export bgb.ini...** for
+explicit interop. `model` maps to bgb `SystemMode` (System-tab radio index:
 Auto↔3, Dmg↔0, Cgb↔1); an explicit CLI `--model` still wins the session.
 **Recent ROMs** persist via `Recent0..9` (wine `Z:\`↔POSIX path translation),
 saved on ROM load + Quit. bgb's window-geometry / open-on-start keys have no

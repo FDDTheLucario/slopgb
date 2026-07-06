@@ -274,6 +274,14 @@ impl App {
             SubChoice::LoadState => {
                 self.open_path_prompt("Load state (path)", crate::PathPurpose::LoadState);
             }
+            // Import/Export settings in bgb's ini format (interop; the native
+            // store stays the default). Route through the shared path modal.
+            SubChoice::ImportBgb => {
+                self.open_path_prompt("Import bgb.ini (path)", crate::PathPurpose::SettingsImportBgb);
+            }
+            SubChoice::ExportBgb => {
+                self.open_path_prompt("Export bgb.ini (path)", crate::PathPurpose::SettingsExportBgb);
+            }
             // Recent ROMs → reload that entry (MN4); clone the path out first so
             // the load can borrow `self` mutably.
             SubChoice::LoadRecent(i) => {

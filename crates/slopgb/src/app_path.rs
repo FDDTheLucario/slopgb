@@ -219,6 +219,18 @@ impl App {
                 }
                 Err(e) => eprintln!("slopgb: load CDL failed: {e}"),
             },
+            PathPurpose::SettingsExportBgb => {
+                crate::settings_file::export_bgb(path, &self.settings, &self.recent);
+                println!("slopgb: exported settings to {}", path.display());
+            }
+            PathPurpose::SettingsImportBgb => {
+                let loaded = crate::settings_file::import_bgb(path);
+                self.settings = loaded.settings;
+                self.recent = loaded.recent;
+                // Apply the imported settings live + persist them to the native store.
+                self.apply_settings();
+                println!("slopgb: imported settings from {}", path.display());
+            }
         }
     }
 
