@@ -7,7 +7,10 @@ window**: each tab's grid renders at the largest integer scale that fits
 (`vram::fit_scale`), keeping a 1px tile border at any scale; the grid + frame are
 **bounded to the actual map extent** (`windows::vram_geom`, so the BG map doesn't
 bleed grid lines into empty space — QA finding). Hit-tests (`tile/oam/bgmap_details`)
-take `scale`; `vram::oam_cell` = `10*scale`.
+take `scale`; `vram::oam_cell` = `10*scale`. Tile-number detail lines show decimal
++ hex, bgb-style (`windows::dec_hex`: `Tile No. 10 ($0A)`, `383 ($17F)` — widens
+past two hex digits for the 0-383 range); addresses/attributes stay hex, small
+enums (palette 0-7, flips) stay decimal.
 
 ### CGB-attribute-aware
 

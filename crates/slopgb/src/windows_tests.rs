@@ -297,6 +297,22 @@ fn tile_details_has_no_phantom_tile_right_of_the_grid() {
 }
 
 #[test]
+fn dec_hex_shows_decimal_and_uppercase_hex() {
+    assert_eq!(dec_hex(10), "10 ($0A)");
+    assert_eq!(dec_hex(0), "0 ($00)");
+    assert_eq!(dec_hex(255), "255 ($FF)");
+    assert_eq!(dec_hex(383), "383 ($17F)", "widens past two hex digits");
+}
+
+#[test]
+fn tile_details_appends_hex_to_the_tile_number() {
+    // scale 2 -> 16 px/cell. Top-left tile 0.
+    assert_eq!(tile_details(0, 0, 2)[0], "Tile No. 0 ($00)");
+    // col 15, row 23 -> tile 23*16+15 = 383 -> three hex digits.
+    assert_eq!(tile_details(15 * 16, 23 * 16, 2)[0], "Tile No. 383 ($17F)");
+}
+
+#[test]
 fn tiles_two_col_splits_content_into_nonoverlapping_left_right() {
     let content = Rect::new(10, 20, 400, 400);
     let (left, right, s) = tiles_two_col(content);
@@ -382,12 +398,12 @@ fn tile_details_track_the_live_scale() {
     // the details hit-test must use the live (fitted) scale, not a fixed one.
     assert_eq!(
         tile_details(32, 0, 2)[0],
-        "Tile No. 2",
+        "Tile No. 2 ($02)",
         "16px/tile at scale 2"
     );
     assert_eq!(
         tile_details(32, 0, 3)[0],
-        "Tile No. 1",
+        "Tile No. 1 ($01)",
         "24px/tile at scale 3"
     );
 }
