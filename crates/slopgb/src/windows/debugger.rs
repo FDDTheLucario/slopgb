@@ -292,6 +292,11 @@ impl Default for DebuggerState {
     }
 }
 
+/// Max stack-pane scroll offset (words below SP). 4 KiB of depth is far past any
+/// real SP excursion; the cap stops a held wheel/drag from growing the per-redraw
+/// stack Vec, and bounds the scrollbar's range.
+const STACK_OFF_MAX: usize = 0x800;
+
 impl DebuggerState {
     /// The address the disasm pane starts at. [`disasm_base`](Self::disasm_base)
     /// is authoritative — [`disasm_follow`](Self::disasm_follow) keeps it tracking
@@ -376,13 +381,52 @@ impl DebuggerState {
         self.mem_base = self.mem_base.wrapping_add(rows.wrapping_mul(16) as u16);
     }
 
+    // --- Scrollbar models: (frac, vis) drives the draggable thumb, `set_*`
+    // --- applies a drag/click. `vis` (thumb size) is the visible content over
+    // --- the whole range; `frac` (thumb position) is the base over the range.
+
+    /// Disasm scrollbar `(frac, vis)` for a `visible`-row pane over the 64 KiB
+    /// space. `frac` tracks the base address linearly — variable-length decode
+    /// makes exact row-fraction impossible, same approximation as the pane.
+    #[must_use]
+    pub fn disasm_scroll(&self, visible: usize) -> (f32, f32) {
+        (self.disasm_base as f32 / f32::from(u16::MAX), visible as f32 * 2.0 / 65536.0)
+    }
+
+    /// Jump the disasm base to `frac` (0..1) of the address space and pin (a drag
+    /// is a manual scroll, so it stops PC-follow like the wheel does).
+    pub fn set_disasm_scroll(&mut self, frac: f32) {
+        self.disasm_base = (frac.clamp(0.0, 1.0) * f32::from(u16::MAX)) as u16;
+        self.pinned = true;
+    }
+
+    /// Memory scrollbar `(frac, vis)` for a `visible`-row pane over 64 KiB.
+    #[must_use]
+    pub fn mem_scroll(&self, visible: usize) -> (f32, f32) {
+        (self.mem_base as f32 / f32::from(u16::MAX), visible as f32 * 16.0 / 65536.0)
+    }
+
+    /// Jump the memory base to `frac` (0..1) of the 64 KiB space (row-aligned).
+    pub fn set_mem_scroll(&mut self, frac: f32) {
+        self.mem_base = ((frac.clamp(0.0, 1.0) * f32::from(u16::MAX)) as u16) & !0x0F;
+    }
+
+    /// Stack scrollbar `(frac, vis)` over the `[0, STACK_OFF_MAX]` scroll range.
+    #[must_use]
+    pub fn stack_scroll(&self, visible: usize) -> (f32, f32) {
+        let max = STACK_OFF_MAX as f32;
+        (self.stack_off as f32 / max, visible as f32 / max)
+    }
+
+    /// Set the stack scroll offset to `frac` (0..1) of the scroll range.
+    pub fn set_stack_scroll(&mut self, frac: f32) {
+        self.stack_off = (frac.clamp(0.0, 1.0) * STACK_OFF_MAX as f32) as usize;
+    }
+
     /// Scroll the stack pane by `rows` words (negative = back toward SP), clamped
     /// to `[0, STACK_OFF_MAX]` so SP never scrolls above the top and the pane's
     /// `gb.stack(off + rows)` fetch stays bounded.
     pub fn scroll_stack(&mut self, rows: i32) {
-        // ponytail: 4 KiB of stack depth is far past any real SP excursion; the
-        // cap just stops a held wheel from growing the per-redraw stack Vec.
-        const STACK_OFF_MAX: usize = 0x800;
         self.stack_off = self
             .stack_off
             .saturating_add_signed(rows as isize)

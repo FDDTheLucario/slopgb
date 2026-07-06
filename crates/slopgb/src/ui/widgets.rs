@@ -174,6 +174,52 @@ pub fn scroll_list(
     drawn
 }
 
+/// Width (px) of a vertical scrollbar's track and thumb.
+pub const SCROLLBAR_W: i32 = 8;
+
+/// The right-edge track rect a vertical scrollbar occupies within `pane`. Shared
+/// by [`vscrollbar`] (draw) and the drag hit-test so they can't disagree.
+#[must_use]
+pub fn vscroll_track(pane: Rect) -> Rect {
+    Rect::new(pane.right() - SCROLLBAR_W, pane.y, SCROLLBAR_W, pane.h)
+}
+
+/// `pane` minus the scrollbar strip — the rect a scrollable pane should render
+/// its content into so text doesn't run under the bar.
+#[must_use]
+pub fn scroll_content(pane: Rect) -> Rect {
+    Rect::new(pane.x, pane.y, (pane.w - SCROLLBAR_W).max(0), pane.h)
+}
+
+/// Thumb height (px) for a track `h` px tall showing `vis` (0..1) of the content,
+/// floored to `2*SCROLLBAR_W` so it stays grabbable over a huge address space.
+fn thumb_h(track_h: i32, vis: f32) -> i32 {
+    let min = (SCROLLBAR_W * 2).min(track_h.max(1));
+    ((vis.clamp(0.0, 1.0) * track_h as f32) as i32).clamp(min, track_h.max(1))
+}
+
+/// Draw a vertical scrollbar in `pane`'s right-edge track: a dim full-height
+/// track with a brighter thumb sized to `vis` (0..1 of content visible) and
+/// positioned at `frac` (0..1 of the scroll travel). Returns the track rect.
+pub fn vscrollbar(c: &mut Canvas, pane: Rect, frac: f32, vis: f32, theme: &Theme) -> Rect {
+    let track = vscroll_track(pane);
+    c.fill_rect(track, theme.border);
+    let th = thumb_h(track.h, vis);
+    let travel = (track.h - th).max(0);
+    let ty = track.y + (frac.clamp(0.0, 1.0) * travel as f32) as i32;
+    c.fill_rect(Rect::new(track.x, ty, SCROLLBAR_W, th), theme.hilight);
+    track
+}
+
+/// The scroll fraction (0..1) a cursor at `py` maps to within `track`, sized so
+/// the thumb (per `vis`) centers on the cursor and the extremes reach 0.0 / 1.0.
+#[must_use]
+pub fn vscroll_frac(track: Rect, py: i32, vis: f32) -> f32 {
+    let th = thumb_h(track.h, vis);
+    let travel = (track.h - th).max(1);
+    ((py - track.y - th / 2) as f32 / travel as f32).clamp(0.0, 1.0)
+}
+
 #[cfg(test)]
 #[path = "widgets_tests.rs"]
 mod tests;

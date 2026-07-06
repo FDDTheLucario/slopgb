@@ -196,3 +196,40 @@ fn swatch_fills_colour_with_a_border() {
     assert_eq!(buf[w + 1], T.text, "top-left border");
     assert_eq!(buf[0], 0x00AA_AAAA, "outside untouched");
 }
+
+#[test]
+fn vscroll_track_is_the_panes_right_edge_strip() {
+    let pane = Rect::new(10, 20, 100, 200);
+    let t = vscroll_track(pane);
+    assert_eq!(t.x, pane.right() - SCROLLBAR_W);
+    assert_eq!((t.y, t.w, t.h), (20, SCROLLBAR_W, 200));
+    // scroll_content is the pane minus that strip.
+    assert_eq!(scroll_content(pane).w, 100 - SCROLLBAR_W);
+}
+
+#[test]
+fn vscroll_frac_maps_cursor_top_to_0_bottom_to_1_middle_to_half() {
+    let track = Rect::new(0, 0, SCROLLBAR_W, 100);
+    let vis = 0.2; // 20%-tall thumb
+    assert_eq!(vscroll_frac(track, -50, vis), 0.0, "above the track clamps to 0");
+    assert_eq!(vscroll_frac(track, 999, vis), 1.0, "below clamps to 1");
+    let mid = vscroll_frac(track, 50, vis);
+    assert!((mid - 0.5).abs() < 0.05, "cursor at track center ~ frac 0.5, got {mid}");
+}
+
+#[test]
+fn vscrollbar_draws_a_thumb_over_a_dim_track() {
+    let (w, h) = (40usize, 100usize);
+    let mut buf = canvas(w, h);
+    let pane = Rect::new(0, 0, w as i32, h as i32);
+    {
+        let mut c = Canvas::new(&mut buf, w, h);
+        vscrollbar(&mut c, pane, 0.0, 0.3, &T); // thumb at top
+    }
+    let tx = (pane.right() - SCROLLBAR_W) as usize; // a track column
+    // Top of the track is the thumb (hilight); far bottom is the dim track.
+    assert_eq!(buf[tx], T.hilight, "thumb at the top");
+    assert_eq!(buf[(h - 1) * w + tx], T.border, "dim track below the thumb");
+    // Left of the track is untouched content area.
+    assert_eq!(buf[0], 0x00AA_AAAA, "content area untouched");
+}

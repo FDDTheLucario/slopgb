@@ -290,6 +290,28 @@ fn center_disasm_on_pc_puts_pc_mid_pane_and_unpins() {
 }
 
 #[test]
+fn scrollbar_models_round_trip_and_disasm_drag_pins() {
+    let mut st = DebuggerState::default();
+    // Memory: frac 0.5 -> ~0x8000, row-aligned; and the reported frac tracks it.
+    st.set_mem_scroll(0.5);
+    assert!((i32::from(st.mem_base) - 0x8000).abs() <= 0x10);
+    assert_eq!(st.mem_base & 0x0F, 0, "row-aligned");
+    let (mf, mv) = st.mem_scroll(30);
+    assert!((mf - 0.5).abs() < 0.01, "mem frac tracks the base");
+    assert!(mv > 0.0 && mv < 1.0, "mem thumb smaller than the whole space");
+    // Disasm: a drag pins (stops PC-follow) and jumps the base.
+    assert!(!st.pinned);
+    st.set_disasm_scroll(0.25);
+    assert!(st.pinned, "dragging the disasm bar pins the view");
+    assert!((st.disasm_base as f32 / f32::from(u16::MAX) - 0.25).abs() < 0.01);
+    // Stack: frac 1.0 -> the max offset; 0.0 -> top.
+    st.set_stack_scroll(1.0);
+    assert_eq!(st.stack_off, 0x800);
+    st.set_stack_scroll(0.0);
+    assert_eq!(st.stack_off, 0);
+}
+
+#[test]
 fn right_click_opens_the_matching_pane_menu_and_sets_the_cursor() {
     let l = DebuggerLayout::for_size(AREA.w, AREA.h);
     let lh = line_height();

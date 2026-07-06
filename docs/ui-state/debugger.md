@@ -78,7 +78,7 @@ stays a `Bgb` wrapper so the bgb ground-truth + gbtr fingerprint stay byte-ident
 **RGBDS syntax** checkbox (`Settings.rgbds_disasm`/`DisasmFmt.rgbds`, default on)
 flips it live.
 
-## Pane scrolling (mouse wheel)
+## Pane scrolling (mouse wheel + draggable scrollbars)
 
 The wheel scrolls whichever debugger pane the cursor is over (`toolwin::on_wheel`,
 3 notches/step): **memory** (`scroll_memory`, 16 bytes/row), **disasm**
@@ -87,6 +87,18 @@ the 1..=3 preceding bytes for the decode that lands exactly on the base; detache
 follow like a Go-to by setting `pinned`), and **stack** (`scroll_stack`, words below
 SP, clamped `[0, 0x800]`; the SP highlight shows only at offset 0). `DebuggerState`
 holds `disasm_base` (authoritative disasm top) + `stack_off`.
+
+**Draggable scrollbars** on each scrollable pane (disasm/memory/stack + the
+standalone memory viewer). One widget (`ui::widgets`: `vscroll_track` /
+`vscrollbar` / `vscroll_frac`, `SCROLLBAR_W = 8`) draws a dim track + bright thumb
+on the pane's right-edge strip (`scroll_content` shrinks the content so text
+doesn't run under it). Each pane exposes a `(frac, vis)` model + a `set_*_scroll`
+(`DebuggerState::disasm_scroll`/`mem_scroll`/`stack_scroll`, `MemoryView::scroll_frac`)
+over its range (64 KiB for disasm/memory — `frac` = base/`u16::MAX`; `[0,0x800]`
+for stack). Drag: a left-press on a track (`toolwin::scrollbar_at`) starts a drag
+(`scroll_drag: Option<(WindowId, ScrollBar)>`), `on_cursor_moved` re-applies the
+frac, left-release (`on_mouse_up`) ends it; a disasm drag pins (stops PC-follow).
+The press is consumed before pane-click routing, so the strip never selects a row.
 
 **Disasm follows PC in place while running:** each redraw calls
 `DebuggerState::disasm_follow`, which re-bases to PC only when unpinned AND PC has

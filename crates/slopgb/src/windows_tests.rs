@@ -150,6 +150,46 @@ fn memory_window_tints_cdl_flagged_bytes() {
 }
 
 #[test]
+fn mem_viewer_scrollbar_model_round_trips() {
+    let mut v = MemoryView::default();
+    v.set_scroll(0.5);
+    assert!((i32::from(v.mem_base) - 0x8000).abs() <= 0x10, "frac 0.5 -> mid of 64 KiB");
+    assert_eq!(v.mem_base & 0x0F, 0, "row-aligned");
+    let (frac, vis) = v.scroll_frac(30);
+    assert!((frac - 0.5).abs() < 0.01, "reported frac tracks the base");
+    assert!(vis > 0.0 && vis < 1.0, "thumb smaller than the whole space");
+}
+
+#[test]
+fn memory_window_draws_a_scrollbar_on_the_right_edge() {
+    let gb = machine();
+    let st = WinState::Memory(MemoryView::default());
+    let (w, h) = (430usize, 360usize);
+    let mut buf = vec![0u32; w * h];
+    {
+        let mut c = Canvas::new(&mut buf, w, h);
+        render(
+            ToolWindow::MemoryViewer,
+            &gb,
+            &mut c,
+            &Theme::BGB,
+            &st,
+            &Breakpoints::default(),
+        );
+    }
+    // The track spans the dump body (window minus the one-line status bar); every
+    // row there is the dim track or the bright thumb (never the 0 background).
+    let body_h = h - crate::ui::text::line_height() as usize;
+    let tx = w - crate::ui::widgets::SCROLLBAR_W as usize; // first track column
+    let track_px: Vec<u32> = (0..body_h).map(|y| buf[y * w + tx]).collect();
+    assert!(
+        track_px.iter().all(|&p| p == Theme::BGB.border || p == Theme::BGB.hilight),
+        "right-edge strip is the scrollbar track/thumb"
+    );
+    assert!(track_px.contains(&Theme::BGB.hilight), "a thumb is drawn");
+}
+
+#[test]
 fn mem_bank_label_names_the_live_banked_region() {
     let gb = machine(); // DMG, ROM-only (no MBC, no external RAM)
     assert_eq!(mem_bank_label(&gb, 0x0100), None, "fixed ROM bank 0");

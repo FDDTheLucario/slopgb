@@ -19,7 +19,7 @@ use crate::ui::canvas::Rect;
 use crate::ui::dialog::InputDialog;
 use crate::ui::font::GLYPH_W;
 use crate::ui::text::{draw_text, line_height};
-use crate::ui::widgets::{checkbox, radio_group};
+use crate::ui::widgets::{checkbox, radio_group, scroll_content, vscrollbar};
 use crate::ui::{Canvas, Theme, ToolWindow};
 use debugger::DebuggerState;
 use vram::{VramLayout, VramState, VramTab};
@@ -87,6 +87,19 @@ impl MemoryView {
     /// wrapping the 64 KiB space — same model as the debugger memory pane.
     pub fn scroll(&mut self, rows: i32) {
         self.mem_base = self.mem_base.wrapping_add(rows.wrapping_mul(16) as u16);
+    }
+
+    /// Scrollbar `(frac, vis)` for a `visible`-row dump over the 64 KiB space:
+    /// `frac` = base position, `vis` = visible fraction (thumb size).
+    #[must_use]
+    pub fn scroll_frac(&self, visible: usize) -> (f32, f32) {
+        (self.mem_base as f32 / f32::from(u16::MAX), visible as f32 * 16.0 / 65536.0)
+    }
+
+    /// Jump the base to `frac` (0..1) of the 64 KiB space (row-aligned), from a
+    /// scrollbar drag/click.
+    pub fn set_scroll(&mut self, frac: f32) {
+        self.mem_base = ((frac.clamp(0.0, 1.0) * f32::from(u16::MAX)) as u16) & !0x0F;
     }
 
     /// Apply a `Go to…` entry: a loaded symbol name resolves to its address,
@@ -234,7 +247,17 @@ fn render_memory_window(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme,
             }
         }
     }
-    debugger::render_memory(c, body, |a| gb.debug_read(a), st.mem_base, theme, &st.symbols);
+    debugger::render_memory(
+        c,
+        scroll_content(body),
+        |a| gb.debug_read(a),
+        st.mem_base,
+        theme,
+        &st.symbols,
+    );
+    // Draggable scrollbar on the dump's right edge.
+    let (mf, mv) = st.scroll_frac(vis_rows.max(0) as usize);
+    vscrollbar(c, body, mf, mv, theme);
     // In-place edit cursor: highlight the byte at `cursor` when it is visible in
     // the dump, overprinting its value (or the pending high nibble mid-edit).
     let off = st.cursor.wrapping_sub(st.mem_base);
@@ -316,7 +339,7 @@ fn render_debugger(
     let start = st.disasm_start(pc);
     let rows = debugger::render_disasm(
         c,
-        l.disasm,
+        scroll_content(l.disasm),
         |a| gb.debug_read(a),
         start,
         pc,
@@ -328,18 +351,33 @@ fn render_debugger(
     );
     // Profiler: overlay per-line execution counts while logging (MB5).
     if gb.profiling() {
-        debugger::render_profile_counts(c, l.disasm, &rows, |a| gb.profile_count(a), theme);
+        debugger::render_profile_counts(c, scroll_content(l.disasm), &rows, |a| gb.profile_count(a), theme);
     }
     debugger::render_regs(c, l.regs, &regs_view(gb, st.clock_base), theme);
     let stack_rows = (l.stack.h / line_height()).max(0) as usize;
     debugger::render_stack(
         c,
-        l.stack,
+        scroll_content(l.stack),
         &gb.stack(st.stack_off + stack_rows),
         st.stack_off,
         theme,
     );
-    debugger::render_memory(c, l.memory, |a| gb.debug_read(a), st.mem_base, theme, &st.symbols);
+    debugger::render_memory(
+        c,
+        scroll_content(l.memory),
+        |a| gb.debug_read(a),
+        st.mem_base,
+        theme,
+        &st.symbols,
+    );
+    // Draggable scrollbars on the three scrollable panes (right-edge strip).
+    let lh = line_height();
+    let (df, dv) = st.disasm_scroll((l.disasm.h / lh).max(0) as usize);
+    vscrollbar(c, l.disasm, df, dv, theme);
+    let (sf, sv) = st.stack_scroll(stack_rows);
+    vscrollbar(c, l.stack, sf, sv, theme);
+    let (mf, mv) = st.mem_scroll((l.memory.h / lh).max(0) as usize);
+    vscrollbar(c, l.memory, mf, mv, theme);
     // The open context menu / modal draws last, on top of every pane.
     if let Some(om) = &st.menu {
         crate::ui::menu::render(c, om.origin, &om.items, om.hovered, theme);

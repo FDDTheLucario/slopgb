@@ -155,6 +155,12 @@ impl ApplicationHandler for App {
                         self.apply_menu_outcome(outcome, event_loop);
                     }
                 }
+                // Left-release ends any in-progress scrollbar drag.
+                WindowEvent::MouseInput {
+                    state: ElementState::Released,
+                    button: MouseButton::Left,
+                    ..
+                } => self.tools.on_mouse_up(),
                 // Hotkeys route by focused window kind: the debugger window gets
                 // bgb's debugger keys, the viewers keep the game keymap.
                 WindowEvent::KeyboardInput { event, .. } => {

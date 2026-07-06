@@ -21,6 +21,7 @@ use crate::dbg::Breakpoints;
 use crate::ui::canvas::Rect;
 use crate::ui::dialog::{DialogKey, DialogResult, InputDialog};
 use crate::ui::text::line_height;
+use crate::ui::widgets::{vscroll_frac, vscroll_track};
 use crate::ui::{Canvas, Theme, ToolWindow, WindowRegistry};
 use crate::windows::{self, WinState, debugger, vram};
 use debugger::{GotoTarget, MenuOutcome};
@@ -71,6 +72,36 @@ pub(crate) fn is_double_click(dt: Duration, dx: i32, dy: i32) -> bool {
     dt < Duration::from_millis(400) && dx.abs() <= 3 && dy.abs() <= 3
 }
 
+/// The standalone memory viewer's dump body (window minus the status-bar line),
+/// the rect its scrollbar spans — matches `render_memory_window`.
+fn mem_body(area: Rect) -> Rect {
+    Rect::new(area.x, area.y, area.w, (area.h - line_height()).max(0))
+}
+
+/// The scrollbar track the point `(px, py)` lands in for a `kind` window of
+/// content-rect `area`, or `None`. Shared by drag-start and drag-follow so both
+/// hit the tracks the renderer drew (`vscroll_track` on the same pane rects).
+fn scrollbar_at(kind: ToolWindow, area: Rect, px: i32, py: i32) -> Option<ScrollBar> {
+    match kind {
+        ToolWindow::Debugger => {
+            let l = debugger::DebuggerLayout::for_size(area.w, area.h);
+            if vscroll_track(l.disasm).contains(px, py) {
+                Some(ScrollBar::Disasm)
+            } else if vscroll_track(l.memory).contains(px, py) {
+                Some(ScrollBar::Memory)
+            } else if vscroll_track(l.stack).contains(px, py) {
+                Some(ScrollBar::Stack)
+            } else {
+                None
+            }
+        }
+        ToolWindow::MemoryViewer => vscroll_track(mem_body(area))
+            .contains(px, py)
+            .then_some(ScrollBar::MemViewer),
+        _ => None,
+    }
+}
+
 /// The number of fully-visible memory rows in a pane `height` px tall at line
 /// height `lh` — one page of PageUp/PageDown scrolling (at least 1).
 #[must_use]
@@ -81,11 +112,24 @@ fn mem_visible_rows(height: i32) -> i32 {
     ((height - lh) / lh.max(1)).max(1)
 }
 
+/// Which scrollable pane a scrollbar drag is manipulating.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ScrollBar {
+    Disasm,
+    Memory,
+    Stack,
+    MemViewer,
+}
+
 /// The set of open tool windows.
 pub struct ToolWindows {
     views: HashMap<WindowId, ToolView>,
     reg: WindowRegistry<WindowId>,
     theme: Theme,
+    /// The scrollbar the user is dragging (window + which pane), if any — a
+    /// left-press on a track starts it, cursor-move updates the offset, release
+    /// ends it.
+    scroll_drag: Option<(WindowId, ScrollBar)>,
 }
 
 fn title(kind: ToolWindow) -> &'static str {
@@ -118,6 +162,7 @@ impl ToolWindows {
             views: HashMap::new(),
             reg: WindowRegistry::new(),
             theme: Theme::BGB,
+            scroll_drag: None,
         }
     }
 
@@ -247,11 +292,21 @@ impl ToolWindows {
     /// Record the cursor moving to physical `(x, y)` over tool window `id`;
     /// updates the hovered-cell details and redraws only if the hover changed.
     pub fn on_cursor_moved(&mut self, id: WindowId, x: f64, y: f64) {
+        let (px, py) = (x as i32, y as i32);
+        {
+            let Some(view) = self.views.get_mut(&id) else {
+                return;
+            };
+            view.cursor = Some((px, py));
+        }
+        // A scrollbar drag owns the cursor: update its offset, skip hover.
+        if matches!(self.scroll_drag, Some((d, _)) if d == id) {
+            self.apply_scroll_drag(id);
+            return;
+        }
         let Some(view) = self.views.get_mut(&id) else {
             return;
         };
-        let (px, py) = (x as i32, y as i32);
-        view.cursor = Some((px, py));
         let area = view.area();
         match &mut view.state {
             WinState::Vram(s) => {
@@ -276,7 +331,74 @@ impl ToolWindows {
     /// position): switches a VRAM control, selects a debugger menu item, or sets
     /// the debugger cursor. Returns a [`MenuOutcome`] for `main` to apply
     /// (debugger only), redrawing on any change.
+    /// If a left-press landed on a scrollbar track, begin dragging it and jump
+    /// to that position. Returns whether the press was consumed (so normal click
+    /// routing is skipped).
+    fn begin_scroll_drag(&mut self, id: WindowId) -> bool {
+        let Some(view) = self.views.get(&id) else {
+            return false;
+        };
+        let Some((px, py)) = view.cursor else {
+            return false;
+        };
+        let Some(bar) = scrollbar_at(view.kind, view.area(), px, py) else {
+            return false;
+        };
+        self.scroll_drag = Some((id, bar));
+        self.apply_scroll_drag(id);
+        true
+    }
+
+    /// Update the dragged scrollbar's pane offset from the current cursor y.
+    /// Redraws. No-op unless a drag on `id` is active.
+    fn apply_scroll_drag(&mut self, id: WindowId) {
+        let Some((_, bar)) = self.scroll_drag.filter(|&(d, _)| d == id) else {
+            return;
+        };
+        let Some(view) = self.views.get_mut(&id) else {
+            return;
+        };
+        let Some((_, py)) = view.cursor else {
+            return;
+        };
+        let area = view.area();
+        let lh = line_height();
+        match (&mut view.state, bar) {
+            (WinState::Debugger(s), ScrollBar::Disasm) => {
+                let l = debugger::DebuggerLayout::for_size(area.w, area.h);
+                let (_, vis) = s.disasm_scroll((l.disasm.h / lh).max(0) as usize);
+                s.set_disasm_scroll(vscroll_frac(vscroll_track(l.disasm), py, vis));
+            }
+            (WinState::Debugger(s), ScrollBar::Memory) => {
+                let l = debugger::DebuggerLayout::for_size(area.w, area.h);
+                let (_, vis) = s.mem_scroll((l.memory.h / lh).max(0) as usize);
+                s.set_mem_scroll(vscroll_frac(vscroll_track(l.memory), py, vis));
+            }
+            (WinState::Debugger(s), ScrollBar::Stack) => {
+                let l = debugger::DebuggerLayout::for_size(area.w, area.h);
+                let (_, vis) = s.stack_scroll((l.stack.h / lh).max(0) as usize);
+                s.set_stack_scroll(vscroll_frac(vscroll_track(l.stack), py, vis));
+            }
+            (WinState::Memory(s), ScrollBar::MemViewer) => {
+                let body = mem_body(area);
+                let (_, vis) = s.scroll_frac((body.h / lh).max(0) as usize);
+                s.set_scroll(vscroll_frac(vscroll_track(body), py, vis));
+            }
+            _ => return,
+        }
+        view.window.request_redraw();
+    }
+
+    /// End any scrollbar drag (on left-release).
+    pub fn on_mouse_up(&mut self) {
+        self.scroll_drag = None;
+    }
+
     pub fn on_mouse_left(&mut self, id: WindowId, gb: &GameBoy) -> Option<MenuOutcome> {
+        // A press on a scrollbar track starts a drag instead of a pane click.
+        if self.begin_scroll_drag(id) {
+            return None;
+        }
         let view = self.views.get_mut(&id)?;
         let (px, py) = view.cursor?;
         let area = view.area();
@@ -799,6 +921,11 @@ impl ToolWindows {
     /// Clear the remembered cursor when it leaves tool window `id`, so a stale
     /// position can't drive a click and the hover details clear.
     pub fn on_cursor_left(&mut self, id: WindowId) {
+        // End a scrollbar drag that leaves the window (a release off-window may
+        // not reach us), so it can't resume as a no-button "drag" on re-entry.
+        if matches!(self.scroll_drag, Some((d, _)) if d == id) {
+            self.scroll_drag = None;
+        }
         let Some(view) = self.views.get_mut(&id) else {
             return;
         };
