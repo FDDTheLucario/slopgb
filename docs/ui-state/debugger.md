@@ -88,11 +88,19 @@ follow like a Go-to by setting `pinned`), and **stack** (`scroll_stack`, words b
 SP, clamped `[0, 0x800]`; the SP highlight shows only at offset 0). `DebuggerState`
 holds `disasm_base` (authoritative disasm top) + `stack_off`.
 
-**Disasm follows PC in place:** each redraw calls `DebuggerState::disasm_follow`,
-which re-bases to PC only when unpinned AND PC has scrolled outside the visible
-decoded window — so single-stepping keeps the listing fixed until PC leaves the
-pane, then re-pages (vs. the old PC-pinned-to-top that shifted every step). `pinned`
-(stay-on-bank / Go-to / a manual scroll) freezes it entirely.
+**Disasm follows PC in place while running:** each redraw calls
+`DebuggerState::disasm_follow`, which re-bases to PC only when unpinned AND PC has
+scrolled outside the visible decoded window — so a free run keeps the listing fixed
+until PC leaves the pane, then re-pages. `pinned` (stay-on-bank / Go-to / a manual
+scroll) freezes it entirely.
+
+**Tracing centers PC:** every trace action (F7 step / F3 over / F8 out / F6 jump /
+F4 run-to-cursor) and "go to PC" (Ctrl+A) call `Tools::center_debugger_on_pc` →
+`DebuggerState::center_disasm_on_pc`, which unpins and re-bases so PC lands on the
+middle row (walks back `visible/2` instructions via `prev_disasm_addr`). So you can
+scroll away (which pins), and the next F7 snaps the traced instruction back to
+center. A breakpoint toggle (F2) does **not** recenter — it acts on the cursor
+without moving the view.
 
 ## .sym symbols
 

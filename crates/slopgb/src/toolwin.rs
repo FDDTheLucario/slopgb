@@ -392,14 +392,18 @@ impl ToolWindows {
         }
     }
 
-    /// Re-center the disasm on PC (Search → "go to PC", Ctrl+A): drop the
-    /// stay-on-bank pin so the pane follows PC again. Redraws.
-    pub fn debugger_goto_pc(&mut self) {
+    /// Center the disasm pane on PC and unpin, so it follows execution again —
+    /// Search → "go to PC" / Ctrl+A, and after every trace step / PC jump. A
+    /// manual scroll pins the view; this re-attaches it. Redraws.
+    pub fn center_debugger_on_pc(&mut self, gb: &GameBoy) {
         let Some(view) = self.debugger_view_mut() else {
             return;
         };
+        let area = view.area();
         if let WinState::Debugger(s) = &mut view.state {
-            s.pinned = false;
+            let l = debugger::DebuggerLayout::for_size(area.w, area.h);
+            let visible = (l.disasm.h / line_height()).max(0) as usize;
+            s.center_disasm_on_pc(gb.cpu_regs().pc, |a| gb.debug_read(a), visible);
             view.window.request_redraw();
         }
     }

@@ -275,6 +275,21 @@ fn pinned_disasm_follows_the_base_not_pc() {
 }
 
 #[test]
+fn center_disasm_on_pc_puts_pc_mid_pane_and_unpins() {
+    // A scrolled/frozen view (pinned, base elsewhere)…
+    let mut st = DebuggerState {
+        pinned: true,
+        disasm_base: 0x0500,
+        ..DebuggerState::default()
+    };
+    // …recenters on PC when tracing: a 10-row pane over a 1-byte NOP stream
+    // walks back visible/2 = 5 instructions, so PC lands on the middle row.
+    st.center_disasm_on_pc(0x0100, NOPS, 10);
+    assert!(!st.pinned, "tracing unpins a scrolled view so it follows PC");
+    assert_eq!(st.disasm_base, 0x00FB, "PC sits 5 rows below the base (centered)");
+}
+
+#[test]
 fn right_click_opens_the_matching_pane_menu_and_sets_the_cursor() {
     let l = DebuggerLayout::for_size(AREA.w, AREA.h);
     let lh = line_height();

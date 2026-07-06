@@ -320,6 +320,21 @@ impl DebuggerState {
         self.disasm_base = pc;
     }
 
+    /// Re-base the disasm pane so `pc` sits at the vertical center of a
+    /// `visible`-row pane, and unpin so it keeps following PC. Used when tracing
+    /// (each F7 step / jump) and on "go to PC" (Ctrl+A) — bgb centers the traced
+    /// instruction rather than letting it drift to a pane edge. Backward decode
+    /// (`prev_disasm_addr`) is GB's best-effort; a mis-aligned byte just shifts
+    /// the center by a row.
+    pub fn center_disasm_on_pc(&mut self, pc: u16, read: impl Fn(u16) -> u8, visible: usize) {
+        self.pinned = false;
+        let mut base = pc;
+        for _ in 0..visible / 2 {
+            base = self.prev_disasm_addr(&read, base);
+        }
+        self.disasm_base = base;
+    }
+
     /// Scroll the disasm pane by `rows` instructions (negative = toward lower
     /// addresses). Detaches follow ([`pinned`](Self::pinned)) like a Go-to, since a
     /// manual scroll means "stop tracking PC".

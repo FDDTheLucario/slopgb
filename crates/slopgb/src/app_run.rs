@@ -89,14 +89,17 @@ impl App {
             }
             Action::DbgStep if self.dbg.is_broken() => {
                 self.dbg.step(&mut self.session.gb);
+                self.tools.center_debugger_on_pc(&self.session.gb);
                 self.refresh_after_step();
             }
             Action::DbgStepOver if self.dbg.is_broken() => {
                 self.dbg.step_over(&mut self.session.gb);
+                self.tools.center_debugger_on_pc(&self.session.gb);
                 self.refresh_after_step();
             }
             Action::DbgStepOut if self.dbg.is_broken() => {
                 self.dbg.step_out(&mut self.session.gb);
+                self.tools.center_debugger_on_pc(&self.session.gb);
                 self.refresh_after_step();
             }
             // Debugger F2 / F4 act on the cursor (or PC when nothing is selected).
@@ -113,6 +116,7 @@ impl App {
                 self.dbg
                     .apply(&mut self.session.gb, dbg::DebugAction::RunToCursor(addr));
                 self.update_title();
+                self.tools.center_debugger_on_pc(&self.session.gb);
                 self.refresh_after_step();
             }
             Action::DbgJumpToCursor => {
@@ -120,10 +124,11 @@ impl App {
                 self.dbg
                     .apply(&mut self.session.gb, dbg::DebugAction::SetPc(addr));
                 self.update_title();
+                self.tools.center_debugger_on_pc(&self.session.gb);
                 self.refresh_after_step();
             }
             Action::DbgGoto => self.tools.open_debugger_goto(),
-            Action::DbgGoToPc => self.tools.debugger_goto_pc(),
+            Action::DbgGoToPc => self.tools.center_debugger_on_pc(&self.session.gb),
             Action::DbgMemScroll(rows) => self.tools.scroll_debugger_memory(rows),
             Action::DbgMemPage(dir) => self.tools.page_debugger_memory(dir),
             // bp/wp manager (RM15): build a list popup from the App-owned sets
