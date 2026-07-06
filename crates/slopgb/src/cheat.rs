@@ -13,8 +13,9 @@
 pub enum Effect {
     /// GameShark: write `value` to `addr` every frame.
     Ram { addr: u16, value: u8 },
-    /// Game Genie ROM patch — recognized but not yet applied.
-    RomPatch,
+    /// Game Genie ROM patch: substitute `value` at `addr`, gated (9-digit codes)
+    /// on the current byte matching `compare`.
+    Rom { addr: u16, value: u8, compare: Option<u8> },
 }
 
 /// Parse a bgb cheat code (case-insensitive; spaces/dashes ignored). Returns the
@@ -22,20 +23,33 @@ pub enum Effect {
 #[must_use]
 pub fn parse_code(code: &str) -> Option<Effect> {
     let clean: String = code.chars().filter(|c| !c.is_whitespace() && *c != '-').collect();
-    // GameShark: 8 hex digits.
-    if clean.len() == 8 && clean.chars().all(|c| c.is_ascii_hexdigit()) {
+    if !clean.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    // GameShark: 8 hex digits `ttvvaaaa` (addr little-endian).
+    if clean.len() == 8 {
         let byte = |i: usize| u8::from_str_radix(&clean[i..i + 2], 16).ok();
         let (ty, value, lo, hi) = (byte(0)?, byte(2)?, byte(4)?, byte(6)?);
         // Type 01 = RAM write. Other GameShark types aren't supported yet.
-        if ty == 0x01 {
-            let addr = u16::from(hi) << 8 | u16::from(lo);
-            return Some(Effect::Ram { addr, value });
-        }
-        return None;
+        return (ty == 0x01).then(|| Effect::Ram {
+            addr: u16::from(hi) << 8 | u16::from(lo),
+            value,
+        });
     }
-    // Game Genie: 6 or 9 hex digits (`AAA-BBB[-CCC]`). Recognized, not applied.
-    if (clean.len() == 6 || clean.len() == 9) && clean.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Some(Effect::RomPatch);
+    // Game Genie: 6 (`AAA-BBB`, unconditional) or 9 (`AAA-BBB-CCC`, with compare)
+    // hex digits — the standard GB Game Genie decode (same as bgb/mGBA/VBA).
+    if clean.len() == 6 || clean.len() == 9 {
+        let n: Vec<u8> = clean.chars().map(|c| c.to_digit(16).unwrap() as u8).collect();
+        let value = (n[0] << 4) | n[1];
+        // Address: nibbles 2-4 are the low 12 bits; nibble 5 (XOR 0xF) is the top.
+        let addr = u16::from(n[5] ^ 0xF) << 12
+            | u16::from(n[2]) << 8
+            | u16::from(n[3]) << 4
+            | u16::from(n[4]);
+        // Compare (9-digit): from nibbles 6 + 8 (7 is a check digit), rotate-right
+        // 2 then XOR 0xBA.
+        let compare = (n.len() == 9).then(|| ((n[6] << 4) | n[8]).rotate_right(2) ^ 0xBA);
+        return Some(Effect::Rom { addr, value, compare });
     }
     None
 }
@@ -130,6 +144,22 @@ impl CheatList {
             .filter(|c| c.enabled)
             .filter_map(|c| match parse_code(&c.code) {
                 Some(Effect::Ram { addr, value }) => Some((addr, value)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The Game Genie ROM patches for every enabled Game-Genie cheat, pushed to
+    /// the core (`GameBoy::set_gg_patches`) whenever the list changes.
+    #[must_use]
+    pub fn gg_patches(&self) -> Vec<slopgb_core::GgPatch> {
+        self.items
+            .iter()
+            .filter(|c| c.enabled)
+            .filter_map(|c| match parse_code(&c.code) {
+                Some(Effect::Rom { addr, value, compare }) => {
+                    Some(slopgb_core::GgPatch { addr, value, compare })
+                }
                 _ => None,
             })
             .collect()

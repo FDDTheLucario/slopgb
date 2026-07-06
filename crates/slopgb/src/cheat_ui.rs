@@ -124,7 +124,10 @@ fn parse_entry(text: &str, editing: Option<usize>) -> CheatEdit {
 fn decoded(code: &str) -> String {
     match parse_code(code) {
         Some(Effect::Ram { addr, value }) => format!("({addr:04X})={value:02X}"),
-        Some(Effect::RomPatch) => "ROM patch".to_string(),
+        Some(Effect::Rom { addr, value, compare: Some(c) }) => {
+            format!("ROM ({addr:04X})={value:02X} ?{c:02X}")
+        }
+        Some(Effect::Rom { addr, value, compare: None }) => format!("ROM ({addr:04X})={value:02X}"),
         None => "(bad code)".to_string(),
     }
 }

@@ -14,9 +14,30 @@ fn gameshark_decodes_like_bgb() {
 }
 
 #[test]
-fn game_genie_recognized_but_not_applied() {
-    assert_eq!(parse_code("ABC-DEF-123"), Some(Effect::RomPatch));
-    assert_eq!(parse_code("ABCDEF"), Some(Effect::RomPatch), "6-hex GG");
+fn game_genie_decodes_like_the_standard() {
+    // Standard GB Game Genie decode. 9-digit 123456789: value 0x12,
+    // addr ((6^F)<<12)|0x345 = 0x9345, compare (0x79 ror2)^0xBA = 0xE4.
+    assert_eq!(
+        parse_code("123-456-789"),
+        Some(Effect::Rom { addr: 0x9345, value: 0x12, compare: Some(0xE4) })
+    );
+    // 6-digit ABCDEF: value 0xAB, addr ((F^F)<<12)|0xCDE = 0x0CDE, no compare.
+    assert_eq!(
+        parse_code("ABCDEF"),
+        Some(Effect::Rom { addr: 0x0CDE, value: 0xAB, compare: None })
+    );
+}
+
+#[test]
+fn gg_patches_from_enabled_game_genie_cheats() {
+    let mut list = CheatList::default();
+    list.add("gg", "ABCDEF"); // 6-digit -> a ROM patch
+    list.add("gs", "01FF0AC1"); // GameShark -> not a GG patch
+    let off = list.add("gg2", "123456789");
+    list.set_enabled(off, false); // disabled -> excluded
+    let p = list.gg_patches();
+    assert_eq!(p.len(), 1, "only the enabled Game Genie cheat");
+    assert_eq!(p[0], slopgb_core::GgPatch { addr: 0x0CDE, value: 0xAB, compare: None });
 }
 
 #[test]

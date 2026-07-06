@@ -118,6 +118,27 @@ fn ram_offset_none_when_no_byte_addressed() {
 }
 
 #[test]
+fn game_genie_patches_rom_reads_conditionally() {
+    let mut c = cart(0x00, 2, 0); // ROM-only
+    let orig = c.read_rom(0x0100);
+    // 6-digit (unconditional) patch: always substitutes.
+    c.set_gg_patches(vec![GgPatch { addr: 0x0100, value: 0xAB, compare: None }]);
+    assert_eq!(c.read_rom(0x0100), 0xAB);
+    // 9-digit patch whose compare matches the live byte: applies.
+    c.set_gg_patches(vec![GgPatch { addr: 0x0100, value: 0xCD, compare: Some(orig) }]);
+    assert_eq!(c.read_rom(0x0100), 0xCD);
+    // Compare mismatch: no substitution (bank-switched code stays correct).
+    c.set_gg_patches(vec![GgPatch { addr: 0x0100, value: 0xEE, compare: Some(orig ^ 0xFF) }]);
+    assert_eq!(c.read_rom(0x0100), orig);
+    // Only the patched address is affected.
+    c.set_gg_patches(vec![GgPatch { addr: 0x0100, value: 0x11, compare: None }]);
+    assert_eq!(c.read_rom(0x0101), c.read_rom(0x0101), "unpatched address untouched");
+    // Empty patch list: byte-identical (golden-safe).
+    c.set_gg_patches(vec![]);
+    assert_eq!(c.read_rom(0x0100), orig);
+}
+
+#[test]
 fn cur_ram_bank_mbc3_rtc_register_reports_none() {
     // MBC3+RTC: a RAM bank reports its index; an RTC register mapped at 0xA000
     // (RAMB 0x08-0x0C) is not a RAM bank, so the indicator shows None.

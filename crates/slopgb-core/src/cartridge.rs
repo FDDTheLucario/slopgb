@@ -211,6 +211,19 @@ pub struct Cartridge {
     ram: Vec<u8>,
     mapper: Mapper,
     has_battery: bool,
+    /// Game Genie ROM-patch cheats (empty in production → `read_rom` is
+    /// byte-identical; a default-off mutating debug hook, set by the frontend
+    /// cheat engine). See [`Self::set_gg_patches`].
+    gg: Vec<GgPatch>,
+}
+
+/// A Game Genie ROM patch: substitute `value` when the CPU reads `addr`, gated
+/// (for 9-digit codes) on the current byte matching `compare`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GgPatch {
+    pub addr: u16,
+    pub value: u8,
+    pub compare: Option<u8>,
 }
 
 impl Cartridge {
@@ -293,6 +306,7 @@ impl Cartridge {
                 cart_type,
                 0x03 | 0x06 | 0x09 | 0x0F | 0x10 | 0x13 | 0x1B | 0x1E
             ),
+            gg: Vec::new(),
         })
     }
 
@@ -370,9 +384,28 @@ impl Cartridge {
         }
     }
 
-    /// Read 0x0000-0x7FFF (banked ROM).
+    /// Read 0x0000-0x7FFF (banked ROM), applying any Game Genie patch. The patch
+    /// list is empty in production, so this is byte-identical there (the empty
+    /// check is skipped and the raw ROM byte returns unchanged).
     pub fn read_rom(&self, addr: u16) -> u8 {
-        self.rom_at(self.rom_bank_for(addr < 0x4000), addr)
+        let byte = self.rom_at(self.rom_bank_for(addr < 0x4000), addr);
+        if self.gg.is_empty() {
+            return byte;
+        }
+        for p in &self.gg {
+            // 6-digit codes have no compare (unconditional); 9-digit patch only
+            // when the current byte matches (so bank-switched code stays correct).
+            if p.addr == addr && p.compare.is_none_or(|c| c == byte) {
+                return p.value;
+            }
+        }
+        byte
+    }
+
+    /// Set the Game Genie ROM patches (from the frontend cheat engine). Empty =
+    /// no patching = byte-identical `read_rom`. A default-off mutating debug hook.
+    pub fn set_gg_patches(&mut self, patches: Vec<GgPatch>) {
+        self.gg = patches;
     }
 
     /// The ROM bank currently mapped at 0x4000-0x7FFF (size-masked the way the

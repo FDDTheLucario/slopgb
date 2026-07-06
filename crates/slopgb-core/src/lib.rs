@@ -40,7 +40,7 @@ pub use state::StateError;
 // Escape hatch for the crate's integration tests, which drive the CPU and
 // interconnect directly (OAM DMA freeze/timing tests). Not public API.
 #[doc(hidden)]
-pub use cartridge::Cartridge;
+pub use cartridge::{Cartridge, GgPatch};
 #[doc(hidden)]
 pub use cpu::{Bus, Cpu};
 #[doc(hidden)]
@@ -577,6 +577,13 @@ impl GameBoy {
     #[must_use]
     pub fn rom_bank(&self) -> usize {
         self.bus.cartridge().cur_rom_bank()
+    }
+
+    /// Set the Game Genie ROM-patch cheats (frontend cheat engine). Empty (the
+    /// default / no cheats) leaves ROM reads byte-identical — a default-off
+    /// mutating debug hook, never set on a golden/test path.
+    pub fn set_gg_patches(&mut self, patches: Vec<GgPatch>) {
+        self.bus.cartridge_mut().set_gg_patches(patches);
     }
 
     /// The external-RAM bank currently visible at 0xA000, or `None` when RAM is

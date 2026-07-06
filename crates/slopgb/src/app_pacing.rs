@@ -51,6 +51,9 @@ impl App {
         let bps = self.run_breakpoints();
         let freeze = self.dbg.freezes().list();
         let cheats = self.cheats.pokes();
+        // Game Genie ROM patches are a persistent core read-intercept: push the
+        // current set once per wake (re-syncs after a ROM reload clears them).
+        self.session.gb.set_gg_patches(self.cheats.gg_patches());
         let mut frames = 0;
         let mut hit = false;
         {
@@ -77,6 +80,9 @@ impl App {
         let bps = self.run_breakpoints();
         let freeze = self.dbg.freezes().list();
         let cheats = self.cheats.pokes();
+        // Game Genie ROM patches are a persistent core read-intercept: push the
+        // current set once per wake (re-syncs after a ROM reload clears them).
+        self.session.gb.set_gg_patches(self.cheats.gg_patches());
         let now = Instant::now();
         // If we fell far behind (stall, drag, debugger), resync instead of
         // fast-forwarding through the backlog.
@@ -104,6 +110,9 @@ impl App {
         let bps = self.run_breakpoints();
         let freeze = self.dbg.freezes().list();
         let cheats = self.cheats.pokes();
+        // Game Genie ROM patches are a persistent core read-intercept: push the
+        // current set once per wake (re-syncs after a ROM reload clears them).
+        self.session.gb.set_gg_patches(self.cheats.gg_patches());
         let muted = self.muted;
         // Options → Misc → fast-forward speed caps frames per wake.
         let cap = turbo_max_frames(self.settings.ff_speed);
