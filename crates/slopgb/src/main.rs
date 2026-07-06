@@ -33,6 +33,7 @@ mod menupopup;
 mod pacing;
 mod screenshot;
 mod session;
+mod settings_file;
 mod symbols;
 mod toolwin;
 mod ui;
@@ -284,9 +285,11 @@ impl App {
         // reused for every ROM load), NOT the resolved session model — so it
         // can't desync when a later ROM auto-detects to a different system, and
         // Apply with the default (Auto) never force-switches the running game.
+        // Persisted settings (bgb.ini) seed everything; the CLI `--model`
+        // override still wins for the session (it isn't persisted).
         let settings = windows::options::Settings {
             model: windows::options::ModelChoice::from_option(opts.model),
-            ..windows::options::Settings::default()
+            ..settings_file::load()
         };
         let blank_frame = blank_frame(settings.dmg_palette[0]);
         let mut app = Self {

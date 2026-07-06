@@ -59,7 +59,10 @@ impl App {
                 self.session.reset();
                 self.resync_pacing();
             }
-            Action::Quit => event_loop.exit(),
+            Action::Quit => {
+                crate::settings_file::save(&self.settings);
+                event_loop.exit();
+            }
             Action::ToggleTool(kind) => {
                 self.tools.toggle(event_loop, kind);
                 // A freshly-opened debugger must reflect the current disasm

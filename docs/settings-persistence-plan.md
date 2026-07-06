@@ -54,6 +54,14 @@ say so — this is the reversible call.
 
 ## Phase 1 — bgb.ini compatibility
 
+**STATUS (2026-07-06):** tasks 1a (fixture+map), 2 (ini model), 3 (typed codecs
+minus the deferred dec-COLORREF/get_all), 4 (Settings↔ini mapping), 5 (path +
+load/save + atomic write), 6 (App wiring: seed from `load()`, save on Apply +
+Quit) — **SHIPPED** in `crates/slopgb/src/settings_file/`. Config path:
+`$XDG_CONFIG_HOME/slopgb/bgb.ini` (else `~/.config/slopgb/bgb.ini`). Remaining:
+task 7 (window/recent interop) + the residual 1a diffs (`SystemMode` enum,
+`stretch`) + `model`/`scheme` persistence (deferred with `SystemMode`).
+
 ```xml
 <plan goal="Read + write bgb.ini as the settings store, byte-preserving unknown keys, so config interops with real bgb">
 

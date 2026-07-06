@@ -90,7 +90,24 @@ buttons (`Field::PickBootrom`→`OptionsOutcome::PickBootrom`→a path modal ove
 dialog) + a live "bootroms enabled" checkbox. `Settings` is no longer `Copy` (holds
 the path strings); `DIALOG_W` 345→420 for slopgb's wider fixed font.
 
+## Persistence (bgb.ini, phase 1)
+
+`App.settings` persists to disk in **bgb's own `bgb.ini` format** so the config
+interops with real bgb (`crates/slopgb/src/settings_file/`). Loaded at startup
+(seeds `settings`; CLI `--model` still wins the session), saved on Options
+Apply/OK and on Quit. Path: `$XDG_CONFIG_HOME/slopgb/bgb.ini` else
+`~/.config/slopgb/bgb.ini` (`%APPDATA%\slopgb\` on Windows), atomic write
+(temp+rename). The `ini` module keeps an **ordered-line model** that preserves
+every key we don't map (bgb's ~250 audio/RTC/link/etc. keys survive verbatim —
+the real bgb.ini round-trips byte-identically). Codecs: 0/1 bools, decimal
+ints, `Color0..3` BGR-hex palette. slopgb-only fields (`tile_hex_8bit`,
+`memory_window`, break_ld_b_b/echo, show_framerate) are stored under a `Slopgb`
+prefix bgb ignores. **Not yet persisted:** `model` (bgb `SystemMode` enum not
+decoded — bgb's value left untouched) and window/recent state. Plan +
+key map: [`../settings-persistence-plan.md`](../settings-persistence-plan.md).
+Phase 2 (a modern native format) is planned there.
+
 ## Inert
 
 SGB, game-controller config, WAV/AVI, rewind, RTC, Load-ROM-on-startup render
-faithfully but inert — slopgb has no backend, and `App.settings` is in-memory only.
+faithfully but inert — slopgb has no backend for them.
