@@ -149,6 +149,10 @@ enum PathPurpose {
     SettingsImportBgb,
     /// Export settings to a bgb-format ini at the typed path.
     SettingsExportBgb,
+    /// Load cheats from a cheat file at the typed path.
+    CheatLoad,
+    /// Save cheats to a cheat file at the typed path.
+    CheatSave,
 }
 
 /// Resolve the boot ROM bytes from `--boot` or the `SLOPGB_BOOT` env var,
@@ -556,11 +560,39 @@ impl App {
         // every key (typing a code can't fire a hotkey); otherwise arrows move the
         // selection, Space toggles enable, Delete removes, Escape closes.
         if focus == Focus::Game && key.state.is_pressed() && self.cheat_dialog.is_some() {
-            if self.cheat_dialog.as_ref().is_some_and(cheat_ui::CheatDialog::input_open) {
-                if let Some(dk) = dialog_key_from(key) {
-                    let edit = self.cheat_dialog.as_mut().and_then(|d| d.input_key(dk));
-                    if let Some(e) = edit {
-                        self.apply_cheat_edit(&e);
+            if self.cheat_dialog.as_ref().is_some_and(cheat_ui::CheatDialog::editor_open) {
+                if let PhysicalKey::Code(code) = key.physical_key {
+                    match code {
+                        KeyCode::Tab => {
+                            if let Some(d) = &mut self.cheat_dialog {
+                                d.switch_field();
+                            }
+                        }
+                        KeyCode::Enter | KeyCode::NumpadEnter => {
+                            let edit = self.cheat_dialog.as_mut().and_then(cheat_ui::CheatDialog::accept);
+                            if let Some(e) = edit {
+                                self.apply_cheat_edit(&e);
+                            }
+                        }
+                        KeyCode::Escape => {
+                            if let Some(d) = &mut self.cheat_dialog {
+                                d.cancel_editor();
+                            }
+                        }
+                        KeyCode::Backspace => {
+                            if let Some(d) = &mut self.cheat_dialog {
+                                d.backspace();
+                            }
+                        }
+                        _ => {
+                            if let Some(ch) = key.text.as_ref().and_then(|t| t.chars().next()) {
+                                if !ch.is_control() {
+                                    if let Some(d) = &mut self.cheat_dialog {
+                                        d.type_char(ch);
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             } else if let PhysicalKey::Code(code) = key.physical_key {

@@ -242,7 +242,7 @@ impl App {
     /// Route a left-click inside the open Cheat dialog to a row selection or a
     /// button action. An open Add/Edit entry is keyboard-driven, so it's ignored.
     fn on_cheat_click(&mut self, area: Rect, px: i32, py: i32) {
-        if self.cheat_dialog.as_ref().is_some_and(cheat_ui::CheatDialog::input_open) {
+        if self.cheat_dialog.as_ref().is_some_and(cheat_ui::CheatDialog::editor_open) {
             return;
         }
         match cheat_ui::hit(area, &self.cheats, px, py) {
@@ -285,6 +285,17 @@ impl App {
                 if let Some((a, v)) = self.cheats.poke_once(sel) {
                     self.session.gb.debug_write(a, v);
                 }
+            }
+            CheatButton::Advanced => {
+                if let Some(d) = &mut self.cheat_dialog {
+                    d.advanced = !d.advanced;
+                }
+            }
+            CheatButton::Load => {
+                self.open_path_prompt("Load cheats (path)", crate::PathPurpose::CheatLoad);
+            }
+            CheatButton::Save => {
+                self.open_path_prompt("Save cheats (path)", crate::PathPurpose::CheatSave);
             }
             CheatButton::Close => self.cheat_dialog = None,
         }

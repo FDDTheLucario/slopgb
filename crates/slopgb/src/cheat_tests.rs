@@ -75,6 +75,27 @@ fn pokes_only_enabled_gameshark_cheats() {
 }
 
 #[test]
+fn cheat_file_round_trips() {
+    let mut list = CheatList::default();
+    list.add("infinite lives", "01FF0AC1");
+    let off = list.add("gg cheat", "ABCDEF");
+    list.set_enabled(off, false);
+    let text = list.to_file_text();
+    assert!(text.contains("+ 01FF0AC1 infinite lives"));
+    assert!(text.contains("- ABCDEF gg cheat"));
+    // Load into a fresh list reconstructs the same cheats.
+    let mut back = CheatList::default();
+    back.load_file_text(&text);
+    assert_eq!(back.items(), list.items());
+    // Blank + comment lines skipped; a code-only line has an empty comment.
+    let mut c2 = CheatList::default();
+    c2.load_file_text("# hdr\n\n+ 0100C0FF\n");
+    assert_eq!(c2.len(), 1);
+    assert_eq!(c2.items()[0].comment, "");
+    assert!(c2.items()[0].enabled);
+}
+
+#[test]
 fn enable_disable_all_and_poke_once() {
     let mut list = CheatList::default();
     list.add("a", "01FF0AC1");

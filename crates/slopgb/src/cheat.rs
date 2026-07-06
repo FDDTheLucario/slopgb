@@ -165,6 +165,39 @@ impl CheatList {
             .collect()
     }
 
+    /// Serialize the list to a cheat file (bgb's Save): one cheat per line
+    /// `<+|-> code comment` (`+` enabled, `-` disabled), `#` comments ignored.
+    #[must_use]
+    pub fn to_file_text(&self) -> String {
+        let mut s = String::from("# slopgb cheats\n");
+        for c in &self.items {
+            let flag = if c.enabled { '+' } else { '-' };
+            s.push_str(&format!("{flag} {} {}\n", c.code, c.comment));
+        }
+        s
+    }
+
+    /// Append cheats parsed from a cheat file (bgb's Load). Blank / `#` lines are
+    /// skipped; a leading `-` marks a disabled cheat.
+    pub fn load_file_text(&mut self, text: &str) {
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let enabled = !line.starts_with('-');
+            let rest = line.trim_start_matches(['+', '-']).trim();
+            let (code, comment) = rest.split_once(' ').unwrap_or((rest, ""));
+            if !code.is_empty() {
+                self.items.push(Cheat {
+                    comment: comment.trim().to_string(),
+                    code: code.to_string(),
+                    enabled,
+                });
+            }
+        }
+    }
+
     /// The one-time poke of the cheat at `i` (bgb's "Poke" button — apply once
     /// without enabling), or `None` if it isn't a RAM cheat.
     #[must_use]

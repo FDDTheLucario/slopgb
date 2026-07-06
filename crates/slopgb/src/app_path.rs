@@ -231,6 +231,17 @@ impl App {
                 self.apply_settings();
                 println!("slopgb: imported settings from {}", path.display());
             }
+            PathPurpose::CheatSave => match std::fs::write(path, self.cheats.to_file_text()) {
+                Ok(()) => println!("slopgb: saved cheats to {}", path.display()),
+                Err(e) => eprintln!("slopgb: save cheats failed: {e}"),
+            },
+            PathPurpose::CheatLoad => match std::fs::read_to_string(path) {
+                Ok(text) => {
+                    self.cheats.load_file_text(&text);
+                    println!("slopgb: loaded cheats from {}", path.display());
+                }
+                Err(e) => eprintln!("slopgb: load cheats failed: {e}"),
+            },
         }
     }
 

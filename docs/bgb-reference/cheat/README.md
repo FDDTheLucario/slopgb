@@ -33,9 +33,18 @@ slopgb).
 
 ## slopgb mapping
 
-`crates/slopgb/src/cheat.rs` (model + code parse + per-frame pokes) +
-`cheat_ui.rs` (the dialog). GameShark RAM pokes re-apply each frame via
-`debug_write` — the same golden-safe path the freeze list uses. slopgb's Add/Edit
-reuses the shared single-line modal with a `comment = code` convention (bgb has
-two fields); Load/Save `.cht` files are not yet implemented. See
-[`../../ui-state/game-menu.md`](../../ui-state/game-menu.md).
+`crates/slopgb/src/cheat.rs` (model + code parse + pokes + file codec) +
+`cheat_ui.rs` (the dialog). Feature-complete vs bgb:
+
+- **GameShark** RAM pokes re-apply each frame via `debug_write` (the freeze
+  list's golden-safe path).
+- **Game Genie** decodes to a `GgPatch` applied in `Cartridge::read_rom` — a
+  default-off, golden-safe core hook pushed via `GameBoy::set_gg_patches`.
+- **Two-field Add/Edit** (Comment / Code) like bgb; Tab switches fields.
+- **Advanced** toggle shows the decoded `(addr)=val` column.
+- **Load / Save** read/write a cheat file (`+ code comment` per line, `-` =
+  disabled) via the shared path modal.
+- Buttons: Add / Edit / Delete / Enable / Disable / Enable all / Disable all /
+  Poke / Load / Save / Advanced / Close.
+
+See [`../../ui-state/game-menu.md`](../../ui-state/game-menu.md).
