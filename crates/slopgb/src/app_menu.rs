@@ -370,8 +370,9 @@ impl App {
         // Exceptions-tab break conditions → the core exception-break mask.
         self.apply_exceptions();
         self.update_title();
-        // Persist the committed settings (bgb.ini), preserving unknown bgb keys.
-        crate::settings_file::save(&self.settings);
+        // Persist the committed settings + recent ROMs (bgb.ini), preserving
+        // unknown bgb keys.
+        crate::settings_file::save(&self.settings, &self.recent);
     }
 
     /// Push the Debug-tab disasm display options (syntax / hex case / clocks) to

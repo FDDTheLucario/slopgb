@@ -3,12 +3,11 @@
 //! the mapped keys + our `Slopgb*` extras — every other line the ini holds is
 //! preserved by the [`Ini`] model. Key map: `docs/settings-persistence-plan.md`.
 //!
-//! Not persisted yet (flagged there): `model` (bgb `SystemMode` enum values not
-//! yet decoded — we leave bgb's value untouched and load the default), and
-//! `scheme` (follows `dmg_palette`, which IS persisted via `Color0..3`).
+//! `model` maps to bgb `SystemMode` (radio index from `options-system.png`);
+//! `scheme` follows `dmg_palette`, persisted via `Color0..3`.
 
 use super::ini::{self, Ini};
-use crate::windows::options::{SCHEMES, Settings};
+use crate::windows::options::{ModelChoice, SCHEMES, Settings};
 
 /// Read a `Settings` from a parsed bgb.ini; any key absent or unparseable takes
 /// its `Settings::default()` value.
@@ -32,8 +31,17 @@ pub fn from_ini(f: &Ini) -> Settings {
         .unwrap_or(d.scheme);
 
     Settings {
-        model: d.model, // SystemMode enum not decoded — not persisted (see module doc).
-        stretch: boolean("StretchAuto", d.stretch),
+        // bgb SystemMode radio index (options-system.png): 0=Gameboy(DMG),
+        // 1=Gameboy Color(CGB), 3=automatic prefer GBC; 2 + 4..7 are SGB/auto
+        // variants slopgb doesn't distinguish, so they collapse to Auto.
+        model: match f.get("SystemMode") {
+            Some("0") => ModelChoice::Dmg,
+            Some("1") => ModelChoice::Cgb,
+            _ => ModelChoice::Auto,
+        },
+        // slopgb's fullscreen-stretch has no bgb equivalent (bgb's `stretch` is a
+        // video-scaling dropdown, not a mode), so it's a `Slopgb` extra.
+        stretch: boolean("SlopgbStretch", d.stretch),
         volume: (int("Volume", 100) as f32 / 100.0).clamp(0.0, 1.0),
         mono: boolean("SoundMono", d.mono),
         lowercase_disasm: boolean("DebugLowercase", d.lowercase_disasm),
@@ -66,7 +74,14 @@ pub fn from_ini(f: &Ini) -> Settings {
 /// `Slopgb*` extras (bgb ignores unknown keys), preserving every other line.
 /// `model`/`SystemMode` is left untouched (see module doc).
 pub fn to_ini(s: &Settings, f: &mut Ini) {
-    f.set("StretchAuto", ini::fmt_bool(s.stretch));
+    f.set(
+        "SystemMode",
+        match s.model {
+            ModelChoice::Dmg => "0",
+            ModelChoice::Cgb => "1",
+            ModelChoice::Auto => "3",
+        },
+    );
     f.set("Volume", &((s.volume * 100.0).round() as i64).to_string());
     f.set("SoundMono", ini::fmt_bool(s.mono));
     f.set("DebugLowercase", ini::fmt_bool(s.lowercase_disasm));
@@ -89,6 +104,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         f.set(key, &ini::fmt_color_hex(s.dmg_palette[i]));
     }
     // slopgb-only fields — no bgb key, stored under a `Slopgb` prefix bgb ignores.
+    f.set("SlopgbStretch", ini::fmt_bool(s.stretch));
     f.set("SlopgbTileHex8bit", ini::fmt_bool(s.tile_hex_8bit));
     f.set("SlopgbMemoryWindow", ini::fmt_bool(s.memory_window));
     f.set("SlopgbShowFramerate", ini::fmt_bool(s.show_framerate));

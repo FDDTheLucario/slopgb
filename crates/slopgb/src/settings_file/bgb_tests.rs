@@ -1,13 +1,15 @@
 use super::*;
+use crate::windows::options::ModelChoice;
 
 const REAL: &str = include_str!("../../../../docs/bgb-reference/bgb.ini");
 
 #[test]
 fn settings_round_trip_through_bgb_ini() {
-    // Non-default across every value type; model stays Auto (not persisted) and
-    // dmg_palette unchanged (so scheme stays matched) — everything else must
-    // survive to_ini -> from_ini exactly.
+    // Non-default across every value type; dmg_palette unchanged (so scheme
+    // stays matched) — everything (incl. model) survives to_ini -> from_ini.
     let s = Settings {
+        model: ModelChoice::Cgb,
+        stretch: true,
         mono: true,
         volume: 0.5,
         lowercase_hex: true,
@@ -61,4 +63,21 @@ fn from_real_ini_reads_known_values() {
     assert!(!s.mono, "SoundMono=0");
     assert!(s.esc_shows_debugger, "DebugEsc=1");
     assert_eq!(s.dmg_palette[0], 0x00E8_FCCC, "Color0=CCFCE8 (BGR) -> E8FCCC");
+    assert_eq!(s.model, ModelChoice::Auto, "SystemMode=3 -> automatic prefer GBC");
+}
+
+#[test]
+fn model_maps_to_bgb_system_mode() {
+    let sysmode = |m| {
+        let mut f = Ini::parse("");
+        to_ini(&Settings { model: m, ..Settings::default() }, &mut f);
+        f.get("SystemMode").unwrap().to_string()
+    };
+    assert_eq!(sysmode(ModelChoice::Dmg), "0", "Gameboy");
+    assert_eq!(sysmode(ModelChoice::Cgb), "1", "Gameboy Color");
+    assert_eq!(sysmode(ModelChoice::Auto), "3", "automatic prefer GBC");
+    // SGB/auto variants collapse to Auto on read.
+    for v in ["2", "4", "5", "6", "7"] {
+        assert_eq!(from_ini(&Ini::parse(&format!("SystemMode={v}\r\n"))).model, ModelChoice::Auto);
+    }
 }

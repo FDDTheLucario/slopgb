@@ -9,6 +9,18 @@ use std::path::{Path, PathBuf};
 
 use crate::windows::options::Settings;
 
+/// bgb keeps up to 10 recent ROMs as `Recent0..9`.
+const RECENT_MAX: usize = 10;
+
+/// Everything loaded from the settings file: the `Settings` plus App-level state
+/// slopgb has an equivalent for (the recent-ROM list). bgb's window-geometry /
+/// open-on-start keys have no slopgb equivalent, so they're preserved verbatim
+/// but not surfaced here.
+pub struct Loaded {
+    pub settings: Settings,
+    pub recent: Vec<PathBuf>,
+}
+
 /// The config directory: `$XDG_CONFIG_HOME/slopgb`, else `%APPDATA%\slopgb` on
 /// Windows, else `~/.config/slopgb`. `None` if no home is discoverable.
 fn config_dir() -> Option<PathBuf> {
@@ -35,35 +47,45 @@ fn bgb_ini_path() -> Option<PathBuf> {
     config_dir().map(|d| d.join("bgb.ini"))
 }
 
-/// Load persisted settings (defaults when no file / unreadable / no config dir).
+/// Load persisted settings + recent ROMs (defaults/empty when no file /
+/// unreadable / no config dir).
 #[must_use]
-pub fn load() -> Settings {
-    bgb_ini_path().map_or_else(Settings::default, |p| load_from(&p))
+pub fn load() -> Loaded {
+    bgb_ini_path().map_or_else(
+        || Loaded { settings: Settings::default(), recent: Vec::new() },
+        |p| load_from(&p),
+    )
 }
 
-/// Persist `settings`, preserving any unknown keys already in the file. No-op if
-/// no config dir is discoverable; a write failure is logged, not fatal.
-pub fn save(settings: &Settings) {
+/// Persist `settings` + `recent`, preserving any unknown keys already in the
+/// file. No-op if no config dir is discoverable; a write failure is logged.
+pub fn save(settings: &Settings, recent: &[PathBuf]) {
     if let Some(path) = bgb_ini_path() {
-        save_to(&path, settings);
+        save_to(&path, settings, recent);
     }
 }
 
-/// Read `Settings` from the bgb.ini at `path`; defaults if absent/unreadable.
-fn load_from(path: &Path) -> Settings {
-    match std::fs::read_to_string(path) {
-        Ok(text) => bgb::from_ini(&ini::Ini::parse(&text)),
-        Err(_) => Settings::default(),
-    }
+fn load_from(path: &Path) -> Loaded {
+    let ini = std::fs::read_to_string(path).map_or_else(|_| ini::Ini::parse(""), |t| ini::Ini::parse(&t));
+    let recent = (0..RECENT_MAX)
+        .filter_map(|i| ini.get(&format!("Recent{i}")).filter(|v| !v.is_empty()))
+        .map(bgb_path_to_posix)
+        .collect();
+    Loaded { settings: bgb::from_ini(&ini), recent }
 }
 
-/// Write `settings` to the bgb.ini at `path`, merging over the existing file
-/// (unknown keys preserved) and writing atomically (temp file + rename).
-fn save_to(path: &Path, settings: &Settings) {
+/// Write to the bgb.ini at `path`, merging over the existing file (unknown keys
+/// preserved) and writing atomically (temp file + rename).
+fn save_to(path: &Path, settings: &Settings, recent: &[PathBuf]) {
     // Merge over the current file so bgb's unmodelled keys survive; start blank
     // if there's no file yet.
     let mut doc = std::fs::read_to_string(path).map_or_else(|_| ini::Ini::parse(""), |t| ini::Ini::parse(&t));
     bgb::to_ini(settings, &mut doc);
+    // Recent0..9: filled slots as wine paths, the rest blank (bgb's shape).
+    for i in 0..RECENT_MAX {
+        let val = recent.get(i).map(|p| posix_to_bgb_path(p)).unwrap_or_default();
+        doc.set(&format!("Recent{i}"), &val);
+    }
     let text = doc.serialize();
 
     if let Some(dir) = path.parent() {
@@ -80,6 +102,26 @@ fn save_to(path: &Path, settings: &Settings) {
     if let Err(e) = std::fs::rename(&tmp, path) {
         eprintln!("slopgb: settings rename failed: {e}");
     }
+}
+
+/// A bgb/wine recent-ROM path (`Z:\home\x`) → a POSIX path (wine maps `Z:` to
+/// `/`); a drive-less value passes through with `\` normalized to `/`.
+fn bgb_path_to_posix(v: &str) -> PathBuf {
+    let body = v
+        .strip_prefix(|c: char| c.is_ascii_alphabetic())
+        .and_then(|r| r.strip_prefix(':'))
+        .unwrap_or(v);
+    PathBuf::from(body.replace('\\', "/"))
+}
+
+/// A POSIX path → a wine `Z:\` path bgb understands (its own recents round-trip;
+/// a real wine bgb can still open them). Relative paths are best-effort.
+fn posix_to_bgb_path(p: &Path) -> String {
+    let s = p.to_string_lossy();
+    s.strip_prefix('/').map_or_else(
+        || s.replace('/', "\\"),
+        |rest| format!("Z:\\{}", rest.replace('/', "\\")),
+    )
 }
 
 #[cfg(test)]

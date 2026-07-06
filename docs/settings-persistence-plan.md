@@ -54,13 +54,17 @@ say so — this is the reversible call.
 
 ## Phase 1 — bgb.ini compatibility
 
-**STATUS (2026-07-06):** tasks 1a (fixture+map), 2 (ini model), 3 (typed codecs
-minus the deferred dec-COLORREF/get_all), 4 (Settings↔ini mapping), 5 (path +
-load/save + atomic write), 6 (App wiring: seed from `load()`, save on Apply +
-Quit) — **SHIPPED** in `crates/slopgb/src/settings_file/`. Config path:
-`$XDG_CONFIG_HOME/slopgb/bgb.ini` (else `~/.config/slopgb/bgb.ini`). Remaining:
-task 7 (window/recent interop) + the residual 1a diffs (`SystemMode` enum,
-`stretch`) + `model`/`scheme` persistence (deferred with `SystemMode`).
+**STATUS (2026-07-06): PHASE 1 COMPLETE.** All tasks shipped in
+`crates/slopgb/src/settings_file/`. Config path: `$XDG_CONFIG_HOME/slopgb/bgb.ini`
+(else `~/.config/slopgb/bgb.ini`). Residual 1a resolved from the captured
+`options-system.png`: `SystemMode` is the System-tab radio index
+(0=Gameboy, 1=Gameboy Color, 3=automatic-prefer-GBC), so `model` persists
+(Auto↔3, Dmg↔0, Cgb↔1; SGB/auto variants 2,4–7 collapse to Auto). `stretch` has
+no bgb equivalent (bgb's is a video-scaling dropdown) → stored as `SlopgbStretch`.
+`scheme` follows `dmg_palette` (persisted via `Color0..3`). Task 7: recent ROMs
+persist via `Recent0..9` with wine `Z:\`↔POSIX translation; bgb's
+window-geometry / open-on-start keys have **no slopgb equivalent** so they're
+preserved verbatim but not acted on (the plan's "preserve where we don't map").
 
 ```xml
 <plan goal="Read + write bgb.ini as the settings store, byte-preserving unknown keys, so config interops with real bgb">
@@ -257,7 +261,7 @@ setting bgb persists. Re-run the 1a per-toggle diff loop only to pin the few
 
 | our `Settings` field | bgb key | encoding / note |
 |---|---|---|
-| `model` | `SystemMode=3` (+ `SystemModeAutoReset`, `StartAsDmgStyle`) | **enum — decode values via 1a diff** (toggle each system) |
+| `model` | `SystemMode` | radio index (`options-system.png`): 0=Gameboy, 1=Gameboy Color, 3=auto-prefer-GBC. Auto↔3, Dmg↔0, Cgb↔1; 2,4–7 (SGB/auto) → Auto |
 | `volume` (0.0–1.0) | `Volume=90` | 0–100 int; scale by /100 |
 | `mono` | `SoundMono` | 0/1 |
 | `lowercase_disasm` | `DebugLowercase` | 0/1 |
@@ -275,20 +279,20 @@ setting bgb persists. Re-run the 1a per-toggle diff loop only to pin the few
 | `bootroms_enabled` | `BootromEnabled` | 0/1 |
 | `bootrom_dmg` / `_gbc` / `_sgb` | `DmgBootRom` / `CgbBootRom` / `SgbBootRom` | path strings |
 | `dmg_palette[0..4]` | `Color0..3` | BGR hex, reverse to our XRGB |
-| `scheme` | `CurrentColorScheme` (name) + the `ColorScheme=` list | match by scheme NAME, not index (bgb stores name) |
-| `stretch` | `StretchAuto` / `FullscreenMode` / `Windowmode` | **ambiguous — pin via 1a** |
-| window geometry | `WinX` / `WinY` (+ `DebugWinX/Y`, `VramWinX/Y`, `IomapWinX/Y`) | ints; slopgb App state, not `Settings` |
-| tool windows open | `DebugWinShowOnStart` / `VramWinShowOnStart` / `IomapWinShowOnStart` | 0/1 |
-| recent ROMs | `Recent0..9` | wine paths — needs Z:\ ↔ POSIX translation |
+| `scheme` | — | follows `dmg_palette` (persisted via `Color0..3`); matched to `SCHEMES` on load |
+| recent ROMs | `Recent0..9` | **done** — wine `Z:\` ↔ POSIX translation (`bgb_path_to_posix`/`posix_to_bgb_path`) |
+| window geometry | `WinX/Y`, `DebugWinX/Y`, … | **no slopgb equivalent** — preserved verbatim, not acted on |
+| tool windows open | `DebugWinShowOnStart` / `VramWinShowOnStart` / `IomapWinShowOnStart` | **no slopgb equivalent** — preserved verbatim |
 | debugger theme | `DebugBgColor` / `DebugTextColor` / `DebugBrkColor` / `DebugCurrentColor` / `DebugHilightColor` / `DebugFreezeColor` / `DebugHiddenColor` / `DebugHLTextColor` | decimal COLORREF (BGR) → our `Theme` |
 
-### slopgb-only fields (NO bgb key → store under a `Slopgb` prefix bgb ignores)
+### slopgb-only fields (NO bgb key → stored under a `Slopgb` prefix bgb ignores)
 
-`tile_hex_8bit`, `memory_window` (bgb's memory pane is integrated), `show_framerate`,
-`break_ld_b_b` (bgb *uses* `ld b,b` as its own breakpoint op — no toggle),
-`break_echo_ram` (no bgb equivalent). **Finding:** slopgb's exception-break model
-(`break_ld_b_b`/`break_echo_ram`) diverges from bgb's fixed break set, so those
-don't round-trip through a native bgb key — confirm no closer key exists in 1a.
+`stretch` (bgb's `stretch` is a video-scaling dropdown, not our fullscreen-stretch
+mode), `tile_hex_8bit`, `memory_window` (bgb's memory pane is integrated),
+`show_framerate`, `break_ld_b_b` (bgb *uses* `ld b,b` as its own breakpoint op —
+no toggle), `break_echo_ram` (no bgb equivalent). Stored as `SlopgbStretch`,
+`SlopgbTileHex8bit`, `SlopgbMemoryWindow`, `SlopgbShowFramerate`,
+`SlopgbBreakLdBB`, `SlopgbBreakEchoRam`.
 
 ### Round-trip-only bulk (~250 keys we don't model)
 

@@ -248,6 +248,8 @@ impl App {
             return;
         }
         push_recent_into(&mut self.recent, path);
+        // Persist immediately so the list survives a crash (bgb saves on exit).
+        crate::settings_file::save(&self.settings, &self.recent);
     }
 }
 

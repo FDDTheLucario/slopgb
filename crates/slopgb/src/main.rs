@@ -285,11 +285,16 @@ impl App {
         // reused for every ROM load), NOT the resolved session model — so it
         // can't desync when a later ROM auto-detects to a different system, and
         // Apply with the default (Auto) never force-switches the running game.
-        // Persisted settings (bgb.ini) seed everything; the CLI `--model`
-        // override still wins for the session (it isn't persisted).
+        // Persisted settings (bgb.ini) seed everything. Precedence for the model:
+        // an explicit CLI `--model` wins the session, else the persisted choice.
+        let loaded = settings_file::load();
+        let recent = loaded.recent;
         let settings = windows::options::Settings {
-            model: windows::options::ModelChoice::from_option(opts.model),
-            ..settings_file::load()
+            model: match opts.model {
+                Some(m) => windows::options::ModelChoice::from_option(Some(m)),
+                None => loaded.settings.model,
+            },
+            ..loaded.settings
         };
         let blank_frame = blank_frame(settings.dmg_palette[0]);
         let mut app = Self {
@@ -332,7 +337,7 @@ impl App {
             fallback_picker: None,
             fallback_last_click: None,
             link: link::Link::new(),
-            recent: Vec::new(),
+            recent,
             menu_popup: None,
             window_size,
             game_cursor: (0, 0),

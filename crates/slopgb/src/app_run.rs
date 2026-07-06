@@ -60,7 +60,7 @@ impl App {
                 self.resync_pacing();
             }
             Action::Quit => {
-                crate::settings_file::save(&self.settings);
+                crate::settings_file::save(&self.settings, &self.recent);
                 event_loop.exit();
             }
             Action::ToggleTool(kind) => {

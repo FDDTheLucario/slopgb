@@ -102,10 +102,13 @@ every key we don't map (bgb's ~250 audio/RTC/link/etc. keys survive verbatim —
 the real bgb.ini round-trips byte-identically). Codecs: 0/1 bools, decimal
 ints, `Color0..3` BGR-hex palette. slopgb-only fields (`tile_hex_8bit`,
 `memory_window`, break_ld_b_b/echo, show_framerate) are stored under a `Slopgb`
-prefix bgb ignores. **Not yet persisted:** `model` (bgb `SystemMode` enum not
-decoded — bgb's value left untouched) and window/recent state. Plan +
-key map: [`../settings-persistence-plan.md`](../settings-persistence-plan.md).
-Phase 2 (a modern native format) is planned there.
+prefix bgb ignores. `model` maps to bgb `SystemMode` (System-tab radio index:
+Auto↔3, Dmg↔0, Cgb↔1); an explicit CLI `--model` still wins the session.
+**Recent ROMs** persist via `Recent0..9` (wine `Z:\`↔POSIX path translation),
+saved on ROM load + Quit. bgb's window-geometry / open-on-start keys have no
+slopgb equivalent — preserved verbatim, not acted on. Phase 1 complete; phase 2
+(a modern native format) is planned. Plan + full key map:
+[`../settings-persistence-plan.md`](../settings-persistence-plan.md).
 
 ## Inert
 
