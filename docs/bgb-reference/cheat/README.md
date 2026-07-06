@@ -42,8 +42,14 @@ slopgb).
   default-off, golden-safe core hook pushed via `GameBoy::set_gg_patches`.
 - **Two-field Add/Edit** (Comment / Code) like bgb; Tab switches fields.
 - **Advanced** toggle shows the decoded `(addr)=val` column.
-- **Load / Save** read/write a cheat file (`+ code comment` per line, `-` =
-  disabled) via the shared path modal.
+- **Load / Save** read/write bgb's `.cht` file for interop: a `cheat = NN`
+  count header, then one line per cheat `<code> <flag><name>` where `flag` is
+  `1` (enabled) / `0` (disabled) immediately followed by the description, e.g.
+  `01FF0AC1 1infinite lives` (matches bgb's `910730D2 1Fight Shiny Pokemon`).
+  Format from bgb's manual + documented `.cht` examples — bgb's dialog buttons
+  couldn't be driven under headless wine (no WM → synthetic button clicks fail),
+  so the byte format is from docs, not a byte-verified capture. Sources:
+  [bgb manual](https://bgb.bircd.org/manual.html), gbatemp `.cht` threads.
 - Buttons: Add / Edit / Delete / Enable / Disable / Enable all / Disable all /
   Poke / Load / Save / Advanced / Close.
 

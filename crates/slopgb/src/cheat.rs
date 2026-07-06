@@ -165,32 +165,40 @@ impl CheatList {
             .collect()
     }
 
-    /// Serialize the list to a cheat file (bgb's Save): one cheat per line
-    /// `<+|-> code comment` (`+` enabled, `-` disabled), `#` comments ignored.
+    /// Serialize to bgb's `.cht` format (bgb's Save, for interop): a
+    /// `cheat = NN` count header (CRLF), then one line per cheat
+    /// `<code> <flag><name>` where `flag` is `1` (enabled) / `0` (disabled)
+    /// immediately followed by the description — e.g. `01FF0AC1 1infinite lives`.
+    /// Format from bgb's manual + documented `.cht` examples (see cheat/README).
     #[must_use]
     pub fn to_file_text(&self) -> String {
-        let mut s = String::from("# slopgb cheats\n");
+        let mut s = format!("cheat = {:02}\r\n", self.items.len());
         for c in &self.items {
-            let flag = if c.enabled { '+' } else { '-' };
-            s.push_str(&format!("{flag} {} {}\n", c.code, c.comment));
+            let flag = if c.enabled { '1' } else { '0' };
+            s.push_str(&format!("{} {flag}{}\r\n", c.code, c.comment));
         }
         s
     }
 
-    /// Append cheats parsed from a cheat file (bgb's Load). Blank / `#` lines are
-    /// skipped; a leading `-` marks a disabled cheat.
+    /// Append cheats parsed from a bgb `.cht` file (bgb's Load). The
+    /// `cheat = NN` header + blank lines are skipped; each cheat line is
+    /// `<code> <flag><name>` (`flag` `1`/`0`; if the char after the space isn't a
+    /// flag digit, the whole remainder is taken as the name — tolerant).
     pub fn load_file_text(&mut self, text: &str) {
         for line in text.lines() {
             let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
+            if line.is_empty() || line.starts_with("cheat") {
                 continue;
             }
-            let enabled = !line.starts_with('-');
-            let rest = line.trim_start_matches(['+', '-']).trim();
-            let (code, comment) = rest.split_once(' ').unwrap_or((rest, ""));
+            let Some((code, rest)) = line.split_once(' ') else {
+                continue;
+            };
+            let flag = rest.chars().next();
+            let enabled = flag != Some('0');
+            let name = if matches!(flag, Some('0' | '1')) { &rest[1..] } else { rest };
             if !code.is_empty() {
                 self.items.push(Cheat {
-                    comment: comment.trim().to_string(),
+                    comment: name.trim().to_string(),
                     code: code.to_string(),
                     enabled,
                 });
