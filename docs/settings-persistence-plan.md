@@ -172,9 +172,11 @@ migrations. `settings_file::load()` precedence: native file wins → else migrat
 phase-1 `bgb.ini` into the native store (once) → else defaults; `save()` writes
 native. bgb.ini demoted to **Import/Export** (game menu → Other → "Import/Export
 bgb.ini...", via `import_bgb`/`export_bgb`). Native parse is tolerant (never
-hard-fails), so the planned `.bak` recovery is moot. Remaining: task 6 Options
-polish (settings-file path display / "Reset all to defaults" / "Open config
-folder") — cosmetic.
+hard-fails), so the planned `.bak` recovery is moot. Task 6: the config-file
+path is shown in the System-info box (`config_file_display`); "Reset all to
+defaults" is skipped (the per-tab Defaults button already covers it) and "Open
+config folder" is skipped (platform process-spawn, low value over showing the
+path). **PHASE 2 COMPLETE.**
 
 ```xml
 <plan goal="A versioned sectioned std-only settings format as the default store; bgb.ini demoted to import/export">

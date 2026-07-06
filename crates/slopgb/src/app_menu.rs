@@ -332,6 +332,7 @@ impl App {
                 format!("model: {:?}", self.session.model),
                 format!("clock: {} Hz", CLOCK_HZ),
                 format!("double speed: {}", self.session.gb.double_speed()),
+                format!("config: {}", crate::settings_file::config_file_display()),
             ],
         )
     }

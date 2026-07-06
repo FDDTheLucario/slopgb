@@ -48,6 +48,12 @@ fn native_path() -> Option<PathBuf> {
     config_dir().map(|d| d.join("slopgb.conf"))
 }
 
+/// The native settings-file path as a string, for display (System info box).
+#[must_use]
+pub fn config_file_display() -> String {
+    native_path().map_or_else(|| "(no config dir)".to_string(), |p| p.display().to_string())
+}
+
 /// Path to the bgb-format settings file (import/export interop).
 fn bgb_ini_path() -> Option<PathBuf> {
     config_dir().map(|d| d.join("bgb.ini"))
