@@ -105,7 +105,23 @@ Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L =
 3,5,8,13,21,34. Model from filename suffix (see ARCHITECTURE.md §Mooneye). Timeout 120
 emulated s.
 
-## State (2026-07-04, #11bu — integration branch)
+## State (2026-07-07, #11bv — integration on `main`)
+
+- **#11bv — the census NO-GO is OVERTURNED; the C3 flip is a TRACTABLE
+  re-host, not a thrice-refuted wall.** `main` already contains the full port
+  (`integration` ⊂ main; nothing to merge). The #11bt "98 DMG SameBoy-pass
+  blockers, unfixable" verdict was founded entirely on the DEFERRED CPU clock
+  (`read_deferred` shifts dispatch+reads to cc+0 → the DMG dispatch/timer rows
+  break). **Measured (three-way gambatte-OCR two-bin OFF/ON/LE): the EAGER clock
+  recovers the entire DMG blocker set the deferred clock breaks — 86–87 rows
+  incl. ALL 45 tima.** The DMG blockers are production-CORRECT rows the deferred
+  clock self-inflicts. Fix: eager clock (dispatch cc+4, count-safe) + the CGB
+  read/render laws as cc+0 value peeks → flip = CGB +232 / DMG +0 (pure gain =
+  GO) vs tier2's −98 (NO-GO). EV v0 measured the read frame must be the LE
+  back-dated **80** (intr_2 passes LE-only), NOT the deferred artifact 84.
+  Remaining: re-host the ~232 CGB laws onto the LE/frame-80 base (multi-session,
+  tractable). Full map + plan:
+  `docs/sameboy-port/tools/measurements/eager-clock-foundation-2026-07-07.md`.
 
 - **Baseline (all-green, defaults NOT flipped):** mooneye 439/439 rom×model;
   gbtr v7.0 battery green vs ratcheted baselines (full run 237/0); core lib
