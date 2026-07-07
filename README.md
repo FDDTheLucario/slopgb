@@ -60,3 +60,51 @@ cargo run --release                      # no ROM → blank LCD; load via drag-d
 
 Optional boot ROM (Nintendo logo + chime): `--boot path/to/dmg_boot.bin` or the
 `SLOPGB_BOOT` env var (boot ROMs are copyrighted and never bundled).
+
+## Credits & references
+
+slopgb was built by studying — and validating against — the Game Boy
+reverse-engineering community's work. All trademarks and copyrights belong to
+their respective owners; none of the projects below are bundled here.
+
+**Reference implementations** (behaviour ported from or cross-checked against):
+
+- [**SameBoy**](https://github.com/LIJI32/SameBoy) (Lior Halphon, MIT) — the
+  core's cycle-exact timing is a port of SameBoy's sub-dot PPU / SM83 model
+  (`display.c`, `sm83_cpu.c`), and is the primary accuracy reference.
+- [**gambatte**](https://github.com/sinamas/gambatte) (Sindre Aamås, GPL-2.0) —
+  the reference for undocumented-corner timing and the source of the gambatte
+  hardware-test baselines.
+- [**mooneye-gb**](https://github.com/Gekkio/mooneye-gb) (Joonas Javanainen /
+  Gekkio, MIT) — reference emulator and test methodology.
+
+**Hardware documentation:**
+
+- [**Pan Docs**](https://gbdev.io/pandocs/) (gbdev) — the primary hardware
+  reference.
+- [**Game Boy: Complete Technical Reference**](https://github.com/Gekkio/gb-ctr)
+  (Gekkio) — CPU / MBC timing and micro-ops.
+
+**Debugger UI:**
+
+- [**bgb**](https://bgb.bircd.org/) (beware) — the debugger, VRAM / I/O viewers,
+  save states and right-click menus are a functional clone of bgb's UI,
+  reproduced from screenshots (not its code).
+
+**Test ROMs** (fetched by `test-roms/download.sh`, never redistributed here):
+
+- [**mooneye-test-suite**](https://github.com/Gekkio/mooneye-test-suite) (Gekkio).
+- [**game-boy-test-roms**](https://github.com/c-sp/game-boy-test-roms) (Christoph
+  Sprenger / c-sp) — the pinned v7.0 collection, bundling work by many authors:
+  blargg (Shay Green),
+  [gambatte](https://github.com/sinamas/gambatte),
+  [mealybug-tearoom-tests](https://github.com/mattcurrie/mealybug-tearoom-tests)
+  and the [acid2](https://github.com/mattcurrie/dmg-acid2) tests (Matt Currie),
+  [SameSuite](https://github.com/LIJI32/SameSuite) (Lior Halphon),
+  [AGE](https://github.com/c-sp/AGE) (Christoph Sprenger),
+  [gbmicrotest](https://github.com/aappleby/gbmicrotest) (Austin Appleby), and
+  [wilbertpol](https://github.com/wilbertpol/mooneye-gb)'s test additions.
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).
