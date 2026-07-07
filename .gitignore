@@ -1,4 +1,7 @@
-/target
+# Unanchored so nested per-crate build dirs are ignored too — CLAUDE.md's
+# `CARGO_TARGET_DIR=target/<name>` parallel-run guidance creates these.
+target/
+*.log
 /test-roms/mts-*
 /test-roms/game-boy-test-roms-v7.0/
 /test-roms/*.tar.xz

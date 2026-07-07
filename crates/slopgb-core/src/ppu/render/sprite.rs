@@ -307,8 +307,14 @@ impl Ppu {
             self.dmg_palette[usize::from((self.eff.bgp >> (bg_c * 2)) & 3)]
         };
 
+        // `get_mut` rather than `[idx]`: during normal rendering ly<144 and
+        // lx<160 so this is always in bounds, but a crafted save-state can put
+        // the machine mid-render at an impossible ly/lx — bound the sole
+        // framebuffer write so a hostile state is a dropped pixel, not a panic.
         let idx = usize::from(self.ly) * SCREEN_W + usize::from(self.render.lx);
-        self.back[idx] = color;
+        if let Some(slot) = self.back.get_mut(idx) {
+            *slot = color;
+        }
     }
 
     /// RGB555 palette RAM entry to XRGB8888: straight 5→8 bit expansion

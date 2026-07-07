@@ -41,13 +41,25 @@ pub fn rle_encode(data: &[u8]) -> Vec<u8> {
 
 /// Decode [`rle_encode`] output. A trailing partial triple (corrupt/truncated
 /// file) is ignored rather than panicking.
+///
+/// Output is capped at [`RLE_DECODE_CAP`]: each triple's count is an untrusted
+/// u16 (up to 65535, a ~21845× amplification), so a crafted `.cdl` could
+/// otherwise resize to tens of GB and abort the process. The largest real CDL
+/// layout is under 9 MiB; a decode that would exceed the cap stops, and the
+/// resulting wrong-length buffer is rejected by `load_cdl`'s exact-length gate.
 #[must_use]
 pub fn rle_decode(bytes: &[u8]) -> Vec<u8> {
+    // 16 MiB — safely above any real CDL layout (ROM + 16K VRAM + <=128K SRAM +
+    // 32K WRAM), so no legitimate file is ever truncated.
+    const RLE_DECODE_CAP: usize = 16 << 20;
     let mut out = Vec::new();
     let mut i = 0;
     while i + 3 <= bytes.len() {
         let v = bytes[i];
         let count = u16::from_le_bytes([bytes[i + 1], bytes[i + 2]]) as usize;
+        if out.len() + count > RLE_DECODE_CAP {
+            break;
+        }
         out.resize(out.len() + count, v);
         i += 3;
     }
@@ -88,6 +100,16 @@ mod tests {
         assert_eq!(rle_decode(&rle_encode(&dense)), dense);
 
         assert_eq!(rle_decode(&rle_encode(&[])), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn rle_decode_caps_hostile_output() {
+        // Each triple claims count=0xFFFF; ~100k of them would resize to ~6.5 GB
+        // without the cap. The decode must stay bounded (no OOM) and short
+        // enough that load_cdl's exact-length gate then rejects it.
+        let hostile = [0u8, 0xFF, 0xFF].repeat(100_000);
+        let out = rle_decode(&hostile);
+        assert!(out.len() <= 16 << 20, "decode capped, not {} bytes", out.len());
     }
 
     #[test]

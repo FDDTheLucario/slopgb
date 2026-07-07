@@ -287,7 +287,10 @@ impl Ppu {
         self.obp1 = r.u8()?;
         self.wy = r.u8()?;
         self.wx = r.u8()?;
-        self.vbk = r.u8()?;
+        // Mask to the FF4F-write invariant (bit 0 only): a crafted state must
+        // not smuggle vbk >= 2, which would index past the 2-bank VRAM array
+        // (`vram_index`). Legit saves only ever hold 0/1, so this is a no-op.
+        self.vbk = r.u8()? & 1;
         self.opri = r.u8()?;
         self.dmg_compat = r.bool()?;
         self.bcps = r.u8()?;
