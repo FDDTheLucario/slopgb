@@ -14,10 +14,11 @@ test ROMs are fetched separately by `test-roms/download.sh`.
 ### SameBoy
 
 The emulator core's cycle-exact timing (the sub-dot PPU / SM83 model) is a Rust
-port of SameBoy's implementation. SameBoy is distributed under the MIT License,
-which requires its copyright and permission notice to be reproduced:
+port of SameBoy's Core implementation (`Core/display.c`, `Core/sm83_cpu.c`).
+SameBoy's Core is distributed under the Expat License (the MIT license), which
+requires its copyright and permission notice to be reproduced:
 
-> Copyright (c) 2015-2025 Lior Halphon
+> Copyright (c) 2015-2026 Lior Halphon
 >
 > Permission is hereby granted, free of charge, to any person obtaining a copy
 > of this software and associated documentation files (the "Software"), to deal
@@ -37,9 +38,9 @@ which requires its copyright and permission notice to be reproduced:
 > OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 > SOFTWARE.
 
-Upstream: <https://github.com/LIJI32/SameBoy> — MIT.
-*(Confirm the exact copyright year range against SameBoy's upstream `LICENSE`
-before a release; the notice above uses SameBoy's stated holder.)*
+Upstream: <https://github.com/LIJI32/SameBoy> — Expat/MIT. (SameBoy's `iOS/`
+and `HexFiend/` directories carry additional terms; slopgb ports only Core
+files, which are under the Expat grant above.)
 
 ---
 
