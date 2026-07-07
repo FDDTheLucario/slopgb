@@ -42,7 +42,7 @@ pub fn rle_encode(data: &[u8]) -> Vec<u8> {
 /// Decode [`rle_encode`] output. A trailing partial triple (corrupt/truncated
 /// file) is ignored rather than panicking.
 ///
-/// Output is capped at [`RLE_DECODE_CAP`]: each triple's count is an untrusted
+/// Output is capped at `RLE_DECODE_CAP`: each triple's count is an untrusted
 /// u16 (up to 65535, a ~21845× amplification), so a crafted `.cdl` could
 /// otherwise resize to tens of GB and abort the process. The largest real CDL
 /// layout is under 9 MiB; a decode that would exceed the cap stops, and the

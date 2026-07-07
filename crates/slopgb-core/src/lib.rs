@@ -37,10 +37,14 @@ pub use joypad::Button;
 pub use model::Model;
 pub use state::StateError;
 
+// A Game Genie ROM patch — the element type of the public
+// [`GameBoy::set_gg_patches`], built by the frontend cheat engine.
+pub use cartridge::GgPatch;
+
 // Escape hatch for the crate's integration tests, which drive the CPU and
 // interconnect directly (OAM DMA freeze/timing tests). Not public API.
 #[doc(hidden)]
-pub use cartridge::{Cartridge, GgPatch};
+pub use cartridge::Cartridge;
 #[doc(hidden)]
 pub use cpu::{Bus, Cpu};
 #[doc(hidden)]

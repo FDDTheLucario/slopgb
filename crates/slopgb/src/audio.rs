@@ -45,7 +45,6 @@ fn pack(l: f32, r: f32) -> u64 {
 
 #[inline]
 fn unpack(v: u64) -> (f32, f32) {
-    #[allow(clippy::cast_possible_truncation)]
     (f32::from_bits((v >> 32) as u32), f32::from_bits(v as u32))
 }
 
@@ -373,7 +372,6 @@ impl Resampler {
         let step = f64::from(self.src_rate) / f64::from(self.dst_rate);
         for &cur in input {
             while self.pos < 1.0 {
-                #[allow(clippy::cast_possible_truncation)]
                 let t = self.pos as f32;
                 out.push((
                     self.prev.0 + (cur.0 - self.prev.0) * t,

@@ -34,8 +34,6 @@ pub fn checkbox(c: &mut Canvas, x: i32, y: i32, checked: bool, label: &str, them
 /// Bordered button with a centred `label`; `pressed` swaps fill/text. Returns
 /// `rect` (the hit area). Kept tested and ready for the modal dialog's OK/Cancel
 /// (M5b) and the I/O map's Refresh button.
-// TODO(M5b): drop the allow once the modal dialog consumes this.
-#[allow(dead_code)]
 pub fn button(c: &mut Canvas, rect: Rect, label: &str, pressed: bool, theme: &Theme) -> Rect {
     let (fill, fg) = if pressed {
         (theme.text, theme.bg)
