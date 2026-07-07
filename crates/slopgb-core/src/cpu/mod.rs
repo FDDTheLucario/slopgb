@@ -185,7 +185,7 @@ pub trait Bus {
     fn dispatch_retime(&mut self) {}
     /// Instruction boundary: drain the deferred-commit clock's parked debt
     /// (SameBoy `flush_pending_cycles`, `sm83_cpu.c:336`). Called exactly
-    /// once per [`super::step`] invocation, after the instruction (or idle /
+    /// once per [`Cpu::step`] invocation, after the instruction (or idle /
     /// dispatch step) completes, so the next instruction begins at a clean
     /// cc+0. Takes no time. Currently inert — the clock it drains is
     /// write-only scaffold that nothing samples yet; it becomes load-bearing

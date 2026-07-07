@@ -1,6 +1,6 @@
 //! Pure picker logic — **no filesystem access**. Everything here derives from
 //! `self.entries` + view state, so it is unit-testable via
-//! [`Picker::with_entries`]. The one exception is [`Picker::navigate_to`], which
+//! [`Picker::with_entries`]. The one exception is `Picker::navigate_to`, which
 //! reads a new directory through [`crate::source`]; it is exercised by the
 //! integration test against a temp dir, not the pure unit tests.
 
@@ -125,7 +125,7 @@ impl Picker {
     }
 
     /// Empty the type-ahead buffer without moving the selection. Every nav key
-    /// already does this internally (see [`Self::typeahead`]'s doc). This is
+    /// already does this internally (see `Self::typeahead`'s doc). This is
     /// an opt-in hook: a host MAY call it after its own idle timeout to start
     /// a fresh search on the next keystroke (this crate is std-only with no
     /// clock, so it never times a buffer out itself). Nothing in this crate

@@ -169,7 +169,7 @@ impl FallbackPicker {
 /// Translate a winit key into the picker's semantic [`Key`], mirroring
 /// `main::dialog_key_from` (the typed-modal translator this picker sits
 /// alongside). `text` is the winit `KeyEvent::text` (a printable char, if
-/// any); `mods` gates the Ctrl+<letter> hotkeys (path bar / sort / hidden /
+/// any); `mods` gates the `Ctrl+<letter>` hotkeys (path bar / sort / hidden /
 /// all-files — see the bottom-of-panel hint drawn in [`FallbackPicker::render`]).
 #[must_use]
 pub(crate) fn winit_key_to_picker(code: KeyCode, text: Option<&str>, mods: ModifiersState) -> Option<Key> {
