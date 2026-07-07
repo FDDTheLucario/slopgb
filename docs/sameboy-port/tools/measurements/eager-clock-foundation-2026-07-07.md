@@ -68,6 +68,50 @@ leading edge — the SAME position the deferred read samples). Dispatch stays cc
 byte-identical OFF. The 134 LE-breaks are the CGB-style rows the correct peeks
 fix; the 86 recoveries are kept because dispatch stays eager.
 
+## EV v0 measured — the read frame must be 80 (LE), NOT 84 (tier2)
+
+Built `set_eager_value` = the eager clock + the FULL ppu tier2 laws (frame 84 +
+accessibility/render), a cc+0 FF41 peek, dispatch cc+4 (`SLOPGB_PROBE_EV` /
+`SLOPGB_MOONEYE_EAGER`). Measured:
+
+- **DMG recovers 87 (incl. all 45 tima)** — the eager clock foundation confirmed
+  a third time.
+- **CGB 608 fail (WORSE than LE 578)** — the tier2 accessibility/render/window/
+  speedchange laws are calibrated to the DEFERRED machine position + write-commit;
+  on the eager clock they misfire (breaks by family: window 67, speedchange 31,
+  sprites 29, halt 28, lcd_offset, m2int_m3stat).
+- **mooneye EV 90/91 — `intr_2_mode0/mode3_timing` HANG (B=42, all models).**
+  DECISIVE: the tier2 read frame (mode3_entry **84**, un-back-dated) makes the
+  cc+0 FF41 read 4 dots off the cc+4 dispatch → incoherent → `intr_2` detects it.
+  This is the refutations' incoherence, mirror-imaged (they broke COUNTS with
+  cc+4-dispatch ∧ cc+0-reads; EV breaks intr_2 with the same split at frame 84).
+- golden_fingerprint PASS (production byte-identical — scaffold is golden-safe).
+
+**The frame law (the key correction):** on the EAGER clock (dispatch cc+4), the
+read frame must be the LE **back-dated 80** frame (`mode3_entry_dot`
+`leading_edge && !tier2` branch — "observationally neutral", `intr_2` passes
+LE-only, stat_irq.rs:73-92), NOT the deferred-clock **84**. The 84 is a
+DEFERRED-clock accounting artifact (the read pays the previous M-cycle's debt).
+SameBoy's FF41 read genuinely sits 4 dots before the following dispatch (different
+M-cycle positions) = exactly the LE back-date. So:
+
+**Refined architecture — the correct foundation is LE (frame 80), and the port =
+add the tier2 accessibility/render/window laws to the LE base, re-calibrated to
+the frame-80 (eager) frame.** NOT a new flag on top of tier2. The tier2 laws are
+the REFERENCE for WHAT to compute, but their frame constants (84, deferred
+write-commit) must be re-derived to the LE frame. This is the multi-session
+re-host; EV v0 (frame 84) is REVERTED (the wrong base). LE already carries the
+frame-80 read laws it has (mode3_entry 80, glitch 74); it LACKS the
+accessibility/render/window laws — that gap (the 134 DMG / ~290 CGB LE-breaks) is
+the port surface. Each family lands as an `leading_edge_reads && !tier2_reclock`
+law arm (the existing LE fork), measured on the LE two-bin, dispatch never moving.
+
+**Why this converges where the deferred clock could not:** the DMG dispatch/timer
+rows are production-correct on the eager clock (nothing to fix — just don't break
+them); the CGB fixes port onto the eager/80 frame; dispatch never leaves cc+4 so
+intr_2 + the counts + mooneye hold. The flip becomes CGB +232 / DMG +0 (a pure
+gain) instead of tier2's CGB +232 / DMG −98 (net loss) → GO instead of NO-GO.
+
 ## Reproduction
 
 `BIN=target/probe/release/deps/gbtr-*`; `SLOPGB_ROWLIST=<abs>/scratchpad/
