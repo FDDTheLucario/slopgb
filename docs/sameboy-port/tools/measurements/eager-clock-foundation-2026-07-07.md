@@ -112,6 +112,53 @@ them); the CGB fixes port onto the eager/80 frame; dispatch never leaves cc+4 so
 intr_2 + the counts + mooneye hold. The flip becomes CGB +232 / DMG +0 (a pure
 gain) instead of tier2's CGB +232 / DMG −98 (net loss) → GO instead of NO-GO.
 
+## The 80-vs-84 conflict → the true architecture is EAGER CLOCK + HALF-DOT READ
+
+Attempting the re-host surfaced the deep constraint. On the eager clock the FF41
+read-frame faces a genuine conflict:
+- **intr_2 (mooneye) wants frame 80** — the production-coherent back-date; the
+  cc+0 read must reproduce the cc+4 dispatch's mode detection (EV frame 84 hung
+  intr_2_mode0/mode3, B=42).
+- **the CGB two-bin rows want frame 84** — SameBoy's actual mode boundary, 4 dots
+  later than production; this is what the deferred clock gives them (→ 291).
+
+Whole-dot cannot be both 80 and 84 for the same read. This is NOT a dead end — it
+is the precise statement of why the port ultimately needs the **half-dot read**
+(`Ppu::read_pos_hd`, HALFDOT Part B): SameBoy reads at the exact HALF-DOT, a
+sub-dot position slopgb's whole-dot grid rounds to 80 OR 84. The half-dot read
+resolves the exact value that is coherent with BOTH intr_2 (dispatch) AND the CGB
+mode boundary.
+
+**The synthesis (supersedes the deferred-clock HALFDOT-BUILD-PLAN):** the true
+SameBoy model = **EAGER clock (dispatch cc+4) + half-dot-resolved PPU reads**. The
+prior HALFDOT plan built Part B (half-dot read) on the DEFERRED clock — which
+self-inflicts the DMG regression the half-dot read then can't undo (dispatch is
+in the wrong frame). On the EAGER clock the DMG side is free (production-correct),
+and the half-dot read resolves the CGB 80/84 conflict. **Eager clock + half-dot
+read is the coherent target; the deferred clock was the wrong base all along.**
+
+OPEN (measure next, do not assume): whether a *mixed whole-dot* frame suffices for
+a useful subset — intr_2-relevant boundaries (mode-2→3 entry, mode-0 exit) at 80
+while CGB-relevant boundaries at 84, IF they are distinct reads. If they overlap,
+the half-dot read is required. Position-based families (accessibility, render
+write-commit, window length) do NOT hit the 80/84 conflict — they re-host onto the
+eager clock directly (port the tier2 stage_write dots to `Bus::write`; gate the
+blocking/render laws `tier2 || eager_value`) and are the tractable first slices.
+
+## Build plan (family order, each an eager_value `leading_edge && !tier2` arm)
+
+1. **Plumbing:** `eager_value` flag (interconnect + ppu), eager clock + dispatch
+   cc+4, `set_eager_value`, probe `SLOPGB_PROBE_EV` + mooneye `SLOPGB_MOONEYE_EAGER`.
+2. **Write-commit (render):** port `write_deferred`'s per-register stage_write dots
+   to the eager `Bus::write` under eager_value → recovers window/speedchange/
+   sprites (the 51+31+29 render breaks). No read-frame/dispatch touch → intr_2 safe.
+3. **Accessibility peek:** route OAM/VRAM/palette reads through the cc+0 blocked
+   verdict (pre-`tick_machine`) → oam_access/vram_m3 (~16). Position-based, no 80/84.
+4. **Read-frame:** the FF41 mode / LY reads — the 80/84 crux. Measure mixed-frame
+   first; if it doesn't separate, land the half-dot read (Part B) on the eager clock.
+5. **DS + halt + speedchange:** re-host the DS/wake laws to the eager frame.
+6. **Flip C3:** CGB +232 / DMG +0, rebaseline the ~37 CGB SameBoy-fail legs.
+
 ## Reproduction
 
 `BIN=target/probe/release/deps/gbtr-*`; `SLOPGB_ROWLIST=<abs>/scratchpad/
