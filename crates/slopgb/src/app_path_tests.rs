@@ -19,6 +19,21 @@ fn blank_app() -> App {
 }
 
 #[test]
+fn prompt_default_prefills_link_and_mcp_only() {
+    assert_eq!(
+        prompt_default(PathPurpose::LinkConnect),
+        format!("localhost:{}", crate::link::DEFAULT_PORT)
+    );
+    assert_eq!(
+        prompt_default(PathPurpose::McpStart),
+        crate::mcp::DEFAULT_PORT.to_string()
+    );
+    // File purposes still open blank.
+    assert_eq!(prompt_default(PathPurpose::LoadRom), "");
+    assert_eq!(prompt_default(PathPurpose::SaveState), "");
+}
+
+#[test]
 fn mcp_start_path_action_boots_and_stops_the_server() {
     // The full menu wiring: SubChoice::McpStart → open_path_prompt → this action
     // (typed port) → mcp.start. Port 0 = an OS-chosen ephemeral port.

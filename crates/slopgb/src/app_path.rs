@@ -33,6 +33,19 @@ pub(crate) fn pick_kind(purpose: PathPurpose) -> PickKind {
     }
 }
 
+/// The value the typed modal opens pre-filled with — a sane default the user can
+/// accept with Enter (or edit): a localhost peer for the link Connect prompt, the
+/// default port for the MCP Start prompt. Empty for every file purpose (they open
+/// blank as before).
+#[must_use]
+pub(crate) fn prompt_default(purpose: PathPurpose) -> String {
+    match purpose {
+        PathPurpose::LinkConnect => format!("localhost:{}", link::DEFAULT_PORT),
+        PathPurpose::McpStart => crate::mcp::DEFAULT_PORT.to_string(),
+        _ => String::new(),
+    }
+}
+
 /// The sidecar `.sym` beside a ROM (`rom.with_extension("sym")`), returned only
 /// when that file exists. Backs auto-load of symbols on ROM load. Pure → unit
 /// tested. `None` keeps auto-load a silent no-op when no sidecar is present.
@@ -79,7 +92,9 @@ impl App {
     /// unresponsive.
     fn open_path_modal(&mut self, title: &str, purpose: PathPurpose) {
         self.path_purpose = purpose;
-        self.path_dialog = Some(crate::ui::dialog::InputDialog::new(title, false));
+        self.path_dialog = Some(
+            crate::ui::dialog::InputDialog::new(title, false).with_initial(prompt_default(purpose)),
+        );
         if let Some(w) = &self.window {
             w.focus_window();
         }

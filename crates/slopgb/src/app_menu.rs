@@ -389,7 +389,7 @@ impl App {
             }
             // MCP submenu: start (via the shared port modal) / stop the server.
             SubChoice::McpStart => {
-                self.open_path_prompt("MCP server port (default 8123)", crate::PathPurpose::McpStart);
+                self.open_path_prompt("MCP server port", crate::PathPurpose::McpStart);
             }
             SubChoice::McpStop => {
                 self.mcp.stop();
