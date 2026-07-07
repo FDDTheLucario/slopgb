@@ -107,4 +107,6 @@ their respective owners; none of the projects below are bundled here.
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE).
+MIT — see [`LICENSE`](LICENSE). Third-party license notices (the SameBoy timing
+port's MIT notice + reference-project attributions) are in
+[`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
