@@ -282,6 +282,12 @@ pub fn run_breakpoint_rom(rom: &[u8], model: Model) -> Result<(), String> {
         GameBoy::new(model, rom.to_vec())
     }
     .map_err(|e| format!("cartridge rejected: {e}"))?;
+    // `SLOPGB_MOONEYE_EAGER=1` re-hosts the post-boot machine on the
+    // eager-value reclock (eager clock + cc+0 read-law peeks, dispatch cc+4)
+    // — the eager-clock foundation gate. Unset = production frame.
+    if std::env::var_os("SLOPGB_MOONEYE_EAGER").is_some() {
+        gb.set_eager_value(true);
+    }
     while !gb.debug_breakpoint_hit() {
         if gb.cycles() > TIMEOUT_TCYCLES {
             return Err(format!(

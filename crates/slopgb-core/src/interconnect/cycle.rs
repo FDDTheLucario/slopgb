@@ -118,6 +118,21 @@ impl Interconnect {
         self.ppu.set_tier2_reclock(on);
     }
 
+    /// Enable the **eager-value** reclock: the eager clock + counter-pinned
+    /// dispatch (cc+4) + the tier2 read laws as cc+0 value peeks. Implies
+    /// [`Self::set_leading_edge_reads`] but does NOT set `tier2_reclock` — no
+    /// deferred clock, no −2 dispatch move → the DMG-count-safe foundation (see
+    /// `docs/sameboy-port/tools/measurements/eager-clock-foundation-2026-07-07.md`).
+    // ponytail: no production call site yet (no `new_with_eager`); driven only
+    // by the port-probe-gated `GameBoy::set_eager_value`. Drop the allow once a
+    // slice-#2 law path references it.
+    #[allow(dead_code)]
+    pub(crate) fn set_eager_value(&mut self, on: bool) {
+        self.eager_value = on;
+        self.set_leading_edge_reads(on);
+        self.ppu.set_eager_value(on);
+    }
+
     /// `(leading_edge_reads, tier2_reclock)` — read-only, for the golden-safe
     /// "production defaults OFF" guard test.
     #[cfg(test)]

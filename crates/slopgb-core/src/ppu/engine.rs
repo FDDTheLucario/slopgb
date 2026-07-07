@@ -62,6 +62,7 @@ impl Ppu {
             lyc_interrupt_line: false,
             leading_edge_reads: false,
             tier2_reclock: false,
+            eager_value: false,
             m0_rise: false,
             m0_access_flip: None,
             pal_access_flip: None,
@@ -369,6 +370,15 @@ impl Ppu {
     /// the mode-0 IRQ dispatch move; implies `leading_edge_reads`.
     pub(crate) fn set_tier2_reclock(&mut self, on: bool) {
         self.tier2_reclock = on;
+    }
+
+    /// Forward the interconnect's `eager_value` flag. Implies
+    /// `leading_edge_reads` (set on the same hook) but NOT `tier2_reclock`.
+    // ponytail: only reachable via the port-probe-gated interconnect hook;
+    // slice #2 adds the law reads. Drop the allow then.
+    #[allow(dead_code)]
+    pub(crate) fn set_eager_value(&mut self, on: bool) {
+        self.eager_value = on;
     }
 
     fn step_dot(&mut self) {

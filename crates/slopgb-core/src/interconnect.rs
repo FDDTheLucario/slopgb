@@ -194,6 +194,20 @@ pub struct Interconnect {
     /// hook ([`crate::GameBoy::set_tier2_reclock`]) sets both.
     tier2_reclock: bool,
 
+    /// The **eager-value** reclock: the eager (production `tick_machine`,
+    /// dispatch cc+4) clock + the tier2 read/render laws applied as cc+0 value
+    /// peeks, WITHOUT the deferred clock or the −2 dispatch move (so dispatch
+    /// stays at its validated cc+4). Implies [`Self::leading_edge_reads`] but
+    /// NOT [`Self::tier2_reclock`] — the DMG-count-safe foundation the census
+    /// no-go was overturned on (see
+    /// `docs/sameboy-port/tools/measurements/eager-clock-foundation-2026-07-07.md`).
+    /// **Held `false`** — golden-safe, production byte-identical. The hook
+    /// ([`crate::GameBoy::set_eager_value`]) sets it + `leading_edge_reads`.
+    // ponytail: slice #1 is plumbing only — no law reads this yet; slice #2
+    // gates the cc+0 read/render laws on it. Remove the allow when it lands.
+    #[allow(dead_code)]
+    eager_value: bool,
+
     /// CGB hardware running a CGB-flagged cart. CGB hardware with a DMG
     /// cart runs in DMG compatibility mode: KEY1/SVBK/HDMA/RP/FF74 and the
     /// palette data ports are disabled (misc/boot_hwio-C).
@@ -514,6 +528,7 @@ impl Interconnect {
             clock: CycleClock::new(),
             leading_edge_reads: false,
             tier2_reclock: false,
+            eager_value: false,
             cgb_mode,
             double_speed: false,
             dot_phase: 0,

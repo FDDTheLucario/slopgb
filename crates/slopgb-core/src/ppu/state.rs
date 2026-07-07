@@ -209,6 +209,7 @@ impl Ppu {
         w.bool(self.lyc_interrupt_line);
         w.bool(self.leading_edge_reads);
         w.bool(self.tier2_reclock);
+        w.bool(self.eager_value);
         w.bool(self.m0_rise);
         write_opt_i8(w, self.m0_access_flip);
         write_opt_i8(w, self.pal_access_flip);
@@ -331,6 +332,7 @@ impl Ppu {
         self.lyc_interrupt_line = r.bool()?;
         self.leading_edge_reads = r.bool()?;
         self.tier2_reclock = r.bool()?;
+        self.eager_value = r.bool()?;
         self.m0_rise = r.bool()?;
         self.m0_access_flip = read_opt_i8(r)?;
         self.pal_access_flip = read_opt_i8(r)?;

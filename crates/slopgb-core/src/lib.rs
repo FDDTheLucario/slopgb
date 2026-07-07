@@ -861,6 +861,20 @@ impl GameBoy {
         self.bus.set_tier2_reclock(on);
     }
 
+    /// Port validation hook — enable the eager-value reclock (the eager clock +
+    /// tier2 read/render laws as cc+0 value peeks, dispatch staying cc+4).
+    /// Implies [`Self::set_leading_edge_reads`] but NOT
+    /// [`Self::set_tier2_reclock`] (no deferred clock / dispatch move) → the
+    /// DMG-count-safe foundation. Off in production.
+    ///
+    /// Compiled only under `cfg(test)` / `--features port_probe` (see
+    /// [`Self::new_with_reclock`]) — the production build cannot arm it.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "port_probe"))]
+    pub fn set_eager_value(&mut self, on: bool) {
+        self.bus.set_eager_value(on);
+    }
+
     /// `(leading_edge_reads, tier2_reclock)` construction flags. Read-only
     /// introspection for the golden-safe guard test only.
     #[cfg(test)]

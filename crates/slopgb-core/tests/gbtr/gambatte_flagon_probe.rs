@@ -87,6 +87,12 @@ fn flagon_probe() {
             let mut gb = harness::boot(&rom, model);
             gb.set_leading_edge_reads(true);
             gb
+        } else if std::env::var("SLOPGB_PROBE_EV").is_ok() {
+            // Eager-value: the eager clock + tier2 read/render laws as cc+0
+            // value peeks, dispatch staying cc+4 (does NOT set tier2_reclock).
+            let mut gb = harness::boot(&rom, model);
+            gb.set_eager_value(true);
+            gb
         } else {
             harness::boot_with_reclock(&rom, model)
         };

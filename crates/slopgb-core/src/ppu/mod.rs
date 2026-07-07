@@ -621,6 +621,11 @@ pub struct Ppu {
     /// `leading_edge_reads` but NOT this) keep the validated baseline frame.
     /// Forwarded by [`Interconnect::set_tier2_reclock`].
     tier2_reclock: bool,
+    /// PPU-side copy of the interconnect's `eager_value` flag (the eager clock
+    /// plus tier2 read/render laws as cc+0 value peeks, dispatch staying cc+4).
+    /// Implies `leading_edge_reads` but NOT `tier2_reclock`. Off in production.
+    /// Forwarded by [`Interconnect::set_eager_value`].
+    eager_value: bool,
     /// The STAT IF bit handed out by the last tick came from the mode-0
     /// source rise. The interconnect drains this and applies the
     /// half-cycle halt law: a rise landing in the second half of the
