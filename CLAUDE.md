@@ -119,7 +119,7 @@ emulated s.
   [`docs/ui-state/`](docs/ui-state/README.md). All UI core hooks are read-only
   `&self` introspection (`slopgb_core::debug` + `GameBoy` accessors) or default-off
   mutating hooks — golden-safe (see the golden-safe law above). The MCP server
-  (`--mcp-port`, off by default) hosts 7 debug tools over hand-rolled HTTP/JSON-RPC
+  (`--mcp-port`, off by default) hosts 8 debug tools over hand-rolled HTTP/JSON-RPC
   for an LLM agent to drive the live debugger — see
   [`docs/ui-state/mcp-server.md`](docs/ui-state/mcp-server.md).
 - **SameBoy cycle-exact port (Phase B / S5):** flag-gated behind

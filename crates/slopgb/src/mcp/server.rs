@@ -411,6 +411,7 @@ fn build_call(name: &str, args: Option<&Json>) -> Result<Call, String> {
         "peek" => Ok(Call::Peek { from: arg("from")?, to: arg("to")? }),
         "cdl" => Ok(Call::Cdl { from: arg("from")?, to: arg("to")? }),
         "vram" => Ok(Call::Vram { view: arg("view")? }),
+        "screencap" => Ok(Call::Screencap),
         "breakpoint" => Ok(Call::Breakpoint { addr: arg("address")? }),
         "registers" => Ok(Call::Registers),
         "expr" => Ok(Call::Expr { expr: arg("expression")? }),
@@ -499,6 +500,11 @@ fn tool_defs() -> Json {
             "vram",
             "Capture a VRAM view as a PNG.",
             &[("view", "one of: bg, win, tile0, tile1, oam, palette")],
+        ),
+        tool(
+            "screencap",
+            "Capture the current Game Boy (Color) screen (160x144) as a PNG.",
+            &[],
         ),
         tool(
             "breakpoint",

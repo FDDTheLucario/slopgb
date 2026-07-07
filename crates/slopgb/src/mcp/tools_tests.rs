@@ -113,6 +113,21 @@ fn breakpoint_sets_pc() {
 }
 
 #[test]
+fn screencap_returns_a_png_of_the_screen() {
+    let gb = GameBoy::new(Model::Dmg, rom_at_0100(&[0x00])).unwrap();
+    let mut bps = Breakpoints::default();
+    let syms = SymbolTable::default();
+    match dispatch(&Call::Screencap, &gb, &mut bps, &syms).unwrap() {
+        ToolResult::Image(png) => {
+            assert_eq!(&png[..8], &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]);
+            // IHDR width/height = 160x144 (SCREEN_W x SCREEN_H), big-endian.
+            assert_eq!(&png[16..24], &[0, 0, 0, 160, 0, 0, 0, 144]);
+        }
+        ToolResult::Text(_) => panic!("expected an image"),
+    }
+}
+
+#[test]
 fn bad_address_is_an_error_not_a_panic() {
     let gb = GameBoy::new(Model::Dmg, rom_at_0100(&[0x00])).unwrap();
     let syms = SymbolTable::default();

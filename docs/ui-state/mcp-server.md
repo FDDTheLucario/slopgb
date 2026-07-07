@@ -17,7 +17,7 @@ claude mcp add --transport http slopgb http://127.0.0.1:8123/mcp
 
 The server binds `127.0.0.1` only (never `0.0.0.0`) — localhost, not the network.
 
-## The seven tools
+## The tools
 
 | Tool | Args | Output |
 |---|---|---|
@@ -25,6 +25,7 @@ The server binds `127.0.0.1` only (never `0.0.0.0`) — localhost, not the netwo
 | `peek` | `from`, `to` | 16 hex bytes/row, `BB:AAAA<tab>…` |
 | `cdl` | `from`, `to` | like `peek`, each byte → an `r`/`w`/`x` access word or `.` |
 | `vram` | `view` (`bg`\|`win`\|`tile0`\|`tile1`\|`oam`\|`palette`) | a PNG (`image/png` content); `bg`/`win` game-paletted, Tiles grey-ramp |
+| `screencap` | — | the current 160×144 screen (`gb.frame()`) as a PNG — cross-reference against `vram *` |
 | `breakpoint` | `address` | sets a PC breakpoint (the only mutating tool) |
 | `registers` | — | `af=… bc=… … lcdc=… stat=… ly=… cnt=… ie=… if=… ime=… ima=… spd=… rom=… ram=… wave=…` |
 | `expr` | `expression` | evaluates a bgb-style debugger expression (hex default, register names, `[addr]`) |

@@ -11,7 +11,7 @@ for the UI. **Read the relevant file before touching that UI area.**
 | [options.md](options.md) | Options dialog: 8 tabs, live settings, Exceptions mask, Joypad rebind/SOCD, live input timing, bootrom UI, pure-bgb mode |
 | [viewers.md](viewers.md) | VRAM viewer (CGB-attr-aware, resize, Palettes), I/O map, `&self` introspection accessors |
 | [save-states-and-link.md](save-states-and-link.md) | Quick + on-disk save states, serial link cable (TCP, byte-level lockstep) |
-| [mcp-server.md](mcp-server.md) | Opt-in MCP server (`--mcp-port`): 7 debug tools over hand-rolled HTTP/JSON-RPC for an LLM agent to drive the live debugger |
+| [mcp-server.md](mcp-server.md) | Opt-in MCP server (`--mcp-port`): 8 debug tools over hand-rolled HTTP/JSON-RPC for an LLM agent to drive the live debugger |
 | [startup-and-boot.md](startup-and-boot.md) | No-ROM blank-LCD startup, opt-in boot-ROM execution |
 | [frontend-layout.md](frontend-layout.md) | Module split satisfying the <1000-line cap; key types/entry points |
 

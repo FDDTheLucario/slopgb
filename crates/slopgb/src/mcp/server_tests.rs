@@ -17,16 +17,18 @@ fn base64_known_vectors() {
 }
 
 #[test]
-fn tool_defs_lists_seven_named_tools() {
+fn tool_defs_lists_every_named_tool() {
     let Json::Arr(tools) = tool_defs() else {
         panic!("tools is an array")
     };
-    assert_eq!(tools.len(), 7);
+    assert_eq!(tools.len(), 8);
     let names: Vec<&str> = tools
         .iter()
         .filter_map(|t| t.get("name").and_then(Json::as_str))
         .collect();
-    for want in ["disassemble", "peek", "cdl", "vram", "breakpoint", "registers", "expr"] {
+    for want in [
+        "disassemble", "peek", "cdl", "vram", "screencap", "breakpoint", "registers", "expr",
+    ] {
         assert!(names.contains(&want), "missing tool {want}");
     }
 }
@@ -36,6 +38,7 @@ fn build_call_validates_arguments() {
     let args = Json::obj([("from", Json::str("C000")), ("to", Json::str("C00F"))]);
     assert!(matches!(build_call("peek", Some(&args)), Ok(Call::Peek { .. })));
     assert!(matches!(build_call("registers", None), Ok(Call::Registers)));
+    assert!(matches!(build_call("screencap", None), Ok(Call::Screencap)));
     // Missing argument and unknown tool are errors, not panics.
     assert!(build_call("peek", None).is_err());
     assert!(build_call("frobnicate", None).is_err());

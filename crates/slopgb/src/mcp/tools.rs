@@ -27,6 +27,7 @@ pub enum Call {
     Peek { from: String, to: String },
     Cdl { from: String, to: String },
     Vram { view: String },
+    Screencap,
     Breakpoint { addr: String },
     Registers,
     Expr { expr: String },
@@ -62,6 +63,11 @@ pub fn dispatch(
             let bmp = vram::capture(gb, view)?;
             Ok(ToolResult::Image(png::encode(&bmp.px, bmp.w, bmp.h)))
         }
+        Call::Screencap => Ok(ToolResult::Image(png::encode(
+            gb.frame(),
+            slopgb_core::SCREEN_W,
+            slopgb_core::SCREEN_H,
+        ))),
         Call::Breakpoint { addr } => {
             let a = addr::parse_one(addr)?;
             breakpoints.set(a.addr);
