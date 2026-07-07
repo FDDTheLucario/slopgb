@@ -19,6 +19,19 @@ fn blank_app() -> App {
 }
 
 #[test]
+fn mcp_start_path_action_boots_and_stops_the_server() {
+    // The full menu wiring: SubChoice::McpStart → open_path_prompt → this action
+    // (typed port) → mcp.start. Port 0 = an OS-chosen ephemeral port.
+    let mut app = blank_app();
+    assert!(!app.mcp.is_active());
+    app.run_path_action(PathPurpose::McpStart, std::path::Path::new("0"));
+    assert!(app.mcp.is_active(), "server started via the menu path");
+    assert!(app.mcp.port().is_some());
+    app.mcp.stop();
+    assert!(!app.mcp.is_active());
+}
+
+#[test]
 fn sym_sidecar_found_only_when_the_file_exists() {
     // Auto-load derivation: rom.with_extension("sym"), gated on exists().
     let dir = std::env::temp_dir().join(format!("slopgb_symsc_{}", std::process::id()));

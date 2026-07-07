@@ -309,6 +309,7 @@ impl App {
             SubKind::State => SubMenu::state(row),
             SubKind::RecentRoms => SubMenu::recent_roms(row, &self.recent_names()),
             SubKind::Link => SubMenu::link(row, self.link.is_active(), self.link.is_listening()),
+            SubKind::Mcp => SubMenu::mcp(row, self.mcp.is_active()),
         }
     }
 
@@ -384,6 +385,14 @@ impl App {
             // the core peer (bgb shows them as distinct rows; the effect is one).
             SubChoice::LinkDisconnect | SubChoice::LinkCancelListen => {
                 self.link.disconnect(&mut self.session.gb);
+                self.update_title();
+            }
+            // MCP submenu: start (via the shared port modal) / stop the server.
+            SubChoice::McpStart => {
+                self.open_path_prompt("MCP server port (default 8123)", crate::PathPurpose::McpStart);
+            }
+            SubChoice::McpStop => {
+                self.mcp.stop();
                 self.update_title();
             }
         }

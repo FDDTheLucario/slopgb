@@ -137,6 +137,8 @@ enum PathPurpose {
     LoadState,
     /// Dial a serial-link peer at the typed `host:port` (bare host → port 8765).
     LinkConnect,
+    /// Start the MCP server on the typed port (blank/invalid → the default port).
+    McpStart,
     /// Set a bootrom path in the open Options dialog's working scratch
     /// (Options → System → DMG/GBC/SGB bootrom `...`).
     Bootrom(windows::options::BootromSlot),
@@ -401,6 +403,9 @@ impl App {
             // whose title is otherwise a bare "slopgb".
             if let Some(link) = self.link.status_label() {
                 title.push_str(&format!(" — {link}"));
+            }
+            if let Some(mcp) = self.mcp.status_label() {
+                title.push_str(&format!(" — {mcp}"));
             }
             window.set_title(&title);
         }

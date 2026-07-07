@@ -107,6 +107,7 @@ fn menu_has_the_fifteen_rc_main_rows_in_order() {
             "Sound channel",
             "Window size",
             "Link",
+            "MCP",
             "Recent ROMs",
             "Exit",
         ]
@@ -142,7 +143,7 @@ fn supported_rows_run_their_action_window_size_opens_a_submenu_rest_none() {
         m.effects[7],
         MenuEffect::Run(Action::ToggleTool(ToolWindow::Debugger))
     );
-    assert_eq!(m.effects[14], MenuEffect::Run(Action::Quit));
+    assert_eq!(m.effects[15], MenuEffect::Run(Action::Quit));
     assert_eq!(
         m.effects[WINDOW_SIZE_ROW],
         MenuEffect::Submenu(SubKind::WindowSize)
@@ -169,10 +170,12 @@ fn supported_rows_run_their_action_window_size_opens_a_submenu_rest_none() {
     assert_eq!(m.effects[8], MenuEffect::Submenu(SubKind::State));
     // Load ROM (MN4) opens the path modal; Recent ROMs (MN4) opens its submenu.
     assert_eq!(m.effects[1], MenuEffect::Run(Action::MainLoadRom));
-    assert_eq!(m.effects[13], MenuEffect::Submenu(SubKind::RecentRoms));
+    assert_eq!(m.effects[14], MenuEffect::Submenu(SubKind::RecentRoms));
     // Link opens its submenu (rows grey by connection state — see
     // link_submenu_greys_rows_by_state).
     assert_eq!(m.effects[12], MenuEffect::Submenu(SubKind::Link));
+    // MCP opens its submenu (Start/Stop, greyed by server state).
+    assert_eq!(m.effects[13], MenuEffect::Submenu(SubKind::Mcp));
 }
 
 #[test]
@@ -546,4 +549,19 @@ fn link_submenu_greys_rows_by_state() {
     assert_eq!(listen.choices[1], None, "Connect greyed while listening");
     assert_eq!(listen.choices[2], None, "Disconnect greyed while listening");
     assert_eq!(listen.choices[3], Some(SubChoice::LinkCancelListen));
+}
+
+#[test]
+fn mcp_submenu_greys_rows_by_state() {
+    let labels = |s: &SubMenu| -> Vec<String> { s.items.iter().map(|i| i.label.clone()).collect() };
+    let idle = SubMenu::mcp(PARENT, false);
+    assert_eq!(idle.kind, SubKind::Mcp);
+    assert_eq!(labels(&idle), ["Start server...", "Stop server"]);
+    // Idle: Start enabled, Stop greyed.
+    assert_eq!(idle.choices[0], Some(SubChoice::McpStart));
+    assert_eq!(idle.choices[1], None, "Stop greyed when idle");
+    // Running: Start greyed, Stop enabled.
+    let running = SubMenu::mcp(PARENT, true);
+    assert_eq!(running.choices[0], None, "Start greyed while running");
+    assert_eq!(running.choices[1], Some(SubChoice::McpStop));
 }

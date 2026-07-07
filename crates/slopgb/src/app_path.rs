@@ -28,7 +28,7 @@ pub(crate) enum PickKind {
 pub(crate) fn pick_kind(purpose: PathPurpose) -> PickKind {
     match purpose {
         PathPurpose::SaveState | PathPurpose::CdlSave => PickKind::Save,
-        PathPurpose::LinkConnect => PickKind::None,
+        PathPurpose::LinkConnect | PathPurpose::McpStart => PickKind::None,
         _ => PickKind::Open,
     }
 }
@@ -187,6 +187,18 @@ impl App {
                     Err(e) => eprintln!("slopgb: link connect failed: {e}"),
                 }
                 self.update_title(); // reflect the "connecting :port" status at once
+            }
+            PathPurpose::McpStart => {
+                // The "path" here is the typed port (blank → the default).
+                let port = crate::mcp::parse_port(&path.to_string_lossy());
+                match self.mcp.start(port) {
+                    Ok(()) => println!(
+                        "slopgb: MCP server on http://127.0.0.1:{}/",
+                        self.mcp.port().unwrap_or(port)
+                    ),
+                    Err(e) => eprintln!("slopgb: MCP server failed on port {port}: {e}"),
+                }
+                self.update_title();
             }
             PathPurpose::Bootrom(slot) => {
                 // Write the typed path into the open Options dialog's working

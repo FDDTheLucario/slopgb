@@ -30,6 +30,17 @@ use crate::dbg::Debugger;
 use crate::symbols::SymbolTable;
 use tools::{Call, ToolResult};
 
+/// Default port for the MCP server when the menu's port prompt is left blank.
+pub const DEFAULT_PORT: u16 = 8123;
+
+/// Parse the port typed into the "Start MCP server" prompt. A blank or
+/// unparseable entry falls back to [`DEFAULT_PORT`] (mirrors
+/// [`crate::link::parse_host_port`]). Never fails.
+#[must_use]
+pub fn parse_port(s: &str) -> u16 {
+    s.trim().parse().unwrap_or(DEFAULT_PORT)
+}
+
 /// A tool call handed from the socket thread to the UI thread, with a one-shot
 /// channel for the reply. The socket thread blocks on the reply; the UI drains
 /// jobs each pump.
@@ -63,6 +74,13 @@ impl Mcp {
         Ok(())
     }
 
+    /// Stop the server (tear down the socket thread) — the menu's "Stop server".
+    /// Idempotent: a no-op when nothing is running.
+    pub fn stop(&mut self) {
+        self.server = None; // Server::drop joins the socket thread
+        self.rx = None;
+    }
+
     /// Whether a server is running.
     #[must_use]
     pub fn is_active(&self) -> bool {
@@ -73,6 +91,13 @@ impl Mcp {
     #[must_use]
     pub fn port(&self) -> Option<u16> {
         self.server.as_ref().map(server::Server::port)
+    }
+
+    /// A short status label for the window title (bgb shows the link state there),
+    /// or `None` when no server is running: `"MCP :<port>"`.
+    #[must_use]
+    pub fn status_label(&self) -> Option<String> {
+        self.port().map(|p| format!("MCP :{p}"))
     }
 
     /// Per-wake pump: execute every queued tool call against the live machine

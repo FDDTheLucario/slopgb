@@ -35,6 +35,27 @@ fn http_post(port: u16, body: &str) -> String {
 }
 
 #[test]
+fn parse_port_defaults_on_blank_or_garbage() {
+    assert_eq!(parse_port("8123"), 8123);
+    assert_eq!(parse_port("  40000 "), 40000);
+    assert_eq!(parse_port(""), DEFAULT_PORT);
+    assert_eq!(parse_port("notaport"), DEFAULT_PORT);
+    assert_eq!(parse_port("99999"), DEFAULT_PORT); // out of u16 range → default
+}
+
+#[test]
+fn status_label_reflects_the_server() {
+    let mut mcp = Mcp::new();
+    assert_eq!(mcp.status_label(), None);
+    mcp.start(0).unwrap();
+    let label = mcp.status_label().unwrap();
+    assert!(label.starts_with("MCP :"), "{label}");
+    mcp.stop();
+    assert!(!mcp.is_active());
+    assert_eq!(mcp.status_label(), None);
+}
+
+#[test]
 fn pump_without_server_is_a_noop() {
     let mut mcp = Mcp::new();
     assert!(!mcp.is_active());

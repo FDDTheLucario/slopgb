@@ -2,8 +2,11 @@
 
 An opt-in [Model Context Protocol](https://modelcontextprotocol.io) server so an
 LLM agent can drive the debugger against the **live machine you're watching** —
-befitting the name. Off by default; enabled with `--mcp-port <N>` or
-`SLOPGB_MCP_PORT=<N>`. Lives in `crates/slopgb/src/mcp.rs` + `mcp/`.
+befitting the name. Off by default. Start it at launch with `--mcp-port <N>` /
+`SLOPGB_MCP_PORT=<N>`, or at runtime from the game-window right-click **MCP**
+submenu (Start server… / Stop server) — mirrors the Link menu. The bound port
+shows in the title bar (`MCP :<port>`, like the link status). Lives in
+`crates/slopgb/src/mcp.rs` + `mcp/`.
 
 ## Wiring it to a client
 

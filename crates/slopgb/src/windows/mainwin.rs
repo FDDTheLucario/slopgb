@@ -27,6 +27,7 @@ pub enum SubKind {
     State,
     RecentRoms,
     Link,
+    Mcp,
 }
 
 /// What clicking a main-menu row does: run a shared frontend [`Action`], open a
@@ -156,6 +157,10 @@ fn entries(sound_on: bool, paused: bool) -> Vec<(MenuItem, MenuEffect)> {
             MenuEffect::Submenu(SubKind::Link),
         ),
         (
+            MenuItem::new("MCP").submenu(),
+            MenuEffect::Submenu(SubKind::Mcp),
+        ),
+        (
             MenuItem::new("Recent ROMs").submenu(),
             MenuEffect::Submenu(SubKind::RecentRoms),
         ),
@@ -212,6 +217,10 @@ pub enum SubChoice {
     LinkDisconnect,
     /// Link → "Cancel listen": stop a listening (not-yet-connected) link.
     LinkCancelListen,
+    /// MCP → "Start server...": open the port modal, then host the MCP server.
+    McpStart,
+    /// MCP → "Stop server": tear the MCP server down.
+    McpStop,
 }
 
 /// An open child submenu (Window size or Sound channel): its kind, box origin
@@ -277,6 +286,14 @@ impl SubMenu {
     pub fn link(parent_row: Rect, active: bool, listening: bool) -> Self {
         let (items, choices) = link_items(active, listening).into_iter().unzip();
         Self::hang(SubKind::Link, parent_row, items, choices)
+    }
+
+    /// Open the [`SubKind::Mcp`] submenu: Start server / Stop server. Only the
+    /// meaningful row is enabled — Start while idle, Stop while `active`.
+    #[must_use]
+    pub fn mcp(parent_row: Rect, active: bool) -> Self {
+        let (items, choices) = mcp_items(active).into_iter().unzip();
+        Self::hang(SubKind::Mcp, parent_row, items, choices)
     }
 
     /// Shared constructor: hang a submenu off the right edge of `parent_row`,
@@ -422,6 +439,22 @@ fn link_items(active: bool, listening: bool) -> Vec<(MenuItem, Option<SubChoice>
             SubChoice::LinkDisconnect,
         ),
         row("Cancel listen", listening, SubChoice::LinkCancelListen),
+    ]
+}
+
+/// The MCP rows: Start server (while idle) / Stop server (while running). The
+/// off row greys out — the same enable/grey pattern as the Link submenu.
+fn mcp_items(active: bool) -> Vec<(MenuItem, Option<SubChoice>)> {
+    let row = |label: &str, enabled: bool, choice: SubChoice| {
+        if enabled {
+            (MenuItem::new(label), Some(choice))
+        } else {
+            (MenuItem::new(label).disabled(), None)
+        }
+    };
+    vec![
+        row("Start server...", !active, SubChoice::McpStart),
+        row("Stop server", active, SubChoice::McpStop),
     ]
 }
 
