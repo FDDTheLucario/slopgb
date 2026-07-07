@@ -42,6 +42,12 @@ impl Breakpoints {
         self.pc.remove(&addr);
     }
 
+    /// Set a breakpoint at `addr` (idempotent — unlike [`Self::toggle`], calling
+    /// it twice keeps the breakpoint set). Used by the MCP `breakpoint` tool.
+    pub fn set(&mut self, addr: u16) {
+        self.pc.insert(addr);
+    }
+
     /// The breakpoint addresses, for [`GameBoy::run_frame_until_breakpoint`].
     #[must_use]
     pub fn pc_list(&self) -> Vec<u16> {
@@ -232,6 +238,11 @@ impl Debugger {
     #[must_use]
     pub fn breakpoints(&self) -> &Breakpoints {
         &self.bps
+    }
+
+    /// The breakpoint set (mutable — for the MCP `breakpoint` tool).
+    pub fn breakpoints_mut(&mut self) -> &mut Breakpoints {
+        &mut self.bps
     }
 
     /// The watchpoint set (read — for the free-run arm check + the manager).

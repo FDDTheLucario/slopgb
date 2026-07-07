@@ -114,10 +114,14 @@ emulated s.
   `test-roms/download.sh` first. Six class-F defect cases exempted (defective
   suites/reference legs) — never drop a test SameBoy passes.
 - **bgb-UI functional clone** (debugger, VRAM/iomap viewers, Options, game-window
-  right-click menu, save states, serial link, opt-in boot ROM, no-ROM startup) —
-  state per area in [`docs/ui-state/`](docs/ui-state/README.md). All UI core hooks
-  are read-only `&self` introspection (`slopgb_core::debug` + `GameBoy` accessors)
-  or default-off mutating hooks — golden-safe (see the golden-safe law above).
+  right-click menu, save states, serial link, opt-in boot ROM, no-ROM startup,
+  opt-in MCP server) — state per area in
+  [`docs/ui-state/`](docs/ui-state/README.md). All UI core hooks are read-only
+  `&self` introspection (`slopgb_core::debug` + `GameBoy` accessors) or default-off
+  mutating hooks — golden-safe (see the golden-safe law above). The MCP server
+  (`--mcp-port`, off by default) hosts 7 debug tools over hand-rolled HTTP/JSON-RPC
+  for an LLM agent to drive the live debugger — see
+  [`docs/ui-state/mcp-server.md`](docs/ui-state/mcp-server.md).
 - **SameBoy cycle-exact port (Phase B / S5):** flag-gated behind
   `tier2_reclock` (implies `leading_edge_reads`); production byte-identical
   OFF. Flag-on two-bin: ON 291 / OFF 486 on the 3422-row full-CGB list;

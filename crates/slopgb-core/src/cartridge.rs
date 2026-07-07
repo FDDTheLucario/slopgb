@@ -334,6 +334,15 @@ impl Cartridge {
         self.rom[offset]
     }
 
+    /// Read a ROM byte at an **explicit** bank (bank-masked/wrapped exactly like
+    /// the live mapper, so an out-of-range bank folds back in and never indexes
+    /// OOB), for the MCP/debug banked disassembler + memory dump. Only the low
+    /// 14 bits of `addr` matter. Side-effect-free (`&self`).
+    #[must_use]
+    pub fn rom_read_banked(&self, bank: u16, addr: u16) -> u8 {
+        self.rom_at(usize::from(bank), addr)
+    }
+
     /// The ROM bank number the mapper selects for the given address area
     /// (`low_area` = 0x0000-0x3FFF vs the switchable 0x4000-0x7FFF), pre-mask.
     /// Shared by [`read_rom`](Self::read_rom) and the debug

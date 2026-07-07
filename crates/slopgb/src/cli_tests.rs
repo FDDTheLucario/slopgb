@@ -67,6 +67,14 @@ fn parse_help_returns_outcome_instead_of_exiting() {
 }
 
 #[test]
+fn parse_mcp_port() {
+    assert_eq!(parse_run(&["--mcp-port", "8123", "g.gb"]).unwrap().mcp_port, Some(8123));
+    assert_eq!(parse_run(&["g.gb"]).unwrap().mcp_port, None);
+    assert!(parse(&["--mcp-port"]).is_err()); // value missing
+    assert!(parse(&["--mcp-port", "notaport"]).is_err());
+}
+
+#[test]
 fn parse_rejects_bad_input() {
     assert!(parse(&["--model", "snes", "x.gb"]).is_err());
     assert!(parse(&["--scale", "0", "x.gb"]).is_err());

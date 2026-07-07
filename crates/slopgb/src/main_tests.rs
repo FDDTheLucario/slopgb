@@ -9,6 +9,7 @@ fn blank_app() -> App {
         scale: 3,
         mute: true,
         boot: None,
+        mcp_port: None,
     };
     App::new(opts, Session::blank(Model::Dmg), false, None)
 }

@@ -21,6 +21,9 @@ OPTIONS:
     --mute            Disable audio output
     --boot <PATH>     Execute a boot ROM from power-on (logo + chime); 256 B for
                       DMG/MGB/SGB, 2304 B for CGB/AGB. Also via SLOPGB_BOOT=<path>
+    --mcp-port <N>    Host an MCP server on 127.0.0.1:<N> so an LLM agent can
+                      drive the debugger (disassemble/peek/cdl/vram/breakpoint/
+                      registers/expr). Also via SLOPGB_MCP_PORT=<N>
     -h, --help        Print this help
 
 KEYS:
@@ -50,6 +53,9 @@ pub(crate) struct Options {
     /// `--boot <path>`; falls back to the `SLOPGB_BOOT` env var (resolved in
     /// `main`). `None` = the direct post-boot install (default).
     pub(crate) boot: Option<PathBuf>,
+    /// Port for the opt-in MCP debug server (`--mcp-port`; falls back to
+    /// `SLOPGB_MCP_PORT`, resolved in `main`). `None` = no server (default).
+    pub(crate) mcp_port: Option<u16>,
 }
 
 /// What a successful argument parse asks the program to do. Printing the
@@ -67,6 +73,7 @@ impl Options {
         let mut scale = 3u32;
         let mut mute = false;
         let mut boot = None;
+        let mut mcp_port = None;
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "-h" | "--help" => return Ok(ParseOutcome::Help),
@@ -74,6 +81,13 @@ impl Options {
                 "--boot" => {
                     let v = args.next().ok_or("--boot requires a path")?;
                     boot = Some(PathBuf::from(v));
+                }
+                "--mcp-port" => {
+                    let v = args.next().ok_or("--mcp-port requires a port number")?;
+                    mcp_port = Some(
+                        v.parse::<u16>()
+                            .map_err(|_| format!("invalid --mcp-port '{v}' (expected 0-65535)"))?,
+                    );
                 }
                 "--model" => {
                     let v = args.next().ok_or("--model requires a value")?;
@@ -104,6 +118,7 @@ impl Options {
             scale,
             mute,
             boot,
+            mcp_port,
         }))
     }
 }

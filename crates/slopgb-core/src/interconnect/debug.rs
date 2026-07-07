@@ -211,6 +211,35 @@ impl Interconnect {
         }
     }
 
+    /// Like [`Self::cdl_flag`] but for an **explicit** bank of the three banked
+    /// regions (ROMX / VRAM / WRAMX), so the MCP/debug `cdl` tool can inspect a
+    /// bank other than the live one. Outside those regions `bank` is meaningless
+    /// and this is exactly [`Self::cdl_flag`]. The physical index mirrors
+    /// [`Self::cdl_index`]; banks wrap within the region (ROM size is a power of
+    /// two, so the modulo matches the mapper's address-line mask). 0 when the log
+    /// is off. Side-effect-free (`&self`).
+    #[must_use]
+    pub fn cdl_flag_banked(&self, bank: u16, addr: u16) -> u8 {
+        let Some(b) = &self.cdl else { return 0 };
+        let l = self.cdl_layout();
+        let idx = match addr {
+            0x4000..=0x7FFF => {
+                let rom_len = self.cart.rom_len().max(0x4000);
+                l.rom + (usize::from(bank) * 0x4000) % rom_len + usize::from(addr & 0x3FFF)
+            }
+            0x8000..=0x9FFF => {
+                l.vram + usize::from(bank & 1) * 0x2000 + usize::from(addr & 0x1FFF)
+            }
+            0xD000..=0xDFFF => {
+                let nbanks = (self.wram.len() / 0x1000).max(1);
+                let bk = usize::from(bank).max(1) % nbanks;
+                l.wram + bk * 0x1000 + usize::from(addr & 0x0FFF)
+            }
+            _ => return self.cdl_flag(addr),
+        };
+        b.get(idx).copied().unwrap_or(0)
+    }
+
     /// The whole physical flag buffer (for a save), or `None` when the log is
     /// off. Its length is `cdl_layout().total` (ROM+VRAM+SRAM+WRAM+tail).
     #[must_use]

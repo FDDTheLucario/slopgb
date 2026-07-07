@@ -8,7 +8,7 @@
 
 use std::env;
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use slopgb_core::{SCREEN_H, SCREEN_W};
 use winit::application::ApplicationHandler;
@@ -83,6 +83,23 @@ impl ApplicationHandler for App {
             let (host, port) = link::parse_host_port(&addr);
             if let Err(e) = self.link.connect(host, port) {
                 eprintln!("slopgb: link connect failed: {e}");
+            }
+        }
+        // Optionally host the MCP debug server — `--mcp-port` or `SLOPGB_MCP_PORT`.
+        // Guarded so a resume/suspend cycle doesn't restart it.
+        if !self.mcp.is_active() {
+            if let Some(port) = self
+                .opts
+                .mcp_port
+                .or_else(|| env::var("SLOPGB_MCP_PORT").ok().and_then(|s| s.parse().ok()))
+            {
+                match self.mcp.start(port) {
+                    Ok(()) => eprintln!(
+                        "slopgb: MCP server on http://127.0.0.1:{}/",
+                        self.mcp.port().unwrap_or(port)
+                    ),
+                    Err(e) => eprintln!("slopgb: MCP server failed on port {port}: {e}"),
+                }
             }
         }
         self.resync_pacing();
@@ -298,6 +315,10 @@ impl ApplicationHandler for App {
         if self.window.is_none() {
             return; // not resumed yet
         }
+        // Serve any queued MCP tool calls first — before the idle guard, so an
+        // agent can still inspect a paused / breakpoint-halted machine (that is
+        // exactly when it wants to). A no-op when no server is running.
+        self.mcp.pump(&self.session.gb, &mut self.dbg, &self.symbols);
         // Reconcile a pending Options "memory viewer in own window" change now
         // that the event loop is available (open/close the standalone window).
         if let Some(want) = self.pending_mem_window.take() {
@@ -315,7 +336,16 @@ impl ApplicationHandler for App {
             // on resume would use a stale offset) but still honor releases, so a
             // button released while paused doesn't stick held on resume.
             self.flush_idle_input();
-            event_loop.set_control_flow(ControlFlow::Wait);
+            // With the MCP server up, poll instead of parking indefinitely so
+            // queued tool calls are served within a few ms even while frozen;
+            // otherwise wait for the next real event (no wasted wakeups).
+            if self.mcp.is_active() {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(
+                    Instant::now() + Duration::from_millis(8),
+                ));
+            } else {
+                event_loop.set_control_flow(ControlFlow::Wait);
+            }
             return;
         }
         // Apply deferred joypad input at its sub-frame offset before emulating,

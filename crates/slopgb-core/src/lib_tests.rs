@@ -543,6 +543,67 @@ fn mbc1_4bank_rom() -> Vec<u8> {
 }
 
 #[test]
+fn debug_read_banked_reads_explicit_rom_bank() {
+    // Stamp the byte at each bank's 0x4000-window base with a bank-unique value.
+    let mut rom = mbc1_4bank_rom();
+    for bank in 0..4usize {
+        rom[bank * 0x4000] = 0xB0 | bank as u8;
+    }
+    let gb = GameBoy::new(Model::Dmg, rom).unwrap();
+    // Any bank is reachable regardless of the live mapping at 0x4000.
+    for bank in 0..4u16 {
+        assert_eq!(gb.debug_read_banked(bank, 0x4000), 0xB0 | bank as u8);
+    }
+    // A bank matching the live mapping is identical to debug_read.
+    let cur = gb.rom_bank() as u16;
+    assert_eq!(gb.debug_read_banked(cur, 0x4000), gb.debug_read(0x4000));
+    // An out-of-range bank folds back in (no OOB panic): bank 4 wraps to bank 0.
+    assert_eq!(gb.debug_read_banked(4, 0x4000), gb.debug_read_banked(0, 0x4000));
+}
+
+#[test]
+fn debug_read_banked_reads_explicit_vram_and_wram_banks() {
+    let mut gb = GameBoy::new(Model::Cgb, rom_with_cgb_flag(0x80)).unwrap();
+    // VRAM: distinct byte per bank via VBK.
+    gb.debug_write(0xFF4F, 0);
+    gb.debug_write(0x8000, 0xA0);
+    gb.debug_write(0xFF4F, 1);
+    gb.debug_write(0x8000, 0xA1);
+    assert_eq!(gb.debug_read_banked(0, 0x8000), 0xA0);
+    assert_eq!(gb.debug_read_banked(1, 0x8000), 0xA1);
+    // WRAMX: distinct byte per SVBK bank at 0xD000.
+    gb.debug_write(0xFF70, 1);
+    gb.debug_write(0xD000, 0x11);
+    gb.debug_write(0xFF70, 2);
+    gb.debug_write(0xD000, 0x22);
+    assert_eq!(gb.debug_read_banked(1, 0xD000), 0x11);
+    assert_eq!(gb.debug_read_banked(2, 0xD000), 0x22);
+    // An unbanked address ignores `bank` (== debug_read).
+    assert_eq!(gb.debug_read_banked(7, 0xFF80), gb.debug_read(0xFF80));
+}
+
+#[test]
+fn cdl_flag_banked_reads_explicit_banks() {
+    let mut gb = GameBoy::new(Model::Dmg, mbc1_4bank_rom()).unwrap();
+    gb.set_cdl(true);
+    let n = gb.cdl_flags().unwrap().len();
+    let mut fx = vec![0u8; n];
+    fx[0x4000] = 4; // ROM bank 1 @ 0x4000 physical
+    fx[3 * 0x4000] = 1; // ROM bank 3 @ 0x4000 physical
+    assert!(gb.load_cdl(&fx));
+    // Any bank is reachable regardless of the live BANK1.
+    assert_eq!(gb.cdl_flag_banked(1, 0x4000), 4);
+    assert_eq!(gb.cdl_flag_banked(3, 0x4000), 1);
+    assert_eq!(gb.cdl_flag_banked(2, 0x4000), 0, "unmarked bank reads 0");
+    // A bank matching the live mapping agrees with cdl_flag.
+    let cur = gb.rom_bank() as u16;
+    assert_eq!(gb.cdl_flag_banked(cur, 0x4000), gb.cdl_flag(0x4000));
+    // Log off → 0.
+    gb.set_cdl(false);
+    assert_eq!(gb.cdl_flag_banked(1, 0x4000), 0);
+}
+
+#[test]
 fn cdl_is_rom_bank_aware() {
     // The flat-64K store collapsed every ROM bank onto 0x4000-0x7FFF; the
     // physical store keys each bank to its own slot (mark and read share the

@@ -31,6 +31,7 @@ mod filepicker;
 mod input;
 mod keymap;
 mod link;
+mod mcp;
 mod menupopup;
 mod pacing;
 mod screenshot;
@@ -289,6 +290,10 @@ struct App {
     /// Serial Link-cable transport (bgb's Link submenu). Inert until Listen /
     /// Connect; pumped once per emulated frame to swap bytes with the peer.
     link: link::Link,
+    /// Opt-in MCP debug server (`--mcp-port` / `SLOPGB_MCP_PORT`). Inert unless
+    /// started; pumped each wake to serve an agent's tool calls against the live
+    /// machine.
+    mcp: mcp::Mcp,
 }
 
 impl App {
@@ -354,6 +359,7 @@ impl App {
             fallback_picker: None,
             fallback_last_click: None,
             link: link::Link::new(),
+            mcp: mcp::Mcp::new(),
             recent,
             menu_popup: None,
             window_size,

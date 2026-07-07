@@ -402,6 +402,14 @@ impl GameBoy {
         self.bus.cdl_flag(addr)
     }
 
+    /// The CDL access flags at an **explicit** bank of the banked regions
+    /// (ROMX / VRAM / WRAMX); elsewhere `bank` is ignored (== [`Self::cdl_flag`]).
+    /// For the MCP/debug `cdl` tool. Read-only, golden-safe.
+    #[must_use]
+    pub fn cdl_flag_banked(&self, bank: u16, addr: u16) -> u8 {
+        self.bus.cdl_flag_banked(bank, addr)
+    }
+
     /// The whole CDL flag buffer (for a save), or `None` when the log is off.
     #[must_use]
     pub fn cdl_flags(&self) -> Option<&[u8]> {
@@ -736,6 +744,16 @@ impl GameBoy {
     #[must_use]
     pub fn debug_read(&self, addr: u16) -> u8 {
         self.bus.debug_read(addr)
+    }
+
+    /// Like [`Self::debug_read`] but reads a specific **bank** of the banked
+    /// regions (ROMX `0x4000-0x7FFF`, VRAM `0x8000-0x9FFF`, WRAMX
+    /// `0xD000-0xDFFF`) rather than the live one — so the MCP/debug tools can
+    /// dump an arbitrary bank. Outside those regions `bank` is ignored
+    /// (== [`Self::debug_read`]). Read-only, golden-safe.
+    #[must_use]
+    pub fn debug_read_banked(&self, bank: u16, addr: u16) -> u8 {
+        self.bus.debug_read_banked(bank, addr)
     }
 
     /// The top `n` 16-bit words of the stack as `(address, word)` pairs,

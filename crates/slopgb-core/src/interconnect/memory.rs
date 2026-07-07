@@ -270,6 +270,32 @@ impl Interconnect {
         }
     }
 
+    /// Like [`Self::debug_read`] but reads a specific **bank** of the three
+    /// banked regions instead of the live one, so the MCP/debug tools can dump
+    /// ROMX / VRAM / WRAMX at an arbitrary bank (e.g. disassemble ROM bank 3
+    /// while bank 5 is mapped). Outside those regions `bank` is meaningless and
+    /// this is exactly [`Self::debug_read`]. Banks wrap within the physical size
+    /// (never OOB). Side-effect-free (`&self`).
+    pub(crate) fn debug_read_banked(&self, bank: u16, addr: u16) -> u8 {
+        match addr {
+            // ROMX: explicit ROM bank (no boot ROM ever overlays 0x4000+).
+            0x4000..=0x7FFF => self.cart.rom_read_banked(bank, addr),
+            // VRAM: explicit bank (0/1); both banks are always allocated.
+            0x8000..=0x9FFF => {
+                self.ppu.debug_vram()[usize::from(bank & 1) * 0x2000 + usize::from(addr & 0x1FFF)]
+            }
+            // WRAMX (0xD000-0xDFFF): explicit WRAM bank (SVBK 0 → bank 1, like
+            // the hardware; DMG has only bank 1, so any bank folds to it).
+            0xD000..=0xDFFF => {
+                let nbanks = (self.wram.len() / 0x1000).max(1);
+                let b = usize::from(bank).max(1) % nbanks;
+                self.wram[b * 0x1000 + usize::from(addr & 0x0FFF)]
+            }
+            // ROM0 / WRAM0 / echo / OAM / IO / HRAM / IE: unbanked → live peek.
+            _ => self.debug_read(addr),
+        }
+    }
+
     fn io_read(&self, addr: u16) -> u8 {
         match addr {
             0xFF00 => self.joypad.read(),
