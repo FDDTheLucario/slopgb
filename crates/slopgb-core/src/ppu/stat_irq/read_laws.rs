@@ -138,6 +138,31 @@ impl Ppu {
         {
             return 3;
         }
+        // EAGER line-start mode-2 back-date (SS, CGB): the eager cc+0 read
+        // samples the PPU 4 dots (+8 hd) before the tier2 deferred cc+4 read,
+        // so the CPU-visible line-start mode-0 window `[0,4)` back-dates by that
+        // debt to the previous line's tail `[-4,0)` — the SAME −4 back-date the
+        // mode-2→3 entry already takes (`mode3_entry_dot` 84→80). A visible-line
+        // read at dots 0-3 then sees the OAM scan (mode 2), matching SameBoy's
+        // cc+4 view — the mode-0-ISR handler's FF41 read lands at the next line's
+        // start (`m0stat`/`late_m0int_halt_m0stat`/`m0irq_m0stat`, all want 2;
+        // CGB reads 2 there while DMG reads 0, so this is CGB-scoped). Tier2's
+        // `read_deferred` already advances `self.dot` to cc+4, reading mode 2
+        // natively → `eager_value`-only (no double-shift). SS: the DS debt is
+        // +2 dots (`read_pos_hd` DS +4 hd) and the carried DS ISR reads take the
+        // `read_carried` arm above. Never fires flag-off → byte-identical.
+        if self.eager_value
+            && !self.ds
+            && self.model.is_cgb()
+            && self.line >= 1
+            && self.line < 144
+            && !self.glitch_line
+            && !self.line_render_done
+            && m == 0
+            && self.dot < 4
+        {
+            return 2;
+        }
         let Some(exit_adj) = self.vis_exit_hd(m) else {
             return m;
         };
