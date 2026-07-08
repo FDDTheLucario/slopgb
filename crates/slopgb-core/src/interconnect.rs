@@ -788,7 +788,18 @@ impl Bus for Interconnect {
         // below is unchanged — `Ppu::stage_write` affects only the
         // pipeline's register view (mealybug m3_* mid-mode-3 writes).
         if let 0xFF40 | 0xFF42 | 0xFF43 | 0xFF47..=0xFF4B = addr {
-            let dots = if self.double_speed { 1 } else { 2 };
+            // Under `eager_value` the tier2 per-register render-frame stage
+            // offsets apply on the eager clock (mid-mode-3 SCX/SCY/palette/WX/
+            // LCDC land at the tier2 render position); off (production +
+            // tier2-off) this stays byte-identical to the gambatte {2 SS, 1 DS}
+            // mid-cycle staging.
+            let dots = if self.eager_value {
+                self.stage_write_dots(addr)
+            } else if self.double_speed {
+                1
+            } else {
+                2
+            };
             self.ppu.stage_write(addr, value, dots);
         }
         self.tick_machine();
