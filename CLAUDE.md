@@ -246,6 +246,20 @@ emulated s.
   parked). Gates: golden byte-identical, mooneye 91/91 OFF+tier2, tier2 two-bin
   291 unchanged, eager intr_2_mode0/mode3/sprites PASS, clippy clean. Map:
   `measurements/eager-coupled-slice-2026-07-07.md`.
+- **#11bz–#11cb — EV convergence 553 → 516 → 462 → 428, each clean flag-gated
+  read-frame port.** #11bz DS read-debt + accessibility/palette (553→516,
+  `eager-ds-debt-slice`); #11ca STOP-shift/lcd-offset frame install (516→462,
+  `eager-stopshift-slice`); **#11cb the line-start mode-2 back-date** (462→428,
+  `6666d9d` SS + `bc68a24` DS, `eager-linestart-mode2-slice-2026-07-08.md`) — the
+  eager cc+0 read's `[0,4)` mode-0 window was the ONE boundary never back-dated by
+  the read-debt (the mode-2→3 entry `84→80` + mode-3 exit `read_pos_hd` already
+  are), so mode-0-ISR line-start reads read 0 where SameBoy's cc+4 view reads
+  mode 2; CGB+`eager_value`-scoped, CLEAN 34/0. The `vis_early` accessibility
+  release was REVERTED as a shuffle (needs the reclocked dot, not a gate flip).
+  Residual 428 = counter-pinned dispatch reads (129, C3-flip), DS mid-dot floor
+  (94), halt-wake (unported wake clock), HDMA DMA-service. Gates all hold
+  (golden/tier2-291/mooneye/EV-DMG-147/intr_2). Next: the halt-wake clock port +
+  the HDMA `defer_steal` eager replication.
 - **History:** per-session port narrative in
   [`docs/sameboy-port/STATE-HISTORY.md`](docs/sameboy-port/STATE-HISTORY.md)
   (verbatim archive) and
