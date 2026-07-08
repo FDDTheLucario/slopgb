@@ -108,7 +108,7 @@ impl Ppu {
                 if old & LCDC_WIN_ENABLE == 0
                     && value & LCDC_WIN_ENABLE != 0
                     && self.render.active
-                    && self.tier2_reclock
+                    && (self.tier2_reclock || self.eager_value)
                 {
                     self.render.win_reenable_dot = self.dot;
                     // A FIRST enable (window neither active nor aborted this

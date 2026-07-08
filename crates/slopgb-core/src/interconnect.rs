@@ -757,6 +757,13 @@ impl Bus for Interconnect {
         // Latch the leading-edge (cc+0) value for PPU-positional reads
         // *before* the PPU advances. Inert while the flag is off (`None`).
         let leading = self.leading_edge_sample(addr);
+        // The eager-value carried-read peek (armed at the STAT ack in
+        // `ack_impl`) is one-shot: `leading_edge_sample`'s FF41 read has now
+        // consumed `read_carried` inside `vis_mode_read`, so clear it (the
+        // tier2 twin clears in `read_deferred`). Never set flag-off → no-op.
+        if self.eager_value && addr == 0xFF41 {
+            self.ppu.set_read_carried(false);
+        }
         self.service_vram_dma();
         self.tick_machine();
         // A trigger inside this very cycle still steals the bus before

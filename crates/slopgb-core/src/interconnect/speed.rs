@@ -190,6 +190,20 @@ impl Interconnect {
                 if self.tier2_reclock {
                     self.ppu.arm_ack_squash(bit);
                 }
+                // Eager-value carried-read peek: the tier2 dispatch retime
+                // (`dispatch_retime_impl`) arms `read_carried` for a STAT
+                // OAM/HBlank ISR so the handler's first FF41 mode read takes
+                // the source's read-position carry (`isr_read_carry_hd`);
+                // under the eager clock the dispatch stays cc+4 (no retime),
+                // so arm the same VERDICT peek here at the STAT (bit 1) ack.
+                // Cleared one-shot after the FF41 read in `Bus::read`. Never
+                // fires flag-off (`eager_value` false) → byte-identical.
+                if self.eager_value
+                    && bit == 1
+                    && (self.ppu.stat_rise_oam() || self.ppu.stat_rise_m0())
+                {
+                    self.ppu.set_read_carried(true);
+                }
             }
             2 | 3 => {
                 // updateTimaIrq(cc + 2 + isCgb()) / updateSerial(cc + 3 +
