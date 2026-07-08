@@ -253,7 +253,7 @@ impl Ppu {
             // want=3 rows render bare via the WY-latch); it is the
             // visible-mode half of the parallel window-length model. See the
             // `vis_hold_until` field docs.
-            if self.tier2_reclock && self.render.win_active {
+            if (self.tier2_reclock || (self.eager_value && !self.ds)) && self.render.win_active {
                 self.vis_hold_until = 263 + u16::from(self.scx & 7);
             }
             // The accessibility unblock (this `line_render_done` rise) is
@@ -277,7 +277,7 @@ impl Ppu {
             // `vramw_m3end_scx5_ds_{2,4}` write-end floors — the DS read grid is
             // its own reclock. Tier2 + bare lines + `!ds`; `bare_flip` is
             // false in production → byte-identical OFF.
-            let access_lead = if self.tier2_reclock && !self.ds {
+            let access_lead = if (self.tier2_reclock || self.eager_value) && !self.ds {
                 -8i8
             } else {
                 0i8

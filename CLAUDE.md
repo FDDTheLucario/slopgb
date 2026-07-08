@@ -231,6 +231,21 @@ emulated s.
   lever: wire the half-dot read (`tick_half`/`dhalf`) on the eager `Bus::read`
   (HALFDOT Part B), THEN gate `vis_mode_read` on `eager_value`. Map:
   `measurements/eager-atomic-core-2026-07-07.md`.
+- **#11by — the COUPLED render-length ∧ read-exit slice SHIPPED: EV SS
+  convergence STARTED (EV CGB 578→553, clean +25/−0).** Overturns #11bw's
+  "half-dot-blocked" read: the SS window `_1`/`_2` pairs separate WHOLE-DOT once
+  the render-LENGTH laws (`vis_hold_until`, `wx_match_dot`/`win_predraw_abort`
+  latches, `wy_trig_sb` shadow) are coupled to the read-EXIT web
+  (`vis_exit_hd`), enabled `eager_value && !ds` with a PRINCIPLED `+8hd`
+  read-debt (cc+0→cc+4) — NOT the half-dot. Recovery: window 21 (arm1/D1 length
+  + arm2 shadow + D3 abort + D6 un-trigger), accessibility 4 (`access_lead=-8`).
+  EV DMG 172→147 bonus. Entry stays 80 (intr_2-safe); `early_lead`/`snap_ok`
+  NOT enabled (they move the sprite-line dispatch → break `intr_2_*_sprites`).
+  DS `!ds`-scoped (returns native; the `lcd_shift_dots`/`sb_dsa8` DS half-dot
+  alignment is the next sub-lever — un-scoped reaches 539 via a DS pair-shuffle,
+  parked). Gates: golden byte-identical, mooneye 91/91 OFF+tier2, tier2 two-bin
+  291 unchanged, eager intr_2_mode0/mode3/sprites PASS, clippy clean. Map:
+  `measurements/eager-coupled-slice-2026-07-07.md`.
 - **History:** per-session port narrative in
   [`docs/sameboy-port/STATE-HISTORY.md`](docs/sameboy-port/STATE-HISTORY.md)
   (verbatim archive) and
