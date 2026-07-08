@@ -220,8 +220,8 @@ impl Interconnect {
         // Pin the post-switch exit-table anchor: the FIRST LCD-on
         // switching STOP since the last enable classifies the dance
         // (mid-frame speedchange anchor vs the VBlank/boot prologue frame
-        // the tier2 suite constants absorb). Tier2-only, byte-identical OFF.
-        if self.tier2_reclock && switching {
+        // the tier2 suite constants absorb). Tier2 + eager, byte-identical OFF.
+        if (self.tier2_reclock || self.eager_value) && switching {
             self.ppu.note_switch_stop();
         }
         probe!(if crate::probe::s5dbg_on() {
@@ -352,8 +352,13 @@ impl Interconnect {
         // +2 half-dots per switch (with K=2/switch the post-switch polled
         // reads land exactly at SameBoy's read cfl − 4, and the half-dot bare
         // exit E(scx) = 510 + 2*scx closes all four scx1/scx2 `_1`/`_2` pairs,
-        // co-landing with that exit). Tier2-only; production byte-identical.
-        if self.tier2_reclock {
+        // co-landing with that exit). Tier2 + eager; production byte-identical
+        // (both off). The eager re-host shares the STOP-shift install so the
+        // `speedchange`/`lcd_offset` reads classify on the same un-shifted frame
+        // the tier2 `law_pos` consumers (`access.rs`, `stat_irq`, `ff0f`,
+        // `regs`, `lyc`, `blocking`) + the `vis_exit_hd` post-switch exit-table
+        // arms (`stop_anchor_midframe`/`stop_leave_*`) already read.
+        if self.tier2_reclock || self.eager_value {
             // K in 8 MHz HALF-dots (the grain): odd K leaves the PPU on a
             // half-dot skew relative to the CPU grid (`dhalf` persists), the
             // odd-mode alignment SameBoy's whole-freeze cannot represent.
