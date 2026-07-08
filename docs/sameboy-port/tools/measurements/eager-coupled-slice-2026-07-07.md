@@ -78,6 +78,13 @@ web is `!ds`-scoped: DS returns native `vis_mode` (byte-identical to the EV
 baseline, measured 0 DS breaks). **The DS half-dot alignment is the next
 sub-lever; porting it recovers the DS pairs cleanly (est. +14 net beyond 553).**
 
+> **RESOLVED #11bz** (`eager-ds-debt-slice-2026-07-07.md`): the uniform +8 was
+> the WRONG debt for DS — a DS M-cycle is 2 dots, so the DS read-debt is +4 hd.
+> Splitting `read_pos_hd` (SS +8 / DS +4) + un-`!ds`-scoping the web landed CLEAN
+> (34 fixed / 6 broke, 553 → 525), + DS accessibility (525 → 517) + palette (517
+> → 516). EV CGB **553 → 516**. Next: the DS sub-DOT (`sb_dsa8` mid-dot +
+> `read_carried` ISR carry on the eager dispatch) + the STOP-shift frame.
+
 ## Gate state (ALL hold)
 
 - golden_fingerprint (`--release`) PASS — production byte-identical (`eager_value` off).
