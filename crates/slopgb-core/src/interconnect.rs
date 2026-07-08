@@ -856,6 +856,12 @@ impl Bus for Interconnect {
         let _leading_edge = self.clock.read();
         // Leading-edge sample (cc+0), inert while the flag is off.
         let leading = self.leading_edge_sample(addr);
+        // Mirror `Bus::read`: clear the one-shot eager carried-read peek once
+        // the FF41 read has consumed it (the tier2 twin clears both paths in
+        // `read_deferred`). Never set flag-off → no-op.
+        if self.eager_value && addr == 0xFF41 {
+            self.ppu.set_read_carried(false);
+        }
         self.service_vram_dma();
         self.tick_machine();
         self.service_vram_dma(); // reads yield to a same-cycle trigger
