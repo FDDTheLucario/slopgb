@@ -323,7 +323,7 @@ impl Ppu {
             // returns open here (the whole-M-cycle `pal_access_edge` stamp in
             // `interconnect/memory.rs` carries its cc+4 straddle law);
             // `pal_open_dot` is never read flag-off → byte-identical.
-            return self.tier2_reclock
+            return (self.tier2_reclock || self.eager_value)
                 && self.model.is_cgb()
                 && !self.glitch_line
                 && self.pal_open_dot != 0
@@ -331,7 +331,7 @@ impl Ppu {
         }
         let lock = if self.glitch_line {
             GLITCH_MODE3_START
-        } else if self.tier2_reclock && self.model.is_cgb() && !self.ds {
+        } else if (self.tier2_reclock || self.eager_value) && self.model.is_cgb() && !self.ds {
             // The tier2 SS mode-3 entry lock is the
             // mode-3 anchor 84 itself: the `*_m3start_2` triplet (SameBoy-pass)
             // accesses at dot 84 and wants BLOCKED (read FF / write dropped)
@@ -354,7 +354,7 @@ impl Ppu {
         };
         // Shifted ROMs classify the access on the un-shifted frame
         // (the machine STOPADV advance; identity otherwise).
-        if self.tier2_reclock && self.model.is_cgb() && !self.ds {
+        if (self.tier2_reclock || self.eager_value) && self.model.is_cgb() && !self.ds {
             let (_, ld) = self.law_pos();
             return ld >= lock;
         }
