@@ -62,13 +62,12 @@ impl Ppu {
     /// (`tier2_reclock` off → native [`Self::vis_mode`]).
     pub(super) fn vis_mode_read(&self) -> u8 {
         let m = self.vis_mode();
-        // Under the eager clock the read-law web is enabled for SINGLE SPEED
-        // only: the DS read sits at a different sub-M-cycle offset (the "+3 not
-        // +4" ISR offset) whose alignment lives in the tier2-gated
-        // `lcd_shift_dots`/`sb_dsa8` shadow — un-ported on the eager clock, so
-        // an EV DS read stays on the native `vis_mode` (byte-identical to the
-        // EV baseline; DS is the separate later sub-lever).
-        if !(self.tier2_reclock || (self.eager_value && !self.ds)) {
+        // Under the eager clock the read-law web is enabled at BOTH speeds: the
+        // DS read-debt is +4 hd (the DS M-cycle is 2 dots, half the SS 4), so
+        // `read_pos_hd` lands the eager DS read at the tier2 DS deferred position
+        // the `vis_exit_hd` `ds1`/DS arms are calibrated to. Native `vis_mode`
+        // returned only in production (`tier2_reclock`/`eager_value` both off).
+        if !(self.tier2_reclock || self.eager_value) {
             return m;
         }
         // The DS mode-2 ISR line-start read probes the mode0→2

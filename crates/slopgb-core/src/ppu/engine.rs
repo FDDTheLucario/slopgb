@@ -275,22 +275,34 @@ impl Ppu {
     /// polled reads stay uncarried. Production reads never resolve mid-dot
     /// (`dhalf` stays 0 flag-off) and no flag-off law consumes this.
     pub(crate) fn read_pos_hd(&self) -> i32 {
-        // The eager cc+0 → deferred cc+4 read-debt in 8 MHz half-dots (4 dots).
-        const EAGER_READ_DEBT_HD: i32 = 8;
+        // The eager cc+0 → deferred read-debt in 8 MHz half-dots. Single speed:
+        // an M-cycle is 4 dots (8 hd), so the deferred read lands 4 dots ahead of
+        // the eager cc+0. DOUBLE SPEED: the CPU M-cycle is 2 dots (4 hd — the CPU
+        // runs 2×), so the deferred DS read lands only 2 dots (4 hd) ahead; the
+        // tier2 DS exit constants (`vis_exit_hd`'s `ds1`/DS arms) are calibrated
+        // to that +2-dot deferred position, so the eager DS read must advance the
+        // matching +4 hd to resolve them on the same frame.
+        const EAGER_READ_DEBT_HD_SS: i32 = 8;
+        const EAGER_READ_DEBT_HD_DS: i32 = 4;
         let base = 2 * i32::from(self.dot) + i32::from(self.dhalf);
         // Eager-clock read-debt: the eager `Bus::read` samples FF41 at cc+0 (this
-        // M-cycle's leading edge), 4 dots (8 half-dots) BEFORE the deferred read
-        // (`read_deferred` pays the previous M-cycle's parked 4T, landing at the
-        // cc+4-equivalent position) that the tier2 exit constants in
-        // [`Ppu::vis_exit_hd`] are calibrated against. Advance the eager read
-        // position by that debt so the (single-speed) exit constants resolve at
-        // the same frame — the coupled render-length + read-exit laws then
-        // separate the SS window `_1`/`_2` pairs on the eager clock (measured:
-        // CGB two-bin 578→553). DS returns native before this is consulted
-        // (`vis_mode_read`), so the shift is inert there — the DS sub-M-cycle
-        // alignment is the separate `lcd_shift_dots`/`sb_dsa8` lever. Never fires
-        // flag-off (`eager_value` false) → production byte-identical.
-        base + if self.eager_value { EAGER_READ_DEBT_HD } else { 0 }
+        // M-cycle's leading edge), one M-cycle (SS 4 dots / DS 2 dots) BEFORE the
+        // deferred read (`read_deferred` pays the previous M-cycle's parked debt,
+        // landing at the cc+4-equivalent position) that the tier2 exit constants
+        // in [`Ppu::vis_exit_hd`] are calibrated against. Advance the eager read
+        // position by that debt (SS +8 hd / DS +4 hd) so the exit constants
+        // resolve at the same frame — the coupled render-length + read-exit laws
+        // then separate the window `_1`/`_2` pairs on the eager clock at BOTH
+        // speeds (measured: SS coupling CGB two-bin 578→553, DS debt 553→525).
+        // The residual DS sub-dot (`sb_dsa8` mid-dot / `read_carried` ISR carry)
+        // is not reconstructed on the eager whole-dot clock, so a handful of DS
+        // pre-draw-abort / STOP-shift legs stay parked. Never fires flag-off
+        // (`eager_value` false) → production byte-identical.
+        base + if self.eager_value {
+            if self.ds { EAGER_READ_DEBT_HD_DS } else { EAGER_READ_DEBT_HD_SS }
+        } else {
+            0
+        }
     }
 
     /// The per-ISR deferred-read sub-M-cycle carry (8 MHz half-dots),
