@@ -96,7 +96,7 @@ impl Ppu {
     /// keep `line_render_done`). `tier2_reclock` gate + `!leading_edge_reads`
     /// in production → byte-identical OFF.
     fn ds_lineend_open(&self) -> bool {
-        self.tier2_reclock
+        (self.tier2_reclock || self.eager_value)
             && self.model.is_cgb()
             && self.ds
             && self.line >= 1
@@ -135,7 +135,7 @@ impl Ppu {
         } else {
             (1..CGB_LINESTART_OAM_OPEN).contains(&ld)
         };
-        self.tier2_reclock && self.model.is_cgb() && self.line != 0 && in_window
+        (self.tier2_reclock || self.eager_value) && self.model.is_cgb() && self.line != 0 && in_window
     }
 
     pub(crate) fn oam_write_blocked(&self) -> bool {
@@ -219,7 +219,7 @@ impl Ppu {
         // write's M-cycle cost SameBoy spreads across the readback —
         // `vramw_m3end_ds_2` stays blocked where the write-free
         // `prewrite_ds`/`postread_ds` readbacks are open).
-        if self.tier2_reclock && self.model.is_cgb() && !self.glitch_line {
+        if (self.tier2_reclock || self.eager_value) && self.model.is_cgb() && !self.glitch_line {
             // Line-END VRAM read release at the bare exit, BOTH speeds: the
             // SS refusal ("co-temporal with vramw_m3end") is resolved
             // by the wr_recent discriminator — the vramw readback follows
@@ -285,7 +285,7 @@ impl Ppu {
             // sits later on the dot grid, so the mode-3 write lock covers it
             // from dot 82 (`prewrite_ds_2` wants its ~dot82 write BLOCKED
             // while `_1`'s earlier write lands).
-            if self.tier2_reclock && self.model.is_cgb() && self.ds {
+            if (self.tier2_reclock || self.eager_value) && self.model.is_cgb() && self.ds {
                 // Same shifted-poll-quantum +1 as the read lock. (A line-END
                 // write release twin was built + REVERTED: it fixed nothing
                 // and broke a vramw_m3end want-dropped write, measured.)
