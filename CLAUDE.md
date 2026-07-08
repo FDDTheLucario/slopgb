@@ -218,6 +218,19 @@ emulated s.
   all three families (render DONE, dispatch atomic #11br, S6 completion welded
   #11bu); the flip is gated SOLELY on the coherent per-T retime (HALFDOT Part A).
   Map: `measurements/s6-completion-weld-refuted-2026-07-04.md`.
+- **#11bw — the EAGER-VALUE (EV) atomic core BUILD-MEASURED as HALF-DOT-BLOCKED on
+  the read-frame (no code shipped, tree byte-identical @ ace4d31).** The eager
+  clock (dispatch cc+4) + tier2 read-laws as cc+0 peeks: enabling `vis_mode_read`
+  under `eager_value` is frame-mismatched — EV CGB two-bin 578→601 (+0hd) /
+  585 (+4hd) / 578 (+8hd == native), a MONOTONE whole-dot curve that never dips
+  below 578. The window `vis_exit_hd` arms are FIXED deferred-frame (`259+SCX&7`);
+  the bare arm is EMERGENT eager-frame (`2*flip+2`) — they need DIFFERENT frames,
+  i.e. the read must resolve to its true HALF-DOT (odd-hd `dhalf`), UNREACHABLE
+  while the eager read keeps `dhalf==0`. intr_2 is SAFE at +8hd (entry stays
+  frame-80). Slice #2a write-commit is net-zero on EV alone (atomicity). Next
+  lever: wire the half-dot read (`tick_half`/`dhalf`) on the eager `Bus::read`
+  (HALFDOT Part B), THEN gate `vis_mode_read` on `eager_value`. Map:
+  `measurements/eager-atomic-core-2026-07-07.md`.
 - **History:** per-session port narrative in
   [`docs/sameboy-port/STATE-HISTORY.md`](docs/sameboy-port/STATE-HISTORY.md)
   (verbatim archive) and
