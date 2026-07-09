@@ -88,7 +88,11 @@ fn post_boot_wram_power_on_pattern() {
     }
     let b = booted(Model::Cgb);
     for addr in [0xC100u16, 0xC800, 0xDE00] {
-        assert_eq!(b.peek_no_io(addr), 0x00, "CGB WRAM zero-filled at {addr:04X}");
+        assert_eq!(
+            b.peek_no_io(addr),
+            0x00,
+            "CGB WRAM zero-filled at {addr:04X}"
+        );
     }
 }
 

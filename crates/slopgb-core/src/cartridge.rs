@@ -469,7 +469,8 @@ impl Cartridge {
     /// Side-effect-free.
     #[must_use]
     pub fn ram_read_banked(&self, bank: u16, addr: u16) -> u8 {
-        self.ram_offset_banked(bank, addr).map_or(0xFF, |i| self.ram[i])
+        self.ram_offset_banked(bank, addr)
+            .map_or(0xFF, |i| self.ram[i])
     }
 
     /// Write raw bytes to an explicit RAM bank for the debug memory editor

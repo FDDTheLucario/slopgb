@@ -64,7 +64,10 @@ fn scroll_disasm_moves_by_instruction_and_pins() {
     assert_eq!(st.disasm_base, 0x0103, "down one = past the 3-byte insn");
     assert!(st.pinned, "manual scroll detaches follow");
     st.scroll_disasm(-1, read);
-    assert_eq!(st.disasm_base, 0x0100, "up one = back-scan to predecessor start");
+    assert_eq!(
+        st.disasm_base, 0x0100,
+        "up one = back-scan to predecessor start"
+    );
 }
 
 #[test]
@@ -87,7 +90,15 @@ fn stack_hit_test_honors_offset() {
     };
     let l = DebuggerLayout::for_size(AREA.w, AREA.h);
     // Row 0 of a stack scrolled down 2 words = SP - (2+0)*2 = SP - 4.
-    let t = target_at(NOPS, AREA, &st, 0x0100, 0xFFFE, l.stack.x + 2, l.stack.y + 1);
+    let t = target_at(
+        NOPS,
+        AREA,
+        &st,
+        0x0100,
+        0xFFFE,
+        l.stack.x + 2,
+        l.stack.y + 1,
+    );
     assert_eq!(t, ClickTarget::Stack(0xFFFA));
 }
 
@@ -147,7 +158,12 @@ fn double_click_disasm_toggles_a_breakpoint() {
 #[test]
 fn address_list_menu_appends_symbol_names() {
     let syms = SymbolTable::parse("00:0150 Reset");
-    let m = address_list_menu(&[0x0150, 0xC000], DebugAction::ClearBreakpoint, &syms, (40, 30));
+    let m = address_list_menu(
+        &[0x0150, 0xC000],
+        DebugAction::ClearBreakpoint,
+        &syms,
+        (40, 30),
+    );
     // The known address gets its symbol name appended; the unknown one doesn't.
     assert!(m.items[0].label.contains("0150") && m.items[0].label.contains("Reset"));
     assert!(m.items[1].label.contains("C000") && !m.items[1].label.contains("Reset"));

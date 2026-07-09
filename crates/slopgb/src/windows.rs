@@ -99,7 +99,10 @@ impl MemoryView {
     /// `frac` = base position, `vis` = visible fraction (thumb size).
     #[must_use]
     pub fn scroll_frac(&self, visible: usize) -> (f32, f32) {
-        (self.mem_base as f32 / f32::from(u16::MAX), visible as f32 * 16.0 / 65536.0)
+        (
+            self.mem_base as f32 / f32::from(u16::MAX),
+            visible as f32 * 16.0 / 65536.0,
+        )
     }
 
     /// Jump the base to `frac` (0..1) of the 64 KiB space (row-aligned), from a
@@ -126,9 +129,10 @@ impl MemoryView {
         }
         if let Some((b, a)) = t.split_once(':') {
             let addr = a.trim().trim_start_matches('$').trim_start_matches("0x");
-            if let (Ok(bank), Ok(addr)) =
-                (u16::from_str_radix(b.trim(), 16), u16::from_str_radix(addr, 16))
-            {
+            if let (Ok(bank), Ok(addr)) = (
+                u16::from_str_radix(b.trim(), 16),
+                u16::from_str_radix(addr, 16),
+            ) {
                 self.bank = Some(bank);
                 self.mem_base = addr;
                 self.cursor = addr;
@@ -277,7 +281,9 @@ fn cdl_tint(c: &mut Canvas, gb: &GameBoy, body: Rect, base: u16, bank: Option<u1
         for col in 0..16i32 {
             let addr = base.wrapping_add((row * 16 + col) as u16);
             let flag = match bank {
-                Some(sel) => gb.cdl_flag_banked(effective_bank(sel, gb.region_bank_count(addr)), addr),
+                Some(sel) => {
+                    gb.cdl_flag_banked(effective_bank(sel, gb.region_bank_count(addr)), addr)
+                }
                 None => gb.cdl_flag(addr),
             };
             if let Some(bg) = crate::cdl::cdl_color(flag) {
@@ -512,7 +518,13 @@ fn render_debugger(
     );
     // Profiler: overlay per-line execution counts while logging (MB5).
     if gb.profiling() {
-        debugger::render_profile_counts(c, scroll_content(l.disasm), &rows, |a| gb.profile_count(a), theme);
+        debugger::render_profile_counts(
+            c,
+            scroll_content(l.disasm),
+            &rows,
+            |a| gb.profile_count(a),
+            theme,
+        );
     }
     debugger::render_regs(c, l.regs, &regs_view(gb, st.clock_base), theme);
     let stack_rows = (l.stack.h / line_height()).max(0) as usize;
@@ -539,7 +551,10 @@ fn render_debugger(
     if let Some(chip) = bank_chip_label(gb, st.mem_base, st.mem_bank) {
         let w = (chip.len() as i32) * GLYPH_W as i32;
         let cx = (l.memory.right() - w - 2).max(l.memory.x);
-        c.fill_rect(Rect::new(cx - 1, l.memory.y, w + 2, line_height()), theme.current);
+        c.fill_rect(
+            Rect::new(cx - 1, l.memory.y, w + 2, line_height()),
+            theme.current,
+        );
         draw_text(c, cx, l.memory.y, &chip, theme.bg);
     }
     // Draggable scrollbars on the three scrollable panes (right-edge strip).
@@ -679,12 +694,28 @@ fn render_vram(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, state: &
             // Left = BG tilemap with the screen viewport box; right = window
             // tilemap with the WX/WY region box (both gated by `scxy`).
             vram::render_bgmap(
-                c, left, gb.vram(), bg_base, signed, &pals[..n], cgb, s,
-                screen_overlay(gb, state.scxy), theme,
+                c,
+                left,
+                gb.vram(),
+                bg_base,
+                signed,
+                &pals[..n],
+                cgb,
+                s,
+                screen_overlay(gb, state.scxy),
+                theme,
             );
             vram::render_bgmap(
-                c, right, gb.vram(), win_base, signed, &pals[..n], cgb, s,
-                window_overlay(gb, state.scxy), theme,
+                c,
+                right,
+                gb.vram(),
+                win_base,
+                signed,
+                &pals[..n],
+                cgb,
+                s,
+                window_overlay(gb, state.scxy),
+                theme,
             );
         }
         VramTab::Palettes => {
@@ -960,7 +991,14 @@ fn tile_details(lx: i32, ly: i32, scale: i32, mask8: bool) -> Vec<String> {
 /// the left (bank 0) or right (bank 1) grid — geometry from [`tiles_two_col`] —
 /// and print the real bank in the `bank:addr` label. A hover in the gutter or
 /// off-grid yields no tile.
-fn tile_details_two(lx: i32, ly: i32, left: Rect, right: Rect, scale: i32, mask8: bool) -> Vec<String> {
+fn tile_details_two(
+    lx: i32,
+    ly: i32,
+    left: Rect,
+    right: Rect,
+    scale: i32,
+    mask8: bool,
+) -> Vec<String> {
     let (bank, gx) = if lx < left.w {
         (0, lx)
     } else {
@@ -1041,7 +1079,10 @@ fn bgmap_details_two(
     let cell = debug::bg_map(gb.vram(), base)[idx];
     let tile = vram::tile_index(cell.tile, signed);
     vec![
-        format!("{}  X {col}  Y {row}", if is_window { "Window" } else { "BG" }),
+        format!(
+            "{}  X {col}  Y {row}",
+            if is_window { "Window" } else { "BG" }
+        ),
         format!("Tile No. {}", dec_hex(u32::from(cell.tile), mask8)),
         format!("Attribute {:02X}", cell.attr),
         format!("Map address {:04X}", base as usize + idx),

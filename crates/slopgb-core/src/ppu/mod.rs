@@ -127,16 +127,16 @@ mod engine;
 mod line_setup;
 mod lyc;
 mod oam_bug;
-#[path = "stat_irq/read_laws.rs"]
-mod stat_irq_read_laws;
 #[path = "stat_irq/reclock.rs"]
 mod reclock;
-#[path = "stat_irq/ff0f.rs"]
-mod stat_irq_ff0f;
 mod regs;
 mod render;
 mod sgb;
 mod stat_irq;
+#[path = "stat_irq/ff0f.rs"]
+mod stat_irq_ff0f;
+#[path = "stat_irq/read_laws.rs"]
+mod stat_irq_read_laws;
 mod state;
 
 use crate::SCREEN_PIXELS;

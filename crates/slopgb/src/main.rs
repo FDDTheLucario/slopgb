@@ -579,7 +579,11 @@ impl App {
         // every key (typing a code can't fire a hotkey); otherwise arrows move the
         // selection, Space toggles enable, Delete removes, Escape closes.
         if focus == Focus::Game && key.state.is_pressed() && self.cheat_dialog.is_some() {
-            if self.cheat_dialog.as_ref().is_some_and(cheat_ui::CheatDialog::editor_open) {
+            if self
+                .cheat_dialog
+                .as_ref()
+                .is_some_and(cheat_ui::CheatDialog::editor_open)
+            {
                 if let PhysicalKey::Code(code) = key.physical_key {
                     match code {
                         KeyCode::Tab => {
@@ -588,7 +592,10 @@ impl App {
                             }
                         }
                         KeyCode::Enter | KeyCode::NumpadEnter => {
-                            let edit = self.cheat_dialog.as_mut().and_then(cheat_ui::CheatDialog::accept);
+                            let edit = self
+                                .cheat_dialog
+                                .as_mut()
+                                .and_then(cheat_ui::CheatDialog::accept);
                             if let Some(e) = edit {
                                 self.apply_cheat_edit(&e);
                             }

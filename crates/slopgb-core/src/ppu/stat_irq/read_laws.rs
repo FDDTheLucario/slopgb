@@ -510,7 +510,8 @@ impl Ppu {
             && !self.ds
             && self.render.win_reenable_dot != 0
             && self.render.wx_match_dot != 0
-            && i32::from(self.render.win_reenable_dot) + 3 > i32::from(self.render.wx_match_dot) + scx7
+            && i32::from(self.render.win_reenable_dot) + 3
+                > i32::from(self.render.wx_match_dot) + scx7
             && self.eff.lcdc & LCDC_WIN_ENABLE != 0
             && self.render.win_active
             && self.bare_m3_visible(m)
@@ -763,7 +764,9 @@ impl Ppu {
         let boot_ly = if l == self.line { self.ly } else { l };
         match addr {
             0xFF41 => Some(
-                0x80 | self.stat_en | (u8::from(boot_ly == self.lyc) << 2) | self.boot_vis_mode(l, d),
+                0x80 | self.stat_en
+                    | (u8::from(boot_ly == self.lyc) << 2)
+                    | self.boot_vis_mode(l, d),
             ),
             0xFF44 => Some(boot_ly),
             0x8000..=0x9FFF => Some(if self.boot_vram_blocked(l, d) {

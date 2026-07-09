@@ -60,8 +60,7 @@ impl Ppu {
             if mfi_now == 0 && self.eng_mfi_prev == 3 && k >= 1 {
                 self.eng_stat = fin;
                 self.eng_stat_pending = None;
-                if self.stat_update.line()
-                    && !(fin & STAT_SRC_LYC != 0 && self.lyc_interrupt_line)
+                if self.stat_update.line() && !(fin & STAT_SRC_LYC != 0 && self.lyc_interrupt_line)
                 {
                     self.stat_update.force_level(false);
                 }
@@ -259,9 +258,7 @@ impl Ppu {
             // `*_ff45_disable_ds_1` legs, measured) and shifted frames
             // mis-map the window (`ff45_enable_weirdpoint_lcdoffset1_1`).
             self.lyc_interrupt_line = ly == i16::from(self.lyc)
-                || (!self.ds
-                    && self.lcd_shift_dots == 0
-                    && ly == i16::from(self.lyc_event));
+                || (!self.ds && self.lcd_shift_dots == 0 && ly == i16::from(self.lyc_event));
         }
         // The vblank-entry LYC-latch drop.
         // A held visible-line LYC match (e.g. LYC=143 carried high from line 143)

@@ -19,7 +19,11 @@ fn clock_emits_output_samples_at_the_rate() {
     // One frame of GB cycles ≈ 70224; at 48 kHz that is ~803 output samples.
     apu.clock(70_224);
     let expected = (70_224.0 / (f64::from(crate::CLOCK_HZ) / 48_000.0)).round() as i64;
-    assert!((apu.out.len() as i64 - expected).abs() <= 1, "emitted {}", apu.out.len());
+    assert!(
+        (apu.out.len() as i64 - expected).abs() <= 1,
+        "emitted {}",
+        apu.out.len()
+    );
 }
 
 #[test]
@@ -90,7 +94,10 @@ fn end_to_end_synthesis_produces_audio() {
     }
     // Clock several frames' worth of cycles.
     apu.clock(70_224 * 4);
-    let peak = apu.out.iter().fold(0.0f32, |m, &(l, r)| m.max(l.abs()).max(r.abs()));
+    let peak = apu
+        .out
+        .iter()
+        .fold(0.0f32, |m, &(l, r)| m.max(l.abs()).max(r.abs()));
     assert!(peak > 0.0, "expected audible SGB output");
 }
 

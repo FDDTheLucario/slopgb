@@ -99,7 +99,11 @@ fn gdma_terminates_at_dest_0x10000_crossing() {
     setup_gdma_regs(&mut b, 0xC000, 0xFFF0);
     b.write(0xFF55, 0x01); // 2 blocks requested, only one fits
     b.tick();
-    assert_eq!(b.peek_no_io(0x9FF0), 0x40, "dest 0xFFF0 masks to VRAM 0x1FF0");
+    assert_eq!(
+        b.peek_no_io(0x9FF0),
+        0x40,
+        "dest 0xFFF0 masks to VRAM 0x1FF0"
+    );
     assert_eq!(b.peek_no_io(0x9FFF), 0x4F);
     assert_eq!(b.peek_no_io(0x8000), 0x00, "no wrap into a second block");
     // With the display off the truncated GDMA still retires its whole
@@ -123,7 +127,11 @@ fn hblank_dma_one_block_per_hblank() {
     assert_eq!(b.read(0xFF55), 0x00, "one block left");
     assert_eq!(b.peek_no_io(0x8000), 0x40);
     assert_eq!(b.peek_no_io(0x800F), 0x4F);
-    assert_eq!(b.peek_no_io(0x8010), 0x00, "second block waits for next hblank");
+    assert_eq!(
+        b.peek_no_io(0x8010),
+        0x00,
+        "second block waits for next hblank"
+    );
     // Run well into line 1's hblank.
     ticks(&mut b, 100);
     assert_eq!(b.read(0xFF55), 0xFF, "done");
@@ -210,7 +218,11 @@ fn hblank_enable_past_window_cutoff_waits() {
     assert!(b.ppu.hblank_active(), "still in the glitch line's hblank");
     b.write(0xFF55, 0x80); // PPU at dot 450: 2 dots left < 3-dot margin
     b.tick();
-    assert_eq!(b.peek_no_io(0x8000), 0x00, "no block this close to line end");
+    assert_eq!(
+        b.peek_no_io(0x8000),
+        0x00,
+        "no block this close to line end"
+    );
     assert_eq!(b.read(0xFF55), 0x00, "armed, nothing copied");
     // The next line's mode-0 entry fires it.
     ticks(&mut b, 250);
@@ -386,7 +398,11 @@ fn speed_switch_defers_pending_hblank_block_leaving_double_speed() {
     }
     assert!(b.stop(0x0000, false)); // back to normal speed, with pause
     assert_eq!(b.read_no_tick(0xFF55), 0x01, "still active");
-    assert_eq!(b.peek_no_io(0x8000), 0x00, "block deferred across the pause");
+    assert_eq!(
+        b.peek_no_io(0x8000),
+        0x00,
+        "block deferred across the pause"
+    );
     b.tick();
     assert_eq!(b.peek_no_io(0x8000), 0x40);
     assert_eq!(b.read_no_tick(0xFF55), 0x00);

@@ -34,7 +34,11 @@ impl Picker {
                 .cmp(&dir_rank(b))
                 .then_with(|| {
                     let key_cmp = key_order(self.sort_key, a, b);
-                    if self.sort_dir == SortDir::Desc { key_cmp.reverse() } else { key_cmp }
+                    if self.sort_dir == SortDir::Desc {
+                        key_cmp.reverse()
+                    } else {
+                        key_cmp
+                    }
                 })
                 .then_with(|| name_key(a).cmp(&name_key(b)))
         });
@@ -108,17 +112,25 @@ impl Picker {
                 .map(|(i, _)| i)
                 .collect();
             if !matches.is_empty() {
-                let current_matches =
-                    visible.get(self.sel).is_some_and(|e| e.name.to_lowercase().starts_with(c));
+                let current_matches = visible
+                    .get(self.sel)
+                    .is_some_and(|e| e.name.to_lowercase().starts_with(c));
                 self.sel = if current_matches {
                     // Repeated press while already on a match: cycle to the next
                     // one, wrapping past the end.
-                    matches.iter().find(|&&i| i > self.sel).copied().unwrap_or(matches[0])
+                    matches
+                        .iter()
+                        .find(|&&i| i > self.sel)
+                        .copied()
+                        .unwrap_or(matches[0])
                 } else {
                     matches[0]
                 };
             }
-        } else if let Some(i) = visible.iter().position(|e| e.name.to_lowercase().starts_with(query.as_str())) {
+        } else if let Some(i) = visible
+            .iter()
+            .position(|e| e.name.to_lowercase().starts_with(query.as_str()))
+        {
             self.sel = i;
         }
         self.clamp_scroll();
@@ -227,7 +239,11 @@ impl Picker {
             return None;
         }
         let lcp = longest_common_prefix(&candidates);
-        if lcp.len() > prefix.len() { Some(lcp) } else { None }
+        if lcp.len() > prefix.len() {
+            Some(lcp)
+        } else {
+            None
+        }
     }
 
     // ---- input dispatch -------------------------------------------------
@@ -403,8 +419,10 @@ impl Picker {
                 // case-insensitive FS a different-case name skips this
                 // confirm. No std-only fix exists — this crate can't detect
                 // whether the target filesystem is case-sensitive.
-                let exists_as_file =
-                    self.entries.iter().any(|e| !e.is_dir && e.name == self.save_name);
+                let exists_as_file = self
+                    .entries
+                    .iter()
+                    .any(|e| !e.is_dir && e.name == self.save_name);
                 if exists_as_file && !self.overwrite_pending {
                     self.overwrite_pending = true;
                     Outcome::None
@@ -512,11 +530,7 @@ impl Picker {
 
 /// Dirs sort before files regardless of key/direction.
 fn dir_rank(e: &Entry) -> u8 {
-    if e.is_dir {
-        0
-    } else {
-        1
-    }
+    if e.is_dir { 0 } else { 1 }
 }
 
 /// Case-insensitive name key (the stable tie-break, and the `Name` sort key).
@@ -529,7 +543,11 @@ fn name_key(e: &Entry) -> String {
 /// with no other `.` as "no extension" — `.gitignore` and `Makefile` are both
 /// `""`, `rom.gb` is `"gb"`.
 fn extension(name: &str) -> String {
-    Path::new(name).extension().and_then(|s| s.to_str()).map(str::to_ascii_lowercase).unwrap_or_default()
+    Path::new(name)
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default()
 }
 
 fn key_order(key: SortKey, a: &Entry, b: &Entry) -> std::cmp::Ordering {

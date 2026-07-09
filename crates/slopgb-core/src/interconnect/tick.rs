@@ -451,14 +451,16 @@ impl Interconnect {
             } else {
                 HaltHdmaState::Low
             };
-            probe!(if crate::probe::s5dbg_on() && self.hdma_mode == HdmaMode::ArmedLcdOn {
-                let (l, d) = self.ppu.scan_pos();
-                eprintln!(
-                    "SLOPGB halt-hdma ly={l} dot={d} st={:?} period={}",
-                    self.halt_hdma,
-                    self.ppu.hdma_period_law()
-                );
-            });
+            probe!(
+                if crate::probe::s5dbg_on() && self.hdma_mode == HdmaMode::ArmedLcdOn {
+                    let (l, d) = self.ppu.scan_pos();
+                    eprintln!(
+                        "SLOPGB halt-hdma ly={l} dot={d} st={:?} period={}",
+                        self.halt_hdma,
+                        self.ppu.hdma_period_law()
+                    );
+                }
+            );
         }
         self.engage_halt_gate(halted);
         if !halted {

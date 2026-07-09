@@ -47,7 +47,13 @@ fn pixel_mealybug_ref(stem: &str, model: Model) -> Option<String> {
 
 /// Render one pixel leg flag-on (or off) and compare its frame to the
 /// reference PNG. `Ok(())` = the leg renders correctly.
-fn pixel_run_leg(rom: &[u8], model: Model, path: &std::path::Path, rel: &str, off: bool) -> Result<(), String> {
+fn pixel_run_leg(
+    rom: &[u8],
+    model: Model,
+    path: &std::path::Path,
+    rel: &str,
+    off: bool,
+) -> Result<(), String> {
     let mut gb = if off {
         harness::boot(rom, model)
     } else {

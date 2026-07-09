@@ -98,10 +98,9 @@ fn flagon_probe() {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
-        let target = (RUN_DOTS as i64
-            + i64::from(CYCLES_PER_FRAME)
-            + fdelta * i64::from(CYCLES_PER_FRAME))
-        .max(0) as u64;
+        let target =
+            (RUN_DOTS as i64 + i64::from(CYCLES_PER_FRAME) + fdelta * i64::from(CYCLES_PER_FRAME))
+                .max(0) as u64;
         while gb.cycles() < target {
             gb.step();
         }

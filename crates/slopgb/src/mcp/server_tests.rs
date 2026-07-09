@@ -27,7 +27,14 @@ fn tool_defs_lists_every_named_tool() {
         .filter_map(|t| t.get("name").and_then(Json::as_str))
         .collect();
     for want in [
-        "disassemble", "peek", "cdl", "vram", "screencap", "breakpoint", "registers", "expr",
+        "disassemble",
+        "peek",
+        "cdl",
+        "vram",
+        "screencap",
+        "breakpoint",
+        "registers",
+        "expr",
     ] {
         assert!(names.contains(&want), "missing tool {want}");
     }
@@ -36,7 +43,10 @@ fn tool_defs_lists_every_named_tool() {
 #[test]
 fn build_call_validates_arguments() {
     let args = Json::obj([("from", Json::str("C000")), ("to", Json::str("C00F"))]);
-    assert!(matches!(build_call("peek", Some(&args)), Ok(Call::Peek { .. })));
+    assert!(matches!(
+        build_call("peek", Some(&args)),
+        Ok(Call::Peek { .. })
+    ));
     assert!(matches!(build_call("registers", None), Ok(Call::Registers)));
     assert!(matches!(build_call("screencap", None), Ok(Call::Screencap)));
     // Missing argument and unknown tool are errors, not panics.
@@ -53,14 +63,20 @@ fn process_handles_handshake_methods() {
     .unwrap();
     let r = process(&init, &tx).unwrap().render();
     assert!(r.contains("\"result\"") && r.contains("serverInfo"));
-    assert!(r.contains("2025-06-18"), "echoes the client protocol version");
+    assert!(
+        r.contains("2025-06-18"),
+        "echoes the client protocol version"
+    );
 
-    let list = super::super::json::parse(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#).unwrap();
+    let list =
+        super::super::json::parse(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#).unwrap();
     let r = process(&list, &tx).unwrap().render();
     assert!(r.contains("disassemble") && r.contains("registers"));
 
     // A notification (no id) gets no response.
-    let note = super::super::json::parse(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#).unwrap();
+    let note =
+        super::super::json::parse(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#)
+            .unwrap();
     assert!(process(&note, &tx).is_none());
 
     // Unknown method → JSON-RPC method-not-found.

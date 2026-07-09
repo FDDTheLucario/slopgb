@@ -91,8 +91,8 @@ impl Spc700 {
     /// Read an I/O register (`reg` in `$F0..=$FF`).
     pub(super) fn io_read(&mut self, reg: u8) -> u8 {
         match reg {
-            0xF0 => self.test,       // TEST — write-mostly; stored value on read.
-            0xF1 => self.control,    // CONTROL — likewise (driver never reads it).
+            0xF0 => self.test,    // TEST — write-mostly; stored value on read.
+            0xF1 => self.control, // CONTROL — likewise (driver never reads it).
             0xF2 => self.dsp_addr,
             0xF3 => self.dsp_read(),
             0xF4..=0xF7 => self.port_in[(reg - 0xF4) as usize],

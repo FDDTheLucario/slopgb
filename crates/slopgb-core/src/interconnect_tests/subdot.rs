@@ -517,7 +517,11 @@ fn cpu_clock_write_first_conserves_with_no_parked_debt() {
     b.write(0xFF80, 0); // pending was 0
     assert_eq!((b.cpu_clock_t(), b.cpu_clock_pending()), (0, 4));
     b.flush_pending();
-    assert_eq!(b.cpu_clock_t(), 4, "one M-cycle = 4 T even when the write is first");
+    assert_eq!(
+        b.cpu_clock_t(),
+        4,
+        "one M-cycle = 4 T even when the write is first"
+    );
 }
 
 #[test]
@@ -607,7 +611,11 @@ fn leading_edge_routes_read_inc_too() {
     let mut b = ic(Model::Dmg);
     b.write(0xFF40, 0x91);
     ticks(&mut b, pos);
-    assert_eq!(b.read_inc(0xFF41) & 3, 0, "read_inc trailing cc+4 view: mode 0");
+    assert_eq!(
+        b.read_inc(0xFF41) & 3,
+        0,
+        "read_inc trailing cc+4 view: mode 0"
+    );
 
     let read_inc_leading = |sample_dot: u32| -> u8 {
         let pos = (452 + sample_dot) / 4;

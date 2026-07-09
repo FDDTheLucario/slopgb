@@ -167,7 +167,9 @@ impl<'a> Parser<'a> {
         while self.b[self.i] != b'"' {
             self.i += 1;
         }
-        let s = std::str::from_utf8(&self.b[start..self.i]).unwrap().to_string();
+        let s = std::str::from_utf8(&self.b[start..self.i])
+            .unwrap()
+            .to_string();
         self.i += 1; // closing quote
         s
     }
@@ -232,7 +234,10 @@ fn run_case(t: &Json) -> Result<(), String> {
         let addr = p[0].num() as usize;
         let w = p[1].num() as u8;
         if s.ram[addr] != w {
-            errs.push(format!("ram[{addr:#06X}]: got {:#X} want {w:#X}", s.ram[addr]));
+            errs.push(format!(
+                "ram[{addr:#06X}]: got {:#X} want {w:#X}",
+                s.ram[addr]
+            ));
         }
     }
     if cyc != cycles {

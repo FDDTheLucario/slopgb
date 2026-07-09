@@ -48,7 +48,8 @@ fn assign(boot: &[u8], chk: u8, letter: u8) -> Set {
     }
     let pal_no = u16::from(gb.debug_read(0xD008));
     let base = 0xDA00u16 + pal_no * 24;
-    let w = |gb: &GameBoy, a: u16| u16::from(gb.debug_read(a)) | (u16::from(gb.debug_read(a + 1)) << 8);
+    let w =
+        |gb: &GameBoy, a: u16| u16::from(gb.debug_read(a)) | (u16::from(gb.debug_read(a + 1)) << 8);
     let pal = |gb: &GameBoy, b: u16| [w(gb, b), w(gb, b + 2), w(gb, b + 4), w(gb, b + 6)];
     [pal(&gb, base), pal(&gb, base + 8), pal(&gb, base + 16)]
 }
@@ -67,7 +68,8 @@ fn assign_held(boot: &[u8], buttons: &[Button]) -> Set {
     }
     let pal_no = u16::from(gb.debug_read(0xD008));
     let base = 0xDA00u16 + pal_no * 24;
-    let w = |gb: &GameBoy, a: u16| u16::from(gb.debug_read(a)) | (u16::from(gb.debug_read(a + 1)) << 8);
+    let w =
+        |gb: &GameBoy, a: u16| u16::from(gb.debug_read(a)) | (u16::from(gb.debug_read(a + 1)) << 8);
     let pal = |gb: &GameBoy, b: u16| [w(gb, b), w(gb, b + 2), w(gb, b + 4), w(gb, b + 6)];
     [pal(&gb, base), pal(&gb, base + 8), pal(&gb, base + 16)]
 }
@@ -122,7 +124,8 @@ fn main() {
                     }
                 }
                 let (bg, obj) = gb.cgb_palette_ram();
-                let w = |r: &[u8; 64], i: usize| u16::from(r[i * 2]) | (u16::from(r[i * 2 + 1]) << 8);
+                let w =
+                    |r: &[u8; 64], i: usize| u16::from(r[i * 2]) | (u16::from(r[i * 2 + 1]) << 8);
                 let got: Set = [
                     [w(bg, 0), w(bg, 1), w(bg, 2), w(bg, 3)],
                     [w(obj, 0), w(obj, 1), w(obj, 2), w(obj, 3)],
@@ -132,7 +135,9 @@ fn main() {
                 if got != want {
                     bad += 1;
                     if bad <= 12 {
-                        println!("MISMATCH chk=${chk:02X} 4th=${l:02X}\n  want {want:04X?}\n  got  {got:04X?}");
+                        println!(
+                            "MISMATCH chk=${chk:02X} 4th=${l:02X}\n  want {want:04X?}\n  got  {got:04X?}"
+                        );
                     }
                 }
             }
@@ -168,7 +173,11 @@ fn main() {
         println!("chk=${chk:02X} 4th=${letter:02X} handoff@{hand}");
         println!("  want {want:04X?}");
         println!("  got  {got:04X?}");
-        println!("  boot_active={} pc={:04X}", gb.boot_active(), gb.cpu_regs().pc);
+        println!(
+            "  boot_active={} pc={:04X}",
+            gb.boot_active(),
+            gb.cpu_regs().pc
+        );
         return;
     }
 
@@ -192,7 +201,11 @@ fn main() {
                 }
             }
             let peak = buf.iter().fold(0f32, |m, s| m.max(s.0.abs()));
-            let hz = if buf.len() > 1 { zc as f32 / 2.0 / (buf.len() as f32 / 44100.0) } else { 0.0 };
+            let hz = if buf.len() > 1 {
+                zc as f32 / 2.0 / (buf.len() as f32 / 44100.0)
+            } else {
+                0.0
+            };
             if peak > 0.02 {
                 println!("fr {fr:3} peak {peak:.3} ~{hz:.0}Hz");
             }
@@ -203,7 +216,10 @@ fn main() {
     if arg2.as_deref() == Some("combos") {
         for (code, btns) in COMBOS {
             let s = assign_held(&boot, btns);
-            println!("combo ${code:02X} {btns:?}: BG={:04X?} OBJ0={:04X?} OBJ1={:04X?}", s[0], s[1], s[2]);
+            println!(
+                "combo ${code:02X} {btns:?}: BG={:04X?} OBJ0={:04X?} OBJ1={:04X?}",
+                s[0], s[1], s[2]
+            );
         }
         return;
     }
@@ -237,7 +253,15 @@ fn main() {
             if !ok {
                 bad += 1;
             }
-            println!("combo ${code:02X} {:<28} {}", format!("{btns:?}"), if ok { "OK".into() } else { format!("MISMATCH want {want:04X?} got {got:04X?}") });
+            println!(
+                "combo ${code:02X} {:<28} {}",
+                format!("{btns:?}"),
+                if ok {
+                    "OK".into()
+                } else {
+                    format!("MISMATCH want {want:04X?} got {got:04X?}")
+                }
+            );
         }
         println!("vcombo: {bad} mismatches");
         return;
@@ -254,7 +278,9 @@ fn main() {
     // Default palette = what a title whose checksum is absent from the table gets
     // (the ROM resolves a miss to index 0). Find an absent checksum.
     let table: Vec<u8> = boot[0x06C7..0x0716].to_vec();
-    let absent = (0u8..=255).find(|c| !table.contains(c)).expect("some checksum absent");
+    let absent = (0u8..=255)
+        .find(|c| !table.contains(c))
+        .expect("some checksum absent");
     let default = assign(&boot, absent, 0x00);
 
     // Map (checksum, 4th-letter) -> palette set across the input space.
@@ -366,7 +392,12 @@ fn main() {
             }
             let chk = bytes.iter().fold(0u8, |a, &b| a.wrapping_add(b));
             let s = assign(&boot, chk, bytes[3]);
-            println!("{t}: BG={:04X?} want {:04X?} {}", s[0], want, if s[0] == want { "OK" } else { "MISMATCH" });
+            println!(
+                "{t}: BG={:04X?} want {:04X?} {}",
+                s[0],
+                want,
+                if s[0] == want { "OK" } else { "MISMATCH" }
+            );
         }
         return;
     }
@@ -375,7 +406,9 @@ fn main() {
     let mut out = String::new();
     out.push_str("; CGB compatibility palette data (factual hardware-interop data).\n");
     out.push_str("; Generated by `cargo run -p slopgb-core --example cgb_palette_extract -- <cgb_boot.bin> emit`,\n");
-    out.push_str("; which observes the reference boot ROM's title->palette output as a black box.\n");
+    out.push_str(
+        "; which observes the reference boot ROM's title->palette output as a black box.\n",
+    );
     out.push_str("; Do not edit by hand. See boot/README.md for provenance.\n\n");
 
     writeln!(out, "DEF CGB_PAL_COUNT  EQU {}", palettes.len()).unwrap();
@@ -386,7 +419,12 @@ fn main() {
     out.push_str("; Unique palettes: 4 BGR555 colours (8 bytes) each.\n");
     out.push_str("CgbPalettes:\n");
     for p in &palettes {
-        writeln!(out, "    dw ${:04X}, ${:04X}, ${:04X}, ${:04X}", p[0], p[1], p[2], p[3]).unwrap();
+        writeln!(
+            out,
+            "    dw ${:04X}, ${:04X}, ${:04X}, ${:04X}",
+            p[0], p[1], p[2], p[3]
+        )
+        .unwrap();
     }
     out.push('\n');
 

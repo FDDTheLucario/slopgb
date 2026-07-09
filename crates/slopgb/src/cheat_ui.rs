@@ -160,10 +160,18 @@ impl CheatDialog {
 fn decoded(code: &str) -> String {
     match parse_code(code) {
         Some(Effect::Ram { addr, value }) => format!("({addr:04X})={value:02X}"),
-        Some(Effect::Rom { addr, value, compare: Some(c) }) => {
+        Some(Effect::Rom {
+            addr,
+            value,
+            compare: Some(c),
+        }) => {
             format!("ROM ({addr:04X})={value:02X} ?{c:02X}")
         }
-        Some(Effect::Rom { addr, value, compare: None }) => format!("ROM ({addr:04X})={value:02X}"),
+        Some(Effect::Rom {
+            addr,
+            value,
+            compare: None,
+        }) => format!("ROM ({addr:04X})={value:02X}"),
         None => "(bad code)".to_string(),
     }
 }
@@ -171,7 +179,12 @@ fn decoded(code: &str) -> String {
 /// The centred dialog panel.
 fn panel(area: Rect) -> Rect {
     let (w, h) = (420, 300);
-    Rect::new(area.x + (area.w - w).max(0) / 2, area.y + (area.h - h).max(0) / 2, w, h)
+    Rect::new(
+        area.x + (area.w - w).max(0) / 2,
+        area.y + (area.h - h).max(0) / 2,
+        w,
+        h,
+    )
 }
 
 /// The 12 button rects (3 rows of 4) along the bottom of `p`.
@@ -185,7 +198,12 @@ fn button_rects(p: Rect) -> Vec<Rect> {
     (0..12)
         .map(|i| {
             let (col, row) = (i % cols, i / cols);
-            Rect::new(p.x + pad + col * (bw + gap), grid_top + row * (bh + gap), bw, bh)
+            Rect::new(
+                p.x + pad + col * (bw + gap),
+                grid_top + row * (bh + gap),
+                bw,
+                bh,
+            )
         })
         .collect()
 }
@@ -209,11 +227,23 @@ pub fn render(c: &mut Canvas, d: &CheatDialog, cheats: &crate::cheat::CheatList,
     let lh = line_height();
     let pad = 6;
     let adv = if d.advanced { "  [Advanced]" } else { "" };
-    draw_text(c, p.x + pad, p.y + pad, &format!("Cheats ({}){adv}", cheats.len()), theme.text);
+    draw_text(
+        c,
+        p.x + pad,
+        p.y + pad,
+        &format!("Cheats ({}){adv}", cheats.len()),
+        theme.text,
+    );
 
     let (top, bottom) = (list_top(p), list_bottom(p));
     if cheats.is_empty() {
-        draw_text(c, p.x + pad, top, "(no cheats — Add a GameShark or Game Genie code)", theme.text);
+        draw_text(
+            c,
+            p.x + pad,
+            top,
+            "(no cheats — Add a GameShark or Game Genie code)",
+            theme.text,
+        );
     }
     for (i, ch) in cheats.items().iter().enumerate() {
         let y = top + i as i32 * lh;
@@ -222,7 +252,12 @@ pub fn render(c: &mut Canvas, d: &CheatDialog, cheats: &crate::cheat::CheatList,
         }
         let mark = if ch.enabled { 'x' } else { ' ' };
         let line = if d.advanced {
-            format!("[{mark}] {}  {}  {}", ch.code, decoded(&ch.code), ch.comment)
+            format!(
+                "[{mark}] {}  {}  {}",
+                ch.code,
+                decoded(&ch.code),
+                ch.comment
+            )
         } else {
             format!("[{mark}] {}  {}", ch.code, ch.comment)
         };
@@ -261,11 +296,20 @@ fn render_editor(c: &mut Canvas, area: Rect, e: &Editor, theme: &Theme) {
         draw_text(c, x + pad, cy, label, theme.text);
         let fr = Rect::new(x + pad, cy + lh, field_w, lh);
         c.outline_rect(fr, if focused { theme.hilight } else { theme.border });
-        let shown = if focused { format!("{text}_") } else { text.to_string() };
+        let shown = if focused {
+            format!("{text}_")
+        } else {
+            text.to_string()
+        };
         draw_text(c, fr.x + 2, fr.y, &shown, theme.text);
     };
     draw_field(y + pad, "Comment", &e.comment, e.field == Field::Comment);
-    draw_field(y + pad + 2 * lh + 2, "Code", &e.code, e.field == Field::Code);
+    draw_field(
+        y + pad + 2 * lh + 2,
+        "Code",
+        &e.code,
+        e.field == Field::Code,
+    );
     draw_text(
         c,
         x + pad,

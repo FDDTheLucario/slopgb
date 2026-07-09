@@ -33,7 +33,11 @@ impl Timer {
             return;
         }
         self.stage += 1;
-        let period = if self.target == 0 { 256 } else { self.target as u16 };
+        let period = if self.target == 0 {
+            256
+        } else {
+            self.target as u16
+        };
         if self.stage >= period {
             self.stage = 0;
             self.out = self.out.wrapping_add(1) & 0x0F;

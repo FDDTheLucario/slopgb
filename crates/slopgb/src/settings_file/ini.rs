@@ -145,11 +145,7 @@ pub fn parse_bool(v: &str) -> bool {
 /// Encode a bool the way bgb writes it.
 #[must_use]
 pub fn fmt_bool(b: bool) -> &'static str {
-    if b {
-        "1"
-    } else {
-        "0"
-    }
+    if b { "1" } else { "0" }
 }
 
 /// Swap a COLORREF (`0x00BBGGRR`, bgb's byte order) to/from our XRGB

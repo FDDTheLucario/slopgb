@@ -54,7 +54,9 @@ fn pal12_targets_palettes_1_and_2() {
     let mut s = SgbView::new();
     s.sgb_command(&packet(
         0x03 * 8 + 1,
-        &[0x1F, 0x00, 0xE0, 0x03, 0xE0, 0x03, 0xE0, 0x03, 0x00, 0x7C, 0x00, 0x7C, 0x00, 0x7C],
+        &[
+            0x1F, 0x00, 0xE0, 0x03, 0xE0, 0x03, 0xE0, 0x03, 0x00, 0x7C, 0x00, 0x7C, 0x00, 0x7C,
+        ],
     ));
     assert_eq!(s.pal[1][1], 0x00_FF00, "pal1 gets colors 1-3 (green)");
     assert_eq!(s.pal[2][1], 0x00_00FF, "pal2 gets colors 4-6 (blue)");
@@ -88,7 +90,11 @@ fn attr_blk_skips_regions_without_control_bit() {
     s.sgb_command(&packet(0x04 * 8 + 1, &[1, 0b101, pals, 5, 5, 10, 10]));
     assert_eq!(s.attr[7 * 20 + 7], 1, "inside recolored");
     assert_eq!(s.attr[0], 3, "outside recolored");
-    assert_eq!(s.attr[7 * 20 + 5], 0, "border untouched (bit1 clear, no promotion)");
+    assert_eq!(
+        s.attr[7 * 20 + 5],
+        0,
+        "border untouched (bit1 clear, no promotion)"
+    );
 }
 
 /// SameBoy quirk: an inside-only ATTR_BLK also recolors the block's border with
@@ -101,7 +107,11 @@ fn attr_blk_inside_only_promotes_border() {
     let pals = (3 << 4) | (2 << 2) | 1;
     s.sgb_command(&packet(0x04 * 8 + 1, &[1, 0b001, pals, 5, 5, 10, 10]));
     assert_eq!(s.attr[7 * 20 + 7], 1, "inside recolored");
-    assert_eq!(s.attr[7 * 20 + 5], 1, "border promoted to the inside palette");
+    assert_eq!(
+        s.attr[7 * 20 + 5],
+        1,
+        "border promoted to the inside palette"
+    );
     assert_eq!(s.attr[0], 0, "outside still untouched");
 }
 
@@ -131,7 +141,10 @@ fn mask_en_modes() {
 fn short_command_ignored() {
     let mut s = SgbView::new();
     s.sgb_command(&[0x01, 0x1F, 0x00]);
-    assert_eq!(s.pal[0], [DMG_SHADES[0], DMG_SHADES[1], DMG_SHADES[2], DMG_SHADES[3]]);
+    assert_eq!(
+        s.pal[0],
+        [DMG_SHADES[0], DMG_SHADES[1], DMG_SHADES[2], DMG_SHADES[3]]
+    );
 }
 
 /// Palettes, attribute map and mask survive a save-state round-trip.
@@ -140,7 +153,9 @@ fn state_round_trips() {
     let mut s = SgbView::new();
     s.sgb_command(&packet(
         0x01,
-        &[0x1F, 0x00, 0xE0, 0x03, 0x00, 0x7C, 0xFF, 0x7F, 0x01, 0x00, 0x20, 0x00, 0x00, 0x04],
+        &[
+            0x1F, 0x00, 0xE0, 0x03, 0x00, 0x7C, 0xFF, 0x7F, 0x01, 0x00, 0x20, 0x00, 0x00, 0x04,
+        ],
     ));
     let pals = (3 << 4) | (2 << 2) | 1;
     s.sgb_command(&packet(0x04 * 8 + 1, &[1, 0b111, pals, 5, 5, 10, 10]));
@@ -262,7 +277,10 @@ fn pal_set_selects_from_ram() {
     assert_eq!(s.pal[0][1], 0x00_FF00, "pal0 e1 = green");
     assert_eq!(s.pal[0][3], 0xFF_FFFF, "pal0 e3 = white");
     assert_eq!(s.pal[0][0], 0xFF_0000, "shared bg = ram pal0 color0 (red)");
-    assert_eq!(s.pal[1][0], 0xFF_0000, "shared bg replicated to all palettes");
+    assert_eq!(
+        s.pal[1][0], 0xFF_0000,
+        "shared bg replicated to all palettes"
+    );
 }
 
 /// PAL_TRN ($0B) decodes the rendered screen shades into palette RAM: a screen
@@ -352,8 +370,14 @@ fn border_composites_after_chr_and_pct() {
     let mut ppu = Ppu::new(Model::Sgb);
     // An SGB always has a border now — the built-in default until the ROM
     // sends its own CHR_TRN+PCT_TRN (below).
-    assert!(ppu.sgb_border().is_some(), "default border present at power-on");
-    assert!(!ppu.sgb.as_ref().unwrap().border_ready(), "but not a ROM border yet");
+    assert!(
+        ppu.sgb_border().is_some(),
+        "default border present at power-on"
+    );
+    assert!(
+        !ppu.sgb.as_ref().unwrap().border_ready(),
+        "but not a ROM border yet"
+    );
 
     let inset0 = 0x12_3456;
     ppu.front[0] = inset0; // GB screen top-left
@@ -393,11 +417,21 @@ fn default_border_draws_frame_and_inset() {
     let inset = 0x11_2233;
     ppu.front.fill(inset);
     ppu.sgb_composite_border();
-    let b = ppu.sgb_border().expect("default border always present on SGB");
+    let b = ppu
+        .sgb_border()
+        .expect("default border always present on SGB");
     let at = |x: usize, y: usize| b[y * crate::SGB_BORDER_W + x];
     assert_eq!(at(48, 40), inset, "inset top-left shows the GB screen");
-    assert_eq!(at(207, 183), inset, "inset bottom-right shows the GB screen");
-    assert_ne!(at(0, 0), inset, "the border corner is the default frame, not the inset");
+    assert_eq!(
+        at(207, 183),
+        inset,
+        "inset bottom-right shows the GB screen"
+    );
+    assert_ne!(
+        at(0, 0),
+        inset,
+        "the border corner is the default frame, not the inset"
+    );
 }
 
 /// Boot intro: the default border fades up from black. The first presented
@@ -411,13 +445,20 @@ fn boot_intro_fades_in_from_black() {
 
     ppu.sgb_frame_boundary(); // frame 1 of the fade
     let after_first = ppu.sgb_border().unwrap()[inset_idx];
-    assert_ne!(after_first, 0xFF_FFFF, "first frame is mid-fade (not full brightness)");
+    assert_ne!(
+        after_first, 0xFF_FFFF,
+        "first frame is mid-fade (not full brightness)"
+    );
     assert!(after_first < 0xFF_FFFF, "fading up from black");
 
     for _ in 1..FADE_LEN {
         ppu.sgb_frame_boundary();
     }
-    assert_eq!(ppu.sgb_border().unwrap()[inset_idx], 0xFF_FFFF, "settled after FADE_LEN frames");
+    assert_eq!(
+        ppu.sgb_border().unwrap()[inset_idx],
+        0xFF_FFFF,
+        "settled after FADE_LEN frames"
+    );
     assert_eq!(ppu.sgb.as_ref().unwrap().fade, 0, "fade counter exhausted");
 }
 
@@ -443,5 +484,9 @@ fn border_transfer_restarts_crossfade() {
         assert!(s.fade_pending, "border transfer flags a cross-fade");
     }
     ppu.sgb_frame_boundary();
-    assert_eq!(ppu.sgb.as_ref().unwrap().fade, FADE_LEN - 1, "cross-fade started and stepped once");
+    assert_eq!(
+        ppu.sgb.as_ref().unwrap().fade,
+        FADE_LEN - 1,
+        "cross-fade started and stepped once"
+    );
 }

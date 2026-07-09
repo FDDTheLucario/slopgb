@@ -15,14 +15,21 @@ pub enum Effect {
     Ram { addr: u16, value: u8 },
     /// Game Genie ROM patch: substitute `value` at `addr`, gated (9-digit codes)
     /// on the current byte matching `compare`.
-    Rom { addr: u16, value: u8, compare: Option<u8> },
+    Rom {
+        addr: u16,
+        value: u8,
+        compare: Option<u8>,
+    },
 }
 
 /// Parse a bgb cheat code (case-insensitive; spaces/dashes ignored). Returns the
 /// decoded [`Effect`], or `None` if the format isn't recognized.
 #[must_use]
 pub fn parse_code(code: &str) -> Option<Effect> {
-    let clean: String = code.chars().filter(|c| !c.is_whitespace() && *c != '-').collect();
+    let clean: String = code
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '-')
+        .collect();
     if !clean.chars().all(|c| c.is_ascii_hexdigit()) {
         return None;
     }
@@ -39,7 +46,10 @@ pub fn parse_code(code: &str) -> Option<Effect> {
     // Game Genie: 6 (`AAA-BBB`, unconditional) or 9 (`AAA-BBB-CCC`, with compare)
     // hex digits — the standard GB Game Genie decode (same as bgb/mGBA/VBA).
     if clean.len() == 6 || clean.len() == 9 {
-        let n: Vec<u8> = clean.chars().map(|c| Some(c.to_digit(16)? as u8)).collect::<Option<_>>()?;
+        let n: Vec<u8> = clean
+            .chars()
+            .map(|c| Some(c.to_digit(16)? as u8))
+            .collect::<Option<_>>()?;
         let value = (n[0] << 4) | n[1];
         // Address: nibbles 2-4 are the low 12 bits; nibble 5 (XOR 0xF) is the top.
         let addr = u16::from(n[5] ^ 0xF) << 12
@@ -49,7 +59,11 @@ pub fn parse_code(code: &str) -> Option<Effect> {
         // Compare (9-digit): from nibbles 6 + 8 (7 is a check digit), rotate-right
         // 2 then XOR 0xBA.
         let compare = (n.len() == 9).then(|| ((n[6] << 4) | n[8]).rotate_right(2) ^ 0xBA);
-        return Some(Effect::Rom { addr, value, compare });
+        return Some(Effect::Rom {
+            addr,
+            value,
+            compare,
+        });
     }
     None
 }
@@ -157,9 +171,15 @@ impl CheatList {
             .iter()
             .filter(|c| c.enabled)
             .filter_map(|c| match parse_code(&c.code) {
-                Some(Effect::Rom { addr, value, compare }) => {
-                    Some(slopgb_core::GgPatch { addr, value, compare })
-                }
+                Some(Effect::Rom {
+                    addr,
+                    value,
+                    compare,
+                }) => Some(slopgb_core::GgPatch {
+                    addr,
+                    value,
+                    compare,
+                }),
                 _ => None,
             })
             .collect()
@@ -195,7 +215,11 @@ impl CheatList {
             };
             let flag = rest.chars().next();
             let enabled = flag != Some('0');
-            let name = if matches!(flag, Some('0' | '1')) { &rest[1..] } else { rest };
+            let name = if matches!(flag, Some('0' | '1')) {
+                &rest[1..]
+            } else {
+                rest
+            };
             if !code.is_empty() {
                 self.items.push(Cheat {
                     comment: name.trim().to_string(),

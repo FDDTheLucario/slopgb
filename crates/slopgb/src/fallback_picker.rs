@@ -100,13 +100,22 @@ impl FallbackPicker {
         // the mode first.
         let filename_y = status_y - lh - 2;
         let list_y = pathbar_y + lh + 4;
-        let list_rect = Rect::new(content_x, list_y, w - 2 * PAD, (filename_y - 2 - list_y).max(0));
+        let list_rect = Rect::new(
+            content_x,
+            list_y,
+            w - 2 * PAD,
+            (filename_y - 2 - list_y).max(0),
+        );
 
         let rows_fit = (list_rect.h / lh).max(0) as usize;
         let v = self.picker.view(rows_fit);
 
         draw_text(c, content_x, title_y, &v.title, theme.text);
-        let path_line = if v.path_focused { format!("{}_", v.path_bar) } else { v.path_bar.clone() };
+        let path_line = if v.path_focused {
+            format!("{}_", v.path_bar)
+        } else {
+            v.path_bar.clone()
+        };
         draw_text(c, content_x, pathbar_y, &path_line, theme.text);
 
         let display_rows: Vec<String> = v
@@ -121,8 +130,18 @@ impl FallbackPicker {
         scroll_list(c, list_rect, &refs, 0, v.highlight, theme);
 
         if let Some(name) = &v.save_name {
-            let hint = if v.overwrite_pending { " (overwrite? press Enter again)" } else { "" };
-            draw_text(c, content_x, filename_y, &format!("Save as: {name}_{hint}"), theme.text);
+            let hint = if v.overwrite_pending {
+                " (overwrite? press Enter again)"
+            } else {
+                ""
+            };
+            draw_text(
+                c,
+                content_x,
+                filename_y,
+                &format!("Save as: {name}_{hint}"),
+                theme.text,
+            );
         }
         draw_text(c, content_x, status_y, &v.status, theme.text);
         // The Ctrl+<letter> hotkeys above have no other affordance (no native
@@ -172,7 +191,11 @@ impl FallbackPicker {
 /// any); `mods` gates the `Ctrl+<letter>` hotkeys (path bar / sort / hidden /
 /// all-files — see the bottom-of-panel hint drawn in [`FallbackPicker::render`]).
 #[must_use]
-pub(crate) fn winit_key_to_picker(code: KeyCode, text: Option<&str>, mods: ModifiersState) -> Option<Key> {
+pub(crate) fn winit_key_to_picker(
+    code: KeyCode,
+    text: Option<&str>,
+    mods: ModifiersState,
+) -> Option<Key> {
     match code {
         KeyCode::ArrowUp => return Some(Key::Up),
         KeyCode::ArrowDown => return Some(Key::Down),

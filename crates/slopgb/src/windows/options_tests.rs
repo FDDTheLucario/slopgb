@@ -430,7 +430,10 @@ fn debug_tab_pure_bgb_toggles_every_departure() {
         !st.working.memory_window,
         "pure bgb -> integrated memory pane"
     );
-    assert!(!st.working.tile_hex_8bit, "pure bgb -> full tile hex ($17F)");
+    assert!(
+        !st.working.tile_hex_8bit,
+        "pure bgb -> full tile hex ($17F)"
+    );
     // Toggling it again restores the slopgb defaults.
     click_field(&mut st, Field::PureBgb);
     assert!(st.working.rgbds_disasm, "back to slopgb defaults");

@@ -3,9 +3,21 @@ use super::*;
 #[test]
 fn gameshark_decodes_like_bgb() {
     // bgb renders 01FF0AC1 as (C10A)=FF (address little-endian).
-    assert_eq!(parse_code("01FF0AC1"), Some(Effect::Ram { addr: 0xC10A, value: 0xFF }));
+    assert_eq!(
+        parse_code("01FF0AC1"),
+        Some(Effect::Ram {
+            addr: 0xC10A,
+            value: 0xFF
+        })
+    );
     // Lowercase + whitespace tolerated.
-    assert_eq!(parse_code(" 0100 00c0 "), Some(Effect::Ram { addr: 0xC000, value: 0x00 }));
+    assert_eq!(
+        parse_code(" 0100 00c0 "),
+        Some(Effect::Ram {
+            addr: 0xC000,
+            value: 0x00
+        })
+    );
     // Non-01 GameShark type unsupported (no poke).
     assert_eq!(parse_code("9012C0DE"), None);
     // Garbage / wrong length (7 hex matches no format).
@@ -19,12 +31,20 @@ fn game_genie_decodes_like_the_standard() {
     // addr ((6^F)<<12)|0x345 = 0x9345, compare (0x79 ror2)^0xBA = 0xE4.
     assert_eq!(
         parse_code("123-456-789"),
-        Some(Effect::Rom { addr: 0x9345, value: 0x12, compare: Some(0xE4) })
+        Some(Effect::Rom {
+            addr: 0x9345,
+            value: 0x12,
+            compare: Some(0xE4)
+        })
     );
     // 6-digit ABCDEF: value 0xAB, addr ((F^F)<<12)|0xCDE = 0x0CDE, no compare.
     assert_eq!(
         parse_code("ABCDEF"),
-        Some(Effect::Rom { addr: 0x0CDE, value: 0xAB, compare: None })
+        Some(Effect::Rom {
+            addr: 0x0CDE,
+            value: 0xAB,
+            compare: None
+        })
     );
 }
 
@@ -37,7 +57,14 @@ fn gg_patches_from_enabled_game_genie_cheats() {
     list.set_enabled(off, false); // disabled -> excluded
     let p = list.gg_patches();
     assert_eq!(p.len(), 1, "only the enabled Game Genie cheat");
-    assert_eq!(p[0], slopgb_core::GgPatch { addr: 0x0CDE, value: 0xAB, compare: None });
+    assert_eq!(
+        p[0],
+        slopgb_core::GgPatch {
+            addr: 0x0CDE,
+            value: 0xAB,
+            compare: None
+        }
+    );
 }
 
 #[test]

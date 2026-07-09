@@ -135,7 +135,14 @@ fn blit(
 /// preserved. Every dst pixel maps to the proportional source pixel;
 /// `dy*src_h/dst_h` and `dx*src_w/dst_w` stay in-bounds for all `dy<dst_h`,
 /// `dx<dst_w`.
-fn blit_stretch(dst: &mut [u32], dst_w: u32, dst_h: u32, frame: &[u32], src_w: usize, src_h: usize) {
+fn blit_stretch(
+    dst: &mut [u32],
+    dst_w: u32,
+    dst_h: u32,
+    frame: &[u32],
+    src_w: usize,
+    src_h: usize,
+) {
     if dst_w == 0 || dst_h == 0 {
         return;
     }
@@ -168,7 +175,15 @@ mod tests {
         let frame = test_frame();
         let mut dst = vec![u32::MAX; SCREEN_PIXELS];
         let mut row = Vec::new();
-        blit(&mut dst, SCREEN_W as u32, SCREEN_H as u32, &frame[..], SCREEN_W, SCREEN_H, &mut row);
+        blit(
+            &mut dst,
+            SCREEN_W as u32,
+            SCREEN_H as u32,
+            &frame[..],
+            SCREEN_W,
+            SCREEN_H,
+            &mut row,
+        );
         assert_eq!(&dst[..], &frame[..]);
     }
 

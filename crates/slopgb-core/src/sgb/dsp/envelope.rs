@@ -94,7 +94,10 @@ impl Env {
         });
     }
 
-    pub fn read_state(&mut self, r: &mut crate::state::Reader<'_>) -> Result<(), crate::StateError> {
+    pub fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::StateError> {
         self.level = r.u32()? as i32;
         self.phase = match r.u8()? {
             0 => Phase::Attack,
@@ -170,9 +173,9 @@ impl Env {
             return;
         }
         match (gain >> 5) & 0x03 {
-            0 => self.level -= 0x20,                                    // linear decrease
-            1 => self.level -= ((self.level - 1) >> 8) + 1,            // exp decrease
-            2 => self.level += 0x20,                                    // linear increase
+            0 => self.level -= 0x20,                        // linear decrease
+            1 => self.level -= ((self.level - 1) >> 8) + 1, // exp decrease
+            2 => self.level += 0x20,                        // linear increase
             _ => self.level += if self.level < 0x600 { 0x20 } else { 0x08 }, // bent increase
         }
         self.level = self.level.clamp(0, 0x7FF);

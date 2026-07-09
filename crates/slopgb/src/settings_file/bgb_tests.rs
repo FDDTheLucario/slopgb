@@ -62,15 +62,28 @@ fn from_real_ini_reads_known_values() {
     assert!(s.break_invalid_op, "InvalidOpBreak=1");
     assert!(!s.mono, "SoundMono=0");
     assert!(s.esc_shows_debugger, "DebugEsc=1");
-    assert_eq!(s.dmg_palette[0], 0x00E8_FCCC, "Color0=CCFCE8 (BGR) -> E8FCCC");
-    assert_eq!(s.model, ModelChoice::Auto, "SystemMode=3 -> automatic prefer GBC");
+    assert_eq!(
+        s.dmg_palette[0], 0x00E8_FCCC,
+        "Color0=CCFCE8 (BGR) -> E8FCCC"
+    );
+    assert_eq!(
+        s.model,
+        ModelChoice::Auto,
+        "SystemMode=3 -> automatic prefer GBC"
+    );
 }
 
 #[test]
 fn model_maps_to_bgb_system_mode() {
     let sysmode = |m| {
         let mut f = Ini::parse("");
-        to_ini(&Settings { model: m, ..Settings::default() }, &mut f);
+        to_ini(
+            &Settings {
+                model: m,
+                ..Settings::default()
+            },
+            &mut f,
+        );
         f.get("SystemMode").unwrap().to_string()
     };
     assert_eq!(sysmode(ModelChoice::Dmg), "0", "Gameboy");
@@ -78,6 +91,9 @@ fn model_maps_to_bgb_system_mode() {
     assert_eq!(sysmode(ModelChoice::Auto), "3", "automatic prefer GBC");
     // SGB/auto variants collapse to Auto on read.
     for v in ["2", "4", "5", "6", "7"] {
-        assert_eq!(from_ini(&Ini::parse(&format!("SystemMode={v}\r\n"))).model, ModelChoice::Auto);
+        assert_eq!(
+            from_ini(&Ini::parse(&format!("SystemMode={v}\r\n"))).model,
+            ModelChoice::Auto
+        );
     }
 }

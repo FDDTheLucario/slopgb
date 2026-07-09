@@ -16,10 +16,18 @@ fn ly_for_comparison_visible_line_schedule() {
     // (display.c held until the dot-3 reset), dot 3 is -1, dots 4+ are N.
     for dot in 0..3u16 {
         run_to(&mut p, 5, dot);
-        assert_eq!(p.ly_for_comparison(), 4, "line 5 dot {dot}: prev-line carryover");
+        assert_eq!(
+            p.ly_for_comparison(),
+            4,
+            "line 5 dot {dot}: prev-line carryover"
+        );
     }
     run_to(&mut p, 5, 3);
-    assert_eq!(p.ly_for_comparison(), -1, "line 5 dot 3: reset to -1 (display.c:1776)");
+    assert_eq!(
+        p.ly_for_comparison(),
+        -1,
+        "line 5 dot 3: reset to -1 (display.c:1776)"
+    );
     for dot in [4u16, 40, 200] {
         run_to(&mut p, 5, dot);
         assert_eq!(p.ly_for_comparison(), 5, "line 5 dot {dot}: latched to N");
@@ -43,10 +51,18 @@ fn ly_for_comparison_vblank_schedule() {
     for line in [144u8, 150] {
         for dot in 0..4u16 {
             run_to(&mut p, line, dot);
-            assert_eq!(p.ly_for_comparison(), -1, "vblank line {line} dot {dot}: -1");
+            assert_eq!(
+                p.ly_for_comparison(),
+                -1,
+                "vblank line {line} dot {dot}: -1"
+            );
         }
         run_to(&mut p, line, 4);
-        assert_eq!(p.ly_for_comparison(), i16::from(line), "vblank line {line} dot 4: latched");
+        assert_eq!(
+            p.ly_for_comparison(),
+            i16::from(line),
+            "vblank line {line} dot 4: latched"
+        );
     }
 }
 
@@ -75,7 +91,11 @@ fn ly_for_comparison_line_153_schedule() {
         };
         for dot in [0u16, 5, 6, 7, 8, 11, 12, 100] {
             run_to(&mut p, 153, dot);
-            assert_eq!(p.ly_for_comparison(), expect(dot), "{label} line 153 dot {dot}");
+            assert_eq!(
+                p.ly_for_comparison(),
+                expect(dot),
+                "{label} line 153 dot {dot}"
+            );
         }
     }
     // AGB shifts earlier, no -1 gap.
@@ -119,8 +139,16 @@ fn stat_update_engine_fires_lyc_once_per_frame() {
         }
         fired
     };
-    assert_eq!(count_lyc_if(true), 1, "flag-on: one LYC=2 STAT IF per frame");
-    assert_eq!(count_lyc_if(false), 1, "flag-off: same single LYC=2 STAT IF (parity)");
+    assert_eq!(
+        count_lyc_if(true),
+        1,
+        "flag-on: one LYC=2 STAT IF per frame"
+    );
+    assert_eq!(
+        count_lyc_if(false),
+        1,
+        "flag-off: same single LYC=2 STAT IF (parity)"
+    );
 }
 
 #[test]
@@ -322,7 +350,10 @@ fn lyc_latch_holds_across_line_start_carryover_flag_on() {
     // Line 5 dot 0: the carryover `ly_for_comparison` reads 4 (line 4). LYC is
     // still 0 (default), so the latch is low (line 4 never matched).
     run_to(&mut p, 5, 0);
-    assert!(!p.lyc_interrupt_line, "latch low entering line 5 (LYC=0, no match)");
+    assert!(
+        !p.lyc_interrupt_line,
+        "latch low entering line 5 (LYC=0, no match)"
+    );
     // Simulate the late write landing at the line-5 start: LYC := 4, the
     // carryover number. With the hold the engine must NOT re-latch it across the
     // carryover dots — no spurious edge. (Without the hold, dots 0-2 re-latch
@@ -341,7 +372,10 @@ fn lyc_latch_holds_across_line_start_carryover_flag_on() {
             p.line, p.dot
         );
     }
-    assert_eq!(fires, 0, "no spurious LYC STAT edge during the line-start carryover");
+    assert_eq!(
+        fires, 0,
+        "no spurious LYC STAT edge during the line-start carryover"
+    );
 }
 
 /// Write-coherence guard (the FF40 leg of the A11/A12 systematic sweep) — an
@@ -372,8 +406,16 @@ fn ff40_enable_lyc_match_fires_once_flag_on() {
         }
         fires
     };
-    assert_eq!(count(false), 1, "flag-off: one IF for the enabling LCDC write");
-    assert_eq!(count(true), 1, "flag-on: one IF (no StatUpdate double-fire)");
+    assert_eq!(
+        count(false),
+        1,
+        "flag-off: one IF for the enabling LCDC write"
+    );
+    assert_eq!(
+        count(true),
+        1,
+        "flag-on: one IF (no StatUpdate double-fire)"
+    );
 }
 
 #[test]

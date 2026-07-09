@@ -81,7 +81,10 @@ impl App {
                     crate::toolwin::is_double_click(now.duration_since(t), px - lx, py - ly)
                 });
                 self.fallback_last_click = if double { None } else { Some((now, px, py)) };
-                let outcome = self.fallback_picker.as_mut().map(|fp| fp.on_click(px, py, double));
+                let outcome = self
+                    .fallback_picker
+                    .as_mut()
+                    .map(|fp| fp.on_click(px, py, double));
                 self.resolve_fallback_picker(outcome);
             }
             return;
@@ -242,7 +245,11 @@ impl App {
     /// Route a left-click inside the open Cheat dialog to a row selection or a
     /// button action. An open Add/Edit entry is keyboard-driven, so it's ignored.
     fn on_cheat_click(&mut self, area: Rect, px: i32, py: i32) {
-        if self.cheat_dialog.as_ref().is_some_and(cheat_ui::CheatDialog::editor_open) {
+        if self
+            .cheat_dialog
+            .as_ref()
+            .is_some_and(cheat_ui::CheatDialog::editor_open)
+        {
             return;
         }
         match cheat_ui::hit(area, &self.cheats, px, py) {
@@ -352,10 +359,16 @@ impl App {
             // Import/Export settings in bgb's ini format (interop; the native
             // store stays the default). Route through the shared path modal.
             SubChoice::ImportBgb => {
-                self.open_path_prompt("Import bgb.ini (path)", crate::PathPurpose::SettingsImportBgb);
+                self.open_path_prompt(
+                    "Import bgb.ini (path)",
+                    crate::PathPurpose::SettingsImportBgb,
+                );
             }
             SubChoice::ExportBgb => {
-                self.open_path_prompt("Export bgb.ini (path)", crate::PathPurpose::SettingsExportBgb);
+                self.open_path_prompt(
+                    "Export bgb.ini (path)",
+                    crate::PathPurpose::SettingsExportBgb,
+                );
             }
             // Recent ROMs → reload that entry (MN4); clone the path out first so
             // the load can borrow `self` mutably.

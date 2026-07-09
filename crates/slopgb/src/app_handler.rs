@@ -88,11 +88,11 @@ impl ApplicationHandler for App {
         // Optionally host the MCP debug server — `--mcp-port` or `SLOPGB_MCP_PORT`.
         // Guarded so a resume/suspend cycle doesn't restart it.
         if !self.mcp.is_active() {
-            if let Some(port) = self
-                .opts
-                .mcp_port
-                .or_else(|| env::var("SLOPGB_MCP_PORT").ok().and_then(|s| s.parse().ok()))
-            {
+            if let Some(port) = self.opts.mcp_port.or_else(|| {
+                env::var("SLOPGB_MCP_PORT")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+            }) {
                 match self.mcp.start(port) {
                     Ok(()) => eprintln!(
                         "slopgb: MCP server on http://127.0.0.1:{}/",
@@ -323,7 +323,8 @@ impl ApplicationHandler for App {
         // Serve any queued MCP tool calls first — before the idle guard, so an
         // agent can still inspect a paused / breakpoint-halted machine (that is
         // exactly when it wants to). A no-op when no server is running.
-        self.mcp.pump(&self.session.gb, &mut self.dbg, &self.symbols);
+        self.mcp
+            .pump(&self.session.gb, &mut self.dbg, &self.symbols);
         // Reconcile a pending Options "memory viewer in own window" change now
         // that the event loop is available (open/close the standalone window).
         if let Some(want) = self.pending_mem_window.take() {

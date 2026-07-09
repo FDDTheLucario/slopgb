@@ -26,7 +26,11 @@ pub const VERSION: u32 = 1;
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Line {
     Section(String),
-    Pair { section: String, key: String, val: String },
+    Pair {
+        section: String,
+        key: String,
+        val: String,
+    },
     Raw(String),
 }
 
@@ -81,7 +85,11 @@ impl Doc {
     #[must_use]
     pub fn get(&self, section: &str, key: &str) -> Option<&str> {
         self.lines.iter().find_map(|l| match l {
-            Line::Pair { section: s, key: k, val } if s == section && k == key => Some(val.as_str()),
+            Line::Pair {
+                section: s,
+                key: k,
+                val,
+            } if s == section && k == key => Some(val.as_str()),
             _ => None,
         })
     }
@@ -92,7 +100,11 @@ impl Doc {
         self.lines
             .iter()
             .filter_map(|l| match l {
-                Line::Pair { section: s, key, val } if s == section => Some((key.as_str(), val.as_str())),
+                Line::Pair {
+                    section: s,
+                    key,
+                    val,
+                } if s == section => Some((key.as_str(), val.as_str())),
                 _ => None,
             })
             .collect()
@@ -102,7 +114,12 @@ impl Doc {
     /// section (creating the section header if absent). Preserves everything else.
     pub fn set(&mut self, section: &str, key: &str, val: &str) {
         for line in &mut self.lines {
-            if let Line::Pair { section: s, key: k, val: v } = line {
+            if let Line::Pair {
+                section: s,
+                key: k,
+                val: v,
+            } = line
+            {
                 if s == section && k == key {
                     *v = val.to_string();
                     return;
@@ -134,7 +151,8 @@ impl Doc {
     /// Replace the whole `[recent]` section with `paths` (numbered `0..`),
     /// dropping any prior recent entries.
     fn set_recent(&mut self, paths: &[String]) {
-        self.lines.retain(|l| !matches!(l, Line::Pair { section, .. } if section == "recent"));
+        self.lines
+            .retain(|l| !matches!(l, Line::Pair { section, .. } if section == "recent"));
         for (i, p) in paths.iter().enumerate() {
             self.set("recent", &i.to_string(), p);
         }
@@ -169,8 +187,13 @@ fn parse_hex(v: &str) -> Option<u32> {
 pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
     let def = Settings::default();
     let b = |sec: &str, k: &str, dv: bool| d.get(sec, k).and_then(parse_bool).unwrap_or(dv);
-    let i = |sec: &str, k: &str, dv: i64| d.get(sec, k).and_then(|v| v.trim().parse().ok()).unwrap_or(dv);
-    let s = |sec: &str, k: &str, dv: &str| d.get(sec, k).map_or_else(|| dv.to_string(), str::to_string);
+    let i = |sec: &str, k: &str, dv: i64| {
+        d.get(sec, k)
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(dv)
+    };
+    let s =
+        |sec: &str, k: &str, dv: &str| d.get(sec, k).map_or_else(|| dv.to_string(), str::to_string);
 
     // palette: 4 comma-separated hex; fall back to default if malformed.
     let mut dmg_palette = def.dmg_palette;
@@ -180,7 +203,10 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
             dmg_palette.copy_from_slice(&parsed);
         }
     }
-    let scheme = SCHEMES.iter().position(|s| s.colors == dmg_palette).unwrap_or(def.scheme);
+    let scheme = SCHEMES
+        .iter()
+        .position(|s| s.colors == dmg_palette)
+        .unwrap_or(def.scheme);
 
     let settings = Settings {
         model: match d.get("system", "model") {
@@ -189,7 +215,10 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
             _ => ModelChoice::Auto,
         },
         stretch: b("graphics", "stretch", def.stretch),
-        volume: d.get("sound", "volume").and_then(|v| v.trim().parse().ok()).unwrap_or(def.volume),
+        volume: d
+            .get("sound", "volume")
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(def.volume),
         mono: b("sound", "mono", def.mono),
         lowercase_disasm: b("debug", "lowercase_disasm", def.lowercase_disasm),
         lowercase_hex: b("debug", "lowercase_hex", def.lowercase_hex),
@@ -209,7 +238,11 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
         break_ld_b_b: b("exceptions", "break_ld_b_b", def.break_ld_b_b),
         break_invalid_op: b("exceptions", "break_invalid_op", def.break_invalid_op),
         break_echo_ram: b("exceptions", "break_echo_ram", def.break_echo_ram),
-        break_lcd_off_vblank: b("exceptions", "break_lcd_off_vblank", def.break_lcd_off_vblank),
+        break_lcd_off_vblank: b(
+            "exceptions",
+            "break_lcd_off_vblank",
+            def.break_lcd_off_vblank,
+        ),
         bootroms_enabled: b("system", "bootroms_enabled", def.bootroms_enabled),
         bootrom_dmg: s("system", "bootrom_dmg", &def.bootrom_dmg),
         bootrom_gbc: s("system", "bootrom_gbc", &def.bootrom_gbc),
@@ -228,20 +261,45 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
 /// key, preserving any unknown keys/sections already present.
 pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
     let Settings {
-        model: _, stretch: _, volume: _, mono: _, lowercase_disasm: _, lowercase_hex: _,
-        show_clocks: _, rgbds_disasm: _, tile_hex_8bit: _, memory_window: _, esc_shows_debugger: _,
-        ff_speed: _, framerate_limit: _, show_framerate: _, freeze_recent: _, pause_on_focus_loss: _,
-        scheme: _, dmg_palette: _, allow_opposing: _, break_ld_b_b: _, break_invalid_op: _,
-        break_echo_ram: _, break_lcd_off_vblank: _, bootroms_enabled: _, bootrom_dmg: _,
-        bootrom_gbc: _, bootrom_sgb: _,
+        model: _,
+        stretch: _,
+        volume: _,
+        mono: _,
+        lowercase_disasm: _,
+        lowercase_hex: _,
+        show_clocks: _,
+        rgbds_disasm: _,
+        tile_hex_8bit: _,
+        memory_window: _,
+        esc_shows_debugger: _,
+        ff_speed: _,
+        framerate_limit: _,
+        show_framerate: _,
+        freeze_recent: _,
+        pause_on_focus_loss: _,
+        scheme: _,
+        dmg_palette: _,
+        allow_opposing: _,
+        break_ld_b_b: _,
+        break_invalid_op: _,
+        break_echo_ram: _,
+        break_lcd_off_vblank: _,
+        bootroms_enabled: _,
+        bootrom_dmg: _,
+        bootrom_gbc: _,
+        bootrom_sgb: _,
     } = settings;
     let fb = |b: bool| if b { "true" } else { "false" };
     d.set("", "version", &VERSION.to_string());
-    d.set("system", "model", match settings.model {
-        ModelChoice::Dmg => "dmg",
-        ModelChoice::Cgb => "cgb",
-        ModelChoice::Auto => "auto",
-    });
+    d.set(
+        "system",
+        "model",
+        match settings.model {
+            ModelChoice::Dmg => "dmg",
+            ModelChoice::Cgb => "cgb",
+            ModelChoice::Auto => "auto",
+        },
+    );
     d.set("system", "bootroms_enabled", fb(settings.bootroms_enabled));
     d.set("system", "bootrom_dmg", &settings.bootrom_dmg);
     d.set("system", "bootrom_gbc", &settings.bootrom_gbc);
@@ -249,7 +307,12 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
     d.set("sound", "volume", &settings.volume.to_string());
     d.set("sound", "mono", fb(settings.mono));
     d.set("graphics", "stretch", fb(settings.stretch));
-    let palette = settings.dmg_palette.iter().map(|&c| fmt_hex(c)).collect::<Vec<_>>().join(", ");
+    let palette = settings
+        .dmg_palette
+        .iter()
+        .map(|&c| fmt_hex(c))
+        .collect::<Vec<_>>()
+        .join(", ");
     d.set("graphics", "palette", &palette);
     d.set("debug", "lowercase_disasm", fb(settings.lowercase_disasm));
     d.set("debug", "lowercase_hex", fb(settings.lowercase_hex));
@@ -257,17 +320,37 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
     d.set("debug", "rgbds_disasm", fb(settings.rgbds_disasm));
     d.set("debug", "tile_hex_8bit", fb(settings.tile_hex_8bit));
     d.set("debug", "memory_window", fb(settings.memory_window));
-    d.set("debug", "esc_shows_debugger", fb(settings.esc_shows_debugger));
+    d.set(
+        "debug",
+        "esc_shows_debugger",
+        fb(settings.esc_shows_debugger),
+    );
     d.set("misc", "ff_speed", &settings.ff_speed.to_string());
-    d.set("misc", "framerate_limit", &settings.framerate_limit.to_string());
+    d.set(
+        "misc",
+        "framerate_limit",
+        &settings.framerate_limit.to_string(),
+    );
     d.set("misc", "show_framerate", fb(settings.show_framerate));
     d.set("misc", "freeze_recent", fb(settings.freeze_recent));
-    d.set("misc", "pause_on_focus_loss", fb(settings.pause_on_focus_loss));
+    d.set(
+        "misc",
+        "pause_on_focus_loss",
+        fb(settings.pause_on_focus_loss),
+    );
     d.set("misc", "allow_opposing", fb(settings.allow_opposing));
     d.set("exceptions", "break_ld_b_b", fb(settings.break_ld_b_b));
-    d.set("exceptions", "break_invalid_op", fb(settings.break_invalid_op));
+    d.set(
+        "exceptions",
+        "break_invalid_op",
+        fb(settings.break_invalid_op),
+    );
     d.set("exceptions", "break_echo_ram", fb(settings.break_echo_ram));
-    d.set("exceptions", "break_lcd_off_vblank", fb(settings.break_lcd_off_vblank));
+    d.set(
+        "exceptions",
+        "break_lcd_off_vblank",
+        fb(settings.break_lcd_off_vblank),
+    );
     d.set_recent(recent);
 }
 

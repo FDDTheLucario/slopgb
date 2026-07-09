@@ -672,9 +672,15 @@ fn tier2_ly0_pulse_readview_passes() {
         ),
         // GUARDs — the LYC-152-anchored reads keep seeing it (the anchor
         // guard's measured discriminator).
-        ("gambatte/ly0/lycint152_m2irq_2_dmg08_cgb04c_outE2.gbc", "E2"),
+        (
+            "gambatte/ly0/lycint152_m2irq_2_dmg08_cgb04c_outE2.gbc",
+            "E2",
+        ),
         ("gambatte/ly0/lycint152_m2irq_ds_2_cgb04c_outE2.gbc", "E2"),
-        ("gambatte/ly0/lycint152_m2irq_1_dmg08_cgb04c_outE0.gbc", "E0"),
+        (
+            "gambatte/ly0/lycint152_m2irq_1_dmg08_cgb04c_outE0.gbc",
+            "E0",
+        ),
     ];
     for (rel, expect) in targets {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));

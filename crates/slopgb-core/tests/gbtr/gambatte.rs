@@ -584,7 +584,11 @@ fn assert_pixel_leg_flagon(root: &Path, rel: &str, model: Model) {
         harness::run_until_breakpoint(&mut gb, common::TIMEOUT_TCYCLES)
             .unwrap_or_else(|e| panic!("{rel} [{model:?}] no breakpoint: {e}"));
         harness::run_for_frames(&mut gb, 1);
-        let suffix = if model.is_cgb() { "_cgb_c" } else { "_dmg_blob" };
+        let suffix = if model.is_cgb() {
+            "_cgb_c"
+        } else {
+            "_dmg_blob"
+        };
         (
             path.with_file_name(format!("{stem}{suffix}.png")),
             CgbColorMap::Identity,

@@ -46,8 +46,18 @@ pub struct Entry {
 
 impl Entry {
     #[must_use]
-    pub fn new(name: impl Into<String>, is_dir: bool, size: Option<u64>, mtime: Option<u64>) -> Self {
-        Self { name: name.into(), is_dir, size, mtime }
+    pub fn new(
+        name: impl Into<String>,
+        is_dir: bool,
+        size: Option<u64>,
+        mtime: Option<u64>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            is_dir,
+            size,
+            mtime,
+        }
     }
 }
 

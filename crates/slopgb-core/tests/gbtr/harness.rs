@@ -90,7 +90,9 @@ pub fn check_fib(gb: &GameBoy) -> Result<(), String> {
 /// DE B0 61 sit at $A001-$A003 ($A000 = $80 while running, $00 = pass,
 /// anything else = failure code; see blargg readmes).
 pub fn blargg_signature_status(gb: &GameBoy) -> Option<u8> {
-    (gb.peek_no_io(0xA001) == 0xDE && gb.peek_no_io(0xA002) == 0xB0 && gb.peek_no_io(0xA003) == 0x61)
+    (gb.peek_no_io(0xA001) == 0xDE
+        && gb.peek_no_io(0xA002) == 0xB0
+        && gb.peek_no_io(0xA003) == 0x61)
         .then(|| gb.peek_no_io(0xA000))
 }
 

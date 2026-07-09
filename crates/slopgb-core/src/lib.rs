@@ -27,8 +27,8 @@ pub(crate) mod model;
 pub(crate) mod ppu;
 pub(crate) mod serial;
 pub mod sgb;
-pub(crate) mod state;
 pub(crate) mod stat_update;
+pub(crate) mod state;
 pub(crate) mod timer;
 
 pub use apu::DEFAULT_SAMPLE_RATE;

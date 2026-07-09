@@ -152,7 +152,10 @@ impl Voice {
         w.u32(self.output as u32);
     }
 
-    pub fn read_state(&mut self, r: &mut crate::state::Reader<'_>) -> Result<(), crate::StateError> {
+    pub fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::StateError> {
         self.brr_addr = r.u16()?;
         self.loop_addr = r.u16()?;
         for s in &mut self.block {

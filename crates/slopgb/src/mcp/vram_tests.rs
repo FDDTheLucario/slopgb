@@ -18,7 +18,7 @@ fn each_view_has_expected_dimensions() {
         ("tile1", 128, 192),
         ("bg", 256, 256),
         ("win", 256, 256),
-        ("oam", 64, 40), // 8x5 of 8x8 (LCDC bit2 off after reset)
+        ("oam", 64, 40),      // 8x5 of 8x8 (LCDC bit2 off after reset)
         ("palette", 64, 256), // CGB: 16 rows × 4 × 16px
     ] {
         let bmp = capture(&gb, view).unwrap();

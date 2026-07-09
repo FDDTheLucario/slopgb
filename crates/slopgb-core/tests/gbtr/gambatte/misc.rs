@@ -286,13 +286,19 @@ fn tier2_halt_m0stat_wake_passes() {
     let targets: [(&str, &str); 3] = [
         // Fixed by the mid-cycle wake: the read lands in the line-start
         // mode-0 window (want 0).
-        ("gambatte/halt/m0int_m0stat_scx2_1_dmg08_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/halt/m0int_m0stat_scx2_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
         (
             "gambatte/halt/m0irq_m0stat_scx4_2_dmg08_out0_cgb04c_out2.gbc",
             "0",
         ),
         // Regression guard: the want-2 sibling stays mode 2.
-        ("gambatte/halt/m0int_m0stat_scx2_2_dmg08_cgb04c_out2.gbc", "2"),
+        (
+            "gambatte/halt/m0int_m0stat_scx2_2_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
     ];
     for (rel, expect) in targets {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
@@ -532,7 +538,10 @@ fn tier2_ff0f_groupab_passes() {
         ("gambatte/m2int_m0irq/m2int_m0irq_ds_1_cgb04c_out1.gbc", "1"),
         // GUARD — the identical dot-254/rise-255 geometry from an
         // LYC-anchored ISR reads clear (the `stat_rise_oam` anchor gate).
-        ("gambatte/lyc0int_m0irq/lyc0int_m0irq_ds_1_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/lyc0int_m0irq/lyc0int_m0irq_ds_1_cgb04c_out0.gbc",
+            "0",
+        ),
         // Group A: the SS LYC=153 latch two dots past the read (rise 6, read 4).
         (
             "gambatte/ly0/lycint152_lyc153irq_2_dmg08_cgb04c_outE2.gbc",
@@ -543,7 +552,10 @@ fn tier2_ff0f_groupab_passes() {
             "gambatte/ly0/lycint152_lyc153irq_1_dmg08_cgb04c_outE0.gbc",
             "E0",
         ),
-        ("gambatte/ly0/lycint152_lyc153irq_ds_1_cgb04c_outE0.gbc", "E0"),
+        (
+            "gambatte/ly0/lycint152_lyc153irq_ds_1_cgb04c_outE0.gbc",
+            "E0",
+        ),
         // Group B: the DS mode-0 write-race (write 1-2 dots before the rise
         // consumes it; the strict edge never re-raises).
         (
@@ -579,7 +591,10 @@ fn tier2_ff0f_groupab_passes() {
             "gambatte/ly0/lycint152_lyc153irq_ifw_ds_1_cgb04c_outE2.gbc",
             "E2",
         ),
-        ("gambatte/m2int_m2irq/m2int_m2irq_ifw_ds_1_cgb04c_out2.gbc", "2"),
+        (
+            "gambatte/m2int_m2irq/m2int_m2irq_ifw_ds_1_cgb04c_out2.gbc",
+            "2",
+        ),
     ];
     for (rel, expect) in targets {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));

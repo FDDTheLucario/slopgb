@@ -29,12 +29,27 @@ fn tier2_late_scx_writestrobe_passes() {
     };
     for (rel, want) in [
         // The straddle pair, both speeds: `_1` extends (want 3), `_2` bare.
-        ("gambatte/m2int_m3stat/scx/late_scx4_1_dmg08_cgb04c_out3.gbc", "3"),
-        ("gambatte/m2int_m3stat/scx/late_scx4_2_dmg08_cgb04c_out0.gbc", "0"),
-        ("gambatte/m2int_m3stat/scx/late_scx4_ds_1_cgb04c_out3.gbc", "3"),
-        ("gambatte/m2int_m3stat/scx/late_scx4_ds_2_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/m2int_m3stat/scx/late_scx4_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/m2int_m3stat/scx/late_scx4_2_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/m2int_m3stat/scx/late_scx4_ds_1_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/m2int_m3stat/scx/late_scx4_ds_2_cgb04c_out0.gbc",
+            "0",
+        ),
         // A mid-mode-3 SCX write extending the fine scroll (want 3).
-        ("gambatte/scx_during_m3/scx_m3_extend_1_dmg08_cgb04c_out3.gbc", "3"),
+        (
+            "gambatte/scx_during_m3/scx_m3_extend_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
         // The glitch-line immediate-commit guard (want mode 3 + LYC = 87).
         (
             "gambatte/enable_display/ly0_late_scx7_m3stat_scx3_1_dmg08_cgb04c_out87.gbc",
@@ -414,14 +429,20 @@ fn tier2_window_late_wy_extend_passes() {
 #[test]
 fn tier2_dmg_window_passes() {
     let Some(root) = common::gbtr_root() else {
-        common::skip_or_fail_gbtr("tier2_dmg_window", "game-boy-test-roms collection not present");
+        common::skip_or_fail_gbtr(
+            "tier2_dmg_window",
+            "game-boy-test-roms collection not present",
+        );
         return;
     };
     // (rel, expected DMG out). Representatives of each shipped DMG arm + guard
     // rows (the parked-atomic residual stays at its native verdict).
     let targets = [
         // Arm D1 — the DMG triggering-window length law (259 + SCX&7 exit).
-        ("gambatte/window/m2int_wx00_m3stat_2_dmg08_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/window/m2int_wx00_m3stat_2_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
         (
             "gambatte/window/m2int_wx07_scx3_m3stat_2_dmg08_cgb04c_out0.gbc",
             "0",
@@ -582,8 +603,14 @@ fn tier2_dmg_m3_render_win_abort_passes() {
         return;
     };
     let targets = [
-        ("mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple.gb", Model::Dmg),
-        ("mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple.gb", Model::Cgb),
+        (
+            "mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple.gb",
+            Model::Dmg,
+        ),
+        (
+            "mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple.gb",
+            Model::Cgb,
+        ),
     ];
     for (rel, model) in targets {
         assert_pixel_leg_flagon(&root, rel, model);
@@ -763,12 +790,24 @@ fn tier2_window_line_flip_consumers_passes() {
         return;
     };
     let targets = [
-        ("gambatte/window/m2int_wxA5_m0irq_2_dmg08_cgb04c_out2.gbc", "2"),
+        (
+            "gambatte/window/m2int_wxA5_m0irq_2_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
         // GUARD — the one-M-earlier read stays clear of the led rise.
-        ("gambatte/window/m2int_wxA5_m0irq_1_dmg08_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/window/m2int_wxA5_m0irq_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
         // GUARDs — the FF41 read law was already right; must not double-move.
-        ("gambatte/window/m2int_wxA5_m3stat_1_dmg08_cgb04c_out3.gbc", "3"),
-        ("gambatte/window/m2int_wxA5_m3stat_2_dmg08_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/window/m2int_wxA5_m3stat_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/m2int_wxA5_m3stat_2_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
         (
             "gambatte/window/m2int_wxA6_vrambusyread_3_dmg08_cgb04c_out5.gbc",
             "5",

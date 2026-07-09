@@ -105,5 +105,8 @@ fn noise_source_overrides_brr() {
         // use_noise = true, noise sample 10000 -> output tracks noise, not BRR.
         out = v.step(&ram, 0x1000, 0x00, 0x00, 0x7F, 0, 10000, true, &mut endx, 0);
     }
-    assert!(out > 100, "noise-sourced output should be nonzero, got {out}");
+    assert!(
+        out > 100,
+        "noise-sourced output should be nonzero, got {out}"
+    );
 }

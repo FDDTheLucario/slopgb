@@ -15,19 +15,32 @@ const EN_LYC: u8 = 0x40;
 fn level_selects_the_one_mode_source_by_interrupt_mode() {
     // Each mode picks exactly its own enable bit (display.c:545-550).
     assert!(StatUpdate::level(0, EN_HBLANK, false));
-    assert!(!StatUpdate::level(0, EN_OAM, false), "mode 0 ignores the OAM enable");
+    assert!(
+        !StatUpdate::level(0, EN_OAM, false),
+        "mode 0 ignores the OAM enable"
+    );
     assert!(StatUpdate::level(1, EN_VBLANK, false));
     assert!(StatUpdate::level(2, EN_OAM, false));
-    assert!(!StatUpdate::level(2, EN_HBLANK, false), "mode 2 ignores the HBlank enable");
+    assert!(
+        !StatUpdate::level(2, EN_HBLANK, false),
+        "mode 2 ignores the HBlank enable"
+    );
 }
 
 #[test]
 fn level_mode_three_and_none_select_no_mode_source() {
     // Mode 3 and the -1/NONE sentinel are the display.c `default:` arm: no
     // mode source, only LYC can hold the line.
-    assert!(!StatUpdate::level(3, !EN_LYC, false), "mode 3: no mode source");
     assert!(
-        !StatUpdate::level(MODE_FOR_INTERRUPT_NONE, EN_HBLANK | EN_OAM | EN_VBLANK, false),
+        !StatUpdate::level(3, !EN_LYC, false),
+        "mode 3: no mode source"
+    );
+    assert!(
+        !StatUpdate::level(
+            MODE_FOR_INTERRUPT_NONE,
+            EN_HBLANK | EN_OAM | EN_VBLANK,
+            false
+        ),
         "NONE: no mode source even with every mode enable set"
     );
     // ...but LYC still works through the NONE state.
@@ -59,7 +72,10 @@ fn stat_blocking_a_second_source_joining_does_not_refire() {
     // The classic STAT blocking case: the line is already high from the mode-0
     // source; LYC then also goes high. No new rising edge (display.c:557).
     let mut s = StatUpdate::new();
-    assert!(s.update(0, EN_HBLANK | EN_LYC, false), "mode-0 source raises the line");
+    assert!(
+        s.update(0, EN_HBLANK | EN_LYC, false),
+        "mode-0 source raises the line"
+    );
     assert!(
         !s.update(0, EN_HBLANK | EN_LYC, true),
         "LYC joining an already-high line does not re-fire"

@@ -105,7 +105,11 @@ impl Mcp {
     /// wake (including while paused/broken — that is exactly when an agent wants
     /// to inspect). Reaps a dead socket thread.
     pub fn pump(&mut self, gb: &GameBoy, dbg: &mut Debugger, symbols: &SymbolTable) {
-        if self.server.as_ref().is_some_and(server::Server::is_finished) {
+        if self
+            .server
+            .as_ref()
+            .is_some_and(server::Server::is_finished)
+        {
             self.server = None;
             self.rx = None;
             return;

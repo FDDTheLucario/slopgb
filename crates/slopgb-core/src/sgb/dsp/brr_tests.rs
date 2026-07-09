@@ -66,7 +66,11 @@ fn filter1_predicts_from_previous_sample() {
     let blk = decode_block(&ram, 0x0200, &mut p1, &mut p2);
     // First output ≈ 0.9375 * 0x2000 = 0x1E00 (7680), within rounding.
     let expected = (f64::from(0x2000) * 0.9375) as i16;
-    assert!((blk.samples[0] - expected).abs() <= 4, "{} vs {expected}", blk.samples[0]);
+    assert!(
+        (blk.samples[0] - expected).abs() <= 4,
+        "{} vs {expected}",
+        blk.samples[0]
+    );
     // Monotone decay toward zero.
     assert!(blk.samples[1].abs() < blk.samples[0].abs());
     assert!(blk.samples[15].abs() < blk.samples[0].abs());

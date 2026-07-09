@@ -30,7 +30,12 @@ fn nib(n: u8) -> i32 {
 /// Decode one 9-byte BRR block at `addr` in `ram`, threading the predictor
 /// history (`p1`/`p2` — the last two full-scale decoded samples) across blocks
 /// so the filter continues seamlessly. Reads wrap the 16-bit APU address space.
-pub(super) fn decode_block(ram: &[u8; 0x1_0000], addr: u16, p1: &mut i32, p2: &mut i32) -> BrrBlock {
+pub(super) fn decode_block(
+    ram: &[u8; 0x1_0000],
+    addr: u16,
+    p1: &mut i32,
+    p2: &mut i32,
+) -> BrrBlock {
     let header = ram[addr as usize];
     let shift = header >> 4;
     let filter = (header >> 2) & 3;

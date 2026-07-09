@@ -168,8 +168,14 @@ fn tier2_m2int_m3stat_ds_readpos_passes() {
     // 84): the DS mode-2 ISR pair straddles it at dots 80/82 (+2 carry →
     // 82/84, want 2/3); the entry is SCX-independent (`m2int_scx4_m2stat_ds`).
     for (rel, expect) in [
-        ("gambatte/m2int_m2stat/m2int_m2stat_ds_1_cgb04c_out2.gbc", "2"),
-        ("gambatte/m2int_m2stat/m2int_m2stat_ds_2_cgb04c_out3.gbc", "3"),
+        (
+            "gambatte/m2int_m2stat/m2int_m2stat_ds_1_cgb04c_out2.gbc",
+            "2",
+        ),
+        (
+            "gambatte/m2int_m2stat/m2int_m2stat_ds_2_cgb04c_out3.gbc",
+            "3",
+        ),
         (
             "gambatte/m2int_m2stat/m2int_scx4_m2stat_ds_2_cgb04c_out3.gbc",
             "3",
@@ -492,8 +498,14 @@ fn tier2_dmg_m3_render_scy_palette_passes() {
         return;
     };
     let targets = [
-        ("gambatte/dmgpalette_during_m3/dmgpalette_during_m3_1.gb", Model::Dmg),
-        ("gambatte/dmgpalette_during_m3/scx3/dmgpalette_during_m3_3.gb", Model::Dmg),
+        (
+            "gambatte/dmgpalette_during_m3/dmgpalette_during_m3_1.gb",
+            Model::Dmg,
+        ),
+        (
+            "gambatte/dmgpalette_during_m3/scx3/dmgpalette_during_m3_3.gb",
+            Model::Dmg,
+        ),
         ("gambatte/scy/scy_during_m3_1.gbc", Model::Dmg),
         ("gambatte/scy/scy_during_m3_1.gbc", Model::Cgb),
         ("gambatte/scy/scx3/scy_during_m3_5.gbc", Model::Dmg),
@@ -554,9 +566,18 @@ fn tier2_dmg_m3_render_scx_ds_passes() {
         return;
     };
     let targets = [
-        ("gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_5.gbc", Model::Cgb),
-        ("gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_8.gbc", Model::Cgb),
-        ("gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_5.gbc", Model::Cgb),
+        (
+            "gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_5.gbc",
+            Model::Cgb,
+        ),
+        (
+            "gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_8.gbc",
+            Model::Cgb,
+        ),
+        (
+            "gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_5.gbc",
+            Model::Cgb,
+        ),
     ];
     for (rel, model) in targets {
         assert_pixel_leg_flagon(&root, rel, model);
@@ -586,10 +607,22 @@ fn tier2_dmg_m3_render_bg_priority_passes() {
         return;
     };
     let targets = [
-        ("mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change.gb", Model::Cgb),
-        ("mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change2.gb", Model::Cgb),
-        ("gambatte/bgen/bgoff_bgon_sprite_below_window.gbc", Model::Cgb),
-        ("mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change.gb", Model::Cgb),
+        (
+            "mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change.gb",
+            Model::Cgb,
+        ),
+        (
+            "mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change2.gb",
+            Model::Cgb,
+        ),
+        (
+            "gambatte/bgen/bgoff_bgon_sprite_below_window.gbc",
+            Model::Cgb,
+        ),
+        (
+            "mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change.gb",
+            Model::Cgb,
+        ),
     ];
     for (rel, model) in targets {
         assert_pixel_leg_flagon(&root, rel, model);
@@ -624,10 +657,16 @@ fn tier2_dmg_m3_render_palette_halfdot_passes() {
     };
     let targets = [
         ("mealybug-tearoom-tests/ppu/m3_bgp_change.gb", Model::Dmg),
-        ("mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb", Model::Dmg),
+        (
+            "mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb",
+            Model::Dmg,
+        ),
         ("mealybug-tearoom-tests/ppu/m3_obp0_change.gb", Model::Dmg),
         ("mealybug-tearoom-tests/ppu/m3_window_timing.gb", Model::Dmg),
-        ("mealybug-tearoom-tests/ppu/m3_window_timing_wx_0.gb", Model::Dmg),
+        (
+            "mealybug-tearoom-tests/ppu/m3_window_timing_wx_0.gb",
+            Model::Dmg,
+        ),
     ];
     for (rel, model) in targets {
         assert_pixel_leg_flagon(&root, rel, model);

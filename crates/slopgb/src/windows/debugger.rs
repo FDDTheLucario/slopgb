@@ -157,7 +157,13 @@ pub fn stack_lines(stack: &[(u16, u16)]) -> Vec<String> {
 /// Draw the stack pane scrolled `offset` words below SP; the SP row (index 0)
 /// gets the highlight bar as in bgb — shown only while it is in view (offset 0).
 /// `stack` must hold `offset + visible` rows (SP-descending).
-pub fn render_stack(c: &mut Canvas, rect: Rect, stack: &[(u16, u16)], offset: usize, theme: &Theme) {
+pub fn render_stack(
+    c: &mut Canvas,
+    rect: Rect,
+    stack: &[(u16, u16)],
+    offset: usize,
+    theme: &Theme,
+) {
     let lines = stack_lines(stack);
     let texts: Vec<&str> = lines.iter().map(String::as_str).collect();
     let highlight = (!texts.is_empty()).then_some(0);
@@ -327,7 +333,13 @@ impl DebuggerState {
         if self.pinned {
             return;
         }
-        let rows = disasm_rows(&read, self.disasm_base, visible, &self.data_hints, self.disasm_fmt);
+        let rows = disasm_rows(
+            &read,
+            self.disasm_base,
+            visible,
+            &self.data_hints,
+            self.disasm_fmt,
+        );
         if rows.iter().any(|r| r.addr == pc) {
             return;
         }
@@ -399,7 +411,10 @@ impl DebuggerState {
     /// makes exact row-fraction impossible, same approximation as the pane.
     #[must_use]
     pub fn disasm_scroll(&self, visible: usize) -> (f32, f32) {
-        (self.disasm_base as f32 / f32::from(u16::MAX), visible as f32 * 2.0 / 65536.0)
+        (
+            self.disasm_base as f32 / f32::from(u16::MAX),
+            visible as f32 * 2.0 / 65536.0,
+        )
     }
 
     /// Jump the disasm base to `frac` (0..1) of the address space and pin (a drag
@@ -412,7 +427,10 @@ impl DebuggerState {
     /// Memory scrollbar `(frac, vis)` for a `visible`-row pane over 64 KiB.
     #[must_use]
     pub fn mem_scroll(&self, visible: usize) -> (f32, f32) {
-        (self.mem_base as f32 / f32::from(u16::MAX), visible as f32 * 16.0 / 65536.0)
+        (
+            self.mem_base as f32 / f32::from(u16::MAX),
+            visible as f32 * 16.0 / 65536.0,
+        )
     }
 
     /// Jump the memory base to `frac` (0..1) of the 64 KiB space (row-aligned).

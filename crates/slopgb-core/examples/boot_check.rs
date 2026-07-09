@@ -36,12 +36,23 @@ fn main() {
             handed = Some((fr, gb.cpu_regs()));
         }
     }
-    println!("audio peak amplitude during boot: {peak:.4} ({})",
-        if peak > 0.01 { "chime audible" } else { "SILENT" });
+    println!(
+        "audio peak amplitude during boot: {peak:.4} ({})",
+        if peak > 0.01 {
+            "chime audible"
+        } else {
+            "SILENT"
+        }
+    );
     if let Some((fr, r)) = handed {
         println!(
             "handed off at frame {fr}: pc={:04X} a={:02X} bc={:04X} de={:04X} hl={:04X} sp={:04X}",
-            r.pc, r.a, r.bc(), r.de(), r.hl(), r.sp
+            r.pc,
+            r.a,
+            r.bc(),
+            r.de(),
+            r.hl(),
+            r.sp
         );
     } else {
         println!("RESULT: FAIL — boot ROM never handed off (locked up?)");

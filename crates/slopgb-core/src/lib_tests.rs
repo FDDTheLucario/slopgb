@@ -546,7 +546,11 @@ fn cdl_load_restores_a_flag_buffer() {
     fixture[0x0150] = 4; // ROM offset 0x150 (bank 0 low area) -> X
     assert!(gb.load_cdl(&fixture), "matching-size buffer loads");
     assert_eq!(gb.cdl_flag(0x0150), 4);
-    assert_eq!(gb.cdl_flags().unwrap(), &fixture[..], "buffer restored verbatim");
+    assert_eq!(
+        gb.cdl_flags().unwrap(),
+        &fixture[..],
+        "buffer restored verbatim"
+    );
     assert!(!gb.load_cdl(&[0u8; 8]), "wrong-size buffer is rejected");
 }
 
@@ -583,7 +587,10 @@ fn debug_read_and_cdl_reach_explicit_sram_banks() {
         assert_eq!(gb.debug_read_banked(bank, 0xA000), 0xD0 | bank as u8);
     }
     // Out-of-range bank folds within the chip (bank 4 wraps to bank 0), no OOB.
-    assert_eq!(gb.debug_read_banked(4, 0xA000), gb.debug_read_banked(0, 0xA000));
+    assert_eq!(
+        gb.debug_read_banked(4, 0xA000),
+        gb.debug_read_banked(0, 0xA000)
+    );
 
     // CDL follows the same bank map. Craft a fixture flagging SRAM bank 2 only
     // (debug_read is side-effect-free, so it can't record a flag): the physical
@@ -620,11 +627,17 @@ fn debug_write_banked_edits_the_named_bank_of_each_region() {
     let mut gb = GameBoy::new(Model::Cgb, rom).unwrap();
     // Poke a distinct byte into a non-live bank of each region, read it back
     // banked, and confirm the *live* bank was untouched.
-    for (addr, bank, val, live) in
-        [(0x8000u16, 1u16, 0xE1u8, 0u16), (0xA000, 3, 0xE3, 0), (0xD000, 5, 0xE5, 1)]
-    {
+    for (addr, bank, val, live) in [
+        (0x8000u16, 1u16, 0xE1u8, 0u16),
+        (0xA000, 3, 0xE3, 0),
+        (0xD000, 5, 0xE5, 1),
+    ] {
         gb.debug_write_banked(bank, addr, val);
-        assert_eq!(gb.debug_read_banked(bank, addr), val, "edit lands in {bank}");
+        assert_eq!(
+            gb.debug_read_banked(bank, addr),
+            val,
+            "edit lands in {bank}"
+        );
         assert_ne!(
             gb.debug_read_banked(live, addr),
             val,
@@ -634,8 +647,15 @@ fn debug_write_banked_edits_the_named_bank_of_each_region() {
     // WRAMX has no page-0 window: bank 0 folds to page 1 on both read and write
     // (SVBK 0 → 1), so a bank-0 edit is visible as bank 1.
     gb.debug_write_banked(0, 0xD000, 0x7C);
-    assert_eq!(gb.debug_read_banked(1, 0xD000), 0x7C, "WRAMX bank 0 aliases bank 1");
-    assert_eq!(gb.debug_read_banked(0, 0xD000), gb.debug_read_banked(1, 0xD000));
+    assert_eq!(
+        gb.debug_read_banked(1, 0xD000),
+        0x7C,
+        "WRAMX bank 0 aliases bank 1"
+    );
+    assert_eq!(
+        gb.debug_read_banked(0, 0xD000),
+        gb.debug_read_banked(1, 0xD000)
+    );
 }
 
 #[test]
@@ -681,7 +701,10 @@ fn debug_read_banked_reads_explicit_rom_bank() {
     let cur = gb.rom_bank() as u16;
     assert_eq!(gb.debug_read_banked(cur, 0x4000), gb.debug_read(0x4000));
     // An out-of-range bank folds back in (no OOB panic): bank 4 wraps to bank 0.
-    assert_eq!(gb.debug_read_banked(4, 0x4000), gb.debug_read_banked(0, 0x4000));
+    assert_eq!(
+        gb.debug_read_banked(4, 0x4000),
+        gb.debug_read_banked(0, 0x4000)
+    );
 }
 
 #[test]
@@ -774,7 +797,10 @@ fn cdl_records_read_write_execute_only_when_armed() {
     }
     assert!(gb.cdl_flag(0x0100) & 4 != 0, "X at the first opcode");
     assert!(gb.cdl_flag(0x0102) & 4 != 0, "X at the store opcode");
-    assert!(gb.cdl_flag(0x0101) & 1 != 0, "R at the immediate operand byte");
+    assert!(
+        gb.cdl_flag(0x0101) & 1 != 0,
+        "R at the immediate operand byte"
+    );
     assert!(gb.cdl_flag(0xC000) & 2 != 0, "W at the stored address");
     // Disarmed: a fresh run logs nothing.
     let mut off = GameBoy::new(Model::Dmg, write_c000_rom()).unwrap();
@@ -796,9 +822,20 @@ fn cdl_logging_does_not_perturb_emulation() {
             gb.step();
         }
         let r = gb.cpu_regs();
-        (r.af(), r.bc(), r.pc, r.sp, gb.debug_read(0xC000), gb.cycles())
+        (
+            r.af(),
+            r.bc(),
+            r.pc,
+            r.sp,
+            gb.debug_read(0xC000),
+            gb.cycles(),
+        )
     };
-    assert_eq!(run(false), run(true), "CDL recording must not change emulation");
+    assert_eq!(
+        run(false),
+        run(true),
+        "CDL recording must not change emulation"
+    );
 }
 
 #[test]
@@ -807,8 +844,14 @@ fn cdl_defaults_off_toggles_and_survives_a_state_load() {
     assert_eq!(gb.cdl_flag(0x0100), 0, "off: flag reads 0");
     assert!(gb.cdl_flags().is_none(), "off: no buffer");
     gb.set_cdl(true);
-    assert!(gb.cdl_flags().is_some_and(|b| !b.is_empty()), "on: buffer allocated");
-    assert!(gb.cdl_flags().unwrap().iter().all(|&f| f == 0), "on: all clear");
+    assert!(
+        gb.cdl_flags().is_some_and(|b| !b.is_empty()),
+        "on: buffer allocated"
+    );
+    assert!(
+        gb.cdl_flags().unwrap().iter().all(|&f| f == 0),
+        "on: all clear"
+    );
     // A save-state load leaves the CDL untouched — it is live UI state, not
     // serialized — so the buffer stays enabled across a load.
     let snap = gb.save_state();
@@ -851,7 +894,11 @@ fn debug_read_resolves_io_but_peek_does_not() {
     assert_eq!(gb.debug_read(0x0143), gb.peek_no_io(0x0143));
     assert_eq!(gb.debug_read(0x0143), 0x00); // the CGB flag we wrote
     for addr in [0x0000u16, 0x4000, 0xC000, 0xFF80, 0xFFFF] {
-        assert_eq!(gb.debug_read(addr), gb.peek_no_io(addr), "non-IO {addr:#06x}");
+        assert_eq!(
+            gb.debug_read(addr),
+            gb.peek_no_io(addr),
+            "non-IO {addr:#06x}"
+        );
     }
 }
 
@@ -994,7 +1041,11 @@ fn run_frame_yields_on_link_stall() {
     let f0 = gb2.frame_count();
     gb2.run_frame();
     assert!(!gb2.link_stalled());
-    assert_eq!(gb2.frame_count(), f0 + 1, "disconnected frame runs to completion");
+    assert_eq!(
+        gb2.frame_count(),
+        f0 + 1,
+        "disconnected frame runs to completion"
+    );
 }
 
 /// Link task 4: disconnecting while a master is stalled folds the serial
@@ -1008,7 +1059,11 @@ fn link_disconnect_while_stalled_raises_if() {
     gb.link_connect(true);
     gb.run_frame(); // master stalls
     assert!(gb.link_stalled());
-    assert_eq!(gb.debug_read(0xFF0F) & 0x08, 0, "no serial IF while stalled");
+    assert_eq!(
+        gb.debug_read(0xFF0F) & 0x08,
+        0,
+        "no serial IF while stalled"
+    );
     gb.link_connect(false);
     assert!(!gb.link_stalled());
     assert_eq!(

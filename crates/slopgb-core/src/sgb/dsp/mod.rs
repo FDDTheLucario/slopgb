@@ -192,9 +192,8 @@ impl SDsp {
         let mut endx = self.endx;
         for v in 0..8 {
             let base = v << 4;
-            let mut pitch = (u16::from(self.regs[base + 2])
-                | (u16::from(self.regs[base + 3]) << 8))
-                & 0x3FFF;
+            let mut pitch =
+                (u16::from(self.regs[base + 2]) | (u16::from(self.regs[base + 3]) << 8)) & 0x3FFF;
             // Pitch modulation from the previous voice (voice 0 is never
             // modulated).
             if v > 0 && pmon & (1 << v) != 0 {
@@ -255,10 +254,7 @@ impl SDsp {
             l = 0;
             r = 0;
         }
-        (
-            l.clamp(-32768, 32767) as i16,
-            r.clamp(-32768, 32767) as i16,
-        )
+        (l.clamp(-32768, 32767) as i16, r.clamp(-32768, 32767) as i16)
     }
 
     // -- Save state ---------------------------------------------------------

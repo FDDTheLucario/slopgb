@@ -87,7 +87,11 @@ mod tests {
     fn rle_round_trips_and_compresses_zeros() {
         let zero = vec![0u8; 65536];
         let enc = rle_encode(&zero);
-        assert!(enc.len() < 16, "all-zero compresses hard: {} bytes", enc.len());
+        assert!(
+            enc.len() < 16,
+            "all-zero compresses hard: {} bytes",
+            enc.len()
+        );
         assert_eq!(rle_decode(&enc), zero);
 
         let mut sparse = vec![0u8; 65536];
@@ -109,7 +113,11 @@ mod tests {
         // enough that load_cdl's exact-length gate then rejects it.
         let hostile = [0u8, 0xFF, 0xFF].repeat(100_000);
         let out = rle_decode(&hostile);
-        assert!(out.len() <= 16 << 20, "decode capped, not {} bytes", out.len());
+        assert!(
+            out.len() <= 16 << 20,
+            "decode capped, not {} bytes",
+            out.len()
+        );
     }
 
     #[test]

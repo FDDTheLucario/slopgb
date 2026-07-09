@@ -188,16 +188,16 @@ impl Ppu {
             // Tier-2: VRAM unblocks coincident with the visible mode→0 flip
             // (`vis_early`); see `oam_read_blocked`. Byte-identical OFF.
             || (self.tier2_reclock && self.vis_early)
-            // NOTE: the DS line-END read release is NOT applied to
-            // VRAM. `vram_m3/postread_ds_2` (want accessible @dot254) is
-            // CO-TEMPORAL with `vramw_m3end/vramw_m3end_ds_2` (want the readback
-            // BLOCKED @dot254): the vramw write costs a CPU M-cycle that shifts
-            // SameBoy's readback cfl vs the sprite-free postread, but slopgb's
-            // deferred frame collapses both to the same dot254 read — so a VRAM
-            // release is an A/B swap (+1 postread / −1 vramw). OAM has no
-            // write-end readback at that dot, so its release ([`Self::
-            // ds_lineend_read_open`], wired only into `oam_read_blocked`) is
-            // clean. The VRAM DS read grid is the parked reclock.
+        // NOTE: the DS line-END read release is NOT applied to
+        // VRAM. `vram_m3/postread_ds_2` (want accessible @dot254) is
+        // CO-TEMPORAL with `vramw_m3end/vramw_m3end_ds_2` (want the readback
+        // BLOCKED @dot254): the vramw write costs a CPU M-cycle that shifts
+        // SameBoy's readback cfl vs the sprite-free postread, but slopgb's
+        // deferred frame collapses both to the same dot254 read — so a VRAM
+        // release is an A/B swap (+1 postread / −1 vramw). OAM has no
+        // write-end readback at that dot, so its release ([`Self::
+        // ds_lineend_read_open`], wired only into `oam_read_blocked`) is
+        // clean. The VRAM DS read grid is the parked reclock.
         {
             return false;
         }
@@ -209,7 +209,11 @@ impl Ppu {
         // Shifted ROMs classify the lock on the un-shifted frame
         // (`vram_m3/preread_lcdoffset1_1` reads dot83 after the +1-dot machine
         // advance where SameBoy still reads open; identity otherwise).
-        let d = if self.tier2_reclock { self.law_pos().1 } else { self.dot };
+        let d = if self.tier2_reclock {
+            self.law_pos().1
+        } else {
+            self.dot
+        };
         // The DS tier2 VRAM read frame: (a) the deferred cc+0
         // read's true DS sample sits +3 T late, so the mode-3 entry lock
         // covers it from dot 80 (the SS +3 CGB grace does not apply on the

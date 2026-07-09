@@ -2,17 +2,59 @@ use super::*;
 
 #[test]
 fn bare_form_parses_unbanked_regions() {
-    assert_eq!(parse_one("02BF").unwrap(), Addr { bank: 0, addr: 0x02BF });
-    assert_eq!(parse_one("C123").unwrap(), Addr { bank: 0, addr: 0xC123 });
-    assert_eq!(parse_one("FF40").unwrap(), Addr { bank: 0, addr: 0xFF40 });
+    assert_eq!(
+        parse_one("02BF").unwrap(),
+        Addr {
+            bank: 0,
+            addr: 0x02BF
+        }
+    );
+    assert_eq!(
+        parse_one("C123").unwrap(),
+        Addr {
+            bank: 0,
+            addr: 0xC123
+        }
+    );
+    assert_eq!(
+        parse_one("FF40").unwrap(),
+        Addr {
+            bank: 0,
+            addr: 0xFF40
+        }
+    );
 }
 
 #[test]
 fn banked_form_parses_banked_regions() {
-    assert_eq!(parse_one("03:7FFF").unwrap(), Addr { bank: 3, addr: 0x7FFF });
-    assert_eq!(parse_one("01:8000").unwrap(), Addr { bank: 1, addr: 0x8000 });
-    assert_eq!(parse_one("02:A000").unwrap(), Addr { bank: 2, addr: 0xA000 });
-    assert_eq!(parse_one("05:D000").unwrap(), Addr { bank: 5, addr: 0xD000 });
+    assert_eq!(
+        parse_one("03:7FFF").unwrap(),
+        Addr {
+            bank: 3,
+            addr: 0x7FFF
+        }
+    );
+    assert_eq!(
+        parse_one("01:8000").unwrap(),
+        Addr {
+            bank: 1,
+            addr: 0x8000
+        }
+    );
+    assert_eq!(
+        parse_one("02:A000").unwrap(),
+        Addr {
+            bank: 2,
+            addr: 0xA000
+        }
+    );
+    assert_eq!(
+        parse_one("05:D000").unwrap(),
+        Addr {
+            bank: 5,
+            addr: 0xD000
+        }
+    );
 }
 
 #[test]
@@ -35,7 +77,13 @@ fn unbanked_region_rejects_banked_form() {
 #[test]
 fn sram_takes_banked_form() {
     // Cart SRAM banks with the mapper — BB:AAAA like the other banked regions.
-    assert_eq!(parse_one("00:A000").unwrap(), Addr { bank: 0, addr: 0xA000 });
+    assert_eq!(
+        parse_one("00:A000").unwrap(),
+        Addr {
+            bank: 0,
+            addr: 0xA000
+        }
+    );
     assert!(parse_one("A000").is_err(), "bare form needs a bank");
 }
 

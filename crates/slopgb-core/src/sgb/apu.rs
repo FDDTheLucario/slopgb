@@ -163,8 +163,10 @@ impl SgbApu {
         while self.samp_acc >= self.cycles_per_sample {
             self.samp_acc -= self.cycles_per_sample;
             if self.out.len() < self.max_out {
-                self.out
-                    .push((f32::from(self.cur.0) * MIX_SCALE, f32::from(self.cur.1) * MIX_SCALE));
+                self.out.push((
+                    f32::from(self.cur.0) * MIX_SCALE,
+                    f32::from(self.cur.1) * MIX_SCALE,
+                ));
             }
         }
     }

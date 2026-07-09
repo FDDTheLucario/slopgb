@@ -23,7 +23,7 @@
 //! only through that `Some`.
 
 use super::*;
-use crate::{SgbSound, SCREEN_H, SCREEN_W};
+use crate::{SCREEN_H, SCREEN_W, SgbSound};
 
 mod bios;
 mod border;
