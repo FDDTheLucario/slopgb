@@ -118,8 +118,9 @@ pub const EXC_LCD_OFF_VBLANK: u16 = 1 << 3;
 /// Leading bytes of a slopgb save state (see [`GameBoy::save_state`]).
 const STATE_MAGIC: &[u8; 4] = b"SLPS";
 /// Save-state format version (bumped on any layout change). v3 dropped the
-/// APU output queues (`samples`/`raw_samples`) from the payload.
-const STATE_VERSION: u16 = 3;
+/// APU output queues (`samples`/`raw_samples`) from the payload; v4 appends the
+/// SGB audio subsystem (SPC700 + S-DSP) on `Model::Sgb`/`Sgb2` states.
+const STATE_VERSION: u16 = 4;
 
 /// A debugger memory watchpoint (bgb's "Set watchpoint"): the free run halts
 /// after the CPU accesses `addr` with a matching access kind. A frontend/
@@ -152,6 +153,9 @@ pub enum DebugReg {
 pub struct GameBoy {
     cpu: cpu::Cpu,
     bus: interconnect::Interconnect,
+    /// SGB audio subsystem (SPC700 + S-DSP). `Some` only on `Model::Sgb`/`Sgb2`;
+    /// `None` elsewhere, so `Dmg`/`Cgb` are byte-identical (golden-safe).
+    sgb_apu: Option<sgb::apu::SgbApu>,
 }
 
 impl GameBoy {
@@ -212,7 +216,8 @@ impl GameBoy {
             cpu.regs_mut().set_de(0xFF56);
             cpu.regs_mut().set_hl(0x000D);
         }
-        Self { cpu, bus }
+        let sgb_apu = sgb::apu::SgbApu::for_model(model);
+        Self { cpu, bus, sgb_apu }
     }
 
     /// Build a machine that **executes `boot_rom`** from power-on (bgb's
@@ -245,7 +250,8 @@ impl GameBoy {
         // constructor state (LCD off, DIV 0, …) and the boot ROM brings it up.
         bus.attach_boot_rom(boot_rom);
         let cpu = cpu::Cpu::power_on();
-        Ok(Self { cpu, bus })
+        let sgb_apu = sgb::apu::SgbApu::for_model(model);
+        Ok(Self { cpu, bus, sgb_apu })
     }
 
     /// Pick the best model for a ROM from its CGB-support header flag
@@ -261,7 +267,16 @@ impl GameBoy {
 
     /// Execute one CPU instruction (or one halted/stopped M-cycle).
     pub fn step(&mut self) {
+        let before = self.bus.cycles();
         self.cpu.step(&mut self.bus);
+        // Advance the SGB audio subsystem by the cycles that instruction spent,
+        // and drain any SGB sound commands it produced. Present only on
+        // `Model::Sgb`/`Sgb2`, so `Dmg`/`Cgb` runs are byte-identical.
+        if let Some(apu) = self.sgb_apu.as_mut() {
+            let elapsed = self.bus.cycles().wrapping_sub(before);
+            apu.clock(elapsed);
+            apu.poll(&mut self.bus);
+        }
     }
 
     /// Run until the next frame is complete (vblank reached), or — with the
@@ -381,6 +396,11 @@ impl GameBoy {
         w.bytes(&id);
         self.cpu.write_state(&mut w);
         self.bus.write_state(&mut w);
+        // SGB audio state (SPC700 + S-DSP), appended only on SGB models — so
+        // `Dmg`/`Cgb` states are byte-identical to the pre-SGB-audio format.
+        if let Some(apu) = &self.sgb_apu {
+            apu.write_state(&mut w);
+        }
         w.into_vec()
     }
 
@@ -414,6 +434,9 @@ impl GameBoy {
         }
         self.cpu.read_state(&mut r)?;
         self.bus.read_state(&mut r)?;
+        if let Some(apu) = self.sgb_apu.as_mut() {
+            apu.read_state(&mut r)?;
+        }
         Ok(())
     }
 
@@ -556,13 +579,23 @@ impl GameBoy {
     /// Move all pending stereo samples (interleaved L/R, `CLOCK_HZ / 64`-ish
     /// native rate decided by the APU) into `out`.
     pub fn drain_audio(&mut self, out: &mut Vec<(f32, f32)>) {
+        let start = out.len();
         self.bus.apu_mut().drain_samples(out);
+        // On SGB, mix the SNES-side stream into the GB samples just drained
+        // (both emit at the same output rate off the same clock, so they align
+        // sample-for-sample). Inert / absent off `Model::Sgb`/`Sgb2`.
+        if let Some(apu) = self.sgb_apu.as_mut() {
+            apu.mix_into(&mut out[start..]);
+        }
     }
 
     /// Set the audio output sample rate in Hz (default
     /// [`DEFAULT_SAMPLE_RATE`]).
     pub fn set_sample_rate(&mut self, hz: u32) {
         self.bus.apu_mut().set_sample_rate(hz);
+        if let Some(apu) = self.sgb_apu.as_mut() {
+            apu.set_output_rate(hz);
+        }
     }
 
     /// Mute or un-mute one APU channel (1-4) in the mixer — a frontend/

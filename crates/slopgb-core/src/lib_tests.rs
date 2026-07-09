@@ -411,6 +411,22 @@ fn save_state_round_trips_cgb_mbc_and_all_channels() {
 }
 
 #[test]
+fn save_state_round_trips_sgb_with_audio_subsystem() {
+    // On SGB the save state also carries the SPC700 + S-DSP (the v4 tail).
+    // Exercise the full serialization chain and confirm the Game Boy side stays
+    // byte-identical across save/load — the SGB APU content round-trip itself is
+    // unit-tested in `sgb::apu`. The oracle issues no SGB sound commands, so the
+    // SNES side is the deterministic IPL.
+    assert_round_trips(
+        Model::Sgb,
+        &savestate_oracle_rom(),
+        &[2000, 40_000],
+        100,
+        "sgb",
+    );
+}
+
+#[test]
 fn load_state_rejects_corrupt_or_foreign_states() {
     let rom = savestate_oracle_rom();
     let mut gb = GameBoy::new(Model::Dmg, rom.clone()).unwrap();

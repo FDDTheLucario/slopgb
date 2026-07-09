@@ -52,6 +52,27 @@ impl Timer {
         self.stage = 0;
         self.out = 0;
     }
+
+    /// Serialize timer state for a save state (Phase-3 SGB APU). Additive;
+    /// no behavior change.
+    pub(super) fn write_state(&self, w: &mut crate::state::Writer) {
+        w.bool(self.enabled);
+        w.u8(self.target);
+        w.u16(self.stage);
+        w.u8(self.out);
+    }
+
+    /// Restore timer state from a save state.
+    pub(super) fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::StateError> {
+        self.enabled = r.bool()?;
+        self.target = r.u8()?;
+        self.stage = r.u16()?;
+        self.out = r.u8()?;
+        Ok(())
+    }
 }
 
 impl Spc700 {

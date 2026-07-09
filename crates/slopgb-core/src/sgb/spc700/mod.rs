@@ -36,6 +36,10 @@ mod ops_bit;
 mod ops_branch;
 mod ops_misc;
 mod ops_mov;
+// Phase-3 (SGB audio) seam completion: APU-RAM access, `Clone`, save-state
+// serialization. Additive only — the verified opcode/RAM/ports modules are
+// untouched; see `phase3.rs`.
+mod phase3;
 mod ports;
 mod ram;
 mod timers;

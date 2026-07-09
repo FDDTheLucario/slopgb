@@ -6,3 +6,6 @@
 //! stream. This module is self-contained and does not touch the Game Boy core.
 
 pub mod spc700;
+
+pub(crate) mod apu;
+pub(crate) mod dsp;

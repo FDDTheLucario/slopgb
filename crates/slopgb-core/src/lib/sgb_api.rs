@@ -58,4 +58,19 @@ impl GameBoy {
     pub fn sgb_flags(&self) -> Option<SgbFlags> {
         self.bus.ppu().sgb_flags()
     }
+
+    /// Supply the optional, user-provided **SGB audio BIOS** (the SGB
+    /// cartridge's SNES-side ROM image). Mirrors the opt-in boot-ROM plumbing
+    /// ([`Self::new_with_boot`], `docs/bootrom-plan.md`): absent it, SGB audio
+    /// is silent for the default sound bank but every other subsystem works and
+    /// output stays byte-identical.
+    ///
+    /// A no-op off `Model::Sgb`/`Sgb2`. See [`crate::sgb::apu`] and
+    /// `docs/hardware-state/sgb-audio.md` for exactly what does and does not
+    /// produce sound with and without it.
+    pub fn load_sgb_bios(&mut self, bios: &[u8]) {
+        if let Some(apu) = self.sgb_apu.as_mut() {
+            apu.load_bios(bios);
+        }
+    }
 }
