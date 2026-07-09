@@ -143,17 +143,20 @@ the real ROM bank, and SRAM/WRAM/VRAM banking is per physical byte; an access to
 disabled/absent SRAM (or an RTC register) maps to no byte and logs nothing.
 Offsets come from `Cartridge::rom_offset`/`ram_offset` + `wram_index` +
 `Ppu::vram_bank`. Operands get R via the fetch path (opcode-only X). Debug menu:
-**CDL logging** (Ctrl+D toggle) / Clear CDL / Save CDL... / Load CDL.... The
-**standalone Memory Viewer** tints each visited byte's cell background
-(`cdl::cdl_color`: X=red, W=green, R=blue, combos blend), drawn before the dump
-text so glyphs stay readable; off = no tint; the status bar names the tint's live
-bank (`mem_bank_label`, e.g. `ROM05:4000`). Save/load use the path modal
-(`PathPurpose::CdlSave/CdlLoad`) with a std-only RLE codec (`cdl::rle_encode/decode`,
-all-zero → 6 bytes). `load_cdl` validates the buffer length against the machine's
-layout and rejects a foreign `.cdl` (`#[must_use]` bool). Ponytail ceiling:
-length-only guard — a same-size ROM/RAM config would still load; embed the cart
-header checksum in the file if it bites. Follow-ups: integrated-pane coloring;
-an arbitrary-bank browser (viewer shows the live-mapped bank only).
+**CDL logging** (Ctrl+D toggle, **check-marked when on** — the click's live-state
+feedback, refreshed into `DebuggerState::cdl_on` on left-click like `prof`) / Clear
+CDL / Save CDL... / Load CDL.... **Both** the standalone Memory Viewer **and the
+debugger's integrated memory pane** tint each visited byte's cell background via the
+shared `windows::cdl_tint` (`cdl::cdl_color`: X=red, W=green, R=blue, combos blend),
+drawn before the dump text so glyphs stay readable; off = no tint; the viewer's
+status bar names the tint's live bank (`mem_bank_label`, e.g. `ROM05:4000`).
+Save/load use the path modal (`PathPurpose::CdlSave/CdlLoad`) with a std-only RLE
+codec (`cdl::rle_encode/decode`, all-zero → 6 bytes). `load_cdl` validates the
+buffer length against the machine's layout and rejects a foreign `.cdl`
+(`#[must_use]` bool). The MCP `cdl` tool reaches an arbitrary bank
+(`cdl_flag_banked`, incl. SRAM); the UI panes still tint the live-mapped bank only.
+Ponytail ceiling: length-only guard — a same-size ROM/RAM config would still load;
+embed the cart header checksum in the file if it bites.
 
 ## Freeze
 

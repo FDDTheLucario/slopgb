@@ -249,6 +249,9 @@ pub struct DebuggerState {
     /// Cached profiler state for the Execution-profiler dropdown (MB5), refreshed
     /// from the machine when the menu opens.
     pub prof: ProfilerView,
+    /// Whether CDL logging is on, for the Debug dropdown's check-mark — refreshed
+    /// from the machine when a click opens the menu (like [`prof`](Self::prof)).
+    pub cdl_on: bool,
     /// Last Search-string query (MB3), reused by "Continue search".
     pub search_query: String,
     /// Address of the last search hit; "Continue search" resumes just after it.
@@ -281,6 +284,7 @@ impl Default for DebuggerState {
             dialog: None,
             data_hints: BTreeSet::new(),
             prof: ProfilerView::default(),
+            cdl_on: false,
             search_query: String::new(),
             search_hit: None,
             bookmarks: [None; 10],

@@ -76,7 +76,7 @@ pub fn menubar_menu(idx: usize, bar: Rect, st: &DebuggerState, pc: u16) -> OpenM
         0 => file_menu(),
         1 => search_menu(),
         2 => run_menu(cursor),
-        3 => debug_menu(cursor),
+        3 => debug_menu(cursor, st.cdl_on),
         4 => window_menu(),
         _ => profiler_menu(st.prof),
     };
@@ -185,7 +185,7 @@ fn run_menu(cursor: u16) -> Vec<(MenuItem, MenuChoice)> {
     ]
 }
 
-fn debug_menu(cursor: u16) -> Vec<(MenuItem, MenuChoice)> {
+fn debug_menu(cursor: u16, cdl_on: bool) -> Vec<(MenuItem, MenuChoice)> {
     vec![
         (
             MenuItem::new("Toggle breakpoint").shortcut("F2"),
@@ -202,7 +202,12 @@ fn debug_menu(cursor: u16) -> Vec<(MenuItem, MenuChoice)> {
         cmd("Breakpoints", "Ctrl+H", Action::DbgManageBreakpoints),
         cmd("Watchpoints", "Ctrl+J", Action::DbgManageWatchpoints),
         cmd("Freezes", "Ctrl+K", Action::DbgManageFreezes),
-        cmd("CDL logging", "Ctrl+D", Action::DbgToggleCdl),
+        (
+            MenuItem::new("CDL logging")
+                .shortcut("Ctrl+D")
+                .checked(cdl_on),
+            MenuChoice::Command(Action::DbgToggleCdl),
+        ),
         cmd("Clear CDL", "", Action::DbgClearCdl),
         cmd("Save CDL...", "", Action::DbgSaveCdl),
         cmd("Load CDL...", "", Action::DbgLoadCdl),

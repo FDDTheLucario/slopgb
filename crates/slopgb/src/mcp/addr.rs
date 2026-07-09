@@ -9,14 +9,16 @@
 //! | ROM0 | 0000-3FFF | `AAAA` |
 //! | ROMX | 4000-7FFF | `BB:AAAA` |
 //! | VRAM | 8000-9FFF | `BB:AAAA` |
+//! | SRAM | A000-BFFF | `BB:AAAA` |
 //! | WRAM0 | C000-CFFF | `AAAA` |
 //! | WRAMX | D000-DFFF | `BB:AAAA` |
 //! | echo+ | E000-FFFF | `AAAA` |
 //!
-//! Cart SRAM (A000-BFFF) is addressable by neither form (matching the tool
-//! spec) — a query there is rejected. A range must stay inside one region (and,
-//! for the banked regions, one bank), so a caller can't accidentally read across
-//! a bank boundary; it splits the query instead.
+//! Cart SRAM (A000-BFFF) banks with the mapper, so it takes the `BB:AAAA` form
+//! like the other banked regions (the bank folds to the RAM chip size). A range
+//! must stay inside one region (and, for the banked regions, one bank), so a
+//! caller can't accidentally read across a bank boundary; it splits the query
+//! instead.
 
 /// A parsed address: an explicit bank plus the 16-bit CPU address. For the
 /// bare `AAAA` form `bank` is 0 (and the region is unbanked, so it's ignored on
@@ -57,7 +59,7 @@ impl Region {
     /// Whether the region needs an explicit bank (the `BB:AAAA` form).
     #[must_use]
     pub fn banked(self) -> bool {
-        matches!(self, Region::RomX | Region::Vram | Region::WramX)
+        matches!(self, Region::RomX | Region::Vram | Region::Sram | Region::WramX)
     }
 
     fn label(self) -> &'static str {
@@ -98,11 +100,6 @@ pub fn parse_one(s: &str) -> Result<Addr, String> {
             return Err(format!(
                 "{addr:04X} is {} — needs the BB:AAAA form (a bank)",
                 region.label()
-            ));
-        }
-        if region == Region::Sram {
-            return Err(format!(
-                "{addr:04X} is cart SRAM — not addressable by these tools"
             ));
         }
         Ok(Addr { bank: 0, addr })

@@ -666,6 +666,9 @@ fn debugger_left_click(
         brk: gb.profile_break(),
         seen: gb.profile_seen(),
     };
+    // Refresh the CDL-on flag so the Debug dropdown's "CDL logging" check-mark
+    // reflects the live state (bgb's toggled-item tick).
+    s.cdl_on = gb.cdl_flags().is_some();
     debugger::on_left_click(|a| gb.debug_read(a), area, s, r, px, py)
 }
 

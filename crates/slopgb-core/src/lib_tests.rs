@@ -542,6 +542,57 @@ fn mbc1_4bank_rom() -> Vec<u8> {
     rom
 }
 
+/// A 4-bank MBC1 ROM with 32 KiB (4-bank) cart RAM, for the banked-SRAM debug
+/// read + CDL. Header 0x149=0x03 = 32 KiB RAM; mapper 0x03 = MBC1+RAM+BATTERY.
+fn mbc1_ram_rom() -> Vec<u8> {
+    let mut rom = mbc1_4bank_rom();
+    rom[0x147] = 0x03; // MBC1+RAM+BATTERY
+    rom[0x149] = 0x03; // 32 KiB RAM (4 banks)
+    rom
+}
+
+#[test]
+fn debug_read_and_cdl_reach_explicit_sram_banks() {
+    let mut gb = GameBoy::new(Model::Dmg, mbc1_ram_rom()).unwrap();
+    // RAMG on + MBC1 mode 1 so BANK2 selects the RAM bank (gbctr).
+    gb.debug_write(0x0000, 0x0A);
+    gb.debug_write(0x6000, 0x01);
+    // Stamp a bank-unique byte into each of the 4 RAM banks at 0xA000.
+    for bank in 0..4u8 {
+        gb.debug_write(0x4000, bank);
+        gb.debug_write(0xA000, 0xD0 | bank);
+    }
+    // Any bank is reachable regardless of the live BANK2.
+    for bank in 0..4u16 {
+        assert_eq!(gb.debug_read_banked(bank, 0xA000), 0xD0 | bank as u8);
+    }
+    // Out-of-range bank folds within the chip (bank 4 wraps to bank 0), no OOB.
+    assert_eq!(gb.debug_read_banked(4, 0xA000), gb.debug_read_banked(0, 0xA000));
+
+    // CDL follows the same bank map. Craft a fixture flagging SRAM bank 2 only
+    // (debug_read is side-effect-free, so it can't record a flag): the physical
+    // SRAM region sits after ROM (4*0x4000) + VRAM (0x4000); bank 2 @ 0xA000 is
+    // offset 2*0x2000 within it.
+    gb.set_cdl(true);
+    let mut fx = vec![0u8; gb.cdl_flags().unwrap().len()];
+    fx[0x10000 + 0x4000 + 2 * 0x2000] = 1;
+    assert!(gb.load_cdl(&fx));
+    assert_eq!(gb.cdl_flag_banked(2, 0xA000), 1);
+    assert_eq!(gb.cdl_flag_banked(0, 0xA000), 0, "other banks unmarked");
+    // The live bank (2) agrees with the plain cdl_flag.
+    gb.debug_write(0x4000, 2);
+    assert_eq!(gb.cdl_flag_banked(2, 0xA000), gb.cdl_flag(0xA000));
+}
+
+#[test]
+fn banked_sram_on_a_cart_without_ram_reads_ff() {
+    // No RAM chip → open-bus 0xFF for every bank, CDL always 0 (never OOB).
+    let mut gb = GameBoy::new(Model::Dmg, mbc1_4bank_rom()).unwrap();
+    assert_eq!(gb.debug_read_banked(3, 0xA000), 0xFF);
+    gb.set_cdl(true);
+    assert_eq!(gb.cdl_flag_banked(3, 0xA000), 0);
+}
+
 #[test]
 fn debug_read_banked_reads_explicit_rom_bank() {
     // Stamp the byte at each bank's 0x4000-window base with a bank-unique value.

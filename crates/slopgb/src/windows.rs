@@ -228,18 +228,15 @@ pub(crate) fn mem_bank_label(gb: &GameBoy, base: u16) -> Option<String> {
     }
 }
 
-/// Render the standalone memory viewer: the hex dump from the base address
-/// filling the window above a one-line status bar showing the nearest preceding
-/// symbol (`Name+offset`, or `----` with no symbols loaded).
-fn render_memory_window(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, st: &MemoryView) {
+/// CDL: tint each visited byte's cell background (R/W/X) across `body`'s 16-col
+/// hex grid from `base`, before the dump text draws over it. Off (all flags 0 /
+/// log disabled) = no tint = unchanged view. Shared by the standalone memory
+/// viewer and the debugger's memory pane so both give the same CDL feedback.
+fn cdl_tint(c: &mut Canvas, gb: &GameBoy, body: Rect, base: u16) {
     let lh = line_height();
-    let body = Rect::new(area.x, area.y, area.w, (area.h - lh).max(0));
-    // CDL: tint each visited byte's cell background (R/W/X) before the dump text
-    // draws over it. Off (all flags 0 / log disabled) = no tint = unchanged view.
-    let vis_rows = (body.h / lh).max(0);
-    for row in 0..vis_rows {
+    for row in 0..(body.h / lh).max(0) {
         for col in 0..16i32 {
-            let addr = st.mem_base.wrapping_add((row * 16 + col) as u16);
+            let addr = base.wrapping_add((row * 16 + col) as u16);
             if let Some(bg) = crate::cdl::cdl_color(gb.cdl_flag(addr)) {
                 let cch = 10 + 3 * col + i32::from(col >= 8);
                 let (cx, cy) = (body.x + cch * GLYPH_W as i32, body.y + row * lh);
@@ -247,6 +244,15 @@ fn render_memory_window(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme,
             }
         }
     }
+}
+
+/// Render the standalone memory viewer: the hex dump from the base address
+/// filling the window above a one-line status bar showing the nearest preceding
+/// symbol (`Name+offset`, or `----` with no symbols loaded).
+fn render_memory_window(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, st: &MemoryView) {
+    let lh = line_height();
+    let body = Rect::new(area.x, area.y, area.w, (area.h - lh).max(0));
+    cdl_tint(c, gb, body, st.mem_base);
     debugger::render_memory(
         c,
         scroll_content(body),
@@ -256,6 +262,7 @@ fn render_memory_window(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme,
         &st.symbols,
     );
     // Draggable scrollbar on the dump's right edge.
+    let vis_rows = (body.h / lh).max(0);
     let (mf, mv) = st.scroll_frac(vis_rows.max(0) as usize);
     vscrollbar(c, body, mf, mv, theme);
     // In-place edit cursor: highlight the byte at `cursor` when it is visible in
@@ -362,6 +369,7 @@ fn render_debugger(
         st.stack_off,
         theme,
     );
+    cdl_tint(c, gb, l.memory, st.mem_base);
     debugger::render_memory(
         c,
         scroll_content(l.memory),

@@ -454,6 +454,24 @@ impl Cartridge {
             + usize::from(addr & 0x3FFF)
     }
 
+    /// Physical external-RAM offset for an **explicit** RAM bank (`ram_index`
+    /// masked to the chip size, so an out-of-range bank folds in), or `None` when
+    /// the cart has no RAM — for the MCP/debug banked SRAM dump + CDL. Reads raw
+    /// RAM bytes ignoring RAMG/RTC mapping; MBC2's 512×4 chip mirrors and only the
+    /// low nibble is meaningful. Side-effect-free.
+    #[must_use]
+    pub fn ram_offset_banked(&self, bank: u16, addr: u16) -> Option<usize> {
+        self.ram_index(usize::from(bank), addr)
+    }
+
+    /// Read an explicit RAM bank for the debug memory dump (open-bus `0xFF` with
+    /// no RAM chip), the SRAM analogue of [`rom_read_banked`](Self::rom_read_banked).
+    /// Side-effect-free.
+    #[must_use]
+    pub fn ram_read_banked(&self, bank: u16, addr: u16) -> u8 {
+        self.ram_offset_banked(bank, addr).map_or(0xFF, |i| self.ram[i])
+    }
+
     /// Physical external-RAM offset for a CPU address in 0xA000-0xBFFF, or `None`
     /// when no RAM byte is addressed there (RAM disabled/absent, or an RTC
     /// register mapped) — for the bank-aware CDL. Side-effect-free.

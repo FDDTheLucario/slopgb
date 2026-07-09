@@ -284,6 +284,8 @@ impl Interconnect {
             0x8000..=0x9FFF => {
                 self.ppu.debug_vram()[usize::from(bank & 1) * 0x2000 + usize::from(addr & 0x1FFF)]
             }
+            // SRAM: explicit RAM bank (raw chip bytes; open-bus 0xFF with no RAM).
+            0xA000..=0xBFFF => self.cart.ram_read_banked(bank, addr),
             // WRAMX (0xD000-0xDFFF): explicit WRAM bank (SVBK 0 → bank 1, like
             // the hardware; DMG has only bank 1, so any bank folds to it).
             0xD000..=0xDFFF => {
