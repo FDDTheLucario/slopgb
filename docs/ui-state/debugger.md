@@ -7,7 +7,7 @@ bgb functional clone. Keys are **focus-dependent** like bgb.
 | Window | Keys |
 |---|---|
 | **game** | F2/F3/F4 open the debugger / VRAM viewer / I/O map (also `SLOPGB_OPEN_TOOLS=debugger,vram,iomap`) |
-| **debugger** | F2 toggle breakpoint · F3 step over · F4 run to cursor · F6 jump to cursor · F7 trace (step) · F8 step out · Ctrl+G go to · Ctrl+H/Ctrl+J/Ctrl+K open the breakpoint/watchpoint/freeze manager · F5/F10 open VRAM/iomap |
+| **debugger** | F2 toggle breakpoint · F3 step over · F4 run to cursor · F6 jump to cursor · F7 trace (step) · F8 step out · Ctrl+G go to · arrows/PageUp-Down scroll the memory pane · **`[` / `]` step the memory pane's browsed bank** · Ctrl+H/Ctrl+J/Ctrl+K open the breakpoint/watchpoint/freeze manager · F5/F10 open VRAM/iomap |
 | **memory viewer** (standalone) | arrows move the byte cursor (a byte / a row), PageUp/Down a window (auto-scroll) · **hex digits type over the cursor byte in place** (2nd nibble commits via `debug_write_banked`) · Esc cancels a pending edit · Ctrl+G go to (`BB:AAAA` bank-prefixed OK) · **`[` / `]` step the browsed bank** |
 | **any** | F9 break/resume (focus-independent so a frozen machine is always resumable) |
 
@@ -155,9 +155,9 @@ one — see the Standalone memory viewer §).
 Save/load use the path modal (`PathPurpose::CdlSave/CdlLoad`) with a std-only RLE
 codec (`cdl::rle_encode/decode`, all-zero → 6 bytes). `load_cdl` validates the
 buffer length against the machine's layout and rejects a foreign `.cdl`
-(`#[must_use]` bool). The MCP `cdl` tool and the standalone viewer's bank browser both
-reach an arbitrary bank (`cdl_flag_banked`, incl. SRAM); the integrated debugger pane
-still tints the live-mapped bank only.
+(`#[must_use]` bool). The MCP `cdl` tool and **both** memory panes' bank browsers reach
+an arbitrary bank (`cdl_flag_banked`, incl. SRAM); each pane tints its browsed bank
+(the live-mapped one by default).
 Ponytail ceiling: length-only guard — a same-size ROM/RAM config would still load;
 embed the cart header checksum in the file if it bites.
 
@@ -185,18 +185,23 @@ highlighted (blue while typing). **Ctrl+G** opens a goto dialog (`MemoryView.got
 Keys routed in the mem-window branch of `app_handler` (`mem_dialog_active`/
 `feed_mem_dialog`/`mem_edit_digit`/`mem_cancel_edit`/`mem_window_key`).
 
-**Bank browser** (`MemoryView.bank`): the viewer reads/tints/edits an arbitrary bank
-of the banked region it sits in, so a human can inspect a non-mapped bank like the MCP
-`peek`/`cdl` tools do (parity). `[` / `]` step the bank (`step_bank`, wrapping
-`GameBoy::region_bank_count`); a `BB:AAAA` Go-to sets bank + base together. Reads go
-through `debug_read_banked` / `cdl_flag_banked` and edits through `debug_write_banked`
-(all folded to the base region by `effective_bank`, so what's shown is what's edited —
-WYSIWYG on any bank; the ROM areas' "edits" still poke the mapper, unchanged). The
-status bar names the **selected** bank (`sel_bank_label`, e.g. `SRM03:A000`) and appends
-`[live ROMxx]` when the browser is off the live-mapped bank. The **integrated debugger
-pane** stays live-bank only (`cdl_tint(.., None)`, `debug_read`) — no selector there yet.
-Follow-ups: mouse click-to-place-cursor; freeze trigger from this window (currently
-only the integrated pane + Ctrl+K manager); a bank selector for the integrated pane.
+**Bank browser** — on **both** memory panes (`MemoryView.bank` and
+`DebuggerState.mem_bank`, each `Option<u16>`): reads/tints (and the standalone viewer's
+edits) an arbitrary bank of the banked region the view sits in, so a human can inspect a
+non-mapped bank like the MCP `peek`/`cdl` tools do (parity). `None` **follows the
+live-mapped bank** (the default — the classic view); `Some(b)` pins to bank `b`. `[` /
+`]` step it (`windows::stepped_bank`, starting from the live bank and **re-following**
+when you land back on it); a `BB:AAAA` Go-to pins bank + base together (standalone
+`apply_goto`, debugger `apply_mem_bank_goto` in `accept_dialog`). One shared read path
+(`windows::banked_read`) folds the selection to **each address's own region** so a
+window straddling a region boundary stays coherent per cell; edits route through
+`debug_write_banked` at the same resolved bank (WYSIWYG; ROM "edits" still poke the
+mapper). The standalone **status bar** shows the bank via `mem_status_line` (live label
+when following; selected + `[live ROMxx]` when pinned off-live). The debugger pane has no
+status bar, so a pinned bank shows as a right-aligned **chip** (`bank_chip_label`, drawn
+only while pinned so the default view is byte-identical); its `[` / `]` route via
+`Action::DbgMemBankStep` → `step_debugger_bank`. Follow-ups: mouse click-to-place-cursor;
+freeze trigger from this window (currently only the integrated pane + Ctrl+K manager).
 
 ## UX
 

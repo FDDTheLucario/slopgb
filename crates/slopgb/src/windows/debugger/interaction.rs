@@ -200,6 +200,24 @@ pub fn open_edit_reg(st: &mut DebuggerState, field: RegField, value: u16) {
     });
 }
 
+/// Apply a `BB:AAAA` memory Go-to: pin the pane's bank browser to `BB` and jump
+/// to `AAAA`. Returns whether the text was a well-formed bank-prefixed address.
+fn apply_mem_bank_goto(st: &mut DebuggerState, text: &str) -> bool {
+    let Some((b, a)) = text.split_once(':') else {
+        return false;
+    };
+    let addr = a.trim().trim_start_matches('$').trim_start_matches("0x");
+    if let (Ok(bank), Ok(addr)) =
+        (u16::from_str_radix(b.trim(), 16), u16::from_str_radix(addr, 16))
+    {
+        st.mem_bank = Some(bank);
+        st.mem_base = addr;
+        true
+    } else {
+        false
+    }
+}
+
 /// Apply an accepted `Go to…` address: reposition the target pane (the disasm
 /// pane pins to the entered base so it stops following PC).
 fn apply_goto(st: &mut DebuggerState, target: GotoTarget, addr: u16) {
@@ -225,8 +243,15 @@ pub(crate) fn accept_dialog(
     let parsed = u16::from_str_radix(hex, 16).ok();
     match kind {
         DialogKind::Goto(target) => {
-            // A loaded symbol name resolves to its address; else the hex parse.
-            if let Some(addr) = st.symbols.resolve(text.trim()).or(parsed) {
+            let t = text.trim();
+            // A loaded symbol name wins; then a `BB:AAAA` bank+address for the
+            // memory pane's bank browser (parity with the MCP/standalone form);
+            // then a bare hex address.
+            if let Some(addr) = st.symbols.resolve(t) {
+                apply_goto(st, target, addr);
+            } else if target == GotoTarget::Memory && apply_mem_bank_goto(st, t) {
+                // handled: BB:AAAA set mem_bank + mem_base
+            } else if let Some(addr) = parsed {
                 apply_goto(st, target, addr);
             }
             None

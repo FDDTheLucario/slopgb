@@ -176,6 +176,8 @@ pub enum Action {
     /// Page the debugger memory pane by one visible page in direction `±1`
     /// (PageUp/PageDown); the page size is the pane's visible row count.
     DbgMemPage(i32),
+    /// Step the debugger memory pane's browsed bank by `±1` (`[` / `]`).
+    DbgMemBankStep(i32),
 }
 
 /// Tracks which physical keys currently hold each button, so two keys mapped
@@ -272,6 +274,9 @@ pub fn map(code: KeyCode, mods: ModifiersState, focus: Focus) -> Option<Action> 
             KeyCode::ArrowDown => Some(Action::DbgMemScroll(1)),
             KeyCode::PageUp => Some(Action::DbgMemPage(-1)),
             KeyCode::PageDown => Some(Action::DbgMemPage(1)),
+            // `[` / `]` step the memory pane's browsed bank (bgb-style browse).
+            KeyCode::BracketLeft => Some(Action::DbgMemBankStep(-1)),
+            KeyCode::BracketRight => Some(Action::DbgMemBankStep(1)),
             // Ctrl+Shift+digit sets a numbered bookmark; Ctrl+digit jumps to it
             // (bgb). Placed after the named Ctrl keys so they take precedence.
             _ if mods.control_key() => digit_of(code).map(|d| {
@@ -445,6 +450,9 @@ mod tests {
         assert_eq!(d(KeyCode::ArrowDown), Some(Action::DbgMemScroll(1)));
         assert_eq!(d(KeyCode::PageUp), Some(Action::DbgMemPage(-1)));
         assert_eq!(d(KeyCode::PageDown), Some(Action::DbgMemPage(1)));
+        // `[` / `]` step the memory pane's browsed bank.
+        assert_eq!(d(KeyCode::BracketLeft), Some(Action::DbgMemBankStep(-1)));
+        assert_eq!(d(KeyCode::BracketRight), Some(Action::DbgMemBankStep(1)));
     }
 
     #[test]

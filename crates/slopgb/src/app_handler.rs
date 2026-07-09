@@ -219,10 +219,15 @@ impl ApplicationHandler for App {
                                 .and_then(|t| t.chars().next())
                                 .and_then(|ch| ch.to_digit(16))
                             {
-                                if let Some((bank, addr, val)) =
-                                    self.tools.mem_edit_digit(window_id, d as u8, &self.session.gb)
+                                if let Some((sel, addr, val)) =
+                                    self.tools.mem_edit_digit(window_id, d as u8)
                                 {
-                                    self.session.gb.debug_write_banked(bank, addr, val);
+                                    crate::windows::banked_write(
+                                        &mut self.session.gb,
+                                        sel,
+                                        addr,
+                                        val,
+                                    );
                                 }
                                 return;
                             }

@@ -232,6 +232,10 @@ pub struct DebuggerState {
     pub disasm_base: u16,
     /// Memory-dump view base.
     pub mem_base: u16,
+    /// The memory pane's bank browser: `None` follows the live-mapped bank (the
+    /// default), `Some(b)` pins to bank `b` (`[`/`]` step it, a `BB:AAAA` Go-to
+    /// sets it), mirroring the standalone viewer's [`MemoryView::bank`].
+    pub mem_bank: Option<u16>,
     /// Stack-pane scroll offset in 16-bit words below SP (0 = SP at the top row).
     pub stack_off: usize,
     /// Last-clicked address (the menu's cursor).
@@ -277,6 +281,7 @@ impl Default for DebuggerState {
         Self {
             disasm_base: 0x0100,
             mem_base: 0xFF00,
+            mem_bank: None,
             stack_off: 0,
             cursor: None,
             pinned: false,

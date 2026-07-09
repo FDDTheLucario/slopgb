@@ -551,7 +551,8 @@ impl ToolWindows {
         // `[` / `]` step the browsed bank of the region the view sits in.
         if matches!(code, KeyCode::BracketLeft | KeyCode::BracketRight) {
             let delta = if code == KeyCode::BracketLeft { -1 } else { 1 };
-            s.step_bank(delta, gb.region_bank_count(s.mem_base));
+            let live = crate::windows::live_bank(gb, s.mem_base);
+            s.step_bank(delta, live, gb.region_bank_count(s.mem_base));
             view.window.request_redraw();
             return true;
         }
@@ -571,23 +572,20 @@ impl ToolWindows {
     }
 
     /// Type a hex digit into the standalone memory window's in-place editor;
-    /// returns `Some((bank, addr, value))` to write when the byte completes — the
-    /// bank is the browsed one folded to `addr`'s region, so the edit lands in the
-    /// bank the viewer shows. Redraws.
-    pub fn mem_edit_digit(&mut self, id: WindowId, d: u8, gb: &GameBoy) -> Option<(u16, u16, u8)> {
+    /// returns `Some((sel, addr, value))` to write when the byte completes, where
+    /// `sel` is the pane's bank selection — fed to `windows::banked_write` so the
+    /// edit lands exactly where the dump shows it (`windows::banked_read`). Redraws.
+    pub fn mem_edit_digit(&mut self, id: WindowId, d: u8) -> Option<(Option<u16>, u16, u8)> {
         let view = self.views.get_mut(&id)?;
         let visible = mem_visible_rows(view.area().h);
         let WinState::Memory(s) = &mut view.state else {
             return None;
         };
+        let sel = s.bank;
         let out = s.edit_hex_digit(d);
         s.ensure_cursor_visible(visible);
         view.window.request_redraw();
-        // Same per-address fold the dump/cursor render uses, so the edit lands in
-        // the bank the viewer is showing at that address.
-        out.map(|(addr, val)| {
-            (crate::windows::effective_bank(s.bank, gb.region_bank_count(addr)), addr, val)
-        })
+        out.map(|(addr, val)| (sel, addr, val))
     }
 
     /// Cancel a pending in-place edit on the memory window (Esc). Returns whether

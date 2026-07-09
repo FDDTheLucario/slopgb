@@ -360,6 +360,21 @@ fn goto_memory_repositions_the_memory_base() {
 }
 
 #[test]
+fn goto_memory_bank_prefixed_pins_the_bank_and_base() {
+    let mut st = DebuggerState::default();
+    open_goto(&mut st, GotoTarget::Memory);
+    type_goto(&mut st, "05:4000");
+    feed_dialog(&mut st, DialogKey::Enter);
+    assert_eq!(st.mem_base, 0x4000);
+    assert_eq!(st.mem_bank, Some(5), "BB:AAAA pins the memory pane's bank");
+    // A colon-less Go-to still just repositions, leaving the pinned bank.
+    open_goto(&mut st, GotoTarget::Memory);
+    type_goto(&mut st, "6000");
+    feed_dialog(&mut st, DialogKey::Enter);
+    assert_eq!((st.mem_base, st.mem_bank), (0x6000, Some(5)), "plain goto keeps bank");
+}
+
+#[test]
 fn goto_escape_cancels_without_moving_the_view() {
     let mut st = DebuggerState::default();
     let base = st.disasm_base;
