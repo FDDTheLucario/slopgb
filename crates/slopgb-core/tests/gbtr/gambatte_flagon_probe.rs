@@ -46,6 +46,79 @@ fn expected_hex(rom_path: &std::path::Path, model: Model) -> Option<String> {
     }
 }
 
+/// Which clock the probe boots under — read once from the env, then handed to
+/// every worker thread (avoids a per-row `env::var` syscall storm).
+#[derive(Clone, Copy)]
+enum ProbeMode {
+    /// Production (flag-off) frame.
+    Off,
+    /// Leading-edge-only (stat_update_tick engine, no tier2 render recalibration)
+    /// — isolates engine vs render bugs.
+    Le,
+    /// Eager-value: the eager clock + tier2 read/render laws as cc+0 value peeks,
+    /// dispatch staying cc+4 (does NOT set tier2_reclock).
+    Ev,
+    /// Tier-2 deferred reclock (the default flag-on frame).
+    Reclock,
+}
+
+impl ProbeMode {
+    fn boot(self, rom: &[u8], model: Model) -> GameBoy {
+        match self {
+            ProbeMode::Off => harness::boot(rom, model),
+            ProbeMode::Le => {
+                let mut gb = harness::boot(rom, model);
+                gb.set_leading_edge_reads(true);
+                gb
+            }
+            ProbeMode::Ev => {
+                let mut gb = harness::boot(rom, model);
+                gb.set_eager_value(true);
+                gb
+            }
+            ProbeMode::Reclock => harness::boot_with_reclock(rom, model),
+        }
+    }
+}
+
+/// One row's verdict.
+enum RowResult {
+    Pass,
+    Fail(String),
+    Skip,
+}
+
+/// Run one row (fresh GB instance — no shared state, so this is the parallel
+/// unit). `root`/`mode`/`fdelta` are read-only across threads.
+fn run_probe_row(root: &std::path::Path, rel: &str, model: Model, mode: ProbeMode, fdelta: i64) -> RowResult {
+    let path = root.join(rel);
+    let Ok(rom) = std::fs::read(&path) else {
+        eprintln!("MISSING {rel}");
+        return RowResult::Skip;
+    };
+    let Some(want) = expected_hex(&path, model) else {
+        return RowResult::Skip;
+    };
+    let mut gb = mode.boot(&rom, model);
+    let target = (RUN_DOTS as i64
+        + i64::from(CYCLES_PER_FRAME)
+        + fdelta * i64::from(CYCLES_PER_FRAME))
+    .max(0) as u64;
+    while gb.cycles() < target {
+        gb.step();
+    }
+    let got = read_hex_screen(gb.frame(), model.is_cgb());
+    // Mirror `check_hex_screen`: only the first `want.len()` tiles matter.
+    let got_pref: String = got.chars().take(want.len()).collect();
+    if got_pref == want {
+        RowResult::Pass
+    } else {
+        RowResult::Fail(format!(
+            "FAIL {rel} [{model:?}] want={want} got={got_pref} (full={got})"
+        ))
+    }
+}
+
 #[test]
 #[ignore = "session-local S5 measurement aid; needs SLOPGB_ROWLIST"]
 fn flagon_probe() {
@@ -57,72 +130,74 @@ fn flagon_probe() {
         panic!("game-boy-test-roms collection not present");
     };
     let off = std::env::var("SLOPGB_PROBE_OFF").is_ok();
+    // Mode + frame-alignment read ONCE (not per row). `SLOPGB_FRAME_DELTA` shifts
+    // the OCR capture point by N frames (signed) to test whether a regression is
+    // an OCR-capture-frame mis-alignment vs a genuine render/engine bug.
+    let mode = if off {
+        ProbeMode::Off
+    } else if std::env::var("SLOPGB_PROBE_LE").is_ok() {
+        ProbeMode::Le
+    } else if std::env::var("SLOPGB_PROBE_EV").is_ok() {
+        ProbeMode::Ev
+    } else {
+        ProbeMode::Reclock
+    };
+    let fdelta: i64 = std::env::var("SLOPGB_FRAME_DELTA")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
     let body = std::fs::read_to_string(&list_path).expect("read rowlist");
+
+    // Each ROM is an independent fresh-boot run, so fan the rows across the
+    // machine's cores (std threads only — no core dep). A 3422-row full-CGB
+    // two-bin drops from ~4 min to seconds. Output is order-stable: fails are
+    // sorted after the join.
+    let rows: Vec<(String, Model)> = body
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .filter_map(parse_row)
+        .collect();
+    let nthreads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(rows.len().max(1));
+    let chunk = rows.len().div_ceil(nthreads.max(1));
 
     let (mut pass, mut fail, mut skip) = (0u32, 0u32, 0u32);
     let mut fails: Vec<String> = Vec::new();
-    for line in body.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
+    std::thread::scope(|s| {
+        let root = &root;
+        let handles: Vec<_> = rows
+            .chunks(chunk.max(1))
+            .map(|slice| {
+                s.spawn(move || {
+                    let (mut p, mut f, mut sk) = (0u32, 0u32, 0u32);
+                    let mut fl: Vec<String> = Vec::new();
+                    for (rel, model) in slice {
+                        match run_probe_row(root, rel, *model, mode, fdelta) {
+                            RowResult::Pass => p += 1,
+                            RowResult::Fail(msg) => {
+                                f += 1;
+                                fl.push(msg);
+                            }
+                            RowResult::Skip => sk += 1,
+                        }
+                    }
+                    (p, f, sk, fl)
+                })
+            })
+            .collect();
+        for h in handles {
+            let (p, f, sk, fl) = h.join().expect("probe worker panicked");
+            pass += p;
+            fail += f;
+            skip += sk;
+            fails.extend(fl);
         }
-        let Some((rel, model)) = parse_row(line) else {
-            continue;
-        };
-        let path = root.join(&rel);
-        let Ok(rom) = std::fs::read(&path) else {
-            eprintln!("MISSING {rel}");
-            skip += 1;
-            continue;
-        };
-        let Some(want) = expected_hex(&path, model) else {
-            skip += 1;
-            continue;
-        };
-        let mut gb = if off {
-            harness::boot(&rom, model)
-        } else if std::env::var("SLOPGB_PROBE_LE").is_ok() {
-            // Leading-edge-only (stat_update_tick engine, but NOT the tier2
-            // render-frame recalibration) — isolates engine vs render bugs.
-            let mut gb = harness::boot(&rom, model);
-            gb.set_leading_edge_reads(true);
-            gb
-        } else if std::env::var("SLOPGB_PROBE_EV").is_ok() {
-            // Eager-value: the eager clock + tier2 read/render laws as cc+0
-            // value peeks, dispatch staying cc+4 (does NOT set tier2_reclock).
-            let mut gb = harness::boot(&rom, model);
-            gb.set_eager_value(true);
-            gb
-        } else {
-            harness::boot_with_reclock(&rom, model)
-        };
-        // Frame-alignment probe: SLOPGB_FRAME_DELTA shifts the OCR capture
-        // point by N frames (signed) to test whether a regression is an
-        // OCR-capture-frame mis-alignment (cheap global fix) vs a genuine
-        // render/engine bug.
-        let fdelta: i64 = std::env::var("SLOPGB_FRAME_DELTA")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-        let target = (RUN_DOTS as i64
-            + i64::from(CYCLES_PER_FRAME)
-            + fdelta * i64::from(CYCLES_PER_FRAME))
-        .max(0) as u64;
-        while gb.cycles() < target {
-            gb.step();
-        }
-        let got = read_hex_screen(gb.frame(), model.is_cgb());
-        // Mirror `check_hex_screen`: only the first `want.len()` tiles matter.
-        let got_pref: String = got.chars().take(want.len()).collect();
-        if got_pref == want {
-            pass += 1;
-        } else {
-            fail += 1;
-            fails.push(format!(
-                "FAIL {rel} [{model:?}] want={want} got={got_pref} (full={got})"
-            ));
-        }
-    }
+    });
+    fails.sort();
+
     for f in &fails {
         println!("{f}");
     }
