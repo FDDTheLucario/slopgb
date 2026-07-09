@@ -200,6 +200,35 @@ impl Ppu {
         {
             return 2;
         }
+        // EAGER DMG line-boundary back-dates — the DMG analogues of the three
+        // CGB eager arms above (DMG is always single-speed → +4-dot debt). The
+        // ONE model difference: native `vis_mode` gives DMG line-0 dots-0-3
+        // mode 0 (CGB holds VBlank mode 1), so the line-0 OAM-entry arm keys on
+        // `m == 0` (not the CGB `m == 1`) and the 153→0 wrap flips mode 1→0 (a
+        // CGB line-0 read stays mode 1 across the wrap, no arm). `dot < 4`
+        // confines the OAM-entry arms to the line START so a real mode-0 HBlank
+        // read (dots ≥ exit) is untouched. `eager_value`-only → tier2 +
+        // production byte-identical. SameBoy-PASS pins: line-start
+        // `lycint_m0stat`/`lycm2int_m0stat`/`m0int_m0stat` (want 2), VBlank
+        // `enable_display/*_m1stat`/`m1/lycint_m1stat` (want 1), line-0
+        // `ly0/lycint152_ly0stat_2` (want 0). `!glitch_line`: the first line
+        // after an LCD enable takes its own leading-edge back-date in
+        // `vis_mode`. The line-0 OAM-entry arm (line 0 dots 0-3 m0→2) is NOT
+        // ported: gambatte `ly0/lycint152_ly0stat_3` (want 2) and mooneye
+        // `stat_lyc_onoff` (want 0) BOTH read line-0 dot 0 with opposite
+        // verdicts — a sub-dot ambiguity the whole-dot frame can't split
+        // (HALFDOT floor).
+        if self.eager_value && !self.model.is_cgb() && !self.glitch_line {
+            if (1..144).contains(&self.line) && m == 0 && self.dot < 4 {
+                return 2; // line-start OAM entry (cc+4 = OAM scan)
+            }
+            if self.line == 144 && m == 0 {
+                return 1; // VBlank entry (cc+4 = VBlank)
+            }
+            if self.line == 153 && m == 1 && self.dot + 4 >= LINE_DOTS {
+                return 0; // 153→0 wrap: cc+4 in line-0 dots 0-3 = DMG mode 0
+            }
+        }
         let Some(exit_adj) = self.vis_exit_hd(m) else {
             return m;
         };
