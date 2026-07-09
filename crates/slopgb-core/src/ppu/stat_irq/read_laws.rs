@@ -165,6 +165,24 @@ impl Ppu {
         {
             return 2;
         }
+        // EAGER VBlank-entry mode-1 back-date (CGB): the line-144 dots-0-3
+        // mode-0 hold in `vis_mode` is the raw FSM state that NO production
+        // read observes — every production/deferred read samples cc+4 (dot 4-7
+        // = VBlank mode 1). The eager cc+0 read alone exposes the dots-0-3
+        // hold, so back-date it to the cc+4 mode 1 with the SAME +4 (SS) / +2
+        // (DS) debt the visible-line arm above takes. SameBoy reads mode 1 at
+        // the VBlank boundary (`enable_display/*_m1stat`, `lcd_offset/
+        // *_m1stat` — want the VBlank bit set). Never fires flag-off
+        // (`eager_value` false) → byte-identical; CGB-scoped (DMG's VBlank-entry
+        // frame is a separate calibration).
+        if self.eager_value
+            && self.model.is_cgb()
+            && self.line == 144
+            && m == 0
+            && self.dot + if self.ds { 2 } else { 4 } >= 4
+        {
+            return 1;
+        }
         let Some(exit_adj) = self.vis_exit_hd(m) else {
             return m;
         };
