@@ -55,6 +55,49 @@ impl Ppu {
         self.compare_ly_irq()
     }
 
+    /// The LYC-coincidence bit (FF41 bit 2) as an FF41 read sees it. Under
+    /// the eager clock the read samples cc+0, but the CPU-visible value is the
+    /// cc+4 one — the SAME +4 (SS) / +2 (DS) read-debt the mode bits take via
+    /// [`Self::read_pos_hd`]. The CGB readable compare switches from `L-1` to
+    /// `L` at line-start dot 4 ([`Self::compare_ly`]), so a cc+0 line-start
+    /// read must back-date the coincidence to the debt-shifted dot to match
+    /// SameBoy's real cc+4 read (`lycint_lycflag`, `lycEnable` STAT bytes).
+    /// Byte-identical OFF (`eager_value` false → the live latched `self.cmp`);
+    /// tier2's deferred read already advances the PPU to cc+4 so it keeps
+    /// `self.cmp`. CGB-only (the DMG readable flag drops at line starts, a
+    /// different frame); glitch lines keep `self.cmp` (their own leading-edge
+    /// back-date lives in [`Self::compare_ly`]).
+    pub(super) fn read_cmp(&self) -> bool {
+        if self.eager_value && self.model.is_cgb() && self.enabled && !self.glitch_line {
+            let debt = if self.ds { 2 } else { 4 };
+            return self.compare_ly_shift(debt) == Some(self.lyc);
+        }
+        self.cmp
+    }
+
+    /// The CGB readable-compare LY ([`Self::compare_ly`] CGB arm) evaluated at
+    /// the eager read's cc+4 position — the current dot advanced by `debt` on
+    /// the 154×456 grid — for [`Self::read_cmp`].
+    fn compare_ly_shift(&self, debt: u16) -> Option<u8> {
+        let mut d = self.dot + debt;
+        let mut l = u16::from(self.line);
+        while d >= LINE_DOTS {
+            d -= LINE_DOTS;
+            l += 1;
+        }
+        if l >= 154 {
+            l -= 154;
+        }
+        Some(match (l, d) {
+            (0, _) => 0,
+            (153, 0..=3) => 152,
+            (153, 4..=11) => 153,
+            (153, _) => 0,
+            (line, 0..=3) => (line - 1) as u8,
+            (line, _) => line as u8,
+        })
+    }
+
     /// LY value the IRQ-side comparator sees (and the DMG readable
     /// flag). Unlike the CGB readable flag it drops at line starts —
     /// gambatte's lyc and m1 IRQs are separate events, and the m1 event

@@ -181,7 +181,7 @@ impl Ppu {
                 }
             }
             0xFF40 => self.lcdc,
-            0xFF41 => 0x80 | self.stat_en | (u8::from(self.cmp) << 2) | self.vis_mode_read(),
+            0xFF41 => 0x80 | self.stat_en | (u8::from(self.read_cmp()) << 2) | self.vis_mode_read(),
             0xFF42 => self.scy,
             0xFF43 => self.scx,
             0xFF44 => self.ly,
