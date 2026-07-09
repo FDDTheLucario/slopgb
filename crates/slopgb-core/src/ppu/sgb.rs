@@ -27,6 +27,7 @@ use crate::{SgbSound, SCREEN_H, SCREEN_W};
 
 mod border;
 mod commands;
+mod defaults;
 mod transfer;
 
 /// 256×224 SNES border surface dimensions (32×28 tiles of 8×8).
@@ -57,6 +58,11 @@ const DMG_SHADES: [u32; 4] = [0xFF_FFFF, 0xAA_AAAA, 0x55_5555, 0x00_0000];
 /// misbehaving ROM must never grow the queue without bound if the host never
 /// drains it. Real ROMs emit a handful per frame.
 const SOUND_QUEUE_CAP: usize = 64;
+
+/// Border boot-intro / cross-fade length, in frames (~0.4 s at 60 Hz). The
+/// power-on default border fades up from black; a later `CHR_TRN`/`PCT_TRN`
+/// cross-fades from the previous border. Purely presentational.
+const FADE_LEN: u16 = 24;
 
 /// The SNES-side presentation state an SGB applies over the DMG picture.
 ///
@@ -99,6 +105,15 @@ pub(super) struct SgbView {
     /// Recomposited 256×224 border surface (GB screen inset + border tiles).
     /// Derived state (rebuilt each frame boundary), so not serialized.
     border_fb: Box<[u32; BORDER_PIXELS]>,
+
+    /// Boot-intro / cross-fade state (presentational). `fade` = frames left in
+    /// the current transition (0 = settled); `fade_from` = the surface being
+    /// blended *from*; `fade_pending` = a border-changing transfer landed this
+    /// frame boundary and a new fade must start. None of it is serialized — a
+    /// loaded state resolves to settled (see `read_state`).
+    fade: u16,
+    fade_from: Box<[u32; BORDER_PIXELS]>,
+    fade_pending: bool,
 
     // --- Phase 2/3 seams: stored, exposed read-only, not consumed this phase ---
     /// OBJ_TRN ($18) captured payload (SGB OBJ palettes/attributes).
@@ -149,7 +164,7 @@ fn boxed_u32<const N: usize>(fill: u32) -> Box<[u32; N]> {
 
 impl SgbView {
     pub(super) fn new() -> Self {
-        Self {
+        let mut v = Self {
             pal: [DMG_SHADES; 4],
             attr: [0; 360],
             mask: 0,
@@ -162,6 +177,10 @@ impl SgbView {
             has_chr: false,
             has_pct: false,
             border_fb: boxed_u32(0),
+            // Boot intro: the default border fades up from black.
+            fade: FADE_LEN,
+            fade_from: boxed_u32(0),
+            fade_pending: false,
             obj_data: None,
             sou_trn: None,
             data_trn: None,
@@ -172,7 +191,11 @@ impl SgbView {
             icon_en: false,
             pal_pri: false,
             jump: None,
-        }
+        };
+        // Seed the default border so `sgb_border()` is valid before the first
+        // frame renders (power-on shows the original built-in border).
+        v.default_composite(None);
+        v
     }
 
     /// Parse one completed SGB command packet stream (`cmd` = the command's
@@ -361,6 +384,10 @@ impl SgbView {
         self.icon_en = r.bool()?;
         self.pal_pri = r.bool()?;
         self.jump = if r.bool()? { Some(r.u32()?) } else { None };
+        // The fade is transient presentation, not serialized: a loaded state
+        // resolves to a settled border (no replayed boot intro / cross-fade).
+        self.fade = 0;
+        self.fade_pending = false;
         Ok(())
     }
 }
@@ -417,14 +444,24 @@ impl Ppu {
     }
 
     /// SGB frame-boundary work (called from [`Self::start_line`] at line 144):
-    /// consume a pending `*_TRN` screen capture and recomposite the border. A
-    /// no-op off SGB (`self.sgb` is `None`) so the whole call is inert on
-    /// DMG/CGB — golden-safe.
+    /// consume a pending `*_TRN` screen capture, recomposite the border, and
+    /// advance the boot-intro / cross-fade blend. A no-op off SGB (`self.sgb`
+    /// is `None`) so the whole call is inert on DMG/CGB — golden-safe.
     pub(super) fn sgb_frame_boundary(&mut self) {
         if let Some(s) = self.sgb.as_mut() {
             s.run_pending_transfer();
+            // A border-changing transfer landed: snapshot the *current* (still
+            // pre-recomposite) surface as the cross-fade source, then start a
+            // fade. Done before `sgb_composite_border` overwrites `border_fb`.
+            if std::mem::take(&mut s.fade_pending) {
+                s.fade_from.copy_from_slice(&s.border_fb[..]);
+                s.fade = FADE_LEN;
+            }
         }
         self.sgb_composite_border();
+        if let Some(s) = self.sgb.as_mut() {
+            s.apply_fade();
+        }
     }
 }
 

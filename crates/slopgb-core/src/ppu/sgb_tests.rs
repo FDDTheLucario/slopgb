@@ -350,7 +350,10 @@ fn sound_queue_is_capped() {
 #[test]
 fn border_composites_after_chr_and_pct() {
     let mut ppu = Ppu::new(Model::Sgb);
-    assert!(ppu.sgb_border().is_none(), "no border before transfers");
+    // An SGB always has a border now — the built-in default until the ROM
+    // sends its own CHR_TRN+PCT_TRN (below).
+    assert!(ppu.sgb_border().is_some(), "default border present at power-on");
+    assert!(!ppu.sgb.as_ref().unwrap().border_ready(), "but not a ROM border yet");
 
     let inset0 = 0x12_3456;
     ppu.front[0] = inset0; // GB screen top-left
@@ -378,4 +381,67 @@ fn border_composites_after_chr_and_pct() {
     // transparent so the inset shows.
     let inset_idx = crate::SGB_BORDER_W * 40 + 48;
     assert_eq!(b[inset_idx], inset0, "gb inset shows through color-0 tile");
+}
+
+// ---- Default border + boot intro / cross-fade ($01/§Phase-1b) ----
+
+/// The original default border is drawn from power-on: the live GB screen is
+/// blitted into the inset and the surrounding area is the (non-inset) frame.
+#[test]
+fn default_border_draws_frame_and_inset() {
+    let mut ppu = Ppu::new(Model::Sgb);
+    let inset = 0x11_2233;
+    ppu.front.fill(inset);
+    ppu.sgb_composite_border();
+    let b = ppu.sgb_border().expect("default border always present on SGB");
+    let at = |x: usize, y: usize| b[y * crate::SGB_BORDER_W + x];
+    assert_eq!(at(48, 40), inset, "inset top-left shows the GB screen");
+    assert_eq!(at(207, 183), inset, "inset bottom-right shows the GB screen");
+    assert_ne!(at(0, 0), inset, "the border corner is the default frame, not the inset");
+}
+
+/// Boot intro: the default border fades up from black. The first presented
+/// frame is dimmer than the settled frame; after `FADE_LEN` boundaries it is
+/// fully settled (the inset shows its true colour).
+#[test]
+fn boot_intro_fades_in_from_black() {
+    let mut ppu = Ppu::new(Model::Sgb);
+    ppu.front.fill(0xFF_FFFF); // white inset → easy brightness check
+    let inset_idx = 40 * crate::SGB_BORDER_W + 48;
+
+    ppu.sgb_frame_boundary(); // frame 1 of the fade
+    let after_first = ppu.sgb_border().unwrap()[inset_idx];
+    assert_ne!(after_first, 0xFF_FFFF, "first frame is mid-fade (not full brightness)");
+    assert!(after_first < 0xFF_FFFF, "fading up from black");
+
+    for _ in 1..FADE_LEN {
+        ppu.sgb_frame_boundary();
+    }
+    assert_eq!(ppu.sgb_border().unwrap()[inset_idx], 0xFF_FFFF, "settled after FADE_LEN frames");
+    assert_eq!(ppu.sgb.as_ref().unwrap().fade, 0, "fade counter exhausted");
+}
+
+/// A ROM border transfer (CHR_TRN+PCT_TRN) restarts the fade — the cross-fade
+/// from the previous (default) border to the new one.
+#[test]
+fn border_transfer_restarts_crossfade() {
+    let mut ppu = Ppu::new(Model::Sgb);
+    ppu.front.fill(0x40_4040);
+    // Settle the boot intro first.
+    for _ in 0..FADE_LEN {
+        ppu.sgb_frame_boundary();
+    }
+    assert_eq!(ppu.sgb.as_ref().unwrap().fade, 0, "boot fade settled");
+
+    // A CHR_TRN and a PCT_TRN land, then the frame boundary consumes them.
+    {
+        let s = ppu.sgb.as_mut().unwrap();
+        s.sgb_command(&packet(0x13 * 8 + 1, &[0])); // CHR_TRN bank 0
+        s.run_pending_transfer();
+        s.sgb_command(&packet(0x14 * 8 + 1, &[])); // PCT_TRN
+        s.run_pending_transfer();
+        assert!(s.fade_pending, "border transfer flags a cross-fade");
+    }
+    ppu.sgb_frame_boundary();
+    assert_eq!(ppu.sgb.as_ref().unwrap().fade, FADE_LEN - 1, "cross-fade started and stepped once");
 }
