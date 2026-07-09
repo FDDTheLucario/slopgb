@@ -256,6 +256,10 @@ fn singlestep_conformance() {
     let mut fails = 0usize;
     let mut per_op = [0u32; 256];
     let mut samples: Vec<String> = Vec::new();
+    // A skipped opcode is NOT a pass. Setting `SPC700_TESTS_DIR` is an explicit
+    // request to run the conformance suite, so a missing or truncated dataset
+    // must fail loudly rather than green-light zero cases.
+    let mut missing: Vec<u8> = Vec::new();
 
     for op in 0u16..=255 {
         let op = op as u8;
@@ -264,6 +268,7 @@ fn singlestep_conformance() {
             Ok(d) => d,
             Err(_) => {
                 eprintln!("warning: missing {path}, skipping opcode {op:#04X}");
+                missing.push(op);
                 continue;
             }
         };
@@ -289,5 +294,16 @@ fn singlestep_conformance() {
         eprintln!("  {s}");
     }
     eprintln!("SingleStepTests: {}/{} passed", total - fails, total);
+    assert!(
+        missing.is_empty(),
+        "{} of 256 opcode files missing from {dir} (first: {:#04X}) — an incomplete \
+         dataset cannot certify the core",
+        missing.len(),
+        missing[0]
+    );
+    assert!(
+        total > 0,
+        "SPC700_TESTS_DIR={dir} yielded 0 cases — a vacuous pass is not a pass"
+    );
     assert_eq!(fails, 0, "{fails}/{total} SingleStepTests cases failed");
 }
