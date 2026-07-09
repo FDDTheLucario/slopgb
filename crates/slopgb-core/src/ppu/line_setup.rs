@@ -43,6 +43,11 @@ impl Ppu {
                 if let Some(c) = mask_fill {
                     self.front.fill(c);
                 }
+                // SGB frame-boundary work: consume a pending `*_TRN` screen
+                // capture (reads the just-rendered shade buffer) and recomposite
+                // the border from the freshly presented `front`. Inert off SGB
+                // (`self.sgb` is `None`) → byte-identical on DMG/CGB.
+                self.sgb_frame_boundary();
             }
             _ => self.ly = self.line,
         }

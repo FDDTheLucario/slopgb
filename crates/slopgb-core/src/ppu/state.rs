@@ -397,6 +397,10 @@ impl Ppu {
         } else {
             None
         };
+        // The border surface is derived (not serialized); recomposite it from
+        // the loaded `front` so `sgb_border()` is valid immediately after a
+        // load, before the next frame renders. No-op off SGB / no border.
+        self.sgb_composite_border();
         Ok(())
     }
 }

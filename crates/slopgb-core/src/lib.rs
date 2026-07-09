@@ -56,8 +56,48 @@ pub const SCREEN_W: usize = 160;
 pub const SCREEN_H: usize = 144;
 /// Pixels per frame.
 pub const SCREEN_PIXELS: usize = SCREEN_W * SCREEN_H;
+/// SGB border surface width (32 tiles of 8px).
+pub const SGB_BORDER_W: usize = 256;
+/// SGB border surface height (28 tiles of 8px).
+pub const SGB_BORDER_H: usize = 224;
+/// Pixels in the SGB border surface.
+pub const SGB_BORDER_PIXELS: usize = SGB_BORDER_W * SGB_BORDER_H;
 /// T-cycles (dots) per frame with the LCD on.
 pub const CYCLES_PER_FRAME: u32 = 70224;
+
+/// A decoded SGB SOUND ($08) command: two sound-effect IDs, an
+/// attenuation/flags byte and the effect-bank selector. The core decodes and
+/// queues these; Phase 3 (the S-DSP) drains the queue via
+/// [`GameBoy::sgb_take_sound_event`]. (Pan Docs "SGB Command $08 — SOUND".)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SgbSound {
+    /// Sound Effect A (port 1) identifier.
+    pub effect_a: u8,
+    /// Sound Effect B (port 2) identifier.
+    pub effect_b: u8,
+    /// Attenuation / effect-on flags byte.
+    pub attenuation: u8,
+    /// Effect-bank selector byte.
+    pub effect_bank: u8,
+}
+
+/// A read-only snapshot of the SGB flag commands (ATRC_EN/TEST_EN/ICON_EN/
+/// PAL_PRI) and the latched JUMP target — SNES-side state with no Game-Boy-bus
+/// effect, exposed for Phase-2/3 consumers. (Pan Docs "SGB Command $0C-$0E /
+/// $12 / $19".)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SgbFlags {
+    /// ATRC_EN ($0C): attraction / screen-saver enable.
+    pub atrc_en: bool,
+    /// TEST_EN ($0D): SNES speed test enable.
+    pub test_en: bool,
+    /// ICON_EN ($0E): SGB built-in icon / menu enable.
+    pub icon_en: bool,
+    /// PAL_PRI ($19): application-vs-user palette priority.
+    pub pal_pri: bool,
+    /// JUMP ($12) SNES program target (24-bit PC), if one was issued.
+    pub jump: Option<u32>,
+}
 /// Master clock in Hz (T-cycles / dots per second, normal speed).
 pub const CLOCK_HZ: u32 = 4_194_304;
 
@@ -479,6 +519,52 @@ impl GameBoy {
     /// XRGB8888 pixels of the most recently completed frame, row-major.
     pub fn frame(&self) -> &[u32; SCREEN_PIXELS] {
         self.bus.ppu().frame()
+    }
+
+    /// The 256×224 SGB border surface (32×28 tiles) with the colorized 160×144
+    /// GB screen composited as an inset at (48, 40), or `None` until a
+    /// CHR_TRN+PCT_TRN border pair has landed (and always `None` off
+    /// `Model::Sgb`/`Sgb2`). The frontend renders this in place of [`frame`]
+    /// when present. (`frame` itself stays 160×144 — the golden hash reads it.)
+    ///
+    /// [`frame`]: Self::frame
+    pub fn sgb_border(&self) -> Option<&[u32; SGB_BORDER_PIXELS]> {
+        self.bus.ppu().sgb_border()
+    }
+
+    /// Drain one queued SGB SOUND ($08) effect event — the Phase-3 S-DSP seam.
+    /// `None` off SGB or when the queue is empty.
+    pub fn sgb_take_sound_event(&mut self) -> Option<SgbSound> {
+        self.bus.ppu_mut().sgb_take_sound_event()
+    }
+
+    /// The most recent SOU_TRN ($09) SPC700 program upload (4096 bytes captured
+    /// from the screen), or `None`. Phase-3 S-DSP seam.
+    pub fn sgb_sou_trn_data(&self) -> Option<&[u8]> {
+        self.bus.ppu().sgb_sou_trn_data()
+    }
+
+    /// The most recent OBJ_TRN ($18) payload (SGB OBJ palettes / attributes), or
+    /// `None`. Phase-2/3 seam.
+    pub fn sgb_obj_trn_data(&self) -> Option<&[u8]> {
+        self.bus.ppu().sgb_obj_trn_data()
+    }
+
+    /// The most recent DATA_TRN ($10) payload destined for SNES RAM, or `None`.
+    /// Phase-2/3 seam.
+    pub fn sgb_data_trn_data(&self) -> Option<&[u8]> {
+        self.bus.ppu().sgb_data_trn_data()
+    }
+
+    /// Drain one queued DATA_SND ($0F) inline SNES-RAM write, or `None`.
+    /// Phase-2/3 seam.
+    pub fn sgb_take_data_snd(&mut self) -> Option<Vec<u8>> {
+        self.bus.ppu_mut().sgb_take_data_snd()
+    }
+
+    /// The current SGB flag / JUMP state, or `None` off SGB. Read-only.
+    pub fn sgb_flags(&self) -> Option<SgbFlags> {
+        self.bus.ppu().sgb_flags()
     }
 
     /// Count of completed frames since power-on.
