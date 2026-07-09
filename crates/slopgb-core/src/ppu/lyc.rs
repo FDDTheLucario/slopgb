@@ -68,11 +68,46 @@ impl Ppu {
     /// different frame); glitch lines keep `self.cmp` (their own leading-edge
     /// back-date lives in [`Self::compare_ly`]).
     pub(super) fn read_cmp(&self) -> bool {
-        if self.eager_value && self.model.is_cgb() && self.enabled && !self.glitch_line {
-            let debt = if self.ds { 2 } else { 4 };
-            return self.compare_ly_shift(debt) == Some(self.lyc);
+        if self.eager_value && self.enabled && !self.glitch_line {
+            if self.model.is_cgb() {
+                let debt = if self.ds { 2 } else { 4 };
+                return self.compare_ly_shift(debt) == Some(self.lyc);
+            }
+            // DMG: the readable flag drops at line starts (`compare_ly_irq`
+            // forced-invalid gaps), a different frame than CGB's held compare,
+            // so shift that table by the +4-dot debt (DMG is single-speed). The
+            // line wrap folds a 153→0 boundary read to the cc+4 line-0 Some(0)
+            // (`ly0/lycint152_lyc0flag`/`lyc153flag`, `lycint_lycflag`).
+            // Byte-identical OFF (`eager_value` false → the latched `self.cmp`).
+            return self.compare_ly_irq_shift(4) == Some(self.lyc);
         }
         self.cmp
+    }
+
+    /// The DMG readable-flag LY ([`Self::compare_ly_irq`] table) evaluated at
+    /// the eager read's cc+4 position — the DMG twin of
+    /// [`Self::compare_ly_shift`], for [`Self::read_cmp`].
+    fn compare_ly_irq_shift(&self, debt: u16) -> Option<u8> {
+        let mut d = self.dot + debt;
+        let mut l = u16::from(self.line);
+        while d >= LINE_DOTS {
+            d -= LINE_DOTS;
+            l += 1;
+        }
+        if l >= 154 {
+            l -= 154;
+        }
+        match l {
+            0 => Some(0),
+            153 => match d {
+                0..=3 => None,
+                4..=7 => Some(153),
+                8..=11 => None,
+                _ => Some(0),
+            },
+            _ if d < 4 => None,
+            _ => Some(l as u8),
+        }
     }
 
     /// The CGB readable-compare LY ([`Self::compare_ly`] CGB arm) evaluated at
