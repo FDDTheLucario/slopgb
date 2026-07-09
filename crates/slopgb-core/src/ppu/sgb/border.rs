@@ -7,9 +7,9 @@
 use super::*;
 
 impl SgbView {
-    /// The border is displayable once both a CHR_TRN (tiles) and a PCT_TRN
-    /// (tilemap + palettes) have landed.
-    fn border_ready(&self) -> bool {
+    /// A ROM border (as opposed to the built-in default) is displayable once
+    /// both a CHR_TRN (tiles) and a PCT_TRN (tilemap + palettes) have landed.
+    pub(super) fn border_ready(&self) -> bool {
         self.has_chr && self.has_pct
     }
 
@@ -70,9 +70,41 @@ impl SgbView {
         }
     }
 
+    /// The presented border surface. An SGB *always* has one now: the ROM's
+    /// border once a CHR_TRN+PCT_TRN pair has landed, else the original
+    /// built-in default (drawn in `defaults.rs`). Always `Some` for an SGB.
     pub(super) fn border_fb(&self) -> Option<&[u32; BORDER_PIXELS]> {
-        self.border_ready().then_some(&*self.border_fb)
+        Some(&*self.border_fb)
     }
+
+    /// Advance the boot-intro / cross-fade blend by one frame: mix `fade_from`
+    /// toward the freshly composited `border_fb`. Linear, settles exactly (the
+    /// last frame is 100% target); a no-op once `fade` reaches 0. Blends the
+    /// whole surface, inset included — presentational, and the intended boot
+    /// "fade the border in" effect.
+    // ponytail: whole-surface blend (the live inset briefly cross-fades too);
+    // separate the artwork from the inset only if that ghosting is ever noticed.
+    pub(super) fn apply_fade(&mut self) {
+        if self.fade == 0 {
+            return;
+        }
+        self.fade -= 1;
+        let num = u32::from(FADE_LEN - self.fade); // 1..=FADE_LEN (0%→100% target)
+        let den = u32::from(FADE_LEN);
+        for i in 0..BORDER_PIXELS {
+            self.border_fb[i] = lerp(self.fade_from[i], self.border_fb[i], num, den);
+        }
+    }
+}
+
+/// Per-channel linear blend `a → b` at `num/den` (XRGB8888, ignores the top
+/// byte). `num == den` yields `b` exactly.
+fn lerp(a: u32, b: u32, num: u32, den: u32) -> u32 {
+    let mix = |sh: u32| {
+        let (ca, cb) = ((a >> sh) & 0xFF, (b >> sh) & 0xFF);
+        ((ca * (den - num) + cb * num) / den) & 0xFF
+    };
+    (mix(16) << 16) | (mix(8) << 8) | mix(0)
 }
 
 impl Ppu {
@@ -84,10 +116,13 @@ impl Ppu {
         let Some(s) = self.sgb.as_mut() else {
             return;
         };
-        if !s.border_ready() {
-            return;
+        // ROM border once CHR_TRN+PCT_TRN have both landed; otherwise the
+        // original built-in default (shown from power-on).
+        if s.border_ready() {
+            s.composite(front);
+        } else {
+            s.default_composite(Some(front));
         }
-        s.composite(front);
     }
 
     /// The 256×224 SNES border surface with the GB screen composited as a

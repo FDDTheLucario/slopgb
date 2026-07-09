@@ -59,11 +59,13 @@ impl SgbView {
                 let bank = if dest == TR_CHR1 { 4096 } else { 0 };
                 self.border_tiles[bank..bank + 4096].copy_from_slice(&d[..4096]);
                 self.has_chr = true;
+                self.fade_pending = true; // cross-fade the new border in
             }
             TR_PCT => {
                 let d = decode_tiles(&self.shade_buf, 136); // 2176 B = map + palettes
                 self.border_raw.copy_from_slice(&d[..2176]);
                 self.has_pct = true;
+                self.fade_pending = true; // cross-fade the new border in
             }
             TR_OBJ => self.obj_data = Some(capture4096(&self.shade_buf)),
             TR_SOU => self.sou_trn = Some(capture4096(&self.shade_buf)),
