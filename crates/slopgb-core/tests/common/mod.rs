@@ -314,7 +314,19 @@ pub fn collect_roms(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>) -> std:
         .collect::<std::io::Result<Vec<PathBuf>>>()?;
     paths.sort();
     for p in paths {
-        if p.is_dir() {
+        // `Path::is_dir` FOLLOWS symlinks; `symlink_metadata` does not. A
+        // symlinked directory is never descended: a stray self-referential link
+        // (e.g. `test-roms/<collection>/<collection> -> <collection>`, easily
+        // created by an `ln -sfn` that lands inside its target) turns this walk
+        // into a cycle that re-collects the whole collection at every depth.
+        // `golden_fingerprint` then fingerprints thousands of duplicate ROMs and
+        // looks like a hang (measured: 5.8x the CPU, no termination in sight).
+        // Symlinked *files* stay collectable — worktrees symlink ROM bundles in.
+        let ft = std::fs::symlink_metadata(&p)?.file_type();
+        if ft.is_symlink() && p.is_dir() {
+            continue;
+        }
+        if ft.is_dir() {
             if recursive {
                 collect_roms(&p, true, out)?;
             }
@@ -327,6 +339,27 @@ pub fn collect_roms(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>) -> std:
         }
     }
     Ok(())
+}
+
+/// A self-referential symlinked directory must not make [`collect_roms`] loop.
+/// Regression: a stray `test-roms/<col>/<col> -> <col>` link made
+/// `golden_fingerprint` re-walk the collection at every depth (2026-07-09).
+#[cfg(unix)]
+#[test]
+fn collect_roms_does_not_follow_symlinked_dirs() {
+    let base = std::env::temp_dir().join(format!("slopgb_symlink_cycle_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(&base).unwrap();
+    std::fs::write(base.join("a.gb"), b"x").unwrap();
+    // The cycle: base/loop -> base
+    std::os::unix::fs::symlink(&base, base.join("loop")).unwrap();
+
+    let mut out = Vec::new();
+    collect_roms(&base, true, &mut out).unwrap();
+    // Terminates, and finds the single real ROM exactly once.
+    assert_eq!(out.len(), 1, "symlink cycle re-collected ROMs: {out:?}");
+
+    std::fs::remove_dir_all(&base).unwrap();
 }
 
 /// Best-effort text of a caught panic payload (the `&str`/`String` cases).
