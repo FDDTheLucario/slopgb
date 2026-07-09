@@ -539,7 +539,7 @@ impl ToolWindows {
         view.window.request_redraw();
     }
 
-    pub fn mem_window_key(&mut self, id: WindowId, code: KeyCode) -> bool {
+    pub fn mem_window_key(&mut self, id: WindowId, code: KeyCode, gb: &GameBoy) -> bool {
         let Some(view) = self.views.get_mut(&id) else {
             return false;
         };
@@ -548,6 +548,14 @@ impl ToolWindows {
         let WinState::Memory(s) = &mut view.state else {
             return false;
         };
+        // `[` / `]` step the browsed bank of the region the view sits in.
+        if matches!(code, KeyCode::BracketLeft | KeyCode::BracketRight) {
+            let delta = if code == KeyCode::BracketLeft { -1 } else { 1 };
+            let live = crate::windows::live_bank(gb, s.mem_base);
+            s.step_bank(delta, live, gb.region_bank_count(s.mem_base));
+            view.window.request_redraw();
+            return true;
+        }
         // Arrows move the byte-edit cursor (a row / a byte); Page by a window.
         let delta = match code {
             KeyCode::ArrowUp => -16,
@@ -564,17 +572,20 @@ impl ToolWindows {
     }
 
     /// Type a hex digit into the standalone memory window's in-place editor;
-    /// returns `Some((addr, value))` to write when the byte completes. Redraws.
-    pub fn mem_edit_digit(&mut self, id: WindowId, d: u8) -> Option<(u16, u8)> {
+    /// returns `Some((sel, addr, value))` to write when the byte completes, where
+    /// `sel` is the pane's bank selection — fed to `windows::banked_write` so the
+    /// edit lands exactly where the dump shows it (`windows::banked_read`). Redraws.
+    pub fn mem_edit_digit(&mut self, id: WindowId, d: u8) -> Option<(Option<u16>, u16, u8)> {
         let view = self.views.get_mut(&id)?;
         let visible = mem_visible_rows(view.area().h);
         let WinState::Memory(s) = &mut view.state else {
             return None;
         };
+        let sel = s.bank;
         let out = s.edit_hex_digit(d);
         s.ensure_cursor_visible(visible);
         view.window.request_redraw();
-        out
+        out.map(|(addr, val)| (sel, addr, val))
     }
 
     /// Cancel a pending in-place edit on the memory window (Esc). Returns whether
@@ -666,6 +677,9 @@ fn debugger_left_click(
         brk: gb.profile_break(),
         seen: gb.profile_seen(),
     };
+    // Refresh the CDL-on flag so the Debug dropdown's "CDL logging" check-mark
+    // reflects the live state (bgb's toggled-item tick).
+    s.cdl_on = gb.cdl_flags().is_some();
     debugger::on_left_click(|a| gb.debug_read(a), area, s, r, px, py)
 }
 

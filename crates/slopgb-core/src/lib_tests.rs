@@ -542,6 +542,113 @@ fn mbc1_4bank_rom() -> Vec<u8> {
     rom
 }
 
+/// A 4-bank MBC1 ROM with 32 KiB (4-bank) cart RAM, for the banked-SRAM debug
+/// read + CDL. Header 0x149=0x03 = 32 KiB RAM; mapper 0x03 = MBC1+RAM+BATTERY.
+fn mbc1_ram_rom() -> Vec<u8> {
+    let mut rom = mbc1_4bank_rom();
+    rom[0x147] = 0x03; // MBC1+RAM+BATTERY
+    rom[0x149] = 0x03; // 32 KiB RAM (4 banks)
+    rom
+}
+
+#[test]
+fn debug_read_and_cdl_reach_explicit_sram_banks() {
+    let mut gb = GameBoy::new(Model::Dmg, mbc1_ram_rom()).unwrap();
+    // RAMG on + MBC1 mode 1 so BANK2 selects the RAM bank (gbctr).
+    gb.debug_write(0x0000, 0x0A);
+    gb.debug_write(0x6000, 0x01);
+    // Stamp a bank-unique byte into each of the 4 RAM banks at 0xA000.
+    for bank in 0..4u8 {
+        gb.debug_write(0x4000, bank);
+        gb.debug_write(0xA000, 0xD0 | bank);
+    }
+    // Any bank is reachable regardless of the live BANK2.
+    for bank in 0..4u16 {
+        assert_eq!(gb.debug_read_banked(bank, 0xA000), 0xD0 | bank as u8);
+    }
+    // Out-of-range bank folds within the chip (bank 4 wraps to bank 0), no OOB.
+    assert_eq!(gb.debug_read_banked(4, 0xA000), gb.debug_read_banked(0, 0xA000));
+
+    // CDL follows the same bank map. Craft a fixture flagging SRAM bank 2 only
+    // (debug_read is side-effect-free, so it can't record a flag): the physical
+    // SRAM region sits after ROM (4*0x4000) + VRAM (0x4000); bank 2 @ 0xA000 is
+    // offset 2*0x2000 within it.
+    gb.set_cdl(true);
+    let mut fx = vec![0u8; gb.cdl_flags().unwrap().len()];
+    fx[0x10000 + 0x4000 + 2 * 0x2000] = 1;
+    assert!(gb.load_cdl(&fx));
+    assert_eq!(gb.cdl_flag_banked(2, 0xA000), 1);
+    assert_eq!(gb.cdl_flag_banked(0, 0xA000), 0, "other banks unmarked");
+    // The live bank (2) agrees with the plain cdl_flag.
+    gb.debug_write(0x4000, 2);
+    assert_eq!(gb.cdl_flag_banked(2, 0xA000), gb.cdl_flag(0xA000));
+}
+
+#[test]
+fn banked_sram_on_a_cart_without_ram_reads_ff() {
+    // No RAM chip → open-bus 0xFF for every bank, CDL always 0 (never OOB).
+    let mut gb = GameBoy::new(Model::Dmg, mbc1_4bank_rom()).unwrap();
+    assert_eq!(gb.debug_read_banked(3, 0xA000), 0xFF);
+    gb.set_cdl(true);
+    assert_eq!(gb.cdl_flag_banked(3, 0xA000), 0);
+}
+
+#[test]
+fn debug_write_banked_edits_the_named_bank_of_each_region() {
+    // CGB MBC5 + 32 KiB RAM: VRAM (2 banks), SRAM (4 banks), WRAM (8 banks).
+    let mut rom = vec![0u8; 8 * 0x4000];
+    rom[0x143] = 0x80; // CGB
+    rom[0x147] = 0x1A; // MBC5+RAM
+    rom[0x148] = 0x03; // 8 ROM banks
+    rom[0x149] = 0x03; // 32 KiB RAM (4 banks)
+    let mut gb = GameBoy::new(Model::Cgb, rom).unwrap();
+    // Poke a distinct byte into a non-live bank of each region, read it back
+    // banked, and confirm the *live* bank was untouched.
+    for (addr, bank, val, live) in
+        [(0x8000u16, 1u16, 0xE1u8, 0u16), (0xA000, 3, 0xE3, 0), (0xD000, 5, 0xE5, 1)]
+    {
+        gb.debug_write_banked(bank, addr, val);
+        assert_eq!(gb.debug_read_banked(bank, addr), val, "edit lands in {bank}");
+        assert_ne!(
+            gb.debug_read_banked(live, addr),
+            val,
+            "the live bank at {addr:04X} is untouched"
+        );
+    }
+    // WRAMX has no page-0 window: bank 0 folds to page 1 on both read and write
+    // (SVBK 0 → 1), so a bank-0 edit is visible as bank 1.
+    gb.debug_write_banked(0, 0xD000, 0x7C);
+    assert_eq!(gb.debug_read_banked(1, 0xD000), 0x7C, "WRAMX bank 0 aliases bank 1");
+    assert_eq!(gb.debug_read_banked(0, 0xD000), gb.debug_read_banked(1, 0xD000));
+}
+
+#[test]
+fn region_bank_count_matches_the_chip_geometry() {
+    let mut rom = vec![0u8; 8 * 0x4000];
+    rom[0x143] = 0x80; // CGB
+    rom[0x147] = 0x1A; // MBC5+RAM
+    rom[0x148] = 0x03; // 8 ROM banks
+    rom[0x149] = 0x03; // 32 KiB RAM = 4 banks
+    let gb = GameBoy::new(Model::Cgb, rom).unwrap();
+    assert_eq!(gb.region_bank_count(0x4000), 8, "ROMX");
+    assert_eq!(gb.region_bank_count(0x8000), 2, "CGB VRAM");
+    assert_eq!(gb.region_bank_count(0xA000), 4, "SRAM");
+    assert_eq!(gb.region_bank_count(0xD000), 8, "CGB WRAM");
+    assert_eq!(gb.region_bank_count(0x0100), 1, "fixed ROM0");
+    assert_eq!(gb.region_bank_count(0xFF80), 1, "HRAM unbanked");
+    // DMG geometry: 1 VRAM bank, 2 WRAM pages, 0 SRAM banks (no chip).
+    let dmg = GameBoy::new(Model::Dmg, mbc1_4bank_rom()).unwrap();
+    assert_eq!(dmg.region_bank_count(0x8000), 1, "DMG VRAM");
+    assert_eq!(dmg.region_bank_count(0xD000), 2, "DMG WRAM");
+    assert_eq!(dmg.region_bank_count(0xA000), 0, "no RAM chip");
+    // A present-but-sub-8KB RAM chip (MBC2's 512 B) still rounds up to 1 bank, so
+    // the viewer names its SRAM instead of dropping the label as if absent.
+    let mut mbc2 = vec![0u8; 4 * 0x4000];
+    mbc2[0x147] = 0x06; // MBC2+BATTERY (built-in 512×4 RAM)
+    let mbc2 = GameBoy::new(Model::Dmg, mbc2).unwrap();
+    assert_eq!(mbc2.region_bank_count(0xA000), 1, "MBC2 512 B RAM → 1 bank");
+}
+
 #[test]
 fn debug_read_banked_reads_explicit_rom_bank() {
     // Stamp the byte at each bank's 0x4000-window base with a bank-unique value.

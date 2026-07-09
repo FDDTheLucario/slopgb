@@ -70,6 +70,44 @@ fn memory_view_goto_resolves_hex_symbol_and_ignores_junk() {
 }
 
 #[test]
+fn memory_view_goto_bank_prefixed_address_pins_bank_and_base() {
+    let mut v = MemoryView::default();
+    assert!(v.apply_goto("03:4000"), "BB:AAAA pins bank + base");
+    assert_eq!((v.bank, v.mem_base, v.cursor), (Some(3), 0x4000, 0x4000));
+    // The address half still accepts a $/0x prefix.
+    assert!(v.apply_goto("2:$A100"));
+    assert_eq!((v.bank, v.mem_base), (Some(2), 0xA100));
+    // A colon-less address takes the plain symbol/hex path and leaves the bank.
+    v.bank = Some(5);
+    assert!(v.apply_goto("C000"));
+    assert_eq!((v.bank, v.mem_base), (Some(5), 0xC000), "plain goto leaves bank");
+    // A colon'd but non-hex bank fails both parses → whole input rejected, no move.
+    assert!(!v.apply_goto("zz:1000"), "non-hex bank is not a valid goto");
+    assert_eq!((v.bank, v.mem_base), (Some(5), 0xC000), "rejected goto changes nothing");
+}
+
+#[test]
+fn memory_view_step_bank_wraps_and_refollows_the_live_bank() {
+    // Live bank 2, a 4-bank region. Stepping off live pins; stepping back onto the
+    // live bank re-follows (None).
+    let mut v = MemoryView::default();
+    assert_eq!(v.bank, None, "defaults to following the live bank");
+    v.step_bank(1, 2, 4); // live 2 → pin 3
+    assert_eq!(v.bank, Some(3));
+    v.step_bank(1, 2, 4); // 3 → wrap to 0
+    assert_eq!(v.bank, Some(0));
+    v.step_bank(1, 2, 4); // 0 → 1
+    assert_eq!(v.bank, Some(1));
+    v.step_bank(1, 2, 4); // 1 → 2 == live → re-follow
+    assert_eq!(v.bank, None, "landing on the live bank re-follows");
+    // A fixed/unbanked region (count 0/1) keeps following live.
+    v.step_bank(1, 0, 1);
+    assert_eq!(v.bank, None);
+    v.step_bank(1, 0, 0);
+    assert_eq!(v.bank, None, "absent-RAM count 0 stays follow-live");
+}
+
+#[test]
 fn memory_view_edit_two_nibbles_commit_a_byte_and_advance() {
     let mut v = MemoryView {
         cursor: 0xC000,
@@ -216,6 +254,116 @@ fn mem_bank_label_follows_cgb_wram_and_mbc_rom_banks() {
 }
 
 #[test]
+fn effective_bank_folds_into_the_region_and_survives_count_zero() {
+    assert_eq!(effective_bank(5, 4), 1, "5 % 4");
+    assert_eq!(effective_bank(3, 4), 3);
+    assert_eq!(effective_bank(0, 1), 0);
+    assert_eq!(effective_bank(9, 0), 0, "count 0 (absent RAM) never divides by zero");
+}
+
+#[test]
+fn stepped_bank_starts_from_live_and_refollows() {
+    // Following live (None), stepping starts from the live bank.
+    assert_eq!(stepped_bank(None, 1, 2, 4), Some(3), "live 2 + 1 → pin 3");
+    assert_eq!(stepped_bank(None, -1, 2, 4), Some(1), "live 2 - 1 → pin 1");
+    // From a pinned bank, wrap within the count.
+    assert_eq!(stepped_bank(Some(3), 1, 2, 4), Some(0), "3 + 1 wraps to 0");
+    assert_eq!(stepped_bank(Some(0), -1, 2, 4), Some(3), "0 - 1 wraps to 3");
+    // Landing on the live bank re-follows.
+    assert_eq!(stepped_bank(Some(1), 1, 2, 4), None, "onto live 2 → follow");
+    assert_eq!(stepped_bank(None, 0, 2, 4), None, "delta 0 stays on live");
+    // Fixed/unbanked (count 0/1) always follows live.
+    assert_eq!(stepped_bank(Some(5), 1, 0, 1), None);
+    assert_eq!(stepped_bank(None, 3, 0, 0), None, "count 0 never divides by zero");
+}
+
+#[test]
+fn banked_read_follows_live_or_reads_the_pinned_bank() {
+    // MBC5, 8 ROM banks, distinct byte at each bank's 0x4000.
+    let mut rom = vec![0u8; 8 * 0x4000];
+    rom[0x147] = 0x19; // MBC5
+    rom[0x148] = 0x03; // 8 banks
+    for b in 0..8usize {
+        rom[b * 0x4000] = 0xB0 | b as u8;
+    }
+    let mut gb = GameBoy::new(Model::Dmg, rom).unwrap();
+    gb.debug_write(0x2000, 5); // map ROM bank 5 live at 0x4000
+    // Following live reads the mapped bank; pinning reads the chosen bank.
+    assert_eq!(banked_read(&gb, None, 0x4000), 0xB5, "None follows live bank 5");
+    assert_eq!(banked_read(&gb, Some(2), 0x4000), 0xB2, "Some(2) reads bank 2");
+    // Live_bank + bank_chip_label agree with the live mapping.
+    assert_eq!(live_bank(&gb, 0x4000), 5);
+    assert_eq!(bank_chip_label(&gb, 0x4000, None), None, "no chip while following live");
+    assert_eq!(bank_chip_label(&gb, 0x4000, Some(2)).as_deref(), Some("ROM02"));
+    // live_bank across the other regions: VRAM 0, WRAM 1 (DMG), absent SRAM 0,
+    // unbanked 0 — the "follow live" start for every region.
+    assert_eq!(live_bank(&gb, 0x8000), 0, "DMG VRAM bank 0");
+    assert_eq!(live_bank(&gb, 0xD000), 1, "DMG WRAM bank 1");
+    assert_eq!(live_bank(&gb, 0xA000), 0, "no RAM chip → 0");
+    assert_eq!(live_bank(&gb, 0xFF80), 0, "unbanked HRAM → 0");
+    // The chip/status name a non-ROM banked region too (WRAMX bank 0 aliases 1).
+    assert_eq!(bank_chip_label(&gb, 0xD000, Some(0)).as_deref(), Some("WRM1"));
+}
+
+#[test]
+fn banked_write_matches_banked_read_gated_when_following_raw_when_pinned() {
+    // MBC1 + 8 KiB RAM left DISABLED (RAMG off — the normal state outside a save).
+    let mut rom = vec![0u8; 4 * 0x4000];
+    rom[0x147] = 0x03; // MBC1+RAM+BATTERY
+    rom[0x149] = 0x02; // 8 KiB RAM (1 bank)
+    let mut gb = GameBoy::new(Model::Dmg, rom).unwrap();
+    // Following live (None): the dump is RAMG-gated open-bus, and a write is the
+    // same gated no-op the CPU sees — so what's shown stays what's written.
+    assert_eq!(banked_read(&gb, None, 0xA000), 0xFF, "disabled SRAM reads FF");
+    banked_write(&mut gb, None, 0xA000, 0x42);
+    assert_eq!(banked_read(&gb, None, 0xA000), 0xFF, "gated write is a no-op");
+    // Pinned to bank 0 (a `00:A000` Go-to) browses the raw chip past RAMG, and a
+    // write is visible on the next pinned read — coherent with that dump.
+    banked_write(&mut gb, Some(0), 0xA000, 0x42);
+    assert_eq!(banked_read(&gb, Some(0), 0xA000), 0x42, "raw pinned write is visible");
+}
+
+#[test]
+fn mem_status_line_follows_live_then_marks_a_pinned_bank() {
+    let mut rom = vec![0u8; 8 * 0x4000];
+    rom[0x147] = 0x19; // MBC5
+    rom[0x148] = 0x03; // 8 banks
+    let mut gb = GameBoy::new(Model::Dmg, rom).unwrap();
+    gb.debug_write(0x2000, 5); // live ROM bank 5
+    let loc = "4000  ----";
+    // Following live: the classic label, no marker.
+    assert_eq!(mem_status_line(&gb, 0x4000, None, loc), "ROM05:4000  ----");
+    // Pinned to the live bank: named, no marker (not diverged).
+    assert_eq!(mem_status_line(&gb, 0x4000, Some(5), loc), "ROM05:4000  ----");
+    // Pinned off the live bank: the selected bank + a [live ..] marker.
+    assert_eq!(
+        mem_status_line(&gb, 0x4000, Some(2), loc),
+        "ROM02:4000  ----  [live ROM05]"
+    );
+}
+
+#[test]
+fn sel_bank_label_names_an_explicit_browsed_bank() {
+    // MBC5 + 32 KiB RAM so SRAM has banks to name.
+    let mut rom = vec![0u8; 8 * 0x4000];
+    rom[0x143] = 0x80; // CGB
+    rom[0x147] = 0x1A; // MBC5+RAM
+    rom[0x148] = 0x03; // 8 ROM banks
+    rom[0x149] = 0x03; // 32 KiB RAM
+    let gb = GameBoy::new(Model::Cgb, rom).unwrap();
+    // The selected bank is named regardless of the live mapping.
+    assert_eq!(sel_bank_label(&gb, 0x4000, 5).as_deref(), Some("ROM05"));
+    assert_eq!(sel_bank_label(&gb, 0x8000, 1).as_deref(), Some("VRM1"));
+    assert_eq!(sel_bank_label(&gb, 0xA000, 3).as_deref(), Some("SRM03"));
+    assert_eq!(sel_bank_label(&gb, 0xD000, 7).as_deref(), Some("WRM7"));
+    // WRAMX bank 0 aliases page 1 (SVBK 0 → 1), so the label names the folded page.
+    assert_eq!(sel_bank_label(&gb, 0xD000, 0).as_deref(), Some("WRM1"));
+    assert_eq!(sel_bank_label(&gb, 0x0100, 0), None, "fixed ROM0 unbanked");
+    // A cart with no RAM chip names no SRAM bank.
+    assert_eq!(sel_bank_label(&machine(), 0xA000, 0), None, "no RAM chip");
+}
+
+#[test]
 fn memory_window_status_bar_shows_nearest_symbol() {
     use crate::symbols::SymbolTable;
     use std::rc::Rc;
@@ -223,6 +371,7 @@ fn memory_window_status_bar_shows_nearest_symbol() {
     let theme = Theme::BGB;
     let st = WinState::Memory(MemoryView {
         mem_base: 0x4008,
+        bank: None,
         symbols: Rc::new(SymbolTable::parse("00:4000 Reset")),
         goto: None,
         cursor: 0x4008,
@@ -435,6 +584,44 @@ fn vram_geom_bounds_the_extent_within_a_large_content_area() {
     let pal = vram_geom(VramTab::Palettes, content, false);
     assert!(!pal.grid);
     assert_eq!(pal.extent, content);
+}
+
+#[test]
+fn debugger_bank_chip_draws_only_while_pinned() {
+    // MBC5 so ROMX has banks to pin. The chip is the pane's only source of the
+    // accent colour, so counting accent pixels within the memory pane rect proves
+    // the chip is drawn when pinned and absent while following the live bank.
+    let mut rom = vec![0u8; 8 * 0x4000];
+    rom[0x147] = 0x19; // MBC5
+    rom[0x148] = 0x03; // 8 banks
+    let gb = GameBoy::new(Model::Dmg, rom).unwrap();
+    let (w, h) = (640usize, 480usize);
+    let mem = debugger::DebuggerLayout::for_size(w as i32, h as i32).memory;
+    let chip_pixels = |bank: Option<u16>| -> usize {
+        let st = debugger::DebuggerState {
+            mem_base: 0x4000,
+            mem_bank: bank,
+            ..Default::default()
+        };
+        let mut buf = vec![0u32; w * h];
+        {
+            let mut c = Canvas::new(&mut buf, w, h);
+            render(
+                ToolWindow::Debugger,
+                &gb,
+                &mut c,
+                &Theme::BGB,
+                &WinState::Debugger(Box::new(st)),
+                &Breakpoints::default(),
+            );
+        }
+        (mem.y..mem.bottom())
+            .flat_map(|y| (mem.x..mem.right()).map(move |x| (y, x)))
+            .filter(|&(y, x)| buf[y as usize * w + x as usize] == Theme::BGB.current)
+            .count()
+    };
+    assert_eq!(chip_pixels(None), 0, "no chip while following the live bank");
+    assert!(chip_pixels(Some(3)) > 0, "a chip is drawn when pinned");
 }
 
 #[test]

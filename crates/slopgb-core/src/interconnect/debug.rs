@@ -230,6 +230,10 @@ impl Interconnect {
             0x8000..=0x9FFF => {
                 l.vram + usize::from(bank & 1) * 0x2000 + usize::from(addr & 0x1FFF)
             }
+            0xA000..=0xBFFF => match self.cart.ram_offset_banked(bank, addr) {
+                Some(off) => l.sram + off,
+                None => return 0,
+            },
             0xD000..=0xDFFF => {
                 let nbanks = (self.wram.len() / 0x1000).max(1);
                 let bk = usize::from(bank).max(1) % nbanks;

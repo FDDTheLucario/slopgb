@@ -284,6 +284,8 @@ impl Interconnect {
             0x8000..=0x9FFF => {
                 self.ppu.debug_vram()[usize::from(bank & 1) * 0x2000 + usize::from(addr & 0x1FFF)]
             }
+            // SRAM: explicit RAM bank (raw chip bytes; open-bus 0xFF with no RAM).
+            0xA000..=0xBFFF => self.cart.ram_read_banked(bank, addr),
             // WRAMX (0xD000-0xDFFF): explicit WRAM bank (SVBK 0 → bank 1, like
             // the hardware; DMG has only bank 1, so any bank folds to it).
             0xD000..=0xDFFF => {
@@ -294,6 +296,44 @@ impl Interconnect {
             // ROM0 / WRAM0 / echo / OAM / IO / HRAM / IE: unbanked → live peek.
             _ => self.debug_read(addr),
         }
+    }
+
+    /// Write a specific **bank** of the banked regions for the debug memory
+    /// editor's bank browser — the write-side of [`Self::debug_read_banked`], so
+    /// an edit lands in the bank the viewer is showing (not just the live one).
+    /// VRAM/SRAM/WRAMX target the explicit `bank`; every other region (incl. the
+    /// ROM areas, whose "writes" poke the mapper exactly as before) routes to the
+    /// unbanked [`Self::debug_write`]. Debug-only (`&mut`, never on a golden path).
+    pub(crate) fn debug_write_banked(&mut self, bank: u16, addr: u16, value: u8) {
+        match addr {
+            0x8000..=0x9FFF => self.ppu.debug_vram_write(bank, addr, value),
+            0xA000..=0xBFFF => self.cart.ram_write_banked(bank, addr, value),
+            0xD000..=0xDFFF => {
+                let nbanks = (self.wram.len() / 0x1000).max(1);
+                let b = usize::from(bank).max(1) % nbanks;
+                self.wram[b * 0x1000 + usize::from(addr & 0x0FFF)] = value;
+            }
+            _ => self.debug_write(addr, value),
+        }
+    }
+
+    /// How many banks the region containing `base` can select in the debug
+    /// memory viewer (1 for the fixed/unbanked regions), so the bank stepper can
+    /// wrap. ROMX/SRAM follow the cart chip size; VRAM is 2 on CGB else 1; WRAMX
+    /// is the WRAM page count (8 on CGB, 2 on DMG). Side-effect-free (`&self`).
+    pub(crate) fn region_bank_count(&self, base: u16) -> u16 {
+        // SRAM stays 0 for an absent RAM chip (a "no banks" signal the viewer
+        // uses); a present-but-sub-8KB chip (MBC2's 512 B, a 2 KiB chip) still
+        // rounds up to its 1 bank. Every other region has ≥1. Capped at u16 (max
+        // ROM ≪ 65536 banks).
+        let n = match base {
+            0x4000..=0x7FFF => self.cart.rom_len() / 0x4000,
+            0x8000..=0x9FFF => usize::from(self.model.is_cgb()) + 1,
+            0xA000..=0xBFFF => self.cart.ram_len().div_ceil(0x2000),
+            0xD000..=0xDFFF => self.wram.len() / 0x1000,
+            _ => 1,
+        };
+        n.min(usize::from(u16::MAX)) as u16
     }
 
     fn io_read(&self, addr: u16) -> u8 {

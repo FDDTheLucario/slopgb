@@ -232,6 +232,10 @@ pub struct DebuggerState {
     pub disasm_base: u16,
     /// Memory-dump view base.
     pub mem_base: u16,
+    /// The memory pane's bank browser: `None` follows the live-mapped bank (the
+    /// default), `Some(b)` pins to bank `b` (`[`/`]` step it, a `BB:AAAA` Go-to
+    /// sets it), mirroring the standalone viewer's [`MemoryView::bank`].
+    pub mem_bank: Option<u16>,
     /// Stack-pane scroll offset in 16-bit words below SP (0 = SP at the top row).
     pub stack_off: usize,
     /// Last-clicked address (the menu's cursor).
@@ -249,6 +253,9 @@ pub struct DebuggerState {
     /// Cached profiler state for the Execution-profiler dropdown (MB5), refreshed
     /// from the machine when the menu opens.
     pub prof: ProfilerView,
+    /// Whether CDL logging is on, for the Debug dropdown's check-mark — refreshed
+    /// from the machine when a click opens the menu (like [`prof`](Self::prof)).
+    pub cdl_on: bool,
     /// Last Search-string query (MB3), reused by "Continue search".
     pub search_query: String,
     /// Address of the last search hit; "Continue search" resumes just after it.
@@ -274,6 +281,7 @@ impl Default for DebuggerState {
         Self {
             disasm_base: 0x0100,
             mem_base: 0xFF00,
+            mem_bank: None,
             stack_off: 0,
             cursor: None,
             pinned: false,
@@ -281,6 +289,7 @@ impl Default for DebuggerState {
             dialog: None,
             data_hints: BTreeSet::new(),
             prof: ProfilerView::default(),
+            cdl_on: false,
             search_query: String::new(),
             search_hit: None,
             bookmarks: [None; 10],

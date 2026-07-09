@@ -33,11 +33,12 @@ The server binds `127.0.0.1` only (never `0.0.0.0`) — localhost, not the netwo
 ### Address forms
 
 `AAAA` (bank implied 0) or `BB:AAAA` (`BB` = hex bank). `AAAA` is legal only for
-ROM0/WRAM0/echo+ (`0000-3FFF`, `C000-CFFF`, `E000-FFFF`); `BB:AAAA` only for the
-banked regions ROMX/VRAM/WRAMX (`4000-7FFF`, `8000-9FFF`, `D000-DFFF`). Cart SRAM
-(`A000-BFFF`) is addressable by **neither** form (matches the tool spec — a query
-there errors; an easy future add). A range must stay inside one region and one
-bank, so `03:7FF0 04:400F` is rejected — split it into two queries.
+ROM0/WRAM0/echo+ (`0000-3FFF`, `C000-CFFF`, `E000-FFFF`); `BB:AAAA` for the banked
+regions ROMX/VRAM/**SRAM**/WRAMX (`4000-7FFF`, `8000-9FFF`, `A000-BFFF`,
+`D000-DFFF`). Cart SRAM banks with the mapper, so `peek`/`cdl` read an explicit
+RAM bank there (raw chip bytes, folded to the RAM size; open-bus `FF` / CDL 0 with
+no RAM chip). A range must stay inside one region and one bank, so
+`03:7FF0 04:400F` is rejected — split it into two queries.
 
 ## Architecture
 
@@ -64,8 +65,9 @@ no-Cargo-dep rule.
 
 Every tool is read-only `&self` introspection except `breakpoint`, which toggles
 the App-owned breakpoint set (not core state — and empty-by-default breakpoints
-keep the run loop byte-identical). Two new core accessors back the banked tools —
-`GameBoy::debug_read_banked` and `cdl_flag_banked`, both read-only `&self`,
-verified golden byte-identical + mooneye 91/91. The whole server is opt-in and
+keep the run loop byte-identical). Two core accessors back the banked tools —
+`GameBoy::debug_read_banked` and `cdl_flag_banked` (both cover ROMX/VRAM/SRAM/
+WRAMX via the cartridge `ram_read_banked` / `ram_offset_banked` helpers), all
+read-only `&self`, verified golden byte-identical + mooneye 91/91. The whole server is opt-in and
 inert by default, so no golden path is touched. See the golden-safe law in the
 [README](README.md).

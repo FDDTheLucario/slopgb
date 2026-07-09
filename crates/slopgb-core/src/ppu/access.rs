@@ -114,6 +114,13 @@ impl Ppu {
         self.vram[i] = value;
     }
 
+    /// Write an **explicit** VRAM bank (0/1) for the debug memory editor's
+    /// bank browser, independent of the live VBK. Side-effect-free aside from
+    /// the poked byte; debug-only. Mirrors [`Self::debug_vram`]'s layout.
+    pub(crate) fn debug_vram_write(&mut self, bank: u16, addr: u16, value: u8) {
+        self.vram[usize::from(bank & 1) * 0x2000 + usize::from(addr & 0x1FFF)] = value;
+    }
+
     /// True while the PPU is in a real hblank (mode 3 finished on a visible
     /// line); the visible STAT mode-0 window at line starts is excluded.
     /// The HBlank DMA engine edge-detects [`Self::hdma_trigger_level`]

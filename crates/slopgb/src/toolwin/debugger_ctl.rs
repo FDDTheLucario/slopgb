@@ -110,6 +110,21 @@ impl ToolWindows {
         }
     }
 
+    /// Step the debugger memory pane's browsed bank by `delta` (`[` / `]`),
+    /// starting from the live-mapped bank when following it and re-following on
+    /// the live bank (see `windows::stepped_bank`). Redraws.
+    pub fn step_debugger_bank(&mut self, delta: i32, gb: &GameBoy) {
+        let Some(view) = self.debugger_view_mut() else {
+            return;
+        };
+        if let WinState::Debugger(s) = &mut view.state {
+            let live = crate::windows::live_bank(gb, s.mem_base);
+            let count = gb.region_bank_count(s.mem_base);
+            s.mem_bank = crate::windows::stepped_bank(s.mem_bank, delta, live, count);
+            view.window.request_redraw();
+        }
+    }
+
     /// Open the debugger's `Go to…` modal on the disasm pane (Ctrl+G).
     pub fn open_debugger_goto(&mut self) {
         let Some(view) = self.debugger_view_mut() else {
