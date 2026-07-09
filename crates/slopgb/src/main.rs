@@ -50,7 +50,10 @@ use std::process;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use slopgb_core::{Button, CLOCK_HZ, CYCLES_PER_FRAME, SCREEN_PIXELS};
+use slopgb_core::{
+    Button, CLOCK_HZ, CYCLES_PER_FRAME, SCREEN_H, SCREEN_PIXELS, SCREEN_W, SGB_BORDER_H,
+    SGB_BORDER_W,
+};
 use winit::event::KeyEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
@@ -420,11 +423,16 @@ impl App {
         };
         // With no ROM loaded the LCD shows a solid lightest-shade blank (bgb's
         // pale-green off screen); the machine is frozen so its own front buffer
-        // never paints.
-        let frame: &[u32; SCREEN_PIXELS] = if self.rom_loaded {
-            self.session.gb.frame()
+        // never paints. On an SGB with a border loaded (CHR_TRN+PCT_TRN), the
+        // 256×224 composite replaces the bare 160×144 frame automatically — the
+        // blit letterboxes whichever size it gets.
+        let (frame, src_w, src_h): (&[u32], usize, usize) = if self.rom_loaded {
+            match self.session.gb.sgb_border() {
+                Some(b) => (&b[..], SGB_BORDER_W, SGB_BORDER_H),
+                None => (&self.session.gb.frame()[..], SCREEN_W, SCREEN_H),
+            }
         } else {
-            &self.blank_frame
+            (&self.blank_frame[..], SCREEN_W, SCREEN_H)
         };
         // The right-click menu is its own window now (see `menupopup`), so it is
         // not part of the game-window overlay. The remaining overlays (info box /
@@ -444,7 +452,7 @@ impl App {
         let wizard = self.key_wizard.as_ref();
         let theme = ui::Theme::BGB;
         let stretch = self.window_size == WindowSizeChoice::FullscreenStretched;
-        if let Err(e) = video.draw(window, frame, stretch, |canvas| {
+        if let Err(e) = video.draw(window, frame, src_w, src_h, stretch, |canvas| {
             // The info box / Load-ROM modal draw on top of everything (modal).
             if let Some(i) = info {
                 windows::mainwin::render_info(canvas, i, &theme);
