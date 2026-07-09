@@ -60,10 +60,29 @@ impl Interconnect {
         // to lift nothing — only a full pixel-pipe reclock uses it (see the
         // `dot_phase` field docs).
         for cc in 1..=4u8 {
-            if !dot_ticks_on_cc(cc, self.double_speed, self.dot_phase) {
-                continue;
+            if self.eager_value {
+                // HALFDOT Part A-infra (eager): advance the PPU per 8-MHz
+                // half-dot (2 per dot SS, 1 DS), folding on the dot-completing
+                // half — the SAME grain `advance_machine_t` runs on the tier2
+                // deferred path (`tick.rs`), reproducing the whole-dot
+                // `dot_ticks_on_cc` grid exactly while `dhalf` stays 0 on the
+                // aligned CPU/PPU grid (byte-identical EV). This is the seam the
+                // half-dot write-strobe (Part A-render) builds on: once
+                // `strobe_tick` moves onto the half-dot grid, a mid-mode-3
+                // register commit lands at its true half-dot. `cycles` is
+                // bumped once above (`dots`), so no per-dot bump here. Never
+                // reached in production (`eager_value` false) → golden
+                // byte-identical; tier2 uses `advance_machine_t`, not this.
+                let half_dots = if self.double_speed { 1 } else { 2 };
+                for _ in 0..half_dots {
+                    let ppu_if = self.ppu.tick_half();
+                    if self.ppu.dot_completed() {
+                        self.fold_ppu_events(ppu_if, cc);
+                    }
+                }
+            } else if dot_ticks_on_cc(cc, self.double_speed, self.dot_phase) {
+                self.tick_machine_dot(cc);
             }
-            self.tick_machine_dot(cc);
         }
         let div = self.timer.div_counter();
         self.apu.tick(div, self.double_speed);
