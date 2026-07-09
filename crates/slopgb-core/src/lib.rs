@@ -747,13 +747,28 @@ impl GameBoy {
     }
 
     /// Like [`Self::debug_read`] but reads a specific **bank** of the banked
-    /// regions (ROMX `0x4000-0x7FFF`, VRAM `0x8000-0x9FFF`, WRAMX
-    /// `0xD000-0xDFFF`) rather than the live one — so the MCP/debug tools can
-    /// dump an arbitrary bank. Outside those regions `bank` is ignored
+    /// regions (ROMX `0x4000-0x7FFF`, VRAM `0x8000-0x9FFF`, SRAM `0xA000-0xBFFF`,
+    /// WRAMX `0xD000-0xDFFF`) rather than the live one — so the MCP/debug tools
+    /// can dump an arbitrary bank. Outside those regions `bank` is ignored
     /// (== [`Self::debug_read`]). Read-only, golden-safe.
     #[must_use]
     pub fn debug_read_banked(&self, bank: u16, addr: u16) -> u8 {
         self.bus.debug_read_banked(bank, addr)
+    }
+
+    /// Like [`Self::debug_write`] but pokes a specific **bank** of the banked
+    /// regions (VRAM/SRAM/WRAMX), so the memory viewer's bank browser edits the
+    /// bank it is showing. Other regions ignore `bank` (== [`Self::debug_write`];
+    /// ROM areas still poke the mapper). Debug-only; never on a golden path.
+    pub fn debug_write_banked(&mut self, bank: u16, addr: u16, value: u8) {
+        self.bus.debug_write_banked(bank, addr, value);
+    }
+
+    /// Selectable bank count for the region containing `base` (1 when
+    /// fixed/unbanked), for the memory viewer's bank stepper. Read-only.
+    #[must_use]
+    pub fn region_bank_count(&self, base: u16) -> u16 {
+        self.bus.region_bank_count(base)
     }
 
     /// The top `n` 16-bit words of the stack as `(address, word)` pairs,

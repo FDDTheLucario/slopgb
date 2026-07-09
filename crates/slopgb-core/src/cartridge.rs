@@ -472,6 +472,16 @@ impl Cartridge {
         self.ram_offset_banked(bank, addr).map_or(0xFF, |i| self.ram[i])
     }
 
+    /// Write raw bytes to an explicit RAM bank for the debug memory editor
+    /// (no-op with no RAM chip), the SRAM analogue of the banked read. Bypasses
+    /// RAMG so a paused debugger can poke a disabled/other bank; stores the raw
+    /// byte (MBC2 keeps only the low nibble on a real read). Debug-only.
+    pub fn ram_write_banked(&mut self, bank: u16, addr: u16, value: u8) {
+        if let Some(i) = self.ram_offset_banked(bank, addr) {
+            self.ram[i] = value;
+        }
+    }
+
     /// Physical external-RAM offset for a CPU address in 0xA000-0xBFFF, or `None`
     /// when no RAM byte is addressed there (RAM disabled/absent, or an RTC
     /// register mapped) — for the bank-aware CDL. Side-effect-free.

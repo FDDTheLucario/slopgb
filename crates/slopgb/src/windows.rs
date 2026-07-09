@@ -58,6 +58,10 @@ impl WinState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MemoryView {
     pub mem_base: u16,
+    /// Selected bank for the banked region the view sits in (the bank browser).
+    /// Reinterpreted per region and folded to the region's bank count on use, so
+    /// `[`/`]` step it and a `BB:AAAA` Go-to sets it. 0 = the first bank.
+    pub bank: u16,
     pub symbols: Rc<SymbolTable>,
     /// Open `Go to…` prompt (Ctrl+G); `None` when idle. Mirrors the integrated
     /// debugger pane's modal, scoped to this standalone window.
@@ -74,6 +78,7 @@ impl Default for MemoryView {
     fn default() -> Self {
         Self {
             mem_base: 0xFF00,
+            bank: 0,
             symbols: Rc::new(SymbolTable::default()),
             goto: None,
             cursor: 0xFF00,
@@ -108,8 +113,30 @@ impl MemoryView {
     /// cursor at the target too. Mirrors the integrated pane's accept_dialog Goto.
     pub fn apply_goto(&mut self, text: &str) -> bool {
         let t = text.trim();
+        // A loaded symbol name wins first (so a symbol that happens to contain a
+        // colon isn't misread as a bank prefix). Then `BB:AAAA` — a bank-prefixed
+        // address (the same form the MCP/debugger use), letting a human jump to an
+        // arbitrary bank + address in one go. Then a bare hex address.
+        if let Some(addr) = self.symbols.resolve(t) {
+            self.mem_base = addr;
+            self.cursor = addr;
+            self.edit_hi = None;
+            return true;
+        }
+        if let Some((b, a)) = t.split_once(':') {
+            let addr = a.trim().trim_start_matches('$').trim_start_matches("0x");
+            if let (Ok(bank), Ok(addr)) =
+                (u16::from_str_radix(b.trim(), 16), u16::from_str_radix(addr, 16))
+            {
+                self.bank = bank;
+                self.mem_base = addr;
+                self.cursor = addr;
+                self.edit_hi = None;
+                return true;
+            }
+        }
         let hex = t.trim_start_matches('$').trim_start_matches("0x");
-        if let Some(addr) = self.symbols.resolve(t).or_else(|| u16::from_str_radix(hex, 16).ok()) {
+        if let Ok(addr) = u16::from_str_radix(hex, 16) {
             self.mem_base = addr;
             self.cursor = addr;
             self.edit_hi = None;
@@ -117,6 +144,15 @@ impl MemoryView {
         } else {
             false
         }
+    }
+
+    /// Step the selected bank by `delta`, wrapping within the region's
+    /// `bank_count` (from `GameBoy::region_bank_count`). A count of 0/1 pins the
+    /// bank to 0 (fixed/unbanked or an absent RAM chip). Cancels a pending edit.
+    pub fn step_bank(&mut self, delta: i32, bank_count: u16) {
+        let c = i32::from(bank_count.max(1));
+        self.bank = (i32::from(self.bank) + delta).rem_euclid(c) as u16;
+        self.edit_hi = None;
     }
 
     /// Move the byte-edit cursor by `delta` bytes (wrapping 64 KiB), cancelling
@@ -232,12 +268,19 @@ pub(crate) fn mem_bank_label(gb: &GameBoy, base: u16) -> Option<String> {
 /// hex grid from `base`, before the dump text draws over it. Off (all flags 0 /
 /// log disabled) = no tint = unchanged view. Shared by the standalone memory
 /// viewer and the debugger's memory pane so both give the same CDL feedback.
-fn cdl_tint(c: &mut Canvas, gb: &GameBoy, body: Rect, base: u16) {
+/// `Some(sel)` tints the browser's selected bank, folded to each address's own
+/// region (`effective_bank`); `None` tints the live-mapped bank (the debugger
+/// pane, unchanged).
+fn cdl_tint(c: &mut Canvas, gb: &GameBoy, body: Rect, base: u16, bank: Option<u16>) {
     let lh = line_height();
     for row in 0..(body.h / lh).max(0) {
         for col in 0..16i32 {
             let addr = base.wrapping_add((row * 16 + col) as u16);
-            if let Some(bg) = crate::cdl::cdl_color(gb.cdl_flag(addr)) {
+            let flag = match bank {
+                Some(sel) => gb.cdl_flag_banked(effective_bank(sel, gb.region_bank_count(addr)), addr),
+                None => gb.cdl_flag(addr),
+            };
+            if let Some(bg) = crate::cdl::cdl_color(flag) {
                 let cch = 10 + 3 * col + i32::from(col >= 8);
                 let (cx, cy) = (body.x + cch * GLYPH_W as i32, body.y + row * lh);
                 c.fill_rect(Rect::new(cx, cy, 2 * GLYPH_W as i32, lh), bg);
@@ -246,17 +289,48 @@ fn cdl_tint(c: &mut Canvas, gb: &GameBoy, body: Rect, base: u16) {
     }
 }
 
+/// Fold a selected bank into the region containing an address: `sel % count`, so
+/// an out-of-region selection (e.g. left over from another region) reads a valid
+/// bank. `count` is `GameBoy::region_bank_count`; 0 (absent SRAM) pins to 0. The
+/// one fold rule shared by the dump/tint/cursor render and the edit-write routing.
+pub(crate) fn effective_bank(sel: u16, count: u16) -> u16 {
+    sel % count.max(1)
+}
+
+/// The status-bar bank label for an **explicit** `bank` of the region `base`
+/// sits in (the browser's selected bank), or `None` in the fixed/unbanked
+/// regions and for absent cart RAM. Sibling of [`mem_bank_label`] (which names
+/// the *live* bank); same format so the two compare cleanly.
+pub(crate) fn sel_bank_label(gb: &GameBoy, base: u16, bank: u16) -> Option<String> {
+    Some(match base {
+        0x4000..=0x7FFF => format!("ROM{bank:02X}"),
+        0x8000..=0x9FFF => format!("VRM{bank}"),
+        0xA000..=0xBFFF if gb.region_bank_count(base) > 0 => format!("SRM{bank:02X}"),
+        0xC000..=0xCFFF => "WRM0".to_string(),
+        // WRAMX maps SVBK 0 → page 1 (there is no page-0 window here), so the
+        // read/write/CDL paths fold bank 0 to 1; name the folded page so the label
+        // matches the bytes shown (bank 0 aliases bank 1).
+        0xD000..=0xDFFF => format!("WRM{}", bank.max(1)),
+        _ => return None,
+    })
+}
+
 /// Render the standalone memory viewer: the hex dump from the base address
 /// filling the window above a one-line status bar showing the nearest preceding
 /// symbol (`Name+offset`, or `----` with no symbols loaded).
 fn render_memory_window(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, st: &MemoryView) {
     let lh = line_height();
     let body = Rect::new(area.x, area.y, area.w, (area.h - lh).max(0));
-    cdl_tint(c, gb, body, st.mem_base);
+    // The bank browser: read every dump byte / CDL flag / cursor byte through the
+    // selected bank, folded to *each address's own region* (`effective_bank`), so a
+    // window that straddles a region boundary stays coherent per cell and matches
+    // the cursor overlay + edit write. Unbanked regions ignore the bank. The
+    // debugger pane passes `None` and stays live-bank.
+    cdl_tint(c, gb, body, st.mem_base, Some(st.bank));
     debugger::render_memory(
         c,
         scroll_content(body),
-        |a| gb.debug_read(a),
+        |a| gb.debug_read_banked(effective_bank(st.bank, gb.region_bank_count(a)), a),
         st.mem_base,
         theme,
         &st.symbols,
@@ -281,7 +355,8 @@ fn render_memory_window(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme,
             theme.hilight
         };
         c.fill_rect(Rect::new(cx, cy, 2 * gw, lh), accent);
-        let cur = gb.debug_read(st.cursor);
+        let cur_bank = effective_bank(st.bank, gb.region_bank_count(st.cursor));
+        let cur = gb.debug_read_banked(cur_bank, st.cursor);
         let text = match st.edit_hi {
             Some(hi) => format!("{hi:X}{:X}", cur & 0x0F),
             None => format!("{cur:02X}"),
@@ -294,10 +369,15 @@ fn render_memory_window(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme,
         Some((name, base)) => format!("{:04X}  {name}+{:X}", st.mem_base, st.mem_base - base),
         None => format!("{:04X}  ----", st.mem_base),
     };
-    // Prefix the live bank of the banked region the view sits in (BGB-style),
-    // so the CDL tint's bank is named: "ROM05:4000  Name+X".
-    let status = match mem_bank_label(gb, st.mem_base) {
-        Some(b) => format!("{b}:{loc}"),
+    // Prefix the *selected* bank of the banked region the base row sits in
+    // (BGB-style), so the browsed bank is named: "ROM05:4000  Name+X". When the
+    // browser is off the live-mapped bank, append it: "…  [live ROM02]".
+    let eff = effective_bank(st.bank, gb.region_bank_count(st.mem_base));
+    let status = match sel_bank_label(gb, st.mem_base, eff) {
+        Some(sel) => match mem_bank_label(gb, st.mem_base) {
+            Some(live) if live != sel => format!("{sel}:{loc}  [live {live}]"),
+            _ => format!("{sel}:{loc}"),
+        },
         None => loc,
     };
     draw_text(c, area.x + 2, bar_y + 1, &status, theme.text);
@@ -369,7 +449,7 @@ fn render_debugger(
         st.stack_off,
         theme,
     );
-    cdl_tint(c, gb, l.memory, st.mem_base);
+    cdl_tint(c, gb, l.memory, st.mem_base, None);
     debugger::render_memory(
         c,
         scroll_content(l.memory),

@@ -70,6 +70,42 @@ fn memory_view_goto_resolves_hex_symbol_and_ignores_junk() {
 }
 
 #[test]
+fn memory_view_goto_bank_prefixed_address_sets_bank_and_base() {
+    let mut v = MemoryView::default();
+    assert!(v.apply_goto("03:4000"), "BB:AAAA sets bank + base");
+    assert_eq!((v.bank, v.mem_base, v.cursor), (3, 0x4000, 0x4000));
+    // The address half still accepts a $/0x prefix.
+    assert!(v.apply_goto("2:$A100"));
+    assert_eq!((v.bank, v.mem_base), (2, 0xA100));
+    // A colon-less address takes the plain symbol/hex path and leaves the bank.
+    v.bank = 5;
+    assert!(v.apply_goto("C000"));
+    assert_eq!((v.bank, v.mem_base), (5, 0xC000), "plain goto leaves bank");
+    // A colon'd but non-hex bank fails both parses → whole input rejected, no move.
+    assert!(!v.apply_goto("zz:1000"), "non-hex bank is not a valid goto");
+    assert_eq!((v.bank, v.mem_base), (5, 0xC000), "rejected goto changes nothing");
+}
+
+#[test]
+fn memory_view_step_bank_wraps_within_the_region_count() {
+    let mut v = MemoryView::default();
+    v.step_bank(1, 4);
+    assert_eq!(v.bank, 1);
+    v.step_bank(-1, 4);
+    assert_eq!(v.bank, 0);
+    v.step_bank(-1, 4);
+    assert_eq!(v.bank, 3, "wraps below 0 to count-1");
+    v.step_bank(1, 4);
+    assert_eq!(v.bank, 0, "wraps above count-1 back to 0");
+    // A fixed/unbanked region (count 0 or 1) pins the bank to 0.
+    v.step_bank(1, 1);
+    assert_eq!(v.bank, 0);
+    v.bank = 7;
+    v.step_bank(1, 0);
+    assert_eq!(v.bank, 0, "absent-RAM count 0 pins to 0");
+}
+
+#[test]
 fn memory_view_edit_two_nibbles_commit_a_byte_and_advance() {
     let mut v = MemoryView {
         cursor: 0xC000,
@@ -216,6 +252,35 @@ fn mem_bank_label_follows_cgb_wram_and_mbc_rom_banks() {
 }
 
 #[test]
+fn effective_bank_folds_into_the_region_and_survives_count_zero() {
+    assert_eq!(effective_bank(5, 4), 1, "5 % 4");
+    assert_eq!(effective_bank(3, 4), 3);
+    assert_eq!(effective_bank(0, 1), 0);
+    assert_eq!(effective_bank(9, 0), 0, "count 0 (absent RAM) never divides by zero");
+}
+
+#[test]
+fn sel_bank_label_names_an_explicit_browsed_bank() {
+    // MBC5 + 32 KiB RAM so SRAM has banks to name.
+    let mut rom = vec![0u8; 8 * 0x4000];
+    rom[0x143] = 0x80; // CGB
+    rom[0x147] = 0x1A; // MBC5+RAM
+    rom[0x148] = 0x03; // 8 ROM banks
+    rom[0x149] = 0x03; // 32 KiB RAM
+    let gb = GameBoy::new(Model::Cgb, rom).unwrap();
+    // The selected bank is named regardless of the live mapping.
+    assert_eq!(sel_bank_label(&gb, 0x4000, 5).as_deref(), Some("ROM05"));
+    assert_eq!(sel_bank_label(&gb, 0x8000, 1).as_deref(), Some("VRM1"));
+    assert_eq!(sel_bank_label(&gb, 0xA000, 3).as_deref(), Some("SRM03"));
+    assert_eq!(sel_bank_label(&gb, 0xD000, 7).as_deref(), Some("WRM7"));
+    // WRAMX bank 0 aliases page 1 (SVBK 0 → 1), so the label names the folded page.
+    assert_eq!(sel_bank_label(&gb, 0xD000, 0).as_deref(), Some("WRM1"));
+    assert_eq!(sel_bank_label(&gb, 0x0100, 0), None, "fixed ROM0 unbanked");
+    // A cart with no RAM chip names no SRAM bank.
+    assert_eq!(sel_bank_label(&machine(), 0xA000, 0), None, "no RAM chip");
+}
+
+#[test]
 fn memory_window_status_bar_shows_nearest_symbol() {
     use crate::symbols::SymbolTable;
     use std::rc::Rc;
@@ -223,6 +288,7 @@ fn memory_window_status_bar_shows_nearest_symbol() {
     let theme = Theme::BGB;
     let st = WinState::Memory(MemoryView {
         mem_base: 0x4008,
+        bank: 0,
         symbols: Rc::new(SymbolTable::parse("00:4000 Reset")),
         goto: None,
         cursor: 0x4008,

@@ -219,17 +219,17 @@ impl ApplicationHandler for App {
                                 .and_then(|t| t.chars().next())
                                 .and_then(|ch| ch.to_digit(16))
                             {
-                                if let Some((addr, val)) =
-                                    self.tools.mem_edit_digit(window_id, d as u8)
+                                if let Some((bank, addr, val)) =
+                                    self.tools.mem_edit_digit(window_id, d as u8, &self.session.gb)
                                 {
-                                    self.session.gb.debug_write(addr, val);
+                                    self.session.gb.debug_write_banked(bank, addr, val);
                                 }
                                 return;
                             }
                         }
                         // Otherwise the window owns its arrow/Page nav keys.
                         if let PhysicalKey::Code(code) = event.physical_key {
-                            if self.tools.mem_window_key(window_id, code) {
+                            if self.tools.mem_window_key(window_id, code, &self.session.gb) {
                                 return;
                             }
                         }
