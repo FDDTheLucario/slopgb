@@ -183,6 +183,23 @@ impl Ppu {
         {
             return 1;
         }
+        // EAGER line-0 entry mode-2 back-date (CGB): at CGB line 0 dots 0-3 the
+        // VBlank mode 1 persists (`vis_mode` — no mode-0 gap before the OAM
+        // scan), the raw FSM state no production/deferred read observes (they
+        // sample cc+4 = dot 4-7 = the mode-2 OAM scan). The eager cc+0 read
+        // alone exposes the dots-0-3 mode-1 hold, so back-date it to the cc+4
+        // mode 2 with the same +4 (SS) / +2 (DS) debt the other line-boundary
+        // arms take — the VBlank→OAM mirror of the visible→VBlank line-144 arm
+        // (`ly0/lycint152_ly0stat`). Never fires flag-off → byte-identical.
+        if self.eager_value
+            && self.model.is_cgb()
+            && self.line == 0
+            && m == 1
+            && self.dot < 4
+            && self.dot + if self.ds { 2 } else { 4 } >= 4
+        {
+            return 2;
+        }
         let Some(exit_adj) = self.vis_exit_hd(m) else {
             return m;
         };
