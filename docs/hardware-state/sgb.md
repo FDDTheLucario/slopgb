@@ -25,10 +25,13 @@ no-op end to end.
 `SgbView` (`ppu/sgb.rs`) holds: `pal[4][4]` XRGB palettes, `attr[360]`
 attribute map (row-major, `y/8*20 + x/8`), `mask` mode, the live `shade_buf`,
 the transfer buffers (`ram_palettes`, `attr_files`, `border_tiles`,
-`border_raw`), the recomposited `border_fb`, and the sound/flag/JUMP state. The
-module is split into `ppu/sgb.rs` (struct + dispatch + dmg_shade + save-state) +
-`ppu/sgb/{commands,transfer,border}.rs` (second `impl SgbView`/`impl Ppu` blocks
-via `use super::*`), tests in `ppu/sgb_tests.rs`.
+`border_raw`), the recomposited `border_fb`, the boot-intro/cross-fade state (`fade`,
+`fade_from`, `fade_pending` — presentational, not serialized), and the
+sound/flag/JUMP state. The module is split into `ppu/sgb.rs` (struct + dispatch
++ dmg_shade + save-state + frame boundary) + `ppu/sgb/{commands,transfer,border,
+defaults,bios}.rs` (second `impl SgbView`/`impl Ppu` blocks via `use super::*`;
+`defaults.rs` = original default border, `bios.rs` = the optional user-BIOS
+seam), tests in `ppu/sgb_tests.rs` + `bios.rs`'s own `#[cfg(test)]`.
 
 ## The VRAM-transfer trap (the critical design point)
 
@@ -88,9 +91,13 @@ frozen `effective_screen_buffer`).
 
 `GameBoy::sgb_border() -> Option<&[u32; 256*224]>` returns the SNES border
 surface (32×28 tiles of 8×8) with the colorized 160×144 GB screen composited as
-an inset at (48, 40), or `None` until **both** a CHR_TRN and a PCT_TRN have
-landed (or off SGB). Recomposited at each frame boundary (and after a state
-load) into `SgbView::border_fb` from `front`:
+an inset at (48, 40). It is **always `Some` on an SGB** (`None` only off SGB):
+the built-in **default border** (below) shows from power-on until a ROM sends
+its own CHR_TRN+PCT_TRN, after which the ROM border replaces it.
+`sgb_composite_border` picks the path each frame boundary — `border_ready()`
+(`has_chr && has_pct`) → the ROM `composite`, else `default_composite`.
+Recomposited at each frame boundary (and after a state load) into
+`SgbView::border_fb` from `front`:
 
 1. Backdrop-fill (palette-0 color 0), then blit the GB inset.
 2. For each 32×28 map entry (LE u16: tile index bits0-9 with `0x300` = "unused"
@@ -103,6 +110,66 @@ load) into `SgbView::border_fb` from `front`:
 (`crates/slopgb`: `video.rs` blit generalized to `(src_w, src_h)`, `main.rs`
 `redraw`) renders `sgb_border()` in place of `frame()` automatically when it is
 `Some` — letterboxed/scaled, no new option.
+
+## Default border (original — no BIOS needed)
+
+On real hardware the SGB's built-in border lives in the SNES-side firmware and
+is uploaded by SNES code. slopgb is a **high-level** SGB emulation — it never
+runs the SNES CPU — so that firmware never executes, and a plain DMG game would
+otherwise show no border. `ppu/sgb/defaults.rs`'s `default_composite` instead
+draws an **original**, procedurally-generated frame (a neutral slate backdrop, a
+steel-blue beveled bezel around the GB inset, and a thin outer edge line — plain
+rectangle fills, `outline()`). **No Nintendo artwork is embedded or copied.**
+Seeded in `SgbView::new()` so `sgb_border()` is valid from power-on. Shown until
+a ROM's CHR_TRN+PCT_TRN lands, then the ROM border takes over.
+
+## Boot intro & cross-fade (presentational)
+
+`ppu/sgb/border.rs::apply_fade` blends the border in over `FADE_LEN` (24) frames
+at the frame boundary, driven by a `fade` counter (linear, settles exactly at
+100% target). Two triggers:
+
+- **Boot intro** — `new()` sets `fade = FADE_LEN`, `fade_from = black`, so the
+  default border fades up from black over the first ~0.4 s.
+- **Cross-fade** — a CHR_TRN/PCT_TRN transfer (`run_pending_transfer`) or a BIOS
+  border install sets `fade_pending`; the next frame boundary snapshots the old
+  surface into `fade_from` and restarts the fade, cross-fading old → new.
+
+The blend covers the whole surface (inset included) — the intended "fade the
+border in" effect, and a brief, barely-visible ghost of the live screen during
+a mid-game border swap (games change borders rarely). It is **purely
+presentational**: nothing is serialized (a loaded state resolves to a settled
+border — `read_state` zeroes `fade`), and it never touches `frame()`.
+
+`ATRC_EN` ($0C) — the SGB "attraction" flag — is decoded and exposed via
+`sgb_flags()`. Its documented role is the firmware's idle attraction *demo*
+(a SNES-side animation slopgb does not emulate), **not** the per-border fade, so
+the boot intro / cross-fade is not gated on it (it always plays).
+
+## Optional user-supplied SGB BIOS (`ppu/sgb/bios.rs`)
+
+A user who owns the SGB firmware can install its **real** border and
+title→palette table. Because slopgb never runs the SNES CPU, it cannot execute
+the firmware to reproduce these; the frontend locates the payloads in the
+user's own BIOS copy and hands them to two seams (**nothing Nintendo-derived is
+committed to this repo** — it only ever enters at runtime from the user's file):
+
+- `Ppu::sgb_install_border(chr0, chr1, pct)` — install a real border: the two
+  4096-byte SNES-4bpp tile banks + the 2176-byte tilemap/palette payload (the
+  exact CHR_TRN/PCT_TRN formats). Validates sizes, marks the border ready, and
+  cross-fades it in. Returns `false` (keeps the default) on a mis-sized payload.
+- `Ppu::sgb_apply_bios_palette(title, table)` — the **palette-by-title** hook
+  for non-SGB-aware carts: `title_checksum` (the documented 8-bit sum of the
+  header title bytes `0x134..0x143` — the same shape the CGB boot ROM uses)
+  indexes the BIOS-extracted `table`, whose four BGR555 colours fill all four
+  SGB palettes. **No Nintendo table is shipped**, so standalone the neutral DMG
+  greyscale default stands; the table is BIOS-supplied.
+
+**Not yet wired end-to-end:** these are `pub(crate)` `Ppu` seams; the
+`GameBoy`-level wrappers that would expose them to the frontend live in `lib.rs`
+(a different work-package's file), so the module is unused *within* the core
+crate until that plumbing is added (`#![allow(dead_code)]`, documented in
+`bios.rs`). Standalone (default border, fade, neutral palette) is fully wired.
 
 ## Phase-2/3 audio + SNES-RAM seams
 
@@ -136,18 +203,28 @@ flags + JUMP. `border_fb` is derived (recomposited on load, not serialized).
 `dmg_shade` (None → `dmg_palette`, byte-identical), the `shade_buf` write (gated
 on `self.sgb.as_mut()`), `sgb_frame_boundary` (gated), the border composite
 (gated), and the state stream (a single `bool(false)` when `None`) all reduce to
-the pre-SGB path bit-for-bit. `golden_fingerprint` was **not** run (it hangs in
+the pre-SGB path bit-for-bit. The **default border, boot intro/cross-fade, and
+BIOS seams add no new golden risk**: every one lives inside `SgbView` (reached
+only through `Some`), `sgb_border()` is only ever `Some` on Sgb/Sgb2, and
+`frame()` stays an unmodified `&[u32; 160*144]` — the golden set never calls
+`sgb_border()`. The fade adds **zero** serialized bytes (it is transient). Since
+`SgbView::new()` runs only for Sgb/Sgb2, the power-on `default_composite` seed
+never executes on Dmg/Cgb. `golden_fingerprint` was **not** run (it hangs in
 this environment); golden-safety is proven by inspection — every new path is
-behind an `sgb.is_some()` check. Verified: mooneye 439/439 rom×model
-(`SLOPGB_REQUIRE_ROMS=1`); core lib + frontend tests green; clippy `-D warnings`
+behind an `sgb.is_some()` check. Verified: mooneye 91/91 (this branch,
+`SLOPGB_REQUIRE_ROMS=1`); core lib + frontend tests green; clippy `-D warnings`
 clean.
 
 ## Tests
 
 - `ppu/sgb_tests.rs` — parser units: PAL01/12, ATTR_BLK (incl. the inside-only
   border promotion), ATTR_LIN/DIV/CHR, ATTR_SET, PAL_SET, PAL_TRN screen-decode,
-  SOUND/DATA_SND queues, flags/JUMP, the queue cap, the border composite
-  (transparency + tile draw), and a full save-state round-trip.
+  SOUND/DATA_SND queues, flags/JUMP, the queue cap, the ROM border composite
+  (transparency + tile draw), the **default border** (frame + inset), the **boot
+  fade-in** and **CHR/PCT cross-fade restart**, and a full save-state round-trip.
+- `ppu/sgb/bios.rs` `#[cfg(test)]` — `title_checksum`, the title→palette hook
+  (install + empty-table neutral + off-SGB no-op), and the border install seam
+  (size validation + ready flag).
 - `lib_tests.rs::sgb_pal01_colorizes_rendered_frame` — end-to-end: a PAL01
   packet driven through the real `Joypad` P1 pulse stream recolors a rendered
   frame (joypad → interconnect → ppu → render).
@@ -157,10 +234,11 @@ clean.
 
 - **SPC700 CPU (Phase 2)** + **S-DSP audio synthesis (Phase 3)** — the seams
   above are the plug points; the queues/payloads are stored, not consumed.
-- **Boot intro animation / jingle** (SameBoy `render_boot_animation` /
-  `render_jingle`) — cosmetic SNES boot sequence, not emulated.
-- **Border fade animation** (`border_animation`) — the border is committed
-  immediately on CHR_TRN+PCT_TRN, no cross-fade.
-- **Built-in default border / palette-by-title** (SameBoy
-  `GB_sgb_load_default_data` / `palette_assignments`) — `sgb_border()` returns
-  `None` until the ROM sends its own border.
+- **Boot jingle** (SameBoy `render_jingle`) — the SNES boot sound, not emulated
+  (the border boot intro *is* — see above).
+- **Real firmware border/palette extraction end-to-end** — the core seams exist
+  (`sgb_install_border` / `sgb_apply_bios_palette`), but the `GameBoy`/frontend
+  plumbing to point at a user BIOS and locate the payloads is not yet wired
+  (`lib.rs` is another work-package's file).
+- **Per-game Nintendo palette table** — deliberately not shipped (legal); the
+  hook applies a BIOS-supplied table, else the neutral default.
