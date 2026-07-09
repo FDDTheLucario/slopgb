@@ -588,4 +588,6 @@ pub(super) const CYCLES: [u8; 256] = [
     2, 8, 4, 5, 4, 5, 5, 6, 3, 4, 5, 4, 2, 2, 4, 7, // Fx  (FF STOP: halt, see note)
 ];
 
-// Tests: see `spc700_tests/` (wired in the follow-up test commit).
+#[cfg(test)]
+#[path = "spc700_tests/mod.rs"]
+mod tests;
