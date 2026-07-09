@@ -25,6 +25,7 @@
 use super::*;
 use crate::{SgbSound, SCREEN_H, SCREEN_W};
 
+mod bios;
 mod border;
 mod commands;
 mod defaults;
