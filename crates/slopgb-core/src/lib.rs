@@ -26,6 +26,7 @@ pub(crate) mod mode_timeline;
 pub(crate) mod model;
 pub(crate) mod ppu;
 pub(crate) mod serial;
+pub mod sgb;
 pub(crate) mod state;
 pub(crate) mod stat_update;
 pub(crate) mod timer;
