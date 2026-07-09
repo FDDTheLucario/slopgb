@@ -14,3 +14,4 @@ State date: 2026-06-14.
 | [ppu-render.md](ppu-render.md) | OAM scan, window machine, mode-3 fetch, mealybug, DMG OAM bug, boot VRAM, frame skip, IRQ drain |
 | [apu.md](apu.md) | post-boot warmup, SameBoy countdown model, ch1 sweep |
 | [io-misc.md](io-misc.md) | serial clock, SGB joypad, MBC30, public API facade, audio frontend |
+| [sgb.md](sgb.md) | SGB presentation: palette/attr/mask commands (PAL01-12, ATTR_BLK, MASK_EN), colorization wiring, deferred commands |

@@ -1085,6 +1085,54 @@ fn new_with_boot_wrong_size_falls_back_to_post_boot() {
     assert!(!gb.boot_active(), "256 B boot ROM is wrong for a CGB model");
 }
 
+/// Drive a 16-byte SGB command packet through the real `Joypad` as a P1 pulse
+/// stream (Pan Docs "SGB Command Packet"): arm, reset pulse, 128 data bits
+/// LSB-first (`$10` = 1, `$20` = 0, each followed by `$30`), then a `$20` stop
+/// bit. Goes through `debug_write(0xFF00)` → the interconnect's SGB drain.
+fn send_sgb_packet(gb: &mut GameBoy, data: &[u8; 16]) {
+    gb.debug_write(0xFF00, 0x30); // arm the pulse receiver
+    gb.debug_write(0xFF00, 0x00); // reset pulse: open the packet
+    gb.debug_write(0xFF00, 0x30);
+    for &byte in data {
+        for bit in 0..8 {
+            gb.debug_write(0xFF00, if byte >> bit & 1 != 0 { 0x10 } else { 0x20 });
+            gb.debug_write(0xFF00, 0x30);
+        }
+    }
+    gb.debug_write(0xFF00, 0x20); // stop bit closes the packet
+    gb.debug_write(0xFF00, 0x30);
+}
+
+/// End-to-end SGB wiring: a PAL01 packet driven through the real `Joypad`
+/// reaches the PPU and recolors the rendered DMG output — proving the
+/// joypad → interconnect → ppu → render path (Pan Docs "SGB Command $00").
+#[test]
+fn sgb_pal01_colorizes_rendered_frame() {
+    let mut rom = vec![0u8; 0x8000]; // ROM-only, NOP sled; CPU never touches IO
+    rom[0x146] = 0x03; // SGB flag — both bytes required for `supports_sgb`
+    rom[0x14B] = 0x33; // old licensee code
+    let mut gb = GameBoy::new(Model::Sgb, rom).unwrap();
+
+    // PAL01 with shared background color 0 = red (BGR555 0x001F).
+    let mut packet = [0u8; 16];
+    packet[0] = 0x01; // command 0 (PAL01), length 1
+    packet[1] = 0x1F; // color 0 lo (R = 31)
+    send_sgb_packet(&mut gb, &packet);
+
+    // BG-only with empty VRAM → every pixel is BG color 0 → BGP shade 0 →
+    // palette-0 entry 0 = the shared background just installed.
+    gb.debug_write(0xFF47, 0xE4); // BGP: color 0 → shade 0
+    gb.debug_write(0xFF40, 0x91); // LCDC: LCD on, BG on, 8000 tile data
+    for _ in 0..3 {
+        gb.run_frame(); // first frame after LCD enable is skipped (LCDC.7)
+    }
+    assert_eq!(
+        gb.frame()[0],
+        0xFF_0000,
+        "top-left pixel takes the SGB-provided background color"
+    );
+}
+
 /// Boot-ROM task 6 (golden guard): `new` (no boot ROM) is unchanged — no boot
 /// ROM mapped, post-boot entry + registers, exactly as before this feature.
 #[test]

@@ -135,6 +135,7 @@ mod reclock;
 mod stat_irq_ff0f;
 mod regs;
 mod render;
+mod sgb;
 mod stat_irq;
 mod state;
 
@@ -142,6 +143,7 @@ use crate::SCREEN_PIXELS;
 use crate::model::Model;
 
 use render::Render;
+use sgb::SgbView;
 
 // `OamBugKind` is referenced crate-wide as `crate::ppu::OamBugKind`; the
 // OAM-bug pattern fns are called bare from `blocking.rs` via its `use super::*`.
@@ -871,6 +873,13 @@ pub struct Ppu {
     front: Box<[u32; SCREEN_PIXELS]>,
     back: Box<[u32; SCREEN_PIXELS]>,
     dmg_palette: [u32; 4],
+
+    /// Super Game Boy presentation state (palettes / attribute map / window
+    /// mask), `Some` only on `Model::Sgb`/`Sgb2`. Drives the DMG-output
+    /// colorization in [`Self::dmg_shade`] and the MASK_EN frame handling in
+    /// [`Self::start_line`]. `None` on every other model, so their output is
+    /// byte-identical to the pre-SGB core (see `docs/hardware-state/sgb.md`).
+    sgb: Option<SgbView>,
 }
 
 /// The BG-fetcher LCDC render-view defer, in PPU dots: the eager

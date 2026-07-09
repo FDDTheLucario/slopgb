@@ -260,6 +260,13 @@ impl Ppu {
         w.u32_slice(&self.front[..]);
         w.u32_slice(&self.back[..]);
         w.u32_slice(&self.dmg_palette);
+        match &self.sgb {
+            Some(s) => {
+                w.bool(true);
+                s.write_state(w);
+            }
+            None => w.bool(false),
+        }
     }
 
     pub(crate) fn read_state(&mut self, r: &mut Reader<'_>) -> Result<(), StateError> {
@@ -380,6 +387,16 @@ impl Ppu {
         r.u32_slice_into(&mut self.front[..])?;
         r.u32_slice_into(&mut self.back[..])?;
         r.u32_slice_into(&mut self.dmg_palette)?;
+        // The `sgb` presence is model-fixed (set by `Ppu::new`), but the flag
+        // is written for a self-describing stream; load into the existing view
+        // if both agree, else honor the serialized shape.
+        self.sgb = if r.bool()? {
+            let mut s = self.sgb.take().unwrap_or_else(SgbView::new);
+            s.read_state(r)?;
+            Some(s)
+        } else {
+            None
+        };
         Ok(())
     }
 }

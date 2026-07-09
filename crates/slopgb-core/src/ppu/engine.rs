@@ -122,6 +122,7 @@ impl Ppu {
             front: pixel_buffer(0xFF_FFFF),
             back: pixel_buffer(0xFF_FFFF),
             dmg_palette: [0xFF_FFFF, 0xAA_AAAA, 0x55_5555, 0x00_0000],
+            sgb: matches!(model, Model::Sgb | Model::Sgb2).then(SgbView::new),
         }
     }
 
