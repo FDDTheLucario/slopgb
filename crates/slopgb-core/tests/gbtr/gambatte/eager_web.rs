@@ -91,3 +91,56 @@ fn eager_write_conflict_commit_passes() {
             .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (eager): {e}"));
     }
 }
+
+/// The eager ack-squash port (#11de): a post-ack mode-0 STAT retrigger must
+/// stay CONSUMED by its dispatch's IF clear. The eager read-frame enters the
+/// STAT/OAM ISR the read-debt earlier than gambatte's cc+4 frame (+8hd = 4
+/// dots SS / 2 dots DS), so the eager ack fires that far before the fixed-dot
+/// retrigger and the production 2-dot `ack_squash_dots` window no longer
+/// reaches it; the `_2` rows wrongly re-deliver IF (got E2, want E0). Widening
+/// the eager LCD-bit window by the shift (SS 6, DS 3) re-consumes the retrigger
+/// while the one-M-cycle-later `_1` siblings still land outside and DELIVER.
+/// Each row is a SameBoy-PASS BUG (`classify_cgb_regr.py` → BUG). Reverting the
+/// window widen (back to `2`) makes this pin fail (the retrigger re-delivers).
+/// Eager-scoped → production/tier2 byte-identical.
+#[test]
+fn eager_ack_squash_retrigger_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_ack_squash_retrigger",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    // Five BUG rows the widened window re-consumes: the SS + DS irq_precedence
+    // mode-0 retriggers plus the mode-2 SS retrigger family.
+    let rows = [
+        (
+            "gambatte/irq_precedence/late_m0irq_retrigger_2_dmg08_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        (
+            "gambatte/irq_precedence/late_m0irq_retrigger_scx1_2_dmg08_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        (
+            "gambatte/irq_precedence/late_m0irq_retrigger_ds_2_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        (
+            "gambatte/lyc153int_m2irq/lyc153int_m2irq_late_retrigger_2_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/m2int_m2irq/m2int_m2irq_late_retrigger_2_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in rows {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_eager(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (eager): {e}"));
+    }
+}

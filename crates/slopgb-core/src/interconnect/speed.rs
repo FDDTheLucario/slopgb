@@ -186,7 +186,32 @@ impl Interconnect {
                 // rise at/before the ack still loses: it folded during the
                 // dispatch advance and the ack clears it (the `_2` siblings).
                 // Production keeps gambatte's cc+4-frame 2-dot window.
-                self.ack_squash_dots = if self.tier2_reclock { 0 } else { 2 };
+                self.ack_squash_dots = if self.tier2_reclock {
+                    0
+                } else if self.eager_value {
+                    // Eager ack-squash port (#11de): the eager read-frame
+                    // enters the STAT/OAM ISR — and so fires this ack — the
+                    // read-debt earlier than the gambatte cc+4 frame the
+                    // production `2` is tuned to (+8hd = 4 dots SS / 2 dots DS,
+                    // the #11by cc+0→cc+4 shift). The mode-0 retrigger is a PPU
+                    // event pinned to the same absolute dot, so the eager
+                    // ack→retrigger gap grows by exactly that shift; widen the
+                    // squash window by it so the post-ack retrigger stays
+                    // consumed on the eager frame (irq_precedence
+                    // `late_m0irq_retrigger_2`/`_scx1_2` + `_ds_2`, want E0)
+                    // while the one-M-cycle-later `_1` siblings still land
+                    // outside it and DELIVER (want E2). DS uses +1 (window 3),
+                    // not the full +2: the LYC/mode-2/mode-1/vblank DS `_1`
+                    // retriggers of the OTHER families (ly0/m1/m2int/lyc153int)
+                    // sit one dot inside window 4, so a full-shift DS window
+                    // over-squashes them (measured −6); window 3 recovers
+                    // `_ds_2` and keeps every DS `_1` delivered
+                    // (`_scx1_ds_2`'s +1-dot retrigger stays parked). Never
+                    // armed flag-off (`eager_value` false) → byte-identical.
+                    if self.double_speed { 3 } else { 6 }
+                } else {
+                    2
+                };
                 if self.tier2_reclock {
                     self.ppu.arm_ack_squash(bit);
                 }
