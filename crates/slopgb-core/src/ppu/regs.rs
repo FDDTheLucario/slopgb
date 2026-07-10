@@ -529,8 +529,11 @@ impl Ppu {
                 // The boundary-WY cross-line latch (see `Ppu::wy_xline_trig`):
                 // a tail/head write matching the current line, window enabled
                 // at the commit (DMG too — the DMG arm-7 twin reads the same
-                // latch).
-                if self.tier2_reclock
+                // latch). Also enabled under `eager_value`: this arch commit runs
+                // at the eager M-cycle END, so the boundary window catches the
+                // tail-write class (`late_wy_FFto0/FFto1/10to0/1toFF`) that the
+                // read-frame WY laws pair with — measured +8 CGB, 0 drop.
+                if (self.tier2_reclock || self.eager_value)
                     && self.enabled
                     && (self.dot >= 452 || self.dot < 4)
                     && self.line < 144
@@ -568,8 +571,10 @@ impl Ppu {
                 // trigger line) must release the latch the check would never
                 // have acquired (`late_wy_1toFF_ds_1` renders bare on
                 // hardware AND SameBoy; its `_2` sibling commits at dot 5
-                // and keeps the trigger). Tier-2 + CGB + DS only.
-                if self.tier2_reclock
+                // and keeps the trigger). Tier-2 + CGB + DS; also `eager_value`
+                // (the eager DS `late_wy_ds`/`late_wy_1toFF_ds` pairs recover on
+                // the same latch, part of the +8 CGB WY slice).
+                if (self.tier2_reclock || self.eager_value)
                     && self.model.is_cgb()
                     && self.ds
                     && self.enabled
