@@ -551,7 +551,13 @@ impl Interconnect {
         // The IME=1 halt-entry rewind (SameBoy `halt()`), on the
         // same tier2 DMG/CGB-single-speed scope as the entry check; the
         // t0+4 flushed + deadline-masked view decides.
-        if !self.tier2_reclock || (self.model.is_cgb() && self.double_speed) {
+        //
+        // Hosted on the eager clock too: the rewind is SameBoy's own halt
+        // semantics, independent of which clock frames the read. Without it the
+        // eager CPU takes the halted+first-check-wake path and the post-wake
+        // stream runs one halt round early — `pending_halt_entry`'s tier2 gate
+        // skips the entry flush, so eager samples `pending()` unadvanced.
+        if !(self.tier2_reclock || self.eager_value) || (self.model.is_cgb() && self.double_speed) {
             return false;
         }
         self.pending_halt_entry() != 0
