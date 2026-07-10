@@ -530,7 +530,31 @@ impl Interconnect {
             self.clock.flush();
             self.advance_machine_t(before, self.clock.now());
         }
-        let w = self.pending();
+        let mut w = self.pending();
+        // The eager clock parks no debt, so the flush above is a no-op for it
+        // and the entry sample sits at t0 — 4 dots before SameBoy's post-fetch
+        // view. A mode-0 rise landing inside the fetch M-cycle is therefore
+        // invisible, the rewind does not arm, and the post-wake stream runs one
+        // halt round early (`late_m0int_halt_m0stat_*`). Fold the rise in as a
+        // VALUE peek at t0+4 rather than advancing: advancing would tick the
+        // timers 4 T early (the TIMA-counted `int_hblank_halt` rows pin that).
+        //
+        // DMG-scoped. On CGB the same peek is +5/−1: it also arms the entry
+        // view for the `_3b` skip-path (`late_m0int_halt_m0stat_scx3_3b` [Cgb],
+        // want out2), where a rise inside the fetch M-cycle should arm SameBoy's
+        // halt-bug rather than the rewind. That row is OFF-fail and outside the
+        // TRUE flip bar, so the CGB half is a net gain — but it drops an EV pass
+        // and no SameBoy verdict has been taken for it, and a shipped slice may
+        // not drop a SameBoy-PASS row on an unverified guess. CGB stays on the
+        // t0 sample until the `_3a`/`_3b` split is measured against SameBoy.
+        if self.eager_value
+            && !self.tier2_reclock
+            && !self.model.is_cgb()
+            && self.ie & IF_STAT_BIT != 0
+            && self.ppu.stat_m0_rise_within(4)
+        {
+            w |= IF_STAT_BIT;
+        }
         probe!(if crate::probe::s5dbg_on() {
             let (l, d) = self.ppu.scan_pos();
             eprintln!(

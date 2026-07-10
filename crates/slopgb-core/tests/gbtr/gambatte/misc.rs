@@ -286,13 +286,19 @@ fn tier2_halt_m0stat_wake_passes() {
     let targets: [(&str, &str); 3] = [
         // Fixed by the mid-cycle wake: the read lands in the line-start
         // mode-0 window (want 0).
-        ("gambatte/halt/m0int_m0stat_scx2_1_dmg08_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/halt/m0int_m0stat_scx2_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
         (
             "gambatte/halt/m0irq_m0stat_scx4_2_dmg08_out0_cgb04c_out2.gbc",
             "0",
         ),
         // Regression guard: the want-2 sibling stays mode 2.
-        ("gambatte/halt/m0int_m0stat_scx2_2_dmg08_cgb04c_out2.gbc", "2"),
+        (
+            "gambatte/halt/m0int_m0stat_scx2_2_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
     ];
     for (rel, expect) in targets {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
@@ -532,7 +538,10 @@ fn tier2_ff0f_groupab_passes() {
         ("gambatte/m2int_m0irq/m2int_m0irq_ds_1_cgb04c_out1.gbc", "1"),
         // GUARD — the identical dot-254/rise-255 geometry from an
         // LYC-anchored ISR reads clear (the `stat_rise_oam` anchor gate).
-        ("gambatte/lyc0int_m0irq/lyc0int_m0irq_ds_1_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/lyc0int_m0irq/lyc0int_m0irq_ds_1_cgb04c_out0.gbc",
+            "0",
+        ),
         // Group A: the SS LYC=153 latch two dots past the read (rise 6, read 4).
         (
             "gambatte/ly0/lycint152_lyc153irq_2_dmg08_cgb04c_outE2.gbc",
@@ -543,7 +552,10 @@ fn tier2_ff0f_groupab_passes() {
             "gambatte/ly0/lycint152_lyc153irq_1_dmg08_cgb04c_outE0.gbc",
             "E0",
         ),
-        ("gambatte/ly0/lycint152_lyc153irq_ds_1_cgb04c_outE0.gbc", "E0"),
+        (
+            "gambatte/ly0/lycint152_lyc153irq_ds_1_cgb04c_outE0.gbc",
+            "E0",
+        ),
         // Group B: the DS mode-0 write-race (write 1-2 dots before the rise
         // consumes it; the strict edge never re-raises).
         (
@@ -579,7 +591,10 @@ fn tier2_ff0f_groupab_passes() {
             "gambatte/ly0/lycint152_lyc153irq_ifw_ds_1_cgb04c_outE2.gbc",
             "E2",
         ),
-        ("gambatte/m2int_m2irq/m2int_m2irq_ifw_ds_1_cgb04c_out2.gbc", "2"),
+        (
+            "gambatte/m2int_m2irq/m2int_m2irq_ifw_ds_1_cgb04c_out2.gbc",
+            "2",
+        ),
     ];
     for (rel, expect) in targets {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
@@ -765,5 +780,69 @@ fn eager_halt_entry_rewind_passes() {
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), "0A", model.is_cgb())
             .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected out0A (eager): {e}"));
+    }
+}
+
+/// The eager halt-entry `t0+4` VALUE peek (`Ppu::stat_m0_rise_within`).
+///
+/// SameBoy's `halt()` samples `IE & IF` *after* the prefetch `cycle_read` walked
+/// the machine through the HALT fetch M-cycle (t0+4). The deferred clock reaches
+/// that view by flushing its parked debt; the eager clock parks none, so its
+/// entry sample sits at t0 and a mode-0 STAT rise landing inside the fetch is
+/// invisible — the rewind never arms and the post-wake stream runs one halt
+/// round early.
+///
+/// Traced on `late_m0int_halt_m0stat_scx3_3a` [Cgb]: OFF samples ly1 dot 332
+/// (w=00, halts, `out0`); tier2 samples dot 260 (w=02 → rewind → re-entry 336,
+/// `out0`); eager sampled dot 256 (w=00 → halts early, `out2`). The rise folds
+/// at dot 257 — four dots.
+///
+/// Reconstructing the rise's VALUE at t0+4 rather than advancing the clock keeps
+/// machine time honest (advancing would tick the timers 4 T early and break the
+/// TIMA-counted `int_hblank_halt` rows). DMG-scoped: see the note in
+/// `halt_entry_impl` on the CGB `_3b` skip-path.
+#[test]
+fn eager_halt_entry_m0_peek_passes_dmg() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_halt_entry_m0_peek",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    // The six DMG halt rows the peek recovers — every one a SameBoy-PASS row
+    // that was inside the TRUE flip bar.
+    let rows = [
+        (
+            "gambatte/halt/late_m0int_halt_m0stat_scx2_3a_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/halt/late_m0int_halt_m0stat_scx3_3a_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/halt/late_m0int_halt_m0stat_scx3_3b_dmg08_out0_cgb04c_out2.gbc",
+            "0",
+        ),
+        (
+            "gambatte/halt/late_m0irq_halt_dec_scx2_2_dmg08_cgb04c_out6.gbc",
+            "6",
+        ),
+        (
+            "gambatte/halt/late_m0irq_halt_dec_scx3_2_dmg08_cgb04c_out6.gbc",
+            "6",
+        ),
+        (
+            "gambatte/halt/late_m0irq_halt_m0stat_scx3_3b_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+    ];
+    for (rel, expect) in rows {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_eager(&rom, Model::Dmg);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, false)
+            .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (eager): {e}"));
     }
 }

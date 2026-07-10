@@ -140,6 +140,27 @@ impl Ppu {
         self.stat_rise_m0
     }
 
+    /// Whether the mode-0 HBlank STAT rise lands within the next `dots` dots —
+    /// a pure VALUE peek of the emergent mode-3 exit, advancing nothing.
+    ///
+    /// SameBoy's `halt()` samples `IE & IF` *after* the prefetch `cycle_read`
+    /// walked the machine through the HALT fetch M-cycle (t0+4). The deferred
+    /// clock reaches that view by flushing its parked debt; the eager clock has
+    /// no debt to flush, so its entry sample sits at t0 and misses a rise that
+    /// lands inside the fetch. Reconstructing the rise's VALUE at t0+4 — the
+    /// same decomposition `read_pos_hd` and [`Ppu::boot_read`] use — restores
+    /// the SameBoy view without fabricating machine time (advancing the clock
+    /// here would tick the timers 4 T early and break the TIMA-counted rows).
+    ///
+    /// Mirrors the DS FF0F read-view peek in `stat_irq/ff0f.rs` (`rise <= dot + 1`).
+    pub(crate) fn stat_m0_rise_within(&self, dots: u16) -> bool {
+        self.eng_stat & STAT_SRC_HBLANK != 0
+            && self.line <= 143
+            && !self.line_render_done
+            && self.render.active
+            && self.projected_flip_dot() <= self.dot + dots
+    }
+
     /// Whether the current line is the LCD-enable
     /// glitch line — its mode-0 engine rise is emitted at a different offset
     /// from the true (SameBoy) commit than normal lines' (rise == visexit vs
