@@ -18,7 +18,10 @@ impl Interconnect {
             return None;
         }
         match addr {
-            0xFF41 => Some(self.ppu.read(0xFF41)),
+            // `read_true_t`: FF41 falls through to the trailing cc+4 read
+            // (`read_no_tick` after `tick_machine`) — the M-cycle data phase —
+            // instead of this cc+0 leading-edge peek.
+            0xFF41 if !self.read_true_t => Some(self.ppu.read(0xFF41)),
             // EXPERIMENT (`eager-dispatch-retime-2026-07-09.md`, read-frame
             // probe): the eager FF0F read trails at cc+4, where `tick_machine`
             // has ALREADY folded this M-cycle's STAT rise into `intf` — so the
@@ -144,6 +147,13 @@ impl Interconnect {
         self.coherent_dispatch = on && std::env::var_os("SLOPGB_COHERENT_DISP").is_some();
         self.disp_advance = on && std::env::var_os("SLOPGB_DISP_ADVANCE").is_some();
         self.ff0f_le = on && std::env::var_os("SLOPGB_FF0F_LE").is_some();
+        // EXPERIMENT (`eager-read-retime-2026-07-09.md`): sample FF41 at cc+4
+        // (the M-cycle data phase, after `tick_machine`) instead of the cc+0
+        // leading-edge peek, and delete the cc+0-undo compensation tower
+        // (read-debt / entry-80 / glitch + line-boundary back-dates). Forwarded
+        // to the PPU so its read laws drop those debts. Byte-identical off.
+        self.read_true_t = on && std::env::var_os("SLOPGB_READ_TRUE_T").is_some();
+        self.ppu.set_read_true_t(self.read_true_t);
     }
 
     /// `(leading_edge_reads, tier2_reclock)` — read-only, for the golden-safe

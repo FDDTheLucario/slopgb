@@ -63,6 +63,7 @@ impl Ppu {
             leading_edge_reads: false,
             tier2_reclock: false,
             eager_value: false,
+            read_true_t: false,
             m0_rise: false,
             m0_access_flip: None,
             pal_access_flip: None,
@@ -309,7 +310,10 @@ impl Ppu {
         // is not reconstructed on the eager whole-dot clock, so a handful of DS
         // pre-draw-abort / STOP-shift legs stay parked. Never fires flag-off
         // (`eager_value` false) → production byte-identical.
-        base + if self.eager_value {
+        // `read_true_t`: the FF41 read samples at cc+4, so `self.dot` is already
+        // advanced the full M-cycle (+4 dots SS) by `tick_machine` — `base`
+        // carries the debt natively and the explicit debt would double-count.
+        base + if self.eager_value && !self.read_true_t {
             if self.ds { EAGER_READ_DEBT_HD_DS } else { EAGER_READ_DEBT_HD_SS }
         } else {
             0
@@ -417,6 +421,15 @@ impl Ppu {
     #[allow(dead_code)]
     pub(crate) fn set_eager_value(&mut self, on: bool) {
         self.eager_value = on;
+    }
+
+    /// EXPERIMENT (`eager-read-retime-2026-07-09.md`): the FF41 cc+4 (true-T)
+    /// read frame. Set only under `eager_value` + `SLOPGB_READ_TRUE_T` by
+    /// [`Interconnect::set_eager_value`]; gates off the cc+0-undo read-debt,
+    /// entry-80 back-date and line-boundary arms.
+    #[allow(dead_code)]
+    pub(crate) fn set_read_true_t(&mut self, on: bool) {
+        self.read_true_t = on;
     }
 
     fn step_dot(&mut self) {

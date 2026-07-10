@@ -23,7 +23,9 @@ impl Bus for Interconnect {
         // `ack_impl`) is one-shot: `leading_edge_sample`'s FF41 read has now
         // consumed `read_carried` inside `vis_mode_read`, so clear it (the
         // tier2 twin clears in `read_deferred`). Never set flag-off → no-op.
-        if self.eager_value && addr == 0xFF41 {
+        // Under `read_true_t` the FF41 read trails at cc+4 (below), so the clear
+        // moves after `read_no_tick` — the trailing read must still see the arm.
+        if self.eager_value && addr == 0xFF41 && !self.read_true_t {
             self.ppu.set_read_carried(false);
         }
         self.service_vram_dma();
@@ -35,6 +37,9 @@ impl Bus for Interconnect {
         self.maybe_oam_bug(addr, OamBugKind::Read);
         self.check_access(addr, false);
         let trailing = self.read_no_tick(addr);
+        if self.read_true_t && addr == 0xFF41 {
+            self.ppu.set_read_carried(false);
+        }
         leading.unwrap_or(trailing)
     }
 
@@ -120,8 +125,9 @@ impl Bus for Interconnect {
         let leading = self.leading_edge_sample(addr);
         // Mirror `Bus::read`: clear the one-shot eager carried-read peek once
         // the FF41 read has consumed it (the tier2 twin clears both paths in
-        // `read_deferred`). Never set flag-off → no-op.
-        if self.eager_value && addr == 0xFF41 {
+        // `read_deferred`). Never set flag-off → no-op. Under `read_true_t` the
+        // clear moves after the trailing cc+4 read (as in `Bus::read`).
+        if self.eager_value && addr == 0xFF41 && !self.read_true_t {
             self.ppu.set_read_carried(false);
         }
         self.service_vram_dma();
@@ -130,6 +136,9 @@ impl Bus for Interconnect {
         self.maybe_oam_bug(addr, OamBugKind::ReadIncrease);
         self.check_access(addr, false);
         let trailing = self.read_no_tick(addr);
+        if self.read_true_t && addr == 0xFF41 {
+            self.ppu.set_read_carried(false);
+        }
         leading.unwrap_or(trailing)
     }
 

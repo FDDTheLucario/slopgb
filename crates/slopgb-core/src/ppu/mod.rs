@@ -626,6 +626,13 @@ pub struct Ppu {
     /// Implies `leading_edge_reads` but NOT `tier2_reclock`. Off in production.
     /// Forwarded by [`Interconnect::set_eager_value`].
     eager_value: bool,
+    /// EXPERIMENT (`eager-read-retime-2026-07-09.md`): FF41 samples at cc+4
+    /// (after `tick_machine`) instead of the cc+0 peek, so the read laws drop
+    /// the cc+0-undo compensations (read-debt / entry-80 / glitch + line-boundary
+    /// back-dates). True only under `eager_value` + `SLOPGB_READ_TRUE_T`. Off in
+    /// production (env-derived probe, not serialized — like the interconnect
+    /// twins).
+    read_true_t: bool,
     /// The STAT IF bit handed out by the last tick came from the mode-0
     /// source rise. The interconnect drains this and applies the
     /// half-cycle halt law: a rise landing in the second half of the

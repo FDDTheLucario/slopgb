@@ -154,6 +154,7 @@ impl Ppu {
         // `self.dot` to cc+4, reading mode 2 natively → `eager_value`-only (no
         // double-shift). Never fires flag-off → byte-identical.
         if self.eager_value
+            && !self.read_true_t
             && self.model.is_cgb()
             && self.line >= 1
             && self.line < 144
@@ -176,6 +177,7 @@ impl Ppu {
         // (`eager_value` false) → byte-identical; CGB-scoped (DMG's VBlank-entry
         // frame is a separate calibration).
         if self.eager_value
+            && !self.read_true_t
             && self.model.is_cgb()
             && self.line == 144
             && m == 0
@@ -192,6 +194,7 @@ impl Ppu {
         // arms take — the VBlank→OAM mirror of the visible→VBlank line-144 arm
         // (`ly0/lycint152_ly0stat`). Never fires flag-off → byte-identical.
         if self.eager_value
+            && !self.read_true_t
             && self.model.is_cgb()
             && self.line == 0
             && m == 1
@@ -218,7 +221,7 @@ impl Ppu {
         // `stat_lyc_onoff` (want 0) BOTH read line-0 dot 0 with opposite
         // verdicts — a sub-dot ambiguity the whole-dot frame can't split
         // (HALFDOT floor).
-        if self.eager_value && !self.model.is_cgb() && !self.glitch_line {
+        if self.eager_value && !self.read_true_t && !self.model.is_cgb() && !self.glitch_line {
             if (1..144).contains(&self.line) && m == 0 && self.dot < 4 {
                 return 2; // line-start OAM entry (cc+4 = OAM scan)
             }

@@ -31,7 +31,7 @@ impl Ppu {
             // 0→3 entry at the trailing frame, so it takes no back-date — dot 74
             // made the deferred `lcdon_timing-GS` STAT read see mode 3 a full
             // M-cycle early (round-1 STAT $87 vs $84). 78 restores it.
-            let start = if self.leading_edge_reads && !self.tier2_reclock && !self.ds {
+            let start = if self.leading_edge_reads && !self.tier2_reclock && !self.ds && !self.read_true_t {
                 GLITCH_MODE3_START - 4
             } else {
                 GLITCH_MODE3_START
@@ -91,7 +91,10 @@ impl Ppu {
     /// offset is deferred with the rest of the DS back-dating); always 84
     /// flag-OFF, so production is byte-identical.
     pub(super) fn mode3_entry_dot(&self) -> u16 {
-        if self.leading_edge_reads && !self.tier2_reclock && !self.ds {
+        // `read_true_t` samples FF41 at cc+4 (self.dot already +4), so the
+        // native 84 entry reproduces the same observed boundary the cc+0 peek
+        // needed the 80 back-date for — no cc+0-undo shift.
+        if self.leading_edge_reads && !self.tier2_reclock && !self.ds && !self.read_true_t {
             80
         } else {
             84

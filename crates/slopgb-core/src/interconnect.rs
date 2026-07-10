@@ -216,6 +216,7 @@ pub struct Interconnect {
     coherent_dispatch: bool, // SLOPGB_COHERENT_DISP: eager-native CGB −2 dispatch retime
     disp_advance: bool, // SLOPGB_DISP_ADVANCE: + the corrupting machine-advance
     ff0f_le: bool,      // SLOPGB_FF0F_LE: FF0F cc+0 leading-edge read
+    read_true_t: bool,  // SLOPGB_READ_TRUE_T: sample FF41 at cc+4 (after tick_machine), delete the cc+0-undo tower
 
     /// CGB hardware running a CGB-flagged cart. CGB hardware with a DMG
     /// cart runs in DMG compatibility mode: KEY1/SVBK/HDMA/RP/FF74 and the
@@ -541,6 +542,7 @@ impl Interconnect {
             coherent_dispatch: false,
             disp_advance: false,
             ff0f_le: false,
+            read_true_t: false,
             cgb_mode,
             double_speed: false,
             dot_phase: 0,
