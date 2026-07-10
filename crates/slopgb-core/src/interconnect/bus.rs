@@ -124,7 +124,21 @@ impl Bus for Interconnect {
         // the next 2 dots (the tier2 `write_deferred` twin); with the borrow
         // above the commit now sits at the WriteCpu dot, so the same squash arm
         // applies (`lycint152_lyc153irq_ifw_2`). Shares the borrow's scope.
-        if borrow && addr == 0xFF0F && value & 0x02 == 0 {
+        //
+        // Double-speed extension (#11df): at DS SameBoy's WriteCpu commits 1 T =
+        // half a dot into the M-cycle, but the eager whole-M-cycle tick already
+        // lands `write_no_tick` at the SAME dot the tier2 deferred path commits
+        // (measured: `m2int_m0irq_scx{3,4}_ifw_ds` commit dots match tier2
+        // exactly), so NO commit-dot borrow is needed — the DS mode-0 rise sits 1
+        // to 2 dots past the write (`w=2` in `stat_update_tick`), not co-instant,
+        // and the existing squash countdown consumes it (`_ds_2` Δ1-2) while the
+        // `_ds_1` siblings' writes sit Δ3-4 and survive. Arm only (no `tick_half`,
+        // no `eager_wr_borrow` repay). Same `!lcd_shift_active` grid guard as SS.
+        let ff0f_ds_squash = self.eager_value
+            && self.model.is_cgb()
+            && self.double_speed
+            && !self.ppu.lcd_shift_active();
+        if (borrow || ff0f_ds_squash) && addr == 0xFF0F && value & 0x02 == 0 {
             self.ppu.arm_ff0f_if_squash();
         }
         self.write_no_tick(addr, value);

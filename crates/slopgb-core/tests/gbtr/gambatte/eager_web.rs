@@ -92,6 +92,40 @@ fn eager_write_conflict_commit_passes() {
     }
 }
 
+/// The double-speed extension of the write-conflict commit port (#11df): a CGB
+/// DS bit1-clearing FF0F write must consume the mode-0 STAT rise landing 1-2
+/// dots later. At DS SameBoy's WriteCpu commits half a dot into the M-cycle,
+/// but the eager whole-M-cycle tick already lands the commit on the SAME dot as
+/// the tier2 deferred path (measured), so no commit-dot borrow is needed — only
+/// the `stat_if_squash` arm, which the SS borrow gated behind `!double_speed`.
+/// With the arm, the DS mode-0 squash window (`w=2`, Δ1-2) consumes the rise for
+/// the `_ds_2` rows while the `_ds_1` siblings (Δ3-4) survive. Both are
+/// SameBoy-PASS BUG rows (`classify_cgb_regr.py` → BUG). Reverting the DS arm
+/// makes this pin fail (the rise re-sets IF → got 2). Eager+CGB+DS scoped →
+/// production/tier2/single-speed byte-identical.
+#[test]
+fn eager_ds_write_conflict_commit_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_ds_write_conflict_commit",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    // The two DS FF0F ifw rows the arm recovers (want 0 = the rise squashed).
+    let rows = [
+        "gambatte/m2int_m0irq/m2int_m0irq_scx3_ifw_ds_2_cgb04c_out0.gbc",
+        "gambatte/m2int_m0irq/m2int_m0irq_scx4_ifw_ds_2_cgb04c_out0.gbc",
+    ];
+    for rel in rows {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_eager(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), "0", true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out0 (eager DS): {e}"));
+    }
+}
+
 /// The eager ack-squash port (#11de): a post-ack mode-0 STAT retrigger must
 /// stay CONSUMED by its dispatch's IF clear. The eager read-frame enters the
 /// STAT/OAM ISR the read-debt earlier than gambatte's cc+4 frame (+8hd = 4
