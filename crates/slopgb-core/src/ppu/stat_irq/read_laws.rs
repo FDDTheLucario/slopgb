@@ -229,7 +229,43 @@ impl Ppu {
                 return 0; // 153→0 wrap: cc+4 in line-0 dots 0-3 = DMG mode 0
             }
         }
-        let Some(exit_adj) = self.vis_exit_hd(m) else {
+        // HALFDOT Part A-render (#11cr): decouple the mode-3→0 verdict from the
+        // peek-time native mode where no length arm fires. The `vis_exit_hd`
+        // arms + arm-8 projection are already peek-independent for the reads
+        // that land a length arm (`projected_flip_dot` holds as the read dot
+        // advances — measured: `scx_m3_extend` `_1`@dot260 / `_2`@dot264 both
+        // project flip 267). The residual peek-dependence is the native-mode
+        // FALLBACK: when a window's `m == 3` length arm (arm 1 / arm-8) is the
+        // true exit but the read peek has crossed the native flip (native mode
+        // 0, `exit == None`) — e.g. `m2int_wx*_scx5_m3stat_ds` on the ISR read
+        // — the caller falls back to native 0, so the read reads 0 where SameBoy
+        // still reads the extended mode 3. Retry with a forced mode-3 view so the
+        // length arm fires; the `m == 0` HOLD arms (arm 2/7 boundary-WY, arm D6)
+        // already returned Some on the native-mode call, so they are untouched.
+        // Mode-3 regime (past entry, render active-or-just-flipped) on a visible
+        // non-glitch line; `eager_value` off (production + tier2) → never reached
+        // (byte-identical). Does NOT touch the counter-pinned dispatch or the
+        // `read_pos_hd` value — verdict-only. This subsumes the native-mode
+        // fallback for the off-arm window ISR reads (+2 EV CGB, 0 drops); the
+        // whole-dot render's flip STILL disagrees with the read-frame projection
+        // for extend/window lines (`flip_dot` 261 vs projection 267 on
+        // `scx_m3_extend`), so a dispatch move that straddles that gap is NOT
+        // held — that residual needs the half-dot render FSM (see #11cr map).
+        let exit = self.vis_exit_hd(m).or_else(|| {
+            if self.eager_value
+                && m == 0
+                && self.line >= 1
+                && self.line < 144
+                && !self.glitch_line
+                && self.dot >= 84
+                && (self.line_render_done || self.render.active)
+            {
+                self.vis_exit_hd(3)
+            } else {
+                None
+            }
+        });
+        let Some(exit_adj) = exit else {
             return m;
         };
         if self.read_pos_hd() < exit_adj { 3 } else { 0 }
