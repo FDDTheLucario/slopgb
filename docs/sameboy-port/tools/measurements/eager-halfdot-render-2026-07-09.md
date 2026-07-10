@@ -127,6 +127,13 @@ SLOPGB_ROWLIST=$(pwd)/scratchpad/cgb_rowlist.txt SLOPGB_PROBE_EV=1 SLOPGB_REQUIR
   refuted). tier2 CGB **291**. golden_fingerprint PASS. mooneye acceptance_ppu
   91/91 flag-off + `SLOPGB_MOONEYE_EAGER`. clippy `-D warnings` clean. All
   `.rs` < 1000 lines.
-- Flip bar: CGB SameBoy-PASS blockers **253 → 220** (−33: 27 write-strobe +
-  6 WY), 0 dropped (classified over the full EV fail list vs SameBoy 1.0.2 —
-  365 EV fails = 220 blockers + 145 floor). DMG unchanged (byte-identical EV).
+- **Flip bar (CORRECTED): CGB SameBoy-PASS blockers 70 → 53** (−17), 0 dropped.
+  The flip bar is `OFF-pass ∩ EV-fail ∩ SameBoy-pass` — only rows the flip would
+  NEWLY break. Re-measured at `1cc64db`: OFF 486 / EV 365 → **95 flip-BUGs** →
+  `classify_cgb_regr.py` → **BUG(must fix)=53, FLOOR(rebaseline-OK)=42, UNK=0**.
+  DMG unchanged (byte-identical EV): **55** blockers. Total real bar **108**.
+- The "253 → 220" figure first published here was **wrong as a flip bar**: it
+  classified SameBoy-PASS over the *whole* EV fail list, which folds in ~150
+  already-floored rows that production (OFF) ALSO fails. Those are not flip
+  drops — the flip never touches them (see the #11cc census, "the 428 EV
+  residuals are NOT the flip bar"). Always intersect with OFF-pass first.
