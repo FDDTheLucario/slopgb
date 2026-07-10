@@ -131,3 +131,61 @@ tier2 CGB two-bin **291**; OFF CGB **486** / DMG **103**; EV CGB **358** / EV DM
 `eager_halt_entry_m0_peek_passes_dmg`, both verified red-before-green.
 
 **TRUE flip bar: 49 CGB + 40 DMG = 89** (was 49 + 46 = 95).
+
+---
+
+## FOLLOW-UP RESOLVED (#11cw, same day): SameBoy PASSES `_3b`; the CGB residual is the WAKE instant, not the entry
+
+`sameboy_tester` rebuilt persistently at `~/.cache/sbbuild/SameBoy-1.0.2/build/bin/tester/`
+(user-authorised). Regression-checked against the known CGB flip bar first:
+reproduces **BUG=49 / FLOOR=42 / UNK=0** exactly — trustworthy.
+
+**Verdict on `late_m0int_halt_m0stat_scx3_3b` [Cgb], want out2: SameBoy PASSES
+(sb==want==2).** So the CGB peek's dropped row is a real SameBoy-PASS — the peek
+may NOT ship on CGB, and the `_3a`/`_3b` split is genuine.
+
+### The split is the WAKE instant, not the entry (traced, both clocks)
+
+`_3a` (want out0) and `_3b` (want out2) have **byte-identical halt-entry traces
+on every clock** — same dot, same `w`, same rewind:
+
+| | EV peek=4 entry | tier2 entry+re-entry | tier2 screen |
+|---|---|---|---|
+| `_3a` | dot 256 w=02 → rewind → 332 w=00 | dot 260 w=02 → 336 w=00 | `0` ✓ |
+| `_3b` | dot 256 w=02 → rewind → 332 w=00 | dot 260 w=02 → 336 w=00 | `2` ✓ |
+
+The peek arms the rewind for BOTH (entry `w=02` on both), giving `_3a`→0 (right)
+and `_3b`→0 (WRONG, want 2). tier2 arms the rewind for both too, yet lands
+`_3a`→0 and `_3b`→2. **The two ROMs diverge downstream of the entry — at the wake
+instant** (`halt_wake_mid_impl` / `stat_vis_from_t` / `mask_hidden_m0_stat`), the
+`Na`/`Nb` wake-clock discriminator that shares the read POSITION but separates on
+the wake INSTANT (per `halt_wake_mid_impl`'s own comment).
+
+### Two eager wake levers measured, both inert (do NOT re-chase)
+
+- **CGB peek window sweep** `SLOPGB_CGBPEEK` 1..4: every N≥1 recovers the same 3-5
+  rows and breaks the same one (`_3b`). Window size is not the discriminator.
+- **The CGB wake `carry_read(4)` re-fetch** (`halt_wake_impl`, tier2 `cgb_any`
+  arm): un-gating it to eager is **byte-identical** (0 rows). Eager's wake path
+  does not carry the deferred read-lag `carry_read` compensates.
+
+### Verdict
+
+CGB `_3b` needs the tier2 **wake-instant** model
+(`stat_vis_from_t`/`mask_hidden_m0_stat`), NOT the entry peek. That is #11cn's
+halt-wake family — which measured **0 rows on the pre-#11cv baseline**, but the
+entry was 4 dots wrong then, so the wake result is **stale and must be
+re-measured now that the entry is correct**. Until then the eager entry peek
+stays **DMG-scoped** as shipped (#11cv): CGB `_3a` is a real EV pass the peek
+would recover (+4), but not at the cost of `_3b`, a SameBoy-PASS row.
+
+**Bar unchanged: 49 CGB + 40 DMG = 89.** The CGB halt residual (5 rows) is
+re-classified from "entry-frame" to "wake-instant" — the #11cn re-measure is the
+next lever, not a new entry mechanism.
+
+### Infra fixed
+
+`sameboy_tester` now lives at `~/.cache/sbbuild/...` (persistent). The port docs
+(`PORT-PLAN.md:91`, `HALFDOT-BUILD-PLAN.md:148,384`) and both classifiers still
+hard-code `/tmp/sbbuild/...` — update them to the cache path or an env var so the
+next session does not hit the same wipe.
