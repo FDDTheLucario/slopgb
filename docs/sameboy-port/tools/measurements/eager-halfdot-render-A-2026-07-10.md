@@ -235,3 +235,82 @@ SLOPGB_ROWLIST=$PWD/scratchpad/cgb_rowlist.txt SLOPGB_PROBE_EV=1 SLOPGB_REQUIRE_
 #   projected_flip_dot / flip_dot / render flags. Run one-row rowlist + SLOPGB_S5DBG=1.
 # SameBoy: SB_TRACE=1 sameboy_tester --cgb --length 2 <rom> | grep 'SBMODE ly=1'
 ```
+
+---
+
+## REVIEWER'S CORRECTION (#11cs-rev, same day) — Step 4 does NOT refute the route
+
+The shipped slice above is verified independently and stands: EV CGB **361→359**,
+EV DMG 92 neutral, **0 SameBoy-pass drops**, golden byte-identical (41.7s, real
+run), tier2 CGB 291, mooneye 92 flag-off AND `SLOPGB_MOONEYE_EAGER`, wilbertpol
+`intr_0_timing` `B=03 C=05 D=08 E=0D H=15 L=22` under `SLOPGB_EAGER=1` on BOTH
+models, clippy clean, `read_laws.rs` 984 < 1000. Note the +2 recovered rows
+(`m2int_wx{03,07}_scx5_m3stat_ds_1`) are OFF-**fail** rows, i.e. flip GAINS —
+**the TRUE flip bar is unchanged at 49 CGB / 46 DMG** (91 flip-BUGs before and
+after). The slice is a clean gain, not a bar reduction.
+
+**But the Step-4 refutation is not established, on two independent grounds.**
+
+### 1. Step 2 was never built, so Step 4 could not test the hypothesis
+
+The hypothesis was: *with a FRAME-INDEPENDENT half-dot render length, 1a+1b
+converges.* Step 4 was run with the **whole-dot** render plus a verdict-only
+patch. §5 of this very map states the whole-dot `flip_dot` (261) and the
+read-frame `projected_flip_dot` (267) still **disagree by 6 dots**. The
+experiment therefore lacked exactly the property under test. "Step-1 + Step-4
+refuted the route" is circular: Step 4 cannot refute a route whose prerequisite
+it omits. The route is **untested**, not refuted.
+
+### 2. The `intr_2_mode0` argument proves too much
+
+The map argues: *1a genuinely moves the dispatch, `intr_2_mode0_timing` measures
+dispatch position, therefore it fails regardless of the length.*
+
+Production **also** sets `stat_late` on every lines-1-143 OAM pulse
+(`stat_events_tick`) — and production **passes** `intr_2_mode0_timing`. A
+late-visible OAM pulse is the CORRECT behaviour. Moving eager's pulse visibility
+to production's position, with everything else coherent, must therefore PASS.
+That it fails means eager+1a is still **incoherent elsewhere**, not that the
+move is wrong.
+
+The drop list names where. Of the 105:
+
+```
+oam_access 10 + vram_m3 7 + cgbpal_m3 9  = 26 ACCESSIBILITY rows
+m2int_m0irq 15 + m2int_m2irq 6           = 21 IRQ-DELIVERY rows
+```
+
+Neither class is a render length, and neither is touched by 1b. **1b removed
+exactly ONE of at least three cc+0 compensations** — the FF41 value debt in
+`read_pos_hd`. Still applied, and now compensating an error that 1a deleted:
+
+- `ppu/render/mode0.rs:280` — `access_lead` (`(tier2_reclock || eager_value) && !ds`),
+  the accessibility lead.
+- `ppu/blocking.rs:99,138,222,288` — the eager OAM/VRAM/palette blocking grid.
+- the STAT-IF delivery latches (the `m2int_m*irq` channel).
+
+This is #11cp's *correct-by-cancellation* restated with a sharper edge: the eager
+clock carries **a family of compensations**, not one. Remove the early-dispatch
+error (1a) and you must remove **every** compensation that was cancelling it —
+value, accessibility, delivery, render — not just the value. The map's own
+"FOUR independent channels" observation IS the finding; the inference "therefore
+un-holdable" does not follow from it. Under-scoped ≠ impossible.
+
+### What the map got right, and it is the most valuable result here
+
+**`flip_dot` (261) ≠ `projected_flip_dot` (267) on `scx_m3_extend`.** In SameBoy
+these are one event. The whole-dot render records a flip 6 dots away from the
+exit the read frame projects, and the seven shadow laws exist to paper over
+exactly that gap — which is why **0 of 7 die** against a whole-dot render. That
+is a precise, falsifiable defect and the correct target.
+
+### The corrected next step (unchanged in direction, corrected in scope)
+
+Build Step 2 **for real**: the half-dot render FSM, so `flip_dot ==
+projected_flip_dot ==` the true half-dot exit. Then (a) re-run the shadow-law
+subsumption — they should now start dying; (b) re-run the coupled landing
+removing **all** the compensations 1a deletes the need for, not only the value
+debt. Only a Step 4 run under those two conditions can refute the route.
+
+Do NOT inherit "Part A-render is necessary but insufficient" as a settled result.
+It is an untested conjecture resting on an experiment that omitted its premise.
