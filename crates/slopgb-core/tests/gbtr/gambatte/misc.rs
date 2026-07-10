@@ -731,3 +731,39 @@ fn tier2_glitch_hunt_carryover_passes() {
             .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
     }
 }
+
+/// The IME=1 halt-entry rewind on the EAGER clock (`halt_entry_rewind_impl`).
+///
+/// SameBoy's `halt()` (sm83_cpu.c:1043-1047) does not enter HALT when
+/// `IE & IF` is already nonzero at the entry view: it clears `halted` and
+/// decrements PC, so the dispatched ISR returns *into* the HALT and it
+/// re-executes with the IF bit consumed. slopgb's production path instead
+/// halts and wakes on the first idle check, which pushes the return address to
+/// halt+1 — the ISR skips the re-halt and the whole post-wake stream runs one
+/// halt round early.
+///
+/// The rewind was hosted on tier2 only; the eager clock ran the production
+/// (halted+wake) shape. `ifandie_ei_halt_sra` is the row that separates them:
+/// `EI; HALT` with `IE & IF` already set, so the entry view must rewind.
+/// Hardware behaviour, not a clock artifact — hence `tier2_reclock ||
+/// eager_value` rather than a new sub-flag. Production (both flags off) keeps
+/// the halted+wake shape and stays byte-identical.
+#[test]
+fn eager_halt_entry_rewind_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_halt_entry_rewind",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let rel = "gambatte/halt/ifandie_ei_halt_sra_dmg08_cgb04c_out0A.gbc";
+    let path = root.join(rel);
+    let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+    for model in [Model::Dmg, Model::Cgb] {
+        let mut gb = harness::boot_eager(&rom, model);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), "0A", model.is_cgb())
+            .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected out0A (eager): {e}"));
+    }
+}
