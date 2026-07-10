@@ -168,8 +168,14 @@ fn tier2_m2int_m3stat_ds_readpos_passes() {
     // 84): the DS mode-2 ISR pair straddles it at dots 80/82 (+2 carry →
     // 82/84, want 2/3); the entry is SCX-independent (`m2int_scx4_m2stat_ds`).
     for (rel, expect) in [
-        ("gambatte/m2int_m2stat/m2int_m2stat_ds_1_cgb04c_out2.gbc", "2"),
-        ("gambatte/m2int_m2stat/m2int_m2stat_ds_2_cgb04c_out3.gbc", "3"),
+        (
+            "gambatte/m2int_m2stat/m2int_m2stat_ds_1_cgb04c_out2.gbc",
+            "2",
+        ),
+        (
+            "gambatte/m2int_m2stat/m2int_m2stat_ds_2_cgb04c_out3.gbc",
+            "3",
+        ),
         (
             "gambatte/m2int_m2stat/m2int_scx4_m2stat_ds_2_cgb04c_out3.gbc",
             "3",
@@ -492,8 +498,14 @@ fn tier2_dmg_m3_render_scy_palette_passes() {
         return;
     };
     let targets = [
-        ("gambatte/dmgpalette_during_m3/dmgpalette_during_m3_1.gb", Model::Dmg),
-        ("gambatte/dmgpalette_during_m3/scx3/dmgpalette_during_m3_3.gb", Model::Dmg),
+        (
+            "gambatte/dmgpalette_during_m3/dmgpalette_during_m3_1.gb",
+            Model::Dmg,
+        ),
+        (
+            "gambatte/dmgpalette_during_m3/scx3/dmgpalette_during_m3_3.gb",
+            Model::Dmg,
+        ),
         ("gambatte/scy/scy_during_m3_1.gbc", Model::Dmg),
         ("gambatte/scy/scy_during_m3_1.gbc", Model::Cgb),
         ("gambatte/scy/scx3/scy_during_m3_5.gbc", Model::Dmg),
@@ -554,9 +566,18 @@ fn tier2_dmg_m3_render_scx_ds_passes() {
         return;
     };
     let targets = [
-        ("gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_5.gbc", Model::Cgb),
-        ("gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_8.gbc", Model::Cgb),
-        ("gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_5.gbc", Model::Cgb),
+        (
+            "gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_5.gbc",
+            Model::Cgb,
+        ),
+        (
+            "gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_8.gbc",
+            Model::Cgb,
+        ),
+        (
+            "gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_5.gbc",
+            Model::Cgb,
+        ),
     ];
     for (rel, model) in targets {
         assert_pixel_leg_flagon(&root, rel, model);
@@ -586,10 +607,22 @@ fn tier2_dmg_m3_render_bg_priority_passes() {
         return;
     };
     let targets = [
-        ("mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change.gb", Model::Cgb),
-        ("mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change2.gb", Model::Cgb),
-        ("gambatte/bgen/bgoff_bgon_sprite_below_window.gbc", Model::Cgb),
-        ("mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change.gb", Model::Cgb),
+        (
+            "mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change.gb",
+            Model::Cgb,
+        ),
+        (
+            "mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change2.gb",
+            Model::Cgb,
+        ),
+        (
+            "gambatte/bgen/bgoff_bgon_sprite_below_window.gbc",
+            Model::Cgb,
+        ),
+        (
+            "mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change.gb",
+            Model::Cgb,
+        ),
     ];
     for (rel, model) in targets {
         assert_pixel_leg_flagon(&root, rel, model);
@@ -624,10 +657,16 @@ fn tier2_dmg_m3_render_palette_halfdot_passes() {
     };
     let targets = [
         ("mealybug-tearoom-tests/ppu/m3_bgp_change.gb", Model::Dmg),
-        ("mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb", Model::Dmg),
+        (
+            "mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb",
+            Model::Dmg,
+        ),
         ("mealybug-tearoom-tests/ppu/m3_obp0_change.gb", Model::Dmg),
         ("mealybug-tearoom-tests/ppu/m3_window_timing.gb", Model::Dmg),
-        ("mealybug-tearoom-tests/ppu/m3_window_timing_wx_0.gb", Model::Dmg),
+        (
+            "mealybug-tearoom-tests/ppu/m3_window_timing_wx_0.gb",
+            Model::Dmg,
+        ),
     ];
     for (rel, model) in targets {
         assert_pixel_leg_flagon(&root, rel, model);
@@ -697,10 +736,16 @@ fn eager_dmg_m3_render_palette_passes() {
     };
     let targets = [
         ("mealybug-tearoom-tests/ppu/m3_bgp_change.gb", Model::Dmg),
-        ("mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb", Model::Dmg),
+        (
+            "mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb",
+            Model::Dmg,
+        ),
         ("mealybug-tearoom-tests/ppu/m3_obp0_change.gb", Model::Dmg),
         ("mealybug-tearoom-tests/ppu/m3_window_timing.gb", Model::Dmg),
-        ("mealybug-tearoom-tests/ppu/m3_window_timing_wx_0.gb", Model::Dmg),
+        (
+            "mealybug-tearoom-tests/ppu/m3_window_timing_wx_0.gb",
+            Model::Dmg,
+        ),
     ];
     for (rel, model) in targets {
         assert_pixel_leg_eager(&root, rel, model);
@@ -734,7 +779,10 @@ fn eager_dmg_m3_render_wx_passes() {
         ("mealybug-tearoom-tests/ppu/m3_wx_4_change.gb", Model::Dmg),
         ("mealybug-tearoom-tests/ppu/m3_wx_5_change.gb", Model::Dmg),
         ("mealybug-tearoom-tests/ppu/m3_wx_6_change.gb", Model::Dmg),
-        ("mealybug-tearoom-tests/ppu/m3_wx_4_change_sprites.gb", Model::Dmg),
+        (
+            "mealybug-tearoom-tests/ppu/m3_wx_4_change_sprites.gb",
+            Model::Dmg,
+        ),
     ];
     for (rel, model) in targets {
         assert_pixel_leg_eager(&root, rel, model);
@@ -842,5 +890,69 @@ fn tier2_sprite_m3stat_ds_passes() {
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), expect, true)
             .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (tier2 flag-on): {e}"));
+    }
+}
+
+/// CGB DOUBLE-SPEED accessibility RE-HOSTED onto the eager clock (#11da, L1).
+/// Under `eager_value` the OAM/VRAM/palette read still resolved against the
+/// production `m0_access_edge`/`pal_access_edge` whole-M-cycle straddle stamp,
+/// which is mis-framed at double speed (the eager mode-0 flip lands at the
+/// reclocked render dot). The DS line-end read releases (`254 + SCX&7`), the
+/// OAM-write release, and the palette-pipe-end unblock all already live in the
+/// ported `Ppu::{oam,vram,pal}_*_blocked` laws (`|| eager_value`-gated); the
+/// fix routes eager DS accessibility through them by taking the same stamp
+/// bypass `tier2_reclock` already takes (`Interconnect::ev_ds_access`,
+/// `interconnect/memory.rs`). EV CGB two-bin 358 → 353 (clean +5/−0). Single
+/// speed keeps the stamp; production + tier2-off byte-identical. The `_1`
+/// siblings are the regression guards (must stay blocked). The lcd-offset
+/// `preread_ds_lcdoffset1_1` accessibility row stays parked (the STOP-shift
+/// `lcd_shift_dots` frame is unported on the eager clock, #11bz).
+#[test]
+fn eager_ds_access_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_ds_access",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        // Recovered (SameBoy-pass, was EV-fail):
+        (
+            "gambatte/oam_access/postread_scx5_ds_2_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/oam_access/postwrite_scx1_ds_2_cgb04c_out1.gbc",
+            "1",
+        ),
+        ("gambatte/vram_m3/postread_scx5_ds_2_cgb04c_out0.gbc", "0"),
+        ("gambatte/cgbpal_m3/cgbpal_m3end_ds_2_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/cgbpal_m3/cgbpal_m3end_scx5_ds_2_cgb04c_out0.gbc",
+            "0",
+        ),
+        // Regression guards (the `_1` siblings must stay blocked):
+        (
+            "gambatte/oam_access/postread_scx5_ds_1_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/oam_access/postwrite_scx1_ds_1_cgb04c_out0.gbc",
+            "0",
+        ),
+        ("gambatte/vram_m3/postread_scx5_ds_1_cgb04c_out3.gbc", "3"),
+        ("gambatte/cgbpal_m3/cgbpal_m3end_ds_1_cgb04c_out7.gbc", "7"),
+        (
+            "gambatte/cgbpal_m3/cgbpal_m3end_scx5_ds_1_cgb04c_out7.gbc",
+            "7",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_eager(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (eager): {e}"));
     }
 }

@@ -3,6 +3,20 @@
 use super::*;
 
 impl Interconnect {
+    /// Eager-value double-speed accessibility bypass. Under `eager_value` the
+    /// production `m0_access_edge`/`pal_access_edge` whole-M-cycle stamp is
+    /// mis-framed at double speed (the eager mode-0 flip lands at the
+    /// reclocked render dot, not the production one), so a DS OAM/VRAM/palette
+    /// read resolves against a stale straddle stamp. Route DS accessibility
+    /// through the ported `Ppu::{oam,vram,pal}_*_blocked` laws instead — the
+    /// same bypass `tier2_reclock` already takes (the ported laws carry the DS
+    /// line-end / entry / palette-pipe boundaries, `|| eager_value`-gated).
+    /// Single speed keeps the stamp (it passes under eager); production +
+    /// tier2-off never set `eager_value` → byte-identical.
+    fn ev_ds_access(&self) -> bool {
+        self.eager_value && self.double_speed
+    }
+
     pub(super) fn wram_index(&self, addr: u16) -> usize {
         let offset = usize::from(addr & 0x1FFF);
         if offset < 0x1000 {
@@ -71,7 +85,9 @@ impl Interconnect {
                 // blocking, including the cc+2 MID-phase second-half
                 // unblock view (sub-dot event-phase model).
                 if self.ppu.oam_read_blocked()
-                    || (!self.tier2_reclock && stamp_blocks(self.m0_access_edge, ACCESS_PHASE))
+                    || (!self.tier2_reclock
+                        && !self.ev_ds_access()
+                        && stamp_blocks(self.m0_access_edge, ACCESS_PHASE))
                 {
                     0xFF
                 } else {
@@ -163,7 +179,7 @@ impl Interconnect {
             // mode-0 entry and its read-back interaction (gambatte
             // dma/hdma_start_*) is the HDMA-seam increment's job.
             0x8000..=0x9FFF
-                if (!self.tier2_reclock || self.ppu.vram_wr_recent())
+                if ((!self.tier2_reclock && !self.ev_ds_access()) || self.ppu.vram_wr_recent())
                     && stamp_blocks(self.m0_access_edge, ACCESS_PHASE)
                     && self.hdma_mode == HdmaMode::Disabled =>
             {
@@ -176,7 +192,10 @@ impl Interconnect {
                 // cc+2 MID-phase OAM read: a mode-3→mode-0 unblock landing
                 // in this M-cycle's second half is not yet visible here
                 // (sub-dot event-phase model).
-                if !self.tier2_reclock && stamp_blocks(self.m0_access_edge, ACCESS_PHASE) {
+                if !self.tier2_reclock
+                    && !self.ev_ds_access()
+                    && stamp_blocks(self.m0_access_edge, ACCESS_PHASE)
+                {
                     0xFF
                 } else {
                     self.ppu.read(addr)
@@ -245,7 +264,9 @@ impl Interconnect {
                 // CPU OAM writes are dropped while DMA owns OAM, and while
                 // the cc+2 MID view still reads mode 3 (sub-dot phase).
                 if self.dma_conflict.is_none()
-                    && (self.tier2_reclock || !stamp_blocks(self.m0_access_edge, ACCESS_PHASE))
+                    && (self.tier2_reclock
+                        || self.ev_ds_access()
+                        || !stamp_blocks(self.m0_access_edge, ACCESS_PHASE))
                 {
                     self.intf |= self.ppu.write(addr, value) & IF_MASK;
                 }
@@ -396,6 +417,7 @@ impl Interconnect {
             0xFF69 | 0xFF6B
                 if self.cgb_mode
                     && !self.tier2_reclock
+                    && !self.ev_ds_access()
                     && stamp_blocks(self.pal_access_edge, ACCESS_PHASE) =>
             {
                 0xFF
