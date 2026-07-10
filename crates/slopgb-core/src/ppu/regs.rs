@@ -34,6 +34,39 @@ impl Ppu {
         // dots at either speed, so there the hint comes from the live
         // `ds` flag instead).
         self.staged_ds = dots <= 1 || (self.tier2_reclock && self.ds);
+        // HALFDOT Part A-render (eager): the write strobe advances per half-dot
+        // under `eager_value` ([`Ppu::tick_half`]), so the staged commit debt is
+        // measured in 8-MHz half-dots — double the whole-dot offset. A run of
+        // aligned half-dots then still commits at the same whole dot as the
+        // whole-dot strobe (byte-identical on the aligned grid). Tier2 keeps the
+        // whole-dot strobe (1 per dot) → unchanged.
+        let dots = if self.eager_value {
+            // The eager write commit must land in the SAME cc+4 read frame the
+            // FF41/accessibility reads observe the mode-3 length in
+            // ([`Ppu::read_pos_hd`]'s +8hd SS / +4hd DS read-debt): the render
+            // latches (`wx_match_dot`/`win_predraw_abort_dot`/`scx_write_dot`/…)
+            // are recorded at the render dot (cc+0 frame), but the reads sample
+            // the length +debt later, so the un-shifted eager commit lands the
+            // mid-mode-3 register change `debt`-hd early of the read's view. Add
+            // the read-debt so the render-length pairs separate on the eager
+            // clock. Speed-dependent: DS is +4hd (its M-cycle is 2 dots).
+            // CGB-scoped: the DMG window/palette render-length laws (arm
+            // D1/D3/D6 fetch phase + the palette pop-grid) are calibrated one
+            // fetch-step ahead of CGB — a uniform +8hd there over-shifts 5
+            // SameBoy-PASS DMG rows (`late_enable_afterVblank`/`late_disable`/
+            // `late_scx_late_disable`). The DMG write-commit frame is a separate
+            // calibration (a later slice).
+            let debt = if !self.model.is_cgb() {
+                0
+            } else if self.ds {
+                4
+            } else {
+                8
+            };
+            (i32::from(dots) * 2 + debt + crate::probe::tune_wcommit(0)).clamp(0, 255) as u8
+        } else {
+            dots
+        };
         // One bus op per M-cycle: a previous stage has always expired or
         // been architecturally committed by now; flush defensively if not.
         if let Some(s) = self.staged.take() {
@@ -61,7 +94,10 @@ impl Ppu {
                 // above — their tier2 pins are calibrated to the cc+0 control
                 // commit. Production (and non-render / glitch lines) set the
                 // view in lockstep — byte-identical OFF.
-                if self.tier2_reclock && self.render.active && !self.glitch_line {
+                if (self.tier2_reclock || self.eager_value)
+                    && self.render.active
+                    && !self.glitch_line
+                {
                     self.render_lcdc_pending = Some((value, RENDER_LCDC_DELAY));
                 } else {
                     self.eff.render_lcdc = value;
@@ -91,7 +127,7 @@ impl Ppu {
                     // at the render frame (`m3_lcdc_win_en_change_multiple`: the
                     // eager clear ended it 2 dots early). Production / glitch lines
                     // (no `render_lcdc` defer) run it synchronously — byte-identical.
-                    if !self.tier2_reclock || self.glitch_line {
+                    if !(self.tier2_reclock || self.eager_value) || self.glitch_line {
                         self.window_abort_render();
                     }
                 }
@@ -122,7 +158,10 @@ impl Ppu {
             0xFF43 => {
                 // Flag a mid-mode-3 SCX rewrite (`late_scx_*`); see
                 // `Render::scx_write_dot`.
-                if self.render.active && self.tier2_reclock && (self.eff.scx & 7) != (value & 7) {
+                if self.render.active
+                    && (self.tier2_reclock || self.eager_value)
+                    && (self.eff.scx & 7) != (value & 7)
+                {
                     self.render.scx_write_dot = self.dot;
                 }
                 self.eff.scx = value;
@@ -246,7 +285,16 @@ impl Ppu {
         // write so they strobe-commit at the render frame instead of the
         // leading edge (see the dots calc in `cycle.rs::write_deferred`). LCDC
         // lands via the split `render_lcdc` view.
-        let staged_pending = self.tier2_reclock
+        // The eager render-frame debt ([`Ppu::stage_write`]) keeps the staged
+        // commit alive past the write's own `tick_machine` (its `dots_left`
+        // exceeds the M-cycle's half-dots), so — like tier2 at the leading edge
+        // — the stage is still present here and this survive-check holds, letting
+        // the debt-delayed strobe commit at the read frame instead of the
+        // redundant M-cycle-END (D+4) re-commit clobbering it. On the un-shifted
+        // DMG eager path (debt 0) the stage drains inside `tick_machine`, so this
+        // is false and the M-cycle-END commit still runs — byte-identical to the
+        // pre-slice DMG eager behaviour.
+        let staged_pending = (self.tier2_reclock || self.eager_value)
             && matches!(addr, 0xFF42 | 0xFF43 | 0xFF47..=0xFF49 | 0xFF4B)
             && !self.glitch_line
             && self
@@ -657,7 +705,7 @@ impl Ppu {
                 // un-catch read law (`tier2_window_late_wx_uncatch_passes`) is
                 // calibrated to the write's cc+0 dot, so its input stays here.
                 // The SPLIT: length/read-law input eager, render view deferred.
-                if self.render.active && self.tier2_reclock {
+                if self.render.active && (self.tier2_reclock || self.eager_value) {
                     self.render.wx_write_dot = self.dot;
                 }
                 self.wx = value;

@@ -250,6 +250,17 @@ impl Ppu {
     pub(crate) fn tick_half(&mut self) -> u8 {
         if self.dhalf == 0 {
             self.dhalf = 1;
+            // HALFDOT Part A-render (eager): advance the write STROBE on the
+            // non-completing half too, so a staged mid-mode-3 register commit
+            // lands at its true HALF-dot instead of only whole-dot boundaries.
+            // `stage_write` doubles `dots_left` under `eager_value` (the ×2
+            // grid conversion), so a run of aligned half-dots still commits at
+            // the same whole dot (byte-identical on the aligned grid); the seam
+            // is the per-register SameBoy half-dot offset. Tier2 keeps the
+            // whole-dot strobe (this half is inert with `eager_value` false).
+            if self.eager_value {
+                self.strobe_tick();
+            }
             return 0;
         }
         self.dhalf = 0;
