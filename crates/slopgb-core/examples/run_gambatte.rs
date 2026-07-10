@@ -91,7 +91,9 @@ fn main() {
         GameBoy::new_with_reclock(model, rom).expect("load rom")
     } else {
         let mut gb = GameBoy::new(model, rom).expect("load rom");
-        if std::env::var("SLOPGB_LE").is_ok() {
+        if std::env::var("SLOPGB_EAGER").is_ok() {
+            gb.set_eager_value(true);
+        } else if std::env::var("SLOPGB_LE").is_ok() {
             gb.set_leading_edge_reads(true);
         }
         gb

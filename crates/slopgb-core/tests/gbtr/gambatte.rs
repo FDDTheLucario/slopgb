@@ -534,6 +534,7 @@ const EXEMPT: &[&str] = &[
 // ---------------------------------------------------------------------------
 
 // ---- pinned-behavior tests relocated to child modules (pure code motion) ----
+mod eager_web;
 mod misc;
 mod oam_vram;
 mod stat_lyc;

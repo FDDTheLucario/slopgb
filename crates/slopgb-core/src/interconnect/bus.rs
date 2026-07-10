@@ -87,6 +87,32 @@ impl Bus for Interconnect {
             self.ppu.stage_write(addr, value, dots);
         }
         self.tick_machine();
+        // Eager write-conflict commit port (#11dd): a CGB single-speed
+        // WriteCpu-conflict engine write (FF41 STAT / FF0F IF / FF45 LYC)
+        // commits its engine-visible effect (`eng_stat`/`intf`/LYC compare) ONE
+        // T past the M-cycle boundary in SameBoy (`GB_CONFLICT_WRITE_CPU`), not
+        // at the boundary where the eager whole-M-cycle tick lands `write_no_tick`.
+        // At single speed 1 T = 1 dot, so borrow the next M-cycle's first PPU
+        // dot here — running this dot's engine tick (folding any co-instant STAT
+        // rise into `intf` FIRST) before the write commits — then the next
+        // `tick_machine` skips cc 1 to restore phase. This lands `write_no_tick`
+        // at the WriteCpu dot (D+1), exactly like the tier2 deferred path.
+        // `eager_value`-gated + CGB SS scoped → production/tier2/DMG byte-identical.
+        // Borrow only on the aligned whole-dot grid: an LCD-enable sub-dot
+        // offset (`lcd_shift_dots != 0`) shifts the CPU/PPU grid, where a
+        // whole-dot borrow mis-maps a co-instant STAT rise onto the wrong side
+        // of the write (`lycwirq_trigger_*_lcdoffset1_1`).
+        let borrow = self.eager_value
+            && self.model.is_cgb()
+            && !self.double_speed
+            && !self.ppu.lcd_shift_active()
+            && matches!(addr, 0xFF0F | 0xFF41 | 0xFF45);
+        if borrow {
+            let a = self.ppu.tick_half();
+            let b = self.ppu.tick_half();
+            self.fold_ppu_events(a | b, 1);
+            self.eager_wr_borrow = true;
+        }
         // Corruption first, then the (mode-blocked) write attempt — during
         // the scan the CPU byte never lands (oam_write_blocked).
         self.maybe_oam_bug(addr, OamBugKind::Write);
@@ -94,6 +120,13 @@ impl Bus for Interconnect {
         // Exception break: disabling the LCD outside vblank — sample the *old*
         // LCDC (`write_no_tick` commits the new one below).
         self.check_exc_lcd(addr, value);
+        // A bit1-clearing FF0F write consumes a STAT engine rise landing within
+        // the next 2 dots (the tier2 `write_deferred` twin); with the borrow
+        // above the commit now sits at the WriteCpu dot, so the same squash arm
+        // applies (`lycint152_lyc153irq_ifw_2`). Shares the borrow's scope.
+        if borrow && addr == 0xFF0F && value & 0x02 == 0 {
+            self.ppu.arm_ff0f_if_squash();
+        }
         self.write_no_tick(addr, value);
     }
 

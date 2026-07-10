@@ -217,6 +217,14 @@ pub struct Interconnect {
     disp_advance: bool, // SLOPGB_DISP_ADVANCE: + the corrupting machine-advance
     ff0f_le: bool,      // SLOPGB_FF0F_LE: FF0F cc+0 leading-edge read
 
+    /// A CGB single-speed WriteCpu-conflict engine write (FF41/FF0F/FF45) just
+    /// committed one PPU dot into the next M-cycle (SameBoy `GB_CONFLICT_
+    /// WRITE_CPU` lands the CPU value 1 T past the M-cycle boundary; #11dd). The
+    /// eager write borrowed that dot ahead of `write_no_tick`, so the next
+    /// `tick_machine` ticks 3 PPU dots (skip cc 1) to restore CPU/PPU phase.
+    /// Set only under `eager_value` → production/tier2 byte-identical.
+    eager_wr_borrow: bool,
+
     /// CGB hardware running a CGB-flagged cart. CGB hardware with a DMG
     /// cart runs in DMG compatibility mode: KEY1/SVBK/HDMA/RP/FF74 and the
     /// palette data ports are disabled (misc/boot_hwio-C).
@@ -541,6 +549,7 @@ impl Interconnect {
             coherent_dispatch: false,
             disp_advance: false,
             ff0f_le: false,
+            eager_wr_borrow: false,
             cgb_mode,
             double_speed: false,
             dot_phase: 0,

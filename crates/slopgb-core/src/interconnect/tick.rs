@@ -61,6 +61,14 @@ impl Interconnect {
         // `dot_phase` field docs).
         for cc in 1..=4u8 {
             if self.eager_value {
+                // Repay a WriteCpu-conflict engine write's borrowed dot: the
+                // previous `Bus::write` ticked cc-1's PPU dot ahead of its
+                // `write_no_tick` (SameBoy WriteCpu commits 1 T into the
+                // M-cycle), so skip it here to restore CPU/PPU phase (#11dd).
+                if cc == 1 && self.eager_wr_borrow {
+                    self.eager_wr_borrow = false;
+                    continue;
+                }
                 // HALFDOT Part A-infra (eager): advance the PPU per 8-MHz
                 // half-dot (2 per dot SS, 1 DS), folding on the dot-completing
                 // half — the SAME grain `advance_machine_t` runs on the tier2

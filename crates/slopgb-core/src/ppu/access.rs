@@ -191,6 +191,13 @@ impl Ppu {
         (self.line, self.dot)
     }
 
+    /// Whether the LCD-enable sub-dot offset is active (`lcd_shift_dots != 0`):
+    /// the CPU/PPU whole-dot grid is shifted, so a whole-dot write-commit
+    /// borrow (`#11dd`) does not map cleanly. Pure accessor.
+    pub(crate) fn lcd_shift_active(&self) -> bool {
+        self.lcd_shift_dots != 0
+    }
+
     /// Whether the PPU is on the LCD-enable glitch line (452 dots, dot-82
     /// pipe). The tier2 SCX write-strobe deferral keeps the
     /// production staging there — the glitch line's render geometry carries
