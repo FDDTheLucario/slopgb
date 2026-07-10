@@ -60,11 +60,19 @@ def dmg_want(rel):
     return None
 
 SBT = os.environ.get('SBT', '/tmp/sbbuild/SameBoy-1.0.2/build/bin/tester/sameboy_tester')
-# Override with SLOPGB_GBTR_ROOT when running outside the phase-b-s7 worktree.
+# Default to the collection in this checkout (this script lives in
+# docs/sameboy-port/tools/). The old default pointed at a throwaway worktree; once
+# that worktree was pruned every row silently classified as UNK, which reads as a
+# clean bar rather than as a measurement that never ran.
+_REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))))
 ROOT = os.environ.get(
     'SLOPGB_GBTR_ROOT',
-    '/home/soulcatcher/personal_repos/slopgb/.claude/worktrees/phase-b-s7/test-roms/game-boy-test-roms-v7.0',
+    os.path.join(_REPO, 'test-roms', 'game-boy-test-roms-v7.0'),
 )
+if not os.path.isdir(ROOT):
+    sys.exit(f"ROM collection not found at {ROOT} — set SLOPGB_GBTR_ROOT. "
+             "Classifying zero rows is a vacuous result, not a bar.")
 
 def main():
     rows = [l.split()[0] for l in open(sys.argv[1]) if l.strip() and not l.startswith('#')]
