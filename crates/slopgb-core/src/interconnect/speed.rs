@@ -467,9 +467,19 @@ impl Interconnect {
         // commits, so the vector fetch + first handler reads sample 2 dots
         // early. Only reached on the reclock path (`dispatch_reclock`), after
         // the low push parked 4 (`pending == 4 > 2`).
-        let before = self.clock.now();
-        let _ = self.clock.dispatch_vector_retime();
-        self.advance_machine_t(before, self.clock.now());
+        // EAGER EXPERIMENT (`coherent_dispatch`): under the eager clock the PPU
+        // is advanced by `tick_machine` (whole-M-cycle, inline), NOT by
+        // `advance_machine_t`; running the deferred machine drive here would
+        // DOUBLE-advance the PPU +2 dots per STAT dispatch (measured: EV CGB
+        // 365→611, intr_2-CGB B=42). Skip it on eager — the eager reads peek the
+        // PPU directly (not via `clock.now()`), so the −2 read-reframe the
+        // deferred retime buys is inert; only the post-push ack reorder +
+        // `read_carried` arm (below) remain.
+        if !self.eager_value || self.disp_advance {
+            let before = self.clock.now();
+            let _ = self.clock.dispatch_vector_retime();
+            self.advance_machine_t(before, self.clock.now());
+        }
         // If this dispatch is a DS OAM/HBlank STAT IRQ, arm the SCOPED
         // carried-read override for the handler's first FF41 read (cleared in
         // `read_deferred`). The override (`vis_mode_read`) shifts ONLY that

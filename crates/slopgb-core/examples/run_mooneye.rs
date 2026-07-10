@@ -68,6 +68,10 @@ fn main() -> ExitCode {
     // (implies leading-edge); SLOPGB_LE=1 enables leading-edge only.
     if std::env::var("SLOPGB_TIER2").is_ok() {
         gb.set_tier2_reclock(true);
+    } else if std::env::var("SLOPGB_EAGER").is_ok() {
+        // Eager-value clock (dispatch cc+4 + cc+0 value peeks); honours
+        // SLOPGB_COHERENT_DISP inside `set_eager_value`.
+        gb.set_eager_value(true);
     } else if std::env::var("SLOPGB_LE").is_ok() {
         gb.set_leading_edge_reads(true);
     }
@@ -88,8 +92,12 @@ fn main() -> ExitCode {
         );
         return ExitCode::from(0);
     }
+    // The 2016 wilbertpol fork signals completion with the undefined opcode
+    // 0xED (`debug_undefined_hit`), not `LD B,B` — set SLOPGB_WILBERT=1 to use
+    // that exit condition (still a Fibonacci verdict).
+    let wilbert = std::env::var("SLOPGB_WILBERT").is_ok();
     let mut timed_out = false;
-    while !gb.debug_breakpoint_hit() {
+    while !(gb.debug_breakpoint_hit() || (wilbert && gb.debug_undefined_hit())) {
         if gb.cycles() > TIMEOUT_TCYCLES {
             timed_out = true;
             break;

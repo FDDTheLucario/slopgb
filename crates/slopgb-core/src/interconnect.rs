@@ -208,6 +208,12 @@ pub struct Interconnect {
     #[allow(dead_code)]
     eager_value: bool,
 
+    /// EXPERIMENT probe flags (`eager-dispatch-retime-2026-07-09.md`); each true
+    /// only under `eager_value` + its env var, else byte-identical.
+    coherent_dispatch: bool, // SLOPGB_COHERENT_DISP: eager-native CGB −2 dispatch retime
+    disp_advance: bool,      // SLOPGB_DISP_ADVANCE: + the corrupting machine-advance
+    ff0f_le: bool,           // SLOPGB_FF0F_LE: FF0F cc+0 leading-edge read
+
     /// CGB hardware running a CGB-flagged cart. CGB hardware with a DMG
     /// cart runs in DMG compatibility mode: KEY1/SVBK/HDMA/RP/FF74 and the
     /// palette data ports are disabled (misc/boot_hwio-C).
@@ -529,6 +535,9 @@ impl Interconnect {
             leading_edge_reads: false,
             tier2_reclock: false,
             eager_value: false,
+            coherent_dispatch: false,
+            disp_advance: false,
+            ff0f_le: false,
             cgb_mode,
             double_speed: false,
             dot_phase: 0,
@@ -922,7 +931,10 @@ impl Bus for Interconnect {
     }
 
     fn dispatch_reclock(&self) -> bool {
-        self.tier2_reclock
+        // EXPERIMENT: the eager-native CGB −2 dispatch retime (the machine
+        // advance is skipped in `dispatch_retime_impl` under `eager_value` — see
+        // there). CGB-scoped so DMG dispatch stays cc+4 (intr_2 count-safe).
+        self.tier2_reclock || (self.coherent_dispatch && self.model.is_cgb())
     }
 
     fn dispatch_retime(&mut self) {

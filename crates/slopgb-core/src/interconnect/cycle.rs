@@ -19,6 +19,14 @@ impl Interconnect {
         }
         match addr {
             0xFF41 => Some(self.ppu.read(0xFF41)),
+            // EXPERIMENT (`eager-dispatch-retime-2026-07-09.md`, read-frame
+            // probe): the eager FF0F read trails at cc+4, where `tick_machine`
+            // has ALREADY folded this M-cycle's STAT rise into `intf` — so the
+            // dispatch-cluster ISR reads see the STAT bit a dot early (got E2
+            // want E0). Route FF0F through the cc+0 leading edge (the pre-tick
+            // `intf`) to test whether the "dispatch-coupled" rows are really a
+            // read-frame miss. Env-gated (`ff0f_le`) → byte-identical off.
+            0xFF0F if self.ff0f_le => Some(0xE0 | self.intf),
             _ => None,
         }
     }
@@ -131,6 +139,11 @@ impl Interconnect {
         self.eager_value = on;
         self.set_leading_edge_reads(on);
         self.ppu.set_eager_value(on);
+        // EXPERIMENT (`eager-dispatch-retime-2026-07-09.md`): each probe is
+        // armed only when eager is on AND its env flag is present.
+        self.coherent_dispatch = on && std::env::var_os("SLOPGB_COHERENT_DISP").is_some();
+        self.disp_advance = on && std::env::var_os("SLOPGB_DISP_ADVANCE").is_some();
+        self.ff0f_le = on && std::env::var_os("SLOPGB_FF0F_LE").is_some();
     }
 
     /// `(leading_edge_reads, tier2_reclock)` — read-only, for the golden-safe
