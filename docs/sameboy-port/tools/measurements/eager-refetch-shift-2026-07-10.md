@@ -179,3 +179,45 @@ EV CGB **358**, EV DMG **85**, tier2 CGB **291**. Bar unchanged **49 CGB + 40 DM
 89**. The 5 CGB halt bar rows stay pinned to the eager wake-clock port (sub-M-cycle
 wake instant), the sole surviving lever after the read-position vein joins the
 wake-mask and `carry_read` veins as exhausted.
+
+---
+
+## REVIEWER VERIFICATION (#11cz-rev): the mutual-exclusion is REAL — traced independently
+
+Dual-traced `scx2_3a` (want0) vs `scx3_3b` (want2) under tier2 and eager, own
+build:
+
+| | tier2 entry / re-entry / WAKE | tier2 screen | eager entry / WAKE | eager screen |
+|---|---|---|---|---|
+| `scx2_3a` want0 | ly1 256 / 332 / **ly2 dot256** | `0` ✓ | ly1 252 / **ly1 dot260** | `2` ✗ |
+| `scx3_3b` want2 | ly1 260 / 336 / **ly2 dot260** | `2` ✓ | ly1 256 / **ly1 dot260** | `2` |
+
+**Confirmed:** tier2 separates the two rows by a **4-dot gap at the wake instant**
+(ly2 dot 256 vs 260) — the SCX difference (2 vs 3) shifts the mode-0 rise, the
+entry, and the wake all by ~4 dots, and tier2's sub-M-cycle wake resolves it. The
+eager whole-M-cycle wake collapses BOTH to dot 260, so both read the same mode and
+emit the same digit. The read position (`read_pos_hd`) is identical for the two
+rows — the read-shift vein cannot possibly separate them; the discriminator is
+upstream, at the wake sample, at half-M-cycle resolution.
+
+The refutation stands and is a genuine #11cp-style wall for the wake frame. Three
+veins are now exhausted for the 5 CGB halt rows, all failing for the SAME reason
+(the discriminator is the sub-M-cycle wake instant eager quantizes away):
+1. wake-mask (`stat_vis_from_t`) — #11cy;
+2. read-position / `carry_read` / one-shot re-fetch flag — #11cz;
+3. entry peek alone — breaks the row (#11cw).
+
+**The ONLY remaining lever for the 5 CGB halt rows is the sub-M-cycle wake clock**
+— eager sampling the halt-wake at half-M-cycle (4-dot) resolution, the eager
+analogue of tier2's `halt_wake_mid_impl` 4k+2 sample. `Ppu::tick_half`/`dhalf`
+exist; the wake would key on the rise's within-M-cycle half. This is a
+HALFDOT-magnitude build (same class as the render FSM), now PROVEN necessary
+rather than conjectured — but for only 5 rows.
+
+**Recommendation (strategic):** the #11cs flip-bar composition shows two
+higher-yield levers untouched — L1 (CGB DS re-host, ~19 rows, mechanical
+`!self.ds` un-scope of already-proven slices) and L2 (DMG window/`late_wy`
+re-host, ~23 rows, the proven `|| eager_value` pattern). Both are re-host work
+against shipped mechanisms, not new physics. Prefer them over a HALFDOT-magnitude
+wake-clock build for 5 rows. The 5 CGB halt rows stay pinned to the sub-M-cycle
+wake clock as the last, most expensive slice before the C3 flip.
