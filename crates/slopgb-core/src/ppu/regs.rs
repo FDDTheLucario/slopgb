@@ -594,8 +594,12 @@ impl Ppu {
                 // triggered there → the window is sticky-active for every later
                 // line → set the cross-line latch. `late_wy_10to0/FFto0/FFto1`
                 // `_2` (commit ly1/ly2 dot0) extend; the `_3` siblings commit
-                // at dot 4 (past the head) → no trigger, bare.
-                if self.tier2_reclock
+                // at dot 4 (past the head) → no trigger, bare. Also enabled
+                // under `eager_value`: the eager arch commit lands at the
+                // M-cycle END (same head-dot window), pairing with the DMG
+                // read-frame WY laws already live under eager — L2 re-host of
+                // the #11ck CGB slice-2 cross-line latch to DMG.
+                if (self.tier2_reclock || self.eager_value)
                     && !self.model.is_cgb()
                     && self.enabled
                     && self.dot < 4
@@ -661,8 +665,11 @@ impl Ppu {
                 // `late_wy_1toFF_2`/`2toFF_2` (FF at dot 4 → bare) vs `_3`
                 // (FF at dot 8, past the compare → the window drew, extends).
                 // SS + DMG; the CGB path is the DS
-                // block above (`wy_latch`/`wy_trig_sb`).
-                if self.tier2_reclock
+                // block above (`wy_latch`/`wy_trig_sb`). Also enabled under
+                // `eager_value`: pairs with the DMG arm-D6 un-trigger read law
+                // already live under eager — L2 re-host of the DMG late-WY
+                // un-trigger latch.
+                if (self.tier2_reclock || self.eager_value)
                     && !self.model.is_cgb()
                     && !self.ds
                     && self.enabled

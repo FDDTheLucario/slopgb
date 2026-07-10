@@ -210,6 +210,61 @@ fn tier2_window_late_wy_untrigger_passes() {
     }
 }
 
+/// The DMG late-WY write-side latch pair RE-HOSTED onto the eager clock (L2,
+/// #11dc). The #11ck CGB slice-2 cross-line latch was CGB-scoped; the DMG
+/// read-frame WY laws (`vis_exit_hd` arms D6/D1/7) already run under
+/// `eager_value`, but the two DMG-scoped write-side latches in
+/// `regs.rs::write` (FF4A) stayed `tier2_reclock`-only: the HEAD-write
+/// cross-line EXTEND (`value + 1 == line` → `wy_xline_trig`, feeds arm 7) and
+/// the SS trigger-line UN-latch (`old_wy == ly && value != ly` →
+/// `wy_trig_sb_raw = false`, feeds arm D6). Extending both with
+/// `|| self.eager_value` recovers the `_2` boundary pairs: `10to0_ly1_2`,
+/// `FFto0_ly2_2`, `FFto1_ly2_2` EXTEND (out3), `1toFF_2`/`2toFF_2` UN-trigger
+/// (out0). EV DMG two-bin 83 → 78 (clean +5/−0, all 5 SameBoy-PASS TRUE-bar
+/// rows); CGB byte-identical. The `_1` siblings stay floored (their render
+/// never sets `wx_match_dot` under the eager whole-dot commit — the Part
+/// A-render frame, not the write-latch). Production byte-identical OFF
+/// (`tier2`/`eager` both off → the latch never fires).
+#[test]
+fn eager_dmg_late_wy_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_dmg_late_wy",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 5] = [
+        (
+            "gambatte/window/arg/late_wy_10to0_ly1_2_dmg08_out3_cgb04c_out0.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto0_ly2_2_dmg08_out3_cgb04c_out0.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto1_ly2_2_dmg08_out3_cgb04c_out0.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/arg/late_wy_1toFF_2_dmg08_out0_cgb04c_out3.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/arg/late_wy_2toFF_2_dmg08_out0_cgb04c_out3.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_eager(&rom, Model::Dmg);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, false)
+            .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (eager): {e}"));
+    }
+}
+
 /// The window visible-mode-3 LENGTH law (the FF41-read
 /// half of the atomic reclock). A triggering window's SameBoy mode-3→0 exit is
 /// `SBex = 263 + SCX&7` (cfl); the CPU-visible FF41 exit is `SBex − read_offset`.
