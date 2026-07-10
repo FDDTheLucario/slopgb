@@ -618,8 +618,10 @@ impl Ppu {
                 } else {
                     3
                 }
-            } else if self.tier2_reclock && !self.ds && self.model.is_cgb() {
-                // The Tier-2 SS glitch-line mode-0 IRQ
+            } else if ((self.tier2_reclock && self.model.is_cgb()) || self.eager_value)
+                && !self.ds
+            {
+                // The Tier-2 / EAGER SS glitch-line mode-0 IRQ
                 // dispatch reclock. The IRQ side keys on `line_render_done`
                 // (the dispatch dot, our dot 254 = SameBoy `cfl=257`), NOT on
                 // `vis_early` (dot 252) the way `vis_mode` does — exactly the
@@ -637,26 +639,23 @@ impl Ppu {
                 // still raises NO mode-0 (the LCD-enable glitch); mode 3
                 // holds for the IRQ until `line_render_done`, then mode 0.
                 //
-                // CGB ONLY — a genuine multi-mechanism atomic on DMG (the
-                // measured negative). On CGB the glitch
-                // `line_render_done` already lands at dot 254 (= SameBoy
-                // cfl=257), so keying the IRQ on it is exactly right and there
-                // is no DMG-style mode-0 halt pin on the glitch line to
-                // conflict. On DMG the glitch `line_render_done` lands at dot
-                // 252, and the SAME glitch-line mode-0 rise drives both the
-                // poll path (`enable_display/frame0_m0irq_count`, SameBoy
-                // renders 90 → wants the rise PAST the dot-252 poll) AND the
-                // halt-wake path (`gbmicrotest int_hblank_halt_scx*`, the
-                // 62,62,62,63,63,63,63,64 grid, calibrated at the dot-252
-                // frame): moving the DMG glitch dispatch +2 lands the poll but
-                // breaks int_hblank +1 (and vice-versa). SameBoy resolves both
-                // at its sub-T-cycle IF-raise phase (cfl=257 = a specific T
-                // within the M-cycle, seen by the mid-cycle halt sampler but not
-                // the leading-edge poll read); slopgb's whole-dot raise cannot
-                // place a single dot that satisfies both — so the DMG
-                // `frame0_m0irq_count` (a baselined floor; production renders
-                // 00) stays unfixed and DMG is byte-identical here. Gating to
-                // CGB keeps int_hblank green while landing the CGB poll rows.
+                // TIER-2 is CGB ONLY (a genuine multi-mechanism atomic on
+                // DMG's deferred frame): the tier2 deferred read/halt-wake share
+                // the dot-252 frame, so the SAME DMG glitch-line rise drives both
+                // the poll path (`frame0_m0irq_count`, wants the rise PAST the
+                // dot-252 poll) AND the halt-wake path (`int_hblank_halt_scx*`,
+                // the dot-252-calibrated grid) — moving the DMG dispatch +2 lands
+                // one and breaks the other, so tier2 stays CGB-scoped (DMG
+                // byte-identical there). Under the EAGER clock this conflict does
+                // NOT exist: the dispatch stays at cc+4 (production frame), the
+                // FF0F poll reads trail at cc+4 and the halt-wake sampler is
+                // un-moved, so keying the eager glitch-line IRQ on
+                // `line_render_done` fixes the glitch-line mode-0 poll
+                // (`intr_0_timing` PASS both models — the eager `vis_early`-keyed
+                // IRQ fired the line-0 mode-0 STAT 4 dots early, straddling the
+                // co-instant FF0F read) WITHOUT disturbing int_hblank_halt /
+                // hblank_int (all verified FF82=01 under eager). Hence the gate:
+                // `(tier2 && is_cgb) || eager_value` — eager covers BOTH models.
                 if self.dot < GLITCH_MODE3_START {
                     crate::stat_update::MODE_FOR_INTERRUPT_NONE
                 } else if self.line_render_done {
