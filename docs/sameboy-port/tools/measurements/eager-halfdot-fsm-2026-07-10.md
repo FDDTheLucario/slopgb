@@ -283,3 +283,72 @@ env-gated off and `probe!`-discarded); EV CGB **359** / EV DMG 92 (env unset);
 tier2 CGB 291; mooneye 92 flag-off; eager `intr_2_mode0` PASS B=03 both models
 (env unset). No `.rs` ≥ 1000 touched; no new deps; no `unsafe`. TRUE flip bar
 unchanged 49 CGB / 46 DMG.
+
+---
+
+## REVIEWER'S NOTE (#11cu, same day) — the halt class is NOT monolithic, and a lever was sitting in the tree
+
+Two things this map (and #11cq, and #11cr before it) missed.
+
+### 1. `halt_entry_rewind` was tier2-only. Hosting it on eager is a clean win.
+
+`interconnect/speed.rs::halt_entry_rewind_impl` early-returned `false` unless
+`tier2_reclock`. It implements SameBoy's `halt()` (sm83_cpu.c:1043-1047): when
+`IE & IF` is already nonzero at the entry view, HALT is **not** entered — PC
+rewinds so the dispatched ISR returns *into* the HALT. The call-site comment in
+`cpu/execute.rs:481-489` already said what its absence costs: *"the whole
+post-wake stream ran one halt round early (`late_m0int_halt_m0stat_*`)."*
+
+Gating it `tier2_reclock || eager_value` gives **EV CGB 359→358, EV DMG 92→91,
+zero SameBoy-pass drops**, all gates green (golden byte-identical, tier2 291,
+mooneye 92 on all three clocks, every eager tripwire `B=03` including
+`intr_2_mode0` and wilbertpol `intr_0_timing` on both models). Pinned by
+`eager_halt_entry_rewind_passes`, verified red-before-green. Shipped as #11cu.
+
+This is **hardware behaviour, not a clock artifact** — hence the `|| eager_value`
+re-host rather than a sub-flag. It moves no dispatch and changes no read frame.
+`pending_halt_entry`'s own tier2 gate skips the entry flush, so eager samples
+`pending()` unadvanced and never touches the #11cj double-advance.
+
+### 2. Therefore "the halt rows need a late dispatch" was never established
+
+Three maps (#11cp, #11cq, #11cr) treat the halt class as one problem solvable
+only by `stat_late`. It splits:
+
+- `ifandie_ei_halt_sra` — the **entry-rewind** row. Fixed by #11cu. No dispatch
+  move, no `stat_late`, no coupled landing.
+- `late_m0int_halt_m0stat_*` — still open. #11cq's Step-0 trace shows EV reaching
+  `op_halt` at ly1 dot **256**, one dot *before* the ly1 mode-0 STAT folds at
+  **257**, so `pending == 0` and no rewind fires. tier2 reaches `op_halt` at dot
+  **260** — *past* the fold — and rewinds. The 4-dot gap is the whole story.
+
+**The open lever this suggests** (untested, stated as a conjecture, not a
+result): `halt_entry_impl` flushes and re-samples at the HALT fetch M-cycle's
+`t0+4` under tier2 — SameBoy's own semantics, per that function's comment
+("SameBoy's `halt()` checks IE & IF *after* the prefetch `cycle_read` advanced
+the machine through the HALT fetch M-cycle (t0+4)"). The eager clock has no debt
+to flush, so it samples the entry view at **t0**, four dots early — the same
+four dots that separate 256 from 260. Reconstructing the `t0+4` **value** at the
+halt entry, without advancing the machine (the eager decomposition's own trick:
+mode VALUE at cc+4, render STATE at cc+0 — exactly `Ppu::boot_read` and
+`read_pos_hd`'s `+8hd` debt), would let the rewind fire on the
+`late_m0int_halt_m0stat_*` rows too. That is a **read-frame** fix at the halt
+entry, not a dispatch move — so it is not touched by the three dispatch
+refutations, nor by #11cn (which ported the *wake* masks, `stat_vis_from_t` /
+`m0_halt_hold`, not the entry view).
+
+### 3. Unresolved factual dispute — do not inherit either number
+
+This map says `flip_dot == projected_flip_dot == 267` in baseline across a
+939-row sweep, and that #11cr's `261` was a coupled-run artifact. #11cr says they
+disagree by 6 dots in baseline. **Both cannot be right and neither has been
+independently reproduced.** The disagreement is not load-bearing for #11cu, and
+is left open here deliberately rather than resolved by picking the more recent
+agent. Anyone reaching for the half-dot render FSM must re-measure this first,
+with their own probe, before believing either map.
+
+Note also that this map's central negative claim — that the FSM "is neither
+necessary nor sufficient" — rests on a Step-1 trace whose key number is exactly
+the disputed one, and, as its own honest caveat records, **the FSM was not
+built.** Its coupled-landing measurements (1a+1b reproduces 428; stripping the
+accessibility family recovers only 5 of 26) are separate, were run, and stand.
