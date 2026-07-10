@@ -88,7 +88,7 @@ The TDD task list (`/tdd-test-plan` output, this session) maps onto these:
 
 ## Tooling (rebuildable)
 
-SameBoy tester `/tmp/sbbuild/SameBoy-1.0.2/build/bin/tester/sameboy_tester`
+SameBoy tester `~/.cache/sbbuild/SameBoy-1.0.2/build/bin/tester/sameboy_tester`
 (`make tester`); gap-finder `/tmp/sb_gaps.py` + OCR `/tmp/sb_ocr.py`
 (gambatte-glyph) → `/tmp/sb_gap_list.txt`. Re-run after each stage; the gap
 count is the progress metric. Source maps: `cpu-timing-map.md`,

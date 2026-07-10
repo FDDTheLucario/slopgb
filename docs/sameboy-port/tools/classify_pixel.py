@@ -25,7 +25,14 @@ import struct, subprocess, os, sys, shutil, tempfile
 import numpy as np
 from PIL import Image
 
-SBT = os.environ.get('SBT', '/tmp/sbbuild/SameBoy-1.0.2/build/bin/tester/sameboy_tester')
+# Prefer the persistent cache build; fall back to the legacy /tmp path (wiped
+# between sessions). Override with SBT=... See build_sameboy_tracers.sh.
+_CACHE_SBT = os.path.expanduser('~/.cache/sbbuild/SameBoy-1.0.2/build/bin/tester/sameboy_tester')
+SBT = os.environ.get(
+    'SBT',
+    _CACHE_SBT if os.path.exists(_CACHE_SBT)
+    else '/tmp/sbbuild/SameBoy-1.0.2/build/bin/tester/sameboy_tester',
+)
 ROOT = os.environ.get(
     'SLOPGB_GBTR_ROOT',
     '/home/soulcatcher/personal_repos/slopgb/.claude/worktrees/phase-b-s7/test-roms/game-boy-test-roms-v7.0',

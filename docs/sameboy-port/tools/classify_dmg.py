@@ -59,7 +59,14 @@ def dmg_want(rel):
         return m.group(1).upper()
     return None
 
-SBT = os.environ.get('SBT', '/tmp/sbbuild/SameBoy-1.0.2/build/bin/tester/sameboy_tester')
+# Prefer the persistent cache build; fall back to the legacy /tmp path (wiped
+# between sessions). Override with SBT=... See build_sameboy_tracers.sh.
+_CACHE_SBT = os.path.expanduser('~/.cache/sbbuild/SameBoy-1.0.2/build/bin/tester/sameboy_tester')
+SBT = os.environ.get(
+    'SBT',
+    _CACHE_SBT if os.path.exists(_CACHE_SBT)
+    else '/tmp/sbbuild/SameBoy-1.0.2/build/bin/tester/sameboy_tester',
+)
 # Default to the collection in this checkout (this script lives in
 # docs/sameboy-port/tools/). The old default pointed at a throwaway worktree; once
 # that worktree was pruned every row silently classified as UNK, which reads as a

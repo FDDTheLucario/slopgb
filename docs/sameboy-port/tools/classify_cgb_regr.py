@@ -23,7 +23,18 @@ def ocr(p,n):
             if rows==g: ch=c; break
         out+=ch
     return out
-SBT='/tmp/sbbuild/SameBoy-1.0.2/build/bin/tester/sameboy_tester'
+# Prefer the persistent cache build; fall back to the legacy /tmp path (wiped
+# between sessions). Override with SBT=... See build_sameboy_tracers.sh.
+def _sbt():
+    if os.environ.get('SBT'):
+        return os.environ['SBT']
+    cache = os.path.expanduser('~/.cache/sbbuild/SameBoy-1.0.2/build/bin/tester/sameboy_tester')
+    tmp = '/tmp/sbbuild/SameBoy-1.0.2/build/bin/tester/sameboy_tester'
+    return cache if os.path.exists(cache) else tmp
+SBT=_sbt()
+if not os.path.exists(SBT):
+    sys.exit(f"sameboy_tester not found at {SBT} — run build_sameboy_tracers.sh or set SBT=. "
+             "Classifying with a missing tester is a vacuous result, not a bar.")
 ROOT='/home/soulcatcher/personal_repos/slopgb/test-roms/game-boy-test-roms-v7.0'
 rows=[l.strip() for l in open(sys.argv[1]) if l.strip()]
 bug=[];floor=[];unk=[]

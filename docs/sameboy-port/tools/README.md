@@ -19,7 +19,7 @@ SameBoy normally traps doesn't freeze the run.
 ### Build + run
 
 ```sh
-cd /tmp/sbbuild/SameBoy-1.0.2          # SameBoy 1.0.2 source + `make tester` build
+cd ~/.cache/sbbuild/SameBoy-1.0.2          # SameBoy 1.0.2 source + `make tester` build
 cp <repo>/docs/sameboy-port/tools/hramdump.c .
 clang -I. -std=gnu11 -D_GNU_SOURCE -DGB_VERSION='"1.0.2"' -DGB_COPYRIGHT_YEAR='"2025"' \
       -D_USE_MATH_DEFINES -fPIC -O2 -Wno-deprecated-declarations \

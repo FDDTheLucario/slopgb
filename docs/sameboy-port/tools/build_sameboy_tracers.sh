@@ -20,10 +20,14 @@
 # `measurements/c2-absclock-cotemporal-refuted-2026-07-01.md`).
 #
 # Usage:  docs/sameboy-port/tools/build_sameboy_tracers.sh
-# Output: /tmp/sbbuild/SameBoy-1.0.2/build/bin/tester/sameboy_tester
+# Output: $SBBUILD/SameBoy-1.0.2/build/bin/tester/sameboy_tester
+#         (persistent cache by default; override SBBUILD=. The old /tmp/sbbuild
+#          location was wiped between sessions — the whole classify protocol
+#          depends on this binary, so it must survive.)
 set -euo pipefail
 SRCTGZ="$HOME/.cache/yay/sameboy/sameboy-1.0.2.tar.gz"
-DIR=/tmp/sbbuild/SameBoy-1.0.2
+SBBUILD="${SBBUILD:-$HOME/.cache/sbbuild}"
+DIR="$SBBUILD/SameBoy-1.0.2"
 TESTER="$DIR/build/bin/tester/sameboy_tester"
 
 # Guard keys on the #11ay `fp=` field, not just SBMODE, so a tree patched with
@@ -46,7 +50,7 @@ if [ -x "$TESTER" ] && grep -q 'SBMODE ly=%d cfl=%d dc=%d vis=%d fp=' "$DIR/Core
 fi
 
 [ -f "$SRCTGZ" ] || { echo "MISSING $SRCTGZ — adjust path"; exit 1; }
-mkdir -p /tmp/sbbuild && cd /tmp/sbbuild
+mkdir -p "$SBBUILD" && cd "$SBBUILD"
 [ -d "$DIR/Core" ] || tar xzf "$SRCTGZ"
 
 python3 - "$DIR" <<'PY'

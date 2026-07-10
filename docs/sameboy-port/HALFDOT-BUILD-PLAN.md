@@ -145,7 +145,7 @@ every measurement (NEVER `cfl*2+dc`, which is non-monotonic — #11ay).
 
 ## 1. The SameBoy per-tick order (the spec being ported)
 
-Citations `file:line` against `/tmp/sbbuild/SameBoy-1.0.2/Core/`.
+Citations `file:line` against `~/.cache/sbbuild/SameBoy-1.0.2/Core/`.
 
 **Two clocks, one divisor.** `GB_advance_cycles` (timing.c:432) normalises CPU
 T-cycles to an 8 MHz budget: single speed `cycles <<= 1` (timing.c:478–480) so
@@ -381,7 +381,7 @@ SameBoy-pass; NEVER move the dispatch dot; production byte-identical OFF.
 
 - SameBoy tester + `fp`-emitting tracers:
   `tools/build_sameboy_tracers.sh` (idempotent, survives `/tmp` wipe) →
-  `/tmp/sbbuild/SameBoy-1.0.2/build/bin/tester/sameboy_tester` (`--cgb --length
+  `~/.cache/sbbuild/SameBoy-1.0.2/build/bin/tester/sameboy_tester` (`--cgb --length
   4`, `SB_TRACE=1`; SBMODE/SBREAD/SBPALR/SBWSCX emit `fp=`).
 - Two-bin: `flagon_probe` (`crates/slopgb-core/tests/gbtr/gambatte_flagon_probe.rs`,
   `#[ignore]`) with `SLOPGB_ROWLIST` (3422 CGB rows), `SLOPGB_PROBE_OFF=1` for the
