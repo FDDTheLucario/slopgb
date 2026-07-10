@@ -33,6 +33,10 @@ pub(crate) struct Session {
     /// model switch (`set_model`) re-runs the boot ROM (logo + chime) like bgb,
     /// instead of silently replaying the post-boot state.
     boot: OwnedBootSpec,
+    /// Optional user-supplied SGB BIOS bytes (`--sgb-bios`/`SLOPGB_SGB_BIOS`),
+    /// kept so a power-cycle / model switch re-applies it to the fresh machine
+    /// (firmware persists across a reset). `None` = no BIOS. A no-op off SGB.
+    sgb_bios: Option<Vec<u8>>,
 }
 
 impl Session {
@@ -57,6 +61,7 @@ impl Session {
             next_autosave: AUTOSAVE_CYCLES,
             quick_state: None,
             boot: OwnedBootSpec::default(),
+            sgb_bios: None,
         }
     }
 
@@ -106,7 +111,23 @@ impl Session {
             next_autosave: AUTOSAVE_CYCLES,
             quick_state: None,
             boot: boot.to_owned(),
+            sgb_bios: None,
         })
+    }
+
+    /// Install the optional user-supplied SGB BIOS (`--sgb-bios`) and keep it so
+    /// a later `reset`/`set_model` re-applies it. A no-op off SGB. The border
+    /// and title palette are not extracted (HLE) — see `GameBoy::load_sgb_bios`.
+    pub(crate) fn set_sgb_bios(&mut self, bios: Option<Vec<u8>>) {
+        self.sgb_bios = bios;
+        self.apply_sgb_bios();
+    }
+
+    /// Re-apply the kept SGB BIOS to the current (freshly built) machine.
+    fn apply_sgb_bios(&mut self) {
+        if let Some(bios) = &self.sgb_bios {
+            self.gb.load_sgb_bios(bios);
+        }
     }
 
     /// Quick Save (bgb State → Quick Save): snapshot the whole machine into
@@ -162,6 +183,7 @@ impl Session {
                     let _ = gb.load_save_data(&data); // rejection already warned at load
                 }
                 self.gb = gb;
+                self.apply_sgb_bios();
                 self.next_autosave = AUTOSAVE_CYCLES;
             }
             // Can't happen (the same image loaded before), but never panic.
@@ -187,6 +209,7 @@ impl Session {
                 }
                 self.gb = gb;
                 self.model = model;
+                self.apply_sgb_bios();
                 self.next_autosave = AUTOSAVE_CYCLES;
                 self.quick_state = None; // a different machine — old snapshot is stale
                 true

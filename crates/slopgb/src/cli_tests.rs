@@ -59,6 +59,16 @@ fn parse_boot_path_and_default() {
 }
 
 #[test]
+fn parse_sgb_bios_path_and_default() {
+    // `--sgb-bios <path>` records the SGB BIOS image; absent, it defaults to None.
+    let opts = parse_run(&["--sgb-bios", "/roms/sgb.bin", "game.gb"]).unwrap();
+    assert_eq!(opts.sgb_bios, Some(PathBuf::from("/roms/sgb.bin")));
+    assert_eq!(parse_run(&["game.gb"]).unwrap().sgb_bios, None);
+    // A missing value is an error (like --boot).
+    assert!(parse(&["--sgb-bios"]).is_err());
+}
+
+#[test]
 fn parse_help_returns_outcome_instead_of_exiting() {
     assert!(matches!(parse(&["-h"]), Ok(ParseOutcome::Help)));
     assert!(matches!(parse(&["--help"]), Ok(ParseOutcome::Help)));
