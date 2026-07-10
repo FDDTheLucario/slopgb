@@ -407,17 +407,19 @@ impl Interconnect {
             // the M-cycle end (whole-M-cycle block, see `pal_access_edge` /
             // [`event_phase`]), so the read stays $FF for the entire straddle
             // M-cycle and becomes readable only next M-cycle (sub-dot
-            // event-phase model). tier2 BYPASSES the stamp:
-            // the deferred (cc+0) read is resolved to its exact half-dot
-            // BEFORE sampling, so the straddle-M-cycle approximation would
-            // re-block a read landing legitimately past the unblock (the
-            // `cgbpal_m3end_scx*_2` SameBoy-passes); the deferred frame's
-            // trailing unblock lives in `Ppu::pal_ram_blocked` instead
-            // (`pal_open_dot` + 1 dot SS / + 0 DS).
+            // event-phase model). tier2 AND the eager clock BYPASS the stamp
+            // (`!self.eager_value` covers both speeds — SS eager `_2` reads
+            // `cgbpal_m3end_scx{2,3,5}_2` land past the pipe end where the whole-
+            // M-cycle stamp still blocks, and the DS `ev_ds_access` cases are a
+            // subset of `eager_value`): the reclocked (cc+0) read is resolved to
+            // its exact half-dot BEFORE sampling, so the straddle-M-cycle
+            // approximation would re-block a read landing legitimately past the
+            // unblock; the reclocked frame's trailing unblock lives in
+            // `Ppu::pal_ram_blocked` instead (`pal_open_dot` + 1 dot SS / + 0 DS).
             0xFF69 | 0xFF6B
                 if self.cgb_mode
                     && !self.tier2_reclock
-                    && !self.ev_ds_access()
+                    && !self.eager_value
                     && stamp_blocks(self.pal_access_edge, ACCESS_PHASE) =>
             {
                 0xFF

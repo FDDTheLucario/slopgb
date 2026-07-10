@@ -208,8 +208,15 @@ impl Ppu {
         let late = if self.model.is_cgb() { 3 } else { 0 };
         // Shifted ROMs classify the lock on the un-shifted frame
         // (`vram_m3/preread_lcdoffset1_1` reads dot83 after the +1-dot machine
-        // advance where SameBoy still reads open; identity otherwise).
-        let d = if self.tier2_reclock { self.law_pos().1 } else { self.dot };
+        // advance where SameBoy still reads open; identity otherwise). The eager
+        // clock takes the same STOP-shift frame as tier2 (and as `pal_ram_blocked`
+        // already does): measured `preread_lcdoffset1_1` law-dot82 opens where the
+        // raw dot83 blocked, `_2` law-dot86 stays blocked — a clean separation.
+        let d = if self.tier2_reclock || self.eager_value {
+            self.law_pos().1
+        } else {
+            self.dot
+        };
         // The DS tier2 VRAM read frame: (a) the deferred cc+0
         // read's true DS sample sits +3 T late, so the mode-3 entry lock
         // covers it from dot 80 (the SS +3 CGB grace does not apply on the

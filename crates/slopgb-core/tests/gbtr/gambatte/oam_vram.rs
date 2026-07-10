@@ -956,3 +956,52 @@ fn eager_ds_access_passes() {
             .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (eager): {e}"));
     }
 }
+
+/// The eager-clock CGB SINGLE-SPEED accessibility residual: the palette
+/// whole-M-cycle stamp bypass + the STOP-shift law-frame, both #11da-style clean
+/// re-hosts. Traced (`postread_scx3_2` @dot256, `preread_lcdoffset1_1` @dot83):
+///
+/// * **Palette** — the CGB `pal_access_edge` stamp is a WHOLE-M-cycle block that
+///   `access_lead` does not disarm; SS eager kept it while `tier2`/DS bypass it,
+///   re-blocking `cgbpal_m3end_scx{2,3,5}_2` reads that land past the pipe end
+///   where `Ppu::pal_ram_blocked` (already `|| eager_value`-gated) reads open.
+///   Fix: extend the `interconnect/memory.rs` FF69/FF6B bypass to all
+///   `eager_value` (`!self.eager_value` supersedes `!self.ev_ds_access()`).
+/// * **STOP-shift** — `Ppu::vram_read_blocked`'s law position used the raw
+///   `self.dot` under eager, not the `law_pos()` STOP-shift frame `tier2` and
+///   `pal_ram_blocked` already take, so `preread_lcdoffset1_1`'s law-dot82 read
+///   blocked (raw dot83 ≥ 83). Fix: `d = law_pos().1` under `tier2 || eager`.
+///
+/// EV CGB two-bin 323 → 318 (clean +5/−0, DMG 74 unchanged). The `_1`/`_2`
+/// siblings separate WHOLE-DOT (`preread_lcdoffset1_2` law-dot86 stays blocked;
+/// the palette `_1` entry reads stay blocked), so no render-length move is
+/// needed — NOT the `vis_early` flip-dot family (whose eager `early_lead` is
+/// mis-framed on scx0/scx5, #11dg map). Production + tier2-off byte-identical.
+#[test]
+fn eager_ss_access_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr("eager_ss_access", "game-boy-test-roms collection not present");
+        return;
+    };
+    let targets = [
+        // Recovered (SameBoy-pass, was EV-fail):
+        ("gambatte/cgbpal_m3/cgbpal_m3end_scx2_2_cgb04c_out0.gbc", "0"),
+        ("gambatte/cgbpal_m3/cgbpal_m3end_scx3_2_cgb04c_out0.gbc", "0"),
+        ("gambatte/cgbpal_m3/cgbpal_m3end_scx5_2_cgb04c_out0.gbc", "0"),
+        ("gambatte/vram_m3/preread_lcdoffset1_1_cgb04c_out0.gbc", "0"),
+        ("gambatte/vram_m3/preread_ds_lcdoffset1_1_cgb04c_out0.gbc", "0"),
+        // Regression guards (the `_1`/`_2` siblings must keep their verdict):
+        ("gambatte/cgbpal_m3/cgbpal_m3end_scx2_1_cgb04c_out7.gbc", "7"),
+        ("gambatte/cgbpal_m3/cgbpal_m3end_scx3_1_cgb04c_out7.gbc", "7"),
+        ("gambatte/cgbpal_m3/cgbpal_m3end_scx5_1_cgb04c_out7.gbc", "7"),
+        ("gambatte/vram_m3/preread_lcdoffset1_2_cgb04c_out3.gbc", "3"),
+        ("gambatte/vram_m3/preread_ds_lcdoffset1_2_cgb04c_out3.gbc", "3"),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_eager(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (eager): {e}"));
+    }
+}
