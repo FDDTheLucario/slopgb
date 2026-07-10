@@ -57,7 +57,28 @@ impl Ppu {
             // `late_scx_late_disable`). The DMG write-commit frame is a separate
             // calibration (a later slice).
             let debt = if !self.model.is_cgb() {
-                0
+                // DMG: the PURE-render registers (SCY FF42 / palette FF47-49 — no
+                // mode-3-length or FF41-read-law coupling; their read laws sample
+                // ARCH `self.scy`/`self.bgp`, and `commit_eff` records no read-law
+                // input for them) take the SAME render-frame debt as CGB, so their
+                // mid-mode-3 commit lands at the tier2 render position instead of
+                // ~4 dots (8hd SS) early — the eager stage starts at cc+0 while the
+                // tier2 stage starts at the cc+4 leading edge (`write_deferred`
+                // advances the machine first). The length-coupled registers
+                // (FF40 LCDC / FF43 SCX / FF4B WX) stay at ZERO debt: a debt there
+                // shifts the FF41 mode-3-length OCR read verdict and breaks the DMG
+                // gambatte set (`late_enable_afterVblank`, #11ck). Render-only →
+                // EV DMG unchanged; recovers the mealybug m3_bgp/obp/scy pixel rows
+                // the flip regressed.
+                if matches!(addr, 0xFF42 | 0xFF47..=0xFF49) {
+                    if self.ds {
+                        4
+                    } else {
+                        8
+                    }
+                } else {
+                    0
+                }
             } else if self.ds {
                 4
             } else {

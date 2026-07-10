@@ -29,6 +29,16 @@ pub fn boot_with_reclock(rom: &[u8], model: Model) -> GameBoy {
         .unwrap_or_else(|e| panic!("cartridge rejected ({model:?}): {e:?}"))
 }
 
+/// Boot with the EAGER-VALUE reclock (the DMG-count-safe eager clock + tier2
+/// read/render laws as cc+0 value peeks, dispatch staying cc+4 — the C3-flip
+/// target). The pin form of the `SLOPGB_PROBE_EV` two-bin, for the eager
+/// render-reclock pins.
+pub fn boot_eager(rom: &[u8], model: Model) -> GameBoy {
+    let mut gb = boot(rom, model);
+    gb.set_eager_value(true);
+    gb
+}
+
 /// Step until `pred` is true, or `Err` after `timeout_tcycles` more T-cycles.
 /// `pred` is checked every instruction.
 pub fn run_until(

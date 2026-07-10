@@ -575,9 +575,28 @@ fn gambatte_matrix() {
 /// the suite's own comparator — the pin form of the `gambatte_pixel_probe`
 /// two-bin. Panics with the frame diff on mismatch (render-reclock pins).
 fn assert_pixel_leg_flagon(root: &Path, rel: &str, model: Model) {
+    assert_pixel_leg(root, rel, model, harness::boot_with_reclock, "tier2 flag-on");
+}
+
+/// The eager-clock (`eager_value`) analogue of [`assert_pixel_leg_flagon`] — the
+/// pin form of the `SLOPGB_PROBE_EV` two-bin for the eager render-reclock rows
+/// re-hosted from the tier2 render laws onto the C3-flip target clock.
+fn assert_pixel_leg_eager(root: &Path, rel: &str, model: Model) {
+    assert_pixel_leg(root, rel, model, harness::boot_eager, "eager");
+}
+
+/// Shared body of the render-reclock pixel pins: boot via `boot`, render the
+/// suite's evaluated frame, and assert it matches the sibling reference PNG.
+fn assert_pixel_leg(
+    root: &Path,
+    rel: &str,
+    model: Model,
+    boot: fn(&[u8], Model) -> GameBoy,
+    clock: &str,
+) {
     let path = root.join(rel);
     let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-    let mut gb = harness::boot_with_reclock(&rom, model);
+    let mut gb = boot(&rom, model);
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let (png, map) = if rel.starts_with("mealybug-tearoom-tests/") {
         // Mealybug protocol: run to LD B,B then one settled frame; Identity map.
@@ -610,7 +629,7 @@ fn assert_pixel_leg_flagon(root: &Path, rel: &str, model: Model) {
         )
     };
     harness::expect_frame_png(&gb, &png, map)
-        .unwrap_or_else(|e| panic!("{rel} [{model:?}] tier2 flag-on render: {e}"));
+        .unwrap_or_else(|e| panic!("{rel} [{model:?}] {clock} render: {e}"));
 }
 
 /// Self-verifying inventory: claimed ∩ exempted = ∅ and claimed ∪ exempted
