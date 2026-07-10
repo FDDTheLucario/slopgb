@@ -47,11 +47,11 @@ fn pixel_mealybug_ref(stem: &str, model: Model) -> Option<String> {
 
 /// Render one pixel leg flag-on (or off) and compare its frame to the
 /// reference PNG. `Ok(())` = the leg renders correctly.
-fn pixel_run_leg(rom: &[u8], model: Model, path: &std::path::Path, rel: &str, off: bool) -> Result<(), String> {
-    let mut gb = if off {
-        harness::boot(rom, model)
-    } else {
-        harness::boot_with_reclock(rom, model)
+fn pixel_run_leg(rom: &[u8], model: Model, path: &std::path::Path, rel: &str, mode: PixelMode) -> Result<(), String> {
+    let mut gb = match mode {
+        PixelMode::Off => harness::boot(rom, model),
+        PixelMode::Reclock => harness::boot_with_reclock(rom, model),
+        PixelMode::Eager => harness::boot_eager(rom, model),
     };
     if rel.starts_with("mealybug-tearoom-tests/") {
         // Mealybug protocol: run to LD B,B, then one more frame to the stable
@@ -99,7 +99,13 @@ fn pixel_probe() {
     let Some(root) = common::gbtr_root() else {
         panic!("game-boy-test-roms collection not present");
     };
-    let off = std::env::var("SLOPGB_PROBE_OFF").is_ok();
+    let mode = if std::env::var("SLOPGB_PROBE_OFF").is_ok() {
+        PixelMode::Off
+    } else if std::env::var("SLOPGB_PROBE_EV").is_ok() {
+        PixelMode::Eager
+    } else {
+        PixelMode::Reclock
+    };
     let body = std::fs::read_to_string(&list_path).expect("read rowlist");
 
     let (mut pass, mut fail, mut skip) = (0u32, 0u32, 0u32);
@@ -118,7 +124,7 @@ fn pixel_probe() {
             skip += 1;
             continue;
         };
-        match harness::catch_case(|| pixel_run_leg(&rom, model, &path, &rel, off)) {
+        match harness::catch_case(|| pixel_run_leg(&rom, model, &path, &rel, mode)) {
             Ok(()) => pass += 1,
             Err(e) => {
                 fail += 1;
@@ -132,6 +138,19 @@ fn pixel_probe() {
     }
     println!(
         "pixel_probe[{}] pass={pass} fail={fail} skip={skip}",
-        if off { "OFF" } else { "ON" }
+        match mode {
+            PixelMode::Off => "OFF",
+            PixelMode::Reclock => "ON",
+            PixelMode::Eager => "EV",
+        }
     );
+}
+
+/// The clock a [`pixel_probe`] row boots on: production, the tier2 deferred
+/// reclock (`ON`), or the eager-value C3-flip clock (`EV`, `SLOPGB_PROBE_EV`).
+#[derive(Clone, Copy)]
+enum PixelMode {
+    Off,
+    Reclock,
+    Eager,
 }
