@@ -189,3 +189,30 @@ next lever, not a new entry mechanism.
 (`PORT-PLAN.md:91`, `HALFDOT-BUILD-PLAN.md:148,384`) and both classifiers still
 hard-code `/tmp/sbbuild/...` — update them to the cache path or an env var so the
 next session does not hit the same wipe.
+
+---
+
+## #11cw follow-up MEASURED: the wake-mask re-host is INERT — it needs the `machine_now` port, not a gate flip
+
+Tested the "re-measure the #11cn wake masks" lever directly:
+
+1. **`machine_now` is 0 under eager** (probe `SLOPGB_S5DBG` `m0rise` line:
+   `mnow=0` on every ly). `advance_machine_t` is the only writer and eager never
+   runs it (it advances whole-dot via `tick_machine`, not T-by-T). Hence
+   `stat_vis_from_t = machine_now + gl` is also 0.
+2. **Un-gating `mask_hidden_m0_stat` to `|| eager_value` is byte-identical**
+   (EV CGB 358 → 358). With `stat_vis_from_t == 0` the deadline
+   `clock.now() < stat_vis_from_t` is never true, so the mask never fires.
+
+So the CGB `_3b` residual is NOT reachable by re-hosting the existing wake mask —
+it is welded to the deferred `machine_now` clock the eager path does not run. A
+dot-based reformulation (deadline in PPU-dot space via `projected_flip_dot`,
+which DOES advance under eager, per #11cv) is the actual lever, but that is the
+**eager wake-clock port** — the multi-session rebuild #11cn measured net-negative
+on the pre-#11cv baseline, now with a correct entry but still no eager
+`machine_now`. Deliberately NOT started blind at session end.
+
+**The 5 CGB halt rows are pinned to the eager wake-clock port. Bar stays 89.**
+Next session: give the eager path a monotonic wake-time (the PPU dot is the
+candidate) so `stat_vis_from_t`/`halt_wake_mid_impl` mean something, THEN
+re-measure — not before.
