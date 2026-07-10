@@ -903,3 +903,64 @@ fn eager_ds_mode3_entry_passes() {
             .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (eager): {e}"));
     }
 }
+
+/// The eager FF0F read-frame peek (`interconnect/bus.rs`, #11db read-frame slice).
+///
+/// The CGB LYC/STAT engine rise lands beyond the eager cc+0 FF0F read, so the
+/// raw `intf` misses the deterministically-imminent bit SameBoy's events-first
+/// read frame has already folded. The eager read ORs in
+/// `Ppu::ff0f_stat_peek() & !ff0f_ly0_pulse_mask()` — the same verdict-only peek
+/// the tier2 `read_deferred` path applies, the same VALUE-at-cc+4 shape as the
+/// halt-entry peek (#11cv). Recovers 4 CGB TRUE-bar rows (all SameBoy-PASS) +
+/// 2 DMG, zero drops; EV CGB 348→344, EV DMG 85→83.
+#[test]
+fn eager_ff0f_read_peek_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_ff0f_read_peek",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    // (rel, expected, model)
+    let rows = [
+        (
+            "gambatte/ly0/lycint152_lyc153irq_2_dmg08_cgb04c_outE2.gbc",
+            "E2",
+            Model::Cgb,
+        ),
+        (
+            "gambatte/lyc153int_m2irq/lyc153int_m2irq_1_dmg08_cgb04c_out0.gbc",
+            "0",
+            Model::Cgb,
+        ),
+        (
+            "gambatte/lcd_offset/offset1_lyc99int_m0irq_count_scx2_ds_1_cgb04c_out90.gbc",
+            "90",
+            Model::Cgb,
+        ),
+        (
+            "gambatte/m2int_m0irq/m2int_m0irq_ds_2_cgb04c_out3.gbc",
+            "3",
+            Model::Cgb,
+        ),
+        // DMG legs of the LYC family (also recovered):
+        (
+            "gambatte/ly0/lycint152_lyc153irq_2_dmg08_cgb04c_outE2.gbc",
+            "E2",
+            Model::Dmg,
+        ),
+        (
+            "gambatte/lyc153int_m2irq/lyc153int_m2irq_1_dmg08_cgb04c_out0.gbc",
+            "0",
+            Model::Dmg,
+        ),
+    ];
+    for (rel, expect, model) in rows {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_eager(&rom, model);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, model.is_cgb())
+            .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected out{expect} (eager): {e}"));
+    }
+}

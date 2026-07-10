@@ -35,6 +35,21 @@ impl Bus for Interconnect {
         self.maybe_oam_bug(addr, OamBugKind::Read);
         self.check_access(addr, false);
         let trailing = self.read_no_tick(addr);
+        // Eager FF0F read-frame peek (#11db): the CGB LYC/STAT engine rise
+        // lands beyond the eager cc+0 read, so the raw `intf` misses the
+        // deterministically-imminent bit SameBoy's events-first read frame has
+        // already folded. Fold it in as a verdict-only value peek
+        // (`Ppu::ff0f_stat_peek`, less the LY0 pulse the whole-dot frame set a
+        // dot early) — the same peek the tier2 `read_deferred` path applies, and
+        // the same VALUE-at-cc+4 shape as the halt-entry peek (#11cv). `intf` is
+        // untouched; the rise still folds at its own dot. Eager-only, off the
+        // tier2 (early-returned above) and production (`eager_value` false) paths
+        // → byte-identical.
+        let trailing = if self.eager_value && addr == 0xFF0F {
+            (trailing | self.ppu.ff0f_stat_peek()) & !self.ppu.ff0f_ly0_pulse_mask()
+        } else {
+            trailing
+        };
         leading.unwrap_or(trailing)
     }
 
