@@ -707,6 +707,40 @@ fn eager_dmg_m3_render_palette_passes() {
     }
 }
 
+/// The WX (FF4B) mid-mode-3 render commit RE-HOSTED onto the eager clock. Like
+/// the palette pin above, the un-shifted eager `eff.wx` lands the WX
+/// activation/reactivation change too early (the eager stage starts at cc+0 vs
+/// tier2's cc+4). WX has the SMALLEST render stage (dots=0 +1) so it needs the
+/// LARGEST frame debt (12hd SS) to reach the ~14hd absolute commit the per-dot
+/// WX comparator wants (`regs.rs::stage_write`). The render/read SPLIT #11bq
+/// built for tier2 carries over: the un-catch READ law's `wx_write_dot` is
+/// recorded in `Ppu::write` at the eager cc+0, so the debt shifts only the
+/// render view — the FF41 mode-3-length reads are untouched (EV DMG two-bin
+/// 102 → 96, clean +6/−0). Recovers the mealybug m3_wx_4/5/6_change + _sprites
+/// rows the flip regressed. (SCX FF43 is NOT re-hosted — its `eff.scx`
+/// fine-scroll discard IS the mode-3 length, so a render debt trades the
+/// `late_scx_late_disable_0`/`_1` SameBoy-PASS OCR sibling pair; refuted, see
+/// the eager-dmg-render-rehost map.)
+#[test]
+fn eager_dmg_m3_render_wx_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_dmg_m3_render_wx",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        ("mealybug-tearoom-tests/ppu/m3_wx_4_change.gb", Model::Dmg),
+        ("mealybug-tearoom-tests/ppu/m3_wx_5_change.gb", Model::Dmg),
+        ("mealybug-tearoom-tests/ppu/m3_wx_6_change.gb", Model::Dmg),
+        ("mealybug-tearoom-tests/ppu/m3_wx_4_change_sprites.gb", Model::Dmg),
+    ];
+    for (rel, model) in targets {
+        assert_pixel_leg_eager(&root, rel, model);
+    }
+}
+
 /// CGB lcd-offset, the line-start OAM-read window,
 /// DOUBLE-SPEED sibling of [`tier2_oam_preread_lcdoffset1_passes`]. Under DS the
 /// deferred cc+0 read lands 2 dots earlier in the dot grid, so the accessible

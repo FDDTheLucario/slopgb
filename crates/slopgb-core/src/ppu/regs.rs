@@ -57,27 +57,49 @@ impl Ppu {
             // `late_scx_late_disable`). The DMG write-commit frame is a separate
             // calibration (a later slice).
             let debt = if !self.model.is_cgb() {
-                // DMG: the PURE-render registers (SCY FF42 / palette FF47-49 — no
-                // mode-3-length or FF41-read-law coupling; their read laws sample
-                // ARCH `self.scy`/`self.bgp`, and `commit_eff` records no read-law
-                // input for them) take the SAME render-frame debt as CGB, so their
-                // mid-mode-3 commit lands at the tier2 render position instead of
-                // ~4 dots (8hd SS) early — the eager stage starts at cc+0 while the
+                // DMG: give the mid-mode-3 render registers the render-frame debt
+                // so their commit lands at the tier2 render position instead of ~4
+                // dots (8hd SS) early — the eager stage starts at cc+0 while the
                 // tier2 stage starts at the cc+4 leading edge (`write_deferred`
-                // advances the machine first). The length-coupled registers
-                // (FF40 LCDC / FF43 SCX / FF4B WX) stay at ZERO debt: a debt there
-                // shifts the FF41 mode-3-length OCR read verdict and breaks the DMG
-                // gambatte set (`late_enable_afterVblank`, #11ck). Render-only →
-                // EV DMG unchanged; recovers the mealybug m3_bgp/obp/scy pixel rows
-                // the flip regressed.
-                if matches!(addr, 0xFF42 | 0xFF47..=0xFF49) {
-                    if self.ds {
-                        4
-                    } else {
-                        8
+                // advances the machine first). The debt shifts only the pixel-view
+                // `eff` commit; the FF41 mode-3-length OCR reads sample ARCH
+                // `self.scy`, and the WX un-catch read law's `wx_write_dot` is
+                // recorded at cc+0 in `Ppu::write` (the #11bq split), so this is
+                // render-only — measured EV DMG two-bin 102 (palette) → 96 (+WX),
+                // no OCR regression vs the pre-debt eager clock. FF40 (LCDC) stays
+                // at ZERO debt: it drives the window bit5 abort/reenable + FF41
+                // read laws calibrated to the cc+0 control commit, and a debt there
+                // breaks the `late_enable_afterVblank` gambatte set (#11ck). SCX
+                // (FF43) also stays zero-debt — its render IS the length (below).
+                match addr {
+                    // SCY / palette: the full cc+0→cc+4 frame debt. Their stage is
+                    // dots ≈ 2 (`2 + parity`), so 8hd SS lands them at the render
+                    // frame's ~12hd absolute (recovers m3_bgp/obp/scy).
+                    0xFF42 | 0xFF47..=0xFF49 => {
+                        if self.ds {
+                            4
+                        } else {
+                            8
+                        }
                     }
-                } else {
-                    0
+                    // WX SS: its render stage is dots=0 (+1 in `stage_write` for
+                    // the FF4B palette-class offset) → 2hd of ×2 grid, the smallest
+                    // of the render regs, so it needs the LARGEST frame debt (12hd)
+                    // to reach the ~14hd absolute render-commit the WX
+                    // activation/reactivation comparator wants. Swept: 12hd lands
+                    // all of m3_wx_4/5/6_change + _sprites; 10hd lands 2, ≤8 lands
+                    // 0. The un-catch READ law's `wx_write_dot` is recorded in
+                    // `Ppu::write` at the eager cc+0 (not `commit_eff`), so the debt
+                    // shifts only the render view — the split #11bq built for tier2.
+                    // SCX (FF43) is NOT here: its render `eff.scx` fine-scroll
+                    // discard IS the mode-3 length, so a render debt shifts the FF41
+                    // mode-3-length OCR verdict too (measured: recovers m3_scx_low/
+                    // high pixels but breaks the `late_scx_late_disable_0`/`_1`
+                    // SameBoy-PASS sibling A/B pair + `ly0_late_scx7_scx0_2`). No
+                    // clean split exists — eff.scx IS the length. Refuted, DMG SCX
+                    // stays zero-debt (see the eager-dmg-render-rehost map).
+                    0xFF4B if !self.ds => 12,
+                    _ => 0,
                 }
             } else if self.ds {
                 4
