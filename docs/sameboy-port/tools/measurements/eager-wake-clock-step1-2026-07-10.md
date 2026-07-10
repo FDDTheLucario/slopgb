@@ -161,3 +161,54 @@ re-fetch, `self.dot`-advancing but timer-safe) — the same HALFDOT capability
 No code shipped; `git diff` empty at `64ccf6c`; golden_fingerprint byte-identical
 (40.2s, real run, `SLOPGB_REQUIRE_ROMS=1`). EV CGB 358 / EV DMG 85 / tier2 291
 re-confirmed.
+
+---
+
+## REVIEWER VERIFICATION + the untested lever (#11cy-rev, same day)
+
+Reproduced every load-bearing number independently (own build, own target dir):
+
+- CGB entry peek un-scoped: EV CGB 358→**354**. Recovers **exactly these 5**, breaks
+  **exactly 1**:
+  - recovered: `late_m0int_halt_m0stat_scx{2,3}_3a` (want0),
+    `late_m0irq_halt_dec_scx{2,3}_2` (want6), `late_m0irq_halt_m0stat_scx3_3b` (want2)
+  - broken: `late_m0int_halt_m0stat_scx3_3b_dmg08_out0_cgb04c_out2` (want2)
+- SameBoy-classified all 6: **BUG=6 / FLOOR=0** — every one SameBoy-PASS.
+- OFF status: the **5 recovered are all OFF-pass** ⇒ all 5 are TRUE bar rows (bar would
+  drop **49→44**). The broken row is **OFF-fail** ⇒ a flip GAIN, not a bar row.
+
+So the peek is a −5 bar move whose only cost is dropping ONE SameBoy-PASS flip-gain.
+It cannot ship as-is: the golden-safe law forbids dropping a test SameBoy passes, even
+an OFF-fail one. The Step-1 refutation of the **wake-mask** stands (a single deadline
+cannot separate rows that wake at the byte-identical instant — verified).
+
+### But "unreachable on eager" is NOT established — a narrower lever is untested
+
+The map refuted a **broad** value-peek keyed on `read_carried` (over-fires: `read_carried==0`
+at the dispatch read = indistinguishable from a bare poll, 358→361 recover13/break17). It did
+NOT try the **narrow one-shot** discriminator that already exists in the tree:
+
+`speed.rs:107` — `halt_wake_impl`'s `cgb_any` arm — fires `carry_read(4)` gated on
+`(dmg_first || cgb_any) && w & IF_STAT_BIT != 0 && stat_rise_m0()`. **That is precisely the
+"just woke from an IME=1 halt on the m0-STAT rise" signal** the re-fetch needs. On tier2 it
+carries the +4; on eager `carry_read` is inert because the eager read peeks `self.dot`, not
+clock debt (the map's own finding). The untested lever:
+
+1. Un-gate that wake-detection to eager and set a **one-shot `halt_refetch` flag** (not
+   `read_carried` — a dedicated flag, set only at this wake, consumed by the very next FF41
+   read).
+2. In the eager FF41 read, when `halt_refetch` is set, resolve at `read_pos_hd + 8hd` (the +4
+   re-fetch dot) instead of `read_pos_hd`, then clear the flag.
+
+This is a read-POSITION shift for ONE flagged read — the same VALUE-at-cc+4 decomposition
+`stat_m0_rise_within` (#11cv) and `read_pos_hd`'s debt use, but keyed on the halt-wake
+re-fetch event rather than `read_carried`. The broad peek's 13/17 churn is the warning: it
+must be surgically scoped to the one-shot flag. If it holds, the CGB peek ships and the bar
+goes **49→44**. If the one-shot flag ALSO over-fires or the two `_3b` rows are still
+identical at the flagged read, THEN "unreachable on eager" is established — with the offset
+table proving the mutual exclusion, #11cp-style. Not before.
+
+**Corrected row naming (three prior maps conflated them):** the recovered `_3b` is
+`late_m0irq_halt_m0stat_scx3_3b` (irq, want2); the broken/blocking `_3b` is
+`late_m0int_halt_m0stat_scx3_3b` (int, want2). Different ROMs. The 5 bar rows are the two
+`_3a` + two `dec_2` + the irq `_3b`.
