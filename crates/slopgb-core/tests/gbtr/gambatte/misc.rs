@@ -846,3 +846,60 @@ fn eager_halt_entry_m0_peek_passes_dmg() {
             .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (eager): {e}"));
     }
 }
+
+/// CGB DOUBLE-SPEED mode-2→3 ENTRY back-date RE-HOSTED onto the eager clock
+/// (#11da, L1). The eager cc+0 FF41 value peek (`leading_edge_sample`) samples
+/// the PPU pre-tick, a DS M-cycle (2 dots) before the trailing cc+4 view, so a
+/// line-start FF41 read straddling the mode-2→3 boundary saw the un-shifted
+/// dot-84 entry as mode 2 where SameBoy's cc+4 view reads mode 3. The DS entry
+/// back-dates to 80 (as single speed) so the peek lands on mode 3
+/// (`Ppu::mode3_entry_dot`, `eager_value && ds`-scoped). EV CGB two-bin
+/// 353 → 348 (clean +5/−0; 4 SameBoy-pass bar + 1 lcd_offset gambatte-want
+/// gain). The `_1` siblings (want 2) are the regression guards — they read
+/// earlier and must stay mode 2. Tier2's deferred DS frame keeps 84;
+/// `eager_value` off → byte-identical.
+#[test]
+fn eager_ds_mode3_entry_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_ds_mode3_entry",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let rows = [
+        // Recovered (SameBoy-pass, was EV-fail):
+        (
+            "gambatte/m2int_m2stat/m2int_m2stat_ds_2_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/m2int_m2stat/m2int_scx4_m2stat_ds_2_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/enable_display/frame0_m3stat_count_ds_2_cgb04c_out90.gbc",
+            "90",
+        ),
+        (
+            "gambatte/enable_display/frame1_m3stat_count_ds_2_cgb04c_out90.gbc",
+            "90",
+        ),
+        // Regression guards (the `_1` mode-2 siblings must stay blocked at 2):
+        (
+            "gambatte/m2int_m2stat/m2int_m2stat_ds_1_cgb04c_out2.gbc",
+            "2",
+        ),
+        (
+            "gambatte/m2int_m2stat/m2int_scx4_m2stat_ds_1_cgb04c_out2.gbc",
+            "2",
+        ),
+    ];
+    for (rel, expect) in rows {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_eager(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (eager): {e}"));
+    }
+}

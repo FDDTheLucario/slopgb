@@ -93,6 +93,16 @@ impl Ppu {
     pub(super) fn mode3_entry_dot(&self) -> u16 {
         if self.leading_edge_reads && !self.tier2_reclock && !self.ds {
             80
+        } else if self.eager_value && self.ds {
+            // EAGER double speed: the eager cc+0 FF41 value peek
+            // (`leading_edge_sample`) samples the PPU pre-tick, a DS M-cycle (2
+            // dots) before the trailing cc+4 view, so the mode-2→3 entry
+            // back-dates to 80 (as single speed) to land that peek on mode 3
+            // where SameBoy's cc+4 view reads mode 3 (`m2int_m2stat_ds_2`,
+            // `enable_display/frame*_m3stat_count_ds_2`). Tier2's deferred DS
+            // frame keeps 84 (the DS back-date is folded into `read_deferred`'s
+            // advance); `eager_value` off → byte-identical.
+            80
         } else {
             84
         }
