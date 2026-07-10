@@ -148,11 +148,21 @@ the boot intro / cross-fade is not gated on it (it always plays).
 
 ## Optional user-supplied SGB BIOS (`ppu/sgb/bios.rs`)
 
-A user who owns the SGB firmware can install its **real** border and
-title→palette table. Because slopgb never runs the SNES CPU, it cannot execute
-the firmware to reproduce these; the frontend locates the payloads in the
-user's own BIOS copy and hands them to two seams (**nothing Nintendo-derived is
-committed to this repo** — it only ever enters at runtime from the user's file):
+### The single BIOS entry point
+
+`GameBoy::load_sgb_bios(&[u8])` (`lib/sgb_api.rs`) is the **one** BIOS entry
+point. The frontend loads a user-owned SGB image (`--sgb-bios <path>` /
+`SLOPGB_SGB_BIOS`, mirroring `--boot`) and hands the bytes here; the call funnels
+to everything a BIOS can feed:
+
+1. **Audio** — the image goes to the APU (`SgbApu::load_bios`) exactly as
+   before. See [sgb-audio.md](sgb-audio.md).
+2. **Border + title→palette** — the two `Ppu` seams below, reached only through
+   this entry point (there is no second public way in).
+
+The two `Ppu` seams (`pub(crate)`, `Model::Sgb`/`Sgb2`-gated) install
+Nintendo-derived data that may only ever enter at **runtime from the user's own
+file — nothing Nintendo-derived is committed to this repo**:
 
 - `Ppu::sgb_install_border(chr0, chr1, pct)` — install a real border: the two
   4096-byte SNES-4bpp tile banks + the 2176-byte tilemap/palette payload (the
@@ -165,11 +175,30 @@ committed to this repo** — it only ever enters at runtime from the user's file
   SGB palettes. **No Nintendo table is shipped**, so standalone the neutral DMG
   greyscale default stands; the table is BIOS-supplied.
 
-**Not yet wired end-to-end:** these are `pub(crate)` `Ppu` seams; the
-`GameBoy`-level wrappers that would expose them to the frontend live in `lib.rs`
-(a different work-package's file), so the module is unused *within* the core
-crate until that plumbing is added (`#![allow(dead_code)]`, documented in
-`bios.rs`). Standalone (default border, fade, neutral palette) is fully wired.
+The seams are wired but reachable **only** via `load_sgb_bios`, so `bios.rs`
+compiles without an `allow(dead_code)` blanket (removed 2026-07-09).
+
+### What a user BIOS enables today — and the honest limit
+
+**Today `--sgb-bios` feeds only the audio path.** slopgb is a high-level SGB
+emulation: **it never runs the SNES 65816.** So it can neither *execute* the
+firmware to build the border/palette, nor trust a raw byte offset for them — the
+border tiles and title→palette table live in the SNES ROM at
+firmware-revision-specific locations that are not discoverable from a bare image
+without a documented, checked structure. An unverifiable guess would ship a
+**wrong** border dressed up as right, so `load_sgb_bios`'s two locators
+(`sgb_bios_border` / `sgb_bios_palette` in `lib/sgb_api.rs`) return `None`, the
+seams stay unfed, and the **original default border + neutral palette stand**.
+The frontend logs this plainly on load.
+
+**What remains impossible without emulating the SNES 65816:** the *real*
+Nintendo border and the per-title palette table. Recovering them needs the SNES
+CPU to run the firmware (decompress/DMA the border, run the title hash), which
+slopgb does not have. The seams are the documented upgrade path: a locator that
+first validates a documented BIOS structure drops into those two helpers with no
+other change, and the border/palette then light up through the same entry point.
+The honest refusal is pinned by
+`lib_tests/sgb.rs::load_sgb_bios_keeps_default_border_off_sgb_noop`.
 
 ## Phase-2/3 audio + SNES-RAM seams
 
@@ -209,11 +238,11 @@ only through `Some`), `sgb_border()` is only ever `Some` on Sgb/Sgb2, and
 `frame()` stays an unmodified `&[u32; 160*144]` — the golden set never calls
 `sgb_border()`. The fade adds **zero** serialized bytes (it is transient). Since
 `SgbView::new()` runs only for Sgb/Sgb2, the power-on `default_composite` seed
-never executes on Dmg/Cgb. `golden_fingerprint` was **not** run (it hangs in
-this environment); golden-safety is proven by inspection — every new path is
-behind an `sgb.is_some()` check. Verified: mooneye 91/91 (this branch,
-`SLOPGB_REQUIRE_ROMS=1`); core lib + frontend tests green; clippy `-D warnings`
-clean.
+never executes on Dmg/Cgb. The BIOS entry point (`load_sgb_bios`) is likewise
+gated: the audio path is `Model::Sgb`/`Sgb2`-only, and the two border/palette
+seams route through `SgbView` (reached only through `Some`). Verified:
+`golden_fingerprint` **passes byte-identically** (`SLOPGB_REQUIRE_ROMS=1`);
+mooneye 91/91; core lib + frontend tests green; clippy `-D warnings` clean.
 
 ## Tests
 

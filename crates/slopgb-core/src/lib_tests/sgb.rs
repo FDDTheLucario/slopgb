@@ -31,3 +31,33 @@ fn sgb_pal01_colorizes_rendered_frame() {
         "top-left pixel takes the SGB-provided background color"
     );
 }
+
+/// The single BIOS entry point feeds the audio path but, being high-level (no
+/// SNES 65816), never fabricates a border or palette from an arbitrary image:
+/// an unverifiable BIOS leaves the original default border untouched, and off
+/// SGB it is an inert no-op. Guards the honest refusal to guess firmware
+/// offsets (see `docs/hardware-state/sgb.md`).
+#[test]
+fn load_sgb_bios_keeps_default_border_off_sgb_noop() {
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x146] = 0x03; // SGB flag
+    rom[0x14B] = 0x33;
+    let mut gb = GameBoy::new(Model::Sgb, rom).unwrap();
+    let before = gb
+        .sgb_border()
+        .expect("an SGB shows the default border from power-on")
+        .to_vec();
+
+    // A bare image can't be trusted for the border/palette → default kept.
+    gb.load_sgb_bios(&[0xABu8; 4096]);
+    assert_eq!(
+        gb.sgb_border().unwrap().as_slice(),
+        before.as_slice(),
+        "an unverifiable BIOS leaves the default border unchanged"
+    );
+
+    // Off SGB: no border, no panic.
+    let mut dmg = GameBoy::new(Model::Dmg, vec![0u8; 0x8000]).unwrap();
+    dmg.load_sgb_bios(&[0xABu8; 4096]);
+    assert!(dmg.sgb_border().is_none());
+}

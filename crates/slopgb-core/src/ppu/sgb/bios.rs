@@ -10,11 +10,11 @@
 //! BIOS the original default border (`defaults.rs`) and the neutral DMG palette
 //! stand.
 //!
-//! These are frontend seams: the `GameBoy`-level wrappers that expose them to
-//! the UI live in `lib.rs`, which a different work-package owns, so this whole
-//! module is unused *within* the core crate until that plumbing is added —
-//! hence the module-wide `dead_code` allowance.
-#![allow(dead_code)]
+//! These are frontend seams: the `GameBoy`-level wrapper that reaches them is
+//! [`crate::GameBoy::load_sgb_bios`] (via `lib/sgb_api.rs`), the single BIOS
+//! entry point. The locators it funnels through find nothing verifiable in a
+//! bare SNES image (slopgb never runs the 65816), so the seams are the wired
+//! upgrade path a checked payload locator drops into.
 
 use super::*;
 
