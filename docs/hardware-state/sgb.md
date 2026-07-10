@@ -52,6 +52,24 @@ shade is retained separately:
   8×8 tile → 16 bytes of standard 2bpp (low byte = bit0 plane, high byte = bit1
   plane, x=0 = bit 7) — the universal representation every consumer reads.
 
+**Verified end-to-end (2026-07-09):** the full acquisition chain a real
+SGB-enhanced game takes — real P1 pulse packets → joypad receiver → FF00 drain →
+`Ppu::sgb_command` → `*_TRN` latch → the **actual PPU render** filling
+`shade_buf` → frame-boundary capture → `decode_tiles` → border buffers →
+`sgb_border()` — is exercised with **no injected internal state**
+(`lib_tests/sgb.rs`, the two tests below). `decode_tiles` was confirmed
+byte-identical to SameBoy's `pixel_to_bits` word packing on a little-endian host
+(`pixel_to_bits[shade] >> x` → bit 7 = low plane, bit 15 = high plane → LE bytes
+`[low, high]`; TILES get no `LE16`, so slopgb's `[lo, hi]` push matches). The
+CHR_TRN bank bit (byte offset 4096 = SameBoy's `+0x800` in `uint16` units) and
+the PCT_TRN palette block at offset 0x800 are proven through the real chain. A
+`record_sgb_shade` index / capture-layout / frame-alignment / bank-select bug is
+caught by the byte-exact round-trip (mutation-tested). **Still assumed:** no real
+commercial SGB-enhanced ROM has been run (the test collection ships none — only
+MLT_REQ ROMs); and slopgb's next-boundary latch is not cycle-matched to SameBoy's
+3-frame `vram_transfer_countdown` (functionally equivalent — games hold the
+payload on screen across frames — but not bit-timed).
+
 ## Implemented commands
 
 | Cmd | Name | Effect |
@@ -254,9 +272,21 @@ mooneye 91/91; core lib + frontend tests green; clippy `-D warnings` clean.
 - `ppu/sgb/bios.rs` `#[cfg(test)]` — `title_checksum`, the title→palette hook
   (install + empty-table neutral + off-SGB no-op), and the border install seam
   (size validation + ready flag).
-- `lib_tests.rs::sgb_pal01_colorizes_rendered_frame` — end-to-end: a PAL01
+- `lib_tests/sgb.rs::sgb_pal01_colorizes_rendered_frame` — end-to-end: a PAL01
   packet driven through the real `Joypad` P1 pulse stream recolors a rendered
   frame (joypad → interconnect → ppu → render).
+- `lib_tests/sgb.rs::trn_capture_round_trips_bytes_through_the_real_renderer` —
+  the screen-capture round-trip, byte-exact: a 4096+4096+2176-byte payload
+  programmed into the screen (identity BGP; the BG grid and the capture grid are
+  both 20-wide 8×8, so a GB tile = a captured tile) and captured by the **real
+  renderer** via genuine CHR_TRN(bank0/1)+PCT_TRN pulse packets decodes back to
+  exactly the bytes — pinning the capture index layout, the frame alignment, the
+  bank bit, and the PCT palette offset. Uses the test-only `Ppu::sgb_captured_border`.
+- `lib_tests/sgb.rs::enhanced_game_border_loads_and_renders_end_to_end` — a
+  hand-designed border (SNES-4bpp tiles + tilemap + BGR555 palettes) delivered as
+  real CHR_TRN+PCT_TRN packets renders through `sgb_border()` with the designed
+  tile in the designed colour at the designed position, and a colour-0 gb-area
+  tile transparent (the GB inset shows through).
 - `video.rs` tests — the generalized `(src_w, src_h)` blit/stretch.
 
 ## Deferred / not this phase

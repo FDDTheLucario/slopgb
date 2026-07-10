@@ -444,6 +444,18 @@ impl Ppu {
         }
     }
 
+    /// Test-only read-back of the raw `*_TRN` capture buffers — the CHR_TRN
+    /// border tiles (8192 B = 256 SNES tiles × 32) and the PCT_TRN border data
+    /// (2176 B = 32×32 tilemap @0 + palettes 4-7 @0x800). Lets the end-to-end
+    /// screen-capture round-trip test assert byte-exactness of what the *real*
+    /// renderer captured, with no injected internal state. `None` off SGB.
+    #[cfg(test)]
+    pub(crate) fn sgb_captured_border(&self) -> Option<(&[u8; 8192], &[u8; 2176])> {
+        self.sgb
+            .as_ref()
+            .map(|s| (&*s.border_tiles, &*s.border_raw))
+    }
+
     /// SGB frame-boundary work (called from [`Self::start_line`] at line 144):
     /// consume a pending `*_TRN` screen capture, recomposite the border, and
     /// advance the boot-intro / cross-fade blend. A no-op off SGB (`self.sgb`
