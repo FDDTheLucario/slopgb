@@ -269,3 +269,81 @@ fn eager_halt_wake_passes() {
             .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (eager halt-wake): {e}"));
     }
 }
+
+/// The eager WINDOW mode-0 STAT-IF read-frame DELIVER (#11do): a window-line
+/// `m0irq` poll of FF0F must observe the STAT bit SameBoy's cc+4 events-first
+/// frame delivers. With a window active the eager clock keeps the PRODUCTION,
+/// window-elevated mode-0 flip R, but SameBoy (and tier2's render-length
+/// reclock) rises the mode-0 STAT source 2 dots (half an M-cycle) earlier at
+/// R-2; the eager cc+0 read landing in the `[R-2, R)` gap reads clear (E0/0)
+/// where SameBoy has already delivered (`m2int_wxA5/A6_m0irq_2`: read R-1,
+/// want 2/E2). Arm (a-eager) in [`Ppu::ff0f_stat_peek`] folds the bit in.
+/// The `win_active` gate is the discriminator: NON-window `m0irq` rows keep
+/// R == SameBoy's rise (no back-date) so their `_1` polls (want 0) must NOT
+/// deliver — the scope guard below (`m2int_m0irq_1`, `m2int_wxA6_m0irq_1`)
+/// stays 0 both with and without the arm; a broadened arm (dropping the
+/// `win_active` gate or widening past `[R-2, R)`) re-sets their bit and fails
+/// this pin. Recovered: 1 CGB BUG + 3 DMG BUG (`classify_{cgb,dmg}` → BUG),
+/// zero drops both models. Reverting the arm makes the `_2` targets read 0.
+/// Eager + SS scoped (DS takes the (a) arm) → production/tier2 byte-identical.
+#[test]
+fn eager_window_m0irq_deliver_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_window_m0irq_deliver",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    // (rel, expect, is_cgb). The `_2` targets DELIVER; the `_1`/non-window
+    // guards must stay CLEAR (the win_active + [R-2, R) scope).
+    let rows = [
+        // Targets — the window `m0irq` reads land in the [R-2, R) deliver gap.
+        (
+            "gambatte/window/m2int_wxA5_m0irq_2_dmg08_cgb04c_out2.gbc",
+            "2",
+            true,
+        ),
+        (
+            "gambatte/window/m2int_wxA5_m0irq_2_dmg08_cgb04c_out2.gbc",
+            "2",
+            false,
+        ),
+        (
+            "gambatte/window/m2int_wxA6_m0irq_2_dmg08_cgb04c_out2.gbc",
+            "2",
+            false,
+        ),
+        (
+            "gambatte/window/m2int_wxA6_m0irq2_2_dmg08_cgb04c_out2.gbc",
+            "2",
+            false,
+        ),
+        // Scope guards (want 0): a window `_1` poll (below R-2) and a
+        // non-window poll (win_active off) must NOT deliver.
+        (
+            "gambatte/window/m2int_wxA6_m0irq_1_dmg08_cgb04c_out0.gbc",
+            "0",
+            false,
+        ),
+        (
+            "gambatte/m2int_m0irq/m2int_m0irq_1_dmg08_cgb04c_out0.gbc",
+            "0",
+            false,
+        ),
+        (
+            "gambatte/m2int_m0irq/m2int_m0irq_scx2_1_dmg08_cgb04c_out0.gbc",
+            "0",
+            true,
+        ),
+    ];
+    for (rel, expect, is_cgb) in rows {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let model = if is_cgb { Model::Cgb } else { Model::Dmg };
+        let mut gb = harness::boot_eager(&rom, model);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, is_cgb).unwrap_or_else(|e| {
+            panic!("{rel} [{model:?}] expected out{expect} (eager window m0irq): {e}")
+        });
+    }
+}

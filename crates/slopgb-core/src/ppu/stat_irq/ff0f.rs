@@ -41,7 +41,9 @@ impl Ppu {
     /// The mode-2 pulse is deliberately NOT peeked: the `m2int_m2irq_1/_2`
     /// legs read 1 M apart around the next line's pulse and pass on the
     /// current frame — a +window peek would flip the `_1` legs.
-    /// Tier2-only caller (`read_deferred`) → production byte-identical OFF.
+    /// Callers: the tier2 `read_deferred` path and the eager `Bus::read`
+    /// FF0F peek (#11db); every arm short-circuits on `tier2_reclock` /
+    /// `eager_value` (both off in production) → production byte-identical OFF.
     pub(crate) fn ff0f_stat_peek(&self) -> u8 {
         if !self.enabled || self.glitch_line || self.stat_update.line() {
             return 0;
@@ -73,6 +75,35 @@ impl Ppu {
             let rise = self.projected_flip_dot();
             if rise <= self.dot + 1 {
                 return IF_STAT;
+            }
+        }
+        // (a-eager) the EAGER single-speed WINDOW mode-0 STAT-IF DELIVER
+        // window (CGB + DMG). When a window is active the eager clock keeps the
+        // PRODUCTION mode-0 flip R (window-elevated: `flip_projection` adds the
+        // window start cost), but SameBoy — and tier2's render-length reclock —
+        // rises the mode-0 STAT source exactly 2 dots (half an M-cycle) EARLIER,
+        // at R-2 (measured tier2 m0rise: wxA5 261→259, wxA6 257→255). The eager
+        // cc+0 FF0F read is on the SAME grid as tier2's read, so a read landing
+        // in that 2-dot gap `[R-2, R)` observes clear where SameBoy's
+        // events-first cc+4 frame has already delivered the bit
+        // (`m2int_wxA5/A6_m0irq_2`: read R-1, want E2, EV reads E0). NON-window
+        // rows keep R == SameBoy's rise (no reclock back-date), so the gap is
+        // empty and the plain `m0irq_1`/`scx2_1` reads (which want CLEAR) never
+        // trip this arm — the `win_active` gate is the discriminator. The `_1`
+        // window siblings read one M-cycle earlier (below R-2) and also stay
+        // clear. Verdict-only (`intf`/dispatch untouched; the rise still folds
+        // at R); eager-only + SS-scoped (DS takes arm (a) above); production and
+        // tier2 inert (`eager_value` false) → byte-identical.
+        if self.eager_value
+            && !self.ds
+            && self.render.win_active
+            && self.eng_stat & STAT_SRC_HBLANK != 0
+            && (1..=143).contains(&self.line)
+        {
+            if let Some(r) = self.m0_flip_dot() {
+                if self.dot + 2 >= r && self.dot < r {
+                    return IF_STAT;
+                }
             }
         }
         // (a-dmg) the DMG single-speed mode-0 STAT-IF DELIVER window.
@@ -132,6 +163,16 @@ impl Ppu {
         {
             return None;
         }
+        self.m0_flip_dot()
+    }
+
+    /// The current line's mode-0 flip (rise) dot R: the render's own recorded
+    /// flip once the visible mode-3→0 flip has fired (`flip_dot`), else its
+    /// projection while the render is still active ([`Self::projected_flip_dot`]),
+    /// else `None` (no visible mode-3 this line). Shared by the DMG tier2
+    /// ([`Self::dmg_m0_if_rise`]) and eager (arm (a-eager) in
+    /// [`Self::ff0f_stat_peek`]) mode-0 STAT-IF DELIVER windows.
+    fn m0_flip_dot(&self) -> Option<u16> {
         if self.line_render_done && self.flip_dot != 0 {
             Some(self.flip_dot)
         } else if self.render.active {
