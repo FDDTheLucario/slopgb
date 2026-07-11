@@ -25,6 +25,13 @@ impl Bus for Interconnect {
         // tier2 twin clears in `read_deferred`). Never set flag-off → no-op.
         if self.eager_value && addr == 0xFF41 {
             self.ppu.set_read_carried(false);
+            // The eager halt-woken re-fetch override is one-shot at the line
+            // boundary: it survives the sub-boundary polls (`read_pos_hd` short
+            // of the line) and clears once this read has crossed it (the same
+            // read `vis_mode_read` resolved to mode 2). Never set flag-off.
+            if self.ppu.halt_refetch_crossed() {
+                self.ppu.set_halt_refetch(false);
+            }
         }
         self.service_vram_dma();
         self.tick_machine();
@@ -197,6 +204,13 @@ impl Bus for Interconnect {
         // `read_deferred`). Never set flag-off → no-op.
         if self.eager_value && addr == 0xFF41 {
             self.ppu.set_read_carried(false);
+            // The eager halt-woken re-fetch override is one-shot at the line
+            // boundary: it survives the sub-boundary polls (`read_pos_hd` short
+            // of the line) and clears once this read has crossed it (the same
+            // read `vis_mode_read` resolved to mode 2). Never set flag-off.
+            if self.ppu.halt_refetch_crossed() {
+                self.ppu.set_halt_refetch(false);
+            }
         }
         self.service_vram_dma();
         self.tick_machine();

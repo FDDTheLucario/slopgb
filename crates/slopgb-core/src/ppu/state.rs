@@ -197,6 +197,7 @@ impl Ppu {
         w.bool(self.stat_rise_oam);
         w.bool(self.stat_rise_m0);
         w.bool(self.read_carried);
+        w.bool(self.halt_refetch);
         w.bool(self.line_render_done);
         w.u16(self.flip_dot);
         w.bool(self.vis_early);
@@ -320,6 +321,7 @@ impl Ppu {
         self.stat_rise_oam = r.bool()?;
         self.stat_rise_m0 = r.bool()?;
         self.read_carried = r.bool()?;
+        self.halt_refetch = r.bool()?;
         self.line_render_done = r.bool()?;
         self.flip_dot = r.u16()?;
         self.vis_early = r.bool()?;

@@ -42,6 +42,35 @@ Halt wake uses a separate, earlier intra-cycle sample (`Bus::pending_halt_wake`,
 
 The 13 "halt" rows actually fail READ-side (CGB getLyReg LY+1-near-boundary + getStat line-start mode-2/3), entangled with the A/B-swept CGB-C LY/STAT timeline + the parked mode-3 +1-dot — see the class-H index note in `tests/gbtr/baselines/gambatte.txt`.
 
+### Eager sub-M-cycle wake clock (`eager_value`, CGB single-speed) — #11dl
+
+The eager halt idle loop samples the wake once per **whole** M-cycle, and the
+PPU commits the mode-0 STAT IF at the END of the M-cycle containing the flip, so
+two lines whose `projected_flip_dot` differ by <4 dots (an `SCX&7` delta) wake at
+the same boundary — collapsing the wake **instant** tier2's 4k+2 sample
+resolves. The 5 CGB halt bar rows (`late_m0int_halt_m0stat_scx{2,3}_3a`,
+`late_m0irq_halt_dec_scx{2,3}_2`, `late_m0irq_halt_m0stat_scx3_3b`) turn on that
+instant. Recovered (+14/−0, all SameBoy-PASS) by two coupled **pure value
+peeks** — no machine advance, timer-safe:
+
+- **`Ppu::m0_stat_flip_reached`** (`interconnect/speed.rs` wake): OR `IF_STAT` in
+  when `self.dot ∈ [flip, flip+4)` (flip = `flip_dot`/`projected_flip_dot`), so
+  the wake lands at the flip's M-cycle boundary (`pfd256`→256, `pfd257`→260) —
+  tier2's sub-M-cycle instant. The `+4` upper bound stops it re-firing on the
+  stale flip after the IME=1 halt rewind.
+- **`Ppu::halt_refetch_read_override`** (applied at `regs.rs` FF41): the armed
+  `halt_refetch` flag makes the IME=1 dispatch's first FF41 read return mode 2
+  once `read_pos_hd >= LINE_DOTS*2` (SameBoy's cc+4 re-fetch in the next line's
+  OAM); one-shot, cleared at the boundary read / next halt entry.
+
+Coupled: the sub-M-cycle wake **separates the read position** (want-0 `_a` wakes
+one M-cycle early → `read_pos_hd` 904 < 912 → stays mode 0), so the override has
+zero collateral — where the entry peek alone (#11cw/#11cy) or the read shift
+alone (#11cz, −9) each dropped a SameBoy-pass row. Map:
+`docs/sameboy-port/tools/measurements/eager-wake-clock-port-2026-07-11.md`. This
+is distinct from the DMG deferred sub-M-cycle sampler (`halt_wake_mid_impl`, the
+tier2 `!is_cgb` mid-block) and from the parked CGB whole-cycle mask above.
+
 ## HALT/STOP clock gating
 
 - HALT/STOP gate the CPU core clock via `Bus::set_halted`, engaging only *after* the post-HALT prefetch M-cycle; the OAM DMA engine freezes with it.

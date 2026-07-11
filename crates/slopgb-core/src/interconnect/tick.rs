@@ -452,6 +452,10 @@ impl Interconnect {
             return;
         }
         if halted {
+            // Backstop-clear an unconsumed eager halt-woken re-fetch override
+            // (the previous round's wake never reached the line-boundary read)
+            // so it cannot leak into this round. One-shot; byte-identical OFF.
+            self.ppu.set_halt_refetch(false);
             // Repay an outstanding sub-M-cycle wake skew
             // before the next halt round begins, re-aligning the CPU to the
             // machine's 4-T grid — the skew lives from the mid-cycle wake

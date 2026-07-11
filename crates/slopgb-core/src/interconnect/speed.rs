@@ -91,7 +91,27 @@ impl Interconnect {
             }
             return 0;
         }
-        let w = self.pending_halt_wake();
+        let mut w = self.pending_halt_wake();
+        // Eager sub-M-cycle WAKE peek (CGB single-speed). The eager PPU commits
+        // the mode-0 STAT IF at the END of the whole M-cycle that contains the
+        // flip, up to one M-cycle later than the projected flip dot; two rows
+        // whose flips differ by <4 dots (an SCX&7 delta) therefore commit — and
+        // wake — at the SAME whole-M-cycle boundary, collapsing the wake INSTANT
+        // that tier2's 4k+2 sample resolves. Peek the rise in DOT space
+        // (`projected_flip_dot() <= dot`, a pure value peek — no machine
+        // advance, timer-safe) so the wake lands at the flip's M-cycle boundary
+        // and the resumed stream + FF41 read separate by the SCX delta. The
+        // resumed IME=1 dispatch's first FF41 read then rides the re-fetch
+        // boundary override (`Ppu::halt_refetch`), armed below.
+        let eager_cgb_halt = self.eager_value && self.model.is_cgb() && !self.double_speed;
+        if eager_cgb_halt
+            && self.cpu_halted
+            && w & IF_STAT_BIT == 0
+            && self.ie & IF_STAT_BIT != 0
+            && self.ppu.m0_stat_flip_reached()
+        {
+            w |= IF_STAT_BIT;
+        }
         if w != 0 {
             // The first idle check (SameBoy's `just_halted` head
             // sample) waking on the m0-origin STAT also re-fetches — the
@@ -105,6 +125,19 @@ impl Interconnect {
                 && self.ppu.stat_rise_m0()
             {
                 self.clock.carry_read(4);
+            }
+            // Eager CGB halt-woken m0-STAT wake: arm the re-fetch boundary
+            // override for the IME=1 dispatch's first FF41 read (consumed
+            // one-shot at the line-boundary crossing in `Bus::read`). The
+            // m0-origin test mirrors the wake above's two cases: a natural
+            // whole-M-cycle IF commit (`stat_rise_m0`) or the sub-M-cycle peek
+            // (`m0_stat_flip_reached` ⇒ the rise landed this M-cycle — the
+            // `stat_m0_rise_within(0)` term catches the render-still-live edge).
+            if eager_cgb_halt
+                && w & IF_STAT_BIT != 0
+                && (self.ppu.stat_rise_m0() || self.ppu.stat_m0_rise_within(0))
+            {
+                self.ppu.set_halt_refetch(true);
             }
             probe!(self.dbg_wake(if self.cpu_halted { "plain" } else { "first" }, w));
         }
@@ -574,7 +607,7 @@ impl Interconnect {
         // t0 sample until the `_3a`/`_3b` split is measured against SameBoy.
         if self.eager_value
             && !self.tier2_reclock
-            && !self.model.is_cgb()
+            && (!self.model.is_cgb() || !self.double_speed)
             && self.ie & IF_STAT_BIT != 0
             && self.ppu.stat_m0_rise_within(4)
         {

@@ -263,7 +263,13 @@ impl Ppu {
                 }
             }
             0xFF40 => self.lcdc,
-            0xFF41 => 0x80 | self.stat_en | (u8::from(self.read_cmp()) << 2) | self.vis_mode_read(),
+            0xFF41 => {
+                // The eager halt-woken re-fetch boundary override rides on top
+                // of the read-law mode (#11dl); the sole non-probe consumer.
+                let vm = self.vis_mode_read();
+                let vm = self.halt_refetch_read_override(vm).unwrap_or(vm);
+                0x80 | self.stat_en | (u8::from(self.read_cmp()) << 2) | vm
+            }
             0xFF42 => self.scy,
             0xFF43 => self.scx,
             0xFF44 => self.ly,

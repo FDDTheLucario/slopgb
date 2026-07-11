@@ -511,6 +511,17 @@ pub struct Ppu {
     /// SameBoy's frame. Reached only under `tier2_reclock` (via
     /// `dispatch_retime`); production (tier2 off) never reaches it.
     read_carried: bool,
+    /// Set by the interconnect's eager CGB halt wake (`halt_wake_mid_impl`) when
+    /// the halt exits on the mode-0 STAT rise: the halt-woken IME=1 dispatch's
+    /// first FF41 read is a re-fetch M-cycle that SameBoy resolves at the next
+    /// line's OAM (mode 2), which the eager read reaches only once its +8hd cc+4
+    /// debt has crossed the line boundary (`read_pos_hd >= LINE_DOTS*2`). Stays
+    /// set across the sub-boundary polls, fires+clears on the boundary-crossing
+    /// FF41 read (`vis_mode_read`), backstop-cleared at the next halt entry.
+    /// Only the sub-M-cycle wake peek separates the want-0 siblings off this read
+    /// position, so the flag has no collateral (#11cz was −9 without the peek).
+    /// Armed only on the eager clock (`eager_value`) → byte-identical OFF.
+    halt_refetch: bool,
     /// The externally visible mode-0 flip (STAT mode bits, OAM/VRAM
     /// unblock): rises with `m0_src` ahead of the pipe end (see
     /// `m0_flip_events` in render.rs), and can drop back mid-line when

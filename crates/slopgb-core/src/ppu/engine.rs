@@ -80,6 +80,7 @@ impl Ppu {
             stat_rise_oam: false,
             stat_rise_m0: false,
             read_carried: false,
+            halt_refetch: false,
             line_render_done: true,
             flip_dot: 0,
             vis_early: false,

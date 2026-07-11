@@ -223,3 +223,49 @@ fn eager_dmg_ff0f_write_commit_passes() {
             .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (eager): {e}"));
     }
 }
+
+/// The eager CGB sub-M-cycle halt-wake port (#11dl): the last bounded C3-flip
+/// piece. A CGB halt exiting on the mode-0 STAT rise wakes at the flip's own
+/// M-cycle boundary (`Ppu::m0_stat_flip_reached`, a pure dot-space peek — no
+/// machine advance, timer-safe), not the whole-M-cycle IF commit that collapses
+/// two SCX-shifted flips onto one boundary; the resumed IME=1 dispatch's first
+/// FF41 read then rides the re-fetch line boundary to mode 2
+/// (`Ppu::halt_refetch_read_override`). The two coupled: the wake peek separates
+/// the wake instant (scx2_3a dot 256 → mode-0 read, scx3_3b dot 260 → mode-2
+/// read) so the read override fires with zero collateral — where the entry peek
+/// or the read shift ALONE each dropped a SameBoy-pass row (#11cw/#11cy/#11cz).
+/// The bar targets (`_3a` want0, `dec_2` want6, m0irq `_3b` want2) AND the row
+/// the coupling saves (m0int `_3b` want2, dropped by the entry peek alone) all
+/// pass; the want-0 `_1a` sibling must stay 0 (the read override must not leak).
+/// +14 SameBoy-PASS BUG rows, zero drops (`classify_cgb_regr.py` → BUG=14).
+/// Reverting either the wake peek or the read override makes this pin fail.
+/// Eager+CGB single-speed scoped → production/tier2/DMG byte-identical.
+#[test]
+fn eager_halt_wake_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr("eager_halt_wake", "game-boy-test-roms collection not present");
+        return;
+    };
+    let rows = [
+        // The five true-bar targets.
+        ("gambatte/halt/late_m0int_halt_m0stat_scx2_3a_dmg08_cgb04c_out0.gbc", "0"),
+        ("gambatte/halt/late_m0int_halt_m0stat_scx3_3a_dmg08_cgb04c_out0.gbc", "0"),
+        ("gambatte/halt/late_m0irq_halt_dec_scx2_2_dmg08_cgb04c_out6.gbc", "6"),
+        ("gambatte/halt/late_m0irq_halt_dec_scx3_2_dmg08_cgb04c_out6.gbc", "6"),
+        ("gambatte/halt/late_m0irq_halt_m0stat_scx3_3b_dmg08_cgb04c_out2.gbc", "2"),
+        // The row the coupling saves: the entry peek alone drops this
+        // (#11cw/#11cz), the read override recovers it — the discriminator the
+        // whole port turns on.
+        ("gambatte/halt/late_m0int_halt_m0stat_scx3_3b_dmg08_out0_cgb04c_out2.gbc", "2"),
+        // A want-0 sibling on the same read boundary — the override must NOT
+        // leak onto it (the sub-M-cycle wake keeps its read one dot short).
+        ("gambatte/halt/late_m0int_halt_m0stat_scx2_1a_dmg08_cgb04c_out0.gbc", "0"),
+    ];
+    for (rel, expect) in rows {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_eager(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (eager halt-wake): {e}"));
+    }
+}

@@ -171,6 +171,34 @@ impl Ppu {
             && self.projected_flip_dot() <= self.dot + dots
     }
 
+    /// Whether `self.dot` sits in the M-cycle that contains the current line's
+    /// mode-0 (HBlank) STAT flip — a pure dot-space peek robust after the render
+    /// completes (unlike [`Self::stat_m0_rise_within`], which needs
+    /// `!line_render_done`). The eager whole-M-cycle wake commits the mode-0 IF
+    /// at the END of the M-cycle containing the flip, so two lines whose flips
+    /// differ by <4 dots (an SCX&7 delta) wake at the same boundary; this
+    /// recovers the flip's own dot (`flip_dot` once recorded, else the
+    /// projection) and confines the wake peek to the flip's own M-cycle
+    /// `[flip, flip+4)` (single-speed) so the eager wake lands at tier2's
+    /// sub-M-cycle wake instant instead of the whole-M-cycle IF commit — and
+    /// does NOT re-fire on the stale, already-passed flip after a halt rewind.
+    pub(crate) fn m0_stat_flip_reached(&self) -> bool {
+        if self.eng_stat & STAT_SRC_HBLANK == 0 || self.line > 143 {
+            return false;
+        }
+        let flip = if self.line_render_done {
+            if self.flip_dot == 0 {
+                return false;
+            }
+            self.flip_dot
+        } else if self.render.active {
+            self.projected_flip_dot()
+        } else {
+            return false;
+        };
+        flip <= self.dot && self.dot < flip + 4
+    }
+
     /// Whether the current line is the LCD-enable
     /// glitch line — its mode-0 engine rise is emitted at a different offset
     /// from the true (SameBoy) commit than normal lines' (rise == visexit vs
@@ -186,6 +214,49 @@ impl Ppu {
     /// resolved (one-shot).
     pub(crate) fn set_read_carried(&mut self, v: bool) {
         self.read_carried = v;
+    }
+
+    /// Arm the eager halt-woken re-fetch boundary override (see the
+    /// [`Ppu::halt_refetch`] field). Set by the eager CGB halt wake; the
+    /// interconnect clears it on the boundary-crossing FF41 read (one-shot).
+    pub(crate) fn set_halt_refetch(&mut self, v: bool) {
+        self.halt_refetch = v;
+    }
+
+    /// Whether an armed [`Ppu::halt_refetch`] read has now crossed the line
+    /// boundary (`read_pos_hd >= LINE_DOTS*2`) — the interconnect's one-shot
+    /// clear signal for the halt-woken re-fetch FF41 read.
+    pub(crate) fn halt_refetch_crossed(&self) -> bool {
+        self.halt_refetch && self.read_pos_hd() >= i32::from(LINE_DOTS) * 2
+    }
+
+    /// The eager halt-woken re-fetch boundary override for `vis_mode_read`
+    /// (CGB single-speed): an IME=1 halt wake on the mode-0 STAT rise dispatches
+    /// the STAT ISR, whose first FF41 read the sub-M-cycle wake peek
+    /// (`halt_wake_mid_impl`) lands at the line's last dot — `read_pos_hd ==
+    /// LINE_DOTS*2`, the +8hd cc+4 debt having crossed the line boundary while
+    /// `self.dot` (452) has not — where SameBoy's cc+4 re-fetch view already
+    /// sits in the next line's OAM scan (mode 2). Without the sub-M-cycle wake
+    /// this fired on the want-0 `_a` siblings too (#11cz, −9 SameBoy-pass), but
+    /// the wake peek wakes them one M-cycle earlier so their read lands one dot
+    /// short of the boundary (`read_pos_hd` 904 < 912, stays mode 0) — the
+    /// coupling that makes the arm collateral-free. `halt_refetch` is armed only
+    /// on the eager clock → byte-identical OFF. `None` = no override.
+    pub(in crate::ppu) fn halt_refetch_read_override(&self, m: u8) -> Option<u8> {
+        if self.eager_value
+            && self.halt_refetch
+            && self.model.is_cgb()
+            && !self.ds
+            && self.line >= 1
+            && self.line < 144
+            && !self.glitch_line
+            && m == 0
+            && self.read_pos_hd() >= i32::from(LINE_DOTS) * 2
+        {
+            Some(2)
+        } else {
+            None
+        }
     }
 
     /// Whether the STAT IF bit handed out by the last [`Self::tick`] came
