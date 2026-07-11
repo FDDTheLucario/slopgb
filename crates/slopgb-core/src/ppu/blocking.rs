@@ -43,6 +43,40 @@ impl Ppu {
             && self.dot - self.vram_wr_dot < 8
     }
 
+    /// EAGER emergent-flip accessibility release (HALFDOT Part-A, #11dm): the
+    /// OAM/VRAM read + write mode-3→0 unblock keyed to the render's OWN
+    /// projected flip on the eager clock, REPLACING the tier2 `vis_early`
+    /// case-tower boolean for the eager path. The eager `vis_early` fires off
+    /// the LE `early_lead = 3` residue (`mode0.rs`) — 2 dots too early — so
+    /// extending its release to eager over-releases the `_1` reads (#11dg: CGB
+    /// +13/−9). Instead the read's exact half-dot position
+    /// ([`Ppu::read_pos_hd`], +8 hd SS read-debt) is compared against the
+    /// EMERGENT flip `2 * projected_flip_dot()` (the render's live projection —
+    /// SS `dhalf` is always 0, so the whole-dot projection IS the half-dot
+    /// flip) plus the 6-hd accessibility lag (SameBoy's OAM/VRAM `m0Time`
+    /// trails the mode-0 flip). This resolves the `_1`/`_2` pairs whole-dot on
+    /// the eager clock where the boolean cannot: `postread_scx3_2` (rphd 520 ≥
+    /// 2·257+6 = 520 → open), `postread_scx5_1` (rphd 520 < 2·259+6 = 524 →
+    /// blocked), `postwrite_2_scx3` (write lands) vs `postwrite_1` (rphd 512 <
+    /// 2·254+6 = 514 → blocked). SS bare (sprite/window-free) visible lines
+    /// only — sprite/window lines carry their own extended exit; the DS floor
+    /// is a separate lever. `eager_value`-gated → tier2 + production
+    /// byte-identical (never released here).
+    fn eager_access_released(&self) -> bool {
+        self.eager_value
+            && !self.ds
+            && !self.glitch_line
+            && (1..144).contains(&self.line)
+            && self.render.active
+            && !self.render.win_active
+            && !self.render.win_stalled
+            && !self.render.win_aborted
+            && self.render.n_sprites == 0
+            && !self.wy_latch
+            && self.wy2 != self.ly
+            && self.read_pos_hd() >= 2 * i32::from(self.projected_flip_dot()) + 6
+    }
+
     pub(crate) fn oam_read_blocked(&self) -> bool {
         self.enabled
             && self.line <= 143
@@ -55,6 +89,9 @@ impl Ppu {
             // SameBoy reads accessible (oam_access/vram_m3 postread_scx3). Release
             // on `vis_early`. Never set in production → byte-identical OFF.
             && !(self.tier2_reclock && self.vis_early)
+            // EAGER emergent-flip release (the eager twin of the `vis_early`
+            // line above; see [`Self::eager_access_released`]).
+            && !self.eager_access_released()
             // Tier-2 CGB line-start OAM-read window: SameBoy keeps
             // `oam_read_blocked = false` for the first few T-cycles of each
             // visible line (`display.c:1805-1810` — the mode-0/HBlank tail runs
@@ -178,7 +215,8 @@ impl Ppu {
     /// lines excluded so `lcdon_write_timing-GS` (the line-start dots 80-83 gap)
     /// is untouched. Never set in production / LE-only → byte-identical OFF.
     fn write_unblocked_early(&self) -> bool {
-        self.tier2_reclock && self.vis_early && !self.glitch_line
+        (self.tier2_reclock && self.vis_early && !self.glitch_line)
+            || self.eager_access_released()
     }
 
     pub(crate) fn vram_read_blocked(&self) -> bool {
@@ -188,6 +226,8 @@ impl Ppu {
             // Tier-2: VRAM unblocks coincident with the visible mode→0 flip
             // (`vis_early`); see `oam_read_blocked`. Byte-identical OFF.
             || (self.tier2_reclock && self.vis_early)
+            // EAGER emergent-flip release (see [`Self::eager_access_released`]).
+            || self.eager_access_released()
             // NOTE: the DS line-END read release is NOT applied to
             // VRAM. `vram_m3/postread_ds_2` (want accessible @dot254) is
             // CO-TEMPORAL with `vramw_m3end/vramw_m3end_ds_2` (want the readback

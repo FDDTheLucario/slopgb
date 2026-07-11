@@ -105,6 +105,43 @@ fn cgb_ly153_loads_two_dots_early() {
     assert_eq!(d.read(0xFF44), 152, "DMG keeps LY=152 to the line end");
 }
 
+/// HALFDOT Part-A (#11dm): the EAGER emergent-flip accessibility release
+/// (`Ppu::eager_access_released`) unblocks OAM/VRAM reads + writes at the
+/// render's OWN projected flip on the eager clock — where the tier2
+/// `vis_early` boolean (LE `early_lead = 3`, 2 dots early) over-releases
+/// the `_1` sibling. On an SCX=3 bare line the flip projects to dot 257,
+/// so the `_2` read (dot 256, `read_pos_hd` 520 ≥ 2·257+6 = 520) releases
+/// while the `_1` read (dot 252, `read_pos_hd` 512 < 520) stays blocked —
+/// the gambatte `postread_scx3_1`/`_2` + `postwrite_2_scx3` split. Eager
+/// off (production/tier2) keeps both blocked pre-dispatch (byte-identical).
+#[test]
+fn eager_emergent_flip_releases_accessibility_at_the_projected_exit() {
+    let mut p = cgb();
+    p.write(0xFF43, 3); // SCX 3 → bare-line mode-3→0 flip projects to dot 257
+    p.write(0xFF40, 0x81); // LCD + BG on
+    p.set_eager_value(true);
+    run_to(&mut p, 1, 252); // the `_1` access position (read_pos_hd 512)
+    assert_eq!(p.projected_flip_dot(), 257, "SCX=3 bare flip projects dot 257");
+    assert!(!p.line_render_done, "dispatch has not fired at dot 252");
+    assert!(p.oam_read_blocked(), "eager `_1` OAM read stays blocked pre-flip");
+    assert!(p.vram_read_blocked(), "eager `_1` VRAM read stays blocked pre-flip");
+    p.write(0xFE00, 0x11);
+    assert_eq!(p.oam[0], 0, "eager `_1` OAM write dropped pre-flip");
+
+    run_to(&mut p, 1, 256); // the `_2` access position (read_pos_hd 520)
+    assert!(!p.line_render_done, "dispatch still pending at dot 256");
+    assert!(!p.oam_read_blocked(), "eager `_2` OAM read releases at the emergent flip");
+    assert!(!p.vram_read_blocked(), "eager `_2` VRAM read releases at the emergent flip");
+    p.write(0xFE00, 0x22);
+    assert_eq!(p.oam[0], 0x22, "eager `_2` OAM write lands at the emergent flip");
+
+    // Eager off (production / tier2): both stay blocked at dot 256 (the
+    // release is eager-gated) — byte-identical with the flag-off path.
+    p.set_eager_value(false);
+    assert!(p.oam_read_blocked(), "production OAM read stays blocked (no eager release)");
+    assert!(p.vram_read_blocked(), "production VRAM read stays blocked (no eager release)");
+}
+
 /// CGB VRAM read blocking starts 3 dots later than DMG — a read at
 /// state(80) still returns data (gambatte vramReadable `lineCycles <
 /// 76 + 3*cgb`; SameBoy oam_search_index-37 `vram_read_blocked =
