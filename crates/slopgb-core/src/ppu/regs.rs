@@ -679,6 +679,23 @@ impl Ppu {
                     && value != self.ly
                 {
                     self.wy_trig_sb_raw = false;
+                    // The dot-0/dot-<4 un-trigger write ALSO spuriously latched
+                    // the wy2-lagged SHADOW (`wy_trig_sb`) at line start (wy2
+                    // still = old_wy = ly before this write's delayed copy
+                    // propagates). When the write lands BEFORE the render draws
+                    // the window (the `_1` variant, WY→FF at dot 0 → `win_active`
+                    // never rises, so the D6 arm cannot fire), the sticky shadow
+                    // blocks the arm-8 emergent bare exit on every later line —
+                    // over-holding mode 3. Release it (mirror of the DS
+                    // `wy_latch` un-latch above) and commit wy2 immediately so
+                    // the next dot's compare does not re-set it. `late_wy_1toFF_1`
+                    // / `2toFF_1` recover; the `_2` siblings (render drew) keep
+                    // D6. Byte-identical flag-OFF (gated tier2||eager).
+                    if self.wy_trig_sb && self.wy_trig_sb_line == self.ly {
+                        self.wy_trig_sb = false;
+                    }
+                    self.wy2 = value;
+                    self.wy2_delay = 0;
                 }
                 // The live window-trigger comparison uses a delayed WY
                 // copy — see `wy2`.

@@ -265,6 +265,65 @@ fn eager_dmg_late_wy_passes() {
     }
 }
 
+/// The DMG late-WY `_1` boundary siblings RE-HOSTED onto the eager clock (L2,
+/// #11di). The `_2` pairs above land BEFORE the render draws (a same-line
+/// commit); the `_1` writes commit ONE dot past the head, so on the eager clock
+/// the wy2-lagged render behaves differently than tier2's deferred frame, and
+/// the write-latch alone (`eager_dmg_late_wy_passes`) does not recover them.
+/// Two eager-DMG-scoped mechanisms close the gap. UN-trigger
+/// (`1toFF_1`/`2toFF_1`, out0): the dot-0 WY→FF write spuriously latched the
+/// wy2-lagged SHADOW (`wy_trig_sb`) at line start; the render never draws
+/// (`win_active` false), so the sticky shadow blocked the arm-8 emergent bare
+/// exit and the read over-held. The regs.rs SS un-latch now also releases the
+/// shadow + commits wy2 (mirror of the DS un-latch). EXTEND
+/// (`10to0_ly1_1`/`FFto0_ly2_1`/`FFto1_ly2_1`, out3): the eager render
+/// OVER-triggers the cross-line seam (`win_active`), so arm D1 fires with the
+/// steady 259 instead of the trigger-line 263; the arm now uses the cross-line
+/// 263 when `wy_xline_trig` under `eager_value`.
+/// EV DMG two-bin 74 → 69 (clean +5/−0, all 5 SameBoy-PASS TRUE-bar rows); CGB
+/// byte-identical (EV 318, tier2 291). The `scx2/scx3` extend siblings + the
+/// `late_disable/reenable`/`m2int` window residual stay floored (render-frame /
+/// read-frame, Part A). Production byte-identical OFF.
+#[test]
+fn eager_dmg_late_wy1_rehost_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_dmg_late_wy1_rehost",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 5] = [
+        (
+            "gambatte/window/arg/late_wy_1toFF_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/arg/late_wy_2toFF_1_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/arg/late_wy_10to0_ly1_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto0_ly2_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto1_ly2_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_eager(&rom, Model::Dmg);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, false)
+            .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (eager): {e}"));
+    }
+}
+
 /// The window visible-mode-3 LENGTH law (the FF41-read
 /// half of the atomic reclock). A triggering window's SameBoy mode-3→0 exit is
 /// `SBex = 263 + SCX&7` (cfl); the CPU-visible FF41 exit is `SBex − read_offset`.

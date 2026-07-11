@@ -363,7 +363,21 @@ impl Ppu {
             && m == 3
         {
             if self.eff.wx < 0xA6 {
-                fold(&mut exit, 2 * (259 + scx7));
+                // The boundary-WY cross-line trigger line (`wy_xline_trig`, set
+                // by the regs.rs tail/head seam writes) extends the SAME +4 dots
+                // past the steady-state exit that the normal first-window line
+                // does (SameBoy's trigger line ends mode 3 later — the exclusion
+                // above only skips the `wy2 == ly` first line). On the DMG eager
+                // clock the wy2-lagged render OVER-triggers this seam line
+                // (`win_active` rises where the tier2 render misses it and arm 7
+                // compensates at `m == 0`), so arm D1 fires with the steady 259
+                // and the read under-holds. Give it the cross-line 263 exit,
+                // matching arm 7's polled extend (`late_wy_10to0_ly1_1`,
+                // `FFto0/FFto1/FFto2_ly2_scx*_1`, want extend). `eager_value`-gated
+                // → tier2 byte-identical (its render never triggers the seam, so
+                // arm D1 does not fire there).
+                let base = if self.eager_value && self.wy_xline_trig { 263 } else { 259 };
+                fold(&mut exit, 2 * (base + scx7));
             } else if self.render.n_sprites == 0 {
                 fold(&mut exit, 2 * (253 + scx7));
             } else if self.render.sprites[..usize::from(self.render.n_sprites)]
