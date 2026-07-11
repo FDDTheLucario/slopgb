@@ -178,3 +178,48 @@ fn eager_ack_squash_retrigger_passes() {
             .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (eager): {e}"));
     }
 }
+
+/// The DMG re-host of the FF0F IF-clear write-conflict borrow (#11dj). DMG is
+/// single-speed with the same 4-dot M-cycle and 1-T WriteCpu commit as CGB SS,
+/// so the identical whole-dot borrow (`Interconnect::write`, un-scoped from
+/// is_cgb for addr FF0F only) moves a bit1-clearing FF0F write's commit to the
+/// WriteCpu dot (D+1) and folds a co-instant STAT rise into `intf` first, then
+/// squashes it. Three SameBoy-PASS BUG rows (`classify_dmg.py` → BUG) recover:
+/// the mode-0 IF-clear straddle (`m2int_m0irq_scx3_ifw_2` want 0,
+/// `m2int_m0irq_scx3_ifw_4` want 0) and the line-153 LYC IF-write
+/// (`lycint152_lyc153irq_ifw_2` want E0). The FF41/FF45 WriteCpu borrow does
+/// NOT cross to DMG (a net-negative A/B swap on the `m0enable/lycdisable_*`
+/// siblings), so the DMG borrow is FF0F-only. Reverting the DMG FF0F scope
+/// makes this pin fail (the rise re-sets IF → got 2/8/E2). Eager+DMG+SS scoped
+/// → production/tier2/CGB byte-identical.
+#[test]
+fn eager_dmg_ff0f_write_commit_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_dmg_ff0f_write_commit",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let rows = [
+        (
+            "gambatte/m2int_m0irq/m2int_m0irq_scx3_ifw_2_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/m2int_m0irq/m2int_m0irq_scx3_ifw_4_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/ly0/lycint152_lyc153irq_ifw_2_dmg08_cgb04c_outE0.gbc",
+            "E0",
+        ),
+    ];
+    for (rel, expect) in rows {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_eager(&rom, Model::Dmg);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, false)
+            .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (eager): {e}"));
+    }
+}
