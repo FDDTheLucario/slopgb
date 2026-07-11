@@ -122,6 +122,15 @@ impl Interconnect {
         self.tier2_reclock = on;
         if on {
             self.set_leading_edge_reads(true);
+            // The tier2 deferred clock and the eager-value clock are mutually
+            // exclusive frames; enabling tier2 clears any armed eager so a
+            // `set_tier2_reclock`-built machine runs PURE tier2 even when the
+            // eager construction default is temp-flipped on (else the tier2
+            // pins would run an incoherent tier2∧eager hybrid). Inert in
+            // production (eager already off → no-op) — the shipped defaults are
+            // both false, so the steady-state tier2 two-bin is unperturbed.
+            self.eager_value = false;
+            self.ppu.set_eager_value(false);
         }
         self.ppu.set_tier2_reclock(on);
     }

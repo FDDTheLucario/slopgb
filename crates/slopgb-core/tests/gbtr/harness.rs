@@ -15,6 +15,18 @@ use crate::common::png;
 /// Build a machine for a collection ROM; a rejected cartridge means a
 /// corrupt checkout, not a test failure.
 pub fn boot(rom: &[u8], model: Model) -> GameBoy {
+    // `SLOPGB_GBTR_EAGER=1` boots every default-path case on the coherent
+    // eager-value C3-flip (`new_with_eager`, the #11ds construction path) so a
+    // whole suite can be diffed OFF-vs-flip for the eager re-host measurement.
+    // Unset = the production frame, byte-identical.
+    if std::env::var_os("SLOPGB_GBTR_EAGER").is_some() {
+        return GameBoy::new_with_eager(model, rom.to_vec())
+            .unwrap_or_else(|e| panic!("cartridge rejected ({model:?}): {e:?}"));
+    }
+    if std::env::var_os("SLOPGB_GBTR_TIER2").is_some() {
+        return GameBoy::new_with_reclock(model, rom.to_vec())
+            .unwrap_or_else(|e| panic!("cartridge rejected ({model:?}): {e:?}"));
+    }
     GameBoy::new(model, rom.to_vec())
         .unwrap_or_else(|e| panic!("cartridge rejected ({model:?}): {e:?}"))
 }
