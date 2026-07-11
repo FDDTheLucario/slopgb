@@ -386,3 +386,43 @@ fn tier2_eager_dmg_ly0_oam_entry_passes() {
             .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (eager ly0 oam): {e}"));
     }
 }
+
+/// HALFDOT (#11dw) — the DMG line-153 FF41 write-commit half-dot, the coupled
+/// odd-half STAT engine's first wall-1 recovery. On line 153 the DMG FF41
+/// engine-view (`eng_stat`) write commits its disable ~2 dots later than the
+/// eager cc+4 whole-dot landing (the line-153 write quirk): SameBoy's
+/// VBLANK-disable lands COINCIDENT with the LYC=153 re-latch (dot 6), so the
+/// held LYC match keeps the STAT line high across the disable → no fresh edge
+/// (`want E0`). slopgb's whole-dot cc+4 commit dropped the line 2 dots before
+/// the LYC re-latch → spurious edge → E2. The deferral is applied to ONLY the
+/// engine `eng_stat` view via the odd-half `Ppu::stat_update_half`, leaving the
+/// LYC re-latch schedule the window/DMA/`_2` neighbours consume UNTOUCHED — so
+/// this recovers the exact #11dv target pair with ZERO family shuffle (the
+/// whole-dot LYC back-date #11dv measured netted +3 DMG / +17 CGB). The CGB
+/// siblings of these two rows already pass via the two-phase `eng_stat_pending`
+/// (pinned in `eager_write_conflict_commit_passes`); this is the DMG twin.
+/// Reverting the `eng_stat_half` line-153 defer makes this pin fail (the commit
+/// lands at dot 4, the line dips → E2). Eager + DMG + line-153 scoped →
+/// production/tier2/CGB byte-identical; EV DMG 54 → 52 clean, EV CGB 295
+/// unchanged, mooneye 93×3.
+#[test]
+fn eager_dmg_lyc153_m1disable_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_dmg_lyc153_m1disable",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let rows = [
+        "gambatte/lycEnable/lyc153_late_m1disable_3_dmg08_cgb04c_outE0.gbc",
+        "gambatte/lycEnable/lyc153_late_enable_m1disable_3_dmg08_cgb04c_outE0.gbc",
+    ];
+    for rel in rows {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_eager(&rom, Model::Dmg);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), "E0", false)
+            .unwrap_or_else(|e| panic!("{rel} [Dmg] expected outE0 (eager line-153 m1disable): {e}"));
+    }
+}

@@ -319,6 +319,13 @@ pub struct Ppu {
     ///   (`m0enable/lycdisable_ff41_scx*`: the dying LYC hold and the mode-0
     ///   rise are separated on hardware, collapsed by slopgb's early flip).
     eng_stat_pending: Option<EngStatPending>,
+    /// HALFDOT (#11dw): a DMG FF41 engine-view (`eng_stat`) write scheduled to
+    /// commit at its true WriteCpu sub-dot position, `(value, half_dots_left)`,
+    /// counted down by the odd-half engine ([`Ppu::stat_update_half`]) so the
+    /// disable/enable lands at the coincident LYC re-latch / mode-0 flip half-
+    /// dot rather than the whole-dot cc+4 commit. `None` (and unread) except
+    /// under `eager_value` → production/tier2 byte-identical.
+    eng_stat_half: Option<(u8, u8)>,
     /// Previous engine tick's `mode_for_interrupt` (m0-flip detection for
     /// the fast-forward above). Tier-2/LE only.
     eng_mfi_prev: u8,

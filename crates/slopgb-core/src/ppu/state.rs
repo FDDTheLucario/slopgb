@@ -151,6 +151,14 @@ impl Ppu {
         w.u8(self.stat_en);
         w.u8(self.eng_stat);
         write_opt_eng_stat_pending(w, self.eng_stat_pending);
+        match self.eng_stat_half {
+            Some((v, hd)) => {
+                w.bool(true);
+                w.u8(v);
+                w.u8(hd);
+            }
+            None => w.bool(false),
+        }
         w.u8(self.eng_mfi_prev);
         write_opt_u8_u16(w, self.ff41_ds_drop);
         w.u8(self.stat_if_squash);
@@ -272,6 +280,11 @@ impl Ppu {
         self.stat_en = r.u8()?;
         self.eng_stat = r.u8()?;
         self.eng_stat_pending = read_opt_eng_stat_pending(r)?;
+        self.eng_stat_half = if r.bool()? {
+            Some((r.u8()?, r.u8()?))
+        } else {
+            None
+        };
         self.eng_mfi_prev = r.u8()?;
         self.ff41_ds_drop = read_opt_u8_u16(r)?;
         self.stat_if_squash = r.u8()?;

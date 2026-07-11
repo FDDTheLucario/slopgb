@@ -10,6 +10,7 @@ impl Ppu {
             stat_en: 0,
             eng_stat: 0,
             eng_stat_pending: None,
+            eng_stat_half: None,
             eng_mfi_prev: 0,
             ff41_ds_drop: None,
             stat_if_squash: 0,
@@ -190,6 +191,7 @@ impl Ppu {
             // gap and apply at a stale tick after re-enable.
             self.eng_stat = self.stat_en;
             self.eng_stat_pending = None;
+            self.eng_stat_half = None;
             self.ff41_ds_drop = None;
             self.stat_if_squash = 0;
             self.ack_squash_ppu = 0;
@@ -261,6 +263,11 @@ impl Ppu {
             // whole-dot strobe (this half is inert with `eager_value` false).
             if self.eager_value {
                 self.strobe_tick();
+                // HALFDOT (#11dw): the odd-half STAT-engine level re-eval, so a
+                // coincident FF41 write-commit / LYC re-latch / mode-0 rise
+                // resolves at its true sub-dot phase. Idempotent on the aligned
+                // grid → byte-identical (see `stat_update_half`).
+                self.stat_update_half();
             }
             return 0;
         }

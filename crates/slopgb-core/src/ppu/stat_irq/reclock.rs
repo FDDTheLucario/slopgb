@@ -389,6 +389,63 @@ impl Ppu {
         self.stat_update_vblank_oam_pulses();
     }
 
+    /// HALFDOT (#11dw): the idempotent odd-half `GB_STAT_update` level
+    /// re-eval. The SameBoy STAT interrupt line is recomputed on the 8-MHz
+    /// ODD half-dot (`Ppu::tick_half`, `dhalf 0→1`) as well as the whole-dot
+    /// even half, so a coincident FF41 write-commit (`eng_stat_half`), LYC
+    /// re-latch, or mode-0 source rise resolves at its true SUB-dot phase
+    /// rather than snapping to the whole-dot even-half tick — the coupled
+    /// engine the #11du/#11dv maps scoped (pieces 1+3+4). On the ALIGNED grid
+    /// (no odd-half input change) `(mfi, eng_stat, lyc_interrupt_line)` are
+    /// unchanged from the even-half tick, so `StatUpdate::update` recomputes
+    /// the SAME level → no 0→1 edge → no IF → byte-identical to the
+    /// even-half-only engine. The IF it raises persists in `pending_if` and is
+    /// folded at this dot's completing (even) half. Eager-only; never runs
+    /// flag-off (`eager_value` false), so production is byte-identical.
+    pub(super) fn stat_update_half(&mut self) {
+        // Commit any FF41 engine-view (`eng_stat`) write scheduled to land on
+        // THIS odd half-dot (piece 4 — the write's true WriteCpu sub-dot
+        // position). DMG-scoped (the CGB two-phase `eng_stat_pending` owns the
+        // CGB write frame). The odd-half level re-eval runs ONLY when such a
+        // commit lands: without an armed `eng_stat_half` the inputs
+        // (mfi, eng_stat, lyc) are unchanged from the even-half tick, so a bare
+        // re-eval would just re-run the whole-dot engine's edge WITHOUT its
+        // squash/pending logic and shuffle verdicts — so stay inert (EV
+        // byte-identical) until armed. `eng_stat_half` is only set under
+        // `eager_value` → production/tier2 byte-identical.
+        let Some((value, hd)) = self.eng_stat_half else {
+            return;
+        };
+        if hd > 0 {
+            self.eng_stat_half = Some((value, hd - 1));
+            return;
+        }
+        self.eng_stat_half = None;
+        if !self.enabled {
+            self.eng_stat = value;
+            return;
+        }
+        // The disable/enable lands here, at the coincident LYC re-latch /
+        // mode-0 flip half-dot rather than the whole-dot cc+4 commit. Re-eval
+        // the level: a rise fires IF (folded at this dot's completing half); a
+        // fall silently lowers the line so a later natural rise re-edges.
+        self.eng_stat = value;
+        let mfi = self.mode_for_interrupt;
+        if self
+            .stat_update
+            .update(mfi, self.eng_stat, self.lyc_interrupt_line)
+        {
+            self.pending_if |= IF_STAT;
+            self.stat_update_halt_masks(mfi);
+            probe!(if crate::probe::s5dbg_on() && self.line < 154 {
+                eprintln!(
+                    "SLOPGB dispatch ly={} dot={} mfi={} lycln={} (halfdot)",
+                    self.line, self.dot, mfi, self.lyc_interrupt_line as u8
+                );
+            });
+        }
+    }
+
     /// The vblank-entry OAM (mode-2) STAT pulse the flag-on
     /// rising-edge [`Self::stat_update_tick`] engine does not emit.
     ///

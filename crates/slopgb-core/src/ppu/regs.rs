@@ -514,6 +514,31 @@ impl Ppu {
                             mfi_t0: 0,
                             k: 0,
                         });
+                    } else if self.eager_value
+                        && !self.model.is_cgb()
+                        && self.line == 153
+                        && !self.glitch_line
+                    {
+                        // HALFDOT (#11dw) piece 4: on LINE 153 the DMG FF41
+                        // engine-view (`eng_stat`) write commits its
+                        // disable/enable ~2 dots LATER than the eager cc+4 whole-
+                        // dot landing — the line-153 write quirk. SameBoy's
+                        // VBLANK-disable on line 153 lands COINCIDENT with the
+                        // LYC=153 re-latch (dot 6), so the held LYC match keeps
+                        // the STAT line high across the disable → no fresh edge
+                        // (`lycEnable/lyc153_late_m1disable_3` want E0; slopgb's
+                        // whole-dot cc+4 commit at dot 4 dropped the line 2 dots
+                        // before the LYC re-latch → spurious edge → E2). Deferring
+                        // ONLY the engine `eng_stat` view via the odd-half
+                        // `stat_update_half` (piece 1) resolves it at the
+                        // coincident sub-dot without moving the whole-dot cc+4
+                        // FF41-read frame. Line-153-scoped (the write side of the
+                        // documented line-153 LYC side-effect zone), NOT ROM-
+                        // specific. The sibling `m0enable/lycdisable_ff41_2` (line
+                        // 1) is untouched. `eager_value`-gated → byte-identical.
+                        self.eng_stat_half =
+                            Some((data, crate::probe::tune_engcommit(2)));
+                        self.eng_stat_pending = None;
                     } else {
                         self.eng_stat = data;
                         self.eng_stat_pending = None;
