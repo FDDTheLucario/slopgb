@@ -347,3 +347,42 @@ fn eager_window_m0irq_deliver_passes() {
         });
     }
 }
+
+/// The eager DMG line-0 OAM-entry read-frame back-date (#11dp): a line-0
+/// dot<4 FF41 read appearing on the eager clock (cc+0) maps to its cc+4 =
+/// line-0 dot 4-7 = the OAM scan (mode 2), the DMG twin of the `(1..144)`
+/// line-start arm. Gated on `!line_render_done` — the discriminator vs the
+/// mooneye `stat_lyc_onoff` LCD-enable poll (line-0 dot 0, want mode 0), which
+/// resolves `lrd=1` (no pending scan). Recovers two SameBoy-PASS bar rows:
+/// `ly0/lycint152_ly0stat_3` (want C2 — its A/B sibling `_2` reads eager
+/// LY=153, untouched) and `enable_display/frame1_m2stat_count_2` (want 90).
+/// Reverting the `line == 0 && !line_render_done` arm makes this pin fail (the
+/// reads fall back to native mode 0). Eager + DMG scoped → production/tier2/CGB
+/// byte-identical; mooneye 3-clock green (`stat_lyc_onoff` holds via the guard).
+#[test]
+fn tier2_eager_dmg_ly0_oam_entry_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "tier2_eager_dmg_ly0_oam_entry",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let rows = [
+        ("gambatte/ly0/lycint152_ly0stat_3_dmg08_cgb04c_outC2.gbc", "C2"),
+        (
+            "gambatte/enable_display/frame1_m2stat_count_2_dmg08_cgb04c_out90.gbc",
+            "90",
+        ),
+        // The A/B sibling that must stay mode 0 (its verdict read is the
+        // earlier eager LY=153 read, not the line-0 read the arm rewrites).
+        ("gambatte/ly0/lycint152_ly0stat_2_dmg08_cgb04c_outC0.gbc", "C0"),
+    ];
+    for (rel, expect) in rows {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_eager(&rom, Model::Dmg);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, false)
+            .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (eager ly0 oam): {e}"));
+    }
+}

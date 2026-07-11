@@ -208,19 +208,20 @@ impl Ppu {
         // CGB line-0 read stays mode 1 across the wrap, no arm). `dot < 4`
         // confines the OAM-entry arms to the line START so a real mode-0 HBlank
         // read (dots ≥ exit) is untouched. `eager_value`-only → tier2 +
-        // production byte-identical. SameBoy-PASS pins: line-start
-        // `lycint_m0stat`/`lycm2int_m0stat`/`m0int_m0stat` (want 2), VBlank
-        // `enable_display/*_m1stat`/`m1/lycint_m1stat` (want 1), line-0
-        // `ly0/lycint152_ly0stat_2` (want 0). `!glitch_line`: the first line
-        // after an LCD enable takes its own leading-edge back-date in
-        // `vis_mode`. The line-0 OAM-entry arm (line 0 dots 0-3 m0→2) is NOT
-        // ported: gambatte `ly0/lycint152_ly0stat_3` (want 2) and mooneye
-        // `stat_lyc_onoff` (want 0) BOTH read line-0 dot 0 with opposite
-        // verdicts — a sub-dot ambiguity the whole-dot frame can't split
-        // (HALFDOT floor).
+        // production byte-identical. `!glitch_line`: LCD-enable line self-dates.
+        // The line-0 OAM-entry arm (m0→2) gates on `!line_render_done`: a fresh
+        // line-0 with a PENDING OAM scan (`lrd=0`) back-dates to cc+4 OAM mode 2
+        // (`lycint152_ly0stat_3` want C2 / `frame1_m2stat_count_2` want 90),
+        // while the mooneye `stat_lyc_onoff` post-enable poll resolves `lrd=1`
+        // (mode 0) — the discriminator the prior "HALFDOT floor" lacked; sibling
+        // `ly0stat_2` (want 0) verdicts on its earlier eager LY=153 read. Pin
+        // `tier2_eager_dmg_ly0_oam_entry_passes`.
         if self.eager_value && !self.model.is_cgb() && !self.glitch_line {
             if (1..144).contains(&self.line) && m == 0 && self.dot < 4 {
                 return 2; // line-start OAM entry (cc+4 = OAM scan)
+            }
+            if self.line == 0 && m == 0 && self.dot < 4 && !self.line_render_done {
+                return 2; // line-0 OAM entry with a pending scan (cc+4 = OAM)
             }
             if self.line == 144 && m == 0 {
                 return 1; // VBlank entry (cc+4 = VBlank)
