@@ -77,6 +77,32 @@ impl Ppu {
             && self.read_pos_hd() >= 2 * i32::from(self.projected_flip_dot()) + 6
     }
 
+    /// EAGER off-screen-window (WX=166) STALLED accessibility release: the
+    /// twin of [`Self::eager_access_released`] for the off-screen window that
+    /// activates during HBlank but renders NOTHING (`win_stalled`) — SameBoy's
+    /// mode-3 OAM/VRAM lock releases at the bare flip there (the stalled window
+    /// adds no fetch), so an OAM/VRAM read past the flip is ACCESSIBLE
+    /// (`m2int_wxA6_{oam,vram}busyread` [Dmg] want the readback). slopgb's
+    /// render keeps `win_active` set (extending the lock to the render-done
+    /// dispatch), so both `eager_access_released` (`!win_active`-scoped) and the
+    /// tier2 path block it — a MISSING law in both clocks (these rows fail tier2
+    /// too). Released only on the eager clock past the emergent flip
+    /// (`2*projected_flip_dot + 6`, the OAM/VRAM `m0Time` lag), on WX=166
+    /// stalled sprite-free SS visible lines. `eager_value`-gated → tier2 plus
+    /// production byte-identical.
+    fn eager_offscreen_win_access(&self) -> bool {
+        self.eager_value
+            && !self.ds
+            && !self.glitch_line
+            && (1..144).contains(&self.line)
+            && self.eff.wx == 0xA6
+            && self.render.win_active
+            && self.render.win_stalled
+            && !self.render.win_aborted
+            && self.render.n_sprites == 0
+            && self.read_pos_hd() >= 2 * i32::from(self.projected_flip_dot()) + 6
+    }
+
     pub(crate) fn oam_read_blocked(&self) -> bool {
         self.enabled
             && self.line <= 143
@@ -92,6 +118,8 @@ impl Ppu {
             // EAGER emergent-flip release (the eager twin of the `vis_early`
             // line above; see [`Self::eager_access_released`]).
             && !self.eager_access_released()
+            // EAGER off-screen-window (WX=166) stalled release.
+            && !self.eager_offscreen_win_access()
             // Tier-2 CGB line-start OAM-read window: SameBoy keeps
             // `oam_read_blocked = false` for the first few T-cycles of each
             // visible line (`display.c:1805-1810` — the mode-0/HBlank tail runs
@@ -228,6 +256,8 @@ impl Ppu {
             || (self.tier2_reclock && self.vis_early)
             // EAGER emergent-flip release (see [`Self::eager_access_released`]).
             || self.eager_access_released()
+            // EAGER off-screen-window (WX=166) stalled release.
+            || self.eager_offscreen_win_access()
             // NOTE: the DS line-END read release is NOT applied to
             // VRAM. `vram_m3/postread_ds_2` (want accessible @dot254) is
             // CO-TEMPORAL with `vramw_m3end/vramw_m3end_ds_2` (want the readback

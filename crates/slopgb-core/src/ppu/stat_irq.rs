@@ -108,6 +108,35 @@ impl Ppu {
         }
     }
 
+    /// EAGER off-screen-window (WX=166) mode-3 exit arming — the eager twin of
+    /// the `render.win_active` guard on the [`Ppu::vis_exit_hd`] window-length
+    /// arms (arm 1 CGB / arm D1 DMG), for the pre-activation read. The WX=166
+    /// window activates during HBlank (SameBoy `wx_166_interrupt_glitch`), so
+    /// slopgb's render only sets `win_active` at the HBlank match (~dot 256/264);
+    /// the eager cc+0 FF41 read lands ONE M-cycle (4 dots) BEFORE that, with
+    /// `win_active` still false, so the window arm misses and the bare arm-8
+    /// (`2*flip + 2`) fires against the render's ALREADY-window-elevated
+    /// projection (`projected_flip_dot` reflects the impending extension) — an
+    /// exit 4 hd too high, so the read stays mode 3 (`m2int_wxA6_scx5_m3stat`
+    /// [Cgb] want 0, `m2int_wxA6_firstline_m3stat` [Dmg] want 0). Firing the
+    /// window-length arm for this armed-but-not-yet-active read uses the closed
+    /// form (CGB `259+SCX&7`, DMG `253+SCX&7`) the deferred read already lands
+    /// on 4 dots later. WX=166 only (the glitch value; on-screen windows caught
+    /// by the render's own `win_active`), window enabled + WY-triggered by this
+    /// line, not aborted. `eager_value`-gated → tier2 + production
+    /// byte-identical (never fires there — the deferred read lands post-activation).
+    pub(super) fn eager_offscreen_win_arming(&self) -> bool {
+        self.eager_value
+            && self.eff.wx == 0xA6
+            && self.eff.lcdc & LCDC_WIN_ENABLE != 0
+            && self.line >= 1
+            && self.line < 144
+            && self.wy2 <= self.line
+            && self.wy2 <= 143
+            && !self.render.win_aborted
+            && !self.render.win_active
+    }
+
     /// STAT mode bits (FF41 bits 0-1) as currently visible to the CPU, for
     /// the interconnect (FEA0-FEFF prohibited-area reads key on OAM locking).
     pub(crate) fn mode_bits(&self) -> u8 {

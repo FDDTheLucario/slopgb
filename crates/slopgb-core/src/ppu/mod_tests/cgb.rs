@@ -277,3 +277,55 @@ fn cgb_vblank_level_holds_through_line0_dots_0_3() {
     run_to(&mut d, 0, 0);
     assert!(!d.stat_line, "DMG level low from (0,0)");
 }
+
+/// EAGER off-screen-window (WX=166) exit-arm cluster (#11dn): the WX=166
+/// window activates during HBlank, so slopgb sets `win_active` one M-cycle
+/// AFTER the eager cc+0 FF41 read — the window-length arm (arm 1 / D1) misses
+/// and the bare arm-8 over-holds mode 3 against the window-elevated projection.
+/// `Ppu::eager_offscreen_win_arming` fires the window-length exit for the
+/// pre-activation read; `Ppu::eager_offscreen_win_access` releases the
+/// stalled-window OAM/VRAM readback. On a CGB SCX=5 WX=166 line the window
+/// exit is `259+5` = dot 264 (rphd 528): the dot-260 read (rphd 528 = exit)
+/// reads mode 0 where the neutered bare arm-8 over-holds mode 3
+/// (`m2int_wxA6_scx5_m3stat` [Cgb] want 0), while dot 259 (rphd 526 < 528)
+/// still holds 3 — a real exit, not a blanket force. The stalled-window OAM
+/// read releases at the emergent flip (dot 265, rphd 538 ≥ 2·266+6 = 538) —
+/// the `m2int_wxA6_{oam,vram}busyread` [Dmg] accessibility class. Eager off
+/// (production / tier2) keeps the read blocked — byte-identical.
+#[test]
+fn eager_offscreen_wx166_window_exit_and_stalled_access() {
+    let mut p = cgb();
+    p.write(0xFF43, 5); // SCX 5 (as the m2int_wxA6_scx5_m3stat ROM)
+    p.write(0xFF4A, 0); // WY 0 → window triggered
+    p.write(0xFF4B, 0xA6); // WX 166 (off-screen glitch value)
+    p.write(0xFF40, 0xA1); // LCD + BG + window enable
+    p.set_eager_value(true);
+
+    // Pre-activation (win_active not yet set): the window-length exit (dot 264,
+    // rphd 528) drives the read, not the window-elevated bare projection.
+    run_to(&mut p, 1, 259);
+    assert!(!p.render.win_active, "wx166 window not yet HBlank-activated at dot 259");
+    assert_eq!(p.vis_mode_read(), 3, "dot 259 (rphd 526 < exit 528) still holds mode 3");
+    run_to(&mut p, 1, 260);
+    assert!(!p.render.win_active, "still pre-activation at dot 260");
+    assert_eq!(
+        p.vis_mode_read(),
+        0,
+        "dot 260 (rphd 528 = window exit) reads mode 0 via the arming arm"
+    );
+
+    // Stalled-window (win_active + win_stalled, renders nothing): the OAM/VRAM
+    // readback releases past the emergent flip.
+    run_to(&mut p, 1, 264);
+    assert!(p.render.win_active && p.render.win_stalled, "wx166 window active + stalled");
+    assert!(p.oam_read_blocked(), "dot 264 (rphd 536 < 538) OAM still blocked");
+    run_to(&mut p, 1, 265);
+    assert!(!p.oam_read_blocked(), "dot 265 (rphd 538 ≥ 2·266+6) OAM readback releases");
+    assert!(!p.vram_read_blocked(), "dot 265 VRAM readback releases too");
+
+    // Eager off (production / tier2): the stalled readback stays blocked (the
+    // release is `eager_value`-gated) — byte-identical with the flag-off path.
+    p.set_eager_value(false);
+    assert!(p.oam_read_blocked(), "production OAM read stays blocked (no eager release)");
+    assert!(p.vram_read_blocked(), "production VRAM read stays blocked (no eager release)");
+}

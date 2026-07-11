@@ -322,7 +322,7 @@ impl Ppu {
         // sprite-free lines only there; DS excludes sprite-laden lines
         // entirely (the real mode-3 end extends past the bare exit;
         // `10spritesPrLine_wx*_m3stat_ds_1` SameBoy-passes).
-        if self.render.win_active
+        if (self.render.win_active || self.eager_offscreen_win_arming())
             && self.model.is_cgb()
             && self.line >= 1
             && self.eff.wx <= 0xA6
@@ -354,7 +354,7 @@ impl Ppu {
         // trigger-line reads at 260 stay 3) but INCLUDED for wx >= 0xA0
         // (`m2int_wxA6_firstline` fits the same 253+SCX&7).
         if !self.model.is_cgb()
-            && self.render.win_active
+            && (self.render.win_active || self.eager_offscreen_win_arming())
             && self.line >= 1
             && self.eff.wx <= 0xA6
             && !self.render.win_aborted
