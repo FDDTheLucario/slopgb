@@ -301,6 +301,24 @@ pub fn run_breakpoint_rom(rom: &[u8], model: Model) -> Result<(), String> {
     check_fib(r.b, r.c, r.d, r.e, r.h, r.l)
 }
 
+/// Run one ROM to the `LD B,B` breakpoint booted on the **eager-value reclock
+/// armed from construction** (`GameBoy::new_with_eager` — the real C3 flip),
+/// then check the Fibonacci signature. Pins that the construction-time eager
+/// enable reaches the same intr_2-safe state as the runtime `set_eager_value`
+/// path (regression guard for `post_boot_inner`'s deferred re-arm).
+pub fn run_breakpoint_rom_eager(rom: &[u8], model: Model) -> Result<(), String> {
+    let mut gb = GameBoy::new_with_eager(model, rom.to_vec())
+        .map_err(|e| format!("cartridge rejected: {e}"))?;
+    while !gb.debug_breakpoint_hit() {
+        if gb.cycles() > TIMEOUT_TCYCLES {
+            return Err(format!("timeout: no LD B,B after {} T-cycles", gb.cycles()));
+        }
+        gb.step();
+    }
+    let r = gb.cpu_regs();
+    check_fib(r.b, r.c, r.d, r.e, r.h, r.l)
+}
+
 /// Collect `.gb`/`.gbc` files under `dir`, sorted for determinism.
 /// Non-recursive unless `recursive` (so `acceptance/` does not swallow its
 /// per-topic subdirectories, which have their own test functions).

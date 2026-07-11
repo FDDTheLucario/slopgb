@@ -19,6 +19,7 @@
 
 mod common;
 
+use slopgb_core::Model;
 use std::path::Path;
 
 /// Every directory group harnessed below, as `(dir, recursive)`. Single
@@ -147,4 +148,48 @@ fn madness() {
 #[test]
 fn sprite_priority() {
     common::run_sprite_priority();
+}
+
+/// Red-before-green pin for the eager-value **construction** path (`#11ds`):
+/// `GameBoy::new_with_eager` arms the eager reclock from the construction
+/// default (the real C3 flip), and `post_boot_inner`'s deferred re-arm must
+/// propagate the eager flags to the PPU engine AFTER the boot hand-off. Without
+/// that re-arm the machine runs eager reads against a non-eager PPU
+/// (incoherent) and `intr_2`/`lcdon` fail with B=42 — the exact 22-combo break
+/// the raw struct-literal flip produces. This asserts the construction path
+/// reaches the same intr_2-safe state as the runtime `set_eager_value` enable.
+/// Fails if the re-arm in `post_boot_inner` is removed.
+#[test]
+fn eager_construction_intr_2_timing() {
+    let Some(root) = common::mts_root() else {
+        common::skip_or_fail(
+            "eager_construction_intr_2_timing",
+            "no mooneye ROMs under <repo>/test-roms/mts-*",
+        );
+        return;
+    };
+    // The counter-pinned PPU-timing ROMs the struct-flip broke on all models.
+    let roms = [
+        "acceptance/ppu/intr_2_mode0_timing.gb",
+        "acceptance/ppu/intr_2_mode3_timing.gb",
+        "acceptance/ppu/intr_2_mode0_timing_sprites.gb",
+    ];
+    let mut fails = Vec::new();
+    for rel in roms {
+        let path = root.join(rel);
+        let Ok(rom) = std::fs::read(&path) else {
+            continue; // absent in a partial checkout — mts_root gate already ran
+        };
+        // Both hardware families (the flip broke DMG- and CGB-family alike).
+        for model in [Model::Dmg, Model::Cgb] {
+            if let Err(e) = common::run_breakpoint_rom_eager(&rom, model) {
+                fails.push(format!("{rel} [{model:?}]: {e}"));
+            }
+        }
+    }
+    assert!(
+        fails.is_empty(),
+        "eager-construction intr_2 timing failed:\n  {}",
+        fails.join("\n  ")
+    );
 }

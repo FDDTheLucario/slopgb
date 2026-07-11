@@ -119,7 +119,7 @@ impl GameBoy {
     /// No boot ROM is executed: CPU registers, hardware registers and timers
     /// are initialised to the exact post-boot state of `model`.
     pub fn new(model: Model, rom: Vec<u8>) -> Result<Self, CartridgeError> {
-        Self::new_inner(model, rom, false)
+        Self::new_inner(model, rom, false, false)
     }
 
     /// Like [`Self::new`], but enables the Stage-B Tier-2 reclock *before* the
@@ -137,30 +137,83 @@ impl GameBoy {
     #[doc(hidden)]
     #[cfg(any(test, feature = "port_probe"))]
     pub fn new_with_reclock(model: Model, rom: Vec<u8>) -> Result<Self, CartridgeError> {
-        Self::new_inner(model, rom, true)
+        Self::new_inner(model, rom, true, false)
     }
 
-    fn new_inner(model: Model, rom: Vec<u8>, tier2: bool) -> Result<Self, CartridgeError> {
+    /// Like [`Self::new`], but arms the **eager-value** reclock from the
+    /// construction default — mirroring the real C3 flip (flipping the
+    /// `interconnect.rs` struct-literal `eager_value`/`leading_edge_reads`
+    /// defaults to `true`). The runtime [`Self::set_eager_value`] toggle boots
+    /// on the production frame and enables afterwards; this drives the eager
+    /// default THROUGH construction, so the boot-time propagation path (the
+    /// deferred re-arm in [`Self::post_boot_inner`]) is exercised — the only
+    /// difference the C3 flip introduces. Compiled only under `cfg(test)` /
+    /// `--features port_probe`; the production build cannot arm it.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "port_probe"))]
+    pub fn new_with_eager(model: Model, rom: Vec<u8>) -> Result<Self, CartridgeError> {
+        Self::new_inner(model, rom, false, true)
+    }
+
+    fn new_inner(
+        model: Model,
+        rom: Vec<u8>,
+        tier2: bool,
+        eager: bool,
+    ) -> Result<Self, CartridgeError> {
         let cart = cartridge::Cartridge::from_bytes(rom)?;
-        Ok(Self::post_boot_inner(model, cart, tier2))
+        Ok(Self::post_boot_inner(model, cart, tier2, eager))
     }
 
     /// The direct post-boot machine (no boot ROM executed): registers, hardware
     /// registers and timers installed at the model's post-boot state. The shared
     /// body of [`Self::new`] and the [`Self::new_with_boot`] wrong-size fallback.
     fn post_boot(model: Model, cart: cartridge::Cartridge) -> Self {
-        Self::post_boot_inner(model, cart, false)
+        Self::post_boot_inner(model, cart, false, false)
     }
 
     /// [`Self::post_boot`] with the Stage-B Tier-2 reclock set (if `tier2`)
     /// before the post-boot state lands — see [`Self::new_with_reclock`].
-    fn post_boot_inner(model: Model, cart: cartridge::Cartridge, tier2: bool) -> Self {
+    fn post_boot_inner(
+        model: Model,
+        cart: cartridge::Cartridge,
+        tier2: bool,
+        eager_default: bool,
+    ) -> Self {
         let mut bus = interconnect::Interconnect::new(model, cart);
         let mut cpu = cpu::Cpu::new(model);
         if tier2 {
             bus.set_tier2_reclock(true);
         }
+        // `new_with_eager` (test / `port_probe` harness) simulates the flipped
+        // struct-literal default without touching the global default: arm the
+        // Interconnect's own eager fields, un-propagated, exactly as the raw
+        // flip leaves them. Always false in production (the real flip lands via
+        // the struct literal, making `bus.eager_value()` true directly below).
+        if eager_default {
+            bus.arm_eager_construction_default();
+        }
+        // Eager-value (the C3-flip default): flipping the `interconnect.rs`
+        // struct-literal `eager_value`/`leading_edge_reads` defaults sets only
+        // the Interconnect's own fields — it never runs the propagation that
+        // `set_eager_value`/`set_leading_edge_reads` do, so the PPU's copy of
+        // the flags (its `StatUpdate`/render engine) stays OFF: the machine
+        // runs eager reads against a non-eager PPU (incoherent → intr_2/lcdon
+        // B=42). Re-run the propagation AFTER `apply_post_boot_state`, exactly
+        // mirroring the runtime `set_eager_value` post-boot path (the only
+        // enable proven intr_2-safe, mooneye 91/91, and the frame every EV
+        // two-bin measurement rides). The suppress-then-re-arm resets the flag
+        // web (incl. the env probes) from a clean base. DIV is untouched — the
+        // boot `+4` recalibration keys on `tier2_reclock`, which eager never
+        // sets. Byte-identical when the default is false (production).
+        let eager = bus.eager_value();
+        if eager {
+            bus.set_eager_value(false);
+        }
         bus.apply_post_boot_state();
+        if eager {
+            bus.set_eager_value(true);
+        }
         if bus.cgb_mode() {
             // CGB-flagged cart: the CGB/AGB boot ROM hands off DE=$FF56
             // HL=$000D instead of the DMG-cart values in the per-model

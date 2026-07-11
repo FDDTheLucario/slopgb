@@ -12,6 +12,13 @@ impl Interconnect {
         self.cgb_mode
     }
 
+    /// The construction-time `eager_value` default (false in production).
+    /// Read by `GameBoy::post_boot_inner` to defer the eager enable until
+    /// after the boot warm-up (see there).
+    pub(crate) fn eager_value(&self) -> bool {
+        self.eager_value
+    }
+
     pub fn model(&self) -> Model {
         self.model
     }

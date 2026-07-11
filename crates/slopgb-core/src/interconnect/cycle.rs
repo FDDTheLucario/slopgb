@@ -153,6 +153,20 @@ impl Interconnect {
         (self.leading_edge_reads, self.tier2_reclock)
     }
 
+    /// Reproduce the C3-flip **construction default** exactly as flipping the
+    /// `interconnect.rs` struct-literal `eager_value`/`leading_edge_reads` to
+    /// `true` would: set only this struct's own fields, WITHOUT the
+    /// PPU-propagation that [`Self::set_eager_value`] runs. That leaves the
+    /// machine incoherent (eager reads, non-eager PPU) — the exact bug
+    /// `GameBoy::post_boot_inner`'s deferred re-arm exists to repair. Only ever
+    /// armed via the `cfg(test)`/`port_probe`-gated `GameBoy::new_with_eager`
+    /// (production `post_boot_inner` always passes `eager_default = false`), so
+    /// no shipped/golden path can reach it.
+    pub(crate) fn arm_eager_construction_default(&mut self) {
+        self.eager_value = true;
+        self.leading_edge_reads = true;
+    }
+
     /// Repay the outstanding sub-M-cycle wake skew — the next access pays the
     /// extra T and lands back on the aligned 4-T grid.
     pub(super) fn repay_wake_skew(&mut self) {
