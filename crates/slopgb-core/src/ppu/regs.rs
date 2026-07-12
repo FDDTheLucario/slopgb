@@ -92,21 +92,45 @@ impl Ppu {
                     // `Ppu::write` at the eager cc+0 (not `commit_eff`), so the debt
                     // shifts only the render view — the split #11bq built for tier2.
                     // SCX (FF43) is NOT here: its render `eff.scx` fine-scroll
-                    // discard IS the mode-3 length, so a render debt shifts the FF41
-                    // mode-3-length OCR verdict too (measured: recovers m3_scx_low/
-                    // high pixels but breaks the `late_scx_late_disable_0`/`_1`
-                    // SameBoy-PASS sibling A/B pair + `ly0_late_scx7_scx0_2`). No
-                    // clean split exists — eff.scx IS the length. Refuted, DMG SCX
-                    // stays zero-debt (see the eager-dmg-render-rehost map).
+                    // discard feeds the EMERGENT bare-line mode-3 length
+                    // (`vis_exit_hd` arm 8 = `2*flip+2`). Re-measured on the EAGER
+                    // frame (#11ej): m3_scx_low needs debt>=4, m3_scx_high never
+                    // clears (best ~41px), but the gambatte m3stat length rows
+                    // (`ly0_late_scx7_m3stat_scx0_2`, `late_scx4_1`) DROP at
+                    // debt>=2 and `late_scx_late_disable_0` at debt>=4 — the
+                    // mealybug (dot 87/111) and gambatte (dot 82) writes are too
+                    // close for any latch/window/sprite discriminator. No clean
+                    // split — eff.scx IS the length. Refuted, DMG SCX zero-debt.
                     0xFF4B if !self.ds => 12,
                     _ => 0,
                 }
             } else if self.ds {
                 4
             } else {
-                8
+                // CGB single-speed, per-register eager render-commit debt
+                // (#11ej). The uniform 8 landed the mealybug/age DMG-compat m3_*
+                // palette/WX legs at the wrong pixel column — CGB runs these DMG
+                // ROMs in compat mode and shares the FF47-4B render path, so each
+                // register carries its own commit class like the DMG calibration
+                // above. These rows pass tier2 (same whole-dot render) and fail
+                // eager ONLY on this cc+0 commit position → `eager_value`-scoped,
+                // tier2 byte-ident.
+                match addr {
+                    // Palette (FF47-49): the DMG-compat BGP pop-grid. Its stage is
+                    // the flat `3` (`stage_write_dots`, no CGB parity), so a
+                    // `6 + 2*parity` debt reproduces the DMG palette even/odd
+                    // anchor (12hd even / 14hd odd). Swept unique-optimal: +-2
+                    // regress m3_bgp_change + age m3-bg-bgp.
+                    0xFF47..=0xFF49 => 6 + 2 * (self.scan_pos().1 & 1) as i32,
+                    // WX (FF4B): like the DMG WX arm — its render stage is the
+                    // smallest, so it needs the largest debt to reach the WX
+                    // activation comparator. 12 recovers m3_window_timing (+_wx_0)
+                    // + m3_wx_4_change_sprites (comparator slack 10-16, no drops).
+                    0xFF4B => 12,
+                    _ => 8,
+                }
             };
-            (i32::from(dots) * 2 + debt + crate::probe::tune_wcommit(0)).clamp(0, 255) as u8
+            (i32::from(dots) * 2 + debt).clamp(0, 255) as u8
         } else {
             dots
         };

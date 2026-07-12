@@ -106,22 +106,6 @@ pub(crate) fn noxline_fires() -> bool {
     true
 }
 
-/// Eager half-dot write-commit offset sweep (`SLOPGB_WCOMMIT`, signed): added
-/// to the ×2 half-dot staged commit debt under `eager_value` for measurement.
-/// Returns `default` (0) unless the knob is set.
-#[cfg(feature = "port_probe")]
-pub(crate) fn tune_wcommit(default: i32) -> i32 {
-    std::env::var("SLOPGB_WCOMMIT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(default)
-}
-#[cfg(not(feature = "port_probe"))]
-#[inline(always)]
-pub(crate) fn tune_wcommit(default: i32) -> i32 {
-    default
-}
-
 /// HALFDOT (#11dw) DMG FF41 engine-view write-commit half-dot deferral sweep
 /// (`SLOPGB_ENGCOMMIT`): the number of odd half-dots the line-153 `eng_stat`
 /// commit is delayed by (`Ppu::stat_update_half`). Returns `default` unless set.

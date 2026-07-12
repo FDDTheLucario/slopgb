@@ -327,3 +327,35 @@ fn mealybug_baseline_has_no_duplicate_keys() {
     let unique: BTreeSet<&&str> = baseline.iter().collect();
     assert_eq!(unique.len(), baseline.len(), "duplicate baseline entries");
 }
+
+/// Red-before-green pin for the #11ej eager per-register CGB write-commit debt
+/// (`Ppu::stage_write`, palette `6 + 2*parity`, WX `12`): these DMG-compat
+/// mode-3 pixel legs pass tier2 (identical whole-dot render code) and fail the
+/// eager clock ONLY on the cc+0 write-commit position. Fails with the CGB
+/// per-register debt reverted (uniform 8 → wrong pixel column), passes with it.
+#[test]
+fn mealybug_eager_cgb_m3_writecommit_passes() {
+    let Some(root) = common::gbtr_root() else {
+        return;
+    };
+    for stem in [
+        "m3_bgp_change",
+        "m3_window_timing",
+        "m3_window_timing_wx_0",
+        "m3_wx_4_change_sprites",
+    ] {
+        let rom_path = root.join(SUITE_DIR).join("ppu").join(format!("{stem}.gb"));
+        let png = root
+            .join(SUITE_DIR)
+            .join("ppu")
+            .join(ppu_ref_name(stem, Model::Cgb));
+        let rom =
+            std::fs::read(&rom_path).unwrap_or_else(|e| panic!("read {}: {e}", rom_path.display()));
+        let mut gb = harness::boot_eager(&rom, Model::Cgb);
+        harness::run_until_breakpoint(&mut gb, common::TIMEOUT_TCYCLES)
+            .unwrap_or_else(|e| panic!("{stem} [Cgb] eager: {e}"));
+        harness::run_for_frames(&mut gb, 1);
+        harness::expect_frame_png(&gb, &png, CgbColorMap::Identity)
+            .unwrap_or_else(|e| panic!("{stem} [Cgb] eager: {e}"));
+    }
+}

@@ -412,6 +412,34 @@ fn age_matrix() {
 /// Self-check for the inventory hook: claimed and exempted are disjoint and
 /// together cover exactly the on-disk `.gb`/`.gbc` set, and the exempted
 /// set is exactly the nine documented revision-skips.
+/// Red-before-green pin for the #11ej eager per-register CGB write-commit debt
+/// (`Ppu::stage_write` palette `6 + 2*parity`): age's m3-bg-bgp is a DMG-compat
+/// mid-mode-3 BGP change that passes tier2 (identical whole-dot render) and
+/// fails the eager clock ONLY on the cc+0 write-commit position. Fails with the
+/// CGB palette debt reverted (uniform 8), passes with it.
+#[test]
+fn age_eager_cgb_m3_bg_bgp_writecommit_passes() {
+    let Some(root) = common::gbtr_root() else {
+        return;
+    };
+    let rom_path = root.join(SUITE_DIR).join("m3-bg-bgp").join("m3-bg-bgp.gb");
+    let png = root
+        .join(SUITE_DIR)
+        .join("m3-bg-bgp")
+        .join("m3-bg-bgp-ncmBC.png");
+    if !rom_path.is_file() {
+        return;
+    }
+    let rom =
+        std::fs::read(&rom_path).unwrap_or_else(|e| panic!("read {}: {e}", rom_path.display()));
+    let mut gb = harness::boot_eager(&rom, Model::Cgb);
+    harness::run_until_breakpoint(&mut gb, common::TIMEOUT_TCYCLES)
+        .unwrap_or_else(|e| panic!("m3-bg-bgp [Cgb] eager: {e}"));
+    harness::run_for_frames(&mut gb, 1);
+    harness::expect_frame_png(&gb, &png, CgbColorMap::Identity)
+        .unwrap_or_else(|e| panic!("m3-bg-bgp [Cgb] eager: {e}"));
+}
+
 #[test]
 fn age_inventory_partitions_suite() {
     let Some((root, roms)) = suite_roms("age inventory") else {
