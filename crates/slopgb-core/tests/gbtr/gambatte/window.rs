@@ -324,6 +324,59 @@ fn eager_dmg_late_wy1_rehost_passes() {
     }
 }
 
+/// The three DMG window-exit latch RECALIBRATIONS for the eager read frame
+/// (#11ed): each `_1`/`_2` (or `_0`/`_2`) sibling pair differs by a whole-M-cycle
+/// NOP that shifts a WRITE, which slopgb latches as a representable render dot;
+/// the arm thresholds were off vs the eager cc+0 read frame.
+///  (1) `late_reenable{,_wx0f}_2` (out0): arm-D5 reenable — the eager clock
+///      records `win_reenable_dot` one M-cycle before tier2, so the bare
+///      threshold takes +4 (not +3): reen 94 + 4 > wxm 97 → bare.
+///  (2) `late_scx_late_disable_0` (out0): arm-D3 pre-draw abort — the mid-line
+///      SCX rewrite is admitted under `eager_value`; the fetch-ship deadline K
+///      widens to 8 (fscx-4 fine-scroll) and the bare exit back-dates one dot
+///      (253→252) so the early-abort `_0` reads mode 0.
+///  (3) `late_wy_FFto2_ly2_scx{2,3}_1` (out3): arm-2 shadow — the eager DMG
+///      first-window-line (`wy2 == ly`) trigger extends even when the render
+///      activated (`win_active`), on-screen WX only.
+/// Reverting any of the three thresholds makes this pin fail (the paired
+/// sibling shuffles). Eager+DMG scoped → production/tier2 byte-identical.
+#[test]
+fn eager_dmg_window_latch_recalib_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_dmg_window_latch_recalib",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 5] = [
+        ("gambatte/window/late_reenable_2_dmg08_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/window/late_reenable_wx0f_2_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/late_scx_late_disable_0_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto2_ly2_scx2_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto2_ly2_scx3_1_dmg08_cgb04c_out3.gbc",
+            "3",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_eager(&rom, Model::Dmg);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, false)
+            .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (eager): {e}"));
+    }
+}
+
 /// The window visible-mode-3 LENGTH law (the FF41-read
 /// half of the atomic reclock). A triggering window's SameBoy mode-3→0 exit is
 /// `SBex = 263 + SCX&7` (cfl); the CPU-visible FF41 exit is `SBex − read_offset`.

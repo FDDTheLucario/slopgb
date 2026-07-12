@@ -197,16 +197,31 @@ impl Ppu {
         if !self.model.is_cgb()
             && self.render.win_predraw_abort
             && wxm != 0
-            && self.render.scx_write_dot == 0
+            // A mid-line SCX rewrite (`scx_write_dot != 0`) is admitted ONLY on
+            // the eager clock: `late_scx_late_disable` rewrites SCX 0→4 AFTER the
+            // window fetched, so its fetch-time `wx_match_scx` (=4) still drives
+            // the exit fine-scroll and the fetch-ship deadline (#11ed). Tier2
+            // keeps the `== 0` scope (byte-identical).
+            && (self.render.scx_write_dot == 0 || self.eager_value)
             && self.eff.lcdc & LCDC_WIN_ENABLE == 0
             && self.line >= 1
             && self.line < 144
             && !self.render.win_active
             && !self.glitch_line
         {
-            let extend = abd + if self.eager_value { 4 } else { 3 } >= wxm && !scx_kills_early;
+            // The fetch-ship deadline `abd + K >= wxm` and the bare exit take a
+            // wider K and a back-dated base on the eager scx-rewrite frame: the
+            // fine-scroll (fscx=4) pushes the window's first-tile ship, so extend
+            // needs K = 8 (measured: `late_scx_late_disable` abd 122 bare / 126
+            // extend, wxm 133), and the eager cc+0 bare exit back-dates one dot
+            // (253→252, the +1 read-debt) so the early-abort `_0` (read rp 512)
+            // reads mode 0. Non-scx eager keeps K=4 / base 253 (#11ec).
+            let eager_scx = self.eager_value && self.render.scx_write_dot != 0;
+            let ek = if eager_scx { 8 } else if self.eager_value { 4 } else { 3 };
+            let extend = i32::from(abd) + ek >= i32::from(wxm) && !scx_kills_early;
+            let bare = if eager_scx { 252 } else { 253 };
             if self.render.n_sprites == 0 {
-                fold(&mut exit, 2 * (if extend { 259 } else { 253 } + fscx));
+                fold(&mut exit, 2 * (if extend { 259 } else { bare } + fscx));
             } else if extend {
                 // Arm D3-spr — a pre-draw abort with an object on the window
                 // line (`late_disable_spx10_wx0f_2`, ns=1): the sprite fetch
@@ -297,9 +312,21 @@ impl Ppu {
         // at wx_match−1 clears the DMG deadline but misses the CGB one):
         // FFto2_ly2 `_2` latch 98 ≤ 99 (extend) /
         // `_3` latch 102 > 99 (bare), wx0f `_2` 106 ≤ 107 / `_3` 110 > 107.
+        // The eager DMG FIRST-window-line (`wy2 == ly`) trigger is admitted even
+        // when slopgb's render DID activate (`win_active`): arm D1 excludes the
+        // trigger line (mode 3 extends later than the steady 259 law) and native
+        // mode has already flipped, so the late-WY-triggered first line falls to
+        // native 0 where SameBoy still extends (`late_wy_FFto2_ly2_scx{2,3}_1`,
+        // win_active, wy_trig 94 ≤ wxm 97, read dot 260 → want 3). On-screen WX
+        // only (`eff.wx < 0xA0`): the off-screen `m2int_wxA6_firstline` renders
+        // nothing → bare, must NOT extend. eager DMG only → byte-identical off.
         if self.line < 144
             && m == 0
-            && !self.render.win_active
+            && (!self.render.win_active
+                || (self.eager_value
+                    && !self.model.is_cgb()
+                    && self.wy2 == self.ly
+                    && self.eff.wx < 0xA0))
             && (!self.ds || self.render.n_sprites == 0)
             && self.win_extends_sb()
         {
@@ -400,17 +427,21 @@ impl Ppu {
         }
         // Arm D5 — the DMG window-REENABLE-too-late bare exit, the
         // arm-5 port. The redraw deadline carries an SCX term absent on CGB:
-        // bare iff `reen + 3 > wx_match + SCX&7` (the fine-scroll delays the
+        // bare iff `reen + K > wx_match + SCX&7` (the fine-scroll delays the
         // redraw start, so a higher-SCX re-enable at the same dot still
-        // catches the tile). `late_reenable_2` reen 95 / match 97 / scx0 →
-        // bare; `scx2_2` reen 95 / scx2 → extend (98 ≤ 99); `scx2_3` reen 99
-        // → bare (102 > 99); `wx0f_2` reen 103 / match 105 → bare. (CGB arm-5
-        // above is SCX-flat, scx ≤ 3 — the ±1 fetch phase again.)
+        // catches the tile); K = 4 on the eager cc+0 read frame, which records
+        // `win_reenable_dot` one M-cycle before the tier2 cc+4 read the +3 was
+        // calibrated against (`late_reenable_2` eager reen 94 vs tier2 95 —
+        // #11ed, mirroring the #11ec arm-D3 +4). `late_reenable_2` reen 94 /
+        // match 97 / scx0 → bare (94+4 > 97); `scx2_2` reen 94 / scx2 → extend
+        // (98 ≯ 99); `wx0f_2` reen 102 / match 105 → bare. Tier2 keeps +3 (CGB
+        // arm-5 above is SCX-flat, scx ≤ 3 — the ±1 fetch phase again.)
         if !self.model.is_cgb()
             && !self.ds
             && self.render.win_reenable_dot != 0
             && self.render.wx_match_dot != 0
-            && i32::from(self.render.win_reenable_dot) + 3 > i32::from(self.render.wx_match_dot) + scx7
+            && i32::from(self.render.win_reenable_dot) + if self.eager_value { 4 } else { 3 }
+                > i32::from(self.render.wx_match_dot) + scx7
             && self.eff.lcdc & LCDC_WIN_ENABLE != 0
             && self.render.win_active
             && self.bare_m3_visible(m)
