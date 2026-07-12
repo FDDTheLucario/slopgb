@@ -127,7 +127,29 @@ impl Ppu {
                     _ => 0,
                 }
             } else if self.ds {
-                4
+                // CGB double-speed: the uniform render-frame read-debt is 4
+                // half-dots (the DS M-cycle is 2 dots, so cc+0→cc+4 is 4hd) for
+                // the pure-render registers. SCX (FF43) POST-match is the
+                // exception: like the SS `!self.ds` post-match arm above, a write
+                // landing AFTER this line's fine-scroll comparator lock
+                // (`hunt_done && dot > hunt_match_dot`) is a pure COARSE/tile
+                // shift with no mode-3-length effect, but on the DS grid the
+                // uniform 4hd over-shoots the eager cc+0 commit by exactly one
+                // whole dot past the OFF/tier2 post-lock commit (measured: eager
+                // stage dot 90/96 + 8hd = dot 94/100, but OFF/tier2 commit dot
+                // 93/99). Debt 2 → 6hd → lands the eager commit on the OFF dot,
+                // recovering the 4 `scx_during_m3_ds` post-match fine-scroll pixel
+                // legs (scx_0060c0/0063c0 `_5`/`_8`). Pre-match / line-start DS
+                // SCX writes keep 4 (the `_ds_1` write-A at `!hunt_done` is
+                // unaffected; its post-match write-B re-aligns onto OFF, still
+                // passing). Swept: 4 fails all 4 targets (+1 dot late); 2 is the
+                // physically-correct OFF-commit alignment (0/1/3 also clear the 4
+                // targets on pixel tolerance but only 2 lands the eager commit on
+                // the exact OFF/tier2 dot). See `eager-ds-scx-2026-07-12.md`.
+                match addr {
+                    0xFF43 if self.render.hunt_done && self.dot > self.render.hunt_match_dot => 2,
+                    _ => 4,
+                }
             } else {
                 // CGB single-speed, per-register eager render-commit debt
                 // (#11ej). The uniform 8 landed the mealybug/age DMG-compat m3_*

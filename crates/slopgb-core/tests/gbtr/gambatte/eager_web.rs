@@ -426,3 +426,39 @@ fn eager_dmg_lyc153_m1disable_passes() {
             .unwrap_or_else(|e| panic!("{rel} [Dmg] expected outE0 (eager line-153 m1disable): {e}"));
     }
 }
+
+/// The SCX (FF43) CGB DOUBLE-SPEED mid-mode-3 render commit RE-HOSTED onto the
+/// eager clock — the DS extension of the shipped single-speed DMG SCX
+/// write-commit cracks (#11el/#11em). These 4 `scx_during_m3_ds` rows write SCX
+/// twice per line, both POST-match (after this line's fine-scroll comparator lock
+/// `hunt_done`, at `hunt_match_dot`=89; write dots 90/232 and 96/226) — a pure
+/// coarse/tile shift with no mode-3-length effect. On the DS grid the uniform CGB
+/// DS render debt (4hd) over-shoots the eager cc+0 commit by exactly one whole dot
+/// (eager stage 90 + 8hd = dot 94, but OFF/tier2 commit dot 93); the post-match
+/// arm's debt 2 (6hd) lands the eager commit on the exact OFF/tier2 dot
+/// (`regs/stage.rs`). Post-match-scoped (the `_ds_1` pre-match line-start write
+/// keeps 4), `eager_value`+`is_cgb`+`ds`-gated → production + tier2 byte-identical
+/// (golden unchanged, tier2 CGB 291 untouched, OCR flagon_probe EV 287/287
+/// zero-drift). Pixel two-bin EV: these 4 recovered, 0 OFF-passing rows dropped
+/// (`scy_during_m3_ds_5` stays the pre-existing floor — SameBoy matches neither
+/// ref nor eager). Reverting the arm makes this pin fail (8px, +1 dot late). See
+/// `eager-ds-scx-2026-07-12.md`.
+#[test]
+fn eager_cgb_m3_render_scx_ds_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_cgb_m3_render_scx_ds",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets = [
+        "gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_5.gbc",
+        "gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_8.gbc",
+        "gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_5.gbc",
+        "gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_8.gbc",
+    ];
+    for rel in targets {
+        assert_pixel_leg_eager(&root, rel, Model::Cgb);
+    }
+}
