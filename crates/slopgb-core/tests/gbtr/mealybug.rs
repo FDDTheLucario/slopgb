@@ -359,3 +359,32 @@ fn mealybug_eager_cgb_m3_writecommit_passes() {
             .unwrap_or_else(|e| panic!("{stem} [Cgb] eager: {e}"));
     }
 }
+
+/// Red-before-green pin for the #11el eager DMG SCX POST-match write-commit debt
+/// (`Ppu::stage_write`, FF43 `hunt_done && dot > hunt_match_dot => 6`). A mid-
+/// mode-3 SCX write landing AFTER this line's fine-scroll comparator lock is a
+/// pure coarse/pixel tile shift; its eager cc+0 commit lands the tile column 4
+/// dots early without the render-frame debt. Fails with the FF43 post-match arm
+/// reverted (159px off, wrong tile column), passes with it. `m3_scx_low_3_bits`
+/// is NOT here: its write is PRE-match (feeds the emergent mode-3 length that the
+/// gambatte m3stat/late_scx rows read) — genuine length coupling, kept zero-debt.
+#[test]
+fn mealybug_eager_dmg_m3_scx_high_writecommit_passes() {
+    let Some(root) = common::gbtr_root() else {
+        return;
+    };
+    let stem = "m3_scx_high_5_bits";
+    let rom_path = root.join(SUITE_DIR).join("ppu").join(format!("{stem}.gb"));
+    let png = root
+        .join(SUITE_DIR)
+        .join("ppu")
+        .join(ppu_ref_name(stem, Model::Dmg));
+    let rom =
+        std::fs::read(&rom_path).unwrap_or_else(|e| panic!("read {}: {e}", rom_path.display()));
+    let mut gb = harness::boot_eager(&rom, Model::Dmg);
+    harness::run_until_breakpoint(&mut gb, common::TIMEOUT_TCYCLES)
+        .unwrap_or_else(|e| panic!("{stem} [Dmg] eager: {e}"));
+    harness::run_for_frames(&mut gb, 1);
+    harness::expect_frame_png(&gb, &png, CgbColorMap::Identity)
+        .unwrap_or_else(|e| panic!("{stem} [Dmg] eager: {e}"));
+}

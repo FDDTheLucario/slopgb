@@ -91,17 +91,24 @@ impl Ppu {
                     // 0. The un-catch READ law's `wx_write_dot` is recorded in
                     // `Ppu::write` at the eager cc+0 (not `commit_eff`), so the debt
                     // shifts only the render view — the split #11bq built for tier2.
-                    // SCX (FF43) is NOT here: its render `eff.scx` fine-scroll
-                    // discard feeds the EMERGENT bare-line mode-3 length
-                    // (`vis_exit_hd` arm 8 = `2*flip+2`). Re-measured on the EAGER
-                    // frame (#11ej): m3_scx_low needs debt>=4, m3_scx_high never
-                    // clears (best ~41px), but the gambatte m3stat length rows
-                    // (`ly0_late_scx7_m3stat_scx0_2`, `late_scx4_1`) DROP at
-                    // debt>=2 and `late_scx_late_disable_0` at debt>=4 — the
-                    // mealybug (dot 87/111) and gambatte (dot 82) writes are too
-                    // close for any latch/window/sprite discriminator. No clean
-                    // split — eff.scx IS the length. Refuted, DMG SCX zero-debt.
                     0xFF4B if !self.ds => 12,
+                    // SCX (FF43) POST-match: the write lands after THIS line's
+                    // fine-scroll comparator lock (`hunt_done && dot >
+                    // hunt_match_dot`), so the discard is locked and the change is
+                    // a pure COARSE/pixel tile shift with NO mode-3-length effect →
+                    // give it the render-frame debt so the eager cc+0 commit lands
+                    // the tile column at the tier2 fetch grid. `6` swept
+                    // unique-optimal (m3_scx_high_5_bits: 4→41px, 6→PASS, 8→35px).
+                    // The `dot > hunt_match_dot` guard rejects the LINE-START write
+                    // (dot 80) whose `hunt_done` is STALE from the previous line
+                    // (match_dot ≥85). PRE-match writes (`!hunt_done`, `_ => 0`)
+                    // feed the fine-scroll hunt the EMERGENT bare-line length grows
+                    // from, so a debt there shifts the gambatte m3stat/late_scx
+                    // length verdicts — genuine coupling, kept zero-debt. Full
+                    // A/B: `measurements/eager-scx-adversarial-2026-07-12.md` (#11el).
+                    0xFF43 if !self.ds
+                        && self.render.hunt_done
+                        && self.dot > self.render.hunt_match_dot => 6,
                     _ => 0,
                 }
             } else if self.ds {
