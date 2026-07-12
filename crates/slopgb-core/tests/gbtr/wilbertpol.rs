@@ -242,6 +242,55 @@ fn run_protocol_case(rom: &[u8], model: Model) -> Result<(), String> {
     harness::check_fib(&gb)
 }
 
+/// Red-before-green pin (#11ek): the six `ly_lyc_153_write-{GS,C}` rom×model
+/// cases pass on the EAGER-VALUE clock (the C3-flip target). They pass on OFF
+/// (so they are absent from the OFF `wilbertpol_matrix` baseline) but the eager
+/// dispatch frame shifts the line-153 LYC-coincidence STAT delivery relative to
+/// the ROM's `LD A,B` interrupt-count read: a late DISABLE (`ly_lyc_153_write`
+/// C015) must still fire the held-153 coincidence, while a fresh ENABLE landing
+/// in the dots-6-7 window (C017) must NOT — opposite corrections keyed on the
+/// write. The discriminated retime lives in `ppu/stat_irq/reclock.rs`
+/// (early-deliver + fresh-in-window suppress) + `ppu/lyc.rs` (the DMG held-153
+/// delayed-copy hold), gated on this line's `l153_lyc_write_dot`. Fails if any
+/// of those arms regress (eager under-/over-fires the count).
+#[test]
+fn eager_ly_lyc_153_write_delivery() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_ly_lyc_153_write_delivery",
+            &format!("test-roms/{}/{SUITE} not present", common::GBTR_DIR),
+        );
+        return;
+    };
+    let dir = root.join(SUITE).join("acceptance/gpu");
+    let cases = [
+        ("ly_lyc_153_write-GS", Model::Dmg),
+        ("ly_lyc_153_write-GS", Model::Mgb),
+        ("ly_lyc_153_write-GS", Model::Sgb),
+        ("ly_lyc_153_write-GS", Model::Sgb2),
+        ("ly_lyc_153_write-C", Model::Cgb),
+        ("ly_lyc_153_write-C", Model::Agb),
+    ];
+    let mut fails = Vec::new();
+    for (stem, model) in cases {
+        let path = dir.join(format!("{stem}.gb"));
+        let Ok(rom) = std::fs::read(&path) else {
+            continue; // absent in a partial checkout — gbtr_root gate already ran
+        };
+        let mut gb = harness::boot_eager(&rom, model);
+        let res = harness::run_until_undefined(&mut gb, TIMEOUT_TCYCLES)
+            .and_then(|()| harness::check_fib(&gb));
+        if let Err(e) = res {
+            fails.push(format!("{stem} [{model:?}]: {e}"));
+        }
+    }
+    assert!(
+        fails.is_empty(),
+        "eager ly_lyc_153_write delivery failed:\n  {}",
+        fails.join("\n  ")
+    );
+}
+
 /// One `manual-only/sprite_priority.gb` case: render 15 frame periods
 /// (mirrors `tests/common/mod.rs::run_sprite_priority`) and compare against
 /// one of the suite's two reference PNGs. The ROM keeps the LCD off for ~9

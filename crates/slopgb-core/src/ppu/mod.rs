@@ -710,6 +710,13 @@ pub struct Ppu {
     /// lyc_ff45_trigger_delay dmg08_out0/cgb04c_out2 split and the
     /// wilbertpol ly_lyc_*write-C rounds pin the cycle).
     lyc_if_delay: u8,
+    /// Eager line-153 discriminated STAT-delivery retime (`ly_lyc_153_write`):
+    /// the dot of the last FF45 write committed on line 153 (CGB), or
+    /// `u16::MAX` for "no write this line" — reset at [`Self::start_line`]. It
+    /// distinguishes a FRESH write landing near the dots-6-7 coincidence window
+    /// (the enable side-effect zone / the late-disable early delivery) from a
+    /// steady-state LYC=153 that must fire normally. Eager-only.
+    l153_lyc_write_dot: u16,
     /// CGB: the LYC value the line-start IRQ event samples — a delayed
     /// copy of FF45 (gambatte LycIrq::regChange keeps `lycReg_` when the
     /// write lands within ~4 dots of the scheduled event). An FF45 write

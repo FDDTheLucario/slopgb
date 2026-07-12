@@ -821,6 +821,11 @@ impl Ppu {
             0xFF45 => {
                 let old = self.lyc;
                 self.lyc = value;
+                // Fresh-write signal for the eager line-153 STAT-delivery retime
+                // (see `l153_lyc_write_dot`). Eager+CGB only.
+                if self.eager_value && self.model.is_cgb() && self.line == 153 {
+                    self.l153_lyc_write_dot = self.dot;
+                }
                 // The comparison retriggers immediately on LYC writes while
                 // the comparison clock runs (`stat_lyc_onoff`).
                 if self.enabled && old != value {

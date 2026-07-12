@@ -224,6 +224,7 @@ impl Ppu {
         write_opt_i8(w, self.pal_access_flip);
         write_opt_i8(w, self.m0_stat_flip);
         w.u8(self.lyc_if_delay);
+        w.u16(self.l153_lyc_write_dot);
         w.u8(self.lyc_event);
         w.bool(self.cmp_irq);
         w.u8(self.stat_ev);
@@ -353,6 +354,7 @@ impl Ppu {
         self.pal_access_flip = read_opt_i8(r)?;
         self.m0_stat_flip = read_opt_i8(r)?;
         self.lyc_if_delay = r.u8()?;
+        self.l153_lyc_write_dot = r.u16()?;
         self.lyc_event = r.u8()?;
         self.cmp_irq = r.bool()?;
         self.stat_ev = r.u8()?;

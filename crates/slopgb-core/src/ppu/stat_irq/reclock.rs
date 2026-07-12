@@ -262,6 +262,27 @@ impl Ppu {
                 || (!self.ds
                     && self.lcd_shift_dots == 0
                     && ly == i16::from(self.lyc_event));
+            // Eager line-153 fresh-ENABLE suppression (`ly_lyc_153_write` C017):
+            // a fresh LYC=153 write that COMMITTED at/after dot 6 — inside the
+            // dots-6-7 coincidence window — raises no fresh trigger on hardware
+            // (SameBoy's "writing LYC during this period has side effects" zone).
+            // Gated on THIS line's write dot (`l153_lyc_write_dot`), so a
+            // steady-state LYC=153 or an earlier-committed write (C016) fires
+            // normally. Also cancel the pending deferred `lyc_if_delay` delivery
+            // the fresh write scheduled (Agb's dots-4-11 window re-delivers at dot
+            // 9 via that path). Eager+CGB only.
+            if self.eager_value
+                && self.model.is_cgb()
+                && self.line == 153
+                && self.lyc == 153
+                && self.dot >= 6
+                && ly == 153
+                && self.l153_lyc_write_dot != u16::MAX
+                && self.l153_lyc_write_dot >= 5
+            {
+                self.lyc_interrupt_line = false;
+                self.lyc_if_delay = 0;
+            }
         }
         // The vblank-entry LYC-latch drop.
         // A held visible-line LYC match (e.g. LYC=143 carried high from line 143)
@@ -387,6 +408,31 @@ impl Ppu {
         }
         self.stat_if_squash = self.stat_if_squash.saturating_sub(1);
         self.stat_update_vblank_oam_pulses();
+        // Eager line-153 DISABLE early-delivery (`ly_lyc_153_write` C015): a late
+        // FF45 disable write (LYC 153→x) leaves the held coincidence value in the
+        // delayed `lyc_event` copy, which the dots-6-7 engine window still fires —
+        // but on the eager frame that dot-6 delivery lands AFTER the CPU has
+        // latched its interrupt-count read (the ROM reads `B` one M-cycle after
+        // the FF45 write). Deliver the held-153 coincidence at dot 3 instead — the
+        // eager-frame dot the CPU's dispatch check observes — matching SameBoy's
+        // serviced count. Fires once (`force_level` suppresses the dots-6-7 re-
+        // edge). CGB, eager-only; the DMG twin rides the `write_lyc_dmg`
+        // `lyc_event` hold + the natural dot-6 delivery (its write commits later,
+        // so dot 6 already precedes the count read).
+        if self.eager_value
+            && self.model.is_cgb()
+            && self.line == 153
+            && self.dot == 3
+            && self.enabled
+            && self.stat_en & STAT_SRC_LYC != 0
+            && self.l153_lyc_write_dot != u16::MAX
+            && self.lyc_event == 153
+            && self.lyc != 153
+            && !self.stat_update.line()
+        {
+            self.pending_if |= IF_STAT;
+            self.stat_update.force_level(true);
+        }
     }
 
     /// HALFDOT (#11dw): the idempotent odd-half `GB_STAT_update` level

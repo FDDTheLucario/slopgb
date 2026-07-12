@@ -69,6 +69,7 @@ impl Ppu {
             pal_access_flip: None,
             m0_stat_flip: None,
             lyc_if_delay: 0,
+            l153_lyc_write_dot: u16::MAX,
             lyc_event: 0,
             cmp_irq: false,
             stat_ev: 0,

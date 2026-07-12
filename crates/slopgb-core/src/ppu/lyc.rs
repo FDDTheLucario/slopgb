@@ -382,7 +382,21 @@ impl Ppu {
         // target event misses that event; everything else lands.
         let protected = !self.glitch_line
             && ((self.dot == 0 && self.line >= 1 && value == self.line)
-                || (self.line == 153 && self.dot == 8 && value == 0));
+                || (self.line == 153 && self.dot == 8 && value == 0)
+                // Eager: a DISABLE of a held LYC=153 (`old == 153`, new value
+                // away from 153) landing in the line-153 dots-4-7 coincidence
+                // window holds the delayed copy at 153, so the held LY=153
+                // coincidence still fires at the dots-6-7 window (wilbertpol
+                // `ly_lyc_153_write-GS` C015) — the DMG twin of the CGB
+                // `write_lyc_cgb`/`step_dot` protection. Scoped to the held-153
+                // disable (not any window write, which spuriously fires
+                // `lycEnable/lyc0_ff45_disable`). The window starts at dot 4
+                // (where this ROM's disable write commits on the DMG grid).
+                || (self.eager_value
+                    && self.line == 153
+                    && old == 153
+                    && value != 153
+                    && (4..=7).contains(&self.dot)));
         if !protected {
             self.lyc_event = value;
         }

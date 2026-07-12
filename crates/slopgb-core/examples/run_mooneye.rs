@@ -112,6 +112,13 @@ fn main() -> ExitCode {
         }
         println!();
     }
+    if std::env::var("SLOPGB_WRAMDUMP").is_ok() {
+        print!("WRAM");
+        for a in 0xC014u16..=0xC018 {
+            print!(" {a:04X}={:02X}", gb.peek_no_io(a));
+        }
+        println!();
+    }
     let r = gb.cpu_regs();
     let pass = !timed_out && [r.b, r.c, r.d, r.e, r.h, r.l] == FIB;
     println!(
