@@ -61,7 +61,14 @@ impl Ppu {
         // mode0→2 boundary is an A/B risk, so the scope confines it to
         // `m2int_m0stat`. Checked first: no mode-3-exit arm can match at
         // dot < 4 (the window arms need a same-line WX match ≥ ~dot 89; the
-        // bare DS arm needs m == 3).
+        // bare DS arm needs m == 3). The mode0→2 boundary is the read's
+        // DEBT-adjusted position, not the raw dot: the eager cc+0 read lands one
+        // DS M-cycle (+4 hd / +2 dots) before SameBoy's cc+4 read, so the tier2
+        // frame's dot-2 boundary is `read_pos_hd >= 4` (`m2int_m0stat_ds_2` reads
+        // raw dot 0, rph 4 = true dot 2 → mode 2; its `_1` sibling reads the
+        // PREVIOUS line's dot 454 (`dot < 4` excludes it → native mode 0)). For
+        // tier2 (`read_deferred` advances `self.dot` to cc+4, no debt) `read_pos_hd
+        // = 2*dot` so `>= 4` ⟺ the original `dot >= 2` — byte-identical there.
         if self.read_carried
             && self.stat_rise_oam
             && self.model.is_cgb()
@@ -71,7 +78,7 @@ impl Ppu {
             && m == 0
             && self.dot < 4
         {
-            return if self.dot >= 2 { 2 } else { 0 };
+            return if self.read_pos_hd() >= 4 { 2 } else { 0 };
         }
         // The DS mode-2 ISR read at the mode2→3 ENTRY boundary: the
         // same +2 carried-read frame as the line-start arm above, applied to
@@ -109,6 +116,30 @@ impl Ppu {
         // one more collision over (all SameBoy-pass). The whole-dot frame
         // carries NO other observable — the true split is the sub-dot poll
         // phase, not resolvable in this frame.
+        // EAGER shifted-frame twin (`offset1_lyc99int_m0stat_count_scx2_ds_1`):
+        // the eager cc+0 poll lands one DS M-cycle (+4 hd / +2 dots) BEFORE the
+        // tier2 poll, so the `dot == flip_dot` sample (the `_2` sibling, which
+        // has already flipped — `line_render_done`) has an eager `_1` twin that
+        // reads 2 dots earlier, WHILE the render has not yet flipped (raw mode
+        // still 3), whose DEBT-adjusted position `read_pos_hd` lands EXACTLY on
+        // the projected flip (`2 * projected_flip_dot`: dot 255, rph 514 = 2·257
+        // = the flip). Both want mode 3 (the shifted flip is a half-dot past the
+        // whole-dot sample). Without this the bare arm-8 exit (2·256 = 512) drops
+        // the raw mode 3 → 0. Exact (mirrors the `dot == flip_dot` arm above, and
+        // the DMG coincident mask); `eager_value` + shifted + not-yet-flipped
+        // render scoped → tier2 (its poll flipped) + production byte-identical.
+        if self.eager_value
+            && self.lcd_shift_dots != 0
+            && self.model.is_cgb()
+            && self.line < 144
+            && !self.read_carried
+            && self.lyc == 0x99
+            && !self.line_render_done
+            && self.render.active
+            && self.read_pos_hd() == 2 * i32::from(self.projected_flip_dot())
+        {
+            return 3;
+        }
         if self.lcd_shift_dots != 0
             && self.model.is_cgb()
             && self.line < 144

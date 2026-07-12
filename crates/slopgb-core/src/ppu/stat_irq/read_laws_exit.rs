@@ -499,6 +499,52 @@ impl Ppu {
             let base = if self.read_carried { 259 } else { 263 };
             fold(&mut exit, 2 * (base + scx7 + ds1));
         }
+        // Arm 8-spr — the DS WINDOW+SPRITE mode-3 exit (eager CGB). Arm 1 (the
+        // triggering-window length law) EXCLUDES sprite-laden DS lines
+        // (`!ds || n_sprites == 0`) because its closed-form `259 + SCX&7` exit
+        // cannot carry the per-line sprite penalty; a NON-window sprite DS line
+        // falls to arm 8's own sprite-free scope but its raw native mode already
+        // verdicts correctly, so ONLY the window+sprite DS line (arm-1-excluded,
+        // no other arm) mis-verdicts the `_2` sibling that reads one M-cycle
+        // PAST the render's flip (`10spritesPrLine_wx0..7_m3stat_ds_2`: eager
+        // read dot 370 < the render's flip 371, raw mode still 3, want 0). The
+        // render's OWN recorded/projected flip bakes in the exact window+sprite
+        // cost, so the EMERGENT exit `2*flip` resolves the pair on the eager DS
+        // read frame with NO closed form: `_1` reads rp 740 < 743 → mode 3 (want
+        // 3); `_2` reads rp 744 ≥ 743 → mode 0 (want 0). The `+1` (over the bare
+        // arm's `−2` DS lead) is the projected-flip lead for a window+sprite line
+        // (swept unique-optimal `2*flip + 1` on the DS window+sprite set: `+0`
+        // drops 7 sibling rows, `+1`/`+2` recover `wx7` clean, `+3` loses it —
+        // the `+1`/`+2` plateau centre). Only `10spritesPrLine_wx7` has the
+        // render's flip 371 MATCHING SameBoy's mode-3 end; `wx0..6` share the
+        // same render flip 371 but SameBoy ends mode 3 wx-dependently earlier
+        // (~321..361) — those are a RENDER-length mismatch, not a read-frame miss
+        // (the render's projected flip is itself wrong there), so this read arm
+        // cannot reach them. Scoped to an ACTIVE, non-aborted window with sprites
+        // on a visible DS line where no earlier arm matched (`exit.is_none()`);
+        // `eager_value` + CGB → production/tier2 (which advance `self.dot`
+        // natively) + SS + non-window-sprite lines (raw-mode-correct)
+        // byte-identical.
+        if self.eager_value
+            && self.model.is_cgb()
+            && self.ds
+            && exit.is_none()
+            && m == 3
+            && self.render.n_sprites > 0
+            && self.render.win_active
+            && !self.render.win_aborted
+            && !self.glitch_line
+            && self.line >= 1
+            && self.line < 144
+            && (self.line_render_done || self.render.active)
+        {
+            let flip = if self.line_render_done && self.flip_dot != 0 {
+                self.flip_dot
+            } else {
+                self.projected_flip_dot()
+            };
+            fold(&mut exit, 2 * i32::from(flip) + 1);
+        }
         // Arm 8 — the unified half-dot BARE-line mode-3 exit.
         // The read position is `read_pos_hd + isr_read_carry_hd + lcd_phase`
         // (folded into the returned exit); the exit is a per-speed half-dot

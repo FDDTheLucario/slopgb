@@ -233,15 +233,28 @@ impl Interconnect {
                     // consumed on the eager frame (irq_precedence
                     // `late_m0irq_retrigger_2`/`_scx1_2` + `_ds_2`, want E0)
                     // while the one-M-cycle-later `_1` siblings still land
-                    // outside it and DELIVER (want E2). DS uses +1 (window 3),
-                    // not the full +2: the LYC/mode-2/mode-1/vblank DS `_1`
-                    // retriggers of the OTHER families (ly0/m1/m2int/lyc153int)
-                    // sit one dot inside window 4, so a full-shift DS window
-                    // over-squashes them (measured −6); window 3 recovers
-                    // `_ds_2` and keeps every DS `_1` delivered
-                    // (`_scx1_ds_2`'s +1-dot retrigger stays parked). Never
-                    // armed flag-off (`eager_value` false) → byte-identical.
-                    if self.double_speed { 3 } else { 6 }
+                    // outside it and DELIVER (want E2). DS uses +1 (window 3) for
+                    // the LYC/mode-2/mode-1/vblank families: their DS `_1`
+                    // retriggers (ly0/m1/m2int/lyc153int) sit one dot inside
+                    // window 4, so a blanket window 4 over-squashes them
+                    // (measured −6). But the MODE-0 (HBLANK) retrigger family
+                    // (`late_m0irq_retrigger`) needs window 4: its DS ack→mode-0-
+                    // rise gaps are `_ds_2` 3 (squash), `_scx1_ds_2` 4 (squash),
+                    // `_ds_1` 5 (deliver), `_scx1_ds_1` 6 (deliver) — the squash/
+                    // deliver boundary is gap 4, so window 3 UNDER-squashes
+                    // `_scx1_ds_2` (its retrigger at ack+4 is DELIVERED → E2,
+                    // want E0). The retrigger SOURCE separates it from the 6
+                    // over-squashed families: HBLANK is the enabled STAT source
+                    // (`stat_src_hblank`, `eng_stat & STAT_SRC_HBLANK`) ONLY for
+                    // the `late_m0irq_retrigger` rows (es=08; the others es=20
+                    // OAM / es=40 LYC), so widen to 4 exactly there. The mode-0
+                    // `_ds_1`/`_scx1_ds_1` at gap 5/6 stay outside window 4 and
+                    // still DELIVER. Never armed flag-off → byte-identical.
+                    if self.double_speed {
+                        if self.ppu.stat_src_hblank() { 4 } else { 3 }
+                    } else {
+                        6
+                    }
                 } else {
                     2
                 };

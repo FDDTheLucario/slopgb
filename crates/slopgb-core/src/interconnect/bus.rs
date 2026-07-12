@@ -53,7 +53,9 @@ impl Bus for Interconnect {
         // tier2 (early-returned above) and production (`eager_value` false) paths
         // → byte-identical.
         let trailing = if self.eager_value && addr == 0xFF0F {
-            (trailing | self.ppu.ff0f_stat_peek()) & !self.ppu.ff0f_ly0_pulse_mask()
+            (trailing | self.ppu.ff0f_stat_peek())
+                & !self.ppu.ff0f_ly0_pulse_mask()
+                & !self.ppu.ff0f_cgb_ds_glitch_m0_mask()
         } else {
             trailing
         };

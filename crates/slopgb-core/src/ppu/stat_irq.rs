@@ -179,6 +179,14 @@ impl Ppu {
         self.stat_rise_m0
     }
 
+    /// Whether the mode-0 (HBlank) STAT source is armed in the engine state
+    /// (`eng_stat & STAT_SRC_HBLANK`). Used by the interconnect's ack-squash
+    /// window to scope the DS retrigger widening to the mode-0 retrigger family
+    /// (`late_m0irq_retrigger`), leaving the LYC/OAM/VBlank families' window.
+    pub(crate) fn stat_src_hblank(&self) -> bool {
+        self.eng_stat & STAT_SRC_HBLANK != 0
+    }
+
     /// Whether the mode-0 HBlank STAT rise lands within the next `dots` dots —
     /// a pure VALUE peek of the emergent mode-3 exit, advancing nothing.
     ///

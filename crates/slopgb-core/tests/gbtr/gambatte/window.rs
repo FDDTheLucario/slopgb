@@ -437,6 +437,75 @@ fn eager_dmg_stat_relatch_passes() {
     }
 }
 
+/// The 8 CGB double-speed STAT-bar rows re-latched for the eager frame
+/// (#11ef), the DS twins of the SS/DMG re-latch families. Each was declared a
+/// "dispatch/emission/floor" by read-debt reasoning; the ROM-binary `cmp -l` →
+/// full-trace method finds a representable whole-M-cycle latch in every one.
+/// (a) the glitch-line mode-0 read-view mask (`ff0f_cgb_ds_glitch_m0_mask`) —
+/// the eager DS frame emits the glitch mode-0 STAT early, so a poll before the
+/// true rise reads the pre-rise value (`ly0_m0irq_scx0/1_ds_1`,
+/// `frame0_m0irq_count_scx2/3_ds_1`). (b) the DS carried mode-2 line-start read
+/// debt (`read_laws.rs` `read_pos_hd >= 4`, not raw `dot >= 2`) —
+/// `m2int_m0stat_ds_2`. (c) the eager shifted-frame flip twin (`read_laws.rs`
+/// lcd_offset arm) — `offset1_lyc99int_m0stat_count_scx2_ds_1`. (d) the DS
+/// window+sprite emergent exit (`read_laws_exit.rs` Arm 8-spr, `2*flip + 1`) —
+/// `10spritesPrLine_wx7_m3stat_ds_2`. (e) the DS mode-0 ack-squash widened to
+/// window 4 for the HBLANK retrigger family (`speed.rs` `stat_src_hblank`) —
+/// `late_m0irq_retrigger_scx1_ds_2`. Reverting any one makes this pin fail.
+/// Eager+CGB+DS scoped → production/tier2 byte-identical (verified: EV CGB
+/// 295→287 clean, tier2 291 / EV DMG 38 unchanged).
+#[test]
+fn eager_cgb_ds_relatch_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_cgb_ds_relatch",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 8] = [
+        (
+            "gambatte/enable_display/ly0_m0irq_scx0_ds_1_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        (
+            "gambatte/enable_display/ly0_m0irq_scx1_ds_1_cgb04c_outE0.gbc",
+            "E0",
+        ),
+        (
+            "gambatte/enable_display/frame0_m0irq_count_scx2_ds_1_cgb04c_out90.gbc",
+            "90",
+        ),
+        (
+            "gambatte/enable_display/frame0_m0irq_count_scx3_ds_1_cgb04c_out90.gbc",
+            "90",
+        ),
+        (
+            "gambatte/m2int_m0stat/m2int_m0stat_ds_2_cgb04c_out2.gbc",
+            "2",
+        ),
+        (
+            "gambatte/lcd_offset/offset1_lyc99int_m0stat_count_scx2_ds_1_cgb04c_out90.gbc",
+            "90",
+        ),
+        (
+            "gambatte/sprites/space/10spritesPrLine_wx7_m3stat_ds_2_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/irq_precedence/late_m0irq_retrigger_scx1_ds_2_cgb04c_outE0.gbc",
+            "E0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_eager(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (eager): {e}"));
+    }
+}
+
 /// The window visible-mode-3 LENGTH law (the FF41-read
 /// half of the atomic reclock). A triggering window's SameBoy mode-3→0 exit is
 /// `SBex = 263 + SCX&7` (cfl); the CPU-visible FF41 exit is `SBex − read_offset`.

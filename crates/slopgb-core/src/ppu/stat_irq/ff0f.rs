@@ -235,6 +235,45 @@ impl Ppu {
         }
     }
 
+    /// The CGB double-speed glitch-line mode-0 read-view mask (the
+    /// `ff0f_dmg_m0_coincident_mask` analogue for the eager CGB DS frame). On
+    /// the first line after an LCD enable (`glitch_line`) an `enable_display`
+    /// ROM polls FF0F (DI, `IE=0`) with the mode-0 STAT source armed; the eager
+    /// DS frame emits the glitch-line mode-0 STAT source EARLY (measured: the
+    /// spurious rise lands ~dot 19, so `intf` bit 1 is already set well before
+    /// the real mode-3→0 flip), so a poll landing BEFORE the true rise reads the
+    /// set bit where SameBoy — polling its cc+4 read frame short of the rise —
+    /// reads clear. The eager cc+0 read's TRUE position is `dot + 2` (the +2-dot
+    /// DS read-debt, the same debt `vis_mode_read` back-dates with); when that
+    /// true position has NOT crossed the rise R the read must read CLEAR:
+    /// `ly0_m0irq_scx0_ds_1` reads dot 250 (true 252) vs R=253 → clear (want
+    /// E0); its `_2` reads dot 252 (true 254 > 253) → set (want E2);
+    /// `ly0_m0irq_scx1_ds_1` reads dot 252 (true 254) vs R=254 → clear, `_2`
+    /// dot 254 (true 256 > 254) → set. R is the render's own recorded flip
+    /// ([`Self::m0_flip_dot`], `flip_dot` once flipped else its projection).
+    /// Returns `IF_STAT` to clear from the read verdict; verdict-only
+    /// (`intf`/dispatch untouched — the spurious rise still stands, this only
+    /// restores the pre-rise read value SameBoy's frame reports). Scoped to
+    /// `eager_value`, CGB, double-speed and the glitch line → production, tier2,
+    /// DMG and single-speed byte-identical.
+    pub(crate) fn ff0f_cgb_ds_glitch_m0_mask(&self) -> u8 {
+        if self.eager_value
+            && self.model.is_cgb()
+            && self.ds
+            && self.enabled
+            && self.glitch_line
+            && self.line < 144
+            && self.eng_stat & STAT_SRC_HBLANK != 0
+        {
+            if let Some(rise) = self.m0_flip_dot() {
+                if self.dot + 2 <= rise {
+                    return IF_STAT;
+                }
+            }
+        }
+        0
+    }
+
     /// Arm the FF0F write-race squash window (see the
     /// `stat_if_squash` field doc + the consumption site in
     /// [`Self::stat_update_tick`]). Called by the interconnect at the deferred
