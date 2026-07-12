@@ -136,6 +136,8 @@ mod reclock;
 #[path = "stat_irq/ff0f.rs"]
 mod stat_irq_ff0f;
 mod regs;
+#[path = "regs/stage.rs"]
+mod regs_stage;
 mod render;
 mod stat_irq;
 mod state;
