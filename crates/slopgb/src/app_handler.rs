@@ -21,7 +21,7 @@ use winit::window::{Window, WindowId};
 use crate::input::Focus;
 use crate::pacing::audio_pacing;
 use crate::video::Video;
-use crate::{App, FRAME_DURATION, link, should_idle, ui, window_title};
+use crate::{App, link, should_idle, ui, window_title};
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -373,8 +373,8 @@ impl ApplicationHandler for App {
             self.tools.focus_debugger();
             self.update_title();
         }
-        // A dead stream would otherwise pin `frames` at 0 forever.
-        self.check_audio_health(frames);
+        // A dead stream would otherwise leave the queue pinned high forever.
+        self.check_audio_health();
         if frames > 0 {
             self.session.autosave();
             if let Some(window) = &self.window {
@@ -384,11 +384,14 @@ impl ApplicationHandler for App {
             self.tools.request_redraw_all();
         }
         self.update_fps(frames);
+        // Both audio and timer pacing now march the `next_frame` grid (audio
+        // slews the interval; see run_audio_paced / run_timer_paced), so in the
+        // Steady band one wake schedules one frame → one present. The audio
+        // transient bands still burst (CatchUp) or skip (Hold), so `frames` may
+        // be >1 or 0 on a given wake — the redraw below is gated on frames > 0.
+        // Turbo free-runs.
         let flow = if self.turbo {
             ControlFlow::Poll
-        } else if audio_pacing(self.audio.is_some(), self.muted) {
-            // Wake well before ~50 ms of queued audio can drain.
-            ControlFlow::WaitUntil(Instant::now() + FRAME_DURATION / 4)
         } else {
             ControlFlow::WaitUntil(self.next_frame)
         };
