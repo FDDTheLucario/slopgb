@@ -681,7 +681,31 @@ impl Ppu {
                     );
                 } else {
                     let phase = i32::from(self.lcd_phase_hd);
-                    fold(&mut exit, 2 * i32::from(flip) + 2 - carry - phase);
+                    // The emergent bare exit's `+2` over-holds a POLLED read
+                    // that lands EXACTLY on the flip boundary. Production reads
+                    // mode 0 AT `flip_dot` (the flip is inclusive), so the true
+                    // CPU-visible mode-0 boundary sits at rphd `2*flip`, not
+                    // `2*flip + 2`. sprite0's polled measurement read is the one
+                    // ROM that reads at exactly rphd `2*flip` (its whole point is
+                    // to bracket the flip): `ppu_sprite0_scx{2,6}_b` eager reads
+                    // rphd 512/520 = `2*flip` and want mode 0, but `+2` (514/522)
+                    // forces mode 3. The carried m2int/scx weld-partners
+                    // (`late_scx4_1`, `m2int_m3stat_1`) read the SAME rphd 512 yet
+                    // carry `= 4` — their `- carry` already lands exit `2*flip - 2`
+                    // — and want mode 3, so the split is `read_carried`, NOT the
+                    // uniform read-frame bias #11eg swept (`ARM8BIAS`, which shifts
+                    // both and shuffles). Drop the `+2` only for the eager-DMG
+                    // polled read → tier2 + production byte-identical (both keep
+                    // `+2`), carried reads untouched (`- carry` owns them).
+                    let over = if self.eager_value
+                        && !self.model.is_cgb()
+                        && !self.read_carried
+                    {
+                        0
+                    } else {
+                        2
+                    };
+                    fold(&mut exit, 2 * i32::from(flip) + over - carry - phase);
                 }
             }
         }
