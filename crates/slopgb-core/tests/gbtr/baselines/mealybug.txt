@@ -36,7 +36,6 @@
 mealybug-tearoom-tests/dma/hdma_timing-C.gb [Cgb]
 
 # ppu/ mode-2 window-enable toggling ([Cgb] passes, see header).
-mealybug-tearoom-tests/ppu/m2_win_en_toggle.gb [Dmg]
 
 # ppu/ mode-3 mid-scanline palette writes. The [Dmg] legs are
 # pixel-perfect; the [Cgb] legs carry the same sprite-stall boundary
@@ -81,8 +80,6 @@ mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change2.gb [Cgb]
 # 30-216 px (the CGB fetch residue above), the scy [Dmg] leg to 29 px of
 # single-pixel tile-row boundary residue at columns 0/7 of
 # band-boundary lines (sub-dot SCY sampling at the line-start fetches).
-mealybug-tearoom-tests/ppu/m3_scx_high_5_bits.gb [Cgb]
-mealybug-tearoom-tests/ppu/m3_scx_high_5_bits_change2.gb [Cgb]
 mealybug-tearoom-tests/ppu/m3_scy_change.gb [Cgb]
 mealybug-tearoom-tests/ppu/m3_scy_change.gb [Dmg]
 mealybug-tearoom-tests/ppu/m3_scy_change2.gb [Cgb]

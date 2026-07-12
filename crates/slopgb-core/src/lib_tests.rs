@@ -6,19 +6,20 @@ fn rom_with_cgb_flag(flag: u8) -> Vec<u8> {
     rom
 }
 
-/// The golden-safe law, guarded without ROMs: every production `GameBoy::new`
-/// must construct with BOTH tier2 flags OFF. A flipped `interconnect.rs`
-/// default (the single "never do this in a pushed commit" rule) fails here
-/// immediately — unlike the gbtr golden hash, this needs no ROM bundle and
-/// always runs. `new_with_reclock` (the intentional ON path) is test/probe-only.
+/// Post-C3-flip default guard (#11cu): every production `GameBoy::new` must
+/// construct on the coherent EAGER-value clock — `leading_edge_reads` ON,
+/// `tier2_reclock` (the disproven read-deferred variant) still OFF. The
+/// eager-value flip is the shipped default; the deferred `tier2_reclock`
+/// must never be the default. `new_with_reclock` (the deferred path) stays
+/// test/probe-only. Needs no ROM bundle, always runs.
 #[test]
-fn production_new_is_reclock_off() {
+fn production_new_is_c3_eager_default() {
     for model in [Model::Dmg, Model::Cgb, Model::Agb] {
         let gb = GameBoy::new(model, rom_with_cgb_flag(0x00)).unwrap();
         assert_eq!(
             gb.reclock_flags(),
-            (false, false),
-            "{model:?}: production GameBoy::new must have (leading_edge, tier2) OFF"
+            (true, false),
+            "{model:?}: production GameBoy::new must be C3 eager (leading_edge ON, tier2 OFF)"
         );
     }
 }

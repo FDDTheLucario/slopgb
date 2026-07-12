@@ -35,38 +35,13 @@ gbmicrotest/dma_basic.gb [Dmg]
 # (oam_int_if_level_c, E2) is model-consistent. A real DMG-vs-AGS
 # divergence carried by the Dmg-modeled run; un-baselining it needs an
 # Agb-side STAT-event table.
-gbmicrotest/oam_int_if_level_d.gb [Dmg]
 gbmicrotest/halt_op_dupe_delay.gb [Dmg]
-gbmicrotest/int_oam_incs.gb [Dmg]
-gbmicrotest/int_oam_nops.gb [Dmg]
-gbmicrotest/lcdon_to_oam_int_l0.gb [Dmg]
-gbmicrotest/lcdon_to_oam_int_l1.gb [Dmg]
-gbmicrotest/lcdon_to_oam_int_l2.gb [Dmg]
 gbmicrotest/line_144_oam_int_b.gb [Dmg]
 gbmicrotest/line_144_oam_int_d.gb [Dmg]
-gbmicrotest/oam_int_inc_sled.gb [Dmg]
-gbmicrotest/oam_int_nops_a.gb [Dmg]
 gbmicrotest/ppu_sprite0_scx3_b.gb [Dmg]
 gbmicrotest/ppu_sprite0_scx7_b.gb [Dmg]
 gbmicrotest/stat_write_glitch_l154_d.gb [Dmg]
-gbmicrotest/win10_b.gb [Dmg]
-gbmicrotest/win11_b.gb [Dmg]
-gbmicrotest/win12_b.gb [Dmg]
-gbmicrotest/win13_b.gb [Dmg]
-gbmicrotest/win14_b.gb [Dmg]
-gbmicrotest/win15_b.gb [Dmg]
-gbmicrotest/win8_b.gb [Dmg]
-gbmicrotest/win9_b.gb [Dmg]
 
 # win0-7_b (and win0_scx3_b): the same one-dot stalled-window-lead
 # conflict as the win8-15_b block above (these legs additionally carry
 # the WX<=7 6-dot-stall anchor pinned by mealybug m3_window_timing).
-gbmicrotest/win0_b.gb [Dmg]
-gbmicrotest/win0_scx3_b.gb [Dmg]
-gbmicrotest/win1_b.gb [Dmg]
-gbmicrotest/win2_b.gb [Dmg]
-gbmicrotest/win3_b.gb [Dmg]
-gbmicrotest/win4_b.gb [Dmg]
-gbmicrotest/win5_b.gb [Dmg]
-gbmicrotest/win6_b.gb [Dmg]
-gbmicrotest/win7_b.gb [Dmg]

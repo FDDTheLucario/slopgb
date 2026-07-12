@@ -44,14 +44,25 @@ fn test_rom() -> Vec<u8> {
     rom
 }
 
+// These interconnect unit tests are calibrated against the OFF (deferred cc+4
+// read) clock. The C3 flip (#11cu) made the eager-value clock the struct-literal
+// construction default, so `Interconnect::new` now arms leading_edge/eager on the
+// bus without the `post_boot_inner` PPU-propagation — an incoherent half-armed
+// machine here. Neutralize it back to the coherent OFF clock so each test still
+// exercises the mechanics it was written for; the eager default's correctness is
+// pinned by the gbtr battery + mooneye, not these micro-timing units.
 fn ic(model: Model) -> Interconnect {
-    Interconnect::new(model, Cartridge::from_bytes(test_rom()).unwrap())
+    let mut b = Interconnect::new(model, Cartridge::from_bytes(test_rom()).unwrap());
+    b.set_eager_value(false);
+    b
 }
 
 fn ic_cgb_mode() -> Interconnect {
     let mut rom = test_rom();
     rom[0x143] = 0x80;
-    Interconnect::new(Model::Cgb, Cartridge::from_bytes(rom).unwrap())
+    let mut b = Interconnect::new(Model::Cgb, Cartridge::from_bytes(rom).unwrap());
+    b.set_eager_value(false);
+    b
 }
 
 fn ticks(b: &mut Interconnect, n: u32) {

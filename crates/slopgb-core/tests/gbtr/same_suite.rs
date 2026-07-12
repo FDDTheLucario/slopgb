@@ -146,12 +146,10 @@ const BASELINE: &[&str] = &[
     // dma: none — hdma_mode0 joined via the CGB-C mode-0/OAM timeline
     // (2026-06); gbc_dma_cont, gdma_addr_mask, hdma_lcd_off passed
     // already.
-    // interrupt: 1 of 1. ei_delay_halt chains the EI one-instruction
-    // IME delay into a HALT wake — class H: the failing rung is the
-    // halt-wake sampler's intra-cycle IF view (same family as the
-    // gambatte halt/ split rows; see the halt-wake bullet in CLAUDE.md
-    // §State) — don't move the FROZEN CPU interrupt sampling for it.
-    "same-suite/interrupt/ei_delay_halt.gb [Cgb]",
+    // interrupt: none — ei_delay_halt (the EI one-instruction IME delay
+    // chained into a HALT wake) now passes under the C3 eager-value flip
+    // (2026-07-12, #11cu; the coherent dispatch frame resolves its
+    // halt-wake intra-cycle IF view).
     // sgb: none — both MLT_REQ command tests pass via the joypad's SGB
     // packet receiver + MLT_REQ multiplexer (src/joypad.rs `Sgb`).
 ];
