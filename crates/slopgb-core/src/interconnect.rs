@@ -543,9 +543,14 @@ impl Interconnect {
             joypad: Joypad::new(sgb_joypad),
             cycles: 0,
             clock: CycleClock::new(),
-            leading_edge_reads: false,
+            // C3 flip (#11cu): the coherent eager-value clock is the production
+            // default. `post_boot_inner` re-arms the PPU flag web after
+            // `apply_post_boot_state`, so the raw struct-literal default is
+            // coherent (mooneye 93/93). `tier2_reclock` (the deferred clock)
+            // stays OFF — it is the disproven read-deferred variant.
+            leading_edge_reads: true,
             tier2_reclock: false,
-            eager_value: false,
+            eager_value: true,
             coherent_dispatch: false,
             disp_advance: false,
             ff0f_le: false,
