@@ -129,6 +129,8 @@ mod lyc;
 mod oam_bug;
 #[path = "stat_irq/read_laws.rs"]
 mod stat_irq_read_laws;
+#[path = "stat_irq/read_laws_exit.rs"]
+mod stat_irq_read_laws_exit;
 #[path = "stat_irq/reclock.rs"]
 mod reclock;
 #[path = "stat_irq/ff0f.rs"]
