@@ -16,9 +16,12 @@ mechanical flip + rebaseline.
 
 ## STEP 1 — non-gambatte confirm (0 SameBoy-pass drops)
 
-Ran the whole battery under `SLOPGB_GBTR_EAGER=1` (`new_with_eager`, behaviorally
-identical to the flipped `new()` for ROM runs — both call
-`arm_eager_construction_default` + the same suppress/re-arm). Every non-gambatte
+Ran the whole battery under `SLOPGB_GBTR_EAGER=1` (`new_with_eager`, byte-identical
+to the flipped `new()` for ROM runs — see the #11cv verification below: `new()`
+does NOT call `arm_eager_construction_default`, but with the struct-literal flip
+`bus.eager_value()` is already `true`, so `post_boot_inner`'s suppress/re-arm
+runs for `new()` too; `arm` is a redundant no-op inside `new_with_eager`). Every
+non-gambatte
 suite failed its OFF baseline with **only "now passing" (stale) entries — ZERO
 "failing but not in baseline" regressions.** Pure gain:
 
@@ -152,3 +155,65 @@ The flip broke 5 OFF-calibrated unit tests; fixed faithfully:
 pushed commit") and the State section still describe the pre-flip OFF world — the
 parent should reconcile them on integration (this exec branch left CLAUDE.md
 untouched to keep the flip diff focused).
+
+## #11cv — production-`new()` re-verification: the construction bug does NOT exist
+
+**Premise investigated:** a report that production `GameBoy::new()` (flipped
+defaults) diverges from the `cfg(test)` `new_with_eager()` that all flip
+verification used — i.e. `new()` ships a "half-armed" machine (eager bus,
+non-eager PPU) that fails ~6 gbtr suites (272/6, e.g. `int_oam_incs` FF80=0x70 vs
+self-check FF81=0x6f), while `new_with_eager()` passes. Prescribed fix: route
+`new()` through `eager_default=true`.
+
+**Root-cause trace.** The only code difference between the two paths is that
+`new_with_eager` calls `Interconnect::arm_eager_construction_default()`
+(`cycle.rs:174`) before `post_boot_inner`'s suppress/re-arm; `new()` does not.
+But `arm_eager_construction_default` sets exactly the two fields
+(`eager_value`, `leading_edge_reads`) that the **struct-literal flip already sets
+to `true`** (`interconnect.rs:551/553`). So on the flipped tree it is a pure
+no-op. Both paths then reach `post_boot_inner`'s `let eager = bus.eager_value();`
+(`lib.rs:209`) with `eager_value == true`, run the same suppress
+(`set_eager_value(false)`) → `apply_post_boot_state()` → re-arm
+(`set_eager_value(true)`) that propagates the flags to the PPU. **The re-arm — the
+actual coherence mechanism — is unconditional on `bus.eager_value()`, which the
+struct-literal flip makes `true` for `new()` too.** The two constructors are
+therefore identical, and the comments at `cycle.rs:165-173` /
+`lib.rs:188-216` are **correct as written** (no update needed): `arm` really is
+reached only via `new_with_eager`, and production really does pass
+`eager_default=false` — it just doesn't matter, because the flip pre-sets the
+fields `arm` would set.
+
+**Empirical proof (two independent nets).**
+1. Full-collection fingerprint diff `new()` vs `new_with_eager()` (frame-16 XRGB +
+   frame-16 raw-audio FNV, both models, whole v7.0 collection): **0 divergent
+   (rom,model) pairs of 9020.** (Throwaway `diag_new_vs_eager`, removed after.)
+   Caveat: the fingerprint captures pixels+audio, not HRAM — so the self-check
+   verdict suites are covered by net 2.
+2. `gbmicrotest_dmg_matrix` (reads the FF80/FF81/FF82 self-check verdicts) run
+   under production `new()` (NO `SLOPGB_GBTR_EAGER`): **pass.** `int_oam_incs`,
+   `win0_b`..`win15_b` etc. all self-check-pass — the reported 272/6 does not
+   reproduce.
+
+The report's "temp-edit `new()` → `eager_default=true` fixes it" observation is
+only explicable on an **un-flipped** tree (struct literal still `false`), where
+`arm` is NOT a no-op and `new()` would indeed be non-eager. On `c3-flip-exec`
+@ `72b098a` the flip is applied and `new()` is coherent by construction.
+
+**Production-path gates (all under production `GameBoy::new()`, NO env toggles;
+`CARGO_TARGET_DIR=target/flipfix`):**
+
+| gate | result |
+|---|---|
+| gbtr battery `--test gbtr --release` (incl. `golden_fingerprint`) | **278/0** (4 ignored) — run **twice** |
+| `golden_fingerprint` vs committed `fingerprint.txt` | **0 drift** (committed golden was already captured under `new()` — no re-capture needed) |
+| mooneye `--test mooneye --release` | **93/93** |
+| core lib `--lib --release` | **760/0** |
+| frontend `-p slopgb --bins --release` | **508/0** |
+| clippy `--workspace --all-targets -D warnings` | clean |
+| flip floor spot-check: `run_gambatte m1statwirq_3_dmg08_out2.gb dmg`, flipped default (no env) | OCR = **2** (== `out2`) |
+
+**Verdict: no construction fix, no golden re-capture, no baseline correction
+needed. `new()` == `new_with_eager` byte-for-byte; the flip agent's
+`new_with_eager` verification is transitively valid for production `new()`; the
+flip is production-verified.** Only doc changes this session (the inaccurate "both
+call `arm`" line above + this section).
