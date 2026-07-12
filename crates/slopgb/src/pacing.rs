@@ -15,6 +15,18 @@ use slopgb_core::DEFAULT_SAMPLE_RATE as CORE_SAMPLE_RATE;
 /// Audio-driven pacing keeps about this much queued for the device.
 const AUDIO_TARGET_MS: u64 = 50;
 
+/// Upper bound on frames emulated per event-loop wake (non-turbo), so a host
+/// that can't keep up — or a resume/underrun burst — stays bounded instead of
+/// spiraling. Shared by both the audio grid ([`wake_plan`]) and the timer pacer.
+pub(crate) const MAX_FRAMES_PER_WAKE: u32 = 8;
+
+/// Maximum fractional adjustment the audio-queue servo applies to the nominal
+/// frame interval (a 1% pitch nudge is inaudible). At the clamp extremes the
+/// grid produces frames 1% faster (queue empty) or slower (queue full) than
+/// nominal — enough to absorb device-vs-monotonic clock drift (≪ 0.5% in
+/// practice) while keeping the long-run rate locked to the device clock.
+const MAX_SLEW: f64 = 0.01;
+
 /// Audio-paced emulation falls back to wall-clock pacing if the device queue
 /// stops draining for this long (the cpal stream stalled or died without
 /// reporting an error).
@@ -67,13 +79,16 @@ impl AudioPipe {
         self.out.push(&self.device_buf);
     }
 
-    pub(crate) fn needs_more(&self) -> bool {
-        self.out.queued() < self.target_fill
-    }
-
     /// The device queue's current fill level (device-rate frames).
     pub(crate) fn queued(&self) -> usize {
         self.out.queued()
+    }
+
+    /// The queue fill target in device-rate frames (~[`AUDIO_TARGET_MS`]); the
+    /// setpoint the servo ([`slewed_interval`]) and band classifier
+    /// ([`PaceBand::classify`]) steer toward.
+    pub(crate) fn target(&self) -> usize {
+        self.target_fill
     }
 
     /// Whether the cpal stream reported a fatal error.
@@ -82,15 +97,18 @@ impl AudioPipe {
     }
 }
 
-/// Watchdog for a dead audio stream. Audio-paced emulation only makes
-/// progress when the device drains the queue, so "zero frames emulated and
-/// the queue level never dropping" sustained for [`AUDIO_STALL_TIMEOUT`]
-/// means the stream is stalled even if cpal never reported an error — and
-/// without intervention the emulator would silently freeze.
+/// Watchdog for a dead audio stream. Under grid pacing frames are emulated on
+/// the wall clock regardless of the queue, so "frames emulated" no longer
+/// implies a live device — only the *queue draining* does. Progress therefore
+/// means the queue level dropped, or sits below `target` (a device eating
+/// everything is alive). A stall is the queue pinned at/above `target` with no
+/// drop for [`AUDIO_STALL_TIMEOUT`] — the grid keeps topping it up to ~2×target
+/// (then `Hold`s), so a dead device leaves it stuck high — even if cpal never
+/// reported an error; without intervention the emulator would run silent.
 pub(crate) struct StallWatchdog {
     /// Queue level at the last observation.
     last_queued: usize,
-    /// Last time the queue drained or emulation produced frames.
+    /// Last time the queue drained or sat below target.
     progress_at: Instant,
 }
 
@@ -108,14 +126,17 @@ impl StallWatchdog {
         self.progress_at = Instant::now();
     }
 
-    /// Record one wake's outcome; true if the stream looks stalled.
-    pub(crate) fn is_stalled(&mut self, frames_emulated: u32, queued: usize, now: Instant) -> bool {
-        if frames_emulated > 0 || queued < self.last_queued {
-            self.last_queued = queued;
+    /// Record one wake's outcome; true if the stream looks stalled. Progress ⇔
+    /// the queue level dropped since last wake, or sits below `target` (a
+    /// fast-draining device never trips). Otherwise the queue is pinned ≥ target
+    /// — a stall once that has held for [`AUDIO_STALL_TIMEOUT`].
+    pub(crate) fn is_stalled(&mut self, queued: usize, target: usize, now: Instant) -> bool {
+        let progressed = queued < self.last_queued || queued < target;
+        self.last_queued = queued;
+        if progressed {
             self.progress_at = now;
             return false;
         }
-        self.last_queued = queued;
         now.duration_since(self.progress_at) > AUDIO_STALL_TIMEOUT
     }
 }
@@ -140,6 +161,114 @@ pub(crate) fn frame_interval(limit: u32, default: Duration) -> Duration {
     } else {
         Duration::from_secs_f64(1.0 / f64::from(limit))
     }
+}
+
+/// Nominal frame interval slewed by the audio-queue fill level: a pure
+/// P-controller that keeps the long-run production rate locked to the device
+/// clock without drift. When the queue sits below `target` the interval shrinks
+/// (produce slightly faster to refill); above `target` it grows (slow down).
+/// The error term `(queued − target)/target` is clamped to ±1 and scaled by
+/// [`MAX_SLEW`], so the interval stays within ±1% of `nominal`. A steady-state
+/// P-offset is fine — the queue just settles slightly off `target`.
+///
+/// Monotonic non-decreasing in `queued`: more queued → longer interval (slower
+/// production). `target == 0` (no device) degenerates to `nominal`.
+#[must_use]
+pub(crate) fn slewed_interval(queued: usize, target: usize, nominal: Duration) -> Duration {
+    if target == 0 {
+        return nominal;
+    }
+    let err = (queued as f64 - target as f64) / target as f64;
+    let slew = err.clamp(-1.0, 1.0) * MAX_SLEW;
+    nominal.mul_f64(1.0 + slew)
+}
+
+/// The per-wake frame budget band, from the audio-queue fill level. Bounds the
+/// transient behavior so post-turbo (over-full) and resume/underrun (empty)
+/// states don't judder or spiral; the normal `Steady` band emits exactly the
+/// frames the wall-clock grid owes (≤1 per wake in practice).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PaceBand {
+    /// Queue over-full (`queued > 2×target`, e.g. right after turbo leaves
+    /// ~250 ms queued): emulate 0 frames until it drains back toward target.
+    Hold,
+    /// Normal band: emit the frames owed by the `next_frame` grid.
+    Steady,
+    /// Queue nearly empty (`queued < target/2`, e.g. resume from
+    /// pause/breakpoint): burst up to [`MAX_FRAMES_PER_WAKE`] to refill — a few
+    /// dropped presents are acceptable while audio continuity is restored.
+    CatchUp,
+}
+
+impl PaceBand {
+    /// Classify the fill level into a band. Thresholds are strict, so the exact
+    /// edges (`2×target`, `target/2`) fall in `Steady`.
+    #[must_use]
+    pub(crate) fn classify(queued: usize, target: usize) -> Self {
+        if queued > 2 * target {
+            PaceBand::Hold
+        } else if queued < target / 2 {
+            PaceBand::CatchUp
+        } else {
+            PaceBand::Steady
+        }
+    }
+}
+
+/// The audio-paced per-wake decision, factored pure for testing: given the
+/// queue level, the wall-clock grid position (`next_frame`) and the slewed
+/// `interval`, return how many frames to emulate this wake and the updated
+/// `next_frame`. The caller emulates up to `budget` frames (breaking early on a
+/// breakpoint / link stall) and stores the returned grid position.
+///
+/// - **Backlog resync:** fell more than [`MAX_FRAMES_PER_WAKE`] intervals behind
+///   (stall, drag, debugger) → rebase the grid to `now` instead of
+///   fast-forwarding through the whole backlog.
+/// - **Hold:** 0 frames; park the grid at `now + interval` so no backlog accrues
+///   while the over-full queue drains.
+/// - **Steady:** the frames the grid owes (`next_frame ≤ now`), capped at
+///   [`MAX_FRAMES_PER_WAKE`] — ≤1 per wake in steady state.
+/// - **CatchUp:** a bounded burst of [`MAX_FRAMES_PER_WAKE`] to refill the queue,
+///   rebasing the grid to `now + interval` (the burst decouples from the grid).
+#[must_use]
+pub(crate) fn wake_plan(
+    queued: usize,
+    target: usize,
+    now: Instant,
+    next_frame: Instant,
+    interval: Duration,
+) -> (u32, Instant) {
+    match PaceBand::classify(queued, target) {
+        PaceBand::Hold => (0, now + interval),
+        PaceBand::CatchUp => (MAX_FRAMES_PER_WAKE, now + interval),
+        PaceBand::Steady => advance_grid(now, next_frame, interval, MAX_FRAMES_PER_WAKE),
+    }
+}
+
+/// Resync-then-march the wall-clock frame grid: rebase to `now` if we fell more
+/// than `cap` intervals behind (rather than fast-forwarding the whole backlog),
+/// then count the frames the grid owes (`next_frame <= now`, inclusive), capped
+/// at `cap`, advancing the grid past each. Shared by the timer pacer
+/// ([`crate::App::run_timer_paced`]) and [`wake_plan`]'s Steady band so the two
+/// can't drift apart.
+#[must_use]
+pub(crate) fn advance_grid(
+    now: Instant,
+    next_frame: Instant,
+    interval: Duration,
+    cap: u32,
+) -> (u32, Instant) {
+    let mut next = if now.duration_since(next_frame) > interval * cap {
+        now
+    } else {
+        next_frame
+    };
+    let mut budget = 0;
+    while next <= now && budget < cap {
+        next += interval;
+        budget += 1;
+    }
+    (budget, next)
 }
 
 /// Max frames to emulate per turbo wake, scaling with the Options fast-forward
