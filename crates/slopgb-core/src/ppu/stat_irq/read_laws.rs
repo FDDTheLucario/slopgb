@@ -423,16 +423,16 @@ impl Ppu {
         //     (clear 95, wx_match 97, scx0); `late_scx03_wx0f/10/11_2`.
         // Fetch SCX (`wx_match_scx`), NOT the read-time SCX, sets BOTH the
         // deadline and the exit fine-scroll (`late_scx_late_disable` rewrites
-        // SCX 0→4 mid-line AFTER the window fetched — read SCX 4 but the
-        // window's length used SCX 0). The −4 polled read frame folds into
-        // both exits: bare `253 + fetch_scx`, extend `259 + fetch_scx`. The
-        // `min(fetch_scx, 2)` deadline cap is the fetch-latency
-        // saturation (scx2/3/5 share the +2 deadline; scx0 the +0).
+        // SCX 0→4 mid-line AFTER the window fetched). The −4 polled read frame
+        // folds into both exits: bare `253 + fetch_scx`, extend `259 + fetch_scx`;
+        // the `min(fetch_scx, 2)` deadline cap is the fetch-latency saturation.
         let fscx = i32::from(self.render.wx_match_scx);
         let wxm = self.render.wx_match_dot;
         let abd = self.render.win_predraw_abort_dot;
         // Extend once the clear lands within 3 dots of the WX match (the
-        // first tile has shipped). EXCEPT a low-WX (near-left) window whose
+        // first tile has shipped) — 4 on the eager cc+0 read frame, which records
+        // `abd` an M-cycle before the tier2 cc+4 read the +3 targets (`wx11_2`
+        // abd106 EXTEND vs `_1` abd102 BARE, #11ec). EXCEPT a low-WX window whose
         // SCX fine-scroll pushes the fetch well past the match: there a clear
         // BEFORE the match (`abd < wxm`) definitively kills it → bare
         // (`late_disable_scx2/3/5_0`, wxm 97, clear 95, fetch SCX ≥ 1; the
@@ -451,7 +451,7 @@ impl Ppu {
             && !self.render.win_active
             && !self.glitch_line
         {
-            let extend = abd + 3 >= wxm && !scx_kills_early;
+            let extend = abd + if self.eager_value { 4 } else { 3 } >= wxm && !scx_kills_early;
             if self.render.n_sprites == 0 {
                 fold(&mut exit, 2 * (if extend { 259 } else { 253 } + fscx));
             } else if extend {
