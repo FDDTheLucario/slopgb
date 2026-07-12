@@ -102,14 +102,28 @@ impl Ppu {
                     // unique-optimal (m3_scx_high_5_bits: 4→41px, 6→PASS, 8→35px).
                     // The `dot > hunt_match_dot` guard rejects the LINE-START write
                     // (dot 80) whose `hunt_done` is STALE from the previous line
-                    // (match_dot ≥85). PRE-match writes (`!hunt_done`, `_ => 0`)
-                    // feed the fine-scroll hunt the EMERGENT bare-line length grows
-                    // from, so a debt there shifts the gambatte m3stat/late_scx
-                    // length verdicts — genuine coupling, kept zero-debt. Full
-                    // A/B: `measurements/eager-scx-adversarial-2026-07-12.md` (#11el).
+                    // (match_dot ≥85).
                     0xFF43 if !self.ds
                         && self.render.hunt_done
                         && self.dot > self.render.hunt_match_dot => 6,
+                    // SCX (FF43) PRE-match on a plain BG line (`!hunt_done`,
+                    // NON-glitch, NON-window): #11el wrongly called these
+                    // length-coupled, but the bare line starts SCX=0 so the
+                    // comparator locks (discard 0) at mode-3 dot 5 BEFORE the
+                    // write; OFF/tier2 commit past the lock → coarse shift, but
+                    // the eager cc+0 commit lands BEFORE it → re-opens the
+                    // comparator → wrong discard → 320px (`m3_scx_low_3_bits`).
+                    // The `6` render-frame debt re-aligns to OFF's post-lock dot.
+                    // The excluded cases ARE genuinely length-coupled: `glitch_
+                    // line` (SCX re-open on the glitch line, `ly0_late_scx7`) and
+                    // `wy_trig_sb` (a WINDOW line masks the discard, `late_scx_
+                    // late_disable`); the m2int length rows write at dot 152 with
+                    // `hunt_done` → the post-match arm above, never here. Full A/B:
+                    // `eager-scxlow-recheck-2026-07-12.md` (#11em, corrects #11el).
+                    0xFF43 if !self.ds
+                        && !self.render.hunt_done
+                        && !self.glitch_line
+                        && !self.wy_trig_sb => 6,
                     _ => 0,
                 }
             } else if self.ds {
