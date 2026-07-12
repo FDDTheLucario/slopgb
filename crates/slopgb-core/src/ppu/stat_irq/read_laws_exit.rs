@@ -332,6 +332,39 @@ impl Ppu {
         {
             fold(&mut exit, 2 * (263 + scx7 + ds1));
         }
+        // Arm D-wx0 — the eager DMG low-WX co-incident-trigger BARE exit
+        // (#11cu, the Arm-2 complement). On a low-WX window's OWN trigger line
+        // the WX comparator matches during the 8-dot prefill, so slopgb's
+        // whole-dot render activates (`win_active`) the instant `wy2 == ly` is
+        // caught — even when that catch lands AT the match dot. SameBoy's mode-2
+        // `wy_check` samples ~2 dots BEFORE the match, so a wy2 that becomes
+        // valid at/after it (the `win_extends_sb` deadline FALSE, `wy_trig_sb_dot
+        // > wx_match_dot − 2`) does NOT trigger → SameBoy renders BARE while
+        // slopgb drew the window and over-extended (`vis_hold_until` / native
+        // flip 257). Force the bare exit so the trigger-line read verdicts mode 0
+        // (`late_wy_FFto2_ly2_wx00_3` wytrig 90 == wxmatch 90 → bare; its `_2`
+        // wytrig 86 ≤ 88 rides Arm 2's extend). WX < 7 (the prefill-match class;
+        // WX ≥ 7 goes bare in the render and rides Arm 2). eager DMG only →
+        // tier2 / CGB / production byte-identical.
+        if self.eager_value
+            && !self.model.is_cgb()
+            && self.render.win_active
+            && self.wy2 == self.ly
+            && self.wy_trig_sb_line == self.ly
+            && self.eff.wx < 7
+            && self.render.wx_match_dot != 0
+            // NO fine scroll only. A nonzero SCX&7 (incl. a `late_scx_*` rewrite
+            // to 4) shifts the window fetch onto its own fine-scroll frame where
+            // the window LEGITIMATELY extends: `late_scx_late_wy_*_wx00_2` has
+            // the IDENTICAL render state (wytrig 90 == wxmatch 90) but scx7=4 and
+            // wants EXTEND. Only the scx7=0 co-incident trigger cleanly fails
+            // SameBoy's mode-2 `wy_check` → bare.
+            && self.scx & 7 == 0
+            && !self.win_extends_sb()
+            && (m == 0 || m == 3)
+        {
+            fold(&mut exit, 2 * 251);
+        }
         // Arm 3 — the CGB PRE-DRAW window-abort bare exit, SS. A
         // window disabled by an LCDC.5 clear BEFORE its first fetch renders
         // BARE on SameBoy with the SCX fine-scroll penalty DROPPED

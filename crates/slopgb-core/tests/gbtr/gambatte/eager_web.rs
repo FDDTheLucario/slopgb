@@ -518,6 +518,29 @@ fn eager_dmg_lyc153_cluster_passes() {
             "gambatte/window/arg/late_wy_10to0_ly1_3_dmg08_cgb04c_out0.gbc",
             "0",
         ),
+        // The WX=0 co-incident-trigger BARE exit (Arm D-wx0, read_laws_exit.rs).
+        (
+            "gambatte/window/arg/late_wy_FFto2_ly2_wx00_3_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        // The line-153 retrigger ack-squash widen (speed.rs 6→10): `_2` squash
+        // (E0) while `_1` still delivers (E2).
+        (
+            "gambatte/lyc153int_m2irq/lyc153int_m2irq_late_retrigger_2_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        // The DMG ly0 dot-4 OAM co-instant mask disable under eager
+        // (ff0f.rs): `_2` reads the pulse (out2), `_1` stays clear.
+        (
+            "gambatte/lyc153int_m2irq/lyc153int_m2irq_2_dmg08_cgb04c_out2.gbc",
+            "2",
+        ),
+        // The (0,4) LYC-write compare-wrap un-block re-enable under eager
+        // (lyc.rs): `_3` fires at dot 4 (outE2), `_1`/`_2` stay blocked.
+        (
+            "gambatte/lycEnable/lycwirq_trigger_ly00_stat50_3_dmg08_cgb04c_outE2.gbc",
+            "E2",
+        ),
     ];
     for (rel, expect) in rows {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));

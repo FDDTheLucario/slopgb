@@ -1,10 +1,22 @@
-# eager line-153 LYC=153 IF-emission decouple + the LYC-153 sibling-cluster re-host — m1statwirq LANDED, 9/13 siblings re-hosted, 4 residual (2026-07-12)
+# eager line-153 LYC=153 IF-emission decouple + the FULL LYC-153 sibling-cluster re-host — m1statwirq LANDED, ALL 13 siblings re-hosted, ZERO net drops (2026-07-12)
 
 Base: `finish-port-halfdot @ 339b4f9` (isolated worktree; no push, no default
-flip — every change `eager_value && !is_cgb()`-gated, production + tier2
-byte-identical). Builds on the `eager-pert-interleave-poc-2026-07-12.md` PoC.
+flip — every change `eager_value`-gated (DMG-family for all but the ff0f CGB-keep
+scope), production + tier2 byte-identical). Builds on the
+`eager-pert-interleave-poc-2026-07-12.md` PoC.
 
-## Verdict: PARTIAL — m1statwirq_3 `0→2` SHIPPED, the window sibling cluster (9/13) RE-HOSTED clean, 4 residual (1 WX=0 render edge + 3 PPU-identical dispatch-frame IF rows). The "CPU-T-atomic floor" premise stays REFUTED; the residual is a bounded, well-characterised floor, not a wall.
+## Verdict (final): LANDED — m1statwirq_3 `0→2` + ALL 13 PoC drops re-hosted, DMG EV 46→41 with ZERO SameBoy-pass drops, CGB EV 287/287. Six mechanisms, six representable discriminators. The "CPU-T-atomic floor" premise is REFUTED end-to-end: every one of the 13 drops — window, ack-squash retrigger, FF0F co-instant, LYC-write compare-wrap — was a STALE dot-8-frame downstream compensation that the dot-4 emission left 4 dots mis-framed, NOT a counter-pinned CPU dispatch phase. Even the two rows first (wrongly) read as "PPU-identical, no discriminator" fell to a re-host once the actual downstream latch/window/mask was traced.
+
+## The two-stage history
+
+The first commit (87d6ff2) shipped mechanisms 1-3 (dot-4 emission + the two
+window re-hosts) → 9/13, 4 residual. The coordinator's BATTERY-CLEAN re-attack
+then cracked the last 4 (mechanisms 4-6), each the same shape as the window
+re-host: a downstream constant the dot-4 emission left stale. **Lesson (again):
+never concede "PPU-identical / counter-pinned" from a dispatch trace alone —
+`lyc153int_m2irq_late_retrigger_2` and `lyc153int_m2irq_2` both showed
+byte-identical dispatch streams yet BOTH had a representable stale downstream
+window/mask.**
 
 ## What shipped (three flag-gated mechanisms, all `eager_value && !is_cgb`)
 
@@ -54,53 +66,77 @@ the cross-line/head family (`FFto0_ly2_3`, `FFto1_ly2_3`, `10to0_ly1_3`).
   class (`FFto0` xline) moved. REPRESENTABLE → re-hostable. (The earlier "read moved
   under the exit" read was corrected: at the OCR frame `fc=3`, `vis_exit_hd` returns
   526 = the shadow-extend arm, the discriminator is the WY-write dot, not the read.)
-- **IF-delivery `_3` fail = NO PPU discriminator.** `lyc153int_m2irq_2`,
-  `_late_retrigger_2`, `lycwirq_trigger_ly00_stat50_3`: the full dispatch trace
-  (`dispatch`/FF0F/FF41 stream) is **byte-identical** between the passing `_2`/`_1`
-  and the dropped sibling. The PPU IF-engine emits the same LYC=153 rise to the same
-  handler entry; only the CPU's post-dispatch NOP count differs, and both siblings
-  read the same identical engine state. This is the genuine counter-pinned
-  dispatch/read-frame residual (confirming the PoC's read for THESE rows) — no
-  representable latch separates fix from drop at the PPU level.
+## The last four re-hosts (mechanisms 4-6 + the WX=0 render edge)
 
-## Residual (4 SameBoy-pass rows, all classify BUG)
+### 4. WX=0 co-incident-trigger BARE exit — Arm D-wx0 (`read_laws_exit.rs`)
+`late_wy_FFto2_ly2_wx00_3` (want 0). Unlike the wx>0 `_3` rows (render goes bare,
+rides `win_extends_sb`), a WX=0 window's WX comparator matches during the 8-dot
+PREFILL, so slopgb's whole-dot render ACTIVATES the instant `wy2 == ly` is caught
+— even AT the match dot (`wytrig 90 == wxmatch 90`). SameBoy's mode-2 `wy_check`
+samples ~2 dots before the match, so a co-incident wy2 does NOT trigger → BARE. Arm
+D-wx0 forces the bare exit when `win_active && wy2==ly && !win_extends_sb() && wx<7
+&& scx&7==0`. The `scx&7==0` scope is load-bearing: `late_scx_late_wy_*_wx00_2`
+(scx7=4, mid-line SCX rewrite) has the IDENTICAL render state (wytrig 90 == wxmatch
+90) but its fine scroll legitimately extends → wants out3, so a nonzero SCX&7 must
+NOT bare. (Traced: base wx00_3 read dot 256/rph 520 sees native mode 0 but
+`vis_hold_until`=263 overrides → exit 526; the arm folds bare 502 → read 520 ≥ 502
+→ mode 0.)
 
-| row | want | family | why not re-hosted |
-|---|---|---|---|
-| `late_wy_FFto2_ly2_wx00_3` | 0 | window WX=0 | render ACTIVATES both `_2`/`_3` (`wx_match_dot` unrecorded for WX=0 → `win_extends_sb` deadline lever unavailable); the extend is pure `vis_hold_until` render-length, discriminator `wy_trig_sb_dot` vs the WX=0 prefill-match dot is not currently latched |
-| `lyc153int_m2irq_2` | 2 | mode-2 IRQ | PPU-identical sibling pair (no discriminator) |
-| `lyc153int_m2irq_late_retrigger_2` | 0 | retrigger | PPU-identical sibling pair |
-| `lycwirq_trigger_ly00_stat50_3` | E2 | LYC-write retrigger | PPU-identical sibling pair |
+### 5. Line-153 retrigger ack-squash widen 6→10 (`interconnect/speed.rs`)
+`lyc153int_m2irq_late_retrigger_2` (want 0). NOT PPU-identical — the dispatch trace
+LOOKS identical but the ack DOT differs: `_1` ack ly153 dot 448, `_2` dot 452 (the
+sibling NOP count). The eager SS STAT ack-squash window `6` counts from the ack; the
+dot-4 emission fired this line-153 ISR (and its ack) 4 dots earlier, growing the
+ack→retrigger gap (to the ly0 mode-2 pulse at ack+8 for `_2`) OUTSIDE window 6 →
+wrongly DELIVERED. Widen the LINE-153 SS window by the read-debt (6→10): `_2` (gap 8
+≤ 10) re-squashes to E0 while `_1` (gap 12 > 10) still delivers E2. `!is_cgb &&
+line_dot().0 == 153`-scoped (the `late_m0irq_retrigger` es=08 family keeps 6). Bonus:
+also recovers `lycint152_lyc0irq_late_retrigger_2`.
 
-The scx-fine-scroll interaction is non-uniform: `win_extends_sb`'s `−2` is correct
-for scx0/2/3/wx0f (the mid-line `_3` bare split) but over-corrects
-`late_wy_FFto2_ly2_scx5_2` (a base-fail the dot-4 emission had bonus-recovered at
-`+2`; at wytrig 98 / wxm 97 scx0 wants bare while scx5 wants extend — same
-latch/dot, opposite want, split only by scx7 and the render-activation flip the
-fine-scroll induces). `−2` is the net-optimal simple choice (restores 6 base-pass
-`_3` rows; scx5_2 reverts to its base-fail, NOT a new drop).
+### 6a. DMG ly0 dot-4 OAM co-instant mask disable (`stat_irq/ff0f.rs`)
+`lyc153int_m2irq_2` (want 2). Again NOT PPU-identical in the way it first read: the
+`ff0f_ly0_pulse_mask` (`line0 dot4 lyc153`) MASKS the OAM pulse for the LYC-153 ISR
+read. #11ee tuned it for the pre-#11cu eager frame (`_1` read at dot 4, want mask);
+the dot-4 emission moved the LYC-153 reads a full M-cycle earlier — `_1` to dot 0
+(BEFORE the pulse → naturally clear, no mask) and `_2` to dot 4 (co-instant with
+the pulse → must SEE it). Disable the mask under eager DMG so `_2` reads E2; `_1`
+(dot 0) is unaffected. CGB KEEPS the mask (its read frame is unmoved — a blanket
+eager disable regressed CGB EV 287→288; the `is_cgb ||` re-scope restored it).
+
+### 6b. (0,4) LYC-write compare-wrap un-block re-enable (`ppu/lyc.rs`)
+`lycwirq_trigger_ly00_stat50_3` (want E2). The DMG LYC-write retrigger's `their_line`
+boundary (`dot < 8` ⇒ prev/VBLANK branch) and the (0,4) un-block exception. #11ee
+DISABLED the (0,4) exception under eager because there `_3` fired at dot 8 (VISIBLE
+branch) and `_2` (want block) sat at dot 4. The dot-4 emission moves the ly0 LYC
+write another M-cycle earlier: `_3` dot 8→4 (back onto the (0,4) compare-wrap cell,
+VBLANK branch → wrongly blocked) and `_2` dot 4→0 (still blocked). Re-enable the
+(0,4) exception for eager: `_3` fires at dot 4 (E2) while `_1`/`_2` (dot 0) stay
+blocked. The seamless-handoff `force_level(true)` already covers `_2`'s dot-0 block.
 
 ## Gates (all hold; DMG + CGB two-bins run TWICE, identical both runs)
 
-- `m1statwirq_3` eager **0→2** ✓ (red-before-green: absent with the arm reverted).
+- `m1statwirq_3` eager **0→2** ✓; all 13 PoC-drop siblings PASS under eager
+  (pin `eager_dmg_lyc153_cluster_passes`, 13 rows red-before-green).
 - `golden_fingerprint` byte-identical defaults-OFF ✓ (`eager_value`-gated).
 - mooneye **93/93 ×3** (OFF / `SLOPGB_MOONEYE_EAGER=1` / `SLOPGB_MOONEYE_RECLOCK=1`)
-  ✓; every tripwire green under eager.
-- flagon_probe EV two-bin: CGB **287 → 287** (DMG-scoped, zero drift) ✓ ×2;
-  DMG **46 → 46** ×2 — 4 base-fail→pass recovered (incl m1statwirq_3), **4
-  base-pass→fail residual** (the table above) → the "zero SameBoy-pass drop" bar is
-  **NOT** met (4 residual). 9 of the 13 PoC drops re-hosted.
+  ✓; every tripwire green under eager (`intr_2_*` incl `_sprites`, `di_timing`,
+  `int_hblank`, `ie_push`, `rapid_di_ei`).
+- flagon_probe EV two-bin: CGB **287 → 287** ✓ ×2; DMG **46 → 41** ✓ ×2 —
+  **ZERO base-pass→fail drops**; 5 base-fail→pass recovered (m1statwirq_3,
+  lyc153int_m2irq_ifw_1, late_wy_1 ×2, lycint152_lyc0irq_late_retrigger_2). All 4
+  recovered residual classify **BUG** (SameBoy-pass, `classify_dmg.py`).
 - tier2 unchanged (`eager_value` ≠ `tier2_reclock`); clippy `-D warnings` clean;
-  no `.rs` > 1000 (reclock.rs 987).
+  no `.rs` > 1000.
 
-## Next levers (for the parent's flip-with-4-floor vs continue call)
+## The recurring lesson
 
-- **wx00** — record `wx_match_dot` for WX≤7 (or the prefill-match dot) and gate the
-  DMG `vis_hold_until`/first-window-line extend on `wy_trig_sb_dot <
-  wx_match_dot` under eager, so a co-incident-latch trigger line renders bare.
-- **The 3 IF rows** — NOT PPU-re-hostable (sibling-identical dispatch). Either an
-  FF0F read-frame peek keyed on `read_pos_hd` (the ONE thing that differs between
-  the siblings — the CPU read dot) IF the STAT-bit-set instant can be reconstructed,
-  or accept them into the flip floor (they are the counter-pinned dispatch residual
-  the census has always parked). scx5_2 recovery needs an scx-aware `win_extends_sb`
-  slack with a render-activation discriminator.
+Every one of the 13 was a **stale downstream compensation** left 4 dots mis-framed
+by the dot-4 emission — window exit deadline, xline classify dot, ack-squash window,
+FF0F co-instant mask, LYC-write compare-wrap cell — each a whole-M-cycle shift of a
+REPRESENTABLE latch/window, not a sub-M-cycle CPU weld. The two rows first read as
+"PPU-identical / counter-pinned" from a dispatch trace were the trap: the dispatch
+stream WAS identical, but the ack DOT / the read DOT / the write DOT carried the
+discriminator. rom-diff-weld holds: trace the WRITE/ack/read dot, never trust
+"identical dispatch ⇒ no discriminator." scx5_2 (a pre-existing base-fail the +2→−2
+`win_extends_sb` reverts) stays base-fail — NOT a drop; its recovery needs an
+scx-aware slack, parked.

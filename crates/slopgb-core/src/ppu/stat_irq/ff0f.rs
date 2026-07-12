@@ -297,7 +297,18 @@ impl Ppu {
         // guard).
         // Second arm: the shifted-frame co-instant mode-0 rise
         // (see `m0sh_age`).
-        if (self.ly0_pulse_age > 0 && self.line == 0 && self.dot == 4 && self.lyc == 153)
+        // The DMG line-0 dot-4 OAM-pulse mask is DISABLED under the eager
+        // #11cu frame: the dot-4 LYC=153 IF-emission decouple moves the LYC-153
+        // ISR's ly0 reads a full M-cycle earlier, so `_1` (want 0) reads dot 0
+        // (before the pulse — naturally clear, no mask needed) while `_2` (want
+        // E2) reads dot 4 co-instant with the pulse and must SEE it
+        // (`lyc153int_m2irq_2`). CGB keeps the mask (its read frame is unmoved —
+        // CGB eager two-bin 287-neutral requires it).
+        if ((self.model.is_cgb() || !self.eager_value)
+            && self.ly0_pulse_age > 0
+            && self.line == 0
+            && self.dot == 4
+            && self.lyc == 153)
             || (self.m0sh_age > 0 && self.dot == self.m0sh_dot && self.lcd_shift_dots != 0)
         {
             IF_STAT

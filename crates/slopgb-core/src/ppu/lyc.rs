@@ -446,8 +446,16 @@ impl Ppu {
                 && (self.m0_src || self.dot < 8)
                 && value == their_line
         } else {
-            self.stat_en & STAT_SRC_VBLANK != 0
-                && !(!self.eager_value && self.line == 0 && self.dot == 4)
+            // The (0,4) compare-wrap un-block cell. #11ee disabled it under the
+            // (pre-#11cu) eager frame because there `_3` fired at dot 8 (VISIBLE
+            // branch) and `_2` (want-block) had moved to dot 4. #11cu's dot-4
+            // LYC=153 IF-emission decouple shifts the whole ISR-timed ly0 LYC
+            // write ANOTHER M-cycle earlier: `_3` moves dot 8→4 (back onto this
+            // compare-wrap cell, VBLANK branch, must FIRE) and `_2` moves dot
+            // 4→0 (still fully blocked). So re-enable the exception for the eager
+            // frame too — `lycwirq_trigger_ly00_stat50_3` fires at (0,4) while
+            // `_1`/`_2` (dot 0) stay blocked. Deferred keeps the original cell.
+            self.stat_en & STAT_SRC_VBLANK != 0 && !(self.line == 0 && self.dot == 4)
         };
         if self.stat_en & STAT_SRC_LYC != 0 && target == Some(value) && !blocked {
             self.pending_if |= IF_STAT;

@@ -252,6 +252,20 @@ impl Interconnect {
                     // still DELIVER. Never armed flag-off → byte-identical.
                     if self.double_speed {
                         if self.ppu.stat_src_hblank() { 4 } else { 3 }
+                    } else if !self.model.is_cgb() && self.ppu.line_dot().0 == 153 {
+                        // Line-153 LYC retrigger family (#11cu): the dot-4 LYC=153
+                        // IF-emission decouple fires this line-153 STAT ISR — and
+                        // its ack — one M-cycle (4 dots) EARLIER than the dot-6
+                        // read frame the SS window `6` was tuned to, so the
+                        // ack→retrigger gap to the ly0 mode-2 pulse grows +4
+                        // (`lyc153int_m2irq_late_retrigger_2` ack 452, retrigger
+                        // ly0 dot4 = ack+8, now OUTSIDE window 6 → wrongly
+                        // DELIVERED). Widen by the same read-debt (6→10) so the
+                        // retrigger re-squashes (gap 8 ≤ 10 → E0) while its `_1`
+                        // sibling (ack 448, gap 12 > 10) still DELIVERS (E2). The
+                        // ack-squash twin of the window/xline re-hosts. eager DMG
+                        // line-153 only → other families keep 6.
+                        10
                     } else {
                         6
                     }
