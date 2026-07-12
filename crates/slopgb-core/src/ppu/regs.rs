@@ -445,14 +445,26 @@ impl Ppu {
                         // dot 4 (the m2enable late_enable /
                         // late_enable_after_lycint(_disable) dmg08 cell
                         // grids pin all eleven cells).
-                        let retro = (self.dot == 0 || self.dot == 4)
+                        // #11ee: the eager cc+0 write records the STAT-enable a
+                        // full M-cycle (4 dots) EARLIER than the tier2 cc+4 frame
+                        // the {0,4} window + the data-only dot-0 lycen were
+                        // calibrated against (an inserted NOP in the `_1`/`_2`
+                        // pair shifts the LDH($41) write +4 dots; slopgb records
+                        // it at eager dot 0 vs tier2 dot 4). Add the +4 read-debt
+                        // so the eager retro resolves in the tier2 frame:
+                        // late_enable_2 (eager dot4→rd8, out of window, want no-
+                        // fire) + late_enable_after_lycint_disable_2 (eager dot0→
+                        // rd4, held-LYC suppressed via the data|old lycen, want
+                        // no-fire). `eager_value`+DMG-scoped → byte-identical.
+                        let rd = if self.eager_value { self.dot + 4 } else { self.dot };
+                        let retro = (rd == 0 || rd == 4)
                             && !self.glitch_line
                             && (1..=144).contains(&self.line)
                             && old & (STAT_SRC_OAM | STAT_SRC_HBLANK) == 0
                             && data & STAT_SRC_OAM != 0
                             && data & STAT_SRC_HBLANK == 0
                             && {
-                                let lycen = if self.dot == 0 { data } else { data | old };
+                                let lycen = if rd == 0 { data } else { data | old };
                                 !(lycen & STAT_SRC_LYC != 0 && self.lyc_ev_m == self.line - 1)
                             };
                         retro || self.stat_write_trigger_dmg(old)
@@ -579,6 +591,34 @@ impl Ppu {
                             data,
                             self.lyc_interrupt_line,
                         );
+                    }
+                    // #11ee: suppress the spurious mid-mode-2 OAM rise on the
+                    // eager clock. Lines 1-143 carry the OAM (mode-2) STAT source
+                    // high only across the line-start window (dots 0-3), then drop
+                    // to NONE (`update_mode_for_interrupt`). A FRESH OAM enable
+                    // landing in that window (the eager cc+0 write records it 4
+                    // dots before its true cc+4 commit at dot 4, where mfi is
+                    // already NONE) makes the dot-engine see a 0→1 edge one dot
+                    // later and fire IF — but the line-start m2 pulse already
+                    // passed, so gambatte/SameBoy raise nothing
+                    // (`m2enable/late_enable_m0disable_2` want 0: enable at ly2
+                    // dot 0, old=HBLANK excludes retro → no legit catch). When
+                    // neither retro nor the write-trigger fired (`!fire` — the
+                    // write did NOT catch the pulse), seed the engine line HIGH
+                    // (STAT blocking, no edge) so the post-window rise is spent;
+                    // the line falls silently at dot 4. A carried-from-prev-line
+                    // OAM (`old & OAM != 0`) fires its real dot-0 pulse and is
+                    // excluded. `eager_value`+DMG-scoped → byte-identical.
+                    if self.eager_value
+                        && !self.model.is_cgb()
+                        && !fire
+                        && self.dot < 4
+                        && (1..=143).contains(&self.line)
+                        && !self.glitch_line
+                        && old & STAT_SRC_OAM == 0
+                        && data & STAT_SRC_OAM != 0
+                    {
+                        self.stat_update.force_level(true);
                     }
                 } else {
                     self.stat_en = data;

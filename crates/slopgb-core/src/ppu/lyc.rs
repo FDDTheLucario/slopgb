@@ -414,6 +414,16 @@ impl Ppu {
         // except the compare-wrap cell at (0,4) (`ly == 153 &&
         // timeToNextLy <= 2`; lycwirq_trigger_ly00_stat50_3 fires there
         // while _1/_2 stay blocked).
+        //
+        // #11ee: the (0,4) un-block cell is the LE/tier2 (deferred) read
+        // frame's compare-wrap position — there `_3` (the fire leg) lands at
+        // dot 4. Under the EAGER clock the FF45 writes are recorded a full
+        // M-cycle earlier: `_3` moves to dot 8 (`their_line == line == 0`, the
+        // VISIBLE branch, which fires it naturally on the LYC=0 match), while
+        // `_2` (want no-fire) moves to dot 4 and would be spuriously un-blocked
+        // here. So under eager the vblank branch fully blocks — no (0,4)
+        // exception (`lycwirq_trigger_ly00_stat50_2` want E0). `eager_value`-
+        // gated → byte-identical flag-off.
         let their_line = if self.dot < 8 { prev } else { self.line };
         let blocked = if self.glitch_line {
             false
@@ -422,10 +432,32 @@ impl Ppu {
                 && (self.m0_src || self.dot < 8)
                 && value == their_line
         } else {
-            self.stat_en & STAT_SRC_VBLANK != 0 && !(self.line == 0 && self.dot == 4)
+            self.stat_en & STAT_SRC_VBLANK != 0
+                && !(!self.eager_value && self.line == 0 && self.dot == 4)
         };
         if self.stat_en & STAT_SRC_LYC != 0 && target == Some(value) && !blocked {
             self.pending_if |= IF_STAT;
+        }
+        // #11ee: seal the eager line-0 vblank-carry → LYC seamless handoff.
+        // On line 0 the STAT line is held HIGH by the mode-1 (VBlank) carry
+        // across dots 0-3, then the carry ends at dot 4 (`mode_for_interrupt`
+        // flips to 2 with OAM disabled → the line DIPS). A LYC-match write that
+        // the m1 block suppresses here (`_1` at dot 0, `_2` at dot 4) must NOT
+        // then let the dot-engine re-raise a FRESH 0→1 edge one dot later: on
+        // SameBoy the just-matched LYC=0 seamlessly continues the already-high
+        // vblank line (`lycwirq_trigger_ly00_stat50_2` want E0 — the eager cc+0
+        // write lands the match at the dot-4 dip). Seed the engine line HIGH so
+        // the match joins (STAT blocking), no fresh IF. `_3` (dot 8) lands in
+        // the VISIBLE branch (`their_line == 0`), is not blocked, and fires its
+        // real edge. `eager_value`+DMG-scoped → byte-identical flag-off.
+        if self.eager_value
+            && !self.model.is_cgb()
+            && blocked
+            && their_line > 143
+            && self.stat_en & STAT_SRC_LYC != 0
+            && target == Some(value)
+        {
+            self.stat_update.force_level(true);
         }
         self.refresh_cmp(false);
     }

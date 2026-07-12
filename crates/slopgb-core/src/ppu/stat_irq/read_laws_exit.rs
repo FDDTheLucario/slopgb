@@ -580,11 +580,33 @@ impl Ppu {
                 && (m == 3 || m == 0)
                 && (self.line_render_done || self.render.active)
             {
-                let flip = if self.line_render_done && self.flip_dot != 0 {
+                let mut flip = if self.line_render_done && self.flip_dot != 0 {
                     self.flip_dot
                 } else {
                     self.projected_flip_dot()
                 };
+                // #11ee: back out the eager render's spurious mid-mode-3 SCX
+                // extension for the BARE-line exit verdict. A mid-mode-3 SCX
+                // rewrite (`scx_write_dot != 0`) commits `eff.scx` at the eager
+                // cc+0 write frame — 4 dots (8hd) before its true cc+4 landing
+                // — so it reaches the render's fine-scroll hunt (`render.rs`
+                // ~dot 89) BEFORE the hunt latches and the render over-discards
+                // the NEW fine-scroll, flipping `eff.scx&7` dots late (258 vs the
+                // production/tier2 254 on `late_scx4_2`: the write's true cc+4
+                // landing is PAST the hunt → the current line keeps the fetch-
+                // start length). The FF43 write-commit debt that would fix this
+                // in the render is REFUTED (`eff.scx` IS the length — it breaks
+                // the `late_scx_late_disable` window siblings; see `regs.rs`
+                // `stage_write`). This is the verdict-only READ analogue: undo the
+                // extension in the bare exit ONLY (window aborts own the
+                // `scx_write_dot` arm above). `eager_value`+DMG+bare-scoped →
+                // byte-identical flag-off.
+                if self.eager_value
+                    && !self.model.is_cgb()
+                    && self.render.scx_write_dot != 0
+                {
+                    flip = flip.saturating_sub(u16::from(self.scx & 7));
+                }
                 // The SS post-switch bare exit: a
                 // 4-variable table. `E = 504 + leave_k −
                 // 4*[lcd_enable_in_ds] + 2*(SCX&7)` rp — the leave k

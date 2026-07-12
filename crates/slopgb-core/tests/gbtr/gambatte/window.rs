@@ -377,6 +377,66 @@ fn eager_dmg_window_latch_recalib_passes() {
     }
 }
 
+/// The five DMG STAT-source RE-LATCH recalibrations for the eager read/write
+/// frame (#11ee): each `_1`/`_2` (or `_2`/`_3`) sibling pair differs by a
+/// whole-M-cycle NOP that shifts a WRITE, which the eager cc+0 frame records a
+/// full M-cycle before the tier2 cc+4 frame the consuming law was calibrated
+/// against.
+///  (1) `m2enable/late_enable_2` (out0) + `late_enable_after_lycint_disable_2`
+///      (dmg08 out0): the FF41 m2-enable RETRO pulse-reach window `{0,4}` +
+///      the data-only dot-0 lycen add the +4 read-debt (`rd = dot + 4`), so the
+///      eager retro resolves in the tier2 frame (`regs.rs` 0xFF41 write).
+///  (2) `m2enable/late_enable_m0disable_2` (dmg08 out0): a fresh OAM enable in
+///      the lines-1-143 mode-2 carry window (dots 0-3) is seeded HIGH (STAT
+///      blocking) so the dot-engine raises no spurious mid-mode-2 IF (`regs.rs`).
+///  (3) `lycEnable/lycwirq_trigger_ly00_stat50_2` (dmg08 outE0): the line-0
+///      vblank-carry → LYC=0 seamless handoff — a matching LYC write the m1
+///      block suppresses seeds the engine line HIGH (`lyc.rs write_lyc_dmg`),
+///      and the (0,4) un-block cell is LE/tier2-only (eager fires `_3` in the
+///      visible branch).
+///  (4) `m2int_m3stat/scx/late_scx4_2` (out0): the eager render's spurious
+///      mid-mode-3 SCX fine-scroll extension is backed out of the BARE-line
+///      exit verdict (`read_laws_exit.rs` Arm 8), the read-only analogue of the
+///      refuted `eff.scx` write-debt.
+/// Reverting any one makes this pin fail (the paired sibling shuffles).
+/// Eager+DMG scoped → production/tier2 byte-identical.
+#[test]
+fn eager_dmg_stat_relatch_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_dmg_stat_relatch",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let targets: [(&str, &str); 5] = [
+        ("gambatte/m2enable/late_enable_2_dmg08_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/m2enable/late_enable_after_lycint_disable_2_dmg08_out0_cgb04c_out2.gbc",
+            "0",
+        ),
+        (
+            "gambatte/m2enable/late_enable_m0disable_2_dmg08_out0_cgb04c_out2.gbc",
+            "0",
+        ),
+        (
+            "gambatte/lycEnable/lycwirq_trigger_ly00_stat50_2_dmg08_outE0_cgb04c_outE2.gbc",
+            "E0",
+        ),
+        (
+            "gambatte/m2int_m3stat/scx/late_scx4_2_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in targets {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_eager(&rom, Model::Dmg);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, false)
+            .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (eager): {e}"));
+    }
+}
+
 /// The window visible-mode-3 LENGTH law (the FF41-read
 /// half of the atomic reclock). A triggering window's SameBoy mode-3→0 exit is
 /// `SBex = 263 + SCX&7` (cfl); the CPU-visible FF41 exit is `SBex − read_offset`.
