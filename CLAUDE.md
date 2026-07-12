@@ -21,9 +21,17 @@ mutates state, so the gbtr golden frame-hash stays **byte-identical**. Mutating 
 (link, profiler, exception mask, channel mute) are **gated off by default**
 (`link_connected`/`None`/`0`) so every golden path is byte-identical. Verify any core
 touch with `cargo test -p slopgb-core --test gbtr` (the `golden_fingerprint` case) +
-the mooneye matrix. The tier2 SameBoy reclock is **OFF by default** — production is
-byte-identical to the pre-port core; never flip the `interconnect.rs` defaults in a
-pushed commit.
+the mooneye matrix. **The C3 flip is DONE (#11cu/#11cv):** the eager-value clock
+(`leading_edge_reads`/`eager_value` = `true` in the `interconnect.rs` struct literal)
+is now the production default — the SameBoy cycle-exact port is complete, TRUE
+flip-floor 0 both models. Production is NO LONGER byte-identical to the pre-port core;
+the golden/baselines are the eager-clock reference. The golden-safe law still binds
+every *UI* hook (read-only `&self` introspection + default-off mutating hooks) to be
+byte-identical against the eager golden. The tier2 SameBoy reclock stays **OFF** (the
+disproven `read_deferred` variant); the pre-port OFF clock survives only as the
+`cfg(test)`/`port_probe` two-bin baseline. Verify via `new()` (production), NOT the
+`SLOPGB_EAGER` post-boot toggle (incoherent) — and never `pkill` a cargo build sharing
+a `CARGO_TARGET_DIR` (corrupts the target → false failures).
 
 ## Where the detail lives
 
@@ -105,7 +113,24 @@ Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L =
 3,5,8,13,21,34. Model from filename suffix (see ARCHITECTURE.md §Mooneye). Timeout 120
 emulated s.
 
-## State (2026-07-07, #11bv — integration on `main`)
+## State (2026-07-12, #11cv — C3 FLIP DONE on `finish-port-halfdot`)
+
+- **#11cu/#11cv — THE C3 FLIP IS EXECUTED. The eager-value clock is the
+  production default; the SameBoy cycle-exact port is COMPLETE.** Flip-floor
+  census = TRUE floor **0 both models** (all 37 CGB + 6 DMG residual flip-BUGs are
+  SameBoy-FAIL rebaseline-OK). Gates under production `new()`: mooneye **93/93**,
+  gbtr battery **278/0** (golden regenerated), core lib + frontend green, clippy
+  clean. The last blocker `m1statwirq_3` was NOT a CPU-atomic dispatch wall — it
+  was the line-153 LYC IF emitting at dot 6 (read frame) vs dot 4 (dispatch
+  frame); the dot-4 emission decouple + the 13-row LYC-153 cluster re-host
+  (`5c91f68`) cleared it, no dispatch move. `new()` == `new_with_eager`
+  byte-identical (9020 fingerprints, 0 divergent) — the `#11ds` construction is
+  coherent. Per-session maps: `eager-{flip-floor-census,lyc153-cluster-rehost,
+  pert-interleave-poc}-2026-07-12.md`, `c3-flip-executed-2026-07-12.md`. NEXT: merge
+  `finish-port-halfdot` → `main` (user-triggered); then S7 scaffolding cleanup
+  (delete the OFF/tier2 forks, retire `new_with_eager`) + the 5 pre-existing
+  >1000-line files. The narrative below is PRE-FLIP (2026-07-07) — superseded, kept
+  for history until a `/clean-docs` pass.
 
 - **#11bv — the census NO-GO is OVERTURNED; the C3 flip is a TRACTABLE
   re-host, not a thrice-refuted wall.** `main` already contains the full port
