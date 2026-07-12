@@ -410,9 +410,24 @@ impl Ppu {
                 // at the eager M-cycle END, so the boundary window catches the
                 // tail-write class (`late_wy_FFto0/FFto1/10to0/1toFF`) that the
                 // read-frame WY laws pair with — measured +8 CGB, 0 drop.
+                // The write dot the tail/head boundary classifies against.
+                // Under the eager DMG line-153 emission decouple (#11cu) the
+                // shared LYC=153 ISR — and every WY write it times — fires one
+                // M-cycle (4 dots SS) EARLIER than the stale dot-6/dot-8
+                // recognition these 452/4 boundaries were tuned against, so a
+                // boundary write that landed at `ly N dot 4` (base: past the
+                // head → bare) now commits at `ly N dot 0` (inside the head →
+                // spurious cross-line extend). Re-map by the +4 read-debt so the
+                // moved write classifies on the calibrated frame: `FFto0_ly2_3`
+                // ly1 dot0 → xdot 4 (NOT head → bare); its `_2` ly0 dot452 →
+                // xdot 456 (still tail → extend). The SS twin of the DS lyfc
+                // wake re-derivation. `eager_value && !is_cgb` (CGB emission
+                // unmoved; tier2 + production byte-identical).
+                let xdot =
+                    self.dot + if self.eager_value && !self.model.is_cgb() { 4 } else { 0 };
                 if (self.tier2_reclock || self.eager_value)
                     && self.enabled
-                    && (self.dot >= 452 || self.dot < 4)
+                    && !(4..452).contains(&xdot)
                     && self.line < 144
                     && value == self.ly
                     && self.eff.lcdc & LCDC_WIN_ENABLE != 0
@@ -436,7 +451,7 @@ impl Ppu {
                 if (self.tier2_reclock || self.eager_value)
                     && !self.model.is_cgb()
                     && self.enabled
-                    && self.dot < 4
+                    && xdot < 4
                     && self.line >= 1
                     && self.line < 144
                     && u16::from(value) + 1 == u16::from(self.line)

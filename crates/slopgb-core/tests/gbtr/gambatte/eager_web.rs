@@ -462,3 +462,68 @@ fn eager_cgb_m3_render_scx_ds_passes() {
         assert_pixel_leg_eager(&root, rel, Model::Cgb);
     }
 }
+
+/// The eager line-153 LYC=153 IF-emission decouple + the LYC-153 window
+/// sibling-cluster re-host (#11cu). `m1statwirq_3` fails on the eager clock
+/// because the DMG `ly_for_comparison` line-153 table sets 153 only at slopgb
+/// dot 6 (the READ frame, `GB_SLEEP(14,4)`), so the `stat_update` engine emits
+/// the LYC STAT IRQ at dot 6 — mid-M-cycle — and the eager CPU recognises it one
+/// M-cycle late, carrying the offset to the FF41 glitch write (got 0, want 2).
+/// SameBoy sets `IF |= 2` at `display_cycles == 4` (the DISPATCH frame); the fix
+/// emits the IF at dot 4 (`stat_irq/reclock.rs`, the C015 two-latch split) while
+/// the register-read latch stays dot 6 — NOT a dispatch move (mooneye `intr_2_*`
+/// all green). That dot-4 emission moves every ISR-timed WY write in the shared
+/// LYC=153 handler 4 dots earlier, tipping the DMG window compensations: the
+/// `win_extends_sb` deadline (`read_laws_exit.rs`, `+2 → −2`) re-splits the
+/// mid-line `_2` extend / `_3` bare siblings, and the `wy_xline_trig` classify
+/// dot (`regs.rs`, `+4` read-debt) re-splits the head/boundary family. All
+/// `eager_value && !is_cgb`-scoped → production + tier2 byte-identical (golden
+/// unchanged, DMG flagon_probe EV 46, CGB EV 287/287). Reverting any of the
+/// three arms makes this pin fail. See `eager-lyc153-cluster-rehost-2026-07-12.md`.
+#[test]
+fn eager_dmg_lyc153_cluster_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_dmg_lyc153_cluster",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let rows = [
+        // The target: the dot-4 IF-emission decouple (mechanism 1).
+        ("gambatte/miscmstatirq/m1statwirq_3_dmg08_out2.gb", "2"),
+        // Mechanism 2: the mid-line late-WY `_2` extend / `_3` bare re-split.
+        (
+            "gambatte/window/arg/late_wy_FFto2_ly2_3_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto2_ly2_scx3_3_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto2_ly2_wx0f_3_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        // Mechanism 3: the cross-line/head-write `wy_xline_trig` re-classify.
+        (
+            "gambatte/window/arg/late_wy_FFto0_ly2_3_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/arg/late_wy_FFto1_ly2_3_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/window/arg/late_wy_10to0_ly1_3_dmg08_cgb04c_out0.gbc",
+            "0",
+        ),
+    ];
+    for (rel, expect) in rows {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot_eager(&rom, Model::Dmg);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, false)
+            .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (eager): {e}"));
+    }
+}

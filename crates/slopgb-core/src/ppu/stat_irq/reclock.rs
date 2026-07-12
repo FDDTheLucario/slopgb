@@ -433,6 +433,35 @@ impl Ppu {
             self.pending_if |= IF_STAT;
             self.stat_update.force_level(true);
         }
+        // Eager DMG line-153 LYC=153 ENABLE emission-dot decouple (#11cu):
+        // the DMG `ly_for_comparison` line-153 table sets 153 only at dot 6
+        // (`GB_SLEEP(14,4)`, pinned by wilbertpol `ly_lyc_153-C`), so the eager
+        // `stat_update` engine's natural 0→1 LYC rise fires at slopgb dot 6 —
+        // the READ frame (cc+4 = +2 read-debt). But SameBoy sets `IF |= 2` at
+        // `display_cycles == 4` (traced `SBIF su ly=153 dc=4`), the DISPATCH
+        // frame, and production gambatte fires there too. On the eager clock the
+        // dot-6 fold lands mid-M-cycle → the CPU recognizes it one M-cycle late
+        // → the ISR's fixed-cycle wait carries the offset to `m1statwirq_3`'s
+        // FF41 glitch write (`0`, want `2`). Emit the IF at dot 4 (the dispatch
+        // frame) while the `ly_for_comparison` READ latch stays dot 6 — the same
+        // two-latch split the C015 disable direction uses above. `force_level`
+        // suppresses the dots-6-7 natural re-edge; `!stat_update.line()` keeps a
+        // pre-armed mode-1 source's STAT-blocking intact. eager + DMG-family
+        // only (production + tier2 byte-identical). See
+        // `measurements/eager-lyc153-cluster-rehost-2026-07-12.md`.
+        if self.eager_value
+            && !self.model.is_cgb()
+            && self.line == 153
+            && self.dot == 4
+            && self.enabled
+            && !self.glitch_line
+            && self.lyc == 153
+            && self.stat_en & STAT_SRC_LYC != 0
+            && !self.stat_update.line()
+        {
+            self.pending_if |= IF_STAT;
+            self.stat_update.force_level(true);
+        }
     }
 
     /// HALFDOT (#11dw): the idempotent odd-half `GB_STAT_update` level

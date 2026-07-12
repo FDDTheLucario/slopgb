@@ -743,6 +743,21 @@ impl Ppu {
             // family — 2 dots earlier (`_1` 99 / `_2` 101), so the DS slack
             // re-derives to the SS value (+2); the same shift is what fixes
             // the `late_wy_ds` blocker trio outright.
-            && self.wy_trig_sb_dot <= self.render.wx_match_dot + 2
+            //
+            // SS DMG eager (#11cu): the same LYC=153-wake re-host. The dot-4
+            // line-153 LYC STAT emission decouple (`reclock.rs`) fires the
+            // shared LYC=153 ISR one M-cycle (4 dots SS) EARLIER than the stale
+            // dot-6/dot-8 recognition the `+2` slack was tuned against, so every
+            // ISR-timed `late_wy` WY write — and its `wy_trig_sb_dot` — moves 4
+            // dots earlier (`FFto2_ly2_2` trigdot 98→94, `_3` 102→98). The `+2`
+            // deadline (wxmatch 97 → 99) then extends BOTH (`_3` 98 ≤ 99), where
+            // SameBoy renders `_3` bare. Re-derive to `−2` (wxmatch → 95) so
+            // `_2` (94 ≤ 95, extend) and `_3` (98 > 95, bare) re-split — the
+            // exact −4 read-debt of the emission move, the SS twin of the DS
+            // lyfc re-derivation above. `eager_value && !is_cgb` only (the CGB
+            // emission is unmoved; production + tier2 byte-identical).
+            && i32::from(self.wy_trig_sb_dot)
+                <= i32::from(self.render.wx_match_dot)
+                    + if self.eager_value && !self.model.is_cgb() { -2 } else { 2 }
     }
 }
