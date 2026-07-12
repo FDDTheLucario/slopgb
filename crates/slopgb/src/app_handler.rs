@@ -102,6 +102,20 @@ impl ApplicationHandler for App {
                 }
             }
         }
+        // Auto-load a sidecar `.sym` for a ROM given on the command line
+        // (`foo.gb` -> `foo.sym`), mirroring the drag-drop path (`load_dropped`)
+        // so console-launched sessions get symbols in the debugger / memory
+        // viewer without a manual load. Done here — after any SLOPGB_OPEN_TOOLS
+        // windows exist — so `load_symbols`' `set_symbols` reaches an
+        // already-open window; a window opened later re-pulls via ToggleTool.
+        // Absent sidecar = silent no-op.
+        if self.rom_loaded {
+            if let Some(rom) = self.opts.rom.clone() {
+                if let Some(sym) = crate::app_path::sym_sidecar(&rom) {
+                    self.load_symbols(&sym);
+                }
+            }
+        }
         self.resync_pacing();
         self.update_title();
     }
