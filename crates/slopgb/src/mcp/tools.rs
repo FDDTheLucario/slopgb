@@ -147,7 +147,11 @@ fn cdl_ranges(gb: &GameBoy) -> String {
     let mut out = String::new();
     for r in gb.cdl_logged_ranges() {
         if addr::Region::of(r.start).banked() {
-            let _ = writeln!(out, "{:02x}:{:04x}-{:02x}:{:04x}", r.bank, r.start, r.bank, r.end);
+            let _ = writeln!(
+                out,
+                "{:02x}:{:04x}-{:02x}:{:04x}",
+                r.bank, r.start, r.bank, r.end
+            );
         } else {
             let _ = writeln!(out, "{:04x}-{:04x}", r.start, r.end);
         }

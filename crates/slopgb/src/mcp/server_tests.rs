@@ -50,7 +50,10 @@ fn build_call_validates_arguments() {
     ));
     assert!(matches!(build_call("registers", None), Ok(Call::Registers)));
     assert!(matches!(build_call("screencap", None), Ok(Call::Screencap)));
-    assert!(matches!(build_call("cdl-ranges", None), Ok(Call::CdlRanges)));
+    assert!(matches!(
+        build_call("cdl-ranges", None),
+        Ok(Call::CdlRanges)
+    ));
     // Missing argument and unknown tool are errors, not panics.
     assert!(build_call("peek", None).is_err());
     assert!(build_call("frobnicate", None).is_err());

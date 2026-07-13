@@ -370,7 +370,14 @@ pub struct CdlRange {
 /// Append every maximal run of non-zero bytes in `buf[base..base+span]` as a
 /// [`CdlRange`], mapping physical offset `o` to CPU address `cpu_start + o`
 /// (contiguous within one bank). A `.` (zero) gap splits a run.
-fn push_runs(buf: &[u8], base: usize, span: usize, cpu_start: u16, bank: u16, out: &mut Vec<CdlRange>) {
+fn push_runs(
+    buf: &[u8],
+    base: usize,
+    span: usize,
+    cpu_start: u16,
+    bank: u16,
+    out: &mut Vec<CdlRange>,
+) {
     let mut run_start: Option<u16> = None;
     for o in 0..span {
         let cpu = cpu_start + o as u16;
@@ -378,14 +385,22 @@ fn push_runs(buf: &[u8], base: usize, span: usize, cpu_start: u16, bank: u16, ou
         match (set, run_start) {
             (true, None) => run_start = Some(cpu),
             (false, Some(start)) => {
-                out.push(CdlRange { bank, start, end: cpu - 1 });
+                out.push(CdlRange {
+                    bank,
+                    start,
+                    end: cpu - 1,
+                });
                 run_start = None;
             }
             _ => {}
         }
     }
     if let Some(start) = run_start {
-        out.push(CdlRange { bank, start, end: cpu_start + (span as u16 - 1) });
+        out.push(CdlRange {
+            bank,
+            start,
+            end: cpu_start + (span as u16 - 1),
+        });
     }
 }
 
