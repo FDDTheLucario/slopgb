@@ -57,14 +57,11 @@ pub(crate) enum Conflict {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct CycleClock {
     clock: u64,
-    /// Debt of the current M-cycle not yet advanced. In real CPU flow this is
-    /// tiny — `flush` drains it every instruction (≤ ~24 T), so SameBoy holds
-    /// it in a byte. The clock is embedded in an `Interconnect` whose `Bus`
-    /// is also driven *standalone* by memory/blocking unit tests that advance
-    /// hundreds of M-cycles without an instruction-boundary flush; a `u32`
-    /// keeps the parked debt from overflowing across those long unflushed
-    /// runs (the overflow ceiling is then unreachable, not a `u8`'s 63 ticks)
-    /// while [`Self::internal`] still traps a genuine runaway loudly.
+    /// Debt of the current M-cycle not yet advanced. `flush` drains it every
+    /// instruction (SameBoy holds it in a byte), but the `Bus` is also driven
+    /// *standalone* by memory/blocking unit tests that run hundreds of M-cycles
+    /// unflushed, so this is a `u32` to stay overflow-safe there
+    /// ([`Self::internal`] still traps a genuine runaway loudly).
     pending: u32,
 }
 
@@ -108,18 +105,14 @@ impl CycleClock {
     ///
     /// In real CPU flow a write is never an instruction's first access — a
     /// fetch always parks debt first — so `pending >= 1` and every class's
-    /// pre-commit split is exact (`sm83_cpu.c:115` asserts this). The clock is
-    /// nonetheless embedded in a [`crate::interconnect::Interconnect`] whose
-    /// `Bus::write` is also driven *standalone* by memory/blocking unit tests
-    /// (no preceding fetch, `pending == 0`); the `saturating_sub` below keeps
-    /// that case underflow-safe in release rather than panicking. A standalone
-    /// write commits at the current clock (`pending == 0` → no advance) and
-    /// reparks its class total, which still conserves the per-M-cycle 4. Every
-    /// class's commit position is nonetheless still **discarded** by the live
-    /// `Bus::write` (`interconnect.rs`); the per-model class *lookup*
-    /// ([`Interconnect::write_conflict`]) is already wired (byte-identical,
-    /// the clock is write-only scaffold), and the architectural-commit *move*
-    /// that consumes the position lands in a later stage.
+    /// pre-commit split is exact (`sm83_cpu.c:115` asserts this). The `Bus` is
+    /// also driven *standalone* by memory/blocking unit tests (no preceding
+    /// fetch, `pending == 0`); the `saturating_sub` below keeps that case
+    /// underflow-safe — it commits at the current clock and still conserves the
+    /// per-M-cycle 4. The live `Bus::write` discards the returned commit
+    /// position today (only the per-model class *lookup*
+    /// [`Interconnect::write_conflict`] is wired), so this stays write-only
+    /// scaffold.
     pub(crate) fn write(&mut self, conflict: Conflict) -> u64 {
         let repark = match conflict {
             Conflict::ReadOld => {

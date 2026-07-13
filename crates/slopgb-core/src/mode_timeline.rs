@@ -1,22 +1,13 @@
-//! Decoupled visible-mode / interrupt-mode timeline — the PPU-side half of the
-//! finer-resolution event-phase model (the half-dot grid re-clocked toward
-//! SameBoy's cycle-exact frame, the class-A floor's documented lift mechanism:
-//! "re-clock observable event commits to a [finer] grid").
+//! Decoupled visible-mode / interrupt-mode timeline for the mode-2/3/0 spine of
+//! a visible line, on a finer (sub-dot) grid than the live PPU's whole-dot
+//! `vis_mode` + `m0_src`/`m0_rise_dot` model.
 //!
-//! Companion to [`crate::cycle_clock`] (the CPU-side deferred-commit clock).
-//! **Test-only cross-check oracle** (`#[cfg(test)]`): the live PPU never
-//! consults it — it keeps its whole-dot `vis_mode` + joint
-//! `m0_src`/`m0_rise_dot` anchor — so this encodes the finer-resolution
-//! timeline purely as an independent check the unit tests compare against
-//! (see `ppu/mod_tests/stat.rs`).
-//!
-//! Scope: the **mode-2 / mode-3 / mode-0 spine of a visible line** (the kernel
-//! pair lives entirely in it). The line-start mode-0/1 window (dots 0-3), the
-//! VBlank lines, and SameBoy's `mode_for_interrupt == -1` "no source" gaps
-//! between transitions (`display.c:1799`) are out of scope here — they are
-//! handled by the live STAT engine and are not needed to separate the kernel.
-//!
-//! It captures the two structural degrees of freedom the whole-dot model folds
+//! **Test-only cross-check oracle** (`#[cfg(test)]`, companion to
+//! [`crate::cycle_clock`]): the live PPU never consults it — it keeps its
+//! whole-dot `vis_mode` + `m0_src`/`m0_rise_dot` anchor — so this encodes the
+//! finer-resolution timeline purely as an independent check the unit tests
+//! compare against (see `ppu/mod_tests/stat.rs`). It captures the two structural
+//! degrees of freedom the whole-dot model folds
 //! together (`docs/sameboy-port/ppu-timing-map.md` §2, §6):
 //!
 //! 1. **Two separate fields** — the CPU-visible STAT mode (`io[STAT]&3`) and
@@ -28,11 +19,13 @@
 //!    `display.c:1778`), while the mode-0 STAT IRQ fires **1 dot after** the
 //!    visible mode→0 edge (`display.c:2108` vs `2091`).
 //!
-//! Those two facts resolve the `m2int_m3stat` / `m0int_m3stat` kernel pair with
-//! **no CPU-call-stack discriminator**: the 2-dot relative swing between the
-//! anchors places the two equal-latency `ldh a,(FF41)` reads on opposite sides
-//! of a mode-3→0 boundary. This is the executable proof the whole-dot
-//! "irreducible" verdict was a model-coarseness artifact, not a hardware fact.
+//! Together those place the `m2int_m3stat` / `m0int_m3stat` kernel pair's two
+//! equal-latency `ldh a,(FF41)` reads on opposite sides of a mode-3→0 boundary
+//! with no CPU-call-stack discriminator.
+//!
+//! Scope is the visible-line spine only: the line-start mode-0/1 window (dots
+//! 0-3), the VBlank lines, and SameBoy's `mode_for_interrupt == -1` "no source"
+//! gaps (`display.c:1799`) stay with the live STAT engine.
 #![allow(dead_code)] // Inert staged-port foundation; see the module doc above.
 
 /// PPU mode as read through FF41 bits 0-1.
