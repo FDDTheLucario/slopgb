@@ -126,8 +126,25 @@ fn save_state_round_trips() {
 fn clone_is_independent() {
     let mut apu = SgbApu::new(48_000);
     apu.spc.apu_ram_mut()[0x2000] = 0x42;
+    // Seed a known DSP register on the ORIGINAL before cloning. The DSP is the
+    // one genuinely shared object (an `Rc<RefCell<SDsp>>` aliased by the SPC700's
+    // `DspLink`); APU RAM lives in the SPC700's own `Box` and is never shared.
+    apu.dsp.borrow_mut().write(0x0C, 0x11); // MVOLL
+
     let mut cloned = apu.clone();
+
+    // Mutate the clone's APU RAM *and* its DSP cell.
     cloned.spc.apu_ram_mut()[0x2000] = 0x00;
-    // Mutating the clone must not affect the original's shared DSP/RAM.
+    cloned.dsp.borrow_mut().write(0x0C, 0x77);
+
+    // The original must be untouched on both. The DSP assert fails if `clone`
+    // regresses to a shallow `Rc::clone(&self.dsp)` (aliasing the same cell)
+    // instead of deep-copying the S-DSP into a fresh `Rc`.
     assert_eq!(apu.spc.apu_ram()[0x2000], 0x42);
+    assert_eq!(
+        apu.dsp.borrow().read(0x0C),
+        0x11,
+        "clone shares the DSP cell"
+    );
+    assert_eq!(cloned.dsp.borrow().read(0x0C), 0x77);
 }

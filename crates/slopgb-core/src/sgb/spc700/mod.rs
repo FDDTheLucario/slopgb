@@ -3,8 +3,8 @@
 //! Self-contained, cycle-accurate SPC700 (Sony SPC700 / S-SMP) processor. The
 //! Super Game Boy runs its SNES-side sound driver on this CPU; slopgb needs it
 //! for SGB audio. This module is **standalone**: it does not touch the Game Boy
-//! CPU, PPU, or any GB state. Phase 3 wires it to the S-DSP (see [`Dsp`]) and to
-//! the SNES↔APU comm ports (see [`Spc700::snes_write_port`]).
+//! CPU, PPU, or any GB state. It is wired to the S-DSP (see [`Dsp`]) and to the
+//! SNES↔APU comm ports (see [`Spc700::snes_write_port`]) by the SGB APU seam.
 //!
 //! # Model
 //!
@@ -36,9 +36,9 @@ mod ops_bit;
 mod ops_branch;
 mod ops_misc;
 mod ops_mov;
-// Phase-3 (SGB audio) seam completion: APU-RAM access, `Clone`, save-state
-// serialization. Additive only — the verified opcode/RAM/ports modules are
-// untouched; see `phase3.rs`.
+// SGB-audio seam completion: APU-RAM access, `Clone`, save-state serialization.
+// Additive over the verified opcode/RAM/ports modules, which stay untouched; see
+// `phase3.rs`.
 mod phase3;
 mod ports;
 mod ram;

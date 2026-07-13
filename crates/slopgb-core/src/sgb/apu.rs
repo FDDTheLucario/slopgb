@@ -210,8 +210,14 @@ impl SgbApu {
             let sig = checksum(data);
             if sig != self.data_trn_sig {
                 self.data_trn_sig = sig;
-                // DATA_TRN is SNES-RAM destined; applied to APU RAM only when it
-                // carries APU descriptors (self-describing, same format).
+                // DATA_TRN really targets SNES work RAM; with no 65816 we push it
+                // through the same self-describing uploader as SOU_TRN. There is
+                // NO gate that the block actually carries APU descriptors —
+                // `upload_transfer` unconditionally reads the first 4 bytes as a
+                // (dest,len) pair and only stops on len==0 or an overrun, so a
+                // non-descriptor DATA_TRN can scribble APU RAM. `start=false` at
+                // least keeps it from redirecting the SPC700's PC. (Limitation:
+                // the true DATA_TRN format/destination is not modeled.)
                 self.upload_transfer(data, false);
             }
         }

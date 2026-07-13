@@ -1,11 +1,19 @@
-//! Two conformance harnesses:
+//! Cycle-timing / conformance checks:
 //!
-//! 1. [`opcode_cycle_table_smoke`] — always runs. Executes all 256 opcodes and
-//!    asserts each consumes exactly its documented base cycle count (or base+2
-//!    for the conditional ops), proving the whole table is wired and the
-//!    dispatch never panics.
+//! 1. [`opcode_cycle_table_smoke`] — always runs. Dispatches all 256 opcodes and
+//!    checks the returned count equals `CYCLES[op]` (or `+2` for the conditional
+//!    ops). Because `execute()` returns `CYCLES[op]` verbatim for the ~240
+//!    unconditional opcodes, this is a *wiring / no-panic* smoke test: it proves
+//!    every opcode dispatches and each conditional handler stays within
+//!    `{base, base+2}`, NOT that any base count is correct (that would compare
+//!    the table to itself). The independent check is (2).
 //!
-//! 2. [`singlestep_conformance`] — `#[ignore]`d. Runs the `SingleStepTests/spc700`
+//! 2. [`cycle_table_matches_documented_source`] — always runs. Pins `CYCLES`
+//!    against [`DOC_CYCLES`], a second hand-entered transcription of the
+//!    published fullsnes / anomie opcode timing table, so a wrong `CYCLES` entry
+//!    fails even with no `SPC700_TESTS_DIR` dataset.
+//!
+//! 3. [`singlestep_conformance`] — `#[ignore]`d. Runs the `SingleStepTests/spc700`
 //!    suite (MIT, github.com/SingleStepTests/spc700): 1000 hardware-traced
 //!    randomised cases per opcode, full pre/post register + RAM state + cycle
 //!    count. Point `SPC700_TESTS_DIR` at the unpacked `v1/` JSON directory:
@@ -45,6 +53,62 @@ fn opcode_cycle_table_smoke() {
         } else {
             assert_eq!(cyc, base, "op {op:#04X}: cycles {cyc} != table {base}");
         }
+    }
+}
+
+/// SPC700 base-cycle counts transcribed *independently* from the published
+/// opcode timing table (nocash **fullsnes** "SPC700 Opcodes" / anomie's SPC700
+/// doc — the base counts bsnes and blargg's SPC_DSP also use). A second,
+/// hand-entered copy: since `execute()` returns `CYCLES[op]` verbatim for the
+/// unconditional opcodes, only an outside reference like this can catch a wrong
+/// `CYCLES` entry without the SingleStepTests dataset. Conditional ops list the
+/// *not-taken* count (branch-taken adds +2 in the handler).
+///
+/// EF `SLEEP` (paper 3) and FF `STOP` (paper 2) are the two entries where the
+/// implementation deliberately deviates: `CYCLES` sets both to 7, the count the
+/// SingleStepTests hardware trace snapshots for the fetch-then-halt spin. That
+/// deviation is reconciled explicitly in [`cycle_table_matches_documented_source`].
+#[rustfmt::skip]
+const DOC_CYCLES: [u8; 256] = [
+    // x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 xA xB xC xD xE xF
+    2, 8, 4, 5, 3, 4, 3, 6, 2, 6, 5, 4, 5, 4, 6, 8, // 0x
+    2, 8, 4, 5, 4, 5, 5, 6, 5, 5, 6, 5, 2, 2, 4, 6, // 1x
+    2, 8, 4, 5, 3, 4, 3, 6, 2, 6, 5, 4, 5, 4, 5, 4, // 2x
+    2, 8, 4, 5, 4, 5, 5, 6, 5, 5, 6, 5, 2, 2, 3, 8, // 3x
+    2, 8, 4, 5, 3, 4, 3, 6, 2, 6, 4, 4, 5, 4, 6, 6, // 4x
+    2, 8, 4, 5, 4, 5, 5, 6, 5, 5, 4, 5, 2, 2, 4, 3, // 5x
+    2, 8, 4, 5, 3, 4, 3, 6, 2, 6, 4, 4, 5, 4, 5, 5, // 6x
+    2, 8, 4, 5, 4, 5, 5, 6, 5, 5, 5, 5, 2, 2, 3, 6, // 7x
+    2, 8, 4, 5, 3, 4, 3, 6, 2, 6, 5, 4, 5, 2, 4, 5, // 8x
+    2, 8, 4, 5, 4, 5, 5, 6, 5, 5, 5, 5, 2, 2, 12, 5, // 9x
+    3, 8, 4, 5, 3, 4, 3, 6, 2, 6, 4, 4, 5, 2, 4, 4, // Ax
+    2, 8, 4, 5, 4, 5, 5, 6, 5, 5, 5, 5, 2, 2, 3, 4, // Bx
+    3, 8, 4, 5, 4, 5, 4, 7, 2, 5, 6, 4, 5, 2, 4, 9, // Cx
+    2, 8, 4, 5, 5, 6, 6, 7, 4, 5, 5, 5, 2, 2, 6, 3, // Dx
+    2, 8, 4, 5, 3, 4, 3, 6, 2, 4, 5, 3, 4, 3, 4, 3, // Ex  (EF SLEEP: paper 3)
+    2, 8, 4, 5, 4, 5, 5, 6, 3, 4, 5, 4, 2, 2, 4, 2, // Fx  (FF STOP: paper 2)
+];
+
+/// Pin every `CYCLES` entry against the independent [`DOC_CYCLES`] transcription.
+/// A single wrong base count in `super::CYCLES` fails here — no dataset needed.
+#[test]
+fn cycle_table_matches_documented_source() {
+    for op in 0u16..=255 {
+        let op = op as u8;
+        // EF SLEEP / FF STOP: the paper lists 3 / 2, but `CYCLES` uses 7 (the
+        // fetch-then-halt count the SingleStepTests trace snapshots). Pin that
+        // deliberate deviation rather than the paper value; every other opcode
+        // must equal the documented count exactly.
+        let want = match op {
+            0xEF | 0xFF => 7,
+            _ => DOC_CYCLES[op as usize],
+        };
+        assert_eq!(
+            super::CYCLES[op as usize],
+            want,
+            "op {op:#04X}: CYCLES {} != expected {want}",
+            super::CYCLES[op as usize],
+        );
     }
 }
 
