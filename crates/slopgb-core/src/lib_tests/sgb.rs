@@ -266,3 +266,69 @@ fn enhanced_game_border_loads_and_renders_end_to_end() {
         "the inset is distinct from the border colour"
     );
 }
+
+/// `rom_supports_sgb` needs BOTH header bytes (SGB flag 0x146 == 0x03 and old
+/// licensee 0x14B == 0x33), and never panics on a truncated image — the
+/// frontend "automatic, prefer SGB" policy calls it on raw ROM bytes.
+#[test]
+fn rom_supports_sgb_needs_both_header_bytes() {
+    let mut rom = vec![0u8; 0x8000];
+    assert!(!GameBoy::rom_supports_sgb(&rom), "bare ROM: no SGB");
+    rom[0x146] = 0x03;
+    assert!(
+        !GameBoy::rom_supports_sgb(&rom),
+        "the SGB flag alone is not enough"
+    );
+    rom[0x14B] = 0x33;
+    assert!(
+        GameBoy::rom_supports_sgb(&rom),
+        "flag + old licensee unlocks SGB"
+    );
+    assert!(
+        !GameBoy::rom_supports_sgb(&[0u8; 4]),
+        "a truncated image is simply 'no SGB', never a panic"
+    );
+}
+
+/// "GBC + initial SGB border" (`ModelChoice::CgbBorder`): attaching the default
+/// SGB border to a CGB machine is presentation-only. It exposes `sgb_border()`
+/// but leaves the emulated LCD frame AND the cycle count byte-identical to a
+/// plain CGB run — the golden-safety of `GameBoy::enable_sgb_border`.
+#[test]
+fn cgb_border_overlay_is_frame_and_cycle_identical() {
+    let rom = || {
+        let mut r = vec![0u8; 0x8000];
+        r[0x143] = 0xC0; // CGB only
+        r
+    };
+    let mut plain = GameBoy::new(Model::Cgb, rom()).unwrap();
+    let mut bordered = GameBoy::new(Model::Cgb, rom()).unwrap();
+    bordered.enable_sgb_border();
+
+    assert!(
+        plain.sgb_border().is_none(),
+        "a plain CGB machine has no border surface"
+    );
+    assert!(
+        bordered.sgb_border().is_some(),
+        "the overlay exposes the built-in default border"
+    );
+
+    for _ in 0..10 {
+        plain.run_frame();
+        bordered.run_frame();
+    }
+    assert_eq!(
+        plain.frame(),
+        bordered.frame(),
+        "the border overlay leaves the LCD frame byte-identical"
+    );
+    assert_eq!(
+        plain.cycles(),
+        bordered.cycles(),
+        "and does not perturb timing"
+    );
+    // Idempotent: re-enabling keeps the same (non-empty) border, no panic.
+    bordered.enable_sgb_border();
+    assert!(bordered.sgb_border().is_some());
+}

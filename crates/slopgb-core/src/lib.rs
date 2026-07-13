@@ -319,6 +319,17 @@ impl GameBoy {
         }
     }
 
+    /// True if the raw ROM header unlocks SGB functions: SGB flag (0x146) == 0x03
+    /// *and* old licensee code (0x14B) == 0x33 (Pan Docs "SGB flag" — the SGB
+    /// ignores command packets otherwise). The frontend's "automatic, prefer SGB"
+    /// policy uses this to pick [`Model::Sgb`]; mirrors
+    /// [`cartridge::Header::supports_sgb`] but is safe to call on any slice
+    /// (`.get()` — a truncated image is simply "no SGB").
+    #[must_use]
+    pub fn rom_supports_sgb(rom: &[u8]) -> bool {
+        rom.get(0x146) == Some(&0x03) && rom.get(0x14B) == Some(&0x33)
+    }
+
     /// Execute one CPU instruction (or one halted/stopped M-cycle).
     pub fn step(&mut self) {
         let before = self.bus.cycles();

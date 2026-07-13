@@ -374,18 +374,19 @@ fn system(s: &Settings, content: Rect) -> Vec<Ctrl> {
     let mut l = Lay::new(content);
     let mut v = Vec::new();
     let model = s.model;
-    // Emulated-system radios: three live (Gameboy / Gameboy Color / automatic),
-    // the SGB/auto-SGB variants inert (slopgb has no SGB system surface).
+    // Emulated-system radios — all live: slopgb has a full SGB system (border,
+    // palettes, SPC700/S-DSP audio), so the SGB/auto-SGB variants each resolve
+    // to a real model (see `ModelChoice::resolve`).
     let caption = "Emulated system (requires reset)";
-    let radios: [(&str, Option<ModelChoice>); 8] = [
-        ("Gameboy", Some(ModelChoice::Dmg)),
-        ("Gameboy Color", Some(ModelChoice::Cgb)),
-        ("Super Gameboy", None),
-        ("automatic, prefer GBC", Some(ModelChoice::Auto)),
-        ("automatic, prefer SGB", None),
-        ("SGB + GBC", None),
-        ("GBC + initial SGB border", None),
-        ("Gameboy or GBC", None),
+    let radios: [(&str, ModelChoice); 8] = [
+        ("Gameboy", ModelChoice::Dmg),
+        ("Gameboy Color", ModelChoice::Cgb),
+        ("Super Gameboy", ModelChoice::Sgb),
+        ("automatic, prefer GBC", ModelChoice::Auto),
+        ("automatic, prefer SGB", ModelChoice::AutoSgb),
+        ("SGB + GBC", ModelChoice::Sgb2),
+        ("GBC + initial SGB border", ModelChoice::CgbBorder),
+        ("Gameboy or GBC", ModelChoice::AutoNoSgb),
     ];
     // The groupbox encloses the caption row + all radios; width fits the widest
     // of the caption / radio labels so nothing renders past the border.
@@ -414,13 +415,10 @@ fn system(s: &Settings, content: Rect) -> Vec<Ctrl> {
     let mut ry = l.y + line_height(); // first radio sits just below the caption
     for &(label, choice) in radios.iter() {
         let kind = Kind::Radio {
-            selected: choice.is_some_and(|c| c == model),
+            selected: choice == model,
             label,
         };
-        match choice {
-            Some(c) => v.push(Ctrl::live(rad((rx, ry), label), kind, Field::Model(c))),
-            None => v.push(Ctrl::inert(rad((rx, ry), label), kind)),
-        }
+        v.push(Ctrl::live(rad((rx, ry), label), kind, Field::Model(choice)));
         ry += step;
     }
     // Inert system toggles (bgb black) — none wired in slopgb yet — below the box.

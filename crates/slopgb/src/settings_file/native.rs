@@ -212,6 +212,11 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
         model: match d.get("system", "model") {
             Some("dmg") => ModelChoice::Dmg,
             Some("cgb") => ModelChoice::Cgb,
+            Some("sgb") => ModelChoice::Sgb,
+            Some("sgb2") => ModelChoice::Sgb2,
+            Some("auto-sgb") => ModelChoice::AutoSgb,
+            Some("cgb-border") => ModelChoice::CgbBorder,
+            Some("auto-nosgb") => ModelChoice::AutoNoSgb,
             _ => ModelChoice::Auto,
         },
         stretch: b("graphics", "stretch", def.stretch),
@@ -297,7 +302,12 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         match settings.model {
             ModelChoice::Dmg => "dmg",
             ModelChoice::Cgb => "cgb",
+            ModelChoice::Sgb => "sgb",
+            ModelChoice::Sgb2 => "sgb2",
             ModelChoice::Auto => "auto",
+            ModelChoice::AutoSgb => "auto-sgb",
+            ModelChoice::CgbBorder => "cgb-border",
+            ModelChoice::AutoNoSgb => "auto-nosgb",
         },
     );
     d.set("system", "bootroms_enabled", fb(settings.bootroms_enabled));

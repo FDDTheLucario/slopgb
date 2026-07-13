@@ -131,4 +131,17 @@ impl Ppu {
     pub(crate) fn sgb_border(&self) -> Option<&[u32; BORDER_PIXELS]> {
         self.sgb.as_ref().and_then(SgbView::border_fb)
     }
+
+    /// Attach a border-only [`SgbView`] to a non-SGB machine so the built-in
+    /// default SGB border renders around the screen (bgb's "GBC + initial SGB
+    /// border" mode). Presentation-only: the joypad SGB command receiver stays
+    /// off (that is `Model::Sgb`/`Sgb2`-gated), so no game-driven CHR_TRN/PCT_TRN
+    /// or palette recolor happens — only the power-on default border. `frame()`
+    /// and the cycle count are unaffected (the default view has `mask == 0`), so
+    /// this never perturbs the golden path — which never calls it.
+    pub(crate) fn enable_sgb_border(&mut self) {
+        if self.sgb.is_none() {
+            self.sgb = Some(SgbView::new());
+        }
+    }
 }

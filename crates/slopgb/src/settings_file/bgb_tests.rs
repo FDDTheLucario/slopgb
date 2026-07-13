@@ -88,12 +88,31 @@ fn model_maps_to_bgb_system_mode() {
     };
     assert_eq!(sysmode(ModelChoice::Dmg), "0", "Gameboy");
     assert_eq!(sysmode(ModelChoice::Cgb), "1", "Gameboy Color");
+    assert_eq!(sysmode(ModelChoice::Sgb), "2", "Super Gameboy");
     assert_eq!(sysmode(ModelChoice::Auto), "3", "automatic prefer GBC");
-    // SGB/auto variants collapse to Auto on read.
-    for v in ["2", "4", "5", "6", "7"] {
+    assert_eq!(sysmode(ModelChoice::AutoSgb), "4", "automatic prefer SGB");
+    assert_eq!(sysmode(ModelChoice::Sgb2), "5", "SGB + GBC");
+    assert_eq!(
+        sysmode(ModelChoice::CgbBorder),
+        "6",
+        "GBC + initial SGB border"
+    );
+    assert_eq!(sysmode(ModelChoice::AutoNoSgb), "7", "Gameboy or GBC");
+    // Read-back is 1:1 for 0..7; an unknown value falls back to Auto.
+    for (v, want) in [
+        ("0", ModelChoice::Dmg),
+        ("1", ModelChoice::Cgb),
+        ("2", ModelChoice::Sgb),
+        ("3", ModelChoice::Auto),
+        ("4", ModelChoice::AutoSgb),
+        ("5", ModelChoice::Sgb2),
+        ("6", ModelChoice::CgbBorder),
+        ("7", ModelChoice::AutoNoSgb),
+        ("9", ModelChoice::Auto),
+    ] {
         assert_eq!(
             from_ini(&Ini::parse(&format!("SystemMode={v}\r\n"))).model,
-            ModelChoice::Auto
+            want
         );
     }
 }

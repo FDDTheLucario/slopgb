@@ -99,6 +99,16 @@ impl GameBoy {
             self.bus.ppu_mut().sgb_apply_bios_palette(&title, &table);
         }
     }
+
+    /// Show the built-in default SGB border around a non-SGB machine — bgb's
+    /// "GBC + initial SGB border" system mode. The game runs in its native
+    /// (usually CGB) mode; only the presentational border surface is added, so
+    /// [`Self::frame`] and the cycle count are byte-identical to the same model
+    /// without a border. Idempotent; a no-op if a border view already exists
+    /// (an actual `Model::Sgb`/`Sgb2` already has one).
+    pub fn enable_sgb_border(&mut self) {
+        self.bus.ppu_mut().enable_sgb_border();
+    }
 }
 
 /// Locate the SGB firmware's real default border (two 4096-byte SNES-4bpp tile

@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 
 use slopgb_core::{CLOCK_HZ, CartridgeError, GameBoy, Model};
 
+use crate::windows::options::ModelChoice;
+
 /// Autosave battery RAM every 5 seconds of emulated time.
 const AUTOSAVE_CYCLES: u64 = 5 * CLOCK_HZ as u64;
 
@@ -37,6 +39,10 @@ pub(crate) struct Session {
     /// kept so a power-cycle / model switch re-applies it to the fresh machine
     /// (firmware persists across a reset). `None` = no BIOS. A no-op off SGB.
     sgb_bios: Option<Vec<u8>>,
+    /// Overlay the built-in default SGB border on a non-SGB machine — bgb's
+    /// "GBC + initial SGB border" system mode (`ModelChoice::CgbBorder`). A
+    /// machine property, so a power-cycle (`reset`) re-applies it.
+    sgb_border: bool,
 }
 
 impl Session {
@@ -62,6 +68,7 @@ impl Session {
             quick_state: None,
             boot: OwnedBootSpec::default(),
             sgb_bios: None,
+            sgb_border: false,
         }
     }
 
@@ -69,16 +76,17 @@ impl Session {
     /// and restore `<rom>.sav` if present. `boot` selects the boot ROM to
     /// execute from power-on for the resolved model (Options paths over
     /// `--boot`); none/none-matching starts post-boot.
-    pub(crate) fn load(
-        path: &Path,
-        model_override: Option<Model>,
-        boot: &BootSpec,
-    ) -> Result<Self, String> {
+    pub(crate) fn load(path: &Path, choice: ModelChoice, boot: &BootSpec) -> Result<Self, String> {
         let rom_bytes =
             fs::read(path).map_err(|e| format!("cannot read ROM '{}': {e}", path.display()))?;
-        let model = model_override.unwrap_or_else(|| GameBoy::auto_model(&rom_bytes));
-        let mut gb = build_gb(model, rom_bytes.clone(), boot.resolve(model).as_deref())
-            .map_err(|e| format!("cannot load ROM '{}': {e}", path.display()))?;
+        let (model, sgb_border) = choice.resolve(&rom_bytes);
+        let mut gb = build_gb(
+            model,
+            rom_bytes.clone(),
+            boot.resolve(model).as_deref(),
+            sgb_border,
+        )
+        .map_err(|e| format!("cannot load ROM '{}': {e}", path.display()))?;
         let sav_path = path.with_extension("sav");
         let mut last_saved = None;
         match fs::read(&sav_path) {
@@ -112,6 +120,7 @@ impl Session {
             quick_state: None,
             boot: boot.to_owned(),
             sgb_bios: None,
+            sgb_border,
         })
     }
 
@@ -177,7 +186,12 @@ impl Session {
     pub(crate) fn reset(&mut self) {
         self.flush_save();
         let boot = self.boot.resolve(self.model);
-        match build_gb(self.model, self.rom_bytes.clone(), boot.as_deref()) {
+        match build_gb(
+            self.model,
+            self.rom_bytes.clone(),
+            boot.as_deref(),
+            self.sgb_border,
+        ) {
             Ok(mut gb) => {
                 if let Ok(data) = fs::read(&self.sav_path) {
                     let _ = gb.load_save_data(&data); // rejection already warned at load
@@ -191,24 +205,25 @@ impl Session {
         }
     }
 
-    /// Switch the emulated system (Options → System → Emulated system): rebuild
-    /// the machine from the ROM with `model_override` (`None` = auto-detect),
-    /// reloading battery RAM. A no-op (returns `false`) when the resolved model
-    /// already matches, so re-applying Options doesn't needlessly power-cycle.
-    pub(crate) fn set_model(&mut self, model_override: Option<Model>) -> bool {
-        let model = model_override.unwrap_or_else(|| GameBoy::auto_model(&self.rom_bytes));
-        if model == self.model {
+    /// Switch the emulated system (Options → System → Emulated system): resolve
+    /// `choice` against the ROM header and rebuild the machine, reloading battery
+    /// RAM. A no-op (returns `false`) when the resolved model *and* border already
+    /// match, so re-applying Options doesn't needlessly power-cycle.
+    pub(crate) fn set_model(&mut self, choice: ModelChoice) -> bool {
+        let (model, sgb_border) = choice.resolve(&self.rom_bytes);
+        if model == self.model && sgb_border == self.sgb_border {
             return false;
         }
         self.flush_save();
         let boot = self.boot.resolve(model);
-        match build_gb(model, self.rom_bytes.clone(), boot.as_deref()) {
+        match build_gb(model, self.rom_bytes.clone(), boot.as_deref(), sgb_border) {
             Ok(mut gb) => {
                 if let Ok(data) = fs::read(&self.sav_path) {
                     let _ = gb.load_save_data(&data);
                 }
                 self.gb = gb;
                 self.model = model;
+                self.sgb_border = sgb_border;
                 self.apply_sgb_bios();
                 self.next_autosave = AUTOSAVE_CYCLES;
                 self.quick_state = None; // a different machine — old snapshot is stale
@@ -439,8 +454,13 @@ impl OwnedBootSpec {
 /// Build the machine: **execute** `boot` from power-on (bgb's boot ROM) when it
 /// is present and the right size for `model`, else the direct post-boot install.
 /// A wrong-size boot ROM falls back to no-boot (logged, non-fatal).
-fn build_gb(model: Model, rom: Vec<u8>, boot: Option<&[u8]>) -> Result<GameBoy, CartridgeError> {
-    match boot {
+fn build_gb(
+    model: Model,
+    rom: Vec<u8>,
+    boot: Option<&[u8]>,
+    sgb_border: bool,
+) -> Result<GameBoy, CartridgeError> {
+    let build = || match boot {
         Some(b) if boot_size_ok(model, b.len()) => GameBoy::new_with_boot(model, rom, b.to_vec()),
         Some(b) => {
             let needs = if model.is_cgb() { 2304 } else { 256 };
@@ -451,7 +471,14 @@ fn build_gb(model: Model, rom: Vec<u8>, boot: Option<&[u8]>) -> Result<GameBoy, 
             GameBoy::new(model, rom)
         }
         None => GameBoy::new(model, rom),
+    };
+    let mut gb = build()?;
+    // "GBC + initial SGB border": overlay the default border on a non-SGB
+    // machine. Presentation-only — leaves frame()/cycles byte-identical.
+    if sgb_border {
+        gb.enable_sgb_border();
     }
+    Ok(gb)
 }
 
 #[cfg(test)]

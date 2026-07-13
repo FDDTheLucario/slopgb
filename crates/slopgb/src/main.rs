@@ -97,10 +97,17 @@ fn main() {
     // Optional SGB BIOS (--sgb-bios / SLOPGB_SGB_BIOS): feeds the SGB audio path
     // on every ROM (re)load; border/palette are not extracted (HLE).
     let sgb_bios = resolve_sgb_bios(&opts);
+    // Effective emulated-system choice for this load: an explicit CLI `--model`
+    // wins, else the persisted Options choice (so a saved SGB / "prefer SGB" /
+    // border selection is honored at startup, not just after opening Options).
+    let model_choice = opts.model.map_or_else(
+        || settings_file::load().settings.model,
+        |m| windows::options::ModelChoice::from_option(Some(m)),
+    );
     let (mut session, rom_loaded) = match &opts.rom {
         Some(rom) => match Session::load(
             rom,
-            opts.model,
+            model_choice,
             &session::BootSpec::cli(boot_rom.as_deref()),
         ) {
             Ok(s) => (s, true),
@@ -110,7 +117,7 @@ fn main() {
             }
         },
         None => (
-            Session::blank(opts.model.unwrap_or(slopgb_core::Model::Dmg)),
+            Session::blank(model_choice.resolve(&[0u8; 0x8000]).0),
             false,
         ),
     };
@@ -862,7 +869,7 @@ impl App {
         // if the dropped file is the currently loaded ROM, loading first
         // would resurrect a stale save and later overwrite the fresh one.
         self.session.flush_save();
-        match Session::load(path, self.opts.model, &self.boot_spec()) {
+        match Session::load(path, self.settings.model, &self.boot_spec()) {
             Ok(mut new) => {
                 new.set_sgb_bios(self.sgb_bios.clone());
                 self.session = new;

@@ -351,6 +351,34 @@ fn model_choice_from_option_maps_preference() {
 }
 
 #[test]
+fn model_choice_resolve_maps_policies() {
+    use slopgb_core::Model;
+    // Forcing choices ignore the ROM header.
+    let none = &[0u8; 0][..];
+    assert_eq!(ModelChoice::Dmg.resolve(none), (Model::Dmg, false));
+    assert_eq!(ModelChoice::Sgb.resolve(none), (Model::Sgb, false));
+    assert_eq!(ModelChoice::Sgb2.resolve(none), (Model::Sgb2, false));
+    // "GBC + initial SGB border" = a CGB machine plus the border-overlay flag.
+    assert_eq!(ModelChoice::CgbBorder.resolve(none), (Model::Cgb, true));
+
+    // A CGB-flagged, SGB-capable header.
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x143] = 0xC0; // CGB only
+    rom[0x146] = 0x03;
+    rom[0x14B] = 0x33; // SGB unlock (both bytes)
+    // "prefer SGB" picks SGB when the header unlocks it...
+    assert_eq!(ModelChoice::AutoSgb.resolve(&rom), (Model::Sgb, false));
+    // ...while "prefer GBC" / "Gameboy or GBC" ignore SGB → CGB here.
+    assert_eq!(ModelChoice::Auto.resolve(&rom), (Model::Cgb, false));
+    assert_eq!(ModelChoice::AutoNoSgb.resolve(&rom), (Model::Cgb, false));
+    // Without the SGB unlock bytes, prefer-SGB falls back to auto (DMG here).
+    assert_eq!(
+        ModelChoice::AutoSgb.resolve(&vec![0u8; 0x8000]),
+        (Model::Dmg, false)
+    );
+}
+
+#[test]
 fn system_tab_model_radios() {
     let mut st = OptionsState::new(Settings::default());
     st.active = OptionsTab::System;
@@ -693,8 +721,9 @@ fn allow_opposing_defaults_off_toggles_and_resets() {
 }
 
 #[test]
-fn inert_control_click_is_noop() {
-    // Clicking an inert System radio (Super Gameboy) must not change the model.
+fn super_gameboy_radio_selects_sgb() {
+    // The Super Gameboy System radio is live (slopgb has a full SGB): clicking
+    // it selects SGB.
     let mut st = OptionsState::new(Settings::default());
     st.active = OptionsTab::System;
     let content = OptionsState::content_rect(dialog());
@@ -705,8 +734,8 @@ fn inert_control_click_is_noop() {
     st.on_click(sgb.rect.x + 2, sgb.rect.y + 2, BOUNDS);
     assert_eq!(
         st.working.model,
-        ModelChoice::Auto,
-        "inert radio is a no-op"
+        ModelChoice::Sgb,
+        "Super Gameboy radio selects SGB"
     );
 }
 

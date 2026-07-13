@@ -1,5 +1,7 @@
 use super::*;
 use slopgb_core::Model;
+
+use crate::windows::options::ModelChoice;
 use std::process;
 
 #[test]
@@ -78,13 +80,13 @@ fn build_gb_executes_a_matching_boot_rom_else_falls_back() {
     let rom = vec![0u8; 0x8000];
     let dmg_boot = vec![0u8; 0x100]; // size-valid (contents irrelevant here)
     // Right size for the model → executes the boot ROM (boot_active).
-    let gb = build_gb(Model::Dmg, rom.clone(), Some(&dmg_boot)).unwrap();
+    let gb = build_gb(Model::Dmg, rom.clone(), Some(&dmg_boot), false).unwrap();
     assert!(gb.boot_active(), "matching boot ROM is executed");
     // Wrong size → falls back to the direct post-boot install (logged).
-    let gb = build_gb(Model::Dmg, rom.clone(), Some(&vec![0u8; 0x900])).unwrap();
+    let gb = build_gb(Model::Dmg, rom.clone(), Some(&vec![0u8; 0x900]), false).unwrap();
     assert!(!gb.boot_active(), "wrong-size boot ROM ignored");
     // None → no boot ROM (the default golden path).
-    let gb = build_gb(Model::Dmg, rom, None).unwrap();
+    let gb = build_gb(Model::Dmg, rom, None, false).unwrap();
     assert!(!gb.boot_active());
 }
 
@@ -101,7 +103,7 @@ fn reset_reruns_the_configured_boot_rom() {
     let boot = vec![0u8; 0x100];
 
     // No boot configured: a power-cycle replays the post-boot state.
-    let mut plain = Session::load(&path, Some(Model::Dmg), &BootSpec::NONE).expect("load");
+    let mut plain = Session::load(&path, ModelChoice::Dmg, &BootSpec::NONE).expect("load");
     assert!(!plain.gb.boot_active());
     plain.reset();
     assert!(
@@ -110,7 +112,7 @@ fn reset_reruns_the_configured_boot_rom() {
     );
 
     // Boot ROM configured: the initial load AND a later reset both run it.
-    let mut s = Session::load(&path, Some(Model::Dmg), &BootSpec::cli(Some(&boot))).expect("load");
+    let mut s = Session::load(&path, ModelChoice::Dmg, &BootSpec::cli(Some(&boot))).expect("load");
     assert!(s.gb.boot_active(), "boot ROM runs on the initial load");
     s.gb.run_frame();
     s.reset();
@@ -166,13 +168,13 @@ fn set_model_reloads_only_on_change() {
     rom[0x148] = 0x00; // 32 KiB
     fs::write(&path, &rom).unwrap();
 
-    let mut s = Session::load(&path, Some(Model::Dmg), &BootSpec::NONE).expect("load");
+    let mut s = Session::load(&path, ModelChoice::Dmg, &BootSpec::NONE).expect("load");
     assert_eq!(s.gb.model(), Model::Dmg);
     // Switching to CGB rebuilds the machine.
-    assert!(s.set_model(Some(Model::Cgb)));
+    assert!(s.set_model(ModelChoice::Cgb));
     assert_eq!(s.gb.model(), Model::Cgb);
     // Re-applying the same model is a no-op.
-    assert!(!s.set_model(Some(Model::Cgb)));
+    assert!(!s.set_model(ModelChoice::Cgb));
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -188,7 +190,7 @@ fn save_state_round_trips_through_a_file() {
     fs::write(&rom_path, &rom).unwrap();
 
     // Run a while, then save to disk.
-    let mut s = Session::load(&rom_path, Some(Model::Dmg), &BootSpec::NONE).expect("load");
+    let mut s = Session::load(&rom_path, ModelChoice::Dmg, &BootSpec::NONE).expect("load");
     for _ in 0..20 {
         s.gb.run_frame();
     }
@@ -197,7 +199,7 @@ fn save_state_round_trips_through_a_file() {
     s.save_state_to(&state_path).expect("save state");
 
     // A fresh same-ROM session restores to the exact saved machine.
-    let mut s2 = Session::load(&rom_path, Some(Model::Dmg), &BootSpec::NONE).expect("reload");
+    let mut s2 = Session::load(&rom_path, ModelChoice::Dmg, &BootSpec::NONE).expect("reload");
     s2.load_state_from(&state_path).expect("load state");
     assert_eq!(s2.gb.cpu_regs().pc, pc);
     assert_eq!(s2.gb.cycles(), cyc);

@@ -14,7 +14,7 @@
 //! applies an [`OptionsOutcome`] to `App`/`Session`/`GameBoy`. The per-tab
 //! control descriptors live in [`tabs`].
 
-use slopgb_core::Model;
+use slopgb_core::{GameBoy, Model};
 
 use crate::ui::Theme;
 use crate::ui::canvas::{Canvas, Rect};
@@ -24,36 +24,62 @@ pub mod tabs;
 
 // --- Settings ---------------------------------------------------------------
 
-/// Which emulated system the System tab selects. Maps to a [`Model`] override
-/// (or auto-detect) applied on the next ROM (re)load.
+/// Which emulated system the System tab selects — bgb's eight "Emulated system"
+/// radios. Resolved against the loaded ROM header into a concrete [`Model`] plus
+/// a border flag on the next (re)load; see [`Self::resolve`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModelChoice {
-    /// "automatic, prefer GBC" — let `GameBoy::auto_model` decide (no override).
+    /// "automatic, prefer GBC" — `GameBoy::auto_model` (CGB if the header asks,
+    /// else DMG; never SGB).
     Auto,
     /// "Gameboy" — force DMG.
     Dmg,
     /// "Gameboy Color" — force CGB.
     Cgb,
+    /// "Super Gameboy" — force SGB (HLE border + palettes; optional `--sgb-bios`).
+    Sgb,
+    /// "SGB + GBC" — force SGB2.
+    Sgb2,
+    /// "automatic, prefer SGB" — SGB when the header unlocks it
+    /// (`GameBoy::rom_supports_sgb`), else the `Auto` policy.
+    AutoSgb,
+    /// "GBC + initial SGB border" — run in CGB mode but show the built-in
+    /// default SGB border around the screen (border-only, presentational).
+    CgbBorder,
+    /// "Gameboy or GBC" — same policy as [`Self::Auto`] (a distinct radio, so it
+    /// round-trips + highlights on its own).
+    AutoNoSgb,
 }
 
 impl ModelChoice {
-    /// The `Model` override this choice applies on reload (`None` = auto-detect).
+    /// Resolve this choice against the ROM header into the concrete build spec
+    /// applied on reload: the [`Model`] and whether to overlay the default SGB
+    /// border on a non-SGB machine (`CgbBorder` only). `AutoSgb` needs the ROM
+    /// to detect SGB support, which is why this can't be a plain `Option<Model>`.
     #[must_use]
-    pub fn as_override(self) -> Option<Model> {
+    pub fn resolve(self, rom: &[u8]) -> (Model, bool) {
         match self {
-            ModelChoice::Auto => None,
-            ModelChoice::Dmg => Some(Model::Dmg),
-            ModelChoice::Cgb => Some(Model::Cgb),
+            ModelChoice::Dmg => (Model::Dmg, false),
+            ModelChoice::Cgb => (Model::Cgb, false),
+            ModelChoice::Sgb => (Model::Sgb, false),
+            ModelChoice::Sgb2 => (Model::Sgb2, false),
+            ModelChoice::Auto | ModelChoice::AutoNoSgb => (GameBoy::auto_model(rom), false),
+            ModelChoice::AutoSgb if GameBoy::rom_supports_sgb(rom) => (Model::Sgb, false),
+            ModelChoice::AutoSgb => (GameBoy::auto_model(rom), false),
+            ModelChoice::CgbBorder => (Model::Cgb, true),
         }
     }
 
-    /// Recover the closest choice from a concrete live model.
+    /// Recover the closest choice from a concrete live model (seeds from a CLI
+    /// `--model`; the auto/border policies aren't recoverable from a plain
+    /// `Model`, which is fine — they only come from the Options UI / settings).
     #[must_use]
     pub fn from_model(m: Model) -> Self {
-        if m.is_cgb() {
-            ModelChoice::Cgb
-        } else {
-            ModelChoice::Dmg
+        match m {
+            Model::Sgb => ModelChoice::Sgb,
+            Model::Sgb2 => ModelChoice::Sgb2,
+            _ if m.is_cgb() => ModelChoice::Cgb,
+            _ => ModelChoice::Dmg,
         }
     }
 

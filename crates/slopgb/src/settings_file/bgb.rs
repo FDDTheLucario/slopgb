@@ -31,12 +31,18 @@ pub fn from_ini(f: &Ini) -> Settings {
         .unwrap_or(d.scheme);
 
     Settings {
-        // bgb SystemMode radio index (options-system.png): 0=Gameboy(DMG),
-        // 1=Gameboy Color(CGB), 3=automatic prefer GBC; 2 + 4..7 are SGB/auto
-        // variants slopgb doesn't distinguish, so they collapse to Auto.
+        // bgb SystemMode radio index (options-system.png), full 0..7 fidelity:
+        // 0=Gameboy(DMG), 1=Gameboy Color(CGB), 2=Super Gameboy, 3=auto prefer
+        // GBC, 4=auto prefer SGB, 5=SGB+GBC(SGB2), 6=GBC+initial SGB border,
+        // 7=Gameboy or GBC. "3" and any unknown value fall back to Auto.
         model: match f.get("SystemMode") {
             Some("0") => ModelChoice::Dmg,
             Some("1") => ModelChoice::Cgb,
+            Some("2") => ModelChoice::Sgb,
+            Some("4") => ModelChoice::AutoSgb,
+            Some("5") => ModelChoice::Sgb2,
+            Some("6") => ModelChoice::CgbBorder,
+            Some("7") => ModelChoice::AutoNoSgb,
             _ => ModelChoice::Auto,
         },
         // slopgb's fullscreen-stretch has no bgb equivalent (bgb's `stretch` is a
@@ -110,7 +116,12 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         match s.model {
             ModelChoice::Dmg => "0",
             ModelChoice::Cgb => "1",
+            ModelChoice::Sgb => "2",
             ModelChoice::Auto => "3",
+            ModelChoice::AutoSgb => "4",
+            ModelChoice::Sgb2 => "5",
+            ModelChoice::CgbBorder => "6",
+            ModelChoice::AutoNoSgb => "7",
         },
     );
     f.set("Volume", &((s.volume * 100.0).round() as i64).to_string());
