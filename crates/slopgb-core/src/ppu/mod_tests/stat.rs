@@ -290,15 +290,13 @@ fn sameboy_mode3_length_is_four_dots_short_of_the_live_flip() {
     }
 }
 
-/// S2c — the flag-on visible mode→0 back-date (`vis_early`, the kernel-pair
+/// S2c — the visible mode→0 back-date (`vis_early`, the kernel-pair
 /// separator). On the `leading-edge` path a bare single-speed line's
 /// CPU-visible STAT mode flips 3→0 at SameBoy's `visible_mode0_dot` (`+4` past
 /// the live dispatch's `+7`, i.e. **3 dots earlier**), while the IRQ-dispatch
 /// flip (`line_render_done`/`m0_src`) stays at `+7` — the decoupling the
 /// instrumentation showed separates `m2int_m3stat_1` (read at our dot 248,
-/// stays mode 3) from `m0int_m3stat_2` (read at our dot 252, now mode 0). The
-/// flag-OFF leg must stay at `+7` (byte-identical production: `vis_early` is
-/// never set there).
+/// stays mode 3) from `m0int_m3stat_2` (read at our dot 252, now mode 0).
 #[test]
 fn visible_mode0_backdates_three_dots_bare_line() {
     let live_visible_flip = || -> u16 {
@@ -325,7 +323,7 @@ fn visible_mode0_backdates_three_dots_bare_line() {
     assert_eq!(
         live_visible_flip(),
         sameboy + 4,
-        "flag-on: visible flip back-dated 3 dots to SameBoy's frame (+4)"
+        "visible flip back-dated 3 dots to SameBoy's frame (+4)"
     );
 }
 
@@ -363,15 +361,14 @@ fn mode0_irq_at_254_plus_scx_fine() {
     }
 }
 
-/// Port Stage A8 — the flag-on mode-0 IRQ side fires at `line_render_done` (the
+/// Port Stage A8 — the mode-0 IRQ side fires at `line_render_done` (the
 /// gambatte-calibrated `m0_rise_dot` frame), NOT the +1-dot `mfi_m0_prev` lag.
-/// The lag put the `StatUpdate` mode-0 STAT IF one dot late vs `stat_events_tick`
-/// and broke `hblank_ly_scx_timing` flag-on; flag-OFF keeps the lag
-/// (byte-identical). Pinned by comparing the `mode_for_interrupt` 3→0 dot to the
-/// flag-off visible mode→0 flip (= `line_render_done`).
+/// The lag put the `StatUpdate` mode-0 STAT IF one dot late and broke
+/// `hblank_ly_scx_timing`. Pinned by comparing the `mode_for_interrupt` 3→0
+/// dot to the visible mode→0 flip (= `line_render_done`).
 #[test]
 fn mode0_irq_fires_at_render_done_not_lagged() {
-    // The line_render_done dot = the flag-off visible mode 3→0 flip (bare SCX 0).
+    // The line_render_done dot = the visible mode 3→0 flip (bare SCX 0).
     let render_done_dot = {
         let mut p = dmg();
         p.write(0xFF40, 0x91);
@@ -417,12 +414,11 @@ fn mode0_irq_fires_at_render_done_not_lagged() {
     );
 }
 
-/// Port Stage A7 — the flag-on mode-2→3 entry back-date (`ppu-subdot-ladder.md`
+/// Port Stage A7 — the mode-2→3 entry back-date (`ppu-subdot-ladder.md`
 /// "A7"). On the leading-edge path a bare single-speed line's CPU-visible STAT
-/// mode flips 2→3 at dot 80 (the read offset of 4 dots earlier than the flag-off
-/// dot 84), making the cc+0 FF41 read observationally neutral for the mode-2→3
-/// entry (mooneye `intr_2_mode3_timing` passes flag-on). Flag-OFF stays at 84
-/// (byte-identical production).
+/// mode flips 2→3 at dot 80 (4 dots earlier than the dispatch's dot 84),
+/// making the cc+0 FF41 read observationally match SameBoy's cc+4 view for
+/// the mode-2→3 entry (mooneye `intr_2_mode3_timing` passes).
 #[test]
 fn mode3_entry_backdates_four_dots() {
     let entry = || -> u16 {
@@ -443,17 +439,16 @@ fn mode3_entry_backdates_four_dots() {
         }
         panic!("bare line never flips 2→3");
     };
-    assert_eq!(entry(), 80, "flag-on: back-dated 4 dots to dot 80");
+    assert_eq!(entry(), 80, "back-dated 4 dots to dot 80");
 }
 
-/// Port Stage A13 — the flag-on LCD-enable glitch-line mode-3 boundary
+/// Port Stage A13 — the LCD-enable glitch-line mode-3 boundary
 /// back-dates (`ppu-subdot-ladder.md` "A13"). On the leading-edge path the
 /// glitch first line's CPU-visible STAT mode-3 window is back-dated the full
 /// single-speed read offset (4 dots, like A7): the mode-0→3 ENTRY moves 78→74
 /// and the 3→0 EXIT (the `line_render_done` flip at dot 252) is anticipated by
-/// `vis_early` rising at dot 248, so the cc+0 FF41 read reproduces the flag-off
-/// cc+4 view (`lcdon_timing-GS` STAT tables; gambatte enable_display). Flag-OFF
-/// stays at (78, 252) — byte-identical production.
+/// `vis_early` rising at dot 248, so the cc+0 FF41 read reproduces SameBoy's
+/// cc+4 view (`lcdon_timing-GS` STAT tables; gambatte enable_display).
 #[test]
 fn glitch_line_mode3_backdates_four_dots() {
     // (entry, exit) dots of the glitch line's visible 0→3→0 STAT-mode window.
@@ -476,7 +471,7 @@ fn glitch_line_mode3_backdates_four_dots() {
         }
         panic!("glitch line never completed a 0→3→0 mode window");
     };
-    assert_eq!(window(), (74, 248), "flag-on: both back-dated 4 dots");
+    assert_eq!(window(), (74, 248), "both back-dated 4 dots");
 }
 
 /// Port Stage A15 — the LCD-enable glitch line raises NO mode-0 (HBlank) STAT
@@ -485,10 +480,9 @@ fn glitch_line_mode3_backdates_four_dots() {
 /// `stat_line_level` / `stat_write_trigger_dmg` suppress the HBlank source there.
 /// The rising-edge engine's glitch `mode_for_interrupt` used to mirror `vis_mode`
 /// (mode 0 in the prefix) and fired a spurious m0 IRQ at the first glitch dot
-/// (`enable_display/ly0_m0irq_trigger` rendered E2 flag-on vs SameBoy/gambatte's
+/// (`enable_display/ly0_m0irq_trigger` rendered E2 vs SameBoy/gambatte's
 /// out0). Now the SS prefix selects NONE; only the real post-render glitch m0
-/// fires. (`dmg()` is single speed, so the `!ds` gate is active here.) Flag-OFF
-/// is byte-identical (`mode_for_interrupt` is unread there).
+/// fires. (`dmg()` is single speed, so the `!ds` gate is active here.)
 #[test]
 fn glitch_line_prefix_suppresses_m0_irq() {
     // mode_for_interrupt across the glitch line with HBlank enabled (single speed).
@@ -538,9 +532,8 @@ fn glitch_line_prefix_suppresses_m0_irq() {
 /// the cc+0 view of what its cc+4 trailing edge sees 4 dots later — the next
 /// line (line 1) at dots 0-3 (the −4 read offset). There the DMG readable
 /// coincidence flag is forced invalid (no-match), so the glitch compare drops
-/// Some(0)→None for those 4 dots. Flag-OFF stays Some(0) the whole glitch line
-/// (byte-identical production). The IRQ side is untouched (the glitch line's
-/// `ly_for_comparison` is −1, so `cmp_irq`/the flag-on STAT engine never re-see
+/// Some(0)→None for those 4 dots. The IRQ side is untouched (the glitch line's
+/// `ly_for_comparison` is −1, so `cmp_irq`/the STAT engine never re-see
 /// the match).
 #[test]
 fn glitch_line_lyc_compare_backdates_four_dots() {
@@ -553,19 +546,19 @@ fn glitch_line_lyc_compare_backdates_four_dots() {
         p.compare_ly()
     };
     // Before the last 4 dots: LY=0 compare both paths (no back-date).
-    assert_eq!(compare_at(447), Some(0), "flag-on dot 447 (before window)");
-    // Last 4 dots map to line-1 dots 0-3: flag-off holds Some(0); flag-on DMG
-    // back-dates to the line-1 no-match (None).
+    assert_eq!(compare_at(447), Some(0), "dot 447 (before window)");
+    // Last 4 dots map to line-1 dots 0-3: this DMG back-dates to the line-1
+    // no-match (None).
     for dot in 448..=451 {
-        assert_eq!(compare_at(dot), None, "flag-on glitch dot {dot}");
+        assert_eq!(compare_at(dot), None, "glitch dot {dot}");
     }
 }
 
 /// Port Stage C/S5 mech-1 — the window vis-HOLD foundation (`vis_hold_until`)
 /// keeps the CPU-visible STAT mode at 3 PAST the dispatch flip
 /// (`line_render_done`/`vis_early`) until SameBoy's `263 + SCX&7` window-length
-/// exit, WITHOUT moving the dispatch. Always 0 (no hold) in production, so it is
-/// byte-identical with the flag-off `line_render_done` read. (Validated
+/// exit, WITHOUT moving the dispatch. Always 0 (no hold) in production today,
+/// so `vis_mode` still reads the plain `line_render_done` flip. (Validated
 /// foundation for the C2 window-length model — see the `vis_hold_until` docs.)
 #[test]
 fn vis_hold_extends_visible_mode3_past_the_dispatch() {

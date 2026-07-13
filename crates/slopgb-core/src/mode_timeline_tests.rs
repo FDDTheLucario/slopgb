@@ -101,7 +101,7 @@ fn kernel_pair_separates_on_the_decoupled_grid() {
 
 /// The kernel separation pinned to the EMULATOR-MEASURED read dots (2026-06-21
 /// instrumentation, `ppu-subdot-ladder.md` "A5 INSTRUMENTED + KERNEL
-/// SEPARATED"): under the flag-on leading-edge path the two ROMs' `ldh a,(FF41)`
+/// SEPARATED"): under the leading-edge path the two ROMs' `ldh a,(FF41)`
 /// land at our-line dots **248** (`m2int_m3stat_1`) and **252**
 /// (`m0int_m3stat_2`) on a bare CGB line (SCX 0). Mapped onto this
 /// `ModeTimeline` (whose dot 0 = the mode-2 start, i.e. our-line dot
@@ -118,7 +118,7 @@ fn measured_kernel_reads_straddle_sameboy_visible_boundary() {
     // Our `vis_mode` puts the visible mode-2 start at our-line dot 4 (dots 0-3
     // are the line-start window); the `ModeTimeline` spine starts at its dot 0.
     const OUR_MODE2_START: u16 = 4;
-    // The flag-on leading-edge read dots measured this session (bare, SCX 0).
+    // The leading-edge read dots measured this session (bare, SCX 0).
     const M2INT_READ_OUR_DOT: u16 = 248;
     const M0INT_READ_OUR_DOT: u16 = 252;
     // Our production visible mode→0 flip dot (pipe end 256 − 2; `m0_flip_events`).

@@ -135,13 +135,12 @@ fn cgb_ly153_loads_two_dots_early() {
 
 /// HALFDOT Part-A: the EAGER emergent-flip accessibility release
 /// (`Ppu::eager_access_released`) unblocks OAM/VRAM reads + writes at the
-/// render's OWN projected flip on the eager clock — where the tier2
-/// `vis_early` boolean (LE `early_lead = 3`, 2 dots early) over-releases
+/// render's OWN projected flip on the eager clock — where the `vis_early`
+/// boolean (LE `early_lead = 3`, 2 dots early) over-releases
 /// the `_1` sibling. On an SCX=3 bare line the flip projects to dot 257,
 /// so the `_2` read (dot 256, `read_pos_hd` 520 ≥ 2·257+6 = 520) releases
 /// while the `_1` read (dot 252, `read_pos_hd` 512 < 520) stays blocked —
-/// the gambatte `postread_scx3_1`/`_2` + `postwrite_2_scx3` split. Eager
-/// off (production/tier2) keeps both blocked pre-dispatch (byte-identical).
+/// the gambatte `postread_scx3_1`/`_2` + `postwrite_2_scx3` split.
 #[test]
 fn eager_emergent_flip_releases_accessibility_at_the_projected_exit() {
     let mut p = cgb();
@@ -330,8 +329,7 @@ fn cgb_vblank_level_holds_through_line0_dots_0_3() {
 /// (`m2int_wxA6_scx5_m3stat` [Cgb] want 0), while dot 259 (rphd 526 < 528)
 /// still holds 3 — a real exit, not a blanket force. The stalled-window OAM
 /// read releases at the emergent flip (dot 265, rphd 538 ≥ 2·266+6 = 538) —
-/// the `m2int_wxA6_{oam,vram}busyread` [Dmg] accessibility class. Eager off
-/// (production / tier2) keeps the read blocked — byte-identical.
+/// the `m2int_wxA6_{oam,vram}busyread` [Dmg] accessibility class.
 #[test]
 fn eager_offscreen_wx166_window_exit_and_stalled_access() {
     let mut p = cgb();

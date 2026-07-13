@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// S5/A4: the flag-on engine's interrupt line is held low while the LCD is off
+/// S5/A4: the STAT engine's interrupt line is held low while the LCD is off
 /// (SameBoy `GB_STAT_update` early-returns, `display.c:525`), so a re-enable
 /// edge-detects from a clean low. A held-high line at the off transition is
 /// cleared.
@@ -133,14 +133,14 @@ fn steady_line_boundaries() {
     assert_eq!(p.read(0xFF44), 2); // state(908)
 }
 
-/// Port Stage A6 — the flag-on [`Ppu::stat_update_tick`] halt-commit-mask
+/// Port Stage A6 — the [`Ppu::stat_update_tick`] halt-commit-mask
 /// calibration (`ppu-subdot-ladder.md` "A6"). The mode-2 (OAM) line-start pulse
 /// takes the **halt-exit** mask (`stat_halt_late`) but NOT the
 /// interrupt-sample mask (`stat_late`) on the leading-edge (cc+0) path —
-/// unlike the flag-off [`Ppu::stat_events_tick`] engine, which takes both for
+/// unlike the removed gambatte STAT event engine, which took both for
 /// its cc+4 frame (`oam_pulse_at_vblank_entry_dmg`). The contrast IS the lift:
 /// the halt mask delays the canonical mooneye `intr_2_mode0_timing` halt-wake
-/// (which then passes flag-on), while dropping the sample mask keeps the
+/// (which then passes), while dropping the sample mask keeps the
 /// non-halt `m2int_m3stat_1` `ldh a,(FF41)` dispatch in SameBoy's frame so its
 /// read still lands on mode 3 (the separated kernel pair). Applying `stat_late`
 /// here would re-collapse the pair.
@@ -170,11 +170,11 @@ fn stat_update_mode2_pulse_halt_mask_only_flag_on() {
     );
 }
 
-/// Port Stage A6 — the flag-on mode-0 (HBlank) source rise carries the
-/// half-cycle halt law (`m0_rise`), the same mask the flag-off engine sets on
-/// its `m0_rise_dot`. (The rise's exact dot is still our cc+4 frame until the
-/// mode-0 dispatch reclock, so this mask is currently neutral on the flag-on
-/// suite; it is wired faithfully so the reclock activates it without a second
+/// Port Stage A6 — the mode-0 (HBlank) source rise carries the
+/// half-cycle halt law (`m0_rise`), the same mask the removed gambatte engine
+/// set on its `m0_rise_dot`. (The rise's exact dot is still our cc+4 frame
+/// until the mode-0 dispatch reclock, so this mask is currently neutral
+/// here; it is wired faithfully so the reclock activates it without a second
 /// edit.)
 #[test]
 fn stat_update_mode0_rise_takes_m0_rise_flag_on() {

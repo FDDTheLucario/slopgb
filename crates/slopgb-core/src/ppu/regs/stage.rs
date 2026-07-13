@@ -89,7 +89,7 @@ impl Ppu {
         // the dmg palette path).
         let dots = if addr == 0xFF4B { dots + 1 } else { dots };
         // Speed hint for the FF4A wy2 scheduling below (1-dot staging
-        // only happens in double speed; the tier2 write-strobe stages 3
+        // only happens in double speed; the write-strobe stages 3
         // dots at either speed, so there the hint comes from the live
         // `ds` flag instead).
         self.staged_ds = dots <= 1;
@@ -274,7 +274,7 @@ impl Ppu {
                 // WX match (the redraw start): re-enable at/before the match →
                 // extends (mode3); after → the redraw starts too late, bare exit
                 // (mode0). slopgb's whole-dot render collapses both to mode3 at
-                // the read dot. Latched tier2 while `render.active` (applies to
+                // the read dot. Latched while `render.active` (applies to
                 // DMG as well as CGB).
                 if old & LCDC_WIN_ENABLE == 0 && value & LCDC_WIN_ENABLE != 0 && self.render.active
                 {

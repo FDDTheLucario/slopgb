@@ -123,13 +123,14 @@ impl Ppu {
                 // does (SameBoy's trigger line ends mode 3 later — the exclusion
                 // above only skips the `wy2 == ly` first line). On the DMG eager
                 // clock the wy2-lagged render OVER-triggers this seam line
-                // (`win_active` rises where the tier2 render misses it and arm 7
-                // compensates at `m == 0`), so arm D1 fires with the steady 259
-                // and the read under-holds. Give it the cross-line 263 exit,
-                // matching arm 7's polled extend (`late_wy_10to0_ly1_1`,
-                // `FFto0/FFto1/FFto2_ly2_scx*_1`, want extend). `eager`-gated
-                // → tier2 byte-identical (its render never triggers the seam, so
-                // arm D1 does not fire there).
+                // (`win_active` rises here, a case that otherwise falls to arm
+                // 7's `!win_active` / `m == 0` compensation), so arm D1 fires
+                // with the steady 259 and the read under-holds. Give it the
+                // cross-line 263 exit, matching arm 7's polled extend
+                // (`late_wy_10to0_ly1_1`, `FFto0/FFto1/FFto2_ly2_scx*_1`, want
+                // extend). This correction only fires for the seam lines this
+                // render's over-trigger hits; elsewhere the render never
+                // triggers the seam, so arm D1 does not fire there.
                 let base = if self.wy_xline_trig { 263 } else { 259 };
                 fold(&mut exit, 2 * (base + scx7));
             } else if self.render.n_sprites == 0 {
@@ -184,7 +185,8 @@ impl Ppu {
         let abd = self.render.win_predraw_abort_dot;
         // Extend once the clear lands within 3 dots of the WX match (the
         // first tile has shipped) — 4 on the eager cc+0 read frame, which records
-        // `abd` an M-cycle before the tier2 cc+4 read the +3 targets (`wx11_2`
+        // `abd` one M-cycle earlier than a cc+4 read would, so the threshold is
+        // 4 where a cc+4 read would use 3 (`wx11_2`
         // abd106 EXTEND vs `_1` abd102 BARE). EXCEPT a low-WX window whose
         // SCX fine-scroll pushes the fetch well past the match: there a clear
         // BEFORE the match (`abd < wxm`) definitively kills it → bare
@@ -456,12 +458,12 @@ impl Ppu {
         // bare iff `reen + K > wx_match + SCX&7` (the fine-scroll delays the
         // redraw start, so a higher-SCX re-enable at the same dot still
         // catches the tile); K = 4 on the eager cc+0 read frame, which records
-        // `win_reenable_dot` one M-cycle before the tier2 cc+4 read the +3 was
-        // calibrated against (`late_reenable_2` eager reen 94 vs tier2 95 —
+        // `win_reenable_dot` one M-cycle earlier than the frame the CGB arm's
+        // +3 above was calibrated against (`late_reenable_2` reen 94 —
         // mirroring the arm-D3 +4). `late_reenable_2` reen 94 /
         // match 97 / scx0 → bare (94+4 > 97); `scx2_2` reen 94 / scx2 → extend
-        // (98 ≯ 99); `wx0f_2` reen 102 / match 105 → bare. Tier2 keeps +3 (CGB
-        // arm-5 above is SCX-flat, scx ≤ 3 — the ±1 fetch phase again.)
+        // (98 ≯ 99); `wx0f_2` reen 102 / match 105 → bare. The CGB arm above
+        // keeps +3 — it is SCX-flat there (scx ≤ 3), the ±1 fetch phase again.
         if !self.model.is_cgb()
             && !self.ds
             && self.render.win_reenable_dot != 0
@@ -660,7 +662,7 @@ impl Ppu {
                 // — so it reaches the render's fine-scroll hunt (`render.rs`
                 // ~dot 89) BEFORE the hunt latches and the render over-discards
                 // the NEW fine-scroll, flipping `eff.scx&7` dots late (258 vs the
-                // production/tier2 254 on `late_scx4_2`: the write's true cc+4
+                // production 254 on `late_scx4_2`: the write's true cc+4
                 // landing is PAST the hunt → the current line keeps the fetch-
                 // start length). The FF43 write-commit debt that would fix this
                 // in the render is REFUTED (`eff.scx` IS the length — it breaks
@@ -713,8 +715,8 @@ impl Ppu {
                     // — and want mode 3, so the split is `read_carried`, NOT the
                     // uniform read-frame bias swept (`ARM8BIAS`, which shifts
                     // both and shuffles). Drop the `+2` only for the eager-DMG
-                    // polled read → tier2 + production byte-identical (both keep
-                    // `+2`), carried reads untouched (`- carry` owns them).
+                    // polled read; every other case still keeps `+2`, carried
+                    // reads untouched (`- carry` owns them).
                     let over = if !self.model.is_cgb() && !self.read_carried {
                         0
                     } else {
@@ -727,7 +729,9 @@ impl Ppu {
         exit
     }
 
-    /// Shadow window-extend predicate (tier2 + CGB only). Fires ONLY
+    /// Shadow window-extend predicate. Drives both DMG and CGB (the
+    /// activation-deadline slack in the final comparison below differs by
+    /// model: CGB +2, DMG −2). Fires ONLY
     /// for the mid-line late-WY trigger that slopgb's discrete `wy_latch`
     /// sampler missed: the WY-trigger ([`Self::wy_trig_sb`]) latched on THIS
     /// line, at/before the WX-activation dot ([`Render::wx_match_dot`]).

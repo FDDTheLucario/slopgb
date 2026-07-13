@@ -18,7 +18,7 @@ impl Interconnect {
         // flip, up to one M-cycle later than the projected flip dot; two rows
         // whose flips differ by <4 dots (an SCX&7 delta) therefore commit — and
         // wake — at the SAME whole-M-cycle boundary, collapsing the wake INSTANT
-        // that tier2's 4k+2 sample resolves. Peek the rise in DOT space
+        // that the 4k+2 sample resolves. Peek the rise in DOT space
         // (`projected_flip_dot() <= dot`, a pure value peek — no machine
         // advance, timer-safe) so the wake lands at the flip's M-cycle boundary
         // and the resumed stream + FF41 read separate by the SCX delta. The

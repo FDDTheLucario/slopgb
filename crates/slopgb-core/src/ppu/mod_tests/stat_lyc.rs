@@ -7,7 +7,7 @@ use super::*;
 /// `-1` ("no line") at line start, latches to the line number a few dots in, and
 /// holds the previous line's value across the first dots of the next line (the
 /// LYC-match tail). Pinned for single speed across DMG / CGB-C / AGB; the field
-/// is computed for the flag-on StatUpdate path (A4), inert flag-off.
+/// is computed for the StatUpdate path (A4).
 #[test]
 fn ly_for_comparison_visible_line_schedule() {
     let mut p = dmg();
@@ -114,13 +114,11 @@ fn ly_for_comparison_line_153_schedule() {
     }
 }
 
-/// S5/A4: the flag-on path drives the SameBoy `GB_STAT_update` rising-edge
-/// engine (`stat_update_tick`) instead of `stat_events_tick`. With only the LYC
+/// S5/A4: the STAT engine drives SameBoy's `GB_STAT_update` rising-edge
+/// model (`stat_update_tick`). With only the LYC
 /// source enabled (LYC=2), the engine raises exactly one STAT IF per frame — on
 /// the rising edge when `ly_for_comparison` reaches 2 — and the held match
-/// across the line-2→3 carryover does not re-fire (STAT blocking). The flag-off
-/// path must agree for this case where both engines fire the same single LYC
-/// interrupt (a net-parity anchor).
+/// across the line-2→3 carryover does not re-fire (STAT blocking).
 #[test]
 fn stat_update_engine_fires_lyc_once_per_frame() {
     let count_lyc_if = || -> u32 {
@@ -138,7 +136,7 @@ fn stat_update_engine_fires_lyc_once_per_frame() {
         }
         fired
     };
-    assert_eq!(count_lyc_if(), 1, "flag-on: one LYC=2 STAT IF per frame");
+    assert_eq!(count_lyc_if(), 1, "one LYC=2 STAT IF per frame");
 }
 
 #[test]
@@ -252,13 +250,12 @@ fn lyc_compare_invalid_first_4_dots_of_line() {
 }
 
 /// Port Stage A11 — an FF41 write that enables a source whose condition is
-/// already met fires the STAT IF exactly ONCE on the flag-on path. SameBoy
+/// already met fires the STAT IF exactly ONCE. SameBoy
 /// computes the write-fire through `GB_STAT_update` (the rising-edge engine)
-/// after `write_stat` (`display.c`); the flag-on path must do the same instead
+/// after `write_stat` (`display.c`); this must do the same instead
 /// of *also* running the gambatte `stat_write_trigger`, which would double-fire
 /// (once on the write, again on the next dot-clocked `stat_update_tick` rising
-/// edge re-seeing the new enable). Flag-off keeps the gambatte write-trigger and
-/// fires once (its dot-clocked `stat_events_tick` LYC event already passed). The
+/// edge re-seeing the new enable). The
 /// double-fire is read-frame-independent, so this banks standalone.
 #[test]
 fn ff41_enable_lyc_fires_once() {
@@ -279,15 +276,15 @@ fn ff41_enable_lyc_fires_once() {
     assert_eq!(
         count(),
         1,
-        "flag-on: one IF (the rising-edge engine, no write-trigger double-fire)"
+        "one IF (the rising-edge engine, no write-trigger double-fire)"
     );
 }
 
 /// Port Stage A12 — an FF45 (LYC) write that creates a match fires the STAT IF
-/// exactly ONCE on the flag-on path, the FF45 analogue of A11. `write_lyc_*`
+/// exactly ONCE, the FF45 analogue of A11. `write_lyc_*`
 /// fires the gambatte LYC-write trigger; without A12 the dot-clocked
 /// `stat_update_tick` then re-sees `lyc_interrupt_line` rise next tick and
-/// double-fires (flag-off fires 1, flag-on fired 2). The fix re-derives
+/// double-fires. The fix re-derives
 /// `lyc_interrupt_line` for the new LYC and re-syncs the `StatUpdate` line when
 /// the write-trigger fired, so the next tick sees no fresh rise.
 #[test]
@@ -309,7 +306,7 @@ fn ff45_match_fires_once() {
     assert_eq!(
         count(),
         1,
-        "flag-on: one IF (write-trigger fires; A12 blocks the StatUpdate re-fire)"
+        "one IF (write-trigger fires; A12 blocks the StatUpdate re-fire)"
     );
 }
 
@@ -367,7 +364,7 @@ fn lyc_latch_holds_across_line_start_carryover() {
 /// FF40 LCD-enable that raises the STAT line (LYC source pre-enabled, LY=0=LYC
 /// matches on the glitch line) fires the STAT IF exactly ONCE on BOTH paths,
 /// with NO fix needed (unlike FF41/FF45). `write_lcdc`'s enable path runs
-/// `legacy_level_edge` (the gambatte STAT edge), but the flag-on dot-clocked
+/// `legacy_level_edge` (the gambatte STAT edge), but the dot-clocked
 /// `stat_update_tick` does NOT double-fire it: the rise lands on the glitch
 /// line, where the engine's LYC input is inert (`ly_for_comparison` returns
 /// -1, so the LYC latch never re-sees the match) — and the disable path is a
@@ -390,7 +387,7 @@ fn ff40_enable_lyc_match_fires_once() {
         }
         fires
     };
-    assert_eq!(count(), 1, "flag-on: one IF (no StatUpdate double-fire)");
+    assert_eq!(count(), 1, "one IF (no StatUpdate double-fire)");
 }
 
 #[test]

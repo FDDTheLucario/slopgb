@@ -564,17 +564,20 @@ pub struct Ppu {
     flip_dot: u16,
     /// The CPU-visible STAT mode→0 boundary back-dated to
     /// SameBoy's cycle-exact frame, **decoupled from the IRQ-dispatch flip**
-    /// (`line_render_done`/`m0_src`). This rises 3 dots *before*
-    /// `line_render_done` on bare single-speed lines,
-    /// so `vis_mode` reads 0 at SameBoy's `ModeTimeline::visible_mode0_dot`
-    /// (our-line dot 251 = 254 − 3) while the dispatch stays at our dot 254 —
-    /// the instrumented separator of the kernel pair (`m2int_m3stat_1` read at
+    /// (`line_render_done`/`m0_src`). This rises before
+    /// `line_render_done` on single-speed lines only — 3 dots early on a bare
+    /// line (`r.fetched == 0 && !win_active && !glitch`), 4 on a sprite/
+    /// window/glitch line — so `vis_mode` reads 0 at SameBoy's
+    /// `ModeTimeline::visible_mode0_dot` (our-line dot 251 = 254 − 3 on the
+    /// bare regime) while the dispatch stays at our dot 254 — the
+    /// instrumented separator of the kernel pair (`m2int_m3stat_1` read at
     /// our dot 248 stays mode 3, `m0int_m3stat_2` at dot 252 reads mode 0).
-    /// Gated to
-    /// **bare single-speed** lines (`r.fetched == 0 && !win_active && !glitch &&
-    /// !ds`), the regime the +3 back-date was measured on; the sprite/window
-    /// (+2 DMG) and double-speed (+4) back-dates are derived-but-unmeasured and
-    /// stay on `line_render_done` for now. LIVE and load-bearing: `vis_mode`
+    /// Double-speed lines are excluded (`!ds`) and stay on `line_render_done`
+    /// — no back-date there yet. The +4 sprite/window/glitch lead is
+    /// measured and live too: it lifts the gambatte sprite `m3stat_2` reads +
+    /// mooneye `intr_2_mode0_timing_sprites` (window reads neutral; the
+    /// LCD-enable glitch line's +4 is also observationally neutral there).
+    /// LIVE and load-bearing: `vis_mode`
     /// (`stat_irq.rs`) reads this field unconditionally to move the visible
     /// EXIT ahead of the counter-pinned dispatch dot — forcing the set off
     /// changes `golden_fingerprint` (confirmed by probe: the gambatte sprite/

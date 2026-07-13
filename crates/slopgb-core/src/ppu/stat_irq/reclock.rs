@@ -142,10 +142,10 @@ impl Ppu {
         }
         self.eng_mfi_prev = self.mode_for_interrupt;
         // Keep the readable comparison/mode flags + the legacy level current
-        // (FF41 reads, the write-edge baseline) exactly as the flag-off path.
+        // (FF41 reads, the write-edge baseline).
         self.refresh_cmp(true);
         // Drain the one-shot mode-0 event flag the gambatte engine would have
-        // consumed this dot, so it does not leak into a later flag-off tick.
+        // consumed this dot, so it does not leak into a later tick.
         let _ = std::mem::take(&mut self.m0_rise_dot);
         // `lyc_interrupt_line` latch: re-evaluate only when `ly_for_comparison`
         // names a real line; hold across the `-1` gaps (`display.c:534`).
@@ -474,7 +474,7 @@ impl Ppu {
         }
     }
 
-    /// The vblank-entry OAM (mode-2) STAT pulse the flag-on
+    /// The vblank-entry OAM (mode-2) STAT pulse the
     /// rising-edge [`Self::stat_update_tick`] engine does not emit.
     ///
     /// In vblank [`Self::update_mode_for_interrupt`] mirrors [`Self::vis_mode`]
@@ -500,7 +500,7 @@ impl Ppu {
         // `vblank_stat_intr-GS` observes it together with the vblank IF; the CGB
         // 144 entry is exempt and is visible in its own cycle
         // (`vblank_stat_intr-C`). Same `!glitch_line` + `m2_pulse_fires` guards
-        // as the flag-off line-start pulse (the previous line's held LYC compare
+        // as the rising-edge line-start pulse (the previous line's held LYC compare
         // blocks it; a glitched LCD-enable line runs no OAM scan, no pulse).
         if !self.glitch_line
             && self.line == 144
@@ -560,7 +560,7 @@ impl Ppu {
         // yet was low before, so the mode source IS what just rose — it cannot be
         // a "LYC-only" rise (a held-high mode source would have made the previous
         // dot high → not an edge). A pure-LYC rise lands where `mfi` is NONE/1/3
-        // (no branch). `stat_lyc_onoff` exercises this flag-on.
+        // (no branch). `stat_lyc_onoff` exercises this.
         if mfi == 2 && self.eng_stat & STAT_SRC_OAM != 0 {
             // Mode-2 (OAM) line-start pulse. Lines 1-143 carry it across the
             // line-start window (the halt-exit sampler misses the rise for one
@@ -591,7 +591,7 @@ impl Ppu {
     }
 
     /// Test view of the [`StatUpdate`](crate::stat_update) interrupt-line
-    /// level (the flag-on engine's `stat_interrupt_line`).
+    /// level (the STAT engine's `stat_interrupt_line`).
     #[cfg(test)]
     pub(crate) fn stat_update_line(&self) -> bool {
         self.stat_update.line()
@@ -634,7 +634,7 @@ impl Ppu {
             // or mode 3) elsewhere.
             //
             // SINGLE SPEED only (`!ds`): the recovered slice is the single-speed
-            // `enable_display/ly0_m0irq_trigger` (+2 flag-on, SameBoy-confirmed
+            // `enable_display/ly0_m0irq_trigger` (+2, SameBoy-confirmed
             // out0).
             if !self.ds {
                 // The SS glitch-line mode-0 IRQ dispatch. The IRQ side keys on
@@ -774,8 +774,8 @@ impl Ppu {
     /// the line-153 GB_SLEEP offsets — deferred to the DS unification; the DS
     /// branch below uses the single-speed dot grid as a documented placeholder
     /// (inert, so it changes no observable behaviour until the flip recalibrates
-    /// it). The LCD-enable glitch line returns `-1` (its LY/LYC view is the live
-    /// flag-off path's concern, `lcdon_*` tables).
+    /// it). The LCD-enable glitch line returns `-1` (its LY/LYC view is handled
+    /// elsewhere, `lcdon_*` tables).
     pub(super) fn ly_for_comparison(&self) -> i16 {
         self.ly_for_comparison_at(self.line, self.dot)
     }
