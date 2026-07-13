@@ -247,6 +247,44 @@ impl Interconnect {
         self.cdl.as_deref()
     }
 
+    /// Every maximal **continuous** span of logged (non-`.`) CPU addresses, one
+    /// [`CdlRange`] per span. The inverse of [`Self::cdl_flag_banked`]: it walks
+    /// the physical buffer region by region and bank by bank (within one bank
+    /// CPU addresses are contiguous, so a run of set bytes is one range),
+    /// canonicalising each physical byte to its `(bank, CPU address)`. A range
+    /// never crosses a region/bank boundary — exactly where the address form /
+    /// bank prefix changes. Empty when the log is off. Read-only, golden-safe.
+    #[must_use]
+    pub fn cdl_logged_ranges(&self) -> Vec<CdlRange> {
+        let Some(buf) = &self.cdl else {
+            return Vec::new();
+        };
+        let l = self.cdl_layout();
+        let mut out = Vec::new();
+        // ROM: bank 0 → 0x0000-0x3FFF (bare), banks 1.. → 0x4000-0x7FFF.
+        for (bank, base) in (0..).zip((l.rom..l.vram).step_by(ROM_BANK)) {
+            let cpu_start = if bank == 0 { 0x0000 } else { 0x4000 };
+            push_runs(buf, base, ROM_BANK, cpu_start, bank, &mut out);
+        }
+        // VRAM: both CGB banks → 0x8000-0x9FFF.
+        for (bank, base) in (0..).zip((l.vram..l.sram).step_by(VRAM_BANK)) {
+            push_runs(buf, base, VRAM_BANK, 0x8000, bank, &mut out);
+        }
+        // SRAM: banks → 0xA000-0xBFFF.
+        for (bank, base) in (0..).zip((l.sram..l.wram).step_by(SRAM_BANK)) {
+            push_runs(buf, base, SRAM_BANK, 0xA000, bank, &mut out);
+        }
+        // WRAM: bank 0 → 0xC000-0xCFFF (bare), banks 1.. → 0xD000-0xDFFF.
+        let wram_end = l.wram + self.wram.len();
+        for (bank, base) in (0..).zip((l.wram..wram_end).step_by(WRAM_BANK)) {
+            let cpu_start = if bank == 0 { 0xC000 } else { 0xD000 };
+            push_runs(buf, base, WRAM_BANK, cpu_start, bank, &mut out);
+        }
+        // Tail: 0xFE00-0xFFFF (OAM/IO/HRAM/IE), unbanked.
+        push_runs(buf, wram_end, CDL_TAIL_LEN, 0xFE00, 0, &mut out);
+        out
+    }
+
     /// Zero the CDL flags without disabling logging (bgb's "clear buffer").
     pub fn cdl_clear(&mut self) {
         if let Some(b) = &mut self.cdl {
@@ -312,6 +350,44 @@ const CDL_VRAM_LEN: usize = 0x4000;
 /// Tail slice covering `0xFE00-0xFFFF` (OAM/unusable/IO/HRAM/IE), unbanked —
 /// keeps HRAM-executed code (OAM-DMA wait loops) tinted.
 const CDL_TAIL_LEN: usize = 0x200;
+/// Physical per-bank slice sizes, one CPU window each (the units the CDL layout
+/// and [`Interconnect::cdl_logged_ranges`] step by).
+const ROM_BANK: usize = 0x4000;
+const VRAM_BANK: usize = 0x2000;
+const SRAM_BANK: usize = 0x2000;
+const WRAM_BANK: usize = 0x1000;
+
+/// One continuous span of logged CPU addresses, inclusive `[start, end]`, all in
+/// bank `bank` (meaningful only for the banked regions; 0 elsewhere). Produced by
+/// [`Interconnect::cdl_logged_ranges`] for the MCP/debug `cdl-ranges` tool.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CdlRange {
+    pub bank: u16,
+    pub start: u16,
+    pub end: u16,
+}
+
+/// Append every maximal run of non-zero bytes in `buf[base..base+span]` as a
+/// [`CdlRange`], mapping physical offset `o` to CPU address `cpu_start + o`
+/// (contiguous within one bank). A `.` (zero) gap splits a run.
+fn push_runs(buf: &[u8], base: usize, span: usize, cpu_start: u16, bank: u16, out: &mut Vec<CdlRange>) {
+    let mut run_start: Option<u16> = None;
+    for o in 0..span {
+        let cpu = cpu_start + o as u16;
+        let set = buf.get(base + o).is_some_and(|&f| f != 0);
+        match (set, run_start) {
+            (true, None) => run_start = Some(cpu),
+            (false, Some(start)) => {
+                out.push(CdlRange { bank, start, end: cpu - 1 });
+                run_start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(start) = run_start {
+        out.push(CdlRange { bank, start, end: cpu_start + (span as u16 - 1) });
+    }
+}
 
 /// Cumulative base offsets of the physical CDL regions plus the total buffer
 /// size (see [`Interconnect::cdl_layout`]).

@@ -26,6 +26,7 @@ pub enum Call {
     Disassemble { from: String, to: String },
     Peek { from: String, to: String },
     Cdl { from: String, to: String },
+    CdlRanges,
     Vram { view: String },
     Screencap,
     Breakpoint { addr: String },
@@ -59,6 +60,7 @@ pub fn dispatch(
                 cdl_word(gb.cdl_flag_banked(bank, addr))
             })))
         }
+        Call::CdlRanges => Ok(ToolResult::Text(cdl_ranges(gb))),
         Call::Vram { view } => {
             let bmp = vram::capture(gb, view)?;
             Ok(ToolResult::Image(png::encode(&bmp.px, bmp.w, bmp.h)))
@@ -134,6 +136,21 @@ fn dump_rows(from: Addr, to: Addr, cell: impl Fn(u16, u16) -> String) -> String 
             break;
         }
         row = row.wrapping_add(16);
+    }
+    out
+}
+
+/// List every continuous span the CDL has logged, one range per line in the
+/// tools' address form: `BB:AAAA-BB:AAAA` for the banked regions (bank on both
+/// ends), bare `AAAA-AAAA` elsewhere. Empty when the log is off / nothing logged.
+fn cdl_ranges(gb: &GameBoy) -> String {
+    let mut out = String::new();
+    for r in gb.cdl_logged_ranges() {
+        if addr::Region::of(r.start).banked() {
+            let _ = writeln!(out, "{:02x}:{:04x}-{:02x}:{:04x}", r.bank, r.start, r.bank, r.end);
+        } else {
+            let _ = writeln!(out, "{:04x}-{:04x}", r.start, r.end);
+        }
     }
     out
 }

@@ -289,6 +289,61 @@ fn cdl_logging_does_not_perturb_emulation() {
 }
 
 #[test]
+fn cdl_logged_ranges_off_is_empty() {
+    let gb = GameBoy::new(Model::Dmg, rom_with_cgb_flag(0x00)).unwrap();
+    assert!(gb.cdl_logged_ranges().is_empty(), "log off → no ranges");
+}
+
+#[test]
+fn cdl_logged_ranges_span_every_region_and_bank() {
+    // mbc1_ram_rom: 4 ROM banks (rom=0x10000), 2 VRAM banks (0x4000), 4 RAM
+    // banks (sram base 0x14000), then WRAM (2 banks, 0x2000) + tail (0x200).
+    let mut gb = GameBoy::new(Model::Dmg, mbc1_ram_rom()).unwrap();
+    gb.set_cdl(true);
+    let mut fx = vec![0u8; gb.cdl_flags().unwrap().len()];
+    let rom = 0x10000;
+    let sram = rom + 0x4000;
+    let wram = sram + 0x8000;
+    let tail = wram + 0x2000;
+    // ROM0 (bare): two disjoint runs — a `.` gap at 0x0104 splits them.
+    fx[0x0100..=0x0103].fill(4);
+    fx[0x0105..=0x0106].fill(1);
+    // ROMX bank 1 @ 0x6000-0x6001, and a single byte in bank 2 @ 0x4001.
+    fx[rom - 0x10000 + 0x4000 + 0x2000] = 1; // bank1, 0x6000
+    fx[0x4000 + 0x2001] = 2; // bank1, 0x6001
+    fx[2 * 0x4000 + 0x0001] = 4; // bank2, 0x4001 (single byte)
+    // SRAM bank 2 @ 0xA000 (single byte).
+    fx[sram + 2 * 0x2000] = 2;
+    // WRAM0 (bare) 0xC000-0xC010, WRAMX bank 1 0xD000-0xD210.
+    fx[wram..=wram + 0x10].fill(1);
+    fx[wram + 0x1000..=wram + 0x1000 + 0x210].fill(4);
+    // Tail (bare) single byte at 0xFF80.
+    fx[tail + (0xFF80 - 0xFE00)] = 4;
+    assert!(gb.load_cdl(&fx));
+
+    let mk = |bank, start, end| CdlRange { bank, start, end };
+    assert_eq!(
+        gb.cdl_logged_ranges(),
+        vec![
+            mk(0, 0x0100, 0x0103),
+            mk(0, 0x0105, 0x0106),
+            mk(1, 0x6000, 0x6001),
+            mk(2, 0x4001, 0x4001),
+            mk(2, 0xA000, 0xA000),
+            mk(0, 0xC000, 0xC010),
+            mk(1, 0xD000, 0xD210),
+            mk(0, 0xFF80, 0xFF80),
+        ],
+        "one range per continuous span, region/bank order"
+    );
+    // Each reported range's endpoints read back set through cdl_flag_banked.
+    for r in gb.cdl_logged_ranges() {
+        assert_ne!(gb.cdl_flag_banked(r.bank, r.start), 0);
+        assert_ne!(gb.cdl_flag_banked(r.bank, r.end), 0);
+    }
+}
+
+#[test]
 fn cdl_defaults_off_toggles_and_survives_a_state_load() {
     let mut gb = GameBoy::new(Model::Dmg, rom_with_cgb_flag(0x00)).unwrap();
     assert_eq!(gb.cdl_flag(0x0100), 0, "off: flag reads 0");

@@ -48,6 +48,7 @@ pub use cartridge::GgPatch;
 pub use cartridge::Cartridge;
 #[doc(hidden)]
 pub use cpu::{Bus, Cpu};
+pub use interconnect::CdlRange;
 #[doc(hidden)]
 pub use interconnect::Interconnect;
 

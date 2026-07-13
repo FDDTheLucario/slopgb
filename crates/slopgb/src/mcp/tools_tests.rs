@@ -128,6 +128,26 @@ fn cdl_words_reflect_flags() {
 }
 
 #[test]
+fn cdl_ranges_lists_continuous_spans_in_address_form() {
+    let mut gb = GameBoy::new(Model::Dmg, rom_at_0100(&[0xAF])).unwrap();
+    let syms = SymbolTable::default();
+    let mut bps = Breakpoints::default();
+    // Off → nothing logged → empty output.
+    assert_eq!(call_text(&Call::CdlRanges, &gb, &mut bps, &syms), "");
+    // 32 KiB no-RAM DMG layout: rom [0,0x8000), vram [0x8000,0xC000),
+    // wram [0xC000,0xE000) (bank0 @ 0xC000, bank1 @ 0xD000).
+    gb.set_cdl(true);
+    let mut fx = vec![0u8; gb.cdl_flags().unwrap().len()];
+    fx[0x0100..=0x0102].fill(4); // ROM0 (bare) 0100-0102
+    fx[0xC000 + 0x1000 + 5] = 1; // WRAMX bank1 @ 0xD005 (single byte, banked form)
+    assert!(gb.load_cdl(&fx));
+    assert_eq!(
+        call_text(&Call::CdlRanges, &gb, &mut bps, &syms),
+        "0100-0102\n01:d005-01:d005\n"
+    );
+}
+
+#[test]
 fn registers_has_every_field() {
     let gb = GameBoy::new(Model::Dmg, rom_at_0100(&[0x00])).unwrap();
     let syms = SymbolTable::default();

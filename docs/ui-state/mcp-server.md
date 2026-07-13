@@ -24,6 +24,7 @@ The server binds `127.0.0.1` only (never `0.0.0.0`) — localhost, not the netwo
 | `disassemble` | `from`, `to` | `BB:AAAA<tab>label<tab>instruction<tab>cycles` per row (empty label → two tabs, bare cycle count). Symbol names substituted into branch/call operands. |
 | `peek` | `from`, `to` | 16 hex bytes/row, `BB:AAAA<tab>…` |
 | `cdl` | `from`, `to` | like `peek`, each byte → an `r`/`w`/`x` access word or `.` |
+| `cdl-ranges` | — | the continuous address ranges the CDL has logged (non-`.`), one `AAAA-AAAA` / `BB:AAAA-BB:AAAA` per line; empty when off / nothing logged |
 | `vram` | `view` (`bg`\|`win`\|`tile0`\|`tile1`\|`oam`\|`palette`) | a PNG (`image/png` content); `bg`/`win` game-paletted, Tiles grey-ramp |
 | `screencap` | — | the current 160×144 screen (`gb.frame()`) as a PNG — cross-reference against `vram *` |
 | `breakpoint` | `address` | sets a PC breakpoint (the only mutating tool) |

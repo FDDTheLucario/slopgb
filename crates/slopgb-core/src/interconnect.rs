@@ -44,6 +44,8 @@ mod tick;
 // as unqualified names.
 use phase::*;
 
+pub use debug::CdlRange;
+
 /// The five implemented interrupt sources: IF/IE bits 0-4 (VBlank, STAT,
 /// timer, serial, joypad). Bits 5-7 of FF0F/FFFF are unmapped (Pan Docs
 /// "Interrupts").

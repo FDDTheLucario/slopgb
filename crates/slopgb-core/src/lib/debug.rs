@@ -136,6 +136,15 @@ impl GameBoy {
         self.bus.cdl_flags()
     }
 
+    /// Every continuous span of logged (non-`.`) CPU addresses, one
+    /// [`CdlRange`](crate::CdlRange) per span (bank-tagged for the banked
+    /// regions). Empty when the log is off. For the MCP/debug `cdl-ranges` tool.
+    /// Read-only, golden-safe.
+    #[must_use]
+    pub fn cdl_logged_ranges(&self) -> Vec<crate::CdlRange> {
+        self.bus.cdl_logged_ranges()
+    }
+
     /// Zero the CDL flags without disabling logging.
     pub fn cdl_clear(&mut self) {
         self.bus.cdl_clear();

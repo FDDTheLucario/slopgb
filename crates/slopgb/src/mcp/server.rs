@@ -423,6 +423,7 @@ fn build_call(name: &str, args: Option<&Json>) -> Result<Call, String> {
             from: arg("from")?,
             to: arg("to")?,
         }),
+        "cdl-ranges" => Ok(Call::CdlRanges),
         "vram" => Ok(Call::Vram { view: arg("view")? }),
         "screencap" => Ok(Call::Screencap),
         "breakpoint" => Ok(Call::Breakpoint {
@@ -518,6 +519,12 @@ fn tool_defs() -> Json {
             "cdl",
             "Dump code/data-log access (r/w/x per byte, `.` if none), 16 per row.",
             range,
+        ),
+        tool(
+            "cdl-ranges",
+            "List the continuous address ranges the code/data log has recorded \
+             so far (non-`.`), one `AAAA-AAAA` / `BB:AAAA-BB:AAAA` range per line.",
+            &[],
         ),
         tool(
             "vram",
