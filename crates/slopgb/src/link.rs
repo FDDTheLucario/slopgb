@@ -21,10 +21,12 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
-use std::thread::{self, JoinHandle};
+use std::thread;
 use std::time::Duration;
 
 use slopgb_core::GameBoy;
+
+use crate::net_worker::ReapedWorker;
 
 /// bgb's default link port.
 pub const DEFAULT_PORT: u16 = 8765;
@@ -145,13 +147,11 @@ pub struct LinkSocket {
     out_tx: Sender<Packet>,
     in_rx: Receiver<Packet>,
     connected: Arc<AtomicBool>,
-    stop: Arc<AtomicBool>,
-    /// Set by the worker on every exit path. Lets the UI reap a socket whose
-    /// thread died *without* ever connecting (dial/accept failed, or a peer
-    /// connected then closed between two pumps) — which the connected-edge
-    /// teardown alone can't see.
-    finished: Arc<AtomicBool>,
-    handle: Option<JoinHandle<()>>,
+    /// The socket-thread stop/finished/join machinery. `is_finished` lets the
+    /// UI reap a socket whose thread died *without* ever connecting
+    /// (dial/accept failed, or a peer connected then closed between two
+    /// pumps) — which the connected-edge teardown alone can't see.
+    worker: ReapedWorker,
     /// The bound (listen) or target (connect) port — shown by the UI.
     port: u16,
 }
@@ -198,34 +198,16 @@ impl LinkSocket {
         // it without limit; outbound is unbounded so the UI never blocks on send.
         let (in_tx, in_rx) = mpsc::sync_channel::<Packet>(IN_QUEUE_CAP);
         let connected = Arc::new(AtomicBool::new(false));
-        let stop = Arc::new(AtomicBool::new(false));
-        let finished = Arc::new(AtomicBool::new(false));
-        let (tc, ts, tf) = (
-            Arc::clone(&connected),
-            Arc::clone(&stop),
-            Arc::clone(&finished),
-        );
-        let handle = thread::spawn(move || {
-            // A drop guard marks the worker finished on *every* exit — normal
-            // return OR a panic unwind — so a panicked worker is still reapable
-            // (the UI can't otherwise see it died). The thread sets `connected`
-            // false on its own exit paths, so reap only needs `finished`.
-            struct FinishGuard(Arc<AtomicBool>);
-            impl Drop for FinishGuard {
-                fn drop(&mut self) {
-                    self.0.store(true, Ordering::Relaxed);
-                }
-            }
-            let _guard = FinishGuard(tf);
-            body(tc, ts, out_rx, in_tx);
-        });
+        let tc = Arc::clone(&connected);
+        // The thread sets `connected` false on its own exit paths, so reaping a
+        // worker that died without ever connecting only needs `is_finished`
+        // (ReapedWorker's drop-guard covers a panic unwind too).
+        let worker = ReapedWorker::spawn(move |stop| body(tc, stop, out_rx, in_tx));
         Self {
             out_tx,
             in_rx,
             connected,
-            stop,
-            finished,
-            handle: Some(handle),
+            worker,
             port: 0,
         }
     }
@@ -245,7 +227,7 @@ impl LinkSocket {
     /// Whether the worker thread has exited (success or failure).
     #[must_use]
     pub fn is_finished(&self) -> bool {
-        self.finished.load(Ordering::Relaxed)
+        self.worker.is_finished()
     }
 
     /// Non-blocking: the next packet the peer sent, if any.
@@ -264,15 +246,6 @@ impl LinkSocket {
     /// Queue a packet for the socket thread to write (never blocks the UI).
     pub fn send(&self, p: Packet) {
         let _ = self.out_tx.send(p);
-    }
-}
-
-impl Drop for LinkSocket {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        if let Some(h) = self.handle.take() {
-            let _ = h.join();
-        }
     }
 }
 

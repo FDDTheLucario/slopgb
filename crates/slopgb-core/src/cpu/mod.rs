@@ -123,8 +123,14 @@ pub trait Bus {
     /// the opcode-fetch M-cycle before `GB_cpu_run`'s interrupt check reads
     /// IF, so a rise landing INSIDE the fetch M-cycle still dispatches at
     /// that boundary; the deferred leading-edge `pending()` view is one
-    /// M-cycle stale there. The default (non-interconnect buses) keeps
-    /// `pending()`; the interconnect overrides it.
+    /// M-cycle stale there. The interconnect is already flushed to the
+    /// boundary by this point (the previous step's `flush_pending`), so this
+    /// default's plain `pending()` sees every rise before it — the SameBoy
+    /// view — and needs no interconnect override: only the m0-rise
+    /// visibility deadline (the same frame offset the halt samples consult)
+    /// would apply on top, and a flush here was measured to shift the
+    /// deferred operand frame of every following instruction (8 pins broken)
+    /// and is NOT SameBoy's semantics.
     fn pending_dispatch(&mut self) -> u8 {
         self.pending()
     }

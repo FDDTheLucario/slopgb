@@ -44,6 +44,24 @@ impl Writer {
             self.u32(v);
         }
     }
+    /// Write an `Option<T>` as a presence byte, followed (if `Some`) by the
+    /// payload written by `write_payload` — the one canonical shape for every
+    /// optional staged-event/scratch field across the save-state format
+    /// (replaces the several near-identical `write_opt*` helpers that used to
+    /// be hand-duplicated per payload shape in each module).
+    pub(crate) fn write_opt<T>(
+        &mut self,
+        o: &Option<T>,
+        write_payload: impl FnOnce(&mut Self, &T),
+    ) {
+        match o {
+            Some(v) => {
+                self.bool(true);
+                write_payload(self, v);
+            }
+            None => self.bool(false),
+        }
+    }
     pub(crate) fn into_vec(self) -> Vec<u8> {
         self.buf
     }
@@ -104,6 +122,18 @@ impl<'a> Reader<'a> {
             *d = self.u32()?;
         }
         Ok(())
+    }
+    /// Read an `Option<T>` written by [`Writer::write_opt`]: a presence byte,
+    /// then (if set) the payload read by `read_payload`.
+    pub(crate) fn read_opt<T>(
+        &mut self,
+        read_payload: impl FnOnce(&mut Self) -> Result<T, StateError>,
+    ) -> Result<Option<T>, StateError> {
+        Ok(if self.bool()? {
+            Some(read_payload(self)?)
+        } else {
+            None
+        })
     }
 }
 

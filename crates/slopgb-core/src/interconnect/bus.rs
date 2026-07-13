@@ -240,10 +240,6 @@ impl Bus for Interconnect {
         self.halt_entry_rewind_impl()
     }
 
-    fn pending_dispatch(&mut self) -> u8 {
-        self.dispatch_pending_impl()
-    }
-
     fn flush_pending(&mut self) {
         // Instruction boundary: drain the deferred-commit clock's parked debt
         // (SameBoy `flush_pending_cycles`), keeping `clock.now()` exact at

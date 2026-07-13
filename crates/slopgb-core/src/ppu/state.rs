@@ -12,93 +12,6 @@
 use super::*;
 use crate::state::{Reader, StateError, Writer};
 
-/// A `Option<(u8, u8)>` staged-event slot (presence byte + payload).
-fn write_opt2(w: &mut Writer, o: Option<(u8, u8)>) {
-    match o {
-        Some((a, b)) => {
-            w.bool(true);
-            w.u8(a);
-            w.u8(b);
-        }
-        None => w.bool(false),
-    }
-}
-fn read_opt2(r: &mut Reader<'_>) -> Result<Option<(u8, u8)>, StateError> {
-    Ok(if r.bool()? {
-        Some((r.u8()?, r.u8()?))
-    } else {
-        None
-    })
-}
-
-/// A `Option<(u8, u16)>` staged-event slot (presence byte + payload).
-fn write_opt_u8_u16(w: &mut Writer, o: Option<(u8, u16)>) {
-    match o {
-        Some((a, b)) => {
-            w.bool(true);
-            w.u8(a);
-            w.u16(b);
-        }
-        None => w.bool(false),
-    }
-}
-fn read_opt_u8_u16(r: &mut Reader<'_>) -> Result<Option<(u8, u16)>, StateError> {
-    Ok(if r.bool()? {
-        Some((r.u8()?, r.u16()?))
-    } else {
-        None
-    })
-}
-
-/// An `Option<EngStatPending>` staged-event slot (presence byte + payload).
-/// Field order below is the on-disk layout — keep it stable.
-fn write_opt_eng_stat_pending(w: &mut Writer, o: Option<EngStatPending>) {
-    match o {
-        Some(EngStatPending {
-            phase1,
-            fin,
-            pre_high,
-            mfi_t0,
-            k,
-        }) => {
-            w.bool(true);
-            w.u8(phase1);
-            w.u8(fin);
-            w.bool(pre_high);
-            w.u8(mfi_t0);
-            w.u8(k);
-        }
-        None => w.bool(false),
-    }
-}
-fn read_opt_eng_stat_pending(r: &mut Reader<'_>) -> Result<Option<EngStatPending>, StateError> {
-    Ok(if r.bool()? {
-        Some(EngStatPending {
-            phase1: r.u8()?,
-            fin: r.u8()?,
-            pre_high: r.bool()?,
-            mfi_t0: r.u8()?,
-            k: r.u8()?,
-        })
-    } else {
-        None
-    })
-}
-
-/// An `Option<i8>` slot (presence byte + payload, bit-cast through `u8`).
-fn write_opt_i8(w: &mut Writer, o: Option<i8>) {
-    match o {
-        Some(v) => {
-            w.bool(true);
-            w.u8(v as u8);
-        }
-        None => w.bool(false),
-    }
-}
-fn read_opt_i8(r: &mut Reader<'_>) -> Result<Option<i8>, StateError> {
-    Ok(if r.bool()? { Some(r.u8()? as i8) } else { None })
-}
-
 impl PipeRegs {
     pub(super) fn write_state(&self, w: &mut Writer) {
         w.u8(self.lcdc);
@@ -150,7 +63,13 @@ impl Ppu {
         w.u8(self.lcdc);
         w.u8(self.stat_en);
         w.u8(self.eng_stat);
-        write_opt_eng_stat_pending(w, self.eng_stat_pending);
+        w.write_opt(&self.eng_stat_pending, |w, p| {
+            w.u8(p.phase1);
+            w.u8(p.fin);
+            w.bool(p.pre_high);
+            w.u8(p.mfi_t0);
+            w.u8(p.k);
+        });
         match self.eng_stat_half {
             Some((v, hd)) => {
                 w.bool(true);
@@ -160,7 +79,10 @@ impl Ppu {
             None => w.bool(false),
         }
         w.u8(self.eng_mfi_prev);
-        write_opt_u8_u16(w, self.ff41_ds_drop);
+        w.write_opt(&self.ff41_ds_drop, |w, &(a, b)| {
+            w.u8(a);
+            w.u16(b);
+        });
         w.u8(self.stat_if_squash);
         w.u8(self.ack_squash_ppu_mask);
         w.u8(self.ack_squash_ppu);
@@ -185,7 +107,10 @@ impl Ppu {
         w.bytes(&self.obj_pal_ram);
         w.bytes(&self.vram[..]);
         w.bytes(&self.oam);
-        write_opt2(w, self.dma_freeze);
+        w.write_opt(&self.dma_freeze, |w, &(a, b)| {
+            w.u8(a);
+            w.u8(b);
+        });
         w.bool(self.oam_dma_active);
 
         w.bool(self.enabled);
@@ -217,19 +142,28 @@ impl Ppu {
         self.stat_update.write_state(w);
         w.bool(self.lyc_interrupt_line);
         w.bool(self.m0_rise);
-        write_opt_i8(w, self.m0_access_flip);
-        write_opt_i8(w, self.pal_access_flip);
-        write_opt_i8(w, self.m0_stat_flip);
+        w.write_opt(&self.m0_access_flip, |w, &v| w.u8(v as u8));
+        w.write_opt(&self.pal_access_flip, |w, &v| w.u8(v as u8));
+        w.write_opt(&self.m0_stat_flip, |w, &v| w.u8(v as u8));
         w.u8(self.lyc_if_delay);
         w.u16(self.l153_lyc_write_dot);
         w.u8(self.lyc_event);
         w.bool(self.cmp_irq);
         w.u8(self.stat_ev);
-        write_opt2(w, self.stat_ev_staged);
+        w.write_opt(&self.stat_ev_staged, |w, &(a, b)| {
+            w.u8(a);
+            w.u8(b);
+        });
         w.u8(self.lyc_ev_m);
-        write_opt2(w, self.lyc_ev_m_staged);
+        w.write_opt(&self.lyc_ev_m_staged, |w, &(a, b)| {
+            w.u8(a);
+            w.u8(b);
+        });
         w.u8(self.stat_lyc_ev);
-        write_opt2(w, self.stat_lyc_ev_staged);
+        w.write_opt(&self.stat_lyc_ev_staged, |w, &(a, b)| {
+            w.u8(a);
+            w.u8(b);
+        });
         w.bool(self.render_finished);
         w.bool(self.hdma_lead);
         w.u16(self.pal_open_dot);
@@ -262,7 +196,10 @@ impl Ppu {
             }
             None => w.bool(false),
         }
-        write_opt2(w, self.render_lcdc_pending);
+        w.write_opt(&self.render_lcdc_pending, |w, &(a, b)| {
+            w.u8(a);
+            w.u8(b);
+        });
         self.render.write_state(w);
 
         w.u32_slice(&self.front[..]);
@@ -284,14 +221,22 @@ impl Ppu {
         self.lcdc = r.u8()?;
         self.stat_en = r.u8()?;
         self.eng_stat = r.u8()?;
-        self.eng_stat_pending = read_opt_eng_stat_pending(r)?;
+        self.eng_stat_pending = r.read_opt(|r| {
+            Ok(EngStatPending {
+                phase1: r.u8()?,
+                fin: r.u8()?,
+                pre_high: r.bool()?,
+                mfi_t0: r.u8()?,
+                k: r.u8()?,
+            })
+        })?;
         self.eng_stat_half = if r.bool()? {
             Some((r.u8()?, r.u8()?))
         } else {
             None
         };
         self.eng_mfi_prev = r.u8()?;
-        self.ff41_ds_drop = read_opt_u8_u16(r)?;
+        self.ff41_ds_drop = r.read_opt(|r| Ok((r.u8()?, r.u16()?)))?;
         self.stat_if_squash = r.u8()?;
         self.ack_squash_ppu_mask = r.u8()?;
         self.ack_squash_ppu = r.u8()?;
@@ -319,7 +264,7 @@ impl Ppu {
         r.bytes_into(&mut self.obj_pal_ram)?;
         r.bytes_into(&mut self.vram[..])?;
         r.bytes_into(&mut self.oam)?;
-        self.dma_freeze = read_opt2(r)?;
+        self.dma_freeze = r.read_opt(|r| Ok((r.u8()?, r.u8()?)))?;
         self.oam_dma_active = r.bool()?;
 
         self.enabled = r.bool()?;
@@ -351,19 +296,19 @@ impl Ppu {
         self.stat_update.read_state(r)?;
         self.lyc_interrupt_line = r.bool()?;
         self.m0_rise = r.bool()?;
-        self.m0_access_flip = read_opt_i8(r)?;
-        self.pal_access_flip = read_opt_i8(r)?;
-        self.m0_stat_flip = read_opt_i8(r)?;
+        self.m0_access_flip = r.read_opt(|r| Ok(r.u8()? as i8))?;
+        self.pal_access_flip = r.read_opt(|r| Ok(r.u8()? as i8))?;
+        self.m0_stat_flip = r.read_opt(|r| Ok(r.u8()? as i8))?;
         self.lyc_if_delay = r.u8()?;
         self.l153_lyc_write_dot = r.u16()?;
         self.lyc_event = r.u8()?;
         self.cmp_irq = r.bool()?;
         self.stat_ev = r.u8()?;
-        self.stat_ev_staged = read_opt2(r)?;
+        self.stat_ev_staged = r.read_opt(|r| Ok((r.u8()?, r.u8()?)))?;
         self.lyc_ev_m = r.u8()?;
-        self.lyc_ev_m_staged = read_opt2(r)?;
+        self.lyc_ev_m_staged = r.read_opt(|r| Ok((r.u8()?, r.u8()?)))?;
         self.stat_lyc_ev = r.u8()?;
-        self.stat_lyc_ev_staged = read_opt2(r)?;
+        self.stat_lyc_ev_staged = r.read_opt(|r| Ok((r.u8()?, r.u8()?)))?;
         self.render_finished = r.bool()?;
         self.hdma_lead = r.bool()?;
         self.pal_open_dot = r.u16()?;
@@ -394,7 +339,7 @@ impl Ppu {
         } else {
             None
         };
-        self.render_lcdc_pending = read_opt2(r)?;
+        self.render_lcdc_pending = r.read_opt(|r| Ok((r.u8()?, r.u8()?)))?;
         self.render.read_state(r)?;
 
         r.u32_slice_into(&mut self.front[..])?;

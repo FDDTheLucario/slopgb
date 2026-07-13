@@ -316,9 +316,9 @@ impl SgbView {
         w.bytes(&self.border_raw[..]);
         w.bool(self.has_chr);
         w.bool(self.has_pct);
-        write_opt_box(w, &self.obj_data);
-        write_opt_box(w, &self.sou_trn);
-        write_opt_box(w, &self.data_trn);
+        w.write_opt(&self.obj_data, |w, data| w.bytes(&data[..]));
+        w.write_opt(&self.sou_trn, |w, data| w.bytes(&data[..]));
+        w.write_opt(&self.data_trn, |w, data| w.bytes(&data[..]));
         w.u32(self.data_snd.len() as u32);
         for p in &self.data_snd {
             w.u32(p.len() as u32);
@@ -361,9 +361,21 @@ impl SgbView {
         r.bytes_into(&mut self.border_raw[..])?;
         self.has_chr = r.bool()?;
         self.has_pct = r.bool()?;
-        self.obj_data = read_opt_box(r)?;
-        self.sou_trn = read_opt_box(r)?;
-        self.data_trn = read_opt_box(r)?;
+        self.obj_data = r.read_opt(|r| {
+            let mut b = boxed_u8();
+            r.bytes_into(&mut b[..])?;
+            Ok(b)
+        })?;
+        self.sou_trn = r.read_opt(|r| {
+            let mut b = boxed_u8();
+            r.bytes_into(&mut b[..])?;
+            Ok(b)
+        })?;
+        self.data_trn = r.read_opt(|r| {
+            let mut b = boxed_u8();
+            r.bytes_into(&mut b[..])?;
+            Ok(b)
+        })?;
         let n = r.u32()? as usize;
         self.data_snd = Vec::new();
         for _ in 0..n {
@@ -390,28 +402,6 @@ impl SgbView {
         self.fade = 0;
         self.fade_pending = false;
         Ok(())
-    }
-}
-
-fn write_opt_box<const N: usize>(w: &mut crate::state::Writer, b: &Option<Box<[u8; N]>>) {
-    match b {
-        Some(data) => {
-            w.bool(true);
-            w.bytes(&data[..]);
-        }
-        None => w.bool(false),
-    }
-}
-
-fn read_opt_box<const N: usize>(
-    r: &mut crate::state::Reader<'_>,
-) -> Result<Option<Box<[u8; N]>>, crate::state::StateError> {
-    if r.bool()? {
-        let mut b = boxed_u8::<N>();
-        r.bytes_into(&mut b[..])?;
-        Ok(Some(b))
-    } else {
-        Ok(None)
     }
 }
 

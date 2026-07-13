@@ -372,15 +372,4 @@ impl Interconnect {
         }
         self.pending_halt_entry() != 0
     }
-
-    pub(super) fn dispatch_pending_impl(&mut self) -> u8 {
-        // The running CPU's end-of-fetch dispatch check: the machine
-        // is already flushed to the boundary (the previous step's
-        // `flush_pending`), so `pending()` sees every rise before it — the
-        // SameBoy view. Only the m0-rise visibility deadline (the same frame
-        // offset the halt samples consult) applies on top; a flush here was
-        // measured to shift the deferred operand frame of every following
-        // instruction (8 pins broken) and is NOT SameBoy's semantics.
-        self.pending()
-    }
 }

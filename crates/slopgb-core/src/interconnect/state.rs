@@ -19,36 +19,6 @@
 use super::*;
 use crate::state::{Reader, StateError, Writer};
 
-fn write_opt_u8(w: &mut Writer, o: Option<u8>) {
-    match o {
-        Some(v) => {
-            w.bool(true);
-            w.u8(v);
-        }
-        None => w.bool(false),
-    }
-}
-fn read_opt_u8(r: &mut Reader<'_>) -> Result<Option<u8>, StateError> {
-    Ok(if r.bool()? { Some(r.u8()?) } else { None })
-}
-fn write_opt_u8x2(w: &mut Writer, o: Option<(u8, u8)>) {
-    match o {
-        Some((a, b)) => {
-            w.bool(true);
-            w.u8(a);
-            w.u8(b);
-        }
-        None => w.bool(false),
-    }
-}
-fn read_opt_u8x2(r: &mut Reader<'_>) -> Result<Option<(u8, u8)>, StateError> {
-    Ok(if r.bool()? {
-        Some((r.u8()?, r.u8()?))
-    } else {
-        None
-    })
-}
-
 impl OamDmaRun {
     fn write_state(&self, w: &mut Writer) {
         w.u16(self.src);
@@ -188,9 +158,9 @@ impl Interconnect {
         w.u64(self.stat_vis_from_t);
         w.u8(self.halt_ly_phase);
         w.u8(self.if_stat_late);
-        write_opt_u8(w, self.m0_access_edge);
-        write_opt_u8(w, self.pal_access_edge);
-        write_opt_u8(w, self.stat_mode_edge);
+        w.write_opt(&self.m0_access_edge, |w, &v| w.u8(v));
+        w.write_opt(&self.pal_access_edge, |w, &v| w.u8(v));
+        w.write_opt(&self.stat_mode_edge, |w, &v| w.u8(v));
         w.u8(self.ack_squash_mask);
         w.u8(self.ack_squash_ticks);
         w.u8(self.ack_squash_dots);
@@ -212,7 +182,10 @@ impl Interconnect {
             None => w.bool(false),
         }
         w.bool(self.dma_oam_owned_prev);
-        write_opt_u8x2(w, self.dma_pending_oam);
+        w.write_opt(&self.dma_pending_oam, |w, &(a, b)| {
+            w.u8(a);
+            w.u8(b);
+        });
         w.bool(self.cpu_halted);
         match &self.dma_conflict {
             Some(d) => {
@@ -278,9 +251,9 @@ impl Interconnect {
         self.stat_vis_from_t = r.u64()?;
         self.halt_ly_phase = r.u8()?;
         self.if_stat_late = r.u8()?;
-        self.m0_access_edge = read_opt_u8(r)?;
-        self.pal_access_edge = read_opt_u8(r)?;
-        self.stat_mode_edge = read_opt_u8(r)?;
+        self.m0_access_edge = r.read_opt(Reader::u8)?;
+        self.pal_access_edge = r.read_opt(Reader::u8)?;
+        self.stat_mode_edge = r.read_opt(Reader::u8)?;
         self.ack_squash_mask = r.u8()?;
         self.ack_squash_ticks = r.u8()?;
         self.ack_squash_dots = r.u8()?;
@@ -298,7 +271,7 @@ impl Interconnect {
             None
         };
         self.dma_oam_owned_prev = r.bool()?;
-        self.dma_pending_oam = read_opt_u8x2(r)?;
+        self.dma_pending_oam = r.read_opt(|r| Ok((r.u8()?, r.u8()?)))?;
         self.cpu_halted = r.bool()?;
         self.dma_conflict = if r.bool()? {
             Some(DmaConflict::read_state(r)?)

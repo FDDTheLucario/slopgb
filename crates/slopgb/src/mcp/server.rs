@@ -14,15 +14,15 @@
 
 use std::io::{BufReader, Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
-use std::thread::{self, JoinHandle};
+use std::thread;
 use std::time::Duration;
 
 use super::Job;
 use super::json::Json;
 use super::tools::{Call, ToolResult, parse_scale};
+use crate::net_worker::ReapedWorker;
 
 /// The MCP protocol revision we advertise if the client doesn't ask for one.
 const PROTOCOL_VERSION: &str = "2024-11-05";
@@ -41,9 +41,7 @@ const MAX_HEADERS: usize = 64 << 10;
 /// A running MCP server: the socket thread + its stop/finished flags, reaped on
 /// drop (mirrors `link::LinkSocket`).
 pub struct Server {
-    stop: Arc<AtomicBool>,
-    finished: Arc<AtomicBool>,
-    handle: Option<JoinHandle<()>>,
+    worker: ReapedWorker,
     port: u16,
 }
 
@@ -54,23 +52,9 @@ impl Server {
     pub fn start(port: u16, tx: Sender<Job>) -> std::io::Result<Server> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port))?;
         let bound = listener.local_addr().map_or(port, |a| a.port());
-        let stop = Arc::new(AtomicBool::new(false));
-        let finished = Arc::new(AtomicBool::new(false));
-        let (ts, tf) = (Arc::clone(&stop), Arc::clone(&finished));
-        let handle = thread::spawn(move || {
-            struct FinishGuard(Arc<AtomicBool>);
-            impl Drop for FinishGuard {
-                fn drop(&mut self) {
-                    self.0.store(true, Ordering::Relaxed);
-                }
-            }
-            let _guard = FinishGuard(tf);
-            serve(&listener, &ts, &tx);
-        });
+        let worker = ReapedWorker::spawn(move |stop| serve(&listener, &stop, &tx));
         Ok(Server {
-            stop,
-            finished,
-            handle: Some(handle),
+            worker,
             port: bound,
         })
     }
@@ -84,16 +68,7 @@ impl Server {
     /// Whether the socket thread has exited.
     #[must_use]
     pub fn is_finished(&self) -> bool {
-        self.finished.load(Ordering::Relaxed)
-    }
-}
-
-impl Drop for Server {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        if let Some(h) = self.handle.take() {
-            let _ = h.join();
-        }
+        self.worker.is_finished()
     }
 }
 

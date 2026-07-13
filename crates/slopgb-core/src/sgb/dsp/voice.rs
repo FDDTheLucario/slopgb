@@ -217,10 +217,12 @@ impl Voice {
         let advanced = self.interp_pos as u32 + u32::from(pitch);
         let steps = advanced >> 12;
         self.interp_pos = (advanced & 0x0FFF) as u16;
-        if !self.ended {
-            for _ in 0..steps {
-                self.advance_sample(ram, endx, idx);
-            }
+        // `self.ended` is provably false here: the top of `step` already
+        // returned early when it was true, and nothing between there and here
+        // touches it (`self.env.step` above only mutates the disjoint `env`
+        // field).
+        for _ in 0..steps {
+            self.advance_sample(ram, endx, idx);
         }
 
         // Sample source: shared noise, or Gaussian-interpolated BRR.

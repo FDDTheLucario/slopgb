@@ -32,6 +32,7 @@ mod keymap;
 mod link;
 mod mcp;
 mod menupopup;
+mod net_worker;
 mod pacing;
 mod screenshot;
 mod session;

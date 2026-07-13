@@ -330,19 +330,11 @@ impl GameBoy {
     }
 
     /// Run until the next frame is complete (vblank reached), or — with the
-    /// LCD off — until an equivalent number of cycles has elapsed.
+    /// LCD off — until an equivalent number of cycles has elapsed. Exactly a
+    /// [`Self::run_slice`] bounded to one frame's worth of cycles (see its doc
+    /// for the lockstep-yield behavior).
     pub fn run_frame(&mut self) {
-        let target = self.bus.frame_count().wrapping_add(1);
-        let deadline = self.bus.cycles().wrapping_add(u64::from(CYCLES_PER_FRAME));
-        while self.bus.frame_count() != target && self.bus.cycles() < deadline {
-            self.step();
-            // Lockstep: a connected master paused awaiting the peer byte yields
-            // control to the frontend (which pumps the link and delivers it).
-            // Always false when disconnected, so golden runs are unaffected.
-            if self.bus.link_stalled() {
-                break;
-            }
-        }
+        self.run_slice(CYCLES_PER_FRAME);
     }
 
     /// Run until the frame completes, `max_cycles` elapse, or a connected master
