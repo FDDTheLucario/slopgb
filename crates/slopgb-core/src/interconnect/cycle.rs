@@ -211,11 +211,7 @@ impl Interconnect {
         // LY-straddle (`hblank_ly_scx`) wake grids keep their aligned
         // calibration. One-shot; also repaid at the next halt entry
         // (`set_cpu_halted`) as the backstop.
-        if self.tier2_reclock
-            && self.wake_skew != 0
-            && addr & 0xFF80 == 0xFF00
-            && addr != 0xFF41
-        {
+        if self.tier2_reclock && self.wake_skew != 0 && addr & 0xFF80 == 0xFF00 && addr != 0xFF41 {
             // IO-page reads other than FF41 re-align first (ROM/RAM fetches
             // ride the skew — the handler's code path must not consume it).
             self.repay_wake_skew();
@@ -273,21 +269,25 @@ impl Interconnect {
                 self.repay_wake_skew();
             }
         }
-        probe!(if matches!(addr, 0xFF68..=0xFF6B) && crate::probe::s5dbg_on() {
-            let (line, dot) = self.ppu.scan_pos();
-            eprintln!("SLOPGB pal{addr:04x} ly={line} dot={dot} v={v:02x}");
-        });
+        probe!(
+            if matches!(addr, 0xFF68..=0xFF6B) && crate::probe::s5dbg_on() {
+                let (line, dot) = self.ppu.scan_pos();
+                eprintln!("SLOPGB pal{addr:04x} ly={line} dot={dot} v={v:02x}");
+            }
+        );
         probe!(if addr == 0xFF0F && crate::probe::s5dbg_on() {
             let (line, dot) = self.ppu.scan_pos();
             eprintln!("SLOPGB ff0f ly={line} dot={dot} if={:02x}", v & 0x1f);
         });
-        probe!(if matches!(addr, 0xFE00..=0xFE9F | 0x8000..=0x9FFF) && crate::probe::s5dbg_on() {
-            let (line, dot) = self.ppu.scan_pos();
-            if line < 144 {
-                let kind = if addr < 0xA000 { "vram" } else { "oam" };
-                eprintln!("SLOPGB {kind} ly={line} dot={dot} v={v:02x}");
+        probe!(
+            if matches!(addr, 0xFE00..=0xFE9F | 0x8000..=0x9FFF) && crate::probe::s5dbg_on() {
+                let (line, dot) = self.ppu.scan_pos();
+                if line < 144 {
+                    let kind = if addr < 0xA000 { "vram" } else { "oam" };
+                    eprintln!("SLOPGB {kind} ly={line} dot={dot} v={v:02x}");
+                }
             }
-        });
+        );
         v
     }
 
@@ -313,10 +313,12 @@ impl Interconnect {
         let _ = self.clock.write(conflict);
         self.advance_machine_t(before, self.clock.now());
         probe!(self.dbg_isr("wr", addr));
-        probe!(if matches!(addr, 0xFF68..=0xFF6B) && crate::probe::s5dbg_on() {
-            let (cly, cdot) = self.ppu.scan_pos();
-            eprintln!("SLOPGB palw{addr:04x} val={value:02x} ly={cly} dot={cdot}");
-        });
+        probe!(
+            if matches!(addr, 0xFF68..=0xFF6B) && crate::probe::s5dbg_on() {
+                let (cly, cdot) = self.ppu.scan_pos();
+                eprintln!("SLOPGB palw{addr:04x} val={value:02x} ly={cly} dot={cdot}");
+            }
+        );
         // A racing DMA-register write beats a same-advance
         // HBlank-DMA steal: SameBoy runs `GB_hdma_run` only after the
         // current instruction completes (sm83_cpu.c:1718), so the write's
@@ -331,8 +333,7 @@ impl Interconnect {
         // already pending at the op's entry still steals first even for
         // the scoped registers. Production (eager) untouched: its head
         // service runs before the write's own tick flags the request.
-        let defer_steal =
-            self.cgb_mode && matches!(addr, 0xFF51..=0xFF55 | 0xFF70 | 0xFF4F);
+        let defer_steal = self.cgb_mode && matches!(addr, 0xFF51..=0xFF55 | 0xFF70 | 0xFF4F);
         if !defer_steal || self.vram_dma_req_pre {
             self.service_vram_dma();
         }
@@ -347,14 +348,16 @@ impl Interconnect {
             // keeps the gambatte mid-cycle staging ({2 SS, 1 DS}) — byte-identical
             // OFF; glitch lines commit immediately (no deferred fetch grid).
             let dots = self.stage_write_dots(addr);
-            probe!(if matches!(addr, 0xFF40 | 0xFF43 | 0xFF4A | 0xFF4B) && crate::probe::s5dbg_on() {
-                let (l, d) = self.ppu.scan_pos();
-                eprintln!(
-                    "SLOPGB w{addr:04x} val={value:02x} ly={l} dot={d} clk={} ds={}",
-                    self.cycles,
-                    u8::from(self.double_speed)
-                );
-            });
+            probe!(
+                if matches!(addr, 0xFF40 | 0xFF43 | 0xFF4A | 0xFF4B) && crate::probe::s5dbg_on() {
+                    let (l, d) = self.ppu.scan_pos();
+                    eprintln!(
+                        "SLOPGB w{addr:04x} val={value:02x} ly={l} dot={d} clk={} ds={}",
+                        self.cycles,
+                        u8::from(self.double_speed)
+                    );
+                }
+            );
             self.ppu.stage_write(addr, value, dots);
         }
         self.maybe_oam_bug(addr, OamBugKind::Write);

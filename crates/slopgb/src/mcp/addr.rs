@@ -59,7 +59,10 @@ impl Region {
     /// Whether the region needs an explicit bank (the `BB:AAAA` form).
     #[must_use]
     pub fn banked(self) -> bool {
-        matches!(self, Region::RomX | Region::Vram | Region::Sram | Region::WramX)
+        matches!(
+            self,
+            Region::RomX | Region::Vram | Region::Sram | Region::WramX
+        )
     }
 
     fn label(self) -> &'static str {

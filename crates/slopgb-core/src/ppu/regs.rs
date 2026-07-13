@@ -5,7 +5,6 @@
 use super::*;
 
 impl Ppu {
-
     /// Read VRAM (0x8000-0x9FFF, current bank), OAM (0xFE00-0xFE9F), or a
     /// PPU register (FF40-FF4B, FF4F, FF68-FF6B). Mode-based access blocking
     /// applies to VRAM/OAM.
@@ -219,7 +218,11 @@ impl Ppu {
                         // fire) + late_enable_after_lycint_disable_2 (eager dot0→
                         // rd4, held-LYC suppressed via the data|old lycen, want
                         // no-fire). `eager_value`+DMG-scoped → byte-identical.
-                        let rd = if self.eager_value { self.dot + 4 } else { self.dot };
+                        let rd = if self.eager_value {
+                            self.dot + 4
+                        } else {
+                            self.dot
+                        };
                         let retro = (rd == 0 || rd == 4)
                             && !self.glitch_line
                             && (1..=144).contains(&self.line)
@@ -311,8 +314,7 @@ impl Ppu {
                         // documented line-153 LYC side-effect zone), NOT ROM-
                         // specific. The sibling `m0enable/lycdisable_ff41_2` (line
                         // 1) is untouched. `eager_value`-gated → byte-identical.
-                        self.eng_stat_half =
-                            Some((data, crate::probe::tune_engcommit(2)));
+                        self.eng_stat_half = Some((data, crate::probe::tune_engcommit(2)));
                         self.eng_stat_pending = None;
                     } else {
                         self.eng_stat = data;
@@ -423,8 +425,12 @@ impl Ppu {
                 // xdot 456 (still tail → extend). The SS twin of the DS lyfc
                 // wake re-derivation. `eager_value && !is_cgb` (CGB emission
                 // unmoved; tier2 + production byte-identical).
-                let xdot =
-                    self.dot + if self.eager_value && !self.model.is_cgb() { 4 } else { 0 };
+                let xdot = self.dot
+                    + if self.eager_value && !self.model.is_cgb() {
+                        4
+                    } else {
+                        0
+                    };
                 if (self.tier2_reclock || self.eager_value)
                     && self.enabled
                     && !(4..452).contains(&xdot)

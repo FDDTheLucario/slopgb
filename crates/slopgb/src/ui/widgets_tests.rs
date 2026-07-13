@@ -211,10 +211,17 @@ fn vscroll_track_is_the_panes_right_edge_strip() {
 fn vscroll_frac_maps_cursor_top_to_0_bottom_to_1_middle_to_half() {
     let track = Rect::new(0, 0, SCROLLBAR_W, 100);
     let vis = 0.2; // 20%-tall thumb
-    assert_eq!(vscroll_frac(track, -50, vis), 0.0, "above the track clamps to 0");
+    assert_eq!(
+        vscroll_frac(track, -50, vis),
+        0.0,
+        "above the track clamps to 0"
+    );
     assert_eq!(vscroll_frac(track, 999, vis), 1.0, "below clamps to 1");
     let mid = vscroll_frac(track, 50, vis);
-    assert!((mid - 0.5).abs() < 0.05, "cursor at track center ~ frac 0.5, got {mid}");
+    assert!(
+        (mid - 0.5).abs() < 0.05,
+        "cursor at track center ~ frac 0.5, got {mid}"
+    );
 }
 
 #[test]

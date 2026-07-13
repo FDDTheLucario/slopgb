@@ -160,7 +160,11 @@ fn gbmicro_flagon_probe() {
                 gb.step();
             }
         }
-        let (v, a, e) = (gb.peek_no_io(0xFF82), gb.peek_no_io(0xFF80), gb.peek_no_io(0xFF81));
+        let (v, a, e) = (
+            gb.peek_no_io(0xFF82),
+            gb.peek_no_io(0xFF80),
+            gb.peek_no_io(0xFF81),
+        );
         if v == 0x01 {
             pass += 1;
         } else {

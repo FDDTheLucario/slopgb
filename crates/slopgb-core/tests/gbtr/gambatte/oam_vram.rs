@@ -980,22 +980,49 @@ fn eager_ds_access_passes() {
 #[test]
 fn eager_ss_access_passes() {
     let Some(root) = common::gbtr_root() else {
-        common::skip_or_fail_gbtr("eager_ss_access", "game-boy-test-roms collection not present");
+        common::skip_or_fail_gbtr(
+            "eager_ss_access",
+            "game-boy-test-roms collection not present",
+        );
         return;
     };
     let targets = [
         // Recovered (SameBoy-pass, was EV-fail):
-        ("gambatte/cgbpal_m3/cgbpal_m3end_scx2_2_cgb04c_out0.gbc", "0"),
-        ("gambatte/cgbpal_m3/cgbpal_m3end_scx3_2_cgb04c_out0.gbc", "0"),
-        ("gambatte/cgbpal_m3/cgbpal_m3end_scx5_2_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/cgbpal_m3/cgbpal_m3end_scx2_2_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/cgbpal_m3/cgbpal_m3end_scx3_2_cgb04c_out0.gbc",
+            "0",
+        ),
+        (
+            "gambatte/cgbpal_m3/cgbpal_m3end_scx5_2_cgb04c_out0.gbc",
+            "0",
+        ),
         ("gambatte/vram_m3/preread_lcdoffset1_1_cgb04c_out0.gbc", "0"),
-        ("gambatte/vram_m3/preread_ds_lcdoffset1_1_cgb04c_out0.gbc", "0"),
+        (
+            "gambatte/vram_m3/preread_ds_lcdoffset1_1_cgb04c_out0.gbc",
+            "0",
+        ),
         // Regression guards (the `_1`/`_2` siblings must keep their verdict):
-        ("gambatte/cgbpal_m3/cgbpal_m3end_scx2_1_cgb04c_out7.gbc", "7"),
-        ("gambatte/cgbpal_m3/cgbpal_m3end_scx3_1_cgb04c_out7.gbc", "7"),
-        ("gambatte/cgbpal_m3/cgbpal_m3end_scx5_1_cgb04c_out7.gbc", "7"),
+        (
+            "gambatte/cgbpal_m3/cgbpal_m3end_scx2_1_cgb04c_out7.gbc",
+            "7",
+        ),
+        (
+            "gambatte/cgbpal_m3/cgbpal_m3end_scx3_1_cgb04c_out7.gbc",
+            "7",
+        ),
+        (
+            "gambatte/cgbpal_m3/cgbpal_m3end_scx5_1_cgb04c_out7.gbc",
+            "7",
+        ),
         ("gambatte/vram_m3/preread_lcdoffset1_2_cgb04c_out3.gbc", "3"),
-        ("gambatte/vram_m3/preread_ds_lcdoffset1_2_cgb04c_out3.gbc", "3"),
+        (
+            "gambatte/vram_m3/preread_ds_lcdoffset1_2_cgb04c_out3.gbc",
+            "3",
+        ),
     ];
     for (rel, expect) in targets {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));

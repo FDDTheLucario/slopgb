@@ -2,7 +2,10 @@ use super::*;
 
 #[test]
 fn renders_escaped_strings() {
-    assert_eq!(Json::str("a\"b\\c\nd\te").render(), "\"a\\\"b\\\\c\\nd\\te\"");
+    assert_eq!(
+        Json::str("a\"b\\c\nd\te").render(),
+        "\"a\\\"b\\\\c\\nd\\te\""
+    );
     // A control char below 0x20 renders as a \u escape.
     assert_eq!(Json::str("\u{01}").render(), "\"\\u0001\"");
 }
@@ -46,7 +49,13 @@ fn round_trips_through_parse_render() {
 #[test]
 fn malformed_input_errors_never_panics() {
     for bad in [
-        "", "{", "[1,", r#"{"a":}"#, "truu", r#"{"a":1}x"#, "\"unterminated",
+        "",
+        "{",
+        "[1,",
+        r#"{"a":}"#,
+        "truu",
+        r#"{"a":1}x"#,
+        "\"unterminated",
     ] {
         assert!(parse(bad).is_err(), "{bad:?} should error");
     }

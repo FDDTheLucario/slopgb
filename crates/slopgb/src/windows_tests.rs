@@ -80,10 +80,18 @@ fn memory_view_goto_bank_prefixed_address_pins_bank_and_base() {
     // A colon-less address takes the plain symbol/hex path and leaves the bank.
     v.bank = Some(5);
     assert!(v.apply_goto("C000"));
-    assert_eq!((v.bank, v.mem_base), (Some(5), 0xC000), "plain goto leaves bank");
+    assert_eq!(
+        (v.bank, v.mem_base),
+        (Some(5), 0xC000),
+        "plain goto leaves bank"
+    );
     // A colon'd but non-hex bank fails both parses → whole input rejected, no move.
     assert!(!v.apply_goto("zz:1000"), "non-hex bank is not a valid goto");
-    assert_eq!((v.bank, v.mem_base), (Some(5), 0xC000), "rejected goto changes nothing");
+    assert_eq!(
+        (v.bank, v.mem_base),
+        (Some(5), 0xC000),
+        "rejected goto changes nothing"
+    );
 }
 
 #[test]
@@ -139,7 +147,10 @@ fn memory_view_cursor_move_autoscrolls_and_cancels_edit() {
     v.move_cursor(-16, 8); // up one row cancels the edit and scrolls the view
     assert_eq!(v.edit_hi, None, "moving cancels a pending edit");
     assert_eq!(v.cursor, 0xFEF0);
-    assert_eq!(v.mem_base, 0xFEF0, "scrolled up so the cursor stays visible");
+    assert_eq!(
+        v.mem_base, 0xFEF0,
+        "scrolled up so the cursor stays visible"
+    );
     // Moving within the visible window does not scroll.
     v.move_cursor(16, 8);
     assert_eq!(v.cursor, 0xFF00);
@@ -178,9 +189,8 @@ fn memory_window_tints_cdl_flagged_bytes() {
     let gw = crate::ui::font::GLYPH_W;
     let lh = crate::ui::text::line_height() as usize;
     let want = crate::cdl::cdl_color(4).unwrap();
-    let cell_has = |cx: usize, color: u32| {
-        (0..lh).any(|y| (cx..cx + 2 * gw).any(|x| buf[y * w + x] == color))
-    };
+    let cell_has =
+        |cx: usize, color: u32| (0..lh).any(|y| (cx..cx + 2 * gw).any(|x| buf[y * w + x] == color));
     // Column 0 hex starts at char 10; the flagged byte's cell is tinted.
     assert!(cell_has(10 * gw, want), "flagged byte cell tinted");
     // Column 1 (char 13) is unflagged → not tinted.
@@ -191,7 +201,10 @@ fn memory_window_tints_cdl_flagged_bytes() {
 fn mem_viewer_scrollbar_model_round_trips() {
     let mut v = MemoryView::default();
     v.set_scroll(0.5);
-    assert!((i32::from(v.mem_base) - 0x8000).abs() <= 0x10, "frac 0.5 -> mid of 64 KiB");
+    assert!(
+        (i32::from(v.mem_base) - 0x8000).abs() <= 0x10,
+        "frac 0.5 -> mid of 64 KiB"
+    );
     assert_eq!(v.mem_base & 0x0F, 0, "row-aligned");
     let (frac, vis) = v.scroll_frac(30);
     assert!((frac - 0.5).abs() < 0.01, "reported frac tracks the base");
@@ -221,7 +234,9 @@ fn memory_window_draws_a_scrollbar_on_the_right_edge() {
     let tx = w - crate::ui::widgets::SCROLLBAR_W as usize; // first track column
     let track_px: Vec<u32> = (0..body_h).map(|y| buf[y * w + tx]).collect();
     assert!(
-        track_px.iter().all(|&p| p == Theme::BGB.border || p == Theme::BGB.hilight),
+        track_px
+            .iter()
+            .all(|&p| p == Theme::BGB.border || p == Theme::BGB.hilight),
         "right-edge strip is the scrollbar track/thumb"
     );
     assert!(track_px.contains(&Theme::BGB.hilight), "a thumb is drawn");
@@ -231,11 +246,19 @@ fn memory_window_draws_a_scrollbar_on_the_right_edge() {
 fn mem_bank_label_names_the_live_banked_region() {
     let gb = machine(); // DMG, ROM-only (no MBC, no external RAM)
     assert_eq!(mem_bank_label(&gb, 0x0100), None, "fixed ROM bank 0");
-    assert_eq!(mem_bank_label(&gb, 0x4000).as_deref(), Some("ROM01"), "None-mapper high bank");
+    assert_eq!(
+        mem_bank_label(&gb, 0x4000).as_deref(),
+        Some("ROM01"),
+        "None-mapper high bank"
+    );
     assert_eq!(mem_bank_label(&gb, 0x8000).as_deref(), Some("VRM0"));
     assert_eq!(mem_bank_label(&gb, 0xA000), None, "no RAM chip");
     assert_eq!(mem_bank_label(&gb, 0xC000).as_deref(), Some("WRM0"));
-    assert_eq!(mem_bank_label(&gb, 0xD000).as_deref(), Some("WRM1"), "DMG WRAM bank 1");
+    assert_eq!(
+        mem_bank_label(&gb, 0xD000).as_deref(),
+        Some("WRM1"),
+        "DMG WRAM bank 1"
+    );
     assert_eq!(mem_bank_label(&gb, 0xFF80), None, "HRAM unbanked");
 }
 
@@ -258,7 +281,11 @@ fn effective_bank_folds_into_the_region_and_survives_count_zero() {
     assert_eq!(effective_bank(5, 4), 1, "5 % 4");
     assert_eq!(effective_bank(3, 4), 3);
     assert_eq!(effective_bank(0, 1), 0);
-    assert_eq!(effective_bank(9, 0), 0, "count 0 (absent RAM) never divides by zero");
+    assert_eq!(
+        effective_bank(9, 0),
+        0,
+        "count 0 (absent RAM) never divides by zero"
+    );
 }
 
 #[test]
@@ -274,7 +301,11 @@ fn stepped_bank_starts_from_live_and_refollows() {
     assert_eq!(stepped_bank(None, 0, 2, 4), None, "delta 0 stays on live");
     // Fixed/unbanked (count 0/1) always follows live.
     assert_eq!(stepped_bank(Some(5), 1, 0, 1), None);
-    assert_eq!(stepped_bank(None, 3, 0, 0), None, "count 0 never divides by zero");
+    assert_eq!(
+        stepped_bank(None, 3, 0, 0),
+        None,
+        "count 0 never divides by zero"
+    );
 }
 
 #[test]
@@ -289,12 +320,27 @@ fn banked_read_follows_live_or_reads_the_pinned_bank() {
     let mut gb = GameBoy::new(Model::Dmg, rom).unwrap();
     gb.debug_write(0x2000, 5); // map ROM bank 5 live at 0x4000
     // Following live reads the mapped bank; pinning reads the chosen bank.
-    assert_eq!(banked_read(&gb, None, 0x4000), 0xB5, "None follows live bank 5");
-    assert_eq!(banked_read(&gb, Some(2), 0x4000), 0xB2, "Some(2) reads bank 2");
+    assert_eq!(
+        banked_read(&gb, None, 0x4000),
+        0xB5,
+        "None follows live bank 5"
+    );
+    assert_eq!(
+        banked_read(&gb, Some(2), 0x4000),
+        0xB2,
+        "Some(2) reads bank 2"
+    );
     // Live_bank + bank_chip_label agree with the live mapping.
     assert_eq!(live_bank(&gb, 0x4000), 5);
-    assert_eq!(bank_chip_label(&gb, 0x4000, None), None, "no chip while following live");
-    assert_eq!(bank_chip_label(&gb, 0x4000, Some(2)).as_deref(), Some("ROM02"));
+    assert_eq!(
+        bank_chip_label(&gb, 0x4000, None),
+        None,
+        "no chip while following live"
+    );
+    assert_eq!(
+        bank_chip_label(&gb, 0x4000, Some(2)).as_deref(),
+        Some("ROM02")
+    );
     // live_bank across the other regions: VRAM 0, WRAM 1 (DMG), absent SRAM 0,
     // unbanked 0 — the "follow live" start for every region.
     assert_eq!(live_bank(&gb, 0x8000), 0, "DMG VRAM bank 0");
@@ -302,7 +348,10 @@ fn banked_read_follows_live_or_reads_the_pinned_bank() {
     assert_eq!(live_bank(&gb, 0xA000), 0, "no RAM chip → 0");
     assert_eq!(live_bank(&gb, 0xFF80), 0, "unbanked HRAM → 0");
     // The chip/status name a non-ROM banked region too (WRAMX bank 0 aliases 1).
-    assert_eq!(bank_chip_label(&gb, 0xD000, Some(0)).as_deref(), Some("WRM1"));
+    assert_eq!(
+        bank_chip_label(&gb, 0xD000, Some(0)).as_deref(),
+        Some("WRM1")
+    );
 }
 
 #[test]
@@ -314,13 +363,25 @@ fn banked_write_matches_banked_read_gated_when_following_raw_when_pinned() {
     let mut gb = GameBoy::new(Model::Dmg, rom).unwrap();
     // Following live (None): the dump is RAMG-gated open-bus, and a write is the
     // same gated no-op the CPU sees — so what's shown stays what's written.
-    assert_eq!(banked_read(&gb, None, 0xA000), 0xFF, "disabled SRAM reads FF");
+    assert_eq!(
+        banked_read(&gb, None, 0xA000),
+        0xFF,
+        "disabled SRAM reads FF"
+    );
     banked_write(&mut gb, None, 0xA000, 0x42);
-    assert_eq!(banked_read(&gb, None, 0xA000), 0xFF, "gated write is a no-op");
+    assert_eq!(
+        banked_read(&gb, None, 0xA000),
+        0xFF,
+        "gated write is a no-op"
+    );
     // Pinned to bank 0 (a `00:A000` Go-to) browses the raw chip past RAMG, and a
     // write is visible on the next pinned read — coherent with that dump.
     banked_write(&mut gb, Some(0), 0xA000, 0x42);
-    assert_eq!(banked_read(&gb, Some(0), 0xA000), 0x42, "raw pinned write is visible");
+    assert_eq!(
+        banked_read(&gb, Some(0), 0xA000),
+        0x42,
+        "raw pinned write is visible"
+    );
 }
 
 #[test]
@@ -334,7 +395,10 @@ fn mem_status_line_follows_live_then_marks_a_pinned_bank() {
     // Following live: the classic label, no marker.
     assert_eq!(mem_status_line(&gb, 0x4000, None, loc), "ROM05:4000  ----");
     // Pinned to the live bank: named, no marker (not diverged).
-    assert_eq!(mem_status_line(&gb, 0x4000, Some(5), loc), "ROM05:4000  ----");
+    assert_eq!(
+        mem_status_line(&gb, 0x4000, Some(5), loc),
+        "ROM05:4000  ----"
+    );
     // Pinned off the live bank: the selected bank + a [live ..] marker.
     assert_eq!(
         mem_status_line(&gb, 0x4000, Some(2), loc),
@@ -400,193 +464,6 @@ fn memory_window_status_bar_shows_nearest_symbol() {
 }
 
 #[test]
-fn vram_render_routes_each_tab_and_shows_hover_details() {
-    use vram::{VramState, VramTab};
-    let gb = machine();
-    let theme = Theme::BGB;
-    let (w, h) = (560usize, 470usize);
-    let render_tab = |tab, hover| {
-        let mut buf = vec![0u32; w * h];
-        let st = WinState::Vram(VramState {
-            tab,
-            hover,
-            ..VramState::default()
-        });
-        let mut c = Canvas::new(&mut buf, w, h);
-        render(
-            ToolWindow::Vram,
-            &gb,
-            &mut c,
-            &theme,
-            &st,
-            &Breakpoints::default(),
-        );
-        buf
-    };
-    // Each tab routes to a different renderer, so their buffers differ.
-    let tiles = render_tab(VramTab::Tiles, None);
-    let palettes = render_tab(VramTab::Palettes, None);
-    assert_ne!(tiles, palettes, "tabs route to distinct content");
-    // Hovering a content cell draws the details field list (extra ink).
-    let l = vram::layout(Rect::new(0, 0, w as i32, h as i32));
-    let hovered = render_tab(VramTab::Tiles, Some((l.content.x + 5, l.content.y + 5)));
-    assert_ne!(hovered, tiles, "hover adds the details panel");
-}
-
-#[test]
-fn tile_details_has_no_phantom_tile_right_of_the_grid() {
-    // At scale 2 the 16-col grid spans 256 px; the content area is wider. A
-    // hover left of the edge resolves a tile; at/beyond column 16 there is none.
-    assert!(!tile_details(0, 0, 2, false).is_empty(), "col 0 -> tile 0");
-    assert!(!tile_details(255, 0, 2, false).is_empty(), "col 15 still in grid");
-    assert!(tile_details(256, 0, 2, false).is_empty(), "col 16 is blank space");
-    assert!(tile_details(400, 0, 2, false).is_empty(), "far right is blank");
-    // Below the 24-row bank-0 grid there is no tile either.
-    assert!(tile_details(0, 384, 2, false).is_empty(), "row 24 past tile 383");
-}
-
-#[test]
-fn dec_hex_shows_decimal_and_uppercase_hex() {
-    assert_eq!(dec_hex(10, false), "10 ($0A)");
-    assert_eq!(dec_hex(0, false), "0 ($00)");
-    assert_eq!(dec_hex(255, false), "255 ($FF)");
-    assert_eq!(dec_hex(383, false), "383 ($17F)", "widens past two hex digits");
-    // mask8 (Options "8-bit tile hex") wraps the hex to the low byte.
-    assert_eq!(dec_hex(383, true), "383 ($7F)", "$17F & 0xFF -> $7F");
-    assert_eq!(dec_hex(256, true), "256 ($00)");
-    assert_eq!(dec_hex(10, true), "10 ($0A)", "sub-256 unchanged by the mask");
-}
-
-#[test]
-fn tile_details_appends_hex_to_the_tile_number() {
-    // scale 2 -> 16 px/cell. Top-left tile 0.
-    assert_eq!(tile_details(0, 0, 2, false)[0], "Tile No. 0 ($00)");
-    // col 15, row 23 -> tile 23*16+15 = 383 -> three hex digits.
-    assert_eq!(tile_details(15 * 16, 23 * 16, 2, false)[0], "Tile No. 383 ($17F)");
-    // With the 8-bit-hex option the same tile wraps to $7F.
-    assert_eq!(tile_details(15 * 16, 23 * 16, 2, true)[0], "Tile No. 383 ($7F)");
-}
-
-#[test]
-fn tiles_two_col_splits_content_into_nonoverlapping_left_right() {
-    let content = Rect::new(10, 20, 400, 400);
-    let (left, right, s) = tiles_two_col(content);
-    assert!(s >= 1);
-    assert_eq!((left.x, left.y), (10, 20), "left grid at content origin");
-    assert_eq!((left.w, left.h), (16 * 8 * s, 24 * 8 * s), "left is a 16x24 grid");
-    assert_eq!((right.w, right.h), (left.w, left.h), "same size grids");
-    assert!(right.x >= left.x + left.w, "no horizontal overlap");
-    assert!(
-        right.x + right.w <= content.x + content.w,
-        "right grid fits inside content"
-    );
-}
-
-#[test]
-fn bgmap_two_col_splits_content_into_nonoverlapping_left_right() {
-    let content = Rect::new(10, 20, 600, 300);
-    let (left, right, s) = bgmap_two_col(content);
-    assert!(s >= 1);
-    assert_eq!((left.x, left.y), (10, 20), "left grid at content origin");
-    assert_eq!((left.w, left.h), (32 * 8 * s, 32 * 8 * s), "left is a 32x32 grid");
-    assert_eq!((right.w, right.h), (left.w, left.h), "same size grids");
-    assert!(right.x >= left.x + left.w, "no horizontal overlap");
-    assert!(
-        right.x + right.w <= content.x + content.w,
-        "right grid fits inside content"
-    );
-}
-
-#[test]
-fn bgmap_bases_derive_bg_from_bit3_and_window_from_bit6() {
-    let mut gb = machine();
-    // Auto: LCDC bit3 (BG select) and bit6 (window select) pick each grid's base.
-    // Zeroed ROM leaves LCDC=0 → both auto to 0x9800; flip bit6 → window to 0x9C00.
-    gb.debug_write(0xFF40, 0x40); // window tilemap select on, BG select off
-    let s = VramState {
-        tab: VramTab::BgMap,
-        ..VramState::default()
-    };
-    let (bg, win, _signed) = bgmap_bases(&gb, &s);
-    assert_eq!(bg, 0x9800, "BG grid uses LCDC bit3 (off)");
-    assert_eq!(win, 0x9C00, "window grid uses LCDC bit6 (on)");
-}
-
-#[test]
-fn bgmap_details_two_maps_hover_to_bg_or_window_grid() {
-    let gb = machine();
-    let s = VramState {
-        tab: VramTab::BgMap,
-        ..VramState::default()
-    };
-    let content = Rect::new(0, 0, 600, 300);
-    let (left, right, sc) = bgmap_two_col(content);
-    // Hover inside the left grid -> BG map.
-    let d0 = bgmap_details_two(&gb, &s, 4, 4, left, right, sc, false);
-    assert!(d0[0].starts_with("BG"), "{d0:?}");
-    // Hover inside the right grid -> Window map.
-    let rx = (right.x - left.x) + 4;
-    let d1 = bgmap_details_two(&gb, &s, rx, 4, left, right, sc, false);
-    assert!(d1[0].starts_with("Window"), "{d1:?}");
-    // Hover in the gutter -> no cell.
-    assert!(bgmap_details_two(&gb, &s, left.w + 1, 4, left, right, sc, false).is_empty());
-}
-
-#[test]
-fn tile_details_two_maps_hover_to_bank_and_prints_real_bank() {
-    let content = Rect::new(0, 0, 400, 400);
-    let (left, right, s) = tiles_two_col(content);
-    // Hover inside the left grid -> bank 0.
-    let d0 = tile_details_two(4, 4, left, right, s, false);
-    assert!(d0[1].starts_with("Tile Address 0:"), "{d0:?}");
-    // Hover inside the right grid -> bank 1 (real bank in the label).
-    let rx = (right.x - left.x) + 4; // content-relative x just inside right grid
-    let d1 = tile_details_two(rx, 4, left, right, s, false);
-    assert!(d1[1].starts_with("Tile Address 1:"), "{d1:?}");
-    // Hover in the gutter between the grids -> no tile.
-    assert!(tile_details_two(left.w + 1, 4, left, right, s, false).is_empty());
-}
-
-#[test]
-fn tile_details_track_the_live_scale() {
-    // The same hover pixel resolves to a different tile at a different scale, so
-    // the details hit-test must use the live (fitted) scale, not a fixed one.
-    assert_eq!(
-        tile_details(32, 0, 2, false)[0],
-        "Tile No. 2 ($02)",
-        "16px/tile at scale 2"
-    );
-    assert_eq!(
-        tile_details(32, 0, 3, false)[0],
-        "Tile No. 1 ($01)",
-        "24px/tile at scale 3"
-    );
-}
-
-#[test]
-fn vram_geom_bounds_the_extent_within_a_large_content_area() {
-    // A content area larger than the natural map: the drawn extent hugs the
-    // bounded map (cols*8*scale), not the whole content rect — QA "bg map should
-    // be bounded". 600/256 -> scale 2 -> 512 square, inside 600.
-    let content = Rect::new(0, 0, 600, 600);
-    let bg = vram_geom(VramTab::BgMap, content, false);
-    assert_eq!(bg.scale, 2);
-    assert_eq!((bg.extent.w, bg.extent.h), (32 * 8 * 2, 32 * 8 * 2));
-    assert!(
-        bg.extent.w < content.w && bg.extent.h < content.h,
-        "bounded"
-    );
-    // Tiles: 128x192 natural; 600/128=4, 600/192=3 -> scale 3.
-    let tiles = vram_geom(VramTab::Tiles, content, false);
-    assert_eq!(tiles.scale, 3);
-    assert_eq!((tiles.extent.w, tiles.extent.h), (16 * 8 * 3, 24 * 8 * 3));
-    // Palettes has no grid; frames the whole content.
-    let pal = vram_geom(VramTab::Palettes, content, false);
-    assert!(!pal.grid);
-    assert_eq!(pal.extent, content);
-}
-
-#[test]
 fn debugger_bank_chip_draws_only_while_pinned() {
     // MBC5 so ROMX has banks to pin. The chip is the pane's only source of the
     // accent colour, so counting accent pixels within the memory pane rect proves
@@ -620,7 +497,11 @@ fn debugger_bank_chip_draws_only_while_pinned() {
             .filter(|&(y, x)| buf[y as usize * w + x as usize] == Theme::BGB.current)
             .count()
     };
-    assert_eq!(chip_pixels(None), 0, "no chip while following the live bank");
+    assert_eq!(
+        chip_pixels(None),
+        0,
+        "no chip while following the live bank"
+    );
     assert!(chip_pixels(Some(3)) > 0, "a chip is drawn when pinned");
 }
 

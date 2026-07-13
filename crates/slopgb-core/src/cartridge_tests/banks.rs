@@ -82,7 +82,11 @@ fn rom_offset_indexes_the_byte_read_rom_returns() {
     c.write_rom(0x2000, 5); // BANK1 = 5
     c.write_rom(0x4000, 1); // BANK2 = 1 -> high-area bank 0x25
     assert_eq!(c.rom_offset(0x0000), 0, "low area = bank 0 offset 0");
-    assert_eq!(c.rom_offset(0x4000), 0x25 * 0x4000, "high area = cur_rom_bank");
+    assert_eq!(
+        c.rom_offset(0x4000),
+        0x25 * 0x4000,
+        "high area = cur_rom_bank"
+    );
     assert_eq!(c.rom_offset(0x4001), 0x25 * 0x4000 + 1);
     // The offset indexes the same byte read_rom returns (make_rom stamps the
     // bank index at each bank's start).
@@ -92,7 +96,11 @@ fn rom_offset_indexes_the_byte_read_rom_returns() {
     let mut c = cart(0x01, 128, 3);
     c.write_rom(0x4000, 2); // BANK2 = 2
     c.write_rom(0x6000, 1); // mode 1
-    assert_eq!(c.rom_offset(0x0000), 0x40 * 0x4000, "mode-1 low area = bank2<<5");
+    assert_eq!(
+        c.rom_offset(0x0000),
+        0x40 * 0x4000,
+        "mode-1 low area = bank2<<5"
+    );
 }
 
 #[test]
@@ -122,17 +130,37 @@ fn game_genie_patches_rom_reads_conditionally() {
     let mut c = cart(0x00, 2, 0); // ROM-only
     let orig = c.read_rom(0x0100);
     // 6-digit (unconditional) patch: always substitutes.
-    c.set_gg_patches(vec![GgPatch { addr: 0x0100, value: 0xAB, compare: None }]);
+    c.set_gg_patches(vec![GgPatch {
+        addr: 0x0100,
+        value: 0xAB,
+        compare: None,
+    }]);
     assert_eq!(c.read_rom(0x0100), 0xAB);
     // 9-digit patch whose compare matches the live byte: applies.
-    c.set_gg_patches(vec![GgPatch { addr: 0x0100, value: 0xCD, compare: Some(orig) }]);
+    c.set_gg_patches(vec![GgPatch {
+        addr: 0x0100,
+        value: 0xCD,
+        compare: Some(orig),
+    }]);
     assert_eq!(c.read_rom(0x0100), 0xCD);
     // Compare mismatch: no substitution (bank-switched code stays correct).
-    c.set_gg_patches(vec![GgPatch { addr: 0x0100, value: 0xEE, compare: Some(orig ^ 0xFF) }]);
+    c.set_gg_patches(vec![GgPatch {
+        addr: 0x0100,
+        value: 0xEE,
+        compare: Some(orig ^ 0xFF),
+    }]);
     assert_eq!(c.read_rom(0x0100), orig);
     // Only the patched address is affected.
-    c.set_gg_patches(vec![GgPatch { addr: 0x0100, value: 0x11, compare: None }]);
-    assert_eq!(c.read_rom(0x0101), c.read_rom(0x0101), "unpatched address untouched");
+    c.set_gg_patches(vec![GgPatch {
+        addr: 0x0100,
+        value: 0x11,
+        compare: None,
+    }]);
+    assert_eq!(
+        c.read_rom(0x0101),
+        c.read_rom(0x0101),
+        "unpatched address untouched"
+    );
     // Empty patch list: byte-identical (golden-safe).
     c.set_gg_patches(vec![]);
     assert_eq!(c.read_rom(0x0100), orig);

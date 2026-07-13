@@ -9,10 +9,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 fn unique_temp_dir(tag: &str) -> PathBuf {
     static COUNTER: AtomicU32 = AtomicU32::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "slopfp-test-{tag}-{}-{n}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("slopfp-test-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create unique temp dir");
     dir
 }
@@ -26,12 +23,18 @@ fn read_dir_maps_entries() {
     let entries = read_dir(&dir).unwrap();
     assert_eq!(entries.len(), 2);
 
-    let file = entries.iter().find(|e| e.name == "file.txt").expect("file.txt listed");
+    let file = entries
+        .iter()
+        .find(|e| e.name == "file.txt")
+        .expect("file.txt listed");
     assert!(!file.is_dir);
     assert_eq!(file.size, Some(5));
     assert!(file.mtime.is_some());
 
-    let sub = entries.iter().find(|e| e.name == "sub").expect("sub listed");
+    let sub = entries
+        .iter()
+        .find(|e| e.name == "sub")
+        .expect("sub listed");
     assert!(sub.is_dir);
     assert_eq!(sub.size, None);
 
@@ -46,7 +49,10 @@ fn symlink_to_dir_is_dir() {
     std::os::unix::fs::symlink(dir.join("realdir"), dir.join("linkdir")).unwrap();
 
     let entries = read_dir(&dir).unwrap();
-    let link = entries.iter().find(|e| e.name == "linkdir").expect("linkdir listed");
+    let link = entries
+        .iter()
+        .find(|e| e.name == "linkdir")
+        .expect("linkdir listed");
     assert!(link.is_dir);
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -59,7 +65,10 @@ fn broken_symlink_listed_not_fatal() {
     std::os::unix::fs::symlink(dir.join("does-not-exist"), dir.join("broken")).unwrap();
 
     let entries = read_dir(&dir).unwrap();
-    let broken = entries.iter().find(|e| e.name == "broken").expect("broken symlink still listed");
+    let broken = entries
+        .iter()
+        .find(|e| e.name == "broken")
+        .expect("broken symlink still listed");
     assert!(!broken.is_dir);
     assert_eq!(broken.size, None);
     assert_eq!(broken.mtime, None);

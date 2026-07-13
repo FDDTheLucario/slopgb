@@ -95,11 +95,18 @@ fn mode_for_interrupt_swings_two_dots_against_the_visible_mode() {
         }
         // The visible 3→0 flip dot: the IRQ mode must still read 3 (the lag).
         if prev_vis == 3 && vis == 0 {
-            assert_eq!(mfi, 3, "mode-0 lag: IRQ still mode 3 on the visible flip dot");
+            assert_eq!(
+                mfi, 3,
+                "mode-0 lag: IRQ still mode 3 on the visible flip dot"
+            );
             // One dot later it catches up to 0.
             p.tick();
             assert_eq!(p.vis_mode(), 0);
-            assert_eq!(p.mode_for_interrupt(), 0, "IRQ mode catches up to 0 after the lag dot");
+            assert_eq!(
+                p.mode_for_interrupt(),
+                0,
+                "IRQ mode catches up to 0 after the lag dot"
+            );
             lag_seen = true;
             break;
         }
@@ -208,13 +215,25 @@ fn mode_for_interrupt_vblank_timeline() {
     p.write(0xFF40, 0x91);
     for dot in 0..4u16 {
         run_to(&mut p, 144, dot);
-        assert_eq!(p.mode_for_interrupt(), 0, "line 144 dot {dot}: HBlank carryover");
+        assert_eq!(
+            p.mode_for_interrupt(),
+            0,
+            "line 144 dot {dot}: HBlank carryover"
+        );
     }
     run_to(&mut p, 144, 4);
-    assert_eq!(p.mode_for_interrupt(), 1, "line 144 dot 4: VBlank source raised");
+    assert_eq!(
+        p.mode_for_interrupt(),
+        1,
+        "line 144 dot 4: VBlank source raised"
+    );
     for line in [145u8, 150, 153] {
         run_to(&mut p, line, 80);
-        assert_eq!(p.mode_for_interrupt(), 1, "vblank line {line}: holds mode 1");
+        assert_eq!(
+            p.mode_for_interrupt(),
+            1,
+            "vblank line {line}: holds mode 1"
+        );
     }
 }
 
@@ -553,7 +572,11 @@ fn glitch_line_lyc_compare_backdates_four_dots_flag_on() {
     };
     // Before the last 4 dots: LY=0 compare both paths (no back-date).
     assert_eq!(compare_at(false, 447), Some(0), "flag-off dot 447");
-    assert_eq!(compare_at(true, 447), Some(0), "flag-on dot 447 (before window)");
+    assert_eq!(
+        compare_at(true, 447),
+        Some(0),
+        "flag-on dot 447 (before window)"
+    );
     // Last 4 dots map to line-1 dots 0-3: flag-off holds Some(0); flag-on DMG
     // back-dates to the line-1 no-match (None).
     for dot in 448..=451 {

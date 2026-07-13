@@ -121,25 +121,50 @@ fn eager_emergent_flip_releases_accessibility_at_the_projected_exit() {
     p.write(0xFF40, 0x81); // LCD + BG on
     p.set_eager_value(true);
     run_to(&mut p, 1, 252); // the `_1` access position (read_pos_hd 512)
-    assert_eq!(p.projected_flip_dot(), 257, "SCX=3 bare flip projects dot 257");
+    assert_eq!(
+        p.projected_flip_dot(),
+        257,
+        "SCX=3 bare flip projects dot 257"
+    );
     assert!(!p.line_render_done, "dispatch has not fired at dot 252");
-    assert!(p.oam_read_blocked(), "eager `_1` OAM read stays blocked pre-flip");
-    assert!(p.vram_read_blocked(), "eager `_1` VRAM read stays blocked pre-flip");
+    assert!(
+        p.oam_read_blocked(),
+        "eager `_1` OAM read stays blocked pre-flip"
+    );
+    assert!(
+        p.vram_read_blocked(),
+        "eager `_1` VRAM read stays blocked pre-flip"
+    );
     p.write(0xFE00, 0x11);
     assert_eq!(p.oam[0], 0, "eager `_1` OAM write dropped pre-flip");
 
     run_to(&mut p, 1, 256); // the `_2` access position (read_pos_hd 520)
     assert!(!p.line_render_done, "dispatch still pending at dot 256");
-    assert!(!p.oam_read_blocked(), "eager `_2` OAM read releases at the emergent flip");
-    assert!(!p.vram_read_blocked(), "eager `_2` VRAM read releases at the emergent flip");
+    assert!(
+        !p.oam_read_blocked(),
+        "eager `_2` OAM read releases at the emergent flip"
+    );
+    assert!(
+        !p.vram_read_blocked(),
+        "eager `_2` VRAM read releases at the emergent flip"
+    );
     p.write(0xFE00, 0x22);
-    assert_eq!(p.oam[0], 0x22, "eager `_2` OAM write lands at the emergent flip");
+    assert_eq!(
+        p.oam[0], 0x22,
+        "eager `_2` OAM write lands at the emergent flip"
+    );
 
     // Eager off (production / tier2): both stay blocked at dot 256 (the
     // release is eager-gated) — byte-identical with the flag-off path.
     p.set_eager_value(false);
-    assert!(p.oam_read_blocked(), "production OAM read stays blocked (no eager release)");
-    assert!(p.vram_read_blocked(), "production VRAM read stays blocked (no eager release)");
+    assert!(
+        p.oam_read_blocked(),
+        "production OAM read stays blocked (no eager release)"
+    );
+    assert!(
+        p.vram_read_blocked(),
+        "production VRAM read stays blocked (no eager release)"
+    );
 }
 
 /// CGB VRAM read blocking starts 3 dots later than DMG — a read at
@@ -304,8 +329,15 @@ fn eager_offscreen_wx166_window_exit_and_stalled_access() {
     // Pre-activation (win_active not yet set): the window-length exit (dot 264,
     // rphd 528) drives the read, not the window-elevated bare projection.
     run_to(&mut p, 1, 259);
-    assert!(!p.render.win_active, "wx166 window not yet HBlank-activated at dot 259");
-    assert_eq!(p.vis_mode_read(), 3, "dot 259 (rphd 526 < exit 528) still holds mode 3");
+    assert!(
+        !p.render.win_active,
+        "wx166 window not yet HBlank-activated at dot 259"
+    );
+    assert_eq!(
+        p.vis_mode_read(),
+        3,
+        "dot 259 (rphd 526 < exit 528) still holds mode 3"
+    );
     run_to(&mut p, 1, 260);
     assert!(!p.render.win_active, "still pre-activation at dot 260");
     assert_eq!(
@@ -317,15 +349,30 @@ fn eager_offscreen_wx166_window_exit_and_stalled_access() {
     // Stalled-window (win_active + win_stalled, renders nothing): the OAM/VRAM
     // readback releases past the emergent flip.
     run_to(&mut p, 1, 264);
-    assert!(p.render.win_active && p.render.win_stalled, "wx166 window active + stalled");
-    assert!(p.oam_read_blocked(), "dot 264 (rphd 536 < 538) OAM still blocked");
+    assert!(
+        p.render.win_active && p.render.win_stalled,
+        "wx166 window active + stalled"
+    );
+    assert!(
+        p.oam_read_blocked(),
+        "dot 264 (rphd 536 < 538) OAM still blocked"
+    );
     run_to(&mut p, 1, 265);
-    assert!(!p.oam_read_blocked(), "dot 265 (rphd 538 ≥ 2·266+6) OAM readback releases");
+    assert!(
+        !p.oam_read_blocked(),
+        "dot 265 (rphd 538 ≥ 2·266+6) OAM readback releases"
+    );
     assert!(!p.vram_read_blocked(), "dot 265 VRAM readback releases too");
 
     // Eager off (production / tier2): the stalled readback stays blocked (the
     // release is `eager_value`-gated) — byte-identical with the flag-off path.
     p.set_eager_value(false);
-    assert!(p.oam_read_blocked(), "production OAM read stays blocked (no eager release)");
-    assert!(p.vram_read_blocked(), "production VRAM read stays blocked (no eager release)");
+    assert!(
+        p.oam_read_blocked(),
+        "production OAM read stays blocked (no eager release)"
+    );
+    assert!(
+        p.vram_read_blocked(),
+        "production VRAM read stays blocked (no eager release)"
+    );
 }

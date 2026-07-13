@@ -103,9 +103,13 @@ impl Ppu {
                     // The `dot > hunt_match_dot` guard rejects the LINE-START write
                     // (dot 80) whose `hunt_done` is STALE from the previous line
                     // (match_dot ≥85).
-                    0xFF43 if !self.ds
-                        && self.render.hunt_done
-                        && self.dot > self.render.hunt_match_dot => 6,
+                    0xFF43
+                        if !self.ds
+                            && self.render.hunt_done
+                            && self.dot > self.render.hunt_match_dot =>
+                    {
+                        6
+                    }
                     // SCX (FF43) PRE-match on a plain BG line (`!hunt_done`,
                     // NON-glitch, NON-window): #11el wrongly called these
                     // length-coupled, but the bare line starts SCX=0 so the
@@ -120,10 +124,14 @@ impl Ppu {
                     // late_disable`); the m2int length rows write at dot 152 with
                     // `hunt_done` → the post-match arm above, never here. Full A/B:
                     // `eager-scxlow-recheck-2026-07-12.md` (#11em, corrects #11el).
-                    0xFF43 if !self.ds
-                        && !self.render.hunt_done
-                        && !self.glitch_line
-                        && !self.wy_trig_sb => 6,
+                    0xFF43
+                        if !self.ds
+                            && !self.render.hunt_done
+                            && !self.glitch_line
+                            && !self.wy_trig_sb =>
+                    {
+                        6
+                    }
                     _ => 0,
                 }
             } else if self.ds {
@@ -214,12 +222,14 @@ impl Ppu {
                     self.eff.render_lcdc = value;
                     self.render_lcdc_pending = None;
                 }
-                probe!(if (old ^ value) & LCDC_WIN_ENABLE != 0 && crate::probe::s5dbg_on() {
-                    eprintln!(
-                        "SLOPGB wlcdc ly={} dot={} old={old:02x} new={value:02x}",
-                        self.line, self.dot
-                    );
-                });
+                probe!(
+                    if (old ^ value) & LCDC_WIN_ENABLE != 0 && crate::probe::s5dbg_on() {
+                        eprintln!(
+                            "SLOPGB wlcdc ly={} dot={} old={old:02x} new={value:02x}",
+                            self.line, self.dot
+                        );
+                    }
+                );
                 // LCDC.5 cleared while the window machine is drawing:
                 // the window aborts at the pipeline view's commit point
                 // (gambatte ppu.cpp setLcdc clears win_draw_started

@@ -18,9 +18,9 @@ fn regs0() -> Registers {
 const AREA: Rect = Rect::new(0, 0, 760, 560);
 const NOPS: fn(u16) -> u8 = |_| 0x00; // every line a 1-byte nop
 
-#[path = "debugger_tests/layout.rs"]
-mod layout;
 #[path = "debugger_tests/interaction.rs"]
 mod interaction;
+#[path = "debugger_tests/layout.rs"]
+mod layout;
 #[path = "debugger_tests/menubar.rs"]
 mod menubar;

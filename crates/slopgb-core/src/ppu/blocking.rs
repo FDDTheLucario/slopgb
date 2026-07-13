@@ -200,7 +200,10 @@ impl Ppu {
         } else {
             (1..CGB_LINESTART_OAM_OPEN).contains(&ld)
         };
-        (self.tier2_reclock || self.eager_value) && self.model.is_cgb() && self.line != 0 && in_window
+        (self.tier2_reclock || self.eager_value)
+            && self.model.is_cgb()
+            && self.line != 0
+            && in_window
     }
 
     pub(crate) fn oam_write_blocked(&self) -> bool {
@@ -243,8 +246,7 @@ impl Ppu {
     /// lines excluded so `lcdon_write_timing-GS` (the line-start dots 80-83 gap)
     /// is untouched. Never set in production / LE-only → byte-identical OFF.
     fn write_unblocked_early(&self) -> bool {
-        (self.tier2_reclock && self.vis_early && !self.glitch_line)
-            || self.eager_access_released()
+        (self.tier2_reclock && self.vis_early && !self.glitch_line) || self.eager_access_released()
     }
 
     pub(crate) fn vram_read_blocked(&self) -> bool {
@@ -258,16 +260,16 @@ impl Ppu {
             || self.eager_access_released()
             // EAGER off-screen-window (WX=166) stalled release.
             || self.eager_offscreen_win_access()
-            // NOTE: the DS line-END read release is NOT applied to
-            // VRAM. `vram_m3/postread_ds_2` (want accessible @dot254) is
-            // CO-TEMPORAL with `vramw_m3end/vramw_m3end_ds_2` (want the readback
-            // BLOCKED @dot254): the vramw write costs a CPU M-cycle that shifts
-            // SameBoy's readback cfl vs the sprite-free postread, but slopgb's
-            // deferred frame collapses both to the same dot254 read — so a VRAM
-            // release is an A/B swap (+1 postread / −1 vramw). OAM has no
-            // write-end readback at that dot, so its release ([`Self::
-            // ds_lineend_read_open`], wired only into `oam_read_blocked`) is
-            // clean. The VRAM DS read grid is the parked reclock.
+        // NOTE: the DS line-END read release is NOT applied to
+        // VRAM. `vram_m3/postread_ds_2` (want accessible @dot254) is
+        // CO-TEMPORAL with `vramw_m3end/vramw_m3end_ds_2` (want the readback
+        // BLOCKED @dot254): the vramw write costs a CPU M-cycle that shifts
+        // SameBoy's readback cfl vs the sprite-free postread, but slopgb's
+        // deferred frame collapses both to the same dot254 read — so a VRAM
+        // release is an A/B swap (+1 postread / −1 vramw). OAM has no
+        // write-end readback at that dot, so its release ([`Self::
+        // ds_lineend_read_open`], wired only into `oam_read_blocked`) is
+        // clean. The VRAM DS read grid is the parked reclock.
         {
             return false;
         }

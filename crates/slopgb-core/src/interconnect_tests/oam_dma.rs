@@ -225,7 +225,11 @@ fn halt_wake_advances_oam_dma_one_catchup_cycle() {
     ticks(&mut b, 50);
     assert_eq!(b.peek_no_io(0xFE05), 0x00, "frozen");
     b.set_cpu_halted(false);
-    assert_eq!(b.peek_no_io(0xFE05), 0x55, "catch-up copy at the gate release");
+    assert_eq!(
+        b.peek_no_io(0xFE05),
+        0x55,
+        "catch-up copy at the gate release"
+    );
     assert_eq!(b.peek_no_io(0xFE06), 0x00, "exactly one cycle of catch-up");
     b.tick(); // copies idx 6, committing at the next cycle's head
     b.tick();
@@ -248,7 +252,11 @@ fn speed_switch_pause_exit_does_not_catch_up_oam_dma() {
     ticks(&mut b, 6); // W+2..W+6 copy idx 0..4
     assert!(b.stop(0x0000, false)); // read cycle copies idx 5, then pause
     assert_eq!(b.peek_no_io(0xFE05), 0x55);
-    assert_eq!(b.peek_no_io(0xFE06), 0x00, "frozen across the pause, no catch-up");
+    assert_eq!(
+        b.peek_no_io(0xFE06),
+        0x00,
+        "frozen across the pause, no catch-up"
+    );
     b.tick(); // copies idx 6: the first post-pause cycle...
     b.tick(); // ...committing at the next cycle's head
     assert_eq!(

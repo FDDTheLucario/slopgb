@@ -584,7 +584,11 @@ impl Link {
         if !self.is_connected() {
             return false;
         }
-        if let Some(p) = self.socket.as_ref().and_then(|s| s.poll_blocking(STALL_POLL)) {
+        if let Some(p) = self
+            .socket
+            .as_ref()
+            .and_then(|s| s.poll_blocking(STALL_POLL))
+        {
             if let Some(reply) = self.apply_packet(gb, p) {
                 self.emit(reply);
             }

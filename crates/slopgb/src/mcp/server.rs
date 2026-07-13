@@ -138,7 +138,7 @@ fn handle_conn(stream: TcpStream, stop: &AtomicBool, tx: &Sender<Job>) {
                     return;
                 }
             }
-            Ok(None) => return, // clean EOF (peer closed)
+            Ok(None) => return,                 // clean EOF (peer closed)
             Err(RequestError::WouldBlock) => {} // idle keep-alive; re-check stop
             Err(RequestError::Fatal) => return,
         }
@@ -292,7 +292,11 @@ fn respond(req: &Request, tx: &Sender<Job>) -> (&'static str, Option<&'static st
     match req.method.as_str() {
         "POST" => match super::json::parse(&String::from_utf8_lossy(&req.body)) {
             Ok(msg) => match process(&msg, tx) {
-                Some(resp) => ("200 OK", Some("application/json"), resp.render().into_bytes()),
+                Some(resp) => (
+                    "200 OK",
+                    Some("application/json"),
+                    resp.render().into_bytes(),
+                ),
                 None => ("202 Accepted", None, Vec::new()), // a notification
             },
             Err(e) => (
@@ -407,14 +411,27 @@ fn build_call(name: &str, args: Option<&Json>) -> Result<Call, String> {
             .ok_or_else(|| format!("tool '{name}' needs a string argument '{k}'"))
     };
     match name {
-        "disassemble" => Ok(Call::Disassemble { from: arg("from")?, to: arg("to")? }),
-        "peek" => Ok(Call::Peek { from: arg("from")?, to: arg("to")? }),
-        "cdl" => Ok(Call::Cdl { from: arg("from")?, to: arg("to")? }),
+        "disassemble" => Ok(Call::Disassemble {
+            from: arg("from")?,
+            to: arg("to")?,
+        }),
+        "peek" => Ok(Call::Peek {
+            from: arg("from")?,
+            to: arg("to")?,
+        }),
+        "cdl" => Ok(Call::Cdl {
+            from: arg("from")?,
+            to: arg("to")?,
+        }),
         "vram" => Ok(Call::Vram { view: arg("view")? }),
         "screencap" => Ok(Call::Screencap),
-        "breakpoint" => Ok(Call::Breakpoint { addr: arg("address")? }),
+        "breakpoint" => Ok(Call::Breakpoint {
+            addr: arg("address")?,
+        }),
         "registers" => Ok(Call::Registers),
-        "expr" => Ok(Call::Expr { expr: arg("expression")? }),
+        "expr" => Ok(Call::Expr {
+            expr: arg("expression")?,
+        }),
         other => Err(format!("unknown tool '{other}'")),
     }
 }
@@ -444,7 +461,10 @@ fn rpc_error(id: &Json, code: i64, message: &str) -> Json {
         ("id", id.clone()),
         (
             "error",
-            Json::obj([("code", Json::Num(code as f64)), ("message", Json::str(message))]),
+            Json::obj([
+                ("code", Json::Num(code as f64)),
+                ("message", Json::str(message)),
+            ]),
         ),
     ])
 }
@@ -457,7 +477,10 @@ fn schema(props: &[(&str, &str)]) -> Json {
             .map(|(k, desc)| {
                 (
                     (*k).to_owned(),
-                    Json::obj([("type", Json::str("string")), ("description", Json::str(*desc))]),
+                    Json::obj([
+                        ("type", Json::str("string")),
+                        ("description", Json::str(*desc)),
+                    ]),
                 )
             })
             .collect(),
@@ -531,8 +554,16 @@ fn base64(data: &[u8]) -> String {
         let n = (u32::from(b0) << 16) | (u32::from(b1) << 8) | u32::from(b2);
         out.push(T[(n >> 18 & 63) as usize] as char);
         out.push(T[(n >> 12 & 63) as usize] as char);
-        out.push(if chunk.len() > 1 { T[(n >> 6 & 63) as usize] as char } else { '=' });
-        out.push(if chunk.len() > 2 { T[(n & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            T[(n >> 6 & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            T[(n & 63) as usize] as char
+        } else {
+            '='
+        });
     }
     out
 }

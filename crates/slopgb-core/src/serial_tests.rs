@@ -441,7 +441,11 @@ fn connected_master_stalls_without_peer_byte() {
     s.write(0xFF01, 0x5A);
     s.write(0xFF02, 0x81);
     // Run well past the would-be completion (8 * 512) — must NOT raise IF.
-    assert_eq!(run_until_irq(&mut s, &mut div, 4000), None, "stalled: no IF");
+    assert_eq!(
+        run_until_irq(&mut s, &mut div, 4000),
+        None,
+        "stalled: no IF"
+    );
     assert_eq!(s.read(0xFF02) & 0x80, 0x80, "transfer still in progress");
     assert!(s.link_master_waiting(), "master waits for the peer byte");
     // Outgoing byte shipped to the frontend exactly once.
@@ -478,7 +482,11 @@ fn disconnect_while_stalled_completes_with_open_bus() {
     s.write(0xFF02, 0x81);
     run_until_irq(&mut s, &mut div, 4000); // stalls
     assert!(s.link_master_waiting());
-    assert_eq!(s.set_link_connected(false), 0x08, "disconnect raises serial IF");
+    assert_eq!(
+        s.set_link_connected(false),
+        0x08,
+        "disconnect raises serial IF"
+    );
     assert!(!s.link_master_waiting());
     assert_eq!(s.read(0xFF01), 0xFF, "open cable reads 1s");
     assert_eq!(s.read(0xFF02) & 0x80, 0, "transfer flag cleared");

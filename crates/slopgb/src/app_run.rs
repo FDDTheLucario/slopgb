@@ -8,9 +8,9 @@ use std::fs;
 use slopgb_core::{SCREEN_H, SCREEN_W};
 use winit::event_loop::ActiveEventLoop;
 
+use crate::cheat_ui;
 use crate::input::Action;
 use crate::windows::debugger::MenuOutcome;
-use crate::cheat_ui;
 use crate::{App, PathPurpose, dbg, screenshot, ui, windows};
 
 /// Top-left origin of the bp/wp manager list popup, below the debugger menu bar.

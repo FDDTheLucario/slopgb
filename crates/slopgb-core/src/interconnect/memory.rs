@@ -442,7 +442,17 @@ impl Interconnect {
 
     fn io_write(&mut self, addr: u16, value: u8) {
         match addr {
-            0xFF00 => self.joypad.write(value),
+            0xFF00 => {
+                self.joypad.write(value);
+                // On SGB the ICD2 snoops the P1 write; a completed
+                // presentation command (palettes / attributes / mask) is
+                // forwarded to the PPU here. `None` unless the joypad is an
+                // SGB receiver, and `Ppu::sgb_command` is a no-op off SGB
+                // models — so this is inert on every DMG/CGB path.
+                if let Some(cmd) = self.joypad.take_sgb_command() {
+                    self.ppu.sgb_command(&cmd);
+                }
+            }
             0xFF01 | 0xFF02 => self.serial.write(addr, value),
             // A timer write never requests IF directly: a write-induced TIMA
             // overflow raises it only at the reload, from `Timer::tick`.

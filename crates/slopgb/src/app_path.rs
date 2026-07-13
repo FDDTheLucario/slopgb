@@ -80,7 +80,9 @@ impl App {
             // No native picker available: a file purpose gets the in-app
             // browser; `host:port` (PickKind::None) has no browser to fall
             // back to, so it keeps the typed modal.
-            PickResult::Unavailable if kind == PickKind::None => self.open_path_modal(title, purpose),
+            PickResult::Unavailable if kind == PickKind::None => {
+                self.open_path_modal(title, purpose)
+            }
             PickResult::Unavailable => self.open_fallback_picker(title, purpose, kind),
         }
     }
@@ -112,7 +114,13 @@ impl App {
             .map(Path::to_path_buf)
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
         // ponytail: per-purpose ext filters, add when a purpose needs one.
-        self.fallback_picker = Some(FallbackPicker::open(purpose, start_dir, &[], title, kind == PickKind::Save));
+        self.fallback_picker = Some(FallbackPicker::open(
+            purpose,
+            start_dir,
+            &[],
+            title,
+            kind == PickKind::Save,
+        ));
         // Reset the double-click timer: a stale click from a previous picker
         // session (same screen spot, still inside the double-click window)
         // must never combine with the first click of this new session.
@@ -241,7 +249,9 @@ impl App {
                     if self.session.gb.load_cdl(&dec) {
                         println!("slopgb: loaded CDL from {}", path.display());
                     } else {
-                        eprintln!("slopgb: CDL file doesn't match this ROM/RAM layout — not loaded");
+                        eprintln!(
+                            "slopgb: CDL file doesn't match this ROM/RAM layout — not loaded"
+                        );
                     }
                 }
                 Err(e) => eprintln!("slopgb: load CDL failed: {e}"),

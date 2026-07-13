@@ -126,6 +126,7 @@ impl Ppu {
             front: pixel_buffer(0xFF_FFFF),
             back: pixel_buffer(0xFF_FFFF),
             dmg_palette: [0xFF_FFFF, 0xAA_AAAA, 0x55_5555, 0x00_0000],
+            sgb: matches!(model, Model::Sgb | Model::Sgb2).then(SgbView::new),
         }
     }
 
@@ -319,7 +320,11 @@ impl Ppu {
         // pre-draw-abort / STOP-shift legs stay parked. Never fires flag-off
         // (`eager_value` false) → production byte-identical.
         base + if self.eager_value {
-            if self.ds { EAGER_READ_DEBT_HD_DS } else { EAGER_READ_DEBT_HD_SS }
+            if self.ds {
+                EAGER_READ_DEBT_HD_DS
+            } else {
+                EAGER_READ_DEBT_HD_SS
+            }
         } else {
             0
         }

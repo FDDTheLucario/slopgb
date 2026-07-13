@@ -13,10 +13,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 fn unique_temp_dir(tag: &str) -> PathBuf {
     static COUNTER: AtomicU32 = AtomicU32::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "slopfp-nav-test-{tag}-{}-{n}",
-        std::process::id()
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("slopfp-nav-test-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create unique temp dir");
     dir
 }
@@ -25,7 +23,10 @@ fn unique_temp_dir(tag: &str) -> PathBuf {
 /// panic (the test knows the fixture it built).
 fn row_index(p: &mut Picker, name: &str) -> usize {
     let v = p.view(50);
-    v.rows.iter().position(|r| r.name == name).unwrap_or_else(|| panic!("{name} not listed"))
+    v.rows
+        .iter()
+        .position(|r| r.name == name)
+        .unwrap_or_else(|| panic!("{name} not listed"))
 }
 
 #[test]
@@ -43,7 +44,11 @@ fn nav_into_subdir_reads_disk() {
 
     assert_eq!(p.cwd(), sub.as_path());
     let v = p.view(50);
-    assert!(v.rows.iter().any(|r| r.name == "known.txt"), "known.txt not listed after nav: {:?}", v.rows);
+    assert!(
+        v.rows.iter().any(|r| r.name == "known.txt"),
+        "known.txt not listed after nav: {:?}",
+        v.rows
+    );
 
     let _ = std::fs::remove_dir_all(&parent);
 }

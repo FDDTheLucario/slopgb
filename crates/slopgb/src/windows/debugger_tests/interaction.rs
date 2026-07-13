@@ -125,8 +125,14 @@ fn center_disasm_on_pc_puts_pc_mid_pane_and_unpins() {
     // …recenters on PC when tracing: a 10-row pane over a 1-byte NOP stream
     // walks back visible/2 = 5 instructions, so PC lands on the middle row.
     st.center_disasm_on_pc(0x0100, NOPS, 10);
-    assert!(!st.pinned, "tracing unpins a scrolled view so it follows PC");
-    assert_eq!(st.disasm_base, 0x00FB, "PC sits 5 rows below the base (centered)");
+    assert!(
+        !st.pinned,
+        "tracing unpins a scrolled view so it follows PC"
+    );
+    assert_eq!(
+        st.disasm_base, 0x00FB,
+        "PC sits 5 rows below the base (centered)"
+    );
 }
 
 #[test]
@@ -138,7 +144,10 @@ fn scrollbar_models_round_trip_and_disasm_drag_pins() {
     assert_eq!(st.mem_base & 0x0F, 0, "row-aligned");
     let (mf, mv) = st.mem_scroll(30);
     assert!((mf - 0.5).abs() < 0.01, "mem frac tracks the base");
-    assert!(mv > 0.0 && mv < 1.0, "mem thumb smaller than the whole space");
+    assert!(
+        mv > 0.0 && mv < 1.0,
+        "mem thumb smaller than the whole space"
+    );
     // Disasm: a drag pins (stops PC-follow) and jumps the base.
     assert!(!st.pinned);
     st.set_disasm_scroll(0.25);
@@ -371,7 +380,11 @@ fn goto_memory_bank_prefixed_pins_the_bank_and_base() {
     open_goto(&mut st, GotoTarget::Memory);
     type_goto(&mut st, "6000");
     feed_dialog(&mut st, DialogKey::Enter);
-    assert_eq!((st.mem_base, st.mem_bank), (0x6000, Some(5)), "plain goto keeps bank");
+    assert_eq!(
+        (st.mem_base, st.mem_bank),
+        (0x6000, Some(5)),
+        "plain goto keeps bank"
+    );
 }
 
 #[test]

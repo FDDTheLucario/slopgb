@@ -127,25 +127,27 @@ mod engine;
 mod line_setup;
 mod lyc;
 mod oam_bug;
-#[path = "stat_irq/read_laws.rs"]
-mod stat_irq_read_laws;
-#[path = "stat_irq/read_laws_exit.rs"]
-mod stat_irq_read_laws_exit;
 #[path = "stat_irq/reclock.rs"]
 mod reclock;
-#[path = "stat_irq/ff0f.rs"]
-mod stat_irq_ff0f;
 mod regs;
 #[path = "regs/stage.rs"]
 mod regs_stage;
 mod render;
+mod sgb;
 mod stat_irq;
+#[path = "stat_irq/ff0f.rs"]
+mod stat_irq_ff0f;
+#[path = "stat_irq/read_laws.rs"]
+mod stat_irq_read_laws;
+#[path = "stat_irq/read_laws_exit.rs"]
+mod stat_irq_read_laws_exit;
 mod state;
 
 use crate::SCREEN_PIXELS;
 use crate::model::Model;
 
 use render::Render;
+use sgb::SgbView;
 
 // `OamBugKind` is referenced crate-wide as `crate::ppu::OamBugKind`; the
 // OAM-bug pattern fns are called bare from `blocking.rs` via its `use super::*`.
@@ -905,6 +907,13 @@ pub struct Ppu {
     front: Box<[u32; SCREEN_PIXELS]>,
     back: Box<[u32; SCREEN_PIXELS]>,
     dmg_palette: [u32; 4],
+
+    /// Super Game Boy presentation state (palettes / attribute map / window
+    /// mask), `Some` only on `Model::Sgb`/`Sgb2`. Drives the DMG-output
+    /// colorization in [`Self::dmg_shade`] and the MASK_EN frame handling in
+    /// [`Self::start_line`]. `None` on every other model, so their output is
+    /// byte-identical to the pre-SGB core (see `docs/hardware-state/sgb.md`).
+    sgb: Option<SgbView>,
 }
 
 /// The BG-fetcher LCDC render-view defer, in PPU dots: the eager

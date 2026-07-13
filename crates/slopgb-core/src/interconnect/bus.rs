@@ -124,10 +124,8 @@ impl Bus for Interconnect {
         } else {
             addr == 0xFF0F
         };
-        let borrow = self.eager_value
-            && !self.double_speed
-            && !self.ppu.lcd_shift_active()
-            && borrow_addr;
+        let borrow =
+            self.eager_value && !self.double_speed && !self.ppu.lcd_shift_active() && borrow_addr;
         if borrow {
             let a = self.ppu.tick_half();
             let b = self.ppu.tick_half();

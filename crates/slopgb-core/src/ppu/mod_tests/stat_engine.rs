@@ -19,7 +19,10 @@ fn stat_update_engine_lcd_off_holds_line_low() {
     // Turn the LCD off: the next tick resets the engine line low.
     p.write(0xFF40, 0x00);
     p.tick();
-    assert!(!p.stat_update_line(), "engine line forced low with the LCD off");
+    assert!(
+        !p.stat_update_line(),
+        "engine line forced low with the LCD off"
+    );
 }
 
 #[test]
@@ -154,7 +157,11 @@ fn stat_update_mode2_pulse_halt_mask_only_flag_on() {
     p.take_stat_halt_late();
     p.take_stat_late();
     let ifs = p.tick(); // advances to line 3 dot 0, fires the OAM pulse
-    assert_eq!(ifs & 2, 2, "mode-2 OAM pulse fires at the visible line start");
+    assert_eq!(
+        ifs & 2,
+        2,
+        "mode-2 OAM pulse fires at the visible line start"
+    );
     assert!(
         p.take_stat_halt_late(),
         "the mode-2 line-start pulse takes the halt-exit mask"
@@ -188,7 +195,10 @@ fn stat_update_mode0_rise_takes_m0_rise_flag_on() {
             break;
         }
     }
-    assert!(saw_rise, "the mode-0 source rise carries the m0_rise halt mask");
+    assert!(
+        saw_rise,
+        "the mode-0 source rise carries the m0_rise halt mask"
+    );
 }
 
 #[test]

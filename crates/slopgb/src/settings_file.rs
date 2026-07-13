@@ -51,7 +51,10 @@ fn native_path() -> Option<PathBuf> {
 /// The native settings-file path as a string, for display (System info box).
 #[must_use]
 pub fn config_file_display() -> String {
-    native_path().map_or_else(|| "(no config dir)".to_string(), |p| p.display().to_string())
+    native_path().map_or_else(
+        || "(no config dir)".to_string(),
+        |p| p.display().to_string(),
+    )
 }
 
 /// Path to the bgb-format settings file (import/export interop).
@@ -90,12 +93,19 @@ fn load_from_paths(native: Option<&Path>, bgb: Option<&Path>) -> Loaded {
             }
         }
     }
-    Loaded { settings: Settings::default(), recent: Vec::new() }
+    Loaded {
+        settings: Settings::default(),
+        recent: Vec::new(),
+    }
 }
 
 fn save_native(path: &Path, settings: &Settings, recent: &[PathBuf]) {
-    let mut doc = std::fs::read_to_string(path).map_or_else(|_| native::Doc::parse(""), |t| native::Doc::parse(&t));
-    let recent_str: Vec<String> = recent.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+    let mut doc = std::fs::read_to_string(path)
+        .map_or_else(|_| native::Doc::parse(""), |t| native::Doc::parse(&t));
+    let recent_str: Vec<String> = recent
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
     native::to_doc(settings, &recent_str, &mut doc);
     write_atomic(path, &doc.serialize());
 }
@@ -104,10 +114,14 @@ fn save_native(path: &Path, settings: &Settings, recent: &[PathBuf]) {
 /// (merging over any existing bgb.ini so its unknown keys survive). For the
 /// "Export bgb.ini" menu action.
 pub fn export_bgb(path: &Path, settings: &Settings, recent: &[PathBuf]) {
-    let mut ini = std::fs::read_to_string(path).map_or_else(|_| ini::Ini::parse(""), |t| ini::Ini::parse(&t));
+    let mut ini =
+        std::fs::read_to_string(path).map_or_else(|_| ini::Ini::parse(""), |t| ini::Ini::parse(&t));
     bgb::to_ini(settings, &mut ini);
     for i in 0..RECENT_MAX {
-        let val = recent.get(i).map(|p| posix_to_bgb_path(p)).unwrap_or_default();
+        let val = recent
+            .get(i)
+            .map(|p| posix_to_bgb_path(p))
+            .unwrap_or_default();
         ini.set(&format!("Recent{i}"), &val);
     }
     write_atomic(path, &ini.serialize());
@@ -120,18 +134,26 @@ pub fn import_bgb(path: &Path) -> Loaded {
 }
 
 fn load_native(path: &Path) -> Loaded {
-    let doc = std::fs::read_to_string(path).map_or_else(|_| native::Doc::parse(""), |t| native::Doc::parse(&t));
+    let doc = std::fs::read_to_string(path)
+        .map_or_else(|_| native::Doc::parse(""), |t| native::Doc::parse(&t));
     let (settings, recent) = native::from_doc(&doc);
-    Loaded { settings, recent: recent.into_iter().map(PathBuf::from).collect() }
+    Loaded {
+        settings,
+        recent: recent.into_iter().map(PathBuf::from).collect(),
+    }
 }
 
 fn load_bgb(path: &Path) -> Loaded {
-    let ini = std::fs::read_to_string(path).map_or_else(|_| ini::Ini::parse(""), |t| ini::Ini::parse(&t));
+    let ini =
+        std::fs::read_to_string(path).map_or_else(|_| ini::Ini::parse(""), |t| ini::Ini::parse(&t));
     let recent = (0..RECENT_MAX)
         .filter_map(|i| ini.get(&format!("Recent{i}")).filter(|v| !v.is_empty()))
         .map(bgb_path_to_posix)
         .collect();
-    Loaded { settings: bgb::from_ini(&ini), recent }
+    Loaded {
+        settings: bgb::from_ini(&ini),
+        recent,
+    }
 }
 
 /// Write `text` to `path` durably (temp file + fsync + rename, creating the

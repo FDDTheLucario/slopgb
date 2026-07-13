@@ -164,9 +164,7 @@ impl Interconnect {
         let l = self.cdl_layout();
         Some(match addr {
             0x0000..=0x7FFF => l.rom + self.cart.rom_offset(addr),
-            0x8000..=0x9FFF => {
-                l.vram + self.ppu.vram_bank() * 0x2000 + usize::from(addr & 0x1FFF)
-            }
+            0x8000..=0x9FFF => l.vram + self.ppu.vram_bank() * 0x2000 + usize::from(addr & 0x1FFF),
             0xA000..=0xBFFF => l.sram + self.cart.ram_offset(addr)?,
             0xC000..=0xFDFF => l.wram + self.wram_index(addr),
             // 0xFE00-0xFFFF tail (OAM/IO/HRAM/IE), unbanked.
@@ -227,9 +225,7 @@ impl Interconnect {
                 let rom_len = self.cart.rom_len().max(0x4000);
                 l.rom + (usize::from(bank) * 0x4000) % rom_len + usize::from(addr & 0x3FFF)
             }
-            0x8000..=0x9FFF => {
-                l.vram + usize::from(bank & 1) * 0x2000 + usize::from(addr & 0x1FFF)
-            }
+            0x8000..=0x9FFF => l.vram + usize::from(bank & 1) * 0x2000 + usize::from(addr & 0x1FFF),
             0xA000..=0xBFFF => match self.cart.ram_offset_banked(bank, addr) {
                 Some(off) => l.sram + off,
                 None => return 0,

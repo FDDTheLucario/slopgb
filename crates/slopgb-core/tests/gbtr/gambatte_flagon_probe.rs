@@ -90,7 +90,13 @@ enum RowResult {
 
 /// Run one row (fresh GB instance — no shared state, so this is the parallel
 /// unit). `root`/`mode`/`fdelta` are read-only across threads.
-fn run_probe_row(root: &std::path::Path, rel: &str, model: Model, mode: ProbeMode, fdelta: i64) -> RowResult {
+fn run_probe_row(
+    root: &std::path::Path,
+    rel: &str,
+    model: Model,
+    mode: ProbeMode,
+    fdelta: i64,
+) -> RowResult {
     let path = root.join(rel);
     let Ok(rom) = std::fs::read(&path) else {
         eprintln!("MISSING {rel}");
@@ -100,10 +106,9 @@ fn run_probe_row(root: &std::path::Path, rel: &str, model: Model, mode: ProbeMod
         return RowResult::Skip;
     };
     let mut gb = mode.boot(&rom, model);
-    let target = (RUN_DOTS as i64
-        + i64::from(CYCLES_PER_FRAME)
-        + fdelta * i64::from(CYCLES_PER_FRAME))
-    .max(0) as u64;
+    let target =
+        (RUN_DOTS as i64 + i64::from(CYCLES_PER_FRAME) + fdelta * i64::from(CYCLES_PER_FRAME))
+            .max(0) as u64;
     while gb.cycles() < target {
         gb.step();
     }

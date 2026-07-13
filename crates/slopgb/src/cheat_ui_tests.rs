@@ -90,7 +90,10 @@ fn hit_resolves_buttons_and_rows() {
 fn render_draws_the_panel_and_editor_without_panic() {
     let mut cheats = CheatList::default();
     cheats.add("infinite lives", "01FF0AC1");
-    let mut d = CheatDialog { advanced: true, ..CheatDialog::default() };
+    let mut d = CheatDialog {
+        advanced: true,
+        ..CheatDialog::default()
+    };
     d.open_add();
     let (w, h) = (640usize, 480usize);
     let mut buf = vec![0u32; w * h];

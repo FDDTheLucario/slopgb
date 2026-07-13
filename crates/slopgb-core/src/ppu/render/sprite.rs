@@ -267,6 +267,11 @@ impl Ppu {
                 !(sp.bg_priority && bg_c != 0)
             };
 
+        // On SGB the DMG output's 2-bit shade is captured (into the shade
+        // buffer) alongside the color, for the `*_TRN` screen-read transfers.
+        // `None` on the CGB paths (SGB is never CGB) and on non-SGB DMG (where
+        // `record_sgb_shade` is a no-op) — byte-identical off SGB.
+        let mut sgb_shade: Option<u8> = None;
         let color = if sprite_wins {
             if cgb {
                 // Integration addition: DMG compatibility mode remaps the
@@ -289,7 +294,11 @@ impl Ppu {
                 } else {
                     self.eff.obp0
                 };
-                self.dmg_palette[usize::from((obp >> (sp.color * 2)) & 3)]
+                // SGB colorizes DMG output: the 2-bit shade selects a color in
+                // the per-cell SGB palette (else straight through dmg_palette).
+                let shade = usize::from((obp >> (sp.color * 2)) & 3);
+                sgb_shade = Some(shade as u8);
+                self.dmg_shade(self.render.lx, shade)
             }
         } else if cgb {
             // Integration addition: compat mode remaps BG pixels through
@@ -302,9 +311,12 @@ impl Ppu {
             };
             self.cgb_color(&self.bg_pal_ram, bg_attr & 0x07, c)
         } else if bg_off {
-            self.dmg_palette[0]
+            sgb_shade = Some(0);
+            self.dmg_shade(self.render.lx, 0)
         } else {
-            self.dmg_palette[usize::from((self.eff.bgp >> (bg_c * 2)) & 3)]
+            let shade = usize::from((self.eff.bgp >> (bg_c * 2)) & 3);
+            sgb_shade = Some(shade as u8);
+            self.dmg_shade(self.render.lx, shade)
         };
 
         // `get_mut` rather than `[idx]`: during normal rendering ly<144 and
@@ -314,6 +326,9 @@ impl Ppu {
         let idx = usize::from(self.ly) * SCREEN_W + usize::from(self.render.lx);
         if let Some(slot) = self.back.get_mut(idx) {
             *slot = color;
+        }
+        if let Some(sh) = sgb_shade {
+            self.record_sgb_shade(idx, sh);
         }
     }
 

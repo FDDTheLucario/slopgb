@@ -50,7 +50,10 @@ use std::process;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use slopgb_core::{Button, CLOCK_HZ, CYCLES_PER_FRAME, SCREEN_PIXELS};
+use slopgb_core::{
+    Button, CLOCK_HZ, CYCLES_PER_FRAME, SCREEN_H, SCREEN_PIXELS, SCREEN_W, SGB_BORDER_H,
+    SGB_BORDER_W,
+};
 use winit::event::KeyEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
@@ -91,7 +94,10 @@ fn main() {
     // Optional boot ROM (--boot / SLOPGB_BOOT): executed from power-on by every
     // ROM load. Read once here; a bad path is logged and treated as no boot ROM.
     let boot_rom = resolve_boot_rom(&opts);
-    let (session, rom_loaded) = match &opts.rom {
+    // Optional SGB BIOS (--sgb-bios / SLOPGB_SGB_BIOS): feeds the SGB audio path
+    // on every ROM (re)load; border/palette are not extracted (HLE).
+    let sgb_bios = resolve_sgb_bios(&opts);
+    let (mut session, rom_loaded) = match &opts.rom {
         Some(rom) => match Session::load(
             rom,
             opts.model,
@@ -108,6 +114,7 @@ fn main() {
             false,
         ),
     };
+    session.set_sgb_bios(sgb_bios.clone());
     let event_loop = match EventLoop::new() {
         Ok(l) => l,
         Err(e) => {
@@ -115,7 +122,7 @@ fn main() {
             process::exit(1);
         }
     };
-    let mut app = App::new(opts, session, rom_loaded, boot_rom);
+    let mut app = App::new(opts, session, rom_loaded, boot_rom, sgb_bios);
     if let Err(e) = event_loop.run_app(&mut app) {
         eprintln!("error: event loop failed: {e}");
         process::exit(1);
@@ -175,11 +182,41 @@ fn resolve_boot_rom(opts: &Options) -> Option<Vec<u8>> {
     }
 }
 
+/// Resolve the optional SGB BIOS bytes from `--sgb-bios` or `SLOPGB_SGB_BIOS`,
+/// reading the file. A read error is logged and treated as no BIOS (non-fatal).
+/// The border/title-palette are *not* extracted from it — slopgb is high-level
+/// and never runs the SNES CPU — so only the SGB audio path is fed; the honest
+/// status is logged and the default border stands (`docs/hardware-state/sgb.md`).
+fn resolve_sgb_bios(opts: &Options) -> Option<Vec<u8>> {
+    let path = opts
+        .sgb_bios
+        .clone()
+        .or_else(|| env::var_os("SLOPGB_SGB_BIOS").map(PathBuf::from))?;
+    match std::fs::read(&path) {
+        Ok(bytes) => {
+            eprintln!(
+                "slopgb: loaded SGB BIOS '{}' ({} bytes) — audio-driver image only; \
+                 the Nintendo border/palette are not extracted (HLE), default border kept",
+                path.display(),
+                bytes.len()
+            );
+            Some(bytes)
+        }
+        Err(e) => {
+            eprintln!("slopgb: cannot read SGB BIOS '{}': {e}", path.display());
+            None
+        }
+    }
+}
+
 struct App {
     opts: Options,
     /// Boot ROM bytes (from `--boot`/`SLOPGB_BOOT`), executed from power-on on
     /// every ROM load. `None` = the direct post-boot install (default).
     boot_rom: Option<Vec<u8>>,
+    /// Optional SGB BIOS bytes (from `--sgb-bios`/`SLOPGB_SGB_BIOS`), re-applied
+    /// to the fresh machine on every ROM (re)load. `None` = no SGB BIOS.
+    sgb_bios: Option<Vec<u8>>,
     session: Session,
     /// Whether a real ROM is loaded. `false` at a no-ROM (bgb-style) startup:
     /// the blank machine is frozen at power-on (emulation gated off) and the LCD
@@ -299,7 +336,13 @@ struct App {
 }
 
 impl App {
-    fn new(opts: Options, session: Session, rom_loaded: bool, boot_rom: Option<Vec<u8>>) -> Self {
+    fn new(
+        opts: Options,
+        session: Session,
+        rom_loaded: bool,
+        boot_rom: Option<Vec<u8>>,
+        sgb_bios: Option<Vec<u8>>,
+    ) -> Self {
         let muted = opts.mute;
         let scale = opts.scale;
         let window_size = WindowSizeChoice::Scale(scale);
@@ -322,6 +365,7 @@ impl App {
         let mut app = Self {
             opts,
             boot_rom,
+            sgb_bios,
             session,
             rom_loaded,
             blank_frame,
@@ -420,11 +464,16 @@ impl App {
         };
         // With no ROM loaded the LCD shows a solid lightest-shade blank (bgb's
         // pale-green off screen); the machine is frozen so its own front buffer
-        // never paints.
-        let frame: &[u32; SCREEN_PIXELS] = if self.rom_loaded {
-            self.session.gb.frame()
+        // never paints. On an SGB with a border loaded (CHR_TRN+PCT_TRN), the
+        // 256×224 composite replaces the bare 160×144 frame automatically — the
+        // blit letterboxes whichever size it gets.
+        let (frame, src_w, src_h): (&[u32], usize, usize) = if self.rom_loaded {
+            match self.session.gb.sgb_border() {
+                Some(b) => (&b[..], SGB_BORDER_W, SGB_BORDER_H),
+                None => (&self.session.gb.frame()[..], SCREEN_W, SCREEN_H),
+            }
         } else {
-            &self.blank_frame
+            (&self.blank_frame[..], SCREEN_W, SCREEN_H)
         };
         // The right-click menu is its own window now (see `menupopup`), so it is
         // not part of the game-window overlay. The remaining overlays (info box /
@@ -444,7 +493,7 @@ impl App {
         let wizard = self.key_wizard.as_ref();
         let theme = ui::Theme::BGB;
         let stretch = self.window_size == WindowSizeChoice::FullscreenStretched;
-        if let Err(e) = video.draw(window, frame, stretch, |canvas| {
+        if let Err(e) = video.draw(window, frame, src_w, src_h, stretch, |canvas| {
             // The info box / Load-ROM modal draw on top of everything (modal).
             if let Some(i) = info {
                 windows::mainwin::render_info(canvas, i, &theme);
@@ -571,7 +620,11 @@ impl App {
         // every key (typing a code can't fire a hotkey); otherwise arrows move the
         // selection, Space toggles enable, Delete removes, Escape closes.
         if focus == Focus::Game && key.state.is_pressed() && self.cheat_dialog.is_some() {
-            if self.cheat_dialog.as_ref().is_some_and(cheat_ui::CheatDialog::editor_open) {
+            if self
+                .cheat_dialog
+                .as_ref()
+                .is_some_and(cheat_ui::CheatDialog::editor_open)
+            {
                 if let PhysicalKey::Code(code) = key.physical_key {
                     match code {
                         KeyCode::Tab => {
@@ -580,7 +633,10 @@ impl App {
                             }
                         }
                         KeyCode::Enter | KeyCode::NumpadEnter => {
-                            let edit = self.cheat_dialog.as_mut().and_then(cheat_ui::CheatDialog::accept);
+                            let edit = self
+                                .cheat_dialog
+                                .as_mut()
+                                .and_then(cheat_ui::CheatDialog::accept);
                             if let Some(e) = edit {
                                 self.apply_cheat_edit(&e);
                             }
@@ -807,7 +863,8 @@ impl App {
         // would resurrect a stale save and later overwrite the fresh one.
         self.session.flush_save();
         match Session::load(path, self.opts.model, &self.boot_spec()) {
-            Ok(new) => {
+            Ok(mut new) => {
+                new.set_sgb_bios(self.sgb_bios.clone());
                 self.session = new;
                 // A loaded ROM starts emulation: leave the no-ROM blank state and
                 // (re)apply the DMG palette to the fresh machine (GameBoy::new

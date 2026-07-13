@@ -26,8 +26,9 @@ pub(crate) mod mode_timeline;
 pub(crate) mod model;
 pub(crate) mod ppu;
 pub(crate) mod serial;
-pub(crate) mod state;
+pub mod sgb;
 pub(crate) mod stat_update;
+pub(crate) mod state;
 pub(crate) mod timer;
 
 pub use apu::DEFAULT_SAMPLE_RATE;
@@ -56,8 +57,48 @@ pub const SCREEN_W: usize = 160;
 pub const SCREEN_H: usize = 144;
 /// Pixels per frame.
 pub const SCREEN_PIXELS: usize = SCREEN_W * SCREEN_H;
+/// SGB border surface width (32 tiles of 8px).
+pub const SGB_BORDER_W: usize = 256;
+/// SGB border surface height (28 tiles of 8px).
+pub const SGB_BORDER_H: usize = 224;
+/// Pixels in the SGB border surface.
+pub const SGB_BORDER_PIXELS: usize = SGB_BORDER_W * SGB_BORDER_H;
 /// T-cycles (dots) per frame with the LCD on.
 pub const CYCLES_PER_FRAME: u32 = 70224;
+
+/// A decoded SGB SOUND ($08) command: two sound-effect IDs, an
+/// attenuation/flags byte and the effect-bank selector. The core decodes and
+/// queues these; Phase 3 (the S-DSP) drains the queue via
+/// [`GameBoy::sgb_take_sound_event`]. (Pan Docs "SGB Command $08 — SOUND".)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SgbSound {
+    /// Sound Effect A (port 1) identifier.
+    pub effect_a: u8,
+    /// Sound Effect B (port 2) identifier.
+    pub effect_b: u8,
+    /// Attenuation / effect-on flags byte.
+    pub attenuation: u8,
+    /// Effect-bank selector byte.
+    pub effect_bank: u8,
+}
+
+/// A read-only snapshot of the SGB flag commands (ATRC_EN/TEST_EN/ICON_EN/
+/// PAL_PRI) and the latched JUMP target — SNES-side state with no Game-Boy-bus
+/// effect, exposed for Phase-2/3 consumers. (Pan Docs "SGB Command $0C-$0E /
+/// $12 / $19".)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SgbFlags {
+    /// ATRC_EN ($0C): attraction / screen-saver enable.
+    pub atrc_en: bool,
+    /// TEST_EN ($0D): SNES speed test enable.
+    pub test_en: bool,
+    /// ICON_EN ($0E): SGB built-in icon / menu enable.
+    pub icon_en: bool,
+    /// PAL_PRI ($19): application-vs-user palette priority.
+    pub pal_pri: bool,
+    /// JUMP ($12) SNES program target (24-bit PC), if one was issued.
+    pub jump: Option<u32>,
+}
 /// Master clock in Hz (T-cycles / dots per second, normal speed).
 pub const CLOCK_HZ: u32 = 4_194_304;
 
@@ -77,8 +118,9 @@ pub const EXC_LCD_OFF_VBLANK: u16 = 1 << 3;
 /// Leading bytes of a slopgb save state (see [`GameBoy::save_state`]).
 const STATE_MAGIC: &[u8; 4] = b"SLPS";
 /// Save-state format version (bumped on any layout change). v3 dropped the
-/// APU output queues (`samples`/`raw_samples`) from the payload.
-const STATE_VERSION: u16 = 3;
+/// APU output queues (`samples`/`raw_samples`) from the payload; v4 appends the
+/// SGB audio subsystem (SPC700 + S-DSP) on `Model::Sgb`/`Sgb2` states.
+const STATE_VERSION: u16 = 4;
 
 /// A debugger memory watchpoint (bgb's "Set watchpoint"): the free run halts
 /// after the CPU accesses `addr` with a matching access kind. A frontend/
@@ -111,6 +153,9 @@ pub enum DebugReg {
 pub struct GameBoy {
     cpu: cpu::Cpu,
     bus: interconnect::Interconnect,
+    /// SGB audio subsystem (SPC700 + S-DSP). `Some` only on `Model::Sgb`/`Sgb2`;
+    /// `None` elsewhere, so `Dmg`/`Cgb` are byte-identical (golden-safe).
+    sgb_apu: Option<sgb::apu::SgbApu>,
 }
 
 impl GameBoy {
@@ -224,7 +269,8 @@ impl GameBoy {
             cpu.regs_mut().set_de(0xFF56);
             cpu.regs_mut().set_hl(0x000D);
         }
-        Self { cpu, bus }
+        let sgb_apu = sgb::apu::SgbApu::for_model(model);
+        Self { cpu, bus, sgb_apu }
     }
 
     /// Build a machine that **executes `boot_rom`** from power-on (bgb's
@@ -257,7 +303,8 @@ impl GameBoy {
         // constructor state (LCD off, DIV 0, …) and the boot ROM brings it up.
         bus.attach_boot_rom(boot_rom);
         let cpu = cpu::Cpu::power_on();
-        Ok(Self { cpu, bus })
+        let sgb_apu = sgb::apu::SgbApu::for_model(model);
+        Ok(Self { cpu, bus, sgb_apu })
     }
 
     /// Pick the best model for a ROM from its CGB-support header flag
@@ -273,7 +320,16 @@ impl GameBoy {
 
     /// Execute one CPU instruction (or one halted/stopped M-cycle).
     pub fn step(&mut self) {
+        let before = self.bus.cycles();
         self.cpu.step(&mut self.bus);
+        // Advance the SGB audio subsystem by the cycles that instruction spent,
+        // and drain any SGB sound commands it produced. Present only on
+        // `Model::Sgb`/`Sgb2`, so `Dmg`/`Cgb` runs are byte-identical.
+        if let Some(apu) = self.sgb_apu.as_mut() {
+            let elapsed = self.bus.cycles().wrapping_sub(before);
+            apu.clock(elapsed);
+            apu.poll(&mut self.bus);
+        }
     }
 
     /// Run until the next frame is complete (vblank reached), or — with the
@@ -393,6 +449,11 @@ impl GameBoy {
         w.bytes(&id);
         self.cpu.write_state(&mut w);
         self.bus.write_state(&mut w);
+        // SGB audio state (SPC700 + S-DSP), appended only on SGB models — so
+        // `Dmg`/`Cgb` states are byte-identical to the pre-SGB-audio format.
+        if let Some(apu) = &self.sgb_apu {
+            apu.write_state(&mut w);
+        }
         w.into_vec()
     }
 
@@ -426,6 +487,9 @@ impl GameBoy {
         }
         self.cpu.read_state(&mut r)?;
         self.bus.read_state(&mut r)?;
+        if let Some(apu) = self.sgb_apu.as_mut() {
+            apu.read_state(&mut r)?;
+        }
         Ok(())
     }
 
@@ -534,6 +598,10 @@ impl GameBoy {
         self.bus.ppu().frame()
     }
 
+    // The SGB border + SNES-side command seams + the audio BIOS loader live in
+    // the `sgb_api` submodule (a second `impl GameBoy`), keeping this file under
+    // the 1000-line cap.
+
     /// Count of completed frames since power-on.
     pub fn frame_count(&self) -> u64 {
         self.bus.frame_count()
@@ -564,13 +632,23 @@ impl GameBoy {
     /// Move all pending stereo samples (interleaved L/R, `CLOCK_HZ / 64`-ish
     /// native rate decided by the APU) into `out`.
     pub fn drain_audio(&mut self, out: &mut Vec<(f32, f32)>) {
+        let start = out.len();
         self.bus.apu_mut().drain_samples(out);
+        // On SGB, mix the SNES-side stream into the GB samples just drained
+        // (both emit at the same output rate off the same clock, so they align
+        // sample-for-sample). Inert / absent off `Model::Sgb`/`Sgb2`.
+        if let Some(apu) = self.sgb_apu.as_mut() {
+            apu.mix_into(&mut out[start..]);
+        }
     }
 
     /// Set the audio output sample rate in Hz (default
     /// [`DEFAULT_SAMPLE_RATE`]).
     pub fn set_sample_rate(&mut self, hz: u32) {
         self.bus.apu_mut().set_sample_rate(hz);
+        if let Some(apu) = self.sgb_apu.as_mut() {
+            apu.set_output_rate(hz);
+        }
     }
 
     /// Mute or un-mute one APU channel (1-4) in the mixer — a frontend/
@@ -963,6 +1041,12 @@ impl GameBoy {
         self.bus.apu_mut().drain_raw_samples(out);
     }
 }
+
+// The SGB accessor block (border, SNES-side command seams, audio BIOS loader)
+// as a second `impl GameBoy`, split out to keep this file under the 1000-line
+// cap (see `docs/tdd-split-plan.md`).
+#[path = "lib/sgb_api.rs"]
+mod sgb_api;
 
 #[cfg(test)]
 #[path = "lib_tests.rs"]

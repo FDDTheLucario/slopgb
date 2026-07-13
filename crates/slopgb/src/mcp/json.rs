@@ -287,11 +287,8 @@ impl P<'_> {
             .b
             .get(self.i..self.i + 4)
             .ok_or("truncated \\u escape")?;
-        let code = u32::from_str_radix(
-            std::str::from_utf8(hex).map_err(|_| "bad \\u escape")?,
-            16,
-        )
-        .map_err(|_| "bad \\u escape")?;
+        let code = u32::from_str_radix(std::str::from_utf8(hex).map_err(|_| "bad \\u escape")?, 16)
+            .map_err(|_| "bad \\u escape")?;
         self.i += 4;
         // Surrogates aren't reassembled (no MCP field needs them); map to the
         // replacement char rather than erroring, so parsing stays total.

@@ -239,7 +239,10 @@ fn buffered_byte_feeds_a_stalled_master() {
     // Our master transfer runs and stalls (lockstep) awaiting a peer byte —
     // proving the buffered byte did NOT leak into the core master queue.
     gb.run_frame();
-    assert!(gb.link_stalled(), "master stalls without a buffered core byte");
+    assert!(
+        gb.link_stalled(),
+        "master stalls without a buffered core byte"
+    );
     let replies = link.drain_pending(&mut gb);
     assert!(replies.is_empty(), "feeding a master emits no SYNC2");
     assert!(!gb.link_stalled(), "the buffered byte completed the stall");
@@ -256,7 +259,11 @@ fn buffered_master_byte_completes_when_slave_arms() {
     gb.link_connect(true);
     let reply = link.apply_packet(&mut gb, Packet::new(cmd::SYNC1, 0x12, 0x80, 0));
     assert!(reply.is_none(), "unarmed port buffers, no immediate reply");
-    assert_eq!(gb.debug_read(0xFF01), 0x00, "core SB untouched while buffered");
+    assert_eq!(
+        gb.debug_read(0xFF01),
+        0x00,
+        "core SB untouched while buffered"
+    );
     // Arm the slave (run the four setup instructions).
     for _ in 0..6 {
         gb.step();
@@ -267,7 +274,11 @@ fn buffered_master_byte_completes_when_slave_arms() {
     assert_eq!(replies.len(), 1);
     assert_eq!(replies[0].cmd, cmd::SYNC2);
     assert_eq!(replies[0].b2, 0x34, "reply carries our outgoing byte");
-    assert_eq!(gb.debug_read(0xFF01), 0x12, "slave received the master byte");
+    assert_eq!(
+        gb.debug_read(0xFF01),
+        0x12,
+        "slave received the master byte"
+    );
     assert_eq!(gb.debug_read(0xFF0F) & 0x08, 0x08, "serial IF raised");
 }
 
@@ -280,7 +291,7 @@ fn multi_xfer_rom(count: u8, start: u8, sc: u8) -> Vec<u8> {
         0x06, count, // ld b,count
         0x21, 0x00, 0xC0, // ld hl,C000
         0x0E, start, // ld c,start
-        0x79, // .loop: ld a,c
+        0x79,  // .loop: ld a,c
         0xE0, 0x01, // ldh (01),a   ; SB
         0x3E, sc, // ld a,sc
         0xE0, 0x02, // ldh (02),a   ; SC
@@ -327,7 +338,10 @@ fn multi_byte_exchange_over_socket_has_no_corruption() {
     });
     link_m.pump(&mut gb_m);
     link_s.pump(&mut gb_s);
-    assert!(gb_m.link_connected() && gb_s.link_connected(), "cores attached");
+    assert!(
+        gb_m.link_connected() && gb_s.link_connected(),
+        "cores attached"
+    );
 
     let done = |gb: &GameBoy| (0..8).all(|i| gb.debug_read(0xC000 + i) != 0x00);
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -465,7 +479,10 @@ fn sixtyfour_byte_exchange_over_socket_has_no_corruption() {
     });
     link_m.pump(&mut gb_m);
     link_s.pump(&mut gb_s);
-    assert!(gb_m.link_connected() && gb_s.link_connected(), "cores attached");
+    assert!(
+        gb_m.link_connected() && gb_s.link_connected(),
+        "cores attached"
+    );
 
     let done = |gb: &GameBoy| (0..N).all(|i| gb.debug_read(0xC000 + i) != 0x00);
     let deadline = Instant::now() + Duration::from_secs(15);

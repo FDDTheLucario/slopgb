@@ -18,7 +18,12 @@ fn chunks(png: &[u8]) -> (u32, u32, Vec<u8>) {
         crc.update(ctype);
         crc.update(data);
         let stored = u32::from_be_bytes(png[i + 8 + len..i + 12 + len].try_into().unwrap());
-        assert_eq!(crc.finish(), stored, "CRC of {:?}", std::str::from_utf8(ctype));
+        assert_eq!(
+            crc.finish(),
+            stored,
+            "CRC of {:?}",
+            std::str::from_utf8(ctype)
+        );
         match ctype {
             b"IHDR" => {
                 w = u32::from_be_bytes(data[0..4].try_into().unwrap());
@@ -39,7 +44,11 @@ fn inflate_stored(zlib: &[u8]) -> Vec<u8> {
     assert_eq!(zlib[0], 0x78);
     assert_eq!(zlib[1], 0x01);
     assert_eq!(u16::from(zlib[0]) << 8 | u16::from(zlib[1]), 0x7801);
-    assert_eq!((u16::from(zlib[0]) << 8 | u16::from(zlib[1])) % 31, 0, "FCHECK");
+    assert_eq!(
+        (u16::from(zlib[0]) << 8 | u16::from(zlib[1])) % 31,
+        0,
+        "FCHECK"
+    );
     let body = &zlib[2..zlib.len() - 4];
     let mut out = Vec::new();
     let mut i = 0;
@@ -73,7 +82,9 @@ fn decode(png: &[u8]) -> (usize, usize, Vec<u32>) {
         assert_eq!(row[0], 0, "no-filter scanline");
         for x in 0..w {
             let o = 1 + x * 3;
-            px.push((u32::from(row[o]) << 16) | (u32::from(row[o + 1]) << 8) | u32::from(row[o + 2]));
+            px.push(
+                (u32::from(row[o]) << 16) | (u32::from(row[o + 1]) << 8) | u32::from(row[o + 2]),
+            );
         }
     }
     (w, h, px)
@@ -85,7 +96,10 @@ fn encodes_a_decodable_png() {
     let png = encode(&pixels, 2, 2);
     let (w, h, back) = decode(&png);
     assert_eq!((w, h), (2, 2));
-    assert_eq!(back, pixels, "pixels survive the round-trip (XRGB, top byte dropped)");
+    assert_eq!(
+        back, pixels,
+        "pixels survive the round-trip (XRGB, top byte dropped)"
+    );
 }
 
 #[test]

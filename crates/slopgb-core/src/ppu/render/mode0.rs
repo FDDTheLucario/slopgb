@@ -296,7 +296,6 @@ impl Ppu {
         }
     }
 
-
     /// The pure flip projection `(proj, lead)` exactly as
     /// [`Self::m0_flip_events`] evaluates it each mode-3 dot: the dispatch
     /// fires when `proj <= lead`, so the PROJECTED dispatch dot from any

@@ -72,6 +72,11 @@ struct Sgb {
     player_count: u8,
     /// Currently selected controller, 0-based.
     current_player: u8,
+    /// A completed non-MLT_REQ command awaiting forward to the PPU/SGB
+    /// presentation layer (drained by [`Joypad::take_sgb_command`]).
+    /// Transient — set in `command_ready` and drained within the same P1
+    /// write, so it is never serialized.
+    pending_cmd: Option<Vec<u8>>,
 }
 
 impl Sgb {
@@ -86,6 +91,7 @@ impl Sgb {
             ready_for_stop: false,
             player_count: 1,
             current_player: 0,
+            pending_cmd: None,
         }
     }
 
@@ -199,6 +205,14 @@ impl Sgb {
     /// effects (header byte 0: command number * 8 + packet length).
     fn command_ready(&mut self) {
         if self.command[0] >> 3 != 0x11 {
+            // Every non-MLT_REQ command drives the SNES-side presentation
+            // (palettes, attributes, mask, borders, sound). Stash the
+            // completed bytes for the interconnect to forward to the PPU/SGB
+            // layer; MLT_REQ (the only Game-Boy-bus-visible command) is
+            // executed below. `discard_command` zeroes the buffer after this
+            // returns, so capture the exact command length now.
+            let len = self.command_size_bits() / 8;
+            self.pending_cmd = Some(self.command[..len].to_vec());
             return;
         }
         // MLT_REQ (Pan Docs "SGB Command $11 — MLT_REQ"): data bit 0
@@ -317,6 +331,13 @@ impl Joypad {
         irq
     }
 
+    /// Drain a completed non-MLT_REQ SGB command for the interconnect to
+    /// forward to the PPU/SGB presentation layer. `None` on a non-SGB joypad
+    /// or when no command has completed since the last drain.
+    pub(crate) fn take_sgb_command(&mut self) -> Option<Vec<u8>> {
+        self.sgb.as_mut().and_then(|s| s.pending_cmd.take())
+    }
+
     /// Read FF00. Unselected/unused bits read 1. In SGB multiplayer mode a
     /// read with both select lines high returns the joypad ID in the low
     /// nibble — $F for player 1 down to $C for player 4 (Pan Docs
@@ -404,6 +425,7 @@ impl Joypad {
                 ready_for_stop,
                 player_count,
                 current_player,
+                pending_cmd: None,
             });
         } else {
             self.sgb = None;

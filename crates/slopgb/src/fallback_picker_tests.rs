@@ -25,25 +25,64 @@ fn picker_with(entries: Vec<Entry>) -> FallbackPicker {
 #[test]
 fn winit_key_to_picker_maps_named_keys() {
     let none = ModifiersState::empty();
-    assert_eq!(winit_key_to_picker(KeyCode::ArrowUp, None, none), Some(Key::Up));
-    assert_eq!(winit_key_to_picker(KeyCode::ArrowDown, None, none), Some(Key::Down));
-    assert_eq!(winit_key_to_picker(KeyCode::PageUp, None, none), Some(Key::PageUp));
-    assert_eq!(winit_key_to_picker(KeyCode::PageDown, None, none), Some(Key::PageDown));
-    assert_eq!(winit_key_to_picker(KeyCode::Home, None, none), Some(Key::Home));
-    assert_eq!(winit_key_to_picker(KeyCode::End, None, none), Some(Key::End));
-    assert_eq!(winit_key_to_picker(KeyCode::Enter, None, none), Some(Key::Enter));
-    assert_eq!(winit_key_to_picker(KeyCode::NumpadEnter, None, none), Some(Key::Enter));
-    assert_eq!(winit_key_to_picker(KeyCode::Backspace, None, none), Some(Key::Backspace));
-    assert_eq!(winit_key_to_picker(KeyCode::Escape, None, none), Some(Key::Cancel));
-    assert_eq!(winit_key_to_picker(KeyCode::Tab, None, none), Some(Key::Tab));
+    assert_eq!(
+        winit_key_to_picker(KeyCode::ArrowUp, None, none),
+        Some(Key::Up)
+    );
+    assert_eq!(
+        winit_key_to_picker(KeyCode::ArrowDown, None, none),
+        Some(Key::Down)
+    );
+    assert_eq!(
+        winit_key_to_picker(KeyCode::PageUp, None, none),
+        Some(Key::PageUp)
+    );
+    assert_eq!(
+        winit_key_to_picker(KeyCode::PageDown, None, none),
+        Some(Key::PageDown)
+    );
+    assert_eq!(
+        winit_key_to_picker(KeyCode::Home, None, none),
+        Some(Key::Home)
+    );
+    assert_eq!(
+        winit_key_to_picker(KeyCode::End, None, none),
+        Some(Key::End)
+    );
+    assert_eq!(
+        winit_key_to_picker(KeyCode::Enter, None, none),
+        Some(Key::Enter)
+    );
+    assert_eq!(
+        winit_key_to_picker(KeyCode::NumpadEnter, None, none),
+        Some(Key::Enter)
+    );
+    assert_eq!(
+        winit_key_to_picker(KeyCode::Backspace, None, none),
+        Some(Key::Backspace)
+    );
+    assert_eq!(
+        winit_key_to_picker(KeyCode::Escape, None, none),
+        Some(Key::Cancel)
+    );
+    assert_eq!(
+        winit_key_to_picker(KeyCode::Tab, None, none),
+        Some(Key::Tab)
+    );
 }
 
 #[test]
 fn winit_key_to_picker_printable_char_from_text() {
     let none = ModifiersState::empty();
-    assert_eq!(winit_key_to_picker(KeyCode::KeyA, Some("a"), none), Some(Key::Char('a')));
+    assert_eq!(
+        winit_key_to_picker(KeyCode::KeyA, Some("a"), none),
+        Some(Key::Char('a'))
+    );
     // A control character in `text` never maps (mirrors `dialog_key_from`).
-    assert_eq!(winit_key_to_picker(KeyCode::KeyA, Some("\u{7}"), none), None);
+    assert_eq!(
+        winit_key_to_picker(KeyCode::KeyA, Some("\u{7}"), none),
+        None
+    );
     // No named key and no text -> nothing to send.
     assert_eq!(winit_key_to_picker(KeyCode::KeyA, None, none), None);
 }
@@ -117,14 +156,21 @@ fn hit_test_maps_click_to_absolute_row_index() {
 
     // A click landing on row-in-view 1 -> abs index = last_offset + 1 = 2 ("c.txt").
     let py = fp.list_rect.y + line_height() + 1;
-    assert_eq!(fp.on_click(10, py, true), Outcome::Picked(PathBuf::from("/x/c.txt")));
+    assert_eq!(
+        fp.on_click(10, py, true),
+        Outcome::Picked(PathBuf::from("/x/c.txt"))
+    );
 }
 
 #[test]
 fn hit_test_outside_list_rect_is_none() {
     let mut fp = picker_with(vec![Entry::new("a.txt", false, Some(1), Some(1))]);
     fp.list_rect = Rect::new(10, 20, 200, 100);
-    assert_eq!(fp.on_click(0, 0, true), Outcome::None, "above/left of the rect");
+    assert_eq!(
+        fp.on_click(0, 0, true),
+        Outcome::None,
+        "above/left of the rect"
+    );
     assert_eq!(fp.on_click(10, 200, true), Outcome::None, "below the rect");
 }
 
@@ -160,5 +206,8 @@ fn single_click_selects_without_picking_then_enter_picks_it() {
 
     let py = fp.list_rect.y + line_height(); // row-in-view 1 -> "b.txt"
     assert_eq!(fp.on_click(10, py, false), Outcome::None);
-    assert_eq!(fp.feed_key(Key::Enter), Outcome::Picked(PathBuf::from("/x/b.txt")));
+    assert_eq!(
+        fp.feed_key(Key::Enter),
+        Outcome::Picked(PathBuf::from("/x/b.txt"))
+    );
 }

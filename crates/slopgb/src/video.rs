@@ -4,7 +4,6 @@
 use std::num::NonZeroU32;
 use std::rc::Rc;
 
-use slopgb_core::{SCREEN_H, SCREEN_PIXELS, SCREEN_W};
 use winit::window::Window;
 
 use crate::ui::Canvas;
@@ -29,17 +28,22 @@ impl Video {
         })
     }
 
-    /// Present `frame`, then let `overlay` draw on top (the bgb-style popup menu —
-    /// pass a no-op closure when there is nothing to overlay). With `stretch` the
-    /// frame fills the whole window (bgb's "Fullscreen stretched", aspect not
-    /// preserved); otherwise it is the largest integer scale, centered on black.
-    /// The core frame and the softbuffer pixel format are both `0x00RRGGBB` u32s,
-    /// so pixels are copied verbatim; the opaque-alpha pass runs *after* the
-    /// overlay so menu pixels (drawn with a 0 top byte) become opaque too.
+    /// Present the `src_w`×`src_h` `frame`, then let `overlay` draw on top (the
+    /// bgb-style popup menu — pass a no-op closure when there is nothing to
+    /// overlay). `src_w`/`src_h` are usually 160×144, but the SGB border surface
+    /// is 256×224 — the blit scales/letterboxes whatever it is given. With
+    /// `stretch` the frame fills the whole window (bgb's "Fullscreen stretched",
+    /// aspect not preserved); otherwise it is the largest integer scale, centered
+    /// on black. The core frame and the softbuffer pixel format are both
+    /// `0x00RRGGBB` u32s, so pixels are copied verbatim; the opaque-alpha pass
+    /// runs *after* the overlay so menu pixels (drawn with a 0 top byte) become
+    /// opaque too.
     pub fn draw(
         &mut self,
         window: &Window,
-        frame: &[u32; SCREEN_PIXELS],
+        frame: &[u32],
+        src_w: usize,
+        src_h: usize,
         stretch: bool,
         overlay: impl FnOnce(&mut Canvas),
     ) -> Result<(), softbuffer::SoftBufferError> {
@@ -50,9 +54,17 @@ impl Video {
         self.surface.resize(w, h)?;
         let mut buffer = self.surface.buffer_mut()?;
         if stretch {
-            blit_stretch(&mut buffer, size.width, size.height, frame);
+            blit_stretch(&mut buffer, size.width, size.height, frame, src_w, src_h);
         } else {
-            blit(&mut buffer, size.width, size.height, frame, &mut self.row);
+            blit(
+                &mut buffer,
+                size.width,
+                size.height,
+                frame,
+                src_w,
+                src_h,
+                &mut self.row,
+            );
         }
         {
             let mut canvas = Canvas::new(&mut buffer, size.width as usize, size.height as usize);
@@ -70,15 +82,23 @@ impl Video {
     }
 }
 
-/// Nearest-neighbor integer upscale of `frame` into the center of `dst`
-/// (`dst_w` x `dst_h`), painting the letterbox margins black. Every pixel of
-/// `dst` is written, but only the margins are cleared — the image region is
-/// overwritten directly, so a large window doesn't pay for a full clear plus
-/// a full blit each frame. If the window is smaller than 160x144 the image is
-/// drawn at 1x and clipped.
-fn blit(dst: &mut [u32], dst_w: u32, dst_h: u32, frame: &[u32; SCREEN_PIXELS], row: &mut Vec<u32>) {
-    let screen_w = SCREEN_W as u32;
-    let screen_h = SCREEN_H as u32;
+/// Nearest-neighbor integer upscale of the `src_w`×`src_h` `frame` into the
+/// center of `dst` (`dst_w` x `dst_h`), painting the letterbox margins black.
+/// Every pixel of `dst` is written, but only the margins are cleared — the image
+/// region is overwritten directly, so a large window doesn't pay for a full
+/// clear plus a full blit each frame. If the window is smaller than the source
+/// the image is drawn at 1x and clipped.
+fn blit(
+    dst: &mut [u32],
+    dst_w: u32,
+    dst_h: u32,
+    frame: &[u32],
+    src_w: usize,
+    src_h: usize,
+    row: &mut Vec<u32>,
+) {
+    let screen_w = src_w as u32;
+    let screen_h = src_h as u32;
     let scale = (dst_w / screen_w).min(dst_h / screen_h).max(1);
     let img_w = (screen_w * scale).min(dst_w);
     let img_h = (screen_h * scale).min(dst_h);
@@ -96,7 +116,7 @@ fn blit(dst: &mut [u32], dst_w: u32, dst_h: u32, frame: &[u32; SCREEN_PIXELS], r
         let sy = dy / scale;
         if sy != cached_sy {
             cached_sy = sy;
-            let src = &frame[sy as usize * SCREEN_W..][..SCREEN_W];
+            let src = &frame[sy as usize * src_w..][..src_w];
             for (dx, px) in row.iter_mut().enumerate() {
                 *px = src[dx / scale as usize];
             }
@@ -110,20 +130,28 @@ fn blit(dst: &mut [u32], dst_w: u32, dst_h: u32, frame: &[u32; SCREEN_PIXELS], r
     }
 }
 
-/// Nearest-neighbor stretch of `frame` to fill the entire `dst` (no letterbox),
-/// for bgb's "Fullscreen stretched". Aspect ratio is not preserved. Every dst
-/// pixel maps to the proportional source pixel; `dy*SCREEN_H/dst_h` and
-/// `dx*SCREEN_W/dst_w` stay in-bounds for all `dy<dst_h`, `dx<dst_w`.
-fn blit_stretch(dst: &mut [u32], dst_w: u32, dst_h: u32, frame: &[u32; SCREEN_PIXELS]) {
+/// Nearest-neighbor stretch of the `src_w`×`src_h` `frame` to fill the entire
+/// `dst` (no letterbox), for bgb's "Fullscreen stretched". Aspect ratio is not
+/// preserved. Every dst pixel maps to the proportional source pixel;
+/// `dy*src_h/dst_h` and `dx*src_w/dst_w` stay in-bounds for all `dy<dst_h`,
+/// `dx<dst_w`.
+fn blit_stretch(
+    dst: &mut [u32],
+    dst_w: u32,
+    dst_h: u32,
+    frame: &[u32],
+    src_w: usize,
+    src_h: usize,
+) {
     if dst_w == 0 || dst_h == 0 {
         return;
     }
     for dy in 0..dst_h {
-        let sy = (dy * SCREEN_H as u32 / dst_h) as usize;
-        let srow = &frame[sy * SCREEN_W..][..SCREEN_W];
+        let sy = (dy * src_h as u32 / dst_h) as usize;
+        let srow = &frame[sy * src_w..][..src_w];
         let drow = &mut dst[(dy * dst_w) as usize..][..dst_w as usize];
         for (dx, px) in drow.iter_mut().enumerate() {
-            let sx = (dx as u32 * SCREEN_W as u32 / dst_w) as usize;
+            let sx = (dx as u32 * src_w as u32 / dst_w) as usize;
             *px = srow[sx];
         }
     }
@@ -132,6 +160,7 @@ fn blit_stretch(dst: &mut [u32], dst_w: u32, dst_h: u32, frame: &[u32; SCREEN_PI
 #[cfg(test)]
 mod tests {
     use super::*;
+    use slopgb_core::{SCREEN_H, SCREEN_PIXELS, SCREEN_W};
 
     fn test_frame() -> Box<[u32; SCREEN_PIXELS]> {
         let mut f = vec![0u32; SCREEN_PIXELS].into_boxed_slice();
@@ -146,7 +175,15 @@ mod tests {
         let frame = test_frame();
         let mut dst = vec![u32::MAX; SCREEN_PIXELS];
         let mut row = Vec::new();
-        blit(&mut dst, SCREEN_W as u32, SCREEN_H as u32, &frame, &mut row);
+        blit(
+            &mut dst,
+            SCREEN_W as u32,
+            SCREEN_H as u32,
+            &frame[..],
+            SCREEN_W,
+            SCREEN_H,
+            &mut row,
+        );
         assert_eq!(&dst[..], &frame[..]);
     }
 
@@ -158,7 +195,7 @@ mod tests {
         let (w, h) = (324u32, 290u32);
         let mut dst = vec![u32::MAX; (w * h) as usize];
         let mut row = Vec::new();
-        blit(&mut dst, w, h, &frame, &mut row);
+        blit(&mut dst, w, h, &frame[..], SCREEN_W, SCREEN_H, &mut row);
         let at = |x: u32, y: u32| dst[(y * w + x) as usize];
         // Letterbox bars are cleared to black by the blit itself.
         assert_eq!(dst[0], 0); // top bar
@@ -180,7 +217,7 @@ mod tests {
         let (w, h) = (324u32, 290u32);
         let mut dst = vec![u32::MAX; (w * h) as usize];
         let mut row = Vec::new();
-        blit(&mut dst, w, h, &frame, &mut row);
+        blit(&mut dst, w, h, &frame[..], SCREEN_W, SCREEN_H, &mut row);
         assert!(dst.iter().all(|&px| px != u32::MAX));
     }
 
@@ -189,7 +226,7 @@ mod tests {
         let frame = test_frame();
         let (w, h) = (500u32, 300u32); // non-integer, non-aspect-preserving
         let mut dst = vec![u32::MAX; (w * h) as usize];
-        blit_stretch(&mut dst, w, h, &frame);
+        blit_stretch(&mut dst, w, h, &frame[..], SCREEN_W, SCREEN_H);
         // No letterbox: every pixel written (none left as the sentinel).
         assert!(dst.iter().all(|&px| px != u32::MAX), "whole window filled");
         // Corners map to the frame corners.
@@ -209,7 +246,7 @@ mod tests {
         let (w, h) = (100u32, 90u32);
         let mut dst = vec![u32::MAX; (w * h) as usize];
         let mut row = Vec::new();
-        blit(&mut dst, w, h, &frame, &mut row);
+        blit(&mut dst, w, h, &frame[..], SCREEN_W, SCREEN_H, &mut row);
         assert_eq!(dst[0], frame[0]); // no centering possible, drawn from origin
         assert_eq!(dst[1], frame[1]);
     }

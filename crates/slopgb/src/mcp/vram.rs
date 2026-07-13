@@ -52,7 +52,15 @@ impl Bitmap {
     }
 
     /// Blit an 8×8 index tile at `(ox, oy)` through `pal`, honoring x/y flip.
-    fn blit(&mut self, ox: usize, oy: usize, tile: &[[u8; 8]; 8], pal: &[u32; 4], xflip: bool, yflip: bool) {
+    fn blit(
+        &mut self,
+        ox: usize,
+        oy: usize,
+        tile: &[[u8; 8]; 8],
+        pal: &[u32; 4],
+        xflip: bool,
+        yflip: bool,
+    ) {
         for y in 0..8 {
             for x in 0..8 {
                 let sy = if yflip { 7 - y } else { y };
@@ -79,7 +87,7 @@ pub fn capture(gb: &GameBoy, view: &str) -> Result<Bitmap, String> {
     match view {
         "tile0" => Ok(tiles(gb, 0)),
         "tile1" => Ok(tiles(gb, 1)),
-        "bg" => Ok(tilemap(gb, 0x08)),  // LCDC bit3 selects the BG map base
+        "bg" => Ok(tilemap(gb, 0x08)), // LCDC bit3 selects the BG map base
         "win" => Ok(tilemap(gb, 0x40)), // LCDC bit6 selects the window map base
         "oam" => Ok(oam(gb)),
         "palette" => Ok(palette(gb)),
@@ -116,7 +124,11 @@ fn tilemap(gb: &GameBoy, base_bit: u8) -> Bitmap {
         for cx in 0..32 {
             let cell = cells[cy * 32 + cx];
             let idx = tile_index(cell.tile, signed);
-            let bank = if cgb { usize::from(cell.attr >> 3 & 1) } else { 0 };
+            let bank = if cgb {
+                usize::from(cell.attr >> 3 & 1)
+            } else {
+                0
+            };
             let tile = tile_pixels(vram, bank, idx);
             let (xflip, yflip) = if cgb {
                 (cell.attr & 0x20 != 0, cell.attr & 0x40 != 0)
@@ -141,13 +153,20 @@ fn oam(gb: &GameBoy) -> Bitmap {
     let tall = lcdc & 0x04 != 0;
     let cgb = gb.model().is_cgb();
     let (_, obj_cram) = gb.cgb_palette_ram();
-    let dmg = [dmg_pal(gb.debug_read(0xFF48)), dmg_pal(gb.debug_read(0xFF49))];
+    let dmg = [
+        dmg_pal(gb.debug_read(0xFF48)),
+        dmg_pal(gb.debug_read(0xFF49)),
+    ];
     let sprites = oam_sprites(gb.oam());
     let cellh = if tall { 16 } else { 8 };
     let mut bmp = Bitmap::new(8 * 8, 5 * cellh);
     for (i, sp) in sprites.iter().enumerate() {
         let (ox, oy) = ((i % 8) * 8, (i / 8) * cellh);
-        let bank = if cgb { usize::from(sp.attr >> 3 & 1) } else { 0 };
+        let bank = if cgb {
+            usize::from(sp.attr >> 3 & 1)
+        } else {
+            0
+        };
         let pal = if cgb {
             cgb_palette_words(obj_cram, usize::from(sp.attr & 7)).map(xrgb)
         } else {
@@ -161,7 +180,14 @@ fn oam(gb: &GameBoy) -> Bitmap {
             bmp.blit(ox, oy, &tile_pixels(vram, bank, a), &pal, xflip, yflip);
             bmp.blit(ox, oy + 8, &tile_pixels(vram, bank, b), &pal, xflip, yflip);
         } else {
-            bmp.blit(ox, oy, &tile_pixels(vram, bank, usize::from(sp.tile)), &pal, xflip, yflip);
+            bmp.blit(
+                ox,
+                oy,
+                &tile_pixels(vram, bank, usize::from(sp.tile)),
+                &pal,
+                xflip,
+                yflip,
+            );
         }
     }
     bmp

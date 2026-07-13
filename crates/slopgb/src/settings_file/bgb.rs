@@ -47,7 +47,9 @@ pub fn from_ini(f: &Ini) -> Settings {
         lowercase_disasm: boolean("DebugLowercase", d.lowercase_disasm),
         lowercase_hex: boolean("DebugHexLower", d.lowercase_hex),
         show_clocks: boolean("DebugCountedClocks", d.show_clocks),
-        rgbds_disasm: f.get("DisasmSyntax").map_or(d.rgbds_disasm, |v| v == "rgbds"),
+        rgbds_disasm: f
+            .get("DisasmSyntax")
+            .map_or(d.rgbds_disasm, |v| v == "rgbds"),
         tile_hex_8bit: boolean("SlopgbTileHex8bit", d.tile_hex_8bit),
         memory_window: boolean("SlopgbMemoryWindow", d.memory_window),
         esc_shows_debugger: boolean("DebugEsc", d.esc_shows_debugger),
@@ -75,12 +77,33 @@ pub fn from_ini(f: &Ini) -> Settings {
 /// `model` is written to bgb's `SystemMode` (see module doc).
 pub fn to_ini(s: &Settings, f: &mut Ini) {
     let Settings {
-        model: _, stretch: _, volume: _, mono: _, lowercase_disasm: _, lowercase_hex: _,
-        show_clocks: _, rgbds_disasm: _, tile_hex_8bit: _, memory_window: _, esc_shows_debugger: _,
-        ff_speed: _, framerate_limit: _, show_framerate: _, freeze_recent: _, pause_on_focus_loss: _,
-        scheme: _, dmg_palette: _, allow_opposing: _, break_ld_b_b: _, break_invalid_op: _,
-        break_echo_ram: _, break_lcd_off_vblank: _, bootroms_enabled: _, bootrom_dmg: _,
-        bootrom_gbc: _, bootrom_sgb: _,
+        model: _,
+        stretch: _,
+        volume: _,
+        mono: _,
+        lowercase_disasm: _,
+        lowercase_hex: _,
+        show_clocks: _,
+        rgbds_disasm: _,
+        tile_hex_8bit: _,
+        memory_window: _,
+        esc_shows_debugger: _,
+        ff_speed: _,
+        framerate_limit: _,
+        show_framerate: _,
+        freeze_recent: _,
+        pause_on_focus_loss: _,
+        scheme: _,
+        dmg_palette: _,
+        allow_opposing: _,
+        break_ld_b_b: _,
+        break_invalid_op: _,
+        break_echo_ram: _,
+        break_lcd_off_vblank: _,
+        bootroms_enabled: _,
+        bootrom_dmg: _,
+        bootrom_gbc: _,
+        bootrom_sgb: _,
     } = s;
     f.set(
         "SystemMode",
@@ -95,7 +118,10 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
     f.set("DebugLowercase", ini::fmt_bool(s.lowercase_disasm));
     f.set("DebugHexLower", ini::fmt_bool(s.lowercase_hex));
     f.set("DebugCountedClocks", ini::fmt_bool(s.show_clocks));
-    f.set("DisasmSyntax", if s.rgbds_disasm { "rgbds" } else { "no$gmb" });
+    f.set(
+        "DisasmSyntax",
+        if s.rgbds_disasm { "rgbds" } else { "no$gmb" },
+    );
     f.set("DebugEsc", ini::fmt_bool(s.esc_shows_debugger));
     f.set("UndelayedSpeed", &s.ff_speed.to_string());
     f.set("FrameRate", &s.framerate_limit.to_string());

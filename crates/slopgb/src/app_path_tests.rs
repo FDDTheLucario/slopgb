@@ -13,9 +13,10 @@ fn blank_app() -> App {
         scale: 3,
         mute: true,
         boot: None,
+        sgb_bios: None,
         mcp_port: None,
     };
-    App::new(opts, Session::blank(Model::Dmg), false, None)
+    App::new(opts, Session::blank(Model::Dmg), false, None, None)
 }
 
 #[test]
@@ -117,7 +118,9 @@ fn picking_from_the_fallback_picker_clears_the_double_click_timer() {
     app.fallback_last_click = Some((std::time::Instant::now(), 10, 10));
     // A nonexistent path: `run_path_action`'s `LoadState` arm just logs and
     // returns on error, so this stays a pure state check.
-    app.resolve_fallback_picker(Some(PickerOutcome::Picked(PathBuf::from("/does/not/exist"))));
+    app.resolve_fallback_picker(Some(PickerOutcome::Picked(PathBuf::from(
+        "/does/not/exist",
+    ))));
     assert!(app.fallback_picker.is_none());
     assert!(app.fallback_last_click.is_none());
 }

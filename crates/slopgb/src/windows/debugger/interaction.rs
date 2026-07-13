@@ -207,9 +207,10 @@ fn apply_mem_bank_goto(st: &mut DebuggerState, text: &str) -> bool {
         return false;
     };
     let addr = a.trim().trim_start_matches('$').trim_start_matches("0x");
-    if let (Ok(bank), Ok(addr)) =
-        (u16::from_str_radix(b.trim(), 16), u16::from_str_radix(addr, 16))
-    {
+    if let (Ok(bank), Ok(addr)) = (
+        u16::from_str_radix(b.trim(), 16),
+        u16::from_str_radix(addr, 16),
+    ) {
         st.mem_bank = Some(bank);
         st.mem_base = addr;
         true

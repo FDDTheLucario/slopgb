@@ -60,8 +60,7 @@ impl Ppu {
             if mfi_now == 0 && self.eng_mfi_prev == 3 && k >= 1 {
                 self.eng_stat = fin;
                 self.eng_stat_pending = None;
-                if self.stat_update.line()
-                    && !(fin & STAT_SRC_LYC != 0 && self.lyc_interrupt_line)
+                if self.stat_update.line() && !(fin & STAT_SRC_LYC != 0 && self.lyc_interrupt_line)
                 {
                     self.stat_update.force_level(false);
                 }
@@ -259,9 +258,7 @@ impl Ppu {
             // `*_ff45_disable_ds_1` legs, measured) and shifted frames
             // mis-map the window (`ff45_enable_weirdpoint_lcdoffset1_1`).
             self.lyc_interrupt_line = ly == i16::from(self.lyc)
-                || (!self.ds
-                    && self.lcd_shift_dots == 0
-                    && ly == i16::from(self.lyc_event));
+                || (!self.ds && self.lcd_shift_dots == 0 && ly == i16::from(self.lyc_event));
             // Eager line-153 fresh-ENABLE suppression (`ly_lyc_153_write` C017):
             // a fresh LYC=153 write that COMMITTED at/after dot 6 — inside the
             // dots-6-7 coincidence window — raises no fresh trigger on hardware
@@ -750,8 +747,7 @@ impl Ppu {
                 } else {
                     3
                 }
-            } else if ((self.tier2_reclock && self.model.is_cgb()) || self.eager_value)
-                && !self.ds
+            } else if ((self.tier2_reclock && self.model.is_cgb()) || self.eager_value) && !self.ds
             {
                 // The Tier-2 / EAGER SS glitch-line mode-0 IRQ
                 // dispatch reclock. The IRQ side keys on `line_render_done`

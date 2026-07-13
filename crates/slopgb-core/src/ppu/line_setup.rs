@@ -25,6 +25,12 @@ impl Ppu {
             144 => {
                 self.ly = 144;
                 self.frame_count += 1;
+                // SGB MASK_EN: freeze holds the last presented frame (no swap);
+                // black/color-0 paint over it. Computed as owned values first
+                // to avoid aliasing the `self.front` fill below. `None` on
+                // every non-SGB model → byte-identical to the pre-SGB path.
+                let hold = self.sgb.as_ref().is_some_and(|s| s.holds_frame());
+                let mask_fill = self.sgb.as_ref().and_then(|s| s.mask_fill());
                 if self.frame_skip {
                     // The first frame after an LCD enable is not displayed
                     // (Pan Docs "LCDC.7"; SameBoy display.c
@@ -33,9 +39,17 @@ impl Ppu {
                     self.frame_skip = false;
                     let white = self.white();
                     self.front.fill(white);
-                } else {
+                } else if !hold {
                     std::mem::swap(&mut self.front, &mut self.back);
                 }
+                if let Some(c) = mask_fill {
+                    self.front.fill(c);
+                }
+                // SGB frame-boundary work: consume a pending `*_TRN` screen
+                // capture (reads the just-rendered shade buffer) and recomposite
+                // the border from the freshly presented `front`. Inert off SGB
+                // (`self.sgb` is `None`) → byte-identical on DMG/CGB.
+                self.sgb_frame_boundary();
             }
             _ => self.ly = self.line,
         }

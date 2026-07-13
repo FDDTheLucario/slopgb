@@ -97,7 +97,11 @@ fn disassemble(gb: &GameBoy, symbols: &SymbolTable, from: Addr, to: Addr) -> Str
         if let Some((t, name)) = insn.target.and_then(|t| symbols.name_at(t).map(|n| (t, n))) {
             text = replace_last(&text, &format!("${t:04X}"), name);
         }
-        let _ = writeln!(out, "{:02X}:{a:04X}\t{label}\t{text}\t{}", from.bank, insn.cycles);
+        let _ = writeln!(
+            out,
+            "{:02X}:{a:04X}\t{label}\t{text}\t{}",
+            from.bank, insn.cycles
+        );
         let next = a.wrapping_add(u16::from(insn.len.max(1)));
         if a >= to.addr || next <= a {
             break; // reached the end, or the 16-bit address wrapped

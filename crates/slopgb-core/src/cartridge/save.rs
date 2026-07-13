@@ -1,0 +1,111 @@
+//! Battery-backed save images (RAM + serialized RTC) and RTC/rumble hooks.
+
+use super::*;
+
+impl Cartridge {
+    fn rtc(&self) -> Option<&Rtc> {
+        match &self.mapper {
+            Mapper::Mbc3 { rtc, .. } => rtc.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Battery-backed RAM image (+ serialized RTC for MBC3), None if the
+    /// cartridge has no battery.
+    ///
+    /// Format: the raw RAM contents (MBC2: 512 bytes, low nibble valid),
+    /// followed — for RTC carts (types 0x0F/0x10) — by a 16-byte block:
+    /// live S,M,H,DL,DH; latched S,M,H,DL,DH; sub-second T-cycle counter as
+    /// little-endian u32; the last latch register write; one zero pad byte.
+    pub fn save_data(&self) -> Option<Vec<u8>> {
+        if !self.has_battery {
+            return None;
+        }
+        let mut data = self.ram.clone();
+        if let Some(rtc) = self.rtc() {
+            data.extend_from_slice(&rtc.regs);
+            data.extend_from_slice(&rtc.latched);
+            data.extend_from_slice(&rtc.subsec.to_le_bytes());
+            // latch_prev so an armed 0x00 -> 0x01 latch sequence survives a
+            // save taken between the two writes.
+            data.extend_from_slice(&[rtc.latch_prev, 0]);
+        }
+        Some(data)
+    }
+
+    /// Restore a [`Self::save_data`] image; also accepts the de-facto .sav
+    /// layouts of other emulators. Returns whether anything was restored.
+    ///
+    /// The RAM prefix is loaded whenever `data` is at least RAM-sized; the
+    /// trailing block is then interpreted as RTC state if the cartridge has
+    /// an RTC: either our own 16-byte block ([`Self::save_data`]) or the
+    /// 44/48-byte footer written by VBA/mGBA/BGB/SameBoy (five 4-byte LE
+    /// live registers, five 4-byte LE latched registers, 32/64-bit
+    /// timestamp). An unknown trailer size skips only the RTC restore, so
+    /// e.g. a Pokemon G/S/C save imported from another emulator never loses
+    /// its RAM. Data shorter than the RAM is rejected (returns false).
+    pub fn load_save_data(&mut self, data: &[u8]) -> bool {
+        if !self.has_battery || data.len() < self.ram.len() {
+            return false;
+        }
+        let (ram, trailer) = data.split_at(self.ram.len());
+        self.ram.copy_from_slice(ram);
+        let rtc_restored = self.load_rtc_trailer(trailer);
+        !self.ram.is_empty() || rtc_restored
+    }
+
+    /// Parse the post-RAM trailer of a save image into the RTC, if any.
+    /// Returns whether RTC state was restored.
+    fn load_rtc_trailer(&mut self, trailer: &[u8]) -> bool {
+        let Mapper::Mbc3 { rtc: Some(rtc), .. } = &mut self.mapper else {
+            return false;
+        };
+        match trailer.len() {
+            // Our own block, see `save_data`.
+            RTC_SAVE_LEN => {
+                for (i, (reg, mask)) in rtc.regs.iter_mut().zip(RTC_MASKS).enumerate() {
+                    *reg = trailer[i] & mask;
+                }
+                for (i, (reg, mask)) in rtc.latched.iter_mut().zip(RTC_MASKS).enumerate() {
+                    *reg = trailer[5 + i] & mask;
+                }
+                let subsec = u32::from_le_bytes(trailer[10..14].try_into().unwrap());
+                rtc.subsec = subsec % CYCLES_PER_SECOND;
+                rtc.latch_prev = trailer[14];
+                true
+            }
+            // De-facto VBA footer (also mGBA/BGB/SameBoy): each register is
+            // stored as a 4-byte LE word (only the low byte is meaningful),
+            // five live then five latched, then a 32- or 64-bit host
+            // timestamp we ignore (our RTC is deterministic and never reads
+            // the host clock).
+            44 | 48 => {
+                for (i, (reg, mask)) in rtc.regs.iter_mut().zip(RTC_MASKS).enumerate() {
+                    *reg = trailer[4 * i] & mask;
+                }
+                for (i, (reg, mask)) in rtc.latched.iter_mut().zip(RTC_MASKS).enumerate() {
+                    *reg = trailer[20 + 4 * i] & mask;
+                }
+                rtc.subsec = 0;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Advance the MBC3 real-time clock by `t_cycles` T-cycles (dots) of
+    /// wall-clock time (4_194_304 per second; in CGB double speed mode pass
+    /// dots, not CPU cycles, so wall time stays correct). Deterministic: the
+    /// RTC never reads the host clock. No-op for carts without an RTC.
+    pub fn tick_rtc(&mut self, t_cycles: u32) {
+        if let Mapper::Mbc3 { rtc: Some(rtc), .. } = &mut self.mapper {
+            rtc.tick_cycles(t_cycles);
+        }
+    }
+
+    /// Rumble motor state (MBC5 rumble carts, types 0x1C-0x1E); always false
+    /// for other cartridges.
+    pub fn rumble(&self) -> bool {
+        matches!(self.mapper, Mapper::Mbc5 { rumble: true, .. })
+    }
+}

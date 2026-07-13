@@ -6,7 +6,11 @@ const SAMPLE: &str = "Version=1060400\r\nSoundMono=0\r\nLastRomDir=\r\nColorSche
 
 #[test]
 fn round_trips_byte_identical() {
-    assert_eq!(Ini::parse(SAMPLE).serialize(), SAMPLE, "unmodified CRLF file is byte-identical");
+    assert_eq!(
+        Ini::parse(SAMPLE).serialize(),
+        SAMPLE,
+        "unmodified CRLF file is byte-identical"
+    );
     // LF-only + no trailing newline also round-trips.
     let lf = "A=1\nB=2";
     assert_eq!(Ini::parse(lf).serialize(), lf);
@@ -33,7 +37,11 @@ fn get_reads_the_first_value() {
     assert_eq!(ini.get("Version"), Some("1060400"));
     assert_eq!(ini.get("LastRomDir"), Some(""));
     assert_eq!(ini.get("Missing"), None);
-    assert_eq!(ini.get("ColorScheme"), Some("a.b"), "first of a repeated key");
+    assert_eq!(
+        ini.get("ColorScheme"),
+        Some("a.b"),
+        "first of a repeated key"
+    );
 }
 
 #[test]
@@ -49,7 +57,11 @@ fn bool_codec() {
 fn color_hex_bgr_swap_matches_the_real_palette() {
     // bgb Color0=CCFCE8 (BGR) is the E8FCCC pale-green our palette uses.
     assert_eq!(parse_color_hex("CCFCE8"), Some(0x00E8_FCCC));
-    assert_eq!(fmt_color_hex(0x00E8_FCCC), "CCFCE8", "re-encode is symmetric");
+    assert_eq!(
+        fmt_color_hex(0x00E8_FCCC),
+        "CCFCE8",
+        "re-encode is symmetric"
+    );
     assert_eq!(parse_color_hex("zzz"), None, "garbage -> None");
 }
 

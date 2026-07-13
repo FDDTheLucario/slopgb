@@ -7,12 +7,10 @@ use std::time::{Duration, Instant};
 
 use slopgb_core::{CYCLES_PER_FRAME, GameBoy};
 
-use crate::pacing::{frame_interval, turbo_max_frames};
+use crate::pacing::{
+    MAX_FRAMES_PER_WAKE, advance_grid, frame_interval, slewed_interval, turbo_max_frames, wake_plan,
+};
 use crate::{App, FRAME_DURATION, ui};
-
-/// Upper bound on frames emulated per event-loop wake (non-turbo), so a host
-/// that can't keep up stays responsive instead of spiraling.
-const MAX_FRAMES_PER_WAKE: u32 = 8;
 
 /// Wall-clock emulation budget per wake while turbo is held.
 const TURBO_BUDGET: Duration = Duration::from_millis(10);
@@ -45,8 +43,12 @@ impl App {
         self.dbg_armed().then(|| self.dbg.breakpoints().pc_list())
     }
 
-    /// Emulate enough frames to keep the audio queue at its fill target. Returns
-    /// the frame count and whether a breakpoint halted emulation.
+    /// Emulate frames on the wall-clock `next_frame` grid — one frame → one
+    /// present per tick in steady state — with the interval slewed and the
+    /// per-wake budget banded by the audio queue level, so the long-run rate
+    /// stays locked to the device clock without the audio-callback-cadence
+    /// judder of a `needs_more()` refill. Returns the frame count and whether a
+    /// breakpoint halted emulation.
     pub(crate) fn run_audio_paced(&mut self) -> (u32, bool) {
         let bps = self.run_breakpoints();
         let freeze = self.dbg.freezes().list();
@@ -54,14 +56,24 @@ impl App {
         // Game Genie ROM patches are a persistent core read-intercept: push the
         // current set once per wake (re-syncs after a ROM reload clears them).
         self.session.gb.set_gg_patches(self.cheats.gg_patches());
+        let now = Instant::now();
         let mut frames = 0;
         let mut hit = false;
         {
             let Some(pipe) = &mut self.audio else {
                 return (0, false);
             };
-            while frames < MAX_FRAMES_PER_WAKE && pipe.needs_more() && !hit {
+            let queued = pipe.queued();
+            let target = pipe.target();
+            // Audio clock is authoritative when sound is on — the framerate
+            // limit applies only to timer pacing, so the nominal is always
+            // FRAME_DURATION, slewed by the queue level.
+            let interval = slewed_interval(queued, target, FRAME_DURATION);
+            let (budget, next) = wake_plan(queued, target, now, self.next_frame, interval);
+            self.next_frame = next;
+            while frames < budget && !hit {
                 hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link, &freeze, &cheats);
+                // Unconditional — the device ring drops any overflow.
                 pipe.pump(&mut self.session.gb);
                 frames += 1;
                 // A silent link peer left the master stalled (run_one_frame
@@ -84,19 +96,17 @@ impl App {
         // current set once per wake (re-syncs after a ROM reload clears them).
         self.session.gb.set_gg_patches(self.cheats.gg_patches());
         let now = Instant::now();
-        // If we fell far behind (stall, drag, debugger), resync instead of
-        // fast-forwarding through the backlog.
-        if now.duration_since(self.next_frame) > 8 * FRAME_DURATION {
-            self.next_frame = now;
-        }
-        // Options → Misc → framerate limit (0 = native ~59.7275 Hz).
+        // Options → Misc → framerate limit (0 = native ~59.7275 Hz). The grid
+        // resync + owed-frame count is the same march audio pacing uses (shared
+        // advance_grid): rebase if we fell far behind, else emit the backlog.
         let interval = frame_interval(self.settings.framerate_limit, FRAME_DURATION);
+        let (budget, next) = advance_grid(now, self.next_frame, interval, MAX_FRAMES_PER_WAKE);
+        self.next_frame = next;
         let mut frames = 0;
         let mut hit = false;
-        while frames < MAX_FRAMES_PER_WAKE && self.next_frame <= now && !hit {
+        while frames < budget && !hit {
             hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link, &freeze, &cheats);
             self.discard_audio();
-            self.next_frame += interval;
             frames += 1;
             if self.session.gb.link_stalled() {
                 break; // silent peer: stop the wake (see run_audio_paced)
@@ -136,15 +146,15 @@ impl App {
     }
 
     /// Detect a dead or stalled cpal stream and fall back to wall-clock
-    /// pacing, so audio-paced emulation can't freeze forever waiting on a
+    /// pacing, so audio-paced emulation can't freeze forever topping up a
     /// queue nobody drains.
-    pub(crate) fn check_audio_health(&mut self, frames: u32) {
+    pub(crate) fn check_audio_health(&mut self) {
         let Some(pipe) = &self.audio else { return };
         let failed = pipe.failed();
         if failed
             || self
                 .watchdog
-                .is_stalled(frames, pipe.queued(), Instant::now())
+                .is_stalled(pipe.queued(), pipe.target(), Instant::now())
         {
             eprintln!(
                 "slopgb: audio stream {}; falling back to timer pacing",

@@ -130,7 +130,11 @@ impl Ppu {
                 // `FFto0/FFto1/FFto2_ly2_scx*_1`, want extend). `eager_value`-gated
                 // → tier2 byte-identical (its render never triggers the seam, so
                 // arm D1 does not fire there).
-                let base = if self.eager_value && self.wy_xline_trig { 263 } else { 259 };
+                let base = if self.eager_value && self.wy_xline_trig {
+                    263
+                } else {
+                    259
+                };
                 fold(&mut exit, 2 * (base + scx7));
             } else if self.render.n_sprites == 0 {
                 fold(&mut exit, 2 * (253 + scx7));
@@ -217,7 +221,13 @@ impl Ppu {
             // (253→252, the +1 read-debt) so the early-abort `_0` (read rp 512)
             // reads mode 0. Non-scx eager keeps K=4 / base 253 (#11ec).
             let eager_scx = self.eager_value && self.render.scx_write_dot != 0;
-            let ek = if eager_scx { 8 } else if self.eager_value { 4 } else { 3 };
+            let ek = if eager_scx {
+                8
+            } else if self.eager_value {
+                4
+            } else {
+                3
+            };
             let extend = i32::from(abd) + ek >= i32::from(wxm) && !scx_kills_early;
             let bare = if eager_scx { 252 } else { 253 };
             if self.render.n_sprites == 0 {
@@ -680,10 +690,7 @@ impl Ppu {
                 // extension in the bare exit ONLY (window aborts own the
                 // `scx_write_dot` arm above). `eager_value`+DMG+bare-scoped →
                 // byte-identical flag-off.
-                if self.eager_value
-                    && !self.model.is_cgb()
-                    && self.render.scx_write_dot != 0
-                {
+                if self.eager_value && !self.model.is_cgb() && self.render.scx_write_dot != 0 {
                     flip = flip.saturating_sub(u16::from(self.scx & 7));
                 }
                 // The SS post-switch bare exit: a
@@ -730,10 +737,7 @@ impl Ppu {
                     // both and shuffles). Drop the `+2` only for the eager-DMG
                     // polled read → tier2 + production byte-identical (both keep
                     // `+2`), carried reads untouched (`- carry` owns them).
-                    let over = if self.eager_value
-                        && !self.model.is_cgb()
-                        && !self.read_carried
-                    {
+                    let over = if self.eager_value && !self.model.is_cgb() && !self.read_carried {
                         0
                     } else {
                         2
