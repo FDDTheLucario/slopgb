@@ -51,7 +51,7 @@ fn every_rs_file_under_the_god_file_cap() {
             (n > LIMIT).then_some((n, p))
         })
         .collect();
-    over.sort_by(|a, b| b.0.cmp(&a.0));
+    over.sort_by_key(|b| std::cmp::Reverse(b.0));
 
     assert!(
         over.is_empty(),

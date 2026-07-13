@@ -203,12 +203,11 @@ impl App {
                 button: MouseButton::Left,
                 ..
             } => self.on_popup_click(event_loop),
-            WindowEvent::KeyboardInput { event, .. } => {
+            WindowEvent::KeyboardInput { event, .. }
                 if event.state.is_pressed()
-                    && event.physical_key == PhysicalKey::Code(KeyCode::Escape)
-                {
-                    self.menu_popup = None;
-                }
+                    && event.physical_key == PhysicalKey::Code(KeyCode::Escape) =>
+            {
+                self.menu_popup = None;
             }
             _ => {}
         }
