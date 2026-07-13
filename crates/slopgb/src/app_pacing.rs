@@ -38,9 +38,31 @@ impl App {
 
     /// The breakpoint PC list to watch this wake, or `None` when not armed (the
     /// pacers then run plain frames). Computed once before the pacing loop so it
-    /// doesn't re-borrow `self` while the audio pipe is held.
-    fn run_breakpoints(&self) -> Option<Vec<u16>> {
-        self.dbg_armed().then(|| self.dbg.breakpoints().pc_list())
+    /// doesn't re-borrow `self` while the audio pipe is held. When armed (the
+    /// debugger is open with a halt source), it first drains any stale hit the
+    /// core recorded while the debugger was closed — see
+    /// [`Self::drain_stale_debug_hits`].
+    fn run_breakpoints(&mut self) -> Option<Vec<u16>> {
+        if !self.dbg_armed() {
+            return None;
+        }
+        self.drain_stale_debug_hits();
+        Some(self.dbg.breakpoints().pc_list())
+    }
+
+    /// Discard any watchpoint / exception-break / profiler-break hit the core
+    /// recorded while the debugger was closed. A closed debugger still leaves
+    /// watchpoints and the exception mask armed (bgb keeps them too), so
+    /// `check_access` keeps setting hits on every CPU access — but the plain
+    /// `run_frame` pacing path never consumes them. Opening the debugger would
+    /// then replay that stale, wrongly-timed hit as a spurious halt on the first
+    /// armed frame. An armed wake consumes a hit the instant it happens
+    /// (`run_frame_until_breakpoint` takes it after every step), so a hit still
+    /// pending at the *start* of an armed wake is always stale: dropping it here
+    /// is safe and never discards a live halt. Golden-safe — `clear_debug_hits`
+    /// only clears the core's debug fields, advancing no cycle.
+    fn drain_stale_debug_hits(&mut self) {
+        self.session.gb.clear_debug_hits();
     }
 
     /// Emulate frames on the wall-clock `next_frame` grid — one frame → one
@@ -246,14 +268,164 @@ fn advance_frame(
     // breaks a chunk early (per-byte); the slave runs full chunks (one byte per
     // pump, with cycles to spare). A silent peer times out and yields the
     // partial frame (resumed next tick).
+    run_chunked_linked_frame(gb, link);
+    false
+}
+
+/// Run one frame in [`LINK_CHUNK_CYCLES`] slices, pumping the link between each,
+/// and return the number of slices run. A connected slave exchanges a byte per
+/// slice; a stalled master whose peer stays silent (`pump_blocking` yields no
+/// reply) breaks the frame early, resuming next tick. Extracted from
+/// [`advance_frame`] so the chunk cadence is unit-testable without a live socket:
+/// a disconnected frontend [`Link`](crate::link::Link) makes `pump`/`pump_blocking`
+/// inert, so the loop is driven purely by the core's frame boundary and stall.
+fn run_chunked_linked_frame(gb: &mut GameBoy, link: &mut crate::link::Link) -> usize {
     let target = gb.frame_count().wrapping_add(1);
     let deadline = gb.cycles().wrapping_add(u64::from(CYCLES_PER_FRAME));
+    let mut chunks = 0;
     while gb.frame_count() != target && gb.cycles() < deadline {
         gb.run_slice(LINK_CHUNK_CYCLES);
+        chunks += 1;
         link.pump(gb);
         if gb.link_stalled() && !link.pump_blocking(gb) {
             break;
         }
     }
-    false
+    chunks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use slopgb_core::{Model, Watchpoint};
+
+    /// A blank, muted, no-ROM `App` (as `main` builds it when launched without a
+    /// ROM) whose live machine runs `rom`. Only `session.gb` is swapped — enough
+    /// to drive the pacing seams headlessly.
+    fn app_running(rom: Vec<u8>) -> App {
+        let opts = crate::cli::Options {
+            rom: None,
+            model: None,
+            scale: 3,
+            mute: true,
+            boot: None,
+            sgb_bios: None,
+            mcp_port: None,
+            ram_init: None,
+        };
+        let mut app = App::new(
+            opts,
+            crate::session::Session::blank(Model::Dmg),
+            false,
+            None,
+            None,
+        );
+        app.session.gb = GameBoy::new(Model::Dmg, rom).expect("valid test ROM");
+        app
+    }
+
+    /// ROM: write 0x42 to WRAM `0xC000` once, then self-loop (never touching
+    /// `0xC000` again) — a write-watchpoint on `0xC000` fires exactly once, early.
+    fn write_once_rom() -> Vec<u8> {
+        let mut rom = vec![0u8; 0x8000];
+        rom[0x0100..0x0107].copy_from_slice(&[
+            0x3E, 0x42, // ld a, 0x42
+            0xEA, 0x00, 0xC0, // ld (0xC000), a
+            0x18, 0xFE, // jr -2   (self-loop at 0x0105)
+        ]);
+        rom
+    }
+
+    /// ROM: arm a master (internal-clock) serial transfer, then self-loop — with
+    /// a peer attached to the core it stalls (lockstep) awaiting the reply byte.
+    fn master_xfer_rom() -> Vec<u8> {
+        let mut rom = vec![0u8; 0x8000];
+        rom[0x0100..0x010A].copy_from_slice(&[
+            0x3E, 0x00, // ld a, 0
+            0xE0, 0x01, // ldh (FF01), a   ; SB
+            0x3E, 0x81, // ld a, 0x81
+            0xE0, 0x02, // ldh (FF02), a   ; SC = transfer + internal clock
+            0x18, 0xFE, // jr -2
+        ]);
+        rom
+    }
+
+    const WP_C000_WRITE: Watchpoint = Watchpoint {
+        addr: 0xC000,
+        read: false,
+        write: true,
+    };
+
+    // ---- Task A: stale debugger-hit discard ----
+
+    #[test]
+    fn opening_debugger_discards_a_hit_recorded_while_closed() {
+        let mut app = app_running(write_once_rom());
+        // Debugger CLOSED but the watchpoint is armed in the live core (bgb keeps
+        // watchpoints armed regardless of the window). With the window shut,
+        // `dbg_armed()` is false, so the pacers drive plain `run_frame` — which
+        // records the hit but never consumes it.
+        app.session.gb.set_watchpoints(&[WP_C000_WRITE]);
+        app.session.gb.run_frame(); // the one 0xC000 write records a pending watch_hit
+        // Opening the debugger begins an armed wake, which drains stale hits before
+        // the first breakpoint-aware frame. Headless can't open a real window (so
+        // `dbg_armed()`/`run_breakpoints` can't fire), so we call the drain that an
+        // armed wake performs — the exact seam under test.
+        app.drain_stale_debug_hits();
+        // The CPU is parked in a self-loop that never touches 0xC000, so a genuine
+        // hit is impossible this frame: any halt here is the drained-away stale one.
+        assert_eq!(
+            app.session.gb.run_frame_until_breakpoint(&[]),
+            None,
+            "no spurious halt from a hit recorded while the debugger was closed",
+        );
+    }
+
+    #[test]
+    fn a_watchpoint_hit_after_opening_still_halts() {
+        let mut app = app_running(write_once_rom());
+        app.session.gb.set_watchpoints(&[WP_C000_WRITE]);
+        // Debugger just opened (armed): drain first, exactly as an armed wake does.
+        app.drain_stale_debug_hits();
+        // The 0xC000 write happens *this* (armed) frame, after the drain — it must
+        // still surface as a real, correctly-timed halt.
+        assert_eq!(
+            app.session.gb.run_frame_until_breakpoint(&[]),
+            Some(0xC000),
+            "a hit occurring after the debugger opened is surfaced",
+        );
+    }
+
+    // ---- Task B: linked-frame chunk cadence ----
+
+    #[test]
+    fn linked_frame_runs_the_expected_chunk_cadence() {
+        // All-NOP ROM: no serial, so the frame runs to its boundary uninterrupted.
+        let mut gb = GameBoy::new(Model::Dmg, vec![0u8; 0x8000]).unwrap();
+        let mut link = crate::link::Link::new(); // no peer: pump/pump_blocking inert
+        gb.run_frame(); // align to a frame boundary so the next span is a full frame
+        let chunks = run_chunked_linked_frame(&mut gb, &mut link);
+        // CYCLES_PER_FRAME (70224) / LINK_CHUNK_CYCLES (4096) = 17.14 ⇒ 18 slices
+        // (17 full + one partial that reaches the frame boundary).
+        assert_eq!(
+            chunks, 18,
+            "one linked frame runs in 18 chunks (17 full 4096-cycle slices + a partial)",
+        );
+    }
+
+    #[test]
+    fn linked_frame_breaks_early_on_a_silent_peer() {
+        let mut gb = GameBoy::new(Model::Dmg, master_xfer_rom()).unwrap();
+        gb.link_connect(true); // the core has a peer attached → the master goes lockstep
+        let mut link = crate::link::Link::new(); // ...but the frontend link is silent
+        let chunks = run_chunked_linked_frame(&mut gb, &mut link);
+        assert!(
+            gb.link_stalled(),
+            "the master stalled awaiting the silent peer's reply byte",
+        );
+        assert!(
+            chunks <= 2,
+            "a silent peer breaks the frame early ({chunks} chunks), not the full 18-chunk frame",
+        );
+    }
 }

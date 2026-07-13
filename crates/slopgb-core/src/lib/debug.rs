@@ -37,6 +37,20 @@ impl GameBoy {
         self.bus.exceptions()
     }
 
+    /// Drop any pending watchpoint / exception-break / profiler-break hit without
+    /// halting. The frontend calls this when the debugger *opens* (an armed wake
+    /// begins): watchpoints and the exception mask stay armed even while the
+    /// debugger is closed, so `check_access` keeps recording hits that the plain
+    /// `run_frame` path never consumes — opening would otherwise replay a stale,
+    /// wrongly-timed hit as a spurious halt. Golden-safe: it only `take`s the
+    /// debug `Option` fields (the same accessors `run_frame_until_breakpoint`
+    /// uses), advancing no cycle and touching no emulated state.
+    pub fn clear_debug_hits(&mut self) {
+        self.bus.take_watch_hit();
+        self.bus.take_exc_hit();
+        self.bus.take_prof_break_hit();
+    }
+
     /// Serialize the whole machine to bytes (bgb's File → Save state). A
     /// magic + version + ROM-fingerprint header precedes the volatile state
     /// (CPU + all peripherals). ROM bytes are *not* included — a state restores
