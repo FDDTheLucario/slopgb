@@ -26,8 +26,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libasound2-dev
 
+      # Pinned — keep in sync with rust-toolchain.toml. Unpinned @stable let a
+      # new stable release surface fresh clippy lints in CI that passed locally.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.97.0
         with:
           components: rustfmt, clippy
 
