@@ -15,6 +15,7 @@ fn blank_app() -> App {
         boot: None,
         sgb_bios: None,
         mcp_port: None,
+        ram_init: None,
     };
     App::new(opts, Session::blank(Model::Dmg), false, None, None)
 }

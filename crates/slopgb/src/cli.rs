@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use slopgb_core::Model;
+use slopgb_core::{Model, RamInit};
 
 pub(crate) const USAGE: &str = "\
 slopgb — Game Boy / Game Boy Color emulator
@@ -28,6 +28,9 @@ OPTIONS:
     --mcp-port <N>    Host an MCP server on 127.0.0.1:<N> so an LLM agent can
                       drive the debugger (disassemble/peek/cdl/vram/breakpoint/
                       registers/expr). Also via SLOPGB_MCP_PORT=<N>
+    --ram-init <SPEC> Power-on RAM: fill:HH sets cart SRAM to a byte (default
+                      fill:FF); random[:seed] fills all RAM with seeded xorshift
+                      garbage (authentic power-on). A .sav still overrides SRAM.
     -h, --help        Print this help
 
 KEYS:
@@ -64,6 +67,10 @@ pub(crate) struct Options {
     /// Port for the opt-in MCP debug server (`--mcp-port`; falls back to
     /// `SLOPGB_MCP_PORT`, resolved in `main`). `None` = no server (default).
     pub(crate) mcp_port: Option<u16>,
+    /// Power-on RAM initialisation (`--ram-init fill:HH` / `--ram-init
+    /// random[:seed]`). `None` = the deterministic 0xFF cart-SRAM default (leaves
+    /// the machine byte-identical to `GameBoy::new`).
+    pub(crate) ram_init: Option<RamInit>,
 }
 
 /// What a successful argument parse asks the program to do. Printing the
@@ -83,6 +90,7 @@ impl Options {
         let mut boot = None;
         let mut sgb_bios = None;
         let mut mcp_port = None;
+        let mut ram_init = None;
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "-h" | "--help" => return Ok(ParseOutcome::Help),
@@ -105,6 +113,10 @@ impl Options {
                 "--model" => {
                     let v = args.next().ok_or("--model requires a value")?;
                     model = Some(parse_model(&v)?);
+                }
+                "--ram-init" => {
+                    let v = args.next().ok_or("--ram-init requires a value")?;
+                    ram_init = Some(parse_ram_init(&v)?);
                 }
                 "--scale" => {
                     let v = args.next().ok_or("--scale requires a value")?;
@@ -133,7 +145,50 @@ impl Options {
             boot,
             sgb_bios,
             mcp_port,
+            ram_init,
         }))
+    }
+}
+
+/// Parse `--ram-init`: `fill:HH` (a hex byte for cart SRAM) or `random[:seed]`
+/// (a seeded xorshift over all RAM; bare `random` uses a fixed default seed).
+pub(crate) fn parse_ram_init(s: &str) -> Result<RamInit, String> {
+    let (kind, arg) = s.split_once(':').map_or((s, None), |(k, v)| (k, Some(v)));
+    match kind.to_ascii_lowercase().as_str() {
+        "fill" => {
+            let v = arg.ok_or("--ram-init fill requires a byte, e.g. fill:0xFF")?;
+            Ok(RamInit::Fill(parse_hex_u8(v)?))
+        }
+        "random" => {
+            let seed = match arg {
+                Some(v) => {
+                    parse_u64(v).map_err(|_| format!("invalid --ram-init random seed '{v}'"))?
+                }
+                None => 0xA5A5_A5A5_A5A5_A5A5,
+            };
+            Ok(RamInit::Random(seed))
+        }
+        _ => Err(format!(
+            "unknown --ram-init '{s}' (expected fill:HH or random[:seed])"
+        )),
+    }
+}
+
+/// Parse a byte written as `0xHH`, `HH` (hex) or plain decimal.
+fn parse_hex_u8(s: &str) -> Result<u8, String> {
+    let t = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X"));
+    let r = match t {
+        Some(h) => u8::from_str_radix(h, 16),
+        None => u8::from_str_radix(s, 16).or_else(|_| s.parse::<u8>()),
+    };
+    r.map_err(|_| format!("invalid byte '{s}' (expected 00-FF)"))
+}
+
+/// Parse a u64 seed as `0x…` hex or plain decimal.
+fn parse_u64(s: &str) -> Result<u64, ()> {
+    match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        Some(h) => u64::from_str_radix(h, 16).map_err(|_| ()),
+        None => s.parse::<u64>().map_err(|_| ()),
     }
 }
 

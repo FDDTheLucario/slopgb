@@ -3,6 +3,17 @@
 use super::*;
 
 impl Cartridge {
+    /// Power-on init for external RAM: overwrite every byte with `f()`. Used by
+    /// [`crate::GameBoy::init_ram`] to fill an unsaved cart's SRAM with a
+    /// deterministic constant or seeded garbage. MBC2 masks the upper nibble on
+    /// read, so a raw fill is fine. A `.sav` load ([`Self::load_save_data`])
+    /// overwrites this afterwards.
+    pub(crate) fn fill_ram(&mut self, mut f: impl FnMut() -> u8) {
+        for b in &mut self.ram {
+            *b = f();
+        }
+    }
+
     fn rtc(&self) -> Option<&Rtc> {
         match &self.mapper {
             Mapper::Mbc3 { rtc, .. } => rtc.as_ref(),

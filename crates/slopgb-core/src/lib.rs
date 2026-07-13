@@ -73,6 +73,44 @@ pub struct SgbBorder {
     raw: Box<[u8; 2176]>,
 }
 
+/// How to initialise power-on RAM, applied via [`GameBoy::init_ram`] before the
+/// machine runs. The default machine ([`GameBoy::new`]) leaves cartridge SRAM at
+/// `0xFF` and work/video RAM zeroed (a stable, golden reference); a frontend can
+/// override that for the play experience.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RamInit {
+    /// Fill the cartridge's external (battery) SRAM with a constant byte, leaving
+    /// work/video/OAM RAM at their zeroed power-on. The deterministic default
+    /// most emulators use; `Fill(0xFF)` reproduces [`GameBoy::new`]. A loaded
+    /// `.sav` overwrites the SRAM afterwards.
+    Fill(u8),
+    /// Fill ALL RAM — cartridge SRAM, work RAM, HRAM, VRAM and OAM — with a
+    /// seeded xorshift PRNG: realistic power-on garbage (e.g. the garbage tiles a
+    /// game briefly shows before clearing VRAM). Deterministic per `seed` so runs
+    /// stay reproducible; std-only, not cryptographic.
+    Random(u64),
+}
+
+/// Tiny non-cryptographic xorshift64 PRNG for [`RamInit::Random`]. std-only, no
+/// deps; deterministic per seed.
+struct XorShift64(u64);
+
+impl XorShift64 {
+    fn new(seed: u64) -> Self {
+        // A zero state is a xorshift fixed point; force it non-zero.
+        Self(seed | 1)
+    }
+
+    fn next_u8(&mut self) -> u8 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.0 = x;
+        (x >> 24) as u8
+    }
+}
+
 /// A decoded SGB SOUND ($08) command: two sound-effect IDs, an
 /// attenuation/flags byte and the effect-bank selector. The core decodes and
 /// queues these; Phase 3 (the S-DSP) drains the queue via
@@ -175,6 +213,22 @@ impl GameBoy {
     pub fn new(model: Model, rom: Vec<u8>) -> Result<Self, CartridgeError> {
         let cart = cartridge::Cartridge::from_bytes(rom)?;
         Ok(Self::post_boot(model, cart))
+    }
+
+    /// Initialise power-on RAM per `init` (see [`RamInit`]). Call this BEFORE the
+    /// machine runs any frame and before any `.sav` load — a frontend seam for
+    /// the play experience. The golden/test path never calls it, so [`Self::new`]'s
+    /// stable RAM (cartridge SRAM `0xFF`, work/video zeroed) stays byte-identical.
+    pub fn init_ram(&mut self, init: RamInit) {
+        match init {
+            RamInit::Fill(byte) => self.bus.cartridge_mut().fill_ram(|| byte),
+            RamInit::Random(seed) => {
+                let mut rng = XorShift64::new(seed);
+                self.bus.cartridge_mut().fill_ram(|| rng.next_u8());
+                self.bus.fill_work_ram(|| rng.next_u8());
+                self.bus.ppu_mut().fill_video_ram(|| rng.next_u8());
+            }
+        }
     }
 
     /// The direct post-boot machine (no boot ROM executed): registers, hardware

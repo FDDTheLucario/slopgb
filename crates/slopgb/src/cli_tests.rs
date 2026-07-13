@@ -13,6 +13,44 @@ fn parse_run(args: &[&str]) -> Result<Options, String> {
 }
 
 #[test]
+fn ram_init_parses_fill_and_random() {
+    use slopgb_core::RamInit;
+    assert_eq!(
+        parse_run(&["g.gb"]).unwrap().ram_init,
+        None,
+        "default: none"
+    );
+    assert_eq!(
+        parse_run(&["--ram-init", "fill:0xA5", "g.gb"])
+            .unwrap()
+            .ram_init,
+        Some(RamInit::Fill(0xA5))
+    );
+    assert_eq!(
+        parse_run(&["--ram-init", "fill:ff", "g.gb"])
+            .unwrap()
+            .ram_init,
+        Some(RamInit::Fill(0xFF)),
+        "bare hex byte"
+    );
+    assert_eq!(
+        parse_run(&["--ram-init", "random:42", "g.gb"])
+            .unwrap()
+            .ram_init,
+        Some(RamInit::Random(42))
+    );
+    assert!(matches!(
+        parse_run(&["--ram-init", "random", "g.gb"])
+            .unwrap()
+            .ram_init,
+        Some(RamInit::Random(_))
+    ));
+    assert!(parse(&["--ram-init", "bogus", "g.gb"]).is_err());
+    assert!(parse(&["--ram-init", "fill:zz", "g.gb"]).is_err());
+    assert!(parse(&["--ram-init"]).is_err(), "missing value");
+}
+
+#[test]
 fn parse_rom_only_defaults() {
     let opts = parse_run(&["game.gb"]).unwrap();
     assert_eq!(opts.rom, Some(PathBuf::from("game.gb")));

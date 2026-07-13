@@ -89,6 +89,15 @@ impl Ppu {
         self.oam[usize::from(addr - 0xFE00)]
     }
 
+    /// Power-on init for VRAM (both CGB banks) + OAM: overwrite every byte with
+    /// `f()`. Used by [`crate::GameBoy::init_ram`] for the seeded-random power-on
+    /// (authentic garbage tiles at boot). Golden-safe: never on a `new` machine.
+    pub(crate) fn fill_video_ram(&mut self, mut f: impl FnMut() -> u8) {
+        for b in self.vram.iter_mut().chain(self.oam.iter_mut()) {
+            *b = f();
+        }
+    }
+
     /// Whole 16 KiB VRAM for the debug VRAM viewer (bank 0 in `[..0x2000]`,
     /// bank 1 in `[0x2000..]`). Side-effect-free.
     pub(crate) fn debug_vram(&self) -> &[u8; 0x4000] {

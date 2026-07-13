@@ -228,6 +228,8 @@ mod boot;
 mod cdl;
 #[path = "lib_tests/debug.rs"]
 mod debug;
+#[path = "lib_tests/ram.rs"]
+mod ram;
 #[path = "lib_tests/run.rs"]
 mod run;
 #[path = "lib_tests/savestate.rs"]

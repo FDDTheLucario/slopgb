@@ -6,7 +6,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use slopgb_core::{CLOCK_HZ, CartridgeError, GameBoy, Model};
+use slopgb_core::{CLOCK_HZ, CartridgeError, GameBoy, Model, RamInit};
 
 use crate::windows::options::ModelChoice;
 
@@ -43,6 +43,9 @@ pub(crate) struct Session {
     /// "GBC + initial SGB border" system mode (`ModelChoice::CgbBorder`). A
     /// machine property, so a power-cycle (`reset`) re-applies it.
     sgb_border: bool,
+    /// Power-on RAM initialisation (`--ram-init`), re-applied on a power-cycle.
+    /// `None` = the deterministic 0xFF cart-SRAM default.
+    ram_init: Option<RamInit>,
 }
 
 impl Session {
@@ -69,6 +72,7 @@ impl Session {
             boot: OwnedBootSpec::default(),
             sgb_bios: None,
             sgb_border: false,
+            ram_init: None,
         }
     }
 
@@ -76,7 +80,12 @@ impl Session {
     /// and restore `<rom>.sav` if present. `boot` selects the boot ROM to
     /// execute from power-on for the resolved model (Options paths over
     /// `--boot`); none/none-matching starts post-boot.
-    pub(crate) fn load(path: &Path, choice: ModelChoice, boot: &BootSpec) -> Result<Self, String> {
+    pub(crate) fn load(
+        path: &Path,
+        choice: ModelChoice,
+        boot: &BootSpec,
+        ram_init: Option<RamInit>,
+    ) -> Result<Self, String> {
         let rom_bytes =
             fs::read(path).map_err(|e| format!("cannot read ROM '{}': {e}", path.display()))?;
         let (model, sgb_border) = choice.resolve(&rom_bytes);
@@ -85,6 +94,7 @@ impl Session {
             rom_bytes.clone(),
             boot.resolve(model).as_deref(),
             sgb_border,
+            ram_init,
         )
         .map_err(|e| format!("cannot load ROM '{}': {e}", path.display()))?;
         let sav_path = path.with_extension("sav");
@@ -121,6 +131,7 @@ impl Session {
             boot: boot.to_owned(),
             sgb_bios: None,
             sgb_border,
+            ram_init,
         })
     }
 
@@ -191,6 +202,7 @@ impl Session {
             self.rom_bytes.clone(),
             boot.as_deref(),
             self.sgb_border,
+            self.ram_init,
         ) {
             Ok(mut gb) => {
                 if let Ok(data) = fs::read(&self.sav_path) {
@@ -216,7 +228,13 @@ impl Session {
         }
         self.flush_save();
         let boot = self.boot.resolve(model);
-        match build_gb(model, self.rom_bytes.clone(), boot.as_deref(), sgb_border) {
+        match build_gb(
+            model,
+            self.rom_bytes.clone(),
+            boot.as_deref(),
+            sgb_border,
+            self.ram_init,
+        ) {
             Ok(mut gb) => {
                 if let Ok(data) = fs::read(&self.sav_path) {
                     let _ = gb.load_save_data(&data);
@@ -459,6 +477,7 @@ fn build_gb(
     rom: Vec<u8>,
     boot: Option<&[u8]>,
     sgb_border: bool,
+    ram_init: Option<RamInit>,
 ) -> Result<GameBoy, CartridgeError> {
     // "GBC + initial SGB border": grab the game's own SGB border from an initial
     // SGB run BEFORE `rom` is consumed by the build below, then show it while the
@@ -484,6 +503,12 @@ fn build_gb(
         None => GameBoy::new(model, rom),
     };
     let mut gb = build()?;
+    // Power-on RAM init (before any `.sav` load, which overwrites cart SRAM):
+    // `None` keeps the deterministic 0xFF cart-SRAM default (byte-identical to
+    // `GameBoy::new`); a frontend `--ram-init` overrides it.
+    if let Some(init) = ram_init {
+        gb.init_ram(init);
+    }
     if sgb_border {
         match &border {
             Some(b) => gb.install_sgb_border(b),

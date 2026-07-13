@@ -108,6 +108,7 @@ fn main() {
             rom,
             model_choice,
             &session::BootSpec::cli(boot_rom.as_deref()),
+            opts.ram_init,
         ) {
             Ok(s) => (s, true),
             Err(e) => {
@@ -868,7 +869,12 @@ impl App {
         // if the dropped file is the currently loaded ROM, loading first
         // would resurrect a stale save and later overwrite the fresh one.
         self.session.flush_save();
-        match Session::load(path, self.settings.model, &self.boot_spec()) {
+        match Session::load(
+            path,
+            self.settings.model,
+            &self.boot_spec(),
+            self.opts.ram_init,
+        ) {
             Ok(mut new) => {
                 new.set_sgb_bios(self.sgb_bios.clone());
                 self.session = new;

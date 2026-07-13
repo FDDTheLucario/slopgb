@@ -88,6 +88,15 @@ impl Interconnect {
         &mut self.cart
     }
 
+    /// Power-on init for work RAM + HRAM: overwrite every byte with `f()`. Used
+    /// by [`crate::GameBoy::init_ram`] for the seeded-random ("realistic garbage")
+    /// power-on. Golden-safe: never called on a `new` (no-boot) machine.
+    pub(crate) fn fill_work_ram(&mut self, mut f: impl FnMut() -> u8) {
+        for b in self.wram.iter_mut().chain(self.hram.iter_mut()) {
+            *b = f();
+        }
+    }
+
     /// Drain captured serial output (test-harness hook; see
     /// `Serial::take_output`).
     pub(crate) fn take_serial_output(&mut self) -> Vec<u8> {
