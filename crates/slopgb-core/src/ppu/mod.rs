@@ -270,15 +270,15 @@ pub struct Ppu {
     frame_count: u64,
 
     /// The CPU has written an LCD register (FF40-FF4B) since power-on — the boot
-    /// hand-off PPU frame is no longer pristine. (Inert deferred-clock scratch:
-    /// the DMG boot-frame read law it gated was removed with the deferred
-    /// clock.) The `poweron_*` ROMs read the untouched boot
-    /// frame (pure NOP sled, no PPU write), while every other early reader
-    /// configures the PPU first — `lcdon_to_*`/`oam_read`/`sprite`/`win` toggle
+    /// hand-off PPU frame is no longer pristine. Inert: the DMG boot-frame read
+    /// law it gated — distinguishing the `poweron_*` ROMs' untouched boot frame
+    /// (pure NOP sled, no PPU write) from every other early reader, which
+    /// configures the PPU first (`lcdon_to_*`/`oam_read`/`sprite`/`win` toggle
     /// the LCD (FF40), the gambatte kernel/halt STAT-ISR tests arm a mode
-    /// interrupt (FF41) — and reads its own frame at cc+0. Set on the tier2 CPU
-    /// write path only (`interconnect/cycle.rs`), so the boot ROM's own register
-    /// install does not trip it; never read in production → byte-identical OFF.
+    /// interrupt (FF41)) before reading its own frame at cc+0 — was removed
+    /// along with the deferred clock that used to consult it. Never set to
+    /// `true` and never read anywhere in the crate today (only round-tripped
+    /// through save-state, `state.rs`): dead scratch, not a live gate.
     lcd_regs_written: bool,
 
     // Registers.
@@ -287,16 +287,18 @@ pub struct Ppu {
     stat_en: u8,
     /// The engine's FF41 enable view (SameBoy reads the two-phase
     /// `io_registers[GB_IO_STAT]` itself in `GB_STAT_update`). Mirrors
-    /// `stat_en` everywhere except the staged window after a CGB FF41 write
-    /// on the tier2/LE path: SameBoy's `GB_CONFLICT_STAT_CGB[_DOUBLE]`
+    /// `stat_en` everywhere except the staged window after a CGB FF41 write:
+    /// SameBoy's `GB_CONFLICT_STAT_CGB[_DOUBLE]`
     /// (sm83_cpu.c:168-188) commits the write in TWO phases — at T0 every bit
     /// lands EXCEPT the LYC enable (bit 6, single speed) / the HBlank enable
     /// (bit 3, double speed), which hold their OLD value one more T-cycle.
     /// The failing lycEnable want-pairs straddle exactly that lag (a disable
     /// whose phase-1 window covers the `ly_for_comparison` latch dot still
     /// fires the LYC edge — `ff41_disable_2` dual-traced: SBWRITE val=40
-    /// phase-1 then the ly6 STAT_IRQ then val=00). Production/flag-off never
-    /// reads this (only `stat_update_tick` consumes it) → byte-identical OFF.
+    /// phase-1 then the ly6 STAT_IRQ then val=00). Live: read every dot by
+    /// `stat_update_tick` (the production STAT-IRQ dispatch run from
+    /// `Ppu::tick`, `engine.rs`), which gates the mode-0/mode-2/LYC IRQ
+    /// sources against it and so directly drives the pending STAT interrupt.
     eng_stat: u8,
     /// Pending [`Self::eng_stat`] transition from a CGB single-speed FF41
     /// write: `(phase1, final, pre_write_line_high, mfi_at_t0,
@@ -521,16 +523,19 @@ pub struct Ppu {
     /// SameBoy's frame. Consulted only under `eager`; production never
     /// reaches it.
     read_carried: bool,
-    /// Set by the interconnect's eager CGB halt wake (`halt_wake_mid_impl`) when
+    /// Set by the interconnect's CGB halt wake (`halt_wake_mid_impl`) when
     /// the halt exits on the mode-0 STAT rise: the halt-woken IME=1 dispatch's
     /// first FF41 read is a re-fetch M-cycle that SameBoy resolves at the next
-    /// line's OAM (mode 2), which the eager read reaches only once its +8hd cc+4
+    /// line's OAM (mode 2), which the read reaches only once its +8hd cc+4
     /// debt has crossed the line boundary (`read_pos_hd >= LINE_DOTS*2`). Stays
     /// set across the sub-boundary polls, fires+clears on the boundary-crossing
     /// FF41 read (`vis_mode_read`), backstop-cleared at the next halt entry.
     /// Only the sub-M-cycle wake peek separates the want-0 siblings off this read
     /// position, so the flag has no collateral (−9 without the peek).
-    /// Armed only on the eager clock (`eager`) → byte-identical OFF.
+    /// Live: consulted unconditionally by `Ppu::read`'s FF41 case
+    /// (`halt_refetch_read_override`, `regs.rs`) to override the STAT mode
+    /// bits handed back to the CPU — forcing it off changes
+    /// `golden_fingerprint` (confirmed by probe).
     halt_refetch: bool,
     /// The externally visible mode-0 flip (STAT mode bits, OAM/VRAM
     /// unblock): rises with `m0_src` ahead of the pipe end (see
@@ -772,40 +777,46 @@ pub struct Ppu {
     wy2: u8,
     /// Dots until `wy2` catches up with the architectural WY (CGB only).
     wy2_delay: u8,
-    /// **Shadow WY-trigger (tier2 + CGB only; byte-identical OFF —
-    /// these fields are never updated nor read on the production path).**
-    /// SameBoy latches `wy_triggered` from a *continuous* `WY == LY` compare
-    /// during the visible frame (`display.c` `wy_check`), whereas slopgb's
-    /// production `wy_latch` samples only at the three gambatte weMaster dots
-    /// (line 0 dot 2, dots 450/454) — so a mid-line late-WY write that SameBoy
-    /// catches is missed by slopgb's discrete sampler. This sticky latch
-    /// re-derives SameBoy's decision for the FF41-read window-length law
-    /// ([`Self::vis_mode_read`]) without touching `line_render_done` / the
-    /// render. Reset at line 0; set the first dot `win_en && wy2 == ly`.
+    /// Shadow WY-trigger (CGB only). SameBoy latches `wy_triggered` from a
+    /// *continuous* `WY == LY` compare during the visible frame (`display.c`
+    /// `wy_check`), whereas slopgb's production `wy_latch` samples only at the
+    /// three gambatte weMaster dots (line 0 dot 2, dots 450/454) — so a
+    /// mid-line late-WY write that SameBoy catches is missed by slopgb's
+    /// discrete sampler. This sticky latch re-derives SameBoy's decision for
+    /// the FF41-read window-length law ([`Self::vis_mode_read`]) without
+    /// touching `line_render_done` / the render. Reset at line 0; set the
+    /// first dot `win_en && wy2 == ly`. Live: consulted by `vis_exit_hd`'s
+    /// bare-exit arm and by `win_extends_sb` (`stat_irq/read_laws_exit.rs`),
+    /// and by the FF43 write-strobe debt selection in `stage_write`
+    /// (`regs/stage.rs`) — forcing it off changes `golden_fingerprint`
+    /// (confirmed by probe).
     wy_trig_sb: bool,
     /// The (line, dot) the shadow latch was set — the window extends mode 3 on
     /// a line iff the latch was set on an earlier line OR on this line at/before
     /// the WX-activation dot ([`Render::wx_match_dot`]). See `wy_trig_sb`.
     wy_trig_sb_line: u8,
     wy_trig_sb_dot: u16,
-    /// The POST-SWITCH bare-exit law latches (tier2-only writers;
-    /// byte-identical OFF). The speedchange m3stat 4-variable exit table
-    /// collapses to per-class rp-frame exits
+    /// The POST-SWITCH bare-exit law latches. The speedchange m3stat
+    /// 4-variable exit table collapses to per-class rp-frame exits
     /// `E = C + 2*(SCX&7)` consumed by [`Self::vis_exit_hd`]:
     ///   SS post-leave: `C = 504 + leave_k − 4*[lcd_enable_in_ds]`
     ///   DS post-enter: `C = 502 + leave_k` (leave_k = 2 when never left)
     /// scoped to dances whose FIRST LCD-on switching STOP sits MID-FRAME
-    /// (line < 144): the whole tier2 DS/SS suite is calibrated on the
-    /// VBlank/boot-prologue frame (kernel `_ds`, lcd_offset offset1-3,
-    /// gdma_cycles all anchor at ly144 — measured), which already absorbs
-    /// the switch error; only the mid-frame-anchored speedchange dances
-    /// (v1/2/3/4/5 ly44 + m2int lcdoff variants, first STOP at ly68/ly133)
-    /// expose the true post-switch exit. `stop_anchor_midframe` is the
-    /// first-LCD-on-STOP-since-enable position latch, taken at the STOP
+    /// (line < 144): the VBlank/boot-prologue-anchored suite (kernel `_ds`,
+    /// lcd_offset offset1-3, gdma_cycles all anchor at ly144 — measured)
+    /// already absorbs the switch error; only the mid-frame-anchored
+    /// speedchange dances (v1/2/3/4/5 ly44 + m2int lcdoff variants, first
+    /// STOP at ly68/ly133) expose the true post-switch exit. `stop_anchor_midframe`
+    /// is the first-LCD-on-STOP-since-enable position latch, taken at the STOP
     /// DECISION instant (the lcdoff dances anchor at their STOP#2 decision,
     /// ly0 dot12 — the DS re-enable reset the line counter); an LCD enable
     /// re-anchors the frame and clears it (SameBoy `double_speed_alignment
     /// = 0` at enable — the e-law: the DS enable quantizes the phase).
+    /// Live: `vis_exit_hd` reads `stop_anchor_midframe` to gate both the SS
+    /// and DS post-switch exit arms below (which in turn read
+    /// `stop_leave_lcd_on`/`stop_leave_k`/`lcd_enable_in_ds`), directly off
+    /// `Ppu::read`'s FF41 dispatch — forcing `stop_anchor_midframe` off
+    /// changes `golden_fingerprint` (confirmed by probe).
     stop_anchor_set: bool,
     stop_anchor_midframe: bool,
     /// A DS→SS STOP leave completed with the LCD enabled (the SameBoy
@@ -829,7 +840,10 @@ pub struct Ppu {
     /// `win_en && self.wy == ly`, immediate WY) re-derives SameBoy's trigger;
     /// when slopgb's render triggered (`win_active`) but this did NOT
     /// (`!wy_trig_sb_raw`), the line is SameBoy-bare and the FF41 read law
-    /// ([`Self::vis_mode_read`]) forces mode 0. Reset at line 0. tier2 + CGB.
+    /// ([`Self::vis_mode_read`]) forces mode 0. Reset at line 0; maintained
+    /// for both models. Live: read by `vis_exit_hd`'s DMG arm D6 and CGB
+    /// arm 6 (`stat_irq/read_laws_exit.rs`) — forcing it off changes
+    /// `golden_fingerprint` on both models (confirmed by probe).
     wy_trig_sb_raw: bool,
     /// The BOUNDARY-WY cross-line trigger: a WY write
     /// committing in a line's tail (dot >= 452) or head (dot < 4) whose
@@ -838,7 +852,10 @@ pub struct Ppu {
     /// `current_line`), while slopgb's render (`wy_latch`) and the
     /// wy2-lagged shadow both miss it — every later line renders bare
     /// where SameBoy draws the window. Frame-sticky like `wy_triggered`;
-    /// reset at the frame top. Tier2 + CGB only (byte-identical OFF).
+    /// reset at the frame top; maintained for both models. Live: read by
+    /// `vis_exit_hd`'s DMG arm D1 and arm 7 (`stat_irq/read_laws_exit.rs`),
+    /// gating the FF41 mode-3 exit — forcing it off changes
+    /// `golden_fingerprint` (confirmed by probe).
     wy_xline_trig: bool,
     /// The last CPU VRAM write ATTEMPT's (line, dot), for the
     /// DS line-end VRAM read release: a readback following a same-line write
