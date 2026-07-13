@@ -4,9 +4,9 @@
 //! `tier2` (the `tier2_*` reclock window tests) + `eager` (the `eager_*`
 //! clock re-host window tests).
 
-#[path = "window/tier2.rs"]
-mod tier2;
 #[path = "window/eager.rs"]
 mod eager;
+#[path = "window/tier2.rs"]
+mod tier2;
 
 // Flag-on read-trace probe module; `#[ignore]`'d so it never runs in the gate.

@@ -225,7 +225,6 @@ fn tier2_window_late_wy_untrigger_passes() {
     }
 }
 
-
 /// The window visible-mode-3 LENGTH law (the FF41-read
 /// half of the atomic reclock). A triggering window's SameBoy mode-3→0 exit is
 /// `SBex = 263 + SCX&7` (cfl); the CPU-visible FF41 exit is `SBex − read_offset`.
