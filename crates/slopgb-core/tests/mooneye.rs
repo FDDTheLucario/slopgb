@@ -150,7 +150,7 @@ fn sprite_priority() {
     common::run_sprite_priority();
 }
 
-/// Red-before-green pin for the eager-value **construction** path (`#11ds`):
+/// Red-before-green pin for the eager-value **construction** path:
 /// `GameBoy::new_with_eager` arms the eager reclock from the construction
 /// default (the real C3 flip), and `post_boot_inner`'s deferred re-arm must
 /// propagate the eager flags to the PPU engine AFTER the boot hand-off. Without

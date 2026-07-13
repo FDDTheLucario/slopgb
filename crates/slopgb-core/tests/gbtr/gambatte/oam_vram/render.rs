@@ -255,7 +255,7 @@ fn tier2_dmg_m3_render_scy_spx08_passes() {
 /// length or FF41-read-law coupling (their read laws sample ARCH state,
 /// `commit_eff` records no read-law input), so EV DMG two-bin stays 102 and the
 /// length-coupled registers (FF40/FF43/FF4B) keep zero debt (a debt there breaks
-/// the `late_enable_afterVblank` gambatte set, #11ck). Same 5 legs as the tier2
+/// the `late_enable_afterVblank` gambatte set). Same 5 legs as the tier2
 /// `tier2_dmg_m3_render_palette_halfdot_passes` pin; production byte-identical
 /// (`eager_value`-gated). Recovers the mealybug rows the flip regressed.
 #[test]
@@ -290,7 +290,7 @@ fn eager_dmg_m3_render_palette_passes() {
 /// activation/reactivation change too early (the eager stage starts at cc+0 vs
 /// tier2's cc+4). WX has the SMALLEST render stage (dots=0 +1) so it needs the
 /// LARGEST frame debt (12hd SS) to reach the ~14hd absolute commit the per-dot
-/// WX comparator wants (`regs.rs::stage_write`). The render/read SPLIT #11bq
+/// WX comparator wants (`regs.rs::stage_write`). The render/read SPLIT
 /// built for tier2 carries over: the un-catch READ law's `wx_write_dot` is
 /// recorded in `Ppu::write` at the eager cc+0, so the debt shifts only the
 /// render view — the FF41 mode-3-length reads are untouched (EV DMG two-bin

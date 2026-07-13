@@ -54,7 +54,7 @@ const SUITE_DIR: &str = "age-test-roms";
 ///   single ladder;
 /// * the m3-bg-* screenshot legs are the class-H fetch-grid residue
 ///   (same families as baselines/mealybug.txt).
-// C3 flip (2026-07-12, #11cu): the eager-value clock default made
+// C3 flip (2026-07-12): the eager-value clock default made
 // ei-halt-dmgC-cgbBCE ([Cgb]+[Dmg]), m3-bg-lcdc-ds [Cgb],
 // stat-int-dmgC-cgbBCE [Dmg] and stat-int-ncmBCE [Cgb] pass — removed.
 const BASELINE: &[&str] = &[
@@ -405,7 +405,7 @@ fn age_matrix() {
 /// Self-check for the inventory hook: claimed and exempted are disjoint and
 /// together cover exactly the on-disk `.gb`/`.gbc` set, and the exempted
 /// set is exactly the nine documented revision-skips.
-/// Red-before-green pin for the #11ej eager per-register CGB write-commit debt
+/// Red-before-green pin for the eager per-register CGB write-commit debt
 /// (`Ppu::stage_write` palette `6 + 2*parity`): age's m3-bg-bgp is a DMG-compat
 /// mid-mode-3 BGP change that passes tier2 (identical whole-dot render) and
 /// fails the eager clock ONLY on the cc+0 write-commit position. Fails with the

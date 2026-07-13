@@ -16,7 +16,7 @@ use crate::common::png;
 /// corrupt checkout, not a test failure.
 pub fn boot(rom: &[u8], model: Model) -> GameBoy {
     // `SLOPGB_GBTR_EAGER=1` boots every default-path case on the coherent
-    // eager-value C3-flip (`new_with_eager`, the #11ds construction path) so a
+    // eager-value C3-flip (`new_with_eager` construction path) so a
     // whole suite can be diffed OFF-vs-flip for the eager re-host measurement.
     // Unset = the production frame, byte-identical.
     if std::env::var_os("SLOPGB_GBTR_EAGER").is_some() {

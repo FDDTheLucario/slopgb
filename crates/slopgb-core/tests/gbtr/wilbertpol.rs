@@ -242,7 +242,7 @@ fn run_protocol_case(rom: &[u8], model: Model) -> Result<(), String> {
     harness::check_fib(&gb)
 }
 
-/// Red-before-green pin (#11ek): the six `ly_lyc_153_write-{GS,C}` rom×model
+/// Red-before-green pin: the six `ly_lyc_153_write-{GS,C}` rom×model
 /// cases pass on the EAGER-VALUE clock (the C3-flip target). They pass on OFF
 /// (so they are absent from the OFF `wilbertpol_matrix` baseline) but the eager
 /// dispatch frame shifts the line-153 LYC-coincidence STAT delivery relative to

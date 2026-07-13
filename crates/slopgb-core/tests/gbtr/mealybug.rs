@@ -328,7 +328,7 @@ fn mealybug_baseline_has_no_duplicate_keys() {
     assert_eq!(unique.len(), baseline.len(), "duplicate baseline entries");
 }
 
-/// Red-before-green pin for the #11ej eager per-register CGB write-commit debt
+/// Red-before-green pin for the eager per-register CGB write-commit debt
 /// (`Ppu::stage_write`, palette `6 + 2*parity`, WX `12`): these DMG-compat
 /// mode-3 pixel legs pass tier2 (identical whole-dot render code) and fail the
 /// eager clock ONLY on the cc+0 write-commit position. Fails with the CGB
@@ -360,7 +360,7 @@ fn mealybug_eager_cgb_m3_writecommit_passes() {
     }
 }
 
-/// Red-before-green pin for the #11el eager DMG SCX POST-match write-commit debt
+/// Red-before-green pin for the eager DMG SCX POST-match write-commit debt
 /// (`Ppu::stage_write`, FF43 `hunt_done && dot > hunt_match_dot => 6`). A mid-
 /// mode-3 SCX write landing AFTER this line's fine-scroll comparator lock is a
 /// pure coarse/pixel tile shift; its eager cc+0 commit lands the tile column 4
@@ -371,9 +371,9 @@ fn mealybug_eager_dmg_m3_scx_high_writecommit_passes() {
     expect_ppu_eager_dmg("m3_scx_high_5_bits");
 }
 
-/// Red-before-green pin for the #11em eager DMG SCX PRE-match BG-line write-commit
+/// Red-before-green pin for the eager DMG SCX PRE-match BG-line write-commit
 /// debt (`Ppu::stage_write`, FF43 `!hunt_done && !glitch_line && !wy_trig_sb =>
-/// 6`). #11el mis-refuted this row as "genuine length coupling"; the trace shows
+/// 6`). An earlier pass mis-refuted this row as "genuine length coupling"; the trace shows
 /// the OLD SCX=0 already matched the fine-scroll comparator at mode3_dot 5
 /// (discard 0, OFF/tier2), so the write is a pure coarse shift — the eager cc+0
 /// commit lands ~3 dots early, RE-OPENS the comparator (re-match dot 91, discard 2

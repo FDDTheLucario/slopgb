@@ -2,8 +2,8 @@
 
 use super::super::*;
 
-/// The DMG late-WY write-side latch pair RE-HOSTED onto the eager clock (L2,
-/// #11dc). The #11ck CGB slice-2 cross-line latch was CGB-scoped; the DMG
+/// The DMG late-WY write-side latch pair RE-HOSTED onto the eager clock (L2).
+/// The CGB slice-2 cross-line latch was CGB-scoped; the DMG
 /// read-frame WY laws (`vis_exit_hd` arms D6/D1/7) already run under
 /// `eager_value`, but the two DMG-scoped write-side latches in
 /// `regs.rs::write` (FF4A) stayed `tier2_reclock`-only: the HEAD-write
@@ -57,8 +57,8 @@ fn eager_dmg_late_wy_passes() {
     }
 }
 
-/// The DMG late-WY `_1` boundary siblings RE-HOSTED onto the eager clock (L2,
-/// #11di). The `_2` pairs above land BEFORE the render draws (a same-line
+/// The DMG late-WY `_1` boundary siblings RE-HOSTED onto the eager clock (L2).
+/// The `_2` pairs above land BEFORE the render draws (a same-line
 /// commit); the `_1` writes commit ONE dot past the head, so on the eager clock
 /// the wy2-lagged render behaves differently than tier2's deferred frame, and
 /// the write-latch alone (`eager_dmg_late_wy_passes`) does not recover them.
@@ -116,8 +116,8 @@ fn eager_dmg_late_wy1_rehost_passes() {
     }
 }
 
-/// The three DMG window-exit latch RECALIBRATIONS for the eager read frame
-/// (#11ed): each `_1`/`_2` (or `_0`/`_2`) sibling pair differs by a whole-M-cycle
+/// The three DMG window-exit latch RECALIBRATIONS for the eager read frame:
+/// each `_1`/`_2` (or `_0`/`_2`) sibling pair differs by a whole-M-cycle
 /// NOP that shifts a WRITE, which slopgb latches as a representable render dot;
 /// the arm thresholds were off vs the eager cc+0 read frame.
 ///  (1) `late_reenable{,_wx0f}_2` (out0): arm-D5 reenable — the eager clock
@@ -170,7 +170,7 @@ fn eager_dmg_window_latch_recalib_passes() {
 }
 
 /// The five DMG STAT-source RE-LATCH recalibrations for the eager read/write
-/// frame (#11ee): each `_1`/`_2` (or `_2`/`_3`) sibling pair differs by a
+/// frame: each `_1`/`_2` (or `_2`/`_3`) sibling pair differs by a
 /// whole-M-cycle NOP that shifts a WRITE, which the eager cc+0 frame records a
 /// full M-cycle before the tier2 cc+4 frame the consuming law was calibrated
 /// against.
@@ -229,8 +229,8 @@ fn eager_dmg_stat_relatch_passes() {
     }
 }
 
-/// The 8 CGB double-speed STAT-bar rows re-latched for the eager frame
-/// (#11ef), the DS twins of the SS/DMG re-latch families. Each was declared a
+/// The 8 CGB double-speed STAT-bar rows re-latched for the eager frame,
+/// the DS twins of the SS/DMG re-latch families. Each was declared a
 /// "dispatch/emission/floor" by read-debt reasoning; the ROM-binary `cmp -l` →
 /// full-trace method finds a representable whole-M-cycle latch in every one.
 /// (a) the glitch-line mode-0 read-view mask (`ff0f_cgb_ds_glitch_m0_mask`) —

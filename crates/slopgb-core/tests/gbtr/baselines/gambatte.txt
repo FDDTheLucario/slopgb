@@ -951,7 +951,7 @@ gambatte/oam_access/prewrite_lcdoffset1_1_cgb04c_out1.gbc [Cgb]
 # cases incl. mealybug photos), not an `event_phase` offset. Not attempted; the
 # ceiling is pinned by `stat_mode_override_requires_double_speed`.
 
-# --- C3 FLIP swap block (2026-07-12, #11cu) ---
+# --- C3 FLIP swap block (2026-07-12) ---
 # The eager-value clock became the production default (interconnect.rs
 # leading_edge_reads/eager_value flipped true). 327 rows above now pass and
 # were removed; the 44 rows below are the eager-flip's SameBoy-FAIL trades —

@@ -148,7 +148,7 @@ const BASELINE: &[&str] = &[
     // already.
     // interrupt: none — ei_delay_halt (the EI one-instruction IME delay
     // chained into a HALT wake) now passes under the C3 eager-value flip
-    // (2026-07-12, #11cu; the coherent dispatch frame resolves its
+    // (2026-07-12; the coherent dispatch frame resolves its
     // halt-wake intra-cycle IF view).
     // sgb: none — both MLT_REQ command tests pass via the joypad's SGB
     // packet receiver + MLT_REQ multiplexer (src/joypad.rs `Sgb`).

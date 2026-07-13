@@ -848,7 +848,7 @@ fn eager_halt_entry_m0_peek_passes_dmg() {
 }
 
 /// CGB DOUBLE-SPEED mode-2→3 ENTRY back-date RE-HOSTED onto the eager clock
-/// (#11da, L1). The eager cc+0 FF41 value peek (`leading_edge_sample`) samples
+/// (L1). The eager cc+0 FF41 value peek (`leading_edge_sample`) samples
 /// the PPU pre-tick, a DS M-cycle (2 dots) before the trailing cc+4 view, so a
 /// line-start FF41 read straddling the mode-2→3 boundary saw the un-shifted
 /// dot-84 entry as mode 2 where SameBoy's cc+4 view reads mode 3. The DS entry
@@ -904,14 +904,14 @@ fn eager_ds_mode3_entry_passes() {
     }
 }
 
-/// The eager FF0F read-frame peek (`interconnect/bus.rs`, #11db read-frame slice).
+/// The eager FF0F read-frame peek (`interconnect/bus.rs`, read-frame slice).
 ///
 /// The CGB LYC/STAT engine rise lands beyond the eager cc+0 FF0F read, so the
 /// raw `intf` misses the deterministically-imminent bit SameBoy's events-first
 /// read frame has already folded. The eager read ORs in
 /// `Ppu::ff0f_stat_peek() & !ff0f_ly0_pulse_mask()` — the same verdict-only peek
 /// the tier2 `read_deferred` path applies, the same VALUE-at-cc+4 shape as the
-/// halt-entry peek (#11cv). Recovers 4 CGB TRUE-bar rows (all SameBoy-PASS) +
+/// halt-entry peek. Recovers 4 CGB TRUE-bar rows (all SameBoy-PASS) +
 /// 2 DMG, zero drops; EV CGB 348→344, EV DMG 85→83.
 #[test]
 fn eager_ff0f_read_peek_passes() {

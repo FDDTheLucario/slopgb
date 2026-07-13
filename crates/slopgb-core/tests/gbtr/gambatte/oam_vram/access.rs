@@ -577,7 +577,7 @@ fn tier2_sprite_m3stat_ds_passes() {
     }
 }
 
-/// CGB DOUBLE-SPEED accessibility RE-HOSTED onto the eager clock (#11da, L1).
+/// CGB DOUBLE-SPEED accessibility RE-HOSTED onto the eager clock (L1).
 /// Under `eager_value` the OAM/VRAM/palette read still resolved against the
 /// production `m0_access_edge`/`pal_access_edge` whole-M-cycle straddle stamp,
 /// which is mis-framed at double speed (the eager mode-0 flip lands at the
@@ -590,7 +590,7 @@ fn tier2_sprite_m3stat_ds_passes() {
 /// speed keeps the stamp; production + tier2-off byte-identical. The `_1`
 /// siblings are the regression guards (must stay blocked). The lcd-offset
 /// `preread_ds_lcdoffset1_1` accessibility row stays parked (the STOP-shift
-/// `lcd_shift_dots` frame is unported on the eager clock, #11bz).
+/// `lcd_shift_dots` frame is unported on the eager clock).
 #[test]
 fn eager_ds_access_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -642,7 +642,7 @@ fn eager_ds_access_passes() {
 }
 
 /// The eager-clock CGB SINGLE-SPEED accessibility residual: the palette
-/// whole-M-cycle stamp bypass + the STOP-shift law-frame, both #11da-style clean
+/// whole-M-cycle stamp bypass + the STOP-shift law-frame, both clean
 /// re-hosts. Traced (`postread_scx3_2` @dot256, `preread_lcdoffset1_1` @dot83):
 ///
 /// * **Palette** — the CGB `pal_access_edge` stamp is a WHOLE-M-cycle block that
@@ -660,7 +660,7 @@ fn eager_ds_access_passes() {
 /// siblings separate WHOLE-DOT (`preread_lcdoffset1_2` law-dot86 stays blocked;
 /// the palette `_1` entry reads stay blocked), so no render-length move is
 /// needed — NOT the `vis_early` flip-dot family (whose eager `early_lead` is
-/// mis-framed on scx0/scx5, #11dg map). Production + tier2-off byte-identical.
+/// mis-framed on scx0/scx5). Production + tier2-off byte-identical.
 #[test]
 fn eager_ss_access_passes() {
     let Some(root) = common::gbtr_root() else {

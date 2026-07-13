@@ -1,4 +1,4 @@
-//! Eager-clock CGB single-speed dispatch/IRQ web pins (#11dd): the
+//! Eager-clock CGB single-speed dispatch/IRQ web pins: the
 //! write-conflict commit port. A CGB `GB_CONFLICT_WRITE_CPU` engine write
 //! (FF41 STAT / FF0F IF / FF45 LYC) commits its engine-visible effect one T
 //! into the M-cycle; the eager whole-M-cycle tick lands it at the boundary
@@ -92,7 +92,7 @@ fn eager_write_conflict_commit_passes() {
     }
 }
 
-/// The double-speed extension of the write-conflict commit port (#11df): a CGB
+/// The double-speed extension of the write-conflict commit port: a CGB
 /// DS bit1-clearing FF0F write must consume the mode-0 STAT rise landing 1-2
 /// dots later. At DS SameBoy's WriteCpu commits half a dot into the M-cycle,
 /// but the eager whole-M-cycle tick already lands the commit on the SAME dot as
@@ -126,7 +126,7 @@ fn eager_ds_write_conflict_commit_passes() {
     }
 }
 
-/// The eager ack-squash port (#11de): a post-ack mode-0 STAT retrigger must
+/// The eager ack-squash port: a post-ack mode-0 STAT retrigger must
 /// stay CONSUMED by its dispatch's IF clear. The eager read-frame enters the
 /// STAT/OAM ISR the read-debt earlier than gambatte's cc+4 frame (+8hd = 4
 /// dots SS / 2 dots DS), so the eager ack fires that far before the fixed-dot
@@ -179,7 +179,7 @@ fn eager_ack_squash_retrigger_passes() {
     }
 }
 
-/// The DMG re-host of the FF0F IF-clear write-conflict borrow (#11dj). DMG is
+/// The DMG re-host of the FF0F IF-clear write-conflict borrow. DMG is
 /// single-speed with the same 4-dot M-cycle and 1-T WriteCpu commit as CGB SS,
 /// so the identical whole-dot borrow (`Interconnect::write`, un-scoped from
 /// is_cgb for addr FF0F only) moves a bit1-clearing FF0F write's commit to the
@@ -224,7 +224,7 @@ fn eager_dmg_ff0f_write_commit_passes() {
     }
 }
 
-/// The eager CGB sub-M-cycle halt-wake port (#11dl): the last bounded C3-flip
+/// The eager CGB sub-M-cycle halt-wake port: the last bounded C3-flip
 /// piece. A CGB halt exiting on the mode-0 STAT rise wakes at the flip's own
 /// M-cycle boundary (`Ppu::m0_stat_flip_reached`, a pure dot-space peek — no
 /// machine advance, timer-safe), not the whole-M-cycle IF commit that collapses
@@ -233,7 +233,7 @@ fn eager_dmg_ff0f_write_commit_passes() {
 /// (`Ppu::halt_refetch_read_override`). The two coupled: the wake peek separates
 /// the wake instant (scx2_3a dot 256 → mode-0 read, scx3_3b dot 260 → mode-2
 /// read) so the read override fires with zero collateral — where the entry peek
-/// or the read shift ALONE each dropped a SameBoy-pass row (#11cw/#11cy/#11cz).
+/// or the read shift ALONE each dropped a SameBoy-pass row.
 /// The bar targets (`_3a` want0, `dec_2` want6, m0irq `_3b` want2) AND the row
 /// the coupling saves (m0int `_3b` want2, dropped by the entry peek alone) all
 /// pass; the want-0 `_1a` sibling must stay 0 (the read override must not leak).
@@ -271,8 +271,8 @@ fn eager_halt_wake_passes() {
             "gambatte/halt/late_m0irq_halt_m0stat_scx3_3b_dmg08_cgb04c_out2.gbc",
             "2",
         ),
-        // The row the coupling saves: the entry peek alone drops this
-        // (#11cw/#11cz), the read override recovers it — the discriminator the
+        // The row the coupling saves: the entry peek alone drops this,
+        // the read override recovers it — the discriminator the
         // whole port turns on.
         (
             "gambatte/halt/late_m0int_halt_m0stat_scx3_3b_dmg08_out0_cgb04c_out2.gbc",
@@ -294,7 +294,7 @@ fn eager_halt_wake_passes() {
     }
 }
 
-/// The eager WINDOW mode-0 STAT-IF read-frame DELIVER (#11do): a window-line
+/// The eager WINDOW mode-0 STAT-IF read-frame DELIVER: a window-line
 /// `m0irq` poll of FF0F must observe the STAT bit SameBoy's cc+4 events-first
 /// frame delivers. With a window active the eager clock keeps the PRODUCTION,
 /// window-elevated mode-0 flip R, but SameBoy (and tier2's render-length
@@ -372,7 +372,7 @@ fn eager_window_m0irq_deliver_passes() {
     }
 }
 
-/// The eager DMG line-0 OAM-entry read-frame back-date (#11dp): a line-0
+/// The eager DMG line-0 OAM-entry read-frame back-date: a line-0
 /// dot<4 FF41 read appearing on the eager clock (cc+0) maps to its cc+4 =
 /// line-0 dot 4-7 = the OAM scan (mode 2), the DMG twin of the `(1..144)`
 /// line-start arm. Gated on `!line_render_done` — the discriminator vs the
@@ -417,7 +417,7 @@ fn tier2_eager_dmg_ly0_oam_entry_passes() {
     }
 }
 
-/// HALFDOT (#11dw) — the DMG line-153 FF41 write-commit half-dot, the coupled
+/// HALFDOT — the DMG line-153 FF41 write-commit half-dot, the coupled
 /// odd-half STAT engine's first wall-1 recovery. On line 153 the DMG FF41
 /// engine-view (`eng_stat`) write commits its disable ~2 dots later than the
 /// eager cc+4 whole-dot landing (the line-153 write quirk): SameBoy's
@@ -427,8 +427,8 @@ fn tier2_eager_dmg_ly0_oam_entry_passes() {
 /// the LYC re-latch → spurious edge → E2. The deferral is applied to ONLY the
 /// engine `eng_stat` view via the odd-half `Ppu::stat_update_half`, leaving the
 /// LYC re-latch schedule the window/DMA/`_2` neighbours consume UNTOUCHED — so
-/// this recovers the exact #11dv target pair with ZERO family shuffle (the
-/// whole-dot LYC back-date #11dv measured netted +3 DMG / +17 CGB). The CGB
+/// this recovers the exact target pair with ZERO family shuffle (the
+/// whole-dot LYC back-date measured netted +3 DMG / +17 CGB). The CGB
 /// siblings of these two rows already pass via the two-phase `eng_stat_pending`
 /// (pinned in `eager_write_conflict_commit_passes`); this is the DMG twin.
 /// Reverting the `eng_stat_half` line-153 defer makes this pin fail (the commit
@@ -460,7 +460,7 @@ fn eager_dmg_lyc153_m1disable_passes() {
 
 /// The SCX (FF43) CGB DOUBLE-SPEED mid-mode-3 render commit RE-HOSTED onto the
 /// eager clock — the DS extension of the shipped single-speed DMG SCX
-/// write-commit cracks (#11el/#11em). These 4 `scx_during_m3_ds` rows write SCX
+/// write-commit cracks. These 4 `scx_during_m3_ds` rows write SCX
 /// twice per line, both POST-match (after this line's fine-scroll comparator lock
 /// `hunt_done`, at `hunt_match_dot`=89; write dots 90/232 and 96/226) — a pure
 /// coarse/tile shift with no mode-3-length effect. On the DS grid the uniform CGB
@@ -495,7 +495,7 @@ fn eager_cgb_m3_render_scx_ds_passes() {
 }
 
 /// The eager line-153 LYC=153 IF-emission decouple + the LYC-153 window
-/// sibling-cluster re-host (#11cu). `m1statwirq_3` fails on the eager clock
+/// sibling-cluster re-host. `m1statwirq_3` fails on the eager clock
 /// because the DMG `ly_for_comparison` line-153 table sets 153 only at slopgb
 /// dot 6 (the READ frame, `GB_SLEEP(14,4)`), so the `stat_update` engine emits
 /// the LYC STAT IRQ at dot 6 — mid-M-cycle — and the eager CPU recognises it one
