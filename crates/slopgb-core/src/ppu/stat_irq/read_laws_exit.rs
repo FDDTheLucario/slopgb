@@ -317,7 +317,7 @@ impl Ppu {
         // native 0 where SameBoy still extends (`late_wy_FFto2_ly2_scx{2,3}_1`,
         // win_active, wy_trig 94 ≤ wxm 97, read dot 260 → want 3). On-screen WX
         // only (`eff.wx < 0xA0`): the off-screen `m2int_wxA6_firstline` renders
-        // nothing → bare, must NOT extend. eager DMG only → byte-identical off.
+        // nothing → bare, must NOT extend. DMG only.
         if self.line < 144
             && m == 0
             && (!self.render.win_active
@@ -339,8 +339,7 @@ impl Ppu {
         // flip 257). Force the bare exit so the trigger-line read verdicts mode 0
         // (`late_wy_FFto2_ly2_wx00_3` wytrig 90 == wxmatch 90 → bare; its `_2`
         // wytrig 86 ≤ 88 rides Arm 2's extend). WX < 7 (the prefill-match class;
-        // WX ≥ 7 goes bare in the render and rides Arm 2). eager DMG only →
-        // tier2 / CGB / production byte-identical.
+        // WX ≥ 7 goes bare in the render and rides Arm 2). DMG only.
         if !self.model.is_cgb()
             && self.render.win_active
             && self.wy2 == self.ly
@@ -548,9 +547,7 @@ impl Ppu {
         // (the render's projected flip is itself wrong there), so this read arm
         // cannot reach them. Scoped to an ACTIVE, non-aborted window with sprites
         // on a visible DS line where no earlier arm matched (`exit.is_none()`);
-        // `eager` + CGB → production/tier2 (which advance `self.dot`
-        // natively) + SS + non-window-sprite lines (raw-mode-correct)
-        // byte-identical.
+        // CGB + DS only.
         if self.model.is_cgb()
             && self.ds
             && exit.is_none()
@@ -670,8 +667,7 @@ impl Ppu {
                 // the `late_scx_late_disable` window siblings; see `regs.rs`
                 // `stage_write`). This is the verdict-only READ analogue: undo the
                 // extension in the bare exit ONLY (window aborts own the
-                // `scx_write_dot` arm above). `eager`+DMG+bare-scoped →
-                // byte-identical flag-off.
+                // `scx_write_dot` arm above). DMG + bare only.
                 if !self.model.is_cgb() && self.render.scx_write_dot != 0 {
                     flip = flip.saturating_sub(u16::from(self.scx & 7));
                 }
@@ -773,8 +769,7 @@ impl Ppu {
             // SameBoy renders `_3` bare. Re-derive to `−2` (wxmatch → 95) so
             // `_2` (94 ≤ 95, extend) and `_3` (98 > 95, bare) re-split — the
             // exact −4 read-debt of the emission move, the SS twin of the DS
-            // lyfc re-derivation above. `eager && !is_cgb` only (the CGB
-            // emission is unmoved; production + tier2 byte-identical).
+            // lyfc re-derivation above. DMG only (the CGB emission is unmoved).
             && i32::from(self.wy_trig_sb_dot)
                 <= i32::from(self.render.wx_match_dot) + if !self.model.is_cgb() { -2 } else { 2 }
     }

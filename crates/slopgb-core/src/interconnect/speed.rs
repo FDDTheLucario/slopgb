@@ -93,31 +93,25 @@ impl Interconnect {
                 // dots stay OUT of reach — see the field docs.
                 self.ack_squash_mask = 1 << bit;
                 self.ack_squash_ticks = 0;
-                // The deferred path takes NO post-ack squash
-                // for the LCD bits: SameBoy's ack is the bare IF clear at the
-                // flushed pending−2 instant (sm83_cpu.c) with no source
-                // re-sync window, so a STAT/VBlank rise
-                // 1-2 dots past the ack is DELIVERED (the six retrigger rows:
-                // `late_m0irq_retrigger_ds_1` rise ack+2 · `_scx1_1` ack+1 ·
-                // `m2int_m2irq_late_retrigger_1` next-line pulse ack+2 ·
-                // `lyc153int_m2irq_late_retrigger_1` line-0 pulse ack+2 ·
+                // SameBoy's ack is the bare IF clear at the flushed pending−2
+                // instant (sm83_cpu.c) with no source re-sync window, so a
+                // STAT/VBlank rise 1-2 dots past the ack is DELIVERED (the six
+                // retrigger rows: `late_m0irq_retrigger_ds_1` rise ack+2 ·
+                // `_scx1_1` ack+1 · `m2int_m2irq_late_retrigger_1` next-line pulse
+                // ack+2 · `lyc153int_m2irq_late_retrigger_1` line-0 pulse ack+2 ·
                 // `lycint143_m1irq_late_retrigger_ds_1` m1 re-rise ack+1 ·
-                // `lycint_vblankirq_late_retrigger_ds_1` vblank IF ack+1..2 —
-                // all dual-traced; the 2-dot squash ate exactly that fold). A
+                // `lycint_vblankirq_late_retrigger_ds_1` vblank IF ack+1..2). A
                 // rise at/before the ack still loses: it folded during the
                 // dispatch advance and the ack clears it (the `_2` siblings).
-                // Production keeps gambatte's cc+4-frame 2-dot window.
-                // Eager ack-squash port: the eager read-frame enters the
-                // STAT/OAM ISR — and so fires this ack — the read-debt earlier
-                // than the gambatte cc+4 frame, so widen the squash window by
-                // that shift so the post-ack retrigger stays consumed on the
-                // eager frame (irq_precedence `late_m0irq_retrigger_2`/`_scx1_2`
-                // + `_ds_2`, want E0) while the one-M-cycle-later `_1` siblings
-                // still land outside it and DELIVER (want E2). DS uses +1
-                // (window 3) for the LYC/mode-2/mode-1/vblank families; the
-                // MODE-0 (HBLANK) retrigger family (`late_m0irq_retrigger`)
-                // needs window 4 — HBLANK is the enabled STAT source
-                // (`stat_src_hblank`) ONLY for those rows, so widen to 4 there.
+                // The read-frame enters the STAT/OAM ISR — and fires this ack —
+                // the read-debt earlier than the gambatte cc+4 frame, so widen the
+                // squash window by that shift so the retrigger stays consumed
+                // (irq_precedence `late_m0irq_retrigger_2`/`_scx1_2`/`_ds_2`, want
+                // E0) while the one-M-cycle-later `_1` siblings land outside it and
+                // DELIVER (want E2). DS uses +1 (window 3) for the LYC/mode-2/
+                // mode-1/vblank families; the MODE-0 (HBLANK) retrigger family
+                // (`late_m0irq_retrigger`) needs window 4 — HBLANK is the enabled
+                // STAT source (`stat_src_hblank`) ONLY for those rows.
                 self.ack_squash_dots = if self.double_speed {
                     if self.ppu.stat_src_hblank() { 4 } else { 3 }
                 } else if !self.model.is_cgb() && self.ppu.line_dot().0 == 153 {
@@ -132,12 +126,10 @@ impl Interconnect {
                 } else {
                     6
                 };
-                // Eager-value carried-read peek: arm `read_carried` for a STAT
-                // OAM/HBlank ISR so the handler's first FF41 mode read takes
-                // the source's read-position carry (`isr_read_carry_hd`).
-                // Under the eager clock the dispatch stays cc+4, so arm the
-                // VERDICT peek here at the STAT (bit 1) ack.
-                // Cleared one-shot after the FF41 read in `Bus::read`.
+                // Carried-read peek: arm `read_carried` for a STAT OAM/HBlank ISR
+                // so the handler's first FF41 mode read takes the source's
+                // read-position carry (`isr_read_carry_hd`). Cleared one-shot after
+                // the FF41 read in `Bus::read`.
                 if bit == 1 && (self.ppu.stat_rise_oam() || self.ppu.stat_rise_m0()) {
                     self.ppu.set_read_carried(true);
                 }
@@ -275,60 +267,39 @@ impl Interconnect {
         while self.cycles < target && self.intf & self.ie & IF_MASK == 0 {
             self.tick_machine();
         }
-        // Post-switch CPU↔PPU realignment, the tier2 DEFAULT at K = 2
-        // half-dots per switching STOP. SameBoy's STOP withholds 5 T from
-        // the PPU feed (`speed_switch_freeze`, sm83_cpu.c:435/timing.c:469)
-        // while slopgb's gambatte-modeled pause runs the PPU throughout; the
-        // measured net alignment on the gambatte cgb04c pause calibration is
-        // +2 half-dots per switch (with K=2/switch the post-switch polled
-        // reads land exactly at SameBoy's read cfl − 4, and the half-dot bare
-        // exit E(scx) = 510 + 2*scx closes all four scx1/scx2 `_1`/`_2` pairs,
-        // co-landing with that exit). The eager re-host shares the STOP-shift
-        // install so the `speedchange`/`lcd_offset` reads classify on the same
-        // un-shifted frame the `law_pos` consumers (`access.rs`, `stat_irq`,
-        // `ff0f`, `regs`, `lyc`, `blocking`) + the `vis_exit_hd` post-switch
-        // exit-table arms (`stop_anchor_midframe`/`stop_leave_*`) already read.
+        // Post-switch CPU↔PPU realignment, K = 2 half-dots per switching STOP.
+        // SameBoy's STOP withholds 5 T from the PPU feed (`speed_switch_freeze`,
+        // sm83_cpu.c:435/timing.c:469) while slopgb's gambatte-modeled pause runs
+        // the PPU throughout; the measured net alignment on the gambatte cgb04c
+        // pause calibration is +2 half-dots per switch (K=2/switch lands the
+        // post-switch polled reads at SameBoy's read cfl − 4, and the half-dot
+        // bare exit E(scx) = 510 + 2*scx closes all four scx1/scx2 `_1`/`_2`
+        // pairs). The STOP-shift install lets the `speedchange`/`lcd_offset` reads
+        // classify on the same un-shifted frame the `law_pos` consumers
+        // (`access.rs`, `stat_irq`, `ff0f`, `regs`, `lyc`, `blocking`) and the
+        // `vis_exit_hd` exit-table arms already read.
         {
             // K in 8 MHz HALF-dots (the grain): odd K leaves the PPU on a
             // half-dot skew relative to the CPU grid (`dhalf` persists), the
             // odd-mode alignment SameBoy's whole-freeze cannot represent.
             //
-            // LEAVE-only (DS→SS): the per-switch K=2 default was measured to
-            // rebase the ENTIRE DS suite (every `_ds` row's boot STOP shifted
-            // +1 dot, breaking ~20 halt/lycEnable/lcd_offset/DS rows whose
-            // tier2 constants were calibrated on the existing frame) — the DS
-            // calibration already ABSORBS the entering switch's frame error,
-            // so advancing there double-counts it. Only the post-switch
-            // SINGLE-SPEED frame (after leaving DS) carries the un-absorbed
-            // gambatte-pause error the speedchange m3stat reads expose.
+            // LEAVE-only (DS→SS): the DS suite's calibration already ABSORBS the
+            // entering switch's frame error, so advancing there double-counts it;
+            // only the post-switch single-speed frame carries the un-absorbed
+            // gambatte-pause error the speedchange m3stat reads expose. Enter
+            // stays 0 (the offset1 dual-traces put the DS rows at the same +2
+            // missing as the SS rows, refuting an enter −2 split).
             //
-            // Leave-only w=4 was measured +14/−11 SameBoy-pass — the +14
-            // (speedchange `_2` legs + 3 lcd_offset counts, with the half-dot
-            // exit co-land) A/B against 11 lcd-offset-frame rows whose tier2
-            // law constants sit on the w=0 frame (8 absorbable by
-            // re-derivation; the offset1 m0stat/m2stat COUNTS +
-            // `hdma_late_m0halt_lcdoffset3` have no absorbing law). The
-            // default flips to `if double_speed {0} else {4}` (leave-only)
-            // once the lcd-offset constants are re-derived on the +2-dot
-            // frame.
-            // STOPADV is LEAVE-ONLY, default w=2 (enter stays 0 — the
-            // enable-phase dual-trace confirms enter contributes 0: the
-            // `_ds`-measured offset1 rows sit at the same +2 missing as the
-            // SS rows, refuting the enter −2 split; and the DS suite is
-            // calibrated on the w=0 enter frame). The MACHINE epoch truth is
-            // +2 hd per leave (the lcd_offset enable-phase dual-traces; the
-            // 2-trip offset2 count rows fix at w=2 and stay broken at w=4
-            // where the two leaves fold to +8 ≡ 0 mod 8). The m3stat READ
-            // laws additionally want +2 hd per leave on top (the w=4
-            // speedchange empirics, with the same m3stat set) — that
-            // law-side surplus is the carried `lcd_phase_hd` (= 4 − k per
-            // leave), consumed by the read comparison so the read frame
-            // matches the w=4-derived constants while polls/counts/LY see
-            // the true +2 epoch.
-            // The leave shift is ALIGNMENT-DEPENDENT (the `sb_dsa8` shadow of
-            // SameBoy's `double_speed_alignment`): the dsa7=4 leaves need +6
-            // (offset3 — only k=6 fixes its count rows) while dsa7∈{0,6}
-            // leaves need +2 (offset1/offset2-leave2/speedchange).
+            // The MACHINE epoch truth is +2 hd per leave (the lcd_offset
+            // enable-phase dual-traces; the offset2 count rows fix at k=2 and
+            // break where two leaves fold to +8 ≡ 0 mod 8). The m3stat READ laws
+            // additionally want +2 hd per leave on top — that law-side surplus is
+            // the carried `lcd_phase_hd` (= 4 − k per leave), consumed by the read
+            // comparison so the read frame matches while polls/counts/LY see the
+            // true +2 epoch. The leave shift is ALIGNMENT-DEPENDENT (the `sb_dsa8`
+            // shadow of SameBoy's `double_speed_alignment`): dsa7=4 leaves need +6
+            // (offset3 — only k=6 fixes its count rows), dsa7∈{0,6} need +2
+            // (offset1/offset2-leave2/speedchange).
             let k = if entering_ds {
                 0
             } else if self.ppu.sb_dsa() & 7 == 4 {
@@ -364,36 +335,25 @@ impl Interconnect {
     }
 
     pub(super) fn halt_entry_impl(&mut self) -> u8 {
-        // SameBoy's `halt()` checks IE & IF *after*
-        // the prefetch `cycle_read` advanced the machine through the HALT
-        // fetch M-cycle (t0+4), where the deferred leading-edge `pending()`
-        // view sits at t0 (sm83_cpu.c:1036-1058). A mode-0 rise landing
-        // inside the fetch M-cycle therefore arms SameBoy's halt-bug (no
-        // halt; the following byte runs twice) while slopgb halted and woke
-        // on the first idle check — one M-cycle short (the `_3b`
-        // skip-path). Flush the debt, then sample.
-        // DMG + single-speed CGB (the CGB-SS extension with the rise
-        // deadline lands the whole set together; the entry flush ALONE was
-        // the measured A/B swap. Double speed
-        // keeps the old masks: its 2-dot M grid re-frames the rise, the DS
-        // legs regressed under the deadline model).
+        // SameBoy's `halt()` checks IE & IF *after* the prefetch `cycle_read`
+        // advanced the machine through the HALT fetch M-cycle (t0+4)
+        // (sm83_cpu.c:1036-1058). A mode-0 rise landing inside the fetch M-cycle
+        // therefore arms SameBoy's halt-bug (no halt; the following byte runs
+        // twice) while slopgb sampled at t0 and woke one M-cycle short (the `_3b`
+        // skip-path). DMG + single-speed CGB; double speed keeps the old masks
+        // (its 2-dot M grid re-frames the rise, the DS legs regress here).
         let mut w = self.pending();
-        // The eager clock parks no debt, so the flush above is a no-op for it
-        // and the entry sample sits at t0 — 4 dots before SameBoy's post-fetch
-        // view. A mode-0 rise landing inside the fetch M-cycle is therefore
-        // invisible, the rewind does not arm, and the post-wake stream runs one
-        // halt round early (`late_m0int_halt_m0stat_*`). Fold the rise in as a
-        // VALUE peek at t0+4 rather than advancing: advancing would tick the
-        // timers 4 T early (the TIMA-counted `int_hblank_halt` rows pin that).
+        // The entry sample sits at t0 — 4 dots before SameBoy's post-fetch view —
+        // so a mode-0 rise landing inside the fetch M-cycle is invisible, the
+        // rewind does not arm, and the post-wake stream runs one halt round early
+        // (`late_m0int_halt_m0stat_*`). Fold the rise in as a VALUE peek at t0+4
+        // rather than advancing: advancing would tick the timers 4 T early (the
+        // TIMA-counted `int_hblank_halt` rows pin that).
         //
-        // DMG-scoped. On CGB the same peek is +5/−1: it also arms the entry
+        // DMG-scoped. CGB stays on the t0 sample until the `_3a`/`_3b` split is
+        // measured against SameBoy: the same peek there would also arm the entry
         // view for the `_3b` skip-path (`late_m0int_halt_m0stat_scx3_3b` [Cgb],
-        // want out2), where a rise inside the fetch M-cycle should arm SameBoy's
-        // halt-bug rather than the rewind. That row is OFF-fail and outside the
-        // TRUE flip bar, so the CGB half is a net gain — but it drops an EV pass
-        // and no SameBoy verdict has been taken for it, and a shipped slice may
-        // not drop a SameBoy-PASS row on an unverified guess. CGB stays on the
-        // t0 sample until the `_3a`/`_3b` split is measured against SameBoy.
+        // want out2) but drops an unverified pass.
         if (!self.model.is_cgb() || !self.double_speed)
             && self.ie & IF_STAT_BIT != 0
             && self.ppu.stat_m0_rise_within(4)

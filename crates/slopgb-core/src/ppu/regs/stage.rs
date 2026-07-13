@@ -6,20 +6,18 @@
 use super::*;
 
 impl Ppu {
-    /// The per-register mid-mode-3 write-commit stage offset (in dots) for the
-    /// eager-value write path — a pure function of `addr` / `scan_pos` / speed.
-    /// The interconnect's `Bus::write` calls this with its live `double_speed`;
-    /// the PPU render-test harness calls it too, so both stage at the exact same
-    /// offset (no duplicated timing constants).
+    /// The per-register mid-mode-3 write-commit stage offset (in dots) — a pure
+    /// function of `addr` / `scan_pos` / speed. `Bus::write` calls this with its
+    /// live `double_speed`; the render-test harness calls it too, so both stage
+    /// at the same offset (no duplicated timing constants).
     pub(crate) fn stage_write_dots(&self, addr: u16, double_speed: bool) -> u8 {
         if let (0xFF43, true, true) = (addr, !self.glitch_active(), double_speed) {
-            // SCX in DOUBLE SPEED takes a +2 render-frame defer, not single
-            // speed's +4 (dots=3): the DS M-cycle is 2 PPU dots (vs 4), so
-            // the write-commit-to-fetch-grid offset halves. dots=2 fixes the
-            // 5 `scx_during_m3_ds` fine-scroll pixel legs AND holds
-            // `late_scx4`'s DS read law (the fine-scroll comparator
-            // straddle) — a swept dots=1 broke the read law, dots=3 broke the
-            // render. SCY/palette keep dots=3 in DS (no DS pixel legs).
+            // SCX in DOUBLE SPEED defers +2 (dots=2), not single speed's +4:
+            // the DS M-cycle is 2 PPU dots (vs 4), so the write-commit-to-fetch-
+            // grid offset halves. dots=2 fixes the 5 `scx_during_m3_ds`
+            // fine-scroll pixel legs and holds `late_scx4`'s DS read law (the
+            // fine-scroll comparator straddle). SCY/palette keep dots=3 in DS
+            // (no DS pixel legs).
             2
         } else if !self.model.is_cgb() && matches!(addr, 0xFF47..=0xFF49) && !self.glitch_active() {
             // The DMG palette (BGP/OBP FF47-49) commit anchors to the EVEN
@@ -100,36 +98,28 @@ impl Ppu {
         // whole-dot offset. A run of aligned half-dots then still commits at the
         // same whole dot as the whole-dot strobe.
         let dots = {
-            // The eager write commit must land in the SAME cc+4 read frame the
-            // FF41/accessibility reads observe the mode-3 length in
-            // ([`Ppu::read_pos_hd`]'s +8hd SS / +4hd DS read-debt): the render
-            // latches (`wx_match_dot`/`win_predraw_abort_dot`/`scx_write_dot`/…)
-            // are recorded at the render dot (cc+0 frame), but the reads sample
-            // the length +debt later, so the un-shifted eager commit lands the
-            // mid-mode-3 register change `debt`-hd early of the read's view. Add
-            // the read-debt so the render-length pairs separate on the eager
-            // clock. Speed-dependent: DS is +4hd (its M-cycle is 2 dots).
-            // CGB-scoped: the DMG window/palette render-length laws (arm
-            // D1/D3/D6 fetch phase + the palette pop-grid) are calibrated one
-            // fetch-step ahead of CGB — a uniform +8hd there over-shifts 5
-            // SameBoy-PASS DMG rows (`late_enable_afterVblank`/`late_disable`/
-            // `late_scx_late_disable`). The DMG write-commit frame is a separate
-            // calibration (a later slice).
+            // The write commit must land in the SAME cc+4 read frame the FF41/
+            // accessibility reads observe the mode-3 length in ([`Ppu::read_pos_hd`]'s
+            // +8hd SS / +4hd DS read-debt): the render latches (`wx_match_dot`/
+            // `win_predraw_abort_dot`/`scx_write_dot`/…) are recorded at the render
+            // dot (cc+0), but the reads sample the length +debt later, so add the
+            // read-debt to separate the render-length pairs. DS is +4hd (its M-cycle
+            // is 2 dots). The DMG window/palette render-length laws (arm D1/D3/D6
+            // fetch phase + the palette pop-grid) are calibrated one fetch-step ahead
+            // of CGB, so DMG carries a separate per-register debt below — a uniform
+            // +8hd over-shifts 5 SameBoy-PASS rows (`late_enable_afterVblank`/
+            // `late_disable`/`late_scx_late_disable`).
             let debt = if !self.model.is_cgb() {
                 // DMG: give the mid-mode-3 render registers the render-frame debt
-                // so their commit lands at the tier2 render position instead of ~4
-                // dots (8hd SS) early — the eager stage starts at cc+0 while the
-                // tier2 stage starts at the cc+4 leading edge (`write_deferred`
-                // advances the machine first). The debt shifts only the pixel-view
-                // `eff` commit; the FF41 mode-3-length OCR reads sample ARCH
-                // `self.scy`, and the WX un-catch read law's `wx_write_dot` is
-                // recorded at cc+0 in `Ppu::write` (the split), so this is
-                // render-only — measured EV DMG two-bin 102 (palette) → 96 (+WX),
-                // no OCR regression vs the pre-debt eager clock. FF40 (LCDC) stays
-                // at ZERO debt: it drives the window bit5 abort/reenable + FF41
-                // read laws calibrated to the cc+0 control commit, and a debt there
-                // breaks the `late_enable_afterVblank` gambatte set. SCX
-                // (FF43) also stays zero-debt — its render IS the length (below).
+                // so their commit lands at the render position instead of ~4 dots
+                // (8hd SS) early. The debt shifts only the pixel-view `eff` commit;
+                // the FF41 mode-3-length OCR reads sample ARCH `self.scy` and the WX
+                // un-catch read law's `wx_write_dot` is recorded at cc+0 in
+                // `Ppu::write` (the split), so this is render-only. FF40 (LCDC) stays
+                // at ZERO debt: it drives the window bit5 abort/reenable + FF41 read
+                // laws calibrated to the cc+0 control commit, and a debt there breaks
+                // the `late_enable_afterVblank` gambatte set. SCX (FF43) also stays
+                // zero-debt — its render IS the length (below).
                 match addr {
                     // SCY / palette: the full cc+0→cc+4 frame debt. Their stage is
                     // dots ≈ 2 (`2 + parity`), so 8hd SS lands them at the render
@@ -141,26 +131,22 @@ impl Ppu {
                             8
                         }
                     }
-                    // WX SS: its render stage is dots=0 (+1 in `stage_write` for
-                    // the FF4B palette-class offset) → 2hd of ×2 grid, the smallest
-                    // of the render regs, so it needs the LARGEST frame debt (12hd)
-                    // to reach the ~14hd absolute render-commit the WX
-                    // activation/reactivation comparator wants. Swept: 12hd lands
-                    // all of m3_wx_4/5/6_change + _sprites; 10hd lands 2, ≤8 lands
-                    // 0. The un-catch READ law's `wx_write_dot` is recorded in
-                    // `Ppu::write` at the eager cc+0 (not `commit_eff`), so the debt
-                    // shifts only the render view — the split built for tier2.
+                    // WX SS: the render stage is the smallest (dots=0, +1 in
+                    // `stage_write` for the FF4B palette-class offset), so it needs
+                    // the largest frame debt (12hd) to reach the ~14hd absolute
+                    // render-commit the WX activation comparator wants (pins
+                    // m3_wx_4/5/6_change + _sprites). The un-catch READ law's
+                    // `wx_write_dot` is recorded at cc+0 in `Ppu::write` (not
+                    // `commit_eff`), so the debt shifts only the render view.
                     0xFF4B if !self.ds => 12,
                     // SCX (FF43) POST-match: the write lands after THIS line's
                     // fine-scroll comparator lock (`hunt_done && dot >
-                    // hunt_match_dot`), so the discard is locked and the change is
-                    // a pure COARSE/pixel tile shift with NO mode-3-length effect →
-                    // give it the render-frame debt so the eager cc+0 commit lands
-                    // the tile column at the tier2 fetch grid. `6` swept
-                    // unique-optimal (m3_scx_high_5_bits: 4→41px, 6→PASS, 8→35px).
-                    // The `dot > hunt_match_dot` guard rejects the LINE-START write
-                    // (dot 80) whose `hunt_done` is STALE from the previous line
-                    // (match_dot ≥85).
+                    // hunt_match_dot`), so the discard is locked and the change is a
+                    // pure COARSE/pixel tile shift with NO mode-3-length effect —
+                    // give it the render-frame debt (6) so the commit lands the tile
+                    // column at the fetch grid (m3_scx_high_5_bits). The `dot >
+                    // hunt_match_dot` guard rejects the LINE-START write (dot 80)
+                    // whose `hunt_done` is STALE from the previous line (match_dot ≥85).
                     0xFF43
                         if !self.ds
                             && self.render.hunt_done
@@ -168,18 +154,16 @@ impl Ppu {
                     {
                         6
                     }
-                    // SCX (FF43) PRE-match on a plain BG line (`!hunt_done`,
-                    // NON-glitch, NON-window): these are NOT length-coupled —
-                    // the bare line starts SCX=0 so the
-                    // comparator locks (discard 0) at mode-3 dot 5 BEFORE the
-                    // write; OFF/tier2 commit past the lock → coarse shift, but
-                    // the eager cc+0 commit lands BEFORE it → re-opens the
-                    // comparator → wrong discard → 320px (`m3_scx_low_3_bits`).
-                    // The `6` render-frame debt re-aligns to OFF's post-lock dot.
-                    // The excluded cases ARE genuinely length-coupled: `glitch_
-                    // line` (SCX re-open on the glitch line, `ly0_late_scx7`) and
-                    // `wy_trig_sb` (a WINDOW line masks the discard, `late_scx_
-                    // late_disable`); the m2int length rows write at dot 152 with
+                    // SCX (FF43) PRE-match on a plain BG line (`!hunt_done`, NON-
+                    // glitch, NON-window): NOT length-coupled — the bare line starts
+                    // SCX=0 so the comparator locks (discard 0) at mode-3 dot 5
+                    // BEFORE the write; a cc+0 commit lands BEFORE the lock →
+                    // re-opens the comparator → wrong discard → 320px
+                    // (`m3_scx_low_3_bits`). The `6` render-frame debt re-aligns to
+                    // the post-lock dot. The excluded cases ARE genuinely length-
+                    // coupled: `glitch_line` (SCX re-open, `ly0_late_scx7`) and
+                    // `wy_trig_sb` (a WINDOW line masks the discard, `late_scx_late_
+                    // disable`); the m2int length rows write at dot 152 with
                     // `hunt_done` → the post-match arm above, never here. Full A/B:
                     // `eager-scxlow-recheck-2026-07-12.md`.
                     0xFF43
@@ -194,43 +178,31 @@ impl Ppu {
                 }
             } else if self.ds {
                 // CGB double-speed: the uniform render-frame read-debt is 4
-                // half-dots (the DS M-cycle is 2 dots, so cc+0→cc+4 is 4hd) for
-                // the pure-render registers. SCX (FF43) POST-match is the
-                // exception: like the SS `!self.ds` post-match arm above, a write
-                // landing AFTER this line's fine-scroll comparator lock
-                // (`hunt_done && dot > hunt_match_dot`) is a pure COARSE/tile
-                // shift with no mode-3-length effect, but on the DS grid the
-                // uniform 4hd over-shoots the eager cc+0 commit by exactly one
-                // whole dot past the OFF/tier2 post-lock commit (measured: eager
-                // stage dot 90/96 + 8hd = dot 94/100, but OFF/tier2 commit dot
-                // 93/99). Debt 2 → 6hd → lands the eager commit on the OFF dot,
+                // half-dots (the DS M-cycle is 2 dots, so cc+0→cc+4 is 4hd) for the
+                // pure-render registers. SCX (FF43) POST-match is the exception:
+                // like the SS post-match arm above, a write landing AFTER the
+                // fine-scroll comparator lock (`hunt_done && dot > hunt_match_dot`)
+                // is a pure COARSE/tile shift with no mode-3-length effect, but on
+                // the DS grid the uniform 4hd over-shoots the commit by exactly one
+                // whole dot past the post-lock commit. Debt 2 → 6hd re-lands it,
                 // recovering the 4 `scx_during_m3_ds` post-match fine-scroll pixel
-                // legs (scx_0060c0/0063c0 `_5`/`_8`). Pre-match / line-start DS
-                // SCX writes keep 4 (the `_ds_1` write-A at `!hunt_done` is
-                // unaffected; its post-match write-B re-aligns onto OFF, still
-                // passing). Swept: 4 fails all 4 targets (+1 dot late); 2 is the
-                // physically-correct OFF-commit alignment (0/1/3 also clear the 4
-                // targets on pixel tolerance but only 2 lands the eager commit on
-                // the exact OFF/tier2 dot). See `eager-ds-scx-2026-07-12.md`.
+                // legs (scx_0060c0/0063c0 `_5`/`_8`). Pre-match / line-start DS SCX
+                // writes keep 4. See `eager-ds-scx-2026-07-12.md`.
                 match addr {
                     0xFF43 if self.render.hunt_done && self.dot > self.render.hunt_match_dot => 2,
                     _ => 4,
                 }
             } else {
-                // CGB single-speed, per-register eager render-commit debt.
-                // The uniform 8 landed the mealybug/age DMG-compat m3_*
-                // palette/WX legs at the wrong pixel column — CGB runs these DMG
-                // ROMs in compat mode and shares the FF47-4B render path, so each
-                // register carries its own commit class like the DMG calibration
-                // above. These rows pass tier2 (same whole-dot render) and fail
-                // eager ONLY on this cc+0 commit position → `eager`-scoped,
-                // tier2 byte-ident.
+                // CGB single-speed, per-register render-commit debt. A uniform 8
+                // landed the mealybug/age DMG-compat m3_* palette/WX legs at the
+                // wrong pixel column — CGB runs these DMG ROMs in compat mode and
+                // shares the FF47-4B render path, so each register carries its own
+                // commit class like the DMG calibration above.
                 match addr {
                     // Palette (FF47-49): the DMG-compat BGP pop-grid. Its stage is
                     // the flat `3` (`stage_write_dots`, no CGB parity), so a
-                    // `6 + 2*parity` debt reproduces the DMG palette even/odd
-                    // anchor (12hd even / 14hd odd). Swept unique-optimal: +-2
-                    // regress m3_bgp_change + age m3-bg-bgp.
+                    // `6 + 2*parity` debt reproduces the DMG palette even/odd anchor
+                    // (12hd even / 14hd odd; pins m3_bgp_change + age m3-bg-bgp).
                     0xFF47..=0xFF49 => 6 + 2 * (self.scan_pos().1 & 1) as i32,
                     // WX (FF4B): like the DMG WX arm — its render stage is the
                     // smallest, so it needs the largest debt to reach the WX
@@ -260,15 +232,12 @@ impl Ppu {
             0xFF40 => {
                 let old = self.eff.lcdc;
                 self.eff.lcdc = value;
-                // The BG fetcher's addressing view (bit3 BG map /
-                // bit4 tile-data select) lags the eager control commit by the
-                // render frame under tier2, so a mid-mode-3 bgtilemap/bgtiledata
-                // toggle reaches the fetch grid at the production/SameBoy dot
-                // instead of the leading edge. Window bit5 (abort/reenable/
-                // enable) + the FF41 read laws keep the eager `eff.lcdc` set
-                // above — their tier2 pins are calibrated to the cc+0 control
-                // commit. Production (and non-render / glitch lines) set the
-                // view in lockstep — byte-identical OFF.
+                // The BG fetcher's addressing view (bit3 BG map / bit4 tile-data
+                // select) lags the control commit by the render frame, so a
+                // mid-mode-3 bgtilemap/bgtiledata toggle reaches the fetch grid at
+                // the SameBoy dot instead of the leading edge. Window bit5 (abort/
+                // reenable/enable) + the FF41 read laws keep the cc+0 `eff.lcdc` set
+                // above. Non-render / glitch lines set the view in lockstep.
                 if self.render.active && !self.glitch_line {
                     self.render_lcdc_pending = Some((value, RENDER_LCDC_DELAY));
                 } else {
@@ -287,12 +256,12 @@ impl Ppu {
                     // eagerly here for the shadow bare-exit / length read laws
                     // (`stat_irq.rs::vis_mode_read`), calibrated to the cc+0 dot.
                     self.window_abort_flags();
-                    // The RENDER re-anchor (drawn-window end + BG-fetch
-                    // tile-boundary) defers to the `render_lcdc` bit5 1→0 catch-up
-                    // (`ppu/mod.rs`) under the tier2 reclock, so the window stops
-                    // at the render frame (`m3_lcdc_win_en_change_multiple`: the
-                    // eager clear ended it 2 dots early). Production / glitch lines
-                    // (no `render_lcdc` defer) run it synchronously.
+                    // The RENDER re-anchor (drawn-window end + BG-fetch tile-
+                    // boundary) defers to the `render_lcdc` bit5 1→0 catch-up
+                    // (`ppu/mod.rs`), so the window stops at the render frame
+                    // (`m3_lcdc_win_en_change_multiple`: a synchronous clear ended
+                    // it 2 dots early). Glitch lines (no `render_lcdc` defer) run it
+                    // synchronously.
                     if self.glitch_line {
                         self.window_abort_render();
                     }

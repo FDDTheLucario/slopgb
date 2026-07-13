@@ -203,8 +203,7 @@ const IF_VBLANK: u8 = 0x01;
 const IF_STAT: u8 = 0x02;
 
 /// Pending [`Ppu::eng_stat`] transition staged by a CGB single-speed FF41
-/// write on the tier2/LE engine path (was a bare `(u8, u8, bool, u8, u8)`).
-/// The tick-by-tick two-phase-commit schedule this drives lives on the
+/// write. The tick-by-tick two-phase-commit schedule this drives lives on the
 /// [`Ppu::eng_stat_pending`] field doc.
 #[derive(Clone, Copy)]
 pub(crate) struct EngStatPending {

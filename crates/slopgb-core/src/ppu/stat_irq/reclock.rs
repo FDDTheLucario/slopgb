@@ -1,9 +1,8 @@
 //! The STAT IRQ engine (SameBoy `GB_STAT_update` port) — the
 //! `stat_update_tick` rising-edge dispatch + vblank/OAM direct pokes, the
 //! halt-commit masks, the decoupled `mode_for_interrupt` derivation, and the
-//! delayed `ly_for_comparison` LYC input. This is the sole, production STAT
-//! IRQ path; it is a second `impl Ppu` block split out of `stat_irq.rs` for
-//! the <1000-line cap (`use super::*`, so `super == ppu`).
+//! delayed `ly_for_comparison` LYC input. The sole, production STAT IRQ path; a
+//! second `impl Ppu` block split out of `stat_irq.rs` for the <1000-line cap.
 
 use super::*;
 
@@ -25,12 +24,11 @@ impl Ppu {
     /// the interconnect's OAM-DMA freeze. The LCD-off guard is the tick's
     /// `!enabled` early-return, which holds the line low.
     ///
-    /// Still uses [`Self::refresh_cmp`] for the *readable* FF41 mode/LYC bits, so
-    /// register reads stay decoupled from the IRQ event source. The per-source
-    /// emission masks (`stat_late` / `stat_halt_late` / `m0_rise`) for the
-    /// halt-wake interaction have no `GB_STAT_update` equivalent and are left
-    /// unset here — so this engine does not yet reproduce the halt-late commit
-    /// timing (a known residual; see the DS / halt-wake levers in CLAUDE.md).
+    /// Still uses [`Self::refresh_cmp`] for the *readable* FF41 mode/LYC bits;
+    /// only the IRQ event source differs. The per-source emission masks
+    /// (`stat_late` / `stat_halt_late` / `m0_rise`) for the halt-wake interaction
+    /// have no `GB_STAT_update` equivalent and are set by
+    /// [`Self::stat_update_halt_masks`] instead.
     pub(super) fn stat_update_tick(&mut self) {
         // Resolve the staged CGB SS FF41 two-phase engine view (see
         // the `eng_stat_pending` field doc): phase-1 rises fire (a mode
@@ -161,7 +159,7 @@ impl Ppu {
         // fresh edge (writes land at state-7, `lyfc=-1`/`0`); slopgb's per-dot
         // engine re-latched it → a spurious `ly1 dot0` (`got=E2`, want E0). Hold
         // like the `-1` gap (a legit LYC=N-1 tail is already latched true at line
-        // N-1). DMG-family for the general lines-1-143 hold; LE/Tier-2 only.
+        // N-1). DMG-family for the general lines-1-143 hold.
         //
         // The CGB ly0→ly1 LYC=0 wrap. The CGB lcd-offset shifts
         // `lycwirq_trigger_ly00_stat50_lcdoffset1_1`'s FF45=0 write to land at the
@@ -175,8 +173,7 @@ impl Ppu {
         // there), so no genuine fresh LYC=0 edge can exist at ly1 — holding the
         // line-1 carryover (the ly0→ly1 wrap only, NOT the lines-2-143 carryover
         // that the ungated CGB hold broke at ly6/ly7) drops nothing SameBoy
-        // delivers. CGB line 1 only; LE/Tier-2 only (`stat_update_tick` never runs
-        // flag-off → byte-identical OFF).
+        // delivers. CGB line 1 only.
         let line_start_carryover = if self.model.is_cgb() {
             // The CGB last-M-cycle LYC-write hold (the
             // line-END half of the line-START carryover hold). slopgb's
@@ -202,8 +199,7 @@ impl Ppu {
             // line-START carryover hold (the lines-2-143 START hold stays
             // REFUTED on CGB: the lcd-offset shifts a REAL edge onto the START
             // carryover dot — but NOT onto the line-END last M-cycle, where lyfc
-            // is fixed and only a fresh write moves the latch). CGB only; LE/Tier-2
-            // only (production byte-identical).
+            // is fixed and only a fresh write moves the latch). CGB only.
             // The CGB line-START carryover hold generalized to lines 1-143
             // (was line 1 only): SameBoy re-latches `lyc_interrupt_line` ONLY
             // at the state-6/-7 GB_SLEEP steps (dot 3 → -1/hold, dot 4 →
@@ -287,8 +283,7 @@ impl Ppu {
         // rise this whole-dot model reproduces. With mode 1 disabled SameBoy's
         // line dips and stays low (no IF), which a whole-dot drop would mis-frame
         // against the deferred read (`m1/lyc143_late_m0enable_lycdisable_*`,
-        // VBlank off). LE/Tier-2 only — `stat_update_tick` never runs flag-off,
-        // so production is byte-identical.
+        // VBlank off).
         if self.line == 144
             && self.dot == 0
             && self.lyc_interrupt_line
@@ -415,8 +410,7 @@ impl Ppu {
         // frame) while the `ly_for_comparison` READ latch stays dot 6 — the same
         // two-latch split the C015 disable direction uses above. `force_level`
         // suppresses the dots-6-7 natural re-edge; `!stat_update.line()` keeps a
-        // pre-armed mode-1 source's STAT-blocking intact. eager + DMG-family
-        // only (production + tier2 byte-identical). See
+        // pre-armed mode-1 source's STAT-blocking intact. DMG-family only. See
         // `measurements/eager-lyc153-cluster-rehost-2026-07-12.md`.
         if !self.model.is_cgb()
             && self.line == 153
@@ -443,8 +437,7 @@ impl Ppu {
     /// unchanged from the even-half tick, so `StatUpdate::update` recomputes
     /// the SAME level → no 0→1 edge → no IF → byte-identical to the
     /// even-half-only engine. The IF it raises persists in `pending_if` and is
-    /// folded at this dot's completing (even) half. Eager-only; never runs
-    /// flag-off (`eager` false), so production is byte-identical.
+    /// folded at this dot's completing (even) half.
     pub(super) fn stat_update_half(&mut self) {
         // Commit any FF41 engine-view (`eng_stat`) write scheduled to land on
         // THIS odd half-dot (piece 4 — the write's true WriteCpu sub-dot
@@ -453,9 +446,7 @@ impl Ppu {
         // commit lands: without an armed `eng_stat_half` the inputs
         // (mfi, eng_stat, lyc) are unchanged from the even-half tick, so a bare
         // re-eval would just re-run the whole-dot engine's edge WITHOUT its
-        // squash/pending logic and shuffle verdicts — so stay inert (EV
-        // byte-identical) until armed. `eng_stat_half` is only set under
-        // `eager` → production/tier2 byte-identical.
+        // squash/pending logic and shuffle verdicts — so stay inert until armed.
         let Some((value, hd)) = self.eng_stat_half else {
             return;
         };
@@ -523,41 +514,33 @@ impl Ppu {
             }
         }
         // The DMG per-line vblank OAM pulses at dot 12 (`display.c:2185`;
-        // `intr_1_2_timing-GS`) are DEFERRED with the rest of the atomic
-        // read-frame work. Adding them here was MEASURED net-negative: the extra
-        // dot-12 IF regresses 6 SameBoy-PASSING rows
-        // (gambatte ly0/lycint152_m2irq, lycm2int/lyc0m2int_m2irq,
-        // window/late_enable_afterVblank ×4 — all in the SameBoy gap list).
-        // SameBoy fires these pulses too, so they are faithful, but this frame's
-        // cc+4 read/halt placement mis-places the resulting read until the global
-        // reclock lands — exactly the atomic-convergence trap. The 144:0
-        // entry pulse above does NOT have this problem (zero lift lost,
-        // +8 gambatte / +5 mooneye), so it banks standalone.
+        // `intr_1_2_timing-GS`) are DEFERRED with the atomic read-frame work.
+        // Adding them here was MEASURED net-negative: the extra dot-12 IF
+        // regresses 6 SameBoy-passing rows (gambatte ly0/lycint152_m2irq,
+        // lycm2int/lyc0m2int_m2irq, window/late_enable_afterVblank ×4). SameBoy
+        // fires them too, but this frame's cc+4 read/halt placement mis-places
+        // the read. The 144:0 entry pulse above has no such problem, so it banks
+        // standalone.
     }
 
-    /// The halt/interrupt-sample commit masks for the flag-on
-    /// [`Self::stat_update_tick`] rising edge, the analogue of the per-source
-    /// `stat_late` / `stat_halt_late` / `m0_rise` masks the removed gambatte
-    /// STAT event engine set (see the truth table in `stat_irq.rs`).
-    /// `mfi` is the [`Ppu::mode_for_interrupt`] that drove this 0→1 rise, so it
-    /// names the source.
+    /// The halt/interrupt-sample commit masks for the [`Self::stat_update_tick`]
+    /// rising edge — the analogue of the per-source `stat_late` /
+    /// `stat_halt_late` / `m0_rise` masks the removed gambatte STAT event engine
+    /// set (truth table in `stat_irq.rs`). `mfi` is the
+    /// [`Ppu::mode_for_interrupt`] that drove this 0→1 rise, so it names the source.
     ///
-    /// **Calibration (measured):** the gambatte
-    /// engine reads FF41/IF at the M-cycle trailing edge (cc+4) and masks the
-    /// mode-2 line-start pulse from BOTH the running CPU's interrupt sample
-    /// (`stat_late`) and the halt-exit sampler (`stat_halt_late`). On the
-    /// leading-edge (cc+0) flag-on path the regular interrupt dispatch is already
-    /// aligned to SameBoy's frame, so the mode-2 pulse needs only the **halt**
-    /// mask (SameBoy `GB_cpu_run` samples the halt exit mid-cycle — `sm83_cpu.c`;
+    /// The gambatte engine reads FF41/IF at the M-cycle trailing edge (cc+4) and
+    /// masks the mode-2 line-start pulse from BOTH the running CPU's interrupt
+    /// sample (`stat_late`) and the halt-exit sampler (`stat_halt_late`). On the
+    /// leading-edge (cc+0) frame the regular interrupt dispatch is already aligned
+    /// to SameBoy's frame, so the mode-2 pulse needs only the **halt** mask
+    /// (SameBoy `GB_cpu_run` samples the halt exit mid-cycle — `sm83_cpu.c`;
     /// gbmicrotest `int_oam_*`); applying `stat_late` too would re-delay the
     /// non-halt `ldh a,(FF41)` dispatch and collapse the separated kernel pair
     /// (`m2int_m3stat_1` reverts 3→0). With only `stat_halt_late` the canonical
-    /// mooneye `intr_2_mode0_timing` passes flag-on (DMG+CGB) **and** the kernel
-    /// pair stays separated (m2int=3 ∧ m0int=0) — the first config in the port to
-    /// hold both. The mode-0 `m0_rise` mask carries the half-cycle halt law as
-    /// before; it is neutral on the flag-on suite until the mode-0 IRQ dispatch
-    /// is reclocked (its rise still lands at our cc+4 dot, the remaining atomic
-    /// work — see the field docs).
+    /// mooneye `intr_2_mode0_timing` passes (DMG+CGB) and the kernel pair stays
+    /// separated (m2int=3 ∧ m0int=0). The mode-0 `m0_rise` mask carries the
+    /// half-cycle halt law.
     fn stat_update_halt_masks(&mut self, mfi: u8) {
         // Record whether THIS STAT 0→1 edge — the
         // one setting the currently-pending STAT bit — is the mode-2 OAM
@@ -622,17 +605,15 @@ impl Ppu {
         // `mfi_m0_prev` lags `line_render_done` by one dot: read the previous
         // dot's value for this dot's mode-0 decision, then latch this dot's.
         self.mfi_m0_prev = self.enabled && self.line <= 143 && self.line_render_done;
-        // On the flag-on path the mode-0 IRQ fires at
-        // `line_render_done` (our dot 254 = the gambatte-calibrated `m0_rise_dot`
-        // frame the mode-0 halt grids pin: gbmicrotest int_hblank_halt, mooneye
-        // hblank_ly_scx_timing), NOT the +1-dot `mfi_m0_prev` lag (255). The lag
-        // models SameBoy's mode-0 IRQ 1 dot after the visible flip
-        // (`display.c:2108` vs `:2091`), but it over-applies in our frame —
-        // `line_render_done` is ALREADY the gambatte IRQ dot here, so the lag put
+        // The mode-0 IRQ fires at `line_render_done` (our dot 254 = the
+        // gambatte-calibrated `m0_rise_dot` frame the mode-0 halt grids pin:
+        // gbmicrotest int_hblank_halt, mooneye hblank_ly_scx_timing), NOT the
+        // +1-dot `mfi_m0_prev` lag (255). The lag models SameBoy's mode-0 IRQ 1 dot
+        // after the visible flip (`display.c:2108` vs `:2091`), but over-applies
+        // here — `line_render_done` is ALREADY the gambatte IRQ dot, so the lag put
         // the `StatUpdate` mode-0 STAT IF one dot late and broke
         // `hblank_ly_scx_timing` (kernel `m0int` and the canonical both hold at
-        // 254; only the 252 full-SameBoy-frame move regresses them). So
-        // `prev_done` reads `line_render_done` directly, without the lag.
+        // 254). So `prev_done` reads `line_render_done` directly, no lag.
         let prev_done = self.enabled && self.line <= 143 && self.line_render_done;
         self.mode_for_interrupt = if !self.enabled {
             0
@@ -656,9 +637,9 @@ impl Ppu {
             // `enable_display/ly0_m0irq_trigger` (+2 flag-on, SameBoy-confirmed
             // out0).
             if !self.ds {
-                // The EAGER SS glitch-line mode-0 IRQ
-                // dispatch reclock. The IRQ side keys on `line_render_done`
-                // (the dispatch dot, our dot 254 = SameBoy `cfl=257`), NOT on
+                // The SS glitch-line mode-0 IRQ dispatch. The IRQ side keys on
+                // `line_render_done` (the dispatch dot, our dot 254 = SameBoy
+                // `cfl=257`), NOT on
                 // `vis_early` (dot 252) the way `vis_mode` does — exactly the
                 // bare-line law (`m0_flip_events`: "The IRQ side keys on
                 // `line_render_done`, not `vis_early`"). `vis_early` back-dates
@@ -674,23 +655,14 @@ impl Ppu {
                 // still raises NO mode-0 (the LCD-enable glitch); mode 3
                 // holds for the IRQ until `line_render_done`, then mode 0.
                 //
-                // TIER-2 is CGB ONLY (a genuine multi-mechanism atomic on
-                // DMG's deferred frame): the tier2 deferred read/halt-wake share
-                // the dot-252 frame, so the SAME DMG glitch-line rise drives both
-                // the poll path (`frame0_m0irq_count`, wants the rise PAST the
-                // dot-252 poll) AND the halt-wake path (`int_hblank_halt_scx*`,
-                // the dot-252-calibrated grid) — moving the DMG dispatch +2 lands
-                // one and breaks the other, so tier2 stays CGB-scoped (DMG
-                // byte-identical there). Under the EAGER clock this conflict does
-                // NOT exist: the dispatch stays at cc+4 (production frame), the
-                // FF0F poll reads trail at cc+4 and the halt-wake sampler is
-                // un-moved, so keying the eager glitch-line IRQ on
-                // `line_render_done` fixes the glitch-line mode-0 poll
-                // (`intr_0_timing` PASS both models — the eager `vis_early`-keyed
-                // IRQ fired the line-0 mode-0 STAT 4 dots early, straddling the
-                // co-instant FF0F read) WITHOUT disturbing int_hblank_halt /
-                // hblank_int (all verified FF82=01 under eager). Hence the gate:
-                // `(tier2 && is_cgb) || eager` — eager covers BOTH models.
+                // Keying the glitch-line IRQ on `line_render_done` fixes the
+                // glitch-line mode-0 poll on both models (`intr_0_timing` PASS — a
+                // `vis_early`-keyed IRQ fired the line-0 mode-0 STAT 4 dots early,
+                // straddling the co-instant FF0F read; `frame0_m0irq_count` wants
+                // the rise PAST the dot-252 poll) WITHOUT disturbing int_hblank_halt
+                // / hblank_int (all verified FF82=01): the dispatch stays at cc+4,
+                // the FF0F poll reads trail at cc+4 and the halt-wake sampler
+                // (`int_hblank_halt_scx*`) is un-moved.
                 if self.dot < GLITCH_MODE3_START {
                     crate::stat_update::MODE_FOR_INTERRUPT_NONE
                 } else if self.line_render_done {
@@ -760,9 +732,7 @@ impl Ppu {
                 // pulse fires its real edge (matching SameBoy's vblank-off rows).
                 // `vis_mode` differs only for DMG (CGB line-0 dots 0-3 already
                 // read mode 1); the IRQ side is decoupled from the FF41 read, so
-                // the visible DMG line-0 mode-0 window is untouched. LE/Tier-2
-                // only — `mode_for_interrupt` is inert flag-off, production
-                // byte-identical.
+                // the visible DMG line-0 mode-0 window is untouched.
                 if self.dot == 4 {
                     2
                 } else if self.dot < 4 {
@@ -798,7 +768,7 @@ impl Ppu {
     /// top of each line, latches to the line number a few dots in, and holds the
     /// previous line's value across the next line's first dots (the LYC-match
     /// tail). This is the LYC input the [`StatUpdate`](crate::stat_update)
-    /// engine consumes on the flag-on path; inert (unread) flag-off.
+    /// engine consumes.
     ///
     /// Single speed is pinned exactly (DMG / CGB-C / AGB). Double speed doubles
     /// the line-153 GB_SLEEP offsets — deferred to the DS unification; the DS

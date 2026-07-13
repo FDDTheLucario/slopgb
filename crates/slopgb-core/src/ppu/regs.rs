@@ -75,36 +75,22 @@ impl Ppu {
         // expired into it — see `stage_write`; writes that never went
         // through the staging path land in both views here).
         //
-        // On the tier2 deferred path the stage SURVIVES the architectural
-        // write and the
-        // pipeline view commits via `strobe_tick` at SameBoy's frame instead
-        // (the io write lands at the write M-cycle's END — `GB_advance_cycles`
-        // runs the display coroutine BEFORE the write commits, memory.c /
-        // sm83_cpu.c — so the pixel pipe sees the new value only from the
-        // next dot after the M-cycle). The eager production path ticks the
-        // machine BEFORE this call, so its stage has already expired and this
-        // immediate convergence is what commits it; the deferred path calls
-        // this at the leading edge with zero dots ticked, so the immediate
-        // convergence was collapsing every mid-mode-3 register write onto the
-        // write's leading edge — the measured "deferred WRITE collapse"
-        // behind the late_scx/late_disable/late_wx render-length pairs
-        // (`late_scx4`: SameBoy separates the legs by whether the SCX commit
-        // lands before/after the fine-scroll comparator's first sample;
-        // slopgb collapsed both legs onto the leading edge). Production
-        // (`!eager`) is byte-identical.
-        // The mode-3 render regs (SCY/SCX/BGP/OBP) survive the arch
-        // write so they strobe-commit at the render frame instead of the
-        // leading edge (see the dots calc in `cycle.rs::write_deferred`). LCDC
-        // lands via the split `render_lcdc` view.
-        // The eager render-frame debt ([`Ppu::stage_write`]) keeps the staged
-        // commit alive past the write's own `tick_machine` (its `dots_left`
-        // exceeds the M-cycle's half-dots), so — like tier2 at the leading edge
-        // — the stage is still present here and this survive-check holds, letting
-        // the debt-delayed strobe commit at the read frame instead of the
-        // redundant M-cycle-END (D+4) re-commit clobbering it. On the un-shifted
-        // DMG eager path (debt 0) the stage drains inside `tick_machine`, so this
-        // is false and the M-cycle-END commit still runs — byte-identical to the
-        // pre-slice DMG eager behaviour.
+        // A staged mid-mode-3 render write (SCY/SCX/BGP/OBP) SURVIVES the
+        // architectural write and strobe-commits at the render frame instead of
+        // the leading edge (the io write lands at the write M-cycle's END —
+        // `GB_advance_cycles` runs the display coroutine BEFORE the write commits,
+        // memory.c / sm83_cpu.c — so the pixel pipe sees the new value only from
+        // the next dot). Collapsing it here onto the write's edge would merge the
+        // late_scx/late_disable/late_wx render-length legs SameBoy separates by
+        // whether the commit lands before/after the fine-scroll comparator's first
+        // sample (`late_scx4`). LCDC lands via the split `render_lcdc` view.
+        // The render-frame debt ([`Ppu::stage_write`]) keeps the staged commit
+        // alive past the write's own `tick_machine` (its `dots_left` exceeds the
+        // M-cycle's half-dots), so the stage is still present here and this
+        // survive-check holds, letting the debt-delayed strobe commit at the read
+        // frame instead of a redundant M-cycle-END (D+4) re-commit clobbering it.
+        // On the un-shifted DMG path (debt 0) the stage drains inside
+        // `tick_machine`, so this is false and the M-cycle-END commit still runs.
         let staged_pending = matches!(addr, 0xFF42 | 0xFF43 | 0xFF47..=0xFF49 | 0xFF4B)
             && !self.glitch_line
             && self
@@ -166,17 +152,13 @@ impl Ppu {
                         // dot 4 (the m2enable late_enable /
                         // late_enable_after_lycint(_disable) dmg08 cell
                         // grids pin all eleven cells).
-                        // The eager cc+0 write records the STAT-enable a
-                        // full M-cycle (4 dots) EARLIER than the tier2 cc+4 frame
-                        // the {0,4} window + the data-only dot-0 lycen were
-                        // calibrated against (an inserted NOP in the `_1`/`_2`
-                        // pair shifts the LDH($41) write +4 dots; slopgb records
-                        // it at eager dot 0 vs tier2 dot 4). Add the +4 read-debt
-                        // so the eager retro resolves in the tier2 frame:
-                        // late_enable_2 (eager dot4→rd8, out of window, want no-
-                        // fire) + late_enable_after_lycint_disable_2 (eager dot0→
-                        // rd4, held-LYC suppressed via the data|old lycen, want
-                        // no-fire). `eager`+DMG-scoped → byte-identical.
+                        // The cc+0 write records the STAT-enable a full M-cycle
+                        // (4 dots) EARLIER than the cc+4 frame the {0,4} window +
+                        // the data-only dot-0 lycen were calibrated against, so add
+                        // the +4 read-debt (`rd`) so the retro resolves in that
+                        // frame: late_enable_2 (dot4 → rd8, out of window, want
+                        // no-fire) + late_enable_after_lycint_disable_2 (dot0 → rd4,
+                        // held-LYC suppressed via the data|old lycen, want no-fire).
                         let rd = self.dot + 4;
                         let retro = (rd == 0 || rd == 4)
                             && !self.glitch_line
@@ -259,7 +241,7 @@ impl Ppu {
                         // FF41-read frame. Line-153-scoped (the write side of the
                         // documented line-153 LYC side-effect zone), NOT ROM-
                         // specific. The sibling `m0enable/lycdisable_ff41_2` (line
-                        // 1) is untouched. `eager`-gated → byte-identical.
+                        // 1) is untouched.
                         self.eng_stat_half = Some((data, 2));
                         self.eng_stat_pending = None;
                     } else {
@@ -278,47 +260,35 @@ impl Ppu {
                     self.stage_stat_copies();
                     self.refresh_cmp(false);
                     if fire {
-                        // When the gambatte write-trigger fired (`fire`),
-                        // re-sync the flag-on [`StatUpdate`]
+                        // When the write-trigger fired, re-sync the [`StatUpdate`]
                         // line to the post-write level so the next dot-clocked
-                        // `stat_update_tick` does NOT re-fire the SAME edge.
-                        // Without this, enabling a source whose condition is
-                        // already met fires IF twice flag-on: once here, again
-                        // when the dot engine re-sees the new enable as a 0→1
-                        // rise (`ff41_enable_lyc_fires_once_flag_on`). The edge
-                        // is discarded — the write-trigger keeps gambatte's
-                        // position-exact fire (replacing it wholesale with the
-                        // rising edge is net-negative in our cc+4 frame);
-                        // this only seeds the line level. Gated on `fire`: a
-                        // write that does NOT
-                        // trigger here must leave the line untouched so a
-                        // legitimate dot-engine rise next tick still fires (the
-                        // un-gated sync suppressed 15 such lifts — measured).
-                        // Read-frame-independent, flag-gated → byte-identical
-                        // flag-OFF.
+                        // `stat_update_tick` does NOT re-fire the SAME edge — else
+                        // enabling a source whose condition is already met fires IF
+                        // twice (`ff41_enable_lyc_fires_once_flag_on`). The edge is
+                        // discarded; this only seeds the line level. Gated on `fire`:
+                        // a write that does NOT trigger here must leave the line
+                        // untouched so a legitimate dot-engine rise next tick still
+                        // fires (the un-gated sync suppressed 15 lifts).
                         let _ = self.stat_update.update(
                             self.mode_for_interrupt,
                             data,
                             self.lyc_interrupt_line,
                         );
                     }
-                    // Suppress the spurious mid-mode-2 OAM rise on the
-                    // eager clock. Lines 1-143 carry the OAM (mode-2) STAT source
-                    // high only across the line-start window (dots 0-3), then drop
-                    // to NONE (`update_mode_for_interrupt`). A FRESH OAM enable
-                    // landing in that window (the eager cc+0 write records it 4
-                    // dots before its true cc+4 commit at dot 4, where mfi is
-                    // already NONE) makes the dot-engine see a 0→1 edge one dot
-                    // later and fire IF — but the line-start m2 pulse already
-                    // passed, so gambatte/SameBoy raise nothing
-                    // (`m2enable/late_enable_m0disable_2` want 0: enable at ly2
-                    // dot 0, old=HBLANK excludes retro → no legit catch). When
-                    // neither retro nor the write-trigger fired (`!fire` — the
-                    // write did NOT catch the pulse), seed the engine line HIGH
-                    // (STAT blocking, no edge) so the post-window rise is spent;
-                    // the line falls silently at dot 4. A carried-from-prev-line
-                    // OAM (`old & OAM != 0`) fires its real dot-0 pulse and is
-                    // excluded. `eager`+DMG-scoped → byte-identical.
+                    // Suppress the spurious mid-mode-2 OAM rise. Lines 1-143 carry
+                    // the OAM (mode-2) STAT source high only across the line-start
+                    // window (dots 0-3), then drop to NONE
+                    // (`update_mode_for_interrupt`). A FRESH OAM enable landing in
+                    // that window (the cc+0 write records it 4 dots before its true
+                    // cc+4 commit at dot 4, where mfi is already NONE) makes the
+                    // dot-engine see a 0→1 edge one dot later and fire IF — but the
+                    // line-start m2 pulse already passed, so SameBoy raises nothing
+                    // (`m2enable/late_enable_m0disable_2` want 0: enable at ly2 dot
+                    // 0, old=HBLANK excludes retro). When neither retro nor the
+                    // write-trigger fired (`!fire`), seed the engine line HIGH (STAT
+                    // blocking, no edge) so the post-window rise is spent; the line
+                    // falls silently at dot 4. A carried-from-prev-line OAM
+                    // (`old & OAM != 0`) fires its real dot-0 pulse and is excluded.
                     if !self.model.is_cgb()
                         && !fire
                         && self.dot < 4
@@ -344,12 +314,11 @@ impl Ppu {
                 let old_wy = self.wy;
                 self.wy = value;
                 // The boundary-WY cross-line latch (see `Ppu::wy_xline_trig`):
-                // a tail/head write matching the current line, window enabled
-                // at the commit (DMG too — the DMG arm-7 twin reads the same
-                // latch). Also enabled under `eager`: this arch commit runs
-                // at the eager M-cycle END, so the boundary window catches the
-                // tail-write class (`late_wy_FFto0/FFto1/10to0/1toFF`) that the
-                // read-frame WY laws pair with — measured +8 CGB, 0 drop.
+                // a tail/head write matching the current line, window enabled at
+                // the commit (DMG too — the DMG arm-7 twin reads the same latch).
+                // The arch commit runs at the M-cycle END, so the boundary window
+                // catches the tail-write class (`late_wy_FFto0/FFto1/10to0/1toFF`)
+                // the read-frame WY laws pair with.
                 // The write dot the tail/head boundary classifies against.
                 // Under the eager DMG line-153 emission decouple the
                 // shared LYC=153 ISR — and every WY write it times — fires one
@@ -361,8 +330,7 @@ impl Ppu {
                 // moved write classifies on the calibrated frame: `FFto0_ly2_3`
                 // ly1 dot0 → xdot 4 (NOT head → bare); its `_2` ly0 dot452 →
                 // xdot 456 (still tail → extend). The SS twin of the DS lyfc
-                // wake re-derivation. `eager && !is_cgb` (CGB emission
-                // unmoved; tier2 + production byte-identical).
+                // wake re-derivation. DMG only (the CGB emission is unmoved).
                 let xdot = self.dot + if !self.model.is_cgb() { 4 } else { 0 };
                 if self.enabled
                     && !(4..452).contains(&xdot)
@@ -381,11 +349,7 @@ impl Ppu {
                 // triggered there → the window is sticky-active for every later
                 // line → set the cross-line latch. `late_wy_10to0/FFto0/FFto1`
                 // `_2` (commit ly1/ly2 dot0) extend; the `_3` siblings commit
-                // at dot 4 (past the head) → no trigger, bare. Also enabled
-                // under `eager`: the eager arch commit lands at the
-                // M-cycle END (same head-dot window), pairing with the DMG
-                // read-frame WY laws already live under eager — L2 re-host of
-                // the CGB slice-2 cross-line latch to DMG.
+                // at dot 4 (past the head) → no trigger, bare.
                 if !self.model.is_cgb()
                     && self.enabled
                     && xdot < 4
@@ -404,9 +368,8 @@ impl Ppu {
                 // trigger line) must release the latch the check would never
                 // have acquired (`late_wy_1toFF_ds_1` renders bare on
                 // hardware AND SameBoy; its `_2` sibling commits at dot 5
-                // and keeps the trigger). Tier-2 + CGB + DS; also `eager`
-                // (the eager DS `late_wy_ds`/`late_wy_1toFF_ds` pairs recover on
-                // the same latch, part of the +8 CGB WY slice).
+                // and keeps the trigger). CGB + DS only (`late_wy_ds`/
+                // `late_wy_1toFF_ds`).
                 if self.model.is_cgb()
                     && self.ds
                     && self.enabled
@@ -421,8 +384,8 @@ impl Ppu {
                     // (lyfc becomes 0 only at dot 3) → commit <= 6
                     // (`late_wy_ds_1` dot 6 bare on HARDWARE — SameBoy
                     // mis-times the line-0 check and fails that row itself /
-                    // `_ds_2` dot 8 keeps). The old single `<= 4` split both
-                    // brackets wrong.
+                    // `_ds_2` dot 8 keeps). A single `<= 4` split brackets both
+                    // wrong.
                     && self.dot <= if self.ly == 0 { 6 } else { 2 }
                     && old_wy == self.ly
                     && value != self.ly
@@ -449,11 +412,8 @@ impl Ppu {
                 // brief match. Releasing it lets the D6 un-trigger arm fire.
                 // `late_wy_1toFF_2`/`2toFF_2` (FF at dot 4 → bare) vs `_3`
                 // (FF at dot 8, past the compare → the window drew, extends).
-                // SS + DMG; the CGB path is the DS
-                // block above (`wy_latch`/`wy_trig_sb`). Also enabled under
-                // `eager`: pairs with the DMG arm-D6 un-trigger read law
-                // already live under eager — L2 re-host of the DMG late-WY
-                // un-trigger latch.
+                // SS + DMG only; the CGB path is the DS block above
+                // (`wy_latch`/`wy_trig_sb`).
                 if !self.model.is_cgb()
                     && !self.ds
                     && self.enabled
@@ -473,8 +433,7 @@ impl Ppu {
                     // over-holding mode 3. Release it (mirror of the DS
                     // `wy_latch` un-latch above) and commit wy2 immediately so
                     // the next dot's compare does not re-set it. `late_wy_1toFF_1`
-                    // / `2toFF_1` recover; the `_2` siblings (render drew) keep
-                    // D6. Byte-identical flag-OFF (gated tier2||eager).
+                    // / `2toFF_1` recover; the `_2` siblings (render drew) keep D6.
                     if self.wy_trig_sb && self.wy_trig_sb_line == self.ly {
                         self.wy_trig_sb = false;
                     }
@@ -503,8 +462,8 @@ impl Ppu {
             0xFF45 => {
                 let old = self.lyc;
                 self.lyc = value;
-                // Fresh-write signal for the eager line-153 STAT-delivery retime
-                // (see `l153_lyc_write_dot`). Eager+CGB only.
+                // Fresh-write signal for the line-153 STAT-delivery retime
+                // (see `l153_lyc_write_dot`). CGB only.
                 if self.model.is_cgb() && self.line == 153 {
                     self.l153_lyc_write_dot = self.dot;
                 }
@@ -519,24 +478,15 @@ impl Ppu {
                     }
                     if (self.pending_if & !before) & IF_STAT != 0 {
                         // `& !before` keys on a NEWLY-set STAT bit (the trigger
-                        // fired this call), not one already pending from an
-                        // earlier tick this M-cycle — so the sync only fires for
-                        // the double-fire case and never over-suppresses a
-                        // legitimate dot-engine rise (the un-gated form dropped
-                        // 15 SameBoy-passing rows).
-                        // The FF45 analogue of the FF41 write-trigger re-sync
-                        // above. The gambatte LYC-write trigger above just
-                        // fired; re-derive
-                        // `lyc_interrupt_line` for the NEW LYC (the engine's LYC
-                        // input, normally latched in `stat_update_tick`) and
-                        // re-sync the `StatUpdate` line so the next dot-clocked
-                        // tick does NOT re-fire the same match as a 0→1 rise
-                        // (`ff45_match_fires_once_flag_on`). Gated on the
-                        // trigger having fired — a write that does not trigger
-                        // here leaves the line for the dot engine to raise
-                        // legitimately next tick. The edge is discarded.
-                        // Read-frame-independent, flag-gated → byte-identical
-                        // flag-OFF.
+                        // fired this call), not one already pending from an earlier
+                        // tick this M-cycle, so the sync only fires for the
+                        // double-fire case (the un-gated form dropped 15
+                        // SameBoy-passing rows). The FF45 analogue of the FF41
+                        // re-sync above: the LYC-write trigger just fired, so
+                        // re-derive `lyc_interrupt_line` for the NEW LYC and re-sync
+                        // the `StatUpdate` line so the next dot tick does NOT re-fire
+                        // the same match (`ff45_match_fires_once_flag_on`). The edge
+                        // is discarded.
                         let ly = self.ly_for_comparison();
                         if ly != -1 {
                             self.lyc_interrupt_line = ly == i16::from(self.lyc);
@@ -558,14 +508,11 @@ impl Ppu {
             0xFF49 => self.obp1 = value,
             0xFF4B => {
                 // Latch a mid-line WX rewrite for the un-catch law (see
-                // `Render::wx_write_dot`; DMG too) at the EAGER (cc+0) leading
-                // edge here, NOT in `commit_eff`. The tier2 reclock defers the
-                // render-VIEW `eff.wx` (a WX survive-stage, for the window
-                // activation/reactivation comparator — `late_wx_ds`, m3_wx_*),
-                // so `commit_eff` now runs at the deferred strobe dot; the
-                // un-catch read law (`tier2_window_late_wx_uncatch_passes`) is
-                // calibrated to the write's cc+0 dot, so its input stays here.
-                // The SPLIT: length/read-law input eager, render view deferred.
+                // `Render::wx_write_dot`; DMG too) at the cc+0 write dot HERE, NOT
+                // in `commit_eff`: the render-VIEW `eff.wx` defers to the strobe
+                // dot (a WX survive-stage for the window activation comparator —
+                // `late_wx_ds`, m3_wx_*), while the un-catch read law is calibrated
+                // to the write's cc+0 dot, so its input stays here.
                 if self.render.active {
                     self.render.wx_write_dot = self.dot;
                 }
@@ -631,7 +578,7 @@ impl Ppu {
             self.win_start_pending = false;
             // The post-switch exit-table latches die with the LCD
             // (the frame they classify is gone; SameBoy's freeze path is
-            // LCD-bound). Inert flag-off: only tier2 STOPs set them.
+            // LCD-bound).
             self.stop_anchor_set = false;
             self.stop_anchor_midframe = false;
             self.stop_leave_lcd_on = false;
@@ -653,7 +600,7 @@ impl Ppu {
             // An enable re-anchors the PPU frame (the e-law: the DS
             // enable quantizes the phase to the 4-dot grid), so the
             // post-switch exit-table latches restart; record the enable's
-            // speed (the lcdoff-dance −4 rp class term). Inert flag-off.
+            // speed (the lcdoff-dance −4 rp class term).
             self.stop_anchor_set = false;
             self.stop_anchor_midframe = false;
             self.stop_leave_lcd_on = false;
