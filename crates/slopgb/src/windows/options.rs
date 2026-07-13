@@ -172,6 +172,11 @@ pub struct Settings {
     /// Joypad → "allow pressing L+R or U+D". `false` (bgb default) filters
     /// opposing directions so the joypad never reports both at once.
     pub allow_opposing: bool,
+    /// bgb's `UninitedWRAM` (ini-only, no dialog control in bgb 1.6.4): power on
+    /// with uninitialised (seeded-random) RAM instead of the deterministic
+    /// default. `false` (bgb default) = the stable 0xFF cart SRAM / zeroed
+    /// work+video RAM. A CLI `--ram-init` overrides this per launch.
+    pub uninited_wram: bool,
     /// Exceptions → "break on ld b,b (40h)".
     pub break_ld_b_b: bool,
     /// Exceptions → "break on invalid opcode" (bgb checks this by default).
@@ -215,6 +220,7 @@ impl Default for Settings {
             scheme: 0,
             dmg_palette: SCHEMES[0].colors,
             allow_opposing: false,
+            uninited_wram: false,
             break_ld_b_b: false,
             // bgb ships with "break on invalid opcode" checked.
             break_invalid_op: true,

@@ -99,16 +99,19 @@ fn main() {
     // Effective emulated-system choice for this load: an explicit CLI `--model`
     // wins, else the persisted Options choice (so a saved SGB / "prefer SGB" /
     // border selection is honored at startup, not just after opening Options).
-    let model_choice = opts.model.map_or_else(
-        || settings_file::load().settings.model,
-        |m| windows::options::ModelChoice::from_option(Some(m)),
-    );
+    let loaded = settings_file::load();
+    let model_choice = opts.model.map_or(loaded.settings.model, |m| {
+        windows::options::ModelChoice::from_option(Some(m))
+    });
+    // Effective power-on RAM init: CLI `--ram-init` wins, else bgb's persisted
+    // `UninitedWRAM` toggle.
+    let ram_init = cli::effective_ram_init(opts.ram_init, loaded.settings.uninited_wram);
     let (mut session, rom_loaded) = match &opts.rom {
         Some(rom) => match Session::load(
             rom,
             model_choice,
             &session::BootSpec::cli(boot_rom.as_deref()),
-            opts.ram_init,
+            ram_init,
         ) {
             Ok(s) => (s, true),
             Err(e) => {
@@ -869,12 +872,8 @@ impl App {
         // if the dropped file is the currently loaded ROM, loading first
         // would resurrect a stale save and later overwrite the fresh one.
         self.session.flush_save();
-        match Session::load(
-            path,
-            self.settings.model,
-            &self.boot_spec(),
-            self.opts.ram_init,
-        ) {
+        let ram_init = cli::effective_ram_init(self.opts.ram_init, self.settings.uninited_wram);
+        match Session::load(path, self.settings.model, &self.boot_spec(), ram_init) {
             Ok(mut new) => {
                 new.set_sgb_bios(self.sgb_bios.clone());
                 self.session = new;

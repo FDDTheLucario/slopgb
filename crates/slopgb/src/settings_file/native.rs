@@ -240,6 +240,7 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
         scheme,
         dmg_palette,
         allow_opposing: b("misc", "allow_opposing", def.allow_opposing),
+        uninited_wram: b("system", "uninited_wram", def.uninited_wram),
         break_ld_b_b: b("exceptions", "break_ld_b_b", def.break_ld_b_b),
         break_invalid_op: b("exceptions", "break_invalid_op", def.break_invalid_op),
         break_echo_ram: b("exceptions", "break_echo_ram", def.break_echo_ram),
@@ -285,6 +286,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         scheme: _,
         dmg_palette: _,
         allow_opposing: _,
+        uninited_wram: _,
         break_ld_b_b: _,
         break_invalid_op: _,
         break_echo_ram: _,
@@ -349,6 +351,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         fb(settings.pause_on_focus_loss),
     );
     d.set("misc", "allow_opposing", fb(settings.allow_opposing));
+    d.set("system", "uninited_wram", fb(settings.uninited_wram));
     d.set("exceptions", "break_ld_b_b", fb(settings.break_ld_b_b));
     d.set(
         "exceptions",

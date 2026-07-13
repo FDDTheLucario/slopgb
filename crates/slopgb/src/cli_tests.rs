@@ -51,6 +51,24 @@ fn ram_init_parses_fill_and_random() {
 }
 
 #[test]
+fn effective_ram_init_cli_beats_uninited_wram_setting() {
+    use slopgb_core::RamInit;
+    // No CLI, setting off → default (None).
+    assert_eq!(effective_ram_init(None, false), None);
+    // No CLI, bgb UninitedWRAM on → seeded-random RAM.
+    assert_eq!(
+        effective_ram_init(None, true),
+        Some(RamInit::Random(DEFAULT_RAM_SEED))
+    );
+    // An explicit --ram-init overrides the persisted toggle.
+    assert_eq!(
+        effective_ram_init(Some(RamInit::Fill(0)), true),
+        Some(RamInit::Fill(0)),
+        "CLI wins over UninitedWRAM"
+    );
+}
+
+#[test]
 fn parse_rom_only_defaults() {
     let opts = parse_run(&["game.gb"]).unwrap();
     assert_eq!(opts.rom, Some(PathBuf::from("game.gb")));

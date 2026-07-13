@@ -150,6 +150,16 @@ impl Options {
     }
 }
 
+/// Default xorshift seed for a bare `--ram-init random` and for bgb's persisted
+/// `UninitedWRAM` toggle — a fixed value so "random" RAM stays reproducible.
+pub(crate) const DEFAULT_RAM_SEED: u64 = 0xA5A5_A5A5_A5A5_A5A5;
+
+/// The effective power-on RAM init: an explicit `--ram-init` (CLI) wins; else
+/// bgb's persisted `UninitedWRAM` maps to seeded-random RAM; else the default.
+pub(crate) fn effective_ram_init(cli: Option<RamInit>, uninited_wram: bool) -> Option<RamInit> {
+    cli.or_else(|| uninited_wram.then_some(RamInit::Random(DEFAULT_RAM_SEED)))
+}
+
 /// Parse `--ram-init`: `fill:HH` (a hex byte for cart SRAM) or `random[:seed]`
 /// (a seeded xorshift over all RAM; bare `random` uses a fixed default seed).
 pub(crate) fn parse_ram_init(s: &str) -> Result<RamInit, String> {
@@ -164,7 +174,7 @@ pub(crate) fn parse_ram_init(s: &str) -> Result<RamInit, String> {
                 Some(v) => {
                     parse_u64(v).map_err(|_| format!("invalid --ram-init random seed '{v}'"))?
                 }
-                None => 0xA5A5_A5A5_A5A5_A5A5,
+                None => DEFAULT_RAM_SEED,
             };
             Ok(RamInit::Random(seed))
         }

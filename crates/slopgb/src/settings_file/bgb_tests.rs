@@ -24,12 +24,14 @@ fn settings_round_trip_through_bgb_ini() {
         bootrom_dmg: "dmg.bin".to_string(),
         esc_shows_debugger: false,
         allow_opposing: true,
+        uninited_wram: true, // bgb's UninitedWRAM key
         ..Settings::default()
     };
     let mut ini = Ini::parse("");
     to_ini(&s, &mut ini);
     let back = from_ini(&ini);
     assert_eq!(back, s, "mapped + slopgb-extra fields round-trip");
+    assert!(ini.serialize().contains("UninitedWRAM=1"), "bgb key name");
 }
 
 #[test]
