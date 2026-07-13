@@ -136,12 +136,10 @@ pub(super) struct Render {
     pub(super) hunt_idx: u8,
     /// The comparator matched: the fine-scroll discard is locked in.
     pub(super) hunt_done: bool,
-    /// The machine dot of the fine-scroll comparator match (0 =
-    /// none yet). The glitch-line same-dot SCX-write hunt re-open keys on
-    /// it (`regs.rs` FF43): a write landing on the match dot committed
-    /// AFTER that dot's render tick, where hardware's comparator still
-    /// sees the new value. Tier-2 only consumer; written unconditionally
-    /// (inert flag-off).
+    /// The machine dot of the fine-scroll comparator match (0 = none yet). The
+    /// glitch-line same-dot SCX-write hunt re-open keys on it (`regs.rs` FF43):
+    /// a write landing on the match dot committed AFTER that dot's render tick,
+    /// where hardware's comparator still sees the new value.
     pub(super) hunt_match_dot: u16,
     /// Pipeline frozen for this many dots (sprite fetches).
     stall: u16,
@@ -234,22 +232,21 @@ pub(super) struct Render {
     /// STEADY mode-3 exit (`259+SCX&7+ds`) where a late-WY-triggered one
     /// extends later — the trigger SOURCE is the arm-1 first-line
     /// discriminator (`late_enable_ly0_ds` want-pair straddles the steady
-    /// exit). Reset per line; tier2+CGB only (read law input).
+    /// exit). Reset per line; CGB read-law input only.
     pub(super) win_enable_dot: u16,
     /// The dot a mid-line FF4B (WX) rewrite committed while
     /// the render was active (0 if none this line). A rewrite landing
     /// AT/BEFORE the WX match dot un-catches the window on SameBoy (the
     /// `late_wx_scx5` pair: write at the match dot 97 → bare, at 101 →
     /// extends) while slopgb's whole-dot render catches first. Reset per
-    /// line; tier2+CGB law input only.
+    /// line; CGB law input only.
     pub(super) wx_write_dot: u16,
-    /// Dot of a mid-mode-3 FF43 (SCX) rewrite, 0 = none this line.
-    /// Flags the `late_scx_late_disable` anomaly: a mid-line SCX change shifts
-    /// both the deferred read frame (−5 not −4) and moves the bare exit's
-    /// fine-scroll off the read-time SCX, which the whole-dot pre-draw-abort
-    /// law (`read_laws.rs` arm D3) cannot represent — so the arm is skipped
-    /// on such lines (the row keeps its native verdict, parked). Reset per
-    /// line; tier2 law input only.
+    /// Dot of a mid-mode-3 FF43 (SCX) rewrite, 0 = none this line. Flags the
+    /// `late_scx_late_disable` anomaly: a mid-line SCX change shifts both the
+    /// read frame (−5 not −4) and moves the bare exit's fine-scroll off the
+    /// read-time SCX, which the whole-dot pre-draw-abort law (`read_laws.rs` arm
+    /// D3) cannot represent — so the arm is skipped on such lines (the row keeps
+    /// its native verdict, parked). Reset per line; law input only.
     pub(super) scx_write_dot: u16,
     /// WX comparator output on the previous dot: activations and
     /// reactivations fire on the rising edge only (the match holds while
@@ -261,10 +258,10 @@ pub(super) struct Render {
     /// comparator for sprites with OAM X 0-7 — an OBJ fetch freezes the
     /// walk (the SCX hunt pauses during an X<8 sprite fetch).
     prefill_pos: u8,
-    /// **Shadow WX-activation dot (tier2 + CGB only; 0 = no match
-    /// yet).** The dot the raw WX comparator first matched this line,
-    /// recorded *before* the `wy_ok`/`win_en` activation gate — so it is
-    /// available even on a bare line the window never enters. The shadow
+    /// **Shadow WX-activation dot (CGB only; 0 = no match yet).** The dot the
+    /// raw WX comparator first matched this line, recorded *before* the
+    /// `wy_ok`/`win_en` activation gate — so it is available even on a bare line
+    /// the window never enters. The shadow
     /// WY-trigger ([`Ppu::wy_trig_sb`]) only extends mode 3 on a line where
     /// it was set at/before this dot (the SameBoy activation deadline).
     pub(super) wx_match_dot: u16,

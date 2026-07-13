@@ -131,11 +131,10 @@ impl Ppu {
     /// (bit 0 = vblank, bit 1 = STAT), 0 if none.
     pub fn tick(&mut self) -> u8 {
         self.strobe_tick();
-        // The deferred BG-fetcher LCDC render view catches up
-        // (like the `stat_ev` staged copies): applied before this dot's
-        // `render_step` so a bit3/bit4 write staged K dots ago drives the fetch
-        // grid from dot W+K. Only scheduled under the tier2 reclock during an
-        // active render (byte-identical OFF).
+        // The deferred BG-fetcher LCDC render view catches up (like the
+        // `stat_ev` staged copies): applied before this dot's `render_step` so
+        // a bit3/bit4 write staged K dots ago drives the fetch grid from dot
+        // W+K.
         let apply_render_lcdc = if let Some((_, dots)) = &mut self.render_lcdc_pending {
             *dots -= 1;
             *dots == 0
@@ -146,13 +145,11 @@ impl Ppu {
             let value = self.render_lcdc_pending.take().map_or(0, |(v, _)| v);
             let old = self.eff.render_lcdc;
             self.eff.render_lcdc = value;
-            // A mid-mode-3 LCDC.5 clear's RENDER re-anchor fires HERE, at
-            // the deferred render frame, when the deferred bit5 view falls 1→0
-            // (the read-law flag half already fired eagerly in
-            // `regs.rs::commit_eff`). So the drawn window ends at the render dot,
-            // not the eager cc+0 (`m3_lcdc_win_en_change_multiple`). Only reached
-            // under the tier2 `render_lcdc` defer (production sets the view in
-            // lockstep with no pending) — byte-identical OFF.
+            // A mid-mode-3 LCDC.5 clear's RENDER re-anchor fires here, at the
+            // deferred render frame, when the deferred bit5 view falls 1→0 (the
+            // read-law half already fired in `regs.rs::commit_eff`). So the
+            // drawn window ends at the render dot, not cc+0
+            // (`m3_lcdc_win_en_change_multiple`).
             if old & LCDC_WIN_ENABLE != 0 && value & LCDC_WIN_ENABLE == 0 && self.render.active {
                 self.window_abort_render();
             }
@@ -180,10 +177,9 @@ impl Ppu {
             }
         }
         if !self.enabled {
-            // Flag-on engine: with the LCD off `GB_STAT_update` returns
-            // early (`display.c:525`) and the interrupt line is held low, so a
-            // re-enable edge-detects from a clean low. Inert flag-off (the
-            // fields are unread), so this changes nothing in production.
+            // With the LCD off `GB_STAT_update` returns early
+            // (`display.c:525`) and the interrupt line is held low, so a
+            // re-enable edge-detects from a clean low.
             self.stat_update = crate::stat_update::StatUpdate::new();
             self.lyc_interrupt_line = false;
             // A staged FF41 engine view must not survive an LCD-off
@@ -246,11 +242,9 @@ impl Ppu {
         if self.dhalf == 0 {
             self.dhalf = 1;
             // Advance the write STROBE on the non-completing half too, so a
-            // staged mid-mode-3 register commit lands at its true HALF-dot
-            // instead of only whole-dot boundaries. `stage_write` doubles
-            // `dots_left` (the ×2 grid conversion), so a run of aligned
-            // half-dots still commits at the same whole dot; the seam is the
-            // per-register SameBoy half-dot offset.
+            // staged mid-mode-3 register commit lands at its true half-dot, not
+            // only at whole-dot boundaries (`stage_write` doubles `dots_left`
+            // for the ×2 grid).
             self.strobe_tick();
             // The odd-half STAT-engine level re-eval, so a coincident FF41
             // write-commit / LYC re-latch / mode-0 rise resolves at its true
@@ -270,40 +264,35 @@ impl Ppu {
         self.dhalf == 0
     }
 
-    /// The deferred read's EXACT half-dot
-    /// position within the current line: `2*dot + dhalf` on the 8 MHz grid.
-    /// [`Interconnect::read_deferred`] advances the machine T-granularly to the
-    /// read's leading edge (the `GB_display_sync` analogue), so at the sample
-    /// instant this IS the read's true half-dot — a DS read landing on an odd
-    /// CPU-T resolves mid-dot (`dhalf == 1`), which the whole-dot `self.dot`
-    /// alone cannot represent (the "+3 not +4" DS ISR read offset). Every
-    /// half-dot read-position law compares against this ONE value; the per-ISR
-    /// sub-M-cycle carry is [`Self::isr_read_carry_hd`], kept separate so
-    /// polled reads stay uncarried. Production reads never resolve mid-dot
-    /// (`dhalf` stays 0 flag-off) and no flag-off law consumes this.
+    /// The read's EXACT half-dot position within the current line:
+    /// `2*dot + dhalf` on the 8 MHz grid. The machine is advanced T-granularly
+    /// to the read's sample instant (the `GB_display_sync` analogue), so at
+    /// that instant this IS the read's true half-dot — a DS read landing on an
+    /// odd CPU-T resolves mid-dot (`dhalf == 1`), which the whole-dot
+    /// `self.dot` alone cannot represent (the "+3 not +4" DS ISR read offset).
+    /// Every half-dot read-position law compares against this ONE value; the
+    /// per-ISR sub-M-cycle carry is [`Self::isr_read_carry_hd`], kept separate
+    /// so polled reads stay uncarried.
     pub(crate) fn read_pos_hd(&self) -> i32 {
-        // The eager cc+0 → deferred read-debt in 8 MHz half-dots. Single speed:
-        // an M-cycle is 4 dots (8 hd), so the deferred read lands 4 dots ahead of
-        // the eager cc+0. DOUBLE SPEED: the CPU M-cycle is 2 dots (4 hd — the CPU
-        // runs 2×), so the deferred DS read lands only 2 dots (4 hd) ahead; the
-        // tier2 DS exit constants (`vis_exit_hd`'s `ds1`/DS arms) are calibrated
-        // to that +2-dot deferred position, so the eager DS read must advance the
-        // matching +4 hd to resolve them on the same frame.
+        // The cc+0 read → deferred read-debt in 8 MHz half-dots. Single speed:
+        // an M-cycle is 4 dots (8 hd), so the deferred read lands 4 dots (8 hd)
+        // ahead of cc+0. Double speed: the CPU M-cycle is 2 dots (4 hd — the
+        // CPU runs 2×), so the deferred DS read lands only 2 dots (4 hd) ahead;
+        // the DS exit constants (`vis_exit_hd`'s `ds1`/DS arms) are calibrated
+        // to that +2-dot position, so the DS read must advance the matching
+        // +4 hd to resolve them on the same frame.
         const EAGER_READ_DEBT_HD_SS: i32 = 8;
         const EAGER_READ_DEBT_HD_DS: i32 = 4;
         let base = 2 * i32::from(self.dot) + i32::from(self.dhalf);
-        // Eager-clock read-debt: the eager `Bus::read` samples FF41 at cc+0 (this
-        // M-cycle's leading edge), one M-cycle (SS 4 dots / DS 2 dots) BEFORE the
-        // deferred read (`read_deferred` pays the previous M-cycle's parked debt,
-        // landing at the cc+4-equivalent position) that the tier2 exit constants
-        // in [`Ppu::vis_exit_hd`] are calibrated against. Advance the eager read
-        // position by that debt (SS +8 hd / DS +4 hd) so the exit constants
-        // resolve at the same frame — the coupled render-length + read-exit laws
-        // then separate the window `_1`/`_2` pairs on the eager clock at BOTH
-        // speeds (measured: SS coupling CGB two-bin 578→553, DS debt 553→525).
-        // The residual DS sub-dot (`sb_dsa8` mid-dot / `read_carried` ISR carry)
-        // is not reconstructed on the eager whole-dot clock, so a handful of DS
-        // pre-draw-abort / STOP-shift legs stay parked.
+        // `Bus::read` samples FF41 at cc+0, one M-cycle (SS 4 dots / DS 2 dots)
+        // before the deferred read the [`Ppu::vis_exit_hd`] exit constants are
+        // calibrated against. Advance the read position by that debt (SS +8 hd /
+        // DS +4 hd) so the exit constants resolve on the same frame — the
+        // coupled render-length + read-exit laws then separate the window
+        // `_1`/`_2` pairs at both speeds. The residual DS sub-dot (`sb_dsa8`
+        // mid-dot / `read_carried` ISR carry) is not reconstructed on the
+        // whole-dot clock, so a handful of DS pre-draw-abort / STOP-shift legs
+        // stay parked.
         base + if self.ds {
             EAGER_READ_DEBT_HD_DS
         } else {
@@ -311,15 +300,12 @@ impl Ppu {
         }
     }
 
-    /// The per-ISR deferred-read sub-M-cycle carry (8 MHz half-dots),
-    /// applied ON TOP of [`Self::read_pos_hd`] by the laws that model a
-    /// STAT-ISR handler's first FF41 read. The measured offsets:
-    /// a carried (`read_carried`) mode-2 OAM-ISR read sits +4 hd late of the
-    /// polled frame at single speed, a mode-0 HBlank-ISR read +2 hd; in double
-    /// speed only the mode-0-ISR read differs (−4 hd — the full-carry
-    /// law's `off = m0 ? 2 : 4` rewritten on the half-dot grid, exit-folded).
-    /// 0 for polled/uncarried reads. Byte-identical OFF (`read_carried` is
-    /// only armed on the tier2 dispatch path).
+    /// The per-ISR deferred-read sub-M-cycle carry (8 MHz half-dots), applied
+    /// ON TOP of [`Self::read_pos_hd`] by the laws that model a STAT-ISR
+    /// handler's first FF41 read. Measured offsets: a carried (`read_carried`)
+    /// mode-2 OAM-ISR read sits +4 hd late of the polled frame at single speed,
+    /// a mode-0 HBlank-ISR read +2 hd; in double speed only the mode-0-ISR read
+    /// differs (−4 hd). 0 for polled/uncarried reads.
     pub(super) fn isr_read_carry_hd(&self) -> i32 {
         if !self.read_carried {
             return 0;
@@ -342,8 +328,8 @@ impl Ppu {
         self.sb_dsa8
     }
 
-    /// Apply the per-STOP-pause alignment correction (−4 mod 8, the
-    /// measured SameBoy-vs-slopgb pause delta). Tier2 STOP path only.
+    /// Apply the per-STOP-pause alignment correction (−4 mod 8, the measured
+    /// SameBoy-vs-slopgb pause delta).
     pub(crate) fn dsa_pause_correction(&mut self) {
         self.sb_dsa8 = (self.sb_dsa8 + 4) & 7;
     }
@@ -353,10 +339,10 @@ impl Ppu {
         self.lcd_shift_dots += dots;
     }
 
-    /// Latch the post-switch exit-table anchor at a switching STOP
-    /// (see [`Self::stop_anchor_midframe`]). Called at the STOP decision
-    /// point, tier2 only; the FIRST LCD-on switching STOP since the last
-    /// LCD enable pins the dance's calibration class.
+    /// Latch the post-switch exit-table anchor at a switching STOP (see
+    /// [`Self::stop_anchor_midframe`]). Called at the STOP decision point; the
+    /// FIRST LCD-on switching STOP since the last LCD enable pins the dance's
+    /// calibration class.
     pub(crate) fn note_switch_stop(&mut self) {
         if self.enabled && !self.stop_anchor_set {
             self.stop_anchor_set = true;
@@ -364,8 +350,8 @@ impl Ppu {
         }
     }
 
-    /// Record a DS→SS STOP leave (see [`Self::stop_leave_lcd_on`]);
-    /// `k` = the applied leave advance in half-dots. Tier2 only.
+    /// Record a DS→SS STOP leave (see [`Self::stop_leave_lcd_on`]); `k` = the
+    /// applied leave advance in half-dots.
     pub(crate) fn note_switch_leave(&mut self, k: u8) {
         if self.enabled {
             self.stop_leave_lcd_on = true;
@@ -373,10 +359,10 @@ impl Ppu {
         }
     }
 
-    /// The current access position mapped back onto the un-shifted
-    /// calibrated frame (see [`Self::lcd_shift_dots`]): subtract the machine
-    /// advance, wrapping across the line boundary. Identity when no advance
-    /// was applied (never-switched ROMs, production).
+    /// The current access position mapped back onto the un-shifted calibrated
+    /// frame (see [`Self::lcd_shift_dots`]): subtract the machine advance,
+    /// wrapping across the line boundary. Identity when no advance was applied
+    /// (never-switched ROMs).
     pub(super) fn law_pos(&self) -> (u8, u16) {
         let s = self.lcd_shift_dots;
         if s == 0 {
@@ -502,13 +488,12 @@ impl Ppu {
             }
         }
         if self.line == 144 && self.dot == 4 {
-            // VBlank interrupt: 4 dots after LY becomes 144, together with
-            // the visible mode 1 (TCAGBD; `vblank_stat_intr-GS`).
-            // A vblank-vector ack 1-2 dots earlier (SS)
-            // merges this raise into the dispatch it interrupted
-            // (`lycint_vblankirq_late_retrigger_2` want 0: ack 144:2, raise
-            // 144:4 consumed; the `_ds_1` ack at 144:3 DELIVERS — DS window
-            // 0). Never armed flag-off → production byte-identical.
+            // VBlank interrupt: 4 dots after LY becomes 144, together with the
+            // visible mode 1 (TCAGBD; `vblank_stat_intr-GS`). A vblank-vector
+            // ack 1-2 dots earlier (SS) merges this raise into the dispatch it
+            // interrupted (`lycint_vblankirq_late_retrigger_2` want 0: ack
+            // 144:2, raise 144:4 consumed; the `_ds_1` ack at 144:3 DELIVERS —
+            // DS window 0).
             let w = if self.ack_squash_ppu_mask & IF_VBLANK != 0 && !self.ds {
                 2
             } else {

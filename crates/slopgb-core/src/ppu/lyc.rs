@@ -8,22 +8,15 @@ impl Ppu {
     /// docs. The IRQ-side comparison uses [`Self::compare_ly_irq`].
     pub(super) fn compare_ly(&self) -> Option<u8> {
         if self.glitch_line {
-            // On the leading-edge (cc+0) read frame, a glitch-line FF41
-            // read in the last 4 dots is the cc+0 view of what its cc+4
-            // trailing edge sees 4 dots later — the *next* line (line 1)
-            // at dots 0-3 (the −4 read offset, exactly A7/A13's mode
+            // A glitch-line FF41 read in the last 4 dots is the cc+0 view of
+            // what its cc+4 trailing edge sees 4 dots later — the *next* line
+            // (line 1) at dots 0-3 (the −4 read offset, exactly A7/A13's mode
             // back-date). Back-date the readable compare to that line-1
-            // dots-0-3 value: DMG forces the coincidence flag invalid
-            // there (None), CGB holds 0 (its readable flag = LY−1 = 0
-            // across dots 0-3, so no change). Single-speed only (the DS
-            // read offset differs); gated `leading-edge`, so flag-off
-            // production stays Some(0) the whole glitch line (byte-identical).
-            // The −4 glitch readable-compare back-date is
-            // LEADING-EDGE-ONLY. The Tier-2 deferred read samples at the
-            // trailing frame, so the glitch line holds Some(0) the whole line
-            // (no line-1-dots-0-3 forced-invalid view) — the −4 made
-            // `lcdon_timing-GS`'s round-3 STAT read drop the LYC=0 coincidence
-            // bit ($80 vs $84). Single speed only.
+            // dots-0-3 value: DMG forces the coincidence flag invalid there
+            // (None), CGB holds 0 (its readable flag = LY−1 = 0 across dots 0-3,
+            // so no change). Single speed only (the DS read offset differs); the
+            // −4 back-date is what makes `lcdon_timing-GS`'s round-3 STAT read
+            // keep the LYC=0 coincidence bit ($84 not $80).
             if !self.ds && self.dot >= GLITCH_LINE_DOTS - 4 {
                 return if self.model.is_cgb() { Some(0) } else { None };
             }
@@ -51,18 +44,15 @@ impl Ppu {
         self.compare_ly_irq()
     }
 
-    /// The LYC-coincidence bit (FF41 bit 2) as an FF41 read sees it. Under
-    /// the eager clock the read samples cc+0, but the CPU-visible value is the
-    /// cc+4 one — the SAME +4 (SS) / +2 (DS) read-debt the mode bits take via
-    /// [`Self::read_pos_hd`]. The CGB readable compare switches from `L-1` to
-    /// `L` at line-start dot 4 ([`Self::compare_ly`]), so a cc+0 line-start
-    /// read must back-date the coincidence to the debt-shifted dot to match
-    /// SameBoy's real cc+4 read (`lycint_lycflag`, `lycEnable` STAT bytes).
-    /// Byte-identical OFF (`eager` false → the live latched `self.cmp`);
-    /// tier2's deferred read already advances the PPU to cc+4 so it keeps
-    /// `self.cmp`. CGB-only (the DMG readable flag drops at line starts, a
-    /// different frame); glitch lines keep `self.cmp` (their own leading-edge
-    /// back-date lives in [`Self::compare_ly`]).
+    /// The LYC-coincidence bit (FF41 bit 2) as an FF41 read sees it. The read
+    /// samples cc+0, but the CPU-visible value is the cc+4 one — the SAME +4
+    /// (SS) / +2 (DS) read-debt the mode bits take via [`Self::read_pos_hd`].
+    /// The CGB readable compare switches from `L-1` to `L` at line-start dot 4
+    /// ([`Self::compare_ly`]), so a cc+0 line-start read must back-date the
+    /// coincidence to the debt-shifted dot to match SameBoy's real cc+4 read
+    /// (`lycint_lycflag`, `lycEnable` STAT bytes). CGB-only (the DMG readable
+    /// flag drops at line starts, a different frame); glitch lines keep
+    /// `self.cmp` (their own back-date lives in [`Self::compare_ly`]).
     pub(super) fn read_cmp(&self) -> bool {
         if self.enabled && !self.glitch_line {
             if self.model.is_cgb() {
@@ -74,15 +64,14 @@ impl Ppu {
             // so shift that table by the +4-dot debt (DMG is single-speed). The
             // line wrap folds a 153→0 boundary read to the cc+4 line-0 Some(0)
             // (`ly0/lycint152_lyc0flag`/`lyc153flag`, `lycint_lycflag`).
-            // Byte-identical OFF (`eager` false → the latched `self.cmp`).
             return self.compare_ly_irq_shift(4) == Some(self.lyc);
         }
         self.cmp
     }
 
     /// The DMG readable-flag LY ([`Self::compare_ly_irq`] table) evaluated at
-    /// the eager read's cc+4 position — the DMG twin of
-    /// [`Self::compare_ly_shift`], for [`Self::read_cmp`].
+    /// the read's cc+4 position — the DMG twin of [`Self::compare_ly_shift`],
+    /// for [`Self::read_cmp`].
     fn compare_ly_irq_shift(&self, debt: u16) -> Option<u8> {
         let mut d = self.dot + debt;
         let mut l = u16::from(self.line);
@@ -107,8 +96,8 @@ impl Ppu {
     }
 
     /// The CGB readable-compare LY ([`Self::compare_ly`] CGB arm) evaluated at
-    /// the eager read's cc+4 position — the current dot advanced by `debt` on
-    /// the 154×456 grid — for [`Self::read_cmp`].
+    /// the read's cc+4 position — the current dot advanced by `debt` on the
+    /// 154×456 grid — for [`Self::read_cmp`].
     fn compare_ly_shift(&self, debt: u16) -> Option<u8> {
         let mut d = self.dot + debt;
         let mut l = u16::from(self.line);
@@ -265,50 +254,48 @@ impl Ppu {
             self.stat_en & STAT_SRC_VBLANK != 0 && !(ll == 153 && ld >= 452)
         };
         let lyc_level_high = self.stat_line && self.stat_line_level(STAT_SRC_LYC & self.stat_en);
-        // The ly153 LYC-WRITE wrap, the FF45 sibling
-        // of the FF41 `lyc_wrap_153` write-trigger. The lcd-offset shifts a late
-        // FF45 write (new LYC = 153) out of the line-153 dots-0-3 carryover (where
-        // `target` = Some(153) and the gambatte path fires) into the dots-6-7
-        // window, where the `target` table wraps to Some(0) (the LY=0 increment)
-        // so `target == Some(value)` fails. But SameBoy's `ly_for_comparison` is
-        // still 153 there (`ly_for_comparison_line_153`: 153 at dots 6-7) — the
-        // write makes a fresh LYC=153 match and `GB_STAT_update` fires. Under Tier-2,
-        // a late FF45 write whose value matches the held `ly_for_comparison`
-        // (the real-state discriminator, not the offset) fires; the gambatte
-        // `target` table (pinning the base `lyc153_late_ff45_enable_{1,2}` cells)
-        // is untouched. Byte-identical OFF.
+        // The ly153 LYC-WRITE wrap, the FF45 sibling of the FF41 `lyc_wrap_153`
+        // write-trigger. The lcd-offset shifts a late FF45 write (new LYC = 153)
+        // out of the line-153 dots-0-3 carryover (where `target` = Some(153) and
+        // the gambatte path fires) into the dots-6-7 window, where the `target`
+        // table wraps to Some(0) (the LY=0 increment) so `target == Some(value)`
+        // fails. But SameBoy's `ly_for_comparison` is still 153 there
+        // (`ly_for_comparison_line_153`: 153 at dots 6-7) — the write makes a
+        // fresh LYC=153 match and `GB_STAT_update` fires. So a late FF45 write
+        // whose value matches the held `ly_for_comparison` (the real-state
+        // discriminator, not the offset) fires; the gambatte `target` table
+        // (pinning the base `lyc153_late_ff45_enable_{1,2}` cells) is untouched.
         let lyc_write_wrap_153 = ll == 153
             && self.ly_for_comparison_at(ll, ld) == i16::from(value)
             && !blocked
             && !lyc_level_high;
-        // The FF45 "weirdpoint" (`ff45_enable_weirdpoint_lcdoffset1_2`).
-        // The lcd-offset shifts a late FF45 write into
-        // the `ly_for_comparison == -1` line-start gap (dot 3 on lines 1-143). At
-        // `lyfc == -1` SameBoy's `GB_STAT_update` leaves `lyc_interrupt_line`
-        // unchanged (`display.c:534` only clears the visible bit, never re-latches
-        // a match) — the write raises NO fresh LYC edge. slopgb's gambatte `target`
-        // table treats line-start dots 0-3 as the upcoming-line match (Some(line))
-        // and would fire (`got=2`, want 0). Under Tier-2 (the SameBoy/reclock
-        // grid), suppress the FF45 fire in the `-1` gap on visible lines 1-143.
-        // Line 153 is EXCLUDED: its `-1` gaps (dots 0-5, 8-11) carry the held
-        // LYC=153 latch + the `lyc_write_wrap_153` wrap fire that SameBoy delivers
+        // The FF45 "weirdpoint" (`ff45_enable_weirdpoint_lcdoffset1_2`). The
+        // lcd-offset shifts a late FF45 write into the `ly_for_comparison == -1`
+        // line-start gap (dot 3 on lines 1-143). At `lyfc == -1` SameBoy's
+        // `GB_STAT_update` leaves `lyc_interrupt_line` unchanged
+        // (`display.c:534` only clears the visible bit, never re-latches a
+        // match) — the write raises NO fresh LYC edge. slopgb's gambatte
+        // `target` table treats line-start dots 0-3 as the upcoming-line match
+        // (Some(line)) and would fire (`got=2`, want 0). So suppress the FF45
+        // fire in the `-1` gap on visible lines 1-143. Line 153 is EXCLUDED: its
+        // `-1` gaps (dots 0-5, 8-11) carry the held LYC=153 latch + the
+        // `lyc_write_wrap_153` wrap fire that SameBoy delivers
         // (`lyc153_late_ff45_enable_3` outE2) — suppressing there drops a real
-        // edge. Byte-identical OFF.
+        // edge.
         let tier2_minus1_gap = (1..=143).contains(&ll) && self.ly_for_comparison_at(ll, ld) == -1;
-        // The FF45-write fire is suppressed under the tier2
-        // engine when a NON-LYC source holds the line: SameBoy's
-        // `GB_STAT_update` raises IF only on the line's 0→1 edge, and a line
-        // held by an enabled MODE source (the VBlank source carried across
-        // the ly153→ly0 wrap: `lycwirq_trigger_ly00_stat50_1`, LYC:=0 commits
-        // ly0 dot1 with STAT=$50, SameBoy line continuously high mode-1 → no
-        // edge, want E0; slopgb fired E2) never dips for a LYC
-        // rewrite. A line held only by the LYC source does NOT suppress:
-        // SameBoy's dot-4 re-latch against the OLD LYC dips it before the
-        // (+4-later) write lands, so its write re-rise IS an edge — slopgb's
-        // early write frame never sees the dip, and the event-like fire is
-        // its stand-in (`ff45_enable_weirdpoint_3` / `lyc153_late_ff45_
-        // enable_3`, both SameBoy-pass, dropped by the blanket engine-line
-        // guard). LE/Tier-2 only → byte-identical OFF.
+        // The FF45-write fire is suppressed under the engine when a NON-LYC
+        // source holds the line: SameBoy's `GB_STAT_update` raises IF only on
+        // the line's 0→1 edge, and a line held by an enabled MODE source (the
+        // VBlank source carried across the ly153→ly0 wrap:
+        // `lycwirq_trigger_ly00_stat50_1`, LYC:=0 commits ly0 dot1 with
+        // STAT=$50, SameBoy line continuously high mode-1 → no edge, want E0;
+        // slopgb fired E2) never dips for a LYC rewrite. A line held only by the
+        // LYC source does NOT suppress: SameBoy's dot-4 re-latch against the OLD
+        // LYC dips it before the (+4-later) write lands, so its write re-rise IS
+        // an edge — slopgb's early write frame never sees the dip, and the
+        // event-like fire is its stand-in (`ff45_enable_weirdpoint_3` /
+        // `lyc153_late_ff45_enable_3`, both SameBoy-pass, dropped by the blanket
+        // engine-line guard).
         let mode_src_en = match self.mode_for_interrupt {
             0 => self.stat_en & STAT_SRC_HBLANK,
             1 => self.stat_en & STAT_SRC_VBLANK,
@@ -369,15 +356,15 @@ impl Ppu {
         let protected = !self.glitch_line
             && ((self.dot == 0 && self.line >= 1 && value == self.line)
                 || (self.line == 153 && self.dot == 8 && value == 0)
-                // Eager: a DISABLE of a held LYC=153 (`old == 153`, new value
-                // away from 153) landing in the line-153 dots-4-7 coincidence
-                // window holds the delayed copy at 153, so the held LY=153
-                // coincidence still fires at the dots-6-7 window (wilbertpol
-                // `ly_lyc_153_write-GS` C015) — the DMG twin of the CGB
-                // `write_lyc_cgb`/`step_dot` protection. Scoped to the held-153
-                // disable (not any window write, which spuriously fires
-                // `lycEnable/lyc0_ff45_disable`). The window starts at dot 4
-                // (where this ROM's disable write commits on the DMG grid).
+                // A DISABLE of a held LYC=153 (`old == 153`, new value away from
+                // 153) landing in the line-153 dots-4-7 coincidence window holds
+                // the delayed copy at 153, so the held LY=153 coincidence still
+                // fires at the dots-6-7 window (wilbertpol `ly_lyc_153_write-GS`
+                // C015) — the DMG twin of the CGB `write_lyc_cgb`/`step_dot`
+                // protection. Scoped to the held-153 disable (not any window
+                // write, which spuriously fires `lycEnable/lyc0_ff45_disable`).
+                // The window starts at dot 4 (where this ROM's disable write
+                // commits on the DMG grid).
                 || (self.line == 153
                     && old == 153
                     && value != 153
@@ -414,15 +401,13 @@ impl Ppu {
         // timeToNextLy <= 2`; lycwirq_trigger_ly00_stat50_3 fires there
         // while _1/_2 stay blocked).
         //
-        // The (0,4) un-block cell is the LE/tier2 (deferred) read
-        // frame's compare-wrap position — there `_3` (the fire leg) lands at
-        // dot 4. Under the EAGER clock the FF45 writes are recorded a full
-        // M-cycle earlier: `_3` moves to dot 8 (`their_line == line == 0`, the
-        // VISIBLE branch, which fires it naturally on the LYC=0 match), while
-        // `_2` (want no-fire) moves to dot 4 and would be spuriously un-blocked
-        // here. So under eager the vblank branch fully blocks — no (0,4)
-        // exception (`lycwirq_trigger_ly00_stat50_2` want E0). `eager`-
-        // gated → byte-identical flag-off.
+        // The (0,4) compare-wrap cell fires the un-block exception (the
+        // `blocked` vblank branch below): the FF45 writes are recorded ~2
+        // M-cycles before SameBoy's cc+4 view (the dot-4 LYC=153 IF-emission
+        // decouple shifts the ISR-timed ly0 write), landing `_3` (the fire leg)
+        // on the (0,4) cell — VBLANK branch, must FIRE — while `_2` moves to
+        // dot 0 (fully blocked, want E0). `lycwirq_trigger_ly00_stat50_3` fires
+        // at (0,4) while `_1`/`_2` stay blocked.
         let their_line = if self.dot < 8 { prev } else { self.line };
         let blocked = if self.glitch_line {
             false
@@ -431,32 +416,26 @@ impl Ppu {
                 && (self.m0_src || self.dot < 8)
                 && value == their_line
         } else {
-            // The (0,4) compare-wrap un-block cell. It was disabled under the
-            // earlier eager frame because there `_3` fired at dot 8 (VISIBLE
-            // branch) and `_2` (want-block) had moved to dot 4. The dot-4
-            // LYC=153 IF-emission decouple shifts the whole ISR-timed ly0 LYC
-            // write ANOTHER M-cycle earlier: `_3` moves dot 8→4 (back onto this
-            // compare-wrap cell, VBLANK branch, must FIRE) and `_2` moves dot
-            // 4→0 (still fully blocked). So re-enable the exception for the eager
-            // frame too — `lycwirq_trigger_ly00_stat50_3` fires at (0,4) while
-            // `_1`/`_2` (dot 0) stay blocked. Deferred keeps the original cell.
+            // The (0,4) compare-wrap un-block cell (see above): `_3` lands here
+            // on the VBLANK branch and must FIRE; `_1`/`_2` (dot 0) stay
+            // blocked.
             self.stat_en & STAT_SRC_VBLANK != 0 && !(self.line == 0 && self.dot == 4)
         };
         if self.stat_en & STAT_SRC_LYC != 0 && target == Some(value) && !blocked {
             self.pending_if |= IF_STAT;
         }
-        // Seal the eager line-0 vblank-carry → LYC seamless handoff.
-        // On line 0 the STAT line is held HIGH by the mode-1 (VBlank) carry
-        // across dots 0-3, then the carry ends at dot 4 (`mode_for_interrupt`
-        // flips to 2 with OAM disabled → the line DIPS). A LYC-match write that
-        // the m1 block suppresses here (`_1` at dot 0, `_2` at dot 4) must NOT
-        // then let the dot-engine re-raise a FRESH 0→1 edge one dot later: on
-        // SameBoy the just-matched LYC=0 seamlessly continues the already-high
-        // vblank line (`lycwirq_trigger_ly00_stat50_2` want E0 — the eager cc+0
-        // write lands the match at the dot-4 dip). Seed the engine line HIGH so
-        // the match joins (STAT blocking), no fresh IF. `_3` (dot 8) lands in
-        // the VISIBLE branch (`their_line == 0`), is not blocked, and fires its
-        // real edge. `eager`+DMG-scoped → byte-identical flag-off.
+        // Seal the line-0 vblank-carry → LYC seamless handoff. On line 0 the
+        // STAT line is held HIGH by the mode-1 (VBlank) carry across dots 0-3,
+        // then the carry ends at dot 4 (`mode_for_interrupt` flips to 2 with OAM
+        // disabled → the line DIPS). A LYC-match write that the m1 block
+        // suppresses here (`_1` at dot 0, `_2` at dot 4) must NOT then let the
+        // dot-engine re-raise a FRESH 0→1 edge one dot later: on SameBoy the
+        // just-matched LYC=0 seamlessly continues the already-high vblank line
+        // (`lycwirq_trigger_ly00_stat50_2` want E0 — the cc+0 write lands the
+        // match at the dot-4 dip). Seed the engine line HIGH so the match joins
+        // (STAT blocking), no fresh IF. `_3` (dot 8) lands in the VISIBLE branch
+        // (`their_line == 0`), is not blocked, and fires its real edge.
+        // DMG-scoped.
         if !self.model.is_cgb()
             && blocked
             && their_line > 143

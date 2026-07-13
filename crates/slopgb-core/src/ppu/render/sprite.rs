@@ -228,22 +228,18 @@ impl Ppu {
         let cgb = self.model.is_cgb();
         // The mixer's render-only LCDC bits sample the DEFERRED view
         // (`render_lcdc`), like the BG fetch's map/data bits: a mid-mode-3
-        // toggle lands its column at the production/SameBoy dot, not the flip's
-        // leading edge. `render_lcdc` == `eff.lcdc` in production
-        // (byte-identical OFF). Only the pixel-draw bits ride it — the
-        // fetch-side / mode-3-length reads keep the eager `eff.lcdc`.
+        // toggle lands its column at the SameBoy render dot, not the earlier
+        // flip dot. Only the pixel-draw bits ride it — the fetch-side /
+        // mode-3-length reads keep the live `eff.lcdc`.
         let render_lcdc = self.eff.render_lcdc;
-        // LCDC.1 also gates sprite pixels at the mix: pixels already in the
-        // FIFO stop showing on dots where the OBJ enable reads low (mealybug
-        // m3_lcdc_obj_en_change: sprites fetched during the prefill turn into
-        // background mid-glyph at the disable commit). The DMG mixer samples the
-        // bit one dot ahead of the eff view (the fetch-lead timing — the blob
-        // photos put each band's suppression boundary one column left of the eff
-        // commit); CGB-C samples eff, pixel-exact. On CGB the
-        // draw-side suppression is render-only (the sprite is already fetched;
-        // the FETCH-side OBJ enable gating the stall/length stays eager in
-        // `render.rs`), so it rides the deferred `render_lcdc`; DMG keeps the
-        // eager eff view (its one-dot-ahead calibration is pinned to it).
+        // The DMG mixer samples LCDC.1 one dot ahead of the eff view (the
+        // fetch-lead timing — the blob photos put each band's suppression
+        // boundary one column left of the eff commit); CGB-C samples eff,
+        // pixel-exact. On CGB the draw-side suppression is render-only (the
+        // sprite is already fetched; the FETCH-side OBJ enable gating the
+        // stall/length stays on the live `eff.lcdc` in `render.rs`), so it rides
+        // the deferred `render_lcdc`; DMG keeps the live eff view (its
+        // one-dot-ahead calibration is pinned to it).
         let obj_en_view = if cgb { render_lcdc } else { self.eff.lcdc };
         if obj_en_view & LCDC_OBJ_ENABLE == 0 {
             sp = EMPTY_SPRITE_PIXEL;
@@ -270,7 +266,7 @@ impl Ppu {
         // On SGB the DMG output's 2-bit shade is captured (into the shade
         // buffer) alongside the color, for the `*_TRN` screen-read transfers.
         // `None` on the CGB paths (SGB is never CGB) and on non-SGB DMG (where
-        // `record_sgb_shade` is a no-op) — byte-identical off SGB.
+        // `record_sgb_shade` is a no-op) — inert off SGB.
         let mut sgb_shade: Option<u8> = None;
         let color = if sprite_wins {
             if cgb {

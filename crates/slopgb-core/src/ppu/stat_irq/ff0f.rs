@@ -1,24 +1,22 @@
-//! FF0F (IF register) read-view + squash family: the eager cc+0 FF0F read's
-//! verdict laws — the group-A STAT engine-rise PEEK, the group-B/C/E
-//! write-race / dispatch-ack / OAM-pulse squash arms. A third `impl Ppu` block
-//! split out of `reclock.rs` for the <1000-line cap (`use super::*` == the
-//! `ppu` module, like `reclock.rs`/`read_laws.rs`); every arm is
-//! `eager`-gated so production is byte-identical. Consumed by the FF0F
-//! read/ack path in `interconnect/bus.rs`.
+//! FF0F (IF register) read-view + squash family: the cc+0 FF0F read's verdict
+//! laws — the group-A STAT engine-rise PEEK, the group-B/C/E write-race /
+//! dispatch-ack / OAM-pulse squash arms. A third `impl Ppu` block split out of
+//! `reclock.rs` for the <1000-line cap (`use super::*` == the `ppu` module,
+//! like `reclock.rs`/`read_laws.rs`). Consumed by the FF0F read/ack path in
+//! `interconnect/bus.rs`.
 
 use super::*;
 
 impl Ppu {
-    /// FF0F group-A read PEEK (the FF41-peek shape on the IF
-    /// register): the deferred cc+0 FF0F read's VERDICT includes a STAT engine
-    /// rise whose emission dot is deterministically known at read time and
-    /// lands within the read's SameBoy-frame sample window — verdict-only, no
-    /// machine advance, no IF commit (the refuted sub-M FF0F sampling
-    /// moved the machine and broke the want-early `_1` legs; this never moves
-    /// anything). SameBoy's `read_high_memory` samples IF after
-    /// `GB_display_sync` runs the PPU to the exact read half-dot with
-    /// PPU-events-first ordering; slopgb's deferred machine advance stops a
-    /// hair short of that frame, so a rise at the very next dot(s) that
+    /// FF0F group-A read PEEK (the FF41-peek shape on the IF register): the
+    /// cc+0 FF0F read's VERDICT includes a STAT engine rise whose emission dot
+    /// is deterministically known at read time and lands within the read's
+    /// SameBoy-frame sample window — verdict-only, no machine advance, no IF
+    /// commit (the refuted sub-M FF0F sampling moved the machine and broke the
+    /// want-early `_1` legs; this never moves anything). SameBoy's
+    /// `read_high_memory` samples IF after `GB_display_sync` runs the PPU to the
+    /// exact read half-dot with PPU-events-first ordering; our machine advance
+    /// stops a hair short of that frame, so a rise at the very next dot(s) that
     /// SameBoy has already folded reads as clear. Dual-traced (SBIF/SBREAD
     /// ff0f fp vs SLOPGB ff0f/dispatch):
     ///
@@ -39,8 +37,7 @@ impl Ppu {
     /// The mode-2 pulse is deliberately NOT peeked: the `m2int_m2irq_1/_2`
     /// legs read 1 M apart around the next line's pulse and pass on the
     /// current frame — a +window peek would flip the `_1` legs.
-    /// Caller: the eager `Bus::read` FF0F peek; every arm short-circuits on
-    /// `eager` (off in production) → production byte-identical OFF.
+    /// Caller: the `Bus::read` FF0F peek.
     pub(crate) fn ff0f_stat_peek(&self) -> u8 {
         if !self.enabled || self.glitch_line || self.stat_update.line() {
             return 0;
@@ -74,23 +71,20 @@ impl Ppu {
                 return IF_STAT;
             }
         }
-        // (a-eager) the EAGER single-speed WINDOW mode-0 STAT-IF DELIVER
-        // window (CGB + DMG). When a window is active the eager clock keeps the
-        // PRODUCTION mode-0 flip R (window-elevated: `flip_projection` adds the
-        // window start cost), but SameBoy — and tier2's render-length reclock —
-        // rises the mode-0 STAT source exactly 2 dots (half an M-cycle) EARLIER,
-        // at R-2 (measured tier2 m0rise: wxA5 261→259, wxA6 257→255). The eager
-        // cc+0 FF0F read is on the SAME grid as tier2's read, so a read landing
-        // in that 2-dot gap `[R-2, R)` observes clear where SameBoy's
-        // events-first cc+4 frame has already delivered the bit
+        // (a-win) the single-speed WINDOW mode-0 STAT-IF DELIVER window
+        // (CGB + DMG). When a window is active the mode-0 flip R is
+        // window-elevated (`flip_projection` adds the window start cost), but
+        // SameBoy rises the mode-0 STAT source exactly 2 dots (half an M-cycle)
+        // EARLIER, at R-2 (measured m0rise: wxA5 261→259, wxA6 257→255). So a
+        // cc+0 FF0F read landing in that 2-dot gap `[R-2, R)` observes clear
+        // where SameBoy's events-first cc+4 frame has already delivered the bit
         // (`m2int_wxA5/A6_m0irq_2`: read R-1, want E2, EV reads E0). NON-window
-        // rows keep R == SameBoy's rise (no reclock back-date), so the gap is
-        // empty and the plain `m0irq_1`/`scx2_1` reads (which want CLEAR) never
-        // trip this arm — the `win_active` gate is the discriminator. The `_1`
-        // window siblings read one M-cycle earlier (below R-2) and also stay
-        // clear. Verdict-only (`intf`/dispatch untouched; the rise still folds
-        // at R); eager-only + SS-scoped (DS takes arm (a) above); production and
-        // tier2 inert (`eager` false) → byte-identical.
+        // rows keep R == SameBoy's rise (no back-date), so the gap is empty and
+        // the plain `m0irq_1`/`scx2_1` reads (which want CLEAR) never trip this
+        // arm — the `win_active` gate is the discriminator. The `_1` window
+        // siblings read one M-cycle earlier (below R-2) and also stay clear.
+        // Verdict-only (`intf`/dispatch untouched; the rise still folds at R);
+        // SS-scoped (DS takes arm (a) above).
         if !self.ds
             && self.render.win_active
             && self.eng_stat & STAT_SRC_HBLANK != 0
@@ -122,8 +116,8 @@ impl Ppu {
     /// The current line's mode-0 flip (rise) dot R: the render's own recorded
     /// flip once the visible mode-3→0 flip has fired (`flip_dot`), else its
     /// projection while the render is still active ([`Self::projected_flip_dot`]),
-    /// else `None` (no visible mode-3 this line). Used by the eager
-    /// (arm (a-eager) in [`Self::ff0f_stat_peek`]) mode-0 STAT-IF DELIVER window.
+    /// else `None` (no visible mode-3 this line). Used by arm (a-win) in
+    /// [`Self::ff0f_stat_peek`]'s mode-0 STAT-IF DELIVER window.
     fn m0_flip_dot(&self) -> Option<u16> {
         if self.line_render_done && self.flip_dot != 0 {
             Some(self.flip_dot)
@@ -135,16 +129,16 @@ impl Ppu {
     }
 
     /// The CGB double-speed glitch-line mode-0 read-view mask (the
-    /// `ff0f_dmg_m0_coincident_mask` analogue for the eager CGB DS frame). On
-    /// the first line after an LCD enable (`glitch_line`) an `enable_display`
-    /// ROM polls FF0F (DI, `IE=0`) with the mode-0 STAT source armed; the eager
-    /// DS frame emits the glitch-line mode-0 STAT source EARLY (measured: the
+    /// `ff0f_dmg_m0_coincident_mask` analogue for the CGB DS frame). On the
+    /// first line after an LCD enable (`glitch_line`) an `enable_display` ROM
+    /// polls FF0F (DI, `IE=0`) with the mode-0 STAT source armed; the CGB DS
+    /// frame emits the glitch-line mode-0 STAT source EARLY (measured: the
     /// spurious rise lands ~dot 19, so `intf` bit 1 is already set well before
     /// the real mode-3→0 flip), so a poll landing BEFORE the true rise reads the
     /// set bit where SameBoy — polling its cc+4 read frame short of the rise —
-    /// reads clear. The eager cc+0 read's TRUE position is `dot + 2` (the +2-dot
-    /// DS read-debt, the same debt `vis_mode_read` back-dates with); when that
-    /// true position has NOT crossed the rise R the read must read CLEAR:
+    /// reads clear. The cc+0 read's TRUE position is `dot + 2` (the +2-dot DS
+    /// read-debt, the same debt `vis_mode_read` back-dates with); when that true
+    /// position has NOT crossed the rise R the read must read CLEAR:
     /// `ly0_m0irq_scx0_ds_1` reads dot 250 (true 252) vs R=253 → clear (want
     /// E0); its `_2` reads dot 252 (true 254 > 253) → set (want E2);
     /// `ly0_m0irq_scx1_ds_1` reads dot 252 (true 254) vs R=254 → clear, `_2`
@@ -152,9 +146,8 @@ impl Ppu {
     /// ([`Self::m0_flip_dot`], `flip_dot` once flipped else its projection).
     /// Returns `IF_STAT` to clear from the read verdict; verdict-only
     /// (`intf`/dispatch untouched — the spurious rise still stands, this only
-    /// restores the pre-rise read value SameBoy's frame reports). Scoped to
-    /// `eager`, CGB, double-speed and the glitch line → production, tier2,
-    /// DMG and single-speed byte-identical.
+    /// restores the pre-rise read value SameBoy's frame reports). Scoped to CGB,
+    /// double-speed and the glitch line.
     pub(crate) fn ff0f_cgb_ds_glitch_m0_mask(&self) -> u8 {
         if self.model.is_cgb()
             && self.ds
@@ -172,19 +165,18 @@ impl Ppu {
         0
     }
 
-    /// Arm the FF0F write-race squash window (see the
-    /// `stat_if_squash` field doc + the consumption site in
-    /// [`Self::stat_update_tick`]). Called by the interconnect at the deferred
-    /// FF0F write's commit instant, only when the written value clears bit 1.
-    /// Tier-2 caller only → production byte-identical OFF.
+    /// Arm the FF0F write-race squash window (see the `stat_if_squash` field
+    /// doc + the consumption site in [`Self::stat_update_tick`]). Called by the
+    /// interconnect at the FF0F write's commit instant, only when the written
+    /// value clears bit 1.
     pub(crate) fn arm_ff0f_if_squash(&mut self) {
         self.stat_if_squash = 2;
     }
 
-    /// The co-instant line-0 dot-4 OAM-pulse read-view mask
-    /// (see the `ly0_pulse_age` field doc): a deferred FF0F read landing on
-    /// the pulse's own dot returns the bit CLEAR (CPU-read-first at the
-    /// shared instant, SameBoy-measured). Verdict-only.
+    /// The co-instant line-0 dot-4 OAM-pulse read-view mask (see the
+    /// `ly0_pulse_age` field doc): an FF0F read landing on the pulse's own dot
+    /// returns the bit CLEAR (CPU-read-first at the shared instant,
+    /// SameBoy-measured). Verdict-only.
     pub(crate) fn ff0f_ly0_pulse_mask(&self) -> u8 {
         // LYC==153 names the anchor: only the LYC-153 ISR's read lands
         // BEFORE the pulse in SameBoy's frame (line-0 dot 3, rise −1;
@@ -195,13 +187,13 @@ impl Ppu {
         // guard).
         // Second arm: the shifted-frame co-instant mode-0 rise
         // (see `m0sh_age`).
-        // The DMG line-0 dot-4 OAM-pulse mask is DISABLED under the eager
-        // frame: the dot-4 LYC=153 IF-emission decouple moves the LYC-153
-        // ISR's ly0 reads a full M-cycle earlier, so `_1` (want 0) reads dot 0
-        // (before the pulse — naturally clear, no mask needed) while `_2` (want
-        // E2) reads dot 4 co-instant with the pulse and must SEE it
-        // (`lyc153int_m2irq_2`). CGB keeps the mask (its read frame is unmoved —
-        // CGB eager two-bin 287-neutral requires it).
+        // The DMG line-0 dot-4 OAM-pulse mask is DISABLED: the dot-4 LYC=153
+        // IF-emission decouple moves the LYC-153 ISR's ly0 reads a full M-cycle
+        // earlier, so `_1` (want 0) reads dot 0 (before the pulse — naturally
+        // clear, no mask needed) while `_2` (want E2) reads dot 4 co-instant
+        // with the pulse and must SEE it (`lyc153int_m2irq_2`). CGB keeps the
+        // mask (its read frame is unmoved — the CGB two-bin 287-neutral
+        // requires it).
         if (self.model.is_cgb()
             && self.ly0_pulse_age > 0
             && self.line == 0

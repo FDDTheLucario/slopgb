@@ -30,15 +30,15 @@ impl Ppu {
             160 => {
                 self.render.active = false;
                 self.render_finished = true;
-                // Record the pipe-end dot for the tier2 palette
-                // unblock law (see `Ppu::pal_open_dot`).
+                // Record the pipe-end dot for the palette unblock law
+                // (see `Ppu::pal_open_dot`).
                 self.pal_open_dot = self.dot;
                 // The CGB palette-RAM unblock (this `render_finished` rise)
                 // is half-classified by the interconnect for the cc+2
                 // MID-phase FF69/FF6B read (sub-dot event-phase model);
                 // bare steady-state lines only (see `m0_access_flip`). The
                 // `lead_eighths` carried here is 0 (net-zero whole-M-cycle
-                // commit) until the reclock sets a per-SCX palette offset.
+                // commit).
                 self.pal_access_flip =
                     (self.render.fetched == 0 && !self.render.win_active && !self.glitch_line)
                         .then_some(0i8);
@@ -100,8 +100,8 @@ impl Ppu {
         // earlier). Gate the OAM-read MID signal to those lines; the
         // sprite/window/glitch phases are later increments.
         let bare_flip = r.fetched == 0 && !r.win_active && !self.glitch_line;
-        // Back-date the CPU-visible mode→0 boundary
-        // (`vis_mode`) AHEAD of the dispatch flip on the flag-on path (single
+        // Back-date the CPU-visible mode→0 boundary (`vis_mode`) AHEAD of the
+        // dispatch flip (single
         // speed): `vis_early` rises here while `m0_src`/`line_render_done` (the
         // IRQ dispatch) stay at `proj <= lead` below, so the visible mode reads 0
         // at SameBoy's `visible_mode0_dot` without moving the dispatch — the
@@ -110,14 +110,13 @@ impl Ppu {
         // dot 251, the kernel −1 net shift); sprite/window lines use `lead + 4`:
         // their sprite-extended mode-3 geometry shifts the boundary, and +4
         // lands it at SameBoy's frame there — measured to lift the gambatte
-        // sprite `m3stat_2` reads (the sprite analogs of the kernel m0int, +40
-        // single-speed flag-on / 0 regress) + mooneye
+        // sprite `m3stat_2` reads (the sprite analogs of the kernel m0int) + mooneye
         // `intr_2_mode0_timing_sprites`, window reads neutral. The LCD-enable
         // glitch line also takes `lead + 4`: there +4 is the *full*
         // single-speed read offset, so the visible mode→0 EXIT is observationally
         // neutral — `vis_early` anticipates `line_render_done` by the same 4 dots
         // the cc+0 read samples early, and `vis_mode`'s glitch branch (paired with
-        // its 78→74 entry back-date) reproduces the flag-off cc+4 view
+        // its 78→74 entry back-date) reproduces the cc+4 view
         // (`lcdon_timing-GS` STAT tables; gambatte enable_display / post-enable
         // m3stat). `bare_flip` is false on the glitch line, so it lands in the +4
         // arm. DS excluded (the DS read offset is 2, deferred). `vis_early`
@@ -151,23 +150,21 @@ impl Ppu {
             // half-classified by the interconnect for the cc+2 MID-phase
             // OAM read (sub-dot event-phase model).
             //
-            // Boundary-coincident accessibility
-            // release. The production stamp blocks an OAM/VRAM access landing in
-            // the unblock M-cycle's SECOND HALF (`event_phase` commit eighth >
-            // ACCESS_PHASE) — the cc+2 MID-frame model. But under the cc+0
-            // deferred read SameBoy unblocks AT the boundary: `vram_m3`/
-            // `oam_access` `postread_scx2/scx5_2` read ACCESSIBLE on the dot
-            // `line_render_done` fires, not the trailing mode 3. A read 4 dots
-            // earlier (`_1`, a different M-cycle) sees no stamp and stays blocked,
-            // so releasing the boundary M-cycle's stamp is a clean separation
-            // (full-CGB two-bin +7/−0 single speed). Push the M0Access edge to
-            // phase 0 (`lead = -8` clamps there) so the leading-edge access is
-            // never pre-empted. SINGLE SPEED only: the same release in double
-            // speed unblocks the DS VRAM-WRITE path too (the stamp gates writes
-            // at `memory.rs` `0x8000..=0x9FFF if stamp_blocks`), regressing the
-            // `vramw_m3end_scx5_ds_{2,4}` write-end floors — the DS read grid is
-            // its own reclock. Tier2 + bare lines + `!ds`; `bare_flip` is
-            // false in production → byte-identical OFF.
+            // Boundary-coincident accessibility release. The interconnect's
+            // stamp blocks an OAM/VRAM access landing in the unblock M-cycle's
+            // SECOND HALF (`event_phase` commit eighth > ACCESS_PHASE) — the cc+2
+            // MID-frame model. But under the cc+0 read SameBoy unblocks AT the
+            // boundary: `vram_m3`/`oam_access` `postread_scx2/scx5_2` read
+            // ACCESSIBLE on the dot `line_render_done` fires, not the trailing
+            // mode 3. A read 4 dots earlier (`_1`, a different M-cycle) sees no
+            // stamp and stays blocked, so releasing the boundary M-cycle's stamp
+            // is a clean separation (full-CGB two-bin +7/−0 single speed). Push
+            // the M0Access edge to phase 0 (`lead = -8` clamps there) so the cc+0
+            // access is never pre-empted. SINGLE SPEED only: the same release in
+            // double speed unblocks the DS VRAM-WRITE path too (the stamp gates
+            // writes at `memory.rs` `0x8000..=0x9FFF if stamp_blocks`), regressing
+            // the `vramw_m3end_scx5_ds_{2,4}` write-end floors — the DS read grid
+            // stays parked. Bare lines + `!ds`.
             let access_lead = if !self.ds { -8i8 } else { 0i8 };
             self.m0_access_flip = bare_flip.then_some(access_lead);
             // The STAT mode-bit flip routes the double-speed FF41 mode-bit
@@ -187,12 +184,11 @@ impl Ppu {
     /// [`Self::m0_flip_events`] evaluates it each mode-3 dot: the dispatch
     /// fires when `proj <= lead`, so the PROJECTED dispatch dot from any
     /// mid-render read position is `dot + proj - lead`. Split out so the
-    /// half-dot bare-exit law (`stat_irq.rs::vis_mode_read`, tier2-only) can
+    /// half-dot bare-exit law (`stat_irq.rs::vis_mode_read`) can
     /// anchor the CPU-visible mode-3→0 exit to the render's own projected
     /// flip BEFORE it fires — which tracks mid-line SCX writes through the
     /// fine-scroll hunt (late_scx4 / scx_m3_extend) where a live-`scx`
-    /// closed form cannot. Pure (`&self`); byte-identical refactor for the
-    /// production caller.
+    /// closed form cannot. Pure (`&self`).
     pub(in crate::ppu) fn flip_projection(&self) -> (u16, u16) {
         let r = &self.render;
         let mut proj = r.stall + (160 - u16::from(r.lx));
@@ -270,8 +266,8 @@ impl Ppu {
             self.m0_rise_dot = false;
             self.line_render_done = false;
             self.flip_dot = 0;
-            // The visible back-date drops with the dispatch (flag-on only;
-            // always false in production). See the `vis_early` field docs.
+            // The visible back-date drops with the dispatch. See the
+            // `vis_early` field docs.
             self.vis_early = false;
             self.vis_hold_until = 0;
         }
@@ -288,12 +284,11 @@ impl Ppu {
         // fetch residue stays documented in baselines/mealybug.txt.)
         // The fine-scroll comparator hunt and the pop side have their
         // own anchors and never read these.
-        // The BG/window fetcher samples the DEFERRED addressing
-        // view (`render_lcdc`, bit3 BG map / bit4 tile-data / bit6 win map): a
+        // The BG/window fetcher samples the DEFERRED addressing view
+        // (`render_lcdc`, bit3 BG map / bit4 tile-data / bit6 win map): a
         // mid-mode-3 bgtilemap/bgtiledata toggle reaches the fetch grid at the
-        // production dot under tier2. OBJ-enable / mode-3-length reads keep the
-        // eager `eff.lcdc` (they must not move the length). `render_lcdc` ==
-        // `eff.lcdc` in production (byte-identical).
+        // deferred render dot. OBJ-enable / mode-3-length reads keep the live
+        // `eff.lcdc` (they must not move the length).
         let lcdc = self.eff.render_lcdc;
         let (scy, scx) = (self.eff.scy, self.eff.scx);
         match self.render.phase {

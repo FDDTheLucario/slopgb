@@ -208,11 +208,11 @@ impl Ppu {
     }
 
     /// Whether the PPU is on the LCD-enable glitch line (452 dots, dot-82
-    /// pipe). The tier2 SCX write-strobe deferral keeps the
-    /// production staging there — the glitch line's render geometry carries
-    /// its own calibrated offsets (`GLITCH_MODE3_START` 78 entry, +2
-    /// `early_lead`), and the +4 render-frame lag mis-frames its fine-scroll
-    /// hunt (`enable_display/ly0_late_scx7_m3stat_*`).
+    /// pipe). The SCX write-strobe staging commits immediately there rather than
+    /// deferring — the glitch line's render geometry carries its own calibrated
+    /// offsets (`GLITCH_MODE3_START` 78 entry, +2 `early_lead`), and the +4
+    /// render-frame lag mis-frames its fine-scroll hunt
+    /// (`enable_display/ly0_late_scx7_m3stat_*`).
     pub(crate) fn glitch_active(&self) -> bool {
         self.glitch_line
     }
