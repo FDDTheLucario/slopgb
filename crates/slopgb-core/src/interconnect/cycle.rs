@@ -1,22 +1,18 @@
 //! Deferred-commit cycle-clock + leading-edge read helpers.
 //! A behaviour-preserving submodule of [`Interconnect`] (a second `impl` block
-//! via `use super::*`); the `clock` / `leading_edge_reads` fields live in the
+//! via `use super::*`); the `clock` / `leading-edge` fields live in the
 //! parent struct.
 
 use super::*;
 
 impl Interconnect {
     /// Leading-edge (cc+0) read value for a PPU-positional address, or
-    /// `None` when the read should use the trailing cc+4 view (the flag is
-    /// off, or the address is not PPU-positional). Pure (`&self`): called
+    /// `None` when the address is not PPU-positional. Pure (`&self`): called
     /// *before* `tick_machine`, so it samples the PPU at the M-cycle's
     /// leading edge. Today only FF41 (the kernel-pair mode read) is routed;
     /// OAM/VRAM/palette accessibility back-dating is not routed here. `Ppu::read`
     /// is side-effect-free (`ppu/regs.rs`).
     pub(super) fn leading_edge_sample(&self, addr: u16) -> Option<u8> {
-        if !self.leading_edge_reads {
-            return None;
-        }
         match addr {
             0xFF41 => Some(self.ppu.read(0xFF41)),
             _ => None,
@@ -93,60 +89,11 @@ impl Interconnect {
         }
     }
 
-    /// Enable leading-edge (cc+0) PPU-positional reads + the `StatUpdate`
-    /// engine + the `vis_early` back-date (the whole flag-on path). Held off in
-    /// production (`new` defaults it false) until the atomic flip; exposed
-    /// through [`crate::GameBoy::set_leading_edge_reads`] for the kernel-pair
-    /// acceptance spec + the gap-count measurement.
-    pub(crate) fn set_leading_edge_reads(&mut self, on: bool) {
-        self.leading_edge_reads = on;
-        // Forward to the PPU so its StatUpdate engine takes over from
-        // `stat_events_tick` on the same flag.
-        self.ppu.set_leading_edge_reads(on);
-    }
-
-    /// Enable the **eager-value** reclock: the eager clock + counter-pinned
-    /// dispatch (cc+4) + the read laws as cc+0 value peeks. Implies
-    /// [`Self::set_leading_edge_reads`] → the DMG-count-safe foundation (see
-    /// `docs/sameboy-port/tools/measurements/eager-clock-foundation-2026-07-07.md`).
-    pub(crate) fn set_eager_value(&mut self, on: bool) {
-        self.eager_value = on;
-        self.set_leading_edge_reads(on);
-        self.ppu.set_eager_value(on);
-    }
-
-    /// The `leading_edge_reads` construction flag — read-only, for the
-    /// golden-safe "production defaults OFF" guard test.
-    #[cfg(test)]
-    pub(crate) fn reclock_flags(&self) -> bool {
-        self.leading_edge_reads
-    }
-
-    /// Reproduce the C3-flip **construction default** exactly as flipping the
-    /// `interconnect.rs` struct-literal `eager_value`/`leading_edge_reads` to
-    /// `true` would: set only this struct's own fields, WITHOUT the
-    /// PPU-propagation that [`Self::set_eager_value`] runs. That leaves the
-    /// machine incoherent (eager reads, non-eager PPU) — the exact bug
-    /// `GameBoy::post_boot_inner`'s deferred re-arm exists to repair. Only ever
-    /// armed via the `cfg(test)`/`flip_hooks`-gated `GameBoy::new_with_eager`
-    /// (production `post_boot_inner` always passes `eager_default = false`), so
-    /// no shipped/golden path can reach it.
-    pub(crate) fn arm_eager_construction_default(&mut self) {
-        self.eager_value = true;
-        self.leading_edge_reads = true;
-    }
-
     /// The per-register mid-mode-3 write-commit stage offset (in dots) for the
     /// eager-value write path ([`crate::interconnect::Bus`]`::write`). A pure
-    /// function of `addr`/`scan_pos`/`speed`; the render-frame offsets apply
-    /// under `eager_value` (production keeps the gambatte {2 SS, 1 DS} staging
-    /// → byte-identical off the eager clock).
+    /// function of `addr`/`scan_pos`/`speed`.
     pub(super) fn stage_write_dots(&self, addr: u16) -> u8 {
-        if let (0xFF43, true, true) = (
-            addr,
-            self.eager_value && !self.ppu.glitch_active(),
-            self.double_speed,
-        ) {
+        if let (0xFF43, true, true) = (addr, !self.ppu.glitch_active(), self.double_speed) {
             // SCX in DOUBLE SPEED takes a +2 render-frame defer, not single
             // speed's +4 (dots=3): the DS M-cycle is 2 PPU dots (vs 4), so
             // the write-commit-to-fetch-grid offset halves. dots=2 fixes the
@@ -157,8 +104,7 @@ impl Interconnect {
             // SCY/palette keep dots=3 in DS (no DS pixel legs, and their
             // timing never reaches an OCR verdict).
             2
-        } else if self.eager_value
-            && !self.model.is_cgb()
+        } else if !self.model.is_cgb()
             && matches!(addr, 0xFF47..=0xFF49)
             && !self.ppu.glitch_active()
         {
@@ -181,11 +127,7 @@ impl Interconnect {
             // mode-3-length or FF41-read-law coupling): production
             // byte-identical OFF, CGB two-bin unaffected.
             2 + (self.ppu.scan_pos().1 & 1) as u8
-        } else if self.eager_value
-            && addr == 0xFF42
-            && !self.double_speed
-            && !self.ppu.glitch_active()
-        {
+        } else if addr == 0xFF42 && !self.double_speed && !self.ppu.glitch_active() {
             // SCY (FF42) commit takes the same EVEN-dot parity anchor as the
             // DMG palette, resolving the sub-dot render-fetch grid the
             // whole-dot defer=3 could not. On a sprite-stalled line the
@@ -207,10 +149,7 @@ impl Interconnect {
             // byte-identical OFF. SS only (the DS M-cycle is 2 dots; SCY has
             // no DS pixel legs and DS keeps defer=3, the `else` below).
             2 + (self.ppu.scan_pos().1 & 1) as u8
-        } else if self.eager_value
-            && matches!(addr, 0xFF42 | 0xFF43 | 0xFF47..=0xFF49)
-            && !self.ppu.glitch_active()
-        {
+        } else if matches!(addr, 0xFF42 | 0xFF43 | 0xFF47..=0xFF49) && !self.ppu.glitch_active() {
             // SCX takes the full +4 render-frame deferral (visible from
             // `step(L+4)`): PROVEN by late_scx4 SS+DS + scx_m3_extend —
             // the fine-scroll comparator hunt (dots 89-96) is calibrated
@@ -226,7 +165,7 @@ impl Interconnect {
             // per-register split mirrors SameBoy's per-register conflict
             // maps (each register carries its own commit class).
             3
-        } else if self.eager_value && addr == 0xFF4B && !self.ppu.glitch_active() {
+        } else if addr == 0xFF4B && !self.ppu.glitch_active() {
             // WX (FF4B) render-VIEW defer: `eff.wx` (the window
             // activation/reactivation comparator) now survives the arch
             // write (see `regs.rs` `staged_pending`) and strobe-commits at

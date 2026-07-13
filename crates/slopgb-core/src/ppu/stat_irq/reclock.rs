@@ -256,8 +256,7 @@ impl Ppu {
             // normally. Also cancel the pending deferred `lyc_if_delay` delivery
             // the fresh write scheduled (Agb's dots-4-11 window re-delivers at dot
             // 9 via that path). Eager+CGB only.
-            if self.eager_value
-                && self.model.is_cgb()
+            if self.model.is_cgb()
                 && self.line == 153
                 && self.lyc == 153
                 && self.dot >= 6
@@ -392,8 +391,7 @@ impl Ppu {
         // edge). CGB, eager-only; the DMG twin rides the `write_lyc_dmg`
         // `lyc_event` hold + the natural dot-6 delivery (its write commits later,
         // so dot 6 already precedes the count read).
-        if self.eager_value
-            && self.model.is_cgb()
+        if self.model.is_cgb()
             && self.line == 153
             && self.dot == 3
             && self.enabled
@@ -422,8 +420,7 @@ impl Ppu {
         // pre-armed mode-1 source's STAT-blocking intact. eager + DMG-family
         // only (production + tier2 byte-identical). See
         // `measurements/eager-lyc153-cluster-rehost-2026-07-12.md`.
-        if self.eager_value
-            && !self.model.is_cgb()
+        if !self.model.is_cgb()
             && self.line == 153
             && self.dot == 4
             && self.enabled
@@ -449,7 +446,7 @@ impl Ppu {
     /// the SAME level → no 0→1 edge → no IF → byte-identical to the
     /// even-half-only engine. The IF it raises persists in `pending_if` and is
     /// folded at this dot's completing (even) half. Eager-only; never runs
-    /// flag-off (`eager_value` false), so production is byte-identical.
+    /// flag-off (`eager` false), so production is byte-identical.
     pub(super) fn stat_update_half(&mut self) {
         // Commit any FF41 engine-view (`eng_stat`) write scheduled to land on
         // THIS odd half-dot (piece 4 — the write's true WriteCpu sub-dot
@@ -460,7 +457,7 @@ impl Ppu {
         // re-eval would just re-run the whole-dot engine's edge WITHOUT its
         // squash/pending logic and shuffle verdicts — so stay inert (EV
         // byte-identical) until armed. `eng_stat_half` is only set under
-        // `eager_value` → production/tier2 byte-identical.
+        // `eager` → production/tier2 byte-identical.
         let Some((value, hd)) = self.eng_stat_half else {
             return;
         };
@@ -627,7 +624,6 @@ impl Ppu {
     pub(super) fn update_mode_for_interrupt(&mut self) {
         // `mfi_m0_prev` lags `line_render_done` by one dot: read the previous
         // dot's value for this dot's mode-0 decision, then latch this dot's.
-        let prev_done = self.mfi_m0_prev;
         self.mfi_m0_prev = self.enabled && self.line <= 143 && self.line_render_done;
         // On the flag-on path the mode-0 IRQ fires at
         // `line_render_done` (our dot 254 = the gambatte-calibrated `m0_rise_dot`
@@ -642,11 +638,7 @@ impl Ppu {
         // them). Flag-OFF keeps the
         // lagged `prev_done`; `stat_events_tick` never reads `mode_for_interrupt`,
         // so production is byte-identical.
-        let prev_done = if self.leading_edge_reads {
-            self.enabled && self.line <= 143 && self.line_render_done
-        } else {
-            prev_done
-        };
+        let prev_done = self.enabled && self.line <= 143 && self.line_render_done;
         self.mode_for_interrupt = if !self.enabled {
             0
         } else if self.glitch_line {
@@ -669,7 +661,7 @@ impl Ppu {
             // SINGLE SPEED only (`!ds`): the recovered slice is the single-speed
             // `enable_display/ly0_m0irq_trigger` (+2 flag-on, SameBoy-confirmed
             // out0).
-            if self.eager_value && !self.ds {
+            if !self.ds {
                 // The EAGER SS glitch-line mode-0 IRQ
                 // dispatch reclock. The IRQ side keys on `line_render_done`
                 // (the dispatch dot, our dot 254 = SameBoy `cfl=257`), NOT on
@@ -704,7 +696,7 @@ impl Ppu {
                 // IRQ fired the line-0 mode-0 STAT 4 dots early, straddling the
                 // co-instant FF0F read) WITHOUT disturbing int_hblank_halt /
                 // hblank_int (all verified FF82=01 under eager). Hence the gate:
-                // `(tier2 && is_cgb) || eager_value` — eager covers BOTH models.
+                // `(tier2 && is_cgb) || eager` — eager covers BOTH models.
                 if self.dot < GLITCH_MODE3_START {
                     crate::stat_update::MODE_FOR_INTERRUPT_NONE
                 } else if self.line_render_done {

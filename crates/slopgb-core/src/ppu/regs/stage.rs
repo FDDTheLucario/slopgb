@@ -35,13 +35,11 @@ impl Ppu {
         // dots at either speed, so there the hint comes from the live
         // `ds` flag instead).
         self.staged_ds = dots <= 1;
-        // HALFDOT Part A-render (eager): the write strobe advances per half-dot
-        // under `eager_value` ([`Ppu::tick_half`]), so the staged commit debt is
-        // measured in 8-MHz half-dots — double the whole-dot offset. A run of
-        // aligned half-dots then still commits at the same whole dot as the
-        // whole-dot strobe (byte-identical on the aligned grid). Tier2 keeps the
-        // whole-dot strobe (1 per dot) → unchanged.
-        let dots = if self.eager_value {
+        // The write strobe advances per half-dot ([`Ppu::tick_half`]), so the
+        // staged commit debt is measured in 8-MHz half-dots — double the
+        // whole-dot offset. A run of aligned half-dots then still commits at the
+        // same whole dot as the whole-dot strobe.
+        let dots = {
             // The eager write commit must land in the SAME cc+4 read frame the
             // FF41/accessibility reads observe the mode-3 length in
             // ([`Ppu::read_pos_hd`]'s +8hd SS / +4hd DS read-debt): the render
@@ -165,7 +163,7 @@ impl Ppu {
                 // ROMs in compat mode and shares the FF47-4B render path, so each
                 // register carries its own commit class like the DMG calibration
                 // above. These rows pass tier2 (same whole-dot render) and fail
-                // eager ONLY on this cc+0 commit position → `eager_value`-scoped,
+                // eager ONLY on this cc+0 commit position → `eager`-scoped,
                 // tier2 byte-ident.
                 match addr {
                     // Palette (FF47-49): the DMG-compat BGP pop-grid. Its stage is
@@ -183,8 +181,6 @@ impl Ppu {
                 }
             };
             (i32::from(dots) * 2 + debt).clamp(0, 255) as u8
-        } else {
-            dots
         };
         // One bus op per M-cycle: a previous stage has always expired or
         // been architecturally committed by now; flush defensively if not.
@@ -213,7 +209,7 @@ impl Ppu {
                 // above — their tier2 pins are calibrated to the cc+0 control
                 // commit. Production (and non-render / glitch lines) set the
                 // view in lockstep — byte-identical OFF.
-                if self.eager_value && self.render.active && !self.glitch_line {
+                if self.render.active && !self.glitch_line {
                     self.render_lcdc_pending = Some((value, RENDER_LCDC_DELAY));
                 } else {
                     self.eff.render_lcdc = value;
@@ -236,8 +232,8 @@ impl Ppu {
                     // (`ppu/mod.rs`) under the tier2 reclock, so the window stops
                     // at the render frame (`m3_lcdc_win_en_change_multiple`: the
                     // eager clear ended it 2 dots early). Production / glitch lines
-                    // (no `render_lcdc` defer) run it synchronously — byte-identical.
-                    if !self.eager_value || self.glitch_line {
+                    // (no `render_lcdc` defer) run it synchronously.
+                    if self.glitch_line {
                         self.window_abort_render();
                     }
                 }
@@ -251,10 +247,7 @@ impl Ppu {
                 // (mode0). slopgb's whole-dot render collapses both to mode3 at
                 // the read dot. Latched tier2 while `render.active` (applies to
                 // DMG as well as CGB).
-                if old & LCDC_WIN_ENABLE == 0
-                    && value & LCDC_WIN_ENABLE != 0
-                    && self.render.active
-                    && self.eager_value
+                if old & LCDC_WIN_ENABLE == 0 && value & LCDC_WIN_ENABLE != 0 && self.render.active
                 {
                     self.render.win_reenable_dot = self.dot;
                     // A FIRST enable (window neither active nor aborted this
@@ -268,7 +261,7 @@ impl Ppu {
             0xFF43 => {
                 // Flag a mid-mode-3 SCX rewrite (`late_scx_*`); see
                 // `Render::scx_write_dot`.
-                if self.render.active && self.eager_value && (self.eff.scx & 7) != (value & 7) {
+                if self.render.active && (self.eff.scx & 7) != (value & 7) {
                     self.render.scx_write_dot = self.dot;
                 }
                 self.eff.scx = value;

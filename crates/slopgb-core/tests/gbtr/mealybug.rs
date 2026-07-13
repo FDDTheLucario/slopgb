@@ -351,7 +351,7 @@ fn mealybug_eager_cgb_m3_writecommit_passes() {
             .join(ppu_ref_name(stem, Model::Cgb));
         let rom =
             std::fs::read(&rom_path).unwrap_or_else(|e| panic!("read {}: {e}", rom_path.display()));
-        let mut gb = harness::boot_eager(&rom, Model::Cgb);
+        let mut gb = harness::boot(&rom, Model::Cgb);
         harness::run_until_breakpoint(&mut gb, common::TIMEOUT_TCYCLES)
             .unwrap_or_else(|e| panic!("{stem} [Cgb] eager: {e}"));
         harness::run_for_frames(&mut gb, 1);
@@ -398,7 +398,7 @@ fn expect_ppu_eager_dmg(stem: &str) {
         .join(ppu_ref_name(stem, Model::Dmg));
     let rom =
         std::fs::read(&rom_path).unwrap_or_else(|e| panic!("read {}: {e}", rom_path.display()));
-    let mut gb = harness::boot_eager(&rom, Model::Dmg);
+    let mut gb = harness::boot(&rom, Model::Dmg);
     harness::run_until_breakpoint(&mut gb, common::TIMEOUT_TCYCLES)
         .unwrap_or_else(|e| panic!("{stem} [Dmg] eager: {e}"));
     harness::run_for_frames(&mut gb, 1);

@@ -3,7 +3,7 @@
 //! write-race / dispatch-ack / OAM-pulse squash arms. A third `impl Ppu` block
 //! split out of `reclock.rs` for the <1000-line cap (`use super::*` == the
 //! `ppu` module, like `reclock.rs`/`read_laws.rs`); every arm is
-//! `eager_value`-gated so production is byte-identical. Consumed by the FF0F
+//! `eager`-gated so production is byte-identical. Consumed by the FF0F
 //! read/ack path in `interconnect/bus.rs`.
 
 use super::*;
@@ -40,7 +40,7 @@ impl Ppu {
     /// legs read 1 M apart around the next line's pulse and pass on the
     /// current frame — a +window peek would flip the `_1` legs.
     /// Caller: the eager `Bus::read` FF0F peek; every arm short-circuits on
-    /// `eager_value` (off in production) → production byte-identical OFF.
+    /// `eager` (off in production) → production byte-identical OFF.
     pub(crate) fn ff0f_stat_peek(&self) -> u8 {
         if !self.enabled || self.glitch_line || self.stat_update.line() {
             return 0;
@@ -90,9 +90,8 @@ impl Ppu {
         // window siblings read one M-cycle earlier (below R-2) and also stay
         // clear. Verdict-only (`intf`/dispatch untouched; the rise still folds
         // at R); eager-only + SS-scoped (DS takes arm (a) above); production and
-        // tier2 inert (`eager_value` false) → byte-identical.
-        if self.eager_value
-            && !self.ds
+        // tier2 inert (`eager` false) → byte-identical.
+        if !self.ds
             && self.render.win_active
             && self.eng_stat & STAT_SRC_HBLANK != 0
             && (1..=143).contains(&self.line)
@@ -154,11 +153,10 @@ impl Ppu {
     /// Returns `IF_STAT` to clear from the read verdict; verdict-only
     /// (`intf`/dispatch untouched — the spurious rise still stands, this only
     /// restores the pre-rise read value SameBoy's frame reports). Scoped to
-    /// `eager_value`, CGB, double-speed and the glitch line → production, tier2,
+    /// `eager`, CGB, double-speed and the glitch line → production, tier2,
     /// DMG and single-speed byte-identical.
     pub(crate) fn ff0f_cgb_ds_glitch_m0_mask(&self) -> u8 {
-        if self.eager_value
-            && self.model.is_cgb()
+        if self.model.is_cgb()
             && self.ds
             && self.enabled
             && self.glitch_line
@@ -204,7 +202,7 @@ impl Ppu {
         // E2) reads dot 4 co-instant with the pulse and must SEE it
         // (`lyc153int_m2irq_2`). CGB keeps the mask (its read frame is unmoved —
         // CGB eager two-bin 287-neutral requires it).
-        if ((self.model.is_cgb() || !self.eager_value)
+        if (self.model.is_cgb()
             && self.ly0_pulse_age > 0
             && self.line == 0
             && self.dot == 4

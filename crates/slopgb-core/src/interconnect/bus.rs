@@ -12,18 +12,17 @@ impl Bus for Interconnect {
         // and park this read's 4 T-cycles.
         let _leading_edge = self.clock.read();
         // Latch the leading-edge (cc+0) value for PPU-positional reads
-        // *before* the PPU advances. Inert while the flag is off (`None`).
+        // *before* the PPU advances (`None` for non-positional addresses).
         let leading = self.leading_edge_sample(addr);
         // The eager-value carried-read peek (armed at the STAT ack in
         // `ack_impl`) is one-shot: `leading_edge_sample`'s FF41 read has now
         // consumed `read_carried` inside `vis_mode_read`, so clear it.
-        // Never set flag-off → no-op.
-        if self.eager_value && addr == 0xFF41 {
+        if addr == 0xFF41 {
             self.ppu.set_read_carried(false);
             // The eager halt-woken re-fetch override is one-shot at the line
             // boundary: it survives the sub-boundary polls (`read_pos_hd` short
             // of the line) and clears once this read has crossed it (the same
-            // read `vis_mode_read` resolved to mode 2). Never set flag-off.
+            // read `vis_mode_read` resolved to mode 2).
             if self.ppu.halt_refetch_crossed() {
                 self.ppu.set_halt_refetch(false);
             }
@@ -43,9 +42,8 @@ impl Bus for Interconnect {
         // already folded. Fold it in as a verdict-only value peek
         // (`Ppu::ff0f_stat_peek`, less the LY0 pulse the whole-dot frame set a
         // dot early) — the same VALUE-at-cc+4 shape as the halt-entry peek.
-        // `intf` is untouched; the rise still folds at its own dot. Eager-only,
-        // byte-identical off the eager path.
-        let trailing = if self.eager_value && addr == 0xFF0F {
+        // `intf` is untouched; the rise still folds at its own dot.
+        let trailing = if addr == 0xFF0F {
             (trailing | self.ppu.ff0f_stat_peek())
                 & !self.ppu.ff0f_ly0_pulse_mask()
                 & !self.ppu.ff0f_cgb_ds_glitch_m0_mask()
@@ -71,18 +69,10 @@ impl Bus for Interconnect {
         // below is unchanged — `Ppu::stage_write` affects only the
         // pipeline's register view (mealybug m3_* mid-mode-3 writes).
         if let 0xFF40 | 0xFF42 | 0xFF43 | 0xFF47..=0xFF4B = addr {
-            // Under `eager_value` the tier2 per-register render-frame stage
-            // offsets apply on the eager clock (mid-mode-3 SCX/SCY/palette/WX/
-            // LCDC land at the tier2 render position); off (production +
-            // tier2-off) this stays byte-identical to the gambatte {2 SS, 1 DS}
-            // mid-cycle staging.
-            let dots = if self.eager_value {
-                self.stage_write_dots(addr)
-            } else if self.double_speed {
-                1
-            } else {
-                2
-            };
+            // The per-register render-frame stage offsets apply on the eager
+            // clock: mid-mode-3 SCX/SCY/palette/WX/LCDC land at the render
+            // position `stage_write_dots` picks.
+            let dots = self.stage_write_dots(addr);
             self.ppu.stage_write(addr, value, dots);
         }
         self.tick_machine();
@@ -96,7 +86,7 @@ impl Bus for Interconnect {
         // rise into `intf` FIRST) before the write commits — then the next
         // `tick_machine` skips cc 1 to restore phase. This lands `write_no_tick`
         // at the WriteCpu dot (D+1), exactly like the tier2 deferred path.
-        // `eager_value`-gated + CGB SS scoped → production/tier2/DMG byte-identical.
+        // `eager`-gated + CGB SS scoped → production/tier2/DMG byte-identical.
         // Borrow only on the aligned whole-dot grid: an LCD-enable sub-dot
         // offset (`lcd_shift_dots != 0`) shifts the CPU/PPU grid, where a
         // whole-dot borrow mis-maps a co-instant STAT rise onto the wrong side
@@ -114,8 +104,7 @@ impl Bus for Interconnect {
         } else {
             addr == 0xFF0F
         };
-        let borrow =
-            self.eager_value && !self.double_speed && !self.ppu.lcd_shift_active() && borrow_addr;
+        let borrow = !self.double_speed && !self.ppu.lcd_shift_active() && borrow_addr;
         if borrow {
             let a = self.ppu.tick_half();
             let b = self.ppu.tick_half();
@@ -143,10 +132,8 @@ impl Bus for Interconnect {
         // and the existing squash countdown consumes it (`_ds_2` Δ1-2) while the
         // `_ds_1` siblings' writes sit Δ3-4 and survive. Arm only (no `tick_half`,
         // no `eager_wr_borrow` repay). Same `!lcd_shift_active` grid guard as SS.
-        let ff0f_ds_squash = self.eager_value
-            && self.model.is_cgb()
-            && self.double_speed
-            && !self.ppu.lcd_shift_active();
+        let ff0f_ds_squash =
+            self.model.is_cgb() && self.double_speed && !self.ppu.lcd_shift_active();
         if (borrow || ff0f_ds_squash) && addr == 0xFF0F && value & 0x02 == 0 {
             self.ppu.arm_ff0f_if_squash();
         }
@@ -178,16 +165,16 @@ impl Bus for Interconnect {
     fn read_inc(&mut self, addr: u16) -> u8 {
         // Deferred-commit clock: same leading-edge read as `read`.
         let _leading_edge = self.clock.read();
-        // Leading-edge sample (cc+0), inert while the flag is off.
+        // Leading-edge sample (cc+0).
         let leading = self.leading_edge_sample(addr);
         // Mirror `Bus::read`: clear the one-shot eager carried-read peek once
-        // the FF41 read has consumed it. Never set flag-off → no-op.
-        if self.eager_value && addr == 0xFF41 {
+        // the FF41 read has consumed it.
+        if addr == 0xFF41 {
             self.ppu.set_read_carried(false);
             // The eager halt-woken re-fetch override is one-shot at the line
             // boundary: it survives the sub-boundary polls (`read_pos_hd` short
             // of the line) and clears once this read has crossed it (the same
-            // read `vis_mode_read` resolved to mode 2). Never set flag-off.
+            // read `vis_mode_read` resolved to mode 2).
             if self.ppu.halt_refetch_crossed() {
                 self.ppu.set_halt_refetch(false);
             }

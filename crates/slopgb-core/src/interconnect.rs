@@ -173,33 +173,12 @@ pub struct Interconnect {
     /// only by the CPU's own M-cycles, never by OAM-DMA / HDMA / STOP-pause
     /// stolen ticks (those call `tick_machine` directly, not through `Bus`).
     clock: CycleClock,
-    /// Route PPU-positional reads (FF41 today; OAM/VRAM/palette join later)
-    /// through the **leading-edge** (cc+0) sample —
-    /// the byte latched at the M-cycle's leading edge, before `tick_machine`
-    /// advances the PPU — instead of the trailing cc+4 view. This is the
-    /// slopgb equivalent of SameBoy force-syncing the PPU to the access
-    /// cycle. **Production default `true`** (the C3 flip is DONE — the
-    /// leading-edge cc+0 path is the shipped reference). `false` restores the
-    /// byte-identical cc+4 model ([`Self::leading_edge_sample`] returns `None`).
-    leading_edge_reads: bool,
-
-    /// The **eager-value** reclock: the eager (production `tick_machine`,
-    /// dispatch cc+4) clock + the read/render laws applied as cc+0 value
-    /// peeks (so dispatch stays at its validated cc+4). Implies
-    /// [`Self::leading_edge_reads`] — the DMG-count-safe foundation the census
-    /// no-go was overturned on (see
-    /// `docs/sameboy-port/tools/measurements/eager-clock-foundation-2026-07-07.md`).
-    /// **Production default `true`** (the eager clock — the C3 flip is DONE);
-    /// the cc+0 read/render laws gate on it (95 sites). The hook
-    /// ([`crate::GameBoy::set_eager_value`]) sets it + `leading_edge_reads`.
-    eager_value: bool,
-
     /// A CGB single-speed WriteCpu-conflict engine write (FF41/FF0F/FF45) just
     /// committed one PPU dot into the next M-cycle (SameBoy `GB_CONFLICT_
     /// WRITE_CPU` lands the CPU value 1 T past the M-cycle boundary). The
     /// eager write borrowed that dot ahead of `write_no_tick`, so the next
     /// `tick_machine` ticks 3 PPU dots (skip cc 1) to restore CPU/PPU phase.
-    /// Set only under `eager_value` → production/tier2 byte-identical.
+    /// Set only under `eager` → production/tier2 byte-identical.
     eager_wr_borrow: bool,
 
     /// CGB hardware running a CGB-flagged cart. CGB hardware with a DMG
@@ -517,12 +496,6 @@ impl Interconnect {
             joypad: Joypad::new(sgb_joypad),
             cycles: 0,
             clock: CycleClock::new(),
-            // C3 flip: the coherent eager-value clock is the production
-            // default. `post_boot_inner` re-arms the PPU flag web after
-            // `apply_post_boot_state`, so the raw struct-literal default is
-            // coherent (mooneye 93/93).
-            leading_edge_reads: true,
-            eager_value: true,
             eager_wr_borrow: false,
             cgb_mode,
             double_speed: false,

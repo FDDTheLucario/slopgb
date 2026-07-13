@@ -2,23 +2,18 @@
 
 use super::*;
 
-/// The OAM accessibility unblock is read at the cc+2 MID phase (sub-dot
-/// event-phase model, increment 1): when the mode-3→mode-0 unblock
-/// lands in the M-cycle's second half (SCX=1 → rise dot ≡ 3) a CPU OAM
-/// read in that same cycle still sees mode 3 ($FF), even though the m0
-/// IRQ is already dispatch-visible and `line_render_done` is set; a
-/// first-half unblock (SCX=0 → dot ≡ 2) is already accessible. One
-/// M-cycle later the OAM read returns the unblocked value on both.
-/// Pins gambatte `oam_access/postread_*` (out3 vs out0 round pair).
+/// OAM accessibility after the eager mode-3→mode-0 unblock: by the M-cycle
+/// where the m0 IRQ is dispatch-visible (`line_render_done` set), the eager
+/// clock's back-dated flip has already opened OAM, so a CPU OAM read at that
+/// M-cycle's cc+2 phase returns the unblocked value on both SCX geometries.
+/// Production accessibility is pinned by gambatte `oam_access/postread_*`.
 #[test]
-fn oam_read_holds_blocked_at_cc2_through_a_second_half_unblock() {
-    for (scx, second_half) in [(0u8, false), (1, true)] {
+fn oam_read_unblocks_by_the_m0_dispatch_mcycle() {
+    for scx in [0u8, 1] {
         let mut b = ic(Model::Dmg);
         b.write(0xFF43, scx);
         b.write(0xFF41, 0x08); // hblank STAT source
         b.write(0xFF40, 0x91);
-        // Same geometry as `m0_rise_second_half_commit_is_halt_late`:
-        // line-1 mode-0 flip at 452 + 254 + SCX%8.
         let rise = 452 + 254 + u32::from(scx);
         ticks(&mut b, rise.div_ceil(4) - 1);
         b.tick(); // the M-cycle whose flip lands the unblock
@@ -26,25 +21,21 @@ fn oam_read_holds_blocked_at_cc2_through_a_second_half_unblock() {
         assert!(!b.ppu.oam_read_blocked(), "scx {scx}: end view unblocked");
         assert_eq!(
             b.read_no_tick(0xFE00),
-            if second_half { 0xFF } else { 0x00 },
-            "scx {scx}: cc+2 MID OAM read"
+            0x00,
+            "scx {scx}: OAM read unblocked"
         );
         b.tick();
-        assert_eq!(
-            b.read_no_tick(0xFE00),
-            0x00,
-            "scx {scx}: unblocked next cycle"
-        );
+        assert_eq!(b.read_no_tick(0xFE00), 0x00, "scx {scx}: still unblocked");
     }
 }
 
-/// VRAM unblocks on the same mode-3→mode-0 edge as OAM, so a CPU VRAM
-/// read is held at the cc+2 MID phase the same way (sub-dot event-phase
-/// model, increment 2): a second-half unblock reads $FF even though the
-/// end view is already accessible. Pins gambatte `vram_m3/postread_*`.
+/// VRAM unblocks on the same mode-3→mode-0 edge as OAM: by the M-cycle where
+/// the eager clock's back-dated flip has opened VRAM, a CPU VRAM read at cc+2
+/// returns the unblocked value on both SCX geometries. Production accessibility
+/// is pinned by gambatte `vram_m3/postread_*`.
 #[test]
-fn vram_read_holds_blocked_at_cc2_through_a_second_half_unblock() {
-    for (scx, second_half) in [(0u8, false), (1, true)] {
+fn vram_read_unblocks_by_the_m0_dispatch_mcycle() {
+    for scx in [0u8, 1] {
         let mut b = ic(Model::Dmg);
         b.write(0xFF43, scx);
         b.write(0xFF41, 0x08);
@@ -55,21 +46,16 @@ fn vram_read_holds_blocked_at_cc2_through_a_second_half_unblock() {
         assert!(!b.ppu.vram_read_blocked(), "scx {scx}: end view unblocked");
         let direct = b.ppu.read(0x8000); // bypasses the MID override
         let via = b.read_no_tick(0x8000);
-        if second_half {
-            assert_eq!(via, 0xFF, "scx {scx}: cc+2 MID VRAM read still blocked");
-        } else {
-            assert_eq!(via, direct, "scx {scx}: first-half unblock is accessible");
-        }
+        assert_eq!(via, direct, "scx {scx}: VRAM read unblocked");
     }
 }
 
-/// A CPU VRAM write is locked out at the cc+2 MID phase the same way
-/// the read is (sub-dot event-phase model): a second-half mode-3→mode-0
-/// unblock drops the write (still mode 3 at cc+2), while a first-half
-/// unblock lets it land. Pins gambatte `vramw_m3end_*`.
+/// A CPU VRAM write after the eager mode-3→mode-0 unblock lands: by the
+/// M-cycle where the back-dated flip has opened VRAM, the cc+2 write is
+/// accepted on both SCX geometries. Pins gambatte `vramw_m3end_*`.
 #[test]
-fn vram_write_dropped_at_cc2_through_a_second_half_unblock() {
-    for (scx, second_half) in [(0u8, false), (1, true)] {
+fn vram_write_lands_by_the_m0_dispatch_mcycle() {
+    for scx in [0u8, 1] {
         let mut b = ic(Model::Dmg);
         b.write(0xFF43, scx);
         b.write(0xFF41, 0x08);
@@ -81,11 +67,7 @@ fn vram_write_dropped_at_cc2_through_a_second_half_unblock() {
         let probe = before ^ 0xFF; // a value distinct from the current byte
         b.write_no_tick(0x8000, probe);
         let after = b.ppu.vram_read_raw(0x8000);
-        if second_half {
-            assert_eq!(after, before, "scx {scx}: cc+2 MID write dropped");
-        } else {
-            assert_eq!(after, probe, "scx {scx}: first-half write landed");
-        }
+        assert_eq!(after, probe, "scx {scx}: VRAM write landed");
     }
 }
 
@@ -310,45 +292,6 @@ fn eighth_grid_predicate_matches_half_split() {
     }
 }
 
-/// The cc-granular tick grid (`dot_ticks_on_cc` + `cc_eighth`) reproduces the
-/// old `for i in 0..dots` dot loop exactly at `dot_phase` 0: the cc's (1..=4)
-/// that tick a whole PPU dot, in order, stamp the same eighths
-/// `edge_eighth(i, dots)` the loop produced for i in 0..dots. This is the
-/// net-zero proof for the cc-granular reclock foundation — phase 0 is
-/// bit-identical to the fixed-alignment loop. `dot_phase` 1 (double speed
-/// only) ticks the complementary odd cc's, stamping the new odd-cc eighths
-/// {2,6} the whole-dot fixed loop could never place — the half-dot offset a
-/// STOP speed switch establishes (the LCD dot clock runs on across the switch).
-#[test]
-fn cc_grid_matches_dot_loop() {
-    for (ds, dots) in [(false, 4u64), (true, 2)] {
-        let cc_eighths: Vec<u8> = (1..=4u8)
-            .filter(|&cc| dot_ticks_on_cc(cc, ds, 0))
-            .map(cc_eighth)
-            .collect();
-        let loop_eighths: Vec<u8> = (0..dots).map(|i| edge_eighth(i, dots)).collect();
-        assert_eq!(
-            cc_eighths, loop_eighths,
-            "ds={ds}: phase-0 cc grid == dot loop"
-        );
-    }
-    // Double-speed phase 1 ticks the complementary odd cc's {1,3}, stamping
-    // the odd-cc eighths {2,6} the fixed even-cc {4,8} loop could never reach.
-    let p1: Vec<u8> = (1..=4u8)
-        .filter(|&cc| dot_ticks_on_cc(cc, true, 1))
-        .map(cc_eighth)
-        .collect();
-    assert_eq!(p1, [2, 6], "double speed phase 1: odd-cc eighths");
-    // Single speed ignores the phase (one dot per cc regardless): 4 dots.
-    assert_eq!(
-        (1..=4u8)
-            .filter(|&cc| dot_ticks_on_cc(cc, false, 1))
-            .count(),
-        4,
-        "single speed is phase-independent"
-    );
-}
-
 /// The `Option<u8>` edge-stamp (INC-G2a) must reproduce the legacy
 /// precomputed boolean exactly: for an edge firing on dot `i`, a MID
 /// observer is blocked iff the old `2 * (i + 1) > dots` half-split was
@@ -560,40 +503,26 @@ fn cpu_clock_write_routes_through_the_per_model_conflict_class() {
 
 // ---- S2a leading-edge (cc+0) FF41 read ---------------------------------
 //
-// A leading-edge read latches FF41 at the M-cycle's *leading* edge (before
-// the PPU advances), the slopgb equivalent of SameBoy force-syncing the PPU
-// to the read's access cycle (`ppu-timing-map.md` §6 (i)). At a mode-3→0
-// boundary M-cycle that reads mode 3, where today's trailing cc+4 view reads
-// mode 0. The flag is held off in production (byte-identical); these tests
-// drive it directly. It goes live only at the S2d atomic flip.
+// The production eager clock latches FF41 at the M-cycle's *leading* edge
+// (before the PPU advances), the slopgb equivalent of SameBoy force-syncing the
+// PPU to the read's access cycle (`ppu-timing-map.md` §6 (i)). At a mode-3→0
+// boundary M-cycle it reads mode 3 where a trailing cc+4 view would read mode 0.
 
 #[test]
 fn leading_edge_ff41_reads_pre_tick_mode_at_the_mode0_boundary() {
-    // Line-1 bare-line mode-0 geometry. The production IRQ-dispatch flip
-    // (`line_render_done`) sits at our dot 254; the flag-on `vis_early`
-    // back-dates the CPU-VISIBLE mode→0 boundary to SameBoy's 251 (3 dots
-    // earlier), decoupled from the dispatch (`ppu/mod.rs` field docs). A
-    // leading-edge (cc+0) read therefore separates by its sample dot.
-
-    // Trailing cc+4 view (production default): the read's M-cycle ends past the
-    // 254 boundary, so FF41 reads mode 0.
-    let pos = (452 + 254u32).div_ceil(4) - 1;
-    let mut b = ic(Model::Dmg);
-    b.write(0xFF40, 0x91); // LCD + BG on
-    ticks(&mut b, pos);
-    assert_eq!(b.read(0xFF41) & 3, 0, "trailing cc+4 view reads mode 0");
-
-    // Flag-on leading cc+0 + the vis_early back-date: a read whose leading edge
-    // samples the m2int dot (248, before the back-dated 251 boundary) reads
-    // mode 3; one sampling the m0int dot (252, at/after it) reads mode 0 — the
-    // instrumented kernel-pair separation, at the two ROMs' actual read dots.
+    // Line-1 bare-line mode-0 geometry. The IRQ-dispatch flip
+    // (`line_render_done`) sits at our dot 254; the `vis_early` back-date moves
+    // the CPU-VISIBLE mode→0 boundary to SameBoy's 251 (3 dots earlier),
+    // decoupled from the dispatch (`ppu/mod.rs` field docs). A leading-edge
+    // (cc+0) read therefore separates by its sample dot: a read whose leading
+    // edge samples the m2int dot (248, before the back-dated 251 boundary) reads
+    // mode 3; one sampling the m0int dot (252, at/after it) reads mode 0.
     let read_leading = |sample_dot: u32| -> u8 {
         // `read` samples FF41 at the M-cycle leading edge (before its tick), so
         // `pos` M-cycles place the sample on dot `pos * 4` (= 452 + sample_dot).
         let pos = (452 + sample_dot) / 4;
         let mut b = ic(Model::Dmg);
-        b.write(0xFF40, 0x91);
-        b.set_leading_edge_reads(true);
+        b.write(0xFF40, 0x91); // LCD + BG on
         ticks(&mut b, pos);
         b.read(0xFF41) & 3
     };
@@ -605,23 +534,11 @@ fn leading_edge_ff41_reads_pre_tick_mode_at_the_mode0_boundary() {
 fn leading_edge_routes_read_inc_too() {
     // `read_inc` (POP/RET-via-SP, LD A,(HL±)) is wired through the same
     // leading-edge sample as `read`, so an FF41 read_inc shows the same cc+0
-    // separation across the back-dated visible boundary. (A regression that
-    // forgot to route read_inc would read the trailing view on both.)
-    let pos = (452 + 254u32).div_ceil(4) - 1;
-    let mut b = ic(Model::Dmg);
-    b.write(0xFF40, 0x91);
-    ticks(&mut b, pos);
-    assert_eq!(
-        b.read_inc(0xFF41) & 3,
-        0,
-        "read_inc trailing cc+4 view: mode 0"
-    );
-
+    // separation across the back-dated visible boundary.
     let read_inc_leading = |sample_dot: u32| -> u8 {
         let pos = (452 + sample_dot) / 4;
         let mut b = ic(Model::Dmg);
         b.write(0xFF40, 0x91);
-        b.set_leading_edge_reads(true);
         ticks(&mut b, pos);
         b.read_inc(0xFF41) & 3
     };
@@ -639,22 +556,16 @@ fn leading_edge_routes_read_inc_too() {
 
 #[test]
 fn leading_edge_is_inert_off_boundary_and_for_non_ppu_reads() {
-    // Mid-mode-3, far from any boundary: leading and trailing views agree, so
-    // the flag changes nothing here.
+    // Mid-mode-3, far from any boundary: the leading-edge sample agrees with the
+    // steady mode, so it changes nothing here.
     let settle = 452 + 120; // line 1, deep in mode 3
     let pos = settle / 4;
-    for flag in [false, true] {
-        let mut b = ic(Model::Dmg);
-        b.write(0xFF40, 0x91);
-        b.set_leading_edge_reads(flag);
-        ticks(&mut b, pos);
-        assert_eq!(b.read(0xFF41) & 3, 3, "flag {flag}: steady mode 3");
-    }
+    let mut b = ic(Model::Dmg);
+    b.write(0xFF40, 0x91);
+    ticks(&mut b, pos);
+    assert_eq!(b.read(0xFF41) & 3, 3, "steady mode 3");
     // A non-PPU read (HRAM) is never routed through the leading-edge path.
-    for flag in [false, true] {
-        let mut b = ic(Model::Dmg);
-        b.set_leading_edge_reads(flag);
-        b.write(0xFF80, 0xA5);
-        assert_eq!(b.read(0xFF80), 0xA5, "flag {flag}: HRAM read unaffected");
-    }
+    let mut b = ic(Model::Dmg);
+    b.write(0xFF80, 0xA5);
+    assert_eq!(b.read(0xFF80), 0xA5, "HRAM read unaffected");
 }

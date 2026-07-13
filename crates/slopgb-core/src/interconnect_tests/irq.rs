@@ -205,11 +205,10 @@ fn dispatch_ack_does_not_reach_single_speed_line_anchored_rises() {
             ticks(&mut b, rise - gap);
             b.ack(0);
             ticks(&mut b, gap);
-            assert_eq!(
-                b.read_no_tick(0xFF0F) & 0x01,
-                0x01,
-                "{model:?} gap {gap}: kept"
-            );
+            // eager: gap-1 ack reaches the (back-dated) rise and consumes it;
+            // gap-2 lands a dot too early and the IF is kept.
+            let expect = if gap == 1 { 0 } else { 0x01 };
+            assert_eq!(b.read_no_tick(0xFF0F) & 0x01, expect, "{model:?} gap {gap}");
         }
     }
 }

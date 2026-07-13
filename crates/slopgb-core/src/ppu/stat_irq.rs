@@ -31,7 +31,7 @@ impl Ppu {
             // 0→3 entry at the trailing frame, so it takes no back-date — dot 74
             // made the deferred `lcdon_timing-GS` STAT read see mode 3 a full
             // M-cycle early (round-1 STAT $87 vs $84). 78 restores it.
-            let start = if self.leading_edge_reads && !self.ds {
+            let start = if !self.ds {
                 GLITCH_MODE3_START - 4
             } else {
                 GLITCH_MODE3_START
@@ -91,21 +91,12 @@ impl Ppu {
     /// offset is deferred with the rest of the DS back-dating); always 84
     /// flag-OFF, so production is byte-identical.
     pub(super) fn mode3_entry_dot(&self) -> u16 {
-        if self.leading_edge_reads && !self.ds {
-            80
-        } else if self.eager_value && self.ds {
-            // EAGER double speed: the eager cc+0 FF41 value peek
-            // (`leading_edge_sample`) samples the PPU pre-tick, a DS M-cycle (2
-            // dots) before the trailing cc+4 view, so the mode-2→3 entry
-            // back-dates to 80 (as single speed) to land that peek on mode 3
-            // where SameBoy's cc+4 view reads mode 3 (`m2int_m2stat_ds_2`,
-            // `enable_display/frame*_m3stat_count_ds_2`). Tier2's deferred DS
-            // frame keeps 84 (the DS back-date is folded into `read_deferred`'s
-            // advance); `eager_value` off → byte-identical.
-            80
-        } else {
-            84
-        }
+        // The eager cc+0 FF41 value peek (`leading_edge_sample`) samples the PPU
+        // pre-tick — one M-cycle (SS 4 dots / DS 2 dots) before the trailing
+        // cc+4 view — so the mode-2→3 entry back-dates to 80 at BOTH speeds to
+        // land that peek on mode 3 where SameBoy's cc+4 view reads mode 3
+        // (`intr_2_mode3_timing`, `m2int_m2stat_ds_2`).
+        80
     }
 
     /// EAGER off-screen-window (WX=166) mode-3 exit arming — the eager twin of
@@ -123,11 +114,10 @@ impl Ppu {
     /// form (CGB `259+SCX&7`, DMG `253+SCX&7`) the deferred read already lands
     /// on 4 dots later. WX=166 only (the glitch value; on-screen windows caught
     /// by the render's own `win_active`), window enabled + WY-triggered by this
-    /// line, not aborted. `eager_value`-gated → tier2 + production
+    /// line, not aborted. `eager`-gated → tier2 + production
     /// byte-identical (never fires there — the deferred read lands post-activation).
     pub(super) fn eager_offscreen_win_arming(&self) -> bool {
-        self.eager_value
-            && self.eff.wx == 0xA6
+        self.eff.wx == 0xA6
             && self.eff.lcdc & LCDC_WIN_ENABLE != 0
             && self.line >= 1
             && self.line < 144
@@ -271,8 +261,7 @@ impl Ppu {
     /// coupling that makes the arm collateral-free. `halt_refetch` is armed only
     /// on the eager clock → byte-identical OFF. `None` = no override.
     pub(in crate::ppu) fn halt_refetch_read_override(&self, m: u8) -> Option<u8> {
-        if self.eager_value
-            && self.halt_refetch
+        if self.halt_refetch
             && self.model.is_cgb()
             && !self.ds
             && self.line >= 1
@@ -428,127 +417,6 @@ impl Ppu {
         }
     }
 
-    /// Per-source STAT IRQ events, fired from the dot clock (gambatte
-    /// mstat_irq.h `MStatIrqEvent` + lyc_irq.cpp `LycIrq`, ported
-    /// function by function). There is no wired-OR STAT line on the IRQ
-    /// side: each source is an *event* whose rise is allowed or
-    /// suppressed by a predicate over the *other* sources' enables —
-    /// sampled through delayed register copies — and the delayed LYC
-    /// value. Truth table (live = `stat_en` at the event tick; ev/evl =
-    /// the delayed [`Self::stat_ev`]/[`Self::stat_lyc_ev`] FF41 copies;
-    /// lycm/lyce = the delayed [`Self::lyc_ev_m`]/[`Self::lyc_event`]
-    /// FF45 copies):
-    ///
-    /// | event (line, dot) | exists iff | fires iff (provenance) |
-    /// |---|---|---|
-    /// | m2 pulse (N∈1-144, 0) | live m2en ∧ ¬live m0en | ¬(ev lycen ∧ lycm = N−1) — `doM2Event` blockedByLycIrq compares the *previous* line (its compare is still held at the pulse dot); the ¬m0en exists-gate is `mode2IrqSchedule` routing every per-line event to the line-0 slot while m0en is set |
-    /// | m2 pulse (0, 4) | live m2en | ¬(ev m1en) ∧ ¬(ev lycen ∧ lycm = 0) — `doM2Event` blockedByM1Irq + blockedByLycIrq |
-    /// | m2 pulse, DMG only (N∈145-153, 12) | live m2en | ¬(live m1en) ∧ ¬(live lycen ∧ cmp_irq) — no gambatte equivalent (mooneye `intr_1_2_timing-GS`); keeps the pre-port level blocking |
-    /// | m0 rise (`m0_flip_events`) | (live ∨ ev) m0en | ¬(ev lycen ∧ lycm = N) — `doM0Event`: *not* blocked by m2en (lcdirq_precedence/m0irq_ly44_lcdstat28) |
-    /// | m1 (144, 4) | live m1en | ¬(ev ∧ (m2en ∨ m0en)) — `doM1Event` |
-    /// | LYC (N∈1-153, 4), lyce = N | (live ∨ evl) lycen | N ∈ 1-144: ¬(evl m2en); else ¬(evl m1en) — `LycIrq::doEvent` + `lycIrqBlockedByM2OrM1StatIrq` (keyed on the LYC *value*, so LYC=144 is m2-blocked and never m1-blocked) |
-    /// | LYC=0 (153, 12), lyce = 0 | (live ∨ evl) lycen | ¬(evl m1en) |
-    ///
-    /// Emission masks: the (N,0) pulses are second-half commits
-    /// (`stat_late` + `stat_halt_late`; the CGB 144 entry is exempt —
-    /// misc/ppu/vblank_stat_intr-C), the (0,4) pulse is dispatch-late
-    /// (`stat_late`; SameBoy "except on line 0", mealybug's "line 0
-    /// timing is different by 4 cycles" handlers), the m0 rise carries
-    /// the half-cycle halt law (`m0_rise`); LYC and m1 events commit
-    /// plain.
-    pub(super) fn stat_events_tick(&mut self) {
-        self.refresh_cmp(true);
-        let cgb = self.model.is_cgb();
-        let live = self.stat_en;
-        let ev = self.stat_ev;
-        let evl = self.stat_lyc_ev;
-        let mut fired = 0u8;
-
-        // m2 line-start pulse (a CGB STAT write committing in this same
-        // M-cycle still reaches the pulse — handled retroactively in the
-        // FF41 write path, see `m2_pulse_fires`).
-        if !self.glitch_line
-            && self.dot == 0
-            && (1..=144).contains(&self.line)
-            && self.m2_pulse_fires(live)
-        {
-            fired |= IF_STAT;
-            if !(cgb && self.line == 144) {
-                self.stat_late = true;
-                self.stat_halt_late = true;
-            }
-        }
-        if !self.glitch_line && self.line == 0 && self.dot == 4 {
-            // m2 line-0 pulse (the one slot that survives the m0en
-            // schedule routing).
-            if live & STAT_SRC_OAM != 0
-                && ev & STAT_SRC_VBLANK == 0
-                && !(ev & STAT_SRC_LYC != 0 && self.lyc_ev_m == 0)
-            {
-                fired |= IF_STAT;
-                self.stat_late = true;
-            }
-        }
-        if !cgb && (145..=153).contains(&self.line) && self.dot == 12 {
-            // DMG vblank-line OAM pulses.
-            if live & STAT_SRC_OAM != 0
-                && live & STAT_SRC_VBLANK == 0
-                && !(live & STAT_SRC_LYC != 0 && self.cmp_irq)
-            {
-                fired |= IF_STAT;
-            }
-        }
-        if self.line == 144 && self.dot == 4 {
-            // m1 event, one M-cycle after the 144:0 pulse, together with
-            // the vblank IF.
-            if live & STAT_SRC_VBLANK != 0 && ev & (STAT_SRC_OAM | STAT_SRC_HBLANK) == 0 {
-                fired |= IF_STAT;
-            }
-        }
-        if std::mem::take(&mut self.m0_rise_dot) {
-            // m0 event on the visible flip's dot (incl. un-flip refires).
-            // The m0 event's delayed view is one M-cycle *fresher* than
-            // the m1/m2 events': the mstat_irq guards are uniform in
-            // gambatte cc, but the m0 event dot carries a smaller
-            // calibration skew on our grid, so a write in the preceding
-            // M-cycle already lands (m0enable disable_1 out0 vs
-            // disable_2 out2 pin the 2-dot cell) — take pending staged
-            // values that are within their last 3 dots.
-            let ev_m0 = self.stat_ev_fresh();
-            let lyc_m0 = self.lyc_ev_m_fresh();
-            if (live | ev_m0) & STAT_SRC_HBLANK != 0
-                && !(ev_m0 & STAT_SRC_LYC != 0 && lyc_m0 == self.line)
-            {
-                fired |= IF_STAT;
-                self.m0_rise = true;
-            }
-        }
-        // LYC events: once per frame at the (delayed) LYC value's line.
-        let lyc_val = if self.glitch_line {
-            None
-        } else if self.line >= 1 && self.dot == 4 && self.lyc_event == self.line {
-            Some(self.line)
-        } else if self.line == 153 && self.dot == 12 && self.lyc_event == 0 {
-            Some(0)
-        } else {
-            None
-        };
-        if let Some(value) = lyc_val {
-            let blocker = if (1..=144).contains(&value) {
-                STAT_SRC_OAM
-            } else {
-                STAT_SRC_VBLANK
-            };
-            // The enable side ORs the live registers with the delayed
-            // copy (gambatte's `(statReg_ | statRegSrc_) & lycirqen`):
-            // both a just-enabled and a just-disabled source fire.
-            if (live | evl) & STAT_SRC_LYC != 0 && evl & blocker == 0 {
-                fired |= IF_STAT;
-            }
-        }
-        self.pending_if |= fired;
-    }
-
     /// gambatte `statChangeTriggersStatIrqDmg`: the DMG STAT-write glitch
     /// — the write momentarily enables every source (Pan Docs "STAT
     /// bug"), raising IF from the hblank/vblank levels and the held LYC
@@ -625,7 +493,7 @@ impl Ppu {
         // armed old bit6), replacing the write-instant lyc arms below. The
         // shifted (lcd-offset) frames keep the calibrated arms — their write
         // law positions are one poll quantum ambiguous.
-        let eng_lyc = self.leading_edge_reads && !self.ds && self.lcd_shift_dots == 0;
+        let eng_lyc = !self.ds && self.lcd_shift_dots == 0;
         // The engine owns the LINE-BOUNDARY region (where the staged view +
         // the lyfc schedule decide); a MID-LINE enable keeps gambatte's
         // write-instant fire — the `lyc_ff41_trigger_delay` pair collapses to
@@ -643,8 +511,7 @@ impl Ppu {
         // Under Tier-2 a fresh LYC enable matching the PREVIOUS line fires in the
         // carryover; `cmp_cgb` (pinning the new-line compare for the calibrated
         // m1statwirq/lyc_ff41_enable_3 rows) is untouched. Byte-identical OFF.
-        let lyc_carryover = self.leading_edge_reads
-            && !eng_lyc
+        let lyc_carryover = !eng_lyc
             && (1..=143).contains(&ll)
             && ld < 4
             && old & STAT_SRC_LYC == 0
@@ -684,8 +551,7 @@ impl Ppu {
         } else {
             self.lyc_interrupt_line || (self.lyc == 153 && (6..12).contains(&ld))
         };
-        let lyc_wrap_153 = self.leading_edge_reads
-            && !eng_lyc
+        let lyc_wrap_153 = !eng_lyc
             && ll == 153
             && latch_at_law
             && !lyc_high
@@ -726,7 +592,7 @@ impl Ppu {
             // the deferral loses the IRQ before the cc+0 read samples it. The
             // lcd-offset shifts these late enables into exactly this carryover
             // tail (`late_enable_lcdoffset1_1` writes FF41 at `ly dot3`), where
-            // SameBoy raises IF at the write. Under Tier-2 (`leading_edge_reads`)
+            // SameBoy raises IF at the write. Under Tier-2 (`leading-edge`)
             // a fresh m0 enable in the carryover tail raises IF immediately;
             // glitch lines excluded (the LCD-enable prefix is not a real
             // hblank). Never set in production / LE-only → byte-identical OFF.
@@ -766,8 +632,7 @@ impl Ppu {
             // asm ROW 3 `ttnl > 4` cutoff). The write-instant fire stays for
             // the SHIFTED frames it was built on (`late_enable_lcdoffset1_1`,
             // eng_lyc false) and DS.
-            if self.leading_edge_reads
-                && !eng_lyc
+            if !eng_lyc
                 && carryover_tail
                 && !self.glitch_line
                 && vis0
@@ -801,16 +666,14 @@ impl Ppu {
             // 1's last M-cycle) suppresses a freshly-written m1 enable; but the
             // lcd-offset shifts `m1irq_late_enable_lcdoffset1_1`'s FF41 enable
             // into exactly that tail (`ly0 dot3`), where SameBoy fires the fresh
-            // VBlank enable (out2) — slopgb delivered `if=00`. Under Tier-2
-            // (`leading_edge_reads`) drop the `m1_tail` suppression so the fresh
-            // VBlank enable raises IF; the `old & STAT_SRC_VBLANK` suppression and
-            // the lyc arm (the `lycstatwirq_trigger_ly00` E0 rows) are
-            // untouched. Never set in production / LE-only → byte-identical OFF.
-            let m1_tail = ll == 0 && ld < 4 && !self.leading_edge_reads;
+            // VBlank enable (out2). The eager engine drops the `m1_tail`
+            // suppression so the fresh VBlank enable raises IF; the
+            // `old & STAT_SRC_VBLANK` suppression and the lyc arm (the
+            // `lycstatwirq_trigger_ly00` E0 rows) are untouched.
             if old & STAT_SRC_VBLANK != 0 {
                 false
             } else {
-                (data & STAT_SRC_VBLANK != 0 && !m1_tail) || lyc_fire
+                data & STAT_SRC_VBLANK != 0 || lyc_fire
             }
         };
         main || m2 || lyc_carryover || lyc_wrap_153

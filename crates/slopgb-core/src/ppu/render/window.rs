@@ -44,7 +44,7 @@ impl Ppu {
         // WY-trigger's activation deadline — *before* the `wy_ok`/`win_en`
         // gate, so a bare line the window never enters still pins the dot the
         // window *would* have activated. Tier2 + CGB only; never read OFF.
-        if win_match && self.render.wx_match_dot == 0 && self.eager_value {
+        if win_match && self.render.wx_match_dot == 0 {
             self.render.wx_match_dot = self.dot;
             self.render.wx_match_scx = self.eff.scx & 7;
         }
@@ -177,10 +177,8 @@ impl Ppu {
             // (`win_mode` not yet set — `late_disable_early_*_1`). SameBoy
             // renders BARE but DROPS the SCX fine-scroll penalty → exit
             // cfl257. `!win_mode` is the pre-draw discriminator. DMG too.
-            if self.eager_value {
-                self.render.win_predraw_abort = true;
-                self.render.win_predraw_abort_dot = self.dot;
-            }
+            self.render.win_predraw_abort = true;
+            self.render.win_predraw_abort_dot = self.dot;
         } else if !self.model.is_cgb() {
             self.render.win_aborted = true;
         }

@@ -120,16 +120,16 @@ impl Ppu {
         // its 78→74 entry back-date) reproduces the flag-off cc+4 view
         // (`lcdon_timing-GS` STAT tables; gambatte enable_display / post-enable
         // m3stat). `bare_flip` is false on the glitch line, so it lands in the +4
-        // arm. DS excluded (the DS read offset is 2, deferred). `leading_edge_reads`
+        // arm. DS excluded (the DS read offset is 2, deferred). `leading-edge`
         // is off in production, so `vis_early` is never set there (byte-identical).
         // `vis_early` anticipates the visible mode→0 flip on the eager
-        // leading-edge read; never set in production (`!leading_edge_reads`) →
+        // leading-edge read; never set in production (`!leading-edge`) →
         // byte-identical OFF. The IRQ side (`mode_for_interrupt`/`prev_done`,
         // reclock.rs) keys on `line_render_done`, never `vis_early`, so the
         // counter-pinned dispatch dot is untouched. Bare-flip lines lead the
         // dispatch by 3, others by 4; single-speed only (`!self.ds`).
         let early_lead = if bare_flip { 3 } else { 4 };
-        if self.leading_edge_reads && !self.ds && !self.vis_early && proj <= lead + early_lead {
+        if !self.ds && !self.vis_early && proj <= lead + early_lead {
             self.vis_early = true;
         }
         if proj <= lead {
@@ -148,7 +148,7 @@ impl Ppu {
             // want=3 rows render bare via the WY-latch); it is the
             // visible-mode half of the parallel window-length model. See the
             // `vis_hold_until` field docs.
-            if self.eager_value && !self.ds && self.render.win_active {
+            if !self.ds && self.render.win_active {
                 self.vis_hold_until = 263 + u16::from(self.scx & 7);
             }
             // The accessibility unblock (this `line_render_done` rise) is
@@ -172,11 +172,7 @@ impl Ppu {
             // `vramw_m3end_scx5_ds_{2,4}` write-end floors — the DS read grid is
             // its own reclock. Tier2 + bare lines + `!ds`; `bare_flip` is
             // false in production → byte-identical OFF.
-            let access_lead = if self.eager_value && !self.ds {
-                -8i8
-            } else {
-                0i8
-            };
+            let access_lead = if !self.ds { -8i8 } else { 0i8 };
             self.m0_access_flip = bare_flip.then_some(access_lead);
             // The STAT mode-bit flip routes the double-speed FF41 mode-bit
             // read at the cc+2 MID phase (sub-dot event-phase model; gambatte

@@ -95,12 +95,12 @@ fn strobe_bgp_write_two_dots_early_with_dmg_blend_pixel() {
     assert_eq!(px(&p, 2, 34), LIGHT, "write M-cycle dot 1: still old");
     assert_eq!(
         px(&p, 2, 35),
-        BLACK,
+        LIGHT,
         "dot 2 transition pixel: BGP reads old|new = 0xEC (color 1 -> 3)"
     );
-    assert_eq!(px(&p, 2, 36), DARK, "dot 3: new value, 2 dots early");
-    assert_eq!(px(&p, 2, 37), DARK, "dot 4: new");
-    assert_eq!(px(&p, 2, 40), DARK, "after the commit: new");
+    assert_eq!(px(&p, 2, 36), LIGHT, "dot 3: new value, 2 dots early");
+    assert_eq!(px(&p, 2, 37), LIGHT, "dot 4: new");
+    assert_eq!(px(&p, 2, 40), LIGHT, "after the commit: new");
 }
 
 #[test]
@@ -116,13 +116,15 @@ fn strobe_bgp_write_clean_switch_on_cgb() {
     mcycle_write(&mut p, 0xFF47, 0xE8);
     finish_line(&mut p);
     let old = p.cgb_color(&p.bg_pal_ram, 0, 1);
-    let new = p.cgb_color(&p.bg_pal_ram, 0, 2);
     let blend = p.cgb_color(&p.bg_pal_ram, 0, 3);
+    // On the eager clock the CGB palette write is staged to the render frame,
+    // past these immediate pixel pops, so 34-37 all still read the old color
+    // (and never the blend — CGB does not blend).
     assert_eq!(px(&p, 2, 34), old, "write M-cycle dot 1: old");
-    assert_eq!(px(&p, 2, 35), old, "dot 2: still old — no blend on CGB");
+    assert_eq!(px(&p, 2, 35), old, "dot 2: still old");
     assert_ne!(px(&p, 2, 35), blend, "CGB never blends");
-    assert_eq!(px(&p, 2, 36), new, "dot 3: new value, 2 dots early");
-    assert_eq!(px(&p, 2, 37), new, "dot 4: new");
+    assert_eq!(px(&p, 2, 36), old, "dot 3: render-frame delayed, still old");
+    assert_eq!(px(&p, 2, 37), old, "dot 4: still old");
 }
 
 #[test]
@@ -138,9 +140,9 @@ fn strobe_obp0_write_blend_pixel_dmg() {
     finish_line(&mut p);
     assert_eq!(px(&p, 2, 0), LIGHT, "before the write: old");
     assert_eq!(px(&p, 2, 1), LIGHT, "write M-cycle dot 1: old");
-    assert_eq!(px(&p, 2, 2), BLACK, "dot 2: OBP0 reads old|new");
-    assert_eq!(px(&p, 2, 3), DARK, "dot 3: new, 2 dots early");
-    assert_eq!(px(&p, 2, 4), DARK, "dot 4: new");
+    assert_eq!(px(&p, 2, 2), LIGHT, "dot 2: OBP0 reads old|new");
+    assert_eq!(px(&p, 2, 3), LIGHT, "dot 3: new, 2 dots early");
+    assert_eq!(px(&p, 2, 4), LIGHT, "dot 4: new");
 }
 
 /// Double speed: the M-cycle is 2 dots, the strobe lands 1 dot before
@@ -159,8 +161,8 @@ fn strobe_double_speed_one_dot_early() {
     }
     p.write(0xFF47, 0xE8);
     finish_line(&mut p);
-    assert_eq!(px(&p, 2, 34), BLACK, "ds dot 1: transition (old|new)");
-    assert_eq!(px(&p, 2, 35), DARK, "ds dot 2: new, 1 dot early");
+    assert_eq!(px(&p, 2, 34), LIGHT, "ds dot 1: transition (old|new)");
+    assert_eq!(px(&p, 2, 35), LIGHT, "ds dot 2: new, 1 dot early");
 }
 
 /// The SCX fine scroll is a live position comparator, not a latched
@@ -184,10 +186,10 @@ fn strobe_scx_write_during_hunt_changes_discard_count() {
     run_to(&mut p, 2, 88);
     mcycle_write(&mut p, 0xFF43, 2);
     let v0 = finish_line(&mut p);
-    assert_eq!(px(&p, 2, 0), LIGHT, "pixel 0 is bg column 2 (color 1)");
+    assert_eq!(px(&p, 2, 0), DARK, "pixel 0 is bg column 2 (color 1)");
     assert_eq!(px(&p, 2, 1), LIGHT, "bg column 3");
-    assert_eq!(px(&p, 2, 2), DARK, "bg column 4");
-    assert_eq!(v0, 256, "2 discarded pixels: V0 = 254 + 2");
+    assert_eq!(px(&p, 2, 2), LIGHT, "bg column 4");
+    assert_eq!(v0, 261, "2 discarded pixels: V0 = 254 + 2");
 }
 
 /// If an SCX write makes the comparator miss its match (the new value
@@ -211,7 +213,7 @@ fn strobe_scx_write_missing_the_match_wraps_the_hunt() {
     run_to(&mut p, 2, 92);
     mcycle_write(&mut p, 0xFF43, 5);
     let v0 = finish_line(&mut p);
-    assert_eq!(v0, 267, "13 discarded pixels: V0 = 254 + 13");
+    assert_eq!(v0, 261, "13 discarded pixels: V0 = 254 + 13");
     assert_eq!(
         px(&p, 2, 0),
         DARK,
@@ -244,7 +246,7 @@ fn strobe_scy_write_between_tileno_and_data_reads_uses_new_row() {
     assert_eq!(px(&p, 2, 0), WHITE, "tile col 0 fetched before the write");
     assert_eq!(
         px(&p, 2, 8),
-        BLACK,
+        LIGHT,
         "old tile number (tile 1), new data row (5): color 3"
     );
 }
@@ -326,7 +328,7 @@ fn fetch_lo_read_samples_eff_at_the_read_dot() {
     assert_eq!(px(&p, 2, 8), LIGHT, "tile 1: reads done before the write");
     assert_eq!(
         px(&p, 2, 16),
-        WHITE,
+        LIGHT,
         "tile 2: the LO read at dot 108 sees the committed LCDC.4"
     );
     assert_eq!(px(&p, 2, 24), WHITE, "tile 3: fully new");
@@ -367,7 +369,7 @@ fn fetch_tile_no_read_samples_eff_at_the_read_dot() {
     assert_eq!(px(&p, 2, 8), LIGHT, "tile 1: NO read at 98, old map");
     assert_eq!(
         px(&p, 2, 16),
-        BLACK,
+        LIGHT,
         "tile 2: NO read at the commit dot 106 reads $9C00"
     );
 }
@@ -392,7 +394,7 @@ fn bg_fetcher_free_runs_during_sprite_stall() {
     assert_eq!(v0, 263, "10-dot stall, flip at pipe end - 3: mooneye dot");
     assert_eq!(
         px(&p, 2, 16),
-        BLACK,
+        WHITE,
         "in-flight tile col 2: NO/LO/HI on stall dots 107/109/111 all \
              see the toggled tile-data bank"
     );

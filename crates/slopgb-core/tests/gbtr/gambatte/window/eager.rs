@@ -5,12 +5,12 @@ use super::super::*;
 /// The DMG late-WY write-side latch pair RE-HOSTED onto the eager clock (L2).
 /// The CGB slice-2 cross-line latch was CGB-scoped; the DMG
 /// read-frame WY laws (`vis_exit_hd` arms D6/D1/7) already run under
-/// `eager_value`, but the two DMG-scoped write-side latches in
+/// `eager`, but the two DMG-scoped write-side latches in
 /// `regs.rs::write` (FF4A) were not yet ported to the eager clock: the HEAD-write
 /// cross-line EXTEND (`value + 1 == line` → `wy_xline_trig`, feeds arm 7) and
 /// the SS trigger-line UN-latch (`old_wy == ly && value != ly` →
 /// `wy_trig_sb_raw = false`, feeds arm D6). Extending both with
-/// `|| self.eager_value` recovers the `_2` boundary pairs: `10to0_ly1_2`,
+/// `|| self.eager` recovers the `_2` boundary pairs: `10to0_ly1_2`,
 /// `FFto0_ly2_2`, `FFto1_ly2_2` EXTEND (out3), `1toFF_2`/`2toFF_2` UN-trigger
 /// (out0). EV DMG two-bin 83 → 78 (clean +5/−0, all 5 SameBoy-PASS TRUE-bar
 /// rows); CGB byte-identical. The `_1` siblings stay floored (their render
@@ -50,7 +50,7 @@ fn eager_dmg_late_wy_passes() {
     ];
     for (rel, expect) in targets {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        let mut gb = harness::boot_eager(&rom, Model::Dmg);
+        let mut gb = harness::boot(&rom, Model::Dmg);
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), expect, false)
             .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (eager): {e}"));
@@ -71,7 +71,7 @@ fn eager_dmg_late_wy_passes() {
 /// (`10to0_ly1_1`/`FFto0_ly2_1`/`FFto1_ly2_1`, out3): the eager render
 /// OVER-triggers the cross-line seam (`win_active`), so arm D1 fires with the
 /// steady 259 instead of the trigger-line 263; the arm now uses the cross-line
-/// 263 when `wy_xline_trig` under `eager_value`.
+/// 263 when `wy_xline_trig` under `eager`.
 /// EV DMG two-bin 74 → 69 (clean +5/−0, all 5 SameBoy-PASS TRUE-bar rows); CGB
 /// byte-identical (EV 318, tier2 291). The `scx2/scx3` extend siblings + the
 /// `late_disable/reenable`/`m2int` window residual stay floored (render-frame /
@@ -109,7 +109,7 @@ fn eager_dmg_late_wy1_rehost_passes() {
     ];
     for (rel, expect) in targets {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        let mut gb = harness::boot_eager(&rom, Model::Dmg);
+        let mut gb = harness::boot(&rom, Model::Dmg);
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), expect, false)
             .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (eager): {e}"));
@@ -124,7 +124,7 @@ fn eager_dmg_late_wy1_rehost_passes() {
 ///      records `win_reenable_dot` one M-cycle before tier2, so the bare
 ///      threshold takes +4 (not +3): reen 94 + 4 > wxm 97 → bare.
 ///  (2) `late_scx_late_disable_0` (out0): arm-D3 pre-draw abort — the mid-line
-///      SCX rewrite is admitted under `eager_value`; the fetch-ship deadline K
+///      SCX rewrite is admitted under `eager`; the fetch-ship deadline K
 ///      widens to 8 (fscx-4 fine-scroll) and the bare exit back-dates one dot
 ///      (253→252) so the early-abort `_0` reads mode 0.
 ///  (3) `late_wy_FFto2_ly2_scx{2,3}_1` (out3): arm-2 shadow — the eager DMG
@@ -162,7 +162,7 @@ fn eager_dmg_window_latch_recalib_passes() {
     ];
     for (rel, expect) in targets {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        let mut gb = harness::boot_eager(&rom, Model::Dmg);
+        let mut gb = harness::boot(&rom, Model::Dmg);
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), expect, false)
             .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (eager): {e}"));
@@ -222,7 +222,7 @@ fn eager_dmg_stat_relatch_passes() {
     ];
     for (rel, expect) in targets {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        let mut gb = harness::boot_eager(&rom, Model::Dmg);
+        let mut gb = harness::boot(&rom, Model::Dmg);
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), expect, false)
             .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (eager): {e}"));
@@ -291,7 +291,7 @@ fn eager_cgb_ds_relatch_passes() {
     ];
     for (rel, expect) in targets {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        let mut gb = harness::boot_eager(&rom, Model::Cgb);
+        let mut gb = harness::boot(&rom, Model::Cgb);
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), expect, true)
             .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (eager): {e}"));

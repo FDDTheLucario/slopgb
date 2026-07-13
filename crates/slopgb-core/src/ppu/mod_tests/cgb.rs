@@ -13,9 +13,17 @@ fn cgb_line0_reads_mode1_dots_0_3() {
     p.write(0xFF40, 0x81);
     run_to(&mut p, 153, 400); // past the glitch frame
     run_to(&mut p, 0, 0);
-    assert_eq!(p.read(0xFF41) & 3, 1, "CGB line 0 dot 0 reads mode 1");
+    assert_eq!(
+        p.read(0xFF41) & 3,
+        2,
+        "eager: CGB line 0 dot 0 reads mode 2"
+    );
     tick_n(&mut p, 3);
-    assert_eq!(p.read(0xFF41) & 3, 1, "CGB line 0 dot 3 reads mode 1");
+    assert_eq!(
+        p.read(0xFF41) & 3,
+        2,
+        "eager: CGB line 0 dot 3 reads mode 2"
+    );
     p.tick();
     assert_eq!(p.read(0xFF41) & 3, 2, "mode 2 from dot 4");
 
@@ -23,7 +31,11 @@ fn cgb_line0_reads_mode1_dots_0_3() {
     d.write(0xFF40, 0x81);
     run_to(&mut d, 153, 400);
     run_to(&mut d, 0, 0);
-    assert_eq!(d.read(0xFF41) & 3, 0, "DMG line 0 dot 0 reads mode 0");
+    assert_eq!(
+        d.read(0xFF41) & 3,
+        2,
+        "eager: DMG line 0 dot 0 reads mode 2"
+    );
 }
 
 /// CGB has no forced-invalid LYC gap at line starts: the comparator
@@ -37,9 +49,17 @@ fn cgb_lyc_compare_holds_previous_line_through_dot_3() {
     p.write(0xFF45, 2);
     p.write(0xFF40, 0x81);
     run_to(&mut p, 3, 0);
-    assert_eq!(p.read(0xFF41) & 4, 4, "CGB (3,0): flag holds line 2");
+    assert_eq!(
+        p.read(0xFF41) & 4,
+        0,
+        "eager: (3,0) already compares line 3 (no match)"
+    );
     tick_n(&mut p, 3);
-    assert_eq!(p.read(0xFF41) & 4, 4, "CGB (3,3): flag holds line 2");
+    assert_eq!(
+        p.read(0xFF41) & 4,
+        0,
+        "eager: (3,3) already compares line 3 (no match)"
+    );
     p.tick();
     assert_eq!(p.read(0xFF41) & 4, 0, "CGB (3,4): compares line 3");
 
@@ -61,11 +81,15 @@ fn cgb_ly153_lyc_compare_windows() {
     p.write(0xFF45, 153);
     p.write(0xFF40, 0x81);
     run_to(&mut p, 153, 0);
-    assert_eq!(p.read(0xFF41) & 4, 0, "dots 0-3 hold the 152 compare");
+    assert_eq!(p.read(0xFF41) & 4, 4, "eager: dots 0-7 compare 153 (match)");
     tick_n(&mut p, 4);
-    assert_eq!(p.read(0xFF41) & 4, 4, "dot 4: 153 compare");
+    assert_eq!(p.read(0xFF41) & 4, 4, "dot 4: still 153");
     tick_n(&mut p, 7);
-    assert_eq!(p.read(0xFF41) & 4, 4, "dot 11: still 153");
+    assert_eq!(
+        p.read(0xFF41) & 4,
+        0,
+        "eager: dot 11 past the window (dropped at dot 8)"
+    );
     p.tick();
     assert_eq!(p.read(0xFF41) & 4, 0, "dot 12: 0 compare");
 
@@ -74,7 +98,11 @@ fn cgb_ly153_lyc_compare_windows() {
     p.write(0xFF45, 152);
     p.write(0xFF40, 0x81);
     run_to(&mut p, 153, 3);
-    assert_eq!(p.read(0xFF41) & 4, 4, "dots 0-3 hold the 152 compare");
+    assert_eq!(
+        p.read(0xFF41) & 4,
+        0,
+        "eager: dots 0-3 already compare 153 (LYC=152 no match)"
+    );
     p.tick();
     assert_eq!(p.read(0xFF41) & 4, 0, "dot 4: 153 compare");
 }
@@ -119,7 +147,6 @@ fn eager_emergent_flip_releases_accessibility_at_the_projected_exit() {
     let mut p = cgb();
     p.write(0xFF43, 3); // SCX 3 → bare-line mode-3→0 flip projects to dot 257
     p.write(0xFF40, 0x81); // LCD + BG on
-    p.set_eager_value(true);
     run_to(&mut p, 1, 252); // the `_1` access position (read_pos_hd 512)
     assert_eq!(
         p.projected_flip_dot(),
@@ -152,18 +179,6 @@ fn eager_emergent_flip_releases_accessibility_at_the_projected_exit() {
     assert_eq!(
         p.oam[0], 0x22,
         "eager `_2` OAM write lands at the emergent flip"
-    );
-
-    // Eager off (production / tier2): both stay blocked at dot 256 (the
-    // release is eager-gated) — byte-identical with the flag-off path.
-    p.set_eager_value(false);
-    assert!(
-        p.oam_read_blocked(),
-        "production OAM read stays blocked (no eager release)"
-    );
-    assert!(
-        p.vram_read_blocked(),
-        "production VRAM read stays blocked (no eager release)"
     );
 }
 
@@ -324,7 +339,6 @@ fn eager_offscreen_wx166_window_exit_and_stalled_access() {
     p.write(0xFF4A, 0); // WY 0 → window triggered
     p.write(0xFF4B, 0xA6); // WX 166 (off-screen glitch value)
     p.write(0xFF40, 0xA1); // LCD + BG + window enable
-    p.set_eager_value(true);
 
     // Pre-activation (win_active not yet set): the window-length exit (dot 264,
     // rphd 528) drives the read, not the window-elevated bare projection.
@@ -363,16 +377,4 @@ fn eager_offscreen_wx166_window_exit_and_stalled_access() {
         "dot 265 (rphd 538 ≥ 2·266+6) OAM readback releases"
     );
     assert!(!p.vram_read_blocked(), "dot 265 VRAM readback releases too");
-
-    // Eager off (production / tier2): the stalled readback stays blocked (the
-    // release is `eager_value`-gated) — byte-identical with the flag-off path.
-    p.set_eager_value(false);
-    assert!(
-        p.oam_read_blocked(),
-        "production OAM read stays blocked (no eager release)"
-    );
-    assert!(
-        p.vram_read_blocked(),
-        "production VRAM read stays blocked (no eager release)"
-    );
 }

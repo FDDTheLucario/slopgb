@@ -2,20 +2,6 @@
 
 use super::*;
 
-/// Post-C3-flip default guard: every production `GameBoy::new` must
-/// construct on the coherent EAGER-value clock — `leading_edge_reads` ON.
-/// Needs no ROM bundle, always runs.
-#[test]
-fn production_new_is_c3_eager_default() {
-    for model in [Model::Dmg, Model::Cgb, Model::Agb] {
-        let gb = GameBoy::new(model, rom_with_cgb_flag(0x00)).unwrap();
-        assert!(
-            gb.reclock_flags(),
-            "{model:?}: production GameBoy::new must be C3 eager (leading_edge ON)"
-        );
-    }
-}
-
 /// Pan Docs "CPU registers" (Power-Up Sequence): on CGB/AGB hardware
 /// the boot ROM hands a CGB-flagged cart off with DE=$FF56 HL=$000D;
 /// a DMG cart gets DE=$0008 HL=$007C (mooneye misc/boot_regs-cgb/-A —

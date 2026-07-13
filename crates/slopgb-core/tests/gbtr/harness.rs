@@ -13,28 +13,10 @@ use crate::common::framecmp::{self, CgbColorMap};
 use crate::common::png;
 
 /// Build a machine for a collection ROM; a rejected cartridge means a
-/// corrupt checkout, not a test failure.
+/// corrupt checkout, not a test failure. `new` is the production eager clock.
 pub fn boot(rom: &[u8], model: Model) -> GameBoy {
-    // `SLOPGB_GBTR_EAGER=1` boots every default-path case on the coherent
-    // eager-value C3-flip (`new_with_eager` construction path) so a
-    // whole suite can be diffed OFF-vs-flip for the eager re-host measurement.
-    // Unset = the production frame, byte-identical.
-    if std::env::var_os("SLOPGB_GBTR_EAGER").is_some() {
-        return GameBoy::new_with_eager(model, rom.to_vec())
-            .unwrap_or_else(|e| panic!("cartridge rejected ({model:?}): {e:?}"));
-    }
     GameBoy::new(model, rom.to_vec())
         .unwrap_or_else(|e| panic!("cartridge rejected ({model:?}): {e:?}"))
-}
-
-/// Boot with the EAGER-VALUE reclock (the DMG-count-safe eager clock + tier2
-/// read/render laws as cc+0 value peeks, dispatch staying cc+4 — the C3-flip
-/// target). The pin form of the `SLOPGB_PROBE_EV` two-bin, for the eager
-/// render-reclock pins.
-pub fn boot_eager(rom: &[u8], model: Model) -> GameBoy {
-    let mut gb = boot(rom, model);
-    gb.set_eager_value(true);
-    gb
 }
 
 /// Step until `pred` is true, or `Err` after `timeout_tcycles` more T-cycles.

@@ -331,7 +331,7 @@ pub struct Ppu {
     /// counted down by the odd-half engine ([`Ppu::stat_update_half`]) so the
     /// disable/enable lands at the coincident LYC re-latch / mode-0 flip half-
     /// dot rather than the whole-dot cc+4 commit. `None` (and unread) except
-    /// under `eager_value` → production/tier2 byte-identical.
+    /// under `eager` → production/tier2 byte-identical.
     eng_stat_half: Option<(u8, u8)>,
     /// Previous engine tick's `mode_for_interrupt` (m0-flip detection for
     /// the fast-forward above). Tier-2/LE only.
@@ -504,7 +504,7 @@ pub struct Ppu {
     /// [`Self::stat_update_halt_masks`]; the interconnect's `ack_impl` reads it
     /// to arm the per-ISR read carry (the OAM-ISR handler's reads land 1
     /// M-cycle = 2 dots DS later than the mode-0-ISR's, decoupled from the
-    /// IF-delivery ack). Consulted only under `eager_value`; production never
+    /// IF-delivery ack). Consulted only under `eager`; production never
     /// reaches it.
     stat_rise_oam: bool,
     /// The currently-pending STAT IRQ was the mode-0 HBlank rise
@@ -522,7 +522,7 @@ pub struct Ppu {
     /// non-carried polled/other-ISR reads too (dropping 50 SameBoy-passes whose
     /// native frame was already correct); gating the SBex override on
     /// `read_carried` confines it to exactly the reads the carry moved to
-    /// SameBoy's frame. Consulted only under `eager_value`; production never
+    /// SameBoy's frame. Consulted only under `eager`; production never
     /// reaches it.
     read_carried: bool,
     /// Set by the interconnect's eager CGB halt wake (`halt_wake_mid_impl`) when
@@ -534,7 +534,7 @@ pub struct Ppu {
     /// FF41 read (`vis_mode_read`), backstop-cleared at the next halt entry.
     /// Only the sub-M-cycle wake peek separates the want-0 siblings off this read
     /// position, so the flag has no collateral (−9 without the peek).
-    /// Armed only on the eager clock (`eager_value`) → byte-identical OFF.
+    /// Armed only on the eager clock (`eager`) → byte-identical OFF.
     halt_refetch: bool,
     /// The externally visible mode-0 flip (STAT mode bits, OAM/VRAM
     /// unblock): rises with `m0_src` ahead of the pipe end (see
@@ -549,11 +549,11 @@ pub struct Ppu {
     /// scx_m3_extend — a live-`scx` closed form mis-frames the missed-hunt
     /// leg). Recorded on both fire paths (projection + the `advance_lx` pipe-
     /// end fallback); reset at line start, `m0_unflip`, and LCD transitions.
-    /// Only read under `eager_value` → production byte-identical.
+    /// Only read under `eager` → production byte-identical.
     flip_dot: u16,
     /// The CPU-visible STAT mode→0 boundary back-dated to
     /// SameBoy's cycle-exact frame, **decoupled from the IRQ-dispatch flip**
-    /// (`line_render_done`/`m0_src`). On the `leading_edge_reads` flag-on path
+    /// (`line_render_done`/`m0_src`). On the `leading-edge` flag-on path
     /// this rises 3 dots *before* `line_render_done` on bare single-speed lines,
     /// so `vis_mode` reads 0 at SameBoy's `ModeTimeline::visible_mode0_dot`
     /// (our-line dot 251 = 254 − 3) while the dispatch stays at our dot 254 —
@@ -564,7 +564,7 @@ pub struct Ppu {
     /// !ds`), the regime the +3 back-date was measured on; the sprite/window
     /// (+2 DMG) and double-speed (+4) back-dates are derived-but-unmeasured and
     /// stay on `line_render_done` for now. **Always `false` on the flag-off
-    /// (production) path** (the set is gated on `leading_edge_reads`), so
+    /// (production) path** (the set is gated on `leading-edge`), so
     /// `vis_mode` reads `line_render_done` exactly — byte-identical in
     /// production. The OAM/VRAM accessibility unblock (`blocking.rs`) keeps the
     /// `line_render_done` dot for now (the visible-vs-accessibility 3-dot window
@@ -578,7 +578,7 @@ pub struct Ppu {
     /// law), past the counter-pinned
     /// dispatch dot, while slopgb's window flip is flat at ~261. Set in
     /// `m0_flip_events` when the flip fires on a `win_active` line under
-    /// `eager_value` (0 = no hold); consumed only by `vis_mode` — the IRQ
+    /// `eager` (0 = no hold); consumed only by `vis_mode` — the IRQ
     /// dispatch (`line_render_done`) is NOT moved.
     ///
     /// **Validated foundation, currently INERT** (like `cycle_clock`/
@@ -590,7 +590,7 @@ pub struct Ppu {
     /// it is the visible-mode half of the parallel window-length model
     /// (which must also replicate the WY-latch trigger to drive it).
     /// **Always 0 on
-    /// the flag-off path** (never set when `eager_value` is false) →
+    /// the flag-off path** (never set when `eager` is false) →
     /// byte-identical in production. Reset at line start + on `m0_unflip`, like
     /// `vis_early`.
     vis_hold_until: u16,
@@ -626,7 +626,7 @@ pub struct Ppu {
     /// Flag-on path only: SameBoy's `GB_STAT_update`
     /// rising-edge STAT interrupt line ([`StatUpdate`](crate::stat_update)),
     /// driven each dot from `mode_for_interrupt` | the LYC latch and replacing
-    /// `stat_events_tick` when `leading_edge_reads` is on. Inert (never read)
+    /// `stat_events_tick` when `leading-edge` is on. Inert (never read)
     /// while the flag is off, so it changes nothing in production.
     stat_update: crate::stat_update::StatUpdate,
     /// SameBoy `lyc_interrupt_line` (`display.c:534`): the LYC==LY STAT source
@@ -635,16 +635,6 @@ pub struct Ppu {
     /// gaps (so a match survives the line-boundary dot). The LYC input
     /// `stat_update` consumes on the flag-on path.
     lyc_interrupt_line: bool,
-    /// PPU-side copy of the interconnect's `leading_edge_reads` master flag,
-    /// selecting the [`StatUpdate`](crate::stat_update) engine over
-    /// `stat_events_tick`. Off in production until the atomic flip;
-    /// forwarded by [`Interconnect::set_leading_edge_reads`].
-    leading_edge_reads: bool,
-    /// PPU-side copy of the interconnect's `eager_value` flag (the eager clock
-    /// plus read/render laws as cc+0 value peeks, dispatch staying cc+4).
-    /// Implies `leading_edge_reads`. Off in production.
-    /// Forwarded by [`Interconnect::set_eager_value`].
-    eager_value: bool,
     /// The STAT IF bit handed out by the last tick came from the mode-0
     /// source rise. The interconnect drains this and applies the
     /// half-cycle halt law: a rise landing in the second half of the

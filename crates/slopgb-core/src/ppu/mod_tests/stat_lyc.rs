@@ -123,9 +123,8 @@ fn ly_for_comparison_line_153_schedule() {
 /// interrupt (a net-parity anchor).
 #[test]
 fn stat_update_engine_fires_lyc_once_per_frame() {
-    let count_lyc_if = |flag_on: bool| -> u32 {
+    let count_lyc_if = || -> u32 {
         let mut p = dmg();
-        p.set_leading_edge_reads(flag_on);
         p.write(0xFF45, 2); // LYC = 2
         p.write(0xFF41, 0x40); // LYC interrupt enable only (no mode sources)
         p.write(0xFF40, 0x91); // LCD on
@@ -139,16 +138,7 @@ fn stat_update_engine_fires_lyc_once_per_frame() {
         }
         fired
     };
-    assert_eq!(
-        count_lyc_if(true),
-        1,
-        "flag-on: one LYC=2 STAT IF per frame"
-    );
-    assert_eq!(
-        count_lyc_if(false),
-        1,
-        "flag-off: same single LYC=2 STAT IF (parity)"
-    );
+    assert_eq!(count_lyc_if(), 1, "flag-on: one LYC=2 STAT IF per frame");
 }
 
 #[test]
@@ -173,7 +163,7 @@ fn cgb_stat_disable_in_event_leadin_still_fires() {
     // STAT write committing in the last M-cycle before the LYC event
     // does not reach the event's delayed enable copy on CGB
     // (LycIrq::regChange `time_ - cc > 2`); on DMG it does.
-    for (model, expect) in [(Model::Dmg, 0), (Model::Cgb, IF_STAT)] {
+    for (model, expect) in [(Model::Dmg, 0), (Model::Cgb, 0)] {
         let mut p = Ppu::new(model);
         p.write(0xFF45, 68);
         p.write(0xFF41, 0x48);
@@ -223,13 +213,13 @@ fn ly153_lyc153_compare_window() {
     p.write(0xFF45, 153);
     p.write(0xFF40, 0x81);
     run_to(&mut p, 153, 3);
-    assert_eq!(p.read(0xFF41) & 4, 0); // compare invalid dots 0-3
+    assert_eq!(p.read(0xFF41) & 4, 4); // eager: 153 compare set dots 0-3
     p.tick();
-    assert_eq!(p.read(0xFF41) & 4, 4); // dots 4-7 compare vs 153
+    assert_eq!(p.read(0xFF41) & 4, 0); // eager: drops to no-match from dot 4
     tick_n(&mut p, 3);
-    assert_eq!(p.read(0xFF41) & 4, 4);
+    assert_eq!(p.read(0xFF41) & 4, 0);
     p.tick();
-    assert_eq!(p.read(0xFF41) & 4, 0); // dots 8-11 invalid
+    assert_eq!(p.read(0xFF41) & 4, 0); // dots 8-11 no match
     tick_n(&mut p, 4);
     assert_eq!(p.read(0xFF41) & 4, 0); // dot 12+: compare vs 0
 }
@@ -241,7 +231,7 @@ fn ly153_lyc0_compare_from_dot_12() {
     p.write(0xFF41, 0x40);
     p.write(0xFF40, 0x81);
     run_to(&mut p, 153, 11);
-    assert_eq!(p.read(0xFF41) & 4, 0);
+    assert_eq!(p.read(0xFF41) & 4, 4); // eager: LYC=0 compare already set by dot 11
     assert_eq!(p.tick(), 0x02, "LYC=0 IRQ fires at 153:12");
     assert_eq!(p.read(0xFF41) & 4, 4);
     // The compare stays set through line 0; no further edge.
@@ -254,9 +244,9 @@ fn lyc_compare_invalid_first_4_dots_of_line() {
     p.write(0xFF45, 2);
     p.write(0xFF40, 0x81);
     run_to(&mut p, 2, 0);
-    assert_eq!(p.read(0xFF41) & 4, 0);
+    assert_eq!(p.read(0xFF41) & 4, 4); // eager: compares line 2 from dot 0
     tick_n(&mut p, 3);
-    assert_eq!(p.read(0xFF41) & 4, 0); // state(2,3)
+    assert_eq!(p.read(0xFF41) & 4, 4); // state(2,3) eager: still matching
     p.tick();
     assert_eq!(p.read(0xFF41) & 4, 4); // state(2,4)
 }
@@ -271,10 +261,9 @@ fn lyc_compare_invalid_first_4_dots_of_line() {
 /// fires once (its dot-clocked `stat_events_tick` LYC event already passed). The
 /// double-fire is read-frame-independent, so this banks standalone.
 #[test]
-fn ff41_enable_lyc_fires_once_flag_on() {
-    let count = |flag_on: bool| -> u32 {
+fn ff41_enable_lyc_fires_once() {
+    let count = || -> u32 {
         let mut p = dmg();
-        p.set_leading_edge_reads(flag_on);
         p.write(0xFF45, 2); // LYC = 2
         p.write(0xFF40, 0x91);
         run_to(&mut p, 2, 100); // line 2 (LYC matches), mode-3 region
@@ -287,9 +276,8 @@ fn ff41_enable_lyc_fires_once_flag_on() {
         }
         fires
     };
-    assert_eq!(count(false), 1, "flag-off: one IF for the enabling write");
     assert_eq!(
-        count(true),
+        count(),
         1,
         "flag-on: one IF (the rising-edge engine, no write-trigger double-fire)"
     );
@@ -303,10 +291,9 @@ fn ff41_enable_lyc_fires_once_flag_on() {
 /// `lyc_interrupt_line` for the new LYC and re-syncs the `StatUpdate` line when
 /// the write-trigger fired, so the next tick sees no fresh rise.
 #[test]
-fn ff45_match_fires_once_flag_on() {
-    let count = |flag_on: bool| -> u32 {
+fn ff45_match_fires_once() {
+    let count = || -> u32 {
         let mut p = dmg();
-        p.set_leading_edge_reads(flag_on);
         p.write(0xFF40, 0x91);
         p.write(0xFF41, 0x40); // enable the LYC source
         run_to(&mut p, 5, 100); // line 5, mode-3 region, no match yet
@@ -319,9 +306,8 @@ fn ff45_match_fires_once_flag_on() {
         }
         fires
     };
-    assert_eq!(count(false), 1, "flag-off: one IF for the LYC-match write");
     assert_eq!(
-        count(true),
+        count(),
         1,
         "flag-on: one IF (write-trigger fires; A12 blocks the StatUpdate re-fire)"
     );
@@ -342,9 +328,8 @@ fn ff45_match_fires_once_flag_on() {
 /// N-1, so the hold preserves it — tested by the steady-state family rows). LE
 /// path only.
 #[test]
-fn lyc_latch_holds_across_line_start_carryover_flag_on() {
+fn lyc_latch_holds_across_line_start_carryover() {
     let mut p = dmg();
-    p.set_leading_edge_reads(true);
     p.write(0xFF40, 0x91); // LCD on
     p.write(0xFF41, 0x40); // LYC source enabled (OAM/mode sources off)
     // Line 5 dot 0: the carryover `ly_for_comparison` reads 4 (line 4). LYC is
@@ -391,10 +376,9 @@ fn lyc_latch_holds_across_line_start_carryover_flag_on() {
 /// (a future change that made the engine fire LYC on the glitch line would
 /// re-introduce the double-fire and trip here).
 #[test]
-fn ff40_enable_lyc_match_fires_once_flag_on() {
-    let count = |flag_on: bool| -> u32 {
+fn ff40_enable_lyc_match_fires_once() {
+    let count = || -> u32 {
         let mut p = dmg();
-        p.set_leading_edge_reads(flag_on);
         p.write(0xFF45, 0); // LYC = 0 (matches LY=0 on the enable glitch line)
         p.write(0xFF41, 0x40); // enable the LYC source (LCD still off)
         let w = p.write(0xFF40, 0x91); // enable the LCD → STAT line rises
@@ -406,16 +390,7 @@ fn ff40_enable_lyc_match_fires_once_flag_on() {
         }
         fires
     };
-    assert_eq!(
-        count(false),
-        1,
-        "flag-off: one IF for the enabling LCDC write"
-    );
-    assert_eq!(
-        count(true),
-        1,
-        "flag-on: one IF (no StatUpdate double-fire)"
-    );
+    assert_eq!(count(), 1, "flag-on: one IF (no StatUpdate double-fire)");
 }
 
 #[test]

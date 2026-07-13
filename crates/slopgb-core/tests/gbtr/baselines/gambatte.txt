@@ -953,7 +953,7 @@ gambatte/oam_access/prewrite_lcdoffset1_1_cgb04c_out1.gbc [Cgb]
 
 # --- C3 FLIP swap block (2026-07-12) ---
 # The eager-value clock became the production default (interconnect.rs
-# leading_edge_reads/eager_value flipped true). 327 rows above now pass and
+# eager clock is now the only path). 327 rows above now pass and
 # were removed; the 44 rows below are the eager-flip's SameBoy-FAIL trades —
 # gambatte cgb04c/dmg08 reference values SameBoy also does not produce
 # (classify_cgb_regr.py 37/37 BUG=0, classify_dmg.py 6/6 BUG=0, scy PNG row

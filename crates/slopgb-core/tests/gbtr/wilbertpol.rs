@@ -221,7 +221,7 @@ fn eager_ly_lyc_153_write_delivery() {
         let Ok(rom) = std::fs::read(&path) else {
             continue; // absent in a partial checkout — gbtr_root gate already ran
         };
-        let mut gb = harness::boot_eager(&rom, model);
+        let mut gb = harness::boot(&rom, model);
         let res = harness::run_until_undefined(&mut gb, TIMEOUT_TCYCLES)
             .and_then(|()| harness::check_fib(&gb));
         if let Err(e) = res {

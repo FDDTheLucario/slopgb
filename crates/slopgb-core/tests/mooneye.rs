@@ -150,25 +150,18 @@ fn sprite_priority() {
     common::run_sprite_priority();
 }
 
-/// Red-before-green pin for the eager-value **construction** path:
-/// `GameBoy::new_with_eager` arms the eager reclock from the construction
-/// default (the real C3 flip), and `post_boot_inner`'s deferred re-arm must
-/// propagate the eager flags to the PPU engine AFTER the boot hand-off. Without
-/// that re-arm the machine runs eager reads against a non-eager PPU
-/// (incoherent) and `intr_2`/`lcdon` fail with B=42 — the exact 22-combo break
-/// the raw struct-literal flip produces. This asserts the construction path
-/// reaches the same intr_2-safe state as the runtime `set_eager_value` enable.
-/// Fails if the re-arm in `post_boot_inner` is removed.
+/// Cross-model pin for the counter-pinned PPU-timing family on the production
+/// (eager) clock: `intr_2_mode0/mode3/sprites` must pass on BOTH hardware
+/// families (the suffix-driven matrix only runs each on its filename model).
 #[test]
-fn eager_construction_intr_2_timing() {
+fn intr_2_timing_both_models() {
     let Some(root) = common::mts_root() else {
         common::skip_or_fail(
-            "eager_construction_intr_2_timing",
+            "intr_2_timing_both_models",
             "no mooneye ROMs under <repo>/test-roms/mts-*",
         );
         return;
     };
-    // The counter-pinned PPU-timing ROMs the struct-flip broke on all models.
     let roms = [
         "acceptance/ppu/intr_2_mode0_timing.gb",
         "acceptance/ppu/intr_2_mode3_timing.gb",
@@ -176,20 +169,18 @@ fn eager_construction_intr_2_timing() {
     ];
     let mut fails = Vec::new();
     for rel in roms {
-        let path = root.join(rel);
-        let Ok(rom) = std::fs::read(&path) else {
+        let Ok(rom) = std::fs::read(root.join(rel)) else {
             continue; // absent in a partial checkout — mts_root gate already ran
         };
-        // Both hardware families (the flip broke DMG- and CGB-family alike).
         for model in [Model::Dmg, Model::Cgb] {
-            if let Err(e) = common::run_breakpoint_rom_eager(&rom, model) {
+            if let Err(e) = common::run_breakpoint_rom(&rom, model) {
                 fails.push(format!("{rel} [{model:?}]: {e}"));
             }
         }
     }
     assert!(
         fails.is_empty(),
-        "eager-construction intr_2 timing failed:\n  {}",
+        "intr_2 timing failed:\n  {}",
         fails.join("\n  ")
     );
 }

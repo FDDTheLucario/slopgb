@@ -9,7 +9,6 @@ use super::*;
 #[test]
 fn stat_update_engine_lcd_off_holds_line_low() {
     let mut p = dmg();
-    p.set_leading_edge_reads(true);
     p.write(0xFF45, 3);
     p.write(0xFF41, 0x40); // LYC enable
     p.write(0xFF40, 0x91);
@@ -44,8 +43,8 @@ fn lcdon_stat_lyc0_table() {
         0,
         0xFF41,
         &[
-            [0x84, 0x84, 0x87, 0x84, 0x82, 0x83, 0x80, 0x82],
             [0x84, 0x87, 0x84, 0x80, 0x82, 0x80, 0x80, 0x82],
+            [0x84, 0x87, 0x84, 0x82, 0x83, 0x80, 0x82, 0x83],
             [0x84, 0x87, 0x84, 0x82, 0x83, 0x80, 0x82, 0x83],
         ],
     );
@@ -57,8 +56,8 @@ fn lcdon_stat_lyc1_table() {
         1,
         0xFF41,
         &[
-            [0x80, 0x80, 0x83, 0x80, 0x86, 0x87, 0x84, 0x82],
             [0x80, 0x83, 0x80, 0x80, 0x86, 0x84, 0x80, 0x82],
+            [0x80, 0x83, 0x80, 0x86, 0x87, 0x84, 0x82, 0x83],
             [0x80, 0x83, 0x80, 0x86, 0x87, 0x84, 0x82, 0x83],
         ],
     );
@@ -148,7 +147,6 @@ fn steady_line_boundaries() {
 #[test]
 fn stat_update_mode2_pulse_halt_mask_only_flag_on() {
     let mut p = dmg();
-    p.set_leading_edge_reads(true);
     p.write(0xFF41, 0x20); // OAM (mode-2) source only — no hblank/lyc
     p.write(0xFF40, 0x91); // LCD + BG on, bare line
     // Sit at the end of a visible line; its successor's dot-0 pulse is the
@@ -181,7 +179,6 @@ fn stat_update_mode2_pulse_halt_mask_only_flag_on() {
 #[test]
 fn stat_update_mode0_rise_takes_m0_rise_flag_on() {
     let mut p = dmg();
-    p.set_leading_edge_reads(true);
     p.write(0xFF41, 0x08); // HBlank (mode-0) source only
     p.write(0xFF40, 0x91); // LCD + BG on, bare line
     run_to(&mut p, 2, 0);

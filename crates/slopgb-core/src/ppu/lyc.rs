@@ -16,7 +16,7 @@ impl Ppu {
             // dots-0-3 value: DMG forces the coincidence flag invalid
             // there (None), CGB holds 0 (its readable flag = LY−1 = 0
             // across dots 0-3, so no change). Single-speed only (the DS
-            // read offset differs); gated `leading_edge_reads`, so flag-off
+            // read offset differs); gated `leading-edge`, so flag-off
             // production stays Some(0) the whole glitch line (byte-identical).
             // The −4 glitch readable-compare back-date is
             // LEADING-EDGE-ONLY. The Tier-2 deferred read samples at the
@@ -24,7 +24,7 @@ impl Ppu {
             // (no line-1-dots-0-3 forced-invalid view) — the −4 made
             // `lcdon_timing-GS`'s round-3 STAT read drop the LYC=0 coincidence
             // bit ($80 vs $84). Single speed only.
-            if self.leading_edge_reads && !self.ds && self.dot >= GLITCH_LINE_DOTS - 4 {
+            if !self.ds && self.dot >= GLITCH_LINE_DOTS - 4 {
                 return if self.model.is_cgb() { Some(0) } else { None };
             }
             // LCD enable: the comparison runs immediately with LY=0
@@ -58,13 +58,13 @@ impl Ppu {
     /// `L` at line-start dot 4 ([`Self::compare_ly`]), so a cc+0 line-start
     /// read must back-date the coincidence to the debt-shifted dot to match
     /// SameBoy's real cc+4 read (`lycint_lycflag`, `lycEnable` STAT bytes).
-    /// Byte-identical OFF (`eager_value` false → the live latched `self.cmp`);
+    /// Byte-identical OFF (`eager` false → the live latched `self.cmp`);
     /// tier2's deferred read already advances the PPU to cc+4 so it keeps
     /// `self.cmp`. CGB-only (the DMG readable flag drops at line starts, a
     /// different frame); glitch lines keep `self.cmp` (their own leading-edge
     /// back-date lives in [`Self::compare_ly`]).
     pub(super) fn read_cmp(&self) -> bool {
-        if self.eager_value && self.enabled && !self.glitch_line {
+        if self.enabled && !self.glitch_line {
             if self.model.is_cgb() {
                 let debt = if self.ds { 2 } else { 4 };
                 return self.compare_ly_shift(debt) == Some(self.lyc);
@@ -74,7 +74,7 @@ impl Ppu {
             // so shift that table by the +4-dot debt (DMG is single-speed). The
             // line wrap folds a 153→0 boundary read to the cc+4 line-0 Some(0)
             // (`ly0/lycint152_lyc0flag`/`lyc153flag`, `lycint_lycflag`).
-            // Byte-identical OFF (`eager_value` false → the latched `self.cmp`).
+            // Byte-identical OFF (`eager` false → the latched `self.cmp`).
             return self.compare_ly_irq_shift(4) == Some(self.lyc);
         }
         self.cmp
@@ -277,8 +277,7 @@ impl Ppu {
         // (the real-state discriminator, not the offset) fires; the gambatte
         // `target` table (pinning the base `lyc153_late_ff45_enable_{1,2}` cells)
         // is untouched. Byte-identical OFF.
-        let lyc_write_wrap_153 = self.leading_edge_reads
-            && ll == 153
+        let lyc_write_wrap_153 = ll == 153
             && self.ly_for_comparison_at(ll, ld) == i16::from(value)
             && !blocked
             && !lyc_level_high;
@@ -295,9 +294,7 @@ impl Ppu {
         // LYC=153 latch + the `lyc_write_wrap_153` wrap fire that SameBoy delivers
         // (`lyc153_late_ff45_enable_3` outE2) — suppressing there drops a real
         // edge. Byte-identical OFF.
-        let tier2_minus1_gap = self.leading_edge_reads
-            && (1..=143).contains(&ll)
-            && self.ly_for_comparison_at(ll, ld) == -1;
+        let tier2_minus1_gap = (1..=143).contains(&ll) && self.ly_for_comparison_at(ll, ld) == -1;
         // The FF45-write fire is suppressed under the tier2
         // engine when a NON-LYC source holds the line: SameBoy's
         // `GB_STAT_update` raises IF only on the line's 0→1 edge, and a line
@@ -318,8 +315,7 @@ impl Ppu {
             2 => self.stat_en & STAT_SRC_OAM,
             _ => 0,
         };
-        let engine_line_high =
-            self.leading_edge_reads && self.stat_update.line() && mode_src_en != 0;
+        let engine_line_high = self.stat_update.line() && mode_src_en != 0;
         let fire = !tier2_minus1_gap
             && !engine_line_high
             && self.stat_en & STAT_SRC_LYC != 0
@@ -331,7 +327,7 @@ impl Ppu {
         // the NEW match as a spurious rising edge. Re-latch silently at the
         // commit so the OLD-match → NEW-match transition has no intermediate
         // drop. Identity for unshifted ROMs (lcd_shift_dots == 0).
-        if self.leading_edge_reads && self.lcd_shift_dots > 0 && ld < 4 && self.dot >= 4 {
+        if self.lcd_shift_dots > 0 && ld < 4 && self.dot >= 4 {
             let lyfc = self.ly_for_comparison();
             if lyfc != -1 {
                 self.lyc_interrupt_line = lyfc == i16::from(value);
@@ -382,8 +378,7 @@ impl Ppu {
                 // disable (not any window write, which spuriously fires
                 // `lycEnable/lyc0_ff45_disable`). The window starts at dot 4
                 // (where this ROM's disable write commits on the DMG grid).
-                || (self.eager_value
-                    && self.line == 153
+                || (self.line == 153
                     && old == 153
                     && value != 153
                     && (4..=7).contains(&self.dot)));
@@ -426,7 +421,7 @@ impl Ppu {
         // VISIBLE branch, which fires it naturally on the LYC=0 match), while
         // `_2` (want no-fire) moves to dot 4 and would be spuriously un-blocked
         // here. So under eager the vblank branch fully blocks — no (0,4)
-        // exception (`lycwirq_trigger_ly00_stat50_2` want E0). `eager_value`-
+        // exception (`lycwirq_trigger_ly00_stat50_2` want E0). `eager`-
         // gated → byte-identical flag-off.
         let their_line = if self.dot < 8 { prev } else { self.line };
         let blocked = if self.glitch_line {
@@ -461,9 +456,8 @@ impl Ppu {
         // write lands the match at the dot-4 dip). Seed the engine line HIGH so
         // the match joins (STAT blocking), no fresh IF. `_3` (dot 8) lands in
         // the VISIBLE branch (`their_line == 0`), is not blocked, and fires its
-        // real edge. `eager_value`+DMG-scoped → byte-identical flag-off.
-        if self.eager_value
-            && !self.model.is_cgb()
+        // real edge. `eager`+DMG-scoped → byte-identical flag-off.
+        if !self.model.is_cgb()
             && blocked
             && their_line > 143
             && self.stat_en & STAT_SRC_LYC != 0

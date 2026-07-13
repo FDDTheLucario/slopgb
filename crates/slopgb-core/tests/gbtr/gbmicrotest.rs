@@ -200,7 +200,7 @@ fn gbmicrotest_dmg_matrix() {
 /// (`gambatte late_scx4_1`/`m2int_m3stat_1`, which read the same rphd 512 wanting
 /// mode 3) at `2*flip - 2`, so dropping the `+2` for the POLLED read
 /// (`!read_carried`) is the exact discriminator — NOT the uniform read-frame
-/// bias a prior sweep (`ARM8BIAS`) mistook for a weld. `eager_value` +
+/// bias a prior sweep (`ARM8BIAS`) mistook for a weld. `eager` +
 /// `!is_cgb` + polled scoped → production + tier2 byte-identical (this pin fails
 /// with the `+2` restored). SameBoy passes these on real DMG.
 #[test]
@@ -215,10 +215,9 @@ fn eager_dmg_sprite0_passes() {
     for name in ["ppu_sprite0_scx2_b", "ppu_sprite0_scx6_b"] {
         let rel = format!("gbmicrotest/{name}.gb");
         let rom = std::fs::read(root.join(&rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        // Coherent eager-value C3-flip (`new_with_eager`) — NOT a
-        // post-boot toggle. Same fixed-point protocol as `run_case`.
-        let mut gb = GameBoy::new_with_eager(Model::Dmg, rom)
-            .unwrap_or_else(|e| panic!("cartridge rejected: {e:?}"));
+        // Production eager clock. Same fixed-point protocol as `run_case`.
+        let mut gb =
+            GameBoy::new(Model::Dmg, rom).unwrap_or_else(|e| panic!("cartridge rejected: {e:?}"));
         let deadline = gb.cycles().saturating_add(DEADLINE_TCYCLES);
         harness::run_for_frames(&mut gb, 2);
         if gb.peek_no_io(0xFF82) == 0 {

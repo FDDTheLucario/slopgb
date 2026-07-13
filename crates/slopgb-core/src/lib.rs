@@ -126,8 +126,10 @@ pub const EXC_LCD_OFF_VBLANK: u16 = 1 << 3;
 const STATE_MAGIC: &[u8; 4] = b"SLPS";
 /// Save-state format version (bumped on any layout change). v3 dropped the
 /// APU output queues (`samples`/`raw_samples`) from the payload; v4 appends the
-/// SGB audio subsystem (SPC700 + S-DSP) on `Model::Sgb`/`Sgb2` states.
-const STATE_VERSION: u16 = 5;
+/// SGB audio subsystem (SPC700 + S-DSP) on `Model::Sgb`/`Sgb2` states; v6 dropped
+/// the retired eager-clock flags (`leading-edge`/`eager`) from the
+/// interconnect + PPU payloads.
+const STATE_VERSION: u16 = 6;
 
 /// A debugger memory watchpoint (bgb's "Set watchpoint"): the free run halts
 /// after the CPU accesses `addr` with a matching access kind. A frontend/
@@ -171,68 +173,17 @@ impl GameBoy {
     /// No boot ROM is executed: CPU registers, hardware registers and timers
     /// are initialised to the exact post-boot state of `model`.
     pub fn new(model: Model, rom: Vec<u8>) -> Result<Self, CartridgeError> {
-        Self::new_inner(model, rom, false)
-    }
-
-    /// Like [`Self::new`], but arms the **eager-value** reclock from the
-    /// construction default — mirroring the real C3 flip (flipping the
-    /// `interconnect.rs` struct-literal `eager_value`/`leading_edge_reads`
-    /// defaults to `true`). The runtime [`Self::set_eager_value`] toggle boots
-    /// on the production frame and enables afterwards; this drives the eager
-    /// default THROUGH construction, so the boot-time propagation path (the
-    /// deferred re-arm in [`Self::post_boot_inner`]) is exercised — the only
-    /// difference the C3 flip introduces. Compiled only under `cfg(test)` /
-    /// `--features flip_hooks`; the production build cannot arm it.
-    #[doc(hidden)]
-    #[cfg(any(test, feature = "flip_hooks"))]
-    pub fn new_with_eager(model: Model, rom: Vec<u8>) -> Result<Self, CartridgeError> {
-        Self::new_inner(model, rom, true)
-    }
-
-    fn new_inner(model: Model, rom: Vec<u8>, eager: bool) -> Result<Self, CartridgeError> {
         let cart = cartridge::Cartridge::from_bytes(rom)?;
-        Ok(Self::post_boot_inner(model, cart, eager))
+        Ok(Self::post_boot(model, cart))
     }
 
     /// The direct post-boot machine (no boot ROM executed): registers, hardware
     /// registers and timers installed at the model's post-boot state. The shared
     /// body of [`Self::new`] and the [`Self::new_with_boot`] wrong-size fallback.
     fn post_boot(model: Model, cart: cartridge::Cartridge) -> Self {
-        Self::post_boot_inner(model, cart, false)
-    }
-
-    /// The shared post-boot body of [`Self::new`] and [`Self::new_with_boot`].
-    fn post_boot_inner(model: Model, cart: cartridge::Cartridge, eager_default: bool) -> Self {
         let mut bus = interconnect::Interconnect::new(model, cart);
         let mut cpu = cpu::Cpu::new(model);
-        // `new_with_eager` (test / `flip_hooks` harness) simulates the flipped
-        // struct-literal default without touching the global default: arm the
-        // Interconnect's own eager fields, un-propagated, exactly as the raw
-        // flip leaves them. Always false in production (the real flip lands via
-        // the struct literal, making `bus.eager_value()` true directly below).
-        if eager_default {
-            bus.arm_eager_construction_default();
-        }
-        // Eager-value (the C3-flip default): flipping the `interconnect.rs`
-        // struct-literal `eager_value`/`leading_edge_reads` defaults sets only
-        // the Interconnect's own fields — it never runs the propagation that
-        // `set_eager_value`/`set_leading_edge_reads` do, so the PPU's copy of
-        // the flags (its `StatUpdate`/render engine) stays OFF: the machine
-        // runs eager reads against a non-eager PPU (incoherent → intr_2/lcdon
-        // B=42). Re-run the propagation AFTER `apply_post_boot_state`, exactly
-        // mirroring the runtime `set_eager_value` post-boot path (the only
-        // enable proven intr_2-safe, mooneye 91/91, and the frame every EV
-        // two-bin measurement rides). The suppress-then-re-arm resets the flag
-        // web (incl. the env probes) from a clean base. Byte-identical when
-        // the default is false (production).
-        let eager = bus.eager_value();
-        if eager {
-            bus.set_eager_value(false);
-        }
         bus.apply_post_boot_state();
-        if eager {
-            bus.set_eager_value(true);
-        }
         if bus.cgb_mode() {
             // CGB-flagged cart: the CGB/AGB boot ROM hands off DE=$FF56
             // HL=$000D instead of the DMG-cart values in the per-model
@@ -787,40 +738,6 @@ impl GameBoy {
     #[doc(hidden)]
     pub fn debug_undefined_hit(&self) -> bool {
         self.cpu.debug_undefined_hit()
-    }
-
-    /// Port validation hook — enable the SameBoy cycle-exact flag-on path
-    /// (leading-edge cc+0 reads + the `StatUpdate` engine + the `vis_early`
-    /// back-date + the A6 halt-late masks). Off in production until the staged
-    /// port flips the default (`docs/sameboy-port/PORT-PLAN.md`); the gbtr S0
-    /// kernel-pair acceptance spec drives it on to measure the convergence.
-    ///
-    /// Compiled only under `cfg(test)` / `--features flip_hooks` (see
-    /// [`Self::new_with_eager`]) — the production build cannot arm it.
-    #[doc(hidden)]
-    #[cfg(any(test, feature = "flip_hooks"))]
-    pub fn set_leading_edge_reads(&mut self, on: bool) {
-        self.bus.set_leading_edge_reads(on);
-    }
-
-    /// Port validation hook — enable the eager-value reclock (the eager clock +
-    /// read/render laws as cc+0 value peeks, dispatch staying cc+4).
-    /// Implies [`Self::set_leading_edge_reads`] → the DMG-count-safe
-    /// foundation. Off in production.
-    ///
-    /// Compiled only under `cfg(test)` / `--features flip_hooks` (see
-    /// [`Self::new_with_eager`]) — the production build cannot arm it.
-    #[doc(hidden)]
-    #[cfg(any(test, feature = "flip_hooks"))]
-    pub fn set_eager_value(&mut self, on: bool) {
-        self.bus.set_eager_value(on);
-    }
-
-    /// The `leading_edge_reads` construction flag. Read-only introspection for
-    /// the golden-safe guard test only.
-    #[cfg(test)]
-    pub(crate) fn reclock_flags(&self) -> bool {
-        self.bus.reclock_flags()
     }
 
     /// Drain the raw audio tap: one stereo sample per dot, taken straight

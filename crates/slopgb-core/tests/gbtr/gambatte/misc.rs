@@ -16,14 +16,11 @@ use super::*;
 /// exactly the `O<E ∧ O≥E` "contradiction" that only the decoupled-edge
 /// rewrite resolves.
 ///
-/// The spec runs on the **flag-on** SameBoy cycle-exact path
-/// ([`GameBoy::set_leading_edge_reads`] — leading-edge cc+0 reads + the
-/// `StatUpdate` engine + the `vis_early` back-date + the halt-late masks). With
-/// those four pieces the kernel pair SEPARATES (`m2int`→3 ∧ `m0int`→0) on both
-/// models while the canonical mooneye `intr_2_mode0_timing` also holds flag-on.
-/// This is GREEN as a flag-on acceptance test; production (flag-off) is
-/// unchanged — the global default flip + ~7000-row rebaseline is the remaining
-/// work.
+/// The spec runs on the production SameBoy cycle-exact eager path (leading-edge
+/// cc+0 reads + the `StatUpdate` engine + the `vis_early` back-date + the
+/// halt-late masks). With those four pieces the kernel pair SEPARATES
+/// (`m2int`→3 ∧ `m0int`→0) on both models while the canonical mooneye
+/// `intr_2_mode0_timing` also holds.
 #[test]
 fn kernel_pair_matches_sameboy_target() {
     let Some(root) = common::gbtr_root() else {
@@ -47,11 +44,9 @@ fn kernel_pair_matches_sameboy_target() {
         let path = root.join(rel);
         let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
         for model in [Model::Dmg, Model::Cgb] {
-            // Run the SameBoy cycle-exact flag-on path (the convergence the
-            // whole-dot production model cannot represent); same 16-frame
-            // protocol + OCR as `run_case`'s `Check::Hex` arm.
+            // The SameBoy cycle-exact eager path is the production default;
+            // same 16-frame protocol + OCR as `run_case`'s `Check::Hex` arm.
             let mut gb = harness::boot(&rom, model);
-            gb.set_leading_edge_reads(true);
             run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
             check_hex_screen(gb.frame(), expect, model.is_cgb()).unwrap_or_else(|e| {
                 panic!("{rel} [{model:?}] expected out{expect} (flag-on): {e}")
@@ -72,7 +67,7 @@ fn kernel_pair_matches_sameboy_target() {
 ///
 /// `ifandie_ei_halt_sra` is the row that exercises it: `EI; HALT` with
 /// `IE & IF` already set, so the entry view must rewind. Hardware behaviour,
-/// not a clock artifact — hence it fires under `eager_value`. Production
+/// not a clock artifact — hence it fires under `eager`. Production
 /// (flag off) keeps the halted+wake shape and stays byte-identical.
 #[test]
 fn eager_halt_entry_rewind_passes() {
@@ -87,7 +82,7 @@ fn eager_halt_entry_rewind_passes() {
     let path = root.join(rel);
     let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
     for model in [Model::Dmg, Model::Cgb] {
-        let mut gb = harness::boot_eager(&rom, model);
+        let mut gb = harness::boot(&rom, model);
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), "0A", model.is_cgb())
             .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected out0A (eager): {e}"));
@@ -151,7 +146,7 @@ fn eager_halt_entry_m0_peek_passes_dmg() {
     ];
     for (rel, expect) in rows {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        let mut gb = harness::boot_eager(&rom, Model::Dmg);
+        let mut gb = harness::boot(&rom, Model::Dmg);
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), expect, false)
             .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (eager): {e}"));
@@ -164,11 +159,11 @@ fn eager_halt_entry_m0_peek_passes_dmg() {
 /// line-start FF41 read straddling the mode-2→3 boundary saw the un-shifted
 /// dot-84 entry as mode 2 where SameBoy's cc+4 view reads mode 3. The DS entry
 /// back-dates to 80 (as single speed) so the peek lands on mode 3
-/// (`Ppu::mode3_entry_dot`, `eager_value && ds`-scoped). EV CGB two-bin
+/// (`Ppu::mode3_entry_dot`, `eager && ds`-scoped). EV CGB two-bin
 /// 353 → 348 (clean +5/−0; 4 SameBoy-pass bar + 1 lcd_offset gambatte-want
 /// gain). The `_1` siblings (want 2) are the regression guards — they read
 /// earlier and must stay mode 2. Tier2's deferred DS frame keeps 84;
-/// `eager_value` off → byte-identical.
+/// `eager` off → byte-identical.
 #[test]
 fn eager_ds_mode3_entry_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -208,7 +203,7 @@ fn eager_ds_mode3_entry_passes() {
     ];
     for (rel, expect) in rows {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        let mut gb = harness::boot_eager(&rom, Model::Cgb);
+        let mut gb = harness::boot(&rom, Model::Cgb);
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), expect, true)
             .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (eager): {e}"));
@@ -269,7 +264,7 @@ fn eager_ff0f_read_peek_passes() {
     ];
     for (rel, expect, model) in rows {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        let mut gb = harness::boot_eager(&rom, model);
+        let mut gb = harness::boot(&rom, model);
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), expect, model.is_cgb())
             .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected out{expect} (eager): {e}"));

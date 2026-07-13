@@ -17,7 +17,7 @@
 //! enable bits and the LYC match — exactly the inputs SameBoy reads — so the
 //! swap is "drive this from the decoupled mode each dot and OR its return
 //! into IF" rather than a from-scratch rewrite. It drives the STAT line on the
-//! flag-on (`leading_edge_reads`) path; production keeps that flag off, so it
+//! flag-on (`leading-edge`) path; production keeps that flag off, so it
 //! changes nothing there.
 
 /// `mode_for_interrupt == -1`: the deliberate "no mode source" state SameBoy

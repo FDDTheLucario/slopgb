@@ -64,15 +64,6 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    // Thesis hooks (port Stage B): SLOPGB_EAGER=1 enables the eager-value clock
-    // (the production default); SLOPGB_LE=1 enables leading-edge only.
-    if std::env::var("SLOPGB_EAGER").is_ok() {
-        // Eager-value clock (dispatch cc+4 + cc+0 value peeks); honours
-        // SLOPGB_COHERENT_DISP inside `set_eager_value`.
-        gb.set_eager_value(true);
-    } else if std::env::var("SLOPGB_LE").is_ok() {
-        gb.set_leading_edge_reads(true);
-    }
     // gbmicrotest verdict mode (port-validation tooling): run ~0.7 emulated s
     // then print $FF80/$FF81/$FF82 ($FF82==0x01 is PASS). Lets the Stage-B
     // flag-on (SLOPGB_TIER2) reclock be measured against gbmicrotest's cc+4

@@ -425,7 +425,7 @@ fn age_eager_cgb_m3_bg_bgp_writecommit_passes() {
     }
     let rom =
         std::fs::read(&rom_path).unwrap_or_else(|e| panic!("read {}: {e}", rom_path.display()));
-    let mut gb = harness::boot_eager(&rom, Model::Cgb);
+    let mut gb = harness::boot(&rom, Model::Cgb);
     harness::run_until_breakpoint(&mut gb, common::TIMEOUT_TCYCLES)
         .unwrap_or_else(|e| panic!("m3-bg-bgp [Cgb] eager: {e}"));
     harness::run_for_frames(&mut gb, 1);

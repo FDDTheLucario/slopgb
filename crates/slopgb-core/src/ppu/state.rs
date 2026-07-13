@@ -3,10 +3,10 @@
 //! RAM, the STAT/LYC event ladder, and the sub-dot fetch/FIFO pipeline (`eff`,
 //! `staged`, `render`). `model` is ROM-derived (not serialized — a state loads
 //! into a same-model machine). Every other field of the live struct is
-//! serialized, including the now-inert clock-flag scratch (`leading_edge_reads`,
-//! `eng_*`, `m0sh_*`, ...): the production/default-off path keeps them at their
-//! initial 0/false, so serializing them is harmless and guarantees no live
-//! field is silently dropped from a future round-trip.
+//! serialized, including the now-inert scratch (`eng_*`, `m0sh_*`, ...):
+//! production keeps them at their initial 0/false, so serializing them is
+//! harmless and guarantees no live field is silently dropped from a future
+//! round-trip.
 //! Live-debugger/UI only, so golden-safe.
 
 use super::*;
@@ -216,8 +216,6 @@ impl Ppu {
         w.bool(self.mfi_m0_prev);
         self.stat_update.write_state(w);
         w.bool(self.lyc_interrupt_line);
-        w.bool(self.leading_edge_reads);
-        w.bool(self.eager_value);
         w.bool(self.m0_rise);
         write_opt_i8(w, self.m0_access_flip);
         write_opt_i8(w, self.pal_access_flip);
@@ -352,8 +350,6 @@ impl Ppu {
         self.mfi_m0_prev = r.bool()?;
         self.stat_update.read_state(r)?;
         self.lyc_interrupt_line = r.bool()?;
-        self.leading_edge_reads = r.bool()?;
-        self.eager_value = r.bool()?;
         self.m0_rise = r.bool()?;
         self.m0_access_flip = read_opt_i8(r)?;
         self.pal_access_flip = read_opt_i8(r)?;

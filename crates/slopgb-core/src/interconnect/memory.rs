@@ -3,18 +3,17 @@
 use super::*;
 
 impl Interconnect {
-    /// Eager-value double-speed accessibility bypass. Under `eager_value` the
+    /// Eager-value double-speed accessibility bypass. Under the eager clock the
     /// production `m0_access_edge`/`pal_access_edge` whole-M-cycle stamp is
     /// mis-framed at double speed (the eager mode-0 flip lands at the
     /// reclocked render dot, not the production one), so a DS OAM/VRAM/palette
     /// read resolves against a stale straddle stamp. Route DS accessibility
     /// through the ported `Ppu::{oam,vram,pal}_*_blocked` laws instead — the
     /// same bypass the eager clock takes (the ported laws carry the DS
-    /// line-end / entry / palette-pipe boundaries, `eager_value`-gated).
-    /// Single speed keeps the stamp (it passes under eager); production never
-    /// sets `eager_value` → byte-identical.
+    /// line-end / entry / palette-pipe boundaries). Single speed keeps the
+    /// stamp (it passes under eager).
     fn ev_ds_access(&self) -> bool {
-        self.eager_value && self.double_speed
+        self.double_speed
     }
 
     pub(super) fn wram_index(&self, addr: u16) -> usize {
@@ -382,26 +381,10 @@ impl Interconnect {
             // BCPS/OCPS stay readable in DMG-compat mode (boot_hwio-C reads
             // the boot leftovers $C8/$D0); the data ports do not.
             0xFF68 | 0xFF6A => self.ppu.read(addr),
-            // cc+2 MID-phase CGB palette read: the pipe-end unblock commits at
-            // the M-cycle end (whole-M-cycle block, see `pal_access_edge` /
-            // [`event_phase`]), so the read stays $FF for the entire straddle
-            // M-cycle and becomes readable only next M-cycle (sub-dot
-            // event-phase model). tier2 AND the eager clock BYPASS the stamp
-            // (`!self.eager_value` covers both speeds — SS eager `_2` reads
-            // `cgbpal_m3end_scx{2,3,5}_2` land past the pipe end where the whole-
-            // M-cycle stamp still blocks, and the DS `ev_ds_access` cases are a
-            // subset of `eager_value`): the reclocked (cc+0) read is resolved to
-            // its exact half-dot BEFORE sampling, so the straddle-M-cycle
-            // approximation would re-block a read landing legitimately past the
-            // unblock; the reclocked frame's trailing unblock lives in
-            // `Ppu::pal_ram_blocked` instead (`pal_open_dot` + 1 dot SS / + 0 DS).
-            0xFF69 | 0xFF6B
-                if self.cgb_mode
-                    && !self.eager_value
-                    && stamp_blocks(self.pal_access_edge, ACCESS_PHASE) =>
-            {
-                0xFF
-            }
+            // The eager clock resolves the reclocked (cc+0) palette read to its
+            // exact half-dot before sampling; the whole-M-cycle straddle stamp
+            // is bypassed and the trailing unblock lives in `Ppu::pal_ram_blocked`
+            // instead (`pal_open_dot` + 1 dot SS / + 0 DS).
             0xFF69 | 0xFF6B if self.cgb_mode => self.ppu.read(addr),
             0xFF6C => self.ppu.read(addr),
             0xFF70 if self.cgb_mode => 0xF8 | self.svbk,

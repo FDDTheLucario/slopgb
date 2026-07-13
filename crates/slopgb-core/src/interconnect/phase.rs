@@ -32,22 +32,6 @@ pub(super) fn edge_eighth(i: u64, dots: u64) -> u8 {
     ((i + 1) * 8 / dots) as u8
 }
 
-/// Whether a whole PPU dot ticks on cc `cc` (1..=4) of an M-cycle, at the
-/// given speed and CPU↔PPU `dot_phase`. The cc-granular successor to the fixed
-/// `for i in 0..dots` dot loop: single speed ticks one dot per cc (4 dots per
-/// M-cycle, phase-independent — 1 cc = 1 dot); double speed ticks one dot per
-/// 2 cc (2 dots per M-cycle). In double speed `phase`=0 ticks on the even cc
-/// {2,4} — the alignment the old loop baked in — and `phase`=1 on the odd cc
-/// {1,3}, the half-dot (1 cc) offset a STOP speed switch can establish because
-/// the LCD dot clock runs on continuously across the switch while the CPU's
-/// M-cycle grid is re-paced. Phase 0 is bit-identical to the dot loop
-/// (`cc_grid_matches_dot_loop`).
-#[inline]
-pub(super) fn dot_ticks_on_cc(cc: u8, ds: bool, phase: u8) -> bool {
-    debug_assert!((1..=4).contains(&cc), "cc must be 1..=4, got {cc}");
-    !ds || cc % 2 == phase % 2
-}
-
 /// The commit eighth (of 8 per M-cycle) of an event on the dot that ticks at
 /// cc `cc` (1..=4). The cc grid IS the single-speed dot grid — cc is the
 /// single-speed dot index + 1 — so the eighth is the single-speed dot-END

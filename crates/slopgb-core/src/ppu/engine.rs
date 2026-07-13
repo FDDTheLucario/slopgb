@@ -61,8 +61,6 @@ impl Ppu {
             mfi_m0_prev: false,
             stat_update: crate::stat_update::StatUpdate::new(),
             lyc_interrupt_line: false,
-            leading_edge_reads: false,
-            eager_value: false,
             m0_rise: false,
             m0_access_flip: None,
             pal_access_flip: None,
@@ -224,17 +222,10 @@ impl Ppu {
         // consulted; the STAT engine that reads it runs on the flag-on path).
         // Runs after step_dot so it sees this dot's `line_render_done` flip.
         self.update_mode_for_interrupt();
-        if self.leading_edge_reads {
-            // Flag-on path: the SameBoy `GB_STAT_update` rising-edge engine
-            // off the decoupled `mode_for_interrupt` + the LYC latch.
-            self.stat_update_tick();
-        } else {
-            // Production path: the gambatte-derived per-source event engine.
-            self.stat_events_tick();
-        }
-        // Age the dispatch-ack squash window (armed only on
-        // the tier2 path; a saturating decrement of an always-0 counter is
-        // byte-identical flag-off).
+        // The SameBoy `GB_STAT_update` rising-edge engine off the decoupled
+        // `mode_for_interrupt` + the LYC latch.
+        self.stat_update_tick();
+        // Age the dispatch-ack squash window.
         self.ack_squash_ppu = self.ack_squash_ppu.saturating_sub(1);
         self.ly0_pulse_age = self.ly0_pulse_age.saturating_sub(1);
         self.m0sh_age = self.m0sh_age.saturating_sub(1);
@@ -254,22 +245,18 @@ impl Ppu {
     pub(crate) fn tick_half(&mut self) -> u8 {
         if self.dhalf == 0 {
             self.dhalf = 1;
-            // HALFDOT Part A-render (eager): advance the write STROBE on the
-            // non-completing half too, so a staged mid-mode-3 register commit
-            // lands at its true HALF-dot instead of only whole-dot boundaries.
-            // `stage_write` doubles `dots_left` under `eager_value` (the ×2
-            // grid conversion), so a run of aligned half-dots still commits at
-            // the same whole dot (byte-identical on the aligned grid); the seam
-            // is the per-register SameBoy half-dot offset. Tier2 keeps the
-            // whole-dot strobe (this half is inert with `eager_value` false).
-            if self.eager_value {
-                self.strobe_tick();
-                // HALFDOT: the odd-half STAT-engine level re-eval, so a
-                // coincident FF41 write-commit / LYC re-latch / mode-0 rise
-                // resolves at its true sub-dot phase. Idempotent on the aligned
-                // grid → byte-identical (see `stat_update_half`).
-                self.stat_update_half();
-            }
+            // Advance the write STROBE on the non-completing half too, so a
+            // staged mid-mode-3 register commit lands at its true HALF-dot
+            // instead of only whole-dot boundaries. `stage_write` doubles
+            // `dots_left` (the ×2 grid conversion), so a run of aligned
+            // half-dots still commits at the same whole dot; the seam is the
+            // per-register SameBoy half-dot offset.
+            self.strobe_tick();
+            // The odd-half STAT-engine level re-eval, so a coincident FF41
+            // write-commit / LYC re-latch / mode-0 rise resolves at its true
+            // sub-dot phase. Idempotent on the aligned grid (see
+            // `stat_update_half`).
+            self.stat_update_half();
             return 0;
         }
         self.dhalf = 0;
@@ -316,16 +303,11 @@ impl Ppu {
         // speeds (measured: SS coupling CGB two-bin 578→553, DS debt 553→525).
         // The residual DS sub-dot (`sb_dsa8` mid-dot / `read_carried` ISR carry)
         // is not reconstructed on the eager whole-dot clock, so a handful of DS
-        // pre-draw-abort / STOP-shift legs stay parked. Never fires flag-off
-        // (`eager_value` false) → production byte-identical.
-        base + if self.eager_value {
-            if self.ds {
-                EAGER_READ_DEBT_HD_DS
-            } else {
-                EAGER_READ_DEBT_HD_SS
-            }
+        // pre-draw-abort / STOP-shift legs stay parked.
+        base + if self.ds {
+            EAGER_READ_DEBT_HD_DS
         } else {
-            0
+            EAGER_READ_DEBT_HD_SS
         }
     }
 
@@ -408,21 +390,6 @@ impl Ppu {
         }
     }
 
-    /// Forward the interconnect's `leading_edge_reads` master flag to the PPU,
-    /// selecting the [`StatUpdate`](crate::stat_update) engine. Off in
-    /// production until the atomic flip (which flips the default in `new`, not
-    /// via this hook); driven by [`Interconnect::set_leading_edge_reads`] (the
-    /// unit tests + the kernel-pair acceptance spec).
-    pub(crate) fn set_leading_edge_reads(&mut self, on: bool) {
-        self.leading_edge_reads = on;
-    }
-
-    /// Forward the interconnect's `eager_value` flag. Implies
-    /// `leading_edge_reads` (set on the same hook).
-    pub(crate) fn set_eager_value(&mut self, on: bool) {
-        self.eager_value = on;
-    }
-
     fn step_dot(&mut self) {
         // CGB: the line-start LYC event's delayed FF45 copy catches up
         // outside the 4-dot lead-in of each event — dot 4, and 153:12
@@ -448,39 +415,32 @@ impl Ppu {
             // visible.
             self.m0_src = false;
         }
-        // Shadow WY-trigger (tier2-only; byte-identical OFF).
-        // SameBoy's `wy_triggered` is a continuous `WY == LY` latch, sticky for
-        // the frame; reset it at the frame top (line 0 dot 0) and set it the
-        // first dot the compare holds on any visible line. See `wy_trig_sb`.
-        // Recording widened to DMG (was CGB-only) for the DMG window
-        // law port — the DMG arms in `read_laws.rs` read the same latches.
-        if self.eager_value {
-            if self.line == 0 && self.dot == 0 {
-                self.wy_trig_sb = false;
-                self.wy_trig_sb_raw = false;
-                self.wy_xline_trig = false;
-            }
-            // The raw-WY sticky latch (immediate `self.wy`, SameBoy's
-            // `wy_check` input), the un-trigger discriminator. Gated `dot >= 4`
-            // (the mode-2 OAM-scan compare window SameBoy runs `wy_check` in):
-            // a line-start (dot 0) WY write commits AFTER slopgb's dot-0 PPU tick
-            // (the tick runs before `write_no_tick`), so a dot-0 compare would
-            // read the OLD WY and mis-latch; `dot >= 4` samples the settled WY,
-            // matching SameBoy's post-write compare (`late_wy_1toFF_1` WY→FF at
-            // dot 0 → WY=FF by dot 4 → never latches → SameBoy-bare).
-            if self.line < 144
-                && self.dot >= 4
-                && !self.wy_trig_sb_raw
-                && win_en
-                && self.wy == self.ly
-            {
-                self.wy_trig_sb_raw = true;
-            }
-            if self.line < 144 && !self.wy_trig_sb && win_en && self.wy2 == self.ly {
-                self.wy_trig_sb = true;
-                self.wy_trig_sb_line = self.ly;
-                self.wy_trig_sb_dot = self.dot;
-            }
+        // Shadow WY-trigger. SameBoy's `wy_triggered` is a continuous
+        // `WY == LY` latch, sticky for the frame; reset it at the frame top
+        // (line 0 dot 0) and set it the first dot the compare holds on any
+        // visible line. See `wy_trig_sb`. Both models: the arms in
+        // `read_laws.rs` read the same latches.
+        if self.line == 0 && self.dot == 0 {
+            self.wy_trig_sb = false;
+            self.wy_trig_sb_raw = false;
+            self.wy_xline_trig = false;
+        }
+        // The raw-WY sticky latch (immediate `self.wy`, SameBoy's
+        // `wy_check` input), the un-trigger discriminator. Gated `dot >= 4`
+        // (the mode-2 OAM-scan compare window SameBoy runs `wy_check` in):
+        // a line-start (dot 0) WY write commits AFTER slopgb's dot-0 PPU tick
+        // (the tick runs before `write_no_tick`), so a dot-0 compare would
+        // read the OLD WY and mis-latch; `dot >= 4` samples the settled WY,
+        // matching SameBoy's post-write compare (`late_wy_1toFF_1` WY→FF at
+        // dot 0 → WY=FF by dot 4 → never latches → SameBoy-bare).
+        if self.line < 144 && self.dot >= 4 && !self.wy_trig_sb_raw && win_en && self.wy == self.ly
+        {
+            self.wy_trig_sb_raw = true;
+        }
+        if self.line < 144 && !self.wy_trig_sb && win_en && self.wy2 == self.ly {
+            self.wy_trig_sb = true;
+            self.wy_trig_sb_line = self.ly;
+            self.wy_trig_sb_dot = self.dot;
         }
         if self.line == 0 && self.dot == 2 {
             // Line 0: assignment, not OR — this is the frame reset

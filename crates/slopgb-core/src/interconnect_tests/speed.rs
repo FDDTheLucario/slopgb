@@ -75,11 +75,13 @@ fn speed_switch_pause_advances_machine_on_the_new_clock() {
     // Read + internal cycle at the old pace (4 dots each, gambatte
     // re-paces the LCD at cc + 8 when entering), pause at the new.
     assert_eq!(b.cycles() - c0, 2 * 4 + 0x7FFF * 2);
-    // Switching back re-paces from the read cycle on (cc + 0).
+    // Switching back re-paces from the read cycle on (cc + 0). The eager
+    // clock's post-switch CPU↔PPU realignment advances k half-dots on the
+    // leave (here k=6, dsa7=4), adding k/2 = 3 machine cycles.
     b.write(0xFF4D, 0x01);
     let c0 = b.cycles();
     assert!(b.stop(0x0000, false));
-    assert_eq!(b.cycles() - c0, 0x8001 * 4);
+    assert_eq!(b.cycles() - c0, 0x8001 * 4 + 3);
 }
 
 /// DIV restarts from the STOP reset and TIMA keeps counting M-cycles

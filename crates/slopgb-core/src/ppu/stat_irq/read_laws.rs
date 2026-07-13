@@ -5,7 +5,7 @@
 //! window-extend predicate. Second `impl Ppu` block split out of
 //! `stat_irq.rs` for the CLAUDE.md <1000-line cap (like `reclock.rs`);
 //! verdict-only laws — the counter-pinned IRQ dispatch lives in the parent
-//! and `reclock.rs`. Production (`eager_value` off) returns the native
+//! and `reclock.rs`. Production (`eager` off) returns the native
 //! [`Ppu::vis_mode`] untouched.
 
 use super::*;
@@ -25,7 +25,7 @@ impl Ppu {
     /// (and during 144:0-3), and mode 3 appears 4 dots after VRAM read
     /// locking (`lcdon_timing-GS` tables).
     ///
-    /// **The law collapse:** under `eager_value` the FF41 read's
+    /// **The law collapse:** under `eager` the FF41 read's
     /// mode-3→0 verdict is ONE comparison — the read's exact half-dot position
     /// ([`Ppu::read_pos_hd`]) against the per-config CPU-visible mode-3 exit
     /// ([`Ppu::vis_exit_hd`]) — replacing the seven accreted shadow laws
@@ -34,17 +34,13 @@ impl Ppu {
     /// the counter-pinned IRQ dispatch (`line_render_done` /
     /// `mode_for_interrupt`), which never moves (SameBoy `GB_STAT_update`
     /// two-latch model, display.c:523-574). Production is byte-identical
-    /// (`eager_value` off → native [`Self::vis_mode`]).
+    /// (`eager` off → native [`Self::vis_mode`]).
     pub(super) fn vis_mode_read(&self) -> u8 {
         let m = self.vis_mode();
         // Under the eager clock the read-law web is enabled at BOTH speeds: the
         // DS read-debt is +4 hd (the DS M-cycle is 2 dots, half the SS 4), so
         // `read_pos_hd` lands the eager DS read at the DS position the
-        // `vis_exit_hd` `ds1`/DS arms are calibrated to. Native `vis_mode`
-        // returned only in production (`eager_value` off).
-        if !self.eager_value {
-            return m;
-        }
+        // `vis_exit_hd` `ds1`/DS arms are calibrated to.
         // The DS mode-2 ISR line-start read probes the mode0→2
         // (HBlank→OAM) LINE-START boundary, not the mode-3 exit: slopgb's
         // native flip lags SameBoy's, which flips at 8 MHz pos 4 = dot 2 (the
@@ -118,10 +114,9 @@ impl Ppu {
         // = the flip). Both want mode 3 (the shifted flip is a half-dot past the
         // whole-dot sample). Without this the bare arm-8 exit (2·256 = 512) drops
         // the raw mode 3 → 0. Exact (mirrors the `dot == flip_dot` arm above, and
-        // the DMG coincident mask); `eager_value` + shifted + not-yet-flipped
+        // the DMG coincident mask); `eager` + shifted + not-yet-flipped
         // render scoped → tier2 (its poll flipped) + production byte-identical.
-        if self.eager_value
-            && self.lcd_shift_dots != 0
+        if self.lcd_shift_dots != 0
             && self.model.is_cgb()
             && self.line < 144
             && !self.read_carried
@@ -157,10 +152,9 @@ impl Ppu {
         // the whole `[0,4)` window; DS separates the `_ds_1`/`_ds_2` pair —
         // `_1` reads dots 0-1 (shift+2 < 4, stays mode 0), `_2` reads dots 2-3
         // (shift+2 ≥ 4 → mode 2). Tier2's `read_deferred` already advances
-        // `self.dot` to cc+4, reading mode 2 natively → `eager_value`-only (no
+        // `self.dot` to cc+4, reading mode 2 natively → `eager`-only (no
         // double-shift). Never fires flag-off → byte-identical.
-        if self.eager_value
-            && self.model.is_cgb()
+        if self.model.is_cgb()
             && self.line >= 1
             && self.line < 144
             && !self.glitch_line
@@ -179,10 +173,9 @@ impl Ppu {
         // (DS) debt the visible-line arm above takes. SameBoy reads mode 1 at
         // the VBlank boundary (`enable_display/*_m1stat`, `lcd_offset/
         // *_m1stat` — want the VBlank bit set). Never fires flag-off
-        // (`eager_value` false) → byte-identical; CGB-scoped (DMG's VBlank-entry
+        // (`eager` false) → byte-identical; CGB-scoped (DMG's VBlank-entry
         // frame is a separate calibration).
-        if self.eager_value
-            && self.model.is_cgb()
+        if self.model.is_cgb()
             && self.line == 144
             && m == 0
             && self.dot + if self.ds { 2 } else { 4 } >= 4
@@ -197,8 +190,7 @@ impl Ppu {
         // mode 2 with the same +4 (SS) / +2 (DS) debt the other line-boundary
         // arms take — the VBlank→OAM mirror of the visible→VBlank line-144 arm
         // (`ly0/lycint152_ly0stat`). Never fires flag-off → byte-identical.
-        if self.eager_value
-            && self.model.is_cgb()
+        if self.model.is_cgb()
             && self.line == 0
             && m == 1
             && self.dot < 4
@@ -213,7 +205,7 @@ impl Ppu {
         // `m == 0` (not the CGB `m == 1`) and the 153→0 wrap flips mode 1→0 (a
         // CGB line-0 read stays mode 1 across the wrap, no arm). `dot < 4`
         // confines the OAM-entry arms to the line START so a real mode-0 HBlank
-        // read (dots ≥ exit) is untouched. `eager_value`-only → tier2 +
+        // read (dots ≥ exit) is untouched. `eager`-only → tier2 +
         // production byte-identical. `!glitch_line`: LCD-enable line self-dates.
         // The line-0 OAM-entry arm (m0→2) gates on `!line_render_done`: a fresh
         // line-0 with a PENDING OAM scan (`lrd=0`) back-dates to cc+4 OAM mode 2
@@ -222,7 +214,7 @@ impl Ppu {
         // (mode 0) — the discriminator the prior "HALFDOT floor" lacked; sibling
         // `ly0stat_2` (want 0) verdicts on its earlier eager LY=153 read. Pin
         // `tier2_eager_dmg_ly0_oam_entry_passes`.
-        if self.eager_value && !self.model.is_cgb() && !self.glitch_line {
+        if !self.model.is_cgb() && !self.glitch_line {
             if (1..144).contains(&self.line) && m == 0 && self.dot < 4 {
                 return 2; // line-start OAM entry (cc+4 = OAM scan)
             }
@@ -250,7 +242,7 @@ impl Ppu {
         // length arm fires; the `m == 0` HOLD arms (arm 2/7 boundary-WY, arm D6)
         // already returned Some on the native-mode call, so they are untouched.
         // Mode-3 regime (past entry, render active-or-just-flipped) on a visible
-        // non-glitch line; `eager_value` off (production + tier2) → never reached
+        // non-glitch line; `eager` off (production + tier2) → never reached
         // (byte-identical). Does NOT touch the counter-pinned dispatch or the
         // `read_pos_hd` value — verdict-only. This subsumes the native-mode
         // fallback for the off-arm window ISR reads (+2 EV CGB, 0 drops); the
@@ -259,8 +251,7 @@ impl Ppu {
         // `scx_m3_extend`), so a dispatch move that straddles that gap is NOT
         // held — that residual needs the half-dot render FSM.
         let exit = self.vis_exit_hd(m).or_else(|| {
-            if self.eager_value
-                && m == 0
+            if m == 0
                 && self.line >= 1
                 && self.line < 144
                 && !self.glitch_line

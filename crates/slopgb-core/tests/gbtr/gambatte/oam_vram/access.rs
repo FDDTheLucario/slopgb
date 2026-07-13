@@ -37,22 +37,20 @@ fn sprite_kernel_pair_matches_sameboy_target() {
         let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
         for model in [Model::Dmg, Model::Cgb] {
             let mut gb = harness::boot(&rom, model);
-            gb.set_leading_edge_reads(true);
             run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
-            check_hex_screen(gb.frame(), expect, model.is_cgb()).unwrap_or_else(|e| {
-                panic!("{rel} [{model:?}] expected out{expect} (flag-on): {e}")
-            });
+            check_hex_screen(gb.frame(), expect, model.is_cgb())
+                .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected out{expect}: {e}"));
         }
     }
 }
 
 /// CGB DOUBLE-SPEED accessibility RE-HOSTED onto the eager clock (L1).
-/// Under `eager_value` the OAM/VRAM/palette read still resolved against the
+/// Under `eager` the OAM/VRAM/palette read still resolved against the
 /// production `m0_access_edge`/`pal_access_edge` whole-M-cycle straddle stamp,
 /// which is mis-framed at double speed (the eager mode-0 flip lands at the
 /// reclocked render dot). The DS line-end read releases (`254 + SCX&7`), the
 /// OAM-write release, and the palette-pipe-end unblock all already live in the
-/// ported `Ppu::{oam,vram,pal}_*_blocked` laws (`|| eager_value`-gated); the
+/// ported `Ppu::{oam,vram,pal}_*_blocked` laws (`|| eager`-gated); the
 /// fix routes eager DS accessibility through them by taking the same stamp
 /// bypass the eager clock already takes (`Interconnect::ev_ds_access`,
 /// `interconnect/memory.rs`). EV CGB two-bin 358 → 353 (clean +5/−0). Single
@@ -103,7 +101,7 @@ fn eager_ds_access_passes() {
     ];
     for (rel, expect) in targets {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        let mut gb = harness::boot_eager(&rom, Model::Cgb);
+        let mut gb = harness::boot(&rom, Model::Cgb);
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), expect, true)
             .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (eager): {e}"));
@@ -117,9 +115,9 @@ fn eager_ds_access_passes() {
 /// * **Palette** — the CGB `pal_access_edge` stamp is a WHOLE-M-cycle block that
 ///   `access_lead` does not disarm; SS eager kept it while `tier2`/DS bypass it,
 ///   re-blocking `cgbpal_m3end_scx{2,3,5}_2` reads that land past the pipe end
-///   where `Ppu::pal_ram_blocked` (already `|| eager_value`-gated) reads open.
+///   where `Ppu::pal_ram_blocked` (already `|| eager`-gated) reads open.
 ///   Fix: extend the `interconnect/memory.rs` FF69/FF6B bypass to all
-///   `eager_value` (`!self.eager_value` supersedes `!self.ev_ds_access()`).
+///   `eager` (`!self.eager` supersedes `!self.ev_ds_access()`).
 /// * **STOP-shift** — `Ppu::vram_read_blocked`'s law position used the raw
 ///   `self.dot` under eager, not the `law_pos()` STOP-shift frame `tier2` and
 ///   `pal_ram_blocked` already take, so `preread_lcdoffset1_1`'s law-dot82 read
@@ -179,7 +177,7 @@ fn eager_ss_access_passes() {
     ];
     for (rel, expect) in targets {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        let mut gb = harness::boot_eager(&rom, Model::Cgb);
+        let mut gb = harness::boot(&rom, Model::Cgb);
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), expect, true)
             .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (eager): {e}"));

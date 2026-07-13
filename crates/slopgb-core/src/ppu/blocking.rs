@@ -60,11 +60,10 @@ impl Ppu {
     /// blocked), `postwrite_2_scx3` (write lands) vs `postwrite_1` (rphd 512 <
     /// 2·254+6 = 514 → blocked). SS bare (sprite/window-free) visible lines
     /// only — sprite/window lines carry their own extended exit; the DS floor
-    /// is a separate lever. `eager_value`-gated → tier2 + production
+    /// is a separate lever. `eager`-gated → tier2 + production
     /// byte-identical (never released here).
     fn eager_access_released(&self) -> bool {
-        self.eager_value
-            && !self.ds
+        !self.ds
             && !self.glitch_line
             && (1..144).contains(&self.line)
             && self.render.active
@@ -88,11 +87,10 @@ impl Ppu {
     /// tier2 path block it — a MISSING law in both clocks (these rows fail tier2
     /// too). Released only on the eager clock past the emergent flip
     /// (`2*projected_flip_dot + 6`, the OAM/VRAM `m0Time` lag), on WX=166
-    /// stalled sprite-free SS visible lines. `eager_value`-gated → tier2 plus
+    /// stalled sprite-free SS visible lines. `eager`-gated → tier2 plus
     /// production byte-identical.
     fn eager_offscreen_win_access(&self) -> bool {
-        self.eager_value
-            && !self.ds
+        !self.ds
             && !self.glitch_line
             && (1..144).contains(&self.line)
             && self.eff.wx == 0xA6
@@ -151,11 +149,10 @@ impl Ppu {
     /// `postwrite_scx1_ds` 256/254 — the write release rides the identical
     /// `254 + SCX&7` law). Bare non-sprite non-window non-glitch lines only (a
     /// sprite/window mode-3 extension pushes the real release later — those
-    /// keep `line_render_done`). Never set in production (`!eager_value`)
+    /// keep `line_render_done`). Never set in production (`!eager`)
     /// → byte-identical OFF.
     fn ds_lineend_open(&self) -> bool {
-        self.eager_value
-            && self.model.is_cgb()
+        self.model.is_cgb()
             && self.ds
             && self.line >= 1
             && self.line <= 143
@@ -170,7 +167,7 @@ impl Ppu {
     /// from the previous HBlank across the first few dots of a visible line until
     /// the mode-2 lock engages ([`CGB_LINESTART_OAM_OPEN`] single speed /
     /// [`CGB_LINESTART_OAM_OPEN_DS`] double speed). Never true in production /
-    /// production (`!eager_value`) -> byte-identical OFF.
+    /// production (`!eager`) -> byte-identical OFF.
     fn cgb_linestart_oam_open(&self) -> bool {
         // Double speed shifts the read grid 2 dots earlier, so the window does
         // too ([`CGB_LINESTART_OAM_OPEN_DS`]). Verified:
@@ -193,7 +190,7 @@ impl Ppu {
         } else {
             (1..CGB_LINESTART_OAM_OPEN).contains(&ld)
         };
-        self.eager_value && self.model.is_cgb() && self.line != 0 && in_window
+        self.model.is_cgb() && self.line != 0 && in_window
     }
 
     pub(crate) fn oam_write_blocked(&self) -> bool {
@@ -271,11 +268,7 @@ impl Ppu {
         // clock takes the same STOP-shift frame as tier2 (and as `pal_ram_blocked`
         // already does): measured `preread_lcdoffset1_1` law-dot82 opens where the
         // raw dot83 blocked, `_2` law-dot86 stays blocked — a clean separation.
-        let d = if self.eager_value {
-            self.law_pos().1
-        } else {
-            self.dot
-        };
+        let d = self.law_pos().1;
         // The DS tier2 VRAM read frame: (a) the deferred cc+0
         // read's true DS sample sits +3 T late, so the mode-3 entry lock
         // covers it from dot 80 (the SS +3 CGB grace does not apply on the
@@ -285,7 +278,7 @@ impl Ppu {
         // write's M-cycle cost SameBoy spreads across the readback —
         // `vramw_m3end_ds_2` stays blocked where the write-free
         // `prewrite_ds`/`postread_ds` readbacks are open).
-        if self.eager_value && self.model.is_cgb() && !self.glitch_line {
+        if self.model.is_cgb() && !self.glitch_line {
             // Line-END VRAM read release at the bare exit, BOTH speeds: the
             // SS refusal ("co-temporal with vramw_m3end") is resolved
             // by the wr_recent discriminator — the vramw readback follows
@@ -351,7 +344,7 @@ impl Ppu {
             // sits later on the dot grid, so the mode-3 write lock covers it
             // from dot 82 (`prewrite_ds_2` wants its ~dot82 write BLOCKED
             // while `_1`'s earlier write lands).
-            if self.eager_value && self.model.is_cgb() && self.ds {
+            if self.model.is_cgb() && self.ds {
                 // Same shifted-poll-quantum +1 as the read lock. (A line-END
                 // write release twin was built + REVERTED: it fixed nothing
                 // and broke a vramw_m3end want-dropped write, measured.)
@@ -389,15 +382,14 @@ impl Ppu {
             // returns open here (the whole-M-cycle `pal_access_edge` stamp in
             // `interconnect/memory.rs` carries its cc+4 straddle law);
             // `pal_open_dot` is never read flag-off → byte-identical.
-            return self.eager_value
-                && self.model.is_cgb()
+            return self.model.is_cgb()
                 && !self.glitch_line
                 && self.pal_open_dot != 0
                 && self.dot < self.pal_open_dot + u16::from(!self.ds);
         }
         let lock = if self.glitch_line {
             GLITCH_MODE3_START
-        } else if self.eager_value && self.model.is_cgb() && !self.ds {
+        } else if self.model.is_cgb() && !self.ds {
             // The tier2 SS mode-3 entry lock is the
             // mode-3 anchor 84 itself: the `*_m3start_2` triplet (SameBoy-pass)
             // accesses at dot 84 and wants BLOCKED (read FF / write dropped)
@@ -420,7 +412,7 @@ impl Ppu {
         };
         // Shifted ROMs classify the access on the un-shifted frame
         // (the machine STOPADV advance; identity otherwise).
-        if self.eager_value && self.model.is_cgb() && !self.ds {
+        if self.model.is_cgb() && !self.ds {
             let (_, ld) = self.law_pos();
             return ld >= lock;
         }

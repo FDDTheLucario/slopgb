@@ -47,49 +47,25 @@ impl Interconnect {
         self.oam_dma_tick();
         self.reset_mcycle_edges();
         // cc-granular reclock: advance the M-cycle one CPU cc at a time
-        // (cc=1..=4), ticking a whole PPU dot only on the cc's
-        // [`dot_ticks_on_cc`] selects for this speed + `dot_phase`. At phase 0
-        // this is bit-identical to the old `for i in 0..dots` loop — single
-        // speed ticks every cc (4 dots), double speed the even cc {2,4} (2
-        // dots) — but a phase-1 double-speed M-cycle ticks the odd cc {1,3}
-        // instead, the half-dot offset the LCD dot clock keeps across a STOP
-        // speed switch (`cc_grid_matches_dot_loop`). Each event edge is stamped
-        // with its dot's [`cc_eighth`] (carrying that sub-dot offset) instead
-        // of the loop index. `dot_phase` stays 0 (the fixed even-cc alignment =
-        // bit-identical to the dot loop): a speed-switch phase set was measured
-        // to lift nothing — only a full pixel-pipe reclock uses it (see the
-        // `dot_phase` field docs).
+        // (cc=1..=4), advancing the PPU per 8-MHz half-dot (2 per dot SS, 1 DS)
+        // and folding on the dot-completing half. Each event edge is stamped
+        // with its dot's [`cc_eighth`]. `cycles` is bumped once above (`dots`),
+        // so no per-dot bump here.
         for cc in 1..=4u8 {
-            if self.eager_value {
-                // Repay a WriteCpu-conflict engine write's borrowed dot: the
-                // previous `Bus::write` ticked cc-1's PPU dot ahead of its
-                // `write_no_tick` (SameBoy WriteCpu commits 1 T into the
-                // M-cycle), so skip it here to restore CPU/PPU phase.
-                if cc == 1 && self.eager_wr_borrow {
-                    self.eager_wr_borrow = false;
-                    continue;
+            // Repay a WriteCpu-conflict engine write's borrowed dot: the
+            // previous `Bus::write` ticked cc-1's PPU dot ahead of its
+            // `write_no_tick` (SameBoy WriteCpu commits 1 T into the
+            // M-cycle), so skip it here to restore CPU/PPU phase.
+            if cc == 1 && self.eager_wr_borrow {
+                self.eager_wr_borrow = false;
+                continue;
+            }
+            let half_dots = if self.double_speed { 1 } else { 2 };
+            for _ in 0..half_dots {
+                let ppu_if = self.ppu.tick_half();
+                if self.ppu.dot_completed() {
+                    self.fold_ppu_events(ppu_if, cc);
                 }
-                // HALFDOT Part A-infra (eager): advance the PPU per 8-MHz
-                // half-dot (2 per dot SS, 1 DS), folding on the dot-completing
-                // half — the SAME grain `advance_machine_t` runs on the tier2
-                // deferred path (`tick.rs`), reproducing the whole-dot
-                // `dot_ticks_on_cc` grid exactly while `dhalf` stays 0 on the
-                // aligned CPU/PPU grid (byte-identical EV). This is the seam the
-                // half-dot write-strobe (Part A-render) builds on: once
-                // `strobe_tick` moves onto the half-dot grid, a mid-mode-3
-                // register commit lands at its true half-dot. `cycles` is
-                // bumped once above (`dots`), so no per-dot bump here. Never
-                // reached in production (`eager_value` false) → golden
-                // byte-identical; tier2 uses `advance_machine_t`, not this.
-                let half_dots = if self.double_speed { 1 } else { 2 };
-                for _ in 0..half_dots {
-                    let ppu_if = self.ppu.tick_half();
-                    if self.ppu.dot_completed() {
-                        self.fold_ppu_events(ppu_if, cc);
-                    }
-                }
-            } else if dot_ticks_on_cc(cc, self.double_speed, self.dot_phase) {
-                self.tick_machine_dot(cc);
             }
         }
         let div = self.timer.div_counter();
@@ -100,21 +76,10 @@ impl Interconnect {
         self.cart.tick_rtc(dots as u32);
     }
 
-    /// One PPU dot of `tick_machine`'s per-dot work (the body of its `for cc`
-    /// loop): tick the PPU, fold its IF / second-half halt-late masks
-    /// (`stat_late`/`stat_halt_late`/`m0_rise`) and the accessibility/STAT edge
-    /// stamps for cc `cc` (1..=4), and pump the dot-exact HBlank-DMA level
-    /// detector. Driven by the whole-M-cycle `tick_machine` per PPU dot.
-    pub(super) fn tick_machine_dot(&mut self, cc: u8) {
-        let ppu_if = self.ppu.tick();
-        self.fold_ppu_events(ppu_if, cc);
-    }
-
     /// Fold a completed PPU dot's IF bits, halt-late masks, accessibility/STAT
     /// edge stamps and the HBlank-DMA level detector into the machine state for
     /// cc `cc` (1..=4). `ppu_if` is the raw IF the PPU tick returned. Called by
-    /// the whole-dot [`Self::tick_machine_dot`] and the eager half-dot loop in
-    /// `tick_machine` (once per completed PPU dot).
+    /// the eager half-dot loop in `tick_machine` (once per completed PPU dot).
     pub(super) fn fold_ppu_events(&mut self, ppu_if: u8, cc: u8) {
         {
             // STAT/VBlank rises in the first 2 dots after the ack are

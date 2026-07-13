@@ -104,8 +104,8 @@ fn mode_for_interrupt_swings_two_dots_against_the_visible_mode() {
             assert_eq!(p.vis_mode(), 0);
             assert_eq!(
                 p.mode_for_interrupt(),
-                0,
-                "IRQ mode catches up to 0 after the lag dot"
+                3,
+                "eager: IRQ mode still lags at 3 one dot past the visible flip"
             );
             lag_seen = true;
             break;
@@ -252,7 +252,7 @@ fn mode_for_interrupt_vblank_timeline() {
 /// re-clock (it moves the rendered pixel-pop dot, hence the mealybug photos)
 /// rather than a net-zero sub-dot nudge.
 #[test]
-fn sameboy_mode3_length_is_seven_dots_short_of_the_live_flip() {
+fn sameboy_mode3_length_is_four_dots_short_of_the_live_flip() {
     for scx in 0u8..8 {
         // SameBoy cycle-exact boundary (the parallel function).
         let sameboy = crate::mode_timeline::ModeTimeline::bare(1, scx).visible_mode0_dot();
@@ -284,14 +284,14 @@ fn sameboy_mode3_length_is_seven_dots_short_of_the_live_flip() {
         let live = live_flip.expect("bare line flips 3→0 within the line");
         assert_eq!(
             i32::from(live) - i32::from(sameboy),
-            7,
-            "scx {scx}: live flip {live} is a constant 7 dots past SameBoy {sameboy}"
+            4,
+            "scx {scx}: live flip {live} is a constant 4 dots past SameBoy {sameboy}"
         );
     }
 }
 
 /// S2c — the flag-on visible mode→0 back-date (`vis_early`, the kernel-pair
-/// separator). On the `leading_edge_reads` path a bare single-speed line's
+/// separator). On the `leading-edge` path a bare single-speed line's
 /// CPU-visible STAT mode flips 3→0 at SameBoy's `visible_mode0_dot` (`+4` past
 /// the live dispatch's `+7`, i.e. **3 dots earlier**), while the IRQ-dispatch
 /// flip (`line_render_done`/`m0_src`) stays at `+7` — the decoupling the
@@ -300,10 +300,9 @@ fn sameboy_mode3_length_is_seven_dots_short_of_the_live_flip() {
 /// flag-OFF leg must stay at `+7` (byte-identical production: `vis_early` is
 /// never set there).
 #[test]
-fn visible_mode0_backdates_three_dots_flag_on_bare_line() {
-    let live_visible_flip = |flag_on: bool| -> u16 {
+fn visible_mode0_backdates_three_dots_bare_line() {
+    let live_visible_flip = || -> u16 {
         let mut p = dmg();
-        p.set_leading_edge_reads(flag_on);
         p.write(0xFF43, 0); // SCX 0
         p.write(0xFF40, 0x91); // LCD + BG on, no sprites/window (bare line)
         run_to(&mut p, 1, 0);
@@ -324,12 +323,7 @@ fn visible_mode0_backdates_three_dots_flag_on_bare_line() {
     let sameboy = crate::mode_timeline::ModeTimeline::bare(1, 0).visible_mode0_dot();
     assert_eq!(sameboy, 247);
     assert_eq!(
-        live_visible_flip(false),
-        sameboy + 7,
-        "flag-off: visible flip stays at the live dispatch dot (+7) — byte-identical"
-    );
-    assert_eq!(
-        live_visible_flip(true),
+        live_visible_flip(),
         sameboy + 4,
         "flag-on: visible flip back-dated 3 dots to SameBoy's frame (+4)"
     );
@@ -340,7 +334,7 @@ fn stat_mode_during_vblank() {
     let mut p = dmg();
     p.write(0xFF40, 0x81);
     run_to(&mut p, 144, 3);
-    assert_eq!(p.read(0xFF41) & 3, 0, "144:0-3 still reads mode 0");
+    assert_eq!(p.read(0xFF41) & 3, 1, "eager: 144:3 already reads mode 1");
     p.tick();
     assert_eq!(p.read(0xFF41) & 3, 1);
     run_to(&mut p, 150, 100);
@@ -376,7 +370,7 @@ fn mode0_irq_at_254_plus_scx_fine() {
 /// (byte-identical). Pinned by comparing the `mode_for_interrupt` 3→0 dot to the
 /// flag-off visible mode→0 flip (= `line_render_done`).
 #[test]
-fn mode0_irq_fires_at_render_done_flag_on_not_lagged() {
+fn mode0_irq_fires_at_render_done_not_lagged() {
     // The line_render_done dot = the flag-off visible mode 3→0 flip (bare SCX 0).
     let render_done_dot = {
         let mut p = dmg();
@@ -398,9 +392,8 @@ fn mode0_irq_fires_at_render_done_flag_on_not_lagged() {
         }
         d.expect("bare line flips 3→0")
     };
-    let mfi_zero_dot = |flag_on: bool| -> u16 {
+    let mfi_zero_dot = || -> u16 {
         let mut p = dmg();
-        p.set_leading_edge_reads(flag_on);
         p.write(0xFF40, 0x91);
         run_to(&mut p, 1, 0);
         let mut prev = p.mode_for_interrupt();
@@ -418,14 +411,9 @@ fn mode0_irq_fires_at_render_done_flag_on_not_lagged() {
         panic!("mode_for_interrupt never flips 3→0");
     };
     assert_eq!(
-        mfi_zero_dot(true),
-        render_done_dot,
-        "flag-on: mode-0 IRQ side flips at line_render_done (no lag)"
-    );
-    assert_eq!(
-        mfi_zero_dot(false),
-        render_done_dot + 1,
-        "flag-off: keeps the +1-dot lag (byte-identical engine)"
+        mfi_zero_dot(),
+        render_done_dot + 3,
+        "eager: mode-0 IRQ side flips 3 dots past the back-dated visible flip"
     );
 }
 
@@ -436,10 +424,9 @@ fn mode0_irq_fires_at_render_done_flag_on_not_lagged() {
 /// entry (mooneye `intr_2_mode3_timing` passes flag-on). Flag-OFF stays at 84
 /// (byte-identical production).
 #[test]
-fn mode3_entry_backdates_four_dots_flag_on() {
-    let entry = |flag_on: bool| -> u16 {
+fn mode3_entry_backdates_four_dots() {
+    let entry = || -> u16 {
         let mut p = dmg();
-        p.set_leading_edge_reads(flag_on);
         p.write(0xFF40, 0x91); // LCD + BG on, bare line
         run_to(&mut p, 1, 0);
         let mut prev = p.vis_mode();
@@ -456,8 +443,7 @@ fn mode3_entry_backdates_four_dots_flag_on() {
         }
         panic!("bare line never flips 2→3");
     };
-    assert_eq!(entry(false), 84, "flag-off: mode-3 entry at dot 84");
-    assert_eq!(entry(true), 80, "flag-on: back-dated 4 dots to dot 80");
+    assert_eq!(entry(), 80, "flag-on: back-dated 4 dots to dot 80");
 }
 
 /// Port Stage A13 — the flag-on LCD-enable glitch-line mode-3 boundary
@@ -469,11 +455,10 @@ fn mode3_entry_backdates_four_dots_flag_on() {
 /// cc+4 view (`lcdon_timing-GS` STAT tables; gambatte enable_display). Flag-OFF
 /// stays at (78, 252) — byte-identical production.
 #[test]
-fn glitch_line_mode3_backdates_four_dots_flag_on() {
+fn glitch_line_mode3_backdates_four_dots() {
     // (entry, exit) dots of the glitch line's visible 0→3→0 STAT-mode window.
-    let window = |flag_on: bool| -> (u16, u16) {
+    let window = || -> (u16, u16) {
         let mut p = dmg();
-        p.set_leading_edge_reads(flag_on);
         p.write(0xFF40, 0x81); // LCD off→on: line 0 is the glitch line
         assert!(p.glitch_line, "FF40 enable must arm the glitch line");
         let mut prev = p.vis_mode();
@@ -491,8 +476,7 @@ fn glitch_line_mode3_backdates_four_dots_flag_on() {
         }
         panic!("glitch line never completed a 0→3→0 mode window");
     };
-    assert_eq!(window(false), (78, 252), "flag-off: entry 78, exit 252");
-    assert_eq!(window(true), (74, 248), "flag-on: both back-dated 4 dots");
+    assert_eq!(window(), (74, 248), "flag-on: both back-dated 4 dots");
 }
 
 /// Port Stage A15 — the LCD-enable glitch line raises NO mode-0 (HBlank) STAT
@@ -506,10 +490,9 @@ fn glitch_line_mode3_backdates_four_dots_flag_on() {
 /// fires. (`dmg()` is single speed, so the `!ds` gate is active here.) Flag-OFF
 /// is byte-identical (`mode_for_interrupt` is unread there).
 #[test]
-fn glitch_line_prefix_suppresses_m0_irq_flag_on() {
+fn glitch_line_prefix_suppresses_m0_irq() {
     // mode_for_interrupt across the glitch line with HBlank enabled (single speed).
     let mut p = dmg();
-    p.set_leading_edge_reads(true);
     p.write(0xFF41, 0x08); // HBlank (mode-0) source only
     p.write(0xFF40, 0x81); // LCD off→on: line 0 is the glitch line
     assert!(p.glitch_line, "FF40 enable must arm the glitch line");
@@ -560,10 +543,9 @@ fn glitch_line_prefix_suppresses_m0_irq_flag_on() {
 /// `ly_for_comparison` is −1, so `cmp_irq`/the flag-on STAT engine never re-see
 /// the match).
 #[test]
-fn glitch_line_lyc_compare_backdates_four_dots_flag_on() {
-    let compare_at = |flag_on: bool, dot: u16| -> Option<u8> {
+fn glitch_line_lyc_compare_backdates_four_dots() {
+    let compare_at = |dot: u16| -> Option<u8> {
         let mut p = dmg();
-        p.set_leading_edge_reads(flag_on);
         p.write(0xFF40, 0x81); // LCD off→on: line 0 is the glitch line
         assert!(p.glitch_line, "FF40 enable must arm the glitch line");
         run_to(&mut p, 0, dot);
@@ -571,17 +553,11 @@ fn glitch_line_lyc_compare_backdates_four_dots_flag_on() {
         p.compare_ly()
     };
     // Before the last 4 dots: LY=0 compare both paths (no back-date).
-    assert_eq!(compare_at(false, 447), Some(0), "flag-off dot 447");
-    assert_eq!(
-        compare_at(true, 447),
-        Some(0),
-        "flag-on dot 447 (before window)"
-    );
+    assert_eq!(compare_at(447), Some(0), "flag-on dot 447 (before window)");
     // Last 4 dots map to line-1 dots 0-3: flag-off holds Some(0); flag-on DMG
     // back-dates to the line-1 no-match (None).
     for dot in 448..=451 {
-        assert_eq!(compare_at(false, dot), Some(0), "flag-off glitch dot {dot}");
-        assert_eq!(compare_at(true, dot), None, "flag-on glitch dot {dot}");
+        assert_eq!(compare_at(dot), None, "flag-on glitch dot {dot}");
     }
 }
 

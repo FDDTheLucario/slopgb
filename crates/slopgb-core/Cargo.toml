@@ -9,25 +9,9 @@ repository.workspace = true
 
 [features]
 default = []
-# Test/example visibility gate for the port flip constructors + setters
-# (`new_with_eager`/`set_eager_value`/…). Integration-test crates and examples
-# are separate compilation units that cannot see the lib's `#[cfg(test)]`
-# items, so they reach the flip hooks through this feature instead. Off by
-# default → the frontend build compiles those hooks out, keeping the
-# golden-safe law compile-enforced.
-flip_hooks = []
 
 [dependencies]
 # Intentionally empty. The core stays dependency-free.
-
-[dev-dependencies]
-# Self-reference enabling `flip_hooks` for THIS crate's own tests + examples
-# only, so they can construct the flip clocks. The frontend depends on
-# slopgb-core without this feature, so the flip setters are `#[cfg(...)]`-
-# compiled out of the production build — the golden-safe law is compile-
-# enforced, not reviewer-enforced. Resolver v3 keeps dev-dep features out of
-# the frontend's normal build.
-slopgb-core = { path = ".", features = ["flip_hooks"] }
 
 [lints]
 workspace = true

@@ -127,14 +127,10 @@ impl Ppu {
                 // compensates at `m == 0`), so arm D1 fires with the steady 259
                 // and the read under-holds. Give it the cross-line 263 exit,
                 // matching arm 7's polled extend (`late_wy_10to0_ly1_1`,
-                // `FFto0/FFto1/FFto2_ly2_scx*_1`, want extend). `eager_value`-gated
+                // `FFto0/FFto1/FFto2_ly2_scx*_1`, want extend). `eager`-gated
                 // → tier2 byte-identical (its render never triggers the seam, so
                 // arm D1 does not fire there).
-                let base = if self.eager_value && self.wy_xline_trig {
-                    263
-                } else {
-                    259
-                };
+                let base = if self.wy_xline_trig { 263 } else { 259 };
                 fold(&mut exit, 2 * (base + scx7));
             } else if self.render.n_sprites == 0 {
                 fold(&mut exit, 2 * (253 + scx7));
@@ -201,12 +197,10 @@ impl Ppu {
         if !self.model.is_cgb()
             && self.render.win_predraw_abort
             && wxm != 0
-            // A mid-line SCX rewrite (`scx_write_dot != 0`) is admitted ONLY on
-            // the eager clock: `late_scx_late_disable` rewrites SCX 0→4 AFTER the
+            // A mid-line SCX rewrite (`scx_write_dot != 0`) is admitted on the
+            // eager clock: `late_scx_late_disable` rewrites SCX 0→4 AFTER the
             // window fetched, so its fetch-time `wx_match_scx` (=4) still drives
-            // the exit fine-scroll and the fetch-ship deadline. Tier2
-            // keeps the `== 0` scope (byte-identical).
-            && (self.render.scx_write_dot == 0 || self.eager_value)
+            // the exit fine-scroll and the fetch-ship deadline.
             && self.eff.lcdc & LCDC_WIN_ENABLE == 0
             && self.line >= 1
             && self.line < 144
@@ -220,14 +214,8 @@ impl Ppu {
             // extend, wxm 133), and the eager cc+0 bare exit back-dates one dot
             // (253→252, the +1 read-debt) so the early-abort `_0` (read rp 512)
             // reads mode 0. Non-scx eager keeps K=4 / base 253.
-            let eager_scx = self.eager_value && self.render.scx_write_dot != 0;
-            let ek = if eager_scx {
-                8
-            } else if self.eager_value {
-                4
-            } else {
-                3
-            };
+            let eager_scx = self.render.scx_write_dot != 0;
+            let ek = if eager_scx { 8 } else { 4 };
             let extend = i32::from(abd) + ek >= i32::from(wxm) && !scx_kills_early;
             let bare = if eager_scx { 252 } else { 253 };
             if self.render.n_sprites == 0 {
@@ -333,10 +321,7 @@ impl Ppu {
         if self.line < 144
             && m == 0
             && (!self.render.win_active
-                || (self.eager_value
-                    && !self.model.is_cgb()
-                    && self.wy2 == self.ly
-                    && self.eff.wx < 0xA0))
+                || (!self.model.is_cgb() && self.wy2 == self.ly && self.eff.wx < 0xA0))
             && (!self.ds || self.render.n_sprites == 0)
             && self.win_extends_sb()
         {
@@ -356,8 +341,7 @@ impl Ppu {
         // wytrig 86 ≤ 88 rides Arm 2's extend). WX < 7 (the prefill-match class;
         // WX ≥ 7 goes bare in the render and rides Arm 2). eager DMG only →
         // tier2 / CGB / production byte-identical.
-        if self.eager_value
-            && !self.model.is_cgb()
+        if !self.model.is_cgb()
             && self.render.win_active
             && self.wy2 == self.ly
             && self.wy_trig_sb_line == self.ly
@@ -483,7 +467,7 @@ impl Ppu {
             && !self.ds
             && self.render.win_reenable_dot != 0
             && self.render.wx_match_dot != 0
-            && i32::from(self.render.win_reenable_dot) + if self.eager_value { 4 } else { 3 }
+            && i32::from(self.render.win_reenable_dot) + 4
                 > i32::from(self.render.wx_match_dot) + scx7
             && self.eff.lcdc & LCDC_WIN_ENABLE != 0
             && self.render.win_active
@@ -564,11 +548,10 @@ impl Ppu {
         // (the render's projected flip is itself wrong there), so this read arm
         // cannot reach them. Scoped to an ACTIVE, non-aborted window with sprites
         // on a visible DS line where no earlier arm matched (`exit.is_none()`);
-        // `eager_value` + CGB → production/tier2 (which advance `self.dot`
+        // `eager` + CGB → production/tier2 (which advance `self.dot`
         // natively) + SS + non-window-sprite lines (raw-mode-correct)
         // byte-identical.
-        if self.eager_value
-            && self.model.is_cgb()
+        if self.model.is_cgb()
             && self.ds
             && exit.is_none()
             && m == 3
@@ -687,9 +670,9 @@ impl Ppu {
                 // the `late_scx_late_disable` window siblings; see `regs.rs`
                 // `stage_write`). This is the verdict-only READ analogue: undo the
                 // extension in the bare exit ONLY (window aborts own the
-                // `scx_write_dot` arm above). `eager_value`+DMG+bare-scoped →
+                // `scx_write_dot` arm above). `eager`+DMG+bare-scoped →
                 // byte-identical flag-off.
-                if self.eager_value && !self.model.is_cgb() && self.render.scx_write_dot != 0 {
+                if !self.model.is_cgb() && self.render.scx_write_dot != 0 {
                     flip = flip.saturating_sub(u16::from(self.scx & 7));
                 }
                 // The SS post-switch bare exit: a
@@ -736,7 +719,7 @@ impl Ppu {
                     // both and shuffles). Drop the `+2` only for the eager-DMG
                     // polled read → tier2 + production byte-identical (both keep
                     // `+2`), carried reads untouched (`- carry` owns them).
-                    let over = if self.eager_value && !self.model.is_cgb() && !self.read_carried {
+                    let over = if !self.model.is_cgb() && !self.read_carried {
                         0
                     } else {
                         2
@@ -790,10 +773,9 @@ impl Ppu {
             // SameBoy renders `_3` bare. Re-derive to `−2` (wxmatch → 95) so
             // `_2` (94 ≤ 95, extend) and `_3` (98 > 95, bare) re-split — the
             // exact −4 read-debt of the emission move, the SS twin of the DS
-            // lyfc re-derivation above. `eager_value && !is_cgb` only (the CGB
+            // lyfc re-derivation above. `eager && !is_cgb` only (the CGB
             // emission is unmoved; production + tier2 byte-identical).
             && i32::from(self.wy_trig_sb_dot)
-                <= i32::from(self.render.wx_match_dot)
-                    + if self.eager_value && !self.model.is_cgb() { -2 } else { 2 }
+                <= i32::from(self.render.wx_match_dot) + if !self.model.is_cgb() { -2 } else { 2 }
     }
 }

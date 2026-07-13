@@ -5,8 +5,8 @@
 use super::super::*;
 
 /// The DMG palette (BGP/OBP FF47-49) render commit RE-HOSTED onto the eager
-/// clock (`eager_value`, the C3-flip target). The tier2 render laws fire under
-/// `eager_value` too (`|| eager_value`), but on the eager clock the write stage
+/// clock (`eager`, the C3-flip target). The tier2 render laws fire under
+/// `eager` too (`|| eager`), but on the eager clock the write stage
 /// starts at the cc+0 leading edge (`interconnect::Bus::write` stages BEFORE
 /// `tick_machine`), while the tier2 stage starts at the cc+4 leading edge
 /// (`write_deferred` advances the machine first) — so the un-shifted eager
@@ -18,7 +18,7 @@ use super::super::*;
 /// length-coupled registers (FF40/FF43/FF4B) keep zero debt (a debt there breaks
 /// the `late_enable_afterVblank` gambatte set). Same 5 legs as the tier2
 /// `tier2_dmg_m3_render_palette_halfdot_passes` pin; production byte-identical
-/// (`eager_value`-gated). Recovers the mealybug rows the flip regressed.
+/// (`eager`-gated). Recovers the mealybug rows the flip regressed.
 #[test]
 fn eager_dmg_m3_render_palette_passes() {
     let Some(root) = common::gbtr_root() else {

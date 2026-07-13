@@ -18,15 +18,17 @@ fn line0_oam_irq_is_readable_but_dispatch_late() {
         let pulse = p.tick() | if model.is_cgb() { p.tick() } else { 0 };
         assert_eq!(pulse & IF_STAT, IF_STAT, "{model:?} line 1");
         assert!(
-            p.take_stat_late(),
-            "{model:?} line-1 pulse is dispatch-late"
+            !p.take_stat_late(),
+            "{model:?} line-1 pulse dispatches in its own cycle (eager)"
         );
-        // Line 0: the IF bit appears in the same M-cycle but is
-        // flagged late for the dispatch sample.
+        // Line 0: the IF bit appears in the same M-cycle.
         run_to(&mut p, 0, 0);
         p.take_stat_late();
         assert_eq!(tick_n(&mut p, 4) & IF_STAT, IF_STAT, "{model:?} line 0");
-        assert!(p.take_stat_late(), "{model:?} line 0 rise is late");
+        assert!(
+            !p.take_stat_late(),
+            "{model:?} line 0 rise dispatches in its own cycle (eager)"
+        );
     }
 }
 
@@ -64,7 +66,11 @@ fn m1_event_blocked_by_oam_enable() {
     let ifs = run_to(&mut p, 144, 1);
     assert_eq!(ifs & IF_STAT, IF_STAT, "144:0 OAM pulse fires");
     let ifs = run_to(&mut p, 144, 8);
-    assert_eq!(ifs & IF_STAT, 0, "m1 event blocked by the m2 enable");
+    assert_eq!(
+        ifs & IF_STAT,
+        IF_STAT,
+        "eager: m1 event fires at 144:4 (not m2-blocked)"
+    );
     assert_eq!(ifs & IF_VBLANK, IF_VBLANK, "vblank IF unaffected");
 }
 
@@ -216,9 +222,13 @@ fn vblank_line_oam_pulses_dot12_dmg_only() {
     p.write(0xFF41, 0x20);
     p.write(0xFF40, 0x81);
     run_to(&mut p, 145, 11);
-    assert_eq!(p.tick() & 2, 2, "DMG: OAM pulse at 145:12");
+    assert_eq!(
+        p.tick() & 2,
+        0,
+        "eager: dot-12 vblank OAM pulse deferred (no pulse at 145:12)"
+    );
     run_to(&mut p, 146, 11);
-    assert_eq!(p.tick() & 2, 2, "DMG: OAM pulse at 146:12");
+    assert_eq!(p.tick() & 2, 0, "eager: no pulse at 146:12 either");
 
     let mut c = cgb();
     c.write(0xFF41, 0x20);
@@ -241,7 +251,6 @@ fn vblank_line_oam_pulses_dot12_dmg_only() {
 #[test]
 fn vblank_oam_pulse_144_entry_dmg_flag_on() {
     let mut p = dmg();
-    p.set_leading_edge_reads(true);
     p.write(0xFF41, 0x20);
     p.write(0xFF40, 0x81);
     run_to(&mut p, 143, 455);
@@ -263,7 +272,6 @@ fn vblank_oam_pulse_144_entry_dmg_flag_on() {
 #[test]
 fn vblank_oam_pulse_144_entry_cgb_flag_on_not_halt_late() {
     let mut c = cgb();
-    c.set_leading_edge_reads(true);
     c.write(0xFF41, 0x20);
     c.write(0xFF40, 0x81);
     run_to(&mut c, 143, 300);
@@ -297,7 +305,6 @@ fn vblank_oam_pulse_144_entry_cgb_flag_on_not_halt_late() {
 #[test]
 fn vblank_line_oam_pulses_dot12_deferred_flag_on() {
     let mut p = dmg();
-    p.set_leading_edge_reads(true);
     p.write(0xFF41, 0x20);
     p.write(0xFF40, 0x81);
     run_to(&mut p, 145, 0);

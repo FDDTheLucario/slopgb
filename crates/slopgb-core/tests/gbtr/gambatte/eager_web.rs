@@ -3,7 +3,7 @@
 //! (FF41 STAT / FF0F IF / FF45 LYC) commits its engine-visible effect one T
 //! into the M-cycle; the eager whole-M-cycle tick lands it at the boundary
 //! instead. The [`Interconnect::write`] borrow moves the commit to the
-//! WriteCpu dot (D+1) under `eager_value`, recovering these SameBoy-pass rows.
+//! WriteCpu dot (D+1) under `eager`, recovering these SameBoy-pass rows.
 
 use super::*;
 
@@ -85,7 +85,7 @@ fn eager_write_conflict_commit_passes() {
     ];
     for (rel, expect) in rows {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        let mut gb = harness::boot_eager(&rom, Model::Cgb);
+        let mut gb = harness::boot(&rom, Model::Cgb);
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), expect, true)
             .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (eager): {e}"));
@@ -119,7 +119,7 @@ fn eager_ds_write_conflict_commit_passes() {
     ];
     for rel in rows {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        let mut gb = harness::boot_eager(&rom, Model::Cgb);
+        let mut gb = harness::boot(&rom, Model::Cgb);
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), "0", true)
             .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out0 (eager DS): {e}"));
@@ -172,7 +172,7 @@ fn eager_ack_squash_retrigger_passes() {
     ];
     for (rel, expect) in rows {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        let mut gb = harness::boot_eager(&rom, Model::Cgb);
+        let mut gb = harness::boot(&rom, Model::Cgb);
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), expect, true)
             .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (eager): {e}"));
@@ -217,7 +217,7 @@ fn eager_dmg_ff0f_write_commit_passes() {
     ];
     for (rel, expect) in rows {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        let mut gb = harness::boot_eager(&rom, Model::Dmg);
+        let mut gb = harness::boot(&rom, Model::Dmg);
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), expect, false)
             .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (eager): {e}"));
@@ -287,7 +287,7 @@ fn eager_halt_wake_passes() {
     ];
     for (rel, expect) in rows {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        let mut gb = harness::boot_eager(&rom, Model::Cgb);
+        let mut gb = harness::boot(&rom, Model::Cgb);
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), expect, true)
             .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect} (eager halt-wake): {e}"));
@@ -364,7 +364,7 @@ fn eager_window_m0irq_deliver_passes() {
     for (rel, expect, is_cgb) in rows {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
         let model = if is_cgb { Model::Cgb } else { Model::Dmg };
-        let mut gb = harness::boot_eager(&rom, model);
+        let mut gb = harness::boot(&rom, model);
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), expect, is_cgb).unwrap_or_else(|e| {
             panic!("{rel} [{model:?}] expected out{expect} (eager window m0irq): {e}")
@@ -410,7 +410,7 @@ fn tier2_eager_dmg_ly0_oam_entry_passes() {
     ];
     for (rel, expect) in rows {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        let mut gb = harness::boot_eager(&rom, Model::Dmg);
+        let mut gb = harness::boot(&rom, Model::Dmg);
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), expect, false)
             .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (eager ly0 oam): {e}"));
@@ -450,7 +450,7 @@ fn eager_dmg_lyc153_m1disable_passes() {
     ];
     for rel in rows {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        let mut gb = harness::boot_eager(&rom, Model::Dmg);
+        let mut gb = harness::boot(&rom, Model::Dmg);
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), "E0", false).unwrap_or_else(|e| {
             panic!("{rel} [Dmg] expected outE0 (eager line-153 m1disable): {e}")
@@ -468,7 +468,7 @@ fn eager_dmg_lyc153_m1disable_passes() {
 /// (eager stage 90 + 8hd = dot 94, but OFF/tier2 commit dot 93); the post-match
 /// arm's debt 2 (6hd) lands the eager commit on the exact OFF/tier2 dot
 /// (`regs/stage.rs`). Post-match-scoped (the `_ds_1` pre-match line-start write
-/// keeps 4), `eager_value`+`is_cgb`+`ds`-gated → production + tier2 byte-identical
+/// keeps 4), `eager`+`is_cgb`+`ds`-gated → production + tier2 byte-identical
 /// (golden unchanged, tier2 CGB 291 untouched, OCR flagon_probe EV 287/287
 /// zero-drift). Pixel two-bin EV: these 4 recovered, 0 OFF-passing rows dropped
 /// (`scy_during_m3_ds_5` stays the pre-existing floor — SameBoy matches neither
@@ -508,7 +508,7 @@ fn eager_cgb_m3_render_scx_ds_passes() {
 /// `win_extends_sb` deadline (`read_laws_exit.rs`, `+2 → −2`) re-splits the
 /// mid-line `_2` extend / `_3` bare siblings, and the `wy_xline_trig` classify
 /// dot (`regs.rs`, `+4` read-debt) re-splits the head/boundary family. All
-/// `eager_value && !is_cgb`-scoped → production + tier2 byte-identical (golden
+/// `eager && !is_cgb`-scoped → production + tier2 byte-identical (golden
 /// unchanged, DMG flagon_probe EV 46, CGB EV 287/287). Reverting any of the
 /// three arms makes this pin fail. See `eager-lyc153-cluster-rehost-2026-07-12.md`.
 #[test]
@@ -575,7 +575,7 @@ fn eager_dmg_lyc153_cluster_passes() {
     ];
     for (rel, expect) in rows {
         let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        let mut gb = harness::boot_eager(&rom, Model::Dmg);
+        let mut gb = harness::boot(&rom, Model::Dmg);
         run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
         check_hex_screen(gb.frame(), expect, false)
             .unwrap_or_else(|e| panic!("{rel} [Dmg] expected out{expect} (eager): {e}"));

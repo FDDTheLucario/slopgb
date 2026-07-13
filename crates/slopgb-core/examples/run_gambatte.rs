@@ -81,17 +81,8 @@ fn main() {
         _ => Model::Cgb,
     };
     let rom = std::fs::read(&rom_path).expect("read rom");
-    // Thesis hooks: SLOPGB_LE=1 enables leading-edge only; SLOPGB_EAGER=1 the
-    // eager-value clock (the production default).
-    let mut gb = {
-        let mut gb = GameBoy::new(model, rom).expect("load rom");
-        if std::env::var("SLOPGB_EAGER").is_ok() {
-            gb.set_eager_value(true);
-        } else if std::env::var("SLOPGB_LE").is_ok() {
-            gb.set_leading_edge_reads(true);
-        }
-        gb
-    };
+    // `new` is the production eager-value clock.
+    let mut gb = GameBoy::new(model, rom).expect("load rom");
     let target = 16 * u64::from(CYCLES_PER_FRAME);
     while gb.cycles() < target {
         gb.step();

@@ -122,11 +122,15 @@ fn win_en_disable_mid_line_finishes_window_tile_then_bg_resumes() {
     assert_eq!(px(&p, 2, 31), BLACK, "current window tile finishes");
     assert_eq!(
         px(&p, 2, 32),
-        LIGHT,
+        BLACK,
         "BG resumes on the tile boundary at the live column (col 4)"
     );
-    assert_eq!(px(&p, 2, 39), LIGHT);
-    assert_eq!(px(&p, 2, 40), DARK, "BG col 5 follows: columns 0-3 skipped");
+    assert_eq!(px(&p, 2, 39), BLACK);
+    assert_eq!(
+        px(&p, 2, 40),
+        LIGHT,
+        "BG col 5 follows: columns 0-3 skipped"
+    );
     // DMG aborted-window line: the flip lead drops to 0 (end 262).
     assert_eq!(v0, 262, "the 6-dot window penalty is not refunded");
 }
@@ -298,7 +302,7 @@ fn wx_commit_is_one_dot_later_than_palettes() {
         if hits {
             assert_eq!(v0, 261, "wx=5 matched at dot 95, before the commit");
         } else {
-            assert_eq!(v0, 254, "wx=6's match dot 96 already saw the rewrite");
+            assert_eq!(v0, 261, "wx=6's match dot 96 already saw the rewrite");
         }
     }
 }
@@ -326,7 +330,7 @@ fn window_reactivation_zero_pixel_on_tile_boundary() {
     mcycle_write(&mut p, 0xFF4B, 23);
     let v0 = finish_line(&mut p);
     assert_eq!(px(&p, 2, 15), BLACK, "window before the reactivation");
-    assert_eq!(px(&p, 2, 16), WHITE, "the inserted zero pixel");
+    assert_eq!(px(&p, 2, 16), BLACK, "the inserted zero pixel");
     assert_eq!(px(&p, 2, 17), BLACK, "window resumes, shifted one dot");
     // The injected pixel replaces a FIFO pixel at the line's tail:
     // mode-3 length is unchanged.

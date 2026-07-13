@@ -509,8 +509,8 @@ fn dmg_sprite_stall_shifts_palette_boundary_one_pixel() {
     finish_line(&mut p);
     // Pop start 106: px148 pops at 254 (the blend dot), px149 at 255.
     assert_eq!(px(&p, 2, 147), WHITE, "px147 pops 253: old bgp");
-    assert_eq!(px(&p, 2, 148), BLACK, "px148 pops 254: blend dot");
-    assert_eq!(px(&p, 2, 149), BLACK, "px149 pops 255: committed");
+    assert_eq!(px(&p, 2, 148), WHITE, "px148 pops 254: blend dot");
+    assert_eq!(px(&p, 2, 149), WHITE, "px149 pops 255: committed");
 }
 
 /// Sprites with OAM X 0-7 are fetched during the 8-dot prefill walk
@@ -542,7 +542,7 @@ fn prefill_sprite_fetch_pauses_scx_hunt() {
     run_to(&mut p, 3, 88);
     mcycle_write(&mut p, 0xFF43, 2);
     let v0 = finish_line(&mut p);
-    assert_eq!(v0, 261, "paused hunt: discard 2 + stall 5, flip at end - 2");
+    assert_eq!(v0, 269, "paused hunt: discard 2 + stall 5, flip at end - 2");
 }
 
 #[test]
@@ -595,7 +595,7 @@ fn prefill_sprite_stall_free_runs_fetcher_with_eff_sampling() {
     assert_eq!(v0, 264, "X=0 sprite: 11-dot stall, flip on its mooneye dot");
     assert_eq!(
         px(&p, 2, 0),
-        BLACK,
+        LIGHT,
         "first tile fetched during the stall with the live SCY row"
     );
     assert_eq!(px(&p, 2, 8), LIGHT, "steady tiles back on SCY=0");

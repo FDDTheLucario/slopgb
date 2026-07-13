@@ -91,7 +91,7 @@ impl Ppu {
         // (`late_scx4`: SameBoy separates the legs by whether the SCX commit
         // lands before/after the fine-scroll comparator's first sample;
         // slopgb collapsed both legs onto the leading edge). Production
-        // (`!eager_value`) is byte-identical.
+        // (`!eager`) is byte-identical.
         // The mode-3 render regs (SCY/SCX/BGP/OBP) survive the arch
         // write so they strobe-commit at the render frame instead of the
         // leading edge (see the dots calc in `cycle.rs::write_deferred`). LCDC
@@ -105,8 +105,7 @@ impl Ppu {
         // DMG eager path (debt 0) the stage drains inside `tick_machine`, so this
         // is false and the M-cycle-END commit still runs — byte-identical to the
         // pre-slice DMG eager behaviour.
-        let staged_pending = self.eager_value
-            && matches!(addr, 0xFF42 | 0xFF43 | 0xFF47..=0xFF49 | 0xFF4B)
+        let staged_pending = matches!(addr, 0xFF42 | 0xFF43 | 0xFF47..=0xFF49 | 0xFF4B)
             && !self.glitch_line
             && self
                 .staged
@@ -177,12 +176,8 @@ impl Ppu {
                         // late_enable_2 (eager dot4→rd8, out of window, want no-
                         // fire) + late_enable_after_lycint_disable_2 (eager dot0→
                         // rd4, held-LYC suppressed via the data|old lycen, want
-                        // no-fire). `eager_value`+DMG-scoped → byte-identical.
-                        let rd = if self.eager_value {
-                            self.dot + 4
-                        } else {
-                            self.dot
-                        };
+                        // no-fire). `eager`+DMG-scoped → byte-identical.
+                        let rd = self.dot + 4;
                         let retro = (rd == 0 || rd == 4)
                             && !self.glitch_line
                             && (1..=144).contains(&self.line)
@@ -206,8 +201,7 @@ impl Ppu {
                     // post-write level (fresh bit6 + the held carryover
                     // match) continues it — without the seed the next dot's
                     // engine tick re-fires the same edge as a spurious 0→1.
-                    if self.leading_edge_reads
-                        && self.model.is_cgb()
+                    if self.model.is_cgb()
                         && self.ds
                         && self.dot < 2
                         && old & STAT_SRC_HBLANK != 0
@@ -225,11 +219,7 @@ impl Ppu {
                     // tick commit+2 (= SameBoy T0), the final value at
                     // commit+4, externals in between edging against the
                     // armed phase-1.
-                    if self.leading_edge_reads
-                        && self.model.is_cgb()
-                        && !self.ds
-                        && self.lcd_shift_dots == 0
-                    {
+                    if self.model.is_cgb() && !self.ds && self.lcd_shift_dots == 0 {
                         // Single speed: the two-phase engine view (see the
                         // `eng_stat_pending` field doc for the schedule).
                         // phase-1 = mode bits NEW, LYC enable (bit 6) OLD —
@@ -252,11 +242,7 @@ impl Ppu {
                             mfi_t0: 0,
                             k: 0,
                         });
-                    } else if self.eager_value
-                        && !self.model.is_cgb()
-                        && self.line == 153
-                        && !self.glitch_line
-                    {
+                    } else if !self.model.is_cgb() && self.line == 153 && !self.glitch_line {
                         // HALFDOT piece 4: on LINE 153 the DMG FF41
                         // engine-view (`eng_stat`) write commits its
                         // disable/enable ~2 dots LATER than the eager cc+4 whole-
@@ -273,7 +259,7 @@ impl Ppu {
                         // FF41-read frame. Line-153-scoped (the write side of the
                         // documented line-153 LYC side-effect zone), NOT ROM-
                         // specific. The sibling `m0enable/lycdisable_ff41_2` (line
-                        // 1) is untouched. `eager_value`-gated → byte-identical.
+                        // 1) is untouched. `eager`-gated → byte-identical.
                         self.eng_stat_half = Some((data, 2));
                         self.eng_stat_pending = None;
                     } else {
@@ -281,8 +267,7 @@ impl Ppu {
                         self.eng_stat_pending = None;
                         // Record a DS LYC-enable DROP for the
                         // m0-flip dip (see `ff41_ds_drop`).
-                        if self.leading_edge_reads
-                            && self.model.is_cgb()
+                        if self.model.is_cgb()
                             && self.ds
                             && old & STAT_SRC_LYC != 0
                             && data & STAT_SRC_LYC == 0
@@ -292,7 +277,7 @@ impl Ppu {
                     }
                     self.stage_stat_copies();
                     self.refresh_cmp(false);
-                    if self.leading_edge_reads && fire {
+                    if fire {
                         // When the gambatte write-trigger fired (`fire`),
                         // re-sync the flag-on [`StatUpdate`]
                         // line to the post-write level so the next dot-clocked
@@ -333,9 +318,8 @@ impl Ppu {
                     // (STAT blocking, no edge) so the post-window rise is spent;
                     // the line falls silently at dot 4. A carried-from-prev-line
                     // OAM (`old & OAM != 0`) fires its real dot-0 pulse and is
-                    // excluded. `eager_value`+DMG-scoped → byte-identical.
-                    if self.eager_value
-                        && !self.model.is_cgb()
+                    // excluded. `eager`+DMG-scoped → byte-identical.
+                    if !self.model.is_cgb()
                         && !fire
                         && self.dot < 4
                         && (1..=143).contains(&self.line)
@@ -362,7 +346,7 @@ impl Ppu {
                 // The boundary-WY cross-line latch (see `Ppu::wy_xline_trig`):
                 // a tail/head write matching the current line, window enabled
                 // at the commit (DMG too — the DMG arm-7 twin reads the same
-                // latch). Also enabled under `eager_value`: this arch commit runs
+                // latch). Also enabled under `eager`: this arch commit runs
                 // at the eager M-cycle END, so the boundary window catches the
                 // tail-write class (`late_wy_FFto0/FFto1/10to0/1toFF`) that the
                 // read-frame WY laws pair with — measured +8 CGB, 0 drop.
@@ -377,16 +361,10 @@ impl Ppu {
                 // moved write classifies on the calibrated frame: `FFto0_ly2_3`
                 // ly1 dot0 → xdot 4 (NOT head → bare); its `_2` ly0 dot452 →
                 // xdot 456 (still tail → extend). The SS twin of the DS lyfc
-                // wake re-derivation. `eager_value && !is_cgb` (CGB emission
+                // wake re-derivation. `eager && !is_cgb` (CGB emission
                 // unmoved; tier2 + production byte-identical).
-                let xdot = self.dot
-                    + if self.eager_value && !self.model.is_cgb() {
-                        4
-                    } else {
-                        0
-                    };
-                if self.eager_value
-                    && self.enabled
+                let xdot = self.dot + if !self.model.is_cgb() { 4 } else { 0 };
+                if self.enabled
                     && !(4..452).contains(&xdot)
                     && self.line < 144
                     && value == self.ly
@@ -404,12 +382,11 @@ impl Ppu {
                 // line → set the cross-line latch. `late_wy_10to0/FFto0/FFto1`
                 // `_2` (commit ly1/ly2 dot0) extend; the `_3` siblings commit
                 // at dot 4 (past the head) → no trigger, bare. Also enabled
-                // under `eager_value`: the eager arch commit lands at the
+                // under `eager`: the eager arch commit lands at the
                 // M-cycle END (same head-dot window), pairing with the DMG
                 // read-frame WY laws already live under eager — L2 re-host of
                 // the CGB slice-2 cross-line latch to DMG.
-                if self.eager_value
-                    && !self.model.is_cgb()
+                if !self.model.is_cgb()
                     && self.enabled
                     && xdot < 4
                     && self.line >= 1
@@ -427,11 +404,10 @@ impl Ppu {
                 // trigger line) must release the latch the check would never
                 // have acquired (`late_wy_1toFF_ds_1` renders bare on
                 // hardware AND SameBoy; its `_2` sibling commits at dot 5
-                // and keeps the trigger). Tier-2 + CGB + DS; also `eager_value`
+                // and keeps the trigger). Tier-2 + CGB + DS; also `eager`
                 // (the eager DS `late_wy_ds`/`late_wy_1toFF_ds` pairs recover on
                 // the same latch, part of the +8 CGB WY slice).
-                if self.eager_value
-                    && self.model.is_cgb()
+                if self.model.is_cgb()
                     && self.ds
                     && self.enabled
                     && self.wy_latch
@@ -475,11 +451,10 @@ impl Ppu {
                 // (FF at dot 8, past the compare → the window drew, extends).
                 // SS + DMG; the CGB path is the DS
                 // block above (`wy_latch`/`wy_trig_sb`). Also enabled under
-                // `eager_value`: pairs with the DMG arm-D6 un-trigger read law
+                // `eager`: pairs with the DMG arm-D6 un-trigger read law
                 // already live under eager — L2 re-host of the DMG late-WY
                 // un-trigger latch.
-                if self.eager_value
-                    && !self.model.is_cgb()
+                if !self.model.is_cgb()
                     && !self.ds
                     && self.enabled
                     && self.line < 144
@@ -530,7 +505,7 @@ impl Ppu {
                 self.lyc = value;
                 // Fresh-write signal for the eager line-153 STAT-delivery retime
                 // (see `l153_lyc_write_dot`). Eager+CGB only.
-                if self.eager_value && self.model.is_cgb() && self.line == 153 {
+                if self.model.is_cgb() && self.line == 153 {
                     self.l153_lyc_write_dot = self.dot;
                 }
                 // The comparison retriggers immediately on LYC writes while
@@ -542,7 +517,7 @@ impl Ppu {
                     } else {
                         self.write_lyc_dmg(old, value);
                     }
-                    if self.leading_edge_reads && (self.pending_if & !before) & IF_STAT != 0 {
+                    if (self.pending_if & !before) & IF_STAT != 0 {
                         // `& !before` keys on a NEWLY-set STAT bit (the trigger
                         // fired this call), not one already pending from an
                         // earlier tick this M-cycle — so the sync only fires for
@@ -591,7 +566,7 @@ impl Ppu {
                 // un-catch read law (`tier2_window_late_wx_uncatch_passes`) is
                 // calibrated to the write's cc+0 dot, so its input stays here.
                 // The SPLIT: length/read-law input eager, render view deferred.
-                if self.render.active && self.eager_value {
+                if self.render.active {
                     self.render.wx_write_dot = self.dot;
                 }
                 self.wx = value;

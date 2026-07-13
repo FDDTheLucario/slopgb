@@ -273,36 +273,12 @@ pub fn check_fib(b: u8, c: u8, d: u8, e: u8, h: u8, l: u8) -> Result<(), String>
 pub fn run_breakpoint_rom(rom: &[u8], model: Model) -> Result<(), String> {
     let mut gb =
         GameBoy::new(model, rom.to_vec()).map_err(|e| format!("cartridge rejected: {e}"))?;
-    // `SLOPGB_MOONEYE_EAGER=1` re-hosts the post-boot machine on the
-    // eager-value reclock (eager clock + cc+0 read-law peeks, dispatch cc+4)
-    // — the eager-clock foundation gate. Unset = production frame.
-    if std::env::var_os("SLOPGB_MOONEYE_EAGER").is_some() {
-        gb.set_eager_value(true);
-    }
     while !gb.debug_breakpoint_hit() {
         if gb.cycles() > TIMEOUT_TCYCLES {
             return Err(format!(
                 "timeout: no LD B,B after {} T-cycles (120 emulated seconds)",
                 gb.cycles()
             ));
-        }
-        gb.step();
-    }
-    let r = gb.cpu_regs();
-    check_fib(r.b, r.c, r.d, r.e, r.h, r.l)
-}
-
-/// Run one ROM to the `LD B,B` breakpoint booted on the **eager-value reclock
-/// armed from construction** (`GameBoy::new_with_eager` — the real C3 flip),
-/// then check the Fibonacci signature. Pins that the construction-time eager
-/// enable reaches the same intr_2-safe state as the runtime `set_eager_value`
-/// path (regression guard for `post_boot_inner`'s deferred re-arm).
-pub fn run_breakpoint_rom_eager(rom: &[u8], model: Model) -> Result<(), String> {
-    let mut gb = GameBoy::new_with_eager(model, rom.to_vec())
-        .map_err(|e| format!("cartridge rejected: {e}"))?;
-    while !gb.debug_breakpoint_hit() {
-        if gb.cycles() > TIMEOUT_TCYCLES {
-            return Err(format!("timeout: no LD B,B after {} T-cycles", gb.cycles()));
         }
         gb.step();
     }

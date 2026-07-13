@@ -24,7 +24,7 @@ impl Interconnect {
         // and the resumed stream + FF41 read separate by the SCX delta. The
         // resumed IME=1 dispatch's first FF41 read then rides the re-fetch
         // boundary override (`Ppu::halt_refetch`), armed below.
-        let eager_cgb_halt = self.eager_value && self.model.is_cgb() && !self.double_speed;
+        let eager_cgb_halt = self.model.is_cgb() && !self.double_speed;
         if eager_cgb_halt
             && self.cpu_halted
             && w & IF_STAT_BIT == 0
@@ -107,68 +107,38 @@ impl Interconnect {
                 // rise at/before the ack still loses: it folded during the
                 // dispatch advance and the ack clears it (the `_2` siblings).
                 // Production keeps gambatte's cc+4-frame 2-dot window.
-                self.ack_squash_dots = if self.eager_value {
-                    // Eager ack-squash port: the eager read-frame
-                    // enters the STAT/OAM ISR — and so fires this ack — the
-                    // read-debt earlier than the gambatte cc+4 frame the
-                    // production `2` is tuned to (+8hd = 4 dots SS / 2 dots DS,
-                    // the cc+0→cc+4 shift). The mode-0 retrigger is a PPU
-                    // event pinned to the same absolute dot, so the eager
-                    // ack→retrigger gap grows by exactly that shift; widen the
-                    // squash window by it so the post-ack retrigger stays
-                    // consumed on the eager frame (irq_precedence
-                    // `late_m0irq_retrigger_2`/`_scx1_2` + `_ds_2`, want E0)
-                    // while the one-M-cycle-later `_1` siblings still land
-                    // outside it and DELIVER (want E2). DS uses +1 (window 3) for
-                    // the LYC/mode-2/mode-1/vblank families: their DS `_1`
-                    // retriggers (ly0/m1/m2int/lyc153int) sit one dot inside
-                    // window 4, so a blanket window 4 over-squashes them
-                    // (measured −6). But the MODE-0 (HBLANK) retrigger family
-                    // (`late_m0irq_retrigger`) needs window 4: its DS ack→mode-0-
-                    // rise gaps are `_ds_2` 3 (squash), `_scx1_ds_2` 4 (squash),
-                    // `_ds_1` 5 (deliver), `_scx1_ds_1` 6 (deliver) — the squash/
-                    // deliver boundary is gap 4, so window 3 UNDER-squashes
-                    // `_scx1_ds_2` (its retrigger at ack+4 is DELIVERED → E2,
-                    // want E0). The retrigger SOURCE separates it from the 6
-                    // over-squashed families: HBLANK is the enabled STAT source
-                    // (`stat_src_hblank`, `eng_stat & STAT_SRC_HBLANK`) ONLY for
-                    // the `late_m0irq_retrigger` rows (es=08; the others es=20
-                    // OAM / es=40 LYC), so widen to 4 exactly there. The mode-0
-                    // `_ds_1`/`_scx1_ds_1` at gap 5/6 stay outside window 4 and
-                    // still DELIVER. Never armed flag-off → byte-identical.
-                    if self.double_speed {
-                        if self.ppu.stat_src_hblank() { 4 } else { 3 }
-                    } else if !self.model.is_cgb() && self.ppu.line_dot().0 == 153 {
-                        // Line-153 LYC retrigger family: the dot-4 LYC=153
-                        // IF-emission decouple fires this line-153 STAT ISR — and
-                        // its ack — one M-cycle (4 dots) EARLIER than the dot-6
-                        // read frame the SS window `6` was tuned to, so the
-                        // ack→retrigger gap to the ly0 mode-2 pulse grows +4
-                        // (`lyc153int_m2irq_late_retrigger_2` ack 452, retrigger
-                        // ly0 dot4 = ack+8, now OUTSIDE window 6 → wrongly
-                        // DELIVERED). Widen by the same read-debt (6→10) so the
-                        // retrigger re-squashes (gap 8 ≤ 10 → E0) while its `_1`
-                        // sibling (ack 448, gap 12 > 10) still DELIVERS (E2). The
-                        // ack-squash twin of the window/xline re-hosts. eager DMG
-                        // line-153 only → other families keep 6.
-                        10
-                    } else {
-                        6
-                    }
+                // Eager ack-squash port: the eager read-frame enters the
+                // STAT/OAM ISR — and so fires this ack — the read-debt earlier
+                // than the gambatte cc+4 frame, so widen the squash window by
+                // that shift so the post-ack retrigger stays consumed on the
+                // eager frame (irq_precedence `late_m0irq_retrigger_2`/`_scx1_2`
+                // + `_ds_2`, want E0) while the one-M-cycle-later `_1` siblings
+                // still land outside it and DELIVER (want E2). DS uses +1
+                // (window 3) for the LYC/mode-2/mode-1/vblank families; the
+                // MODE-0 (HBLANK) retrigger family (`late_m0irq_retrigger`)
+                // needs window 4 — HBLANK is the enabled STAT source
+                // (`stat_src_hblank`) ONLY for those rows, so widen to 4 there.
+                self.ack_squash_dots = if self.double_speed {
+                    if self.ppu.stat_src_hblank() { 4 } else { 3 }
+                } else if !self.model.is_cgb() && self.ppu.line_dot().0 == 153 {
+                    // Line-153 LYC retrigger family: the dot-4 LYC=153
+                    // IF-emission decouple fires this line-153 STAT ISR — and
+                    // its ack — one M-cycle (4 dots) EARLIER than the dot-6
+                    // read frame the SS window `6` was tuned to, so widen by
+                    // the same read-debt (6→10) so the retrigger re-squashes
+                    // (gap 8 ≤ 10 → E0) while its `_1` sibling (gap 12 > 10)
+                    // still DELIVERS (E2). eager DMG line-153 only.
+                    10
                 } else {
-                    2
+                    6
                 };
                 // Eager-value carried-read peek: arm `read_carried` for a STAT
                 // OAM/HBlank ISR so the handler's first FF41 mode read takes
                 // the source's read-position carry (`isr_read_carry_hd`).
                 // Under the eager clock the dispatch stays cc+4, so arm the
                 // VERDICT peek here at the STAT (bit 1) ack.
-                // Cleared one-shot after the FF41 read in `Bus::read`. Never
-                // fires flag-off (`eager_value` false) → byte-identical.
-                if self.eager_value
-                    && bit == 1
-                    && (self.ppu.stat_rise_oam() || self.ppu.stat_rise_m0())
-                {
+                // Cleared one-shot after the FF41 read in `Bus::read`.
+                if bit == 1 && (self.ppu.stat_rise_oam() || self.ppu.stat_rise_m0()) {
                     self.ppu.set_read_carried(true);
                 }
             }
@@ -191,9 +161,8 @@ impl Interconnect {
         let entering_ds = switching && !self.double_speed;
         // Pin the post-switch exit-table anchor: the FIRST LCD-on
         // switching STOP since the last enable classifies the dance
-        // (mid-frame speedchange anchor vs the VBlank/boot prologue frame
-        // the tier2 suite constants absorb). Tier2 + eager, byte-identical OFF.
-        if self.eager_value && switching {
+        // (mid-frame speedchange anchor vs the VBlank/boot prologue frame).
+        if switching {
             self.ppu.note_switch_stop();
         }
         // gambatte Memory::stop snapshots the HDMA situation at the
@@ -314,13 +283,12 @@ impl Interconnect {
         // +2 half-dots per switch (with K=2/switch the post-switch polled
         // reads land exactly at SameBoy's read cfl − 4, and the half-dot bare
         // exit E(scx) = 510 + 2*scx closes all four scx1/scx2 `_1`/`_2` pairs,
-        // co-landing with that exit). Tier2 + eager; production byte-identical
-        // (both off). The eager re-host shares the STOP-shift install so the
-        // `speedchange`/`lcd_offset` reads classify on the same un-shifted frame
-        // the tier2 `law_pos` consumers (`access.rs`, `stat_irq`, `ff0f`,
-        // `regs`, `lyc`, `blocking`) + the `vis_exit_hd` post-switch exit-table
-        // arms (`stop_anchor_midframe`/`stop_leave_*`) already read.
-        if self.eager_value {
+        // co-landing with that exit). The eager re-host shares the STOP-shift
+        // install so the `speedchange`/`lcd_offset` reads classify on the same
+        // un-shifted frame the `law_pos` consumers (`access.rs`, `stat_irq`,
+        // `ff0f`, `regs`, `lyc`, `blocking`) + the `vis_exit_hd` post-switch
+        // exit-table arms (`stop_anchor_midframe`/`stop_leave_*`) already read.
+        {
             // K in 8 MHz HALF-dots (the grain): odd K leaves the PPU on a
             // half-dot skew relative to the CPU grid (`dhalf` persists), the
             // odd-mode alignment SameBoy's whole-freeze cannot represent.
@@ -426,8 +394,7 @@ impl Interconnect {
         // and no SameBoy verdict has been taken for it, and a shipped slice may
         // not drop a SameBoy-PASS row on an unverified guess. CGB stays on the
         // t0 sample until the `_3a`/`_3b` split is measured against SameBoy.
-        if self.eager_value
-            && (!self.model.is_cgb() || !self.double_speed)
+        if (!self.model.is_cgb() || !self.double_speed)
             && self.ie & IF_STAT_BIT != 0
             && self.ppu.stat_m0_rise_within(4)
         {
@@ -440,7 +407,7 @@ impl Interconnect {
         // The IME=1 halt-entry rewind (SameBoy `halt()`), DMG/CGB-single-speed
         // scoped like the entry check. The rewind is SameBoy's own halt
         // semantics, independent of which clock frames the read.
-        if !self.eager_value || (self.model.is_cgb() && self.double_speed) {
+        if self.model.is_cgb() && self.double_speed {
             return false;
         }
         self.pending_halt_entry() != 0
