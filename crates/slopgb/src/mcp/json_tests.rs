@@ -41,6 +41,27 @@ fn parses_the_jsonrpc_envelope() {
 }
 
 #[test]
+fn non_finite_numbers_render_as_valid_json() {
+    // JSON has no inf/nan; the writer must emit `null`, never the Rust
+    // Display forms `inf`/`NaN` (which are not valid JSON and break a strict
+    // client). Non-finite is wire-reachable: `1e999` overflows f64 to +inf on
+    // parse, and the server echoes an id straight back into a response.
+    assert_eq!(Json::Num(f64::INFINITY).render(), "null");
+    assert_eq!(Json::Num(f64::NEG_INFINITY).render(), "null");
+    assert_eq!(Json::Num(f64::NAN).render(), "null");
+    let id = parse("1e999").unwrap();
+    assert!(
+        matches!(id, Json::Num(n) if !n.is_finite()),
+        "1e999 -> non-finite"
+    );
+    let echoed = Json::obj([("id", id)]).render();
+    assert_eq!(
+        echoed, r#"{"id":null}"#,
+        "echoed non-finite id stays valid JSON"
+    );
+}
+
+#[test]
 fn round_trips_through_parse_render() {
     let src = r#"{"a":"x\ny","b":[1,2,3],"c":{"d":true},"e":null}"#;
     assert_eq!(parse(src).unwrap().render(), src);

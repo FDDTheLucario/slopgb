@@ -5,8 +5,9 @@
 //!
 //! GameShark GB code = 8 hex `ttvvaaaa`: type `tt` (01 = RAM write), value `vv`,
 //! address `aaaa` stored little-endian. bgb renders `01FF0AC1` as `(C10A)=FF`.
-//! Game Genie (ROM patch) codes are recognized + stored but not yet applied
-//! (needs a core ROM-read hook); they contribute no poke.
+//! Game Genie (ROM patch) codes decode to a `compare`/substitute pair and are
+//! pushed to the core via `GameBoy::set_gg_patches` (see [`CheatList::gg_patches`])
+//! whenever the list changes; they contribute a ROM patch, not a RAM poke.
 
 /// The decoded effect of a cheat code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -195,7 +196,11 @@ impl CheatList {
         let mut s = format!("cheat = {:02}\r\n", self.items.len());
         for c in &self.items {
             let flag = if c.enabled { '1' } else { '0' };
-            s.push_str(&format!("{} {flag}{}\r\n", c.code, c.comment));
+            // The .cht line is space-delimited, so the code field must not carry
+            // internal whitespace (parse_code tolerates it on input; load splits
+            // on the first space). Emit the whitespace-stripped code.
+            let code: String = c.code.chars().filter(|ch| !ch.is_whitespace()).collect();
+            s.push_str(&format!("{code} {flag}{}\r\n", c.comment));
         }
         s
     }

@@ -63,7 +63,12 @@ impl Json {
             Json::Null => out.push_str("null"),
             Json::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
             Json::Num(n) => {
-                if n.fract() == 0.0 && n.is_finite() && n.abs() < 9.007_199_254_740_992e15 {
+                if !n.is_finite() {
+                    // JSON has no inf/nan; `null` is the standard fallback (and
+                    // what serde_json emits). Non-finite is wire-reachable via an
+                    // overflowing id like `1e999`, so this must never render `inf`.
+                    out.push_str("null");
+                } else if n.fract() == 0.0 && n.abs() < 9.007_199_254_740_992e15 {
                     let _ = write!(out, "{}", *n as i64);
                 } else {
                     let _ = write!(out, "{n}");

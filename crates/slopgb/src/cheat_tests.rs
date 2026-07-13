@@ -125,6 +125,28 @@ fn cheat_file_round_trips_in_bgb_format() {
 }
 
 #[test]
+fn cheat_file_round_trips_codes_containing_spaces() {
+    // parse_code accepts internal whitespace ("0142 20C0"), but the .cht line
+    // format is space-delimited: a raw space in the code field splits wrong on
+    // load. to_file_text must emit a whitespace-free code so the round-trip
+    // preserves the cheat's effect instead of corrupting code + comment.
+    let mut list = CheatList::default();
+    list.add("coins", "0142 20C0"); // valid RAM cheat (C020)=42, but has a space
+    let text = list.to_file_text();
+    assert!(
+        text.contains("014220C0 1coins"),
+        "serialized code must carry no internal space: {text:?}"
+    );
+
+    let mut back = CheatList::default();
+    back.load_file_text(&text);
+    assert_eq!(back.len(), 1, "one cheat survives the round-trip");
+    assert_eq!(back.items()[0].comment, "coins", "comment not corrupted");
+    assert!(back.items()[0].enabled);
+    assert_eq!(back.pokes(), vec![(0xC020, 0x42)], "effect preserved");
+}
+
+#[test]
 fn enable_disable_all_and_poke_once() {
     let mut list = CheatList::default();
     list.add("a", "01FF0AC1");
