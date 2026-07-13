@@ -440,6 +440,18 @@ impl App {
     /// Pacing (fast-forward / framerate) + show-framerate + the debugger display
     /// flags are read directly from `self.settings`, so they need no push here.
     pub(crate) fn apply_settings(&mut self) {
+        self.apply_settings_no_persist();
+        // Persist the committed settings + recent ROMs (bgb.ini), preserving
+        // unknown bgb keys.
+        crate::settings_file::save(&self.settings, &self.recent);
+    }
+
+    /// The state-mutating half of [`Self::apply_settings`] with the on-disk
+    /// persistence removed: pushes the committed settings to the live machine /
+    /// frontend and reconciles stretch <-> window size, but writes no file. The
+    /// public entry point wraps this and then saves; tests drive the
+    /// reconciliation through this seam without touching the real config.
+    fn apply_settings_no_persist(&mut self) {
         let s = self.settings.clone();
         if let Some(pipe) = &mut self.audio {
             pipe.set_volume(s.volume, s.mono);
@@ -480,9 +492,6 @@ impl App {
         // Exceptions-tab break conditions → the core exception-break mask.
         self.apply_exceptions();
         self.update_title();
-        // Persist the committed settings + recent ROMs (bgb.ini), preserving
-        // unknown bgb keys.
-        crate::settings_file::save(&self.settings, &self.recent);
     }
 
     /// Push the Debug-tab disasm display options (syntax / hex case / clocks) to
@@ -547,3 +556,7 @@ fn about_box() -> InfoBox {
         ],
     )
 }
+
+#[cfg(test)]
+#[path = "app_menu_tests.rs"]
+mod tests;
