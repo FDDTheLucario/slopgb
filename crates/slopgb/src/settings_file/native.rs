@@ -1,4 +1,4 @@
-//! slopgb's native settings format (phase 2): a versioned, sectioned,
+//! slopgb's native settings format: a versioned, sectioned,
 //! std-only text file (`slopgb.conf`) — the default store; bgb.ini is demoted to
 //! import/export. Human-editable + git-diffable, forward/back compatible:
 //! unknown keys/sections are preserved, missing keys default, `version` drives

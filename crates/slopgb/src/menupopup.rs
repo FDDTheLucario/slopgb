@@ -310,12 +310,6 @@ fn anchor_and_monitor(game: &Window, cursor: (i32, i32)) -> (Point, Option<Monit
     ((base.0 + cursor.0, base.1 + cursor.1), monitor)
 }
 
-/// Decide whether a focus change dismisses the popup, updating the
-/// "has ever been focused" latch `focused_once`. A focus *gain* arms it; a focus
-/// *loss* dismisses only after a gain — ignoring the spurious on-map
-/// `Focused(false)` some WMs deliver before the window is ever focused (which
-/// would otherwise close the menu the instant it opens). Pure, so it is tested
-/// headless (the rest of the winit glue is verified live).
 /// Decide whether hovering the main-menu row carrying `effect` should open a
 /// submenu, given the `open_kind` currently shown (if any). Returns the
 /// [`SubKind`] to open when the row is a submenu opener whose kind is not
@@ -331,6 +325,12 @@ pub fn hover_open(effect: MenuEffect, open_kind: Option<SubKind>) -> Option<SubK
     }
 }
 
+/// Decide whether a focus change dismisses the popup, updating the
+/// "has ever been focused" latch `focused_once`. A focus *gain* arms it; a focus
+/// *loss* dismisses only after a gain — ignoring the spurious on-map
+/// `Focused(false)` some WMs deliver before the window is ever focused (which
+/// would otherwise close the menu the instant it opens). Pure, so it is tested
+/// headless (the rest of the winit glue is verified live).
 #[must_use]
 pub fn focus_dismiss(focused_once: &mut bool, focused: bool) -> bool {
     if focused {

@@ -1,6 +1,7 @@
-//! On-disk settings persistence. Phase 1: read/write bgb's `bgb.ini` format so
-//! the config interops with real bgb, preserving every key we don't model.
-//! See `docs/settings-persistence-plan.md` for the two-phase plan + key map.
+//! On-disk settings persistence. The native `slopgb.conf` is the default store;
+//! bgb's `bgb.ini` format is read/written for interop (import/export + a one-time
+//! migration), preserving every key we don't model. See
+//! `docs/settings-persistence-plan.md` for the key map.
 
 mod bgb;
 mod ini;
@@ -43,7 +44,7 @@ fn config_dir() -> Option<PathBuf> {
         .map(|h| PathBuf::from(h).join(".config").join("slopgb"))
 }
 
-/// Path to the native settings file (phase 2 default store).
+/// Path to the native settings file (the default store).
 fn native_path() -> Option<PathBuf> {
     config_dir().map(|d| d.join("slopgb.conf"))
 }
@@ -78,8 +79,8 @@ pub fn save(settings: &Settings, recent: &[PathBuf]) {
     }
 }
 
-/// Precedence: native file wins; else migrate a phase-1 bgb.ini into the native
-/// store (once); else defaults. Path-injected for tests.
+/// Precedence: native file wins; else migrate a bgb.ini into the native store
+/// (once); else defaults. Path-injected for tests.
 fn load_from_paths(native: Option<&Path>, bgb: Option<&Path>) -> Loaded {
     if let Some(np) = native {
         if np.exists() {
