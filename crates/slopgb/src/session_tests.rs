@@ -1,8 +1,24 @@
 use super::*;
-use slopgb_core::Model;
+use slopgb_core::{Model, RamInit};
 
 use crate::windows::options::ModelChoice;
 use std::process;
+
+/// A 32 KiB MBC1+RAM+BATTERY cart (8 KiB SRAM) so `save_data`/`flush_save`
+/// exercise the battery-persistence path.
+fn battery_rom() -> Vec<u8> {
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x147] = 0x03; // MBC1 + RAM + BATTERY
+    rom[0x149] = 0x02; // 8 KiB RAM
+    rom
+}
+
+/// Per-process scratch dir (concurrent runs can't collide).
+fn scratch(tag: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("slopgb-{tag}-{}", process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    dir
+}
 
 #[test]
 fn boot_size_ok_matches_model_class() {
@@ -219,6 +235,123 @@ fn save_state_round_trips_through_a_file() {
         s2.gb.cycles(),
         before,
         "failed load leaves the machine intact"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn ram_init_runs_before_sav_load_no_data_loss() {
+    // A battery cart with an existing .sav loaded under `--ram-init random`:
+    // init_ram (seeded garbage) must run BEFORE the .sav restore, so the user's
+    // real save survives. If the order were reversed the garbage would clobber
+    // the .sav — silent, permanent data loss.
+    let dir = scratch("raminit-order");
+    let path = dir.join("game.gb");
+    fs::write(&path, battery_rom()).unwrap();
+    let sav = vec![0x77u8; 0x2000];
+    fs::write(path.with_extension("sav"), &sav).unwrap();
+
+    let s = Session::load(
+        &path,
+        ModelChoice::Dmg,
+        &BootSpec::NONE,
+        Some(RamInit::Random(0xDEAD_BEEF)),
+    )
+    .expect("load");
+    assert_eq!(
+        s.gb.save_data().unwrap(),
+        sav,
+        "the existing .sav must survive power-on RAM init (init runs first)"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn flush_save_writes_once_then_dedups_until_ram_changes() {
+    let dir = scratch("flush-dedup");
+    let path = dir.join("game.gb");
+    fs::write(&path, battery_rom()).unwrap();
+    let sav_path = path.with_extension("sav");
+
+    let mut s = Session::load(&path, ModelChoice::Dmg, &BootSpec::NONE, None).expect("load");
+    assert!(!sav_path.exists(), "no save file until the first flush");
+    s.flush_save();
+    assert!(sav_path.exists(), "first flush writes the battery RAM");
+
+    // Dirty dedup: unchanged RAM must NOT be rewritten. Delete the file; a no-op
+    // flush must not recreate it (a regression to always-different rewrites it).
+    fs::remove_file(&sav_path).unwrap();
+    s.flush_save();
+    assert!(
+        !sav_path.exists(),
+        "unchanged RAM is not rewritten (last_saved dedup)"
+    );
+
+    // A RAM change flushes again.
+    assert!(s.gb.load_save_data(&vec![0x11u8; 0x2000]));
+    s.flush_save();
+    assert!(sav_path.exists(), "changed RAM is written");
+    assert_eq!(fs::read(&sav_path).unwrap(), vec![0x11u8; 0x2000]);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn autosave_flushes_only_after_the_cadence_deadline() {
+    let dir = scratch("autosave");
+    let path = dir.join("game.gb");
+    fs::write(&path, battery_rom()).unwrap();
+    let sav_path = path.with_extension("sav");
+
+    let mut s = Session::load(&path, ModelChoice::Dmg, &BootSpec::NONE, None).expect("load");
+    assert!(s.gb.load_save_data(&vec![0x33u8; 0x2000]), "make RAM dirty");
+
+    // Before the deadline autosave is a no-op.
+    s.next_autosave = u64::MAX;
+    s.autosave();
+    assert!(
+        !sav_path.exists(),
+        "before the deadline autosave does nothing"
+    );
+
+    // At/after the deadline it flushes and re-arms the next deadline.
+    s.next_autosave = s.gb.cycles();
+    s.autosave();
+    assert!(sav_path.exists(), "at the deadline autosave flushes");
+    assert_eq!(
+        s.next_autosave,
+        s.gb.cycles().saturating_add(AUTOSAVE_CYCLES),
+        "autosave re-arms the next cadence deadline"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn quick_load_reanchors_the_autosave_deadline() {
+    let dir = scratch("quickload-anchor");
+    let path = dir.join("game.gb");
+    fs::write(&path, battery_rom()).unwrap();
+
+    let mut s = Session::load(&path, ModelChoice::Dmg, &BootSpec::NONE, None).expect("load");
+    s.gb.run_frame();
+    s.quick_save();
+    let snap_cycles = s.gb.cycles();
+    for _ in 0..5 {
+        s.gb.run_frame();
+    }
+    assert!(
+        s.gb.cycles() > snap_cycles,
+        "time advanced past the snapshot"
+    );
+
+    // A stale far-future deadline must be re-anchored by quick_load, else the
+    // restored (earlier) machine would suppress autosave until time replays.
+    s.next_autosave = u64::MAX;
+    assert!(s.quick_load(), "snapshot restored");
+    assert_eq!(s.gb.cycles(), snap_cycles, "cycle counter jumped back");
+    assert_eq!(
+        s.next_autosave,
+        snap_cycles.saturating_add(AUTOSAVE_CYCLES),
+        "quick_load re-anchors autosave to the restored cycle counter"
     );
     let _ = fs::remove_dir_all(&dir);
 }

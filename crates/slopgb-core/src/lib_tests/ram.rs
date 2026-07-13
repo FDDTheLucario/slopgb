@@ -69,3 +69,91 @@ fn random_fills_work_ram_deterministically() {
     assert_eq!(a, wram0(0x1234_5678), "same seed -> identical WRAM");
     assert!(a.iter().any(|&b| b != 0), "seeded fill populated work RAM");
 }
+
+/// Pin the exact xorshift64 output stream through the public `init_ram` seam:
+/// cart SRAM is filled first, so `save_data()[..N]` is the first N `next_u8()`
+/// draws. This defeats the "swap the PRNG, every test still passes" hole — the
+/// documented contract (cli.rs `DEFAULT_RAM_SEED`) is cross-run reproducibility,
+/// which a different algorithm silently breaks. Values computed from the
+/// xorshift64 definition (seed | 1; ^= <<13; ^= >>7; ^= <<17; byte = x >> 24).
+#[test]
+fn random_pins_the_exact_xorshift_stream() {
+    let mut gb = GameBoy::new(Model::Dmg, ram_cart()).unwrap();
+    gb.init_ram(RamInit::Random(0xDEAD_BEEF));
+    let sram = gb.save_data().unwrap();
+    assert_eq!(
+        &sram[..16],
+        &[
+            0xBF, 0x29, 0x9E, 0x99, 0xC2, 0x0D, 0xC9, 0xEF, 0x6D, 0xB1, 0xD8, 0x25, 0x32, 0xBB,
+            0x1C, 0xBD,
+        ],
+        "seed 0xDEADBEEF -> exact xorshift64 stream (a PRNG swap changes these)"
+    );
+}
+
+/// `RamInit::Random` fills BOTH video RAM banks (deleting the `fill_video_ram`
+/// call would pass every other test). Probes via the bank-explicit debug read,
+/// which bypasses PPU mode blocking.
+#[test]
+fn random_fills_both_video_ram_banks() {
+    let vram = |seed, bank| {
+        let mut gb = GameBoy::new(Model::Cgb, ram_cart()).unwrap();
+        gb.init_ram(RamInit::Random(seed));
+        (0x8000u16..0x8010)
+            .map(|a| gb.debug_read_banked(bank, a))
+            .collect::<Vec<_>>()
+    };
+    let b0 = vram(0x1234_5678, 0);
+    let b1 = vram(0x1234_5678, 1);
+    assert_eq!(
+        b0,
+        vram(0x1234_5678, 0),
+        "same seed -> identical VRAM bank 0"
+    );
+    assert!(
+        b0.iter().any(|&b| b != 0),
+        "seeded fill populated VRAM bank 0"
+    );
+    assert!(
+        b1.iter().any(|&b| b != 0),
+        "seeded fill populated VRAM bank 1"
+    );
+}
+
+/// `RamInit::Random` fills the banked CGB work RAM (D000-DFFF, banks 1-7), not
+/// just bank 0 at C000. Probes several banks via the bank-explicit debug read.
+#[test]
+fn random_fills_banked_cgb_work_ram() {
+    let mut gb = GameBoy::new(Model::Cgb, ram_cart()).unwrap();
+    gb.init_ram(RamInit::Random(0x1234_5678));
+    for bank in [2u16, 5, 7] {
+        let banked: Vec<u8> = (0xD000u16..0xD010)
+            .map(|a| gb.debug_read_banked(bank, a))
+            .collect();
+        assert!(
+            banked.iter().any(|&b| b != 0),
+            "seeded fill populated WRAM bank {bank}"
+        );
+    }
+}
+
+/// `RamInit::Fill` touches ONLY cart SRAM — work RAM and video RAM stay at the
+/// zeroed `new` default. Pins the deliberate Fill-vs-Random scope asymmetry
+/// (Random fills all three; Fill fills only the battery-backed cart RAM).
+#[test]
+fn fill_touches_only_cart_sram() {
+    let mut gb = GameBoy::new(Model::Cgb, ram_cart()).unwrap();
+    gb.init_ram(RamInit::Fill(0x42));
+    assert!(
+        gb.save_data().unwrap()[..0x2000].iter().all(|&b| b == 0x42),
+        "Fill sets cart SRAM"
+    );
+    assert!(
+        (0xC000u16..0xC010).all(|a| gb.debug_read(a) == 0),
+        "Fill leaves work RAM at the zeroed default"
+    );
+    assert!(
+        (0x8000u16..0x8010).all(|a| gb.debug_read_banked(0, a) == 0),
+        "Fill leaves video RAM at the zeroed default"
+    );
+}

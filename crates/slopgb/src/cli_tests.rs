@@ -39,12 +39,15 @@ fn ram_init_parses_fill_and_random() {
             .ram_init,
         Some(RamInit::Random(42))
     );
-    assert!(matches!(
+    // Bare `random` must resolve to the fixed DEFAULT_RAM_SEED, not a wildcard:
+    // the documented contract (cli.rs) is cross-run reproducibility, so a
+    // regression to an entropy/time seed must fail here.
+    assert_eq!(
         parse_run(&["--ram-init", "random", "g.gb"])
             .unwrap()
             .ram_init,
-        Some(RamInit::Random(_))
-    ));
+        Some(RamInit::Random(DEFAULT_RAM_SEED))
+    );
     assert!(parse(&["--ram-init", "bogus", "g.gb"]).is_err());
     assert!(parse(&["--ram-init", "fill:zz", "g.gb"]).is_err());
     assert!(parse(&["--ram-init"]).is_err(), "missing value");
