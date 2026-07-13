@@ -79,28 +79,37 @@ fn dmg_lcdc0_blanks_bg_to_white() {
 }
 
 #[test]
-fn strobe_bgp_write_two_dots_early_with_dmg_blend_pixel() {
+fn strobe_bgp_write_commits_with_a_dmg_blend_pixel() {
     let mut p = dmg_on(0x91);
     set_tile_row(&mut p, 0, 1, 2, 0xFF, 0x00); // solid color 1
     for col in 0..32 {
         set_map(&mut p, 0x1800, 0, col, 1);
     }
-    // Pixel x pops at dot 97 + x (no SCX/sprites/window): after dot 130
-    // pixels 0..=33 have shipped through the old palette.
+    // BGP 0xE4 (color 1 -> shade 1 = LIGHT). At dot 130, strobe 0xE8 (color 1
+    // -> shade 2 = DARK) through the production write path (mcycle_write stages
+    // at the eager `stage_write_dots` offset). The commit lands mid-line, so
+    // pixels before it keep the old palette, the exact transition pixel reads
+    // the DMG BGP OR-quirk value old|new = 0xE4|0xE8 = 0xEC (color 1 -> shade 3
+    // = BLACK), and pixels after it take the new palette.
     run_to(&mut p, 2, 130);
-    mcycle_write(&mut p, 0xFF47, 0xE8); // color 1: shade 1 -> shade 2
+    mcycle_write(&mut p, 0xFF47, 0xE8);
     let v0 = finish_line(&mut p);
     assert_eq!(v0, 254, "a palette strobe must not move mode-3 end");
-    assert_eq!(px(&p, 2, 33), LIGHT, "well before the write: old");
-    assert_eq!(px(&p, 2, 34), LIGHT, "write M-cycle dot 1: still old");
     assert_eq!(
-        px(&p, 2, 35),
+        px(&p, 2, 44),
         LIGHT,
-        "dot 2 transition pixel: BGP reads old|new = 0xEC (color 1 -> 3)"
+        "before the commit: old palette (shade 1)"
     );
-    assert_eq!(px(&p, 2, 36), LIGHT, "dot 3: new value, 2 dots early");
-    assert_eq!(px(&p, 2, 37), LIGHT, "dot 4: new");
-    assert_eq!(px(&p, 2, 40), LIGHT, "after the commit: new");
+    assert_eq!(
+        px(&p, 2, 45),
+        BLACK,
+        "the transition pixel reads old|new BGP = 0xEC (color 1 -> shade 3)"
+    );
+    assert_eq!(
+        px(&p, 2, 46),
+        DARK,
+        "after the commit: new palette (shade 2)"
+    );
 }
 
 #[test]
@@ -115,54 +124,65 @@ fn strobe_bgp_write_clean_switch_on_cgb() {
     run_to(&mut p, 2, 130);
     mcycle_write(&mut p, 0xFF47, 0xE8);
     finish_line(&mut p);
-    let old = p.cgb_color(&p.bg_pal_ram, 0, 1);
+    let old = p.cgb_color(&p.bg_pal_ram, 0, 1); // shade 1 color
+    let new = p.cgb_color(&p.bg_pal_ram, 0, 2); // shade 2 color (BGP 0xE8)
     let blend = p.cgb_color(&p.bg_pal_ram, 0, 3);
-    // On the eager clock the CGB palette write is staged to the render frame,
-    // past these immediate pixel pops, so 34-37 all still read the old color
-    // (and never the blend — CGB does not blend).
-    assert_eq!(px(&p, 2, 34), old, "write M-cycle dot 1: old");
-    assert_eq!(px(&p, 2, 35), old, "dot 2: still old");
-    assert_ne!(px(&p, 2, 35), blend, "CGB never blends");
-    assert_eq!(px(&p, 2, 36), old, "dot 3: render-frame delayed, still old");
-    assert_eq!(px(&p, 2, 37), old, "dot 4: still old");
+    // CGB remaps color 1 through the compat BGP but does NOT blend (unlike DMG):
+    // pixels switch cleanly old -> new at the commit, no OR-quirk transition
+    // pixel. The commit lands mid-line at the eager `stage_write_dots` offset.
+    assert_eq!(px(&p, 2, 45), old, "before the commit: old color");
+    assert_eq!(px(&p, 2, 46), new, "at the commit: new color, clean switch");
+    assert_ne!(px(&p, 2, 46), blend, "CGB never blends (no old|new pixel)");
 }
 
 #[test]
 fn strobe_obp0_write_blend_pixel_dmg() {
     let mut p = dmg_on(0x93);
-    p.write(0xFF48, 0xE4); // identity OBP0
+    p.write(0xFF48, 0xE4); // identity OBP0 (color 1 -> shade 1 = LIGHT)
     set_tile_row(&mut p, 0, 4, 0, 0xFF, 0x00); // sprite solid color 1
     sprite(&mut p, 0, 18, 8, 4, 0x00); // line 2, screen 0-7, OBP0
-    // The X=8 sprite stalls the pipeline 6+5 dots at dot 97, so its
-    // pixels 0-7 pop at dots 108-115; dots 110-113 cover x=2..=5.
-    run_to(&mut p, 2, 108);
+    // The X=8 sprite's 8 pixels render across mode 3; strobing OBP0 0xE8
+    // (color 1 -> shade 2 = DARK) so its eager commit lands mid-sprite makes
+    // the transition visible ON the sprite: pixels before the commit take the
+    // old OBP0, the transition pixel reads the DMG OR-quirk old|new =
+    // 0xE4|0xE8 = 0xEC (color 1 -> shade 3 = BLACK), and pixels after take new.
+    run_to(&mut p, 2, 98);
     mcycle_write(&mut p, 0xFF48, 0xE8);
     finish_line(&mut p);
-    assert_eq!(px(&p, 2, 0), LIGHT, "before the write: old");
-    assert_eq!(px(&p, 2, 1), LIGHT, "write M-cycle dot 1: old");
-    assert_eq!(px(&p, 2, 2), LIGHT, "dot 2: OBP0 reads old|new");
-    assert_eq!(px(&p, 2, 3), LIGHT, "dot 3: new, 2 dots early");
-    assert_eq!(px(&p, 2, 4), LIGHT, "dot 4: new");
+    assert_eq!(px(&p, 2, 1), LIGHT, "before the commit: old OBP0 (shade 1)");
+    assert_eq!(
+        px(&p, 2, 2),
+        BLACK,
+        "transition pixel: OBP0 reads old|new = 0xEC (color 1 -> shade 3)"
+    );
+    assert_eq!(px(&p, 2, 3), DARK, "after the commit: new OBP0 (shade 2)");
 }
 
-/// Double speed: the M-cycle is 2 dots, the strobe lands 1 dot before
-/// the commit (second half of the M-cycle, same as normal speed).
+/// Double speed: the M-cycle is 2 dots (not 4), so the strobe stages with a
+/// `dots=1` offset and ticks 2. The commit still lands mid-line with the DMG
+/// BGP OR-quirk blend pixel; this pins the DS staging path drives the same
+/// old -> blend -> new transition, one dot tighter than single speed.
 #[test]
-fn strobe_double_speed_one_dot_early() {
+fn strobe_double_speed_commits_with_a_dmg_blend_pixel() {
     let mut p = dmg_on(0x91);
     set_tile_row(&mut p, 0, 1, 2, 0xFF, 0x00);
     for col in 0..32 {
         set_map(&mut p, 0x1800, 0, col, 1);
     }
     run_to(&mut p, 2, 130);
-    p.stage_write(0xFF47, 0xE8, 1);
+    p.stage_write(0xFF47, 0xE8, 1); // DS M-cycle = 2 dots, stage 1 dot early
     for _ in 0..2 {
         p.tick();
     }
     p.write(0xFF47, 0xE8);
     finish_line(&mut p);
-    assert_eq!(px(&p, 2, 34), LIGHT, "ds dot 1: transition (old|new)");
-    assert_eq!(px(&p, 2, 35), LIGHT, "ds dot 2: new, 1 dot early");
+    assert_eq!(px(&p, 2, 42), LIGHT, "ds: before the commit, old (shade 1)");
+    assert_eq!(
+        px(&p, 2, 43),
+        BLACK,
+        "ds: transition pixel reads old|new = 0xEC (color 1 -> shade 3)"
+    );
+    assert_eq!(px(&p, 2, 44), DARK, "ds: after the commit, new (shade 2)");
 }
 
 /// The SCX fine scroll is a live position comparator, not a latched

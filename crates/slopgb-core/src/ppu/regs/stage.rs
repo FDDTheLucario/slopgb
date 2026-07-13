@@ -6,6 +6,66 @@
 use super::*;
 
 impl Ppu {
+    /// The per-register mid-mode-3 write-commit stage offset (in dots) for the
+    /// eager-value write path — a pure function of `addr` / `scan_pos` / speed.
+    /// The interconnect's `Bus::write` calls this with its live `double_speed`;
+    /// the PPU render-test harness calls it too, so both stage at the exact same
+    /// offset (no duplicated timing constants).
+    pub(crate) fn stage_write_dots(&self, addr: u16, double_speed: bool) -> u8 {
+        if let (0xFF43, true, true) = (addr, !self.glitch_active(), double_speed) {
+            // SCX in DOUBLE SPEED takes a +2 render-frame defer, not single
+            // speed's +4 (dots=3): the DS M-cycle is 2 PPU dots (vs 4), so
+            // the write-commit-to-fetch-grid offset halves. dots=2 fixes the
+            // 5 `scx_during_m3_ds` fine-scroll pixel legs AND holds
+            // `late_scx4`'s DS read law (the fine-scroll comparator
+            // straddle) — a swept dots=1 broke the read law, dots=3 broke the
+            // render. SCY/palette keep dots=3 in DS (no DS pixel legs).
+            2
+        } else if !self.model.is_cgb() && matches!(addr, 0xFF47..=0xFF49) && !self.glitch_active() {
+            // The DMG palette (BGP/OBP FF47-49) commit anchors to the EVEN
+            // (CPU-M-cycle) dot grid. SameBoy commits the palette at the write
+            // M-cycle's exact half-dot; single speed is whole-dot aligned so
+            // the commit lands at a whole (EVEN) dot, from which the pop is
+            // visible +2 dots — an ODD leading edge rounds up one dot so the
+            // commit is visible +3 (round_up_even(LE)+2), an EVEN one +2. The
+            // mealybug BGP/OBP legs land EVEN leading edges (want +2), the
+            // gambatte dmgpalette legs ODD (want +3). DMG only — CGB has no
+            // FF47-49 render path (its palettes are FF68-6B).
+            2 + (self.scan_pos().1 & 1) as u8
+        } else if addr == 0xFF42 && !double_speed && !self.glitch_active() {
+            // SCY (FF42) takes the same EVEN-dot parity anchor as the DMG
+            // palette (round_up_even(LE)+2: +2 from an EVEN leading edge, +3
+            // from an ODD one). On a sprite-stalled line a tile's Lo/Hi data
+            // read straddles the deferred SCY-commit dot, re-sampling the NEW
+            // scroll while the latched tile NUMBER keeps the old (the mealybug
+            // m3_scy_change mixed-fetch behaviour). objectless
+            // scy_during_m3_{1,4,5,6} land ODD (want +3); the sprite leg EVEN
+            // (want +2). SS only (DS keeps defer=3, the `else` below).
+            2 + (self.scan_pos().1 & 1) as u8
+        } else if matches!(addr, 0xFF42 | 0xFF43 | 0xFF47..=0xFF49) && !self.glitch_active() {
+            // SCX takes the full +4 render-frame deferral: the fine-scroll
+            // comparator hunt (dots 89-96) is calibrated to the production cc+4
+            // frame, 4 dots late of the deferred write's true instant, so the
+            // pipeline-view SCX must lag the same 4 dots for the straddle pairs
+            // to separate (late_scx4 SS+DS + scx_m3_extend). WX/WY keep the
+            // production frame; each register carries its own commit class,
+            // mirroring SameBoy's per-register conflict maps.
+            3
+        } else if addr == 0xFF4B && !self.glitch_active() {
+            // WX (FF4B) render-VIEW defer: `eff.wx` (the window activation
+            // comparator) survives the arch write and strobe-commits at the
+            // production frame — leading+2 at BOTH speeds. stage_write adds the
+            // FF4B +1 (WX one dot later than the palette class) → final 2 ==
+            // leading+2. The un-catch READ law (`wx_write_dot`, FF41 mode-3
+            // length) keeps its cc+0 input in regs.rs (the split).
+            0
+        } else if double_speed {
+            1
+        } else {
+            2
+        }
+    }
+
     /// the write M-cycle and commits via [`Self::write`] afterwards, so
     /// the pixel pipeline sees the new value land mid-cycle exactly as the
     /// bus drives it on hardware (gbctr "Memory access timing"), while

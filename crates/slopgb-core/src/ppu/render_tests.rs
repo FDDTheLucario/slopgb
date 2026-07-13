@@ -56,10 +56,14 @@ fn sprite(p: &mut Ppu, i: u8, y: u8, x: u8, tile: u8, flags: u8) {
     p.oam_dma_write(i * 4 + 3, flags);
 }
 
-/// Mimic the interconnect's write path: stage, tick one M-cycle (4 dots
-/// at normal speed), then commit architecturally.
+/// Mimic the interconnect's write path exactly: stage at the register's
+/// production commit offset (`stage_write_dots`, the same call `Bus::write`
+/// makes), tick one M-cycle (4 dots at normal speed), then commit
+/// architecturally. These render tests are single-speed, so `double_speed` is
+/// `false`.
 fn mcycle_write(p: &mut Ppu, addr: u16, value: u8) {
-    p.stage_write(addr, value, 2);
+    let dots = p.stage_write_dots(addr, false);
+    p.stage_write(addr, value, dots);
     for _ in 0..4 {
         p.tick();
     }

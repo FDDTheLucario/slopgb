@@ -90,101 +90,12 @@ impl Interconnect {
     }
 
     /// The per-register mid-mode-3 write-commit stage offset (in dots) for the
-    /// eager-value write path ([`crate::interconnect::Bus`]`::write`). A pure
-    /// function of `addr`/`scan_pos`/`speed`.
+    /// eager-value write path ([`crate::interconnect::Bus`]`::write`). Delegates
+    /// to [`crate::ppu::Ppu::stage_write_dots`] with the live double-speed flag —
+    /// the offset is a pure function of `addr` / `scan_pos` / speed, so the PPU
+    /// render-test harness shares the exact same computation.
     pub(super) fn stage_write_dots(&self, addr: u16) -> u8 {
-        if let (0xFF43, true, true) = (addr, !self.ppu.glitch_active(), self.double_speed) {
-            // SCX in DOUBLE SPEED takes a +2 render-frame defer, not single
-            // speed's +4 (dots=3): the DS M-cycle is 2 PPU dots (vs 4), so
-            // the write-commit-to-fetch-grid offset halves. dots=2 fixes the
-            // 5 `scx_during_m3_ds` fine-scroll pixel legs AND holds
-            // `late_scx4`'s DS read law (the fine-scroll comparator
-            // straddle) — a swept dots=1 broke the read law
-            // (`tier2_late_scx_writestrobe`), dots=3 broke the render.
-            // SCY/palette keep dots=3 in DS (no DS pixel legs, and their
-            // timing never reaches an OCR verdict).
-            2
-        } else if !self.model.is_cgb()
-            && matches!(addr, 0xFF47..=0xFF49)
-            && !self.ppu.glitch_active()
-        {
-            // The DMG palette (BGP/OBP FF47-49) commit anchors to the EVEN
-            // (CPU-M-cycle) dot grid, resolving the sub-dot render POP grid
-            // that the whole-dot defer=3 could not. SameBoy commits the
-            // palette at the write M-cycle's exact half-dot and the pixel
-            // pops at a half-dot; single speed is whole-dot aligned so the
-            // write commit lands at a whole (EVEN) dot, from which the pop is
-            // visible +2 dots. The tier2 deferred write's leading edge
-            // (`scan_pos().1` — the machine already advanced there above) is
-            // whole-dot but loses which side of the even grid it sits on: an
-            // ODD leading edge means the M-cycle boundary rounds up one dot
-            // so the commit is visible +3 (round_up_even(LE)+2), an EVEN one
-            // +2. The mealybug BGP/OBP legs land EVEN leading edges (want +2
-            // — a flat +3 renders the change one column late), the gambatte
-            // dmgpalette legs ODD (want +3). DMG only — CGB has no FF47-49
-            // render path (its palettes are FF68-6B) and no BGP OR-quirk, so
-            // it keeps the plain +3. Render-only (pure colour selection, no
-            // mode-3-length or FF41-read-law coupling): production
-            // byte-identical OFF, CGB two-bin unaffected.
-            2 + (self.ppu.scan_pos().1 & 1) as u8
-        } else if addr == 0xFF42 && !self.double_speed && !self.ppu.glitch_active() {
-            // SCY (FF42) commit takes the same EVEN-dot parity anchor as the
-            // DMG palette, resolving the sub-dot render-fetch grid the
-            // whole-dot defer=3 could not. On a sprite-stalled line the
-            // ~11-dot OBJ fetch shifts the BG fetch grid so a tile's Lo/Hi
-            // data read (`bg_tile_addr`, fine row = LY+SCY & 7) lands EXACTLY
-            // on the deferred SCY-commit dot: SameBoy/production commits the
-            // write at the M-cycle's mid-point (its true half-dot, visible +2
-            // from an EVEN leading edge / +3 from an ODD one — the same
-            // round_up_even(LE)+2 the palette derives), so a per-tile data
-            // read straddling it re-samples the NEW scroll while the
-            // already-latched tile NUMBER keeps the old (the mealybug
-            // m3_scy_change mixed-fetch behaviour). The flat defer=3 rendered
-            // the SCY change one column late on `scy_during_m3_spx08_2` (the
-            // sprite-stalled scy leg). The objectless scy_during_m3_{1,4,5,6}
-            // writes land ODD leading edges (want +3 — a flat +2 broke all
-            // 8); the sprite leg lands an EVEN one (want +2). SCY is pure row
-            // selection — no mode-3-length or FF41-read-law coupling (those
-            // sample ARCH `self.scy`) — so this is render-only, production
-            // byte-identical OFF. SS only (the DS M-cycle is 2 dots; SCY has
-            // no DS pixel legs and DS keeps defer=3, the `else` below).
-            2 + (self.ppu.scan_pos().1 & 1) as u8
-        } else if matches!(addr, 0xFF42 | 0xFF43 | 0xFF47..=0xFF49) && !self.ppu.glitch_active() {
-            // SCX takes the full +4 render-frame deferral (visible from
-            // `step(L+4)`): PROVEN by late_scx4 SS+DS + scx_m3_extend —
-            // the fine-scroll comparator hunt (dots 89-96) is calibrated
-            // to the production cc+4 frame, 4 dots late of the deferred
-            // write's true instant, so the pipeline-view SCX must lag the
-            // same 4 dots for the straddle pairs to separate. LCDC +4 was
-            // BUILT + MEASURED NET-NEGATIVE (A/B-inverts the
-            // sprites/late_sizechange pairs and pushes the late_disable
-            // pre-draw aborts into post-draw); WX/WY likewise keep the
-            // production frame (late_wx/late_wy `_1` legs) — write-vs-
-            // render-event races already compare in a consistent frame,
-            // only the hunt's absolute-dot anchor needs the lag. The
-            // per-register split mirrors SameBoy's per-register conflict
-            // maps (each register carries its own commit class).
-            3
-        } else if addr == 0xFF4B && !self.ppu.glitch_active() {
-            // WX (FF4B) render-VIEW defer: `eff.wx` (the window
-            // activation/reactivation comparator) now survives the arch
-            // write (see `regs.rs` `staged_pending`) and strobe-commits at
-            // the production frame — leading+2 at BOTH speeds — instead of
-            // the leading edge (cc+0), where the eager commit landed the WX
-            // change 2-4 dots early of the render's per-dot WX comparator
-            // (`late_wx_ds` DS: the eager cc+0 WX=255 pre-empted the wx=7
-            // window activation → bare; m3_wx_6 SS: the un-catch straddle
-            // needs the change to split the two `pos_dot==wx+6` compares).
-            // The un-catch READ law (`wx_write_dot`, FF41 mode-3 length) keeps
-            // its cc+0 input in `regs.rs` (the split). stage_write adds the
-            // FF4B +1 (WX one dot later than the palette class) → final 2:
-            // leading+2 == production. Render-only, byte-identical OFF.
-            0
-        } else if self.double_speed {
-            1
-        } else {
-            2
-        }
+        self.ppu.stage_write_dots(addr, self.double_speed)
     }
 
     /// Test-only view of the deferred-commit CPU clock's committed position
