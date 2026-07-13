@@ -330,11 +330,11 @@ pub struct Ppu {
     /// commit at its true WriteCpu sub-dot position, `(value, half_dots_left)`,
     /// counted down by the odd-half engine ([`Ppu::stat_update_half`]) so the
     /// disable/enable lands at the coincident LYC re-latch / mode-0 flip half-
-    /// dot rather than the whole-dot cc+4 commit. `None` (and unread) except
-    /// under `eager` → production/tier2 byte-identical.
+    /// dot rather than the whole-dot cc+4 commit. `None` between CGB FF41
+    /// write-commits; armed by the write, consumed by the odd-half engine.
     eng_stat_half: Option<(u8, u8)>,
     /// Previous engine tick's `mode_for_interrupt` (m0-flip detection for
-    /// the fast-forward above). Tier-2/LE only.
+    /// the fast-forward above).
     eng_mfi_prev: u8,
     /// The DS analogue of the m0-flip fast-forward dip: the (line,
     /// dot) of the last DS FF41 commit that DROPPED the LYC enable. At DS
@@ -348,7 +348,7 @@ pub struct Ppu {
     /// (SameBoy `GB_CONFLICT_WRITE_CPU`: the IF write lands leading-edge +1 T
     /// and beats a co/prior-instant rise; a consumed rise does not
     /// level-re-raise — strict edge). Armed to 2 at the deferred FF0F write,
-    /// decremented per engine dot, one-shot on consumption. Tier-2 only.
+    /// decremented per engine dot, one-shot on consumption.
     stat_if_squash: u8,
     /// The deferred-path dispatch-ack squash, the PPU-side
     /// replacement for the interconnect's whole-dot bit-0/1 `ack_squash_dots`
@@ -359,7 +359,7 @@ pub struct Ppu {
     /// Windows in dots (SS, DS): mode-0 (0, 1) ·
     /// mode-2 pulse (0, 0) · LYC / mode-1 / vblank-IF (2, 0). Armed to 2 at
     /// `ack`, decremented per dot, consumed as `ctr >= 3 − W`. `mask` names
-    /// the acked bit. Tier-2 only (never armed flag-off).
+    /// the acked bit.
     ack_squash_ppu_mask: u8,
     ack_squash_ppu: u8,
     /// The line-0 dot-4 OAM pulse's read-view age: armed (1)
@@ -443,10 +443,9 @@ pub struct Ppu {
     /// applied (w=4). Carried across LCD disable/enable (the phase is a
     /// CPU-grid-vs-PPU displacement, not a frame property — the lcd_offset
     /// ROMs re-enable the LCD after their excursions and the offset
-    /// persists). Consumed by the tier2 offset-sensitive laws
-    /// (accessibility windows / write-triggers / the P1 comparison); always 0
-    /// flag-off (only written from the tier2 STOP path) so production is
-    /// byte-identical.
+    /// persists). Consumed by the offset-sensitive laws (accessibility windows /
+    /// write-triggers / the P1 comparison); written from the STOP speed-switch
+    /// path (`interconnect::speed`).
     lcd_phase_hd: i16,
     /// Shadow of SameBoy's `double_speed_alignment` (mod 8): the LCD
     /// age in 8 MHz half-dots since the last enable (+2 per dot while the LCD

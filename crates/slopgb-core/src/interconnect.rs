@@ -178,7 +178,8 @@ pub struct Interconnect {
     /// WRITE_CPU` lands the CPU value 1 T past the M-cycle boundary). The
     /// eager write borrowed that dot ahead of `write_no_tick`, so the next
     /// `tick_machine` ticks 3 PPU dots (skip cc 1) to restore CPU/PPU phase.
-    /// Set only under `eager` → production/tier2 byte-identical.
+    /// Set by the eager mid-M-cycle write borrow (`interconnect::bus`); repaid
+    /// by the next `tick_machine`.
     eager_wr_borrow: bool,
 
     /// CGB hardware running a CGB-flagged cart. CGB hardware with a DMG
