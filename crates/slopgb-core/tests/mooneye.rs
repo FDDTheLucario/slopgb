@@ -170,7 +170,15 @@ fn intr_2_timing_both_models() {
     let mut fails = Vec::new();
     for rel in roms {
         let Ok(rom) = std::fs::read(root.join(rel)) else {
-            continue; // absent in a partial checkout — mts_root gate already ran
+            // Absent in a partial checkout: skip normally, but fail loudly under
+            // SLOPGB_REQUIRE_ROMS=1 so a missing required ROM can't pass this
+            // cross-model pin vacuously (the mts_root gate ran, but each of
+            // these ROMs must individually exist).
+            common::skip_or_fail(
+                "intr_2_timing_both_models",
+                &format!("required ROM {rel} not present"),
+            );
+            continue;
         };
         for model in [Model::Dmg, Model::Cgb] {
             if let Err(e) = common::run_breakpoint_rom(&rom, model) {

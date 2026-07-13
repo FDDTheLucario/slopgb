@@ -135,7 +135,16 @@ fn golden_fingerprint() {
     let mode = std::env::var("SLOPGB_GOLDEN").ok();
     let path = golden_path();
     if mode.as_deref() != Some("capture") && !path.exists() {
-        println!("golden_fingerprint: no snapshot (set SLOPGB_GOLDEN=capture to create); skipping");
+        // Missing snapshot: skip normally, but fail loudly under
+        // SLOPGB_REQUIRE_ROMS=1 (as in CI) so this gate cannot silently no-op —
+        // the check runs before the gbtr_root gate, which otherwise couldn't
+        // force it. The snapshot (fingerprint.txt) is committed, so present
+        // checkouts never hit this branch.
+        common::skip_or_fail_gbtr(
+            "golden_fingerprint",
+            "no golden snapshot (set SLOPGB_GOLDEN=capture to create \
+             tests/gbtr/golden/fingerprint.txt)",
+        );
         return;
     }
     let Some(root) = common::gbtr_root() else {

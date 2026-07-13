@@ -211,3 +211,97 @@ fn get_is_method_not_allowed() {
     assert!(resp.starts_with("HTTP/1.1 405"), "GET → 405: {resp}");
     drop(server);
 }
+
+// --- Abuse guards on the untrusted-net request parser (`read_request`). ---
+// These drive `read_request` directly (the exact path `handle_conn` uses) with
+// crafted byte streams. Each asserts the guard's *observable* effect so it fails
+// the instant that guard is removed — see the per-test comment for what the
+// un-guarded code would return instead.
+
+/// Feed crafted request bytes straight into [`read_request`] over a loopback
+/// socket pair and return its outcome. A writer thread sends `request` and then
+/// closes its write half, so a body larger than the socket buffer can't deadlock
+/// the send and a truncated request still reaches EOF. Broken-pipe write errors
+/// are ignored: the MAX_BODY guard drops the socket before draining an oversized
+/// body, so the writer's remaining bytes are expected to fail.
+fn drive_read_request(request: Vec<u8>) -> Result<Option<Request>, RequestError> {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let writer = std::thread::spawn(move || {
+        if let Ok(mut c) = TcpStream::connect((Ipv4Addr::LOCALHOST, port)) {
+            let _ = c.write_all(&request);
+            let _ = c.flush();
+            let _ = c.shutdown(std::net::Shutdown::Write);
+        }
+    });
+    let (server, _) = listener.accept().unwrap();
+    // Generous timeout: no test path here legitimately waits on it (data or EOF
+    // always arrives), it only defeats a writer-vs-reader startup race.
+    server
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let mut reader = BufReader::new(server);
+    let stop = AtomicBool::new(false);
+    let outcome = read_request(&mut reader, &stop);
+    drop(reader); // close the server side so a still-blocked writer unblocks
+    writer.join().unwrap();
+    outcome
+}
+
+#[test]
+fn oversized_content_length_is_rejected_before_the_body() {
+    let len = MAX_BODY + 1;
+    let mut req = format!("POST /mcp HTTP/1.1\r\nContent-Length: {len}\r\n\r\n").into_bytes();
+    req.resize(req.len() + len, 0); // a full body the size the header claims
+    let outcome = drive_read_request(req);
+    // Guard present: Fatal right after the headers, the `len`-byte body never
+    // allocated or read. Guard removed: it would allocate `len` bytes, read the
+    // whole body, and return Ok(Some(..)) — so this Fatal assert fails.
+    assert!(
+        matches!(outcome, Err(RequestError::Fatal)),
+        "Content-Length exceeding MAX_BODY must be rejected before the body"
+    );
+}
+
+#[test]
+fn oversized_headers_overflow_reject() {
+    // One header line whose length alone blows past MAX_HEADERS.
+    let mut req = b"POST /mcp HTTP/1.1\r\nX: ".to_vec();
+    req.resize(req.len() + MAX_HEADERS + 8, b'a');
+    req.extend_from_slice(b"\r\n\r\n");
+    let outcome = drive_read_request(req);
+    // Guard present: header_bytes crosses MAX_HEADERS -> Fatal. Guard removed:
+    // the giant header is accepted, the blank line ends the headers, and it
+    // returns Ok(Some(..)) with an empty body — so this Fatal assert fails.
+    assert!(
+        matches!(outcome, Err(RequestError::Fatal)),
+        "headers exceeding MAX_HEADERS must overflow-reject"
+    );
+}
+
+#[test]
+fn truncated_headers_terminate_not_hang() {
+    // Request line + one header, then EOF with no blank line.
+    let req = b"POST /mcp HTTP/1.1\r\nHost: localhost\r\n".to_vec();
+    let outcome = drive_read_request(req);
+    // The header loop hits read_line -> Ok(0) (EOF) and returns Fatal. This
+    // returning at all proves "terminates, not hangs": were that arm to loop or
+    // continue instead of returning, `read_request` would spin forever.
+    assert!(
+        matches!(outcome, Err(RequestError::Fatal)),
+        "truncated headers must terminate with Fatal"
+    );
+}
+
+#[test]
+fn unparseable_content_length_defaults_to_empty_body() {
+    let req = b"POST /mcp HTTP/1.1\r\nContent-Length: not-a-number\r\n\r\n".to_vec();
+    let outcome = drive_read_request(req);
+    // `.parse().unwrap_or(0)` -> a 0-length body, not a panic. Were it `.unwrap()`
+    // this would panic (aborting the read) instead of yielding an empty-body
+    // request, so matching Ok(Some { body empty }) pins the defaulting.
+    assert!(
+        matches!(outcome, Ok(Some(ref r)) if r.method == "POST" && r.body.is_empty()),
+        "unparseable Content-Length must default to an empty body"
+    );
+}
