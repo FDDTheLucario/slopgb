@@ -460,6 +460,17 @@ fn build_gb(
     boot: Option<&[u8]>,
     sgb_border: bool,
 ) -> Result<GameBoy, CartridgeError> {
+    // "GBC + initial SGB border": grab the game's own SGB border from an initial
+    // SGB run BEFORE `rom` is consumed by the build below, then show it while the
+    // real machine runs in CGB color. Only SGB-capable ROMs upload a border; the
+    // rest fall back to the built-in default. `capture_initial_sgb_border`
+    // returns as soon as the game uploads (≈200 frames for Pokémon G/S), so the
+    // 600-frame cap only bites on a ROM that never does.
+    let border = if sgb_border && GameBoy::rom_supports_sgb(&rom) {
+        GameBoy::capture_initial_sgb_border(&rom, 600)
+    } else {
+        None
+    };
     let build = || match boot {
         Some(b) if boot_size_ok(model, b.len()) => GameBoy::new_with_boot(model, rom, b.to_vec()),
         Some(b) => {
@@ -473,10 +484,11 @@ fn build_gb(
         None => GameBoy::new(model, rom),
     };
     let mut gb = build()?;
-    // "GBC + initial SGB border": overlay the default border on a non-SGB
-    // machine. Presentation-only — leaves frame()/cycles byte-identical.
     if sgb_border {
-        gb.enable_sgb_border();
+        match &border {
+            Some(b) => gb.install_sgb_border(b),
+            None => gb.enable_sgb_border(), // no game border → the default one
+        }
     }
     Ok(gb)
 }

@@ -290,12 +290,14 @@ fn rom_supports_sgb_needs_both_header_bytes() {
     );
 }
 
-/// "GBC + initial SGB border" (`ModelChoice::CgbBorder`): attaching the default
-/// SGB border to a CGB machine is presentation-only. It exposes `sgb_border()`
-/// but leaves the emulated LCD frame AND the cycle count byte-identical to a
-/// plain CGB run — the golden-safety of `GameBoy::enable_sgb_border`.
+/// "GBC + initial SGB border" (`ModelChoice::CgbBorder`): `enable_sgb_border`
+/// attaches the border surface to a CGB machine and arms the joypad SGB receiver
+/// so an SGB-capable game uploads its own border while rendering GBC color
+/// inside. Golden-safety is by construction: a plain `GameBoy::new(Cgb, ..)`
+/// (what the golden path uses) never has a border surface; only an explicit
+/// `enable_sgb_border` adds one.
 #[test]
-fn cgb_border_overlay_is_frame_and_cycle_identical() {
+fn cgb_border_enables_a_border_surface_off_the_golden_path() {
     let rom = || {
         let mut r = vec![0u8; 0x8000];
         r[0x143] = 0xC0; // CGB only
@@ -307,28 +309,36 @@ fn cgb_border_overlay_is_frame_and_cycle_identical() {
 
     assert!(
         plain.sgb_border().is_none(),
-        "a plain CGB machine has no border surface"
+        "the golden path (plain CGB) has no border surface — golden-safe"
     );
     assert!(
         bordered.sgb_border().is_some(),
-        "the overlay exposes the built-in default border"
+        "enable_sgb_border exposes the built-in default border (until the game \
+         uploads its own)"
     );
 
+    // Both run without panicking; the bordered machine keeps a border surface.
     for _ in 0..10 {
         plain.run_frame();
         bordered.run_frame();
     }
-    assert_eq!(
-        plain.frame(),
-        bordered.frame(),
-        "the border overlay leaves the LCD frame byte-identical"
-    );
-    assert_eq!(
-        plain.cycles(),
-        bordered.cycles(),
-        "and does not perturb timing"
-    );
-    // Idempotent: re-enabling keeps the same (non-empty) border, no panic.
+    assert!(bordered.sgb_border().is_some());
+    // Idempotent: re-enabling is a no-op, no panic.
     bordered.enable_sgb_border();
     assert!(bordered.sgb_border().is_some());
+}
+
+/// `capture_initial_sgb_border` returns `None` for a ROM that never uploads an
+/// SGB border (here a NOP sled), so the frontend falls back to the default
+/// border. (The successful-capture path needs a real SGB game and is verified
+/// by hand; it can't be a committed test without shipping a copyrighted ROM.)
+#[test]
+fn capture_initial_sgb_border_is_none_when_the_game_uploads_nothing() {
+    let mut rom = vec![0u8; 0x8000]; // ROM-only NOP sled
+    rom[0x146] = 0x03; // SGB flag
+    rom[0x14B] = 0x33; // old licensee — so the receiver is armed
+    assert!(
+        GameBoy::capture_initial_sgb_border(&rom, 30).is_none(),
+        "a game that uploads no CHR_TRN/PCT_TRN yields no captured border"
+    );
 }

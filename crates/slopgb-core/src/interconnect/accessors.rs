@@ -39,6 +39,20 @@ impl Interconnect {
         &mut self.ppu
     }
 
+    /// Attach the PPU border surface for the "GBC + initial SGB border" mode
+    /// (shows the built-in default border until a captured game border is
+    /// installed via [`Self::install_sgb_border`]). Presentation-only.
+    pub(crate) fn enable_sgb_border(&mut self) {
+        self.ppu.enable_sgb_border();
+    }
+
+    /// Install a border captured from an initial SGB run (see
+    /// [`crate::GameBoy::capture_initial_sgb_border`]) as this machine's border,
+    /// so a CGB game shows its own SGB border while rendering GBC color.
+    pub(crate) fn install_sgb_border(&mut self, tiles: Box<[u8; 8192]>, raw: Box<[u8; 2176]>) {
+        self.ppu.sgb_restore_border(tiles, raw);
+    }
+
     pub fn apu_mut(&mut self) -> &mut Apu {
         &mut self.apu
     }

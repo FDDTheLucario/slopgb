@@ -100,14 +100,37 @@ impl GameBoy {
         }
     }
 
-    /// Show the built-in default SGB border around a non-SGB machine — bgb's
-    /// "GBC + initial SGB border" system mode. The game runs in its native
-    /// (usually CGB) mode; only the presentational border surface is added, so
-    /// [`Self::frame`] and the cycle count are byte-identical to the same model
-    /// without a border. Idempotent; a no-op if a border view already exists
-    /// (an actual `Model::Sgb`/`Sgb2` already has one).
+    /// Attach the built-in default SGB border surface to a non-SGB machine (the
+    /// fallback for "GBC + initial SGB border" when the game uploads no border).
+    /// Presentation-only: `frame()`/cycles are byte-identical to the same model
+    /// without a border. The golden path never calls this. Idempotent.
     pub fn enable_sgb_border(&mut self) {
-        self.bus.ppu_mut().enable_sgb_border();
+        self.bus.enable_sgb_border();
+    }
+
+    /// Run `rom` on an SGB machine until it uploads its own border (bgb's
+    /// "initial SGB" phase), then snapshot that border. `None` if the game
+    /// uploads no SGB border within `max_frames`. Pair with
+    /// [`Self::install_sgb_border`] to show it on a CGB machine while the game
+    /// renders in GBC color — the faithful "GBC + initial SGB border" mode.
+    #[must_use]
+    pub fn capture_initial_sgb_border(rom: &[u8], max_frames: u32) -> Option<SgbBorder> {
+        let mut sgb = GameBoy::new(Model::Sgb, rom.to_vec()).ok()?;
+        for _ in 0..max_frames {
+            sgb.run_frame();
+            if let Some((tiles, raw)) = sgb.bus.ppu().sgb_border_snapshot() {
+                return Some(SgbBorder { tiles, raw });
+            }
+        }
+        None
+    }
+
+    /// Install a border captured by [`Self::capture_initial_sgb_border`]: the
+    /// machine keeps rendering in its native (CGB) mode, now with this SGB border
+    /// around the screen. Idempotent (replaces any prior border).
+    pub fn install_sgb_border(&mut self, border: &SgbBorder) {
+        self.bus
+            .install_sgb_border(border.tiles.clone(), border.raw.clone());
     }
 }
 

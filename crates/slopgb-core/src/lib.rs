@@ -64,6 +64,15 @@ pub const SGB_BORDER_PIXELS: usize = SGB_BORDER_W * SGB_BORDER_H;
 /// T-cycles (dots) per frame with the LCD on.
 pub const CYCLES_PER_FRAME: u32 = 70224;
 
+/// A game's SGB border (CHR_TRN tiles + PCT_TRN tilemap/palettes) captured from
+/// an initial SGB run, for the "GBC + initial SGB border" mode. Opaque — grab it
+/// with [`GameBoy::capture_initial_sgb_border`], show it on a CGB machine with
+/// [`GameBoy::install_sgb_border`].
+pub struct SgbBorder {
+    tiles: Box<[u8; 8192]>,
+    raw: Box<[u8; 2176]>,
+}
+
 /// A decoded SGB SOUND ($08) command: two sound-effect IDs, an
 /// attenuation/flags byte and the effect-bank selector. The core decodes and
 /// queues these; Phase 3 (the S-DSP) drains the queue via

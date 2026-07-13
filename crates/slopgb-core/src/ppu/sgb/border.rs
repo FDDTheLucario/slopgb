@@ -6,11 +6,32 @@
 
 use super::*;
 
+/// A captured SGB border's raw data: CHR_TRN tiles (256×32 B) + PCT_TRN
+/// tilemap/palettes (2176 B). See [`SgbView::border_snapshot`].
+pub(crate) type BorderSnapshot = (Box<[u8; 8192]>, Box<[u8; 2176]>);
+
 impl SgbView {
     /// A ROM border (as opposed to the built-in default) is displayable once
     /// both a CHR_TRN (tiles) and a PCT_TRN (tilemap + palettes) have landed.
     pub(super) fn border_ready(&self) -> bool {
         self.has_chr && self.has_pct
+    }
+
+    /// Snapshot the game-uploaded border art (CHR_TRN tiles + PCT_TRN map/
+    /// palettes), or `None` if no ROM border has landed. Used by the "GBC +
+    /// initial SGB border" mode to grab a game's border from an initial SGB run.
+    pub(super) fn border_snapshot(&self) -> Option<BorderSnapshot> {
+        self.border_ready()
+            .then(|| (self.border_tiles.clone(), self.border_raw.clone()))
+    }
+
+    /// Restore a previously [`Self::border_snapshot`]'d border as this view's ROM
+    /// border. Marks it ready so the next composite shows it (not the default).
+    pub(super) fn restore_border(&mut self, tiles: Box<[u8; 8192]>, raw: Box<[u8; 2176]>) {
+        self.border_tiles = tiles;
+        self.border_raw = raw;
+        self.has_chr = true;
+        self.has_pct = true;
     }
 
     /// Recomposite `border_fb` from the tilemap/tiles/palettes and the current
@@ -132,16 +153,31 @@ impl Ppu {
         self.sgb.as_ref().and_then(SgbView::border_fb)
     }
 
-    /// Attach a border-only [`SgbView`] to a non-SGB machine so the built-in
-    /// default SGB border renders around the screen (bgb's "GBC + initial SGB
-    /// border" mode). Presentation-only: the joypad SGB command receiver stays
-    /// off (that is `Model::Sgb`/`Sgb2`-gated), so no game-driven CHR_TRN/PCT_TRN
-    /// or palette recolor happens — only the power-on default border. `frame()`
-    /// and the cycle count are unaffected (the default view has `mask == 0`), so
-    /// this never perturbs the golden path — which never calls it.
+    /// Attach a border-only [`SgbView`] to a non-SGB machine, showing the built-in
+    /// default SGB border. The "GBC + initial SGB border" fallback when the game
+    /// uploads no border of its own; when it does, [`Self::sgb_restore_border`]
+    /// swaps in the captured one. On a CGB machine the inner screen keeps
+    /// rendering GBC color (the `cgb_color` path — `dmg_shade`/SGB palettes never
+    /// apply), so only the border comes from SGB. Idempotent.
     pub(crate) fn enable_sgb_border(&mut self) {
         if self.sgb.is_none() {
             self.sgb = Some(SgbView::new());
+        }
+    }
+
+    /// Snapshot the game-uploaded SGB border, if one has landed. `None` off SGB
+    /// or before a CHR_TRN+PCT_TRN pair.
+    pub(crate) fn sgb_border_snapshot(&self) -> Option<BorderSnapshot> {
+        self.sgb.as_ref().and_then(SgbView::border_snapshot)
+    }
+
+    /// Install a snapshotted border into this PPU's view (creating a border-only
+    /// view if absent). For "GBC + initial SGB border": the border shows while
+    /// the machine renders in its native (CGB) mode.
+    pub(crate) fn sgb_restore_border(&mut self, tiles: Box<[u8; 8192]>, raw: Box<[u8; 2176]>) {
+        self.enable_sgb_border();
+        if let Some(s) = self.sgb.as_mut() {
+            s.restore_border(tiles, raw);
         }
     }
 }
