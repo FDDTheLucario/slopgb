@@ -412,186 +412,10 @@ impl GameBoy {
         None
     }
 
-    /// Set (replacing any previous) the debugger memory watchpoints the free run
-    /// halts on (bgb's "Set watchpoint"). A live-debugger-only control — the list
-    /// defaults empty and is never set on a golden/test path, so it is
-    /// golden-safe (an empty list is a zero-overhead no-op in the access path).
-    pub fn set_watchpoints(&mut self, wps: &[Watchpoint]) {
-        self.bus.set_watchpoints(wps);
-    }
-
-    /// Set the debugger exception-break mask (bgb's Options → Exceptions): the
-    /// free run halts when an armed `EXC_*` condition occurs. `0` (the default)
-    /// disarms every check, so it is golden-safe (never set on a golden/test
-    /// path; an unset mask is a zero-overhead no-op in the exec/access paths).
-    pub fn set_exceptions(&mut self, mask: u16) {
-        self.bus.set_exceptions(mask);
-    }
-
-    /// The current exception-break mask (`0` when no exception is armed).
-    #[must_use]
-    pub fn exceptions(&self) -> u16 {
-        self.bus.exceptions()
-    }
-
-    /// Serialize the whole machine to bytes (bgb's File → Save state). A
-    /// magic + version + ROM-fingerprint header precedes the volatile state
-    /// (CPU + all peripherals). ROM bytes are *not* included — a state restores
-    /// into a machine already built from the same ROM. `&self`/read-only, so it
-    /// is golden-safe (never reached on a golden/test path).
-    #[must_use]
-    pub fn save_state(&self) -> Vec<u8> {
-        let mut w = state::Writer::new();
-        w.bytes(STATE_MAGIC);
-        w.u16(STATE_VERSION);
-        let id = self.bus.cartridge().rom_id();
-        w.u32(id.len() as u32);
-        w.bytes(&id);
-        self.cpu.write_state(&mut w);
-        self.bus.write_state(&mut w);
-        // SGB audio state (SPC700 + S-DSP), appended only on SGB models — so
-        // `Dmg`/`Cgb` states are byte-identical to the pre-SGB-audio format.
-        if let Some(apu) = &self.sgb_apu {
-            apu.write_state(&mut w);
-        }
-        w.into_vec()
-    }
-
-    /// Restore a machine from [`Self::save_state`] bytes (bgb's File → Load
-    /// state). Validates the magic/version/ROM fingerprint against the *loaded*
-    /// ROM, then restores the volatile state. The debugger state (breakpoints,
-    /// watchpoints, profiler, exception mask) is left untouched. **Atomic**: on
-    /// any error the machine is unchanged (the restore lands in a clone that
-    /// only replaces `self` on full success). Live-debugger/UI only.
-    pub fn load_state(&mut self, bytes: &[u8]) -> Result<(), StateError> {
-        let mut restored = self.clone();
-        restored.load_state_into(bytes)?;
-        *self = restored;
-        Ok(())
-    }
-
-    fn load_state_into(&mut self, bytes: &[u8]) -> Result<(), StateError> {
-        let mut r = state::Reader::new(bytes);
-        let mut magic = [0u8; 4];
-        r.bytes_into(&mut magic)?;
-        if &magic != STATE_MAGIC {
-            return Err(StateError::BadMagic);
-        }
-        if r.u16()? != STATE_VERSION {
-            return Err(StateError::BadVersion);
-        }
-        let id_len = r.u32()? as usize;
-        let id = r.bytes_vec(id_len)?;
-        if id != self.bus.cartridge().rom_id() {
-            return Err(StateError::RomMismatch);
-        }
-        self.cpu.read_state(&mut r)?;
-        self.bus.read_state(&mut r)?;
-        if let Some(apu) = self.sgb_apu.as_mut() {
-            apu.read_state(&mut r)?;
-        }
-        Ok(())
-    }
-
-    /// Enable/disable the execution profiler (bgb's "logging mode"/"stop"): a
-    /// per-PC instruction tally. Off by default and never set on a golden/test
-    /// path, so it is golden-safe (an unset tally is a zero-overhead no-op in
-    /// the CPU fetch path).
-    pub fn set_profiling(&mut self, on: bool) {
-        self.bus.set_profiling(on);
-    }
-
-    /// Zero the profiler tally without disabling logging (bgb's "clear buffer").
-    pub fn clear_profile(&mut self) {
-        self.bus.clear_profile();
-    }
-
-    /// Enable/disable the FCEUX-style code/data log (CDL): per-CPU-address R/W/X
-    /// access flags. Off by default and never set on a golden/test path, so it is
-    /// golden-safe (a `None` log is a zero-overhead no-op in every access hook).
-    pub fn set_cdl(&mut self, on: bool) {
-        self.bus.set_cdl(on);
-    }
-
-    /// The CDL access flags at `addr` (R=1, W=2, X=4), 0 when off/unvisited.
-    #[must_use]
-    pub fn cdl_flag(&self, addr: u16) -> u8 {
-        self.bus.cdl_flag(addr)
-    }
-
-    /// The CDL access flags at an **explicit** bank of the banked regions
-    /// (ROMX / VRAM / WRAMX); elsewhere `bank` is ignored (== [`Self::cdl_flag`]).
-    /// For the MCP/debug `cdl` tool. Read-only, golden-safe.
-    #[must_use]
-    pub fn cdl_flag_banked(&self, bank: u16, addr: u16) -> u8 {
-        self.bus.cdl_flag_banked(bank, addr)
-    }
-
-    /// The whole CDL flag buffer (for a save), or `None` when the log is off.
-    #[must_use]
-    pub fn cdl_flags(&self) -> Option<&[u8]> {
-        self.bus.cdl_flags()
-    }
-
-    /// Zero the CDL flags without disabling logging.
-    pub fn cdl_clear(&mut self) {
-        self.bus.cdl_clear();
-    }
-
-    /// Load a physical CDL flag buffer (a decoded `.cdl` file), enabling the
-    /// log. Returns false (leaving the log unchanged) if the buffer's length
-    /// doesn't match this machine's layout — a `.cdl` from another ROM/RAM
-    /// configuration.
-    #[must_use]
-    pub fn load_cdl(&mut self, flags: &[u8]) -> bool {
-        self.bus.load_cdl(flags)
-    }
-
-    /// The live WRAM bank at `0xD000-0xDFFF` (CGB SVBK, 1 on DMG), for the
-    /// memory-viewer bank indicator.
-    #[must_use]
-    pub fn wram_bank(&self) -> usize {
-        self.bus.wram_bank()
-    }
-
-    /// The live VRAM bank (CGB VBK, 0 on DMG), for the viewer bank indicator.
-    #[must_use]
-    pub fn vram_bank(&self) -> usize {
-        self.bus.vram_bank()
-    }
-
-    /// Arm/disarm profiler "break mode": the free run halts the first time each
-    /// address executes (bgb's coverage break). Only meaningful with profiling
-    /// on; live-debugger-only, golden-safe.
-    pub fn set_profile_break(&mut self, on: bool) {
-        self.bus.set_profile_break(on);
-    }
-
-    /// Whether profiler break mode is armed.
-    #[must_use]
-    pub fn profile_break(&self) -> bool {
-        self.bus.profile_break()
-    }
-
-    /// Whether the execution profiler is currently logging.
-    #[must_use]
-    pub fn profiling(&self) -> bool {
-        self.bus.profiling()
-    }
-
-    /// Times the instruction at `pc` has executed since the last clear (0 if
-    /// unseen or profiling is off).
-    #[must_use]
-    pub fn profile_count(&self, pc: u16) -> u64 {
-        self.bus.profile_count(pc)
-    }
-
-    /// Distinct instruction addresses the profiler has seen since the last clear
-    /// (bgb's "N addresses seen").
-    #[must_use]
-    pub fn profile_seen(&self) -> usize {
-        self.bus.profile_seen()
-    }
+    // The debugger/introspection accessors (watchpoints, exception-break mask,
+    // save-states, execution profiler, CDL, WRAM/VRAM bank indicators) live in
+    // the `lib_debug` submodule (a second `impl GameBoy`), keeping this file
+    // under the 1000-line cap (see `docs/tdd-split-plan.md`).
 
     /// XRGB8888 pixels of the most recently completed frame, row-major.
     pub fn frame(&self) -> &[u32; SCREEN_PIXELS] {
@@ -1047,6 +871,13 @@ impl GameBoy {
 // cap (see `docs/tdd-split-plan.md`).
 #[path = "lib/sgb_api.rs"]
 mod sgb_api;
+
+// The debugger/introspection accessor block (watchpoints, exception mask,
+// save-states, profiler, CDL, bank indicators) as a second `impl GameBoy`,
+// split out to keep this file under the 1000-line cap (see
+// `docs/tdd-split-plan.md`).
+#[path = "lib/debug.rs"]
+mod lib_debug;
 
 #[cfg(test)]
 #[path = "lib_tests.rs"]
