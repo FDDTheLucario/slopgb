@@ -53,6 +53,12 @@ pub struct Canvas<'a> {
     w: i32,
     h: i32,
     clip: Rect,
+    /// When `Some`, every [`Self::put`]/[`Self::fill_rect`] call's rect (as
+    /// requested, pre-clip) is also appended here — the theme
+    /// LAYOUT-INVARIANCE guard test's recorder (see [`Self::new_recording`]),
+    /// proving a `Theme` swap only recolors pixels, never moves or resizes
+    /// anything. `None` (the default) costs nothing beyond the `Option` check.
+    record: Option<Vec<Rect>>,
 }
 
 impl<'a> Canvas<'a> {
@@ -66,7 +72,29 @@ impl<'a> Canvas<'a> {
             w,
             h,
             clip: Rect::new(0, 0, w, h),
+            record: None,
         }
+    }
+
+    /// Like [`Self::new`], but records every draw call's rect into
+    /// [`Self::drawn`] — for the theme layout-invariance guard test: render
+    /// the same widgets under different themes and assert the recorded rects
+    /// are identical (only the pixel colours may differ). Test-only (nothing
+    /// in the running app needs a recording canvas).
+    #[allow(dead_code)]
+    #[must_use]
+    pub fn new_recording(buf: &'a mut [u32], w: usize, h: usize) -> Self {
+        let mut c = Self::new(buf, w, h);
+        c.record = Some(Vec::new());
+        c
+    }
+
+    /// Every rect passed to [`Self::put`] (as a 1×1 rect) or [`Self::fill_rect`]
+    /// so far, in call order — empty unless built with [`Self::new_recording`].
+    #[allow(dead_code)]
+    #[must_use]
+    pub fn drawn(&self) -> &[Rect] {
+        self.record.as_deref().unwrap_or(&[])
     }
 
     /// The whole surface as a rectangle.
@@ -90,6 +118,9 @@ impl<'a> Canvas<'a> {
 
     /// Set one pixel, clipped to the buffer and the clip rect.
     pub fn put(&mut self, x: i32, y: i32, color: u32) {
+        if let Some(rec) = &mut self.record {
+            rec.push(Rect::new(x, y, 1, 1));
+        }
         if x >= 0 && y >= 0 && x < self.w && y < self.h && self.clip.contains(x, y) {
             self.buf[(y * self.w + x) as usize] = color;
         }
@@ -97,6 +128,9 @@ impl<'a> Canvas<'a> {
 
     /// Fill a rectangle, clipped.
     pub fn fill_rect(&mut self, r: Rect, color: u32) {
+        if let Some(rec) = &mut self.record {
+            rec.push(r);
+        }
         let a = r.intersect(&self.clip).intersect(&self.bounds());
         for y in a.y..a.bottom() {
             let row = (y * self.w) as usize;

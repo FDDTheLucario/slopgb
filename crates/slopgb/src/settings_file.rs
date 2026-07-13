@@ -79,6 +79,22 @@ pub fn save(settings: &Settings, recent: &[PathBuf]) {
     }
 }
 
+/// Load every `[theme.NAME]` custom-theme section from the native settings
+/// file — the theming API's registry (`ThemeChoice::Custom`'s lookup table).
+/// bgb.ini has no equivalent concept, so only the native store is consulted.
+/// Empty (not an error) with no config dir, no file, or no `[theme.*]`
+/// sections.
+#[must_use]
+pub fn load_custom_themes() -> crate::ui::CustomThemes {
+    let Some(path) = native_path() else {
+        return crate::ui::CustomThemes::default();
+    };
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return crate::ui::CustomThemes::default();
+    };
+    native::custom_themes(&native::Doc::parse(&text))
+}
+
 /// Precedence: native file wins; else migrate a bgb.ini into the native store
 /// (once); else defaults. Path-injected for tests.
 fn load_from_paths(native: Option<&Path>, bgb: Option<&Path>) -> Loaded {

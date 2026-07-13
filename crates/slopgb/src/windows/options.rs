@@ -19,9 +19,9 @@
 
 use slopgb_core::{GameBoy, Model};
 
-use crate::ui::Theme;
 use crate::ui::canvas::{Canvas, Rect};
 use crate::ui::text::{draw_text, line_height, measure};
+use crate::ui::{Theme, ThemeChoice};
 
 pub mod tabs;
 
@@ -199,6 +199,13 @@ pub struct Settings {
     /// System → SGB bootrom path (empty = none). Faithful field; slopgb maps an
     /// SGB model to the DMG-class 256 B boot ROM, so this feeds the SGB models.
     pub bootrom_sgb: String,
+    /// UI → active colour theme (Light/Dark/Classic/a named custom theme). No
+    /// bgb equivalent and no on-screen control (the paramount look-only
+    /// constraint) — set via config or the Light↔Dark hotkey (bare `T`,
+    /// [`crate::input::Action::ToggleTheme`]). Default `Light` (a modern flat
+    /// look); `Classic` reproduces bgb's original grey/white palette
+    /// pixel-for-pixel.
+    pub theme: ThemeChoice,
 }
 
 impl Default for Settings {
@@ -233,6 +240,7 @@ impl Default for Settings {
             bootrom_dmg: String::new(),
             bootrom_gbc: String::new(),
             bootrom_sgb: String::new(),
+            theme: ThemeChoice::Light,
         }
     }
 }
@@ -580,7 +588,7 @@ pub fn render(c: &mut Canvas, st: &OptionsState, theme: &Theme) {
     c.set_clip(saved);
     // Button row.
     for (b, r) in OptionsState::button_rects(dialog) {
-        c.fill_rect(r, theme.bg);
+        c.fill_rect(r, theme.button_face);
         c.outline_rect(r, theme.text);
         let tx = r.x + (r.w - measure(b.label())) / 2;
         draw_text(
@@ -598,7 +606,11 @@ pub fn render(c: &mut Canvas, st: &OptionsState, theme: &Theme) {
 /// Foreground colour for a control: black when live, grey when inert (matches
 /// bgb greying out unavailable options).
 fn fg(enabled: bool, theme: &Theme) -> u32 {
-    if enabled { theme.text } else { theme.hilight }
+    if enabled {
+        theme.text
+    } else {
+        theme.disabled_text
+    }
 }
 
 /// Draw a checkbox honouring `enabled` (greyed if inert). The clickable hit-rect

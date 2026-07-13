@@ -129,6 +129,8 @@ frontend green, clippy clean. Missing ROMs skip unless `SLOPGB_REQUIRE_ROMS=1` (
 S-DSP audio, BIOS, border) and the bgb-UI clone (debugger, viewers, Options, link,
 opt-in boot ROM, MCP) are all merged — per-area detail in
 [`docs/ui-state/`](docs/ui-state/README.md) + [`docs/hardware-state/`](docs/hardware-state/README.md).
+UI theming (contemporary Light default / Dark / Classic + custom-theme API; colour-only,
+`T` toggles Light↔Dark): [`docs/ui-state/theming.md`](docs/ui-state/theming.md).
 Known residuals (all SameBoy-FAIL/floored, NOT regressions): DS mid-dot render floor,
 halt-wake/HDMA levers. History: [`STATE-HISTORY.md`](docs/sameboy-port/STATE-HISTORY.md).
 

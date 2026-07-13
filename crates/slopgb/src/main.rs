@@ -343,6 +343,11 @@ struct App {
     /// started; pumped each wake to serve an agent's tool calls against the live
     /// machine.
     mcp: mcp::Mcp,
+    /// Custom themes loaded from the settings file's `[theme.NAME]` sections
+    /// (the theming API's registry) — what `settings.theme`'s `Custom(name)`
+    /// variant resolves against. Loaded once at startup; like every other
+    /// persisted setting, a config edit needs a restart to take effect.
+    custom_themes: ui::CustomThemes,
 }
 
 impl App {
@@ -364,6 +369,7 @@ impl App {
         // an explicit CLI `--model` wins the session, else the persisted choice.
         let loaded = settings_file::load();
         let recent = loaded.recent;
+        let custom_themes = settings_file::load_custom_themes();
         let settings = windows::options::Settings {
             model: match opts.model {
                 Some(m) => windows::options::ModelChoice::from_option(Some(m)),
@@ -420,6 +426,7 @@ impl App {
             menu_popup: None,
             window_size,
             game_cursor: (0, 0),
+            custom_themes,
         };
         // Push the default DMG palette (bgb's pale green) onto the freshly-built
         // machine so loaded DMG games look like bgb out of the box, not the core's
@@ -501,7 +508,7 @@ impl App {
         let picker = self.file_picker.as_mut();
         let options = self.options.as_ref();
         let wizard = self.key_wizard.as_ref();
-        let theme = ui::Theme::BGB;
+        let theme = self.settings.theme.resolve(&self.custom_themes);
         let stretch = self.window_size == WindowSizeChoice::FullscreenStretched;
         if let Err(e) = video.draw(window, frame, src_w, src_h, stretch, |canvas| {
             // The info box / Load-ROM modal draw on top of everything (modal).

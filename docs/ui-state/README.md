@@ -15,6 +15,7 @@ for the UI. **Read the relevant file before touching that UI area.**
 | [startup-and-boot.md](startup-and-boot.md) | No-ROM blank-LCD startup, opt-in boot-ROM execution |
 | [pacing-and-audio.md](pacing-and-audio.md) | The three pacers (turbo/audio/timer), the audio-queue rate servo + bands, the slewed `next_frame` grid, the stall watchdog, FPS-counter semantics |
 | [frontend-layout.md](frontend-layout.md) | Module split satisfying the <1000-line cap; key types/entry points |
+| [theming.md](theming.md) | Light/Dark/Classic themes, the 16-role `Theme` palette, the Light↔Dark hotkey, persistence, and the custom-theme (`[theme.NAME]`) config API |
 
 ## The golden-safe law (the one invariant)
 

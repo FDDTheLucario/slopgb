@@ -195,6 +195,15 @@ impl App {
                 }
                 self.resync_pacing();
             }
+            // UI → theme toggle (bare T, any focus): flips Light<->Dark and
+            // persists immediately, so the choice survives a crash/kill (not
+            // just a clean Quit). No on-screen widget — this hotkey is the
+            // whole control surface.
+            Action::ToggleTheme => {
+                self.toggle_theme();
+                self.tools.request_redraw_all();
+                self.request_game_redraw();
+            }
             Action::SaveScreenshot => self.save_screenshot(),
             Action::DbgSaveMemDump => self.save_memory_dump(),
             // bgb's "Options..." (F11): open the tabbed control panel, seeded
@@ -342,4 +351,28 @@ impl App {
             .debugger_cursor()
             .unwrap_or_else(|| self.session.gb.cpu_regs().pc)
     }
+
+    /// Flip the active theme Light↔Dark and persist immediately (the theming
+    /// feature's only control surface — no on-screen widget). Classic/Custom
+    /// aren't part of the toggle cycle: they're config/CLI-only selections,
+    /// so pressing the key from either lands on Dark (a defined, non-stuck
+    /// outcome) rather than cycling through every possible choice.
+    fn toggle_theme(&mut self) {
+        self.toggle_theme_no_persist();
+        crate::settings_file::save(&self.settings, &self.recent);
+    }
+
+    /// The state-mutating half of [`Self::toggle_theme`] with persistence
+    /// removed, so a test can drive it without touching the real config file.
+    fn toggle_theme_no_persist(&mut self) {
+        self.settings.theme = if self.settings.theme == ui::ThemeChoice::Dark {
+            ui::ThemeChoice::Light
+        } else {
+            ui::ThemeChoice::Dark
+        };
+    }
 }
+
+#[cfg(test)]
+#[path = "app_run_tests.rs"]
+mod tests;

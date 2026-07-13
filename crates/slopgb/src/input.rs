@@ -77,6 +77,12 @@ pub enum Action {
     Reset,
     /// Quit the emulator (on press).
     Quit,
+    /// Toggle the active colour theme Light↔Dark (on press) — the theming
+    /// feature's only control surface: a hotkey, deliberately with no
+    /// on-screen widget (a visible toggle control would be a layout change).
+    /// Classic/Custom aren't part of the toggle cycle (config/CLI-only
+    /// selections); persisted immediately, so it survives a crash/kill.
+    ToggleTheme,
     /// Open/close a bgb-style debug tool window (on press).
     ToggleTool(ToolWindow),
     /// Toggle the debugger break (freeze emulation) — F9, focus-independent.
@@ -239,6 +245,7 @@ pub fn map(code: KeyCode, mods: ModifiersState, focus: Focus) -> Option<Action> 
         KeyCode::Tab => Some(Action::Turbo),
         KeyCode::KeyP => Some(Action::Pause),
         KeyCode::KeyR => Some(Action::Reset),
+        KeyCode::KeyT => Some(Action::ToggleTheme),
         // Escape is deliberately *not* bound here: bgb shows the debugger on Esc
         // (never quits). `App::handle_key` intercepts it so it can honour the
         // "pressing Esc shows debugger" Options flag + the focus. See BUG-1.
@@ -520,6 +527,18 @@ mod tests {
         // Resume-safety: F9 toggles break from any focus.
         assert_eq!(g(KeyCode::F9), Some(Action::DbgBreak));
         assert_eq!(d(KeyCode::F9), Some(Action::DbgBreak));
+    }
+
+    #[test]
+    fn theme_toggle_key_is_focus_independent() {
+        // Bare T is a global hotkey (like P/R/F9), not gated on which window
+        // has focus — the theme is app-wide, not per-window.
+        assert_eq!(g(KeyCode::KeyT), Some(Action::ToggleTheme));
+        assert_eq!(d(KeyCode::KeyT), Some(Action::ToggleTheme));
+        assert_eq!(
+            map(KeyCode::KeyT, NONE, Focus::Viewer),
+            Some(Action::ToggleTheme)
+        );
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::ThemeChoice;
 use crate::windows::options::ModelChoice;
 
 const REAL: &str = include_str!("../../../../docs/bgb-reference/bgb.ini");
@@ -32,6 +33,27 @@ fn settings_round_trip_through_bgb_ini() {
     let back = from_ini(&ini);
     assert_eq!(back, s, "mapped + slopgb-extra fields round-trip");
     assert!(ini.serialize().contains("UninitedWRAM=1"), "bgb key name");
+}
+
+#[test]
+fn theme_choice_round_trips_through_bgb_ini_as_a_slopgb_extra() {
+    // bgb has no theming concept, so this rides the `Slopgb*` extra-key
+    // convention (like `SlopgbStretch` etc.) rather than a real bgb key.
+    for choice in [
+        ThemeChoice::Light,
+        ThemeChoice::Dark,
+        ThemeChoice::Classic,
+        ThemeChoice::Custom("solarized".to_string()),
+    ] {
+        let s = Settings {
+            theme: choice.clone(),
+            ..Settings::default()
+        };
+        let mut ini = Ini::parse("");
+        to_ini(&s, &mut ini);
+        let back = from_ini(&ini);
+        assert_eq!(back.theme, choice, "{choice:?} round-trips");
+    }
 }
 
 #[test]

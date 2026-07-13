@@ -16,6 +16,7 @@
 //! 0 = /roms/game.gbc
 //! ```
 
+use crate::ui::{CustomThemes, Theme, ThemeChoice};
 use crate::windows::options::{ModelChoice, SCHEMES, Settings};
 
 /// The current native-format version (bumped when a migration is needed).
@@ -108,6 +109,22 @@ impl Doc {
                 _ => None,
             })
             .collect()
+    }
+
+    /// Every distinct `[section]` name that starts with `prefix`, in file
+    /// order — e.g. `"theme."` finds every `[theme.NAME]` custom-theme
+    /// section without the names being known ahead of time.
+    #[must_use]
+    pub fn section_names_with_prefix(&self, prefix: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for line in &self.lines {
+            if let Line::Section(s) = line {
+                if s.starts_with(prefix) && !out.contains(s) {
+                    out.push(s.clone());
+                }
+            }
+        }
+        out
     }
 
     /// Set `key` in `section`: overwrite in place, else append at the end of the
@@ -253,6 +270,10 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
         bootrom_dmg: s("system", "bootrom_dmg", &def.bootrom_dmg),
         bootrom_gbc: s("system", "bootrom_gbc", &def.bootrom_gbc),
         bootrom_sgb: s("system", "bootrom_sgb", &def.bootrom_sgb),
+        theme: d
+            .get("ui", "theme")
+            .map(ThemeChoice::from_key)
+            .unwrap_or_default(),
     };
     let recent = d
         .section_pairs("recent")
@@ -295,6 +316,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         bootrom_dmg: _,
         bootrom_gbc: _,
         bootrom_sgb: _,
+        theme: _,
     } = settings;
     let fb = |b: bool| if b { "true" } else { "false" };
     d.set("", "version", &VERSION.to_string());
@@ -364,7 +386,27 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         "break_lcd_off_vblank",
         fb(settings.break_lcd_off_vblank),
     );
+    d.set("ui", "theme", &settings.theme.to_key());
     d.set_recent(recent);
+}
+
+/// Every `[theme.NAME]` section as a registered custom theme (the theming
+/// API): each section's `role = 0xRRGGBB` pairs feed [`Theme::from_pairs`]. A
+/// section with an unknown role or a bad value is skipped (logged, not
+/// fatal) so one bad custom theme can't break loading the rest.
+#[must_use]
+pub fn custom_themes(d: &Doc) -> CustomThemes {
+    let mut out = CustomThemes::default();
+    for section in d.section_names_with_prefix("theme.") {
+        let Some(name) = section.strip_prefix("theme.").filter(|n| !n.is_empty()) else {
+            continue;
+        };
+        match Theme::from_pairs(&d.section_pairs(&section)) {
+            Ok(theme) => out.insert(name, theme),
+            Err(e) => eprintln!("slopgb: custom theme '{name}' in [{section}]: {e}"),
+        }
+    }
+    out
 }
 
 #[cfg(test)]

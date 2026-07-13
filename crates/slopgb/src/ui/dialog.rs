@@ -180,7 +180,7 @@ pub fn render(c: &mut Canvas, area: Rect, dlg: &InputDialog, theme: &Theme) {
     // Field: bordered, the buffer text, then a caret bar. The text is clipped to
     // the field interior and scrolled so a long value keeps its tail (and caret)
     // visible instead of spilling past the box.
-    c.fill_rect(l.field, theme.bg);
+    c.fill_rect(l.field, theme.panel);
     c.outline_rect(l.field, theme.text);
     let inner_w = (l.field.w - 4).max(0); // 2px padding each side
     let visible = (inner_w / GLYPH_W as i32).max(0) as usize;

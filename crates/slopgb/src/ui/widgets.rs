@@ -25,7 +25,10 @@ pub fn checkbox(c: &mut Canvas, x: i32, y: i32, checked: bool, label: &str, them
     c.fill_rect(Rect::new(x, y, box_sz, box_sz), theme.bg);
     c.outline_rect(Rect::new(x, y, box_sz, box_sz), theme.text);
     if checked {
-        c.fill_rect(Rect::new(x + 2, y + 2, box_sz - 4, box_sz - 4), theme.text);
+        c.fill_rect(
+            Rect::new(x + 2, y + 2, box_sz - 4, box_sz - 4),
+            theme.accent,
+        );
     }
     draw_text(c, x + box_sz + 3, y, label, theme.text);
     checkbox_rect(x, y, label)
@@ -38,7 +41,7 @@ pub fn button(c: &mut Canvas, rect: Rect, label: &str, pressed: bool, theme: &Th
     let (fill, fg) = if pressed {
         (theme.text, theme.bg)
     } else {
-        (theme.bg, theme.text)
+        (theme.button_face, theme.text)
     };
     c.fill_rect(rect, fill);
     c.outline_rect(rect, theme.text);
@@ -88,7 +91,7 @@ pub fn radio_group(
         c.fill_rect(Rect::new(r.x, y, dot, dot), theme.bg);
         c.outline_rect(Rect::new(r.x, y, dot, dot), theme.text);
         if i == selected {
-            c.fill_rect(Rect::new(r.x + 2, y + 2, dot - 4, dot - 4), theme.text);
+            c.fill_rect(Rect::new(r.x + 2, y + 2, dot - 4, dot - 4), theme.accent);
         }
         draw_text(c, r.x + dot + 2, y, opt, theme.text);
     }
@@ -205,7 +208,7 @@ pub fn vscrollbar(c: &mut Canvas, pane: Rect, frac: f32, vis: f32, theme: &Theme
     let th = thumb_h(track.h, vis);
     let travel = (track.h - th).max(0);
     let ty = track.y + (frac.clamp(0.0, 1.0) * travel as f32) as i32;
-    c.fill_rect(Rect::new(track.x, ty, SCROLLBAR_W, th), theme.hilight);
+    c.fill_rect(Rect::new(track.x, ty, SCROLLBAR_W, th), theme.scrollbar);
     track
 }
 

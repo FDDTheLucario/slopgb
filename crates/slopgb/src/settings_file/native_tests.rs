@@ -82,3 +82,57 @@ fn comments_and_blank_lines_survive() {
     assert!(out.contains("# my config"), "comment preserved");
     assert_eq!(d.get("sound", "volume"), Some("0.5"));
 }
+
+// --- Task 6: ThemeChoice persistence -----------------------------------------
+
+#[test]
+fn theme_choice_round_trips_every_variant() {
+    for choice in [
+        ThemeChoice::Light,
+        ThemeChoice::Dark,
+        ThemeChoice::Classic,
+        ThemeChoice::Custom("solarized".to_string()),
+    ] {
+        let s = Settings {
+            theme: choice.clone(),
+            ..Settings::default()
+        };
+        let mut d = Doc::default();
+        to_doc(&s, &[], &mut d);
+        let (back, _) = from_doc(&Doc::parse(&d.serialize()));
+        assert_eq!(back.theme, choice, "{choice:?} round-trips");
+    }
+}
+
+#[test]
+fn unknown_theme_value_falls_back_to_default_non_fatally() {
+    let (s, _) = from_doc(&Doc::parse("[ui]\ntheme = bogus\n"));
+    assert_eq!(s.theme, ThemeChoice::default());
+    // A missing key defaults the same way.
+    let (s2, _) = from_doc(&Doc::parse("version = 1\n"));
+    assert_eq!(s2.theme, ThemeChoice::default());
+}
+
+// --- Task 9: custom theme registry loader ------------------------------------
+
+#[test]
+fn custom_themes_loads_every_theme_section() {
+    let d = Doc::parse(
+        "[theme.solarized]\nbg = 0x002B36\ntext = 0x93A1A1\n\n\
+         [theme.hotdog]\nbg = 0xFF0000\n",
+    );
+    let themes = custom_themes(&d);
+    assert_eq!(themes.get("solarized").unwrap().bg, 0x0000_2B36);
+    assert_eq!(themes.get("solarized").unwrap().text, 0x0093_A1A1);
+    assert_eq!(themes.get("hotdog").unwrap().bg, 0x00FF_0000);
+    assert!(themes.get("nonexistent").is_none());
+}
+
+#[test]
+fn custom_themes_skips_a_malformed_section_without_panicking() {
+    // An unknown role in one section must not stop the rest from loading.
+    let d = Doc::parse("[theme.bad]\nnot_a_role = purple\n\n[theme.good]\nbg = 0x111111\n");
+    let themes = custom_themes(&d);
+    assert!(themes.get("bad").is_none(), "malformed section skipped");
+    assert_eq!(themes.get("good").unwrap().bg, 0x0011_1111);
+}

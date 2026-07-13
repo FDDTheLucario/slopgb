@@ -7,6 +7,7 @@
 //! `scheme` follows `dmg_palette`, persisted via `Color0..3`.
 
 use super::ini::{self, Ini};
+use crate::ui::ThemeChoice;
 use crate::windows::options::{ModelChoice, SCHEMES, Settings};
 
 /// Read a `Settings` from a parsed bgb.ini; any key absent or unparseable takes
@@ -76,6 +77,12 @@ pub fn from_ini(f: &Ini) -> Settings {
         bootrom_dmg: text("DmgBootRom", &d.bootrom_dmg),
         bootrom_gbc: text("CgbBootRom", &d.bootrom_gbc),
         bootrom_sgb: text("SgbBootRom", &d.bootrom_sgb),
+        // No bgb equivalent (a `Slopgb` extra, like the other slopgb-only
+        // fields below).
+        theme: f
+            .get("SlopgbTheme")
+            .map(ThemeChoice::from_key)
+            .unwrap_or_default(),
     }
 }
 
@@ -112,6 +119,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         bootrom_dmg: _,
         bootrom_gbc: _,
         bootrom_sgb: _,
+        theme: _,
     } = s;
     f.set(
         "SystemMode",
@@ -158,6 +166,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
     f.set("SlopgbShowFramerate", ini::fmt_bool(s.show_framerate));
     f.set("SlopgbBreakLdBB", ini::fmt_bool(s.break_ld_b_b));
     f.set("SlopgbBreakEchoRam", ini::fmt_bool(s.break_echo_ram));
+    f.set("SlopgbTheme", &s.theme.to_key());
 }
 
 #[cfg(test)]

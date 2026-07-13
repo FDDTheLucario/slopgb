@@ -220,10 +220,10 @@ pub fn render(
         }
         let hot = it.enabled && hovered == Some(i);
         let fg = if !it.enabled {
-            theme.hilight
+            theme.disabled_text
         } else if hot {
-            c.fill_rect(*r, theme.current);
-            theme.bg
+            c.fill_rect(*r, theme.selection_bg);
+            theme.selection_fg
         } else {
             theme.text
         };
