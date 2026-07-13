@@ -91,6 +91,10 @@ When a **hardware** question comes up, consult in order:
   calls).
 - Each iteration: run `/rust-diff-review` on that iteration's diff, fix every finding
   before the next iteration.
+- **Enable the pre-commit gate once per clone: `git config core.hooksPath .githooks`.**
+  It runs `cargo fmt --all --check` + `cargo clippy --workspace --all-targets -D
+  warnings` (the CI checks) on the pinned toolchain (`rust-toolchain.toml`, 1.97.0) and
+  blocks the commit if either fails. Bump the pin + fix new lints in the same PR.
 - Keep this file updated (and `/clean-docs`-clean) as the project evolves.
 
 ## Commands
