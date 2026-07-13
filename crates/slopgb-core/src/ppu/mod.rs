@@ -235,14 +235,15 @@ pub(crate) struct EngStatPending {
 #[derive(Clone)]
 struct PipeRegs {
     lcdc: u8,
-    /// The BG fetcher's LCDC addressing view (map/data select).
-    /// Tracks `lcdc` in lockstep in production (byte-identical), but under the
-    /// tier2 render reclock it lags the eager control commit by the +4
-    /// render-frame offset (see `render_lcdc_pending`), so a mid-mode-3 LCDC
-    /// bit3/bit4 write (bgtilemap/bgtiledata) reaches the fetch grid at the
-    /// production/SameBoy dot instead of the leading edge. The window bit5
-    /// (abort/reenable/enable) side-effects + the FF41 read laws keep the eager
-    /// `lcdc` — their tier2 pins are calibrated to the cc+0 control commit.
+    /// The BG fetcher's LCDC addressing view (map/data select). Tracks
+    /// `lcdc` in lockstep outside a render, but a mid-mode-3 LCDC bit3/bit4
+    /// write (bgtilemap/bgtiledata) defers its commit to this view by the
+    /// render frame (`RENDER_LCDC_DELAY` dots, see `render_lcdc_pending`), so
+    /// the fetch grid picks it up at the SameBoy dot instead of the write's
+    /// leading edge. LIVE — forcing the defer off changes `golden_fingerprint`
+    /// (the gambatte bgtilemap rows). The window bit5 (abort/reenable/enable)
+    /// side-effects + the FF41 read laws keep reading the cc+0 `lcdc` above —
+    /// only the BG-fetch addressing view lags.
     render_lcdc: u8,
     scy: u8,
     scx: u8,
@@ -351,15 +352,18 @@ pub struct Ppu {
     /// level-re-raise — strict edge). Armed to 2 at the deferred FF0F write,
     /// decremented per engine dot, one-shot on consumption.
     stat_if_squash: u8,
-    /// The deferred-path dispatch-ack squash, the PPU-side
-    /// replacement for the interconnect's whole-dot bit-0/1 `ack_squash_dots`
-    /// (zeroed under tier2). A rise of the acked bit landing within the
-    /// per-SOURCE window after the ack is merged into the dispatch (SameBoy:
-    /// the rise fp at/before the SBACK fp was already in the sampled IF);
-    /// past it, it survives and re-sets IF (the six `late_*_retrigger` rows).
-    /// Windows in dots (SS, DS): mode-0 (0, 1) ·
-    /// mode-2 pulse (0, 0) · LYC / mode-1 / vblank-IF (2, 0). Armed to 2 at
-    /// `ack`, decremented per dot, consumed as `ctr >= 3 − W`. `mask` names
+    /// A planned PPU-side dispatch-ack squash — the intended replacement for
+    /// the interconnect's whole-dot bit-0/1 `ack_squash_dots` — designed so a
+    /// rise of the acked bit landing within the per-SOURCE window after the
+    /// ack merges into the dispatch (SameBoy: the rise fp at/before the SBACK
+    /// fp was already in the sampled IF); past it, it would survive and
+    /// re-set IF (the six `late_*_retrigger` rows). Intended windows in dots
+    /// (SS, DS): mode-0 (0, 1) · mode-2 pulse (0, 0) · LYC / mode-1 /
+    /// vblank-IF (2, 0), armed to 2 at `ack`, decremented per dot, consumed
+    /// as `ctr >= 3 − W`. **Dead**: no call site in the crate ever arms
+    /// `mask`/`ctr` to non-zero (confirmed by an assert-on-read probe across
+    /// the full gbtr battery — never trips), so both fields always read 0 and
+    /// the consumption sites below are unreachable in practice. `mask` names
     /// the acked bit.
     ack_squash_ppu_mask: u8,
     ack_squash_ppu: u8,
@@ -455,8 +459,9 @@ pub struct Ppu {
     /// calibrated on the offset1 enter→leave segment: SameBoy Δdsa 24 vs
     /// slopgb Δage 28 mod 8). The DS→SS leave shift depends on this
     /// alignment (`2 + (sb_dsa8 & 4)`: dsa7=0 rows need +2, the dsa7=4
-    /// offset3 rows need +6 — build-measured). Increment is unconditional
-    /// (mod-8 counter, unobservable flag-off); consumed tier2-only.
+    /// offset3 rows need +6 — build-measured). The increment (mod-8 counter)
+    /// runs every dot unconditionally; LIVE — read by [`Self::sb_dsa`], which
+    /// `interconnect::speed`'s STOP-leave shift math consults directly.
     sb_dsa8: u8,
     /// Total machine STOPADV advance applied this ROM, in DOTS
     /// (Σ k/2 over the DS→SS leaves). The frame-anchored write/read-instant
@@ -464,7 +469,8 @@ pub struct Ppu {
     /// calibrated on unshifted ROMs; a post-leave CPU access lands
     /// `lcd_shift_dots` deeper in the frame (the advance moved the enable
     /// anchor and the LY-polls re-sync), so those laws classify against
-    /// [`Self::law_pos`]. 0 for never-switched ROMs and flag-off.
+    /// [`Self::law_pos`]. 0 for never-switched ROMs (only [`Self::add_lcd_shift`],
+    /// called from a STOP DS→SS leave, moves it off 0).
     lcd_shift_dots: u16,
     /// First line after LCD enable (no OAM scan, shifted mode 3, 452 dots).
     glitch_line: bool,
@@ -502,8 +508,9 @@ pub struct Ppu {
     /// [`Self::stat_update_halt_masks`]; the interconnect's `ack_impl` reads it
     /// to arm the per-ISR read carry (the OAM-ISR handler's reads land 1
     /// M-cycle = 2 dots DS later than the mode-0-ISR's, decoupled from the
-    /// IF-delivery ack). Consulted only under `eager`; production never
-    /// reaches it.
+    /// IF-delivery ack). LIVE: read unconditionally by
+    /// `interconnect::speed`'s carried-read peek and by the FF0F/FF41 read
+    /// laws (`stat_irq/read_laws.rs`, `stat_irq/ff0f.rs`).
     stat_rise_oam: bool,
     /// The currently-pending STAT IRQ was the mode-0 HBlank rise
     /// (`mfi==0`). The mode-0 ISR read lands +2 dots early (vs the mode-2 +4),
@@ -520,8 +527,9 @@ pub struct Ppu {
     /// non-carried polled/other-ISR reads too (dropping 50 SameBoy-passes whose
     /// native frame was already correct); gating the SBex override on
     /// `read_carried` confines it to exactly the reads the carry moved to
-    /// SameBoy's frame. Consulted only under `eager`; production never
-    /// reaches it.
+    /// SameBoy's frame. LIVE: read unconditionally by the FF41 read laws
+    /// (`stat_irq/read_laws.rs`, `stat_irq/read_laws_exit.rs`) and cleared by
+    /// the interconnect (`interconnect/bus.rs`).
     read_carried: bool,
     /// Set by the interconnect's CGB halt wake (`halt_wake_mid_impl`) when
     /// the halt exits on the mode-0 STAT rise: the halt-woken IME=1 dispatch's
@@ -550,12 +558,14 @@ pub struct Ppu {
     /// scx_m3_extend — a live-`scx` closed form mis-frames the missed-hunt
     /// leg). Recorded on both fire paths (projection + the `advance_lx` pipe-
     /// end fallback); reset at line start, `m0_unflip`, and LCD transitions.
-    /// Only read under `eager` → production byte-identical.
+    /// LIVE: read unconditionally by the FF0F/FF41 read laws
+    /// (`stat_irq/ff0f.rs`, `stat_irq/read_laws.rs`, `stat_irq/read_laws_exit.rs`,
+    /// `stat_irq.rs`).
     flip_dot: u16,
     /// The CPU-visible STAT mode→0 boundary back-dated to
     /// SameBoy's cycle-exact frame, **decoupled from the IRQ-dispatch flip**
-    /// (`line_render_done`/`m0_src`). On the `leading-edge` flag-on path
-    /// this rises 3 dots *before* `line_render_done` on bare single-speed lines,
+    /// (`line_render_done`/`m0_src`). This rises 3 dots *before*
+    /// `line_render_done` on bare single-speed lines,
     /// so `vis_mode` reads 0 at SameBoy's `ModeTimeline::visible_mode0_dot`
     /// (our-line dot 251 = 254 − 3) while the dispatch stays at our dot 254 —
     /// the instrumented separator of the kernel pair (`m2int_m3stat_1` read at
@@ -564,10 +574,11 @@ pub struct Ppu {
     /// **bare single-speed** lines (`r.fetched == 0 && !win_active && !glitch &&
     /// !ds`), the regime the +3 back-date was measured on; the sprite/window
     /// (+2 DMG) and double-speed (+4) back-dates are derived-but-unmeasured and
-    /// stay on `line_render_done` for now. **Always `false` on the flag-off
-    /// (production) path** (the set is gated on `leading-edge`), so
-    /// `vis_mode` reads `line_render_done` exactly — byte-identical in
-    /// production. The OAM/VRAM accessibility unblock (`blocking.rs`) keeps the
+    /// stay on `line_render_done` for now. LIVE and load-bearing: `vis_mode`
+    /// (`stat_irq.rs`) reads this field unconditionally to move the visible
+    /// EXIT ahead of the counter-pinned dispatch dot — forcing the set off
+    /// changes `golden_fingerprint` (confirmed by probe: the gambatte sprite/
+    /// window rows). The OAM/VRAM accessibility unblock (`blocking.rs`) keeps the
     /// `line_render_done` dot for now (the visible-vs-accessibility 3-dot window
     /// is a later back-dating). Reset at line start + on `m0_unflip`.
     vis_early: bool,
@@ -577,10 +588,10 @@ pub struct Ppu {
     /// (which only ANTICIPATES the visible flip earlier): SameBoy extends a
     /// TRIGGERING window's mode-3 to ≈ `263 + SCX&7` (the measured window-length
     /// law), past the counter-pinned
-    /// dispatch dot, while slopgb's window flip is flat at ~261. Set in
-    /// `m0_flip_events` when the flip fires on a `win_active` line under
-    /// `eager` (0 = no hold); consumed only by `vis_mode` — the IRQ
-    /// dispatch (`line_render_done`) is NOT moved.
+    /// dispatch dot, while slopgb's window flip is flat at ~261. Set
+    /// unconditionally in `m0_flip_events` when the flip fires on a
+    /// `win_active` single-speed line (0 = no hold); consumed only by
+    /// `vis_mode` — the IRQ dispatch (`line_render_done`) is NOT moved.
     ///
     /// **Validated foundation, currently INERT** (like `cycle_clock`/
     /// `mode_timeline`): the rows it targets are blocked on a SEPARATE missing
@@ -590,10 +601,10 @@ pub struct Ppu {
     /// dispatch (want=0, need the opposite direction). Measured 0/233 alone;
     /// it is the visible-mode half of the parallel window-length model
     /// (which must also replicate the WY-latch trigger to drive it).
-    /// **Always 0 on
-    /// the flag-off path** (never set when `eager` is false) →
-    /// byte-identical in production. Reset at line start + on `m0_unflip`, like
-    /// `vis_early`.
+    /// Confirmed by probe: forcing the set above off leaves
+    /// `golden_fingerprint` byte-identical today — the field IS set (no flag
+    /// gates it), it just never reaches a read that would observe it yet.
+    /// Reset at line start + on `m0_unflip`, like `vis_early`.
     vis_hold_until: u16,
     /// The mode-0 STAT IRQ source level: rises on the visible flip's
     /// dot — 2 dots before the pipe end on a bare line, 1 in double
@@ -630,8 +641,9 @@ pub struct Ppu {
     /// SameBoy `lyc_interrupt_line` (`display.c:534`): the LYC==LY STAT source
     /// as a *latch* — re-evaluated to `ly_for_comparison == LYC` whenever
     /// `ly_for_comparison` is a real line, and HELD across the `-1` "no line"
-    /// gaps (so a match survives the line-boundary dot). The LYC input
-    /// `stat_update` consumes on the flag-on path.
+    /// gaps (so a match survives the line-boundary dot). LIVE: the LYC input
+    /// [`Self::stat_update`] consumes unconditionally every dot
+    /// (`stat_update_tick`).
     lyc_interrupt_line: bool,
     /// The STAT IF bit handed out by the last tick came from the mode-0
     /// source rise. The interconnect drains this and applies the
@@ -697,12 +709,13 @@ pub struct Ppu {
     /// lyc_ff45_trigger_delay dmg08_out0/cgb04c_out2 split and the
     /// wilbertpol ly_lyc_*write-C rounds pin the cycle).
     lyc_if_delay: u8,
-    /// Eager line-153 discriminated STAT-delivery retime (`ly_lyc_153_write`):
+    /// Line-153 discriminated STAT-delivery retime (`ly_lyc_153_write`):
     /// the dot of the last FF45 write committed on line 153 (CGB), or
     /// `u16::MAX` for "no write this line" — reset at [`Self::start_line`]. It
     /// distinguishes a FRESH write landing near the dots-6-7 coincidence window
     /// (the enable side-effect zone / the late-disable early delivery) from a
-    /// steady-state LYC=153 that must fire normally. Eager-only.
+    /// steady-state LYC=153 that must fire normally. LIVE: read unconditionally
+    /// by `stat_irq/reclock.rs`.
     l153_lyc_write_dot: u16,
     /// CGB: the LYC value the line-start IRQ event samples — a delayed
     /// copy of FF45 (gambatte LycIrq::regChange keeps `lycReg_` when the
@@ -755,9 +768,10 @@ pub struct Ppu {
     /// shipped, `render_finished` rise; 0 = not yet this line). The CGB
     /// palette-RAM read/write unblock trails it by 1 dot at single speed and
     /// is coincident in double speed on the deferred (cc+0) frame — the
-    /// `cgbpal_m3end` constraint table.
-    /// Consumed only by the tier2 arm of [`Self::pal_ram_blocked`]; reset per
-    /// line, so production (which never reads it) is byte-identical.
+    /// `cgbpal_m3end` constraint table. LIVE: read unconditionally by
+    /// [`Self::pal_ram_blocked`] (forcing it neutral changes
+    /// `golden_fingerprint` — the gambatte cgbpal_m3end rows, confirmed by
+    /// probe); reset per line.
     pal_open_dot: u16,
 
     // Window state.
@@ -891,10 +905,12 @@ pub struct Ppu {
     /// [`Self::stage_write`]).
     staged: Option<StagedWrite>,
     /// A mid-mode-3 LCDC write's deferred render-view commit
-    /// `(value, dots_left)`: the tier2 render reclock lags the BG fetcher's
-    /// `eff.render_lcdc` behind the eager control commit by the render frame
-    /// (`RENDER_LCDC_DELAY` dots). `None` outside a pending defer; production
-    /// never schedules one (byte-identical).
+    /// `(value, dots_left)`: lags the BG fetcher's `eff.render_lcdc` behind
+    /// the write's cc+0 `eff.lcdc` commit by the render frame
+    /// (`RENDER_LCDC_DELAY` dots). `None` outside a pending defer; LIVE —
+    /// scheduled by every mid-mode-3, non-glitch-line LCDC write
+    /// (`commit_eff`, `regs/stage.rs`), confirmed by probe (forcing it off
+    /// changes `golden_fingerprint`, the gambatte bgtilemap rows).
     render_lcdc_pending: Option<(u8, u8)>,
 
     render: Render,
@@ -911,10 +927,9 @@ pub struct Ppu {
     sgb: Option<SgbView>,
 }
 
-/// The BG-fetcher LCDC render-view defer, in PPU dots: the eager
-/// control commit lands at the write's leading edge (cc+0), the render fetch
-/// grid is calibrated +4 late, so the addressing view re-commits this many
-/// `Ppu::tick`s later.
+/// The BG-fetcher LCDC render-view defer, in PPU dots: `eff.lcdc` commits
+/// at the write's leading edge (cc+0), the render fetch grid is calibrated
+/// +4 late, so the addressing view re-commits this many `Ppu::tick`s later.
 const RENDER_LCDC_DELAY: u8 = 3;
 
 fn pixel_buffer(fill: u32) -> Box<[u32; SCREEN_PIXELS]> {
