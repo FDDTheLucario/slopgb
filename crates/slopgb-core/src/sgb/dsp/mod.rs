@@ -124,13 +124,11 @@ impl SDsp {
                 self.endx = 0;
                 self.regs[ENDX] = 0;
             }
-            FLG => {
-                if val & 0x80 != 0 {
-                    // Soft reset: silence + key-off every voice.
-                    for v in &mut self.voices {
-                        v.env.level = 0;
-                        v.env.key_off();
-                    }
+            // Soft reset (bit 7): silence + key-off every voice.
+            FLG if val & 0x80 != 0 => {
+                for v in &mut self.voices {
+                    v.env.level = 0;
+                    v.env.key_off();
                 }
             }
             _ => {}

@@ -1,0 +1,8 @@
+# Pinned toolchain — CI and local dev use the SAME rustc/clippy so a new
+# stable release cannot surface fresh lints in CI that passed locally (the
+# `dtolnay/rust-toolchain@stable` drift that kept breaking main). Bump this
+# channel deliberately (and fix any new lints in the same PR); keep the CI
+# action ref in `.github/workflows/ci.yml` in sync.
+[toolchain]
+channel = "1.97.0"
+components = ["rustfmt", "clippy"]
