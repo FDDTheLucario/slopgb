@@ -5,10 +5,13 @@
 //! row 2 Sound/GB Colors/Joypad/Misc), the active tab's group sitting in the
 //! bottom row touching the content, with OK/Cancel/Apply/Defaults buttons.
 //!
-//! Settings backed by a real slopgb capability are **live**; bgb-only controls
-//! (SGB borders, game-controller config, WAV/AVI recording, bootroms, link, …)
-//! are rendered faithfully but inert/greyed, exactly as bgb greys unavailable
-//! controls. Goal is functional 1:1, not pixel or code parity.
+//! Settings backed by a real slopgb capability are **live** (including SGB
+//! borders, bootroms, and the emulated-system radios). The remaining bgb-only
+//! controls (game-controller config, WAV/AVI recording, HQ sound, …) are drawn
+//! faithfully but inert — in bgb's own colour, i.e. NOT greyed unless bgb itself
+//! greys them, and a click on one is silently swallowed. Goal is functional 1:1,
+//! not pixel or code parity, matching the bgb 1.6.4 captures in
+//! `docs/bgb-reference/options/`.
 //!
 //! `main` owns the `Option<OptionsState>` and routes keys/clicks to it, then
 //! applies an [`OptionsOutcome`] to `App`/`Session`/`GameBoy`. The per-tab

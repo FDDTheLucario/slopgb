@@ -36,7 +36,7 @@ OPTIONS:
 KEYS:
     Z = A        X = B        Enter = Start    RShift/Backspace = Select
     Arrow keys = D-pad        Tab (hold) = turbo
-    P = pause    R = reset    Esc = quit       F9 = break/resume
+    P = pause    R = reset    Esc = debugger   F9 = break/resume
     F2 = debugger    F3 = VRAM viewer    F4 = I/O map  (bgb-style debug windows)
 
 When the debugger window is focused its keys follow bgb: F2 toggle breakpoint,

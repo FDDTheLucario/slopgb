@@ -17,10 +17,15 @@ accuracy is authoritative; the UI hooks are read-only introspection layered on t
 
 Every core change made *for the UI* is read-only `&self` debug introspection
 (`slopgb_core::debug` + a few `GameBoy` accessors) that never advances a cycle or
-mutates state; mutating hooks (link, profiler, exception mask, channel mute) are gated
-off by default. So every UI path stays **byte-identical** to the golden. Verify any
-core touch with `cargo test -p slopgb-core --test gbtr` (`golden_fingerprint`) + the
-mooneye matrix.
+mutates state; every mutating hook is gated off by default — watchpoints, the
+exception mask, the profiler, CDL, link, channel mute, the opt-in boot ROM, RAM
+init, and Game Genie patches (all default-empty/off, verified per gate in a unit
+test). A third class — explicit user-initiated mutations (`debug_set_reg`,
+`debug_write`, load-state) — changes state only on a direct user action, never on
+the passive frame loop. So every UI path stays **byte-identical** to the golden.
+Verify any core touch with `cargo test -p slopgb-core --test gbtr`
+(`golden_fingerprint`) + the mooneye matrix; the armed-hook half is pinned by
+`armed_debug_hooks_do_not_perturb_emulation` + `cdl_logging_does_not_perturb_emulation`.
 
 **The C3 flip is DONE and the forks are collapsed (#11cu/#11cv + S7):** the
 eager-value clock is now the **only** clock — the `leading_edge_reads`/`eager_value`/

@@ -1,6 +1,6 @@
 //! Frontend debugger execution control: break / resume / step / step-over over
-//! the live machine, driving the emulation loop. The breakpoint-by-click UI
-//! lands in a later increment; this is the keyboard-driven core (plan C6/C7).
+//! the live machine, driving the emulation loop. Both the keyboard-driven core
+//! and breakpoint-by-click (double-click a disasm row) drive it.
 //!
 //! Stepping uses the core's own `step` (one instruction) and
 //! `run_until_breakpoint` (run to a return address) — no test-only paths, so the
@@ -13,7 +13,8 @@ use slopgb_core::{DebugReg, GameBoy, Watchpoint, debug};
 /// The set of PC breakpoints the free-run loop halts on. Lives in the
 /// App-owned [`Debugger`] (not the per-window view state) because both the key
 /// handler and the run loop consult it, and a breakpoint is a property of the
-/// machine, not of one debugger window. Watchpoints (RM8) extend this later.
+/// machine, not of one debugger window. Watchpoints live alongside it (see
+/// [`Watchpoints`] below).
 #[derive(Default, Clone, Debug)]
 pub struct Breakpoints {
     pc: BTreeSet<u16>,

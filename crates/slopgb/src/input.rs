@@ -2,7 +2,8 @@
 //! actions, **focus-dependent** like bgb (see [`map`] / [`Focus`]).
 //!
 //! Global (any focus): Z=A, X=B, Enter=Start, Right Shift / Backspace=Select,
-//! arrows=D-pad, Tab (held)=turbo, P=pause, R=reset, Esc=quit, F9=break toggle.
+//! arrows=D-pad, Tab (held)=turbo, P=pause, R=reset, Esc=debugger (bgb-style;
+//! never quits), F9=break toggle.
 //! Game-window F-keys: F2/F3/F4 open the debugger / VRAM / I-O-map windows.
 //! Debugger-window F-keys: F2 toggle breakpoint, F3 step over, F4 run to cursor,
 //! F7 trace (step), F8 step out, Ctrl+G go to, F5/F10 open VRAM/iomap.

@@ -104,11 +104,10 @@ fn scrollbar_at(kind: ToolWindow, area: Rect, px: i32, py: i32) -> Option<Scroll
     }
 }
 
-/// The number of fully-visible memory rows in a pane `height` px tall at line
-/// height `lh` — one page of PageUp/PageDown scrolling (at least 1).
+/// Full 16-byte rows visible in a pane `height` px tall (less the one-line
+/// status bar) at the current line height — one page of PageUp/PageDown
+/// scrolling (at least 1), used for cursor auto-scroll.
 #[must_use]
-/// Full 16-byte rows visible in the standalone memory window's dump body (the
-/// window height less the one-line status bar), used for cursor auto-scroll.
 fn mem_visible_rows(height: i32) -> i32 {
     let lh = line_height();
     ((height - lh) / lh.max(1)).max(1)
@@ -329,10 +328,6 @@ impl ToolWindows {
         }
     }
 
-    /// Handle a left-button press on tool window `id` (uses the last cursor
-    /// position): switches a VRAM control, selects a debugger menu item, or sets
-    /// the debugger cursor. Returns a [`MenuOutcome`] for `main` to apply
-    /// (debugger only), redrawing on any change.
     /// If a left-press landed on a scrollbar track, begin dragging it and jump
     /// to that position. Returns whether the press was consumed (so normal click
     /// routing is skipped).
@@ -396,6 +391,10 @@ impl ToolWindows {
         self.scroll_drag = None;
     }
 
+    /// Handle a left-button press on tool window `id` (uses the last cursor
+    /// position): switches a VRAM control, selects a debugger menu item, or sets
+    /// the debugger cursor. Returns a [`MenuOutcome`] for `main` to apply
+    /// (debugger only), redrawing on any change.
     pub fn on_mouse_left(&mut self, id: WindowId, gb: &GameBoy) -> Option<MenuOutcome> {
         // A press on a scrollbar track starts a drag instead of a pane click.
         if self.begin_scroll_drag(id) {
@@ -492,10 +491,6 @@ impl ToolWindows {
         }
     }
 
-    /// Handle a navigation key for the standalone memory window `id` (arrows by a
-    /// row, PageUp/Down by a page); returns whether it was consumed (so the caller
-    /// doesn't also route it as a game button). Repeats are welcome here, so it is
-    /// not behind the key-repeat guard — holding an arrow scrolls continuously.
     /// Whether the standalone memory window `id` has an open `Go to…` dialog
     /// (so the key path routes keys to it instead of scrolling/hotkeys).
     #[must_use]
@@ -539,6 +534,10 @@ impl ToolWindows {
         view.window.request_redraw();
     }
 
+    /// Handle a navigation key for the standalone memory window `id` (arrows by a
+    /// row, PageUp/Down by a page); returns whether it was consumed (so the caller
+    /// doesn't also route it as a game button). Repeats are welcome here, so it is
+    /// not behind the key-repeat guard — holding an arrow scrolls continuously.
     pub fn mem_window_key(&mut self, id: WindowId, code: KeyCode, gb: &GameBoy) -> bool {
         let Some(view) = self.views.get_mut(&id) else {
             return false;

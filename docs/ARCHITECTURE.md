@@ -26,6 +26,13 @@ slopgb is a cycle-accurate Game Boy (DMG) / Game Boy Color (CGB) emulator.
    (`cargo clippy --all-targets -- -D warnings`).
 5. Unit tests live in the same file (`#[cfg(test)] mod tests`) or in
    `crates/slopgb-core/tests/` for cross-module behavior.
+6. **The golden-safe law.** Every core hook added for the UI is either read-only
+   `&self` introspection or a default-off mutating hook (watchpoints, exception
+   mask, profiler, CDL, link, channel mute, boot ROM, RAM init, Game Genie) that
+   never perturbs emulation when disarmed — so the debugger/viewers stay
+   byte-identical to the golden. The debug surface lives in `lib/debug.rs`,
+   `interconnect/{accessors,debug,link}.rs`, and the `debug/` module (they are
+   *not* in the module-ownership table below). See CLAUDE.md "The golden-safe law".
 
 ## Timing model (the contract everything hangs on)
 

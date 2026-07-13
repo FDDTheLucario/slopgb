@@ -4,13 +4,11 @@
 //! tested headless); `main` owns the `Option<MainMenu>` / `Option<SubMenu>`,
 //! routes the mouse, and renders the overlay.
 //!
-//! Item-for-item from the captures (15 rows, no separators). The five already-
-//! supported actions (Pause / Enable sound / Reset / Debugger / Exit) run via
-//! `main`'s shared `run_action`; **Window size** opens its submenu (MN2). The
-//! rest render greyed (the project's "not-yet-wired = greyed" convention) —
-//! Load ROM / Options / Cheat / Save screenshot land in MN4/later, and the other
-//! submenu rows (State / Other / Sound channel / Link / Recent ROMs) keep their
-//! `▶` arrow but don't open until MN3–MN7.
+//! Item-for-item from the captures (15 rows, no separators). Every row is wired:
+//! the direct actions (Pause / Enable sound / Reset / Debugger / Load ROM /
+//! Options / Cheat / Save screenshot / Exit) run via `main`'s shared
+//! `run_action`, and the submenu rows (Window size / State / Other / Sound
+//! channel / Link / Recent ROMs) open their submenus.
 
 use crate::input::Action;
 use crate::ui::canvas::{Canvas, Rect};
