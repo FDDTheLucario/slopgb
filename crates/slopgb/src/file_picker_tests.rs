@@ -3,15 +3,15 @@ use slopfp::Entry;
 use std::path::PathBuf;
 use winit::keyboard::ModifiersState;
 
-/// A `FallbackPicker` over a pure in-memory listing (no fs), rooted at `/x`,
+/// A `FilePicker` over a pure in-memory listing (no fs), rooted at `/x`,
 /// for the pure hit-test math below — `open()` always reads a real directory,
 /// which these tests don't need.
-fn picker_with(entries: Vec<Entry>) -> FallbackPicker {
+fn picker_with(entries: Vec<Entry>) -> FilePicker {
     // `last_rowcount` defaults to the full entry count, as if `render` had just
     // drawn every one of them (the common case these hit-test fixtures want);
     // tests of the "undrawn sliver" guard override it explicitly.
     let last_rowcount = entries.len();
-    FallbackPicker {
+    FilePicker {
         picker: Picker::with_entries(Mode::Open, "/x", entries),
         purpose: PathPurpose::LoadRom,
         last_offset: 0,
@@ -101,9 +101,9 @@ fn ctrl_h_toggles_hidden_else_falls_through_to_char() {
 
 #[test]
 fn ctrl_hotkeys_reach_the_path_bar_and_sort_toggles() {
-    // These have no other affordance with no native dialog open (no menu bar
-    // in the fallback picker), so they must map through; each falls back to
-    // its plain `Char` with no modifier, same shape as Ctrl+H above.
+    // These have no other affordance in the file picker (no menu bar), so they
+    // must map through; each falls back to its plain `Char` with no modifier,
+    // same shape as Ctrl+H above.
     assert_eq!(
         winit_key_to_picker(KeyCode::KeyL, Some("l"), ModifiersState::CONTROL),
         Some(Key::FocusPath)

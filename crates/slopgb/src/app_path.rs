@@ -7,29 +7,30 @@ use std::rc::Rc;
 
 use slopfp::Outcome as PickerOutcome;
 
-use crate::fallback_picker::FallbackPicker;
-use crate::filepicker::{self, PickResult};
+use crate::file_picker::FilePicker;
 use crate::ui::dialog::DialogResult;
 use crate::{App, PathPurpose, link, push_recent_into, symbols};
 
-/// Which native dialog (if any) a path purpose should try before the typed
-/// modal. `LinkConnect` is a `host:port`, not a file, so it never picks; a
-/// `SaveState` writes a new file, so it uses the save dialog; the rest open an
-/// existing file. Pure → unit-tested (it must never offer a file picker for
-/// `LinkConnect`).
+/// How a path purpose collects its value: the in-app file browser (open- or
+/// save-mode) or the typed [`crate::ui::dialog::InputDialog`] modal for a
+/// non-file entry (link `host:port` / MCP port). Pure → unit-tested (it must
+/// never offer a file browser for `LinkConnect`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PickKind {
-    Open,
-    Save,
-    None,
+pub(crate) enum PathEntry {
+    /// Browse for an existing file to open.
+    OpenFile,
+    /// Browse to a (possibly new) file to save.
+    SaveFile,
+    /// Type a non-file value (`host:port` / port number) into the text modal.
+    Modal,
 }
 
 #[must_use]
-pub(crate) fn pick_kind(purpose: PathPurpose) -> PickKind {
+pub(crate) fn path_entry(purpose: PathPurpose) -> PathEntry {
     match purpose {
-        PathPurpose::SaveState | PathPurpose::CdlSave => PickKind::Save,
-        PathPurpose::LinkConnect | PathPurpose::McpStart => PickKind::None,
-        _ => PickKind::Open,
+        PathPurpose::SaveState | PathPurpose::CdlSave => PathEntry::SaveFile,
+        PathPurpose::LinkConnect | PathPurpose::McpStart => PathEntry::Modal,
+        _ => PathEntry::OpenFile,
     }
 }
 
@@ -56,42 +57,25 @@ pub(crate) fn sym_sidecar(rom: &Path) -> Option<PathBuf> {
 }
 
 impl App {
-    /// Open a path entry for `purpose`. Prefer a **native file dialog** (a
-    /// dep-free shell-out, [`crate::filepicker`]); when no picker tool is
-    /// installed, fall back to an **in-app** browser
-    /// ([`crate::fallback_picker::FallbackPicker`]) for file purposes, or the
-    /// typed modal for the one non-file purpose (link `host:port`). A
-    /// user-cancelled native dialog just closes.
+    /// Open a path entry for `purpose`. File purposes use the **in-app** browser
+    /// ([`crate::file_picker::FilePicker`], built on `slopfp`) — a
+    /// self-contained picker with no dependency on a system dialog utility being
+    /// installed. The one non-file purpose (link `host:port` / MCP port) has no
+    /// file to browse, so it uses the typed modal.
     pub(crate) fn open_path_prompt(&mut self, title: &str, purpose: PathPurpose) {
-        let kind = pick_kind(purpose);
-        let picked = match kind {
-            PickKind::Open => filepicker::pick_open(),
-            PickKind::Save => filepicker::pick_save(),
-            // Not a file (link host:port): go straight to the typed modal.
-            PickKind::None => PickResult::Unavailable,
-        };
-        match picked {
-            PickResult::Picked(path) => {
-                self.run_path_action(purpose, &path);
-                self.request_game_redraw();
+        match path_entry(purpose) {
+            entry @ (PathEntry::OpenFile | PathEntry::SaveFile) => {
+                self.open_file_picker(title, purpose, entry)
             }
-            // The user backed out of the native dialog — don't nag with a fallback.
-            PickResult::Cancelled => self.request_game_redraw(),
-            // No native picker available: a file purpose gets the in-app
-            // browser; `host:port` (PickKind::None) has no browser to fall
-            // back to, so it keeps the typed modal.
-            PickResult::Unavailable if kind == PickKind::None => {
-                self.open_path_modal(title, purpose)
-            }
-            PickResult::Unavailable => self.open_fallback_picker(title, purpose, kind),
+            PathEntry::Modal => self.open_path_modal(title, purpose),
         }
     }
 
-    /// The typed-path modal over the LCD (fallback when no native picker exists).
-    /// It lives on the game window and only captures keys there, so raise + focus
-    /// the game window — else a prompt triggered from a tool window (e.g. the
-    /// debugger "Load symbols...") would appear hidden behind it and seem
-    /// unresponsive.
+    /// The typed-path modal over the LCD (for the non-file purposes — link
+    /// `host:port` / MCP port). It lives on the game window and only captures
+    /// keys there, so raise + focus the game window — else a prompt triggered
+    /// from a tool window (e.g. the debugger "Load symbols...") would appear
+    /// hidden behind it and seem unresponsive.
     fn open_path_modal(&mut self, title: &str, purpose: PathPurpose) {
         self.path_purpose = purpose;
         self.path_dialog = Some(
@@ -103,10 +87,10 @@ impl App {
         self.request_game_redraw();
     }
 
-    /// The in-app fallback file browser, rooted at the last-loaded ROM's
+    /// The in-app file browser, rooted at the last-loaded ROM's
     /// directory (falling back to the process cwd, then `/`) — same
     /// raise+focus rationale as [`Self::open_path_modal`].
-    fn open_fallback_picker(&mut self, title: &str, purpose: PathPurpose, kind: PickKind) {
+    fn open_file_picker(&mut self, title: &str, purpose: PathPurpose, entry: PathEntry) {
         let start_dir = self
             .recent
             .first()
@@ -114,46 +98,46 @@ impl App {
             .map(Path::to_path_buf)
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
         // ponytail: per-purpose ext filters, add when a purpose needs one.
-        self.fallback_picker = Some(FallbackPicker::open(
+        self.file_picker = Some(FilePicker::open(
             purpose,
             start_dir,
             &[],
             title,
-            kind == PickKind::Save,
+            entry == PathEntry::SaveFile,
         ));
         // Reset the double-click timer: a stale click from a previous picker
         // session (same screen spot, still inside the double-click window)
         // must never combine with the first click of this new session.
-        self.fallback_last_click = None;
+        self.picker_last_click = None;
         if let Some(w) = &self.window {
             w.focus_window();
         }
         self.request_game_redraw();
     }
 
-    /// Apply an in-app fallback-picker outcome (shared by the key-feed guard
+    /// Apply an in-app file-picker outcome (shared by the key-feed guard
     /// in `main::handle_key` and the click routing in `app_menu::on_game_click`):
     /// `Picked` runs the picker's own purpose and closes it, `Cancelled` just
     /// closes it, `None`/no-outcome keeps it open. Always repaints (the
     /// picker's own view may have changed even with no outcome — a nav key).
-    /// Both close arms null out `fallback_last_click` too — else a stale
+    /// Both close arms null out `picker_last_click` too — else a stale
     /// double-click timer from this session could combine with the first
     /// click of a picker opened later at the same screen spot.
-    pub(crate) fn resolve_fallback_picker(&mut self, outcome: Option<PickerOutcome>) {
+    pub(crate) fn resolve_file_picker(&mut self, outcome: Option<PickerOutcome>) {
         match outcome {
             Some(PickerOutcome::Picked(path)) => {
                 let purpose = self
-                    .fallback_picker
+                    .file_picker
                     .as_ref()
                     .expect("outcome came from this picker")
                     .purpose();
-                self.fallback_picker = None;
-                self.fallback_last_click = None;
+                self.file_picker = None;
+                self.picker_last_click = None;
                 self.run_path_action(purpose, &path);
             }
             Some(PickerOutcome::Cancelled) => {
-                self.fallback_picker = None;
-                self.fallback_last_click = None;
+                self.file_picker = None;
+                self.picker_last_click = None;
             }
             _ => {}
         }
@@ -179,7 +163,7 @@ impl App {
     }
 
     /// Carry out an accepted path entry per its purpose. `pub(crate)`: both the
-    /// typed modal (this file) and the fallback-picker guards in `main.rs`/
+    /// typed modal (this file) and the file-picker guards in `main.rs`/
     /// `app_menu.rs` route their accepted path through this one sink.
     pub(crate) fn run_path_action(&mut self, purpose: PathPurpose, path: &Path) {
         match purpose {

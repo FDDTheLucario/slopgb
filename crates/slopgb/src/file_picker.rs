@@ -1,10 +1,10 @@
-//! The in-app fallback file browser: `slopfp`'s pure state
-//! machine wired to the game window, used only when [`crate::filepicker`]'s
-//! native-dialog shell-out finds no installed picker tool
-//! ([`crate::filepicker::PickResult::Unavailable`]). Slots into the exact same
-//! sites as the typed [`crate::ui::dialog::InputDialog`] path modal (see
-//! `app_path.rs`, `main.rs::handle_key`, `app_menu.rs::on_game_click`, and the
-//! game redraw) — a sibling modal, not a replacement plumbing path.
+//! The in-app file browser: `slopfp`'s pure state machine wired to the game
+//! window. This is the file picker for every file purpose (Load ROM / Save &
+//! Load state / symbols / bootrom paths / CDL / cheats) — self-contained, with
+//! no dependency on a system dialog utility. Slots into the same sites as the
+//! typed [`crate::ui::dialog::InputDialog`] path modal (see `app_path.rs`,
+//! `main.rs::handle_key`, `app_menu.rs::on_game_click`, and the game redraw);
+//! the typed modal now handles only the non-file purposes (link / MCP port).
 
 use std::path::PathBuf;
 
@@ -23,7 +23,7 @@ const MAX_W: i32 = 560;
 const MAX_H: i32 = 420;
 const MARGIN: i32 = 40;
 
-pub(crate) struct FallbackPicker {
+pub(crate) struct FilePicker {
     picker: Picker,
     purpose: PathPurpose,
     /// Scroll offset of the last `view()` (rows are pre-sliced to the window,
@@ -39,7 +39,7 @@ pub(crate) struct FallbackPicker {
     last_rowcount: usize,
 }
 
-impl FallbackPicker {
+impl FilePicker {
     /// Open a picker rooted at `start_dir`. `filters` are extensions without
     /// the dot; empty = show everything.
     // ponytail: per-purpose ext filters (e.g. gb/gbc/gbs/sav), add when a
@@ -189,7 +189,7 @@ impl FallbackPicker {
 /// `main::dialog_key_from` (the typed-modal translator this picker sits
 /// alongside). `text` is the winit `KeyEvent::text` (a printable char, if
 /// any); `mods` gates the `Ctrl+<letter>` hotkeys (path bar / sort / hidden /
-/// all-files — see the bottom-of-panel hint drawn in [`FallbackPicker::render`]).
+/// all-files — see the bottom-of-panel hint drawn in [`FilePicker::render`]).
 #[must_use]
 pub(crate) fn winit_key_to_picker(
     code: KeyCode,
@@ -221,5 +221,5 @@ pub(crate) fn winit_key_to_picker(
 }
 
 #[cfg(test)]
-#[path = "fallback_picker_tests.rs"]
+#[path = "file_picker_tests.rs"]
 mod tests;

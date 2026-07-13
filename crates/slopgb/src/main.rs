@@ -26,8 +26,7 @@ mod cheat_ui;
 mod cli;
 mod clipboard;
 mod dbg;
-mod fallback_picker;
-mod filepicker;
+mod file_picker;
 mod input;
 mod keymap;
 mod link;
@@ -299,15 +298,15 @@ struct App {
     path_dialog: Option<InputDialog>,
     /// What the open [`Self::path_dialog`] does on accept.
     path_purpose: PathPurpose,
-    /// The in-app fallback file browser ([`fallback_picker::FallbackPicker`]),
-    /// opened instead of [`Self::path_dialog`] for FILE purposes when no
-    /// native picker tool is installed (`PickKind::None` — the link
-    /// host:port prompt — always keeps the typed modal).
-    fallback_picker: Option<fallback_picker::FallbackPicker>,
-    /// Time + position of the last left-press on [`Self::fallback_picker`]'s
+    /// The in-app file browser ([`file_picker::FilePicker`]) — the picker for
+    /// every FILE purpose (Load ROM / save+load state / symbols / bootrom /
+    /// CDL / cheats). The non-file purposes (`PathEntry::Modal` — link `host:port`
+    /// / MCP port) use [`Self::path_dialog`] instead.
+    file_picker: Option<file_picker::FilePicker>,
+    /// Time + position of the last left-press on [`Self::file_picker`]'s
     /// list, for synthesizing a double-click (winit delivers no such event;
     /// mirrors `toolwin::ToolView::note_click`).
-    fallback_last_click: Option<(Instant, i32, i32)>,
+    picker_last_click: Option<(Instant, i32, i32)>,
     /// Recently loaded ROM paths (MN4), most-recent first, deduped, capped — the
     /// Recent ROMs submenu. In-memory only (on-disk persistence deferred).
     recent: Vec<PathBuf>,
@@ -409,8 +408,8 @@ impl App {
             cheat_dialog: None,
             path_dialog: None,
             path_purpose: PathPurpose::LoadRom,
-            fallback_picker: None,
-            fallback_last_click: None,
+            file_picker: None,
+            picker_last_click: None,
             link: link::Link::new(),
             mcp: mcp::Mcp::new(),
             recent,
@@ -491,11 +490,11 @@ impl App {
         let cheat_list = &self.cheats;
         let path_dlg = self.path_dialog.as_ref();
         // `&mut` (not `&ref`, unlike the other overlays): the picker's `view()`
-        // is a live widget call, not a plain read — see `fallback_picker.rs`.
+        // is a live widget call, not a plain read — see `file_picker.rs`.
         // Still a disjoint field borrow from `video`/`options`/etc above, and
         // `video.draw`'s overlay is `FnOnce`, so moving this `Option<&mut _>`
         // into the closure (called exactly once) borrow-checks cleanly.
-        let fallback = self.fallback_picker.as_mut();
+        let picker = self.file_picker.as_mut();
         let options = self.options.as_ref();
         let wizard = self.key_wizard.as_ref();
         let theme = ui::Theme::BGB;
@@ -519,9 +518,9 @@ impl App {
                 let area = canvas.bounds();
                 dialog::render(canvas, area, d, &theme);
             }
-            // The in-app fallback file browser is the same kind of standalone
+            // The in-app file browser is the same kind of standalone
             // overlay as the path modal (never open at the same time as it).
-            if let Some(fp) = fallback {
+            if let Some(fp) = picker {
                 let area = canvas.bounds();
                 fp.render(canvas, area.w, area.h, &theme);
             }
@@ -609,16 +608,16 @@ impl App {
             }
             return;
         }
-        // The in-app fallback file browser (no native picker tool installed):
-        // same capture rule as the path modal above, translated through
-        // `fallback_picker::winit_key_to_picker` instead of `dialog_key_from`.
-        if focus == Focus::Game && key.state.is_pressed() && self.fallback_picker.is_some() {
+        // The in-app file browser captures keys with the same rule as the path
+        // modal above, translated through `file_picker::winit_key_to_picker`
+        // instead of `dialog_key_from`.
+        if focus == Focus::Game && key.state.is_pressed() && self.file_picker.is_some() {
             if let PhysicalKey::Code(code) = key.physical_key {
                 if let Some(pk) =
-                    fallback_picker::winit_key_to_picker(code, key.text.as_deref(), self.modifiers)
+                    file_picker::winit_key_to_picker(code, key.text.as_deref(), self.modifiers)
                 {
-                    let outcome = self.fallback_picker.as_mut().map(|fp| fp.feed_key(pk));
-                    self.resolve_fallback_picker(outcome);
+                    let outcome = self.file_picker.as_mut().map(|fp| fp.feed_key(pk));
+                    self.resolve_file_picker(outcome);
                 }
             }
             return;

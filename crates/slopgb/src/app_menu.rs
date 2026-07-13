@@ -70,22 +70,22 @@ impl App {
             }
             return;
         }
-        // The in-app fallback file browser is topmost too (it opens in exactly
+        // The in-app file browser is topmost too (it opens in exactly
         // the situations the path modal would have): only the left button acts;
         // a second left-press close enough in time+space to the first is a
         // double-click (activate), matching `toolwin::ToolView::note_click`.
-        if self.fallback_picker.is_some() {
+        if self.file_picker.is_some() {
             if button == MouseButton::Left {
                 let now = std::time::Instant::now();
-                let double = self.fallback_last_click.is_some_and(|(t, lx, ly)| {
+                let double = self.picker_last_click.is_some_and(|(t, lx, ly)| {
                     crate::toolwin::is_double_click(now.duration_since(t), px - lx, py - ly)
                 });
-                self.fallback_last_click = if double { None } else { Some((now, px, py)) };
+                self.picker_last_click = if double { None } else { Some((now, px, py)) };
                 let outcome = self
-                    .fallback_picker
+                    .file_picker
                     .as_mut()
                     .map(|fp| fp.on_click(px, py, double));
-                self.resolve_fallback_picker(outcome);
+                self.resolve_file_picker(outcome);
             }
             return;
         }
