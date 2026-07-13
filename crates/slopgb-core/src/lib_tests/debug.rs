@@ -281,3 +281,50 @@ fn ime_accessors_track_the_ei_delay() {
     assert!(gb.ime(), "IME enabled one instruction after EI");
     assert!(!gb.ime_pending(), "pending cleared once applied");
 }
+
+/// The golden-safe law's armed-hook half. `&self` accessors are compiler-pure,
+/// but the mutating debug hooks (watchpoints, exception mask, profiler) run
+/// per-CPU-access code when armed. Arm all three — with watchpoints/exceptions
+/// that actually *match* the ROM's accesses, so the record-a-hit paths run, not
+/// just the empty-list fast path — and assert emulation stays byte-identical to
+/// an unarmed machine over many frames (regs/cycles/frame each frame, then full
+/// memory). `run_frame` never consumes a hit (only `run_frame_until_breakpoint`
+/// does), so the hooks may fire freely without stalling the core run.
+#[test]
+fn armed_debug_hooks_do_not_perturb_emulation() {
+    let build = |arm: bool| {
+        let mut gb = GameBoy::new(Model::Cgb, comprehensive_oracle_rom(true)).unwrap();
+        if arm {
+            gb.set_watchpoints(&[
+                Watchpoint {
+                    addr: 0xFF40, // LCDC — the ROM writes it
+                    read: true,
+                    write: true,
+                },
+                Watchpoint {
+                    addr: 0xA000, // cart RAM — the ROM writes it
+                    read: true,
+                    write: true,
+                },
+            ]);
+            gb.set_exceptions(EXC_LD_B_B | EXC_INVALID_OPCODE | EXC_ECHO_RAM | EXC_LCD_OFF_VBLANK);
+            gb.set_profiling(true);
+        }
+        gb
+    };
+    let mut plain = build(false);
+    let mut armed = build(true);
+    for i in 0..120 {
+        plain.run_frame();
+        armed.run_frame();
+        assert_machines_match(&plain, &armed, &format!("armed hooks, frame {i}"));
+    }
+    for addr in 0u32..=0xFFFF {
+        let addr = addr as u16;
+        assert_eq!(
+            plain.debug_read(addr),
+            armed.debug_read(addr),
+            "armed debug hooks perturbed memory at {addr:#06X}"
+        );
+    }
+}
