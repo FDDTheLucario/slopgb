@@ -64,7 +64,7 @@ impl Interconnect {
                 // Repay a WriteCpu-conflict engine write's borrowed dot: the
                 // previous `Bus::write` ticked cc-1's PPU dot ahead of its
                 // `write_no_tick` (SameBoy WriteCpu commits 1 T into the
-                // M-cycle), so skip it here to restore CPU/PPU phase (#11dd).
+                // M-cycle), so skip it here to restore CPU/PPU phase.
                 if cc == 1 && self.eager_wr_borrow {
                     self.eager_wr_borrow = false;
                     continue;

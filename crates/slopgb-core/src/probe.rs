@@ -110,7 +110,7 @@ pub(crate) fn noxline_fires() -> bool {
     true
 }
 
-/// HALFDOT (#11dw) DMG FF41 engine-view write-commit half-dot deferral sweep
+/// HALFDOT DMG FF41 engine-view write-commit half-dot deferral sweep
 /// (`SLOPGB_ENGCOMMIT`): the number of odd half-dots the line-153 `eng_stat`
 /// commit is delayed by (`Ppu::stat_update_half`). Returns `default` unless set.
 #[cfg(feature = "port_probe")]

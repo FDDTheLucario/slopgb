@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// Post-C3-flip default guard (#11cu): every production `GameBoy::new` must
+/// Post-C3-flip default guard: every production `GameBoy::new` must
 /// construct on the coherent EAGER-value clock — `leading_edge_reads` ON,
 /// `tier2_reclock` (the disproven read-deferred variant) still OFF. The
 /// eager-value flip is the shipped default; the deferred `tier2_reclock` must

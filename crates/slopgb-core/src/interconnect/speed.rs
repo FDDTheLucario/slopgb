@@ -222,11 +222,11 @@ impl Interconnect {
                 self.ack_squash_dots = if self.tier2_reclock {
                     0
                 } else if self.eager_value {
-                    // Eager ack-squash port (#11de): the eager read-frame
+                    // Eager ack-squash port: the eager read-frame
                     // enters the STAT/OAM ISR — and so fires this ack — the
                     // read-debt earlier than the gambatte cc+4 frame the
                     // production `2` is tuned to (+8hd = 4 dots SS / 2 dots DS,
-                    // the #11by cc+0→cc+4 shift). The mode-0 retrigger is a PPU
+                    // the cc+0→cc+4 shift). The mode-0 retrigger is a PPU
                     // event pinned to the same absolute dot, so the eager
                     // ack→retrigger gap grows by exactly that shift; widen the
                     // squash window by it so the post-ack retrigger stays
@@ -253,7 +253,7 @@ impl Interconnect {
                     if self.double_speed {
                         if self.ppu.stat_src_hblank() { 4 } else { 3 }
                     } else if !self.model.is_cgb() && self.ppu.line_dot().0 == 153 {
-                        // Line-153 LYC retrigger family (#11cu): the dot-4 LYC=153
+                        // Line-153 LYC retrigger family: the dot-4 LYC=153
                         // IF-emission decouple fires this line-153 STAT ISR — and
                         // its ack — one M-cycle (4 dots) EARLIER than the dot-6
                         // read frame the SS window `6` was tuned to, so the

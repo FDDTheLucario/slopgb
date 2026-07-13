@@ -221,7 +221,7 @@ pub struct Interconnect {
 
     /// A CGB single-speed WriteCpu-conflict engine write (FF41/FF0F/FF45) just
     /// committed one PPU dot into the next M-cycle (SameBoy `GB_CONFLICT_
-    /// WRITE_CPU` lands the CPU value 1 T past the M-cycle boundary; #11dd). The
+    /// WRITE_CPU` lands the CPU value 1 T past the M-cycle boundary). The
     /// eager write borrowed that dot ahead of `write_no_tick`, so the next
     /// `tick_machine` ticks 3 PPU dots (skip cc 1) to restore CPU/PPU phase.
     /// Set only under `eager_value` → production/tier2 byte-identical.
@@ -545,7 +545,7 @@ impl Interconnect {
             joypad: Joypad::new(sgb_joypad),
             cycles: 0,
             clock: CycleClock::new(),
-            // C3 flip (#11cu): the coherent eager-value clock is the production
+            // C3 flip: the coherent eager-value clock is the production
             // default. `post_boot_inner` re-arms the PPU flag web after
             // `apply_post_boot_state`, so the raw struct-literal default is
             // coherent (mooneye 93/93). `tier2_reclock` (the deferred clock)

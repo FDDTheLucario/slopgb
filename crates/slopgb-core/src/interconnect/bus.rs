@@ -42,13 +42,13 @@ impl Bus for Interconnect {
         self.maybe_oam_bug(addr, OamBugKind::Read);
         self.check_access(addr, false);
         let trailing = self.read_no_tick(addr);
-        // Eager FF0F read-frame peek (#11db): the CGB LYC/STAT engine rise
+        // Eager FF0F read-frame peek: the CGB LYC/STAT engine rise
         // lands beyond the eager cc+0 read, so the raw `intf` misses the
         // deterministically-imminent bit SameBoy's events-first read frame has
         // already folded. Fold it in as a verdict-only value peek
         // (`Ppu::ff0f_stat_peek`, less the LY0 pulse the whole-dot frame set a
         // dot early) — the same peek the tier2 `read_deferred` path applies, and
-        // the same VALUE-at-cc+4 shape as the halt-entry peek (#11cv). `intf` is
+        // the same VALUE-at-cc+4 shape as the halt-entry peek. `intf` is
         // untouched; the rise still folds at its own dot. Eager-only, off the
         // tier2 (early-returned above) and production (`eager_value` false) paths
         // → byte-identical.
@@ -96,7 +96,7 @@ impl Bus for Interconnect {
             self.ppu.stage_write(addr, value, dots);
         }
         self.tick_machine();
-        // Eager write-conflict commit port (#11dd): a CGB single-speed
+        // Eager write-conflict commit port: a CGB single-speed
         // WriteCpu-conflict engine write (FF41 STAT / FF0F IF / FF45 LYC)
         // commits its engine-visible effect (`eng_stat`/`intf`/LYC compare) ONE
         // T past the M-cycle boundary in SameBoy (`GB_CONFLICT_WRITE_CPU`), not
@@ -111,7 +111,7 @@ impl Bus for Interconnect {
         // offset (`lcd_shift_dots != 0`) shifts the CPU/PPU grid, where a
         // whole-dot borrow mis-maps a co-instant STAT rise onto the wrong side
         // of the write (`lycwirq_trigger_*_lcdoffset1_1`).
-        // #11dj: DMG is single-speed with the same 4-dot M-cycle and 1-T
+        // DMG is single-speed with the same 4-dot M-cycle and 1-T
         // WriteCpu commit as CGB SS, so the identical whole-dot borrow re-hosts
         // the DMG FF0F-clear straddle (`m2int_m0irq_scx3_ifw_2`/`_4`,
         // `ly0/lycint152_lyc153irq_ifw_2`). Scoped to FF0F on DMG: the FF41/FF45
@@ -144,7 +144,7 @@ impl Bus for Interconnect {
         // above the commit now sits at the WriteCpu dot, so the same squash arm
         // applies (`lycint152_lyc153irq_ifw_2`). Shares the borrow's scope.
         //
-        // Double-speed extension (#11df): at DS SameBoy's WriteCpu commits 1 T =
+        // Double-speed extension: at DS SameBoy's WriteCpu commits 1 T =
         // half a dot into the M-cycle, but the eager whole-M-cycle tick already
         // lands `write_no_tick` at the SAME dot the tier2 deferred path commits
         // (measured: `m2int_m0irq_scx{3,4}_ifw_ds` commit dots match tier2

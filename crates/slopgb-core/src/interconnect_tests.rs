@@ -45,7 +45,7 @@ fn test_rom() -> Vec<u8> {
 }
 
 // These interconnect unit tests are calibrated against the OFF (deferred cc+4
-// read) clock. The C3 flip (#11cu) made the eager-value clock the struct-literal
+// read) clock. The C3 flip made the eager-value clock the struct-literal
 // construction default, so `Interconnect::new` now arms leading_edge/eager on the
 // bus without the `post_boot_inner` PPU-propagation — an incoherent half-armed
 // machine here. Neutralize it back to the coherent OFF clock so each test still
