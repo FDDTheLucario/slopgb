@@ -14,11 +14,12 @@ pub mod widgets;
 
 pub use canvas::Canvas;
 pub use registry::{ToolWindow, WindowRegistry};
-// `ThemeParseError` is re-exported for API symmetry with `Theme`/`ThemeChoice`
-// (a future custom-theme UI/CLI would surface it); nothing in-crate names it
-// via this path yet (only via `theme::ThemeParseError` internally).
+pub use theme::{CustomThemes, Theme, ThemeChoice};
+// Re-exported for API symmetry with `Theme`/`ThemeChoice` (a future
+// custom-theme UI/CLI would surface it); nothing in-crate names it via this
+// path yet (only via `theme::ThemeParseError` internally).
 #[allow(unused_imports)]
-pub use theme::{CustomThemes, Theme, ThemeChoice, ThemeParseError};
+pub use theme::ThemeParseError;
 
 #[cfg(test)]
 #[path = "ui/font_tests.rs"]

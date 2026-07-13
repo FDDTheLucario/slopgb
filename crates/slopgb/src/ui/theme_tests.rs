@@ -165,6 +165,20 @@ fn theme_choice_key_round_trips_every_variant() {
 }
 
 #[test]
+fn empty_named_custom_encodes_as_the_default_key_not_a_lossy_custom() {
+    // `Custom("")` isn't reachable through `from_key` (which maps a bare
+    // `"custom:"` straight to `default()`), but a direct construction must
+    // still encode/decode consistently rather than round-tripping to a
+    // different `Custom("")` on the next load.
+    let choice = ThemeChoice::Custom(String::new());
+    assert_eq!(choice.to_key(), ThemeChoice::default().to_key());
+    assert_eq!(
+        ThemeChoice::from_key(&choice.to_key()),
+        ThemeChoice::default()
+    );
+}
+
+#[test]
 fn theme_choice_from_key_falls_back_on_garbage() {
     assert_eq!(ThemeChoice::from_key(""), ThemeChoice::default());
     assert_eq!(ThemeChoice::from_key("bogus"), ThemeChoice::default());

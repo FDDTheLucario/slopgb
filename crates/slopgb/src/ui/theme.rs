@@ -320,13 +320,17 @@ impl ThemeChoice {
 
     /// Encode for persistence (the native config's `theme` key, and the
     /// bgb-ini `SlopgbTheme` extra): `light` / `dark` / `classic` /
-    /// `custom:NAME`.
+    /// `custom:NAME`. An empty-named `Custom` (never produced by
+    /// [`Self::from_key`], but not `unsafe`-illegal to construct directly)
+    /// encodes as [`Self::default`]'s key, so this always agrees with
+    /// [`Self::from_key`] — never a lossy `"custom:"` round-trip.
     #[must_use]
     pub fn to_key(&self) -> String {
         match self {
             ThemeChoice::Light => "light".to_string(),
             ThemeChoice::Dark => "dark".to_string(),
             ThemeChoice::Classic => "classic".to_string(),
+            ThemeChoice::Custom(name) if name.is_empty() => Self::default().to_key(),
             ThemeChoice::Custom(name) => format!("custom:{name}"),
         }
     }

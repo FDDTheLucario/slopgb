@@ -113,14 +113,15 @@ impl Doc {
 
     /// Every distinct `[section]` name that starts with `prefix`, in file
     /// order — e.g. `"theme."` finds every `[theme.NAME]` custom-theme
-    /// section without the names being known ahead of time.
+    /// section without the names being known ahead of time. Borrows from
+    /// `self` (no cloning) like [`Self::section_pairs`].
     #[must_use]
-    pub fn section_names_with_prefix(&self, prefix: &str) -> Vec<String> {
-        let mut out = Vec::new();
+    pub fn section_names_with_prefix(&self, prefix: &str) -> Vec<&str> {
+        let mut out: Vec<&str> = Vec::new();
         for line in &self.lines {
             if let Line::Section(s) = line {
-                if s.starts_with(prefix) && !out.contains(s) {
-                    out.push(s.clone());
+                if s.starts_with(prefix) && !out.contains(&s.as_str()) {
+                    out.push(s.as_str());
                 }
             }
         }
@@ -401,7 +402,7 @@ pub fn custom_themes(d: &Doc) -> CustomThemes {
         let Some(name) = section.strip_prefix("theme.").filter(|n| !n.is_empty()) else {
             continue;
         };
-        match Theme::from_pairs(&d.section_pairs(&section)) {
+        match Theme::from_pairs(&d.section_pairs(section)) {
             Ok(theme) => out.insert(name, theme),
             Err(e) => eprintln!("slopgb: custom theme '{name}' in [{section}]: {e}"),
         }
