@@ -627,27 +627,42 @@ impl Apu {
         if self.raw_samples.len() < RAW_SAMPLE_CAP {
             self.raw_samples.push((l, r));
         }
-        self.sum_l += l;
-        self.sum_r += r;
-        self.sum_count += 1;
-        self.sample_frac += 1.0;
-        if self.sample_frac >= self.cycles_per_sample {
-            self.sample_frac -= self.cycles_per_sample;
-            let n = self.sum_count as f32;
-            let l = self.sum_l / n;
-            let r = self.sum_r / n;
-            self.sum_l = 0.0;
-            self.sum_r = 0.0;
-            self.sum_count = 0;
-            let l = high_pass(&mut self.hp_cap_l, l, self.hp_charge);
-            let r = high_pass(&mut self.hp_cap_r, r, self.hp_charge);
+        if let Some(sample) = self.accumulate_output(l, r) {
             // Drop new samples once one second of audio has piled up: a
             // consumer that far behind has lost real-time anyway, and
             // headless runs (e.g. the mooneye harness) never drain at all.
             if self.samples.len() < self.max_samples {
-                self.samples.push((l, r));
+                self.samples.push(sample);
             }
         }
+    }
+
+    /// The audible output stage: box-average resampler + high-pass "output
+    /// capacitor". Split out of [`Self::output_cycle`] so a test can push a
+    /// known per-dot `(l, r)` sequence and read back the exact averaged,
+    /// filtered sample. Accumulates one dot and, on the T-cycle a resampling
+    /// window closes (`cycles_per_sample` dots gathered), divides the sum by
+    /// the dot count (arithmetic mean) and runs it through the capacitor,
+    /// returning the emitted stereo sample; otherwise `None`. Behaviour is
+    /// byte-identical to the previously-inlined version.
+    fn accumulate_output(&mut self, l: f32, r: f32) -> Option<(f32, f32)> {
+        self.sum_l += l;
+        self.sum_r += r;
+        self.sum_count += 1;
+        self.sample_frac += 1.0;
+        if self.sample_frac < self.cycles_per_sample {
+            return None;
+        }
+        self.sample_frac -= self.cycles_per_sample;
+        let n = self.sum_count as f32;
+        let l = self.sum_l / n;
+        let r = self.sum_r / n;
+        self.sum_l = 0.0;
+        self.sum_r = 0.0;
+        self.sum_count = 0;
+        let l = high_pass(&mut self.hp_cap_l, l, self.hp_charge);
+        let r = high_pass(&mut self.hp_cap_r, r, self.hp_charge);
+        Some((l, r))
     }
 
     /// CGB PCM12 (FF76): channel 1 digital output in the low nibble,

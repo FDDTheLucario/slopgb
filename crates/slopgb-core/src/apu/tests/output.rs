@@ -208,6 +208,128 @@ fn raw_tap_is_pre_average_pre_high_pass() {
 }
 
 #[test]
+fn high_pass_dc_input_decays_geometrically_by_the_charge_factor() {
+    // The output capacitor is a single-pole high-pass:
+    //   out = input - cap;  cap = input - out * charge
+    // Driven with a constant input x from a discharged start, its output is
+    // a pure geometric decay, out_n = x * charge^(n-1) (proof: cap_n =
+    // x*(1 - charge^n), so out_{n+1} = x - cap_n = x*charge^n). Verify with
+    // an exactly-representable charge so the whole ladder is bit-exact and an
+    // off-by-one in the recurrence (or dropping the `- out*charge` leak)
+    // fails immediately.
+    let mut cap = 0.0_f32;
+    let charge = 0.5_f32;
+    let outs = [
+        high_pass(&mut cap, 1.0, charge),
+        high_pass(&mut cap, 1.0, charge),
+        high_pass(&mut cap, 1.0, charge),
+        high_pass(&mut cap, 1.0, charge),
+    ];
+    assert_eq!(outs, [1.0, 0.5, 0.25, 0.125], "x * 0.5^(n-1)");
+
+    // charge == 1 is the no-leak limit: DC passes forever (no high-pass at
+    // all). This pins that `charge` is exactly what removes the DC — a
+    // mis-scaled charge that drifts toward 1 stops removing DC.
+    let mut cap = 0.0_f32;
+    let held = [
+        high_pass(&mut cap, 1.0, 1.0),
+        high_pass(&mut cap, 1.0, 1.0),
+        high_pass(&mut cap, 1.0, 1.0),
+    ];
+    assert_eq!(held, [1.0, 1.0, 1.0], "charge==1 leaks nothing: DC held");
+}
+
+#[test]
+fn hp_charge_is_scaled_from_per_t_cycle_to_per_output_sample() {
+    // Physical model (Blargg's DMG measurement): the output capacitor keeps
+    // a fraction PER_T_CYCLE of its charge every *T-cycle*. One 48 kHz output
+    // sample spans CLOCK_HZ/48000 T-cycles, so the per-*sample* charge factor
+    // the resampled stream must use is PER_T_CYCLE raised to that many cycles
+    // (~0.9963, not the raw 0.999958). Deriving the expectation from the raw
+    // physical constant + the clock (not from hp_charge) makes this a real
+    // pin, not a mirror: leaving hp_charge at the per-T-cycle value, or
+    // mis-scaling it, decays audibly wrong yet is invisible to the golden.
+    const PER_T_CYCLE: f64 = 0.999_958;
+    let cps = f64::from(crate::CLOCK_HZ) / 48_000.0;
+    let expected = PER_T_CYCLE.powf(cps); // ~0.9963366 at 48 kHz
+
+    let h = H::dmg(); // built at DEFAULT_SAMPLE_RATE = 48 kHz
+    assert!(
+        (f64::from(h.apu.hp_charge) - expected).abs() < 1e-6,
+        "hp_charge {} must be the per-sample factor {expected}",
+        h.apu.hp_charge
+    );
+    // The classic bug is leaving hp_charge at the raw per-T-cycle value; the
+    // two differ by >0.003, orders of magnitude outside the 1e-6 pin above.
+    assert!(
+        (expected - PER_T_CYCLE).abs() > 0.003,
+        "per-sample and per-T-cycle charge must be distinguishable"
+    );
+
+    // Drive pure DC through the *production* capacitor from discharged and
+    // read the output 100 samples in. Independently, out_100 = x*charge^99.
+    // A 2x-mis-scaled hp_charge (~1.99) makes the filter unstable (grows
+    // >1); a halved one (~0.50) collapses it to ~1e-30 by sample 100. Either
+    // lands nowhere near the ~0.695 asserted here to 1e-4.
+    let mut cap = 0.0_f32;
+    let mut out = 0.0_f32;
+    for _ in 0..100 {
+        out = high_pass(&mut cap, 1.0, h.apu.hp_charge);
+    }
+    let analytic = expected.powi(99); // ~0.6953505
+    assert!(
+        (f64::from(out) - analytic).abs() < 1e-4,
+        "DC decay at sample 100: got {out}, expected {analytic}"
+    );
+}
+
+#[test]
+fn box_average_emits_the_exact_window_mean() {
+    // The resampler is a box average: it sums every dot in a window of
+    // `cycles_per_sample` T-cycles and divides by the dot count. Pick a rate
+    // whose window is an exact integer (4194304/524288 = 8 dots) and feed a
+    // ramp so the mean depends on *which* dots the window spans — an
+    // off-by-one bound (`>` instead of `>=`, or the wrong frac reset) then
+    // changes both when a sample emits and its value.
+    let mut h = H::dmg();
+    h.apu.set_sample_rate(524_288); // cycles_per_sample == 8.0 exactly
+
+    // A window closes only on the 8th dot, never earlier: dots 1..=7 emit
+    // nothing (the `>=` boundary).
+    for n in 1..=7 {
+        assert_eq!(
+            h.apu.accumulate_output(n as f32, (2 * n) as f32),
+            None,
+            "dot {n} must not close the window"
+        );
+    }
+    // 8th dot closes window 1: mean of 1..=8 = 36/8 = 4.5 (right channel
+    // 2x = 9.0). The capacitor is discharged, so the high-pass passes the
+    // mean through unchanged (out_1 = input - 0).
+    let s1 = h.apu.accumulate_output(8.0, 16.0).expect("8th dot emits");
+    assert_eq!(s1, (4.5, 9.0), "window 1 = arithmetic mean of dots 1..=8");
+
+    // Window 2 must span exactly dots 9..=16 (the sum/count reset after
+    // emit, the window advanced by 8 not 7 or 9): mean 100/8 = 12.5, right
+    // 25.0. Rezero the capacitor so this mean is again exact (out_1 rule).
+    h.apu.hp_cap_l = 0.0;
+    h.apu.hp_cap_r = 0.0;
+    for n in 9..=15 {
+        assert_eq!(
+            h.apu.accumulate_output(n as f32, (2 * n) as f32),
+            None,
+            "dot {n} must not close window 2"
+        );
+    }
+    let s2 = h.apu.accumulate_output(16.0, 32.0).expect("16th dot emits");
+    assert_eq!(
+        s2,
+        (12.5, 25.0),
+        "window 2 = arithmetic mean of dots 9..=16"
+    );
+}
+
+#[test]
 fn raw_tap_is_capped_and_draining_restarts_collection() {
     let mut h = H::dmg();
     // Run far past the cap: the buffer must stop growing, not OOM.
