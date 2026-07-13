@@ -214,8 +214,10 @@ impl Picker {
         // `None` for a bare root `"/"` (skipping the gate entirely) and strips
         // an extra component for a trailing separator (`"/home/user/"` ->
         // `"/home"`), both wrong here.
-        let sep = std::path::MAIN_SEPARATOR;
-        let dir_str = match self.path_edit.rfind(sep) {
+        // Split on EITHER separator: on Windows both `/` and `\` are valid
+        // (`is_separator`), so a `/`-typed path completes there too; on Unix
+        // `is_separator` matches only `/`, preserving `\` in filenames.
+        let dir_str = match self.path_edit.rfind(std::path::is_separator) {
             Some(i) => &self.path_edit[..=i],
             None => "",
         };
@@ -562,8 +564,8 @@ fn key_order(key: SortKey, a: &Entry, b: &Entry) -> std::cmp::Ordering {
 /// Byte offset of the final path component in an edit-buffer string (0 if it
 /// has no separator).
 fn final_component_start(s: &str) -> usize {
-    match s.rfind(std::path::MAIN_SEPARATOR) {
-        Some(i) => i + std::path::MAIN_SEPARATOR.len_utf8(),
+    match s.rfind(std::path::is_separator) {
+        Some(i) => i + 1, // path separators are single-byte ASCII ('/' or '\')
         None => 0,
     }
 }
