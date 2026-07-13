@@ -120,6 +120,10 @@ pub enum StateError {
     BadVersion,
     /// The state was saved from a different ROM than the one loaded.
     RomMismatch,
+    /// The state was saved from a different *system* than the one loaded: its
+    /// SGB-audio-tail flag disagrees with this machine's model (an SGB state
+    /// loaded into DMG/CGB, or a DMG/CGB state loaded into SGB).
+    ModelMismatch,
 }
 
 impl std::fmt::Display for StateError {
@@ -129,6 +133,9 @@ impl std::fmt::Display for StateError {
             StateError::BadMagic => "not a slopgb save state",
             StateError::BadVersion => "unsupported save-state version",
             StateError::RomMismatch => "save state is for a different ROM",
+            StateError::ModelMismatch => {
+                "save state is for a different system (SGB audio present/absent mismatch)"
+            }
         };
         f.write_str(s)
     }

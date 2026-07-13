@@ -22,6 +22,12 @@ serde/no unsafe):
   ROM key vs the loaded cart, then restores **atomically into a clone**, so a
   bad/foreign/truncated file leaves the machine intact.
 
+The header carries a `bool` has-SGB-audio-tail flag (v7, right after the
+ROM-fingerprint): the same ROM legally runs as SGB (with the ~64 KB SPC700+S-DSP
+tail) or DMG/CGB (without). On load a mismatch vs the target machine's model is a
+clear `StateError::ModelMismatch` — never a silent tail-drop (SGB→DMG) nor an
+opaque `Truncated` (DMG→SGB).
+
 ROM bytes + the debugger fields (watch/prof/exc mask) are **not** serialized.
 `App.path_purpose` routes the shared modal (Load ROM / Save state / Load state);
 `Session::save_state_to`/`load_state_from` do the fs + logging. Verified by a

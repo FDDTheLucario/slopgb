@@ -50,6 +50,10 @@ impl GameBoy {
         let id = self.bus.cartridge().rom_id();
         w.u32(id.len() as u32);
         w.bytes(&id);
+        // Has-SGB-audio-tail flag: the ROM header pins the ROM but not the model,
+        // yet the same ROM runs as SGB (with the audio tail below) or DMG/CGB
+        // (without). Record it so `load_state` can reject a cross-model load.
+        w.bool(self.sgb_apu.is_some());
         self.cpu.write_state(&mut w);
         self.bus.write_state(&mut w);
         // SGB audio state (SPC700 + S-DSP), appended only on SGB models — so
@@ -87,6 +91,13 @@ impl GameBoy {
         let id = r.bytes_vec(id_len)?;
         if id != self.bus.cartridge().rom_id() {
             return Err(StateError::RomMismatch);
+        }
+        // Reject a cross-model load before touching state: an SGB state (tail
+        // present) loaded into DMG/CGB would silently drop the ~64 KB tail; a
+        // DMG/CGB state loaded into SGB would fail opaquely as `Truncated` on the
+        // missing tail. Both are a model mismatch.
+        if r.bool()? != self.sgb_apu.is_some() {
+            return Err(StateError::ModelMismatch);
         }
         self.cpu.read_state(&mut r)?;
         self.bus.read_state(&mut r)?;

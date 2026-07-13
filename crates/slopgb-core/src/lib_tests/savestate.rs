@@ -91,6 +91,35 @@ fn load_state_rejects_corrupt_or_foreign_states() {
 }
 
 #[test]
+fn load_state_rejects_cross_model_sgb_vs_dmg() {
+    // Same ROM, different system: an SGB state carries the SPC700 + S-DSP tail,
+    // a DMG state doesn't. Loading one into the other must be a clear
+    // `ModelMismatch` — never a silent tail-drop (SGB→DMG) nor an opaque
+    // `Truncated` (DMG→SGB).
+    let rom = savestate_oracle_rom();
+    let mut sgb = GameBoy::new(Model::Sgb, rom.clone()).unwrap();
+    sgb.run_frame();
+    let sgb_state = sgb.save_state();
+    let mut dmg = GameBoy::new(Model::Dmg, rom.clone()).unwrap();
+    dmg.run_frame();
+    let dmg_state = dmg.save_state();
+
+    assert_eq!(
+        dmg.load_state(&sgb_state),
+        Err(StateError::ModelMismatch),
+        "SGB state into DMG must not silently drop the audio tail"
+    );
+    assert_eq!(
+        sgb.load_state(&dmg_state),
+        Err(StateError::ModelMismatch),
+        "DMG state into SGB must not fail as Truncated"
+    );
+    // Same-model still round-trips.
+    assert!(sgb.load_state(&sgb_state).is_ok());
+    assert!(dmg.load_state(&dmg_state).is_ok());
+}
+
+#[test]
 fn clone_is_an_independent_machine_snapshot() {
     // The Quick Save/Load primitive (MN6): GameBoy: Clone must be a deep,
     // independent copy — advancing one must not touch the other.

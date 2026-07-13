@@ -62,4 +62,8 @@ fn state_error_displays() {
         StateError::RomMismatch.to_string(),
         "save state is for a different ROM"
     );
+    assert_eq!(
+        StateError::ModelMismatch.to_string(),
+        "save state is for a different system (SGB audio present/absent mismatch)"
+    );
 }
