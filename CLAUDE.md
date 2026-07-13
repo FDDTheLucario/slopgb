@@ -27,13 +27,11 @@ Verify any core touch with `cargo test -p slopgb-core --test gbtr`
 (`golden_fingerprint`) + the mooneye matrix; the armed-hook half is pinned by
 `armed_debug_hooks_do_not_perturb_emulation` + `cdl_logging_does_not_perturb_emulation`.
 
-**The C3 flip is DONE and the forks are collapsed (#11cu/#11cv + S7):** the
-eager-value clock is now the **only** clock — the `leading_edge_reads`/`eager_value`/
-`tier2_reclock` fork flags and both alternate paths (the disproven `read_deferred`
-tier2 clock, the pre-flip OFF baseline) have been deleted. The golden/baselines are
-the eager reference, NOT byte-identical to the pre-port core. Verify any core touch
-with `golden_fingerprint` + mooneye; never `pkill` a build sharing a `CARGO_TARGET_DIR`
-(corrupts the target → false failures).
+The SameBoy port is complete: the eager cycle-exact clock is the **only** clock (the
+dual-clock fork scaffolding was deleted). The golden/baselines are the eager reference,
+**NOT** byte-identical to the pre-port core. Never `pkill` a build sharing a
+`CARGO_TARGET_DIR` (corrupts the target → false failures). History:
+[`docs/sameboy-port/`](docs/sameboy-port/PORT-PLAN.md).
 
 ## Where the detail lives
 
@@ -81,6 +79,16 @@ When a **hardware** question comes up, consult in order:
   subsystem, write its state/quirks to the matching `docs/hardware-state/` (core) or
   `docs/ui-state/` (frontend) file — one file per subsystem/area. Keep CLAUDE.md a
   lean index: durable rules, commands, and pointers only.
+- **No jargon comments; keep comments fresh.** A comment explains what the *current*
+  code does + *why* the hardware behaves so — never process narrative. Forbidden in
+  comments: fork/session codenames (`tier2`, `eager`, `flag-on/off`, `byte-identical
+  OFF`, `#11x`, `S5`, `C3`, "port stage N"), A/B-sweep stories, and "inert/dead/never-
+  called/off" claims you haven't just verified. Put narrative in the commit or `docs/`;
+  keep the pinning ROM + hardware citation inline. **When you touch a comment, re-verify
+  it against the code**: every named symbol must exist (grep it); a "removing this is
+  byte-identical" claim must be *probed* (force the value off, run `golden_fingerprint`
+  — if golden changes it is LIVE and the claim is false). A stale/false core comment is
+  a regression trap: a defect, not a nit.
 - Commit + push frequently. **Every commit MUST be SSH-signed** (`commit.gpgsign=true`,
   `gpg.format=ssh`, key `~/.ssh/id_ed25519`, committer `richard@richardmoch.xyz`, verify
   `%G?`=G; `export SSH_AUTH_SOCK=/run/user/1000/ssh-agent.socket`, commit `-S`). Signing
@@ -113,30 +121,14 @@ Test ends on `LD B,B` (`GameBoy::debug_breakpoint_hit`). Pass ⇔ B,C,D,E,H,L =
 3,5,8,13,21,34. Model from filename suffix (see ARCHITECTURE.md §Mooneye). Timeout 120
 emulated s.
 
-## State (2026-07-13 — the SameBoy port is COMPLETE and the clock forks are collapsed; eager is the only clock)
+## State
 
-- **The C3 flip is DONE and the S7 fork-collapse is DONE, all on `main`.** The eager-value
-  cycle-exact clock is the sole clock — the port's dual-clock scaffolding (the `port_probe`
-  measurement harness, the disproven `tier2_reclock` fork, the pre-flip OFF baseline, and
-  the `eager_value`/`leading_edge_reads`/`flip_hooks` fork flags) is deleted. slopgb runs at
-  SameBoy-class accuracy — cycle-exact PPU (variable mode-3 length, fine-scroll, window,
-  mid-mode-3 register views), sub-M-cycle interrupt/STAT timing, double-speed.
-- **Baseline (all green):** mooneye 93/93; gbtr v7.0 battery **215/0** (golden = eager
-  reference; the tier2-only test rows were retired with the fork); core lib + frontend
-  green; clippy clean. Missing ROMs skip unless `SLOPGB_REQUIRE_ROMS=1` — run
-  `test-roms/download.sh` first.
-- **SGB support** (command set, SPC700, S-DSP+ICD2 audio, BIOS, border, palette) and the
-  **bgb-UI clone** (debugger, viewers, Options, right-click menu, save states, link,
-  opt-in boot ROM + MCP server) are merged — per-area state in
-  [`docs/ui-state/`](docs/ui-state/README.md). All eight Options → System "Emulated
-  system" radios are live; "GBC + initial SGB border" captures the game's own SGB border
-  from an initial SGB run and shows it with GBC color (bgb-faithful). The file picker is
-  slopfp only (no native-dialog shell-out).
-- **Remaining (non-blocking):** the SRAM power-on init feature (deterministic fill +
-  opt-in seeded xorshift). Known residuals (all SameBoy-FAIL/floored, NOT regressions):
-  DS mid-dot render floor, halt-wake/HDMA levers.
-- **History:** [`STATE-HISTORY.md`](docs/sameboy-port/STATE-HISTORY.md) +
-  [`ppu-subdot-ladder.md`](docs/hardware-state/ppu-subdot-ladder.md); roadmap
-  [`PORT-PLAN.md`](docs/sameboy-port/PORT-PLAN.md); maps in
-  `docs/sameboy-port/tools/measurements/`.
+Baseline (all green, on `main`): mooneye **93/93**, gbtr v7.0 **215/0**, core lib +
+frontend green, clippy clean. Missing ROMs skip unless `SLOPGB_REQUIRE_ROMS=1` (run
+`test-roms/download.sh` first). The SameBoy cycle-exact port, SGB support (SPC700 +
+S-DSP audio, BIOS, border) and the bgb-UI clone (debugger, viewers, Options, link,
+opt-in boot ROM, MCP) are all merged — per-area detail in
+[`docs/ui-state/`](docs/ui-state/README.md) + [`docs/hardware-state/`](docs/hardware-state/README.md).
+Known residuals (all SameBoy-FAIL/floored, NOT regressions): DS mid-dot render floor,
+halt-wake/HDMA levers. History: [`STATE-HISTORY.md`](docs/sameboy-port/STATE-HISTORY.md).
 
