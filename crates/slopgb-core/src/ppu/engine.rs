@@ -265,7 +265,7 @@ impl Ppu {
             // whole-dot strobe (this half is inert with `eager_value` false).
             if self.eager_value {
                 self.strobe_tick();
-                // HALFDOT (#11dw): the odd-half STAT-engine level re-eval, so a
+                // HALFDOT: the odd-half STAT-engine level re-eval, so a
                 // coincident FF41 write-commit / LYC re-latch / mode-0 rise
                 // resolves at its true sub-dot phase. Idempotent on the aligned
                 // grid → byte-identical (see `stat_update_half`).

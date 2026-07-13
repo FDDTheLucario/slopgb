@@ -430,7 +430,7 @@ impl Ppu {
             self.pending_if |= IF_STAT;
             self.stat_update.force_level(true);
         }
-        // Eager DMG line-153 LYC=153 ENABLE emission-dot decouple (#11cu):
+        // Eager DMG line-153 LYC=153 ENABLE emission-dot decouple:
         // the DMG `ly_for_comparison` line-153 table sets 153 only at dot 6
         // (`GB_SLEEP(14,4)`, pinned by wilbertpol `ly_lyc_153-C`), so the eager
         // `stat_update` engine's natural 0→1 LYC rise fires at slopgb dot 6 —
@@ -461,13 +461,13 @@ impl Ppu {
         }
     }
 
-    /// HALFDOT (#11dw): the idempotent odd-half `GB_STAT_update` level
+    /// HALFDOT: the idempotent odd-half `GB_STAT_update` level
     /// re-eval. The SameBoy STAT interrupt line is recomputed on the 8-MHz
     /// ODD half-dot (`Ppu::tick_half`, `dhalf 0→1`) as well as the whole-dot
     /// even half, so a coincident FF41 write-commit (`eng_stat_half`), LYC
     /// re-latch, or mode-0 source rise resolves at its true SUB-dot phase
     /// rather than snapping to the whole-dot even-half tick — the coupled
-    /// engine the #11du/#11dv maps scoped (pieces 1+3+4). On the ALIGNED grid
+    /// engine the port maps scoped (pieces 1+3+4). On the ALIGNED grid
     /// (no odd-half input change) `(mfi, eng_stat, lyc_interrupt_line)` are
     /// unchanged from the even-half tick, so `StatUpdate::update` recomputes
     /// the SAME level → no 0→1 edge → no IF → byte-identical to the

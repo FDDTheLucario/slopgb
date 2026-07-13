@@ -193,7 +193,7 @@ impl Ppu {
 
     /// Whether the LCD-enable sub-dot offset is active (`lcd_shift_dots != 0`):
     /// the CPU/PPU whole-dot grid is shifted, so a whole-dot write-commit
-    /// borrow (`#11dd`) does not map cleanly. Pure accessor.
+    /// borrow does not map cleanly. Pure accessor.
     pub(crate) fn lcd_shift_active(&self) -> bool {
         self.lcd_shift_dots != 0
     }

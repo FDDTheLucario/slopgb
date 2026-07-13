@@ -42,7 +42,7 @@ impl Ppu {
     /// legs read 1 M apart around the next line's pulse and pass on the
     /// current frame — a +window peek would flip the `_1` legs.
     /// Callers: the tier2 `read_deferred` path and the eager `Bus::read`
-    /// FF0F peek (#11db); every arm short-circuits on `tier2_reclock` /
+    /// FF0F peek; every arm short-circuits on `tier2_reclock` /
     /// `eager_value` (both off in production) → production byte-identical OFF.
     pub(crate) fn ff0f_stat_peek(&self) -> u8 {
         if !self.enabled || self.glitch_line || self.stat_update.line() {
@@ -298,7 +298,7 @@ impl Ppu {
         // Second arm: the shifted-frame co-instant mode-0 rise
         // (see `m0sh_age`).
         // The DMG line-0 dot-4 OAM-pulse mask is DISABLED under the eager
-        // #11cu frame: the dot-4 LYC=153 IF-emission decouple moves the LYC-153
+        // frame: the dot-4 LYC=153 IF-emission decouple moves the LYC-153
         // ISR's ly0 reads a full M-cycle earlier, so `_1` (want 0) reads dot 0
         // (before the pulse — naturally clear, no mask needed) while `_2` (want
         // E2) reads dot 4 co-instant with the pulse and must SEE it

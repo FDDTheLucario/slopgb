@@ -105,7 +105,7 @@ fn cgb_ly153_loads_two_dots_early() {
     assert_eq!(d.read(0xFF44), 152, "DMG keeps LY=152 to the line end");
 }
 
-/// HALFDOT Part-A (#11dm): the EAGER emergent-flip accessibility release
+/// HALFDOT Part-A: the EAGER emergent-flip accessibility release
 /// (`Ppu::eager_access_released`) unblocks OAM/VRAM reads + writes at the
 /// render's OWN projected flip on the eager clock — where the tier2
 /// `vis_early` boolean (LE `early_lead = 3`, 2 dots early) over-releases
@@ -303,7 +303,7 @@ fn cgb_vblank_level_holds_through_line0_dots_0_3() {
     assert!(!d.stat_line, "DMG level low from (0,0)");
 }
 
-/// EAGER off-screen-window (WX=166) exit-arm cluster (#11dn): the WX=166
+/// EAGER off-screen-window (WX=166) exit-arm cluster: the WX=166
 /// window activates during HBlank, so slopgb sets `win_active` one M-cycle
 /// AFTER the eager cc+0 FF41 read — the window-length arm (arm 1 / D1) misses
 /// and the bare arm-8 over-holds mode 3 against the window-elevated projection.

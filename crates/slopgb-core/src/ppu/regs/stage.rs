@@ -65,12 +65,12 @@ impl Ppu {
                 // advances the machine first). The debt shifts only the pixel-view
                 // `eff` commit; the FF41 mode-3-length OCR reads sample ARCH
                 // `self.scy`, and the WX un-catch read law's `wx_write_dot` is
-                // recorded at cc+0 in `Ppu::write` (the #11bq split), so this is
+                // recorded at cc+0 in `Ppu::write` (the split), so this is
                 // render-only — measured EV DMG two-bin 102 (palette) → 96 (+WX),
                 // no OCR regression vs the pre-debt eager clock. FF40 (LCDC) stays
                 // at ZERO debt: it drives the window bit5 abort/reenable + FF41
                 // read laws calibrated to the cc+0 control commit, and a debt there
-                // breaks the `late_enable_afterVblank` gambatte set (#11ck). SCX
+                // breaks the `late_enable_afterVblank` gambatte set. SCX
                 // (FF43) also stays zero-debt — its render IS the length (below).
                 match addr {
                     // SCY / palette: the full cc+0→cc+4 frame debt. Their stage is
@@ -91,7 +91,7 @@ impl Ppu {
                     // all of m3_wx_4/5/6_change + _sprites; 10hd lands 2, ≤8 lands
                     // 0. The un-catch READ law's `wx_write_dot` is recorded in
                     // `Ppu::write` at the eager cc+0 (not `commit_eff`), so the debt
-                    // shifts only the render view — the split #11bq built for tier2.
+                    // shifts only the render view — the split built for tier2.
                     0xFF4B if !self.ds => 12,
                     // SCX (FF43) POST-match: the write lands after THIS line's
                     // fine-scroll comparator lock (`hunt_done && dot >
@@ -111,8 +111,8 @@ impl Ppu {
                         6
                     }
                     // SCX (FF43) PRE-match on a plain BG line (`!hunt_done`,
-                    // NON-glitch, NON-window): #11el wrongly called these
-                    // length-coupled, but the bare line starts SCX=0 so the
+                    // NON-glitch, NON-window): these are NOT length-coupled —
+                    // the bare line starts SCX=0 so the
                     // comparator locks (discard 0) at mode-3 dot 5 BEFORE the
                     // write; OFF/tier2 commit past the lock → coarse shift, but
                     // the eager cc+0 commit lands BEFORE it → re-opens the
@@ -123,7 +123,7 @@ impl Ppu {
                     // `wy_trig_sb` (a WINDOW line masks the discard, `late_scx_
                     // late_disable`); the m2int length rows write at dot 152 with
                     // `hunt_done` → the post-match arm above, never here. Full A/B:
-                    // `eager-scxlow-recheck-2026-07-12.md` (#11em, corrects #11el).
+                    // `eager-scxlow-recheck-2026-07-12.md`.
                     0xFF43
                         if !self.ds
                             && !self.render.hunt_done
@@ -159,8 +159,8 @@ impl Ppu {
                     _ => 4,
                 }
             } else {
-                // CGB single-speed, per-register eager render-commit debt
-                // (#11ej). The uniform 8 landed the mealybug/age DMG-compat m3_*
+                // CGB single-speed, per-register eager render-commit debt.
+                // The uniform 8 landed the mealybug/age DMG-compat m3_*
                 // palette/WX legs at the wrong pixel column — CGB runs these DMG
                 // ROMs in compat mode and shares the FF47-4B render path, so each
                 // register carries its own commit class like the DMG calibration

@@ -43,12 +43,12 @@ impl Ppu {
             && self.dot - self.vram_wr_dot < 8
     }
 
-    /// EAGER emergent-flip accessibility release (HALFDOT Part-A, #11dm): the
+    /// EAGER emergent-flip accessibility release (HALFDOT Part-A): the
     /// OAM/VRAM read + write mode-3→0 unblock keyed to the render's OWN
     /// projected flip on the eager clock, REPLACING the tier2 `vis_early`
     /// case-tower boolean for the eager path. The eager `vis_early` fires off
     /// the LE `early_lead = 3` residue (`mode0.rs`) — 2 dots too early — so
-    /// extending its release to eager over-releases the `_1` reads (#11dg: CGB
+    /// extending its release to eager over-releases the `_1` reads (CGB
     /// +13/−9). Instead the read's exact half-dot position
     /// ([`Ppu::read_pos_hd`], +8 hd SS read-debt) is compared against the
     /// EMERGENT flip `2 * projected_flip_dot()` (the render's live projection —

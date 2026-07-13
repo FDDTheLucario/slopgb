@@ -27,7 +27,7 @@ impl Ppu {
             0xFF40 => self.lcdc,
             0xFF41 => {
                 // The eager halt-woken re-fetch boundary override rides on top
-                // of the read-law mode (#11dl); the sole non-probe consumer.
+                // of the read-law mode; the sole non-probe consumer.
                 let vm = self.vis_mode_read();
                 let vm = self.halt_refetch_read_override(vm).unwrap_or(vm);
                 0x80 | self.stat_en | (u8::from(self.read_cmp()) << 2) | vm
@@ -207,7 +207,7 @@ impl Ppu {
                         // dot 4 (the m2enable late_enable /
                         // late_enable_after_lycint(_disable) dmg08 cell
                         // grids pin all eleven cells).
-                        // #11ee: the eager cc+0 write records the STAT-enable a
+                        // The eager cc+0 write records the STAT-enable a
                         // full M-cycle (4 dots) EARLIER than the tier2 cc+4 frame
                         // the {0,4} window + the data-only dot-0 lycen were
                         // calibrated against (an inserted NOP in the `_1`/`_2`
@@ -297,7 +297,7 @@ impl Ppu {
                         && self.line == 153
                         && !self.glitch_line
                     {
-                        // HALFDOT (#11dw) piece 4: on LINE 153 the DMG FF41
+                        // HALFDOT piece 4: on LINE 153 the DMG FF41
                         // engine-view (`eng_stat`) write commits its
                         // disable/enable ~2 dots LATER than the eager cc+4 whole-
                         // dot landing — the line-153 write quirk. SameBoy's
@@ -357,7 +357,7 @@ impl Ppu {
                             self.lyc_interrupt_line,
                         );
                     }
-                    // #11ee: suppress the spurious mid-mode-2 OAM rise on the
+                    // Suppress the spurious mid-mode-2 OAM rise on the
                     // eager clock. Lines 1-143 carry the OAM (mode-2) STAT source
                     // high only across the line-start window (dots 0-3), then drop
                     // to NONE (`update_mode_for_interrupt`). A FRESH OAM enable
@@ -413,7 +413,7 @@ impl Ppu {
                 // tail-write class (`late_wy_FFto0/FFto1/10to0/1toFF`) that the
                 // read-frame WY laws pair with — measured +8 CGB, 0 drop.
                 // The write dot the tail/head boundary classifies against.
-                // Under the eager DMG line-153 emission decouple (#11cu) the
+                // Under the eager DMG line-153 emission decouple the
                 // shared LYC=153 ISR — and every WY write it times — fires one
                 // M-cycle (4 dots SS) EARLIER than the stale dot-6/dot-8
                 // recognition these 452/4 boundaries were tuned against, so a
@@ -453,7 +453,7 @@ impl Ppu {
                 // under `eager_value`: the eager arch commit lands at the
                 // M-cycle END (same head-dot window), pairing with the DMG
                 // read-frame WY laws already live under eager — L2 re-host of
-                // the #11ck CGB slice-2 cross-line latch to DMG.
+                // the CGB slice-2 cross-line latch to DMG.
                 if (self.tier2_reclock || self.eager_value)
                     && !self.model.is_cgb()
                     && self.enabled

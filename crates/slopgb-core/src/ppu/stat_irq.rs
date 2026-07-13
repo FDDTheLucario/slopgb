@@ -274,7 +274,7 @@ impl Ppu {
     /// LINE_DOTS*2`, the +8hd cc+4 debt having crossed the line boundary while
     /// `self.dot` (452) has not — where SameBoy's cc+4 re-fetch view already
     /// sits in the next line's OAM scan (mode 2). Without the sub-M-cycle wake
-    /// this fired on the want-0 `_a` siblings too (#11cz, −9 SameBoy-pass), but
+    /// this fired on the want-0 `_a` siblings too (−9 SameBoy-pass), but
     /// the wake peek wakes them one M-cycle earlier so their read lands one dot
     /// short of the boundary (`read_pos_hd` 904 < 912, stays mode 0) — the
     /// coupling that makes the arm collateral-free. `halt_refetch` is armed only

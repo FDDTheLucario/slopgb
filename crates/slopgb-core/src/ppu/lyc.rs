@@ -429,7 +429,7 @@ impl Ppu {
         // timeToNextLy <= 2`; lycwirq_trigger_ly00_stat50_3 fires there
         // while _1/_2 stay blocked).
         //
-        // #11ee: the (0,4) un-block cell is the LE/tier2 (deferred) read
+        // The (0,4) un-block cell is the LE/tier2 (deferred) read
         // frame's compare-wrap position — there `_3` (the fire leg) lands at
         // dot 4. Under the EAGER clock the FF45 writes are recorded a full
         // M-cycle earlier: `_3` moves to dot 8 (`their_line == line == 0`, the
@@ -446,9 +446,9 @@ impl Ppu {
                 && (self.m0_src || self.dot < 8)
                 && value == their_line
         } else {
-            // The (0,4) compare-wrap un-block cell. #11ee disabled it under the
-            // (pre-#11cu) eager frame because there `_3` fired at dot 8 (VISIBLE
-            // branch) and `_2` (want-block) had moved to dot 4. #11cu's dot-4
+            // The (0,4) compare-wrap un-block cell. It was disabled under the
+            // earlier eager frame because there `_3` fired at dot 8 (VISIBLE
+            // branch) and `_2` (want-block) had moved to dot 4. The dot-4
             // LYC=153 IF-emission decouple shifts the whole ISR-timed ly0 LYC
             // write ANOTHER M-cycle earlier: `_3` moves dot 8→4 (back onto this
             // compare-wrap cell, VBLANK branch, must FIRE) and `_2` moves dot
@@ -460,7 +460,7 @@ impl Ppu {
         if self.stat_en & STAT_SRC_LYC != 0 && target == Some(value) && !blocked {
             self.pending_if |= IF_STAT;
         }
-        // #11ee: seal the eager line-0 vblank-carry → LYC seamless handoff.
+        // Seal the eager line-0 vblank-carry → LYC seamless handoff.
         // On line 0 the STAT line is held HIGH by the mode-1 (VBlank) carry
         // across dots 0-3, then the carry ends at dot 4 (`mode_for_interrupt`
         // flips to 2 with OAM disabled → the line DIPS). A LYC-match write that

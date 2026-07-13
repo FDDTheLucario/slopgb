@@ -189,7 +189,7 @@ impl Ppu {
         // Extend once the clear lands within 3 dots of the WX match (the
         // first tile has shipped) — 4 on the eager cc+0 read frame, which records
         // `abd` an M-cycle before the tier2 cc+4 read the +3 targets (`wx11_2`
-        // abd106 EXTEND vs `_1` abd102 BARE, #11ec). EXCEPT a low-WX window whose
+        // abd106 EXTEND vs `_1` abd102 BARE). EXCEPT a low-WX window whose
         // SCX fine-scroll pushes the fetch well past the match: there a clear
         // BEFORE the match (`abd < wxm`) definitively kills it → bare
         // (`late_disable_scx2/3/5_0`, wxm 97, clear 95, fetch SCX ≥ 1; the
@@ -204,7 +204,7 @@ impl Ppu {
             // A mid-line SCX rewrite (`scx_write_dot != 0`) is admitted ONLY on
             // the eager clock: `late_scx_late_disable` rewrites SCX 0→4 AFTER the
             // window fetched, so its fetch-time `wx_match_scx` (=4) still drives
-            // the exit fine-scroll and the fetch-ship deadline (#11ed). Tier2
+            // the exit fine-scroll and the fetch-ship deadline. Tier2
             // keeps the `== 0` scope (byte-identical).
             && (self.render.scx_write_dot == 0 || self.eager_value)
             && self.eff.lcdc & LCDC_WIN_ENABLE == 0
@@ -219,7 +219,7 @@ impl Ppu {
             // needs K = 8 (measured: `late_scx_late_disable` abd 122 bare / 126
             // extend, wxm 133), and the eager cc+0 bare exit back-dates one dot
             // (253→252, the +1 read-debt) so the early-abort `_0` (read rp 512)
-            // reads mode 0. Non-scx eager keeps K=4 / base 253 (#11ec).
+            // reads mode 0. Non-scx eager keeps K=4 / base 253.
             let eager_scx = self.eager_value && self.render.scx_write_dot != 0;
             let ek = if eager_scx {
                 8
@@ -343,7 +343,7 @@ impl Ppu {
             fold(&mut exit, 2 * (263 + scx7 + ds1));
         }
         // Arm D-wx0 — the eager DMG low-WX co-incident-trigger BARE exit
-        // (#11cu, the Arm-2 complement). On a low-WX window's OWN trigger line
+        // (the Arm-2 complement). On a low-WX window's OWN trigger line
         // the WX comparator matches during the 8-dot prefill, so slopgb's
         // whole-dot render activates (`win_active`) the instant `wy2 == ly` is
         // caught — even when that catch lands AT the match dot. SameBoy's mode-2
@@ -475,7 +475,7 @@ impl Ppu {
         // catches the tile); K = 4 on the eager cc+0 read frame, which records
         // `win_reenable_dot` one M-cycle before the tier2 cc+4 read the +3 was
         // calibrated against (`late_reenable_2` eager reen 94 vs tier2 95 —
-        // #11ed, mirroring the #11ec arm-D3 +4). `late_reenable_2` reen 94 /
+        // mirroring the arm-D3 +4). `late_reenable_2` reen 94 /
         // match 97 / scx0 → bare (94+4 > 97); `scx2_2` reen 94 / scx2 → extend
         // (98 ≯ 99); `wx0f_2` reen 102 / match 105 → bare. Tier2 keeps +3 (CGB
         // arm-5 above is SCX-flat, scx ≤ 3 — the ±1 fetch phase again.)
@@ -674,7 +674,7 @@ impl Ppu {
                 } else {
                     self.projected_flip_dot()
                 };
-                // #11ee: back out the eager render's spurious mid-mode-3 SCX
+                // Back out the eager render's spurious mid-mode-3 SCX
                 // extension for the BARE-line exit verdict. A mid-mode-3 SCX
                 // rewrite (`scx_write_dot != 0`) commits `eff.scx` at the eager
                 // cc+0 write frame — 4 dots (8hd) before its true cc+4 landing
@@ -733,7 +733,7 @@ impl Ppu {
                     // (`late_scx4_1`, `m2int_m3stat_1`) read the SAME rphd 512 yet
                     // carry `= 4` — their `- carry` already lands exit `2*flip - 2`
                     // — and want mode 3, so the split is `read_carried`, NOT the
-                    // uniform read-frame bias #11eg swept (`ARM8BIAS`, which shifts
+                    // uniform read-frame bias swept (`ARM8BIAS`, which shifts
                     // both and shuffles). Drop the `+2` only for the eager-DMG
                     // polled read → tier2 + production byte-identical (both keep
                     // `+2`), carried reads untouched (`- carry` owns them).
@@ -781,7 +781,7 @@ impl Ppu {
             // re-derives to the SS value (+2); the same shift is what fixes
             // the `late_wy_ds` blocker trio outright.
             //
-            // SS DMG eager (#11cu): the same LYC=153-wake re-host. The dot-4
+            // SS DMG eager: the same LYC=153-wake re-host. The dot-4
             // line-153 LYC STAT emission decouple (`reclock.rs`) fires the
             // shared LYC=153 ISR one M-cycle (4 dots SS) EARLIER than the stale
             // dot-6/dot-8 recognition the `+2` slack was tuned against, so every

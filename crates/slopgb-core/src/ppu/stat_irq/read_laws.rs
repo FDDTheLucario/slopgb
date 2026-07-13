@@ -244,7 +244,7 @@ impl Ppu {
                 return 0; // 153→0 wrap: cc+4 in line-0 dots 0-3 = DMG mode 0
             }
         }
-        // HALFDOT Part A-render (#11cr): decouple the mode-3→0 verdict from the
+        // HALFDOT Part A-render: decouple the mode-3→0 verdict from the
         // peek-time native mode where no length arm fires. The `vis_exit_hd`
         // arms + arm-8 projection are already peek-independent for the reads
         // that land a length arm (`projected_flip_dot` holds as the read dot
@@ -265,7 +265,7 @@ impl Ppu {
         // whole-dot render's flip STILL disagrees with the read-frame projection
         // for extend/window lines (`flip_dot` 261 vs projection 267 on
         // `scx_m3_extend`), so a dispatch move that straddles that gap is NOT
-        // held — that residual needs the half-dot render FSM (see #11cr map).
+        // held — that residual needs the half-dot render FSM.
         let exit = self.vis_exit_hd(m).or_else(|| {
             if self.eager_value
                 && m == 0
