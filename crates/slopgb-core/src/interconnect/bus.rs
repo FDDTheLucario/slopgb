@@ -14,12 +14,12 @@ impl Bus for Interconnect {
         // Latch the leading-edge (cc+0) value for PPU-positional reads
         // *before* the PPU advances (`None` for non-positional addresses).
         let leading = self.leading_edge_sample(addr);
-        // The eager-value carried-read peek (armed at the STAT ack in
-        // `ack_impl`) is one-shot: `leading_edge_sample`'s FF41 read has now
-        // consumed `read_carried` inside `vis_mode_read`, so clear it.
+        // The carried-read peek (armed at the STAT ack in `ack_impl`) is
+        // one-shot: `leading_edge_sample`'s FF41 read has now consumed
+        // `read_carried` inside `vis_mode_read`, so clear it.
         if addr == 0xFF41 {
             self.ppu.set_read_carried(false);
-            // The eager halt-woken re-fetch override is one-shot at the line
+            // The halt-woken re-fetch override is one-shot at the line
             // boundary: it survives the sub-boundary polls (`read_pos_hd` short
             // of the line) and clears once this read has crossed it (the same
             // read `vis_mode_read` resolved to mode 2).
@@ -36,13 +36,12 @@ impl Bus for Interconnect {
         self.maybe_oam_bug(addr, OamBugKind::Read);
         self.check_access(addr, false);
         let trailing = self.read_no_tick(addr);
-        // Eager FF0F read-frame peek: the CGB LYC/STAT engine rise
-        // lands beyond the eager cc+0 read, so the raw `intf` misses the
-        // deterministically-imminent bit SameBoy's events-first read frame has
-        // already folded. Fold it in as a verdict-only value peek
-        // (`Ppu::ff0f_stat_peek`, less the LY0 pulse the whole-dot frame set a
-        // dot early) — the same VALUE-at-cc+4 shape as the halt-entry peek.
-        // `intf` is untouched; the rise still folds at its own dot.
+        // FF0F read-frame peek: the CGB LYC/STAT engine rise lands beyond the
+        // cc+0 read, so the raw `intf` misses the deterministically-imminent bit
+        // SameBoy's events-first read frame has already folded. Fold it in as a
+        // verdict-only value peek (`Ppu::ff0f_stat_peek`, less the LY0 pulse the
+        // whole-dot frame set a dot early) — the same VALUE-at-cc+4 shape as the
+        // halt-entry peek. `intf` is untouched; the rise still folds at its own dot.
         let trailing = if addr == 0xFF0F {
             (trailing | self.ppu.ff0f_stat_peek())
                 & !self.ppu.ff0f_ly0_pulse_mask()
@@ -54,11 +53,9 @@ impl Bus for Interconnect {
     }
 
     fn write(&mut self, addr: u16, value: u8) {
-        // Deferred-commit clock: a write commits per its per-model
-        // conflict class (`write_conflict`, the SameBoy `cycle_write` map).
-        // The commit position is still discarded — write-only scaffold —
-        // so swapping `ReadOld` for the real class is byte-identical; the
-        // architectural-commit move that consumes it lands later.
+        // Deferred-commit clock: a write commits per its per-model conflict
+        // class (`write_conflict`, the SameBoy `cycle_write` map). The commit
+        // position is currently discarded (nothing samples it).
         let conflict = self.write_conflict(addr);
         let _commit = self.clock.write(conflict);
         self.service_vram_dma();
@@ -69,36 +66,33 @@ impl Bus for Interconnect {
         // below is unchanged — `Ppu::stage_write` affects only the
         // pipeline's register view (mealybug m3_* mid-mode-3 writes).
         if let 0xFF40 | 0xFF42 | 0xFF43 | 0xFF47..=0xFF4B = addr {
-            // The per-register render-frame stage offsets apply on the eager
-            // clock: mid-mode-3 SCX/SCY/palette/WX/LCDC land at the render
-            // position `stage_write_dots` picks.
+            // Per-register render-frame stage offsets: mid-mode-3
+            // SCX/SCY/palette/WX/LCDC land at the render position
+            // `stage_write_dots` picks.
             let dots = self.stage_write_dots(addr);
             self.ppu.stage_write(addr, value, dots);
         }
         self.tick_machine();
-        // Eager write-conflict commit port: a CGB single-speed
-        // WriteCpu-conflict engine write (FF41 STAT / FF0F IF / FF45 LYC)
-        // commits its engine-visible effect (`eng_stat`/`intf`/LYC compare) ONE
-        // T past the M-cycle boundary in SameBoy (`GB_CONFLICT_WRITE_CPU`), not
-        // at the boundary where the eager whole-M-cycle tick lands `write_no_tick`.
-        // At single speed 1 T = 1 dot, so borrow the next M-cycle's first PPU
-        // dot here — running this dot's engine tick (folding any co-instant STAT
-        // rise into `intf` FIRST) before the write commits — then the next
-        // `tick_machine` skips cc 1 to restore phase. This lands `write_no_tick`
-        // at the WriteCpu dot (D+1), exactly like the tier2 deferred path.
-        // `eager`-gated + CGB SS scoped → production/tier2/DMG byte-identical.
+        // Write-conflict commit: a CGB single-speed WriteCpu-conflict engine
+        // write (FF41 STAT / FF0F IF / FF45 LYC) commits its engine-visible
+        // effect (`eng_stat`/`intf`/LYC compare) ONE T past the M-cycle boundary
+        // in SameBoy (`GB_CONFLICT_WRITE_CPU`), not at the boundary where the
+        // whole-M-cycle tick lands `write_no_tick`. At single speed 1 T = 1 dot,
+        // so borrow the next M-cycle's first PPU dot here — running this dot's
+        // engine tick (folding any co-instant STAT rise into `intf` FIRST)
+        // before the write commits — then the next `tick_machine` skips cc 1 to
+        // restore phase, landing `write_no_tick` at the WriteCpu dot (D+1).
         // Borrow only on the aligned whole-dot grid: an LCD-enable sub-dot
         // offset (`lcd_shift_dots != 0`) shifts the CPU/PPU grid, where a
         // whole-dot borrow mis-maps a co-instant STAT rise onto the wrong side
         // of the write (`lycwirq_trigger_*_lcdoffset1_1`).
-        // DMG is single-speed with the same 4-dot M-cycle and 1-T
-        // WriteCpu commit as CGB SS, so the identical whole-dot borrow re-hosts
-        // the DMG FF0F-clear straddle (`m2int_m0irq_scx3_ifw_2`/`_4`,
+        // DMG is single-speed with the same 4-dot M-cycle and 1-T WriteCpu
+        // commit as CGB SS, so the identical whole-dot borrow re-hosts the DMG
+        // FF0F-clear straddle (`m2int_m0irq_scx3_ifw_2`/`_4`,
         // `ly0/lycint152_lyc153irq_ifw_2`). Scoped to FF0F on DMG: the FF41/FF45
         // WriteCpu borrow recovers on CGB but is a net-negative A/B swap on DMG
-        // (`m0enable/lycdisable_ff41_2`/`ff45_3` invert), so only the FF0F IF-clear
-        // borrow crosses to DMG. Production/tier2 (flag off / early-returned)
-        // untouched; CGB unchanged (all three addrs on is_cgb).
+        // (`m0enable/lycdisable_ff41_2`/`ff45_3` invert), so only the FF0F
+        // IF-clear borrow crosses to DMG.
         let borrow_addr = if self.model.is_cgb() {
             matches!(addr, 0xFF0F | 0xFF41 | 0xFF45)
         } else {
@@ -119,19 +113,19 @@ impl Bus for Interconnect {
         // LCDC (`write_no_tick` commits the new one below).
         self.check_exc_lcd(addr, value);
         // A bit1-clearing FF0F write consumes a STAT engine rise landing within
-        // the next 2 dots (the tier2 `write_deferred` twin); with the borrow
-        // above the commit now sits at the WriteCpu dot, so the same squash arm
-        // applies (`lycint152_lyc153irq_ifw_2`). Shares the borrow's scope.
+        // the next 2 dots; with the borrow above the commit now sits at the
+        // WriteCpu dot, so the same squash arm applies
+        // (`lycint152_lyc153irq_ifw_2`). Shares the borrow's scope.
         //
-        // Double-speed extension: at DS SameBoy's WriteCpu commits 1 T =
-        // half a dot into the M-cycle, but the eager whole-M-cycle tick already
-        // lands `write_no_tick` at the SAME dot the tier2 deferred path commits
-        // (measured: `m2int_m0irq_scx{3,4}_ifw_ds` commit dots match tier2
-        // exactly), so NO commit-dot borrow is needed — the DS mode-0 rise sits 1
-        // to 2 dots past the write (`w=2` in `stat_update_tick`), not co-instant,
-        // and the existing squash countdown consumes it (`_ds_2` Δ1-2) while the
-        // `_ds_1` siblings' writes sit Δ3-4 and survive. Arm only (no `tick_half`,
-        // no `eager_wr_borrow` repay). Same `!lcd_shift_active` grid guard as SS.
+        // Double-speed extension: at DS SameBoy's WriteCpu commits 1 T = half a
+        // dot into the M-cycle, but the whole-M-cycle tick already lands
+        // `write_no_tick` at the SAME dot (measured: `m2int_m0irq_scx{3,4}_ifw_ds`
+        // commit dots match), so NO commit-dot borrow is needed — the DS mode-0
+        // rise sits 1 to 2 dots past the write (`w=2` in `stat_update_tick`), not
+        // co-instant, and the existing squash countdown consumes it (`_ds_2`
+        // Δ1-2) while the `_ds_1` siblings' writes sit Δ3-4 and survive. Arm only
+        // (no `tick_half`, no `eager_wr_borrow` repay). Same `!lcd_shift_active`
+        // grid guard as SS.
         let ff0f_ds_squash =
             self.model.is_cgb() && self.double_speed && !self.ppu.lcd_shift_active();
         if (borrow || ff0f_ds_squash) && addr == 0xFF0F && value & 0x02 == 0 {
@@ -167,11 +161,11 @@ impl Bus for Interconnect {
         let _leading_edge = self.clock.read();
         // Leading-edge sample (cc+0).
         let leading = self.leading_edge_sample(addr);
-        // Mirror `Bus::read`: clear the one-shot eager carried-read peek once
+        // Mirror `Bus::read`: clear the one-shot carried-read peek once
         // the FF41 read has consumed it.
         if addr == 0xFF41 {
             self.ppu.set_read_carried(false);
-            // The eager halt-woken re-fetch override is one-shot at the line
+            // The halt-woken re-fetch override is one-shot at the line
             // boundary: it survives the sub-boundary polls (`read_pos_hd` short
             // of the line) and clears once this read has crossed it (the same
             // read `vis_mode_read` resolved to mode 2).
@@ -251,10 +245,9 @@ impl Bus for Interconnect {
     }
 
     fn flush_pending(&mut self) {
-        // Instruction boundary: drain the deferred-commit clock's parked
-        // debt (SameBoy `flush_pending_cycles`). Net-zero — the clock is
-        // write-only scaffold; this only keeps `clock.now()` exact at
-        // boundaries for the leading-edge port.
+        // Instruction boundary: drain the deferred-commit clock's parked debt
+        // (SameBoy `flush_pending_cycles`), keeping `clock.now()` exact at
+        // boundaries for the leading-edge sampling.
         self.clock.flush();
     }
 }

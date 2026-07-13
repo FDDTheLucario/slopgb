@@ -15,7 +15,7 @@ use super::{Bus, Cpu, flags};
 /// The flush is placed here, around the whole body, so it fires on *every*
 /// exit path (the locked / halt-stay / halt-wake / stop-idle early returns
 /// included) with a single call — the SameBoy `flush_pending_cycles`
-/// instruction boundary (`sm83_cpu.c:336`). Currently inert.
+/// instruction boundary (`sm83_cpu.c:336`).
 pub fn step(cpu: &mut Cpu, bus: &mut impl Bus) {
     run_step(cpu, bus);
     bus.flush_pending();
@@ -463,15 +463,12 @@ fn op_halt(cpu: &mut Cpu, bus: &mut impl Bus) {
         }
         return;
     }
-    // IME=1 (or EI-pending) with IE & IF already nonzero at the
-    // entry view: the halt is NOT entered and PC rewinds to the HALT
-    // itself, so the dispatched ISR returns INTO the halt and it
-    // re-executes with the IF bit consumed (SameBoy halt()
-    // sm83_cpu.c:1043-1047: `halted = false; pc--`). The prior
-    // halted+first-check-wake path pushed halt+1 — the ISR skipped the
-    // re-halt and the whole post-wake stream ran one halt round early
-    // (`late_m0int_halt_m0stat_*`). Tier2-gated inside
-    // `halt_entry_rewind` (production keeps the halted+wake shape).
+    // IME=1 (or EI-pending) with IE & IF already nonzero at the entry view:
+    // the halt is NOT entered and PC rewinds to the HALT itself, so the
+    // dispatched ISR returns INTO the halt and it re-executes with the IF bit
+    // consumed (SameBoy halt() sm83_cpu.c:1043-1047: `halted = false; pc--`).
+    // Gated by `halt_entry_rewind`; the alternative halted+wake shape ran the
+    // whole post-wake stream one halt round early (`late_m0int_halt_m0stat_*`).
     if bus.halt_entry_rewind() {
         cpu.regs.pc = cpu.regs.pc.wrapping_sub(1);
         return;

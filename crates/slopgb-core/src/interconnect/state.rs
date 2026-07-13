@@ -1,22 +1,20 @@
 //! Interconnect save-state (de)serialization (a second `impl Interconnect`
 //! block; see `crate::state`). Delegates the peripherals to their own
 //! serializers and writes the interconnect's own volatile state (WRAM/HRAM, IF/
-//! IE, the deferred-commit clock, the STAT sub-dot edges, the tier2-reclock
-//! scratch fields, the OAM-DMA + HDMA engines, CGB misc regs).
+//! IE, the deferred-commit clock, the STAT sub-dot edges, the inert
+//! deferred-clock scratch fields, the OAM-DMA + HDMA engines, CGB misc regs).
 //!
 //! NOT serialized: `model`/`cgb_mode` (ROM-derived — a state loads into a
 //! same-model machine), `boot_rom`/`boot_active` (the opt-in boot-ROM
 //! attachment is machine *construction*, like the ROM itself — a state loads
 //! into a machine already built with the same boot-ROM-or-not configuration),
 //! and the debugger-only fields (watchpoints, profiler, exception mask) —
-//! those are live UI state, left untouched by a load. Every other field,
-//! including the now-inert deferred-clock scratch (`clock`,
-//! `m0_halt_hold`, `ack_squash_deadline_t`, `wake_skew`, `machine_now`,
-//! `vram_dma_req_pre`, `stat_vis_from_t`, `halt_ly_phase`, `deferred_squash`),
-//! is serialized — production keeps these at their initial 0/false, so
-//! serializing them is harmless and guarantees no live
-//! field is silently dropped from a round-trip. Live-debugger/UI only, so
-//! golden-safe.
+//! those are live UI state, left untouched by a load. Every other field is
+//! serialized, including the inert deferred-clock scratch (`m0_halt_hold`,
+//! `ack_squash_deadline_t`, `wake_skew`, `machine_now`, `vram_dma_req_pre`,
+//! `stat_vis_from_t`, `halt_ly_phase`, `deferred_squash`) that stays at its
+//! initial 0/false — serializing it is harmless and guarantees no live field is
+//! silently dropped from a round-trip. Live-debugger/UI only, so golden-safe.
 
 use super::*;
 use crate::state::{Reader, StateError, Writer};

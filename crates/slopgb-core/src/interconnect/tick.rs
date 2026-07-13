@@ -3,9 +3,9 @@
 use super::*;
 
 impl Interconnect {
-    /// Consume this M-cycle's dispatch-ack timer/serial squash mask: the
-    /// `ack_squash_mask & 0x0C` while the sync-ahead window is open (stepping
-    /// its countdown), else 0. Used by the eager `tick_machine`.
+    /// This M-cycle's dispatch-ack timer/serial squash mask: `ack_squash_mask
+    /// & 0x0C` while the sync-ahead window is open (stepping its countdown),
+    /// else 0. Consumed once per `tick_machine` (see the `ack_squash_*` fields).
     fn take_ack_squash_tick_mask(&mut self) -> u8 {
         if self.ack_squash_ticks > 0 {
             self.ack_squash_ticks -= 1;
@@ -16,7 +16,7 @@ impl Interconnect {
     }
 
     /// Clear the per-M-cycle late-mask + accessibility/STAT edge stamps at the
-    /// M-cycle head. Used by the eager `tick_machine`.
+    /// M-cycle head (called by `tick_machine`).
     fn reset_mcycle_edges(&mut self) {
         self.if_stat_late = 0;
         self.m0_access_edge = None;
@@ -76,7 +76,7 @@ impl Interconnect {
     /// Fold a completed PPU dot's IF bits, halt-late masks, accessibility/STAT
     /// edge stamps and the HBlank-DMA level detector into the machine state for
     /// cc `cc` (1..=4). `ppu_if` is the raw IF the PPU tick returned. Called by
-    /// the eager half-dot loop in `tick_machine` (once per completed PPU dot).
+    /// the half-dot loop in `tick_machine` (once per completed PPU dot).
     pub(super) fn fold_ppu_events(&mut self, ppu_if: u8, cc: u8) {
         {
             // STAT/VBlank rises in the first 2 dots after the ack are
@@ -124,17 +124,11 @@ impl Interconnect {
                 }
             }
             if let Some(lead) = self.ppu.take_m0_access_flip() {
-                // The OAM/VRAM accessibility unblock trails the IRQ rise by
-                // one half-dot (gambatte m0Time = xpos lcd_hres+7 vs the IRQ
-                // at +6). A CPU OAM read samples at the cc+2 MID phase — two
-                // dots before this M-cycle's end-sampled view — so when the
-                // unblock lands in the cycle's second half it still reads
-                // mode 3 ($FF). The IRQ, mode-bit flip and every other
-                // access keep the end view; only the OAM read consults this
-                // (gambatte oam_access/postread_*). The edge is stamped with
-                // its dot-END commit eighth ([`event_phase`]); the read decides
-                // blocking against the single CPU-access observer phase
-                // [`ACCESS_PHASE`] ([`stamp_blocks`]).
+                // The OAM/VRAM accessibility unblock trails the IRQ rise by one
+                // half-dot (gambatte m0Time = xpos lcd_hres+7 vs the IRQ at +6),
+                // so a second-half unblock is not yet visible to the cc+2 MID
+                // OAM read (gambatte oam_access/postread_*; see the field doc).
+                // Stamped with its dot-END commit eighth ([`event_phase`]).
                 self.m0_access_edge = Some(event_phase(EdgeKind::M0Access, cc, lead));
             }
             if let Some(lead) = self.ppu.take_pal_access_flip() {
@@ -147,23 +141,15 @@ impl Interconnect {
             if let Some(lead) = self.ppu.take_m0_stat_flip() {
                 // A sprite-line m3→m0 flip holds the double-speed FF41 mode bits
                 // at the pre-flip mode 3 for the WHOLE straddle M-cycle
-                // (`event_phase(StatMode)=END_PHASE`): the earlier dot-END
-                // half-split caught only the +43 rows whose flip lands in
-                // the M-cycle's second half; the whole-M-cycle block adds the +84
-                // residual `m3stat_ds_1` rows whose flip lands in the first half
-                // (gambatte sprites). Net-positive A/B trade (full-gbtr +84/−3,
-                // net floor −84): the only regressions are the 3
-                // `late_sizechange_sp00/01/39_ds_1` (a net-neutral in-cluster
-                // swap — their `_ds_2` siblings are in the lift; whole-M-cycle
-                // forces both same-line size-change reads to mode 3, the `_2`
-                // want it and the `_1` do not, and no `event_phase` offset
-                // separates two reads in one M-cycle). The sprite-line gate stays
-                // (dropping it floors 5
-                // bare-line reads at a different chain offset:
-                // dma gdma/hdma_cycles_scx5_ds_2, lcd_offset m0stat_count). The
-                // edge stamps the whole-M-cycle END phase ([`event_phase`]); the
-                // FF41 read blocks against the single CPU-access observer phase
-                // [`ACCESS_PHASE`] ([`stamp_blocks`]).
+                // (`event_phase(StatMode)=END_PHASE`): both first- and
+                // second-half flips block, pinning gambatte sprites `m3stat_ds_1`.
+                // Costs 3 in-cluster swaps (`late_sizechange_sp00/01/39_ds_1`,
+                // whose `_ds_2` siblings want mode 3 too — no `event_phase`
+                // offset separates two reads in one M-cycle). The sprite-line
+                // gate stays: dropping it floors dma gdma/hdma_cycles_scx5_ds_2
+                // and lcd_offset m0stat_count. The edge stamps the whole-M-cycle
+                // END phase; the FF41 read blocks against [`ACCESS_PHASE`]
+                // ([`stamp_blocks`]).
                 self.stat_mode_edge = Some(event_phase(EdgeKind::StatMode, cc, lead));
             }
             // Dot-exact mode-0 entry: each visible line's hblank start
@@ -187,36 +173,26 @@ impl Interconnect {
 
     /// Gate (true) or ungate (false) the OAM DMA controller's clock.
     ///
-    /// The OAM DMA controller is clocked by the CPU core clock, which HALT
-    /// (and STOP) switches off while the PPU keeps running on its own clock.
-    /// A transfer in progress therefore does not proceed while the CPU is
-    /// halted: bytes already copied stay, the byte in flight never commits,
-    /// and the rest of OAM keeps its old contents — the PPU renders from
-    /// that mixture for as long as the CPU sleeps. Hardware-verified by
-    /// mooneye madness/mgb_oam_dma_halt_sprites.s ("OAM DMA is in the middle
-    /// of OAM access (but not proceeding with it!)"); its observed sprite
-    /// data pins the freeze mid-byte, with the overwritten OAM byte intact.
-    ///
-    /// Called by the CPU wiring on halt/stop entry and exit (via
-    /// [`Bus::set_halted`]); the halted CPU performs no bus accesses on
-    /// hardware, so the CPU-visible bus state during the freeze is
-    /// unobservable and no bus conflict is modelled.
-    ///
-    /// While a transfer sits frozen mid-byte, the PPU is handed the frozen
-    /// access (OAM index about to be replaced + in-flight source byte): the
-    /// DMA controller is "in the middle of OAM access (but not proceeding
-    /// with it!)" and the MGB PPU's OAM scan sees glitched data derived
-    /// from exactly these bytes (madness/mgb_oam_dma_halt_sprites.s; see
-    /// `Ppu::set_oam_dma_freeze`). A freeze during the setup delay has no
-    /// OAM access in flight and hands over nothing.
+    /// HALT/STOP switch off the CPU core clock that drives the OAM DMA
+    /// controller while the PPU keeps running, so a transfer in progress freezes
+    /// mid-byte: copied bytes stay, the in-flight byte never commits, the rest
+    /// of OAM keeps its old contents, and the PPU renders that mixture for as
+    /// long as the CPU sleeps. The frozen access (the OAM index about to be
+    /// replaced plus the in-flight source byte) is handed to the PPU, whose MGB
+    /// OAM scan sees glitched data derived from exactly those bytes; a freeze
+    /// during the setup
+    /// delay has none and hands over nothing. Hardware-verified by mooneye
+    /// madness/mgb_oam_dma_halt_sprites.s ("OAM DMA is in the middle of OAM
+    /// access (but not proceeding with it!)"); see `Ppu::set_oam_dma_freeze`.
+    /// The halted CPU performs no bus accesses, so no bus conflict is modelled.
     pub fn set_cpu_halted(&mut self, halted: bool) {
         if self.cpu_halted == halted {
             return;
         }
         if halted {
-            // Backstop-clear an unconsumed eager halt-woken re-fetch override
-            // (the previous round's wake never reached the line-boundary read)
-            // so it cannot leak into this round. One-shot; byte-identical OFF.
+            // Backstop-clear an unconsumed halt-woken re-fetch override (the
+            // previous round's wake never reached the line-boundary read) so it
+            // cannot leak into this round.
             self.ppu.set_halt_refetch(false);
             // gambatte Memory::halt: a flagged-but-unserviced block
             // request is deferred (hdma_requested) and re-flagged at
@@ -233,8 +209,7 @@ impl Interconnect {
         }
         self.engage_halt_gate(halted);
         if !halted {
-            // Clear any unspent deferred mode-0 halt-wake delay so it cannot
-            // leak into a later halt (the wake consumed the IRQ this masked).
+            // Reset the (now-inert) deferred mode-0 halt-wake delay scratch.
             self.m0_halt_hold = 0;
             // The halt-mode wake restarts the OAM DMA controller's clock
             // one M-cycle ahead of the CPU pipeline: a single catch-up

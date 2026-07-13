@@ -114,11 +114,8 @@ impl Timer {
     /// Advance one T-cycle (one of the 4 substeps of an M-cycle), returning the
     /// IF bit set this T (bit 2 = timer) and whether it committed in the
     /// M-cycle's second half (`substep >= 2`, the `late` halt-wake mask). The
-    /// per-substep primitive `tick` is built from; the port Stage-B deferred
-    /// machine advance ([`crate::interconnect::Interconnect`]) drives the timer
-    /// T-by-T through this so a sub-M-cycle dispatch reclock re-frames the timer
-    /// with the PPU. `reloaded` is reset per M-cycle by the caller (`tick`
-    /// inlines it; the deferred path resets it at each M-cycle's first substep).
+    /// per-substep primitive [`Self::tick`] composes from; `reloaded` is reset
+    /// once per M-cycle by the caller (`tick` inlines it).
     pub fn tick_substep(&mut self, substep: u8) -> (u8, bool) {
         let mut iff = 0;
         let mut late = false;

@@ -32,8 +32,7 @@ impl Interconnect {
     /// the intermediate masked write are memory effects handled elsewhere),
     /// and the two-stage `STAT_*`/`PALETTE_*` classes collapse to their final
     /// value-write phase (`WriteCpu`/`ReadNew`/`EarlyTwo`). The result is
-    /// discarded by `Bus::write` today, so this is byte-identical in both flag
-    /// states (the commit position is not yet consumed).
+    /// discarded by `Bus::write` today (the commit position is not yet consumed).
     pub(super) fn write_conflict(&self, addr: u16) -> Conflict {
         // Only the IO page FF00-FF7F conflicts; everything else reads old.
         if addr & 0xFF80 != 0xFF00 {
@@ -90,7 +89,7 @@ impl Interconnect {
     }
 
     /// The per-register mid-mode-3 write-commit stage offset (in dots) for the
-    /// eager-value write path ([`crate::interconnect::Bus`]`::write`). Delegates
+    /// write path ([`crate::interconnect::Bus`]`::write`). Delegates
     /// to [`crate::ppu::Ppu::stage_write_dots`] with the live double-speed flag —
     /// the offset is a pure function of `addr` / `scan_pos` / speed, so the PPU
     /// render-test harness shares the exact same computation.

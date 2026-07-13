@@ -91,7 +91,6 @@ impl Interconnect {
         } else {
             s.div_counter.wrapping_sub(cgb_cart_cut as u16)
         };
-        // Port Stage B (Tier 2) DIV phase re-calibration. The post-boot
         self.timer.set_div(div);
         self.serial.tick(div);
         self.apu.tick(div, false);

@@ -3,15 +3,12 @@
 use super::*;
 
 impl Interconnect {
-    /// Eager-value double-speed accessibility bypass. Under the eager clock the
-    /// production `m0_access_edge`/`pal_access_edge` whole-M-cycle stamp is
-    /// mis-framed at double speed (the eager mode-0 flip lands at the
-    /// reclocked render dot, not the production one), so a DS OAM/VRAM/palette
-    /// read resolves against a stale straddle stamp. Route DS accessibility
-    /// through the ported `Ppu::{oam,vram,pal}_*_blocked` laws instead — the
-    /// same bypass the eager clock takes (the ported laws carry the DS
-    /// line-end / entry / palette-pipe boundaries). Single speed keeps the
-    /// stamp (it passes under eager).
+    /// Double-speed accessibility bypass. At double speed the whole-M-cycle
+    /// `m0_access_edge`/`pal_access_edge` stamp is mis-framed (the mode-0 flip
+    /// lands at the reclocked render dot), so a DS OAM/VRAM/palette read routes
+    /// through the ported `Ppu::{oam,vram,pal}_*_blocked` laws instead (they
+    /// carry the DS line-end / entry / palette-pipe boundaries). Single speed
+    /// keeps the stamp.
     fn ev_ds_access(&self) -> bool {
         self.double_speed
     }
@@ -143,24 +140,17 @@ impl Interconnect {
             0x0000..=0x7FFF => self
                 .boot_rom_byte(addr)
                 .unwrap_or_else(|| self.cart.read_rom(addr)),
-            // cc+2 MID-phase VRAM read: same mode-3→mode-0 unblock edge as
-            // OAM below — a second-half unblock is not yet visible here
-            // (sub-dot event-phase model). tier2 BYPASSES
-            // every M0Access straddle stamp (all five sites) — the deferred
-            // (cc+0) access is resolved to its exact half-dot before sampling,
-            // so the cc+4 straddle-M-cycle approximation double-blocks
-            // accesses landing legitimately past the unblock (the DS
-            // `postread_scx5_ds_2` SameBoy-passes); the deferred frame's
-            // release laws live in `Ppu::{oam,vram}_read_blocked` /
-            // `ds_lineend_open`. EXCEPT a readback within 8 dots of a
-            // same-line VRAM write ATTEMPT (`vram_wr_recent`, the
-            // co-temporality): the write's M-cycle cost is what SameBoy
-            // spreads across the readback, so those keep the straddle stamp
-            // (`vramw_m3end_scx5_ds_{2,4}` SameBoy-passes, measured drop
-            // without the guard). Suppressed while an
-            // HDMA is armed: the HDMA service seam writes VRAM at the same
-            // mode-0 entry and its read-back interaction (gambatte
-            // dma/hdma_start_*) is the HDMA-seam increment's job.
+            // cc+2 MID-phase VRAM read: a second-half mode-3→mode-0 unblock is
+            // not yet visible here (same edge as the OAM read below). At double
+            // speed the straddle stamp is mis-framed, so the release laws live
+            // in `Ppu::{oam,vram}_read_blocked` / `ds_lineend_open`
+            // (`postread_scx5_ds_2`) — EXCEPT a readback within 8 dots of a
+            // same-line VRAM write attempt (`vram_wr_recent`), whose M-cycle
+            // cost SameBoy spreads across the readback, so it keeps the straddle
+            // stamp (`vramw_m3end_scx5_ds_{2,4}`). Suppressed while an HDMA is
+            // armed: the HDMA service seam writes VRAM at the same mode-0 entry,
+            // and the read-back interaction (gambatte dma/hdma_start_*) is the
+            // HDMA-seam increment's job.
             0x8000..=0x9FFF
                 if (!self.ev_ds_access() || self.ppu.vram_wr_recent())
                     && stamp_blocks(self.m0_access_edge, ACCESS_PHASE)
@@ -225,14 +215,12 @@ impl Interconnect {
         }
         match addr {
             0x0000..=0x7FFF => self.cart.write_rom(addr, value),
-            // cc+2 MID-phase VRAM write: a mode-3→mode-0 unblock landing in
-            // this M-cycle's second half is not yet visible here, so the
-            // write is still locked out (dropped) — same edge/sub-dot
-            // phase as the OAM/VRAM read (sub-dot event-phase model).
-            // The VRAM WRITE straddle stamp stays on BOTH paths: the tier2
-            // bypass here dropped the SameBoy-passing `vramw_m3end_scx5_ds_4`
-            // (measured — the write side of the co-temporality; only
-            // the READ sites + the OAM write resolve at the deferred frame).
+            // cc+2 MID-phase VRAM write: a second-half mode-3→mode-0 unblock is
+            // not yet visible here, so the write is still locked out (dropped) —
+            // same edge as the OAM/VRAM read. The straddle stamp stays even at
+            // double speed: bypassing it here drops the SameBoy-passing
+            // `vramw_m3end_scx5_ds_4` (the write side of the co-temporality;
+            // only the reads + the OAM write resolve through the ported laws).
             0x8000..=0x9FFF if stamp_blocks(self.m0_access_edge, ACCESS_PHASE) => {}
             0x8000..=0x9FFF => self.intf |= self.ppu.write(addr, value) & IF_MASK,
             0xA000..=0xBFFF => self.cart.write_ram(addr, value),
@@ -343,21 +331,16 @@ impl Interconnect {
             0xFF0F => 0xE0 | self.intf,
             0xFF10..=0xFF3F => self.apu.read(addr),
             0xFF46 => self.dma_reg,
-            // The STAT mode bits read at the cc+2 MID phase: in double speed
-            // a read whose M-cycle straddles a sprite-line mode-3→mode-0 flip
+            // The STAT mode bits read at the cc+2 MID phase: in double speed a
+            // read whose M-cycle straddles a sprite-line mode-3→mode-0 flip
             // still reads mode 3 for the WHOLE straddle M-cycle
-            // (`event_phase(StatMode)=END_PHASE` — not only a
-            // 2nd-half flip), where the whole-dot end view has already flipped
-            // to mode 0 (gambatte sprites m3stat_ds). Only the low mode bits
-            // move; the enable bits and the live LYC compare keep the end view.
-            // The `double_speed` gate is load-bearing, not belt-and-braces:
-            // single-speed FF41 m3stat reads share this one stamp but want the
-            // end view (cross-oracle — see
-            // `stat_mode_override_requires_double_speed`). The LCD-on guard is
-            // belt-and-braces: the flag is only set by a live flip (LCD on) and
-            // reset every tick, so an LCD-off read can never carry it, but the
-            // guard keeps the override from ever forcing mode 3 over the LCD-off
-            // mode 0.
+            // (`event_phase(StatMode)=END_PHASE`), where the whole-dot end view
+            // has flipped to mode 0 (gambatte sprites m3stat_ds). Only the low
+            // mode bits move; the enable bits and live LYC compare keep the end
+            // view. The `double_speed` gate is load-bearing — single-speed FF41
+            // m3stat reads share this stamp but want the end view
+            // (`stat_mode_override_requires_double_speed`). The LCD-on guard
+            // keeps an LCD-off read from ever forcing mode 3 over mode 0.
             0xFF41
                 if stamp_blocks(self.stat_mode_edge, ACCESS_PHASE)
                     && self.double_speed
@@ -381,10 +364,10 @@ impl Interconnect {
             // BCPS/OCPS stay readable in DMG-compat mode (boot_hwio-C reads
             // the boot leftovers $C8/$D0); the data ports do not.
             0xFF68 | 0xFF6A => self.ppu.read(addr),
-            // The eager clock resolves the reclocked (cc+0) palette read to its
-            // exact half-dot before sampling; the whole-M-cycle straddle stamp
-            // is bypassed and the trailing unblock lives in `Ppu::pal_ram_blocked`
-            // instead (`pal_open_dot` + 1 dot SS / + 0 DS).
+            // The reclocked (cc+0) palette read resolves to its exact half-dot
+            // before sampling, so the whole-M-cycle straddle stamp is bypassed
+            // and the trailing unblock lives in `Ppu::pal_ram_blocked`
+            // (`pal_open_dot` + 1 dot SS / + 0 DS).
             0xFF69 | 0xFF6B if self.cgb_mode => self.ppu.read(addr),
             0xFF6C => self.ppu.read(addr),
             0xFF70 if self.cgb_mode => 0xF8 | self.svbk,

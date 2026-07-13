@@ -100,10 +100,10 @@ pub trait Bus {
     /// so the halt-exit check runs on a HALF-M-cycle grid and a wake resumes
     /// the CPU — and its whole dispatch + handler read stream — at that
     /// sub-M-cycle T (the deferred clock keeps the 2-T offset until the
-    /// machine re-aligns). The default (production, and every
+    /// machine re-aligns). The default (the base impl and every
     /// non-interconnect test bus) is the plain end-sampled
     /// [`pending_halt_wake`](Bus::pending_halt_wake); the interconnect
-    /// overrides it on the tier2 deferred path for the DMG family.
+    /// overrides it for the DMG family.
     fn pending_halt_wake_mid(&mut self) -> u8 {
         self.pending_halt_wake()
     }
@@ -113,8 +113,8 @@ pub trait Bus {
     /// M-cycle) and then checks IE & IF, so the entry decision observes the
     /// machine at the fetch's END (t0+4), one M-cycle past the deferred
     /// leading-edge view `pending()` gives (sm83_cpu.c:1036-1058). The
-    /// default (production, non-interconnect buses) keeps `pending()`; the
-    /// interconnect overrides it on the tier2 deferred path.
+    /// default (non-interconnect buses) keeps `pending()`; the interconnect
+    /// overrides it.
     fn pending_halt_entry(&mut self) -> u8 {
         self.pending()
     }
@@ -123,9 +123,8 @@ pub trait Bus {
     /// the opcode-fetch M-cycle before `GB_cpu_run`'s interrupt check reads
     /// IF, so a rise landing INSIDE the fetch M-cycle still dispatches at
     /// that boundary; the deferred leading-edge `pending()` view is one
-    /// M-cycle stale there. The default (production, non-interconnect
-    /// buses) keeps `pending()`; the interconnect overrides it on the tier2
-    /// deferred path.
+    /// M-cycle stale there. The default (non-interconnect buses) keeps
+    /// `pending()`; the interconnect overrides it.
     fn pending_dispatch(&mut self) -> u8 {
         self.pending()
     }
@@ -133,8 +132,7 @@ pub trait Bus {
     /// IE & IF is already nonzero at the entry view should NOT halt and
     /// instead rewind PC into the HALT (SameBoy `halt()`
     /// sm83_cpu.c:1043-1047), so the dispatched ISR returns into the halt.
-    /// Default false (production keeps the halted+first-check-wake shape);
-    /// the interconnect enables it on the tier2 deferred path.
+    /// Default false; the interconnect enables it.
     fn halt_entry_rewind(&mut self) -> bool {
         false
     }
@@ -171,10 +169,8 @@ pub trait Bus {
     /// (SameBoy `flush_pending_cycles`, `sm83_cpu.c:336`). Called exactly
     /// once per [`Cpu::step`] invocation, after the instruction (or idle /
     /// dispatch step) completes, so the next instruction begins at a clean
-    /// cc+0. Takes no time. Currently inert — the clock it drains is
-    /// write-only scaffold that nothing samples yet; it becomes load-bearing
-    /// once leading-edge reads are wired. Defaults to a no-op for `Bus`
-    /// implementations without a cycle clock.
+    /// cc+0. Takes no time. Defaults to a no-op for `Bus` implementations
+    /// without a cycle clock.
     fn flush_pending(&mut self) {}
 }
 

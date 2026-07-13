@@ -162,24 +162,20 @@ pub struct Interconnect {
     /// Elapsed T-cycles since power-on (normal-speed dots).
     cycles: u64,
     /// CPU-side deferred-commit clock (SameBoy `pending_cycles`,
-    /// `sm83_cpu.c`). Every CPU-driven M-cycle (the
-    /// five [`Bus`] access methods) parks its 4 T-cycles here and commits the
-    /// previous M-cycle's debt at the *leading* edge, draining at the
-    /// instruction boundary via [`Bus::flush_pending`]. Behaviour-neutral
-    /// while nothing samples it; load-bearing once FF41/OAM/VRAM/palette reads
-    /// switch to leading-edge (cc+0) sampling. Counts pure CPU T-cycles
-    /// (4 per M-cycle in *both* speeds — the double-speed factor lives in the
-    /// PPU/APU domain, never here; `cycle_clock.rs` module doc). Advanced
-    /// only by the CPU's own M-cycles, never by OAM-DMA / HDMA / STOP-pause
-    /// stolen ticks (those call `tick_machine` directly, not through `Bus`).
+    /// `sm83_cpu.c`). Every CPU-driven M-cycle (the five [`Bus`] access
+    /// methods) parks its 4 T-cycles here, commits the previous M-cycle's debt
+    /// at the leading edge, and drains at the instruction boundary via
+    /// [`Bus::flush_pending`]. Counts pure CPU T-cycles (4 per M-cycle in
+    /// *both* speeds — the double-speed factor lives in the PPU/APU domain, not
+    /// here; `cycle_clock.rs` module doc). Advanced only by the CPU's own
+    /// M-cycles, never by OAM-DMA / HDMA / STOP-pause stolen ticks (those call
+    /// `tick_machine` directly, not through `Bus`).
     clock: CycleClock,
     /// A CGB single-speed WriteCpu-conflict engine write (FF41/FF0F/FF45) just
     /// committed one PPU dot into the next M-cycle (SameBoy `GB_CONFLICT_
-    /// WRITE_CPU` lands the CPU value 1 T past the M-cycle boundary). The
-    /// eager write borrowed that dot ahead of `write_no_tick`, so the next
-    /// `tick_machine` ticks 3 PPU dots (skip cc 1) to restore CPU/PPU phase.
-    /// Set by the eager mid-M-cycle write borrow (`interconnect::bus`); repaid
-    /// by the next `tick_machine`.
+    /// WRITE_CPU` lands the CPU value 1 T past the M-cycle boundary). The write
+    /// borrowed that dot ahead of `write_no_tick`, so the next `tick_machine`
+    /// ticks 3 PPU dots (skip cc 1) to restore CPU/PPU phase.
     eager_wr_borrow: bool,
 
     /// CGB hardware running a CGB-flagged cart. CGB hardware with a DMG
@@ -188,19 +184,13 @@ pub struct Interconnect {
     cgb_mode: bool,
     double_speed: bool,
     /// CPU↔PPU sub-dot phase for the cc-granular reclock: which cc's of the
-    /// M-cycle tick a PPU dot in double speed (see [`dot_ticks_on_cc`]). 0 =
-    /// the fixed even-cc {2,4} alignment the old `for i in 0..dots` loop baked
-    /// in (single speed is phase-independent); 1 = the odd-cc {1,3} half-dot
-    /// offset a STOP speed switch can establish (the LCD dot clock runs on
-    /// continuously across the switch while the CPU's M-cycle grid is re-paced).
-    /// **Held at 0**: setting it at the speed switch was measured to lift ZERO
-    /// gambatte DS rows. The m3stat / speedchange
-    /// `_2` reads are served by the cc-invariant `END_PHASE` StatMode/PalAccess
-    /// overrides, and their correct answer needs the pixel-pipe END *dot* to
-    /// move (a full pixel-pipe reclock), not the M-cycle's sample phase. The
-    /// field is the cc-granular
-    /// substrate that reclock would drive; 0 is bit-identical to the dot loop
-    /// (`cc_grid_matches_dot_loop`).
+    /// M-cycle tick a PPU dot in double speed (see [`dot_ticks_on_cc`]). 0 = the
+    /// fixed even-cc {2,4} alignment (single speed is phase-independent); 1 =
+    /// the odd-cc {1,3} offset a STOP speed switch can establish. Held at 0:
+    /// setting it at the speed switch lifts zero gambatte DS rows
+    /// (`cc_grid_matches_dot_loop` confirms 0 is bit-identical to the dot loop);
+    /// the m3stat/speedchange `_2` reads need the pixel-pipe END dot to move,
+    /// not the M-cycle sample phase.
     dot_phase: u8,
     /// KEY1 bit 0: speed switch armed for the next STOP.
     key1_armed: bool,
@@ -220,82 +210,43 @@ pub struct Interconnect {
     /// see them immediately ([`Bus::pending_halt_wake`]; `Timer::tick`'s
     /// `late`).
     if_late: u8,
-    /// The deferred-frame mode-0 STAT halt-wake delay.
-    /// The deferred halt loop samples `pending_halt_wake` at this M-cycle's cc+0
-    /// (after paying the previous M-cycle's debt), ~2 M-cycles before SameBoy's
-    /// `GB_cpu_run` DMG mid-cycle sample (`sm83_cpu.c:1621-1628`, advance-2 →
-    /// sample → advance-2) plus the dispatch-retime's const −1 TIMA phase. A
-    /// forward advance before the sample was measured WORSE (the IRQ becomes
-    /// visible earlier → wake earlier → lower count); the delay is supplied as
-    /// extra `if_late` masking instead (delay via `if_late`, NOT
-    /// advance). Set when the mode-0 rise is taken during halt on the reclock
-    /// path; counts down one mask per following M-cycle. Only the
-    /// `int_hblank_halt`/`hblank_ly_scx` mode-0 halt grids observe it (intr_2
-    /// wakes on the mode-2 OAM source, the kernel reads FF41 — neither halt-wakes
-    /// on mode 0), so it is free to recalibrate w.r.t. the rest of the triad.
-    /// Inert on the eager clock (never set), so production is byte-identical.
+    /// Inert deferred-clock scratch (the removed −1 TIMA-phase mode-0 STAT
+    /// halt-wake delay). Never set on the current clock; kept for savestate
+    /// stability.
     m0_halt_hold: u8,
-    /// Now-inert deferred-clock scratch (the removed tier2 `advance_machine_t`
-    /// path): a timer/serial ack-squash deadline in CPU T that the eager clock
-    /// never sets or consumes — it keeps the whole-M-cycle `ack_squash_ticks`
-    /// window instead. Retained only for savestate layout (see
-    /// `interconnect/state.rs`).
+    /// Inert deferred-clock scratch (the removed exact-T timer/serial
+    /// ack-squash deadline; the live squash uses the `ack_squash_*` tick/dot
+    /// counters below). Never set now; kept for savestate stability.
     ack_squash_deadline_t: u64,
-    /// Outstanding sub-M-cycle wake skew (T). Set to 2 by a
-    /// mid-cycle (w2) halt wake: the dispatch + the first handler instruction
-    /// run 2 T early (their deferred reads land at the wake's true
-    /// sub-M-cycle T); the next instruction-boundary flush repays it,
-    /// re-aligning the CPU to the machine's 4-T grid so the per-M-cycle mask
-    /// calibrations (if_late lifecycle, rise-cc tables) hold for everything
-    /// after — the clock-park offset consumed by all post-wake
-    /// accesses until the next instruction-boundary flush. An UNBOUNDED
-    /// skew was measured to hang the multi-round mooneye
-    /// `hblank_ly_scx_timing-GS` (B=42): every later round's halt entry
-    /// lands off-grid and the whole calibrated mask map mis-frames.
+    /// Inert deferred-clock scratch (the removed sub-M-cycle wake-skew clock
+    /// offset). Never set now; kept for savestate stability.
     wake_skew: u32,
-    /// Now-inert deferred-clock scratch (the removed `advance_machine_t` path);
-    /// unused by the eager clock. Retained only for savestate layout.
+    /// Inert deferred-clock scratch (the removed per-T machine clock). Never
+    /// set now; kept for savestate stability.
     machine_now: u64,
-    /// Request pending at write_deferred entry.
+    /// Inert deferred-clock scratch (the removed pre-write VRAM-DMA-request
+    /// latch). Never set now; kept for savestate stability.
     vram_dma_req_pre: bool,
-    /// The mode-0 STAT rise's halt-wake visibility
-    /// deadline in machine T: the halt sampler masks IF_STAT while
-    /// `clock.now() < stat_vis_from_t`. Replaces the M-cycle-quantized
-    /// `if_late`/`m0_halt_hold` masking for the mode-0 rise under the
-    /// SameBoy-exact 4k+2 sample grid (rise T).
+    /// Inert deferred-clock scratch (the removed mode-0 STAT halt-wake
+    /// visibility deadline in machine T). Never set now; kept for savestate
+    /// stability.
     stat_vis_from_t: u64,
-    /// The post-mode-0-halt-wake
-    /// LY read-phase carry. SameBoy's DMG halt-wake resumes the CPU at the
-    /// IRQ's sub-M-cycle clock, so the CPU's M-cycle phase is offset from the
-    /// PPU dot grid by the IRQ's within-M-cycle position. slopgb's deferred
-    /// clock is M-cycle-quantized (CPU+PPU advance together), which collapses
-    /// that offset — so a post-wake LY read that straddles the LY-increment
-    /// (`hblank_ly_scx_timing-GS`) reads the wrapped line where hardware, on
-    /// its sub-M-cycle phase, still reads the previous line. This field, set on
-    /// the mode-0 halt-wake to the carry (indexed by the rise's M-cycle phase
-    /// `cc`), back-dates exactly the first post-wake FF44 read by that many
-    /// dots (one-shot), reproducing the sub-M-cycle phase WITHOUT touching the
-    /// pre-halt `wait_ly` poll (which runs before the wake sets it) — the
-    /// reason a uniform `vis_ly` back-date fails. int_hblank (TIMA, not LY) and
-    /// intr_2 (mode-2 wake) are untouched. Cleared one-shot at the read.
+    /// Inert deferred-clock scratch (the removed post-mode-0-halt-wake FF44
+    /// read-phase carry). Never set now; kept for savestate stability.
     halt_ly_phase: u8,
     /// STAT IF bit raised by the PPU in the *current* M-cycle's second
     /// half (line-0 OAM rise): readable via FF0F at once, but the CPU's
     /// interrupt sample for this cycle must not see it
     /// (`Ppu::take_stat_late`).
     if_stat_late: u8,
-    /// The mode-3→mode-0 OAM accessibility unblock fired in the *second
-    /// half* of the current M-cycle (`Ppu::take_m0_access_flip`
-    /// half-classified against the dot-loop index): a CPU OAM read samples
-    /// at the cc+2 MID phase, two dots before this M-cycle's end-sampled
-    /// view, so it still reads mode 3 ($FF) when the unblock lands late.
-    /// First wedge of the sub-dot event-phase model — routes only the OAM
-    /// read; the m0 IRQ, mode-bit flip and every other access stay on the
-    /// whole-dot end view, so this is net-zero except the straddle
-    /// M-cycle (gambatte `oam_access/postread_*`). See `Ppu::m0_access_flip`.
-    /// Stamped with the flip's dot-END commit eighth ([`edge_eighth`]; `None`
-    /// = no flip this M-cycle); a read is blocked when its observer phase
-    /// precedes the stamp ([`stamp_blocks`]).
+    /// The mode-3→mode-0 OAM accessibility unblock for the current M-cycle
+    /// (`Ppu::take_m0_access_flip`): a CPU OAM read samples at the cc+2 MID
+    /// phase, two dots before this M-cycle's end view, so it still reads mode 3
+    /// ($FF) when the unblock lands late (gambatte `oam_access/postread_*`).
+    /// Routes only the OAM read; every other access keeps the end view. Stamped
+    /// with the flip's dot-END commit eighth ([`edge_eighth`]; `None` = no flip
+    /// this M-cycle); a read blocks when its observer phase precedes the stamp
+    /// ([`stamp_blocks`]).
     m0_access_edge: Option<u8>,
     /// As `m0_access_edge` but for the CGB palette-RAM unblock (anchored at
     /// the pipe end / `render_finished`, one dot after the m0 flip). Unlike
@@ -310,41 +261,33 @@ pub struct Interconnect {
     /// gated to sprite-extended lines): a CPU FF41 read samples the mode bits
     /// at the cc+2 MID phase, so in double speed it still reads mode 3 when
     /// the flip lands late (gambatte sprites `m3stat_ds_1`). The FF41 override
-    /// consults this only in double speed; the single-speed STAT-mode read,
-    /// and the first-half/other-chain DS reads, are the parked multi-chain
-    /// problem (see the dot-loop comment). See `Ppu::m0_stat_flip`.
+    /// consults this in double speed only. See `Ppu::m0_stat_flip`.
     stat_mode_edge: Option<u8>,
     /// Dispatch-ack source sync-ahead (gambatte-core memory.cpp
-    /// `Memory::ackIrq`): the IF clear of an interrupt dispatch happens
-    /// slightly *into* the low-push M-cycle on hardware, so it also
-    /// consumes a hardware re-set of the acked source that lands just
+    /// `Memory::ackIrq`): a dispatch's IF clear lands slightly *into* the
+    /// low-push M-cycle, so it also consumes a re-set of the acked source just
     /// after the ack — `updateSerial(cc + 3 + isCgb())`,
-    /// `updateTimaIrq(cc + 2 + isCgb())`, `lcd_.update(cc + 2)` run
-    /// before `intreq_.ackIrq(bit)`. Translated to this core's
-    /// tick-then-access grid: a timer/serial set produced by the next
-    /// machine tick (the next two on CGB/AGB — the timer IF commits on
-    /// the last T-substep, the serial IF on the DIV-edge boundary), and
-    /// a STAT/VBlank rise in the first 2 dots of the next tick, are
-    /// swallowed by the preceding [`Bus::ack`]. The 2-dot LCD window is
-    /// deliberately NOT widened to the line-anchored rises' second-half
-    /// emission dots at single speed (gambatte's `cc + 2` does not reach
-    /// them — m2int_m2irq_late_retrigger_1 and late_m0irq_retrigger_scx1_1
-    /// pin the keeps); in double speed the 2-dot window spans the whole
-    /// tick, which is what flips the `*_late_retrigger_ds_2` rows.
-    /// Pinned by gambatte tima/tc00_irq_late_retrigger_2/3 (dmg08_outE4
-    /// vs cgb04c_outE0), serial/start_wait_trigger_int8_read_if_2/3 and
-    /// the irq_precedence/m1/ly0/lyc153int `*_late_retrigger` rows.
-    /// `ack_squash_mask` is the acked source's IF bit (only that source
-    /// is consumed — others get *flagged*, which our per-tick OR already
-    /// models); `ack_squash_ticks`/`ack_squash_dots` are the remaining
-    /// windows.
+    /// `updateTimaIrq(cc + 2 + isCgb())`, `lcd_.update(cc + 2)` run before
+    /// `intreq_.ackIrq(bit)`. On the tick-then-access grid: a timer/serial set
+    /// from the next tick(s) and a STAT/VBlank rise in the first 2 dots of the
+    /// next tick are swallowed by the preceding [`Bus::ack`]. The single-speed
+    /// 2-dot LCD window deliberately does NOT reach the line-anchored rises'
+    /// second-half emission dots (m2int_m2irq_late_retrigger_1,
+    /// late_m0irq_retrigger_scx1_1 pin the keeps); in double speed it spans the
+    /// whole tick, flipping the `*_late_retrigger_ds_2` rows. Pinned by gambatte
+    /// tima/tc00_irq_late_retrigger_2/3 (dmg08_outE4 vs cgb04c_outE0),
+    /// serial/start_wait_trigger_int8_read_if_2/3, and the
+    /// irq_precedence/m1/ly0/lyc153int `*_late_retrigger` rows.
+    /// `ack_squash_mask` is the acked source's IF bit (only that source is
+    /// consumed — others get *flagged*, which the per-tick OR already models);
+    /// `ack_squash_ticks`/`ack_squash_dots` are the remaining windows.
     ack_squash_mask: u8,
     ack_squash_ticks: u8,
     ack_squash_dots: u8,
 
     /// Inert deferred-clock scratch (the removed −2 dispatch reclock's timer/
-    /// serial squash latch). Unused on the eager path, which recomputes the
-    /// squash per `tick_machine` call; kept only for savestate stability.
+    /// serial squash latch); the live squash is recomputed per `tick_machine`
+    /// call. Never set now; kept for savestate stability.
     deferred_squash: u8,
 
     /// FF46 readback is simply the last written value
@@ -429,12 +372,11 @@ pub struct Interconnect {
     /// default; a `None` tally makes `profile_pc` a no-op, so golden is
     /// byte-identical.
     prof: Option<std::collections::BTreeMap<u16, u64>>,
-    /// FCEUX-style code/data log: per-CPU-address access flags (R=1, W=2, X=4).
-    /// `None` (off) by default; a `None` log makes every CDL hook a no-op, so the
-    /// golden path is byte-identical. Excluded from save-state (live UI state).
-    /// Bank-aware code/data log: physical-offset flag buffer (R=1/W=2/X=4),
-    /// sized to the machine (ROM|VRAM|SRAM|WRAM|tail — see `cdl_layout`), or
-    /// `None` when off. Debugger-only; `None` on every golden/test path.
+    /// FCEUX-style bank-aware code/data log: physical-offset flag buffer
+    /// (R=1/W=2/X=4), sized to the machine (ROM|VRAM|SRAM|WRAM|tail — see
+    /// `cdl_layout`), or `None` when off. A `None` log makes every CDL hook a
+    /// no-op, so the golden path is byte-identical. Excluded from save-state
+    /// (live UI state).
     cdl: Option<Box<[u8]>>,
     /// Profiler break mode: halt the free run on each address's first execution.
     prof_break: bool,
