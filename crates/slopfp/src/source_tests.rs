@@ -77,13 +77,27 @@ fn broken_symlink_listed_not_fatal() {
 }
 
 #[test]
-fn home_from_env() {
+fn home_reads_the_platform_home_var() {
+    // ponytail: edition-2024's `forbid(unsafe_code)` bans `std::env::set_var`
+    // (now unsafe), so we can't feed `home()` a known value — instead pin its
+    // contract against the ambient env with the var NAME hardcoded as the spec.
+    // This is not a pure mirror: a regression that read the wrong variable, or
+    // returned `None`/a relative path when the var is set, fails here.
     #[cfg(windows)]
-    let expected = std::env::var_os("USERPROFILE").map(PathBuf::from);
+    let name = "USERPROFILE";
     #[cfg(not(windows))]
-    let expected = std::env::var_os("HOME").map(PathBuf::from);
+    let name = "HOME";
 
-    assert_eq!(home(), expected);
+    match std::env::var_os(name) {
+        Some(v) => {
+            let h = home().expect("home() is Some when the platform var is set");
+            assert_eq!(h, PathBuf::from(&v), "home() is exactly ${name}");
+            assert!(h.is_absolute(), "a real home path is absolute: {h:?}");
+        }
+        None => assert!(home().is_none(), "home() is None when ${name} is unset"),
+    }
+    // Pure function of the env: repeated calls agree (no hidden state).
+    assert_eq!(home(), home());
 }
 
 #[cfg(unix)]

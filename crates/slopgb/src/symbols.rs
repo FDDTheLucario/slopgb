@@ -59,7 +59,18 @@ impl SymbolTable {
         self.syms.is_empty()
     }
 
-    /// The name of a symbol at exactly `addr`, if any.
+    // ponytail: the lookups below are bank-agnostic — `Symbol.bank` is parsed
+    // and stored but never consulted. Two symbols sharing a 0x4000-0x7FFF
+    // address in different ROM banks therefore collide and an arbitrary one is
+    // returned (`name_at`'s binary_search picks any equal-address match;
+    // `nearest_before` the sorted-last). Fine today: every caller
+    // (debugger/mem-viewer/mcp) looks up by bare address with no active bank in
+    // hand. Upgrade path = thread the active ROM bank through those call sites
+    // and add a `name_at(bank, addr)` that prefers the matching-bank symbol.
+
+    /// The name of a symbol at exactly `addr`, if any. Bank-agnostic (see the
+    /// ceiling note above): on a same-address multi-bank collision, an arbitrary
+    /// one is returned.
     #[must_use]
     pub fn name_at(&self, addr: u16) -> Option<&str> {
         let i = self.syms.binary_search_by_key(&addr, |s| s.addr).ok()?;

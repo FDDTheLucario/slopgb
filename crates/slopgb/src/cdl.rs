@@ -107,6 +107,23 @@ mod tests {
     }
 
     #[test]
+    fn rle_decode_drops_trailing_partial_triple() {
+        // Two runs encode to two 3-byte triples; lopping off the last byte
+        // leaves the second triple incomplete. The `i + 3 <= len` guard drops
+        // that partial triple (no panic) and the first run still decodes — the
+        // documented truncation tolerance.
+        let data = [0xAAu8, 0xAA, 0xBB, 0xBB, 0xBB];
+        let enc = rle_encode(&data);
+        assert_eq!(enc.len(), 6, "two runs -> two 3-byte triples");
+        let dec = rle_decode(&enc[..enc.len() - 1]);
+        assert_eq!(
+            dec,
+            vec![0xAA, 0xAA],
+            "partial triple dropped, first run kept"
+        );
+    }
+
+    #[test]
     fn rle_decode_caps_hostile_output() {
         // Each triple claims count=0xFFFF; ~100k of them would resize to ~6.5 GB
         // without the cap. The decode must stay bounded (no OOM) and short

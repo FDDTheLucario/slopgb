@@ -47,6 +47,29 @@ fn lookups_find_exact_nearest_and_by_name() {
 }
 
 #[test]
+fn same_address_different_bank_symbols_collide_bank_is_ignored() {
+    // Two symbols share 0x4000 in different ROM banks. Both parse (no dedup),
+    // but the lookups ignore `Symbol.bank` (see the ceiling note on the impl),
+    // so an arbitrary same-address symbol is returned. This pins that CURRENT
+    // (documented-limitation) behavior — flip it if the lookups ever go
+    // bank-aware.
+    let t = SymbolTable::parse("01:4000 Bank1Fn\n02:4000 Bank2Fn");
+    assert_eq!(t.len(), 2, "both same-address symbols stored, not deduped");
+    // A same-address symbol comes back regardless of bank; which one is not
+    // guaranteed (binary_search may return any equal-key index).
+    let got = t
+        .name_at(0x4000)
+        .expect("some symbol at the shared address");
+    assert!(
+        got == "Bank1Fn" || got == "Bank2Fn",
+        "bank ignored: a same-address symbol is returned, got {got:?}"
+    );
+    // nearest_before is deterministic: stable sort keeps input order for equal
+    // addresses, and it takes the sorted-last → the bank-02 entry.
+    assert_eq!(t.nearest_before(0x4000), Some(("Bank2Fn", 0x4000)));
+}
+
+#[test]
 fn parse_sorts_out_of_order_input() {
     let t = SymbolTable::parse("00:4030 End\n00:4000 Reset\n00:4010 Loop");
     // Regardless of file order, addresses resolve correctly.

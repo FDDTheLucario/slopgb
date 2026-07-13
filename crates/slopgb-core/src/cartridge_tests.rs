@@ -958,6 +958,13 @@ fn mbc5_battery_save() {
     c.write_ram(0xA000, 0x42);
     let save = c.save_data().unwrap();
     assert_eq!(save.len(), 0x8000);
+    // Content round-trip: the byte we wrote must actually appear in the save
+    // image (RAM bank 0 selected at reset → offset 0), so a right-sized but
+    // zeroed buffer would fail rather than pass on length alone.
+    assert_eq!(
+        save[0], 0x42,
+        "written RAM byte survives into the save image"
+    );
     assert!(cart(0x19, 4, 0).save_data().is_none());
     assert!(cart(0x1C, 4, 0).save_data().is_none());
     assert!(cart(0x1B, 4, 3).save_data().is_some());

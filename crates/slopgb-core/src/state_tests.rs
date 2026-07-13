@@ -47,13 +47,19 @@ fn reading_past_the_end_is_truncated_not_a_panic() {
 
 #[test]
 fn state_error_displays() {
-    // Each variant has a human message (shown by the UI on a failed load).
-    for e in [
-        StateError::Truncated,
-        StateError::BadMagic,
-        StateError::BadVersion,
-        StateError::RomMismatch,
-    ] {
-        assert!(!e.to_string().is_empty());
-    }
+    // Pin the exact human message per variant (shown by the UI on a failed
+    // load) so a swapped or garbled string is caught, not just an empty one.
+    assert_eq!(
+        StateError::Truncated.to_string(),
+        "save state is truncated or corrupt"
+    );
+    assert_eq!(StateError::BadMagic.to_string(), "not a slopgb save state");
+    assert_eq!(
+        StateError::BadVersion.to_string(),
+        "unsupported save-state version"
+    );
+    assert_eq!(
+        StateError::RomMismatch.to_string(),
+        "save state is for a different ROM"
+    );
 }

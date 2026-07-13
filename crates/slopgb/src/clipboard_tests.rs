@@ -9,11 +9,17 @@ fn candidates_are_the_three_clipboard_tools_in_priority_order() {
     assert_eq!(c[2], ("xsel", &["-ib"][..]));
 }
 
+// Exercise the real `try_copy` logic (write to the child's stdin, require a
+// clean exit) against STUB commands, so the test never spawns a real clipboard
+// tool or touches the developer's clipboard.
+#[cfg(unix)]
 #[test]
-fn copy_never_panics_and_returns_a_bool() {
-    // On a headless CI host none of the tools exist → false; on a desktop one
-    // may succeed → true. Either way it must not panic (every spawn/IO error
-    // falls through, never unwraps).
-    let _ = copy("slopgb clipboard test");
-    let _ = copy(""); // empty text is also fine
+fn try_copy_needs_a_written_stdin_and_a_clean_exit() {
+    // `cat` drains stdin and exits 0 → the write-succeeded + exited-cleanly path.
+    assert!(try_copy("cat", &[], "slopgb clipboard payload"));
+    assert!(try_copy("cat", &[], ""), "empty text still succeeds");
+    // `false` ignores stdin and exits nonzero → the clean-exit check fails.
+    assert!(!try_copy("false", &[], "anything"));
+    // A tool that isn't installed can't spawn → falls through to false.
+    assert!(!try_copy("slopgb-no-such-clipboard-tool", &[], "x"));
 }

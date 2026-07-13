@@ -225,3 +225,78 @@ fn every_opcode_decodes_without_panic() {
         assert_ne!(insn.text, "undefined opcode");
     }
 }
+
+/// Expected M-cycles per base opcode — the **not-taken** count for conditional
+/// branches, which is exactly what the disassembler reports (`Insn::cycles`).
+/// Transcribed from the gbctr instruction tables; this is the same source as
+/// the independent `base_cycles` cross-check in `cpu/execute_tests.rs` (a
+/// sibling `#[cfg(test)]` module, so not importable here), with the not-taken
+/// branch baked in.
+fn expected_cycles(op: u8) -> u8 {
+    match op {
+        0x01 | 0x11 | 0x21 | 0x31 => 3,
+        0x02 | 0x12 | 0x22 | 0x32 | 0x0A | 0x1A | 0x2A | 0x3A => 2,
+        0x03 | 0x13 | 0x23 | 0x33 | 0x0B | 0x1B | 0x2B | 0x3B => 2,
+        0x34..=0x36 => 3,
+        0x06 | 0x0E | 0x16 | 0x1E | 0x26 | 0x2E | 0x3E => 2,
+        0x08 => 5,
+        0x09 | 0x19 | 0x29 | 0x39 => 2,
+        0x18 => 3,
+        0x20 | 0x28 | 0x30 | 0x38 => 2, // jr cc, not taken
+        0x76 => 1,                      // halt
+        0x40..=0x7F => {
+            if (op >> 3) & 7 == 6 || op & 7 == 6 {
+                2
+            } else {
+                1
+            }
+        }
+        0x80..=0xBF => {
+            if op & 7 == 6 {
+                2
+            } else {
+                1
+            }
+        }
+        0xC0 | 0xC8 | 0xD0 | 0xD8 => 2, // ret cc, not taken
+        0xC1 | 0xD1 | 0xE1 | 0xF1 => 3,
+        0xC2 | 0xCA | 0xD2 | 0xDA => 3, // jp cc, not taken
+        0xC3 => 4,
+        0xC4 | 0xCC | 0xD4 | 0xDC => 3, // call cc, not taken
+        0xC5 | 0xD5 | 0xE5 | 0xF5 => 4,
+        0xC6 | 0xCE | 0xD6 | 0xDE | 0xE6 | 0xEE | 0xF6 | 0xFE => 2,
+        0xC7 | 0xCF | 0xD7 | 0xDF | 0xE7 | 0xEF | 0xF7 | 0xFF => 4,
+        0xC9 | 0xD9 => 4,
+        0xCD => 6,
+        0xE0 | 0xF0 => 3,
+        0xE2 | 0xF2 => 2,
+        0xE8 => 4,
+        0xE9 => 1,
+        0xEA | 0xFA => 4,
+        0xF8 => 3,
+        0xF9 => 2,
+        _ => 1, // 1-cycle ops + stop; illegal opcodes are skipped by the caller
+    }
+}
+
+#[test]
+fn cycle_column_matches_gbctr_for_every_legal_opcode() {
+    // Illegal/undefined opcodes render as "db $xx" with 0 cycles (no meaningful
+    // table entry), so skip them — same set as `every_opcode_decodes_...`.
+    const ILLEGAL: [u8; 11] = [
+        0xD3, 0xDB, 0xDD, 0xE3, 0xE4, 0xEB, 0xEC, 0xED, 0xF4, 0xFC, 0xFD,
+    ];
+    for op in 0u16..=0xFF {
+        let op = op as u8;
+        if op == 0xCB || ILLEGAL.contains(&op) {
+            continue;
+        }
+        let got = decode(&[op, 0x00, 0x00], 0);
+        assert_eq!(
+            got.cycles,
+            expected_cycles(op),
+            "cycles for {op:02X} ({})",
+            got.text
+        );
+    }
+}
