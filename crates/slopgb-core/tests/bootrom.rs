@@ -54,12 +54,14 @@ fn dmg_boot_rom() -> Option<Vec<u8>> {
 #[test]
 fn dmg_boot_rom_converges_to_post_boot() {
     let Some(boot) = dmg_boot_rom() else {
-        // Like the mooneye/gbtr harness: print a skip notice, or panic under
-        // SLOPGB_REQUIRE_ROMS=1 so CI can enforce this oracle when it provides
-        // the (copyrighted, un-vendored) boot ROM.
-        common::skip_or_fail(
-            "dmg_boot_rom_converges_to_post_boot",
-            "bootroms/dmg_boot.bin not present",
+        // Skip UNCONDITIONALLY when absent. The DMG boot ROM is copyrighted +
+        // un-vendored — `test-roms/download.sh` never fetches it, so it is
+        // always absent in CI. Do NOT use `skip_or_fail`: `SLOPGB_REQUIRE_ROMS`
+        // gates the DOWNLOADABLE mooneye/gbtr bundles (a missing bundle in CI is
+        // a misconfig to fail loudly), not this developer-supplied oracle.
+        println!(
+            "skip: dmg_boot_rom_converges_to_post_boot — bootroms/dmg_boot.bin not present \
+             (copyrighted, un-vendored)"
         );
         return;
     };
