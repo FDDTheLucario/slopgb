@@ -444,6 +444,12 @@ impl App {
         if let Some(pipe) = &mut self.audio {
             pipe.set_volume(s.volume, s.mono);
         }
+        // Power-on RAM init (bgb's UninitedWRAM): store it for the next reset/
+        // reload — power-on state, so it doesn't scramble the running machine.
+        self.session.set_ram_init(crate::cli::effective_ram_init(
+            self.opts.ram_init,
+            s.uninited_wram,
+        ));
         // Switch the emulated system FIRST: `set_model` rebuilds the machine from
         // the ROM, which resets the PPU palette to the power-on default — so the
         // DMG palette must be (re)applied to the (possibly fresh) machine after.

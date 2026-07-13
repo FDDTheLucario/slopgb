@@ -721,6 +721,20 @@ fn allow_opposing_defaults_off_toggles_and_resets() {
 }
 
 #[test]
+fn uninited_ram_checkbox_toggles_the_setting() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::System;
+    assert!(!st.working.uninited_wram, "default off");
+    let content = OptionsState::content_rect(dialog());
+    let cb = controls(OptionsTab::System, &st.working, content)
+        .into_iter()
+        .find(|c| matches!(&c.kind, super::tabs::Kind::Check { label, .. } if label.contains("uninitialized RAM")))
+        .expect("uninitialized RAM checkbox present on the System tab");
+    st.on_click(cb.rect.x + 2, cb.rect.y + 2, BOUNDS);
+    assert!(st.working.uninited_wram, "clicking it turns it on");
+}
+
+#[test]
 fn super_gameboy_radio_selects_sgb() {
     // The Super Gameboy System radio is live (slopgb has a full SGB): clicking
     // it selects SGB.

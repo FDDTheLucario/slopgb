@@ -38,6 +38,9 @@ pub(crate) enum Field {
     ShowFramerate,
     FreezeRecent,
     PauseOnFocusLoss,
+    /// System → "uninitialized RAM at power-on" (bgb's `UninitedWRAM`): power on
+    /// with seeded-random garbage RAM. Takes effect on the next reset/load.
+    UninitedWram,
     Model(ModelChoice),
     Volume,
     /// Fast-forward speed slider (maps the click fraction to 1..=`FF_SPEED_MAX`).
@@ -267,6 +270,7 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         Field::ShowFramerate => s.show_framerate = !s.show_framerate,
         Field::FreezeRecent => s.freeze_recent = !s.freeze_recent,
         Field::PauseOnFocusLoss => s.pause_on_focus_loss = !s.pause_on_focus_loss,
+        Field::UninitedWram => s.uninited_wram = !s.uninited_wram,
         Field::Model(m) => s.model = m,
         Field::Volume => s.volume = slider_frac(ct.rect, px),
         // 1..=FF_SPEED_MAX mapped from the click fraction along the track.
@@ -297,7 +301,10 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
     let d = Settings::default();
     match tab {
         OptionsTab::Graphics => s.stretch = d.stretch,
-        OptionsTab::System => s.model = d.model,
+        OptionsTab::System => {
+            s.model = d.model;
+            s.uninited_wram = d.uninited_wram;
+        }
         OptionsTab::Debug => {
             // The live Debug fields; lowercase_disasm is inert (fixed).
             s.lowercase_hex = d.lowercase_hex;
@@ -437,6 +444,15 @@ fn system(s: &Settings, content: Rect) -> Vec<Ctrl> {
         v.push(Ctrl::inert(rc(l.at(), label), chk(label, false)));
         l.row();
     }
+    // Live: bgb's `UninitedWRAM` (an ini-only key in bgb; surfaced here as a
+    // checkbox). Power on with seeded-random garbage RAM; applied on next reset.
+    let uw = "uninitialized RAM at power-on";
+    v.push(Ctrl::live(
+        rc(l.at(), uw),
+        chk(uw, s.uninited_wram),
+        Field::UninitedWram,
+    ));
+    l.row();
     // --- Boot ROM paths (right column; bgb's System tab, options-system.png) ---
     // Three labeled path fields each with a "..." browse button, then a live
     // "bootroms enabled" checkbox. The path box shows the configured path; the

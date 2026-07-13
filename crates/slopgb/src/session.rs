@@ -135,6 +135,13 @@ impl Session {
         })
     }
 
+    /// Update the power-on RAM init used by the next `reset`/`set_model` rebuild
+    /// (Options → System → "uninitialized RAM at power-on"). Power-on state, so
+    /// it does not touch the currently running machine's RAM.
+    pub(crate) fn set_ram_init(&mut self, ram_init: Option<RamInit>) {
+        self.ram_init = ram_init;
+    }
+
     /// Install the optional user-supplied SGB BIOS (`--sgb-bios`) and keep it so
     /// a later `reset`/`set_model` re-applies it. A no-op off SGB. The border
     /// and title palette are not extracted (HLE) — see `GameBoy::load_sgb_bios`.
