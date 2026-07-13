@@ -211,7 +211,7 @@ fn screencap_returns_a_png_of_the_screen() {
     let gb = GameBoy::new(Model::Dmg, rom_at_0100(&[0x00])).unwrap();
     let mut bps = Breakpoints::default();
     let syms = SymbolTable::default();
-    match dispatch(&Call::Screencap, &gb, &mut bps, &syms).unwrap() {
+    match dispatch(&Call::Screencap { scale: 1 }, &gb, &mut bps, &syms).unwrap() {
         ToolResult::Image(png) => {
             assert_eq!(&png[..8], &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]);
             // IHDR width/height = 160x144 (SCREEN_W x SCREEN_H), big-endian.
@@ -219,6 +219,29 @@ fn screencap_returns_a_png_of_the_screen() {
         }
         ToolResult::Text(_) => panic!("expected an image"),
     }
+}
+
+#[test]
+fn screencap_scale_magnifies_the_png_dimensions() {
+    let gb = GameBoy::new(Model::Dmg, rom_at_0100(&[0x00])).unwrap();
+    let mut bps = Breakpoints::default();
+    let syms = SymbolTable::default();
+    // 3x → 480x432 in the IHDR (160*3, 144*3).
+    match dispatch(&Call::Screencap { scale: 3 }, &gb, &mut bps, &syms).unwrap() {
+        ToolResult::Image(png) => assert_eq!(&png[16..24], &[0, 0, 1, 224, 0, 0, 1, 176]),
+        ToolResult::Text(_) => panic!("expected an image"),
+    }
+}
+
+#[test]
+fn parse_scale_accepts_suffix_and_bare_and_rejects_others() {
+    assert_eq!(parse_scale(None), Ok(1)); // absent → native
+    assert_eq!(parse_scale(Some("")), Ok(1));
+    assert_eq!(parse_scale(Some("4x")), Ok(4));
+    assert_eq!(parse_scale(Some("4")), Ok(4)); // bare digit
+    assert_eq!(parse_scale(Some(" 6X ")), Ok(6)); // trimmed, case-insensitive
+    assert!(parse_scale(Some("7x")).is_err()); // out of 2..6
+    assert!(parse_scale(Some("big")).is_err());
 }
 
 #[test]

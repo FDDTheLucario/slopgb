@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use super::Job;
 use super::json::Json;
-use super::tools::{Call, ToolResult};
+use super::tools::{Call, ToolResult, parse_scale};
 
 /// The MCP protocol revision we advertise if the client doesn't ask for one.
 const PROTOCOL_VERSION: &str = "2024-11-05";
@@ -410,6 +410,8 @@ fn build_call(name: &str, args: Option<&Json>) -> Result<Call, String> {
             .map(str::to_owned)
             .ok_or_else(|| format!("tool '{name}' needs a string argument '{k}'"))
     };
+    // The two image tools take an optional magnification (absent → native 1x).
+    let scale = parse_scale(args.and_then(|a| a.get("scale")).and_then(Json::as_str));
     match name {
         "disassemble" => Ok(Call::Disassemble {
             from: arg("from")?,
@@ -424,8 +426,11 @@ fn build_call(name: &str, args: Option<&Json>) -> Result<Call, String> {
             to: arg("to")?,
         }),
         "cdl-ranges" => Ok(Call::CdlRanges),
-        "vram" => Ok(Call::Vram { view: arg("view")? }),
-        "screencap" => Ok(Call::Screencap),
+        "vram" => Ok(Call::Vram {
+            view: arg("view")?,
+            scale: scale?,
+        }),
+        "screencap" => Ok(Call::Screencap { scale: scale? }),
         "breakpoint" => Ok(Call::Breakpoint {
             addr: arg("address")?,
         }),
@@ -470,23 +475,27 @@ fn rpc_error(id: &Json, code: i64, message: &str) -> Json {
     ])
 }
 
-/// A `{type:object, properties, required}` input schema for one tool.
-fn schema(props: &[(&str, &str)]) -> Json {
-    let properties = Json::Obj(
-        props
-            .iter()
-            .map(|(k, desc)| {
-                (
-                    (*k).to_owned(),
-                    Json::obj([
-                        ("type", Json::str("string")),
-                        ("description", Json::str(*desc)),
-                    ]),
-                )
-            })
-            .collect(),
-    );
-    let required = Json::Arr(props.iter().map(|(k, _)| Json::str(*k)).collect());
+/// The optional magnification prop shared by the two image tools (`vram`,
+/// `screencap`) — a nearest-neighbor upscale so a model can read the pixel art.
+const SCALE_PROP: (&str, &str) = (
+    "scale",
+    "optional PNG magnification: 2x, 3x, 4x, 5x, or 6x (omit for native size)",
+);
+
+/// A `{type:object, properties, required}` input schema. Every `required` prop is
+/// also a property; `optional` props are properties but omitted from `required`.
+fn schema_of(required: &[(&str, &str)], optional: &[(&str, &str)]) -> Json {
+    let prop = |(k, desc): &(&str, &str)| {
+        (
+            (*k).to_owned(),
+            Json::obj([
+                ("type", Json::str("string")),
+                ("description", Json::str(*desc)),
+            ]),
+        )
+    };
+    let properties = Json::Obj(required.iter().chain(optional).map(prop).collect());
+    let required = Json::Arr(required.iter().map(|(k, _)| Json::str(*k)).collect());
     Json::obj([
         ("type", Json::str("object")),
         ("properties", properties),
@@ -495,10 +504,15 @@ fn schema(props: &[(&str, &str)]) -> Json {
 }
 
 fn tool(name: &str, desc: &str, props: &[(&str, &str)]) -> Json {
+    tool_opt(name, desc, props, &[])
+}
+
+/// Like [`tool`] but with `optional` (not-`required`) properties too.
+fn tool_opt(name: &str, desc: &str, required: &[(&str, &str)], optional: &[(&str, &str)]) -> Json {
     Json::obj([
         ("name", Json::str(name)),
         ("description", Json::str(desc)),
-        ("inputSchema", schema(props)),
+        ("inputSchema", schema_of(required, optional)),
     ])
 }
 
@@ -526,15 +540,17 @@ fn tool_defs() -> Json {
              so far (non-`.`), one `AAAA-AAAA` / `BB:AAAA-BB:AAAA` range per line.",
             &[],
         ),
-        tool(
+        tool_opt(
             "vram",
             "Capture a VRAM view as a PNG.",
             &[("view", "one of: bg, win, tile0, tile1, oam, palette")],
+            &[SCALE_PROP],
         ),
-        tool(
+        tool_opt(
             "screencap",
             "Capture the current Game Boy (Color) screen (160x144) as a PNG.",
             &[],
+            &[SCALE_PROP],
         ),
         tool(
             "breakpoint",

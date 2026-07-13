@@ -25,11 +25,18 @@ The server binds `127.0.0.1` only (never `0.0.0.0`) — localhost, not the netwo
 | `peek` | `from`, `to` | 16 hex bytes/row, `BB:AAAA<tab>…` |
 | `cdl` | `from`, `to` | like `peek`, each byte → an `r`/`w`/`x` access word or `.` |
 | `cdl-ranges` | — | the continuous address ranges the CDL has logged (non-`.`), one `AAAA-AAAA` / `BB:AAAA-BB:AAAA` per line; empty when off / nothing logged |
-| `vram` | `view` (`bg`\|`win`\|`tile0`\|`tile1`\|`oam`\|`palette`) | a PNG (`image/png` content); `bg`/`win` game-paletted, Tiles grey-ramp |
-| `screencap` | — | the current 160×144 screen (`gb.frame()`) as a PNG — cross-reference against `vram *` |
+| `vram` | `view` (`bg`\|`win`\|`tile0`\|`tile1`\|`oam`\|`palette`), optional `scale` | a PNG (`image/png` content); `bg`/`win` game-paletted, Tiles grey-ramp |
+| `screencap` | optional `scale` | the current 160×144 screen (`gb.frame()`) as a PNG — cross-reference against `vram *` |
 | `breakpoint` | `address` | sets a PC breakpoint (the only mutating tool) |
 | `registers` | — | `af=… bc=… … lcdc=… stat=… ly=… cnt=… ie=… if=… ime=… ima=… spd=… rom=… ram=… wave=…` |
 | `expr` | `expression` | evaluates a bgb-style debugger expression (hex default, register names, `[addr]`) |
+
+### Image scale
+
+`vram` and `screencap` take an optional `scale` (`2x`–`6x`, or a bare `2`–`6`);
+omit it for native size. It nearest-neighbor magnifies the PNG so a model that
+struggles with 160×144 pixel art can read it — `screencap` `3x` → 480×432. Only
+the two image tools read it; parsing lives in `tools::parse_scale`.
 
 ### Address forms
 

@@ -27,8 +27,8 @@ pub enum Call {
     Peek { from: String, to: String },
     Cdl { from: String, to: String },
     CdlRanges,
-    Vram { view: String },
-    Screencap,
+    Vram { view: String, scale: u32 },
+    Screencap { scale: u32 },
     Breakpoint { addr: String },
     Registers,
     Expr { expr: String },
@@ -61,14 +61,17 @@ pub fn dispatch(
             })))
         }
         Call::CdlRanges => Ok(ToolResult::Text(cdl_ranges(gb))),
-        Call::Vram { view } => {
+        Call::Vram { view, scale } => {
             let bmp = vram::capture(gb, view)?;
-            Ok(ToolResult::Image(png::encode(&bmp.px, bmp.w, bmp.h)))
+            Ok(ToolResult::Image(encode_scaled(
+                &bmp.px, bmp.w, bmp.h, *scale,
+            )))
         }
-        Call::Screencap => Ok(ToolResult::Image(png::encode(
+        Call::Screencap { scale } => Ok(ToolResult::Image(encode_scaled(
             gb.frame(),
             slopgb_core::SCREEN_W,
             slopgb_core::SCREEN_H,
+            *scale,
         ))),
         Call::Breakpoint { addr } => {
             let a = addr::parse_one(addr)?;
@@ -81,6 +84,41 @@ pub fn dispatch(
         Call::Registers => Ok(ToolResult::Text(registers(gb))),
         Call::Expr { expr } => Ok(ToolResult::Text(expr_eval(gb, expr))),
     }
+}
+
+/// Parse the optional magnification argument the two image tools accept. Absent
+/// or blank → `1` (native size). Otherwise `2`–`6`, written bare (`4`) or with
+/// the advertised `x` suffix (`4x`); anything else is an error the agent sees.
+pub fn parse_scale(s: Option<&str>) -> Result<u32, String> {
+    let s = s.map(str::trim).unwrap_or("");
+    if s.is_empty() {
+        return Ok(1);
+    }
+    let digits = s.strip_suffix(|c: char| c == 'x' || c == 'X').unwrap_or(s);
+    match digits.parse::<u32>() {
+        Ok(n @ 1..=6) => Ok(n),
+        _ => Err(format!(
+            "scale must be one of 2x, 3x, 4x, 5x, 6x (got {s:?})"
+        )),
+    }
+}
+
+/// Encode `px` (XRGB8888, `w×h`) as a PNG, nearest-neighbor magnified by `scale`
+/// (`1` = native). Pixel-art screens are tiny, so integer upscaling is enough for
+/// a model that struggles to read them at native size.
+fn encode_scaled(px: &[u32], w: usize, h: usize, scale: u32) -> Vec<u8> {
+    if scale <= 1 {
+        return png::encode(px, w, h);
+    }
+    let f = scale as usize;
+    let (nw, nh) = (w * f, h * f);
+    let mut out = vec![0u32; nw * nh];
+    for y in 0..nh {
+        for x in 0..nw {
+            out[y * nw + x] = px.get((y / f) * w + (x / f)).copied().unwrap_or(0);
+        }
+    }
+    png::encode(&out, nw, nh)
 }
 
 /// Disassemble `[from, to]`, one instruction per line:
