@@ -172,7 +172,7 @@ pub(crate) fn parse_ram_init(s: &str) -> Result<RamInit, String> {
         "random" => {
             let seed = match arg {
                 Some(v) => {
-                    parse_u64(v).map_err(|_| format!("invalid --ram-init random seed '{v}'"))?
+                    parse_u64(v).ok_or_else(|| format!("invalid --ram-init random seed '{v}'"))?
                 }
                 None => DEFAULT_RAM_SEED,
             };
@@ -184,21 +184,20 @@ pub(crate) fn parse_ram_init(s: &str) -> Result<RamInit, String> {
     }
 }
 
-/// Parse a byte written as `0xHH`, `HH` (hex) or plain decimal.
+/// Parse a byte written as `0xHH` or `HH` (two hex digits — the `fill:HH` form).
 fn parse_hex_u8(s: &str) -> Result<u8, String> {
-    let t = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X"));
-    let r = match t {
-        Some(h) => u8::from_str_radix(h, 16),
-        None => u8::from_str_radix(s, 16).or_else(|_| s.parse::<u8>()),
-    };
-    r.map_err(|_| format!("invalid byte '{s}' (expected 00-FF)"))
+    let h = s
+        .strip_prefix("0x")
+        .or_else(|| s.strip_prefix("0X"))
+        .unwrap_or(s);
+    u8::from_str_radix(h, 16).map_err(|_| format!("invalid byte '{s}' (expected hex 00-FF)"))
 }
 
-/// Parse a u64 seed as `0x…` hex or plain decimal.
-fn parse_u64(s: &str) -> Result<u64, ()> {
+/// Parse a u64 seed as `0x…` hex or plain decimal. `None` if malformed.
+fn parse_u64(s: &str) -> Option<u64> {
     match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        Some(h) => u64::from_str_radix(h, 16).map_err(|_| ()),
-        None => s.parse::<u64>().map_err(|_| ()),
+        Some(h) => u64::from_str_radix(h, 16).ok(),
+        None => s.parse::<u64>().ok(),
     }
 }
 
