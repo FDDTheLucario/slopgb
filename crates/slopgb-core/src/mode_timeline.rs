@@ -4,10 +4,11 @@
 //! "re-clock observable event commits to a [finer] grid").
 //!
 //! Companion to [`crate::cycle_clock`] (the CPU-side deferred-commit clock).
-//! **Inert / validated foundation, not yet wired** — the live PPU keeps its
-//! whole-dot `vis_mode` + joint `m0_src`/`m0_rise_dot` anchor (the half-dot
-//! grid at its current resolution); this module encodes the *next* resolution
-//! and is wired at port Stage S2+S3 (`docs/sameboy-port/PORT-PLAN.md`).
+//! **Test-only cross-check oracle** (`#[cfg(test)]`): the live PPU never
+//! consults it — it keeps its whole-dot `vis_mode` + joint
+//! `m0_src`/`m0_rise_dot` anchor — so this encodes the finer-resolution
+//! timeline purely as an independent check the unit tests compare against
+//! (see `ppu/mod_tests/stat.rs`).
 //!
 //! Scope: the **mode-2 / mode-3 / mode-0 spine of a visible line** (the kernel
 //! pair lives entirely in it). The line-start mode-0/1 window (dots 0-3), the

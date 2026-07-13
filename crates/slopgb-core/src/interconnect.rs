@@ -234,18 +234,11 @@ pub struct Interconnect {
     /// on mode 0), so it is free to recalibrate w.r.t. the rest of the triad.
     /// Inert on the eager clock (never set), so production is byte-identical.
     m0_halt_hold: u8,
-    /// The deferred-path timer/serial ack-squash deadline in CPU T (0 = no
-    /// window open).
-    /// SameBoy's dispatch-ack consumes a re-set of the acked source only up
-    /// to an exact T past the ack (`updateTimaIrq(cc + 2 + isCgb())` /
-    /// `updateSerial(cc + 3 + isCgb())` before `ackIrq`); the deferred
-    /// path's whole-M-cycle `ack_squash_ticks` window over-covers by up to
-    /// 3 T, swallowing the `tima/tc00_irq_late_retrigger_1` re-set SameBoy
-    /// delivers (reads E0, wants E4) while its `_2` sibling (inside the
-    /// true window) is rightly consumed. Set by `ack` on the tier2 path
-    /// alongside the production counters; consumed at the exact commit T in
-    /// `advance_machine_t`. Production (eager path) keeps the tick counters
-    /// — byte-identical OFF.
+    /// Now-inert deferred-clock scratch (the removed tier2 `advance_machine_t`
+    /// path): a timer/serial ack-squash deadline in CPU T that the eager clock
+    /// never sets or consumes — it keeps the whole-M-cycle `ack_squash_ticks`
+    /// window instead. Retained only for savestate layout (see
+    /// `interconnect/state.rs`).
     ack_squash_deadline_t: u64,
     /// Outstanding sub-M-cycle wake skew (T). Set to 2 by a
     /// mid-cycle (w2) halt wake: the dispatch + the first handler instruction
@@ -259,8 +252,8 @@ pub struct Interconnect {
     /// `hblank_ly_scx_timing-GS` (B=42): every later round's halt entry
     /// lands off-grid and the whole calibrated mask map mis-frames.
     wake_skew: u32,
-    /// The machine T the deferred advance is currently executing (set per-T by
-    /// `advance_machine_t`; only read by the mode-0 rise visibility deadline).
+    /// Now-inert deferred-clock scratch (the removed `advance_machine_t` path);
+    /// unused by the eager clock. Retained only for savestate layout.
     machine_now: u64,
     /// Request pending at write_deferred entry.
     vram_dma_req_pre: bool,

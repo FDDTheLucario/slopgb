@@ -5,9 +5,7 @@ use super::*;
 impl Interconnect {
     /// Consume this M-cycle's dispatch-ack timer/serial squash mask: the
     /// `ack_squash_mask & 0x0C` while the sync-ahead window is open (stepping
-    /// its countdown), else 0. Shared by the eager `tick_machine` (stores it
-    /// in a local) and the deferred `advance_machine_t` (stores it in
-    /// `deferred_squash`).
+    /// its countdown), else 0. Used by the eager `tick_machine`.
     fn take_ack_squash_tick_mask(&mut self) -> u8 {
         if self.ack_squash_ticks > 0 {
             self.ack_squash_ticks -= 1;
@@ -18,8 +16,7 @@ impl Interconnect {
     }
 
     /// Clear the per-M-cycle late-mask + accessibility/STAT edge stamps at the
-    /// M-cycle head. Shared by the eager `tick_machine` and the deferred
-    /// `advance_machine_t` phase-0 head.
+    /// M-cycle head. Used by the eager `tick_machine`.
     fn reset_mcycle_edges(&mut self) {
         self.if_stat_late = 0;
         self.m0_access_edge = None;

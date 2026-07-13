@@ -1,16 +1,13 @@
 //! Deferred-commit ("lazy-advance") CPU clock — the validated foundation for
 //! the SameBoy cycle-exact timing port.
 //!
-//! This module is wired into `Interconnect` as its CPU `clock`. It is
-//! the executable, unit-tested encoding of SameBoy 1.0.2's `pending_cycles`
-//! deferred-commit clock (`sm83_cpu.c`), the load-bearing primitive the floor
-//! lift depends on. Today the live core uses tick-then-access (a read samples
-//! peripheral state at the M-cycle's *trailing* edge, cc+4); this clock samples
-//! at the *leading* edge (cc+0) and defers the M-cycle's own 4 T-cycles, which
-//! is what lands a STAT/OAM/VRAM read on the correct side of a mode-3→mode-0
-//! boundary. The production eager clock reuses this park/flush bookkeeping
-//! (`read`/`write`/`internal`/`flush`) while sampling PPU state directly at the
-//! access (see `interconnect::Bus`).
+//! This module is the executable, unit-tested encoding of SameBoy 1.0.2's
+//! `pending_cycles` deferred-commit clock (`sm83_cpu.c`), the load-bearing
+//! primitive the timing port was built on. The production (eager) clock samples
+//! at the *leading* edge (cc+0) and defers the M-cycle's own 4 T-cycles — what
+//! lands a STAT/OAM/VRAM read on the correct side of a mode-3→mode-0 boundary —
+//! reusing this park/flush bookkeeping (`read`/`write`/`internal`/`flush`) while
+//! sampling PPU state directly at the access (see `interconnect::Bus`).
 //!
 //! Model (CPU T-cycles, 4 = one M-cycle, in both speeds — the double-speed
 //! factor is applied once, centrally, only to the PPU/APU domain, never

@@ -19,6 +19,10 @@ pub(crate) mod cycle_clock;
 pub mod debug;
 pub(crate) mod interconnect;
 pub(crate) mod joypad;
+// Test-only cross-check oracle (SameBoy's decoupled visible/interrupt-mode
+// timeline); the live PPU never consults it, so it is gated out of the shipped
+// core. See its module doc.
+#[cfg(test)]
 pub(crate) mod mode_timeline;
 pub(crate) mod model;
 pub(crate) mod ppu;
