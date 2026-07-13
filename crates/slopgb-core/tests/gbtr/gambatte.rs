@@ -537,7 +537,6 @@ const EXEMPT: &[&str] = &[
 mod eager_web;
 mod misc;
 mod oam_vram;
-mod stat_lyc;
 mod window;
 
 #[test]
@@ -571,23 +570,8 @@ fn gambatte_matrix() {
     harness::assert_against_baseline("gambatte", &results, &harness::parse_baseline(BASELINE_TXT));
 }
 
-/// Boot a gambatte or mealybug pixel-reference ROM flag-on (tier2 render
-/// reclock), render a frame, and assert it matches the sibling reference PNG via
-/// the suite's own comparator — the pin form of the `gambatte_pixel_probe`
-/// two-bin. Panics with the frame diff on mismatch (render-reclock pins).
-fn assert_pixel_leg_flagon(root: &Path, rel: &str, model: Model) {
-    assert_pixel_leg(
-        root,
-        rel,
-        model,
-        harness::boot_with_reclock,
-        "tier2 flag-on",
-    );
-}
-
-/// The eager-clock (`eager_value`) analogue of [`assert_pixel_leg_flagon`] — the
-/// pin form of the `SLOPGB_PROBE_EV` two-bin for the eager render-reclock rows
-/// re-hosted from the tier2 render laws onto the C3-flip target clock.
+/// The eager-clock (`eager_value`) pixel pin — the pin form of the
+/// `SLOPGB_PROBE_EV` two-bin for the eager render-reclock rows.
 fn assert_pixel_leg_eager(root: &Path, rel: &str, model: Model) {
     assert_pixel_leg(root, rel, model, harness::boot_eager, "eager");
 }

@@ -3,19 +3,15 @@
 use super::*;
 
 /// Post-C3-flip default guard: every production `GameBoy::new` must
-/// construct on the coherent EAGER-value clock — `leading_edge_reads` ON,
-/// `tier2_reclock` (the disproven read-deferred variant) still OFF. The
-/// eager-value flip is the shipped default; the deferred `tier2_reclock` must
-/// never be the default. `new_with_reclock` (the deferred path) stays
-/// test/probe-only. Needs no ROM bundle, always runs.
+/// construct on the coherent EAGER-value clock — `leading_edge_reads` ON.
+/// Needs no ROM bundle, always runs.
 #[test]
 fn production_new_is_c3_eager_default() {
     for model in [Model::Dmg, Model::Cgb, Model::Agb] {
         let gb = GameBoy::new(model, rom_with_cgb_flag(0x00)).unwrap();
-        assert_eq!(
+        assert!(
             gb.reclock_flags(),
-            (true, false),
-            "{model:?}: production GameBoy::new must be C3 eager (leading_edge ON, tier2 OFF)"
+            "{model:?}: production GameBoy::new must be C3 eager (leading_edge ON)"
         );
     }
 }

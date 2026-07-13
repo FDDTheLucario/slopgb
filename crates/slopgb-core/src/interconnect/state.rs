@@ -10,11 +10,11 @@
 //! into a machine already built with the same boot-ROM-or-not configuration),
 //! and the debugger-only fields (watchpoints, profiler, exception mask) —
 //! those are live UI state, left untouched by a load. Every other field,
-//! including the tier2-reclock-only scratch (`clock`, `leading_edge_reads`,
-//! `tier2_reclock`, `m0_halt_hold`, `ack_squash_deadline_t`, `wake_skew`,
-//! `machine_now`, `vram_dma_req_pre`, `stat_vis_from_t`, `halt_ly_phase`,
-//! `deferred_squash`), is serialized — production keeps these at their
-//! initial 0/false, so serializing them is harmless and guarantees no live
+//! including the now-inert deferred-clock scratch (`clock`, `leading_edge_reads`,
+//! `m0_halt_hold`, `ack_squash_deadline_t`, `wake_skew`, `machine_now`,
+//! `vram_dma_req_pre`, `stat_vis_from_t`, `halt_ly_phase`, `deferred_squash`),
+//! is serialized — production keeps these at their initial 0/false, so
+//! serializing them is harmless and guarantees no live
 //! field is silently dropped from a round-trip. Live-debugger/UI only, so
 //! golden-safe.
 
@@ -172,7 +172,6 @@ impl Interconnect {
         w.u64(self.cycles);
         self.clock.write_state(w);
         w.bool(self.leading_edge_reads);
-        w.bool(self.tier2_reclock);
         w.bool(self.double_speed);
         w.u8(self.dot_phase);
         w.bool(self.key1_armed);
@@ -261,7 +260,6 @@ impl Interconnect {
         self.cycles = r.u64()?;
         self.clock.read_state(r)?;
         self.leading_edge_reads = r.bool()?;
-        self.tier2_reclock = r.bool()?;
         self.double_speed = r.bool()?;
         self.dot_phase = r.u8()?;
         self.key1_armed = r.bool()?;

@@ -271,8 +271,9 @@ pub struct Ppu {
     frame_count: u64,
 
     /// The CPU has written an LCD register (FF40-FF4B) since power-on — the boot
-    /// hand-off PPU frame is no longer pristine. Gates the DMG boot-frame read
-    /// law ([`Self::boot_read`]): the `poweron_*` ROMs read the untouched boot
+    /// hand-off PPU frame is no longer pristine. (Inert deferred-clock scratch:
+    /// the DMG boot-frame read law it gated was removed with the deferred
+    /// clock.) The `poweron_*` ROMs read the untouched boot
     /// frame (pure NOP sled, no PPU write), while every other early reader
     /// configures the PPU first — `lcdon_to_*`/`oam_read`/`sprite`/`win` toggle
     /// the LCD (FF40), the gambatte kernel/halt STAT-ISR tests arm a mode
@@ -500,11 +501,11 @@ pub struct Ppu {
     /// The source of the STAT IRQ that set the
     /// currently-pending STAT bit was the mode-2 OAM line-start rise (`mfi==2`),
     /// not a mode-0/LYC rise. A sticky level updated on every STAT 0→1 edge in
-    /// [`Self::stat_update_halt_masks`]; the interconnect's `dispatch_retime`
-    /// reads it to apply the per-ISR deferred-read carry (the OAM-ISR handler's
-    /// reads land 1 M-cycle = 2 dots DS later than the mode-0-ISR's, decoupled
-    /// from the IF-delivery ack). Reached only under `tier2_reclock` (via
-    /// `dispatch_retime`); production (tier2 off) never reaches it.
+    /// [`Self::stat_update_halt_masks`]; the interconnect's `ack_impl` reads it
+    /// to arm the per-ISR read carry (the OAM-ISR handler's reads land 1
+    /// M-cycle = 2 dots DS later than the mode-0-ISR's, decoupled from the
+    /// IF-delivery ack). Consulted only under `eager_value`; production never
+    /// reaches it.
     stat_rise_oam: bool,
     /// The currently-pending STAT IRQ was the mode-0 HBlank rise
     /// (`mfi==0`). The mode-0 ISR read lands +2 dots early (vs the mode-2 +4),
@@ -512,7 +513,7 @@ pub struct Ppu {
     /// (one source per 0→1 edge); both false for a pure-LYC rise.
     stat_rise_m0: bool,
     /// Set by the interconnect's
-    /// `dispatch_retime` when it carried a STAT-ISR read (`carry_read`), so the
+    /// `ack_impl` when it carried a STAT-ISR read (`carry_read`), so the
     /// FIRST FF41 mode read of the handler — now landed at SameBoy's absolute
     /// cfl — resolves its verdict against SameBoy's bare exit `SBex` instead of
     /// slopgb's native mode (a full 3↔0 override, both directions). Cleared by
@@ -521,8 +522,8 @@ pub struct Ppu {
     /// non-carried polled/other-ISR reads too (dropping 50 SameBoy-passes whose
     /// native frame was already correct); gating the SBex override on
     /// `read_carried` confines it to exactly the reads the carry moved to
-    /// SameBoy's frame. Reached only under `tier2_reclock` (via
-    /// `dispatch_retime`); production (tier2 off) never reaches it.
+    /// SameBoy's frame. Consulted only under `eager_value`; production never
+    /// reaches it.
     read_carried: bool,
     /// Set by the interconnect's eager CGB halt wake (`halt_wake_mid_impl`) when
     /// the halt exits on the mode-0 STAT rise: the halt-woken IME=1 dispatch's
@@ -548,7 +549,7 @@ pub struct Ppu {
     /// scx_m3_extend — a live-`scx` closed form mis-frames the missed-hunt
     /// leg). Recorded on both fire paths (projection + the `advance_lx` pipe-
     /// end fallback); reset at line start, `m0_unflip`, and LCD transitions.
-    /// Only read under `tier2_reclock` → production byte-identical.
+    /// Only read under `eager_value` → production byte-identical.
     flip_dot: u16,
     /// The CPU-visible STAT mode→0 boundary back-dated to
     /// SameBoy's cycle-exact frame, **decoupled from the IRQ-dispatch flip**
@@ -577,7 +578,7 @@ pub struct Ppu {
     /// law), past the counter-pinned
     /// dispatch dot, while slopgb's window flip is flat at ~261. Set in
     /// `m0_flip_events` when the flip fires on a `win_active` line under
-    /// `tier2_reclock` (0 = no hold); consumed only by `vis_mode` — the IRQ
+    /// `eager_value` (0 = no hold); consumed only by `vis_mode` — the IRQ
     /// dispatch (`line_render_done`) is NOT moved.
     ///
     /// **Validated foundation, currently INERT** (like `cycle_clock`/
@@ -589,7 +590,7 @@ pub struct Ppu {
     /// it is the visible-mode half of the parallel window-length model
     /// (which must also replicate the WY-latch trigger to drive it).
     /// **Always 0 on
-    /// the flag-off path** (never set when `tier2_reclock` is false) →
+    /// the flag-off path** (never set when `eager_value` is false) →
     /// byte-identical in production. Reset at line start + on `m0_unflip`, like
     /// `vis_early`.
     vis_hold_until: u16,
@@ -639,15 +640,9 @@ pub struct Ppu {
     /// `stat_events_tick`. Off in production until the atomic flip;
     /// forwarded by [`Interconnect::set_leading_edge_reads`].
     leading_edge_reads: bool,
-    /// PPU-side copy of the interconnect's `tier2_reclock` flag (the −2
-    /// dispatch reclock). Gates the mode-0 IRQ dispatch move
-    /// (254→252) so the leading-edge-only specs (which set
-    /// `leading_edge_reads` but NOT this) keep the validated baseline frame.
-    /// Forwarded by [`Interconnect::set_tier2_reclock`].
-    tier2_reclock: bool,
     /// PPU-side copy of the interconnect's `eager_value` flag (the eager clock
-    /// plus tier2 read/render laws as cc+0 value peeks, dispatch staying cc+4).
-    /// Implies `leading_edge_reads` but NOT `tier2_reclock`. Off in production.
+    /// plus read/render laws as cc+0 value peeks, dispatch staying cc+4).
+    /// Implies `leading_edge_reads`. Off in production.
     /// Forwarded by [`Interconnect::set_eager_value`].
     eager_value: bool,
     /// The STAT IF bit handed out by the last tick came from the mode-0

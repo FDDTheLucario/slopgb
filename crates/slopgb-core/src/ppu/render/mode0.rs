@@ -122,107 +122,17 @@ impl Ppu {
         // m3stat). `bare_flip` is false on the glitch line, so it lands in the +4
         // arm. DS excluded (the DS read offset is 2, deferred). `leading_edge_reads`
         // is off in production, so `vis_early` is never set there (byte-identical).
-        // Re-derive the BARE-line `vis_early` lead for the −2
-        // dispatch reclock (the kernel separator). The Tier-1 lead was calibrated
-        // against the cc+4 dispatch (our dot 254): vis_early fires ~dot 251 so the
-        // kernel m2int read (cc+0 dot 248) sees mode 3 and m0int (dot 252) sees
-        // mode 0. The deferred Tier-2 frame samples those reads at dots
-        // 252 / 256, so the dot-251 vis_early makes m2int@252 read mode 0 (wrong,
-        // wants 3). Lowering the bare lead by 2 (`lead + 3` → `lead + 1`) fires
-        // vis_early 2 dots LATER, landing the visible mode→0 boundary in (252,
-        // 256] so m2int@252 reads mode 3 and m0int@256 reads mode 0. Sprite lines
-        // take the separate grid-snap below (their finer mode-3 geometry needs
-        // a per-config re-grid, not a uniform −2). Gated on `tier2_reclock`.
-        // Sprite-line visible mode→0 RE-GRID for the
-        // deferred Tier-2 frame. The `intr_2_mode0_timing_sprites` test resolves
-        // the mode-3 length to whole M-cycles (a NOP-count delay then an FF41
-        // poll): hardware buckets configs that share an `extra` to the same
-        // value (e.g. 10 sprites at X=0 and X=1 both extend by 16), but our
-        // `proj` formula tracks a finer per-X staircase (X=0→dispatch dot 318,
-        // X=1→317, …). At cc+4 the CPU read's own M-cycle quantization snaps that
-        // staircase back onto the right buckets, so production passes every
-        // config; at cc+0 the leading-edge read no longer hides the sub-M-cycle
-        // dispatch phase, so configs whose dispatch dot straddles a read-grid
-        // boundary mis-bucket (e.g. X=1's dot 317 reads mode 0 one poll early).
-        // Fix: on sprite lines (`has_sprites`, including OAM sprites pushed fully
-        // off-screen at X≥168 that take the bare `lead`), snap BOTH the dispatch
-        // and the coincident `vis_early` to the CPU read grid — the next dot
-        // ≡ 0 (mod 4), one dot below the read dots (≡ 1) — so all configs in a
-        // bucket land on the same grid dot and reproduce the cc+4 quantization.
-        // `early_lead = 0` makes `vis_early` coincide with the snapped dispatch
-        // (a negative sprite lead is structurally dead — the dispatch sets
-        // `m0_src` and early-returns). Bare lines keep `lead + 1` (the kernel /
-        // int_hblank −1 shift, no snap); window/glitch lines keep `lead + 2`.
-        // All gated on `tier2_reclock`; production (`!leading_edge_reads`) never
-        // sets `vis_early` and the snap is inert, so it is byte-identical OFF.
-        let has_sprites = r.n_sprites > 0;
-        // The tier2 `early_lead` case-tower is
-        // COLLAPSED to its two physical residues; everything else is 0 (the
-        // visible flip coincides with the dispatch, and the FF41 read's finer
-        // placement is the ONE half-dot comparison in `vis_exit_hd`):
-        //
-        // 1. The LCD-enable GLITCH line keeps +2 — the glitch frame's visible
-        //    mode→0 offset (452-dot line, dot-82 pipe); `lcdon_timing-GS`'s
-        //    post-glitch reads are calibrated against it.
-        // 2. The bare-line cc2 READ-GRID parity (+1 iff the dispatch dot lands
-        //    ≡ 1 mod 4 on a clean bare line): a leading-edge access in the
-        //    dispatch's own M-cycle observes the flip at the cc+2 phase, which
-        //    the whole-dot `line_render_done` misses only for the cc2 parity
-        //    (`m2int_scx3`/`nobg_scx7` m3stat_2). Its FF41 side is
-        //    subsumed by the carry law (`vis_exit_hd` arm 8 — the
-        //    m2-ISR +4 hd carry reproduces the same verdict); the
-        //    residue survives for the OAM/VRAM ACCESSIBILITY release + the
-        //    fallback reads the carry law doesn't cover (line 0, CGB
-        //    `wy_trig_sb`-bare). Scoped to clean bare lines — on a
-        //    late-window-DISABLE line the anticipation is an A/B swap that
-        //    drops the SameBoy-passing `_2` sibling (measured).
-        //
-        // The IRQ side (`mode_for_interrupt`/`prev_done`, reclock.rs) keys on
-        // `line_render_done`, never `vis_early` — the counter-pinned dispatch
-        // dot is untouched. `vis_early` is never set in production
-        // (`leading_edge_reads` off) → byte-identical OFF.
-        let early_lead = if self.tier2_reclock {
-            if self.glitch_line {
-                2
-            } else if bare_flip && !has_sprites {
-                let dispatch_dot = self.dot + proj.saturating_sub(lead);
-                let clean_bare =
-                    !self.wy_latch && self.wy2 != self.ly && !r.win_stalled && !r.win_aborted;
-                u16::from((dispatch_dot & 3) == 1 && clean_bare)
-            } else {
-                // Sprite lines (the grid-snap below) and window lines (their
-                // mode-3 extension is already in `proj`/`lead`) take 0.
-                0
-            }
-        } else if bare_flip {
-            3
-        } else {
-            4
-        };
-        // Single-speed ONLY (`!self.ds`). In DOUBLE speed the sprite-line FF41
-        // mode-bit read rides the production `stat_mode_edge` override
-        // (`interconnect/memory.rs`: a DS sprite m3→m0
-        // flip holds the FF41 bits at 3 for the read M-cycle), armed by the
-        // `m0_stat_flip` stamp that only `m0_flip_events` sets. Snapping the DS
-        // dispatch to the `% 4` grid pushed it past the pipe end, where
-        // `advance_lx`'s fallback flips `m0_src` first and `m0_flip_events`
-        // early-returns — so the stamp never armed and the deferred cc+0 read
-        // saw the already-flipped mode 0. Gating the snap to single speed lets DS
-        // sprite lines flip at the natural dot, arm the stamp, and the deferred
-        // read straddle the override (gambatte sprites `*_m3stat_ds_1` want the
-        // lagging 3). `vis_early` stays `!self.ds`-gated (it anticipates mode 0,
-        // the wrong direction for these reads). See
-        // `tier2_sprite_m3stat_ds_passes`.
-        let snap_ok = !(self.tier2_reclock && has_sprites && !self.ds) || self.dot % 4 == 0;
-        if self.leading_edge_reads
-            && !self.ds
-            && !self.vis_early
-            && proj <= lead + early_lead
-            && snap_ok
-        {
+        // `vis_early` anticipates the visible mode→0 flip on the eager
+        // leading-edge read; never set in production (`!leading_edge_reads`) →
+        // byte-identical OFF. The IRQ side (`mode_for_interrupt`/`prev_done`,
+        // reclock.rs) keys on `line_render_done`, never `vis_early`, so the
+        // counter-pinned dispatch dot is untouched. Bare-flip lines lead the
+        // dispatch by 3, others by 4; single-speed only (`!self.ds`).
+        let early_lead = if bare_flip { 3 } else { 4 };
+        if self.leading_edge_reads && !self.ds && !self.vis_early && proj <= lead + early_lead {
             self.vis_early = true;
         }
-        if proj <= lead && snap_ok {
+        if proj <= lead {
             self.m0_src = true;
             self.m0_rise_dot = true;
             self.line_render_done = true;
@@ -238,7 +148,7 @@ impl Ppu {
             // want=3 rows render bare via the WY-latch); it is the
             // visible-mode half of the parallel window-length model. See the
             // `vis_hold_until` field docs.
-            if (self.tier2_reclock || (self.eager_value && !self.ds)) && self.render.win_active {
+            if self.eager_value && !self.ds && self.render.win_active {
                 self.vis_hold_until = 263 + u16::from(self.scx & 7);
             }
             // The accessibility unblock (this `line_render_done` rise) is
@@ -262,7 +172,7 @@ impl Ppu {
             // `vramw_m3end_scx5_ds_{2,4}` write-end floors — the DS read grid is
             // its own reclock. Tier2 + bare lines + `!ds`; `bare_flip` is
             // false in production → byte-identical OFF.
-            let access_lead = if (self.tier2_reclock || self.eager_value) && !self.ds {
+            let access_lead = if self.eager_value && !self.ds {
                 -8i8
             } else {
                 0i8

@@ -34,7 +34,7 @@ impl Ppu {
         // only happens in double speed; the tier2 write-strobe stages 3
         // dots at either speed, so there the hint comes from the live
         // `ds` flag instead).
-        self.staged_ds = dots <= 1 || (self.tier2_reclock && self.ds);
+        self.staged_ds = dots <= 1;
         // HALFDOT Part A-render (eager): the write strobe advances per half-dot
         // under `eager_value` ([`Ppu::tick_half`]), so the staged commit debt is
         // measured in 8-MHz half-dots — double the whole-dot offset. A run of
@@ -213,10 +213,7 @@ impl Ppu {
                 // above — their tier2 pins are calibrated to the cc+0 control
                 // commit. Production (and non-render / glitch lines) set the
                 // view in lockstep — byte-identical OFF.
-                if (self.tier2_reclock || self.eager_value)
-                    && self.render.active
-                    && !self.glitch_line
-                {
+                if self.eager_value && self.render.active && !self.glitch_line {
                     self.render_lcdc_pending = Some((value, RENDER_LCDC_DELAY));
                 } else {
                     self.eff.render_lcdc = value;
@@ -240,7 +237,7 @@ impl Ppu {
                     // at the render frame (`m3_lcdc_win_en_change_multiple`: the
                     // eager clear ended it 2 dots early). Production / glitch lines
                     // (no `render_lcdc` defer) run it synchronously — byte-identical.
-                    if !(self.tier2_reclock || self.eager_value) || self.glitch_line {
+                    if !self.eager_value || self.glitch_line {
                         self.window_abort_render();
                     }
                 }
@@ -257,7 +254,7 @@ impl Ppu {
                 if old & LCDC_WIN_ENABLE == 0
                     && value & LCDC_WIN_ENABLE != 0
                     && self.render.active
-                    && (self.tier2_reclock || self.eager_value)
+                    && self.eager_value
                 {
                     self.render.win_reenable_dot = self.dot;
                     // A FIRST enable (window neither active nor aborted this
@@ -271,10 +268,7 @@ impl Ppu {
             0xFF43 => {
                 // Flag a mid-mode-3 SCX rewrite (`late_scx_*`); see
                 // `Render::scx_write_dot`.
-                if self.render.active
-                    && (self.tier2_reclock || self.eager_value)
-                    && (self.eff.scx & 7) != (value & 7)
-                {
+                if self.render.active && self.eager_value && (self.eff.scx & 7) != (value & 7) {
                     self.render.scx_write_dot = self.dot;
                 }
                 self.eff.scx = value;

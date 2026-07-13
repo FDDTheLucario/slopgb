@@ -62,7 +62,6 @@ impl Ppu {
             stat_update: crate::stat_update::StatUpdate::new(),
             lyc_interrupt_line: false,
             leading_edge_reads: false,
-            tier2_reclock: false,
             eager_value: false,
             m0_rise: false,
             m0_access_flip: None,
@@ -418,14 +417,8 @@ impl Ppu {
         self.leading_edge_reads = on;
     }
 
-    /// Forward the interconnect's `tier2_reclock` flag. Gates
-    /// the mode-0 IRQ dispatch move; implies `leading_edge_reads`.
-    pub(crate) fn set_tier2_reclock(&mut self, on: bool) {
-        self.tier2_reclock = on;
-    }
-
     /// Forward the interconnect's `eager_value` flag. Implies
-    /// `leading_edge_reads` (set on the same hook) but NOT `tier2_reclock`.
+    /// `leading_edge_reads` (set on the same hook).
     pub(crate) fn set_eager_value(&mut self, on: bool) {
         self.eager_value = on;
     }
@@ -461,7 +454,7 @@ impl Ppu {
         // first dot the compare holds on any visible line. See `wy_trig_sb`.
         // Recording widened to DMG (was CGB-only) for the DMG window
         // law port — the DMG arms in `read_laws.rs` read the same latches.
-        if self.tier2_reclock || self.eager_value {
+        if self.eager_value {
             if self.line == 0 && self.dot == 0 {
                 self.wy_trig_sb = false;
                 self.wy_trig_sb_raw = false;

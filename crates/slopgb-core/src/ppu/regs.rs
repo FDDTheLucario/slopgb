@@ -91,7 +91,7 @@ impl Ppu {
         // (`late_scx4`: SameBoy separates the legs by whether the SCX commit
         // lands before/after the fine-scroll comparator's first sample;
         // slopgb collapsed both legs onto the leading edge). Production
-        // (`!tier2_reclock`) is byte-identical.
+        // (`!eager_value`) is byte-identical.
         // The mode-3 render regs (SCY/SCX/BGP/OBP) survive the arch
         // write so they strobe-commit at the render frame instead of the
         // leading edge (see the dots calc in `cycle.rs::write_deferred`). LCDC
@@ -105,7 +105,7 @@ impl Ppu {
         // DMG eager path (debt 0) the stage drains inside `tick_machine`, so this
         // is false and the M-cycle-END commit still runs — byte-identical to the
         // pre-slice DMG eager behaviour.
-        let staged_pending = (self.tier2_reclock || self.eager_value)
+        let staged_pending = self.eager_value
             && matches!(addr, 0xFF42 | 0xFF43 | 0xFF47..=0xFF49 | 0xFF4B)
             && !self.glitch_line
             && self
@@ -117,30 +117,6 @@ impl Ppu {
                 self.staged = None;
             }
             self.commit_eff(addr, value);
-        }
-        // The glitch-line same-dot SCX-write hunt RE-OPEN: the
-        // LCD-enable glitch line's fine-scroll hunt closes at
-        // machine dot `83 + scx_init` on CGB, but a same-dot FF43 commit lands
-        // AFTER that dot's render tick — hardware's comparator (SameBoy
-        // `render_pixel_if_possible`, live per-dot compare) still honors the
-        // new value: the CGB sample deadline is `D(scx_init) = 83 + scx_init`
-        // inclusive (`ly0_late_scx7_m3stat_scx1_1` writes SCX=7 at dot 84 with
-        // scx_init=1 — hunt matched dot 84 — and must read mode 3 at 252, exit
-        // E(7)=257; `scx0_2` writes dot 84 with match dot 83, stays missed;
-        // `scx1_2`/`scx3_2` write past the window). Re-opening lets the
-        // comparator cycle to the new SCX&7 (re-match dot ~90, discard 7) —
-        // the exit arithmetic is already right when honored. Glitch + Tier-2
-        // + CGB only; production and non-glitch lines (the late_scx4
-        // write-strobe calibration) untouched.
-        if addr == 0xFF43
-            && self.tier2_reclock
-            && self.model.is_cgb()
-            && self.glitch_line
-            && self.render.hunt_done
-            && self.render.hunt_match_dot == self.dot
-            && value & 7 != self.render.hunt_idx
-        {
-            self.render.hunt_done = false;
         }
         match addr {
             0x8000..=0x9FFF => {
@@ -409,7 +385,7 @@ impl Ppu {
                     } else {
                         0
                     };
-                if (self.tier2_reclock || self.eager_value)
+                if self.eager_value
                     && self.enabled
                     && !(4..452).contains(&xdot)
                     && self.line < 144
@@ -432,7 +408,7 @@ impl Ppu {
                 // M-cycle END (same head-dot window), pairing with the DMG
                 // read-frame WY laws already live under eager — L2 re-host of
                 // the CGB slice-2 cross-line latch to DMG.
-                if (self.tier2_reclock || self.eager_value)
+                if self.eager_value
                     && !self.model.is_cgb()
                     && self.enabled
                     && xdot < 4
@@ -454,7 +430,7 @@ impl Ppu {
                 // and keeps the trigger). Tier-2 + CGB + DS; also `eager_value`
                 // (the eager DS `late_wy_ds`/`late_wy_1toFF_ds` pairs recover on
                 // the same latch, part of the +8 CGB WY slice).
-                if (self.tier2_reclock || self.eager_value)
+                if self.eager_value
                     && self.model.is_cgb()
                     && self.ds
                     && self.enabled
@@ -502,7 +478,7 @@ impl Ppu {
                 // `eager_value`: pairs with the DMG arm-D6 un-trigger read law
                 // already live under eager — L2 re-host of the DMG late-WY
                 // un-trigger latch.
-                if (self.tier2_reclock || self.eager_value)
+                if self.eager_value
                     && !self.model.is_cgb()
                     && !self.ds
                     && self.enabled
@@ -615,7 +591,7 @@ impl Ppu {
                 // un-catch read law (`tier2_window_late_wx_uncatch_passes`) is
                 // calibrated to the write's cc+0 dot, so its input stays here.
                 // The SPLIT: length/read-law input eager, render view deferred.
-                if self.render.active && (self.tier2_reclock || self.eager_value) {
+                if self.render.active && self.eager_value {
                     self.render.wx_write_dot = self.dot;
                 }
                 self.wx = value;

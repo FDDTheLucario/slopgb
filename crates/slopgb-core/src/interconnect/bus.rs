@@ -8,11 +8,6 @@ use super::*;
 
 impl Bus for Interconnect {
     fn read(&mut self, addr: u16) -> u8 {
-        if self.tier2_reclock {
-            // The deferred-commit reclock advances the machine to
-            // this M-cycle's leading edge before sampling.
-            return self.read_deferred(addr, OamBugKind::Read);
-        }
         // Deferred-commit clock: pay the previous M-cycle's parked debt
         // and park this read's 4 T-cycles.
         let _leading_edge = self.clock.read();
@@ -21,8 +16,8 @@ impl Bus for Interconnect {
         let leading = self.leading_edge_sample(addr);
         // The eager-value carried-read peek (armed at the STAT ack in
         // `ack_impl`) is one-shot: `leading_edge_sample`'s FF41 read has now
-        // consumed `read_carried` inside `vis_mode_read`, so clear it (the
-        // tier2 twin clears in `read_deferred`). Never set flag-off → no-op.
+        // consumed `read_carried` inside `vis_mode_read`, so clear it.
+        // Never set flag-off → no-op.
         if self.eager_value && addr == 0xFF41 {
             self.ppu.set_read_carried(false);
             // The eager halt-woken re-fetch override is one-shot at the line
@@ -47,11 +42,9 @@ impl Bus for Interconnect {
         // deterministically-imminent bit SameBoy's events-first read frame has
         // already folded. Fold it in as a verdict-only value peek
         // (`Ppu::ff0f_stat_peek`, less the LY0 pulse the whole-dot frame set a
-        // dot early) — the same peek the tier2 `read_deferred` path applies, and
-        // the same VALUE-at-cc+4 shape as the halt-entry peek. `intf` is
-        // untouched; the rise still folds at its own dot. Eager-only, off the
-        // tier2 (early-returned above) and production (`eager_value` false) paths
-        // → byte-identical.
+        // dot early) — the same VALUE-at-cc+4 shape as the halt-entry peek.
+        // `intf` is untouched; the rise still folds at its own dot. Eager-only,
+        // byte-identical off the eager path.
         let trailing = if self.eager_value && addr == 0xFF0F {
             (trailing | self.ppu.ff0f_stat_peek())
                 & !self.ppu.ff0f_ly0_pulse_mask()
@@ -63,9 +56,6 @@ impl Bus for Interconnect {
     }
 
     fn write(&mut self, addr: u16, value: u8) {
-        if self.tier2_reclock {
-            return self.write_deferred(addr, value);
-        }
         // Deferred-commit clock: a write commits per its per-model
         // conflict class (`write_conflict`, the SameBoy `cycle_write` map).
         // The commit position is still discarded — write-only scaffold —
@@ -164,9 +154,6 @@ impl Bus for Interconnect {
     }
 
     fn tick(&mut self) {
-        if self.tier2_reclock {
-            return self.tick_deferred();
-        }
         // Deferred-commit clock: an internal M-cycle parks +4 without
         // committing (SameBoy `cycle_no_access`); the next access pays it.
         self.clock.internal();
@@ -175,9 +162,6 @@ impl Bus for Interconnect {
     }
 
     fn tick_addr(&mut self, value: u16) {
-        if self.tier2_reclock {
-            return self.tick_addr_deferred(value);
-        }
         // Deferred-commit clock: the OAM-bug-carrying internal M-cycle (a
         // 16-bit register driven on the address bus) is SameBoy's
         // `cycle_oam_bug` (`sm83_cpu.c:326`), which — unlike `cycle_no_access`
@@ -192,16 +176,12 @@ impl Bus for Interconnect {
     }
 
     fn read_inc(&mut self, addr: u16) -> u8 {
-        if self.tier2_reclock {
-            return self.read_deferred(addr, OamBugKind::ReadIncrease);
-        }
         // Deferred-commit clock: same leading-edge read as `read`.
         let _leading_edge = self.clock.read();
         // Leading-edge sample (cc+0), inert while the flag is off.
         let leading = self.leading_edge_sample(addr);
         // Mirror `Bus::read`: clear the one-shot eager carried-read peek once
-        // the FF41 read has consumed it (the tier2 twin clears both paths in
-        // `read_deferred`). Never set flag-off → no-op.
+        // the FF41 read has consumed it. Never set flag-off → no-op.
         if self.eager_value && addr == 0xFF41 {
             self.ppu.set_read_carried(false);
             // The eager halt-woken re-fetch override is one-shot at the line
@@ -271,14 +251,6 @@ impl Bus for Interconnect {
         self.set_cpu_halted(halted);
     }
 
-    fn dispatch_reclock(&self) -> bool {
-        self.tier2_reclock
-    }
-
-    fn dispatch_retime(&mut self) {
-        self.dispatch_retime_impl()
-    }
-
     fn pending_halt_entry(&mut self) -> u8 {
         self.halt_entry_impl()
     }
@@ -292,15 +264,6 @@ impl Bus for Interconnect {
     }
 
     fn flush_pending(&mut self) {
-        if self.tier2_reclock {
-            // Drain the parked debt AND advance the machine to
-            // catch up, so the deferred −2 read shift is reabsorbed at the
-            // instruction boundary (SameBoy `flush_pending_cycles`).
-            let before = self.clock.now();
-            self.clock.flush();
-            self.advance_machine_t(before, self.clock.now());
-            return;
-        }
         // Instruction boundary: drain the deferred-commit clock's parked
         // debt (SameBoy `flush_pending_cycles`). Net-zero — the clock is
         // write-only scaffold; this only keeps `clock.now()` exact at

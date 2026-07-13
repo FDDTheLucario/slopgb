@@ -105,32 +105,9 @@ impl Interconnect {
         self.ppu.set_leading_edge_reads(on);
     }
 
-    /// Enable the deferred-commit machine advance + the −2 interrupt-dispatch
-    /// reclock. Implies [`Self::set_leading_edge_reads`] — the cc+0 reads are
-    /// the frame the reclock recalibrates against. Held off in production and in
-    /// the kernel-pair specs (which set only `leading_edge`); set through
-    /// [`crate::GameBoy::set_tier2_reclock`].
-    pub(crate) fn set_tier2_reclock(&mut self, on: bool) {
-        self.tier2_reclock = on;
-        if on {
-            self.set_leading_edge_reads(true);
-            // The tier2 deferred clock and the eager-value clock are mutually
-            // exclusive frames; enabling tier2 clears any armed eager so a
-            // `set_tier2_reclock`-built machine runs PURE tier2 even when the
-            // eager construction default is temp-flipped on (else the tier2
-            // pins would run an incoherent tier2∧eager hybrid). Inert in
-            // production (eager already off → no-op) — the shipped defaults are
-            // both false, so the steady-state tier2 two-bin is unperturbed.
-            self.eager_value = false;
-            self.ppu.set_eager_value(false);
-        }
-        self.ppu.set_tier2_reclock(on);
-    }
-
     /// Enable the **eager-value** reclock: the eager clock + counter-pinned
-    /// dispatch (cc+4) + the tier2 read laws as cc+0 value peeks. Implies
-    /// [`Self::set_leading_edge_reads`] but does NOT set `tier2_reclock` — no
-    /// deferred clock, no −2 dispatch move → the DMG-count-safe foundation (see
+    /// dispatch (cc+4) + the read laws as cc+0 value peeks. Implies
+    /// [`Self::set_leading_edge_reads`] → the DMG-count-safe foundation (see
     /// `docs/sameboy-port/tools/measurements/eager-clock-foundation-2026-07-07.md`).
     pub(crate) fn set_eager_value(&mut self, on: bool) {
         self.eager_value = on;
@@ -138,11 +115,11 @@ impl Interconnect {
         self.ppu.set_eager_value(on);
     }
 
-    /// `(leading_edge_reads, tier2_reclock)` — read-only, for the golden-safe
-    /// "production defaults OFF" guard test.
+    /// The `leading_edge_reads` construction flag — read-only, for the
+    /// golden-safe "production defaults OFF" guard test.
     #[cfg(test)]
-    pub(crate) fn reclock_flags(&self) -> (bool, bool) {
-        (self.leading_edge_reads, self.tier2_reclock)
+    pub(crate) fn reclock_flags(&self) -> bool {
+        self.leading_edge_reads
     }
 
     /// Reproduce the C3-flip **construction default** exactly as flipping the
@@ -159,177 +136,15 @@ impl Interconnect {
         self.leading_edge_reads = true;
     }
 
-    /// Repay the outstanding sub-M-cycle wake skew — the next access pays the
-    /// extra T and lands back on the aligned 4-T grid.
-    pub(super) fn repay_wake_skew(&mut self) {
-        self.clock.carry_read(std::mem::take(&mut self.wake_skew));
-    }
-
-    /// Deferred-commit read: pay the previous M-cycle's parked debt —
-    /// advancing the whole machine to this M-cycle's leading edge (cc+0) — then
-    /// sample. Unlike the eager [`Bus::read`] (which advances a full M-cycle
-    /// *after* a single FF41 leading-edge peek and otherwise trails at cc+4),
-    /// every read here samples at the leading edge, and the dispatch reclock's
-    /// `pending=2` lands the vector/handler reads 2 dots early.
-    ///
-    /// The `GB_display_sync` analogue: `advance_machine_t` is T-granular and
-    /// drives the PPU per 8 MHz half-dot (`Ppu::tick_half`), so by the time the
-    /// sample below runs the PPU is resolved to the read's EXACT half-dot: a DS
-    /// read landing on an odd CPU-T sits mid-dot (half-dot phase 1),
-    /// exactly like SameBoy's zero-cycle force-run
-    /// (`sync_ppu_if_needed → GB_display_run(gb, 0, true)`,
-    /// memory.c:540 / display.h:51) draining the display coroutine to the
-    /// read's T before returning `STAT&3`. The FF41/FF44/accessibility
-    /// verdicts sampled here are therefore "as of that true half-dot"; the
-    /// half-dot read-position laws compare [`Ppu::read_pos_hd`] (+ the per-ISR
-    /// carry [`Ppu::isr_read_carry_hd`]) against half-dot boundaries. The
-    /// frame mapping to SameBoy is `slopgb dot D ↔ SameBoy cfl D+4` (single
-    /// speed) / `D+3` (double speed — the odd offset is why the mid-dot
-    /// position is load-bearing there).
-    pub(super) fn read_deferred(&mut self, addr: u16, kind: OamBugKind) -> u8 {
-        // An outstanding sub-M-cycle wake skew is consumed by the handler's
-        // FIRST FF41 read — that read samples the STAT mode at the wake's true
-        // sub-M-cycle T (2 T early) — and REPAID before any other IO/PPU-
-        // positional read, so the TIMA-counted (`int_hblank_halt`) and
-        // LY-straddle (`hblank_ly_scx`) wake grids keep their aligned
-        // calibration. One-shot; also repaid at the next halt entry
-        // (`set_cpu_halted`) as the backstop.
-        if self.tier2_reclock && self.wake_skew != 0 && addr & 0xFF80 == 0xFF00 && addr != 0xFF41 {
-            // IO-page reads other than FF41 re-align first (ROM/RAM fetches
-            // ride the skew — the handler's code path must not consume it).
-            self.repay_wake_skew();
-        }
-        let before = self.clock.now();
-        let _ = self.clock.read(); // clock += old pending; park 4
-        self.advance_machine_t(before, self.clock.now());
-        self.service_vram_dma();
-        self.maybe_oam_bug(addr, kind);
-        let v = self.read_no_tick(addr);
-        // DMG power-on boot-frame read law: the tier2 deferred FF41/
-        // FF44/OAM/VRAM read samples cc+0, 4 dots before production's cc+4 read
-        // of the same `LD A,(nn)`, so a boot read straddling a mode transition
-        // returns the pre-transition value; restore the read's true (cc+4)
-        // verdict (`Ppu::boot_read`). Verdict-only, `!is_cgb`/first-frame scoped
-        // → `None` (byte-identical) off the boot frame and in production.
-        let v = self.ppu.boot_read(addr).unwrap_or(v);
-        // FF0F read peek: the deferred IF read's verdict includes the
-        // deterministically-imminent STAT engine rise SameBoy's events-first
-        // read frame has already folded (see `Ppu::ff0f_stat_peek`).
-        // Verdict-only: `intf` is untouched, the rise still folds at its own dot.
-        let v = if addr == 0xFF0F {
-            // The DMG mode-0 STAT-IF SERVICE-CLEAR: a deferred read that
-            // crossed the counter-pinned mode-0 rise returns 0 when the STAT
-            // interrupt is pending AND enabled (`intf & ie & STAT`) — the CPU is
-            // servicing it, and on hardware the dispatch clears IF at the read's
-            // cycle so the `ldh a,(FF0F)` observes 0 (`hblank_int_scx*_if_d`,
-            // ISR CP A==0). The `intf & ie` gate is the discriminator vs a pure
-            // poll of the same dot (`hblank_scx2_if_a`: DI + IE=0, no dispatch →
-            // the bit stays set, want E2). See `Ppu::ff0f_dmg_service_clear`.
-            if self.intf & self.ie & IF_STAT_BIT != 0 && self.ppu.ff0f_dmg_service_clear() {
-                0
-            } else {
-                // The glitch-line mode-0 co-instant read-view mask (a
-                // read landing on the flip dot precedes the rise on hardware;
-                // `Ppu::ff0f_dmg_m0_coincident_mask`) joins the OAM-pulse mask;
-                // both clear a bit slopgb's whole-dot frame folded a dot too
-                // early.
-                (v | self.ppu.ff0f_stat_peek())
-                    & !self.ppu.ff0f_ly0_pulse_mask()
-                    & !self.ppu.ff0f_dmg_m0_coincident_mask()
-            }
-        } else {
-            v
-        };
-        // The SCOPED carried-read exit override is one-shot — clear the
-        // arm after the STAT-ISR handler's first FF41 mode read has resolved (its
-        // `vis_mode_read` already consumed `read_carried` inside `read_no_tick`).
-        if addr == 0xFF41 {
-            self.ppu.set_read_carried(false);
-            // The wake skew is consumed by this read — repay it so everything
-            // after runs on the aligned grid.
-            if self.tier2_reclock && self.wake_skew != 0 {
-                self.repay_wake_skew();
-            }
-        }
-        v
-    }
-
-    /// Deferred-commit write: the value commits at the leading edge
-    /// per its conflict class ([`Self::write_conflict`]), advancing the machine
-    /// by the class's pre-commit split.
-    pub(super) fn write_deferred(&mut self, addr: u16, value: u8) {
-        // A CPU write to any LCD register (FF40-FF4B) ends the pristine
-        // boot hand-off frame, so the DMG boot-frame read law (`Ppu::boot_read`)
-        // no longer applies. The `poweron_*` ROMs read the untouched boot frame
-        // (pure NOP sled, no PPU write); every other early reader configures the
-        // PPU first — `lcdon_to_*`/`oam_read`/`sprite`/`win` turn the LCD off/on
-        // (FF40), the gambatte kernel/halt STAT-ISR tests arm a mode interrupt
-        // (FF41) — and reads its own frame at cc+0. Boot's own register install
-        // goes through the direct `ppu.write`/`write_no_tick` paths, not this
-        // CPU write path, so it does not trip the flag.
-        if matches!(addr, 0xFF40..=0xFF4B) {
-            self.ppu.mark_lcd_reg_written();
-        }
-        let conflict = self.write_conflict(addr);
-        self.vram_dma_req_pre = self.vram_dma_req.is_some();
-        let before = self.clock.now();
-        let _ = self.clock.write(conflict);
-        self.advance_machine_t(before, self.clock.now());
-        // A racing DMA-register write beats a same-advance
-        // HBlank-DMA steal: SameBoy runs `GB_hdma_run` only after the
-        // current instruction completes (sm83_cpu.c:1718), so the write's
-        // store is visible to the block (`hdma_late_destl_1`:
-        // SameBoy order w54 → run dst=8010; the deferred head-service ran
-        // the block with the stale dst=8000; likewise `_length`/`_wrambank`/
-        // `_disable`). SCOPED to the registers the block itself consumes
-        // (FF51-FF55 counters/arm + FF70 WRAM bank + FF4F VRAM bank): the
-        // steal defers past their store. A GENERAL post-store service was
-        // measured to break `irq_precedence/hdma_vs_m0_scx2_halt` (a
-        // base-passing row) and 60+ hdma rows in the first cut; a request
-        // already pending at the op's entry still steals first even for
-        // the scoped registers. Production (eager) untouched: its head
-        // service runs before the write's own tick flags the request.
-        let defer_steal = self.cgb_mode && matches!(addr, 0xFF51..=0xFF55 | 0xFF70 | 0xFF4F);
-        if !defer_steal || self.vram_dma_req_pre {
-            self.service_vram_dma();
-        }
-        if let 0xFF40 | 0xFF42 | 0xFF43 | 0xFF47..=0xFF4B = addr {
-            // Stage the mid-mode-3 pipeline-view commit at SameBoy's render
-            // frame: the deferred clock lands the eager `commit_eff` 4 dots
-            // EARLY of the render's cc+4-calibrated fetch grid, so each register
-            // re-commits after its per-register offset (the `staged_pending`
-            // survive skip in `Ppu::write` keeps the stage alive). The offsets
-            // and their per-register rationale live in [`Self::stage_write_dots`]
-            // (SCX +4, SCX-DS +2, SCY/DMG-palette even-parity, WX +0). Production
-            // keeps the gambatte mid-cycle staging ({2 SS, 1 DS}) — byte-identical
-            // OFF; glitch lines commit immediately (no deferred fetch grid).
-            let dots = self.stage_write_dots(addr);
-            self.ppu.stage_write(addr, value, dots);
-        }
-        self.maybe_oam_bug(addr, OamBugKind::Write);
-        // A bit1-clearing FF0F write consumes a STAT engine rise landing within
-        // the next 2 dots (see `Ppu::arm_ff0f_if_squash` + the consumption site
-        // in `stat_update_tick`).
-        if addr == 0xFF0F && value & 0x02 == 0 {
-            self.ppu.arm_ff0f_if_squash();
-        }
-        self.write_no_tick(addr, value);
-        if defer_steal {
-            self.service_vram_dma();
-        }
-    }
-
-    /// The per-register mid-mode-3 write-commit stage offset (in dots),
-    /// shared by the tier2 deferred write path ([`Self::write_deferred`]) and
-    /// the eager-value write path ([`crate::interconnect::Bus`]`::write`). A
-    /// pure function of `addr`/`scan_pos`/`speed`; the tier2 render-frame
-    /// offsets also apply under `eager_value` (for the tier2 path
-    /// `tier2_reclock` is already true, so `|| eager_value` is a no-op →
-    /// byte-identical there).
+    /// The per-register mid-mode-3 write-commit stage offset (in dots) for the
+    /// eager-value write path ([`crate::interconnect::Bus`]`::write`). A pure
+    /// function of `addr`/`scan_pos`/`speed`; the render-frame offsets apply
+    /// under `eager_value` (production keeps the gambatte {2 SS, 1 DS} staging
+    /// → byte-identical off the eager clock).
     pub(super) fn stage_write_dots(&self, addr: u16) -> u8 {
         if let (0xFF43, true, true) = (
             addr,
-            (self.tier2_reclock || self.eager_value) && !self.ppu.glitch_active(),
+            self.eager_value && !self.ppu.glitch_active(),
             self.double_speed,
         ) {
             // SCX in DOUBLE SPEED takes a +2 render-frame defer, not single
@@ -342,7 +157,7 @@ impl Interconnect {
             // SCY/palette keep dots=3 in DS (no DS pixel legs, and their
             // timing never reaches an OCR verdict).
             2
-        } else if (self.tier2_reclock || self.eager_value)
+        } else if self.eager_value
             && !self.model.is_cgb()
             && matches!(addr, 0xFF47..=0xFF49)
             && !self.ppu.glitch_active()
@@ -366,7 +181,7 @@ impl Interconnect {
             // mode-3-length or FF41-read-law coupling): production
             // byte-identical OFF, CGB two-bin unaffected.
             2 + (self.ppu.scan_pos().1 & 1) as u8
-        } else if (self.tier2_reclock || self.eager_value)
+        } else if self.eager_value
             && addr == 0xFF42
             && !self.double_speed
             && !self.ppu.glitch_active()
@@ -392,7 +207,7 @@ impl Interconnect {
             // byte-identical OFF. SS only (the DS M-cycle is 2 dots; SCY has
             // no DS pixel legs and DS keeps defer=3, the `else` below).
             2 + (self.ppu.scan_pos().1 & 1) as u8
-        } else if (self.tier2_reclock || self.eager_value)
+        } else if self.eager_value
             && matches!(addr, 0xFF42 | 0xFF43 | 0xFF47..=0xFF49)
             && !self.ppu.glitch_active()
         {
@@ -411,10 +226,7 @@ impl Interconnect {
             // per-register split mirrors SameBoy's per-register conflict
             // maps (each register carries its own commit class).
             3
-        } else if (self.tier2_reclock || self.eager_value)
-            && addr == 0xFF4B
-            && !self.ppu.glitch_active()
-        {
+        } else if self.eager_value && addr == 0xFF4B && !self.ppu.glitch_active() {
             // WX (FF4B) render-VIEW defer: `eff.wx` (the window
             // activation/reactivation comparator) now survives the arch
             // write (see `regs.rs` `staged_pending`) and strobe-commits at
@@ -434,25 +246,6 @@ impl Interconnect {
         } else {
             2
         }
-    }
-
-    /// Deferred-commit internal M-cycle (`cycle_no_access`): park
-    /// +4 and advance nothing now — the debt is paid by the next real access.
-    pub(super) fn tick_deferred(&mut self) {
-        let before = self.clock.now();
-        self.clock.internal();
-        self.advance_machine_t(before, self.clock.now()); // delta 0 (deferred)
-        self.service_vram_dma();
-    }
-
-    /// Deferred-commit `cycle_oam_bug` (`tick_addr`): commits the
-    /// previous debt at the leading edge and reparks 4, like a read.
-    pub(super) fn tick_addr_deferred(&mut self, value: u16) {
-        let before = self.clock.now();
-        let _ = self.clock.read();
-        self.advance_machine_t(before, self.clock.now());
-        self.service_vram_dma();
-        self.maybe_oam_bug(value, OamBugKind::Write);
     }
 
     /// Test-only view of the deferred-commit CPU clock's committed position

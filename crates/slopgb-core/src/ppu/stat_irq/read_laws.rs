@@ -5,18 +5,10 @@
 //! window-extend predicate. Second `impl Ppu` block split out of
 //! `stat_irq.rs` for the CLAUDE.md <1000-line cap (like `reclock.rs`);
 //! verdict-only laws — the counter-pinned IRQ dispatch lives in the parent
-//! and `reclock.rs`. Production (`tier2_reclock` off) returns the native
+//! and `reclock.rs`. Production (`eager_value` off) returns the native
 //! [`Ppu::vis_mode`] untouched.
 
 use super::*;
-
-/// Frames after power-on over which the DMG boot-frame read law
-/// ([`Ppu::boot_read`]) applies. The 20 `poweron_*` gbmicrotest reads all land
-/// at `frame_count == 2` (the first game frame — the boot warmup crosses line
-/// 144 once); `frame_count` is monotonic from power-on (it never resets, even
-/// across an LCD disable/enable), so the window fires exactly once and reverts
-/// to the cc+0 frame for every later read.
-const BOOT_READ_FRAME: u64 = 2;
 
 impl Ppu {
     /// The render's projected mode-3→0 flip dot: the flip projection applied
@@ -33,7 +25,7 @@ impl Ppu {
     /// (and during 144:0-3), and mode 3 appears 4 dots after VRAM read
     /// locking (`lcdon_timing-GS` tables).
     ///
-    /// **The law collapse:** under `tier2_reclock` the FF41 read's
+    /// **The law collapse:** under `eager_value` the FF41 read's
     /// mode-3→0 verdict is ONE comparison — the read's exact half-dot position
     /// ([`Ppu::read_pos_hd`]) against the per-config CPU-visible mode-3 exit
     /// ([`Ppu::vis_exit_hd`]) — replacing the seven accreted shadow laws
@@ -42,15 +34,15 @@ impl Ppu {
     /// the counter-pinned IRQ dispatch (`line_render_done` /
     /// `mode_for_interrupt`), which never moves (SameBoy `GB_STAT_update`
     /// two-latch model, display.c:523-574). Production is byte-identical
-    /// (`tier2_reclock` off → native [`Self::vis_mode`]).
+    /// (`eager_value` off → native [`Self::vis_mode`]).
     pub(super) fn vis_mode_read(&self) -> u8 {
         let m = self.vis_mode();
         // Under the eager clock the read-law web is enabled at BOTH speeds: the
         // DS read-debt is +4 hd (the DS M-cycle is 2 dots, half the SS 4), so
-        // `read_pos_hd` lands the eager DS read at the tier2 DS deferred position
-        // the `vis_exit_hd` `ds1`/DS arms are calibrated to. Native `vis_mode`
-        // returned only in production (`tier2_reclock`/`eager_value` both off).
-        if !(self.tier2_reclock || self.eager_value) {
+        // `read_pos_hd` lands the eager DS read at the DS position the
+        // `vis_exit_hd` `ds1`/DS arms are calibrated to. Native `vis_mode`
+        // returned only in production (`eager_value` off).
+        if !self.eager_value {
             return m;
         }
         // The DS mode-2 ISR line-start read probes the mode0→2
@@ -284,134 +276,5 @@ impl Ppu {
             return m;
         };
         if self.read_pos_hd() < exit_adj { 3 } else { 0 }
-    }
-
-    /// The DMG power-on boot-frame read law. The tier2 deferred read
-    /// samples the PPU at cc+0 (the M-cycle leading edge), 4 dots before
-    /// production's cc+4 read of the same `LD A,(nn)`; on the first frame after
-    /// power-on the `poweron_*` gbmicrotest ROMs read STAT (FF41), OAM
-    /// (FE00-FE9F), VRAM (8000-9FFF) or LY (FF44) via a NOP-sled-timed direct
-    /// load whose cc+0 sample lands exactly 4 dots before a boot mode transition
-    /// and returns the pre-transition value (`poweron_stat_007` reads mode 0 at
-    /// ly0 dot0, want mode 2 — the read's true cc+4 position dot4 is past the
-    /// DMG line-start mode-0 hold; `poweron_oam_070` reads OAM blocked at dot252,
-    /// want accessible — the true position dot256 is past the mode-0 flip).
-    /// Restore the value at the read's true (cc+4) position: the current
-    /// (line, dot) advanced 4 dots on the 154×456 grid ([`Self::boot_shift4`]),
-    /// with the STAT chain's LYC-coincidence, the OAM/VRAM mode locks and LY all
-    /// re-derived there. **Verdict-only** — no counter/dispatch moves; the `+4`
-    /// boot DIV (timer domain, `interconnect/boot.rs`) is untouched so `boot_div`
-    /// stays byte-identical, and the counter-pinned IRQ dispatch never moves.
-    /// Scoped to `tier2_reclock` + `!is_cgb` (CGB's boot hand-off is a separate
-    /// frame — byte-identical) + the first game frame (`frame_count <=
-    /// BOOT_READ_FRAME`; the 20 poweron reads all land at `frame_count == 2`, and
-    /// `frame_count` is monotonic from power-on so the window fires exactly once).
-    /// Production returns `None` (byte-identical OFF). Consumed by the deferred
-    /// FF41/FF44/OAM/VRAM read path in `interconnect/cycle.rs`.
-    pub(crate) fn boot_read(&self, addr: u16) -> Option<u8> {
-        if !(self.tier2_reclock
-            && !self.model.is_cgb()
-            && self.enabled
-            && !self.lcd_regs_written
-            && self.frame_count <= BOOT_READ_FRAME)
-        {
-            return None;
-        }
-        let (l, d) = self.boot_shift4();
-        // The LY *register* at the shifted position: the raw `self.ly` when the
-        // shift stays on the current line (it carries the line-153 LY=0 quirk —
-        // `self.ly` reads 0 late on line 153 while the scan line is still 153,
-        // so `poweron_ly_000`/`stat_000` want LY 0 / coincidence set there), or
-        // the new line number once the shift crossed a line boundary.
-        let boot_ly = if l == self.line { self.ly } else { l };
-        match addr {
-            0xFF41 => Some(
-                0x80 | self.stat_en
-                    | (u8::from(boot_ly == self.lyc) << 2)
-                    | self.boot_vis_mode(l, d),
-            ),
-            0xFF44 => Some(boot_ly),
-            0x8000..=0x9FFF => Some(if self.boot_vram_blocked(l, d) {
-                0xFF
-            } else {
-                self.vram[self.vram_index(addr)]
-            }),
-            0xFE00..=0xFE9F => Some(if self.boot_oam_blocked(l, d) {
-                0xFF
-            } else {
-                self.oam[usize::from(addr - 0xFE00)]
-            }),
-            _ => None,
-        }
-    }
-
-    /// (line, dot) advanced 4 dots — the cc+0→cc+4 single-speed read offset — on
-    /// the 154-line × 456-dot frame grid, for [`Self::boot_read`].
-    fn boot_shift4(&self) -> (u8, u16) {
-        let mut d = self.dot + 4;
-        let mut l = u16::from(self.line);
-        if d >= LINE_DOTS {
-            d -= LINE_DOTS;
-            l += 1;
-        }
-        if l >= 154 {
-            l = 0;
-        }
-        (l as u8, d)
-    }
-
-    /// The CPU-visible STAT mode at a boot-frame [`Self::boot_shift4`] position:
-    /// VBlank (mode 1) off the visible lines (mode 0 for line 144 dots 0-3), the
-    /// DMG line-start mode-0 hold (dots 0-3), mode 2 to the mode-3 entry
-    /// ([`Self::mode3_entry_dot`], 84 under tier2), then mode 3 until the
-    /// projected mode-0 flip ([`Self::boot_past_flip`]).
-    fn boot_vis_mode(&self, l: u8, d: u16) -> u8 {
-        if l >= 144 {
-            return u8::from(!(l == 144 && d < 4));
-        }
-        if d < 4 {
-            0
-        } else if d < self.mode3_entry_dot() {
-            2
-        } else if self.boot_past_flip(l, d) {
-            0
-        } else {
-            3
-        }
-    }
-
-    /// Is a boot-frame shifted position past the bare-line mode-0 flip (mode 0 /
-    /// OAM+VRAM accessible)? The flip anchors to the render's own projected
-    /// dispatch ([`Self::flip_projection`], `dot + proj − lead`) while the render
-    /// is live, or the recorded `flip_dot` once it has fired; a position on a
-    /// later line (the shift wrapped a line boundary) sits at that line's start,
-    /// before its flip, and a mode-2 position (render not yet active) is not past
-    /// the flip either.
-    fn boot_past_flip(&self, l: u8, d: u16) -> bool {
-        if l != self.line {
-            return false;
-        }
-        if self.line_render_done {
-            return self.flip_dot != 0 && d >= self.flip_dot;
-        }
-        if !self.render.active {
-            return false;
-        }
-        d >= self.projected_flip_dot()
-    }
-
-    /// DMG OAM read-block at a boot-frame shifted position: blocked across the
-    /// whole visible mode-2 + mode-3 span (from the line start — unlike the STAT
-    /// mode-0 hold, the OAM scan locks from dot 0) until the mode-0 flip;
-    /// accessible in VBlank.
-    fn boot_oam_blocked(&self, l: u8, d: u16) -> bool {
-        l <= 143 && !self.boot_past_flip(l, d)
-    }
-
-    /// DMG VRAM read-block at a boot-frame shifted position: blocked only in
-    /// mode 3, whose read-lock engages at dot 80 (4 dots before the visible
-    /// mode-3 entry, `blocking.rs`) and releases at the mode-0 flip.
-    fn boot_vram_blocked(&self, l: u8, d: u16) -> bool {
-        l <= 143 && d >= 80 && !self.boot_past_flip(l, d)
     }
 }

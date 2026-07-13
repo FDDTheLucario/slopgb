@@ -10,11 +10,11 @@ repository.workspace = true
 [features]
 default = []
 # Test/example visibility gate for the port flip constructors + setters
-# (`new_with_eager`/`new_with_reclock`/`set_eager_value`/…). Integration-test
-# crates and examples are separate compilation units that cannot see the lib's
-# `#[cfg(test)]` items, so they reach the (stage-2/3) flip hooks through this
-# feature instead. Off by default → the frontend build compiles those hooks
-# out, keeping the golden-safe law compile-enforced.
+# (`new_with_eager`/`set_eager_value`/…). Integration-test crates and examples
+# are separate compilation units that cannot see the lib's `#[cfg(test)]`
+# items, so they reach the flip hooks through this feature instead. Off by
+# default → the frontend build compiles those hooks out, keeping the
+# golden-safe law compile-enforced.
 flip_hooks = []
 
 [dependencies]

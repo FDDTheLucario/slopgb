@@ -1,4 +1,4 @@
-//! The `tier2_reclock` flag-on STAT IRQ engine (SameBoy `GB_STAT_update`
+//! The leading-edge STAT IRQ engine (SameBoy `GB_STAT_update`
 //! port) — the `stat_update_tick` rising-edge dispatch + vblank/OAM direct
 //! pokes, the halt-commit masks, the decoupled `mode_for_interrupt`
 //! derivation, and the delayed `ly_for_comparison` LYC input. Second
@@ -569,12 +569,12 @@ impl Ppu {
         // one setting the currently-pending STAT bit — is the mode-2 OAM
         // line-start rise. Sticky until the next STAT edge (a held STAT bit
         // raises no new edge, so the flag keeps naming the source of the pending
-        // bit). The interconnect's `dispatch_retime` keys the per-ISR deferred
+        // bit). The interconnect's eager ack (`ack_impl`) keys the per-ISR
         // read carry on it. Line 0's OAM pulse takes no carry
         // (its read frame already matches — same exemption as the halt mask).
         self.stat_rise_oam = mfi == 2 && self.eng_stat & STAT_SRC_OAM != 0 && self.line != 0;
         // The mode-0 HBlank ISR read is +2 dots early (half the mode-2 +4);
-        // tagged so `dispatch_retime` carries it the matching +2.
+        // tagged so `ack_impl` carries it the matching +2.
         self.stat_rise_m0 = mfi == 0 && self.eng_stat & STAT_SRC_HBLANK != 0;
         // The rise's source is unambiguous from `mfi` alone: this runs only on a
         // 0→1 edge, so the line was LOW the previous dot — meaning neither source
@@ -643,30 +643,7 @@ impl Ppu {
         // lagged `prev_done`; `stat_events_tick` never reads `mode_for_interrupt`,
         // so production is byte-identical.
         let prev_done = if self.leading_edge_reads {
-            self.enabled
-                && self.line <= 143
-                && (self.line_render_done
-                    // The WINDOW-line mode-0 engine rise leads the
-                    // render flip by 2 dots (SS CGB): the win-line render
-                    // clock sits uniformly +2 late in slopgb's frame (the
-                    // FF41 `vis_mode_read` window laws already compensate;
-                    // the ENGINE still read the raw flip). SameBoy raises
-                    // the win-line mode-0 IF at the same instant as its
-                    // visible flip (dual-traced `m2int_wxA5_m0irq_2`: SB
-                    // rise = flip fp = slopgb-frame 259, slopgb rise 261 →
-                    // the `_2` dot-260 FF0F read missed it; the `_1`
-                    // dot-256 read stays clear). Projection-based so
-                    // mid-line SCX/WX writes track.
-                    || (self.tier2_reclock
-                        && self.model.is_cgb()
-                        && !self.ds
-                        && self.render.win_active
-                        && !self.glitch_line
-                        && self.render.active
-                        && {
-                            let (proj, lead) = self.flip_projection();
-                            proj.saturating_sub(lead) <= 2
-                        }))
+            self.enabled && self.line <= 143 && self.line_render_done
         } else {
             prev_done
         };
@@ -691,35 +668,9 @@ impl Ppu {
             //
             // SINGLE SPEED only (`!ds`): the recovered slice is the single-speed
             // `enable_display/ly0_m0irq_trigger` (+2 flag-on, SameBoy-confirmed
-            // out0). The double-speed `ly0_m0irq_scxN_ds_{1,2}` reads BRACKET the
-            // glitch m0 IRQ dot (`_1` wants outE0 / read before, `_2` wants outE2
-            // / read after), which our whole-dot model misframes (fires at the
-            // prefix AND the post-render dot, never the DS mid-line dot SameBoy
-            // hits) — so suppressing the DS prefix is a read-frame A/B swap that
-            // drops the SameBoy-passing `ly0_m0irq_scx0_ds_2` (outE2). That DS
-            // slice is deferred with the atomic reclock. Measured: SS-gated =
-            // +2 / 0 regress / 0 lift lost; universal = +6 / 0 regress / −1
-            // SameBoy-passing drop.
-            if self.tier2_reclock && self.ds && self.model.is_cgb() {
-                // The DS glitch-line arm deferred above:
-                // suppress the enable-glitch PREFIX (the spurious dot-19 rise
-                // the `_1` legs' pre-rise reads caught -> got E2 want E0) AND
-                // hold mode 3 for the IRQ until line_render_done + 2 - SameBoy
-                // raises the glitch-line mode-0 STAT at cfl259, TWO dots past
-                // the bare-line 257 (frame-0 ly0). The prior
-                // "suppress-prefix drops ly0_m0irq_scx0_ds_2" A/B resolved by
-                // the +2: the `_2` read lands between the old post-render dot
-                // and the true rise.
-                if self.dot < GLITCH_MODE3_START {
-                    crate::stat_update::MODE_FOR_INTERRUPT_NONE
-                } else if self.line_render_done {
-                    0
-                } else {
-                    3
-                }
-            } else if ((self.tier2_reclock && self.model.is_cgb()) || self.eager_value) && !self.ds
-            {
-                // The Tier-2 / EAGER SS glitch-line mode-0 IRQ
+            // out0).
+            if self.eager_value && !self.ds {
+                // The EAGER SS glitch-line mode-0 IRQ
                 // dispatch reclock. The IRQ side keys on `line_render_done`
                 // (the dispatch dot, our dot 254 = SameBoy `cfl=257`), NOT on
                 // `vis_early` (dot 252) the way `vis_mode` does — exactly the

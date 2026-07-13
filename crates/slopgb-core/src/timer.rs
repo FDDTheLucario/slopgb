@@ -141,9 +141,10 @@ impl Timer {
         (iff, late)
     }
 
-    /// Reset the per-M-cycle `reloaded` latch (the deferred machine advance
-    /// calls this at each M-cycle's first substep, mirroring [`Self::tick`]'s
-    /// inline reset).
+    /// Reset the per-M-cycle `reloaded` latch. Test-only (the `tick_substep`
+    /// composition unit test drives the substeps manually; production `tick`
+    /// inlines the reset).
+    #[cfg(test)]
     pub fn begin_mcycle(&mut self) {
         self.reloaded = false;
     }

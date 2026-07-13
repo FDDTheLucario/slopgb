@@ -24,11 +24,7 @@ impl Ppu {
             // (no line-1-dots-0-3 forced-invalid view) — the −4 made
             // `lcdon_timing-GS`'s round-3 STAT read drop the LYC=0 coincidence
             // bit ($80 vs $84). Single speed only.
-            if self.leading_edge_reads
-                && !self.tier2_reclock
-                && !self.ds
-                && self.dot >= GLITCH_LINE_DOTS - 4
-            {
+            if self.leading_edge_reads && !self.ds && self.dot >= GLITCH_LINE_DOTS - 4 {
                 return if self.model.is_cgb() { Some(0) } else { None };
             }
             // LCD enable: the comparison runs immediately with LY=0

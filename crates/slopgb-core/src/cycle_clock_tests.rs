@@ -102,18 +102,3 @@ fn wx_hold_advances_one_t_past_the_commit() {
     assert_eq!(c.now(), 5, "the clock advances one T past the commit");
     assert_eq!(c.pending(), 3, "only 3 T stay parked for the next M-cycle");
 }
-
-/// `cpu-timing-map.md` §6: the interrupt-dispatch vector retime
-/// (`sm83_cpu.c:1690-1692`) latches the IF-ack / vector 2 T before the final
-/// push M-cycle completes.
-#[test]
-fn dispatch_vector_retime_latches_two_t_early() {
-    let mut c = CycleClock::new();
-    c.read(); // parks 4 (the push M-cycle's debt)
-    let latch = c.dispatch_vector_retime();
-    assert_eq!(
-        latch, 2,
-        "vector latched 2 T before the M-cycle's 4 would complete"
-    );
-    assert_eq!(c.pending(), 2, "the final 2 T stay parked");
-}

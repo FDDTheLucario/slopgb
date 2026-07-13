@@ -271,17 +271,8 @@ pub fn check_fib(b: u8, c: u8, d: u8, e: u8, h: u8, l: u8) -> Result<(), String>
 /// Run one ROM image on `model` until the `LD B,B` breakpoint or timeout,
 /// then check the Fibonacci signature.
 pub fn run_breakpoint_rom(rom: &[u8], model: Model) -> Result<(), String> {
-    // Port Stage B / C-stage flag-on validation: `SLOPGB_MOONEYE_RECLOCK=1`
-    // boots the whole mooneye matrix on the construction-time deferred reclock
-    // (the real C3 flip), so the convergence gate (mooneye flag-on, zero
-    // SameBoy-drop) can be re-measured after every S5 change. Unset = the
-    // production tick-then-access frame, so the gate is byte-identical.
-    let mut gb = if std::env::var_os("SLOPGB_MOONEYE_RECLOCK").is_some() {
-        GameBoy::new_with_reclock(model, rom.to_vec())
-    } else {
-        GameBoy::new(model, rom.to_vec())
-    }
-    .map_err(|e| format!("cartridge rejected: {e}"))?;
+    let mut gb =
+        GameBoy::new(model, rom.to_vec()).map_err(|e| format!("cartridge rejected: {e}"))?;
     // `SLOPGB_MOONEYE_EAGER=1` re-hosts the post-boot machine on the
     // eager-value reclock (eager clock + cc+0 read-law peeks, dispatch cc+4)
     // — the eager-clock foundation gate. Unset = production frame.

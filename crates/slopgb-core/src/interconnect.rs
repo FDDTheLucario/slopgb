@@ -183,25 +183,10 @@ pub struct Interconnect {
     /// byte-identical cc+4 model ([`Self::leading_edge_sample`] returns `None`).
     leading_edge_reads: bool,
 
-    /// The −2 sub-M-cycle **dispatch reclock**. When on
-    /// (implies [`Self::leading_edge_reads`]), `tick_machine` advances the
-    /// PPU/timer/APU/serial deferred — slaved to the deferred-commit
-    /// [`CycleClock`]'s parked debt instead of a flat 4-dot quantum — and
-    /// the interrupt dispatch re-parks `pending=2` ([`Bus::dispatch_retime`])
-    /// so the vector fetch + first handler reads sample 2 dots early
-    /// ("re-frames every read").
-    /// **Held `false`** — the deferred path is red until the whole reclock
-    /// converges, so it sits behind its OWN flag, separate from
-    /// `leading_edge_reads`: the kernel-pair gate specs run `leading_edge`
-    /// only, keeping them on the validated frame while this lands. The
-    /// hook ([`crate::GameBoy::set_tier2_reclock`]) sets both.
-    tier2_reclock: bool,
-
     /// The **eager-value** reclock: the eager (production `tick_machine`,
-    /// dispatch cc+4) clock + the tier2 read/render laws applied as cc+0 value
-    /// peeks, WITHOUT the deferred clock or the −2 dispatch move (so dispatch
-    /// stays at its validated cc+4). Implies [`Self::leading_edge_reads`] but
-    /// NOT [`Self::tier2_reclock`] — the DMG-count-safe foundation the census
+    /// dispatch cc+4) clock + the read/render laws applied as cc+0 value
+    /// peeks (so dispatch stays at its validated cc+4). Implies
+    /// [`Self::leading_edge_reads`] — the DMG-count-safe foundation the census
     /// no-go was overturned on (see
     /// `docs/sameboy-port/tools/measurements/eager-clock-foundation-2026-07-07.md`).
     /// **Production default `true`** (the eager clock — the C3 flip is DONE);
@@ -268,8 +253,7 @@ pub struct Interconnect {
     /// `int_hblank_halt`/`hblank_ly_scx` mode-0 halt grids observe it (intr_2
     /// wakes on the mode-2 OAM source, the kernel reads FF41 — neither halt-wakes
     /// on mode 0), so it is free to recalibrate w.r.t. the rest of the triad.
-    /// Inert flag-off (only set under `tier2_reclock`), so production is
-    /// byte-identical.
+    /// Inert on the eager clock (never set), so production is byte-identical.
     m0_halt_hold: u8,
     /// The deferred-path timer/serial ack-squash deadline in CPU T (0 = no
     /// window open).
@@ -385,11 +369,9 @@ pub struct Interconnect {
     ack_squash_ticks: u8,
     ack_squash_dots: u8,
 
-    /// The `tick_squash` mask (`ack_squash_mask & 0x0C`,
-    /// the timer/serial squash) latched at the current deferred M-cycle's first
-    /// T, so it persists across the T-by-T [`Self::advance_machine_t`] loop even
-    /// when the −2 dispatch reclock splits one M-cycle across two advances. Unused
-    /// on the eager path (which recomputes it per `tick_machine` call).
+    /// Inert deferred-clock scratch (the removed −2 dispatch reclock's timer/
+    /// serial squash latch). Unused on the eager path, which recomputes the
+    /// squash per `tick_machine` call; kept only for savestate stability.
     deferred_squash: u8,
 
     /// FF46 readback is simply the last written value
@@ -538,10 +520,8 @@ impl Interconnect {
             // C3 flip: the coherent eager-value clock is the production
             // default. `post_boot_inner` re-arms the PPU flag web after
             // `apply_post_boot_state`, so the raw struct-literal default is
-            // coherent (mooneye 93/93). `tier2_reclock` (the deferred clock)
-            // stays OFF — it is the disproven read-deferred variant.
+            // coherent (mooneye 93/93).
             leading_edge_reads: true,
-            tier2_reclock: false,
             eager_value: true,
             eager_wr_borrow: false,
             cgb_mode,

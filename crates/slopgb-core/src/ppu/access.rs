@@ -219,13 +219,6 @@ impl Ppu {
         self.frame_count
     }
 
-    /// Record a CPU write to an LCD register (FF40-FF4B): the boot hand-off
-    /// frame is no longer pristine, disabling the DMG boot-frame read law
-    /// ([`Self::boot_read`]). Called from the tier2 CPU write path only.
-    pub(crate) fn mark_lcd_reg_written(&mut self) {
-        self.lcd_regs_written = true;
-    }
-
     /// Map DMG shades 0..=3 to XRGB8888 (frontend palette option).
     pub fn set_dmg_palette(&mut self, palette: [u32; 4]) {
         self.dmg_palette = palette;

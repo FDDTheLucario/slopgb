@@ -64,11 +64,9 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    // Thesis hooks (port Stage B): SLOPGB_TIER2=1 enables the full reclock
-    // (implies leading-edge); SLOPGB_LE=1 enables leading-edge only.
-    if std::env::var("SLOPGB_TIER2").is_ok() {
-        gb.set_tier2_reclock(true);
-    } else if std::env::var("SLOPGB_EAGER").is_ok() {
+    // Thesis hooks (port Stage B): SLOPGB_EAGER=1 enables the eager-value clock
+    // (the production default); SLOPGB_LE=1 enables leading-edge only.
+    if std::env::var("SLOPGB_EAGER").is_ok() {
         // Eager-value clock (dispatch cc+4 + cc+0 value peeks); honours
         // SLOPGB_COHERENT_DISP inside `set_eager_value`.
         gb.set_eager_value(true);

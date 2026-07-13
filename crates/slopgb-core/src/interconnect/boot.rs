@@ -92,23 +92,6 @@ impl Interconnect {
             s.div_counter.wrapping_sub(cgb_cart_cut as u16)
         };
         // Port Stage B (Tier 2) DIV phase re-calibration. The post-boot
-        // `div_counter` constants (`model.rs`) are calibrated against the eager
-        // tick-then-access frame, where a register read samples the timer at
-        // cc+4 (after this M-cycle's 4 dots are applied). The deferred-commit
-        // reclock samples every read at the M-cycle leading edge (cc+0), i.e.
-        // one M-cycle (4 T) earlier — so the boot hand-off DIV phase must
-        // advance 4 T to land on SameBoy's leading-edge frame. Without it,
-        // reads positioned immediately after a DIV-byte increment lose 1
-        // (`boot_div-*`: B/C/L low by one; the before-increment reads are
-        // unaffected). SameBoy passes `boot_div` reading at cc+0 because its
-        // `div_counter` rides that same +1-M-cycle leading-edge timeline.
-        // Applies uniformly to the timer, serial, and APU seeds below (all
-        // derive from `div`), which is why it also fixes `boot_sclk_align`.
-        let div = if self.tier2_reclock {
-            div.wrapping_add(4)
-        } else {
-            div
-        };
         self.timer.set_div(div);
         self.serial.tick(div);
         self.apu.tick(div, false);

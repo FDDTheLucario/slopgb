@@ -178,26 +178,12 @@ fn dispatch_interrupt(cpu: &mut Cpu, bus: &mut impl Bus) {
         let bit = pending.trailing_zeros() as u8;
         (0x0040 + (u16::from(bit) << 3), Some(bit))
     };
-    if bus.dispatch_reclock() {
-        // The IF-ack / vector latch lands AFTER the low push (SameBoy
-        // sm83_cpu.c:1690, the M5+2 latch), and the dispatch reclock re-parks
-        // pending=2 there so the vector fetch + first handler reads sample 2
-        // dots early ("re-frames every read").
-        cpu.regs.sp = cpu.regs.sp.wrapping_sub(1);
-        bus.write(cpu.regs.sp, pc as u8);
-        bus.dispatch_retime();
-        if let Some(bit) = ack_bit {
-            bus.ack(bit);
-        }
-    } else {
-        // Eager path (byte-identical): the chosen IF bit is acknowledged
-        // before the low push, exactly as before the port.
-        if let Some(bit) = ack_bit {
-            bus.ack(bit);
-        }
-        cpu.regs.sp = cpu.regs.sp.wrapping_sub(1);
-        bus.write(cpu.regs.sp, pc as u8);
+    // The chosen IF bit is acknowledged before the low push.
+    if let Some(bit) = ack_bit {
+        bus.ack(bit);
     }
+    cpu.regs.sp = cpu.regs.sp.wrapping_sub(1);
+    bus.write(cpu.regs.sp, pc as u8);
     cpu.regs.pc = target;
 }
 

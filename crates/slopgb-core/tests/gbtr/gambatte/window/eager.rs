@@ -6,7 +6,7 @@ use super::super::*;
 /// The CGB slice-2 cross-line latch was CGB-scoped; the DMG
 /// read-frame WY laws (`vis_exit_hd` arms D6/D1/7) already run under
 /// `eager_value`, but the two DMG-scoped write-side latches in
-/// `regs.rs::write` (FF4A) stayed `tier2_reclock`-only: the HEAD-write
+/// `regs.rs::write` (FF4A) were not yet ported to the eager clock: the HEAD-write
 /// cross-line EXTEND (`value + 1 == line` → `wy_xline_trig`, feeds arm 7) and
 /// the SS trigger-line UN-latch (`old_wy == ly && value != ly` →
 /// `wy_trig_sb_raw = false`, feeds arm D6). Extending both with

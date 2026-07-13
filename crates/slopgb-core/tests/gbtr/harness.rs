@@ -23,21 +23,7 @@ pub fn boot(rom: &[u8], model: Model) -> GameBoy {
         return GameBoy::new_with_eager(model, rom.to_vec())
             .unwrap_or_else(|e| panic!("cartridge rejected ({model:?}): {e:?}"));
     }
-    if std::env::var_os("SLOPGB_GBTR_TIER2").is_some() {
-        return GameBoy::new_with_reclock(model, rom.to_vec())
-            .unwrap_or_else(|e| panic!("cartridge rejected ({model:?}): {e:?}"));
-    }
     GameBoy::new(model, rom.to_vec())
-        .unwrap_or_else(|e| panic!("cartridge rejected ({model:?}): {e:?}"))
-}
-
-/// Boot with the Stage-B Tier-2 reclock enabled at construction (before the
-/// post-boot state lands), the way the production default behaves once the
-/// port flips it. Required for boot-time-DIV-sensitive ROMs (`boot_div`,
-/// `boot_sclk_align`) whose phase is decided during `apply_post_boot_state`;
-/// the post-boot `set_tier2_reclock` toggle is too late for those.
-pub fn boot_with_reclock(rom: &[u8], model: Model) -> GameBoy {
-    GameBoy::new_with_reclock(model, rom.to_vec())
         .unwrap_or_else(|e| panic!("cartridge rejected ({model:?}): {e:?}"))
 }
 

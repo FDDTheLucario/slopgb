@@ -31,7 +31,7 @@ impl Ppu {
             // 0→3 entry at the trailing frame, so it takes no back-date — dot 74
             // made the deferred `lcdon_timing-GS` STAT read see mode 3 a full
             // M-cycle early (round-1 STAT $87 vs $84). 78 restores it.
-            let start = if self.leading_edge_reads && !self.tier2_reclock && !self.ds {
+            let start = if self.leading_edge_reads && !self.ds {
                 GLITCH_MODE3_START - 4
             } else {
                 GLITCH_MODE3_START
@@ -85,13 +85,13 @@ impl Ppu {
     /// the trailing (cc+4) frame, not LE-only's 4-dots-early peek, so dot 80
     /// makes the deferred read see mode 3 a full M-cycle early (`test_iter 2`
     /// counts one poll, want two). 84 restores it (`intr_2_mode3_timing` passes
-    /// flag-on, both models). The mode-0 *exit* differs (`early_lead`, gated on
-    /// `tier2_reclock` in `m0_flip_events`): it keeps a back-date because the
+    /// flag-on, both models). The mode-0 *exit* differs (`early_lead` in
+    /// `m0_flip_events`): it keeps a back-date because the
     /// kernel separation needs the −1 net shift. Single speed only (the DS read
     /// offset is deferred with the rest of the DS back-dating); always 84
     /// flag-OFF, so production is byte-identical.
     pub(super) fn mode3_entry_dot(&self) -> u16 {
-        if self.leading_edge_reads && !self.tier2_reclock && !self.ds {
+        if self.leading_edge_reads && !self.ds {
             80
         } else if self.eager_value && self.ds {
             // EAGER double speed: the eager cc+0 FF41 value peek
@@ -166,7 +166,7 @@ impl Ppu {
 
     /// Whether the currently-pending STAT IRQ
     /// was raised by the mode-2 OAM line-start rise (vs mode-0/LYC). A sticky
-    /// level read (not drained) by the interconnect's `dispatch_retime` to key
+    /// level read (not drained) by the interconnect's `ack_impl` to key
     /// the per-ISR deferred-read carry (see the [`Ppu::stat_rise_oam`] field +
     /// [`crate::ppu::m2carry_on`]).
     pub(crate) fn stat_rise_oam(&self) -> bool {
@@ -195,7 +195,7 @@ impl Ppu {
     /// clock reaches that view by flushing its parked debt; the eager clock has
     /// no debt to flush, so its entry sample sits at t0 and misses a rise that
     /// lands inside the fetch. Reconstructing the rise's VALUE at t0+4 — the
-    /// same decomposition `read_pos_hd` and [`Ppu::boot_read`] use — restores
+    /// same decomposition `read_pos_hd` uses — restores
     /// the SameBoy view without fabricating machine time (advancing the clock
     /// here would tick the timers 4 T early and break the TIMA-counted rows).
     ///
@@ -236,17 +236,8 @@ impl Ppu {
         flip <= self.dot && self.dot < flip + 4
     }
 
-    /// Whether the current line is the LCD-enable
-    /// glitch line — its mode-0 engine rise is emitted at a different offset
-    /// from the true (SameBoy) commit than normal lines' (rise == visexit vs
-    /// visexit − 3, dual-trace measured), so the halt-wake visibility
-    /// deadline carries a per-shape correction.
-    pub(crate) fn glitch_line_now(&self) -> bool {
-        self.glitch_line
-    }
-
     /// Arm/disarm the SCOPED carried-read exit override (see the
-    /// [`Ppu::read_carried`] field). `dispatch_retime` sets it after a STAT-ISR
+    /// [`Ppu::read_carried`] field). `ack_impl` sets it after a STAT-ISR
     /// read carry; the interconnect clears it once the handler's FF41 read has
     /// resolved (one-shot).
     pub(crate) fn set_read_carried(&mut self, v: bool) {

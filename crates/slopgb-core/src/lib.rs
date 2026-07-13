@@ -127,7 +127,7 @@ const STATE_MAGIC: &[u8; 4] = b"SLPS";
 /// Save-state format version (bumped on any layout change). v3 dropped the
 /// APU output queues (`samples`/`raw_samples`) from the payload; v4 appends the
 /// SGB audio subsystem (SPC700 + S-DSP) on `Model::Sgb`/`Sgb2` states.
-const STATE_VERSION: u16 = 4;
+const STATE_VERSION: u16 = 5;
 
 /// A debugger memory watchpoint (bgb's "Set watchpoint"): the free run halts
 /// after the CPU accesses `addr` with a matching access kind. A frontend/
@@ -171,25 +171,7 @@ impl GameBoy {
     /// No boot ROM is executed: CPU registers, hardware registers and timers
     /// are initialised to the exact post-boot state of `model`.
     pub fn new(model: Model, rom: Vec<u8>) -> Result<Self, CartridgeError> {
-        Self::new_inner(model, rom, false, false)
-    }
-
-    /// Like [`Self::new`], but enables the Stage-B Tier-2 reclock *before* the
-    /// post-boot state is applied, so the deferred-frame DIV phase
-    /// re-calibration (`interconnect/boot.rs`, the `boot_div`/`boot_sclk` fix)
-    /// lands at hand-off. This mirrors the production path once the port flips
-    /// the construction default; the runtime [`Self::set_tier2_reclock`] toggle
-    /// cannot reproduce it because boot has already run by the time it is
-    /// called. Off-path (and `set_tier2_reclock`-only) construction is
-    /// unchanged.
-    ///
-    /// Compiled only under `cfg(test)` or `--features flip_hooks` — the
-    /// production frontend build cannot reference it, so the tier2 reclock can
-    /// never be armed in a shipped binary (the golden-safe law, compile-enforced).
-    #[doc(hidden)]
-    #[cfg(any(test, feature = "flip_hooks"))]
-    pub fn new_with_reclock(model: Model, rom: Vec<u8>) -> Result<Self, CartridgeError> {
-        Self::new_inner(model, rom, true, false)
+        Self::new_inner(model, rom, false)
     }
 
     /// Like [`Self::new`], but arms the **eager-value** reclock from the
@@ -204,39 +186,25 @@ impl GameBoy {
     #[doc(hidden)]
     #[cfg(any(test, feature = "flip_hooks"))]
     pub fn new_with_eager(model: Model, rom: Vec<u8>) -> Result<Self, CartridgeError> {
-        Self::new_inner(model, rom, false, true)
+        Self::new_inner(model, rom, true)
     }
 
-    fn new_inner(
-        model: Model,
-        rom: Vec<u8>,
-        tier2: bool,
-        eager: bool,
-    ) -> Result<Self, CartridgeError> {
+    fn new_inner(model: Model, rom: Vec<u8>, eager: bool) -> Result<Self, CartridgeError> {
         let cart = cartridge::Cartridge::from_bytes(rom)?;
-        Ok(Self::post_boot_inner(model, cart, tier2, eager))
+        Ok(Self::post_boot_inner(model, cart, eager))
     }
 
     /// The direct post-boot machine (no boot ROM executed): registers, hardware
     /// registers and timers installed at the model's post-boot state. The shared
     /// body of [`Self::new`] and the [`Self::new_with_boot`] wrong-size fallback.
     fn post_boot(model: Model, cart: cartridge::Cartridge) -> Self {
-        Self::post_boot_inner(model, cart, false, false)
+        Self::post_boot_inner(model, cart, false)
     }
 
-    /// [`Self::post_boot`] with the Stage-B Tier-2 reclock set (if `tier2`)
-    /// before the post-boot state lands — see [`Self::new_with_reclock`].
-    fn post_boot_inner(
-        model: Model,
-        cart: cartridge::Cartridge,
-        tier2: bool,
-        eager_default: bool,
-    ) -> Self {
+    /// The shared post-boot body of [`Self::new`] and [`Self::new_with_boot`].
+    fn post_boot_inner(model: Model, cart: cartridge::Cartridge, eager_default: bool) -> Self {
         let mut bus = interconnect::Interconnect::new(model, cart);
         let mut cpu = cpu::Cpu::new(model);
-        if tier2 {
-            bus.set_tier2_reclock(true);
-        }
         // `new_with_eager` (test / `flip_hooks` harness) simulates the flipped
         // struct-literal default without touching the global default: arm the
         // Interconnect's own eager fields, un-propagated, exactly as the raw
@@ -255,9 +223,8 @@ impl GameBoy {
         // mirroring the runtime `set_eager_value` post-boot path (the only
         // enable proven intr_2-safe, mooneye 91/91, and the frame every EV
         // two-bin measurement rides). The suppress-then-re-arm resets the flag
-        // web (incl. the env probes) from a clean base. DIV is untouched — the
-        // boot `+4` recalibration keys on `tier2_reclock`, which eager never
-        // sets. Byte-identical when the default is false (production).
+        // web (incl. the env probes) from a clean base. Byte-identical when
+        // the default is false (production).
         let eager = bus.eager_value();
         if eager {
             bus.set_eager_value(false);
@@ -829,44 +796,30 @@ impl GameBoy {
     /// kernel-pair acceptance spec drives it on to measure the convergence.
     ///
     /// Compiled only under `cfg(test)` / `--features flip_hooks` (see
-    /// [`Self::new_with_reclock`]) — the production build cannot arm it.
+    /// [`Self::new_with_eager`]) — the production build cannot arm it.
     #[doc(hidden)]
     #[cfg(any(test, feature = "flip_hooks"))]
     pub fn set_leading_edge_reads(&mut self, on: bool) {
         self.bus.set_leading_edge_reads(on);
     }
 
-    /// Port validation hook — enable the Stage-B Tier-2 dispatch reclock
-    /// (deferred-commit machine advance + the −2 interrupt-dispatch retime).
-    /// Implies [`Self::set_leading_edge_reads`]. Off in production; the
-    /// make-or-break thesis measurement drives it on (`PORT-PLAN.md` Tier 2).
-    ///
-    /// Compiled only under `cfg(test)` / `--features flip_hooks` (see
-    /// [`Self::new_with_reclock`]) — the production build cannot arm it.
-    #[doc(hidden)]
-    #[cfg(any(test, feature = "flip_hooks"))]
-    pub fn set_tier2_reclock(&mut self, on: bool) {
-        self.bus.set_tier2_reclock(on);
-    }
-
     /// Port validation hook — enable the eager-value reclock (the eager clock +
-    /// tier2 read/render laws as cc+0 value peeks, dispatch staying cc+4).
-    /// Implies [`Self::set_leading_edge_reads`] but NOT
-    /// [`Self::set_tier2_reclock`] (no deferred clock / dispatch move) → the
-    /// DMG-count-safe foundation. Off in production.
+    /// read/render laws as cc+0 value peeks, dispatch staying cc+4).
+    /// Implies [`Self::set_leading_edge_reads`] → the DMG-count-safe
+    /// foundation. Off in production.
     ///
     /// Compiled only under `cfg(test)` / `--features flip_hooks` (see
-    /// [`Self::new_with_reclock`]) — the production build cannot arm it.
+    /// [`Self::new_with_eager`]) — the production build cannot arm it.
     #[doc(hidden)]
     #[cfg(any(test, feature = "flip_hooks"))]
     pub fn set_eager_value(&mut self, on: bool) {
         self.bus.set_eager_value(on);
     }
 
-    /// `(leading_edge_reads, tier2_reclock)` construction flags. Read-only
-    /// introspection for the golden-safe guard test only.
+    /// The `leading_edge_reads` construction flag. Read-only introspection for
+    /// the golden-safe guard test only.
     #[cfg(test)]
-    pub(crate) fn reclock_flags(&self) -> (bool, bool) {
+    pub(crate) fn reclock_flags(&self) -> bool {
         self.bus.reclock_flags()
     }
 

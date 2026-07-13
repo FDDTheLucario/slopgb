@@ -9,10 +9,10 @@ impl Interconnect {
     /// reclocked render dot, not the production one), so a DS OAM/VRAM/palette
     /// read resolves against a stale straddle stamp. Route DS accessibility
     /// through the ported `Ppu::{oam,vram,pal}_*_blocked` laws instead — the
-    /// same bypass `tier2_reclock` already takes (the ported laws carry the DS
-    /// line-end / entry / palette-pipe boundaries, `|| eager_value`-gated).
-    /// Single speed keeps the stamp (it passes under eager); production +
-    /// tier2-off never set `eager_value` → byte-identical.
+    /// same bypass the eager clock takes (the ported laws carry the DS
+    /// line-end / entry / palette-pipe boundaries, `eager_value`-gated).
+    /// Single speed keeps the stamp (it passes under eager); production never
+    /// sets `eager_value` → byte-identical.
     fn ev_ds_access(&self) -> bool {
         self.eager_value && self.double_speed
     }
@@ -85,9 +85,7 @@ impl Interconnect {
                 // blocking, including the cc+2 MID-phase second-half
                 // unblock view (sub-dot event-phase model).
                 if self.ppu.oam_read_blocked()
-                    || (!self.tier2_reclock
-                        && !self.ev_ds_access()
-                        && stamp_blocks(self.m0_access_edge, ACCESS_PHASE))
+                    || (!self.ev_ds_access() && stamp_blocks(self.m0_access_edge, ACCESS_PHASE))
                 {
                     0xFF
                 } else {
@@ -115,20 +113,6 @@ impl Interconnect {
     }
 
     pub(super) fn read_no_tick(&mut self, addr: u16) -> u8 {
-        // One-shot post-mode-0-halt-wake LY phase
-        // carry. The mode-0 halt-wake set `halt_ly_phase` to the sub-M-cycle
-        // carry; the FIRST post-wake FF44 read (hblank's measurement read)
-        // back-dates the line by it, then clears. The pre-halt `wait_ly` poll
-        // never sees it (it ran before the wake), so — unlike a uniform LY
-        // back-date — the poll is uncorrupted. See `Interconnect::halt_ly_phase`.
-        if addr == 0xFF44 && self.tier2_reclock && self.halt_ly_phase > 0 {
-            let off = u16::from(self.halt_ly_phase);
-            self.halt_ly_phase = 0;
-            let (line, dot) = self.ppu.line_dot();
-            if (1..=143).contains(&line) && dot < off {
-                return line - 1;
-            }
-        }
         if let Some(c) = self.dma_conflict {
             // OAM (and the prohibited area behind it) reads $FF while a DMA
             // byte is in flight (gbctr OAM DMA).
@@ -179,7 +163,7 @@ impl Interconnect {
             // mode-0 entry and its read-back interaction (gambatte
             // dma/hdma_start_*) is the HDMA-seam increment's job.
             0x8000..=0x9FFF
-                if ((!self.tier2_reclock && !self.ev_ds_access()) || self.ppu.vram_wr_recent())
+                if (!self.ev_ds_access() || self.ppu.vram_wr_recent())
                     && stamp_blocks(self.m0_access_edge, ACCESS_PHASE)
                     && self.hdma_mode == HdmaMode::Disabled =>
             {
@@ -192,10 +176,7 @@ impl Interconnect {
                 // cc+2 MID-phase OAM read: a mode-3→mode-0 unblock landing
                 // in this M-cycle's second half is not yet visible here
                 // (sub-dot event-phase model).
-                if !self.tier2_reclock
-                    && !self.ev_ds_access()
-                    && stamp_blocks(self.m0_access_edge, ACCESS_PHASE)
-                {
+                if !self.ev_ds_access() && stamp_blocks(self.m0_access_edge, ACCESS_PHASE) {
                     0xFF
                 } else {
                     self.ppu.read(addr)
@@ -264,9 +245,7 @@ impl Interconnect {
                 // CPU OAM writes are dropped while DMA owns OAM, and while
                 // the cc+2 MID view still reads mode 3 (sub-dot phase).
                 if self.dma_conflict.is_none()
-                    && (self.tier2_reclock
-                        || self.ev_ds_access()
-                        || !stamp_blocks(self.m0_access_edge, ACCESS_PHASE))
+                    && (self.ev_ds_access() || !stamp_blocks(self.m0_access_edge, ACCESS_PHASE))
                 {
                     self.intf |= self.ppu.write(addr, value) & IF_MASK;
                 }
@@ -418,7 +397,6 @@ impl Interconnect {
             // `Ppu::pal_ram_blocked` instead (`pal_open_dot` + 1 dot SS / + 0 DS).
             0xFF69 | 0xFF6B
                 if self.cgb_mode
-                    && !self.tier2_reclock
                     && !self.eager_value
                     && stamp_blocks(self.pal_access_edge, ACCESS_PHASE) =>
             {

@@ -81,15 +81,9 @@ fn main() {
         _ => Model::Cgb,
     };
     let rom = std::fs::read(&rom_path).expect("read rom");
-    // Thesis hooks: SLOPGB_TIER2=1 enables the full Stage-B reclock via
-    // `new_with_reclock` (the flag set *before* boot hand-off, so the C0 DIV+4
-    // re-calibration lands — this MATCHES the gbtr/`flagon_probe`
-    // `boot_with_reclock` frame; a post-boot `set_tier2_reclock` toggle skips
-    // the +4 and mis-frames every window/late_wy read by the DIV phase).
-    // SLOPGB_LE=1 enables leading-edge only.
-    let mut gb = if std::env::var("SLOPGB_TIER2").is_ok() {
-        GameBoy::new_with_reclock(model, rom).expect("load rom")
-    } else {
+    // Thesis hooks: SLOPGB_LE=1 enables leading-edge only; SLOPGB_EAGER=1 the
+    // eager-value clock (the production default).
+    let mut gb = {
         let mut gb = GameBoy::new(model, rom).expect("load rom");
         if std::env::var("SLOPGB_EAGER").is_ok() {
             gb.set_eager_value(true);
