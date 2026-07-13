@@ -878,10 +878,3 @@ fn gambatte_blank_verdict() {
     logo[70 * SCREEN_W + 4] = 0x0000_0000;
     check_blank(&logo).unwrap();
 }
-
-#[path = "gambatte_flagon_probe.rs"]
-mod flagon_probe;
-
-// Pixel two-bin probe (mode-3 render reclock); `#[ignore]`'d.
-#[path = "gambatte_pixel_probe.rs"]
-mod pixel_probe;

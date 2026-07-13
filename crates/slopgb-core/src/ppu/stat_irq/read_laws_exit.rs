@@ -537,7 +537,6 @@ impl Ppu {
             && self.render.wx_match_dot != 0
             && !self.glitch_line
             && (!self.ds || self.render.n_sprites == 0)
-            && crate::probe::noxline_fires()
         {
             let base = if self.read_carried { 259 } else { 263 };
             fold(&mut exit, 2 * (base + scx7 + ds1));

@@ -272,10 +272,7 @@ impl Bus for Interconnect {
     }
 
     fn dispatch_reclock(&self) -> bool {
-        // EXPERIMENT: the eager-native CGB −2 dispatch retime (the machine
-        // advance is skipped in `dispatch_retime_impl` under `eager_value` — see
-        // there). CGB-scoped so DMG dispatch stays cc+4 (intr_2 count-safe).
-        self.tier2_reclock || (self.coherent_dispatch && self.model.is_cgb())
+        self.tier2_reclock
     }
 
     fn dispatch_retime(&mut self) {

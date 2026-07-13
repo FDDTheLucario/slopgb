@@ -149,27 +149,11 @@ impl Ppu {
                 // spreads).
                 self.vram_wr_line = self.line;
                 self.vram_wr_dot = self.dot;
-                probe!(if crate::probe::s5dbg_on() && self.line < 144 {
-                    eprintln!(
-                        "SLOPGB vramw ly={} dot={} blk={}",
-                        self.line,
-                        self.dot,
-                        u8::from(self.vram_write_blocked())
-                    );
-                });
                 if !self.vram_write_blocked() {
                     self.vram[self.vram_index(addr)] = value;
                 }
             }
             0xFE00..=0xFE9F => {
-                probe!(if crate::probe::s5dbg_on() && self.line < 144 {
-                    eprintln!(
-                        "SLOPGB oamw ly={} dot={} blk={}",
-                        self.line,
-                        self.dot,
-                        u8::from(self.oam_write_blocked())
-                    );
-                });
                 if !self.oam_write_blocked() {
                     self.oam[usize::from(addr - 0xFE00)] = value;
                 }
@@ -314,7 +298,7 @@ impl Ppu {
                         // documented line-153 LYC side-effect zone), NOT ROM-
                         // specific. The sibling `m0enable/lycdisable_ff41_2` (line
                         // 1) is untouched. `eager_value`-gated → byte-identical.
-                        self.eng_stat_half = Some((data, crate::probe::tune_engcommit(2)));
+                        self.eng_stat_half = Some((data, 2));
                         self.eng_stat_pending = None;
                     } else {
                         self.eng_stat = data;
@@ -399,12 +383,6 @@ impl Ppu {
             0xFF4A => {
                 let old_wy = self.wy;
                 self.wy = value;
-                probe!(if crate::probe::s5dbg_on() {
-                    eprintln!(
-                        "SLOPGB wwy ly={} dot={} old={old_wy:02x} new={value:02x}",
-                        self.line, self.dot
-                    );
-                });
                 // The boundary-WY cross-line latch (see `Ppu::wy_xline_trig`):
                 // a tail/head write matching the current line, window enabled
                 // at the commit (DMG too — the DMG arm-7 twin reads the same

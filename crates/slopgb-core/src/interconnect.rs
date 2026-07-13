@@ -178,11 +178,9 @@ pub struct Interconnect {
     /// the byte latched at the M-cycle's leading edge, before `tick_machine`
     /// advances the PPU — instead of the trailing cc+4 view. This is the
     /// slopgb equivalent of SameBoy force-syncing the PPU to the access
-    /// cycle. **Held `false`**: the leading-edge
-    /// path is inert until the atomic flip (decoupled `mode_for_interrupt`
-    /// and the anchor swing) lands with it — alone it would just shift FF41
-    /// one M-cycle early. `false` is byte-identical to the cc+4 model
-    /// ([`Self::leading_edge_sample`] returns `None`).
+    /// cycle. **Production default `true`** (the C3 flip is DONE — the
+    /// leading-edge cc+0 path is the shipped reference). `false` restores the
+    /// byte-identical cc+4 model ([`Self::leading_edge_sample`] returns `None`).
     leading_edge_reads: bool,
 
     /// The −2 sub-M-cycle **dispatch reclock**. When on
@@ -206,18 +204,10 @@ pub struct Interconnect {
     /// NOT [`Self::tier2_reclock`] — the DMG-count-safe foundation the census
     /// no-go was overturned on (see
     /// `docs/sameboy-port/tools/measurements/eager-clock-foundation-2026-07-07.md`).
-    /// **Held `false`** — golden-safe, production byte-identical. The hook
+    /// **Production default `true`** (the eager clock — the C3 flip is DONE);
+    /// the cc+0 read/render laws gate on it (95 sites). The hook
     /// ([`crate::GameBoy::set_eager_value`]) sets it + `leading_edge_reads`.
-    // ponytail: slice #1 is plumbing only — no law reads this yet; slice #2
-    // gates the cc+0 read/render laws on it. Remove the allow when it lands.
-    #[allow(dead_code)]
     eager_value: bool,
-
-    /// EXPERIMENT probe flags (`eager-dispatch-retime-2026-07-09.md`); each true
-    /// only under `eager_value` + its env var, else byte-identical.
-    coherent_dispatch: bool, // SLOPGB_COHERENT_DISP: eager-native CGB −2 dispatch retime
-    disp_advance: bool, // SLOPGB_DISP_ADVANCE: + the corrupting machine-advance
-    ff0f_le: bool,      // SLOPGB_FF0F_LE: FF0F cc+0 leading-edge read
 
     /// A CGB single-speed WriteCpu-conflict engine write (FF41/FF0F/FF45) just
     /// committed one PPU dot into the next M-cycle (SameBoy `GB_CONFLICT_
@@ -553,9 +543,6 @@ impl Interconnect {
             leading_edge_reads: true,
             tier2_reclock: false,
             eager_value: true,
-            coherent_dispatch: false,
-            disp_advance: false,
-            ff0f_le: false,
             eager_wr_borrow: false,
             cgb_mode,
             double_speed: false,
@@ -656,25 +643,6 @@ fn sgb_header_zero_bits(cart: &Cartridge) -> u32 {
         zeros += cmd.count_zeros() + sum.count_zeros();
     }
     zeros
-}
-
-/// SameBoy-port measurement traces. Compiled only under `--features port_probe`
-/// and gated at runtime by `SLOPGB_S5DBG`; see [`crate::probe`].
-#[cfg(feature = "port_probe")]
-impl Interconnect {
-    pub(crate) fn dbg_wake(&mut self, path: &str, w: u8) {
-        if crate::probe::s5dbg_on() {
-            let (l, d) = self.ppu.scan_pos();
-            eprintln!(
-                "SLOPGB wake[{path}] ly={l} dot={d} clk={} pend={} w={w:02x} intf={:02x} late={:02x} hold={}",
-                self.clock.now(),
-                self.clock.pending(),
-                self.intf,
-                self.if_late,
-                self.m0_halt_hold
-            );
-        }
-    }
 }
 
 #[cfg(test)]

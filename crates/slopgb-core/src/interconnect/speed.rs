@@ -47,7 +47,6 @@ impl Interconnect {
             let m0_head = self.ppu.stat_rise_m0();
             let w0 = self.pending_halt_wake();
             let w0m = if m0_head { w0 & !IF_STAT_BIT } else { w0 };
-            probe!(self.dbg_wake("w0", w0m));
             if w0m != 0 {
                 return w0m;
             }
@@ -75,7 +74,6 @@ impl Interconnect {
                 self.clock.advance_pending(2);
                 self.advance_machine_t(before, self.clock.now());
                 self.clock.carry_read(4);
-                probe!(self.dbg_wake("g2", w2));
                 return w2;
             }
             // Non-STAT sources keep the calibrated mid-sample semantics:
@@ -86,7 +84,6 @@ impl Interconnect {
             if w2n != 0 {
                 self.clock.forgive(2);
                 self.wake_skew = 2;
-                probe!(self.dbg_wake("w2", w2n));
                 return w2n;
             }
             return 0;
@@ -139,7 +136,6 @@ impl Interconnect {
             {
                 self.ppu.set_halt_refetch(true);
             }
-            probe!(self.dbg_wake(if self.cpu_halted { "plain" } else { "first" }, w));
         }
         w
     }
@@ -323,16 +319,6 @@ impl Interconnect {
         if (self.tier2_reclock || self.eager_value) && switching {
             self.ppu.note_switch_stop();
         }
-        probe!(if crate::probe::s5dbg_on() {
-            let (l, d) = self.ppu.scan_pos();
-            eprintln!(
-                "SLOPGB stop ly={l} dot={d} clk={} sw={} from_ds={} ip={}",
-                self.cycles,
-                u8::from(switching),
-                u8::from(self.double_speed),
-                u8::from(interrupt_pending)
-            );
-        });
         // gambatte Memory::stop snapshots the HDMA situation at the
         // pre-read cc: a block request still pending when STOP executes
         // (flagged mid-instruction — no boundary came) is deferred when
@@ -500,31 +486,17 @@ impl Interconnect {
             // leaves need +2 (offset1/offset2-leave2/speedchange).
             let k = if entering_ds {
                 0
+            } else if self.ppu.sb_dsa() & 7 == 4 {
+                6
             } else {
-                crate::probe::tune_stopadv(if self.ppu.sb_dsa() & 7 == 4 { 6 } else { 2 })
+                2
             };
-            probe!(if crate::probe::s5dbg_on() && !entering_ds {
-                let (l, d) = self.ppu.scan_pos();
-                eprintln!(
-                    "SLOPGB leave ly={l} dot={d} clk={} dsa={} dsa7={} k={k}",
-                    self.cycles,
-                    self.ppu.sb_dsa(),
-                    self.ppu.sb_dsa() & 7
-                );
-            });
             // Record the leave for the post-switch exit table (the leave k
             // is the table's class variable; LCD checked at the pause-end
             // instant, so the lcdoff2 off-leave stays excluded).
             if !entering_ds {
                 self.ppu.note_switch_leave(k as u8);
             }
-            probe!(if !entering_ds {
-                let ph = std::env::var("SLOPGB_LCDPH")
-                    .ok()
-                    .and_then(|v| v.parse::<i16>().ok())
-                    .unwrap_or(0);
-                self.ppu.add_lcd_phase(ph);
-            });
             for _ in 0..k {
                 let ppu_if = self.ppu.tick_half();
                 if self.ppu.dot_completed() {
@@ -552,15 +524,14 @@ impl Interconnect {
         // commits, so the vector fetch + first handler reads sample 2 dots
         // early. Only reached on the reclock path (`dispatch_reclock`), after
         // the low push parked 4 (`pending == 4 > 2`).
-        // EAGER EXPERIMENT (`coherent_dispatch`): under the eager clock the PPU
-        // is advanced by `tick_machine` (whole-M-cycle, inline), NOT by
-        // `advance_machine_t`; running the deferred machine drive here would
-        // DOUBLE-advance the PPU +2 dots per STAT dispatch (measured: EV CGB
-        // 365→611, intr_2-CGB B=42). Skip it on eager — the eager reads peek the
-        // PPU directly (not via `clock.now()`), so the −2 read-reframe the
-        // deferred retime buys is inert; only the post-push ack reorder +
-        // `read_carried` arm (below) remain.
-        if !self.eager_value || self.disp_advance {
+        // Under the eager clock the PPU is advanced by `tick_machine`
+        // (whole-M-cycle, inline), NOT by `advance_machine_t`; running the
+        // deferred machine drive here would DOUBLE-advance the PPU +2 dots per
+        // STAT dispatch (measured: EV CGB 365→611, intr_2-CGB B=42). Skip it on
+        // eager — the eager reads peek the PPU directly (not via `clock.now()`),
+        // so the −2 read-reframe the deferred retime buys is inert; only the
+        // post-push ack reorder + `read_carried` arm (below) remain.
+        if !self.eager_value {
             let before = self.clock.now();
             let _ = self.clock.dispatch_vector_retime();
             self.advance_machine_t(before, self.clock.now());
@@ -586,14 +557,6 @@ impl Interconnect {
         {
             self.ppu.set_read_carried(true);
         }
-        probe!(if crate::probe::s5dbg_on() {
-            let (line, dot) = self.ppu.scan_pos();
-            eprintln!(
-                "SLOPGB vec ly={line} dot={dot} clk={} pend={}",
-                self.clock.now(),
-                self.clock.pending()
-            );
-        });
     }
 
     pub(super) fn halt_entry_impl(&mut self) -> u8 {
@@ -640,15 +603,6 @@ impl Interconnect {
         {
             w |= IF_STAT_BIT;
         }
-        probe!(if crate::probe::s5dbg_on() {
-            let (l, d) = self.ppu.scan_pos();
-            eprintln!(
-                "SLOPGB hentry ly={l} dot={d} clk={} w={w:02x} m0={} vis_from={}",
-                self.clock.now(),
-                u8::from(self.ppu.stat_rise_m0()),
-                self.stat_vis_from_t
-            );
-        });
         // The entry decision observes the machine genuinely — the
         // m0-origin STAT rise's frame offset (the same T-deadline the wake
         // sampler consults) applies here too, else a rise landing in the

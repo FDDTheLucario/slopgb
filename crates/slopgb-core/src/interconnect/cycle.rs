@@ -19,14 +19,6 @@ impl Interconnect {
         }
         match addr {
             0xFF41 => Some(self.ppu.read(0xFF41)),
-            // EXPERIMENT (`eager-dispatch-retime-2026-07-09.md`, read-frame
-            // probe): the eager FF0F read trails at cc+4, where `tick_machine`
-            // has ALREADY folded this M-cycle's STAT rise into `intf` — so the
-            // dispatch-cluster ISR reads see the STAT bit a dot early (got E2
-            // want E0). Route FF0F through the cc+0 leading edge (the pre-tick
-            // `intf`) to test whether the "dispatch-coupled" rows are really a
-            // read-frame miss. Env-gated (`ff0f_le`) → byte-identical off.
-            0xFF0F if self.ff0f_le => Some(0xE0 | self.intf),
             _ => None,
         }
     }
@@ -140,19 +132,10 @@ impl Interconnect {
     /// [`Self::set_leading_edge_reads`] but does NOT set `tier2_reclock` — no
     /// deferred clock, no −2 dispatch move → the DMG-count-safe foundation (see
     /// `docs/sameboy-port/tools/measurements/eager-clock-foundation-2026-07-07.md`).
-    // ponytail: no production call site yet (no `new_with_eager`); driven only
-    // by the port-probe-gated `GameBoy::set_eager_value`. Drop the allow once a
-    // slice-#2 law path references it.
-    #[allow(dead_code)]
     pub(crate) fn set_eager_value(&mut self, on: bool) {
         self.eager_value = on;
         self.set_leading_edge_reads(on);
         self.ppu.set_eager_value(on);
-        // EXPERIMENT (`eager-dispatch-retime-2026-07-09.md`): each probe is
-        // armed only when eager is on AND its env flag is present.
-        self.coherent_dispatch = on && std::env::var_os("SLOPGB_COHERENT_DISP").is_some();
-        self.disp_advance = on && std::env::var_os("SLOPGB_DISP_ADVANCE").is_some();
-        self.ff0f_le = on && std::env::var_os("SLOPGB_FF0F_LE").is_some();
     }
 
     /// `(leading_edge_reads, tier2_reclock)` — read-only, for the golden-safe
@@ -168,7 +151,7 @@ impl Interconnect {
     /// PPU-propagation that [`Self::set_eager_value`] runs. That leaves the
     /// machine incoherent (eager reads, non-eager PPU) — the exact bug
     /// `GameBoy::post_boot_inner`'s deferred re-arm exists to repair. Only ever
-    /// armed via the `cfg(test)`/`port_probe`-gated `GameBoy::new_with_eager`
+    /// armed via the `cfg(test)`/`flip_hooks`-gated `GameBoy::new_with_eager`
     /// (production `post_boot_inner` always passes `eager_default = false`), so
     /// no shipped/golden path can reach it.
     pub(crate) fn arm_eager_construction_default(&mut self) {
@@ -219,7 +202,6 @@ impl Interconnect {
         let before = self.clock.now();
         let _ = self.clock.read(); // clock += old pending; park 4
         self.advance_machine_t(before, self.clock.now());
-        probe!(self.dbg_isr("rd", addr));
         self.service_vram_dma();
         self.maybe_oam_bug(addr, kind);
         let v = self.read_no_tick(addr);
@@ -269,25 +251,6 @@ impl Interconnect {
                 self.repay_wake_skew();
             }
         }
-        probe!(
-            if matches!(addr, 0xFF68..=0xFF6B) && crate::probe::s5dbg_on() {
-                let (line, dot) = self.ppu.scan_pos();
-                eprintln!("SLOPGB pal{addr:04x} ly={line} dot={dot} v={v:02x}");
-            }
-        );
-        probe!(if addr == 0xFF0F && crate::probe::s5dbg_on() {
-            let (line, dot) = self.ppu.scan_pos();
-            eprintln!("SLOPGB ff0f ly={line} dot={dot} if={:02x}", v & 0x1f);
-        });
-        probe!(
-            if matches!(addr, 0xFE00..=0xFE9F | 0x8000..=0x9FFF) && crate::probe::s5dbg_on() {
-                let (line, dot) = self.ppu.scan_pos();
-                if line < 144 {
-                    let kind = if addr < 0xA000 { "vram" } else { "oam" };
-                    eprintln!("SLOPGB {kind} ly={line} dot={dot} v={v:02x}");
-                }
-            }
-        );
         v
     }
 
@@ -312,13 +275,6 @@ impl Interconnect {
         let before = self.clock.now();
         let _ = self.clock.write(conflict);
         self.advance_machine_t(before, self.clock.now());
-        probe!(self.dbg_isr("wr", addr));
-        probe!(
-            if matches!(addr, 0xFF68..=0xFF6B) && crate::probe::s5dbg_on() {
-                let (cly, cdot) = self.ppu.scan_pos();
-                eprintln!("SLOPGB palw{addr:04x} val={value:02x} ly={cly} dot={cdot}");
-            }
-        );
         // A racing DMA-register write beats a same-advance
         // HBlank-DMA steal: SameBoy runs `GB_hdma_run` only after the
         // current instruction completes (sm83_cpu.c:1718), so the write's
@@ -348,16 +304,6 @@ impl Interconnect {
             // keeps the gambatte mid-cycle staging ({2 SS, 1 DS}) — byte-identical
             // OFF; glitch lines commit immediately (no deferred fetch grid).
             let dots = self.stage_write_dots(addr);
-            probe!(
-                if matches!(addr, 0xFF40 | 0xFF43 | 0xFF4A | 0xFF4B) && crate::probe::s5dbg_on() {
-                    let (l, d) = self.ppu.scan_pos();
-                    eprintln!(
-                        "SLOPGB w{addr:04x} val={value:02x} ly={l} dot={d} clk={} ds={}",
-                        self.cycles,
-                        u8::from(self.double_speed)
-                    );
-                }
-            );
             self.ppu.stage_write(addr, value, dots);
         }
         self.maybe_oam_bug(addr, OamBugKind::Write);
@@ -496,7 +442,6 @@ impl Interconnect {
         let before = self.clock.now();
         self.clock.internal();
         self.advance_machine_t(before, self.clock.now()); // delta 0 (deferred)
-        probe!(self.dbg_isr("na", 0));
         self.service_vram_dma();
     }
 
@@ -506,7 +451,6 @@ impl Interconnect {
         let before = self.clock.now();
         let _ = self.clock.read();
         self.advance_machine_t(before, self.clock.now());
-        probe!(self.dbg_isr("ob", value));
         self.service_vram_dma();
         self.maybe_oam_bug(value, OamBugKind::Write);
     }
@@ -523,24 +467,5 @@ impl Interconnect {
     #[cfg(test)]
     pub(crate) fn cpu_clock_pending(&self) -> u32 {
         self.clock.pending()
-    }
-}
-
-/// SameBoy-port per-access ISR trace. Compiled only under `--features
-/// port_probe` and gated at runtime by `SLOPGB_ISRTRACE`; see [`crate::probe`].
-#[cfg(feature = "port_probe")]
-impl Interconnect {
-    fn dbg_isr(&self, tag: &str, addr: u16) {
-        if !crate::probe::isrtrace_on() {
-            return;
-        }
-        let (line, dot) = self.ppu.scan_pos();
-        if (134..=138).contains(&line) || line <= 3 {
-            eprintln!(
-                "SL2 {tag} a={addr:04x} ly={line} dot={dot} clk={} pend={}",
-                self.clock.now(),
-                self.clock.pending()
-            );
-        }
     }
 }

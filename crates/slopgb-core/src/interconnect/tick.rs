@@ -147,14 +147,6 @@ impl Interconnect {
             }
             if self.ppu.take_m0_rise() {
                 let second_half = obs_pre_edge(MID_PHASE, event_phase(EdgeKind::M0Rise, cc, 0));
-                probe!(if crate::probe::s5dbg_on() {
-                    let (l, d) = self.ppu.scan_pos();
-                    eprintln!(
-                        "SLOPGB m0rise ly={l} dot={d} cc={cc} mnow={} halted={}",
-                        self.machine_now,
-                        u8::from(self.cpu_halted)
-                    );
-                });
                 if self.tier2_reclock && (!self.model.is_cgb() || !self.double_speed) {
                     // The mode-0 rise's halt-wake visibility is a
                     // T-deadline on the SameBoy-exact 4k+2 sample grid — no
@@ -207,8 +199,7 @@ impl Interconnect {
                     // ground truth); broader generalisation is golden + all-oracle
                     // checked. Gated on `tier2_reclock` + `cpu_halted`.
                     const HALT_LY_PHASE_BY_CC: [u8; 4] = [1, 2, 0, 1];
-                    self.halt_ly_phase =
-                        crate::probe::tune_p2tbl(HALT_LY_PHASE_BY_CC[(cc as usize - 1) & 3], cc);
+                    self.halt_ly_phase = HALT_LY_PHASE_BY_CC[(cc as usize - 1) & 3];
                     // Base 0 (was 1). The boot-DIV +4 (the deferred hand-off
                     // frame installed at construction)
                     // advances the timer phase one M-cycle, which shifts this
@@ -233,7 +224,7 @@ impl Interconnect {
                     // exists on the DMG path — on CGB it is a pure +1 wake
                     // delay (broke the CGB `halt *_m0stat` want-0 legs,
                     // measured −15 on the two-bin).
-                    let p2hh: u8 = crate::probe::tune_p2hh(u8::from(!self.model.is_cgb()));
+                    let p2hh: u8 = u8::from(!self.model.is_cgb());
                     // The cc==4 hold is DMG-ONLY: it models the
                     // mid-cycle (w2) sampler's frame rotation, which does not
                     // exist on CGB (head sampler). For the CGB
@@ -482,16 +473,6 @@ impl Interconnect {
             } else {
                 HaltHdmaState::Low
             };
-            probe!(
-                if crate::probe::s5dbg_on() && self.hdma_mode == HdmaMode::ArmedLcdOn {
-                    let (l, d) = self.ppu.scan_pos();
-                    eprintln!(
-                        "SLOPGB halt-hdma ly={l} dot={d} st={:?} period={}",
-                        self.halt_hdma,
-                        self.ppu.hdma_period_law()
-                    );
-                }
-            );
         }
         self.engage_halt_gate(halted);
         if !halted {

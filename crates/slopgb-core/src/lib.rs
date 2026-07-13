@@ -12,9 +12,6 @@
 //! access of that cycle is performed. See `docs/ARCHITECTURE.md` for the full
 //! contract.
 
-#[macro_use]
-pub(crate) mod probe;
-
 pub(crate) mod apu;
 pub(crate) mod cartridge;
 pub(crate) mod cpu;
@@ -177,11 +174,11 @@ impl GameBoy {
     /// called. Off-path (and `set_tier2_reclock`-only) construction is
     /// unchanged.
     ///
-    /// Compiled only under `cfg(test)` or `--features port_probe` — the
+    /// Compiled only under `cfg(test)` or `--features flip_hooks` — the
     /// production frontend build cannot reference it, so the tier2 reclock can
     /// never be armed in a shipped binary (the golden-safe law, compile-enforced).
     #[doc(hidden)]
-    #[cfg(any(test, feature = "port_probe"))]
+    #[cfg(any(test, feature = "flip_hooks"))]
     pub fn new_with_reclock(model: Model, rom: Vec<u8>) -> Result<Self, CartridgeError> {
         Self::new_inner(model, rom, true, false)
     }
@@ -194,9 +191,9 @@ impl GameBoy {
     /// default THROUGH construction, so the boot-time propagation path (the
     /// deferred re-arm in [`Self::post_boot_inner`]) is exercised — the only
     /// difference the C3 flip introduces. Compiled only under `cfg(test)` /
-    /// `--features port_probe`; the production build cannot arm it.
+    /// `--features flip_hooks`; the production build cannot arm it.
     #[doc(hidden)]
-    #[cfg(any(test, feature = "port_probe"))]
+    #[cfg(any(test, feature = "flip_hooks"))]
     pub fn new_with_eager(model: Model, rom: Vec<u8>) -> Result<Self, CartridgeError> {
         Self::new_inner(model, rom, false, true)
     }
@@ -231,7 +228,7 @@ impl GameBoy {
         if tier2 {
             bus.set_tier2_reclock(true);
         }
-        // `new_with_eager` (test / `port_probe` harness) simulates the flipped
+        // `new_with_eager` (test / `flip_hooks` harness) simulates the flipped
         // struct-literal default without touching the global default: arm the
         // Interconnect's own eager fields, un-propagated, exactly as the raw
         // flip leaves them. Always false in production (the real flip lands via
@@ -822,10 +819,10 @@ impl GameBoy {
     /// port flips the default (`docs/sameboy-port/PORT-PLAN.md`); the gbtr S0
     /// kernel-pair acceptance spec drives it on to measure the convergence.
     ///
-    /// Compiled only under `cfg(test)` / `--features port_probe` (see
+    /// Compiled only under `cfg(test)` / `--features flip_hooks` (see
     /// [`Self::new_with_reclock`]) — the production build cannot arm it.
     #[doc(hidden)]
-    #[cfg(any(test, feature = "port_probe"))]
+    #[cfg(any(test, feature = "flip_hooks"))]
     pub fn set_leading_edge_reads(&mut self, on: bool) {
         self.bus.set_leading_edge_reads(on);
     }
@@ -835,10 +832,10 @@ impl GameBoy {
     /// Implies [`Self::set_leading_edge_reads`]. Off in production; the
     /// make-or-break thesis measurement drives it on (`PORT-PLAN.md` Tier 2).
     ///
-    /// Compiled only under `cfg(test)` / `--features port_probe` (see
+    /// Compiled only under `cfg(test)` / `--features flip_hooks` (see
     /// [`Self::new_with_reclock`]) — the production build cannot arm it.
     #[doc(hidden)]
-    #[cfg(any(test, feature = "port_probe"))]
+    #[cfg(any(test, feature = "flip_hooks"))]
     pub fn set_tier2_reclock(&mut self, on: bool) {
         self.bus.set_tier2_reclock(on);
     }
@@ -849,10 +846,10 @@ impl GameBoy {
     /// [`Self::set_tier2_reclock`] (no deferred clock / dispatch move) → the
     /// DMG-count-safe foundation. Off in production.
     ///
-    /// Compiled only under `cfg(test)` / `--features port_probe` (see
+    /// Compiled only under `cfg(test)` / `--features flip_hooks` (see
     /// [`Self::new_with_reclock`]) — the production build cannot arm it.
     #[doc(hidden)]
-    #[cfg(any(test, feature = "port_probe"))]
+    #[cfg(any(test, feature = "flip_hooks"))]
     pub fn set_eager_value(&mut self, on: bool) {
         self.bus.set_eager_value(on);
     }

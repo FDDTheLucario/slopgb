@@ -221,21 +221,6 @@ impl Ppu {
             && snap_ok
         {
             self.vis_early = true;
-            probe!(if crate::probe::s5dbg_on() && self.line < 144 {
-                let kind = if bare_flip {
-                    "bare"
-                } else if has_sprites {
-                    "spr"
-                } else if self.glitch_line {
-                    "glitch"
-                } else {
-                    "win"
-                };
-                eprintln!(
-                    "SLOPGB visflip ly={} dot={} kind={kind} proj={proj} lead={lead} el={early_lead}",
-                    self.line, self.dot
-                );
-            });
         }
         if proj <= lead && snap_ok {
             self.m0_src = true;

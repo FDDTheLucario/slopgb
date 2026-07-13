@@ -222,14 +222,6 @@ impl Ppu {
                     self.eff.render_lcdc = value;
                     self.render_lcdc_pending = None;
                 }
-                probe!(
-                    if (old ^ value) & LCDC_WIN_ENABLE != 0 && crate::probe::s5dbg_on() {
-                        eprintln!(
-                            "SLOPGB wlcdc ly={} dot={} old={old:02x} new={value:02x}",
-                            self.line, self.dot
-                        );
-                    }
-                );
                 // LCDC.5 cleared while the window machine is drawing:
                 // the window aborts at the pipeline view's commit point
                 // (gambatte ppu.cpp setLcdc clears win_draw_started

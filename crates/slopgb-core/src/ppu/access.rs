@@ -238,14 +238,3 @@ impl Ppu {
         self.dmg_compat = compat;
     }
 }
-
-/// SameBoy-port measurement side-effect: the `SLOPGB_LCDPH` LCD-phase
-/// injector. Compiled only under `--features port_probe`; see [`crate::probe`].
-#[cfg(feature = "port_probe")]
-impl Ppu {
-    /// Accumulate the LCD phase residual at a STOP speed-switch leave
-    /// (see [`Self::lcd_phase_hd`]). Tier2 STOP path only.
-    pub(crate) fn add_lcd_phase(&mut self, hd: i16) {
-        self.lcd_phase_hd += hd;
-    }
-}
