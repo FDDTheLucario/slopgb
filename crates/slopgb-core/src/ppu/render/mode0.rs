@@ -120,14 +120,13 @@ impl Ppu {
         // its 78→74 entry back-date) reproduces the flag-off cc+4 view
         // (`lcdon_timing-GS` STAT tables; gambatte enable_display / post-enable
         // m3stat). `bare_flip` is false on the glitch line, so it lands in the +4
-        // arm. DS excluded (the DS read offset is 2, deferred). `leading-edge`
-        // is off in production, so `vis_early` is never set there (byte-identical).
-        // `vis_early` anticipates the visible mode→0 flip on the eager
-        // leading-edge read; never set in production (`!leading-edge`) →
-        // byte-identical OFF. The IRQ side (`mode_for_interrupt`/`prev_done`,
-        // reclock.rs) keys on `line_render_done`, never `vis_early`, so the
-        // counter-pinned dispatch dot is untouched. Bare-flip lines lead the
-        // dispatch by 3, others by 4; single-speed only (`!self.ds`).
+        // arm. DS excluded (the DS read offset is 2, deferred). `vis_early`
+        // anticipates the visible mode→0 flip by the same dots the eager read
+        // samples early, and IS set below on single-speed lines (`!self.ds`).
+        // The IRQ side (`mode_for_interrupt`/`prev_done`, reclock.rs) keys on
+        // `line_render_done`, never `vis_early`, so the counter-pinned dispatch
+        // dot is untouched. Bare-flip lines lead the dispatch by 3, others by 4;
+        // single-speed only (`!self.ds`).
         let early_lead = if bare_flip { 3 } else { 4 };
         if !self.ds && !self.vis_early && proj <= lead + early_lead {
             self.vis_early = true;
@@ -142,12 +141,9 @@ impl Ppu {
             // (the measured window-length law), PAST this counter-pinned dispatch
             // dot; slopgb's window flip is flat at ~261. Record the hold target so
             // `vis_mode` keeps reading mode 3 until it, WITHOUT moving the dispatch
-            // (`line_render_done`). Win-active lines only (`bare_flip` lines keep
-            // the eighth-grid lever); tier2-gated, so `vis_hold_until` stays 0
-            // in production (byte-identical OFF). Currently inert on its own (the
-            // want=3 rows render bare via the WY-latch); it is the
-            // visible-mode half of the parallel window-length model. See the
-            // `vis_hold_until` field docs.
+            // (`line_render_done`). Set here for win-active single-speed lines
+            // (`!self.ds && self.render.win_active`); it is the visible-mode half
+            // of the window-length model. See the `vis_hold_until` field docs.
             if !self.ds && self.render.win_active {
                 self.vis_hold_until = 263 + u16::from(self.scx & 7);
             }

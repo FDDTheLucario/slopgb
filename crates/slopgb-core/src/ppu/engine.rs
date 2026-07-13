@@ -218,12 +218,12 @@ impl Ppu {
             self.start_line();
         }
         self.step_dot();
-        // Maintain the decoupled interrupt-facing mode (inert — not yet
-        // consulted; the STAT engine that reads it runs on the flag-on path).
-        // Runs after step_dot so it sees this dot's `line_render_done` flip.
+        // Maintain the decoupled interrupt-facing mode (`mode_for_interrupt`),
+        // consulted by the STAT engine on the very next line. Runs after
+        // step_dot so it sees this dot's `line_render_done` flip.
         self.update_mode_for_interrupt();
-        // The SameBoy `GB_STAT_update` rising-edge engine off the decoupled
-        // `mode_for_interrupt` + the LYC latch.
+        // The SameBoy `GB_STAT_update` rising-edge engine (production STAT
+        // dispatch), off the decoupled `mode_for_interrupt` + the LYC latch.
         self.stat_update_tick();
         // Age the dispatch-ack squash window.
         self.ack_squash_ppu = self.ack_squash_ppu.saturating_sub(1);
@@ -232,16 +232,16 @@ impl Ppu {
         std::mem::take(&mut self.pending_if)
     }
 
-    /// Advance one 8 MHz HALF-dot. The pixel-pipe
-    /// reclock's grain: two half-dots per whole dot (single speed = 2 half-dots
-    /// per CPU-T; double speed = 1). The first half of a dot (`dhalf 0→1`) does
-    /// no structural work and the second (`dhalf 1→0`) runs the whole-dot
-    /// [`Self::tick`] body, so a run of aligned half-dots is byte-identical to
-    /// the whole-dot advance; the seam is that later stages move a
-    /// mode-3-exit / read boundary onto the odd half-dot. Called only on the
-    /// tier2 deferred path ([`Interconnect::advance_machine_t`]); production
-    /// never calls it, so the flag-off path is untouched. Returns the IF bits
-    /// produced (0 on the non-completing half).
+    /// Advance one 8 MHz HALF-dot — the eager clock's PPU grain: two half-dots
+    /// per whole dot (single speed = 2 half-dots per CPU-T; double speed = 1).
+    /// The first half of a dot (`dhalf 0→1`) does no structural work and the
+    /// second (`dhalf 1→0`) runs the whole-dot [`Self::tick`] body, so a run of
+    /// aligned half-dots is byte-identical to the whole-dot advance; the seam is
+    /// that a mode-3-exit / read boundary can sit on the odd half-dot. This is
+    /// the sole PPU tick path: the per-M-cycle machine advance
+    /// (`interconnect::tick`), the mid-M-cycle write strobe (`interconnect::bus`)
+    /// and the STOP dance (`interconnect::speed`) all drive it. Returns the IF
+    /// bits produced (0 on the non-completing half).
     pub(crate) fn tick_half(&mut self) -> u8 {
         if self.dhalf == 0 {
             self.dhalf = 1;

@@ -1,16 +1,15 @@
-//! The leading-edge STAT IRQ engine (SameBoy `GB_STAT_update`
-//! port) — the `stat_update_tick` rising-edge dispatch + vblank/OAM direct
-//! pokes, the halt-commit masks, the decoupled `mode_for_interrupt`
-//! derivation, and the delayed `ly_for_comparison` LYC input. Second
-//! `impl Ppu` block split out of `stat_irq.rs` for the <1000-line cap;
-//! flag-OFF production never runs this path — see the parent `stat_irq.rs`
-//! for the legacy gambatte event engine.
+//! The STAT IRQ engine (SameBoy `GB_STAT_update` port) — the
+//! `stat_update_tick` rising-edge dispatch + vblank/OAM direct pokes, the
+//! halt-commit masks, the decoupled `mode_for_interrupt` derivation, and the
+//! delayed `ly_for_comparison` LYC input. This is the sole, production STAT
+//! IRQ path; it is a second `impl Ppu` block split out of `stat_irq.rs` for
+//! the <1000-line cap (`use super::*`, so `super == ppu`).
 
 use super::*;
 
 impl Ppu {
-    /// SameBoy `GB_STAT_update` (`display.c:523`), the flag-on replacement for
-    /// [`Self::stat_events_tick`]. There is a single STAT
+    /// SameBoy `GB_STAT_update` (`display.c:523`), the production STAT
+    /// interrupt dispatch. There is a single STAT
     /// interrupt *line* — the OR of the one mode source selected by
     /// `mode_for_interrupt` and the LYC source — and `IF |= STAT` fires only on
     /// its 0→1 rising edge (the classic STAT-blocking model: a second source
@@ -26,13 +25,12 @@ impl Ppu {
     /// the interconnect's OAM-DMA freeze. The LCD-off guard is the tick's
     /// `!enabled` early-return, which holds the line low.
     ///
-    /// Still uses [`Self::refresh_cmp`] for the *readable* FF41 mode/LYC bits so
-    /// register reads stay identical to the flag-off path; only the IRQ event
-    /// source changes. The per-source emission masks (`stat_late` /
-    /// `stat_halt_late` / `m0_rise`) that the gambatte engine sets for the
+    /// Still uses [`Self::refresh_cmp`] for the *readable* FF41 mode/LYC bits, so
+    /// register reads stay decoupled from the IRQ event source. The per-source
+    /// emission masks (`stat_late` / `stat_halt_late` / `m0_rise`) for the
     /// halt-wake interaction have no `GB_STAT_update` equivalent and are left
-    /// unset here (so the flag-on path does not yet reproduce the halt-late
-    /// commit timing).
+    /// unset here — so this engine does not yet reproduce the halt-late commit
+    /// timing (a known residual; see the DS / halt-wake levers in CLAUDE.md).
     pub(super) fn stat_update_tick(&mut self) {
         // Resolve the staged CGB SS FF41 two-phase engine view (see
         // the `eng_stat_pending` field doc): phase-1 rises fire (a mode
@@ -493,9 +491,9 @@ impl Ppu {
     /// selects the OAM (mode-2) source there and the `GB_STAT_update` line never
     /// rises for it. SameBoy raises the 144-entry pulse as a **direct `IF |= 2`
     /// poke** (`display.c:2160`), independent of `stat_interrupt_line`, NOT a
-    /// line rise. This reproduces it on the flag-on path with the *same* guard
-    /// and commit masks the flag-off [`Self::stat_events_tick`] engine uses (the
-    /// `vblank_stat_intr-GS` DMG / `-C` CGB lift).
+    /// line rise. This reproduces it with the *same* guard and commit masks the
+    /// removed gambatte STAT event engine used (the `vblank_stat_intr-GS` DMG /
+    /// `-C` CGB lift).
     ///
     /// The visible-line m2 pulses (lines 1-143 dot 0) are already covered by the
     /// rising-edge engine — its level-OR naturally reproduces `m2_pulse_fires`'
@@ -525,23 +523,22 @@ impl Ppu {
             }
         }
         // The DMG per-line vblank OAM pulses at dot 12 (`display.c:2185`;
-        // `stat_events_tick`'s 145-153 block; `intr_1_2_timing-GS`) are
-        // DEFERRED with the rest of the atomic read-frame work. Adding them on
-        // the flag-on path was MEASURED net-negative: the extra dot-12 IF
-        // regresses 6 SameBoy-PASSING rows
+        // `intr_1_2_timing-GS`) are DEFERRED with the rest of the atomic
+        // read-frame work. Adding them here was MEASURED net-negative: the extra
+        // dot-12 IF regresses 6 SameBoy-PASSING rows
         // (gambatte ly0/lycint152_m2irq, lycm2int/lyc0m2int_m2irq,
         // window/late_enable_afterVblank ×4 — all in the SameBoy gap list).
-        // SameBoy fires these pulses too, so they are faithful, but flag-on's
-        // cc+4 read/halt frame mis-places the resulting read until the global
+        // SameBoy fires these pulses too, so they are faithful, but this frame's
+        // cc+4 read/halt placement mis-places the resulting read until the global
         // reclock lands — exactly the atomic-convergence trap. The 144:0
         // entry pulse above does NOT have this problem (zero lift lost,
         // +8 gambatte / +5 mooneye), so it banks standalone.
     }
 
     /// The halt/interrupt-sample commit masks for the flag-on
-    /// [`Self::stat_update_tick`] rising edge, the leading-edge-frame analogue of
-    /// the per-source `stat_late` / `stat_halt_late` / `m0_rise` masks the
-    /// gambatte [`Self::stat_events_tick`] engine sets (see its truth table).
+    /// [`Self::stat_update_tick`] rising edge, the analogue of the per-source
+    /// `stat_late` / `stat_halt_late` / `m0_rise` masks the removed gambatte
+    /// STAT event engine set (see the truth table in `stat_irq.rs`).
     /// `mfi` is the [`Ppu::mode_for_interrupt`] that drove this 0→1 rise, so it
     /// names the source.
     ///
@@ -632,12 +629,10 @@ impl Ppu {
         // models SameBoy's mode-0 IRQ 1 dot after the visible flip
         // (`display.c:2108` vs `:2091`), but it over-applies in our frame —
         // `line_render_done` is ALREADY the gambatte IRQ dot here, so the lag put
-        // the `StatUpdate` mode-0 STAT IF one dot late vs `stat_events_tick` and
-        // broke `hblank_ly_scx_timing` flag-on (kernel `m0int` and the canonical
-        // both hold at 254; only the 252 full-SameBoy-frame move regresses
-        // them). Flag-OFF keeps the
-        // lagged `prev_done`; `stat_events_tick` never reads `mode_for_interrupt`,
-        // so production is byte-identical.
+        // the `StatUpdate` mode-0 STAT IF one dot late and broke
+        // `hblank_ly_scx_timing` (kernel `m0int` and the canonical both hold at
+        // 254; only the 252 full-SameBoy-frame move regresses them). So
+        // `prev_done` reads `line_render_done` directly, without the lag.
         let prev_done = self.enabled && self.line <= 143 && self.line_render_done;
         self.mode_for_interrupt = if !self.enabled {
             0
@@ -655,8 +650,7 @@ impl Ppu {
             // E2 — `enable_display/ly0_m0irq`, `irq_precedence/late_m0irq_retrigger`).
             // Select NONE in the prefix so no mode source contributes (LYC still
             // can — `level` ORs them); keep `vis_mode` (the real post-render m0,
-            // or mode 3) elsewhere. `mode_for_interrupt` is inert flag-OFF
-            // (`stat_events_tick` never reads it), so production is byte-identical.
+            // or mode 3) elsewhere.
             //
             // SINGLE SPEED only (`!ds`): the recovered slice is the single-speed
             // `enable_display/ly0_m0irq_trigger` (+2 flag-on, SameBoy-confirmed

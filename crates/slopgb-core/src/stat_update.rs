@@ -1,24 +1,20 @@
 //! SameBoy `GB_STAT_update` rising-edge STAT-interrupt line — wired into the
-//! PPU as `Ppu.stat_update`, the STAT-line tracker for the leading-edge path.
+//! PPU as `Ppu.stat_update`, the production STAT-line tracker.
 //!
-//! On the flag-off (production) path the STAT IRQ is
-//! raised by the gambatte-derived per-source event engine
-//! (`ppu/stat_irq.rs::stat_events_tick`), a set of mode/LYC *pulse* predicates.
-//! SameBoy instead keeps a single **level** — `stat_interrupt_line` = the OR of
-//! the one mode source selected by [`mode_for_interrupt`](crate::ppu) and the
-//! LYC source — and fires `IF |= STAT` only on its **0→1 rising edge**
+//! SameBoy keeps a single **level** — `stat_interrupt_line` = the OR of the one
+//! mode source selected by [`mode_for_interrupt`](crate::ppu) and the LYC
+//! source — and fires `IF |= STAT` only on its **0→1 rising edge**
 //! (`display.c:523-560`). That is the classic STAT-blocking model: while the
 //! line is already high from one source, a second source going high produces
-//! no new interrupt.
+//! no new interrupt. (This replaced an earlier gambatte-derived per-source
+//! event engine; the fork collapse removed that alternate path, so this is now
+//! the sole STAT IRQ source.)
 //!
 //! This module is the executable, unit-tested encoding of that rising-edge
 //! core. It is a pure function of the *decoupled* interrupt mode (the
 //! [`Ppu::mode_for_interrupt`](crate::ppu) field) plus the STAT register's
-//! enable bits and the LYC match — exactly the inputs SameBoy reads — so the
-//! swap is "drive this from the decoupled mode each dot and OR its return
-//! into IF" rather than a from-scratch rewrite. It drives the STAT line on the
-//! flag-on (`leading-edge`) path; production keeps that flag off, so it
-//! changes nothing there.
+//! enable bits and the LYC match — exactly the inputs SameBoy reads. It drives
+//! the STAT line every dot (`stat_update_tick`).
 
 /// `mode_for_interrupt == -1`: the deliberate "no mode source" state SameBoy
 /// uses to force the STAT line low between transitions (`display.c:1799`,

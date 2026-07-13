@@ -18,7 +18,7 @@
 //! | dot          | event |
 //! |--------------|-------|
 //! | 0            | LY := line; OAM reads blocked; LYC compare invalid (flag 0); STAT mode reads 0; **OAM (mode-2) IRQ pulse** on lines 1-143 — readable in the same M-cycle but a second-half commit: the halt-exit sampler *and* the running CPU's same-cycle interrupt sample miss it for one M-cycle (SameBoy display.c raises the OAM STAT interrupt 1 T-cycle before STAT changes; the mealybug per-line handlers and wilbertpol intr_2_timing pin the views). The OAM *blocking level* rises here and holds through mode 3, blocking mode-0/LYC edges under it (gambatte m2int_m0irq/lycm2int) |
-//! | 4            | STAT mode reads 2; OAM writes blocked; LYC compare valid (line 0's OAM pulse sits here, with its own dispatch-late/m1-blocked rules — see `stat_events_tick`) |
+//! | 4            | STAT mode reads 2; OAM writes blocked; LYC compare valid (line 0's OAM pulse sits here, with its own dispatch-late/m1-blocked rules — see `stat_update_tick`) |
 //! | 80           | VRAM reads blocked (the serial scan's last entry latch sits at dot 81 — see §Dot-serial OAM scan) |
 //! | 84           | STAT mode reads 3; VRAM writes blocked |
 //! | P − 2        | mode 0: STAT reads 0, mode-0 IRQ source asserts, OAM+VRAM unblock, OAM blocking level drops — two dots before the pipe end P = 256 + SCX%8 + sprite/window penalties (three on sprite-laden DMG lines, whose first OBJ fetch costs 6 dots: the flip stays on its mooneye dot while the pixels shift — see `obj_fetch_base`); `m0_flip_events` in render.rs: the gbmicrotest hblank_int/int_hblank grids pin the IRQ dot, mooneye intr_2_mode0_timing/_sprites and the gbmicrotest ppu_sprite0/win*_b grids the flip — both at 254 + SCX%8 on a bare line. The pipe-end anchors (HBlank-DMA trigger, CGB palette-RAM blocking) stay at P |
@@ -430,13 +430,11 @@ pub struct Ppu {
     /// D calls to [`Self::tick`] the observable state is state(D).
     dot: u16,
     /// Half-dot phase within the current dot (0 or 1), the 8 MHz sub-dot grain
-    /// of the pixel-pipe reclock. Advanced by
-    /// [`Self::tick_half`] on the tier2 deferred path only; production
-    /// ([`Self::tick`], the whole-dot advance) never touches it and leaves it 0
-    /// so the flag-off path is byte-identical. `dhalf == 0` after a
-    /// dot-completing half-dot (the whole-dot work ran), `1` mid-dot (a DS read
-    /// landing on an odd CPU-T resolves here — the sub-dot read position
-    /// samples).
+    /// of the pixel-pipe reclock. Advanced by [`Self::tick_half`], the sole PPU
+    /// tick path; a run of aligned half-dots leaves it at 0 on every whole-dot
+    /// boundary. `dhalf == 0` after a dot-completing half-dot (the whole-dot
+    /// work ran), `1` mid-dot (a DS read landing on an odd CPU-T resolves here —
+    /// the sub-dot read position samples).
     dhalf: u8,
     /// The persistent LCD phase residual, in 8 MHz half-dots: the
     /// accumulated difference between SameBoy's CPU-grid shift at each STOP
@@ -486,8 +484,8 @@ pub struct Ppu {
     pending_if: u8,
     /// The STAT IF bit just produced came from the line-0 OAM rise, which
     /// sits in the second half of its M-cycle: readable immediately, but
-    /// it misses the CPU's interrupt sample for that one cycle (see
-    /// `stat_events_tick`). Drained by the interconnect via
+    /// it misses the CPU's interrupt sample for that one cycle (the SameBoy
+    /// timer-`if_late` shape). Drained by the interconnect via
     /// [`Self::take_stat_late`].
     stat_late: bool,
     /// The STAT IF bit just produced was a second-half commit (a line-start
@@ -601,8 +599,7 @@ pub struct Ppu {
     /// blocking level gaplessly, and drops at dot 4 of the next line
     /// when the mode-2 window becomes visible.
     m0_src: bool,
-    /// `m0_src` rose on the current dot: the rise emitted by
-    /// `stat_events_tick` this tick is the mode-0 event and carries the
+    /// `m0_src` rose on the current dot: the mode-0 event this tick carries the
     /// half-cycle halt law (see [`Self::take_m0_rise`]).
     m0_rise_dot: bool,
     /// The **interrupt-facing** mode, decoupled from the
@@ -612,22 +609,20 @@ pub struct Ppu {
     /// **one dot before** the visible byte does (lines 1-143, `display.c:1787`
     /// vs `:1792`), and the mode-0 IRQ mode goes to 0 **one dot after** the
     /// visible byte does (`display.c:2108` vs `:2091`). That 2-dot relative
-    /// swing is what separates the `m2int`/`m0int` kernel pair. Consumed by the
-    /// [`StatUpdate`](crate::stat_update) engine on the flag-on path
-    /// (`stat_update_tick`); on the flag-off (production) path it is maintained
-    /// every dot but read only by the decoupling test. Mirrors `vis_mode` on
-    /// VBlank / glitch lines (anchor swing not modelled there yet).
+    /// swing is what separates the `m2int`/`m0int` kernel pair. Consumed every
+    /// dot by the production [`StatUpdate`](crate::stat_update) engine
+    /// (`stat_update_tick`). Mirrors `vis_mode` on VBlank / glitch lines
+    /// (anchor swing not modelled there yet).
     mode_for_interrupt: u8,
     /// One-dot-delayed mirror of `line_render_done`, the substrate for the
     /// mode-0 lag above: `line_render_done` rises on the visible 3→0 flip
     /// dot, so its previous-dot value is still false there and true one dot
     /// later — exactly the dot the IRQ-facing mode transitions to 0.
     mfi_m0_prev: bool,
-    /// Flag-on path only: SameBoy's `GB_STAT_update`
-    /// rising-edge STAT interrupt line ([`StatUpdate`](crate::stat_update)),
-    /// driven each dot from `mode_for_interrupt` | the LYC latch and replacing
-    /// `stat_events_tick` when `leading-edge` is on. Inert (never read)
-    /// while the flag is off, so it changes nothing in production.
+    /// SameBoy's `GB_STAT_update` rising-edge STAT interrupt line
+    /// ([`StatUpdate`](crate::stat_update)), driven each dot from
+    /// `mode_for_interrupt` | the LYC latch. This is the production STAT IRQ
+    /// engine; it replaced the gambatte per-source event engine, since removed.
     stat_update: crate::stat_update::StatUpdate,
     /// SameBoy `lyc_interrupt_line` (`display.c:534`): the LYC==LY STAT source
     /// as a *latch* — re-evaluated to `ly_for_comparison == LYC` whenever

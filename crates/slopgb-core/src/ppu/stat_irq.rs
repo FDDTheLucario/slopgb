@@ -53,15 +53,16 @@ impl Ppu {
             2
         } else if !(self.line_render_done || self.vis_early) {
             // `vis_early` back-dates the CPU-visible mode→0 boundary to
-            // SameBoy's frame on the flag-on path (3 dots before the dispatch
-            // flip, bare single-speed lines); always false in production, so
-            // this reads `line_render_done` exactly. See the field docs.
+            // SameBoy's frame (3-4 dots before the dispatch flip on bare
+            // single-speed lines; set in `m0_flip_events`). Load-bearing: it is
+            // what moves the visible EXIT ahead of the counter-pinned dispatch
+            // dot, so do not fold this term away. See the field docs.
             3
         } else if self.dot < self.vis_hold_until {
             // Window vis-HOLD: a triggering window extends the CPU-visible
             // mode-3 PAST the dispatch flip to SameBoy's `263 + SCX&7` exit
-            // (`vis_hold_until`, set in `m0_flip_events`). 0 (no hold) in
-            // production, so byte-identical OFF. See the `vis_hold_until` docs.
+            // (`vis_hold_until`, set in `m0_flip_events` for win-active
+            // single-speed lines; 0 = no hold). See the `vis_hold_until` docs.
             3
         } else {
             0
@@ -141,7 +142,7 @@ impl Ppu {
 
     /// Whether the STAT IF bit handed out by the last [`Self::tick`] came
     /// from the line-0 OAM rise and must miss the CPU's interrupt sample
-    /// for the current M-cycle (see `stat_events_tick`).
+    /// for the current M-cycle (the SameBoy timer-`if_late` shape).
     pub(crate) fn take_stat_late(&mut self) -> bool {
         std::mem::take(&mut self.stat_late)
     }
@@ -347,7 +348,7 @@ impl Ppu {
             // gap (gambatte mstat_irq.h doM0Event: the m2 enable blocks
             // the m0 IRQ — m2int_m0irq_*_out0; the level also blocks the
             // LYC dot-4 edge, lycm2int). The IRQ itself is an *event* at
-            // the line-start dots — see `stat_events_tick` (SameBoy display.c
+            // the line-start dots — see `stat_update_tick` (SameBoy display.c
             // mode_for_interrupt pulse). Line 0's level starts at dot 4
             // with the LY/LYC validity.
             let oam_window = self.line <= 143
@@ -365,8 +366,7 @@ impl Ppu {
             // on *both* families (wilbertpol intr_2_timing rounds 5-7 pin
             // MGB and CGB alike; gbmicrotest line_144_oam_int_b/c/d pin
             // DMG — `vblank_stat_intr-GS` sees it together with the
-            // vblank IF through the DMG halt-late commit, see
-            // `stat_events_tick`).
+            // vblank IF through the DMG halt-late commit).
             let pulse144 = self.line == 144 && self.dot == 0;
             // DMG: the OAM source also pulses on every later vblank line
             // (`intr_1_2_timing-GS`: mode1→mode2 IRQ distance is 464 dots —
