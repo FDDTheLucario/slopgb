@@ -31,7 +31,6 @@ pub struct Theme {
     pub hilight: u32,
     /// Break/locked highlight — consumed when the debugger gains its break
     /// state; part of bgb's documented palette.
-    #[allow(dead_code)]
     pub freeze: u32,
     /// Frame / outline colour (dialog borders, box outlines).
     pub border: u32,
@@ -40,16 +39,6 @@ pub struct Theme {
     pub panel: u32,
     /// Button fill (unpressed).
     pub button_face: u32,
-    /// Raised-bevel light edge (top/left of a 3-D control). Not read by any
-    /// current draw call — every built-in preset draws flat
-    /// (`bevel_light == bevel_dark == border`); reserved for a future
-    /// raised/sunken button style and for the custom-theme API.
-    #[allow(dead_code)]
-    pub bevel_light: u32,
-    /// Raised-bevel dark edge (bottom/right of a 3-D control). See
-    /// [`Self::bevel_light`].
-    #[allow(dead_code)]
-    pub bevel_dark: u32,
     /// The one tasteful "brand" accent — a checkbox/radio's checked mark.
     pub accent: u32,
     /// Hovered/selected menu-row background — distinct from [`Self::current`]
@@ -83,8 +72,6 @@ impl Theme {
         border: 0x0080_8080,
         panel: 0x00FF_FFFF,         // == bg
         button_face: 0x00FF_FFFF,   // == bg
-        bevel_light: 0x0080_8080,   // == border (flat)
-        bevel_dark: 0x0080_8080,    // == border (flat)
         accent: 0x0000_0000,        // == text
         selection_bg: 0x0000_00FF,  // == current
         selection_fg: 0x00FF_FFFF,  // == bg
@@ -108,8 +95,6 @@ impl Theme {
         border: 0x00DA_DCE0,
         panel: 0x00FF_FFFF,
         button_face: 0x00ED_EDF0,
-        bevel_light: 0x00DA_DCE0, // flat: == border
-        bevel_dark: 0x00DA_DCE0,  // flat: == border
         accent: 0x001A_73E8,
         selection_bg: 0x001A_73E8,
         selection_fg: 0x00FF_FFFF,
@@ -129,8 +114,6 @@ impl Theme {
         border: 0x005F_6368,
         panel: 0x002D_2E31,
         button_face: 0x003C_4043,
-        bevel_light: 0x005F_6368, // flat: == border
-        bevel_dark: 0x005F_6368,  // flat: == border
         accent: 0x008A_B4F8,
         selection_bg: 0x008A_B4F8,
         selection_fg: 0x0020_2124,
@@ -138,29 +121,7 @@ impl Theme {
         scrollbar: 0x0080_868B,
     };
 
-    /// Every role name [`Self::from_pairs`]/[`Self::to_pairs`] recognize, in
-    /// field-declaration order. `to_pairs`/`role` round out the theming API's
-    /// export direction; unused by the running app itself (no export UI yet).
-    #[allow(dead_code)]
-    const ROLE_NAMES: [&'static str; 16] = [
-        "bg",
-        "text",
-        "current",
-        "breakpoint",
-        "hilight",
-        "freeze",
-        "border",
-        "panel",
-        "button_face",
-        "bevel_light",
-        "bevel_dark",
-        "accent",
-        "selection_bg",
-        "selection_fg",
-        "disabled_text",
-        "scrollbar",
-    ];
-
+    /// Every role name [`Self::from_pairs`] recognizes.
     fn role_mut(&mut self, name: &str) -> Option<&mut u32> {
         Some(match name {
             "bg" => &mut self.bg,
@@ -172,36 +133,11 @@ impl Theme {
             "border" => &mut self.border,
             "panel" => &mut self.panel,
             "button_face" => &mut self.button_face,
-            "bevel_light" => &mut self.bevel_light,
-            "bevel_dark" => &mut self.bevel_dark,
             "accent" => &mut self.accent,
             "selection_bg" => &mut self.selection_bg,
             "selection_fg" => &mut self.selection_fg,
             "disabled_text" => &mut self.disabled_text,
             "scrollbar" => &mut self.scrollbar,
-            _ => return None,
-        })
-    }
-
-    #[allow(dead_code)]
-    fn role(&self, name: &str) -> Option<u32> {
-        Some(match name {
-            "bg" => self.bg,
-            "text" => self.text,
-            "current" => self.current,
-            "breakpoint" => self.breakpoint,
-            "hilight" => self.hilight,
-            "freeze" => self.freeze,
-            "border" => self.border,
-            "panel" => self.panel,
-            "button_face" => self.button_face,
-            "bevel_light" => self.bevel_light,
-            "bevel_dark" => self.bevel_dark,
-            "accent" => self.accent,
-            "selection_bg" => self.selection_bg,
-            "selection_fg" => self.selection_fg,
-            "disabled_text" => self.disabled_text,
-            "scrollbar" => self.scrollbar,
             _ => return None,
         })
     }
@@ -239,31 +175,13 @@ impl Theme {
         }
         Ok(t)
     }
-
-    /// Every role as `(name, "0xRRGGBB")`, in [`Self::ROLE_NAMES`] order —
-    /// the inverse of [`Self::from_pairs`] (round-trips). The theming API's
-    /// export direction; no export UI calls it yet, but it's exercised by the
-    /// round-trip test.
-    #[allow(dead_code)]
-    #[must_use]
-    pub fn to_pairs(self) -> Vec<(&'static str, String)> {
-        Self::ROLE_NAMES
-            .iter()
-            .map(|&name| {
-                (
-                    name,
-                    format!("0x{:06X}", self.role(name).unwrap_or(0) & 0xFF_FFFF),
-                )
-            })
-            .collect()
-    }
 }
 
 /// A [`Theme::from_pairs`] failure: an unrecognized role name, or a role
 /// whose value isn't `0x` + 6 hex digits. Always returned, never panics.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ThemeParseError {
-    /// A key that isn't one of [`Theme::ROLE_NAMES`].
+    /// A key that isn't a role [`Theme::from_pairs`] recognizes.
     UnknownRole(String),
     /// A role whose value didn't parse as `0xRRGGBB`.
     BadValue { role: String, value: String },

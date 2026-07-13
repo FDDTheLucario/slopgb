@@ -7,26 +7,30 @@ tool window already took `&Theme` (bgb-clone-plan Layer B/C), so swapping the ac
 palette recolors the whole UI with zero call-site churn beyond the handful of
 role-repoints below.
 
-## Role set (16, additive over the original 7)
+## Role set (13, additive over the original 7)
 
 `bg`/`text`/`current`/`breakpoint`/`hilight`/`freeze`/`border` are the original bgb
 roles, unchanged. New: `panel` (recessed field bg), `button_face` (unpressed button
-fill), `bevel_light`/`bevel_dark` (raised-bevel edges — **unwired**: every preset
-draws flat, `bevel_light == bevel_dark == border`; reserved for a future 3-D control
-style + the custom-theme API), `accent` (checkbox/radio checked-mark), `selection_bg`/
-`selection_fg` (hovered menu row — split from `current`, the debugger's current-PC-row
-color, so a custom theme can tell "hovered" and "current instruction" apart),
-`disabled_text` (greyed/inert control text), `scrollbar` (thumb colour).
+fill), `accent` (checkbox/radio checked-mark), `selection_bg`/`selection_fg` (hovered
+menu row — split from `current`, the debugger's current-PC-row color, so a custom
+theme can tell "hovered" and "current instruction" apart), `disabled_text`
+(greyed/inert control text), `scrollbar` (thumb colour).
 
 `Theme::BGB` fills every new role with the value the pre-theming draw code used at
-that call site (`panel=button_face=bg`, `bevel_*=border`, `accent=text`,
-`selection_bg=current`, `selection_fg=bg`, `disabled_text=scrollbar=hilight`) — so
-repointing a call site at the new role (`ui/widgets.rs` checkbox/radio-dot fill →
-`accent`, button fill → `button_face`, scrollbar thumb → `scrollbar`; `ui/menu.rs`
-hover row → `selection_bg`/`selection_fg`, disabled row → `disabled_text`;
-`ui/dialog.rs` input-field fill → `panel`; `windows/options.rs` `fg()` disabled colour
-→ `disabled_text`, button-row fill → `button_face`) is pixel-identical for `BGB`.
+that call site (`panel=button_face=bg`, `accent=text`, `selection_bg=current`,
+`selection_fg=bg`, `disabled_text=scrollbar=hilight`) — so repointing a call site at
+the new role (`ui/widgets.rs` checkbox/radio-dot fill → `accent`, button fill →
+`button_face`, scrollbar thumb → `scrollbar`; `ui/menu.rs` hover row →
+`selection_bg`/`selection_fg`, disabled row → `disabled_text`; `ui/dialog.rs`
+input-field fill → `panel`; `windows/options.rs` `fg()` disabled colour →
+`disabled_text`, button-row fill → `button_face`) is pixel-identical for `BGB`.
 `Theme::CLASSIC == Theme::BGB` (offered as a selectable choice, not just the default).
+
+A prior revision also carried `bevel_light`/`bevel_dark` (raised-bevel edges) and a
+`to_pairs`/`role`/`ROLE_NAMES` export API; both were dead (no draw call read the bevel
+roles, no export UI called `to_pairs`) and were deleted (YAGNI) — `from_pairs` (the
+import half, live via `settings_file::load_custom_themes`) stands alone on `role_mut`.
+A theme file setting `bevel_light`/`bevel_dark` now honestly gets `UnknownRole`.
 
 ## Palettes (hex, XRGB8888)
 
@@ -38,7 +42,7 @@ hover row → `selection_bg`/`selection_fg`, disabled row → `disabled_text`;
 | breakpoint | `D93025` | `F28B82` |
 | hilight | `9AA0A6` | `9AA0A6` |
 | freeze | `F9AB00` | `FDD663` |
-| border / bevel_light / bevel_dark | `DADCE0` | `5F6368` |
+| border | `DADCE0` | `5F6368` |
 | panel | `FFFFFF` | `2D2E31` |
 | button_face | `EDEDF0` | `3C4043` |
 | selection_fg | `FFFFFF` | `202124` |
@@ -46,9 +50,9 @@ hover row → `selection_bg`/`selection_fg`, disabled row → `disabled_text`;
 | scrollbar | `C4C7C5` | `80868B` |
 
 One accent family (blue) shared by `current`/`accent`/`selection_bg` in both; flat
-borders (`bevel_light == bevel_dark == border`, no raised/sunken 3-D effect — drawing
-one wasn't needed to hit "contemporary" and would only ever be a pixel recolor if
-added later, never a geometry change).
+borders (no raised/sunken 3-D bevel effect — drawing one wasn't needed to hit
+"contemporary" and would only ever be a pixel recolor if added later, never a
+geometry change).
 
 ## `ThemeChoice` + resolution
 
@@ -86,9 +90,8 @@ hand-edited config can't wedge startup.
 
 `Theme::from_pairs(&[(role, "0xRRGGBB"), ...]) -> Result<Theme, ThemeParseError>`:
 missing roles fall back to `Theme::LIGHT`'s value; an unknown role name or unparseable
-value is a `ThemeParseError` (`UnknownRole`/`BadValue`), never a panic. `Theme::
-to_pairs(self) -> Vec<(&str, String)>` is the inverse (round-trips both directions;
-exercised by `ui/theme_tests.rs`, not yet wired to any export UI).
+value is a `ThemeParseError` (`UnknownRole`/`BadValue`), never a panic. Import-only —
+there's no export direction (no export UI to feed).
 
 `ThemeChoice::Custom(name)` resolves against `CustomThemes`, loaded once at startup by
 `settings_file::load_custom_themes()`: every `[theme.NAME]` section in `slopgb.conf`

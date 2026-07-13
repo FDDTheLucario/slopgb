@@ -29,8 +29,6 @@ fn bgb_original_seven_are_unchanged_and_new_roles_are_present() {
     // is pixel-identical to before).
     assert_eq!(t.panel, t.bg);
     assert_eq!(t.button_face, t.bg);
-    assert_eq!(t.bevel_light, t.border);
-    assert_eq!(t.bevel_dark, t.border);
     assert_eq!(t.accent, t.text);
     assert_eq!(t.selection_bg, t.current);
     assert_eq!(t.selection_fg, t.bg);
@@ -86,7 +84,7 @@ fn classic_choice_resolves_byte_identical_to_bgb() {
     assert_eq!(resolved, Theme::BGB);
 }
 
-// --- Task 8: theming API (from_pairs / to_pairs) -----------------------------
+// --- Task 8: theming API (from_pairs) ----------------------------------------
 
 #[test]
 fn from_pairs_overrides_named_roles_and_defaults_the_rest() {
@@ -122,16 +120,6 @@ fn from_pairs_rejects_bad_hex_without_panicking() {
     );
     // Display never panics either.
     assert!(err.to_string().contains("bg"));
-}
-
-#[test]
-fn from_pairs_and_to_pairs_round_trip() {
-    for preset in [Theme::LIGHT, Theme::DARK, Theme::CLASSIC] {
-        let pairs = preset.to_pairs();
-        let refs: Vec<(&str, &str)> = pairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        let back = Theme::from_pairs(&refs).unwrap();
-        assert_eq!(back, preset, "round-trips through to_pairs/from_pairs");
-    }
 }
 
 // --- Task 9: custom theme registry -------------------------------------------
