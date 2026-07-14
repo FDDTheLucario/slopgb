@@ -87,6 +87,17 @@ impl ToolPlugins {
         Self::default()
     }
 
+    /// Load tool plugins from the `--plugins` / `SLOPGB_PLUGINS_DIR` directory in
+    /// `opts` — the same directory tier-1 plugins use.
+    #[must_use]
+    pub fn from_options(opts: &crate::cli::Options) -> Self {
+        let dir = opts
+            .plugins_dir
+            .clone()
+            .or_else(|| std::env::var_os("SLOPGB_PLUGINS_DIR").map(std::path::PathBuf::from));
+        Self::load(dir.as_deref())
+    }
+
     /// Load every tool module in `dir` (`None` → empty). A `*.wasm` that isn't a
     /// tool module (e.g. a tier-1 plugin) fails [`LoadedTool::load`] and is
     /// skipped, so it can coexist with tier-1 plugins in the same directory.
