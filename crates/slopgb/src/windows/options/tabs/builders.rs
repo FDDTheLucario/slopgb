@@ -665,6 +665,54 @@ pub(super) fn theme_tab(s: &Settings, content: Rect) -> Vec<Ctrl> {
     v
 }
 
+pub(super) fn plugins(s: &Settings, content: Rect) -> Vec<Ctrl> {
+    let mut l = Lay::new(content);
+    let mut v = Vec::new();
+    // The scanned plugins directory (read-only; set via --plugins / the config
+    // file — there is no in-dialog browse yet).
+    let dir = if s.plugins.dir.is_empty() {
+        "(none)".to_owned()
+    } else {
+        s.plugins.dir.clone()
+    };
+    v.push(text_label(l.at(), format!("Plugins dir: {dir}")));
+    l.row();
+    // Live: allow mutation-capable plugins (default off, golden-safe).
+    v.push(Ctrl::live(
+        rc(l.at(), "allow plugin mutation"),
+        chk("allow plugin mutation", s.plugins.allow_mutation),
+        Field::PluginAllowMutation,
+    ));
+    l.row();
+    l.row();
+    // One live enable checkbox per discovered plugin. The plugin's "name [caps]"
+    // is a dynamic string, so it is drawn as a separate inert label beside a
+    // static-empty checkbox (the shared `Kind::Check` label is `&'static str`);
+    // the checkbox hit-rect still spans the whole row so a click on the name
+    // toggles it. An empty list shows an inert note.
+    if s.plugins.entries.is_empty() {
+        v.push(text_label(l.at(), "(no plugins discovered)".to_owned()));
+    } else {
+        let box_sz = line_height() - 4;
+        for (i, e) in s.plugins.entries.iter().enumerate() {
+            let (x, y) = l.at();
+            let label = format!("{} [{}]", e.name, e.capabilities);
+            let w = box_sz + 3 + measure(&label);
+            v.push(Ctrl::live(
+                Rect::new(x, y, w, box_sz),
+                Kind::Check {
+                    checked: e.enabled,
+                    label: "",
+                },
+                Field::PluginEnable(i),
+            ));
+            v.push(text_label((x + box_sz + 3, y), label));
+            l.row();
+        }
+    }
+    v
+}
+
 // --- small builder helpers --------------------------------------------------
 
 fn chk(label: &'static str, checked: bool) -> Kind {

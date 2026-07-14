@@ -37,6 +37,54 @@ fn settings_and_recent_round_trip() {
 }
 
 #[test]
+fn plugin_config_round_trips_dir_allow_mutation_and_disabled() {
+    use crate::windows::options::PluginEntry;
+    let s = Settings {
+        plugins: PluginConfig {
+            dir: "/opt/plugins".into(),
+            allow_mutation: true,
+            entries: vec![
+                PluginEntry {
+                    name: "a".into(),
+                    capabilities: "introspection".into(),
+                    enabled: true,
+                },
+                PluginEntry {
+                    name: "b".into(),
+                    capabilities: "introspection".into(),
+                    enabled: false,
+                },
+            ],
+        },
+        ..Settings::default()
+    };
+    let mut d = Doc::default();
+    to_doc(&s, &[], &mut d);
+    let text = d.serialize();
+    assert!(text.contains("[plugins]"), "{text}");
+    assert!(text.contains("dir = /opt/plugins"));
+    assert!(text.contains("allow_mutation = true"));
+    assert!(
+        text.contains("disabled = b"),
+        "only the off plugin persists"
+    );
+
+    let (back, _) = from_doc(&Doc::parse(&text));
+    assert_eq!(back.plugins.dir, "/opt/plugins");
+    assert!(back.plugins.allow_mutation);
+    // Only the disabled plugin survives (an enabled one defaults on), rebuilt as
+    // a placeholder — its capability label is unknown until the host is synced.
+    assert_eq!(
+        back.plugins.entries,
+        vec![PluginEntry {
+            name: "b".into(),
+            capabilities: String::new(),
+            enabled: false,
+        }]
+    );
+}
+
+#[test]
 fn unknown_keys_and_sections_survive_a_save() {
     let src = "version = 1\n[system]\nmodel = dmg\nfuture_key = 42\n\n[weird]\nx = y\n";
     let mut d = Doc::parse(src);

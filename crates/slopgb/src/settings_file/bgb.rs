@@ -8,7 +8,7 @@
 
 use super::ini::{self, Ini};
 use crate::ui::ThemeChoice;
-use crate::windows::options::{ModelChoice, SCHEMES, Settings};
+use crate::windows::options::{ModelChoice, PluginConfig, SCHEMES, Settings};
 
 /// Read a `Settings` from a parsed bgb.ini; any key absent or unparseable takes
 /// its `Settings::default()` value.
@@ -83,6 +83,11 @@ pub fn from_ini(f: &Ini) -> Settings {
             .get("SlopgbTheme")
             .map(ThemeChoice::from_key)
             .unwrap_or_default(),
+        plugins: PluginConfig::from_persisted(
+            text("SlopgbPluginsDir", ""),
+            boolean("SlopgbPluginsAllowMutation", false),
+            f.get("SlopgbPluginsDisabled").unwrap_or(""),
+        ),
     }
 }
 
@@ -120,6 +125,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         bootrom_gbc: _,
         bootrom_sgb: _,
         theme: _,
+        plugins: _,
     } = s;
     f.set(
         "SystemMode",
@@ -167,6 +173,12 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
     f.set("SlopgbBreakLdBB", ini::fmt_bool(s.break_ld_b_b));
     f.set("SlopgbBreakEchoRam", ini::fmt_bool(s.break_echo_ram));
     f.set("SlopgbTheme", &s.theme.to_key());
+    f.set("SlopgbPluginsDir", &s.plugins.dir);
+    f.set(
+        "SlopgbPluginsAllowMutation",
+        ini::fmt_bool(s.plugins.allow_mutation),
+    );
+    f.set("SlopgbPluginsDisabled", &s.plugins.disabled_joined());
 }
 
 #[cfg(test)]

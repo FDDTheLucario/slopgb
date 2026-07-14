@@ -17,7 +17,7 @@
 //! ```
 
 use crate::ui::{CustomThemes, Theme, ThemeChoice};
-use crate::windows::options::{ModelChoice, SCHEMES, Settings};
+use crate::windows::options::{ModelChoice, PluginConfig, SCHEMES, Settings};
 
 /// The current native-format version (bumped when a migration is needed).
 pub const VERSION: u32 = 1;
@@ -275,6 +275,11 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
             .get("ui", "theme")
             .map(ThemeChoice::from_key)
             .unwrap_or_default(),
+        plugins: PluginConfig::from_persisted(
+            s("plugins", "dir", ""),
+            b("plugins", "allow_mutation", false),
+            d.get("plugins", "disabled").unwrap_or(""),
+        ),
     };
     let recent = d
         .section_pairs("recent")
@@ -318,6 +323,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         bootrom_gbc: _,
         bootrom_sgb: _,
         theme: _,
+        plugins: _,
     } = settings;
     let fb = |b: bool| if b { "true" } else { "false" };
     d.set("", "version", &VERSION.to_string());
@@ -388,6 +394,13 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         fb(settings.break_lcd_off_vblank),
     );
     d.set("ui", "theme", &settings.theme.to_key());
+    d.set("plugins", "dir", &settings.plugins.dir);
+    d.set(
+        "plugins",
+        "allow_mutation",
+        fb(settings.plugins.allow_mutation),
+    );
+    d.set("plugins", "disabled", &settings.plugins.disabled_joined());
     d.set_recent(recent);
 }
 

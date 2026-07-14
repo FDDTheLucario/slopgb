@@ -26,6 +26,7 @@ pub enum SubKind {
     RecentRoms,
     Link,
     Mcp,
+    Plugins,
 }
 
 /// What clicking a main-menu row does: run a shared frontend [`Action`], open a
@@ -159,6 +160,10 @@ fn entries(sound_on: bool, paused: bool) -> Vec<(MenuItem, MenuEffect)> {
             MenuEffect::Submenu(SubKind::Mcp),
         ),
         (
+            MenuItem::new("Plugins").submenu(),
+            MenuEffect::Submenu(SubKind::Plugins),
+        ),
+        (
             MenuItem::new("Recent ROMs").submenu(),
             MenuEffect::Submenu(SubKind::RecentRoms),
         ),
@@ -219,6 +224,8 @@ pub enum SubChoice {
     McpStart,
     /// MCP → "Stop server": tear the MCP server down.
     McpStop,
+    /// Plugins → "Reload plugins": re-scan the plugins directory.
+    ReloadPlugins,
 }
 
 /// An open child submenu (Window size or Sound channel): its kind, box origin
@@ -292,6 +299,16 @@ impl SubMenu {
     pub fn mcp(parent_row: Rect, active: bool) -> Self {
         let (items, choices) = mcp_items(active).into_iter().unzip();
         Self::hang(SubKind::Mcp, parent_row, items, choices)
+    }
+
+    /// Open the [`SubKind::Plugins`] submenu: a status row per loaded plugin
+    /// (`(name, enabled)`) — check-marked while enabled, greyed while disabled —
+    /// then a live "Reload plugins" action. Enable/disable itself lives on the
+    /// Options → Plugins tab; this submenu is live status + reload.
+    #[must_use]
+    pub fn plugins(parent_row: Rect, loaded: &[(String, bool)]) -> Self {
+        let (items, choices) = plugins_items(loaded).into_iter().unzip();
+        Self::hang(SubKind::Plugins, parent_row, items, choices)
     }
 
     /// Shared constructor: hang a submenu off the right edge of `parent_row`,
@@ -454,6 +471,29 @@ fn mcp_items(active: bool) -> Vec<(MenuItem, Option<SubChoice>)> {
         row("Start server...", !active, SubChoice::McpStart),
         row("Stop server", active, SubChoice::McpStop),
     ]
+}
+
+/// The Plugins rows: a disabled (non-clickable) status row per loaded plugin —
+/// check-marked while enabled, greyed while disabled — then a live "Reload
+/// plugins" action. An empty list shows a single greyed "(no plugins)" row.
+fn plugins_items(loaded: &[(String, bool)]) -> Vec<(MenuItem, Option<SubChoice>)> {
+    let mut v = Vec::with_capacity(loaded.len() + 1);
+    if loaded.is_empty() {
+        v.push((MenuItem::new("(no plugins)").disabled(), None));
+    } else {
+        for (name, enabled) in loaded {
+            let mut item = MenuItem::new(name.clone()).checked(*enabled);
+            if !*enabled {
+                item = item.disabled();
+            }
+            v.push((item, None));
+        }
+    }
+    v.push((
+        MenuItem::new("Reload plugins"),
+        Some(SubChoice::ReloadPlugins),
+    ));
+    v
 }
 
 // --- Popup-window geometry (RM-QA: the menu is its own borderless window) ---

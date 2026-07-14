@@ -194,14 +194,18 @@ fn resolve_boot_rom(opts: &Options) -> Option<Vec<u8>> {
     }
 }
 
-/// Load wasm plugins from `--plugins` or `SLOPGB_PLUGINS_DIR`. Absent → an empty
-/// host (no plugins, golden path untouched); a directory that can't be read is
-/// logged and treated as empty (non-fatal).
-fn load_plugins(opts: &Options) -> PluginHost {
+/// Load wasm plugins from `--plugins`, `SLOPGB_PLUGINS_DIR`, or the persisted
+/// `settings.plugins.dir` (in that precedence). Absent → an empty host (no
+/// plugins, golden path untouched); a directory that can't be read is logged and
+/// treated as empty (non-fatal).
+fn load_plugins(opts: &Options, settings: &windows::options::Settings) -> PluginHost {
+    let persisted =
+        (!settings.plugins.dir.is_empty()).then(|| PathBuf::from(&settings.plugins.dir));
     let Some(dir) = opts
         .plugins_dir
         .clone()
         .or_else(|| env::var_os("SLOPGB_PLUGINS_DIR").map(PathBuf::from))
+        .or(persisted)
     else {
         return PluginHost::new();
     };
@@ -400,7 +404,7 @@ impl App {
         let loaded = settings_file::load();
         let recent = loaded.recent;
         let custom_themes = settings_file::load_custom_themes();
-        let settings = windows::options::Settings {
+        let mut settings = windows::options::Settings {
             model: match opts.model {
                 Some(m) => windows::options::ModelChoice::from_option(Some(m)),
                 None => loaded.settings.model,
@@ -408,7 +412,22 @@ impl App {
             ..loaded.settings
         };
         let blank_frame = blank_frame(settings.dmg_palette[0]);
-        let plugins = load_plugins(&opts);
+        // Load the plugins, then reconcile the persisted config with the live
+        // host: remember the resolved directory, apply the remembered-disabled
+        // set (so an off plugin stays skipped), and mirror the live list (name +
+        // caps + enabled) back into `settings.plugins.entries` for the UI.
+        let mut plugins = load_plugins(&opts, &settings);
+        if let Some(dir) = plugins.dir() {
+            settings.plugins.dir = dir.display().to_string();
+        }
+        for name in settings.plugins.disabled_names() {
+            plugins.set_enabled(&name, false);
+        }
+        settings.plugins.entries = plugins
+            .infos()
+            .into_iter()
+            .map(windows::options::PluginEntry::from)
+            .collect();
         let mut app = Self {
             opts,
             boot_rom,

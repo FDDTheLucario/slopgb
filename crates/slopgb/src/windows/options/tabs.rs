@@ -75,6 +75,11 @@ pub(crate) enum Field {
     PickBootrom(super::BootromSlot),
     /// Theme → the active UI colour theme (one of the three built-in themes).
     Theme(ThemeRadio),
+    /// Plugins → "allow plugin mutation" toggle.
+    PluginAllowMutation,
+    /// Plugins → the enable checkbox for the discovered plugin at this index
+    /// into [`super::Settings::plugins`]'s entries.
+    PluginEnable(usize),
 }
 
 /// Fast-forward speed slider range (1..=`FF_SPEED_MAX`).
@@ -152,6 +157,7 @@ pub(crate) fn controls(tab: OptionsTab, s: &Settings, content: Rect) -> Vec<Ctrl
         OptionsTab::Joypad => joypad(s, content),
         OptionsTab::Misc => misc(s, content),
         OptionsTab::Theme => theme_tab(s, content),
+        OptionsTab::Plugins => plugins(s, content),
     }
 }
 
@@ -275,6 +281,12 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
                 ThemeRadio::Classic => ThemeChoice::Classic,
             };
         }
+        Field::PluginAllowMutation => s.plugins.allow_mutation = !s.plugins.allow_mutation,
+        Field::PluginEnable(i) => {
+            if let Some(e) = s.plugins.entries.get_mut(i) {
+                e.enabled = !e.enabled;
+            }
+        }
         // Routed out by `on_content_click` before reaching here.
         Field::ConfigureKeyboard | Field::PickBootrom(_) => {}
     }
@@ -320,5 +332,13 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
             s.pause_on_focus_loss = d.pause_on_focus_loss;
         }
         OptionsTab::Theme => s.theme = d.theme,
+        // Reset the allow-mutation toggle + re-enable every discovered plugin
+        // (the dir + which plugins exist aren't "defaults" to reset).
+        OptionsTab::Plugins => {
+            s.plugins.allow_mutation = d.plugins.allow_mutation;
+            for e in &mut s.plugins.entries {
+                e.enabled = true;
+            }
+        }
     }
 }

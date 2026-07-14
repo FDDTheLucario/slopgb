@@ -129,6 +129,90 @@ pub const SCHEMES: [Scheme; 4] = [
     },
 ];
 
+/// One discovered plugin as the Plugins tab renders it: its name, a human
+/// capability label, and whether it is enabled. The name + capabilities are
+/// runtime facts synced from the live [`crate::PluginHost`] when the dialog
+/// opens; only the per-name enabled flag persists (see [`PluginConfig`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PluginEntry {
+    pub name: String,
+    pub capabilities: String,
+    pub enabled: bool,
+}
+
+impl From<slopgb_plugin_host::PluginInfo> for PluginEntry {
+    fn from(i: slopgb_plugin_host::PluginInfo) -> Self {
+        Self {
+            name: i.name,
+            capabilities: i.capabilities,
+            enabled: i.enabled,
+        }
+    }
+}
+
+/// The plugins feature's config (Options → Plugins tab). `dir` + `allow_mutation`
+/// persist directly; `entries` is the live discovered list — only the *disabled*
+/// names are persisted (a new plugin defaults to enabled), reconstructed as
+/// placeholders on load and refilled from the host once it is scanned.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PluginConfig {
+    /// Directory scanned for `*.wasm` plugins (empty = none).
+    pub dir: String,
+    /// Whether mutation-capable plugins are permitted. Default off (golden-safe);
+    /// only the read-only introspection tier is served today, so this is a
+    /// persisted preference reserved for when the MUTATE tier lands.
+    pub allow_mutation: bool,
+    /// Discovered plugins with their enabled flag (synced from the live host).
+    pub entries: Vec<PluginEntry>,
+}
+
+impl PluginConfig {
+    /// The disabled plugin names, comma-joined — the persisted form of the
+    /// enabled set (an empty list means every plugin is enabled).
+    #[must_use]
+    pub(crate) fn disabled_joined(&self) -> String {
+        self.entries
+            .iter()
+            .filter(|e| !e.enabled)
+            .map(|e| e.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// The disabled plugin names, owned — pushed to the host at startup so a
+    /// remembered-off plugin stays skipped in `pump`.
+    #[must_use]
+    pub fn disabled_names(&self) -> Vec<String> {
+        self.entries
+            .iter()
+            .filter(|e| !e.enabled)
+            .map(|e| e.name.clone())
+            .collect()
+    }
+
+    /// Reconstruct from the persisted fields. `disabled` is a comma-list of
+    /// plugin names to start disabled; each becomes a placeholder entry (its
+    /// capability label is unknown until the live host is synced in).
+    #[must_use]
+    pub(crate) fn from_persisted(dir: String, allow_mutation: bool, disabled: &str) -> Self {
+        let entries = disabled
+            .split(',')
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .map(|n| PluginEntry {
+                name: n.to_owned(),
+                capabilities: String::new(),
+                enabled: false,
+            })
+            .collect();
+        Self {
+            dir,
+            allow_mutation,
+            entries,
+        }
+    }
+}
+
 /// Every Options setting. Live fields drive a real slopgb capability; the dialog
 /// also carries the (mostly inert) bgb controls implicitly via [`tabs`]. Cloned
 /// into [`OptionsState`] as the working + baseline copies. (Not `Copy` — it
@@ -207,6 +291,10 @@ pub struct Settings {
     /// look); `Classic` reproduces bgb's original grey/white palette
     /// pixel-for-pixel. A named `Custom` theme stays config-only.
     pub theme: ThemeChoice,
+    /// Plugins → the discovered-plugin list, plugins dir, and allow-mutation
+    /// toggle (Options → Plugins tab). Default empty/off — the golden path is
+    /// byte-identical with no plugins.
+    pub plugins: PluginConfig,
 }
 
 impl Default for Settings {
@@ -242,6 +330,7 @@ impl Default for Settings {
             bootrom_gbc: String::new(),
             bootrom_sgb: String::new(),
             theme: ThemeChoice::Light,
+            plugins: PluginConfig::default(),
         }
     }
 }
@@ -292,6 +381,7 @@ pub enum OptionsTab {
     Joypad,
     Misc,
     Theme,
+    Plugins,
 }
 
 impl OptionsTab {
@@ -303,13 +393,14 @@ impl OptionsTab {
         OptionsTab::Exceptions,
     ];
     /// Tabs in bgb's bottom group (row 2 when one of them is active), with
-    /// slopgb's Theme tab appended.
-    pub const GROUP_B: [OptionsTab; 5] = [
+    /// slopgb's Theme + Plugins tabs appended.
+    pub const GROUP_B: [OptionsTab; 6] = [
         OptionsTab::Sound,
         OptionsTab::GbColors,
         OptionsTab::Joypad,
         OptionsTab::Misc,
         OptionsTab::Theme,
+        OptionsTab::Plugins,
     ];
 
     #[must_use]
@@ -324,6 +415,7 @@ impl OptionsTab {
             OptionsTab::Joypad => "Joypad",
             OptionsTab::Misc => "Misc",
             OptionsTab::Theme => "Theme",
+            OptionsTab::Plugins => "Plugins",
         }
     }
 

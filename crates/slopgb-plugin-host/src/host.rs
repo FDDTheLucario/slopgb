@@ -3,7 +3,7 @@
 
 use std::fmt;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use slopgb_core::GameBoy;
 use slopgb_plugin_api::{ABI_VERSION, Capabilities, Reg};
@@ -60,8 +60,61 @@ impl From<wasmi::Error> for LoadError {
 /// One instantiated plugin and its private store.
 pub struct LoadedPlugin {
     name: String,
+    caps: Capabilities,
+    /// Whether `pump` drives this plugin. On by default at load; the UI toggles
+    /// it (a disabled plugin's `on_frame` stops firing but it stays resident).
+    enabled: bool,
     store: Store<HostState>,
     on_frame: TypedFunc<(), i32>,
+}
+
+impl LoadedPlugin {
+    /// The plugin's advertised name (its `.wasm` file stem).
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The capabilities this plugin declared at load.
+    #[must_use]
+    pub fn capabilities(&self) -> Capabilities {
+        self.caps
+    }
+
+    /// Whether `pump` currently drives this plugin.
+    #[must_use]
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+}
+
+/// A loaded plugin's UI-facing metadata: its name, a human capability label, and
+/// whether it is currently enabled. What the Options tab / right-click submenu
+/// render (the frontend never touches the [`Capabilities`] type directly).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PluginInfo {
+    pub name: String,
+    pub capabilities: String,
+    pub enabled: bool,
+}
+
+/// A human label for a capability bit set (e.g. `introspection`), for the UI.
+fn caps_label(caps: Capabilities) -> String {
+    let mut parts = Vec::new();
+    for (bit, name) in [
+        (Capabilities::INTROSPECTION, "introspection"),
+        (Capabilities::MUTATE, "mutate"),
+        (Capabilities::SUBSYSTEM, "subsystem"),
+    ] {
+        if caps.contains(bit) {
+            parts.push(name);
+        }
+    }
+    if parts.is_empty() {
+        "none".to_owned()
+    } else {
+        parts.join("+")
+    }
 }
 
 /// Owns the loaded plugins and drives them once per frame. Empty by default, so
@@ -70,6 +123,10 @@ pub struct LoadedPlugin {
 pub struct PluginHost {
     plugins: Vec<LoadedPlugin>,
     log: Vec<String>,
+    /// The directory the plugins were scanned from (set by [`Self::load_dir`]),
+    /// so [`Self::reload`] can re-scan the same place. `None` for a host built
+    /// plugin-by-plugin via [`Self::push`].
+    dir: Option<PathBuf>,
 }
 
 impl PluginHost {
@@ -82,6 +139,7 @@ impl PluginHost {
     /// skipped, so one bad plugin cannot stop the rest.
     pub fn load_dir(dir: &Path) -> std::io::Result<Self> {
         let mut host = Self::new();
+        host.dir = Some(dir.to_owned());
         for entry in fs::read_dir(dir)? {
             let path = entry?.path();
             if path.extension().is_some_and(|e| e == "wasm") {
@@ -142,6 +200,8 @@ impl PluginHost {
 
         Ok(LoadedPlugin {
             name: name.to_owned(),
+            caps: Capabilities::from_bits(caps_bits),
+            enabled: true,
             store,
             on_frame,
         })
@@ -162,8 +222,11 @@ impl PluginHost {
     /// that traps is logged and left in place. Call once per emulated frame.
     pub fn pump(&mut self, gb: &GameBoy) {
         let snap_src = gb;
-        let Self { plugins, log } = self;
+        let Self { plugins, log, .. } = self;
         for p in plugins.iter_mut() {
+            if !p.enabled {
+                continue;
+            }
             let data = p.store.data_mut();
             data.snap = Snapshot::capture(snap_src);
             data.log.clear();
@@ -182,6 +245,66 @@ impl PluginHost {
     #[must_use]
     pub fn take_log(&mut self) -> Vec<String> {
         std::mem::take(&mut self.log)
+    }
+
+    /// The directory the plugins were scanned from, if any (set by
+    /// [`Self::load_dir`]). The frontend persists this so plugins reload without
+    /// re-passing `--plugins` on the next launch.
+    #[must_use]
+    pub fn dir(&self) -> Option<&Path> {
+        self.dir.as_deref()
+    }
+
+    /// UI-facing metadata for every loaded plugin (name, capability label,
+    /// enabled) in load order — what the Options tab / submenu render.
+    #[must_use]
+    pub fn infos(&self) -> Vec<PluginInfo> {
+        self.plugins
+            .iter()
+            .map(|p| PluginInfo {
+                name: p.name.clone(),
+                capabilities: caps_label(p.caps),
+                enabled: p.enabled,
+            })
+            .collect()
+    }
+
+    /// Enable or disable the plugin named `name` (a no-op if none matches). A
+    /// disabled plugin is skipped by [`Self::pump`], so its `on_frame` stops
+    /// firing while it stays resident.
+    pub fn set_enabled(&mut self, name: &str, enabled: bool) {
+        for p in &mut self.plugins {
+            if p.name == name {
+                p.enabled = enabled;
+            }
+        }
+    }
+
+    /// Re-scan the directory this host was loaded from ([`Self::load_dir`]),
+    /// replacing the loaded set — so a new `.wasm` is picked up and a removed one
+    /// dropped. Per-plugin enabled flags are preserved by name across the
+    /// re-scan. A no-op for a host with no source directory.
+    pub fn reload(&mut self) {
+        let Some(dir) = self.dir.clone() else {
+            return;
+        };
+        let disabled: Vec<String> = self
+            .plugins
+            .iter()
+            .filter(|p| !p.enabled)
+            .map(|p| p.name.clone())
+            .collect();
+        match Self::load_dir(&dir) {
+            Ok(fresh) => {
+                self.plugins = fresh.plugins;
+                for name in &disabled {
+                    self.set_enabled(name, false);
+                }
+            }
+            Err(e) => self
+                .log
+                .push(format!("plugin reload failed for {}: {e}", dir.display())),
+        }
     }
 }
 

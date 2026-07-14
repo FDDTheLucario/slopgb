@@ -1,10 +1,10 @@
 # Options control panel
 
 **Options...** (F11) opens a bgb-style tabbed control panel (`windows::options`,
-captures in [`../bgb-reference/options/`](../bgb-reference/)). A 9-tab two-row
-property sheet (Graphics/System/Debug/Exceptions · Sound/GB Colors/Joypad/Misc, plus a
-slopgb Theme tab; the active tab's group sits in the bottom row, bgb's multi-row
-behaviour) drawn as a
+captures in [`../bgb-reference/options/`](../bgb-reference/)). A 10-tab two-row
+property sheet (Graphics/System/Debug/Exceptions · Sound/GB Colors/Joypad/Misc, plus
+slopgb Theme + Plugins tabs; the active tab's group sits in the bottom row, bgb's
+multi-row behaviour) drawn as a
 modal LCD overlay (`App.options: Option<OptionsState>`, click/key captured like the
 info box, Esc=Cancel).
 
@@ -27,6 +27,7 @@ where bgb itself greys them).
 | Debug | lowercase-hex + show-clocks (→ `DisasmFmt` via `tools.set_disasm_fmt`); "pressing Esc shows debugger" (`Settings.esc_shows_debugger`, default on → `handle_key` opens the debugger on Esc instead of quitting); RGBDS syntax; "memory viewer in own window" |
 | Misc | fast-forward-speed + framerate-limit sliders (→ `app_pacing` `turbo_max_frames`/`frame_interval`); show-framerate (title); freeze-recent-ROMs (`push_recent` gate); pause-if-losing-focus (auto-pause on focus loss, auto-resume on refocus unless manually paused via `App.paused_by_focus`) |
 | Theme | Light/Dark/Classic radios → `Settings.theme` (`ThemeChoice`; the render path recolors from it each redraw — see [theming.md](theming.md)). Custom themes stay config-only. |
+| Plugins | Per-plugin **enable** checkbox (`Field::PluginEnable(i)` → `PluginConfig.entries[i].enabled` → `PluginHost::set_enabled`, skipping a disabled plugin's `on_frame`), the read-only plugins-dir display, and an **allow-mutation** toggle (`Field::PluginAllowMutation`, default off). No bgb equivalent — see [plugin-api.md](plugin-api.md#managing-plugins-from-the-ui). |
 
 **Pure bgb mode** (Debug tab): one toggle flips every slopgb-departure setting
 (rgbds→off, memory-window→off) to bgb-faithful.

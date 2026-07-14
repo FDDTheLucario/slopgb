@@ -316,7 +316,35 @@ impl App {
             SubKind::RecentRoms => SubMenu::recent_roms(row, &self.recent_names()),
             SubKind::Link => SubMenu::link(row, self.link.is_active(), self.link.is_listening()),
             SubKind::Mcp => SubMenu::mcp(row, self.mcp.is_active()),
+            SubKind::Plugins => SubMenu::plugins(row, &self.plugin_rows()),
         }
+    }
+
+    /// The loaded plugins as `(name, enabled)` rows for the Plugins submenu (live
+    /// status; the source of truth is the running [`PluginHost`]).
+    fn plugin_rows(&self) -> Vec<(String, bool)> {
+        self.plugins
+            .infos()
+            .into_iter()
+            .map(|i| (i.name, i.enabled))
+            .collect()
+    }
+
+    /// Re-scan the plugins directory (Plugins submenu → "Reload plugins"), then
+    /// refresh the Options-tab entry list from the live host and drain its log.
+    fn reload_plugins(&mut self) {
+        self.plugins.reload();
+        self.sync_plugin_entries();
+        for line in self.plugins.take_log() {
+            eprintln!("{line}");
+        }
+    }
+
+    /// Mirror the live host's plugin list (name + capability label + enabled)
+    /// into `settings.plugins.entries`, so the Options → Plugins tab renders the
+    /// current set. Called before opening Options and after a reload.
+    pub(crate) fn sync_plugin_entries(&mut self) {
+        self.settings.plugins.entries = self.plugins.infos().into_iter().map(Into::into).collect();
     }
 
     /// The live mute state of sound channels 1-4 (the APU is the single source
@@ -407,6 +435,8 @@ impl App {
                 self.mcp.stop();
                 self.update_title();
             }
+            // Plugins submenu → re-scan the plugins directory.
+            SubChoice::ReloadPlugins => self.reload_plugins(),
         }
     }
 
@@ -491,6 +521,19 @@ impl App {
         }
         // Exceptions-tab break conditions → the core exception-break mask.
         self.apply_exceptions();
+        // Plugins-tab enable checkboxes → the live host: a disabled plugin's
+        // on_frame stops next pump. A no-op with no plugins (golden path stays
+        // byte-identical).
+        let states: Vec<(String, bool)> = self
+            .settings
+            .plugins
+            .entries
+            .iter()
+            .map(|e| (e.name.clone(), e.enabled))
+            .collect();
+        for (name, enabled) in states {
+            self.plugins.set_enabled(&name, enabled);
+        }
         self.update_title();
     }
 

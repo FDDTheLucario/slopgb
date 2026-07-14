@@ -57,6 +57,52 @@ fn theme_choice_round_trips_through_bgb_ini_as_a_slopgb_extra() {
 }
 
 #[test]
+fn plugin_config_round_trips_and_preserves_unknown_keys() {
+    use crate::windows::options::{PluginConfig, PluginEntry};
+    let s = Settings {
+        plugins: PluginConfig {
+            dir: "/opt/plugins".into(),
+            allow_mutation: true,
+            entries: vec![
+                PluginEntry {
+                    name: "a".into(),
+                    capabilities: "introspection".into(),
+                    enabled: true,
+                },
+                PluginEntry {
+                    name: "b".into(),
+                    capabilities: "introspection".into(),
+                    enabled: false,
+                },
+            ],
+        },
+        ..Settings::default()
+    };
+    // Round-trip over the REAL bgb.ini so the byte-for-byte preserve invariant is
+    // exercised alongside the new Slopgb* plugin keys.
+    let mut ini = Ini::parse(REAL);
+    to_ini(&s, &mut ini);
+    let out = ini.serialize();
+    assert!(out.contains("SlopgbPluginsDir=/opt/plugins"));
+    assert!(out.contains("SlopgbPluginsAllowMutation=1"));
+    assert!(out.contains("SlopgbPluginsDisabled=b"));
+    // An unrelated unmodelled bgb key still survives verbatim.
+    assert!(out.contains("SoundBufSize=57"));
+
+    let back = from_ini(&ini);
+    assert_eq!(back.plugins.dir, "/opt/plugins");
+    assert!(back.plugins.allow_mutation);
+    assert_eq!(
+        back.plugins.entries,
+        vec![PluginEntry {
+            name: "b".into(),
+            capabilities: String::new(),
+            enabled: false,
+        }]
+    );
+}
+
+#[test]
 fn save_preserves_unknown_bgb_keys_and_writes_slopgb_extras() {
     let mut ini = Ini::parse(REAL);
     let s = Settings {

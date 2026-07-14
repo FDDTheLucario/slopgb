@@ -210,6 +210,9 @@ impl App {
             // from the live settings. Routed/applied by `on_game_click` +
             // `handle_key` like the other modals.
             Action::MainOptions => {
+                // Refresh the Plugins tab's list from the live host before the
+                // working copy is snapshotted, so it shows the current plugins.
+                self.sync_plugin_entries();
                 self.options = Some(windows::options::OptionsState::new(self.settings.clone()));
                 self.request_game_redraw();
             }

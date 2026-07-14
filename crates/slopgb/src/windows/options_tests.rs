@@ -94,6 +94,72 @@ fn system_tab_has_bootrom_controls() {
     );
 }
 
+// --- Plugins tab ------------------------------------------------------------
+
+fn settings_with_plugins() -> Settings {
+    Settings {
+        plugins: PluginConfig {
+            dir: "/opt/plugins".into(),
+            allow_mutation: false,
+            entries: vec![
+                PluginEntry {
+                    name: "framecounter".into(),
+                    capabilities: "introspection".into(),
+                    enabled: true,
+                },
+                PluginEntry {
+                    name: "tracer".into(),
+                    capabilities: "introspection".into(),
+                    enabled: false,
+                },
+            ],
+        },
+        ..Settings::default()
+    }
+}
+
+#[test]
+fn plugins_tab_lists_entries_dir_and_toggle() {
+    let s = settings_with_plugins();
+    let content = OptionsState::content_rect(dialog());
+    let ctrls = controls(OptionsTab::Plugins, &s, content);
+
+    // The allow-mutation toggle is present + live.
+    assert!(
+        ctrls
+            .iter()
+            .any(|c| c.field == Some(Field::PluginAllowMutation)),
+        "missing allow-mutation toggle"
+    );
+    // One enable checkbox per plugin, each mapped to the right index.
+    for i in 0..s.plugins.entries.len() {
+        let ctrl = ctrls
+            .iter()
+            .find(|c| c.field == Some(Field::PluginEnable(i)))
+            .unwrap_or_else(|| panic!("missing enable checkbox for plugin {i}"));
+        let checked = matches!(ctrl.kind, Kind::Check { checked, .. } if checked);
+        assert_eq!(checked, s.plugins.entries[i].enabled, "checkbox {i} state");
+    }
+    // The plugins dir is shown somewhere (an inert label).
+    assert!(
+        ctrls.iter().any(|c| matches!(&c.kind,
+            Kind::Label { text } if text.contains("/opt/plugins"))),
+        "missing plugins-dir display"
+    );
+}
+
+#[test]
+fn plugins_tab_enable_checkbox_toggles_entry() {
+    let mut st = OptionsState::new(settings_with_plugins());
+    st.active = OptionsTab::Plugins;
+    assert!(st.working.plugins.entries[0].enabled);
+    click_field(&mut st, Field::PluginEnable(0));
+    assert!(
+        !st.working.plugins.entries[0].enabled,
+        "click must toggle it"
+    );
+}
+
 #[test]
 fn bootrom_checkbox_toggles_and_browse_routes_outcome() {
     let mut st = OptionsState::new(Settings::default());
@@ -148,7 +214,7 @@ fn options_tab_labels_and_groups() {
         .chain(&OptionsTab::GROUP_B)
         .copied()
         .collect();
-    assert_eq!(all.len(), 9);
+    assert_eq!(all.len(), 10);
     assert_eq!(
         all.iter().map(|t| t.label()).collect::<Vec<_>>(),
         [
@@ -160,7 +226,8 @@ fn options_tab_labels_and_groups() {
             "GB Colors",
             "Joypad",
             "Misc",
-            "Theme"
+            "Theme",
+            "Plugins"
         ]
     );
     // The slopgb Theme tab lives in the bottom group.

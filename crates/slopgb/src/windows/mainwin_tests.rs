@@ -88,7 +88,7 @@ fn popup_gap_around_submenu_is_transparent() {
 }
 
 #[test]
-fn menu_has_the_fifteen_rc_main_rows_in_order() {
+fn menu_has_the_rc_main_rows_in_order() {
     let m = MainMenu::open((10, 10), true, false);
     let labels: Vec<&str> = m.items.iter().map(|i| i.label.as_str()).collect();
     assert_eq!(
@@ -108,6 +108,7 @@ fn menu_has_the_fifteen_rc_main_rows_in_order() {
             "Window size",
             "Link",
             "MCP",
+            "Plugins",
             "Recent ROMs",
             "Exit",
         ]
@@ -143,7 +144,7 @@ fn supported_rows_run_their_action_window_size_opens_a_submenu_rest_none() {
         m.effects[7],
         MenuEffect::Run(Action::ToggleTool(ToolWindow::Debugger))
     );
-    assert_eq!(m.effects[15], MenuEffect::Run(Action::Quit));
+    assert_eq!(m.effects[16], MenuEffect::Run(Action::Quit));
     assert_eq!(
         m.effects[WINDOW_SIZE_ROW],
         MenuEffect::Submenu(SubKind::WindowSize)
@@ -170,19 +171,21 @@ fn supported_rows_run_their_action_window_size_opens_a_submenu_rest_none() {
     assert_eq!(m.effects[8], MenuEffect::Submenu(SubKind::State));
     // Load ROM (MN4) opens the path modal; Recent ROMs (MN4) opens its submenu.
     assert_eq!(m.effects[1], MenuEffect::Run(Action::MainLoadRom));
-    assert_eq!(m.effects[14], MenuEffect::Submenu(SubKind::RecentRoms));
+    assert_eq!(m.effects[15], MenuEffect::Submenu(SubKind::RecentRoms));
     // Link opens its submenu (rows grey by connection state — see
     // link_submenu_greys_rows_by_state).
     assert_eq!(m.effects[12], MenuEffect::Submenu(SubKind::Link));
     // MCP opens its submenu (Start/Stop, greyed by server state).
     assert_eq!(m.effects[13], MenuEffect::Submenu(SubKind::Mcp));
+    // Plugins opens its submenu (live status + Reload plugins).
+    assert_eq!(m.effects[14], MenuEffect::Submenu(SubKind::Plugins));
 }
 
 #[test]
 fn submenu_rows_show_the_arrow_window_size_enabled_others_greyed() {
     let m = MainMenu::open((0, 0), true, false);
-    // All six submenu rows draw the arrow.
-    for i in [8, 9, 10, 11, 12, 13] {
+    // All seven submenu rows draw the arrow.
+    for i in [8, 9, 10, 11, 12, 13, 14] {
         assert!(m.items[i].submenu, "row {i} draws the submenu arrow");
     }
     // Window size + Sound channel are live; the rest stay greyed until MN4-7.
@@ -196,7 +199,9 @@ fn submenu_rows_show_the_arrow_window_size_enabled_others_greyed() {
     );
     assert!(m.items[9].enabled, "Other is wired (MN5)");
     assert!(m.items[8].enabled, "State is wired (MN6)");
-    assert!(m.items[13].enabled, "Recent ROMs is wired (MN4)");
+    assert!(m.items[15].enabled, "Recent ROMs is wired (MN4)");
+    assert!(m.items[14].enabled, "Plugins is wired");
+    assert!(m.items[13].enabled, "MCP is wired");
     assert!(m.items[12].enabled, "Link is wired");
     assert!(m.items[1].enabled, "Load ROM is wired (MN4)");
     assert!(
@@ -564,4 +569,36 @@ fn mcp_submenu_greys_rows_by_state() {
     let running = SubMenu::mcp(PARENT, true);
     assert_eq!(running.choices[0], None, "Start greyed while running");
     assert_eq!(running.choices[1], Some(SubChoice::McpStop));
+}
+
+#[test]
+fn plugins_submenu_lists_status_rows_then_reload() {
+    let labels = |s: &SubMenu| -> Vec<String> { s.items.iter().map(|i| i.label.clone()).collect() };
+    let loaded = [
+        ("framecounter".to_string(), true),
+        ("tracer".to_string(), false),
+    ];
+    let s = SubMenu::plugins(PARENT, &loaded);
+    assert_eq!(s.kind, SubKind::Plugins);
+    assert_eq!(labels(&s), ["framecounter", "tracer", "Reload plugins"]);
+    // The plugin rows are status-only (no choice) — greyed while disabled,
+    // check-marked while enabled — and only Reload plugins acts.
+    assert_eq!(s.choices[0], None);
+    assert!(
+        s.items[0].enabled && s.items[0].checked,
+        "enabled plugin checked"
+    );
+    assert_eq!(s.choices[1], None);
+    assert!(!s.items[1].enabled, "disabled plugin greyed");
+    assert_eq!(s.choices[2], Some(SubChoice::ReloadPlugins));
+}
+
+#[test]
+fn plugins_submenu_empty_shows_note_and_reload() {
+    let s = SubMenu::plugins(PARENT, &[]);
+    let labels: Vec<String> = s.items.iter().map(|i| i.label.clone()).collect();
+    assert_eq!(labels, ["(no plugins)", "Reload plugins"]);
+    assert_eq!(s.choices[0], None);
+    assert!(!s.items[0].enabled, "empty note is greyed");
+    assert_eq!(s.choices[1], Some(SubChoice::ReloadPlugins));
 }

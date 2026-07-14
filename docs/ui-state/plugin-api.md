@@ -113,6 +113,42 @@ emulation. For plugins that means: this tier is **read-only**, `--plugins` is
 golden frame-hash is byte-identical (pinned by `golden_fingerprint`). A plugin
 that traps is logged and left in place; it cannot corrupt the machine.
 
+## Managing plugins from the UI
+
+Plugins load from `--plugins <dir>` / `SLOPGB_PLUGINS_DIR`, or — when neither is
+given — the persisted `settings.plugins.dir` (whatever directory plugins last
+loaded from is remembered, so they reload without re-passing the flag). Two UI
+surfaces manage them; **Options → Plugins** is the primary home, the right-click
+**Plugins** submenu is secondary live status.
+
+**Options → Plugins tab** (`OptionsTab::Plugins`, `tabs::plugins`): one **enable**
+checkbox per discovered plugin (`name [capabilities]`), the read-only plugins-dir
+line, and an **allow-mutation** toggle. The tab reads `Settings.plugins`
+(`PluginConfig` — `dir`, `allow_mutation`, `entries: Vec<PluginEntry>`); the entry
+list is synced from the live `PluginHost::infos()` each time the dialog opens
+(`App::sync_plugin_entries`). Toggling a checkbox edits `entries[i].enabled`;
+OK/Apply pushes each flag to the host via `PluginHost::set_enabled`, so a disabled
+plugin's `on_frame` is skipped by `pump` (it stays resident, just idle).
+
+**Right-click → Plugins submenu** (`SubKind::Plugins`, `SubMenu::plugins`): a
+status row per loaded plugin — check-marked while enabled, greyed while disabled,
+non-clickable — then a live **Reload plugins** action (`SubChoice::ReloadPlugins`
+→ `PluginHost::reload`) that re-scans the directory, picking up a newly-dropped
+`.wasm` and dropping a removed one while preserving each plugin's enabled flag by
+name.
+
+**Persistence** (`settings_file/`): `PluginConfig` round-trips the `dir`,
+`allow_mutation`, and the *disabled* plugin names (the enabled set's complement —
+a new plugin defaults to enabled). Native `slopgb.conf` uses a `[plugins]` section
+(`dir` / `allow_mutation` / `disabled = a, b`); bgb.ini uses the `Slopgb*` extras
+(`SlopgbPluginsDir` / `SlopgbPluginsAllowMutation` / `SlopgbPluginsDisabled`), so
+bgb's own keys survive verbatim. The capability label per entry is runtime-only
+(refilled from the host on sync), not persisted.
+
+`allow_mutation` is a persisted, default-off preference reserved for the (not-yet-
+served) `MUTATE` tier — it currently gates nothing, keeping the golden path
+byte-identical.
+
 ## ABI versioning
 
 The guest exports `slopgb_abi_version()`; the host refuses a plugin whose version

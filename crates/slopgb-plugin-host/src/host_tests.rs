@@ -72,6 +72,68 @@ fn host_log_reads_guest_memory() {
 }
 
 #[test]
+fn disabled_plugin_is_skipped_in_pump() {
+    // A disabled plugin's on_frame does not fire, so it emits no log; re-enabling
+    // resumes it.
+    let bytes = wasm(&plugin_wat(
+        1,
+        1,
+        "(call $host_log (i32.const 0) (i32.const 2))",
+    ));
+    let mut host = PluginHost::new();
+    host.push(PluginHost::load_bytes("logger", &bytes).unwrap());
+
+    host.set_enabled("logger", false);
+    host.pump(&gb());
+    assert!(host.take_log().is_empty(), "disabled plugin must not log");
+
+    host.set_enabled("logger", true);
+    host.pump(&gb());
+    assert_eq!(host.take_log(), vec!["[logger] hi".to_string()]);
+}
+
+#[test]
+fn infos_report_name_caps_and_enabled() {
+    let bytes = wasm(&plugin_wat(1, 1, ""));
+    let mut host = PluginHost::new();
+    host.push(PluginHost::load_bytes("probe", &bytes).unwrap());
+    let infos = host.infos();
+    assert_eq!(infos.len(), 1);
+    assert_eq!(infos[0].name, "probe");
+    assert_eq!(infos[0].capabilities, "introspection");
+    assert!(infos[0].enabled);
+    host.set_enabled("probe", false);
+    assert!(!host.infos()[0].enabled);
+}
+
+#[test]
+fn reload_rescans_dir_and_preserves_enabled() {
+    // load_dir remembers its directory; reload picks up a newly-dropped .wasm and
+    // keeps the per-plugin enabled flag across the re-scan.
+    let dir = std::env::temp_dir().join(format!("slopgb-plugin-reload-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let one = wasm(&plugin_wat(1, 1, ""));
+    std::fs::write(dir.join("one.wasm"), &one).unwrap();
+    let mut host = PluginHost::load_dir(&dir).unwrap();
+    assert_eq!(host.infos().len(), 1);
+
+    // Disable it, then drop a second plugin and reload.
+    host.set_enabled("one", false);
+    std::fs::write(dir.join("two.wasm"), &one).unwrap();
+    host.reload();
+
+    let infos = host.infos();
+    assert_eq!(infos.len(), 2, "reload must pick up the new plugin");
+    let one_info = infos.iter().find(|i| i.name == "one").unwrap();
+    assert!(!one_info.enabled, "disabled flag must survive the re-scan");
+    assert!(infos.iter().find(|i| i.name == "two").unwrap().enabled);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn host_read_sees_snapshot() {
     // on_frame reads byte $0147 (cartridge type) and logs it back via host_read
     // → store at mem[8] → log 1 byte. Simplest observable path: read then drop,
