@@ -38,7 +38,7 @@ impl Cpu {
         self.regs.pbr = 0;
         let addr = if self.regs.e { vector.0 } else { vector.1 };
         let lo = self.read8(bus, addr) as u16;
-        let hi = self.read8(bus, addr + 1) as u16;
+        let hi = self.read8(bus, addr.wrapping_add(1)) as u16;
         self.regs.pc = lo | (hi << 8);
     }
 

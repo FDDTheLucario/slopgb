@@ -31,8 +31,21 @@ index high bytes.
   +1, page/bank-cross, decimal +1).
 - The Klaus extended-opcodes ROM reaches its self-loop success PC.
 
+## State
+
+All 256 opcodes pass their full SingleStepTests vector sets (10k cases each,
+emulation + native), cycle-exact — the `all_opcodes` sweep in `tests/vectors.rs`
+covers 5.12M cases. Note: the vectors show **no** decimal-mode cycle penalty on
+this core, and their MVN/MVP tests capture a cycle-capped partial move (the CPU
+yields via `step_bounded`; `step` runs the move to completion). The Klaus
+cross-check is not yet wired (no 65C816 build in the canonical Klaus repo).
+
+Vectors are gitignored; fetch with `test-roms/download-65816-tests.sh` (tests
+skip when absent, or fail under `SLOPGB_REQUIRE_ROMS`).
+
 ## Test
 
 ```sh
-cargo test -p slopgb-w65c816
+cargo test -p slopgb-w65c816                                   # unit + group vectors
+cargo test -p slopgb-w65c816 --release -- --ignored all_opcodes  # full 256 sweep
 ```
