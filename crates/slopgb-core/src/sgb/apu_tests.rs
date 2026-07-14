@@ -101,6 +101,94 @@ fn end_to_end_synthesis_produces_audio() {
     assert!(peak > 0.0, "expected audible SGB output");
 }
 
+/// An **original**, clean-room SPC700 sound driver (authored from the SPC700 /
+/// S-DSP register docs — nocash fullsnes, Blargg `SPC_DSP` — not derived from any
+/// ROM), packaged as an SGB `SOU_TRN` block. The block carries three descriptors:
+/// the SPC700 program (the `SOU_TRN` entry point), a one-entry sample directory,
+/// and a 16-sample square-wave BRR sample. Run, the program writes the S-DSP
+/// registers over `$F2`/`$F3` to play a ~2 kHz square-wave "menu tone" on voice 0
+/// (my own synthesis: a hand-built square BRR looped at the sample rate).
+fn original_sgb_tone_driver() -> Vec<u8> {
+    // SPC700: `MOV dp,#imm` = `8F imm dp` (fullsnes opcode table).
+    let mov = |dp: u8, imm: u8| [0x8F, imm, dp];
+    // The DSP setup the program performs, voice 0. KON is written last so the
+    // voice keys on only once everything is configured (nocash "SNES APU DSP").
+    let dsp_writes: [(u8, u8); 12] = [
+        (0x6C, 0x00), // FLG: unmute, no soft-reset, noise off
+        (0x5D, 0x02), // DIR = page $02 (sample directory at $0200)
+        (0x0C, 0x7F), // MVOLL (master volume L)
+        (0x1C, 0x7F), // MVOLR
+        (0x00, 0x7F), // V0 VOLL
+        (0x01, 0x7F), // V0 VOLR
+        (0x02, 0x00), // V0 pitch lo
+        (0x03, 0x10), // V0 pitch hi -> $1000 (1 BRR sample / output sample)
+        (0x04, 0x00), // V0 SRCN = directory entry 0
+        (0x05, 0x00), // V0 ADSR1 = 0 -> use GAIN
+        (0x07, 0x7F), // V0 GAIN = direct max (audible, steady)
+        (0x4C, 0x01), // KON voice 0 (last)
+    ];
+    let mut prog = Vec::new();
+    for (dp, imm) in dsp_writes {
+        prog.extend_from_slice(&mov(0xF2, dp)); // select DSP register
+        prog.extend_from_slice(&mov(0xF3, imm)); // write it
+    }
+    prog.extend_from_slice(&[0x2F, 0xFE]); // BRA * (spin so the DSP keeps playing)
+
+    // One-entry sample directory: start = loop = $0210.
+    let dir = [0x10u8, 0x02, 0x10, 0x02];
+    // A 16-sample square BRR block: header shift 9 / filter 0 / loop + end, then
+    // eight nibbles +7 and eight nibbles -8 -> a square wave, looped at $1000
+    // pitch = 32 kHz / 16 = 2 kHz.
+    let mut brr = vec![0x93u8];
+    brr.extend_from_slice(&[0x77, 0x77, 0x77, 0x77, 0x88, 0x88, 0x88, 0x88]);
+
+    // Assemble the SOU_TRN descriptor stream: (dest_le, len_le, data...). The
+    // FIRST descriptor's address is the entry point, so the program leads.
+    let mut block = Vec::new();
+    let mut push = |dest: u16, data: &[u8]| {
+        block.extend_from_slice(&dest.to_le_bytes());
+        block.extend_from_slice(&(data.len() as u16).to_le_bytes());
+        block.extend_from_slice(data);
+    };
+    push(0x0400, &prog); // program (entry)
+    push(0x0200, &dir); // directory
+    push(0x0210, &brr); // sample
+    block
+}
+
+/// The clean-room SPC700 driver, uploaded via `SOU_TRN` and executed on the
+/// emulated SPC700, sets up the S-DSP and synthesizes audible tone output —
+/// proving "a `SOU_TRN`-uploaded driver runs exactly". No DSP register is poked
+/// from Rust here: the audio can only appear if the SPC700 ran the program, so a
+/// non-zero peak is proof the uploaded driver executed end to end.
+#[test]
+fn original_sou_trn_driver_synthesizes_a_tone() {
+    let mut apu = SgbApu::new(48_000);
+    apu.upload_transfer(&original_sgb_tone_driver(), true);
+    assert_eq!(
+        apu.spc.pc, 0x0400,
+        "SOU_TRN entry = the program's load address"
+    );
+
+    // Run a few frames so the SPC700 executes the setup and the DSP synthesizes.
+    apu.clock(70_224 * 4);
+
+    // The driver wrote MVOLL over $F2/$F3 — readable back proves it executed.
+    assert_eq!(
+        apu.dsp.borrow().read(0x0C),
+        0x7F,
+        "the uploaded program set MVOLL via the SPC700 DSP ports",
+    );
+    let peak = apu
+        .out
+        .iter()
+        .fold(0.0f32, |m, &(l, r)| m.max(l.abs()).max(r.abs()));
+    assert!(
+        peak > 0.0,
+        "the uploaded driver synthesized audible tone output"
+    );
+}
+
 #[test]
 fn save_state_round_trips() {
     let mut apu = SgbApu::new(48_000);

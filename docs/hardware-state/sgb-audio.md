@@ -163,7 +163,16 @@ The Game Boy sends SGB commands; the seams are drained from the PPU each step:
   descriptors, per fullsnes). `SgbApu::upload_transfer` copies each descriptor
   into APU RAM and starts the SPC700 at the first load address (typically the
   Program Area `0x0400`). This is the path that produces **real audio with no
-  BIOS** for a game that ships its own SPC700 driver + samples.
+  BIOS** for a game that ships its own SPC700 driver + samples. An **original,
+  clean-room SPC700 driver** proving this path is in `apu_tests.rs`
+  (`original_sou_trn_driver_synthesizes_a_tone`): a hand-authored SPC700 program
+  that writes the S-DSP registers over `$F2`/`$F3` and plays a synthesized
+  square-wave tone (my own BRR sample), uploaded via `SOU_TRN` and executed on
+  the emulated SPC700 — no DSP register is poked from Rust, so the audible output
+  is proof the uploaded driver ran end to end. (This is the SPC700 slice; a full
+  65C816 SGB *system* driver that interprets the SGB SOUND effect codes /
+  DATA_SND / JUMP needs the 65C816 wired into a live SGB machine — see the
+  integration path above.)
 - **SOUND ($08)** — decoded to the four SNES↔APU comm ports (effect A/B,
   attenuation, bank). See "unverified" below.
 - **DATA_SND ($0F)** — targets SNES *work RAM*, not the APU; drained/ignored (no
