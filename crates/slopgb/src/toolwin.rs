@@ -406,7 +406,7 @@ impl ToolWindows {
         let double = view.note_click(px, py);
         match &mut view.state {
             WinState::Vram(s) => {
-                if vram::on_click(s, area, px, py, gb.model().is_cgb()) {
+                if vram::on_click(s, area, px, py) {
                     view.window.request_redraw();
                 }
                 None

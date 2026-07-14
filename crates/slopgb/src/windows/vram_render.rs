@@ -195,7 +195,7 @@ pub(super) fn render_vram(
         c.outline_rect(if g.grid { g.extent } else { l.content }, theme.border);
     }
     c.outline_rect(l.details, theme.border);
-    render_vram_controls(c, &l, state, cgb, theme);
+    render_vram_controls(c, &l, state, theme);
     render_vram_details(gb, c, &l, state, g.scale, two, theme);
 }
 
@@ -312,25 +312,8 @@ fn draw_grid(c: &mut Canvas, content: Rect, cell_w: i32, cell_h: i32, theme: &Th
     c.set_clip(saved);
 }
 
-/// Draw the checkboxes/radios in the details column, reflecting `state`. `cgb`
-/// gates the CGB-only Tiles bank toggle.
-fn render_vram_controls(
-    c: &mut Canvas,
-    l: &VramLayout,
-    state: &VramState,
-    cgb: bool,
-    theme: &Theme,
-) {
-    if state.tab == VramTab::Tiles && cgb {
-        checkbox(
-            c,
-            l.tile_bank_box.x,
-            l.tile_bank_box.y,
-            state.tile_bank != 0,
-            "VRAM bank 1",
-            theme,
-        );
-    }
+/// Draw the checkboxes/radios in the details column, reflecting `state`.
+fn render_vram_controls(c: &mut Canvas, l: &VramLayout, state: &VramState, theme: &Theme) {
     if state.tab == VramTab::BgMap {
         radio_group(
             c,

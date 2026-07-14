@@ -432,10 +432,10 @@ fn click_on_a_tab_switches_the_active_tab() {
     let l = layout(area);
     // Click the OAM tab (index 2).
     let t = l.tabs[2];
-    assert!(on_click(&mut s, area, t.x + 1, t.y + 1, false));
+    assert!(on_click(&mut s, area, t.x + 1, t.y + 1));
     assert_eq!(s.tab, VramTab::Oam);
     // Clicking the same tab again is a no-op (no redraw).
-    assert!(!on_click(&mut s, area, t.x + 1, t.y + 1, false));
+    assert!(!on_click(&mut s, area, t.x + 1, t.y + 1));
 }
 
 #[test]
@@ -444,46 +444,12 @@ fn click_toggles_checkboxes_and_empty_space_does_nothing() {
     let mut s = VramState::default();
     let l = layout(area);
     assert!(s.grid, "Grid on by default");
-    assert!(on_click(
-        &mut s,
-        area,
-        l.grid_box.x + 1,
-        l.grid_box.y + 1,
-        false
-    ));
+    assert!(on_click(&mut s, area, l.grid_box.x + 1, l.grid_box.y + 1));
     assert!(!s.grid, "Grid toggled off");
-    assert!(on_click(
-        &mut s,
-        area,
-        l.grid_box.x + 1,
-        l.grid_box.y + 1,
-        false
-    ));
+    assert!(on_click(&mut s, area, l.grid_box.x + 1, l.grid_box.y + 1));
     assert!(s.grid, "Grid toggled back on");
     // A click in dead space (mid-content, no widget) changes nothing.
-    assert!(!on_click(
-        &mut s,
-        area,
-        l.content.x + 1,
-        l.content.y + 1,
-        false
-    ));
-}
-
-#[test]
-fn click_tiles_bank_toggle_is_cgb_only() {
-    let area = Rect::new(0, 0, 520, 440);
-    let mut s = VramState::default(); // defaults to the Tiles tab
-    let l = layout(area);
-    let (bx, by) = (l.tile_bank_box.x + 1, l.tile_bank_box.y + 1);
-    // On DMG (cgb=false) the bank toggle is inert.
-    assert!(!on_click(&mut s, area, bx, by, false));
-    assert_eq!(s.tile_bank, 0);
-    // On CGB it flips between bank 0 and 1.
-    assert!(on_click(&mut s, area, bx, by, true));
-    assert_eq!(s.tile_bank, 1);
-    assert!(on_click(&mut s, area, bx, by, true));
-    assert_eq!(s.tile_bank, 0);
+    assert!(!on_click(&mut s, area, l.content.x + 1, l.content.y + 1));
 }
 
 #[test]
@@ -493,11 +459,11 @@ fn click_source_radio_only_acts_on_bg_map_tab() {
     // On the Tiles tab the source radios are inert.
     let mut s = VramState::default();
     let r = l.map_src[2];
-    assert!(!on_click(&mut s, area, r.x + 1, r.y + 1, false));
+    assert!(!on_click(&mut s, area, r.x + 1, r.y + 1));
     assert_eq!(s.map_src, 0);
     // On the BG map tab they select.
     s.tab = VramTab::BgMap;
-    assert!(on_click(&mut s, area, r.x + 1, r.y + 1, false));
+    assert!(on_click(&mut s, area, r.x + 1, r.y + 1));
     assert_eq!(s.map_src, 2);
 }
 

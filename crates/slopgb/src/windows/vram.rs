@@ -67,8 +67,6 @@ pub struct VramState {
     pub map_src: u8,
     /// `Tiles` source radio index into [`TILE_SRC`].
     pub tile_src: u8,
-    /// Which CGB VRAM bank the Tiles tab shows (0/1); ignored on DMG.
-    pub tile_bank: u8,
     /// Cursor position (window pixels) while it is over the content area, for
     /// the hovered-cell details panel; `None` when outside.
     pub hover: Option<(i32, i32)>,
@@ -88,7 +86,6 @@ impl Default for VramState {
             scxy: true,
             map_src: 0,
             tile_src: 0,
-            tile_bank: 0,
             hover: None,
             tile_hex_8bit: false,
         }
@@ -108,8 +105,6 @@ pub struct VramLayout {
     pub scxy_box: Rect,
     pub map_src: Vec<Rect>,
     pub tile_src: Vec<Rect>,
-    /// Tiles-tab CGB VRAM-bank-1 toggle.
-    pub tile_bank_box: Rect,
 }
 
 /// Compute the VRAM window layout for `area`.
@@ -123,9 +118,7 @@ pub fn layout(area: Rect) -> VramLayout {
     let details = Rect::new(dx, top, area.right() - dx - 2, area.bottom() - top);
     // Controls fill the lower rows of the details column, top-down. Each tab
     // shows only the subset that applies (gated in render/click).
-    let mut cy = details.bottom() - 1 - 6 * lh;
-    let tile_bank_box = checkbox_rect(dx, cy, "VRAM bank 1");
-    cy += lh;
+    let mut cy = details.bottom() - 1 - 5 * lh;
     let map_src = radio_rects(dx, cy, &MAP_SRC);
     cy += lh;
     let tile_src = radio_rects(dx, cy, &TILE_SRC);
@@ -144,14 +137,13 @@ pub fn layout(area: Rect) -> VramLayout {
         scxy_box,
         map_src,
         tile_src,
-        tile_bank_box,
     }
 }
 
 /// Handle a left-click at window-pixel `(px, py)`: switch tab, toggle a
-/// checkbox, or select a BG-map source radio. `cgb` gates the CGB-only Tiles
-/// bank toggle. Returns whether `state` changed (i.e. a redraw is needed).
-pub fn on_click(state: &mut VramState, area: Rect, px: i32, py: i32, cgb: bool) -> bool {
+/// checkbox, or select a BG-map source radio. Returns whether `state` changed
+/// (i.e. a redraw is needed).
+pub fn on_click(state: &mut VramState, area: Rect, px: i32, py: i32) -> bool {
     let l = layout(area);
     for (i, r) in l.tabs.iter().enumerate() {
         if r.contains(px, py) {
@@ -165,11 +157,6 @@ pub fn on_click(state: &mut VramState, area: Rect, px: i32, py: i32, cgb: bool) 
     }
     if l.paletted_box.contains(px, py) {
         state.show_paletted = !state.show_paletted;
-        return true;
-    }
-    // The Tiles tab's bank toggle is CGB-only (DMG has a single VRAM bank).
-    if state.tab == VramTab::Tiles && cgb && l.tile_bank_box.contains(px, py) {
-        state.tile_bank ^= 1;
         return true;
     }
     // scxy + the source radios only apply on the BG map tab (where they show).
