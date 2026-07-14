@@ -318,6 +318,44 @@ impl SgbApu {
     }
 }
 
+// The swap seam (`super::AudioCoprocessor`) bridges to the built-in
+// implementation: each method forwards to the identically-named inherent method
+// above, so the built-in path is byte-identical whether reached directly (unit
+// tests hold a concrete `SgbApu`) or through the trait object `GameBoy` holds.
+impl super::AudioCoprocessor for SgbApu {
+    fn clock(&mut self, gb_cycles: u64) {
+        SgbApu::clock(self, gb_cycles);
+    }
+
+    fn poll(&mut self, bus: &mut Interconnect) {
+        SgbApu::poll(self, bus);
+    }
+
+    fn mix_into(&mut self, out: &mut [(f32, f32)]) {
+        SgbApu::mix_into(self, out);
+    }
+
+    fn set_output_rate(&mut self, hz: u32) {
+        SgbApu::set_output_rate(self, hz);
+    }
+
+    fn load_bios(&mut self, bios: &[u8]) {
+        SgbApu::load_bios(self, bios);
+    }
+
+    fn write_state(&self, w: &mut crate::state::Writer) {
+        SgbApu::write_state(self, w);
+    }
+
+    fn read_state(&mut self, r: &mut crate::state::Reader<'_>) -> Result<(), crate::StateError> {
+        SgbApu::read_state(self, r)
+    }
+
+    fn clone_box(&self) -> Box<dyn super::AudioCoprocessor> {
+        Box::new(self.clone())
+    }
+}
+
 impl Clone for SgbApu {
     fn clone(&self) -> Self {
         // Deep-clone the DSP into a fresh shared cell and re-attach a link to the

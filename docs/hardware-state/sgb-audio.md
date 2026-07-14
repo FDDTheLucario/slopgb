@@ -12,6 +12,21 @@ Code: `crates/slopgb-core/src/sgb/dsp/` (the S-DSP), `sgb/apu.rs` (the
 `GameBoy` integration in `lib.rs` + `lib/sgb_api.rs`. The SGB *presentation*
 side (border/palette/attributes) is [sgb.md](sgb.md).
 
+## The `AudioCoprocessor` swap seam
+
+`GameBoy` holds the SGB audio side as `Option<Box<dyn sgb::AudioCoprocessor>>`
+(`sgb/mod.rs`), not the concrete `SgbApu` — so the built-in SPC700 + S-DSP can
+be swapped for an alternative implementation (e.g. one backed by a wasm
+coprocessor plugin) without touching `GameBoy`. The trait mirrors the subsystem
+surface `GameBoy` drives: `clock` / `poll(&mut Interconnect)` /`mix_into` /
+`set_output_rate` / `load_bios` / `write_state` / `read_state` / `clone_box`.
+The built-in `SgbApu` is the default and only implementation today; it bridges
+to its own inherent methods, so the path is **byte-identical** whether reached
+directly (unit tests hold a concrete `SgbApu`) or through the trait object. The
+box exists only on `Model::Sgb`/`Sgb2`, so `Dmg`/`Cgb` never touch the seam
+(golden-safe). Verified byte-identical: `golden_fingerprint` + mooneye 93/93 +
+the SGB audio unit tests, all unchanged after the extraction.
+
 ## Sources
 
 Every table and quirk is a verbatim port of a cited reference:

@@ -203,13 +203,31 @@ pub enum DebugReg {
 }
 
 /// A complete emulated Game Boy.
-#[derive(Clone)]
 pub struct GameBoy {
     cpu: cpu::Cpu,
     bus: interconnect::Interconnect,
-    /// SGB audio subsystem (SPC700 + S-DSP). `Some` only on `Model::Sgb`/`Sgb2`;
+    /// SGB audio subsystem (SPC700 + S-DSP), behind the [`sgb::AudioCoprocessor`]
+    /// swap seam. `Some` only on `Model::Sgb`/`Sgb2` (the built-in `SgbApu`);
     /// `None` elsewhere, so `Dmg`/`Cgb` are byte-identical (golden-safe).
-    sgb_apu: Option<sgb::apu::SgbApu>,
+    sgb_apu: Option<Box<dyn sgb::AudioCoprocessor>>,
+}
+
+impl Clone for GameBoy {
+    fn clone(&self) -> Self {
+        // Manual (not derived) because `Box<dyn AudioCoprocessor>` is not `Clone`;
+        // deep-clone the coprocessor via its `clone_box`.
+        GameBoy {
+            cpu: self.cpu.clone(),
+            bus: self.bus.clone(),
+            sgb_apu: self.sgb_apu.as_ref().map(|a| a.clone_box()),
+        }
+    }
+}
+
+/// Build the default (built-in) SGB audio coprocessor for `model`, boxed behind
+/// the [`sgb::AudioCoprocessor`] swap seam. `None` off `Model::Sgb`/`Sgb2`.
+fn build_sgb_apu(model: Model) -> Option<Box<dyn sgb::AudioCoprocessor>> {
+    sgb::apu::SgbApu::for_model(model).map(|a| Box::new(a) as Box<dyn sgb::AudioCoprocessor>)
 }
 
 impl GameBoy {
@@ -255,7 +273,7 @@ impl GameBoy {
             cpu.regs_mut().set_de(0xFF56);
             cpu.regs_mut().set_hl(0x000D);
         }
-        let sgb_apu = sgb::apu::SgbApu::for_model(model);
+        let sgb_apu = build_sgb_apu(model);
         Self { cpu, bus, sgb_apu }
     }
 
@@ -289,7 +307,7 @@ impl GameBoy {
         // constructor state (LCD off, DIV 0, …) and the boot ROM brings it up.
         bus.attach_boot_rom(boot_rom);
         let cpu = cpu::Cpu::power_on();
-        let sgb_apu = sgb::apu::SgbApu::for_model(model);
+        let sgb_apu = build_sgb_apu(model);
         Ok(Self { cpu, bus, sgb_apu })
     }
 
