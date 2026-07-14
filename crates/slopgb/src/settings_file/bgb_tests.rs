@@ -26,6 +26,9 @@ fn settings_round_trip_through_bgb_ini() {
         esc_shows_debugger: false,
         allow_opposing: true,
         uninited_wram: true, // bgb's UninitedWRAM key
+        frame_blend: true,
+        dmg_gbc_lcd: true,
+        contrast: 0.75,
         ..Settings::default()
     };
     let mut ini = Ini::parse("");

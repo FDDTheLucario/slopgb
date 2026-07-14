@@ -283,6 +283,14 @@ pub struct Settings {
     pub model: ModelChoice,
     /// Graphics → stretch the LCD to fill (fullscreen stretched).
     pub stretch: bool,
+    /// Graphics → "frame blend": present each frame averaged with the previous
+    /// one (a one-frame motion trail, softening flicker). Frontend-only.
+    pub frame_blend: bool,
+    /// GB Colors → "DMG on GBC LCD colors": tint the DMG output through the GBC
+    /// LCD colour-correction curve (the washed-out panel look). Frontend-only.
+    pub dmg_gbc_lcd: bool,
+    /// GB Colors → contrast wheel, 0.0..=1.0 (0.5 = neutral / no change).
+    pub contrast: f32,
     /// Sound → master volume, 0.0..=1.0.
     pub volume: f32,
     /// Sound → mono output (downmix L/R).
@@ -366,6 +374,9 @@ impl Default for Settings {
         Self {
             model: ModelChoice::Auto,
             stretch: false,
+            frame_blend: false,
+            dmg_gbc_lcd: false,
+            contrast: 0.5,
             volume: 1.0,
             mono: false,
             audio_backend: AudioBackend::Builtin,

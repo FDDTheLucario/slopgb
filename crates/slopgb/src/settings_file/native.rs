@@ -238,6 +238,12 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
             _ => ModelChoice::Auto,
         },
         stretch: b("graphics", "stretch", def.stretch),
+        frame_blend: b("graphics", "frame_blend", def.frame_blend),
+        dmg_gbc_lcd: b("graphics", "dmg_gbc_lcd", def.dmg_gbc_lcd),
+        contrast: d
+            .get("graphics", "contrast")
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(def.contrast),
         volume: d
             .get("sound", "volume")
             .and_then(|v| v.trim().parse().ok())
@@ -299,6 +305,9 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
     let Settings {
         model: _,
         stretch: _,
+        frame_blend: _,
+        dmg_gbc_lcd: _,
+        contrast: _,
         volume: _,
         mono: _,
         audio_backend: _,
@@ -353,6 +362,9 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
     d.set("sound", "mono", fb(settings.mono));
     d.set("sound", "audio_backend", settings.audio_backend.to_key());
     d.set("graphics", "stretch", fb(settings.stretch));
+    d.set("graphics", "frame_blend", fb(settings.frame_blend));
+    d.set("graphics", "dmg_gbc_lcd", fb(settings.dmg_gbc_lcd));
+    d.set("graphics", "contrast", &settings.contrast.to_string());
     let palette = settings
         .dmg_palette
         .iter()

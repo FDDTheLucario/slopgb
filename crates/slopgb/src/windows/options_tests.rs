@@ -562,6 +562,38 @@ fn graphics_tab_stretch_toggle() {
 }
 
 #[test]
+fn graphics_frame_blend_dropdown_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Graphics;
+    assert!(!st.working.frame_blend);
+    click_field(&mut st, Field::FrameBlend);
+    assert!(st.working.frame_blend, "frame blend on after click");
+}
+
+#[test]
+fn gbcolors_dmg_gbc_lcd_checkbox_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::GbColors;
+    assert!(!st.working.dmg_gbc_lcd);
+    click_field(&mut st, Field::DmgGbcLcd);
+    assert!(st.working.dmg_gbc_lcd);
+}
+
+#[test]
+fn gbcolors_contrast_slider_tracks_click_position() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::GbColors;
+    let r = field_rect(OptionsTab::GbColors, &st.working, Field::Contrast);
+    // Click near the right end → a high contrast fraction (default is 0.5).
+    st.on_click(r.x + r.w - 2, r.y + r.h / 2, BOUNDS);
+    assert!(
+        st.working.contrast > 0.9,
+        "contrast slider tracks click x: {}",
+        st.working.contrast
+    );
+}
+
+#[test]
 fn exceptions_tab_break_conditions_are_live() {
     // Four break conditions are wired to the core exception-break mask; the
     // rest of the tab stays faithfully inert (no clean detector / no backend).

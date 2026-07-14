@@ -64,8 +64,21 @@ pub(super) fn graphics(s: &Settings, content: Rect) -> Vec<Ctrl> {
         chk("MGB auto border/colors", false),
     ));
     l.row();
+    // "frame blend" is live: a label + a dropdown that cycles off ↔ on.
+    let fb_label = "frame blend:";
+    let (fx, fy) = l.at();
+    v.push(text_label((fx, fy), fb_label.to_owned()));
+    let fb_cx = fx + measure(fb_label) + 6;
+    v.push(Ctrl::live(
+        Rect::new(fb_cx, fy, 70, line_height() + 2),
+        Kind::Dropdown {
+            value: if s.frame_blend { "on" } else { "off" }.to_string(),
+            w: 70,
+        },
+        Field::FrameBlend,
+    ));
+    l.row();
     for (label, val) in [
-        ("frame blend:", "off"),
         ("doubler:", "auto"),
         ("bpp:", "auto"),
         ("output:", "auto"),
@@ -451,21 +464,26 @@ pub(super) fn gb_colors(s: &Settings, content: Rect) -> Vec<Ctrl> {
         chk("0-31 numbers", false),
     ));
     l.row();
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
         rc(l.at(), "DMG on GBC LCD colors"),
-        chk("DMG on GBC LCD colors", false),
+        chk("DMG on GBC LCD colors", s.dmg_gbc_lcd),
+        Field::DmgGbcLcd,
     ));
     l.row();
-    // Contrast wheel (inert).
+    // Contrast wheel — live slider over the present-side contrast filter.
     v.push(Ctrl::inert(
         rc(l.at(), "Contrast wheel:"),
         Kind::Label {
             text: "Contrast wheel:".into(),
         },
     ));
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
         Rect::new(l.x0 + 100, l.y, 140, line_height()),
-        Kind::Slider { frac: 0.5, w: 140 },
+        Kind::Slider {
+            frac: s.contrast,
+            w: 140,
+        },
+        Field::Contrast,
     ));
     v
 }

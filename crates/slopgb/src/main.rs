@@ -35,6 +35,7 @@ mod menupopup;
 mod msu1;
 mod net_worker;
 mod pacing;
+mod postfx;
 mod screenshot;
 mod session;
 mod settings_file;
@@ -317,6 +318,12 @@ struct App {
     /// A solid LCD-off frame (the palette's lightest shade) shown while no ROM is
     /// loaded — bgb's pale-green blank screen. Rebuilt when the palette changes.
     blank_frame: Box<[u32; SCREEN_PIXELS]>,
+    /// Scratch for the presentation filters (`postfx`): the core frame is copied
+    /// here and filtered in place before the blit, so the core buffer is never
+    /// touched. Empty on the all-off path (the borrow is presented directly).
+    postfx_buf: Vec<u32>,
+    /// The previously presented (pre-filter) frame, used by "frame blend".
+    prev_frame: Vec<u32>,
     window: Option<Rc<Window>>,
     video: Option<Video>,
     audio: Option<AudioPipe>,
@@ -503,6 +510,8 @@ impl App {
             session,
             rom_loaded,
             blank_frame,
+            postfx_buf: Vec::new(),
+            prev_frame: Vec::new(),
             settings,
             options: None,
             key_wizard: None,
@@ -604,7 +613,7 @@ impl App {
         // never paints. On an SGB with a border loaded (CHR_TRN+PCT_TRN), the
         // 256×224 composite replaces the bare 160×144 frame automatically — the
         // blit letterboxes whichever size it gets.
-        let (frame, src_w, src_h): (&[u32], usize, usize) = if self.rom_loaded {
+        let (mut frame, src_w, src_h): (&[u32], usize, usize) = if self.rom_loaded {
             match self.session.gb.sgb_border() {
                 Some(b) => (&b[..], SGB_BORDER_W, SGB_BORDER_H),
                 None => (&self.session.gb.frame()[..], SCREEN_W, SCREEN_H),
@@ -612,6 +621,18 @@ impl App {
         } else {
             (&self.blank_frame[..], SCREEN_W, SCREEN_H)
         };
+        // Presentation filters (frontend-only, golden-safe): copy the core frame
+        // into the scratch buffer and filter it in place, then present that.
+        if postfx::any_active(&self.settings) {
+            self.postfx_buf.clear();
+            self.postfx_buf.extend_from_slice(frame);
+            postfx::apply(&mut self.postfx_buf, &self.prev_frame, &self.settings);
+            self.prev_frame.clear();
+            self.prev_frame.extend_from_slice(frame);
+            frame = &self.postfx_buf[..];
+        } else if !self.prev_frame.is_empty() {
+            self.prev_frame.clear(); // drop history so re-enabling blend starts fresh
+        }
         // The right-click menu is its own window now (see `menupopup`), so it is
         // not part of the game-window overlay. The remaining overlays (info box /
         // Options / path modal / key wizard) stay centred/modal here. (Captures

@@ -25,6 +25,9 @@ fn settings_and_recent_round_trip() {
         ff_speed: 6,
         break_ld_b_b: true,
         stretch: true,
+        frame_blend: true,
+        dmg_gbc_lcd: true,
+        contrast: 0.75,
         bootrom_dmg: "x.bin".to_string(),
         ..Settings::default()
     };

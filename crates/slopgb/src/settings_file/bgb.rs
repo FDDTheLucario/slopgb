@@ -49,6 +49,13 @@ pub fn from_ini(f: &Ini) -> Settings {
         // slopgb's fullscreen-stretch has no bgb equivalent (bgb's `stretch` is a
         // video-scaling dropdown, not a mode), so it's a `Slopgb` extra.
         stretch: boolean("SlopgbStretch", d.stretch),
+        // No faithful bgb key mapped — stored as `Slopgb` extras.
+        frame_blend: boolean("SlopgbFrameBlend", d.frame_blend),
+        dmg_gbc_lcd: boolean("SlopgbDmgGbcLcd", d.dmg_gbc_lcd),
+        contrast: f
+            .get("SlopgbContrast")
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(d.contrast),
         volume: (int("Volume", (d.volume * 100.0) as i64) as f32 / 100.0).clamp(0.0, 1.0),
         mono: boolean("SoundMono", d.mono),
         // No bgb equivalent (a `Slopgb` extra) — the SGB audio backend.
@@ -102,6 +109,9 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
     let Settings {
         model: _,
         stretch: _,
+        frame_blend: _,
+        dmg_gbc_lcd: _,
+        contrast: _,
         volume: _,
         mono: _,
         audio_backend: _,
@@ -172,6 +182,9 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
     }
     // slopgb-only fields — no bgb key, stored under a `Slopgb` prefix bgb ignores.
     f.set("SlopgbStretch", ini::fmt_bool(s.stretch));
+    f.set("SlopgbFrameBlend", ini::fmt_bool(s.frame_blend));
+    f.set("SlopgbDmgGbcLcd", ini::fmt_bool(s.dmg_gbc_lcd));
+    f.set("SlopgbContrast", &s.contrast.to_string());
     f.set("SlopgbTileHex8bit", ini::fmt_bool(s.tile_hex_8bit));
     f.set("SlopgbMemoryWindow", ini::fmt_bool(s.memory_window));
     f.set("SlopgbShowFramerate", ini::fmt_bool(s.show_framerate));

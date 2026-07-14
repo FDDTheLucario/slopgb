@@ -30,6 +30,12 @@ pub(crate) enum ThemeRadio {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Field {
     Stretch,
+    /// Graphics → "frame blend" combo (cycles off ↔ on).
+    FrameBlend,
+    /// GB Colors → "DMG on GBC LCD colors" checkbox.
+    DmgGbcLcd,
+    /// GB Colors → contrast wheel slider (maps the click fraction to 0.0..=1.0).
+    Contrast,
     Mono,
     LowercaseHex,
     ShowClocks,
@@ -234,6 +240,9 @@ pub(crate) fn on_content_click(
 fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
     match field {
         Field::Stretch => s.stretch = !s.stretch,
+        Field::FrameBlend => s.frame_blend = !s.frame_blend,
+        Field::DmgGbcLcd => s.dmg_gbc_lcd = !s.dmg_gbc_lcd,
+        Field::Contrast => s.contrast = slider_frac(ct.rect, px),
         Field::Mono => s.mono = !s.mono,
         Field::LowercaseHex => s.lowercase_hex = !s.lowercase_hex,
         Field::ShowClocks => s.show_clocks = !s.show_clocks,
@@ -299,7 +308,10 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
 pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
     let d = Settings::default();
     match tab {
-        OptionsTab::Graphics => s.stretch = d.stretch,
+        OptionsTab::Graphics => {
+            s.stretch = d.stretch;
+            s.frame_blend = d.frame_blend;
+        }
         OptionsTab::System => {
             s.model = d.model;
             s.uninited_wram = d.uninited_wram;
@@ -325,7 +337,11 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
             s.mono = d.mono;
             s.audio_backend = d.audio_backend;
         }
-        OptionsTab::GbColors => s.select_scheme(d.scheme),
+        OptionsTab::GbColors => {
+            s.select_scheme(d.scheme);
+            s.dmg_gbc_lcd = d.dmg_gbc_lcd;
+            s.contrast = d.contrast;
+        }
         // configure-keyboard is not a Settings field; only the SOCD toggle resets.
         OptionsTab::Joypad => s.allow_opposing = d.allow_opposing,
         OptionsTab::Misc => {
