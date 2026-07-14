@@ -144,3 +144,29 @@ fn sbc() {
         "e9", "e5", "f5", "ed", "fd", "f9", "ef", "ff", "e1", "f1", "f2", "e7", "f7", "e3", "f3",
     ]);
 }
+
+#[test]
+fn interrupts() {
+    run_opcodes(&["00", "02", "40"]);
+}
+
+#[test]
+fn block_moves() {
+    run_opcodes(&["54", "44"]);
+}
+
+#[test]
+fn wait_stop() {
+    run_opcodes(&["cb", "db"]);
+}
+
+/// The acceptance gate: every one of the 256 opcodes against its full vector set
+/// (emulation + native), cycle-exact. Ignored by default (5.12M cases, minutes
+/// in debug); run with `cargo test -p slopgb-w65c816 --release -- --ignored`.
+#[test]
+#[ignore = "full 256-opcode sweep; slow, run explicitly"]
+fn all_opcodes() {
+    let all: Vec<String> = (0u16..=0xFF).map(|o| format!("{o:02x}")).collect();
+    let refs: Vec<&str> = all.iter().map(String::as_str).collect();
+    run_opcodes(&refs);
+}

@@ -14,6 +14,10 @@ pub struct Cpu {
     pub regs: Regs,
     /// Cycles accrued by the instruction currently executing (reset per `step`).
     cycles: u64,
+    /// Cycle budget for the current instruction. Only the block-move ops
+    /// (`MVN`/`MVP`), which loop, consult it: they yield once it is reached so a
+    /// long move can be split across calls. Every other instruction ignores it.
+    cap: u64,
     /// Set by `STP`; cleared only by RESET. `WAI` sets `waiting` until an
     /// interrupt. Both are inspected by the host loop.
     pub stopped: bool,
@@ -35,6 +39,7 @@ impl Cpu {
         Self {
             regs: Regs::at_reset(),
             cycles: 0,
+            cap: u64::MAX,
             stopped: false,
             waiting: false,
         }
@@ -46,6 +51,7 @@ impl Cpu {
         Self {
             regs,
             cycles: 0,
+            cap: u64::MAX,
             stopped: false,
             waiting: false,
         }
@@ -57,12 +63,27 @@ impl Cpu {
     /// multi-byte pushes step `S` linearly in between, so a word push can address
     /// across the page-1 boundary before SH is re-pinned.
     pub fn step(&mut self, bus: &mut impl Bus) -> u64 {
+        self.step_bounded(bus, u64::MAX)
+    }
+
+    /// Like [`step`](Self::step), but a block move (`MVN`/`MVP`) yields once it
+    /// has spent `max_cycles`, leaving `PC` at the opcode so the next call
+    /// resumes it. Every other instruction runs to completion regardless of the
+    /// budget. Returns the cycles actually spent.
+    pub fn step_bounded(&mut self, bus: &mut impl Bus, max_cycles: u64) -> u64 {
         self.cycles = 0;
+        self.cap = max_cycles;
         self.pin_emulation_stack();
         let opcode = self.fetch8(bus);
         self.dispatch(opcode, bus);
         self.pin_emulation_stack();
         self.cycles
+    }
+
+    /// Whether the current instruction has reached its cycle budget (block moves
+    /// only).
+    pub(crate) fn cap_reached(&self) -> bool {
+        self.cycles >= self.cap
     }
 
     /// Force the stack high byte to `01` while in emulation mode.

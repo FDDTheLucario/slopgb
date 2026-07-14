@@ -325,7 +325,14 @@ impl Cpu {
             0xE3 => am!(self, bus, am_stack_s => sbc),
             0xF3 => am!(self, bus, am_stack_s_y => sbc),
 
-            other => panic!("unimplemented opcode {other:#04x}"),
+            // --- interrupts / block moves / wait ---
+            0x00 => self.brk(bus),
+            0x02 => self.cop(bus),
+            0x40 => self.rti(bus),
+            0x54 => self.mvn(bus),
+            0x44 => self.mvp(bus),
+            0xCB => self.wai(),
+            0xDB => self.stp(),
         }
     }
 }

@@ -113,7 +113,10 @@ fn run_one(test: &J) -> Result<(), String> {
     let mut bus = VecBus::default();
     bus.seed(&ram_pairs(initial));
 
-    let ran = cpu.step(&mut bus);
+    // The vectors run the block moves (MVN/MVP) under a fixed cycle budget,
+    // capturing a partial move; passing that budget makes the CPU yield at the
+    // same point. Every other instruction ignores the budget.
+    let ran = cpu.step_bounded(&mut bus, cycles.len() as u64);
 
     if ran as usize != cycles.len() {
         return Err(format!("cycles: got {ran}, want {}", cycles.len()));
