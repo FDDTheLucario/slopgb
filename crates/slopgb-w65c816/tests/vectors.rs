@@ -125,3 +125,8 @@ fn cpx_cpy() {
 fn branches() {
     run_opcodes(&["10", "30", "50", "70", "90", "b0", "d0", "f0", "80", "82"]);
 }
+
+#[test]
+fn jumps_calls() {
+    run_opcodes(&["4c", "5c", "6c", "7c", "dc", "20", "fc", "22", "60", "6b"]);
+}

@@ -279,6 +279,18 @@ impl Cpu {
             0x80 => self.branch(bus, true),
             0x82 => self.brl(bus),
 
+            // --- jumps / calls ---
+            0x4C => self.jmp_abs(bus),
+            0x5C => self.jmp_long(bus),
+            0x6C => self.jmp_indirect(bus),
+            0x7C => self.jmp_indirect_x(bus),
+            0xDC => self.jmp_long_indirect(bus),
+            0x20 => self.jsr_abs(bus),
+            0xFC => self.jsr_indirect_x(bus),
+            0x22 => self.jsl(bus),
+            0x60 => self.rts(bus),
+            0x6B => self.rtl(bus),
+
             other => panic!("unimplemented opcode {other:#04x}"),
         }
     }

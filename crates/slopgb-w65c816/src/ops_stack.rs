@@ -36,6 +36,19 @@ impl Cpu {
         self.read8(bus, self.regs.s as u32)
     }
 
+    /// Push one byte stepping the full 16-bit `S` (no page-1 clamp). Used by the
+    /// 65816 long-call ops (`JSL`/`RTL`), which are not clamped to page 1.
+    pub(crate) fn push8_linear(&mut self, bus: &mut impl Bus, value: u8) {
+        self.write8(bus, self.regs.s as u32, value);
+        self.regs.s = self.regs.s.wrapping_sub(1);
+    }
+
+    /// Pull one byte stepping the full 16-bit `S` (no page-1 clamp).
+    pub(crate) fn pull8_linear(&mut self, bus: &mut impl Bus) -> u8 {
+        self.regs.s = self.regs.s.wrapping_add(1);
+        self.read8(bus, self.regs.s as u32)
+    }
+
     /// Push a 16-bit value (high byte first). The 65816 stack ops that push a
     /// word — `PHD`/`PEA`/`PEI`/`PER` and native pushes — step the full 16-bit
     /// `S` and are not clamped to page 1 (the emulation-mode SH lock is re-applied
