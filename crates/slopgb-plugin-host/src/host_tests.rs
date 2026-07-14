@@ -2,6 +2,7 @@
 //! modules so they don't need the wasm32 fixture build.
 
 use slopgb_core::{GameBoy, Model};
+use slopgb_plugin_api::ABI_VERSION;
 
 use super::{LoadError, PluginHost};
 
@@ -43,7 +44,7 @@ fn rejects_abi_version_mismatch() {
 #[test]
 fn rejects_unsupported_capability() {
     // caps = 3 = INTROSPECTION | MUTATE; MUTATE is not served in phase 1.
-    let bytes = wasm(&plugin_wat(1, 0b011, ""));
+    let bytes = wasm(&plugin_wat(ABI_VERSION, 0b011, ""));
     let err = PluginHost::load_bytes("greedy", &bytes).err().unwrap();
     assert!(
         matches!(err, LoadError::UnsupportedCapabilities { .. }),
@@ -53,7 +54,7 @@ fn rejects_unsupported_capability() {
 
 #[test]
 fn accepts_introspection_plugin() {
-    let bytes = wasm(&plugin_wat(1, 1, ""));
+    let bytes = wasm(&plugin_wat(ABI_VERSION, 1, ""));
     assert!(PluginHost::load_bytes("ok", &bytes).is_ok());
 }
 
@@ -61,7 +62,7 @@ fn accepts_introspection_plugin() {
 fn host_log_reads_guest_memory() {
     // on_frame logs the two bytes "hi" from the data segment at offset 0.
     let bytes = wasm(&plugin_wat(
-        1,
+        ABI_VERSION,
         1,
         "(call $host_log (i32.const 0) (i32.const 2))",
     ));
@@ -139,7 +140,7 @@ fn host_read_sees_snapshot() {
     // → store at mem[8] → log 1 byte. Simplest observable path: read then drop,
     // asserting no trap. Value correctness is covered by the fixture round trip.
     let body = "(drop (call $host_read (i32.const 0x0147)))";
-    let bytes = wasm(&plugin_wat(1, 1, body));
+    let bytes = wasm(&plugin_wat(ABI_VERSION, 1, body));
     let mut host = PluginHost::new();
     host.push(PluginHost::load_bytes("reader", &bytes).unwrap());
     host.pump(&gb()); // must not trap

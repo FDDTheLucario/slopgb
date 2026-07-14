@@ -11,4 +11,4 @@ pub use coprocessor::LoadedCoprocessor;
 pub use host::{LoadError, LoadedPlugin, PluginHost, PluginInfo};
 pub use slopgb_plugin_api::ToolResult;
 pub use snapshot::Snapshot;
-pub use tool::LoadedTool;
+pub use tool::{LoadedTool, ToolContext, ToolMeta};

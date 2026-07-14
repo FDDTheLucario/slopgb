@@ -3,11 +3,12 @@
 //! Guide: `docs/ui-state/plugin-api.md`.
 
 mod abi;
+pub mod args;
 mod coprocessor;
 mod tool;
 mod view;
 
-pub use abi::{ABI_VERSION, Reg};
+pub use abi::{ABI_VERSION, META_DESCRIPTION, META_NAME, META_SCHEMA, Reg};
 pub use coprocessor::Coprocessor;
 pub use tool::{__emit, ToolPlugin, ToolResult};
 pub use view::{GameBoyView, Registers};
