@@ -55,13 +55,18 @@ The SNES-side chips exist as standalone wasm coprocessor plugins:
 - **`slopgb-w65c816-plugin`** wraps the clean-room 65C816 (the SNES CPU) with a
   guest SNES-RAM + comm-port bus. Proven in `w65c816_roundtrip.rs`.
 
-The full chain is now wired **natively** in **`slopgb-sgb-coprocessor`**
-(`SgbCoprocessor`): a clean-room 65C816 (`slopgb-w65c816`) over a SNES bus whose
-`$2140-$2143` window is the SPC700 + S-DSP (`slopgb-snes-apu`), exposed as a
+The full chain runs as **two loaded wasm plugins** orchestrated by
+**`slopgb-sgb-coprocessor`** (`SgbCoprocessor`): it loads `spc700.wasm` +
+`w65c816.wasm` through `LoadedCoprocessor`, installs the clean-room firmware into
+each chip's RAM (`write_ram`/`set_pc`), mediates the four `$2140-$2143` SNES↔APU
+comm ports between the two loaded plugins each pumped chunk, routes the SGB sound
+commands into the chips, and mixes the drained S-DSP PCM — exposed as a
 `slopgb-core` `AudioCoprocessor` a frontend injects via `set_audio_coprocessor`.
-It composes the shared native crates directly (no wasm round-trip needed; core
-stays zero-dep — this crate is separate). The remaining integration work,
-smallest-first:
+It depends on **neither** `slopgb-snes-apu` nor `slopgb-w65c816` (the plugins are
+built from those); `wasmi` stays quarantined in `slopgb-plugin-host`. Plugin
+pumps are **batched** (a ~4096 GB-cycle flush chunk) so the per-frame wasm
+crossing count stays low — never one crossing per emulated cycle. The integration
+milestones, smallest-first:
 
 1. **A PCM-drain path in the tier-3 ABI — DONE (ABI v3).** `Coprocessor` gained
    `drain_pcm` (default: none, for a non-audio chip like the 65C816); the
@@ -80,30 +85,39 @@ smallest-first:
    lives in the host and forwards to the wasm plugin, calling `drain_pcm` each
    frame from item 1). SGB-only, golden-safe (see the swap-seam section).
 4. **Combine the 65C816 + SPC700 + DSP into one SNES coprocessor — DONE
-   (`slopgb-sgb-coprocessor`).** The injected `SgbCoprocessor` runs both CPUs:
-   DATA_SND ($0F) lands in SNES work RAM, JUMP ($12) redirects the 65C816, and
-   the four `$2140-$2143` comm ports carry bytes between the SNES CPU and the
-   SPC700 — the no-ops the built-in HLE path leaves. It ships an **original
-   clean-room firmware** in place of the (unshipped, copyrighted) SGB system ROM:
-   a 65C816 shim that forwards a SNES-RAM sound mailbox to the SPC700 ports, and
-   a SPC700 driver that waits on a port and keys the S-DSP. So a bare SGB `SOUND
-   ($08)` command produces audio with no game-supplied driver, and a `SOU_TRN`
-   game driver still plays (the upload replaces the resident driver). Proven end
-   to end (`sound_command_drives_the_firmware_chain_to_audio`,
+   (`slopgb-sgb-coprocessor`).** The injected `SgbCoprocessor` drives both loaded
+   plugins: DATA_SND ($0F) lands in SNES work RAM (`write_ram` on the CPU plugin),
+   JUMP ($12) redirects the 65C816 (`set_pc`), and the host mediates the four
+   `$2140-$2143` comm ports between the SNES CPU and the SPC700 plugins — the
+   no-ops the built-in HLE path leaves. It installs an **original clean-room
+   firmware** (owned as byte arrays here, poked into the chips' RAM) in place of
+   the (unshipped, copyrighted) SGB system ROM: a 65C816 shim that forwards a
+   SNES-RAM sound mailbox to the SPC700 ports, and a SPC700 driver that waits on a
+   port and keys the S-DSP. So a bare SGB `SOUND ($08)` command produces audio
+   with no game-supplied driver, and a `SOU_TRN` game driver still plays (the
+   upload replaces the resident driver). Save-state / clone ride the tier-3
+   `save_state`/`load_state` ABI (v5); clone re-instantiates fresh plugin
+   instances and loads the snapshot. Proven end to end
+   (`sound_command_drives_the_firmware_chain_to_audio`,
    `injected_coprocessor_makes_a_gameboy_sound_command_audible`) — a SOUND packet
    through a real `GameBoy` yields non-zero PCM. **Honest limits:** the SNES↔GB
    clock ratio is a loose HLE approximation (not cycle-exact), the SOUND→note
    mapping and the DATA_SND packet layout are original clean-room interpretations
    (the real SGB effect-code→driver semantics live in the unread system ROM), and
    the tone is a synthesized square, not the SGB sample bank.
-5. **Frontend backend toggle — DONE.** The `slopgb` frontend selects the backend
-   with `--sgb-coprocessor` (or `SLOPGB_SGB_COPROCESSOR`): off (default) keeps the
-   built-in HLE `SgbApu` (byte-identical golden path); on injects a fresh
-   `SgbCoprocessor` (at `DEFAULT_SAMPLE_RATE`) via `set_audio_coprocessor` after
-   every machine build — `Session::set_sgb_coprocessor`/`apply_sgb_coprocessor`,
-   re-applied on power-cycle / model switch, a no-op off SGB. Proven in
-   `session::tests::sgb_coprocessor_toggle_swaps_the_audio_backend` (a SOUND
-   command is silent on the built-in default, audible with the coprocessor on).
+5. **Frontend backend toggle + runtime plugin loading — DONE.** The `slopgb`
+   frontend selects the backend with `--sgb-coprocessor` (or
+   `SLOPGB_SGB_COPROCESSOR`): off (default) keeps the built-in HLE `SgbApu`
+   (byte-identical golden path); on loads the two plugin `.wasm` at runtime from
+   `SLOPGB_SGB_COPROCESSOR=<dir>` (or the `--plugins` dir) and injects the
+   `SgbCoprocessor` via `set_audio_coprocessor` after every machine build. slopgb
+   itself neither builds nor bundles the wasm — if the plugins are absent or fail
+   to load, the built-in `SgbApu` stands (golden-safe fallback).
+   `Session::set_sgb_coprocessor_dir` + `set_sgb_coprocessor`/
+   `apply_sgb_coprocessor`, re-applied on power-cycle / model switch, a no-op off
+   SGB. Proven in `session::tests::sgb_coprocessor_toggle_swaps_the_audio_backend`
+   (silent on the built-in default, silent on the missing-plugins fallback,
+   audible with the coprocessor loaded).
 
 ## Sources
 
