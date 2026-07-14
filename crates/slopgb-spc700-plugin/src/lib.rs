@@ -28,6 +28,7 @@ use std::rc::Rc;
 use slopgb_plugin_api::{Coprocessor, slopgb_coprocessor_plugin};
 use slopgb_snes_apu::dsp::SDsp;
 use slopgb_snes_apu::spc700::{Dsp, Spc700};
+use slopgb_snes_apu::state::{Reader, StateError, Writer};
 
 /// The S-DSP emits one stereo sample every 32 SPC700 cycles (→ 32 kHz).
 const DSP_PERIOD: u32 = 32;
@@ -124,6 +125,55 @@ impl Coprocessor for Spc700Cop {
 
     fn drain_pcm(&mut self) -> Vec<(i16, i16)> {
         std::mem::take(&mut self.pcm)
+    }
+
+    fn set_pc(&mut self, addr: u32) {
+        self.spc.set_pc(addr as u16);
+    }
+
+    /// Poke `bytes` into APU RAM at `addr` (wrapping the 64 KB space) — how the
+    /// host installs a resident SPC700 driver or lands a SOU_TRN upload.
+    fn write_ram(&mut self, addr: u32, bytes: &[u8]) {
+        let ram = self.spc.apu_ram_mut();
+        for (i, &b) in bytes.iter().enumerate() {
+            ram[(addr.wrapping_add(i as u32) & 0xFFFF) as usize] = b;
+        }
+    }
+
+    fn read_ram(&mut self, addr: u32, len: usize) -> Vec<u8> {
+        let ram = self.spc.apu_ram_mut();
+        (0..len)
+            .map(|i| ram[(addr.wrapping_add(i as u32) & 0xFFFF) as usize])
+            .collect()
+    }
+
+    /// Serialize the SPC700 + S-DSP + the host-side cycle/sample accumulators.
+    /// The transient undrained `pcm` is not persisted (audio the host has yet to
+    /// pull), matching the built-in path that clears it on restore.
+    fn save_state(&self) -> Vec<u8> {
+        let mut w = Writer::new();
+        self.spc.write_state(&mut w);
+        self.dsp.borrow().write_state(&mut w);
+        w.u64(self.cycles);
+        w.u32(self.dsp_div);
+        w.u64(self.samples);
+        w.into_vec()
+    }
+
+    fn load_state(&mut self, bytes: &[u8]) {
+        let mut r = Reader::new(bytes);
+        let restored = (|| -> Result<(), StateError> {
+            self.spc.read_state(&mut r)?;
+            self.dsp.borrow_mut().read_state(&mut r)?;
+            self.cycles = r.u64()?;
+            self.dsp_div = r.u32()?;
+            self.samples = r.u64()?;
+            Ok(())
+        })();
+        // A truncated/foreign buffer leaves the chip partially restored but
+        // usable; drop the transient audio buffer either way.
+        let _ = restored;
+        self.pcm.clear();
     }
 }
 

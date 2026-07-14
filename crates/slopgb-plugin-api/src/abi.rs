@@ -8,7 +8,13 @@
 /// v4 adds two host→guest bulk imports for streaming coprocessors: `host_recv`
 /// (read the game-written mailbox) and `host_file` (read chunks of a host-owned
 /// file by key + offset — a track `.pcm` / data `.msu`, too large for comm ports).
-pub const ABI_VERSION: i32 = 4;
+/// v5 adds five tier-3 exports for an orchestrating host (the SGB coprocessor
+/// driving two loaded chips): `slopgb_set_pc` / `slopgb_write_ram` /
+/// `slopgb_read_ram` (firmware install + memory peek/poke) and
+/// `slopgb_save_state` / `slopgb_load_state` (chip state snapshots). RAM writes
+/// and state restores ride the existing mailbox channel; RAM reads and state
+/// saves ride the emit channel.
+pub const ABI_VERSION: i32 = 5;
 
 /// A readable register or I/O byte. Discriminant is the `host_reg` wire index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -168,6 +168,98 @@ impl Coprocessor for W65816Cop {
             0
         }
     }
+
+    /// Redirect the CPU to a 24-bit `bank<<16 | pc` target and un-halt it — how
+    /// the host points the CPU at freshly installed firmware or applies an SGB
+    /// `JUMP`. Clearing `stopped`/`waiting` lets the target actually run.
+    fn set_pc(&mut self, addr: u32) {
+        self.cpu.regs.pbr = (addr >> 16) as u8;
+        self.cpu.regs.pc = addr as u16;
+        self.cpu.stopped = false;
+        self.cpu.waiting = false;
+    }
+
+    /// Poke `bytes` into SNES RAM at `addr` (wrapping the 64 KB bank) — how the
+    /// host installs resident firmware or lands an SGB `DATA_SND` block.
+    fn write_ram(&mut self, addr: u32, bytes: &[u8]) {
+        for (i, &b) in bytes.iter().enumerate() {
+            self.bus.ram[(addr.wrapping_add(i as u32) & 0xFFFF) as usize] = b;
+        }
+    }
+
+    fn read_ram(&mut self, addr: u32, len: usize) -> Vec<u8> {
+        (0..len)
+            .map(|i| self.bus.ram[(addr.wrapping_add(i as u32) & 0xFFFF) as usize])
+            .collect()
+    }
+
+    /// Serialize the register file + halt flags, the 64 KB RAM, the comm-port
+    /// latches, and the host-side cycle counter.
+    fn save_state(&self) -> Vec<u8> {
+        let r = &self.cpu.regs;
+        let mut buf = Vec::with_capacity(0x1_0000 + 32);
+        for v in [r.a, r.x, r.y, r.s, r.d, r.pc] {
+            buf.extend_from_slice(&v.to_le_bytes());
+        }
+        buf.extend_from_slice(&[r.pbr, r.dbr, r.p, r.e as u8]);
+        buf.push(self.cpu.stopped as u8);
+        buf.push(self.cpu.waiting as u8);
+        buf.extend_from_slice(&self.bus.ram[..]);
+        buf.extend_from_slice(&self.bus.port_in);
+        buf.extend_from_slice(&self.bus.port_out);
+        buf.extend_from_slice(&self.cycles.to_le_bytes());
+        buf
+    }
+
+    /// Restore state produced by [`Self::save_state`]. A truncated/foreign
+    /// buffer is ignored (the chip keeps its current state) rather than panic.
+    fn load_state(&mut self, bytes: &[u8]) {
+        if bytes.len() != 0x1_0000 + 32 {
+            return;
+        }
+        let mut c = Cursor { b: bytes, pos: 0 };
+        let r = &mut self.cpu.regs;
+        r.a = c.u16();
+        r.x = c.u16();
+        r.y = c.u16();
+        r.s = c.u16();
+        r.d = c.u16();
+        r.pc = c.u16();
+        r.pbr = c.u8();
+        r.dbr = c.u8();
+        r.p = c.u8();
+        r.e = c.u8() != 0;
+        self.cpu.stopped = c.u8() != 0;
+        self.cpu.waiting = c.u8() != 0;
+        self.bus.ram.copy_from_slice(c.take(0x1_0000));
+        self.bus.port_in.copy_from_slice(c.take(N_PORTS));
+        self.bus.port_out.copy_from_slice(c.take(N_PORTS));
+        self.cycles = c.u64();
+    }
+}
+
+/// A minimal little-endian read cursor for [`W65816Cop::load_state`]. Only
+/// entered after a length check, so every `take` is in bounds.
+struct Cursor<'a> {
+    b: &'a [u8],
+    pos: usize,
+}
+
+impl Cursor<'_> {
+    fn take(&mut self, n: usize) -> &[u8] {
+        let s = &self.b[self.pos..self.pos + n];
+        self.pos += n;
+        s
+    }
+    fn u8(&mut self) -> u8 {
+        self.take(1)[0]
+    }
+    fn u16(&mut self) -> u16 {
+        u16::from_le_bytes(self.take(2).try_into().unwrap())
+    }
+    fn u64(&mut self) -> u64 {
+        u64::from_le_bytes(self.take(8).try_into().unwrap())
+    }
 }
 
 slopgb_coprocessor_plugin!(W65816Cop);

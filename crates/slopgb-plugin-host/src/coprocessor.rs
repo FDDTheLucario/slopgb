@@ -2,7 +2,7 @@
 //! 65C816), driven by the host through reset / clock / comm-port calls. The
 //! chip's internal RAM stays inside the sandbox; only the comm ports cross.
 
-use slopgb_plugin_api::{ABI_VERSION, Capabilities, EMIT_KIND_PCM};
+use slopgb_plugin_api::{ABI_VERSION, Capabilities, EMIT_KIND_PCM, EMIT_KIND_RAM, EMIT_KIND_STATE};
 use wasmi::{Engine, Module, Store, TypedFunc};
 
 use crate::LoadError;
@@ -17,6 +17,11 @@ pub struct LoadedCoprocessor {
     port_write: TypedFunc<(i32, i32), ()>,
     port_read: TypedFunc<i32, i32>,
     drain_pcm: TypedFunc<(), i32>,
+    set_pc: TypedFunc<i32, ()>,
+    write_ram: TypedFunc<i32, ()>,
+    read_ram: TypedFunc<(i32, i32), i32>,
+    save_state: TypedFunc<(), i32>,
+    load_state: TypedFunc<(), ()>,
 }
 
 impl LoadedCoprocessor {
@@ -66,6 +71,21 @@ impl LoadedCoprocessor {
         let drain_pcm = instance
             .get_typed_func::<(), i32>(&store, "slopgb_drain_pcm")
             .map_err(|_| LoadError::MissingExport("slopgb_drain_pcm"))?;
+        let set_pc = instance
+            .get_typed_func::<i32, ()>(&store, "slopgb_set_pc")
+            .map_err(|_| LoadError::MissingExport("slopgb_set_pc"))?;
+        let write_ram = instance
+            .get_typed_func::<i32, ()>(&store, "slopgb_write_ram")
+            .map_err(|_| LoadError::MissingExport("slopgb_write_ram"))?;
+        let read_ram = instance
+            .get_typed_func::<(i32, i32), i32>(&store, "slopgb_read_ram")
+            .map_err(|_| LoadError::MissingExport("slopgb_read_ram"))?;
+        let save_state = instance
+            .get_typed_func::<(), i32>(&store, "slopgb_save_state")
+            .map_err(|_| LoadError::MissingExport("slopgb_save_state"))?;
+        let load_state = instance
+            .get_typed_func::<(), ()>(&store, "slopgb_load_state")
+            .map_err(|_| LoadError::MissingExport("slopgb_load_state"))?;
 
         Ok(Self {
             store,
@@ -74,6 +94,11 @@ impl LoadedCoprocessor {
             port_write,
             port_read,
             drain_pcm,
+            set_pc,
+            write_ram,
+            read_ram,
+            save_state,
+            load_state,
         })
     }
 
@@ -142,5 +167,57 @@ impl LoadedCoprocessor {
             ));
         }
         Ok(out)
+    }
+
+    /// Redirect the chip's program counter to `addr` (its own address space).
+    pub fn set_pc(&mut self, addr: u32) -> Result<(), LoadError> {
+        self.set_pc.call(&mut self.store, addr as i32)?;
+        Ok(())
+    }
+
+    /// Write `bytes` into the chip's internal memory at `addr`. The bytes ride
+    /// the mailbox channel (staged, then pulled by the guest inside the call).
+    pub fn write_ram(&mut self, addr: u32, bytes: &[u8]) -> Result<(), LoadError> {
+        self.store.data_mut().mailbox = bytes.to_vec();
+        self.write_ram.call(&mut self.store, addr as i32)?;
+        Ok(())
+    }
+
+    /// Read `len` bytes of the chip's internal memory at `addr` (the guest ships
+    /// them over the emit channel; this decodes them). Short on a chip that
+    /// exposes less.
+    pub fn read_ram(&mut self, addr: u32, len: usize) -> Result<Vec<u8>, LoadError> {
+        self.store.data_mut().emitted = None;
+        let n = self
+            .read_ram
+            .call(
+                &mut self.store,
+                (addr as i32, i32::try_from(len).unwrap_or(i32::MAX)),
+            )?
+            .max(0) as usize;
+        let bytes = match self.store.data_mut().emitted.take() {
+            Some((EMIT_KIND_RAM, buf)) => buf,
+            _ => return Ok(Vec::new()),
+        };
+        Ok(bytes.into_iter().take(n).collect())
+    }
+
+    /// Snapshot the chip's full state to bytes (guest ships them over the emit
+    /// channel). Pair with [`Self::load_state`].
+    pub fn save_state(&mut self) -> Result<Vec<u8>, LoadError> {
+        self.store.data_mut().emitted = None;
+        self.save_state.call(&mut self.store, ())?;
+        Ok(match self.store.data_mut().emitted.take() {
+            Some((EMIT_KIND_STATE, buf)) => buf,
+            _ => Vec::new(),
+        })
+    }
+
+    /// Restore chip state from bytes produced by [`Self::save_state`] (staged in
+    /// the mailbox, pulled by the guest inside the call).
+    pub fn load_state(&mut self, bytes: &[u8]) -> Result<(), LoadError> {
+        self.store.data_mut().mailbox = bytes.to_vec();
+        self.load_state.call(&mut self.store, ())?;
+        Ok(())
     }
 }

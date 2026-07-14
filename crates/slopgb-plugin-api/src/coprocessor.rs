@@ -8,6 +8,12 @@
 /// The [`crate::__emit`] `kind` a coprocessor uses to push drained PCM: a flat
 /// buffer of interleaved little-endian `i16` `L,R` sample pairs.
 pub const EMIT_KIND_PCM: i32 = 2;
+/// The [`crate::__emit`] `kind` `slopgb_save_state` uses to push the chip's
+/// serialized state (opaque bytes) back to the host.
+pub const EMIT_KIND_STATE: i32 = 3;
+/// The [`crate::__emit`] `kind` `slopgb_read_ram` uses to push a read chunk of
+/// the chip's internal memory back to the host.
+pub const EMIT_KIND_RAM: i32 = 4;
 
 /// Read the host→guest **mailbox** — the bytes a game (or the frontend) last
 /// deposited for this coprocessor, e.g. a streaming-audio play-request written
@@ -82,6 +88,44 @@ pub trait Coprocessor {
     fn drain_pcm(&mut self) -> Vec<(i16, i16)> {
         Vec::new()
     }
+
+    /// Redirect the chip's program counter to `addr` (its own address space —
+    /// e.g. a 24-bit `bank<<16 | pc` for the 65C816, a 16-bit `pc` for the
+    /// SPC700). Lets an orchestrating host install firmware or apply an SGB
+    /// `JUMP`. Default: ignored (a chip with no host-settable PC).
+    fn set_pc(&mut self, addr: u32) {
+        let _ = addr;
+    }
+
+    /// Write `bytes` into the chip's internal memory starting at `addr`. Lets a
+    /// host install resident firmware or deposit a data block (e.g. SGB
+    /// `DATA_SND` / `SOU_TRN`) the sandboxed chip then runs. Default: ignored.
+    fn write_ram(&mut self, addr: u32, bytes: &[u8]) {
+        let _ = (addr, bytes);
+    }
+
+    /// Read `len` bytes of the chip's internal memory starting at `addr`.
+    /// Observability (a debugger peek, or a host confirming a firmware/transfer
+    /// landed); `&mut` because some chips (the SPC700) expose RAM only through a
+    /// mutable handle. Default: zeros (a chip that exposes no RAM).
+    fn read_ram(&mut self, addr: u32, len: usize) -> Vec<u8> {
+        let _ = addr;
+        vec![0u8; len]
+    }
+
+    /// Serialize the chip's full volatile state to bytes for a host save-state.
+    /// The format is private to the chip; [`Self::load_state`] is its inverse.
+    /// Default: empty (a stateless / non-persisted coprocessor).
+    fn save_state(&self) -> Vec<u8> {
+        Vec::new()
+    }
+
+    /// Restore chip state previously produced by [`Self::save_state`]. A
+    /// malformed / foreign buffer should leave the chip usable (best-effort).
+    /// Default: ignored.
+    fn load_state(&mut self, bytes: &[u8]) {
+        let _ = bytes;
+    }
 }
 
 /// Export a [`Coprocessor`] as a loadable subsystem module: generates the ABI /
@@ -155,6 +199,60 @@ macro_rules! slopgb_coprocessor_plugin {
                 $crate::__emit($crate::EMIT_KIND_PCM, &bytes);
                 pcm.len() as i32
             })
+        }
+
+        /// Redirect the chip's program counter (host → guest scalar).
+        #[allow(unsafe_code)]
+        #[unsafe(no_mangle)]
+        pub extern "C" fn slopgb_set_pc(addr: i32) {
+            __SLOPGB_COP.with_borrow_mut(|c| $crate::Coprocessor::set_pc(c, addr as u32));
+        }
+
+        /// Write host-supplied bytes into the chip's memory at `addr`. The bytes
+        /// arrive through the mailbox channel (the host sets it, the guest pulls
+        /// it here), so no raw pointer crosses.
+        #[allow(unsafe_code)]
+        #[unsafe(no_mangle)]
+        pub extern "C" fn slopgb_write_ram(addr: i32) {
+            let bytes = $crate::recv_mailbox();
+            __SLOPGB_COP
+                .with_borrow_mut(|c| $crate::Coprocessor::write_ram(c, addr as u32, &bytes));
+        }
+
+        /// Read `len` bytes of the chip's memory at `addr` back to the host over
+        /// the emit channel ([`EMIT_KIND_RAM`]); returns the byte count.
+        ///
+        /// [`EMIT_KIND_RAM`]: $crate::EMIT_KIND_RAM
+        #[allow(unsafe_code)]
+        #[unsafe(no_mangle)]
+        pub extern "C" fn slopgb_read_ram(addr: i32, len: i32) -> i32 {
+            __SLOPGB_COP.with_borrow_mut(|c| {
+                let bytes = $crate::Coprocessor::read_ram(c, addr as u32, len.max(0) as usize);
+                $crate::__emit($crate::EMIT_KIND_RAM, &bytes);
+                bytes.len() as i32
+            })
+        }
+
+        /// Serialize the chip state to the host over the emit channel
+        /// ([`EMIT_KIND_STATE`]); returns the byte count.
+        ///
+        /// [`EMIT_KIND_STATE`]: $crate::EMIT_KIND_STATE
+        #[allow(unsafe_code)]
+        #[unsafe(no_mangle)]
+        pub extern "C" fn slopgb_save_state() -> i32 {
+            __SLOPGB_COP.with_borrow(|c| {
+                let bytes = $crate::Coprocessor::save_state(c);
+                $crate::__emit($crate::EMIT_KIND_STATE, &bytes);
+                bytes.len() as i32
+            })
+        }
+
+        /// Restore chip state the host staged in the mailbox (host → guest bulk).
+        #[allow(unsafe_code)]
+        #[unsafe(no_mangle)]
+        pub extern "C" fn slopgb_load_state() {
+            let bytes = $crate::recv_mailbox();
+            __SLOPGB_COP.with_borrow_mut(|c| $crate::Coprocessor::load_state(c, &bytes));
         }
     };
 }
