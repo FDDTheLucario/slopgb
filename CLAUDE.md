@@ -45,6 +45,7 @@ This file is a lean index. Implementation-state narratives live in dedicated dir
 | [`docs/hardware-state/`](docs/hardware-state/README.md) | **core** per-subsystem state, quirks, parked/disproven approaches (one file per subsystem) |
 | [`docs/ui-state/`](docs/ui-state/README.md) | **frontend / bgb-UI** per-area state (menus, debugger, options, viewers, save-states + link, startup + boot, layout) |
 | [`docs/bgb-reference/`](docs/bgb-reference/README.md) | real bgb screenshots + capture rig — **never invent bgb's UI, capture it** |
+| [`docs/msu1-plugin-plan.md`](docs/msu1-plugin-plan.md) | queued: MSU-1 streaming-audio coprocessor plugin (+ the resident-handler/polled-mailbox pattern) |
 | `crates/slopgb-core/tests/gbtr/baselines/gambatte.txt` header | floor-class index (A–H + lift conditions) — read before touching baselined behavior |
 
 When a **hardware** question comes up, consult in order:
