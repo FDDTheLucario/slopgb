@@ -146,6 +146,7 @@ impl App {
                     &addrs,
                     dbg::DebugAction::ClearBreakpoint,
                     &self.symbols,
+                    |a| windows::live_bank(&self.session.gb, a),
                     MANAGER_ORIGIN,
                 );
                 self.tools.set_debugger_menu(menu);
@@ -162,6 +163,7 @@ impl App {
                     &addrs,
                     dbg::DebugAction::ClearWatchpoint,
                     &self.symbols,
+                    |a| windows::live_bank(&self.session.gb, a),
                     MANAGER_ORIGIN,
                 );
                 self.tools.set_debugger_menu(menu);
@@ -172,6 +174,7 @@ impl App {
                     &addrs,
                     dbg::DebugAction::ClearFreeze,
                     &self.symbols,
+                    |a| windows::live_bank(&self.session.gb, a),
                     MANAGER_ORIGIN,
                 );
                 self.tools.set_debugger_menu(menu);

@@ -44,7 +44,7 @@ fn clicking_a_bar_label_opens_its_dropdown() {
     let mut st = DebuggerState::default();
     // Click the "Run" label (index 2).
     let r = rects[2];
-    let action = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + 2, r.y + 2);
+    let action = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + 2, r.y + 2, |_| 0);
     assert_eq!(action, None);
     let m = st.menu.as_ref().expect("Run dropdown opened");
     assert_eq!(m.bar, Some(2));
@@ -61,7 +61,7 @@ fn debug_menu_toggle_breakpoint_acts_on_the_cursor() {
     };
     // Open the Debug menu (index 3).
     let r = rects[3];
-    on_left_click(NOPS, AREA, &mut st, regs0(), r.x + 2, r.y + 2);
+    on_left_click(NOPS, AREA, &mut st, regs0(), r.x + 2, r.y + 2, |_| 0);
     // "Toggle breakpoint" is the first item; clicking it toggles bp at the cursor.
     let item_rects = menu_rects(
         st.menu.as_ref().unwrap().origin,
@@ -75,6 +75,7 @@ fn debug_menu_toggle_breakpoint_acts_on_the_cursor() {
         regs0(),
         ir.x + ir.w / 2,
         ir.y + ir.h / 2,
+        |_| 0,
     );
     assert_eq!(
         action,
@@ -88,7 +89,15 @@ fn run_menu_run_to_cursor_falls_back_to_pc_without_a_cursor() {
     let l = DebuggerLayout::for_size(AREA.w, AREA.h);
     let rects = menubar_rects(l.menu);
     let mut st = DebuggerState::default(); // no cursor selected
-    on_left_click(NOPS, AREA, &mut st, regs0(), rects[2].x + 2, rects[2].y + 2);
+    on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        regs0(),
+        rects[2].x + 2,
+        rects[2].y + 2,
+        |_| 0,
+    );
     // "Run to Cursor" is index 9 in the Run menu.
     let item_rects = menu_rects(
         st.menu.as_ref().unwrap().origin,
@@ -102,6 +111,7 @@ fn run_menu_run_to_cursor_falls_back_to_pc_without_a_cursor() {
         regs0(),
         ir.x + ir.w / 2,
         ir.y + ir.h / 2,
+        |_| 0,
     );
     assert_eq!(
         action,
@@ -117,7 +127,7 @@ fn click_menubar_item(bar_idx: usize, item_idx: usize) -> Option<MenuOutcome> {
     let rects = menubar_rects(l.menu);
     let mut st = DebuggerState::default();
     let br = rects[bar_idx];
-    on_left_click(NOPS, AREA, &mut st, regs0(), br.x + 2, br.y + 2);
+    on_left_click(NOPS, AREA, &mut st, regs0(), br.x + 2, br.y + 2, |_| 0);
     let item_rects = menu_rects(
         st.menu.as_ref().unwrap().origin,
         &st.menu.as_ref().unwrap().items,
@@ -130,6 +140,7 @@ fn click_menubar_item(bar_idx: usize, item_idx: usize) -> Option<MenuOutcome> {
         regs0(),
         ir.x + ir.w / 2,
         ir.y + ir.h / 2,
+        |_| 0,
     )
 }
 

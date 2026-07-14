@@ -18,6 +18,7 @@ pub fn on_left_click(
     regs: Registers,
     px: i32,
     py: i32,
+    bank_of: impl Fn(u16) -> u16,
 ) -> Option<MenuOutcome> {
     let l = DebuggerLayout::for_size(area.w, area.h);
     // An open menu eats the click: an enabled item acts; a click anywhere else
@@ -40,7 +41,7 @@ pub fn on_left_click(
     }
     // Otherwise select the clicked pane line (sets the cursor).
     if let ClickTarget::Disasm(a) | ClickTarget::Memory(a) | ClickTarget::Stack(a) =
-        target_at(read, area, st, regs.pc, regs.sp, px, py)
+        target_at(read, area, st, regs.pc, regs.sp, px, py, bank_of)
     {
         st.cursor = Some(a);
     }
@@ -52,6 +53,7 @@ pub fn on_left_click(
 /// the click isn't on a disasm line (the paired single-click already moved the
 /// cursor). Pure over `read`, so it tests headless.
 #[must_use]
+#[allow(clippy::too_many_arguments)]
 pub fn on_double_click(
     read: impl Fn(u16) -> u8,
     area: Rect,
@@ -60,11 +62,12 @@ pub fn on_double_click(
     sp: u16,
     px: i32,
     py: i32,
+    bank_of: impl Fn(u16) -> u16,
 ) -> Option<MenuOutcome> {
     if st.menu.is_some() {
         return None;
     }
-    match target_at(read, area, st, pc, sp, px, py) {
+    match target_at(read, area, st, pc, sp, px, py, bank_of) {
         ClickTarget::Disasm(a) => Some(MenuOutcome::Act(DebugAction::ToggleBreakpoint(a))),
         _ => None,
     }
@@ -128,6 +131,7 @@ fn apply_choice(
 
 /// Handle a right-click: open the clicked pane's context menu at the cursor (and
 /// select that line), or dismiss an already-open menu. Pure over `read`.
+#[allow(clippy::too_many_arguments)]
 pub fn on_right_click(
     read: impl Fn(u16) -> u8,
     area: Rect,
@@ -136,12 +140,13 @@ pub fn on_right_click(
     sp: u16,
     px: i32,
     py: i32,
+    bank_of: impl Fn(u16) -> u16,
 ) {
     if st.menu.is_some() {
         st.menu = None;
         return;
     }
-    let target = target_at(read, area, st, pc, sp, px, py);
+    let target = target_at(read, area, st, pc, sp, px, py, bank_of);
     if let ClickTarget::Disasm(a) | ClickTarget::Memory(a) | ClickTarget::Stack(a) = target {
         st.cursor = Some(a);
     }

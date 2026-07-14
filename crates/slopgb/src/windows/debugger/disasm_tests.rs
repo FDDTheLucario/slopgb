@@ -61,6 +61,7 @@ fn render_disasm_highlights_the_pc_row() {
             &BTreeSet::new(),
             DisasmFmt::default(),
             &SymbolTable::default(),
+            |_| 0,
             &t,
         );
     }
@@ -157,7 +158,7 @@ fn annotate_symbols_inserts_labels_and_substitutes_operands() {
     };
     let syms = SymbolTable::parse("00:0150 Loop");
     let raw = disasm_rows(mem, 0x0150, 1, &BTreeSet::new(), DisasmFmt::default());
-    let rows = annotate_symbols(raw, &syms, DisasmFmt::default());
+    let rows = annotate_symbols(raw, &syms, DisasmFmt::default(), |_| 0);
     // A label line precedes the instruction whose address is the symbol.
     assert!(rows[0].is_label, "row 0 is a label line");
     assert_eq!(rows[0].text, "Loop:");
@@ -183,7 +184,7 @@ fn annotate_symbols_blank_spacer_above_midlist_label() {
     let mem = |_a: u16| 0x00u8; // NOP
     let syms = SymbolTable::parse("00:0101 Foo");
     let raw = disasm_rows(mem, 0x0100, 2, &BTreeSet::new(), DisasmFmt::default());
-    let rows = annotate_symbols(raw, &syms, DisasmFmt::default());
+    let rows = annotate_symbols(raw, &syms, DisasmFmt::default(), |_| 0);
     // rows: [instr@0100, <blank>, "Foo:", instr@0101]
     assert!(!rows[0].is_label, "top instruction row, no leading blank");
     let label = rows
@@ -198,10 +199,35 @@ fn annotate_symbols_blank_spacer_above_midlist_label() {
 }
 
 #[test]
+fn annotate_symbols_names_only_the_active_bank() {
+    // Same ROMX address 0x6ACE has a symbol in bank 0B and none in bank 24. With
+    // bank 24 mapped there, the 0B symbol must NOT be shown (the reported bug);
+    // with bank 0B mapped it is.
+    let mem = |_a: u16| 0x00u8; // NOP
+    let syms = SymbolTable::parse("0B:6ACE Palette_0b");
+    let raw = disasm_rows(mem, 0x6ACE, 1, &BTreeSet::new(), DisasmFmt::default());
+    let live24 = annotate_symbols(raw.clone(), &syms, DisasmFmt::default(), |_| 0x24);
+    assert!(
+        !live24.iter().any(|r| r.text == "Palette_0b:"),
+        "wrong-bank label suppressed while bank 24 is mapped"
+    );
+    let live0b = annotate_symbols(raw, &syms, DisasmFmt::default(), |_| 0x0B);
+    assert!(
+        live0b.iter().any(|r| r.text == "Palette_0b:"),
+        "matching-bank label shown while bank 0B is mapped"
+    );
+}
+
+#[test]
 fn annotate_symbols_empty_table_is_identity() {
     let mem = |_a: u16| 0x00u8;
     let raw = disasm_rows(mem, 0x0100, 3, &BTreeSet::new(), DisasmFmt::default());
-    let rows = annotate_symbols(raw.clone(), &SymbolTable::default(), DisasmFmt::default());
+    let rows = annotate_symbols(
+        raw.clone(),
+        &SymbolTable::default(),
+        DisasmFmt::default(),
+        |_| 0,
+    );
     assert_eq!(rows, raw, "no symbols -> rows unchanged");
 }
 
