@@ -156,6 +156,47 @@ impl AudioBackend {
     }
 }
 
+/// Screenshot image format (Joypad tab "Screenshots" dropdown). Both encoders
+/// are std-only (`screenshot::to_bmp` / `mcp::png::encode`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ScreenshotFormat {
+    /// Uncompressed 24-bit BMP (bgb's format, opens everywhere).
+    #[default]
+    Bmp,
+    /// 8-bit RGB PNG.
+    Png,
+}
+
+impl ScreenshotFormat {
+    /// The next format in the cycle (the Joypad dropdown steps through both).
+    #[must_use]
+    pub fn next(self) -> Self {
+        match self {
+            ScreenshotFormat::Bmp => ScreenshotFormat::Png,
+            ScreenshotFormat::Png => ScreenshotFormat::Bmp,
+        }
+    }
+
+    /// Display label + file extension (the dropdown shows this; the saver appends
+    /// it to the filename).
+    #[must_use]
+    pub fn ext(self) -> &'static str {
+        match self {
+            ScreenshotFormat::Bmp => "bmp",
+            ScreenshotFormat::Png => "png",
+        }
+    }
+
+    /// Decode [`Self::ext`]; anything unrecognized falls back to the default BMP.
+    #[must_use]
+    pub fn from_key(v: &str) -> Self {
+        match v {
+            "png" => ScreenshotFormat::Png,
+            _ => ScreenshotFormat::Bmp,
+        }
+    }
+}
+
 /// A named DMG palette preset (GB Colors tab "Scheme"). `colors[0]` is the
 /// lightest shade (GB color 0), `colors[3]` the darkest — the order
 /// `GameBoy::set_dmg_palette` expects.
@@ -291,6 +332,11 @@ pub struct Settings {
     pub dmg_gbc_lcd: bool,
     /// GB Colors → contrast wheel, 0.0..=1.0 (0.5 = neutral / no change).
     pub contrast: f32,
+    /// Graphics → "SGB border in screenshot": when an SGB border is loaded, the
+    /// saved screenshot is the 256×224 composite instead of the bare 160×144 LCD.
+    pub sgb_border_screenshot: bool,
+    /// Joypad → "Screenshots" image format (BMP or PNG).
+    pub screenshot_format: ScreenshotFormat,
     /// Sound → master volume, 0.0..=1.0.
     pub volume: f32,
     /// Sound → mono output (downmix L/R).
@@ -377,6 +423,8 @@ impl Default for Settings {
             frame_blend: false,
             dmg_gbc_lcd: false,
             contrast: 0.5,
+            sgb_border_screenshot: false,
+            screenshot_format: ScreenshotFormat::Bmp,
             volume: 1.0,
             mono: false,
             audio_backend: AudioBackend::Builtin,

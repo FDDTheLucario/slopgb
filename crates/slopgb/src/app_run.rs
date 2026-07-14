@@ -5,12 +5,13 @@
 
 use std::fs;
 
-use slopgb_core::{SCREEN_H, SCREEN_W};
+use slopgb_core::{SCREEN_H, SCREEN_W, SGB_BORDER_H, SGB_BORDER_W};
 use winit::event_loop::ActiveEventLoop;
 
 use crate::cheat_ui;
 use crate::input::Action;
 use crate::windows::debugger::MenuOutcome;
+use crate::windows::options::ScreenshotFormat;
 use crate::{App, PathPurpose, dbg, screenshot, ui, windows};
 
 /// Top-left origin of the bp/wp manager list popup, below the debugger menu bar.
@@ -333,15 +334,32 @@ impl App {
         }
     }
 
-    /// Write the current frame to `slopgb-<unix-millis>.bmp` in the working
-    /// directory (bgb's "Save screenshot"); log the path or any I/O error.
+    /// Write the current frame to `slopgb-<unix-millis>.<ext>` in the working
+    /// directory (bgb's "Save screenshot"); log the path or any I/O error. The
+    /// image format (Joypad "Screenshots") and whether an SGB border is included
+    /// (Graphics "SGB border in screenshot") follow the current settings.
     fn save_screenshot(&self) {
-        let bmp = screenshot::to_bmp(self.session.gb.frame(), SCREEN_W, SCREEN_H);
+        // Include the 256×224 SGB composite only when the option is on and a
+        // border is actually loaded; otherwise the bare 160×144 LCD.
+        let border = self
+            .settings
+            .sgb_border_screenshot
+            .then(|| self.session.gb.sgb_border())
+            .flatten();
+        let (frame, w, h): (&[u32], usize, usize) = match border {
+            Some(b) => (&b[..], SGB_BORDER_W, SGB_BORDER_H),
+            None => (&self.session.gb.frame()[..], SCREEN_W, SCREEN_H),
+        };
+        let fmt = self.settings.screenshot_format;
+        let data = match fmt {
+            ScreenshotFormat::Bmp => screenshot::to_bmp(frame, w, h),
+            ScreenshotFormat::Png => crate::mcp::png::encode(frame, w, h),
+        };
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis());
-        let path = format!("slopgb-{stamp}.bmp");
-        match fs::write(&path, &bmp) {
+        let path = format!("slopgb-{stamp}.{}", fmt.ext());
+        match fs::write(&path, &data) {
             Ok(()) => eprintln!("saved screenshot to {path}"),
             Err(e) => eprintln!("error: could not save screenshot: {e}"),
         }

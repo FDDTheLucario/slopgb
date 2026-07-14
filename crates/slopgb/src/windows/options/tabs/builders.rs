@@ -55,9 +55,10 @@ pub(super) fn graphics(s: &Settings, content: Rect) -> Vec<Ctrl> {
         rc(l.at(), "disable SGB colors"),
         chk("disable SGB colors", false),
     ));
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
         rc(l.row().at(), "SGB border in screenshot"),
-        chk("SGB border in screenshot", false),
+        chk("SGB border in screenshot", s.sgb_border_screenshot),
+        Field::SgbBorderScreenshot,
     ));
     v.push(Ctrl::inert(
         rc(l.row().at(), "MGB auto border/colors"),
@@ -532,7 +533,19 @@ pub(super) fn joypad(s: &Settings, content: Rect) -> Vec<Ctrl> {
     // The inert recording/screenshot/rapid-speed combos, each on its own row.
     draw_label_combo(&mut v, &mut l, "Screenshot button:", "saves");
     l.row();
-    draw_label_combo(&mut v, &mut l, "Screenshots:", "bmp");
+    // "Screenshots" is live: a dropdown cycling the saved-image format (bmp/png).
+    let ss_label = "Screenshots:";
+    let (sx, sy) = l.at();
+    v.push(text_label((sx, sy), ss_label.to_owned()));
+    let ss_cx = sx + measure(ss_label) + 6;
+    v.push(Ctrl::live(
+        Rect::new(ss_cx, sy, 70, line_height() + 2),
+        Kind::Dropdown {
+            value: s.screenshot_format.ext().to_string(),
+            w: 70,
+        },
+        Field::ScreenshotFormat,
+    ));
     l.row();
     draw_label_combo(&mut v, &mut l, "Rapid speed:", "2 2");
     l.row();

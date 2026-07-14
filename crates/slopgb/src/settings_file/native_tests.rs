@@ -28,6 +28,8 @@ fn settings_and_recent_round_trip() {
         frame_blend: true,
         dmg_gbc_lcd: true,
         contrast: 0.75,
+        sgb_border_screenshot: true,
+        screenshot_format: crate::windows::options::ScreenshotFormat::Png,
         bootrom_dmg: "x.bin".to_string(),
         ..Settings::default()
     };

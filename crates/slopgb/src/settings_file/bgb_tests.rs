@@ -29,6 +29,8 @@ fn settings_round_trip_through_bgb_ini() {
         frame_blend: true,
         dmg_gbc_lcd: true,
         contrast: 0.75,
+        sgb_border_screenshot: true,
+        screenshot_format: crate::windows::options::ScreenshotFormat::Png,
         ..Settings::default()
     };
     let mut ini = Ini::parse("");

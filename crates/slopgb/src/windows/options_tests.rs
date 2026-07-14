@@ -571,6 +571,38 @@ fn graphics_frame_blend_dropdown_toggles() {
 }
 
 #[test]
+fn screenshot_format_ext_next_and_key_roundtrip() {
+    use crate::windows::options::ScreenshotFormat;
+    assert_eq!(ScreenshotFormat::Bmp.ext(), "bmp");
+    assert_eq!(ScreenshotFormat::Png.ext(), "png");
+    assert_eq!(ScreenshotFormat::Bmp.next(), ScreenshotFormat::Png);
+    assert_eq!(ScreenshotFormat::Png.next(), ScreenshotFormat::Bmp);
+    assert_eq!(ScreenshotFormat::from_key("png"), ScreenshotFormat::Png);
+    assert_eq!(ScreenshotFormat::from_key("garbage"), ScreenshotFormat::Bmp);
+}
+
+#[test]
+fn graphics_sgb_border_screenshot_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Graphics;
+    assert!(!st.working.sgb_border_screenshot);
+    click_field(&mut st, Field::SgbBorderScreenshot);
+    assert!(st.working.sgb_border_screenshot);
+}
+
+#[test]
+fn joypad_screenshot_format_dropdown_cycles() {
+    use crate::windows::options::ScreenshotFormat;
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Joypad;
+    assert_eq!(st.working.screenshot_format, ScreenshotFormat::Bmp);
+    click_field(&mut st, Field::ScreenshotFormat);
+    assert_eq!(st.working.screenshot_format, ScreenshotFormat::Png);
+    click_field(&mut st, Field::ScreenshotFormat);
+    assert_eq!(st.working.screenshot_format, ScreenshotFormat::Bmp);
+}
+
+#[test]
 fn gbcolors_dmg_gbc_lcd_checkbox_toggles() {
     let mut st = OptionsState::new(Settings::default());
     st.active = OptionsTab::GbColors;
@@ -830,8 +862,15 @@ fn joypad_tab_transcribes_the_capture_controls() {
         })
     };
     assert!(has_dropdown("saves"), "Screenshot button dropdown");
-    assert!(has_dropdown("bmp"), "Screenshots dropdown");
     assert!(has_dropdown("2 2"), "Rapid speed dropdown");
+    // "Screenshots" is now a live dropdown driving the image format.
+    assert!(
+        ctrls.iter().any(
+            |c| matches!(&c.kind, Kind::Dropdown { value, .. } if value == "bmp")
+                && c.field == Some(Field::ScreenshotFormat)
+        ),
+        "Screenshots format dropdown is live"
+    );
     assert!(
         ctrls
             .iter()

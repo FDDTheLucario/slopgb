@@ -17,7 +17,9 @@
 //! ```
 
 use crate::ui::{CustomThemes, Theme, ThemeChoice};
-use crate::windows::options::{AudioBackend, ModelChoice, PluginConfig, SCHEMES, Settings};
+use crate::windows::options::{
+    AudioBackend, ModelChoice, PluginConfig, SCHEMES, ScreenshotFormat, Settings,
+};
 
 /// The current native-format version (bumped when a migration is needed).
 pub const VERSION: u32 = 1;
@@ -244,6 +246,14 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
             .get("graphics", "contrast")
             .and_then(|v| v.trim().parse().ok())
             .unwrap_or(def.contrast),
+        sgb_border_screenshot: b(
+            "graphics",
+            "sgb_border_screenshot",
+            def.sgb_border_screenshot,
+        ),
+        screenshot_format: d
+            .get("misc", "screenshot_format")
+            .map_or(def.screenshot_format, ScreenshotFormat::from_key),
         volume: d
             .get("sound", "volume")
             .and_then(|v| v.trim().parse().ok())
@@ -308,6 +318,8 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         frame_blend: _,
         dmg_gbc_lcd: _,
         contrast: _,
+        sgb_border_screenshot: _,
+        screenshot_format: _,
         volume: _,
         mono: _,
         audio_backend: _,
@@ -365,6 +377,16 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
     d.set("graphics", "frame_blend", fb(settings.frame_blend));
     d.set("graphics", "dmg_gbc_lcd", fb(settings.dmg_gbc_lcd));
     d.set("graphics", "contrast", &settings.contrast.to_string());
+    d.set(
+        "graphics",
+        "sgb_border_screenshot",
+        fb(settings.sgb_border_screenshot),
+    );
+    d.set(
+        "misc",
+        "screenshot_format",
+        settings.screenshot_format.ext(),
+    );
     let palette = settings
         .dmg_palette
         .iter()

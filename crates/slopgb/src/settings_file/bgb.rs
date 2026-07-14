@@ -8,7 +8,9 @@
 
 use super::ini::{self, Ini};
 use crate::ui::ThemeChoice;
-use crate::windows::options::{AudioBackend, ModelChoice, PluginConfig, SCHEMES, Settings};
+use crate::windows::options::{
+    AudioBackend, ModelChoice, PluginConfig, SCHEMES, ScreenshotFormat, Settings,
+};
 
 /// Read a `Settings` from a parsed bgb.ini; any key absent or unparseable takes
 /// its `Settings::default()` value.
@@ -56,6 +58,10 @@ pub fn from_ini(f: &Ini) -> Settings {
             .get("SlopgbContrast")
             .and_then(|v| v.trim().parse().ok())
             .unwrap_or(d.contrast),
+        sgb_border_screenshot: boolean("SlopgbSgbBorderScreenshot", d.sgb_border_screenshot),
+        screenshot_format: f
+            .get("SlopgbScreenshotFormat")
+            .map_or(d.screenshot_format, ScreenshotFormat::from_key),
         volume: (int("Volume", (d.volume * 100.0) as i64) as f32 / 100.0).clamp(0.0, 1.0),
         mono: boolean("SoundMono", d.mono),
         // No bgb equivalent (a `Slopgb` extra) — the SGB audio backend.
@@ -112,6 +118,8 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         frame_blend: _,
         dmg_gbc_lcd: _,
         contrast: _,
+        sgb_border_screenshot: _,
+        screenshot_format: _,
         volume: _,
         mono: _,
         audio_backend: _,
@@ -185,6 +193,11 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
     f.set("SlopgbFrameBlend", ini::fmt_bool(s.frame_blend));
     f.set("SlopgbDmgGbcLcd", ini::fmt_bool(s.dmg_gbc_lcd));
     f.set("SlopgbContrast", &s.contrast.to_string());
+    f.set(
+        "SlopgbSgbBorderScreenshot",
+        ini::fmt_bool(s.sgb_border_screenshot),
+    );
+    f.set("SlopgbScreenshotFormat", s.screenshot_format.ext());
     f.set("SlopgbTileHex8bit", ini::fmt_bool(s.tile_hex_8bit));
     f.set("SlopgbMemoryWindow", ini::fmt_bool(s.memory_window));
     f.set("SlopgbShowFramerate", ini::fmt_bool(s.show_framerate));

@@ -36,6 +36,10 @@ pub(crate) enum Field {
     DmgGbcLcd,
     /// GB Colors → contrast wheel slider (maps the click fraction to 0.0..=1.0).
     Contrast,
+    /// Graphics → "SGB border in screenshot" checkbox.
+    SgbBorderScreenshot,
+    /// Joypad → "Screenshots" format dropdown (cycles BMP ↔ PNG).
+    ScreenshotFormat,
     Mono,
     LowercaseHex,
     ShowClocks,
@@ -243,6 +247,8 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         Field::FrameBlend => s.frame_blend = !s.frame_blend,
         Field::DmgGbcLcd => s.dmg_gbc_lcd = !s.dmg_gbc_lcd,
         Field::Contrast => s.contrast = slider_frac(ct.rect, px),
+        Field::SgbBorderScreenshot => s.sgb_border_screenshot = !s.sgb_border_screenshot,
+        Field::ScreenshotFormat => s.screenshot_format = s.screenshot_format.next(),
         Field::Mono => s.mono = !s.mono,
         Field::LowercaseHex => s.lowercase_hex = !s.lowercase_hex,
         Field::ShowClocks => s.show_clocks = !s.show_clocks,
@@ -311,6 +317,7 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
         OptionsTab::Graphics => {
             s.stretch = d.stretch;
             s.frame_blend = d.frame_blend;
+            s.sgb_border_screenshot = d.sgb_border_screenshot;
         }
         OptionsTab::System => {
             s.model = d.model;
@@ -342,8 +349,12 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
             s.dmg_gbc_lcd = d.dmg_gbc_lcd;
             s.contrast = d.contrast;
         }
-        // configure-keyboard is not a Settings field; only the SOCD toggle resets.
-        OptionsTab::Joypad => s.allow_opposing = d.allow_opposing,
+        // configure-keyboard is not a Settings field; the SOCD toggle + the
+        // screenshot format are the live Joypad fields that reset.
+        OptionsTab::Joypad => {
+            s.allow_opposing = d.allow_opposing;
+            s.screenshot_format = d.screenshot_format;
+        }
         OptionsTab::Misc => {
             s.ff_speed = d.ff_speed;
             s.framerate_limit = d.framerate_limit;
