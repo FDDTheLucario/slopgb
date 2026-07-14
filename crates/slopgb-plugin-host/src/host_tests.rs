@@ -77,7 +77,7 @@ fn disabled_plugin_is_skipped_in_pump() {
     // A disabled plugin's on_frame does not fire, so it emits no log; re-enabling
     // resumes it.
     let bytes = wasm(&plugin_wat(
-        1,
+        ABI_VERSION,
         1,
         "(call $host_log (i32.const 0) (i32.const 2))",
     ));
@@ -95,7 +95,7 @@ fn disabled_plugin_is_skipped_in_pump() {
 
 #[test]
 fn infos_report_name_caps_and_enabled() {
-    let bytes = wasm(&plugin_wat(1, 1, ""));
+    let bytes = wasm(&plugin_wat(ABI_VERSION, 1, ""));
     let mut host = PluginHost::new();
     host.push(PluginHost::load_bytes("probe", &bytes).unwrap());
     let infos = host.infos();
@@ -115,7 +115,7 @@ fn reload_rescans_dir_and_preserves_enabled() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
 
-    let one = wasm(&plugin_wat(1, 1, ""));
+    let one = wasm(&plugin_wat(ABI_VERSION, 1, ""));
     std::fs::write(dir.join("one.wasm"), &one).unwrap();
     let mut host = PluginHost::load_dir(&dir).unwrap();
     assert_eq!(host.infos().len(), 1);
