@@ -1,0 +1,23 @@
+[package]
+name = "slopgb-spc700-plugin"
+description = "slopgb coprocessor plugin: the SNES SPC700 (S-SMP) + S-DSP audio subsystem (slopgb-snes-apu) hosted in a wasm sandbox with its comm ports."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+# cdylib is the loadable wasm artifact; rlib lets the native unit tests link the
+# wrapper directly (the Coprocessor logic is target-independent).
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+slopgb-plugin-api = { path = "../slopgb-plugin-api" }
+slopgb-snes-apu = { path = "../slopgb-snes-apu" }
+
+# NOT `[lints] workspace = true`: the wasm export macro needs the
+# `#[unsafe(no_mangle)]` linkage marker the workspace `forbid(unsafe_code)`
+# rejects; `deny` lets the macro scope-`allow` it, everything else stays safe.
+[lints.rust]
+unsafe_code = "deny"

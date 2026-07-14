@@ -1458,6 +1458,14 @@ name = "slopgb-snes-apu"
 version = "0.1.0"
 
 [[package]]
+name = "slopgb-spc700-plugin"
+version = "0.1.0"
+dependencies = [
+ "slopgb-plugin-api",
+ "slopgb-snes-apu",
+]
+
+[[package]]
 name = "slopgb-w65c816"
 version = "0.1.0"
 
