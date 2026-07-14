@@ -25,7 +25,7 @@ where bgb itself greys them).
 | Sound | volume + mono (`AudioPipe::set_volume` gain/downmix); **SGB audio backend** dropdown (Built-in HLE APU / SGB coprocessor → `Settings.audio_backend` → `Session::set_sgb_coprocessor`, the same seam `--sgb-coprocessor` drives; the CLI flag/env still wins the launch, else the persisted choice is honored at startup. Default Built-in → byte-identical. A no-op off SGB) |
 | Graphics | stretch (→ fullscreen-stretched window size); **frame blend** (`postfx` present filter — averages the frame with the previous one); **SGB border in screenshot** (`save_screenshot` uses the 256×224 composite when a border is loaded) |
 | GB Colors | (above) plus **DMG on GBC LCD colors** + **contrast** wheel — `postfx` per-pixel present filters (frontend-only, golden-safe) |
-| Debug | lowercase-hex + show-clocks (→ `DisasmFmt` via `tools.set_disasm_fmt`); "pressing Esc shows debugger" (`Settings.esc_shows_debugger`, default on → `handle_key` opens the debugger on Esc instead of quitting); RGBDS syntax; "memory viewer in own window"; **Registers can be edited** (→ `DebuggerState.registers_editable` via `tools.set_registers_editable`; off greys the register-edit menu); **Start in debugger** (opens the debugger window at launch) |
+| Debug | lowercase-hex + show-clocks (→ `DisasmFmt` via `tools.set_disasm_fmt`); "pressing Esc shows debugger" (`Settings.esc_shows_debugger`, default on → `handle_key` opens the debugger on Esc instead of quitting); RGBDS syntax; "memory viewer in own window"; **Registers can be edited** (→ `DebuggerState.registers_editable` via `tools.set_registers_editable`; off greys the register-edit menu); **Start in debugger** (opens the debugger window at launch); **Live update memory viewer** (`tools.request_redraw_live` skips the standalone memory window's per-frame redraw when off — it then repaints only on interaction, bgb's non-continuous refresh) |
 | Misc | fast-forward-speed + framerate-limit sliders (→ `app_pacing` `turbo_max_frames`/`frame_interval`); show-framerate (title); freeze-recent-ROMs (`push_recent` gate); pause-if-losing-focus (auto-pause on focus loss, auto-resume on refocus unless manually paused via `App.paused_by_focus`); **Show errors on ROM load** (a failed load pops an info box, default on); **Load ROM dialog on startup** (opens the picker at launch when no CLI ROM) |
 | Joypad | **Screenshot button** saves↔copies (copies puts the frame on the clipboard as PNG via `clipboard::copy_image_png`); **Screenshots** format bmp↔png (`ScreenshotFormat` → `screenshot::to_bmp` / `mcp::png::encode`) |
 | Theme | Light/Dark/Classic radios → `Settings.theme` (`ThemeChoice`; the render path recolors from it each redraw — see [theming.md](theming.md)). Custom themes stay config-only. |
@@ -123,9 +123,19 @@ slopgb equivalent — preserved verbatim, not acted on. Phase 1 complete; phase 
 
 ## Inert
 
-Still faithful-but-inert (no golden-safe/dep-free backend): game-controller
-config, WAV/AVI recording, rewind, RTC files, doubler/bpp/output/vsync scalers,
-soundcard/samplerate/latency, lowercase-disassembler toggle, "0-31 numbers",
-live-update-memory-viewer, GB-CPU-usage-meter, reduce-CPU-usage, recovery-save-
-state, rapid-speed, "disable SGB colors". These are the next-tier backend work,
-not wiring gaps.
+Still faithful-but-inert — each blocked on real work, not a wiring gap:
+
+- **GB CPU usage meter** — needs a core halt-cycle counter (golden-safe read) +
+  a metric window + an uncaptured bgb meter widget.
+- **0-31 numbers** — the exact bgb palette-number display is uncaptured (would
+  violate the never-invent-bgb-UI rule); capture it first.
+- **Rapid speed** — blocked on the missing rapid-fire button binding ("configure
+  extra buttons" is itself inert).
+- **Recovery save state** — the periodic write reuses `save_state_to`, but
+  restore-on-relaunch is an unmade UX decision (auto-load vs prompt).
+- **reduce CPU usage** — already effectively on: the non-turbo loop parks with
+  `ControlFlow::WaitUntil`, so it doesn't busy-spin.
+- Faithful chrome with no dep-free/golden-safe backend: game-controller config,
+  WAV/AVI recording, rewind, RTC files, doubler/bpp/output/vsync scalers,
+  soundcard/samplerate/latency, lowercase-disassembler toggle, "disable SGB
+  colors".
