@@ -4,7 +4,7 @@
 //! - a live **APU-RAM view** (the S-DSP shares the SPC700's 64 KB bus for BRR
 //!   sample fetch, the sample directory, and the echo buffer; SGB bulk uploads
 //!   — SOU_TRN / DATA_TRN / DATA_SND — land here too),
-//! - [`Clone`] (the emulator clones the whole [`crate::GameBoy`] for the atomic
+//! - [`Clone`] (the emulator clones the whole `GameBoy` for the atomic
 //!   save-state restore), and
 //! - byte (de)serialization for save states.
 //!
@@ -12,7 +12,7 @@
 //! changes, so the `SingleStepTests/spc700` validation (256/256) is untouched.
 //! Kept in this one file so the verified opcode / RAM / ports modules stay
 //! pristine. The attached [`Dsp`] is intentionally NOT part of `Clone` /
-//! `write_state`: the owner ([`crate::sgb::apu::SgbApu`]) re-attaches it, since
+//! `write_state`: the owner (`slopgb-core`'s `SgbApu`) re-attaches it, since
 //! `Box<dyn Dsp>` is neither `Clone` nor serializable.
 
 use super::*;
@@ -50,38 +50,37 @@ impl Clone for Spc700 {
 }
 
 impl Spc700 {
-    /// Shared APU-RAM view (BRR sample fetch, sample directory, echo buffer).
-    /// Test/observability only; the synthesis path uses [`Self::apu_ram_mut`].
-    #[cfg(test)]
-    pub(crate) fn apu_ram(&self) -> &[u8; 0x1_0000] {
+    /// Read-only APU-RAM view (BRR sample fetch, sample directory, echo buffer)
+    /// — observability for the owner + tests; the synthesis path uses the
+    /// mutable [`Self::apu_ram_mut`].
+    pub fn apu_ram(&self) -> &[u8; 0x1_0000] {
         &self.ram
     }
 
     /// Mutable APU-RAM view — the DSP writes the echo buffer here, and the SGB
     /// command stream DMAs uploads (SOU_TRN / DATA_TRN / DATA_SND) into it. On
     /// real hardware the DSP and the SMP share this same 64 KB bus.
-    pub(crate) fn apu_ram_mut(&mut self) -> &mut [u8; 0x1_0000] {
+    pub fn apu_ram_mut(&mut self) -> &mut [u8; 0x1_0000] {
         &mut self.ram
     }
 
     /// Redirect execution to `pc` and clear the SLEEP/STOP idle flag — used when
     /// the SGB uploads a fresh SPC700 sound driver (SOU_TRN) and starts it.
-    pub(crate) fn set_pc(&mut self, pc: u16) {
+    pub fn set_pc(&mut self, pc: u16) {
         self.pc = pc;
         self.stopped = false;
     }
 
     /// APU-side input latch of comm port `n` (0-3) — what the SNES wrote via
-    /// [`Self::snes_write_port`], i.e. what the APU reads at `$F4+n`. Test-only
-    /// observability (the paired `snes_read_port` exposes the other latch).
-    #[cfg(test)]
-    pub(crate) fn apu_port_in(&self, n: usize) -> u8 {
+    /// [`Self::snes_write_port`], i.e. what the APU reads at `$F4+n`.
+    /// Observability for the owner + tests.
+    pub fn apu_port_in(&self, n: usize) -> u8 {
         self.port_in[n & 3]
     }
 
     /// Serialize volatile state (RAM + registers + I/O ports + timers) to a save
     /// state. The attached DSP is written by the owner, not here.
-    pub(crate) fn write_state(&self, w: &mut Writer) {
+    pub fn write_state(&self, w: &mut Writer) {
         w.bytes(&self.ram[..]);
         w.u8(self.a);
         w.u8(self.x);
@@ -108,7 +107,7 @@ impl Spc700 {
 
     /// Restore volatile state from a save state (symmetric with
     /// [`Self::write_state`]).
-    pub(crate) fn read_state(&mut self, r: &mut Reader<'_>) -> Result<(), StateError> {
+    pub fn read_state(&mut self, r: &mut Reader<'_>) -> Result<(), StateError> {
         r.bytes_into(&mut self.ram[..])?;
         self.a = r.u8()?;
         self.x = r.u8()?;

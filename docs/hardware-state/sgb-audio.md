@@ -7,10 +7,13 @@ into the Game Boy audio stream. Everything here is **`Model::Sgb`/`Sgb2`-scoped*
 — on `Dmg`/`Cgb` the subsystem is never constructed, so output is byte-identical
 (the golden-safe law).
 
-Code: `crates/slopgb-core/src/sgb/dsp/` (the S-DSP), `sgb/apu.rs` (the
-`SgbApu` wiring), `sgb/spc700/` (the CPU — see [spc700.md](spc700.md)),
-`GameBoy` integration in `lib.rs` + `lib/sgb_api.rs`. The SGB *presentation*
-side (border/palette/attributes) is [sgb.md](sgb.md).
+Code: the SPC700 (`spc700/`) and the S-DSP (`dsp/`) live in the shared
+`crates/slopgb-snes-apu` crate (so the same logic backs both this built-in path
+and a wasm coprocessor plugin — no duplication); `crates/slopgb-core/src/sgb/apu.rs`
+holds the `SgbApu` wiring that clocks them off the Game Boy stream, and `GameBoy`
+integration is in `lib.rs` + `lib/sgb_api.rs`. The CPU detail is
+[spc700.md](spc700.md). The SGB *presentation* side (border/palette/attributes)
+is [sgb.md](sgb.md).
 
 ## The `AudioCoprocessor` swap seam
 

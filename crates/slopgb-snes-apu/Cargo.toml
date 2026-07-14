@@ -1,0 +1,16 @@
+[package]
+name = "slopgb-snes-apu"
+description = "SNES-side audio subsystem (SPC700 S-SMP + S-DSP) shared by slopgb-core (the built-in SGB audio path) and a wasm coprocessor plugin. Std-only, no unsafe."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Intentionally empty: pure DSP/CPU logic + a little-endian byte serializer,
+# std only, so it compiles both natively (the built-in) and to wasm32 (the
+# coprocessor plugin) with no external deps.
+
+[lints]
+workspace = true

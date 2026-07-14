@@ -6,6 +6,7 @@ members = [
     "crates/slopfp",
     "crates/slopgb-plugin-api",
     "crates/slopgb-plugin-host",
+    "crates/slopgb-snes-apu",
     "crates/slopgb-w65c816",
     "crates/slopgb-w65c816-plugin",
 ]

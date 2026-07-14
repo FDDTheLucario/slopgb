@@ -29,15 +29,20 @@ pub(crate) mod ppu;
 pub(crate) mod serial;
 pub mod sgb;
 pub(crate) mod stat_update;
-pub(crate) mod state;
 pub(crate) mod timer;
+
+// The save-state serializer lives in the shared SNES-APU crate (so the SPC700 +
+// S-DSP there can save through the same `Writer`/`Reader` the rest of the
+// machine uses); re-exported as `crate::state` so every subsystem keeps naming
+// it unchanged.
+pub(crate) use slopgb_snes_apu::state;
 
 pub use apu::DEFAULT_SAMPLE_RATE;
 pub use cartridge::CartridgeError;
 pub use cpu::Registers;
 pub use joypad::Button;
 pub use model::Model;
-pub use state::StateError;
+pub use slopgb_snes_apu::StateError;
 
 // A Game Genie ROM patch — the element type of the public
 // [`GameBoy::set_gg_patches`], built by the frontend cheat engine.

@@ -1,6 +1,6 @@
 [package]
 name = "slopgb-core"
-description = "Cycle-accurate Game Boy / Game Boy Color emulator core. Zero dependencies."
+description = "Cycle-accurate Game Boy / Game Boy Color emulator core. No external dependencies (std only)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,7 +11,11 @@ repository.workspace = true
 default = []
 
 [dependencies]
-# Intentionally empty. The core stays dependency-free.
+# No external (crates.io) deps — std only. The one path dependency is an
+# in-tree split of core's own SNES-side audio code (SPC700 + S-DSP), shared so
+# the exact same logic backs both this built-in path and a wasm coprocessor
+# plugin (no duplication). Also std-only + forbid(unsafe_code).
+slopgb-snes-apu = { path = "../slopgb-snes-apu" }
 
 [lints]
 workspace = true

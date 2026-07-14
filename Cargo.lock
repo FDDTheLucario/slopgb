@@ -1435,6 +1435,9 @@ dependencies = [
 [[package]]
 name = "slopgb-core"
 version = "0.1.0"
+dependencies = [
+ "slopgb-snes-apu",
+]
 
 [[package]]
 name = "slopgb-plugin-api"
@@ -1449,6 +1452,10 @@ dependencies = [
  "wasmi",
  "wat",
 ]
+
+[[package]]
+name = "slopgb-snes-apu"
+version = "0.1.0"
 
 [[package]]
 name = "slopgb-w65c816"

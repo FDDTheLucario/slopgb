@@ -6,10 +6,14 @@
 //! clocks both off the Game Boy's cycle stream and routes the SGB sound
 //! commands. It is self-contained and does not touch the Game Boy core.
 
-pub mod spc700;
+// The SPC700 (S-SMP) CPU and the S-DSP synthesizer live in the shared
+// `slopgb-snes-apu` crate — the same logic backs both the built-in path here and
+// a wasm coprocessor plugin. Re-exported so `crate::sgb::spc700`/`::dsp` keep
+// naming them unchanged.
+pub(crate) use slopgb_snes_apu::dsp;
+pub use slopgb_snes_apu::spc700;
 
 pub(crate) mod apu;
-pub(crate) mod dsp;
 
 use crate::interconnect::Interconnect;
 

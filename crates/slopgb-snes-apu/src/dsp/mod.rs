@@ -14,9 +14,9 @@
 //! `MVOLL=0C MVOLR=1C EVOLL=2C EVOLR=3C KON=4C KOF=5C FLG=6C ENDX=7C EFB=0D
 //! PMON=2D NON=3D EON=4D DIR=5D ESA=6D EDL=7D`.
 //!
-//! The register file is written through the SPC700's `$F2`/`$F3` port (see
-//! [`crate::sgb::apu`]); the DSP shares the SPC700's 64 KB APU RAM for BRR
-//! sample data and the echo buffer.
+//! The register file is written through the SPC700's `$F2`/`$F3` port (wired by
+//! the SGB APU seam in `slopgb-core`); the DSP shares the SPC700's 64 KB APU RAM
+//! for BRR sample data and the echo buffer.
 //!
 //! Sources: nocash **fullsnes**, **Blargg SPC_DSP**, **bsnes** `dsp` — cited at
 //! each submodule.
@@ -50,7 +50,7 @@ const EDL: usize = 0x7D;
 /// The complete S-DSP: register file, 8 voices, echo unit, and the shared
 /// noise/rate state.
 #[derive(Clone)]
-pub(crate) struct SDsp {
+pub struct SDsp {
     /// The 128-byte register file (`$00-$7F`).
     regs: [u8; 128],
     voices: [Voice; 8],
@@ -77,7 +77,7 @@ impl Default for SDsp {
 }
 
 impl SDsp {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         SDsp {
             regs: [0; 128],
             voices: Default::default(),
@@ -95,7 +95,7 @@ impl SDsp {
 
     /// Read a DSP register. `addr` is the raw `$F2` value; bit 7 selects the
     /// read-only mirror (same data). `ENVX`/`OUTX`/`ENDX` return live state.
-    pub(crate) fn read(&self, addr: u8) -> u8 {
+    pub fn read(&self, addr: u8) -> u8 {
         let reg = (addr & 0x7F) as usize;
         match reg & 0x0F {
             0x08 => self.voices[reg >> 4].env.envx(),
@@ -107,7 +107,7 @@ impl SDsp {
 
     /// Write a DSP register. Writes to the `$80-$FF` mirror are ignored (the
     /// mirror is read-only, matching the SPC700 shadow behaviour).
-    pub(crate) fn write(&mut self, addr: u8, val: u8) {
+    pub fn write(&mut self, addr: u8, val: u8) {
         if addr & 0x80 != 0 {
             return;
         }
@@ -144,7 +144,7 @@ impl SDsp {
 
     /// Produce one 32 kHz stereo sample. Reads BRR data + the sample directory
     /// from `ram` and reads/writes the echo buffer there.
-    pub(crate) fn sample(&mut self, ram: &mut [u8; 0x1_0000]) -> (i16, i16) {
+    pub fn sample(&mut self, ram: &mut [u8; 0x1_0000]) -> (i16, i16) {
         // Global rate counter (counts down, wraps at the period).
         self.counter = if self.counter == 0 {
             envelope::COUNTER_MAX - 1
@@ -257,7 +257,7 @@ impl SDsp {
 
     // -- Save state ---------------------------------------------------------
 
-    pub(crate) fn write_state(&self, w: &mut crate::state::Writer) {
+    pub fn write_state(&self, w: &mut crate::state::Writer) {
         w.bytes(&self.regs);
         w.u32(self.counter);
         w.u32(self.noise as u32);
@@ -271,7 +271,7 @@ impl SDsp {
         self.echo.write_state(w);
     }
 
-    pub(crate) fn read_state(
+    pub fn read_state(
         &mut self,
         r: &mut crate::state::Reader<'_>,
     ) -> Result<(), crate::StateError> {
