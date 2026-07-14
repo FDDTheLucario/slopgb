@@ -19,6 +19,7 @@ fn blank_app() -> App {
         sgb_coprocessor: false,
         mcp_port: None,
         plugins_dir: None,
+        msu1: None,
         ram_init: None,
     };
     App::new(opts, Session::blank(Model::Dmg), false, None, None, false)

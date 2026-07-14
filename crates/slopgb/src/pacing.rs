@@ -71,8 +71,22 @@ impl AudioPipe {
     /// Move all pending core samples to the device queue (resampling on the
     /// way). Excess beyond the queue capacity is dropped by `push`.
     pub(crate) fn pump(&mut self, gb: &mut GameBoy) {
+        self.pump_mixing(gb, &[]);
+    }
+
+    /// Like [`Self::pump`], but adds `extra` (core-rate samples, e.g. an MSU-1
+    /// track's resampled PCM) into the Game Boy stream sample-for-sample before
+    /// the device resample + gain. Both are frame-locked, so their counts match
+    /// within a sample or two; the mix runs to the shorter of the two and drops
+    /// any residual tail (as the built-in SGB `mix_into` does). An empty `extra`
+    /// is exactly [`Self::pump`] (byte-identical output).
+    pub(crate) fn pump_mixing(&mut self, gb: &mut GameBoy, extra: &[(f32, f32)]) {
         self.drain_buf.clear();
         gb.drain_audio(&mut self.drain_buf);
+        for (dst, src) in self.drain_buf.iter_mut().zip(extra) {
+            dst.0 += src.0;
+            dst.1 += src.1;
+        }
         self.device_buf.clear();
         self.resampler.run(&self.drain_buf, &mut self.device_buf);
         apply_gain(&mut self.device_buf, self.gain, self.mono);

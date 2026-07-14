@@ -34,6 +34,10 @@ OPTIONS:
                       registers/expr). Also via SLOPGB_MCP_PORT=<N>
     --plugins <DIR>   Load every *.wasm plugin in <DIR> (read-only introspection;
                       see docs/ui-state/plugin-api.md). Also via SLOPGB_PLUGINS_DIR
+    --msu1 <DIR>      Load an MSU-1 streaming-audio pack from <DIR> (the MSU-1
+                      coprocessor plugin msu1.wasm + track_N.pcm tracks + an
+                      optional .msu data ROM). Registers map to $A000-$A007; the
+                      track's PCM is mixed into the audio. Also via SLOPGB_MSU1
     --ram-init <SPEC> Power-on RAM: fill:HH sets cart SRAM to a byte (default
                       fill:FF); random[:seed] fills all RAM with seeded xorshift
                       garbage (authentic power-on). A .sav still overrides SRAM.
@@ -82,6 +86,10 @@ pub(crate) struct Options {
     /// `SLOPGB_PLUGINS_DIR`, resolved in `main`). `None` = no plugins (default,
     /// golden path untouched).
     pub(crate) plugins_dir: Option<PathBuf>,
+    /// Directory of an MSU-1 pack to load (`--msu1`; falls back to `SLOPGB_MSU1`,
+    /// resolved in `main`). `None` = no MSU-1 (default; the core is untouched and
+    /// the audio path is byte-identical).
+    pub(crate) msu1: Option<PathBuf>,
     /// Power-on RAM initialisation (`--ram-init fill:HH` / `--ram-init
     /// random[:seed]`). `None` = the deterministic 0xFF cart-SRAM default (leaves
     /// the machine byte-identical to `GameBoy::new`).
@@ -107,6 +115,7 @@ impl Options {
         let mut sgb_coprocessor = false;
         let mut mcp_port = None;
         let mut plugins_dir = None;
+        let mut msu1 = None;
         let mut ram_init = None;
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -131,6 +140,10 @@ impl Options {
                 "--plugins" => {
                     let v = args.next().ok_or("--plugins requires a directory")?;
                     plugins_dir = Some(PathBuf::from(v));
+                }
+                "--msu1" => {
+                    let v = args.next().ok_or("--msu1 requires a directory")?;
+                    msu1 = Some(PathBuf::from(v));
                 }
                 "--model" => {
                     let v = args.next().ok_or("--model requires a value")?;
@@ -169,6 +182,7 @@ impl Options {
             sgb_coprocessor,
             mcp_port,
             plugins_dir,
+            msu1,
             ram_init,
         }))
     }

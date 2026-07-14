@@ -32,6 +32,7 @@ mod keymap;
 mod link;
 mod mcp;
 mod menupopup;
+mod msu1;
 mod net_worker;
 mod pacing;
 mod screenshot;
@@ -238,6 +239,24 @@ fn load_plugins(opts: &Options, settings: &windows::options::Settings) -> Plugin
     }
 }
 
+/// Load an MSU-1 pack from `--msu1` or `SLOPGB_MSU1` (in that precedence).
+/// Absent → `None` (no MSU-1; the core + audio path stay byte-identical). A pack
+/// that fails to load (missing plugin wasm, bad module) is logged and treated as
+/// absent (non-fatal — the game still runs, just without MSU-1 audio).
+fn load_msu1(opts: &Options) -> Option<msu1::Msu1> {
+    let dir = opts
+        .msu1
+        .clone()
+        .or_else(|| env::var_os("SLOPGB_MSU1").map(PathBuf::from))?;
+    match msu1::Msu1::load(&dir) {
+        Ok(m) => Some(m),
+        Err(e) => {
+            eprintln!("slopgb: {e}");
+            None
+        }
+    }
+}
+
 /// Resolve the optional SGB BIOS bytes from `--sgb-bios` or `SLOPGB_SGB_BIOS`,
 /// reading the file. A read error is logged and treated as no BIOS (non-fatal).
 /// The border/title-palette are *not* extracted from it — slopgb is high-level
@@ -395,6 +414,11 @@ struct App {
     /// Opt-in wasm plugins (`--plugins` / `SLOPGB_PLUGINS_DIR`). Empty unless a
     /// directory was given; pumped once per rendered frame with a read-only view.
     plugins: PluginHost,
+    /// Opt-in MSU-1 streaming-audio pack (`--msu1` / `SLOPGB_MSU1`). `None` unless
+    /// a pack loaded; when present, its resampled PCM is mixed into the audio each
+    /// frame and its registers ($A000-$A007) are polled from the running game.
+    /// With no pack the core + audio path are byte-identical (golden-safe).
+    msu1: Option<msu1::Msu1>,
     /// Custom themes loaded from the settings file's `[theme.NAME]` sections
     /// (the theming API's registry) — what `settings.theme`'s `Custom(name)`
     /// variant resolves against. Loaded once at startup; like every other
@@ -455,6 +479,8 @@ impl App {
             .map(windows::options::PluginEntry::from)
             .collect();
         let mcp = mcp::Mcp::with_tool_plugins(mcp::plugin_host::ToolPlugins::from_options(&opts));
+        // Opt-in MSU-1 pack (--msu1 / SLOPGB_MSU1); None keeps the golden path.
+        let msu1 = load_msu1(&opts);
         let mut app = Self {
             opts,
             boot_rom,
@@ -501,6 +527,7 @@ impl App {
             link: link::Link::new(),
             mcp,
             plugins,
+            msu1,
             recent,
             menu_popup: None,
             window_size,
