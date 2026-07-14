@@ -1,0 +1,16 @@
+[package]
+name = "slopgb-sgb-coprocessor"
+description = "Combined SGB SNES-side audio coprocessor (clean-room 65C816 + SPC700 + S-DSP) exposed as a slopgb-core AudioCoprocessor. Native, std-only, no unsafe."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+slopgb-core = { path = "../slopgb-core" }
+slopgb-w65c816 = { path = "../slopgb-w65c816" }
+slopgb-snes-apu = { path = "../slopgb-snes-apu" }
+
+[lints]
+workspace = true

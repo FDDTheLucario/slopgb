@@ -1454,6 +1454,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "slopgb-sgb-coprocessor"
+version = "0.1.0"
+dependencies = [
+ "slopgb-core",
+ "slopgb-snes-apu",
+ "slopgb-w65c816",
+]
+
+[[package]]
 name = "slopgb-snes-apu"
 version = "0.1.0"
 

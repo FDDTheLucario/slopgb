@@ -55,8 +55,12 @@ The SNES-side chips exist as standalone wasm coprocessor plugins:
 - **`slopgb-w65c816-plugin`** wraps the clean-room 65C816 (the SNES CPU) with a
   guest SNES-RAM + comm-port bus. Proven in `w65c816_roundtrip.rs`.
 
-**Not yet wired into a live SGB machine** (so DATA_SND/JUMP still no-op in core —
-see the routing + BIOS-gating tables below). The remaining integration work,
+The full chain is now wired **natively** in **`slopgb-sgb-coprocessor`**
+(`SgbCoprocessor`): a clean-room 65C816 (`slopgb-w65c816`) over a SNES bus whose
+`$2140-$2143` window is the SPC700 + S-DSP (`slopgb-snes-apu`), exposed as a
+`slopgb-core` `AudioCoprocessor` a frontend injects via `set_audio_coprocessor`.
+It composes the shared native crates directly (no wasm round-trip needed; core
+stays zero-dep — this crate is separate). The remaining integration work,
 smallest-first:
 
 1. **A PCM-drain path in the tier-3 ABI — DONE (ABI v3).** `Coprocessor` gained
@@ -75,11 +79,23 @@ smallest-first:
    a plugin-backed `AudioCoprocessor` (core can't depend on `wasmi`; the adapter
    lives in the host and forwards to the wasm plugin, calling `drain_pcm` each
    frame from item 1). SGB-only, golden-safe (see the swap-seam section).
-4. **Combine the 65C816 + SPC700 + DSP into one SNES coprocessor** running the
-   real SGB sound driver, so a DATA_SND packet reaches SNES work RAM and the
-   driver programs the SPC700 — which needs the SGB system ROM (not shipped; see
-   BIOS gating) or a game's self-uploaded driver (SOU_TRN, which already works on
-   the built-in path).
+4. **Combine the 65C816 + SPC700 + DSP into one SNES coprocessor — DONE
+   (`slopgb-sgb-coprocessor`).** The injected `SgbCoprocessor` runs both CPUs:
+   DATA_SND ($0F) lands in SNES work RAM, JUMP ($12) redirects the 65C816, and
+   the four `$2140-$2143` comm ports carry bytes between the SNES CPU and the
+   SPC700 — the no-ops the built-in HLE path leaves. It ships an **original
+   clean-room firmware** in place of the (unshipped, copyrighted) SGB system ROM:
+   a 65C816 shim that forwards a SNES-RAM sound mailbox to the SPC700 ports, and
+   a SPC700 driver that waits on a port and keys the S-DSP. So a bare SGB `SOUND
+   ($08)` command produces audio with no game-supplied driver, and a `SOU_TRN`
+   game driver still plays (the upload replaces the resident driver). Proven end
+   to end (`sound_command_drives_the_firmware_chain_to_audio`,
+   `injected_coprocessor_makes_a_gameboy_sound_command_audible`) — a SOUND packet
+   through a real `GameBoy` yields non-zero PCM. **Honest limits:** the SNES↔GB
+   clock ratio is a loose HLE approximation (not cycle-exact), the SOUND→note
+   mapping and the DATA_SND packet layout are original clean-room interpretations
+   (the real SGB effect-code→driver semantics live in the unread system ROM), and
+   the tone is a synthesized square, not the SGB sample bank.
 
 ## Sources
 
