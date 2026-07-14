@@ -55,6 +55,10 @@ pub(crate) enum Field {
     ShowFramerate,
     FreezeRecent,
     PauseOnFocusLoss,
+    /// Misc → "Show errors on ROM load".
+    ShowErrorsOnRomLoad,
+    /// Misc → "Load ROM dialog on startup".
+    LoadRomDialogOnStartup,
     /// System → "uninitialized RAM at power-on" (bgb's `UninitedWRAM`): power on
     /// with seeded-random garbage RAM. Takes effect on the next reset/load.
     UninitedWram,
@@ -270,6 +274,10 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         Field::ShowFramerate => s.show_framerate = !s.show_framerate,
         Field::FreezeRecent => s.freeze_recent = !s.freeze_recent,
         Field::PauseOnFocusLoss => s.pause_on_focus_loss = !s.pause_on_focus_loss,
+        Field::ShowErrorsOnRomLoad => s.show_errors_on_rom_load = !s.show_errors_on_rom_load,
+        Field::LoadRomDialogOnStartup => {
+            s.load_rom_dialog_on_startup = !s.load_rom_dialog_on_startup;
+        }
         Field::UninitedWram => s.uninited_wram = !s.uninited_wram,
         Field::Model(m) => s.model = m,
         Field::Volume => s.volume = slider_frac(ct.rect, px),
@@ -361,6 +369,8 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
             s.show_framerate = d.show_framerate;
             s.freeze_recent = d.freeze_recent;
             s.pause_on_focus_loss = d.pause_on_focus_loss;
+            s.show_errors_on_rom_load = d.show_errors_on_rom_load;
+            s.load_rom_dialog_on_startup = d.load_rom_dialog_on_startup;
         }
         OptionsTab::Theme => s.theme = d.theme,
         // Reset the allow-mutation toggle + re-enable every discovered plugin

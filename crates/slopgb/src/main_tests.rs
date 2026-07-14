@@ -36,6 +36,15 @@ fn no_rom_idles_emulation_like_pause() {
 }
 
 #[test]
+fn rom_load_error_box_respects_the_show_errors_option() {
+    // Off → no box (silent, console-only). On → a box carrying the message.
+    assert_eq!(rom_load_error_box(false, "bad rom"), None);
+    let b = rom_load_error_box(true, "bad rom").expect("box shown when enabled");
+    assert_eq!(b.title, "ROM load failed");
+    assert_eq!(b.lines, vec!["bad rom".to_string()]);
+}
+
+#[test]
 fn no_rom_title_is_bare_slopgb() {
     // bgb with no ROM titles the window "bgb"; slopgb titles it "slopgb" (no
     // game name, no leading separator). With a ROM the game stem leads.

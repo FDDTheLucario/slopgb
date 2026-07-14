@@ -1048,9 +1048,22 @@ impl App {
                     window.request_redraw();
                 }
             }
-            Err(e) => eprintln!("slopgb: load ignored: {e}"),
+            Err(e) => {
+                eprintln!("slopgb: load ignored: {e}");
+                // Misc → "Show errors on ROM load": surface the failure in a
+                // modal info box (bgb behaviour); otherwise it stays console-only.
+                self.info_box =
+                    rom_load_error_box(self.settings.show_errors_on_rom_load, &e.to_string());
+            }
         }
     }
+}
+
+/// The info box shown when a ROM fails to load, or `None` when the "Show errors
+/// on ROM load" option is off. A free function so the gate is unit-testable
+/// without a live event loop.
+fn rom_load_error_box(show: bool, msg: &str) -> Option<InfoBox> {
+    show.then(|| InfoBox::new("ROM load failed", vec![msg.to_string()]))
 }
 
 /// Whether emulation should idle (emulate zero frames) this wake: when paused,

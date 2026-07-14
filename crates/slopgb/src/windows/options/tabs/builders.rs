@@ -609,18 +609,26 @@ pub(super) fn joypad(s: &Settings, content: Rect) -> Vec<Ctrl> {
 pub(super) fn misc(s: &Settings, content: Rect) -> Vec<Ctrl> {
     // Single column: slopgb's font is wide enough that bgb's two-column Misc
     // layout would overlap, so the checkboxes stack vertically (functional 1:1,
-    // not pixel). "Load ROM dialog on startup" is inert — App settings are
-    // in-memory only, so there is no persisted startup to honour.
+    // not pixel). "reduce CPU usage" / "Recovery save state" stay inert (no
+    // backend); the rest drive real settings.
     let mut l = Lay::new(content);
     let mut v = Vec::new();
     let rows: [(&str, bool, Option<Field>); 7] = [
-        ("Load ROM dialog on startup", false, None),
+        (
+            "Load ROM dialog on startup",
+            s.load_rom_dialog_on_startup,
+            Some(Field::LoadRomDialogOnStartup),
+        ),
         (
             "freeze recent ROMs menu",
             s.freeze_recent,
             Some(Field::FreezeRecent),
         ),
-        ("Show errors on ROM load", true, None),
+        (
+            "Show errors on ROM load",
+            s.show_errors_on_rom_load,
+            Some(Field::ShowErrorsOnRomLoad),
+        ),
         (
             "Show framerate",
             s.show_framerate,

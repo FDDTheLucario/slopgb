@@ -31,6 +31,8 @@ fn settings_round_trip_through_bgb_ini() {
         contrast: 0.75,
         sgb_border_screenshot: true,
         screenshot_format: crate::windows::options::ScreenshotFormat::Png,
+        show_errors_on_rom_load: false,
+        load_rom_dialog_on_startup: true,
         ..Settings::default()
     };
     let mut ini = Ini::parse("");

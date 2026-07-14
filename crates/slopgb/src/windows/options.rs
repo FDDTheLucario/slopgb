@@ -371,6 +371,12 @@ pub struct Settings {
     pub freeze_recent: bool,
     /// Misc → pause emulation when the window loses focus.
     pub pause_on_focus_loss: bool,
+    /// Misc → "Show errors on ROM load": pop an info box when a ROM fails to
+    /// load (bgb ships this checked). When off, a failed load is silent.
+    pub show_errors_on_rom_load: bool,
+    /// Misc → "Load ROM dialog on startup": open the file picker at launch when
+    /// no ROM was given on the command line.
+    pub load_rom_dialog_on_startup: bool,
     /// GB Colors → selected scheme index into [`SCHEMES`].
     pub scheme: usize,
     /// GB Colors → the live DMG palette (lightest→darkest).
@@ -440,6 +446,9 @@ impl Default for Settings {
             show_framerate: false,
             freeze_recent: false,
             pause_on_focus_loss: false,
+            // bgb ships "Show errors on ROM load" checked.
+            show_errors_on_rom_load: true,
+            load_rom_dialog_on_startup: false,
             scheme: 0,
             dmg_palette: SCHEMES[0].colors,
             allow_opposing: false,

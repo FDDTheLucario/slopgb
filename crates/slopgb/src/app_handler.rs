@@ -116,6 +116,11 @@ impl ApplicationHandler for App {
                 }
             }
         }
+        // Misc → "Load ROM dialog on startup": if enabled and no ROM was given
+        // on the command line, pop the file picker so the user can pick one.
+        if self.settings.load_rom_dialog_on_startup && !self.rom_loaded {
+            self.open_path_prompt("Load ROM", crate::PathPurpose::LoadRom);
+        }
         self.resync_pacing();
         self.update_title();
     }

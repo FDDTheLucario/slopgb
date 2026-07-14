@@ -797,6 +797,13 @@ fn misc_tab_live_toggles() {
     assert!(st.working.freeze_recent);
     click_field(&mut st, Field::PauseOnFocusLoss);
     assert!(st.working.pause_on_focus_loss);
+    // "Show errors on ROM load" defaults on (bgb-faithful) → click turns it off.
+    assert!(st.working.show_errors_on_rom_load);
+    click_field(&mut st, Field::ShowErrorsOnRomLoad);
+    assert!(!st.working.show_errors_on_rom_load);
+    assert!(!st.working.load_rom_dialog_on_startup);
+    click_field(&mut st, Field::LoadRomDialogOnStartup);
+    assert!(st.working.load_rom_dialog_on_startup);
 }
 
 #[test]

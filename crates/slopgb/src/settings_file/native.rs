@@ -274,6 +274,16 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
         show_framerate: b("misc", "show_framerate", def.show_framerate),
         freeze_recent: b("misc", "freeze_recent", def.freeze_recent),
         pause_on_focus_loss: b("misc", "pause_on_focus_loss", def.pause_on_focus_loss),
+        show_errors_on_rom_load: b(
+            "misc",
+            "show_errors_on_rom_load",
+            def.show_errors_on_rom_load,
+        ),
+        load_rom_dialog_on_startup: b(
+            "misc",
+            "load_rom_dialog_on_startup",
+            def.load_rom_dialog_on_startup,
+        ),
         scheme,
         dmg_palette,
         allow_opposing: b("misc", "allow_opposing", def.allow_opposing),
@@ -335,6 +345,8 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         show_framerate: _,
         freeze_recent: _,
         pause_on_focus_loss: _,
+        show_errors_on_rom_load: _,
+        load_rom_dialog_on_startup: _,
         scheme: _,
         dmg_palette: _,
         allow_opposing: _,
@@ -417,6 +429,16 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         "misc",
         "pause_on_focus_loss",
         fb(settings.pause_on_focus_loss),
+    );
+    d.set(
+        "misc",
+        "show_errors_on_rom_load",
+        fb(settings.show_errors_on_rom_load),
+    );
+    d.set(
+        "misc",
+        "load_rom_dialog_on_startup",
+        fb(settings.load_rom_dialog_on_startup),
     );
     d.set("misc", "allow_opposing", fb(settings.allow_opposing));
     d.set("system", "uninited_wram", fb(settings.uninited_wram));
