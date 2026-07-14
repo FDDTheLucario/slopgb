@@ -285,7 +285,7 @@ fn clone_is_independent() {
     };
     cop.cpu.borrow_mut().write_ram(0x0500, &[0x42]).unwrap();
 
-    let cloned = cop.deep_clone();
+    let cloned = cop.deep_clone().expect("re-instantiate for clone");
     cloned.cpu.borrow_mut().write_ram(0x0500, &[0x00]).unwrap();
 
     assert_eq!(
@@ -294,6 +294,22 @@ fn clone_is_independent() {
         "SNES RAM is not shared"
     );
     assert_eq!(cpu_ram(&cloned, 0x0500, 1), vec![0x00]);
+}
+
+#[test]
+fn inert_state_reloads_through_the_real_coprocessor() {
+    // A machine saved while the coprocessor fell back to inert (a failed clone)
+    // must still reload through the real coprocessor — the inert layout matches
+    // `SgbCoprocessor::write_state`.
+    let Some(mut cop) = build_cop(48_000) else {
+        return;
+    };
+    let mut w = Writer::new();
+    AudioCoprocessor::write_state(&InertCoprocessor, &mut w);
+    let bytes = w.into_vec();
+    let mut r = Reader::new(&bytes);
+    cop.read_state(&mut r)
+        .expect("inert-written state reads into the real coprocessor");
 }
 
 // ---- End-to-end: injected into a real GameBoy ----

@@ -249,7 +249,10 @@ fn write_out(caller: &mut Caller<'_, ToolStore>, out_ptr: i32, out_cap: i32, byt
         return 0;
     };
     let n = bytes.len().min(cap);
-    let _ = mem.write(caller, off, &bytes[..n]);
+    if let Err(e) = mem.write(caller, off, &bytes[..n]) {
+        eprintln!("slopgb: plugin host write to guest memory failed: {e}");
+        return 0;
+    }
     i32::try_from(bytes.len()).unwrap_or(i32::MAX)
 }
 

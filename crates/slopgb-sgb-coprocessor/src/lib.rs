@@ -222,31 +222,34 @@ impl SgbCoprocessor {
             data_trn_sig: 0,
             jump: None,
         };
-        me.install_firmware();
+        me.install_firmware()?;
         Ok(me)
     }
 
     /// Install the resident clean-room firmware into both chips: the 65C816 shim
     /// into SNES RAM (+ reset vector + entry PC), and the SPC700 driver + one-
-    /// entry sample directory + a square BRR sample into APU RAM (+ entry PC).
-    fn install_firmware(&mut self) {
+    /// entry sample directory + a square BRR sample into APU RAM (+ entry PC). A
+    /// failure aborts the load, so `from_wasm` reports it and the caller falls
+    /// back to the built-in `SgbApu` rather than running a chip with no firmware.
+    fn install_firmware(&mut self) -> Result<(), LoadError> {
         {
             let cpu = self.cpu.get_mut();
-            let _ = cpu.write_ram(u32::from(SHIM_ORG), &SNES_SHIM);
-            let _ = cpu.write_ram(
+            cpu.write_ram(u32::from(SHIM_ORG), &SNES_SHIM)?;
+            cpu.write_ram(
                 u32::from(RESET_VEC),
                 &[SHIM_ORG as u8, (SHIM_ORG >> 8) as u8],
-            );
-            let _ = cpu.set_pc(u32::from(SHIM_ORG));
+            )?;
+            cpu.set_pc(u32::from(SHIM_ORG))?;
         }
         {
             let (prog, dir, brr) = spc_firmware();
             let spc = self.spc.get_mut();
-            let _ = spc.write_ram(u32::from(SPC_PROG_ORG), &prog);
-            let _ = spc.write_ram(u32::from(SPC_DIR_ORG), &dir);
-            let _ = spc.write_ram(u32::from(SPC_BRR_ORG), &brr);
-            let _ = spc.set_pc(u32::from(SPC_PROG_ORG));
+            spc.write_ram(u32::from(SPC_PROG_ORG), &prog)?;
+            spc.write_ram(u32::from(SPC_DIR_ORG), &dir)?;
+            spc.write_ram(u32::from(SPC_BRR_ORG), &brr)?;
+            spc.set_pc(u32::from(SPC_PROG_ORG))?;
         }
+        Ok(())
     }
 
     // -- Clocking -----------------------------------------------------------
@@ -459,8 +462,14 @@ impl SgbCoprocessor {
     // -- Save state ---------------------------------------------------------
 
     fn write_state(&self, w: &mut Writer) {
-        let spc = self.spc.borrow_mut().save_state().unwrap_or_default();
-        let cpu = self.cpu.borrow_mut().save_state().unwrap_or_default();
+        let spc = self.spc.borrow_mut().save_state().unwrap_or_else(|e| {
+            eprintln!("slopgb: SGB coprocessor SPC700 save_state failed: {e}");
+            Vec::new()
+        });
+        let cpu = self.cpu.borrow_mut().save_state().unwrap_or_else(|e| {
+            eprintln!("slopgb: SGB coprocessor 65C816 save_state failed: {e}");
+            Vec::new()
+        });
         w.u32(spc.len() as u32);
         w.bytes(&spc);
         w.u32(cpu.len() as u32);
@@ -489,8 +498,12 @@ impl SgbCoprocessor {
         let spc = r.bytes_vec(n)?;
         let n = r.u32()? as usize;
         let cpu = r.bytes_vec(n)?;
-        let _ = self.spc.get_mut().load_state(&spc);
-        let _ = self.cpu.get_mut().load_state(&cpu);
+        if let Err(e) = self.spc.get_mut().load_state(&spc) {
+            eprintln!("slopgb: SGB coprocessor SPC700 load_state failed: {e}");
+        }
+        if let Err(e) = self.cpu.get_mut().load_state(&cpu) {
+            eprintln!("slopgb: SGB coprocessor 65C816 load_state failed: {e}");
+        }
         self.spc_target = r.u64()?;
         self.cpu_target = r.u64()?;
         self.spc_acc = r.u64()? as i64;
@@ -519,13 +532,22 @@ impl SgbCoprocessor {
     /// this coprocessor's current chip state into them, and copy the host-side
     /// runtime. Used by [`AudioCoprocessor::clone_box`] for the save-state restore
     /// that clones the whole `GameBoy`.
-    fn deep_clone(&self) -> Self {
-        let spc_state = self.spc.borrow_mut().save_state().unwrap_or_default();
-        let cpu_state = self.cpu.borrow_mut().save_state().unwrap_or_default();
-        let mut fresh = Self::from_wasm(&self.spc_wasm, &self.cpu_wasm, self.out_rate)
-            .expect("re-instantiating the already-loaded plugin wasm");
-        let _ = fresh.spc.get_mut().load_state(&spc_state);
-        let _ = fresh.cpu.get_mut().load_state(&cpu_state);
+    fn deep_clone(&self) -> Result<Self, LoadError> {
+        let spc_state = self.spc.borrow_mut().save_state().unwrap_or_else(|e| {
+            eprintln!("slopgb: SGB coprocessor SPC700 save_state failed on clone: {e}");
+            Vec::new()
+        });
+        let cpu_state = self.cpu.borrow_mut().save_state().unwrap_or_else(|e| {
+            eprintln!("slopgb: SGB coprocessor 65C816 save_state failed on clone: {e}");
+            Vec::new()
+        });
+        let mut fresh = Self::from_wasm(&self.spc_wasm, &self.cpu_wasm, self.out_rate)?;
+        if let Err(e) = fresh.spc.get_mut().load_state(&spc_state) {
+            eprintln!("slopgb: SGB coprocessor SPC700 load_state failed on clone: {e}");
+        }
+        if let Err(e) = fresh.cpu.get_mut().load_state(&cpu_state) {
+            eprintln!("slopgb: SGB coprocessor 65C816 load_state failed on clone: {e}");
+        }
         fresh.spc_target = self.spc_target;
         fresh.cpu_target = self.cpu_target;
         fresh.spc_acc = self.spc_acc;
@@ -541,7 +563,7 @@ impl SgbCoprocessor {
         fresh.sou_trn_sig = self.sou_trn_sig;
         fresh.data_trn_sig = self.data_trn_sig;
         fresh.jump = self.jump;
-        fresh
+        Ok(fresh)
     }
 }
 
@@ -569,7 +591,87 @@ impl AudioCoprocessor for SgbCoprocessor {
         SgbCoprocessor::read_state(self, r)
     }
     fn clone_box(&self) -> Box<dyn AudioCoprocessor> {
-        Box::new(self.deep_clone())
+        // Re-instantiating the already-validated plugin wasm can only fail on an
+        // allocation error (which aborts anyway), so this is near-unreachable —
+        // but a save-state clone must never panic the emulator. Degrade to a
+        // silent inert coprocessor and log, rather than `.expect`.
+        match self.deep_clone() {
+            Ok(fresh) => Box::new(fresh),
+            Err(e) => {
+                eprintln!(
+                    "slopgb: SGB coprocessor clone failed ({e}); audio inert for this snapshot"
+                );
+                Box::new(InertCoprocessor)
+            }
+        }
+    }
+}
+
+/// The on-disk state layout [`SgbCoprocessor::write_state`] emits, all zeroed
+/// (empty chip-state blocks + zeroed runtime). [`InertCoprocessor`] writes this
+/// so a machine saved with an inert coprocessor still reloads through
+/// [`SgbCoprocessor::read_state`]. **Keep in sync with `write_state`.**
+fn write_empty_state(w: &mut Writer) {
+    w.u32(0); // spc state len
+    w.u32(0); // cpu state len
+    for _ in 0..5 {
+        w.u64(0); // spc/cpu target, spc/cpu acc, pending_gb
+    }
+    for _ in 0..N_PORTS {
+        w.u8(0); // to_spc
+    }
+    w.u64(0); // src_acc
+    w.u16(0); // cur.0
+    w.u16(0); // cur.1
+    w.u64(0); // samp_acc
+    w.u32(0); // poll_ctr
+    w.u64(0); // sou_trn_sig
+    w.u64(0); // data_trn_sig
+    w.bool(false); // jump present
+    w.u32(0); // jump target
+}
+
+/// A no-op [`AudioCoprocessor`] producing silence. Only ever the result of
+/// [`SgbCoprocessor::clone_box`] failing to re-instantiate the plugin wasm
+/// (near-impossible — the bytes loaded once already), so a save-state can never
+/// panic the emulator.
+struct InertCoprocessor;
+
+impl AudioCoprocessor for InertCoprocessor {
+    fn clock(&mut self, _gb_cycles: u64) {}
+    fn poll(&mut self, _cmds: &mut dyn SgbCommandSource) {}
+    fn mix_into(&mut self, _out: &mut [(f32, f32)]) {}
+    fn set_output_rate(&mut self, _hz: u32) {}
+    fn load_bios(&mut self, _bios: &[u8]) {}
+    fn write_state(&self, w: &mut Writer) {
+        write_empty_state(w);
+    }
+    fn read_state(&mut self, r: &mut Reader<'_>) -> Result<(), StateError> {
+        // Consume (and discard) the same layout, so an inert-then-restored path
+        // stays byte-aligned.
+        let n = r.u32()? as usize;
+        r.bytes_vec(n)?;
+        let n = r.u32()? as usize;
+        r.bytes_vec(n)?;
+        for _ in 0..5 {
+            r.u64()?;
+        }
+        for _ in 0..N_PORTS {
+            r.u8()?;
+        }
+        r.u64()?;
+        r.u16()?;
+        r.u16()?;
+        r.u64()?;
+        r.u32()?;
+        r.u64()?;
+        r.u64()?;
+        r.bool()?;
+        r.u32()?;
+        Ok(())
+    }
+    fn clone_box(&self) -> Box<dyn AudioCoprocessor> {
+        Box::new(InertCoprocessor)
     }
 }
 
