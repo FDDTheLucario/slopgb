@@ -1,0 +1,9 @@
+# Cargo aliases for this workspace. NOTE: no `[build] target` here on purpose —
+# that would force every `cargo build` to cross-compile; the plugin build sets
+# the wasm target only on its own invocation.
+[alias]
+# Build the coprocessor plugin crates to their loadable wasm artifacts
+# (target/wasm32-unknown-unknown/release/slopgb_{msu1,spc700,w65c816}_plugin.wasm).
+# The host loads only *.wasm; a plain `cargo build` produces native cdylibs
+# (.so/.dylib/.dll) the host can't use.
+build-plugins = "build --release --target wasm32-unknown-unknown -p slopgb-msu1-plugin -p slopgb-spc700-plugin -p slopgb-w65c816-plugin"
