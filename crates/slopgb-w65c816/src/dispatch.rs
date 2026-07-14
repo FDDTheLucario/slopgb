@@ -291,6 +291,40 @@ impl Cpu {
             0x60 => self.rts(bus),
             0x6B => self.rtl(bus),
 
+            // --- ADC ---
+            0x69 => self.adc_imm(bus),
+            0x65 => am!(self, bus, am_dp => adc),
+            0x75 => am!(self, bus, am_dp_x => adc),
+            0x6D => am!(self, bus, am_abs => adc),
+            0x7D => amw!(self, bus, am_abs_x, false => adc),
+            0x79 => amw!(self, bus, am_abs_y, false => adc),
+            0x6F => am!(self, bus, am_long => adc),
+            0x7F => am!(self, bus, am_long_x => adc),
+            0x61 => am!(self, bus, am_indirect_x => adc),
+            0x71 => amw!(self, bus, am_indirect_y, false => adc),
+            0x72 => am!(self, bus, am_indirect => adc),
+            0x67 => am!(self, bus, am_long_indirect => adc),
+            0x77 => am!(self, bus, am_long_indirect_y => adc),
+            0x63 => am!(self, bus, am_stack_s => adc),
+            0x73 => am!(self, bus, am_stack_s_y => adc),
+
+            // --- SBC ---
+            0xE9 => self.sbc_imm(bus),
+            0xE5 => am!(self, bus, am_dp => sbc),
+            0xF5 => am!(self, bus, am_dp_x => sbc),
+            0xED => am!(self, bus, am_abs => sbc),
+            0xFD => amw!(self, bus, am_abs_x, false => sbc),
+            0xF9 => amw!(self, bus, am_abs_y, false => sbc),
+            0xEF => am!(self, bus, am_long => sbc),
+            0xFF => am!(self, bus, am_long_x => sbc),
+            0xE1 => am!(self, bus, am_indirect_x => sbc),
+            0xF1 => amw!(self, bus, am_indirect_y, false => sbc),
+            0xF2 => am!(self, bus, am_indirect => sbc),
+            0xE7 => am!(self, bus, am_long_indirect => sbc),
+            0xF7 => am!(self, bus, am_long_indirect_y => sbc),
+            0xE3 => am!(self, bus, am_stack_s => sbc),
+            0xF3 => am!(self, bus, am_stack_s_y => sbc),
+
             other => panic!("unimplemented opcode {other:#04x}"),
         }
     }

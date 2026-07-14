@@ -172,11 +172,12 @@ impl Cpu {
         }
     }
 
-    /// `PLB`: pull the data-bank register (sets N/Z).
+    /// `PLB`: pull the data-bank register (sets N/Z). Like the other 65816-only
+    /// stack ops it steps `S` linearly (not clamped to page 1) in emulation.
     pub(crate) fn plb(&mut self, bus: &mut impl Bus) {
         self.io();
         self.io();
-        let v = self.pull8(bus);
+        let v = self.pull8_linear(bus);
         self.regs.dbr = v;
         self.set_nz(v as u16, false);
     }

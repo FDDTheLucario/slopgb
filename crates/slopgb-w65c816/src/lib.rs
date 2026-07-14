@@ -6,6 +6,7 @@
 mod addressing;
 mod cpu;
 mod dispatch;
+mod ops_arith;
 mod ops_branch;
 mod ops_ctrl;
 mod ops_flow;
