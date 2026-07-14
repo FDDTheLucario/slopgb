@@ -9,6 +9,47 @@
 /// buffer of interleaved little-endian `i16` `L,R` sample pairs.
 pub const EMIT_KIND_PCM: i32 = 2;
 
+/// Read the host→guest **mailbox** — the bytes a game (or the frontend) last
+/// deposited for this coprocessor, e.g. a streaming-audio play-request written
+/// through `DATA_SND`. A resident coprocessor polls this each `run_until` and
+/// edge-detects a change. Empty when nothing is queued.
+///
+/// The host writes into a guest-owned buffer through wasmi's bounds-checked
+/// `Memory` and reports the true length, so this grows + retries on overflow —
+/// no `unsafe`, no raw pointer (the ABI's guest-scratch pattern).
+#[must_use]
+pub fn recv_mailbox() -> Vec<u8> {
+    let mut buf = vec![0u8; 64];
+    loop {
+        let need = crate::abi::host_recv(buf.as_ptr() as i32, buf.len() as i32).max(0) as usize;
+        if need <= buf.len() {
+            buf.truncate(need);
+            return buf;
+        }
+        buf.resize(need, 0);
+    }
+}
+
+/// Read up to `buf.len()` bytes of the host-owned file identified by `key`,
+/// starting at byte `offset`, into `buf`. Returns the number of bytes actually
+/// written (`0` when `key` names no file or `offset` is at/past the end) — the
+/// caller streams by advancing `offset` until it gets a short/zero read.
+///
+/// The host owns the file (a track `.pcm`, a data `.msu` — far larger than the
+/// comm ports can carry); the plugin pulls it in chunks. The host writes into
+/// `buf` through the bounds-checked `Memory`, so there is no `unsafe` and no raw
+/// pointer. `key`'s meaning is a host↔plugin convention (e.g. MSU-1: the audio
+/// track number, or a reserved key for the data ROM).
+pub fn read_file(key: u32, offset: u32, buf: &mut [u8]) -> usize {
+    let n = crate::abi::host_file(
+        key as i32,
+        offset as i32,
+        buf.as_ptr() as i32,
+        buf.len() as i32,
+    );
+    (n.max(0) as usize).min(buf.len())
+}
+
 /// A chip a plugin hosts. Implement this, then invoke
 /// [`slopgb_coprocessor_plugin!`](crate::slopgb_coprocessor_plugin).
 pub trait Coprocessor {

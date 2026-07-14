@@ -172,6 +172,12 @@ drives it with `reset` / `run_until` (the chip's own cycle domain) / `port_write
   *same* code the core built-in SGB audio path runs) — clocking it in wasm runs
   the real SPC700 IPL ROM (the `$AA`/`$BB` boot handshake) and the S-DSP
   synthesizes. Proof: `slopgb-plugin-host/tests/spc700_roundtrip.rs`.
+- `crates/slopgb-msu1-plugin` is an **MSU-1 streaming-audio** chip: the eight
+  MSU-1 registers (`$2000-$2007`) map 1:1 to comm ports `0..=7`, streaming a
+  user-supplied `.pcm` track and reading a `.msu` data ROM through the v4 bulk
+  channels below. Proof: `slopgb-plugin-host/tests/msu1_roundtrip.rs` (register
+  select/seek/play, the data port, a looping track, and the mailbox mode). See
+  [`docs/msu1-plugin-plan.md`](../msu1-plugin-plan.md).
 
 **PCM drain (ABI v3).** `drain_pcm` (default: none, for a non-audio chip like the
 65C816) returns the stereo samples synthesized since the last drain; the generated
@@ -179,6 +185,23 @@ drives it with `reset` / `run_until` (the chip's own cycle domain) / `port_write
 L,R pairs, kind `EMIT_KIND_PCM`) and the host decodes them in `LoadedCoprocessor::
 drain_pcm` to mix like the built-in `mix_into`. Proof:
 `spc700_roundtrip::spc700_pcm_drains_to_the_host`.
+
+**Bulk channels (ABI v4).** Two host→guest imports let a *streaming* coprocessor
+move more than the scalar comm ports can carry, both reusing the guest-scratch
+pattern (the host writes into a guest-owned buffer through wasmi's bounds-checked
+`Memory` — no `unsafe`, no raw pointer):
+
+- `recv_mailbox() -> Vec<u8>` (import `host_recv`): read the **mailbox**, the bytes
+  a game / the frontend last deposited via `LoadedCoprocessor::set_mailbox` — a
+  play-request the game writes through `DATA_SND`. A resident coprocessor polls it
+  each `run_until` and edge-detects a change (the "resident handler + polled
+  mailbox" pattern). The **per-frame hook** is that already-pumped `run_until`
+  itself; no extra export.
+- `read_file(key, offset, buf) -> usize` (import `host_file`): read a chunk of a
+  keyed **host-owned file** registered with `LoadedCoprocessor::set_file` — a track
+  `.pcm` or data `.msu`, far larger than a comm port. The bytes stay host-side;
+  only the requested chunk crosses. `key`'s meaning is a host↔plugin convention
+  (MSU-1: the audio track number, or `DATA_FILE_KEY` for the data ROM).
 
 ## Golden-safe rules
 
@@ -228,7 +251,10 @@ byte-identical.
 
 The guest exports `slopgb_abi_version()`; the host refuses a plugin whose version
 differs from its own (`ABI_VERSION`). Rebuild a plugin against the matching SDK
-after an ABI bump.
+after an ABI bump. History: v3 added the coprocessor PCM drain; **v4** added the
+two coprocessor bulk imports (`host_recv` / `host_file`, above). The wat test
+fixtures interpolate `ABI_VERSION`, so a bump auto-tracks; the Rust SDK macros
+emit it too — no literal to chase.
 
 ## For the full contract
 

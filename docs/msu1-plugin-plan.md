@@ -1,8 +1,41 @@
 # MSU-1 (+ resident-handler streaming) plugin — plan
 
-Forward-looking / queued. An MSU-1-style streaming-audio coprocessor as a slopgb
-tier-3 plugin, plus the more general "resident frame-handler + polled mailbox"
-custom-music pattern it generalizes.
+**Status: implemented** as `crates/slopgb-msu1-plugin` (the register interface +
+the polled-mailbox mode), on the v4 coprocessor bulk channels. Proof:
+`slopgb-plugin-host/tests/msu1_roundtrip.rs`; the SDK surface is documented in
+[`ui-state/plugin-api.md`](ui-state/plugin-api.md#coprocessor-plugins-tier-3).
+The register-map / bit-layout spec below is the design reference; the two open
+sections at the end (**deferred**) are the remaining integration.
+
+An MSU-1-style streaming-audio coprocessor as a slopgb tier-3 plugin, plus the
+more general "resident frame-handler + polled mailbox" custom-music pattern it
+generalizes.
+
+## What landed (and how it maps to the plan)
+
+- **Register interface.** Comm ports `0..=7` map to `$2000-$2007`: status/data +
+  32-bit seek, 16-bit track select, volume, control (play/repeat/resume), and the
+  `"S-MSU1"` id bytes. The `.pcm` header (`"MSU1"` + 32-bit LE loop point) and the
+  interleaved 16-bit LE stereo samples stream via the bulk-file channel.
+- **Resident handler + polled mailbox.** Every `run_until` the plugin polls the
+  host mailbox; a game-written `[cmd, track_lo, track_hi, flags]` play-request
+  starts playback with no register writes.
+- **ABI v4 bulk channels** (shared, general): `host_recv` (mailbox) + `host_file`
+  (keyed host-owned file by offset), both reusing the guest-scratch pattern (no
+  `unsafe`, no `from_raw_parts`). The per-frame handler hook is the already-pumped
+  `run_until`.
+
+## Deferred (honest coverage)
+
+- **Frontend cart-address mapping.** The "one integration decision" below — wiring
+  GB/SNES cart addresses to the coprocessor's comm ports + driving `run_until` /
+  `drain_pcm` from the frontend's per-frame loop, plus resolving a track number to
+  an on-disk `track_NNNN.pcm`. The plugin + ABI are proven at the host level
+  (`LoadedCoprocessor`), the same tier the SPC700/65C816 plugins are proven at;
+  the frontend does not yet route a running game's writes into a loaded MSU-1.
+- **Output-rate resampling.** The plugin streams at the `.pcm` native 44.1 kHz
+  (one output sample per `run_until` cycle); mixing into the Game Boy stream at its
+  own rate is a frontend concern, unwired with the cart mapping above.
 
 ## Two usage modes (both ride the coprocessor tier)
 

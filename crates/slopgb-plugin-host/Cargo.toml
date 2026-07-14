@@ -19,6 +19,10 @@ wasmi = "1.1"
 # Test-only: hand-written `.wat` modules for the load-gating and memory-read
 # unit tests, so they don't depend on the wasm32 fixture build.
 wat = "1"
+# Test-only (rlib, native): the MSU-1 plugin's shared constants (DATA_FILE_KEY /
+# PCM_MAGIC), so the round-trip fixtures stay in sync with the plugin. The wasm
+# artifact the test loads is built separately by cargo; this is not a runtime dep.
+slopgb-msu1-plugin = { path = "../slopgb-msu1-plugin" }
 
 [lints]
 workspace = true

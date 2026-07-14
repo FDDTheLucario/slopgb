@@ -1441,6 +1441,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "slopgb-msu1-plugin"
+version = "0.1.0"
+dependencies = [
+ "slopgb-plugin-api",
+]
+
+[[package]]
 name = "slopgb-plugin-api"
 version = "0.1.0"
 
@@ -1449,6 +1456,7 @@ name = "slopgb-plugin-host"
 version = "0.1.0"
 dependencies = [
  "slopgb-core",
+ "slopgb-msu1-plugin",
  "slopgb-plugin-api",
  "wasmi",
  "wat",

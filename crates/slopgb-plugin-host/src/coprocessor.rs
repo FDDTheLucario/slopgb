@@ -7,7 +7,6 @@ use wasmi::{Engine, Module, Store, TypedFunc};
 
 use crate::LoadError;
 use crate::host::{HostState, build_linker};
-use crate::snapshot::Snapshot;
 
 /// One instantiated coprocessor plugin and the entry points the host drives it
 /// with.
@@ -26,14 +25,7 @@ impl LoadedCoprocessor {
     pub fn load(bytes: &[u8]) -> Result<Self, LoadError> {
         let engine = Engine::default();
         let module = Module::new(&engine, bytes)?;
-        let mut store = Store::new(
-            &engine,
-            HostState {
-                snap: Snapshot::empty(),
-                log: Vec::new(),
-                emitted: None,
-            },
-        );
+        let mut store = Store::new(&engine, HostState::empty());
         let linker = build_linker(&engine);
         let instance = linker.instantiate_and_start(&mut store, &module)?;
 
@@ -89,6 +81,24 @@ impl LoadedCoprocessor {
     pub fn reset(&mut self) -> Result<(), LoadError> {
         self.reset.call(&mut self.store, ())?;
         Ok(())
+    }
+
+    /// Set the host→guest **mailbox** (v4) — the bytes the coprocessor's next
+    /// `host_recv` (`recv_mailbox`) returns. The frontend deposits a game-written
+    /// play-request here; the resident plugin polls it each `run_until`.
+    pub fn set_mailbox(&mut self, bytes: &[u8]) {
+        self.store.data_mut().mailbox = bytes.to_vec();
+    }
+
+    /// Register (or replace) a host-owned **file** (v4) the coprocessor reads by
+    /// `key` + offset via `host_file` (`read_file`) — a streaming track `.pcm` or
+    /// data `.msu`. The bytes stay host-side; only the requested chunks cross.
+    pub fn set_file(&mut self, key: u32, bytes: Vec<u8>) {
+        let files = &mut self.store.data_mut().files;
+        match files.iter_mut().find(|(k, _)| *k == key) {
+            Some(slot) => slot.1 = bytes,
+            None => files.push((key, bytes)),
+        }
     }
 
     /// Advance the chip to at least `target_cycle`; returns the cycle reached.

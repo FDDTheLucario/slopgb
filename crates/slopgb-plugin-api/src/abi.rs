@@ -5,7 +5,10 @@
 /// `slopgb_abi_version()` export and refuses a mismatch.
 ///
 /// v3 adds the tier-3 `slopgb_drain_pcm` export (the coprocessor PCM-drain path).
-pub const ABI_VERSION: i32 = 3;
+/// v4 adds two host→guest bulk imports for streaming coprocessors: `host_recv`
+/// (read the game-written mailbox) and `host_file` (read chunks of a host-owned
+/// file by key + offset — a track `.pcm` / data `.msu`, too large for comm ports).
+pub const ABI_VERSION: i32 = 4;
 
 /// A readable register or I/O byte. Discriminant is the `host_reg` wire index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,6 +72,13 @@ mod raw {
         pub safe fn host_reg(which: i32) -> i32;
         pub safe fn host_log(ptr: i32, len: i32);
         pub safe fn host_emit(kind: i32, ptr: i32, len: i32);
+        // Coprocessor bulk channels (v4). Both write into the guest scratch at
+        // `out_ptr` (up to `out_cap` bytes) through wasmi's bounds-checked
+        // `Memory` — no raw pointer crosses. `host_recv` returns the mailbox's
+        // true length (grow + retry a short buffer); `host_file` returns the byte
+        // count actually read at `key`+`offset` (0 = no file / past EOF).
+        pub safe fn host_recv(out_ptr: i32, out_cap: i32) -> i32;
+        pub safe fn host_file(key: i32, offset: i32, out_ptr: i32, out_cap: i32) -> i32;
         // Tool-plugin imports. A tier-1 plugin references none of these, so its
         // module declares no import for them and the host need not provide them.
         // Scalars:
@@ -107,6 +117,12 @@ mod raw {
     pub fn host_emit(_kind: i32, _ptr: i32, _len: i32) {
         unreachable!()
     }
+    pub fn host_recv(_out_ptr: i32, _out_cap: i32) -> i32 {
+        unreachable!()
+    }
+    pub fn host_file(_key: i32, _offset: i32, _out_ptr: i32, _out_cap: i32) -> i32 {
+        unreachable!()
+    }
     pub fn host_read_banked(_bank: i32, _addr: i32) -> i32 {
         unreachable!()
     }
@@ -143,6 +159,7 @@ mod raw {
 }
 
 pub(crate) use raw::{
-    host_cdl_flag, host_cdl_ranges, host_disasm, host_emit, host_expr, host_log, host_read,
-    host_read_banked, host_reg, host_registers, host_screencap, host_set_breakpoint, host_vram,
+    host_cdl_flag, host_cdl_ranges, host_disasm, host_emit, host_expr, host_file, host_log,
+    host_read, host_read_banked, host_recv, host_reg, host_registers, host_screencap,
+    host_set_breakpoint, host_vram,
 };

@@ -14,10 +14,33 @@ use crate::snapshot::Snapshot;
 /// wasmi store data: the frame snapshot the imports read, the log lines the
 /// guest emitted this frame, and the last result a tool plugin pushed via
 /// `host_emit` (kind, bytes). Owned and `'static`, so no `GameBoy` is borrowed.
+///
+/// `mailbox` + `files` back the v4 coprocessor bulk channels: `host_recv` serves
+/// the mailbox (a game-written play-request), `host_file` serves a chunk of a
+/// keyed host-owned file (a track `.pcm` / data `.msu`). Both are empty for a
+/// per-frame plugin that never touches them.
 pub(crate) struct HostState {
     pub(crate) snap: Snapshot,
     pub(crate) log: Vec<String>,
     pub(crate) emitted: Option<(i32, Vec<u8>)>,
+    pub(crate) mailbox: Vec<u8>,
+    // ponytail: linear-scanned (key, bytes); a coprocessor holds a handful of
+    // files (one data ROM + a few tracks). A map only if that ever grows large.
+    pub(crate) files: Vec<(u32, Vec<u8>)>,
+}
+
+impl HostState {
+    /// A store state with no snapshot, log, mailbox, or files (the load-time
+    /// default before the first frame / file registration).
+    pub(crate) fn empty() -> Self {
+        HostState {
+            snap: Snapshot::empty(),
+            log: Vec::new(),
+            emitted: None,
+            mailbox: Vec::new(),
+            files: Vec::new(),
+        }
+    }
 }
 
 /// Why a plugin failed to load.
@@ -161,14 +184,7 @@ impl PluginHost {
     pub fn load_bytes(name: &str, bytes: &[u8]) -> Result<LoadedPlugin, LoadError> {
         let engine = Engine::default();
         let module = Module::new(&engine, bytes)?;
-        let mut store = Store::new(
-            &engine,
-            HostState {
-                snap: Snapshot::empty(),
-                log: Vec::new(),
-                emitted: None,
-            },
-        );
+        let mut store = Store::new(&engine, HostState::empty());
         let linker = build_linker(&engine);
         let instance = linker.instantiate_and_start(&mut store, &module)?;
 
@@ -377,8 +393,79 @@ pub(crate) fn build_linker(engine: &Engine) -> Linker<HostState> {
                 },
             )
         })
+        .and_then(|l| {
+            // v4: hand the guest the mailbox (a game-written play-request). Writes
+            // up to `out_cap` bytes into the guest scratch and returns the *true*
+            // length, so the guest grows + retries a short buffer.
+            l.func_wrap(
+                "slopgb",
+                "host_recv",
+                |mut caller: Caller<'_, HostState>, out_ptr: i32, out_cap: i32| -> i32 {
+                    // Clone so the mailbox stays set for the next poll (the guest
+                    // edge-detects a change; it is not consumed on read).
+                    let mailbox = caller.data().mailbox.clone();
+                    write_guest(&mut caller, out_ptr, out_cap, &mailbox);
+                    i32::try_from(mailbox.len()).unwrap_or(i32::MAX)
+                },
+            )
+        })
+        .and_then(|l| {
+            // v4: serve a chunk of a keyed host-owned file (a track `.pcm` / data
+            // `.msu`). Writes up to `out_cap` bytes of file `key` at `offset` and
+            // returns the byte count actually written (0 = no file / past EOF).
+            l.func_wrap(
+                "slopgb",
+                "host_file",
+                |mut caller: Caller<'_, HostState>,
+                 key: i32,
+                 offset: i32,
+                 out_ptr: i32,
+                 out_cap: i32|
+                 -> i32 {
+                    let key = key as u32;
+                    let Ok(off) = usize::try_from(offset) else {
+                        return 0;
+                    };
+                    let cap = out_cap.max(0) as usize;
+                    let chunk = caller
+                        .data()
+                        .files
+                        .iter()
+                        .find(|(k, _)| *k == key)
+                        .map(|(_, bytes)| {
+                            let end = off.saturating_add(cap).min(bytes.len());
+                            bytes.get(off..end).unwrap_or(&[]).to_vec()
+                        })
+                        .unwrap_or_default();
+                    write_guest(&mut caller, out_ptr, out_cap, &chunk)
+                },
+            )
+        })
         .expect("host import names are unique and well-typed");
     linker
+}
+
+/// Write `bytes` (capped at `out_cap`) into the guest scratch at `out_ptr`
+/// through wasmi's bounds-checked `Memory`, returning the byte count written. No
+/// raw pointer crosses; a bad memory/bounds fails closed (returns 0).
+fn write_guest(
+    caller: &mut Caller<'_, HostState>,
+    out_ptr: i32,
+    out_cap: i32,
+    bytes: &[u8],
+) -> i32 {
+    let Some(Extern::Memory(mem)) = caller.get_export("memory") else {
+        return 0;
+    };
+    let (Ok(off), Ok(cap)) = (usize::try_from(out_ptr), usize::try_from(out_cap)) else {
+        return 0;
+    };
+    let n = bytes.len().min(cap);
+    if mem.write(caller, off, &bytes[..n]).is_ok() {
+        i32::try_from(n).unwrap_or(i32::MAX)
+    } else {
+        0
+    }
 }
 
 #[cfg(test)]

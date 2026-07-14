@@ -4,6 +4,7 @@ members = [
     "crates/slopgb-core",
     "crates/slopgb",
     "crates/slopfp",
+    "crates/slopgb-msu1-plugin",
     "crates/slopgb-plugin-api",
     "crates/slopgb-plugin-host",
     "crates/slopgb-sgb-coprocessor",
