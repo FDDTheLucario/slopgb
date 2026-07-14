@@ -101,11 +101,14 @@ fn main() {
     // Optional SGB audio-coprocessor backend (--sgb-coprocessor / the presence of
     // SLOPGB_SGB_COPROCESSOR): swaps the built-in HLE APU for the combined chip on
     // every SGB (re)load. Off = the built-in default (byte-identical golden path).
-    let sgb_coprocessor = opts.sgb_coprocessor || env::var_os("SLOPGB_SGB_COPROCESSOR").is_some();
+    let cli_coprocessor = opts.sgb_coprocessor || env::var_os("SLOPGB_SGB_COPROCESSOR").is_some();
     // Effective emulated-system choice for this load: an explicit CLI `--model`
     // wins, else the persisted Options choice (so a saved SGB / "prefer SGB" /
     // border selection is honored at startup, not just after opening Options).
     let loaded = settings_file::load();
+    // Effective audio backend: the CLI flag / env var wins the launch, else the
+    // persisted Options choice — honored at startup like --model above.
+    let sgb_coprocessor = cli_coprocessor || loaded.settings.audio_backend.is_coprocessor();
     let model_choice = opts.model.map_or(loaded.settings.model, |m| {
         windows::options::ModelChoice::from_option(Some(m))
     });
@@ -424,6 +427,13 @@ impl App {
             model: match opts.model {
                 Some(m) => windows::options::ModelChoice::from_option(Some(m)),
                 None => loaded.settings.model,
+            },
+            // The effective backend (CLI/env flag wins, else persisted) — so the
+            // Sound-tab dropdown shows what is actually live this launch.
+            audio_backend: if sgb_coprocessor {
+                windows::options::AudioBackend::SgbCoprocessor
+            } else {
+                loaded.settings.audio_backend
             },
             ..loaded.settings
         };

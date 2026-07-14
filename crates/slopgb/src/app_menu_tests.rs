@@ -24,6 +24,29 @@ fn blank_app() -> App {
     App::new(opts, Session::blank(Model::Dmg), false, None, None, false)
 }
 
+/// Applying Options → Sound → SGB audio backend mirrors the choice into
+/// `sgb_coprocessor` (which a later ROM (re)load re-injects) and drives the live
+/// `Session::set_sgb_coprocessor` seam. Built-in ↔ coprocessor both directions.
+#[test]
+fn apply_settings_drives_the_sgb_audio_backend() {
+    use crate::windows::options::AudioBackend;
+    let mut app = blank_app();
+    // Selecting the coprocessor in Options and applying flips the live choice.
+    app.settings.audio_backend = AudioBackend::SgbCoprocessor;
+    app.apply_settings_no_persist();
+    assert!(
+        app.sgb_coprocessor,
+        "selecting the coprocessor drives the backend on Apply"
+    );
+    // Switching back to Built-in restores the byte-identical default.
+    app.settings.audio_backend = AudioBackend::Builtin;
+    app.apply_settings_no_persist();
+    assert!(
+        !app.sgb_coprocessor,
+        "Built-in restores the default backend"
+    );
+}
+
 /// The stretch <-> window-size reconciliation must hold both directions, and
 /// exercising it must write nothing: `apply_settings_no_persist` is the
 /// disk-free half of `apply_settings` (the `settings_file::save` side effect is

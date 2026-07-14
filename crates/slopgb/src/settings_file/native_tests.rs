@@ -153,6 +153,25 @@ fn theme_choice_round_trips_every_variant() {
 }
 
 #[test]
+fn audio_backend_round_trips_and_unknown_falls_back() {
+    for choice in [AudioBackend::Builtin, AudioBackend::SgbCoprocessor] {
+        let s = Settings {
+            audio_backend: choice,
+            ..Settings::default()
+        };
+        let mut d = Doc::default();
+        to_doc(&s, &[], &mut d);
+        let (back, _) = from_doc(&Doc::parse(&d.serialize()));
+        assert_eq!(back.audio_backend, choice, "{choice:?} round-trips");
+    }
+    // Unknown / missing value falls back to the default (Built-in), non-fatally.
+    let (s, _) = from_doc(&Doc::parse("[sound]\naudio_backend = bogus\n"));
+    assert_eq!(s.audio_backend, AudioBackend::Builtin);
+    let (s2, _) = from_doc(&Doc::parse("version = 1\n"));
+    assert_eq!(s2.audio_backend, AudioBackend::Builtin);
+}
+
+#[test]
 fn unknown_theme_value_falls_back_to_default_non_fatally() {
     let (s, _) = from_doc(&Doc::parse("[ui]\ntheme = bogus\n"));
     assert_eq!(s.theme, ThemeChoice::default());

@@ -96,6 +96,66 @@ impl ModelChoice {
     }
 }
 
+/// Which SGB audio backend the Sound tab selects (a slopgb extra, no bgb
+/// equivalent — the same seam the `--sgb-coprocessor` flag drives). `Builtin` is
+/// the default HLE `SgbApu` (byte-identical golden path); `SgbCoprocessor` swaps
+/// in the combined 65C816+SPC700+S-DSP chip. A no-op off `Model::Sgb`/`Sgb2`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AudioBackend {
+    /// The built-in HLE SGB APU (default).
+    #[default]
+    Builtin,
+    /// The combined SGB audio coprocessor (`--sgb-coprocessor`).
+    SgbCoprocessor,
+}
+
+impl AudioBackend {
+    /// Whether the coprocessor backend is selected — the bool `Session::
+    /// set_sgb_coprocessor` takes.
+    #[must_use]
+    pub fn is_coprocessor(self) -> bool {
+        matches!(self, AudioBackend::SgbCoprocessor)
+    }
+
+    /// The next backend in the cycle (the Sound-tab dropdown steps through both).
+    #[must_use]
+    pub fn next(self) -> Self {
+        match self {
+            AudioBackend::Builtin => AudioBackend::SgbCoprocessor,
+            AudioBackend::SgbCoprocessor => AudioBackend::Builtin,
+        }
+    }
+
+    /// Display label for the dropdown.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            AudioBackend::Builtin => "Built-in",
+            AudioBackend::SgbCoprocessor => "SGB coprocessor",
+        }
+    }
+
+    /// Encode for persistence (native `[sound] audio_backend`, bgb-ini
+    /// `SlopgbAudioBackend`).
+    #[must_use]
+    pub fn to_key(self) -> &'static str {
+        match self {
+            AudioBackend::Builtin => "builtin",
+            AudioBackend::SgbCoprocessor => "sgb-coprocessor",
+        }
+    }
+
+    /// Decode [`Self::to_key`]; anything unrecognized falls back to the default
+    /// (`Builtin`), so a hand-edited config can't wedge startup.
+    #[must_use]
+    pub fn from_key(v: &str) -> Self {
+        match v {
+            "sgb-coprocessor" => AudioBackend::SgbCoprocessor,
+            _ => AudioBackend::Builtin,
+        }
+    }
+}
+
 /// A named DMG palette preset (GB Colors tab "Scheme"). `colors[0]` is the
 /// lightest shade (GB color 0), `colors[3]` the darkest — the order
 /// `GameBoy::set_dmg_palette` expects.
@@ -227,6 +287,10 @@ pub struct Settings {
     pub volume: f32,
     /// Sound → mono output (downmix L/R).
     pub mono: bool,
+    /// Sound → SGB audio backend (Built-in HLE APU vs the combined coprocessor).
+    /// Drives the same seam as `--sgb-coprocessor`; the CLI flag wins the launch.
+    /// Default `Builtin` → byte-identical golden path. A no-op off SGB.
+    pub audio_backend: AudioBackend,
     /// Debug → lowercase disassembler mnemonics.
     pub lowercase_disasm: bool,
     /// Debug → lowercase hex digits in the disasm/memory panes.
@@ -304,6 +368,7 @@ impl Default for Settings {
             stretch: false,
             volume: 1.0,
             mono: false,
+            audio_backend: AudioBackend::Builtin,
             lowercase_disasm: true,
             lowercase_hex: false,
             show_clocks: true,

@@ -17,7 +17,7 @@
 //! ```
 
 use crate::ui::{CustomThemes, Theme, ThemeChoice};
-use crate::windows::options::{ModelChoice, PluginConfig, SCHEMES, Settings};
+use crate::windows::options::{AudioBackend, ModelChoice, PluginConfig, SCHEMES, Settings};
 
 /// The current native-format version (bumped when a migration is needed).
 pub const VERSION: u32 = 1;
@@ -243,6 +243,9 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
             .and_then(|v| v.trim().parse().ok())
             .unwrap_or(def.volume),
         mono: b("sound", "mono", def.mono),
+        audio_backend: d
+            .get("sound", "audio_backend")
+            .map_or(def.audio_backend, AudioBackend::from_key),
         lowercase_disasm: b("debug", "lowercase_disasm", def.lowercase_disasm),
         lowercase_hex: b("debug", "lowercase_hex", def.lowercase_hex),
         show_clocks: b("debug", "show_clocks", def.show_clocks),
@@ -298,6 +301,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         stretch: _,
         volume: _,
         mono: _,
+        audio_backend: _,
         lowercase_disasm: _,
         lowercase_hex: _,
         show_clocks: _,
@@ -347,6 +351,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
     d.set("system", "bootrom_sgb", &settings.bootrom_sgb);
     d.set("sound", "volume", &settings.volume.to_string());
     d.set("sound", "mono", fb(settings.mono));
+    d.set("sound", "audio_backend", settings.audio_backend.to_key());
     d.set("graphics", "stretch", fb(settings.stretch));
     let palette = settings
         .dmg_palette

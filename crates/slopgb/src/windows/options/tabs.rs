@@ -50,6 +50,8 @@ pub(crate) enum Field {
     UninitedWram,
     Model(ModelChoice),
     Volume,
+    /// Sound → the SGB audio-backend dropdown (cycles Built-in ↔ coprocessor).
+    AudioBackend,
     /// Fast-forward speed slider (maps the click fraction to 1..=`FF_SPEED_MAX`).
     FfSpeed,
     /// Framerate-limit slider (maps the click fraction to the `FRAMERATE_STEPS`).
@@ -256,6 +258,7 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         Field::UninitedWram => s.uninited_wram = !s.uninited_wram,
         Field::Model(m) => s.model = m,
         Field::Volume => s.volume = slider_frac(ct.rect, px),
+        Field::AudioBackend => s.audio_backend = s.audio_backend.next(),
         // 1..=FF_SPEED_MAX mapped from the click fraction along the track.
         Field::FfSpeed => {
             let f = slider_frac(ct.rect, px);
@@ -320,6 +323,7 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
         OptionsTab::Sound => {
             s.volume = d.volume;
             s.mono = d.mono;
+            s.audio_backend = d.audio_backend;
         }
         OptionsTab::GbColors => s.select_scheme(d.scheme),
         // configure-keyboard is not a Settings field; only the SOCD toggle resets.

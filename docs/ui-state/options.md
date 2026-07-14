@@ -22,7 +22,7 @@ where bgb itself greys them).
 |---|---|
 | System | Emulated system (Gameboy/Gameboy Color/automatic → `ModelChoice` → `Session::set_model` rebuilds the machine on change; palette re-applied after) |
 | GB Colors | scheme (`SCHEMES` presets → `GameBoy::set_dmg_palette`) |
-| Sound | volume + mono (`AudioPipe::set_volume` gain/downmix) |
+| Sound | volume + mono (`AudioPipe::set_volume` gain/downmix); **SGB audio backend** dropdown (Built-in HLE APU / SGB coprocessor → `Settings.audio_backend` → `Session::set_sgb_coprocessor`, the same seam `--sgb-coprocessor` drives; the CLI flag/env still wins the launch, else the persisted choice is honored at startup. Default Built-in → byte-identical. A no-op off SGB) |
 | Graphics | stretch (→ fullscreen-stretched window size) |
 | Debug | lowercase-hex + show-clocks (→ `DisasmFmt` via `tools.set_disasm_fmt`); "pressing Esc shows debugger" (`Settings.esc_shows_debugger`, default on → `handle_key` opens the debugger on Esc instead of quitting); RGBDS syntax; "memory viewer in own window" |
 | Misc | fast-forward-speed + framerate-limit sliders (→ `app_pacing` `turbo_max_frames`/`frame_interval`); show-framerate (title); freeze-recent-ROMs (`push_recent` gate); pause-if-losing-focus (auto-pause on focus loss, auto-resume on refocus unless manually paused via `App.paused_by_focus`) |

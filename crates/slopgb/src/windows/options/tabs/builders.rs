@@ -397,6 +397,24 @@ pub(super) fn sound(s: &Settings, content: Rect) -> Vec<Ctrl> {
         Rect::new(l.x0 + 60, l.y, 180, line_height()),
         Kind::Slider { frac: 0.5, w: 180 },
     ));
+    l.row();
+    l.row();
+    // SGB audio backend (a slopgb extra) — dropdown, cycles Built-in ↔ SGB
+    // coprocessor on click. Drives the same seam as `--sgb-coprocessor`.
+    v.push(Ctrl::inert(
+        rc(l.at(), "SGB audio:"),
+        Kind::Label {
+            text: "SGB audio:".into(),
+        },
+    ));
+    v.push(Ctrl::live(
+        Rect::new(l.x0 + 90, l.y, 150, line_height() + 2),
+        Kind::Dropdown {
+            value: s.audio_backend.label().to_string(),
+            w: 150,
+        },
+        Field::AudioBackend,
+    ));
     v
 }
 

@@ -486,6 +486,11 @@ impl App {
         if let Some(pipe) = &mut self.audio {
             pipe.set_volume(s.volume, s.mono);
         }
+        // Sound → SGB audio backend: swap the live SGB machine's coprocessor (a
+        // no-op off SGB). Mirror the choice into `sgb_coprocessor` so a later ROM
+        // (re)load re-injects the same backend. Built-in = byte-identical golden.
+        self.sgb_coprocessor = s.audio_backend.is_coprocessor();
+        self.session.set_sgb_coprocessor(self.sgb_coprocessor);
         // Power-on RAM init (bgb's UninitedWRAM): store it for the next reset/
         // reload — power-on state, so it doesn't scramble the running machine.
         self.session.set_ram_init(crate::cli::effective_ram_init(

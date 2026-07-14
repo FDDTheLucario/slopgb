@@ -8,7 +8,7 @@
 
 use super::ini::{self, Ini};
 use crate::ui::ThemeChoice;
-use crate::windows::options::{ModelChoice, PluginConfig, SCHEMES, Settings};
+use crate::windows::options::{AudioBackend, ModelChoice, PluginConfig, SCHEMES, Settings};
 
 /// Read a `Settings` from a parsed bgb.ini; any key absent or unparseable takes
 /// its `Settings::default()` value.
@@ -51,6 +51,10 @@ pub fn from_ini(f: &Ini) -> Settings {
         stretch: boolean("SlopgbStretch", d.stretch),
         volume: (int("Volume", (d.volume * 100.0) as i64) as f32 / 100.0).clamp(0.0, 1.0),
         mono: boolean("SoundMono", d.mono),
+        // No bgb equivalent (a `Slopgb` extra) — the SGB audio backend.
+        audio_backend: f
+            .get("SlopgbAudioBackend")
+            .map_or(d.audio_backend, AudioBackend::from_key),
         lowercase_disasm: boolean("DebugLowercase", d.lowercase_disasm),
         lowercase_hex: boolean("DebugHexLower", d.lowercase_hex),
         show_clocks: boolean("DebugCountedClocks", d.show_clocks),
@@ -100,6 +104,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         stretch: _,
         volume: _,
         mono: _,
+        audio_backend: _,
         lowercase_disasm: _,
         lowercase_hex: _,
         show_clocks: _,
@@ -173,6 +178,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
     f.set("SlopgbBreakLdBB", ini::fmt_bool(s.break_ld_b_b));
     f.set("SlopgbBreakEchoRam", ini::fmt_bool(s.break_echo_ram));
     f.set("SlopgbTheme", &s.theme.to_key());
+    f.set("SlopgbAudioBackend", s.audio_backend.to_key());
     f.set("SlopgbPluginsDir", &s.plugins.dir);
     f.set(
         "SlopgbPluginsAllowMutation",
