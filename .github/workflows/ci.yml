@@ -32,6 +32,8 @@ jobs:
         uses: dtolnay/rust-toolchain@1.97.0
         with:
           components: rustfmt, clippy
+          # Plugins compile to wasm; the guest SDK + round-trip test need this.
+          targets: wasm32-unknown-unknown
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
@@ -47,6 +49,11 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # The host-target run above does not cross-compile the guest SDK; lint it
+      # for the wasm32 target it actually ships to.
+      - name: Clippy (wasm plugin SDK)
+        run: cargo clippy -p slopgb-plugin-api --target wasm32-unknown-unknown -- -D warnings
 
       - name: Test
         run: cargo test --workspace

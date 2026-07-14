@@ -2,7 +2,9 @@
 
 Cycle-accurate GB/GBC emulator. Workspace: `crates/slopgb-core` (emulator, zero deps,
 no unsafe) + `crates/slopgb` (frontend: winit/softbuffer/cpal only, a BGB-style
-debugger UI).
+debugger UI) + `crates/slopgb-plugin-api` (guest SDK for Rust→wasm plugins) +
+`crates/slopgb-plugin-host` (the wasmi runtime — the one place `wasmi` is a dep,
+isolated so core stays zero-dep and the frontend keeps its three-lib rule).
 
 **Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before touching core** — timing
 contract (tick-then-access M-cycles), memory map, module ownership, mooneye +
@@ -45,7 +47,7 @@ This file is a lean index. Implementation-state narratives live in dedicated dir
 | [`docs/ui-state/`](docs/ui-state/README.md) | **frontend / bgb-UI** per-area state (menus, debugger, options, viewers, save-states + link, startup + boot, layout) |
 | [`docs/bgb-reference/`](docs/bgb-reference/README.md) | real bgb screenshots + capture rig — **never invent bgb's UI, capture it** |
 | [`docs/sameboy-port/`](docs/sameboy-port/PORT-PLAN.md) | the SameBoy cycle-exact port: `PORT-PLAN`, `STATE-HISTORY`, `C3-FLIP-CHECKLIST`, per-session measurement maps under `tools/measurements/` (the port + its measurement scaffolding are retired — history only) |
-| `docs/*-plan.md` | forward-looking plans (clone/rclick-menu/menu-design/link/bootrom/exceptions/joypad/savestate/copy-clipboard/noload-startup/qa-fixes) |
+| `docs/*-plan.md` | forward-looking plans (clone/rclick-menu/menu-design/link/bootrom/exceptions/joypad/savestate/copy-clipboard/noload-startup/qa-fixes/plugin-api) |
 | `crates/slopgb-core/tests/gbtr/baselines/gambatte.txt` header | floor-class index (A–H + lift conditions) — read before touching baselined behavior |
 
 When a **hardware** question comes up, consult in order:
@@ -68,7 +70,10 @@ When a **hardware** question comes up, consult in order:
   `crates/slopgb-core/tests/gbtr/baselines/gambatte.txt`: every baselined cluster is an
   A/B-swept trade — one-sided "fixes" regress the now-green siblings.
 - No new deps in core (std only); no unsafe anywhere (`forbid(unsafe_code)`); clippy
-  `-D warnings` clean.
+  `-D warnings` clean. The sole external runtime dep (`wasmi`, the plugin engine)
+  is quarantined in `crates/slopgb-plugin-host`; the guest SDK uses
+  `deny(unsafe_code)` + a scoped `allow` for two wasm linkage markers only (no
+  `unsafe` blocks). See [`docs/plugin-api-plan.md`](docs/plugin-api-plan.md).
 - No god files: keep every `.rs` **under 1000 lines**. Split a growing file into
   cohesive submodules (`foo.rs` + `foo/`, each a second `impl` block via
   `use super::*`; struct/fields/consts stay in the parent) and externalize inline

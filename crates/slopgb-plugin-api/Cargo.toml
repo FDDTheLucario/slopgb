@@ -1,0 +1,21 @@
+[package]
+name = "slopgb-plugin-api"
+description = "Guest SDK for writing slopgb emulator plugins in Rust, compiled to wasm32."
+# Concrete (not workspace-inherited) so the crate directory is liftable into any
+# plugin project by copy-paste — a plugin author depends on this crate alone.
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+
+[dependencies]
+# Intentionally empty. A plugin's only dependency is this SDK; std only.
+
+# NOT `[lints] workspace = true`: the workspace pins `unsafe_code = "forbid"`, but
+# a wasm guest needs two linkage *markers* — an `unsafe extern` import block and a
+# `#[unsafe(no_mangle)]` export — that `forbid` rejects outright. This crate uses
+# crate-level `deny(unsafe_code)` instead, so those two markers (and nothing else —
+# no `unsafe` blocks, no raw pointers) can be scope-`allow`ed in `abi.rs` and the
+# generated export. Everything else stays lint-checked safe. See `abi.rs`.
+[lints.rust]
+unsafe_code = "deny"

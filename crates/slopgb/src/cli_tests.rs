@@ -147,6 +147,19 @@ fn parse_mcp_port() {
 }
 
 #[test]
+fn parse_plugins_dir() {
+    use std::path::PathBuf;
+    assert_eq!(
+        parse_run(&["--plugins", "/opt/plugins", "g.gb"])
+            .unwrap()
+            .plugins_dir,
+        Some(PathBuf::from("/opt/plugins"))
+    );
+    assert_eq!(parse_run(&["g.gb"]).unwrap().plugins_dir, None);
+    assert!(parse(&["--plugins"]).is_err()); // value missing
+}
+
+#[test]
 fn parse_rejects_bad_input() {
     assert!(parse(&["--model", "snes", "x.gb"]).is_err());
     assert!(parse(&["--scale", "0", "x.gb"]).is_err());

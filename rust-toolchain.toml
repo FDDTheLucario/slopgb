@@ -6,3 +6,6 @@
 [toolchain]
 channel = "1.97.0"
 components = ["rustfmt", "clippy"]
+# Plugins are authored in Rust and compiled to wasm; the guest SDK
+# (slopgb-plugin-api) and the plugin-host round-trip test build for this target.
+targets = ["wasm32-unknown-unknown"]

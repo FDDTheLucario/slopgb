@@ -1,6 +1,12 @@
 [workspace]
 resolver = "3"
-members = ["crates/slopgb-core", "crates/slopgb", "crates/slopfp"]
+members = [
+    "crates/slopgb-core",
+    "crates/slopgb",
+    "crates/slopfp",
+    "crates/slopgb-plugin-api",
+    "crates/slopgb-plugin-host",
+]
 
 [workspace.package]
 version = "0.1.0"

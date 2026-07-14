@@ -28,6 +28,8 @@ OPTIONS:
     --mcp-port <N>    Host an MCP server on 127.0.0.1:<N> so an LLM agent can
                       drive the debugger (disassemble/peek/cdl/vram/breakpoint/
                       registers/expr). Also via SLOPGB_MCP_PORT=<N>
+    --plugins <DIR>   Load every *.wasm plugin in <DIR> (read-only introspection;
+                      see docs/ui-state/plugin-api.md). Also via SLOPGB_PLUGINS_DIR
     --ram-init <SPEC> Power-on RAM: fill:HH sets cart SRAM to a byte (default
                       fill:FF); random[:seed] fills all RAM with seeded xorshift
                       garbage (authentic power-on). A .sav still overrides SRAM.
@@ -67,6 +69,10 @@ pub(crate) struct Options {
     /// Port for the opt-in MCP debug server (`--mcp-port`; falls back to
     /// `SLOPGB_MCP_PORT`, resolved in `main`). `None` = no server (default).
     pub(crate) mcp_port: Option<u16>,
+    /// Directory of `*.wasm` plugins to load (`--plugins`; falls back to
+    /// `SLOPGB_PLUGINS_DIR`, resolved in `main`). `None` = no plugins (default,
+    /// golden path untouched).
+    pub(crate) plugins_dir: Option<PathBuf>,
     /// Power-on RAM initialisation (`--ram-init fill:HH` / `--ram-init
     /// random[:seed]`). `None` = the deterministic 0xFF cart-SRAM default (leaves
     /// the machine byte-identical to `GameBoy::new`).
@@ -90,6 +96,7 @@ impl Options {
         let mut boot = None;
         let mut sgb_bios = None;
         let mut mcp_port = None;
+        let mut plugins_dir = None;
         let mut ram_init = None;
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -109,6 +116,10 @@ impl Options {
                         v.parse::<u16>()
                             .map_err(|_| format!("invalid --mcp-port '{v}' (expected 0-65535)"))?,
                     );
+                }
+                "--plugins" => {
+                    let v = args.next().ok_or("--plugins requires a directory")?;
+                    plugins_dir = Some(PathBuf::from(v));
                 }
                 "--model" => {
                     let v = args.next().ok_or("--model requires a value")?;
@@ -145,6 +156,7 @@ impl Options {
             boot,
             sgb_bios,
             mcp_port,
+            plugins_dir,
             ram_init,
         }))
     }

@@ -16,4 +16,9 @@ cargo fmt --all --check
 echo "pre-commit: cargo clippy --workspace --all-targets -- -D warnings"
 cargo clippy --workspace --all-targets -- -D warnings
 
+# The guest plugin SDK ships to wasm32; the host-target run above does not
+# cross-compile it, so lint it for its real target too.
+echo "pre-commit: cargo clippy -p slopgb-plugin-api --target wasm32-unknown-unknown -- -D warnings"
+cargo clippy -p slopgb-plugin-api --target wasm32-unknown-unknown -- -D warnings
+
 echo "pre-commit: OK"

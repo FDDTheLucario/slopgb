@@ -311,6 +311,7 @@ mod tests {
             boot: None,
             sgb_bios: None,
             mcp_port: None,
+            plugins_dir: None,
             ram_init: None,
         };
         let mut app = App::new(

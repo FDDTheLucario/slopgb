@@ -391,6 +391,12 @@ impl ApplicationHandler for App {
         self.check_audio_health();
         if frames > 0 {
             self.session.autosave();
+            // Drive read-only plugins once per rendered frame-batch. A no-op with
+            // no plugins loaded (default), so the golden path is untouched.
+            self.plugins.pump(&self.session.gb);
+            for line in self.plugins.take_log() {
+                eprintln!("{line}");
+            }
             if let Some(window) = &self.window {
                 window.request_redraw();
             }

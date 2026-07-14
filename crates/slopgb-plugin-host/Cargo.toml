@@ -1,0 +1,24 @@
+[package]
+name = "slopgb-plugin-host"
+description = "Runtime that loads and drives slopgb wasm plugins against a live GameBoy."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+slopgb-core = { path = "../slopgb-core" }
+slopgb-plugin-api = { path = "../slopgb-plugin-api" }
+# The one external dependency of the whole plugin system, isolated to this crate
+# so slopgb-core stays zero-dep and the frontend keeps its winit/softbuffer/cpal
+# rule. A pure-Rust interpreter with a fully safe host API (no embedder unsafe).
+wasmi = "1.1"
+
+[dev-dependencies]
+# Test-only: hand-written `.wat` modules for the load-gating and memory-read
+# unit tests, so they don't depend on the wasm32 fixture build.
+wat = "1"
+
+[lints]
+workspace = true

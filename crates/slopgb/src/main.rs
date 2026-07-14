@@ -54,6 +54,7 @@ use slopgb_core::{
     Button, CLOCK_HZ, CYCLES_PER_FRAME, SCREEN_H, SCREEN_PIXELS, SCREEN_W, SGB_BORDER_H,
     SGB_BORDER_W,
 };
+use slopgb_plugin_host::PluginHost;
 use winit::event::KeyEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
@@ -189,6 +190,31 @@ fn resolve_boot_rom(opts: &Options) -> Option<Vec<u8>> {
         Err(e) => {
             eprintln!("slopgb: cannot read boot ROM '{}': {e}", path.display());
             None
+        }
+    }
+}
+
+/// Load wasm plugins from `--plugins` or `SLOPGB_PLUGINS_DIR`. Absent → an empty
+/// host (no plugins, golden path untouched); a directory that can't be read is
+/// logged and treated as empty (non-fatal).
+fn load_plugins(opts: &Options) -> PluginHost {
+    let Some(dir) = opts
+        .plugins_dir
+        .clone()
+        .or_else(|| env::var_os("SLOPGB_PLUGINS_DIR").map(PathBuf::from))
+    else {
+        return PluginHost::new();
+    };
+    match PluginHost::load_dir(&dir) {
+        Ok(host) => {
+            if host.is_empty() {
+                eprintln!("slopgb: no plugins loaded from '{}'", dir.display());
+            }
+            host
+        }
+        Err(e) => {
+            eprintln!("slopgb: cannot read plugins dir '{}': {e}", dir.display());
+            PluginHost::new()
         }
     }
 }
@@ -344,6 +370,9 @@ struct App {
     /// started; pumped each wake to serve an agent's tool calls against the live
     /// machine.
     mcp: mcp::Mcp,
+    /// Opt-in wasm plugins (`--plugins` / `SLOPGB_PLUGINS_DIR`). Empty unless a
+    /// directory was given; pumped once per rendered frame with a read-only view.
+    plugins: PluginHost,
     /// Custom themes loaded from the settings file's `[theme.NAME]` sections
     /// (the theming API's registry) — what `settings.theme`'s `Custom(name)`
     /// variant resolves against. Loaded once at startup; like every other
@@ -379,6 +408,7 @@ impl App {
             ..loaded.settings
         };
         let blank_frame = blank_frame(settings.dmg_palette[0]);
+        let plugins = load_plugins(&opts);
         let mut app = Self {
             opts,
             boot_rom,
@@ -423,6 +453,7 @@ impl App {
             picker_last_click: None,
             link: link::Link::new(),
             mcp: mcp::Mcp::new(),
+            plugins,
             recent,
             menu_popup: None,
             window_size,
