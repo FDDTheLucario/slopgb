@@ -11,11 +11,13 @@ use wasmi::{Caller, Engine, Extern, Linker, Module, Store, TypedFunc};
 
 use crate::snapshot::Snapshot;
 
-/// wasmi store data: the frame snapshot the imports read, and the log lines the
-/// guest emitted this frame. Owned and `'static`, so no `GameBoy` is borrowed.
-struct HostState {
-    snap: Snapshot,
-    log: Vec<String>,
+/// wasmi store data: the frame snapshot the imports read, the log lines the
+/// guest emitted this frame, and the last result a tool plugin pushed via
+/// `host_emit` (kind, bytes). Owned and `'static`, so no `GameBoy` is borrowed.
+pub(crate) struct HostState {
+    pub(crate) snap: Snapshot,
+    pub(crate) log: Vec<String>,
+    pub(crate) emitted: Option<(i32, Vec<u8>)>,
 }
 
 /// Why a plugin failed to load.
@@ -106,6 +108,7 @@ impl PluginHost {
             HostState {
                 snap: Snapshot::empty(),
                 log: Vec::new(),
+                emitted: None,
             },
         );
         let linker = build_linker(&engine);
@@ -188,9 +191,10 @@ impl LoadError {
     }
 }
 
-/// Register the three read-only host imports. All wasmi calls here are safe;
-/// `host_log` reads guest memory through the bounds-checked `Memory::read`.
-fn build_linker(engine: &Engine) -> Linker<HostState> {
+/// Register the read-only host imports. All wasmi calls here are safe;
+/// `host_log`/`host_emit` read guest memory through the bounds-checked
+/// `Memory::read`.
+pub(crate) fn build_linker(engine: &Engine) -> Linker<HostState> {
     let mut linker = Linker::new(engine);
     linker
         .func_wrap(
@@ -228,6 +232,24 @@ fn build_linker(engine: &Engine) -> Linker<HostState> {
                         if let Ok(s) = String::from_utf8(buf) {
                             caller.data_mut().log.push(s);
                         }
+                    }
+                },
+            )
+        })
+        .and_then(|l| {
+            l.func_wrap(
+                "slopgb",
+                "host_emit",
+                |mut caller: Caller<'_, HostState>, kind: i32, ptr: i32, len: i32| {
+                    let Some(Extern::Memory(mem)) = caller.get_export("memory") else {
+                        return;
+                    };
+                    let (Ok(off), Ok(n)) = (usize::try_from(ptr), usize::try_from(len)) else {
+                        return;
+                    };
+                    let mut buf = vec![0u8; n];
+                    if mem.read(&caller, off, &mut buf).is_ok() {
+                        caller.data_mut().emitted = Some((kind, buf));
                     }
                 },
             )

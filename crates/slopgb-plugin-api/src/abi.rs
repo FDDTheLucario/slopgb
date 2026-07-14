@@ -54,6 +54,7 @@ mod raw {
         pub safe fn host_read(addr: i32) -> i32;
         pub safe fn host_reg(which: i32) -> i32;
         pub safe fn host_log(ptr: i32, len: i32);
+        pub safe fn host_emit(kind: i32, ptr: i32, len: i32);
     }
 }
 
@@ -69,6 +70,9 @@ mod raw {
     pub fn host_log(_ptr: i32, _len: i32) {
         unreachable!()
     }
+    pub fn host_emit(_kind: i32, _ptr: i32, _len: i32) {
+        unreachable!()
+    }
 }
 
-pub(crate) use raw::{host_log, host_read, host_reg};
+pub(crate) use raw::{host_emit, host_log, host_read, host_reg};

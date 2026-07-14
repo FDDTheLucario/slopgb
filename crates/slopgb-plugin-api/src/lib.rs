@@ -3,9 +3,11 @@
 //! Guide: `docs/ui-state/plugin-api.md`.
 
 mod abi;
+mod tool;
 mod view;
 
 pub use abi::{ABI_VERSION, Reg};
+pub use tool::{__emit, ToolPlugin, ToolResult};
 pub use view::{GameBoyView, Registers};
 
 /// What a plugin is allowed to do, as a bit set. Tier 1 ([`INTROSPECTION`]) is

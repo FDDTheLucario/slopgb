@@ -4,6 +4,9 @@
 
 mod host;
 mod snapshot;
+mod tool;
 
 pub use host::{LoadError, LoadedPlugin, PluginHost};
+pub use slopgb_plugin_api::ToolResult;
 pub use snapshot::Snapshot;
+pub use tool::LoadedTool;
