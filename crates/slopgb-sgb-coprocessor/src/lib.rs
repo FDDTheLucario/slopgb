@@ -1,22 +1,26 @@
-//! Combined SGB SNES-side audio coprocessor: a clean-room WDC 65C816 (the SNES
-//! CPU) driving a SPC700 (S-SMP) + S-DSP, wired together as one
-//! [`slopgb_core::sgb::AudioCoprocessor`] a frontend can inject with
-//! [`slopgb_core::GameBoy::set_audio_coprocessor`].
+//! Combined SGB SNES-side audio coprocessor, driving the SNES CPU (65C816) and
+//! audio subsystem (SPC700 + S-DSP) as **loaded wasm coprocessor plugins**.
 //!
-//! This is the LLE route the built-in HLE `SgbApu` leaves open: the built-in
-//! path never runs a 65C816, so DATA_SND/JUMP are no-ops and only a self-
-//! uploaded SPC700 driver (SOU_TRN) makes sound. Here the 65C816 is present, so
-//! DATA_SND lands in SNES work RAM, JUMP redirects the SNES CPU, and the four
-//! SNES↔APU comm ports (`$2140-$2143`) actually carry data between the two CPUs.
+//! Where the built-in HLE [`slopgb_core::sgb`] path never runs a 65C816 (so
+//! `DATA_SND`/`JUMP` are no-ops and only a self-uploaded `SOU_TRN` driver makes
+//! sound), this backend loads two real chips —
+//! [`slopgb-w65c816-plugin`](../slopgb_w65c816_plugin/index.html) (the SNES CPU)
+//! and [`slopgb-spc700-plugin`](../slopgb_spc700_plugin/index.html) (the audio
+//! subsystem) — through [`LoadedCoprocessor`], and orchestrates them: it installs
+//! the clean-room firmware into each chip's RAM (tier-3 `write_ram`/`set_pc`),
+//! mediates the four SNES↔APU comm ports (`$2140-$2143`) between the two loaded
+//! plugins each step, routes the SGB sound commands into the CPU's RAM, and mixes
+//! the drained S-DSP PCM into the Game Boy stream. The chips themselves run
+//! sandboxed in wasm — this crate depends on neither `slopgb-snes-apu` nor
+//! `slopgb-w65c816` directly.
 //!
 //! # Clean-room firmware (original, not the SGB system ROM)
 //!
 //! The real SGB sound program lives in Nintendo's SGB cartridge SNES ROM, which
 //! slopgb does not ship and this code was never allowed to read. In its place
 //! this coprocessor installs an **original** two-part firmware, authored purely
-//! from the WDC W65C816S datasheet's opcode encodings and nocash *fullsnes*
-//! (SNES APU I/O ports `$2140-$2143`, the SPC700 opcode table, the S-DSP
-//! register map):
+//! from the WDC W65C816S datasheet's opcode encodings and nocash *fullsnes* (SNES
+//! APU I/O ports `$2140-$2143`, the SPC700 opcode table, the S-DSP register map):
 //!
 //! - a 65C816 **shim** ([`SNES_SHIM`]) that forwards a SNES-RAM sound mailbox to
 //!   the SPC700 comm ports, and
@@ -24,23 +28,27 @@
 //!   trigger, programs the S-DSP to play a synthesized square-wave voice.
 //!
 //! So a bare SGB `SOUND ($08)` command produces audio with no game-supplied
-//! driver — the clean-room stand-in for the default sound bank. A game that
-//! ships its own SPC700 driver via `SOU_TRN` still works (that upload replaces
-//! the resident driver, exactly as on real hardware).
+//! driver. A game that ships its own SPC700 driver via `SOU_TRN` still works (the
+//! upload replaces the resident driver, exactly as on real hardware).
 //!
-//! Clocking + PCM mirror the built-in `SgbApu` (SPC700 at `125/512` GB T-cycle,
-//! one 32 kHz S-DSP sample per 32 SPC cycles, zero-order-held to the output
-//! rate). See `docs/hardware-state/sgb-audio.md`.
+//! # Availability + fallback
+//!
+//! [`SgbCoprocessor::load`] reads the two plugin `.wasm` files from a directory;
+//! if they are absent or fail to load it returns an error, and the frontend falls
+//! back to the golden-safe built-in `SgbApu`. The `.wasm` ships with no one — a
+//! user who wants this backend builds the plugin crates for `wasm32` and points
+//! the backend at the directory holding them.
+//!
+//! See `docs/hardware-state/sgb-audio.md`.
 
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::collections::VecDeque;
+use std::fs;
+use std::path::Path;
 
 use slopgb_core::sgb::{AudioCoprocessor, SgbCommandSource};
-use slopgb_core::{SgbFlags, SgbSound, StateError};
-use slopgb_snes_apu::dsp::SDsp;
-use slopgb_snes_apu::spc700::{Dsp, Spc700};
-use slopgb_snes_apu::state::{Reader, Writer};
-use slopgb_w65c816::{Bus, Cpu};
+use slopgb_core::{Reader, SgbFlags, SgbSound, StateError, Writer};
+use slopgb_plugin_host::{LoadError, LoadedCoprocessor};
 
 #[cfg(test)]
 #[path = "lib_tests.rs"]
@@ -53,143 +61,103 @@ const SPC_NUM: i64 = 125;
 const SPC_DEN: i64 = 512;
 /// GB T-cycles → 65C816 cycles. The SNES CPU averages ~2.68 MHz once memory-
 /// access wait states are folded in; `5/8` of the GB clock is close enough for
-/// this HLE bridge (the two CPUs only need to make forward progress and trade
-/// comm-port bytes, not stay cycle-locked).
-// ponytail: fixed HLE ratio; the SNES↔GB clock relationship is loose here, not
-// cycle-exact. Tighten only if a driver turns out to be timing-sensitive.
+/// this HLE bridge (the two CPUs only need forward progress + comm-port bytes).
 const CPU_NUM: i64 = 5;
 const CPU_DEN: i64 = 8;
-/// The S-DSP emits one stereo sample every 32 SPC700 cycles (→ 32 kHz).
-const DSP_PERIOD: u32 = 32;
+/// The S-DSP emits one stereo sample every 32 SPC700 cycles → 32 kHz.
+const DSP_RATE: f64 = 32_000.0;
 /// Full-scale S-DSP output (±32768) → mix amplitude; half scale, matching the
 /// built-in path so an injected coprocessor is no louder than the default.
 const MIX_SCALE: f32 = 0.5 / 32768.0;
+/// GB T-cycles of emulation accumulated before the two plugins are pumped once
+/// (mediated + clocked + drained). Batching keeps the per-frame wasm-crossing
+/// count low (a frame is ~17 chunks) while the comm-port handshake still
+/// completes in a couple of chunks — never one crossing per emulated cycle.
+const FLUSH_CHUNK: u64 = 4096;
 
-/// SNES bank-0 address of comm port 0 (`$2140`); ports 1-3 follow. (fullsnes,
-/// "SNES APU I/O Ports".)
-const PORT_BASE: u16 = 0x2140;
+/// The plugin `.wasm` filenames [`SgbCoprocessor::load`] looks for in its dir.
+pub const SPC_WASM: &str = "spc700.wasm";
+pub const CPU_WASM: &str = "w65c816.wasm";
+
+/// Comm ports (SNES APU I/O has four: `$2140-$2143` / `$F4-$F7`).
 const N_PORTS: usize = 4;
+/// SNES bank-0 address of comm port 0 (`$2140`). (fullsnes, "SNES APU I/O".)
+const PORT_BASE: u16 = 0x2140;
 /// Where the 65C816 shim runs from, and its emulation-mode reset vector value.
 const SHIM_ORG: u16 = 0x8000;
 /// Emulation-mode reset vector location (`$00FFFC-$00FFFD`).
-const RESET_VEC: usize = 0xFFFC;
+const RESET_VEC: u16 = 0xFFFC;
 /// The sound mailbox the shim forwards: `[note, trigger]` in SNES work RAM.
 const MB_NOTE: u16 = 0x0200;
-const MB_TRIG: u16 = 0x0201;
+/// SPC700 APU-RAM load addresses of the resident driver / directory / sample.
+const SPC_PROG_ORG: u16 = 0x0400;
+const SPC_DIR_ORG: u16 = 0x0200;
+const SPC_BRR_ORG: u16 = 0x0210;
 
 /// The clean-room 65C816 shim (emulation mode, 8-bit). It copies the SNES-RAM
-/// mailbox to the SPC700 comm ports forever, so a mailbox write reaches the
-/// audio CPU. Opcodes are the WDC datasheet encodings (`AD`/`8D` = LDA/STA abs,
-/// `4C` = JMP abs):
+/// mailbox `[$0200,$0201]` to the SPC700 comm ports `$2140/$2141` forever, so a
+/// mailbox write reaches the audio CPU. Opcodes are the WDC datasheet encodings
+/// (`AD`/`8D` = LDA/STA abs, `4C` = JMP abs):
 ///
 /// ```text
 /// $8000  LDA $0200   ; A = mailbox note
-/// $8003  STA $2140   ; -> APUIO0 (note the SPC700 reads at $F4)
+/// $8003  STA $2140   ; -> APUIO0 (the SPC700 reads at $F4)
 /// $8006  LDA $0201   ; A = mailbox trigger
-/// $8009  STA $2141   ; -> APUIO1 (trigger the SPC700 polls at $F5)
+/// $8009  STA $2141   ; -> APUIO1 (the SPC700 polls at $F5)
 /// $800C  JMP $8000   ; loop
 /// ```
 const SNES_SHIM: [u8; 15] = [
     0xAD,
-    (MB_NOTE & 0xFF) as u8,
+    MB_NOTE as u8,
     (MB_NOTE >> 8) as u8, // LDA $0200
     0x8D,
-    (PORT_BASE & 0xFF) as u8,
+    PORT_BASE as u8,
     (PORT_BASE >> 8) as u8, // STA $2140
     0xAD,
-    (MB_TRIG & 0xFF) as u8,
-    (MB_TRIG >> 8) as u8, // LDA $0201
+    (MB_NOTE + 1) as u8,
+    ((MB_NOTE + 1) >> 8) as u8, // LDA $0201
     0x8D,
-    ((PORT_BASE + 1) & 0xFF) as u8,
+    (PORT_BASE + 1) as u8,
     ((PORT_BASE + 1) >> 8) as u8, // STA $2141
     0x4C,
-    (SHIM_ORG & 0xFF) as u8,
+    SHIM_ORG as u8,
     (SHIM_ORG >> 8) as u8, // JMP $8000
 ];
 
-/// A lightweight [`Dsp`] the SPC700 owns; forwards `$F2`/`$F3` accesses to the
-/// shared [`SDsp`]. Synthesis (which needs APU RAM) is driven by [`SgbCoprocessor::clock`].
-struct DspLink(Rc<RefCell<SDsp>>);
-
-impl Dsp for DspLink {
-    fn read(&mut self, addr: u8) -> u8 {
-        self.0.borrow_mut().read(addr)
-    }
-    fn write(&mut self, addr: u8, val: u8) {
-        self.0.borrow_mut().write(addr, val);
-    }
-}
-
-/// SNES work RAM + the comm-port latches the 65C816 shares with the SPC700.
-/// `$2140-$2143` (any bank — banks alias) route to the ports; everything else is
-/// plain RAM.
-#[derive(Clone)]
-struct SnesBus {
-    ram: Box<[u8; 0x1_0000]>,
-    /// 65C816 → SPC700: what the CPU last wrote to `$2140-$2143`.
-    to_apu: [u8; N_PORTS],
-    /// SPC700 → 65C816: what the SPC700 last wrote back, for CPU reads of the
-    /// same window.
-    from_apu: [u8; N_PORTS],
-}
-
-impl SnesBus {
-    fn new() -> Self {
-        let mut ram = Box::new([0u8; 0x1_0000]);
-        ram[SHIM_ORG as usize..SHIM_ORG as usize + SNES_SHIM.len()].copy_from_slice(&SNES_SHIM);
-        ram[RESET_VEC] = SHIM_ORG as u8;
-        ram[RESET_VEC + 1] = (SHIM_ORG >> 8) as u8;
-        SnesBus {
-            ram,
-            to_apu: [0; N_PORTS],
-            from_apu: [0; N_PORTS],
-        }
-    }
-
-    /// The comm-port index an address maps to (`$2140-$2143` in any bank), or
-    /// `None` for plain RAM.
-    fn port_index(addr: u32) -> Option<usize> {
-        let low = (addr & 0xFFFF) as u16;
-        (low >= PORT_BASE && low < PORT_BASE + N_PORTS as u16).then(|| (low - PORT_BASE) as usize)
-    }
-}
-
-impl Bus for SnesBus {
-    fn read(&mut self, addr: u32) -> u8 {
-        match Self::port_index(addr) {
-            Some(p) => self.from_apu[p],
-            None => self.ram[(addr & 0xFFFF) as usize],
-        }
-    }
-    fn write(&mut self, addr: u32, value: u8) {
-        match Self::port_index(addr) {
-            Some(p) => self.to_apu[p] = value,
-            None => self.ram[(addr & 0xFFFF) as usize] = value,
-        }
-    }
-}
-
-/// The combined coprocessor: a 65C816 over [`SnesBus`] plus a SPC700 + S-DSP,
-/// clocked off the Game Boy stream and mixed into its audio.
+/// The combined coprocessor: a 65C816 plugin + a SPC700 plugin, clocked off the
+/// Game Boy stream, their comm ports mediated, the S-DSP PCM mixed into its audio.
+///
+/// The two [`LoadedCoprocessor`]s are held behind [`RefCell`] so the read-only
+/// `AudioCoprocessor::write_state(&self)` can still call the (store-mutating)
+/// wasm `save_state` export.
 pub struct SgbCoprocessor {
-    cpu: Cpu,
-    bus: SnesBus,
-    spc: Spc700,
-    dsp: Rc<RefCell<SDsp>>,
+    spc: RefCell<LoadedCoprocessor>,
+    cpu: RefCell<LoadedCoprocessor>,
+    /// The plugin bytes, kept so [`Self::clone_box`] can re-instantiate.
+    spc_wasm: Vec<u8>,
+    cpu_wasm: Vec<u8>,
 
-    /// 65C816 cycle budget carried across `clock`s (in `1/CPU_DEN` units).
-    cpu_acc: i64,
-    /// SPC700 cycle budget carried across `clock`s (in `1/SPC_DEN` units).
+    /// Absolute cycle targets handed to each plugin's `run_until` (its own domain).
+    spc_target: u64,
+    cpu_target: u64,
+    /// Fractional cycle carries for the GB→chip clock ratios.
     spc_acc: i64,
-    /// SPC cycles accumulated toward the next 32 kHz DSP sample.
-    dsp_div: u32,
-    /// Latest 32 kHz DSP sample, zero-order-held between updates.
-    cur: (i16, i16),
+    cpu_acc: i64,
+    /// GB T-cycles accumulated since the last plugin pump.
+    pending_gb: u64,
+    /// Last comm-port bytes mediated into the SPC700 (host-observable).
+    to_spc: [u8; N_PORTS],
 
-    /// Output-rate emission accumulator (in GB T-cycles) and the cycles-per-
-    /// sample law (mirrors the GB APU so the streams stay sample-aligned).
+    /// Undrained 32 kHz S-DSP samples pulled from the SPC plugin (oldest first).
+    src: VecDeque<(i16, i16)>,
+    /// Fractional 32 kHz→output-rate resample position.
+    src_acc: f64,
+    /// Latest 32 kHz sample, zero-order-held between source samples.
+    cur: (i16, i16),
+    /// Output-rate emission accumulator (GB T-cycles) + the cycles-per-sample law.
     samp_acc: f64,
     cycles_per_sample: f64,
+    out_rate: u32,
     out: Vec<(f32, f32)>,
     max_out: usize,
 
@@ -202,26 +170,51 @@ pub struct SgbCoprocessor {
 }
 
 impl SgbCoprocessor {
-    /// Build the coprocessor at `output_rate` Hz, with the clean-room firmware
-    /// installed (65C816 shim resident in SNES RAM, SPC700 driver + sample bank
-    /// resident in APU RAM) and both CPUs at their reset entry points.
-    #[must_use]
-    pub fn new(output_rate: u32) -> Self {
-        let dsp = Rc::new(RefCell::new(SDsp::new()));
-        let mut spc = Spc700::new();
-        spc.attach_dsp(Box::new(DspLink(Rc::clone(&dsp))));
+    /// Load the two coprocessor plugins from `dir` (`spc700.wasm` + `w65c816.wasm`)
+    /// and build the backend at `output_rate` Hz. Errors (missing / bad wasm) are
+    /// returned so the frontend can log them and fall back to the built-in
+    /// `SgbApu`.
+    pub fn load(dir: &Path, output_rate: u32) -> Result<Self, String> {
+        let spc_path = dir.join(SPC_WASM);
+        let cpu_path = dir.join(CPU_WASM);
+        let spc_bytes = fs::read(&spc_path)
+            .map_err(|e| format!("cannot read SGB plugin '{}': {e}", spc_path.display()))?;
+        let cpu_bytes = fs::read(&cpu_path)
+            .map_err(|e| format!("cannot read SGB plugin '{}': {e}", cpu_path.display()))?;
+        Self::from_wasm(&spc_bytes, &cpu_bytes, output_rate)
+            .map_err(|e| format!("cannot load SGB coprocessor plugins: {e}"))
+    }
+
+    /// Build the backend from the two plugins' wasm bytes: instantiate, reset,
+    /// install the resident clean-room firmware, and point both chips at their
+    /// entry. The bytes are kept for [`Self::clone_box`].
+    pub fn from_wasm(
+        spc_bytes: &[u8],
+        cpu_bytes: &[u8],
+        output_rate: u32,
+    ) -> Result<Self, LoadError> {
+        let mut spc = LoadedCoprocessor::load(spc_bytes)?;
+        let mut cpu = LoadedCoprocessor::load(cpu_bytes)?;
+        spc.reset()?;
+        cpu.reset()?;
         let rate = output_rate.max(1);
         let mut me = SgbCoprocessor {
-            cpu: Cpu::new(),
-            bus: SnesBus::new(),
-            spc,
-            dsp,
-            cpu_acc: 0,
+            spc: RefCell::new(spc),
+            cpu: RefCell::new(cpu),
+            spc_wasm: spc_bytes.to_vec(),
+            cpu_wasm: cpu_bytes.to_vec(),
+            spc_target: 0,
+            cpu_target: 0,
             spc_acc: 0,
-            dsp_div: 0,
+            cpu_acc: 0,
+            pending_gb: 0,
+            to_spc: [0; N_PORTS],
+            src: VecDeque::new(),
+            src_acc: 0.0,
             cur: (0, 0),
             samp_acc: 0.0,
             cycles_per_sample: f64::from(GB_CLOCK_HZ) / f64::from(rate),
+            out_rate: rate,
             out: Vec::new(),
             max_out: rate as usize,
             poll_ctr: 0,
@@ -230,57 +223,109 @@ impl SgbCoprocessor {
             jump: None,
         };
         me.install_firmware();
-        me
+        Ok(me)
     }
 
-    /// (Re)install the resident firmware and point both CPUs at their entry.
+    /// Install the resident clean-room firmware into both chips: the 65C816 shim
+    /// into SNES RAM (+ reset vector + entry PC), and the SPC700 driver + one-
+    /// entry sample directory + a square BRR sample into APU RAM (+ entry PC).
     fn install_firmware(&mut self) {
-        self.cpu = Cpu::new();
-        let lo = u16::from(self.bus.ram[RESET_VEC]);
-        let hi = u16::from(self.bus.ram[RESET_VEC + 1]);
-        self.cpu.regs.pc = lo | (hi << 8);
-        install_spc_firmware(&mut self.spc);
+        {
+            let cpu = self.cpu.get_mut();
+            let _ = cpu.write_ram(u32::from(SHIM_ORG), &SNES_SHIM);
+            let _ = cpu.write_ram(
+                u32::from(RESET_VEC),
+                &[SHIM_ORG as u8, (SHIM_ORG >> 8) as u8],
+            );
+            let _ = cpu.set_pc(u32::from(SHIM_ORG));
+        }
+        {
+            let (prog, dir, brr) = spc_firmware();
+            let spc = self.spc.get_mut();
+            let _ = spc.write_ram(u32::from(SPC_PROG_ORG), &prog);
+            let _ = spc.write_ram(u32::from(SPC_DIR_ORG), &dir);
+            let _ = spc.write_ram(u32::from(SPC_BRR_ORG), &brr);
+            let _ = spc.set_pc(u32::from(SPC_PROG_ORG));
+        }
     }
 
     // -- Clocking -----------------------------------------------------------
 
     fn clock(&mut self, gb_cycles: u64) {
-        // 1. Deliver the 65C816's last comm-port writes to the SPC700.
-        for p in 0..N_PORTS {
-            self.spc.snes_write_port(p, self.bus.to_apu[p]);
+        self.pending_gb += gb_cycles;
+        while self.pending_gb >= FLUSH_CHUNK {
+            self.pending_gb -= FLUSH_CHUNK;
+            self.flush(FLUSH_CHUNK);
         }
+    }
 
-        // 2. Run the SPC700 + S-DSP, synthesizing samples into `cur`.
-        self.spc_acc += gb_cycles as i64 * SPC_NUM;
-        while self.spc_acc >= SPC_DEN {
-            let cyc = self.spc.step();
-            self.spc_acc -= i64::from(cyc) * SPC_DEN;
-            self.dsp_div += cyc;
-            while self.dsp_div >= DSP_PERIOD {
-                self.dsp_div -= DSP_PERIOD;
-                self.cur = self.dsp.borrow_mut().sample(self.spc.apu_ram_mut());
+    /// Pump both plugins once for a `span` of GB T-cycles: mediate the comm ports
+    /// (65C816 → SPC700, then SPC700 → 65C816), advance each chip to its cycle
+    /// target, drain the S-DSP PCM, and emit `span`'s worth of output samples.
+    fn flush(&mut self, span: u64) {
+        // Advance the chips' absolute cycle targets by the GB→chip ratios.
+        self.spc_acc += span as i64 * SPC_NUM;
+        let spc_adv = self.spc_acc.div_euclid(SPC_DEN).max(0) as u64;
+        self.spc_acc -= spc_adv as i64 * SPC_DEN;
+        self.spc_target += spc_adv;
+        self.cpu_acc += span as i64 * CPU_NUM;
+        let cpu_adv = self.cpu_acc.div_euclid(CPU_DEN).max(0) as u64;
+        self.cpu_acc -= cpu_adv as i64 * CPU_DEN;
+        self.cpu_target += cpu_adv;
+
+        // 1. Deliver the 65C816's comm-port writes to the SPC700.
+        let mut cpu_out = [0u8; N_PORTS];
+        {
+            let mut cpu = self.cpu.borrow_mut();
+            for (p, slot) in cpu_out.iter_mut().enumerate() {
+                *slot = cpu.port_read(p as u8).unwrap_or(0);
             }
         }
-
+        self.to_spc = cpu_out;
+        {
+            let mut spc = self.spc.borrow_mut();
+            for (p, &v) in cpu_out.iter().enumerate() {
+                let _ = spc.port_write(p as u8, v);
+            }
+            // 2. Run the SPC700 + S-DSP and pull the synthesized PCM.
+            let _ = spc.run_until(self.spc_target);
+            if let Ok(batch) = spc.drain_pcm() {
+                self.src.extend(batch);
+            }
+        }
         // 3. Read the SPC700's comm-port replies back for the 65C816.
-        for p in 0..N_PORTS {
-            self.bus.from_apu[p] = self.spc.snes_read_port(p);
+        let mut spc_out = [0u8; N_PORTS];
+        {
+            let mut spc = self.spc.borrow_mut();
+            for (p, slot) in spc_out.iter_mut().enumerate() {
+                *slot = spc.port_read(p as u8).unwrap_or(0);
+            }
         }
+        {
+            let mut cpu = self.cpu.borrow_mut();
+            for (p, &v) in spc_out.iter().enumerate() {
+                let _ = cpu.port_write(p as u8, v);
+            }
+            // 4. Run the 65C816 shim.
+            let _ = cpu.run_until(self.cpu_target);
+        }
+        // 5. Emit output-rate samples (32 kHz S-DSP → output rate, zero-order-hold).
+        self.emit_output(span);
+    }
 
-        // 4. Run the 65C816 shim.
-        self.cpu_acc += gb_cycles as i64 * CPU_NUM;
-        while self.cpu_acc >= CPU_DEN && !self.cpu.stopped {
-            let spent = self.cpu.step(&mut self.bus);
-            self.cpu_acc -= spent as i64 * CPU_DEN;
-        }
-        if self.cpu.stopped {
-            self.cpu_acc = 0;
-        }
-
-        // 5. Emit output-rate samples (zero-order-hold of the 32 kHz stream).
-        self.samp_acc += gb_cycles as f64;
+    /// Emit the output-rate samples owed for a `span` of GB T-cycles, resampling
+    /// the 32 kHz S-DSP source by holding the current sample (32 kHz < output).
+    fn emit_output(&mut self, span: u64) {
+        self.samp_acc += span as f64;
         while self.samp_acc >= self.cycles_per_sample {
             self.samp_acc -= self.cycles_per_sample;
+            self.src_acc += DSP_RATE;
+            while self.src_acc >= f64::from(self.out_rate) {
+                self.src_acc -= f64::from(self.out_rate);
+                if let Some(s) = self.src.pop_front() {
+                    self.cur = s;
+                }
+            }
             if self.out.len() < self.max_out {
                 self.out.push((
                     f32::from(self.cur.0) * MIX_SCALE,
@@ -301,9 +346,12 @@ impl SgbCoprocessor {
 
     fn set_output_rate(&mut self, hz: u32) {
         let hz = hz.max(1);
+        self.out_rate = hz;
         self.cycles_per_sample = f64::from(GB_CLOCK_HZ) / f64::from(hz);
         self.max_out = hz as usize;
         self.samp_acc = 0.0;
+        self.src_acc = 0.0;
+        self.src.clear();
         self.out.clear();
     }
 
@@ -318,7 +366,7 @@ impl SgbCoprocessor {
 
     fn poll(&mut self, cmds: &mut dyn SgbCommandSource) {
         // SOUND ($08): a play request. Deposit the effect id + a trigger in the
-        // mailbox; the 65C816 shim forwards them to the SPC700 driver.
+        // CPU's mailbox; the 65C816 shim forwards them to the SPC700 driver.
         while let Some(s) = cmds.take_sound_event() {
             self.apply_sound(s);
         }
@@ -355,8 +403,10 @@ impl SgbCoprocessor {
     /// flags byte if non-zero), so the shim wakes the SPC700 driver.
     fn apply_sound(&mut self, s: SgbSound) {
         let trig = if s.attenuation != 0 { s.attenuation } else { 1 };
-        self.bus.ram[MB_NOTE as usize] = s.effect_a;
-        self.bus.ram[MB_TRIG as usize] = trig;
+        let _ = self
+            .cpu
+            .get_mut()
+            .write_ram(u32::from(MB_NOTE), &[s.effect_a, trig]);
     }
 
     /// DATA_SND ($0F): copy the packet's data into SNES work RAM at its target
@@ -367,9 +417,8 @@ impl SgbCoprocessor {
         }
         let dest = u16::from(pkt[0]) | (u16::from(pkt[1]) << 8);
         let len = usize::from(pkt[2]);
-        for (i, &b) in pkt[3..].iter().take(len).enumerate() {
-            self.bus.ram[dest.wrapping_add(i as u16) as usize] = b;
-        }
+        let data: Vec<u8> = pkt[3..].iter().take(len).copied().collect();
+        let _ = self.cpu.get_mut().write_ram(u32::from(dest), &data);
     }
 
     /// JUMP ($12): redirect the 65C816 to the SNES program target — no longer a
@@ -378,10 +427,7 @@ impl SgbCoprocessor {
         if let Some(target) = flags.jump {
             if self.jump != Some(target) {
                 self.jump = Some(target);
-                self.cpu.regs.pbr = (target >> 16) as u8;
-                self.cpu.regs.pc = target as u16;
-                self.cpu.stopped = false;
-                self.cpu.waiting = false;
+                let _ = self.cpu.get_mut().set_pc(target);
             }
         }
     }
@@ -391,7 +437,7 @@ impl SgbCoprocessor {
     /// `start`, point the SPC700 at the first load address. Same shape as the
     /// built-in `SgbApu` uploader, so a `SOU_TRN` game driver runs identically.
     fn upload_transfer(&mut self, data: &[u8], start: bool) {
-        let ram = self.spc.apu_ram_mut();
+        let spc = self.spc.get_mut();
         let mut off = 0usize;
         let mut entry = None;
         while off + 4 <= data.len() {
@@ -401,31 +447,33 @@ impl SgbCoprocessor {
             if len == 0 || off + len > data.len() {
                 break;
             }
-            for (i, &b) in data[off..off + len].iter().enumerate() {
-                ram[dest.wrapping_add(i as u16) as usize] = b;
-            }
+            let _ = spc.write_ram(u32::from(dest), &data[off..off + len]);
             entry.get_or_insert(dest);
             off += len;
         }
         if let (true, Some(e)) = (start, entry) {
-            self.spc.set_pc(e);
+            let _ = spc.set_pc(u32::from(e));
         }
     }
 
     // -- Save state ---------------------------------------------------------
 
     fn write_state(&self, w: &mut Writer) {
-        self.spc.write_state(w);
-        self.dsp.borrow().write_state(w);
-        write_cpu(w, &self.cpu);
-        w.bytes(&self.bus.ram[..]);
-        for p in 0..N_PORTS {
-            w.u8(self.bus.to_apu[p]);
-            w.u8(self.bus.from_apu[p]);
-        }
-        w.u64(self.cpu_acc as u64);
+        let spc = self.spc.borrow_mut().save_state().unwrap_or_default();
+        let cpu = self.cpu.borrow_mut().save_state().unwrap_or_default();
+        w.u32(spc.len() as u32);
+        w.bytes(&spc);
+        w.u32(cpu.len() as u32);
+        w.bytes(&cpu);
+        w.u64(self.spc_target);
+        w.u64(self.cpu_target);
         w.u64(self.spc_acc as u64);
-        w.u32(self.dsp_div);
+        w.u64(self.cpu_acc as u64);
+        w.u64(self.pending_gb);
+        for &b in &self.to_spc {
+            w.u8(b);
+        }
+        w.u64(self.src_acc.to_bits());
         w.u16(self.cur.0 as u16);
         w.u16(self.cur.1 as u16);
         w.u64(self.samp_acc.to_bits());
@@ -437,17 +485,21 @@ impl SgbCoprocessor {
     }
 
     fn read_state(&mut self, r: &mut Reader<'_>) -> Result<(), StateError> {
-        self.spc.read_state(r)?;
-        self.dsp.borrow_mut().read_state(r)?;
-        read_cpu(r, &mut self.cpu)?;
-        r.bytes_into(&mut self.bus.ram[..])?;
-        for p in 0..N_PORTS {
-            self.bus.to_apu[p] = r.u8()?;
-            self.bus.from_apu[p] = r.u8()?;
-        }
-        self.cpu_acc = r.u64()? as i64;
+        let n = r.u32()? as usize;
+        let spc = r.bytes_vec(n)?;
+        let n = r.u32()? as usize;
+        let cpu = r.bytes_vec(n)?;
+        let _ = self.spc.get_mut().load_state(&spc);
+        let _ = self.cpu.get_mut().load_state(&cpu);
+        self.spc_target = r.u64()?;
+        self.cpu_target = r.u64()?;
         self.spc_acc = r.u64()? as i64;
-        self.dsp_div = r.u32()?;
+        self.cpu_acc = r.u64()? as i64;
+        self.pending_gb = r.u64()?;
+        for slot in &mut self.to_spc {
+            *slot = r.u8()?;
+        }
+        self.src_acc = f64::from_bits(r.u64()?);
         self.cur.0 = r.u16()? as i16;
         self.cur.1 = r.u16()? as i16;
         self.samp_acc = f64::from_bits(r.u64()?);
@@ -457,36 +509,39 @@ impl SgbCoprocessor {
         let has_jump = r.bool()?;
         let j = r.u32()?;
         self.jump = has_jump.then_some(j);
+        // The undrained source/output PCM is transient, not part of the snapshot.
+        self.src.clear();
         self.out.clear();
         Ok(())
     }
-}
 
-impl Clone for SgbCoprocessor {
-    fn clone(&self) -> Self {
-        // Deep-clone the DSP into a fresh cell and re-attach a link to the cloned
-        // SPC700 (its own `Clone` drops the trait object), mirroring `SgbApu`.
-        let dsp = Rc::new(RefCell::new(self.dsp.borrow().clone()));
-        let mut spc = self.spc.clone();
-        spc.attach_dsp(Box::new(DspLink(Rc::clone(&dsp))));
-        SgbCoprocessor {
-            cpu: self.cpu.clone(),
-            bus: self.bus.clone(),
-            spc,
-            dsp,
-            cpu_acc: self.cpu_acc,
-            spc_acc: self.spc_acc,
-            dsp_div: self.dsp_div,
-            cur: self.cur,
-            samp_acc: self.samp_acc,
-            cycles_per_sample: self.cycles_per_sample,
-            out: self.out.clone(),
-            max_out: self.max_out,
-            poll_ctr: self.poll_ctr,
-            sou_trn_sig: self.sou_trn_sig,
-            data_trn_sig: self.data_trn_sig,
-            jump: self.jump,
-        }
+    /// Deep-clone: re-instantiate the two plugins from the kept wasm bytes, load
+    /// this coprocessor's current chip state into them, and copy the host-side
+    /// runtime. Used by [`AudioCoprocessor::clone_box`] for the save-state restore
+    /// that clones the whole `GameBoy`.
+    fn deep_clone(&self) -> Self {
+        let spc_state = self.spc.borrow_mut().save_state().unwrap_or_default();
+        let cpu_state = self.cpu.borrow_mut().save_state().unwrap_or_default();
+        let mut fresh = Self::from_wasm(&self.spc_wasm, &self.cpu_wasm, self.out_rate)
+            .expect("re-instantiating the already-loaded plugin wasm");
+        let _ = fresh.spc.get_mut().load_state(&spc_state);
+        let _ = fresh.cpu.get_mut().load_state(&cpu_state);
+        fresh.spc_target = self.spc_target;
+        fresh.cpu_target = self.cpu_target;
+        fresh.spc_acc = self.spc_acc;
+        fresh.cpu_acc = self.cpu_acc;
+        fresh.pending_gb = self.pending_gb;
+        fresh.to_spc = self.to_spc;
+        fresh.src = self.src.clone();
+        fresh.src_acc = self.src_acc;
+        fresh.cur = self.cur;
+        fresh.samp_acc = self.samp_acc;
+        fresh.out = self.out.clone();
+        fresh.poll_ctr = self.poll_ctr;
+        fresh.sou_trn_sig = self.sou_trn_sig;
+        fresh.data_trn_sig = self.data_trn_sig;
+        fresh.jump = self.jump;
+        fresh
     }
 }
 
@@ -514,66 +569,22 @@ impl AudioCoprocessor for SgbCoprocessor {
         SgbCoprocessor::read_state(self, r)
     }
     fn clone_box(&self) -> Box<dyn AudioCoprocessor> {
-        Box::new(self.clone())
+        Box::new(self.deep_clone())
     }
 }
 
-/// Serialize the 65C816 register file + halt flags.
-fn write_cpu(w: &mut Writer, cpu: &Cpu) {
-    let r = &cpu.regs;
-    w.u16(r.a);
-    w.u16(r.x);
-    w.u16(r.y);
-    w.u16(r.s);
-    w.u16(r.d);
-    w.u16(r.pc);
-    w.u8(r.pbr);
-    w.u8(r.dbr);
-    w.u8(r.p);
-    w.bool(r.e);
-    w.bool(cpu.stopped);
-    w.bool(cpu.waiting);
-}
-
-fn read_cpu(r: &mut Reader<'_>, cpu: &mut Cpu) -> Result<(), StateError> {
-    let regs = &mut cpu.regs;
-    regs.a = r.u16()?;
-    regs.x = r.u16()?;
-    regs.y = r.u16()?;
-    regs.s = r.u16()?;
-    regs.d = r.u16()?;
-    regs.pc = r.u16()?;
-    regs.pbr = r.u8()?;
-    regs.dbr = r.u8()?;
-    regs.p = r.u8()?;
-    regs.e = r.bool()?;
-    cpu.stopped = r.bool()?;
-    cpu.waiting = r.bool()?;
-    Ok(())
-}
-
 /// Install the clean-room SPC700 driver + one-entry sample directory + a square
-/// BRR sample into APU RAM and point the SPC700 at the driver entry.
-fn install_spc_firmware(spc: &mut Spc700) {
-    let (prog, dir, brr) = spc_firmware();
-    let ram = spc.apu_ram_mut();
-    ram[0x0400..0x0400 + prog.len()].copy_from_slice(&prog);
-    ram[0x0200..0x0200 + dir.len()].copy_from_slice(&dir);
-    ram[0x0210..0x0210 + brr.len()].copy_from_slice(&brr);
-    spc.set_pc(0x0400);
-}
-
-/// The original clean-room SPC700 driver: wait on comm port 1 (the SNES
-/// trigger), then program the S-DSP to key a ~2 kHz square-wave voice. Authored
-/// from the SPC700 opcode table + S-DSP register map (nocash *fullsnes*), never
-/// from a ROM. Returns `(program@$0400, directory@$0200, sample@$0210)`.
+/// BRR sample into APU RAM. The original clean-room driver waits on comm port 1
+/// (the SNES trigger), then programs the S-DSP to key a ~2 kHz square-wave voice.
+/// Authored from the SPC700 opcode table + S-DSP register map (nocash *fullsnes*),
+/// never from a ROM. Returns `(program@$0400, directory@$0200, sample@$0210)`.
 fn spc_firmware() -> (Vec<u8>, [u8; 4], Vec<u8>) {
     // `MOV dp,#imm` = `8F imm dp`; `MOV A,dp` = `E4 dp`; `CLRP` = `20`;
     // `BEQ rel` = `F0 rel`; `BRA rel` = `2F rel` (fullsnes opcode table).
     let mov = |dp: u8, imm: u8| [0x8F, imm, dp];
     let mut prog = Vec::new();
     prog.push(0x20); // CLRP: direct page = $00xx, so $F5 is the comm port
-    // wait: MOV A,$F5 / BEQ wait  — spin until the SNES sets the trigger port.
+    // wait: MOV A,$F5 / BEQ wait — spin until the SNES sets the trigger port.
     prog.extend_from_slice(&[0xE4, 0xF5]); // MOV A,$F5 (port_in[1])
     prog.extend_from_slice(&[0xF0, 0xFC]); // BEQ -4 -> the MOV above
     // The S-DSP program: voice 0, GAIN-direct, square sample, KON last.
@@ -598,7 +609,12 @@ fn spc_firmware() -> (Vec<u8>, [u8; 4], Vec<u8>) {
     prog.extend_from_slice(&[0x2F, 0xFE]); // BRA * (spin so the DSP keeps playing)
 
     // One-entry sample directory: start = loop = $0210.
-    let dir = [0x10u8, 0x02, 0x10, 0x02];
+    let dir = [
+        SPC_BRR_ORG as u8,
+        (SPC_BRR_ORG >> 8) as u8,
+        SPC_BRR_ORG as u8,
+        (SPC_BRR_ORG >> 8) as u8,
+    ];
     // A 16-sample square BRR block: header shift 9 / filter 0 / loop + end, then
     // eight +7 nibbles and eight -8 nibbles -> a square wave, looped at $1000
     // pitch = 32 kHz / 16 = 2 kHz.

@@ -135,6 +135,7 @@ fn main() {
         ),
     };
     session.set_sgb_bios(sgb_bios.clone());
+    session.set_sgb_coprocessor_dir(resolve_sgb_coprocessor_dir(&opts));
     session.set_sgb_coprocessor(sgb_coprocessor);
     let event_loop = match EventLoop::new() {
         Ok(l) => l,
@@ -255,6 +256,19 @@ fn load_msu1(opts: &Options) -> Option<msu1::Msu1> {
             None
         }
     }
+}
+
+/// Resolve the directory the SGB audio coprocessor loads its two plugin `.wasm`
+/// (`spc700.wasm` + `w65c816.wasm`) from: `SLOPGB_SGB_COPROCESSOR` (a directory
+/// path) wins, else the conventional `--plugins` / `SLOPGB_PLUGINS_DIR` plugin
+/// directory. `None` when none is set → the coprocessor is unavailable and the
+/// built-in `SgbApu` stands.
+fn resolve_sgb_coprocessor_dir(opts: &Options) -> Option<PathBuf> {
+    env::var_os("SLOPGB_SGB_COPROCESSOR")
+        .map(PathBuf::from)
+        .filter(|p| !p.as_os_str().is_empty())
+        .or_else(|| opts.plugins_dir.clone())
+        .or_else(|| env::var_os("SLOPGB_PLUGINS_DIR").map(PathBuf::from))
 }
 
 /// Resolve the optional SGB BIOS bytes from `--sgb-bios` or `SLOPGB_SGB_BIOS`,
@@ -989,6 +1003,7 @@ impl App {
         match Session::load(path, self.settings.model, &self.boot_spec(), ram_init) {
             Ok(mut new) => {
                 new.set_sgb_bios(self.sgb_bios.clone());
+                new.set_sgb_coprocessor_dir(resolve_sgb_coprocessor_dir(&self.opts));
                 new.set_sgb_coprocessor(self.sgb_coprocessor);
                 self.session = new;
                 // A loaded ROM starts emulation: leave the no-ROM blank state and

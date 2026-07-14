@@ -27,8 +27,11 @@ OPTIONS:
                       CPU) — the default border stands. Also via SLOPGB_SGB_BIOS
     --sgb-coprocessor Swap the SGB audio backend from the built-in HLE APU to the
                       combined 65C816+SPC700+S-DSP coprocessor (SGB models only),
-                      so a bare SOUND command makes audio with no game driver.
-                      Default off (built-in). Also via SLOPGB_SGB_COPROCESSOR
+                      so a bare SOUND command makes audio with no game driver. The
+                      two chips run as wasm plugins loaded at runtime (spc700.wasm
+                      + w65c816.wasm) from SLOPGB_SGB_COPROCESSOR=<dir> or the
+                      --plugins dir; if absent, the built-in APU stands. Default
+                      off (built-in). Enable also via SLOPGB_SGB_COPROCESSOR
     --mcp-port <N>    Host an MCP server on 127.0.0.1:<N> so an LLM agent can
                       drive the debugger (disassemble/peek/cdl/vram/breakpoint/
                       registers/expr). Also via SLOPGB_MCP_PORT=<N>

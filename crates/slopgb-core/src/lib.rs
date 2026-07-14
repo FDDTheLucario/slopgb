@@ -43,6 +43,11 @@ pub use cpu::Registers;
 pub use joypad::Button;
 pub use model::Model;
 pub use slopgb_snes_apu::StateError;
+// The save-state (de)serializers the `AudioCoprocessor` trait's `write_state` /
+// `read_state` take. Re-exported publicly so an out-of-core coprocessor (e.g. a
+// plugin-backed one) can name the parameter types without depending on
+// `slopgb-snes-apu` directly.
+pub use slopgb_snes_apu::state::{Reader, Writer};
 
 // A Game Genie ROM patch — the element type of the public
 // [`GameBoy::set_gg_patches`], built by the frontend cheat engine.

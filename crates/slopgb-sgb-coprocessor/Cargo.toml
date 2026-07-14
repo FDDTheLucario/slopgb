@@ -1,6 +1,6 @@
 [package]
 name = "slopgb-sgb-coprocessor"
-description = "Combined SGB SNES-side audio coprocessor (clean-room 65C816 + SPC700 + S-DSP) exposed as a slopgb-core AudioCoprocessor. Native, std-only, no unsafe."
+description = "Combined SGB SNES-side audio coprocessor: loads the clean-room 65C816 + SPC700 + S-DSP as wasm coprocessor plugins and mediates them, exposed as a slopgb-core AudioCoprocessor. No unsafe."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,8 +9,7 @@ repository.workspace = true
 
 [dependencies]
 slopgb-core = { path = "../slopgb-core" }
-slopgb-w65c816 = { path = "../slopgb-w65c816" }
-slopgb-snes-apu = { path = "../slopgb-snes-apu" }
+slopgb-plugin-host = { path = "../slopgb-plugin-host" }
 
 [lints]
 workspace = true

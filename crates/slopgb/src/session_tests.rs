@@ -404,6 +404,50 @@ fn play_and_peak(gb: &mut GameBoy, frames: u32) -> f32 {
     peak(&out)
 }
 
+/// Build the two SGB coprocessor plugin crates for `wasm32` and drop them into
+/// `dir` as `spc700.wasm` + `w65c816.wasm` (the names [`Session`] loads). `false`
+/// if the wasm target / build is unavailable (the caller then skips). Shares the
+/// per-plugin temp target dir with the `slopgb-sgb-coprocessor` tests, so the
+/// wasm build is cached across both suites.
+fn build_sgb_plugins(dir: &Path) -> bool {
+    for (pkg, stem, out) in [
+        (
+            "slopgb-spc700-plugin",
+            "slopgb_spc700_plugin",
+            "spc700.wasm",
+        ),
+        (
+            "slopgb-w65c816-plugin",
+            "slopgb_w65c816_plugin",
+            "w65c816.wasm",
+        ),
+    ] {
+        let manifest = format!("{}/../{pkg}/Cargo.toml", env!("CARGO_MANIFEST_DIR"));
+        let target = std::env::temp_dir().join(format!("slopgb-sgb-cop-{stem}"));
+        let ok = process::Command::new(env!("CARGO"))
+            .args([
+                "build",
+                "--release",
+                "--target",
+                "wasm32-unknown-unknown",
+                "--manifest-path",
+                &manifest,
+            ])
+            .env("CARGO_TARGET_DIR", &target)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !ok {
+            return false;
+        }
+        let wasm = target.join(format!("wasm32-unknown-unknown/release/{stem}.wasm"));
+        if fs::copy(&wasm, dir.join(out)).is_err() {
+            return false;
+        }
+    }
+    true
+}
+
 #[test]
 fn sgb_coprocessor_toggle_swaps_the_audio_backend() {
     let dir = scratch("sgb-coprocessor");
@@ -422,9 +466,26 @@ fn sgb_coprocessor_toggle_swaps_the_audio_backend() {
         "default built-in backend makes no tone for a bare SOUND command (peak {off_peak})"
     );
 
-    // Coprocessor backend selected: the same SOUND command drives the clean-room
-    // 65C816 -> SPC700 -> S-DSP chain to audible PCM through the public frontend path.
+    // Coprocessor selected but no plugin directory set: the load fails and the
+    // built-in APU stands (the golden-safe fallback) — no panic, still silent.
+    let mut nodir = Session::load(&path, ModelChoice::Sgb, &BootSpec::NONE, None).expect("load");
+    nodir.set_sgb_coprocessor(true);
+    send_sgb_packet(&mut nodir.gb, &sound_packet());
+    assert!(
+        play_and_peak(&mut nodir.gb, 16) < 1e-3,
+        "no plugin directory falls back to the silent built-in backend"
+    );
+
+    // With the two plugins present in a directory: the coprocessor loads them and
+    // the same SOUND command drives the clean-room 65C816 -> SPC700 -> S-DSP chain
+    // to audible PCM through the public frontend path. Skips if wasm is unavailable.
+    if !build_sgb_plugins(&dir) {
+        eprintln!("skipping coprocessor-injection half: wasm32 build unavailable");
+        let _ = fs::remove_dir_all(&dir);
+        return;
+    }
     let mut on = Session::load(&path, ModelChoice::Sgb, &BootSpec::NONE, None).expect("load");
+    on.set_sgb_coprocessor_dir(Some(dir.clone()));
     on.set_sgb_coprocessor(true);
     send_sgb_packet(&mut on.gb, &sound_packet());
     let on_peak = play_and_peak(&mut on.gb, 16);
@@ -433,7 +494,8 @@ fn sgb_coprocessor_toggle_swaps_the_audio_backend() {
         "the injected coprocessor makes a bare SOUND command audible (peak {on_peak} vs {off_peak})"
     );
 
-    // The choice survives a power-cycle (re-injected into the fresh machine).
+    // The choice survives a power-cycle (re-injected into the fresh machine from
+    // the kept directory).
     on.reset();
     send_sgb_packet(&mut on.gb, &sound_packet());
     assert!(

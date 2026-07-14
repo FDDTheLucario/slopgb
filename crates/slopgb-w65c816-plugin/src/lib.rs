@@ -34,6 +34,9 @@ const PORT_BASE: u16 = 0x2140;
 const PROG_ORG: u16 = 0x8000;
 /// Emulation-mode reset vector location (`$00FFFC-$00FFFD`).
 const RESET_VEC: usize = 0xFFFC;
+/// Serialized [`W65816Cop::save_state`] length: 18 bytes of registers + halt
+/// flags, the 64 KB RAM, 8 bytes of comm-port latches, an 8-byte cycle counter.
+const STATE_LEN: usize = 18 + 0x1_0000 + 8 + 8;
 
 /// A tiny 8-bit (emulation-mode) program: echo comm port 1 (host input) + 7 to
 /// comm port 0 (host output), forever. It proves the full round trip — a host
@@ -197,7 +200,7 @@ impl Coprocessor for W65816Cop {
     /// latches, and the host-side cycle counter.
     fn save_state(&self) -> Vec<u8> {
         let r = &self.cpu.regs;
-        let mut buf = Vec::with_capacity(0x1_0000 + 32);
+        let mut buf = Vec::with_capacity(STATE_LEN);
         for v in [r.a, r.x, r.y, r.s, r.d, r.pc] {
             buf.extend_from_slice(&v.to_le_bytes());
         }
@@ -208,13 +211,14 @@ impl Coprocessor for W65816Cop {
         buf.extend_from_slice(&self.bus.port_in);
         buf.extend_from_slice(&self.bus.port_out);
         buf.extend_from_slice(&self.cycles.to_le_bytes());
+        debug_assert_eq!(buf.len(), STATE_LEN);
         buf
     }
 
     /// Restore state produced by [`Self::save_state`]. A truncated/foreign
     /// buffer is ignored (the chip keeps its current state) rather than panic.
     fn load_state(&mut self, bytes: &[u8]) {
-        if bytes.len() != 0x1_0000 + 32 {
+        if bytes.len() != STATE_LEN {
             return;
         }
         let mut c = Cursor { b: bytes, pos: 0 };
