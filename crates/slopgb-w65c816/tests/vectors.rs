@@ -108,3 +108,20 @@ fn inc_dec() {
 fn tsb_trb() {
     run_opcodes(&["04", "0c", "14", "1c"]);
 }
+
+#[test]
+fn cmp() {
+    run_opcodes(&[
+        "c9", "c5", "d5", "cd", "dd", "d9", "cf", "df", "c1", "d1", "d2", "c7", "d7", "c3", "d3",
+    ]);
+}
+
+#[test]
+fn cpx_cpy() {
+    run_opcodes(&["e0", "e4", "ec", "c0", "c4", "cc"]);
+}
+
+#[test]
+fn branches() {
+    run_opcodes(&["10", "30", "50", "70", "90", "b0", "d0", "f0", "80", "82"]);
+}

@@ -6,6 +6,7 @@
 mod addressing;
 mod cpu;
 mod dispatch;
+mod ops_branch;
 mod ops_ctrl;
 mod ops_load;
 mod ops_logic;
@@ -14,6 +15,15 @@ mod regs;
 
 pub use cpu::Cpu;
 pub use regs::{Regs, flag};
+
+/// The value mask and sign bit for a data width (16-bit vs 8-bit).
+pub(crate) fn width_bits(wide: bool) -> (u16, u16) {
+    if wide {
+        (0xFFFF, 0x8000)
+    } else {
+        (0x00FF, 0x0080)
+    }
+}
 
 /// The 24-bit bus a 65C816 talks to. A flat RAM backs the vector tests; the
 /// coprocessor plugin backs it with guest RAM + host comm ports.

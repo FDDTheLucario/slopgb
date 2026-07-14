@@ -242,6 +242,43 @@ impl Cpu {
             0x14 => am!(self, bus, am_dp => trb),
             0x1C => am!(self, bus, am_abs => trb),
 
+            // --- CMP ---
+            0xC9 => self.cmp_imm(bus),
+            0xC5 => am!(self, bus, am_dp => cmp),
+            0xD5 => am!(self, bus, am_dp_x => cmp),
+            0xCD => am!(self, bus, am_abs => cmp),
+            0xDD => amw!(self, bus, am_abs_x, false => cmp),
+            0xD9 => amw!(self, bus, am_abs_y, false => cmp),
+            0xCF => am!(self, bus, am_long => cmp),
+            0xDF => am!(self, bus, am_long_x => cmp),
+            0xC1 => am!(self, bus, am_indirect_x => cmp),
+            0xD1 => amw!(self, bus, am_indirect_y, false => cmp),
+            0xD2 => am!(self, bus, am_indirect => cmp),
+            0xC7 => am!(self, bus, am_long_indirect => cmp),
+            0xD7 => am!(self, bus, am_long_indirect_y => cmp),
+            0xC3 => am!(self, bus, am_stack_s => cmp),
+            0xD3 => am!(self, bus, am_stack_s_y => cmp),
+
+            // --- CPX / CPY ---
+            0xE0 => self.cpx_imm(bus),
+            0xE4 => am!(self, bus, am_dp => cpx),
+            0xEC => am!(self, bus, am_abs => cpx),
+            0xC0 => self.cpy_imm(bus),
+            0xC4 => am!(self, bus, am_dp => cpy),
+            0xCC => am!(self, bus, am_abs => cpy),
+
+            // --- branches ---
+            0x10 => self.branch(bus, self.regs.p & flag::N == 0),
+            0x30 => self.branch(bus, self.regs.p & flag::N != 0),
+            0x50 => self.branch(bus, self.regs.p & flag::V == 0),
+            0x70 => self.branch(bus, self.regs.p & flag::V != 0),
+            0x90 => self.branch(bus, self.regs.p & flag::C == 0),
+            0xB0 => self.branch(bus, self.regs.p & flag::C != 0),
+            0xD0 => self.branch(bus, self.regs.p & flag::Z == 0),
+            0xF0 => self.branch(bus, self.regs.p & flag::Z != 0),
+            0x80 => self.branch(bus, true),
+            0x82 => self.brl(bus),
+
             other => panic!("unimplemented opcode {other:#04x}"),
         }
     }

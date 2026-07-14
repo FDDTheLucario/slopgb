@@ -250,12 +250,3 @@ impl Cpu {
         self.rmw_writeback(bus, addr, v, r, wide, bank0);
     }
 }
-
-/// The value mask and sign bit for a width.
-fn width_bits(wide: bool) -> (u16, u16) {
-    if wide {
-        (0xFFFF, 0x8000)
-    } else {
-        (0x00FF, 0x0080)
-    }
-}
