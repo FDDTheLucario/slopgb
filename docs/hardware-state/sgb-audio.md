@@ -20,15 +20,28 @@ is [sgb.md](sgb.md).
 `GameBoy` holds the SGB audio side as `Option<Box<dyn sgb::AudioCoprocessor>>`
 (`sgb/mod.rs`), not the concrete `SgbApu` — so the built-in SPC700 + S-DSP can
 be swapped for an alternative implementation (e.g. one backed by a wasm
-coprocessor plugin) without touching `GameBoy`. The trait mirrors the subsystem
-surface `GameBoy` drives: `clock` / `poll(&mut Interconnect)` /`mix_into` /
+coprocessor plugin) without touching `GameBoy`. The trait is **`pub`** and
+**bus-agnostic**: `clock` / `poll(&mut dyn SgbCommandSource)` / `mix_into` /
 `set_output_rate` / `load_bios` / `write_state` / `read_state` / `clone_box`.
-The built-in `SgbApu` is the default and only implementation today; it bridges
-to its own inherent methods, so the path is **byte-identical** whether reached
-directly (unit tests hold a concrete `SgbApu`) or through the trait object. The
-box exists only on `Model::Sgb`/`Sgb2`, so `Dmg`/`Cgb` never touch the seam
-(golden-safe). Verified byte-identical: `golden_fingerprint` + mooneye 93/93 +
-the SGB audio unit tests, all unchanged after the extraction.
+`poll` takes the small public `SgbCommandSource` trait (`take_sound_event` /
+`take_data_snd` / `sou_trn_data` / `data_trn_data` / `flags`) instead of the
+core-private `Interconnect`, so the trait can be implemented outside
+`slopgb-core`; the bus (`impl SgbCommandSource for Interconnect`, crate-private)
+is the live source `GameBoy::step` passes as a `&mut dyn`, so the bus type never
+leaks. The built-in `SgbApu` is the default implementation; it bridges to its
+own inherent methods, so the path is **byte-identical** whether reached directly
+(unit tests hold a concrete `SgbApu`) or through the trait object.
+
+`GameBoy::set_audio_coprocessor(Box<dyn AudioCoprocessor>)` (`lib/sgb_api.rs`)
+is the public injection seam — a frontend/host installs a plugin-backed
+coprocessor here. It only replaces on `Model::Sgb`/`Sgb2` (off SGB there is no
+slot, so the box is dropped); like `debug_set_reg`/load-state it is an explicit
+user-initiated mutation, never taken on the passive frame loop. The box exists
+only on `Model::Sgb`/`Sgb2`, so `Dmg`/`Cgb` never touch the seam (golden-safe).
+Verified byte-identical: `golden_fingerprint` + mooneye 93/93 + the SGB audio
+unit tests + the two injection tests
+(`injected_audio_coprocessor_is_driven_through_the_public_seam`,
+`set_audio_coprocessor_is_a_noop_off_sgb`), all green after the decoupling.
 
 ## SNES-side coprocessor plugins — status + the full-integration path
 
@@ -53,16 +66,15 @@ smallest-first:
    `LoadedCoprocessor::drain_pcm` decodes them, so the host can mix a plugin's PCM
    like the built-in's `mix_into`. Proven in
    `spc700_roundtrip::spc700_pcm_drains_to_the_host`.
-2. **Decouple `AudioCoprocessor` from `Interconnect`.** `poll(&mut Interconnect)`
-   is a core-private type, so the trait can't be implemented outside core. Move
-   the bus→command extraction into `GameBoy` and give the trait comm-port-level
-   methods (feed SOUND ports / bulk-upload APU RAM / drain PCM), then make the
-   trait `pub` — keep it byte-identical (same ops, same order; the built-in stays
-   default).
-3. **A public `GameBoy` injection API** (`set_audio_coprocessor`) so the
-   frontend/host can install a plugin-backed `AudioCoprocessor` (core can't
-   depend on `wasmi`; the adapter lives in the host and forwards to the wasm
-   plugin, calling `drain_pcm` each frame from item 1).
+2. **Decouple `AudioCoprocessor` from `Interconnect` — DONE.** `poll` now takes
+   the public `SgbCommandSource` trait instead of the core-private `Interconnect`,
+   so the trait is `pub` and implementable outside core. Same ops, same order —
+   the built-in `SgbApu` keeps its throttle + edge-detection and stays default;
+   byte-identical (see the swap-seam section above).
+3. **A public `GameBoy` injection API — DONE.** `set_audio_coprocessor` installs
+   a plugin-backed `AudioCoprocessor` (core can't depend on `wasmi`; the adapter
+   lives in the host and forwards to the wasm plugin, calling `drain_pcm` each
+   frame from item 1). SGB-only, golden-safe (see the swap-seam section).
 4. **Combine the 65C816 + SPC700 + DSP into one SNES coprocessor** running the
    real SGB sound driver, so a DATA_SND packet reaches SNES work RAM and the
    driver programs the SPC700 — which needs the SGB system ROM (not shipped; see

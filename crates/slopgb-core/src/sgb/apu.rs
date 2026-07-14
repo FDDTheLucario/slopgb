@@ -38,7 +38,6 @@ use std::rc::Rc;
 use super::dsp::SDsp;
 use super::spc700::{Dsp, Spc700};
 use crate::SgbSound;
-use crate::interconnect::Interconnect;
 
 /// The S-DSP emits one stereo sample every 32 SPC700 cycles (→ 32 kHz).
 const DSP_PERIOD: u32 = 32;
@@ -185,13 +184,13 @@ impl SgbApu {
     // -- SGB command routing ------------------------------------------------
 
     /// Drain the SGB command seams and apply them.
-    pub(crate) fn poll(&mut self, bus: &mut Interconnect) {
+    pub(crate) fn poll(&mut self, cmds: &mut dyn super::SgbCommandSource) {
         // Best-effort sound-effect events → comm ports.
-        while let Some(sound) = bus.ppu_mut().sgb_take_sound_event() {
+        while let Some(sound) = cmds.take_sound_event() {
             self.apply_sound(sound);
         }
         // DATA_SND targets SNES work RAM; no audio effect without a 65816.
-        while bus.ppu_mut().sgb_take_data_snd().is_some() {}
+        while cmds.take_data_snd().is_some() {}
 
         // Poll the transfer getters + JUMP occasionally (they persist between
         // transfers, so edge-detect by checksum).
@@ -199,14 +198,14 @@ impl SgbApu {
         if self.poll_ctr & 0x3F != 0 {
             return;
         }
-        if let Some(data) = bus.ppu().sgb_sou_trn_data() {
+        if let Some(data) = cmds.sou_trn_data() {
             let sig = checksum(data);
             if sig != self.sou_trn_sig {
                 self.sou_trn_sig = sig;
                 self.upload_transfer(data, true);
             }
         }
-        if let Some(data) = bus.ppu().sgb_data_trn_data() {
+        if let Some(data) = cmds.data_trn_data() {
             let sig = checksum(data);
             if sig != self.data_trn_sig {
                 self.data_trn_sig = sig;
@@ -221,7 +220,7 @@ impl SgbApu {
                 self.upload_transfer(data, false);
             }
         }
-        if let Some(flags) = bus.ppu().sgb_flags() {
+        if let Some(flags) = cmds.flags() {
             if flags.jump.is_some() {
                 self.jump = flags.jump;
             }
@@ -327,8 +326,8 @@ impl super::AudioCoprocessor for SgbApu {
         SgbApu::clock(self, gb_cycles);
     }
 
-    fn poll(&mut self, bus: &mut Interconnect) {
-        SgbApu::poll(self, bus);
+    fn poll(&mut self, cmds: &mut dyn super::SgbCommandSource) {
+        SgbApu::poll(self, cmds);
     }
 
     fn mix_into(&mut self, out: &mut [(f32, f32)]) {

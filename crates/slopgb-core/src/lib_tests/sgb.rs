@@ -328,6 +328,116 @@ fn cgb_border_enables_a_border_surface_off_the_golden_path() {
     assert!(bordered.sgb_border().is_some());
 }
 
+// ---- Audio-coprocessor injection (the public `set_audio_coprocessor` seam) ----
+
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use crate::sgb::{AudioCoprocessor, SgbCommandSource};
+
+#[derive(Default)]
+struct SpyLog {
+    clocked: u64,
+    sounds: Vec<crate::SgbSound>,
+    mixed: usize,
+    rate: u32,
+}
+
+/// A minimal alternative [`AudioCoprocessor`] written the way an *out-of-core*
+/// implementer must: it names only the public `AudioCoprocessor` +
+/// [`SgbCommandSource`] traits — never the core-private `Interconnect` — so it
+/// compiling at all proves the decoupling. It records what `GameBoy` drives it
+/// with, through a shared handle the test keeps after the box is moved in.
+struct SpyCoprocessor(Rc<RefCell<SpyLog>>);
+
+impl AudioCoprocessor for SpyCoprocessor {
+    fn clock(&mut self, gb_cycles: u64) {
+        self.0.borrow_mut().clocked += gb_cycles;
+    }
+    fn poll(&mut self, cmds: &mut dyn SgbCommandSource) {
+        while let Some(s) = cmds.take_sound_event() {
+            self.0.borrow_mut().sounds.push(s);
+        }
+        while cmds.take_data_snd().is_some() {}
+    }
+    fn mix_into(&mut self, out: &mut [(f32, f32)]) {
+        self.0.borrow_mut().mixed += out.len();
+    }
+    fn set_output_rate(&mut self, hz: u32) {
+        self.0.borrow_mut().rate = hz;
+    }
+    fn load_bios(&mut self, _bios: &[u8]) {}
+    fn write_state(&self, w: &mut crate::state::Writer) {
+        w.u32(self.0.borrow().clocked as u32);
+    }
+    fn read_state(&mut self, r: &mut crate::state::Reader<'_>) -> Result<(), crate::StateError> {
+        self.0.borrow_mut().clocked = u64::from(r.u32()?);
+        Ok(())
+    }
+    fn clone_box(&self) -> Box<dyn AudioCoprocessor> {
+        Box::new(SpyCoprocessor(Rc::clone(&self.0)))
+    }
+}
+
+/// The keystone: an injected coprocessor is driven by `GameBoy` through the
+/// public seams — `clock` each step, `poll` fed a `SgbCommandSource` (a SOUND
+/// packet crosses it), `mix_into` on drain, `set_output_rate` on a rate change —
+/// with no reference to the core-private bus anywhere in `SpyCoprocessor`.
+#[test]
+fn injected_audio_coprocessor_is_driven_through_the_public_seam() {
+    let mut gb = sgb_machine();
+    let log = Rc::new(RefCell::new(SpyLog::default()));
+    gb.set_audio_coprocessor(Box::new(SpyCoprocessor(Rc::clone(&log))));
+    gb.set_sample_rate(44_100); // propagates to the freshly installed cop
+
+    // A SOUND ($08) packet must reach the injected cop's `poll` via the command
+    // source seam (byte-1..4 = effect A/B, attenuation, bank).
+    let mut sound = [0u8; 16];
+    sound[0] = 0x08 * 8 + 1; // command $08, length 1
+    sound[1] = 0xA1;
+    sound[2] = 0xB2;
+    sound[3] = 0xC3;
+    sound[4] = 0xD4;
+    send_sgb_packet(&mut gb, &sound);
+
+    gb.run_frame();
+    let mut out = Vec::new();
+    gb.drain_audio(&mut out);
+
+    let l = log.borrow();
+    assert!(l.clocked > 0, "clock() drove the injected coprocessor");
+    assert!(l.mixed > 0, "mix_into() drove it on drain");
+    assert_eq!(l.rate, 44_100, "set_sample_rate propagated to it");
+    assert!(
+        l.sounds.contains(&crate::SgbSound {
+            effect_a: 0xA1,
+            effect_b: 0xB2,
+            attenuation: 0xC3,
+            effect_bank: 0xD4,
+        }),
+        "the SOUND command crossed the SgbCommandSource seam to the injected cop",
+    );
+}
+
+/// Off `Model::Sgb`/`Sgb2` there is no coprocessor slot, so injection drops the
+/// box and never drives it — `Dmg`/`Cgb` stay byte-identical (golden-safe).
+#[test]
+fn set_audio_coprocessor_is_a_noop_off_sgb() {
+    let mut dmg = GameBoy::new(Model::Dmg, vec![0u8; 0x8000]).unwrap();
+    let log = Rc::new(RefCell::new(SpyLog::default()));
+    dmg.set_audio_coprocessor(Box::new(SpyCoprocessor(Rc::clone(&log))));
+
+    dmg.run_frame();
+    let mut out = Vec::new();
+    dmg.drain_audio(&mut out);
+
+    assert_eq!(
+        log.borrow().clocked,
+        0,
+        "off SGB the injected coprocessor is never installed or driven",
+    );
+}
+
 /// `capture_initial_sgb_border` returns `None` for a ROM that never uploads an
 /// SGB border (here a NOP sled), so the frontend falls back to the default
 /// border. (The successful-capture path needs a real SGB game and is verified

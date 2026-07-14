@@ -100,6 +100,26 @@ impl GameBoy {
         }
     }
 
+    /// Install an alternative SGB SNES-side audio coprocessor in place of the
+    /// built-in [`sgb::apu::SgbApu`] — the injection seam a frontend/host uses to
+    /// run a plugin-backed [`sgb::AudioCoprocessor`] (e.g. a combined 65C816 +
+    /// SPC700 + S-DSP chip forwarding to a wasm plugin's `drain_pcm`).
+    ///
+    /// Only meaningful on `Model::Sgb`/`Sgb2`: off SGB the machine holds no audio
+    /// coprocessor slot, so there is nothing to replace — the passed `cop` is
+    /// dropped and `Dmg`/`Cgb` stay byte-identical (golden-safe). Like
+    /// [`Self::debug_set_reg`] / load-state, this is an explicit user-initiated
+    /// mutation, never taken on the passive frame loop.
+    ///
+    /// The incoming `cop` keeps whatever output rate it was built with; call
+    /// [`Self::set_sample_rate`] afterwards to align it with the host (it
+    /// propagates to the newly installed coprocessor).
+    pub fn set_audio_coprocessor(&mut self, cop: Box<dyn sgb::AudioCoprocessor>) {
+        if self.sgb_apu.is_some() {
+            self.sgb_apu = Some(cop);
+        }
+    }
+
     /// Attach the built-in default SGB border surface to a non-SGB machine (the
     /// fallback for "GBC + initial SGB border" when the game uploads no border).
     /// Presentation-only: `frame()`/cycles are byte-identical to the same model
