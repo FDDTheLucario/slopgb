@@ -32,8 +32,11 @@ impl Cpu {
         self.regs.xce();
     }
 
-    /// `WDM #`: reserved two-byte no-op (consumes its signature byte).
-    pub(crate) fn wdm(&mut self, bus: &mut impl Bus) {
-        self.fetch8(bus);
+    /// `WDM #`: reserved two-byte no-op. The signature byte is skipped (PC
+    /// advances past it) but not read from the bus — the second cycle is
+    /// internal (vectors show a null data value at PC+1).
+    pub(crate) fn wdm(&mut self) {
+        self.io();
+        self.regs.pc = self.regs.pc.wrapping_add(1);
     }
 }

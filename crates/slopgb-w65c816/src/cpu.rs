@@ -154,6 +154,23 @@ impl Cpu {
         }
     }
 
+    /// Write back a read-modify-write result: high byte first (at `addr+1`),
+    /// then the low byte, the reverse of a normal store (datasheet RMW timing,
+    /// confirmed by the vectors' write order).
+    pub(crate) fn write_data_rmw(
+        &mut self,
+        bus: &mut impl Bus,
+        addr: u32,
+        value: u16,
+        wide: bool,
+        bank0: bool,
+    ) {
+        if wide {
+            self.write8(bus, next_addr(addr, bank0), (value >> 8) as u8);
+        }
+        self.write8(bus, addr, value as u8);
+    }
+
     // --- flag helpers -------------------------------------------------------
 
     /// Set or clear a `P` flag.

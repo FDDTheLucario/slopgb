@@ -8,6 +8,7 @@ mod cpu;
 mod dispatch;
 mod ops_ctrl;
 mod ops_load;
+mod ops_logic;
 mod ops_stack;
 mod regs;
 

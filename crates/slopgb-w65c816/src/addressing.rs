@@ -47,6 +47,15 @@ impl Cpu {
         lo | (hi << 8)
     }
 
+    /// Read a 16-bit pointer from bank 0 at `base16`, second byte at `base+1`
+    /// with a plain 16-bit wrap (no direct-page page-wrap). Used by stack-
+    /// relative indirect, whose pointer is not a direct-page access.
+    fn read_ptr16_linear(&mut self, bus: &mut impl Bus, base16: u16) -> u16 {
+        let lo = self.read8(bus, base16 as u32) as u16;
+        let hi = self.read8(bus, base16.wrapping_add(1) as u32) as u16;
+        lo | (hi << 8)
+    }
+
     /// Read a 24-bit pointer from bank 0 at `base16` (bytes at `base`, `base+1`,
     /// `base+2`, wrapping in bank 0).
     fn read_ptr24(&mut self, bus: &mut impl Bus, base16: u16) -> u32 {
@@ -199,7 +208,7 @@ impl Cpu {
         let off = self.fetch8(bus);
         self.io();
         let base = self.regs.s.wrapping_add(off as u16);
-        let ptr = self.read_ptr16(bus, base);
+        let ptr = self.read_ptr16_linear(bus, base);
         self.io();
         let eff = ((self.regs.dbr as u32) << 16)
             .wrapping_add(ptr as u32)
