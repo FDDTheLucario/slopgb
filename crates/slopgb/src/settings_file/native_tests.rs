@@ -35,6 +35,7 @@ fn settings_and_recent_round_trip() {
         load_rom_dialog_on_startup: true,
         registers_editable: false,
         start_in_debugger: true,
+        mem_live_update: false,
         bootrom_dmg: "x.bin".to_string(),
         ..Settings::default()
     };

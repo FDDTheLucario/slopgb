@@ -272,6 +272,7 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
         esc_shows_debugger: b("debug", "esc_shows_debugger", def.esc_shows_debugger),
         registers_editable: b("debug", "registers_editable", def.registers_editable),
         start_in_debugger: b("debug", "start_in_debugger", def.start_in_debugger),
+        mem_live_update: b("debug", "mem_live_update", def.mem_live_update),
         ff_speed: i("misc", "ff_speed", i64::from(def.ff_speed)).clamp(1, 20) as u32,
         framerate_limit: i("misc", "framerate_limit", i64::from(def.framerate_limit)).max(0) as u32,
         show_framerate: b("misc", "show_framerate", def.show_framerate),
@@ -346,6 +347,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         esc_shows_debugger: _,
         registers_editable: _,
         start_in_debugger: _,
+        mem_live_update: _,
         ff_speed: _,
         framerate_limit: _,
         show_framerate: _,
@@ -430,6 +432,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         fb(settings.registers_editable),
     );
     d.set("debug", "start_in_debugger", fb(settings.start_in_debugger));
+    d.set("debug", "mem_live_update", fb(settings.mem_live_update));
     d.set("misc", "ff_speed", &settings.ff_speed.to_string());
     d.set(
         "misc",

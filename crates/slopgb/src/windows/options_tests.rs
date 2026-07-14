@@ -489,6 +489,10 @@ fn debug_tab_display_flags_toggle() {
     assert!(!st.working.start_in_debugger);
     click_field(&mut st, Field::StartInDebugger);
     assert!(st.working.start_in_debugger);
+    // "Live update memory viewer" on by default → click turns it off.
+    assert!(st.working.mem_live_update);
+    click_field(&mut st, Field::MemLiveUpdate);
+    assert!(!st.working.mem_live_update);
 }
 
 #[test]

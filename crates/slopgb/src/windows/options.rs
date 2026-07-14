@@ -369,6 +369,10 @@ pub struct Settings {
     pub registers_editable: bool,
     /// Debug → "Start in debugger": open the debugger window at launch.
     pub start_in_debugger: bool,
+    /// Debug → "Live update memory viewer": auto-refresh the standalone memory
+    /// window every frame. Default on; off means it only repaints on interaction
+    /// (scroll / Go-to), matching bgb's non-continuous refresh.
+    pub mem_live_update: bool,
     /// Misc → fast-forward speed multiplier (turbo), 1..=20.
     pub ff_speed: u32,
     /// Misc → framerate limit (0 = real speed / 60 fps).
@@ -452,6 +456,7 @@ impl Default for Settings {
             esc_shows_debugger: true,
             registers_editable: true,
             start_in_debugger: false,
+            mem_live_update: true,
             ff_speed: 10,
             framerate_limit: 0,
             show_framerate: false,

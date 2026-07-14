@@ -414,8 +414,10 @@ impl ApplicationHandler for App {
             if let Some(window) = &self.window {
                 window.request_redraw();
             }
-            // Keep the open debug windows tracking live machine state.
-            self.tools.request_redraw_all();
+            // Keep the open debug windows tracking live machine state (the
+            // standalone memory viewer honours "Live update memory viewer").
+            self.tools
+                .request_redraw_live(self.settings.mem_live_update);
         }
         self.update_fps(frames);
         // Both audio and timer pacing now march the `next_frame` grid (audio

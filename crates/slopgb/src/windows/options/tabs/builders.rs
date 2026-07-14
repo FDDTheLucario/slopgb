@@ -251,16 +251,17 @@ pub(super) fn debug(s: &Settings, content: Rect) -> Vec<Ctrl> {
         Field::PureBgb,
     ));
     l.row();
-    // "Registers can be edited" is live (gates the register-edit context menu);
-    // "Live update memory viewer" / "GB CPU usage meter" stay inert (no backend).
+    // "Registers can be edited" + "Live update memory viewer" are live;
+    // "GB CPU usage meter" stays inert (needs a core halt-cycle counter).
     v.push(Ctrl::live(
         rc(l.at(), "Registers can be edited"),
         chk("Registers can be edited", s.registers_editable),
         Field::RegistersEditable,
     ));
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
         rc(l.row().at(), "Live update memory viewer"),
-        chk("Live update memory viewer", true),
+        chk("Live update memory viewer", s.mem_live_update),
+        Field::MemLiveUpdate,
     ));
     v.push(Ctrl::live(
         rc(l.row().at(), "pressing Esc shows debugger"),

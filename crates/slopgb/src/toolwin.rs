@@ -657,6 +657,17 @@ impl ToolWindows {
             v.window.request_redraw();
         }
     }
+
+    /// Per-frame auto-redraw honouring the "Live update memory viewer" option:
+    /// every tool window repaints except the standalone memory viewer when
+    /// `mem_live` is off (it then repaints only on interaction — scroll / Go-to).
+    pub fn request_redraw_live(&self, mem_live: bool) {
+        for v in self.views.values() {
+            if auto_redraws(matches!(v.state, WinState::Memory(_)), mem_live) {
+                v.window.request_redraw();
+            }
+        }
+    }
 }
 
 /// Glue the live machine onto the pure [`debugger::on_left_click`] (the register
@@ -707,9 +718,16 @@ fn debugger_right_click(
     debugger::on_right_click(|a| gb.debug_read(a), area, s, r.pc, r.sp, px, py);
 }
 
+/// Whether a tool window should auto-refresh on the per-frame tick: everything
+/// does, except the standalone memory viewer when "Live update memory viewer"
+/// is off (it then refreshes only on interaction).
+fn auto_redraws(is_memory_window: bool, mem_live: bool) -> bool {
+    mem_live || !is_memory_window
+}
+
 #[cfg(test)]
 mod tests {
-    use super::is_double_click;
+    use super::{auto_redraws, is_double_click};
     use std::time::Duration;
 
     #[test]
@@ -723,5 +741,18 @@ mod tests {
         assert!(!is_double_click(ms(401), 0, 0), "too slow");
         assert!(!is_double_click(ms(50), 4, 0), "too far in x");
         assert!(!is_double_click(ms(50), 0, 4), "too far in y");
+    }
+
+    #[test]
+    fn memory_window_skips_auto_redraw_only_when_live_update_is_off() {
+        // Non-memory windows always auto-refresh; the memory window skips it only
+        // when "Live update memory viewer" is off.
+        assert!(auto_redraws(false, true));
+        assert!(auto_redraws(false, false), "non-memory always refreshes");
+        assert!(auto_redraws(true, true), "memory refreshes when live");
+        assert!(
+            !auto_redraws(true, false),
+            "memory frozen when live-update off"
+        );
     }
 }
