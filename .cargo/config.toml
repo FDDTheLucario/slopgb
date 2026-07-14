@@ -7,3 +7,6 @@
 # The host loads only *.wasm; a plain `cargo build` produces native cdylibs
 # (.so/.dylib/.dll) the host can't use.
 build-plugins = "build --release --target wasm32-unknown-unknown -p slopgb-msu1-plugin -p slopgb-spc700-plugin -p slopgb-w65c816-plugin"
+# `cargo xtask stage-plugins <dir>`: build the plugins to wasm AND copy them to
+# the fixed names the loaders open (spc700.wasm / w65c816.wasm / msu1.wasm).
+xtask = "run --release --package xtask --"
