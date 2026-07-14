@@ -790,4 +790,52 @@ mod tests {
         sgb_increment(&mut j);
         assert_eq!(j.read(), 0xFF);
     }
+
+    /// One SGB header packet as `boot/slopgb_sgb_boot.asm` (`SgbHandshake`)
+    /// builds it: command `$F1 + 2k`, then 14 header bytes, then their 8-bit
+    /// sum as a checksum. The `$F1` family is a single-packet command.
+    fn sgb_header_packet(k: u8, chunk: &[u8; 14]) -> [u8; 16] {
+        let mut p = [0u8; 16];
+        p[0] = 0xF1 + 2 * k;
+        let mut sum = 0u8;
+        for i in 0..14 {
+            p[1 + i] = chunk[i];
+            sum = sum.wrapping_add(chunk[i]);
+        }
+        p[15] = sum;
+        p
+    }
+
+    /// The six pulse-coded command packets the slopgb SGB boot ROM transfers to
+    /// the SNES (the cart header at `$0104`, 84 bytes) must decode byte-exactly
+    /// through the real ICD2 receiver — the clean-room "handshake packet format
+    /// is correct" oracle. This pins the wire format the boot ROM emits: `$00`
+    /// reset / `$10`-`$20` data (LSB-first) / `$30` idle / `$20` stop pulses,
+    /// 16-byte packets, the `$F1,$F3,$F5,$F7,$F9,$FB` command sequence, and the
+    /// per-packet checksum — matching `SgbSendByte`/`SgbHandshake` in the asm.
+    #[test]
+    fn sgb_boot_header_handshake_decodes() {
+        // 84 bytes standing in for the cart region $0104..$0158 the boot ROM
+        // walks (a recognizable ramp, so a bit-order slip would be visible).
+        let header: Vec<u8> = (0u8..84).collect();
+        let mut j = sgb_joypad();
+        for k in 0..6u8 {
+            let chunk: [u8; 14] = header[k as usize * 14..k as usize * 14 + 14]
+                .try_into()
+                .unwrap();
+            let packet = sgb_header_packet(k, &chunk);
+            send_packet(&mut j, &packet);
+            assert_eq!(
+                j.take_sgb_command().as_deref(),
+                Some(&packet[..]),
+                "header packet {k} (command ${:02X}) decodes byte-exactly",
+                packet[0],
+            );
+        }
+        // Command sequence is $F1,$F3,$F5,$F7,$F9,$FB and every packet ends with
+        // the checksum of its 14 payload bytes.
+        let p3 = sgb_header_packet(3, &[10u8; 14]);
+        assert_eq!(p3[0], 0xF7);
+        assert_eq!(p3[15], 140, "checksum = 14 * 10");
+    }
 }

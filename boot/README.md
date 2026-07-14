@@ -1,4 +1,17 @@
-# slopgb CGB boot ROM (original, open-source)
+# slopgb clean-room boot ROMs (original, open-source)
+
+Two **original** boot ROMs, written from public hardware documentation — not
+derived from, and containing no bytes of, any copyrighted boot ROM:
+
+- **`slopgb_cgb_boot.bin`** (2304 B, CGB-class) — the full CGB power-on
+  experience; see below.
+- **`slopgb_sgb_boot.bin`** (256 B, DMG-class) — the Super Game Boy boot: logo +
+  the SGB header/packet handshake to the SNES + the documented SGB post-boot
+  state. See [**SGB boot ROM**](#sgb-boot-rom).
+
+Both are MIT-licensed original work. Build both with `make all`.
+
+## CGB boot ROM
 
 An **original** Game Boy Color boot ROM, written from public hardware
 documentation (Pan Docs, the gbdev wiki, mooneye/gbmicrotest behaviour notes) —
@@ -86,5 +99,43 @@ category as the core's existing `CGB_COMPAT_*` palettes), reproduced clean-room:
 
 `cgb_palettes.inc` is generated; regenerate with
 `cargo run -p slopgb-core --example cgb_palette_extract -- bootroms/cgb_boot.bin emit`.
+
+## SGB boot ROM
+
+`slopgb_sgb_boot.asm` → `slopgb_sgb_boot.bin` (256 bytes, DMG-class). An
+**original** Super Game Boy boot ROM, written from public documentation only
+(Pan Docs "SGB Functions" / "SGB Command Packet" / "Power-Up Sequence", the
+gbdev wiki). It contains **no bytes of, and is not derived from**, Nintendo's
+copyrighted `sgb_boot.bin` / `sgb2_boot.bin` — those are never read,
+disassembled, or extracted. The 48-byte Nintendo logo is **read from the cart**
+(`$0104`, which shows through during boot), never embedded here.
+
+What it does, in the documented SGB power-on order:
+
+1. hardware init (stack, APU/LCD off, VRAM clear);
+2. unpack the cart's Nintendo logo into VRAM and show it with a short scroll
+   (the SGB plays its chime on the SNES side, so no GB sound channel is
+   triggered — matching mooneye `boot_hwio-S`, which leaves NR52 with no channel
+   active);
+3. **the SGB header handshake** — transfer the 16-byte cart header to the SNES
+   ICD2 as six pulse-coded command packets (`$F1,$F3,$F5,$F7,$F9,$FB`), each
+   carrying 14 header bytes + a checksum, over P14/P15 of the joypad port
+   (`$00` reset / `$10`=1 `$20`=0 data, LSB-first / `$30` idle / `$20` stop);
+4. install the documented SGB post-boot state and hand off via `FF50`:
+   `A=01 F=00 BC=0014 DE=0000 HL=C060 SP=FFFE PC=0100` (mooneye `boot_regs-sgb`),
+   `LCDC=$91 BGP=$FC P1=$30`.
+
+Deliberate clean-room simplifications (none change the handshake or the
+post-boot state the tests observe): the anti-piracy logo *compare* is omitted
+(the header checksum still gates a corrupt cart), and the scroll timing is not
+frame-exact. `sgb2_boot.bin` would differ only in the post-boot `A` value (`$FF`
+vs `$01`).
+
+Verified by `cargo test -p slopgb-core --test sgb_bootrom` (runs the real ROM
+from power-on and asserts the register/IO convergence + hand-off) and
+`joypad::tests::sgb_boot_header_handshake_decodes` (the six header packets decode
+byte-exactly through the ICD2 receiver). Build with `make slopgb_sgb_boot.bin`;
+load with `--boot boot/slopgb_sgb_boot.bin <game>` or the Options → System SGB
+bootrom path.
 
 License: MIT (original work).

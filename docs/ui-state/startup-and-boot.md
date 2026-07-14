@@ -58,3 +58,18 @@ load (`Session::BootSpec`, Options paths over `--boot`). SGB maps to the DMG-cla
 the direct-init post-boot regs at FF50 hand-off (skipped if absent, or a hard failure
 under `SLOPGB_REQUIRE_ROMS=1`). `bootroms/` is gitignored — copyrighted boot ROMs
 never vendored.
+
+### Clean-room boot ROMs (committed, MIT)
+
+`boot/` ships **original** boot ROMs built from public docs (never derived from a
+copyrighted ROM) — source, build (RGBDS `make`), and provenance live in
+[`boot/README.md`](../../boot/README.md):
+
+- `slopgb_cgb_boot.bin` (2304 B) — the full CGB power-on animation + palettes.
+- `slopgb_sgb_boot.bin` (256 B) — the SGB boot: logo + the six-packet SGB header
+  handshake to the SNES ICD2 + the documented SGB post-boot state, unmapped via
+  FF50. Unlike the copyrighted oracle this asset is committed, so
+  `tests/sgb_bootrom.rs` **always** runs it from power-on and asserts the
+  register/IO convergence (`boot_regs-sgb`: `A=01 F=00 BC=0014 DE=0000 HL=C060
+  SP=FFFE`, `LCDC=$91 BGP=$FC P1=$30`); the packet wire format is pinned by
+  `joypad::tests::sgb_boot_header_handshake_decodes`.
