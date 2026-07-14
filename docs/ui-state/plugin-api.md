@@ -93,17 +93,69 @@ before each call, so reads are cheap and consistent for the whole frame:
 | `registers() -> Registers` | all of the above at once |
 | `log(&str)` | append a UTF-8 line to slopgb's stderr |
 
+## Tool plugins (MCP debug tools)
+
+A **tool plugin** is called on demand instead of every frame: it takes a request
+and returns text or an image, which is exactly the shape of an [MCP debug
+tool](mcp-server.md). A plugin can register a new MCP tool that the built-in
+server then advertises and dispatches alongside its own — third parties extend
+the tool set without touching slopgb.
+
+Implement `ToolPlugin` and list your tools in `slopgb_tools!` (a module may expose
+several). The nine built-in tools are themselves ported to a reference plugin
+(`crates/slopgb/reference-tools/`) as the dogfood/proof set — a parity test pins
+each one byte-identical to its built-in.
+
+```rust
+use slopgb_plugin_api::{GameBoyView, ToolPlugin, ToolResult, args, slopgb_tools};
+
+struct Peek;
+impl ToolPlugin for Peek {
+    fn new() -> Self { Peek }
+    fn name(&self) -> &str { "peek" }
+    fn description(&self) -> &str { "Dump memory bytes." }
+    fn input_schema(&self) -> &str {
+        r#"{"type":"object","properties":{"from":{"type":"string"}},"required":["from"]}"#
+    }
+    fn call(&mut self, req: &str, gb: &GameBoyView) -> ToolResult {
+        // `req` is the MCP `arguments` object as JSON; pull fields with `args::field`.
+        let from = args::field(req, "from").unwrap_or_default();
+        // …parse, read via the view, format…
+        ToolResult::Text(format!("{from}: {:02X}", gb.read(0)))
+    }
+}
+slopgb_tools!(Peek);
+```
+
+Beyond the tier-1 accessors, `GameBoyView` gives a tool plugin the richer debug
+surface (served only on the tool host):
+
+| Method | Returns |
+|---|---|
+| `read_banked(bank, addr) -> u8` / `cdl_flag(bank, addr) -> u8` | a byte / its code-data-log flags in an explicit bank |
+| `set_breakpoint(addr)` | set a PC breakpoint (needs `MUTATE`) |
+| `registers_text()` / `cdl_ranges()` / `disassemble(bank, from, to)` / `expr(&str)` | the host's formatted text results |
+| `screencap(scale)` / `vram(view, scale)` | PNG bytes |
+
+The text/image bulk results cross host→guest through a guest-owned scratch buffer
+the guest reads by safe indexing — no `unsafe`, no raw pointers.
+
+`--plugins <DIR>` loads tool plugins from the same directory as tier-1 plugins
+(each `*.wasm` is tried as both; the wrong shape is skipped). The MCP server picks
+them up automatically; start it with `--mcp-port`. A plugin tool whose name
+matches a built-in **wins** (so the reference plugins can transparently stand in
+for the built-ins).
+
 ## Capability tiers
 
-A plugin declares what it needs via `Plugin::CAPABILITIES` (default:
-`INTROSPECTION`). The host refuses to load a plugin asking for more than it
-currently serves.
+A plugin declares what it needs (`Plugin::CAPABILITIES` / `ToolPlugin::capabilities()`,
+default `INTROSPECTION`). Each host refuses a plugin asking for more than it serves.
 
 | Tier | Bit | Status |
 |---|---|---|
-| Introspection (read-only) | `INTROSPECTION` | **served now** |
-| Mutation (write regs/memory, breakpoints) | `MUTATE` | reserved — rejected at load |
-| Subsystem hosting (e.g. be the SPC700) | `SUBSYSTEM` | **served now** via `LoadedCoprocessor` |
+| Introspection (read-only) | `INTROSPECTION` | **served on every host** |
+| Mutation (write regs/memory, breakpoints) | `MUTATE` | **served on the tool host** (`set_breakpoint`); rejected on the per-frame host |
+| Subsystem hosting (e.g. be the SPC700) | `SUBSYSTEM` | **served** via `LoadedCoprocessor` |
 
 ## Coprocessor plugins (tier 3)
 

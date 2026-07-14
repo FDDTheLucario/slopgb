@@ -38,6 +38,24 @@ omit it for native size. It nearest-neighbor magnifies the PNG so a model that
 struggles with 160×144 pixel art can read it — `screencap` `3x` → 480×432. Only
 the two image tools read it; parsing lives in `tools::parse_scale`.
 
+### Plugin tools
+
+The tool set is **pluggable**: a wasm tool plugin (see
+[plugin-api.md](plugin-api.md) — tier 2, `ToolPlugin` / `slopgb_tools!`) loaded
+via `--plugins` registers new MCP tools, which `tools/list` advertises and
+`tools/call` dispatches alongside these built-ins. A plugin tool whose name
+matches a built-in wins (so the reference plugins in
+`crates/slopgb/reference-tools/` — the nine built-ins re-implemented on the
+plugin ABI, parity-pinned byte-identical — can stand in for them).
+
+The nine built-ins stay native; the plugins call back into the same
+`mcp::tools` formatters through a borrowed `plugin_host::FrontendToolContext`, so
+a ported tool's output (text or PNG) is identical to the built-in's. The socket
+thread advertises plugin tools from a metadata snapshot taken at server start;
+`tools/call` for a plugin name is forwarded to the UI thread like a built-in and
+run against the live machine. Loading plugins is opt-in, so the default path is
+unchanged.
+
 ### Address forms
 
 `AAAA` (bank implied 0) or `BB:AAAA` (`BB` = hex bank). `AAAA` is legal only for

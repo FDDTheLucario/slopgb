@@ -20,8 +20,13 @@ bounds-checked `Memory`).
 | Trait | Macro | Shape |
 |---|---|---|
 | `Plugin` | `slopgb_plugin!` | tier 1: per-frame read-only `on_frame(&GameBoyView)` |
-| `ToolPlugin` | `slopgb_tool_plugin!` | tier 2: on-demand `call(args, &view) -> ToolResult` |
+| `ToolPlugin` | `slopgb_tools!` (many) / `slopgb_tool_plugin!` (one) | tier 2: on-demand `call(args, &view) -> ToolResult`; a module lists several tools, each with `name`/`description`/`input_schema` for MCP `tools/list` |
 | `Coprocessor` | `slopgb_coprocessor_plugin!` | tier 3: host-driven `reset`/`run_until`/comm-ports |
+
+`GameBoyView` also carries the tool-only debug helpers (`read_banked`, `cdl_flag`,
+`set_breakpoint`, and the bulk-result `registers_text`/`cdl_ranges`/`disassemble`/
+`vram`/`screencap`/`expr`); `args::field` pulls a string out of the JSON request
+without a JSON dep. These require the tool host, not the per-frame host.
 
 Wire contract (`abi.rs`): `ABI_VERSION`, `Reg`, the `host_*` imports — the host
 must agree. `abi.rs` is cfg-split (real wasm imports vs off-wasm `unreachable!`
