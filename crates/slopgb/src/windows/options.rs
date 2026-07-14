@@ -361,6 +361,11 @@ pub struct Settings {
     /// Debug → "pressing Esc shows debugger": Esc opens the debugger (bgb's
     /// behaviour) instead of quitting. Default on. See BUG-1.
     pub esc_shows_debugger: bool,
+    /// Debug → "Registers can be edited": allow the debugger's register-edit
+    /// context menu. Default on (bgb ships it checked); off greys the item.
+    pub registers_editable: bool,
+    /// Debug → "Start in debugger": open the debugger window at launch.
+    pub start_in_debugger: bool,
     /// Misc → fast-forward speed multiplier (turbo), 1..=20.
     pub ff_speed: u32,
     /// Misc → framerate limit (0 = real speed / 60 fps).
@@ -441,6 +446,8 @@ impl Default for Settings {
             tile_hex_8bit: false,
             memory_window: false,
             esc_shows_debugger: true,
+            registers_editable: true,
+            start_in_debugger: false,
             ff_speed: 10,
             framerate_limit: 0,
             show_framerate: false,

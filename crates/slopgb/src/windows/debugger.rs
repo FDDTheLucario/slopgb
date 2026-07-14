@@ -280,6 +280,9 @@ pub struct DebuggerState {
     /// Loaded `.sym` symbols (shared, cheap to clone), for disasm labels/operands
     /// and go-to-by-name; empty until a symbol file is loaded.
     pub symbols: Rc<SymbolTable>,
+    /// Debug → "Registers can be edited": when false the register-edit context
+    /// menu item is greyed. Pushed from `App::apply_settings`. Default on.
+    pub registers_editable: bool,
 }
 
 impl Default for DebuggerState {
@@ -303,6 +306,7 @@ impl Default for DebuggerState {
             clock_base: 0,
             disasm_fmt: DisasmFmt::default(),
             symbols: Rc::new(SymbolTable::default()),
+            registers_editable: true,
         }
     }
 }
@@ -650,11 +654,13 @@ pub fn menu_for(target: ClickTarget, st: &DebuggerState, origin: (i32, i32)) -> 
         ClickTarget::Disasm(addr) => disasm_entries(addr, st, true),
         ClickTarget::Memory(addr) => disasm_entries(addr, st, false),
         ClickTarget::Stack(addr) => stack_entries(addr),
-        ClickTarget::Reg(field) => vec![(
+        // "edit register" is greyed when the Debug-tab "Registers can be edited"
+        // option is off (matches bgb greying the item).
+        ClickTarget::Reg(field) if st.registers_editable => vec![(
             MenuItem::new("edit register"),
             MenuChoice::OpenEditReg(field),
         )],
-        ClickTarget::Registers => vec![disabled("edit register")],
+        ClickTarget::Reg(_) | ClickTarget::Registers => vec![disabled("edit register")],
         ClickTarget::None => return None,
     };
     let (items, choices) = entries.into_iter().unzip();

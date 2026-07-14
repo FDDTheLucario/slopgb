@@ -77,6 +77,8 @@ pub fn from_ini(f: &Ini) -> Settings {
         tile_hex_8bit: boolean("SlopgbTileHex8bit", d.tile_hex_8bit),
         memory_window: boolean("SlopgbMemoryWindow", d.memory_window),
         esc_shows_debugger: boolean("DebugEsc", d.esc_shows_debugger),
+        registers_editable: boolean("SlopgbRegistersEditable", d.registers_editable),
+        start_in_debugger: boolean("SlopgbStartInDebugger", d.start_in_debugger),
         ff_speed: int("UndelayedSpeed", i64::from(d.ff_speed)).clamp(1, 20) as u32,
         framerate_limit: int("FrameRate", i64::from(d.framerate_limit)).max(0) as u32,
         show_framerate: boolean("SlopgbShowFramerate", d.show_framerate),
@@ -132,6 +134,8 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         tile_hex_8bit: _,
         memory_window: _,
         esc_shows_debugger: _,
+        registers_editable: _,
+        start_in_debugger: _,
         ff_speed: _,
         framerate_limit: _,
         show_framerate: _,
@@ -177,6 +181,11 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         if s.rgbds_disasm { "rgbds" } else { "no$gmb" },
     );
     f.set("DebugEsc", ini::fmt_bool(s.esc_shows_debugger));
+    f.set(
+        "SlopgbRegistersEditable",
+        ini::fmt_bool(s.registers_editable),
+    );
+    f.set("SlopgbStartInDebugger", ini::fmt_bool(s.start_in_debugger));
     f.set("UndelayedSpeed", &s.ff_speed.to_string());
     f.set("FrameRate", &s.framerate_limit.to_string());
     f.set("RecentFrozen", ini::fmt_bool(s.freeze_recent));

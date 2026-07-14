@@ -516,6 +516,9 @@ impl App {
         }
         // Debug-tab disasm display flags → the debugger view.
         self.push_disasm_fmt();
+        // Debug-tab "Registers can be edited" → the debugger's edit menu.
+        self.tools
+            .set_registers_editable(self.settings.registers_editable);
         // Debug-tab "8-bit tile hex" → the VRAM viewer.
         self.tools.set_tile_hex_8bit(self.settings.tile_hex_8bit);
         // Defer opening/closing the standalone memory window to `about_to_wait`,

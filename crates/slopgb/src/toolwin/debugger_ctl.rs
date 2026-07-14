@@ -294,6 +294,19 @@ impl ToolWindows {
         }
     }
 
+    /// Push the "Registers can be edited" option (Options → Debug) to the
+    /// debugger view, repainting it if open. Inert when the window isn't built.
+    pub fn set_registers_editable(&mut self, on: bool) {
+        if let Some(view) = self.debugger_view_mut() {
+            if let WinState::Debugger(s) = &mut view.state {
+                if s.registers_editable != on {
+                    s.registers_editable = on;
+                    view.window.request_redraw();
+                }
+            }
+        }
+    }
+
     /// Open the debugger's `Evaluate expression` modal (RM14).
     pub fn open_debugger_eval(&mut self) {
         let Some(view) = self.debugger_view_mut() else {

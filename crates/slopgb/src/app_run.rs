@@ -71,6 +71,8 @@ impl App {
                 // `DisasmFmt::default` / empty-table defaults.
                 self.push_disasm_fmt();
                 self.tools.set_tile_hex_8bit(self.settings.tile_hex_8bit);
+                self.tools
+                    .set_registers_editable(self.settings.registers_editable);
                 self.tools.set_symbols(self.symbols.clone());
                 // Keep the Options "memory viewer in own window" setting in sync
                 // with reality, so a later Apply doesn't fight a menu toggle.

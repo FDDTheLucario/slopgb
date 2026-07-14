@@ -32,6 +32,8 @@ fn settings_and_recent_round_trip() {
         screenshot_format: crate::windows::options::ScreenshotFormat::Png,
         show_errors_on_rom_load: false,
         load_rom_dialog_on_startup: true,
+        registers_editable: false,
+        start_in_debugger: true,
         bootrom_dmg: "x.bin".to_string(),
         ..Settings::default()
     };

@@ -481,6 +481,14 @@ fn debug_tab_display_flags_toggle() {
     assert!(!st.working.tile_hex_8bit, "8-bit tile hex off by default");
     click_field(&mut st, Field::TileHex8bit);
     assert!(st.working.tile_hex_8bit);
+    // "Registers can be edited" on by default (bgb) → click flips off.
+    assert!(st.working.registers_editable);
+    click_field(&mut st, Field::RegistersEditable);
+    assert!(!st.working.registers_editable);
+    // "Start in debugger" off by default → click turns it on.
+    assert!(!st.working.start_in_debugger);
+    click_field(&mut st, Field::StartInDebugger);
+    assert!(st.working.start_in_debugger);
 }
 
 #[test]

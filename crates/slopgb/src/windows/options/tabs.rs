@@ -49,6 +49,10 @@ pub(crate) enum Field {
     /// Debug → "pressing Esc shows debugger" (Esc opens the debugger, never
     /// quits). See BUG-1.
     EscShowsDebugger,
+    /// Debug → "Registers can be edited".
+    RegistersEditable,
+    /// Debug → "Start in debugger".
+    StartInDebugger,
     /// Toggle "pure bgb mode": flip every slopgb-departure setting to its
     /// bgb-faithful value (and back to the slopgb defaults).
     PureBgb,
@@ -260,6 +264,8 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         Field::TileHex8bit => s.tile_hex_8bit = !s.tile_hex_8bit,
         Field::MemoryWindow => s.memory_window = !s.memory_window,
         Field::EscShowsDebugger => s.esc_shows_debugger = !s.esc_shows_debugger,
+        Field::RegistersEditable => s.registers_editable = !s.registers_editable,
+        Field::StartInDebugger => s.start_in_debugger = !s.start_in_debugger,
         Field::PureBgb => {
             if pure_bgb(s) {
                 // Already bgb-faithful → restore the slopgb defaults.
@@ -339,6 +345,8 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
             s.tile_hex_8bit = d.tile_hex_8bit;
             s.memory_window = d.memory_window;
             s.esc_shows_debugger = d.esc_shows_debugger;
+            s.registers_editable = d.registers_editable;
+            s.start_in_debugger = d.start_in_debugger;
         }
         // The four wired break conditions; the rest of the tab is inert.
         OptionsTab::Exceptions => {

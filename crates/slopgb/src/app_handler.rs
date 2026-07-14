@@ -116,6 +116,15 @@ impl ApplicationHandler for App {
                 }
             }
         }
+        // Debug → "Start in debugger": open the debugger window at launch (unless
+        // SLOPGB_OPEN_TOOLS already did, to avoid toggling it back closed).
+        if self.settings.start_in_debugger && !self.tools.is_open(ui::ToolWindow::Debugger) {
+            self.tools.toggle(event_loop, ui::ToolWindow::Debugger);
+            self.push_disasm_fmt();
+            self.tools
+                .set_registers_editable(self.settings.registers_editable);
+            self.tools.set_symbols(self.symbols.clone());
+        }
         // Misc → "Load ROM dialog on startup": if enabled and no ROM was given
         // on the command line, pop the file picker so the user can pick one.
         if self.settings.load_rom_dialog_on_startup && !self.rom_loaded {

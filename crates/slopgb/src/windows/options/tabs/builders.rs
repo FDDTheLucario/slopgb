@@ -251,10 +251,12 @@ pub(super) fn debug(s: &Settings, content: Rect) -> Vec<Ctrl> {
         Field::PureBgb,
     ));
     l.row();
-    // Inert / always-on debugger settings (bgb black; some checked by default).
-    v.push(Ctrl::inert(
+    // "Registers can be edited" is live (gates the register-edit context menu);
+    // "Live update memory viewer" / "GB CPU usage meter" stay inert (no backend).
+    v.push(Ctrl::live(
         rc(l.at(), "Registers can be edited"),
-        chk("Registers can be edited", true),
+        chk("Registers can be edited", s.registers_editable),
+        Field::RegistersEditable,
     ));
     v.push(Ctrl::inert(
         rc(l.row().at(), "Live update memory viewer"),
@@ -269,9 +271,10 @@ pub(super) fn debug(s: &Settings, content: Rect) -> Vec<Ctrl> {
         rc(l.row().at(), "GB CPU usage meter"),
         chk("GB CPU usage meter", true),
     ));
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
         rc(l.row().at(), "Start in debugger"),
-        chk("Start in debugger", false),
+        chk("Start in debugger", s.start_in_debugger),
+        Field::StartInDebugger,
     ));
     l.row();
     // The disassembler dialect: a live dropdown (click cycles rgbds ↔ no$gmb).
