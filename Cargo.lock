@@ -1455,6 +1455,14 @@ name = "slopgb-w65c816"
 version = "0.1.0"
 
 [[package]]
+name = "slopgb-w65c816-plugin"
+version = "0.1.0"
+dependencies = [
+ "slopgb-plugin-api",
+ "slopgb-w65c816",
+]
+
+[[package]]
 name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

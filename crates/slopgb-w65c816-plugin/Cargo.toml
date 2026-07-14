@@ -1,0 +1,24 @@
+[package]
+name = "slopgb-w65c816-plugin"
+description = "slopgb coprocessor plugin: the clean-room 65C816 (SNES/SGB SNES-side CPU) hosted in a wasm sandbox with guest SNES RAM + comm ports."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+# cdylib is the loadable wasm artifact; rlib lets the native unit tests link the
+# wrapper directly (the Coprocessor logic is target-independent).
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+slopgb-plugin-api = { path = "../slopgb-plugin-api" }
+slopgb-w65c816 = { path = "../slopgb-w65c816" }
+
+# NOT `[lints] workspace = true`: like slopgb-plugin-api, the wasm export macro
+# (`slopgb_coprocessor_plugin!`) needs `#[unsafe(no_mangle)]` linkage markers the
+# workspace `forbid(unsafe_code)` rejects. `deny` lets the macro scope-`allow`
+# them while everything else stays lint-checked safe (no `unsafe` blocks here).
+[lints.rust]
+unsafe_code = "deny"

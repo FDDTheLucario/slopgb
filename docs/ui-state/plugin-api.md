@@ -103,7 +103,18 @@ currently serves.
 |---|---|---|
 | Introspection (read-only) | `INTROSPECTION` | **served now** |
 | Mutation (write regs/memory, breakpoints) | `MUTATE` | reserved — rejected at load |
-| Subsystem hosting (e.g. be the SPC700) | `SUBSYSTEM` | reserved — rejected at load |
+| Subsystem hosting (e.g. be the SPC700) | `SUBSYSTEM` | **served now** via `LoadedCoprocessor` |
+
+## Coprocessor plugins (tier 3)
+
+A coprocessor plugin implements `Coprocessor` (invoke `slopgb_coprocessor_plugin!`)
+and hosts a whole chip inside the sandbox: the chip's RAM never crosses the
+boundary, only its comm ports do. The host drives it with `reset` / `run_until`
+(the chip's own cycle domain) / `port_write` / `port_read` through
+`LoadedCoprocessor`. `crates/slopgb-w65c816-plugin` is the reference: it wraps
+the clean-room 65C816 (`slopgb-w65c816`) over a guest SNES-RAM + comm-port bus —
+the SNES-side CPU route for a full SGB. Round-trip proof:
+`slopgb-plugin-host/tests/w65c816_roundtrip.rs`.
 
 ## Golden-safe rules
 
