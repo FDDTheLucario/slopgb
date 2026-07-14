@@ -30,6 +30,42 @@ box exists only on `Model::Sgb`/`Sgb2`, so `Dmg`/`Cgb` never touch the seam
 (golden-safe). Verified byte-identical: `golden_fingerprint` + mooneye 93/93 +
 the SGB audio unit tests, all unchanged after the extraction.
 
+## SNES-side coprocessor plugins — status + the full-integration path
+
+The SNES-side chips exist as standalone wasm coprocessor plugins:
+
+- **`slopgb-spc700-plugin`** wraps `slopgb-snes-apu` (SPC700 + S-DSP — the exact
+  built-in code) as a tier-3 `Coprocessor`; clocking it in wasm runs the real
+  IPL ROM (`$AA`/`$BB` handshake) and the S-DSP synthesizes. Proven in
+  `slopgb-plugin-host/tests/spc700_roundtrip.rs`.
+- **`slopgb-w65c816-plugin`** wraps the clean-room 65C816 (the SNES CPU) with a
+  guest SNES-RAM + comm-port bus. Proven in `w65c816_roundtrip.rs`.
+
+**Not yet wired into a live SGB machine** (so DATA_SND/JUMP still no-op in core —
+see the routing + BIOS-gating tables below). The remaining integration work,
+smallest-first:
+
+1. **A PCM-drain path in the tier-3 ABI.** `Coprocessor` today is
+   reset/run_until/port_write/port_read only; the SPC700 plugin surfaces a sample
+   *count*, not the stream. Add a bulk-drain call (e.g. a host import the plugin
+   pushes samples through, or a `drain_pcm` export) so the host can mix the
+   plugin's PCM like the built-in's `mix_into`.
+2. **Decouple `AudioCoprocessor` from `Interconnect`.** `poll(&mut Interconnect)`
+   is a core-private type, so the trait can't be implemented outside core. Move
+   the bus→command extraction into `GameBoy` and give the trait comm-port-level
+   methods (feed SOUND ports / bulk-upload APU RAM / drain PCM), then make the
+   trait `pub` — keep it byte-identical (same ops, same order; the built-in stays
+   default).
+3. **A public `GameBoy` injection API** (`set_audio_coprocessor`) so the
+   frontend/host can install a plugin-backed `AudioCoprocessor` (core can't
+   depend on `wasmi`; the adapter lives in the host and forwards to the wasm
+   plugin).
+4. **Combine the 65C816 + SPC700 + DSP into one SNES coprocessor** running the
+   real SGB sound driver, so a DATA_SND packet reaches SNES work RAM and the
+   driver programs the SPC700 — which needs the SGB system ROM (not shipped; see
+   BIOS gating) or a game's self-uploaded driver (SOU_TRN, which already works on
+   the built-in path).
+
 ## Sources
 
 Every table and quirk is a verbatim port of a cited reference:
