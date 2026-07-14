@@ -3,8 +3,15 @@
 //! a slopgb coprocessor plugin with a comm-port bus). Built only from the WDC
 //! datasheet, Eyes & Lichty, and test vectors/ROMs — never an emulator's source.
 
+mod addressing;
+mod cpu;
+mod dispatch;
+mod ops_ctrl;
+mod ops_load;
+mod ops_stack;
 mod regs;
 
+pub use cpu::Cpu;
 pub use regs::{Regs, flag};
 
 /// The 24-bit bus a 65C816 talks to. A flat RAM backs the vector tests; the

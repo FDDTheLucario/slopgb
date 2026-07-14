@@ -4,6 +4,7 @@ target/
 *.log
 /test-roms/mts-*
 /test-roms/game-boy-test-roms-v7.0/
+/test-roms/65816-tests/
 /test-roms/*.tar.xz
 /test-roms/*.zip
 *.sav
