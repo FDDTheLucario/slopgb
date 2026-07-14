@@ -1,0 +1,15 @@
+[package]
+name = "slopgb-w65c816"
+description = "Clean-room WDC 65C816 CPU core (SNES/SGB SNES-side CPU), bus-generic; hosted as a slopgb coprocessor plugin."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# The CPU core is pure + bus-generic (std only). The coprocessor-plugin wrapper
+# (slopgb-plugin-api) is added when the core is complete enough to host.
+
+[lints]
+workspace = true

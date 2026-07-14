@@ -6,6 +6,7 @@ members = [
     "crates/slopfp",
     "crates/slopgb-plugin-api",
     "crates/slopgb-plugin-host",
+    "crates/slopgb-w65c816",
 ]
 
 [workspace.package]

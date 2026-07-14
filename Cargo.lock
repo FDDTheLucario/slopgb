@@ -1451,6 +1451,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "slopgb-w65c816"
+version = "0.1.0"
+
+[[package]]
 name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
