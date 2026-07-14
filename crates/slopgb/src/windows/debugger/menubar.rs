@@ -228,6 +228,7 @@ pub fn address_list_menu(
     addrs: &[u16],
     clear: fn(u16) -> DebugAction,
     symbols: &SymbolTable,
+    bank_of: impl Fn(u16) -> u16,
     origin: (i32, i32),
 ) -> OpenMenu {
     let entries: Vec<(MenuItem, MenuChoice)> = if addrs.is_empty() {
@@ -240,7 +241,7 @@ pub fn address_list_menu(
                 // snapshot can never re-arm an entry the user cleared elsewhere.
                 let choice = MenuChoice::Act(clear(a));
                 // Append the symbol name when the address is an exact symbol.
-                let label = match symbols.name_at(a) {
+                let label = match symbols.name_at(bank_of(a), a) {
                     Some(name) => format!("{}:{a:04X} {name}", region_label(a)),
                     None => format!("{}:{a:04X}", region_label(a)),
                 };

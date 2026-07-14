@@ -181,13 +181,14 @@ pub fn memory_rows(
     start: u16,
     count: usize,
     syms: &SymbolTable,
+    bank_of: impl Fn(u16) -> u16,
 ) -> Vec<String> {
     (0..count)
         .map(|i| {
             let base = start.wrapping_add((i * 16) as u16);
             let bytes: Vec<u8> = (0..16).map(|j| read(base.wrapping_add(j))).collect();
             let mut row = hex_row(&format!("{}:{base:04X}", region_label(base)), &bytes);
-            if let Some(name) = syms.name_at(base) {
+            if let Some(name) = syms.name_at(bank_of(base), base) {
                 row.push(' ');
                 row.push_str(name);
             }
@@ -204,9 +205,10 @@ pub fn render_memory(
     start: u16,
     theme: &Theme,
     syms: &SymbolTable,
+    bank_of: impl Fn(u16) -> u16,
 ) {
     let count = (rect.h / line_height()).max(0) as usize + 1;
-    let rows = memory_rows(read, start, count, syms);
+    let rows = memory_rows(read, start, count, syms, bank_of);
     let texts: Vec<&str> = rows.iter().map(String::as_str).collect();
     scroll_list(c, rect, &texts, 0, None, theme);
 }
@@ -584,6 +586,7 @@ impl OpenMenu {
 /// `disasm_rows` from the same view-base the renderer used (variable-length
 /// instructions ⇒ fixed pixel math can't work), so hit-test and render agree.
 #[must_use]
+#[allow(clippy::too_many_arguments)]
 pub fn target_at(
     read: impl Fn(u16) -> u8,
     area: Rect,
@@ -592,6 +595,7 @@ pub fn target_at(
     sp: u16,
     px: i32,
     py: i32,
+    bank_of: impl Fn(u16) -> u16,
 ) -> ClickTarget {
     let l = DebuggerLayout::for_size(area.w, area.h);
     let lh = line_height().max(1);
@@ -609,6 +613,7 @@ pub fn target_at(
             ),
             &st.symbols,
             st.disasm_fmt,
+            bank_of,
         );
         return rows
             .get(row)

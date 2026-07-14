@@ -158,6 +158,7 @@ pub fn annotate_symbols(
     rows: Vec<DisasmRow>,
     syms: &SymbolTable,
     fmt: DisasmFmt,
+    bank_of: impl Fn(u16) -> u16,
 ) -> Vec<DisasmRow> {
     if syms.is_empty() {
         return rows;
@@ -165,7 +166,7 @@ pub fn annotate_symbols(
     let mut out = Vec::with_capacity(rows.len());
     for mut row in rows {
         if !row.is_label {
-            if let Some(name) = syms.name_at(row.addr) {
+            if let Some(name) = syms.name_at(bank_of(row.addr), row.addr) {
                 // Blank spacer above the label for breathing room (bgb parity),
                 // skipped when the label is the very top row of the pane.
                 if !out.is_empty() {
@@ -183,7 +184,10 @@ pub fn annotate_symbols(
                     is_label: true,
                 });
             }
-            if let Some((t, n)) = row.target.and_then(|t| syms.name_at(t).map(|n| (t, n))) {
+            if let Some((t, n)) = row
+                .target
+                .and_then(|t| syms.name_at(bank_of(t), t).map(|n| (t, n)))
+            {
                 // Replace only the *last* hex occurrence (the operand): the same
                 // digits also appear in the row's leading address label.
                 row.text = replace_last(&row.text, &target_hex(t, fmt), n);
@@ -235,6 +239,7 @@ pub fn render_disasm(
     data_hints: &BTreeSet<u16>,
     fmt: DisasmFmt,
     symbols: &SymbolTable,
+    bank_of: impl Fn(u16) -> u16,
     theme: &Theme,
 ) -> Vec<DisasmRow> {
     let lh = line_height();
@@ -243,6 +248,7 @@ pub fn render_disasm(
         disasm_rows(read, start, count, data_hints, fmt),
         symbols,
         fmt,
+        bank_of,
     );
     let texts: Vec<&str> = rows.iter().map(|r| r.text.as_str()).collect();
     // Highlight the *instruction* row at PC, not a label line sharing its address.

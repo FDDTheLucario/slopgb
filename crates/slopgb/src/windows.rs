@@ -334,6 +334,13 @@ pub(crate) fn banked_read(gb: &GameBoy, sel: Option<u16>, addr: u16) -> u8 {
     }
 }
 
+/// The concrete bank the dump shows for `addr`: the pinned selection folded to
+/// `addr`'s region, or the live-mapped bank when following live. The bank a
+/// symbol must match to be named at `addr` (bank-discriminated `name_at`).
+pub(crate) fn shown_bank(gb: &GameBoy, sel: Option<u16>, addr: u16) -> u16 {
+    browse_bank(sel, gb, addr).unwrap_or_else(|| live_bank(gb, addr))
+}
+
 /// Write `val` to `addr` through the browser selection `sel` — the write mirror
 /// of [`banked_read`], so an edit lands exactly where the dump shows it. Follow-
 /// live (`None`) uses the RAMG-gated `debug_write` (matching the gated dump: a
@@ -423,6 +430,7 @@ fn render_memory_window(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme,
         st.mem_base,
         theme,
         &st.symbols,
+        |a| shown_bank(gb, st.bank, a),
     );
     // Draggable scrollbar on the dump's right edge.
     let vis_rows = (body.h / lh).max(0);
@@ -453,7 +461,10 @@ fn render_memory_window(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme,
     }
     let bar_y = area.bottom() - lh;
     c.hline(area.x, bar_y, area.w, theme.border);
-    let loc = match st.symbols.nearest_before(st.mem_base) {
+    let loc = match st
+        .symbols
+        .nearest_before(shown_bank(gb, st.bank, st.mem_base), st.mem_base)
+    {
         Some((name, base)) => format!("{:04X}  {name}+{:X}", st.mem_base, st.mem_base - base),
         None => format!("{:04X}  ----", st.mem_base),
     };
@@ -515,6 +526,7 @@ fn render_debugger(
         &st.data_hints,
         st.disasm_fmt,
         &st.symbols,
+        |a| live_bank(gb, a),
         theme,
     );
     // Profiler: overlay per-line execution counts while logging (MB5).
@@ -548,6 +560,7 @@ fn render_debugger(
         st.mem_base,
         theme,
         &st.symbols,
+        |a| shown_bank(gb, st.mem_bank, a),
     );
     if let Some(chip) = bank_chip_label(gb, st.mem_base, st.mem_bank) {
         let w = (chip.len() as i32) * GLYPH_W as i32;
