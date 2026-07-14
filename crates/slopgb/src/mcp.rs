@@ -17,17 +17,20 @@
 
 pub mod addr;
 pub mod json;
+pub mod plugin_host;
 pub mod png;
 pub mod server;
 pub mod tools;
 pub mod vram;
 
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError};
 
 use slopgb_core::GameBoy;
 
 use crate::dbg::Debugger;
 use crate::symbols::SymbolTable;
+use plugin_host::{FrontendToolContext, PluginMeta, ToolPlugins};
 use tools::{Call, ToolResult};
 
 /// Default port for the MCP server when the menu's port prompt is left blank.
@@ -41,34 +44,54 @@ pub fn parse_port(s: &str) -> u16 {
     s.trim().parse().unwrap_or(DEFAULT_PORT)
 }
 
+/// What a queued job runs: a built-in [`Call`], or a loaded tool plugin
+/// (addressed by name, with its raw MCP `arguments` object as a JSON string).
+pub enum ToolInvocation {
+    Builtin(Call),
+    Plugin { name: String, args: String },
+}
+
 /// A tool call handed from the socket thread to the UI thread, with a one-shot
 /// channel for the reply. The socket thread blocks on the reply; the UI drains
 /// jobs each pump.
 pub struct Job {
-    pub call: Call,
+    pub call: ToolInvocation,
     pub reply: SyncSender<Result<ToolResult, String>>,
 }
 
-/// UI-side MCP state: owns the running [`server::Server`] and the job queue it
-/// feeds. Inert (all methods no-ops) until [`Self::start`] succeeds. Held by the
-/// `App` and pumped once per event-loop wake — mirrors [`crate::link::Link`].
+/// UI-side MCP state: owns the running [`server::Server`], the job queue it
+/// feeds, and the loaded tool plugins. Inert (all methods no-ops) until
+/// [`Self::start`] succeeds. Held by the `App` and pumped once per event-loop
+/// wake — mirrors [`crate::link::Link`].
 #[derive(Default)]
 pub struct Mcp {
     server: Option<server::Server>,
     rx: Option<Receiver<Job>>,
+    tools: ToolPlugins,
+    /// Cloned to the socket thread at [`Self::start`] so `tools/list` can
+    /// advertise plugin tools without touching the UI-thread modules.
+    plugin_meta: Arc<Vec<PluginMeta>>,
 }
 
 impl Mcp {
+    /// Build with a set of loaded tool plugins (from `--plugins`). Their
+    /// metadata is snapshot now so `tools/list` can advertise them. Use
+    /// [`Mcp::default`] for none.
     #[must_use]
-    pub fn new() -> Self {
-        Self::default()
+    pub fn with_tool_plugins(tools: ToolPlugins) -> Self {
+        let plugin_meta = Arc::new(tools.metadata());
+        Self {
+            tools,
+            plugin_meta,
+            ..Self::default()
+        }
     }
 
     /// Bind the server on `127.0.0.1:port` and begin serving. Replaces any
     /// existing server. Errors (returned) if the port is already in use.
     pub fn start(&mut self, port: u16) -> std::io::Result<()> {
         let (tx, rx) = std::sync::mpsc::channel();
-        let server = server::Server::start(port, tx)?;
+        let server = server::Server::start(port, tx, self.plugin_meta.clone())?;
         self.server = Some(server);
         self.rx = Some(rx);
         Ok(())
@@ -118,7 +141,21 @@ impl Mcp {
         loop {
             match rx.try_recv() {
                 Ok(job) => {
-                    let result = tools::dispatch(&job.call, gb, dbg.breakpoints_mut(), symbols);
+                    let result = match &job.call {
+                        ToolInvocation::Builtin(call) => {
+                            tools::dispatch(call, gb, dbg.breakpoints_mut(), symbols)
+                        }
+                        ToolInvocation::Plugin { name, args } => {
+                            let mut ctx = FrontendToolContext {
+                                gb,
+                                breakpoints: dbg.breakpoints_mut(),
+                                symbols,
+                            };
+                            self.tools
+                                .dispatch(name, args, &mut ctx)
+                                .unwrap_or_else(|| Err(format!("unknown tool '{name}'")))
+                        }
+                    };
                     // The socket thread may have already timed out and dropped the
                     // receiver; a failed send is fine (its request is abandoned).
                     let _ = job.reply.send(result);

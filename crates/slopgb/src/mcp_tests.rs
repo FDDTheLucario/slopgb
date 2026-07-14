@@ -45,7 +45,7 @@ fn parse_port_defaults_on_blank_or_garbage() {
 
 #[test]
 fn status_label_reflects_the_server() {
-    let mut mcp = Mcp::new();
+    let mut mcp = Mcp::default();
     assert_eq!(mcp.status_label(), None);
     mcp.start(0).unwrap();
     let label = mcp.status_label().unwrap();
@@ -57,7 +57,7 @@ fn status_label_reflects_the_server() {
 
 #[test]
 fn pump_without_server_is_a_noop() {
-    let mut mcp = Mcp::new();
+    let mut mcp = Mcp::default();
     assert!(!mcp.is_active());
     let gb = GameBoy::new(Model::Dmg, vec![0u8; 0x8000]).unwrap();
     let mut dbg = Debugger::default();
@@ -67,7 +67,7 @@ fn pump_without_server_is_a_noop() {
 
 #[test]
 fn start_then_pump_serves_a_live_tool_call() {
-    let mut mcp = Mcp::new();
+    let mut mcp = Mcp::default();
     mcp.start(0).unwrap();
     assert!(mcp.is_active());
     let port = mcp.port().unwrap();

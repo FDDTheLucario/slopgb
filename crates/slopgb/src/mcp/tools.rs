@@ -1,8 +1,10 @@
-//! The seven MCP tools' logic, run on the UI thread against the live machine.
+//! The built-in MCP tools' logic, run on the UI thread against the live machine.
 //! Each is read-only `&self` introspection except `breakpoint`, which toggles
 //! the App-owned breakpoint set. Formatting reuses the core disassembler and
 //! decoders, the debugger's expression evaluator, and the symbol table; nothing
-//! here advances a cycle, so the whole surface is golden-safe.
+//! here advances a cycle, so the whole surface is golden-safe. The `pub(crate)`
+//! formatters here are also what the reference tool plugins delegate to (via
+//! `plugin_host::FrontendToolContext`), so a ported tool matches byte-for-byte.
 
 use std::fmt::Write as _;
 
@@ -106,7 +108,7 @@ pub fn parse_scale(s: Option<&str>) -> Result<u32, String> {
 /// Encode `px` (XRGB8888, `w×h`) as a PNG, nearest-neighbor magnified by `scale`
 /// (`1` = native). Pixel-art screens are tiny, so integer upscaling is enough for
 /// a model that struggles to read them at native size.
-fn encode_scaled(px: &[u32], w: usize, h: usize, scale: u32) -> Vec<u8> {
+pub(crate) fn encode_scaled(px: &[u32], w: usize, h: usize, scale: u32) -> Vec<u8> {
     if scale <= 1 {
         return png::encode(px, w, h);
     }
@@ -125,7 +127,7 @@ fn encode_scaled(px: &[u32], w: usize, h: usize, scale: u32) -> Vec<u8> {
 /// `BB:AAAA\tLABEL\tinstruction\tcycles` (empty label → two tabs). Reads through
 /// the requested bank, and substitutes a known symbol name for a branch/call
 /// operand (bgb's inline label).
-fn disassemble(gb: &GameBoy, symbols: &SymbolTable, from: Addr, to: Addr) -> String {
+pub(crate) fn disassemble(gb: &GameBoy, symbols: &SymbolTable, from: Addr, to: Addr) -> String {
     let read = |a: u16| gb.debug_read_banked(from.bank, a);
     let mut out = String::new();
     let mut a = from.addr;
@@ -181,7 +183,7 @@ fn dump_rows(from: Addr, to: Addr, cell: impl Fn(u16, u16) -> String) -> String 
 /// List every continuous span the CDL has logged, one range per line in the
 /// tools' address form: `BB:AAAA-BB:AAAA` for the banked regions (bank on both
 /// ends), bare `AAAA-AAAA` elsewhere. Empty when the log is off / nothing logged.
-fn cdl_ranges(gb: &GameBoy) -> String {
+pub(crate) fn cdl_ranges(gb: &GameBoy) -> String {
     let mut out = String::new();
     for r in gb.cdl_logged_ranges() {
         if addr::Region::of(r.start).banked() {
@@ -216,7 +218,7 @@ fn cdl_word(flag: u8) -> String {
 }
 
 /// The one-line register readout the debugger window shows.
-fn registers(gb: &GameBoy) -> String {
+pub(crate) fn registers(gb: &GameBoy) -> String {
     let r = gb.cpu_regs();
     let rd = |a| gb.debug_read(a);
     let ram = gb
@@ -247,7 +249,7 @@ fn registers(gb: &GameBoy) -> String {
 }
 
 /// Evaluate a bgb-style debugger expression against the live regs + memory.
-fn expr_eval(gb: &GameBoy, s: &str) -> String {
+pub(crate) fn expr_eval(gb: &GameBoy, s: &str) -> String {
     let regs = gb.cpu_regs();
     match crate::windows::debugger::eval_expr(s, &regs, |a| gb.debug_read(a)) {
         Ok(v) => format!("{v:#06X} ({v})"),

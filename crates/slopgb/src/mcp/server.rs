@@ -14,15 +14,24 @@
 
 use std::io::{BufReader, Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::thread;
 use std::time::Duration;
 
-use super::Job;
 use super::json::Json;
+use super::plugin_host::PluginMeta;
 use super::tools::{Call, ToolResult, parse_scale};
+use super::{Job, ToolInvocation};
 use crate::net_worker::ReapedWorker;
+
+/// What the request handlers need to serve a call: the channel to the UI thread
+/// and the loaded tool-plugin metadata (for `tools/list` + routing `tools/call`).
+struct Dispatch<'a> {
+    tx: &'a Sender<Job>,
+    plugins: &'a [PluginMeta],
+}
 
 /// The MCP protocol revision we advertise if the client doesn't ask for one.
 const PROTOCOL_VERSION: &str = "2024-11-05";
@@ -47,12 +56,18 @@ pub struct Server {
 
 impl Server {
     /// Bind `127.0.0.1:port` (a taken port errors synchronously) and serve on a
-    /// background thread, forwarding tool calls over `tx`. Port 0 → an OS-chosen
-    /// ephemeral port (see [`Self::port`]).
-    pub fn start(port: u16, tx: Sender<Job>) -> std::io::Result<Server> {
+    /// background thread, forwarding tool calls over `tx`. `plugins` is the
+    /// loaded tool-plugin metadata (advertised in `tools/list`, routed in
+    /// `tools/call`). Port 0 → an OS-chosen ephemeral port (see [`Self::port`]).
+    pub fn start(
+        port: u16,
+        tx: Sender<Job>,
+        plugins: Arc<Vec<PluginMeta>>,
+    ) -> std::io::Result<Server> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port))?;
         let bound = listener.local_addr().map_or(port, |a| a.port());
-        let worker = ReapedWorker::spawn(move |stop| serve(&listener, &stop, &tx));
+        let worker =
+            ReapedWorker::spawn(move |stop| serve(&listener, &stop, &tx, plugins.as_slice()));
         Ok(Server {
             worker,
             port: bound,
@@ -73,16 +88,17 @@ impl Server {
 }
 
 /// Poll-accept connections until stopped, handling each to completion.
-fn serve(listener: &TcpListener, stop: &AtomicBool, tx: &Sender<Job>) {
+fn serve(listener: &TcpListener, stop: &AtomicBool, tx: &Sender<Job>, plugins: &[PluginMeta]) {
     if listener.set_nonblocking(true).is_err() {
         return;
     }
+    let d = Dispatch { tx, plugins };
     loop {
         if stop.load(Ordering::Relaxed) {
             return;
         }
         match listener.accept() {
-            Ok((stream, _)) => handle_conn(stream, stop, tx),
+            Ok((stream, _)) => handle_conn(stream, stop, &d),
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 thread::sleep(ACCEPT_POLL);
             }
@@ -92,7 +108,7 @@ fn serve(listener: &TcpListener, stop: &AtomicBool, tx: &Sender<Job>) {
 }
 
 /// Serve requests on one connection (keep-alive) until it closes or stops.
-fn handle_conn(stream: TcpStream, stop: &AtomicBool, tx: &Sender<Job>) {
+fn handle_conn(stream: TcpStream, stop: &AtomicBool, d: &Dispatch) {
     if stream.set_read_timeout(Some(READ_TIMEOUT)).is_err() {
         return;
     }
@@ -108,7 +124,7 @@ fn handle_conn(stream: TcpStream, stop: &AtomicBool, tx: &Sender<Job>) {
         }
         match read_request(&mut reader, stop) {
             Ok(Some(req)) => {
-                let (status, ctype, body) = respond(&req, tx);
+                let (status, ctype, body) = respond(&req, d);
                 if write_response(&mut writer, status, ctype, &body).is_err() {
                     return;
                 }
@@ -263,10 +279,10 @@ fn write_response(
 }
 
 /// Turn a request into an HTTP `(status, content-type, body)`.
-fn respond(req: &Request, tx: &Sender<Job>) -> (&'static str, Option<&'static str>, Vec<u8>) {
+fn respond(req: &Request, d: &Dispatch) -> (&'static str, Option<&'static str>, Vec<u8>) {
     match req.method.as_str() {
         "POST" => match super::json::parse(&String::from_utf8_lossy(&req.body)) {
-            Ok(msg) => match process(&msg, tx) {
+            Ok(msg) => match process(&msg, d) {
                 Some(resp) => (
                     "200 OK",
                     Some("application/json"),
@@ -292,9 +308,9 @@ fn respond(req: &Request, tx: &Sender<Job>) -> (&'static str, Option<&'static st
 
 /// Dispatch one JSON-RPC message. `None` for a notification (no `id` → no
 /// response). Handles a single object; a batch array maps element-wise.
-fn process(msg: &Json, tx: &Sender<Job>) -> Option<Json> {
+fn process(msg: &Json, d: &Dispatch) -> Option<Json> {
     if let Json::Arr(items) = msg {
-        let out: Vec<Json> = items.iter().filter_map(|m| process(m, tx)).collect();
+        let out: Vec<Json> = items.iter().filter_map(|m| process(m, d)).collect();
         return (!out.is_empty()).then_some(Json::Arr(out));
     }
     let method = msg.get("method").and_then(Json::as_str).unwrap_or("");
@@ -324,8 +340,8 @@ fn process(msg: &Json, tx: &Sender<Job>) -> Option<Json> {
             ]))
         }
         "ping" => Ok(Json::obj([])),
-        "tools/list" => Ok(Json::obj([("tools", tool_defs())])),
-        "tools/call" => tool_call(msg, tx),
+        "tools/list" => Ok(Json::obj([("tools", tool_defs(d.plugins))])),
+        "tools/call" => tool_call(msg, d),
         _ if method.starts_with("notifications/") => return None,
         _ => Err((-32601, format!("method not found: {method}"))),
     };
@@ -341,16 +357,28 @@ fn process(msg: &Json, tx: &Sender<Job>) -> Option<Json> {
 }
 
 /// Execute a `tools/call`, returning an MCP tool-result value (tool-level errors
-/// are `isError` results, so the agent sees them — not JSON-RPC errors).
-fn tool_call(msg: &Json, tx: &Sender<Job>) -> Result<Json, (i64, String)> {
+/// are `isError` results, so the agent sees them — not JSON-RPC errors). A name
+/// a loaded plugin owns routes to the plugin (it wins over a same-named
+/// built-in); anything else is a built-in.
+fn tool_call(msg: &Json, d: &Dispatch) -> Result<Json, (i64, String)> {
     let params = msg.get("params");
     let name = params
         .and_then(|p| p.get("name"))
         .and_then(Json::as_str)
         .unwrap_or("");
     let args = params.and_then(|p| p.get("arguments"));
-    match build_call(name, args) {
-        Ok(call) => Ok(match run_on_ui(call, tx) {
+    let invocation = if d.plugins.iter().any(|p| p.name == name) {
+        // Hand the raw arguments object to the plugin as JSON to parse itself.
+        let args_json = args.map_or_else(|| "{}".to_owned(), Json::render);
+        Ok(ToolInvocation::Plugin {
+            name: name.to_owned(),
+            args: args_json,
+        })
+    } else {
+        build_call(name, args).map(ToolInvocation::Builtin)
+    };
+    match invocation {
+        Ok(call) => Ok(match run_on_ui(call, d.tx) {
             Ok(ToolResult::Text(t)) => tool_content(vec![text_block(&t)], false),
             Ok(ToolResult::Image(png)) => tool_content(
                 vec![Json::obj([
@@ -367,7 +395,7 @@ fn tool_call(msg: &Json, tx: &Sender<Job>) -> Result<Json, (i64, String)> {
 }
 
 /// Forward a call to the UI thread and wait (bounded) for its reply.
-fn run_on_ui(call: Call, tx: &Sender<Job>) -> Result<ToolResult, String> {
+fn run_on_ui(call: ToolInvocation, tx: &Sender<Job>) -> Result<ToolResult, String> {
     let (rtx, rrx) = mpsc::sync_channel(1);
     tx.send(Job { call, reply: rtx })
         .map_err(|_| "emulator is shutting down".to_owned())?;
@@ -491,8 +519,29 @@ fn tool_opt(name: &str, desc: &str, required: &[(&str, &str)], optional: &[(&str
     ])
 }
 
-/// The MCP tool catalogue advertised by `tools/list`.
-fn tool_defs() -> Json {
+/// The MCP tool catalogue advertised by `tools/list`: the built-ins whose name
+/// no loaded plugin provides, followed by every plugin tool (a plugin tool wins
+/// over a same-named built-in, so each name appears once).
+fn tool_defs(plugins: &[PluginMeta]) -> Json {
+    let mut defs = builtin_tool_defs();
+    if let Json::Arr(items) = &mut defs {
+        items.retain(|t| {
+            let name = t.get("name").and_then(Json::as_str).unwrap_or("");
+            !plugins.iter().any(|p| p.name == name)
+        });
+        for p in plugins {
+            items.push(Json::obj([
+                ("name", Json::str(p.name.as_str())),
+                ("description", Json::str(p.description.as_str())),
+                ("inputSchema", p.schema.clone()),
+            ]));
+        }
+    }
+    defs
+}
+
+/// The built-in tool catalogue (before merging in plugin tools).
+fn builtin_tool_defs() -> Json {
     let range = &[
         ("from", "start address, AAAA or BB:AAAA hex (BB = bank)"),
         ("to", "end address (inclusive), same region/bank as `from`"),

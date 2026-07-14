@@ -223,6 +223,18 @@ fn load_plugins(opts: &Options, settings: &windows::options::Settings) -> Plugin
     }
 }
 
+/// Load tier-2 MCP tool plugins from the same `--plugins` / `SLOPGB_PLUGINS_DIR`
+/// directory. A tier-1 module there is skipped by the tool loader (and vice
+/// versa), so both kinds can share the directory. Empty when unset; the MCP
+/// server advertises + dispatches whatever loads here.
+fn load_tool_plugins(opts: &Options) -> mcp::plugin_host::ToolPlugins {
+    let dir = opts
+        .plugins_dir
+        .clone()
+        .or_else(|| env::var_os("SLOPGB_PLUGINS_DIR").map(PathBuf::from));
+    mcp::plugin_host::ToolPlugins::load(dir.as_deref())
+}
+
 /// Resolve the optional SGB BIOS bytes from `--sgb-bios` or `SLOPGB_SGB_BIOS`,
 /// reading the file. A read error is logged and treated as no BIOS (non-fatal).
 /// The border/title-palette are *not* extracted from it — slopgb is high-level
@@ -428,6 +440,7 @@ impl App {
             .into_iter()
             .map(windows::options::PluginEntry::from)
             .collect();
+        let mcp = mcp::Mcp::with_tool_plugins(load_tool_plugins(&opts));
         let mut app = Self {
             opts,
             boot_rom,
@@ -471,7 +484,7 @@ impl App {
             file_picker: None,
             picker_last_click: None,
             link: link::Link::new(),
-            mcp: mcp::Mcp::new(),
+            mcp,
             plugins,
             recent,
             menu_popup: None,

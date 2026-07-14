@@ -18,7 +18,7 @@ fn base64_known_vectors() {
 
 #[test]
 fn tool_defs_lists_every_named_tool() {
-    let Json::Arr(tools) = tool_defs() else {
+    let Json::Arr(tools) = tool_defs(&[]) else {
         panic!("tools is an array")
     };
     assert_eq!(tools.len(), 9);
@@ -71,7 +71,7 @@ fn build_call_validates_arguments() {
 
 #[test]
 fn image_tool_schemas_mark_scale_optional() {
-    let Json::Arr(tools) = tool_defs() else {
+    let Json::Arr(tools) = tool_defs(&[]) else {
         panic!("array")
     };
     for name in ["vram", "screencap"] {
@@ -100,11 +100,15 @@ fn image_tool_schemas_mark_scale_optional() {
 #[test]
 fn process_handles_handshake_methods() {
     let (tx, _rx) = std::sync::mpsc::channel::<Job>();
+    let d = Dispatch {
+        tx: &tx,
+        plugins: &[],
+    };
     let init = super::super::json::parse(
         r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#,
     )
     .unwrap();
-    let r = process(&init, &tx).unwrap().render();
+    let r = process(&init, &d).unwrap().render();
     assert!(r.contains("\"result\"") && r.contains("serverInfo"));
     assert!(
         r.contains("2025-06-18"),
@@ -113,18 +117,18 @@ fn process_handles_handshake_methods() {
 
     let list =
         super::super::json::parse(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#).unwrap();
-    let r = process(&list, &tx).unwrap().render();
+    let r = process(&list, &d).unwrap().render();
     assert!(r.contains("disassemble") && r.contains("registers"));
 
     // A notification (no id) gets no response.
     let note =
         super::super::json::parse(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#)
             .unwrap();
-    assert!(process(&note, &tx).is_none());
+    assert!(process(&note, &d).is_none());
 
     // Unknown method → JSON-RPC method-not-found.
     let bad = super::super::json::parse(r#"{"jsonrpc":"2.0","id":3,"method":"nope"}"#).unwrap();
-    assert!(process(&bad, &tx).unwrap().render().contains("-32601"));
+    assert!(process(&bad, &d).unwrap().render().contains("-32601"));
 }
 
 /// Write an HTTP POST and read back the JSON body (parsing Content-Length).
@@ -162,7 +166,7 @@ fn http_post(stream: &mut TcpStream, body: &str) -> String {
 #[test]
 fn end_to_end_over_a_socket() {
     let (tx, rx) = std::sync::mpsc::channel::<Job>();
-    let server = Server::start(0, tx).unwrap();
+    let server = Server::start(0, tx, std::sync::Arc::new(Vec::new())).unwrap();
     let port = server.port();
     assert_ne!(port, 0);
 
@@ -172,7 +176,14 @@ fn end_to_end_over_a_socket() {
         let mut bps = Breakpoints::default();
         let syms = SymbolTable::default();
         if let Ok(job) = rx.recv_timeout(Duration::from_secs(5)) {
-            let r = crate::mcp::tools::dispatch(&job.call, &gb, &mut bps, &syms);
+            let r = match &job.call {
+                crate::mcp::ToolInvocation::Builtin(c) => {
+                    crate::mcp::tools::dispatch(c, &gb, &mut bps, &syms)
+                }
+                crate::mcp::ToolInvocation::Plugin { name, .. } => {
+                    Err(format!("no plugin in this test: {name}"))
+                }
+            };
             let _ = job.reply.send(r);
         }
     });
@@ -199,7 +210,7 @@ fn end_to_end_over_a_socket() {
 #[test]
 fn get_is_method_not_allowed() {
     let (tx, _rx) = std::sync::mpsc::channel::<Job>();
-    let server = Server::start(0, tx).unwrap();
+    let server = Server::start(0, tx, std::sync::Arc::new(Vec::new())).unwrap();
     let port = server.port();
     let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
     stream
