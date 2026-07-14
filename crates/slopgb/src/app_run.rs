@@ -352,6 +352,17 @@ impl App {
             Some(b) => (&b[..], SGB_BORDER_W, SGB_BORDER_H),
             None => (&self.session.gb.frame()[..], SCREEN_W, SCREEN_H),
         };
+        // Joypad "Screenshot button" → copies: put the frame on the clipboard as
+        // a PNG (the universally-pasteable image format) instead of a file.
+        if self.settings.screenshot_copies {
+            let png = crate::mcp::png::encode(frame, w, h);
+            if crate::clipboard::copy_image_png(&png) {
+                eprintln!("copied screenshot to the clipboard");
+            } else {
+                eprintln!("slopgb: no image-clipboard tool found (install wl-copy/xclip)");
+            }
+            return;
+        }
         let fmt = self.settings.screenshot_format;
         let data = match fmt {
             ScreenshotFormat::Bmp => screenshot::to_bmp(frame, w, h),

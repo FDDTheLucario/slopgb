@@ -40,6 +40,8 @@ pub(crate) enum Field {
     SgbBorderScreenshot,
     /// Joypad → "Screenshots" format dropdown (cycles BMP ↔ PNG).
     ScreenshotFormat,
+    /// Joypad → "Screenshot button" dropdown (cycles saves ↔ copies).
+    ScreenshotButtonMode,
     Mono,
     LowercaseHex,
     ShowClocks,
@@ -257,6 +259,7 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         Field::Contrast => s.contrast = slider_frac(ct.rect, px),
         Field::SgbBorderScreenshot => s.sgb_border_screenshot = !s.sgb_border_screenshot,
         Field::ScreenshotFormat => s.screenshot_format = s.screenshot_format.next(),
+        Field::ScreenshotButtonMode => s.screenshot_copies = !s.screenshot_copies,
         Field::Mono => s.mono = !s.mono,
         Field::LowercaseHex => s.lowercase_hex = !s.lowercase_hex,
         Field::ShowClocks => s.show_clocks = !s.show_clocks,
@@ -370,6 +373,7 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
         OptionsTab::Joypad => {
             s.allow_opposing = d.allow_opposing;
             s.screenshot_format = d.screenshot_format;
+            s.screenshot_copies = d.screenshot_copies;
         }
         OptionsTab::Misc => {
             s.ff_speed = d.ff_speed;

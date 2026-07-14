@@ -534,7 +534,24 @@ pub(super) fn joypad(s: &Settings, content: Rect) -> Vec<Ctrl> {
     l.row();
 
     // The inert recording/screenshot/rapid-speed combos, each on its own row.
-    draw_label_combo(&mut v, &mut l, "Screenshot button:", "saves");
+    // "Screenshot button" is live: a dropdown cycling save-to-file ↔ clipboard.
+    let sb_label = "Screenshot button:";
+    let (bx, by) = l.at();
+    v.push(text_label((bx, by), sb_label.to_owned()));
+    let sb_cx = bx + measure(sb_label) + 6;
+    v.push(Ctrl::live(
+        Rect::new(sb_cx, by, 70, line_height() + 2),
+        Kind::Dropdown {
+            value: if s.screenshot_copies {
+                "copies"
+            } else {
+                "saves"
+            }
+            .to_string(),
+            w: 70,
+        },
+        Field::ScreenshotButtonMode,
+    ));
     l.row();
     // "Screenshots" is live: a dropdown cycling the saved-image format (bmp/png).
     let ss_label = "Screenshots:";

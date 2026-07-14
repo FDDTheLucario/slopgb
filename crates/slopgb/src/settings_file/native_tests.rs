@@ -30,6 +30,7 @@ fn settings_and_recent_round_trip() {
         contrast: 0.75,
         sgb_border_screenshot: true,
         screenshot_format: crate::windows::options::ScreenshotFormat::Png,
+        screenshot_copies: true,
         show_errors_on_rom_load: false,
         load_rom_dialog_on_startup: true,
         registers_editable: false,

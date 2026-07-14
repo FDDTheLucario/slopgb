@@ -62,6 +62,7 @@ pub fn from_ini(f: &Ini) -> Settings {
         screenshot_format: f
             .get("SlopgbScreenshotFormat")
             .map_or(d.screenshot_format, ScreenshotFormat::from_key),
+        screenshot_copies: boolean("SlopgbScreenshotCopies", d.screenshot_copies),
         volume: (int("Volume", (d.volume * 100.0) as i64) as f32 / 100.0).clamp(0.0, 1.0),
         mono: boolean("SoundMono", d.mono),
         // No bgb equivalent (a `Slopgb` extra) — the SGB audio backend.
@@ -124,6 +125,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         contrast: _,
         sgb_border_screenshot: _,
         screenshot_format: _,
+        screenshot_copies: _,
         volume: _,
         mono: _,
         audio_backend: _,
@@ -219,6 +221,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         ini::fmt_bool(s.sgb_border_screenshot),
     );
     f.set("SlopgbScreenshotFormat", s.screenshot_format.ext());
+    f.set("SlopgbScreenshotCopies", ini::fmt_bool(s.screenshot_copies));
     f.set("SlopgbTileHex8bit", ini::fmt_bool(s.tile_hex_8bit));
     f.set("SlopgbMemoryWindow", ini::fmt_bool(s.memory_window));
     f.set("SlopgbShowFramerate", ini::fmt_bool(s.show_framerate));

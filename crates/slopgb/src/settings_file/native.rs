@@ -254,6 +254,7 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
         screenshot_format: d
             .get("misc", "screenshot_format")
             .map_or(def.screenshot_format, ScreenshotFormat::from_key),
+        screenshot_copies: b("misc", "screenshot_copies", def.screenshot_copies),
         volume: d
             .get("sound", "volume")
             .and_then(|v| v.trim().parse().ok())
@@ -332,6 +333,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         contrast: _,
         sgb_border_screenshot: _,
         screenshot_format: _,
+        screenshot_copies: _,
         volume: _,
         mono: _,
         audio_backend: _,
@@ -403,6 +405,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         "screenshot_format",
         settings.screenshot_format.ext(),
     );
+    d.set("misc", "screenshot_copies", fb(settings.screenshot_copies));
     let palette = settings
         .dmg_palette
         .iter()

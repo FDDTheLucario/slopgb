@@ -611,6 +611,20 @@ fn joypad_screenshot_format_dropdown_cycles() {
 }
 
 #[test]
+fn joypad_screenshot_button_mode_dropdown_cycles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Joypad;
+    assert!(!st.working.screenshot_copies, "saves-to-file by default");
+    click_field(&mut st, Field::ScreenshotButtonMode);
+    assert!(
+        st.working.screenshot_copies,
+        "cycles to copies-to-clipboard"
+    );
+    click_field(&mut st, Field::ScreenshotButtonMode);
+    assert!(!st.working.screenshot_copies);
+}
+
+#[test]
 fn gbcolors_dmg_gbc_lcd_checkbox_toggles() {
     let mut st = OptionsState::new(Settings::default());
     st.active = OptionsTab::GbColors;
@@ -876,8 +890,15 @@ fn joypad_tab_transcribes_the_capture_controls() {
             matches!(&c.kind, Kind::Dropdown { value, .. } if value == val) && c.field.is_none()
         })
     };
-    assert!(has_dropdown("saves"), "Screenshot button dropdown");
     assert!(has_dropdown("2 2"), "Rapid speed dropdown");
+    // "Screenshot button" is now a live dropdown (saves ↔ copies).
+    assert!(
+        ctrls.iter().any(
+            |c| matches!(&c.kind, Kind::Dropdown { value, .. } if value == "saves")
+                && c.field == Some(Field::ScreenshotButtonMode)
+        ),
+        "Screenshot-button mode dropdown is live"
+    );
     // "Screenshots" is now a live dropdown driving the image format.
     assert!(
         ctrls.iter().any(

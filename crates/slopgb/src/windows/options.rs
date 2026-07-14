@@ -337,6 +337,9 @@ pub struct Settings {
     pub sgb_border_screenshot: bool,
     /// Joypad → "Screenshots" image format (BMP or PNG).
     pub screenshot_format: ScreenshotFormat,
+    /// Joypad → "Screenshot button": `false` saves to a file (default), `true`
+    /// copies the frame to the clipboard as a PNG image.
+    pub screenshot_copies: bool,
     /// Sound → master volume, 0.0..=1.0.
     pub volume: f32,
     /// Sound → mono output (downmix L/R).
@@ -436,6 +439,7 @@ impl Default for Settings {
             contrast: 0.5,
             sgb_border_screenshot: false,
             screenshot_format: ScreenshotFormat::Bmp,
+            screenshot_copies: false,
             volume: 1.0,
             mono: false,
             audio_backend: AudioBackend::Builtin,
