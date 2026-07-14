@@ -1428,6 +1428,7 @@ dependencies = [
  "slopfp",
  "slopgb-core",
  "slopgb-plugin-host",
+ "slopgb-sgb-coprocessor",
  "softbuffer",
  "winit",
 ]

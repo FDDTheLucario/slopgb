@@ -14,11 +14,12 @@ fn blank_app() -> App {
         mute: true,
         boot: None,
         sgb_bios: None,
+        sgb_coprocessor: false,
         mcp_port: None,
         plugins_dir: None,
         ram_init: None,
     };
-    App::new(opts, Session::blank(Model::Dmg), false, None, None)
+    App::new(opts, Session::blank(Model::Dmg), false, None, None, false)
 }
 
 #[test]

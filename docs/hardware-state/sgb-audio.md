@@ -96,6 +96,14 @@ smallest-first:
    mapping and the DATA_SND packet layout are original clean-room interpretations
    (the real SGB effect-code→driver semantics live in the unread system ROM), and
    the tone is a synthesized square, not the SGB sample bank.
+5. **Frontend backend toggle — DONE.** The `slopgb` frontend selects the backend
+   with `--sgb-coprocessor` (or `SLOPGB_SGB_COPROCESSOR`): off (default) keeps the
+   built-in HLE `SgbApu` (byte-identical golden path); on injects a fresh
+   `SgbCoprocessor` (at `DEFAULT_SAMPLE_RATE`) via `set_audio_coprocessor` after
+   every machine build — `Session::set_sgb_coprocessor`/`apply_sgb_coprocessor`,
+   re-applied on power-cycle / model switch, a no-op off SGB. Proven in
+   `session::tests::sgb_coprocessor_toggle_swaps_the_audio_backend` (a SOUND
+   command is silent on the built-in default, audible with the coprocessor on).
 
 ## Sources
 

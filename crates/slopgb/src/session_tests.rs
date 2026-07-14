@@ -356,6 +356,93 @@ fn quick_load_reanchors_the_autosave_deadline() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// A 32 KiB ROM-only cart flagged SGB-enhanced (header `$0146 = 0x03`).
+fn sgb_rom() -> Vec<u8> {
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x146] = 0x03; // SGB flag
+    rom[0x14B] = 0x33; // old licensee code (SGB requires it)
+    rom
+}
+
+/// Drive a 16-byte SGB command packet through the joypad (`FF00` pulses), per
+/// the SGB command protocol (Pan Docs "SGB Command Packet").
+fn send_sgb_packet(gb: &mut GameBoy, data: &[u8; 16]) {
+    gb.debug_write(0xFF00, 0x30);
+    gb.debug_write(0xFF00, 0x00);
+    gb.debug_write(0xFF00, 0x30);
+    for &byte in data {
+        for bit in 0..8 {
+            gb.debug_write(0xFF00, if byte >> bit & 1 != 0 { 0x10 } else { 0x20 });
+            gb.debug_write(0xFF00, 0x30);
+        }
+    }
+    gb.debug_write(0xFF00, 0x20);
+    gb.debug_write(0xFF00, 0x30);
+}
+
+/// Peak amplitude of drained stereo PCM.
+fn peak(out: &[(f32, f32)]) -> f32 {
+    out.iter()
+        .fold(0.0f32, |m, &(l, r)| m.max(l.abs()).max(r.abs()))
+}
+
+/// A bare SGB SOUND ($08) packet, effect A = note 0x40 (trigger defaults on).
+fn sound_packet() -> [u8; 16] {
+    let mut packet = [0u8; 16];
+    packet[0] = 0x08 * 8 + 1; // command $08, length 1
+    packet[1] = 0x40;
+    packet
+}
+
+/// Run `frames` and collect every drained sample's peak.
+fn play_and_peak(gb: &mut GameBoy, frames: u32) -> f32 {
+    let mut out = Vec::new();
+    for _ in 0..frames {
+        gb.run_frame();
+        gb.drain_audio(&mut out);
+    }
+    peak(&out)
+}
+
+#[test]
+fn sgb_coprocessor_toggle_swaps_the_audio_backend() {
+    let dir = scratch("sgb-coprocessor");
+    let path = dir.join("game.gb");
+    fs::write(&path, sgb_rom()).unwrap();
+
+    // Default (built-in HLE APU): a bare SOUND command with no game driver / BIOS
+    // makes no real audio (the default sound bank isn't present) — the golden-safe
+    // default. The HLE path leaves only a noise-floor residue, far below a tone.
+    let mut off = Session::load(&path, ModelChoice::Sgb, &BootSpec::NONE, None).expect("load");
+    assert_eq!(off.gb.model(), Model::Sgb);
+    send_sgb_packet(&mut off.gb, &sound_packet());
+    let off_peak = play_and_peak(&mut off.gb, 16);
+    assert!(
+        off_peak < 1e-3,
+        "default built-in backend makes no tone for a bare SOUND command (peak {off_peak})"
+    );
+
+    // Coprocessor backend selected: the same SOUND command drives the clean-room
+    // 65C816 -> SPC700 -> S-DSP chain to audible PCM through the public frontend path.
+    let mut on = Session::load(&path, ModelChoice::Sgb, &BootSpec::NONE, None).expect("load");
+    on.set_sgb_coprocessor(true);
+    send_sgb_packet(&mut on.gb, &sound_packet());
+    let on_peak = play_and_peak(&mut on.gb, 16);
+    assert!(
+        on_peak > 1e-2 && on_peak > off_peak * 50.0,
+        "the injected coprocessor makes a bare SOUND command audible (peak {on_peak} vs {off_peak})"
+    );
+
+    // The choice survives a power-cycle (re-injected into the fresh machine).
+    on.reset();
+    send_sgb_packet(&mut on.gb, &sound_packet());
+    assert!(
+        play_and_peak(&mut on.gb, 16) > 1e-2,
+        "reset re-injects the coprocessor backend"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn atomic_write_replaces_existing_file() {
     // Per-process directory so concurrent test runs can't race on it.

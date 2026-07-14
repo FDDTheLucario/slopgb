@@ -1,9 +1,9 @@
 # slopgb (frontend)
 
 The BGB-style debugger/player frontend. External deps limited to
-`winit` / `softbuffer` / `cpal` (plus the internal `slopfp` and
-`slopgb-plugin-host`). `forbid(unsafe_code)`. Per-area state lives in
-`docs/ui-state/<area>.md` — read the matching file first.
+`winit` / `softbuffer` / `cpal` (plus the internal `slopfp`,
+`slopgb-plugin-host`, and `slopgb-sgb-coprocessor`). `forbid(unsafe_code)`.
+Per-area state lives in `docs/ui-state/<area>.md` — read the matching file first.
 
 ## Architecture
 

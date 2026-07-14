@@ -98,6 +98,10 @@ fn main() {
     // Optional SGB BIOS (--sgb-bios / SLOPGB_SGB_BIOS): feeds the SGB audio path
     // on every ROM (re)load; border/palette are not extracted (HLE).
     let sgb_bios = resolve_sgb_bios(&opts);
+    // Optional SGB audio-coprocessor backend (--sgb-coprocessor / the presence of
+    // SLOPGB_SGB_COPROCESSOR): swaps the built-in HLE APU for the combined chip on
+    // every SGB (re)load. Off = the built-in default (byte-identical golden path).
+    let sgb_coprocessor = opts.sgb_coprocessor || env::var_os("SLOPGB_SGB_COPROCESSOR").is_some();
     // Effective emulated-system choice for this load: an explicit CLI `--model`
     // wins, else the persisted Options choice (so a saved SGB / "prefer SGB" /
     // border selection is honored at startup, not just after opening Options).
@@ -127,6 +131,7 @@ fn main() {
         ),
     };
     session.set_sgb_bios(sgb_bios.clone());
+    session.set_sgb_coprocessor(sgb_coprocessor);
     let event_loop = match EventLoop::new() {
         Ok(l) => l,
         Err(e) => {
@@ -134,7 +139,14 @@ fn main() {
             process::exit(1);
         }
     };
-    let mut app = App::new(opts, session, rom_loaded, boot_rom, sgb_bios);
+    let mut app = App::new(
+        opts,
+        session,
+        rom_loaded,
+        boot_rom,
+        sgb_bios,
+        sgb_coprocessor,
+    );
     if let Err(e) = event_loop.run_app(&mut app) {
         eprintln!("error: event loop failed: {e}");
         process::exit(1);
@@ -258,6 +270,9 @@ struct App {
     /// Optional SGB BIOS bytes (from `--sgb-bios`/`SLOPGB_SGB_BIOS`), re-applied
     /// to the fresh machine on every ROM (re)load. `None` = no SGB BIOS.
     sgb_bios: Option<Vec<u8>>,
+    /// Whether the combined SGB audio coprocessor backend (`--sgb-coprocessor`) is
+    /// selected, re-injected on every ROM (re)load. `false` = the built-in HLE APU.
+    sgb_coprocessor: bool,
     session: Session,
     /// Whether a real ROM is loaded. `false` at a no-ROM (bgb-style) startup:
     /// the blank machine is frozen at power-on (emulation gated off) and the LCD
@@ -391,6 +406,7 @@ impl App {
         rom_loaded: bool,
         boot_rom: Option<Vec<u8>>,
         sgb_bios: Option<Vec<u8>>,
+        sgb_coprocessor: bool,
     ) -> Self {
         let muted = opts.mute;
         let scale = opts.scale;
@@ -433,6 +449,7 @@ impl App {
             opts,
             boot_rom,
             sgb_bios,
+            sgb_coprocessor,
             session,
             rom_loaded,
             blank_frame,
@@ -935,6 +952,7 @@ impl App {
         match Session::load(path, self.settings.model, &self.boot_spec(), ram_init) {
             Ok(mut new) => {
                 new.set_sgb_bios(self.sgb_bios.clone());
+                new.set_sgb_coprocessor(self.sgb_coprocessor);
                 self.session = new;
                 // A loaded ROM starts emulation: leave the no-ROM blank state and
                 // (re)apply the DMG palette to the fresh machine (GameBoy::new

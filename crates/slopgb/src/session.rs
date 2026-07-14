@@ -6,7 +6,8 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use slopgb_core::{CLOCK_HZ, CartridgeError, GameBoy, Model, RamInit};
+use slopgb_core::{CLOCK_HZ, CartridgeError, DEFAULT_SAMPLE_RATE, GameBoy, Model, RamInit};
+use slopgb_sgb_coprocessor::SgbCoprocessor;
 
 use crate::windows::options::ModelChoice;
 
@@ -39,6 +40,11 @@ pub(crate) struct Session {
     /// kept so a power-cycle / model switch re-applies it to the fresh machine
     /// (firmware persists across a reset). `None` = no BIOS. A no-op off SGB.
     sgb_bios: Option<Vec<u8>>,
+    /// Opt-in swap of the SGB audio backend from the built-in HLE `SgbApu` to the
+    /// combined 65C816+SPC700+S-DSP coprocessor (`--sgb-coprocessor`). Kept so a
+    /// power-cycle / model switch re-injects it into the fresh machine. `false` =
+    /// the built-in default (byte-identical golden path). A no-op off SGB.
+    sgb_coprocessor: bool,
     /// Overlay the built-in default SGB border on a non-SGB machine — bgb's
     /// "GBC + initial SGB border" system mode (`ModelChoice::CgbBorder`). A
     /// machine property, so a power-cycle (`reset`) re-applies it.
@@ -71,6 +77,7 @@ impl Session {
             quick_state: None,
             boot: OwnedBootSpec::default(),
             sgb_bios: None,
+            sgb_coprocessor: false,
             sgb_border: false,
             ram_init: None,
         }
@@ -130,6 +137,7 @@ impl Session {
             quick_state: None,
             boot: boot.to_owned(),
             sgb_bios: None,
+            sgb_coprocessor: false,
             sgb_border,
             ram_init,
         })
@@ -154,6 +162,26 @@ impl Session {
     fn apply_sgb_bios(&mut self) {
         if let Some(bios) = &self.sgb_bios {
             self.gb.load_sgb_bios(bios);
+        }
+    }
+
+    /// Select the SGB audio backend (`--sgb-coprocessor`) and keep the choice so a
+    /// later `reset`/`set_model` re-applies it. `true` injects the combined
+    /// coprocessor; `false` restores the built-in on the *next* rebuild (an
+    /// already-injected machine keeps it until then). A no-op off SGB.
+    pub(crate) fn set_sgb_coprocessor(&mut self, on: bool) {
+        self.sgb_coprocessor = on;
+        self.apply_sgb_coprocessor();
+    }
+
+    /// Inject the combined coprocessor into the current (freshly built) machine
+    /// when selected. `set_audio_coprocessor` drops the box off SGB, so this is a
+    /// no-op there. Built at the core's default output rate — the rate the
+    /// GameBoy's own APU runs at — so the two streams stay sample-aligned.
+    fn apply_sgb_coprocessor(&mut self) {
+        if self.sgb_coprocessor {
+            self.gb
+                .set_audio_coprocessor(Box::new(SgbCoprocessor::new(DEFAULT_SAMPLE_RATE)));
         }
     }
 
@@ -217,6 +245,7 @@ impl Session {
                 }
                 self.gb = gb;
                 self.apply_sgb_bios();
+                self.apply_sgb_coprocessor();
                 self.next_autosave = AUTOSAVE_CYCLES;
             }
             // Can't happen (the same image loaded before), but never panic.
@@ -250,6 +279,7 @@ impl Session {
                 self.model = model;
                 self.sgb_border = sgb_border;
                 self.apply_sgb_bios();
+                self.apply_sgb_coprocessor();
                 self.next_autosave = AUTOSAVE_CYCLES;
                 self.quick_state = None; // a different machine — old snapshot is stale
                 true

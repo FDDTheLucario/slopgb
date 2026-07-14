@@ -11,6 +11,7 @@ repository.workspace = true
 slopgb-core = { path = "../slopgb-core" }
 slopfp = { path = "../slopfp" }
 slopgb-plugin-host = { path = "../slopgb-plugin-host" }
+slopgb-sgb-coprocessor = { path = "../slopgb-sgb-coprocessor" }
 winit = "0.30"
 softbuffer = "0.4"
 cpal = "0.16"
