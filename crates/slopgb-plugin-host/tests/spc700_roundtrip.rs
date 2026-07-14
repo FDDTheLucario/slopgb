@@ -70,3 +70,52 @@ fn spc700_ipl_and_dsp_run_in_wasm() {
         "sample count cleared on reset"
     );
 }
+
+/// The tier-3 PCM-drain path: the stereo stream the S-DSP synthesized in wasm
+/// crosses back to the host with the right sample count, oldest-first, and the
+/// drain consumes the buffer (a second drain with no clocking is empty). This is
+/// the plumbing an SGB audio backend needs to mix a plugin like the built-in
+/// `mix_into`; whether the samples are silent depends on the driver loaded (the
+/// bare IPL keys on no voice), which this does not assert.
+#[test]
+fn spc700_pcm_drains_to_the_host() {
+    let Some(bytes) = build_plugin() else {
+        eprintln!("skipping spc700_pcm_drains_to_the_host: wasm32 build unavailable");
+        return;
+    };
+
+    let mut cop = LoadedCoprocessor::load(&bytes).unwrap();
+    cop.reset().unwrap();
+
+    let reached = cop.run_until(60_000).unwrap();
+    let pcm = cop.drain_pcm().unwrap();
+    // One 32 kHz stereo sample per 32 SPC cycles.
+    assert!(
+        (reached / 32).abs_diff(pcm.len() as u64) <= 2,
+        "drained pair count ~= cycles/32 (reached={reached}, pairs={})",
+        pcm.len(),
+    );
+
+    // The drain consumed the buffer: nothing new without more clocking.
+    assert!(
+        cop.drain_pcm().unwrap().is_empty(),
+        "a second drain with no clocking is empty",
+    );
+
+    // Clocking again yields a fresh batch, and draining twice never
+    // double-counts against the running total on ports 4-5.
+    let before = sample_count(&mut cop);
+    let reached2 = cop.run_until(reached + 32_000).unwrap();
+    let pcm2 = cop.drain_pcm().unwrap();
+    let after = sample_count(&mut cop);
+    assert!(!pcm2.is_empty(), "more clocking drains more PCM");
+    assert_eq!(
+        after - before,
+        pcm2.len() as u64,
+        "the drained batch matches the running sample-count delta (reached2={reached2})",
+    );
+}
+
+fn sample_count(cop: &mut LoadedCoprocessor) -> u64 {
+    u64::from(cop.port_read(4).unwrap()) | (u64::from(cop.port_read(5).unwrap()) << 8)
+}

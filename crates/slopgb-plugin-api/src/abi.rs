@@ -3,7 +3,9 @@
 
 /// Incremented on any incompatible import/export change. Host reads the guest's
 /// `slopgb_abi_version()` export and refuses a mismatch.
-pub const ABI_VERSION: i32 = 2;
+///
+/// v3 adds the tier-3 `slopgb_drain_pcm` export (the coprocessor PCM-drain path).
+pub const ABI_VERSION: i32 = 3;
 
 /// A readable register or I/O byte. Discriminant is the `host_reg` wire index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

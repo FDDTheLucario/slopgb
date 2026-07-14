@@ -36,8 +36,9 @@ The SNES-side chips exist as standalone wasm coprocessor plugins:
 
 - **`slopgb-spc700-plugin`** wraps `slopgb-snes-apu` (SPC700 + S-DSP — the exact
   built-in code) as a tier-3 `Coprocessor`; clocking it in wasm runs the real
-  IPL ROM (`$AA`/`$BB` handshake) and the S-DSP synthesizes. Proven in
-  `slopgb-plugin-host/tests/spc700_roundtrip.rs`.
+  IPL ROM (`$AA`/`$BB` handshake) and the S-DSP synthesizes. It buffers the
+  synthesized stereo PCM and hands it back through the ABI's `drain_pcm` path
+  (see item 1). Proven in `slopgb-plugin-host/tests/spc700_roundtrip.rs`.
 - **`slopgb-w65c816-plugin`** wraps the clean-room 65C816 (the SNES CPU) with a
   guest SNES-RAM + comm-port bus. Proven in `w65c816_roundtrip.rs`.
 
@@ -45,11 +46,13 @@ The SNES-side chips exist as standalone wasm coprocessor plugins:
 see the routing + BIOS-gating tables below). The remaining integration work,
 smallest-first:
 
-1. **A PCM-drain path in the tier-3 ABI.** `Coprocessor` today is
-   reset/run_until/port_write/port_read only; the SPC700 plugin surfaces a sample
-   *count*, not the stream. Add a bulk-drain call (e.g. a host import the plugin
-   pushes samples through, or a `drain_pcm` export) so the host can mix the
-   plugin's PCM like the built-in's `mix_into`.
+1. **A PCM-drain path in the tier-3 ABI — DONE (ABI v3).** `Coprocessor` gained
+   `drain_pcm` (default: none, for a non-audio chip like the 65C816); the
+   generated `slopgb_drain_pcm` export ships the stereo samples over the emit
+   channel (interleaved LE `i16` L,R pairs, kind `EMIT_KIND_PCM`) and
+   `LoadedCoprocessor::drain_pcm` decodes them, so the host can mix a plugin's PCM
+   like the built-in's `mix_into`. Proven in
+   `spc700_roundtrip::spc700_pcm_drains_to_the_host`.
 2. **Decouple `AudioCoprocessor` from `Interconnect`.** `poll(&mut Interconnect)`
    is a core-private type, so the trait can't be implemented outside core. Move
    the bus→command extraction into `GameBoy` and give the trait comm-port-level
@@ -59,7 +62,7 @@ smallest-first:
 3. **A public `GameBoy` injection API** (`set_audio_coprocessor`) so the
    frontend/host can install a plugin-backed `AudioCoprocessor` (core can't
    depend on `wasmi`; the adapter lives in the host and forwards to the wasm
-   plugin).
+   plugin, calling `drain_pcm` each frame from item 1).
 4. **Combine the 65C816 + SPC700 + DSP into one SNES coprocessor** running the
    real SGB sound driver, so a DATA_SND packet reaches SNES work RAM and the
    driver programs the SPC700 — which needs the SGB system ROM (not shipped; see

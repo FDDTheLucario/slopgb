@@ -9,7 +9,7 @@ mod tool;
 mod view;
 
 pub use abi::{ABI_VERSION, META_DESCRIPTION, META_NAME, META_SCHEMA, Reg};
-pub use coprocessor::Coprocessor;
+pub use coprocessor::{Coprocessor, EMIT_KIND_PCM};
 pub use tool::{__emit, ToolPlugin, ToolResult};
 pub use view::{GameBoyView, Registers};
 

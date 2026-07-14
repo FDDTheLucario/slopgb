@@ -161,9 +161,9 @@ default `INTROSPECTION`). Each host refuses a plugin asking for more than it ser
 
 A coprocessor plugin implements `Coprocessor` (invoke `slopgb_coprocessor_plugin!`)
 and hosts a whole chip inside the sandbox: the chip's RAM never crosses the
-boundary, only its comm ports do. The host drives it with `reset` / `run_until`
-(the chip's own cycle domain) / `port_write` / `port_read` through
-`LoadedCoprocessor`. Two references:
+boundary, only its comm ports (and, for audio chips, drained PCM) do. The host
+drives it with `reset` / `run_until` (the chip's own cycle domain) / `port_write`
+/ `port_read` / `drain_pcm` through `LoadedCoprocessor`. Two references:
 
 - `crates/slopgb-w65c816-plugin` wraps the clean-room 65C816 (`slopgb-w65c816`)
   over a guest SNES-RAM + comm-port bus — the SNES-side CPU route for a full SGB.
@@ -171,8 +171,14 @@ boundary, only its comm ports do. The host drives it with `reset` / `run_until`
 - `crates/slopgb-spc700-plugin` wraps the SPC700 + S-DSP (`slopgb-snes-apu`, the
   *same* code the core built-in SGB audio path runs) — clocking it in wasm runs
   the real SPC700 IPL ROM (the `$AA`/`$BB` boot handshake) and the S-DSP
-  synthesizes. Proof: `slopgb-plugin-host/tests/spc700_roundtrip.rs`. (PCM
-  draining is not in the tier-3 ABI yet — a follow-up for the SGB integration.)
+  synthesizes. Proof: `slopgb-plugin-host/tests/spc700_roundtrip.rs`.
+
+**PCM drain (ABI v3).** `drain_pcm` (default: none, for a non-audio chip like the
+65C816) returns the stereo samples synthesized since the last drain; the generated
+`slopgb_drain_pcm` export ships them over the emit channel (interleaved LE `i16`
+L,R pairs, kind `EMIT_KIND_PCM`) and the host decodes them in `LoadedCoprocessor::
+drain_pcm` to mix like the built-in `mix_into`. Proof:
+`spc700_roundtrip::spc700_pcm_drains_to_the_host`.
 
 ## Golden-safe rules
 

@@ -2,7 +2,7 @@
 //! 65C816), driven by the host through reset / clock / comm-port calls. The
 //! chip's internal RAM stays inside the sandbox; only the comm ports cross.
 
-use slopgb_plugin_api::{ABI_VERSION, Capabilities};
+use slopgb_plugin_api::{ABI_VERSION, Capabilities, EMIT_KIND_PCM};
 use wasmi::{Engine, Module, Store, TypedFunc};
 
 use crate::LoadError;
@@ -17,6 +17,7 @@ pub struct LoadedCoprocessor {
     run_until: TypedFunc<i64, i64>,
     port_write: TypedFunc<(i32, i32), ()>,
     port_read: TypedFunc<i32, i32>,
+    drain_pcm: TypedFunc<(), i32>,
 }
 
 impl LoadedCoprocessor {
@@ -70,6 +71,9 @@ impl LoadedCoprocessor {
         let port_read = instance
             .get_typed_func::<i32, i32>(&store, "slopgb_port_read")
             .map_err(|_| LoadError::MissingExport("slopgb_port_read"))?;
+        let drain_pcm = instance
+            .get_typed_func::<(), i32>(&store, "slopgb_drain_pcm")
+            .map_err(|_| LoadError::MissingExport("slopgb_drain_pcm"))?;
 
         Ok(Self {
             store,
@@ -77,6 +81,7 @@ impl LoadedCoprocessor {
             run_until,
             port_write,
             port_read,
+            drain_pcm,
         })
     }
 
@@ -104,5 +109,28 @@ impl LoadedCoprocessor {
     pub fn port_read(&mut self, port: u8) -> Result<u8, LoadError> {
         let v = self.port_read.call(&mut self.store, i32::from(port))?;
         Ok((v & 0xFF) as u8)
+    }
+
+    /// Drain the stereo PCM the chip synthesized since the last drain, oldest
+    /// first — the host mixes this into the Game Boy stream like the built-in
+    /// `mix_into`. Empty for a non-audio coprocessor. The plugin ships the
+    /// samples over the emit channel (interleaved LE `i16` L,R pairs); this
+    /// decodes them back.
+    pub fn drain_pcm(&mut self) -> Result<Vec<(i16, i16)>, LoadError> {
+        self.store.data_mut().emitted = None;
+        let pairs = self.drain_pcm.call(&mut self.store, ())?.max(0) as usize;
+        let bytes = match self.store.data_mut().emitted.take() {
+            Some((EMIT_KIND_PCM, buf)) => buf,
+            // No PCM emitted (a silent/non-audio chip, or a foreign kind).
+            _ => return Ok(Vec::new()),
+        };
+        let mut out = Vec::with_capacity(pairs);
+        for c in bytes.chunks_exact(4) {
+            out.push((
+                i16::from_le_bytes([c[0], c[1]]),
+                i16::from_le_bytes([c[2], c[3]]),
+            ));
+        }
+        Ok(out)
     }
 }

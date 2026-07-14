@@ -15,10 +15,10 @@
 //!
 //! `run_until(target)` advances the SPC700 in its own 1.024 MHz cycle domain and
 //! drives one S-DSP sample every 32 SPC cycles (→ 32 kHz), mirroring the
-//! built-in `SgbApu` wiring exactly (the DSP shares the SPC700's APU RAM). PCM
-//! draining is not part of the tier-3 ABI yet, so the plugin surfaces the sample
-//! count rather than the stream; wiring a bulk PCM path is the SGB-integration
-//! follow-up.
+//! built-in `SgbApu` wiring exactly (the DSP shares the SPC700's APU RAM). The
+//! synthesized stereo PCM is buffered and drained to the host over the tier-3
+//! `drain_pcm` path; ports `4-5` keep surfacing the running sample count for
+//! quick observability.
 
 #![deny(unsafe_code)]
 
@@ -31,6 +31,10 @@ use slopgb_snes_apu::spc700::{Dsp, Spc700};
 
 /// The S-DSP emits one stereo sample every 32 SPC700 cycles (→ 32 kHz).
 const DSP_PERIOD: u32 = 32;
+
+/// Cap on the undrained PCM buffer (~2 s at 32 kHz). The host drains every
+/// frame, so this only bounds memory if it never does; excess is dropped.
+const PCM_CAP: usize = 1 << 16;
 
 /// Forwards the SPC700's `$F2`/`$F3` DSP-register accesses to the shared
 /// [`SDsp`]; synthesis (which needs APU RAM) is driven by the plugin, not here.
@@ -54,9 +58,10 @@ struct Spc700Cop {
     cycles: u64,
     /// SPC cycles accumulated toward the next 32 kHz DSP sample.
     dsp_div: u32,
-    /// Total S-DSP samples produced since reset (host-observable proof of
-    /// synthesis; the tier-3 ABI has no PCM-drain path yet).
+    /// Total S-DSP samples produced since reset (host-observable on ports 4-5).
     samples: u64,
+    /// Stereo PCM synthesized but not yet drained by the host (oldest first).
+    pcm: Vec<(i16, i16)>,
 }
 
 impl Spc700Cop {
@@ -71,6 +76,7 @@ impl Spc700Cop {
             cycles: 0,
             dsp_div: 0,
             samples: 0,
+            pcm: Vec::new(),
         }
     }
 }
@@ -91,7 +97,10 @@ impl Coprocessor for Spc700Cop {
             self.dsp_div += cyc;
             while self.dsp_div >= DSP_PERIOD {
                 self.dsp_div -= DSP_PERIOD;
-                let _ = self.dsp.borrow_mut().sample(self.spc.apu_ram_mut());
+                let s = self.dsp.borrow_mut().sample(self.spc.apu_ram_mut());
+                if self.pcm.len() < PCM_CAP {
+                    self.pcm.push(s);
+                }
                 self.samples += 1;
             }
         }
@@ -111,6 +120,10 @@ impl Coprocessor for Spc700Cop {
             5 => ((self.samples >> 8) & 0xFF) as u8,
             _ => 0,
         }
+    }
+
+    fn drain_pcm(&mut self) -> Vec<(i16, i16)> {
+        std::mem::take(&mut self.pcm)
     }
 }
 
