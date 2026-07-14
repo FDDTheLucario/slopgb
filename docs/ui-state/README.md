@@ -35,10 +35,6 @@ hooks (link, profiler, exception mask, channel mute) are **gated off by default*
 
 bgb runs under wine here; clone its UI from real screenshots, never from memory.
 
-- Plans: [`bgb-clone-plan.md`](../bgb-clone-plan.md) (windows),
-  [`bgb-rclick-menu-plan.md`](../bgb-rclick-menu-plan.md) (menus).
-- Analysis-gated design decisions (keybinding routing, breakpoint/cursor state,
-  save-state/reverse-exec/link scope): [`bgb-menu-design.md`](../bgb-menu-design.md).
 - Real-screenshot spec + re-capture rig + gotchas:
   [`bgb-reference/`](../bgb-reference/README.md) (captured menus in `menus/`).
 

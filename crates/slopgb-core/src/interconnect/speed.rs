@@ -1,7 +1,7 @@
 //! CGB speed-switch / halt-wake / dispatch-reclock engine bodies (the
 //! `Bus` trait impl in the parent delegates here — a trait impl cannot
-//! split across files; CLAUDE.md <1000-line cap, seam per
-//! `docs/tdd-split-plan.md` B5). Pure cut-and-paste of the trait-fn
+//! split across files; CLAUDE.md <1000-line cap). Pure cut-and-paste of the
+//! trait-fn
 //! bodies: `stop` (the STOP dance: gambatte pause + the leave
 //! advance + the exit-table latches), the halt-wake samplers
 //! (wake grid), the IF ack (per-source ack windows),

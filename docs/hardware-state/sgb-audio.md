@@ -128,7 +128,7 @@ ROM**, which slopgb does not ship, and slopgb does **not** emulate the SNES's
 | `Dmg`/`Cgb` | Subsystem absent; output byte-identical. |
 
 `GameBoy::load_sgb_bios(&[u8])` mirrors the opt-in boot-ROM **bytes** API
-(`docs/bootrom-plan.md`) — an embedder supplies the SGB SNES ROM image. A
+— an embedder supplies the SGB SNES ROM image. A
 `--sgb-bios` CLI flag paralleling `--boot` is **intentionally deferred**: until a
 supplied BIOS can actually enable audio (which needs either a 65816 core or a
 verified offset of the standard SPC700 driver+samples inside a real SGB BIOS),

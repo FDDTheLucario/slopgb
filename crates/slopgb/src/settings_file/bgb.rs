@@ -1,7 +1,7 @@
 //! `Settings` ↔ bgb.ini mapping. Reads the recognized keys into `Settings`
 //! (defaulting anything absent/unparseable) and writes them back, touching only
 //! the mapped keys + our `Slopgb*` extras — every other line the ini holds is
-//! preserved by the [`Ini`] model. Key map: `docs/settings-persistence-plan.md`.
+//! preserved by the [`Ini`] model.
 //!
 //! `model` maps to bgb `SystemMode` (radio index from `options-system.png`);
 //! `scheme` follows `dmg_palette`, persisted via `Color0..3`.

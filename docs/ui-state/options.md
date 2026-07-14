@@ -44,15 +44,12 @@ halting the debugger free-run via `exc_hit` in `run_frame_until_breakpoint`:
   vblank (FF40 bit7→0 while on + PPU mode≠1, `check_exc_lcd`) — checked in the ticked
   bus path.
 
-Armed only while the debugger window is open (`dbg_armed`). Plan:
-[`../bgb-exceptions-break-plan.md`](../bgb-exceptions-break-plan.md). The tab's other
+Armed only while the debugger window is open (`dbg_armed`). The tab's other
 conditions (OAM-DMA bad access, 16-bit inc/dec FE00-FEFF, SGB transfer, MBC,
 inaccessible VRAM, halt+ints bug, uninitialized RAM) render but are **inert** — no
 clean golden-safe detector/backend.
 
 ## Joypad (`keymap`)
-
-Plan: [`../bgb-joypad-functional-plan.md`](../bgb-joypad-functional-plan.md).
 
 - **Configure keyboard** opens bgb's sequential key-rebind wizard
   (`keymap::KeyConfigWizard`, `docs/bgb-reference/options/joypad-keyconfig.png`):
@@ -118,8 +115,7 @@ Auto↔3, Dmg↔0, Cgb↔1); an explicit CLI `--model` still wins the session.
 **Recent ROMs** persist via `Recent0..9` (wine `Z:\`↔POSIX path translation),
 saved on ROM load + Quit. bgb's window-geometry / open-on-start keys have no
 slopgb equivalent — preserved verbatim, not acted on. Phase 1 complete; phase 2
-(a modern native format) is planned. Plan + full key map:
-[`../settings-persistence-plan.md`](../settings-persistence-plan.md).
+(a modern native format) is planned.
 
 ## Inert
 

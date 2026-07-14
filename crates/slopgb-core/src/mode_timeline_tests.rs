@@ -1,6 +1,6 @@
-//! Tests for the decoupled mode timeline: each pins a concrete number from
-//! `docs/sameboy-port/ppu-timing-map.md` §2/§6 against SameBoy 1.0.2 `display.c`
-//! (asserting the spec value, not the function's own definition).
+//! Tests for the decoupled mode timeline: each pins a concrete number against
+//! SameBoy 1.0.2 `display.c` (asserting the spec value, not the function's own
+//! definition).
 
 use super::*;
 
@@ -61,13 +61,13 @@ fn visible_and_interrupt_mode_decoupled_at_boundary() {
     );
 }
 
-/// The kernel-resolver MECHANISM (`ppu-timing-map.md` §6), at the model level:
+/// The kernel-resolver MECHANISM, at the model level:
 /// the anchors swing 2 dots (mode-2 IRQ −1, mode-0 IRQ +1 from their visible
 /// edges), and a 2-dot read separation straddles the mode-3→0 edge — so two
 /// equal-latency reads anchored on the two IRQs land on opposite sides (mode 3
 /// vs mode 0) with no call-stack discriminator. This is a unit-level proof that
 /// the decoupled structure *can* represent what the whole-dot model collapses;
-/// the full per-ROM dispatch+ISR latency (ppu-timing-map.md §6) is validated
+/// the full per-ROM dispatch+ISR latency is validated
 /// end-to-end only by the wired port against the actual ROMs.
 #[test]
 fn kernel_pair_separates_on_the_decoupled_grid() {
@@ -99,9 +99,8 @@ fn kernel_pair_separates_on_the_decoupled_grid() {
     );
 }
 
-/// The kernel separation pinned to the EMULATOR-MEASURED read dots (2026-06-21
-/// instrumentation, `ppu-subdot-ladder.md` "A5 INSTRUMENTED + KERNEL
-/// SEPARATED"): under the leading-edge path the two ROMs' `ldh a,(FF41)`
+/// The kernel separation pinned to the EMULATOR-MEASURED read dots: under the
+/// leading-edge path the two ROMs' `ldh a,(FF41)`
 /// land at our-line dots **248** (`m2int_m3stat_1`) and **252**
 /// (`m0int_m3stat_2`) on a bare CGB line (SCX 0). Mapped onto this
 /// `ModeTimeline` (whose dot 0 = the mode-2 start, i.e. our-line dot

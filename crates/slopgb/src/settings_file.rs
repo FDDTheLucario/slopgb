@@ -1,7 +1,6 @@
 //! On-disk settings persistence. The native `slopgb.conf` is the default store;
 //! bgb's `bgb.ini` format is read/written for interop (import/export + a one-time
-//! migration), preserving every key we don't model. See
-//! `docs/settings-persistence-plan.md` for the key map.
+//! migration), preserving every key we don't model.
 
 mod bgb;
 mod ini;

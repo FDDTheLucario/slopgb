@@ -141,7 +141,7 @@ opcodes at 0x0150) in bgb and reading its debugger. Rules slopgb's disassembler 
    wrong): `xdotool mousemove --sync X Y click 3` opens the pane's right-click menu;
    `click 1` on a menu-bar item opens its dropdown. `import -window root` then crop around
    the click; `xdotool key Escape` dismisses. Captured menus live in
-   [`menus/`](menus/) → spec/plan in [`../bgb-rclick-menu-plan.md`](../bgb-rclick-menu-plan.md).
+   [`menus/`](menus/).
 6. Restore `bgb.ini`, `pkill -9 -f bgb64.exe`.
 
 **XInput crash + the reliable fix:** bgb can crash at startup under wine with `X Error …

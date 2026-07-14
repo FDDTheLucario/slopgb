@@ -147,4 +147,4 @@ Both port `lycRegChangeTriggersStatIrq` (held-compare target tables, m0/m1 block
 ### Parked / documented swaps
 
 - Residual ±1-dot conflicts (gambatte `m2int_m0irq_scx2`/`5`-chained reads vs the gbmicrotest `_if` grid, DS sub-phase rows, wilbertpol 2016 `_nops` chains) are **documented swaps** in the baselines — **do not chase** them without sub-dot IF-flop modeling.
-- **Parked:** the wilbertpol `_nops` chains in particular flip canonical `intr_2_mode0_timing` when chased — see [ppu-subdot-ladder.md](ppu-subdot-ladder.md) INC-G2c.
+- **Parked:** the wilbertpol `_nops` chains in particular flip canonical `intr_2_mode0_timing` when chased.

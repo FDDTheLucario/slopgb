@@ -134,7 +134,7 @@ fn steady_line_boundaries() {
 }
 
 /// Port Stage A6 — the [`Ppu::stat_update_tick`] halt-commit-mask
-/// calibration (`ppu-subdot-ladder.md` "A6"). The mode-2 (OAM) line-start pulse
+/// calibration. The mode-2 (OAM) line-start pulse
 /// takes the **halt-exit** mask (`stat_halt_late`) but NOT the
 /// interrupt-sample mask (`stat_late`) on the leading-edge (cc+0) path —
 /// unlike the removed gambatte STAT event engine, which took both for

@@ -404,7 +404,7 @@ impl GameBoy {
     // The debugger/introspection accessors (watchpoints, exception-break mask,
     // save-states, execution profiler, CDL, WRAM/VRAM bank indicators) live in
     // the `lib_debug` submodule (a second `impl GameBoy`), keeping this file
-    // under the 1000-line cap (see `docs/tdd-split-plan.md`).
+    // under the 1000-line cap.
 
     /// XRGB8888 pixels of the most recently completed frame, row-major.
     pub fn frame(&self) -> &[u32; SCREEN_PIXELS] {
@@ -809,14 +809,13 @@ impl GameBoy {
 
 // The SGB accessor block (border, SNES-side command seams, audio BIOS loader)
 // as a second `impl GameBoy`, split out to keep this file under the 1000-line
-// cap (see `docs/tdd-split-plan.md`).
+// cap.
 #[path = "lib/sgb_api.rs"]
 mod sgb_api;
 
 // The debugger/introspection accessor block (watchpoints, exception mask,
 // save-states, profiler, CDL, bank indicators) as a second `impl GameBoy`,
-// split out to keep this file under the 1000-line cap (see
-// `docs/tdd-split-plan.md`).
+// split out to keep this file under the 1000-line cap.
 #[path = "lib/debug.rs"]
 mod lib_debug;
 

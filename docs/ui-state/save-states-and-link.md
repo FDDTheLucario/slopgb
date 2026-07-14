@@ -32,8 +32,7 @@ ROM bytes + the debugger fields (watch/prof/exc mask) are **not** serialized.
 `App.path_purpose` routes the shared modal (Load ROM / Save state / Load state);
 `Session::save_state_to`/`load_state_from` do the fs + logging. Verified by a
 whole-machine round-trip oracle (save→fresh→load→run-both byte-identical across
-frame/cycles/regs/memory/audio) + gbtr golden byte-identical. Plan:
-[`../bgb-savestate-plan.md`](../bgb-savestate-plan.md).
+frame/cycles/regs/memory/audio) + gbtr golden byte-identical.
 
 ## Link submenu (`SubKind::Link`) — serial link cable over TCP
 
@@ -41,7 +40,7 @@ Rows (`main-sub-link.png`) grey by state via `link_items(active, listening)`:
 Listen/Connect while idle, Disconnect while a socket is active, Cancel listen while
 listening. Title bar shows the link status (`linked`/`listening :port`/`connecting
 :port`). Connect opens a `host:port` modal (`PathPurpose::LinkConnect`,
-bracket-stripped IPv6). Plan: [`../bgb-link-plan.md`](../bgb-link-plan.md).
+bracket-stripped IPv6).
 
 ### Core: byte-level lockstep hook on `Serial` (golden-safe)
 

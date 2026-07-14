@@ -1,7 +1,6 @@
-//! Software-rendered UI toolkit for the bgb-style debugger/viewer windows
-//! (Layer B of `docs/bgb-clone-plan.md`): pure pixel drawing into softbuffer
-//! XRGB8888 buffers, no GUI dependency. Composed into the tool windows in
-//! Layer C.
+//! Software-rendered UI toolkit for the bgb-style debugger/viewer windows:
+//! pure pixel drawing into softbuffer XRGB8888 buffers, no GUI dependency.
+//! Composed into the tool windows.
 
 pub mod canvas;
 pub mod dialog;

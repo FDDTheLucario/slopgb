@@ -32,8 +32,7 @@
 #    UPDATE 2026-06 (cc-reclock): the EVENT-layer half of "re-clock to a
 #    half-dot grid" is now built (the cc-granular `for cc in 1..=4` tick
 #    loop + `dot_phase`, net-zero — commit 22ee6fc), but a phase set at
-#    the speed switch was MEASURED to lift 0 of these rows (probe note in
-#    docs/hardware-state/ppu-subdot-ladder.md): the m3stat/speedchange `_2`
+#    the speed switch was MEASURED to lift 0 of these rows: the m3stat/speedchange `_2`
 #    reads ride the cc-invariant END_PHASE StatMode/PalAccess overrides, and
 #    their answer needs the pixel-pipe END *dot* to move, not the M-cycle
 #    sample phase. The remaining lift is the full PIXEL-PIPE reclock
@@ -54,7 +53,7 @@
 #    to correct → the pixel-pipe reclock above. Golden drift stayed confined to
 #    the STAT/mode-0 cluster (zero photo/game/fetch-grid drift). Pinned closed
 #    by the unit test single_speed_ff41_keeps_end_view_under_every_edge (both
-#    models); full write-up in docs/hardware-state/ppu-subdot-ladder.md.
+#    models).
 # B. Speed-switch / HDMA sub-M-cycle seam — the dma/ + speedchange/ +
 #    oamdma *speedchange* rows (~165 here) plus mealybug hdma_timing-C
 #    and the four age spsw-* rows. A/B sweeps over the pause constant
@@ -959,8 +958,7 @@ gambatte/oam_access/prewrite_lcdoffset1_1_cgb04c_out1.gbc [Cgb]
 # (classify_cgb_regr.py 37/37 BUG=0, classify_dmg.py 6/6 BUG=0, scy PNG row
 # SameBoy non-black). Floor classes: A (CGB ds/lcdoffset sub-dot),
 # B (m1/lycEnable/m0enable/m2enable dispatch-frame cgb04c-vs-SameBoy),
-# window render-length. Census:
-# tools/measurements/eager-flip-floor-census-2026-07-12.md.
+# window render-length.
 gambatte/display_startstate/stat_scx2_2_cgb04c_out84.gbc [Cgb]
 gambatte/lcd_offset/offset1_lyc99int_m0stat_count_scx2_ds_2_cgb04c_out90.gbc [Cgb]
 gambatte/lcd_offset/offset3_lyc98int_ly_count_1_cgb04c_out99.gbc [Cgb]

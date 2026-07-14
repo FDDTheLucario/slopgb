@@ -12,7 +12,7 @@ The default DMG palette is bgb's pale-green LCD (`SCHEMES[0]` "BGB 0.3" =
 `E8FCCC ACD490 548C70 142C38`, decoded from `bgb.ini` BGR; `App::apply_palette`
 pushes it at startup + each (re)load) so a fresh slopgb matches bgb; the core
 power-on default stays grayscale. Title is bare `"slopgb"` with no ROM
-(`window_title`). Plan: [`../bgb-noload-startup-plan.md`](../bgb-noload-startup-plan.md).
+(`window_title`).
 
 ## Opt-in boot-ROM execution
 
@@ -57,4 +57,4 @@ load (`Session::BootSpec`, Options paths over `--boot`). SGB maps to the DMG-cla
 `tests/bootrom.rs` runs the **real `dmg_boot.bin`** from power-on and converges to
 the direct-init post-boot regs at FF50 hand-off (skipped if absent, or a hard failure
 under `SLOPGB_REQUIRE_ROMS=1`). `bootroms/` is gitignored — copyrighted boot ROMs
-never vendored. Plan: [`../bgb-bootrom-plan.md`](../bgb-bootrom-plan.md).
+never vendored.

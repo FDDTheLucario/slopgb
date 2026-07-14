@@ -7,8 +7,8 @@
 //! whole-dot `vis_mode` + `m0_src`/`m0_rise_dot` anchor — so this encodes the
 //! finer-resolution timeline purely as an independent check the unit tests
 //! compare against (see `ppu/mod_tests/stat.rs`). It captures the two structural
-//! degrees of freedom the whole-dot model folds
-//! together (`docs/sameboy-port/ppu-timing-map.md` §2, §6):
+//! degrees of freedom the whole-dot model folds together (matching SameBoy
+//! `display.c`):
 //!
 //! 1. **Two separate fields** — the CPU-visible STAT mode (`io[STAT]&3`) and
 //!    the interrupt-facing `mode_for_interrupt` — updated on *different* dots

@@ -2,7 +2,7 @@
 //! std-only text file (`slopgb.conf`) — the default store; bgb.ini is demoted to
 //! import/export. Human-editable + git-diffable, forward/back compatible:
 //! unknown keys/sections are preserved, missing keys default, `version` drives
-//! future migrations. See `docs/settings-persistence-plan.md`.
+//! future migrations.
 //!
 //! ```text
 //! version = 1

@@ -264,7 +264,7 @@ impl SubMenu {
     /// Open the [`SubKind::State`] submenu (`main-sub-state.png`) to the right of
     /// `parent_row`. Quick Save / Quick Load (an in-memory snapshot) + Load
     /// state... (on-disk, via a path modal) are live; Select / Load recovery
-    /// stay greyed (their subsystems aren't built — see `docs/bgb-menu-design.md`).
+    /// stay greyed (their subsystems aren't built).
     #[must_use]
     pub fn state(parent_row: Rect) -> Self {
         let (items, choices) = state_items().into_iter().unzip();

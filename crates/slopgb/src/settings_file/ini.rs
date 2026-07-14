@@ -5,7 +5,7 @@
 //! The model preserves every line verbatim — comments, blanks, and the ~250
 //! keys slopgb doesn't model — so writing the file back never corrupts the
 //! user's bgb config. Only keys we [`set`](Ini::set) are re-rendered; everything
-//! else round-trips byte-for-byte. See `docs/settings-persistence-plan.md`.
+//! else round-trips byte-for-byte.
 
 /// The content of one physical line: a recognized `key=value` pair, or a
 /// verbatim passthrough (comment / blank / anything without a `=`).

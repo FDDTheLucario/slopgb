@@ -122,5 +122,4 @@ after an ABI bump.
 ## For the full contract
 
 Run `cargo doc -p slopgb-plugin-api --open` — the SDK is the authoritative,
-self-documenting interface. Design history and the deferred tiers are in
-[`docs/plugin-api-plan.md`](../plugin-api-plan.md).
+self-documenting interface.

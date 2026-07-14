@@ -194,7 +194,7 @@ fn stat_mode_override_requires_double_speed() {
 }
 
 /// R3 closure pin — the single-speed FF41 STAT mode-bit read at cc+2 MID stays
-/// CLOSED on BOTH models (CC-RECLOCK Phase-0 + R3, ppu-subdot-ladder.md). The
+/// CLOSED on BOTH models. The
 /// abandoned R3 override (force the FF41 mode bits to 3 when a bare-line
 /// mode-3→mode-0 flip lands in the read M-cycle's second half, reusing the
 /// `m0_access_edge` half-split, the single-speed analog of the double-speed
@@ -505,7 +505,7 @@ fn cpu_clock_write_routes_through_the_per_model_conflict_class() {
 //
 // The production eager clock latches FF41 at the M-cycle's *leading* edge
 // (before the PPU advances), the slopgb equivalent of SameBoy force-syncing the
-// PPU to the read's access cycle (`ppu-timing-map.md` §6 (i)). At a mode-3→0
+// PPU to the read's access cycle. At a mode-3→0
 // boundary M-cycle it reads mode 3 where a trailing cc+4 view would read mode 0.
 
 #[test]

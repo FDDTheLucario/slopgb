@@ -1,9 +1,9 @@
-//! Tests for the deferred-commit clock: each pins a worked example from
-//! `docs/sameboy-port/cpu-timing-map.md` against SameBoy 1.0.2 `sm83_cpu.c`.
+//! Tests for the deferred-commit clock: each pins a worked example against
+//! SameBoy 1.0.2 `sm83_cpu.c`.
 
 use super::*;
 
-/// `cpu-timing-map.md` §2.1: `LDH A,(a8)` (`ld_a_da8`, `sm83_cpu.c:1284`).
+/// `LDH A,(a8)` (`ld_a_da8`, `sm83_cpu.c:1284`).
 /// Opcode fetch samples at C0, imm fetch at C0+4, the FF41 data read at
 /// **C0+8** (the leading edge of M3), and the trailing flush ends at C0+12.
 /// This 4-T-earlier sample than tick-then-access (cc+4 = C0+12) is the crux.
@@ -25,7 +25,7 @@ fn ldh_a_da8_samples_stat_at_leading_edge() {
     );
 }
 
-/// `cpu-timing-map.md` §4: `cycle_no_access` (`sm83_cpu.c:321`) parks +4 with no
+/// `cycle_no_access` (`sm83_cpu.c:321`) parks +4 with no
 /// advance, paid lazily by the next access — so a read after one internal
 /// M-cycle samples a full M-cycle later.
 #[test]
@@ -41,7 +41,7 @@ fn internal_cycle_defers_four() {
     assert_eq!(c.pending(), 4);
 }
 
-/// `cpu-timing-map.md` §3: every conflict class conserves the per-M-cycle total
+/// Every conflict class conserves the per-M-cycle total
 /// of 4 T-cycles (the pre-commit split is reclaimed by the re-park), so overall
 /// instruction timing is unchanged while the sub-M-cycle commit point varies.
 #[test]
@@ -61,7 +61,7 @@ fn conflict_write_conserves_total() {
     }
 }
 
-/// `cpu-timing-map.md` §3: the commit point itself shifts per class — `ReadNew`
+/// The commit point itself shifts per class — `ReadNew`
 /// lands 1 T early, `WriteCpu` 1 T late, `ReadOld` at the leading edge,
 /// `EarlyTwo` (PALETTE_CGB≥D / SCX) 2 T early, `WxHold` (WX_DMG / LCDC tile-sel
 /// glitch) at the leading edge like `ReadOld` but with the M-cycle holding one

@@ -95,7 +95,7 @@ pub mod cmd {
     /// Peer is closing the link.
     pub const DISCONNECT: u8 = 109;
     // bgb also defines SYNC3 (106, idle keep-alive) and STATUS (108, run/pause)
-    // — added when timestamp-precise bgb-wire interop lands (see docs/bgb-link-plan.md).
+    // — added when timestamp-precise bgb-wire interop lands.
 }
 
 /// An 8-byte bgb link packet: a command, three data bytes, and a little-endian

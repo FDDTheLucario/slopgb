@@ -33,8 +33,7 @@ after the batch. The device drains in callback-sized steps (typ. 1024 frames ≈
 21.3 ms @ 48 kHz — more than one 16.74 ms video frame), so the queue fell short every
 other callback and the wake emulated *two* frames but presented only the latest —
 frame N was emulated and never shown. The FPS counter read an honest ~59.7 because it
-counts **emulated** frames, not presents. Full diagnosis:
-[`docs/audio-video-pacing-plan.md`](../audio-video-pacing-plan.md).
+counts **emulated** frames, not presents.
 
 ## The servo + bands (audio pacing)
 
@@ -115,8 +114,6 @@ reintroduces the judder:
   Widening `MAX_SLEW` trades pitch stability for drift range (plan range 0.5–2%).
 
 ## Rejected approaches (do not re-chase)
-
-From [`docs/audio-video-pacing-plan.md`](../audio-video-pacing-plan.md):
 
 - **Present inside the batch loop (per emulated frame):** softbuffer/winit presents
   only the single latest framebuffer on `RedrawRequested`; there is no frame queue to

@@ -16,8 +16,7 @@
 # `cfl*2+dc` RESETS per line (`display.c` cfl=0) and is CONSERVED across the
 # mode-0 flip (cfl+=k while a GB_SLEEP drives dc -=2k), so it maps two genuinely
 # different instants to the same number and has repeatedly produced FALSE
-# "co-temporal" verdicts (#11i/#11ap/#11ax, all refuted by `fp` in #11ay —
-# `measurements/c2-absclock-cotemporal-refuted-2026-07-01.md`).
+# "co-temporal" verdicts, all refuted by the absolute-clock `fp` metric.
 #
 # Usage:  docs/sameboy-port/tools/build_sameboy_tracers.sh
 # Output: $SBBUILD/SameBoy-1.0.2/build/bin/tester/sameboy_tester

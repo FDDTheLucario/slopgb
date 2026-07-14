@@ -10,7 +10,6 @@ State date: 2026-06-14.
 | [cpu-interrupts.md](cpu-interrupts.md) | dispatch-ack sync-ahead, interrupt sampling, halt wake, HALT/STOP gate, CGB speed switch |
 | [dma.md](dma.md) | OAM DMA bus conflicts, OAM×VRAM DMA composition, CGB VRAM (HBlank) DMA |
 | [ppu-timing.md](ppu-timing.md) | mode-3 write strobe, SCX hunt, STAT IRQ events, post-boot LCD phase, CGB-C LY/STAT timeline, mode-0 end-of-line grid |
-| [ppu-subdot-ladder.md](ppu-subdot-ladder.md) | the half-dot/eighth-grid sub-dot event-phase ladder (INC1–G2, parked + disproven) |
 | [ppu-render.md](ppu-render.md) | OAM scan, window machine, mode-3 fetch, mealybug, DMG OAM bug, boot VRAM, frame skip, IRQ drain |
 | [apu.md](apu.md) | post-boot warmup, SameBoy countdown model, ch1 sweep |
 | [io-misc.md](io-misc.md) | serial clock, SGB joypad, MBC30, public API facade, audio frontend |

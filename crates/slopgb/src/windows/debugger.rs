@@ -219,7 +219,7 @@ pub fn render_memory(
 /// context menu. Owned by `WinState::Debugger`, mutated by the click/hover
 /// hit-tests and read by the renderer. The breakpoint *set* is **not** here — it
 /// lives in the App-owned `dbg::Debugger` (both the key handler and the run loop
-/// consult it; see `docs/bgb-menu-design.md` RA1).
+/// consult it).
 /// Live execution-profiler state for the Execution-profiler dropdown (MB5):
 /// which radio mode is active and the distinct-addresses-seen count. Cached on
 /// [`DebuggerState`] (refreshed from the machine when the menu opens) so the

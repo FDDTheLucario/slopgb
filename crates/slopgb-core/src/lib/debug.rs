@@ -3,7 +3,7 @@
 //! code/data log (CDL), and the WRAM/VRAM bank indicators.
 //!
 //! A second `impl GameBoy` block, split out of `lib.rs` to keep it under the
-//! 1000-line cap (see `docs/tdd-split-plan.md`). `use super::*` pulls in
+//! 1000-line cap. `use super::*` pulls in
 //! `GameBoy`, `Watchpoint`, `StateError`, and the save-state constants; as a
 //! child module it reaches `GameBoy`'s private `cpu`/`bus`/`sgb_apu` fields
 //! directly.

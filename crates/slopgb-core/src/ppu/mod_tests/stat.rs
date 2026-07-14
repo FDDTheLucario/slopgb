@@ -55,7 +55,7 @@ fn m0_stat_flip_is_off_on_a_bare_line() {
 /// CPU-visible mode in two one-dot windows on a visible line — the OAM
 /// (mode-2) IRQ leads the visible byte by one dot (dot 3), and the mode-0
 /// IRQ lags it by one dot (the dot after the visible 3→0 flip). That 2-dot
-/// relative swing is what separates the kernel pair (`ppu-timing-map.md` §2).
+/// relative swing is what separates the kernel pair.
 /// The field is inert at S2b (the STAT engine still fires on the old path);
 /// this pins the decoupling directly against the visible mode.
 #[test]
@@ -414,9 +414,9 @@ fn mode0_irq_fires_at_render_done_not_lagged() {
     );
 }
 
-/// Port Stage A7 — the mode-2→3 entry back-date (`ppu-subdot-ladder.md`
-/// "A7"). On the leading-edge path a bare single-speed line's CPU-visible STAT
-/// mode flips 2→3 at dot 80 (4 dots earlier than the dispatch's dot 84),
+/// The mode-2→3 entry back-date. On the leading-edge path a bare single-speed
+/// line's CPU-visible STAT mode flips 2→3 at dot 80 (4 dots earlier than the
+/// dispatch's dot 84),
 /// making the cc+0 FF41 read observationally match SameBoy's cc+4 view for
 /// the mode-2→3 entry (mooneye `intr_2_mode3_timing` passes).
 #[test]
@@ -443,7 +443,7 @@ fn mode3_entry_backdates_four_dots() {
 }
 
 /// Port Stage A13 — the LCD-enable glitch-line mode-3 boundary
-/// back-dates (`ppu-subdot-ladder.md` "A13"). On the leading-edge path the
+/// back-dates. On the leading-edge path the
 /// glitch first line's CPU-visible STAT mode-3 window is back-dated the full
 /// single-speed read offset (4 dots, like A7): the mode-0→3 ENTRY moves 78→74
 /// and the 3→0 EXIT (the `line_render_done` flip at dot 252) is anticipated by

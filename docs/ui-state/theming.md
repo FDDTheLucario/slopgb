@@ -3,7 +3,7 @@
 Contemporary UI look, replacing the bare "Windows 3" bgb chrome as the default —
 **colour only**: no rect/control was moved, resized, or added. `Theme` (`ui/theme.rs`)
 carries only `u32` XRGB8888 fields, so it structurally cannot encode geometry; every
-tool window already took `&Theme` (bgb-clone-plan Layer B/C), so swapping the active
+tool window already took `&Theme`, so swapping the active
 palette recolors the whole UI with zero call-site churn beyond the handful of
 role-repoints below.
 

@@ -410,8 +410,7 @@ impl Ppu {
         // frame) while the `ly_for_comparison` READ latch stays dot 6 — the same
         // two-latch split the C015 disable direction uses above. `force_level`
         // suppresses the dots-6-7 natural re-edge; `!stat_update.line()` keeps a
-        // pre-armed mode-1 source's STAT-blocking intact. DMG-family only. See
-        // `measurements/eager-lyc153-cluster-rehost-2026-07-12.md`.
+        // pre-armed mode-1 source's STAT-blocking intact. DMG-family only.
         if !self.model.is_cgb()
             && self.line == 153
             && self.dot == 4

@@ -33,8 +33,7 @@ Output: `<rom> FF80=62 FF81=62 FF82=01 PASS`.
 
 `int_hblank_halt_scx0..7` (DMG) all **PASS** in SameBoy — `$FF80` = 62,62,62,63,
 63,63,63,64 = the baked expected. So slopgb's Tier-2 reclock reading 60,60,61,61,
-61,61,62,62 is a **port bug, not a hardware contradiction** (see
-`../../hardware-state/ppu-subdot-ladder.md` THESIS RESULT #7).
+61,61,62,62 is a **port bug, not a hardware contradiction**.
 
 ## Note on game/visual ROMs
 

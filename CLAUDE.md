@@ -32,8 +32,7 @@ Verify any core touch with `cargo test -p slopgb-core --test gbtr`
 The SameBoy port is complete: the eager cycle-exact clock is the **only** clock (the
 dual-clock fork scaffolding was deleted). The golden/baselines are the eager reference,
 **NOT** byte-identical to the pre-port core. Never `pkill` a build sharing a
-`CARGO_TARGET_DIR` (corrupts the target → false failures). History:
-[`docs/sameboy-port/`](docs/sameboy-port/PORT-PLAN.md).
+`CARGO_TARGET_DIR` (corrupts the target → false failures).
 
 ## Where the detail lives
 
@@ -46,8 +45,6 @@ This file is a lean index. Implementation-state narratives live in dedicated dir
 | [`docs/hardware-state/`](docs/hardware-state/README.md) | **core** per-subsystem state, quirks, parked/disproven approaches (one file per subsystem) |
 | [`docs/ui-state/`](docs/ui-state/README.md) | **frontend / bgb-UI** per-area state (menus, debugger, options, viewers, save-states + link, startup + boot, layout) |
 | [`docs/bgb-reference/`](docs/bgb-reference/README.md) | real bgb screenshots + capture rig — **never invent bgb's UI, capture it** |
-| [`docs/sameboy-port/`](docs/sameboy-port/PORT-PLAN.md) | the SameBoy cycle-exact port: `PORT-PLAN`, `STATE-HISTORY`, `C3-FLIP-CHECKLIST`, per-session measurement maps under `tools/measurements/` (the port + its measurement scaffolding are retired — history only) |
-| `docs/*-plan.md` | forward-looking plans (clone/rclick-menu/menu-design/link/bootrom/exceptions/joypad/savestate/copy-clipboard/noload-startup/qa-fixes/plugin-api) |
 | `crates/slopgb-core/tests/gbtr/baselines/gambatte.txt` header | floor-class index (A–H + lift conditions) — read before touching baselined behavior |
 
 When a **hardware** question comes up, consult in order:
@@ -73,13 +70,12 @@ When a **hardware** question comes up, consult in order:
   `-D warnings` clean. The sole external runtime dep (`wasmi`, the plugin engine)
   is quarantined in `crates/slopgb-plugin-host`; the guest SDK uses
   `deny(unsafe_code)` + a scoped `allow` for two wasm linkage markers only (no
-  `unsafe` blocks). See [`docs/plugin-api-plan.md`](docs/plugin-api-plan.md).
+  `unsafe` blocks).
 - No god files: keep every `.rs` **under 1000 lines**. Split a growing file into
   cohesive submodules (`foo.rs` + `foo/`, each a second `impl` block via
   `use super::*`; struct/fields/consts stay in the parent) and externalize inline
   tests to a `#[cfg(test)] #[path = "X_tests.rs"] mod tests;` sibling (split further
-  into nested `#[path]` category modules if it too passes 1000). See
-  [`docs/tdd-split-plan.md`](docs/tdd-split-plan.md) for the seam map.
+  into nested `#[path]` category modules if it too passes 1000).
 - **Document state in the dedicated dirs, not here.** When you build or change a
   subsystem, write its state/quirks to the matching `docs/hardware-state/` (core) or
   `docs/ui-state/` (frontend) file — one file per subsystem/area. Keep CLAUDE.md a
@@ -137,5 +133,5 @@ opt-in boot ROM, MCP) are all merged — per-area detail in
 UI theming (contemporary Light default / Dark / Classic + custom-theme API; colour-only,
 `T` toggles Light↔Dark): [`docs/ui-state/theming.md`](docs/ui-state/theming.md).
 Known residuals (all SameBoy-FAIL/floored, NOT regressions): DS mid-dot render floor,
-halt-wake/HDMA levers. History: [`STATE-HISTORY.md`](docs/sameboy-port/STATE-HISTORY.md).
+halt-wake/HDMA levers.
 

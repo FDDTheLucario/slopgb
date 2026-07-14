@@ -66,8 +66,7 @@ peeks** — no machine advance, timer-safe:
 Coupled: the sub-M-cycle wake **separates the read position** (want-0 `_a` wakes
 one M-cycle early → `read_pos_hd` 904 < 912 → stays mode 0), so the override has
 zero collateral — where the entry peek alone (#11cw/#11cy) or the read shift
-alone (#11cz, −9) each dropped a SameBoy-pass row. Map:
-`docs/sameboy-port/tools/measurements/eager-wake-clock-port-2026-07-11.md`. This
+alone (#11cz, −9) each dropped a SameBoy-pass row. This
 is distinct from the DMG deferred sub-M-cycle sampler (`halt_wake_mid_impl`, the
 tier2 `!is_cgb` mid-block) and from the parked CGB whole-cycle mask above.
 

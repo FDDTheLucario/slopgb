@@ -20,5 +20,3 @@ Every `.rs` stays under 1000 lines (the project-wide rule). The frontend splits:
   (per-tab `Ctrl` builders).
 - Each module externalizes its tests to a `#[path]` `*_tests.rs` sibling (e.g.
   `debugger_misc_tests.rs`).
-
-See [`../tdd-split-plan.md`](../tdd-split-plan.md) for the seam map.
