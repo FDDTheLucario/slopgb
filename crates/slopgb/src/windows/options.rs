@@ -1,9 +1,10 @@
 //! The bgb "Options" control panel (functional clone of bgb 1.6.4's Options
 //! property sheet — captures in `docs/bgb-reference/options/`). A modal overlay
-//! over the LCD (like [`super::mainwin::InfoBox`]): an 8-tab dialog laid out in
+//! over the LCD (like [`super::mainwin::InfoBox`]): a 9-tab dialog laid out in
 //! bgb's two-row Windows tab control (row 1 Graphics/System/Debug/Exceptions,
-//! row 2 Sound/GB Colors/Joypad/Misc), the active tab's group sitting in the
-//! bottom row touching the content, with OK/Cancel/Apply/Defaults buttons.
+//! row 2 Sound/GB Colors/Joypad/Misc plus a slopgb Theme tab), the active tab's
+//! group sitting in the bottom row touching the content, with
+//! OK/Cancel/Apply/Defaults buttons.
 //!
 //! Settings backed by a real slopgb capability are **live** (including SGB
 //! borders, bootroms, and the emulated-system radios). The remaining bgb-only
@@ -200,11 +201,11 @@ pub struct Settings {
     /// SGB model to the DMG-class 256 B boot ROM, so this feeds the SGB models.
     pub bootrom_sgb: String,
     /// UI → active colour theme (Light/Dark/Classic/a named custom theme). No
-    /// bgb equivalent and no on-screen control (the paramount look-only
-    /// constraint) — set via config or the Light↔Dark hotkey (bare `T`,
+    /// bgb equivalent — set via the Options Theme tab (the three built-ins), the
+    /// config file, or the Light↔Dark hotkey (bare `T`,
     /// [`crate::input::Action::ToggleTheme`]). Default `Light` (a modern flat
     /// look); `Classic` reproduces bgb's original grey/white palette
-    /// pixel-for-pixel.
+    /// pixel-for-pixel. A named `Custom` theme stays config-only.
     pub theme: ThemeChoice,
 }
 
@@ -278,7 +279,8 @@ impl Settings {
 
 // --- Tabs -------------------------------------------------------------------
 
-/// The eight Options tabs, in bgb's order (row 1 then row 2).
+/// The Options tabs: bgb's eight (row 1 then row 2) plus slopgb's Theme tab
+/// (appended to row 2 — no bgb equivalent).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OptionsTab {
     Graphics,
@@ -289,6 +291,7 @@ pub enum OptionsTab {
     GbColors,
     Joypad,
     Misc,
+    Theme,
 }
 
 impl OptionsTab {
@@ -299,12 +302,14 @@ impl OptionsTab {
         OptionsTab::Debug,
         OptionsTab::Exceptions,
     ];
-    /// Tabs in bgb's bottom group (row 2 when one of them is active).
-    pub const GROUP_B: [OptionsTab; 4] = [
+    /// Tabs in bgb's bottom group (row 2 when one of them is active), with
+    /// slopgb's Theme tab appended.
+    pub const GROUP_B: [OptionsTab; 5] = [
         OptionsTab::Sound,
         OptionsTab::GbColors,
         OptionsTab::Joypad,
         OptionsTab::Misc,
+        OptionsTab::Theme,
     ];
 
     #[must_use]
@@ -318,6 +323,7 @@ impl OptionsTab {
             OptionsTab::GbColors => "GB Colors",
             OptionsTab::Joypad => "Joypad",
             OptionsTab::Misc => "Misc",
+            OptionsTab::Theme => "Theme",
         }
     }
 
@@ -484,16 +490,18 @@ impl OptionsState {
     #[must_use]
     pub fn tab_hitboxes(&self, dialog: Rect) -> Vec<(OptionsTab, Rect)> {
         let active_group = self.active.group();
-        let (top, bottom) = if active_group == 0 {
-            (OptionsTab::GROUP_B, OptionsTab::GROUP_A)
+        // Slices: the two groups now differ in length (Theme extends GROUP_B), so
+        // the swapped branches can't be equal-length arrays.
+        let (top, bottom): (&[OptionsTab], &[OptionsTab]) = if active_group == 0 {
+            (&OptionsTab::GROUP_B, &OptionsTab::GROUP_A)
         } else {
-            (OptionsTab::GROUP_A, OptionsTab::GROUP_B)
+            (&OptionsTab::GROUP_A, &OptionsTab::GROUP_B)
         };
-        let mut out = Vec::with_capacity(8);
+        let mut out = Vec::with_capacity(9);
         for (row, tabs) in [top, bottom].into_iter().enumerate() {
             let y = dialog.y + row as i32 * TAB_ROW_H;
             let mut cx = dialog.x + 4;
-            for t in tabs {
+            for &t in tabs {
                 let w = measure(t.label()) + TAB_PAD * 2;
                 out.push((t, Rect::new(cx, y, w, TAB_ROW_H)));
                 cx += w + 2;

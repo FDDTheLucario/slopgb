@@ -201,8 +201,8 @@ impl fmt::Display for ThemeParseError {
 
 /// Which palette is active — the persisted `Settings::theme` choice.
 /// `Custom` carries a name resolved against a loaded [`CustomThemes`]
-/// registry. No on-screen control selects this (the paramount look-only
-/// constraint): it's set via config or the Light↔Dark hotkey (`T`).
+/// registry. Selected via the Options Theme tab (the three built-ins), the
+/// config file, or the Light↔Dark hotkey (`T`); a `Custom` theme is config-only.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ThemeChoice {
     Light,

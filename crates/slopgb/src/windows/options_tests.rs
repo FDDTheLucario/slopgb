@@ -1,4 +1,4 @@
-use super::tabs::{Field, Kind, controls};
+use super::tabs::{Field, Kind, ThemeRadio, controls};
 use super::*;
 use crate::ui::canvas::Canvas;
 
@@ -148,7 +148,7 @@ fn options_tab_labels_and_groups() {
         .chain(&OptionsTab::GROUP_B)
         .copied()
         .collect();
-    assert_eq!(all.len(), 8);
+    assert_eq!(all.len(), 9);
     assert_eq!(
         all.iter().map(|t| t.label()).collect::<Vec<_>>(),
         [
@@ -159,9 +159,12 @@ fn options_tab_labels_and_groups() {
             "Sound",
             "GB Colors",
             "Joypad",
-            "Misc"
+            "Misc",
+            "Theme"
         ]
     );
+    // The slopgb Theme tab lives in the bottom group.
+    assert!(OptionsTab::GROUP_B.contains(&OptionsTab::Theme));
     for t in OptionsTab::GROUP_A {
         assert_eq!(t.group(), 0);
     }
@@ -557,6 +560,30 @@ fn gbcolors_scheme_cycles_palette() {
 }
 
 #[test]
+fn theme_tab_radios_select_theme() {
+    // The Theme tab exposes the three built-in colour themes as live radios;
+    // clicking one sets `working.theme` (persisted via the usual OK/Apply flow).
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Theme;
+    // The Dark radio is a live control on the tab.
+    let content = OptionsState::content_rect(dialog());
+    assert!(
+        controls(OptionsTab::Theme, &st.working, content)
+            .iter()
+            .any(|c| c.field == Some(Field::Theme(ThemeRadio::Dark))),
+        "Theme tab has a live Dark radio"
+    );
+    // Default is Light; clicking Dark → Classic → Light round-trips the choice.
+    assert_eq!(st.working.theme, ThemeChoice::Light);
+    click_field(&mut st, Field::Theme(ThemeRadio::Dark));
+    assert_eq!(st.working.theme, ThemeChoice::Dark);
+    click_field(&mut st, Field::Theme(ThemeRadio::Classic));
+    assert_eq!(st.working.theme, ThemeChoice::Classic);
+    click_field(&mut st, Field::Theme(ThemeRadio::Light));
+    assert_eq!(st.working.theme, ThemeChoice::Light);
+}
+
+#[test]
 fn defaults_resets_every_tab_only_its_own_fields() {
     // For each tab, mutate one of its live fields away from default, press
     // Defaults on that tab, and assert it reset (and an out-of-tab field is
@@ -577,6 +604,11 @@ fn defaults_resets_every_tab_only_its_own_fields() {
         (OptionsTab::Sound, |s| s.volume = 0.1, |s| s.volume == 1.0),
         (OptionsTab::GbColors, |s| s.scheme = 2, |s| s.scheme == 0),
         (OptionsTab::Misc, |s| s.ff_speed = 3, |s| s.ff_speed == 10),
+        (
+            OptionsTab::Theme,
+            |s| s.theme = ThemeChoice::Dark,
+            |s| s.theme == ThemeChoice::Light,
+        ),
         (
             // invalid-opcode defaults checked, so flip it off to test the reset.
             OptionsTab::Exceptions,

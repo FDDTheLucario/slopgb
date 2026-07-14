@@ -65,8 +65,13 @@ line in the whole render path that changed to make every window themeable. No ne
 `&Theme` plumbing anywhere: the same parameter that always flowed through now just
 carries a different value.
 
-**No on-screen control** (the paramount look-only constraint: a visible toggle would
-be a layout change) — selection is config/CLI/hotkey only.
+**Options → Theme tab** (a slopgb extra, no bgb equivalent): Light/Dark/Classic radios
+select the three built-in themes; the pick applies + persists through the normal
+Options OK/Apply flow (the render path already recolors from `settings.theme` every
+redraw, so the tab's click handler only has to set `s.theme` — no new plumbing). A
+named `Custom` theme has no radio and stays config-only — when one is active the tab
+shows an inert `(custom theme active: NAME)` line instead of a lit radio. The config
+file and the Light↔Dark hotkey (`T`, below) still select the theme too.
 
 ## Hotkey
 
