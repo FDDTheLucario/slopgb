@@ -77,9 +77,68 @@ slopgb --plugins target/wasm32-unknown-unknown/release game.gb
 # each plugin's log lines print to stderr, prefixed with the plugin's file stem
 ```
 
+> **Toolchain note.** `wasm32-unknown-unknown` must be installed for the exact
+> toolchain that builds the crate. Inside the slopgb tree that is automatic
+> (`rust-toolchain.toml` pins the target); a **standalone** plugin crate uses
+> your default toolchain, so run `rustup target add wasm32-unknown-unknown`
+> first — otherwise the build fails with a misleading "target may not be
+> installed" even when `rustup` reports the target present for a *different*
+> toolchain.
+
 `--plugins <DIR>` (or `SLOPGB_PLUGINS_DIR=<DIR>`) loads **every** `*.wasm` in the
 directory. A file that fails to load is logged and skipped, so one bad plugin
 can't stop the rest. With no such flag, no plugin machinery runs at all.
+
+## Compiling several plugins at once
+
+Put each plugin in its own crate under one **plugin workspace**, so a single
+build drops every `.wasm` into one directory you point `--plugins` at:
+
+```
+my-plugins/
+  Cargo.toml            # [workspace] members = ["frame-counter", "pc-logger", …]
+  frame-counter/{Cargo.toml, src/lib.rs}
+  pc-logger/{Cargo.toml, src/lib.rs}
+```
+
+Share the SDK dependency once at the workspace root so each member just inherits
+it:
+
+```toml
+# my-plugins/Cargo.toml
+[workspace]
+resolver = "3"
+members = ["frame-counter", "pc-logger"]
+[workspace.dependencies]
+slopgb-plugin-api = { path = "…/slopgb/crates/slopgb-plugin-api" }
+[profile.release]
+opt-level = "z"
+strip = true
+```
+
+Each member is a `cdylib` that inherits the shared dep:
+
+```toml
+# my-plugins/frame-counter/Cargo.toml
+[lib]
+crate-type = ["cdylib"]
+[dependencies]
+slopgb-plugin-api.workspace = true
+```
+
+Build them all with one command, then load the whole directory:
+
+```sh
+cargo build --release --target wasm32-unknown-unknown   # builds every member
+slopgb --plugins my-plugins/target/wasm32-unknown-unknown/release game.gb
+```
+
+Every member emits one `.wasm` into `target/wasm32-unknown-unknown/release/`
+(crate `frame-counter` → `frame_counter.wasm` — dashes become underscores).
+Build a subset with `-p frame-counter -p pc-logger`. That release directory *is*
+your plugins dir — no renaming needed for tier-1/2 plugins (they report their
+name from wasm metadata); only the tier-3 coprocessor seams need fixed filenames
+(handled by `cargo xtask stage-plugins <dir>`).
 
 ## What a plugin can see
 
