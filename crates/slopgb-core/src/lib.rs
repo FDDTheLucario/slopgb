@@ -500,6 +500,22 @@ impl GameBoy {
         }
     }
 
+    /// Arm/disarm the per-channel audio recording tap (Joypad → "Audio
+    /// channels"). A frontend control, *not* hardware: off by default, fully
+    /// gated in the APU output stage, so it never perturbs golden output.
+    /// While armed, [`Self::drain_audio_channels`] yields the four channels'
+    /// isolated mono streams at the same rate/length as [`Self::drain_audio`].
+    pub fn set_record_channels(&mut self, on: bool) {
+        self.bus.apu_mut().set_record_channels(on);
+    }
+
+    /// Move each GB sound channel's recorded mono samples into `out[i]`
+    /// (channel 1..=4 → index 0..=3). Empty unless [`Self::set_record_channels`]
+    /// armed the tap. SGB's SNES-side audio is not included (GB channels only).
+    pub fn drain_audio_channels(&mut self, out: &mut [Vec<f32>; 4]) {
+        self.bus.apu_mut().drain_audio_channels(out);
+    }
+
     /// Set the audio output sample rate in Hz (default
     /// [`DEFAULT_SAMPLE_RATE`]).
     pub fn set_sample_rate(&mut self, hz: u32) {

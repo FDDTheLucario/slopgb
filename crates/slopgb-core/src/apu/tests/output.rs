@@ -64,6 +64,61 @@ fn silence_when_all_dacs_off() {
 }
 
 #[test]
+fn record_channels_captures_four_isolated_streams() {
+    // The Joypad → "Audio channels" tap: armed, it records each channel's
+    // isolated mono output at the same rate/length as the mixed stream.
+    let mut h = H::dmg();
+    h.apu.set_record_channels(true);
+    h.w(0xFF24, 0x77); // NR50 master vol
+    h.w(0xFF25, 0xFF); // NR51: route everything
+    h.w(0xFF11, 0x80); // ch1 50% duty
+    h.w(0xFF13, 0x00);
+    h.w(0xFF14, 0x84); // ch1 trigger, audible period
+    h.w(0xFF12, 0xF0); // ch1 DAC on + max envelope
+    h.ticks(50_000);
+    let mut mixed = Vec::new();
+    h.apu.drain_samples(&mut mixed);
+    let mut chans: [Vec<f32>; 4] = Default::default();
+    h.apu.drain_audio_channels(&mut chans);
+    // Every track is the same length as the mix (they share the resampling
+    // window), so the four WAVs line up with the mixed recording.
+    for (i, c) in chans.iter().enumerate() {
+        assert_eq!(c.len(), mixed.len(), "channel {i} length matches the mix");
+    }
+    // Ch1 is playing → its track carries the square wave; ch2-4 DACs are off,
+    // so those tracks are pure silence (the tap is per-channel, not the mix).
+    let energy: f32 = chans[0].iter().map(|&s| s * s).sum();
+    assert!(energy > 1.0, "ch1 track carries audio, got {energy}");
+    for (ch, track) in chans.iter().enumerate().skip(1) {
+        assert!(
+            track.iter().all(|&s| s == 0.0),
+            "ch{} DAC off → silent track",
+            ch + 1
+        );
+    }
+}
+
+#[test]
+fn record_channels_disarmed_records_nothing_and_disarming_clears() {
+    let mut h = H::dmg();
+    h.start_ch1();
+    h.ticks(10_000);
+    let mut chans: [Vec<f32>; 4] = Default::default();
+    // Never armed → nothing captured.
+    h.apu.drain_audio_channels(&mut chans);
+    assert!(
+        chans.iter().all(Vec::is_empty),
+        "disarmed tap records nothing"
+    );
+    // Arm, capture, then disarm: disarming drops the buffered samples.
+    h.apu.set_record_channels(true);
+    h.ticks(10_000);
+    h.apu.set_record_channels(false);
+    h.apu.drain_audio_channels(&mut chans);
+    assert!(chans.iter().all(Vec::is_empty), "disarm drops the buffer");
+}
+
+#[test]
 fn playing_pulse_is_audible_and_routed_by_nr51() {
     let mut h = H::dmg();
     h.w(0xFF24, 0x77);
