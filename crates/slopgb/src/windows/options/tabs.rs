@@ -120,6 +120,13 @@ pub(crate) enum Field {
     /// Joypad → "configure keyboard": opens the key-rebind wizard (does not
     /// mutate [`Settings`]; routes a [`super::OptionsOutcome`] out instead).
     ConfigureKeyboard,
+    /// Joypad → "configure game controller": opens the controller-rebind wizard.
+    ConfigureGamepad,
+    /// Joypad → "clear game controller": unbinds every controller button.
+    ClearGamepad,
+    /// Joypad → "Game controller works only if app has focus" (gates controller
+    /// input on window focus).
+    GamepadNeedsFocus,
     /// Joypad → "allow pressing L+R or U+D" (the SOCD filter toggle).
     AllowOpposing,
     /// Joypad → "Rapid speed" combo (cycles the auto-fire period 1→4).
@@ -302,6 +309,8 @@ pub(crate) fn on_content_click(
     // of mutating `Settings` here.
     match field {
         Field::ConfigureKeyboard => return Some(super::OptionsOutcome::ConfigureKeyboard),
+        Field::ConfigureGamepad => return Some(super::OptionsOutcome::ConfigureGamepad),
+        Field::ClearGamepad => return Some(super::OptionsOutcome::ClearGamepad),
         Field::PickBootrom(slot) => return Some(super::OptionsOutcome::PickBootrom(slot)),
         Field::SoundCard => return Some(super::OptionsOutcome::CycleSoundcard),
         _ => {}
@@ -383,6 +392,7 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         }
         Field::SchemeCycle => s.select_scheme((s.scheme + 1) % SCHEMES.len()),
         Field::AllowOpposing => s.allow_opposing = !s.allow_opposing,
+        Field::GamepadNeedsFocus => s.gamepad_needs_focus = !s.gamepad_needs_focus,
         Field::RapidSpeed => {
             s.rapid_speed = if s.rapid_speed >= 4 {
                 1
@@ -417,7 +427,11 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
             }
         }
         // Routed out by `on_content_click` before reaching here.
-        Field::ConfigureKeyboard | Field::PickBootrom(_) | Field::SoundCard => {}
+        Field::ConfigureKeyboard
+        | Field::ConfigureGamepad
+        | Field::ClearGamepad
+        | Field::PickBootrom(_)
+        | Field::SoundCard => {}
     }
 }
 
@@ -484,6 +498,8 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
         // screenshot format are the live Joypad fields that reset.
         OptionsTab::Joypad => {
             s.allow_opposing = d.allow_opposing;
+            s.gamepad_needs_focus = d.gamepad_needs_focus;
+            s.gamepad_map = d.gamepad_map.clone();
             s.screenshot_format = d.screenshot_format;
             s.screenshot_copies = d.screenshot_copies;
             s.rapid_speed = d.rapid_speed;

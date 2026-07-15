@@ -257,55 +257,79 @@ impl KeyConfigWizard {
         (self.step >= WIZARD_ORDER.len()).then_some(self.working)
     }
 
-    /// The button at window pixel `(px, py)`, hit-tested against the same rects
-    /// [`Self::render`] draws (so they cannot drift). `bounds` is the canvas.
-    #[must_use]
-    pub fn button_at(&self, bounds: Rect, px: i32, py: i32) -> Option<WizardButton> {
-        button_rects(bounds)
-            .into_iter()
-            .find(|(_, r)| r.contains(px, py))
-            .map(|(b, _)| b)
-    }
-
     /// Draw the wizard centred over the LCD, faithful to bgb's
     /// `joypad-keyconfig.png`: a GB illustration (current button red), the two
     /// text lines, and the Cancel / Skip/clear / Skip/keep buttons.
     pub fn render(&self, c: &mut Canvas, theme: &Theme) {
-        let bounds = c.bounds();
-        let dlg = dialog_rect(bounds);
-        c.fill_rect(dlg, theme.bg);
-        c.outline_rect(dlg, theme.border);
-        self.draw_gb(c, dlg, theme);
-
-        let lh = line_height();
-        let tx = dlg.x + 14;
-        let ty = dlg.y + 84;
-        let prompt = format!("press and hold the button for {}", self.prompt_name());
-        draw_text(c, tx, ty, &prompt, theme.text);
         let mapped = self.current_key().map_or("(none)", key_name);
-        draw_text(
-            c,
-            tx,
-            ty + lh + 4,
-            &format!("currently mapped to: {mapped}"),
-            theme.text,
-        );
-
-        for (kind, r) in button_rects(bounds) {
-            c.outline_rect(r, theme.text);
-            let label = kind.label();
-            let lx = r.x + (r.w - measure(label)) / 2;
-            draw_text(c, lx, r.y + (r.h - lh) / 2, label, theme.text);
-        }
+        render_rebind_wizard(c, theme, self.prompt_name(), mapped, self.current_button());
     }
 
-    /// Draw the Game Boy illustration (D-pad + A/B + select/start) with the
-    /// button currently being configured highlighted red.
-    fn draw_gb(&self, c: &mut Canvas, dlg: Rect, theme: &Theme) {
-        let cur = self.current_button();
+    /// Left-click hit-test over the wizard's three buttons.
+    #[must_use]
+    pub fn button_at(&self, bounds: Rect, px: i32, py: i32) -> Option<WizardButton> {
+        wizard_button_at(bounds, px, py)
+    }
+}
+
+/// Render the shared rebind-wizard modal (keyboard + game controller): the GB
+/// illustration with `highlight`ed button, the "press … for X" prompt, the
+/// "currently mapped to: …" line, and the Cancel / Skip-clear / Skip-keep row.
+pub(crate) fn render_rebind_wizard(
+    c: &mut Canvas,
+    theme: &Theme,
+    prompt_name: &str,
+    mapped: &str,
+    highlight: Option<Button>,
+) {
+    let bounds = c.bounds();
+    let dlg = dialog_rect(bounds);
+    c.fill_rect(dlg, theme.bg);
+    c.outline_rect(dlg, theme.border);
+    draw_wizard_gb(c, dlg, theme, highlight);
+
+    let lh = line_height();
+    let tx = dlg.x + 14;
+    let ty = dlg.y + 84;
+    draw_text(
+        c,
+        tx,
+        ty,
+        &format!("press and hold the button for {prompt_name}"),
+        theme.text,
+    );
+    draw_text(
+        c,
+        tx,
+        ty + lh + 4,
+        &format!("currently mapped to: {mapped}"),
+        theme.text,
+    );
+    for (kind, r) in button_rects(bounds) {
+        c.outline_rect(r, theme.text);
+        let label = kind.label();
+        let lx = r.x + (r.w - measure(label)) / 2;
+        draw_text(c, lx, r.y + (r.h - lh) / 2, label, theme.text);
+    }
+}
+
+/// Left-click hit-test over the wizard's three bottom buttons (shared by both
+/// rebind wizards; depends only on `bounds`).
+#[must_use]
+pub(crate) fn wizard_button_at(bounds: Rect, px: i32, py: i32) -> Option<WizardButton> {
+    button_rects(bounds)
+        .into_iter()
+        .find(|(_, r)| r.contains(px, py))
+        .map(|(b, _)| b)
+}
+
+/// Draw the Game Boy illustration (D-pad + A/B + select/start) with `highlight`
+/// (the button being configured) drawn red.
+fn draw_wizard_gb(c: &mut Canvas, dlg: Rect, theme: &Theme, highlight: Option<Button>) {
+    {
         let ink = theme.text;
         let col = |b: Button| {
-            if cur == Some(b) {
+            if highlight == Some(b) {
                 theme.breakpoint
             } else {
                 ink

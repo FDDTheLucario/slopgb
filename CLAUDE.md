@@ -1,10 +1,11 @@
 # slopgb
 
 Cycle-accurate GB/GBC emulator. Workspace: `crates/slopgb-core` (emulator, zero deps,
-no unsafe) + `crates/slopgb` (frontend: winit/softbuffer/cpal only, a BGB-style
-debugger UI) + `crates/slopgb-plugin-api` (guest SDK for Rust→wasm plugins) +
-`crates/slopgb-plugin-host` (the wasmi runtime — the one place `wasmi` is a dep,
-isolated so core stays zero-dep and the frontend keeps its three-lib rule).
+no unsafe) + `crates/slopgb` (frontend: winit/softbuffer/cpal + gilrs for game
+controllers, a BGB-style debugger UI) + `crates/slopgb-plugin-api` (guest SDK for
+Rust→wasm plugins) + `crates/slopgb-plugin-host` (the wasmi runtime — the one place
+`wasmi` is a dep, isolated so core stays zero-dep and the frontend keeps its lean
+dep set).
 
 **Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before touching core** — timing
 contract (tick-then-access M-cycles), memory map, module ownership, mooneye +

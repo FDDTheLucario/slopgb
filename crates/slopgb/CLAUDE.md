@@ -1,8 +1,9 @@
 # slopgb (frontend)
 
 The BGB-style debugger/player frontend. External deps limited to
-`winit` / `softbuffer` / `cpal` (plus the internal `slopfp`,
-`slopgb-plugin-host`, and `slopgb-sgb-coprocessor`). `forbid(unsafe_code)`.
+`winit` / `softbuffer` / `cpal` / `gilrs` (game controllers) (plus the internal
+`slopfp`, `slopgb-plugin-host`, and `slopgb-sgb-coprocessor`). `forbid(unsafe_code)`
+(the unsafe in `gilrs`'s platform backends is contained in the dependency).
 Per-area state lives in `docs/ui-state/<area>.md` — read the matching file first.
 
 ## Architecture
@@ -33,6 +34,7 @@ cargo run --release -- [game.gb]     # no ROM = blank LCD (bgb-style)
 
 ## Rules
 
-- No new external deps beyond winit/softbuffer/cpal. No god files (<1000 lines).
+- No new external deps beyond winit/softbuffer/cpal + gilrs (game controllers).
+  No god files (<1000 lines).
 - UI state goes in `docs/ui-state/`; never invent bgb's UI from memory —
   `docs/bgb-reference/` is the capture rig.

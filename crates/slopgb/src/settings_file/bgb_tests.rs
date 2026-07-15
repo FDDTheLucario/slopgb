@@ -41,6 +41,8 @@ fn settings_round_trip_through_bgb_ini() {
         rtc_bgb_legacy: true,
         palette_edit_shade: 2,
         palette_0_31: true,
+        gamepad_map: "East,West,North,South,Start,Select,L1,R1".to_string(),
+        gamepad_needs_focus: false,
         uninited_wram: true, // bgb's UninitedWRAM key
         frame_blend: true,
         doubler: true,

@@ -644,10 +644,16 @@ pub(super) fn joypad(s: &Settings, content: Rect) -> Vec<Ctrl> {
         Field::ConfigureKeyboard,
     ));
     l.row();
-    for label in ["configure game controller", "clear game controller"] {
-        v.push(Ctrl::inert(
+    // Live game-controller config (gilrs): configure opens the rebind wizard,
+    // clear unbinds every button.
+    for (label, field) in [
+        ("configure game controller", Field::ConfigureGamepad),
+        ("clear game controller", Field::ClearGamepad),
+    ] {
+        v.push(Ctrl::live(
             Rect::new(l.x, l.y, 180, line_height() + 4),
             btn(label, 180),
+            field,
         ));
         l.row();
     }
@@ -753,11 +759,16 @@ pub(super) fn joypad(s: &Settings, content: Rect) -> Vec<Ctrl> {
         Field::AllowOpposing,
     ));
     l.row();
-    // The focus checkboxes (inert — winit only delivers keys to the focused
-    // window, so these are always effectively checked).
-    v.push(Ctrl::inert(
+    // The controller focus check is live: gilrs delivers events regardless of
+    // window focus, so gating on it is meaningful. The keyboard one stays inert —
+    // winit only delivers keys to the focused window, so it is always in effect.
+    v.push(Ctrl::live(
         rc(l.at(), "Game controller works only if app has focus"),
-        chk("Game controller works only if app has focus", true),
+        chk(
+            "Game controller works only if app has focus",
+            s.gamepad_needs_focus,
+        ),
+        Field::GamepadNeedsFocus,
     ));
     l.row();
     v.push(Ctrl::inert(

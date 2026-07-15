@@ -68,9 +68,24 @@ clean golden-safe detector/backend.
   opposite direction on a new press and **resurrects** a still-held one on release
   (last-input priority); verified via the golden-safe `&self` read
   `GameBoy::debug_button`→`Joypad::pressed` (tests only).
+- **Game controller** (`gilrs`): a plugged controller drives the joypad through a
+  rebindable `gamepad::GamepadBindings` (default South=A/East=B/D-pad+left-stick =
+  directions, mapped across pads via gilrs's SDL_GameControllerDB) fed into the same
+  deferred sub-frame input path as the keyboard (`App::poll_gamepad`/`set_gamepad_
+  button`, polled each `about_to_wait`). **configure game controller** opens a
+  rebind wizard sharing the keyboard wizard's modal (`gamepad::GamepadConfigWizard`
+  → `keymap::render_rebind_wizard`; binds the next controller press per step);
+  **clear game controller** unbinds everything. The map persists (`Settings.
+  gamepad_map`, 8 comma-separated controller-button names). **Game controller works
+  only if app has focus** (`Settings.gamepad_needs_focus`, default on) gates the
+  input on window focus — meaningful because gilrs reads the device directly, unlike
+  the keyboard.
 - **Screenshot button** (saves↔copies) and **Screenshots** (bmp↔png) combos are
-  live (see the Live-settings table). The rest (game-controller config/clear,
-  Mappable-button-records, Rapid-speed combo, joystick-ID) is faithful-but-inert.
+  live (see the Live-settings table). The still-inert Joypad chrome is the
+  Mappable-button-records (Audio/Video/channels are live), Rapid-speed combo (live),
+  the joypad-0 selector, "configure extra buttons", the MBC7 joystick-ID, and the
+  "Keyboard works only if app has focus" check (winit only delivers keys to the
+  focused window, so it is always in effect).
 
 ## Live input timing (`app_input` + `input::apply_input`)
 
@@ -143,7 +158,9 @@ buildable control:
   core has no distinct GBA/MGB/GB-Player models to detect into.
 - **Waitloop detection** — a speed hack that skips CPU wait loops → perturbs
   emulated timing → forbidden by the golden-safe law.
-- **Hard-blocked**: game-controller config/clear + extra buttons + MBC7 joystick
-  (need a gamepad input dep — banned); `bpp`/`output`/`vsync` (DirectDraw-era
-  concepts, no softbuffer equivalent); joypad-0 select + focus checkboxes
-  (single keyboard player, winit is always focus-gated).
+- **Hard-blocked**: `bpp`/`output`/`vsync` (DirectDraw-era concepts, no softbuffer
+  equivalent); the joypad-0 selector (single player); "configure extra buttons"
+  (maps non-Game-Boy controls — no target); the MBC7 joystick-ID (the core has no
+  MBC7 tilt sensor); the "Keyboard works only if app has focus" check (winit only
+  delivers keys to the focused window). The game-controller config/clear + its
+  focus gate are **now live** via `gilrs` (see the Joypad section).

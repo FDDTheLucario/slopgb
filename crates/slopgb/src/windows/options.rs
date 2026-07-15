@@ -430,6 +430,14 @@ pub struct Settings {
     /// Joypad → "allow pressing L+R or U+D". `false` (bgb default) filters
     /// opposing directions so the joypad never reports both at once.
     pub allow_opposing: bool,
+    /// Joypad → game controller: the controller→Game-Boy button map, persisted
+    /// as `crate::gamepad::GamepadBindings::to_config` (8 comma-separated
+    /// controller-button names in Right,Left,Up,Down,A,B,Select,Start order).
+    pub gamepad_map: String,
+    /// Joypad → "Game controller works only if app has focus". `true` (bgb
+    /// default) gates controller input on window focus; `false` accepts it in
+    /// the background (gilrs reads the device directly, unlike the keyboard).
+    pub gamepad_needs_focus: bool,
     /// Joypad → "Rapid speed": the auto-fire toggle period in frames for the
     /// rapid-fire keys (`[` = rapid A, `]` = rapid B). 1..=4; bgb's "2 2".
     pub rapid_speed: u32,
@@ -550,6 +558,8 @@ impl Default for Settings {
             palette_edit_shade: 0,
             palette_0_31: false,
             allow_opposing: false,
+            gamepad_map: crate::gamepad::default_map_config(),
+            gamepad_needs_focus: true,
             rapid_speed: 2,
             record_audio: false,
             record_video: false,
@@ -775,6 +785,12 @@ pub enum OptionsOutcome {
     /// Joypad → "configure keyboard": open the key-rebind wizard. Neither
     /// applies nor closes the dialog (the wizard floats above it).
     ConfigureKeyboard,
+    /// Joypad → "configure game controller": open the controller-rebind wizard.
+    /// Floats above the dialog like the keyboard wizard.
+    ConfigureGamepad,
+    /// Joypad → "clear game controller": unbind every controller button. Applied
+    /// immediately (persisted), dialog stays open.
+    ClearGamepad,
     /// System → a `...` bootrom-path button: open the shared path modal over the
     /// dialog to edit that slot's path. Neither applies nor closes.
     PickBootrom(BootromSlot),

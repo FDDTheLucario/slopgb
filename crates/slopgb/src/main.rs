@@ -28,6 +28,7 @@ mod cli;
 mod clipboard;
 mod dbg;
 mod file_picker;
+mod gamepad;
 mod input;
 mod keymap;
 mod link;
@@ -368,6 +369,15 @@ struct App {
     rapid_a_on: bool,
     rapid_b_on: bool,
     rapid_counter: u32,
+    /// Game controller input (Options → Joypad): the `gilrs` handle, the
+    /// controller→Game-Boy button map, and the controller-only held-set for the
+    /// SOCD filter.
+    gamepad: gamepad::Gamepads,
+    gamepad_bindings: gamepad::GamepadBindings,
+    gamepad_held: [bool; 8],
+    /// The open "configure game controller" wizard, if any (floats over the LCD
+    /// like the keyboard wizard; captures controller presses to rebind).
+    gamepad_wizard: Option<gamepad::GamepadConfigWizard>,
     /// Per-key hold state, so two keys mapped to one button release cleanly.
     buttons: ButtonTracker,
     /// Rebindable keyboard → Game Boy button map (Joypad "configure keyboard").
@@ -463,6 +473,10 @@ struct App {
     /// → "Pause if losing focus"), so refocus auto-resumes — but a *manual* pause
     /// is never clobbered on refocus.
     paused_by_focus: bool,
+    /// Whether the game window currently has OS focus — gates controller input
+    /// when "Game controller works only if app has focus" is on (the gamepad,
+    /// unlike the keyboard, delivers events regardless of focus).
+    window_focused: bool,
     /// Last windowed integer scale chosen (CLI or Window-size menu), restored
     /// when leaving fullscreen-stretched so the menu-picked size isn't lost.
     last_scale: u32,
@@ -543,6 +557,8 @@ impl App {
         let mcp = mcp::Mcp::with_tool_plugins(mcp::plugin_host::ToolPlugins::from_options(&opts));
         // Opt-in MSU-1 pack (--msu1 / SLOPGB_MSU1); None keeps the golden path.
         let msu1 = load_msu1(&opts);
+        // Build the controller map before `settings` is moved into the struct.
+        let gamepad_bindings = gamepad::GamepadBindings::from_config(&settings.gamepad_map);
         let mut app = Self {
             opts,
             boot_rom,
@@ -560,6 +576,7 @@ impl App {
             options: None,
             key_wizard: None,
             paused_by_focus: false,
+            window_focused: true,
             last_scale: scale,
             window: None,
             video: None,
@@ -576,6 +593,10 @@ impl App {
             rapid_a_on: false,
             rapid_b_on: false,
             rapid_counter: 0,
+            gamepad: gamepad::Gamepads::new(),
+            gamepad_bindings,
+            gamepad_held: [false; 8],
+            gamepad_wizard: None,
             buttons: ButtonTracker::default(),
             bindings: keymap::KeyBindings::default(),
             input_ops: Vec::new(),
@@ -724,6 +745,7 @@ impl App {
         let picker = self.file_picker.as_mut();
         let options = self.options.as_ref();
         let wizard = self.key_wizard.as_ref();
+        let gp_wizard = self.gamepad_wizard.as_ref();
         let theme = self.settings.theme.resolve(&self.custom_themes);
         let stretch = self.window_size == WindowSizeChoice::FullscreenStretched;
         if let Err(e) = video.draw(window, frame, src_w, src_h, stretch, |canvas| {
@@ -753,6 +775,10 @@ impl App {
             }
             // The key-rebind wizard floats above even the Options dialog.
             if let Some(w) = wizard {
+                w.render(canvas, &theme);
+            }
+            // The controller-rebind wizard shares the same modal slot.
+            if let Some(w) = gp_wizard {
                 w.render(canvas, &theme);
             }
         }) {
@@ -820,6 +846,16 @@ impl App {
                     w.bind_key(code);
                     self.commit_wizard_if_done();
                 }
+            }
+            self.request_game_redraw();
+            return;
+        }
+        // The controller-rebind wizard captures game-window keys too: Escape
+        // cancels it; other keys are swallowed (the binding target is the
+        // controller, not the keyboard) so they don't move the game mid-config.
+        if focus == Focus::Game && key.state.is_pressed() && self.gamepad_wizard.is_some() {
+            if let PhysicalKey::Code(KeyCode::Escape) = key.physical_key {
+                self.gamepad_wizard = None;
             }
             self.request_game_redraw();
             return;

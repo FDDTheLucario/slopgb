@@ -56,6 +56,30 @@ impl App {
             self.request_game_redraw();
             return;
         }
+        // The controller-rebind wizard shares the same modal slot + buttons.
+        if self.gamepad_wizard.is_some() {
+            if button == MouseButton::Left {
+                let area = self.window_area();
+                match crate::keymap::wizard_button_at(area, px, py) {
+                    Some(WizardButton::Cancel) => self.gamepad_wizard = None,
+                    Some(WizardButton::SkipKeep) => {
+                        if let Some(w) = self.gamepad_wizard.as_mut() {
+                            w.skip_keep();
+                        }
+                        self.commit_gamepad_wizard_if_done();
+                    }
+                    Some(WizardButton::SkipClear) => {
+                        if let Some(w) = self.gamepad_wizard.as_mut() {
+                            w.skip_clear();
+                        }
+                        self.commit_gamepad_wizard_if_done();
+                    }
+                    None => {}
+                }
+            }
+            self.request_game_redraw();
+            return;
+        }
         // A path modal is topmost — it can float over the Options dialog (the
         // bootrom `...` browse) as well as stand alone (Load ROM / save state),
         // so it is checked before Options. Route the click to OK/Cancel.
@@ -114,6 +138,18 @@ impl App {
                 match out {
                     // Float the key-rebind wizard above the (still-open) dialog.
                     OptionsOutcome::ConfigureKeyboard => self.open_key_wizard(),
+                    // Float the controller-rebind wizard above the dialog.
+                    OptionsOutcome::ConfigureGamepad => {
+                        self.gamepad_wizard = Some(crate::gamepad::GamepadConfigWizard::open(
+                            self.gamepad_bindings.clone(),
+                        ));
+                    }
+                    // Unbind every controller button, committing immediately.
+                    OptionsOutcome::ClearGamepad => {
+                        self.gamepad_bindings.clear();
+                        let cfg = self.gamepad_bindings.to_config();
+                        self.apply_gamepad_map(cfg);
+                    }
                     // Open the path modal over the dialog to edit a bootrom path.
                     OptionsOutcome::PickBootrom(slot) => {
                         self.open_path_prompt("Bootrom path", crate::PathPurpose::Bootrom(slot))
@@ -512,6 +548,9 @@ impl App {
         // files": choose the .sav RTC layout + the sidecar for the next write.
         self.session.set_rtc_vba_export(s.rtc_vba_sav);
         self.session.set_rtc_bgb_legacy(s.rtc_bgb_legacy);
+        // Joypad → game controller: re-derive the live map (Defaults/import may
+        // have changed it; the wizard/clear paths set both in lock-step already).
+        self.gamepad_bindings = crate::gamepad::GamepadBindings::from_config(&s.gamepad_map);
         // Sound → SGB audio backend: swap the live SGB machine's coprocessor (a
         // no-op off SGB). Mirror the choice into `sgb_coprocessor` so a later ROM
         // (re)load re-injects the same backend. Built-in = byte-identical golden.

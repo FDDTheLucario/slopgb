@@ -37,6 +37,8 @@ fn settings_and_recent_round_trip() {
         rtc_bgb_legacy: true,
         palette_edit_shade: 2,
         palette_0_31: true,
+        gamepad_map: "East,West,North,South,Start,Select,L1,R1".to_string(),
+        gamepad_needs_focus: false,
         break_oam_dma_bad: true,
         break_incdec_fexx: true,
         break_sgb_transfer: true,

@@ -316,6 +316,7 @@ impl ApplicationHandler for App {
             // events, so drop all input before any button can stick. With
             // Options → Misc → "Pause if losing focus" set, also pause.
             WindowEvent::Focused(false) | WindowEvent::Occluded(true) => {
+                self.window_focused = false;
                 self.release_all_input();
                 if self.settings.pause_on_focus_loss && !self.paused {
                     self.paused = true;
@@ -327,6 +328,7 @@ impl ApplicationHandler for App {
             // Refocus auto-resumes, but only a pause we induced — a manual pause
             // (P) stays put (bgb's "Pause if losing focus" resume behaviour).
             WindowEvent::Focused(true) | WindowEvent::Occluded(false) => {
+                self.window_focused = true;
                 if self.paused_by_focus && self.paused {
                     self.paused = false;
                     self.resync_pacing();
@@ -357,6 +359,10 @@ impl ApplicationHandler for App {
         if self.window.is_none() {
             return; // not resumed yet
         }
+        // Drain controller input every wake (before the idle guard, so the gilrs
+        // queue never backs up while paused). Frozen presses are dropped by
+        // `flush_idle_input` like keyboard presses.
+        self.poll_gamepad();
         // Serve any queued MCP tool calls first — before the idle guard, so an
         // agent can still inspect a paused / breakpoint-halted machine (that is
         // exactly when it wants to). A no-op when no server is running.

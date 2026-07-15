@@ -930,6 +930,23 @@ fn joypad_tab_live_controls_are_the_functional_ones() {
         live.contains(&Field::AllowOpposing),
         "allow L+R / U+D is live"
     );
+    // The game-controller controls are live now (gilrs backend).
+    for f in [
+        Field::ConfigureGamepad,
+        Field::ClearGamepad,
+        Field::GamepadNeedsFocus,
+    ] {
+        assert!(live.contains(&f), "{f:?} is live");
+    }
+}
+
+#[test]
+fn joypad_gamepad_focus_checkbox_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Joypad;
+    assert!(st.working.gamepad_needs_focus, "bgb default: on");
+    click_field(&mut st, Field::GamepadNeedsFocus);
+    assert!(!st.working.gamepad_needs_focus);
 }
 
 #[test]

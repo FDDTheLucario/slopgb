@@ -316,6 +316,8 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
         .clamp(0, 3) as usize,
         palette_0_31: b("graphics", "palette_0_31", def.palette_0_31),
         allow_opposing: b("misc", "allow_opposing", def.allow_opposing),
+        gamepad_map: s("misc", "gamepad_map", &def.gamepad_map),
+        gamepad_needs_focus: b("misc", "gamepad_needs_focus", def.gamepad_needs_focus),
         rapid_speed: i("misc", "rapid_speed", i64::from(def.rapid_speed)).clamp(1, 4) as u32,
         record_audio: b("misc", "record_audio", def.record_audio),
         record_video: b("misc", "record_video", def.record_video),
@@ -410,6 +412,8 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         palette_edit_shade: _,
         palette_0_31: _,
         allow_opposing: _,
+        gamepad_map: _,
+        gamepad_needs_focus: _,
         rapid_speed: _,
         record_audio: _,
         record_video: _,
@@ -552,6 +556,12 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         fb(settings.recovery_save_state),
     );
     d.set("misc", "allow_opposing", fb(settings.allow_opposing));
+    d.set("misc", "gamepad_map", &settings.gamepad_map);
+    d.set(
+        "misc",
+        "gamepad_needs_focus",
+        fb(settings.gamepad_needs_focus),
+    );
     d.set("misc", "rapid_speed", &settings.rapid_speed.to_string());
     d.set("misc", "record_audio", fb(settings.record_audio));
     d.set("misc", "record_video", fb(settings.record_video));
