@@ -149,11 +149,18 @@ pub(super) fn system(s: &Settings, content: Rect) -> Vec<Ctrl> {
         v.push(Ctrl::live(rad((rx, ry), label), kind, Field::Model(choice)));
         ry += step;
     }
-    // Inert system toggles (bgb black) — none wired in slopgb yet — below the box.
+    // System toggles below the box: "automatic reset on system change" is live;
+    // the rest stay inert (bgb black) — no backend in slopgb yet.
     l.x = l.x0;
     l.y = box_bottom + line_height() / 2;
+    let arsc = "automatic reset on system change";
+    v.push(Ctrl::live(
+        rc(l.at(), arsc),
+        chk(arsc, s.auto_reset_on_system_change),
+        Field::AutoResetOnSystemChange,
+    ));
+    l.row();
     for label in [
-        "automatic reset on system change",
         "Rewind enabled",
         "detect GB pocket / SGB2",
         "detect GBA",

@@ -500,7 +500,9 @@ impl App {
         // Switch the emulated system FIRST: `set_model` rebuilds the machine from
         // the ROM, which resets the PPU palette to the power-on default — so the
         // DMG palette must be (re)applied to the (possibly fresh) machine after.
-        if self.session.set_model(s.model) {
+        // With "automatic reset on system change" off, the choice is deferred and
+        // applied by the next Reset (see `Action::Reset`).
+        if s.auto_reset_on_system_change && self.session.set_model(s.model) {
             self.resync_pacing();
             self.request_game_redraw();
         }

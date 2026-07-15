@@ -74,6 +74,8 @@ pub(crate) enum Field {
     /// System → "uninitialized RAM at power-on" (bgb's `UninitedWRAM`): power on
     /// with seeded-random garbage RAM. Takes effect on the next reset/load.
     UninitedWram,
+    /// System → "automatic reset on system change".
+    AutoResetOnSystemChange,
     Model(ModelChoice),
     Volume,
     /// Sound → the SGB audio-backend dropdown (cycles Built-in ↔ coprocessor).
@@ -297,6 +299,9 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         }
         Field::ReduceCpu => s.reduce_cpu = !s.reduce_cpu,
         Field::UninitedWram => s.uninited_wram = !s.uninited_wram,
+        Field::AutoResetOnSystemChange => {
+            s.auto_reset_on_system_change = !s.auto_reset_on_system_change;
+        }
         Field::Model(m) => s.model = m,
         Field::Volume => s.volume = slider_frac(ct.rect, px),
         Field::AudioBackend => s.audio_backend = s.audio_backend.next(),
@@ -348,6 +353,7 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
         OptionsTab::System => {
             s.model = d.model;
             s.uninited_wram = d.uninited_wram;
+            s.auto_reset_on_system_change = d.auto_reset_on_system_change;
         }
         OptionsTab::Debug => {
             // The live Debug fields; lowercase_disasm is inert (fixed).

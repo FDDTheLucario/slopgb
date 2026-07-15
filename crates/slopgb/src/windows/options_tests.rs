@@ -974,6 +974,15 @@ fn uninited_ram_checkbox_toggles_the_setting() {
 }
 
 #[test]
+fn auto_reset_on_system_change_checkbox_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::System;
+    assert!(st.working.auto_reset_on_system_change, "on by default");
+    click_field(&mut st, Field::AutoResetOnSystemChange);
+    assert!(!st.working.auto_reset_on_system_change);
+}
+
+#[test]
 fn super_gameboy_radio_selects_sgb() {
     // The Super Gameboy System radio is live (slopgb has a full SGB): clicking
     // it selects SGB.

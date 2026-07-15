@@ -94,6 +94,10 @@ pub fn from_ini(f: &Ini) -> Settings {
         dmg_palette,
         allow_opposing: boolean("JoyOpposite", d.allow_opposing),
         uninited_wram: boolean("UninitedWRAM", d.uninited_wram),
+        auto_reset_on_system_change: boolean(
+            "SlopgbAutoResetOnSystemChange",
+            d.auto_reset_on_system_change,
+        ),
         break_ld_b_b: boolean("SlopgbBreakLdBB", d.break_ld_b_b),
         break_invalid_op: boolean("InvalidOpBreak", d.break_invalid_op),
         break_echo_ram: boolean("SlopgbBreakEchoRam", d.break_echo_ram),
@@ -155,6 +159,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         dmg_palette: _,
         allow_opposing: _,
         uninited_wram: _,
+        auto_reset_on_system_change: _,
         break_ld_b_b: _,
         break_invalid_op: _,
         break_echo_ram: _,
@@ -211,6 +216,10 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
     f.set("SlopgbReduceCpu", ini::fmt_bool(s.reduce_cpu));
     f.set("JoyOpposite", ini::fmt_bool(s.allow_opposing));
     f.set("UninitedWRAM", ini::fmt_bool(s.uninited_wram));
+    f.set(
+        "SlopgbAutoResetOnSystemChange",
+        ini::fmt_bool(s.auto_reset_on_system_change),
+    );
     f.set("InvalidOpBreak", ini::fmt_bool(s.break_invalid_op));
     f.set("DebugDisableLCD", ini::fmt_bool(s.break_lcd_off_vblank));
     f.set("BootromEnabled", ini::fmt_bool(s.bootroms_enabled));

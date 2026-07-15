@@ -57,7 +57,12 @@ impl App {
                 self.update_title();
             }
             Action::Reset => {
-                self.session.reset();
+                // Apply any deferred emulated-system choice (auto-reset off): a
+                // changed model rebuilds via set_model, an unchanged one plain
+                // power-cycles.
+                if !self.session.set_model(self.settings.model) {
+                    self.session.reset();
+                }
                 self.resync_pacing();
             }
             Action::Quit => {

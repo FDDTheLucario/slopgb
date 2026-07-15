@@ -416,6 +416,10 @@ pub struct Settings {
     pub break_echo_ram: bool,
     /// Exceptions → "break on disabling LCD outside vblank".
     pub break_lcd_off_vblank: bool,
+    /// System → "automatic reset on system change": when on (default) picking a
+    /// new Emulated-system radio rebuilds the machine immediately; when off the
+    /// choice is deferred and applied on the next Reset.
+    pub auto_reset_on_system_change: bool,
     /// System → "bootroms enabled": execute the configured boot ROM on ROM load
     /// (bgb's checkbox). Off by default — slopgb then boots post-boot.
     pub bootroms_enabled: bool,
@@ -483,6 +487,7 @@ impl Default for Settings {
             break_invalid_op: true,
             break_echo_ram: false,
             break_lcd_off_vblank: false,
+            auto_reset_on_system_change: true,
             bootroms_enabled: false,
             bootrom_dmg: String::new(),
             bootrom_gbc: String::new(),

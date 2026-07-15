@@ -302,6 +302,11 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
             "break_lcd_off_vblank",
             def.break_lcd_off_vblank,
         ),
+        auto_reset_on_system_change: b(
+            "system",
+            "auto_reset_on_system_change",
+            def.auto_reset_on_system_change,
+        ),
         bootroms_enabled: b("system", "bootroms_enabled", def.bootroms_enabled),
         bootrom_dmg: s("system", "bootrom_dmg", &def.bootrom_dmg),
         bootrom_gbc: s("system", "bootrom_gbc", &def.bootrom_gbc),
@@ -363,6 +368,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         dmg_palette: _,
         allow_opposing: _,
         uninited_wram: _,
+        auto_reset_on_system_change: _,
         break_ld_b_b: _,
         break_invalid_op: _,
         break_echo_ram: _,
@@ -464,6 +470,11 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
     d.set("misc", "reduce_cpu", fb(settings.reduce_cpu));
     d.set("misc", "allow_opposing", fb(settings.allow_opposing));
     d.set("system", "uninited_wram", fb(settings.uninited_wram));
+    d.set(
+        "system",
+        "auto_reset_on_system_change",
+        fb(settings.auto_reset_on_system_change),
+    );
     d.set("exceptions", "break_ld_b_b", fb(settings.break_ld_b_b));
     d.set(
         "exceptions",
