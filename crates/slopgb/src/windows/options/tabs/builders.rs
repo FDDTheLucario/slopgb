@@ -311,9 +311,8 @@ pub(super) fn debug(s: &Settings, content: Rect) -> Vec<Ctrl> {
 pub(super) fn exceptions(s: &Settings, content: Rect) -> Vec<Ctrl> {
     let mut l = Lay::new(content);
     let mut v = Vec::new();
-    // Four break conditions are wired to the core exception-break mask (the
-    // free run halts when armed + the debugger is open); the rest stay
-    // faithfully inert (bgb black) — no clean golden-safe detector / no backend.
+    // All seven break conditions are wired to the golden-safe core exception
+    // mask (the free run halts when armed + the debugger is open).
     // Each entry: (label, live field, checked-from-settings).
     let rows: [(&str, Option<Field>, bool); 7] = [
         (
@@ -336,7 +335,11 @@ pub(super) fn exceptions(s: &Settings, content: Rect) -> Vec<Ctrl> {
             Some(Field::BreakEchoRam),
             s.break_echo_ram,
         ),
-        ("break on SGB transfer start", None, false),
+        (
+            "break on SGB transfer start",
+            Some(Field::BreakSgbTransfer),
+            s.break_sgb_transfer,
+        ),
         (
             "break on ld b,b (40h)",
             Some(Field::BreakLdBB),

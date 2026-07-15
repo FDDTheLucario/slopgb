@@ -102,7 +102,9 @@ impl Sgb {
     }
 
     /// Observe a P1 write: `old`/`new` are the select bits (masked 0x30).
-    fn joyp_write(&mut self, old: u8, new: u8) {
+    /// Returns whether this write *started* a new command transfer (the first
+    /// reset pulse of a command) — the debugger's "SGB transfer start" edge.
+    fn joyp_write(&mut self, old: u8, new: u8) -> bool {
         // Pan Docs MLT_REQ: "The next joypad is automatically selected
         // when P15 goes from LOW (0) to HIGH (1)" — JOYP bit 5 rising.
         // SameBoy gates the increment on an even player count (single
@@ -115,9 +117,18 @@ impl Sgb {
         // GB_sgb_write): $00 = reset/start, $20 (P14 low) = "0" bit,
         // $10 (P15 low) = "1" bit, $30 = idle between pulses.
         match new >> 4 {
-            0x3 => self.ready_for_pulse = true,
-            0x2 => self.zero_pulse(),
-            0x1 => self.one_pulse(),
+            0x3 => {
+                self.ready_for_pulse = true;
+                false
+            }
+            0x2 => {
+                self.zero_pulse();
+                false
+            }
+            0x1 => {
+                self.one_pulse();
+                false
+            }
             _ => self.reset_pulse(),
         }
     }
@@ -186,19 +197,23 @@ impl Sgb {
 
     /// "$00" pulse: opens a packet; off a packet boundary it restarts the
     /// whole command.
-    fn reset_pulse(&mut self) {
+    fn reset_pulse(&mut self) -> bool {
         if !self.ready_for_pulse {
-            return;
+            return false;
         }
+        // A reset pulse that discards the accumulator opens a fresh command
+        // transfer (write_index 0 / mid-packet garbage / after a stop) — the
+        // "SGB transfer start" edge; an inter-packet reset mid-command does not.
+        let started = self.write_index % (SGB_PACKET_BYTES * 8) != 0
+            || self.write_index == 0
+            || self.ready_for_stop;
         self.ready_for_write = true;
         self.ready_for_pulse = false;
-        if self.write_index % (SGB_PACKET_BYTES * 8) != 0
-            || self.write_index == 0
-            || self.ready_for_stop
-        {
+        if started {
             self.discard_command();
             self.ready_for_stop = false;
         }
+        started
     }
 
     /// A complete command arrived; execute the ones with Game-Boy-visible
@@ -354,14 +369,18 @@ impl Joypad {
     }
 
     /// Write FF00 (select lines only; on SGB the ICD2 snoops the write).
-    pub fn write(&mut self, value: u8) {
+    /// Returns whether an SGB command transfer just started (always `false` off
+    /// SGB) — the "SGB transfer start" exception edge.
+    pub fn write(&mut self, value: u8) -> bool {
         let before = self.input_lines();
-        if let Some(sgb) = &mut self.sgb {
-            sgb.joyp_write(self.select, value & 0x30);
-        }
+        let sgb_started = match &mut self.sgb {
+            Some(sgb) => sgb.joyp_write(self.select, value & 0x30),
+            None => false,
+        };
         self.select = value & 0x30;
         // Newly exposing a held button drops a P1 line: interrupt.
         self.latch_edges(before);
+        sgb_started
     }
 }
 

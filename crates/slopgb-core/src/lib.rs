@@ -180,6 +180,9 @@ pub const EXC_OAM_DMA_BAD: u16 = 1 << 4;
 /// `FE00-FEFF` — the value the SM83's 16-bit inc/dec unit drives onto the bus,
 /// the OAM-corruption-bug trigger (bgb's "break on 16 bits inc/dec FE00-FEFF").
 pub const EXC_INCDEC_FEXX: u16 = 1 << 5;
+/// Break when an SGB command packet transfer starts (its first P1 reset pulse).
+/// A no-op off SGB models (bgb's "break on SGB transfer start").
+pub const EXC_SGB_TRANSFER: u16 = 1 << 6;
 
 /// Leading bytes of a slopgb save state (see [`GameBoy::save_state`]).
 const STATE_MAGIC: &[u8; 4] = b"SLPS";

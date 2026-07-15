@@ -102,6 +102,8 @@ pub(crate) enum Field {
     BreakOamDmaBad,
     /// Exceptions → "break on 16 bits inc/dec FE00-FEFF".
     BreakIncDecFexx,
+    /// Exceptions → "break on SGB transfer start".
+    BreakSgbTransfer,
     /// System → "bootroms enabled" checkbox.
     BootromsEnabled,
     /// System → a `...` bootrom-path browse button (routes a
@@ -328,6 +330,7 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         Field::BreakLcdOffVblank => s.break_lcd_off_vblank = !s.break_lcd_off_vblank,
         Field::BreakOamDmaBad => s.break_oam_dma_bad = !s.break_oam_dma_bad,
         Field::BreakIncDecFexx => s.break_incdec_fexx = !s.break_incdec_fexx,
+        Field::BreakSgbTransfer => s.break_sgb_transfer = !s.break_sgb_transfer,
         Field::BootromsEnabled => s.bootroms_enabled = !s.bootroms_enabled,
         Field::Theme(t) => {
             s.theme = match t {
@@ -382,6 +385,7 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
             s.break_lcd_off_vblank = d.break_lcd_off_vblank;
             s.break_oam_dma_bad = d.break_oam_dma_bad;
             s.break_incdec_fexx = d.break_incdec_fexx;
+            s.break_sgb_transfer = d.break_sgb_transfer;
         }
         OptionsTab::Sound => {
             s.volume = d.volume;

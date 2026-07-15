@@ -68,6 +68,40 @@ fn incdec16_fexx_exception_breaks_only_when_armed() {
 }
 
 #[test]
+fn sgb_transfer_start_exception_breaks_only_when_armed_and_on_sgb() {
+    // `ld a,30 ; ldh (00),a ; ld a,00 ; ldh (00),a ; jr -2`: the $30 arms the
+    // pulse receiver and the following $00 is the reset pulse that opens a
+    // command packet — bgb's "break on SGB transfer start".
+    let mut rom = exc_rom(&[0x3E, 0x30, 0xE0, 0x00, 0x3E, 0x00, 0xE0, 0x00, 0x18, 0xFE]);
+    rom[0x146] = 0x03; // SGB flag + old licensee 0x33 → the ICD2 receiver is live
+    rom[0x14B] = 0x33;
+
+    let mut off = GameBoy::new(Model::Sgb, rom.clone()).unwrap();
+    assert_eq!(
+        off.run_frame_until_breakpoint(&[]),
+        None,
+        "no break when disarmed"
+    );
+
+    let mut on = GameBoy::new(Model::Sgb, rom.clone()).unwrap();
+    on.set_exceptions(EXC_SGB_TRANSFER);
+    assert_eq!(
+        on.run_frame_until_breakpoint(&[]),
+        Some(0xFF00),
+        "the reset pulse starting the packet breaks"
+    );
+
+    // A DMG has no SGB packet receiver, so the same P1 writes never fire it.
+    let mut dmg = GameBoy::new(Model::Dmg, rom).unwrap();
+    dmg.set_exceptions(EXC_SGB_TRANSFER);
+    assert_eq!(
+        dmg.run_frame_until_breakpoint(&[]),
+        None,
+        "no SGB transfer off SGB models"
+    );
+}
+
+#[test]
 fn halt_cycles_counts_only_time_spent_halted() {
     // `ld a,0 ; ldh (FF0F),a ; ldh (FFFF),a ; halt`: clear IF + IE so HALT
     // (IME=0) has no wake condition and stays halted for the rest of the frame

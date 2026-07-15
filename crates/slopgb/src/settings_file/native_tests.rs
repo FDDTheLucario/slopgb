@@ -26,6 +26,7 @@ fn settings_and_recent_round_trip() {
         break_ld_b_b: true,
         break_oam_dma_bad: true,
         break_incdec_fexx: true,
+        break_sgb_transfer: true,
         stretch: true,
         frame_blend: true,
         dmg_gbc_lcd: true,

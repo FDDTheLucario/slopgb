@@ -7,7 +7,7 @@
 use super::*;
 use crate::{
     EXC_ECHO_RAM, EXC_INCDEC_FEXX, EXC_INVALID_OPCODE, EXC_LCD_OFF_VBLANK, EXC_LD_B_B,
-    EXC_OAM_DMA_BAD,
+    EXC_OAM_DMA_BAD, EXC_SGB_TRANSFER,
 };
 
 impl Interconnect {
@@ -84,6 +84,15 @@ impl Interconnect {
     pub(super) fn incdec16_exception(&mut self, addr: u16) {
         if self.exc_mask & EXC_INCDEC_FEXX != 0 && (0xFE00..=0xFEFF).contains(&addr) {
             self.exc_hit = Some(addr);
+        }
+    }
+
+    /// Exception break at the start of an SGB command packet transfer (the
+    /// caller — `io_write` on FF00 — only calls this when the joypad reports a
+    /// fresh transfer). Records FF00 as the hit. Inert when the bit is unarmed.
+    pub(super) fn sgb_transfer_exception(&mut self) {
+        if self.exc_mask & EXC_SGB_TRANSFER != 0 {
+            self.exc_hit = Some(0xFF00);
         }
     }
 
