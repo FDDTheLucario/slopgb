@@ -32,6 +32,7 @@ fn settings_and_recent_round_trip() {
         rapid_speed: 3,
         record_audio: true,
         record_video: true,
+        record_audio_channels: true,
         break_oam_dma_bad: true,
         break_incdec_fexx: true,
         break_sgb_transfer: true,

@@ -312,6 +312,7 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
         rapid_speed: i("misc", "rapid_speed", i64::from(def.rapid_speed)).clamp(1, 4) as u32,
         record_audio: b("misc", "record_audio", def.record_audio),
         record_video: b("misc", "record_video", def.record_video),
+        record_audio_channels: b("misc", "record_audio_channels", def.record_audio_channels),
         uninited_wram: b("system", "uninited_wram", def.uninited_wram),
         break_ld_b_b: b("exceptions", "break_ld_b_b", def.break_ld_b_b),
         break_invalid_op: b("exceptions", "break_invalid_op", def.break_invalid_op),
@@ -401,6 +402,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         rapid_speed: _,
         record_audio: _,
         record_video: _,
+        record_audio_channels: _,
         uninited_wram: _,
         auto_reset_on_system_change: _,
         rewind_enabled: _,
@@ -534,6 +536,11 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
     d.set("misc", "rapid_speed", &settings.rapid_speed.to_string());
     d.set("misc", "record_audio", fb(settings.record_audio));
     d.set("misc", "record_video", fb(settings.record_video));
+    d.set(
+        "misc",
+        "record_audio_channels",
+        fb(settings.record_audio_channels),
+    );
     d.set("system", "uninited_wram", fb(settings.uninited_wram));
     d.set(
         "system",

@@ -36,6 +36,7 @@ fn settings_round_trip_through_bgb_ini() {
         rapid_speed: 3,
         record_audio: true,
         record_video: true,
+        record_audio_channels: true,
         uninited_wram: true, // bgb's UninitedWRAM key
         frame_blend: true,
         doubler: true,

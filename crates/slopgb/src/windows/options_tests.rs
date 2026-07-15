@@ -963,6 +963,15 @@ fn joypad_video_record_checkbox_toggles() {
 }
 
 #[test]
+fn joypad_audio_channels_record_checkbox_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Joypad;
+    assert!(!st.working.record_audio_channels);
+    click_field(&mut st, Field::RecordAudioChannels);
+    assert!(st.working.record_audio_channels);
+}
+
+#[test]
 fn joypad_tab_transcribes_the_capture_controls() {
     // JP8: the inert chrome matching options-joypad.png is present (dropdowns,
     // the Mappable-button-records groupbox + its checks, the joystick-ID field).
@@ -1001,7 +1010,8 @@ fn joypad_tab_transcribes_the_capture_controls() {
             if *label == "Mappable button records")),
         "Mappable button records groupbox"
     );
-    // "Audio" records a WAV, "Video" records an AVI; "Audio channels" stays inert.
+    // The whole Mappable-button-records row is live: Audio→WAV, Video→AVI,
+    // Audio channels→4 per-channel WAVs.
     assert!(
         ctrls
             .iter()
@@ -1023,8 +1033,8 @@ fn joypad_tab_transcribes_the_capture_controls() {
                 label: "Audio channels",
                 ..
             }
-        ) && c.field.is_none()),
-        "inert check Audio channels"
+        ) && c.field == Some(Field::RecordAudioChannels)),
+        "Audio channels record checkbox is live"
     );
     assert!(
         ctrls

@@ -48,6 +48,10 @@ pub(crate) struct AudioPipe {
     /// Audio recorder (Joypad → "Audio"): `Some` accumulates every core-rate
     /// frame drained here, taken by the frontend when recording stops.
     record: Option<Vec<(f32, f32)>>,
+    /// Per-channel recorder (Joypad → "Audio channels"): `Some` accumulates the
+    /// 4 GB channels' isolated mono core-rate streams (armed on the core too),
+    /// taken by the frontend when recording stops.
+    record_channels: Option<[Vec<f32>; 4]>,
 }
 
 impl AudioPipe {
@@ -65,6 +69,7 @@ impl AudioPipe {
             drain_buf: Vec::new(),
             device_buf: Vec::new(),
             record: None,
+            record_channels: None,
         }
     }
 
@@ -86,6 +91,23 @@ impl AudioPipe {
     /// Stop recording and take the accumulated core-rate frames (empty if none).
     pub(crate) fn take_record(&mut self) -> Vec<(f32, f32)> {
         self.record.take().unwrap_or_default()
+    }
+
+    /// Start accumulating the 4 per-channel streams (Joypad → "Audio channels").
+    /// The caller must also arm the core tap (`GameBoy::set_record_channels`).
+    pub(crate) fn start_record_channels(&mut self) {
+        self.record_channels = Some(Default::default());
+    }
+
+    /// Whether per-channel audio is currently being recorded.
+    pub(crate) fn is_recording_channels(&self) -> bool {
+        self.record_channels.is_some()
+    }
+
+    /// Stop per-channel recording and take the 4 accumulated streams (all empty
+    /// if none). The caller should also disarm the core tap.
+    pub(crate) fn take_record_channels(&mut self) -> [Vec<f32>; 4] {
+        self.record_channels.take().unwrap_or_default()
     }
 
     /// Update the master volume gain + mono downmix (from Options → Sound).
@@ -117,6 +139,11 @@ impl AudioPipe {
         // the device resample + gain, so the WAV is the game's own output.
         if let Some(rec) = &mut self.record {
             rec.extend_from_slice(&self.drain_buf);
+        }
+        // Per-channel recorder (Joypad → "Audio channels"): pull the 4 isolated
+        // core-rate streams (same length/rate as the mix drained above).
+        if let Some(chans) = &mut self.record_channels {
+            gb.drain_audio_channels(chans);
         }
         self.device_buf.clear();
         self.resampler.run(&self.drain_buf, &mut self.device_buf);

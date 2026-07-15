@@ -671,9 +671,10 @@ pub(super) fn joypad(s: &Settings, content: Rect) -> Vec<Ctrl> {
         chk("Video", s.record_video),
         Field::RecordVideo,
     ));
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
         rc((gx + 8, grow + line_height()), "Audio channels"),
-        chk("Audio channels", false),
+        chk("Audio channels", s.record_audio_channels),
+        Field::RecordAudioChannels,
     ));
     l.y += group_h + 2;
 

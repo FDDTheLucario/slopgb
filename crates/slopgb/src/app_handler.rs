@@ -483,5 +483,20 @@ impl ApplicationHandler for App {
                 self.save_wav_recording(&frames);
             }
         }
+        // Finalise an in-progress per-channel recording too.
+        if self
+            .audio
+            .as_ref()
+            .is_some_and(crate::pacing::AudioPipe::is_recording_channels)
+        {
+            if let Some(chans) = self
+                .audio
+                .as_mut()
+                .map(crate::pacing::AudioPipe::take_record_channels)
+            {
+                self.session.gb.set_record_channels(false);
+                self.save_channel_recordings(&chans);
+            }
+        }
     }
 }

@@ -117,6 +117,8 @@ pub(crate) enum Field {
     RecordAudio,
     /// Joypad → "Video" (Mappable button records): record the LCD to an AVI.
     RecordVideo,
+    /// Joypad → "Audio channels": record the 4 sound channels to separate WAVs.
+    RecordAudioChannels,
     /// Exceptions → "break on ld b,b (40h)".
     BreakLdBB,
     /// Exceptions → "break on invalid opcode".
@@ -370,6 +372,7 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         }
         Field::RecordAudio => s.record_audio = !s.record_audio,
         Field::RecordVideo => s.record_video = !s.record_video,
+        Field::RecordAudioChannels => s.record_audio_channels = !s.record_audio_channels,
         Field::BreakLdBB => s.break_ld_b_b = !s.break_ld_b_b,
         Field::BreakInvalidOp => s.break_invalid_op = !s.break_invalid_op,
         Field::BreakEchoRam => s.break_echo_ram = !s.break_echo_ram,
@@ -460,6 +463,7 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
             s.rapid_speed = d.rapid_speed;
             s.record_audio = d.record_audio;
             s.record_video = d.record_video;
+            s.record_audio_channels = d.record_audio_channels;
         }
         OptionsTab::Misc => {
             s.ff_speed = d.ff_speed;

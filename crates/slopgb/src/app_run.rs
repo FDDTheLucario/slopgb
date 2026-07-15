@@ -440,6 +440,49 @@ impl App {
         }
     }
 
+    /// Joypad → "Audio channels": start/stop the per-channel recorder. Arms both
+    /// the core APU tap and the pipe's capture; on stop, writes one WAV per GB
+    /// sound channel. Needs a live audio pipe (a `--mute` run can't record).
+    pub(crate) fn sync_channel_recording(&mut self) {
+        let want = self.settings.record_audio_channels;
+        let Some(pipe) = self.audio.as_mut() else {
+            return;
+        };
+        if want && !pipe.is_recording_channels() {
+            pipe.start_record_channels();
+            self.session.gb.set_record_channels(true);
+        } else if !want && pipe.is_recording_channels() {
+            let chans = pipe.take_record_channels(); // pipe borrow ends here
+            self.session.gb.set_record_channels(false);
+            self.save_channel_recordings(&chans);
+        }
+    }
+
+    /// Encode each channel that played to its own WAV (`slopgb-<stamp>-chN.wav`,
+    /// N=1..4). A channel whose DAC never turned on is all-zero and is skipped.
+    pub(crate) fn save_channel_recordings(&self, chans: &[Vec<f32>; 4]) {
+        if chans.iter().all(Vec::is_empty) {
+            eprintln!("slopgb: channel recording was empty (no audio while recording)");
+            return;
+        }
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis());
+        let rate = crate::pacing::AudioPipe::record_rate();
+        for (i, ch) in chans.iter().enumerate() {
+            if ch.iter().all(|&s| s == 0.0) {
+                continue; // this channel's DAC never turned on: nothing to save
+            }
+            let frames: Vec<(f32, f32)> = ch.iter().map(|&s| (s, s)).collect();
+            let wav = crate::wav::encode_wav(&frames, rate);
+            let path = format!("slopgb-{stamp}-ch{}.wav", i + 1);
+            match fs::write(&path, &wav) {
+                Ok(()) => eprintln!("saved channel {} recording to {path}", i + 1),
+                Err(e) => eprintln!("error: could not save channel recording: {e}"),
+            }
+        }
+    }
+
     /// Joypad → "Video": start/stop the AVI video recorder to match the setting.
     /// Toggling it off (or quitting mid-record) finalises the file.
     pub(crate) fn sync_video_recording(&mut self) {

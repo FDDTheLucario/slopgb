@@ -108,6 +108,7 @@ pub fn from_ini(f: &Ini) -> Settings {
         rapid_speed: int("SlopgbRapidSpeed", i64::from(d.rapid_speed)).clamp(1, 4) as u32,
         record_audio: boolean("SlopgbRecordAudio", d.record_audio),
         record_video: boolean("SlopgbRecordVideo", d.record_video),
+        record_audio_channels: boolean("SlopgbRecordAudioChannels", d.record_audio_channels),
         uninited_wram: boolean("UninitedWRAM", d.uninited_wram),
         auto_reset_on_system_change: boolean(
             "SlopgbAutoResetOnSystemChange",
@@ -188,6 +189,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         rapid_speed: _,
         record_audio: _,
         record_video: _,
+        record_audio_channels: _,
         uninited_wram: _,
         auto_reset_on_system_change: _,
         rewind_enabled: _,
@@ -256,6 +258,10 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
     f.set("SlopgbRapidSpeed", &s.rapid_speed.to_string());
     f.set("SlopgbRecordAudio", ini::fmt_bool(s.record_audio));
     f.set("SlopgbRecordVideo", ini::fmt_bool(s.record_video));
+    f.set(
+        "SlopgbRecordAudioChannels",
+        ini::fmt_bool(s.record_audio_channels),
+    );
     f.set("UninitedWRAM", ini::fmt_bool(s.uninited_wram));
     f.set(
         "SlopgbAutoResetOnSystemChange",
