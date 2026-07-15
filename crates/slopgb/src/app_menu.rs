@@ -555,6 +555,7 @@ impl App {
             lowercase_hex: self.settings.lowercase_hex,
             show_clocks: self.settings.show_clocks,
             rgbds: self.settings.rgbds_disasm,
+            lowercase_disasm: self.settings.lowercase_disasm,
         });
     }
 

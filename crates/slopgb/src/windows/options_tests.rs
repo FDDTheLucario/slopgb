@@ -462,6 +462,10 @@ fn system_tab_model_radios() {
 fn debug_tab_display_flags_toggle() {
     let mut st = OptionsState::new(Settings::default());
     st.active = OptionsTab::Debug;
+    // "lowercase disassembler" on by default → click flips it (mnemonic case).
+    assert!(st.working.lowercase_disasm);
+    click_field(&mut st, Field::LowercaseDisasm);
+    assert!(!st.working.lowercase_disasm);
     click_field(&mut st, Field::LowercaseHex);
     assert!(st.working.lowercase_hex);
     click_field(&mut st, Field::ShowClocks);

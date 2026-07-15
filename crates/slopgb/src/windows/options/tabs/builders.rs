@@ -224,11 +224,12 @@ pub(super) fn system(s: &Settings, content: Rect) -> Vec<Ctrl> {
 pub(super) fn debug(s: &Settings, content: Rect) -> Vec<Ctrl> {
     let mut l = Lay::new(content);
     let mut v = Vec::new();
-    // lowercase disassembler: slopgb's disasm is always no$gmb-lowercase, so this
-    // reflects the fixed reality (inert, checked); lowercase-hex + show-clocks are live.
-    v.push(Ctrl::inert(
+    // "lowercase disassembler" toggles mnemonic/register case (hex case is the
+    // separate "lowercase hex" below); both live.
+    v.push(Ctrl::live(
         rc(l.at(), "lowercase disassembler"),
         chk("lowercase disassembler", s.lowercase_disasm),
+        Field::LowercaseDisasm,
     ));
     v.push(Ctrl::live(
         rc(l.row().at(), "lowercase hex"),
