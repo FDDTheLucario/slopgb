@@ -34,8 +34,10 @@ default.
   (BG palette + CGB attr bank), then OAM sprites (OBJ palette) for tiles no BG cell
   referenced — BG wins ties. Off → the neutral grey ramp. `render_tiles` takes a
   per-tile `palette(tile)` closure resolving the guess to `bg_palettes`/`obj_palettes`
-  RGB (unreferenced tiles stay grey). Not yet shown: bgb's per-tile `guessed palette`
-  hover-detail text line.
+  RGB (unreferenced tiles stay grey). The hover panel also shows the guess as a
+  `guessed palette BG n`/`OBJ n` line (`guessed_palette_line`), blank when the tile is
+  referenced nowhere — shown regardless of the checkbox (the guess is computed once via
+  `tile_guess` and shared by the colouring + the detail line).
 - **BG map: BG + window tilemaps side by side** (like the CGB two-bank Tiles view) —
   BG tilemap left (LCDC bit 3), window tilemap right (bit 6), each fitted to half the
   content via `windows::bgmap_two_col` (shared by render + hover). The left grid gets

@@ -100,21 +100,26 @@ pub(super) fn render_vram(
     // The BG-map tab shows the BG tilemap (left) and window tilemap (right) side
     // by side, like the two-bank Tiles view.
     let bgmap_two = (state.tab == VramTab::BgMap).then(|| bgmap_two_col(l.content));
+    // A raw tile carries no palette, so guess one per tile from where it is used
+    // (both BG maps, then OAM; BG wins) — colours the grid when "show paletted"
+    // is on and feeds the hover panel's guessed-palette line. Cheap; computed once.
+    let tile_guess = (state.tab == VramTab::Tiles).then(|| {
+        let signed = gb.debug_read(0xFF40) & 0x10 == 0;
+        debug::tile_palette_guess(gb.vram(), gb.oam(), signed, tall, cgb)
+    });
     match state.tab {
         VramTab::Tiles => {
-            // A raw tile carries no palette. "show paletted" guesses one per tile
-            // from where it is used (BG map / OAM); off shows a neutral grey ramp.
-            // On CGB both banks show at once (bank 0 left, bank 1 right); DMG has one.
-            let tables = state.show_paletted.then(|| {
-                let signed = gb.debug_read(0xFF40) & 0x10 == 0;
-                (
-                    debug::tile_palette_guess(gb.vram(), gb.oam(), signed, tall, cgb),
-                    bg_palettes(gb, true).0,
-                    obj_palettes(gb, true).0,
-                )
-            });
-            let pal = |bank: usize, tile: usize| match &tables {
-                Some((guess, bg, obj)) => guess[bank][tile].map_or(vram::GREYS, |r| {
+            // "show paletted" resolves each tile's guess to its BG/OBJ RGB; off (or
+            // an unreferenced tile) shows the neutral grey ramp. On CGB both banks
+            // show at once (bank 0 left, bank 1 right); DMG has one.
+            let rgb = state
+                .show_paletted
+                .then(|| (bg_palettes(gb, true).0, obj_palettes(gb, true).0));
+            let guess = tile_guess
+                .as_ref()
+                .expect("tile_guess set on the Tiles tab");
+            let pal = |bank: usize, tile: usize| match &rgb {
+                Some((bg, obj)) => guess[bank][tile].map_or(vram::GREYS, |r| {
                     (if r.obj { obj } else { bg })[r.index as usize]
                 }),
                 None => vram::GREYS,
@@ -210,7 +215,7 @@ pub(super) fn render_vram(
     }
     c.outline_rect(l.details, theme.border);
     render_vram_controls(c, &l, state, theme);
-    render_vram_details(gb, c, &l, state, g.scale, two, theme);
+    render_vram_details(gb, c, &l, state, g.scale, two, tile_guess.as_ref(), theme);
 }
 
 /// The BG-map tab's 8 BG palettes (CGB) or single BGP palette (DMG) as RGB888,
@@ -363,6 +368,7 @@ fn render_vram_controls(c: &mut Canvas, l: &VramLayout, state: &VramState, theme
 /// Draw the hovered-cell field list (bgb's right panel) for the active tab.
 /// `scale` is the tab's live render scale ([`vram_geom`]), so the hover hit-test
 /// matches the drawn cell size at any window size.
+#[allow(clippy::too_many_arguments)]
 fn render_vram_details(
     gb: &GameBoy,
     c: &mut Canvas,
@@ -370,6 +376,7 @@ fn render_vram_details(
     state: &VramState,
     scale: i32,
     two: Option<(Rect, Rect, i32)>,
+    tile_guess: Option<&TileGuess>,
     theme: &Theme,
 ) {
     let Some((hx, hy)) = state.hover else {
@@ -382,8 +389,8 @@ fn render_vram_details(
     let m8 = state.tile_hex_8bit;
     let lines = match state.tab {
         VramTab::Tiles => match two {
-            Some((left, right, s)) => tile_details_two(lx, ly, left, right, s, m8),
-            None => tile_details(lx, ly, scale, m8),
+            Some((left, right, s)) => tile_details_two(lx, ly, left, right, s, m8, tile_guess),
+            None => tile_details(lx, ly, scale, m8, tile_guess),
         },
         VramTab::Oam => oam_details(gb, lx, ly, scale, m8),
         VramTab::BgMap => match two {
@@ -408,9 +415,31 @@ fn dec_hex(n: u32, mask8: bool) -> String {
     format!("{n} (${hex:02X})")
 }
 
+/// The per-tile palette guess for both banks ([`debug::tile_palette_guess`]).
+type TileGuess = [[Option<debug::PaletteRef>; 384]; 2];
+
+/// bgb's Tiles hover "guessed palette" line: `BG n`/`OBJ n` for a guessed tile,
+/// or a blank line (the tile is referenced nowhere) so the panel layout is stable.
+fn guessed_palette_line(guess: Option<&TileGuess>, bank: usize, tile: usize) -> String {
+    match guess.and_then(|g| g[bank][tile]) {
+        Some(r) => format!(
+            "guessed palette {} {}",
+            if r.obj { "OBJ" } else { "BG" },
+            r.index
+        ),
+        None => String::new(),
+    }
+}
+
 /// Tiles-tab details: the tile under `(lx, ly)` in the 16-wide grid at `scale`.
 /// The content area is wider than the grid, so an out-of-column hover has no tile.
-fn tile_details(lx: i32, ly: i32, scale: i32, mask8: bool) -> Vec<String> {
+fn tile_details(
+    lx: i32,
+    ly: i32,
+    scale: i32,
+    mask8: bool,
+    guess: Option<&TileGuess>,
+) -> Vec<String> {
     let col = lx / (8 * scale);
     let tile = (ly / (8 * scale)) * 16 + col;
     if col >= 16 || !(0..384).contains(&tile) {
@@ -419,6 +448,7 @@ fn tile_details(lx: i32, ly: i32, scale: i32, mask8: bool) -> Vec<String> {
     vec![
         format!("Tile No. {}", dec_hex(tile as u32, mask8)),
         format!("Tile Address 0:{:04X}", 0x8000 + tile * 16),
+        guessed_palette_line(guess, 0, tile as usize),
     ]
 }
 
@@ -433,6 +463,7 @@ fn tile_details_two(
     right: Rect,
     scale: i32,
     mask8: bool,
+    guess: Option<&TileGuess>,
 ) -> Vec<String> {
     let (bank, gx) = if lx < left.w {
         (0, lx)
@@ -452,6 +483,7 @@ fn tile_details_two(
     vec![
         format!("Tile No. {}", dec_hex(tile as u32, mask8)),
         format!("Tile Address {bank}:{:04X}", 0x8000 + tile * 16),
+        guessed_palette_line(guess, bank, tile as usize),
     ]
 }
 
