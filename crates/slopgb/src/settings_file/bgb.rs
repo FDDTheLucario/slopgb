@@ -90,6 +90,7 @@ pub fn from_ini(f: &Ini) -> Settings {
         show_errors_on_rom_load: boolean("SlopgbShowRomErrors", d.show_errors_on_rom_load),
         load_rom_dialog_on_startup: boolean("SlopgbLoadRomOnStartup", d.load_rom_dialog_on_startup),
         reduce_cpu: boolean("SlopgbReduceCpu", d.reduce_cpu),
+        recovery_save_state: boolean("SlopgbRecoverySaveState", d.recovery_save_state),
         scheme,
         dmg_palette,
         allow_opposing: boolean("JoyOpposite", d.allow_opposing),
@@ -158,6 +159,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         show_errors_on_rom_load: _,
         load_rom_dialog_on_startup: _,
         reduce_cpu: _,
+        recovery_save_state: _,
         scheme: _,
         dmg_palette: _,
         allow_opposing: _,
@@ -220,6 +222,10 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         ini::fmt_bool(s.load_rom_dialog_on_startup),
     );
     f.set("SlopgbReduceCpu", ini::fmt_bool(s.reduce_cpu));
+    f.set(
+        "SlopgbRecoverySaveState",
+        ini::fmt_bool(s.recovery_save_state),
+    );
     f.set("JoyOpposite", ini::fmt_bool(s.allow_opposing));
     f.set("UninitedWRAM", ini::fmt_bool(s.uninited_wram));
     f.set(

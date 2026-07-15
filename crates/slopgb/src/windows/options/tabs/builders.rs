@@ -649,8 +649,7 @@ pub(super) fn joypad(s: &Settings, content: Rect) -> Vec<Ctrl> {
 pub(super) fn misc(s: &Settings, content: Rect) -> Vec<Ctrl> {
     // Single column: slopgb's font is wide enough that bgb's two-column Misc
     // layout would overlap, so the checkboxes stack vertically (functional 1:1,
-    // not pixel). "Recovery save state" stays inert (no backend); the rest drive
-    // real settings.
+    // not pixel). Every row drives a real setting.
     let mut l = Lay::new(content);
     let mut v = Vec::new();
     let rows: [(&str, bool, Option<Field>); 7] = [
@@ -680,7 +679,11 @@ pub(super) fn misc(s: &Settings, content: Rect) -> Vec<Ctrl> {
             Some(Field::PauseOnFocusLoss),
         ),
         ("reduce CPU usage", s.reduce_cpu, Some(Field::ReduceCpu)),
-        ("Recovery save state", true, None),
+        (
+            "Recovery save state",
+            s.recovery_save_state,
+            Some(Field::RecoverySaveState),
+        ),
     ];
     for (i, &(label, checked, field)) in rows.iter().enumerate() {
         if i > 0 {

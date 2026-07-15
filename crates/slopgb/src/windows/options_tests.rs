@@ -834,6 +834,10 @@ fn misc_tab_live_toggles() {
     assert!(st.working.reduce_cpu);
     click_field(&mut st, Field::ReduceCpu);
     assert!(!st.working.reduce_cpu);
+    // "Recovery save state" on by default → click turns it off.
+    assert!(st.working.recovery_save_state);
+    click_field(&mut st, Field::RecoverySaveState);
+    assert!(!st.working.recovery_save_state);
 }
 
 #[test]

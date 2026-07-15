@@ -36,6 +36,48 @@ fn no_rom_idles_emulation_like_pause() {
 }
 
 #[test]
+fn recovery_save_state_restores_a_crashed_session_and_clears_on_clean_quit() {
+    let dir = std::env::temp_dir().join(format!("slopgb-recov-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rom_path = dir.join("recov.gb");
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x147] = 0x00; // ROM ONLY
+    std::fs::write(&rom_path, &rom).unwrap();
+
+    // Load, stamp a WRAM marker, and force a recovery write (bypass the throttle).
+    let mut app = blank_app();
+    app.load_dropped(&rom_path);
+    app.session.gb.debug_write(0xC000, 0xAB);
+    app.recovery_next = std::time::Instant::now();
+    app.write_recovery_state();
+    assert!(
+        app.recovery_path.as_ref().unwrap().exists(),
+        "recovery file written"
+    );
+
+    // A crash = no clean quit → the file survives, so the next load restores it.
+    let mut crashed = blank_app();
+    crashed.load_dropped(&rom_path);
+    assert_eq!(
+        crashed.session.gb.debug_read(0xC000),
+        0xAB,
+        "restored the crashed machine's WRAM"
+    );
+
+    // A clean quit deletes the recovery, so the following load starts fresh.
+    crashed.clear_recovery_state();
+    let mut fresh = blank_app();
+    fresh.load_dropped(&rom_path);
+    assert_eq!(
+        fresh.session.gb.debug_read(0xC000),
+        0x00,
+        "fresh machine after a clean quit"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn should_poll_spins_for_turbo_or_reduce_cpu_off() {
     assert!(
         !should_poll(false, true),

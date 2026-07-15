@@ -78,6 +78,10 @@ use windows::mainwin::{InfoBox, WindowSizeChoice};
 const FRAME_DURATION: Duration =
     Duration::from_nanos(CYCLES_PER_FRAME as u64 * 1_000_000_000 / CLOCK_HZ as u64);
 
+/// How often the recovery save state is rewritten while a ROM runs (Misc →
+/// "Recovery save state").
+const RECOVERY_INTERVAL: Duration = Duration::from_secs(10);
+
 fn main() {
     let opts = match Options::parse(env::args().skip(1)) {
         Ok(ParseOutcome::Run(opts)) => opts,
@@ -324,6 +328,12 @@ struct App {
     postfx_buf: Vec<u32>,
     /// The previously presented (pre-filter) frame, used by "frame blend".
     prev_frame: Vec<u32>,
+    /// Misc → "Recovery save state": the `<rom>.recovery` path for the loaded
+    /// ROM (None with no ROM). Written periodically and deleted on a clean quit,
+    /// so its presence at load time means the last session crashed.
+    recovery_path: Option<std::path::PathBuf>,
+    /// Wall-clock deadline for the next recovery-state write.
+    recovery_next: Instant,
     window: Option<Rc<Window>>,
     video: Option<Video>,
     audio: Option<AudioPipe>,
@@ -518,6 +528,8 @@ impl App {
             blank_frame,
             postfx_buf: Vec::new(),
             prev_frame: Vec::new(),
+            recovery_path: None,
+            recovery_next: Instant::now(),
             settings,
             options: None,
             key_wizard: None,
@@ -1051,6 +1063,7 @@ impl App {
                 self.apply_exceptions();
                 self.paused = false;
                 self.push_recent(path);
+                self.arm_recovery(path);
                 // Auto-load a sidecar `.sym` (foo.gb -> foo.sym) if present, so
                 // symbols reach the disassembler and memory viewer without a
                 // manual load. Absent sidecar = silent no-op.

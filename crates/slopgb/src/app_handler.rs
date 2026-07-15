@@ -114,6 +114,9 @@ impl ApplicationHandler for App {
                 if let Some(sym) = crate::app_path::sym_sidecar(&rom) {
                     self.load_symbols(&sym);
                 }
+                // Recovery save state for a CLI-launched ROM (drag-drop loads go
+                // through `load_dropped`, which arms it there).
+                self.arm_recovery(&rom);
             }
         }
         // Debug → "Start in debugger": open the debugger window at launch (unless
@@ -405,6 +408,7 @@ impl ApplicationHandler for App {
         self.check_audio_health();
         if frames > 0 {
             self.session.autosave();
+            self.write_recovery_state();
             // Drive read-only plugins once per rendered frame-batch. A no-op with
             // no plugins loaded (default), so the golden path is untouched.
             self.plugins.pump(&self.session.gb);
@@ -436,5 +440,7 @@ impl ApplicationHandler for App {
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         self.session.flush_save();
+        // Clean quit: drop the recovery state so the next load starts fresh.
+        self.clear_recovery_state();
     }
 }

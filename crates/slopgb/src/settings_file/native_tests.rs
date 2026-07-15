@@ -37,6 +37,7 @@ fn settings_and_recent_round_trip() {
         show_errors_on_rom_load: false,
         load_rom_dialog_on_startup: true,
         reduce_cpu: false,
+        recovery_save_state: false,
         auto_reset_on_system_change: false,
         registers_editable: false,
         start_in_debugger: true,

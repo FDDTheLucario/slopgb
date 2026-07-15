@@ -71,6 +71,8 @@ pub(crate) enum Field {
     LoadRomDialogOnStartup,
     /// Misc → "reduce CPU usage".
     ReduceCpu,
+    /// Misc → "Recovery save state".
+    RecoverySaveState,
     /// System → "uninitialized RAM at power-on" (bgb's `UninitedWRAM`): power on
     /// with seeded-random garbage RAM. Takes effect on the next reset/load.
     UninitedWram,
@@ -304,6 +306,7 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
             s.load_rom_dialog_on_startup = !s.load_rom_dialog_on_startup;
         }
         Field::ReduceCpu => s.reduce_cpu = !s.reduce_cpu,
+        Field::RecoverySaveState => s.recovery_save_state = !s.recovery_save_state,
         Field::UninitedWram => s.uninited_wram = !s.uninited_wram,
         Field::AutoResetOnSystemChange => {
             s.auto_reset_on_system_change = !s.auto_reset_on_system_change;
@@ -413,6 +416,7 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
             s.show_errors_on_rom_load = d.show_errors_on_rom_load;
             s.load_rom_dialog_on_startup = d.load_rom_dialog_on_startup;
             s.reduce_cpu = d.reduce_cpu;
+            s.recovery_save_state = d.recovery_save_state;
         }
         OptionsTab::Theme => s.theme = d.theme,
         // Reset the allow-mutation toggle + re-enable every discovered plugin

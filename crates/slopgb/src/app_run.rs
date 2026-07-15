@@ -4,6 +4,7 @@
 //! exporters.
 
 use std::fs;
+use std::path::Path;
 
 use slopgb_core::{SCREEN_H, SCREEN_W, SGB_BORDER_H, SGB_BORDER_W};
 use winit::event_loop::ActiveEventLoop;
@@ -380,6 +381,56 @@ impl App {
         match fs::write(&path, &data) {
             Ok(()) => eprintln!("saved screenshot to {path}"),
             Err(e) => eprintln!("error: could not save screenshot: {e}"),
+        }
+    }
+
+    /// Arm the recovery-save-state machinery for the ROM at `rom_path`: set its
+    /// `<rom>.recovery` sidecar path and, if that file is already present (Misc →
+    /// "Recovery save state" on), restore it over the freshly-loaded machine — a
+    /// leftover file means the last session of this ROM crashed (a clean quit
+    /// deletes it). Called from every load path (drag-drop + CLI startup).
+    pub(crate) fn arm_recovery(&mut self, rom_path: &Path) {
+        self.recovery_path = Some(rom_path.with_extension("recovery"));
+        self.recovery_next = std::time::Instant::now() + crate::RECOVERY_INTERVAL;
+        if !self.settings.recovery_save_state {
+            return;
+        }
+        if let Some(rp) = self.recovery_path.clone() {
+            if rp.exists() {
+                match self.session.load_state_from(&rp) {
+                    Ok(()) => {
+                        eprintln!("slopgb: recovered unsaved progress from {}", rp.display());
+                    }
+                    Err(e) => eprintln!("slopgb: recovery state ignored: {e}"),
+                }
+            }
+        }
+    }
+
+    /// Misc → "Recovery save state": rewrite `<rom>.recovery` on the interval so
+    /// a crash loses at most `RECOVERY_INTERVAL` of progress. No-op when the
+    /// option is off, no ROM is loaded, or the interval hasn't elapsed.
+    pub(crate) fn write_recovery_state(&mut self) {
+        if !self.settings.recovery_save_state {
+            return;
+        }
+        let now = std::time::Instant::now();
+        if now < self.recovery_next {
+            return;
+        }
+        if let Some(rp) = self.recovery_path.clone() {
+            if let Err(e) = self.session.save_state_to(&rp) {
+                eprintln!("slopgb: recovery save failed: {e}");
+            }
+        }
+        self.recovery_next = now + crate::RECOVERY_INTERVAL;
+    }
+
+    /// Delete the recovery state on a clean quit, so it is only ever present —
+    /// and therefore restored on the next load — after a crash.
+    pub(crate) fn clear_recovery_state(&self) {
+        if let Some(rp) = &self.recovery_path {
+            let _ = std::fs::remove_file(rp);
         }
     }
 

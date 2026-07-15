@@ -396,6 +396,10 @@ pub struct Settings {
     /// (`WaitUntil`) instead of busy-polling. Default on; off spins for lowest
     /// input latency at the cost of a pinned core.
     pub reduce_cpu: bool,
+    /// Misc → "Recovery save state": periodically write `<rom>.recovery` and
+    /// restore it on the next load of that ROM (crash recovery — deleted on a
+    /// clean quit). Default on (bgb ships it checked).
+    pub recovery_save_state: bool,
     /// GB Colors → selected scheme index into [`SCHEMES`].
     pub scheme: usize,
     /// GB Colors → the live DMG palette (lightest→darkest).
@@ -487,6 +491,7 @@ impl Default for Settings {
             show_errors_on_rom_load: true,
             load_rom_dialog_on_startup: false,
             reduce_cpu: true,
+            recovery_save_state: true,
             scheme: 0,
             dmg_palette: SCHEMES[0].colors,
             allow_opposing: false,
