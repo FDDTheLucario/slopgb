@@ -180,17 +180,27 @@ pub(super) fn system(s: &Settings, content: Rect) -> Vec<Ctrl> {
         Field::RewindEnabled,
     ));
     l.row();
+    // Inert: no distinct core models to detect into, and waitloop-skip would
+    // perturb emulated timing (golden-safe-forbidden). "Save BGB legacy RTC
+    // files" is inert too — its sidecar `.rtc` byte layout is unverified.
     for label in [
         "detect GB pocket / SGB2",
         "detect GBA",
         "GB Player",
         "Waitloop detection (fast)",
         "Save BGB legacy RTC files",
-        "Save RTC in SAV file (VBA compatible)",
     ] {
         v.push(Ctrl::inert(rc(l.at(), label), chk(label, false)));
         l.row();
     }
+    // Live: write the MBC3 RTC as VBA's portable `.sav` footer.
+    let vba = "Save RTC in SAV file (VBA compatible)";
+    v.push(Ctrl::live(
+        rc(l.at(), vba),
+        chk(vba, s.rtc_vba_sav),
+        Field::RtcVbaSav,
+    ));
+    l.row();
     // Live: bgb's `UninitedWRAM` (an ini-only key in bgb; surfaced here as a
     // checkbox). Power on with seeded-random garbage RAM; applied on next reset.
     let uw = "uninitialized RAM at power-on";

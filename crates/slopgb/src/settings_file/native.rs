@@ -314,6 +314,7 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
         record_video: b("misc", "record_video", def.record_video),
         record_audio_channels: b("misc", "record_audio_channels", def.record_audio_channels),
         uninited_wram: b("system", "uninited_wram", def.uninited_wram),
+        rtc_vba_sav: b("system", "rtc_vba_sav", def.rtc_vba_sav),
         break_ld_b_b: b("exceptions", "break_ld_b_b", def.break_ld_b_b),
         break_invalid_op: b("exceptions", "break_invalid_op", def.break_invalid_op),
         break_echo_ram: b("exceptions", "break_echo_ram", def.break_echo_ram),
@@ -404,6 +405,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         record_video: _,
         record_audio_channels: _,
         uninited_wram: _,
+        rtc_vba_sav: _,
         auto_reset_on_system_change: _,
         rewind_enabled: _,
         break_ld_b_b: _,
@@ -542,6 +544,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         fb(settings.record_audio_channels),
     );
     d.set("system", "uninited_wram", fb(settings.uninited_wram));
+    d.set("system", "rtc_vba_sav", fb(settings.rtc_vba_sav));
     d.set(
         "system",
         "auto_reset_on_system_change",

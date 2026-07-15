@@ -37,6 +37,7 @@ mod msu1;
 mod net_worker;
 mod pacing;
 mod postfx;
+mod rtc_export;
 mod screenshot;
 mod session;
 mod settings_file;
@@ -1137,6 +1138,7 @@ impl App {
                 new.set_sgb_bios(self.sgb_bios.clone());
                 new.set_sgb_coprocessor_dir(resolve_sgb_coprocessor_dir(&self.opts));
                 new.set_sgb_coprocessor(self.sgb_coprocessor);
+                new.set_rtc_vba_export(self.settings.rtc_vba_sav);
                 self.session = new;
                 // A loaded ROM starts emulation: leave the no-ROM blank state and
                 // (re)apply the DMG palette to the fresh machine (GameBoy::new

@@ -21,6 +21,18 @@ impl Cartridge {
         }
     }
 
+    /// The battery SRAM alone, without the RTC trailer [`Self::save_data`]
+    /// appends. `None` with no battery. Read-only.
+    pub fn battery_sram(&self) -> Option<Vec<u8>> {
+        self.has_battery.then(|| self.ram.clone())
+    }
+
+    /// The MBC3 RTC `(live, latched)` register files, each `[S, M, H, DL, DH]`,
+    /// or `None` with no RTC. Read-only.
+    pub fn rtc_state(&self) -> Option<([u8; 5], [u8; 5])> {
+        self.rtc().map(|r| (r.regs, r.latched))
+    }
+
     /// Battery-backed RAM image (+ serialized RTC for MBC3), None if the
     /// cartridge has no battery.
     ///

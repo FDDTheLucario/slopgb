@@ -27,8 +27,15 @@ pub(crate) struct Session {
     /// ROM file stem, for the window title.
     pub(crate) title: String,
     sav_path: PathBuf,
-    /// Last battery-RAM image written to disk (dirty check).
+    /// Last battery-RAM image written to disk (dirty check). Holds the canonical
+    /// timestamp-free `save_data` image so the dirty check stays stable even when
+    /// the VBA export stamps a moving wall clock into the file.
     last_saved: Option<Vec<u8>>,
+    /// Options → System → "Save RTC in SAV file (VBA compatible)": write the MBC3
+    /// RTC as VBA's `.sav` footer (raw SRAM + a wall-clock-stamped footer) so
+    /// other emulators read the clock. Off = slopgb's own block. Set by the
+    /// frontend from settings; only affects RTC carts.
+    rtc_vba_export: bool,
     /// Emulated-cycle deadline for the next autosave.
     next_autosave: u64,
     /// In-memory quick-save snapshot (bgb State → Quick Save / Quick Load): a
@@ -88,6 +95,7 @@ impl Session {
             title: String::new(),
             sav_path: PathBuf::new(),
             last_saved: None,
+            rtc_vba_export: false,
             next_autosave: AUTOSAVE_CYCLES,
             quick_state: None,
             rewind: std::collections::VecDeque::new(),
@@ -151,6 +159,7 @@ impl Session {
             title,
             sav_path,
             last_saved,
+            rtc_vba_export: false,
             next_autosave: AUTOSAVE_CYCLES,
             quick_state: None,
             rewind: std::collections::VecDeque::new(),
@@ -367,16 +376,43 @@ impl Session {
         }
     }
 
-    /// Write battery RAM to `<rom>.sav` if it changed since the last write.
+    /// Options → System → "Save RTC in SAV file (VBA compatible)": choose the
+    /// `.sav` RTC layout. Only affects the next write of an RTC cart.
+    pub(crate) fn set_rtc_vba_export(&mut self, on: bool) {
+        self.rtc_vba_export = on;
+    }
+
+    /// The battery image to persist. With the VBA-RTC toggle on and an RTC cart,
+    /// this is the raw SRAM plus a wall-clock-stamped VBA footer (readable by
+    /// VBA / mGBA / SameBoy); otherwise slopgb's own `save_data` block.
+    fn save_image(&self) -> Option<Vec<u8>> {
+        if self.rtc_vba_export {
+            if let (Some(mut ram), Some((live, latched))) =
+                (self.gb.battery_sram(), self.gb.rtc_state())
+            {
+                let secs = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs());
+                ram.extend_from_slice(&crate::rtc_export::vba_footer(live, latched, secs));
+                return Some(ram);
+            }
+        }
+        self.gb.save_data()
+    }
+
+    /// Write battery RAM to `<rom>.sav` if it changed since the last write. The
+    /// dirty check compares the canonical (timestamp-free) `save_data` image, so
+    /// the VBA export's moving wall clock never forces a redundant write.
     pub(crate) fn flush_save(&mut self) {
-        let Some(data) = self.gb.save_data() else {
+        let Some(canonical) = self.gb.save_data() else {
             return; // cartridge has no battery RAM
         };
-        if self.last_saved.as_deref() == Some(data.as_slice()) {
+        if self.last_saved.as_deref() == Some(canonical.as_slice()) {
             return;
         }
-        match write_atomic(&self.sav_path, &data) {
-            Ok(()) => self.last_saved = Some(data),
+        let image = self.save_image().unwrap_or_else(|| canonical.clone());
+        match write_atomic(&self.sav_path, &image) {
+            Ok(()) => self.last_saved = Some(canonical),
             Err(e) => eprintln!(
                 "slopgb: cannot write save file '{}': {e}",
                 self.sav_path.display()

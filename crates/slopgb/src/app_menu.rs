@@ -508,6 +508,9 @@ impl App {
         self.sync_video_recording();
         // Joypad → "Audio channels": start/stop the per-channel WAV recorder.
         self.sync_channel_recording();
+        // System → "Save RTC in SAV file (VBA compatible)": choose the .sav RTC
+        // layout for the next battery write.
+        self.session.set_rtc_vba_export(s.rtc_vba_sav);
         // Sound → SGB audio backend: swap the live SGB machine's coprocessor (a
         // no-op off SGB). Mirror the choice into `sgb_coprocessor` so a later ROM
         // (re)load re-injects the same backend. Built-in = byte-identical golden.

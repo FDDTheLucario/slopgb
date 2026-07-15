@@ -635,6 +635,23 @@ impl GameBoy {
         self.bus.cartridge_mut().load_save_data(data)
     }
 
+    /// The cart's battery SRAM alone, without the RTC trailer [`Self::save_data`]
+    /// appends, or `None` with no battery. Read-only; lets a frontend
+    /// re-serialize the `.sav` in another emulator's RTC layout (see
+    /// [`Self::rtc_state`]). Side-effect-free.
+    #[must_use]
+    pub fn battery_sram(&self) -> Option<Vec<u8>> {
+        self.bus.cartridge().battery_sram()
+    }
+
+    /// The MBC3 RTC register files `(live, latched)`, each `[S, M, H, DL, DH]`,
+    /// or `None` when the cart has no RTC. Read-only introspection for a
+    /// VBA-compatible `.sav` export. Side-effect-free.
+    #[must_use]
+    pub fn rtc_state(&self) -> Option<([u8; 5], [u8; 5])> {
+        self.bus.cartridge().rtc_state()
+    }
+
     /// True once the CPU has executed `LD B,B` (opcode 0x40) — the mooneye
     /// test suite's "test finished" software breakpoint.
     pub fn debug_breakpoint_hit(&self) -> bool {

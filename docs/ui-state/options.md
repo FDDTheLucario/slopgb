@@ -20,7 +20,7 @@ where bgb itself greys them).
 
 | Tab | Setting → effect |
 |---|---|
-| System | Emulated system (Gameboy/Gameboy Color/automatic → `ModelChoice` → `Session::set_model` rebuilds the machine on change; palette re-applied after) |
+| System | Emulated system (Gameboy/Gameboy Color/automatic → `ModelChoice` → `Session::set_model` rebuilds the machine on change; palette re-applied after); **Save RTC in SAV file (VBA compatible)** — writes an MBC3 cart's RTC as VBA's portable `.sav` footer (raw SRAM + a wall-clock-stamped 48-byte block) instead of slopgb's own, via the golden-safe read-only `GameBoy::battery_sram` / `rtc_state` + `rtc_export::vba_footer` (`Session::save_image`; the dirty check stays on the timestamp-free image so the moving clock doesn't force redundant writes). slopgb's core already reads the VBA footer back |
 | GB Colors | scheme (`SCHEMES` presets → `GameBoy::set_dmg_palette`) |
 | Sound | volume + mono (`AudioPipe::set_volume` gain/downmix); **SGB audio backend** dropdown (Built-in HLE APU / SGB coprocessor → `Settings.audio_backend` → `Session::set_sgb_coprocessor`, the same seam `--sgb-coprocessor` drives; the CLI flag/env still wins the launch, else the persisted choice is honored at startup. Default Built-in → byte-identical. A no-op off SGB) |
 | Graphics | stretch (→ fullscreen-stretched window size); **frame blend** (`postfx` present filter — averages the frame with the previous one); **SGB border in screenshot** (`save_screenshot` uses the 256×224 composite when a border is loaded) |
@@ -128,7 +128,8 @@ lowercase-disassembler, the whole Sound row (soundcard / samplerate / latency /
 8-bit / high-quality), Graphics doubler (scale2x) + disable-SGB-colors (golden-
 safe PPU `sgb_mono`), System Rewind (Backspace, a savestate ring), Joypad
 rapid-speed (`[`/`]` auto-fire) + Audio WAV recording + Video AVI recording +
-Audio-channels recording (golden-safe per-channel APU tap). See the Live table.
+Audio-channels recording (golden-safe per-channel APU tap) + VBA-compatible RTC
+`.sav` export (golden-safe read-only RTC accessors). See the Live table.
 
 ## Inert
 
@@ -136,9 +137,9 @@ Still inert — each needs a prerequisite beyond a normal wiring:
 
 - **0-31 numbers** — the exact bgb palette-number display is uncaptured; run the
   wine rig first (never-invent-bgb-UI rule).
-- **RTC VBA / legacy .rtc** — RTC already round-trips in the `.sav` (slopgb's own
-  block); these are cross-emulator interop formats whose VBA timestamp needs a
-  wall clock the deterministic core lacks.
+- **Save BGB legacy RTC files** — the separate sidecar `.rtc` file's exact byte
+  layout is unverified; writing it would be inventing a format (VBA-in-SAV is
+  live above; that footer is pinned by slopgb-core's own parser).
 - **Model detection** (GB-pocket/SGB2 · GBA · GB Player · MGB-auto-border) — the
   core has no distinct GBA/MGB/GB-Player models to detect into.
 - **Waitloop detection** — a speed hack that skips CPU wait loops → perturbs

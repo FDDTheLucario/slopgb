@@ -972,6 +972,15 @@ fn joypad_audio_channels_record_checkbox_toggles() {
 }
 
 #[test]
+fn system_rtc_vba_sav_checkbox_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::System;
+    assert!(!st.working.rtc_vba_sav);
+    click_field(&mut st, Field::RtcVbaSav);
+    assert!(st.working.rtc_vba_sav);
+}
+
+#[test]
 fn joypad_tab_transcribes_the_capture_controls() {
     // JP8: the inert chrome matching options-joypad.png is present (dropdowns,
     // the Mappable-button-records groupbox + its checks, the joystick-ID field).

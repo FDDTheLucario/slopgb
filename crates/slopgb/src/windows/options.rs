@@ -435,6 +435,10 @@ pub struct Settings {
     /// Joypad → "Audio channels" (Mappable button records): record the 4 GB
     /// sound channels to separate WAVs while set. Off on Apply finalises them.
     pub record_audio_channels: bool,
+    /// System → "Save RTC in SAV file (VBA compatible)": write an MBC3 cart's
+    /// RTC as VBA's `.sav` footer (portable to VBA/mGBA/SameBoy) instead of
+    /// slopgb's own block. Off = slopgb's block (still self-round-tripping).
+    pub rtc_vba_sav: bool,
     /// bgb's `UninitedWRAM` (ini-only, no dialog control in bgb 1.6.4): power on
     /// with uninitialised (seeded-random) RAM instead of the deterministic
     /// default. `false` (bgb default) = the stable 0xFF cart SRAM / zeroed
@@ -537,6 +541,7 @@ impl Default for Settings {
             record_audio: false,
             record_video: false,
             record_audio_channels: false,
+            rtc_vba_sav: false,
             uninited_wram: false,
             break_ld_b_b: false,
             // bgb ships with "break on invalid opcode" checked.
