@@ -292,28 +292,32 @@ impl ToolWindows {
 
     /// Record the cursor moving to physical `(x, y)` over tool window `id`;
     /// updates the hovered-cell details and redraws only if the hover changed.
-    pub fn on_cursor_moved(&mut self, id: WindowId, x: f64, y: f64) {
+    /// Returns whether a VRAM hover changed — the game window then repaints its
+    /// OAM sprite outline (which won't follow the cursor on its own while paused).
+    pub fn on_cursor_moved(&mut self, id: WindowId, x: f64, y: f64) -> bool {
         let (px, py) = (x as i32, y as i32);
         {
             let Some(view) = self.views.get_mut(&id) else {
-                return;
+                return false;
             };
             view.cursor = Some((px, py));
         }
         // A scrollbar drag owns the cursor: update its offset, skip hover.
         if matches!(self.scroll_drag, Some((d, _)) if d == id) {
             self.apply_scroll_drag(id);
-            return;
+            return false;
         }
         let Some(view) = self.views.get_mut(&id) else {
-            return;
+            return false;
         };
         let area = view.area();
         match &mut view.state {
             WinState::Vram(s) => {
-                if vram::on_hover(s, area, px, py) {
+                let changed = vram::on_hover(s, area, px, py);
+                if changed {
                     view.window.request_redraw();
                 }
+                changed
             }
             // Track the hovered row of an open context menu.
             WinState::Debugger(s) => {
@@ -322,10 +326,23 @@ impl ToolWindows {
                         view.window.request_redraw();
                     }
                 }
+                false
             }
             // The memory window has no hover state (just the cursor, tracked above).
-            WinState::Stateless | WinState::Memory(_) => {}
+            WinState::Stateless | WinState::Memory(_) => false,
         }
+    }
+
+    /// Emu-pixel bounding box of the sprite hovered in an open VRAM viewer's OAM
+    /// tab, for the game window to outline over the live screen. `None` unless a
+    /// VRAM window is open on the OAM tab with the cursor over a live sprite.
+    #[must_use]
+    pub fn oam_hover_rect(&self, gb: &GameBoy) -> Option<Rect> {
+        let tall = gb.debug_read(0xFF40) & 0x04 != 0;
+        self.views.values().find_map(|v| match &v.state {
+            WinState::Vram(s) => vram::oam_hover_rect(s, v.area(), gb.oam(), tall),
+            _ => None,
+        })
     }
 
     /// If a left-press landed on a scrollbar track, begin dragging it and jump

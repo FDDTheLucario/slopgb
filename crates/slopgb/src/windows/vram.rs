@@ -259,6 +259,53 @@ pub fn oam_cell_h(scale: i32, tall: bool) -> i32 {
     (if tall { 18 } else { 10 }) * scale
 }
 
+/// The integer render scale the OAM tab fits into `content` (mirrors `vram_geom`'s
+/// OAM arm). Shared so the render, the details panel, and the game-window
+/// highlight all resolve sprites at the same pitch.
+#[must_use]
+pub fn oam_scale(content: Rect, tall: bool) -> i32 {
+    fit_scale(
+        content.w,
+        content.h,
+        8 * oam_cell(1),
+        5 * oam_cell_h(1, tall),
+    )
+}
+
+/// The OAM-grid cell index (0..40) under content-relative `(lx, ly)` at `scale`,
+/// or `None` off the 8×5 grid. Shared by the details panel and the game-window
+/// highlight so they can never resolve different sprites.
+#[must_use]
+pub fn oam_cell_at(lx: i32, ly: i32, scale: i32, tall: bool) -> Option<usize> {
+    if lx < 0 || ly < 0 {
+        return None;
+    }
+    let (col, row) = (lx / oam_cell(scale), ly / oam_cell_h(scale, tall));
+    let idx = (row * 8 + col) as usize;
+    (col < 8 && idx < 40).then_some(idx)
+}
+
+/// Emu-pixel (LCD-space) bounding box of the sprite hovered in the OAM tab, or
+/// `None` when the tab isn't OAM or the cursor isn't over a live sprite. `x`/`y`
+/// un-offset OAM's stored +8/+16 to on-screen coords; the box is 8 wide and 8 or
+/// 16 (`tall`, LCDC bit 2) high. Lets the game window outline the hovered sprite.
+#[must_use]
+pub fn oam_hover_rect(state: &VramState, area: Rect, oam: &[u8], tall: bool) -> Option<Rect> {
+    if state.tab != VramTab::Oam {
+        return None;
+    }
+    let (hx, hy) = state.hover?;
+    let content = layout(area).content;
+    let scale = oam_scale(content, tall);
+    let idx = oam_cell_at(hx - content.x, hy - content.y, scale, tall)?;
+    let s = debug::oam_sprites(oam)[idx];
+    if s.x == 0 && s.y == 0 {
+        return None; // empty slot — render_oam skips these
+    }
+    let h = if tall { 16 } else { 8 };
+    Some(Rect::new(i32::from(s.x) - 8, i32::from(s.y) - 16, 8, h))
+}
+
 /// Mirror an 8×8 tile's pixels horizontally and/or vertically (the OAM/BG-map
 /// attribute X/Y-flip bits). Pure — `pixels[row][col]`, so an x-flip mirrors the
 /// column and a y-flip the row.

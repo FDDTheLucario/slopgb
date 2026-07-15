@@ -40,8 +40,7 @@ fn vram_geom(tab: VramTab, content: Rect, tall: bool) -> VramGeom {
         }
         VramTab::Oam => {
             // 8×16 mode needs a taller row pitch so the stacked tiles don't overlap.
-            let (nw, nh) = (8 * vram::oam_cell(1), 5 * vram::oam_cell_h(1, tall));
-            let s = vram::fit_scale(content.w, content.h, nw, nh);
+            let s = vram::oam_scale(content, tall);
             tiled(8, 5, vram::oam_cell(s), vram::oam_cell_h(s, tall), s)
         }
         VramTab::Palettes => VramGeom {
@@ -490,14 +489,9 @@ fn tile_details_two(
 /// OAM-tab details: the sprite under `(lx, ly)` in the 8-wide cell grid at `scale`.
 fn oam_details(gb: &GameBoy, lx: i32, ly: i32, scale: i32, mask8: bool) -> Vec<String> {
     let tall = gb.debug_read(0xFF40) & 0x04 != 0;
-    let (col, row) = (
-        lx / vram::oam_cell(scale),
-        ly / vram::oam_cell_h(scale, tall),
-    );
-    let idx = (row * 8 + col) as usize;
-    if col >= 8 || idx >= 40 {
+    let Some(idx) = vram::oam_cell_at(lx, ly, scale, tall) else {
         return Vec::new();
-    }
+    };
     let s = debug::oam_sprites(gb.oam())[idx];
     vec![
         format!("OAM addr FE{:02X}", idx * 4),

@@ -160,8 +160,16 @@ impl ApplicationHandler for App {
                 // Mouse drives the tool windows' tabs/checkboxes/details and the
                 // debugger's context menu (left selects/acts, right opens it).
                 WindowEvent::CursorMoved { position, .. } => {
-                    self.tools
-                        .on_cursor_moved(window_id, position.x, position.y);
+                    // A VRAM OAM hover change moves the game window's sprite outline,
+                    // so nudge the game window (it won't repaint itself while paused).
+                    if self
+                        .tools
+                        .on_cursor_moved(window_id, position.x, position.y)
+                    {
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                    }
                 }
                 WindowEvent::CursorLeft { .. } => self.tools.on_cursor_left(window_id),
                 // Mouse wheel scrolls the debugger memory pane (bgb).
