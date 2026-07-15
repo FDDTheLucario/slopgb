@@ -126,7 +126,7 @@ fn render_tiles_blits_tile_zero_into_the_top_left_cell() {
             Rect::new(0, 0, w as i32, h as i32),
             &vram,
             0,
-            &GREYS,
+            |_| GREYS,
             scale,
         );
     }
@@ -208,17 +208,6 @@ fn render_oam_honors_bank_palette_and_tall() {
         0x00FF_FFFF,
         "8x16 lower stacked tile is tile|1"
     );
-}
-
-#[test]
-fn tile_index_resolves_signed_and_unsigned_addressing() {
-    assert_eq!(tile_index(0, false), 0);
-    assert_eq!(tile_index(255, false), 255);
-    // Signed (0x8800): n is i8 relative to tile 256.
-    assert_eq!(tile_index(0, true), 256);
-    assert_eq!(tile_index(127, true), 383);
-    assert_eq!(tile_index(0x80, true), 128); // -128
-    assert_eq!(tile_index(0xFF, true), 255); // -1
 }
 
 #[test]

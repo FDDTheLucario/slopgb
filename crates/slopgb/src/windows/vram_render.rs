@@ -102,14 +102,28 @@ pub(super) fn render_vram(
     let bgmap_two = (state.tab == VramTab::BgMap).then(|| bgmap_two_col(l.content));
     match state.tab {
         VramTab::Tiles => {
-            // A raw tile has no inherent palette, so bgb renders the Tiles grid
-            // in a neutral grey ramp rather than through one game palette. On CGB
-            // both banks show at once (bank 0 left, bank 1 right); DMG has one.
+            // A raw tile carries no palette. "show paletted" guesses one per tile
+            // from where it is used (BG map / OAM); off shows a neutral grey ramp.
+            // On CGB both banks show at once (bank 0 left, bank 1 right); DMG has one.
+            let tables = state.show_paletted.then(|| {
+                let signed = gb.debug_read(0xFF40) & 0x10 == 0;
+                (
+                    debug::tile_palette_guess(gb.vram(), gb.oam(), signed, tall, cgb),
+                    bg_palettes(gb, true).0,
+                    obj_palettes(gb, true).0,
+                )
+            });
+            let pal = |bank: usize, tile: usize| match &tables {
+                Some((guess, bg, obj)) => guess[bank][tile].map_or(vram::GREYS, |r| {
+                    (if r.obj { obj } else { bg })[r.index as usize]
+                }),
+                None => vram::GREYS,
+            };
             if let Some((left, right, s)) = tiles_two {
-                vram::render_tiles(c, left, gb.vram(), 0, &vram::GREYS, s);
-                vram::render_tiles(c, right, gb.vram(), 1, &vram::GREYS, s);
+                vram::render_tiles(c, left, gb.vram(), 0, |t| pal(0, t), s);
+                vram::render_tiles(c, right, gb.vram(), 1, |t| pal(1, t), s);
             } else {
-                vram::render_tiles(c, l.content, gb.vram(), 0, &vram::GREYS, g.scale);
+                vram::render_tiles(c, l.content, gb.vram(), 0, |t| pal(0, t), g.scale);
             }
         }
         VramTab::Oam => {
@@ -498,7 +512,7 @@ fn bgmap_details_two(
     let base = if is_window { win_base } else { bg_base };
     let idx = (row * 32 + col) as usize;
     let cell = debug::bg_map(gb.vram(), base)[idx];
-    let tile = vram::tile_index(cell.tile, signed);
+    let tile = debug::bg_tile_index(cell.tile, signed);
     vec![
         format!(
             "{}  X {col}  Y {row}",

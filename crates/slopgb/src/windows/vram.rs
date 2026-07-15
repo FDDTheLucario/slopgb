@@ -221,14 +221,16 @@ pub fn render_tabs(c: &mut Canvas, x: i32, y: i32, active: VramTab, theme: &Them
     tab_strip(c, x, y, &labels, active_idx, theme)
 }
 
-/// Render the Tiles tab: all 384 tiles of `bank` in a 16-wide grid through
-/// `palette` at integer `scale`, top-left at `rect`. Clipped to `rect`.
+/// Render the Tiles tab: all 384 tiles of `bank` in a 16-wide grid at integer
+/// `scale`, top-left at `rect`. `palette(tile)` gives each tile's four shades —
+/// a fixed grey ramp when "show paletted" is off, or the tile's guessed palette
+/// when on ([`debug::tile_palette_guess`]). Clipped to `rect`.
 pub fn render_tiles(
     c: &mut Canvas,
     rect: Rect,
     vram: &[u8],
     bank: usize,
-    palette: &[u32; 4],
+    palette: impl Fn(usize) -> [u32; 4],
     scale: i32,
 ) {
     const COLS: usize = 16;
@@ -237,7 +239,7 @@ pub fn render_tiles(
         let px = rect.x + (tile % COLS) as i32 * 8 * scale;
         let py = rect.y + (tile / COLS) as i32 * 8 * scale;
         let pixels = debug::tile_pixels(vram, bank, tile);
-        c.blit_tile(px, py, &pixels, palette, scale);
+        c.blit_tile(px, py, &pixels, &palette(tile), scale);
     }
     c.set_clip(saved);
 }
@@ -399,18 +401,6 @@ pub fn render_palettes(c: &mut Canvas, rect: Rect, bg: &[u8], obj: &[u8], theme:
     c.set_clip(saved);
 }
 
-/// Absolute tile index (0..=383) for a BG-map tile number under the LCDC tile
-/// data area: unsigned 0x8000 method (`n`), or signed 0x8800 method where `n`
-/// is taken as `i8` relative to tile 256 (`0x9000`).
-#[must_use]
-pub fn tile_index(n: u8, signed: bool) -> usize {
-    if signed {
-        (256 + i16::from(n as i8)) as usize
-    } else {
-        n as usize
-    }
-}
-
 /// Split a `start`-anchored `len`-long span over a `modulus`-wide axis into the
 /// 1 or 2 contiguous pieces it occupies once it wraps past the edge.
 fn wrap_spans(start: i32, len: i32, modulus: i32) -> Vec<(i32, i32)> {
@@ -531,7 +521,7 @@ pub fn render_bgmap(
             continue;
         };
         let pixels = flip_tile(
-            debug::tile_pixels(vram, bank, tile_index(cell.tile, signed)),
+            debug::tile_pixels(vram, bank, debug::bg_tile_index(cell.tile, signed)),
             xf,
             yf,
         );
