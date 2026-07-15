@@ -121,19 +121,28 @@ saved on ROM load + Quit. bgb's window-geometry / open-on-start keys have no
 slopgb equivalent — preserved verbatim, not acted on. Phase 1 complete; phase 2
 (a modern native format) is planned.
 
+Now live (were inert): reduce-CPU-usage, recovery-save-state, auto-reset-on-
+system-change, the three remaining Exceptions breaks (OAM-DMA-bad-access,
+16-bit-inc/dec-FE00-FEFF, SGB-transfer-start — golden-safe core detectors),
+lowercase-disassembler, and the whole Sound row (soundcard / samplerate /
+latency / 8-bit output / high-quality). See the Live-settings table.
+
 ## Inert
 
-Still faithful-but-inert — each blocked on real work, not a wiring gap:
+Still faithful-but-inert, by reason:
 
-- **0-31 numbers** — the exact bgb palette-number display is uncaptured (would
-  violate the never-invent-bgb-UI rule); capture it first.
-- **Rapid speed** — blocked on the missing rapid-fire button binding ("configure
-  extra buttons" is itself inert).
-- **Recovery save state** — the periodic write reuses `save_state_to`, but
-  restore-on-relaunch is an unmade UX decision (auto-load vs prompt).
-- **reduce CPU usage** — already effectively on: the non-turbo loop parks with
-  `ControlFlow::WaitUntil`, so it doesn't busy-spin.
-- Faithful chrome with no dep-free/golden-safe backend: game-controller config,
-  WAV/AVI recording, rewind, RTC files, doubler/bpp/output/vsync scalers,
-  soundcard/samplerate/latency, lowercase-disassembler toggle, "disable SGB
-  colors".
+- **0-31 numbers** — the exact bgb palette-number display is uncaptured; capture
+  it via the wine rig before implementing (never-invent-bgb-UI rule).
+- **Rapid speed** — needs a rapid-fire button binding first ("configure extra
+  buttons" is itself inert).
+- **WAV/AVI recording**, **doubler/scaler** — implementable std-only (encoder /
+  scale2x); not yet built.
+- **Rewind** — a savestate ring-buffer feature; not yet built.
+- **RTC files (VBA / legacy .rtc)** — RTC already round-trips in the `.sav`
+  (slopgb's own block); these are cross-emulator interop formats, not yet built.
+- **disable SGB colors** — needs the core SGB colorizer to force the DMG grey
+  palette (a present-side desaturate would grey the border too).
+- **Model detection** (GB-pocket/SGB2 · GBA · GB Player · MGB-auto-border ·
+  Waitloop-detection) — niche auto-detect/perf toggles.
+- **Hard-blocked**: game-controller config (needs a gamepad input dep — banned);
+  `bpp`/`output`/`vsync` (DirectDraw-era concepts with no softbuffer equivalent).
