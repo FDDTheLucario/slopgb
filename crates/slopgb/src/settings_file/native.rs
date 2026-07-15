@@ -263,6 +263,19 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
         audio_backend: d
             .get("sound", "audio_backend")
             .map_or(def.audio_backend, AudioBackend::from_key),
+        audio_device: s("sound", "audio_device", &def.audio_device),
+        audio_sample_rate: i(
+            "sound",
+            "audio_sample_rate",
+            i64::from(def.audio_sample_rate),
+        )
+        .max(0) as u32,
+        audio_latency: d
+            .get("sound", "audio_latency")
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(def.audio_latency),
+        audio_8bit: b("sound", "audio_8bit", def.audio_8bit),
+        audio_hq: b("sound", "audio_hq", def.audio_hq),
         lowercase_disasm: b("debug", "lowercase_disasm", def.lowercase_disasm),
         lowercase_hex: b("debug", "lowercase_hex", def.lowercase_hex),
         show_clocks: b("debug", "show_clocks", def.show_clocks),
@@ -349,6 +362,11 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         volume: _,
         mono: _,
         audio_backend: _,
+        audio_device: _,
+        audio_sample_rate: _,
+        audio_latency: _,
+        audio_8bit: _,
+        audio_hq: _,
         lowercase_disasm: _,
         lowercase_hex: _,
         show_clocks: _,
@@ -411,6 +429,19 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
     d.set("sound", "volume", &settings.volume.to_string());
     d.set("sound", "mono", fb(settings.mono));
     d.set("sound", "audio_backend", settings.audio_backend.to_key());
+    d.set("sound", "audio_device", &settings.audio_device);
+    d.set(
+        "sound",
+        "audio_sample_rate",
+        &settings.audio_sample_rate.to_string(),
+    );
+    d.set(
+        "sound",
+        "audio_latency",
+        &settings.audio_latency.to_string(),
+    );
+    d.set("sound", "audio_8bit", fb(settings.audio_8bit));
+    d.set("sound", "audio_hq", fb(settings.audio_hq));
     d.set("graphics", "stretch", fb(settings.stretch));
     d.set("graphics", "frame_blend", fb(settings.frame_blend));
     d.set("graphics", "dmg_gbc_lcd", fb(settings.dmg_gbc_lcd));

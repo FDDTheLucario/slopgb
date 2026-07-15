@@ -118,6 +118,16 @@ impl App {
                     OptionsOutcome::PickBootrom(slot) => {
                         self.open_path_prompt("Bootrom path", crate::PathPurpose::Bootrom(slot))
                     }
+                    // Advance the working output device to the next enumerated one.
+                    OptionsOutcome::CycleSoundcard => {
+                        if let Some(o) = &mut self.options {
+                            let devices = crate::audio::AudioOutput::device_names();
+                            o.working.audio_device = crate::audio::cycle_output_device(
+                                &o.working.audio_device,
+                                &devices,
+                            );
+                        }
+                    }
                     // OK/Apply push working live; Cancel/Defaults do not (Defaults
                     // only edits the controls, matching bgb — nothing goes live
                     // until OK/Apply).
@@ -485,6 +495,12 @@ impl App {
         let s = self.settings.clone();
         if let Some(pipe) = &mut self.audio {
             pipe.set_volume(s.volume, s.mono);
+        }
+        // Sound → device/samplerate/latency/8-bit/quality: rebuild the output
+        // stream, but only when one of those actually changed (Apply otherwise
+        // leaves the running stream untouched — no glitch).
+        if self.audio_prefs() != self.audio_prefs_applied || s.audio_hq != self.audio_hq_applied {
+            self.reopen_audio();
         }
         // Sound → SGB audio backend: swap the live SGB machine's coprocessor (a
         // no-op off SGB). Mirror the choice into `sgb_coprocessor` so a later ROM

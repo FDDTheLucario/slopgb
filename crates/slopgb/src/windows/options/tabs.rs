@@ -84,6 +84,17 @@ pub(crate) enum Field {
     Volume,
     /// Sound → the SGB audio-backend dropdown (cycles Built-in ↔ coprocessor).
     AudioBackend,
+    /// Sound → "soundcard" dropdown: cycle the output device (routes a
+    /// [`super::OptionsOutcome::CycleSoundcard`] out — needs the live device list).
+    SoundCard,
+    /// Sound → a samplerate radio: sets the requested rate (0 = Auto).
+    SampleRate(u32),
+    /// Sound → the latency slider (maps the click fraction to 0.0..=1.0).
+    Latency,
+    /// Sound → "8 bits output".
+    EightBit,
+    /// Sound → "High quality sound rendering".
+    AudioHq,
     /// Fast-forward speed slider (maps the click fraction to 1..=`FF_SPEED_MAX`).
     FfSpeed,
     /// Framerate-limit slider (maps the click fraction to the `FRAMERATE_STEPS`).
@@ -263,6 +274,7 @@ pub(crate) fn on_content_click(
     match field {
         Field::ConfigureKeyboard => return Some(super::OptionsOutcome::ConfigureKeyboard),
         Field::PickBootrom(slot) => return Some(super::OptionsOutcome::PickBootrom(slot)),
+        Field::SoundCard => return Some(super::OptionsOutcome::CycleSoundcard),
         _ => {}
     }
     apply(field, s, &ct, px);
@@ -317,6 +329,10 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         Field::Model(m) => s.model = m,
         Field::Volume => s.volume = slider_frac(ct.rect, px),
         Field::AudioBackend => s.audio_backend = s.audio_backend.next(),
+        Field::SampleRate(hz) => s.audio_sample_rate = hz,
+        Field::Latency => s.audio_latency = slider_frac(ct.rect, px),
+        Field::EightBit => s.audio_8bit = !s.audio_8bit,
+        Field::AudioHq => s.audio_hq = !s.audio_hq,
         // 1..=FF_SPEED_MAX mapped from the click fraction along the track.
         Field::FfSpeed => {
             let f = slider_frac(ct.rect, px);
@@ -352,7 +368,7 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
             }
         }
         // Routed out by `on_content_click` before reaching here.
-        Field::ConfigureKeyboard | Field::PickBootrom(_) => {}
+        Field::ConfigureKeyboard | Field::PickBootrom(_) | Field::SoundCard => {}
     }
 }
 
@@ -397,6 +413,11 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
             s.volume = d.volume;
             s.mono = d.mono;
             s.audio_backend = d.audio_backend;
+            s.audio_device = d.audio_device.clone();
+            s.audio_sample_rate = d.audio_sample_rate;
+            s.audio_latency = d.audio_latency;
+            s.audio_8bit = d.audio_8bit;
+            s.audio_hq = d.audio_hq;
         }
         OptionsTab::GbColors => {
             s.select_scheme(d.scheme);

@@ -348,6 +348,16 @@ pub struct Settings {
     /// Drives the same seam as `--sgb-coprocessor`; the CLI flag wins the launch.
     /// Default `Builtin` → byte-identical golden path. A no-op off SGB.
     pub audio_backend: AudioBackend,
+    /// Sound → output device name (empty = the host default).
+    pub audio_device: String,
+    /// Sound → requested output sample rate (0 = the device default / "Auto").
+    pub audio_sample_rate: u32,
+    /// Sound → latency slider, 0.0..=1.0 (mapped to a device buffer size).
+    pub audio_latency: f32,
+    /// Sound → "8 bits output": prefer an 8-bit (`U8`) device format.
+    pub audio_8bit: bool,
+    /// Sound → "High quality sound rendering": use the higher-quality resampler.
+    pub audio_hq: bool,
     /// Debug → lowercase disassembler mnemonics.
     pub lowercase_disasm: bool,
     /// Debug → lowercase hex digits in the disasm/memory panes.
@@ -471,6 +481,11 @@ impl Default for Settings {
             volume: 1.0,
             mono: false,
             audio_backend: AudioBackend::Builtin,
+            audio_device: String::new(),
+            audio_sample_rate: 0,
+            audio_latency: 0.5,
+            audio_8bit: false,
+            audio_hq: true,
             lowercase_disasm: true,
             lowercase_hex: false,
             show_clocks: true,
@@ -685,6 +700,9 @@ pub enum OptionsOutcome {
     /// System → a `...` bootrom-path button: open the shared path modal over the
     /// dialog to edit that slot's path. Neither applies nor closes.
     PickBootrom(BootromSlot),
+    /// Sound → "soundcard": advance `working.audio_device` to the next enumerated
+    /// output device (the live device list lives outside the dialog). Stays open.
+    CycleSoundcard,
 }
 
 /// Which bootrom-path field (bgb's System tab: DMG / GBC / SGB bootrom). The

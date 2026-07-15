@@ -48,10 +48,12 @@ pub(crate) struct AudioPipe {
 }
 
 impl AudioPipe {
-    pub(crate) fn new(out: AudioOutput) -> Self {
+    /// Build the pipe, choosing resampler quality (Sound → "High quality sound
+    /// rendering"): `hq` = linear interpolation, false = zero-order hold.
+    pub(crate) fn new_with_quality(out: AudioOutput, hq: bool) -> Self {
         let rate = out.sample_rate();
         Self {
-            resampler: Resampler::new(CORE_SAMPLE_RATE, rate),
+            resampler: Resampler::new_quality(CORE_SAMPLE_RATE, rate, hq),
             target_fill: usize::try_from(u64::from(rate) * AUDIO_TARGET_MS / 1000)
                 .unwrap_or(usize::MAX),
             out,

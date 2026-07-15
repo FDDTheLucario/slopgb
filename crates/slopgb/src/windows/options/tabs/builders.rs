@@ -376,11 +376,28 @@ pub(super) fn exceptions(s: &Settings, content: Rect) -> Vec<Ctrl> {
 pub(super) fn sound(s: &Settings, content: Rect) -> Vec<Ctrl> {
     let mut l = Lay::new(content);
     let mut v = Vec::new();
-    draw_label_combo(&mut v, &mut l, "soundcard:", "auto");
+    // "soundcard": a live dropdown cycling the output device (empty = default).
+    let sc_label = "soundcard:";
+    let (scx, scy) = l.at();
+    v.push(text_label((scx, scy), sc_label.to_owned()));
+    let sc_val = if s.audio_device.is_empty() {
+        "default".to_owned()
+    } else {
+        s.audio_device.clone()
+    };
+    v.push(Ctrl::live(
+        Rect::new(scx + measure(sc_label) + 6, scy, 130, line_height() + 2),
+        Kind::Dropdown {
+            value: sc_val,
+            w: 130,
+        },
+        Field::SoundCard,
+    ));
     l.row();
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
         rc(l.at(), "8 bits output"),
-        chk("8 bits output", false),
+        chk("8 bits output", s.audio_8bit),
+        Field::EightBit,
     ));
     v.push(Ctrl::live(
         rc(l.col(140).at(), "mono output"),
@@ -388,24 +405,31 @@ pub(super) fn sound(s: &Settings, content: Rect) -> Vec<Ctrl> {
         Field::Mono,
     ));
     l.row();
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
         rc(l.at(), "High quality sound rendering"),
-        chk("High quality sound rendering", true),
+        chk("High quality sound rendering", s.audio_hq),
+        Field::AudioHq,
     ));
     l.row();
     l.row();
-    // Samplerate radios (inert; device-driven in slopgb).
-    let rates = ["Auto", "24000", "48000", "96000"];
+    // Samplerate radios: each sets the requested rate (Auto = 0 = device default).
+    let rates: [(&str, u32); 4] = [
+        ("Auto", 0),
+        ("24000", 24000),
+        ("48000", 48000),
+        ("96000", 96000),
+    ];
     let mut cx = 0;
-    for r in rates {
-        v.push(Ctrl::inert(
-            rad(l.col(cx).at(), r),
+    for (label, hz) in rates {
+        v.push(Ctrl::live(
+            rad(l.col(cx).at(), label),
             Kind::Radio {
-                selected: r == "Auto",
-                label: r,
+                selected: s.audio_sample_rate == hz,
+                label,
             },
+            Field::SampleRate(hz),
         ));
-        cx += measure(r) + 28;
+        cx += measure(label) + 28;
     }
     l.row();
     l.row();
@@ -431,9 +455,13 @@ pub(super) fn sound(s: &Settings, content: Rect) -> Vec<Ctrl> {
             text: "Latency:".into(),
         },
     ));
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
         Rect::new(l.x0 + 60, l.y, 180, line_height()),
-        Kind::Slider { frac: 0.5, w: 180 },
+        Kind::Slider {
+            frac: s.audio_latency,
+            w: 180,
+        },
+        Field::Latency,
     ));
     l.row();
     l.row();

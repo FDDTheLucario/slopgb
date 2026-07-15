@@ -337,6 +337,11 @@ struct App {
     window: Option<Rc<Window>>,
     video: Option<Video>,
     audio: Option<AudioPipe>,
+    /// The Sound-tab prefs the open audio stream was built with, so Apply only
+    /// rebuilds it (a brief glitch) when a device/rate/latency/8-bit/quality
+    /// setting actually changed.
+    audio_prefs_applied: audio::AudioPrefs,
+    audio_hq_applied: bool,
     /// Runtime audio mute (bgb's "Enable sound" toggle). Initialised from the
     /// `--mute` flag; gates audio pacing so the pipe drains to silence without
     /// tearing down the cpal stream. See [`pacing::audio_pacing`].
@@ -538,6 +543,8 @@ impl App {
             window: None,
             video: None,
             audio: None,
+            audio_prefs_applied: audio::AudioPrefs::default(),
+            audio_hq_applied: true,
             muted,
             paused: false,
             turbo: false,
@@ -1016,18 +1023,44 @@ impl App {
     /// (when not launched `--mute`) and when "Enable sound" is toggled on after a
     /// muted start, so the menu toggle always restores audio. A device that won't
     /// open just leaves `audio` `None` — the timer paces, silently.
+    /// The current Sound-tab device preferences (used to open the stream + to
+    /// detect when a re-open is needed on Apply).
+    fn audio_prefs(&self) -> audio::AudioPrefs {
+        audio::AudioPrefs {
+            device: self.settings.audio_device.clone(),
+            sample_rate: self.settings.audio_sample_rate,
+            latency_frames: audio_latency_frames(self.settings.audio_latency),
+            eight_bit: self.settings.audio_8bit,
+        }
+    }
+
     fn try_open_audio(&mut self) {
         if self.audio.is_some() {
             return;
         }
-        match AudioOutput::new() {
+        let prefs = self.audio_prefs();
+        self.audio_prefs_applied = prefs.clone();
+        self.audio_hq_applied = self.settings.audio_hq;
+        match AudioOutput::with_prefs(&prefs) {
             Ok(out) => {
-                let mut pipe = AudioPipe::new(out);
+                let mut pipe = AudioPipe::new_with_quality(out, self.settings.audio_hq);
                 pipe.set_volume(self.settings.volume, self.settings.mono);
                 self.audio = Some(pipe);
             }
             Err(e) => eprintln!("slopgb: audio disabled: {e}"),
         }
+    }
+
+    /// Re-open the audio stream with the current Sound-tab preferences (device /
+    /// samplerate / latency / 8-bit / quality). No-op when audio isn't running
+    /// (e.g. `--mute`), so it never forces the stream open behind the user.
+    pub(crate) fn reopen_audio(&mut self) {
+        if self.audio.is_none() {
+            return;
+        }
+        self.audio = None;
+        self.try_open_audio();
+        self.resync_pacing();
     }
 
     /// The boot ROM spec for a ROM load: the Options bootrom paths (when enabled)
@@ -1118,6 +1151,13 @@ fn window_title(rom_loaded: bool, title: &str, state: &str) -> String {
 /// (spin for lowest input latency). A free function so the choice is testable.
 fn should_poll(turbo: bool, reduce_cpu: bool) -> bool {
     turbo || !reduce_cpu
+}
+
+/// Map the Sound-tab latency slider fraction (0..=1) to a device buffer size in
+/// frames: ~128 (low latency) to ~4096 (high). A free function so the mapping is
+/// unit-testable.
+fn audio_latency_frames(frac: f32) -> u32 {
+    (128.0 + frac.clamp(0.0, 1.0) * (4096.0 - 128.0)) as u32
 }
 
 /// GB CPU duty percent over a sample window: the share of `delta_cycles` the CPU

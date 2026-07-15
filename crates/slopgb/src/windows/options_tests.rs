@@ -325,6 +325,32 @@ fn sound_volume_slider_full_range() {
     );
 }
 
+#[test]
+fn sound_tab_device_rate_latency_and_format_controls_are_live() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Sound;
+    // Samplerate radio: 48000 selects that rate.
+    click_field(&mut st, Field::SampleRate(48000));
+    assert_eq!(st.working.audio_sample_rate, 48000);
+    // 8-bit + HQ checkboxes.
+    assert!(!st.working.audio_8bit);
+    click_field(&mut st, Field::EightBit);
+    assert!(st.working.audio_8bit);
+    assert!(st.working.audio_hq, "HQ on by default");
+    click_field(&mut st, Field::AudioHq);
+    assert!(!st.working.audio_hq);
+    // Latency slider tracks the click x.
+    let r = field_rect(OptionsTab::Sound, &st.working, Field::Latency);
+    st.on_click(r.right() - 1, r.y + r.h / 2, BOUNDS);
+    assert!(st.working.audio_latency > 0.9, "latency slider right edge");
+    // Soundcard dropdown routes the cycle outcome without mutating settings here.
+    let before = st.working.clone();
+    let r = field_rect(OptionsTab::Sound, &st.working, Field::SoundCard);
+    let out = st.on_click(r.x + r.w / 2, r.y + r.h / 2, BOUNDS);
+    assert_eq!(out, Some(OptionsOutcome::CycleSoundcard));
+    assert_eq!(st.working, before, "cycle is applied by the App, not here");
+}
+
 // --- JP5: configure-keyboard routes an outcome -------------------------------
 
 #[test]

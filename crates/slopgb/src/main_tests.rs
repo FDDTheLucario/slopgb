@@ -78,6 +78,16 @@ fn recovery_save_state_restores_a_crashed_session_and_clears_on_clean_quit() {
 }
 
 #[test]
+fn audio_latency_frames_maps_the_slider_monotonically() {
+    assert_eq!(audio_latency_frames(0.0), 128, "low end");
+    assert_eq!(audio_latency_frames(1.0), 4096, "high end");
+    assert!(audio_latency_frames(0.5) > 128 && audio_latency_frames(0.5) < 4096);
+    // Out-of-range fractions clamp, never panic.
+    assert_eq!(audio_latency_frames(-1.0), 128);
+    assert_eq!(audio_latency_frames(2.0), 4096);
+}
+
+#[test]
 fn should_poll_spins_for_turbo_or_reduce_cpu_off() {
     assert!(
         !should_poll(false, true),

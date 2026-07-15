@@ -69,6 +69,15 @@ pub fn from_ini(f: &Ini) -> Settings {
         audio_backend: f
             .get("SlopgbAudioBackend")
             .map_or(d.audio_backend, AudioBackend::from_key),
+        audio_device: text("SlopgbAudioDevice", &d.audio_device),
+        audio_sample_rate: int("SlopgbAudioSampleRate", i64::from(d.audio_sample_rate)).max(0)
+            as u32,
+        audio_latency: f
+            .get("SlopgbAudioLatency")
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(d.audio_latency),
+        audio_8bit: boolean("SlopgbAudio8Bit", d.audio_8bit),
+        audio_hq: boolean("SlopgbAudioHq", d.audio_hq),
         lowercase_disasm: boolean("DebugLowercase", d.lowercase_disasm),
         lowercase_hex: boolean("DebugHexLower", d.lowercase_hex),
         show_clocks: boolean("DebugCountedClocks", d.show_clocks),
@@ -140,6 +149,11 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         volume: _,
         mono: _,
         audio_backend: _,
+        audio_device: _,
+        audio_sample_rate: _,
+        audio_latency: _,
+        audio_8bit: _,
+        audio_hq: _,
         lowercase_disasm: _,
         lowercase_hex: _,
         show_clocks: _,
@@ -265,6 +279,11 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
     f.set("SlopgbBreakEchoRam", ini::fmt_bool(s.break_echo_ram));
     f.set("SlopgbTheme", &s.theme.to_key());
     f.set("SlopgbAudioBackend", s.audio_backend.to_key());
+    f.set("SlopgbAudioDevice", &s.audio_device);
+    f.set("SlopgbAudioSampleRate", &s.audio_sample_rate.to_string());
+    f.set("SlopgbAudioLatency", &s.audio_latency.to_string());
+    f.set("SlopgbAudio8Bit", ini::fmt_bool(s.audio_8bit));
+    f.set("SlopgbAudioHq", ini::fmt_bool(s.audio_hq));
     f.set("SlopgbPluginsDir", &s.plugins.dir);
     f.set(
         "SlopgbPluginsAllowMutation",
