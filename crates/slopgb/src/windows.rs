@@ -413,8 +413,8 @@ pub(crate) fn mem_status_line(gb: &GameBoy, base: u16, sel: Option<u16>, loc: &s
 }
 
 /// Render the standalone memory viewer: the hex dump from the base address
-/// filling the window above a one-line status bar showing the nearest preceding
-/// symbol (`Name+offset`, or `----` with no symbols loaded).
+/// filling the window above a one-line status bar showing the nearest symbol
+/// preceding the cursor (`Name+offset`, or `----` with no symbols loaded).
 fn render_memory_window(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, st: &MemoryView) {
     let lh = line_height();
     let body = Rect::new(area.x, area.y, area.w, (area.h - lh).max(0));
@@ -463,15 +463,15 @@ fn render_memory_window(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme,
     c.hline(area.x, bar_y, area.w, theme.border);
     let loc = match st
         .symbols
-        .nearest_before(shown_bank(gb, st.bank, st.mem_base), st.mem_base)
+        .nearest_before(shown_bank(gb, st.bank, st.cursor), st.cursor)
     {
-        Some((name, base)) => format!("{:04X}  {name}+{:X}", st.mem_base, st.mem_base - base),
-        None => format!("{:04X}  ----", st.mem_base),
+        Some((name, base)) => format!("{:04X}  {name}+{:X}", st.cursor, st.cursor - base),
+        None => format!("{:04X}  ----", st.cursor),
     };
     // Following the live bank (`None`) shows the classic "ROM05:4000 …" status
     // (live label, no marker). When pinned to a bank, name it and append the live
     // bank it has diverged from: "…  [live ROM02]".
-    let status = mem_status_line(gb, st.mem_base, st.bank, &loc);
+    let status = mem_status_line(gb, st.cursor, st.bank, &loc);
     draw_text(c, area.x + 2, bar_y + 1, &status, theme.text);
     if let Some(dlg) = &st.goto {
         crate::ui::dialog::render(c, area, dlg, theme);
