@@ -110,6 +110,7 @@ pub fn from_ini(f: &Ini) -> Settings {
         record_video: boolean("SlopgbRecordVideo", d.record_video),
         record_audio_channels: boolean("SlopgbRecordAudioChannels", d.record_audio_channels),
         rtc_vba_sav: boolean("SlopgbRtcVbaSav", d.rtc_vba_sav),
+        rtc_bgb_legacy: boolean("SlopgbRtcBgbLegacy", d.rtc_bgb_legacy),
         uninited_wram: boolean("UninitedWRAM", d.uninited_wram),
         auto_reset_on_system_change: boolean(
             "SlopgbAutoResetOnSystemChange",
@@ -192,6 +193,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         record_video: _,
         record_audio_channels: _,
         rtc_vba_sav: _,
+        rtc_bgb_legacy: _,
         uninited_wram: _,
         auto_reset_on_system_change: _,
         rewind_enabled: _,
@@ -265,6 +267,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         ini::fmt_bool(s.record_audio_channels),
     );
     f.set("SlopgbRtcVbaSav", ini::fmt_bool(s.rtc_vba_sav));
+    f.set("SlopgbRtcBgbLegacy", ini::fmt_bool(s.rtc_bgb_legacy));
     f.set("UninitedWRAM", ini::fmt_bool(s.uninited_wram));
     f.set(
         "SlopgbAutoResetOnSystemChange",

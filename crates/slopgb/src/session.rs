@@ -36,6 +36,9 @@ pub(crate) struct Session {
     /// other emulators read the clock. Off = slopgb's own block. Set by the
     /// frontend from settings; only affects RTC carts.
     rtc_vba_export: bool,
+    /// Options → System → "Save BGB legacy RTC files": also write the RTC to a
+    /// separate `<rom>.rtc` sidecar. Set by the frontend from settings.
+    rtc_bgb_legacy: bool,
     /// Emulated-cycle deadline for the next autosave.
     next_autosave: u64,
     /// In-memory quick-save snapshot (bgb State → Quick Save / Quick Load): a
@@ -96,6 +99,7 @@ impl Session {
             sav_path: PathBuf::new(),
             last_saved: None,
             rtc_vba_export: false,
+            rtc_bgb_legacy: false,
             next_autosave: AUTOSAVE_CYCLES,
             quick_state: None,
             rewind: std::collections::VecDeque::new(),
@@ -160,6 +164,7 @@ impl Session {
             sav_path,
             last_saved,
             rtc_vba_export: false,
+            rtc_bgb_legacy: false,
             next_autosave: AUTOSAVE_CYCLES,
             quick_state: None,
             rewind: std::collections::VecDeque::new(),
@@ -382,6 +387,35 @@ impl Session {
         self.rtc_vba_export = on;
     }
 
+    /// Options → System → "Save BGB legacy RTC files": also write a `<rom>.rtc`
+    /// sidecar. Only affects the next write of an RTC cart.
+    pub(crate) fn set_rtc_bgb_legacy(&mut self, on: bool) {
+        self.rtc_bgb_legacy = on;
+    }
+
+    /// Write the `<rom>.rtc` sidecar (the shared 48-byte RTC footer with a fresh
+    /// wall-clock stamp) when the legacy-RTC option is on and the cart has an
+    /// RTC. Called after a `.sav` write so it tracks the same dirty edge.
+    fn write_rtc_sidecar(&self) {
+        if !self.rtc_bgb_legacy {
+            return;
+        }
+        let Some((live, latched)) = self.gb.rtc_state() else {
+            return;
+        };
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let footer = crate::rtc_export::vba_footer(live, latched, secs);
+        let rtc_path = self.sav_path.with_extension("rtc");
+        if let Err(e) = write_atomic(&rtc_path, &footer) {
+            eprintln!(
+                "slopgb: cannot write RTC file '{}': {e}",
+                rtc_path.display()
+            );
+        }
+    }
+
     /// The battery image to persist. With the VBA-RTC toggle on and an RTC cart,
     /// this is the raw SRAM plus a wall-clock-stamped VBA footer (readable by
     /// VBA / mGBA / SameBoy); otherwise slopgb's own `save_data` block.
@@ -412,7 +446,12 @@ impl Session {
         }
         let image = self.save_image().unwrap_or_else(|| canonical.clone());
         match write_atomic(&self.sav_path, &image) {
-            Ok(()) => self.last_saved = Some(canonical),
+            Ok(()) => {
+                self.last_saved = Some(canonical);
+                // Sidecar `<rom>.rtc` shares the same dirty edge (no-op unless
+                // the legacy-RTC option is on and the cart has an RTC).
+                self.write_rtc_sidecar();
+            }
             Err(e) => eprintln!(
                 "slopgb: cannot write save file '{}': {e}",
                 self.sav_path.display()

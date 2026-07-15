@@ -121,6 +121,8 @@ pub(crate) enum Field {
     RecordAudioChannels,
     /// System → "Save RTC in SAV file (VBA compatible)".
     RtcVbaSav,
+    /// System → "Save BGB legacy RTC files" (a `<rom>.rtc` sidecar).
+    RtcBgbLegacy,
     /// Exceptions → "break on ld b,b (40h)".
     BreakLdBB,
     /// Exceptions → "break on invalid opcode".
@@ -376,6 +378,7 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         Field::RecordVideo => s.record_video = !s.record_video,
         Field::RecordAudioChannels => s.record_audio_channels = !s.record_audio_channels,
         Field::RtcVbaSav => s.rtc_vba_sav = !s.rtc_vba_sav,
+        Field::RtcBgbLegacy => s.rtc_bgb_legacy = !s.rtc_bgb_legacy,
         Field::BreakLdBB => s.break_ld_b_b = !s.break_ld_b_b,
         Field::BreakInvalidOp => s.break_invalid_op = !s.break_invalid_op,
         Field::BreakEchoRam => s.break_echo_ram = !s.break_echo_ram,
@@ -419,6 +422,7 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
             s.auto_reset_on_system_change = d.auto_reset_on_system_change;
             s.rewind_enabled = d.rewind_enabled;
             s.rtc_vba_sav = d.rtc_vba_sav;
+            s.rtc_bgb_legacy = d.rtc_bgb_legacy;
         }
         OptionsTab::Debug => {
             s.lowercase_disasm = d.lowercase_disasm;

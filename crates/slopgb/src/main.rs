@@ -1139,6 +1139,7 @@ impl App {
                 new.set_sgb_coprocessor_dir(resolve_sgb_coprocessor_dir(&self.opts));
                 new.set_sgb_coprocessor(self.sgb_coprocessor);
                 new.set_rtc_vba_export(self.settings.rtc_vba_sav);
+                new.set_rtc_bgb_legacy(self.settings.rtc_bgb_legacy);
                 self.session = new;
                 // A loaded ROM starts emulation: leave the no-ROM blank state and
                 // (re)apply the DMG palette to the fresh machine (GameBoy::new

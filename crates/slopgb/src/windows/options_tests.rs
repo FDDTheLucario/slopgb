@@ -981,6 +981,15 @@ fn system_rtc_vba_sav_checkbox_toggles() {
 }
 
 #[test]
+fn system_rtc_bgb_legacy_checkbox_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::System;
+    assert!(!st.working.rtc_bgb_legacy);
+    click_field(&mut st, Field::RtcBgbLegacy);
+    assert!(st.working.rtc_bgb_legacy);
+}
+
+#[test]
 fn joypad_tab_transcribes_the_capture_controls() {
     // JP8: the inert chrome matching options-joypad.png is present (dropdowns,
     // the Mappable-button-records groupbox + its checks, the joystick-ID field).

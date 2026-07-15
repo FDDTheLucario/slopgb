@@ -119,10 +119,12 @@ impl ApplicationHandler for App {
                 self.arm_recovery(&rom);
             }
         }
-        // System → "Save RTC in SAV file (VBA compatible)": apply the persisted
-        // choice to the session built for a CLI-launched ROM (drag-drop loads
-        // set it in `load_dropped`).
+        // System → RTC save options: apply the persisted choices to the session
+        // built for a CLI-launched ROM (drag-drop loads set them in
+        // `load_dropped`).
         self.session.set_rtc_vba_export(self.settings.rtc_vba_sav);
+        self.session
+            .set_rtc_bgb_legacy(self.settings.rtc_bgb_legacy);
         // Debug → "Start in debugger": open the debugger window at launch (unless
         // SLOPGB_OPEN_TOOLS already did, to avoid toggling it back closed).
         if self.settings.start_in_debugger && !self.tools.is_open(ui::ToolWindow::Debugger) {

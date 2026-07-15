@@ -439,6 +439,10 @@ pub struct Settings {
     /// RTC as VBA's `.sav` footer (portable to VBA/mGBA/SameBoy) instead of
     /// slopgb's own block. Off = slopgb's block (still self-round-tripping).
     pub rtc_vba_sav: bool,
+    /// System → "Save BGB legacy RTC files": also write the RTC to a separate
+    /// `<rom>.rtc` sidecar (the de-facto shared 48-byte footer) for old
+    /// emulators that read a standalone RTC file. Write-only interop.
+    pub rtc_bgb_legacy: bool,
     /// bgb's `UninitedWRAM` (ini-only, no dialog control in bgb 1.6.4): power on
     /// with uninitialised (seeded-random) RAM instead of the deterministic
     /// default. `false` (bgb default) = the stable 0xFF cart SRAM / zeroed
@@ -542,6 +546,7 @@ impl Default for Settings {
             record_video: false,
             record_audio_channels: false,
             rtc_vba_sav: false,
+            rtc_bgb_legacy: false,
             uninited_wram: false,
             break_ld_b_b: false,
             // bgb ships with "break on invalid opcode" checked.

@@ -180,19 +180,25 @@ pub(super) fn system(s: &Settings, content: Rect) -> Vec<Ctrl> {
         Field::RewindEnabled,
     ));
     l.row();
-    // Inert: no distinct core models to detect into, and waitloop-skip would
-    // perturb emulated timing (golden-safe-forbidden). "Save BGB legacy RTC
-    // files" is inert too — its sidecar `.rtc` byte layout is unverified.
+    // Inert: no distinct core models to detect into, and a waitloop skip would
+    // perturb emulated timing (golden-safe-forbidden).
     for label in [
         "detect GB pocket / SGB2",
         "detect GBA",
         "GB Player",
         "Waitloop detection (fast)",
-        "Save BGB legacy RTC files",
     ] {
         v.push(Ctrl::inert(rc(l.at(), label), chk(label, false)));
         l.row();
     }
+    // Live: write the MBC3 RTC to a separate `<rom>.rtc` sidecar (legacy bgb).
+    let bgb_rtc = "Save BGB legacy RTC files";
+    v.push(Ctrl::live(
+        rc(l.at(), bgb_rtc),
+        chk(bgb_rtc, s.rtc_bgb_legacy),
+        Field::RtcBgbLegacy,
+    ));
+    l.row();
     // Live: write the MBC3 RTC as VBA's portable `.sav` footer.
     let vba = "Save RTC in SAV file (VBA compatible)";
     v.push(Ctrl::live(
