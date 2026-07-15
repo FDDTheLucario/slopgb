@@ -27,7 +27,7 @@ where bgb itself greys them).
 | GB Colors | (above) plus **DMG on GBC LCD colors** + **contrast** wheel — `postfx` per-pixel present filters (frontend-only, golden-safe) |
 | Debug | lowercase-hex + show-clocks (→ `DisasmFmt` via `tools.set_disasm_fmt`); "pressing Esc shows debugger" (`Settings.esc_shows_debugger`, default on → `handle_key` opens the debugger on Esc instead of quitting); RGBDS syntax; "memory viewer in own window"; **Registers can be edited** (→ `DebuggerState.registers_editable` via `tools.set_registers_editable`; off greys the register-edit menu); **Start in debugger** (opens the debugger window at launch); **Live update memory viewer** (`tools.request_redraw_live` skips the standalone memory window's per-frame redraw when off — it then repaints only on interaction, bgb's non-continuous refresh); **GB CPU usage meter** (the emulated CPU's non-halted duty %, from the golden-safe `GameBoy::halt_cycles` counter, shown in the window title alongside FPS) |
 | Misc | fast-forward-speed + framerate-limit sliders (→ `app_pacing` `turbo_max_frames`/`frame_interval`); show-framerate (title); freeze-recent-ROMs (`push_recent` gate); pause-if-losing-focus (auto-pause on focus loss, auto-resume on refocus unless manually paused via `App.paused_by_focus`); **Show errors on ROM load** (a failed load pops an info box, default on); **Load ROM dialog on startup** (opens the picker at launch when no CLI ROM) |
-| Joypad | **Screenshot button** saves↔copies (copies puts the frame on the clipboard as PNG via `clipboard::copy_image_png`); **Screenshots** format bmp↔png (`ScreenshotFormat` → `screenshot::to_bmp` / `mcp::png::encode`) |
+| Joypad | **Screenshot button** saves↔copies (copies puts the frame on the clipboard as PNG via `clipboard::copy_image_png`); **Screenshots** format bmp↔png (`ScreenshotFormat` → `screenshot::to_bmp` / `mcp::png::encode`); **Audio** records a WAV, **Video** records an uncompressed AVI (`avi::AviWriter` streams the 160×144 LCD one frame per rendered batch, patching sizes + `idx1` on finalise; toggling off / quitting finalises) |
 | Theme | Light/Dark/Classic radios → `Settings.theme` (`ThemeChoice`; the render path recolors from it each redraw — see [theming.md](theming.md)). Custom themes stay config-only. |
 | Plugins | Per-plugin **enable** checkbox (`Field::PluginEnable(i)` → `PluginConfig.entries[i].enabled` → `PluginHost::set_enabled`, skipping a disabled plugin's `on_frame`), the read-only plugins-dir display, and an **allow-mutation** toggle (`Field::PluginAllowMutation`, default off). No bgb equivalent — see [plugin-api.md](plugin-api.md#managing-plugins-from-the-ui). |
 
@@ -127,14 +127,13 @@ system-change, the three remaining Exceptions breaks (OAM-DMA-bad-access,
 lowercase-disassembler, the whole Sound row (soundcard / samplerate / latency /
 8-bit / high-quality), Graphics doubler (scale2x) + disable-SGB-colors (golden-
 safe PPU `sgb_mono`), System Rewind (Backspace, a savestate ring), Joypad
-rapid-speed (`[`/`]` auto-fire) + Audio WAV recording. See the Live table.
+rapid-speed (`[`/`]` auto-fire) + Audio WAV recording + Video AVI recording.
+See the Live table.
 
 ## Inert
 
 Still inert — each needs a prerequisite beyond a normal wiring:
 
-- **Video (AVI) recording** — std-only uncompressed-AVI writer + streaming index;
-  buildable, not yet written.
 - **Audio-channels recording** — needs per-channel core audio taps.
 - **0-31 numbers** — the exact bgb palette-number display is uncaptured; run the
   wine rig first (never-invent-bgb-UI rule).

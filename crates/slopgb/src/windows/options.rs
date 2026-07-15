@@ -429,6 +429,9 @@ pub struct Settings {
     /// Joypad → "Audio" (Mappable button records): record the game audio to a
     /// WAV while set. Toggling it off on Apply finalises the file.
     pub record_audio: bool,
+    /// Joypad → "Video" (Mappable button records): record the 160×144 LCD to an
+    /// uncompressed AVI while set. Toggling it off on Apply finalises the file.
+    pub record_video: bool,
     /// bgb's `UninitedWRAM` (ini-only, no dialog control in bgb 1.6.4): power on
     /// with uninitialised (seeded-random) RAM instead of the deterministic
     /// default. `false` (bgb default) = the stable 0xFF cart SRAM / zeroed
@@ -529,6 +532,7 @@ impl Default for Settings {
             allow_opposing: false,
             rapid_speed: 2,
             record_audio: false,
+            record_video: false,
             uninited_wram: false,
             break_ld_b_b: false,
             // bgb ships with "break on invalid opcode" checked.

@@ -440,6 +440,57 @@ impl App {
         }
     }
 
+    /// Joypad → "Video": start/stop the AVI video recorder to match the setting.
+    /// Toggling it off (or quitting mid-record) finalises the file.
+    pub(crate) fn sync_video_recording(&mut self) {
+        let want = self.settings.record_video;
+        if want && self.video_rec.is_none() {
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis());
+            let path = format!("slopgb-{stamp}.avi");
+            let fps = slopgb_core::CLOCK_HZ as f64 / slopgb_core::CYCLES_PER_FRAME as f64;
+            match crate::avi::AviWriter::create(
+                Path::new(&path),
+                SCREEN_W as u32,
+                SCREEN_H as u32,
+                fps,
+            ) {
+                Ok(w) => {
+                    self.video_rec = Some(w);
+                    eprintln!("recording video to {path}");
+                }
+                Err(e) => eprintln!("error: could not start video recording: {e}"),
+            }
+        } else if !want {
+            self.finish_video_recording();
+        }
+    }
+
+    /// Append the current 160×144 LCD to the AVI (one frame per rendered batch).
+    /// No-op with no recorder or no ROM (a frozen machine has no fresh frame).
+    pub(crate) fn write_video_frame(&mut self) {
+        if !self.rom_loaded {
+            return;
+        }
+        let Some(rec) = self.video_rec.as_mut() else {
+            return;
+        };
+        if let Err(e) = rec.write_frame(self.session.gb.frame()) {
+            eprintln!("slopgb: video frame write failed: {e}");
+        }
+    }
+
+    /// Finalise the AVI (patch sizes + index) if one is recording.
+    pub(crate) fn finish_video_recording(&mut self) {
+        if let Some(mut rec) = self.video_rec.take() {
+            match rec.finish() {
+                Ok(()) => eprintln!("saved video recording"),
+                Err(e) => eprintln!("error: could not finalise video recording: {e}"),
+            }
+        }
+    }
+
     /// Misc → "Recovery save state": rewrite `<rom>.recovery` on the interval so
     /// a crash loses at most `RECOVERY_INTERVAL` of progress. No-op when the
     /// option is off, no ROM is loaded, or the interval hasn't elapsed.

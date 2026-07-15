@@ -954,6 +954,15 @@ fn joypad_audio_record_checkbox_toggles() {
 }
 
 #[test]
+fn joypad_video_record_checkbox_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Joypad;
+    assert!(!st.working.record_video);
+    click_field(&mut st, Field::RecordVideo);
+    assert!(st.working.record_video);
+}
+
+#[test]
 fn joypad_tab_transcribes_the_capture_controls() {
     // JP8: the inert chrome matching options-joypad.png is present (dropdowns,
     // the Mappable-button-records groupbox + its checks, the joystick-ID field).
@@ -992,7 +1001,7 @@ fn joypad_tab_transcribes_the_capture_controls() {
             if *label == "Mappable button records")),
         "Mappable button records groupbox"
     );
-    // "Audio" is live (records a WAV); "Video" / "Audio channels" stay inert.
+    // "Audio" records a WAV, "Video" records an AVI; "Audio channels" stays inert.
     assert!(
         ctrls
             .iter()
@@ -1000,15 +1009,23 @@ fn joypad_tab_transcribes_the_capture_controls() {
                 && c.field == Some(Field::RecordAudio)),
         "Audio record checkbox is live"
     );
-    for label in ["Video", "Audio channels"] {
-        assert!(
-            ctrls.iter().any(
-                |c| matches!(&c.kind, Kind::Check { label: l, .. } if *l == label)
-                    && c.field.is_none()
-            ),
-            "inert check {label}"
-        );
-    }
+    assert!(
+        ctrls
+            .iter()
+            .any(|c| matches!(&c.kind, Kind::Check { label: "Video", .. })
+                && c.field == Some(Field::RecordVideo)),
+        "Video record checkbox is live"
+    );
+    assert!(
+        ctrls.iter().any(|c| matches!(
+            &c.kind,
+            Kind::Check {
+                label: "Audio channels",
+                ..
+            }
+        ) && c.field.is_none()),
+        "inert check Audio channels"
+    );
     assert!(
         ctrls
             .iter()

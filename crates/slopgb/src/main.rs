@@ -20,6 +20,7 @@ mod app_pacing;
 mod app_path;
 mod app_run;
 mod audio;
+mod avi;
 mod cdl;
 mod cheat;
 mod cheat_ui;
@@ -346,6 +347,10 @@ struct App {
     /// setting actually changed.
     audio_prefs_applied: audio::AudioPrefs,
     audio_hq_applied: bool,
+    /// Joypad → "Video": the active AVI recorder while recording, else `None`.
+    /// Started/finalised by `sync_video_recording`; fed one LCD frame per
+    /// rendered batch in `about_to_wait`.
+    video_rec: Option<avi::AviWriter>,
     /// Runtime audio mute (bgb's "Enable sound" toggle). Initialised from the
     /// `--mute` flag; gates audio pacing so the pipe drains to silence without
     /// tearing down the cpal stream. See [`pacing::audio_pacing`].
@@ -560,6 +565,7 @@ impl App {
             audio: None,
             audio_prefs_applied: audio::AudioPrefs::default(),
             audio_hq_applied: true,
+            video_rec: None,
             muted,
             paused: false,
             turbo: false,

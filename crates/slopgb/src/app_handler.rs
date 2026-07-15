@@ -432,6 +432,8 @@ impl ApplicationHandler for App {
             if self.settings.rewind_enabled {
                 self.session.capture_rewind();
             }
+            // Joypad → "Video": append this frame to the AVI (no-op when off).
+            self.write_video_frame();
             // Drive read-only plugins once per rendered frame-batch. A no-op with
             // no plugins loaded (default), so the golden path is untouched.
             self.plugins.pump(&self.session.gb);
@@ -465,6 +467,8 @@ impl ApplicationHandler for App {
         self.session.flush_save();
         // Clean quit: drop the recovery state so the next load starts fresh.
         self.clear_recovery_state();
+        // Finalise an in-progress video recording so it isn't lost.
+        self.finish_video_recording();
         // Finalise an in-progress audio recording so it isn't lost.
         if self
             .audio

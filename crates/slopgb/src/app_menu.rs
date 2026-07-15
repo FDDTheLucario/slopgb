@@ -504,6 +504,8 @@ impl App {
         }
         // Joypad → "Audio": start/stop the audio recorder to match the setting.
         self.sync_audio_recording();
+        // Joypad → "Video": start/stop the AVI video recorder to match the setting.
+        self.sync_video_recording();
         // Sound → SGB audio backend: swap the live SGB machine's coprocessor (a
         // no-op off SGB). Mirror the choice into `sgb_coprocessor` so a later ROM
         // (re)load re-injects the same backend. Built-in = byte-identical golden.
