@@ -53,6 +53,34 @@ impl App {
         self.input_ops.push((button, pressed));
     }
 
+    /// Rapid-fire (Joypad "Rapid speed"): while `[`/`]` is held, toggle A/B every
+    /// `rapid_speed` frames; release cleanly when the key is let go. Queued into
+    /// the same deferred-input path as a real press. Called once per emulated
+    /// frame batch, before `apply_pending_input`.
+    pub(crate) fn apply_autofire(&mut self) {
+        self.rapid_counter = self.rapid_counter.wrapping_add(1);
+        let period = self.settings.rapid_speed.max(1);
+        let on = (self.rapid_counter / period) % 2 == 0;
+        if self.rapid_a {
+            if on != self.rapid_a_on {
+                self.queue_input(Button::A, on);
+                self.rapid_a_on = on;
+            }
+        } else if self.rapid_a_on {
+            self.queue_input(Button::A, false);
+            self.rapid_a_on = false;
+        }
+        if self.rapid_b {
+            if on != self.rapid_b_on {
+                self.queue_input(Button::B, on);
+                self.rapid_b_on = on;
+            }
+        } else if self.rapid_b_on {
+            self.queue_input(Button::B, false);
+            self.rapid_b_on = false;
+        }
+    }
+
     /// Apply any deferred joypad ops at their captured sub-frame offset, just
     /// before the frame pacers run. A no-op when nothing is queued.
     pub(crate) fn apply_pending_input(&mut self) {

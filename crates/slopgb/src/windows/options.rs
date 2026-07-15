@@ -423,6 +423,9 @@ pub struct Settings {
     /// Joypad → "allow pressing L+R or U+D". `false` (bgb default) filters
     /// opposing directions so the joypad never reports both at once.
     pub allow_opposing: bool,
+    /// Joypad → "Rapid speed": the auto-fire toggle period in frames for the
+    /// rapid-fire keys (`[` = rapid A, `]` = rapid B). 1..=4; bgb's "2 2".
+    pub rapid_speed: u32,
     /// bgb's `UninitedWRAM` (ini-only, no dialog control in bgb 1.6.4): power on
     /// with uninitialised (seeded-random) RAM instead of the deterministic
     /// default. `false` (bgb default) = the stable 0xFF cart SRAM / zeroed
@@ -521,6 +524,7 @@ impl Default for Settings {
             scheme: 0,
             dmg_palette: SCHEMES[0].colors,
             allow_opposing: false,
+            rapid_speed: 2,
             uninited_wram: false,
             break_ld_b_b: false,
             // bgb ships with "break on invalid opcode" checked.

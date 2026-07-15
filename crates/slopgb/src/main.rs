@@ -354,6 +354,13 @@ struct App {
     /// Backspace held with rewind enabled: step backward through the save-state
     /// ring instead of advancing (see `about_to_wait`).
     rewinding: bool,
+    /// Rapid-fire held state (`[`/`]`) + the last auto-fired level per button,
+    /// and the frame counter driving the "Rapid speed" toggle cadence.
+    rapid_a: bool,
+    rapid_b: bool,
+    rapid_a_on: bool,
+    rapid_b_on: bool,
+    rapid_counter: u32,
     /// Per-key hold state, so two keys mapped to one button release cleanly.
     buttons: ButtonTracker,
     /// Rebindable keyboard → Game Boy button map (Joypad "configure keyboard").
@@ -556,6 +563,11 @@ impl App {
             paused: false,
             turbo: false,
             rewinding: false,
+            rapid_a: false,
+            rapid_b: false,
+            rapid_a_on: false,
+            rapid_b_on: false,
+            rapid_counter: 0,
             buttons: ButtonTracker::default(),
             bindings: keymap::KeyBindings::default(),
             input_ops: Vec::new(),
@@ -986,6 +998,9 @@ impl App {
                     self.resync_pacing();
                 }
             }
+            // Rapid-fire A / B while held (Joypad "Rapid speed" cadence).
+            Action::RapidA => self.rapid_a = pressed,
+            Action::RapidB => self.rapid_b = pressed,
             // Every other action fires on press only; the debugger menu items
             // reuse this same dispatch via `run_action`, so a hotkey and its
             // menu entry can never diverge.

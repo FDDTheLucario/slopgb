@@ -400,6 +400,9 @@ impl ApplicationHandler for App {
             ));
             return;
         }
+        // Rapid-fire (Joypad "Rapid speed") queues its A/B toggles into the same
+        // deferred-input path, so drive it just before applying that input.
+        self.apply_autofire();
         // Apply deferred joypad input at its sub-frame offset before emulating,
         // so the joypad interrupt lands on a realistic, varied LCD line.
         self.apply_pending_input();

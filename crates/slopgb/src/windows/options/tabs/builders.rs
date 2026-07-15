@@ -635,7 +635,18 @@ pub(super) fn joypad(s: &Settings, content: Rect) -> Vec<Ctrl> {
         Field::ScreenshotFormat,
     ));
     l.row();
-    draw_label_combo(&mut v, &mut l, "Rapid speed:", "2 2");
+    // "Rapid speed" is live: a dropdown cycling the auto-fire period ("N N").
+    let rs_label = "Rapid speed:";
+    let (rsx, rsy) = l.at();
+    v.push(text_label((rsx, rsy), rs_label.to_owned()));
+    v.push(Ctrl::live(
+        Rect::new(rsx + measure(rs_label) + 6, rsy, 70, line_height() + 2),
+        Kind::Dropdown {
+            value: format!("{n} {n}", n = s.rapid_speed),
+            w: 70,
+        },
+        Field::RapidSpeed,
+    ));
     l.row();
 
     // Mappable button records groupbox (Audio / Video / Audio channels).

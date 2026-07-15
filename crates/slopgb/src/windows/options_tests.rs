@@ -933,6 +933,18 @@ fn joypad_tab_live_controls_are_the_functional_ones() {
 }
 
 #[test]
+fn joypad_rapid_speed_dropdown_cycles_1_to_4() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Joypad;
+    assert_eq!(st.working.rapid_speed, 2, "default 2");
+    click_field(&mut st, Field::RapidSpeed); // 2 -> 3
+    click_field(&mut st, Field::RapidSpeed); // 3 -> 4
+    assert_eq!(st.working.rapid_speed, 4);
+    click_field(&mut st, Field::RapidSpeed); // 4 wraps -> 1
+    assert_eq!(st.working.rapid_speed, 1);
+}
+
+#[test]
 fn joypad_tab_transcribes_the_capture_controls() {
     // JP8: the inert chrome matching options-joypad.png is present (dropdowns,
     // the Mappable-button-records groupbox + its checks, the joystick-ID field).
@@ -940,12 +952,14 @@ fn joypad_tab_transcribes_the_capture_controls() {
     let s = Settings::default();
     let content = OptionsState::content_rect(dialog());
     let ctrls = controls(OptionsTab::Joypad, &s, content);
-    let has_dropdown = |val: &str| {
-        ctrls.iter().any(|c| {
-            matches!(&c.kind, Kind::Dropdown { value, .. } if value == val) && c.field.is_none()
-        })
-    };
-    assert!(has_dropdown("2 2"), "Rapid speed dropdown");
+    // "Rapid speed" is now a live dropdown cycling the auto-fire period.
+    assert!(
+        ctrls.iter().any(
+            |c| matches!(&c.kind, Kind::Dropdown { value, .. } if value == "2 2")
+                && c.field == Some(Field::RapidSpeed)
+        ),
+        "Rapid speed dropdown is live"
+    );
     // "Screenshot button" is now a live dropdown (saves ↔ copies).
     assert!(
         ctrls.iter().any(

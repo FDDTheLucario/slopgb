@@ -29,6 +29,7 @@ fn settings_and_recent_round_trip() {
         tile_hex_8bit: true,
         ff_speed: 6,
         break_ld_b_b: true,
+        rapid_speed: 3,
         break_oam_dma_bad: true,
         break_incdec_fexx: true,
         break_sgb_transfer: true,

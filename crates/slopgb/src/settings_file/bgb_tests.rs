@@ -33,6 +33,7 @@ fn settings_round_trip_through_bgb_ini() {
         bootrom_dmg: "dmg.bin".to_string(),
         esc_shows_debugger: false,
         allow_opposing: true,
+        rapid_speed: 3,
         uninited_wram: true, // bgb's UninitedWRAM key
         frame_blend: true,
         doubler: true,
