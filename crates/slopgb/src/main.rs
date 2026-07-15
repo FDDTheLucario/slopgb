@@ -357,6 +357,12 @@ struct App {
     fps_frames: u32,
     fps_since: Instant,
     fps: f64,
+    /// GB-CPU-usage meter (Debug → "GB CPU usage meter"): the non-halted duty %,
+    /// recomputed each FPS window from the `cycles`/`halt_cycles` deltas below.
+    cpu_usage: f64,
+    /// Machine `cycles` / `halt_cycles` at the last FPS-window sample.
+    cpu_cycles_prev: u64,
+    cpu_halt_prev: u64,
     /// Open bgb-style debug tool windows (F2/F3/F4). The game window is handled
     /// directly; these are routed by [`toolwin::ToolWindows::owns`].
     tools: toolwin::ToolWindows,
@@ -534,6 +540,9 @@ impl App {
             fps_frames: 0,
             fps_since: Instant::now(),
             fps: 0.0,
+            cpu_usage: 0.0,
+            cpu_cycles_prev: 0,
+            cpu_halt_prev: 0,
             tools: toolwin::ToolWindows::new(),
             dbg: dbg::Debugger::default(),
             modifiers: ModifiersState::empty(),
@@ -582,10 +591,16 @@ impl App {
                 " (debugging)".to_owned()
             } else if self.paused {
                 " — paused".to_owned()
-            } else if self.settings.show_framerate {
-                format!(" — {:.1} fps", self.fps)
             } else {
-                String::new()
+                // FPS and the GB-CPU-usage meter both append when enabled.
+                let mut s = String::new();
+                if self.settings.show_framerate {
+                    s.push_str(&format!(" — {:.1} fps", self.fps));
+                }
+                if self.settings.cpu_usage_meter {
+                    s.push_str(&format!(" — {:.0}% cpu", self.cpu_usage));
+                }
+                s
             };
             let mut title = window_title(self.rom_loaded, &self.session.title, &state);
             // The serial-link status (bgb shows it in the title bar) is appended
@@ -1083,6 +1098,17 @@ fn window_title(rom_loaded: bool, title: &str, state: &str) -> String {
     } else {
         "slopgb".to_owned()
     }
+}
+
+/// GB CPU duty percent over a sample window: the share of `delta_cycles` the CPU
+/// was NOT halted (`delta_cycles - delta_halt`). 0 when no cycles elapsed (paused
+/// / no ROM). A free function so it is unit-testable without a live machine.
+fn cpu_usage_pct(delta_cycles: u64, delta_halt: u64) -> f64 {
+    if delta_cycles == 0 {
+        return 0.0;
+    }
+    let active = delta_cycles.saturating_sub(delta_halt);
+    100.0 * active as f64 / delta_cycles as f64
 }
 
 /// A solid LCD frame filled with `color` (the palette's lightest shade) — the

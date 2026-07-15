@@ -493,6 +493,10 @@ fn debug_tab_display_flags_toggle() {
     assert!(st.working.mem_live_update);
     click_field(&mut st, Field::MemLiveUpdate);
     assert!(!st.working.mem_live_update);
+    // "GB CPU usage meter" off by default → click turns it on.
+    assert!(!st.working.cpu_usage_meter);
+    click_field(&mut st, Field::CpuUsageMeter);
+    assert!(st.working.cpu_usage_meter);
 }
 
 #[test]

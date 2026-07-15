@@ -373,6 +373,9 @@ pub struct Settings {
     /// window every frame. Default on; off means it only repaints on interaction
     /// (scroll / Go-to), matching bgb's non-continuous refresh.
     pub mem_live_update: bool,
+    /// Debug → "GB CPU usage meter": show the emulated CPU's non-halted duty %
+    /// (from `GameBoy::halt_cycles`) in the window title. Default off.
+    pub cpu_usage_meter: bool,
     /// Misc → fast-forward speed multiplier (turbo), 1..=20.
     pub ff_speed: u32,
     /// Misc → framerate limit (0 = real speed / 60 fps).
@@ -457,6 +460,7 @@ impl Default for Settings {
             registers_editable: true,
             start_in_debugger: false,
             mem_live_update: true,
+            cpu_usage_meter: false,
             ff_speed: 10,
             framerate_limit: 0,
             show_framerate: false,

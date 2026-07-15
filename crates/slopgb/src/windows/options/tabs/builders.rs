@@ -251,8 +251,8 @@ pub(super) fn debug(s: &Settings, content: Rect) -> Vec<Ctrl> {
         Field::PureBgb,
     ));
     l.row();
-    // "Registers can be edited" + "Live update memory viewer" are live;
-    // "GB CPU usage meter" stays inert (needs a core halt-cycle counter).
+    // "Registers can be edited" / "Live update memory viewer" / "GB CPU usage
+    // meter" are all live.
     v.push(Ctrl::live(
         rc(l.at(), "Registers can be edited"),
         chk("Registers can be edited", s.registers_editable),
@@ -268,9 +268,10 @@ pub(super) fn debug(s: &Settings, content: Rect) -> Vec<Ctrl> {
         chk("pressing Esc shows debugger", s.esc_shows_debugger),
         Field::EscShowsDebugger,
     ));
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
         rc(l.row().at(), "GB CPU usage meter"),
-        chk("GB CPU usage meter", true),
+        chk("GB CPU usage meter", s.cpu_usage_meter),
+        Field::CpuUsageMeter,
     ));
     v.push(Ctrl::live(
         rc(l.row().at(), "Start in debugger"),

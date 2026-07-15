@@ -36,6 +36,7 @@ fn settings_and_recent_round_trip() {
         registers_editable: false,
         start_in_debugger: true,
         mem_live_update: false,
+        cpu_usage_meter: true,
         bootrom_dmg: "x.bin".to_string(),
         ..Settings::default()
     };

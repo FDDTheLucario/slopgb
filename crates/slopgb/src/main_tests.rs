@@ -36,6 +36,16 @@ fn no_rom_idles_emulation_like_pause() {
 }
 
 #[test]
+fn cpu_usage_pct_is_the_non_halted_share() {
+    assert_eq!(cpu_usage_pct(0, 0), 0.0, "no elapsed cycles → 0");
+    assert_eq!(cpu_usage_pct(1000, 0), 100.0, "never halted → 100%");
+    assert_eq!(cpu_usage_pct(1000, 1000), 0.0, "fully halted → 0%");
+    assert_eq!(cpu_usage_pct(1000, 250), 75.0, "quarter halted → 75%");
+    // halt can't exceed total, but a bad delta must not underflow/panic.
+    assert_eq!(cpu_usage_pct(100, 200), 0.0, "saturates, no panic");
+}
+
+#[test]
 fn rom_load_error_box_respects_the_show_errors_option() {
     // Off → no box (silent, console-only). On → a box carrying the message.
     assert_eq!(rom_load_error_box(false, "bad rom"), None);

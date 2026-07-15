@@ -81,6 +81,7 @@ pub fn from_ini(f: &Ini) -> Settings {
         registers_editable: boolean("SlopgbRegistersEditable", d.registers_editable),
         start_in_debugger: boolean("SlopgbStartInDebugger", d.start_in_debugger),
         mem_live_update: boolean("SlopgbMemLiveUpdate", d.mem_live_update),
+        cpu_usage_meter: boolean("SlopgbCpuUsageMeter", d.cpu_usage_meter),
         ff_speed: int("UndelayedSpeed", i64::from(d.ff_speed)).clamp(1, 20) as u32,
         framerate_limit: int("FrameRate", i64::from(d.framerate_limit)).max(0) as u32,
         show_framerate: boolean("SlopgbShowFramerate", d.show_framerate),
@@ -140,6 +141,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         registers_editable: _,
         start_in_debugger: _,
         mem_live_update: _,
+        cpu_usage_meter: _,
         ff_speed: _,
         framerate_limit: _,
         show_framerate: _,
@@ -191,6 +193,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
     );
     f.set("SlopgbStartInDebugger", ini::fmt_bool(s.start_in_debugger));
     f.set("SlopgbMemLiveUpdate", ini::fmt_bool(s.mem_live_update));
+    f.set("SlopgbCpuUsageMeter", ini::fmt_bool(s.cpu_usage_meter));
     f.set("UndelayedSpeed", &s.ff_speed.to_string());
     f.set("FrameRate", &s.framerate_limit.to_string());
     f.set("RecentFrozen", ini::fmt_bool(s.freeze_recent));

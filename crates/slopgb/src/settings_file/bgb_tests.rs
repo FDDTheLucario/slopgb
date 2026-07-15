@@ -37,6 +37,7 @@ fn settings_round_trip_through_bgb_ini() {
         registers_editable: false,
         start_in_debugger: true,
         mem_live_update: false,
+        cpu_usage_meter: true,
         ..Settings::default()
     };
     let mut ini = Ini::parse("");
