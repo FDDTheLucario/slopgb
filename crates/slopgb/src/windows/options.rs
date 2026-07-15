@@ -419,6 +419,9 @@ pub struct Settings {
     /// Exceptions → "break on OAM DMA bad accesses" (a CPU access outside HRAM
     /// while an OAM DMA transfers).
     pub break_oam_dma_bad: bool,
+    /// Exceptions → "break on 16 bits inc/dec FE00-FEFF" (the OAM-corruption
+    /// trigger: a 16-bit INC/DEC rr whose value is in that range).
+    pub break_incdec_fexx: bool,
     /// System → "automatic reset on system change": when on (default) picking a
     /// new Emulated-system radio rebuilds the machine immediately; when off the
     /// choice is deferred and applied on the next Reset.
@@ -491,6 +494,7 @@ impl Default for Settings {
             break_echo_ram: false,
             break_lcd_off_vblank: false,
             break_oam_dma_bad: false,
+            break_incdec_fexx: false,
             auto_reset_on_system_change: true,
             bootroms_enabled: false,
             bootrom_dmg: String::new(),
@@ -516,7 +520,8 @@ impl Settings {
     #[must_use]
     pub fn exception_mask(&self) -> u16 {
         use slopgb_core::{
-            EXC_ECHO_RAM, EXC_INVALID_OPCODE, EXC_LCD_OFF_VBLANK, EXC_LD_B_B, EXC_OAM_DMA_BAD,
+            EXC_ECHO_RAM, EXC_INCDEC_FEXX, EXC_INVALID_OPCODE, EXC_LCD_OFF_VBLANK, EXC_LD_B_B,
+            EXC_OAM_DMA_BAD,
         };
         let mut m = 0;
         if self.break_ld_b_b {
@@ -533,6 +538,9 @@ impl Settings {
         }
         if self.break_oam_dma_bad {
             m |= EXC_OAM_DMA_BAD;
+        }
+        if self.break_incdec_fexx {
+            m |= EXC_INCDEC_FEXX;
         }
         m
     }

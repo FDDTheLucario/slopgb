@@ -21,6 +21,7 @@ fn settings_round_trip_through_bgb_ini() {
         break_ld_b_b: true,
         break_echo_ram: true,
         break_oam_dma_bad: true,
+        break_incdec_fexx: true,
         ff_speed: 5,
         framerate_limit: 30,
         bootrom_dmg: "dmg.bin".to_string(),

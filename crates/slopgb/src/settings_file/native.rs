@@ -303,6 +303,7 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
             def.break_lcd_off_vblank,
         ),
         break_oam_dma_bad: b("exceptions", "break_oam_dma_bad", def.break_oam_dma_bad),
+        break_incdec_fexx: b("exceptions", "break_incdec_fexx", def.break_incdec_fexx),
         auto_reset_on_system_change: b(
             "system",
             "auto_reset_on_system_change",
@@ -375,6 +376,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         break_echo_ram: _,
         break_lcd_off_vblank: _,
         break_oam_dma_bad: _,
+        break_incdec_fexx: _,
         bootroms_enabled: _,
         bootrom_dmg: _,
         bootrom_gbc: _,
@@ -493,6 +495,11 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         "exceptions",
         "break_oam_dma_bad",
         fb(settings.break_oam_dma_bad),
+    );
+    d.set(
+        "exceptions",
+        "break_incdec_fexx",
+        fb(settings.break_incdec_fexx),
     );
     d.set("ui", "theme", &settings.theme.to_key());
     d.set("plugins", "dir", &settings.plugins.dir);

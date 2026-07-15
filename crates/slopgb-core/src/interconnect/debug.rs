@@ -5,7 +5,10 @@
 //! byte-identical. Interconnect work package.
 
 use super::*;
-use crate::{EXC_ECHO_RAM, EXC_INVALID_OPCODE, EXC_LCD_OFF_VBLANK, EXC_LD_B_B, EXC_OAM_DMA_BAD};
+use crate::{
+    EXC_ECHO_RAM, EXC_INCDEC_FEXX, EXC_INVALID_OPCODE, EXC_LCD_OFF_VBLANK, EXC_LD_B_B,
+    EXC_OAM_DMA_BAD,
+};
 
 impl Interconnect {
     /// Per-access debugger check on a CPU bus access: memory watchpoints (RM8)
@@ -72,6 +75,15 @@ impl Interconnect {
                 ));
         if hit {
             self.exc_hit = Some(pc);
+        }
+    }
+
+    /// Exception break on a 16-bit `INC rr`/`DEC rr` whose pre-op register value
+    /// `addr` (driven on the bus this cycle) lands in `FE00-FEFF` — the OAM
+    /// corruption trigger. Inert when the bit is unarmed (`exc_mask == 0` path).
+    pub(super) fn incdec16_exception(&mut self, addr: u16) {
+        if self.exc_mask & EXC_INCDEC_FEXX != 0 && (0xFE00..=0xFEFF).contains(&addr) {
+            self.exc_hit = Some(addr);
         }
     }
 

@@ -46,6 +46,28 @@ fn oam_dma_bad_access_exception_breaks_only_when_armed() {
 }
 
 #[test]
+fn incdec16_fexx_exception_breaks_only_when_armed() {
+    // `ld hl,FE00 ; inc hl ; jr -2`: the INC HL drives HL=FE00 onto the bus, the
+    // OAM-corruption trigger — bgb's "break on 16 bits inc/dec FE00-FEFF".
+    let rom = exc_rom(&[0x21, 0x00, 0xFE, 0x23, 0x18, 0xFE]);
+
+    let mut off = GameBoy::new(Model::Dmg, rom.clone()).unwrap();
+    assert_eq!(
+        off.run_frame_until_breakpoint(&[]),
+        None,
+        "no break when disarmed"
+    );
+
+    let mut on = GameBoy::new(Model::Dmg, rom).unwrap();
+    on.set_exceptions(EXC_INCDEC_FEXX);
+    assert_eq!(
+        on.run_frame_until_breakpoint(&[]),
+        Some(0xFE00),
+        "INC HL from FE00 breaks at that address"
+    );
+}
+
+#[test]
 fn halt_cycles_counts_only_time_spent_halted() {
     // `ld a,0 ; ldh (FF0F),a ; ldh (FFFF),a ; halt`: clear IF + IE so HALT
     // (IME=0) has no wake condition and stays halted for the rest of the frame

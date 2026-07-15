@@ -74,6 +74,12 @@ pub trait Bus {
     /// even there it is inert unless an exception was armed, so a golden/test
     /// run is byte-identical.
     fn check_exec(&mut self, _pc: u16, _opcode: u8) {}
+    /// Check a 16-bit `INC rr`/`DEC rr` whose pre-op register value `addr` rides
+    /// the bus this cycle against the exception-break mask (bgb's "break on 16
+    /// bits inc/dec FE00-FEFF"). No time, no architectural effect; the default is
+    /// a no-op and the real bus is inert unless that exception is armed, so a
+    /// golden/test run is byte-identical.
+    fn check_incdec16(&mut self, _addr: u16) {}
     /// `IF & IE & 0x1F` right now. Takes no time.
     fn pending(&self) -> u8;
     /// `IF & IE & 0x1F` as seen by the halted CPU's wake check (both the

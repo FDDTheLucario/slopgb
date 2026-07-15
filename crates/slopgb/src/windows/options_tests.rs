@@ -671,11 +671,12 @@ fn exceptions_tab_break_conditions_are_live() {
         Field::BreakEchoRam,
         Field::BreakLcdOffVblank,
         Field::BreakOamDmaBad,
+        Field::BreakIncDecFexx,
     ] {
         assert!(live.contains(&f), "{f:?} is live");
     }
-    assert_eq!(live.len(), 5, "exactly five live break conditions");
-    // The inert rows (16-bit inc-dec / SGB) stay non-live.
+    assert_eq!(live.len(), 6, "exactly six live break conditions");
+    // The inert row (SGB transfer start) stays non-live.
     use super::tabs::Kind;
     let inert_present = |label: &str| {
         controls(OptionsTab::Exceptions, &s, content)
@@ -684,7 +685,6 @@ fn exceptions_tab_break_conditions_are_live() {
                 matches!(&c.kind, Kind::Check { label: l, .. } if *l == label) && c.field.is_none()
             })
     };
-    assert!(inert_present("break on 16 bits inc/dec FE00-FEFF"));
     assert!(inert_present("break on SGB transfer start"));
 }
 

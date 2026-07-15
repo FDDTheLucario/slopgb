@@ -103,6 +103,7 @@ pub fn from_ini(f: &Ini) -> Settings {
         break_echo_ram: boolean("SlopgbBreakEchoRam", d.break_echo_ram),
         break_lcd_off_vblank: boolean("DebugDisableLCD", d.break_lcd_off_vblank),
         break_oam_dma_bad: boolean("SlopgbBreakOamDmaBad", d.break_oam_dma_bad),
+        break_incdec_fexx: boolean("SlopgbBreakIncDecFexx", d.break_incdec_fexx),
         bootroms_enabled: boolean("BootromEnabled", d.bootroms_enabled),
         bootrom_dmg: text("DmgBootRom", &d.bootrom_dmg),
         bootrom_gbc: text("CgbBootRom", &d.bootrom_gbc),
@@ -166,6 +167,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         break_echo_ram: _,
         break_lcd_off_vblank: _,
         break_oam_dma_bad: _,
+        break_incdec_fexx: _,
         bootroms_enabled: _,
         bootrom_dmg: _,
         bootrom_gbc: _,
@@ -225,6 +227,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
     f.set("InvalidOpBreak", ini::fmt_bool(s.break_invalid_op));
     f.set("DebugDisableLCD", ini::fmt_bool(s.break_lcd_off_vblank));
     f.set("SlopgbBreakOamDmaBad", ini::fmt_bool(s.break_oam_dma_bad));
+    f.set("SlopgbBreakIncDecFexx", ini::fmt_bool(s.break_incdec_fexx));
     f.set("BootromEnabled", ini::fmt_bool(s.bootroms_enabled));
     f.set("DmgBootRom", &s.bootrom_dmg);
     f.set("CgbBootRom", &s.bootrom_gbc);

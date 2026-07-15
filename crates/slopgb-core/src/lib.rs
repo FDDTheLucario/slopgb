@@ -176,6 +176,10 @@ pub const EXC_LCD_OFF_VBLANK: u16 = 1 << 3;
 /// Break on a CPU access outside HRAM while an OAM DMA is transferring (the bus
 /// is contended — the read/write hits the DMA byte, not the intended one).
 pub const EXC_OAM_DMA_BAD: u16 = 1 << 4;
+/// Break on a 16-bit `INC rr`/`DEC rr` whose register pair holds an address in
+/// `FE00-FEFF` — the value the SM83's 16-bit inc/dec unit drives onto the bus,
+/// the OAM-corruption-bug trigger (bgb's "break on 16 bits inc/dec FE00-FEFF").
+pub const EXC_INCDEC_FEXX: u16 = 1 << 5;
 
 /// Leading bytes of a slopgb save state (see [`GameBoy::save_state`]).
 const STATE_MAGIC: &[u8; 4] = b"SLPS";

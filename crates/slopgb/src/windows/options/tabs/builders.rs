@@ -321,7 +321,11 @@ pub(super) fn exceptions(s: &Settings, content: Rect) -> Vec<Ctrl> {
             Some(Field::BreakOamDmaBad),
             s.break_oam_dma_bad,
         ),
-        ("break on 16 bits inc/dec FE00-FEFF", None, false),
+        (
+            "break on 16 bits inc/dec FE00-FEFF",
+            Some(Field::BreakIncDecFexx),
+            s.break_incdec_fexx,
+        ),
         (
             "break on disabling LCD outside vblank",
             Some(Field::BreakLcdOffVblank),
