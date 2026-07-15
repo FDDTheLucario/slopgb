@@ -289,6 +289,7 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
             "load_rom_dialog_on_startup",
             def.load_rom_dialog_on_startup,
         ),
+        reduce_cpu: b("misc", "reduce_cpu", def.reduce_cpu),
         scheme,
         dmg_palette,
         allow_opposing: b("misc", "allow_opposing", def.allow_opposing),
@@ -357,6 +358,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         pause_on_focus_loss: _,
         show_errors_on_rom_load: _,
         load_rom_dialog_on_startup: _,
+        reduce_cpu: _,
         scheme: _,
         dmg_palette: _,
         allow_opposing: _,
@@ -459,6 +461,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         "load_rom_dialog_on_startup",
         fb(settings.load_rom_dialog_on_startup),
     );
+    d.set("misc", "reduce_cpu", fb(settings.reduce_cpu));
     d.set("misc", "allow_opposing", fb(settings.allow_opposing));
     d.set("system", "uninited_wram", fb(settings.uninited_wram));
     d.set("exceptions", "break_ld_b_b", fb(settings.break_ld_b_b));

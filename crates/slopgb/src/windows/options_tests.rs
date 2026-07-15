@@ -834,6 +834,10 @@ fn misc_tab_live_toggles() {
     assert!(!st.working.load_rom_dialog_on_startup);
     click_field(&mut st, Field::LoadRomDialogOnStartup);
     assert!(st.working.load_rom_dialog_on_startup);
+    // "reduce CPU usage" on by default → click turns it off.
+    assert!(st.working.reduce_cpu);
+    click_field(&mut st, Field::ReduceCpu);
+    assert!(!st.working.reduce_cpu);
 }
 
 #[test]

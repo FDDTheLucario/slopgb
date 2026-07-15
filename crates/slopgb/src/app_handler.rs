@@ -426,7 +426,7 @@ impl ApplicationHandler for App {
         // transient bands still burst (CatchUp) or skip (Hold), so `frames` may
         // be >1 or 0 on a given wake — the redraw below is gated on frames > 0.
         // Turbo free-runs.
-        let flow = if self.turbo {
+        let flow = if crate::should_poll(self.turbo, self.settings.reduce_cpu) {
             ControlFlow::Poll
         } else {
             ControlFlow::WaitUntil(self.next_frame)

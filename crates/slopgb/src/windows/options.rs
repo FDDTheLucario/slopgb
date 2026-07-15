@@ -392,6 +392,10 @@ pub struct Settings {
     /// Misc → "Load ROM dialog on startup": open the file picker at launch when
     /// no ROM was given on the command line.
     pub load_rom_dialog_on_startup: bool,
+    /// Misc → "reduce CPU usage": between frames the event loop parks
+    /// (`WaitUntil`) instead of busy-polling. Default on; off spins for lowest
+    /// input latency at the cost of a pinned core.
+    pub reduce_cpu: bool,
     /// GB Colors → selected scheme index into [`SCHEMES`].
     pub scheme: usize,
     /// GB Colors → the live DMG palette (lightest→darkest).
@@ -469,6 +473,7 @@ impl Default for Settings {
             // bgb ships "Show errors on ROM load" checked.
             show_errors_on_rom_load: true,
             load_rom_dialog_on_startup: false,
+            reduce_cpu: true,
             scheme: 0,
             dmg_palette: SCHEMES[0].colors,
             allow_opposing: false,

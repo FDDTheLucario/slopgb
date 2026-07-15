@@ -36,6 +36,17 @@ fn no_rom_idles_emulation_like_pause() {
 }
 
 #[test]
+fn should_poll_spins_for_turbo_or_reduce_cpu_off() {
+    assert!(
+        !should_poll(false, true),
+        "normal run parks (reduce-cpu on)"
+    );
+    assert!(should_poll(true, true), "turbo always polls");
+    assert!(should_poll(false, false), "reduce-cpu off spins");
+    assert!(should_poll(true, false));
+}
+
+#[test]
 fn cpu_usage_pct_is_the_non_halted_share() {
     assert_eq!(cpu_usage_pct(0, 0), 0.0, "no elapsed cycles → 0");
     assert_eq!(cpu_usage_pct(1000, 0), 100.0, "never halted → 100%");

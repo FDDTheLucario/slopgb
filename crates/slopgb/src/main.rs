@@ -1100,6 +1100,13 @@ fn window_title(rom_loaded: bool, title: &str, state: &str) -> String {
     }
 }
 
+/// Whether `about_to_wait` should busy-poll instead of parking until the next
+/// frame: always while turbo runs flat-out, and when "reduce CPU usage" is off
+/// (spin for lowest input latency). A free function so the choice is testable.
+fn should_poll(turbo: bool, reduce_cpu: bool) -> bool {
+    turbo || !reduce_cpu
+}
+
 /// GB CPU duty percent over a sample window: the share of `delta_cycles` the CPU
 /// was NOT halted (`delta_cycles - delta_halt`). 0 when no cycles elapsed (paused
 /// / no ROM). A free function so it is unit-testable without a live machine.
