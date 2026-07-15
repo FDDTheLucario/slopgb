@@ -921,6 +921,11 @@ pub struct Ppu {
     front: Box<[u32; SCREEN_PIXELS]>,
     back: Box<[u32; SCREEN_PIXELS]>,
     dmg_palette: [u32; 4],
+    /// Frontend display option (Graphics → "disable SGB colors"): render the SGB
+    /// game screen through the plain [`Self::dmg_palette`] instead of the SGB
+    /// per-cell palettes. Default `false` → the colorized path is untouched
+    /// (golden-safe). Not serialized; the frontend re-applies it on load.
+    sgb_mono: bool,
 
     /// Super Game Boy presentation state (palettes / attribute map / window
     /// mask), `Some` only on `Model::Sgb`/`Sgb2`. Drives the DMG-output

@@ -601,6 +601,11 @@ impl App {
     /// path (`apply_settings`).
     fn apply_palette(&mut self) {
         self.session.gb.set_dmg_palette(self.settings.dmg_palette);
+        // Graphics → "disable SGB colors" is a display option like the palette,
+        // so it rides the same apply path (Options apply + every ROM load).
+        self.session
+            .gb
+            .set_sgb_mono(self.settings.disable_sgb_colors);
         self.blank_frame = blank_frame(self.settings.dmg_palette[0]);
     }
 

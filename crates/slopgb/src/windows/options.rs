@@ -324,6 +324,9 @@ pub struct Settings {
     pub model: ModelChoice,
     /// Graphics → stretch the LCD to fill (fullscreen stretched).
     pub stretch: bool,
+    /// Graphics → "disable SGB colors": render an SGB game in the plain DMG
+    /// palette instead of the SGB per-cell colors (a no-op off SGB).
+    pub disable_sgb_colors: bool,
     /// Graphics → "frame blend": present each frame averaged with the previous
     /// one (a one-frame motion trail, softening flicker). Frontend-only.
     pub frame_blend: bool,
@@ -472,6 +475,7 @@ impl Default for Settings {
         Self {
             model: ModelChoice::Auto,
             stretch: false,
+            disable_sgb_colors: false,
             frame_blend: false,
             dmg_gbc_lcd: false,
             contrast: 0.5,

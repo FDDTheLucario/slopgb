@@ -240,6 +240,7 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
             _ => ModelChoice::Auto,
         },
         stretch: b("graphics", "stretch", def.stretch),
+        disable_sgb_colors: b("graphics", "disable_sgb_colors", def.disable_sgb_colors),
         frame_blend: b("graphics", "frame_blend", def.frame_blend),
         dmg_gbc_lcd: b("graphics", "dmg_gbc_lcd", def.dmg_gbc_lcd),
         contrast: d
@@ -353,6 +354,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
     let Settings {
         model: _,
         stretch: _,
+        disable_sgb_colors: _,
         frame_blend: _,
         dmg_gbc_lcd: _,
         contrast: _,
@@ -443,6 +445,11 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
     d.set("sound", "audio_8bit", fb(settings.audio_8bit));
     d.set("sound", "audio_hq", fb(settings.audio_hq));
     d.set("graphics", "stretch", fb(settings.stretch));
+    d.set(
+        "graphics",
+        "disable_sgb_colors",
+        fb(settings.disable_sgb_colors),
+    );
     d.set("graphics", "frame_blend", fb(settings.frame_blend));
     d.set("graphics", "dmg_gbc_lcd", fb(settings.dmg_gbc_lcd));
     d.set("graphics", "contrast", &settings.contrast.to_string());

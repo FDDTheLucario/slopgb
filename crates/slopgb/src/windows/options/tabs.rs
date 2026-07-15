@@ -32,6 +32,8 @@ pub(crate) enum Field {
     Stretch,
     /// Debug → "lowercase disassembler" (mnemonic/register case).
     LowercaseDisasm,
+    /// Graphics → "disable SGB colors" checkbox.
+    DisableSgbColors,
     /// Graphics → "frame blend" combo (cycles off ↔ on).
     FrameBlend,
     /// GB Colors → "DMG on GBC LCD colors" checkbox.
@@ -284,6 +286,7 @@ pub(crate) fn on_content_click(
 fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
     match field {
         Field::Stretch => s.stretch = !s.stretch,
+        Field::DisableSgbColors => s.disable_sgb_colors = !s.disable_sgb_colors,
         Field::LowercaseDisasm => s.lowercase_disasm = !s.lowercase_disasm,
         Field::FrameBlend => s.frame_blend = !s.frame_blend,
         Field::DmgGbcLcd => s.dmg_gbc_lcd = !s.dmg_gbc_lcd,
@@ -380,6 +383,7 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
             s.stretch = d.stretch;
             s.frame_blend = d.frame_blend;
             s.sgb_border_screenshot = d.sgb_border_screenshot;
+            s.disable_sgb_colors = d.disable_sgb_colors;
         }
         OptionsTab::System => {
             s.model = d.model;

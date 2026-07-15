@@ -51,9 +51,10 @@ pub(super) fn graphics(s: &Settings, content: Rect) -> Vec<Ctrl> {
     let mut l = Lay::new(content);
     let mut v = Vec::new();
     // Left column: inert visual toggles + combos (bgb black).
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
         rc(l.at(), "disable SGB colors"),
-        chk("disable SGB colors", false),
+        chk("disable SGB colors", s.disable_sgb_colors),
+        Field::DisableSgbColors,
     ));
     v.push(Ctrl::live(
         rc(l.row().at(), "SGB border in screenshot"),

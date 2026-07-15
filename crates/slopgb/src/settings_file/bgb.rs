@@ -51,6 +51,7 @@ pub fn from_ini(f: &Ini) -> Settings {
         // slopgb's fullscreen-stretch has no bgb equivalent (bgb's `stretch` is a
         // video-scaling dropdown, not a mode), so it's a `Slopgb` extra.
         stretch: boolean("SlopgbStretch", d.stretch),
+        disable_sgb_colors: boolean("SlopgbDisableSgbColors", d.disable_sgb_colors),
         // No faithful bgb key mapped — stored as `Slopgb` extras.
         frame_blend: boolean("SlopgbFrameBlend", d.frame_blend),
         dmg_gbc_lcd: boolean("SlopgbDmgGbcLcd", d.dmg_gbc_lcd),
@@ -140,6 +141,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
     let Settings {
         model: _,
         stretch: _,
+        disable_sgb_colors: _,
         frame_blend: _,
         dmg_gbc_lcd: _,
         contrast: _,
@@ -263,6 +265,10 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
     }
     // slopgb-only fields — no bgb key, stored under a `Slopgb` prefix bgb ignores.
     f.set("SlopgbStretch", ini::fmt_bool(s.stretch));
+    f.set(
+        "SlopgbDisableSgbColors",
+        ini::fmt_bool(s.disable_sgb_colors),
+    );
     f.set("SlopgbFrameBlend", ini::fmt_bool(s.frame_blend));
     f.set("SlopgbDmgGbcLcd", ini::fmt_bool(s.dmg_gbc_lcd));
     f.set("SlopgbContrast", &s.contrast.to_string());

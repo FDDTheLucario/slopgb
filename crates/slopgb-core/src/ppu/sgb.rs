@@ -421,8 +421,10 @@ impl Ppu {
     /// (byte-identical to the pre-SGB path on every non-SGB model).
     pub(super) fn dmg_shade(&self, lx: u8, shade: usize) -> u32 {
         match &self.sgb {
-            Some(s) => s.shade_color(lx, self.ly, shade),
-            None => self.dmg_palette[shade],
+            // "disable SGB colors" (default off, so the colorized path is
+            // byte-identical) drops through to the plain DMG palette.
+            Some(s) if !self.sgb_mono => s.shade_color(lx, self.ly, shade),
+            _ => self.dmg_palette[shade],
         }
     }
 

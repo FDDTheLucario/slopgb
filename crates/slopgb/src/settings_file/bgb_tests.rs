@@ -35,6 +35,7 @@ fn settings_round_trip_through_bgb_ini() {
         allow_opposing: true,
         uninited_wram: true, // bgb's UninitedWRAM key
         frame_blend: true,
+        disable_sgb_colors: true,
         dmg_gbc_lcd: true,
         contrast: 0.75,
         sgb_border_screenshot: true,

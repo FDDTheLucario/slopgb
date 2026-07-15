@@ -233,6 +233,12 @@ impl Ppu {
         self.dmg_palette = palette;
     }
 
+    /// Graphics → "disable SGB colors": render the SGB game screen in plain DMG
+    /// palette instead of the SGB per-cell colors. Default off (golden-safe).
+    pub fn set_sgb_mono(&mut self, on: bool) {
+        self.sgb_mono = on;
+    }
+
     /// Integration addition: enable DMG compatibility rendering on a CGB
     /// model (CGB hardware running a non-CGB cart). Set once by the
     /// interconnect at power-on; no effect on DMG models.

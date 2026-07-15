@@ -32,6 +32,38 @@ fn sgb_pal01_colorizes_rendered_frame() {
     );
 }
 
+/// Graphics → "disable SGB colors": with `set_sgb_mono`, the SGB per-cell
+/// colors are dropped and the game screen renders through the plain DMG palette
+/// (default off, so the colorized path stays byte-identical).
+#[test]
+fn disable_sgb_colors_renders_through_the_dmg_palette() {
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x146] = 0x03;
+    rom[0x14B] = 0x33;
+    let mut gb = GameBoy::new(Model::Sgb, rom).unwrap();
+    let mut packet = [0u8; 16];
+    packet[0] = 0x01; // PAL01
+    packet[1] = 0x1F; // shared background color 0 = red
+    send_sgb_packet(&mut gb, &packet);
+    gb.debug_write(0xFF47, 0xE4); // BGP
+    gb.debug_write(0xFF40, 0x91); // LCD on, BG on
+    gb.set_sgb_mono(true);
+    for _ in 0..3 {
+        gb.run_frame();
+    }
+    assert_eq!(
+        gb.frame()[0],
+        0xFF_FFFF,
+        "the SGB red is gone: shade 0 uses the default DMG palette"
+    );
+    // Re-enabling colors restores the SGB-provided red.
+    gb.set_sgb_mono(false);
+    for _ in 0..2 {
+        gb.run_frame();
+    }
+    assert_eq!(gb.frame()[0], 0xFF_0000, "SGB color restored");
+}
+
 /// The single BIOS entry point feeds the audio path but, being high-level (no
 /// SNES 65816), never fabricates a border or palette from an arbitrary image:
 /// an unverifiable BIOS leaves the original default border untouched, and off

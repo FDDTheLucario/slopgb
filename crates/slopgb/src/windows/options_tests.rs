@@ -608,6 +608,15 @@ fn graphics_tab_stretch_toggle() {
 }
 
 #[test]
+fn graphics_disable_sgb_colors_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Graphics;
+    assert!(!st.working.disable_sgb_colors);
+    click_field(&mut st, Field::DisableSgbColors);
+    assert!(st.working.disable_sgb_colors);
+}
+
+#[test]
 fn graphics_frame_blend_dropdown_toggles() {
     let mut st = OptionsState::new(Settings::default());
     st.active = OptionsTab::Graphics;

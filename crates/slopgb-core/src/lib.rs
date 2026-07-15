@@ -578,6 +578,13 @@ impl GameBoy {
         self.bus.ppu_mut().set_dmg_palette(palette);
     }
 
+    /// Graphics → "disable SGB colors": render an SGB game screen through the
+    /// plain DMG palette instead of the SGB per-cell colors. Default off, so a
+    /// golden/test run is byte-identical. A no-op off SGB models.
+    pub fn set_sgb_mono(&mut self, on: bool) {
+        self.bus.ppu_mut().set_sgb_mono(on);
+    }
+
     /// The cartridge ROM bank currently mapped at 0x4000-0x7FFF, for the debug
     /// bank indicator (distinct from the VRAM/WRAM banks at FF4F/FF70).
     /// Side-effect-free.
