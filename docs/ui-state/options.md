@@ -143,7 +143,10 @@ Still inert — each needs a prerequisite beyond a normal wiring:
   bgb's exact 8↔5-bit colour curve + the "select: all" drag semantics — neither
   is in the one static `options-gbcolors.png` capture (the checkbox is unchecked
   there), and there is no `bgb.exe` in-tree to capture the checked state. A
-  never-invent-bgb blocker, not a low-value defer.
+  never-invent-bgb blocker, not a low-value defer — **held by decision** until a
+  `bgb.exe` is dropped in-tree so the capture rig can read the real 0-31 values +
+  colour curve, then it gets built 1:1 (wine is installed; the rig just needs the
+  binary).
 - **Model detection** (GB-pocket/SGB2 · GBA · GB Player · MGB-auto-border) — the
   core has no distinct GBA/MGB/GB-Player models to detect into.
 - **Waitloop detection** — a speed hack that skips CPU wait loops → perturbs
