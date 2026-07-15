@@ -124,25 +124,28 @@ slopgb equivalent — preserved verbatim, not acted on. Phase 1 complete; phase 
 Now live (were inert): reduce-CPU-usage, recovery-save-state, auto-reset-on-
 system-change, the three remaining Exceptions breaks (OAM-DMA-bad-access,
 16-bit-inc/dec-FE00-FEFF, SGB-transfer-start — golden-safe core detectors),
-lowercase-disassembler, and the whole Sound row (soundcard / samplerate /
-latency / 8-bit output / high-quality). See the Live-settings table.
+lowercase-disassembler, the whole Sound row (soundcard / samplerate / latency /
+8-bit / high-quality), Graphics doubler (scale2x) + disable-SGB-colors (golden-
+safe PPU `sgb_mono`), System Rewind (Backspace, a savestate ring), Joypad
+rapid-speed (`[`/`]` auto-fire) + Audio WAV recording. See the Live table.
 
 ## Inert
 
-Still faithful-but-inert, by reason:
+Still inert — each needs a prerequisite beyond a normal wiring:
 
-- **0-31 numbers** — the exact bgb palette-number display is uncaptured; capture
-  it via the wine rig before implementing (never-invent-bgb-UI rule).
-- **Rapid speed** — needs a rapid-fire button binding first ("configure extra
-  buttons" is itself inert).
-- **WAV/AVI recording**, **doubler/scaler** — implementable std-only (encoder /
-  scale2x); not yet built.
-- **Rewind** — a savestate ring-buffer feature; not yet built.
-- **RTC files (VBA / legacy .rtc)** — RTC already round-trips in the `.sav`
-  (slopgb's own block); these are cross-emulator interop formats, not yet built.
-- **disable SGB colors** — needs the core SGB colorizer to force the DMG grey
-  palette (a present-side desaturate would grey the border too).
-- **Model detection** (GB-pocket/SGB2 · GBA · GB Player · MGB-auto-border ·
-  Waitloop-detection) — niche auto-detect/perf toggles.
-- **Hard-blocked**: game-controller config (needs a gamepad input dep — banned);
-  `bpp`/`output`/`vsync` (DirectDraw-era concepts with no softbuffer equivalent).
+- **Video (AVI) recording** — std-only uncompressed-AVI writer + streaming index;
+  buildable, not yet written.
+- **Audio-channels recording** — needs per-channel core audio taps.
+- **0-31 numbers** — the exact bgb palette-number display is uncaptured; run the
+  wine rig first (never-invent-bgb-UI rule).
+- **RTC VBA / legacy .rtc** — RTC already round-trips in the `.sav` (slopgb's own
+  block); these are cross-emulator interop formats whose VBA timestamp needs a
+  wall clock the deterministic core lacks.
+- **Model detection** (GB-pocket/SGB2 · GBA · GB Player · MGB-auto-border) — the
+  core has no distinct GBA/MGB/GB-Player models to detect into.
+- **Waitloop detection** — a speed hack that skips CPU wait loops → perturbs
+  emulated timing → forbidden by the golden-safe law.
+- **Hard-blocked**: game-controller config/clear + extra buttons + MBC7 joystick
+  (need a gamepad input dep — banned); `bpp`/`output`/`vsync` (DirectDraw-era
+  concepts, no softbuffer equivalent); joypad-0 select + focus checkboxes
+  (single keyboard player, winit is always focus-gated).
