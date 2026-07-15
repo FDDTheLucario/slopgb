@@ -54,6 +54,7 @@ pub fn from_ini(f: &Ini) -> Settings {
         disable_sgb_colors: boolean("SlopgbDisableSgbColors", d.disable_sgb_colors),
         // No faithful bgb key mapped — stored as `Slopgb` extras.
         frame_blend: boolean("SlopgbFrameBlend", d.frame_blend),
+        doubler: boolean("SlopgbDoubler", d.doubler),
         dmg_gbc_lcd: boolean("SlopgbDmgGbcLcd", d.dmg_gbc_lcd),
         contrast: f
             .get("SlopgbContrast")
@@ -143,6 +144,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         stretch: _,
         disable_sgb_colors: _,
         frame_blend: _,
+        doubler: _,
         dmg_gbc_lcd: _,
         contrast: _,
         sgb_border_screenshot: _,
@@ -270,6 +272,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         ini::fmt_bool(s.disable_sgb_colors),
     );
     f.set("SlopgbFrameBlend", ini::fmt_bool(s.frame_blend));
+    f.set("SlopgbDoubler", ini::fmt_bool(s.doubler));
     f.set("SlopgbDmgGbcLcd", ini::fmt_bool(s.dmg_gbc_lcd));
     f.set("SlopgbContrast", &s.contrast.to_string());
     f.set(

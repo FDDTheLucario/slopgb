@@ -328,6 +328,9 @@ struct App {
     postfx_buf: Vec<u32>,
     /// The previously presented (pre-filter) frame, used by "frame blend".
     prev_frame: Vec<u32>,
+    /// Scratch for the "doubler" scale2x output (2× the source), presented in
+    /// place of the base frame when the doubler is on.
+    scale_buf: Vec<u32>,
     /// Misc → "Recovery save state": the `<rom>.recovery` path for the loaded
     /// ROM (None with no ROM). Written periodically and deleted on a clean quit,
     /// so its presence at load time means the last session crashed.
@@ -533,6 +536,7 @@ impl App {
             blank_frame,
             postfx_buf: Vec::new(),
             prev_frame: Vec::new(),
+            scale_buf: Vec::new(),
             recovery_path: None,
             recovery_next: Instant::now(),
             settings,
@@ -652,7 +656,7 @@ impl App {
         // never paints. On an SGB with a border loaded (CHR_TRN+PCT_TRN), the
         // 256×224 composite replaces the bare 160×144 frame automatically — the
         // blit letterboxes whichever size it gets.
-        let (mut frame, src_w, src_h): (&[u32], usize, usize) = if self.rom_loaded {
+        let (mut frame, mut src_w, mut src_h): (&[u32], usize, usize) = if self.rom_loaded {
             match self.session.gb.sgb_border() {
                 Some(b) => (&b[..], SGB_BORDER_W, SGB_BORDER_H),
                 None => (&self.session.gb.frame()[..], SCREEN_W, SCREEN_H),
@@ -671,6 +675,14 @@ impl App {
             frame = &self.postfx_buf[..];
         } else if !self.prev_frame.is_empty() {
             self.prev_frame.clear(); // drop history so re-enabling blend starts fresh
+        }
+        // Graphics → "doubler": scale2x the (filtered) frame to 2×, presented in
+        // its place; the blit then scales/letterboxes the larger image.
+        if self.settings.doubler {
+            postfx::scale2x(frame, src_w, src_h, &mut self.scale_buf);
+            frame = &self.scale_buf[..];
+            src_w *= 2;
+            src_h *= 2;
         }
         // The right-click menu is its own window now (see `menupopup`), so it is
         // not part of the game-window overlay. The remaining overlays (info box /

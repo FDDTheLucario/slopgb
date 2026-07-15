@@ -80,8 +80,20 @@ pub(super) fn graphics(s: &Settings, content: Rect) -> Vec<Ctrl> {
         Field::FrameBlend,
     ));
     l.row();
+    // "doubler" is live: a dropdown cycling off ↔ scale2x.
+    let db_label = "doubler:";
+    let (dx, dy) = l.at();
+    v.push(text_label((dx, dy), db_label.to_owned()));
+    v.push(Ctrl::live(
+        Rect::new(dx + measure(db_label) + 6, dy, 70, line_height() + 2),
+        Kind::Dropdown {
+            value: if s.doubler { "scale2x" } else { "off" }.to_string(),
+            w: 70,
+        },
+        Field::Doubler,
+    ));
+    l.row();
     for (label, val) in [
-        ("doubler:", "auto"),
         ("bpp:", "auto"),
         ("output:", "auto"),
         ("vsync:", "auto"),

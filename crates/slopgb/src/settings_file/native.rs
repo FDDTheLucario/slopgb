@@ -242,6 +242,7 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
         stretch: b("graphics", "stretch", def.stretch),
         disable_sgb_colors: b("graphics", "disable_sgb_colors", def.disable_sgb_colors),
         frame_blend: b("graphics", "frame_blend", def.frame_blend),
+        doubler: b("graphics", "doubler", def.doubler),
         dmg_gbc_lcd: b("graphics", "dmg_gbc_lcd", def.dmg_gbc_lcd),
         contrast: d
             .get("graphics", "contrast")
@@ -356,6 +357,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         stretch: _,
         disable_sgb_colors: _,
         frame_blend: _,
+        doubler: _,
         dmg_gbc_lcd: _,
         contrast: _,
         sgb_border_screenshot: _,
@@ -451,6 +453,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         fb(settings.disable_sgb_colors),
     );
     d.set("graphics", "frame_blend", fb(settings.frame_blend));
+    d.set("graphics", "doubler", fb(settings.doubler));
     d.set("graphics", "dmg_gbc_lcd", fb(settings.dmg_gbc_lcd));
     d.set("graphics", "contrast", &settings.contrast.to_string());
     d.set(

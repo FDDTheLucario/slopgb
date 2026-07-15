@@ -623,6 +623,10 @@ fn graphics_frame_blend_dropdown_toggles() {
     assert!(!st.working.frame_blend);
     click_field(&mut st, Field::FrameBlend);
     assert!(st.working.frame_blend, "frame blend on after click");
+    // "doubler" dropdown cycles off ↔ scale2x.
+    assert!(!st.working.doubler);
+    click_field(&mut st, Field::Doubler);
+    assert!(st.working.doubler);
 }
 
 #[test]

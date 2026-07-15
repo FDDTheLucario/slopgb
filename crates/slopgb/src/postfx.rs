@@ -40,6 +40,47 @@ pub fn apply(buf: &mut [u32], prev: &[u32], s: &Settings) {
     }
 }
 
+/// Scale2x (AdvMAME2x): double a `w`×`h` frame to `2w`×`2h` into `dst`, the
+/// classic edge-preserving pixel doubler (Graphics → "doubler"). Each source
+/// pixel E becomes four, promoted to a neighbour only on a clean diagonal edge;
+/// otherwise E is replicated (so flat areas stay crisp, not blurred). `dst` is
+/// resized to `4*w*h`. Pure — unit-tested.
+pub fn scale2x(src: &[u32], w: usize, h: usize, dst: &mut Vec<u32>) {
+    dst.clear();
+    dst.resize(w * h * 4, 0);
+    let dw = w * 2;
+    let at = |x: usize, y: usize| src[y * w + x];
+    for y in 0..h {
+        for x in 0..w {
+            let e = at(x, y);
+            // Orthogonal neighbours, clamped at the edges (so borders replicate).
+            let a = at(x, y.saturating_sub(1)); // up
+            let d = at(x, (y + 1).min(h - 1)); // down
+            let b = at(x.saturating_sub(1), y); // left
+            let f = at((x + 1).min(w - 1), y); // right
+            // The four output sub-pixels of E.
+            let (mut e0, mut e1, mut e2, mut e3) = (e, e, e, e);
+            if b == a && b != d && a != f {
+                e0 = a;
+            }
+            if a == f && a != b && f != d {
+                e1 = f;
+            }
+            if d == b && d != f && b != a {
+                e2 = b;
+            }
+            if f == d && f != a && d != b {
+                e3 = d;
+            }
+            let (ox, oy) = (x * 2, y * 2);
+            dst[oy * dw + ox] = e0;
+            dst[oy * dw + ox + 1] = e1;
+            dst[(oy + 1) * dw + ox] = e2;
+            dst[(oy + 1) * dw + ox + 1] = e3;
+        }
+    }
+}
+
 /// Per-channel average of two XRGB8888 pixels (a one-frame motion trail).
 #[must_use]
 pub fn blend_px(a: u32, b: u32) -> u32 {

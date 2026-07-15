@@ -34,6 +34,7 @@ fn settings_and_recent_round_trip() {
         break_sgb_transfer: true,
         stretch: true,
         frame_blend: true,
+        doubler: true,
         disable_sgb_colors: true,
         dmg_gbc_lcd: true,
         contrast: 0.75,

@@ -36,6 +36,8 @@ pub(crate) enum Field {
     DisableSgbColors,
     /// Graphics → "frame blend" combo (cycles off ↔ on).
     FrameBlend,
+    /// Graphics → "doubler" combo (cycles off ↔ scale2x).
+    Doubler,
     /// GB Colors → "DMG on GBC LCD colors" checkbox.
     DmgGbcLcd,
     /// GB Colors → contrast wheel slider (maps the click fraction to 0.0..=1.0).
@@ -289,6 +291,7 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         Field::DisableSgbColors => s.disable_sgb_colors = !s.disable_sgb_colors,
         Field::LowercaseDisasm => s.lowercase_disasm = !s.lowercase_disasm,
         Field::FrameBlend => s.frame_blend = !s.frame_blend,
+        Field::Doubler => s.doubler = !s.doubler,
         Field::DmgGbcLcd => s.dmg_gbc_lcd = !s.dmg_gbc_lcd,
         Field::Contrast => s.contrast = slider_frac(ct.rect, px),
         Field::SgbBorderScreenshot => s.sgb_border_screenshot = !s.sgb_border_screenshot,
@@ -382,6 +385,7 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
         OptionsTab::Graphics => {
             s.stretch = d.stretch;
             s.frame_blend = d.frame_blend;
+            s.doubler = d.doubler;
             s.sgb_border_screenshot = d.sgb_border_screenshot;
             s.disable_sgb_colors = d.disable_sgb_colors;
         }

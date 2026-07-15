@@ -330,6 +330,9 @@ pub struct Settings {
     /// Graphics → "frame blend": present each frame averaged with the previous
     /// one (a one-frame motion trail, softening flicker). Frontend-only.
     pub frame_blend: bool,
+    /// Graphics → "doubler": scale2x the frame to 2× before the blit (an
+    /// edge-preserving pixel doubler). Frontend-only.
+    pub doubler: bool,
     /// GB Colors → "DMG on GBC LCD colors": tint the DMG output through the GBC
     /// LCD colour-correction curve (the washed-out panel look). Frontend-only.
     pub dmg_gbc_lcd: bool,
@@ -477,6 +480,7 @@ impl Default for Settings {
             stretch: false,
             disable_sgb_colors: false,
             frame_blend: false,
+            doubler: false,
             dmg_gbc_lcd: false,
             contrast: 0.5,
             sgb_border_screenshot: false,

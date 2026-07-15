@@ -61,3 +61,34 @@ fn apply_blends_when_lengths_match() {
 fn any_active_false_on_defaults() {
     assert!(!any_active(&Settings::default()));
 }
+
+#[test]
+fn scale2x_doubles_dimensions_and_replicates_flat_areas() {
+    // A flat 2×2 block doubles to 4×4 of the same value (no spurious edges).
+    let src = vec![0x0011_2233u32; 4];
+    let mut dst = Vec::new();
+    scale2x(&src, 2, 2, &mut dst);
+    assert_eq!(dst.len(), 16, "2×2 -> 4×4");
+    assert!(
+        dst.iter().all(|&p| p == 0x0011_2233),
+        "flat area stays flat"
+    );
+}
+
+#[test]
+fn scale2x_smooths_a_corner_diagonal() {
+    // A lone AA at (0,0) with the rest 0: its down (0) and right (0) neighbours
+    // match, so scale2x promotes only the inner-diagonal sub-pixel to the
+    // background — the classic edge smoothing. The other three stay AA.
+    let src = vec![0x00AA_AAAA, 0x0000_0000, 0x0000_0000, 0x0000_0000];
+    let mut dst = Vec::new();
+    scale2x(&src, 2, 2, &mut dst);
+    // Source (0,0) -> dst (0,0),(1,0),(0,1),(1,1) = indices 0,1,4,5 (dst width 4).
+    assert_eq!(dst[0], 0x00AA_AAAA, "E0");
+    assert_eq!(dst[1], 0x00AA_AAAA, "E1");
+    assert_eq!(dst[4], 0x00AA_AAAA, "E2");
+    assert_eq!(
+        dst[5], 0x0000_0000,
+        "E3 promoted to the down/right diagonal"
+    );
+}
