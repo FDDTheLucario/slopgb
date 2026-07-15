@@ -449,6 +449,9 @@ pub struct Settings {
     /// new Emulated-system radio rebuilds the machine immediately; when off the
     /// choice is deferred and applied on the next Reset.
     pub auto_reset_on_system_change: bool,
+    /// System → "Rewind enabled": keep a ring of recent save states so Backspace
+    /// rewinds emulation. Default off (it costs memory + a per-interval snapshot).
+    pub rewind_enabled: bool,
     /// System → "bootroms enabled": execute the configured boot ROM on ROM load
     /// (bgb's checkbox). Off by default — slopgb then boots post-boot.
     pub bootroms_enabled: bool,
@@ -528,6 +531,7 @@ impl Default for Settings {
             break_incdec_fexx: false,
             break_sgb_transfer: false,
             auto_reset_on_system_change: true,
+            rewind_enabled: false,
             bootroms_enabled: false,
             bootrom_dmg: String::new(),
             bootrom_gbc: String::new(),

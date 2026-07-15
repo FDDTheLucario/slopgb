@@ -173,8 +173,14 @@ pub(super) fn system(s: &Settings, content: Rect) -> Vec<Ctrl> {
         Field::AutoResetOnSystemChange,
     ));
     l.row();
+    let rw = "Rewind enabled";
+    v.push(Ctrl::live(
+        rc(l.at(), rw),
+        chk(rw, s.rewind_enabled),
+        Field::RewindEnabled,
+    ));
+    l.row();
     for label in [
-        "Rewind enabled",
         "detect GB pocket / SGB2",
         "detect GBA",
         "GB Player",

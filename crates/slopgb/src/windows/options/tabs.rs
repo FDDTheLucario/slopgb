@@ -84,6 +84,8 @@ pub(crate) enum Field {
     UninitedWram,
     /// System → "automatic reset on system change".
     AutoResetOnSystemChange,
+    /// System → "Rewind enabled".
+    RewindEnabled,
     Model(ModelChoice),
     Volume,
     /// Sound → the SGB audio-backend dropdown (cycles Built-in ↔ coprocessor).
@@ -332,6 +334,7 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         Field::AutoResetOnSystemChange => {
             s.auto_reset_on_system_change = !s.auto_reset_on_system_change;
         }
+        Field::RewindEnabled => s.rewind_enabled = !s.rewind_enabled,
         Field::Model(m) => s.model = m,
         Field::Volume => s.volume = slider_frac(ct.rect, px),
         Field::AudioBackend => s.audio_backend = s.audio_backend.next(),
@@ -393,6 +396,7 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
             s.model = d.model;
             s.uninited_wram = d.uninited_wram;
             s.auto_reset_on_system_change = d.auto_reset_on_system_change;
+            s.rewind_enabled = d.rewind_enabled;
         }
         OptionsTab::Debug => {
             s.lowercase_disasm = d.lowercase_disasm;

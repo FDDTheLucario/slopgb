@@ -385,6 +385,21 @@ impl ApplicationHandler for App {
             }
             return;
         }
+        // Rewind (Backspace held + "Rewind enabled"): step backward through the
+        // save-state ring at frame cadence instead of advancing. Falls through to
+        // normal play when the ring is exhausted.
+        if self.rewinding && self.settings.rewind_enabled && self.session.rewind_step() {
+            self.flush_idle_input(); // don't feed presses into a rewound machine
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+            self.tools.request_redraw_all();
+            self.update_fps(0);
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + crate::FRAME_DURATION,
+            ));
+            return;
+        }
         // Apply deferred joypad input at its sub-frame offset before emulating,
         // so the joypad interrupt lands on a realistic, varied LCD line.
         self.apply_pending_input();
@@ -409,6 +424,11 @@ impl ApplicationHandler for App {
         if frames > 0 {
             self.session.autosave();
             self.write_recovery_state();
+            // Build the rewind ring while playing forward (System → "Rewind
+            // enabled"); throttled internally to the capture interval.
+            if self.settings.rewind_enabled {
+                self.session.capture_rewind();
+            }
             // Drive read-only plugins once per rendered frame-batch. A no-op with
             // no plugins loaded (default), so the golden path is untouched.
             self.plugins.pump(&self.session.gb);

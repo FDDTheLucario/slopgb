@@ -517,3 +517,26 @@ fn atomic_write_replaces_existing_file() {
     assert!(!path.with_extension("sav.tmp").exists());
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn rewind_ring_captures_then_restores_and_empties() {
+    // A blank machine is fine here: save_state/load_state work regardless of the
+    // frozen front-end gate, and frame_count starts at 0 so the first capture fires.
+    let mut s = Session::blank(Model::Dmg);
+    s.gb.debug_write(0xC000, 0xAB); // WRAM marker
+    s.capture_rewind(); // frame 0 >= next(0) -> snapshot taken
+    s.gb.debug_write(0xC000, 0x00); // move past it
+
+    assert!(s.rewind_step(), "a snapshot was available");
+    assert_eq!(
+        s.gb.debug_read(0xC000),
+        0xAB,
+        "rewind restored the captured WRAM"
+    );
+    assert!(!s.rewind_step(), "ring now empty");
+
+    // Reset drops the ring so stale states can't be rewound into.
+    s.capture_rewind();
+    s.reset();
+    assert!(!s.rewind_step(), "reset cleared the ring");
+}

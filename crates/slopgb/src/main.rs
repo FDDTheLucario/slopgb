@@ -351,6 +351,9 @@ struct App {
     muted: bool,
     paused: bool,
     turbo: bool,
+    /// Backspace held with rewind enabled: step backward through the save-state
+    /// ring instead of advancing (see `about_to_wait`).
+    rewinding: bool,
     /// Per-key hold state, so two keys mapped to one button release cleanly.
     buttons: ButtonTracker,
     /// Rebindable keyboard → Game Boy button map (Joypad "configure keyboard").
@@ -552,6 +555,7 @@ impl App {
             muted,
             paused: false,
             turbo: false,
+            rewinding: false,
             buttons: ButtonTracker::default(),
             bindings: keymap::KeyBindings::default(),
             input_ops: Vec::new(),
@@ -970,6 +974,14 @@ impl App {
         match action {
             Action::Turbo => {
                 self.turbo = pressed;
+                if !pressed {
+                    self.resync_pacing();
+                }
+            }
+            // Rewind while held (System → "Rewind enabled"); resume forward play
+            // on release. A no-op if rewind is off / the ring is empty.
+            Action::Rewind => {
+                self.rewinding = pressed;
                 if !pressed {
                     self.resync_pacing();
                 }

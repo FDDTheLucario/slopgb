@@ -1023,6 +1023,10 @@ fn auto_reset_on_system_change_checkbox_toggles() {
     assert!(st.working.auto_reset_on_system_change, "on by default");
     click_field(&mut st, Field::AutoResetOnSystemChange);
     assert!(!st.working.auto_reset_on_system_change);
+    // "Rewind enabled" off by default → click turns it on.
+    assert!(!st.working.rewind_enabled);
+    click_field(&mut st, Field::RewindEnabled);
+    assert!(st.working.rewind_enabled);
 }
 
 #[test]

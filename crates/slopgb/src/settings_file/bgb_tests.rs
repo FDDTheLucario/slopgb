@@ -47,6 +47,7 @@ fn settings_round_trip_through_bgb_ini() {
         reduce_cpu: false,
         recovery_save_state: false,
         auto_reset_on_system_change: false,
+        rewind_enabled: true,
         registers_editable: false,
         start_in_debugger: true,
         mem_live_update: false,

@@ -14,6 +14,11 @@ use crate::windows::options::ModelChoice;
 /// Autosave battery RAM every 5 seconds of emulated time.
 const AUTOSAVE_CYCLES: u64 = 5 * CLOCK_HZ as u64;
 
+/// Capture a rewind snapshot every N emulated frames (~30/s at 60 fps).
+const REWIND_INTERVAL_FRAMES: u64 = 2;
+/// Rewind ring cap — ~20 s of backward playback at the capture rate.
+const REWIND_MAX_STATES: usize = 600;
+
 pub(crate) struct Session {
     pub(crate) gb: GameBoy,
     /// Original ROM image, kept for reset.
@@ -32,6 +37,12 @@ pub(crate) struct Session {
     /// resets to `None`; it deliberately **survives a reset** so a Quick Load can
     /// undo the reset (bgb's behavior — the snapshot is the same ROM).
     quick_state: Option<Box<GameBoy>>,
+    /// System → "Rewind enabled": a bounded ring of recent save states (oldest
+    /// dropped when full), captured every [`REWIND_INTERVAL_FRAMES`] while
+    /// playing. Empty until rewind is enabled; cleared on reset / ROM change.
+    rewind: std::collections::VecDeque<Vec<u8>>,
+    /// Frame count at which the next rewind snapshot is taken.
+    next_rewind_frame: u64,
     /// Boot-ROM configuration captured at load, so a power-cycle (`reset`) or a
     /// model switch (`set_model`) re-runs the boot ROM (logo + chime) like bgb,
     /// instead of silently replaying the post-boot state.
@@ -79,6 +90,8 @@ impl Session {
             last_saved: None,
             next_autosave: AUTOSAVE_CYCLES,
             quick_state: None,
+            rewind: std::collections::VecDeque::new(),
+            next_rewind_frame: 0,
             boot: OwnedBootSpec::default(),
             sgb_bios: None,
             sgb_coprocessor: false,
@@ -140,6 +153,8 @@ impl Session {
             last_saved,
             next_autosave: AUTOSAVE_CYCLES,
             quick_state: None,
+            rewind: std::collections::VecDeque::new(),
+            next_rewind_frame: 0,
             boot: boot.to_owned(),
             sgb_bios: None,
             sgb_coprocessor: false,
@@ -232,6 +247,40 @@ impl Session {
         true
     }
 
+    /// Capture a rewind snapshot if the interval has elapsed (System → "Rewind
+    /// enabled"; the caller invokes this only while playing with rewind on).
+    pub(crate) fn capture_rewind(&mut self) {
+        let frame = self.gb.frame_count();
+        if frame < self.next_rewind_frame {
+            return;
+        }
+        self.next_rewind_frame = frame + REWIND_INTERVAL_FRAMES;
+        if self.rewind.len() >= REWIND_MAX_STATES {
+            self.rewind.pop_front();
+        }
+        self.rewind.push_back(self.gb.save_state());
+    }
+
+    /// Restore (and drop) the most recent rewind snapshot. Returns whether one
+    /// was available — `false` means the ring is empty (nothing to rewind to).
+    pub(crate) fn rewind_step(&mut self) -> bool {
+        match self.rewind.pop_back() {
+            Some(bytes) => {
+                let _ = self.gb.load_state(&bytes);
+                self.next_autosave = self.gb.cycles().saturating_add(AUTOSAVE_CYCLES);
+                self.next_rewind_frame = 0; // recapture promptly once play resumes
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Drop the rewind ring — a reset / ROM change makes the states stale.
+    pub(crate) fn clear_rewind(&mut self) {
+        self.rewind.clear();
+        self.next_rewind_frame = 0;
+    }
+
     /// Save state to disk (bgb File / State → Save state): write the serialized
     /// machine to `path` via a temp-file-then-rename (same durability as the
     /// battery `.sav` write — an interrupted save can't destroy a prior good
@@ -257,6 +306,7 @@ impl Session {
     /// ROM (logo + chime) when one is configured for the model, like bgb.
     pub(crate) fn reset(&mut self) {
         self.flush_save();
+        self.clear_rewind(); // the pre-reset states no longer apply
         let boot = self.boot.resolve(self.model);
         match build_gb(
             self.model,

@@ -326,6 +326,7 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
             "auto_reset_on_system_change",
             def.auto_reset_on_system_change,
         ),
+        rewind_enabled: b("system", "rewind_enabled", def.rewind_enabled),
         bootroms_enabled: b("system", "bootroms_enabled", def.bootroms_enabled),
         bootrom_dmg: s("system", "bootrom_dmg", &def.bootrom_dmg),
         bootrom_gbc: s("system", "bootrom_gbc", &def.bootrom_gbc),
@@ -396,6 +397,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         allow_opposing: _,
         uninited_wram: _,
         auto_reset_on_system_change: _,
+        rewind_enabled: _,
         break_ld_b_b: _,
         break_invalid_op: _,
         break_echo_ram: _,
@@ -529,6 +531,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         "auto_reset_on_system_change",
         fb(settings.auto_reset_on_system_change),
     );
+    d.set("system", "rewind_enabled", fb(settings.rewind_enabled));
     d.set("exceptions", "break_ld_b_b", fb(settings.break_ld_b_b));
     d.set(
         "exceptions",

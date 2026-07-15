@@ -110,6 +110,7 @@ pub fn from_ini(f: &Ini) -> Settings {
             "SlopgbAutoResetOnSystemChange",
             d.auto_reset_on_system_change,
         ),
+        rewind_enabled: boolean("SlopgbRewindEnabled", d.rewind_enabled),
         break_ld_b_b: boolean("SlopgbBreakLdBB", d.break_ld_b_b),
         break_invalid_op: boolean("InvalidOpBreak", d.break_invalid_op),
         break_echo_ram: boolean("SlopgbBreakEchoRam", d.break_echo_ram),
@@ -183,6 +184,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         allow_opposing: _,
         uninited_wram: _,
         auto_reset_on_system_change: _,
+        rewind_enabled: _,
         break_ld_b_b: _,
         break_invalid_op: _,
         break_echo_ram: _,
@@ -250,6 +252,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         "SlopgbAutoResetOnSystemChange",
         ini::fmt_bool(s.auto_reset_on_system_change),
     );
+    f.set("SlopgbRewindEnabled", ini::fmt_bool(s.rewind_enabled));
     f.set("InvalidOpBreak", ini::fmt_bool(s.break_invalid_op));
     f.set("DebugDisableLCD", ini::fmt_bool(s.break_lcd_off_vblank));
     f.set("SlopgbBreakOamDmaBad", ini::fmt_bool(s.break_oam_dma_bad));
