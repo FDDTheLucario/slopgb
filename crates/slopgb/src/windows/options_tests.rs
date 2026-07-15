@@ -963,6 +963,77 @@ fn joypad_video_record_checkbox_toggles() {
 }
 
 #[test]
+fn palette_0_31_display_matches_captured_bgb() {
+    // Captured from real bgb (docs/bgb-reference/options/options-gbcolors-031.png):
+    // the lightest BGB-0.3 colour 232/252/204 reads 29/31/25 with "0-31 numbers"
+    // on — i.e. v8 >> 3.
+    let mut s = Settings::default();
+    s.select_scheme(0); // BGB 0.3: colour 0 = 0x00E8FCCC = 232,252,204
+    s.palette_edit_shade = 0;
+    s.palette_0_31 = false;
+    assert_eq!(
+        [
+            s.palette_channel_display(0),
+            s.palette_channel_display(1),
+            s.palette_channel_display(2)
+        ],
+        [232, 252, 204]
+    );
+    s.palette_0_31 = true;
+    assert_eq!(
+        [
+            s.palette_channel_display(0),
+            s.palette_channel_display(1),
+            s.palette_channel_display(2)
+        ],
+        [29, 31, 25],
+        "0-31 numbers must show bgb's v8>>3 readout"
+    );
+}
+
+#[test]
+fn set_palette_channel_edits_the_selected_shade_and_snaps_in_5bit() {
+    let mut s = Settings::default();
+    s.select_scheme(0);
+    s.palette_edit_shade = 2; // a mid shade
+    // 8-bit mode: max frac -> 255 in the green channel, others untouched.
+    s.palette_0_31 = false;
+    let before = s.dmg_palette;
+    s.set_palette_channel(1, 1.0);
+    assert_eq!((s.dmg_palette[2] >> 8) & 0xFF, 255, "green set to 255");
+    assert_eq!(s.dmg_palette[2] & 0xFF, before[2] & 0xFF, "blue untouched");
+    assert_eq!(s.dmg_palette[0], before[0], "other shades untouched");
+    // 5-bit mode: setting level 15 snaps to v5<<3 = 120 (bgb's readout inverse).
+    s.palette_0_31 = true;
+    s.set_palette_channel(0, 15.0 / 31.0);
+    assert_eq!((s.dmg_palette[2] >> 16) & 0xFF, 120, "red snaps to 15<<3");
+    assert_eq!(
+        s.palette_channel_display(0),
+        15,
+        "reads back as 15 in 5-bit"
+    );
+}
+
+#[test]
+fn gb_colors_rgb_editor_controls_are_live() {
+    let s = Settings::default();
+    let content = OptionsState::content_rect(dialog());
+    let ctrls = controls(OptionsTab::GbColors, &s, content);
+    for f in [
+        Field::PaletteR,
+        Field::PaletteG,
+        Field::PaletteB,
+        Field::Palette031,
+        Field::PaletteSelectShade,
+    ] {
+        assert!(
+            ctrls.iter().any(|c| c.field == Some(f)),
+            "GB Colors control {f:?} must be live"
+        );
+    }
+}
+
+#[test]
 fn joypad_audio_channels_record_checkbox_toggles() {
     let mut st = OptionsState::new(Settings::default());
     st.active = OptionsTab::Joypad;

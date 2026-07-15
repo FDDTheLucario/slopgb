@@ -308,6 +308,13 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
         recovery_save_state: b("misc", "recovery_save_state", def.recovery_save_state),
         scheme,
         dmg_palette,
+        palette_edit_shade: i(
+            "graphics",
+            "palette_edit_shade",
+            def.palette_edit_shade as i64,
+        )
+        .clamp(0, 3) as usize,
+        palette_0_31: b("graphics", "palette_0_31", def.palette_0_31),
         allow_opposing: b("misc", "allow_opposing", def.allow_opposing),
         rapid_speed: i("misc", "rapid_speed", i64::from(def.rapid_speed)).clamp(1, 4) as u32,
         record_audio: b("misc", "record_audio", def.record_audio),
@@ -400,6 +407,8 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         recovery_save_state: _,
         scheme: _,
         dmg_palette: _,
+        palette_edit_shade: _,
+        palette_0_31: _,
         allow_opposing: _,
         rapid_speed: _,
         record_audio: _,
@@ -488,6 +497,12 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         .collect::<Vec<_>>()
         .join(", ");
     d.set("graphics", "palette", &palette);
+    d.set(
+        "graphics",
+        "palette_edit_shade",
+        &settings.palette_edit_shade.to_string(),
+    );
+    d.set("graphics", "palette_0_31", fb(settings.palette_0_31));
     d.set("debug", "lowercase_disasm", fb(settings.lowercase_disasm));
     d.set("debug", "lowercase_hex", fb(settings.lowercase_hex));
     d.set("debug", "show_clocks", fb(settings.show_clocks));

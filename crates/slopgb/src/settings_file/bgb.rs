@@ -104,6 +104,9 @@ pub fn from_ini(f: &Ini) -> Settings {
         recovery_save_state: boolean("SlopgbRecoverySaveState", d.recovery_save_state),
         scheme,
         dmg_palette,
+        palette_edit_shade: int("SlopgbPaletteShade", d.palette_edit_shade as i64).clamp(0, 3)
+            as usize,
+        palette_0_31: boolean("Slopgb031Numbers", d.palette_0_31),
         allow_opposing: boolean("JoyOpposite", d.allow_opposing),
         rapid_speed: int("SlopgbRapidSpeed", i64::from(d.rapid_speed)).clamp(1, 4) as u32,
         record_audio: boolean("SlopgbRecordAudio", d.record_audio),
@@ -187,6 +190,8 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         recovery_save_state: _,
         scheme: _,
         dmg_palette: _,
+        palette_edit_shade: _,
+        palette_0_31: _,
         allow_opposing: _,
         rapid_speed: _,
         record_audio: _,
@@ -290,6 +295,8 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         f.set(key, &ini::fmt_color_hex(s.dmg_palette[i]));
     }
     // slopgb-only fields — no bgb key, stored under a `Slopgb` prefix bgb ignores.
+    f.set("SlopgbPaletteShade", &s.palette_edit_shade.to_string());
+    f.set("Slopgb031Numbers", ini::fmt_bool(s.palette_0_31));
     f.set("SlopgbStretch", ini::fmt_bool(s.stretch));
     f.set(
         "SlopgbDisableSgbColors",

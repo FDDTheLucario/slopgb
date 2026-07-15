@@ -39,6 +39,8 @@ fn settings_round_trip_through_bgb_ini() {
         record_audio_channels: true,
         rtc_vba_sav: true,
         rtc_bgb_legacy: true,
+        palette_edit_shade: 2,
+        palette_0_31: true,
         uninited_wram: true, // bgb's UninitedWRAM key
         frame_blend: true,
         doubler: true,

@@ -24,7 +24,7 @@ where bgb itself greys them).
 | GB Colors | scheme (`SCHEMES` presets → `GameBoy::set_dmg_palette`) |
 | Sound | volume + mono (`AudioPipe::set_volume` gain/downmix); **SGB audio backend** dropdown (Built-in HLE APU / SGB coprocessor → `Settings.audio_backend` → `Session::set_sgb_coprocessor`, the same seam `--sgb-coprocessor` drives; the CLI flag/env still wins the launch, else the persisted choice is honored at startup. Default Built-in → byte-identical. A no-op off SGB) |
 | Graphics | stretch (→ fullscreen-stretched window size); **frame blend** (`postfx` present filter — averages the frame with the previous one); **SGB border in screenshot** (`save_screenshot` uses the 256×224 composite when a border is loaded) |
-| GB Colors | (above) plus **DMG on GBC LCD colors** + **contrast** wheel — `postfx` per-pixel present filters (frontend-only, golden-safe) |
+| GB Colors | (above) plus **per-colour RGB editor** (bgb's three sliders + number readouts editing the selected shade of `dmg_palette`; **select** dropdown picks the shade; **0-31 numbers** toggles the readouts between 8-bit 0-255 and native 5-bit 0-31 — `v8>>3`, captured 1:1 from real bgb: 232/252/204→29/31/25, `docs/bgb-reference/options/options-gbcolors-031.png`; edits snap to `v5<<3` in 5-bit mode) + **DMG on GBC LCD colors** + **contrast** wheel — `postfx` per-pixel present filters (frontend-only, golden-safe) |
 | Debug | lowercase-hex + show-clocks (→ `DisasmFmt` via `tools.set_disasm_fmt`); "pressing Esc shows debugger" (`Settings.esc_shows_debugger`, default on → `handle_key` opens the debugger on Esc instead of quitting); RGBDS syntax; "memory viewer in own window"; **Registers can be edited** (→ `DebuggerState.registers_editable` via `tools.set_registers_editable`; off greys the register-edit menu); **Start in debugger** (opens the debugger window at launch); **Live update memory viewer** (`tools.request_redraw_live` skips the standalone memory window's per-frame redraw when off — it then repaints only on interaction, bgb's non-continuous refresh); **GB CPU usage meter** (the emulated CPU's non-halted duty %, from the golden-safe `GameBoy::halt_cycles` counter, shown in the window title alongside FPS) |
 | Misc | fast-forward-speed + framerate-limit sliders (→ `app_pacing` `turbo_max_frames`/`frame_interval`); show-framerate (title); freeze-recent-ROMs (`push_recent` gate); pause-if-losing-focus (auto-pause on focus loss, auto-resume on refocus unless manually paused via `App.paused_by_focus`); **Show errors on ROM load** (a failed load pops an info box, default on); **Load ROM dialog on startup** (opens the picker at launch when no CLI ROM) |
 | Joypad | **Screenshot button** saves↔copies (copies puts the frame on the clipboard as PNG via `clipboard::copy_image_png`); **Screenshots** format bmp↔png (`ScreenshotFormat` → `screenshot::to_bmp` / `mcp::png::encode`); **Audio** records a WAV, **Video** records an uncompressed AVI (`avi::AviWriter` streams the 160×144 LCD one frame per rendered batch, patching sizes + `idx1` on finalise; toggling off / quitting finalises); **Audio channels** records the 4 GB sound channels to separate WAVs (`slopgb-<stamp>-chN.wav`) via the golden-safe core tap `GameBoy::set_record_channels` / `drain_audio_channels` — each channel's isolated mono output, box-averaged over the mix's own window |
@@ -129,24 +129,16 @@ lowercase-disassembler, the whole Sound row (soundcard / samplerate / latency /
 safe PPU `sgb_mono`), System Rewind (Backspace, a savestate ring), Joypad
 rapid-speed (`[`/`]` auto-fire) + Audio WAV recording + Video AVI recording +
 Audio-channels recording (golden-safe per-channel APU tap) + VBA-compatible RTC
-`.sav` export + BGB-legacy `.rtc` sidecar (golden-safe read-only RTC accessors).
-See the Live table.
+`.sav` export + BGB-legacy `.rtc` sidecar (golden-safe read-only RTC accessors) +
+the GB Colors per-colour RGB editor with **0-31 numbers** (captured 1:1 from real
+bgb via the wine rig). See the Live table.
 
 ## Inert
 
-Still inert — each needs a prerequisite beyond a normal wiring:
+Still inert — each is a genuine hard constraint (a banned dep, absent core
+hardware, the golden-safe law, or no softbuffer/desktop equivalent), NOT a
+buildable control:
 
-- **0-31 numbers** (GB Colors) — this toggles the *display range* of bgb's three
-  per-colour RGB sliders (0-255 ↔ native 5-bit 0-31). slopgb's GB Colors tab
-  replaced that per-colour editor with preset-scheme cycling, so there are no RGB
-  sliders to retarget. Building it faithfully needs both a new RGB-editor UI and
-  bgb's exact 8↔5-bit colour curve + the "select: all" drag semantics — neither
-  is in the one static `options-gbcolors.png` capture (the checkbox is unchecked
-  there), and there is no `bgb.exe` in-tree to capture the checked state. A
-  never-invent-bgb blocker, not a low-value defer — **held by decision** until a
-  `bgb.exe` is dropped in-tree so the capture rig can read the real 0-31 values +
-  colour curve, then it gets built 1:1 (wine is installed; the rig just needs the
-  binary).
 - **Model detection** (GB-pocket/SGB2 · GBA · GB Player · MGB-auto-border) — the
   core has no distinct GBA/MGB/GB-Player models to detect into.
 - **Waitloop detection** — a speed hack that skips CPU wait loops → perturbs

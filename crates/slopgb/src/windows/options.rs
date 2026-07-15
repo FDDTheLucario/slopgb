@@ -420,6 +420,13 @@ pub struct Settings {
     pub scheme: usize,
     /// GB Colors → the live DMG palette (lightest→darkest).
     pub dmg_palette: [u32; 4],
+    /// GB Colors → which shade (0=lightest..3=darkest) the RGB sliders edit.
+    pub palette_edit_shade: usize,
+    /// GB Colors → "0-31 numbers": show/edit the RGB sliders in native 5-bit
+    /// (0-31, bgb's `v8>>3` readout) instead of 8-bit (0-255). Captured from
+    /// real bgb (`docs/bgb-reference/options/options-gbcolors-031.png`:
+    /// 232/252/204 → 29/31/25).
+    pub palette_0_31: bool,
     /// Joypad → "allow pressing L+R or U+D". `false` (bgb default) filters
     /// opposing directions so the joypad never reports both at once.
     pub allow_opposing: bool,
@@ -540,6 +547,8 @@ impl Default for Settings {
             recovery_save_state: true,
             scheme: 0,
             dmg_palette: SCHEMES[0].colors,
+            palette_edit_shade: 0,
+            palette_0_31: false,
             allow_opposing: false,
             rapid_speed: 2,
             record_audio: false,
@@ -575,6 +584,37 @@ impl Settings {
             self.scheme = i;
             self.dmg_palette = s.colors;
         }
+    }
+
+    /// The displayed value of channel `ch` (0=R,1=G,2=B) of the selected shade:
+    /// 8-bit (0-255) or, with "0-31 numbers" on, 5-bit (`v8>>3`, 0-31) — bgb's
+    /// readout law (232→29, 252→31, 204→25, captured from real bgb).
+    #[must_use]
+    pub fn palette_channel_display(&self, ch: usize) -> u32 {
+        let v8 = (self.dmg_palette[self.palette_edit_shade.min(3)] >> (16 - ch as u32 * 8)) & 0xFF;
+        if self.palette_0_31 { v8 >> 3 } else { v8 }
+    }
+
+    /// The slider fraction (0..1) for channel `ch` of the selected shade.
+    #[must_use]
+    pub fn palette_channel_frac(&self, ch: usize) -> f32 {
+        let v8 = (self.dmg_palette[self.palette_edit_shade.min(3)] >> (16 - ch as u32 * 8)) & 0xFF;
+        v8 as f32 / 255.0
+    }
+
+    /// Set channel `ch` (0=R,1=G,2=B) of the selected shade from a slider
+    /// fraction. With "0-31 numbers" on the value snaps to `v5<<3` (32 levels,
+    /// the natural inverse of bgb's `v8>>3` readout); otherwise full 8-bit.
+    pub fn set_palette_channel(&mut self, ch: usize, frac: f32) {
+        let v8 = if self.palette_0_31 {
+            ((frac * 31.0).round() as u32) << 3
+        } else {
+            (frac * 255.0).round() as u32
+        }
+        .min(255);
+        let shift = 16 - ch as u32 * 8;
+        let shade = self.palette_edit_shade.min(3);
+        self.dmg_palette[shade] = (self.dmg_palette[shade] & !(0xFFu32 << shift)) | (v8 << shift);
     }
 
     /// The core exception-break mask (`EXC_*` bits) for the armed conditions —

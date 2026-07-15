@@ -35,6 +35,8 @@ fn settings_and_recent_round_trip() {
         record_audio_channels: true,
         rtc_vba_sav: true,
         rtc_bgb_legacy: true,
+        palette_edit_shade: 2,
+        palette_0_31: true,
         break_oam_dma_bad: true,
         break_incdec_fexx: true,
         break_sgb_transfer: true,

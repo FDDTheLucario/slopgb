@@ -522,7 +522,38 @@ pub(super) fn sound(s: &Settings, content: Rect) -> Vec<Ctrl> {
 pub(super) fn gb_colors(s: &Settings, content: Rect) -> Vec<Ctrl> {
     let mut l = Lay::new(content);
     let mut v = Vec::new();
-    // Four swatches of the live palette (lightest→darkest).
+    // Per-colour RGB editor for the selected shade (bgb's three sliders): a
+    // number readout + a slider each, R/G/B top→bottom. "0-31 numbers" shows
+    // them in native 5-bit (bgb's v8>>3 readout) instead of 8-bit.
+    for (ch, field) in [Field::PaletteR, Field::PaletteG, Field::PaletteB]
+        .into_iter()
+        .enumerate()
+    {
+        v.push(Ctrl::inert(
+            rc(l.at(), "000"),
+            Kind::Label {
+                text: s.palette_channel_display(ch).to_string(),
+            },
+        ));
+        v.push(Ctrl::live(
+            Rect::new(l.x0 + 40, l.y, 160, line_height()),
+            Kind::Slider {
+                frac: s.palette_channel_frac(ch),
+                w: 160,
+            },
+            field,
+        ));
+        l.row();
+    }
+    // "0-31 numbers": toggle the readouts between 8-bit (0-255) and 5-bit (0-31).
+    v.push(Ctrl::live(
+        rc(l.at(), "0-31 numbers"),
+        chk("0-31 numbers", s.palette_0_31),
+        Field::Palette031,
+    ));
+    l.row();
+    // Four swatches of the live palette (lightest→darkest); the "select"
+    // dropdown picks which one the RGB sliders above edit.
     for (i, c) in s.dmg_palette.iter().enumerate() {
         v.push(Ctrl::inert(
             Rect::new(l.x0 + i as i32 * 34, l.y, 30, 22),
@@ -530,6 +561,21 @@ pub(super) fn gb_colors(s: &Settings, content: Rect) -> Vec<Ctrl> {
         ));
     }
     l.y += 30;
+    v.push(Ctrl::inert(
+        rc(l.at(), "select:"),
+        Kind::Label {
+            text: "select:".into(),
+        },
+    ));
+    v.push(Ctrl::live(
+        Rect::new(l.x0 + 55, l.y, 44, line_height() + 2),
+        Kind::Dropdown {
+            value: s.palette_edit_shade.to_string(),
+            w: 44,
+        },
+        Field::PaletteSelectShade,
+    ));
+    l.row();
     // Scheme dropdown — live, cycles through SCHEMES on click.
     v.push(Ctrl::inert(
         rc(l.at(), "Scheme:"),
@@ -544,12 +590,6 @@ pub(super) fn gb_colors(s: &Settings, content: Rect) -> Vec<Ctrl> {
             w: 120,
         },
         Field::SchemeCycle,
-    ));
-    l.row();
-    l.row();
-    v.push(Ctrl::inert(
-        rc(l.at(), "0-31 numbers"),
-        chk("0-31 numbers", false),
     ));
     l.row();
     v.push(Ctrl::live(

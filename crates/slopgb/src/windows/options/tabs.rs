@@ -42,6 +42,17 @@ pub(crate) enum Field {
     DmgGbcLcd,
     /// GB Colors → contrast wheel slider (maps the click fraction to 0.0..=1.0).
     Contrast,
+    /// GB Colors → "0-31 numbers": toggle the RGB sliders between 8-bit (0-255)
+    /// and native 5-bit (0-31) display.
+    Palette031,
+    /// GB Colors → "select" dropdown: cycle which shade (0..3) the RGB sliders
+    /// edit.
+    PaletteSelectShade,
+    /// GB Colors → the R / G / B sliders editing the selected shade (channel
+    /// 0 / 1 / 2); maps the click fraction to the channel value.
+    PaletteR,
+    PaletteG,
+    PaletteB,
     /// Graphics → "SGB border in screenshot" checkbox.
     SgbBorderScreenshot,
     /// Joypad → "Screenshots" format dropdown (cycles BMP ↔ PNG).
@@ -308,6 +319,11 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         Field::Doubler => s.doubler = !s.doubler,
         Field::DmgGbcLcd => s.dmg_gbc_lcd = !s.dmg_gbc_lcd,
         Field::Contrast => s.contrast = slider_frac(ct.rect, px),
+        Field::Palette031 => s.palette_0_31 = !s.palette_0_31,
+        Field::PaletteSelectShade => s.palette_edit_shade = (s.palette_edit_shade + 1) % 4,
+        Field::PaletteR => s.set_palette_channel(0, slider_frac(ct.rect, px)),
+        Field::PaletteG => s.set_palette_channel(1, slider_frac(ct.rect, px)),
+        Field::PaletteB => s.set_palette_channel(2, slider_frac(ct.rect, px)),
         Field::SgbBorderScreenshot => s.sgb_border_screenshot = !s.sgb_border_screenshot,
         Field::ScreenshotFormat => s.screenshot_format = s.screenshot_format.next(),
         Field::ScreenshotButtonMode => s.screenshot_copies = !s.screenshot_copies,
@@ -461,6 +477,8 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
             s.select_scheme(d.scheme);
             s.dmg_gbc_lcd = d.dmg_gbc_lcd;
             s.contrast = d.contrast;
+            s.palette_edit_shade = d.palette_edit_shade;
+            s.palette_0_31 = d.palette_0_31;
         }
         // configure-keyboard is not a Settings field; the SOCD toggle + the
         // screenshot format are the live Joypad fields that reset.
