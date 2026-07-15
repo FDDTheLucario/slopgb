@@ -453,6 +453,13 @@ impl GameBoy {
         self.bus.cycles()
     }
 
+    /// Of [`Self::cycles`], those elapsed while the CPU was HALT-gated — a
+    /// read-only diagnostic (the frontend GB-CPU-usage meter). Not part of the
+    /// save-state, so it restarts from 0 after a load.
+    pub fn halt_cycles(&self) -> u64 {
+        self.bus.halt_cycles()
+    }
+
     /// Press a joypad button (held until [`Self::release`]).
     pub fn press(&mut self, b: Button) {
         self.bus.joypad_mut().press(b);

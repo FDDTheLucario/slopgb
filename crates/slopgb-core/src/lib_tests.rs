@@ -21,6 +21,32 @@ fn exc_rom(bytes: &[u8]) -> Vec<u8> {
     rom
 }
 
+#[test]
+fn halt_cycles_counts_only_time_spent_halted() {
+    // `ld a,0 ; ldh (FF0F),a ; ldh (FFFF),a ; halt`: clear IF + IE so HALT
+    // (IME=0) has no wake condition and stays halted for the rest of the frame
+    // while the PPU keeps running — so halt_cycles is most of the frame.
+    let mut gb = GameBoy::new(
+        Model::Dmg,
+        exc_rom(&[0x3E, 0x00, 0xE0, 0x0F, 0xE0, 0xFF, 0x76]),
+    )
+    .unwrap();
+    assert_eq!(gb.halt_cycles(), 0, "nothing halted yet");
+    gb.run_frame();
+    let (c, h) = (gb.cycles(), gb.halt_cycles());
+    assert!(h > 0, "some cycles were spent halted");
+    assert!(h <= c, "halt cycles never exceed total ({h} > {c})");
+    assert!(
+        h > c / 2,
+        "a HALT-only frame is halted most of the time ({h}/{c})"
+    );
+
+    // A NOP-only ROM never halts, so the counter stays put.
+    let mut nop = GameBoy::new(Model::Dmg, vec![0u8; 0x8000]).unwrap();
+    nop.run_frame();
+    assert_eq!(nop.halt_cycles(), 0, "no halt cycles without a HALT");
+}
+
 /// A ROM that turns the LCD fully on (BG+window+sprites), enables the
 /// timer at its fastest rate, and triggers APU channel 1, then spins — so
 /// running frames exercises the PPU sub-dot pipeline, the timer, OAM, and

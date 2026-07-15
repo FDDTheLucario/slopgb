@@ -20,6 +20,12 @@ impl Interconnect {
         self.cycles
     }
 
+    /// Of [`Self::cycles`], those elapsed while HALT-gated (the GB-CPU-usage
+    /// meter's numerator). Read-only diagnostic; resets to 0 on state load.
+    pub fn halt_cycles(&self) -> u64 {
+        self.halt_cycles
+    }
+
     pub fn frame_count(&self) -> u64 {
         self.ppu.frame_count()
     }
