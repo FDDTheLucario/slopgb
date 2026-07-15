@@ -173,6 +173,9 @@ pub const EXC_INVALID_OPCODE: u16 = 1 << 1;
 pub const EXC_ECHO_RAM: u16 = 1 << 2;
 /// Break on disabling the LCD (`FF40` bit 7 → 0) outside vblank.
 pub const EXC_LCD_OFF_VBLANK: u16 = 1 << 3;
+/// Break on a CPU access outside HRAM while an OAM DMA is transferring (the bus
+/// is contended — the read/write hits the DMA byte, not the intended one).
+pub const EXC_OAM_DMA_BAD: u16 = 1 << 4;
 
 /// Leading bytes of a slopgb save state (see [`GameBoy::save_state`]).
 const STATE_MAGIC: &[u8; 4] = b"SLPS";

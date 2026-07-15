@@ -24,6 +24,7 @@ fn settings_and_recent_round_trip() {
         tile_hex_8bit: true,
         ff_speed: 6,
         break_ld_b_b: true,
+        break_oam_dma_bad: true,
         stretch: true,
         frame_blend: true,
         dmg_gbc_lcd: true,

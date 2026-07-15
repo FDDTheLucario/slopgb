@@ -22,6 +22,30 @@ fn exc_rom(bytes: &[u8]) -> Vec<u8> {
 }
 
 #[test]
+fn oam_dma_bad_access_exception_breaks_only_when_armed() {
+    // `ld a,C0 ; ldh (46),a ; jr -2`: kick an OAM DMA (source 0xC000) then spin
+    // from ROM. Once the transfer is running, the spin's own opcode fetch is a
+    // non-HRAM access contended with the DMA — bgb's "OAM DMA bad access".
+    let rom = exc_rom(&[0x3E, 0xC0, 0xE0, 0x46, 0x18, 0xFE]);
+
+    // Unarmed (mask 0) is a no-op: the free run never halts on it.
+    let mut off = GameBoy::new(Model::Dmg, rom.clone()).unwrap();
+    assert_eq!(
+        off.run_frame_until_breakpoint(&[]),
+        None,
+        "no break when the exception is disarmed"
+    );
+
+    // Armed: the contended fetch during the transfer halts the run.
+    let mut on = GameBoy::new(Model::Dmg, rom).unwrap();
+    on.set_exceptions(EXC_OAM_DMA_BAD);
+    assert!(
+        on.run_frame_until_breakpoint(&[]).is_some(),
+        "a non-HRAM access during an OAM DMA breaks"
+    );
+}
+
+#[test]
 fn halt_cycles_counts_only_time_spent_halted() {
     // `ld a,0 ; ldh (FF0F),a ; ldh (FFFF),a ; halt`: clear IF + IE so HALT
     // (IME=0) has no wake condition and stays halted for the rest of the frame

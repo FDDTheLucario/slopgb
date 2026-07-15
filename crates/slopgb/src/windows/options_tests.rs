@@ -657,7 +657,7 @@ fn gbcolors_contrast_slider_tracks_click_position() {
 
 #[test]
 fn exceptions_tab_break_conditions_are_live() {
-    // Four break conditions are wired to the core exception-break mask; the
+    // These break conditions are wired to the core exception-break mask; the
     // rest of the tab stays faithfully inert (no clean detector / no backend).
     let s = Settings::default();
     let content = OptionsState::content_rect(dialog());
@@ -670,11 +670,12 @@ fn exceptions_tab_break_conditions_are_live() {
         Field::BreakInvalidOp,
         Field::BreakEchoRam,
         Field::BreakLcdOffVblank,
+        Field::BreakOamDmaBad,
     ] {
         assert!(live.contains(&f), "{f:?} is live");
     }
-    assert_eq!(live.len(), 4, "exactly four live break conditions");
-    // The inert rows (OAM DMA / 16-bit inc-dec / SGB) stay non-live.
+    assert_eq!(live.len(), 5, "exactly five live break conditions");
+    // The inert rows (16-bit inc-dec / SGB) stay non-live.
     use super::tabs::Kind;
     let inert_present = |label: &str| {
         controls(OptionsTab::Exceptions, &s, content)
@@ -683,7 +684,7 @@ fn exceptions_tab_break_conditions_are_live() {
                 matches!(&c.kind, Kind::Check { label: l, .. } if *l == label) && c.field.is_none()
             })
     };
-    assert!(inert_present("break on OAM DMA bad accesses"));
+    assert!(inert_present("break on 16 bits inc/dec FE00-FEFF"));
     assert!(inert_present("break on SGB transfer start"));
 }
 

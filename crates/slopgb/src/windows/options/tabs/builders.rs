@@ -316,7 +316,11 @@ pub(super) fn exceptions(s: &Settings, content: Rect) -> Vec<Ctrl> {
     // faithfully inert (bgb black) — no clean golden-safe detector / no backend.
     // Each entry: (label, live field, checked-from-settings).
     let rows: [(&str, Option<Field>, bool); 7] = [
-        ("break on OAM DMA bad accesses", None, false),
+        (
+            "break on OAM DMA bad accesses",
+            Some(Field::BreakOamDmaBad),
+            s.break_oam_dma_bad,
+        ),
         ("break on 16 bits inc/dec FE00-FEFF", None, false),
         (
             "break on disabling LCD outside vblank",

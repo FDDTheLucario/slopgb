@@ -98,6 +98,8 @@ pub(crate) enum Field {
     BreakEchoRam,
     /// Exceptions → "break on disabling LCD outside vblank".
     BreakLcdOffVblank,
+    /// Exceptions → "break on OAM DMA bad accesses".
+    BreakOamDmaBad,
     /// System → "bootroms enabled" checkbox.
     BootromsEnabled,
     /// System → a `...` bootrom-path browse button (routes a
@@ -322,6 +324,7 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         Field::BreakInvalidOp => s.break_invalid_op = !s.break_invalid_op,
         Field::BreakEchoRam => s.break_echo_ram = !s.break_echo_ram,
         Field::BreakLcdOffVblank => s.break_lcd_off_vblank = !s.break_lcd_off_vblank,
+        Field::BreakOamDmaBad => s.break_oam_dma_bad = !s.break_oam_dma_bad,
         Field::BootromsEnabled => s.bootroms_enabled = !s.bootroms_enabled,
         Field::Theme(t) => {
             s.theme = match t {
@@ -368,12 +371,13 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
             s.mem_live_update = d.mem_live_update;
             s.cpu_usage_meter = d.cpu_usage_meter;
         }
-        // The four wired break conditions; the rest of the tab is inert.
+        // The wired break conditions; the rest of the tab is inert.
         OptionsTab::Exceptions => {
             s.break_ld_b_b = d.break_ld_b_b;
             s.break_invalid_op = d.break_invalid_op;
             s.break_echo_ram = d.break_echo_ram;
             s.break_lcd_off_vblank = d.break_lcd_off_vblank;
+            s.break_oam_dma_bad = d.break_oam_dma_bad;
         }
         OptionsTab::Sound => {
             s.volume = d.volume;

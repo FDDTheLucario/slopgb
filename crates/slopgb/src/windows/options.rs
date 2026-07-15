@@ -416,6 +416,9 @@ pub struct Settings {
     pub break_echo_ram: bool,
     /// Exceptions → "break on disabling LCD outside vblank".
     pub break_lcd_off_vblank: bool,
+    /// Exceptions → "break on OAM DMA bad accesses" (a CPU access outside HRAM
+    /// while an OAM DMA transfers).
+    pub break_oam_dma_bad: bool,
     /// System → "automatic reset on system change": when on (default) picking a
     /// new Emulated-system radio rebuilds the machine immediately; when off the
     /// choice is deferred and applied on the next Reset.
@@ -487,6 +490,7 @@ impl Default for Settings {
             break_invalid_op: true,
             break_echo_ram: false,
             break_lcd_off_vblank: false,
+            break_oam_dma_bad: false,
             auto_reset_on_system_change: true,
             bootroms_enabled: false,
             bootrom_dmg: String::new(),
@@ -511,7 +515,9 @@ impl Settings {
     /// pushed to the machine by `App::apply_exceptions`.
     #[must_use]
     pub fn exception_mask(&self) -> u16 {
-        use slopgb_core::{EXC_ECHO_RAM, EXC_INVALID_OPCODE, EXC_LCD_OFF_VBLANK, EXC_LD_B_B};
+        use slopgb_core::{
+            EXC_ECHO_RAM, EXC_INVALID_OPCODE, EXC_LCD_OFF_VBLANK, EXC_LD_B_B, EXC_OAM_DMA_BAD,
+        };
         let mut m = 0;
         if self.break_ld_b_b {
             m |= EXC_LD_B_B;
@@ -524,6 +530,9 @@ impl Settings {
         }
         if self.break_lcd_off_vblank {
             m |= EXC_LCD_OFF_VBLANK;
+        }
+        if self.break_oam_dma_bad {
+            m |= EXC_OAM_DMA_BAD;
         }
         m
     }
