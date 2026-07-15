@@ -43,6 +43,7 @@ mod symbols;
 mod toolwin;
 mod ui;
 mod video;
+mod wav;
 mod windows;
 
 use std::collections::HashSet;

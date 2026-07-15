@@ -310,6 +310,7 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
         dmg_palette,
         allow_opposing: b("misc", "allow_opposing", def.allow_opposing),
         rapid_speed: i("misc", "rapid_speed", i64::from(def.rapid_speed)).clamp(1, 4) as u32,
+        record_audio: b("misc", "record_audio", def.record_audio),
         uninited_wram: b("system", "uninited_wram", def.uninited_wram),
         break_ld_b_b: b("exceptions", "break_ld_b_b", def.break_ld_b_b),
         break_invalid_op: b("exceptions", "break_invalid_op", def.break_invalid_op),
@@ -397,6 +398,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         dmg_palette: _,
         allow_opposing: _,
         rapid_speed: _,
+        record_audio: _,
         uninited_wram: _,
         auto_reset_on_system_change: _,
         rewind_enabled: _,
@@ -528,6 +530,7 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
     );
     d.set("misc", "allow_opposing", fb(settings.allow_opposing));
     d.set("misc", "rapid_speed", &settings.rapid_speed.to_string());
+    d.set("misc", "record_audio", fb(settings.record_audio));
     d.set("system", "uninited_wram", fb(settings.uninited_wram));
     d.set(
         "system",

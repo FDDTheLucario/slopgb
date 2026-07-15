@@ -407,6 +407,39 @@ impl App {
         }
     }
 
+    /// Joypad → "Audio": start/stop the WAV audio recorder to match the setting.
+    /// Recording needs a live audio pipe (a `--mute` run can't record). Toggling
+    /// the setting off (or quitting mid-record) finalises the file.
+    pub(crate) fn sync_audio_recording(&mut self) {
+        let want = self.settings.record_audio;
+        let Some(pipe) = self.audio.as_mut() else {
+            return;
+        };
+        if want && !pipe.is_recording() {
+            pipe.start_record();
+        } else if !want && pipe.is_recording() {
+            let frames = pipe.take_record(); // pipe borrow ends here
+            self.save_wav_recording(&frames);
+        }
+    }
+
+    /// Encode recorded audio frames to a timestamped WAV in the working dir.
+    pub(crate) fn save_wav_recording(&self, frames: &[(f32, f32)]) {
+        if frames.is_empty() {
+            eprintln!("slopgb: audio recording was empty (no audio while recording)");
+            return;
+        }
+        let wav = crate::wav::encode_wav(frames, crate::pacing::AudioPipe::record_rate());
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis());
+        let path = format!("slopgb-{stamp}.wav");
+        match fs::write(&path, &wav) {
+            Ok(()) => eprintln!("saved audio recording to {path}"),
+            Err(e) => eprintln!("error: could not save audio recording: {e}"),
+        }
+    }
+
     /// Misc → "Recovery save state": rewrite `<rom>.recovery` on the interval so
     /// a crash loses at most `RECOVERY_INTERVAL` of progress. No-op when the
     /// option is off, no ROM is loaded, or the interval hasn't elapsed.

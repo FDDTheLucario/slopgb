@@ -661,7 +661,11 @@ pub(super) fn joypad(s: &Settings, content: Rect) -> Vec<Ctrl> {
         },
     ));
     let grow = gy + line_height() + 2;
-    v.push(Ctrl::inert(rc((gx + 8, grow), "Audio"), chk("Audio", true)));
+    v.push(Ctrl::live(
+        rc((gx + 8, grow), "Audio"),
+        chk("Audio", s.record_audio),
+        Field::RecordAudio,
+    ));
     v.push(Ctrl::inert(
         rc((gx + 80, grow), "Video"),
         chk("Video", true),

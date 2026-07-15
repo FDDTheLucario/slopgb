@@ -426,6 +426,9 @@ pub struct Settings {
     /// Joypad → "Rapid speed": the auto-fire toggle period in frames for the
     /// rapid-fire keys (`[` = rapid A, `]` = rapid B). 1..=4; bgb's "2 2".
     pub rapid_speed: u32,
+    /// Joypad → "Audio" (Mappable button records): record the game audio to a
+    /// WAV while set. Toggling it off on Apply finalises the file.
+    pub record_audio: bool,
     /// bgb's `UninitedWRAM` (ini-only, no dialog control in bgb 1.6.4): power on
     /// with uninitialised (seeded-random) RAM instead of the deterministic
     /// default. `false` (bgb default) = the stable 0xFF cart SRAM / zeroed
@@ -525,6 +528,7 @@ impl Default for Settings {
             dmg_palette: SCHEMES[0].colors,
             allow_opposing: false,
             rapid_speed: 2,
+            record_audio: false,
             uninited_wram: false,
             break_ld_b_b: false,
             // bgb ships with "break on invalid opcode" checked.

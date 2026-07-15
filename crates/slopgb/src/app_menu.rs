@@ -502,6 +502,8 @@ impl App {
         if self.audio_prefs() != self.audio_prefs_applied || s.audio_hq != self.audio_hq_applied {
             self.reopen_audio();
         }
+        // Joypad → "Audio": start/stop the audio recorder to match the setting.
+        self.sync_audio_recording();
         // Sound → SGB audio backend: swap the live SGB machine's coprocessor (a
         // no-op off SGB). Mirror the choice into `sgb_coprocessor` so a later ROM
         // (re)load re-injects the same backend. Built-in = byte-identical golden.

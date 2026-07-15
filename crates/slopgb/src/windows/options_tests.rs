@@ -945,6 +945,15 @@ fn joypad_rapid_speed_dropdown_cycles_1_to_4() {
 }
 
 #[test]
+fn joypad_audio_record_checkbox_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Joypad;
+    assert!(!st.working.record_audio);
+    click_field(&mut st, Field::RecordAudio);
+    assert!(st.working.record_audio);
+}
+
+#[test]
 fn joypad_tab_transcribes_the_capture_controls() {
     // JP8: the inert chrome matching options-joypad.png is present (dropdowns,
     // the Mappable-button-records groupbox + its checks, the joystick-ID field).
@@ -983,7 +992,15 @@ fn joypad_tab_transcribes_the_capture_controls() {
             if *label == "Mappable button records")),
         "Mappable button records groupbox"
     );
-    for label in ["Audio", "Video", "Audio channels"] {
+    // "Audio" is live (records a WAV); "Video" / "Audio channels" stay inert.
+    assert!(
+        ctrls
+            .iter()
+            .any(|c| matches!(&c.kind, Kind::Check { label: "Audio", .. })
+                && c.field == Some(Field::RecordAudio)),
+        "Audio record checkbox is live"
+    );
+    for label in ["Video", "Audio channels"] {
         assert!(
             ctrls.iter().any(
                 |c| matches!(&c.kind, Kind::Check { label: l, .. } if *l == label)

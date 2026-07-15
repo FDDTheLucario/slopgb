@@ -106,6 +106,7 @@ pub fn from_ini(f: &Ini) -> Settings {
         dmg_palette,
         allow_opposing: boolean("JoyOpposite", d.allow_opposing),
         rapid_speed: int("SlopgbRapidSpeed", i64::from(d.rapid_speed)).clamp(1, 4) as u32,
+        record_audio: boolean("SlopgbRecordAudio", d.record_audio),
         uninited_wram: boolean("UninitedWRAM", d.uninited_wram),
         auto_reset_on_system_change: boolean(
             "SlopgbAutoResetOnSystemChange",
@@ -184,6 +185,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         dmg_palette: _,
         allow_opposing: _,
         rapid_speed: _,
+        record_audio: _,
         uninited_wram: _,
         auto_reset_on_system_change: _,
         rewind_enabled: _,
@@ -250,6 +252,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
     );
     f.set("JoyOpposite", ini::fmt_bool(s.allow_opposing));
     f.set("SlopgbRapidSpeed", &s.rapid_speed.to_string());
+    f.set("SlopgbRecordAudio", ini::fmt_bool(s.record_audio));
     f.set("UninitedWRAM", ini::fmt_bool(s.uninited_wram));
     f.set(
         "SlopgbAutoResetOnSystemChange",

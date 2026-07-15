@@ -45,6 +45,9 @@ pub(crate) struct AudioPipe {
     drain_buf: Vec<(f32, f32)>,
     /// Scratch: resampled samples (device rate).
     device_buf: Vec<(f32, f32)>,
+    /// Audio recorder (Joypad → "Audio"): `Some` accumulates every core-rate
+    /// frame drained here, taken by the frontend when recording stops.
+    record: Option<Vec<(f32, f32)>>,
 }
 
 impl AudioPipe {
@@ -61,7 +64,28 @@ impl AudioPipe {
             mono: false,
             drain_buf: Vec::new(),
             device_buf: Vec::new(),
+            record: None,
         }
+    }
+
+    /// The core APU sample rate the recorder's samples are at (WAV rate).
+    pub(crate) fn record_rate() -> u32 {
+        CORE_SAMPLE_RATE
+    }
+
+    /// Start accumulating recorded audio (Joypad → "Audio").
+    pub(crate) fn start_record(&mut self) {
+        self.record = Some(Vec::new());
+    }
+
+    /// Whether audio is currently being recorded.
+    pub(crate) fn is_recording(&self) -> bool {
+        self.record.is_some()
+    }
+
+    /// Stop recording and take the accumulated core-rate frames (empty if none).
+    pub(crate) fn take_record(&mut self) -> Vec<(f32, f32)> {
+        self.record.take().unwrap_or_default()
     }
 
     /// Update the master volume gain + mono downmix (from Options → Sound).
@@ -88,6 +112,11 @@ impl AudioPipe {
         for (dst, src) in self.drain_buf.iter_mut().zip(extra) {
             dst.0 += src.0;
             dst.1 += src.1;
+        }
+        // Recorder (Joypad → "Audio"): capture the mixed core-rate stream before
+        // the device resample + gain, so the WAV is the game's own output.
+        if let Some(rec) = &mut self.record {
+            rec.extend_from_slice(&self.drain_buf);
         }
         self.device_buf.clear();
         self.resampler.run(&self.drain_buf, &mut self.device_buf);

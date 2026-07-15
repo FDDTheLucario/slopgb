@@ -465,5 +465,19 @@ impl ApplicationHandler for App {
         self.session.flush_save();
         // Clean quit: drop the recovery state so the next load starts fresh.
         self.clear_recovery_state();
+        // Finalise an in-progress audio recording so it isn't lost.
+        if self
+            .audio
+            .as_ref()
+            .is_some_and(crate::pacing::AudioPipe::is_recording)
+        {
+            if let Some(frames) = self
+                .audio
+                .as_mut()
+                .map(crate::pacing::AudioPipe::take_record)
+            {
+                self.save_wav_recording(&frames);
+            }
+        }
     }
 }

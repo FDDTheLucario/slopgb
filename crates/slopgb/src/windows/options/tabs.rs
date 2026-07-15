@@ -113,6 +113,8 @@ pub(crate) enum Field {
     AllowOpposing,
     /// Joypad → "Rapid speed" combo (cycles the auto-fire period 1→4).
     RapidSpeed,
+    /// Joypad → "Audio" (Mappable button records): record audio to a WAV.
+    RecordAudio,
     /// Exceptions → "break on ld b,b (40h)".
     BreakLdBB,
     /// Exceptions → "break on invalid opcode".
@@ -364,6 +366,7 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
                 s.rapid_speed + 1
             }
         }
+        Field::RecordAudio => s.record_audio = !s.record_audio,
         Field::BreakLdBB => s.break_ld_b_b = !s.break_ld_b_b,
         Field::BreakInvalidOp => s.break_invalid_op = !s.break_invalid_op,
         Field::BreakEchoRam => s.break_echo_ram = !s.break_echo_ram,
@@ -452,6 +455,7 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
             s.screenshot_format = d.screenshot_format;
             s.screenshot_copies = d.screenshot_copies;
             s.rapid_speed = d.rapid_speed;
+            s.record_audio = d.record_audio;
         }
         OptionsTab::Misc => {
             s.ff_speed = d.ff_speed;

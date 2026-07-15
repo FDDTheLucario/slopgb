@@ -34,6 +34,7 @@ fn settings_round_trip_through_bgb_ini() {
         esc_shows_debugger: false,
         allow_opposing: true,
         rapid_speed: 3,
+        record_audio: true,
         uninited_wram: true, // bgb's UninitedWRAM key
         frame_blend: true,
         doubler: true,
