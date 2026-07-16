@@ -130,6 +130,35 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// Alpha-blend `fg` over the existing pixel at `(x, y)` by `coverage`
+    /// (0 = keep dst, 255 = full fg) — the anti-aliased glyph compositor.
+    /// Per-channel linear lerp; clipped exactly like [`Self::put`].
+    pub fn blend_px(&mut self, x: i32, y: i32, fg: u32, coverage: u8) {
+        if coverage == 0 {
+            return; // fully transparent: nothing to draw (and no recorded rect)
+        }
+        #[cfg(test)]
+        if let Some(rec) = &mut self.record {
+            rec.push(Rect::new(x, y, 1, 1));
+        }
+        if x < 0 || y < 0 || x >= self.w || y >= self.h || !self.clip.contains(x, y) {
+            return;
+        }
+        let idx = (y * self.w + x) as usize;
+        if coverage == 255 {
+            self.buf[idx] = fg;
+            return;
+        }
+        let dst = self.buf[idx];
+        let cov = i32::from(coverage);
+        let lerp = |shift: u32| -> u32 {
+            let d = ((dst >> shift) & 0xFF) as i32;
+            let f = ((fg >> shift) & 0xFF) as i32;
+            (d + (f - d) * cov / 255) as u32 & 0xFF
+        };
+        self.buf[idx] = (lerp(16) << 16) | (lerp(8) << 8) | lerp(0);
+    }
+
     /// Fill a rectangle, clipped.
     pub fn fill_rect(&mut self, r: Rect, color: u32) {
         #[cfg(test)]

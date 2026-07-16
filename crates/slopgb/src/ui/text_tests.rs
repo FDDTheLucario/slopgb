@@ -21,16 +21,38 @@ fn draw_text_blits_each_glyph_at_its_column_and_advances() {
         end = draw_text(&mut c, 0, 0, "Ai", FG);
     }
     assert_eq!(end, 2 * GLYPH_W as i32, "advances by one cell per glyph");
-    // Column 0 must match the 'A' bitmap exactly; column 1 the 'i' bitmap.
+    // Each pixel is the glyph's coverage blended over the black bg: white FG
+    // over black gives a gray whose channels equal the coverage value.
     for (col_base, ch) in [(0, 'A'), (GLYPH_W, 'i')] {
-        for (row, &bits) in font::glyph(ch).iter().enumerate() {
+        let g = font::glyph(ch);
+        for row in 0..GLYPH_H {
             for col in 0..GLYPH_W {
-                let lit = bits & (1 << (7 - col)) != 0;
-                let px = buf[row * cw + col_base + col];
-                assert_eq!(px == FG, lit, "{ch:?} pixel ({col},{row})");
+                let cov = g[row * GLYPH_W + col] as u32;
+                let expect = (cov << 16) | (cov << 8) | cov;
+                assert_eq!(
+                    buf[row * cw + col_base + col],
+                    expect,
+                    "{ch:?} ({col},{row})"
+                );
             }
         }
     }
+}
+
+#[test]
+fn draw_text_is_antialiased_not_one_bit() {
+    // A rendered glyph must contain a partial-coverage pixel (neither bg nor full
+    // fg) — the whole point of the AA font.
+    let mut buf = vec![0u32; GLYPH_W * GLYPH_H];
+    {
+        let mut c = Canvas::new(&mut buf, GLYPH_W, GLYPH_H);
+        draw_text(&mut c, 0, 0, "e", FG);
+    }
+    let partial = buf.iter().any(|&p| {
+        let ch = p & 0xFF;
+        ch != 0x00 && ch != 0xFF
+    });
+    assert!(partial, "AA text must have partial-coverage pixels");
 }
 
 #[test]
