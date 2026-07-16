@@ -198,8 +198,9 @@ impl App {
             // (Re)open the right-click menu as its own borderless window, at the
             // pointer, so it can extend past the game window instead of clipping.
             if let Some(win) = self.window.clone() {
+                let theme = self.settings.theme.resolve(&self.custom_themes);
                 self.menu_popup =
-                    MenuPopup::open(event_loop, &win, (px, py), !self.muted, self.paused);
+                    MenuPopup::open(event_loop, &win, (px, py), !self.muted, self.paused, theme);
             }
         }
     }

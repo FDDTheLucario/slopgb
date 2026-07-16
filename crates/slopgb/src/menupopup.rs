@@ -90,6 +90,7 @@ impl MenuPopup {
         cursor: (i32, i32),
         sound_on: bool,
         paused: bool,
+        theme: Theme,
     ) -> Option<Self> {
         let menu = MainMenu::open((0, 0), sound_on, paused);
         let (pw, ph) = popup_content_size(&menu, None);
@@ -144,7 +145,7 @@ impl MenuPopup {
             anchor,
             monitor,
             focused_once: false,
-            theme: Theme::BGB,
+            theme,
         })
     }
 
