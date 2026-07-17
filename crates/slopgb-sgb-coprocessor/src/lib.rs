@@ -554,7 +554,12 @@ impl SgbCoprocessor {
             spc.write_ram(u32::from(SPC_PROG_ORG), &prog)?;
             spc.write_ram(u32::from(SPC_DIR_ORG), &dir)?;
             spc.write_ram(u32::from(SPC_BRR_ORG), &brr)?;
-            spc.set_pc(u32::from(SPC_PROG_ORG))?;
+            // No set_pc: the SPC700 boots its own IPL ROM (the chip ships
+            // the documented 64-byte boot loader at $FFC0), announcing
+            // $AA/$BB and serving the standard upload protocol — the
+            // arcade pilot uploads its sound driver through it. The square
+            // driver above is entered host-side on a SOUND command instead
+            // (see apply_sound).
         }
         Ok(())
     }

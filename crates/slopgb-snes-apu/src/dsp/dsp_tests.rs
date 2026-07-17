@@ -51,6 +51,9 @@ fn envx_and_outx_read_live_voice_state() {
 fn keyon_produces_audio_end_to_end() {
     let mut ram = ram_with_sample();
     let mut dsp = SDsp::new();
+    // Leave the power-on FLG state ($E0: reset + mute + echo-write disable)
+    // like every real driver does before keying a voice.
+    dsp.write(FLG as u8, 0x00);
     // Voice 0: DIR page 2, SRCN 0, full VOL, GAIN direct max, pitch 0x1000.
     dsp.write(DIR as u8, 0x02);
     dsp.write(0x04, 0x00); // SRCN 0

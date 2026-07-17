@@ -786,6 +786,58 @@ fn nmi_handler_preserves_a_with_empty_vector() {
     );
 }
 
+/// The resident SPC700 firmware speaks the boot-ROM upload protocol
+/// (fullsnes "Uploader"): announce $AA/$BB, accept $CC + address, per-byte
+/// index/ack pump, new-kick block switch, entry jump. A guest 65C816
+/// program performing the documented uploader sequence lands a driver in
+/// APU RAM and starts it (observable through the comm ports).
+#[test]
+fn spc_ipl_upload_protocol_round_trips() {
+    let Some((spc_wasm, _)) = plugins() else {
+        return;
+    };
+    let mut spc = slopgb_plugin_host::LoadedCoprocessor::load(&spc_wasm).unwrap();
+    spc.reset().unwrap();
+    let mut cyc = 0u64;
+    let run = |spc: &mut slopgb_plugin_host::LoadedCoprocessor, cyc: &mut u64| {
+        *cyc += 4_000;
+        spc.run_until(*cyc).unwrap();
+    };
+    // Wait for the announce.
+    run(&mut spc, &mut cyc);
+    assert_eq!(spc.port_read(0).unwrap(), 0xAA, "ready low");
+    assert_eq!(spc.port_read(1).unwrap(), 0xBB, "ready high");
+
+    // Upload `MOV $F6,#$5A / BRA *` to $0300 per the documented sequence.
+    let driver = [0x8F, 0x5A, 0xF6, 0x2F, 0xFE];
+    spc.port_write(2, 0x00).unwrap(); // dest $0300
+    spc.port_write(3, 0x03).unwrap();
+    spc.port_write(1, 0x01).unwrap(); // command: transfer
+    spc.port_write(0, 0xCC).unwrap(); // kick
+    run(&mut spc, &mut cyc);
+    assert_eq!(spc.port_read(0).unwrap(), 0xCC, "kick acknowledged");
+    for (i, &b) in driver.iter().enumerate() {
+        spc.port_write(1, b).unwrap();
+        spc.port_write(0, i as u8).unwrap();
+        run(&mut spc, &mut cyc);
+        assert_eq!(spc.port_read(0).unwrap(), i as u8, "byte {i} acked");
+    }
+    // Entry command: kick = (index+2)|1, command 0, address = $0300.
+    let kick = (driver.len() as u8 + 2) | 1;
+    spc.port_write(2, 0x00).unwrap();
+    spc.port_write(3, 0x03).unwrap();
+    spc.port_write(1, 0x00).unwrap();
+    spc.port_write(0, kick).unwrap();
+    run(&mut spc, &mut cyc);
+    assert_eq!(spc.port_read(0).unwrap(), kick, "entry acknowledged");
+    run(&mut spc, &mut cyc);
+    assert_eq!(
+        spc.port_read(2).unwrap(),
+        0x5A,
+        "the uploaded driver runs (its port-2 marker visible)"
+    );
+}
+
 /// JUMP ($12) carries an optional NMI-handler address in packet bytes 4-6
 /// (Pan Docs "SGB Command 12h — JUMP"): nonzero installs the SNES RAM NMI
 /// vector at $00BB-$00BD (the bytes fullsnes documents JUMP clobbering);

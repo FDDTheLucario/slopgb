@@ -103,6 +103,14 @@ impl SgbCoprocessor {
             .cpu
             .get_mut()
             .write_ram(u32::from(MB_NOTE), &[s.effect_a, trig]);
+        // Enter the resident square driver (the SPC otherwise idles in its
+        // IPL boot ROM waiting for an upload) — the host-side stand-in for
+        // the sound engine the real BIOS uploads at power-on. Never while a
+        // SOU_TRN game driver is installed: that driver owns the chip and
+        // handles sound itself.
+        if self.sou_trn_sig == 0 {
+            let _ = self.spc.get_mut().set_pc(u32::from(SPC_PROG_ORG));
+        }
     }
 
     /// DATA_SND ($0F): copy the packet's inline data into SNES work RAM at
