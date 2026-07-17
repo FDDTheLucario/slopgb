@@ -70,6 +70,9 @@ pub struct SnesPpu {
     bg_old: u8,
     /// TM (`$212C`): main-screen layer enables (bit 0-3 BG1-4, bit 4 OBJ).
     tm: u8,
+    /// OBSEL (`$2101`): OBJ size selection (bits 7-5), name gap (4-3),
+    /// tile base (2-0).
+    obsel: u8,
 }
 
 impl SnesPpu {
@@ -98,6 +101,7 @@ impl SnesPpu {
             vofs: [0; 4],
             bg_old: 0,
             tm: 0,
+            obsel: 0,
         }
     }
 
@@ -132,6 +136,7 @@ impl SnesPpu {
                 }
                 self.oam_addr = (self.oam_addr + 1) & 0x3FF;
             }
+            0x01 => self.obsel = val,
             0x05 => self.bgmode = val,
             0x07..=0x0A => self.bgsc[usize::from(port - 0x07)] = val,
             0x0B | 0x0C => self.nba[usize::from(port - 0x0B)] = val,
@@ -303,6 +308,7 @@ impl Default for SnesPpu {
     }
 }
 
+mod obj;
 mod render;
 
 #[cfg(test)]
