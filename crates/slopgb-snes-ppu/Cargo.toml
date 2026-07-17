@@ -1,0 +1,10 @@
+[package]
+name = "slopgb-snes-ppu"
+description = "Clean-room SNES PPU (S-PPU) for the slopgb SGB SNES side: VRAM/CGRAM/OAM ports and the BG/OBJ renderer; hosted as a slopgb coprocessor plugin."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
