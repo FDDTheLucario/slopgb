@@ -24,8 +24,11 @@
 #![deny(unsafe_code)]
 
 mod icd2;
+mod mmio;
 
 use icd2::{CHAR_ROW_LEN, ICD2_STATE_LEN, Icd2};
+pub use mmio::MMIO_RING_CAP;
+use mmio::{MMIO_STATE_LEN, Mmio};
 use slopgb_plugin_api::{Coprocessor, slopgb_coprocessor_plugin};
 use slopgb_w65c816::{Bus, Cpu};
 
@@ -39,8 +42,8 @@ const PROG_ORG: u16 = 0x8000;
 const RESET_VEC: usize = 0xFFFC;
 /// Serialized [`W65816Cop::save_state`] length: 18 bytes of registers + halt
 /// flags, the 128 KB WRAM, the 32 KB program area, 8 bytes of comm-port
-/// latches, the ICD2 block, an 8-byte cycle counter.
-const STATE_LEN: usize = 18 + WRAM_LEN + PROG_LEN + 8 + ICD2_STATE_LEN + 8;
+/// latches, the ICD2 block, the MMIO block, an 8-byte cycle counter.
+const STATE_LEN: usize = 18 + WRAM_LEN + PROG_LEN + 8 + ICD2_STATE_LEN + MMIO_STATE_LEN + 8;
 /// 128 KB of work RAM at `$7E-$7F`.
 const WRAM_LEN: usize = 0x2_0000;
 /// The 32 KB `$8000-$FFFF` program area (the RAM-backed BIOS ROM region).
@@ -63,6 +66,12 @@ pub const HW_LCD_ROW: u32 = HOST_WIN + 0x16;
 pub const HW_CONTROL: u32 = HOST_WIN + 0x17;
 /// `W len 320` at `HW_CHAR_ROWS + row * 320`: load a character-buffer row.
 pub const HW_CHAR_ROWS: u32 = HOST_WIN + 0x20;
+/// `R len 3 + 3*MMIO_RING_CAP` (drains): `[n_lo, n_hi, overflow]` then `n`
+/// captured MMIO writes as `(addr_lo, addr_hi, val)` triples, oldest first.
+pub const HW_MMIO_RING: u32 = HOST_WIN + 0x1000;
+/// `W len L` at `HW_SHADOW + i`: the CPU-read shadows for `$4200 + i`
+/// (`i < 0x20`); offsets `0x20`/`0x21` are the `$4016`/`$4017` serial bytes.
+pub const HW_SHADOW: u32 = HOST_WIN + 0x2000;
 
 /// A tiny 8-bit (emulation-mode) program: echo comm port 1 (host input) + 7 to
 /// comm port 0 (host output), forever. It proves the full round trip — a host
@@ -99,6 +108,8 @@ struct SnesBus {
     port_out: [u8; N_PORTS],
     /// The SGB ICD2 register block at `$6000-$7FFF` (see `icd2.rs`).
     icd2: Icd2,
+    /// The MMIO write-capture ring + read shadows (see `mmio.rs`).
+    mmio: Mmio,
 }
 
 /// Heap-allocate a zeroed fixed-size byte array (the arrays are too big for
@@ -118,6 +129,7 @@ impl SnesBus {
             port_in: [0; N_PORTS],
             port_out: [0; N_PORTS],
             icd2: Icd2::new(),
+            mmio: Mmio::new(),
         }
     }
 
@@ -175,6 +187,11 @@ impl Bus for SnesBus {
         if let Some(a) = Self::icd2_addr(addr) {
             return self.icd2.cpu_read(a);
         }
+        if Self::system_bank(addr) {
+            if let Some(v) = self.mmio.cpu_read((addr & 0xFFFF) as u16) {
+                return v;
+            }
+        }
         self.mem_slot(addr).map_or(0, |b| *b)
     }
 
@@ -185,6 +202,9 @@ impl Bus for SnesBus {
         }
         if let Some(a) = Self::icd2_addr(addr) {
             return self.icd2.cpu_write(a, value);
+        }
+        if Self::system_bank(addr) && self.mmio.cpu_write((addr & 0xFFFF) as u16, value) {
+            return;
         }
         if let Some(b) = self.mem_slot(addr) {
             *b = value;
@@ -230,6 +250,17 @@ impl W65816Cop {
                     icd2.host_set_lcd_row(lcd_row, write_row);
                 }
             }
+            a if (HW_SHADOW..HW_SHADOW + 0x22).contains(&a) => {
+                let mmio = &mut self.bus.mmio;
+                for (j, &v) in bytes.iter().enumerate() {
+                    let off = (a - HW_SHADOW) as usize + j;
+                    match off {
+                        0x20 | 0x21 => mmio.host_set_joy_serial_byte(off - 0x20, v),
+                        o if o < 0x20 => mmio.host_set_shadow(o as u8, v),
+                        _ => {}
+                    }
+                }
+            }
             a if (HW_CHAR_ROWS..HW_CHAR_ROWS + (icd2::CHAR_ROWS * CHAR_ROW_LEN) as u32)
                 .contains(&a) =>
             {
@@ -269,6 +300,22 @@ impl W65816Cop {
                     *slot = icd2.host_control();
                 }
             }
+            HW_MMIO_RING if out.len() >= 3 => {
+                let mmio = &mut self.bus.mmio;
+                // Drain only what this read can carry — a short read must
+                // not lose captured writes.
+                let drained = mmio.host_drain_up_to((out.len() - 3) / 3);
+                let n = drained.len() as u16;
+                out[0] = n as u8;
+                out[1] = (n >> 8) as u8;
+                out[2] = u8::from(mmio.overflowed());
+                for (i, &(a, v)) in drained.iter().enumerate() {
+                    let base = 3 + i * 3;
+                    out[base] = a as u8;
+                    out[base + 1] = (a >> 8) as u8;
+                    out[base + 2] = v;
+                }
+            }
             _ => {}
         }
         out
@@ -291,6 +338,7 @@ impl Coprocessor for W65816Cop {
         self.bus.port_in = [0; N_PORTS];
         self.bus.port_out = [0; N_PORTS];
         self.bus.icd2 = Icd2::new();
+        self.bus.mmio = Mmio::new();
         self.cpu = Cpu::new();
         // Load PC from the emulation-mode reset vector, like real power-on.
         let lo = self.bus.read(RESET_VEC as u32) as u16;
@@ -383,6 +431,7 @@ impl Coprocessor for W65816Cop {
         buf.extend_from_slice(&self.bus.port_in);
         buf.extend_from_slice(&self.bus.port_out);
         self.bus.icd2.save_state(&mut buf);
+        self.bus.mmio.save_state(&mut buf);
         buf.extend_from_slice(&self.cycles.to_le_bytes());
         debug_assert_eq!(buf.len(), STATE_LEN);
         buf
@@ -413,6 +462,7 @@ impl Coprocessor for W65816Cop {
         self.bus.port_in.copy_from_slice(c.take(N_PORTS));
         self.bus.port_out.copy_from_slice(c.take(N_PORTS));
         self.bus.icd2.load_state(c.take(ICD2_STATE_LEN));
+        self.bus.mmio.load_state(c.take(MMIO_STATE_LEN));
         self.cycles = c.u64();
     }
 }

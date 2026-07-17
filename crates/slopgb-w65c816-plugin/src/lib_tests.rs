@@ -230,3 +230,43 @@ fn cpu_reads_wram_banks_via_bus() {
     assert!(cop.cpu.stopped);
     assert_eq!(cop.port_read(0), 0x5D, "high-WRAM byte crossed out");
 }
+
+// ---- MMIO: capture ring + shadows through the host window ----
+
+/// End to end: guest MMIO writes drain through HW_MMIO_RING (with count +
+/// overflow header), and host-poked shadows serve guest reads.
+#[test]
+fn mmio_ring_and_shadows_round_trip() {
+    let mut cop = W65816Cop::new();
+    // Shadow HVBJOY = vblank before the program runs.
+    cop.write_ram(HW_SHADOW + 0x12, &[0x80]);
+    // STA-driven captures: LDA #$8F / STA $2100 / LDA #$81 / STA $4200 /
+    // LDA $4212 / STA $0300 / STP.
+    let prog = [
+        0xA9, 0x8F, 0x8D, 0x00, 0x21, // INIDISP <- 8F
+        0xA9, 0x81, 0x8D, 0x00, 0x42, // NMITIMEN <- 81
+        0xAD, 0x12, 0x42, // LDA $4212 (HVBJOY shadow)
+        0x8D, 0x00, 0x03, // STA $0300
+        0xDB, // STP
+    ];
+    cop.write_ram(u32::from(PROG_ORG), &prog);
+    cop.cpu = Cpu::new();
+    cop.cpu.regs.pc = PROG_ORG;
+    cop.cycles = 0;
+    cop.run_until(1000);
+    assert!(cop.cpu.stopped);
+
+    assert_eq!(
+        cop.read_ram(0x0300, 1),
+        vec![0x80],
+        "shadow served the read"
+    );
+    let ring = cop.read_ram(HW_MMIO_RING, 3 + 3 * MMIO_RING_CAP);
+    let n = usize::from(ring[0]) | usize::from(ring[1]) << 8;
+    assert_eq!(n, 2, "two captured writes");
+    assert_eq!(ring[2], 0, "no overflow");
+    assert_eq!(&ring[3..9], &[0x00, 0x21, 0x8F, 0x00, 0x42, 0x81]);
+    // The drain consumed the ring.
+    let again = cop.read_ram(HW_MMIO_RING, 3);
+    assert_eq!(&again[..2], &[0, 0]);
+}
