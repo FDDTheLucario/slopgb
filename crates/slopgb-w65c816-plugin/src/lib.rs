@@ -77,6 +77,9 @@ pub const HW_SHADOW: u32 = HOST_WIN + 0x2000;
 /// boundary inside `run_until`, consumed once; zero cancels a pending one).
 /// `R len 1`: the pending flag.
 pub const HW_NMI: u32 = HOST_WIN + 0x3000;
+/// `R len 1`: whether a `$420B` write stalled the CPU awaiting host DMA
+/// service. `W len 1` zero: the host executed the transfer, resume.
+pub const HW_DMA_STALL: u32 = HOST_WIN + 0x3001;
 
 /// A tiny 8-bit (emulation-mode) program: echo comm port 1 (host input) + 7 to
 /// comm port 0 (host output), forever. It proves the full round trip — a host
@@ -262,6 +265,11 @@ impl W65816Cop {
                     self.nmi_pending = v != 0;
                 }
             }
+            HW_DMA_STALL => {
+                if let [0] = *bytes {
+                    self.bus.mmio.host_clear_dma_stall();
+                }
+            }
             a if (HW_SHADOW..HW_SHADOW + 0x22).contains(&a) => {
                 let mmio = &mut self.bus.mmio;
                 for (j, &v) in bytes.iter().enumerate() {
@@ -315,6 +323,11 @@ impl W65816Cop {
             HW_NMI => {
                 if let Some(slot) = out.first_mut() {
                     *slot = u8::from(self.nmi_pending);
+                }
+            }
+            HW_DMA_STALL => {
+                if let Some(slot) = out.first_mut() {
+                    *slot = u8::from(self.bus.mmio.dma_stall());
                 }
             }
             HW_MMIO_RING if out.len() >= 3 => {
@@ -372,6 +385,13 @@ impl Coprocessor for W65816Cop {
                 // STP halted the oscillator: no instructions retire, but the
                 // host's clock still advances, so honor the "reach the target"
                 // contract by absorbing the idle span.
+                self.cycles = target_cycle;
+                break;
+            }
+            if self.bus.mmio.dma_stall() {
+                // A $420B write paused the CPU for the host-run DMA transfer
+                // (fullsnes 420Bh); absorb like STP — a pending NMI stays
+                // pending until the CPU resumes.
                 self.cycles = target_cycle;
                 break;
             }

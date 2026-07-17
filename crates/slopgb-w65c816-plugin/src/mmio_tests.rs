@@ -76,6 +76,34 @@ fn manual_joypad_port_shadows() {
     assert_eq!(m.cpu_read(0x4017), Some(0x7F));
 }
 
+/// The WRAM B-bus access ports `$2180-$2183` (WMDATA + the 17-bit WMADD)
+/// are captured writes — their address/auto-increment state machine lives
+/// host-side with the DMA engine (fullsnes "SNES Memory Work RAM Access").
+#[test]
+fn wmdata_ports_are_captured() {
+    let mut m = Mmio::new();
+    assert!(m.cpu_write(0x2180, 0x42), "WMDATA");
+    assert!(m.cpu_write(0x2181, 0x00), "WMADDL");
+    assert!(m.cpu_write(0x2183, 0x01), "WMADDH");
+    assert!(!m.cpu_write(0x2184, 0x00), "past WMADDH: open bus");
+    assert!(!m.cpu_write(0x217F, 0x00), "below the window: open bus");
+}
+
+/// A nonzero MDMAEN (`$420B`) write arms the DMA stall — the CPU pauses
+/// until the host has drained the ring and executed the transfer (fullsnes
+/// 420Bh: "The CPU is paused during the transfer"). Zero starts nothing.
+#[test]
+fn mdmaen_write_arms_the_dma_stall() {
+    let mut m = Mmio::new();
+    assert!(!m.dma_stall());
+    m.cpu_write(0x420B, 0x00);
+    assert!(!m.dma_stall(), "MDMAEN=0 starts no transfer");
+    m.cpu_write(0x420B, 0x01);
+    assert!(m.dma_stall());
+    m.host_clear_dma_stall();
+    assert!(!m.dma_stall());
+}
+
 /// A short host read drains only what it can carry; the rest stays queued.
 #[test]
 fn partial_drain_keeps_the_tail() {

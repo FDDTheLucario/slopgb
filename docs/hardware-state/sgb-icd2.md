@@ -116,11 +116,48 @@ with *host*-side effects (`$6003` reset bit) are capture-only.
   installs clean-room firmware into), I/O space and HiROM banks open-bus;
   ports + ICD2 gated to A22=0 (system banks). DATA_TRN's `$7F:0100` target
   and JUMP's `$00:1800` (= `$7E:1800` via the mirror) now resolve correctly.
+- **Host pump** (landed): `SgbCoprocessor::flush` deposits teed packets when
+  the guest-visible `$6002` flag is clear, reads the pad latches back into
+  `joypad_feed` (sticky-written gated), and maintains the `$6000` LCD-row
+  shadow off the GB frame position.
+- **MMIO capture + shadows** (landed): write-capture ring (`$2100-$213F`,
+  `$2180-$2183`, `$4000-$44FF`) drained per flush; host-fed read shadows for
+  `$4200-$421F` + `$4016/17` with guest-side RDNMI/TIMEUP read-clear.
+- **NMI + frame clock** (landed): hardware NMI in `slopgb-w65c816`
+  (datasheet vectors, both modes, WAI wake) + `HW_NMI` trigger; the GB frame
+  position scaled onto 262 NTSC lines drives the vblank edge — RDNMI/HVBJOY
+  shadows + one NMI per frame when the guest's own NMITIMEN bit 7 asks.
+- **GP-DMA + WRAM B-bus port** (landed): see the section below.
 - **Pilot probe** (headless, scratch): ARCADE-mode select on Space Invaders
-  triggers DATA_TRN + `JUMP $001800` and lands the GB in the diagnosed
-  `$32F4` ACK spin — remaining gap: DATA_TRN payloads must route to the
-  teed packet's WRAM dest (they historically went to SPC RAM), then the
-  uploaded program can run and ACK.
-- **Next**: the SgbCoprocessor pump (deposit teed packets when the flag is
-  clear, read pads → `joypad_feed`, LCD-row shadow), then the real 65C816
-  memory map, MMIO capture, NMI, DMA, and the SNES PPU plugin (`goal.md`).
+  runs DATA_SND bootstrap → JUMP → dispatcher → DATA_TRN payload staging on
+  the real wasm 65C816; the arcade program enters and now needs the PPU
+  (`$21xx`) + joypad autopoll to survive its hardware init.
+- **Next**: joypad autopoll (`$4200` bit 0 → `$4218-$421F` shadows), then
+  the SNES PPU plugin chain (`goal.md` T13-T18).
+
+## GP-DMA (`$420B` / `$43x0-$43x6`) + the WRAM port (`$2180-$2183`)
+
+The GP-DMA engine is **host-side** (`slopgb-sgb-coprocessor/src/dma.rs`),
+executing off captured `$43xx`/`$420B` writes — the same consumer path a
+future PPU gets (`bbus_write` routes B-bus bytes through `apply_mmio`, so
+DMA feeds the PPU for free once `$21xx` routing lands).
+
+- **Atomicity**: a nonzero `$420B` write stalls the plugin CPU (absorbing
+  cycles like STP/WAI — hardware pauses the CPU during GP-DMA, fullsnes
+  420Bh) until the host drains the ring, runs the transfer, and clears
+  `HW_DMA_STALL`. Post-trigger guest code can never observe a half-applied
+  transfer, despite the polled ring.
+- Semantics per fullsnes "SNES DMA and HDMA Channel 0..7 Registers": unit
+  modes 0-7 (5-7 = repeats of 1-3), A-bus increment/decrement/fixed, B→A
+  direction, byte counter with `0 = $10000`, channel 0-first order, working
+  registers left stepped (A1T final, DAS zero), constant bank byte.
+- The `$2180` WMDATA / 17-bit WMADD state machine lives host-side; guest
+  `$2180-$2183` *writes* are captured and applied in order. WRAM-to-WRAM
+  DMA is suppressed byte-wise but completes (fullsnes 2183h "DMA Notes").
+- Ceilings (deliberate): guest *reads* of `$2180` are open bus (no game
+  observed doing this; the address machine is host-side); H-DMA (`$420C`)
+  inert in the ring; DMA `$43xx` read-back unimplemented (host-side state
+  only); per-byte wasm crossings (bulk when PPU uploads make size matter);
+  a `$420B` entry dropped by ring overflow loses its transfer (the CPU is
+  still un-stalled; only the overflow warning fires — unreachable for real
+  write rates, see the `MMIO_RING_CAP` comment).

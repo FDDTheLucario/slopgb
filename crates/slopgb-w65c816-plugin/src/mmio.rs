@@ -6,12 +6,15 @@
 //! between `run_until` slices through the host window (`HW_*` in `lib.rs`);
 //! per-register semantics cite nocash fullsnes.
 
-/// Ring capacity in captured writes. A host flush covers ~2.5 K CPU cycles,
-/// so even a pathological store loop cannot legitimately outrun this by
-/// much; overflow drops the newest writes and arms a sticky flag.
+/// Ring capacity in captured writes. A host flush covers ~2.5 K CPU cycles
+/// and MMIO stores come as LDA/STA pairs (≥7 cycles each), so a real
+/// program stays well under this; overflow drops the newest writes and arms
+/// a sticky flag. If a dropped write is a `$420B` trigger, its DMA is lost
+/// too (the host still un-stalls the CPU) — the overflow warning is the
+/// only trace, so the cap must stay comfortably above the legitimate rate.
 pub const MMIO_RING_CAP: usize = 512;
 /// Serialized [`Mmio::save_state`] length.
-pub(crate) const MMIO_STATE_LEN: usize = 2 + 1 + MMIO_RING_CAP * 3 + 0x20 + 2;
+pub(crate) const MMIO_STATE_LEN: usize = 2 + 1 + MMIO_RING_CAP * 3 + 0x20 + 2 + 1;
 
 /// Captured-write ring + read shadows.
 pub(crate) struct Mmio {
@@ -25,6 +28,10 @@ pub(crate) struct Mmio {
     shadow: [u8; 0x20],
     /// Host-fed images for `$4016`/`$4017` (manual joypad serial reads).
     joy_serial: [u8; 2],
+    /// A nonzero MDMAEN (`$420B`) write pauses the CPU until the host has
+    /// executed the transfer (fullsnes 420Bh: "The CPU is paused during the
+    /// transfer") — so post-trigger code never sees a half-applied DMA.
+    dma_stall: bool,
 }
 
 impl Mmio {
@@ -34,14 +41,16 @@ impl Mmio {
             overflow: false,
             shadow: [0; 0x20],
             joy_serial: [0; 2],
+            dma_stall: false,
         }
     }
 
     /// Whether `addr` (bank-local, system bank) is in a captured window:
     /// the PPU B-bus registers `$2100-$213F` (minus the `$2140-$2143` APU
-    /// ports, routed earlier) or the CPU I/O block `$4000-$44FF`.
+    /// ports, routed earlier), the WRAM access ports `$2180-$2183`, or the
+    /// CPU I/O block `$4000-$44FF`.
     fn captured(addr: u16) -> bool {
-        matches!(addr, 0x2100..=0x213F | 0x4000..=0x44FF)
+        matches!(addr, 0x2100..=0x213F | 0x2180..=0x2183 | 0x4000..=0x44FF)
     }
 
     /// Observe a CPU write; returns whether it was captured. Full writes
@@ -51,12 +60,25 @@ impl Mmio {
         if !Self::captured(addr) {
             return false;
         }
+        if addr == 0x420B && val != 0 {
+            self.dma_stall = true;
+        }
         if self.ring.len() >= MMIO_RING_CAP {
             self.overflow = true;
         } else {
             self.ring.push((addr, val));
         }
         true
+    }
+
+    /// Whether a `$420B` write is awaiting host DMA service.
+    pub(crate) fn dma_stall(&self) -> bool {
+        self.dma_stall
+    }
+
+    /// Host acknowledgment: the transfer ran, the CPU resumes.
+    pub(crate) fn host_clear_dma_stall(&mut self) {
+        self.dma_stall = false;
     }
 
     /// Serve a CPU read from a shadowed register, or `None` for open bus.
@@ -123,6 +145,7 @@ impl Mmio {
         }
         buf.extend_from_slice(&self.shadow);
         buf.extend_from_slice(&self.joy_serial);
+        buf.push(u8::from(self.dma_stall));
     }
 
     /// Restore from exactly [`MMIO_STATE_LEN`] bytes; a wrong-length or
@@ -145,6 +168,7 @@ impl Mmio {
         let off = 3 + MMIO_RING_CAP * 3;
         self.shadow.copy_from_slice(&b[off..off + 0x20]);
         self.joy_serial.copy_from_slice(&b[off + 0x20..off + 0x22]);
+        self.dma_stall = b[off + 0x22] != 0;
     }
 }
 

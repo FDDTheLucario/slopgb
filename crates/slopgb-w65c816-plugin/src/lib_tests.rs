@@ -271,6 +271,46 @@ fn mmio_ring_and_shadows_round_trip() {
     assert_eq!(&again[..2], &[0, 0]);
 }
 
+// ---- DMA stall handshake ----
+
+/// A nonzero `$420B` write pauses the CPU (fullsnes 420Bh: "The CPU is
+/// paused during the transfer") until the host — having drained the ring and
+/// executed the transfer — clears the stall through `HW_DMA_STALL`. So the
+/// instruction after the trigger always observes a completed DMA, never the
+/// pre-transfer memory.
+#[test]
+fn dma_trigger_stalls_cpu_until_host_clears() {
+    let mut cop = W65816Cop::new();
+    // LDA #$01 / STA $420B / LDA #$A5 / STA $0310 / STP
+    let prog = [
+        0xA9, 0x01, 0x8D, 0x0B, 0x42, 0xA9, 0xA5, 0x8D, 0x10, 0x03, 0xDB,
+    ];
+    cop.write_ram(u32::from(PROG_ORG), &prog);
+    cop.cpu = Cpu::new();
+    cop.cpu.regs.pc = PROG_ORG;
+    cop.cycles = 0;
+
+    let reached = cop.run_until(1000);
+    assert_eq!(reached, 1000, "the stalled span absorbs the clock");
+    assert_eq!(
+        cop.read_ram(0x0310, 1),
+        vec![0],
+        "nothing after the trigger ran"
+    );
+    assert_eq!(cop.read_ram(HW_DMA_STALL, 1), vec![1], "stall visible");
+
+    // The stall rides the save state (a mid-DMA snapshot must not un-pause).
+    let state = cop.save_state();
+    let mut fresh = W65816Cop::new();
+    fresh.load_state(&state);
+    assert_eq!(fresh.read_ram(HW_DMA_STALL, 1), vec![1]);
+
+    cop.write_ram(HW_DMA_STALL, &[0]);
+    cop.run_until(2000);
+    assert!(cop.cpu.stopped, "resumed to the STP");
+    assert_eq!(cop.read_ram(0x0310, 1), vec![0xA5], "post-trigger code ran");
+}
+
 // ---- Host-triggered NMI ----
 
 /// A host NMI request wakes a WAI-ing program, vectors through $FFFA, runs

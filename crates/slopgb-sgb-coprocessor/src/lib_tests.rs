@@ -504,6 +504,9 @@ fn save_state_round_trips() {
     cop.poll(&mut cmds);
     cop.clock(12_345);
     assert_eq!(cop.pending_packets.len(), 1, "one packet awaiting deposit");
+    // Non-default DMA state must ride too.
+    cop.dma_regs[2][1] = 0x18;
+    cop.wmadd = 0x1234;
 
     let mut w = Writer::new();
     cop.write_state(&mut w);
@@ -769,3 +772,6 @@ fn nmi_handler_preserves_a_with_empty_vector() {
         "A survived the NMI round trip"
     );
 }
+
+#[path = "lib_tests_dma.rs"]
+mod dma;
