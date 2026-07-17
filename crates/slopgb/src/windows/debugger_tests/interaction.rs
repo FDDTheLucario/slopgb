@@ -16,7 +16,7 @@ fn render_disasm_draws_a_red_gutter_dot_on_breakpoint_rows() {
     let (w, h) = (200usize, lh * 4);
     let mut buf = vec![0x00AA_AAAA_u32; w * h];
     let mut bps = Breakpoints::default();
-    bps.toggle(0x0101); // rows are 0x100,0x101,... -> dot on visible row 1
+    bps.toggle(0x0101, None); // rows are 0x100,0x101,... -> dot on visible row 1
     {
         let mut c = Canvas::new(&mut buf, w, h);
         render_disasm(
@@ -270,7 +270,9 @@ fn selecting_set_break_returns_a_toggle_breakpoint_action() {
     );
     assert_eq!(
         action,
-        Some(MenuOutcome::Act(DebugAction::ToggleBreakpoint(0x0102)))
+        Some(MenuOutcome::Act(DebugAction::ToggleBreakpoint(
+            0x0102, None
+        )))
     );
     assert!(st.menu.is_none(), "menu closes after a selection");
 }
@@ -432,6 +434,43 @@ fn goto_disasm_pins_the_view_to_the_entered_address() {
     assert!(st.dialog.is_none(), "accept closes the dialog");
     assert!(st.pinned, "disasm Go-to pins the view");
     assert_eq!(st.disasm_base, 0x0150);
+}
+
+#[test]
+fn goto_disasm_bank_prefixed_pins_the_disasm_bank() {
+    let mut st = DebuggerState::default();
+    open_goto(&mut st, GotoTarget::Disasm);
+    // `01:6401` while some other bank is live must show bank 1, not the live bank.
+    type_goto(&mut st, "01:6401");
+    feed_dialog(&mut st, DialogKey::Enter);
+    assert_eq!(st.disasm_base, 0x6401);
+    assert_eq!(
+        st.disasm_bank,
+        Some(1),
+        "BB:AAAA pins the disasm pane's bank"
+    );
+    assert!(st.pinned, "a banked Go-to pins the view");
+    // A breakpoint toggled here qualifies to bank 1 (switchable-ROM address).
+    assert_eq!(st.disasm_bp_bank(0x6401), Some(1));
+    // Re-attaching to PC drops the pinned bank (follows the live bank again).
+    st.center_disasm_on_pc(0x0100, |_| 0x00, 10);
+    assert_eq!(st.disasm_bank, None, "go-to-PC clears the pinned bank");
+}
+
+#[test]
+fn goto_disasm_symbol_pins_its_own_bank() {
+    let mut st = DebuggerState {
+        symbols: std::rc::Rc::new(crate::symbols::SymbolTable::parse("01:6401 SomeWhere")),
+        ..DebuggerState::default()
+    };
+    open_goto(&mut st, GotoTarget::Disasm);
+    type_goto(&mut st, "SomeWhere");
+    feed_dialog(&mut st, DialogKey::Enter);
+    assert_eq!(
+        (st.disasm_base, st.disasm_bank),
+        (0x6401, Some(1)),
+        "a banked symbol jumps into its own bank"
+    );
 }
 
 #[test]

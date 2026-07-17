@@ -87,13 +87,16 @@ impl SymbolTable {
             .map(|s| (s.name.as_str(), s.addr))
     }
 
-    /// The address of the symbol named `name` (case-insensitive), for `Go to…`.
+    /// The `(bank, addr)` of the symbol named `name` (case-insensitive), for `Go
+    /// to…`. The bank lets a Go-to pin the disasm/memory bank browser to the
+    /// symbol's own bank (so `01:6401 SomeWhere` jumps into bank 1, not whatever
+    /// is mapped).
     #[must_use]
-    pub fn resolve(&self, name: &str) -> Option<u16> {
+    pub fn resolve(&self, name: &str) -> Option<(u16, u16)> {
         self.syms
             .iter()
             .find(|s| s.name.eq_ignore_ascii_case(name))
-            .map(|s| s.addr)
+            .map(|s| (s.bank, s.addr))
     }
 }
 

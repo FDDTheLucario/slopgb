@@ -238,6 +238,12 @@ pub struct ProfilerView {
 pub struct DebuggerState {
     /// Disasm view base when [`pinned`](Self::pinned) (else the pane follows PC).
     pub disasm_base: u16,
+    /// The disasm pane's bank browser: `None` follows the live-mapped ROM bank
+    /// (the default), `Some(b)` pins to bank `b` so the listing shows that bank's
+    /// bytes even as the game maps others in — a separate view. A `BB:AAAA` Go-to
+    /// (or a banked symbol) sets it; re-attaching to PC (`center_disasm_on_pc`)
+    /// clears it. Mirrors [`mem_bank`](Self::mem_bank).
+    pub disasm_bank: Option<u16>,
     /// Memory-dump view base.
     pub mem_base: u16,
     /// The memory pane's bank browser: `None` follows the live-mapped bank (the
@@ -288,6 +294,7 @@ impl Default for DebuggerState {
     fn default() -> Self {
         Self {
             disasm_base: 0x0100,
+            disasm_bank: None,
             mem_base: 0xFF00,
             mem_bank: None,
             stack_off: 0,
@@ -323,6 +330,21 @@ impl DebuggerState {
         self.disasm_base
     }
 
+    /// The ROM-bank qualifier for a breakpoint toggled at `addr` from this view:
+    /// the pinned disasm bank when the view is pinned to one and `addr` is
+    /// switchable ROM (`0x4000-0x7FFF`), else `None` (bank-agnostic — the
+    /// flat-address default). So a breakpoint set while browsing `01:6401` breaks
+    /// only in bank 1, but one set on a live-followed or non-ROMX line breaks on
+    /// the address alone.
+    #[must_use]
+    pub fn disasm_bp_bank(&self, addr: u16) -> Option<u16> {
+        if (0x4000..=0x7FFF).contains(&addr) {
+            self.disasm_bank
+        } else {
+            None
+        }
+    }
+
     /// Keep the disasm view in place while stepping: re-base to `pc` only when the
     /// view is unpinned AND `pc` falls outside the `visible` decoded rows from the
     /// current base (so single-stepping doesn't scroll the listing until PC leaves
@@ -335,12 +357,15 @@ impl DebuggerState {
         if self.pinned {
             return;
         }
+        // Only the row addresses matter here (the pane re-basing check), so the
+        // bank label is irrelevant — pass a dummy bank resolver.
         let rows = disasm_rows(
             &read,
             self.disasm_base,
             visible,
             &self.data_hints,
             self.disasm_fmt,
+            &|_| 0,
         );
         if rows.iter().any(|r| r.addr == pc) {
             return;
@@ -356,6 +381,10 @@ impl DebuggerState {
     /// the center by a row.
     pub fn center_disasm_on_pc(&mut self, pc: u16, read: impl Fn(u16) -> u8, visible: usize) {
         self.pinned = false;
+        // Re-attach to execution: drop any pinned bank so the pane shows PC in
+        // its live bank (where the machine actually stopped). `read` here is the
+        // live-bank read the caller passes.
+        self.disasm_bank = None;
         let mut base = pc;
         for _ in 0..visible / 2 {
             base = self.prev_disasm_addr(&read, base);
@@ -380,7 +409,7 @@ impl DebuggerState {
     /// Address of the instruction *after* the one at `addr` (decodes one insn,
     /// honoring data hints; falls back to +1 if the stream can't advance).
     fn next_disasm_addr(&self, read: impl Fn(u16) -> u8, addr: u16) -> u16 {
-        disasm_rows(read, addr, 2, &self.data_hints, self.disasm_fmt)
+        disasm_rows(read, addr, 2, &self.data_hints, self.disasm_fmt, &|_| 0)
             .get(1)
             .map_or(addr.wrapping_add(1), |r| r.addr)
     }
@@ -610,10 +639,11 @@ pub fn target_at(
                 row + 1,
                 &st.data_hints,
                 st.disasm_fmt,
+                &bank_of,
             ),
             &st.symbols,
             st.disasm_fmt,
-            bank_of,
+            &bank_of,
         );
         return rows
             .get(row)
@@ -735,7 +765,7 @@ fn disasm_entries(addr: u16, st: &DebuggerState, is_disasm: bool) -> Vec<(MenuIt
     ));
     v.push((
         MenuItem::new("Set break/condition..."),
-        MenuChoice::Act(DebugAction::ToggleBreakpoint(addr)),
+        MenuChoice::Act(DebugAction::ToggleBreakpoint(addr, st.disasm_bp_bank(addr))),
     ));
     v
 }

@@ -79,7 +79,9 @@ fn debug_menu_toggle_breakpoint_acts_on_the_cursor() {
     );
     assert_eq!(
         action,
-        Some(MenuOutcome::Act(DebugAction::ToggleBreakpoint(0x0150)))
+        Some(MenuOutcome::Act(DebugAction::ToggleBreakpoint(
+            0x0150, None
+        )))
     );
     assert!(st.menu.is_none(), "selecting closes the dropdown");
 }

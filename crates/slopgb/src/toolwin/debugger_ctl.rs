@@ -28,6 +28,17 @@ impl ToolWindows {
         }
     }
 
+    /// The ROM-bank qualifier for a breakpoint toggled at `addr` from the
+    /// debugger's disasm view (the pinned bank on a switchable-ROM line, else
+    /// `None`). `None` when no debugger window is open.
+    #[must_use]
+    pub fn debugger_disasm_bp_bank(&self, addr: u16) -> Option<u16> {
+        match &self.debugger_view()?.state {
+            WinState::Debugger(s) => s.disasm_bp_bank(addr),
+            _ => None,
+        }
+    }
+
     /// Whether the debugger window has an open modal, so `main` routes keys to it
     /// instead of the focus keymap.
     #[must_use]
@@ -241,7 +252,9 @@ impl ToolWindows {
                 debugger::DisasmFmt::default(),
             ),
         };
-        let rows = debugger::disasm_rows(|a| gb.debug_read(a), start, COUNT, &hints, fmt);
+        let rows = debugger::disasm_rows(|a| gb.debug_read(a), start, COUNT, &hints, fmt, &|a| {
+            crate::windows::live_bank(gb, a)
+        });
         rows.iter()
             .map(|r| r.text.as_str())
             .collect::<Vec<_>>()
@@ -261,7 +274,9 @@ impl ToolWindows {
             ),
         };
         if code {
-            let rows = debugger::disasm_rows(|a| gb.debug_read(a), addr, 16, &hints, fmt);
+            let rows = debugger::disasm_rows(|a| gb.debug_read(a), addr, 16, &hints, fmt, &|a| {
+                crate::windows::live_bank(gb, a)
+            });
             rows.iter()
                 .map(|r| r.text.as_str())
                 .collect::<Vec<_>>()

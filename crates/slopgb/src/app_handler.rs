@@ -392,6 +392,10 @@ impl ApplicationHandler for App {
         // window had focus (bgb does this).
         if hit_bp {
             self.dbg.set_broken(true);
+            // Snap the disasm view to where it stopped (PC, in its live bank), so
+            // a breakpoint halt shows the actual instruction — not a stale pinned
+            // bank the free run left behind.
+            self.tools.center_debugger_on_pc(&self.session.gb);
             self.tools.focus_debugger();
             self.update_title();
         }

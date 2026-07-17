@@ -142,7 +142,9 @@ fn double_click_disasm_toggles_a_breakpoint() {
     let (px, py) = (l.disasm.x + 9, l.disasm.y + 2 * lh + 1);
     assert_eq!(
         on_double_click(NOPS, AREA, &st, 0x0100, 0xFFFE, px, py, |_| 0),
-        Some(MenuOutcome::Act(DebugAction::ToggleBreakpoint(0x0102))),
+        Some(MenuOutcome::Act(DebugAction::ToggleBreakpoint(
+            0x0102, None
+        ))),
         "double-click on a disasm line toggles its breakpoint"
     );
     // Off the disasm pane (the menu bar) it does nothing.

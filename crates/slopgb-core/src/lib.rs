@@ -386,14 +386,21 @@ impl GameBoy {
 
     /// Like [`Self::run_frame`], but stop early (returning that address) if `PC`
     /// reaches one of `breakpoints` after a step — the debugger's free-running
-    /// auto-halt. The PC check is *after* each step, matching
-    /// [`Self::run_until_breakpoint`], so a breakpoint on the current line
-    /// doesn't fire instantly (the loop always advances off it; a loop back to
-    /// the breakpoint still stops). With no breakpoints it is exactly a
+    /// auto-halt. Each breakpoint is `(addr, bank)`: `bank` is `None` to halt on
+    /// `addr` in any ROM bank (the flat-address default), or `Some(b)` to halt
+    /// only when the currently-mapped ROM bank ([`Self::rom_bank`]) is `b` — so a
+    /// breakpoint on a `0x4000-0x7FFF` address in one ROM bank doesn't fire while
+    /// a different bank is executing there. The PC check is *after* each step,
+    /// matching [`Self::run_until_breakpoint`], so a breakpoint on the current
+    /// line doesn't fire instantly (the loop always advances off it; a loop back
+    /// to the breakpoint still stops). With no breakpoints it is exactly a
     /// `run_frame`. Returns `None` if the frame completed without a hit. This
     /// drives emulation forward; only call it for a live debugger run, never on
     /// a golden/test path.
-    pub fn run_frame_until_breakpoint(&mut self, breakpoints: &[u16]) -> Option<u16> {
+    pub fn run_frame_until_breakpoint(
+        &mut self,
+        breakpoints: &[(u16, Option<u16>)],
+    ) -> Option<u16> {
         let target = self.bus.frame_count().wrapping_add(1);
         let deadline = self.bus.cycles().wrapping_add(u64::from(CYCLES_PER_FRAME));
         while self.bus.frame_count() != target && self.bus.cycles() < deadline {
@@ -417,7 +424,10 @@ impl GameBoy {
                 return Some(addr);
             }
             let pc = self.cpu_regs().pc;
-            if breakpoints.contains(&pc) {
+            if breakpoints
+                .iter()
+                .any(|&(a, bank)| a == pc && bank.is_none_or(|b| self.rom_bank() as u16 == b))
+            {
                 return Some(pc);
             }
             // Lockstep serial stall: yield to the frontend pump (golden-safe —

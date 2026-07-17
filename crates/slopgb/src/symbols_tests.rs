@@ -40,9 +40,9 @@ fn lookups_find_exact_nearest_and_by_name() {
     assert_eq!(t.nearest_before(0, 0x4010), Some(("Loop", 0x4010)));
     assert_eq!(t.nearest_before(0, 0x402F), Some(("Loop", 0x4010)));
     assert_eq!(t.nearest_before(0, 0x3FFF), None);
-    // By name, case-insensitive.
-    assert_eq!(t.resolve("loop"), Some(0x4010));
-    assert_eq!(t.resolve("END"), Some(0x4030));
+    // By name, case-insensitive; resolve carries the symbol's bank + address.
+    assert_eq!(t.resolve("loop"), Some((0, 0x4010)));
+    assert_eq!(t.resolve("END"), Some((0, 0x4030)));
     assert_eq!(t.resolve("nope"), None);
 }
 
@@ -67,5 +67,13 @@ fn parse_sorts_out_of_order_input() {
     // Regardless of file order, addresses resolve correctly.
     assert_eq!(t.name_at(0, 0x4010), Some("Loop"));
     assert_eq!(t.name_at(0, 0x4030), Some("End"));
-    assert_eq!(t.resolve("reset"), Some(0x4000));
+    assert_eq!(t.resolve("reset"), Some((0, 0x4000)));
+}
+
+#[test]
+fn resolve_carries_the_symbols_bank() {
+    // A banked symbol resolves to its own bank, so a Go-to can pin the view there
+    // instead of assuming a flat address in the live-mapped bank.
+    let t = SymbolTable::parse("01:6401 SomeWhere");
+    assert_eq!(t.resolve("somewhere"), Some((1, 0x6401)));
 }

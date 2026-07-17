@@ -85,7 +85,11 @@ impl App {
                 if self.dbg.is_broken() || self.tools.is_open(ui::ToolWindow::Debugger) =>
             {
                 self.dbg.toggle_break();
-                if !self.dbg.is_broken() {
+                if self.dbg.is_broken() {
+                    // Entering a break: jump the disasm view to exactly where the
+                    // emulator stopped (PC, in its live bank).
+                    self.tools.center_debugger_on_pc(&self.session.gb);
+                } else {
                     self.resync_pacing();
                 }
                 self.update_title();
@@ -109,9 +113,12 @@ impl App {
             // Debugger F2 / F4 act on the cursor (or PC when nothing is selected).
             Action::DbgToggleBreakpoint => {
                 let addr = self.debug_cursor_or_pc();
+                // Qualify by the disasm view's pinned bank (ROMX only), so F2 on a
+                // `01:6401` line breaks in bank 1, not whatever bank is mapped.
+                let bank = self.tools.debugger_disasm_bp_bank(addr);
                 self.dbg.apply(
                     &mut self.session.gb,
-                    dbg::DebugAction::ToggleBreakpoint(addr),
+                    dbg::DebugAction::ToggleBreakpoint(addr, bank),
                 );
                 self.refresh_after_step();
             }

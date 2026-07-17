@@ -173,7 +173,7 @@ fn reference_plugins_match_builtins_byte_for_byte() {
         );
         // The mutating tool's effect matches too.
         if name == "breakpoint" {
-            assert!(plugin_bps.contains(0x0150) && native_bps.contains(0x0150));
+            assert!(plugin_bps.dot_at(0x0150, 0) && native_bps.dot_at(0x0150, 0));
         }
     }
 }

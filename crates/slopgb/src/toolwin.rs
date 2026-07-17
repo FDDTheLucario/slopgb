@@ -263,7 +263,12 @@ impl ToolWindows {
         if let WinState::Debugger(s) = &mut view.state {
             let l = debugger::DebuggerLayout::for_size(size.width as i32, size.height as i32);
             let visible = (l.disasm.h / line_height()).max(0) as usize;
-            s.disasm_follow(gb.cpu_regs().pc, |a| gb.debug_read(a), visible);
+            let bank = s.disasm_bank;
+            s.disasm_follow(
+                gb.cpu_regs().pc,
+                |a| crate::windows::banked_read(gb, bank, a),
+                visible,
+            );
         }
         {
             let mut canvas = Canvas::new(&mut buf, size.width as usize, size.height as usize);
@@ -490,7 +495,8 @@ impl ToolWindows {
                     if l.memory.contains(px, py) {
                         s.scroll_memory(rows);
                     } else if l.disasm.contains(px, py) {
-                        s.scroll_disasm(rows, |a| gb.debug_read(a));
+                        let bank = s.disasm_bank;
+                        s.scroll_disasm(rows, |a| crate::windows::banked_read(gb, bank, a));
                     } else if l.stack.contains(px, py) {
                         s.scroll_stack(rows);
                     } else {
@@ -696,14 +702,18 @@ fn debugger_left_click(
     // Refresh the CDL-on flag so the Debug dropdown's "CDL logging" check-mark
     // reflects the live state (bgb's toggled-item tick).
     s.cdl_on = gb.cdl_flags().is_some();
+    // Hit-test through the same pinned-bank read + bank the renderer used, so
+    // symbol label lines land on the same rows and the click maps to the drawn
+    // address (a live-bank read would shift rows when the view is bank-pinned).
+    let bank = s.disasm_bank;
     debugger::on_left_click(
-        |a| gb.debug_read(a),
+        |a| windows::banked_read(gb, bank, a),
         area,
         s,
         r,
         px,
         py,
-        |a| windows::live_bank(gb, a),
+        |a| windows::shown_bank(gb, bank, a),
     )
 }
 
@@ -718,14 +728,14 @@ fn debugger_double_click(
 ) -> Option<MenuOutcome> {
     let r = gb.cpu_regs();
     debugger::on_double_click(
-        |a| gb.debug_read(a),
+        |a| windows::banked_read(gb, s.disasm_bank, a),
         area,
         s,
         r.pc,
         r.sp,
         px,
         py,
-        |a| windows::live_bank(gb, a),
+        |a| windows::shown_bank(gb, s.disasm_bank, a),
     )
 }
 
@@ -738,22 +748,69 @@ fn debugger_right_click(
     py: i32,
 ) {
     let r = gb.cpu_regs();
+    // Same renderer-matched read/bank as the left-click glue (row alignment).
+    let bank = s.disasm_bank;
     debugger::on_right_click(
-        |a| gb.debug_read(a),
+        |a| windows::banked_read(gb, bank, a),
         area,
         s,
         r.pc,
         r.sp,
         px,
         py,
-        |a| windows::live_bank(gb, a),
+        |a| windows::shown_bank(gb, bank, a),
     );
 }
 
 #[cfg(test)]
 mod tests {
-    use super::is_double_click;
+    use super::{debugger_double_click, is_double_click};
+    use crate::dbg::DebugAction;
+    use crate::symbols::SymbolTable;
+    use crate::ui::canvas::Rect;
+    use crate::ui::text::line_height;
+    use crate::windows::debugger::{self, MenuOutcome};
+    use slopgb_core::{GameBoy, Model};
+    use std::rc::Rc;
     use std::time::Duration;
+
+    /// A bank-pinned view must hit-test through the pinned bank, not the live
+    /// one: the renderer names symbols per the *shown* bank, and a live-bank
+    /// hit-test would miss the label row and toggle the breakpoint one line off.
+    #[test]
+    fn double_click_hits_the_drawn_row_in_a_pinned_bank() {
+        // MBC1, 64 KiB (4 banks), all-nop body; live ROM bank is 1 at reset.
+        let mut rom = vec![0u8; 0x10000];
+        rom[0x0147] = 0x01;
+        rom[0x0148] = 0x01;
+        let gb = GameBoy::new(Model::Dmg, rom).unwrap();
+        assert_ne!(gb.rom_bank(), 2, "live bank must differ from the pin");
+        // View pinned to bank 2 with a symbol at its first shown row, so the
+        // rendered pane is: row 0 `Foo:` label, row 1 the 02:4000 instruction.
+        let st = debugger::DebuggerState {
+            pinned: true,
+            disasm_base: 0x4000,
+            disasm_bank: Some(2),
+            symbols: Rc::new(SymbolTable::parse("02:4000 Foo")),
+            ..debugger::DebuggerState::default()
+        };
+        let area = Rect::new(0, 0, 760, 560);
+        let l = debugger::DebuggerLayout::for_size(area.w, area.h);
+        let out = debugger_double_click(
+            &st,
+            area,
+            &gb,
+            l.disasm.x + 9,
+            l.disasm.y + line_height() + 1, // row 1: the labeled instruction
+        );
+        assert_eq!(
+            out,
+            Some(MenuOutcome::Act(DebugAction::ToggleBreakpoint(
+                0x4000,
+                Some(2)
+            )))
+        );
+    }
 
     #[test]
     fn double_click_within_window_and_radius() {

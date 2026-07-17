@@ -77,7 +77,10 @@ pub fn dispatch(
         ))),
         Call::Breakpoint { addr } => {
             let a = addr::parse_one(addr)?;
-            breakpoints.set(a.addr);
+            // A `BB:AAAA` breakpoint in switchable ROM qualifies to that bank, so
+            // it halts only when bank `BB` is mapped; elsewhere it's bank-agnostic.
+            let bank = (0x4000..=0x7FFF).contains(&a.addr).then_some(a.bank);
+            breakpoints.set(a.addr, bank);
             Ok(ToolResult::Text(format!(
                 "breakpoint set at {:02X}:{:04X}",
                 a.bank, a.addr
