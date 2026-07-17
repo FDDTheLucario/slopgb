@@ -80,28 +80,36 @@ fn drawing_clips_to_the_buffer_without_panicking() {
 }
 
 #[test]
-fn round_outline_omits_the_four_corner_pixels() {
-    let mut buf = blank();
-    let r = Rect::new(1, 1, 4, 4); // covers x 1..5, y 1..5
+fn round_outline_chamfers_the_corners() {
+    const BW: usize = 12;
+    let mut buf = vec![BG; BW * BW];
+    let atb = |b: &[u32], x: i32, y: i32| b[(y * BW as i32 + x) as usize];
+    let r = Rect::new(1, 1, 10, 10); // x 1..11, y 1..11
     {
-        let mut c = Canvas::new(&mut buf, W, H);
+        let mut c = Canvas::new(&mut buf, BW, BW);
         c.round_outline(r, FG);
     }
-    // Corners are skipped; the pixels just inside each corner (along an edge) set.
-    for (cx, cy) in [(1, 1), (4, 1), (1, 4), (4, 4)] {
-        assert_eq!(at(&buf, cx, cy), BG, "corner ({cx},{cy}) omitted");
+    // The 2px chamfer cuts the outer corner triangle (3 px per corner)...
+    for (cx, cy) in [(1, 1), (2, 1), (1, 2)] {
+        assert_eq!(atb(&buf, cx, cy), BG, "chamfer cut ({cx},{cy})");
     }
-    assert_eq!(at(&buf, 2, 1), FG, "top edge drawn");
-    assert_eq!(at(&buf, 1, 2), FG, "left edge drawn");
-    assert_eq!(at(&buf, 4, 2), FG, "right edge drawn");
-    assert_eq!(at(&buf, 2, 4), FG, "bottom edge drawn");
-    // A too-small rect falls back to a hard outline (corner set).
-    let mut buf2 = blank();
+    // ...bridged by one diagonal pixel, with the edges inset by 2.
+    assert_eq!(atb(&buf, 2, 2), FG, "top-left chamfer bridge");
+    assert_eq!(atb(&buf, 3, 1), FG, "top edge starts inset by 2");
+    assert_eq!(atb(&buf, 1, 3), FG, "left edge starts inset by 2");
+    // `chamfer_cut_pixels` reports exactly those cut coordinates.
+    let cut = Canvas::chamfer_cut_pixels(r);
+    assert_eq!(cut.len(), 12, "3 px * 4 corners");
+    assert!(cut.contains(&(1, 1)) && cut.contains(&(2, 1)) && cut.contains(&(1, 2)));
+
+    // A too-small rect falls back to a hard outline (corner set, no cut list).
+    let mut buf2 = vec![BG; BW * BW];
     {
-        let mut c = Canvas::new(&mut buf2, W, H);
-        c.round_outline(Rect::new(0, 0, 2, 2), FG);
+        let mut c = Canvas::new(&mut buf2, BW, BW);
+        c.round_outline(Rect::new(0, 0, 4, 4), FG); // 4 < 2*2+1
     }
-    assert_eq!(buf2[0], FG, "2x2 falls back to hard corner");
+    assert_eq!(buf2[0], FG, "too-small falls back to a hard corner");
+    assert!(Canvas::chamfer_cut_pixels(Rect::new(0, 0, 4, 4)).is_empty());
 }
 
 #[test]

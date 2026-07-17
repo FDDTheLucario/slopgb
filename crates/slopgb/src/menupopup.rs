@@ -203,18 +203,13 @@ impl MenuPopup {
                 }
             }
         }
-        // Contemporary theme: punch each box's 4 corner pixels back to fully
-        // transparent (RGB=0, alpha=0) so the desktop shows through — a visibly
-        // rounded popup (`menu::render` already omits the corner *border*). The
+        // Contemporary theme: punch each box's chamfered corner triangles back
+        // to fully transparent (RGB=0, alpha=0) so the desktop shows through — a
+        // visibly rounded popup matching `round_outline`'s 2px chamfer. The
         // classic square theme leaves the corners opaque.
         if self.theme.rounded {
             for b in std::iter::once(main_box).chain(sub_box) {
-                for (cx, cy) in [
-                    (b.x, b.y),
-                    (b.right() - 1, b.y),
-                    (b.x, b.bottom() - 1),
-                    (b.right() - 1, b.bottom() - 1),
-                ] {
+                for (cx, cy) in Canvas::chamfer_cut_pixels(b) {
                     if (0..w).contains(&cx) && (0..h).contains(&cy) {
                         buf[(cy * w + cx) as usize] = 0x0000_0000;
                     }
