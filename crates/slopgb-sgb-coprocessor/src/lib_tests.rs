@@ -250,7 +250,7 @@ fn bios_runtime_contract_variables_stubs_and_staging() {
             .unwrap();
         // JSR $C58D / JSR $BBED / LDA #$55 / STA $0320 / STP.
         let prog = [
-            0x20, 0x8D, 0xC5, // JSR $C58D (aux: plain return)
+            0x20, 0x8D, 0xC5, // JSR $C58D (aux: waits one vblank NMI)
             0x20, 0xED, 0xBB, // JSR $BBED (main: calls the hook)
             0xA9, 0x55, // LDA #$55
             0x8D, 0x20, 0x03, // STA $0320 (survival marker)
@@ -258,8 +258,10 @@ fn bios_runtime_contract_variables_stubs_and_staging() {
         ];
         cpu.write_ram(0x9000, &prog).unwrap();
         cpu.set_pc(0x9000).unwrap();
-        cpu.run_until(2_000).unwrap();
     }
+    // The aux service blocks on the vblank edge, so the program needs the
+    // host pump (RDNMI shadow + NMI delivery), not a raw run_until.
+    cop.clock(70_224 * 2);
     assert_eq!(
         cop.debug_cpu_ram(0x0310, 1),
         vec![0x77],
@@ -782,6 +784,82 @@ fn nmi_handler_preserves_a_with_empty_vector() {
         vec![0x5A],
         "A survived the NMI round trip"
     );
+}
+
+/// JUMP ($12) carries an optional NMI-handler address in packet bytes 4-6
+/// (Pan Docs "SGB Command 12h — JUMP"): nonzero installs the SNES RAM NMI
+/// vector at $00BB-$00BD (the bytes fullsnes documents JUMP clobbering);
+/// all-zero leaves the vector unchanged.
+#[test]
+fn jump_packet_installs_the_ram_nmi_vector() {
+    let Some(mut cop) = build_cop(48_000) else {
+        return;
+    };
+    let mut pkt = [0u8; 16];
+    pkt[0] = 0x12 << 3 | 1;
+    pkt[1] = 0x00; // PC $001800 (the flags path applies it)
+    pkt[2] = 0x18;
+    pkt[3] = 0x00;
+    pkt[4] = 0x00; // NMI handler $7F:0100
+    pkt[5] = 0x01;
+    pkt[6] = 0x7F;
+    let mut cmds = TestCmds {
+        packets: vec![pkt],
+        ..TestCmds::default()
+    };
+    cop.poll(&mut cmds);
+    assert_eq!(
+        cop.debug_cpu_ram(0x00BB, 3),
+        vec![0x00, 0x01, 0x7F],
+        "the RAM NMI vector holds the packet's handler address"
+    );
+
+    let mut zero = [0u8; 16];
+    zero[0] = 0x12 << 3 | 1;
+    zero[2] = 0x18; // PC only, NMI bytes all zero
+    let mut cmds = TestCmds {
+        packets: vec![zero],
+        ..TestCmds::default()
+    };
+    cop.poll(&mut cmds);
+    assert_eq!(
+        cop.debug_cpu_ram(0x00BB, 3),
+        vec![0x00, 0x01, 0x7F],
+        "an all-zero NMI field leaves the vector unchanged"
+    );
+}
+
+/// The resident aux BIOS service: wait for the next vblank (RDNMI poll),
+/// then return — without ever touching NMITIMEN (the pilot's JUMP points
+/// the $00BB vector at its bootstrap entry, so a delivered NMI would
+/// re-enter the main loop recursively). Pinned black-box from the hook's
+/// ACK-latch sandwich around the aux call.
+#[test]
+fn aux_service_waits_for_vblank_without_nmis() {
+    let Some(mut cop) = build_cop(48_000) else {
+        return;
+    };
+    {
+        let mut cpu = cop.cpu.borrow_mut();
+        cpu.write_ram(0x9300, &[0xEE, 0x60, 0x03, 0x40]).unwrap(); // INC $0360 / RTI
+        cpu.write_ram(0x00BB, &[0x00, 0x93, 0x00]).unwrap(); // [$00BB] = $00:9300
+        // JSR the aux entry ($C590 — a thunk to the resident body), then halt.
+        let prog = [0x20, 0x90, 0xC5, 0xA9, 0xA5, 0x8D, 0x64, 0x03, 0xDB];
+        cpu.write_ram(0x9000, &prog).unwrap();
+        cpu.set_pc(0x9000).unwrap();
+    }
+    cop.clock(70_224 * 3);
+    assert_eq!(
+        cop.debug_cpu_ram(0x0364, 1),
+        vec![0xA5],
+        "the aux service returned after the vblank wait"
+    );
+    assert_eq!(
+        cop.debug_cpu_ram(0x0360, 1),
+        vec![0],
+        "no NMI was delivered (the guest never enabled one)"
+    );
+    assert_eq!(cop.nmitimen, 0, "NMITIMEN untouched");
 }
 
 // ---- Joypad autopoll ($4200 bit 0 → $4218-$421F) ----

@@ -19,6 +19,16 @@ impl SgbCoprocessor {
                 // frame later — defer the BIOS-runtime variable update until
                 // then (see `pending_trn_pkt`).
                 self.pending_trn_pkt = Some(p);
+            } else if p[0] >> 3 == 0x12 && p[4..7] != [0, 0, 0] {
+                // JUMP ($12) bytes 4-6: the SNES NMI handler address — "the
+                // NMI handler remains unchanged if all bytes 4-6 are zero"
+                // (Pan Docs "SGB Command 12h"). The BIOS lands it in the RAM
+                // vector at $00BB-$00BD (fullsnes: JUMP clobbers exactly
+                // those bytes), where the resident NMI handler dispatches.
+                let cpu = self.cpu.get_mut();
+                let _ = cpu.write_ram(u32::from(NMI_RAM_VEC), &p[4..7]);
+                let _ = cpu.write_ram(BIOS_PKT_BUF, &p);
+                let _ = cpu.write_ram(BIOS_LAST_CMD, &[p[0] >> 3]);
             } else {
                 // The BIOS-runtime variables the uploaded code polls: the
                 // packet bytes and the command number (see the BIOS_* consts).

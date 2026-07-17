@@ -161,8 +161,17 @@ const BIOS_AUX_ENTRIES: [u32; 2] = [0xC58D, 0xC590];
 /// depth is pinned by the pilot's own `PLA PLA / RTS` stack fixup), else
 /// return. The host performs the receive/transfer duties asynchronously.
 const BIOS_MAIN_BODY: u32 = 0xBE00;
-/// The resident aux-service body: plain RTS (nothing to do yet).
-const BIOS_AUX_BODY: u32 = 0xBE20;
+/// The resident aux-service body: wait for the next vblank (poll RDNMI
+/// bit 7 — the flag sets regardless of NMITIMEN, fullsnes 4210h), then
+/// return. Pinned black-box from the pilot's hook, which wraps the aux
+/// call in its ICD2 ACK latch writes ($01 before, $00 after) on every
+/// DATA_TRN delivery: the wait holds the $01 latch across a vblank so the
+/// GB polling D751 observes both handshake values. It must NOT touch
+/// NMITIMEN — the pilot's JUMP sets the $00BB NMI vector to its bootstrap
+/// entry, so a delivered NMI would re-enter the main loop recursively
+/// (probed: the stack then eats the direct page). Sits past the RTI stub
+/// (the body outgrew the $BE20-$BE2F slot).
+const BIOS_AUX_BODY: u32 = 0xBE60;
 /// The game's hook slot the main service calls (zero until installed).
 const BIOS_HOOK_SLOT: u32 = 0x0800;
 /// The JUMP trampoline: `CLC / XCE / JML target` — the BIOS hands control
@@ -478,7 +487,21 @@ impl SgbCoprocessor {
                     0x60,    // RTS
                 ],
             )?;
-            cpu.write_ram(BIOS_AUX_BODY, &[0x60])?;
+            // Aux body (see BIOS_AUX_BODY): PHP / SEP #$20 /
+            // wait: LDA $4210 / BPL wait / PLP / RTS — the $4210 reads ride
+            // the host-fed RDNMI shadow (set at every vblank edge,
+            // read-clear guest-side), so the wait spans to the next edge.
+            cpu.write_ram(
+                BIOS_AUX_BODY,
+                &[
+                    0x08, // PHP (caller's register widths preserved)
+                    0xE2, 0x20, // SEP #$20
+                    0xAD, 0x10, 0x42, // wait: LDA $4210 (RDNMI)
+                    0x10, 0xFB, // BPL wait
+                    0x28, // PLP
+                    0x60, // RTS
+                ],
+            )?;
             // The resident NMI handler + both CPU-mode NMI vectors.
             cpu.write_ram(
                 NMI_HANDLER,
@@ -766,6 +789,16 @@ impl SgbCoprocessor {
         self.cpu
             .borrow_mut()
             .read_ram(addr, len)
+            .unwrap_or_default()
+    }
+
+    /// The PPU plugin's raw state snapshot (the `slopgb-snes-ppu` image:
+    /// VRAM, CGRAM, OAM, registers, framebuffer) — read-only introspection
+    /// for the debugger/MCP; empty without a PPU plugin.
+    pub fn debug_ppu_state(&self) -> Vec<u8> {
+        self.ppu
+            .as_ref()
+            .and_then(|p| p.borrow_mut().save_state().ok())
             .unwrap_or_default()
     }
 
