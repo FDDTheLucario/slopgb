@@ -197,6 +197,11 @@ pub struct SgbCoprocessor {
     /// GB frame position (T-cycles, mod one frame) for the `$6000` LCD-row
     /// shadow.
     gb_pos: u64,
+    /// The SNES-WRAM destination of the next DATA_TRN payload, parsed from
+    /// the teed `$10` packet header (Pan Docs "SGB Command $10": dest lo,
+    /// hi, bank). The payload itself arrives one frame later (the screen
+    /// capture), routed here by `poll`.
+    data_trn_dest: Option<u32>,
 }
 
 impl SgbCoprocessor {
@@ -254,6 +259,7 @@ impl SgbCoprocessor {
             pending_packets: VecDeque::new(),
             feed: None,
             gb_pos: 0,
+            data_trn_dest: None,
         };
         me.install_firmware()?;
         Ok(me)
@@ -435,6 +441,13 @@ impl SgbCoprocessor {
         // Raw packet tee → the ICD2 mailbox deposit queue (bounded like the
         // core-side tee; the flush pump deposits one per guest consume).
         while let Some(p) = cmds.take_packet() {
+            // DATA_TRN ($10) names its SNES-WRAM dest in the header (Pan
+            // Docs "SGB Command $10": lo, hi, bank); the 4 KB payload rides
+            // the next frame's screen capture — remember where to land it.
+            if p[0] >> 3 == 0x10 {
+                self.data_trn_dest =
+                    Some(u32::from(p[1]) | u32::from(p[2]) << 8 | u32::from(p[3]) << 16);
+            }
             while self.pending_packets.len() >= PACKET_QUEUE_CAP {
                 self.pending_packets.pop_front();
             }
@@ -459,14 +472,20 @@ impl SgbCoprocessor {
             let sig = checksum(data);
             if sig != self.sou_trn_sig {
                 self.sou_trn_sig = sig;
-                self.upload_transfer(data, true);
+                self.upload_transfer(data);
             }
         }
         if let Some(data) = cmds.data_trn_data() {
             let sig = checksum(data);
             if sig != self.data_trn_sig {
                 self.data_trn_sig = sig;
-                self.upload_transfer(data, false);
+                // DATA_TRN is 4 KB into SNES WRAM at the packet's dest — the
+                // copy the SGB BIOS performs on real hardware. Without a
+                // teed dest packet there is nowhere honest to put it, so it
+                // is dropped rather than guessed.
+                if let Some(dest) = self.data_trn_dest {
+                    let _ = self.cpu.get_mut().write_ram(dest, data);
+                }
             }
         }
         if let Some(flags) = cmds.flags() {
@@ -507,11 +526,11 @@ impl SgbCoprocessor {
         }
     }
 
-    /// Copy a self-describing `(dest, len, data…)` transfer block into APU RAM
-    /// (fullsnes: SGB sound transfers begin with a destination/length pair); with
-    /// `start`, point the SPC700 at the first load address. Same shape as the
+    /// Copy a SOU_TRN self-describing `(dest, len, data…)` transfer block into
+    /// APU RAM (fullsnes: SGB sound transfers begin with a destination/length
+    /// pair) and point the SPC700 at the first load address. Same shape as the
     /// built-in `SgbApu` uploader, so a `SOU_TRN` game driver runs identically.
-    fn upload_transfer(&mut self, data: &[u8], start: bool) {
+    fn upload_transfer(&mut self, data: &[u8]) {
         let spc = self.spc.get_mut();
         let mut off = 0usize;
         let mut entry = None;
@@ -526,7 +545,7 @@ impl SgbCoprocessor {
             entry.get_or_insert(dest);
             off += len;
         }
-        if let (true, Some(e)) = (start, entry) {
+        if let Some(e) = entry {
             let _ = spc.set_pc(u32::from(e));
         }
     }
@@ -568,6 +587,8 @@ impl SgbCoprocessor {
             w.bytes(p);
         }
         w.u64(self.gb_pos);
+        w.bool(self.data_trn_dest.is_some());
+        w.u32(self.data_trn_dest.unwrap_or(0));
     }
 
     fn read_state(&mut self, r: &mut Reader<'_>) -> Result<(), StateError> {
@@ -610,6 +631,9 @@ impl SgbCoprocessor {
             self.pending_packets.push_back(p);
         }
         self.gb_pos = r.u64()? % GB_FRAME_CYCLES;
+        let has_dest = r.bool()?;
+        let dest = r.u32()?;
+        self.data_trn_dest = has_dest.then_some(dest);
         // The undrained source/output PCM is transient, not part of the
         // snapshot — and so is the pad feed (re-read from the restored plugin
         // state on the next flush).
@@ -657,6 +681,7 @@ impl SgbCoprocessor {
         fresh.pending_packets = self.pending_packets.clone();
         fresh.feed = self.feed;
         fresh.gb_pos = self.gb_pos;
+        fresh.data_trn_dest = self.data_trn_dest;
         Ok(fresh)
     }
 }
@@ -748,6 +773,8 @@ fn write_empty_state(w: &mut Writer) {
     w.u32(0); // jump target
     w.u8(0); // pending ICD2 packets
     w.u64(0); // gb_pos
+    w.bool(false); // data_trn dest present
+    w.u32(0); // data_trn dest
 }
 
 /// A no-op [`AudioCoprocessor`] producing silence. Only ever the result of
@@ -793,6 +820,8 @@ impl AudioCoprocessor for InertCoprocessor {
             r.bytes_into(&mut p)?;
         }
         r.u64()?;
+        r.bool()?;
+        r.u32()?;
         Ok(())
     }
     fn clone_box(&self) -> Box<dyn AudioCoprocessor> {

@@ -182,6 +182,46 @@ fn icd2_pump_maintains_lcd_row_shadow() {
     );
 }
 
+/// DATA_TRN ($10) routes its 4 KB payload into SNES WRAM at the destination
+/// carried in the teed packet header (Pan Docs "SGB Command $10": dest lo,
+/// hi, bank — the pilot sends 81 00 01 7F = $7F:0100). On real hardware the
+/// SGB BIOS performs this copy; the host pump assumes that duty. The payload
+/// must NOT land in SPC (audio) RAM — that was a misroute.
+#[test]
+fn data_trn_lands_at_packet_dest_in_wram() {
+    let Some(mut cop) = build_cop(48_000) else {
+        return;
+    };
+    let mut pkt = [0u8; 16];
+    pkt[0] = 0x81; // DATA_TRN, one packet
+    pkt[1] = 0x00; // dest lo
+    pkt[2] = 0x01; // dest hi
+    pkt[3] = 0x7F; // dest bank -> $7F:0100
+    let payload: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
+    let mut cmds = TestCmds {
+        packets: vec![pkt],
+        data_trn: Some(payload.clone()),
+        ..TestCmds::default()
+    };
+    cop.poll(&mut cmds);
+    // The transfer getter is throttled (polled every 64th call), so keep
+    // polling until the edge-detect fires.
+    for _ in 0..64 {
+        cop.poll(&mut cmds);
+    }
+    assert_eq!(
+        cpu_ram(&cop, 0x7F_0100, 4096),
+        payload,
+        "payload at the packet's WRAM dest"
+    );
+    let spc_head = cop.spc.borrow_mut().read_ram(0x0100, 16).unwrap();
+    assert_ne!(
+        &spc_head[..],
+        &payload[..16],
+        "no misroute into SPC RAM at the transfer shape's first dest"
+    );
+}
+
 /// DATA_SND ($0F) is no longer a no-op: the packet's data lands at its target
 /// SNES-work-RAM address of the 65C816 plugin (fullsnes `dest_lo, dest_hi, len,
 /// data…`).
