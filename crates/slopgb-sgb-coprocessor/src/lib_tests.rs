@@ -182,6 +182,112 @@ fn icd2_pump_maintains_lcd_row_shadow() {
     );
 }
 
+/// JUMP hands control over in native mode (pinned black-box: the pilot's
+/// dispatcher uses REP #$30 + 16-bit index ops, impossible in emulation
+/// mode). A target program whose marker is only correct when REP #$20
+/// actually widens A proves the mode.
+#[test]
+fn jump_enters_native_mode() {
+    let Some(mut cop) = build_cop(48_000) else {
+        return;
+    };
+    // REP #$20 / LDA #$1234 / STA $0330 / SEP #$20 / STP.
+    let prog = [
+        0xC2, 0x20, 0xA9, 0x34, 0x12, 0x8D, 0x30, 0x03, 0xE2, 0x20, 0xDB,
+    ];
+    cop.cpu.borrow_mut().write_ram(0x9100, &prog).unwrap();
+    let mut cmds = TestCmds {
+        flags: Some(SgbFlags {
+            atrc_en: false,
+            test_en: false,
+            icon_en: false,
+            pal_pri: false,
+            jump: Some(0x9100),
+        }),
+        ..Default::default()
+    };
+    for _ in 0..64 {
+        cop.poll(&mut cmds);
+    }
+    cop.clock(70_224);
+    assert_eq!(
+        cop.debug_cpu_ram(0x0330, 2),
+        vec![0x34, 0x12],
+        "16-bit store: the JUMP target ran in native mode"
+    );
+}
+
+/// The resident BIOS-runtime contract that SGB arcade-takeover programs hook
+/// (pinned black-box from the pilot's own DATA_SND-installed routines — see
+/// docs/hardware-state/sgb-arcade-takeover.md): every teed packet's bytes
+/// land at `$7E:0600` with the command number at `$7E:02C2`; a DATA_TRN
+/// payload is staged in WRAM with a pointer at `$7E:0284/85`; and the
+/// service entries the uploaded bootstrap JSRs into hold resident RTS stubs
+/// (the host performs their duties asynchronously) so the call does not
+/// crash into zeroed RAM.
+#[test]
+fn bios_runtime_contract_variables_stubs_and_staging() {
+    let Some(mut cop) = build_cop(48_000) else {
+        return;
+    };
+    // Service entries survive a JSR (no crash into zeroed RAM), and the
+    // main service calls the game's $0800 hook when one is installed: a
+    // guest program JSRs both entries around installing a marker hook.
+    {
+        let mut cpu = cop.cpu.borrow_mut();
+        // Hook at $0800: LDA #$77 / STA $0310 / RTS.
+        cpu.write_ram(0x0800, &[0xA9, 0x77, 0x8D, 0x10, 0x03, 0x60])
+            .unwrap();
+        // JSR $C58D / JSR $BBED / LDA #$55 / STA $0320 / STP.
+        let prog = [
+            0x20, 0x8D, 0xC5, // JSR $C58D (aux: plain return)
+            0x20, 0xED, 0xBB, // JSR $BBED (main: calls the hook)
+            0xA9, 0x55, // LDA #$55
+            0x8D, 0x20, 0x03, // STA $0320 (survival marker)
+            0xDB, // STP
+        ];
+        cpu.write_ram(0x9000, &prog).unwrap();
+        cpu.set_pc(0x9000).unwrap();
+        cpu.run_until(2_000).unwrap();
+    }
+    assert_eq!(
+        cop.debug_cpu_ram(0x0310, 1),
+        vec![0x77],
+        "hook ran via $BBED"
+    );
+    assert_eq!(
+        cop.debug_cpu_ram(0x0320, 1),
+        vec![0x55],
+        "both JSRs returned"
+    );
+
+    // A teed packet lands in the packet buffer + last-command variable.
+    let mut pkt = [0u8; 16];
+    pkt[0] = 0x81; // DATA_TRN
+    pkt[1] = 0x00;
+    pkt[2] = 0x01;
+    pkt[3] = 0x7F;
+    let payload: Vec<u8> = (0..4096u32).map(|i| (i % 249) as u8).collect();
+    let mut cmds = TestCmds {
+        packets: vec![pkt],
+        data_trn: Some(payload.clone()),
+        ..TestCmds::default()
+    };
+    for _ in 0..65 {
+        cop.poll(&mut cmds);
+    }
+    assert_eq!(cop.debug_cpu_ram(0x0600, 16), pkt.to_vec(), "packet buffer");
+    assert_eq!(cop.debug_cpu_ram(0x02C2, 1), vec![0x10], "last command");
+
+    // The payload is staged in WRAM behind the $0284/85 pointer (bank $7E
+    // implied — the game's copy loop hardwires it) and still lands at the
+    // packet's dest.
+    let ptr = cop.debug_cpu_ram(0x0284, 2);
+    let staging = 0x7E_0000 | u32::from(ptr[0]) | u32::from(ptr[1]) << 8;
+    assert_eq!(cop.debug_cpu_ram(staging, 4096), payload, "staged payload");
+    assert_eq!(cop.debug_cpu_ram(0x7F_0100, 4096), payload, "dest copy");
+}
+
 /// DATA_TRN ($10) routes its 4 KB payload into SNES WRAM at the destination
 /// carried in the teed packet header (Pan Docs "SGB Command $10": dest lo,
 /// hi, bank — the pilot sends 81 00 01 7F = $7F:0100). On real hardware the
@@ -231,10 +337,21 @@ fn data_snd_writes_to_snes_work_ram() {
         return;
     };
     let mut cmds = TestCmds::default();
-    // Write [0xDE, 0xAD] at $0300.
-    cmds.data_snd.push(vec![0x00, 0x03, 0x02, 0xDE, 0xAD]);
+    // Pan Docs "SGB Command 0Fh — DATA_SND": dest lo, dest hi, BANK, count,
+    // data. Write [0xDE, 0xAD] at $7F:0300.
+    cmds.data_snd.push(vec![0x00, 0x03, 0x7F, 0x02, 0xDE, 0xAD]);
     cop.poll(&mut cmds);
-    assert_eq!(cpu_ram(&cop, 0x0300, 2), vec![0xDE, 0xAD]);
+    assert_eq!(cpu_ram(&cop, 0x7F_0300, 2), vec![0xDE, 0xAD]);
+    // Bank 0 routes through the low-WRAM mirror ($7E), count clamps at 11.
+    let mut pkt = vec![0x00, 0x18, 0x00, 0x0B];
+    pkt.extend_from_slice(&[0xEA; 12]); // 12 data bytes, only 11 valid
+    cmds.data_snd.push(pkt);
+    cop.poll(&mut cmds);
+    assert_eq!(cpu_ram(&cop, 0x7E_1800, 12), {
+        let mut v = vec![0xEA; 11];
+        v.push(0x00);
+        v
+    });
 }
 
 /// JUMP ($12) is no longer a no-op: it redirects the 65C816 plugin's program

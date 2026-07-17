@@ -98,6 +98,39 @@ const HW_LCD_ROW: u32 = 0x0100_0016;
 /// the core-side tee cap; the guest normally consumes far faster).
 const PACKET_QUEUE_CAP: usize = 16;
 
+/// The resident BIOS-runtime WRAM contract arcade-takeover programs hook —
+/// pinned black-box from the pilot's own uploaded routines (see
+/// docs/hardware-state/sgb-arcade-takeover.md), never from BIOS code.
+/// The current packet's 16 bytes (`$7E:0600`, via the bank-0 mirror).
+const BIOS_PKT_BUF: u32 = 0x0600;
+/// The last received command number (`$7E:02C2`).
+const BIOS_LAST_CMD: u32 = 0x02C2;
+/// 16-bit pointer to the staged DATA_TRN payload, bank `$7E` implied
+/// (`$7E:0284/85`).
+const BIOS_TRN_PTR: u32 = 0x0284;
+/// Where the host stages DATA_TRN payloads (high WRAM, clear of the low
+/// pages the uploaded stubs use; reached through the pointer above).
+const BIOS_TRN_STAGING: u32 = 0x7E_D000;
+/// BIOS service entries uploaded bootstraps `JSR` into (two per known BIOS
+/// revision, selected on the `$00:FFDB` byte — zero in slopgb, so the first
+/// of each pair is the live one). The entries sit 3 bytes apart, so each
+/// holds a `JMP` thunk into a resident body below.
+const BIOS_MAIN_ENTRIES: [u32; 2] = [0xBBED, 0xBBF0];
+const BIOS_AUX_ENTRIES: [u32; 2] = [0xC58D, 0xC590];
+/// The resident main-service body: call the game's `$0800` hook slot when
+/// one is installed (`LDA $0800 / BEQ +3 / JSR $0800 / RTS` — the two-JSR
+/// depth is pinned by the pilot's own `PLA PLA / RTS` stack fixup), else
+/// return. The host performs the receive/transfer duties asynchronously.
+const BIOS_MAIN_BODY: u32 = 0xBE00;
+/// The resident aux-service body: plain RTS (nothing to do yet).
+const BIOS_AUX_BODY: u32 = 0xBE20;
+/// The game's hook slot the main service calls (zero until installed).
+const BIOS_HOOK_SLOT: u32 = 0x0800;
+/// The JUMP trampoline: `CLC / XCE / JML target` — the BIOS hands control
+/// to a JUMP target in native mode (pinned by the pilot's dispatcher using
+/// `REP #$30` + 16-bit index ops, impossible in emulation mode).
+const JUMP_TRAMP: u32 = 0xBF00;
+
 /// Comm ports (SNES APU I/O has four: `$2140-$2143` / `$F4-$F7`).
 const N_PORTS: usize = 4;
 /// SNES bank-0 address of comm port 0 (`$2140`). (fullsnes, "SNES APU I/O".)
@@ -279,6 +312,35 @@ impl SgbCoprocessor {
                 &[SHIM_ORG as u8, (SHIM_ORG >> 8) as u8],
             )?;
             cpu.set_pc(u32::from(SHIM_ORG))?;
+            // Resident BIOS service entries (JMP thunks; the entries sit 3
+            // bytes apart, too tight for inline bodies). Opcodes per the WDC
+            // datasheet: 4C = JMP abs, AD = LDA abs, F0 = BEQ, 20 = JSR,
+            // 60 = RTS.
+            for entry in BIOS_MAIN_ENTRIES {
+                cpu.write_ram(
+                    entry,
+                    &[0x4C, BIOS_MAIN_BODY as u8, (BIOS_MAIN_BODY >> 8) as u8],
+                )?;
+            }
+            for entry in BIOS_AUX_ENTRIES {
+                cpu.write_ram(
+                    entry,
+                    &[0x4C, BIOS_AUX_BODY as u8, (BIOS_AUX_BODY >> 8) as u8],
+                )?;
+            }
+            // Main body: guarded call into the game's hook slot.
+            let hook_lo = BIOS_HOOK_SLOT as u8;
+            let hook_hi = (BIOS_HOOK_SLOT >> 8) as u8;
+            cpu.write_ram(
+                BIOS_MAIN_BODY,
+                &[
+                    0xAD, hook_lo, hook_hi, // LDA $0800 (0 = no hook installed)
+                    0xF0, 0x03, // BEQ +3 -> the RTS
+                    0x20, hook_lo, hook_hi, // JSR $0800
+                    0x60,    // RTS
+                ],
+            )?;
+            cpu.write_ram(BIOS_AUX_BODY, &[0x60])?;
         }
         {
             let (prog, dir, brr) = spc_firmware();
@@ -435,6 +497,16 @@ impl SgbCoprocessor {
         std::mem::take(&mut self.out)
     }
 
+    /// Read `len` bytes of the 65C816 plugin's memory at the 24-bit `addr` —
+    /// read-only introspection for the debugger/MCP (a `peek` into the SNES
+    /// side; never advances a cycle).
+    pub fn debug_cpu_ram(&self, addr: u32, len: usize) -> Vec<u8> {
+        self.cpu
+            .borrow_mut()
+            .read_ram(addr, len)
+            .unwrap_or_default()
+    }
+
     // -- SGB command routing ------------------------------------------------
 
     fn poll(&mut self, cmds: &mut dyn SgbCommandSource) {
@@ -447,6 +519,13 @@ impl SgbCoprocessor {
             if p[0] >> 3 == 0x10 {
                 self.data_trn_dest =
                     Some(u32::from(p[1]) | u32::from(p[2]) << 8 | u32::from(p[3]) << 16);
+            }
+            // The BIOS-runtime variables the uploaded code polls: the packet
+            // bytes and the command number (see the BIOS_* consts).
+            {
+                let cpu = self.cpu.get_mut();
+                let _ = cpu.write_ram(BIOS_PKT_BUF, &p);
+                let _ = cpu.write_ram(BIOS_LAST_CMD, &[p[0] >> 3]);
             }
             while self.pending_packets.len() >= PACKET_QUEUE_CAP {
                 self.pending_packets.pop_front();
@@ -482,9 +561,17 @@ impl SgbCoprocessor {
                 // DATA_TRN is 4 KB into SNES WRAM at the packet's dest — the
                 // copy the SGB BIOS performs on real hardware. Without a
                 // teed dest packet there is nowhere honest to put it, so it
-                // is dropped rather than guessed.
+                // is dropped rather than guessed. The payload is also staged
+                // behind the BIOS-runtime pointer for uploaded code that
+                // performs the dest copy itself (the pilot does).
+                let cpu = self.cpu.get_mut();
+                let _ = cpu.write_ram(BIOS_TRN_STAGING, data);
+                let _ = cpu.write_ram(
+                    BIOS_TRN_PTR,
+                    &[BIOS_TRN_STAGING as u8, (BIOS_TRN_STAGING >> 8) as u8],
+                );
                 if let Some(dest) = self.data_trn_dest {
-                    let _ = self.cpu.get_mut().write_ram(dest, data);
+                    let _ = cpu.write_ram(dest, data);
                 }
             }
         }
@@ -503,16 +590,17 @@ impl SgbCoprocessor {
             .write_ram(u32::from(MB_NOTE), &[s.effect_a, trig]);
     }
 
-    /// DATA_SND ($0F): copy the packet's data into SNES work RAM at its target
-    /// address (bank 0), the write the 65C816 sound program would service.
+    /// DATA_SND ($0F): copy the packet's inline data into SNES work RAM at
+    /// its 24-bit target. Pan Docs "SGB Command 0Fh — DATA_SND": dest low,
+    /// dest high, dest bank, count (1-11), data bytes.
     fn apply_data_snd(&mut self, pkt: &[u8]) {
-        if pkt.len() < 3 {
+        if pkt.len() < 5 {
             return;
         }
-        let dest = u16::from(pkt[0]) | (u16::from(pkt[1]) << 8);
-        let len = usize::from(pkt[2]);
-        let data: Vec<u8> = pkt[3..].iter().take(len).copied().collect();
-        let _ = self.cpu.get_mut().write_ram(u32::from(dest), &data);
+        let dest = u32::from(pkt[0]) | u32::from(pkt[1]) << 8 | u32::from(pkt[2]) << 16;
+        let len = usize::from(pkt[3]).min(11);
+        let data: Vec<u8> = pkt[4..].iter().take(len).copied().collect();
+        let _ = self.cpu.get_mut().write_ram(dest, &data);
     }
 
     /// JUMP ($12): redirect the 65C816 to the SNES program target — no longer a
@@ -521,7 +609,19 @@ impl SgbCoprocessor {
         if let Some(target) = flags.jump {
             if self.jump != Some(target) {
                 self.jump = Some(target);
-                let _ = self.cpu.get_mut().set_pc(target);
+                // The BIOS hands a JUMP target control in native mode (the
+                // pilot's dispatcher REP #$30 pins it): CLC / XCE / JML.
+                let cpu = self.cpu.get_mut();
+                let tramp = [
+                    0x18, // CLC
+                    0xFB, // XCE -> native
+                    0x5C, // JML target
+                    target as u8,
+                    (target >> 8) as u8,
+                    (target >> 16) as u8,
+                ];
+                let _ = cpu.write_ram(JUMP_TRAMP, &tramp);
+                let _ = cpu.set_pc(JUMP_TRAMP);
             }
         }
     }
