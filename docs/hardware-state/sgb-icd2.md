@@ -169,4 +169,9 @@ DMA feeds the PPU for free once `$21xx` routing lands).
   only); per-byte wasm crossings (bulk when PPU uploads make size matter);
   a `$420B` entry dropped by ring overflow loses its transfer (the CPU is
   still un-stalled; only the overflow warning fires — unreachable for real
-  write rates, see the `MMIO_RING_CAP` comment).
+  write rates, see the `MMIO_RING_CAP` comment); the CPU multiplier/divider
+  (`$4202-$4206` → `$4214-$4217`) is unimplemented — a byte-scan of the
+  pilot's whole 4 KB arcade payload finds no absolute-addressed access to
+  either block, and the resident BIOS surface is an RTS sled with no math
+  services to call, so the `$4214-$4217` shadows read 0; implement when a
+  probe shows a title touching them.
