@@ -794,6 +794,9 @@ pub enum OptionsOutcome {
     /// System → a `...` bootrom-path button: open the shared path modal over the
     /// dialog to edit that slot's path. Neither applies nor closes.
     PickBootrom(BootromSlot),
+    /// Plugins → the `...` button: open the path modal to edit the plugins
+    /// directory. Neither applies nor closes (rescan happens on OK/Apply).
+    PickPluginsDir,
     /// Sound → "soundcard": advance `working.audio_device` to the next enumerated
     /// output device (the live device list lives outside the dialog). Stays open.
     CycleSoundcard,

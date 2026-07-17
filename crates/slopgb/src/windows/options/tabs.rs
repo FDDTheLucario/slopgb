@@ -160,6 +160,9 @@ pub(crate) enum Field {
     /// System → a `...` bootrom-path browse button (routes a
     /// [`super::OptionsOutcome::PickBootrom`] out, like ConfigureKeyboard).
     PickBootrom(super::BootromSlot),
+    /// Plugins → the `...` button: routes [`super::OptionsOutcome::PickPluginsDir`]
+    /// out to open the path modal.
+    PickPluginsDir,
     /// Theme → the active UI colour theme (one of the three built-in themes).
     Theme(ThemeRadio),
     /// Plugins → "allow plugin mutation" toggle.
@@ -312,6 +315,7 @@ pub(crate) fn on_content_click(
         Field::ConfigureGamepad => return Some(super::OptionsOutcome::ConfigureGamepad),
         Field::ClearGamepad => return Some(super::OptionsOutcome::ClearGamepad),
         Field::PickBootrom(slot) => return Some(super::OptionsOutcome::PickBootrom(slot)),
+        Field::PickPluginsDir => return Some(super::OptionsOutcome::PickPluginsDir),
         Field::SoundCard => return Some(super::OptionsOutcome::CycleSoundcard),
         _ => {}
     }
@@ -431,6 +435,7 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
         | Field::ConfigureGamepad
         | Field::ClearGamepad
         | Field::PickBootrom(_)
+        | Field::PickPluginsDir
         | Field::SoundCard => {}
     }
 }

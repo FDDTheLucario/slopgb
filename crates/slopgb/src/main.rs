@@ -187,6 +187,9 @@ enum PathPurpose {
     /// Set a bootrom path in the open Options dialog's working scratch
     /// (Options → System → DMG/GBC/SGB bootrom `...`).
     Bootrom(windows::options::BootromSlot),
+    /// Set the plugins directory in the open Options dialog's working scratch
+    /// (Options → Plugins → `...`). Applied (rescanned) on OK/Apply.
+    PluginsDir,
     /// Load a `.sym` symbol file from the typed path (debugger labels/go-to).
     SymbolFile,
     /// Save the CDL flags to the typed path (RLE-compressed).

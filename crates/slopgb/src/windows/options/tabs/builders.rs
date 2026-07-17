@@ -900,14 +900,29 @@ pub(super) fn theme_tab(s: &Settings, content: Rect) -> Vec<Ctrl> {
 pub(super) fn plugins(s: &Settings, content: Rect) -> Vec<Ctrl> {
     let mut l = Lay::new(content);
     let mut v = Vec::new();
-    // The scanned plugins directory (read-only; set via --plugins / the config
-    // file — there is no in-dialog browse yet).
+    // The scanned plugins directory + a "..." browse button to change it (the
+    // new dir is rescanned on OK/Apply).
     let dir = if s.plugins.dir.is_empty() {
         "(none)".to_owned()
     } else {
         s.plugins.dir.clone()
     };
-    v.push(text_label(l.at(), format!("Plugins dir: {dir}")));
+    // "Plugins dir:" label, then the "..." browse button, then the (possibly
+    // long) path — the button sits at a fixed offset so a long path just clips
+    // to the right instead of colliding with it.
+    let (dx, dy) = l.at();
+    let caption = "Plugins dir:";
+    v.push(text_label((dx, dy), caption.to_owned()));
+    let bx = dx + measure(caption) + 6;
+    v.push(Ctrl::live(
+        Rect::new(bx, dy, 22, line_height() + 2),
+        Kind::Button {
+            label: "...",
+            w: 22,
+        },
+        Field::PickPluginsDir,
+    ));
+    v.push(text_label((bx + 28, dy), dir));
     l.row();
     // Live: allow mutation-capable plugins (default off, golden-safe).
     v.push(Ctrl::live(

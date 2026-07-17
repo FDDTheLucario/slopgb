@@ -146,6 +146,22 @@ fn plugins_tab_lists_entries_dir_and_toggle() {
             Kind::Label { text } if text.contains("/opt/plugins"))),
         "missing plugins-dir display"
     );
+    // A "..." browse button changes the plugins dir.
+    assert!(
+        ctrls.iter().any(|c| c.field == Some(Field::PickPluginsDir)),
+        "missing plugins-dir browse button"
+    );
+}
+
+#[test]
+fn plugins_dir_browse_routes_the_outcome_without_mutating() {
+    let mut st = OptionsState::new(settings_with_plugins());
+    st.active = OptionsTab::Plugins;
+    let before = st.working.clone();
+    let r = field_rect(OptionsTab::Plugins, &st.working, Field::PickPluginsDir);
+    let out = st.on_click(r.x + r.w / 2, r.y + r.h / 2, BOUNDS);
+    assert_eq!(out, Some(OptionsOutcome::PickPluginsDir));
+    assert_eq!(st.working, before, "browse doesn't mutate settings");
 }
 
 #[test]

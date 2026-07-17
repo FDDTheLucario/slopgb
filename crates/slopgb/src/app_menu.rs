@@ -154,6 +154,10 @@ impl App {
                     OptionsOutcome::PickBootrom(slot) => {
                         self.open_path_prompt("Bootrom path", crate::PathPurpose::Bootrom(slot))
                     }
+                    // Open the path modal to edit the plugins directory.
+                    OptionsOutcome::PickPluginsDir => {
+                        self.open_path_prompt("Plugins dir", crate::PathPurpose::PluginsDir)
+                    }
                     // Advance the working output device to the next enumerated one.
                     OptionsOutcome::CycleSoundcard => {
                         if let Some(o) = &mut self.options {
@@ -377,6 +381,27 @@ impl App {
             .collect()
     }
 
+    /// Rebuild the plugin host from `dir` (Options → Plugins → "..." changed the
+    /// directory): load the new directory (empty = an empty host), then mirror
+    /// the discovered set into the Options tab. A bad dir logs and leaves an
+    /// empty host so a typo can't wedge the dialog.
+    fn rebuild_plugins(&mut self, dir: &str) {
+        self.plugins = if dir.is_empty() {
+            slopgb_plugin_host::PluginHost::new()
+        } else {
+            slopgb_plugin_host::PluginHost::load_dir(std::path::Path::new(dir)).unwrap_or_else(
+                |e| {
+                    eprintln!("slopgb: cannot load plugins dir '{dir}': {e}");
+                    slopgb_plugin_host::PluginHost::new()
+                },
+            )
+        };
+        self.sync_plugin_entries();
+        for line in self.plugins.take_log() {
+            eprintln!("{line}");
+        }
+    }
+
     /// Re-scan the plugins directory (Plugins submenu → "Reload plugins"), then
     /// refresh the Options-tab entry list from the live host and drain its log.
     fn reload_plugins(&mut self) {
@@ -552,6 +577,16 @@ impl App {
         // Joypad → game controller: re-derive the live map (Defaults/import may
         // have changed it; the wizard/clear paths set both in lock-step already).
         self.gamepad_bindings = crate::gamepad::GamepadBindings::from_config(&s.gamepad_map);
+        // Plugins → dir changed ("..."): rebuild the host from the new directory
+        // (rescans) and refresh the tab's entry list. No-op if unchanged.
+        let cur_dir = self
+            .plugins
+            .dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        if s.plugins.dir != cur_dir {
+            self.rebuild_plugins(&s.plugins.dir);
+        }
         // Sound → SGB audio backend: swap the live SGB machine's coprocessor (a
         // no-op off SGB). Mirror the choice into `sgb_coprocessor` so a later ROM
         // (re)load re-injects the same backend. Built-in = byte-identical golden.

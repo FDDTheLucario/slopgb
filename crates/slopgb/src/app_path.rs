@@ -29,7 +29,9 @@ pub(crate) enum PathEntry {
 pub(crate) fn path_entry(purpose: PathPurpose) -> PathEntry {
     match purpose {
         PathPurpose::SaveState | PathPurpose::CdlSave => PathEntry::SaveFile,
-        PathPurpose::LinkConnect | PathPurpose::McpStart => PathEntry::Modal,
+        PathPurpose::LinkConnect | PathPurpose::McpStart | PathPurpose::PluginsDir => {
+            PathEntry::Modal
+        }
         _ => PathEntry::OpenFile,
     }
 }
@@ -78,9 +80,15 @@ impl App {
     /// hidden behind it and seem unresponsive.
     fn open_path_modal(&mut self, title: &str, purpose: PathPurpose) {
         self.path_purpose = purpose;
-        self.path_dialog = Some(
-            crate::ui::dialog::InputDialog::new(title, false).with_initial(prompt_default(purpose)),
-        );
+        // The plugins-dir modal pre-fills the current directory to edit; the
+        // other modal purposes use their static default (host:port / MCP port).
+        let initial = if purpose == PathPurpose::PluginsDir {
+            self.settings.plugins.dir.clone()
+        } else {
+            prompt_default(purpose)
+        };
+        self.path_dialog =
+            Some(crate::ui::dialog::InputDialog::new(title, false).with_initial(initial));
         if let Some(w) = &self.window {
             w.focus_window();
         }
@@ -212,6 +220,13 @@ impl App {
                 // scratch; OK/Apply commits it to settings, Cancel reverts.
                 if let Some(o) = &mut self.options {
                     *slot.path_mut(&mut o.working) = path.to_string_lossy().into_owned();
+                }
+            }
+            PathPurpose::PluginsDir => {
+                // Write the plugins dir into the open dialog's working scratch;
+                // OK/Apply rescans the new directory, Cancel reverts.
+                if let Some(o) = &mut self.options {
+                    o.working.plugins.dir = path.to_string_lossy().into_owned();
                 }
             }
             PathPurpose::SymbolFile => self.load_symbols(path),
