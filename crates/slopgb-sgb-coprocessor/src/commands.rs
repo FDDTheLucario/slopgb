@@ -13,12 +13,24 @@ impl SgbCoprocessor {
             // Docs "SGB Command $10": lo, hi, bank); the 4 KB payload rides
             // the next frame's screen capture — remember where to land it.
             if p[0] >> 3 == 0x10 {
-                self.data_trn_dest =
-                    Some(u32::from(p[1]) | u32::from(p[2]) << 8 | u32::from(p[3]) << 16);
                 // DATA_TRN completes when its screen payload lands, one
-                // frame later — defer the BIOS-runtime variable update until
-                // then (see `pending_trn_pkt`).
-                self.pending_trn_pkt = Some(p);
+                // frame later — defer the dest copy + BIOS-runtime variable
+                // update until then. A new $10 packet proves the previous
+                // pending transfer's payload completed (the GB serializes
+                // packet → payload strictly), so flush it now even if the
+                // throttled edge hasn't fired — pairing each payload with
+                // its own packet's dest, never a newer one's.
+                if !self.pending_trn.is_empty() {
+                    if let Some(data) = cmds.data_trn_data() {
+                        self.data_trn_sig = checksum(data);
+                        let data = data.to_vec();
+                        self.apply_pending_trn(&data);
+                    }
+                }
+                while self.pending_trn.len() >= PACKET_QUEUE_CAP {
+                    self.pending_trn.pop_front();
+                }
+                self.pending_trn.push_back(p);
             } else if p[0] >> 3 == 0x12 && p[4..7] != [0, 0, 0] {
                 // JUMP ($12) bytes 4-6: the SNES NMI handler address — "the
                 // NMI handler remains unchanged if all bytes 4-6 are zero"
@@ -67,31 +79,34 @@ impl SgbCoprocessor {
             let sig = checksum(data);
             if sig != self.data_trn_sig {
                 self.data_trn_sig = sig;
-                // DATA_TRN is 4 KB into SNES WRAM at the packet's dest — the
-                // copy the SGB BIOS performs on real hardware. Without a
-                // teed dest packet there is nowhere honest to put it, so it
-                // is dropped rather than guessed. The payload is also staged
-                // behind the BIOS-runtime pointer for uploaded code that
-                // performs the dest copy itself (the pilot does).
-                let cpu = self.cpu.get_mut();
-                let _ = cpu.write_ram(BIOS_TRN_STAGING, data);
-                let _ = cpu.write_ram(
-                    BIOS_TRN_PTR,
-                    &[BIOS_TRN_STAGING as u8, (BIOS_TRN_STAGING >> 8) as u8],
-                );
-                if let Some(dest) = self.data_trn_dest {
-                    let _ = cpu.write_ram(dest, data);
-                }
-                // The transfer is now complete: publish the deferred packet
-                // to the BIOS-runtime variables the uploaded code polls.
-                if let Some(p) = self.pending_trn_pkt.take() {
-                    let _ = cpu.write_ram(BIOS_PKT_BUF, &p);
-                    let _ = cpu.write_ram(BIOS_LAST_CMD, &[p[0] >> 3]);
-                }
+                let data = data.to_vec();
+                self.apply_pending_trn(&data);
             }
         }
         if let Some(flags) = cmds.flags() {
             self.apply_flags(flags);
+        }
+    }
+
+    /// Complete the oldest pending DATA_TRN with its just-arrived 4 KB
+    /// payload: stage it behind the BIOS-runtime pointer (uploaded code
+    /// performs its own copy — the pilot does), copy it to the packet's own
+    /// 24-bit dest (the copy the SGB BIOS performs on real hardware), and
+    /// publish the packet to the BIOS-runtime variables. Without a pending
+    /// packet there is nowhere honest to put the payload, so only the
+    /// staging updates.
+    fn apply_pending_trn(&mut self, data: &[u8]) {
+        let cpu = self.cpu.get_mut();
+        let _ = cpu.write_ram(BIOS_TRN_STAGING, data);
+        let _ = cpu.write_ram(
+            BIOS_TRN_PTR,
+            &[BIOS_TRN_STAGING as u8, (BIOS_TRN_STAGING >> 8) as u8],
+        );
+        if let Some(p) = self.pending_trn.pop_front() {
+            let dest = u32::from(p[1]) | u32::from(p[2]) << 8 | u32::from(p[3]) << 16;
+            let _ = cpu.write_ram(dest, data);
+            let _ = cpu.write_ram(BIOS_PKT_BUF, &p);
+            let _ = cpu.write_ram(BIOS_LAST_CMD, &[p[0] >> 3]);
         }
     }
 

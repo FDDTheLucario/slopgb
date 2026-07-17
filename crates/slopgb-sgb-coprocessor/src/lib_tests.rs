@@ -786,6 +786,76 @@ fn nmi_handler_preserves_a_with_empty_vector() {
     );
 }
 
+/// DATA_TRN pairing under stream skew: a payload always lands at the dest
+/// of the packet it belongs to, even when the next $10 packet arrives
+/// before the throttled payload edge fires — the new packet's arrival
+/// proves the previous payload completed (the GB serializes them), so the
+/// pending pair is applied immediately.
+#[test]
+fn data_trn_pairs_payloads_with_their_own_packets() {
+    let Some(mut cop) = build_cop(48_000) else {
+        return;
+    };
+    let mut pkt1 = [0u8; 16];
+    pkt1[0] = 0x10 << 3 | 1;
+    pkt1[1] = 0x00; // dest $7F:0100
+    pkt1[2] = 0x01;
+    pkt1[3] = 0x7F;
+    let payload1: Vec<u8> = vec![0xAB; 64];
+    let mut cmds = TestCmds {
+        packets: vec![pkt1],
+        ..TestCmds::default()
+    };
+    cop.poll(&mut cmds); // pkt1 teed; payload not yet visible
+
+    let mut pkt2 = [0u8; 16];
+    pkt2[0] = 0x10 << 3 | 1;
+    pkt2[1] = 0x00; // dest $7F:9100
+    pkt2[2] = 0x91;
+    pkt2[3] = 0x7F;
+    let mut cmds = TestCmds {
+        packets: vec![pkt2],
+        data_trn: Some(payload1.clone()),
+        ..TestCmds::default()
+    };
+    cop.poll(&mut cmds); // pkt2's arrival must flush (payload1 -> pkt1's dest)
+    assert_eq!(
+        cop.debug_cpu_ram(0x7F_0100, 4),
+        vec![0xAB; 4],
+        "payload 1 landed at packet 1's dest"
+    );
+    assert_eq!(
+        cop.debug_cpu_ram(0x7F_9100, 4),
+        vec![0; 4],
+        "nothing crossed to packet 2's dest yet"
+    );
+    assert_eq!(
+        cop.debug_cpu_ram(0x02C2, 1),
+        vec![0x10],
+        "packet 1 published to the BIOS-runtime variables"
+    );
+
+    // Payload 2 arrives; the throttled edge pairs it with packet 2.
+    let payload2: Vec<u8> = vec![0xCD; 64];
+    let mut cmds = TestCmds {
+        data_trn: Some(payload2),
+        ..TestCmds::default()
+    };
+    for _ in 0..65 {
+        cop.poll(&mut cmds);
+    }
+    assert_eq!(
+        cop.debug_cpu_ram(0x7F_9100, 4),
+        vec![0xCD; 4],
+        "payload 2 landed at packet 2's dest"
+    );
+    assert_eq!(
+        cop.debug_cpu_ram(0x7F_0100, 4),
+        vec![0xAB; 4],
+        "packet 1's dest untouched by the second transfer"
+    );
+}
+
 /// The resident SPC700 firmware speaks the boot-ROM upload protocol
 /// (fullsnes "Uploader"): announce $AA/$BB, accept $CC + address, per-byte
 /// index/ack pump, new-kick block switch, entry jump. A guest 65C816

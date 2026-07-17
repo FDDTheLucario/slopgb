@@ -41,12 +41,12 @@ impl SgbCoprocessor {
             w.bytes(p);
         }
         w.u64(self.gb_pos);
-        w.bool(self.data_trn_dest.is_some());
-        w.u32(self.data_trn_dest.unwrap_or(0));
         w.u8(self.nmitimen);
         w.bool(self.in_vblank);
-        w.bool(self.pending_trn_pkt.is_some());
-        w.bytes(&self.pending_trn_pkt.unwrap_or([0; 16]));
+        w.u8(self.pending_trn.len() as u8);
+        for p in &self.pending_trn {
+            w.bytes(p);
+        }
         for ch in &self.dma_regs {
             w.bytes(ch);
         }
@@ -107,15 +107,18 @@ impl SgbCoprocessor {
             self.pending_packets.push_back(p);
         }
         self.gb_pos = r.u64()? % GB_FRAME_CYCLES;
-        let has_dest = r.bool()?;
-        let dest = r.u32()?;
-        self.data_trn_dest = has_dest.then_some(dest);
         self.nmitimen = r.u8()?;
         self.in_vblank = r.bool()?;
-        let has_pkt = r.bool()?;
-        let mut pkt = [0u8; 16];
-        r.bytes_into(&mut pkt)?;
-        self.pending_trn_pkt = has_pkt.then_some(pkt);
+        let n = usize::from(r.u8()?);
+        if n > PACKET_QUEUE_CAP {
+            return Err(StateError::Truncated);
+        }
+        self.pending_trn.clear();
+        for _ in 0..n {
+            let mut p = [0u8; 16];
+            r.bytes_into(&mut p)?;
+            self.pending_trn.push_back(p);
+        }
         for ch in &mut self.dma_regs {
             r.bytes_into(ch)?;
         }
@@ -200,10 +203,9 @@ impl SgbCoprocessor {
         fresh.pending_packets = self.pending_packets.clone();
         fresh.feed = self.feed;
         fresh.gb_pos = self.gb_pos;
-        fresh.data_trn_dest = self.data_trn_dest;
         fresh.nmitimen = self.nmitimen;
         fresh.in_vblank = self.in_vblank;
-        fresh.pending_trn_pkt = self.pending_trn_pkt;
+        fresh.pending_trn = self.pending_trn.clone();
         fresh.dma_regs = self.dma_regs;
         fresh.wmadd = self.wmadd;
         fresh.input = self.input;
@@ -238,12 +240,9 @@ fn write_empty_state(w: &mut Writer) {
     w.u32(0); // jump target
     w.u8(0); // pending ICD2 packets
     w.u64(0); // gb_pos
-    w.bool(false); // data_trn dest present
-    w.u32(0); // data_trn dest
     w.u8(0); // nmitimen
     w.bool(false); // in_vblank
-    w.bool(false); // pending DATA_TRN packet present
-    w.bytes(&[0u8; 16]); // pending DATA_TRN packet
+    w.u8(0); // pending DATA_TRN packets
     w.bytes(&[0u8; 7 * 8]); // dma channel registers
     w.u32(0); // wmadd
     w.bool(false); // joy_busy
@@ -295,13 +294,13 @@ impl AudioCoprocessor for InertCoprocessor {
             r.bytes_into(&mut p)?;
         }
         r.u64()?;
-        r.bool()?;
-        r.u32()?;
         r.u8()?;
         r.bool()?;
-        r.bool()?;
-        let mut pkt = [0u8; 16];
-        r.bytes_into(&mut pkt)?;
+        let n = usize::from(r.u8()?);
+        for _ in 0..n {
+            let mut p = [0u8; 16];
+            r.bytes_into(&mut p)?;
+        }
         let mut dma = [0u8; 7 * 8];
         r.bytes_into(&mut dma)?;
         r.u32()?;

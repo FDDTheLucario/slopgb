@@ -295,17 +295,15 @@ pub struct SgbCoprocessor {
     /// GB frame position (T-cycles, mod one frame) for the `$6000` LCD-row
     /// shadow.
     gb_pos: u64,
-    /// The SNES-WRAM destination of the next DATA_TRN payload, parsed from
-    /// the teed `$10` packet header (Pan Docs "SGB Command $10": dest lo,
-    /// hi, bank). The payload itself arrives one frame later (the screen
-    /// capture), routed here by `poll`.
-    data_trn_dest: Option<u32>,
-    /// A teed DATA_TRN packet whose 4 KB payload has not landed yet. The
-    /// BIOS-runtime variables ($0600 packet buffer, $02C2 command) update
-    /// only when the payload arrives — a dispatcher keying on $02C2 == $10
-    /// must never run against an empty staging buffer (the pilot's does the
-    /// copy-and-enter immediately).
-    pending_trn_pkt: Option<[u8; 16]>,
+    /// Teed DATA_TRN packets whose 4 KB payloads have not landed yet,
+    /// oldest first (Pan Docs "SGB Command $10": dest lo, hi, bank in
+    /// bytes 1-3; the payload rides the next frame's screen capture). Each
+    /// payload pairs with the oldest pending packet, and the BIOS-runtime
+    /// variables ($0600 packet buffer, $02C2 command) update only then — a
+    /// dispatcher keying on $02C2 == $10 must never run against an empty
+    /// staging buffer, and a payload must never land at a newer packet's
+    /// dest (the mis-pair that overwrote the pilot's program area).
+    pending_trn: VecDeque<[u8; 16]>,
     /// The guest's last NMITIMEN ($4200) write, from the MMIO capture ring
     /// (bit 7 = vblank NMI enable, bit 0 = joypad autopoll).
     nmitimen: u8,
@@ -417,8 +415,7 @@ impl SgbCoprocessor {
             pending_packets: VecDeque::new(),
             feed: None,
             gb_pos: 0,
-            data_trn_dest: None,
-            pending_trn_pkt: None,
+            pending_trn: VecDeque::new(),
             nmitimen: 0,
             in_vblank: false,
             dma_regs: [[0; 7]; 8],
