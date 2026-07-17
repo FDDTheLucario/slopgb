@@ -13,6 +13,8 @@
 
 use std::fmt;
 
+use crate::ui::canvas::{Canvas, Rect};
+
 /// One named colour role, XRGB8888 (`0x00RRGGBB`) — the entire visual
 /// vocabulary every tool window draws with. Every field here is a colour;
 /// nothing in this struct has an x/y/w/h, so a `Theme` swap can never move or
@@ -51,6 +53,10 @@ pub struct Theme {
     pub disabled_text: u32,
     /// Scrollbar thumb colour.
     pub scrollbar: u32,
+    /// Contemporary chrome: draw dialog/button/field frames with softened
+    /// (corner-omitted) borders instead of hard rectangles. `false` keeps the
+    /// classic square bgb look; the flat Light/Dark themes set it `true`.
+    pub rounded: bool,
 }
 
 impl Theme {
@@ -77,6 +83,7 @@ impl Theme {
         selection_fg: 0x00FF_FFFF,  // == bg
         disabled_text: 0x0080_8080, // == hilight
         scrollbar: 0x0080_8080,     // == hilight
+        rounded: false,             // classic square bgb chrome
     };
 
     /// The classic "Windows 3" bgb look, offered as a selectable
@@ -100,6 +107,7 @@ impl Theme {
         selection_fg: 0x00FF_FFFF,
         disabled_text: 0x00BD_C1C6,
         scrollbar: 0x00C4_C7C5,
+        rounded: true,
     };
 
     /// A contemporary flat dark palette: dark background, light text, the
@@ -119,7 +127,20 @@ impl Theme {
         selection_fg: 0x0020_2124,
         disabled_text: 0x005F_6368,
         scrollbar: 0x0080_868B,
+        rounded: true,
     };
+
+    /// Draw a chrome frame around `r` in this theme's border style: softened
+    /// (corner-omitted) for a contemporary theme, a hard rectangle for the
+    /// classic look. Call this instead of `Canvas::outline_rect` for dialog /
+    /// button / field / groupbox frames so the border style follows the theme.
+    pub fn frame(&self, c: &mut Canvas, r: Rect, color: u32) {
+        if self.rounded {
+            c.round_outline(r, color);
+        } else {
+            c.outline_rect(r, color);
+        }
+    }
 
     /// Every role name [`Self::from_pairs`] recognizes.
     fn role_mut(&mut self, name: &str) -> Option<&mut u32> {

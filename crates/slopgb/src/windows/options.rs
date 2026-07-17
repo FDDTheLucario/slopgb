@@ -974,14 +974,14 @@ impl OptionsState {
 pub fn render(c: &mut Canvas, st: &OptionsState, theme: &Theme) {
     let dialog = OptionsState::dialog_rect(c.bounds());
     c.fill_rect(dialog, theme.bg);
-    c.outline_rect(dialog, theme.border);
+    theme.frame(c, dialog, theme.border);
     // Tab strip (two rows; active tab outlined, others just labelled).
     for (t, r) in st.tab_hitboxes(dialog) {
         if t == st.active {
             c.fill_rect(r, theme.bg);
-            c.outline_rect(r, theme.text);
+            theme.frame(c, r, theme.text);
         } else {
-            c.outline_rect(r, theme.border);
+            theme.frame(c, r, theme.border);
         }
         draw_text(c, r.x + TAB_PAD, r.y + 3, t.label(), theme.text);
     }
@@ -993,7 +993,7 @@ pub fn render(c: &mut Canvas, st: &OptionsState, theme: &Theme) {
     // Button row.
     for (b, r) in OptionsState::button_rects(dialog) {
         c.fill_rect(r, theme.button_face);
-        c.outline_rect(r, theme.text);
+        theme.frame(c, r, theme.text);
         let tx = r.x + (r.w - measure(b.label())) / 2;
         draw_text(
             c,
@@ -1070,7 +1070,7 @@ pub(crate) fn dropdown(
     let color = fg(enabled, theme);
     let h = line_height() + 2;
     let r = Rect::new(x, y, w, h);
-    c.outline_rect(r, color);
+    theme.frame(c, r, color);
     draw_text(c, x + 3, y + 1, value, color);
     // arrow box on the right
     c.vline(r.right() - h, y, h, color);

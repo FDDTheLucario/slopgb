@@ -197,13 +197,17 @@ fn theme_swap_only_recolors_a_whole_window_never_moves_it() {
         }
         pixels.push(buf);
     }
+    // Within one border style a theme swap only recolours, never moves anything:
+    // LIGHT and DARK share the contemporary rounded frames, so identical geometry.
     assert_eq!(
         geoms[0], geoms[1],
-        "LIGHT vs DARK must draw the identical set of rects"
+        "LIGHT vs DARK (same rounded style) must draw the identical set of rects"
     );
-    assert_eq!(
+    // LIGHT (rounded) vs CLASSIC (square) *do* differ in frame geometry — the
+    // corner-omitted contemporary border is the intended difference, not a move.
+    assert_ne!(
         geoms[0], geoms[2],
-        "LIGHT vs CLASSIC must draw the identical set of rects"
+        "rounded vs square themes differ in frame geometry by design"
     );
     assert_ne!(pixels[0], pixels[1], "LIGHT vs DARK pixels must differ");
     assert_ne!(pixels[0], pixels[2], "LIGHT vs CLASSIC pixels must differ");

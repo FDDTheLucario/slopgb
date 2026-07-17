@@ -268,14 +268,14 @@ pub(crate) fn render(tab: OptionsTab, s: &Settings, c: &mut Canvas, content: Rec
             }
             Kind::Button { label, w } => {
                 let r = Rect::new(x, y, *w, line_height() + 4);
-                c.outline_rect(r, super::fg(enabled, theme));
+                theme.frame(c, r, super::fg(enabled, theme));
                 let tx = x + (*w - measure(label)) / 2;
                 draw_text(c, tx, y + 2, label, super::fg(enabled, theme));
             }
             Kind::GroupBox { label, w, h } => {
                 // Caption sits just inside the top-left of the frame (drawing it
                 // straddling the border would clip against the content area).
-                c.outline_rect(Rect::new(x, y, *w, *h), theme.border);
+                theme.frame(c, Rect::new(x, y, *w, *h), theme.border);
                 draw_text(c, x + 4, y + 1, label, theme.text);
             }
             Kind::Label { text } => {

@@ -80,6 +80,31 @@ fn drawing_clips_to_the_buffer_without_panicking() {
 }
 
 #[test]
+fn round_outline_omits_the_four_corner_pixels() {
+    let mut buf = blank();
+    let r = Rect::new(1, 1, 4, 4); // covers x 1..5, y 1..5
+    {
+        let mut c = Canvas::new(&mut buf, W, H);
+        c.round_outline(r, FG);
+    }
+    // Corners are skipped; the pixels just inside each corner (along an edge) set.
+    for (cx, cy) in [(1, 1), (4, 1), (1, 4), (4, 4)] {
+        assert_eq!(at(&buf, cx, cy), BG, "corner ({cx},{cy}) omitted");
+    }
+    assert_eq!(at(&buf, 2, 1), FG, "top edge drawn");
+    assert_eq!(at(&buf, 1, 2), FG, "left edge drawn");
+    assert_eq!(at(&buf, 4, 2), FG, "right edge drawn");
+    assert_eq!(at(&buf, 2, 4), FG, "bottom edge drawn");
+    // A too-small rect falls back to a hard outline (corner set).
+    let mut buf2 = blank();
+    {
+        let mut c = Canvas::new(&mut buf2, W, H);
+        c.round_outline(Rect::new(0, 0, 2, 2), FG);
+    }
+    assert_eq!(buf2[0], FG, "2x2 falls back to hard corner");
+}
+
+#[test]
 fn push_clip_confines_drawing() {
     let mut buf = blank();
     {

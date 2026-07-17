@@ -192,6 +192,21 @@ impl<'a> Canvas<'a> {
         self.vline(r.right() - 1, r.y, r.h, color); // right
     }
 
+    /// Rectangle outline with the four corner pixels omitted — a subtly
+    /// "rounded" frame for contemporary themes (vs the hard-cornered
+    /// [`Self::outline_rect`]). Falls back to a hard outline when too small to
+    /// round meaningfully.
+    pub fn round_outline(&mut self, r: Rect, color: u32) {
+        if r.w < 3 || r.h < 3 {
+            self.outline_rect(r, color);
+            return;
+        }
+        self.hline(r.x + 1, r.y, r.w - 2, color); // top (minus corners)
+        self.hline(r.x + 1, r.bottom() - 1, r.w - 2, color); // bottom
+        self.vline(r.x, r.y + 1, r.h - 2, color); // left
+        self.vline(r.right() - 1, r.y + 1, r.h - 2, color); // right
+    }
+
     /// Draw an 8×8 grid of 2-bit palette indices (e.g. from
     /// `slopgb_core::debug::tile_pixels`) through `palette` at integer `scale`
     /// — each source pixel becomes a `scale × scale` block — with the tile's
