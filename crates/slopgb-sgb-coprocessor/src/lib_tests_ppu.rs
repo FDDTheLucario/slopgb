@@ -96,6 +96,32 @@ fn dma_bbus_feeds_the_ppu() {
     assert_eq!(frame[0], 0x1133, "the DMA'd palette word rendered");
 }
 
+/// `debug_status` (the MCP coprocessor tool's line) reports the PPU state:
+/// absent = audio-only note; present = frame count + the guest's INIDISP.
+#[test]
+fn debug_status_reports_the_ppu_line() {
+    let Some(cop) = build_cop(48_000) else {
+        return;
+    };
+    assert!(cop.debug_status().contains("no SNES PPU plugin"));
+
+    let Some(mut cop) = build_cop_ppu(48_000) else {
+        return;
+    };
+    assert!(cop.debug_status().contains("0 frames rendered"));
+    {
+        let mut cpu = cop.cpu.borrow_mut();
+        let prog = stores(&[(0x2100, 0x8F)], &[0xDB]); // forced blank
+        cpu.write_ram(0x9000, &prog).unwrap();
+        cpu.set_pc(0x9000).unwrap();
+    }
+    cop.clock(70_224 * 2);
+    let status = cop.debug_status();
+    assert!(status.contains("frames rendered"), "{status}");
+    assert!(!status.contains("0 frames rendered"), "{status}");
+    assert!(status.contains("INIDISP $8F"), "{status}");
+}
+
 /// The PPU block rides the coprocessor save state: a frame's registers
 /// survive save/load and the restored machine keeps rendering them.
 #[test]

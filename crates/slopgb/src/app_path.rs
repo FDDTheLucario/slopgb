@@ -188,6 +188,7 @@ impl App {
                     // blank state (else `should_idle` keeps emulation gated and
                     // the LCD frozen on `blank_frame`).
                     self.rom_loaded = true;
+                    self.snes_frame = None;
                     self.apply_palette();
                     self.resync_pacing();
                     self.update_title();

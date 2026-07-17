@@ -92,3 +92,12 @@ fn scale2x_smooths_a_corner_diagonal() {
         "E3 promoted to the down/right diagonal"
     );
 }
+
+#[test]
+fn snes_rgb555_converts_bgr_order_and_expands() {
+    assert_eq!(snes_rgb555_px(0x001F), 0x00FF_0000, "red is the low field");
+    assert_eq!(snes_rgb555_px(0x03E0), 0x0000_FF00, "green mid");
+    assert_eq!(snes_rgb555_px(0x7C00), 0x0000_00FF, "blue high");
+    assert_eq!(snes_rgb555_px(0x7FFF), 0x00FF_FFFF, "31 expands to 255");
+    assert_eq!(snes_rgb555_px(0x0001), 0x0008_0000, "1 expands to 8");
+}

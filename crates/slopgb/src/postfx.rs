@@ -119,6 +119,18 @@ pub fn gbc_lcd_px(px: u32) -> u32 {
     (nr << 16) | (ng << 8) | nb
 }
 
+/// One SNES RGB555 word (fullsnes CGRAM entry: bits 14-10 Blue, 9-5 Green,
+/// 4-0 Red) → the frontend's 0xRRGGBB, expanding each 5-bit channel as
+/// `c<<3 | c>>2` so 31 maps to 255.
+#[must_use]
+pub fn snes_rgb555_px(c: u16) -> u32 {
+    let expand = |v: u32| v << 3 | v >> 2;
+    let r = expand(u32::from(c) & 0x1F);
+    let g = expand(u32::from(c) >> 5 & 0x1F);
+    let b = expand(u32::from(c) >> 10 & 0x1F);
+    r << 16 | g << 8 | b
+}
+
 #[cfg(test)]
 #[path = "postfx_tests.rs"]
 mod tests;

@@ -119,6 +119,14 @@ pub trait AudioCoprocessor {
     /// untouched.
     fn set_input(&mut self, _dpad: u8, _buttons: u8) {}
 
+    /// The last completed SNES-side frame (256x224 RGB555 words, row-major)
+    /// a full-takeover program rendered, handed out at most once per SNES
+    /// vblank. The default has no SNES PPU and returns `None`, so the
+    /// built-in HLE presentation is untouched.
+    fn take_frame(&mut self) -> Option<Vec<u16>> {
+        None
+    }
+
     /// Add the pending SNES-side samples into the Game Boy samples just drained,
     /// sample-for-sample.
     fn mix_into(&mut self, out: &mut [(f32, f32)]);

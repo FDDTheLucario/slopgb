@@ -383,6 +383,14 @@ impl GameBoy {
         }
     }
 
+    /// The last completed SNES-side frame from a loaded SGB coprocessor
+    /// (256x224 RGB555 — `SGB_BORDER_W`x`SGB_BORDER_H`), at most once per
+    /// SNES vblank. `None` on the built-in HLE path (and always on
+    /// DMG/CGB), so a frontend polling this changes nothing there.
+    pub fn take_snes_frame(&mut self) -> Option<Vec<u16>> {
+        self.sgb_apu.as_mut()?.take_frame()
+    }
+
     /// Run until the next frame is complete (vblank reached), or — with the
     /// LCD off — until an equivalent number of cycles has elapsed. Exactly a
     /// [`Self::run_slice`] bounded to one frame's worth of cycles (see its doc

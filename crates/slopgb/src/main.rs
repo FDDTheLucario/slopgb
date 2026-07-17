@@ -309,6 +309,11 @@ struct App {
     /// A solid LCD-off frame (the palette's lightest shade) shown while no ROM is
     /// loaded — bgb's pale-green blank screen. Rebuilt when the palette changes.
     blank_frame: Box<[u32; SCREEN_PIXELS]>,
+    /// The last SNES-side frame a full-takeover SGB coprocessor rendered
+    /// (256x224, converted to 0xRRGGBB). `Some` switches presentation to the
+    /// SNES picture; cleared on ROM load. `None` everywhere the coprocessor
+    /// (or its PPU plugin) is absent — the golden presentation paths.
+    snes_frame: Option<Vec<u32>>,
     /// Scratch for the presentation filters (`postfx`): the core frame is copied
     /// here and filtered in place before the blit, so the core buffer is never
     /// touched. Empty on the all-off path (the borrow is presented directly).
@@ -541,6 +546,7 @@ impl App {
             session,
             rom_loaded,
             blank_frame,
+            snes_frame: None,
             postfx_buf: Vec::new(),
             prev_frame: Vec::new(),
             scale_buf: Vec::new(),
@@ -683,10 +689,17 @@ impl App {
         // never paints. On an SGB with a border loaded (CHR_TRN+PCT_TRN), the
         // 256×224 composite replaces the bare 160×144 frame automatically — the
         // blit letterboxes whichever size it gets.
+        // A full-takeover SGB coprocessor renders the SNES side itself; a
+        // fresh 256×224 frame (converted here) replaces the GB composite
+        // until the next ROM load. Absent coprocessor/PPU: never `Some`.
+        if let Some(f) = self.session.gb.take_snes_frame() {
+            self.snes_frame = Some(f.iter().map(|&c| postfx::snes_rgb555_px(c)).collect());
+        }
         let (mut frame, mut src_w, mut src_h): (&[u32], usize, usize) = if self.rom_loaded {
-            match self.session.gb.sgb_border() {
-                Some(b) => (&b[..], SGB_BORDER_W, SGB_BORDER_H),
-                None => (&self.session.gb.frame()[..], SCREEN_W, SCREEN_H),
+            match (&self.snes_frame, self.session.gb.sgb_border()) {
+                (Some(s), _) => (&s[..], SGB_BORDER_W, SGB_BORDER_H),
+                (None, Some(b)) => (&b[..], SGB_BORDER_W, SGB_BORDER_H),
+                (None, None) => (&self.session.gb.frame()[..], SCREEN_W, SCREEN_H),
             }
         } else {
             (&self.blank_frame[..], SCREEN_W, SCREEN_H)
@@ -1168,6 +1181,7 @@ impl App {
                 // (re)apply the DMG palette to the fresh machine (GameBoy::new
                 // resets it to the core grayscale default).
                 self.rom_loaded = true;
+                self.snes_frame = None;
                 self.apply_palette();
                 // The fresh machine starts with no exception mask; re-arm it.
                 self.apply_exceptions();

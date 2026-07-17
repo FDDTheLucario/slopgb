@@ -76,6 +76,41 @@ fn sgb_local_matrix_is_pushed_to_the_coprocessor() {
     );
 }
 
+/// The SNES-frame fetch seam: a coprocessor serving a frame surfaces it
+/// through `GameBoy::take_snes_frame`; the default (and the built-in HLE)
+/// serves none.
+#[test]
+fn sgb_take_snes_frame_seam() {
+    #[derive(Clone)]
+    struct FrameCop(Option<Vec<u16>>);
+    impl sgb::AudioCoprocessor for FrameCop {
+        fn clock(&mut self, _gb_cycles: u64) {}
+        fn poll(&mut self, _cmds: &mut dyn sgb::SgbCommandSource) {}
+        fn take_frame(&mut self) -> Option<Vec<u16>> {
+            self.0.take()
+        }
+        fn mix_into(&mut self, _out: &mut [(f32, f32)]) {}
+        fn set_output_rate(&mut self, _hz: u32) {}
+        fn load_bios(&mut self, _bios: &[u8]) {}
+        fn write_state(&self, _w: &mut crate::state::Writer) {}
+        fn read_state(&mut self, _r: &mut crate::state::Reader<'_>) -> Result<(), StateError> {
+            Ok(())
+        }
+        fn clone_box(&self) -> Box<dyn sgb::AudioCoprocessor> {
+            Box::new(self.clone())
+        }
+    }
+
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x146] = 0x03;
+    rom[0x14B] = 0x33;
+    let mut gb = GameBoy::new(Model::Sgb, rom).unwrap();
+    assert!(gb.take_snes_frame().is_none(), "built-in HLE: no frames");
+    gb.set_audio_coprocessor(Box::new(FrameCop(Some(vec![0x2A55; 4]))));
+    assert_eq!(gb.take_snes_frame(), Some(vec![0x2A55; 4]));
+    assert!(gb.take_snes_frame().is_none(), "consumed");
+}
+
 /// A stub coprocessor that feeds fixed ICD2 pad bytes (the SNES→GB return
 /// path). `joypad_feed` returning `Some` engages the override on `step`.
 struct FeedCop([u8; 4]);

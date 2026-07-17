@@ -327,6 +327,10 @@ pub struct SgbCoprocessor {
     ppu_row: u16,
     /// A completed frame awaits [`Self::take_snes_frame`].
     frame_ready: bool,
+    /// Diagnostics only (`debug_status`), transient across save states:
+    /// completed-frame count + the guest's last INIDISP write.
+    frames_done: u64,
+    last_inidisp: u8,
 }
 
 impl SgbCoprocessor {
@@ -416,6 +420,8 @@ impl SgbCoprocessor {
             ppu_wasm: ppu_bytes.map(<[u8]>::to_vec),
             ppu_row: 0,
             frame_ready: false,
+            frames_done: 0,
+            last_inidisp: 0,
         };
         me.install_firmware()?;
         Ok(me)
@@ -615,6 +621,7 @@ impl SgbCoprocessor {
                     // The scanline pump completed the frame before this
                     // edge (V >= 225 implies all 224 rows rendered).
                     self.frame_ready = self.ppu.is_some();
+                    self.frames_done += u64::from(self.frame_ready);
                 } else {
                     let _ = cpu.write_ram(HW_SHADOW + SH_RDNMI, &[0x02]);
                     // A new frame begins as vblank ends.
@@ -784,6 +791,9 @@ impl SgbCoprocessor {
             // arrive via DMA (the CPU-side APU ports route earlier) — a
             // DMA-to-APU transfer is unimplemented and lands inert too.
             0x2100..=0x21FF => {
+                if addr == 0x2100 {
+                    self.last_inidisp = val; // diagnostics (debug_status)
+                }
                 if let Some(ppu) = &self.ppu {
                     let _ = ppu.borrow_mut().port_write((addr - 0x2100) as u8, val);
                 }
@@ -829,6 +839,9 @@ impl AudioCoprocessor for SgbCoprocessor {
     fn set_input(&mut self, dpad: u8, buttons: u8) {
         self.input = (dpad, buttons);
     }
+    fn take_frame(&mut self) -> Option<Vec<u16>> {
+        self.take_snes_frame()
+    }
     fn mix_into(&mut self, out: &mut [(f32, f32)]) {
         SgbCoprocessor::mix_into(self, out);
     }
@@ -867,9 +880,16 @@ impl AudioCoprocessor for SgbCoprocessor {
         // machine isn't in SGB mode, or the GB is sending nothing) — the exact
         // "SNES side isn't running" case. Non-zero = the chips are executing.
         let running = self.cpu_target > 0 || self.spc_target > 0;
+        let ppu = match &self.ppu {
+            Some(_) => format!(
+                "SNES PPU plugin loaded: {} frames rendered, last INIDISP ${:02X}",
+                self.frames_done, self.last_inidisp
+            ),
+            None => "no SNES PPU plugin (audio-only)".into(),
+        };
         format!(
             "wasm SGB coprocessor: SPC700 + 65C816 plugins loaded; {} \
-             (65C816 ran to cyc {}, SPC700 to cyc {}); last GB->SPC ports {:02X?}",
+             (65C816 ran to cyc {}, SPC700 to cyc {}); last GB->SPC ports {:02X?}; {}",
             if running {
                 "RUNNING"
             } else {
@@ -878,6 +898,7 @@ impl AudioCoprocessor for SgbCoprocessor {
             self.cpu_target,
             self.spc_target,
             self.to_spc,
+            ppu,
         )
     }
 }
