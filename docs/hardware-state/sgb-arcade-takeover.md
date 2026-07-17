@@ -73,15 +73,20 @@ disassembly of the teed bytes):
   then the kick/index/ack pump) — which is why the coprocessor boots the
   chip's IPL ROM instead of parking it in the resident square driver.
 
-**Current wall (next session's entry point)**: by the time the second JUMP
-applies, `$7F:0100` no longer holds the program — later stream payloads
-overwrite it (probed: the head reads frame-data-like bytes, and the JML
-lands in BRK chaos walking open-bus bank `$F4`, two bytes per BRK→RTI-stub
-round trip). Suspect the DATA_TRN dest/payload pairing or the arm-patch
-sequencing in `commands.rs` (`data_trn_dest` updates on the packet tee;
-the payload lands on a throttled checksum edge). Instrument every `$10`
-packet dest + payload head + what lands at `$7F:0100`/`$7F:9100` per frame
-to pin the mis-pairing.
+**Current wall (next session's entry point)**: the delivery pipeline is
+fixed (FIFO payload pairing, ping-pong staging, and the guest-side
+delivery mailbox the resident main-service body consumes — publishes now
+serialize with the hook exactly like the single-threaded real BIOS). The
+60 KB program upload survives intact, the second JUMP lands, and the
+arcade program **executes**, driving its sound-driver upload through the
+SPC700 IPL ROM — until ~byte 244 of block 1, where the flush-batched APU
+port mediation deadlocks the per-byte handshake (SNES waiting for echo
+`$F4`, the IPL's Y at ~`$60`): repeating mod-256 index values across
+sticky per-flush port snapshots alias, and the two sides lose lockstep.
+Fix direction: ordered port-write replay — capture the 65C816's
+`$2140-$2143` writes in sequence (a ring like the MMIO one) and replay
+them to the SPC one at a time, pacing on its echoes, instead of
+delivering only each flush's final latch values.
 
 ## Provenance / clean-room note
 
