@@ -93,6 +93,24 @@ const HW_PACKET: u32 = 0x0100_0000;
 const HW_PADS: u32 = 0x0100_0011;
 /// `W len 2`: the `$6000` shadows `[lcd_row, write_row]`.
 const HW_LCD_ROW: u32 = 0x0100_0016;
+/// `R len 3 + 3*512` (drains): the MMIO write-capture ring.
+const HW_MMIO_RING: u32 = 0x0100_1000;
+/// `W len L` at `+ i`: CPU-read shadows for `$4200 + i`.
+const HW_SHADOW: u32 = 0x0100_2000;
+/// `W len 1`: request an NMI (consumed at the next instruction boundary).
+const HW_NMI: u32 = 0x0100_3000;
+/// The plugin's ring capacity (drain reads size to this).
+const MMIO_RING_CAP: usize = 512;
+/// Shadow offsets within the `$4200` block.
+const SH_RDNMI: u32 = 0x10;
+const SH_HVBJOY: u32 = 0x12;
+
+/// SNES NTSC frame: 262 lines, vblank beginning at V=225 in the 224-line
+/// mode (fullsnes "SNES PPU Resolution" / "4212h"). The GB frame position is
+/// scaled onto it — both machines run ~60 Hz (the two oscillators are not
+/// locked on real hardware either).
+const SNES_LINES: u64 = 262;
+const SNES_VBLANK_LINE: u64 = 225;
 
 /// Max teed packets held for deposit before the oldest is dropped (matches
 /// the core-side tee cap; the guest normally consumes far faster).
@@ -130,6 +148,23 @@ const BIOS_HOOK_SLOT: u32 = 0x0800;
 /// to a JUMP target in native mode (pinned by the pilot's dispatcher using
 /// `REP #$30` + 16-bit index ops, impossible in emulation mode).
 const JUMP_TRAMP: u32 = 0xBF00;
+/// The resident NMI handler. fullsnes ("SGB Commands" notes): the BIOS's NMI
+/// path dispatches through a **RAM vector at `$00:00BB-$00BD`** — "only NMIs
+/// can be hooked", and JUMP is documented to clobber exactly those bytes.
+/// The handler jumps through that vector when a program installed one, else
+/// returns. A and P are saved at the interrupted width and restored on both
+/// exits (the hook receives the original A), and the guard reads the vector
+/// with long addressing so it is independent of the interrupted D and DBR:
+/// `PHA / PHP / SEP #$20 / LDA $0000BB / ORA $0000BC / ORA $0000BD /
+/// BEQ +5 / PLP / PLA / JML [$00BB] / PLP / PLA / RTI`.
+const NMI_HANDLER: u32 = 0xBE30;
+/// The RAM NMI vector the handler dispatches through.
+const NMI_RAM_VEC: u8 = 0xBB;
+/// A resident RTI, targeted by the BRK/COP/IRQ vectors: a stray break in an
+/// uploaded program resumes instead of cascading through zeroed memory
+/// (those vectors live in the unshipped BIOS ROM; fullsnes notes several
+/// real BIOS entries are plain returns).
+const RTI_STUB: u32 = 0xBE50;
 
 /// Comm ports (SNES APU I/O has four: `$2140-$2143` / `$F4-$F7`).
 const N_PORTS: usize = 4;
@@ -235,6 +270,18 @@ pub struct SgbCoprocessor {
     /// hi, bank). The payload itself arrives one frame later (the screen
     /// capture), routed here by `poll`.
     data_trn_dest: Option<u32>,
+    /// A teed DATA_TRN packet whose 4 KB payload has not landed yet. The
+    /// BIOS-runtime variables ($0600 packet buffer, $02C2 command) update
+    /// only when the payload arrives — a dispatcher keying on $02C2 == $10
+    /// must never run against an empty staging buffer (the pilot's does the
+    /// copy-and-enter immediately).
+    pending_trn_pkt: Option<[u8; 16]>,
+    /// The guest's last NMITIMEN ($4200) write, from the MMIO capture ring
+    /// (bit 7 = vblank NMI enable, bit 0 = joypad autopoll).
+    nmitimen: u8,
+    /// Whether the scaled SNES V counter sat in vblank at the last flush
+    /// (edge detector for the RDNMI flag + NMI delivery).
+    in_vblank: bool,
 }
 
 impl SgbCoprocessor {
@@ -293,6 +340,9 @@ impl SgbCoprocessor {
             feed: None,
             gb_pos: 0,
             data_trn_dest: None,
+            pending_trn_pkt: None,
+            nmitimen: 0,
+            in_vblank: false,
         };
         me.install_firmware()?;
         Ok(me)
@@ -306,6 +356,15 @@ impl SgbCoprocessor {
     fn install_firmware(&mut self) -> Result<(), LoadError> {
         {
             let cpu = self.cpu.get_mut();
+            // Model the entire unshipped BIOS ROM as inert returns: an RTS
+            // sled across the whole program area, so an uploaded program
+            // JSR-ing any service entry slopgb has not (yet) pinned returns
+            // harmlessly instead of executing zeroes. Specific resident
+            // routines overwrite their spots below.
+            cpu.write_ram(0x8000, &[0x60u8; 0x8000])?;
+            // Keep the documented revision byte: $FFDB = 0 selects the first
+            // entry of each BIOS service pair (sgb-arcade-takeover.md).
+            cpu.write_ram(0xFFDB, &[0x00])?;
             cpu.write_ram(u32::from(SHIM_ORG), &SNES_SHIM)?;
             cpu.write_ram(
                 u32::from(RESET_VEC),
@@ -341,6 +400,51 @@ impl SgbCoprocessor {
                 ],
             )?;
             cpu.write_ram(BIOS_AUX_BODY, &[0x60])?;
+            // The resident NMI handler + both CPU-mode NMI vectors.
+            cpu.write_ram(
+                NMI_HANDLER,
+                &[
+                    0x48, // PHA (interrupted width)
+                    0x08, // PHP
+                    0xE2,
+                    0x20, // SEP #$20 (8-bit A for the guard)
+                    0xAF,
+                    NMI_RAM_VEC,
+                    0x00,
+                    0x00, // LDA $0000BB (long)
+                    0x0F,
+                    NMI_RAM_VEC + 1,
+                    0x00,
+                    0x00, // ORA $0000BC
+                    0x0F,
+                    NMI_RAM_VEC + 2,
+                    0x00,
+                    0x00, // ORA $0000BD
+                    0xF0,
+                    0x05, // BEQ +5 -> the empty-vector PLP/PLA/RTI
+                    0x28, // PLP (width back to the interrupted M)
+                    0x68, // PLA (original A restored for the hook)
+                    0xDC,
+                    NMI_RAM_VEC,
+                    0x00, // JML [$00BB]
+                    0x28, // PLP
+                    0x68, // PLA
+                    0x40, // RTI
+                ],
+            )?;
+            let nmi_vec = [NMI_HANDLER as u8, (NMI_HANDLER >> 8) as u8];
+            cpu.write_ram(0xFFEA, &nmi_vec)?; // native NMI vector
+            cpu.write_ram(0xFFFA, &nmi_vec)?; // emulation NMI vector
+            // Break/interrupt vectors -> the resident RTI (see RTI_STUB).
+            cpu.write_ram(RTI_STUB, &[0x40])?;
+            let rti = [RTI_STUB as u8, (RTI_STUB >> 8) as u8];
+            cpu.write_ram(0xFFE4, &rti)?; // native COP
+            cpu.write_ram(0xFFE6, &rti)?; // native BRK
+            cpu.write_ram(0xFFEE, &rti)?; // native IRQ
+            cpu.write_ram(0xFFF4, &rti)?; // emulation COP
+            cpu.write_ram(0xFFFE, &rti)?; // emulation IRQ/BRK
+            // RDNMI reads the CPU version bits from power-on (fullsnes 4210h).
+            cpu.write_ram(HW_SHADOW + SH_RDNMI, &[0x02])?;
         }
         {
             let (prog, dir, brr) = spc_firmware();
@@ -376,9 +480,53 @@ impl SgbCoprocessor {
         self.gb_pos = (self.gb_pos + span) % GB_FRAME_CYCLES;
         let line = self.gb_pos / GB_LINE_CYCLES;
         let row = ((line / 8) as u8).min(0x11);
+        // Drain the guest's captured MMIO writes from the last slice and
+        // apply the ones the clocking loop consumes (NMITIMEN for now; the
+        // PPU/DMA routing grows here).
+        let captured: Vec<(u16, u8)> = {
+            let mut cpu = self.cpu.borrow_mut();
+            match cpu.read_ram(HW_MMIO_RING, 3 + 3 * MMIO_RING_CAP) {
+                Ok(buf) if buf.len() >= 3 => {
+                    let n = usize::from(buf[0]) | usize::from(buf[1]) << 8;
+                    if buf[2] != 0 {
+                        eprintln!("slopgb: SNES MMIO capture ring overflowed; writes dropped");
+                    }
+                    buf[3..]
+                        .chunks_exact(3)
+                        .take(n)
+                        .map(|e| (u16::from(e[0]) | u16::from(e[1]) << 8, e[2]))
+                        .collect()
+                }
+                _ => Vec::new(),
+            }
+        };
+        for (addr, val) in captured {
+            self.apply_mmio(addr, val);
+        }
         {
             let mut cpu = self.cpu.borrow_mut();
             let _ = cpu.write_ram(HW_LCD_ROW, &[row, row & 3]);
+            // The SNES frame clock: scale the GB frame position onto the
+            // 262-line NTSC frame; on the vblank edges maintain the RDNMI
+            // flag (set at begin, auto-clear at end — fullsnes 4210h; the
+            // read-acknowledge runs guest-side) and deliver the NMI when
+            // NMITIMEN bit 7 enables it (fullsnes 4200h).
+            let v = self.gb_pos * SNES_LINES / GB_FRAME_CYCLES;
+            let vblank = v >= SNES_VBLANK_LINE;
+            if vblank != self.in_vblank {
+                self.in_vblank = vblank;
+                if vblank {
+                    let _ = cpu.write_ram(HW_SHADOW + SH_RDNMI, &[0x82]);
+                    if self.nmitimen & 0x80 != 0 {
+                        let _ = cpu.write_ram(HW_NMI, &[1]);
+                    }
+                } else {
+                    let _ = cpu.write_ram(HW_SHADOW + SH_RDNMI, &[0x02]);
+                }
+                // HVBJOY bit 7 tracks vblank (bit 6 hblank is below this
+                // pump's resolution; autopoll-busy lands with autopoll).
+                let _ = cpu.write_ram(HW_SHADOW + SH_HVBJOY, &[(vblank as u8) << 7]);
+            }
             if !self.pending_packets.is_empty() {
                 let clear = matches!(cpu.read_ram(HW_PACKET, 1).as_deref(), Ok([0]));
                 if clear {
@@ -519,10 +667,13 @@ impl SgbCoprocessor {
             if p[0] >> 3 == 0x10 {
                 self.data_trn_dest =
                     Some(u32::from(p[1]) | u32::from(p[2]) << 8 | u32::from(p[3]) << 16);
-            }
-            // The BIOS-runtime variables the uploaded code polls: the packet
-            // bytes and the command number (see the BIOS_* consts).
-            {
+                // DATA_TRN completes when its screen payload lands, one
+                // frame later — defer the BIOS-runtime variable update until
+                // then (see `pending_trn_pkt`).
+                self.pending_trn_pkt = Some(p);
+            } else {
+                // The BIOS-runtime variables the uploaded code polls: the
+                // packet bytes and the command number (see the BIOS_* consts).
                 let cpu = self.cpu.get_mut();
                 let _ = cpu.write_ram(BIOS_PKT_BUF, &p);
                 let _ = cpu.write_ram(BIOS_LAST_CMD, &[p[0] >> 3]);
@@ -573,10 +724,25 @@ impl SgbCoprocessor {
                 if let Some(dest) = self.data_trn_dest {
                     let _ = cpu.write_ram(dest, data);
                 }
+                // The transfer is now complete: publish the deferred packet
+                // to the BIOS-runtime variables the uploaded code polls.
+                if let Some(p) = self.pending_trn_pkt.take() {
+                    let _ = cpu.write_ram(BIOS_PKT_BUF, &p);
+                    let _ = cpu.write_ram(BIOS_LAST_CMD, &[p[0] >> 3]);
+                }
             }
         }
         if let Some(flags) = cmds.flags() {
             self.apply_flags(flags);
+        }
+    }
+
+    /// Apply one captured MMIO write from the guest. The clocking loop
+    /// consumes NMITIMEN; everything else is inert until its consumer lands
+    /// (DMA, PPU routing).
+    fn apply_mmio(&mut self, addr: u16, val: u8) {
+        if addr == 0x4200 {
+            self.nmitimen = val;
         }
     }
 
@@ -689,6 +855,10 @@ impl SgbCoprocessor {
         w.u64(self.gb_pos);
         w.bool(self.data_trn_dest.is_some());
         w.u32(self.data_trn_dest.unwrap_or(0));
+        w.u8(self.nmitimen);
+        w.bool(self.in_vblank);
+        w.bool(self.pending_trn_pkt.is_some());
+        w.bytes(&self.pending_trn_pkt.unwrap_or([0; 16]));
     }
 
     fn read_state(&mut self, r: &mut Reader<'_>) -> Result<(), StateError> {
@@ -734,6 +904,12 @@ impl SgbCoprocessor {
         let has_dest = r.bool()?;
         let dest = r.u32()?;
         self.data_trn_dest = has_dest.then_some(dest);
+        self.nmitimen = r.u8()?;
+        self.in_vblank = r.bool()?;
+        let has_pkt = r.bool()?;
+        let mut pkt = [0u8; 16];
+        r.bytes_into(&mut pkt)?;
+        self.pending_trn_pkt = has_pkt.then_some(pkt);
         // The undrained source/output PCM is transient, not part of the
         // snapshot — and so is the pad feed (re-read from the restored plugin
         // state on the next flush).
@@ -782,6 +958,9 @@ impl SgbCoprocessor {
         fresh.feed = self.feed;
         fresh.gb_pos = self.gb_pos;
         fresh.data_trn_dest = self.data_trn_dest;
+        fresh.nmitimen = self.nmitimen;
+        fresh.in_vblank = self.in_vblank;
+        fresh.pending_trn_pkt = self.pending_trn_pkt;
         Ok(fresh)
     }
 }
@@ -875,6 +1054,10 @@ fn write_empty_state(w: &mut Writer) {
     w.u64(0); // gb_pos
     w.bool(false); // data_trn dest present
     w.u32(0); // data_trn dest
+    w.u8(0); // nmitimen
+    w.bool(false); // in_vblank
+    w.bool(false); // pending DATA_TRN packet present
+    w.bytes(&[0u8; 16]); // pending DATA_TRN packet
 }
 
 /// A no-op [`AudioCoprocessor`] producing silence. Only ever the result of
@@ -922,6 +1105,11 @@ impl AudioCoprocessor for InertCoprocessor {
         r.u64()?;
         r.bool()?;
         r.u32()?;
+        r.u8()?;
+        r.bool()?;
+        r.bool()?;
+        let mut pkt = [0u8; 16];
+        r.bytes_into(&mut pkt)?;
         Ok(())
     }
     fn clone_box(&self) -> Box<dyn AudioCoprocessor> {
