@@ -2,6 +2,59 @@
 
 use super::*;
 
+/// A stub coprocessor that records every raw packet its `poll` drains.
+#[derive(Clone)]
+struct TeeCop(std::rc::Rc<std::cell::RefCell<Vec<[u8; 16]>>>);
+
+impl sgb::AudioCoprocessor for TeeCop {
+    fn clock(&mut self, _gb_cycles: u64) {}
+    fn poll(&mut self, cmds: &mut dyn sgb::SgbCommandSource) {
+        while let Some(p) = cmds.take_packet() {
+            self.0.borrow_mut().push(p);
+        }
+    }
+    fn mix_into(&mut self, _out: &mut [(f32, f32)]) {}
+    fn set_output_rate(&mut self, _hz: u32) {}
+    fn load_bios(&mut self, _bios: &[u8]) {}
+    fn write_state(&self, _w: &mut crate::state::Writer) {}
+    fn read_state(&mut self, _r: &mut crate::state::Reader<'_>) -> Result<(), StateError> {
+        Ok(())
+    }
+    fn clone_box(&self) -> Box<dyn sgb::AudioCoprocessor> {
+        Box::new(self.clone())
+    }
+}
+
+/// The raw-packet tee end to end: a packet pulsed through P1 reaches an
+/// installed coprocessor via `SgbCommandSource::take_packet` on the next
+/// step, while the HLE presentation still consumes the same command (a tee,
+/// not a takeover).
+#[test]
+fn sgb_packet_tee_reaches_coprocessor_while_hle_still_applies() {
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x146] = 0x03;
+    rom[0x14B] = 0x33;
+    let mut gb = GameBoy::new(Model::Sgb, rom).unwrap();
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    gb.set_audio_coprocessor(Box::new(TeeCop(seen.clone())));
+
+    let mut packet = [0u8; 16];
+    packet[0] = 0x01; // PAL01, one packet
+    packet[1] = 0x1F; // shared background color 0 = red
+    send_sgb_packet(&mut gb, &packet);
+    gb.debug_write(0xFF47, 0xE4);
+    gb.debug_write(0xFF40, 0x91);
+    for _ in 0..3 {
+        gb.run_frame();
+    }
+    assert_eq!(
+        seen.borrow().as_slice(),
+        &[packet],
+        "coprocessor got the raw packet"
+    );
+    assert_eq!(gb.frame()[0], 0xFF_0000, "HLE colorization still applied");
+}
+
 /// End-to-end SGB wiring: a PAL01 packet driven through the real `Joypad`
 /// reaches the PPU and recolors the rendered DMG output — proving the
 /// joypad → interconnect → ppu → render path (Pan Docs "SGB Command $00").

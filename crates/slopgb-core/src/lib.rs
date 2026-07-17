@@ -193,8 +193,9 @@ const STATE_MAGIC: &[u8; 4] = b"SLPS";
 /// interconnect + PPU payloads; v7 records a has-SGB-audio-tail flag byte right
 /// after the header so a cross-model load (SGB state into DMG/CGB or vice versa)
 /// is rejected with `StateError::ModelMismatch` instead of silently dropping the
-/// tail or failing as `Truncated`.
-const STATE_VERSION: u16 = 7;
+/// tail or failing as `Truncated`; v8 appends the SGB raw-packet tee queue to
+/// the joypad payload (the ICD2 mailbox feed).
+const STATE_VERSION: u16 = 8;
 
 /// A debugger memory watchpoint (bgb's "Set watchpoint"): the free run halts
 /// after the CPU accesses `addr` with a matching access kind. A frontend/

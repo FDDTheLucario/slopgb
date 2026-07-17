@@ -18,6 +18,11 @@ pub(crate) mod apu;
 use crate::interconnect::Interconnect;
 use crate::{SgbFlags, SgbSound};
 
+/// An SGB command packet is always 16 bytes on the wire (Pan Docs "SGB Command
+/// Packet") — the unit the ICD2 mailbox (`$7000-$700F`) latches. Shared by the
+/// GB-side receiver ([`crate::joypad`]) and the coprocessor packet seam.
+pub const SGB_PACKET_LEN: usize = 16;
+
 /// The SGB SNES-side sound commands the Game Boy queues each step, handed to an
 /// [`AudioCoprocessor`] without leaking the core-private bus. `GameBoy` drains
 /// the PPU's SGB command seams through this trait; an out-of-core coprocessor
@@ -25,6 +30,15 @@ use crate::{SgbFlags, SgbSound};
 /// commands the built-in [`apu::SgbApu`] does — SOUND / DATA_SND / SOU_TRN /
 /// DATA_TRN / flags+JUMP.
 pub trait SgbCommandSource {
+    /// Drain one raw 16-byte SGB command packet, oldest first — the ICD2
+    /// mailbox feed (fullsnes "SGB Port 7000h-700Fh"). Every accepted packet
+    /// is teed here (MLT_REQ and mid-command packets included) while the HLE
+    /// presentation path keeps consuming the assembled commands unchanged.
+    /// Default `None`: a source without a raw-packet tee.
+    fn take_packet(&mut self) -> Option<[u8; SGB_PACKET_LEN]> {
+        None
+    }
+
     /// Drain one queued SOUND ($08) effect event, or `None` when the queue is
     /// empty.
     fn take_sound_event(&mut self) -> Option<SgbSound>;
@@ -48,6 +62,9 @@ pub trait SgbCommandSource {
 /// `SgbCommandSource` trait object is the only handle an out-of-core
 /// coprocessor sees — the bus type never leaks.
 impl SgbCommandSource for Interconnect {
+    fn take_packet(&mut self) -> Option<[u8; SGB_PACKET_LEN]> {
+        self.joypad_mut().take_sgb_packet()
+    }
     fn take_sound_event(&mut self) -> Option<SgbSound> {
         self.ppu_mut().sgb_take_sound_event()
     }
