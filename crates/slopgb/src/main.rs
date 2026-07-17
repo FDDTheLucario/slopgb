@@ -108,17 +108,10 @@ fn main() {
     // Optional SGB BIOS (--sgb-bios / SLOPGB_SGB_BIOS): feeds the SGB audio path
     // on every ROM (re)load; border/palette are not extracted (HLE).
     let sgb_bios = resolve_sgb_bios(&opts);
-    // Optional SGB audio-coprocessor backend (--sgb-coprocessor / the presence of
-    // SLOPGB_SGB_COPROCESSOR): swaps the built-in HLE APU for the combined chip on
-    // every SGB (re)load. Off = the built-in default (byte-identical golden path).
-    let cli_coprocessor = opts.sgb_coprocessor || env::var_os("SLOPGB_SGB_COPROCESSOR").is_some();
     // Effective emulated-system choice for this load: an explicit CLI `--model`
     // wins, else the persisted Options choice (so a saved SGB / "prefer SGB" /
     // border selection is honored at startup, not just after opening Options).
     let loaded = settings_file::load();
-    // Effective audio backend: the CLI flag / env var wins the launch, else the
-    // persisted Options choice — honored at startup like --model above.
-    let sgb_coprocessor = cli_coprocessor || loaded.settings.audio_backend.is_coprocessor();
     let model_choice = opts.model.map_or(loaded.settings.model, |m| {
         windows::options::ModelChoice::from_option(Some(m))
     });
@@ -144,8 +137,8 @@ fn main() {
         ),
     };
     session.set_sgb_bios(sgb_bios.clone());
-    session.set_sgb_coprocessor_dir(resolve_sgb_coprocessor_dir(&opts));
-    session.set_sgb_coprocessor(sgb_coprocessor);
+    // The plugins dir (and the SGB coprocessor it auto-loads) is applied in
+    // `App::new`, from the CLI/env/persisted dir it reconciles into `settings`.
     let event_loop = match EventLoop::new() {
         Ok(l) => l,
         Err(e) => {
@@ -153,14 +146,7 @@ fn main() {
             process::exit(1);
         }
     };
-    let mut app = App::new(
-        opts,
-        session,
-        rom_loaded,
-        boot_rom,
-        sgb_bios,
-        sgb_coprocessor,
-    );
+    let mut app = App::new(opts, session, rom_loaded, boot_rom, sgb_bios);
     if let Err(e) = event_loop.run_app(&mut app) {
         eprintln!("error: event loop failed: {e}");
         process::exit(1);
@@ -245,10 +231,11 @@ fn load_plugins(opts: &Options, settings: &windows::options::Settings) -> Plugin
                 eprintln!("slopgb: no plugins found in '{}'", dir.display());
             } else if host.is_empty() {
                 // Discovered plugins, but none the per-frame pump drives — all
-                // higher-tier (subsystem/tool), loaded via their own seams.
+                // higher-tier (subsystem/tool), driven via their own seams.
                 eprintln!(
-                    "slopgb: {total} subsystem/tool plugin(s) in '{}' — loaded via \
-                     --sgb-coprocessor / --msu1, not the per-frame --plugins pump",
+                    "slopgb: {total} subsystem/tool plugin(s) in '{}' — the SGB \
+                     coprocessor (spc700 + w65c816) auto-loads from here; MSU-1 via \
+                     --msu1. Not the per-frame --plugins pump.",
                     dir.display()
                 );
             }
@@ -277,19 +264,6 @@ fn load_msu1(opts: &Options) -> Option<msu1::Msu1> {
             None
         }
     }
-}
-
-/// Resolve the directory the SGB audio coprocessor loads its two plugin `.wasm`
-/// (`spc700.wasm` + `w65c816.wasm`) from: `SLOPGB_SGB_COPROCESSOR` (a directory
-/// path) wins, else the conventional `--plugins` / `SLOPGB_PLUGINS_DIR` plugin
-/// directory. `None` when none is set → the coprocessor is unavailable and the
-/// built-in `SgbApu` stands.
-fn resolve_sgb_coprocessor_dir(opts: &Options) -> Option<PathBuf> {
-    env::var_os("SLOPGB_SGB_COPROCESSOR")
-        .map(PathBuf::from)
-        .filter(|p| !p.as_os_str().is_empty())
-        .or_else(|| opts.plugins_dir.clone())
-        .or_else(|| env::var_os("SLOPGB_PLUGINS_DIR").map(PathBuf::from))
 }
 
 /// Resolve the optional SGB BIOS bytes from `--sgb-bios` or `SLOPGB_SGB_BIOS`,
@@ -327,9 +301,6 @@ struct App {
     /// Optional SGB BIOS bytes (from `--sgb-bios`/`SLOPGB_SGB_BIOS`), re-applied
     /// to the fresh machine on every ROM (re)load. `None` = no SGB BIOS.
     sgb_bios: Option<Vec<u8>>,
-    /// Whether the combined SGB audio coprocessor backend (`--sgb-coprocessor`) is
-    /// selected, re-injected on every ROM (re)load. `false` = the built-in HLE APU.
-    sgb_coprocessor: bool,
     session: Session,
     /// Whether a real ROM is loaded. `false` at a no-ROM (bgb-style) startup:
     /// the blank machine is frozen at power-on (emulation gated off) and the LCD
@@ -521,7 +492,6 @@ impl App {
         rom_loaded: bool,
         boot_rom: Option<Vec<u8>>,
         sgb_bios: Option<Vec<u8>>,
-        sgb_coprocessor: bool,
     ) -> Self {
         let muted = opts.mute;
         let scale = opts.scale;
@@ -539,13 +509,6 @@ impl App {
             model: match opts.model {
                 Some(m) => windows::options::ModelChoice::from_option(Some(m)),
                 None => loaded.settings.model,
-            },
-            // The effective backend (CLI/env flag wins, else persisted) — so the
-            // Sound-tab dropdown shows what is actually live this launch.
-            audio_backend: if sgb_coprocessor {
-                windows::options::AudioBackend::SgbCoprocessor
-            } else {
-                loaded.settings.audio_backend
             },
             ..loaded.settings
         };
@@ -575,7 +538,6 @@ impl App {
             opts,
             boot_rom,
             sgb_bios,
-            sgb_coprocessor,
             session,
             rom_loaded,
             blank_frame,
@@ -652,6 +614,14 @@ impl App {
         app.apply_palette();
         // Arm the default exception-break mask (bgb's "break on invalid opcode").
         app.apply_exceptions();
+        // The SGB coprocessor is a plugin: point the session at the resolved
+        // plugins dir (CLI `--plugins` / env / persisted — the single source
+        // `load_plugins` already reconciled into `settings.plugins.dir`) so it
+        // auto-loads `spc700.wasm` + `w65c816.wasm` on an SGB machine at startup.
+        app.session.set_plugins_dir(
+            (!app.settings.plugins.dir.is_empty())
+                .then(|| PathBuf::from(&app.settings.plugins.dir)),
+        );
         app
     }
 
@@ -1184,8 +1154,13 @@ impl App {
         match Session::load(path, self.settings.model, &self.boot_spec(), ram_init) {
             Ok(mut new) => {
                 new.set_sgb_bios(self.sgb_bios.clone());
-                new.set_sgb_coprocessor_dir(resolve_sgb_coprocessor_dir(&self.opts));
-                new.set_sgb_coprocessor(self.sgb_coprocessor);
+                // Carry the live plugins dir (seeded from --plugins at startup,
+                // possibly re-pointed via the UI) so the SGB coprocessor plugin
+                // re-injects into the fresh machine.
+                new.set_plugins_dir(
+                    (!self.settings.plugins.dir.is_empty())
+                        .then(|| PathBuf::from(&self.settings.plugins.dir)),
+                );
                 new.set_rtc_vba_export(self.settings.rtc_vba_sav);
                 new.set_rtc_bgb_legacy(self.settings.rtc_bgb_legacy);
                 self.session = new;

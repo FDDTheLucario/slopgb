@@ -7,7 +7,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use slopgb_core::{CLOCK_HZ, CartridgeError, DEFAULT_SAMPLE_RATE, GameBoy, Model, RamInit};
-use slopgb_sgb_coprocessor::SgbCoprocessor;
+use slopgb_sgb_coprocessor::{CPU_WASM, SPC_WASM, SgbCoprocessor};
 
 use crate::windows::options::ModelChoice;
 
@@ -61,15 +61,13 @@ pub(crate) struct Session {
     /// kept so a power-cycle / model switch re-applies it to the fresh machine
     /// (firmware persists across a reset). `None` = no BIOS. A no-op off SGB.
     sgb_bios: Option<Vec<u8>>,
-    /// Opt-in swap of the SGB audio backend from the built-in HLE `SgbApu` to the
-    /// combined 65C816+SPC700+S-DSP coprocessor (`--sgb-coprocessor`). Kept so a
-    /// power-cycle / model switch re-injects it into the fresh machine. `false` =
-    /// the built-in default (byte-identical golden path). A no-op off SGB.
-    sgb_coprocessor: bool,
-    /// Directory the coprocessor loads its two plugin `.wasm` (`spc700.wasm` +
-    /// `w65c816.wasm`) from at inject time. `None` (or a directory missing the
-    /// wasm) → the coprocessor is unavailable and the built-in `SgbApu` stands.
-    sgb_coprocessor_dir: Option<PathBuf>,
+    /// Plugins directory (`--plugins`/`SLOPGB_PLUGINS_DIR`, or the UI browse). The
+    /// SGB coprocessor is a plugin: when this dir holds `spc700.wasm` +
+    /// `w65c816.wasm` and the machine is SGB, the combined 65C816+SPC700+S-DSP
+    /// coprocessor auto-loads over the built-in HLE `SgbApu` at inject time. `None`
+    /// (or a dir missing either wasm) → the built-in `SgbApu` stands (golden-safe
+    /// default). Kept so a power-cycle / model switch re-injects it.
+    plugins_dir: Option<PathBuf>,
     /// Overlay the built-in default SGB border on a non-SGB machine — bgb's
     /// "GBC + initial SGB border" system mode (`ModelChoice::CgbBorder`). A
     /// machine property, so a power-cycle (`reset`) re-applies it.
@@ -106,8 +104,7 @@ impl Session {
             next_rewind_frame: 0,
             boot: OwnedBootSpec::default(),
             sgb_bios: None,
-            sgb_coprocessor: false,
-            sgb_coprocessor_dir: None,
+            plugins_dir: None,
             sgb_border: false,
             ram_init: None,
         }
@@ -171,8 +168,7 @@ impl Session {
             next_rewind_frame: 0,
             boot: boot.to_owned(),
             sgb_bios: None,
-            sgb_coprocessor: false,
-            sgb_coprocessor_dir: None,
+            plugins_dir: None,
             sgb_border,
             ram_init,
         })
@@ -200,40 +196,33 @@ impl Session {
         }
     }
 
-    /// Set the directory the SGB coprocessor loads its two plugin `.wasm` from.
-    /// Kept so a `reset`/`set_model` rebuild re-injects from the same place. Set
-    /// before [`Self::set_sgb_coprocessor`] so the first inject sees it.
-    pub(crate) fn set_sgb_coprocessor_dir(&mut self, dir: Option<PathBuf>) {
-        self.sgb_coprocessor_dir = dir;
-    }
-
-    /// Select the SGB audio backend (`--sgb-coprocessor`) and keep the choice so a
-    /// later `reset`/`set_model` re-applies it. `true` injects the combined
-    /// coprocessor; `false` restores the built-in on the *next* rebuild (an
-    /// already-injected machine keeps it until then). A no-op off SGB.
-    pub(crate) fn set_sgb_coprocessor(&mut self, on: bool) {
-        self.sgb_coprocessor = on;
+    /// Set the plugins directory the SGB coprocessor auto-loads from, then apply
+    /// it to the current machine. Kept so a `reset`/`set_model` rebuild re-injects
+    /// from the same place.
+    pub(crate) fn set_plugins_dir(&mut self, dir: Option<PathBuf>) {
+        self.plugins_dir = dir;
         self.apply_sgb_coprocessor();
     }
 
     /// Inject the combined coprocessor into the current (freshly built) machine
-    /// when selected, loading its two plugin `.wasm` from the kept directory. If
-    /// the directory is unset or the plugins are missing / fail to load, the
-    /// built-in `SgbApu` is left in place (the golden-safe default) and the reason
-    /// is logged. `set_audio_coprocessor` drops the box off SGB, so this is a
-    /// no-op there. Built at the core's default output rate — the rate the
-    /// GameBoy's own APU runs at — so the two streams stay sample-aligned.
+    /// when its plugin is present. The SGB SNES-side chips run only from a loaded
+    /// plugin: with `spc700.wasm` + `w65c816.wasm` in the plugins dir and an SGB
+    /// machine, the combined 65C816+SPC700+S-DSP coprocessor replaces the built-in
+    /// HLE `SgbApu`. A missing plugin (or non-SGB machine) leaves the `SgbApu` in
+    /// place — the golden-safe default — silently, since absence is the norm; only
+    /// a present-but-broken plugin is logged. Built at the core's default output
+    /// rate (the GameBoy APU's rate) so the two streams stay sample-aligned.
     fn apply_sgb_coprocessor(&mut self) {
-        if !self.sgb_coprocessor {
+        // Off SGB the machine holds no coprocessor slot; skip the wasm load
+        // entirely (`set_audio_coprocessor` would drop the box anyway).
+        if !matches!(self.model, Model::Sgb | Model::Sgb2) {
             return;
         }
-        let Some(dir) = &self.sgb_coprocessor_dir else {
-            eprintln!(
-                "slopgb: SGB coprocessor selected but no plugin directory set \
-                 (SLOPGB_SGB_COPROCESSOR / --plugins); using the built-in SGB APU"
-            );
+        let Some(dir) = &self.plugins_dir else { return };
+        // No coprocessor plugin in the dir → HLE default, not an error.
+        if !dir.join(SPC_WASM).exists() || !dir.join(CPU_WASM).exists() {
             return;
-        };
+        }
         match SgbCoprocessor::load(dir, DEFAULT_SAMPLE_RATE) {
             Ok(cop) => self.gb.set_audio_coprocessor(Box::new(cop)),
             Err(e) => eprintln!("slopgb: {e}; using the built-in SGB APU"),

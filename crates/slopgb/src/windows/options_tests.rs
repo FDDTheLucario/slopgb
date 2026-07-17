@@ -800,27 +800,6 @@ fn theme_tab_radios_select_theme() {
 }
 
 #[test]
-fn sound_tab_audio_backend_dropdown_cycles() {
-    // The Sound tab exposes the SGB audio backend as a live dropdown; clicking it
-    // cycles Built-in ↔ SGB coprocessor (the same seam --sgb-coprocessor drives).
-    let mut st = OptionsState::new(Settings::default());
-    st.active = OptionsTab::Sound;
-    let content = OptionsState::content_rect(dialog());
-    assert!(
-        controls(OptionsTab::Sound, &st.working, content)
-            .iter()
-            .any(|c| c.field == Some(Field::AudioBackend)),
-        "Sound tab has a live audio-backend control"
-    );
-    // Default Built-in; clicking cycles to the coprocessor and back.
-    assert_eq!(st.working.audio_backend, AudioBackend::Builtin);
-    click_field(&mut st, Field::AudioBackend);
-    assert_eq!(st.working.audio_backend, AudioBackend::SgbCoprocessor);
-    click_field(&mut st, Field::AudioBackend);
-    assert_eq!(st.working.audio_backend, AudioBackend::Builtin);
-}
-
-#[test]
 fn defaults_resets_every_tab_only_its_own_fields() {
     // For each tab, mutate one of its live fields away from default, press
     // Defaults on that tab, and assert it reset (and an out-of-tab field is

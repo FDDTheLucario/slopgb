@@ -343,7 +343,6 @@ mod tests {
             mute: true,
             boot: None,
             sgb_bios: None,
-            sgb_coprocessor: false,
             mcp_port: None,
             plugins_dir: None,
             msu1: None,
@@ -355,7 +354,6 @@ mod tests {
             false,
             None,
             None,
-            false,
         );
         app.session.gb = GameBoy::new(Model::Dmg, rom).expect("valid test ROM");
         app

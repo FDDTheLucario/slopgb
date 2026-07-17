@@ -399,10 +399,10 @@ impl App {
                 },
             )
         };
-        // Point the SGB coprocessor at the same directory so its subsystem
-        // plugins (spc700 + w65c816) load from the plugins dir the UI just set.
+        // The SGB coprocessor is a plugin: point the session at the same dir so
+        // spc700 + w65c816 auto-load (on SGB) from the plugins dir the UI just set.
         self.session
-            .set_sgb_coprocessor_dir((!dir.is_empty()).then(|| std::path::PathBuf::from(dir)));
+            .set_plugins_dir((!dir.is_empty()).then(|| std::path::PathBuf::from(dir)));
         self.sync_plugin_entries();
         for line in self.plugins.take_log() {
             eprintln!("{line}");
@@ -594,11 +594,6 @@ impl App {
         if s.plugins.dir != cur_dir {
             self.rebuild_plugins(&s.plugins.dir);
         }
-        // Sound → SGB audio backend: swap the live SGB machine's coprocessor (a
-        // no-op off SGB). Mirror the choice into `sgb_coprocessor` so a later ROM
-        // (re)load re-injects the same backend. Built-in = byte-identical golden.
-        self.sgb_coprocessor = s.audio_backend.is_coprocessor();
-        self.session.set_sgb_coprocessor(self.sgb_coprocessor);
         // Power-on RAM init (bgb's UninitedWRAM): store it for the next reset/
         // reload — power-on state, so it doesn't scramble the running machine.
         self.session.set_ram_init(crate::cli::effective_ram_init(

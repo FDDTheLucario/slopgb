@@ -20,11 +20,13 @@ Per-area state lives in `docs/ui-state/<area>.md` — read the matching file fir
   pump; serial link `link.rs`; persistence `settings_file/`.
 - Plugin seams (one per capability tier — all valid subsystem types supported,
   see [`../slopgb-plugin-host/CLAUDE.md`](../slopgb-plugin-host/CLAUDE.md)):
-  `--plugins <dir>` / Options→Plugins is the tier-1 `INTROSPECTION` pump only;
-  tier-3 `SUBSYSTEM` plugins load through their own seams — `--sgb-coprocessor`
-  (`slopgb-sgb-coprocessor` drives `spc700.wasm` + `w65c816.wasm`) and `--msu1`
-  (`msu1.rs` drives `msu1.wasm` via `LoadedCoprocessor`). Pointing `--plugins` at
-  a subsystem plugin skips it (wrong loader, not an invalid plugin).
+  `--plugins <dir>` / Options→Plugins feeds the tier-1 `INTROSPECTION` pump *and*
+  is where the tier-3 SGB coprocessor auto-loads its plugins from — on an SGB
+  machine, `spc700.wasm` + `w65c816.wasm` in that dir replace the built-in HLE
+  `SgbApu` (`slopgb-sgb-coprocessor`, via `Session::set_plugins_dir`). MSU-1 loads
+  from a `--msu1` pack (`msu1.rs` drives `msu1.wasm` via `LoadedCoprocessor`). The
+  tier-1 pump itself skips subsystem plugins in the dir (wrong loader, not an
+  invalid plugin) — the coprocessor seam picks them up.
 
 ## Golden-safe
 

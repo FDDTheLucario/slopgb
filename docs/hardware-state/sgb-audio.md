@@ -105,17 +105,18 @@ milestones, smallest-first:
    mapping and the DATA_SND packet layout are original clean-room interpretations
    (the real SGB effect-code→driver semantics live in the unread system ROM), and
    the tone is a synthesized square, not the SGB sample bank.
-5. **Frontend backend toggle + runtime plugin loading — DONE.** The `slopgb`
-   frontend selects the backend with `--sgb-coprocessor` (or
-   `SLOPGB_SGB_COPROCESSOR`): off (default) keeps the built-in HLE `SgbApu`
-   (byte-identical golden path); on loads the two plugin `.wasm` at runtime from
-   `SLOPGB_SGB_COPROCESSOR=<dir>` (or the `--plugins` dir) and injects the
-   `SgbCoprocessor` via `set_audio_coprocessor` after every machine build. slopgb
-   itself neither builds nor bundles the wasm — if the plugins are absent or fail
-   to load, the built-in `SgbApu` stands (golden-safe fallback).
-   `Session::set_sgb_coprocessor_dir` + `set_sgb_coprocessor`/
-   `apply_sgb_coprocessor`, re-applied on power-cycle / model switch, a no-op off
-   SGB. Proven in `session::tests::sgb_coprocessor_toggle_swaps_the_audio_backend`
+5. **Runtime plugin loading — DONE (no toggle: it's a plugin).** The SGB
+   coprocessor auto-loads from the plugins dir (`--plugins` / `SLOPGB_PLUGINS_DIR`,
+   or the Options→Plugins browse): on an SGB machine, when the dir holds both
+   `spc700.wasm` + `w65c816.wasm`, `Session::apply_sgb_coprocessor` loads them and
+   injects the `SgbCoprocessor` via `set_audio_coprocessor` after every machine
+   build; a missing plugin (or non-SGB machine) leaves the built-in HLE `SgbApu` in
+   place (byte-identical golden path), silently — absence is the norm, not an
+   error. slopgb itself neither builds nor bundles the wasm. The dir is held by
+   `Session::set_plugins_dir` (`plugins_dir`), re-applied on power-cycle / model
+   switch. There is no `--sgb-coprocessor` flag and no Sound-tab backend selector:
+   drop the plugin in the dir and it runs. Proven in
+   `session::tests::sgb_coprocessor_plugin_in_the_dir_swaps_the_audio_backend`
    (silent on the built-in default, silent on the missing-plugins fallback,
    audible with the coprocessor loaded).
 

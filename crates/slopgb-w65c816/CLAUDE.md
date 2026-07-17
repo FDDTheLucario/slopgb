@@ -9,8 +9,9 @@ hosted as a slopgb coprocessor plugin (`Coprocessor`, comm-port bus).
 This is one first-class `SUBSYSTEM` plugin type (alongside the SPC700 + MSU-1);
 the plugin host supports **every** valid subsystem via the generic
 `LoadedCoprocessor` ABI — see
-[`../slopgb-plugin-host/CLAUDE.md`](../slopgb-plugin-host/CLAUDE.md). It loads
-through the `--sgb-coprocessor` seam, not the tier-1 `--plugins` pump.
+[`../slopgb-plugin-host/CLAUDE.md`](../slopgb-plugin-host/CLAUDE.md). As
+`w65c816.wasm` it auto-loads (with `spc700.wasm`) from the `--plugins` dir on SGB
+models via the SGB-coprocessor seam, not the tier-1 `--plugins` per-frame pump.
 
 ## Clean-room rule (non-negotiable)
 

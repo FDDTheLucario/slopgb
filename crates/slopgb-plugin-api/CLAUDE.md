@@ -35,9 +35,10 @@ valid a plugin as any introspection one. The plugin **system** must support
 exporting the `reset`/`run_until`/`port_read`/`port_write` ABI loads). What
 differs is the *loader*, not the validity — a `SUBSYSTEM` plugin exports the
 coprocessor ABI, not `on_frame`, so it loads through `LoadedCoprocessor` (driven
-by the frontend's `--sgb-coprocessor` / `--msu1` seams), **not** the tier-1
-`PluginHost` per-frame pump. Pointing the tier-1 `--plugins` scanner at a
-subsystem plugin skips it — a loader mismatch, never "an invalid plugin".
+by the frontend's coprocessor seams — the SGB coprocessor auto-loads from the
+`--plugins` dir, MSU-1 from a `--msu1` pack), **not** the tier-1 `PluginHost`
+per-frame pump. The tier-1 `--plugins` *scanner* skips a subsystem plugin in that
+dir — a loader mismatch, never "an invalid plugin".
 
 Wire contract (`abi.rs`): `ABI_VERSION`, `Reg`, the `host_*` imports — the host
 must agree. `abi.rs` is cfg-split (real wasm imports vs off-wasm `unreachable!`

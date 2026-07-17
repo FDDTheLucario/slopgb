@@ -17,9 +17,7 @@
 //! ```
 
 use crate::ui::{CustomThemes, Theme, ThemeChoice};
-use crate::windows::options::{
-    AudioBackend, ModelChoice, PluginConfig, SCHEMES, ScreenshotFormat, Settings,
-};
+use crate::windows::options::{ModelChoice, PluginConfig, SCHEMES, ScreenshotFormat, Settings};
 
 /// The current native-format version (bumped when a migration is needed).
 pub const VERSION: u32 = 1;
@@ -262,9 +260,6 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
             .and_then(|v| v.trim().parse().ok())
             .unwrap_or(def.volume),
         mono: b("sound", "mono", def.mono),
-        audio_backend: d
-            .get("sound", "audio_backend")
-            .map_or(def.audio_backend, AudioBackend::from_key),
         audio_device: s("sound", "audio_device", &def.audio_device),
         audio_sample_rate: i(
             "sound",
@@ -381,7 +376,6 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         screenshot_copies: _,
         volume: _,
         mono: _,
-        audio_backend: _,
         audio_device: _,
         audio_sample_rate: _,
         audio_latency: _,
@@ -459,7 +453,6 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
     d.set("system", "bootrom_sgb", &settings.bootrom_sgb);
     d.set("sound", "volume", &settings.volume.to_string());
     d.set("sound", "mono", fb(settings.mono));
-    d.set("sound", "audio_backend", settings.audio_backend.to_key());
     d.set("sound", "audio_device", &settings.audio_device);
     d.set(
         "sound",

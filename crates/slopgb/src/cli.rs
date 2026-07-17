@@ -25,18 +25,14 @@ OPTIONS:
                       only). Feeds the SGB audio driver; the Nintendo border and
                       title palette are NOT extracted (slopgb never runs the SNES
                       CPU) — the default border stands. Also via SLOPGB_SGB_BIOS
-    --sgb-coprocessor Swap the SGB audio backend from the built-in HLE APU to the
-                      combined 65C816+SPC700+S-DSP coprocessor (SGB models only),
-                      so a bare SOUND command makes audio with no game driver. The
-                      two chips run as wasm plugins loaded at runtime (spc700.wasm
-                      + w65c816.wasm) from SLOPGB_SGB_COPROCESSOR=<dir> or the
-                      --plugins dir; if absent, the built-in APU stands. Default
-                      off (built-in). Enable also via SLOPGB_SGB_COPROCESSOR
     --mcp-port <N>    Host an MCP server on 127.0.0.1:<N> so an LLM agent can
                       drive the debugger (disassemble/peek/cdl/vram/breakpoint/
                       registers/expr). Also via SLOPGB_MCP_PORT=<N>
-    --plugins <DIR>   Load every *.wasm plugin in <DIR> (read-only introspection;
-                      see docs/ui-state/plugin-api.md). Also via SLOPGB_PLUGINS_DIR
+    --plugins <DIR>   Load every *.wasm plugin in <DIR>. Tier-1 introspection
+                      plugins run in the per-frame pump; the SGB coprocessor
+                      (spc700.wasm + w65c816.wasm) auto-loads from here on SGB
+                      models. See docs/ui-state/plugin-api.md. Also via
+                      SLOPGB_PLUGINS_DIR
     --msu1 <DIR>      Load an MSU-1 streaming-audio pack from <DIR> (the MSU-1
                       coprocessor plugin msu1.wasm + track_N.pcm tracks + an
                       optional .msu data ROM). Registers map to $A000-$A007; the
@@ -77,11 +73,6 @@ pub(crate) struct Options {
     /// image). `--sgb-bios <path>`; falls back to `SLOPGB_SGB_BIOS` (resolved in
     /// `main`). `None` = SGB audio silent for the default bank, default border.
     pub(crate) sgb_bios: Option<PathBuf>,
-    /// Opt-in swap of the SGB audio backend to the combined 65C816+SPC700+S-DSP
-    /// coprocessor (`--sgb-coprocessor`; falls back to `SLOPGB_SGB_COPROCESSOR`,
-    /// resolved in `main`). `false` = the built-in HLE `SgbApu` (default). A
-    /// no-op off `Model::Sgb`/`Sgb2`.
-    pub(crate) sgb_coprocessor: bool,
     /// Port for the opt-in MCP debug server (`--mcp-port`; falls back to
     /// `SLOPGB_MCP_PORT`, resolved in `main`). `None` = no server (default).
     pub(crate) mcp_port: Option<u16>,
@@ -115,7 +106,6 @@ impl Options {
         let mut mute = false;
         let mut boot = None;
         let mut sgb_bios = None;
-        let mut sgb_coprocessor = false;
         let mut mcp_port = None;
         let mut plugins_dir = None;
         let mut msu1 = None;
@@ -132,7 +122,6 @@ impl Options {
                     let v = args.next().ok_or("--sgb-bios requires a path")?;
                     sgb_bios = Some(PathBuf::from(v));
                 }
-                "--sgb-coprocessor" => sgb_coprocessor = true,
                 "--mcp-port" => {
                     let v = args.next().ok_or("--mcp-port requires a port number")?;
                     mcp_port = Some(
@@ -182,7 +171,6 @@ impl Options {
             mute,
             boot,
             sgb_bios,
-            sgb_coprocessor,
             mcp_port,
             plugins_dir,
             msu1,

@@ -128,17 +128,6 @@ fn parse_sgb_bios_path_and_default() {
 }
 
 #[test]
-fn parse_sgb_coprocessor_flag_and_default() {
-    // `--sgb-coprocessor` is a bare switch (no value); absent, it defaults off.
-    assert!(
-        parse_run(&["--sgb-coprocessor", "game.gb"])
-            .unwrap()
-            .sgb_coprocessor
-    );
-    assert!(!parse_run(&["game.gb"]).unwrap().sgb_coprocessor);
-}
-
-#[test]
 fn parse_help_returns_outcome_instead_of_exiting() {
     assert!(matches!(parse(&["-h"]), Ok(ParseOutcome::Help)));
     assert!(matches!(parse(&["--help"]), Ok(ParseOutcome::Help)));
