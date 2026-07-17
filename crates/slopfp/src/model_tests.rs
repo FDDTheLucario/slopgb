@@ -506,3 +506,32 @@ fn fmt_mtime_known_dates() {
     assert_eq!(fmt_mtime(Some(0)), "1970-01-01");
     assert_eq!(fmt_mtime(Some(1_700_000_000)), "2023-11-14");
 }
+
+// ---- Mode::Directory ------------------------------------------------------
+
+#[test]
+fn directory_mode_picks_cwd_and_never_picks_a_file() {
+    use std::path::PathBuf;
+    let mut p = Picker::with_entries(
+        Mode::Directory,
+        "/base",
+        vec![file("a.txt", 1, 1), dir("sub")],
+    );
+    // "select this folder" returns the current dir.
+    assert_eq!(p.pick_cwd(), Outcome::Picked(PathBuf::from("/base")));
+    // A file highlighted + Enter does NOT pick it (unlike Open mode) — files are
+    // shown but not selectable in directory mode.
+    p.on_click(0); // highlight the file row (a.txt sorts after the dir)
+    assert_eq!(
+        p.on_key(Key::Enter),
+        Outcome::None,
+        "a file is not pickable"
+    );
+    // Contrast: the same file IS picked in Open mode.
+    let mut o = Picker::with_entries(Mode::Open, "/base", vec![file("a.txt", 1, 1)]);
+    o.on_click(0);
+    assert_eq!(
+        o.on_key(Key::Enter),
+        Outcome::Picked(PathBuf::from("/base/a.txt"))
+    );
+}

@@ -14,7 +14,7 @@ use winit::keyboard::{KeyCode, ModifiersState};
 use crate::PathPurpose;
 use crate::ui::Theme;
 use crate::ui::canvas::{Canvas, Rect};
-use crate::ui::text::{draw_text, line_height};
+use crate::ui::text::{draw_text, line_height, measure};
 use crate::ui::widgets::scroll_list;
 
 /// Panel padding + max size, centred over the game window.
@@ -37,6 +37,9 @@ pub(crate) struct FilePicker {
     /// of the line height (leaving a sub-row sliver at the bottom). A click
     /// past this many rows-in-view hits blank space, not an undrawn row.
     last_rowcount: usize,
+    /// The "select this folder" button's hit-rect from the last `render`
+    /// (`Mode::Directory` only; zero-area otherwise) — clicking it picks `cwd`.
+    select_rect: Rect,
 }
 
 impl FilePicker {
@@ -50,9 +53,8 @@ impl FilePicker {
         start_dir: PathBuf,
         filters: &[&str],
         title: &str,
-        save: bool,
+        mode: Mode,
     ) -> Self {
-        let mode = if save { Mode::Save } else { Mode::Open };
         let picker = Picker::new(mode, start_dir, filters).with_title(title);
         Self {
             picker,
@@ -60,6 +62,7 @@ impl FilePicker {
             last_offset: 0,
             list_rect: Rect::new(0, 0, 0, 0),
             last_rowcount: 0,
+            select_rect: Rect::new(0, 0, 0, 0),
         }
     }
 
@@ -129,6 +132,7 @@ impl FilePicker {
         let refs: Vec<&str> = display_rows.iter().map(String::as_str).collect();
         scroll_list(c, list_rect, &refs, 0, v.highlight, theme);
 
+        self.select_rect = Rect::new(0, 0, 0, 0);
         if let Some(name) = &v.save_name {
             let hint = if v.overwrite_pending {
                 " (overwrite? press Enter again)"
@@ -142,6 +146,14 @@ impl FilePicker {
                 &format!("Save as: {name}_{hint}"),
                 theme.text,
             );
+        } else if self.picker.mode() == Mode::Directory {
+            // Directory mode: a button that picks the folder being browsed
+            // (navigating into folders is Enter/double-click; this selects `cwd`).
+            let label = "[ Select this folder ]";
+            let br = Rect::new(content_x, filename_y, measure(label) + 8, lh + 2);
+            theme.frame(c, br, theme.text);
+            draw_text(c, content_x + 4, filename_y + 1, label, theme.text);
+            self.select_rect = br;
         }
         draw_text(c, content_x, status_y, &v.status, theme.text);
         // The Ctrl+<letter> hotkeys above have no other affordance (no native
@@ -168,6 +180,10 @@ impl FilePicker {
     /// `list_rect.h` isn't an exact multiple of `line_height()`, or the list is
     /// shorter than the viewport) is also a no-op — there is no row there.
     pub(crate) fn on_click(&mut self, px: i32, py: i32, double: bool) -> Outcome {
+        // The "select this folder" button (directory mode) picks the current dir.
+        if self.select_rect.contains(px, py) {
+            return self.picker.pick_cwd();
+        }
         if !self.list_rect.contains(px, py) {
             return Outcome::None;
         }
