@@ -18,6 +18,13 @@ Per-area state lives in `docs/ui-state/<area>.md` — read the matching file fir
   software UI toolkit `ui.rs` into softbuffer XRGB8888 buffers.
 - Read-only introspection into core: `mcp/` (opt-in MCP server) + the plugin
   pump; serial link `link.rs`; persistence `settings_file/`.
+- Plugin seams (one per capability tier — all valid subsystem types supported,
+  see [`../slopgb-plugin-host/CLAUDE.md`](../slopgb-plugin-host/CLAUDE.md)):
+  `--plugins <dir>` / Options→Plugins is the tier-1 `INTROSPECTION` pump only;
+  tier-3 `SUBSYSTEM` plugins load through their own seams — `--sgb-coprocessor`
+  (`slopgb-sgb-coprocessor` drives `spc700.wasm` + `w65c816.wasm`) and `--msu1`
+  (`msu1.rs` drives `msu1.wasm` via `LoadedCoprocessor`). Pointing `--plugins` at
+  a subsystem plugin skips it (wrong loader, not an invalid plugin).
 
 ## Golden-safe
 

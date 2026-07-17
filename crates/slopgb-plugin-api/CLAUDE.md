@@ -28,6 +28,17 @@ bounds-checked `Memory`).
 `vram`/`screencap`/`expr`); `args::field` pulls a string out of the JSON request
 without a JSON dep. These require the tool host, not the per-frame host.
 
+**Subsystem plugins are first-class.** A `Coprocessor` (`SUBSYSTEM`) plugin — e.g.
+the SPC700, 65C816, MSU-1 chips (`slopgb-{spc700,w65c816,msu1}-plugin`) — is as
+valid a plugin as any introspection one. The plugin **system** must support
+*every* valid subsystem type: `LoadedCoprocessor` is generic (any module
+exporting the `reset`/`run_until`/`port_read`/`port_write` ABI loads). What
+differs is the *loader*, not the validity — a `SUBSYSTEM` plugin exports the
+coprocessor ABI, not `on_frame`, so it loads through `LoadedCoprocessor` (driven
+by the frontend's `--sgb-coprocessor` / `--msu1` seams), **not** the tier-1
+`PluginHost` per-frame pump. Pointing the tier-1 `--plugins` scanner at a
+subsystem plugin skips it — a loader mismatch, never "an invalid plugin".
+
 Wire contract (`abi.rs`): `ABI_VERSION`, `Reg`, the `host_*` imports — the host
 must agree. `abi.rs` is cfg-split (real wasm imports vs off-wasm `unreachable!`
 stubs) so the crate builds for BOTH targets; the host build reuses the contract

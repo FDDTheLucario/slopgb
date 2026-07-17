@@ -7,6 +7,16 @@ Rust→wasm plugins) + `crates/slopgb-plugin-host` (the wasmi runtime — the on
 `wasmi` is a dep, isolated so core stays zero-dep and the frontend keeps its lean
 dep set).
 
+**Plugins have three peer capability tiers, one loader each** (see
+[`crates/slopgb-plugin-host/CLAUDE.md`](crates/slopgb-plugin-host/CLAUDE.md)):
+tier-1 `INTROSPECTION` (`PluginHost` per-frame pump, `--plugins`), tier-2 tool
+(`LoadedTool`, MCP), tier-3 `SUBSYSTEM` (`LoadedCoprocessor`, `--sgb-coprocessor`
+/ `--msu1`). **Subsystem plugins (SPC700 / 65C816 / MSU-1 — `slopgb-*-plugin`,
+built by `cargo xtask stage-plugins`) are first-class**: the host supports every
+valid subsystem type via the generic coprocessor ABI. They load through their own
+seam, not the tier-1 `--plugins` scanner, which skips them (a loader mismatch, not
+an invalid plugin).
+
 **Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before touching core** — timing
 contract (tick-then-access M-cycles), memory map, module ownership, mooneye +
 game-boy-test-roms harness protocols.
