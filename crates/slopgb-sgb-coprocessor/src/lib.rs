@@ -605,6 +605,26 @@ impl AudioCoprocessor for SgbCoprocessor {
             }
         }
     }
+
+    fn debug_status(&self) -> String {
+        // The run-cycle targets grow only while the host clocks the chips, so a
+        // zero here means the coprocessor loaded but was never driven (the
+        // machine isn't in SGB mode, or the GB is sending nothing) — the exact
+        // "SNES side isn't running" case. Non-zero = the chips are executing.
+        let running = self.cpu_target > 0 || self.spc_target > 0;
+        format!(
+            "wasm SGB coprocessor: SPC700 + 65C816 plugins loaded; {} \
+             (65C816 ran to cyc {}, SPC700 to cyc {}); last GB->SPC ports {:02X?}",
+            if running {
+                "RUNNING"
+            } else {
+                "NOT yet clocked"
+            },
+            self.cpu_target,
+            self.spc_target,
+            self.to_spc,
+        )
+    }
 }
 
 /// The on-disk state layout [`SgbCoprocessor::write_state`] emits, all zeroed

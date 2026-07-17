@@ -438,6 +438,7 @@ fn build_call(name: &str, args: Option<&Json>) -> Result<Call, String> {
             addr: arg("address")?,
         }),
         "registers" => Ok(Call::Registers),
+        "coprocessor" => Ok(Call::Coprocessor),
         "expr" => Ok(Call::Expr {
             expr: arg("expression")?,
         }),
@@ -582,6 +583,11 @@ fn builtin_tool_defs() -> Json {
             &[("address", "AAAA or BB:AAAA hex")],
         ),
         tool("registers", "Read the CPU + LCD register state.", &[]),
+        tool(
+            "coprocessor",
+            "SGB coprocessor status: whether the SPC700 + 65C816 subsystem plugins are engaged and running (or the built-in HLE / not-SGB).",
+            &[],
+        ),
         tool(
             "expr",
             "Evaluate a bgb-style debugger expression (hex default, registers, `[addr]`).",

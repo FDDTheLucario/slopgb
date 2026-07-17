@@ -104,4 +104,13 @@ pub trait AudioCoprocessor {
     /// Deep-clone into a fresh box (trait objects can't derive `Clone`), for the
     /// atomic save-state restore that clones the whole `GameBoy`.
     fn clone_box(&self) -> Box<dyn AudioCoprocessor>;
+
+    /// A human-readable status line for the debugger / MCP: which SGB audio
+    /// coprocessor is engaged, and — for the wasm plugin coprocessor — whether
+    /// its chips loaded and how many SGB sound commands it has processed. The
+    /// default is the built-in HLE APU; the wasm coprocessor overrides it.
+    /// Read-only introspection (never advances a cycle).
+    fn debug_status(&self) -> String {
+        "built-in SGB APU (HLE) — no wasm coprocessor plugins loaded".to_string()
+    }
 }

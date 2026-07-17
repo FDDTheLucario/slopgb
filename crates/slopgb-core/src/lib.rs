@@ -652,6 +652,15 @@ impl GameBoy {
         self.bus.cartridge().rtc_state()
     }
 
+    /// The SGB audio coprocessor's status line, or `None` when this machine has
+    /// no SGB coprocessor at all (not `Model::Sgb` / `Sgb2`). Reports whether the
+    /// built-in HLE APU or the wasm SPC700+65C816 plugin coprocessor is engaged —
+    /// read-only introspection for the debugger / MCP. Side-effect-free.
+    #[must_use]
+    pub fn sgb_coprocessor_status(&self) -> Option<String> {
+        self.sgb_apu.as_ref().map(|a| a.debug_status())
+    }
+
     /// True once the CPU has executed `LD B,B` (opcode 0x40) — the mooneye
     /// test suite's "test finished" software breakpoint.
     pub fn debug_breakpoint_hit(&self) -> bool {
