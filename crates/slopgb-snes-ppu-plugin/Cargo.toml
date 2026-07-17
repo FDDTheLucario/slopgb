@@ -1,0 +1,24 @@
+[package]
+name = "slopgb-snes-ppu-plugin"
+description = "slopgb coprocessor plugin: the clean-room SNES PPU (S-PPU) hosted in a wasm sandbox — B-bus ports in, rendered 256x224 RGB555 lines out."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+# cdylib is the loadable wasm artifact; rlib lets the native unit tests link the
+# wrapper directly (the Coprocessor logic is target-independent).
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+slopgb-plugin-api = { path = "../slopgb-plugin-api" }
+slopgb-snes-ppu = { path = "../slopgb-snes-ppu" }
+
+# NOT `[lints] workspace = true`: like slopgb-plugin-api, the wasm export macro
+# (`slopgb_coprocessor_plugin!`) needs `#[unsafe(no_mangle)]` linkage markers the
+# workspace `forbid(unsafe_code)` rejects. `deny` lets the macro scope-`allow`
+# them while everything else stays lint-checked safe (no `unsafe` blocks here).
+[lints.rust]
+unsafe_code = "deny"

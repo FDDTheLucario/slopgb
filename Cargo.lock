@@ -1573,6 +1573,14 @@ name = "slopgb-snes-ppu"
 version = "0.1.0"
 
 [[package]]
+name = "slopgb-snes-ppu-plugin"
+version = "0.1.0"
+dependencies = [
+ "slopgb-plugin-api",
+ "slopgb-snes-ppu",
+]
+
+[[package]]
 name = "slopgb-spc700-plugin"
 version = "0.1.0"
 dependencies = [

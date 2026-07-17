@@ -315,6 +315,9 @@ impl Default for SnesPpu {
 mod frame;
 mod obj;
 mod render;
+mod state;
+
+pub use state::PPU_STATE_LEN;
 
 #[cfg(test)]
 #[path = "lib_tests.rs"]

@@ -130,6 +130,41 @@ fn cgram_word_latch_flipflop_and_readback() {
     assert_eq!(ppu.read(0x3B), 0x78, "address stepped to color 4");
 }
 
+/// The snapshot round trip: every memory + port latch + register survives
+/// save/load byte-identically; a wrong-length image is ignored.
+#[test]
+fn state_round_trips() {
+    let mut ppu = SnesPpu::new();
+    ppu.write(0x15, 0x84);
+    ppu.write(0x16, 0x21);
+    ppu.write(0x17, 0x01);
+    ppu.write(0x18, 0xCD);
+    ppu.write(0x21, 7);
+    ppu.write(0x22, 0x34); // dangling low byte: the flipflop must ride
+    ppu.write(0x02, 0x10);
+    ppu.write(0x04, 0x55);
+    ppu.write(0x05, 0x11);
+    ppu.write(0x0D, 0x03);
+    ppu.write(0x00, 0x8F);
+    let img = ppu.save_state();
+    assert_eq!(img.len(), PPU_STATE_LEN);
+
+    let mut fresh = SnesPpu::new();
+    fresh.load_state(&img);
+    assert_eq!(fresh.save_state(), img, "byte-identical re-serialization");
+    // The restored flipflop completes the dangling CGRAM pair.
+    fresh.write(0x22, 0x12);
+    assert_eq!(fresh.cgram()[7], 0x1234);
+
+    let mut untouched = SnesPpu::new();
+    untouched.load_state(&img[1..]);
+    assert_eq!(
+        untouched.save_state(),
+        SnesPpu::new().save_state(),
+        "wrong-length image ignored"
+    );
+}
+
 /// OAM (fullsnes 2102h-2104h/2138h): either OAMADD byte write copies the
 /// whole 9-bit reload into the address (bit 0 = 0); low-table writes latch
 /// even bytes and land words on odd bytes; the high table (`$200+`) takes

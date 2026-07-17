@@ -36,6 +36,11 @@ const PLUGINS: &[Plugin] = &[
         artifact: "slopgb_msu1_plugin.wasm",
         staged: "msu1.wasm",
     },
+    Plugin {
+        pkg: "slopgb-snes-ppu-plugin",
+        artifact: "slopgb_snes_ppu_plugin.wasm",
+        staged: "snes-ppu.wasm",
+    },
 ];
 
 struct Plugin {
@@ -121,7 +126,10 @@ mod tests {
         // The seams open these exact filenames (msu1.rs PLUGIN_WASM, session.rs
         // coprocessor pair). A typo here would silently stage unusable plugins.
         let staged: Vec<&str> = PLUGINS.iter().map(|p| p.staged).collect();
-        assert_eq!(staged, ["spc700.wasm", "w65c816.wasm", "msu1.wasm"]);
+        assert_eq!(
+            staged,
+            ["spc700.wasm", "w65c816.wasm", "msu1.wasm", "snes-ppu.wasm"]
+        );
     }
 
     #[test]
