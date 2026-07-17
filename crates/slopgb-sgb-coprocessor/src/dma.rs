@@ -104,12 +104,17 @@ impl SgbCoprocessor {
         self.apply_mmio(0x2100 | u16::from(port), val);
     }
 
-    /// A DMA read from a B-bus port. Only WMDATA reads back today; the rest
-    /// of the B-bus is open bus (reads 0) until the PPU lands.
+    /// A DMA read from a B-bus port: WMDATA host-side, everything else from
+    /// the PPU when one is loaded (its readable ports $2138-$213B), else
+    /// open bus (0).
     fn bbus_read(&mut self, port: u8) -> u8 {
         match port {
             0x80 => self.wmdata_read(),
-            _ => 0,
+            _ => self
+                .ppu
+                .as_ref()
+                .and_then(|p| p.borrow_mut().port_read(port).ok())
+                .unwrap_or(0),
         }
     }
 

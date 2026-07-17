@@ -6,16 +6,6 @@ use super::*;
 
 // ---- GP-DMA ($420B / $43x0-$43x6) + the WRAM B-bus port ($2180-$2183) ----
 
-/// A little `LDA #imm / STA abs` assembler for guest MMIO setup programs.
-fn stores(pairs: &[(u16, u8)], tail: &[u8]) -> Vec<u8> {
-    let mut p = Vec::new();
-    for &(addr, val) in pairs {
-        p.extend_from_slice(&[0xA9, val, 0x8D, addr as u8, (addr >> 8) as u8]);
-    }
-    p.extend_from_slice(tail);
-    p
-}
-
 /// End to end through the real wasm CPU: a guest program points WMADD at
 /// WRAM, configures channel 0 (A→B, increment, one byte to one register —
 /// fullsnes 43x0h mode 0), fires MDMAEN, and the bytes staged in the

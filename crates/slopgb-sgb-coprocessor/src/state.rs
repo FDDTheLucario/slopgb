@@ -52,6 +52,19 @@ impl SgbCoprocessor {
         }
         w.u32(self.wmadd);
         w.bool(self.joy_busy);
+        // The optional PPU plugin: a length-prefixed opaque block (empty =
+        // no PPU loaded) + the scanline-pump cursor and frame flag.
+        let ppu = match &self.ppu {
+            Some(p) => p.borrow_mut().save_state().unwrap_or_else(|e| {
+                eprintln!("slopgb: SGB coprocessor PPU save_state failed: {e}");
+                Vec::new()
+            }),
+            None => Vec::new(),
+        };
+        w.u32(ppu.len() as u32);
+        w.bytes(&ppu);
+        w.u16(self.ppu_row);
+        w.bool(self.frame_ready);
     }
 
     pub(crate) fn read_state(&mut self, r: &mut Reader<'_>) -> Result<(), StateError> {
@@ -108,6 +121,19 @@ impl SgbCoprocessor {
         }
         self.wmadd = r.u32()? & 0x1_FFFF;
         self.joy_busy = r.bool()?;
+        let n = r.u32()? as usize;
+        let ppu_state = r.bytes_vec(n)?;
+        if let Some(p) = &self.ppu {
+            // A state saved without a PPU loads into a PPU-bearing machine
+            // with the chip left at reset (nothing to restore).
+            if !ppu_state.is_empty() {
+                if let Err(e) = p.borrow_mut().load_state(&ppu_state) {
+                    eprintln!("slopgb: SGB coprocessor PPU load_state failed: {e}");
+                }
+            }
+        }
+        self.ppu_row = r.u16()?.min(SNES_FB_H as u16);
+        self.frame_ready = r.bool()?;
         // The undrained source/output PCM is transient, not part of the
         // snapshot — and so are the pad feed and the pushed input matrix
         // (the core re-supplies both on the next step/flush).
@@ -131,7 +157,25 @@ impl SgbCoprocessor {
             eprintln!("slopgb: SGB coprocessor 65C816 save_state failed on clone: {e}");
             Vec::new()
         });
-        let mut fresh = Self::from_wasm(&self.spc_wasm, &self.cpu_wasm, self.out_rate)?;
+        let ppu_state = self.ppu.as_ref().map(|p| {
+            p.borrow_mut().save_state().unwrap_or_else(|e| {
+                eprintln!("slopgb: SGB coprocessor PPU save_state failed on clone: {e}");
+                Vec::new()
+            })
+        });
+        let mut fresh = Self::from_wasm_full(
+            &self.spc_wasm,
+            &self.cpu_wasm,
+            self.ppu_wasm.as_deref(),
+            self.out_rate,
+        )?;
+        if let (Some(p), Some(state)) = (&fresh.ppu, &ppu_state) {
+            if !state.is_empty() {
+                if let Err(e) = p.borrow_mut().load_state(state) {
+                    eprintln!("slopgb: SGB coprocessor PPU load_state failed on clone: {e}");
+                }
+            }
+        }
         if let Err(e) = fresh.spc.get_mut().load_state(&spc_state) {
             eprintln!("slopgb: SGB coprocessor SPC700 load_state failed on clone: {e}");
         }
@@ -164,6 +208,8 @@ impl SgbCoprocessor {
         fresh.wmadd = self.wmadd;
         fresh.input = self.input;
         fresh.joy_busy = self.joy_busy;
+        fresh.ppu_row = self.ppu_row;
+        fresh.frame_ready = self.frame_ready;
         Ok(fresh)
     }
 }
@@ -201,6 +247,9 @@ fn write_empty_state(w: &mut Writer) {
     w.bytes(&[0u8; 7 * 8]); // dma channel registers
     w.u32(0); // wmadd
     w.bool(false); // joy_busy
+    w.u32(0); // ppu state len (no PPU)
+    w.u16(0); // ppu_row
+    w.bool(false); // frame_ready
 }
 
 /// A no-op [`AudioCoprocessor`] producing silence. Only ever the result of
@@ -256,6 +305,10 @@ impl AudioCoprocessor for InertCoprocessor {
         let mut dma = [0u8; 7 * 8];
         r.bytes_into(&mut dma)?;
         r.u32()?;
+        r.bool()?;
+        let n = r.u32()? as usize;
+        r.bytes_vec(n)?;
+        r.u16()?;
         r.bool()?;
         Ok(())
     }

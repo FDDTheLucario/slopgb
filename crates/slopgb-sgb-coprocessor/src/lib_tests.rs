@@ -99,6 +99,16 @@ fn peak(out: &[(f32, f32)]) -> f32 {
         .fold(0.0f32, |m, &(l, r)| m.max(l.abs()).max(r.abs()))
 }
 
+/// A little `LDA #imm / STA abs` assembler for guest MMIO setup programs.
+fn stores(pairs: &[(u16, u8)], tail: &[u8]) -> Vec<u8> {
+    let mut p = Vec::new();
+    for &(addr, val) in pairs {
+        p.extend_from_slice(&[0xA9, val, 0x8D, addr as u8, (addr >> 8) as u8]);
+    }
+    p.extend_from_slice(tail);
+    p
+}
+
 /// Read `len` bytes of the 65C816 plugin's SNES RAM (test observability).
 fn cpu_ram(cop: &SgbCoprocessor, addr: u32, len: usize) -> Vec<u8> {
     cop.cpu.borrow_mut().read_ram(addr, len).unwrap()
@@ -851,3 +861,6 @@ fn no_autopoll_without_the_guest_enabling_it() {
 
 #[path = "lib_tests_dma.rs"]
 mod dma;
+
+#[path = "lib_tests_ppu.rs"]
+mod ppu;
