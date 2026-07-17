@@ -52,6 +52,7 @@ impl SgbCoprocessor {
         }
         w.u32(self.wmadd);
         w.bool(self.joy_busy);
+        w.bool(self.trn_flip);
         // The optional PPU plugin: a length-prefixed opaque block (empty =
         // no PPU loaded) + the scanline-pump cursor and frame flag.
         let ppu = match &self.ppu {
@@ -124,6 +125,7 @@ impl SgbCoprocessor {
         }
         self.wmadd = r.u32()? & 0x1_FFFF;
         self.joy_busy = r.bool()?;
+        self.trn_flip = r.bool()?;
         let n = r.u32()? as usize;
         let ppu_state = r.bytes_vec(n)?;
         if let Some(p) = &self.ppu {
@@ -210,6 +212,7 @@ impl SgbCoprocessor {
         fresh.wmadd = self.wmadd;
         fresh.input = self.input;
         fresh.joy_busy = self.joy_busy;
+        fresh.trn_flip = self.trn_flip;
         fresh.ppu_row = self.ppu_row;
         fresh.frame_ready = self.frame_ready;
         Ok(fresh)
@@ -246,6 +249,7 @@ fn write_empty_state(w: &mut Writer) {
     w.bytes(&[0u8; 7 * 8]); // dma channel registers
     w.u32(0); // wmadd
     w.bool(false); // joy_busy
+    w.bool(false); // trn_flip
     w.u32(0); // ppu state len (no PPU)
     w.u16(0); // ppu_row
     w.bool(false); // frame_ready

@@ -37,16 +37,13 @@ impl SgbCoprocessor {
                 // (Pan Docs "SGB Command 12h"). The BIOS lands it in the RAM
                 // vector at $00BB-$00BD (fullsnes: JUMP clobbers exactly
                 // those bytes), where the resident NMI handler dispatches.
-                let cpu = self.cpu.get_mut();
-                let _ = cpu.write_ram(u32::from(NMI_RAM_VEC), &p[4..7]);
-                let _ = cpu.write_ram(BIOS_PKT_BUF, &p);
-                let _ = cpu.write_ram(BIOS_LAST_CMD, &[p[0] >> 3]);
+                let _ = self
+                    .cpu
+                    .get_mut()
+                    .write_ram(u32::from(NMI_RAM_VEC), &p[4..7]);
+                self.deliver_packet(&p, None);
             } else {
-                // The BIOS-runtime variables the uploaded code polls: the
-                // packet bytes and the command number (see the BIOS_* consts).
-                let cpu = self.cpu.get_mut();
-                let _ = cpu.write_ram(BIOS_PKT_BUF, &p);
-                let _ = cpu.write_ram(BIOS_LAST_CMD, &[p[0] >> 3]);
+                self.deliver_packet(&p, None);
             }
             while self.pending_packets.len() >= PACKET_QUEUE_CAP {
                 self.pending_packets.pop_front();
@@ -96,18 +93,32 @@ impl SgbCoprocessor {
     /// packet there is nowhere honest to put the payload, so only the
     /// staging updates.
     fn apply_pending_trn(&mut self, data: &[u8]) {
-        let cpu = self.cpu.get_mut();
-        let _ = cpu.write_ram(BIOS_TRN_STAGING, data);
-        let _ = cpu.write_ram(
-            BIOS_TRN_PTR,
-            &[BIOS_TRN_STAGING as u8, (BIOS_TRN_STAGING >> 8) as u8],
-        );
+        let staging = BIOS_TRN_STAGING[usize::from(self.trn_flip)];
+        self.trn_flip = !self.trn_flip;
+        let _ = self.cpu.get_mut().write_ram(staging, data);
         if let Some(p) = self.pending_trn.pop_front() {
             let dest = u32::from(p[1]) | u32::from(p[2]) << 8 | u32::from(p[3]) << 16;
-            let _ = cpu.write_ram(dest, data);
-            let _ = cpu.write_ram(BIOS_PKT_BUF, &p);
-            let _ = cpu.write_ram(BIOS_LAST_CMD, &[p[0] >> 3]);
+            let _ = self.cpu.get_mut().write_ram(dest, data);
+            self.deliver_packet(&p, Some(staging));
         }
+    }
+
+    /// Hand a packet to the resident BIOS through the delivery mailbox: the
+    /// main-service body publishes it to the BIOS-runtime variables and
+    /// then calls the hook — all inside one guest-side service call, so a
+    /// hook mid-flight (e.g. across its aux vblank wait) never observes a
+    /// half-delivered update (the real BIOS is single-threaded). `staging`
+    /// carries the DATA_TRN payload buffer the pointer should publish;
+    /// other packets leave the pointer bytes as-is (the body republishes
+    /// the previous value, which is what the variables already hold).
+    fn deliver_packet(&mut self, p: &[u8; 16], staging: Option<u32>) {
+        let cpu = self.cpu.get_mut();
+        let _ = cpu.write_ram(BIOS_DELIVERY, p);
+        let _ = cpu.write_ram(BIOS_DELIVERY + 0x10, &[p[0] >> 3]);
+        if let Some(st) = staging {
+            let _ = cpu.write_ram(BIOS_DELIVERY + 0x11, &[st as u8, (st >> 8) as u8]);
+        }
+        let _ = cpu.write_ram(BIOS_DELIVERY + 0x16, &[1]);
     }
 
     /// SOUND ($08): mailbox `note = effect_a`, `trigger = 1` (or the effect-on

@@ -148,19 +148,32 @@ const BIOS_LAST_CMD: u32 = 0x02C2;
 /// (`$7E:0284/85`).
 const BIOS_TRN_PTR: u32 = 0x0284;
 /// Where the host stages DATA_TRN payloads (high WRAM, clear of the low
-/// pages the uploaded stubs use; reached through the pointer above).
-const BIOS_TRN_STAGING: u32 = 0x7E_D000;
+/// pages the uploaded stubs use; reached through the pointer above). Two
+/// ping-pong buffers: the guest's dispatcher caches the pointer at copy
+/// start and its 4 KB copy spans several flushes, so the next payload must
+/// land in the *other* buffer or an in-flight copy reads torn data (the
+/// GB ACKs before copying, so transfer N+1 legitimately arrives mid-copy).
+const BIOS_TRN_STAGING: [u32; 2] = [0x7E_D000, 0x7E_E000];
 /// BIOS service entries uploaded bootstraps `JSR` into (two per known BIOS
 /// revision, selected on the `$00:FFDB` byte — zero in slopgb, so the first
 /// of each pair is the live one). The entries sit 3 bytes apart, so each
 /// holds a `JMP` thunk into a resident body below.
 const BIOS_MAIN_ENTRIES: [u32; 2] = [0xBBED, 0xBBF0];
 const BIOS_AUX_ENTRIES: [u32; 2] = [0xC58D, 0xC590];
-/// The resident main-service body: call the game's `$0800` hook slot when
-/// one is installed (`LDA $0800 / BEQ +3 / JSR $0800 / RTS` — the two-JSR
-/// depth is pinned by the pilot's own `PLA PLA / RTS` stack fixup), else
-/// return. The host performs the receive/transfer duties asynchronously.
-const BIOS_MAIN_BODY: u32 = 0xBE00;
+/// The resident main-service body: consume the host's delivery mailbox
+/// (publish the packet/command/staging-pointer to the BIOS-runtime
+/// variables), then call the game's `$0800` hook slot when one is
+/// installed (the two-JSR depth is pinned by the pilot's own `PLA PLA /
+/// RTS` stack fixup). Publishing INSIDE the service call is load-bearing:
+/// the real BIOS is single-threaded, so a hook that reads its dest before
+/// a vblank wait and its staging pointer after it can never see a
+/// mid-delivery update — an async host publish landed exactly in that
+/// window and re-routed a payload over the pilot's program area.
+const BIOS_MAIN_BODY: u32 = 0xBE80;
+/// The host→BIOS delivery mailbox (high WRAM, beside the staging buffers):
+/// `+0..15` the packet, `+$10` the command byte, `+$11/$12` the staging
+/// pointer, `+$16` the pending flag the resident body consumes.
+const BIOS_DELIVERY: u32 = 0x7E_CF00;
 /// The resident aux-service body: wait for the next vblank (poll RDNMI
 /// bit 7 — the flag sets regardless of NMITIMEN, fullsnes 4210h), then
 /// return. Pinned black-box from the pilot's hook, which wraps the aux
@@ -334,6 +347,9 @@ pub struct SgbCoprocessor {
     ppu_row: u16,
     /// A completed frame awaits [`Self::take_snes_frame`].
     frame_ready: bool,
+    /// Which [`BIOS_TRN_STAGING`] buffer the next DATA_TRN payload lands in
+    /// (ping-pong; see the const doc).
+    trn_flip: bool,
     /// Diagnostics only (`debug_status`), transient across save states:
     /// completed-frame count + the guest's last INIDISP write.
     frames_done: u64,
@@ -416,6 +432,7 @@ impl SgbCoprocessor {
             feed: None,
             gb_pos: 0,
             pending_trn: VecDeque::new(),
+            trn_flip: false,
             nmitimen: 0,
             in_vblank: false,
             dma_regs: [[0; 7]; 8],
@@ -472,16 +489,93 @@ impl SgbCoprocessor {
                     &[0x4C, BIOS_AUX_BODY as u8, (BIOS_AUX_BODY >> 8) as u8],
                 )?;
             }
-            // Main body: guarded call into the game's hook slot.
+            // Main body (see BIOS_MAIN_BODY): consume the delivery mailbox
+            // with long addressing (caller's DBR unknown), then the guarded
+            // hook call. PLP precedes the JSR so the hook sees exactly the
+            // caller's two return addresses (its PLA PLA / RTS fixup).
             let hook_lo = BIOS_HOOK_SLOT as u8;
             let hook_hi = (BIOS_HOOK_SLOT >> 8) as u8;
+            let mb = |off: u32| {
+                let a = BIOS_DELIVERY + off;
+                [a as u8, (a >> 8) as u8, (a >> 16) as u8]
+            };
+            let [d0, d1, d2] = mb(0);
+            let [c0, c1, c2] = mb(0x10);
+            let [p0, p1, p2] = mb(0x11);
+            let [q0, q1, q2] = mb(0x12);
+            let [f0, f1, f2] = mb(0x16);
             cpu.write_ram(
                 BIOS_MAIN_BODY,
                 &[
-                    0xAD, hook_lo, hook_hi, // LDA $0800 (0 = no hook installed)
-                    0xF0, 0x03, // BEQ +3 -> the RTS
-                    0x20, hook_lo, hook_hi, // JSR $0800
-                    0x60,    // RTS
+                    0x08, // BE80 PHP
+                    0xE2,
+                    0x30, // BE81 SEP #$30
+                    0xAF,
+                    f0,
+                    f1,
+                    f2, // BE83 LDA long flag
+                    // No delivery pending: skip the publish, still call the
+                    // hook — the BIOS invokes it every service loop, and
+                    // the pilot's hook re-ACKs on stale $02C2 (its own
+                    // pacing protocol with the GB).
+                    0xF0,
+                    0x2B, // BE87 BEQ hookcall (BEB4)
+                    0xA2,
+                    0x0F, // BE89 LDX #$0F
+                    0xBF,
+                    d0,
+                    d1,
+                    d2, // BE8B loop: LDA long packet,X
+                    0x9F,
+                    BIOS_PKT_BUF as u8,
+                    (BIOS_PKT_BUF >> 8) as u8,
+                    0x00, // BE8F STA long $0600,X
+                    0xCA, // BE93 DEX
+                    0x10,
+                    0xF5, // BE94 BPL loop
+                    0xAF,
+                    c0,
+                    c1,
+                    c2, // BE96 LDA long cmd
+                    0x8F,
+                    BIOS_LAST_CMD as u8,
+                    (BIOS_LAST_CMD >> 8) as u8,
+                    0x00, // BE9A STA long $02C2
+                    0xAF,
+                    p0,
+                    p1,
+                    p2, // BE9E LDA long ptr lo
+                    0x8F,
+                    BIOS_TRN_PTR as u8,
+                    (BIOS_TRN_PTR >> 8) as u8,
+                    0x00, // BEA2 STA long $0284
+                    0xAF,
+                    q0,
+                    q1,
+                    q2, // BEA6 LDA long ptr hi
+                    0x8F,
+                    (BIOS_TRN_PTR + 1) as u8,
+                    ((BIOS_TRN_PTR + 1) >> 8) as u8,
+                    0x00, // BEAA
+                    0xA9,
+                    0x00, // BEAE LDA #$00
+                    0x8F,
+                    f0,
+                    f1,
+                    f2, // BEB0 STA long flag (consumed)
+                    0xAF,
+                    hook_lo,
+                    hook_hi,
+                    0x00, // BEB4 LDA long $0800 (hook?)
+                    0xF0,
+                    0x05, // BEB8 BEQ exit (BEBF: the PLP)
+                    0x28, // BEBA PLP
+                    0x20,
+                    hook_lo,
+                    hook_hi, // BEBB JSR $0800
+                    0x60,    // BEBE RTS
+                    0x28,    // BEBF exit: PLP
+                    0x60,    // BEC0 RTS
                 ],
             )?;
             // Aux body (see BIOS_AUX_BODY): PHP / SEP #$20 /

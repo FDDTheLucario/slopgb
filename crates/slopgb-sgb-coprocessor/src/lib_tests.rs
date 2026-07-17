@@ -109,6 +109,18 @@ fn stores(pairs: &[(u16, u8)], tail: &[u8]) -> Vec<u8> {
     p
 }
 
+/// Drive one resident main-service call on the guest — consumes a pending
+/// delivery-mailbox packet, publishing it to the BIOS-runtime variables
+/// (the publish is guest-side since the mailbox serialization landed).
+fn run_service(cop: &mut SgbCoprocessor) {
+    {
+        let mut cpu = cop.cpu.borrow_mut();
+        cpu.write_ram(0x9F00, &[0x20, 0xED, 0xBB, 0xDB]).unwrap(); // JSR $BBED / STP
+        cpu.set_pc(0x9F00).unwrap();
+    }
+    cop.clock(4096 * 2);
+}
+
 /// Read `len` bytes of the 65C816 plugin's SNES RAM (test observability).
 fn cpu_ram(cop: &SgbCoprocessor, addr: u32, len: usize) -> Vec<u8> {
     cop.cpu.borrow_mut().read_ram(addr, len).unwrap()
@@ -263,14 +275,14 @@ fn bios_runtime_contract_variables_stubs_and_staging() {
     // host pump (RDNMI shadow + NMI delivery), not a raw run_until.
     cop.clock(70_224 * 2);
     assert_eq!(
-        cop.debug_cpu_ram(0x0310, 1),
-        vec![0x77],
-        "hook ran via $BBED"
-    );
-    assert_eq!(
         cop.debug_cpu_ram(0x0320, 1),
         vec![0x55],
         "both JSRs returned"
+    );
+    assert_eq!(
+        cop.debug_cpu_ram(0x0310, 1),
+        vec![0x77],
+        "the service calls the hook every invocation"
     );
 
     // A teed packet lands in the packet buffer + last-command variable.
@@ -288,7 +300,13 @@ fn bios_runtime_contract_variables_stubs_and_staging() {
     for _ in 0..65 {
         cop.poll(&mut cmds);
     }
+    run_service(&mut cop);
     assert_eq!(cop.debug_cpu_ram(0x0600, 16), pkt.to_vec(), "packet buffer");
+    assert_eq!(
+        cop.debug_cpu_ram(0x0310, 1),
+        vec![0x77],
+        "the delivery called the installed hook"
+    );
     assert_eq!(cop.debug_cpu_ram(0x02C2, 1), vec![0x10], "last command");
 
     // The payload is staged in WRAM behind the $0284/85 pointer (bank $7E
@@ -829,10 +847,16 @@ fn data_trn_pairs_payloads_with_their_own_packets() {
         vec![0; 4],
         "nothing crossed to packet 2's dest yet"
     );
+    run_service(&mut cop);
     assert_eq!(
         cop.debug_cpu_ram(0x02C2, 1),
         vec![0x10],
-        "packet 1 published to the BIOS-runtime variables"
+        "packet 1 published through the service call"
+    );
+    assert_eq!(
+        cop.debug_cpu_ram(0x0601, 3),
+        vec![0x00, 0x01, 0x7F],
+        "the published packet is packet 1 (its dest bytes)"
     );
 
     // Payload 2 arrives; the throttled edge pairs it with packet 2.
