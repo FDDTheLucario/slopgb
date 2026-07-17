@@ -88,6 +88,18 @@ struct Sgb {
     /// 7000h"). Bounded; oldest dropped. Drained by
     /// [`Joypad::take_sgb_packet`]; serialized (packets may await delivery).
     packets: std::collections::VecDeque<[u8; SGB_PACKET_BYTES]>,
+    /// SNES-fed pad bytes, one per player — the ICD2 `$6004-$6007` controller
+    /// latches (fullsnes "SGB Port 6004h-6007h"): active low, high nibble
+    /// Start/Select/B/A (the GB button column), low nibble Down/Up/Left/Right
+    /// (the d-pad column). On real hardware these lines *are* the GB's pad, so
+    /// while fed (`Some`) they replace the local matrix; `None` until a
+    /// coprocessor's SNES program writes the latches (the local matrix — the
+    /// frontend's buttons — stays live before takeover). Transient like
+    /// `pending_cmd`, never serialized: it is a cache of *coprocessor* state
+    /// that a live coprocessor re-installs on the next `GameBoy::step`, and
+    /// persisting it would freeze the pads on a state loaded into a
+    /// plugins-less session (nothing there to ever clear it).
+    feed: Option<[u8; 4]>,
 }
 
 impl Sgb {
@@ -104,6 +116,7 @@ impl Sgb {
             current_player: 0,
             pending_cmd: None,
             packets: std::collections::VecDeque::new(),
+            feed: None,
         }
     }
 
@@ -321,15 +334,46 @@ impl Joypad {
     }
 
     /// The P10-P13 input lines: AND of every selected column, 1 when idle.
+    /// While SNES-fed pads are present (the ICD2 `$6004-$6007` return path),
+    /// the currently selected player's fed byte supplies both columns in
+    /// place of the local matrix — on real hardware those latches *are* the
+    /// GB's pad lines (fullsnes "SGB Port 6004h-6007h").
     fn input_lines(&self) -> u8 {
+        let (dpad, buttons) = match &self.sgb {
+            Some(Sgb {
+                feed: Some(pads),
+                current_player,
+                ..
+            }) => {
+                let b = pads[usize::from(current_player & 3)];
+                (b & 0x0F, b >> 4)
+            }
+            _ => (self.dpad, self.buttons),
+        };
         let mut lines = 0x0F;
         if self.select & 0x10 == 0 {
-            lines &= self.dpad;
+            lines &= dpad;
         }
         if self.select & 0x20 == 0 {
-            lines &= self.buttons;
+            lines &= buttons;
         }
         lines
+    }
+
+    /// Install the SNES-fed pad bytes (ICD2 `$6004-$6007`, one per player) —
+    /// the coprocessor return path. A fed line drop latches the joypad
+    /// interrupt exactly like a physical press. A no-op off SGB. There is no
+    /// runtime path back to the un-fed matrix (real latches never un-write);
+    /// only a reset or a state load clears the feed.
+    pub(crate) fn set_sgb_feed(&mut self, pads: [u8; 4]) {
+        if self.sgb.is_none() {
+            return;
+        }
+        let before = self.input_lines();
+        if let Some(s) = self.sgb.as_mut() {
+            s.feed = Some(pads);
+        }
+        self.latch_edges(before);
     }
 
     /// Latch the joypad interrupt on any 1 -> 0 input line transition.
@@ -498,6 +542,9 @@ impl Joypad {
                 current_player,
                 pending_cmd: None,
                 packets,
+                // Transient (see the field doc): a live coprocessor re-feeds
+                // on the next step; a plugins-less load gets the matrix back.
+                feed: None,
             });
         } else {
             self.sgb = None;

@@ -194,7 +194,8 @@ const STATE_MAGIC: &[u8; 4] = b"SLPS";
 /// after the header so a cross-model load (SGB state into DMG/CGB or vice versa)
 /// is rejected with `StateError::ModelMismatch` instead of silently dropping the
 /// tail or failing as `Truncated`; v8 appends the SGB raw-packet tee queue to
-/// the joypad payload (the ICD2 mailbox feed).
+/// the joypad payload (the ICD2 mailbox feed; the SNES-fed pad latches stay
+/// transient — a live coprocessor re-feeds them on the next step).
 const STATE_VERSION: u16 = 8;
 
 /// A debugger memory watchpoint (bgb's "Set watchpoint"): the free run halts
@@ -365,6 +366,14 @@ impl GameBoy {
             let elapsed = self.bus.cycles().wrapping_sub(before);
             apu.clock(elapsed);
             apu.poll(&mut self.bus);
+            // The SNES→GB return path: pad bytes the coprocessor's SNES
+            // program wrote into the ICD2 latches replace the local joypad
+            // matrix. `None` (the default, and the built-in HLE) feeds
+            // nothing, so the matrix — and every non-coprocessor run — is
+            // untouched.
+            if let Some(pads) = apu.joypad_feed() {
+                self.bus.joypad_mut().set_sgb_feed(pads);
+            }
         }
     }
 

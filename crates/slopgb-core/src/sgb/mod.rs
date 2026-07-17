@@ -99,8 +99,18 @@ pub trait AudioCoprocessor {
     fn clock(&mut self, gb_cycles: u64);
 
     /// Drain the SGB sound commands the Game Boy queued (via `cmds`) and apply
-    /// them to the chip (SOUND / SOU_TRN / DATA_TRN / DATA_SND / JUMP).
+    /// them to the chip (SOUND / DATA_SND / SOU_TRN / DATA_TRN / JUMP).
     fn poll(&mut self, cmds: &mut dyn SgbCommandSource);
+
+    /// The SNES-side ICD2 controller latches (`$6004-$6007`, fullsnes "SGB
+    /// Port 6004h-6007h"), one byte per player — the SNES→GB return path.
+    /// `Some` replaces the GB's local joypad matrix with the fed lines (on
+    /// real hardware the latches *are* the GB's pad); the default `None`
+    /// leaves the local matrix live, so a coprocessor without a running SNES
+    /// program (or the built-in HLE) changes nothing (golden-safe).
+    fn joypad_feed(&mut self) -> Option<[u8; 4]> {
+        None
+    }
 
     /// Add the pending SNES-side samples into the Game Boy samples just drained,
     /// sample-for-sample.

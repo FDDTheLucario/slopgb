@@ -449,6 +449,78 @@ fn non_sgb_take_packet_is_none() {
     assert_eq!(j.take_sgb_packet(), None);
 }
 
+// ---- SNES-fed joypad (the ICD2 $6004-$6007 return path) ----
+
+/// Fed pad bytes replace the local matrix lines: fullsnes "SGB Port
+/// 6004h-6007h" layout, active low — high nibble Start/Select/B/A is the GB
+/// button column, low nibble Down/Up/Left/Right the d-pad column.
+#[test]
+fn sgb_feed_replaces_matrix_lines() {
+    let mut j = sgb_joypad();
+    j.press(Button::Start); // the local matrix says Start held...
+    j.set_sgb_feed([0xEF, 0xFF, 0xFF, 0xFF]); // ...but the SNES says "A pressed"
+    j.write(0x10); // button column
+    assert_eq!(j.read(), 0xDE, "A low from the feed; local Start ignored");
+    j.write(0x20); // d-pad column
+    assert_eq!(j.read(), 0xEF, "d-pad idle from the feed");
+}
+
+/// A fed press produces the joypad interrupt edge exactly like a real press,
+/// and a fed release (rising edge) does not.
+#[test]
+fn sgb_feed_press_edge_raises_irq() {
+    let mut j = sgb_joypad();
+    j.write(0x10); // button column selected
+    j.take_irq();
+    j.set_sgb_feed([0xEF, 0xFF, 0xFF, 0xFF]); // A pressed
+    assert_eq!(j.take_irq(), 0x10);
+    j.set_sgb_feed([0xFF, 0xFF, 0xFF, 0xFF]); // released
+    assert_eq!(j.take_irq(), 0);
+}
+
+/// Multiplayer: key reads serve the currently selected player's fed pad
+/// (the ICD2 rotates which controller the GB sees).
+#[test]
+fn sgb_feed_serves_current_player() {
+    let mut j = sgb_joypad();
+    send_packet(&mut j, &mlt_req(1)); // two players, current = 0
+    j.set_sgb_feed([0xFF, 0xFE, 0xFF, 0xFF]); // only player 2 presses Right
+    // Read through the d-pad column ($20 keeps P15 high — selecting the
+    // button column would edge P15 and advance the player).
+    j.write(0x20);
+    assert_eq!(j.read(), 0xEF, "player 1 idle");
+    j.write(0x30);
+    sgb_increment(&mut j); // advance to player 2
+    j.write(0x20);
+    assert_eq!(j.read(), 0xEE, "player 2's fed Right");
+}
+
+/// The feed is transient: a state load clears it (a live coprocessor
+/// re-feeds on the next step; a plugins-less load must get the local matrix
+/// back, never permanently frozen pads).
+#[test]
+fn sgb_feed_is_transient_across_save_state() {
+    let mut j = sgb_joypad();
+    j.set_sgb_feed([0xEF, 0xFF, 0xFF, 0xFF]);
+    let mut w = crate::state::Writer::new();
+    j.write_state(&mut w);
+    let bytes = w.into_vec();
+    let mut t = Joypad::new(false);
+    let mut r = crate::state::Reader::new(&bytes);
+    t.read_state(&mut r).unwrap();
+    t.write(0x10);
+    assert_eq!(t.read(), 0xDF, "loaded joypad reads the local matrix");
+}
+
+/// Feeding a non-SGB joypad is a no-op (no ICD2 exists to feed).
+#[test]
+fn non_sgb_feed_is_noop() {
+    let mut j = Joypad::new(false);
+    j.set_sgb_feed([0x00, 0x00, 0x00, 0x00]);
+    j.write(0x10);
+    assert_eq!(j.read(), 0xDF, "matrix still authoritative");
+}
+
 /// One SGB header packet as `boot/slopgb_sgb_boot.asm` (`SgbHandshake`)
 /// builds it: command `$F1 + 2k`, then 14 header bytes, then their 8-bit
 /// sum as a checksum. The `$F1` family is a single-packet command.

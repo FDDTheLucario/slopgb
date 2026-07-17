@@ -25,6 +25,55 @@ impl sgb::AudioCoprocessor for TeeCop {
     }
 }
 
+/// A stub coprocessor that feeds fixed ICD2 pad bytes (the SNES→GB return
+/// path). `joypad_feed` returning `Some` engages the override on `step`.
+struct FeedCop([u8; 4]);
+
+impl sgb::AudioCoprocessor for FeedCop {
+    fn clock(&mut self, _gb_cycles: u64) {}
+    fn poll(&mut self, _cmds: &mut dyn sgb::SgbCommandSource) {}
+    fn joypad_feed(&mut self) -> Option<[u8; 4]> {
+        Some(self.0)
+    }
+    fn mix_into(&mut self, _out: &mut [(f32, f32)]) {}
+    fn set_output_rate(&mut self, _hz: u32) {}
+    fn load_bios(&mut self, _bios: &[u8]) {}
+    fn write_state(&self, _w: &mut crate::state::Writer) {}
+    fn read_state(&mut self, _r: &mut crate::state::Reader<'_>) -> Result<(), StateError> {
+        Ok(())
+    }
+    fn clone_box(&self) -> Box<dyn sgb::AudioCoprocessor> {
+        Box::new(FeedCop(self.0))
+    }
+}
+
+/// The SNES→GB return path end to end: a coprocessor feeding ICD2 pad bytes
+/// overrides what the game reads at P1 — and without a feeding coprocessor
+/// the read is byte-identical to the plain matrix (default-inert seam).
+#[test]
+fn sgb_joypad_feed_overrides_p1_reads_and_defaults_inert() {
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x146] = 0x03;
+    rom[0x14B] = 0x33;
+
+    // Default machine (built-in HLE SgbApu): feed seam inert.
+    let mut gb = GameBoy::new(Model::Sgb, rom.clone()).unwrap();
+    gb.debug_write(0xFF00, 0x10); // select the button column
+    gb.step();
+    assert_eq!(
+        gb.debug_read(0xFF00),
+        0xDF,
+        "no coprocessor: plain idle matrix"
+    );
+
+    // A feeding coprocessor: the fed "A pressed" replaces the matrix.
+    let mut gb = GameBoy::new(Model::Sgb, rom).unwrap();
+    gb.set_audio_coprocessor(Box::new(FeedCop([0xEF, 0xFF, 0xFF, 0xFF])));
+    gb.debug_write(0xFF00, 0x10);
+    gb.step();
+    assert_eq!(gb.debug_read(0xFF00), 0xDE, "fed A visible at P1");
+}
+
 /// The raw-packet tee end to end: a packet pulsed through P1 reaches an
 /// installed coprocessor via `SgbCommandSource::take_packet` on the next
 /// step, while the HLE presentation still consumes the same command (a tee,
