@@ -270,3 +270,36 @@ fn mmio_ring_and_shadows_round_trip() {
     let again = cop.read_ram(HW_MMIO_RING, 3);
     assert_eq!(&again[..2], &[0, 0]);
 }
+
+// ---- Host-triggered NMI ----
+
+/// A host NMI request wakes a WAI-ing program, vectors through $FFFA, runs
+/// the handler once (consumed), and RTI resumes the wait loop.
+#[test]
+fn host_nmi_vectors_wakes_wai_and_consumes_once() {
+    let mut cop = W65816Cop::new();
+    cop.write_ram(0xFFFA, &[0x00, 0x92]); // NMI vector -> $9200
+    cop.write_ram(0x9000, &[0xCB, 0x80, 0xFD]); // main: WAI / BRA main
+    cop.write_ram(0x9200, &[0xEE, 0x40, 0x03, 0x40]); // INC $0340 / RTI
+    cop.cpu = Cpu::new();
+    cop.cpu.regs.pc = 0x9000;
+    cop.cycles = 0;
+
+    cop.run_until(200);
+    assert!(cop.cpu.waiting, "parked in WAI");
+    assert_eq!(cop.read_ram(0x0340, 1), vec![0]);
+
+    cop.write_ram(HW_NMI, &[1]);
+    assert_eq!(cop.read_ram(HW_NMI, 1), vec![1], "pending visible");
+    cop.run_until(400);
+    assert_eq!(cop.read_ram(0x0340, 1), vec![1], "handler ran once");
+    assert_eq!(cop.read_ram(HW_NMI, 1), vec![0], "request consumed");
+
+    cop.run_until(600);
+    assert_eq!(
+        cop.read_ram(0x0340, 1),
+        vec![1],
+        "no re-delivery without a new request"
+    );
+    assert!(cop.cpu.waiting, "back in the WAI loop");
+}

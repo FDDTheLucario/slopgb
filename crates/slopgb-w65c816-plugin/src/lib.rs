@@ -42,8 +42,9 @@ const PROG_ORG: u16 = 0x8000;
 const RESET_VEC: usize = 0xFFFC;
 /// Serialized [`W65816Cop::save_state`] length: 18 bytes of registers + halt
 /// flags, the 128 KB WRAM, the 32 KB program area, 8 bytes of comm-port
-/// latches, the ICD2 block, the MMIO block, an 8-byte cycle counter.
-const STATE_LEN: usize = 18 + WRAM_LEN + PROG_LEN + 8 + ICD2_STATE_LEN + MMIO_STATE_LEN + 8;
+/// latches, the ICD2 block, the MMIO block, the NMI-pending flag, an 8-byte
+/// cycle counter.
+const STATE_LEN: usize = 18 + WRAM_LEN + PROG_LEN + 8 + ICD2_STATE_LEN + MMIO_STATE_LEN + 1 + 8;
 /// 128 KB of work RAM at `$7E-$7F`.
 const WRAM_LEN: usize = 0x2_0000;
 /// The 32 KB `$8000-$FFFF` program area (the RAM-backed BIOS ROM region).
@@ -72,6 +73,10 @@ pub const HW_MMIO_RING: u32 = HOST_WIN + 0x1000;
 /// `W len L` at `HW_SHADOW + i`: the CPU-read shadows for `$4200 + i`
 /// (`i < 0x20`); offsets `0x20`/`0x21` are the `$4016`/`$4017` serial bytes.
 pub const HW_SHADOW: u32 = HOST_WIN + 0x2000;
+/// `W len 1`: nonzero requests an NMI (delivered at the next instruction
+/// boundary inside `run_until`, consumed once; zero cancels a pending one).
+/// `R len 1`: the pending flag.
+pub const HW_NMI: u32 = HOST_WIN + 0x3000;
 
 /// A tiny 8-bit (emulation-mode) program: echo comm port 1 (host input) + 7 to
 /// comm port 0 (host output), forever. It proves the full round trip — a host
@@ -218,6 +223,8 @@ struct W65816Cop {
     bus: SnesBus,
     /// Cycles executed since the last reset (the chip's own cycle domain).
     cycles: u64,
+    /// A host-requested NMI awaiting the next instruction boundary.
+    nmi_pending: bool,
 }
 
 impl W65816Cop {
@@ -248,6 +255,11 @@ impl W65816Cop {
             HW_LCD_ROW => {
                 if let [lcd_row, write_row] = *bytes {
                     icd2.host_set_lcd_row(lcd_row, write_row);
+                }
+            }
+            HW_NMI => {
+                if let [v] = *bytes {
+                    self.nmi_pending = v != 0;
                 }
             }
             a if (HW_SHADOW..HW_SHADOW + 0x22).contains(&a) => {
@@ -300,6 +312,11 @@ impl W65816Cop {
                     *slot = icd2.host_control();
                 }
             }
+            HW_NMI => {
+                if let Some(slot) = out.first_mut() {
+                    *slot = u8::from(self.nmi_pending);
+                }
+            }
             HW_MMIO_RING if out.len() >= 3 => {
                 let mmio = &mut self.bus.mmio;
                 // Drain only what this read can carry — a short read must
@@ -328,6 +345,7 @@ impl Coprocessor for W65816Cop {
             cpu: Cpu::new(),
             bus: SnesBus::new(),
             cycles: 0,
+            nmi_pending: false,
         };
         me.reset();
         me
@@ -345,6 +363,7 @@ impl Coprocessor for W65816Cop {
         let hi = self.bus.read(RESET_VEC as u32 + 1) as u16;
         self.cpu.regs.pc = lo | (hi << 8);
         self.cycles = 0;
+        self.nmi_pending = false;
     }
 
     fn run_until(&mut self, target_cycle: u64) -> u64 {
@@ -353,6 +372,19 @@ impl Coprocessor for W65816Cop {
                 // STP halted the oscillator: no instructions retire, but the
                 // host's clock still advances, so honor the "reach the target"
                 // contract by absorbing the idle span.
+                self.cycles = target_cycle;
+                break;
+            }
+            if self.nmi_pending {
+                // /NMI is sampled at instruction boundaries; deliver once
+                // (also wakes a WAI-ing CPU).
+                self.nmi_pending = false;
+                self.cycles += self.cpu.nmi(&mut self.bus);
+                continue;
+            }
+            if self.cpu.waiting {
+                // WAI: nothing retires until an interrupt arrives; absorb
+                // the idle span like STP (the host clock keeps advancing).
                 self.cycles = target_cycle;
                 break;
             }
@@ -432,6 +464,7 @@ impl Coprocessor for W65816Cop {
         buf.extend_from_slice(&self.bus.port_out);
         self.bus.icd2.save_state(&mut buf);
         self.bus.mmio.save_state(&mut buf);
+        buf.push(u8::from(self.nmi_pending));
         buf.extend_from_slice(&self.cycles.to_le_bytes());
         debug_assert_eq!(buf.len(), STATE_LEN);
         buf
@@ -463,6 +496,7 @@ impl Coprocessor for W65816Cop {
         self.bus.port_out.copy_from_slice(c.take(N_PORTS));
         self.bus.icd2.load_state(c.take(ICD2_STATE_LEN));
         self.bus.mmio.load_state(c.take(MMIO_STATE_LEN));
+        self.nmi_pending = c.u8() != 0;
         self.cycles = c.u64();
     }
 }
