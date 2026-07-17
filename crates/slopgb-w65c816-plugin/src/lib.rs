@@ -23,6 +23,9 @@
 
 #![deny(unsafe_code)]
 
+mod icd2;
+
+use icd2::{CHAR_ROW_LEN, ICD2_STATE_LEN, Icd2};
 use slopgb_plugin_api::{Coprocessor, slopgb_coprocessor_plugin};
 use slopgb_w65c816::{Bus, Cpu};
 
@@ -35,8 +38,27 @@ const PROG_ORG: u16 = 0x8000;
 /// Emulation-mode reset vector location (`$00FFFC-$00FFFD`).
 const RESET_VEC: usize = 0xFFFC;
 /// Serialized [`W65816Cop::save_state`] length: 18 bytes of registers + halt
-/// flags, the 64 KB RAM, 8 bytes of comm-port latches, an 8-byte cycle counter.
-const STATE_LEN: usize = 18 + 0x1_0000 + 8 + 8;
+/// flags, the 64 KB RAM, 8 bytes of comm-port latches, the ICD2 block, an
+/// 8-byte cycle counter.
+const STATE_LEN: usize = 18 + 0x1_0000 + 8 + ICD2_STATE_LEN + 8;
+
+/// Host-window base for `write_ram`/`read_ram`: the 65C816 bus is 24-bit, so
+/// any address at or above this can never be chip memory — it is the host's
+/// out-of-band pump channel into the ICD2 block (packet deposit, pad
+/// readback, LCD-row shadow). Addresses below keep their raw-memory-install
+/// meaning (firmware, `DATA_SND`/`DATA_TRN` payloads).
+pub const HOST_WIN: u32 = 0x0100_0000;
+/// `W HOST_WIN + 0, len 16`: deposit a packet + raise the `$6002` flag.
+/// `R HOST_WIN + 0, len 1`: the flag (deposit only when clear).
+pub const HW_PACKET: u32 = HOST_WIN;
+/// `R len 5`: the four `$6004-$6007` pad latches + the sticky written flag.
+pub const HW_PADS: u32 = HOST_WIN + 0x11;
+/// `W len 2`: the `$6000` shadows `[lcd_row, write_row]`.
+pub const HW_LCD_ROW: u32 = HOST_WIN + 0x16;
+/// `R len 1`: the last `$6003` control write.
+pub const HW_CONTROL: u32 = HOST_WIN + 0x17;
+/// `W len 320` at `HW_CHAR_ROWS + row * 320`: load a character-buffer row.
+pub const HW_CHAR_ROWS: u32 = HOST_WIN + 0x20;
 
 /// A tiny 8-bit (emulation-mode) program: echo comm port 1 (host input) + 7 to
 /// comm port 0 (host output), forever. It proves the full round trip — a host
@@ -58,7 +80,8 @@ const DEMO: [u8; 11] = [
     0x80, 0xF5, // BRA -11 -> $8000
 ];
 
-/// Guest SNES RAM + the comm-port latches the hosted CPU talks to.
+/// Guest SNES RAM + the comm-port latches + the ICD2 block the hosted CPU
+/// talks to.
 struct SnesBus {
     /// 64 KB of RAM, aliased across every 65C816 bank.
     ram: Box<[u8; 0x1_0000]>,
@@ -66,6 +89,8 @@ struct SnesBus {
     port_in: [u8; N_PORTS],
     /// Chip -> host: what the CPU wrote (the host's `port_read` returns it).
     port_out: [u8; N_PORTS],
+    /// The SGB ICD2 register block at `$6000-$7FFF` (see `icd2.rs`).
+    icd2: Icd2,
 }
 
 impl SnesBus {
@@ -74,7 +99,16 @@ impl SnesBus {
             ram: Box::new([0u8; 0x1_0000]),
             port_in: [0; N_PORTS],
             port_out: [0; N_PORTS],
+            icd2: Icd2::new(),
         }
+    }
+
+    /// The ICD2 window: `$6000-$7FFF` in any bank (banks alias in the flat
+    /// map; the real chip responds wherever A22=0 — refined with the full
+    /// memory map).
+    fn icd2_addr(addr: u32) -> Option<u16> {
+        let low = (addr & 0xFFFF) as u16;
+        (0x6000..=0x7FFF).contains(&low).then_some(low)
     }
 
     /// The comm-port index an address maps to, if any (`$2140-$2143` in any
@@ -88,17 +122,24 @@ impl SnesBus {
 
 impl Bus for SnesBus {
     fn read(&mut self, addr: u32) -> u8 {
-        match Self::port_index(addr) {
-            Some(p) => self.port_in[p],
-            None => self.ram[(addr & 0xFFFF) as usize],
+        if let Some(p) = Self::port_index(addr) {
+            return self.port_in[p];
         }
+        if let Some(a) = Self::icd2_addr(addr) {
+            return self.icd2.cpu_read(a);
+        }
+        self.ram[(addr & 0xFFFF) as usize]
     }
 
     fn write(&mut self, addr: u32, value: u8) {
-        match Self::port_index(addr) {
-            Some(p) => self.port_out[p] = value,
-            None => self.ram[(addr & 0xFFFF) as usize] = value,
+        if let Some(p) = Self::port_index(addr) {
+            self.port_out[p] = value;
+            return;
         }
+        if let Some(a) = Self::icd2_addr(addr) {
+            return self.icd2.cpu_write(a, value);
+        }
+        self.ram[(addr & 0xFFFF) as usize] = value;
     }
 }
 
@@ -121,6 +162,68 @@ impl W65816Cop {
     }
 }
 
+impl W65816Cop {
+    /// The host window's write half (see the `HW_*` constants): packet
+    /// deposit, `$6000` shadows, character-row loads. Unknown offsets are
+    /// ignored (a newer host talking to an older plugin degrades quietly).
+    fn host_window_write(&mut self, addr: u32, bytes: &[u8]) {
+        let icd2 = &mut self.bus.icd2;
+        match addr {
+            HW_PACKET => {
+                if let Ok(p) = <&[u8; 16]>::try_from(bytes) {
+                    icd2.host_deposit_packet(p);
+                }
+            }
+            HW_LCD_ROW => {
+                if let [lcd_row, write_row] = *bytes {
+                    icd2.host_set_lcd_row(lcd_row, write_row);
+                }
+            }
+            a if (HW_CHAR_ROWS..HW_CHAR_ROWS + (icd2::CHAR_ROWS * CHAR_ROW_LEN) as u32)
+                .contains(&a) =>
+            {
+                let off = (a - HW_CHAR_ROWS) as usize;
+                // Row-aligned only (see HW_CHAR_ROWS): a misaligned write is
+                // a host bug, dropped rather than silently row-start-mapped.
+                if off % CHAR_ROW_LEN == 0 {
+                    icd2.host_load_char_row(off / CHAR_ROW_LEN, bytes);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The host window's read half: the packet flag, the pad latches + the
+    /// sticky written flag, the `$6003` capture. Unknown offsets read zeros.
+    fn host_window_read(&mut self, addr: u32, len: usize) -> Vec<u8> {
+        let icd2 = &self.bus.icd2;
+        let mut out = vec![0u8; len];
+        match addr {
+            HW_PACKET => {
+                if let Some(slot) = out.first_mut() {
+                    *slot = u8::from(icd2.packet_pending());
+                }
+            }
+            HW_PADS => {
+                let (pads, written) = icd2.host_pads();
+                for (slot, &v) in out.iter_mut().zip(pads.iter()) {
+                    *slot = v;
+                }
+                if let Some(slot) = out.get_mut(4) {
+                    *slot = u8::from(written);
+                }
+            }
+            HW_CONTROL => {
+                if let Some(slot) = out.first_mut() {
+                    *slot = icd2.host_control();
+                }
+            }
+            _ => {}
+        }
+        out
+    }
+}
+
 impl Coprocessor for W65816Cop {
     fn new() -> Self {
         let mut me = W65816Cop {
@@ -136,6 +239,7 @@ impl Coprocessor for W65816Cop {
         self.install_program();
         self.bus.port_in = [0; N_PORTS];
         self.bus.port_out = [0; N_PORTS];
+        self.bus.icd2 = Icd2::new();
         self.cpu = Cpu::new();
         // Load PC from the emulation-mode reset vector, like real power-on.
         let lo = self.bus.read(RESET_VEC as u32) as u16;
@@ -184,13 +288,21 @@ impl Coprocessor for W65816Cop {
 
     /// Poke `bytes` into SNES RAM at `addr` (wrapping the 64 KB bank) — how the
     /// host installs resident firmware or lands an SGB `DATA_SND` block.
+    /// Addresses at/above [`HOST_WIN`] are the out-of-band ICD2 pump channel
+    /// instead (the 24-bit bus can never reach them).
     fn write_ram(&mut self, addr: u32, bytes: &[u8]) {
+        if addr >= HOST_WIN {
+            return self.host_window_write(addr, bytes);
+        }
         for (i, &b) in bytes.iter().enumerate() {
             self.bus.ram[(addr.wrapping_add(i as u32) & 0xFFFF) as usize] = b;
         }
     }
 
     fn read_ram(&mut self, addr: u32, len: usize) -> Vec<u8> {
+        if addr >= HOST_WIN {
+            return self.host_window_read(addr, len);
+        }
         (0..len)
             .map(|i| self.bus.ram[(addr.wrapping_add(i as u32) & 0xFFFF) as usize])
             .collect()
@@ -210,6 +322,7 @@ impl Coprocessor for W65816Cop {
         buf.extend_from_slice(&self.bus.ram[..]);
         buf.extend_from_slice(&self.bus.port_in);
         buf.extend_from_slice(&self.bus.port_out);
+        self.bus.icd2.save_state(&mut buf);
         buf.extend_from_slice(&self.cycles.to_le_bytes());
         debug_assert_eq!(buf.len(), STATE_LEN);
         buf
@@ -238,6 +351,7 @@ impl Coprocessor for W65816Cop {
         self.bus.ram.copy_from_slice(c.take(0x1_0000));
         self.bus.port_in.copy_from_slice(c.take(N_PORTS));
         self.bus.port_out.copy_from_slice(c.take(N_PORTS));
+        self.bus.icd2.load_state(c.take(ICD2_STATE_LEN));
         self.cycles = c.u64();
     }
 }

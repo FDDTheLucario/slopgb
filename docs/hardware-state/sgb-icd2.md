@@ -93,6 +93,23 @@ with *host*-side effects (`$6003` reset bit) are capture-only.
 
 ## Status
 
-- Spec extracted + design recorded (this file). Implementation: core packet
-  tee → core `joypad_feed` seam → plugin `icd2.rs` → host pump — see
-  `goal.md` phases; landed state will be tracked here as tasks complete.
+- **Core packet tee** (landed): every accepted 16-byte packet (MLT_REQ and
+  mid-command packets included) is queued on the joypad's SGB state and
+  drained via `SgbCommandSource::take_packet` (`sgb::SGB_PACKET_LEN`);
+  bounded at 16, serialized (save-state v8). The HLE presentation path is
+  untouched — a tee, not a takeover.
+- **Core joypad return seam** (landed): `AudioCoprocessor::joypad_feed()
+  -> Option<[u8; 4]>`, polled on `GameBoy::step`; `Some` installs the ICD2
+  pad latches as the P1 line source (per-current-player, IRQ edges intact).
+  Default `None` = local matrix live (golden-safe); the feed is transient
+  across save states (a live coprocessor re-feeds next step).
+- **Plugin ICD2 block** (landed): `slopgb-w65c816-plugin/src/icd2.rs`
+  implements the register table above on the hosted CPU's bus (synchronous
+  `$7000` flag clear + `$7800` auto-increment, the `[600Fh]=21h` garbage
+  mirrors, sparse A0-A3/A11-A15 decode) with the host window at
+  `HOST_WIN = 0x0100_0000` (`HW_PACKET`/`HW_PADS`/`HW_LCD_ROW`/`HW_CONTROL`/
+  `HW_CHAR_ROWS`) on the unchanged `write_ram`/`read_ram` ABI. ICD2 state
+  rides the plugin save state. Bank gating (A22) awaits the real memory map.
+- **Next**: the SgbCoprocessor pump (deposit teed packets when the flag is
+  clear, read pads → `joypad_feed`, LCD-row shadow), then the real 65C816
+  memory map, MMIO capture, NMI, DMA, and the SNES PPU plugin (`goal.md`).
