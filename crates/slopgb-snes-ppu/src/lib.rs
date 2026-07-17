@@ -52,6 +52,24 @@ pub struct SnesPpu {
     oam_addr: u16,
     /// The memorized low byte for low-table word writes.
     oam_lsb: u8,
+
+    /// BGMODE (`$2105`): mode bits 2-0, BG3-priority bit 3, per-BG tile
+    /// size bits 4-7.
+    bgmode: u8,
+    /// BGnSC (`$2107-$210A`): map base (bits 7-2, 1K-word steps) + screen
+    /// size (bits 1-0).
+    bgsc: [u8; 4],
+    /// BG12NBA/BG34NBA (`$210B/0C`): per-BG tile base nibbles (4K-word
+    /// steps).
+    nba: [u8; 2],
+    /// The effective 10-bit BGnHOFS/BGnVOFS scroll values (`$210D-$2114`).
+    hofs: [u16; 4],
+    vofs: [u16; 4],
+    /// The shared write-twice scroll latch ("BG_old" — fullsnes 210Dh; one
+    /// latch across all eight scroll registers).
+    bg_old: u8,
+    /// TM (`$212C`): main-screen layer enables (bit 0-3 BG1-4, bit 4 OBJ).
+    tm: u8,
 }
 
 impl SnesPpu {
@@ -73,6 +91,13 @@ impl SnesPpu {
             oam_priority: false,
             oam_addr: 0,
             oam_lsb: 0,
+            bgmode: 0,
+            bgsc: [0; 4],
+            nba: [0; 2],
+            hofs: [0; 4],
+            vofs: [0; 4],
+            bg_old: 0,
+            tm: 0,
         }
     }
 
@@ -107,6 +132,27 @@ impl SnesPpu {
                 }
                 self.oam_addr = (self.oam_addr + 1) & 0x3FF;
             }
+            0x05 => self.bgmode = val,
+            0x07..=0x0A => self.bgsc[usize::from(port - 0x07)] = val,
+            0x0B | 0x0C => self.nba[usize::from(port - 0x0B)] = val,
+            0x0D..=0x14 => {
+                // The write-twice scroll mechanism, verbatim from fullsnes
+                // 210Dh ("BG_old"): one shared previous-byte latch across
+                // all eight registers. The 210Dh/210Eh M7 twins are not
+                // modeled (mode 7 unsupported).
+                // The registers stay full-width here (the renderer masks to
+                // 10 bits at use): masking on write would corrupt the
+                // formula's `Reg>>8` term on the next write of the pair.
+                let i = usize::from(port - 0x0D) / 2;
+                let cur = u16::from(val);
+                let prev = u16::from(self.bg_old);
+                if (port - 0x0D) & 1 == 0 {
+                    self.hofs[i] = cur << 8 | prev & !7 | self.hofs[i] >> 8 & 7;
+                } else {
+                    self.vofs[i] = cur << 8 | prev;
+                }
+                self.bg_old = val;
+            }
             0x15 => self.vmain = val,
             0x16 => {
                 self.vmadd = self.vmadd & 0xFF00 | u16::from(val);
@@ -133,6 +179,7 @@ impl SnesPpu {
                     self.step_vmadd();
                 }
             }
+            0x2C => self.tm = val,
             0x21 => {
                 // CGADD resets the shared 1st/2nd-access flipflop
                 // (fullsnes 2121h).
@@ -255,6 +302,8 @@ impl Default for SnesPpu {
         Self::new()
     }
 }
+
+mod render;
 
 #[cfg(test)]
 #[path = "lib_tests.rs"]
