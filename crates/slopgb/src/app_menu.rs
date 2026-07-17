@@ -383,8 +383,11 @@ impl App {
 
     /// Rebuild the plugin host from `dir` (Options → Plugins → "..." changed the
     /// directory): load the new directory (empty = an empty host), then mirror
-    /// the discovered set into the Options tab. A bad dir logs and leaves an
-    /// empty host so a typo can't wedge the dialog.
+    /// the discovered set — including higher-tier subsystem plugins — into the
+    /// Options tab. The plugins dir is the unified subsystem source, so it also
+    /// feeds the SGB coprocessor seam: with `spc700.wasm` + `w65c816.wasm` present
+    /// there, enabling the SGB-coprocessor backend loads them from this dir. A bad
+    /// dir logs and leaves an empty host so a typo can't wedge the dialog.
     fn rebuild_plugins(&mut self, dir: &str) {
         self.plugins = if dir.is_empty() {
             slopgb_plugin_host::PluginHost::new()
@@ -396,6 +399,10 @@ impl App {
                 },
             )
         };
+        // Point the SGB coprocessor at the same directory so its subsystem
+        // plugins (spc700 + w65c816) load from the plugins dir the UI just set.
+        self.session
+            .set_sgb_coprocessor_dir((!dir.is_empty()).then(|| std::path::PathBuf::from(dir)));
         self.sync_plugin_entries();
         for line in self.plugins.take_log() {
             eprintln!("{line}");

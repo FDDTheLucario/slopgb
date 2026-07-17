@@ -150,6 +150,11 @@ pub struct PluginHost {
     /// so [`Self::reload`] can re-scan the same place. `None` for a host built
     /// plugin-by-plugin via [`Self::push`].
     dir: Option<PathBuf>,
+    /// Valid plugins found in the scanned directory that this per-frame host
+    /// does NOT drive — higher-tier ones (`SUBSYSTEM` / tool), which load through
+    /// their own seams (`--sgb-coprocessor` / `--msu1` / the MCP host). Recorded
+    /// so the UI can list every supported plugin, not silently drop them.
+    discovered: Vec<PluginInfo>,
 }
 
 impl PluginHost {
@@ -172,6 +177,17 @@ impl PluginHost {
                     .and_then(|b| Self::load_bytes(&name, &b))
                 {
                     Ok(p) => host.push(p),
+                    // A valid plugin of a higher tier (SUBSYSTEM / tool): this
+                    // per-frame host doesn't drive it, but it is a real plugin —
+                    // record it so the UI lists every supported subsystem rather
+                    // than dropping it. It loads through its own seam.
+                    Err(LoadError::UnsupportedCapabilities { requested }) => {
+                        host.discovered.push(PluginInfo {
+                            name: name.into_owned(),
+                            capabilities: caps_label(Capabilities::from_bits(requested)),
+                            enabled: false,
+                        });
+                    }
                     Err(e) => eprintln!("slopgb: skipping plugin {}: {e}", path.display()),
                 }
             }
@@ -271,8 +287,9 @@ impl PluginHost {
         self.dir.as_deref()
     }
 
-    /// UI-facing metadata for every loaded plugin (name, capability label,
-    /// enabled) in load order — what the Options tab / submenu render.
+    /// UI-facing metadata for every plugin found: the per-frame plugins this host
+    /// drives (togglable), then the higher-tier ones it discovered but does not
+    /// drive (`SUBSYSTEM` / tool), so the UI lists every supported subsystem.
     #[must_use]
     pub fn infos(&self) -> Vec<PluginInfo> {
         self.plugins
@@ -282,6 +299,7 @@ impl PluginHost {
                 capabilities: caps_label(p.caps),
                 enabled: p.enabled,
             })
+            .chain(self.discovered.iter().cloned())
             .collect()
     }
 
@@ -313,6 +331,7 @@ impl PluginHost {
         match Self::load_dir(&dir) {
             Ok(fresh) => {
                 self.plugins = fresh.plugins;
+                self.discovered = fresh.discovered;
                 for name in &disabled {
                     self.set_enabled(name, false);
                 }

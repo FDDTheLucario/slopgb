@@ -240,8 +240,17 @@ fn load_plugins(opts: &Options, settings: &windows::options::Settings) -> Plugin
     };
     match PluginHost::load_dir(&dir) {
         Ok(host) => {
-            if host.is_empty() {
-                eprintln!("slopgb: no plugins loaded from '{}'", dir.display());
+            let total = host.infos().len();
+            if total == 0 {
+                eprintln!("slopgb: no plugins found in '{}'", dir.display());
+            } else if host.is_empty() {
+                // Discovered plugins, but none the per-frame pump drives — all
+                // higher-tier (subsystem/tool), loaded via their own seams.
+                eprintln!(
+                    "slopgb: {total} subsystem/tool plugin(s) in '{}' — loaded via \
+                     --sgb-coprocessor / --msu1, not the per-frame --plugins pump",
+                    dir.display()
+                );
             }
             host
         }
