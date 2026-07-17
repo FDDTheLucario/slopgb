@@ -112,6 +112,7 @@ const MMIO_RING_CAP: usize = 512;
 /// Shadow offsets within the `$4200` block.
 const SH_RDNMI: u32 = 0x10;
 const SH_HVBJOY: u32 = 0x12;
+const SH_JOY1: u32 = 0x18;
 
 /// SNES NTSC frame: 262 lines, vblank beginning at V=225 in the 224-line
 /// mode (fullsnes "SNES PPU Resolution" / "4212h"). The GB frame position is
@@ -297,6 +298,15 @@ pub struct SgbCoprocessor {
     /// The 17-bit `$2181-$2183` WRAM access address behind the `$2180`
     /// WMDATA port (auto-increments per access — fullsnes 2180h).
     wmadd: u32,
+    /// The GB-side physical matrix (active-low `dpad`/`buttons` nibbles)
+    /// pushed by `AudioCoprocessor::set_input`. Transient — the core
+    /// re-pushes it every step.
+    input: (u8, u8),
+    /// The autopoll window is open: HVBJOY bit 0 set at the vblank edge,
+    /// cleared (and the JOY1 shadows published) one flush later — hardware
+    /// takes ~4224 master cycles and reads mid-window are unreliable
+    /// (fullsnes 4212h / "AUTO JOYPAD READ").
+    joy_busy: bool,
 }
 
 impl SgbCoprocessor {
@@ -360,6 +370,8 @@ impl SgbCoprocessor {
             in_vblank: false,
             dma_regs: [[0; 7]; 8],
             wmadd: 0,
+            input: (0x0F, 0x0F),
+            joy_busy: false,
         };
         me.install_firmware()?;
         Ok(me)
@@ -540,11 +552,24 @@ impl SgbCoprocessor {
                     if self.nmitimen & 0x80 != 0 {
                         let _ = cpu.write_ram(HW_NMI, &[1]);
                     }
+                    // Joypad autopoll begins on the first vblank line when
+                    // NMITIMEN bit 0 asks for it (fullsnes 4200h).
+                    self.joy_busy = self.nmitimen & 1 != 0;
                 } else {
                     let _ = cpu.write_ram(HW_SHADOW + SH_RDNMI, &[0x02]);
                 }
-                // HVBJOY bit 7 tracks vblank (bit 6 hblank is below this
-                // pump's resolution; autopoll-busy lands with autopoll).
+                // HVBJOY bit 7 tracks vblank, bit 0 the autopoll window
+                // (bit 6 hblank is below this pump's resolution).
+                let hvbjoy = (vblank as u8) << 7 | u8::from(self.joy_busy);
+                let _ = cpu.write_ram(HW_SHADOW + SH_HVBJOY, &[hvbjoy]);
+            } else if self.joy_busy {
+                // The poll window ends (~4224 master cycles ≈ under one
+                // flush): the JOY1 shadows become valid exactly when the
+                // busy bit drops — mid-window reads are unreliable on
+                // hardware, so nothing is published earlier.
+                self.joy_busy = false;
+                let (dpad, buttons) = self.input;
+                let _ = cpu.write_ram(HW_SHADOW + SH_JOY1, &joy1_bytes(dpad, buttons));
                 let _ = cpu.write_ram(HW_SHADOW + SH_HVBJOY, &[(vblank as u8) << 7]);
             }
             if !self.pending_packets.is_empty() {
@@ -861,6 +886,9 @@ impl AudioCoprocessor for SgbCoprocessor {
     fn joypad_feed(&mut self) -> Option<[u8; 4]> {
         self.feed
     }
+    fn set_input(&mut self, dpad: u8, buttons: u8) {
+        self.input = (dpad, buttons);
+    }
     fn mix_into(&mut self, out: &mut [(f32, f32)]) {
         SgbCoprocessor::mix_into(self, out);
     }
@@ -961,6 +989,24 @@ fn spc_firmware() -> (Vec<u8>, [u8; 4], Vec<u8>) {
     // pitch = 32 kHz / 16 = 2 kHz.
     let brr = vec![0x93u8, 0x77, 0x77, 0x77, 0x77, 0x88, 0x88, 0x88, 0x88];
     (prog, dir, brr)
+}
+
+/// Map the GB active-low matrix nibbles onto the SNES JOY1 layout, `[low,
+/// high]` for `$4218/$4219` (fullsnes 4218h: bit 15 B, 13 Select, 12 Start,
+/// 11-8 Up/Down/Left/Right, 7 A; 1 = pressed). GB A/B/Select/Start and the
+/// d-pad map to their SNES namesakes; Y/X/L/R and the low id nibble read 0.
+fn joy1_bytes(dpad: u8, buttons: u8) -> [u8; 2] {
+    let d = !dpad & 0x0F;
+    let b = !buttons & 0x0F;
+    let high = (b >> 1 & 1) << 7 // B
+        | (b >> 2 & 1) << 5 // Select
+        | (b >> 3 & 1) << 4 // Start
+        | (d >> 2 & 1) << 3 // Up
+        | (d >> 3 & 1) << 2 // Down
+        | (d >> 1 & 1) << 1 // Left
+        | (d & 1); // Right
+    let low = (b & 1) << 7; // A
+    [low, high]
 }
 
 /// A cheap order-sensitive checksum for edge-detecting transfer uploads (FNV-1a).

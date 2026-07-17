@@ -374,6 +374,12 @@ impl GameBoy {
             if let Some(pads) = apu.joypad_feed() {
                 self.bus.joypad_mut().set_sgb_feed(pads);
             }
+            // The GB→SNES input path: the local physical matrix crosses
+            // into the coprocessor for its joypad autopoll. The default
+            // implementation drops it, so non-coprocessor runs are
+            // untouched.
+            let (dpad, buttons) = self.bus.joypad().local_matrix();
+            apu.set_input(dpad, buttons);
         }
     }
 

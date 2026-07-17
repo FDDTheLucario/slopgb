@@ -128,12 +128,21 @@ with *host*-side effects (`$6003` reset bit) are capture-only.
   position scaled onto 262 NTSC lines drives the vblank edge — RDNMI/HVBJOY
   shadows + one NMI per frame when the guest's own NMITIMEN bit 7 asks.
 - **GP-DMA + WRAM B-bus port** (landed): see the section below.
+- **Joypad autopoll** (landed): `AudioCoprocessor::set_input` pushes the
+  GB-side physical matrix each step (default drops it — golden-safe);
+  when the guest's NMITIMEN bit 0 asks, the vblank edge arms the HVBJOY
+  busy bit and the next flush publishes the mapped `$4218/$4219` shadows
+  as busy drops (values valid only after the window, fullsnes "AUTO
+  JOYPAD READ"). GB A/B/Select/Start + d-pad → SNES namesakes; Y/X/L/R
+  and JOY2-4 read 0 (one physical controller). Manual `$4016` serial
+  bit-shifting is not modeled (shadows are static bytes) — extend if a
+  title manual-polls.
 - **Pilot probe** (headless, scratch): ARCADE-mode select on Space Invaders
   runs DATA_SND bootstrap → JUMP → dispatcher → DATA_TRN payload staging on
   the real wasm 65C816; the arcade program enters and now needs the PPU
   (`$21xx`) + joypad autopoll to survive its hardware init.
-- **Next**: joypad autopoll (`$4200` bit 0 → `$4218-$421F` shadows), then
-  the SNES PPU plugin chain (`goal.md` T13-T18).
+- **Next**: probe whether the pilot touches the multiplier/divider
+  (`$4202-$4206`), then the SNES PPU plugin chain (`goal.md` T13-T18).
 
 ## GP-DMA (`$420B` / `$43x0-$43x6`) + the WRAM port (`$2180-$2183`)
 

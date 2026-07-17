@@ -51,6 +51,7 @@ impl SgbCoprocessor {
             w.bytes(ch);
         }
         w.u32(self.wmadd);
+        w.bool(self.joy_busy);
     }
 
     pub(crate) fn read_state(&mut self, r: &mut Reader<'_>) -> Result<(), StateError> {
@@ -106,12 +107,14 @@ impl SgbCoprocessor {
             r.bytes_into(ch)?;
         }
         self.wmadd = r.u32()? & 0x1_FFFF;
+        self.joy_busy = r.bool()?;
         // The undrained source/output PCM is transient, not part of the
-        // snapshot — and so is the pad feed (re-read from the restored plugin
-        // state on the next flush).
+        // snapshot — and so are the pad feed and the pushed input matrix
+        // (the core re-supplies both on the next step/flush).
         self.src.clear();
         self.out.clear();
         self.feed = None;
+        self.input = (0x0F, 0x0F);
         Ok(())
     }
 
@@ -159,6 +162,8 @@ impl SgbCoprocessor {
         fresh.pending_trn_pkt = self.pending_trn_pkt;
         fresh.dma_regs = self.dma_regs;
         fresh.wmadd = self.wmadd;
+        fresh.input = self.input;
+        fresh.joy_busy = self.joy_busy;
         Ok(fresh)
     }
 }
@@ -195,6 +200,7 @@ fn write_empty_state(w: &mut Writer) {
     w.bytes(&[0u8; 16]); // pending DATA_TRN packet
     w.bytes(&[0u8; 7 * 8]); // dma channel registers
     w.u32(0); // wmadd
+    w.bool(false); // joy_busy
 }
 
 /// A no-op [`AudioCoprocessor`] producing silence. Only ever the result of
@@ -250,6 +256,7 @@ impl AudioCoprocessor for InertCoprocessor {
         let mut dma = [0u8; 7 * 8];
         r.bytes_into(&mut dma)?;
         r.u32()?;
+        r.bool()?;
         Ok(())
     }
     fn clone_box(&self) -> Box<dyn AudioCoprocessor> {

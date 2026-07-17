@@ -112,6 +112,13 @@ pub trait AudioCoprocessor {
         None
     }
 
+    /// The GB→SNES input path: `step` pushes the local (physical) joypad
+    /// matrix — active-low `dpad`/`buttons` nibbles — into the SNES side,
+    /// whose joypad autopoll serves it back at `$4218-$421F`. The default
+    /// drops it (the built-in HLE runs no SNES CPU), so plain runs are
+    /// untouched.
+    fn set_input(&mut self, _dpad: u8, _buttons: u8) {}
+
     /// Add the pending SNES-side samples into the Game Boy samples just drained,
     /// sample-for-sample.
     fn mix_into(&mut self, out: &mut [(f32, f32)]);

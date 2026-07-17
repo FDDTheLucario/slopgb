@@ -360,6 +360,13 @@ impl Joypad {
         lines
     }
 
+    /// The physical active-low line nibbles `(dpad, buttons)` the frontend
+    /// set — the SGB feed override does not apply here; this is the GB-side
+    /// input source the SNES joypad autopoll consumes.
+    pub(crate) fn local_matrix(&self) -> (u8, u8) {
+        (self.dpad, self.buttons)
+    }
+
     /// Install the SNES-fed pad bytes (ICD2 `$6004-$6007`, one per player) —
     /// the coprocessor return path. A fed line drop latches the joypad
     /// interrupt exactly like a physical press. A no-op off SGB. There is no

@@ -25,6 +25,57 @@ impl sgb::AudioCoprocessor for TeeCop {
     }
 }
 
+/// A stub coprocessor recording what the GB→SNES input push delivers.
+#[derive(Clone)]
+struct InputCop(std::rc::Rc<std::cell::RefCell<Vec<(u8, u8)>>>);
+
+impl sgb::AudioCoprocessor for InputCop {
+    fn clock(&mut self, _gb_cycles: u64) {}
+    fn poll(&mut self, _cmds: &mut dyn sgb::SgbCommandSource) {}
+    fn set_input(&mut self, dpad: u8, buttons: u8) {
+        self.0.borrow_mut().push((dpad, buttons));
+    }
+    fn mix_into(&mut self, _out: &mut [(f32, f32)]) {}
+    fn set_output_rate(&mut self, _hz: u32) {}
+    fn load_bios(&mut self, _bios: &[u8]) {}
+    fn write_state(&self, _w: &mut crate::state::Writer) {}
+    fn read_state(&mut self, _r: &mut crate::state::Reader<'_>) -> Result<(), StateError> {
+        Ok(())
+    }
+    fn clone_box(&self) -> Box<dyn sgb::AudioCoprocessor> {
+        Box::new(self.clone())
+    }
+}
+
+/// The GB→SNES input path: every step pushes the local (physical) active-low
+/// matrix nibbles into the coprocessor — the raw frontend state, not the
+/// SGB-feed-overridden view — so its joypad autopoll can serve them back.
+#[test]
+fn sgb_local_matrix_is_pushed_to_the_coprocessor() {
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x146] = 0x03;
+    rom[0x14B] = 0x33;
+    let mut gb = GameBoy::new(Model::Sgb, rom).unwrap();
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    gb.set_audio_coprocessor(Box::new(InputCop(seen.clone())));
+
+    gb.step();
+    assert_eq!(
+        seen.borrow().last(),
+        Some(&(0x0F, 0x0F)),
+        "idle matrix pushed"
+    );
+
+    gb.bus.joypad_mut().press(Button::A);
+    gb.bus.joypad_mut().press(Button::Right);
+    gb.step();
+    assert_eq!(
+        seen.borrow().last(),
+        Some(&(0x0E, 0x0E)),
+        "Right + A pressed (active low) pushed"
+    );
+}
+
 /// A stub coprocessor that feeds fixed ICD2 pad bytes (the SNES→GB return
 /// path). `joypad_feed` returning `Some` engages the override on `step`.
 struct FeedCop([u8; 4]);
