@@ -119,6 +119,10 @@ const HW_NMI: u32 = 0x0100_3000;
 /// `W len 1` zero: DMA service complete, un-stall the CPU. (`R len 1`: the
 /// stall flag a guest `$420B` write armed.)
 const HW_DMA_STALL: u32 = 0x0100_3001;
+/// `R len 3 + 2*cap` (drains): the ordered APU-port write ring.
+const HW_PORT_RING: u32 = 0x0100_4000;
+/// The plugin's port-ring capacity.
+const PORT_RING_CAP: usize = 512;
 /// The plugin's ring capacity (drain reads size to this).
 const MMIO_RING_CAP: usize = 512;
 /// Shadow offsets within the `$4200` block.
@@ -779,21 +783,40 @@ impl SgbCoprocessor {
         self.cpu_acc -= cpu_adv as i64 * CPU_DEN;
         self.cpu_target += cpu_adv;
 
-        // 1. Deliver the 65C816's comm-port writes to the SPC700.
-        let mut cpu_out = [0u8; N_PORTS];
-        {
+        // 1. Replay the 65C816's APU-port writes to the SPC700 **in
+        // order**, giving the chip a run slice after each event: the
+        // SPC700 IPL upload's per-byte index/ack pump repeats mod-256
+        // values, so delivering only each flush's final latch state
+        // aliases the handshake and the two sides lose lockstep.
+        let events: Vec<(u8, u8)> = {
             let mut cpu = self.cpu.borrow_mut();
-            for (p, slot) in cpu_out.iter_mut().enumerate() {
-                *slot = cpu.port_read(p as u8).unwrap_or(0);
+            match cpu.read_ram(HW_PORT_RING, 3 + 2 * PORT_RING_CAP) {
+                Ok(buf) if buf.len() >= 3 => {
+                    let n = usize::from(buf[0]) | usize::from(buf[1]) << 8;
+                    if buf[2] != 0 {
+                        eprintln!("slopgb: SNES APU port ring overflowed; writes dropped");
+                    }
+                    buf[3..]
+                        .chunks_exact(2)
+                        .take(n)
+                        .map(|e| (e[0], e[1]))
+                        .collect()
+                }
+                _ => Vec::new(),
             }
-        }
-        self.to_spc = cpu_out;
+        };
         {
             let mut spc = self.spc.borrow_mut();
-            for (p, &v) in cpu_out.iter().enumerate() {
-                let _ = spc.port_write(p as u8, v);
+            let start = self.spc_target - spc_adv;
+            let n = events.len() as u64;
+            for (i, &(p, v)) in events.iter().enumerate() {
+                let _ = spc.port_write(p, v);
+                if usize::from(p) < N_PORTS {
+                    self.to_spc[usize::from(p)] = v;
+                }
+                let _ = spc.run_until(start + spc_adv * (i as u64 + 1) / (n + 1));
             }
-            // 2. Run the SPC700 + S-DSP and pull the synthesized PCM.
+            // 2. Run the SPC700 + S-DSP to the target and pull the PCM.
             let _ = spc.run_until(self.spc_target);
             if let Ok(batch) = spc.drain_pcm() {
                 self.src.extend(batch);

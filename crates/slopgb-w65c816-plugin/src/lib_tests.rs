@@ -271,6 +271,46 @@ fn mmio_ring_and_shadows_round_trip() {
     assert_eq!(&again[..2], &[0, 0]);
 }
 
+// ---- APU port-write ring ----
+
+/// The CPU's `$2140-$2143` writes are captured **in order** — every write,
+/// no dedup (a same-value index write is the IPL protocol's "data valid"
+/// edge) — and drained through `HW_PORT_RING`: a host replaying them one
+/// at a time preserves multi-step handshakes that final-latch snapshots
+/// alias (the SPC700 IPL upload's mod-256 indexes).
+#[test]
+fn apu_port_writes_ring_in_order() {
+    let mut cop = W65816Cop::new();
+    // STA $2141 (data $11) / STA $2140 (index 0) / STA $2140 (index 0,
+    // deduped) / STA $2141 ($22) / STA $2140 (1) / STP.
+    let prog = [
+        0xA9, 0x11, 0x8D, 0x41, 0x21, // LDA #$11 / STA $2141
+        0xA9, 0x00, 0x8D, 0x40, 0x21, // index 0
+        0x8D, 0x40, 0x21, // again (kept — every write matters)
+        0xA9, 0x22, 0x8D, 0x41, 0x21, // data $22
+        0xA9, 0x01, 0x8D, 0x40, 0x21, // index 1
+        0xDB,
+    ];
+    cop.write_ram(u32::from(PROG_ORG), &prog);
+    cop.cpu = Cpu::new();
+    cop.cpu.regs.pc = PROG_ORG;
+    cop.cycles = 0;
+    cop.run_until(1000);
+
+    let ring = cop.read_ram(HW_PORT_RING, 3 + 2 * PORT_RING_CAP);
+    let n = usize::from(ring[0]) | usize::from(ring[1]) << 8;
+    assert_eq!(ring[2], 0, "no overflow");
+    let entries: Vec<(u8, u8)> = (0..n).map(|i| (ring[3 + i * 2], ring[4 + i * 2])).collect();
+    assert_eq!(
+        entries,
+        vec![(1, 0x11), (0, 0x00), (0, 0x00), (1, 0x22), (0, 0x01)],
+        "every write captured in order"
+    );
+    // The drain consumed the ring.
+    let again = cop.read_ram(HW_PORT_RING, 3);
+    assert_eq!(&again[..2], &[0, 0]);
+}
+
 // ---- DMA stall handshake ----
 
 /// A nonzero `$420B` write pauses the CPU (fullsnes 420Bh: "The CPU is

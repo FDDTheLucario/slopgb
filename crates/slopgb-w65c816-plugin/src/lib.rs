@@ -43,8 +43,9 @@ const RESET_VEC: usize = 0xFFFC;
 /// Serialized [`W65816Cop::save_state`] length: 18 bytes of registers + halt
 /// flags, the 128 KB WRAM, the 32 KB program area, 8 bytes of comm-port
 /// latches, the ICD2 block, the MMIO block, the NMI-pending flag, an 8-byte
-/// cycle counter.
-const STATE_LEN: usize = 18 + WRAM_LEN + PROG_LEN + 8 + ICD2_STATE_LEN + MMIO_STATE_LEN + 1 + 8;
+/// cycle counter, and the APU port-write ring (count + overflow + entries).
+const STATE_LEN: usize =
+    18 + WRAM_LEN + PROG_LEN + 8 + ICD2_STATE_LEN + MMIO_STATE_LEN + 1 + 8 + 3 + 2 * PORT_RING_CAP;
 /// 128 KB of work RAM at `$7E-$7F`.
 const WRAM_LEN: usize = 0x2_0000;
 /// The 32 KB `$8000-$FFFF` program area (the RAM-backed BIOS ROM region).
@@ -80,6 +81,15 @@ pub const HW_NMI: u32 = HOST_WIN + 0x3000;
 /// `R len 1`: whether a `$420B` write stalled the CPU awaiting host DMA
 /// service. `W len 1` zero: the host executed the transfer, resume.
 pub const HW_DMA_STALL: u32 = HOST_WIN + 0x3001;
+/// `R len 3 + 2*PORT_RING_CAP` (drains): `[n_lo, n_hi, overflow]` then `n`
+/// ordered `(port, val)` APU-port writes — every write, no dedup (a
+/// same-value index write is the SPC700 IPL protocol's "data valid" edge).
+/// A host replaying these one at a time preserves multi-step handshakes
+/// that final-latch snapshots alias.
+pub const HW_PORT_RING: u32 = HOST_WIN + 0x4000;
+/// Port-ring capacity in captured writes (a flush window is ~2.5 K CPU
+/// cycles; the resident shim's 4-write loop peaks near 340).
+pub const PORT_RING_CAP: usize = 512;
 
 /// A tiny 8-bit (emulation-mode) program: echo comm port 1 (host input) + 7 to
 /// comm port 0 (host output), forever. It proves the full round trip — a host
@@ -118,6 +128,10 @@ struct SnesBus {
     icd2: Icd2,
     /// The MMIO write-capture ring + read shadows (see `mmio.rs`).
     mmio: Mmio,
+    /// Ordered `(port, val)` APU-port writes awaiting host replay (see
+    /// [`HW_PORT_RING`]); `port_ring_of` is the sticky overflow flag.
+    port_ring: Vec<(u8, u8)>,
+    port_ring_of: bool,
 }
 
 /// Heap-allocate a zeroed fixed-size byte array (the arrays are too big for
@@ -138,6 +152,8 @@ impl SnesBus {
             port_out: [0; N_PORTS],
             icd2: Icd2::new(),
             mmio: Mmio::new(),
+            port_ring: Vec::new(),
+            port_ring_of: false,
         }
     }
 
@@ -205,6 +221,12 @@ impl Bus for SnesBus {
 
     fn write(&mut self, addr: u32, value: u8) {
         if let Some(p) = Self::port_index(addr) {
+            // Ring every write for ordered host replay (see HW_PORT_RING).
+            if self.port_ring.len() >= PORT_RING_CAP {
+                self.port_ring_of = true;
+            } else {
+                self.port_ring.push((p as u8, value));
+            }
             self.port_out[p] = value;
             return;
         }
@@ -329,6 +351,17 @@ impl W65816Cop {
                 if let Some(slot) = out.first_mut() {
                     *slot = u8::from(self.bus.mmio.dma_stall());
                 }
+            }
+            HW_PORT_RING if out.len() >= 3 => {
+                let n = self.bus.port_ring.len().min((out.len() - 3) / 2);
+                out[0] = n as u8;
+                out[1] = (n >> 8) as u8;
+                out[2] = u8::from(std::mem::take(&mut self.bus.port_ring_of));
+                for (i, &(p, v)) in self.bus.port_ring.iter().take(n).enumerate() {
+                    out[3 + i * 2] = p;
+                    out[4 + i * 2] = v;
+                }
+                self.bus.port_ring.drain(..n);
             }
             HW_MMIO_RING if out.len() >= 3 => {
                 let mmio = &mut self.bus.mmio;
@@ -486,6 +519,14 @@ impl Coprocessor for W65816Cop {
         self.bus.mmio.save_state(&mut buf);
         buf.push(u8::from(self.nmi_pending));
         buf.extend_from_slice(&self.cycles.to_le_bytes());
+        buf.extend_from_slice(&(self.bus.port_ring.len() as u16).to_le_bytes());
+        buf.push(u8::from(self.bus.port_ring_of));
+        for &(p, v) in &self.bus.port_ring {
+            buf.extend_from_slice(&[p, v]);
+        }
+        for _ in self.bus.port_ring.len()..PORT_RING_CAP {
+            buf.extend_from_slice(&[0, 0]);
+        }
         debug_assert_eq!(buf.len(), STATE_LEN);
         buf
     }
@@ -518,6 +559,15 @@ impl Coprocessor for W65816Cop {
         self.bus.mmio.load_state(c.take(MMIO_STATE_LEN));
         self.nmi_pending = c.u8() != 0;
         self.cycles = c.u64();
+        let n = usize::from(c.u16()).min(PORT_RING_CAP);
+        self.bus.port_ring_of = c.u8() != 0;
+        self.bus.port_ring.clear();
+        for i in 0..PORT_RING_CAP {
+            let e = c.take(2);
+            if i < n {
+                self.bus.port_ring.push((e[0], e[1]));
+            }
+        }
     }
 }
 
