@@ -109,7 +109,18 @@ with *host*-side effects (`$6003` reset bit) are capture-only.
   mirrors, sparse A0-A3/A11-A15 decode) with the host window at
   `HOST_WIN = 0x0100_0000` (`HW_PACKET`/`HW_PADS`/`HW_LCD_ROW`/`HW_CONTROL`/
   `HW_CHAR_ROWS`) on the unchanged `write_ram`/`read_ram` ABI. ICD2 state
-  rides the plugin save state. Bank gating (A22) awaits the real memory map.
+  rides the plugin save state.
+- **Real memory map** (landed): 128 KB WRAM at `$7E-$7F` + the bank-0/`$80`
+  low-8K mirror, the `$8000-$FFFF` program area (one 32 KB RAM-backed image
+  aliased across system banks — the unshipped BIOS ROM region the host
+  installs clean-room firmware into), I/O space and HiROM banks open-bus;
+  ports + ICD2 gated to A22=0 (system banks). DATA_TRN's `$7F:0100` target
+  and JUMP's `$00:1800` (= `$7E:1800` via the mirror) now resolve correctly.
+- **Pilot probe** (headless, scratch): ARCADE-mode select on Space Invaders
+  triggers DATA_TRN + `JUMP $001800` and lands the GB in the diagnosed
+  `$32F4` ACK spin — remaining gap: DATA_TRN payloads must route to the
+  teed packet's WRAM dest (they historically went to SPC RAM), then the
+  uploaded program can run and ACK.
 - **Next**: the SgbCoprocessor pump (deposit teed packets when the flag is
   clear, read pads → `joypad_feed`, LCD-row shadow), then the real 65C816
   memory map, MMIO capture, NMI, DMA, and the SNES PPU plugin (`goal.md`).
