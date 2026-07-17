@@ -44,18 +44,44 @@ the BIOS to have done it.
 
 ## Where the pilot stands (2026-07-17)
 
-With the contract in place the chain runs: bootstrap loops the service, the
-hook dispatches on the DATA_TRN, the ACK write reaches the pad latch (the
-GB-side `joypad_feed` path works — `D751` moves), the dispatcher copies the
-staged program, and control enters the arcade program at `$7F:01xx`. The
-program then **dies in BRK chaos**: it needs vblank NMI, the `$21xx`/`$42xx`
-MMIO surface, and a PPU — none exist yet. In native mode the BRK vector
-(`$00:FFE6`) reads zeroed program area, so the crash sprays bank 0 (the
-`04 35 00 35` stack-byte pattern over the pad latches is its fingerprint).
-Unblocking it is the MMIO-capture / NMI / clocking-loop / PPU work
-(`goal.md` phases 2-4). One loose end to re-check then: a byte-0 patch of
-the `$7F:0100` payload (`$4C` ↔ `$18`) seen around the transfer — likely the
-program's armed/disarmed entry state, judge again once it survives.
+With the contract in place the chain runs end to end: the ACK handshake
+completes (the GB leaves the `$32F4` spin, `D751` = `$FF`), and the pilot
+streams one DATA_TRN per GB frame. Everything below is pinned from live
+probes of the pilot's own uploaded code (PC-distribution sampling +
+disassembly of the teed bytes):
+
+- **Bootstrap (`$1800`, the first JUMP's target)**: `STZ $1700 /
+  STZ $4200 / LDA long $FFDB / BEQ+5 / JSR $BBED / BRA` — revision 0
+  selects the **second** entry (`$BBF0`/`$C590`) of each service pair, and
+  the loop re-disables NMIs every iteration.
+- **Hook (`$0800` → `$0A00`)**: on `$02C2 == $10` it writes pad latch
+  `$01`, loads `[$B0]` from the packet's dest bytes (`$0601-$0603`), calls
+  the **aux service** (`$C590`), writes pad latch `$00`, then copies the
+  4 KB staging to `[$B0]`. The aux service is therefore a **wait-for-
+  vblank** (the wait holds the `$01` latch across a vblank so the GB
+  observes both handshake values); an NMI-enabling variant was probed and
+  refuted — see `BIOS_AUX_BODY` in the coprocessor.
+- **JUMP carries the NMI vector**: the pilot's first JUMP is
+  `PC=$001800 / NMI=$001800`; once streaming is up it sends a second JUMP
+  `PC=$7F:0103 / NMI=$7F:0100` (Pan Docs 12h bytes 4-6 → the `$00BB-BD`
+  RAM vector).
+- **The arcade program head (`$7F:0100`)**: `JMP $0106` (an RTI — the
+  disarmed NMI entry; the byte-0 arm patch flips the flow), `JMP $0107`
+  (the init entry the second JUMP targets). The init clears DP `$1000+`,
+  writes `$FE` to `$2140`, and uploads two sound-data blocks to the SPC700
+  through the **standard IPL boot-ROM protocol** (`CMP $2140` for `$BBAA`,
+  then the kick/index/ack pump) — which is why the coprocessor boots the
+  chip's IPL ROM instead of parking it in the resident square driver.
+
+**Current wall (next session's entry point)**: by the time the second JUMP
+applies, `$7F:0100` no longer holds the program — later stream payloads
+overwrite it (probed: the head reads frame-data-like bytes, and the JML
+lands in BRK chaos walking open-bus bank `$F4`, two bytes per BRK→RTI-stub
+round trip). Suspect the DATA_TRN dest/payload pairing or the arm-patch
+sequencing in `commands.rs` (`data_trn_dest` updates on the packet tee;
+the payload lands on a throttled checksum edge). Instrument every `$10`
+packet dest + payload head + what lands at `$7F:0100`/`$7F:9100` per frame
+to pin the mis-pairing.
 
 ## Provenance / clean-room note
 
