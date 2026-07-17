@@ -73,6 +73,8 @@ pub struct SnesPpu {
     /// OBSEL (`$2101`): OBJ size selection (bits 7-5), name gap (4-3),
     /// tile base (2-0).
     obsel: u8,
+    /// INIDISP (`$2100`): forced blank (bit 7) + master brightness (3-0).
+    inidisp: u8,
 }
 
 impl SnesPpu {
@@ -102,6 +104,7 @@ impl SnesPpu {
             bg_old: 0,
             tm: 0,
             obsel: 0,
+            inidisp: 0,
         }
     }
 
@@ -136,6 +139,7 @@ impl SnesPpu {
                 }
                 self.oam_addr = (self.oam_addr + 1) & 0x3FF;
             }
+            0x00 => self.inidisp = val,
             0x01 => self.obsel = val,
             0x05 => self.bgmode = val,
             0x07..=0x0A => self.bgsc[usize::from(port - 0x07)] = val,
@@ -308,6 +312,7 @@ impl Default for SnesPpu {
     }
 }
 
+mod frame;
 mod obj;
 mod render;
 
