@@ -79,6 +79,25 @@ const FLUSH_CHUNK: u64 = 4096;
 pub const SPC_WASM: &str = "spc700.wasm";
 pub const CPU_WASM: &str = "w65c816.wasm";
 
+/// GB scanline / frame lengths in T-cycles (the SGB clocks the GB at DMG
+/// speed), for the ICD2 `$6000` LCD-row shadow.
+const GB_LINE_CYCLES: u64 = 456;
+const GB_FRAME_CYCLES: u64 = 70_224;
+
+/// The w65c816 plugin's ICD2 host window (mirrors `slopgb-w65c816-plugin`'s
+/// `HOST_WIN`/`HW_*` contract — that crate is wasm-loaded, never linked, the
+/// same way `GB_CLOCK_HZ` mirrors `slopgb_core::CLOCK_HZ`).
+/// `W len 16`: deposit a packet; `R len 1`: the `$6002` flag.
+const HW_PACKET: u32 = 0x0100_0000;
+/// `R len 5`: the `$6004-$6007` pad latches + the sticky written flag.
+const HW_PADS: u32 = 0x0100_0011;
+/// `W len 2`: the `$6000` shadows `[lcd_row, write_row]`.
+const HW_LCD_ROW: u32 = 0x0100_0016;
+
+/// Max teed packets held for deposit before the oldest is dropped (matches
+/// the core-side tee cap; the guest normally consumes far faster).
+const PACKET_QUEUE_CAP: usize = 16;
+
 /// Comm ports (SNES APU I/O has four: `$2140-$2143` / `$F4-$F7`).
 const N_PORTS: usize = 4;
 /// SNES bank-0 address of comm port 0 (`$2140`). (fullsnes, "SNES APU I/O".)
@@ -167,6 +186,17 @@ pub struct SgbCoprocessor {
     sou_trn_sig: u64,
     data_trn_sig: u64,
     jump: Option<u32>,
+
+    /// Teed GB packets awaiting deposit into the plugin's ICD2 mailbox
+    /// (deposited one per flush, only when the guest cleared `$6002`).
+    pending_packets: VecDeque<[u8; 16]>,
+    /// Pad latches the SNES program wrote (`$6004-$6007`), re-read from the
+    /// plugin each flush once its sticky written flag arms. Transient — the
+    /// next flush refreshes it from the (serialized) plugin state.
+    feed: Option<[u8; 4]>,
+    /// GB frame position (T-cycles, mod one frame) for the `$6000` LCD-row
+    /// shadow.
+    gb_pos: u64,
 }
 
 impl SgbCoprocessor {
@@ -221,6 +251,9 @@ impl SgbCoprocessor {
             sou_trn_sig: 0,
             data_trn_sig: 0,
             jump: None,
+            pending_packets: VecDeque::new(),
+            feed: None,
+            gb_pos: 0,
         };
         me.install_firmware()?;
         Ok(me)
@@ -262,10 +295,31 @@ impl SgbCoprocessor {
         }
     }
 
-    /// Pump both plugins once for a `span` of GB T-cycles: mediate the comm ports
+    /// Pump both plugins once for a `span` of GB T-cycles: pump the ICD2
+    /// window (LCD-row shadow + packet deposit), mediate the comm ports
     /// (65C816 → SPC700, then SPC700 → 65C816), advance each chip to its cycle
-    /// target, drain the S-DSP PCM, and emit `span`'s worth of output samples.
+    /// target, pull the ICD2 pad latches back, drain the S-DSP PCM, and emit
+    /// `span`'s worth of output samples.
     fn flush(&mut self, span: u64) {
+        // ICD2, GB→SNES half: refresh the $6000 LCD-row shadow (fullsnes "SGB
+        // Port 6000h": character row 0-$11, $11 = last row or vblank) and
+        // deposit the next teed packet once the guest consumed the last one
+        // ($6002 clear — never overwrite an unread mailbox).
+        self.gb_pos = (self.gb_pos + span) % GB_FRAME_CYCLES;
+        let line = self.gb_pos / GB_LINE_CYCLES;
+        let row = ((line / 8) as u8).min(0x11);
+        {
+            let mut cpu = self.cpu.borrow_mut();
+            let _ = cpu.write_ram(HW_LCD_ROW, &[row, row & 3]);
+            if !self.pending_packets.is_empty() {
+                let clear = matches!(cpu.read_ram(HW_PACKET, 1).as_deref(), Ok([0]));
+                if clear {
+                    if let Some(p) = self.pending_packets.pop_front() {
+                        let _ = cpu.write_ram(HW_PACKET, &p);
+                    }
+                }
+            }
+        }
         // Advance the chips' absolute cycle targets by the GB→chip ratios.
         self.spc_acc += span as i64 * SPC_NUM;
         let spc_adv = self.spc_acc.div_euclid(SPC_DEN).max(0) as u64;
@@ -311,6 +365,16 @@ impl SgbCoprocessor {
             }
             // 4. Run the 65C816 shim.
             let _ = cpu.run_until(self.cpu_target);
+            // ICD2, SNES→GB half: pull the pad latches the program wrote.
+            // The sticky flag gates the feed — before the SNES side takes
+            // over the joypad, the GB's local matrix must stay live.
+            if let Ok(v) = cpu.read_ram(HW_PADS, 5) {
+                if let [p1, p2, p3, p4, written] = v[..] {
+                    if written != 0 {
+                        self.feed = Some([p1, p2, p3, p4]);
+                    }
+                }
+            }
         }
         // 5. Emit output-rate samples (32 kHz S-DSP → output rate, zero-order-hold).
         self.emit_output(span);
@@ -368,6 +432,14 @@ impl SgbCoprocessor {
     // -- SGB command routing ------------------------------------------------
 
     fn poll(&mut self, cmds: &mut dyn SgbCommandSource) {
+        // Raw packet tee → the ICD2 mailbox deposit queue (bounded like the
+        // core-side tee; the flush pump deposits one per guest consume).
+        while let Some(p) = cmds.take_packet() {
+            while self.pending_packets.len() >= PACKET_QUEUE_CAP {
+                self.pending_packets.pop_front();
+            }
+            self.pending_packets.push_back(p);
+        }
         // SOUND ($08): a play request. Deposit the effect id + a trigger in the
         // CPU's mailbox; the 65C816 shim forwards them to the SPC700 driver.
         while let Some(s) = cmds.take_sound_event() {
@@ -491,6 +563,11 @@ impl SgbCoprocessor {
         w.u64(self.data_trn_sig);
         w.bool(self.jump.is_some());
         w.u32(self.jump.unwrap_or(0));
+        w.u8(self.pending_packets.len() as u8);
+        for p in &self.pending_packets {
+            w.bytes(p);
+        }
+        w.u64(self.gb_pos);
     }
 
     fn read_state(&mut self, r: &mut Reader<'_>) -> Result<(), StateError> {
@@ -522,9 +599,23 @@ impl SgbCoprocessor {
         let has_jump = r.bool()?;
         let j = r.u32()?;
         self.jump = has_jump.then_some(j);
-        // The undrained source/output PCM is transient, not part of the snapshot.
+        let n = usize::from(r.u8()?);
+        if n > PACKET_QUEUE_CAP {
+            return Err(StateError::Truncated);
+        }
+        self.pending_packets.clear();
+        for _ in 0..n {
+            let mut p = [0u8; 16];
+            r.bytes_into(&mut p)?;
+            self.pending_packets.push_back(p);
+        }
+        self.gb_pos = r.u64()? % GB_FRAME_CYCLES;
+        // The undrained source/output PCM is transient, not part of the
+        // snapshot — and so is the pad feed (re-read from the restored plugin
+        // state on the next flush).
         self.src.clear();
         self.out.clear();
+        self.feed = None;
         Ok(())
     }
 
@@ -563,6 +654,9 @@ impl SgbCoprocessor {
         fresh.sou_trn_sig = self.sou_trn_sig;
         fresh.data_trn_sig = self.data_trn_sig;
         fresh.jump = self.jump;
+        fresh.pending_packets = self.pending_packets.clone();
+        fresh.feed = self.feed;
+        fresh.gb_pos = self.gb_pos;
         Ok(fresh)
     }
 }
@@ -573,6 +667,9 @@ impl AudioCoprocessor for SgbCoprocessor {
     }
     fn poll(&mut self, cmds: &mut dyn SgbCommandSource) {
         SgbCoprocessor::poll(self, cmds);
+    }
+    fn joypad_feed(&mut self) -> Option<[u8; 4]> {
+        self.feed
     }
     fn mix_into(&mut self, out: &mut [(f32, f32)]) {
         SgbCoprocessor::mix_into(self, out);
@@ -649,6 +746,8 @@ fn write_empty_state(w: &mut Writer) {
     w.u64(0); // data_trn_sig
     w.bool(false); // jump present
     w.u32(0); // jump target
+    w.u8(0); // pending ICD2 packets
+    w.u64(0); // gb_pos
 }
 
 /// A no-op [`AudioCoprocessor`] producing silence. Only ever the result of
@@ -688,6 +787,12 @@ impl AudioCoprocessor for InertCoprocessor {
         r.u64()?;
         r.bool()?;
         r.u32()?;
+        let n = usize::from(r.u8()?);
+        for _ in 0..n {
+            let mut p = [0u8; 16];
+            r.bytes_into(&mut p)?;
+        }
+        r.u64()?;
         Ok(())
     }
     fn clone_box(&self) -> Box<dyn AudioCoprocessor> {

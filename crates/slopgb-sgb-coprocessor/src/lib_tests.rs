@@ -70,9 +70,13 @@ struct TestCmds {
     sou_trn: Option<Vec<u8>>,
     data_trn: Option<Vec<u8>>,
     flags: Option<SgbFlags>,
+    packets: Vec<[u8; 16]>,
 }
 
 impl SgbCommandSource for TestCmds {
+    fn take_packet(&mut self) -> Option<[u8; 16]> {
+        (!self.packets.is_empty()).then(|| self.packets.remove(0))
+    }
     fn take_sound_event(&mut self) -> Option<SgbSound> {
         (!self.sounds.is_empty()).then(|| self.sounds.remove(0))
     }
@@ -98,6 +102,84 @@ fn peak(out: &[(f32, f32)]) -> f32 {
 /// Read `len` bytes of the 65C816 plugin's SNES RAM (test observability).
 fn cpu_ram(cop: &SgbCoprocessor, addr: u32, len: usize) -> Vec<u8> {
     cop.cpu.borrow_mut().read_ram(addr, len).unwrap()
+}
+
+/// The ICD2 pump end to end through the real wasm chips: a teed GB packet is
+/// deposited into the plugin's ICD2 mailbox (only when the `$6002` flag is
+/// clear), a guest SNES program consumes it and answers on the `$6004` pad
+/// latch, and the answer surfaces through `AudioCoprocessor::joypad_feed` —
+/// gated by the sticky written flag (None until the program writes).
+#[test]
+fn icd2_pump_round_trips_packet_to_joypad_feed() {
+    let Some(mut cop) = build_cop(48_000) else {
+        return;
+    };
+    assert_eq!(cop.joypad_feed(), None, "no feed before the program writes");
+
+    // wait: LDA $6002 / AND #$01 / BEQ wait — spin on the packet flag, then
+    // LDA $7000 (clears the flag) / STA $6004 (pad latch) / STP.
+    let prog = [
+        0xAD, 0x02, 0x60, // LDA $6002
+        0x29, 0x01, // AND #$01
+        0xF0, 0xF9, // BEQ -7
+        0xAD, 0x00, 0x70, // LDA $7000
+        0x8D, 0x04, 0x60, // STA $6004
+        0xDB, // STP
+    ];
+    {
+        let mut cpu = cop.cpu.borrow_mut();
+        cpu.write_ram(0x9000, &prog).unwrap();
+        cpu.set_pc(0x9000).unwrap();
+    }
+
+    let mut pkt = [0u8; 16];
+    pkt[0] = 0xEF; // the ACK byte the program echoes onto the pad latch
+    let mut cmds = TestCmds {
+        packets: vec![pkt],
+        ..TestCmds::default()
+    };
+    cop.poll(&mut cmds);
+    assert!(cmds.packets.is_empty(), "poll drained the tee");
+    // Two pump chunks: one deposits + runs the program, the next re-reads the
+    // pad latches after the answer.
+    cop.clock(4096 * 4);
+
+    assert_eq!(
+        cop.joypad_feed(),
+        Some([0xEF, 0xFF, 0xFF, 0xFF]),
+        "the program's pad answer feeds the GB joypad"
+    );
+}
+
+/// The pump's LCD-row shadow: the guest reads `$6000` and sees the GB frame
+/// position the host wrote (row 17 = last row / vblank).
+#[test]
+fn icd2_pump_maintains_lcd_row_shadow() {
+    let Some(mut cop) = build_cop(48_000) else {
+        return;
+    };
+    // wait: LDA $6000 / LSR ×3 (drop the write-buffer bits) / CMP #$11 /
+    // BNE wait — spin until the shadow shows vblank, then STA $0300 / STP.
+    let prog = [
+        0xAD, 0x00, 0x60, // LDA $6000
+        0x4A, 0x4A, 0x4A, // LSR A ×3
+        0xC9, 0x11, // CMP #$11
+        0xD0, 0xF6, // BNE -10
+        0x8D, 0x00, 0x03, // STA $0300
+        0xDB, // STP
+    ];
+    {
+        let mut cpu = cop.cpu.borrow_mut();
+        cpu.write_ram(0x9000, &prog).unwrap();
+        cpu.set_pc(0x9000).unwrap();
+    }
+    // ~152 GB lines into the frame: inside vblank -> row $11.
+    cop.clock(456 * 152);
+    assert_eq!(
+        cpu_ram(&cop, 0x0300, 1),
+        vec![0x11],
+        "guest sees the vblank character row"
+    );
 }
 
 /// DATA_SND ($0F) is no longer a no-op: the packet's data lands at its target
@@ -258,8 +340,13 @@ fn save_state_round_trips() {
         attenuation: 0,
         effect_bank: 0,
     });
+    // Two teed packets: the resident shim never reads the mailbox, so the
+    // first stays unconsumed in the guest and the second stays queued — the
+    // queued one (and the nonzero gb frame position) must ride the state.
+    cmds.packets = vec![[0x11; 16], [0x22; 16]];
     cop.poll(&mut cmds);
     cop.clock(12_345);
+    assert_eq!(cop.pending_packets.len(), 1, "one packet awaiting deposit");
 
     let mut w = Writer::new();
     cop.write_state(&mut w);
