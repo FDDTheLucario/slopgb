@@ -15,3 +15,4 @@ State date: 2026-06-14.
 | [io-misc.md](io-misc.md) | serial clock, SGB joypad, MBC30, public API facade, audio frontend |
 | [sgb.md](sgb.md) | SGB presentation: palette/attr/mask commands (PAL01-12, ATTR_BLK, MASK_EN), colorization wiring, deferred commands |
 | [sgb-audio.md](sgb-audio.md) | SGB audio: SNES S-DSP (BRR/envelope/Gaussian/echo/noise), SPC700↔DSP clocking, SGB sound-command routing, BIOS gating (what works without it) |
+| [sgb-icd2.md](sgb-icd2.md) | ICD2 bridge: SNES-side `$6000-$7FFF` register spec (fullsnes), packet mailbox / pad-latch semantics, the host-window plugin crossing design |
