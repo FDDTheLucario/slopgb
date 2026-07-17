@@ -880,56 +880,73 @@ fn data_trn_pairs_payloads_with_their_own_packets() {
     );
 }
 
-/// The resident SPC700 firmware speaks the boot-ROM upload protocol
-/// (fullsnes "Uploader"): announce $AA/$BB, accept $CC + address, per-byte
-/// index/ack pump, new-kick block switch, entry jump. A guest 65C816
-/// program performing the documented uploader sequence lands a driver in
-/// APU RAM and starts it (observable through the comm ports).
+/// The resident sound-engine stand-in speaks the upload protocol pinned
+/// from the pilot's own loader: announce $AA/$BB; any new kick on port 0
+/// carries a 16-bit block length on ports 2/3; the kick is acknowledged,
+/// then a per-byte index/ack pump runs for exactly `len` bytes; chained
+/// kicks continue; a zero-length kick terminates the round and
+/// re-announces (the loader waits for the fresh $BBAA before its next
+/// upload).
 #[test]
-fn spc_ipl_upload_protocol_round_trips() {
+fn spc_engine_upload_protocol_round_trips() {
     let Some((spc_wasm, _)) = plugins() else {
         return;
     };
     let mut spc = slopgb_plugin_host::LoadedCoprocessor::load(&spc_wasm).unwrap();
     spc.reset().unwrap();
-    let mut cyc = 0u64;
+    // The coprocessor installs the engine at load; a bare plugin needs the
+    // same install the host performs.
+    let Some(cop) = build_cop(48_000) else {
+        return;
+    };
+    drop(spc);
+    let mut spc = cop.spc.borrow_mut();
+    let mut cyc = {
+        // The engine was clocked during from_wasm? No — start fresh from 0.
+        0u64
+    };
     let run = |spc: &mut slopgb_plugin_host::LoadedCoprocessor, cyc: &mut u64| {
         *cyc += 4_000;
         spc.run_until(*cyc).unwrap();
     };
-    // Wait for the announce.
     run(&mut spc, &mut cyc);
     assert_eq!(spc.port_read(0).unwrap(), 0xAA, "ready low");
     assert_eq!(spc.port_read(1).unwrap(), 0xBB, "ready high");
 
-    // Upload `MOV $F6,#$5A / BRA *` to $0300 per the documented sequence.
-    let driver = [0x8F, 0x5A, 0xF6, 0x2F, 0xFE];
-    spc.port_write(2, 0x00).unwrap(); // dest $0300
-    spc.port_write(3, 0x03).unwrap();
-    spc.port_write(1, 0x01).unwrap(); // command: transfer
-    spc.port_write(0, 0xCC).unwrap(); // kick
+    // Block 1: kick $CC, length 3.
+    spc.port_write(2, 0x03).unwrap();
+    spc.port_write(3, 0x00).unwrap();
+    spc.port_write(1, 0xBF).unwrap(); // nonzero marker byte (ignored)
+    spc.port_write(0, 0xCC).unwrap();
     run(&mut spc, &mut cyc);
     assert_eq!(spc.port_read(0).unwrap(), 0xCC, "kick acknowledged");
-    for (i, &b) in driver.iter().enumerate() {
-        spc.port_write(1, b).unwrap();
-        spc.port_write(0, i as u8).unwrap();
+    for i in 0..3u8 {
+        spc.port_write(1, 0x40 + i).unwrap();
+        spc.port_write(0, i).unwrap();
         run(&mut spc, &mut cyc);
-        assert_eq!(spc.port_read(0).unwrap(), i as u8, "byte {i} acked");
+        assert_eq!(spc.port_read(0).unwrap(), i, "byte {i} acked");
     }
-    // Entry command: kick = (index+2)|1, command 0, address = $0300.
-    let kick = (driver.len() as u8 + 2) | 1;
+
+    // Chained kick, length 2.
+    spc.port_write(2, 0x02).unwrap();
+    spc.port_write(3, 0x00).unwrap();
+    spc.port_write(0, 0x05).unwrap();
+    run(&mut spc, &mut cyc);
+    assert_eq!(spc.port_read(0).unwrap(), 0x05, "chained kick acked");
+    for i in 0..2u8 {
+        spc.port_write(1, 0x60 + i).unwrap();
+        spc.port_write(0, i).unwrap();
+        run(&mut spc, &mut cyc);
+        assert_eq!(spc.port_read(0).unwrap(), i, "chained byte {i} acked");
+    }
+
+    // Zero-length kick: terminator -> the engine re-announces.
     spc.port_write(2, 0x00).unwrap();
-    spc.port_write(3, 0x03).unwrap();
-    spc.port_write(1, 0x00).unwrap();
-    spc.port_write(0, kick).unwrap();
+    spc.port_write(3, 0x00).unwrap();
+    spc.port_write(0, 0x09).unwrap();
     run(&mut spc, &mut cyc);
-    assert_eq!(spc.port_read(0).unwrap(), kick, "entry acknowledged");
-    run(&mut spc, &mut cyc);
-    assert_eq!(
-        spc.port_read(2).unwrap(),
-        0x5A,
-        "the uploaded driver runs (its port-2 marker visible)"
-    );
+    assert_eq!(spc.port_read(0).unwrap(), 0xAA, "re-announce low");
+    assert_eq!(spc.port_read(1).unwrap(), 0xBB, "re-announce high");
 }
 
 /// JUMP ($12) carries an optional NMI-handler address in packet bytes 4-6

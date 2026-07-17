@@ -225,6 +225,9 @@ const RESET_VEC: u16 = 0xFFFC;
 const MB_NOTE: u16 = 0x0200;
 /// SPC700 APU-RAM load addresses of the resident driver / directory / sample.
 const SPC_PROG_ORG: u16 = 0x0400;
+/// Where the resident sound-engine stand-in (the boot program) lives —
+/// high, clear of conventional upload targets, below the boot-ROM region.
+const SPC_ENGINE_ORG: u16 = 0xFF00;
 const SPC_DIR_ORG: u16 = 0x0200;
 const SPC_BRR_ORG: u16 = 0x0210;
 
@@ -647,14 +650,15 @@ impl SgbCoprocessor {
             let (prog, dir, brr) = spc_firmware();
             let spc = self.spc.get_mut();
             spc.write_ram(u32::from(SPC_PROG_ORG), &prog)?;
+            spc.write_ram(u32::from(SPC_ENGINE_ORG), &engine_firmware())?;
+            spc.set_pc(u32::from(SPC_ENGINE_ORG))?;
             spc.write_ram(u32::from(SPC_DIR_ORG), &dir)?;
             spc.write_ram(u32::from(SPC_BRR_ORG), &brr)?;
-            // No set_pc: the SPC700 boots its own IPL ROM (the chip ships
-            // the documented 64-byte boot loader at $FFC0), announcing
-            // $AA/$BB and serving the standard upload protocol — the
-            // arcade pilot uploads its sound driver through it. The square
-            // driver above is entered host-side on a SOUND command instead
-            // (see apply_sound).
+            // The engine stand-in boots (not the chip's IPL ROM): the
+            // pilot's loader speaks the BIOS sound engine's length-aware
+            // protocol and waits for re-announces between blocks, which
+            // the raw IPL never sends. The square driver above is entered
+            // host-side on a SOUND command instead (see apply_sound).
         }
         Ok(())
     }
@@ -809,12 +813,20 @@ impl SgbCoprocessor {
             let mut spc = self.spc.borrow_mut();
             let start = self.spc_target - spc_adv;
             let n = events.len() as u64;
+            let dbg = std::env::var_os("SLOPGB_APUDBG").is_some();
             for (i, &(p, v)) in events.iter().enumerate() {
                 let _ = spc.port_write(p, v);
                 if usize::from(p) < N_PORTS {
                     self.to_spc[usize::from(p)] = v;
                 }
                 let _ = spc.run_until(start + spc_adv * (i as u64 + 1) / (n + 1));
+                if dbg {
+                    eprintln!(
+                        "apu<- p{p}={v:02X} | out {:02X} {:02X}",
+                        spc.port_read(0).unwrap_or(0),
+                        spc.port_read(1).unwrap_or(0)
+                    );
+                }
             }
             // 2. Run the SPC700 + S-DSP to the target and pull the PCM.
             let _ = spc.run_until(self.spc_target);
@@ -1055,11 +1067,18 @@ impl AudioCoprocessor for SgbCoprocessor {
     }
 }
 
-/// Install the clean-room SPC700 driver + one-entry sample directory + a square
-/// BRR sample into APU RAM. The original clean-room driver waits on comm port 1
-/// (the SNES trigger), then programs the S-DSP to key a ~2 kHz square-wave voice.
-/// Authored from the SPC700 opcode table + S-DSP register map (nocash *fullsnes*),
-/// never from a ROM. Returns `(program@$0400, directory@$0200, sample@$0210)`.
+/// Install the clean-room SPC700 firmware + one-entry sample directory + a
+/// square BRR sample into APU RAM. The boot program at [`SPC_ENGINE_ORG`]
+/// is a stand-in for the SGB BIOS's resident sound engine, speaking the
+/// upload protocol pinned black-box from the pilot's own loader (its code
+/// arrives in cleartext DATA_TRN payloads): announce `$AA/$BB`; any new
+/// kick on port 0 carries a 16-bit block length on ports 2/3; ack the
+/// kick, then pump `len` bytes with per-byte index/ack echoes; a zero-len
+/// kick terminates the round and re-announces. Received data is counted
+/// but not stored (our SOUND stand-in is the resident square driver at
+/// [`SPC_PROG_ORG`], entered host-side) — a ceiling until a title needs
+/// its uploaded APU data to actually play. Authored from the SPC700
+/// opcode table (nocash *fullsnes*), never from a ROM.
 fn spc_firmware() -> (Vec<u8>, [u8; 4], Vec<u8>) {
     // `MOV dp,#imm` = `8F imm dp`; `MOV A,dp` = `E4 dp`; `CLRP` = `20`;
     // `BEQ rel` = `F0 rel`; `BRA rel` = `2F rel` (fullsnes opcode table).
@@ -1102,6 +1121,53 @@ fn spc_firmware() -> (Vec<u8>, [u8; 4], Vec<u8>) {
     // pitch = 32 kHz / 16 = 2 kHz.
     let brr = vec![0x93u8, 0x77, 0x77, 0x77, 0x77, 0x88, 0x88, 0x88, 0x88];
     (prog, dir, brr)
+}
+
+/// The resident APU sound-engine stand-in (see [`spc_firmware`]'s doc for
+/// the pinned protocol). Direct-page state: `$00/$01` remaining length,
+/// `$02` expected index, `$03` last-acknowledged port-0 value, `$04` the
+/// current kick. Opcodes per the fullsnes SPC700 table.
+fn engine_firmware() -> Vec<u8> {
+    #[rustfmt::skip]
+    let prog = vec![
+        0x20,             // FF00 CLRP
+        // announce (FF01): ready pattern; last-ack = the port's CURRENT
+        // input so a stale kick never re-triggers — only a fresh write.
+        0x8F, 0xAA, 0xF4, // FF01 MOV $F4,#$AA
+        0x8F, 0xBB, 0xF5, // FF04 MOV $F5,#$BB
+        0xE4, 0xF4,       // FF07 MOV A,$F4
+        0xC4, 0x03,       // FF09 MOV $03,A
+        // kick_wait (FF0B): any new port-0 value is a kick.
+        0xE4, 0xF4,       // FF0B MOV A,$F4
+        0x64, 0x03,       // FF0D CMP A,$03
+        0xF0, 0xFA,       // FF0F BEQ kick_wait (-6)
+        0xC4, 0x04,       // FF11 MOV $04,A
+        0xE4, 0xF6,       // FF13 MOV A,$F6   block length lo (port 2)
+        0xC4, 0x00,       // FF15 MOV $00,A
+        0xE4, 0xF7,       // FF17 MOV A,$F7   block length hi (port 3)
+        0xC4, 0x01,       // FF19 MOV $01,A
+        0xE4, 0x04,       // FF1B MOV A,$04
+        0xC4, 0xF4,       // FF1D MOV $F4,A   acknowledge the kick
+        0xC4, 0x03,       // FF1F MOV $03,A
+        0xE4, 0x00,       // FF21 MOV A,$00   len == 0 -> terminator
+        0x04, 0x01,       // FF23 OR A,$01
+        0xD0, 0x02,       // FF25 BNE recv_setup (FF29)
+        0x2F, 0xD8,       // FF27 BRA announce (FF29 - $28 = FF01)
+        // recv_setup (FF29):
+        0x8F, 0x00, 0x02, // FF29 MOV $02,#$00
+        // recv (FF2C): expected index arrives -> echo + count.
+        0xE4, 0xF4,       // FF2C MOV A,$F4
+        0x64, 0x02,       // FF2E CMP A,$02
+        0xD0, 0xFA,       // FF30 BNE recv (-6)
+        0xE4, 0x02,       // FF32 MOV A,$02
+        0xC4, 0xF4,       // FF34 MOV $F4,A   echo the index
+        0xC4, 0x03,       // FF36 MOV $03,A
+        0xAB, 0x02,       // FF38 INC $02
+        0x1A, 0x00,       // FF3A DECW $00
+        0xD0, 0xEE,       // FF3C BNE recv (FF3E - $12 = FF2C)
+        0x2F, 0xCB,       // FF3E BRA kick_wait (FF40 - $35 = FF0B)
+    ];
+    prog
 }
 
 /// Map the GB active-low matrix nibbles onto the SNES JOY1 layout, `[low,
