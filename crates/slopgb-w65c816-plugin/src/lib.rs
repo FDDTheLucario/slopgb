@@ -87,6 +87,11 @@ pub const HW_DMA_STALL: u32 = HOST_WIN + 0x3001;
 /// A host replaying these one at a time preserves multi-step handshakes
 /// that final-latch snapshots alias.
 pub const HW_PORT_RING: u32 = HOST_WIN + 0x4000;
+/// `R len 2 + 2*PAD_RING_CAP` (drains): the ordered ICD2 pad-latch write
+/// ring — `[n, overflow]` then `n` `(reg, value)` pairs. The latches carry
+/// sub-frame protocol sequences (ACK handshakes, one-shot phase triggers)
+/// that a per-flush latch snapshot aliases away.
+pub const HW_PAD_RING: u32 = HOST_WIN + 0x5000;
 /// Port-ring capacity in captured writes (a flush window is ~2.5 K CPU
 /// cycles; the resident shim's 4-write loop peaks near 340).
 // Sized for the writes one whole flush window can produce: the host drains
@@ -325,7 +330,7 @@ impl W65816Cop {
     /// The host window's read half: the packet flag, the pad latches + the
     /// sticky written flag, the `$6003` capture. Unknown offsets read zeros.
     fn host_window_read(&mut self, addr: u32, len: usize) -> Vec<u8> {
-        let icd2 = &self.bus.icd2;
+        let icd2 = &mut self.bus.icd2;
         let mut out = vec![0u8; len];
         match addr {
             HW_PACKET => {
@@ -355,6 +360,16 @@ impl W65816Cop {
             HW_DMA_STALL => {
                 if let Some(slot) = out.first_mut() {
                     *slot = u8::from(self.bus.mmio.dma_stall());
+                }
+            }
+            HW_PAD_RING if out.len() >= 2 => {
+                let (ring, of) = icd2.host_drain_pad_ring();
+                let n = ring.len().min((out.len() - 2) / 2);
+                out[0] = n as u8;
+                out[1] = u8::from(of);
+                for (i, &(r, v)) in ring.iter().take(n).enumerate() {
+                    out[2 + i * 2] = r;
+                    out[3 + i * 2] = v;
                 }
             }
             HW_PORT_RING if out.len() >= 3 => {

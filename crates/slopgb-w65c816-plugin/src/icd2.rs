@@ -13,9 +13,13 @@
 pub(crate) const CHAR_ROW_LEN: usize = 320;
 /// The four character-row buffers the chip rotates through.
 pub(crate) const CHAR_ROWS: usize = 4;
+/// Pad-latch write ring capacity: every `$6004-$6007` write between two host
+/// drains, in order. An ACK handshake is a handful of writes per frame; 64
+/// leaves generous headroom.
+pub(crate) const PAD_RING_CAP: usize = 64;
 /// Serialized [`Icd2::save_state`] length.
 pub(crate) const ICD2_STATE_LEN: usize =
-    16 + 1 + 4 + 1 + 1 + 1 + 1 + 1 + CHAR_ROWS * CHAR_ROW_LEN + 2;
+    16 + 1 + 4 + 1 + 1 + 1 + 1 + 1 + CHAR_ROWS * CHAR_ROW_LEN + 2 + 2 + 2 * PAD_RING_CAP;
 
 /// ICD2-R register state. CPU-side accesses come from the hosted 65C816's
 /// bus (`cpu_read`/`cpu_write`); `host_*` methods are the GB-side halves the
@@ -30,6 +34,12 @@ pub(crate) struct Icd2 {
     /// Sticky: the program wrote at least one pad latch since reset — the
     /// host's signal that the SNES side has taken over the joypad.
     pads_written: bool,
+    /// Every pad-latch write since the last host drain, in order:
+    /// `(reg - 4, value)`. The latches carry sub-frame protocol sequences
+    /// (an ACK handshake; the takeover init's one-shot phase trigger), so
+    /// the host must see every write, not just each drain's final state.
+    pad_ring: Vec<(u8, u8)>,
+    pad_ring_of: bool,
     /// `$6001` bits 1-0: the character-buffer row selected for `$7800` reads.
     read_row: u8,
     /// `$6000` bits 1-0: the row currently being written (host shadow).
@@ -53,6 +63,8 @@ impl Icd2 {
             // Idle pads (nothing pressed, active low) until the program writes.
             pads: [0xFF; 4],
             pads_written: false,
+            pad_ring: Vec::new(),
+            pad_ring_of: false,
             read_row: 0,
             write_row: 0,
             lcd_row: 0,
@@ -120,6 +132,11 @@ impl Icd2 {
             r @ 0x4..=0x7 => {
                 self.pads[r - 4] = v;
                 self.pads_written = true;
+                if self.pad_ring.len() >= PAD_RING_CAP {
+                    self.pad_ring_of = true;
+                } else {
+                    self.pad_ring.push(((r - 4) as u8, v));
+                }
             }
             _ => {}
         }
@@ -144,6 +161,14 @@ impl Icd2 {
     /// The pad latches + the sticky program-wrote-them flag.
     pub(crate) fn host_pads(&self) -> ([u8; 4], bool) {
         (self.pads, self.pads_written)
+    }
+
+    /// Drain the ordered pad-latch write ring (+ the sticky overflow flag).
+    pub(crate) fn host_drain_pad_ring(&mut self) -> (Vec<(u8, u8)>, bool) {
+        (
+            std::mem::take(&mut self.pad_ring),
+            std::mem::take(&mut self.pad_ring_of),
+        )
     }
 
     /// Refresh the `$6000` shadows (current LCD character row + write buffer).
@@ -180,6 +205,15 @@ impl Icd2 {
             buf.extend_from_slice(row);
         }
         buf.extend_from_slice(&self.buf_idx.to_le_bytes());
+        buf.push(self.pad_ring.len() as u8);
+        buf.push(u8::from(self.pad_ring_of));
+        for &(r, v) in &self.pad_ring {
+            buf.push(r);
+            buf.push(v);
+        }
+        for _ in self.pad_ring.len()..PAD_RING_CAP {
+            buf.extend_from_slice(&[0, 0]);
+        }
     }
 
     /// Restore from exactly [`ICD2_STATE_LEN`] bytes. A wrong-length slice is
@@ -203,6 +237,11 @@ impl Icd2 {
         }
         let off = 26 + CHAR_ROWS * CHAR_ROW_LEN;
         self.buf_idx = u16::from_le_bytes([b[off], b[off + 1]]) & 511;
+        let n = usize::from(b[off + 2]).min(PAD_RING_CAP);
+        self.pad_ring_of = b[off + 3] != 0;
+        self.pad_ring = (0..n)
+            .map(|i| (b[off + 4 + i * 2], b[off + 5 + i * 2]))
+            .collect();
     }
 }
 

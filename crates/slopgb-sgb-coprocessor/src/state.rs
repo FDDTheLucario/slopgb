@@ -148,7 +148,10 @@ impl SgbCoprocessor {
         // (the core re-supplies both on the next step/flush).
         self.src.clear();
         self.out.clear();
-        self.feed = None;
+        self.pads_taken = false;
+        self.pads_shadow = [0xFF; 4];
+        self.feed_queue.clear();
+        self.feed_hold = 0;
         self.input = (0x0F, 0x0F);
         Ok(())
     }
@@ -209,7 +212,10 @@ impl SgbCoprocessor {
         fresh.data_trn_sig = self.data_trn_sig;
         fresh.jump = self.jump;
         fresh.pending_packets = self.pending_packets.clone();
-        fresh.feed = self.feed;
+        fresh.pads_taken = self.pads_taken;
+        fresh.pads_shadow = self.pads_shadow;
+        fresh.feed_queue = self.feed_queue.clone();
+        fresh.feed_hold = self.feed_hold;
         fresh.gb_pos = self.gb_pos;
         fresh.nmitimen = self.nmitimen;
         fresh.in_vblank = self.in_vblank;

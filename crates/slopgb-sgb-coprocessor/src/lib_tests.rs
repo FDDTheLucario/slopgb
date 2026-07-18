@@ -962,6 +962,57 @@ fn no_autopoll_without_the_guest_enabling_it() {
     );
 }
 
+/// The pad feed preserves sub-flush latch sequences and passes the local
+/// matrix through when idle: a guest writing $3F / $01 / $00 back to back
+/// (the takeover init's one-shot Select+Start trigger chased by an ACK
+/// sandwich) surfaces each value in order — each dwelling long enough for
+/// GB polls — and afterwards the player's own buttons flow (the resident
+/// BIOS's continuous pad forward).
+#[test]
+fn pad_feed_replays_latch_sequences_then_passes_the_matrix_through() {
+    let Some(mut cop) = build_cop(48_000) else {
+        return;
+    };
+    assert_eq!(cop.joypad_feed(), None, "matrix untouched before takeover");
+    let prog = [
+        0xA9, 0x3F, 0x8D, 0x04, 0x60, // LDA #$3F / STA $6004
+        0xA9, 0x01, 0x8D, 0x04, 0x60, // LDA #$01 / STA $6004
+        0xA9, 0x00, 0x8D, 0x04, 0x60, // LDA #$00 / STA $6004
+        0xDB, // STP
+    ];
+    {
+        let mut cpu = cop.cpu.borrow_mut();
+        cpu.write_ram(0x9000, &prog).unwrap();
+        cpu.set_pc(0x9000).unwrap();
+    }
+    cop.clock(8192);
+    let mut seen = Vec::new();
+    for _ in 0..8192 {
+        let f = cop.joypad_feed().expect("taken over");
+        if seen.last() != Some(&f[0]) {
+            seen.push(f[0]);
+        }
+    }
+    assert_eq!(
+        seen[..3],
+        [0x3F, 0x01, 0x00],
+        "every latch write surfaced, in order"
+    );
+    assert_eq!(
+        seen.get(3),
+        Some(&0xFF),
+        "then the idle matrix (nothing pressed) passes through"
+    );
+    // Queue drained: the local matrix (Select+Start = buttons $3, dpad $F,
+    // active low) passes through as the latch byte.
+    cop.set_input(0x0F, 0x03);
+    assert_eq!(
+        cop.joypad_feed(),
+        Some([0x3F, 0xFF, 0xFF, 0xFF]),
+        "player input forwards while the SNES side is idle"
+    );
+}
+
 #[path = "lib_tests_apu.rs"]
 mod apu;
 

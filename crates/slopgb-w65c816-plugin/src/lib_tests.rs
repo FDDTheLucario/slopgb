@@ -421,3 +421,36 @@ fn host_nmi_vectors_wakes_wai_and_consumes_once() {
     );
     assert!(cop.cpu.waiting, "back in the WAI loop");
 }
+
+/// Every pad-latch write between two host drains survives, in order: the
+/// latches carry sub-frame protocol sequences — the takeover init's one-shot
+/// Select+Start trigger ($3F) chased by the hook's $01/$00 ACK sandwich —
+/// that a per-flush latch snapshot aliases to just the final value.
+#[test]
+fn pad_latch_writes_ring_in_order() {
+    let mut cop = W65816Cop::new();
+    // STA $6004 with $3F, $01, $00 back to back, then STP.
+    let prog = [
+        0xA9, 0x3F, 0x8D, 0x04, 0x60, // LDA #$3F / STA $6004
+        0xA9, 0x01, 0x8D, 0x04, 0x60, // LDA #$01 / STA $6004
+        0xA9, 0x00, 0x8D, 0x04, 0x60, // LDA #$00 / STA $6004
+        0xDB,
+    ];
+    cop.write_ram(u32::from(PROG_ORG), &prog);
+    cop.cpu = Cpu::new();
+    cop.cpu.regs.pc = PROG_ORG;
+    cop.cycles = 0;
+    cop.run_until(2_000);
+
+    let ring = cop.read_ram(HW_PAD_RING, 2 + 2 * 64);
+    let n = usize::from(ring[0]);
+    assert_eq!(ring[1], 0, "no overflow");
+    let entries: Vec<(u8, u8)> = (0..n).map(|i| (ring[2 + i * 2], ring[3 + i * 2])).collect();
+    assert_eq!(
+        entries,
+        vec![(0, 0x3F), (0, 0x01), (0, 0x00)],
+        "every latch write captured in order"
+    );
+    let again = cop.read_ram(HW_PAD_RING, 2);
+    assert_eq!(again[0], 0, "the drain consumed the ring");
+}

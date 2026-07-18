@@ -123,6 +123,18 @@ const HW_DMA_STALL: u32 = 0x0100_3001;
 const HW_PORT_RING: u32 = 0x0100_4000;
 /// The plugin's port-ring capacity.
 const PORT_RING_CAP: usize = 16384;
+/// `R len 2 + 2*PAD_RING_CAP` (drains): the ordered ICD2 pad-latch write
+/// ring — `[n, overflow]` then `(reg, value)` pairs.
+const HW_PAD_RING: u32 = 0x0100_5000;
+/// The plugin's pad-latch ring capacity.
+const PAD_RING_CAP: usize = 64;
+/// Queued feed snapshots kept at most (oldest dropped).
+const FEED_QUEUE_CAP: usize = 128;
+/// GB steps each queued feed snapshot dwells on the pad — about a flush's
+/// worth, so every value of a latch sequence is visible to several of the
+/// GB's poll iterations (a hardware latch write persists until the BIOS's
+/// next per-frame pad forward).
+const FEED_DWELL_STEPS: u32 = 1024;
 /// The plugin's ring capacity (drain reads size to this).
 const MMIO_RING_CAP: usize = 512;
 /// Shadow offsets within the `$4200` block.
@@ -327,10 +339,22 @@ pub struct SgbCoprocessor {
     /// Teed GB packets awaiting deposit into the plugin's ICD2 mailbox
     /// (deposited one per flush, only when the guest cleared `$6002`).
     pending_packets: VecDeque<[u8; 16]>,
-    /// Pad latches the SNES program wrote (`$6004-$6007`), re-read from the
-    /// plugin each flush once its sticky written flag arms. Transient — the
-    /// next flush refreshes it from the (serialized) plugin state.
-    feed: Option<[u8; 4]>,
+    /// The SNES program has written a pad latch at least once (the plugin's
+    /// sticky flag): the joypad is taken over. Transient — refreshed from
+    /// the (serialized) plugin state each flush.
+    pads_taken: bool,
+    /// The latches' final state as of the last flush (the base the ring's
+    /// incremental writes build on). Transient like `pads_taken`.
+    pads_shadow: [u8; 4],
+    /// One feed snapshot per drained pad-latch write, oldest first. Each is
+    /// held on the GB pad for [`FEED_DWELL_STEPS`] steps before the next
+    /// pops, so the GB's polls see every value of a sub-flush latch sequence
+    /// (on hardware a latch write persists until the BIOS's next per-frame
+    /// pad forward). Transient: re-derives from the plugin's latch state.
+    feed_queue: VecDeque<[u8; 4]>,
+    /// Steps the current head of `feed_queue` (already popped into
+    /// `pads_shadow`) remains on the pad.
+    feed_hold: u32,
     /// GB frame position (T-cycles, mod one frame) for the `$6000` LCD-row
     /// shadow.
     gb_pos: u64,
@@ -457,7 +481,10 @@ impl SgbCoprocessor {
             data_trn_sig: 0,
             jump: None,
             pending_packets: VecDeque::new(),
-            feed: None,
+            pads_taken: false,
+            pads_shadow: [0xFF; 4],
+            feed_queue: VecDeque::new(),
+            feed_hold: 0,
             gb_pos: 0,
             pending_trn: VecDeque::new(),
             trn_flip: false,
@@ -909,13 +936,35 @@ impl SgbCoprocessor {
             }
             // 4. Run the 65C816 to its target (or the event floor's position).
             let _ = cpu.run_until(self.cpu_target.max(self.cpu_pos));
-            // ICD2, SNES→GB half: pull the pad latches the program wrote.
-            // The sticky flag gates the feed — before the SNES side takes
-            // over the joypad, the GB's local matrix must stay live.
+            // ICD2, SNES→GB half: drain the ordered pad-latch write ring.
+            // Every write becomes one queued feed snapshot, so a sub-flush
+            // protocol sequence (the takeover init's one-shot Select+Start
+            // trigger chased by the hook's ACK sandwich) reaches the GB one
+            // value per step instead of collapsing to the final latch state.
+            // The sticky written flag still gates the takeover as a whole —
+            // before the SNES side writes a latch, the GB's local matrix
+            // must stay live.
             if let Ok(v) = cpu.read_ram(HW_PADS, 5) {
                 if let [p1, p2, p3, p4, written] = v[..] {
                     if written != 0 {
-                        self.feed = Some([p1, p2, p3, p4]);
+                        self.pads_taken = true;
+                        self.pads_shadow = [p1, p2, p3, p4];
+                    }
+                }
+            }
+            if let Ok(ring) = cpu.read_ram(HW_PAD_RING, 2 + 2 * PAD_RING_CAP) {
+                if ring.len() >= 2 {
+                    let n = usize::from(ring[0]);
+                    let mut pads = self.feed_queue.back().copied().unwrap_or(self.pads_shadow);
+                    for i in 0..n {
+                        let (r, v) = (ring[2 + i * 2], ring[3 + i * 2]);
+                        if usize::from(r) < 4 {
+                            pads[usize::from(r)] = v;
+                            self.feed_queue.push_back(pads);
+                        }
+                    }
+                    while self.feed_queue.len() > FEED_QUEUE_CAP {
+                        self.feed_queue.pop_front();
                     }
                 }
             }
@@ -1058,7 +1107,27 @@ impl AudioCoprocessor for SgbCoprocessor {
         SgbCoprocessor::poll(self, cmds);
     }
     fn joypad_feed(&mut self) -> Option<[u8; 4]> {
-        self.feed
+        // Queued latch writes first, each dwelling long enough for the GB's
+        // polls to see it (ordered protocol sequences — an ACK handshake, a
+        // one-shot phase trigger). With the queue idle, forward the local
+        // matrix — the resident BIOS's continuous pad pass-through, the
+        // only way the player's buttons reach a taken-over GB (ICD2 latch
+        // encoding: buttons high nibble, d-pad low, active low).
+        if self.feed_hold > 0 {
+            self.feed_hold -= 1;
+            return Some(self.pads_shadow);
+        }
+        if let Some(pads) = self.feed_queue.pop_front() {
+            self.pads_shadow = pads;
+            self.feed_hold = FEED_DWELL_STEPS;
+            return Some(pads);
+        }
+        if self.pads_taken {
+            let (dpad, buttons) = self.input;
+            Some([buttons << 4 | dpad & 0x0F, 0xFF, 0xFF, 0xFF])
+        } else {
+            None
+        }
     }
     fn set_input(&mut self, dpad: u8, buttons: u8) {
         self.input = (dpad, buttons);
