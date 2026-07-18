@@ -747,7 +747,20 @@ impl SgbCoprocessor {
         // PPU/DMA routing grows here).
         let captured: Vec<(u16, u8)> = {
             let mut cpu = self.cpu.borrow_mut();
-            match cpu.read_ram(HW_MMIO_RING, 3 + 3 * MMIO_RING_CAP) {
+            // Two-phase drain: a 3-byte header probe reports the pending
+            // count without draining; the 48 KB bulk read runs only when
+            // there is something to carry (the full-window read every flush
+            // dominated the frame budget).
+            let pending = match cpu.read_ram(HW_MMIO_RING, 3) {
+                Ok(h) if h.len() >= 2 => usize::from(h[0]) | usize::from(h[1]) << 8,
+                _ => 0,
+            };
+            let bulk = if pending > 0 {
+                cpu.read_ram(HW_MMIO_RING, 3 + 3 * MMIO_RING_CAP)
+            } else {
+                Ok(Vec::new())
+            };
+            match bulk {
                 Ok(buf) if buf.len() >= 3 => {
                     let n = usize::from(buf[0]) | usize::from(buf[1]) << 8;
                     if buf[2] != 0 {
@@ -873,7 +886,18 @@ impl SgbCoprocessor {
             for _ in 0..MAX_MEDIATION_ROUNDS {
                 let events: Vec<(u8, u8)> = {
                     let mut cpu = self.cpu.borrow_mut();
-                    match cpu.read_ram(HW_PORT_RING, 3 + 2 * PORT_RING_CAP) {
+                    // Two-phase drain (see the MMIO ring): header probe
+                    // first, the 32 KB bulk read only when non-empty.
+                    let pending = match cpu.read_ram(HW_PORT_RING, 3) {
+                        Ok(h) if h.len() >= 2 => usize::from(h[0]) | usize::from(h[1]) << 8,
+                        _ => 0,
+                    };
+                    let bulk = if pending > 0 {
+                        cpu.read_ram(HW_PORT_RING, 3 + 2 * PORT_RING_CAP)
+                    } else {
+                        Ok(Vec::new())
+                    };
+                    match bulk {
                         Ok(buf) if buf.len() >= 3 => {
                             let n = usize::from(buf[0]) | usize::from(buf[1]) << 8;
                             if buf[2] != 0 {
@@ -959,7 +983,17 @@ impl SgbCoprocessor {
                     }
                 }
             }
-            if let Ok(ring) = cpu.read_ram(HW_PAD_RING, 2 + 2 * PAD_RING_CAP) {
+            // Two-phase drain (see the MMIO ring): header probe first.
+            let pad_pending = match cpu.read_ram(HW_PAD_RING, 2) {
+                Ok(h) if !h.is_empty() => usize::from(h[0]),
+                _ => 0,
+            };
+            let pad_bulk = if pad_pending > 0 {
+                cpu.read_ram(HW_PAD_RING, 2 + 2 * PAD_RING_CAP)
+            } else {
+                Ok(Vec::new())
+            };
+            if let Ok(ring) = pad_bulk {
                 if ring.len() >= 2 {
                     let n = usize::from(ring[0]);
                     let mut pads = self.feed_queue.back().copied().unwrap_or(self.pads_shadow);

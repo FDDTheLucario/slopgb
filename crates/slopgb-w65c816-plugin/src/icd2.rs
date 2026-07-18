@@ -163,10 +163,17 @@ impl Icd2 {
         (self.pads, self.pads_written)
     }
 
-    /// Drain the ordered pad-latch write ring (+ the sticky overflow flag).
-    pub(crate) fn host_drain_pad_ring(&mut self) -> (Vec<(u8, u8)>, bool) {
+    /// Pad-latch writes waiting in the ring (a peek — nothing drains).
+    pub(crate) fn pad_ring_pending(&self) -> usize {
+        self.pad_ring.len()
+    }
+
+    /// Drain up to `max` ordered pad-latch writes (+ take the sticky
+    /// overflow flag).
+    pub(crate) fn host_drain_pad_ring(&mut self, max: usize) -> (Vec<(u8, u8)>, bool) {
+        let n = self.pad_ring.len().min(max);
         (
-            std::mem::take(&mut self.pad_ring),
+            self.pad_ring.drain(..n).collect(),
             std::mem::take(&mut self.pad_ring_of),
         )
     }

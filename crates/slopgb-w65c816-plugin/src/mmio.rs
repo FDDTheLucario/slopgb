@@ -105,6 +105,11 @@ impl Mmio {
 
     // -- Host halves ---------------------------------------------------------
 
+    /// Captured writes waiting in the ring (a peek — nothing drains).
+    pub(crate) fn pending(&self) -> usize {
+        self.ring.len()
+    }
+
     /// Drain at most `n` captured writes, oldest first, leaving the rest
     /// queued (a host read shorter than the full ring must not lose writes).
     pub(crate) fn host_drain_up_to(&mut self, n: usize) -> Vec<(u16, u8)> {

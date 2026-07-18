@@ -487,3 +487,46 @@ fn mmio_ring_holds_a_full_flush_window_of_writes() {
     assert_eq!(ring[2], 0, "no overflow");
     assert_eq!(n, 1200, "every write of the burst captured");
 }
+
+/// A header-sized ring read reports the pending count without draining —
+/// the host probes cheaply every flush and pays the bulk copy only when
+/// events exist. Applies to all three rings.
+#[test]
+fn header_reads_report_without_draining() {
+    let mut cop = W65816Cop::new();
+    let prog = [
+        0xA9, 0x11, 0x8D, 0x41, 0x21, // STA $2141 (port ring)
+        0xA9, 0x22, 0x8D, 0x05, 0x21, // STA $2105 (mmio ring)
+        0xA9, 0x33, 0x8D, 0x04, 0x60, // STA $6004 (pad ring)
+        0xDB,
+    ];
+    cop.write_ram(u32::from(PROG_ORG), &prog);
+    cop.cpu = Cpu::new();
+    cop.cpu.regs.pc = PROG_ORG;
+    cop.cycles = 0;
+    cop.run_until(1000);
+
+    assert_eq!(cop.read_ram(HW_PORT_RING, 3)[0], 1, "port: header count");
+    assert_eq!(
+        cop.read_ram(HW_PORT_RING, 3)[0],
+        1,
+        "port: probe drained nothing"
+    );
+    assert_eq!(cop.read_ram(HW_MMIO_RING, 3)[0], 1, "mmio: header count");
+    assert_eq!(
+        cop.read_ram(HW_MMIO_RING, 3)[0],
+        1,
+        "mmio: probe drained nothing"
+    );
+    assert_eq!(cop.read_ram(HW_PAD_RING, 2)[0], 1, "pad: header count");
+    assert_eq!(
+        cop.read_ram(HW_PAD_RING, 2)[0],
+        1,
+        "pad: probe drained nothing"
+    );
+
+    // Full reads still drain.
+    let full = cop.read_ram(HW_PORT_RING, 3 + 2 * PORT_RING_CAP);
+    assert_eq!((full[0], full[3], full[4]), (1, 1, 0x11));
+    assert_eq!(cop.read_ram(HW_PORT_RING, 3)[0], 0, "port drained");
+}

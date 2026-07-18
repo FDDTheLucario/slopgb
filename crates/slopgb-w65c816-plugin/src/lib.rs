@@ -363,40 +363,64 @@ impl W65816Cop {
                 }
             }
             HW_PAD_RING if out.len() >= 2 => {
-                let (ring, of) = icd2.host_drain_pad_ring();
-                let n = ring.len().min((out.len() - 2) / 2);
-                out[0] = n as u8;
-                out[1] = u8::from(of);
-                for (i, &(r, v)) in ring.iter().take(n).enumerate() {
-                    out[2 + i * 2] = r;
-                    out[3 + i * 2] = v;
+                // A header-sized read (no room for entries) reports the
+                // pending count without draining, so an idle host can skip
+                // the bulk copy; a larger read drains what fits.
+                let fits = (out.len() - 2) / 2;
+                if fits == 0 {
+                    out[0] = icd2.pad_ring_pending().min(255) as u8;
+                } else {
+                    let (ring, of) = icd2.host_drain_pad_ring(fits);
+                    out[0] = ring.len() as u8;
+                    out[1] = u8::from(of);
+                    for (i, &(r, v)) in ring.iter().enumerate() {
+                        out[2 + i * 2] = r;
+                        out[3 + i * 2] = v;
+                    }
                 }
             }
             HW_PORT_RING if out.len() >= 3 => {
-                let n = self.bus.port_ring.len().min((out.len() - 3) / 2);
-                out[0] = n as u8;
-                out[1] = (n >> 8) as u8;
-                out[2] = u8::from(std::mem::take(&mut self.bus.port_ring_of));
-                for (i, &(p, v)) in self.bus.port_ring.iter().take(n).enumerate() {
-                    out[3 + i * 2] = p;
-                    out[4 + i * 2] = v;
+                // Header-sized read: pending count only, nothing drains.
+                let fits = (out.len() - 3) / 2;
+                if fits == 0 {
+                    let n = self.bus.port_ring.len();
+                    out[0] = n as u8;
+                    out[1] = (n >> 8) as u8;
+                    out[2] = u8::from(self.bus.port_ring_of);
+                } else {
+                    let n = self.bus.port_ring.len().min(fits);
+                    out[0] = n as u8;
+                    out[1] = (n >> 8) as u8;
+                    out[2] = u8::from(std::mem::take(&mut self.bus.port_ring_of));
+                    for (i, &(p, v)) in self.bus.port_ring.iter().take(n).enumerate() {
+                        out[3 + i * 2] = p;
+                        out[4 + i * 2] = v;
+                    }
+                    self.bus.port_ring.drain(..n);
                 }
-                self.bus.port_ring.drain(..n);
             }
             HW_MMIO_RING if out.len() >= 3 => {
                 let mmio = &mut self.bus.mmio;
-                // Drain only what this read can carry — a short read must
-                // not lose captured writes.
-                let drained = mmio.host_drain_up_to((out.len() - 3) / 3);
-                let n = drained.len() as u16;
-                out[0] = n as u8;
-                out[1] = (n >> 8) as u8;
-                out[2] = u8::from(mmio.overflowed());
-                for (i, &(a, v)) in drained.iter().enumerate() {
-                    let base = 3 + i * 3;
-                    out[base] = a as u8;
-                    out[base + 1] = (a >> 8) as u8;
-                    out[base + 2] = v;
+                // Header-sized read: pending count only, nothing drains —
+                // an idle host skips the bulk copy. A larger read drains
+                // only what it can carry (never losing captured writes).
+                let fits = (out.len() - 3) / 3;
+                if fits == 0 {
+                    let n = mmio.pending() as u16;
+                    out[0] = n as u8;
+                    out[1] = (n >> 8) as u8;
+                } else {
+                    let drained = mmio.host_drain_up_to(fits);
+                    let n = drained.len() as u16;
+                    out[0] = n as u8;
+                    out[1] = (n >> 8) as u8;
+                    out[2] = u8::from(mmio.overflowed());
+                    for (i, &(a, v)) in drained.iter().enumerate() {
+                        let base = 3 + i * 3;
+                        out[base] = a as u8;
+                        out[base + 1] = (a >> 8) as u8;
+                        out[base + 2] = v;
+                    }
                 }
             }
             _ => {}
