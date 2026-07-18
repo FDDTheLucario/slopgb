@@ -135,6 +135,9 @@ const HW_PAD_RING: u32 = 0x0100_5000;
 const PAD_RING_CAP: usize = 64;
 /// Queued feed snapshots kept at most (oldest dropped).
 const FEED_QUEUE_CAP: usize = 128;
+/// Streamed character rows held for flush-paced delivery (oldest dropped;
+/// ~a frame's worth of bands).
+const CHAR_QUEUE_CAP: usize = 24;
 /// GB steps each queued feed snapshot dwells on the pad — about a flush's
 /// worth, so every value of a latch sequence is visible to several of the
 /// GB's poll iterations (a hardware latch write persists until the BIOS's
@@ -312,6 +315,9 @@ pub struct SgbCoprocessor {
     /// The `$7800` buffer (`row % 4`) the last streamed character row
     /// landed in — the `$6000` write-row shadow. Transient.
     char_write_row: u8,
+    /// Streamed character rows awaiting flush delivery (one per flush, so
+    /// the guest sees every `$6000` write-row value). Transient.
+    char_queue: VecDeque<(u8, Box<[u8; 320]>)>,
     /// Furthest cycles each chip has actually been run to — ahead of the
     /// targets after a mediation burst (each replayed port event owes the
     /// SPC700 a consume slice and the 65C816 a produce slice). The next
@@ -479,6 +485,7 @@ impl SgbCoprocessor {
             spc_pos: 0,
             cpu_pos: 0,
             char_write_row: 0,
+            char_queue: VecDeque::new(),
             spc_acc: 0,
             cpu_acc: 0,
             pending_gb: 0,
@@ -805,6 +812,14 @@ impl SgbCoprocessor {
         }
         {
             let mut cpu = self.cpu.borrow_mut();
+            // One character row per flush: land it in its rotating buffer
+            // and advance the $6000 write-row shadow so the guest observes
+            // every band value in sequence (18 bands/frame vs ~17 flushes
+            // — near-lockstep with the real stream).
+            if let Some((band, data)) = self.char_queue.pop_front() {
+                let _ = cpu.write_ram(HW_CHAR_ROWS + u32::from(band % 4) * 320, &data[..]);
+                self.char_write_row = band % 4;
+            }
             let _ = cpu.write_ram(HW_LCD_ROW, &[row, self.char_write_row]);
             // The SNES frame clock: scale the GB frame position onto the
             // 262-line NTSC frame; on the vblank edges maintain the RDNMI

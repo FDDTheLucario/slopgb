@@ -48,13 +48,18 @@ impl SgbCoprocessor {
             }
             self.pending_packets.push_back(p);
         }
-        // ICD2 character rows: the GB screen's 8-line bands stream into the
-        // plugin's four rotating `$7800` buffers (row % 4 — fullsnes "SGB
-        // Port 7800h"), where the SNES side DMAs them into VRAM.
-        while let Some((row, data)) = cmds.take_char_row() {
-            let cpu = self.cpu.get_mut();
-            let _ = cpu.write_ram(HW_CHAR_ROWS + u32::from(row % 4) * 320, &data[..]);
-            self.char_write_row = row % 4;
+        // ICD2 character rows: collect the GB screen's 8-line bands here;
+        // the flush delivers them into the plugin's four rotating `$7800`
+        // buffers ONE PER FLUSH — the guest CPU runs a flush behind the GB,
+        // so delivering a whole frame's bands at once skips `$6000`
+        // write-row values faster than the SNES side can poll them, and
+        // the missed bands land stale (Space Invaders' playfield assembled
+        // its invader row into the wrong vertical bands).
+        while let Some(row) = cmds.take_char_row() {
+            if self.char_queue.len() >= CHAR_QUEUE_CAP {
+                self.char_queue.pop_front();
+            }
+            self.char_queue.push_back(row);
         }
         // SOUND ($08): a play request. Deposit the effect id + a trigger in the
         // CPU's mailbox; the 65C816 shim forwards them to the SPC700 driver.
