@@ -83,8 +83,18 @@ on the existing `read_ram`/`write_ram` calls:
   existing caller is untouched and a generic host sees one uniform ABI.
 - Host pump protocol (per `flush`): deposit the next teed GB packet **only
   when the guest-visible `$6002` flag is clear** (read via the window — never
-  overwrite an unconsumed packet); read the pad latches and hand them to
-  `AudioCoprocessor::joypad_feed`; refresh the LCD-row shadow.
+  overwrite an unconsumed packet); drain the ordered pad-latch write ring;
+  refresh the LCD-row shadow.
+- **Pad-latch delivery is ordered, not sampled**: every `$6004-$6007` write
+  rings (cap 64, drained at `HW_PAD_RING`) because the latches carry
+  sub-frame protocol sequences — the takeover hook's `$01`/`$00` ACK
+  sandwich, and the arcade init's one-shot `$3F` (Select+Start) phase
+  trigger, which a per-flush latch snapshot aliased away entirely. The
+  coprocessor feeds one snapshot per ~flush of GB steps
+  (`FEED_DWELL_STEPS`) so the GB's polls see each value, then **passes the
+  local matrix through** while the SNES side is idle — the resident BIOS's
+  continuous per-frame pad forward, and the only path by which the
+  player's buttons reach a taken-over GB at all.
 
 Read-side-effect strategy, explicitly: the flag-clear on `$7000` and the
 `$7800` index auto-increment run inside the plugin's `Bus::read` (synchronous,

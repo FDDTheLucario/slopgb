@@ -68,25 +68,71 @@ disassembly of the teed bytes):
 - **The arcade program head (`$7F:0100`)**: `JMP $0106` (an RTI — the
   disarmed NMI entry; the byte-0 arm patch flips the flow), `JMP $0107`
   (the init entry the second JUMP targets). The init clears DP `$1000+`,
-  writes `$FE` to `$2140`, and uploads two sound-data blocks to the SPC700
-  through the **standard IPL boot-ROM protocol** (`CMP $2140` for `$BBAA`,
-  then the kick/index/ack pump) — which is why the coprocessor boots the
+  writes `$FE` to `$2140`, and drives the SPC700 through the **standard
+  IPL boot-ROM protocol** — which is why the coprocessor boots the
   chip's IPL ROM instead of parking it in the resident square driver.
 
-**Current wall (next session's entry point)**: the delivery pipeline is
-fixed (FIFO payload pairing, ping-pong staging, and the guest-side
-delivery mailbox the resident main-service body consumes — publishes now
-serialize with the hook exactly like the single-threaded real BIOS). The
-60 KB program upload survives intact, the second JUMP lands, and the
-arcade program **executes**, driving its sound-driver upload through the
-SPC700 IPL ROM — until ~byte 244 of block 1, where the flush-batched APU
-port mediation deadlocks the per-byte handshake (SNES waiting for echo
-`$F4`, the IPL's Y at ~`$60`): repeating mod-256 index values across
-sticky per-flush port snapshots alias, and the two sides lose lockstep.
-Fix direction: ordered port-write replay — capture the 65C816's
-`$2140-$2143` writes in sequence (a ring like the MMIO one) and replay
-them to the SPC one at a time, pacing on its echoes, instead of
-delivering only each flush's final latch values.
+## The init's full sequence (all pinned from the uploaded bytes)
+
+The loader at `$7F:0171` has two entries: `$016A` (skip-handshake —
+continue an open IPL session with the current kick byte at DP `$0C`) and
+`$0171` (wait for the 16-bit `$BBAA` announce on `$2140`, then kick
+`$CC`). Chain headers are `[len16, dest16]`: `dest == 0` returns (chain
+end, nothing sent); `len == 0, dest != 0` sends the **IPL entry command**
+(port 1 = 0 + kick — the SPC jumps to `dest`). The init:
+
+1. `JSL $0171` with chain pointer `$7F:01DA` — chain 1: the APU driver
+   (`$17BC → $0800`), an echo table (`$64 → $2E00`), a five-entry sample
+   directory (`$14 → $2F00`), the BRR bank (`$5A5A → $2F6D`, ending
+   byte-exactly at the directory's samples), then **entry `$FFC0`** — the
+   IPL restarts and re-announces.
+2. `JSL $0171` with pointer `$7F:747C` (= the byte after chain 1's entry
+   header) — chain 2: the music/data chains, ending with the entry into
+   the uploaded driver at `$0800` (which unmaps the IPL via `CONTROL`).
+3. Pad latch `$6004 = $3F` — **Select+Start on the wire**: the GB's poll
+   (`$106C`) derives `D751 = $0C`, the phase machine's first content
+   request. One shot; the hook's ACK sandwich overwrites it within
+   microseconds (why the latch needs ordered delivery, below).
+4. `JML $001800` — back to the bootstrap service loop.
+
+## The GB-side phase machine (ROM `$31E0-$3248`, bank 3 templates)
+
+After the second JUMP the GB loops `CALL $106C / LD A,(D767) / CP (D751)`
+until the pad byte changes, then dispatches: `$0C` → stream the content
+table at `$3343` + `JUMP $7F:2000` (NMI `$7F:2003`); `$0E` → table
+`$334A` + `JUMP $7F:2006`; `$0D` → table `$334E`. `D751` is the plain
+CPL'd joypad byte (dpad high nibble, buttons low) — `$0C` = Select+Start
+— so the **content phases are driven by pad-latch values**: the init's
+one-shot `$3F` starts phase 2, and afterwards the *player's* Select+Start
+(reaching the GB through the resident BIOS's continuous pad forward)
+drives the later dispatches. The 15-block initial stream is table
+`$333E`'s count, by design.
+
+## Resolved walls (each was a host-model defect, never the pilot's)
+
+- **`*_TRN` capture clock**: captures fire one GB-frame after the command
+  on a machine-clocked window (core `SgbView::trn_countdown`) — the GB's
+  line-144 boundary loses latches across LCD-off stretches (blocks 7/10
+  duplicated → the chain-1 entry header vanished), and command-time
+  capture is too early (the pilot sends `$10` while still drawing;
+  block 1 landed with its header bytes blank).
+- **APU port mediation**: the 65C816's `$2140-43` writes ring in order
+  (cap 16384) and replay per-event with minimum consume/produce slices,
+  in rounds inside each flush — an echo-paced upload advances one byte
+  per round, so single-round mediation moved one byte per flush and
+  aliased the mod-256 index handshake.
+- **Pad-latch delivery**: `$6004-$6007` writes ring in order too
+  (HW_PAD_RING); the coprocessor feeds one snapshot per dwell to the GB
+  and passes the local matrix through when the queue idles — the
+  resident BIOS's per-frame pad forward, and the only path for player
+  input into a taken-over GB.
+
+With all three in place the pilot runs end to end: both IPL chains
+upload, the driver takes the APU (live port-3 dispatch traffic), the
+init's `$3F` fires phase 2, the GB streams the stage tables and sends
+`JUMP $7F:2000`, the arcade game's own main loop runs (`$7F:207E` +
+subroutines, own stack at `$1FFx`), and a real Select+Start press
+reaches `D751` and advances the phase (`JUMP $7F:2006` observed).
 
 ## Provenance / clean-room note
 

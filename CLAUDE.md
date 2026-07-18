@@ -141,7 +141,9 @@ emulated s.
 Baseline (all green, on `main`): mooneye **93/93**, gbtr v7.0 **215/0**, core lib +
 frontend green, clippy clean. Missing ROMs skip unless `SLOPGB_REQUIRE_ROMS=1` (run
 `test-roms/download.sh` first). The SameBoy cycle-exact port, SGB support (SPC700 +
-S-DSP audio, BIOS, border) and the bgb-UI clone (debugger, viewers, Options, link,
+S-DSP audio, BIOS, border, and the SNES-side LLE: 65C816 + SNES-PPU plugins, GP-DMA,
+autopoll, the arcade-takeover runtime — Space Invaders' ARCADE mode runs its own
+SNES program end to end) and the bgb-UI clone (debugger, viewers, Options, link,
 opt-in boot ROM, MCP) are all merged — per-area detail in
 [`docs/ui-state/`](docs/ui-state/README.md) + [`docs/hardware-state/`](docs/hardware-state/README.md).
 UI theming (contemporary Light default / Dark / Classic + custom-theme API; colour-only,
