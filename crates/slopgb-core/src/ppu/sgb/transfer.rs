@@ -31,11 +31,17 @@ fn decode_tiles(shade: &[u8; SCREEN_PIXELS], n_tiles: usize) -> Vec<u8> {
 }
 
 impl SgbView {
-    /// Latch a `*_TRN` destination (`TR_*`); the capture happens at the next
-    /// frame boundary via [`Self::run_pending_transfer`]. Last write wins if two
-    /// transfers are requested in the same frame.
+    /// Latch a `*_TRN` destination (`TR_*`) and capture the screen right away.
+    /// The screen must already show the payload when the command is sent (Pan
+    /// Docs "SGB Functions — VRAM Transfer") and games hold it stable through
+    /// the transfer, so the just-streamed [`SgbView::shade_buf`] is the
+    /// payload. Waiting for the GB's own line-144 boundary instead loses a
+    /// screen whenever a game sends two `*_TRN`s without reaching vblank in
+    /// between (Space Invaders' DATA_TRN stream): the hardware capture clock
+    /// is the free-running SNES vblank, which the GB LCD state never stalls.
     pub(super) fn latch_transfer(&mut self, dest: u8) {
         self.pending_transfer = Some(dest);
+        self.run_pending_transfer();
     }
 
     /// Consume a pending `*_TRN`: decode the just-rendered screen and route the

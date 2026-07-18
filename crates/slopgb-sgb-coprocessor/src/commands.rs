@@ -10,27 +10,20 @@ impl SgbCoprocessor {
         // core-side tee; the flush pump deposits one per guest consume).
         while let Some(p) = cmds.take_packet() {
             // DATA_TRN ($10) names its SNES-WRAM dest in the header (Pan
-            // Docs "SGB Command $10": lo, hi, bank); the 4 KB payload rides
-            // the next frame's screen capture — remember where to land it.
+            // Docs "SGB Command $10": lo, hi, bank). The core captures the
+            // 4 KB screen payload during the same command execution that
+            // produced this packet, so the current capture buffer is exactly
+            // this packet's payload — pair the two right here.
             if p[0] >> 3 == 0x10 {
-                // DATA_TRN completes when its screen payload lands, one
-                // frame later — defer the dest copy + BIOS-runtime variable
-                // update until then. A new $10 packet proves the previous
-                // pending transfer's payload completed (the GB serializes
-                // packet → payload strictly), so flush it now even if the
-                // throttled edge hasn't fired — pairing each payload with
-                // its own packet's dest, never a newer one's.
-                if !self.pending_trn.is_empty() {
-                    if let Some(data) = cmds.data_trn_data() {
-                        self.data_trn_sig = checksum(data);
-                        let data = data.to_vec();
-                        self.apply_pending_trn(&data);
-                    }
-                }
                 while self.pending_trn.len() >= PACKET_QUEUE_CAP {
                     self.pending_trn.pop_front();
                 }
                 self.pending_trn.push_back(p);
+                if let Some(data) = cmds.data_trn_data() {
+                    self.data_trn_sig = checksum(data);
+                    let data = data.to_vec();
+                    self.apply_pending_trn(&data);
+                }
             } else if p[0] >> 3 == 0x12 && p[4..7] != [0, 0, 0] {
                 // JUMP ($12) bytes 4-6: the SNES NMI handler address — "the
                 // NMI handler remains unchanged if all bytes 4-6 are zero"
@@ -70,14 +63,6 @@ impl SgbCoprocessor {
             if sig != self.sou_trn_sig {
                 self.sou_trn_sig = sig;
                 self.upload_transfer(data);
-            }
-        }
-        if let Some(data) = cmds.data_trn_data() {
-            let sig = checksum(data);
-            if sig != self.data_trn_sig {
-                self.data_trn_sig = sig;
-                let data = data.to_vec();
-                self.apply_pending_trn(&data);
             }
         }
         if let Some(flags) = cmds.flags() {
