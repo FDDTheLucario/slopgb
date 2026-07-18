@@ -422,97 +422,6 @@ fn jump_redirects_the_snes_cpu() {
     );
 }
 
-/// The headline: a bare SGB SOUND ($08) command produces audio through the whole
-/// clean-room chain — the mailbox is set in the 65C816 plugin's RAM, its shim
-/// forwards it to the SPC700 comm port (mediated by the host between the two
-/// loaded plugins), the SPC700 driver wakes and keys the S-DSP, and the S-DSP
-/// synthesizes a tone. No game driver, no BIOS. A non-zero peak proves both
-/// chips executed their firmware in wasm.
-#[test]
-fn sound_command_drives_the_firmware_chain_to_audio() {
-    let Some(mut cop) = build_cop(48_000) else {
-        return;
-    };
-    let mut cmds = TestCmds::default();
-    cmds.sounds.push(SgbSound {
-        effect_a: 0x40,
-        effect_b: 0x00,
-        attenuation: 0x00,
-        effect_bank: 0x00,
-    });
-    cop.poll(&mut cmds); // mailbox note = 0x40, trigger = 1
-
-    for _ in 0..8 {
-        cop.clock(70_224);
-    }
-    assert!(
-        peak(&cop.out) > 0.0,
-        "SOUND drove 65C816 -> SPC700 -> S-DSP to audible output",
-    );
-    // The 65C816 really forwarded the mailbox to the SPC700 comm ports (the
-    // host-mediated values that crossed into the SPC plugin).
-    assert_eq!(cop.to_spc[0], 0x40, "shim forwarded the note to APUIO0");
-    assert_ne!(cop.to_spc[1], 0x00, "shim forwarded the trigger to APUIO1");
-}
-
-/// A game that ships its own SPC700 driver via SOU_TRN still plays — the upload
-/// replaces the resident driver and starts it (the path the built-in also has).
-#[test]
-fn sou_trn_game_driver_still_plays() {
-    let Some(mut cop) = build_cop(48_000) else {
-        return;
-    };
-    // An unconditional tone driver (no port poll): program@$0400 sets up the DSP
-    // and spins. Same clean-room construction as the resident driver, minus the
-    // wait loop.
-    let mut prog = vec![0x20u8]; // CLRP
-    let mov = |dp: u8, imm: u8| [0x8F, imm, dp];
-    for (dp, imm) in [
-        (0x6Cu8, 0x00u8),
-        (0x5D, 0x02),
-        (0x0C, 0x7F),
-        (0x1C, 0x7F),
-        (0x00, 0x7F),
-        (0x01, 0x7F),
-        (0x02, 0x00),
-        (0x03, 0x10),
-        (0x04, 0x00),
-        (0x05, 0x00),
-        (0x07, 0x7F),
-        (0x4C, 0x01),
-    ] {
-        prog.extend_from_slice(&mov(0xF2, dp));
-        prog.extend_from_slice(&mov(0xF3, imm));
-    }
-    prog.extend_from_slice(&[0x2F, 0xFE]); // BRA *
-    let dir = [0x10u8, 0x02, 0x10, 0x02];
-    let brr = [0x93u8, 0x77, 0x77, 0x77, 0x77, 0x88, 0x88, 0x88, 0x88];
-    let mut block = Vec::new();
-    let mut push = |dest: u16, data: &[u8]| {
-        block.extend_from_slice(&dest.to_le_bytes());
-        block.extend_from_slice(&(data.len() as u16).to_le_bytes());
-        block.extend_from_slice(data);
-    };
-    push(0x0400, &prog);
-    push(0x0200, &dir);
-    push(0x0210, &brr);
-
-    let mut cmds = TestCmds {
-        sou_trn: Some(block),
-        ..Default::default()
-    };
-    for _ in 0..64 {
-        cop.poll(&mut cmds); // the SOU_TRN getter opens on the 64th poll
-    }
-    for _ in 0..8 {
-        cop.clock(70_224);
-    }
-    assert!(
-        peak(&cop.out) > 0.0,
-        "the uploaded SOU_TRN driver synthesized audio"
-    );
-}
-
 /// The coprocessor round-trips through a save state (both plugins' chip state +
 /// the host accumulators), so an injected machine can still save/load.
 #[test]
@@ -804,11 +713,10 @@ fn nmi_handler_preserves_a_with_empty_vector() {
     );
 }
 
-/// DATA_TRN pairing under stream skew: a payload always lands at the dest
-/// of the packet it belongs to, even when the next $10 packet arrives
-/// before the throttled payload edge fires — the new packet's arrival
-/// proves the previous payload completed (the GB serializes them), so the
-/// pending pair is applied immediately.
+/// DATA_TRN pairing: the core captures the payload during the same command
+/// execution that tees the $10 packet, so the capture visible at a packet's
+/// arrival is that packet's own payload — each pairs immediately, back to
+/// back, with no cross-talk between consecutive transfers.
 #[test]
 fn data_trn_pairs_payloads_with_their_own_packets() {
     let Some(mut cop) = build_cop(48_000) else {
@@ -819,24 +727,12 @@ fn data_trn_pairs_payloads_with_their_own_packets() {
     pkt1[1] = 0x00; // dest $7F:0100
     pkt1[2] = 0x01;
     pkt1[3] = 0x7F;
-    let payload1: Vec<u8> = vec![0xAB; 64];
     let mut cmds = TestCmds {
         packets: vec![pkt1],
+        data_trn: Some(vec![0xAB; 64]),
         ..TestCmds::default()
     };
-    cop.poll(&mut cmds); // pkt1 teed; payload not yet visible
-
-    let mut pkt2 = [0u8; 16];
-    pkt2[0] = 0x10 << 3 | 1;
-    pkt2[1] = 0x00; // dest $7F:9100
-    pkt2[2] = 0x91;
-    pkt2[3] = 0x7F;
-    let mut cmds = TestCmds {
-        packets: vec![pkt2],
-        data_trn: Some(payload1.clone()),
-        ..TestCmds::default()
-    };
-    cop.poll(&mut cmds); // pkt2's arrival must flush (payload1 -> pkt1's dest)
+    cop.poll(&mut cmds);
     assert_eq!(
         cop.debug_cpu_ram(0x7F_0100, 4),
         vec![0xAB; 4],
@@ -859,15 +755,17 @@ fn data_trn_pairs_payloads_with_their_own_packets() {
         "the published packet is packet 1 (its dest bytes)"
     );
 
-    // Payload 2 arrives; the throttled edge pairs it with packet 2.
-    let payload2: Vec<u8> = vec![0xCD; 64];
+    let mut pkt2 = [0u8; 16];
+    pkt2[0] = 0x10 << 3 | 1;
+    pkt2[1] = 0x00; // dest $7F:9100
+    pkt2[2] = 0x91;
+    pkt2[3] = 0x7F;
     let mut cmds = TestCmds {
-        data_trn: Some(payload2),
+        packets: vec![pkt2],
+        data_trn: Some(vec![0xCD; 64]),
         ..TestCmds::default()
     };
-    for _ in 0..65 {
-        cop.poll(&mut cmds);
-    }
+    cop.poll(&mut cmds);
     assert_eq!(
         cop.debug_cpu_ram(0x7F_9100, 4),
         vec![0xCD; 4],
@@ -877,60 +775,6 @@ fn data_trn_pairs_payloads_with_their_own_packets() {
         cop.debug_cpu_ram(0x7F_0100, 4),
         vec![0xAB; 4],
         "packet 1's dest untouched by the second transfer"
-    );
-}
-
-/// The SPC700 boots its real IPL ROM, which speaks the documented upload
-/// protocol (fullsnes "Uploader"): announce $AA/$BB, $CC kick with a dest
-/// on ports 2/3 and a nonzero command on port 1, a per-byte index/ack
-/// pump, then an entry command (port 1 = 0) jumping to the uploaded code
-/// — whose own port write is visible after the jump. This is exactly the
-/// protocol the pilot's arcade loader drives (its terminator header sends
-/// command 0 with the entry address).
-#[test]
-fn spc_ipl_upload_protocol_round_trips() {
-    let Some((spc_wasm, _)) = plugins() else {
-        return;
-    };
-    let mut spc = slopgb_plugin_host::LoadedCoprocessor::load(&spc_wasm).unwrap();
-    spc.reset().unwrap();
-    let mut cyc = 0u64;
-    let run = |spc: &mut slopgb_plugin_host::LoadedCoprocessor, cyc: &mut u64| {
-        *cyc += 4_000;
-        spc.run_until(*cyc).unwrap();
-    };
-    // Wait for the announce.
-    run(&mut spc, &mut cyc);
-    assert_eq!(spc.port_read(0).unwrap(), 0xAA, "ready low");
-    assert_eq!(spc.port_read(1).unwrap(), 0xBB, "ready high");
-
-    // Upload `MOV $F6,#$5A / BRA *` to $0300 per the documented sequence.
-    let driver = [0x8F, 0x5A, 0xF6, 0x2F, 0xFE];
-    spc.port_write(2, 0x00).unwrap(); // dest $0300
-    spc.port_write(3, 0x03).unwrap();
-    spc.port_write(1, 0x01).unwrap(); // command: transfer
-    spc.port_write(0, 0xCC).unwrap(); // kick
-    run(&mut spc, &mut cyc);
-    assert_eq!(spc.port_read(0).unwrap(), 0xCC, "kick acknowledged");
-    for (i, &b) in driver.iter().enumerate() {
-        spc.port_write(1, b).unwrap();
-        spc.port_write(0, i as u8).unwrap();
-        run(&mut spc, &mut cyc);
-        assert_eq!(spc.port_read(0).unwrap(), i as u8, "byte {i} acked");
-    }
-    // Entry command: kick = (index+2)|1, command 0, address = $0300.
-    let kick = (driver.len() as u8 + 2) | 1;
-    spc.port_write(2, 0x00).unwrap();
-    spc.port_write(3, 0x03).unwrap();
-    spc.port_write(1, 0x00).unwrap();
-    spc.port_write(0, kick).unwrap();
-    run(&mut spc, &mut cyc);
-    assert_eq!(spc.port_read(0).unwrap(), kick, "entry acknowledged");
-    run(&mut spc, &mut cyc);
-    assert_eq!(
-        spc.port_read(2).unwrap(),
-        0x5A,
-        "the uploaded driver runs (its port-2 marker visible)"
     );
 }
 
@@ -1084,6 +928,9 @@ fn no_autopoll_without_the_guest_enabling_it() {
         "JOY1 shadow untouched with autopoll disabled"
     );
 }
+
+#[path = "lib_tests_apu.rs"]
+mod apu;
 
 #[path = "lib_tests_dma.rs"]
 mod dma;

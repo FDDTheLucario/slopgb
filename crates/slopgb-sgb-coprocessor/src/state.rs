@@ -81,6 +81,9 @@ impl SgbCoprocessor {
         }
         self.spc_target = r.u64()?;
         self.cpu_target = r.u64()?;
+        // Pacing state, not serialized: after a load the chip sits exactly at
+        // its target.
+        self.spc_pos = self.spc_target;
         self.spc_acc = r.u64()? as i64;
         self.cpu_acc = r.u64()? as i64;
         self.pending_gb = r.u64()?;
@@ -189,6 +192,7 @@ impl SgbCoprocessor {
         }
         fresh.spc_target = self.spc_target;
         fresh.cpu_target = self.cpu_target;
+        fresh.spc_pos = self.spc_pos;
         fresh.spc_acc = self.spc_acc;
         fresh.cpu_acc = self.cpu_acc;
         fresh.pending_gb = self.pending_gb;

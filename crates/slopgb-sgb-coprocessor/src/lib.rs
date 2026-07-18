@@ -122,7 +122,7 @@ const HW_DMA_STALL: u32 = 0x0100_3001;
 /// `R len 3 + 2*cap` (drains): the ordered APU-port write ring.
 const HW_PORT_RING: u32 = 0x0100_4000;
 /// The plugin's port-ring capacity.
-const PORT_RING_CAP: usize = 512;
+const PORT_RING_CAP: usize = 16384;
 /// The plugin's ring capacity (drain reads size to this).
 const MMIO_RING_CAP: usize = 512;
 /// Shadow offsets within the `$4200` block.
@@ -228,19 +228,31 @@ const SPC_PROG_ORG: u16 = 0x0400;
 const SPC_DIR_ORG: u16 = 0x0200;
 const SPC_BRR_ORG: u16 = 0x0210;
 
-/// The clean-room 65C816 shim (emulation mode, 8-bit). It copies the SNES-RAM
-/// mailbox `[$0200,$0201]` to the SPC700 comm ports `$2140/$2141` forever, so a
-/// mailbox write reaches the audio CPU. Opcodes are the WDC datasheet encodings
-/// (`AD`/`8D` = LDA/STA abs, `4C` = JMP abs):
+/// The clean-room 65C816 shim (emulation mode, 8-bit). It watches the
+/// SNES-RAM mailbox `[$0200,$0201]` and, when the trigger is armed, copies it
+/// to the SPC700 comm ports `$2140/$2141` once and disarms it — an idle
+/// mailbox produces **no** port traffic (the written level persists on the
+/// port, so the SPC700 still sees it; an unconditional forward loop would
+/// flood the host's ordered port ring with identical writes). Opcodes are the
+/// WDC datasheet encodings (`AD`/`8D`/`9C` = LDA/STA/STZ abs, `F0` = BEQ,
+/// `4C` = JMP abs):
 ///
 /// ```text
-/// $8000  LDA $0200   ; A = mailbox note
-/// $8003  STA $2140   ; -> APUIO0 (the SPC700 reads at $F4)
-/// $8006  LDA $0201   ; A = mailbox trigger
-/// $8009  STA $2141   ; -> APUIO1 (the SPC700 polls at $F5)
-/// $800C  JMP $8000   ; loop
+/// $8000  LDA $0201   ; A = mailbox trigger
+/// $8003  BEQ $8000   ; idle: nothing to forward
+/// $8005  LDA $0200   ; A = mailbox note
+/// $8008  STA $2140   ; -> APUIO0 (the SPC700 reads at $F4)
+/// $800B  LDA $0201   ; A = mailbox trigger
+/// $800E  STA $2141   ; -> APUIO1 (the SPC700 polls at $F5)
+/// $8011  STZ $0201   ; disarm; the port keeps the level
+/// $8014  JMP $8000   ; loop
 /// ```
-const SNES_SHIM: [u8; 15] = [
+const SNES_SHIM: [u8; 23] = [
+    0xAD,
+    (MB_NOTE + 1) as u8,
+    ((MB_NOTE + 1) >> 8) as u8, // LDA $0201
+    0xF0,
+    0xFB, // BEQ $8000
     0xAD,
     MB_NOTE as u8,
     (MB_NOTE >> 8) as u8, // LDA $0200
@@ -253,6 +265,9 @@ const SNES_SHIM: [u8; 15] = [
     0x8D,
     (PORT_BASE + 1) as u8,
     ((PORT_BASE + 1) >> 8) as u8, // STA $2141
+    0x9C,
+    (MB_NOTE + 1) as u8,
+    ((MB_NOTE + 1) >> 8) as u8, // STZ $0201
     0x4C,
     SHIM_ORG as u8,
     (SHIM_ORG >> 8) as u8, // JMP $8000
@@ -274,6 +289,12 @@ pub struct SgbCoprocessor {
     /// Absolute cycle targets handed to each plugin's `run_until` (its own domain).
     spc_target: u64,
     cpu_target: u64,
+    /// Furthest cycle the SPC700 has actually been run to — ahead of
+    /// `spc_target` after a flooded-ring replay (each replayed port event
+    /// owes the chip a minimum consume slice). The next replay's floor
+    /// starts here; a floor below the chip's real position would no-op the
+    /// slices and let events clobber the comm ports again.
+    spc_pos: u64,
     /// Fractional cycle carries for the GB→chip clock ratios.
     spc_acc: i64,
     cpu_acc: i64,
@@ -416,6 +437,7 @@ impl SgbCoprocessor {
             cpu_wasm: cpu_bytes.to_vec(),
             spc_target: 0,
             cpu_target: 0,
+            spc_pos: 0,
             spc_acc: 0,
             cpu_acc: 0,
             pending_gb: 0,
@@ -818,13 +840,26 @@ impl SgbCoprocessor {
             let cpu_start = self.cpu_target - cpu_adv;
             let n = events.len() as u64;
             let dbg = std::env::var_os("SLOPGB_APUDBG").is_some();
+            // A comm port is a register, not a queue: the next event
+            // overwrites it, so the SPC700 must get enough cycles to consume
+            // each one before the next lands — the IPL's per-byte pump is
+            // ~25 cycles (fullsnes "Boot ROM"). When the guest outpaces real
+            // echo pacing (a stale echo shadow between flushes aliases its
+            // mod-256 index wait), the proportional slice tends to zero and
+            // uploads clobber; the floor below lets the SPC run ahead of its
+            // clock instead — later flush targets simply no-op until real
+            // time catches back up.
+            const SPC_MIN_EVENT_CYCLES: u64 = 64;
+            let mut spc_pos = self.spc_pos.max(spc_start);
             for (i, &(p, v)) in events.iter().enumerate() {
                 let mut spc = self.spc.borrow_mut();
                 let _ = spc.port_write(p, v);
                 if usize::from(p) < N_PORTS {
                     self.to_spc[usize::from(p)] = v;
                 }
-                let _ = spc.run_until(spc_start + spc_adv * (i as u64 + 1) / (n + 1));
+                spc_pos = (spc_start + spc_adv * (i as u64 + 1) / (n + 1))
+                    .max(spc_pos + SPC_MIN_EVENT_CYCLES);
+                let _ = spc.run_until(spc_pos);
                 let mut echoes = [0u8; N_PORTS];
                 for (q, slot) in echoes.iter_mut().enumerate() {
                     *slot = spc.port_read(q as u8).unwrap_or(0);
@@ -842,9 +877,11 @@ impl SgbCoprocessor {
                 }
                 let _ = cpu.run_until(cpu_start + cpu_adv * (i as u64 + 1) / (n + 1));
             }
-            // Run the SPC700 + S-DSP to the target and pull the PCM.
+            // Run the SPC700 + S-DSP to the target (or wherever the event
+            // floor left it, if that is already past) and pull the PCM.
+            self.spc_pos = self.spc_target.max(spc_pos);
             let mut spc = self.spc.borrow_mut();
-            let _ = spc.run_until(self.spc_target);
+            let _ = spc.run_until(self.spc_pos);
             if let Ok(batch) = spc.drain_pcm() {
                 self.src.extend(batch);
             }

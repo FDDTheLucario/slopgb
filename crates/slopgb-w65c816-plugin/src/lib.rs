@@ -89,7 +89,12 @@ pub const HW_DMA_STALL: u32 = HOST_WIN + 0x3001;
 pub const HW_PORT_RING: u32 = HOST_WIN + 0x4000;
 /// Port-ring capacity in captured writes (a flush window is ~2.5 K CPU
 /// cycles; the resident shim's 4-write loop peaks near 340).
-pub const PORT_RING_CAP: usize = 512;
+// Sized for the writes one whole flush window can produce: the host drains
+// once per flush, but the clocking loop runs a `run_until` slice per
+// scanline, so a tight upload pump (a few cycles per STA) can bank thousands
+// of events before the next drain. 16384 leaves >2x headroom over the
+// theoretical per-frame STA rate.
+pub const PORT_RING_CAP: usize = 16384;
 
 /// A tiny 8-bit (emulation-mode) program: echo comm port 1 (host input) + 7 to
 /// comm port 0 (host output), forever. It proves the full round trip — a host

@@ -311,6 +311,44 @@ fn apu_port_writes_ring_in_order() {
     assert_eq!(&again[..2], &[0, 0]);
 }
 
+/// The ring must hold every port write the CPU can issue between two host
+/// drains. The host drains once per flush while the clocking loop runs many
+/// `run_until` slices per flush, so a firmware upload pump (two writes per
+/// byte, hundreds of bytes per frame — Space Invaders' IPL chain) far
+/// exceeds one slice's worth; dropping the tail starves the SPC700 mid
+/// transfer while the 65C816 sails on against stale echoes.
+#[test]
+fn port_ring_holds_a_full_flush_window_of_writes() {
+    let mut cop = W65816Cop::new();
+    // CLC/XCE -> native, 16-bit X, then 300 iterations of a data+index
+    // port-write pair (600 events), STP.
+    let prog = [
+        0x18, 0xFB, // CLC / XCE
+        0xC2, 0x10, // REP #$10
+        0xA2, 0x2C, 0x01, // LDX #300
+        0xA9, 0x55, // LDA #$55
+        0x8D, 0x41, 0x21, // STA $2141
+        0x8D, 0x40, 0x21, // STA $2140
+        0xCA, // DEX
+        0xD0, 0xF7, // BNE back to the STA $2141
+        0xDB, // STP
+    ];
+    cop.write_ram(u32::from(PROG_ORG), &prog);
+    cop.cpu = Cpu::new();
+    cop.cpu.regs.pc = PROG_ORG;
+    cop.cycles = 0;
+    cop.run_until(300_000);
+
+    let ring = cop.read_ram(HW_PORT_RING, 3 + 2 * PORT_RING_CAP);
+    let n = usize::from(ring[0]) | usize::from(ring[1]) << 8;
+    assert_eq!(ring[2], 0, "no overflow");
+    assert_eq!(n, 600, "every write of the burst captured");
+    for i in 0..n {
+        let want = if i % 2 == 0 { (1, 0x55) } else { (0, 0x55) };
+        assert_eq!((ring[3 + i * 2], ring[4 + i * 2]), want, "event {i}");
+    }
+}
+
 // ---- DMA stall handshake ----
 
 /// A nonzero `$420B` write pauses the CPU (fullsnes 420Bh: "The CPU is
