@@ -162,3 +162,33 @@ fn ppu_state_rides_the_save_state() {
     let frame = restored.take_snes_frame().expect("frame after restore");
     assert_eq!(frame[0], 0x0877, "restored CGRAM still renders");
 }
+
+/// SNES frames stay withheld until the display actually shows a picture
+/// (INIDISP not force-blanked, brightness above zero) — before a takeover
+/// drives the PPU the framebuffer is permanently black, and surfacing it
+/// would black out the frontend over the live HLE presentation. Once live,
+/// frames keep flowing through later blank stretches (a real TV shows the
+/// takeover's own black transitions).
+#[test]
+fn frames_withheld_until_the_display_is_visible_then_sticky() {
+    let Some(mut cop) = build_cop_ppu(48_000) else {
+        return;
+    };
+    cop.clock(70_224 * 2);
+    assert!(
+        cop.take_snes_frame().is_none(),
+        "no frame while the display never showed a picture"
+    );
+    cop.apply_mmio(0x2100, 0x0F); // visible brightness
+    cop.clock(70_224);
+    assert!(
+        cop.take_snes_frame().is_some(),
+        "visible display: frames flow"
+    );
+    cop.apply_mmio(0x2100, 0x80); // force blank again
+    cop.clock(70_224);
+    assert!(
+        cop.take_snes_frame().is_some(),
+        "sticky: the takeover's own blank stretches still present"
+    );
+}

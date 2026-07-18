@@ -397,6 +397,9 @@ pub struct SgbCoprocessor {
     ppu_row: u16,
     /// A completed frame awaits [`Self::take_snes_frame`].
     frame_ready: bool,
+    /// The SNES display has shown a picture at least once (INIDISP written
+    /// visible) — gates the frame handoff; see [`Self::take_snes_frame`].
+    snes_live: bool,
     /// Which [`BIOS_TRN_STAGING`] buffer the next DATA_TRN payload lands in
     /// (ping-pong; see the const doc).
     trn_flip: bool,
@@ -498,6 +501,7 @@ impl SgbCoprocessor {
             ppu_wasm: ppu_bytes.map(<[u8]>::to_vec),
             ppu_row: 0,
             frame_ready: false,
+            snes_live: false,
             frames_done: 0,
             last_inidisp: 0,
         };
@@ -1066,6 +1070,12 @@ impl SgbCoprocessor {
             0x2100..=0x21FF => {
                 if addr == 0x2100 {
                     self.last_inidisp = val; // diagnostics (debug_status)
+                    // The display shows a picture: not force-blanked and
+                    // brightness above zero (fullsnes 2100h). Arms the
+                    // frame handoff — see `take_snes_frame`.
+                    if val & 0x80 == 0 && val & 0x0F != 0 {
+                        self.snes_live = true;
+                    }
                 }
                 if let Some(ppu) = &self.ppu {
                     let _ = ppu.borrow_mut().port_write((addr - 0x2100) as u8, val);
@@ -1076,10 +1086,14 @@ impl SgbCoprocessor {
     }
 
     /// Fetch the last completed SNES frame (256x224 RGB555 words,
-    /// row-major), at most once per vblank. `None` without a PPU plugin or
-    /// until the next frame completes.
+    /// row-major), at most once per vblank. `None` without a PPU plugin,
+    /// until the next frame completes, or until the SNES display has ever
+    /// shown a picture (`snes_live`) — before a takeover programs the PPU
+    /// the framebuffer is permanently black, and surfacing it would black
+    /// out the frontend over the live HLE presentation. Sticky once live:
+    /// the takeover's own blank stretches present as a real TV would.
     pub fn take_snes_frame(&mut self) -> Option<Vec<u16>> {
-        if !self.frame_ready {
+        if !self.frame_ready || !self.snes_live {
             return None;
         }
         self.frame_ready = false;
