@@ -31,17 +31,34 @@ fn decode_tiles(shade: &[u8; SCREEN_PIXELS], n_tiles: usize) -> Vec<u8> {
 }
 
 impl SgbView {
-    /// Latch a `*_TRN` destination (`TR_*`) and capture the screen right away.
-    /// The screen must already show the payload when the command is sent (Pan
-    /// Docs "SGB Functions — VRAM Transfer") and games hold it stable through
-    /// the transfer, so the just-streamed [`SgbView::shade_buf`] is the
-    /// payload. Waiting for the GB's own line-144 boundary instead loses a
-    /// screen whenever a game sends two `*_TRN`s without reaching vblank in
-    /// between (Space Invaders' DATA_TRN stream): the hardware capture clock
-    /// is the free-running SNES vblank, which the GB LCD state never stalls.
+    /// Latch a `*_TRN` destination (`TR_*`) and open its capture window: the
+    /// screen is captured [`TRN_CAPTURE_DELAY`] cycles later, by
+    /// [`Self::tick_trn`]. That models the real capture clock — the SNES
+    /// side's own following frame. The GB's line-144 boundary is wrong (an
+    /// LCD-off window can skip it entirely, silently losing a latched
+    /// screen), and command time is wrong too (a game may still be streaming
+    /// the payload when the command completes — Space Invaders sends DATA_TRN
+    /// mid-redraw and relies on the following-frame capture).
     pub(super) fn latch_transfer(&mut self, dest: u8) {
+        if self.pending_transfer.is_some() {
+            // A second command inside an open window: consume the pending
+            // capture rather than losing it.
+            self.run_pending_transfer();
+        }
         self.pending_transfer = Some(dest);
-        self.run_pending_transfer();
+        self.trn_countdown = TRN_CAPTURE_DELAY;
+    }
+
+    /// Advance the `*_TRN` capture clock by `cycles` (ticked from the machine
+    /// step on SGB models, whatever the GB LCD is doing); an expiring window
+    /// captures the screen.
+    pub(crate) fn tick_trn(&mut self, cycles: u32) {
+        if self.trn_countdown > 0 {
+            self.trn_countdown = self.trn_countdown.saturating_sub(cycles);
+            if self.trn_countdown == 0 {
+                self.run_pending_transfer();
+            }
+        }
     }
 
     /// Consume a pending `*_TRN`: decode the just-rendered screen and route the
@@ -128,6 +145,14 @@ fn capture4096(shade: &[u8; SCREEN_PIXELS]) -> Box<[u8; 4096]> {
 }
 
 impl Ppu {
+    /// Advance the SGB `*_TRN` capture window (machine-clocked; see
+    /// [`SgbView::tick_trn`]). No-op off SGB.
+    pub(crate) fn sgb_tick_trn(&mut self, cycles: u32) {
+        if let Some(s) = self.sgb.as_mut() {
+            s.tick_trn(cycles);
+        }
+    }
+
     /// Drain one queued SGB SOUND ($08) effect event. The Phase-3 S-DSP seam:
     /// the host pulls these and feeds them to the sound engine. `None` off SGB
     /// or when the queue is empty. (Pan Docs "SGB Command $08 — SOUND".)

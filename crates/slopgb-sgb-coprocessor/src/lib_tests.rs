@@ -713,22 +713,36 @@ fn nmi_handler_preserves_a_with_empty_vector() {
     );
 }
 
-/// DATA_TRN pairing: the core captures the payload during the same command
-/// execution that tees the $10 packet, so the capture visible at a packet's
-/// arrival is that packet's own payload — each pairs immediately, back to
-/// back, with no cross-talk between consecutive transfers.
+/// DATA_TRN pairing under the one-frame capture skew: the payload lands a
+/// frame after its packet, so a packet waits pending until the payload edge
+/// fires — and a byte-identical payload (no edge) is flushed by the next
+/// packet's arrival with those same bytes.
 #[test]
 fn data_trn_pairs_payloads_with_their_own_packets() {
     let Some(mut cop) = build_cop(48_000) else {
         return;
     };
-    let mut pkt1 = [0u8; 16];
-    pkt1[0] = 0x10 << 3 | 1;
-    pkt1[1] = 0x00; // dest $7F:0100
-    pkt1[2] = 0x01;
-    pkt1[3] = 0x7F;
+    let trn = |hi: u8| {
+        let mut p = [0u8; 16];
+        p[0] = 0x10 << 3 | 1;
+        p[1] = 0x00;
+        p[2] = hi;
+        p[3] = 0x7F;
+        p
+    };
+    // Packet 1 arrives; its payload is not captured yet.
     let mut cmds = TestCmds {
-        packets: vec![pkt1],
+        packets: vec![trn(0x01)],
+        ..TestCmds::default()
+    };
+    cop.poll(&mut cmds);
+    assert_eq!(
+        cop.debug_cpu_ram(0x7F_0100, 4),
+        vec![0; 4],
+        "nothing lands before the payload is captured"
+    );
+    // The capture lands: the payload edge pairs it with packet 1.
+    let mut cmds = TestCmds {
         data_trn: Some(vec![0xAB; 64]),
         ..TestCmds::default()
     };
@@ -737,11 +751,6 @@ fn data_trn_pairs_payloads_with_their_own_packets() {
         cop.debug_cpu_ram(0x7F_0100, 4),
         vec![0xAB; 4],
         "payload 1 landed at packet 1's dest"
-    );
-    assert_eq!(
-        cop.debug_cpu_ram(0x7F_9100, 4),
-        vec![0; 4],
-        "nothing crossed to packet 2's dest yet"
     );
     run_service(&mut cop);
     assert_eq!(
@@ -754,14 +763,14 @@ fn data_trn_pairs_payloads_with_their_own_packets() {
         vec![0x00, 0x01, 0x7F],
         "the published packet is packet 1 (its dest bytes)"
     );
-
-    let mut pkt2 = [0u8; 16];
-    pkt2[0] = 0x10 << 3 | 1;
-    pkt2[1] = 0x00; // dest $7F:9100
-    pkt2[2] = 0x91;
-    pkt2[3] = 0x7F;
+    // Packet 2, then its distinct payload a frame later.
     let mut cmds = TestCmds {
-        packets: vec![pkt2],
+        packets: vec![trn(0x91)],
+        data_trn: Some(vec![0xAB; 64]),
+        ..TestCmds::default()
+    };
+    cop.poll(&mut cmds);
+    let mut cmds = TestCmds {
         data_trn: Some(vec![0xCD; 64]),
         ..TestCmds::default()
     };
@@ -775,6 +784,30 @@ fn data_trn_pairs_payloads_with_their_own_packets() {
         cop.debug_cpu_ram(0x7F_0100, 4),
         vec![0xAB; 4],
         "packet 1's dest untouched by the second transfer"
+    );
+    // Packet 3's payload is byte-identical to payload 2 — no signature edge.
+    // Packet 4's arrival flushes it with the current (identical) bytes.
+    let mut cmds = TestCmds {
+        packets: vec![trn(0xA1)],
+        data_trn: Some(vec![0xCD; 64]),
+        ..TestCmds::default()
+    };
+    cop.poll(&mut cmds);
+    assert_eq!(
+        cop.debug_cpu_ram(0x7F_A100, 4),
+        vec![0; 4],
+        "identical payload has no edge; packet 3 stays pending"
+    );
+    let mut cmds = TestCmds {
+        packets: vec![trn(0xB1)],
+        data_trn: Some(vec![0xCD; 64]),
+        ..TestCmds::default()
+    };
+    cop.poll(&mut cmds);
+    assert_eq!(
+        cop.debug_cpu_ram(0x7F_A100, 4),
+        vec![0xCD; 4],
+        "packet 4's arrival flushed packet 3 with the identical payload"
     );
 }
 

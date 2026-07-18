@@ -196,7 +196,7 @@ const STATE_MAGIC: &[u8; 4] = b"SLPS";
 /// tail or failing as `Truncated`; v8 appends the SGB raw-packet tee queue to
 /// the joypad payload (the ICD2 mailbox feed; the SNES-fed pad latches stay
 /// transient — a live coprocessor re-feeds them on the next step).
-const STATE_VERSION: u16 = 8;
+const STATE_VERSION: u16 = 9;
 
 /// A debugger memory watchpoint (bgb's "Set watchpoint"): the free run halts
 /// after the CPU accesses `addr` with a matching access kind. A frontend/
@@ -364,6 +364,9 @@ impl GameBoy {
         // `Model::Sgb`/`Sgb2`, so `Dmg`/`Cgb` runs are byte-identical.
         if let Some(apu) = self.sgb_apu.as_mut() {
             let elapsed = self.bus.cycles().wrapping_sub(before);
+            // The SGB `*_TRN` capture window runs on the SNES-side clock —
+            // it ticks here, whatever the GB LCD is doing.
+            self.bus.ppu_mut().sgb_tick_trn(elapsed as u32);
             apu.clock(elapsed);
             apu.poll(&mut self.bus);
             // The SNES→GB return path: pad bytes the coprocessor's SNES

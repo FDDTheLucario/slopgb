@@ -296,7 +296,9 @@ fn pal_trn_decodes_screen_shades() {
         let b1 = (hi >> (7 - x)) & 1;
         s.shade_buf[x] = b0 | (b1 << 1);
     }
-    s.sgb_command(&packet(0x0B * 8 + 1, &[])); // PAL_TRN captures at command time
+    s.sgb_command(&packet(0x0B * 8 + 1, &[])); // PAL_TRN opens a capture window
+    assert_eq!(s.pending_transfer, Some(TR_PAL));
+    s.run_pending_transfer();
     assert_eq!(s.ram_palettes[0], lo, "color low byte from bit0 plane");
     assert_eq!(s.ram_palettes[1], hi, "color high byte from bit1 plane");
     assert_eq!(s.pending_transfer, None, "transfer consumed");
@@ -489,22 +491,31 @@ fn border_transfer_restarts_crossfade() {
     );
 }
 
-/// Each `*_TRN` command captures the screen it was sent with, even when the
-/// GB never reaches its own vblank between two commands (Space Invaders
-/// streams DATA_TRN blocks that way): the capture happens at command time,
-/// when the payload screen is on the LCD, not at the GB's next line-144
-/// boundary (the hardware capture clock is the free-running SNES vblank).
+/// A `*_TRN` command captures the screen one frame after the command, on the
+/// free-running SNES-side capture clock — not at the GB's next line-144 (an
+/// LCD-off window can skip that entirely, losing the screen) and not at
+/// command time (a game may still be streaming the payload when the command
+/// completes: Space Invaders sends DATA_TRN mid-redraw and relies on the
+/// following-frame capture).
 #[test]
-fn trn_captures_at_command_time_never_losing_a_screen() {
+fn trn_captures_one_frame_after_the_command() {
     let mut s = SgbView::new();
-    s.shade_buf.fill(1);
+    s.shade_buf.fill(2);
     s.sgb_command(&packet(0x10 * 8 + 1, &[0, 0x01, 0x7F])); // DATA_TRN #1
-    let first = s.data_trn_data().expect("first screen captured").to_vec();
+    assert!(s.data_trn_data().is_none(), "no capture at command time");
+    // The GB finishes streaming the real payload inside the window.
+    s.shade_buf.fill(1);
+    s.tick_trn(70_223);
+    assert!(s.data_trn_data().is_none(), "window still open");
+    s.tick_trn(1);
+    let first = s.data_trn_data().expect("captured at window end").to_vec();
     assert_eq!(first[0], 0xFF, "shade 1 = low bitplane set");
     assert_eq!(first[1], 0x00, "shade 1 = high bitplane clear");
-    // The GB streams the next screen before any line-144 boundary runs.
-    s.shade_buf.fill(2);
+    // The next command opens its own window; the GB never reaches line 144
+    // in between and the capture still happens.
     s.sgb_command(&packet(0x10 * 8 + 1, &[0, 0x11, 0x7F])); // DATA_TRN #2
+    s.shade_buf.fill(2);
+    s.tick_trn(70_224);
     let second = s.data_trn_data().expect("second screen captured");
     assert_eq!(second[0], 0x00, "shade 2 = low bitplane clear");
     assert_eq!(second[1], 0xFF, "shade 2 = high bitplane set");

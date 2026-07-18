@@ -203,3 +203,68 @@ fn flooded_port_ring_uploads_without_clobbering() {
     let want: Vec<u8> = (0..600u32).map(|i| (i as u8) ^ 0xA5).collect();
     assert_eq!(got, want, "every blind-pumped byte reached APU RAM");
 }
+
+/// A properly echo-paced IPL upload (the loader waits for each ack, like the
+/// pilot's) must move at hardware-like speed, not one byte per flush: the
+/// mediation loops inside a flush — drain the ring, replay, publish echoes,
+/// let the CPU produce the next writes — until the ring stays empty, so a
+/// whole block crosses in a handful of flushes.
+#[test]
+fn echo_paced_upload_crosses_hundreds_of_bytes_per_flush() {
+    let Some(mut cop) = build_cop(48_000) else {
+        return;
+    };
+    cop.clock(70_224 * 2);
+    {
+        let mut spc = cop.spc.borrow_mut();
+        assert_eq!(spc.port_read(0).unwrap(), 0xAA, "IPL announced");
+    }
+    // Kick a transfer to $0400, then pump 512 bytes (data = index XOR $5C),
+    // waiting for the echo after every kick/index — the documented protocol.
+    let mut prog = stores(
+        &[
+            (0x2142, 0x00),
+            (0x2143, 0x04),
+            (0x2141, 0x01),
+            (0x2140, 0xCC),
+        ],
+        &[],
+    );
+    prog.extend_from_slice(&[
+        0xAD, 0x40, 0x21, // wait: LDA $2140
+        0xC9, 0xCC, // CMP #$CC
+        0xD0, 0xF9, // BNE wait (kick echo)
+        0x18, 0xFB, // CLC / XCE -> native
+        0xC2, 0x10, // REP #$10
+        0xA2, 0x00, 0x02, // LDX #512
+        0xA9, 0x00, // LDA #$00 (index)
+        // loop:
+        0x48, // PHA
+        0x49, 0x5C, // EOR #$5C
+        0x8D, 0x41, 0x21, // STA $2141 (data)
+        0x68, // PLA
+        0x8D, 0x40, 0x21, // STA $2140 (index)
+        // ack: the IPL echoes the index before the next byte may go out.
+        0xCD, 0x40, 0x21, // CMP $2140
+        0xD0, 0xFB, // BNE ack
+        0x1A, // INC A
+        0xCA, // DEX
+        0xD0, 0xED, // BNE loop
+        0xDB, // STP
+    ]);
+    {
+        let mut cpu = cop.cpu.borrow_mut();
+        cpu.write_ram(0x9000, &prog).unwrap();
+        cpu.set_pc(0x9000).unwrap();
+    }
+    // A quarter frame is a handful of flushes — thousands of flushes worth
+    // of the old one-byte pace; with in-flush mediation rounds the 512
+    // bytes cross easily.
+    cop.clock(70_224 / 4);
+    let got = cop.spc.borrow_mut().read_ram(0x0400, 512).unwrap();
+    let want: Vec<u8> = (0..512u32).map(|i| (i as u8) ^ 0x5C).collect();
+    assert_eq!(
+        got, want,
+        "the whole upload crossed within a fraction of a frame"
+    );
+}

@@ -289,12 +289,13 @@ pub struct SgbCoprocessor {
     /// Absolute cycle targets handed to each plugin's `run_until` (its own domain).
     spc_target: u64,
     cpu_target: u64,
-    /// Furthest cycle the SPC700 has actually been run to — ahead of
-    /// `spc_target` after a flooded-ring replay (each replayed port event
-    /// owes the chip a minimum consume slice). The next replay's floor
-    /// starts here; a floor below the chip's real position would no-op the
-    /// slices and let events clobber the comm ports again.
+    /// Furthest cycles each chip has actually been run to — ahead of the
+    /// targets after a mediation burst (each replayed port event owes the
+    /// SPC700 a consume slice and the 65C816 a produce slice). The next
+    /// replay's floors start here; a floor below a chip's real position
+    /// would no-op the slices and let events clobber the comm ports.
     spc_pos: u64,
+    cpu_pos: u64,
     /// Fractional cycle carries for the GB→chip clock ratios.
     spc_acc: i64,
     cpu_acc: i64,
@@ -438,6 +439,7 @@ impl SgbCoprocessor {
             spc_target: 0,
             cpu_target: 0,
             spc_pos: 0,
+            cpu_pos: 0,
             spc_acc: 0,
             cpu_acc: 0,
             pending_gb: 0,
@@ -807,79 +809,85 @@ impl SgbCoprocessor {
         self.cpu_acc -= cpu_adv as i64 * CPU_DEN;
         self.cpu_target += cpu_adv;
 
-        // 1. Replay the 65C816's APU-port writes to the SPC700 **in
-        // order**, giving the chip a run slice after each event: the
-        // SPC700 IPL upload's per-byte index/ack pump repeats mod-256
-        // values, so delivering only each flush's final latch state
-        // aliases the handshake and the two sides lose lockstep.
-        let events: Vec<(u8, u8)> = {
-            let mut cpu = self.cpu.borrow_mut();
-            match cpu.read_ram(HW_PORT_RING, 3 + 2 * PORT_RING_CAP) {
-                Ok(buf) if buf.len() >= 3 => {
-                    let n = usize::from(buf[0]) | usize::from(buf[1]) << 8;
-                    if buf[2] != 0 {
-                        eprintln!("slopgb: SNES APU port ring overflowed; writes dropped");
-                    }
-                    buf[3..]
-                        .chunks_exact(2)
-                        .take(n)
-                        .map(|e| (e[0], e[1]))
-                        .collect()
-                }
-                _ => Vec::new(),
-            }
-        };
+        // 1+2. Interleaved co-simulation, in rounds: drain the 65C816's
+        // ordered APU-port write ring, replay each write into the SPC700 with
+        // a consume slice, hand the echoes back and give the CPU a produce
+        // slice — then drain again, because those CPU slices produce the
+        // *next* writes (an echo-paced upload advances exactly one byte per
+        // round). Without the rounds a whole flush moved one byte; the bound
+        // keeps a flush finite. Ordered per-event replay matters: the IPL
+        // upload's index/ack pump repeats mod-256 values, so delivering only
+        // final latch states aliases the handshake and desyncs the chips.
+        //
+        // A comm port is a register, not a queue: each write needs the SPC700
+        // to run enough cycles to consume it before the next lands (the IPL's
+        // per-byte pump is ~25 cycles — fullsnes "Boot ROM"), and the CPU
+        // needs enough to check the echo and produce the next byte. The
+        // per-event floors let both chips run ahead of their clock targets
+        // during a burst; the positions are anchored across flushes
+        // (`spc_pos`/`cpu_pos`), and later flush targets simply no-op until
+        // real time catches back up.
         {
-            // 2. Interleaved co-simulation: per event, run the SPC a slice,
-            // hand its echoes back, and run the CPU a slice — so each side
-            // observes every transition of the other's ports in order. A
-            // final-echo-only CPU update let the guest's echo-wait match a
-            // leaped-ahead ack, pump multiple bytes per flush, flood the
-            // ring, and desync the IPL upload.
             let spc_start = self.spc_target - spc_adv;
             let cpu_start = self.cpu_target - cpu_adv;
-            let n = events.len() as u64;
             let dbg = std::env::var_os("SLOPGB_APUDBG").is_some();
-            // A comm port is a register, not a queue: the next event
-            // overwrites it, so the SPC700 must get enough cycles to consume
-            // each one before the next lands — the IPL's per-byte pump is
-            // ~25 cycles (fullsnes "Boot ROM"). When the guest outpaces real
-            // echo pacing (a stale echo shadow between flushes aliases its
-            // mod-256 index wait), the proportional slice tends to zero and
-            // uploads clobber; the floor below lets the SPC run ahead of its
-            // clock instead — later flush targets simply no-op until real
-            // time catches back up.
             const SPC_MIN_EVENT_CYCLES: u64 = 64;
+            const CPU_MIN_EVENT_CYCLES: u64 = 64;
+            const MAX_MEDIATION_ROUNDS: usize = 512;
             let mut spc_pos = self.spc_pos.max(spc_start);
-            for (i, &(p, v)) in events.iter().enumerate() {
-                let mut spc = self.spc.borrow_mut();
-                let _ = spc.port_write(p, v);
-                if usize::from(p) < N_PORTS {
-                    self.to_spc[usize::from(p)] = v;
+            let mut cpu_pos = self.cpu_pos.max(cpu_start);
+            for _ in 0..MAX_MEDIATION_ROUNDS {
+                let events: Vec<(u8, u8)> = {
+                    let mut cpu = self.cpu.borrow_mut();
+                    match cpu.read_ram(HW_PORT_RING, 3 + 2 * PORT_RING_CAP) {
+                        Ok(buf) if buf.len() >= 3 => {
+                            let n = usize::from(buf[0]) | usize::from(buf[1]) << 8;
+                            if buf[2] != 0 {
+                                eprintln!("slopgb: SNES APU port ring overflowed; writes dropped");
+                            }
+                            buf[3..]
+                                .chunks_exact(2)
+                                .take(n)
+                                .map(|e| (e[0], e[1]))
+                                .collect()
+                        }
+                        _ => Vec::new(),
+                    }
+                };
+                if events.is_empty() {
+                    break;
                 }
-                spc_pos = (spc_start + spc_adv * (i as u64 + 1) / (n + 1))
-                    .max(spc_pos + SPC_MIN_EVENT_CYCLES);
-                let _ = spc.run_until(spc_pos);
-                let mut echoes = [0u8; N_PORTS];
-                for (q, slot) in echoes.iter_mut().enumerate() {
-                    *slot = spc.port_read(q as u8).unwrap_or(0);
+                for &(p, v) in &events {
+                    let mut spc = self.spc.borrow_mut();
+                    let _ = spc.port_write(p, v);
+                    if usize::from(p) < N_PORTS {
+                        self.to_spc[usize::from(p)] = v;
+                    }
+                    spc_pos += SPC_MIN_EVENT_CYCLES;
+                    let _ = spc.run_until(spc_pos);
+                    let mut echoes = [0u8; N_PORTS];
+                    for (q, slot) in echoes.iter_mut().enumerate() {
+                        *slot = spc.port_read(q as u8).unwrap_or(0);
+                    }
+                    if dbg {
+                        eprintln!(
+                            "apu<- p{p}={v:02X} | out {:02X} {:02X}",
+                            echoes[0], echoes[1]
+                        );
+                    }
+                    drop(spc);
+                    let mut cpu = self.cpu.borrow_mut();
+                    for (q, &e) in echoes.iter().enumerate() {
+                        let _ = cpu.port_write(q as u8, e);
+                    }
+                    cpu_pos += CPU_MIN_EVENT_CYCLES;
+                    let _ = cpu.run_until(cpu_pos);
                 }
-                if dbg {
-                    eprintln!(
-                        "apu<- p{p}={v:02X} | out {:02X} {:02X}",
-                        echoes[0], echoes[1]
-                    );
-                }
-                drop(spc);
-                let mut cpu = self.cpu.borrow_mut();
-                for (q, &e) in echoes.iter().enumerate() {
-                    let _ = cpu.port_write(q as u8, e);
-                }
-                let _ = cpu.run_until(cpu_start + cpu_adv * (i as u64 + 1) / (n + 1));
             }
             // Run the SPC700 + S-DSP to the target (or wherever the event
             // floor left it, if that is already past) and pull the PCM.
             self.spc_pos = self.spc_target.max(spc_pos);
+            self.cpu_pos = self.cpu_target.max(cpu_pos);
             let mut spc = self.spc.borrow_mut();
             let _ = spc.run_until(self.spc_pos);
             if let Ok(batch) = spc.drain_pcm() {
@@ -899,8 +907,8 @@ impl SgbCoprocessor {
             for (p, &v) in spc_out.iter().enumerate() {
                 let _ = cpu.port_write(p as u8, v);
             }
-            // 4. Run the 65C816 to its target.
-            let _ = cpu.run_until(self.cpu_target);
+            // 4. Run the 65C816 to its target (or the event floor's position).
+            let _ = cpu.run_until(self.cpu_target.max(self.cpu_pos));
             // ICD2, SNES→GB half: pull the pad latches the program wrote.
             // The sticky flag gates the feed — before the SNES side takes
             // over the joypad, the GB's local matrix must stay live.
