@@ -66,6 +66,38 @@ impl Mmio {
         if addr == 0x420B && val != 0 {
             self.dma_stall = true;
         }
+        // The CPU multiply/divide unit (fullsnes 4202h-4206h) is served
+        // plugin-side: programs read the result registers a handful of
+        // cycles after the kick — far inside one host flush, so a host
+        // round trip could never answer in time. Results land complete
+        // (no partial-result garbage window). The write-only operand
+        // latches live in their own shadow slots ($4202/$4204/$4205 —
+        // never host-fed), so the unit adds no serialized state.
+        match addr {
+            0x4202 | 0x4204 | 0x4205 => {
+                self.shadow[usize::from(addr - 0x4200)] = val;
+            }
+            // WRMPYB: product = WRMPYA * val -> RDMPYL/H.
+            0x4203 => {
+                let prod = u16::from(self.shadow[0x02]) * u16::from(val);
+                self.shadow[0x16] = prod as u8;
+                self.shadow[0x17] = (prod >> 8) as u8;
+            }
+            // WRDIVB: WRDIV / val -> RDDIVL/H, remainder -> RDMPYL/H;
+            // divide by zero: quotient $FFFF, remainder = dividend.
+            0x4206 => {
+                let dividend = u16::from_le_bytes([self.shadow[0x04], self.shadow[0x05]]);
+                let (q, r) = match val {
+                    0 => (0xFFFF, dividend),
+                    d => (dividend / u16::from(d), dividend % u16::from(d)),
+                };
+                self.shadow[0x14] = q as u8;
+                self.shadow[0x15] = (q >> 8) as u8;
+                self.shadow[0x16] = r as u8;
+                self.shadow[0x17] = (r >> 8) as u8;
+            }
+            _ => {}
+        }
         if self.ring.len() >= MMIO_RING_CAP {
             self.overflow = true;
         } else {

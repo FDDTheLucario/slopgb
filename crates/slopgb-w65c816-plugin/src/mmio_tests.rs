@@ -104,6 +104,47 @@ fn mdmaen_write_arms_the_dma_stall() {
     assert!(!m.dma_stall());
 }
 
+/// The CPU multiply unit (fullsnes 4202h/4203h): WRMPYB kicks an 8x8
+/// multiply of WRMPYA, product readable at RDMPYL/H ($4216/$4217). The
+/// result completes within the write here (no 8-cycle garbage window).
+#[test]
+fn multiply_registers_compute_the_product() {
+    let mut m = Mmio::new();
+    m.cpu_write(0x4202, 40);
+    m.cpu_write(0x4203, 3);
+    assert_eq!(m.cpu_read(0x4216), Some(120), "RDMPYL");
+    assert_eq!(m.cpu_read(0x4217), Some(0), "RDMPYH");
+    // 16-bit product: 200 * 200 = 40000 = $9C40.
+    m.cpu_write(0x4202, 200);
+    m.cpu_write(0x4203, 200);
+    assert_eq!(m.cpu_read(0x4216), Some(0x40));
+    assert_eq!(m.cpu_read(0x4217), Some(0x9C));
+    // WRMPYA latches: a second WRMPYB reuses it.
+    m.cpu_write(0x4203, 2);
+    assert_eq!(m.cpu_read(0x4216), Some(0x90), "200*2 = $190");
+    assert_eq!(m.cpu_read(0x4217), Some(0x01));
+}
+
+/// The CPU divide unit (fullsnes 4204h-4206h): WRDIVB kicks WRDIV / divisor
+/// — quotient at RDDIVL/H ($4214/$4215), remainder at RDMPYL/H. Division by
+/// zero yields quotient $FFFF and remainder = dividend.
+#[test]
+fn divide_registers_compute_quotient_and_remainder() {
+    let mut m = Mmio::new();
+    m.cpu_write(0x4204, 0xE8); // 1000 = $03E8
+    m.cpu_write(0x4205, 0x03);
+    m.cpu_write(0x4206, 7);
+    assert_eq!(m.cpu_read(0x4214), Some(142), "RDDIVL: 1000/7");
+    assert_eq!(m.cpu_read(0x4215), Some(0));
+    assert_eq!(m.cpu_read(0x4216), Some(6), "RDMPYL: 1000%7");
+    assert_eq!(m.cpu_read(0x4217), Some(0));
+    m.cpu_write(0x4206, 0);
+    assert_eq!(m.cpu_read(0x4214), Some(0xFF), "div0 quotient $FFFF");
+    assert_eq!(m.cpu_read(0x4215), Some(0xFF));
+    assert_eq!(m.cpu_read(0x4216), Some(0xE8), "div0 remainder = dividend");
+    assert_eq!(m.cpu_read(0x4217), Some(0x03));
+}
+
 /// A short host read drains only what it can carry; the rest stays queued.
 #[test]
 fn partial_drain_keeps_the_tail() {
