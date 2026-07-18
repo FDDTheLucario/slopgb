@@ -3,7 +3,7 @@
 //! chip's internal RAM stays inside the sandbox; only the comm ports cross.
 
 use slopgb_plugin_api::{ABI_VERSION, Capabilities, EMIT_KIND_PCM, EMIT_KIND_RAM, EMIT_KIND_STATE};
-use wasmi::{Engine, Module, Store, TypedFunc};
+use wasmtime::{Engine, Module, Store, TypedFunc};
 
 use crate::LoadError;
 use crate::host::{HostState, build_linker};
@@ -32,10 +32,10 @@ impl LoadedCoprocessor {
         let module = Module::new(&engine, bytes)?;
         let mut store = Store::new(&engine, HostState::empty());
         let linker = build_linker(&engine);
-        let instance = linker.instantiate_and_start(&mut store, &module)?;
+        let instance = linker.instantiate(&mut store, &module)?;
 
         let version = instance
-            .get_typed_func::<(), i32>(&store, "slopgb_abi_version")
+            .get_typed_func::<(), i32>(&mut store, "slopgb_abi_version")
             .map_err(|_| LoadError::MissingExport("slopgb_abi_version"))?
             .call(&mut store, ())?;
         if version != ABI_VERSION {
@@ -46,7 +46,7 @@ impl LoadedCoprocessor {
         }
 
         let caps = instance
-            .get_typed_func::<(), i32>(&store, "slopgb_capabilities")
+            .get_typed_func::<(), i32>(&mut store, "slopgb_capabilities")
             .map_err(|_| LoadError::MissingExport("slopgb_capabilities"))?
             .call(&mut store, ())? as u32;
         // Subsystem hosting (optionally with introspection); anything beyond
@@ -57,34 +57,34 @@ impl LoadedCoprocessor {
         }
 
         let reset = instance
-            .get_typed_func::<(), ()>(&store, "slopgb_reset")
+            .get_typed_func::<(), ()>(&mut store, "slopgb_reset")
             .map_err(|_| LoadError::MissingExport("slopgb_reset"))?;
         let run_until = instance
-            .get_typed_func::<i64, i64>(&store, "slopgb_run_until")
+            .get_typed_func::<i64, i64>(&mut store, "slopgb_run_until")
             .map_err(|_| LoadError::MissingExport("slopgb_run_until"))?;
         let port_write = instance
-            .get_typed_func::<(i32, i32), ()>(&store, "slopgb_port_write")
+            .get_typed_func::<(i32, i32), ()>(&mut store, "slopgb_port_write")
             .map_err(|_| LoadError::MissingExport("slopgb_port_write"))?;
         let port_read = instance
-            .get_typed_func::<i32, i32>(&store, "slopgb_port_read")
+            .get_typed_func::<i32, i32>(&mut store, "slopgb_port_read")
             .map_err(|_| LoadError::MissingExport("slopgb_port_read"))?;
         let drain_pcm = instance
-            .get_typed_func::<(), i32>(&store, "slopgb_drain_pcm")
+            .get_typed_func::<(), i32>(&mut store, "slopgb_drain_pcm")
             .map_err(|_| LoadError::MissingExport("slopgb_drain_pcm"))?;
         let set_pc = instance
-            .get_typed_func::<i32, ()>(&store, "slopgb_set_pc")
+            .get_typed_func::<i32, ()>(&mut store, "slopgb_set_pc")
             .map_err(|_| LoadError::MissingExport("slopgb_set_pc"))?;
         let write_ram = instance
-            .get_typed_func::<i32, ()>(&store, "slopgb_write_ram")
+            .get_typed_func::<i32, ()>(&mut store, "slopgb_write_ram")
             .map_err(|_| LoadError::MissingExport("slopgb_write_ram"))?;
         let read_ram = instance
-            .get_typed_func::<(i32, i32), i32>(&store, "slopgb_read_ram")
+            .get_typed_func::<(i32, i32), i32>(&mut store, "slopgb_read_ram")
             .map_err(|_| LoadError::MissingExport("slopgb_read_ram"))?;
         let save_state = instance
-            .get_typed_func::<(), i32>(&store, "slopgb_save_state")
+            .get_typed_func::<(), i32>(&mut store, "slopgb_save_state")
             .map_err(|_| LoadError::MissingExport("slopgb_save_state"))?;
         let load_state = instance
-            .get_typed_func::<(), ()>(&store, "slopgb_load_state")
+            .get_typed_func::<(), ()>(&mut store, "slopgb_load_state")
             .map_err(|_| LoadError::MissingExport("slopgb_load_state"))?;
 
         Ok(Self {
