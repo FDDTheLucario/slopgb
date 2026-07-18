@@ -43,6 +43,9 @@ impl SgbView {
         if self.pending_transfer.is_some() {
             // A second command inside an open window: consume the pending
             // capture rather than losing it.
+            if std::env::var_os("SLOPGB_TRNDBG").is_some() {
+                eprintln!("TRNDBG latch collision: early capture");
+            }
             self.run_pending_transfer();
         }
         self.pending_transfer = Some(dest);

@@ -163,13 +163,15 @@ const BIOS_LAST_CMD: u32 = 0x02C2;
 /// 16-bit pointer to the staged DATA_TRN payload, bank `$7E` implied
 /// (`$7E:0284/85`).
 const BIOS_TRN_PTR: u32 = 0x0284;
-/// Where the host stages DATA_TRN payloads (high WRAM, clear of the low
-/// pages the uploaded stubs use; reached through the pointer above). Two
+/// Where the host stages DATA_TRN payloads (the mid-bank `$7E:2000-$7FFF`
+/// window — the pilot's phase streams cover all of `$7F` and the upper
+/// half of `$7E`, and staging inside a streamed page corrupts the game's
+/// own data; reached through the pointer above). Two
 /// ping-pong buffers: the guest's dispatcher caches the pointer at copy
 /// start and its 4 KB copy spans several flushes, so the next payload must
 /// land in the *other* buffer or an in-flight copy reads torn data (the
 /// GB ACKs before copying, so transfer N+1 legitimately arrives mid-copy).
-const BIOS_TRN_STAGING: [u32; 2] = [0x7E_D000, 0x7E_E000];
+const BIOS_TRN_STAGING: [u32; 2] = [0x7E_5000, 0x7E_6000];
 /// BIOS service entries uploaded bootstraps `JSR` into (two per known BIOS
 /// revision, selected on the `$00:FFDB` byte — zero in slopgb, so the first
 /// of each pair is the live one). The entries sit 3 bytes apart, so each
@@ -186,10 +188,11 @@ const BIOS_AUX_ENTRIES: [u32; 2] = [0xC58D, 0xC590];
 /// mid-delivery update — an async host publish landed exactly in that
 /// window and re-routed a payload over the pilot's program area.
 const BIOS_MAIN_BODY: u32 = 0xBE80;
-/// The host→BIOS delivery mailbox (high WRAM, beside the staging buffers):
+/// The host→BIOS delivery mailbox (beside the staging buffers, in the same
+/// stream-free mid-bank window):
 /// `+0..15` the packet, `+$10` the command byte, `+$11/$12` the staging
 /// pointer, `+$16` the pending flag the resident body consumes.
-const BIOS_DELIVERY: u32 = 0x7E_CF00;
+const BIOS_DELIVERY: u32 = 0x7E_4F00;
 /// The resident aux-service body: wait for the next vblank (poll RDNMI
 /// bit 7 — the flag sets regardless of NMITIMEN, fullsnes 4210h), then
 /// return. Pinned black-box from the pilot's hook, which wraps the aux

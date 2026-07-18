@@ -1013,6 +1013,30 @@ fn pad_feed_replays_latch_sequences_then_passes_the_matrix_through() {
     );
 }
 
+/// The pilot's phase streams cover ALL of bank $7F and the upper half of
+/// bank $7E (the observed DATA_TRN dest map: $7F:0100-$F100 + $7E:8000-
+/// $F000), so the host-side staging buffers and the delivery mailbox must
+/// live in the untouched $7E:2000-$7FFF window — anywhere else, every
+/// staged payload / delivery overwrites the game's own data (4 KB holes;
+/// Space Invaders' attract formation tables were the visible casualty).
+#[test]
+fn host_wram_structures_avoid_the_streamed_regions() {
+    for a in BIOS_TRN_STAGING {
+        assert_eq!(a >> 16, 0x7E, "staging stays in bank 7E: {a:06X}");
+        let off = a & 0xFFFF;
+        assert!(
+            (0x2000..0x7000).contains(&off),
+            "staging (4 KB) inside the free window: {a:06X}"
+        );
+    }
+    let off = BIOS_DELIVERY & 0xFFFF;
+    assert_eq!(BIOS_DELIVERY >> 16, 0x7E);
+    assert!(
+        (0x2000..0x7FE0).contains(&off),
+        "delivery mailbox inside the free window: {BIOS_DELIVERY:06X}"
+    );
+}
+
 #[path = "lib_tests_apu.rs"]
 mod apu;
 
