@@ -52,6 +52,7 @@ use slopgb_plugin_host::{LoadError, LoadedCoprocessor};
 
 mod commands;
 mod dma;
+mod perf;
 mod state;
 
 use state::InertCoprocessor;
@@ -351,6 +352,12 @@ pub struct SgbCoprocessor {
     poll_ctr: u32,
     sou_trn_sig: u64,
     data_trn_sig: u64,
+    /// The last `data_trn_seq` observed from the command source — the cheap
+    /// pre-filter that skips re-hashing an unchanged 4 KB payload on every
+    /// poll (once per GB instruction). Transient: the core counter resets
+    /// with a savestate load, and `None` (a source without the counter)
+    /// falls back to hashing each poll.
+    data_trn_seq_seen: Option<u64>,
     jump: Option<u32>,
 
     /// Teed GB packets awaiting deposit into the plugin's ICD2 mailbox
@@ -501,6 +508,7 @@ impl SgbCoprocessor {
             poll_ctr: 0,
             sou_trn_sig: 0,
             data_trn_sig: 0,
+            data_trn_seq_seen: None,
             jump: None,
             pending_packets: VecDeque::new(),
             pads_taken: false,
@@ -751,6 +759,7 @@ impl SgbCoprocessor {
     /// target, pull the ICD2 pad latches back, drain the S-DSP PCM, and emit
     /// `span`'s worth of output samples.
     fn flush(&mut self, span: u64) {
+        let mut tp = perf::PerfTimer::start();
         // ICD2, GB→SNES half: refresh the $6000 LCD-row shadow (fullsnes "SGB
         // Port 6000h": character row 0-$11, $11 = last row or vblank) and
         // deposit the next teed packet once the guest consumed the last one
@@ -797,6 +806,7 @@ impl SgbCoprocessor {
         // The ring is applied — any $420B in it just ran its transfer — so
         // release a DMA-stalled CPU before this flush's run_until.
         let _ = self.cpu.get_mut().write_ram(HW_DMA_STALL, &[0]);
+        tp.lap(0);
         // The scanline pump: render every framebuffer row the SNES beam has
         // passed since the last flush (display lines are 1-based, so row r
         // is complete once V > r). Runs after the ring apply, so this
@@ -810,6 +820,7 @@ impl SgbCoprocessor {
                 self.ppu_row += 1;
             }
         }
+        tp.lap(1);
         {
             let mut cpu = self.cpu.borrow_mut();
             // One character row per flush: land it in its rotating buffer
@@ -870,6 +881,7 @@ impl SgbCoprocessor {
                 }
             }
         }
+        tp.lap(2);
         // Advance the chips' absolute cycle targets by the GB→chip ratios.
         self.spc_acc += span as i64 * SPC_NUM;
         let spc_adv = self.spc_acc.div_euclid(SPC_DEN).max(0) as u64;
@@ -966,6 +978,7 @@ impl SgbCoprocessor {
                     let _ = cpu.run_until(cpu_pos);
                 }
             }
+            tp.lap(3);
             // Run the SPC700 + S-DSP to the target (or wherever the event
             // floor left it, if that is already past) and pull the PCM.
             self.spc_pos = self.spc_target.max(spc_pos);
@@ -976,6 +989,7 @@ impl SgbCoprocessor {
                 self.src.extend(batch);
             }
         }
+        tp.lap(4);
         // 3. Read the SPC700's final comm-port replies back for the 65C816.
         let mut spc_out = [0u8; N_PORTS];
         {
@@ -1034,8 +1048,11 @@ impl SgbCoprocessor {
                 }
             }
         }
+        tp.lap(5);
         // 5. Emit output-rate samples (32 kHz S-DSP → output rate, zero-order-hold).
         self.emit_output(span);
+        tp.lap(6);
+        tp.finish();
     }
 
     /// Emit the output-rate samples owed for a `span` of GB T-cycles, resampling
@@ -1129,6 +1146,10 @@ impl SgbCoprocessor {
             // arrive via DMA (the CPU-side APU ports route earlier) — a
             // DMA-to-APU transfer is unimplemented and lands inert too.
             0x2100..=0x21FF => {
+                if (0x2102..=0x2103).contains(&addr) && std::env::var_os("SLOPGB_OAMDBG").is_some()
+                {
+                    eprintln!("OAMREG {addr:04X}={val:02X}");
+                }
                 if addr == 0x2100 {
                     self.last_inidisp = val; // diagnostics (debug_status)
                     // The display shows a picture: not force-blanked and

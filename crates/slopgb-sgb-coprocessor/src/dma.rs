@@ -73,6 +73,15 @@ impl SgbCoprocessor {
             0 => 0x1_0000,
             n => n,
         };
+        if bbad == 0x04 && !b_to_a && std::env::var_os("SLOPGB_OAMDBG").is_some() {
+            let src = u32::from(a1b) << 16 | u32::from(a_addr);
+            let dump = self
+                .cpu
+                .get_mut()
+                .read_ram(src, count.min(64))
+                .unwrap_or_default();
+            eprintln!("OAMDMA ch{ch} src={src:06X} count={count} head={dump:02X?}");
+        }
         for i in 0..count {
             let b_port = bbad.wrapping_add(unit[i % unit.len()]);
             let a24 = u32::from(a1b) << 16 | u32::from(a_addr);

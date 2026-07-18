@@ -110,6 +110,24 @@ drives the later dispatches. The 15-block initial stream is table
 
 ## Resolved walls (each was a host-model defect, never the pilot's)
 
+- **CPU multiply/divide unit** (`$4202-$4206` → `$4214-$4217`): the
+  attract demo lays the invader formation out with the hardware
+  multiplier (column × 16); with the unit unimplemented every `RDMPY`
+  read returned 0 and all columns collapsed onto the base X — the whole
+  formation rendered as one vertical strip on the player. Served
+  plugin-side (`w65c816` `Mmio::cpu_write`), results complete on the
+  kick write: programs read the product a handful of cycles later, far
+  inside one host flush, so a host round trip could never answer in
+  time (fullsnes 4202h-4206h; div/0 → quotient `$FFFF`, remainder =
+  dividend).
+- **DATA_TRN payload polling**: `poll` runs once per GB instruction, and
+  after the first DATA_TRN the payload getter stays `Some` forever — the
+  4 KB edge-detect checksum ran per instruction and dominated the whole
+  frame budget (~23 fps). The core now bumps a capture counter per
+  completed DATA_TRN (`SgbCommandSource::data_trn_seq`) and the
+  coprocessor re-hashes only on a counter edge (~380 fps probe-side;
+  sources without the counter keep the per-poll check).
+
 - **`*_TRN` capture clock**: captures fire one GB-frame after the command
   on a machine-clocked window (core `SgbView::trn_countdown`) — the GB's
   line-144 boundary loses latches across LCD-off stretches (blocks 7/10

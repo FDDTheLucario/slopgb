@@ -95,7 +95,10 @@ impl SgbView {
             }
             TR_OBJ => self.obj_data = Some(capture4096(&self.shade_buf)),
             TR_SOU => self.sou_trn = Some(capture4096(&self.shade_buf)),
-            TR_DATA => self.data_trn = Some(capture4096(&self.shade_buf)),
+            TR_DATA => {
+                self.data_trn = Some(capture4096(&self.shade_buf));
+                self.data_trn_seq += 1;
+            }
             _ => {}
         }
     }
@@ -155,6 +158,10 @@ impl SgbView {
 
     pub(super) fn data_trn_data(&self) -> Option<&[u8]> {
         self.data_trn.as_deref().map(|b| &b[..])
+    }
+
+    pub(super) fn data_trn_seq(&self) -> u64 {
+        self.data_trn_seq
     }
 
     pub(super) fn flags(&self) -> crate::SgbFlags {
@@ -221,6 +228,12 @@ impl Ppu {
     /// The most recent DATA_TRN ($10) payload destined for SNES RAM.
     pub(crate) fn sgb_data_trn_data(&self) -> Option<&[u8]> {
         self.sgb.as_ref().and_then(SgbView::data_trn_data)
+    }
+
+    /// The DATA_TRN capture counter — bumps once per completed capture, so a
+    /// consumer can skip re-reading (and re-hashing) an unchanged payload.
+    pub(crate) fn sgb_data_trn_seq(&self) -> Option<u64> {
+        self.sgb.as_ref().map(SgbView::data_trn_seq)
     }
 
     /// Drain one queued DATA_SND ($0F) inline SNES-RAM write. Phase-2/3 seam.

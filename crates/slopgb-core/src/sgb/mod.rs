@@ -53,6 +53,14 @@ pub trait SgbCommandSource {
     /// The most recent DATA_TRN ($10) payload destined for SNES RAM, or `None`.
     fn data_trn_data(&self) -> Option<&[u8]>;
 
+    /// A counter that bumps once per completed DATA_TRN capture — the cheap
+    /// "did the payload change?" signal, so a consumer only reads (and
+    /// hashes) [`Self::data_trn_data`] on an edge. Default `None`: no change
+    /// tracking, the consumer must check the payload itself every poll.
+    fn data_trn_seq(&self) -> Option<u64> {
+        None
+    }
+
     /// The current SGB flag / JUMP snapshot, or `None`.
     fn flags(&self) -> Option<SgbFlags>;
 
@@ -83,6 +91,9 @@ impl SgbCommandSource for Interconnect {
     }
     fn data_trn_data(&self) -> Option<&[u8]> {
         self.ppu().sgb_data_trn_data()
+    }
+    fn data_trn_seq(&self) -> Option<u64> {
+        self.ppu().sgb_data_trn_seq()
     }
     fn flags(&self) -> Option<SgbFlags> {
         self.ppu().sgb_flags()

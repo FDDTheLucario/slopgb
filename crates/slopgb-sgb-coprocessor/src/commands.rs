@@ -74,13 +74,21 @@ impl SgbCoprocessor {
 
         // The DATA_TRN payload check runs every poll (never throttled): the
         // capture lands exactly one frame after its packet, and pairing must
-        // beat both the next packet and the next capture.
-        if let Some(data) = cmds.data_trn_data() {
-            let sig = checksum(data);
-            if sig != self.data_trn_sig {
-                self.data_trn_sig = sig;
-                let data = data.to_vec();
-                self.apply_pending_trn(&data);
+        // beat both the next packet and the next capture. The capture counter
+        // is the cheap pre-filter — without it the 4 KB checksum ran once per
+        // GB instruction and dominated the whole frame budget after the first
+        // DATA_TRN (`data_trn_data` stays `Some` forever). A source without
+        // the counter (`None`) hashes every poll as before.
+        let seq = cmds.data_trn_seq();
+        if seq.is_none() || seq != self.data_trn_seq_seen {
+            self.data_trn_seq_seen = seq;
+            if let Some(data) = cmds.data_trn_data() {
+                let sig = checksum(data);
+                if sig != self.data_trn_sig {
+                    self.data_trn_sig = sig;
+                    let data = data.to_vec();
+                    self.apply_pending_trn(&data);
+                }
             }
         }
         self.poll_ctr = self.poll_ctr.wrapping_add(1);

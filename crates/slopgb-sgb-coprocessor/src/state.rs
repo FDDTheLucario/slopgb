@@ -154,6 +154,7 @@ impl SgbCoprocessor {
         self.pads_shadow = [0xFF; 4];
         self.char_write_row = 0;
         self.char_queue.clear();
+        self.data_trn_seq_seen = None;
         self.feed_queue.clear();
         self.feed_hold = 0;
         self.input = (0x0F, 0x0F);
@@ -216,6 +217,7 @@ impl SgbCoprocessor {
         fresh.poll_ctr = self.poll_ctr;
         fresh.sou_trn_sig = self.sou_trn_sig;
         fresh.data_trn_sig = self.data_trn_sig;
+        fresh.data_trn_seq_seen = self.data_trn_seq_seen;
         fresh.jump = self.jump;
         fresh.pending_packets = self.pending_packets.clone();
         fresh.pads_taken = self.pads_taken;

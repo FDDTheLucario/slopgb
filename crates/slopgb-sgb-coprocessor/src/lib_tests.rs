@@ -69,6 +69,10 @@ struct TestCmds {
     data_snd: Vec<Vec<u8>>,
     sou_trn: Option<Vec<u8>>,
     data_trn: Option<Vec<u8>>,
+    /// Capture counter served by `data_trn_seq` (`None` = no counter).
+    trn_seq: Option<u64>,
+    /// How many times `data_trn_data` was read (the gate observability).
+    trn_reads: std::cell::Cell<u32>,
     flags: Option<SgbFlags>,
     packets: Vec<[u8; 16]>,
 }
@@ -87,7 +91,11 @@ impl SgbCommandSource for TestCmds {
         self.sou_trn.as_deref()
     }
     fn data_trn_data(&self) -> Option<&[u8]> {
+        self.trn_reads.set(self.trn_reads.get() + 1);
         self.data_trn.as_deref()
+    }
+    fn data_trn_seq(&self) -> Option<u64> {
+        self.trn_seq
     }
     fn flags(&self) -> Option<SgbFlags> {
         self.flags
@@ -714,6 +722,41 @@ fn nmi_handler_preserves_a_with_empty_vector() {
 }
 
 /// DATA_TRN pairing under the one-frame capture skew: the payload lands a
+/// The DATA_TRN payload check gates on the source's capture counter: an
+/// unchanged counter skips the 4 KB read+hash entirely (it used to run once
+/// per GB instruction), a bump reopens exactly one check, and a source
+/// without a counter (`None`) checks every poll as before.
+#[test]
+fn data_trn_checks_gate_on_the_capture_counter() {
+    let Some(mut cop) = build_cop(48_000) else {
+        return;
+    };
+    let mut cmds = TestCmds {
+        data_trn: Some(vec![0x11; 4096]),
+        trn_seq: Some(1),
+        ..TestCmds::default()
+    };
+    for _ in 0..10 {
+        cop.poll(&mut cmds);
+    }
+    assert_eq!(cmds.trn_reads.get(), 1, "one read on the counter edge");
+    cmds.trn_seq = Some(2);
+    cmds.data_trn = Some(vec![0x22; 4096]);
+    for _ in 0..10 {
+        cop.poll(&mut cmds);
+    }
+    assert_eq!(cmds.trn_reads.get(), 2, "one more read on the next edge");
+    // No counter: every poll checks (the pre-gate behavior).
+    let mut cmds = TestCmds {
+        data_trn: Some(vec![0x33; 4096]),
+        ..TestCmds::default()
+    };
+    for _ in 0..10 {
+        cop.poll(&mut cmds);
+    }
+    assert_eq!(cmds.trn_reads.get(), 10, "counterless sources re-check");
+}
+
 /// frame after its packet, so a packet waits pending until the payload edge
 /// fires — and a byte-identical payload (no edge) is flushed by the next
 /// packet's arrival with those same bytes.

@@ -132,6 +132,12 @@ pub(super) struct SgbView {
     sou_trn: Option<Box<[u8; 4096]>>,
     /// DATA_TRN ($10) captured payload destined for SNES RAM.
     data_trn: Option<Box<[u8; 4096]>>,
+    /// Bumps once per completed DATA_TRN capture — the cheap change signal
+    /// consumers poll instead of hashing the 4 KB payload every call. Not
+    /// serialized: a load keeps the running value (`read_state` reuses the
+    /// view), and the consumer forgets its remembered value on its own load,
+    /// so the pair re-syncs on the first poll either way.
+    data_trn_seq: u64,
     /// ICD2 character-row stream: each completed 8-line band of the
     /// rendered screen as 20 GB 2bpp tiles (320 bytes — fullsnes "SGB Port
     /// 7800h"), awaiting the coprocessor's drain (the `$7800` path the
@@ -202,6 +208,7 @@ impl SgbView {
             obj_data: None,
             sou_trn: None,
             data_trn: None,
+            data_trn_seq: 0,
             char_rows: std::collections::VecDeque::new(),
             data_snd: Vec::new(),
             sound_events: Vec::new(),
