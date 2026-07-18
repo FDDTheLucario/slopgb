@@ -100,6 +100,35 @@ impl SgbView {
         }
     }
 
+    /// Stream one completed 8-line band of the rendered screen into the
+    /// ICD2 character-row queue: 20 tiles × 16 bytes of standard GB 2bpp
+    /// (fullsnes "SGB Port 7800h" — the format the SNES DMAs straight into
+    /// VRAM). `band` is the character row, 0-17.
+    pub(super) fn stream_char_row(&mut self, band: u8) {
+        let mut data = Box::new([0u8; 320]);
+        let y0 = usize::from(band) * 8;
+        for tile in 0..20 {
+            for ry in 0..8 {
+                let (mut lo, mut hi) = (0u8, 0u8);
+                for x in 0..8 {
+                    let px = self.shade_buf[(y0 + ry) * 160 + tile * 8 + x] & 3;
+                    lo |= (px & 1) << (7 - x);
+                    hi |= (px >> 1) << (7 - x);
+                }
+                data[tile * 16 + ry * 2] = lo;
+                data[tile * 16 + ry * 2 + 1] = hi;
+            }
+        }
+        if self.char_rows.len() >= 8 {
+            self.char_rows.pop_front();
+        }
+        self.char_rows.push_back((band, data));
+    }
+
+    pub(super) fn take_char_row(&mut self) -> Option<(u8, Box<[u8; 320]>)> {
+        self.char_rows.pop_front()
+    }
+
     pub(super) fn take_sound_event(&mut self) -> Option<SgbSound> {
         if self.sound_events.is_empty() {
             None
@@ -154,6 +183,21 @@ impl Ppu {
         if let Some(s) = self.sgb.as_mut() {
             s.tick_trn(cycles);
         }
+    }
+
+    /// At a line-8k boundary on SGB, stream the just-completed character
+    /// row (the ICD2 `$7800` feed). No-op off SGB — golden-safe.
+    pub(crate) fn sgb_stream_char_row(&mut self, line: u8) {
+        if line % 8 == 0 && (8..=144).contains(&line) {
+            if let Some(s) = self.sgb.as_mut() {
+                s.stream_char_row(line / 8 - 1);
+            }
+        }
+    }
+
+    /// Drain one streamed ICD2 character row (`(row 0-17, 320 bytes)`).
+    pub(crate) fn sgb_take_char_row(&mut self) -> Option<(u8, Box<[u8; 320]>)> {
+        self.sgb.as_mut().and_then(SgbView::take_char_row)
     }
 
     /// Drain one queued SGB SOUND ($08) effect event. The Phase-3 S-DSP seam:

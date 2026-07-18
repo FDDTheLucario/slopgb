@@ -152,6 +152,7 @@ impl SgbCoprocessor {
         self.out.clear();
         self.pads_taken = false;
         self.pads_shadow = [0xFF; 4];
+        self.char_write_row = 0;
         self.feed_queue.clear();
         self.feed_hold = 0;
         self.input = (0x0F, 0x0F);
@@ -200,6 +201,7 @@ impl SgbCoprocessor {
         fresh.cpu_target = self.cpu_target;
         fresh.spc_pos = self.spc_pos;
         fresh.cpu_pos = self.cpu_pos;
+        fresh.char_write_row = self.char_write_row;
         fresh.spc_acc = self.spc_acc;
         fresh.cpu_acc = self.cpu_acc;
         fresh.pending_gb = self.pending_gb;

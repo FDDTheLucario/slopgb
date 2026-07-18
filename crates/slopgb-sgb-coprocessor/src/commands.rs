@@ -48,6 +48,14 @@ impl SgbCoprocessor {
             }
             self.pending_packets.push_back(p);
         }
+        // ICD2 character rows: the GB screen's 8-line bands stream into the
+        // plugin's four rotating `$7800` buffers (row % 4 — fullsnes "SGB
+        // Port 7800h"), where the SNES side DMAs them into VRAM.
+        while let Some((row, data)) = cmds.take_char_row() {
+            let cpu = self.cpu.get_mut();
+            let _ = cpu.write_ram(HW_CHAR_ROWS + u32::from(row % 4) * 320, &data[..]);
+            self.char_write_row = row % 4;
+        }
         // SOUND ($08): a play request. Deposit the effect id + a trigger in the
         // CPU's mailbox; the 65C816 shim forwards them to the SPC700 driver.
         while let Some(s) = cmds.take_sound_event() {

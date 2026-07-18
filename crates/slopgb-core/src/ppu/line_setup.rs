@@ -21,10 +21,14 @@ impl Ppu {
             1..=143 => {
                 self.ly = self.line;
                 self.clear_line_flip_state();
+                // A completed 8-line band streams its ICD2 character row
+                // (no-op off SGB — golden-safe).
+                self.sgb_stream_char_row(self.line);
             }
             144 => {
                 self.ly = 144;
                 self.frame_count += 1;
+                self.sgb_stream_char_row(144);
                 // SGB MASK_EN: freeze holds the last presented frame (no swap);
                 // black/color-0 paint over it. Computed as owned values first
                 // to avoid aliasing the `self.front` fill below. `None` on

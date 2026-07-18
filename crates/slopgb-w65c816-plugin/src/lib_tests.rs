@@ -530,3 +530,27 @@ fn header_reads_report_without_draining() {
     assert_eq!((full[0], full[3], full[4]), (1, 1, 0x11));
     assert_eq!(cop.read_ram(HW_PORT_RING, 3)[0], 0, "port drained");
 }
+
+/// The ICD2 bus-read window performs real device reads: `$7800` serves the
+/// loaded character row with its per-read auto-increment, so a GP-DMA
+/// sourcing the char port advances through the row byte by byte.
+#[test]
+fn icd2_bus_window_reads_the_char_port_with_side_effects() {
+    let mut cop = W65816Cop::new();
+    let mut row = [0u8; 320];
+    row[0] = 0xAB;
+    row[1] = 0xCD;
+    row[2] = 0xEF;
+    cop.write_ram(HW_CHAR_ROWS, &row);
+    let got = cop.read_ram(HW_ICD2_BUS + 0x1800, 3);
+    assert_eq!(got, vec![0xAB, 0xCD, 0xEF], "auto-increment per read");
+    // The index kept advancing — a fresh read continues, and a $6001 write
+    // through the bus window is not modeled (read-only window): reset via
+    // the CPU-visible register instead.
+    cop.bus.icd2.cpu_write(0x6001, 0);
+    assert_eq!(
+        cop.read_ram(HW_ICD2_BUS + 0x1800, 1),
+        vec![0xAB],
+        "index reset"
+    );
+}

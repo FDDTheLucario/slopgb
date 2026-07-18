@@ -491,6 +491,29 @@ fn border_transfer_restarts_crossfade() {
     );
 }
 
+/// Each completed 8-line band streams as an ICD2 character row: 20 GB
+/// 2bpp tiles, 320 bytes (fullsnes "SGB Port 7800h") — the `$7800` feed
+/// the SNES side DMAs into VRAM.
+#[test]
+fn char_rows_stream_as_gb_2bpp_tiles() {
+    let mut s = SgbView::new();
+    // Band 2 (lines 16-23): tile 0 all shade 1, tile 1 all shade 2.
+    for y in 16..24 {
+        for x in 0..8 {
+            s.shade_buf[y * 160 + x] = 1;
+            s.shade_buf[y * 160 + 8 + x] = 2;
+        }
+    }
+    s.stream_char_row(2);
+    let (row, data) = s.take_char_row().expect("a streamed row");
+    assert_eq!(row, 2);
+    assert_eq!(data[0], 0xFF, "tile 0 row 0 low plane");
+    assert_eq!(data[1], 0x00, "tile 0 row 0 high plane");
+    assert_eq!(data[16], 0x00, "tile 1 low plane");
+    assert_eq!(data[17], 0xFF, "tile 1 high plane");
+    assert!(s.take_char_row().is_none(), "drained");
+}
+
 /// A `*_TRN` command captures the screen one frame after the command, on the
 /// free-running SNES-side capture clock — not at the GB's next line-144 (an
 /// LCD-off window can skip that entirely, losing the screen) and not at

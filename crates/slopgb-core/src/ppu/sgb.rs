@@ -132,6 +132,13 @@ pub(super) struct SgbView {
     sou_trn: Option<Box<[u8; 4096]>>,
     /// DATA_TRN ($10) captured payload destined for SNES RAM.
     data_trn: Option<Box<[u8; 4096]>>,
+    /// ICD2 character-row stream: each completed 8-line band of the
+    /// rendered screen as 20 GB 2bpp tiles (320 bytes — fullsnes "SGB Port
+    /// 7800h"), awaiting the coprocessor's drain (the `$7800` path the
+    /// SNES DMAs into VRAM). Bounded, oldest dropped; transient like
+    /// `Joypad`'s `pending_cmd` (a live coprocessor re-streams every
+    /// frame, and the HLE path never drains it).
+    char_rows: std::collections::VecDeque<(u8, Box<[u8; 320]>)>,
     /// DATA_SND ($0F) inline packets written to SNES RAM (drained by the host).
     data_snd: Vec<Vec<u8>>,
     /// SOUND ($08) effect events (drained by the host / Phase 3).
@@ -195,6 +202,7 @@ impl SgbView {
             obj_data: None,
             sou_trn: None,
             data_trn: None,
+            char_rows: std::collections::VecDeque::new(),
             data_snd: Vec::new(),
             sound_events: Vec::new(),
             atrc_en: false,

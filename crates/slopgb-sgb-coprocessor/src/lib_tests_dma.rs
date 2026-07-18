@@ -248,3 +248,46 @@ fn gp_dma_das_zero_means_64k() {
     assert_eq!(cop.debug_cpu_ram(0x7E_FFFF, 1), vec![0x3C]);
     assert_eq!(cop.debug_cpu_ram(0x7F_0000, 1), vec![0], "stopped at 64 K");
 }
+
+/// A GP-DMA sourcing the ICD2 `$7800` character port reads through the
+/// device — its per-read auto-increment advances the row — so a streamed
+/// GB screen band lands byte-exact (here into WRAM through the `$2180`
+/// WMDATA port; the takeover DMAs the same source into VRAM).
+#[test]
+fn dma_from_the_char_port_streams_the_loaded_row() {
+    let Some(mut cop) = build_cop(48_000) else {
+        return;
+    };
+    let mut row = [0u8; 320];
+    for (i, b) in row.iter_mut().enumerate() {
+        *b = (i as u8) ^ 0x5A;
+    }
+    cop.cpu.get_mut().write_ram(HW_CHAR_ROWS, &row).unwrap();
+    let prog = stores(
+        &[
+            (0x2181, 0x00), // WMADD = $003000 (WRAM $7E:3000)
+            (0x2182, 0x30),
+            (0x2183, 0x00),
+            (0x4300, 0x00), // A->B, increment, mode 0
+            (0x4301, 0x80), // BBAD $2180 (WMDATA)
+            (0x4302, 0x00), // A1T = $7800
+            (0x4303, 0x78),
+            (0x4304, 0x00), // bank 0
+            (0x4305, 0x10), // 16 bytes
+            (0x4306, 0x00),
+            (0x420B, 0x01),
+        ],
+        &[0xDB],
+    );
+    {
+        let mut cpu = cop.cpu.borrow_mut();
+        cpu.write_ram(0x9000, &prog).unwrap();
+        cpu.set_pc(0x9000).unwrap();
+    }
+    cop.clock(70_224);
+    assert_eq!(
+        cpu_ram(&cop, 0x7E_3000, 16),
+        row[..16].to_vec(),
+        "the char row streamed through the device read path"
+    );
+}

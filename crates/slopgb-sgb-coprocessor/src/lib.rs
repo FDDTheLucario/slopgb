@@ -110,6 +110,11 @@ const HW_PACKET: u32 = 0x0100_0000;
 const HW_PADS: u32 = 0x0100_0011;
 /// `W len 2`: the `$6000` shadows `[lcd_row, write_row]`.
 const HW_LCD_ROW: u32 = 0x0100_0016;
+/// `W len 320` at `+ (row % 4) * 320`: load an ICD2 `$7800` character row.
+const HW_CHAR_ROWS: u32 = 0x0100_0020;
+/// `R len N` at `+ off`: N successive ICD2 *bus* reads (`$6000 + off+i`,
+/// side effects included) — the GP-DMA A-bus source path for `$7800`.
+const HW_ICD2_BUS: u32 = 0x0100_6000;
 /// `R len 3 + 3*MMIO_RING_CAP` (drains): the MMIO write-capture ring.
 const HW_MMIO_RING: u32 = 0x0100_1000;
 /// `W len L` at `+ i`: CPU-read shadows for `$4200 + i`.
@@ -304,6 +309,9 @@ pub struct SgbCoprocessor {
     /// Absolute cycle targets handed to each plugin's `run_until` (its own domain).
     spc_target: u64,
     cpu_target: u64,
+    /// The `$7800` buffer (`row % 4`) the last streamed character row
+    /// landed in — the `$6000` write-row shadow. Transient.
+    char_write_row: u8,
     /// Furthest cycles each chip has actually been run to — ahead of the
     /// targets after a mediation burst (each replayed port event owes the
     /// SPC700 a consume slice and the 65C816 a produce slice). The next
@@ -470,6 +478,7 @@ impl SgbCoprocessor {
             cpu_target: 0,
             spc_pos: 0,
             cpu_pos: 0,
+            char_write_row: 0,
             spc_acc: 0,
             cpu_acc: 0,
             pending_gb: 0,
@@ -796,7 +805,7 @@ impl SgbCoprocessor {
         }
         {
             let mut cpu = self.cpu.borrow_mut();
-            let _ = cpu.write_ram(HW_LCD_ROW, &[row, row & 3]);
+            let _ = cpu.write_ram(HW_LCD_ROW, &[row, self.char_write_row]);
             // The SNES frame clock: scale the GB frame position onto the
             // 262-line NTSC frame; on the vblank edges maintain the RDNMI
             // flag (set at begin, auto-clear at end — fullsnes 4210h; the

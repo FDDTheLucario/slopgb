@@ -30,6 +30,14 @@ fn a_bus_is_wram(addr: u32) -> bool {
     bank == 0x7E || bank == 0x7F || (bank & 0x40 == 0 && addr & 0xFFFF < 0x2000)
 }
 
+/// The ICD2 register block on the A bus (`$6000-$7FFF` in the system banks) —
+/// DMA sources there need *bus* reads (the `$7800` character port
+/// auto-increments per read), not raw memory reads.
+fn a_bus_is_icd2(addr: u32) -> bool {
+    let bank = (addr >> 16) as u8;
+    bank & 0x40 == 0 && bank != 0x7E && (0x6000..0x8000).contains(&(addr & 0xFFFF))
+}
+
 impl SgbCoprocessor {
     /// Execute a captured MDMAEN (`$420B`) write: enabled channels run
     /// channel 0 first through 7 last, back to back, and the enable bits
@@ -76,10 +84,18 @@ impl SgbCoprocessor {
                     let v = self.bbus_read(b_port);
                     let _ = self.cpu.get_mut().write_ram(a24, &[v]);
                 } else {
+                    // ICD2 sources go through the bus-read window (the
+                    // `$7800` char port's auto-increment must run per
+                    // byte); everything else is plain memory.
+                    let src = if a_bus_is_icd2(a24) {
+                        HW_ICD2_BUS + (a24 & 0x1FFF)
+                    } else {
+                        a24
+                    };
                     let v = self
                         .cpu
                         .get_mut()
-                        .read_ram(a24, 1)
+                        .read_ram(src, 1)
                         .ok()
                         .and_then(|b| b.first().copied())
                         .unwrap_or(0);

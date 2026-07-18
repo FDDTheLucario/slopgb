@@ -92,6 +92,11 @@ pub const HW_PORT_RING: u32 = HOST_WIN + 0x4000;
 /// sub-frame protocol sequences (ACK handshakes, one-shot phase triggers)
 /// that a per-flush latch snapshot aliases away.
 pub const HW_PAD_RING: u32 = HOST_WIN + 0x5000;
+/// `R len N` at `+ off`: N successive *bus* reads of ICD2 space
+/// (`$6000 + (off + i & $1FFF)`), side effects included — the host's GP-DMA
+/// engine sources A-bus reads of the ICD2 through here (a raw `read_ram`
+/// has no device semantics: `$7800`'s auto-increment must run per byte).
+pub const HW_ICD2_BUS: u32 = HOST_WIN + 0x6000;
 /// Port-ring capacity in captured writes (a flush window is ~2.5 K CPU
 /// cycles; the resident shim's 4-write loop peaks near 340).
 // Sized for the writes one whole flush window can produce: the host drains
@@ -360,6 +365,13 @@ impl W65816Cop {
             HW_DMA_STALL => {
                 if let Some(slot) = out.first_mut() {
                     *slot = u8::from(self.bus.mmio.dma_stall());
+                }
+            }
+            a if (HW_ICD2_BUS..HW_ICD2_BUS + 0x2000).contains(&a) => {
+                let off = a - HW_ICD2_BUS;
+                for (i, slot) in out.iter_mut().enumerate() {
+                    let reg = 0x6000 + ((off + i as u32) & 0x1FFF) as u16;
+                    *slot = icd2.cpu_read(reg);
                 }
             }
             HW_PAD_RING if out.len() >= 2 => {

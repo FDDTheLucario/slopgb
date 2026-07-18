@@ -55,6 +55,13 @@ pub trait SgbCommandSource {
 
     /// The current SGB flag / JUMP snapshot, or `None`.
     fn flags(&self) -> Option<SgbFlags>;
+
+    /// Drain one streamed ICD2 character row — `(row 0-17, 320 bytes of GB
+    /// 2bpp tiles)`, the `$7800` feed the SNES side DMAs into VRAM
+    /// (fullsnes "SGB Port 7800h"). Default `None` (the HLE never streams).
+    fn take_char_row(&mut self) -> Option<(u8, Box<[u8; 320]>)> {
+        None
+    }
 }
 
 /// The Game Boy bus is the live command source, forwarding to the PPU's SGB
@@ -79,6 +86,9 @@ impl SgbCommandSource for Interconnect {
     }
     fn flags(&self) -> Option<SgbFlags> {
         self.ppu().sgb_flags()
+    }
+    fn take_char_row(&mut self) -> Option<(u8, Box<[u8; 320]>)> {
+        self.ppu_mut().sgb_take_char_row()
     }
 }
 
