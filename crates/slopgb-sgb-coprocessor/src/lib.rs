@@ -110,7 +110,7 @@ const HW_PACKET: u32 = 0x0100_0000;
 const HW_PADS: u32 = 0x0100_0011;
 /// `W len 2`: the `$6000` shadows `[lcd_row, write_row]`.
 const HW_LCD_ROW: u32 = 0x0100_0016;
-/// `R len 3 + 3*512` (drains): the MMIO write-capture ring.
+/// `R len 3 + 3*MMIO_RING_CAP` (drains): the MMIO write-capture ring.
 const HW_MMIO_RING: u32 = 0x0100_1000;
 /// `W len L` at `+ i`: CPU-read shadows for `$4200 + i`.
 const HW_SHADOW: u32 = 0x0100_2000;
@@ -136,7 +136,7 @@ const FEED_QUEUE_CAP: usize = 128;
 /// next per-frame pad forward).
 const FEED_DWELL_STEPS: u32 = 1024;
 /// The plugin's ring capacity (drain reads size to this).
-const MMIO_RING_CAP: usize = 512;
+const MMIO_RING_CAP: usize = 16384;
 /// Shadow offsets within the `$4200` block.
 const SH_RDNMI: u32 = 0x10;
 const SH_HVBJOY: u32 = 0x12;

@@ -454,3 +454,36 @@ fn pad_latch_writes_ring_in_order() {
     let again = cop.read_ram(HW_PAD_RING, 2);
     assert_eq!(again[0], 0, "the drain consumed the ring");
 }
+
+/// The MMIO ring must hold every captured write one whole flush window can
+/// produce — the mediation rounds let the CPU run far ahead of real time
+/// inside one flush, so a takeover's tile upload (tight STA $2118/$2119
+/// loops) banks thousands of writes between drains; dropping the tail
+/// tears the PPU's VRAM image.
+#[test]
+fn mmio_ring_holds_a_full_flush_window_of_writes() {
+    let mut cop = W65816Cop::new();
+    // Native mode, 16-bit X: 600 iterations of a $2118/$2119 write pair
+    // (1200 events), STP.
+    let prog = [
+        0x18, 0xFB, // CLC / XCE
+        0xC2, 0x10, // REP #$10
+        0xA2, 0x58, 0x02, // LDX #600
+        0xA9, 0x5A, // LDA #$5A
+        0x8D, 0x18, 0x21, // STA $2118
+        0x8D, 0x19, 0x21, // STA $2119
+        0xCA, // DEX
+        0xD0, 0xF7, // BNE back to the STA $2118
+        0xDB, // STP
+    ];
+    cop.write_ram(u32::from(PROG_ORG), &prog);
+    cop.cpu = Cpu::new();
+    cop.cpu.regs.pc = PROG_ORG;
+    cop.cycles = 0;
+    cop.run_until(300_000);
+
+    let ring = cop.read_ram(HW_MMIO_RING, 3 + 3 * MMIO_RING_CAP);
+    let n = usize::from(ring[0]) | usize::from(ring[1]) << 8;
+    assert_eq!(ring[2], 0, "no overflow");
+    assert_eq!(n, 1200, "every write of the burst captured");
+}

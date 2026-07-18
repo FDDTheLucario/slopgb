@@ -64,6 +64,10 @@ impl App {
                 if !self.session.set_model(self.settings.model) {
                     self.session.reset();
                 }
+                // The cached SNES frame belongs to the pre-reset machine; the
+                // fresh coprocessor withholds frames until its display goes
+                // live, so a stale (possibly blank) frame would stick.
+                self.snes_frame = None;
                 self.resync_pacing();
             }
             Action::Quit => {

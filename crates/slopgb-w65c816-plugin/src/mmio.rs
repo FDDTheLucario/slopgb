@@ -12,7 +12,10 @@
 /// a sticky flag. If a dropped write is a `$420B` trigger, its DMA is lost
 /// too (the host still un-stalls the CPU) — the overflow warning is the
 /// only trace, so the cap must stay comfortably above the legitimate rate.
-pub const MMIO_RING_CAP: usize = 512;
+// Sized for one whole flush window's writes: the mediation rounds let the
+// CPU run far ahead of real time inside a flush, so a takeover's tile
+// upload banks thousands of captured writes between host drains.
+pub const MMIO_RING_CAP: usize = 16384;
 /// Serialized [`Mmio::save_state`] length.
 pub(crate) const MMIO_STATE_LEN: usize = 2 + 1 + MMIO_RING_CAP * 3 + 0x20 + 2 + 1;
 
