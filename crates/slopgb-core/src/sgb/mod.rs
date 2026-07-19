@@ -176,4 +176,19 @@ pub trait AudioCoprocessor {
     fn debug_status(&self) -> String {
         "built-in SGB APU (HLE) — no wasm coprocessor plugins loaded".to_string()
     }
+
+    /// A self-sustaining `.spc` (SPC700 Sound File) snapshot of the current
+    /// song, captured from-the-top by the engine's last play command. Read-only
+    /// introspection; `None` unless [`Self::can_export_spc`] is true.
+    fn export_spc(&self) -> Option<Vec<u8>> {
+        None
+    }
+
+    /// Whether a from-start `.spc` is available to export right now — true only
+    /// for a recognized resident engine that has started a song, so the UI greys
+    /// the action for engines it can't snapshot from the top (the square SFX
+    /// driver, a game-uploaded foreign engine, or no song yet).
+    fn can_export_spc(&self) -> bool {
+        false
+    }
 }

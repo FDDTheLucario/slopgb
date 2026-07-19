@@ -356,6 +356,9 @@ impl super::AudioCoprocessor for SgbApu {
     fn clone_box(&self) -> Box<dyn super::AudioCoprocessor> {
         Box::new(self.clone())
     }
+    // No `export_spc`: this HLE square driver plays SGB sound effects, not
+    // sequenced music with a song-start to snapshot from — the trait default
+    // (`None` / not exportable) greys the export action for it.
 }
 
 impl Clone for SgbApu {

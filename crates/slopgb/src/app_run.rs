@@ -218,6 +218,7 @@ impl App {
                 self.request_game_redraw();
             }
             Action::SaveScreenshot => self.save_screenshot(),
+            Action::ExportSpc => self.export_spc(),
             Action::DbgSaveMemDump => self.save_memory_dump(),
             // bgb's "Options..." (F11): open the tabbed control panel, seeded
             // from the live settings. Routed/applied by `on_game_click` +
@@ -317,6 +318,25 @@ impl App {
         match fs::write(&path, &dump) {
             Ok(()) => eprintln!("saved memory dump to {path}"),
             Err(e) => eprintln!("error: could not save memory dump: {e}"),
+        }
+    }
+
+    /// Export the SGB audio chip's current state as `slopgb-<unix-millis>.spc`
+    /// (main menu → "Export SPC"); best captured while a song is playing, so the
+    /// SPC is self-sustaining. Logs the path, or a hint if there's no SPC to dump
+    /// (not an SGB machine, or the coprocessor has no SPC700).
+    fn export_spc(&self) {
+        let Some(spc) = self.session.gb.export_spc() else {
+            eprintln!("slopgb: no SPC to export (needs an SGB machine with audio)");
+            return;
+        };
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis());
+        let path = format!("slopgb-{stamp}.spc");
+        match fs::write(&path, &spc) {
+            Ok(()) => eprintln!("saved SPC ({} bytes) to {path}", spc.len()),
+            Err(e) => eprintln!("error: could not save SPC: {e}"),
         }
     }
 

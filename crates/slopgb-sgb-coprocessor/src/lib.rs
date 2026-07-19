@@ -268,6 +268,12 @@ const MB_NOTE: u16 = 0x0200;
 const SPC_PROG_ORG: u16 = 0x0400;
 const SPC_DIR_ORG: u16 = 0x0200;
 const SPC_BRR_ORG: u16 = 0x0210;
+/// SPC700 cycles (~1.024 MHz) to let a resident N-SPC engine run past a play
+/// command before grabbing the [from-start snapshot](SgbCoprocessor::song_start_spc)
+/// — about one 60 Hz frame, enough for the driver's song-init to finish (timers
+/// enabled, sequencer pointer reset to the score top) so the captured `.spc` is
+/// self-sustaining, while losing only an imperceptible sliver of the first note.
+const SONG_START_CAPTURE_DELAY: u64 = 17_000;
 
 /// The clean-room 65C816 shim (emulation mode, 8-bit). It watches the
 /// SNES-RAM mailbox `[$0200,$0201]` and, when the trigger is armed, copies it
@@ -476,6 +482,17 @@ pub struct SgbCoprocessor {
     dbg_soutrn_nonzero: u32,
     dbg_soutrn_head: [u8; 16],
     dbg_pcm_peak: f32,
+    /// A self-sustaining `.spc` grabbed shortly after the resident engine
+    /// (re)started a song, so an export reproduces that song from its opening
+    /// rather than from the instant the user clicks. `None` until a recognized
+    /// resident engine reaches a play command — which doubles as the export
+    /// gate ([`Self::can_export_spc`]): the built-in square driver and any
+    /// game-uploaded foreign engine never fill it, so they stay un-exportable
+    /// (the menu greys the row) instead of yielding a broken mid-song dump.
+    song_start_spc: Option<Vec<u8>>,
+    /// When armed (a play command just landed), the `spc_pos` target at which
+    /// [`Self::flush`] grabs [`Self::song_start_spc`].
+    capture_at: Option<u64>,
 }
 
 impl SgbCoprocessor {
@@ -638,6 +655,8 @@ impl SgbCoprocessor {
             dbg_soutrn_nonzero: 0,
             dbg_soutrn_head: [0; 16],
             dbg_pcm_peak: 0.0,
+            song_start_spc: None,
+            capture_at: None,
         };
         me.install_firmware()?;
         Ok(me)
@@ -1189,6 +1208,19 @@ impl SgbCoprocessor {
         tp.lap(5);
         // 5. Emit output-rate samples (32 kHz S-DSP → output rate, zero-order-hold).
         self.emit_output(span);
+        // From-start capture: once the resident engine has run a frame past the
+        // play command (`nspc_flush` armed `capture_at`), the song-init has
+        // finished — grab a self-sustaining snapshot for a from-the-top export.
+        if let Some(at) = self.capture_at {
+            if self.spc_pos >= at {
+                self.capture_at = None;
+                if let Ok(spc) = self.spc.borrow_mut().dump_spc() {
+                    if !spc.is_empty() {
+                        self.song_start_spc = Some(spc);
+                    }
+                }
+            }
+        }
         tp.lap(6);
         tp.finish();
     }
@@ -1428,6 +1460,17 @@ impl AudioCoprocessor for SgbCoprocessor {
         }
     }
 
+    fn export_spc(&self) -> Option<Vec<u8>> {
+        // The from-start snapshot the resident engine's last play command
+        // produced (assembled by the SPC700 plugin from its ARAM + registers +
+        // DSP). `None` until a recognized song has started.
+        self.song_start_spc.clone()
+    }
+
+    fn can_export_spc(&self) -> bool {
+        self.song_start_spc.is_some()
+    }
+
     fn debug_status(&self) -> String {
         // The run-cycle targets grow only while the host clocks the chips, so a
         // zero here means the coprocessor loaded but was never driven (the
@@ -1445,7 +1488,9 @@ impl AudioCoprocessor for SgbCoprocessor {
             // Live SPC output ports (the engine's echo) + the ARAM entry byte, to
             // diagnose the N-SPC handshake. borrow_mut from &self via the RefCell.
             let mut spc = self.spc.borrow_mut();
-            let song = spc.read_ram(u32::from(self.dbg_soutrn_dest), 8).unwrap_or_default();
+            let song = spc
+                .read_ram(u32::from(self.dbg_soutrn_dest), 8)
+                .unwrap_or_default();
             // The default ROM engine has its own internals; only the clean-room
             // engine (SLOPGB_NSPC_CLEANROOM) has the engine.asm variable layout
             // this decodes ($12 songlp, $14 tempo, $16 tickacc, $19 state, $1B

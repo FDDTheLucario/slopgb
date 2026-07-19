@@ -14,9 +14,9 @@ fn at(m: &MainMenu, idx: usize) -> (i32, i32) {
 }
 
 /// Index of the "Window size" row (carries the submenu opener).
-const WINDOW_SIZE_ROW: usize = 11;
+const WINDOW_SIZE_ROW: usize = 12;
 /// Index of the "Sound channel" row (MN3 submenu opener).
-const SOUND_CHANNEL_ROW: usize = 10;
+const SOUND_CHANNEL_ROW: usize = 11;
 
 #[test]
 fn popup_size_unions_main_menu_and_submenu() {
@@ -101,6 +101,7 @@ fn menu_has_the_rc_main_rows_in_order() {
             "Cheat...",
             "Reset gameboy",
             "Save screenshot",
+            "Export SPC",
             "Debugger",
             "State",
             "Other",
@@ -141,10 +142,10 @@ fn supported_rows_run_their_action_window_size_opens_a_submenu_rest_none() {
     assert_eq!(m.effects[2], MenuEffect::Run(Action::ToggleSound));
     assert_eq!(m.effects[5], MenuEffect::Run(Action::Reset));
     assert_eq!(
-        m.effects[7],
+        m.effects[8],
         MenuEffect::Run(Action::ToggleTool(ToolWindow::Debugger))
     );
-    assert_eq!(m.effects[16], MenuEffect::Run(Action::Quit));
+    assert_eq!(m.effects[17], MenuEffect::Run(Action::Quit));
     assert_eq!(
         m.effects[WINDOW_SIZE_ROW],
         MenuEffect::Submenu(SubKind::WindowSize)
@@ -160,7 +161,12 @@ fn supported_rows_run_their_action_window_size_opens_a_submenu_rest_none() {
         "Save screenshot is wired (MN4)"
     );
     assert_eq!(
-        m.effects[9],
+        m.effects[7],
+        MenuEffect::Run(Action::ExportSpc),
+        "Export SPC is wired"
+    );
+    assert_eq!(
+        m.effects[10],
         MenuEffect::Submenu(SubKind::Other),
         "Other opens its submenu (MN5)"
     );
@@ -168,24 +174,42 @@ fn supported_rows_run_their_action_window_size_opens_a_submenu_rest_none() {
     assert_eq!(m.effects[3], MenuEffect::Run(Action::MainOptions));
     assert_eq!(m.effects[4], MenuEffect::Run(Action::MainCheats));
     // State opens its submenu (MN6 Quick Save/Load).
-    assert_eq!(m.effects[8], MenuEffect::Submenu(SubKind::State));
+    assert_eq!(m.effects[9], MenuEffect::Submenu(SubKind::State));
     // Load ROM (MN4) opens the path modal; Recent ROMs (MN4) opens its submenu.
     assert_eq!(m.effects[1], MenuEffect::Run(Action::MainLoadRom));
-    assert_eq!(m.effects[15], MenuEffect::Submenu(SubKind::RecentRoms));
+    assert_eq!(m.effects[16], MenuEffect::Submenu(SubKind::RecentRoms));
     // Link opens its submenu (rows grey by connection state — see
     // link_submenu_greys_rows_by_state).
-    assert_eq!(m.effects[12], MenuEffect::Submenu(SubKind::Link));
+    assert_eq!(m.effects[13], MenuEffect::Submenu(SubKind::Link));
     // MCP opens its submenu (Start/Stop, greyed by server state).
-    assert_eq!(m.effects[13], MenuEffect::Submenu(SubKind::Mcp));
+    assert_eq!(m.effects[14], MenuEffect::Submenu(SubKind::Mcp));
     // Plugins opens its submenu (live status + Reload plugins).
-    assert_eq!(m.effects[14], MenuEffect::Submenu(SubKind::Plugins));
+    assert_eq!(m.effects[15], MenuEffect::Submenu(SubKind::Plugins));
+}
+
+#[test]
+fn export_spc_greys_when_no_song_to_export() {
+    let mut m = MainMenu::open((0, 0), true, false);
+    assert!(m.items[7].enabled, "Export SPC enabled by default");
+    m.disable_effect(MenuEffect::Run(Action::ExportSpc));
+    assert!(
+        !m.items[7].enabled,
+        "Export SPC greyed after disable_effect"
+    );
+    // A greyed row resolves to no effect even if clicked.
+    let (cx, cy) = at(&m, 7);
+    assert_eq!(
+        m.effect_at(cx, cy),
+        MenuEffect::None,
+        "clicking the greyed Export SPC row does nothing"
+    );
 }
 
 #[test]
 fn submenu_rows_show_the_arrow_window_size_enabled_others_greyed() {
     let m = MainMenu::open((0, 0), true, false);
     // All seven submenu rows draw the arrow.
-    for i in [8, 9, 10, 11, 12, 13, 14] {
+    for i in [9, 10, 11, 12, 13, 14, 15] {
         assert!(m.items[i].submenu, "row {i} draws the submenu arrow");
     }
     // Window size + Sound channel are live; the rest stay greyed until MN4-7.
@@ -197,12 +221,12 @@ fn submenu_rows_show_the_arrow_window_size_enabled_others_greyed() {
         m.items[SOUND_CHANNEL_ROW].enabled,
         "Sound channel is wired (MN3)"
     );
-    assert!(m.items[9].enabled, "Other is wired (MN5)");
-    assert!(m.items[8].enabled, "State is wired (MN6)");
-    assert!(m.items[15].enabled, "Recent ROMs is wired (MN4)");
-    assert!(m.items[14].enabled, "Plugins is wired");
-    assert!(m.items[13].enabled, "MCP is wired");
-    assert!(m.items[12].enabled, "Link is wired");
+    assert!(m.items[10].enabled, "Other is wired (MN5)");
+    assert!(m.items[9].enabled, "State is wired (MN6)");
+    assert!(m.items[16].enabled, "Recent ROMs is wired (MN4)");
+    assert!(m.items[15].enabled, "Plugins is wired");
+    assert!(m.items[14].enabled, "MCP is wired");
+    assert!(m.items[13].enabled, "Link is wired");
     assert!(m.items[1].enabled, "Load ROM is wired (MN4)");
     assert!(
         !m.items[1].submenu,
@@ -226,10 +250,10 @@ fn effect_at_resolves_only_enabled_rows() {
         m.effect_at(at(&m, 1).0, at(&m, 1).1),
         MenuEffect::Run(Action::MainLoadRom)
     );
-    // Link (row 12) now opens its submenu; a point outside the box resolves to
+    // Link (row 13) now opens its submenu; a point outside the box resolves to
     // None (greyed-row → None is exercised by the submenu tests).
     assert_eq!(
-        m.effect_at(at(&m, 12).0, at(&m, 12).1),
+        m.effect_at(at(&m, 13).0, at(&m, 13).1),
         MenuEffect::Submenu(SubKind::Link)
     );
     assert_eq!(m.effect_at(-50, -50), MenuEffect::None);

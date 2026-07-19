@@ -2,7 +2,9 @@
 //! 65C816), driven by the host through reset / clock / comm-port calls. The
 //! chip's internal RAM stays inside the sandbox; only the comm ports cross.
 
-use slopgb_plugin_api::{ABI_VERSION, Capabilities, EMIT_KIND_PCM, EMIT_KIND_RAM, EMIT_KIND_STATE};
+use slopgb_plugin_api::{
+    ABI_VERSION, Capabilities, EMIT_KIND_PCM, EMIT_KIND_RAM, EMIT_KIND_SPC, EMIT_KIND_STATE,
+};
 use wasmtime::{Engine, Module, Store, TypedFunc};
 
 use crate::LoadError;
@@ -22,6 +24,7 @@ pub struct LoadedCoprocessor {
     read_ram: TypedFunc<(i32, i32), i32>,
     save_state: TypedFunc<(), i32>,
     load_state: TypedFunc<(), ()>,
+    dump_spc: TypedFunc<(), i32>,
 }
 
 impl LoadedCoprocessor {
@@ -86,6 +89,9 @@ impl LoadedCoprocessor {
         let load_state = instance
             .get_typed_func::<(), ()>(&mut store, "slopgb_load_state")
             .map_err(|_| LoadError::MissingExport("slopgb_load_state"))?;
+        let dump_spc = instance
+            .get_typed_func::<(), i32>(&mut store, "slopgb_dump_spc")
+            .map_err(|_| LoadError::MissingExport("slopgb_dump_spc"))?;
 
         Ok(Self {
             store,
@@ -99,6 +105,7 @@ impl LoadedCoprocessor {
             read_ram,
             save_state,
             load_state,
+            dump_spc,
         })
     }
 
@@ -209,6 +216,17 @@ impl LoadedCoprocessor {
         self.save_state.call(&mut self.store, ())?;
         Ok(match self.store.data_mut().emitted.take() {
             Some((EMIT_KIND_STATE, buf)) => buf,
+            _ => Vec::new(),
+        })
+    }
+
+    /// Ask the chip for a `.spc` snapshot (an audio chip assembles the SPC700
+    /// file from its ARAM + registers + DSP; a non-audio chip returns empty).
+    pub fn dump_spc(&mut self) -> Result<Vec<u8>, LoadError> {
+        self.store.data_mut().emitted = None;
+        self.dump_spc.call(&mut self.store, ())?;
+        Ok(match self.store.data_mut().emitted.take() {
+            Some((EMIT_KIND_SPC, buf)) => buf,
             _ => Vec::new(),
         })
     }

@@ -10,6 +10,8 @@
 
 pub mod dsp;
 pub mod spc700;
+pub mod spc_file;
 pub mod state;
 
+pub use spc_file::{SPC_FILE_LEN, build_spc_file};
 pub use state::StateError;

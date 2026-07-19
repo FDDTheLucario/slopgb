@@ -262,6 +262,18 @@ pattern (the host writes into a guest-owned buffer through wasmi's bounds-checke
   only the requested chunk crosses. `key`'s meaning is a host↔plugin convention
   (MSU-1: the audio track number, or `DATA_FILE_KEY` for the data ROM).
 
+**Orchestration + snapshots (ABI v5–v6).** The exports the SGB coprocessor uses
+to install firmware into and snapshot its chips: `set_pc` / `write_ram` /
+`read_ram` (v5 — memory peek/poke; reads ride the emit channel as
+`EMIT_KIND_RAM`) and `save_state` / `load_state` (v5 — opaque chip state as
+`EMIT_KIND_STATE`). An audio chip additionally exports `dump_spc` (v6): it
+assembles a `.spc` (SPC700 Sound File) from its ARAM + registers + DSP and ships
+it over the emit channel under **its own `EMIT_KIND_SPC`** — a distinct kind from
+the save-state so the payload's intent is unambiguous. `LoadedCoprocessor::
+dump_spc` decodes that kind; the SGB coprocessor surfaces it as `export_spc` for
+the frontend's "Export SPC" (see
+[`docs/hardware-state/sgb-audio.md`](../hardware-state/sgb-audio.md)).
+
 ## Golden-safe rules
 
 The one invariant this project guards is that no UI/extension feature perturbs

@@ -289,6 +289,36 @@ host-side. The pieces, all reverse-engineered from a real SGB1 `program.rom`:
 The `coprocessor` MCP tool's status line reports the resident-driver state and
 SOUND/SOU_TRN/DATA_SND counts + DSP peak for diagnosing this path.
 
+## SPC export (right-click → "Export SPC")
+
+Writes the playing song as a 66048-byte `.spc` (SPC700 Sound File v0.30) —
+`slopgb-<unix-millis>.spc` in the working dir. `slopgb_snes_apu::build_spc_file`
+assembles the header (CPU regs), the 64 KB ARAM, and the 128-byte DSP register
+file; it also writes the `$F0-$FF` I/O registers from a non-destructive
+`Spc700::io_snapshot` (control + timer targets). Those live in struct fields, not
+ARAM — omitting them left the timers disabled, so a timer-paced N-SPC dump came
+back frozen/silent.
+
+**From the top, not mid-song.** The coprocessor arms a capture when the resident
+engine receives a music play command (score code, bit 7 = stop) and grabs the
+snapshot one frame later (`SONG_START_CAPTURE_DELAY` ≈ 17k SPC cycles), once
+song-init has set the timers and reset the sequencer. So the export reproduces
+the song from its opening no matter when the user clicks — no restart handshake
+is reverse-engineered; the driver re-inits itself and we just wait.
+
+**Availability gate.** That captured snapshot is also the recognition signal:
+`export_spc` / `can_export_spc` are `Some`/true only for a recognized resident
+engine (ROM via `--sgb-bios`, or the clean-room engine) that has started a song.
+The UI greys "Export SPC" otherwise — the built-in square SFX driver, a
+game-uploaded foreign engine, or no song yet — so it never yields a broken dump.
+This stands in for literal ARAM fingerprinting and is more robust (any N-SPC
+variant, no per-game hashes).
+
+Plumbing: the SPC700 plugin's `dump_spc` export assembles the file guest-side
+(the CPU/DSP/`$F0-$FF` state the ARAM-only `read_ram` ABI can't reach) and ships
+it over the emit channel under `EMIT_KIND_SPC` (ABI v6); `AudioCoprocessor::
+export_spc` / `can_export_spc` carry it through `GameBoy` to the frontend action.
+
 ## Save states
 
 The SGB APU (SPC700 RAM + registers + timers, the full S-DSP register file +

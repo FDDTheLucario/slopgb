@@ -132,6 +132,13 @@ impl SgbCoprocessor {
         }
         self.nspc_shadow = self.nspc_cmd;
         self.nspc_pending = false;
+        // A music play command (score code, bit 7 = stop) restarts the song
+        // from its top — arm a from-start capture one frame out, once the
+        // engine has re-inited (see `SONG_START_CAPTURE_DELAY`).
+        let score = self.nspc_cmd[0];
+        if score != 0 && score & 0x80 == 0 {
+            self.capture_at = Some(self.spc_pos + SONG_START_CAPTURE_DELAY);
+        }
     }
 
     /// Complete the oldest pending DATA_TRN with its just-arrived 4 KB

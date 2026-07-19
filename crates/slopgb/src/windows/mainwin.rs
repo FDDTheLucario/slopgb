@@ -82,6 +82,15 @@ impl MainMenu {
             .nth(i)
     }
 
+    /// Grey the row carrying `effect` (renders greyed, `effect_at` skips it).
+    /// No-op if no row has that effect. Used to disable a runtime-gated action
+    /// (e.g. Export SPC when no exportable song is playing).
+    pub fn disable_effect(&mut self, effect: MenuEffect) {
+        if let Some(i) = self.effects.iter().position(|&e| e == effect) {
+            self.items[i].enabled = false;
+        }
+    }
+
     /// Update the hovered row; returns whether it changed (so `main` only
     /// redraws on a real change).
     pub fn hover_at(&mut self, px: i32, py: i32) -> bool {
@@ -130,6 +139,10 @@ fn entries(sound_on: bool, paused: bool) -> Vec<(MenuItem, MenuEffect)> {
         (
             MenuItem::new("Save screenshot"),
             MenuEffect::Run(Action::SaveScreenshot),
+        ),
+        (
+            MenuItem::new("Export SPC"),
+            MenuEffect::Run(Action::ExportSpc),
         ),
         (
             MenuItem::new("Debugger").shortcut("Esc"),
