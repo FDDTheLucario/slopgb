@@ -19,12 +19,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # cpal needs the ALSA headers on Linux.
-      - name: Install ALSA development package (Linux)
+      # cpal needs the ALSA headers on Linux; gilrs needs libudev.
+      - name: Install ALSA + udev development packages (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev
+          sudo apt-get install -y libasound2-dev libudev-dev
 
       # Pinned — keep in sync with rust-toolchain.toml. Unpinned @stable let a
       # new stable release surface fresh clippy lints in CI that passed locally.
