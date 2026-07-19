@@ -35,9 +35,34 @@ SNES V-counter each flush (`PPU_HW_LINE`), latches a frame at the vblank
 edge, and `GameBoy::take_snes_frame` hands it to the frontend (which
 presents SNES > border > bare, `snes_rgb555_px` expanding BGR555).
 
+## Renderer shape (interpreter-speed, oracle-pinned)
+
+The scanline renderers are written for interpreted-wasm speed with
+byte-identical output, each pinned by a fuzzed frozen-reference oracle in
+the crate's tests before the rewrite:
+
+- `bg_line` walks 8-pixel char-row runs (map entry + plane words load
+  once per run; an X-flip mirrors a run onto one 8-aligned block, so
+  only the walk direction reverses); plane decode goes through the
+  `SPREAD` bit-spread LUT (planes OR into eight packed index nibbles).
+- `render_line` merges rung-outer over a resolved-pixel mask with an
+  all-resolved early-out; TM-disabled and rendered-empty layers skip
+  their rungs wholesale.
+- `obj_line` fetches + spreads each 8-pixel chunk's two VRAM words once.
+
+The host/plugin boundary is batched (one wasm crossing per run, not per
+byte): `HW_LINE` takes a `[y, count]` span, `HW_PORTS` applies a
+`(port, val)` run in order, the flush batches consecutive captured
+pure-PPU writes (host-consumed registers are order barriers; INIDISP
+keeps its `snes_live` bookkeeping), and GP-DMA bulk-reads contiguous
+A-bus runs (the ICD2 `$7800` window auto-increments per byte inside the
+plugin) while batching pure-PPU destination bytes.
+
 ## Status
 
 All host-side plumbing is exercised by the pilot (Space Invaders ARCADE):
 the takeover game runs and its `$21xx` traffic routes through `apply_mmio`.
-Renderer correctness is pinned by the crate's unit tests (23) +
-`slopgb-plugin-host`'s `snes_ppu_roundtrip`.
+Renderer correctness is pinned by the crate's unit tests (27, including
+the three fuzz oracles) + `slopgb-plugin-host`'s `snes_ppu_roundtrip`.
+Probe fps (ARCADE takeover, every 500-frame window): wasmi >= 66
+(gameplay 92-106), wasmtime several hundred.
