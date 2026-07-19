@@ -196,6 +196,94 @@ fn flg_mute_silences_output() {
     }
 }
 
+/// FNV-1a over the save-state byte stream, so a checkpoint pins the exact
+/// voice/echo state without embedding ~800 literal bytes per checkpoint.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for &b in bytes {
+        hash ^= u64::from(b);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01B3);
+    }
+    hash
+}
+
+/// Pins the full observable output stream (mixed samples + save-state hash at
+/// checkpoints) across a KON -> sustain -> KOF -> long silent release
+/// (loop+end BRR, so `ENDX` keeps toggling while muted) -> re-KON sequence on
+/// two voices with voice 1 PMON-modulated by voice 0. This is the byte-
+/// identity guard for the release/level-0 output fast path: any change that
+/// alters BRR advance, ENDX timing, envelope evolution, or the zero output
+/// voice 0 feeds into voice 1's pitch modulation must fail this test.
+#[test]
+fn sample_stream_is_byte_identical_across_silent_release_stretch() {
+    let mut ram = ram_with_sample();
+    let mut dsp = SDsp::new();
+    dsp.write(FLG as u8, 0x00);
+    dsp.write(DIR as u8, 0x02);
+    // Voice 0: SRCN 0, full vol, GAIN direct max, pitch 0x1000.
+    dsp.write(0x04, 0x00);
+    dsp.write(0x00, 0x7F);
+    dsp.write(0x01, 0x7F);
+    dsp.write(0x02, 0x00);
+    dsp.write(0x03, 0x10);
+    dsp.write(0x05, 0x00);
+    dsp.write(0x07, 0x7F);
+    // Voice 1: SRCN 0, full vol, GAIN direct max, pitch 0x0800, PMON-modulated
+    // by voice 0's output.
+    dsp.write(0x14, 0x00);
+    dsp.write(0x10, 0x7F);
+    dsp.write(0x11, 0x7F);
+    dsp.write(0x12, 0x00);
+    dsp.write(0x13, 0x08);
+    dsp.write(0x15, 0x00);
+    dsp.write(0x17, 0x7F);
+    dsp.write(PMON as u8, 0x02); // voice 1 modulated by voice 0
+    dsp.write(MVOLL as u8, 0x7F);
+    dsp.write(MVOLR as u8, 0x7F);
+    dsp.write(KON as u8, 0x03); // key on voices 0 + 1
+
+    let checkpoints = [5, 20, 40, 41, 60, 150, 260, 300, 399, 400, 401, 420, 440];
+    let mut results = Vec::new();
+    for i in 0..500 {
+        if i == 40 {
+            dsp.write(KOF as u8, 0x03); // key off both -> release
+        }
+        if i == 400 {
+            // KOF is level-sensitive (sampled live every sample, not an edge)
+            // — it must be cleared before KON or the still-held key-off
+            // immediately re-releases the voice this same/next sample.
+            dsp.write(KOF as u8, 0x00);
+            dsp.write(KON as u8, 0x03); // re-key while still silent -> revive
+        }
+        let (l, r) = dsp.sample(&mut ram);
+        if checkpoints.contains(&i) {
+            let mut w = crate::state::Writer::new();
+            dsp.write_state(&mut w);
+            results.push((i, l, r, fnv1a(&w.into_vec())));
+        }
+    }
+
+    // Values captured from the pre-optimization implementation (sample() /
+    // voice::step() synthesizing every voice in full every sample, no
+    // release/level-0 fast path) — pins byte-identity across the fast path.
+    let expected: [(i32, i16, i16, u64); 13] = [
+        (5, 0, 0, 0x4faf_4a25_a95d_7534),
+        (20, 55, 55, 0x787a_8f0f_e93e_58f5),
+        (40, 55, 55, 0xa9bb_dc3e_d59c_9aaf),
+        (41, 55, 55, 0x8d40_b6e7_e5ca_5278),
+        (60, 51, 51, 0x1120_0eda_6726_c8ad),
+        (150, 29, 29, 0xd179_75ff_e84f_f330),
+        (260, 3, 3, 0xf6d8_d970_43aa_563a),
+        (300, 0, 0, 0x7c73_6fcc_9e8a_58b6),
+        (399, 0, 0, 0x1306_5eb1_b1b2_a6da),
+        (400, 0, 0, 0x3ac8_38ed_7eea_54f6),
+        (401, 0, 0, 0xbfa4_6061_78be_5067),
+        (420, 55, 55, 0x8f70_a0e4_c347_c322),
+        (440, 55, 55, 0x7fc2_f28a_17d8_0495),
+    ];
+    assert_eq!(results, expected);
+}
+
 #[test]
 fn save_state_round_trips() {
     let mut ram = ram_with_sample();

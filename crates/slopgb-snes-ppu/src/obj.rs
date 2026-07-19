@@ -86,9 +86,26 @@ impl SnesPpu {
                     return; // time over: no tile fetches left this line
                 }
                 slots -= 1;
+                // An X-flip mirrors the chunk onto one 8-aligned source
+                // block (src/8 is constant across it), so the sub-tile and
+                // its two plane words load once per chunk; only the bit
+                // column walks, descending normally, ascending when
+                // flipped.
+                let src0 = if attr & 0x40 != 0 {
+                    w - 1 - chunk * 8
+                } else {
+                    chunk * 8
+                };
+                let t = trow & 0x1F0 | trow.wrapping_add(src0 / 8) & 0xF;
+                let word = base
+                    + usize::from(t) * 16
+                    + if t >= 0x100 { gap } else { 0 }
+                    + usize::from(fy & 7);
+                let w0 = self.vram[word & 0x7FFF];
+                let w1 = self.vram[(word + 8) & 0x7FFF];
+                let nibbles = crate::render::row_nibbles(w0, w1);
                 for p in 0..8u16 {
-                    let c = chunk * 8 + p;
-                    let x = sx + i32::from(c);
+                    let x = sx + i32::from(chunk * 8 + p);
                     if !(0..256).contains(&x) {
                         continue;
                     }
@@ -96,21 +113,12 @@ impl SnesPpu {
                     if slot.is_some() {
                         continue; // an earlier sprite already owns the pixel
                     }
-                    let src = if attr & 0x40 != 0 { w - 1 - c } else { c };
-                    let t = trow & 0x1F0 | trow.wrapping_add(src / 8) & 0xF;
-                    let word = base
-                        + usize::from(t) * 16
-                        + if t >= 0x100 { gap } else { 0 }
-                        + usize::from(fy & 7);
-                    let bit = 7 - (src & 7);
-                    let w0 = self.vram[word & 0x7FFF];
-                    let w1 = self.vram[(word + 8) & 0x7FFF];
-                    let idx = usize::from(
-                        w0 >> bit & 1
-                            | (w0 >> 8 >> bit & 1) << 1
-                            | (w1 >> bit & 1) << 2
-                            | (w1 >> 8 >> bit & 1) << 3,
-                    );
+                    let col = if attr & 0x40 != 0 {
+                        (src0 - p) & 7
+                    } else {
+                        (src0 + p) & 7
+                    };
+                    let idx = (nibbles >> (col * 4) & 0xF) as usize;
                     if idx != 0 {
                         // OBJs are always 16-color; palettes live in the
                         // CGRAM OBJ half at 80h+ (fullsnes CGRAM indices).

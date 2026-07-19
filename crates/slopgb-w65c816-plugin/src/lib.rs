@@ -220,6 +220,29 @@ impl SnesBus {
 
 impl Bus for SnesBus {
     fn read(&mut self, addr: u32) -> u8 {
+        let bank = (addr >> 16) as u8;
+        let low = (addr & 0xFFFF) as u16;
+
+        // WRAM short-circuit: banks $7E/$7F and the low-8K mirror never
+        // reach the capture windows, ICD2 block, or APU ports.
+        if bank == 0x7E || bank == 0x7F {
+            if let Some(slot) = self.mem_slot(addr) {
+                return *slot;
+            }
+        }
+        if bank & 0x40 == 0 && low < 0x2000 {
+            // Low-bank WRAM mirror ($0000-$1FFF in system banks).
+            if let Some(slot) = self.mem_slot(addr) {
+                return *slot;
+            }
+        }
+        if bank & 0x40 == 0 && low >= 0x8000 {
+            // Program area ($8000-$FFFF in system banks): not captured.
+            if let Some(slot) = self.mem_slot(addr) {
+                return *slot;
+            }
+        }
+
         if let Some(p) = Self::port_index(addr) {
             return self.port_in[p];
         }
@@ -227,7 +250,7 @@ impl Bus for SnesBus {
             return self.icd2.cpu_read(a);
         }
         if Self::system_bank(addr) {
-            if let Some(v) = self.mmio.cpu_read((addr & 0xFFFF) as u16) {
+            if let Some(v) = self.mmio.cpu_read(low) {
                 return v;
             }
         }
@@ -235,6 +258,32 @@ impl Bus for SnesBus {
     }
 
     fn write(&mut self, addr: u32, value: u8) {
+        let bank = (addr >> 16) as u8;
+        let low = (addr & 0xFFFF) as u16;
+
+        // WRAM short-circuit: banks $7E/$7F and the low-8K mirror never
+        // reach the capture windows, ICD2 block, or APU ports.
+        if bank == 0x7E || bank == 0x7F {
+            if let Some(slot) = self.mem_slot(addr) {
+                *slot = value;
+            }
+            return;
+        }
+        if bank & 0x40 == 0 && low < 0x2000 {
+            // Low-bank WRAM mirror ($0000-$1FFF in system banks).
+            if let Some(slot) = self.mem_slot(addr) {
+                *slot = value;
+            }
+            return;
+        }
+        if bank & 0x40 == 0 && low >= 0x8000 {
+            // Program area ($8000-$FFFF in system banks): not captured.
+            if let Some(slot) = self.mem_slot(addr) {
+                *slot = value;
+            }
+            return;
+        }
+
         if let Some(p) = Self::port_index(addr) {
             // Ring every write for ordered host replay (see HW_PORT_RING).
             if self.port_ring.len() >= PORT_RING_CAP {
@@ -248,7 +297,7 @@ impl Bus for SnesBus {
         if let Some(a) = Self::icd2_addr(addr) {
             return self.icd2.cpu_write(a, value);
         }
-        if Self::system_bank(addr) && self.mmio.cpu_write((addr & 0xFFFF) as u16, value) {
+        if Self::system_bank(addr) && self.mmio.cpu_write(low, value) {
             return;
         }
         if let Some(b) = self.mem_slot(addr) {

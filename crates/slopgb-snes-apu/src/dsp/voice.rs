@@ -12,7 +12,7 @@
 //! the `(interp * env) >> 11` output scaling.
 
 use super::brr::decode_block;
-use super::envelope::Env;
+use super::envelope::{Env, Phase};
 use super::gaussian;
 
 /// One voice's playback + envelope state.
@@ -223,6 +223,21 @@ impl Voice {
         // field).
         for _ in 0..steps {
             self.advance_sample(ram, endx, idx);
+        }
+
+        // Once released, level only ramps down (Release's -8/sample, floored
+        // at 0, is unconditional — `Env::step` never re-enters ADSR/GAIN while
+        // in this phase) and only KON can raise it again, so a released
+        // voice sitting at level 0 stays silent every sample until re-keyed.
+        // The output would be `(sample * 0) >> 11 == 0` regardless of
+        // `sample`, so skip computing it: no Gaussian interpolation, envelope
+        // multiply, or (in the caller) volume multiply / mix accumulation.
+        // BRR position/ENDX above still advance — hardware keeps decoding a
+        // released voice's stream (fullsnes "SNES APU DSP - ADSR / GAIN").
+        if level == 0 && self.env.phase == Phase::Release {
+            self.outx = 0;
+            self.output = 0;
+            return 0;
         }
 
         // Sample source: shared noise, or Gaussian-interpolated BRR.

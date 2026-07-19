@@ -30,9 +30,14 @@ pub const FB_BYTES: usize = FB_WIDTH * FB_HEIGHT * 2;
 /// `0x0100_0000` can collide with chip addressing).
 pub const HOST_WIN: u32 = 0x0100_0000;
 /// `W len 2`: `[y_lo, y_hi]` — render line `y` into the framebuffer.
+/// `W len 3`: `[y_lo, y_hi, count]` — render `count` lines from `y` (one
+/// host call per beam span instead of one per line).
 pub const HW_LINE: u32 = HOST_WIN;
 /// `R len n` at `HW_FB + byte offset`: the framebuffer bytes.
 pub const HW_FB: u32 = HOST_WIN + 0x1000;
+/// `W len 2N`: `[(port, val) × N]` — apply a run of B-bus writes in order
+/// (one host call per captured-write or DMA run instead of one per byte).
+pub const HW_PORTS: u32 = HOST_WIN + 0x2000;
 
 /// Serialized state: the PPU snapshot + the framebuffer + the cycle counter.
 const STATE_LEN: usize = PPU_STATE_LEN + FB_BYTES + 8;
@@ -76,13 +81,19 @@ impl Coprocessor for SnesPpuCop {
 
     fn write_ram(&mut self, addr: u32, bytes: &[u8]) {
         if addr == HW_LINE {
-            if let [lo, hi] = *bytes {
-                let y = usize::from(lo) | usize::from(hi) << 8;
-                if y < FB_HEIGHT {
-                    let mut line = [0u16; FB_WIDTH];
-                    self.ppu.render_line(y as u16, &mut line);
-                    self.fb[y * FB_WIDTH..(y + 1) * FB_WIDTH].copy_from_slice(&line);
-                }
+            let (y0, count) = match *bytes {
+                [lo, hi] => (usize::from(lo) | usize::from(hi) << 8, 1),
+                [lo, hi, n] => (usize::from(lo) | usize::from(hi) << 8, usize::from(n)),
+                _ => return,
+            };
+            let mut line = [0u16; FB_WIDTH];
+            for y in y0..(y0 + count).min(FB_HEIGHT) {
+                self.ppu.render_line(y as u16, &mut line);
+                self.fb[y * FB_WIDTH..(y + 1) * FB_WIDTH].copy_from_slice(&line);
+            }
+        } else if addr == HW_PORTS {
+            for pair in bytes.chunks_exact(2) {
+                self.ppu.write(pair[0], pair[1]);
             }
         }
     }

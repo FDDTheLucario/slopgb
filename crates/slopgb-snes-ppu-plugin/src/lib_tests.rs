@@ -68,3 +68,67 @@ fn state_round_trip_and_reset() {
     assert_eq!(fresh.read_ram(HW_FB + 10 * 512, 2), vec![0, 0]);
     assert_eq!(fresh.save_state().len(), STATE_LEN);
 }
+
+/// The 3-byte HW_LINE form renders a whole span in one host call, exactly
+/// like the equivalent sequence of single-line renders; out-of-range rows
+/// clip at the frame bottom.
+#[test]
+fn hw_line_span_renders_like_single_lines() {
+    let mut a = SnesPpuCop::new();
+    let mut b = SnesPpuCop::new();
+    for cop in [&mut a, &mut b] {
+        cop.port_write(0x00, 0x0F);
+        cop.port_write(0x05, 0x01);
+        cop.port_write(0x2C, 0x01);
+        cop.port_write(0x07, 0x04);
+        cop.port_write(0x0B, 0x01);
+        cop.port_write(0x15, 0x80);
+        vram_word(cop, 0x400, 0x0002);
+        vram_word(cop, 0x1000 + 2 * 16, 0x0080); // row 0 pixel 0
+        vram_word(cop, 0x1000 + 2 * 16 + 1, 0x0040); // row 1 pixel 1
+        cop.port_write(0x21, 0x01);
+        cop.port_write(0x22, 0x1F);
+        cop.port_write(0x22, 0x00);
+    }
+    for y in 0..4u16 {
+        a.write_ram(HW_LINE, &y.to_le_bytes());
+    }
+    b.write_ram(HW_LINE, &[0, 0, 4]);
+    assert_eq!(
+        a.read_ram(HW_FB, 512 * 4),
+        b.read_ram(HW_FB, 512 * 4),
+        "span == singles"
+    );
+    // A span reaching past the last row clips instead of wrapping.
+    b.write_ram(HW_LINE, &[220, 0, 40]);
+    let tail = b.read_ram(HW_FB + 223 * 512, 4);
+    assert_eq!(tail.len(), 4, "bottom row rendered, nothing wrapped");
+}
+
+/// The HW_PORTS window applies `(port, val)` pairs in order — one host
+/// call standing in for a run of B-bus writes (a DMA's worth).
+#[test]
+fn hw_ports_batch_applies_pairs_in_order() {
+    let mut a = SnesPpuCop::new();
+    let mut b = SnesPpuCop::new();
+    // Same VRAM upload: a via singles, b via one batch (VMAIN step-on-high,
+    // address set, then data pairs — order matters).
+    let singles: &[(u8, u8)] = &[
+        (0x15, 0x80),
+        (0x16, 0x00),
+        (0x17, 0x04),
+        (0x18, 0x34),
+        (0x19, 0x12),
+        (0x18, 0x78),
+        (0x19, 0x56),
+    ];
+    for &(p, v) in singles {
+        a.port_write(p, v);
+    }
+    let mut batch = Vec::new();
+    for &(p, v) in singles {
+        batch.extend_from_slice(&[p, v]);
+    }
+    b.write_ram(HW_PORTS, &batch);
+    assert_eq!(a.save_state(), b.save_state(), "batch == singles");
+}
