@@ -341,3 +341,44 @@ the shared DSP and re-attaching the SPC700 link).
   pipeline phase and the exact ~5-sample decode startup are approximated.
 - **Bent GAIN** uses `env` for the `0x600` test rather than a separate hidden
   envelope shadow (a minor curve difference).
+
+## Clean-room N-SPC engine (opt-in, work-in-progress)
+
+An **original** SPC700 N-SPC engine that replaces the SGB ROM's copyrighted engine
+code, so SGB music becomes upstreamable — only the *samples* need the user's ROM.
+**Default is the ROM's own engine** (authentic, accurate); set the env var
+`SLOPGB_NSPC_CLEANROOM` to run the clean-room engine instead.
+
+- **Where / build.** `crates/slopgb-sgb-coprocessor/nspc/`: `engine.asm` (source),
+  `driver.bin` (built artifact, `include_bytes!` as `NSPC_ENGINE` in `lib.rs`),
+  `Makefile`, `linkfile`, `README.md`, `spec/SPEC.md` (design specs). Built with
+  **WLA-DX** (`wla-spc700` + `wlalink` on `PATH`), run `make` in `nspc/`. Commit
+  both `engine.asm` **and** `driver.bin`. It loads at
+  APU `$0400`; `install_sgb_bios` uploads it over `$0400` and uploads the ROM's
+  sound DATA (`$4B00` sample dir, `$4C10` pitch/velocity tables, `$4C30` instrument
+  table, `$4DB0` BRR) from `--sgb-bios`.
+- **Clean-room process.** Written by a walled subagent from `nspc/spec/SPEC.md`
+  ONLY — never the ROM or any disassembly. The (dirty) coordinator produced those
+  behavioral specs from ROM disassembly and relayed only black-box test results.
+  Keep this wall if resuming: never feed the ROM/disassembly to the engine author.
+- **Works:** plays Animaniacs' intro + title songs, correct pattern sequence
+  (song-list loop controls), tempo `(500*tempo)/256`, all 8 channels, correct
+  pitch on nearly everything, `$00`-terminated tracks / frame advance, fade→stop,
+  velocity + quantization + instrument tables, comm-port play/stop protocol.
+- **Left to do (polish, behind the flag):**
+  1. On the title song (song.2) the lead (ch0, instrument `$2C`) plays ~1 octave
+     low + quiet. Puzzling: `$2C`'s base pitch (`$08F0`) is ~2× the intro's `$30`
+     (`$04F0`), so it should play *higher* — needs a per-voice `VxPITCH` readout
+     (DSP registers, not yet exposed to the host) to tell whether the engine
+     mis-applies the base or the lead is a different channel.
+  2. Fade cuts to silence instead of ramping MVOL down (regressed).
+  3. Clipping (`DSP peak` maxes) with many simultaneous voices — wants a mix scale.
+- **Diagnostics.** The `coprocessor` MCP tool's status shows `ENG(clean-room)
+  songlp/tempo/tickacc/state/activemask/tdurrem` when the flag is set. A/B against
+  ground truth by toggling the env var (unset = ROM engine).
+- **Tunables** (top of `engine.asm`): `REF_NOTE`, `OCT_REF`, `PITCH_OUT_SHIFT`
+  (pitch); `TIMER_DIV`, `TEMPO_DEFAULT` (tempo); `MVOL_DEFAULT`, `CHVOL_DEFAULT`.
+- **Bring-up bugs fixed** (mostly SPC700 flag-clobber + my spec errors): SBN block
+  header is `[len,dest]` not `[dest,len]`; per-instrument pitch base is big-endian;
+  `$F7`/`$F5` take 3 operands; two `MOV`/`INCW`-before-branch flag clobbers (froze
+  ch0's tempo to 0; made `$00` end-of-track unreachable so frames never advanced).

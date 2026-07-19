@@ -85,6 +85,11 @@ const MIX_SCALE: f32 = 1.2 / 32768.0;
 /// top of the GB channels rather than under them. ponytail: fixed ratio; a
 /// per-game knob if one needs a different balance.
 const GB_GAIN: f32 = 0.6;
+/// The clean-room N-SPC music engine (original SPC700 code, built offline from a
+/// format spec by a walled-off implementer — see `nspc/README.md`; not derived
+/// from any SGB ROM). Uploaded to APU $0400 over the ROM's own engine, driving
+/// the ROM-supplied samples. `nspc/driver.bin` (WLA-DX; `make` in `nspc/`).
+pub const NSPC_ENGINE: &[u8] = include_bytes!("../nspc/driver.bin");
 /// GB T-cycles of emulation accumulated before the two plugins are pumped once
 /// (mediated + clocked + drained). Batching keeps the per-frame wasm-crossing
 /// count low (a frame is ~17 chunks) while the comm-port handshake still
@@ -491,35 +496,49 @@ impl SgbCoprocessor {
             .map_err(|e| format!("cannot load SGB coprocessor plugins: {e}"))
     }
 
-    /// Install the real SGB resident sound driver from a user-supplied SGB
-    /// system ROM (`--sgb-bios`) so games that ship only song data (Animaniacs
-    /// et al.) play. The SGB stores its resident SPC700 program — the N-SPC
-    /// engine, sample directory, and BRR soundfont — as a standard SNES APU
-    /// block table (`[u16 len, u16 dest, len bytes]*` then `[0000, entry]`) that
-    /// its boot loader streams to the audio chip. We parse that table, upload
-    /// each block into APU RAM through the plugin ABI (`write_ram`), and enter
-    /// the engine at its terminator entry. Returns whether a valid driver was
-    /// installed; on any parse failure the clean-room firmware stays untouched.
+    /// Install SGB resident music playback from a user-supplied SGB system ROM
+    /// (`--sgb-bios`), so games that ship only song data (Animaniacs et al.) play.
+    /// The SGB stores its resident SPC700 program — engine, sample directory, and
+    /// BRR soundfont — as a standard SNES APU block table (`[u16 len, u16 dest,
+    /// len bytes]*` then `[0000, entry]`) at LoROM $06:8000. Returns whether a
+    /// valid table was found (else the clean-room firmware stays).
     ///
-    /// Everything reaches the SPC700 through the plugin's public ABI — the ROM
-    /// parsing is host-side, so the plugin boundary stays clean. The supplied
-    /// bytes are the user's own ROM; nothing here is committed to the tree.
+    /// **Default: the ROM's own resident engine** — the authentic, accurate
+    /// playback (upload every block, enter its entry point). Set
+    /// `SLOPGB_NSPC_CLEANROOM` to instead run the original [`NSPC_ENGINE`]
+    /// (uploaded over $0400, reading the ROM's sample data) — the upstreamable
+    /// clean-room path, still being refined (see `nspc/README.md`).
+    ///
+    /// Everything reaches the SPC700 through the plugin's public ABI; ROM parsing
+    /// is host-side, so the plugin boundary stays clean.
     pub fn install_sgb_bios(&mut self, program_rom: &[u8]) -> bool {
-        // The driver upload table sits at LoROM $06:8000 in the SGB1/SGB2
-        // system ROM. ponytail: fixed offset for the known dump; a different
-        // revision would need the boot loader's own source pointer instead of
-        // this constant (read it from the loader at $00:AC43).
+        // ponytail: fixed table offset + sample dests for the known SGB1/SGB2
+        // dump; a different revision would need the boot loader's own source
+        // pointer ($00:AC43) and its block dests.
         const TABLE_OFF: usize = 0x3_0000;
         let Some((entry, blocks)) = parse_apu_blocks(program_rom, TABLE_OFF) else {
             return false;
         };
+        let cleanroom = std::env::var_os("SLOPGB_NSPC_CLEANROOM").is_some();
         let spc = self.spc.get_mut();
         for (dest, data) in &blocks {
-            if spc.write_ram(u32::from(*dest), data).is_err() {
+            // The clean-room engine replaces the ROM's engine CODE at $0400 with
+            // its own, uploading only the ROM's sound DATA (sample directory
+            // $4B00, pitch/velocity tables $4C10, instrument table $4C30, BRR
+            // waveforms $4DB0). The default (ROM engine) uploads every block.
+            let is_engine = *dest == SPC_PROG_ORG;
+            if (!cleanroom || !is_engine) && spc.write_ram(u32::from(*dest), data).is_err() {
                 return false;
             }
         }
-        if spc.set_pc(u32::from(entry)).is_err() {
+        let pc = if !cleanroom {
+            entry
+        } else if spc.write_ram(u32::from(SPC_PROG_ORG), NSPC_ENGINE).is_ok() {
+            SPC_PROG_ORG
+        } else {
+            return false;
+        };
+        if spc.set_pc(u32::from(pc)).is_err() {
             return false;
         }
         self.nspc_resident = true;
@@ -1426,18 +1445,32 @@ impl AudioCoprocessor for SgbCoprocessor {
             // Live SPC output ports (the engine's echo) + the ARAM entry byte, to
             // diagnose the N-SPC handshake. borrow_mut from &self via the RefCell.
             let mut spc = self.spc.borrow_mut();
-            let echo = [
-                spc.port_read(0).unwrap_or(0xEE),
-                spc.port_read(1).unwrap_or(0xEE),
-                spc.port_read(2).unwrap_or(0xEE),
-                spc.port_read(3).unwrap_or(0xEE),
-            ];
             let song = spc.read_ram(u32::from(self.dbg_soutrn_dest), 8).unwrap_or_default();
+            // The default ROM engine has its own internals; only the clean-room
+            // engine (SLOPGB_NSPC_CLEANROOM) has the engine.asm variable layout
+            // this decodes ($12 songlp, $14 tempo, $16 tickacc, $19 state, $1B
+            // activemask, $48.. per-channel tdurrem).
+            let eng = if std::env::var_os("SLOPGB_NSPC_CLEANROOM").is_some() {
+                let v = spc.read_ram(0x12, 10).unwrap_or_default();
+                let durrem = spc.read_ram(0x48, 8).unwrap_or_default();
+                let g = |i: usize| v.get(i).copied().unwrap_or(0);
+                let songlp = u16::from(g(0)) | u16::from(g(1)) << 8;
+                format!(
+                    "; ENG(clean-room) songlp ${songlp:04X} tempo ${:02X} tickacc \
+                     ${:02X} state {} activemask ${:02X} tdurrem {durrem:02X?}",
+                    g(2),
+                    g(4),
+                    g(7),
+                    g(9),
+                )
+            } else {
+                "; ROM engine (default; SLOPGB_NSPC_CLEANROOM for the clean-room engine)"
+                    .to_string()
+            };
             format!(
                 "N-SPC resident (--sgb-bios): SOUND x{} last {:02X?}, SOU_TRN x{} \
-                 (dest ${:04X} len {}), DATA_SND x{}; cmd {:02X?} shadow {:02X?} \
-                 pending {}; SPC echo ports {:02X?}; DSP peak {}; SOU_TRN head {:02X?} \
-                 nonzero {}/{}; song@${:04X} {:02X?}",
+                 (dest ${:04X} len {}), DATA_SND x{}; cmd {:02X?}; DSP peak {}; \
+                 song@${:04X} {:02X?}{eng}",
                 self.dbg_sound,
                 self.dbg_last_sound,
                 self.dbg_soutrn,
@@ -1445,13 +1478,7 @@ impl AudioCoprocessor for SgbCoprocessor {
                 self.dbg_soutrn_len,
                 self.dbg_datasnd,
                 self.nspc_cmd,
-                self.nspc_shadow,
-                self.nspc_pending,
-                echo,
                 self.dbg_pcm_peak,
-                self.dbg_soutrn_head,
-                self.dbg_soutrn_nonzero,
-                self.dbg_soutrn_len,
                 self.dbg_soutrn_dest,
                 song,
             )

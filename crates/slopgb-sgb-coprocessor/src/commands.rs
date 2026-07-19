@@ -114,35 +114,24 @@ impl SgbCoprocessor {
         }
     }
 
-    /// Deliver a queued N-SPC command to the resident engine with the SGB BIOS's
-    /// echo-ack handshake (ported from program.rom $00:BAC4). The engine echoes
-    /// the last command word back on its output ports; only once the echo matches
-    /// the shadow do we send the next command — otherwise we resend the shadow
-    /// (the BIOS `$BAFB` retry). Ports 0/1 carry the 16-bit command, 2/3 the data.
-    /// Runs at the throttled poll cadence so the wasm port crossings stay bounded.
+    /// Deliver a queued command word to the resident clean-room engine by writing
+    /// ports 0/1 (command) + 2/3 (data); the engine edge-detects a changed word
+    /// and acts. No echo-ack gate: this is our own host↔engine protocol (both
+    /// sides ours), and a gate that waited for the engine to echo the last word
+    /// could wedge forever if the engine's post-fade idle state stopped echoing
+    /// it — leaving later play commands undelivered (permanent silence). Just
+    /// deliver the latest pending command; last write wins. Runs at the throttled
+    /// poll cadence so the wasm port crossings stay bounded.
     fn nspc_flush(&mut self) {
-        let spc = self.spc.get_mut();
-        let echo = [
-            spc.port_read(0).unwrap_or(0),
-            spc.port_read(1).unwrap_or(0),
-            spc.port_read(2).unwrap_or(0),
-            spc.port_read(3).unwrap_or(0),
-        ];
-        if echo == self.nspc_shadow {
-            // Engine acked the last word. Send the next if one is queued.
-            if self.nspc_pending {
-                for (p, &v) in self.nspc_cmd.iter().enumerate() {
-                    let _ = spc.port_write(p as u8, v);
-                }
-                self.nspc_shadow = self.nspc_cmd;
-                self.nspc_pending = false;
-            }
-        } else {
-            // Not yet echoed: resend the shadow until the engine catches up.
-            for (p, &v) in self.nspc_shadow.iter().enumerate() {
-                let _ = spc.port_write(p as u8, v);
-            }
+        if !self.nspc_pending {
+            return;
         }
+        let spc = self.spc.get_mut();
+        for (p, &v) in self.nspc_cmd.iter().enumerate() {
+            let _ = spc.port_write(p as u8, v);
+        }
+        self.nspc_shadow = self.nspc_cmd;
+        self.nspc_pending = false;
     }
 
     /// Complete the oldest pending DATA_TRN with its just-arrived 4 KB
@@ -259,6 +248,12 @@ impl SgbCoprocessor {
             self.dbg_soutrn_nonzero = data.iter().filter(|&&b| b != 0).count() as u32;
             for (i, slot) in self.dbg_soutrn_head.iter_mut().enumerate() {
                 *slot = *data.get(i).unwrap_or(&0);
+            }
+            // Dev: dump each captured SBN to `$SLOPGB_DUMP_SOUTRN.<n>` for offline
+            // N-SPC reverse-engineering. Off unless the env var is set.
+            if let Some(path) = std::env::var_os("SLOPGB_DUMP_SOUTRN") {
+                let p = format!("{}.{}", path.to_string_lossy(), self.dbg_soutrn);
+                let _ = std::fs::write(&p, data);
             }
         }
         let spc = self.spc.get_mut();
