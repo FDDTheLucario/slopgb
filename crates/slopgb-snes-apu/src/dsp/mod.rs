@@ -121,8 +121,14 @@ impl SDsp {
         self.regs[reg] = val;
         match reg {
             KON => {
-                // Key-on is edge-triggered (0→1): "write 0 then 1 to restart".
-                self.kon_edge |= val & !self.kon_prev;
+                // Every KON WRITE arms its set bits (Blargg SPC_DSP
+                // `new_kon`: each write re-arms; the check consumes) — a
+                // driver re-keys a voice by writing the same mask again with
+                // no 0 write in between (Space Invaders' march re-KONs $10
+                // per note). Only the *held register level* does not
+                // retrigger. `kon_prev` stays as the last-written mirror for
+                // the save-state layout.
+                self.kon_edge |= val;
                 self.kon_prev = val;
             }
             ENDX => {

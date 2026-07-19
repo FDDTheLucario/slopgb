@@ -75,6 +75,109 @@ fn keyon_produces_audio_end_to_end() {
     assert!(peak > 10, "expected audible output, peak {peak}");
 }
 
+/// ADSR-mode key-on produces audio — the register set Space Invaders' ARCADE
+/// sound driver programs (ADSR1 $FF = ADSR on, fast attack; ADSR2 $E0;
+/// FLG $20; medium volumes), which must synthesize like the GAIN path does.
+#[test]
+fn keyon_produces_audio_in_adsr_mode() {
+    let mut ram = ram_with_sample();
+    let mut dsp = SDsp::new();
+    dsp.write(FLG as u8, 0x20);
+    dsp.write(DIR as u8, 0x02);
+    dsp.write(0x04, 0x00); // SRCN 0
+    dsp.write(0x00, 0x40); // VOLL
+    dsp.write(0x01, 0x40); // VOLR
+    dsp.write(0x02, 0xCD); // PL
+    dsp.write(0x03, 0x0F); // PH -> pitch 0x0FCD
+    dsp.write(0x05, 0xFF); // ADSR1: ADSR enabled, attack rate 15
+    dsp.write(0x06, 0xE0); // ADSR2: sustain level 7
+    dsp.write(MVOLL as u8, 0x40);
+    dsp.write(MVOLR as u8, 0x40);
+    dsp.write(KON as u8, 0x01);
+    let mut peak = 0i16;
+    for _ in 0..2000 {
+        let (l, r) = dsp.sample(&mut ram);
+        peak = peak.max(l.abs()).max(r.abs());
+    }
+    assert!(peak > 0, "ADSR-mode voice must produce audio, peak={peak}");
+}
+
+/// Same ADSR key-on, but on voice 4 with KOF bits held for the OTHER voices
+/// — the exact register pattern the ARCADE driver leaves while the march
+/// plays (KOF $EF pulses, voice-4 bit clear).
+#[test]
+fn keyon_produces_audio_on_voice_4_with_others_keyed_off() {
+    let mut ram = ram_with_sample();
+    let mut dsp = SDsp::new();
+    dsp.write(FLG as u8, 0x20);
+    dsp.write(DIR as u8, 0x02);
+    dsp.write(0x44, 0x00); // SRCN 0
+    dsp.write(0x40, 0x40); // VOLL
+    dsp.write(0x41, 0x40); // VOLR
+    dsp.write(0x42, 0xCD); // PL
+    dsp.write(0x43, 0x0F); // PH
+    dsp.write(0x45, 0xFF); // ADSR1
+    dsp.write(0x46, 0xE0); // ADSR2
+    dsp.write(MVOLL as u8, 0x40);
+    dsp.write(MVOLR as u8, 0x40);
+    dsp.write(KOF as u8, 0xEF); // every voice but 4 keyed off
+    dsp.write(KON as u8, 0x10); // key on voice 4
+    dsp.write(KOF as u8, 0x00);
+    let mut peak = 0i16;
+    for _ in 0..2000 {
+        let (l, r) = dsp.sample(&mut ram);
+        peak = peak.max(l.abs()).max(r.abs());
+    }
+    assert!(
+        peak > 0,
+        "voice-4 ADSR key-on must produce audio, peak={peak}"
+    );
+}
+
+/// Re-writing KON with the SAME bit set re-triggers the voice: each KON
+/// write arms its set bits (Blargg SPC_DSP `new_kon`; fullsnes "KON") — the
+/// register holding a bit does not, but a fresh write does, with no 0-write
+/// in between. Space Invaders' march re-KONs $10 for every note.
+#[test]
+fn keyon_rewrite_retriggers_without_a_zero_write() {
+    let mut ram = ram_with_sample();
+    // Make the sample one-shot (END without LOOP), so the first note ends.
+    ram[0x0210] = 0x41;
+    let mut dsp = SDsp::new();
+    dsp.write(FLG as u8, 0x20);
+    dsp.write(DIR as u8, 0x02);
+    dsp.write(0x04, 0x00);
+    dsp.write(0x00, 0x40);
+    dsp.write(0x01, 0x40);
+    dsp.write(0x02, 0xCD);
+    dsp.write(0x03, 0x0F);
+    dsp.write(0x05, 0xFF);
+    dsp.write(0x06, 0xE0);
+    dsp.write(MVOLL as u8, 0x40);
+    dsp.write(MVOLR as u8, 0x40);
+    dsp.write(KON as u8, 0x01);
+    let mut peak1 = 0i16;
+    for _ in 0..600 {
+        let (l, r) = dsp.sample(&mut ram);
+        peak1 = peak1.max(l.abs()).max(r.abs());
+    }
+    assert!(peak1 > 0, "first note must sound, peak={peak1}");
+    // The one-shot has ended; the driver keys the next note with the same
+    // KON value.
+    dsp.write(KOF as u8, 0x01);
+    for _ in 0..40 {
+        dsp.sample(&mut ram);
+    }
+    dsp.write(KOF as u8, 0x00);
+    dsp.write(KON as u8, 0x01); // same value — no 0 write first
+    let mut peak2 = 0i16;
+    for _ in 0..600 {
+        let (l, r) = dsp.sample(&mut ram);
+        peak2 = peak2.max(l.abs()).max(r.abs());
+    }
+    assert!(peak2 > 0, "re-written KON must retrigger, peak={peak2}");
+}
+
 #[test]
 fn flg_mute_silences_output() {
     let mut ram = ram_with_sample();
