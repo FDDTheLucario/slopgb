@@ -81,9 +81,10 @@ When a **hardware** question comes up, consult in order:
   `crates/slopgb-core/tests/gbtr/baselines/gambatte.txt`: every baselined cluster is an
   A/B-swept trade — one-sided "fixes" regress the now-green siblings.
 - No new deps in core (std only); no unsafe anywhere (`forbid(unsafe_code)`); clippy
-  `-D warnings` clean. The external runtime deps (`wasmtime` for the coprocessor +
-  per-frame plugin paths, `wasmi` for the tier-2 tool path whose store borrows the
-  live tool context) are quarantined in `crates/slopgb-plugin-host`; the guest SDK uses
+  `-D warnings` clean. The external runtime dep (`wasmi`, the sole wasm engine —
+  all three plugin tiers run on the interpreter; the coprocessor path holds
+  >=66fps on the pilot post-optimization) is quarantined in
+  `crates/slopgb-plugin-host`; the guest SDK uses
   `deny(unsafe_code)` + a scoped `allow` for two wasm linkage markers only (no
   `unsafe` blocks).
 - No god files: keep every `.rs` **under 1000 lines**. Split a growing file into
