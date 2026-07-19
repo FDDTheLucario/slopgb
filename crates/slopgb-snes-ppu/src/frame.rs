@@ -76,15 +76,13 @@ impl SnesPpu {
         let mut bg_used = [false; 4];
         for (i, buf) in bg.iter_mut().enumerate() {
             if self.tm & 1 << i != 0 {
-                self.bg_line(i, y, buf);
-                bg_used[i] = buf.iter().any(Option::is_some);
+                bg_used[i] = self.bg_line(i, y, buf);
             }
         }
         let mut obj = [None; 256];
         let mut obj_used = false;
         if self.tm & 0x10 != 0 {
-            self.obj_line(y, &mut obj);
-            obj_used = obj.iter().any(Option::is_some);
+            obj_used = self.obj_line(y, &mut obj);
         }
         let rungs: &[Rung] = match self.bgmode & 7 {
             0 => &MODE0,
@@ -92,40 +90,50 @@ impl SnesPpu {
             _ => &MODE1B,
         };
         // Top rung first over the backdrop: each pixel keeps the first
-        // opaque hit (the chart order), later rungs fill only what is
-        // still unresolved; layers with nothing on this line skip whole.
+        // opaque hit (the chart order). The still-unresolved pixels live in
+        // a compact index list — each rung walks only those, swap-removing
+        // hits, so a covering top layer collapses the later rungs to a few
+        // leftovers instead of full 256-slot rescans. Order within the list
+        // is irrelevant: every unresolved pixel sees the same rung.
         let backdrop = self.cgram[0] & 0x7FFF;
         out.fill(backdrop);
-        let mut resolved = [false; 256];
+        let mut open: [u8; 256] = [0; 256];
+        for (i, slot) in open.iter_mut().enumerate() {
+            *slot = i as u8;
+        }
         let mut left = 256usize;
         for rung in rungs {
             match *rung {
                 Bg(b, _) if !bg_used[b] => continue,
                 Obj(_) if !obj_used => continue,
                 Bg(b, want) => {
-                    for x in 0..256 {
-                        if !resolved[x] {
-                            if let Some((c, p)) = bg[b][x] {
-                                if p == want {
-                                    out[x] = c;
-                                    resolved[x] = true;
-                                    left -= 1;
-                                }
+                    let mut i = 0;
+                    while i < left {
+                        let x = usize::from(open[i]);
+                        if let Some((c, p)) = bg[b][x] {
+                            if p == want {
+                                out[x] = c;
+                                left -= 1;
+                                open[i] = open[left];
+                                continue;
                             }
                         }
+                        i += 1;
                     }
                 }
                 Obj(want) => {
-                    for x in 0..256 {
-                        if !resolved[x] {
-                            if let Some((c, p)) = obj[x] {
-                                if p == want {
-                                    out[x] = c;
-                                    resolved[x] = true;
-                                    left -= 1;
-                                }
+                    let mut i = 0;
+                    while i < left {
+                        let x = usize::from(open[i]);
+                        if let Some((c, p)) = obj[x] {
+                            if p == want {
+                                out[x] = c;
+                                left -= 1;
+                                open[i] = open[left];
+                                continue;
                             }
                         }
+                        i += 1;
                     }
                 }
             }

@@ -28,8 +28,10 @@ impl SnesPpu {
     /// priority-rotation start) wins regardless of its priority bits — the
     /// bits only order OBJ against BG (fullsnes priority chart). The
     /// 32-sprites/line and 34-tiles/line limits drop the additional ones.
-    pub fn obj_line(&self, y: u16, out: &mut [Option<(u16, u8)>; 256]) {
+    /// Returns whether any pixel landed.
+    pub fn obj_line(&self, y: u16, out: &mut [Option<(u16, u8)>; 256]) -> bool {
         out.fill(None);
+        let mut wrote = false;
         let base = usize::from(self.obsel & 7) << 13;
         let gap = usize::from(self.obsel >> 3 & 3) << 12;
         let (sw, sh, lw, lh) = OBJ_SIZES[usize::from(self.obsel >> 5)];
@@ -83,7 +85,7 @@ impl SnesPpu {
                     continue;
                 }
                 if slots == 0 {
-                    return; // time over: no tile fetches left this line
+                    return wrote; // time over: no tile fetches left this line
                 }
                 slots -= 1;
                 // An X-flip mirrors the chunk onto one 8-aligned source
@@ -123,10 +125,12 @@ impl SnesPpu {
                         // OBJs are always 16-color; palettes live in the
                         // CGRAM OBJ half at 80h+ (fullsnes CGRAM indices).
                         *slot = Some((self.cgram[0x80 + pal * 16 + idx] & 0x7FFF, prio));
+                        wrote = true;
                     }
                 }
             }
         }
+        wrote
     }
 }
 

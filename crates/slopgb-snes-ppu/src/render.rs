@@ -55,17 +55,18 @@ impl SnesPpu {
     /// Render BG `bg`'s contribution to line `y`: per pixel the 15-bit
     /// CGRAM color + the map entry's priority bit, `None` where transparent
     /// (or the BG doesn't render in this mode). TM masking and priority
-    /// merging are the frame assembler's job.
+    /// merging are the frame assembler's job. Returns whether any pixel
+    /// landed (the assembler skips this layer's rungs when nothing did).
     ///
     /// The line is walked in 8-pixel char-row runs (a run never crosses a
     /// char boundary: `vx & 7` is contiguous within it, and an X-flip
     /// mirrors the run onto a single 8-aligned block of the tile), so the
     /// map entry and the row's plane words load once per run instead of
     /// once per pixel.
-    pub fn bg_line(&self, bg: usize, y: u16, out: &mut [Option<(u16, bool)>; 256]) {
+    pub fn bg_line(&self, bg: usize, y: u16, out: &mut [Option<(u16, bool)>; 256]) -> bool {
         out.fill(None);
         let Some(bpp) = self.bg_bpp(bg) else {
-            return;
+            return false;
         };
         let tile16 = self.bgmode & 1 << (4 + bg) != 0;
         let map_base = usize::from(self.bgsc[bg] >> 2) << 10;
@@ -85,6 +86,7 @@ impl SnesPpu {
                 pal << bpp
             }
         };
+        let mut wrote = false;
         let mut x = 0usize;
         while x < 256 {
             let vx = (x as u16).wrapping_add(self.hofs[bg]) & 0x3FF;
@@ -147,10 +149,12 @@ impl SnesPpu {
                 if idx != 0 {
                     // color 0 is transparent
                     out[x + k] = Some((self.cgram[(base + idx) & 0xFF] & 0x7FFF, prio));
+                    wrote = true;
                 }
             }
             x += run;
         }
+        wrote
     }
 }
 
