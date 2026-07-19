@@ -89,10 +89,13 @@ pub const CPU_WASM: &str = "w65c816.wasm";
 pub const PPU_WASM: &str = "snes-ppu.wasm";
 
 /// The snes-ppu plugin's host window (mirrored, wasm-loaded never linked):
-/// `W len 2` at `PPU_HW_LINE`: render framebuffer row y; reads at
-/// `PPU_HW_FB` fetch the 256x224 RGB555 LE framebuffer.
+/// `W len 2` at `PPU_HW_LINE`: render framebuffer row y (`len 3` renders a
+/// `[y_lo, y_hi, count]` span in one call); reads at `PPU_HW_FB` fetch the
+/// 256x224 RGB555 LE framebuffer; `W len 2N` at `PPU_HW_PORTS` applies a
+/// `(port, val)` run in order — one wasm crossing per run, not per byte.
 const PPU_HW_LINE: u32 = 0x0100_0000;
 const PPU_HW_FB: u32 = 0x0100_1000;
+const PPU_HW_PORTS: u32 = 0x0100_2000;
 /// The plugin's fixed frame geometry.
 pub const SNES_FB_W: usize = 256;
 pub const SNES_FB_H: usize = 224;
@@ -773,15 +776,15 @@ impl SgbCoprocessor {
         let captured: Vec<(u16, u8)> = {
             let mut cpu = self.cpu.borrow_mut();
             // Two-phase drain: a 3-byte header probe reports the pending
-            // count without draining; the 48 KB bulk read runs only when
-            // there is something to carry (the full-window read every flush
-            // dominated the frame budget).
+            // count without draining; a sized read drains exactly `pending`
+            // entries (clamped to full-window capacity).
             let pending = match cpu.read_ram(HW_MMIO_RING, 3) {
                 Ok(h) if h.len() >= 2 => usize::from(h[0]) | usize::from(h[1]) << 8,
                 _ => 0,
             };
             let bulk = if pending > 0 {
-                cpu.read_ram(HW_MMIO_RING, 3 + 3 * MMIO_RING_CAP)
+                let size = (3 + 3 * pending).min(3 + 3 * MMIO_RING_CAP);
+                cpu.read_ram(HW_MMIO_RING, size)
             } else {
                 Ok(Vec::new())
             };
@@ -800,24 +803,53 @@ impl SgbCoprocessor {
                 _ => Vec::new(),
             }
         };
+        // Consecutive pure-PPU writes ($2100-$213F; the WMDATA quartet and
+        // the CPU I/O block are host-consumed) apply as one batched wasm
+        // call; any host-consumed register is an order barrier that flushes
+        // the run first, so the guest-observable sequence is unchanged.
+        let mut ppu_run: Vec<u8> = Vec::new();
         for (addr, val) in captured {
-            self.apply_mmio(addr, val);
+            if (0x2100..=0x213F).contains(&addr) {
+                if addr == 0x2100 {
+                    self.last_inidisp = val; // diagnostics (debug_status)
+                    // The display shows a picture: not force-blanked and
+                    // brightness above zero (fullsnes 2100h). Arms the
+                    // frame handoff — see `take_snes_frame`.
+                    if val & 0x80 == 0 && val & 0x0F != 0 {
+                        self.snes_live = true;
+                    }
+                }
+                if (0x2102..=0x2103).contains(&addr) && std::env::var_os("SLOPGB_OAMDBG").is_some()
+                {
+                    eprintln!("OAMREG {addr:04X}={val:02X}");
+                }
+                ppu_run.push((addr - 0x2100) as u8);
+                ppu_run.push(val);
+            } else {
+                self.flush_ppu_run(&mut ppu_run);
+                self.apply_mmio(addr, val);
+            }
         }
+        self.flush_ppu_run(&mut ppu_run);
         // The ring is applied — any $420B in it just ran its transfer — so
         // release a DMA-stalled CPU before this flush's run_until.
         let _ = self.cpu.get_mut().write_ram(HW_DMA_STALL, &[0]);
         tp.lap(0);
         // The scanline pump: render every framebuffer row the SNES beam has
         // passed since the last flush (display lines are 1-based, so row r
-        // is complete once V > r). Runs after the ring apply, so this
-        // flush's register writes land at ~10-line granularity.
+        // is complete once V > r) — one span render per flush. Runs after
+        // the ring apply, so this flush's register writes land at ~10-line
+        // granularity.
         if let Some(ppu) = &self.ppu {
             let v = self.gb_pos * SNES_LINES / GB_FRAME_CYCLES;
             let target = v.min(SNES_FB_H as u64) as u16;
-            let mut ppu = ppu.borrow_mut();
-            while self.ppu_row < target {
-                let _ = ppu.write_ram(PPU_HW_LINE, &self.ppu_row.to_le_bytes());
-                self.ppu_row += 1;
+            if self.ppu_row < target {
+                let count = (target - self.ppu_row).min(255) as u8;
+                let _ = ppu.borrow_mut().write_ram(
+                    PPU_HW_LINE,
+                    &[self.ppu_row as u8, (self.ppu_row >> 8) as u8, count],
+                );
+                self.ppu_row += u16::from(count);
             }
         }
         tp.lap(1);
@@ -923,13 +955,14 @@ impl SgbCoprocessor {
                 let events: Vec<(u8, u8)> = {
                     let mut cpu = self.cpu.borrow_mut();
                     // Two-phase drain (see the MMIO ring): header probe
-                    // first, the 32 KB bulk read only when non-empty.
+                    // first, a sized read drains exactly `pending` entries.
                     let pending = match cpu.read_ram(HW_PORT_RING, 3) {
                         Ok(h) if h.len() >= 2 => usize::from(h[0]) | usize::from(h[1]) << 8,
                         _ => 0,
                     };
                     let bulk = if pending > 0 {
-                        cpu.read_ram(HW_PORT_RING, 3 + 2 * PORT_RING_CAP)
+                        let size = (3 + 2 * pending).min(3 + 2 * PORT_RING_CAP);
+                        cpu.read_ram(HW_PORT_RING, size)
                     } else {
                         Ok(Vec::new())
                     };
@@ -1021,13 +1054,14 @@ impl SgbCoprocessor {
                     }
                 }
             }
-            // Two-phase drain (see the MMIO ring): header probe first.
+            // Two-phase drain (see the MMIO ring): header probe first, sized read.
             let pad_pending = match cpu.read_ram(HW_PAD_RING, 2) {
                 Ok(h) if !h.is_empty() => usize::from(h[0]),
                 _ => 0,
             };
             let pad_bulk = if pad_pending > 0 {
-                cpu.read_ram(HW_PAD_RING, 2 + 2 * PAD_RING_CAP)
+                let size = (2 + 2 * pad_pending).min(2 + 2 * PAD_RING_CAP);
+                cpu.read_ram(HW_PAD_RING, size)
             } else {
                 Ok(Vec::new())
             };
@@ -1129,6 +1163,19 @@ impl SgbCoprocessor {
     /// loop consumes NMITIMEN; the DMA engine consumes the channel
     /// registers, MDMAEN, and the WRAM access ports; everything else is
     /// inert until its consumer lands (PPU routing).
+    /// Apply a buffered run of pure-PPU `(port, val)` pairs as one batched
+    /// plugin call, in order, and clear the buffer. No-op when empty or
+    /// without a PPU plugin (matching the unbatched path's routing).
+    fn flush_ppu_run(&mut self, run: &mut Vec<u8>) {
+        if run.is_empty() {
+            return;
+        }
+        if let Some(ppu) = &self.ppu {
+            let _ = ppu.borrow_mut().write_ram(PPU_HW_PORTS, run);
+        }
+        run.clear();
+    }
+
     fn apply_mmio(&mut self, addr: u16, val: u8) {
         match addr {
             0x2180 => self.wmdata_write(val),

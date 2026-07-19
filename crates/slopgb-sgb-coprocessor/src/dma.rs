@@ -82,36 +82,85 @@ impl SgbCoprocessor {
                 .unwrap_or_default();
             eprintln!("OAMDMA ch{ch} src={src:06X} count={count} head={dump:02X?}");
         }
-        for i in 0..count {
-            let b_port = bbad.wrapping_add(unit[i % unit.len()]);
-            let a24 = u32::from(a1b) << 16 | u32::from(a_addr);
-            // ponytail: one wasm crossing per byte; bulk the A-bus side when
-            // PPU VRAM uploads (the snes-ppu routing) make size matter.
-            let wram_clash = (0x80..=0x83).contains(&b_port) && a_bus_is_wram(a24);
-            if !wram_clash {
-                if b_to_a {
-                    let v = self.bbus_read(b_port);
-                    let _ = self.cpu.get_mut().write_ram(a24, &[v]);
-                } else {
-                    // ICD2 sources go through the bus-read window (the
-                    // `$7800` char port's auto-increment must run per
-                    // byte); everything else is plain memory.
-                    let src = if a_bus_is_icd2(a24) {
-                        HW_ICD2_BUS + (a24 & 0x1FFF)
+        if b_to_a || step != 1 {
+            // B→A and fixed/decrement A-stepping stay per-byte (rare paths;
+            // the fixed-source read may carry per-read device semantics).
+            for i in 0..count {
+                let b_port = bbad.wrapping_add(unit[i % unit.len()]);
+                let a24 = u32::from(a1b) << 16 | u32::from(a_addr);
+                let wram_clash = (0x80..=0x83).contains(&b_port) && a_bus_is_wram(a24);
+                if !wram_clash {
+                    if b_to_a {
+                        let v = self.bbus_read(b_port);
+                        let _ = self.cpu.get_mut().write_ram(a24, &[v]);
                     } else {
-                        a24
-                    };
-                    let v = self
-                        .cpu
-                        .get_mut()
-                        .read_ram(src, 1)
-                        .ok()
-                        .and_then(|b| b.first().copied())
-                        .unwrap_or(0);
-                    self.bbus_write(b_port, v);
+                        let v = self.read_a_bus(a24);
+                        self.bbus_write(b_port, v);
+                    }
                 }
+                a_addr = a_addr.wrapping_add_signed(step);
             }
-            a_addr = a_addr.wrapping_add_signed(step);
+        } else {
+            // A→B with an incrementing source: read the source in one bulk
+            // call per contiguous run (the ICD2 window keeps its per-byte
+            // device semantics inside the plugin — its handler performs N
+            // successive bus reads), and hand pure-PPU destination ports to
+            // the plugin as one batched `(port, val)` run. Runs break at
+            // the bank-local wrap, at the ICD2 region edges, and at any
+            // non-PPU destination byte (the order barrier).
+            let mut done = 0usize;
+            let mut ppu_run: Vec<u8> = Vec::new();
+            while done < count {
+                let a24 = u32::from(a1b) << 16 | u32::from(a_addr);
+                let to_wrap = 0x1_0000 - usize::from(a_addr);
+                let icd2 = a_bus_is_icd2(a24);
+                let to_edge = if icd2 {
+                    0x8000 - usize::from(a_addr)
+                } else if (a24 >> 16) as u8 & 0x40 == 0
+                    && (a24 >> 16) as u8 != 0x7E
+                    && a_addr < 0x6000
+                {
+                    usize::from(0x6000 - a_addr)
+                } else {
+                    to_wrap
+                };
+                let run = (count - done).min(to_wrap).min(to_edge);
+                let src = if icd2 {
+                    HW_ICD2_BUS + (a24 & 0x1FFF)
+                } else {
+                    a24
+                };
+                let bytes = self
+                    .cpu
+                    .get_mut()
+                    .read_ram(src, run)
+                    .unwrap_or_else(|_| vec![0; run]);
+                for (i, &v) in bytes.iter().enumerate().take(run) {
+                    let b_port = bbad.wrapping_add(unit[(done + i) % unit.len()]);
+                    let a_run = u32::from(a1b) << 16 | u32::from(a_addr.wrapping_add(i as u16));
+                    let wram_clash = (0x80..=0x83).contains(&b_port) && a_bus_is_wram(a_run);
+                    if wram_clash {
+                        continue;
+                    }
+                    // Pure-PPU ports batch; anything else (WMDATA, the CPU
+                    // I/O block routing inside apply_mmio) flushes first so
+                    // ordering holds. INIDISP ($2100) keeps its host
+                    // bookkeeping (snes_live), and the OAMADD debug trace
+                    // keeps its print — both via the unbatched path.
+                    let dbg_barrier = (0x02..=0x03).contains(&b_port)
+                        && std::env::var_os("SLOPGB_OAMDBG").is_some();
+                    if (0x01..=0x3F).contains(&b_port) && !dbg_barrier {
+                        ppu_run.push(b_port);
+                        ppu_run.push(v);
+                    } else {
+                        self.flush_ppu_run(&mut ppu_run);
+                        self.bbus_write(b_port, v);
+                    }
+                }
+                a_addr = a_addr.wrapping_add(run as u16);
+                done += run;
+            }
+            self.flush_ppu_run(&mut ppu_run);
         }
         // The working registers end stepped: A1T at the final address, DAS
         // decremented to zero (fullsnes 43x2h "DMA Current Addr" / 43x5h
@@ -127,6 +176,23 @@ impl SgbCoprocessor {
     /// free.
     fn bbus_write(&mut self, port: u8, val: u8) {
         self.apply_mmio(0x2100 | u16::from(port), val);
+    }
+
+    /// One A-bus source byte: ICD2 addresses go through the bus-read window
+    /// (the `$7800` char port auto-increments per read), plain memory
+    /// otherwise.
+    fn read_a_bus(&mut self, a24: u32) -> u8 {
+        let src = if a_bus_is_icd2(a24) {
+            HW_ICD2_BUS + (a24 & 0x1FFF)
+        } else {
+            a24
+        };
+        self.cpu
+            .get_mut()
+            .read_ram(src, 1)
+            .ok()
+            .and_then(|b| b.first().copied())
+            .unwrap_or(0)
     }
 
     /// A DMA read from a B-bus port: WMDATA host-side, everything else from
