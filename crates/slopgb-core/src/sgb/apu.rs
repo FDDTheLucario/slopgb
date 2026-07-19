@@ -356,9 +356,17 @@ impl super::AudioCoprocessor for SgbApu {
     fn clone_box(&self) -> Box<dyn super::AudioCoprocessor> {
         Box::new(self.clone())
     }
-    // No `export_spc`: this HLE square driver plays SGB sound effects, not
-    // sequenced music with a song-start to snapshot from — the trait default
-    // (`None` / not exportable) greys the export action for it.
+    // No `export_spc` / `can_export_spc`: this HLE square driver plays SGB sound
+    // effects, not sequenced music with a song-start to snapshot from — the
+    // trait default (`None` / not exportable) greys the UI export for it.
+
+    fn export_spc_live(&self) -> Option<Vec<u8>> {
+        // The MCP debug path still dumps its live SPC700 + DSP state on demand.
+        Some(slopgb_snes_apu::build_spc_file(
+            &self.spc,
+            &self.dsp.borrow(),
+        ))
+    }
 }
 
 impl Clone for SgbApu {

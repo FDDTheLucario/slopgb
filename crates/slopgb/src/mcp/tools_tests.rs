@@ -169,6 +169,47 @@ fn coprocessor_reports_not_sgb_on_dmg_and_a_backend_on_sgb() {
 }
 
 #[test]
+fn dump_spc_explains_when_nothing_to_dump() {
+    let syms = SymbolTable::default();
+    let mut bps = Breakpoints::default();
+    // DMG has no SPC700 — a live dump reports that, and writes no file.
+    let dmg = GameBoy::new(Model::Dmg, rom_at_0100(&[0x00])).unwrap();
+    let out = call_text(
+        &Call::DumpSpc {
+            mode: "live".into(),
+        },
+        &dmg,
+        &mut bps,
+        &syms,
+    );
+    assert!(out.to_lowercase().contains("no spc"), "DMG live: {out:?}");
+    // SGB with no song played yet has no from-start snapshot.
+    let sgb = GameBoy::new(Model::Sgb, rom_at_0100(&[0x00])).unwrap();
+    let out = call_text(
+        &Call::DumpSpc {
+            mode: "start".into(),
+        },
+        &sgb,
+        &mut bps,
+        &syms,
+    );
+    assert!(
+        out.to_lowercase().contains("no from-start"),
+        "SGB start, no song: {out:?}"
+    );
+    // A bogus mode is a clear error, not a panic or a write.
+    let out = call_text(
+        &Call::DumpSpc {
+            mode: "sideways".into(),
+        },
+        &sgb,
+        &mut bps,
+        &syms,
+    );
+    assert!(out.contains("unknown mode"), "bad mode: {out:?}");
+}
+
+#[test]
 fn registers_has_every_field() {
     let gb = GameBoy::new(Model::Dmg, rom_at_0100(&[0x00])).unwrap();
     let syms = SymbolTable::default();

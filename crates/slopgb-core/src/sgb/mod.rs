@@ -191,4 +191,12 @@ pub trait AudioCoprocessor {
     fn can_export_spc(&self) -> bool {
         false
     }
+
+    /// A `.spc` of the chip's **current** state, snapshotted right now — unlike
+    /// [`Self::export_spc`] this is the live driver mid-song, not the song's
+    /// start. For the MCP `dump-spc` debug path (inspect a driver at the exact
+    /// moment of a bug). `None` if this coprocessor has no SPC700 to dump.
+    fn export_spc_live(&self) -> Option<Vec<u8>> {
+        None
+    }
 }

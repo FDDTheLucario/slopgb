@@ -439,6 +439,13 @@ fn build_call(name: &str, args: Option<&Json>) -> Result<Call, String> {
         }),
         "registers" => Ok(Call::Registers),
         "coprocessor" => Ok(Call::Coprocessor),
+        "dump-spc" => Ok(Call::DumpSpc {
+            mode: args
+                .and_then(|a| a.get("mode"))
+                .and_then(Json::as_str)
+                .unwrap_or("live")
+                .to_owned(),
+        }),
         "expr" => Ok(Call::Expr {
             expr: arg("expression")?,
         }),
@@ -587,6 +594,15 @@ fn builtin_tool_defs() -> Json {
             "coprocessor",
             "SGB coprocessor status: whether the SPC700 + 65C816 subsystem plugins are engaged and running (or the built-in HLE / not-SGB).",
             &[],
+        ),
+        tool_opt(
+            "dump-spc",
+            "Write the SGB SPC700 audio state to a `.spc` file (for an SPC player / driver debugging) and report the path.",
+            &[],
+            &[(
+                "mode",
+                "'live' (default: the driver's current state, mid-song) or 'start' (the song from its top)",
+            )],
         ),
         tool(
             "expr",

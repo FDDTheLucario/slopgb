@@ -1471,6 +1471,15 @@ impl AudioCoprocessor for SgbCoprocessor {
         self.song_start_spc.is_some()
     }
 
+    fn export_spc_live(&self) -> Option<Vec<u8>> {
+        // The SPC700 plugin assembles a `.spc` from its current ARAM + registers
+        // + DSP — the live state, whatever is playing now.
+        match self.spc.borrow_mut().dump_spc() {
+            Ok(spc) if !spc.is_empty() => Some(spc),
+            _ => None,
+        }
+    }
+
     fn debug_status(&self) -> String {
         // The run-cycle targets grow only while the host clocks the chips, so a
         // zero here means the coprocessor loaded but was never driven (the

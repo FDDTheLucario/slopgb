@@ -314,10 +314,20 @@ game-uploaded foreign engine, or no song yet — so it never yields a broken dum
 This stands in for literal ARAM fingerprinting and is more robust (any N-SPC
 variant, no per-game hashes).
 
+**Live state, for debugging.** The from-start capture is the UI's job; the MCP
+`dump-spc` tool instead defaults to `mode: live` — the driver's *current* state,
+snapshotted on demand, so a driver stuck on a note or mis-advancing a pattern can
+be dumped at the exact moment and played back / inspected (`mode: start` gives the
+same from-top snapshot the UI exports). `AudioCoprocessor::export_spc_live`
+assembles it from the live chip: the SPC700 plugin's `dump_spc` for the resident
+path, `build_spc_file` directly for the built-in HLE `SgbApu` (which the UI
+export greys but the debug path still dumps).
+
 Plumbing: the SPC700 plugin's `dump_spc` export assembles the file guest-side
 (the CPU/DSP/`$F0-$FF` state the ARAM-only `read_ram` ABI can't reach) and ships
 it over the emit channel under `EMIT_KIND_SPC` (ABI v6); `AudioCoprocessor::
-export_spc` / `can_export_spc` carry it through `GameBoy` to the frontend action.
+export_spc` / `can_export_spc` / `export_spc_live` carry it through `GameBoy` to
+the frontend action and the MCP `dump-spc` tool.
 
 ## Save states
 

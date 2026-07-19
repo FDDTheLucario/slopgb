@@ -29,6 +29,8 @@ The server binds `127.0.0.1` only (never `0.0.0.0`) — localhost, not the netwo
 | `screencap` | optional `scale` | the current 160×144 screen (`gb.frame()`) as a PNG — cross-reference against `vram *` |
 | `breakpoint` | `address` | sets a PC breakpoint (the only mutating tool) |
 | `registers` | — | `af=… bc=… … lcdc=… stat=… ly=… cnt=… ie=… if=… ime=… ima=… spd=… rom=… ram=… wave=…` |
+| `coprocessor` | — | SGB coprocessor status: the SPC700 + 65C816 plugins engaged / built-in HLE / not-SGB |
+| `dump-spc` | optional `mode` | writes the SGB SPC700 state to `slopgb-<ms>-<mode>.spc` and reports the path. `mode` = `live` (default — the driver's current state, for debugging mid-song) or `start` (the from-the-top snapshot the UI's "Export SPC" writes) |
 | `expr` | `expression` | evaluates a bgb-style debugger expression (hex default, register names, `[addr]`) |
 
 ### Image scale

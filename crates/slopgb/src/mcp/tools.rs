@@ -34,6 +34,7 @@ pub enum Call {
     Breakpoint { addr: String },
     Registers,
     Coprocessor,
+    DumpSpc { mode: String },
     Expr { expr: String },
 }
 
@@ -86,6 +87,7 @@ pub fn dispatch(
         }
         Call::Registers => Ok(ToolResult::Text(registers(gb))),
         Call::Coprocessor => Ok(ToolResult::Text(coprocessor_status(gb))),
+        Call::DumpSpc { mode } => Ok(ToolResult::Text(dump_spc(gb, mode))),
         Call::Expr { expr } => Ok(ToolResult::Text(expr_eval(gb, expr))),
     }
 }
@@ -261,6 +263,47 @@ pub(crate) fn coprocessor_status(gb: &GameBoy) -> String {
          chips exist only on Model::Sgb / Sgb2."
             .to_string()
     })
+}
+
+/// The `dump-spc` tool: write the SGB audio chip's state to a `.spc` file and
+/// report the path. `mode` = `live` (default — the driver's current state, for
+/// debugging a driver mid-song) or `start` (the from-the-top snapshot the UI
+/// exports). Returns an explanatory line if there is nothing to dump (not an SGB
+/// machine, or `start` before a recognized song has played).
+pub(crate) fn dump_spc(gb: &GameBoy, mode: &str) -> String {
+    let mode = if mode.trim().is_empty() {
+        "live"
+    } else {
+        mode.trim()
+    };
+    let spc = match mode {
+        "live" => gb.export_spc_live(),
+        "start" => gb.export_spc(),
+        other => {
+            return format!(
+                "unknown mode '{other}': use 'live' (current state) or 'start' (song top)"
+            );
+        }
+    };
+    let Some(spc) = spc else {
+        return match mode {
+            "start" => "no from-start SPC available: needs an SGB machine whose recognized \
+                        resident engine (--sgb-bios or the clean-room engine) has started a \
+                        song. Try mode 'live', or the coprocessor tool for status."
+                .to_string(),
+            _ => "no SPC to dump: this machine has no SGB SPC700 (not in Super Game Boy mode). \
+                  Set --model sgb; see the coprocessor tool."
+                .to_string(),
+        };
+    };
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    let path = format!("slopgb-{stamp}-{mode}.spc");
+    match std::fs::write(&path, &spc) {
+        Ok(()) => format!("wrote {} state to {path} ({} bytes)", mode, spc.len()),
+        Err(e) => format!("error: could not write {path}: {e}"),
+    }
 }
 
 /// Evaluate a bgb-style debugger expression against the live regs + memory.
