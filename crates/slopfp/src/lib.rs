@@ -61,11 +61,15 @@ impl Entry {
     }
 }
 
-/// Open (return an existing file) vs Save (return `cwd`/typed-name, overwrite-confirmed).
+/// Open (return an existing file) vs Save (return `cwd`/typed-name, overwrite-
+/// confirmed) vs Directory (browse folders and return one — files are shown but
+/// not selectable; the host offers a "select this folder" action wired to
+/// [`Picker::pick_cwd`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Open,
     Save,
+    Directory,
 }
 
 /// Column the listing is ordered by. Directories always sort before files
@@ -278,5 +282,19 @@ impl Picker {
     #[must_use]
     pub fn cwd(&self) -> &std::path::Path {
         &self.cwd
+    }
+
+    /// The picker's mode.
+    #[must_use]
+    pub fn mode(&self) -> Mode {
+        self.mode
+    }
+
+    /// Pick the directory currently being browsed — the host wires this to a
+    /// "select this folder" affordance in [`Mode::Directory`]. Returns
+    /// [`Outcome::Picked`] with the current `cwd`.
+    #[must_use]
+    pub fn pick_cwd(&self) -> Outcome {
+        Outcome::Picked(self.cwd.clone())
     }
 }

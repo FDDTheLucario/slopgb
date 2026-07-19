@@ -95,6 +95,16 @@ pub struct Apu {
     /// [`Self::mix`] *before* the box-average resampler and the high-pass
     /// stage of [`Self::output_cycle`] (see [`Self::drain_raw_samples`]).
     raw_samples: Vec<(f32, f32)>,
+    /// Joypad → "Audio channels" recording tap (a frontend control, NOT
+    /// hardware). When set, [`Self::output_cycle`] also emits each channel's
+    /// isolated mono analog output into `channel_samples`, box-averaged over
+    /// the *same* window as the mixed `samples` (so the four tracks line up
+    /// with the mix). Default off — the tap is fully gated, so the golden
+    /// path is byte-identical and it never feeds emulated state.
+    record_channels: bool,
+    channel_samples: [Vec<f32>; 4],
+    ch_sum: [f32; 4],
+    ch_count: u32,
 }
 
 /// Cap on [`Apu::raw_samples`] (two frames of dots): the tap exists for
@@ -203,6 +213,10 @@ impl Apu {
             samples: Vec::new(),
             max_samples: 0,
             raw_samples: Vec::new(),
+            record_channels: false,
+            channel_samples: Default::default(),
+            ch_sum: [0.0; 4],
+            ch_count: 0,
         };
         apu.set_sample_rate(DEFAULT_SAMPLE_RATE);
         apu
@@ -620,6 +634,28 @@ impl Apu {
         out.append(&mut self.raw_samples);
     }
 
+    /// Arm/disarm the per-channel recording tap (Joypad → "Audio channels").
+    /// Off (the default) leaves [`Self::output_cycle`] byte-identical to golden;
+    /// disarming also drops any buffered per-channel samples.
+    pub fn set_record_channels(&mut self, on: bool) {
+        self.record_channels = on;
+        if !on {
+            for b in &mut self.channel_samples {
+                b.clear();
+            }
+        }
+        self.ch_sum = [0.0; 4];
+        self.ch_count = 0;
+    }
+
+    /// Move each channel's accumulated mono samples into `out[i]`. Same rate
+    /// and length as the mixed [`Self::drain_samples`] stream (shared window).
+    pub fn drain_audio_channels(&mut self, out: &mut [Vec<f32>; 4]) {
+        for (o, b) in out.iter_mut().zip(self.channel_samples.iter_mut()) {
+            o.append(b);
+        }
+    }
+
     /// Accumulate one T-cycle of output; emit an averaged sample whenever
     /// `CLOCK_HZ / sample_rate` cycles have been gathered.
     fn output_cycle(&mut self) {
@@ -627,12 +663,34 @@ impl Apu {
         if self.raw_samples.len() < RAW_SAMPLE_CAP {
             self.raw_samples.push((l, r));
         }
+        // Per-channel recording tap: accumulate each channel's isolated analog
+        // into the same resampling window the mix uses. Gated off by default,
+        // so the golden path skips this entirely (byte-identical).
+        if self.record_channels {
+            for ch in 0..4 {
+                self.ch_sum[ch] += self.channel_analog(ch);
+            }
+            self.ch_count += 1;
+        }
         if let Some(sample) = self.accumulate_output(l, r) {
             // Drop new samples once one second of audio has piled up: a
             // consumer that far behind has lost real-time anyway, and
             // headless runs (e.g. the mooneye harness) never drain at all.
             if self.samples.len() < self.max_samples {
                 self.samples.push(sample);
+            }
+            // The mix window just closed; emit each channel's mean over the
+            // same dot count, then reset. `ch_count` matches the mix's
+            // `sum_count` since both advance once per `output_cycle` dot.
+            if self.record_channels && self.ch_count > 0 {
+                let n = self.ch_count as f32;
+                for ch in 0..4 {
+                    if self.channel_samples[ch].len() < self.max_samples {
+                        self.channel_samples[ch].push(self.ch_sum[ch] / n);
+                    }
+                    self.ch_sum[ch] = 0.0;
+                }
+                self.ch_count = 0;
             }
         }
     }
@@ -700,6 +758,23 @@ impl Apu {
         if self.nr51 & (0x01 << ch) != 0 {
             *right += analog;
         }
+    }
+
+    /// Isolated mono analog output of channel `ch` (0-3) for the recording
+    /// tap: the DAC contribution alone, with no NR51 routing or NR50 master
+    /// volume, so each recorded track is that one channel by itself. A DAC-off
+    /// or frontend-muted channel reads 0, matching [`Self::mix_channel`].
+    fn channel_analog(&self, ch: usize) -> f32 {
+        let (dac, digital) = match ch {
+            0 => (self.ch1.dac, self.ch1.digital()),
+            1 => (self.ch2.dac, self.ch2.digital()),
+            2 => (self.ch3.dac, self.ch3.digital()),
+            _ => (self.ch4.dac, self.ch4.digital()),
+        };
+        if !dac || self.mute_mask & (1 << ch) != 0 {
+            return 0.0;
+        }
+        1.0 - f32::from(digital) / 7.5
     }
 
     /// Instantaneous analog output of both terminals, each in [-1, 1].

@@ -173,6 +173,16 @@ pub const EXC_INVALID_OPCODE: u16 = 1 << 1;
 pub const EXC_ECHO_RAM: u16 = 1 << 2;
 /// Break on disabling the LCD (`FF40` bit 7 → 0) outside vblank.
 pub const EXC_LCD_OFF_VBLANK: u16 = 1 << 3;
+/// Break on a CPU access outside HRAM while an OAM DMA is transferring (the bus
+/// is contended — the read/write hits the DMA byte, not the intended one).
+pub const EXC_OAM_DMA_BAD: u16 = 1 << 4;
+/// Break on a 16-bit `INC rr`/`DEC rr` whose register pair holds an address in
+/// `FE00-FEFF` — the value the SM83's 16-bit inc/dec unit drives onto the bus,
+/// the OAM-corruption-bug trigger (bgb's "break on 16 bits inc/dec FE00-FEFF").
+pub const EXC_INCDEC_FEXX: u16 = 1 << 5;
+/// Break when an SGB command packet transfer starts (its first P1 reset pulse).
+/// A no-op off SGB models (bgb's "break on SGB transfer start").
+pub const EXC_SGB_TRANSFER: u16 = 1 << 6;
 
 /// Leading bytes of a slopgb save state (see [`GameBoy::save_state`]).
 const STATE_MAGIC: &[u8; 4] = b"SLPS";
@@ -183,8 +193,10 @@ const STATE_MAGIC: &[u8; 4] = b"SLPS";
 /// interconnect + PPU payloads; v7 records a has-SGB-audio-tail flag byte right
 /// after the header so a cross-model load (SGB state into DMG/CGB or vice versa)
 /// is rejected with `StateError::ModelMismatch` instead of silently dropping the
-/// tail or failing as `Truncated`.
-const STATE_VERSION: u16 = 7;
+/// tail or failing as `Truncated`; v8 appends the SGB raw-packet tee queue to
+/// the joypad payload (the ICD2 mailbox feed; the SNES-fed pad latches stay
+/// transient — a live coprocessor re-feeds them on the next step).
+const STATE_VERSION: u16 = 9;
 
 /// A debugger memory watchpoint (bgb's "Set watchpoint"): the free run halts
 /// after the CPU accesses `addr` with a matching access kind. A frontend/
@@ -352,9 +364,34 @@ impl GameBoy {
         // `Model::Sgb`/`Sgb2`, so `Dmg`/`Cgb` runs are byte-identical.
         if let Some(apu) = self.sgb_apu.as_mut() {
             let elapsed = self.bus.cycles().wrapping_sub(before);
+            // The SGB `*_TRN` capture window runs on the SNES-side clock —
+            // it ticks here, whatever the GB LCD is doing.
+            self.bus.ppu_mut().sgb_tick_trn(elapsed as u32);
             apu.clock(elapsed);
             apu.poll(&mut self.bus);
+            // The SNES→GB return path: pad bytes the coprocessor's SNES
+            // program wrote into the ICD2 latches replace the local joypad
+            // matrix. `None` (the default, and the built-in HLE) feeds
+            // nothing, so the matrix — and every non-coprocessor run — is
+            // untouched.
+            if let Some(pads) = apu.joypad_feed() {
+                self.bus.joypad_mut().set_sgb_feed(pads);
+            }
+            // The GB→SNES input path: the local physical matrix crosses
+            // into the coprocessor for its joypad autopoll. The default
+            // implementation drops it, so non-coprocessor runs are
+            // untouched.
+            let (dpad, buttons) = self.bus.joypad().local_matrix();
+            apu.set_input(dpad, buttons);
         }
+    }
+
+    /// The last completed SNES-side frame from a loaded SGB coprocessor
+    /// (256x224 RGB555 — `SGB_BORDER_W`x`SGB_BORDER_H`), at most once per
+    /// SNES vblank. `None` on the built-in HLE path (and always on
+    /// DMG/CGB), so a frontend polling this changes nothing there.
+    pub fn take_snes_frame(&mut self) -> Option<Vec<u16>> {
+        self.sgb_apu.as_mut()?.take_frame()
     }
 
     /// Run until the next frame is complete (vblank reached), or — with the
@@ -463,6 +500,13 @@ impl GameBoy {
         self.bus.cycles()
     }
 
+    /// Of [`Self::cycles`], those elapsed while the CPU was HALT-gated — a
+    /// read-only diagnostic (the frontend GB-CPU-usage meter). Not part of the
+    /// save-state, so it restarts from 0 after a load.
+    pub fn halt_cycles(&self) -> u64 {
+        self.bus.halt_cycles()
+    }
+
     /// Press a joypad button (held until [`Self::release`]).
     pub fn press(&mut self, b: Button) {
         self.bus.joypad_mut().press(b);
@@ -491,6 +535,22 @@ impl GameBoy {
         if let Some(apu) = self.sgb_apu.as_mut() {
             apu.mix_into(&mut out[start..]);
         }
+    }
+
+    /// Arm/disarm the per-channel audio recording tap (Joypad → "Audio
+    /// channels"). A frontend control, *not* hardware: off by default, fully
+    /// gated in the APU output stage, so it never perturbs golden output.
+    /// While armed, [`Self::drain_audio_channels`] yields the four channels'
+    /// isolated mono streams at the same rate/length as [`Self::drain_audio`].
+    pub fn set_record_channels(&mut self, on: bool) {
+        self.bus.apu_mut().set_record_channels(on);
+    }
+
+    /// Move each GB sound channel's recorded mono samples into `out[i]`
+    /// (channel 1..=4 → index 0..=3). Empty unless [`Self::set_record_channels`]
+    /// armed the tap. SGB's SNES-side audio is not included (GB channels only).
+    pub fn drain_audio_channels(&mut self, out: &mut [Vec<f32>; 4]) {
+        self.bus.apu_mut().drain_audio_channels(out);
     }
 
     /// Set the audio output sample rate in Hz (default
@@ -571,6 +631,13 @@ impl GameBoy {
         self.bus.ppu_mut().set_dmg_palette(palette);
     }
 
+    /// Graphics → "disable SGB colors": render an SGB game screen through the
+    /// plain DMG palette instead of the SGB per-cell colors. Default off, so a
+    /// golden/test run is byte-identical. A no-op off SGB models.
+    pub fn set_sgb_mono(&mut self, on: bool) {
+        self.bus.ppu_mut().set_sgb_mono(on);
+    }
+
     /// The cartridge ROM bank currently mapped at 0x4000-0x7FFF, for the debug
     /// bank indicator (distinct from the VRAM/WRAM banks at FF4F/FF70).
     /// Side-effect-free.
@@ -603,6 +670,32 @@ impl GameBoy {
     /// Returns false if the image was rejected (wrong size / no battery).
     pub fn load_save_data(&mut self, data: &[u8]) -> bool {
         self.bus.cartridge_mut().load_save_data(data)
+    }
+
+    /// The cart's battery SRAM alone, without the RTC trailer [`Self::save_data`]
+    /// appends, or `None` with no battery. Read-only; lets a frontend
+    /// re-serialize the `.sav` in another emulator's RTC layout (see
+    /// [`Self::rtc_state`]). Side-effect-free.
+    #[must_use]
+    pub fn battery_sram(&self) -> Option<Vec<u8>> {
+        self.bus.cartridge().battery_sram()
+    }
+
+    /// The MBC3 RTC register files `(live, latched)`, each `[S, M, H, DL, DH]`,
+    /// or `None` when the cart has no RTC. Read-only introspection for a
+    /// VBA-compatible `.sav` export. Side-effect-free.
+    #[must_use]
+    pub fn rtc_state(&self) -> Option<([u8; 5], [u8; 5])> {
+        self.bus.cartridge().rtc_state()
+    }
+
+    /// The SGB audio coprocessor's status line, or `None` when this machine has
+    /// no SGB coprocessor at all (not `Model::Sgb` / `Sgb2`). Reports whether the
+    /// built-in HLE APU or the wasm SPC700+65C816 plugin coprocessor is engaged —
+    /// read-only introspection for the debugger / MCP. Side-effect-free.
+    #[must_use]
+    pub fn sgb_coprocessor_status(&self) -> Option<String> {
+        self.sgb_apu.as_ref().map(|a| a.debug_status())
     }
 
     /// True once the CPU has executed `LD B,B` (opcode 0x40) — the mooneye

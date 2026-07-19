@@ -39,6 +39,10 @@ pub struct DisasmFmt {
     /// Disassemble in RGBDS syntax (`$`-hex, `[mem]`, `ldh`, `db $xx`); when off,
     /// bgb / no$gmb syntax.
     pub rgbds: bool,
+    /// Lowercase mnemonics + register names (bgb's "lowercase disassembler").
+    /// Off uppercases them; the hex digits follow [`Self::lowercase_hex`]
+    /// independently.
+    pub lowercase_disasm: bool,
 }
 
 impl Default for DisasmFmt {
@@ -47,8 +51,35 @@ impl Default for DisasmFmt {
             lowercase_hex: false,
             show_clocks: true,
             rgbds: true,
+            lowercase_disasm: true,
         }
     }
+}
+
+/// Case a decoded instruction's text. The core decoder emits mnemonics +
+/// register names lowercase and hex digits UPPERCASE, so the character's own
+/// case disambiguates them regardless of syntax: an `A-F` letter is a hex digit
+/// (cased by `lower_hex`), any other letter is mnemonic/register (uppercased
+/// unless `lower_mnemonic`). Digits and punctuation pass through. Runs before
+/// symbol substitution, so no symbol-name casing is at risk.
+#[must_use]
+pub fn case_disasm(text: &str, lower_mnemonic: bool, lower_hex: bool) -> String {
+    text.chars()
+        .map(|c| {
+            if c.is_ascii_uppercase() {
+                // A hex digit (the decoder's only uppercase output).
+                if lower_hex { c.to_ascii_lowercase() } else { c }
+            } else if c.is_ascii_lowercase() {
+                if lower_mnemonic {
+                    c
+                } else {
+                    c.to_ascii_uppercase()
+                }
+            } else {
+                c
+            }
+        })
+        .collect()
 }
 
 /// Disassemble `count` instructions from `start`, each formatted as a bgb
@@ -101,12 +132,13 @@ pub fn disasm_rows(
         if data_hints.contains(&addr) {
             let b = read(addr);
             let prefix = if fmt.rgbds { "$" } else { "" };
+            let db_kw = if fmt.lowercase_disasm { "db" } else { "DB" };
             let text = format!(
                 "{}:{} {:<9}{:<20}{}",
                 region(addr),
                 addr_s(addr),
                 hx2(b),
-                format!("db {prefix}{}", hx2(b)),
+                format!("{db_kw} {prefix}{}", hx2(b)),
                 clk("")
             );
             rows.push(DisasmRow {
@@ -133,11 +165,7 @@ pub fn disasm_rows(
             .iter()
             .map(|b| format!("{} ", hx2(*b)))
             .collect();
-        let mnem = if fmt.lowercase_hex {
-            insn.text.to_ascii_lowercase()
-        } else {
-            insn.text
-        };
+        let mnem = case_disasm(&insn.text, fmt.lowercase_disasm, fmt.lowercase_hex);
         let text = format!(
             "{}:{} {:<9}{:<20}{}",
             region(addr),

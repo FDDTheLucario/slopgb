@@ -90,6 +90,7 @@ impl MenuPopup {
         cursor: (i32, i32),
         sound_on: bool,
         paused: bool,
+        theme: Theme,
     ) -> Option<Self> {
         let menu = MainMenu::open((0, 0), sound_on, paused);
         let (pw, ph) = popup_content_size(&menu, None);
@@ -144,7 +145,7 @@ impl MenuPopup {
             anchor,
             monitor,
             focused_once: false,
-            theme: Theme::BGB,
+            theme,
         })
     }
 
@@ -199,6 +200,19 @@ impl MenuPopup {
             for y in b.y.max(0)..b.bottom().min(h) {
                 for x in b.x.max(0)..b.right().min(w) {
                     buf[(y * w + x) as usize] |= 0xFF00_0000;
+                }
+            }
+        }
+        // Contemporary theme: punch each box's chamfered corner triangles back
+        // to fully transparent (RGB=0, alpha=0) so the desktop shows through — a
+        // visibly rounded popup matching `round_outline`'s 2px chamfer. The
+        // classic square theme leaves the corners opaque.
+        if self.theme.rounded {
+            for b in std::iter::once(main_box).chain(sub_box) {
+                for (cx, cy) in Canvas::chamfer_cut_pixels(b) {
+                    if (0..w).contains(&cx) && (0..h).contains(&cy) {
+                        buf[(cy * w + cx) as usize] = 0x0000_0000;
+                    }
                 }
             }
         }

@@ -21,10 +21,46 @@ fn settings_and_recent_round_trip() {
         model: ModelChoice::Cgb,
         mono: true,
         volume: 0.4,
+        audio_device: "Speakers".to_string(),
+        audio_sample_rate: 48000,
+        audio_latency: 0.25,
+        audio_8bit: true,
+        audio_hq: false,
         tile_hex_8bit: true,
         ff_speed: 6,
         break_ld_b_b: true,
+        rapid_speed: 3,
+        record_audio: true,
+        record_video: true,
+        record_audio_channels: true,
+        rtc_vba_sav: true,
+        rtc_bgb_legacy: true,
+        palette_edit_shade: 2,
+        palette_0_31: true,
+        gamepad_map: "East,West,North,South,Start,Select,L1,R1".to_string(),
+        gamepad_needs_focus: false,
+        break_oam_dma_bad: true,
+        break_incdec_fexx: true,
+        break_sgb_transfer: true,
         stretch: true,
+        frame_blend: true,
+        doubler: true,
+        disable_sgb_colors: true,
+        dmg_gbc_lcd: true,
+        contrast: 0.75,
+        sgb_border_screenshot: true,
+        screenshot_format: crate::windows::options::ScreenshotFormat::Png,
+        screenshot_copies: true,
+        show_errors_on_rom_load: false,
+        load_rom_dialog_on_startup: true,
+        reduce_cpu: false,
+        recovery_save_state: false,
+        auto_reset_on_system_change: false,
+        rewind_enabled: true,
+        registers_editable: false,
+        start_in_debugger: true,
+        mem_live_update: false,
+        cpu_usage_meter: true,
         bootrom_dmg: "x.bin".to_string(),
         ..Settings::default()
     };
@@ -150,25 +186,6 @@ fn theme_choice_round_trips_every_variant() {
         let (back, _) = from_doc(&Doc::parse(&d.serialize()));
         assert_eq!(back.theme, choice, "{choice:?} round-trips");
     }
-}
-
-#[test]
-fn audio_backend_round_trips_and_unknown_falls_back() {
-    for choice in [AudioBackend::Builtin, AudioBackend::SgbCoprocessor] {
-        let s = Settings {
-            audio_backend: choice,
-            ..Settings::default()
-        };
-        let mut d = Doc::default();
-        to_doc(&s, &[], &mut d);
-        let (back, _) = from_doc(&Doc::parse(&d.serialize()));
-        assert_eq!(back.audio_backend, choice, "{choice:?} round-trips");
-    }
-    // Unknown / missing value falls back to the default (Built-in), non-fatally.
-    let (s, _) = from_doc(&Doc::parse("[sound]\naudio_backend = bogus\n"));
-    assert_eq!(s.audio_backend, AudioBackend::Builtin);
-    let (s2, _) = from_doc(&Doc::parse("version = 1\n"));
-    assert_eq!(s2.audio_backend, AudioBackend::Builtin);
 }
 
 #[test]

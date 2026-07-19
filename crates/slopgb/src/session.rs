@@ -7,12 +7,17 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use slopgb_core::{CLOCK_HZ, CartridgeError, DEFAULT_SAMPLE_RATE, GameBoy, Model, RamInit};
-use slopgb_sgb_coprocessor::SgbCoprocessor;
+use slopgb_sgb_coprocessor::{CPU_WASM, SPC_WASM, SgbCoprocessor};
 
 use crate::windows::options::ModelChoice;
 
 /// Autosave battery RAM every 5 seconds of emulated time.
 const AUTOSAVE_CYCLES: u64 = 5 * CLOCK_HZ as u64;
+
+/// Capture a rewind snapshot every N emulated frames (~30/s at 60 fps).
+const REWIND_INTERVAL_FRAMES: u64 = 2;
+/// Rewind ring cap — ~20 s of backward playback at the capture rate.
+const REWIND_MAX_STATES: usize = 600;
 
 pub(crate) struct Session {
     pub(crate) gb: GameBoy,
@@ -22,8 +27,18 @@ pub(crate) struct Session {
     /// ROM file stem, for the window title.
     pub(crate) title: String,
     sav_path: PathBuf,
-    /// Last battery-RAM image written to disk (dirty check).
+    /// Last battery-RAM image written to disk (dirty check). Holds the canonical
+    /// timestamp-free `save_data` image so the dirty check stays stable even when
+    /// the VBA export stamps a moving wall clock into the file.
     last_saved: Option<Vec<u8>>,
+    /// Options → System → "Save RTC in SAV file (VBA compatible)": write the MBC3
+    /// RTC as VBA's `.sav` footer (raw SRAM + a wall-clock-stamped footer) so
+    /// other emulators read the clock. Off = slopgb's own block. Set by the
+    /// frontend from settings; only affects RTC carts.
+    rtc_vba_export: bool,
+    /// Options → System → "Save BGB legacy RTC files": also write the RTC to a
+    /// separate `<rom>.rtc` sidecar. Set by the frontend from settings.
+    rtc_bgb_legacy: bool,
     /// Emulated-cycle deadline for the next autosave.
     next_autosave: u64,
     /// In-memory quick-save snapshot (bgb State → Quick Save / Quick Load): a
@@ -32,6 +47,12 @@ pub(crate) struct Session {
     /// resets to `None`; it deliberately **survives a reset** so a Quick Load can
     /// undo the reset (bgb's behavior — the snapshot is the same ROM).
     quick_state: Option<Box<GameBoy>>,
+    /// System → "Rewind enabled": a bounded ring of recent save states (oldest
+    /// dropped when full), captured every [`REWIND_INTERVAL_FRAMES`] while
+    /// playing. Empty until rewind is enabled; cleared on reset / ROM change.
+    rewind: std::collections::VecDeque<Vec<u8>>,
+    /// Frame count at which the next rewind snapshot is taken.
+    next_rewind_frame: u64,
     /// Boot-ROM configuration captured at load, so a power-cycle (`reset`) or a
     /// model switch (`set_model`) re-runs the boot ROM (logo + chime) like bgb,
     /// instead of silently replaying the post-boot state.
@@ -40,15 +61,13 @@ pub(crate) struct Session {
     /// kept so a power-cycle / model switch re-applies it to the fresh machine
     /// (firmware persists across a reset). `None` = no BIOS. A no-op off SGB.
     sgb_bios: Option<Vec<u8>>,
-    /// Opt-in swap of the SGB audio backend from the built-in HLE `SgbApu` to the
-    /// combined 65C816+SPC700+S-DSP coprocessor (`--sgb-coprocessor`). Kept so a
-    /// power-cycle / model switch re-injects it into the fresh machine. `false` =
-    /// the built-in default (byte-identical golden path). A no-op off SGB.
-    sgb_coprocessor: bool,
-    /// Directory the coprocessor loads its two plugin `.wasm` (`spc700.wasm` +
-    /// `w65c816.wasm`) from at inject time. `None` (or a directory missing the
-    /// wasm) → the coprocessor is unavailable and the built-in `SgbApu` stands.
-    sgb_coprocessor_dir: Option<PathBuf>,
+    /// Plugins directory (`--plugins`/`SLOPGB_PLUGINS_DIR`, or the UI browse). The
+    /// SGB coprocessor is a plugin: when this dir holds `spc700.wasm` +
+    /// `w65c816.wasm` and the machine is SGB, the combined 65C816+SPC700+S-DSP
+    /// coprocessor auto-loads over the built-in HLE `SgbApu` at inject time. `None`
+    /// (or a dir missing either wasm) → the built-in `SgbApu` stands (golden-safe
+    /// default). Kept so a power-cycle / model switch re-injects it.
+    plugins_dir: Option<PathBuf>,
     /// Overlay the built-in default SGB border on a non-SGB machine — bgb's
     /// "GBC + initial SGB border" system mode (`ModelChoice::CgbBorder`). A
     /// machine property, so a power-cycle (`reset`) re-applies it.
@@ -77,12 +96,15 @@ impl Session {
             title: String::new(),
             sav_path: PathBuf::new(),
             last_saved: None,
+            rtc_vba_export: false,
+            rtc_bgb_legacy: false,
             next_autosave: AUTOSAVE_CYCLES,
             quick_state: None,
+            rewind: std::collections::VecDeque::new(),
+            next_rewind_frame: 0,
             boot: OwnedBootSpec::default(),
             sgb_bios: None,
-            sgb_coprocessor: false,
-            sgb_coprocessor_dir: None,
+            plugins_dir: None,
             sgb_border: false,
             ram_init: None,
         }
@@ -138,12 +160,15 @@ impl Session {
             title,
             sav_path,
             last_saved,
+            rtc_vba_export: false,
+            rtc_bgb_legacy: false,
             next_autosave: AUTOSAVE_CYCLES,
             quick_state: None,
+            rewind: std::collections::VecDeque::new(),
+            next_rewind_frame: 0,
             boot: boot.to_owned(),
             sgb_bios: None,
-            sgb_coprocessor: false,
-            sgb_coprocessor_dir: None,
+            plugins_dir: None,
             sgb_border,
             ram_init,
         })
@@ -171,40 +196,33 @@ impl Session {
         }
     }
 
-    /// Set the directory the SGB coprocessor loads its two plugin `.wasm` from.
-    /// Kept so a `reset`/`set_model` rebuild re-injects from the same place. Set
-    /// before [`Self::set_sgb_coprocessor`] so the first inject sees it.
-    pub(crate) fn set_sgb_coprocessor_dir(&mut self, dir: Option<PathBuf>) {
-        self.sgb_coprocessor_dir = dir;
-    }
-
-    /// Select the SGB audio backend (`--sgb-coprocessor`) and keep the choice so a
-    /// later `reset`/`set_model` re-applies it. `true` injects the combined
-    /// coprocessor; `false` restores the built-in on the *next* rebuild (an
-    /// already-injected machine keeps it until then). A no-op off SGB.
-    pub(crate) fn set_sgb_coprocessor(&mut self, on: bool) {
-        self.sgb_coprocessor = on;
+    /// Set the plugins directory the SGB coprocessor auto-loads from, then apply
+    /// it to the current machine. Kept so a `reset`/`set_model` rebuild re-injects
+    /// from the same place.
+    pub(crate) fn set_plugins_dir(&mut self, dir: Option<PathBuf>) {
+        self.plugins_dir = dir;
         self.apply_sgb_coprocessor();
     }
 
     /// Inject the combined coprocessor into the current (freshly built) machine
-    /// when selected, loading its two plugin `.wasm` from the kept directory. If
-    /// the directory is unset or the plugins are missing / fail to load, the
-    /// built-in `SgbApu` is left in place (the golden-safe default) and the reason
-    /// is logged. `set_audio_coprocessor` drops the box off SGB, so this is a
-    /// no-op there. Built at the core's default output rate — the rate the
-    /// GameBoy's own APU runs at — so the two streams stay sample-aligned.
+    /// when its plugin is present. The SGB SNES-side chips run only from a loaded
+    /// plugin: with `spc700.wasm` + `w65c816.wasm` in the plugins dir and an SGB
+    /// machine, the combined 65C816+SPC700+S-DSP coprocessor replaces the built-in
+    /// HLE `SgbApu`. A missing plugin (or non-SGB machine) leaves the `SgbApu` in
+    /// place — the golden-safe default — silently, since absence is the norm; only
+    /// a present-but-broken plugin is logged. Built at the core's default output
+    /// rate (the GameBoy APU's rate) so the two streams stay sample-aligned.
     fn apply_sgb_coprocessor(&mut self) {
-        if !self.sgb_coprocessor {
+        // Off SGB the machine holds no coprocessor slot; skip the wasm load
+        // entirely (`set_audio_coprocessor` would drop the box anyway).
+        if !matches!(self.model, Model::Sgb | Model::Sgb2) {
             return;
         }
-        let Some(dir) = &self.sgb_coprocessor_dir else {
-            eprintln!(
-                "slopgb: SGB coprocessor selected but no plugin directory set \
-                 (SLOPGB_SGB_COPROCESSOR / --plugins); using the built-in SGB APU"
-            );
+        let Some(dir) = &self.plugins_dir else { return };
+        // No coprocessor plugin in the dir → HLE default, not an error.
+        if !dir.join(SPC_WASM).exists() || !dir.join(CPU_WASM).exists() {
             return;
-        };
+        }
         match SgbCoprocessor::load(dir, DEFAULT_SAMPLE_RATE) {
             Ok(cop) => self.gb.set_audio_coprocessor(Box::new(cop)),
             Err(e) => eprintln!("slopgb: {e}; using the built-in SGB APU"),
@@ -232,6 +250,40 @@ impl Session {
         true
     }
 
+    /// Capture a rewind snapshot if the interval has elapsed (System → "Rewind
+    /// enabled"; the caller invokes this only while playing with rewind on).
+    pub(crate) fn capture_rewind(&mut self) {
+        let frame = self.gb.frame_count();
+        if frame < self.next_rewind_frame {
+            return;
+        }
+        self.next_rewind_frame = frame + REWIND_INTERVAL_FRAMES;
+        if self.rewind.len() >= REWIND_MAX_STATES {
+            self.rewind.pop_front();
+        }
+        self.rewind.push_back(self.gb.save_state());
+    }
+
+    /// Restore (and drop) the most recent rewind snapshot. Returns whether one
+    /// was available — `false` means the ring is empty (nothing to rewind to).
+    pub(crate) fn rewind_step(&mut self) -> bool {
+        match self.rewind.pop_back() {
+            Some(bytes) => {
+                let _ = self.gb.load_state(&bytes);
+                self.next_autosave = self.gb.cycles().saturating_add(AUTOSAVE_CYCLES);
+                self.next_rewind_frame = 0; // recapture promptly once play resumes
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Drop the rewind ring — a reset / ROM change makes the states stale.
+    pub(crate) fn clear_rewind(&mut self) {
+        self.rewind.clear();
+        self.next_rewind_frame = 0;
+    }
+
     /// Save state to disk (bgb File / State → Save state): write the serialized
     /// machine to `path` via a temp-file-then-rename (same durability as the
     /// battery `.sav` write — an interrupted save can't destroy a prior good
@@ -257,6 +309,7 @@ impl Session {
     /// ROM (logo + chime) when one is configured for the model, like bgb.
     pub(crate) fn reset(&mut self) {
         self.flush_save();
+        self.clear_rewind(); // the pre-reset states no longer apply
         let boot = self.boot.resolve(self.model);
         match build_gb(
             self.model,
@@ -317,16 +370,77 @@ impl Session {
         }
     }
 
-    /// Write battery RAM to `<rom>.sav` if it changed since the last write.
-    pub(crate) fn flush_save(&mut self) {
-        let Some(data) = self.gb.save_data() else {
-            return; // cartridge has no battery RAM
-        };
-        if self.last_saved.as_deref() == Some(data.as_slice()) {
+    /// Options → System → "Save RTC in SAV file (VBA compatible)": choose the
+    /// `.sav` RTC layout. Only affects the next write of an RTC cart.
+    pub(crate) fn set_rtc_vba_export(&mut self, on: bool) {
+        self.rtc_vba_export = on;
+    }
+
+    /// Options → System → "Save BGB legacy RTC files": also write a `<rom>.rtc`
+    /// sidecar. Only affects the next write of an RTC cart.
+    pub(crate) fn set_rtc_bgb_legacy(&mut self, on: bool) {
+        self.rtc_bgb_legacy = on;
+    }
+
+    /// Write the `<rom>.rtc` sidecar (the shared 48-byte RTC footer with a fresh
+    /// wall-clock stamp) when the legacy-RTC option is on and the cart has an
+    /// RTC. Called after a `.sav` write so it tracks the same dirty edge.
+    fn write_rtc_sidecar(&self) {
+        if !self.rtc_bgb_legacy {
             return;
         }
-        match write_atomic(&self.sav_path, &data) {
-            Ok(()) => self.last_saved = Some(data),
+        let Some((live, latched)) = self.gb.rtc_state() else {
+            return;
+        };
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let footer = crate::rtc_export::vba_footer(live, latched, secs);
+        let rtc_path = self.sav_path.with_extension("rtc");
+        if let Err(e) = write_atomic(&rtc_path, &footer) {
+            eprintln!(
+                "slopgb: cannot write RTC file '{}': {e}",
+                rtc_path.display()
+            );
+        }
+    }
+
+    /// The battery image to persist. With the VBA-RTC toggle on and an RTC cart,
+    /// this is the raw SRAM plus a wall-clock-stamped VBA footer (readable by
+    /// VBA / mGBA / SameBoy); otherwise slopgb's own `save_data` block.
+    fn save_image(&self) -> Option<Vec<u8>> {
+        if self.rtc_vba_export {
+            if let (Some(mut ram), Some((live, latched))) =
+                (self.gb.battery_sram(), self.gb.rtc_state())
+            {
+                let secs = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs());
+                ram.extend_from_slice(&crate::rtc_export::vba_footer(live, latched, secs));
+                return Some(ram);
+            }
+        }
+        self.gb.save_data()
+    }
+
+    /// Write battery RAM to `<rom>.sav` if it changed since the last write. The
+    /// dirty check compares the canonical (timestamp-free) `save_data` image, so
+    /// the VBA export's moving wall clock never forces a redundant write.
+    pub(crate) fn flush_save(&mut self) {
+        let Some(canonical) = self.gb.save_data() else {
+            return; // cartridge has no battery RAM
+        };
+        if self.last_saved.as_deref() == Some(canonical.as_slice()) {
+            return;
+        }
+        let image = self.save_image().unwrap_or_else(|| canonical.clone());
+        match write_atomic(&self.sav_path, &image) {
+            Ok(()) => {
+                self.last_saved = Some(canonical);
+                // Sidecar `<rom>.rtc` shares the same dirty edge (no-op unless
+                // the legacy-RTC option is on and the cart has an RTC).
+                self.write_rtc_sidecar();
+            }
             Err(e) => eprintln!(
                 "slopgb: cannot write save file '{}': {e}",
                 self.sav_path.display()

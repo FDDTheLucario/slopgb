@@ -42,6 +42,11 @@ pub(super) const INSET_Y: usize = 40;
 /// `pending_transfer` destination codes: which buffer the next captured screen
 /// (4096 bytes) is routed into. Stored as a `u8` so the save-state stream stays
 /// a flat scalar (SameBoy's `transfer_dest`).
+/// `*_TRN` capture-window length: the capture happens on the SNES side
+/// during the frame after the command (Pan Docs "SGB Functions — VRAM
+/// Transfer" wants the screen visible then), so one GB frame of cycles.
+pub(super) const TRN_CAPTURE_DELAY: u32 = 70_224;
+
 pub(super) const TR_PAL: u8 = 0; // PAL_TRN  → ram_palettes (512 palettes × 4 colors)
 pub(super) const TR_ATTR: u8 = 1; // ATTR_TRN → attr_files (45 files × 90 bytes)
 pub(super) const TR_CHR0: u8 = 2; // CHR_TRN  → border tiles, bank 0 (tiles 0-127)
@@ -86,8 +91,12 @@ pub(super) struct SgbView {
     /// reads — NOT `front`, whose shade is lost to XRGB8888.
     shade_buf: Box<[u8; SCREEN_PIXELS]>,
     /// A `*_TRN` command latched a screen capture into this destination
-    /// (`TR_*`); consumed at the next frame boundary. `None` when idle.
+    /// (`TR_*`); consumed when its capture window expires. `None` when idle.
     pending_transfer: Option<u8>,
+    /// Cycles left in the open `*_TRN` capture window (0 = no window). Runs
+    /// on the machine clock — the SNES side's capture timing — so a GB
+    /// LCD-off stretch never stalls it.
+    trn_countdown: u32,
 
     /// PAL_TRN palette RAM: 512 SNES palettes × 4 colors × 2 bytes (BGR555 LE).
     ram_palettes: Box<[u8; 4096]>,
@@ -123,6 +132,19 @@ pub(super) struct SgbView {
     sou_trn: Option<Box<[u8; 4096]>>,
     /// DATA_TRN ($10) captured payload destined for SNES RAM.
     data_trn: Option<Box<[u8; 4096]>>,
+    /// Bumps once per completed DATA_TRN capture — the cheap change signal
+    /// consumers poll instead of hashing the 4 KB payload every call. Not
+    /// serialized: a load keeps the running value (`read_state` reuses the
+    /// view), and the consumer forgets its remembered value on its own load,
+    /// so the pair re-syncs on the first poll either way.
+    data_trn_seq: u64,
+    /// ICD2 character-row stream: each completed 8-line band of the
+    /// rendered screen as 20 GB 2bpp tiles (320 bytes — fullsnes "SGB Port
+    /// 7800h"), awaiting the coprocessor's drain (the `$7800` path the
+    /// SNES DMAs into VRAM). Bounded, oldest dropped; transient like
+    /// `Joypad`'s `pending_cmd` (a live coprocessor re-streams every
+    /// frame, and the HLE path never drains it).
+    char_rows: std::collections::VecDeque<(u8, Box<[u8; 320]>)>,
     /// DATA_SND ($0F) inline packets written to SNES RAM (drained by the host).
     data_snd: Vec<Vec<u8>>,
     /// SOUND ($08) effect events (drained by the host / Phase 3).
@@ -171,6 +193,7 @@ impl SgbView {
             mask: 0,
             shade_buf: boxed_u8(),
             pending_transfer: None,
+            trn_countdown: 0,
             ram_palettes: boxed_u8(),
             attr_files: boxed_u8(),
             border_tiles: boxed_u8(),
@@ -185,6 +208,8 @@ impl SgbView {
             obj_data: None,
             sou_trn: None,
             data_trn: None,
+            data_trn_seq: 0,
+            char_rows: std::collections::VecDeque::new(),
             data_snd: Vec::new(),
             sound_events: Vec::new(),
             atrc_en: false,
@@ -310,6 +335,7 @@ impl SgbView {
             }
             None => w.bool(false),
         }
+        w.u32(self.trn_countdown);
         w.bytes(&self.ram_palettes[..]);
         w.bytes(&self.attr_files[..]);
         w.bytes(&self.border_tiles[..]);
@@ -355,6 +381,7 @@ impl SgbView {
         self.mask = r.u8()?;
         r.bytes_into(&mut self.shade_buf[..])?;
         self.pending_transfer = if r.bool()? { Some(r.u8()?) } else { None };
+        self.trn_countdown = r.u32()?;
         r.bytes_into(&mut self.ram_palettes[..])?;
         r.bytes_into(&mut self.attr_files[..])?;
         r.bytes_into(&mut self.border_tiles[..])?;
@@ -421,8 +448,10 @@ impl Ppu {
     /// (byte-identical to the pre-SGB path on every non-SGB model).
     pub(super) fn dmg_shade(&self, lx: u8, shade: usize) -> u32 {
         match &self.sgb {
-            Some(s) => s.shade_color(lx, self.ly, shade),
-            None => self.dmg_palette[shade],
+            // "disable SGB colors" (default off, so the colorized path is
+            // byte-identical) drops through to the plain DMG palette.
+            Some(s) if !self.sgb_mono => s.shade_color(lx, self.ly, shade),
+            _ => self.dmg_palette[shade],
         }
     }
 
@@ -447,12 +476,13 @@ impl Ppu {
     }
 
     /// SGB frame-boundary work (called from [`Self::start_line`] at line 144):
-    /// consume a pending `*_TRN` screen capture, recomposite the border, and
-    /// advance the boot-intro / cross-fade blend. A no-op off SGB (`self.sgb`
-    /// is `None`) so the whole call is inert on DMG/CGB — golden-safe.
+    /// recomposite the border and advance the boot-intro / cross-fade blend.
+    /// (`*_TRN` captures fire from their own machine-clocked window — see
+    /// `transfer.rs::tick_trn` — never from this GB-LCD-dependent boundary.)
+    /// A no-op off SGB (`self.sgb` is `None`) so the whole call is inert on
+    /// DMG/CGB — golden-safe.
     pub(super) fn sgb_frame_boundary(&mut self) {
         if let Some(s) = self.sgb.as_mut() {
-            s.run_pending_transfer();
             // A border-changing transfer landed: snapshot the *current* (still
             // pre-recomposite) surface as the cross-fade source, then start a
             // fade. Done before `sgb_composite_border` overwrites `border_fb`.

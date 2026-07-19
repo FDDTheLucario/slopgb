@@ -80,6 +80,18 @@ impl Cpu {
         self.cycles
     }
 
+    /// Deliver a hardware NMI between instructions (see
+    /// [`nmi_sequence`](Self::nmi_sequence) for the datasheet semantics).
+    /// Returns the cycles spent.
+    pub fn nmi(&mut self, bus: &mut impl Bus) -> u64 {
+        self.cycles = 0;
+        self.cap = u64::MAX;
+        self.pin_emulation_stack();
+        self.nmi_sequence(bus);
+        self.pin_emulation_stack();
+        self.cycles
+    }
+
     /// Whether the current instruction has reached its cycle budget (block moves
     /// only).
     pub(crate) fn cap_reached(&self) -> bool {

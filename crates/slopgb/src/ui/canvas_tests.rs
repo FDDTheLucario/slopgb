@@ -27,6 +27,40 @@ fn fill_rect_sets_exactly_the_covered_pixels() {
 }
 
 #[test]
+fn blend_px_composites_coverage_over_the_destination() {
+    let mut buf = blank();
+    let mut c = Canvas::new(&mut buf, W, H);
+    let white = 0x00FF_FFFF;
+    // cov 0 leaves dst untouched; 255 is full fg; 128 is ~halfway. Out-of-bounds
+    // is a silent no-op. Do every mutation before reading pixels back.
+    c.blend_px(0, 0, white, 0);
+    c.blend_px(1, 0, white, 255);
+    c.blend_px(2, 0, white, 128);
+    c.blend_px(-1, 0, white, 255);
+    c.blend_px(W as i32, 0, white, 255);
+    assert_eq!(at(&buf, 0, 0), BG, "cov 0 keeps dst");
+    assert_eq!(at(&buf, 1, 0), white, "cov 255 is full fg");
+    let mid = at(&buf, 2, 0);
+    for shift in [16, 8, 0] {
+        let ch = (mid >> shift) & 0xFF;
+        assert!(
+            (0x7E..=0x81).contains(&ch),
+            "half coverage ~0x7F, got {ch:#x}"
+        );
+    }
+
+    // Blend over a non-zero dst blends between the two colours (0x40 -> ~0xA0).
+    let mut buf2 = vec![0x0040_4040u32; W * H];
+    let mut c2 = Canvas::new(&mut buf2, W, H);
+    c2.blend_px(0, 0, white, 128);
+    let g = (buf2[0] >> 8) & 0xFF;
+    assert!(
+        (0x9E..=0xA1).contains(&g),
+        "0x40 -> ~0xA0 at half, got {g:#x}"
+    );
+}
+
+#[test]
 fn drawing_clips_to_the_buffer_without_panicking() {
     let mut buf = blank();
     let mut c = Canvas::new(&mut buf, W, H);
@@ -43,6 +77,39 @@ fn drawing_clips_to_the_buffer_without_panicking() {
     c2.put(0, -1, FG);
     c2.put(W as i32, 0, FG);
     assert!(buf2.iter().all(|&p| p == BG));
+}
+
+#[test]
+fn round_outline_chamfers_the_corners() {
+    const BW: usize = 12;
+    let mut buf = vec![BG; BW * BW];
+    let atb = |b: &[u32], x: i32, y: i32| b[(y * BW as i32 + x) as usize];
+    let r = Rect::new(1, 1, 10, 10); // x 1..11, y 1..11
+    {
+        let mut c = Canvas::new(&mut buf, BW, BW);
+        c.round_outline(r, FG);
+    }
+    // The 2px chamfer cuts the outer corner triangle (3 px per corner)...
+    for (cx, cy) in [(1, 1), (2, 1), (1, 2)] {
+        assert_eq!(atb(&buf, cx, cy), BG, "chamfer cut ({cx},{cy})");
+    }
+    // ...bridged by one diagonal pixel, with the edges inset by 2.
+    assert_eq!(atb(&buf, 2, 2), FG, "top-left chamfer bridge");
+    assert_eq!(atb(&buf, 3, 1), FG, "top edge starts inset by 2");
+    assert_eq!(atb(&buf, 1, 3), FG, "left edge starts inset by 2");
+    // `chamfer_cut_pixels` reports exactly those cut coordinates.
+    let cut = Canvas::chamfer_cut_pixels(r);
+    assert_eq!(cut.len(), 12, "3 px * 4 corners");
+    assert!(cut.contains(&(1, 1)) && cut.contains(&(2, 1)) && cut.contains(&(1, 2)));
+
+    // A too-small rect falls back to a hard outline (corner set, no cut list).
+    let mut buf2 = vec![BG; BW * BW];
+    {
+        let mut c = Canvas::new(&mut buf2, BW, BW);
+        c.round_outline(Rect::new(0, 0, 4, 4), FG); // 4 < 2*2+1
+    }
+    assert_eq!(buf2[0], FG, "too-small falls back to a hard corner");
+    assert!(Canvas::chamfer_cut_pixels(Rect::new(0, 0, 4, 4)).is_empty());
 }
 
 #[test]

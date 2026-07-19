@@ -5,13 +5,15 @@
 use crate::ui::canvas::Canvas;
 use crate::ui::font::{self, GLYPH_H, GLYPH_W};
 
-/// Draw one glyph with its top-left at `(x, y)`.
+/// Draw one glyph with its top-left at `(x, y)`, alpha-blending each cell's
+/// 8-bit coverage over the destination so the text is anti-aliased (`blend_px`
+/// no-ops on 0 coverage, so blank cells cost nothing and blend over any theme).
 fn draw_glyph(c: &mut Canvas, x: i32, y: i32, ch: char, color: u32) {
-    for (row, &bits) in font::glyph(ch).iter().enumerate() {
+    let g = font::glyph(ch);
+    for row in 0..GLYPH_H {
         for col in 0..GLYPH_W {
-            if bits & (1 << (7 - col)) != 0 {
-                c.put(x + col as i32, y + row as i32, color);
-            }
+            let cov = g[row * GLYPH_W + col];
+            c.blend_px(x + col as i32, y + row as i32, color, cov);
         }
     }
 }

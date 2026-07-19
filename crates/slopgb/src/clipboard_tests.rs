@@ -9,6 +9,28 @@ fn candidates_are_the_three_clipboard_tools_in_priority_order() {
     assert_eq!(c[2], ("xsel", &["-ib"][..]));
 }
 
+#[test]
+fn image_candidates_are_the_mime_capable_tools() {
+    let c = image_candidates();
+    assert_eq!(c[0], ("wl-copy", &["--type", "image/png"][..]));
+    assert_eq!(
+        c[1],
+        ("xclip", &["-selection", "clipboard", "-t", "image/png"][..])
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn copy_image_png_needs_a_tool_that_accepts_the_bytes() {
+    // No real clipboard tool is guaranteed in CI, so just exercise the byte-write
+    // path against a stub: `false` rejects it, an installed tool may accept it.
+    assert!(!try_write("false", &[], b"\x89PNG"));
+    assert!(
+        try_write("cat", &[], b"\x89PNG"),
+        "cat drains bytes, exits 0"
+    );
+}
+
 // Exercise the real `try_copy` logic (write to the child's stdin, require a
 // clean exit) against STUB commands, so the test never spawns a real clipboard
 // tool or touches the developer's clipboard.

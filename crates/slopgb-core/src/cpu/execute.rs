@@ -552,12 +552,14 @@ fn execute(cpu: &mut Cpu, bus: &mut impl Bus, op: u8) {
             let i = (op >> 4) & 3;
             let v = rp_get(cpu, i);
             rp_set(cpu, i, v.wrapping_add(1));
+            bus.check_incdec16(v);
             bus.tick_addr(v);
         }
         0x0B | 0x1B | 0x2B | 0x3B => {
             let i = (op >> 4) & 3;
             let v = rp_get(cpu, i);
             rp_set(cpu, i, v.wrapping_sub(1));
+            bus.check_incdec16(v);
             bus.tick_addr(v);
         }
         // INC/DEC r8 (incl. (HL): read + write cycles)

@@ -96,62 +96,43 @@ impl ModelChoice {
     }
 }
 
-/// Which SGB audio backend the Sound tab selects (a slopgb extra, no bgb
-/// equivalent — the same seam the `--sgb-coprocessor` flag drives). `Builtin` is
-/// the default HLE `SgbApu` (byte-identical golden path); `SgbCoprocessor` swaps
-/// in the combined 65C816+SPC700+S-DSP chip. A no-op off `Model::Sgb`/`Sgb2`.
+/// Screenshot image format (Joypad tab "Screenshots" dropdown). Both encoders
+/// are std-only (`screenshot::to_bmp` / `mcp::png::encode`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum AudioBackend {
-    /// The built-in HLE SGB APU (default).
+pub enum ScreenshotFormat {
+    /// Uncompressed 24-bit BMP (bgb's format, opens everywhere).
     #[default]
-    Builtin,
-    /// The combined SGB audio coprocessor (`--sgb-coprocessor`).
-    SgbCoprocessor,
+    Bmp,
+    /// 8-bit RGB PNG.
+    Png,
 }
 
-impl AudioBackend {
-    /// Whether the coprocessor backend is selected — the bool `Session::
-    /// set_sgb_coprocessor` takes.
-    #[must_use]
-    pub fn is_coprocessor(self) -> bool {
-        matches!(self, AudioBackend::SgbCoprocessor)
-    }
-
-    /// The next backend in the cycle (the Sound-tab dropdown steps through both).
+impl ScreenshotFormat {
+    /// The next format in the cycle (the Joypad dropdown steps through both).
     #[must_use]
     pub fn next(self) -> Self {
         match self {
-            AudioBackend::Builtin => AudioBackend::SgbCoprocessor,
-            AudioBackend::SgbCoprocessor => AudioBackend::Builtin,
+            ScreenshotFormat::Bmp => ScreenshotFormat::Png,
+            ScreenshotFormat::Png => ScreenshotFormat::Bmp,
         }
     }
 
-    /// Display label for the dropdown.
+    /// Display label + file extension (the dropdown shows this; the saver appends
+    /// it to the filename).
     #[must_use]
-    pub fn label(self) -> &'static str {
+    pub fn ext(self) -> &'static str {
         match self {
-            AudioBackend::Builtin => "Built-in",
-            AudioBackend::SgbCoprocessor => "SGB coprocessor",
+            ScreenshotFormat::Bmp => "bmp",
+            ScreenshotFormat::Png => "png",
         }
     }
 
-    /// Encode for persistence (native `[sound] audio_backend`, bgb-ini
-    /// `SlopgbAudioBackend`).
-    #[must_use]
-    pub fn to_key(self) -> &'static str {
-        match self {
-            AudioBackend::Builtin => "builtin",
-            AudioBackend::SgbCoprocessor => "sgb-coprocessor",
-        }
-    }
-
-    /// Decode [`Self::to_key`]; anything unrecognized falls back to the default
-    /// (`Builtin`), so a hand-edited config can't wedge startup.
+    /// Decode [`Self::ext`]; anything unrecognized falls back to the default BMP.
     #[must_use]
     pub fn from_key(v: &str) -> Self {
         match v {
-            "sgb-coprocessor" => AudioBackend::SgbCoprocessor,
-            _ => AudioBackend::Builtin,
+            "png" => ScreenshotFormat::Png,
+            _ => ScreenshotFormat::Bmp,
         }
     }
 }
@@ -283,14 +264,42 @@ pub struct Settings {
     pub model: ModelChoice,
     /// Graphics → stretch the LCD to fill (fullscreen stretched).
     pub stretch: bool,
+    /// Graphics → "disable SGB colors": render an SGB game in the plain DMG
+    /// palette instead of the SGB per-cell colors (a no-op off SGB).
+    pub disable_sgb_colors: bool,
+    /// Graphics → "frame blend": present each frame averaged with the previous
+    /// one (a one-frame motion trail, softening flicker). Frontend-only.
+    pub frame_blend: bool,
+    /// Graphics → "doubler": scale2x the frame to 2× before the blit (an
+    /// edge-preserving pixel doubler). Frontend-only.
+    pub doubler: bool,
+    /// GB Colors → "DMG on GBC LCD colors": tint the DMG output through the GBC
+    /// LCD colour-correction curve (the washed-out panel look). Frontend-only.
+    pub dmg_gbc_lcd: bool,
+    /// GB Colors → contrast wheel, 0.0..=1.0 (0.5 = neutral / no change).
+    pub contrast: f32,
+    /// Graphics → "SGB border in screenshot": when an SGB border is loaded, the
+    /// saved screenshot is the 256×224 composite instead of the bare 160×144 LCD.
+    pub sgb_border_screenshot: bool,
+    /// Joypad → "Screenshots" image format (BMP or PNG).
+    pub screenshot_format: ScreenshotFormat,
+    /// Joypad → "Screenshot button": `false` saves to a file (default), `true`
+    /// copies the frame to the clipboard as a PNG image.
+    pub screenshot_copies: bool,
     /// Sound → master volume, 0.0..=1.0.
     pub volume: f32,
     /// Sound → mono output (downmix L/R).
     pub mono: bool,
-    /// Sound → SGB audio backend (Built-in HLE APU vs the combined coprocessor).
-    /// Drives the same seam as `--sgb-coprocessor`; the CLI flag wins the launch.
-    /// Default `Builtin` → byte-identical golden path. A no-op off SGB.
-    pub audio_backend: AudioBackend,
+    /// Sound → output device name (empty = the host default).
+    pub audio_device: String,
+    /// Sound → requested output sample rate (0 = the device default / "Auto").
+    pub audio_sample_rate: u32,
+    /// Sound → latency slider, 0.0..=1.0 (mapped to a device buffer size).
+    pub audio_latency: f32,
+    /// Sound → "8 bits output": prefer an 8-bit (`U8`) device format.
+    pub audio_8bit: bool,
+    /// Sound → "High quality sound rendering": use the higher-quality resampler.
+    pub audio_hq: bool,
     /// Debug → lowercase disassembler mnemonics.
     pub lowercase_disasm: bool,
     /// Debug → lowercase hex digits in the disasm/memory panes.
@@ -307,6 +316,18 @@ pub struct Settings {
     /// Debug → "pressing Esc shows debugger": Esc opens the debugger (bgb's
     /// behaviour) instead of quitting. Default on. See BUG-1.
     pub esc_shows_debugger: bool,
+    /// Debug → "Registers can be edited": allow the debugger's register-edit
+    /// context menu. Default on (bgb ships it checked); off greys the item.
+    pub registers_editable: bool,
+    /// Debug → "Start in debugger": open the debugger window at launch.
+    pub start_in_debugger: bool,
+    /// Debug → "Live update memory viewer": auto-refresh the standalone memory
+    /// window every frame. Default on; off means it only repaints on interaction
+    /// (scroll / Go-to), matching bgb's non-continuous refresh.
+    pub mem_live_update: bool,
+    /// Debug → "GB CPU usage meter": show the emulated CPU's non-halted duty %
+    /// (from `GameBoy::halt_cycles`) in the window title. Default off.
+    pub cpu_usage_meter: bool,
     /// Misc → fast-forward speed multiplier (turbo), 1..=20.
     pub ff_speed: u32,
     /// Misc → framerate limit (0 = real speed / 60 fps).
@@ -317,13 +338,62 @@ pub struct Settings {
     pub freeze_recent: bool,
     /// Misc → pause emulation when the window loses focus.
     pub pause_on_focus_loss: bool,
+    /// Misc → "Show errors on ROM load": pop an info box when a ROM fails to
+    /// load (bgb ships this checked). When off, a failed load is silent.
+    pub show_errors_on_rom_load: bool,
+    /// Misc → "Load ROM dialog on startup": open the file picker at launch when
+    /// no ROM was given on the command line.
+    pub load_rom_dialog_on_startup: bool,
+    /// Misc → "reduce CPU usage": between frames the event loop parks
+    /// (`WaitUntil`) instead of busy-polling. Default on; off spins for lowest
+    /// input latency at the cost of a pinned core.
+    pub reduce_cpu: bool,
+    /// Misc → "Recovery save state": periodically write `<rom>.recovery` and
+    /// restore it on the next load of that ROM (crash recovery — deleted on a
+    /// clean quit). Default on (bgb ships it checked).
+    pub recovery_save_state: bool,
     /// GB Colors → selected scheme index into [`SCHEMES`].
     pub scheme: usize,
     /// GB Colors → the live DMG palette (lightest→darkest).
     pub dmg_palette: [u32; 4],
+    /// GB Colors → which shade (0=lightest..3=darkest) the RGB sliders edit.
+    pub palette_edit_shade: usize,
+    /// GB Colors → "0-31 numbers": show/edit the RGB sliders in native 5-bit
+    /// (0-31, bgb's `v8>>3` readout) instead of 8-bit (0-255). Captured from
+    /// real bgb (`docs/bgb-reference/options/options-gbcolors-031.png`:
+    /// 232/252/204 → 29/31/25).
+    pub palette_0_31: bool,
     /// Joypad → "allow pressing L+R or U+D". `false` (bgb default) filters
     /// opposing directions so the joypad never reports both at once.
     pub allow_opposing: bool,
+    /// Joypad → game controller: the controller→Game-Boy button map, persisted
+    /// as `crate::gamepad::GamepadBindings::to_config` (8 comma-separated
+    /// controller-button names in Right,Left,Up,Down,A,B,Select,Start order).
+    pub gamepad_map: String,
+    /// Joypad → "Game controller works only if app has focus". `true` (bgb
+    /// default) gates controller input on window focus; `false` accepts it in
+    /// the background (gilrs reads the device directly, unlike the keyboard).
+    pub gamepad_needs_focus: bool,
+    /// Joypad → "Rapid speed": the auto-fire toggle period in frames for the
+    /// rapid-fire keys (`[` = rapid A, `]` = rapid B). 1..=4; bgb's "2 2".
+    pub rapid_speed: u32,
+    /// Joypad → "Audio" (Mappable button records): record the game audio to a
+    /// WAV while set. Toggling it off on Apply finalises the file.
+    pub record_audio: bool,
+    /// Joypad → "Video" (Mappable button records): record the 160×144 LCD to an
+    /// uncompressed AVI while set. Toggling it off on Apply finalises the file.
+    pub record_video: bool,
+    /// Joypad → "Audio channels" (Mappable button records): record the 4 GB
+    /// sound channels to separate WAVs while set. Off on Apply finalises them.
+    pub record_audio_channels: bool,
+    /// System → "Save RTC in SAV file (VBA compatible)": write an MBC3 cart's
+    /// RTC as VBA's `.sav` footer (portable to VBA/mGBA/SameBoy) instead of
+    /// slopgb's own block. Off = slopgb's block (still self-round-tripping).
+    pub rtc_vba_sav: bool,
+    /// System → "Save BGB legacy RTC files": also write the RTC to a separate
+    /// `<rom>.rtc` sidecar (the de-facto shared 48-byte footer) for old
+    /// emulators that read a standalone RTC file. Write-only interop.
+    pub rtc_bgb_legacy: bool,
     /// bgb's `UninitedWRAM` (ini-only, no dialog control in bgb 1.6.4): power on
     /// with uninitialised (seeded-random) RAM instead of the deterministic
     /// default. `false` (bgb default) = the stable 0xFF cart SRAM / zeroed
@@ -337,6 +407,22 @@ pub struct Settings {
     pub break_echo_ram: bool,
     /// Exceptions → "break on disabling LCD outside vblank".
     pub break_lcd_off_vblank: bool,
+    /// Exceptions → "break on OAM DMA bad accesses" (a CPU access outside HRAM
+    /// while an OAM DMA transfers).
+    pub break_oam_dma_bad: bool,
+    /// Exceptions → "break on 16 bits inc/dec FE00-FEFF" (the OAM-corruption
+    /// trigger: a 16-bit INC/DEC rr whose value is in that range).
+    pub break_incdec_fexx: bool,
+    /// Exceptions → "break on SGB transfer start" (a command packet's first P1
+    /// reset pulse; a no-op off SGB models).
+    pub break_sgb_transfer: bool,
+    /// System → "automatic reset on system change": when on (default) picking a
+    /// new Emulated-system radio rebuilds the machine immediately; when off the
+    /// choice is deferred and applied on the next Reset.
+    pub auto_reset_on_system_change: bool,
+    /// System → "Rewind enabled": keep a ring of recent save states so Backspace
+    /// rewinds emulation. Default off (it costs memory + a per-interval snapshot).
+    pub rewind_enabled: bool,
     /// System → "bootroms enabled": execute the configured boot ROM on ROM load
     /// (bgb's checkbox). Off by default — slopgb then boots post-boot.
     pub bootroms_enabled: bool,
@@ -366,9 +452,21 @@ impl Default for Settings {
         Self {
             model: ModelChoice::Auto,
             stretch: false,
+            disable_sgb_colors: false,
+            frame_blend: false,
+            doubler: false,
+            dmg_gbc_lcd: false,
+            contrast: 0.5,
+            sgb_border_screenshot: false,
+            screenshot_format: ScreenshotFormat::Bmp,
+            screenshot_copies: false,
             volume: 1.0,
             mono: false,
-            audio_backend: AudioBackend::Builtin,
+            audio_device: String::new(),
+            audio_sample_rate: 0,
+            audio_latency: 0.5,
+            audio_8bit: false,
+            audio_hq: true,
             lowercase_disasm: true,
             lowercase_hex: false,
             show_clocks: true,
@@ -376,20 +474,44 @@ impl Default for Settings {
             tile_hex_8bit: false,
             memory_window: false,
             esc_shows_debugger: true,
+            registers_editable: true,
+            start_in_debugger: false,
+            mem_live_update: true,
+            cpu_usage_meter: false,
             ff_speed: 10,
             framerate_limit: 0,
             show_framerate: false,
             freeze_recent: false,
             pause_on_focus_loss: false,
+            // bgb ships "Show errors on ROM load" checked.
+            show_errors_on_rom_load: true,
+            load_rom_dialog_on_startup: false,
+            reduce_cpu: true,
+            recovery_save_state: true,
             scheme: 0,
             dmg_palette: SCHEMES[0].colors,
+            palette_edit_shade: 0,
+            palette_0_31: false,
             allow_opposing: false,
+            gamepad_map: crate::gamepad::default_map_config(),
+            gamepad_needs_focus: true,
+            rapid_speed: 2,
+            record_audio: false,
+            record_video: false,
+            record_audio_channels: false,
+            rtc_vba_sav: false,
+            rtc_bgb_legacy: false,
             uninited_wram: false,
             break_ld_b_b: false,
             // bgb ships with "break on invalid opcode" checked.
             break_invalid_op: true,
             break_echo_ram: false,
             break_lcd_off_vblank: false,
+            break_oam_dma_bad: false,
+            break_incdec_fexx: false,
+            break_sgb_transfer: false,
+            auto_reset_on_system_change: true,
+            rewind_enabled: false,
             bootroms_enabled: false,
             bootrom_dmg: String::new(),
             bootrom_gbc: String::new(),
@@ -409,11 +531,45 @@ impl Settings {
         }
     }
 
+    /// The displayed value of channel `ch` (0=R,1=G,2=B) of the selected shade:
+    /// 8-bit (0-255) or, with "0-31 numbers" on, 5-bit (`v8>>3`, 0-31) — bgb's
+    /// readout law (232→29, 252→31, 204→25, captured from real bgb).
+    #[must_use]
+    pub fn palette_channel_display(&self, ch: usize) -> u32 {
+        let v8 = (self.dmg_palette[self.palette_edit_shade.min(3)] >> (16 - ch as u32 * 8)) & 0xFF;
+        if self.palette_0_31 { v8 >> 3 } else { v8 }
+    }
+
+    /// The slider fraction (0..1) for channel `ch` of the selected shade.
+    #[must_use]
+    pub fn palette_channel_frac(&self, ch: usize) -> f32 {
+        let v8 = (self.dmg_palette[self.palette_edit_shade.min(3)] >> (16 - ch as u32 * 8)) & 0xFF;
+        v8 as f32 / 255.0
+    }
+
+    /// Set channel `ch` (0=R,1=G,2=B) of the selected shade from a slider
+    /// fraction. With "0-31 numbers" on the value snaps to `v5<<3` (32 levels,
+    /// the natural inverse of bgb's `v8>>3` readout); otherwise full 8-bit.
+    pub fn set_palette_channel(&mut self, ch: usize, frac: f32) {
+        let v8 = if self.palette_0_31 {
+            ((frac * 31.0).round() as u32) << 3
+        } else {
+            (frac * 255.0).round() as u32
+        }
+        .min(255);
+        let shift = 16 - ch as u32 * 8;
+        let shade = self.palette_edit_shade.min(3);
+        self.dmg_palette[shade] = (self.dmg_palette[shade] & !(0xFFu32 << shift)) | (v8 << shift);
+    }
+
     /// The core exception-break mask (`EXC_*` bits) for the armed conditions —
     /// pushed to the machine by `App::apply_exceptions`.
     #[must_use]
     pub fn exception_mask(&self) -> u16 {
-        use slopgb_core::{EXC_ECHO_RAM, EXC_INVALID_OPCODE, EXC_LCD_OFF_VBLANK, EXC_LD_B_B};
+        use slopgb_core::{
+            EXC_ECHO_RAM, EXC_INCDEC_FEXX, EXC_INVALID_OPCODE, EXC_LCD_OFF_VBLANK, EXC_LD_B_B,
+            EXC_OAM_DMA_BAD, EXC_SGB_TRANSFER,
+        };
         let mut m = 0;
         if self.break_ld_b_b {
             m |= EXC_LD_B_B;
@@ -426,6 +582,15 @@ impl Settings {
         }
         if self.break_lcd_off_vblank {
             m |= EXC_LCD_OFF_VBLANK;
+        }
+        if self.break_oam_dma_bad {
+            m |= EXC_OAM_DMA_BAD;
+        }
+        if self.break_incdec_fexx {
+            m |= EXC_INCDEC_FEXX;
+        }
+        if self.break_sgb_transfer {
+            m |= EXC_SGB_TRANSFER;
         }
         m
     }
@@ -555,9 +720,21 @@ pub enum OptionsOutcome {
     /// Joypad → "configure keyboard": open the key-rebind wizard. Neither
     /// applies nor closes the dialog (the wizard floats above it).
     ConfigureKeyboard,
+    /// Joypad → "configure game controller": open the controller-rebind wizard.
+    /// Floats above the dialog like the keyboard wizard.
+    ConfigureGamepad,
+    /// Joypad → "clear game controller": unbind every controller button. Applied
+    /// immediately (persisted), dialog stays open.
+    ClearGamepad,
     /// System → a `...` bootrom-path button: open the shared path modal over the
     /// dialog to edit that slot's path. Neither applies nor closes.
     PickBootrom(BootromSlot),
+    /// Plugins → the `...` button: open the path modal to edit the plugins
+    /// directory. Neither applies nor closes (rescan happens on OK/Apply).
+    PickPluginsDir,
+    /// Sound → "soundcard": advance `working.audio_device` to the next enumerated
+    /// output device (the live device list lives outside the dialog). Stays open.
+    CycleSoundcard,
 }
 
 /// Which bootrom-path field (bgb's System tab: DMG / GBC / SGB bootrom). The
@@ -735,14 +912,14 @@ impl OptionsState {
 pub fn render(c: &mut Canvas, st: &OptionsState, theme: &Theme) {
     let dialog = OptionsState::dialog_rect(c.bounds());
     c.fill_rect(dialog, theme.bg);
-    c.outline_rect(dialog, theme.border);
+    theme.frame(c, dialog, theme.border);
     // Tab strip (two rows; active tab outlined, others just labelled).
     for (t, r) in st.tab_hitboxes(dialog) {
         if t == st.active {
             c.fill_rect(r, theme.bg);
-            c.outline_rect(r, theme.text);
+            theme.frame(c, r, theme.text);
         } else {
-            c.outline_rect(r, theme.border);
+            theme.frame(c, r, theme.border);
         }
         draw_text(c, r.x + TAB_PAD, r.y + 3, t.label(), theme.text);
     }
@@ -754,7 +931,7 @@ pub fn render(c: &mut Canvas, st: &OptionsState, theme: &Theme) {
     // Button row.
     for (b, r) in OptionsState::button_rects(dialog) {
         c.fill_rect(r, theme.button_face);
-        c.outline_rect(r, theme.text);
+        theme.frame(c, r, theme.text);
         let tx = r.x + (r.w - measure(b.label())) / 2;
         draw_text(
             c,
@@ -831,7 +1008,7 @@ pub(crate) fn dropdown(
     let color = fg(enabled, theme);
     let h = line_height() + 2;
     let r = Rect::new(x, y, w, h);
-    c.outline_rect(r, color);
+    theme.frame(c, r, color);
     draw_text(c, x + 3, y + 1, value, color);
     // arrow box on the right
     c.vline(r.right() - h, y, h, color);

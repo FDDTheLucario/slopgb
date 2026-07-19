@@ -2,6 +2,194 @@
 
 use super::*;
 
+/// A stub coprocessor that records every raw packet its `poll` drains.
+#[derive(Clone)]
+struct TeeCop(std::rc::Rc<std::cell::RefCell<Vec<[u8; 16]>>>);
+
+impl sgb::AudioCoprocessor for TeeCop {
+    fn clock(&mut self, _gb_cycles: u64) {}
+    fn poll(&mut self, cmds: &mut dyn sgb::SgbCommandSource) {
+        while let Some(p) = cmds.take_packet() {
+            self.0.borrow_mut().push(p);
+        }
+    }
+    fn mix_into(&mut self, _out: &mut [(f32, f32)]) {}
+    fn set_output_rate(&mut self, _hz: u32) {}
+    fn load_bios(&mut self, _bios: &[u8]) {}
+    fn write_state(&self, _w: &mut crate::state::Writer) {}
+    fn read_state(&mut self, _r: &mut crate::state::Reader<'_>) -> Result<(), StateError> {
+        Ok(())
+    }
+    fn clone_box(&self) -> Box<dyn sgb::AudioCoprocessor> {
+        Box::new(self.clone())
+    }
+}
+
+/// A stub coprocessor recording what the GB→SNES input push delivers.
+#[derive(Clone)]
+struct InputCop(std::rc::Rc<std::cell::RefCell<Vec<(u8, u8)>>>);
+
+impl sgb::AudioCoprocessor for InputCop {
+    fn clock(&mut self, _gb_cycles: u64) {}
+    fn poll(&mut self, _cmds: &mut dyn sgb::SgbCommandSource) {}
+    fn set_input(&mut self, dpad: u8, buttons: u8) {
+        self.0.borrow_mut().push((dpad, buttons));
+    }
+    fn mix_into(&mut self, _out: &mut [(f32, f32)]) {}
+    fn set_output_rate(&mut self, _hz: u32) {}
+    fn load_bios(&mut self, _bios: &[u8]) {}
+    fn write_state(&self, _w: &mut crate::state::Writer) {}
+    fn read_state(&mut self, _r: &mut crate::state::Reader<'_>) -> Result<(), StateError> {
+        Ok(())
+    }
+    fn clone_box(&self) -> Box<dyn sgb::AudioCoprocessor> {
+        Box::new(self.clone())
+    }
+}
+
+/// The GB→SNES input path: every step pushes the local (physical) active-low
+/// matrix nibbles into the coprocessor — the raw frontend state, not the
+/// SGB-feed-overridden view — so its joypad autopoll can serve them back.
+#[test]
+fn sgb_local_matrix_is_pushed_to_the_coprocessor() {
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x146] = 0x03;
+    rom[0x14B] = 0x33;
+    let mut gb = GameBoy::new(Model::Sgb, rom).unwrap();
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    gb.set_audio_coprocessor(Box::new(InputCop(seen.clone())));
+
+    gb.step();
+    assert_eq!(
+        seen.borrow().last(),
+        Some(&(0x0F, 0x0F)),
+        "idle matrix pushed"
+    );
+
+    gb.bus.joypad_mut().press(Button::A);
+    gb.bus.joypad_mut().press(Button::Right);
+    gb.step();
+    assert_eq!(
+        seen.borrow().last(),
+        Some(&(0x0E, 0x0E)),
+        "Right + A pressed (active low) pushed"
+    );
+}
+
+/// The SNES-frame fetch seam: a coprocessor serving a frame surfaces it
+/// through `GameBoy::take_snes_frame`; the default (and the built-in HLE)
+/// serves none.
+#[test]
+fn sgb_take_snes_frame_seam() {
+    #[derive(Clone)]
+    struct FrameCop(Option<Vec<u16>>);
+    impl sgb::AudioCoprocessor for FrameCop {
+        fn clock(&mut self, _gb_cycles: u64) {}
+        fn poll(&mut self, _cmds: &mut dyn sgb::SgbCommandSource) {}
+        fn take_frame(&mut self) -> Option<Vec<u16>> {
+            self.0.take()
+        }
+        fn mix_into(&mut self, _out: &mut [(f32, f32)]) {}
+        fn set_output_rate(&mut self, _hz: u32) {}
+        fn load_bios(&mut self, _bios: &[u8]) {}
+        fn write_state(&self, _w: &mut crate::state::Writer) {}
+        fn read_state(&mut self, _r: &mut crate::state::Reader<'_>) -> Result<(), StateError> {
+            Ok(())
+        }
+        fn clone_box(&self) -> Box<dyn sgb::AudioCoprocessor> {
+            Box::new(self.clone())
+        }
+    }
+
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x146] = 0x03;
+    rom[0x14B] = 0x33;
+    let mut gb = GameBoy::new(Model::Sgb, rom).unwrap();
+    assert!(gb.take_snes_frame().is_none(), "built-in HLE: no frames");
+    gb.set_audio_coprocessor(Box::new(FrameCop(Some(vec![0x2A55; 4]))));
+    assert_eq!(gb.take_snes_frame(), Some(vec![0x2A55; 4]));
+    assert!(gb.take_snes_frame().is_none(), "consumed");
+}
+
+/// A stub coprocessor that feeds fixed ICD2 pad bytes (the SNES→GB return
+/// path). `joypad_feed` returning `Some` engages the override on `step`.
+struct FeedCop([u8; 4]);
+
+impl sgb::AudioCoprocessor for FeedCop {
+    fn clock(&mut self, _gb_cycles: u64) {}
+    fn poll(&mut self, _cmds: &mut dyn sgb::SgbCommandSource) {}
+    fn joypad_feed(&mut self) -> Option<[u8; 4]> {
+        Some(self.0)
+    }
+    fn mix_into(&mut self, _out: &mut [(f32, f32)]) {}
+    fn set_output_rate(&mut self, _hz: u32) {}
+    fn load_bios(&mut self, _bios: &[u8]) {}
+    fn write_state(&self, _w: &mut crate::state::Writer) {}
+    fn read_state(&mut self, _r: &mut crate::state::Reader<'_>) -> Result<(), StateError> {
+        Ok(())
+    }
+    fn clone_box(&self) -> Box<dyn sgb::AudioCoprocessor> {
+        Box::new(FeedCop(self.0))
+    }
+}
+
+/// The SNES→GB return path end to end: a coprocessor feeding ICD2 pad bytes
+/// overrides what the game reads at P1 — and without a feeding coprocessor
+/// the read is byte-identical to the plain matrix (default-inert seam).
+#[test]
+fn sgb_joypad_feed_overrides_p1_reads_and_defaults_inert() {
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x146] = 0x03;
+    rom[0x14B] = 0x33;
+
+    // Default machine (built-in HLE SgbApu): feed seam inert.
+    let mut gb = GameBoy::new(Model::Sgb, rom.clone()).unwrap();
+    gb.debug_write(0xFF00, 0x10); // select the button column
+    gb.step();
+    assert_eq!(
+        gb.debug_read(0xFF00),
+        0xDF,
+        "no coprocessor: plain idle matrix"
+    );
+
+    // A feeding coprocessor: the fed "A pressed" replaces the matrix.
+    let mut gb = GameBoy::new(Model::Sgb, rom).unwrap();
+    gb.set_audio_coprocessor(Box::new(FeedCop([0xEF, 0xFF, 0xFF, 0xFF])));
+    gb.debug_write(0xFF00, 0x10);
+    gb.step();
+    assert_eq!(gb.debug_read(0xFF00), 0xDE, "fed A visible at P1");
+}
+
+/// The raw-packet tee end to end: a packet pulsed through P1 reaches an
+/// installed coprocessor via `SgbCommandSource::take_packet` on the next
+/// step, while the HLE presentation still consumes the same command (a tee,
+/// not a takeover).
+#[test]
+fn sgb_packet_tee_reaches_coprocessor_while_hle_still_applies() {
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x146] = 0x03;
+    rom[0x14B] = 0x33;
+    let mut gb = GameBoy::new(Model::Sgb, rom).unwrap();
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    gb.set_audio_coprocessor(Box::new(TeeCop(seen.clone())));
+
+    let mut packet = [0u8; 16];
+    packet[0] = 0x01; // PAL01, one packet
+    packet[1] = 0x1F; // shared background color 0 = red
+    send_sgb_packet(&mut gb, &packet);
+    gb.debug_write(0xFF47, 0xE4);
+    gb.debug_write(0xFF40, 0x91);
+    for _ in 0..3 {
+        gb.run_frame();
+    }
+    assert_eq!(
+        seen.borrow().as_slice(),
+        &[packet],
+        "coprocessor got the raw packet"
+    );
+    assert_eq!(gb.frame()[0], 0xFF_0000, "HLE colorization still applied");
+}
+
 /// End-to-end SGB wiring: a PAL01 packet driven through the real `Joypad`
 /// reaches the PPU and recolors the rendered DMG output — proving the
 /// joypad → interconnect → ppu → render path (Pan Docs "SGB Command $00").
@@ -30,6 +218,38 @@ fn sgb_pal01_colorizes_rendered_frame() {
         0xFF_0000,
         "top-left pixel takes the SGB-provided background color"
     );
+}
+
+/// Graphics → "disable SGB colors": with `set_sgb_mono`, the SGB per-cell
+/// colors are dropped and the game screen renders through the plain DMG palette
+/// (default off, so the colorized path stays byte-identical).
+#[test]
+fn disable_sgb_colors_renders_through_the_dmg_palette() {
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x146] = 0x03;
+    rom[0x14B] = 0x33;
+    let mut gb = GameBoy::new(Model::Sgb, rom).unwrap();
+    let mut packet = [0u8; 16];
+    packet[0] = 0x01; // PAL01
+    packet[1] = 0x1F; // shared background color 0 = red
+    send_sgb_packet(&mut gb, &packet);
+    gb.debug_write(0xFF47, 0xE4); // BGP
+    gb.debug_write(0xFF40, 0x91); // LCD on, BG on
+    gb.set_sgb_mono(true);
+    for _ in 0..3 {
+        gb.run_frame();
+    }
+    assert_eq!(
+        gb.frame()[0],
+        0xFF_FFFF,
+        "the SGB red is gone: shade 0 uses the default DMG palette"
+    );
+    // Re-enabling colors restores the SGB-provided red.
+    gb.set_sgb_mono(false);
+    for _ in 0..2 {
+        gb.run_frame();
+    }
+    assert_eq!(gb.frame()[0], 0xFF_0000, "SGB color restored");
 }
 
 /// The single BIOS entry point feeds the audio path but, being high-level (no

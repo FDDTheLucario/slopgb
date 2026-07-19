@@ -6,6 +6,13 @@ hosted as a slopgb coprocessor plugin (`Coprocessor`, comm-port bus).
 `forbid(unsafe_code)` while it's a pure core; switches to the plugin-api `deny` +
 `slopgb_coprocessor_plugin!` when wrapped for wasm.
 
+This is one first-class `SUBSYSTEM` plugin type (alongside the SPC700 + MSU-1);
+the plugin host supports **every** valid subsystem via the generic
+`LoadedCoprocessor` ABI — see
+[`../slopgb-plugin-host/CLAUDE.md`](../slopgb-plugin-host/CLAUDE.md). As
+`w65c816.wasm` it auto-loads (with `spc700.wasm`) from the `--plugins` dir on SGB
+models via the SGB-coprocessor seam, not the tier-1 `--plugins` per-frame pump.
+
 ## Clean-room rule (non-negotiable)
 
 **Never read an emulator's source.** Implement from:

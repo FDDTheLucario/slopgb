@@ -208,6 +208,10 @@ impl Bus for Interconnect {
         self.exec_exception(pc, opcode);
     }
 
+    fn check_incdec16(&mut self, addr: u16) {
+        self.incdec16_exception(addr);
+    }
+
     fn pending(&self) -> u8 {
         self.intf & self.ie & IF_MASK & !self.if_stat_late
     }

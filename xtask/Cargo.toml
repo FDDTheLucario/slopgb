@@ -1,0 +1,14 @@
+[package]
+name = "xtask"
+description = "Dev-only build tasks (std only, not shipped): build + stage the wasm coprocessor plugins."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+# Intentionally empty — std only. Shells out to `cargo` and copies files.
+
+[lints]
+workspace = true

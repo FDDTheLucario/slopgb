@@ -199,6 +199,20 @@ impl App {
             self.fps = f64::from(self.fps_frames) / elapsed.as_secs_f64();
             self.fps_frames = 0;
             self.fps_since = Instant::now();
+            // GB-CPU-usage meter: the non-halted share of the cycles elapsed
+            // this window (same 1 s cadence as the FPS counter). A reset or a
+            // state-load rewinds the counters (halt_cycles isn't serialized), so
+            // a backward delta just resyncs the baseline and reports 0.
+            let (cyc, halt) = (self.session.gb.cycles(), self.session.gb.halt_cycles());
+            self.cpu_usage = match (
+                cyc.checked_sub(self.cpu_cycles_prev),
+                halt.checked_sub(self.cpu_halt_prev),
+            ) {
+                (Some(dc), Some(dh)) => crate::cpu_usage_pct(dc, dh),
+                _ => 0.0,
+            };
+            self.cpu_cycles_prev = cyc;
+            self.cpu_halt_prev = halt;
             self.update_title();
         }
     }
@@ -329,7 +343,6 @@ mod tests {
             mute: true,
             boot: None,
             sgb_bios: None,
-            sgb_coprocessor: false,
             mcp_port: None,
             plugins_dir: None,
             msu1: None,
@@ -341,7 +354,6 @@ mod tests {
             false,
             None,
             None,
-            false,
         );
         app.session.gb = GameBoy::new(Model::Dmg, rom).expect("valid test ROM");
         app

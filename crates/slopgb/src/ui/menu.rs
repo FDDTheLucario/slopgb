@@ -210,7 +210,7 @@ pub fn render(
 ) {
     let bounds = menu_bounds(origin, items);
     c.fill_rect(bounds, theme.bg);
-    c.outline_rect(bounds, theme.border);
+    theme.frame(c, bounds, theme.border);
     let rects = menu_rects(origin, items);
     for (i, (it, r)) in items.iter().zip(&rects).enumerate() {
         if it.separator {

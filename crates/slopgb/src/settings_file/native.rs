@@ -17,7 +17,7 @@
 //! ```
 
 use crate::ui::{CustomThemes, Theme, ThemeChoice};
-use crate::windows::options::{AudioBackend, ModelChoice, PluginConfig, SCHEMES, Settings};
+use crate::windows::options::{ModelChoice, PluginConfig, SCHEMES, ScreenshotFormat, Settings};
 
 /// The current native-format version (bumped when a migration is needed).
 pub const VERSION: u32 = 1;
@@ -238,14 +238,41 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
             _ => ModelChoice::Auto,
         },
         stretch: b("graphics", "stretch", def.stretch),
+        disable_sgb_colors: b("graphics", "disable_sgb_colors", def.disable_sgb_colors),
+        frame_blend: b("graphics", "frame_blend", def.frame_blend),
+        doubler: b("graphics", "doubler", def.doubler),
+        dmg_gbc_lcd: b("graphics", "dmg_gbc_lcd", def.dmg_gbc_lcd),
+        contrast: d
+            .get("graphics", "contrast")
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(def.contrast),
+        sgb_border_screenshot: b(
+            "graphics",
+            "sgb_border_screenshot",
+            def.sgb_border_screenshot,
+        ),
+        screenshot_format: d
+            .get("misc", "screenshot_format")
+            .map_or(def.screenshot_format, ScreenshotFormat::from_key),
+        screenshot_copies: b("misc", "screenshot_copies", def.screenshot_copies),
         volume: d
             .get("sound", "volume")
             .and_then(|v| v.trim().parse().ok())
             .unwrap_or(def.volume),
         mono: b("sound", "mono", def.mono),
-        audio_backend: d
-            .get("sound", "audio_backend")
-            .map_or(def.audio_backend, AudioBackend::from_key),
+        audio_device: s("sound", "audio_device", &def.audio_device),
+        audio_sample_rate: i(
+            "sound",
+            "audio_sample_rate",
+            i64::from(def.audio_sample_rate),
+        )
+        .max(0) as u32,
+        audio_latency: d
+            .get("sound", "audio_latency")
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(def.audio_latency),
+        audio_8bit: b("sound", "audio_8bit", def.audio_8bit),
+        audio_hq: b("sound", "audio_hq", def.audio_hq),
         lowercase_disasm: b("debug", "lowercase_disasm", def.lowercase_disasm),
         lowercase_hex: b("debug", "lowercase_hex", def.lowercase_hex),
         show_clocks: b("debug", "show_clocks", def.show_clocks),
@@ -253,15 +280,46 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
         tile_hex_8bit: b("debug", "tile_hex_8bit", def.tile_hex_8bit),
         memory_window: b("debug", "memory_window", def.memory_window),
         esc_shows_debugger: b("debug", "esc_shows_debugger", def.esc_shows_debugger),
+        registers_editable: b("debug", "registers_editable", def.registers_editable),
+        start_in_debugger: b("debug", "start_in_debugger", def.start_in_debugger),
+        mem_live_update: b("debug", "mem_live_update", def.mem_live_update),
+        cpu_usage_meter: b("debug", "cpu_usage_meter", def.cpu_usage_meter),
         ff_speed: i("misc", "ff_speed", i64::from(def.ff_speed)).clamp(1, 20) as u32,
         framerate_limit: i("misc", "framerate_limit", i64::from(def.framerate_limit)).max(0) as u32,
         show_framerate: b("misc", "show_framerate", def.show_framerate),
         freeze_recent: b("misc", "freeze_recent", def.freeze_recent),
         pause_on_focus_loss: b("misc", "pause_on_focus_loss", def.pause_on_focus_loss),
+        show_errors_on_rom_load: b(
+            "misc",
+            "show_errors_on_rom_load",
+            def.show_errors_on_rom_load,
+        ),
+        load_rom_dialog_on_startup: b(
+            "misc",
+            "load_rom_dialog_on_startup",
+            def.load_rom_dialog_on_startup,
+        ),
+        reduce_cpu: b("misc", "reduce_cpu", def.reduce_cpu),
+        recovery_save_state: b("misc", "recovery_save_state", def.recovery_save_state),
         scheme,
         dmg_palette,
+        palette_edit_shade: i(
+            "graphics",
+            "palette_edit_shade",
+            def.palette_edit_shade as i64,
+        )
+        .clamp(0, 3) as usize,
+        palette_0_31: b("graphics", "palette_0_31", def.palette_0_31),
         allow_opposing: b("misc", "allow_opposing", def.allow_opposing),
+        gamepad_map: s("misc", "gamepad_map", &def.gamepad_map),
+        gamepad_needs_focus: b("misc", "gamepad_needs_focus", def.gamepad_needs_focus),
+        rapid_speed: i("misc", "rapid_speed", i64::from(def.rapid_speed)).clamp(1, 4) as u32,
+        record_audio: b("misc", "record_audio", def.record_audio),
+        record_video: b("misc", "record_video", def.record_video),
+        record_audio_channels: b("misc", "record_audio_channels", def.record_audio_channels),
         uninited_wram: b("system", "uninited_wram", def.uninited_wram),
+        rtc_vba_sav: b("system", "rtc_vba_sav", def.rtc_vba_sav),
+        rtc_bgb_legacy: b("system", "rtc_bgb_legacy", def.rtc_bgb_legacy),
         break_ld_b_b: b("exceptions", "break_ld_b_b", def.break_ld_b_b),
         break_invalid_op: b("exceptions", "break_invalid_op", def.break_invalid_op),
         break_echo_ram: b("exceptions", "break_echo_ram", def.break_echo_ram),
@@ -270,6 +328,15 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
             "break_lcd_off_vblank",
             def.break_lcd_off_vblank,
         ),
+        break_oam_dma_bad: b("exceptions", "break_oam_dma_bad", def.break_oam_dma_bad),
+        break_incdec_fexx: b("exceptions", "break_incdec_fexx", def.break_incdec_fexx),
+        break_sgb_transfer: b("exceptions", "break_sgb_transfer", def.break_sgb_transfer),
+        auto_reset_on_system_change: b(
+            "system",
+            "auto_reset_on_system_change",
+            def.auto_reset_on_system_change,
+        ),
+        rewind_enabled: b("system", "rewind_enabled", def.rewind_enabled),
         bootroms_enabled: b("system", "bootroms_enabled", def.bootroms_enabled),
         bootrom_dmg: s("system", "bootrom_dmg", &def.bootrom_dmg),
         bootrom_gbc: s("system", "bootrom_gbc", &def.bootrom_gbc),
@@ -299,9 +366,21 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
     let Settings {
         model: _,
         stretch: _,
+        disable_sgb_colors: _,
+        frame_blend: _,
+        doubler: _,
+        dmg_gbc_lcd: _,
+        contrast: _,
+        sgb_border_screenshot: _,
+        screenshot_format: _,
+        screenshot_copies: _,
         volume: _,
         mono: _,
-        audio_backend: _,
+        audio_device: _,
+        audio_sample_rate: _,
+        audio_latency: _,
+        audio_8bit: _,
+        audio_hq: _,
         lowercase_disasm: _,
         lowercase_hex: _,
         show_clocks: _,
@@ -309,19 +388,42 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         tile_hex_8bit: _,
         memory_window: _,
         esc_shows_debugger: _,
+        registers_editable: _,
+        start_in_debugger: _,
+        mem_live_update: _,
+        cpu_usage_meter: _,
         ff_speed: _,
         framerate_limit: _,
         show_framerate: _,
         freeze_recent: _,
         pause_on_focus_loss: _,
+        show_errors_on_rom_load: _,
+        load_rom_dialog_on_startup: _,
+        reduce_cpu: _,
+        recovery_save_state: _,
         scheme: _,
         dmg_palette: _,
+        palette_edit_shade: _,
+        palette_0_31: _,
         allow_opposing: _,
+        gamepad_map: _,
+        gamepad_needs_focus: _,
+        rapid_speed: _,
+        record_audio: _,
+        record_video: _,
+        record_audio_channels: _,
         uninited_wram: _,
+        rtc_vba_sav: _,
+        rtc_bgb_legacy: _,
+        auto_reset_on_system_change: _,
+        rewind_enabled: _,
         break_ld_b_b: _,
         break_invalid_op: _,
         break_echo_ram: _,
         break_lcd_off_vblank: _,
+        break_oam_dma_bad: _,
+        break_incdec_fexx: _,
+        break_sgb_transfer: _,
         bootroms_enabled: _,
         bootrom_dmg: _,
         bootrom_gbc: _,
@@ -351,8 +453,40 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
     d.set("system", "bootrom_sgb", &settings.bootrom_sgb);
     d.set("sound", "volume", &settings.volume.to_string());
     d.set("sound", "mono", fb(settings.mono));
-    d.set("sound", "audio_backend", settings.audio_backend.to_key());
+    d.set("sound", "audio_device", &settings.audio_device);
+    d.set(
+        "sound",
+        "audio_sample_rate",
+        &settings.audio_sample_rate.to_string(),
+    );
+    d.set(
+        "sound",
+        "audio_latency",
+        &settings.audio_latency.to_string(),
+    );
+    d.set("sound", "audio_8bit", fb(settings.audio_8bit));
+    d.set("sound", "audio_hq", fb(settings.audio_hq));
     d.set("graphics", "stretch", fb(settings.stretch));
+    d.set(
+        "graphics",
+        "disable_sgb_colors",
+        fb(settings.disable_sgb_colors),
+    );
+    d.set("graphics", "frame_blend", fb(settings.frame_blend));
+    d.set("graphics", "doubler", fb(settings.doubler));
+    d.set("graphics", "dmg_gbc_lcd", fb(settings.dmg_gbc_lcd));
+    d.set("graphics", "contrast", &settings.contrast.to_string());
+    d.set(
+        "graphics",
+        "sgb_border_screenshot",
+        fb(settings.sgb_border_screenshot),
+    );
+    d.set(
+        "misc",
+        "screenshot_format",
+        settings.screenshot_format.ext(),
+    );
+    d.set("misc", "screenshot_copies", fb(settings.screenshot_copies));
     let palette = settings
         .dmg_palette
         .iter()
@@ -360,6 +494,12 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         .collect::<Vec<_>>()
         .join(", ");
     d.set("graphics", "palette", &palette);
+    d.set(
+        "graphics",
+        "palette_edit_shade",
+        &settings.palette_edit_shade.to_string(),
+    );
+    d.set("graphics", "palette_0_31", fb(settings.palette_0_31));
     d.set("debug", "lowercase_disasm", fb(settings.lowercase_disasm));
     d.set("debug", "lowercase_hex", fb(settings.lowercase_hex));
     d.set("debug", "show_clocks", fb(settings.show_clocks));
@@ -371,6 +511,14 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         "esc_shows_debugger",
         fb(settings.esc_shows_debugger),
     );
+    d.set(
+        "debug",
+        "registers_editable",
+        fb(settings.registers_editable),
+    );
+    d.set("debug", "start_in_debugger", fb(settings.start_in_debugger));
+    d.set("debug", "mem_live_update", fb(settings.mem_live_update));
+    d.set("debug", "cpu_usage_meter", fb(settings.cpu_usage_meter));
     d.set("misc", "ff_speed", &settings.ff_speed.to_string());
     d.set(
         "misc",
@@ -384,8 +532,46 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         "pause_on_focus_loss",
         fb(settings.pause_on_focus_loss),
     );
+    d.set(
+        "misc",
+        "show_errors_on_rom_load",
+        fb(settings.show_errors_on_rom_load),
+    );
+    d.set(
+        "misc",
+        "load_rom_dialog_on_startup",
+        fb(settings.load_rom_dialog_on_startup),
+    );
+    d.set("misc", "reduce_cpu", fb(settings.reduce_cpu));
+    d.set(
+        "misc",
+        "recovery_save_state",
+        fb(settings.recovery_save_state),
+    );
     d.set("misc", "allow_opposing", fb(settings.allow_opposing));
+    d.set("misc", "gamepad_map", &settings.gamepad_map);
+    d.set(
+        "misc",
+        "gamepad_needs_focus",
+        fb(settings.gamepad_needs_focus),
+    );
+    d.set("misc", "rapid_speed", &settings.rapid_speed.to_string());
+    d.set("misc", "record_audio", fb(settings.record_audio));
+    d.set("misc", "record_video", fb(settings.record_video));
+    d.set(
+        "misc",
+        "record_audio_channels",
+        fb(settings.record_audio_channels),
+    );
     d.set("system", "uninited_wram", fb(settings.uninited_wram));
+    d.set("system", "rtc_vba_sav", fb(settings.rtc_vba_sav));
+    d.set("system", "rtc_bgb_legacy", fb(settings.rtc_bgb_legacy));
+    d.set(
+        "system",
+        "auto_reset_on_system_change",
+        fb(settings.auto_reset_on_system_change),
+    );
+    d.set("system", "rewind_enabled", fb(settings.rewind_enabled));
     d.set("exceptions", "break_ld_b_b", fb(settings.break_ld_b_b));
     d.set(
         "exceptions",
@@ -397,6 +583,21 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         "exceptions",
         "break_lcd_off_vblank",
         fb(settings.break_lcd_off_vblank),
+    );
+    d.set(
+        "exceptions",
+        "break_oam_dma_bad",
+        fb(settings.break_oam_dma_bad),
+    );
+    d.set(
+        "exceptions",
+        "break_incdec_fexx",
+        fb(settings.break_incdec_fexx),
+    );
+    d.set(
+        "exceptions",
+        "break_sgb_transfer",
+        fb(settings.break_sgb_transfer),
     );
     d.set("ui", "theme", &settings.theme.to_key());
     d.set("plugins", "dir", &settings.plugins.dir);

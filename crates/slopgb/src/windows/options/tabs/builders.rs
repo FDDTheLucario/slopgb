@@ -51,22 +51,49 @@ pub(super) fn graphics(s: &Settings, content: Rect) -> Vec<Ctrl> {
     let mut l = Lay::new(content);
     let mut v = Vec::new();
     // Left column: inert visual toggles + combos (bgb black).
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
         rc(l.at(), "disable SGB colors"),
-        chk("disable SGB colors", false),
+        chk("disable SGB colors", s.disable_sgb_colors),
+        Field::DisableSgbColors,
     ));
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
         rc(l.row().at(), "SGB border in screenshot"),
-        chk("SGB border in screenshot", false),
+        chk("SGB border in screenshot", s.sgb_border_screenshot),
+        Field::SgbBorderScreenshot,
     ));
     v.push(Ctrl::inert(
         rc(l.row().at(), "MGB auto border/colors"),
         chk("MGB auto border/colors", false),
     ));
     l.row();
+    // "frame blend" is live: a label + a dropdown that cycles off ↔ on.
+    let fb_label = "frame blend:";
+    let (fx, fy) = l.at();
+    v.push(text_label((fx, fy), fb_label.to_owned()));
+    let fb_cx = fx + measure(fb_label) + 6;
+    v.push(Ctrl::live(
+        Rect::new(fb_cx, fy, 70, line_height() + 2),
+        Kind::Dropdown {
+            value: if s.frame_blend { "on" } else { "off" }.to_string(),
+            w: 70,
+        },
+        Field::FrameBlend,
+    ));
+    l.row();
+    // "doubler" is live: a dropdown cycling off ↔ scale2x.
+    let db_label = "doubler:";
+    let (dx, dy) = l.at();
+    v.push(text_label((dx, dy), db_label.to_owned()));
+    v.push(Ctrl::live(
+        Rect::new(dx + measure(db_label) + 6, dy, 70, line_height() + 2),
+        Kind::Dropdown {
+            value: if s.doubler { "scale2x" } else { "off" }.to_string(),
+            w: 70,
+        },
+        Field::Doubler,
+    ));
+    l.row();
     for (label, val) in [
-        ("frame blend:", "off"),
-        ("doubler:", "auto"),
         ("bpp:", "auto"),
         ("output:", "auto"),
         ("vsync:", "auto"),
@@ -135,22 +162,51 @@ pub(super) fn system(s: &Settings, content: Rect) -> Vec<Ctrl> {
         v.push(Ctrl::live(rad((rx, ry), label), kind, Field::Model(choice)));
         ry += step;
     }
-    // Inert system toggles (bgb black) — none wired in slopgb yet — below the box.
+    // System toggles below the box: "automatic reset on system change" is live;
+    // the rest stay inert (bgb black) — no backend in slopgb yet.
     l.x = l.x0;
     l.y = box_bottom + line_height() / 2;
+    let arsc = "automatic reset on system change";
+    v.push(Ctrl::live(
+        rc(l.at(), arsc),
+        chk(arsc, s.auto_reset_on_system_change),
+        Field::AutoResetOnSystemChange,
+    ));
+    l.row();
+    let rw = "Rewind enabled";
+    v.push(Ctrl::live(
+        rc(l.at(), rw),
+        chk(rw, s.rewind_enabled),
+        Field::RewindEnabled,
+    ));
+    l.row();
+    // Inert: no distinct core models to detect into, and a waitloop skip would
+    // perturb emulated timing (golden-safe-forbidden).
     for label in [
-        "automatic reset on system change",
-        "Rewind enabled",
         "detect GB pocket / SGB2",
         "detect GBA",
         "GB Player",
         "Waitloop detection (fast)",
-        "Save BGB legacy RTC files",
-        "Save RTC in SAV file (VBA compatible)",
     ] {
         v.push(Ctrl::inert(rc(l.at(), label), chk(label, false)));
         l.row();
     }
+    // Live: write the MBC3 RTC to a separate `<rom>.rtc` sidecar (legacy bgb).
+    let bgb_rtc = "Save BGB legacy RTC files";
+    v.push(Ctrl::live(
+        rc(l.at(), bgb_rtc),
+        chk(bgb_rtc, s.rtc_bgb_legacy),
+        Field::RtcBgbLegacy,
+    ));
+    l.row();
+    // Live: write the MBC3 RTC as VBA's portable `.sav` footer.
+    let vba = "Save RTC in SAV file (VBA compatible)";
+    v.push(Ctrl::live(
+        rc(l.at(), vba),
+        chk(vba, s.rtc_vba_sav),
+        Field::RtcVbaSav,
+    ));
+    l.row();
     // Live: bgb's `UninitedWRAM` (an ini-only key in bgb; surfaced here as a
     // checkbox). Power on with seeded-random garbage RAM; applied on next reset.
     let uw = "uninitialized RAM at power-on";
@@ -203,11 +259,12 @@ pub(super) fn system(s: &Settings, content: Rect) -> Vec<Ctrl> {
 pub(super) fn debug(s: &Settings, content: Rect) -> Vec<Ctrl> {
     let mut l = Lay::new(content);
     let mut v = Vec::new();
-    // lowercase disassembler: slopgb's disasm is always no$gmb-lowercase, so this
-    // reflects the fixed reality (inert, checked); lowercase-hex + show-clocks are live.
-    v.push(Ctrl::inert(
+    // "lowercase disassembler" toggles mnemonic/register case (hex case is the
+    // separate "lowercase hex" below); both live.
+    v.push(Ctrl::live(
         rc(l.at(), "lowercase disassembler"),
         chk("lowercase disassembler", s.lowercase_disasm),
+        Field::LowercaseDisasm,
     ));
     v.push(Ctrl::live(
         rc(l.row().at(), "lowercase hex"),
@@ -237,27 +294,32 @@ pub(super) fn debug(s: &Settings, content: Rect) -> Vec<Ctrl> {
         Field::PureBgb,
     ));
     l.row();
-    // Inert / always-on debugger settings (bgb black; some checked by default).
-    v.push(Ctrl::inert(
+    // "Registers can be edited" / "Live update memory viewer" / "GB CPU usage
+    // meter" are all live.
+    v.push(Ctrl::live(
         rc(l.at(), "Registers can be edited"),
-        chk("Registers can be edited", true),
+        chk("Registers can be edited", s.registers_editable),
+        Field::RegistersEditable,
     ));
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
         rc(l.row().at(), "Live update memory viewer"),
-        chk("Live update memory viewer", true),
+        chk("Live update memory viewer", s.mem_live_update),
+        Field::MemLiveUpdate,
     ));
     v.push(Ctrl::live(
         rc(l.row().at(), "pressing Esc shows debugger"),
         chk("pressing Esc shows debugger", s.esc_shows_debugger),
         Field::EscShowsDebugger,
     ));
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
         rc(l.row().at(), "GB CPU usage meter"),
-        chk("GB CPU usage meter", true),
+        chk("GB CPU usage meter", s.cpu_usage_meter),
+        Field::CpuUsageMeter,
     ));
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
         rc(l.row().at(), "Start in debugger"),
-        chk("Start in debugger", false),
+        chk("Start in debugger", s.start_in_debugger),
+        Field::StartInDebugger,
     ));
     l.row();
     // The disassembler dialect: a live dropdown (click cycles rgbds ↔ no$gmb).
@@ -285,13 +347,20 @@ pub(super) fn debug(s: &Settings, content: Rect) -> Vec<Ctrl> {
 pub(super) fn exceptions(s: &Settings, content: Rect) -> Vec<Ctrl> {
     let mut l = Lay::new(content);
     let mut v = Vec::new();
-    // Four break conditions are wired to the core exception-break mask (the
-    // free run halts when armed + the debugger is open); the rest stay
-    // faithfully inert (bgb black) — no clean golden-safe detector / no backend.
+    // All seven break conditions are wired to the golden-safe core exception
+    // mask (the free run halts when armed + the debugger is open).
     // Each entry: (label, live field, checked-from-settings).
     let rows: [(&str, Option<Field>, bool); 7] = [
-        ("break on OAM DMA bad accesses", None, false),
-        ("break on 16 bits inc/dec FE00-FEFF", None, false),
+        (
+            "break on OAM DMA bad accesses",
+            Some(Field::BreakOamDmaBad),
+            s.break_oam_dma_bad,
+        ),
+        (
+            "break on 16 bits inc/dec FE00-FEFF",
+            Some(Field::BreakIncDecFexx),
+            s.break_incdec_fexx,
+        ),
         (
             "break on disabling LCD outside vblank",
             Some(Field::BreakLcdOffVblank),
@@ -302,7 +371,11 @@ pub(super) fn exceptions(s: &Settings, content: Rect) -> Vec<Ctrl> {
             Some(Field::BreakEchoRam),
             s.break_echo_ram,
         ),
-        ("break on SGB transfer start", None, false),
+        (
+            "break on SGB transfer start",
+            Some(Field::BreakSgbTransfer),
+            s.break_sgb_transfer,
+        ),
         (
             "break on ld b,b (40h)",
             Some(Field::BreakLdBB),
@@ -338,11 +411,28 @@ pub(super) fn exceptions(s: &Settings, content: Rect) -> Vec<Ctrl> {
 pub(super) fn sound(s: &Settings, content: Rect) -> Vec<Ctrl> {
     let mut l = Lay::new(content);
     let mut v = Vec::new();
-    draw_label_combo(&mut v, &mut l, "soundcard:", "auto");
+    // "soundcard": a live dropdown cycling the output device (empty = default).
+    let sc_label = "soundcard:";
+    let (scx, scy) = l.at();
+    v.push(text_label((scx, scy), sc_label.to_owned()));
+    let sc_val = if s.audio_device.is_empty() {
+        "default".to_owned()
+    } else {
+        s.audio_device.clone()
+    };
+    v.push(Ctrl::live(
+        Rect::new(scx + measure(sc_label) + 6, scy, 130, line_height() + 2),
+        Kind::Dropdown {
+            value: sc_val,
+            w: 130,
+        },
+        Field::SoundCard,
+    ));
     l.row();
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
         rc(l.at(), "8 bits output"),
-        chk("8 bits output", false),
+        chk("8 bits output", s.audio_8bit),
+        Field::EightBit,
     ));
     v.push(Ctrl::live(
         rc(l.col(140).at(), "mono output"),
@@ -350,24 +440,31 @@ pub(super) fn sound(s: &Settings, content: Rect) -> Vec<Ctrl> {
         Field::Mono,
     ));
     l.row();
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
         rc(l.at(), "High quality sound rendering"),
-        chk("High quality sound rendering", true),
+        chk("High quality sound rendering", s.audio_hq),
+        Field::AudioHq,
     ));
     l.row();
     l.row();
-    // Samplerate radios (inert; device-driven in slopgb).
-    let rates = ["Auto", "24000", "48000", "96000"];
+    // Samplerate radios: each sets the requested rate (Auto = 0 = device default).
+    let rates: [(&str, u32); 4] = [
+        ("Auto", 0),
+        ("24000", 24000),
+        ("48000", 48000),
+        ("96000", 96000),
+    ];
     let mut cx = 0;
-    for r in rates {
-        v.push(Ctrl::inert(
-            rad(l.col(cx).at(), r),
+    for (label, hz) in rates {
+        v.push(Ctrl::live(
+            rad(l.col(cx).at(), label),
             Kind::Radio {
-                selected: r == "Auto",
-                label: r,
+                selected: s.audio_sample_rate == hz,
+                label,
             },
+            Field::SampleRate(hz),
         ));
-        cx += measure(r) + 28;
+        cx += measure(label) + 28;
     }
     l.row();
     l.row();
@@ -393,27 +490,13 @@ pub(super) fn sound(s: &Settings, content: Rect) -> Vec<Ctrl> {
             text: "Latency:".into(),
         },
     ));
-    v.push(Ctrl::inert(
-        Rect::new(l.x0 + 60, l.y, 180, line_height()),
-        Kind::Slider { frac: 0.5, w: 180 },
-    ));
-    l.row();
-    l.row();
-    // SGB audio backend (a slopgb extra) — dropdown, cycles Built-in ↔ SGB
-    // coprocessor on click. Drives the same seam as `--sgb-coprocessor`.
-    v.push(Ctrl::inert(
-        rc(l.at(), "SGB audio:"),
-        Kind::Label {
-            text: "SGB audio:".into(),
-        },
-    ));
     v.push(Ctrl::live(
-        Rect::new(l.x0 + 90, l.y, 150, line_height() + 2),
-        Kind::Dropdown {
-            value: s.audio_backend.label().to_string(),
-            w: 150,
+        Rect::new(l.x0 + 60, l.y, 180, line_height()),
+        Kind::Slider {
+            frac: s.audio_latency,
+            w: 180,
         },
-        Field::AudioBackend,
+        Field::Latency,
     ));
     v
 }
@@ -421,7 +504,38 @@ pub(super) fn sound(s: &Settings, content: Rect) -> Vec<Ctrl> {
 pub(super) fn gb_colors(s: &Settings, content: Rect) -> Vec<Ctrl> {
     let mut l = Lay::new(content);
     let mut v = Vec::new();
-    // Four swatches of the live palette (lightest→darkest).
+    // Per-colour RGB editor for the selected shade (bgb's three sliders): a
+    // number readout + a slider each, R/G/B top→bottom. "0-31 numbers" shows
+    // them in native 5-bit (bgb's v8>>3 readout) instead of 8-bit.
+    for (ch, field) in [Field::PaletteR, Field::PaletteG, Field::PaletteB]
+        .into_iter()
+        .enumerate()
+    {
+        v.push(Ctrl::inert(
+            rc(l.at(), "000"),
+            Kind::Label {
+                text: s.palette_channel_display(ch).to_string(),
+            },
+        ));
+        v.push(Ctrl::live(
+            Rect::new(l.x0 + 40, l.y, 160, line_height()),
+            Kind::Slider {
+                frac: s.palette_channel_frac(ch),
+                w: 160,
+            },
+            field,
+        ));
+        l.row();
+    }
+    // "0-31 numbers": toggle the readouts between 8-bit (0-255) and 5-bit (0-31).
+    v.push(Ctrl::live(
+        rc(l.at(), "0-31 numbers"),
+        chk("0-31 numbers", s.palette_0_31),
+        Field::Palette031,
+    ));
+    l.row();
+    // Four swatches of the live palette (lightest→darkest); the "select"
+    // dropdown picks which one the RGB sliders above edit.
     for (i, c) in s.dmg_palette.iter().enumerate() {
         v.push(Ctrl::inert(
             Rect::new(l.x0 + i as i32 * 34, l.y, 30, 22),
@@ -429,6 +543,21 @@ pub(super) fn gb_colors(s: &Settings, content: Rect) -> Vec<Ctrl> {
         ));
     }
     l.y += 30;
+    v.push(Ctrl::inert(
+        rc(l.at(), "select:"),
+        Kind::Label {
+            text: "select:".into(),
+        },
+    ));
+    v.push(Ctrl::live(
+        Rect::new(l.x0 + 55, l.y, 44, line_height() + 2),
+        Kind::Dropdown {
+            value: s.palette_edit_shade.to_string(),
+            w: 44,
+        },
+        Field::PaletteSelectShade,
+    ));
+    l.row();
     // Scheme dropdown — live, cycles through SCHEMES on click.
     v.push(Ctrl::inert(
         rc(l.at(), "Scheme:"),
@@ -445,27 +574,26 @@ pub(super) fn gb_colors(s: &Settings, content: Rect) -> Vec<Ctrl> {
         Field::SchemeCycle,
     ));
     l.row();
-    l.row();
-    v.push(Ctrl::inert(
-        rc(l.at(), "0-31 numbers"),
-        chk("0-31 numbers", false),
-    ));
-    l.row();
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
         rc(l.at(), "DMG on GBC LCD colors"),
-        chk("DMG on GBC LCD colors", false),
+        chk("DMG on GBC LCD colors", s.dmg_gbc_lcd),
+        Field::DmgGbcLcd,
     ));
     l.row();
-    // Contrast wheel (inert).
+    // Contrast wheel — live slider over the present-side contrast filter.
     v.push(Ctrl::inert(
         rc(l.at(), "Contrast wheel:"),
         Kind::Label {
             text: "Contrast wheel:".into(),
         },
     ));
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
         Rect::new(l.x0 + 100, l.y, 140, line_height()),
-        Kind::Slider { frac: 0.5, w: 140 },
+        Kind::Slider {
+            frac: s.contrast,
+            w: 140,
+        },
+        Field::Contrast,
     ));
     v
 }
@@ -498,10 +626,16 @@ pub(super) fn joypad(s: &Settings, content: Rect) -> Vec<Ctrl> {
         Field::ConfigureKeyboard,
     ));
     l.row();
-    for label in ["configure game controller", "clear game controller"] {
-        v.push(Ctrl::inert(
+    // Live game-controller config (gilrs): configure opens the rebind wizard,
+    // clear unbinds every button.
+    for (label, field) in [
+        ("configure game controller", Field::ConfigureGamepad),
+        ("clear game controller", Field::ClearGamepad),
+    ] {
+        v.push(Ctrl::live(
             Rect::new(l.x, l.y, 180, line_height() + 4),
             btn(label, 180),
+            field,
         ));
         l.row();
     }
@@ -512,11 +646,51 @@ pub(super) fn joypad(s: &Settings, content: Rect) -> Vec<Ctrl> {
     l.row();
 
     // The inert recording/screenshot/rapid-speed combos, each on its own row.
-    draw_label_combo(&mut v, &mut l, "Screenshot button:", "saves");
+    // "Screenshot button" is live: a dropdown cycling save-to-file ↔ clipboard.
+    let sb_label = "Screenshot button:";
+    let (bx, by) = l.at();
+    v.push(text_label((bx, by), sb_label.to_owned()));
+    let sb_cx = bx + measure(sb_label) + 6;
+    v.push(Ctrl::live(
+        Rect::new(sb_cx, by, 70, line_height() + 2),
+        Kind::Dropdown {
+            value: if s.screenshot_copies {
+                "copies"
+            } else {
+                "saves"
+            }
+            .to_string(),
+            w: 70,
+        },
+        Field::ScreenshotButtonMode,
+    ));
     l.row();
-    draw_label_combo(&mut v, &mut l, "Screenshots:", "bmp");
+    // "Screenshots" is live: a dropdown cycling the saved-image format (bmp/png).
+    let ss_label = "Screenshots:";
+    let (sx, sy) = l.at();
+    v.push(text_label((sx, sy), ss_label.to_owned()));
+    let ss_cx = sx + measure(ss_label) + 6;
+    v.push(Ctrl::live(
+        Rect::new(ss_cx, sy, 70, line_height() + 2),
+        Kind::Dropdown {
+            value: s.screenshot_format.ext().to_string(),
+            w: 70,
+        },
+        Field::ScreenshotFormat,
+    ));
     l.row();
-    draw_label_combo(&mut v, &mut l, "Rapid speed:", "2 2");
+    // "Rapid speed" is live: a dropdown cycling the auto-fire period ("N N").
+    let rs_label = "Rapid speed:";
+    let (rsx, rsy) = l.at();
+    v.push(text_label((rsx, rsy), rs_label.to_owned()));
+    v.push(Ctrl::live(
+        Rect::new(rsx + measure(rs_label) + 6, rsy, 70, line_height() + 2),
+        Kind::Dropdown {
+            value: format!("{n} {n}", n = s.rapid_speed),
+            w: 70,
+        },
+        Field::RapidSpeed,
+    ));
     l.row();
 
     // Mappable button records groupbox (Audio / Video / Audio channels).
@@ -531,14 +705,20 @@ pub(super) fn joypad(s: &Settings, content: Rect) -> Vec<Ctrl> {
         },
     ));
     let grow = gy + line_height() + 2;
-    v.push(Ctrl::inert(rc((gx + 8, grow), "Audio"), chk("Audio", true)));
-    v.push(Ctrl::inert(
-        rc((gx + 80, grow), "Video"),
-        chk("Video", true),
+    v.push(Ctrl::live(
+        rc((gx + 8, grow), "Audio"),
+        chk("Audio", s.record_audio),
+        Field::RecordAudio,
     ));
-    v.push(Ctrl::inert(
+    v.push(Ctrl::live(
+        rc((gx + 80, grow), "Video"),
+        chk("Video", s.record_video),
+        Field::RecordVideo,
+    ));
+    v.push(Ctrl::live(
         rc((gx + 8, grow + line_height()), "Audio channels"),
-        chk("Audio channels", false),
+        chk("Audio channels", s.record_audio_channels),
+        Field::RecordAudioChannels,
     ));
     l.y += group_h + 2;
 
@@ -561,11 +741,16 @@ pub(super) fn joypad(s: &Settings, content: Rect) -> Vec<Ctrl> {
         Field::AllowOpposing,
     ));
     l.row();
-    // The focus checkboxes (inert — winit only delivers keys to the focused
-    // window, so these are always effectively checked).
-    v.push(Ctrl::inert(
+    // The controller focus check is live: gilrs delivers events regardless of
+    // window focus, so gating on it is meaningful. The keyboard one stays inert —
+    // winit only delivers keys to the focused window, so it is always in effect.
+    v.push(Ctrl::live(
         rc(l.at(), "Game controller works only if app has focus"),
-        chk("Game controller works only if app has focus", true),
+        chk(
+            "Game controller works only if app has focus",
+            s.gamepad_needs_focus,
+        ),
+        Field::GamepadNeedsFocus,
     ));
     l.row();
     v.push(Ctrl::inert(
@@ -578,18 +763,25 @@ pub(super) fn joypad(s: &Settings, content: Rect) -> Vec<Ctrl> {
 pub(super) fn misc(s: &Settings, content: Rect) -> Vec<Ctrl> {
     // Single column: slopgb's font is wide enough that bgb's two-column Misc
     // layout would overlap, so the checkboxes stack vertically (functional 1:1,
-    // not pixel). "Load ROM dialog on startup" is inert — App settings are
-    // in-memory only, so there is no persisted startup to honour.
+    // not pixel). Every row drives a real setting.
     let mut l = Lay::new(content);
     let mut v = Vec::new();
     let rows: [(&str, bool, Option<Field>); 7] = [
-        ("Load ROM dialog on startup", false, None),
+        (
+            "Load ROM dialog on startup",
+            s.load_rom_dialog_on_startup,
+            Some(Field::LoadRomDialogOnStartup),
+        ),
         (
             "freeze recent ROMs menu",
             s.freeze_recent,
             Some(Field::FreezeRecent),
         ),
-        ("Show errors on ROM load", true, None),
+        (
+            "Show errors on ROM load",
+            s.show_errors_on_rom_load,
+            Some(Field::ShowErrorsOnRomLoad),
+        ),
         (
             "Show framerate",
             s.show_framerate,
@@ -600,8 +792,12 @@ pub(super) fn misc(s: &Settings, content: Rect) -> Vec<Ctrl> {
             s.pause_on_focus_loss,
             Some(Field::PauseOnFocusLoss),
         ),
-        ("reduce CPU usage", true, None),
-        ("Recovery save state", true, None),
+        ("reduce CPU usage", s.reduce_cpu, Some(Field::ReduceCpu)),
+        (
+            "Recovery save state",
+            s.recovery_save_state,
+            Some(Field::RecoverySaveState),
+        ),
     ];
     for (i, &(label, checked, field)) in rows.iter().enumerate() {
         if i > 0 {
@@ -686,14 +882,29 @@ pub(super) fn theme_tab(s: &Settings, content: Rect) -> Vec<Ctrl> {
 pub(super) fn plugins(s: &Settings, content: Rect) -> Vec<Ctrl> {
     let mut l = Lay::new(content);
     let mut v = Vec::new();
-    // The scanned plugins directory (read-only; set via --plugins / the config
-    // file — there is no in-dialog browse yet).
+    // The scanned plugins directory + a "..." browse button to change it (the
+    // new dir is rescanned on OK/Apply).
     let dir = if s.plugins.dir.is_empty() {
         "(none)".to_owned()
     } else {
         s.plugins.dir.clone()
     };
-    v.push(text_label(l.at(), format!("Plugins dir: {dir}")));
+    // "Plugins dir:" label, then the "..." browse button, then the (possibly
+    // long) path — the button sits at a fixed offset so a long path just clips
+    // to the right instead of colliding with it.
+    let (dx, dy) = l.at();
+    let caption = "Plugins dir:";
+    v.push(text_label((dx, dy), caption.to_owned()));
+    let bx = dx + measure(caption) + 6;
+    v.push(Ctrl::live(
+        Rect::new(bx, dy, 22, line_height() + 2),
+        Kind::Button {
+            label: "...",
+            w: 22,
+        },
+        Field::PickPluginsDir,
+    ));
+    v.push(text_label((bx + 28, dy), dir));
     l.row();
     // Live: allow mutation-capable plugins (default off, golden-safe).
     v.push(Ctrl::live(
@@ -703,11 +914,13 @@ pub(super) fn plugins(s: &Settings, content: Rect) -> Vec<Ctrl> {
     ));
     l.row();
     l.row();
-    // One live enable checkbox per discovered plugin. The plugin's "name [caps]"
-    // is a dynamic string, so it is drawn as a separate inert label beside a
-    // static-empty checkbox (the shared `Kind::Check` label is `&'static str`);
-    // the checkbox hit-rect still spans the whole row so a click on the name
-    // toggles it. An empty list shows an inert note.
+    // One row per discovered plugin: "name [caps]". A per-frame introspection
+    // plugin gets a live enable checkbox (the pump drives it). A higher-tier
+    // SUBSYSTEM plugin is listed but the checkbox is inert — it loads through its
+    // own seam (`--sgb-coprocessor` / `--msu1`), not this per-frame pump, so an
+    // enable toggle here would do nothing. The dynamic "name [caps]" string is a
+    // separate label beside a static-empty checkbox (`Kind::Check`'s label is
+    // `&'static str`). An empty list shows an inert note.
     if s.plugins.entries.is_empty() {
         v.push(text_label(l.at(), "(no plugins discovered)".to_owned()));
     } else {
@@ -716,14 +929,18 @@ pub(super) fn plugins(s: &Settings, content: Rect) -> Vec<Ctrl> {
             let (x, y) = l.at();
             let label = format!("{} [{}]", e.name, e.capabilities);
             let w = box_sz + 3 + measure(&label);
-            v.push(Ctrl::live(
-                Rect::new(x, y, w, box_sz),
-                Kind::Check {
-                    checked: e.enabled,
-                    label: "",
-                },
-                Field::PluginEnable(i),
-            ));
+            let box_rect = Rect::new(x, y, w, box_sz);
+            let check = Kind::Check {
+                checked: e.enabled,
+                label: "",
+            };
+            // Only per-frame plugins are pump-togglable; subsystem/tool ones are
+            // driven by their own loader, so their row is informational (inert).
+            if e.capabilities.contains("subsystem") {
+                v.push(Ctrl::inert(box_rect, check));
+            } else {
+                v.push(Ctrl::live(box_rect, check, Field::PluginEnable(i)));
+            }
             v.push(text_label((x + box_sz + 3, y), label));
             l.row();
         }

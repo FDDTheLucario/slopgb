@@ -130,6 +130,35 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// Alpha-blend `fg` over the existing pixel at `(x, y)` by `coverage`
+    /// (0 = keep dst, 255 = full fg) — the anti-aliased glyph compositor.
+    /// Per-channel linear lerp; clipped exactly like [`Self::put`].
+    pub fn blend_px(&mut self, x: i32, y: i32, fg: u32, coverage: u8) {
+        if coverage == 0 {
+            return; // fully transparent: nothing to draw (and no recorded rect)
+        }
+        #[cfg(test)]
+        if let Some(rec) = &mut self.record {
+            rec.push(Rect::new(x, y, 1, 1));
+        }
+        if x < 0 || y < 0 || x >= self.w || y >= self.h || !self.clip.contains(x, y) {
+            return;
+        }
+        let idx = (y * self.w + x) as usize;
+        if coverage == 255 {
+            self.buf[idx] = fg;
+            return;
+        }
+        let dst = self.buf[idx];
+        let cov = i32::from(coverage);
+        let lerp = |shift: u32| -> u32 {
+            let d = ((dst >> shift) & 0xFF) as i32;
+            let f = ((fg >> shift) & 0xFF) as i32;
+            (d + (f - d) * cov / 255) as u32 & 0xFF
+        };
+        self.buf[idx] = (lerp(16) << 16) | (lerp(8) << 8) | lerp(0);
+    }
+
     /// Fill a rectangle, clipped.
     pub fn fill_rect(&mut self, r: Rect, color: u32) {
         #[cfg(test)]
@@ -161,6 +190,58 @@ impl<'a> Canvas<'a> {
         self.hline(r.x, r.bottom() - 1, r.w, color); // bottom
         self.vline(r.x, r.y, r.h, color); // left
         self.vline(r.right() - 1, r.y, r.h, color); // right
+    }
+
+    /// Corner radius (in pixels) of the contemporary [`Self::round_outline`]
+    /// frame — a 2px chamfer, matched by the popup's transparent-corner punch.
+    pub const CORNER: i32 = 2;
+
+    /// Rectangle outline with 2px chamfered corners — a visibly "rounded" frame
+    /// for contemporary themes (vs the hard-cornered [`Self::outline_rect`]).
+    /// The four edges inset by [`Self::CORNER`] at each corner, bridged by one
+    /// diagonal pixel. Falls back to a hard outline when too small.
+    pub fn round_outline(&mut self, r: Rect, color: u32) {
+        let c = Self::CORNER;
+        if r.w < 2 * c + 1 || r.h < 2 * c + 1 {
+            self.outline_rect(r, color);
+            return;
+        }
+        self.hline(r.x + c, r.y, r.w - 2 * c, color); // top
+        self.hline(r.x + c, r.bottom() - 1, r.w - 2 * c, color); // bottom
+        self.vline(r.x, r.y + c, r.h - 2 * c, color); // left
+        self.vline(r.right() - 1, r.y + c, r.h - 2 * c, color); // right
+        // One diagonal pixel bridges each 2px chamfer.
+        self.put(r.x + 1, r.y + 1, color); // top-left
+        self.put(r.right() - 2, r.y + 1, color); // top-right
+        self.put(r.x + 1, r.bottom() - 2, color); // bottom-left
+        self.put(r.right() - 2, r.bottom() - 2, color); // bottom-right
+    }
+
+    /// The corner pixels [`Self::round_outline`] chamfers away (the outer
+    /// triangle at each corner) — the popup punches these transparent so the
+    /// desktop shows through a rounded corner. Empty when `r` is too small.
+    #[must_use]
+    pub fn chamfer_cut_pixels(r: Rect) -> Vec<(i32, i32)> {
+        let c = Self::CORNER;
+        if r.w < 2 * c + 1 || r.h < 2 * c + 1 {
+            return Vec::new();
+        }
+        // The 3-pixel outer triangle at each corner (for a 2px chamfer).
+        let (x, y, xr, yb) = (r.x, r.y, r.right() - 1, r.bottom() - 1);
+        vec![
+            (x, y),
+            (x + 1, y),
+            (x, y + 1), // top-left
+            (xr, y),
+            (xr - 1, y),
+            (xr, y + 1), // top-right
+            (x, yb),
+            (x + 1, yb),
+            (x, yb - 1), // bottom-left
+            (xr, yb),
+            (xr - 1, yb),
+            (xr, yb - 1), // bottom-right
+        ]
     }
 
     /// Draw an 8×8 grid of 2-bit palette indices (e.g. from

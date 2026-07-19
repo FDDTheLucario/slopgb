@@ -161,6 +161,13 @@ pub struct Interconnect {
     joypad: Joypad,
     /// Elapsed T-cycles since power-on (normal-speed dots).
     cycles: u64,
+    /// Of [`Self::cycles`], those elapsed while the CPU was HALT-gated — a
+    /// read-only diagnostic for the frontend's GB-CPU-usage meter. Bumped in
+    /// lockstep with `cycles` inside `tick_machine` when `cpu_halted`, so it
+    /// cannot perturb emulation (no emulated value or control flow reads it);
+    /// deliberately NOT serialized, so save-states stay byte-identical and it
+    /// simply restarts from 0 on load.
+    halt_cycles: u64,
     /// CPU-side deferred-commit clock (SameBoy `pending_cycles`,
     /// `sm83_cpu.c`). Every CPU-driven M-cycle (the five [`Bus`] access
     /// methods) parks its 4 T-cycles here, commits the previous M-cycle's debt
@@ -431,6 +438,7 @@ impl Interconnect {
             serial: Serial::new(cgb_mode),
             joypad: Joypad::new(sgb_joypad),
             cycles: 0,
+            halt_cycles: 0,
             clock: CycleClock::new(),
             eager_wr_borrow: false,
             cgb_mode,

@@ -83,6 +83,9 @@ fn end_to_end_synthesis_produces_audio() {
     }
     {
         let mut dsp = apu.dsp.borrow_mut();
+        // Leave the power-on FLG state ($E0: reset + mute + echo-write
+        // disable) like every real driver does before keying a voice.
+        dsp.write(0x6C, 0x00);
         dsp.write(0x5D, 0x02); // DIR
         dsp.write(0x00, 0x7F); // VOLL
         dsp.write(0x01, 0x7F); // VOLR

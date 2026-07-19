@@ -21,6 +21,8 @@ pub(crate) enum PathEntry {
     OpenFile,
     /// Browse to a (possibly new) file to save.
     SaveFile,
+    /// Browse to and select a directory (the file browser in directory mode).
+    Directory,
     /// Type a non-file value (`host:port` / port number) into the text modal.
     Modal,
 }
@@ -29,6 +31,7 @@ pub(crate) enum PathEntry {
 pub(crate) fn path_entry(purpose: PathPurpose) -> PathEntry {
     match purpose {
         PathPurpose::SaveState | PathPurpose::CdlSave => PathEntry::SaveFile,
+        PathPurpose::PluginsDir => PathEntry::Directory,
         PathPurpose::LinkConnect | PathPurpose::McpStart => PathEntry::Modal,
         _ => PathEntry::OpenFile,
     }
@@ -64,7 +67,7 @@ impl App {
     /// file to browse, so it uses the typed modal.
     pub(crate) fn open_path_prompt(&mut self, title: &str, purpose: PathPurpose) {
         match path_entry(purpose) {
-            entry @ (PathEntry::OpenFile | PathEntry::SaveFile) => {
+            entry @ (PathEntry::OpenFile | PathEntry::SaveFile | PathEntry::Directory) => {
                 self.open_file_picker(title, purpose, entry)
             }
             PathEntry::Modal => self.open_path_modal(title, purpose),
@@ -91,20 +94,26 @@ impl App {
     /// directory (falling back to the process cwd, then `/`) — same
     /// raise+focus rationale as [`Self::open_path_modal`].
     fn open_file_picker(&mut self, title: &str, purpose: PathPurpose, entry: PathEntry) {
-        let start_dir = self
-            .recent
-            .first()
-            .and_then(|p| p.parent())
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
+        // The plugins-dir browse starts at the current plugins dir (if set) so the
+        // user edits from there; every other purpose starts at the last ROM's dir.
+        let start_dir = if purpose == PathPurpose::PluginsDir
+            && !self.settings.plugins.dir.is_empty()
+        {
+            PathBuf::from(&self.settings.plugins.dir)
+        } else {
+            self.recent
+                .first()
+                .and_then(|p| p.parent())
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")))
+        };
+        let mode = match entry {
+            PathEntry::SaveFile => slopfp::Mode::Save,
+            PathEntry::Directory => slopfp::Mode::Directory,
+            _ => slopfp::Mode::Open,
+        };
         // ponytail: per-purpose ext filters, add when a purpose needs one.
-        self.file_picker = Some(FilePicker::open(
-            purpose,
-            start_dir,
-            &[],
-            title,
-            entry == PathEntry::SaveFile,
-        ));
+        self.file_picker = Some(FilePicker::open(purpose, start_dir, &[], title, mode));
         // Reset the double-click timer: a stale click from a previous picker
         // session (same screen spot, still inside the double-click window)
         // must never combine with the first click of this new session.
@@ -179,6 +188,7 @@ impl App {
                     // blank state (else `should_idle` keeps emulation gated and
                     // the LCD frozen on `blank_frame`).
                     self.rom_loaded = true;
+                    self.snes_frame = None;
                     self.apply_palette();
                     self.resync_pacing();
                     self.update_title();
@@ -212,6 +222,13 @@ impl App {
                 // scratch; OK/Apply commits it to settings, Cancel reverts.
                 if let Some(o) = &mut self.options {
                     *slot.path_mut(&mut o.working) = path.to_string_lossy().into_owned();
+                }
+            }
+            PathPurpose::PluginsDir => {
+                // Write the plugins dir into the open dialog's working scratch;
+                // OK/Apply rescans the new directory, Cancel reverts.
+                if let Some(o) = &mut self.options {
+                    o.working.plugins.dir = path.to_string_lossy().into_owned();
                 }
             }
             PathPurpose::SymbolFile => self.load_symbols(path),

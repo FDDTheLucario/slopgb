@@ -146,6 +146,22 @@ fn plugins_tab_lists_entries_dir_and_toggle() {
             Kind::Label { text } if text.contains("/opt/plugins"))),
         "missing plugins-dir display"
     );
+    // A "..." browse button changes the plugins dir.
+    assert!(
+        ctrls.iter().any(|c| c.field == Some(Field::PickPluginsDir)),
+        "missing plugins-dir browse button"
+    );
+}
+
+#[test]
+fn plugins_dir_browse_routes_the_outcome_without_mutating() {
+    let mut st = OptionsState::new(settings_with_plugins());
+    st.active = OptionsTab::Plugins;
+    let before = st.working.clone();
+    let r = field_rect(OptionsTab::Plugins, &st.working, Field::PickPluginsDir);
+    let out = st.on_click(r.x + r.w / 2, r.y + r.h / 2, BOUNDS);
+    assert_eq!(out, Some(OptionsOutcome::PickPluginsDir));
+    assert_eq!(st.working, before, "browse doesn't mutate settings");
 }
 
 #[test]
@@ -325,6 +341,32 @@ fn sound_volume_slider_full_range() {
     );
 }
 
+#[test]
+fn sound_tab_device_rate_latency_and_format_controls_are_live() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Sound;
+    // Samplerate radio: 48000 selects that rate.
+    click_field(&mut st, Field::SampleRate(48000));
+    assert_eq!(st.working.audio_sample_rate, 48000);
+    // 8-bit + HQ checkboxes.
+    assert!(!st.working.audio_8bit);
+    click_field(&mut st, Field::EightBit);
+    assert!(st.working.audio_8bit);
+    assert!(st.working.audio_hq, "HQ on by default");
+    click_field(&mut st, Field::AudioHq);
+    assert!(!st.working.audio_hq);
+    // Latency slider tracks the click x.
+    let r = field_rect(OptionsTab::Sound, &st.working, Field::Latency);
+    st.on_click(r.right() - 1, r.y + r.h / 2, BOUNDS);
+    assert!(st.working.audio_latency > 0.9, "latency slider right edge");
+    // Soundcard dropdown routes the cycle outcome without mutating settings here.
+    let before = st.working.clone();
+    let r = field_rect(OptionsTab::Sound, &st.working, Field::SoundCard);
+    let out = st.on_click(r.x + r.w / 2, r.y + r.h / 2, BOUNDS);
+    assert_eq!(out, Some(OptionsOutcome::CycleSoundcard));
+    assert_eq!(st.working, before, "cycle is applied by the App, not here");
+}
+
 // --- JP5: configure-keyboard routes an outcome -------------------------------
 
 #[test]
@@ -462,6 +504,10 @@ fn system_tab_model_radios() {
 fn debug_tab_display_flags_toggle() {
     let mut st = OptionsState::new(Settings::default());
     st.active = OptionsTab::Debug;
+    // "lowercase disassembler" on by default → click flips it (mnemonic case).
+    assert!(st.working.lowercase_disasm);
+    click_field(&mut st, Field::LowercaseDisasm);
+    assert!(!st.working.lowercase_disasm);
     click_field(&mut st, Field::LowercaseHex);
     assert!(st.working.lowercase_hex);
     click_field(&mut st, Field::ShowClocks);
@@ -481,6 +527,22 @@ fn debug_tab_display_flags_toggle() {
     assert!(!st.working.tile_hex_8bit, "8-bit tile hex off by default");
     click_field(&mut st, Field::TileHex8bit);
     assert!(st.working.tile_hex_8bit);
+    // "Registers can be edited" on by default (bgb) → click flips off.
+    assert!(st.working.registers_editable);
+    click_field(&mut st, Field::RegistersEditable);
+    assert!(!st.working.registers_editable);
+    // "Start in debugger" off by default → click turns it on.
+    assert!(!st.working.start_in_debugger);
+    click_field(&mut st, Field::StartInDebugger);
+    assert!(st.working.start_in_debugger);
+    // "Live update memory viewer" on by default → click turns it off.
+    assert!(st.working.mem_live_update);
+    click_field(&mut st, Field::MemLiveUpdate);
+    assert!(!st.working.mem_live_update);
+    // "GB CPU usage meter" off by default → click turns it on.
+    assert!(!st.working.cpu_usage_meter);
+    click_field(&mut st, Field::CpuUsageMeter);
+    assert!(st.working.cpu_usage_meter);
 }
 
 #[test]
@@ -562,8 +624,99 @@ fn graphics_tab_stretch_toggle() {
 }
 
 #[test]
+fn graphics_disable_sgb_colors_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Graphics;
+    assert!(!st.working.disable_sgb_colors);
+    click_field(&mut st, Field::DisableSgbColors);
+    assert!(st.working.disable_sgb_colors);
+}
+
+#[test]
+fn graphics_frame_blend_dropdown_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Graphics;
+    assert!(!st.working.frame_blend);
+    click_field(&mut st, Field::FrameBlend);
+    assert!(st.working.frame_blend, "frame blend on after click");
+    // "doubler" dropdown cycles off ↔ scale2x.
+    assert!(!st.working.doubler);
+    click_field(&mut st, Field::Doubler);
+    assert!(st.working.doubler);
+}
+
+#[test]
+fn screenshot_format_ext_next_and_key_roundtrip() {
+    use crate::windows::options::ScreenshotFormat;
+    assert_eq!(ScreenshotFormat::Bmp.ext(), "bmp");
+    assert_eq!(ScreenshotFormat::Png.ext(), "png");
+    assert_eq!(ScreenshotFormat::Bmp.next(), ScreenshotFormat::Png);
+    assert_eq!(ScreenshotFormat::Png.next(), ScreenshotFormat::Bmp);
+    assert_eq!(ScreenshotFormat::from_key("png"), ScreenshotFormat::Png);
+    assert_eq!(ScreenshotFormat::from_key("garbage"), ScreenshotFormat::Bmp);
+}
+
+#[test]
+fn graphics_sgb_border_screenshot_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Graphics;
+    assert!(!st.working.sgb_border_screenshot);
+    click_field(&mut st, Field::SgbBorderScreenshot);
+    assert!(st.working.sgb_border_screenshot);
+}
+
+#[test]
+fn joypad_screenshot_format_dropdown_cycles() {
+    use crate::windows::options::ScreenshotFormat;
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Joypad;
+    assert_eq!(st.working.screenshot_format, ScreenshotFormat::Bmp);
+    click_field(&mut st, Field::ScreenshotFormat);
+    assert_eq!(st.working.screenshot_format, ScreenshotFormat::Png);
+    click_field(&mut st, Field::ScreenshotFormat);
+    assert_eq!(st.working.screenshot_format, ScreenshotFormat::Bmp);
+}
+
+#[test]
+fn joypad_screenshot_button_mode_dropdown_cycles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Joypad;
+    assert!(!st.working.screenshot_copies, "saves-to-file by default");
+    click_field(&mut st, Field::ScreenshotButtonMode);
+    assert!(
+        st.working.screenshot_copies,
+        "cycles to copies-to-clipboard"
+    );
+    click_field(&mut st, Field::ScreenshotButtonMode);
+    assert!(!st.working.screenshot_copies);
+}
+
+#[test]
+fn gbcolors_dmg_gbc_lcd_checkbox_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::GbColors;
+    assert!(!st.working.dmg_gbc_lcd);
+    click_field(&mut st, Field::DmgGbcLcd);
+    assert!(st.working.dmg_gbc_lcd);
+}
+
+#[test]
+fn gbcolors_contrast_slider_tracks_click_position() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::GbColors;
+    let r = field_rect(OptionsTab::GbColors, &st.working, Field::Contrast);
+    // Click near the right end → a high contrast fraction (default is 0.5).
+    st.on_click(r.x + r.w - 2, r.y + r.h / 2, BOUNDS);
+    assert!(
+        st.working.contrast > 0.9,
+        "contrast slider tracks click x: {}",
+        st.working.contrast
+    );
+}
+
+#[test]
 fn exceptions_tab_break_conditions_are_live() {
-    // Four break conditions are wired to the core exception-break mask; the
+    // These break conditions are wired to the core exception-break mask; the
     // rest of the tab stays faithfully inert (no clean detector / no backend).
     let s = Settings::default();
     let content = OptionsState::content_rect(dialog());
@@ -576,21 +729,17 @@ fn exceptions_tab_break_conditions_are_live() {
         Field::BreakInvalidOp,
         Field::BreakEchoRam,
         Field::BreakLcdOffVblank,
+        Field::BreakOamDmaBad,
+        Field::BreakIncDecFexx,
+        Field::BreakSgbTransfer,
     ] {
         assert!(live.contains(&f), "{f:?} is live");
     }
-    assert_eq!(live.len(), 4, "exactly four live break conditions");
-    // The inert rows (OAM DMA / 16-bit inc-dec / SGB) stay non-live.
-    use super::tabs::Kind;
-    let inert_present = |label: &str| {
-        controls(OptionsTab::Exceptions, &s, content)
-            .into_iter()
-            .any(|c| {
-                matches!(&c.kind, Kind::Check { label: l, .. } if *l == label) && c.field.is_none()
-            })
-    };
-    assert!(inert_present("break on OAM DMA bad accesses"));
-    assert!(inert_present("break on SGB transfer start"));
+    assert_eq!(
+        live.len(),
+        7,
+        "all seven break conditions are live (greyed accuracy locks aside)"
+    );
 }
 
 #[test]
@@ -648,27 +797,6 @@ fn theme_tab_radios_select_theme() {
     assert_eq!(st.working.theme, ThemeChoice::Classic);
     click_field(&mut st, Field::Theme(ThemeRadio::Light));
     assert_eq!(st.working.theme, ThemeChoice::Light);
-}
-
-#[test]
-fn sound_tab_audio_backend_dropdown_cycles() {
-    // The Sound tab exposes the SGB audio backend as a live dropdown; clicking it
-    // cycles Built-in ↔ SGB coprocessor (the same seam --sgb-coprocessor drives).
-    let mut st = OptionsState::new(Settings::default());
-    st.active = OptionsTab::Sound;
-    let content = OptionsState::content_rect(dialog());
-    assert!(
-        controls(OptionsTab::Sound, &st.working, content)
-            .iter()
-            .any(|c| c.field == Some(Field::AudioBackend)),
-        "Sound tab has a live audio-backend control"
-    );
-    // Default Built-in; clicking cycles to the coprocessor and back.
-    assert_eq!(st.working.audio_backend, AudioBackend::Builtin);
-    click_field(&mut st, Field::AudioBackend);
-    assert_eq!(st.working.audio_backend, AudioBackend::SgbCoprocessor);
-    click_field(&mut st, Field::AudioBackend);
-    assert_eq!(st.working.audio_backend, AudioBackend::Builtin);
 }
 
 #[test]
@@ -733,6 +861,21 @@ fn misc_tab_live_toggles() {
     assert!(st.working.freeze_recent);
     click_field(&mut st, Field::PauseOnFocusLoss);
     assert!(st.working.pause_on_focus_loss);
+    // "Show errors on ROM load" defaults on (bgb-faithful) → click turns it off.
+    assert!(st.working.show_errors_on_rom_load);
+    click_field(&mut st, Field::ShowErrorsOnRomLoad);
+    assert!(!st.working.show_errors_on_rom_load);
+    assert!(!st.working.load_rom_dialog_on_startup);
+    click_field(&mut st, Field::LoadRomDialogOnStartup);
+    assert!(st.working.load_rom_dialog_on_startup);
+    // "reduce CPU usage" on by default → click turns it off.
+    assert!(st.working.reduce_cpu);
+    click_field(&mut st, Field::ReduceCpu);
+    assert!(!st.working.reduce_cpu);
+    // "Recovery save state" on by default → click turns it off.
+    assert!(st.working.recovery_save_state);
+    click_field(&mut st, Field::RecoverySaveState);
+    assert!(!st.working.recovery_save_state);
 }
 
 #[test]
@@ -782,6 +925,151 @@ fn joypad_tab_live_controls_are_the_functional_ones() {
         live.contains(&Field::AllowOpposing),
         "allow L+R / U+D is live"
     );
+    // The game-controller controls are live now (gilrs backend).
+    for f in [
+        Field::ConfigureGamepad,
+        Field::ClearGamepad,
+        Field::GamepadNeedsFocus,
+    ] {
+        assert!(live.contains(&f), "{f:?} is live");
+    }
+}
+
+#[test]
+fn joypad_gamepad_focus_checkbox_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Joypad;
+    assert!(st.working.gamepad_needs_focus, "bgb default: on");
+    click_field(&mut st, Field::GamepadNeedsFocus);
+    assert!(!st.working.gamepad_needs_focus);
+}
+
+#[test]
+fn joypad_rapid_speed_dropdown_cycles_1_to_4() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Joypad;
+    assert_eq!(st.working.rapid_speed, 2, "default 2");
+    click_field(&mut st, Field::RapidSpeed); // 2 -> 3
+    click_field(&mut st, Field::RapidSpeed); // 3 -> 4
+    assert_eq!(st.working.rapid_speed, 4);
+    click_field(&mut st, Field::RapidSpeed); // 4 wraps -> 1
+    assert_eq!(st.working.rapid_speed, 1);
+}
+
+#[test]
+fn joypad_audio_record_checkbox_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Joypad;
+    assert!(!st.working.record_audio);
+    click_field(&mut st, Field::RecordAudio);
+    assert!(st.working.record_audio);
+}
+
+#[test]
+fn joypad_video_record_checkbox_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Joypad;
+    assert!(!st.working.record_video);
+    click_field(&mut st, Field::RecordVideo);
+    assert!(st.working.record_video);
+}
+
+#[test]
+fn palette_0_31_display_matches_captured_bgb() {
+    // Captured from real bgb (docs/bgb-reference/options/options-gbcolors-031.png):
+    // the lightest BGB-0.3 colour 232/252/204 reads 29/31/25 with "0-31 numbers"
+    // on — i.e. v8 >> 3.
+    let mut s = Settings::default();
+    s.select_scheme(0); // BGB 0.3: colour 0 = 0x00E8FCCC = 232,252,204
+    s.palette_edit_shade = 0;
+    s.palette_0_31 = false;
+    assert_eq!(
+        [
+            s.palette_channel_display(0),
+            s.palette_channel_display(1),
+            s.palette_channel_display(2)
+        ],
+        [232, 252, 204]
+    );
+    s.palette_0_31 = true;
+    assert_eq!(
+        [
+            s.palette_channel_display(0),
+            s.palette_channel_display(1),
+            s.palette_channel_display(2)
+        ],
+        [29, 31, 25],
+        "0-31 numbers must show bgb's v8>>3 readout"
+    );
+}
+
+#[test]
+fn set_palette_channel_edits_the_selected_shade_and_snaps_in_5bit() {
+    let mut s = Settings::default();
+    s.select_scheme(0);
+    s.palette_edit_shade = 2; // a mid shade
+    // 8-bit mode: max frac -> 255 in the green channel, others untouched.
+    s.palette_0_31 = false;
+    let before = s.dmg_palette;
+    s.set_palette_channel(1, 1.0);
+    assert_eq!((s.dmg_palette[2] >> 8) & 0xFF, 255, "green set to 255");
+    assert_eq!(s.dmg_palette[2] & 0xFF, before[2] & 0xFF, "blue untouched");
+    assert_eq!(s.dmg_palette[0], before[0], "other shades untouched");
+    // 5-bit mode: setting level 15 snaps to v5<<3 = 120 (bgb's readout inverse).
+    s.palette_0_31 = true;
+    s.set_palette_channel(0, 15.0 / 31.0);
+    assert_eq!((s.dmg_palette[2] >> 16) & 0xFF, 120, "red snaps to 15<<3");
+    assert_eq!(
+        s.palette_channel_display(0),
+        15,
+        "reads back as 15 in 5-bit"
+    );
+}
+
+#[test]
+fn gb_colors_rgb_editor_controls_are_live() {
+    let s = Settings::default();
+    let content = OptionsState::content_rect(dialog());
+    let ctrls = controls(OptionsTab::GbColors, &s, content);
+    for f in [
+        Field::PaletteR,
+        Field::PaletteG,
+        Field::PaletteB,
+        Field::Palette031,
+        Field::PaletteSelectShade,
+    ] {
+        assert!(
+            ctrls.iter().any(|c| c.field == Some(f)),
+            "GB Colors control {f:?} must be live"
+        );
+    }
+}
+
+#[test]
+fn joypad_audio_channels_record_checkbox_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::Joypad;
+    assert!(!st.working.record_audio_channels);
+    click_field(&mut st, Field::RecordAudioChannels);
+    assert!(st.working.record_audio_channels);
+}
+
+#[test]
+fn system_rtc_vba_sav_checkbox_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::System;
+    assert!(!st.working.rtc_vba_sav);
+    click_field(&mut st, Field::RtcVbaSav);
+    assert!(st.working.rtc_vba_sav);
+}
+
+#[test]
+fn system_rtc_bgb_legacy_checkbox_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::System;
+    assert!(!st.working.rtc_bgb_legacy);
+    click_field(&mut st, Field::RtcBgbLegacy);
+    assert!(st.working.rtc_bgb_legacy);
 }
 
 #[test]
@@ -792,14 +1080,30 @@ fn joypad_tab_transcribes_the_capture_controls() {
     let s = Settings::default();
     let content = OptionsState::content_rect(dialog());
     let ctrls = controls(OptionsTab::Joypad, &s, content);
-    let has_dropdown = |val: &str| {
-        ctrls.iter().any(|c| {
-            matches!(&c.kind, Kind::Dropdown { value, .. } if value == val) && c.field.is_none()
-        })
-    };
-    assert!(has_dropdown("saves"), "Screenshot button dropdown");
-    assert!(has_dropdown("bmp"), "Screenshots dropdown");
-    assert!(has_dropdown("2 2"), "Rapid speed dropdown");
+    // "Rapid speed" is now a live dropdown cycling the auto-fire period.
+    assert!(
+        ctrls.iter().any(
+            |c| matches!(&c.kind, Kind::Dropdown { value, .. } if value == "2 2")
+                && c.field == Some(Field::RapidSpeed)
+        ),
+        "Rapid speed dropdown is live"
+    );
+    // "Screenshot button" is now a live dropdown (saves ↔ copies).
+    assert!(
+        ctrls.iter().any(
+            |c| matches!(&c.kind, Kind::Dropdown { value, .. } if value == "saves")
+                && c.field == Some(Field::ScreenshotButtonMode)
+        ),
+        "Screenshot-button mode dropdown is live"
+    );
+    // "Screenshots" is now a live dropdown driving the image format.
+    assert!(
+        ctrls.iter().any(
+            |c| matches!(&c.kind, Kind::Dropdown { value, .. } if value == "bmp")
+                && c.field == Some(Field::ScreenshotFormat)
+        ),
+        "Screenshots format dropdown is live"
+    );
     assert!(
         ctrls
             .iter()
@@ -807,15 +1111,32 @@ fn joypad_tab_transcribes_the_capture_controls() {
             if *label == "Mappable button records")),
         "Mappable button records groupbox"
     );
-    for label in ["Audio", "Video", "Audio channels"] {
-        assert!(
-            ctrls.iter().any(
-                |c| matches!(&c.kind, Kind::Check { label: l, .. } if *l == label)
-                    && c.field.is_none()
-            ),
-            "inert check {label}"
-        );
-    }
+    // The whole Mappable-button-records row is live: Audio→WAV, Video→AVI,
+    // Audio channels→4 per-channel WAVs.
+    assert!(
+        ctrls
+            .iter()
+            .any(|c| matches!(&c.kind, Kind::Check { label: "Audio", .. })
+                && c.field == Some(Field::RecordAudio)),
+        "Audio record checkbox is live"
+    );
+    assert!(
+        ctrls
+            .iter()
+            .any(|c| matches!(&c.kind, Kind::Check { label: "Video", .. })
+                && c.field == Some(Field::RecordVideo)),
+        "Video record checkbox is live"
+    );
+    assert!(
+        ctrls.iter().any(|c| matches!(
+            &c.kind,
+            Kind::Check {
+                label: "Audio channels",
+                ..
+            }
+        ) && c.field == Some(Field::RecordAudioChannels)),
+        "Audio channels record checkbox is live"
+    );
     assert!(
         ctrls
             .iter()
@@ -852,6 +1173,19 @@ fn uninited_ram_checkbox_toggles_the_setting() {
         .expect("uninitialized RAM checkbox present on the System tab");
     st.on_click(cb.rect.x + 2, cb.rect.y + 2, BOUNDS);
     assert!(st.working.uninited_wram, "clicking it turns it on");
+}
+
+#[test]
+fn auto_reset_on_system_change_checkbox_toggles() {
+    let mut st = OptionsState::new(Settings::default());
+    st.active = OptionsTab::System;
+    assert!(st.working.auto_reset_on_system_change, "on by default");
+    click_field(&mut st, Field::AutoResetOnSystemChange);
+    assert!(!st.working.auto_reset_on_system_change);
+    // "Rewind enabled" off by default → click turns it on.
+    assert!(!st.working.rewind_enabled);
+    click_field(&mut st, Field::RewindEnabled);
+    assert!(st.working.rewind_enabled);
 }
 
 #[test]

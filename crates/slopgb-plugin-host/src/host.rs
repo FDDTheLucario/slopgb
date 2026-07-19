@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use slopgb_core::GameBoy;
 use slopgb_plugin_api::{ABI_VERSION, Capabilities, Reg};
-use wasmi::{Caller, Engine, Extern, Linker, Module, Store, TypedFunc};
+use wasmtime::{Caller, Engine, Extern, Linker, Module, Store, TypedFunc};
 
 use crate::snapshot::Snapshot;
 
@@ -47,7 +47,7 @@ impl HostState {
 #[derive(Debug)]
 pub enum LoadError {
     /// The wasm was malformed or an expected export was missing/mistyped.
-    Wasm(wasmi::Error),
+    Wasm(wasmtime::Error),
     /// A required export (`slopgb_abi_version` / `_capabilities` / `_on_frame`)
     /// was absent.
     MissingExport(&'static str),
@@ -74,9 +74,17 @@ impl fmt::Display for LoadError {
 
 impl std::error::Error for LoadError {}
 
+impl From<wasmtime::Error> for LoadError {
+    fn from(e: wasmtime::Error) -> Self {
+        LoadError::Wasm(e)
+    }
+}
+
+// The tier-2 tool path still runs on wasmi (its per-call store borrows the
+// live tool context, which wasmtime's `'static` store data cannot hold).
 impl From<wasmi::Error> for LoadError {
     fn from(e: wasmi::Error) -> Self {
-        LoadError::Wasm(e)
+        LoadError::Wasm(wasmtime::Error::msg(e.to_string()))
     }
 }
 
@@ -150,6 +158,11 @@ pub struct PluginHost {
     /// so [`Self::reload`] can re-scan the same place. `None` for a host built
     /// plugin-by-plugin via [`Self::push`].
     dir: Option<PathBuf>,
+    /// Valid plugins found in the scanned directory that this per-frame host
+    /// does NOT drive — higher-tier ones (`SUBSYSTEM` / tool), which load through
+    /// their own seams (`--sgb-coprocessor` / `--msu1` / the MCP host). Recorded
+    /// so the UI can list every supported plugin, not silently drop them.
+    discovered: Vec<PluginInfo>,
 }
 
 impl PluginHost {
@@ -172,6 +185,17 @@ impl PluginHost {
                     .and_then(|b| Self::load_bytes(&name, &b))
                 {
                     Ok(p) => host.push(p),
+                    // A valid plugin of a higher tier (SUBSYSTEM / tool): this
+                    // per-frame host doesn't drive it, but it is a real plugin —
+                    // record it so the UI lists every supported subsystem rather
+                    // than dropping it. It loads through its own seam.
+                    Err(LoadError::UnsupportedCapabilities { requested }) => {
+                        host.discovered.push(PluginInfo {
+                            name: name.into_owned(),
+                            capabilities: caps_label(Capabilities::from_bits(requested)),
+                            enabled: false,
+                        });
+                    }
                     Err(e) => eprintln!("slopgb: skipping plugin {}: {e}", path.display()),
                 }
             }
@@ -186,10 +210,10 @@ impl PluginHost {
         let module = Module::new(&engine, bytes)?;
         let mut store = Store::new(&engine, HostState::empty());
         let linker = build_linker(&engine);
-        let instance = linker.instantiate_and_start(&mut store, &module)?;
+        let instance = linker.instantiate(&mut store, &module)?;
 
         let version = instance
-            .get_typed_func::<(), i32>(&store, "slopgb_abi_version")
+            .get_typed_func::<(), i32>(&mut store, "slopgb_abi_version")
             .map_err(|_| LoadError::MissingExport("slopgb_abi_version"))?
             .call(&mut store, ())?;
         if version != ABI_VERSION {
@@ -200,7 +224,7 @@ impl PluginHost {
         }
 
         let caps_bits = instance
-            .get_typed_func::<(), i32>(&store, "slopgb_capabilities")
+            .get_typed_func::<(), i32>(&mut store, "slopgb_capabilities")
             .map_err(|_| LoadError::MissingExport("slopgb_capabilities"))?
             .call(&mut store, ())? as u32;
         // Phase 1 serves introspection only; anything else is refused up front.
@@ -211,7 +235,7 @@ impl PluginHost {
         }
 
         let on_frame = instance
-            .get_typed_func::<(), i32>(&store, "slopgb_on_frame")
+            .get_typed_func::<(), i32>(&mut store, "slopgb_on_frame")
             .map_err(|_| LoadError::MissingExport("slopgb_on_frame"))?;
 
         Ok(LoadedPlugin {
@@ -271,8 +295,9 @@ impl PluginHost {
         self.dir.as_deref()
     }
 
-    /// UI-facing metadata for every loaded plugin (name, capability label,
-    /// enabled) in load order — what the Options tab / submenu render.
+    /// UI-facing metadata for every plugin found: the per-frame plugins this host
+    /// drives (togglable), then the higher-tier ones it discovered but does not
+    /// drive (`SUBSYSTEM` / tool), so the UI lists every supported subsystem.
     #[must_use]
     pub fn infos(&self) -> Vec<PluginInfo> {
         self.plugins
@@ -282,6 +307,7 @@ impl PluginHost {
                 capabilities: caps_label(p.caps),
                 enabled: p.enabled,
             })
+            .chain(self.discovered.iter().cloned())
             .collect()
     }
 
@@ -313,6 +339,7 @@ impl PluginHost {
         match Self::load_dir(&dir) {
             Ok(fresh) => {
                 self.plugins = fresh.plugins;
+                self.discovered = fresh.discovered;
                 for name in &disabled {
                     self.set_enabled(name, false);
                 }
@@ -326,7 +353,7 @@ impl PluginHost {
 
 impl LoadError {
     fn from_io(e: std::io::Error) -> Self {
-        LoadError::Wasm(wasmi::Error::new(e.to_string()))
+        LoadError::Wasm(wasmtime::Error::msg(e.to_string()))
     }
 }
 

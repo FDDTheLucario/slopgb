@@ -5,6 +5,22 @@ fn font_table_is_complete_and_sized() {
     assert_eq!(GLYPH_W, 7);
     assert_eq!(GLYPH_H, 13);
     assert_eq!(font::GLYPHS.len(), 95); // 0x20..=0x7E inclusive
+    // One coverage byte per pixel, row-major.
+    assert_eq!(font::glyph('A').len(), GLYPH_W * GLYPH_H);
+}
+
+#[test]
+fn glyphs_are_antialiased_coverage_not_one_bit() {
+    // A solid glyph must reach near-full ink AND carry at least one partial
+    // (anti-aliased) pixel — i.e. it is grayscale coverage, not hard 1-bit.
+    for ch in ['M', '@', 'e'] {
+        let g = font::glyph(ch);
+        assert!(g.iter().any(|&v| v >= 200), "{ch:?} has near-solid ink");
+        assert!(
+            g.iter().any(|&v| (1..255).contains(&v)),
+            "{ch:?} has an AA-partial pixel (not 1-bit)"
+        );
+    }
 }
 
 #[test]

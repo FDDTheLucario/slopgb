@@ -2,8 +2,8 @@
 //! actions, **focus-dependent** like bgb (see [`map`] / [`Focus`]).
 //!
 //! Global (any focus): Z=A, X=B, Enter=Start, Right Shift / Backspace=Select,
-//! arrows=D-pad, Tab (held)=turbo, P=pause, R=reset, Esc=debugger (bgb-style;
-//! never quits), F9=break toggle.
+//! arrows=D-pad, Tab (held)=turbo, Backspace (held)=rewind, `[`/`]` (held)=rapid
+//! A/B, P=pause, R=reset, Esc=debugger (bgb-style; never quits), F9=break toggle.
 //! Game-window F-keys: F2/F3/F4 open the debugger / VRAM / I-O-map windows.
 //! Debugger-window F-keys: F2 toggle breakpoint, F3 step over, F4 run to cursor,
 //! F7 trace (step), F8 step out, Ctrl+G go to, F5/F10 open VRAM/iomap.
@@ -71,6 +71,13 @@ pub enum Focus {
 pub enum Action {
     /// Uncapped emulation speed while held.
     Turbo,
+    /// Rewind emulation from the save-state ring while held (System → "Rewind
+    /// enabled"). A no-op when rewind is disabled or the ring is empty.
+    Rewind,
+    /// Auto-fire the A button while held (`[`), at the Joypad "Rapid speed" rate.
+    RapidA,
+    /// Auto-fire the B button while held (`]`).
+    RapidB,
     /// Toggle pause (on press).
     Pause,
     /// Power-cycle the machine, reloading save RAM (on press).
@@ -243,6 +250,7 @@ pub fn map(code: KeyCode, mods: ModifiersState, focus: Focus) -> Option<Action> 
     // buttons are resolved earlier, through `App.bindings` (rebindable).
     let global = match code {
         KeyCode::Tab => Some(Action::Turbo),
+        KeyCode::Backspace => Some(Action::Rewind),
         KeyCode::KeyP => Some(Action::Pause),
         KeyCode::KeyR => Some(Action::Reset),
         KeyCode::KeyT => Some(Action::ToggleTheme),
@@ -304,6 +312,10 @@ pub fn map(code: KeyCode, mods: ModifiersState, focus: Focus) -> Option<Action> 
             KeyCode::F4 => Some(Action::ToggleTool(ToolWindow::IoMap)),
             // bgb's main-menu "Options..." hotkey (F11).
             KeyCode::F11 => Some(Action::MainOptions),
+            // Rapid-fire A/B (Joypad "Rapid speed") — game-side only, so `[`/`]`
+            // stay the debugger's bank-step keys.
+            KeyCode::BracketLeft => Some(Action::RapidA),
+            KeyCode::BracketRight => Some(Action::RapidB),
             _ => None,
         },
     }

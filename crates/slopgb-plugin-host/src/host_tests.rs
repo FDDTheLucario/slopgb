@@ -108,6 +108,40 @@ fn infos_report_name_caps_and_enabled() {
 }
 
 #[test]
+fn load_dir_lists_subsystem_plugins_instead_of_skipping_them() {
+    // A SUBSYSTEM plugin (caps 0b100) is a valid, higher-tier plugin the per-frame
+    // host doesn't drive — it must be discovered + listed (for the UI), not
+    // dropped. An introspection plugin in the same dir is still driven.
+    let dir = std::env::temp_dir().join(format!("slopgb-plugin-subsys-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("frame.wasm"),
+        wasm(&plugin_wat(ABI_VERSION, 0b001, "")),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("chip.wasm"),
+        wasm(&plugin_wat(ABI_VERSION, 0b100, "")), // SUBSYSTEM
+    )
+    .unwrap();
+
+    let host = PluginHost::load_dir(&dir).unwrap();
+    let infos = host.infos();
+    assert_eq!(infos.len(), 2, "both plugins listed, none skipped");
+    let frame = infos.iter().find(|i| i.name == "frame").unwrap();
+    assert_eq!(frame.capabilities, "introspection");
+    assert!(frame.enabled, "the per-frame plugin is driven");
+    let chip = infos.iter().find(|i| i.name == "chip").unwrap();
+    assert_eq!(chip.capabilities, "subsystem");
+    assert!(
+        !chip.enabled,
+        "a subsystem plugin isn't driven by this per-frame host"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn reload_rescans_dir_and_preserves_enabled() {
     // load_dir remembers its directory; reload picks up a newly-dropped .wasm and
     // keeps the per-plugin enabled flag across the re-scan.

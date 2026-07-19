@@ -6,6 +6,23 @@ use crate::ui::canvas::{Canvas, Rect};
 use std::collections::BTreeSet;
 
 #[test]
+fn case_disasm_toggles_mnemonic_and_hex_independently() {
+    // Decoder output convention: lowercase mnemonic/reg, UPPERCASE hex.
+    let src = "ld a,$FF";
+    // All-lowercase (both on).
+    assert_eq!(case_disasm(src, true, true), "ld a,$ff");
+    // Uppercase mnemonic, lowercase hex — the independence bgb allows.
+    assert_eq!(case_disasm(src, false, true), "LD A,$ff");
+    // Lowercase mnemonic, uppercase hex (the default).
+    assert_eq!(case_disasm(src, true, false), "ld a,$FF");
+    // All-uppercase (both off).
+    assert_eq!(case_disasm(src, false, false), "LD A,$FF");
+    // A register letter that is also a hex letter (`c`) stays a register: it is
+    // lowercase in the source, so it follows the mnemonic case, not hex.
+    assert_eq!(case_disasm("ld a,($FF00+c)", false, true), "LD A,($ff00+C)");
+}
+
+#[test]
 fn disasm_rows_decode_format_and_advance() {
     // 0x100: nop; 0x101: jp 0150 (C3 50 01); 0x104: ld a,FF (3E FF).
     let mem = |a: u16| match a {
@@ -149,6 +166,7 @@ fn disasm_fmt_lowercase_hex_and_hide_clocks() {
         lowercase_hex: true,
         show_clocks: true,
         rgbds: false,
+        lowercase_disasm: true,
     };
     let rows = disasm_rows(mem, 0x0100, 1, &BTreeSet::new(), lower, &|_| 0);
     assert!(
@@ -171,6 +189,7 @@ fn disasm_fmt_lowercase_hex_and_hide_clocks() {
         lowercase_hex: false,
         show_clocks: false,
         rgbds: false,
+        lowercase_disasm: true,
     };
     let rows = disasm_rows(mem, 0x0100, 1, &BTreeSet::new(), no_clk, &|_| 0);
     assert!(

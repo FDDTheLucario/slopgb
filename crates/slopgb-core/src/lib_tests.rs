@@ -21,6 +21,112 @@ fn exc_rom(bytes: &[u8]) -> Vec<u8> {
     rom
 }
 
+#[test]
+fn oam_dma_bad_access_exception_breaks_only_when_armed() {
+    // `ld a,C0 ; ldh (46),a ; jr -2`: kick an OAM DMA (source 0xC000) then spin
+    // from ROM. Once the transfer is running, the spin's own opcode fetch is a
+    // non-HRAM access contended with the DMA — bgb's "OAM DMA bad access".
+    let rom = exc_rom(&[0x3E, 0xC0, 0xE0, 0x46, 0x18, 0xFE]);
+
+    // Unarmed (mask 0) is a no-op: the free run never halts on it.
+    let mut off = GameBoy::new(Model::Dmg, rom.clone()).unwrap();
+    assert_eq!(
+        off.run_frame_until_breakpoint(&[]),
+        None,
+        "no break when the exception is disarmed"
+    );
+
+    // Armed: the contended fetch during the transfer halts the run.
+    let mut on = GameBoy::new(Model::Dmg, rom).unwrap();
+    on.set_exceptions(EXC_OAM_DMA_BAD);
+    assert!(
+        on.run_frame_until_breakpoint(&[]).is_some(),
+        "a non-HRAM access during an OAM DMA breaks"
+    );
+}
+
+#[test]
+fn incdec16_fexx_exception_breaks_only_when_armed() {
+    // `ld hl,FE00 ; inc hl ; jr -2`: the INC HL drives HL=FE00 onto the bus, the
+    // OAM-corruption trigger — bgb's "break on 16 bits inc/dec FE00-FEFF".
+    let rom = exc_rom(&[0x21, 0x00, 0xFE, 0x23, 0x18, 0xFE]);
+
+    let mut off = GameBoy::new(Model::Dmg, rom.clone()).unwrap();
+    assert_eq!(
+        off.run_frame_until_breakpoint(&[]),
+        None,
+        "no break when disarmed"
+    );
+
+    let mut on = GameBoy::new(Model::Dmg, rom).unwrap();
+    on.set_exceptions(EXC_INCDEC_FEXX);
+    assert_eq!(
+        on.run_frame_until_breakpoint(&[]),
+        Some(0xFE00),
+        "INC HL from FE00 breaks at that address"
+    );
+}
+
+#[test]
+fn sgb_transfer_start_exception_breaks_only_when_armed_and_on_sgb() {
+    // `ld a,30 ; ldh (00),a ; ld a,00 ; ldh (00),a ; jr -2`: the $30 arms the
+    // pulse receiver and the following $00 is the reset pulse that opens a
+    // command packet — bgb's "break on SGB transfer start".
+    let mut rom = exc_rom(&[0x3E, 0x30, 0xE0, 0x00, 0x3E, 0x00, 0xE0, 0x00, 0x18, 0xFE]);
+    rom[0x146] = 0x03; // SGB flag + old licensee 0x33 → the ICD2 receiver is live
+    rom[0x14B] = 0x33;
+
+    let mut off = GameBoy::new(Model::Sgb, rom.clone()).unwrap();
+    assert_eq!(
+        off.run_frame_until_breakpoint(&[]),
+        None,
+        "no break when disarmed"
+    );
+
+    let mut on = GameBoy::new(Model::Sgb, rom.clone()).unwrap();
+    on.set_exceptions(EXC_SGB_TRANSFER);
+    assert_eq!(
+        on.run_frame_until_breakpoint(&[]),
+        Some(0xFF00),
+        "the reset pulse starting the packet breaks"
+    );
+
+    // A DMG has no SGB packet receiver, so the same P1 writes never fire it.
+    let mut dmg = GameBoy::new(Model::Dmg, rom).unwrap();
+    dmg.set_exceptions(EXC_SGB_TRANSFER);
+    assert_eq!(
+        dmg.run_frame_until_breakpoint(&[]),
+        None,
+        "no SGB transfer off SGB models"
+    );
+}
+
+#[test]
+fn halt_cycles_counts_only_time_spent_halted() {
+    // `ld a,0 ; ldh (FF0F),a ; ldh (FFFF),a ; halt`: clear IF + IE so HALT
+    // (IME=0) has no wake condition and stays halted for the rest of the frame
+    // while the PPU keeps running — so halt_cycles is most of the frame.
+    let mut gb = GameBoy::new(
+        Model::Dmg,
+        exc_rom(&[0x3E, 0x00, 0xE0, 0x0F, 0xE0, 0xFF, 0x76]),
+    )
+    .unwrap();
+    assert_eq!(gb.halt_cycles(), 0, "nothing halted yet");
+    gb.run_frame();
+    let (c, h) = (gb.cycles(), gb.halt_cycles());
+    assert!(h > 0, "some cycles were spent halted");
+    assert!(h <= c, "halt cycles never exceed total ({h} > {c})");
+    assert!(
+        h > c / 2,
+        "a HALT-only frame is halted most of the time ({h}/{c})"
+    );
+
+    // A NOP-only ROM never halts, so the counter stays put.
+    let mut nop = GameBoy::new(Model::Dmg, vec![0u8; 0x8000]).unwrap();
+    nop.run_frame();
+    assert_eq!(nop.halt_cycles(), 0, "no halt cycles without a HALT");
+}
+
 /// A ROM that turns the LCD fully on (BG+window+sprites), enables the
 /// timer at its fastest rate, and triggers APU channel 1, then spins — so
 /// running frames exercises the PPU sub-dot pipeline, the timer, OAM, and

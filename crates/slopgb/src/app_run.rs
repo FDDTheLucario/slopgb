@@ -4,13 +4,15 @@
 //! exporters.
 
 use std::fs;
+use std::path::Path;
 
-use slopgb_core::{SCREEN_H, SCREEN_W};
+use slopgb_core::{SCREEN_H, SCREEN_W, SGB_BORDER_H, SGB_BORDER_W};
 use winit::event_loop::ActiveEventLoop;
 
 use crate::cheat_ui;
 use crate::input::Action;
 use crate::windows::debugger::MenuOutcome;
+use crate::windows::options::ScreenshotFormat;
 use crate::{App, PathPurpose, dbg, screenshot, ui, windows};
 
 /// Top-left origin of the bp/wp manager list popup, below the debugger menu bar.
@@ -56,7 +58,16 @@ impl App {
                 self.update_title();
             }
             Action::Reset => {
-                self.session.reset();
+                // Apply any deferred emulated-system choice (auto-reset off): a
+                // changed model rebuilds via set_model, an unchanged one plain
+                // power-cycles.
+                if !self.session.set_model(self.settings.model) {
+                    self.session.reset();
+                }
+                // The cached SNES frame belongs to the pre-reset machine; the
+                // fresh coprocessor withholds frames until its display goes
+                // live, so a stale (possibly blank) frame would stick.
+                self.snes_frame = None;
                 self.resync_pacing();
             }
             Action::Quit => {
@@ -70,6 +81,8 @@ impl App {
                 // `DisasmFmt::default` / empty-table defaults.
                 self.push_disasm_fmt();
                 self.tools.set_tile_hex_8bit(self.settings.tile_hex_8bit);
+                self.tools
+                    .set_registers_editable(self.settings.registers_editable);
                 self.tools.set_symbols(self.symbols.clone());
                 // Keep the Options "memory viewer in own window" setting in sync
                 // with reality, so a later Apply doesn't fight a menu toggle.
@@ -343,17 +356,222 @@ impl App {
         }
     }
 
-    /// Write the current frame to `slopgb-<unix-millis>.bmp` in the working
-    /// directory (bgb's "Save screenshot"); log the path or any I/O error.
+    /// Write the current frame to `slopgb-<unix-millis>.<ext>` in the working
+    /// directory (bgb's "Save screenshot"); log the path or any I/O error. The
+    /// image format (Joypad "Screenshots") and whether an SGB border is included
+    /// (Graphics "SGB border in screenshot") follow the current settings.
     fn save_screenshot(&self) {
-        let bmp = screenshot::to_bmp(self.session.gb.frame(), SCREEN_W, SCREEN_H);
+        // Include the 256×224 SGB composite only when the option is on and a
+        // border is actually loaded; otherwise the bare 160×144 LCD.
+        let border = self
+            .settings
+            .sgb_border_screenshot
+            .then(|| self.session.gb.sgb_border())
+            .flatten();
+        let (frame, w, h): (&[u32], usize, usize) = match border {
+            Some(b) => (&b[..], SGB_BORDER_W, SGB_BORDER_H),
+            None => (&self.session.gb.frame()[..], SCREEN_W, SCREEN_H),
+        };
+        // Joypad "Screenshot button" → copies: put the frame on the clipboard as
+        // a PNG (the universally-pasteable image format) instead of a file.
+        if self.settings.screenshot_copies {
+            let png = crate::mcp::png::encode(frame, w, h);
+            if crate::clipboard::copy_image_png(&png) {
+                eprintln!("copied screenshot to the clipboard");
+            } else {
+                eprintln!("slopgb: no image-clipboard tool found (install wl-copy/xclip)");
+            }
+            return;
+        }
+        let fmt = self.settings.screenshot_format;
+        let data = match fmt {
+            ScreenshotFormat::Bmp => screenshot::to_bmp(frame, w, h),
+            ScreenshotFormat::Png => crate::mcp::png::encode(frame, w, h),
+        };
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis());
-        let path = format!("slopgb-{stamp}.bmp");
-        match fs::write(&path, &bmp) {
+        let path = format!("slopgb-{stamp}.{}", fmt.ext());
+        match fs::write(&path, &data) {
             Ok(()) => eprintln!("saved screenshot to {path}"),
             Err(e) => eprintln!("error: could not save screenshot: {e}"),
+        }
+    }
+
+    /// Arm the recovery-save-state machinery for the ROM at `rom_path`: set its
+    /// `<rom>.recovery` sidecar path and, if that file is already present (Misc →
+    /// "Recovery save state" on), restore it over the freshly-loaded machine — a
+    /// leftover file means the last session of this ROM crashed (a clean quit
+    /// deletes it). Called from every load path (drag-drop + CLI startup).
+    pub(crate) fn arm_recovery(&mut self, rom_path: &Path) {
+        self.recovery_path = Some(rom_path.with_extension("recovery"));
+        self.recovery_next = std::time::Instant::now() + crate::RECOVERY_INTERVAL;
+        if !self.settings.recovery_save_state {
+            return;
+        }
+        if let Some(rp) = self.recovery_path.clone() {
+            if rp.exists() {
+                match self.session.load_state_from(&rp) {
+                    Ok(()) => {
+                        eprintln!("slopgb: recovered unsaved progress from {}", rp.display());
+                    }
+                    Err(e) => eprintln!("slopgb: recovery state ignored: {e}"),
+                }
+            }
+        }
+    }
+
+    /// Joypad → "Audio": start/stop the WAV audio recorder to match the setting.
+    /// Recording needs a live audio pipe (a `--mute` run can't record). Toggling
+    /// the setting off (or quitting mid-record) finalises the file.
+    pub(crate) fn sync_audio_recording(&mut self) {
+        let want = self.settings.record_audio;
+        let Some(pipe) = self.audio.as_mut() else {
+            return;
+        };
+        if want && !pipe.is_recording() {
+            pipe.start_record();
+        } else if !want && pipe.is_recording() {
+            let frames = pipe.take_record(); // pipe borrow ends here
+            self.save_wav_recording(&frames);
+        }
+    }
+
+    /// Encode recorded audio frames to a timestamped WAV in the working dir.
+    pub(crate) fn save_wav_recording(&self, frames: &[(f32, f32)]) {
+        if frames.is_empty() {
+            eprintln!("slopgb: audio recording was empty (no audio while recording)");
+            return;
+        }
+        let wav = crate::wav::encode_wav(frames, crate::pacing::AudioPipe::record_rate());
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis());
+        let path = format!("slopgb-{stamp}.wav");
+        match fs::write(&path, &wav) {
+            Ok(()) => eprintln!("saved audio recording to {path}"),
+            Err(e) => eprintln!("error: could not save audio recording: {e}"),
+        }
+    }
+
+    /// Joypad → "Audio channels": start/stop the per-channel recorder. Arms both
+    /// the core APU tap and the pipe's capture; on stop, writes one WAV per GB
+    /// sound channel. Needs a live audio pipe (a `--mute` run can't record).
+    pub(crate) fn sync_channel_recording(&mut self) {
+        let want = self.settings.record_audio_channels;
+        let Some(pipe) = self.audio.as_mut() else {
+            return;
+        };
+        if want && !pipe.is_recording_channels() {
+            pipe.start_record_channels();
+            self.session.gb.set_record_channels(true);
+        } else if !want && pipe.is_recording_channels() {
+            let chans = pipe.take_record_channels(); // pipe borrow ends here
+            self.session.gb.set_record_channels(false);
+            self.save_channel_recordings(&chans);
+        }
+    }
+
+    /// Encode each channel that played to its own WAV (`slopgb-<stamp>-chN.wav`,
+    /// N=1..4). A channel whose DAC never turned on is all-zero and is skipped.
+    pub(crate) fn save_channel_recordings(&self, chans: &[Vec<f32>; 4]) {
+        if chans.iter().all(Vec::is_empty) {
+            eprintln!("slopgb: channel recording was empty (no audio while recording)");
+            return;
+        }
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis());
+        let rate = crate::pacing::AudioPipe::record_rate();
+        for (i, ch) in chans.iter().enumerate() {
+            if ch.iter().all(|&s| s == 0.0) {
+                continue; // this channel's DAC never turned on: nothing to save
+            }
+            let frames: Vec<(f32, f32)> = ch.iter().map(|&s| (s, s)).collect();
+            let wav = crate::wav::encode_wav(&frames, rate);
+            let path = format!("slopgb-{stamp}-ch{}.wav", i + 1);
+            match fs::write(&path, &wav) {
+                Ok(()) => eprintln!("saved channel {} recording to {path}", i + 1),
+                Err(e) => eprintln!("error: could not save channel recording: {e}"),
+            }
+        }
+    }
+
+    /// Joypad → "Video": start/stop the AVI video recorder to match the setting.
+    /// Toggling it off (or quitting mid-record) finalises the file.
+    pub(crate) fn sync_video_recording(&mut self) {
+        let want = self.settings.record_video;
+        if want && self.video_rec.is_none() {
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis());
+            let path = format!("slopgb-{stamp}.avi");
+            let fps = slopgb_core::CLOCK_HZ as f64 / slopgb_core::CYCLES_PER_FRAME as f64;
+            match crate::avi::AviWriter::create(
+                Path::new(&path),
+                SCREEN_W as u32,
+                SCREEN_H as u32,
+                fps,
+            ) {
+                Ok(w) => {
+                    self.video_rec = Some(w);
+                    eprintln!("recording video to {path}");
+                }
+                Err(e) => eprintln!("error: could not start video recording: {e}"),
+            }
+        } else if !want {
+            self.finish_video_recording();
+        }
+    }
+
+    /// Append the current 160×144 LCD to the AVI (one frame per rendered batch).
+    /// No-op with no recorder or no ROM (a frozen machine has no fresh frame).
+    pub(crate) fn write_video_frame(&mut self) {
+        if !self.rom_loaded {
+            return;
+        }
+        let Some(rec) = self.video_rec.as_mut() else {
+            return;
+        };
+        if let Err(e) = rec.write_frame(self.session.gb.frame()) {
+            eprintln!("slopgb: video frame write failed: {e}");
+        }
+    }
+
+    /// Finalise the AVI (patch sizes + index) if one is recording.
+    pub(crate) fn finish_video_recording(&mut self) {
+        if let Some(mut rec) = self.video_rec.take() {
+            match rec.finish() {
+                Ok(()) => eprintln!("saved video recording"),
+                Err(e) => eprintln!("error: could not finalise video recording: {e}"),
+            }
+        }
+    }
+
+    /// Misc → "Recovery save state": rewrite `<rom>.recovery` on the interval so
+    /// a crash loses at most `RECOVERY_INTERVAL` of progress. No-op when the
+    /// option is off, no ROM is loaded, or the interval hasn't elapsed.
+    pub(crate) fn write_recovery_state(&mut self) {
+        if !self.settings.recovery_save_state {
+            return;
+        }
+        let now = std::time::Instant::now();
+        if now < self.recovery_next {
+            return;
+        }
+        if let Some(rp) = self.recovery_path.clone() {
+            if let Err(e) = self.session.save_state_to(&rp) {
+                eprintln!("slopgb: recovery save failed: {e}");
+            }
+        }
+        self.recovery_next = now + crate::RECOVERY_INTERVAL;
+    }
+
+    /// Delete the recovery state on a clean quit, so it is only ever present —
+    /// and therefore restored on the next load — after a crash.
+    pub(crate) fn clear_recovery_state(&self) {
+        if let Some(rp) = &self.recovery_path {
+            let _ = std::fs::remove_file(rp);
         }
     }
 

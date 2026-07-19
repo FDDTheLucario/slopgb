@@ -1,10 +1,23 @@
 # slopgb
 
 Cycle-accurate GB/GBC emulator. Workspace: `crates/slopgb-core` (emulator, zero deps,
-no unsafe) + `crates/slopgb` (frontend: winit/softbuffer/cpal only, a BGB-style
-debugger UI) + `crates/slopgb-plugin-api` (guest SDK for Rust→wasm plugins) +
-`crates/slopgb-plugin-host` (the wasmi runtime — the one place `wasmi` is a dep,
-isolated so core stays zero-dep and the frontend keeps its three-lib rule).
+no unsafe) + `crates/slopgb` (frontend: winit/softbuffer/cpal + gilrs for game
+controllers, a BGB-style debugger UI) + `crates/slopgb-plugin-api` (guest SDK for
+Rust→wasm plugins) + `crates/slopgb-plugin-host` (the wasmi runtime — the one place
+`wasmi` is a dep, isolated so core stays zero-dep and the frontend keeps its lean
+dep set).
+
+**Plugins have three peer capability tiers, one loader each** (see
+[`crates/slopgb-plugin-host/CLAUDE.md`](crates/slopgb-plugin-host/CLAUDE.md)):
+tier-1 `INTROSPECTION` (`PluginHost` per-frame pump, `--plugins`), tier-2 tool
+(`LoadedTool`, MCP), tier-3 `SUBSYSTEM` (`LoadedCoprocessor`): the SGB
+coprocessor auto-loads `spc700.wasm` + `w65c816.wasm` from the `--plugins` dir on
+SGB models; MSU-1 loads from a `--msu1` pack. **Subsystem plugins (SPC700 / 65C816
+/ MSU-1 — `slopgb-*-plugin`, built by `cargo xtask stage-plugins`) are
+first-class**: the host supports every valid subsystem type via the generic
+coprocessor ABI. They load through their own seam — the tier-1 `--plugins`
+*scanner* skips them (a loader mismatch, not an invalid plugin), even though the
+SGB coprocessor reads its plugins from that same directory.
 
 **Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before touching core** — timing
 contract (tick-then-access M-cycles), memory map, module ownership, mooneye +
@@ -68,8 +81,9 @@ When a **hardware** question comes up, consult in order:
   `crates/slopgb-core/tests/gbtr/baselines/gambatte.txt`: every baselined cluster is an
   A/B-swept trade — one-sided "fixes" regress the now-green siblings.
 - No new deps in core (std only); no unsafe anywhere (`forbid(unsafe_code)`); clippy
-  `-D warnings` clean. The sole external runtime dep (`wasmi`, the plugin engine)
-  is quarantined in `crates/slopgb-plugin-host`; the guest SDK uses
+  `-D warnings` clean. The external runtime deps (`wasmtime` for the coprocessor +
+  per-frame plugin paths, `wasmi` for the tier-2 tool path whose store borrows the
+  live tool context) are quarantined in `crates/slopgb-plugin-host`; the guest SDK uses
   `deny(unsafe_code)` + a scoped `allow` for two wasm linkage markers only (no
   `unsafe` blocks).
 - No god files: keep every `.rs` **under 1000 lines**. Split a growing file into
@@ -128,7 +142,9 @@ emulated s.
 Baseline (all green, on `main`): mooneye **93/93**, gbtr v7.0 **215/0**, core lib +
 frontend green, clippy clean. Missing ROMs skip unless `SLOPGB_REQUIRE_ROMS=1` (run
 `test-roms/download.sh` first). The SameBoy cycle-exact port, SGB support (SPC700 +
-S-DSP audio, BIOS, border) and the bgb-UI clone (debugger, viewers, Options, link,
+S-DSP audio, BIOS, border, and the SNES-side LLE: 65C816 + SNES-PPU plugins, GP-DMA,
+autopoll, the arcade-takeover runtime — Space Invaders' ARCADE mode runs its own
+SNES program end to end) and the bgb-UI clone (debugger, viewers, Options, link,
 opt-in boot ROM, MCP) are all merged — per-area detail in
 [`docs/ui-state/`](docs/ui-state/README.md) + [`docs/hardware-state/`](docs/hardware-state/README.md).
 UI theming (contemporary Light default / Dark / Classic + custom-theme API; colour-only,

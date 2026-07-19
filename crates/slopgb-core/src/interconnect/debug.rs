@@ -5,7 +5,10 @@
 //! byte-identical. Interconnect work package.
 
 use super::*;
-use crate::{EXC_ECHO_RAM, EXC_INVALID_OPCODE, EXC_LCD_OFF_VBLANK, EXC_LD_B_B};
+use crate::{
+    EXC_ECHO_RAM, EXC_INCDEC_FEXX, EXC_INVALID_OPCODE, EXC_LCD_OFF_VBLANK, EXC_LD_B_B,
+    EXC_OAM_DMA_BAD, EXC_SGB_TRANSFER,
+};
 
 impl Interconnect {
     /// Per-access debugger check on a CPU bus access: memory watchpoints (RM8)
@@ -28,6 +31,15 @@ impl Interconnect {
         // Echo RAM is C000-DDFF mirrored at E000-FDFF; any CPU access there is
         // bgb's "break on ram echo (E000-FDFF) access".
         if self.exc_mask & EXC_ECHO_RAM != 0 && (0xE000..=0xFDFF).contains(&addr) {
+            self.exc_hit = Some(addr);
+        }
+        // While an OAM DMA is copying, the CPU can only reliably touch HRAM
+        // (FF80-FFFE); any other access is contended with the DMA — bgb's "break
+        // on OAM DMA bad accesses". `dma_run` is Some only mid-transfer.
+        if self.exc_mask & EXC_OAM_DMA_BAD != 0
+            && self.dma_run.is_some()
+            && !(0xFF80..=0xFFFE).contains(&addr)
+        {
             self.exc_hit = Some(addr);
         }
     }
@@ -63,6 +75,24 @@ impl Interconnect {
                 ));
         if hit {
             self.exc_hit = Some(pc);
+        }
+    }
+
+    /// Exception break on a 16-bit `INC rr`/`DEC rr` whose pre-op register value
+    /// `addr` (driven on the bus this cycle) lands in `FE00-FEFF` — the OAM
+    /// corruption trigger. Inert when the bit is unarmed (`exc_mask == 0` path).
+    pub(super) fn incdec16_exception(&mut self, addr: u16) {
+        if self.exc_mask & EXC_INCDEC_FEXX != 0 && (0xFE00..=0xFEFF).contains(&addr) {
+            self.exc_hit = Some(addr);
+        }
+    }
+
+    /// Exception break at the start of an SGB command packet transfer (the
+    /// caller — `io_write` on FF00 — only calls this when the joypad reports a
+    /// fresh transfer). Records FF00 as the hit. Inert when the bit is unarmed.
+    pub(super) fn sgb_transfer_exception(&mut self) {
+        if self.exc_mask & EXC_SGB_TRANSFER != 0 {
+            self.exc_hit = Some(0xFF00);
         }
     }
 

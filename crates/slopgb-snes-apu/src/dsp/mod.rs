@@ -78,8 +78,14 @@ impl Default for SDsp {
 
 impl SDsp {
     pub fn new() -> Self {
+        let mut regs = [0u8; 128];
+        // Power-on FLG = $E0: soft reset + mute + echo-write disable
+        // (fullsnes 6Ch). The echo-write half is load-bearing: with FLG=0
+        // the echo unit writes silence over ESA=0 — the IPL boot loader's
+        // zero page — erasing upload pointers between instructions.
+        regs[FLG] = 0xE0;
         SDsp {
-            regs: [0; 128],
+            regs,
             voices: Default::default(),
             echo: Echo::default(),
             counter: 0,
@@ -115,8 +121,14 @@ impl SDsp {
         self.regs[reg] = val;
         match reg {
             KON => {
-                // Key-on is edge-triggered (0→1): "write 0 then 1 to restart".
-                self.kon_edge |= val & !self.kon_prev;
+                // Every KON WRITE arms its set bits (Blargg SPC_DSP
+                // `new_kon`: each write re-arms; the check consumes) — a
+                // driver re-keys a voice by writing the same mask again with
+                // no 0 write in between (Space Invaders' march re-KONs $10
+                // per note). Only the *held register level* does not
+                // retrigger. `kon_prev` stays as the last-written mirror for
+                // the save-state layout.
+                self.kon_edge |= val;
                 self.kon_prev = val;
             }
             ENDX => {
@@ -212,13 +224,17 @@ impl SDsp {
             );
             prev_out = out;
 
-            let l = (out * self.reg_i8(base)) >> 7;
-            let r = (out * self.reg_i8(base + 1)) >> 7;
-            main_l += l;
-            main_r += r;
-            if eon & (1 << v) != 0 {
-                echo_l += l;
-                echo_r += r;
+            // A silent voice (e.g. released, level 0) returns exactly 0; the
+            // volume multiply and mix add are no-ops, so skip them.
+            if out != 0 {
+                let l = (out * self.reg_i8(base)) >> 7;
+                let r = (out * self.reg_i8(base + 1)) >> 7;
+                main_l += l;
+                main_r += r;
+                if eon & (1 << v) != 0 {
+                    echo_l += l;
+                    echo_r += r;
+                }
             }
         }
         self.endx = endx;

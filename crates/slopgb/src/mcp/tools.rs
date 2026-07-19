@@ -33,6 +33,7 @@ pub enum Call {
     Screencap { scale: u32 },
     Breakpoint { addr: String },
     Registers,
+    Coprocessor,
     Expr { expr: String },
 }
 
@@ -87,6 +88,7 @@ pub fn dispatch(
             )))
         }
         Call::Registers => Ok(ToolResult::Text(registers(gb))),
+        Call::Coprocessor => Ok(ToolResult::Text(coprocessor_status(gb))),
         Call::Expr { expr } => Ok(ToolResult::Text(expr_eval(gb, expr))),
     }
 }
@@ -262,6 +264,19 @@ pub(crate) fn registers(gb: &GameBoy) -> String {
         u8::from(gb.double_speed()),
         gb.rom_bank(),
     )
+}
+
+/// The SGB audio coprocessor status (the `coprocessor` tool): whether this
+/// machine has an SGB coprocessor and, if so, whether the built-in HLE APU or
+/// the wasm SPC700 + 65C816 plugins are engaged and actually running. A machine
+/// that is not in SGB mode says so — the SPC700/65C816 only run on SGB.
+pub(crate) fn coprocessor_status(gb: &GameBoy) -> String {
+    gb.sgb_coprocessor_status().unwrap_or_else(|| {
+        "no SGB coprocessor: this machine is NOT in Super Game Boy mode, so the SPC700 / \
+         65C816 never run. Set System -> Super Gameboy (or --model sgb); the coprocessor \
+         chips exist only on Model::Sgb / Sgb2."
+            .to_string()
+    })
 }
 
 /// Evaluate a bgb-style debugger expression against the live regs + memory.

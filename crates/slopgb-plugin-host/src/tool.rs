@@ -115,7 +115,7 @@ impl LoadedTool {
 
         let count = call0(&mut store, "slopgb_tool_count")?.max(0);
         let meta_fn = instance
-            .get_typed_func::<(i32, i32), ()>(&store, "slopgb_tool_meta")
+            .get_typed_func::<(i32, i32), ()>(&mut store, "slopgb_tool_meta")
             .map_err(|_| LoadError::MissingExport("slopgb_tool_meta"))?;
         let mut tools = Vec::new();
         for idx in 0..count {
@@ -180,7 +180,7 @@ impl LoadedTool {
             .get_memory(&store, "memory")
             .ok_or(LoadError::MissingExport("memory"))?;
         let arg_alloc = instance
-            .get_typed_func::<i32, i32>(&store, "slopgb_arg_alloc")
+            .get_typed_func::<i32, i32>(&mut store, "slopgb_arg_alloc")
             .map_err(|_| LoadError::MissingExport("slopgb_arg_alloc"))?;
         let call_tool: TypedFunc<(i32, i32), i32> = instance
             .get_typed_func(&store, "slopgb_call_tool")
@@ -194,7 +194,7 @@ impl LoadedTool {
                 ptr as usize,
                 &args.as_bytes()[..len.max(0) as usize],
             )
-            .map_err(|e| LoadError::Wasm(wasmi::Error::new(e.to_string())))?;
+            .map_err(|e| LoadError::Wasm(wasmtime::Error::msg(e.to_string())))?;
         call_tool.call(&mut store, (idx as i32, len))?;
 
         Ok(match store.data_mut().emitted.take() {

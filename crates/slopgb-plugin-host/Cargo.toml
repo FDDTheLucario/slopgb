@@ -13,6 +13,11 @@ slopgb-plugin-api = { path = "../slopgb-plugin-api" }
 # The one external dependency of the whole plugin system, isolated to this crate
 # so slopgb-core stays zero-dep and the frontend keeps its winit/softbuffer/cpal
 # rule. A pure-Rust interpreter with a fully safe host API (no embedder unsafe).
+wasmtime = { version = "46", default-features = false, features = [
+    "cranelift",
+    "runtime",
+    "std",
+] }
 wasmi = "1.1"
 
 [dev-dependencies]

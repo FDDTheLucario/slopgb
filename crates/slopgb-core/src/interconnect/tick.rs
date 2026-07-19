@@ -30,6 +30,12 @@ impl Interconnect {
     pub(super) fn tick_machine(&mut self) {
         let dots: u64 = if self.double_speed { 2 } else { 4 };
         self.cycles += dots;
+        // Read-only diagnostic (GB-CPU-usage meter): the fraction of elapsed
+        // cycles spent HALT-gated. Bumped in lockstep with `cycles`; never read
+        // by emulation, so it can't perturb the golden output.
+        if self.cpu_halted {
+            self.halt_cycles += dots;
+        }
         // Dispatch-ack sync-ahead window for this tick (see `ack`):
         // timer/serial sets produced by an in-window tick are consumed
         // by the preceding ack instead of re-raising IF.

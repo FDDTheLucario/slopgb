@@ -20,6 +20,16 @@ pub(crate) fn clipboard_candidates() -> [(&'static str, &'static [&'static str])
     ]
 }
 
+/// Candidate tools for an `image/png` clipboard write (Joypad "Screenshot
+/// button" → copies). `xsel` has no MIME support, so only wl-copy + xclip
+/// qualify. Pure, so the table is unit-testable.
+pub(crate) fn image_candidates() -> [(&'static str, &'static [&'static str]); 2] {
+    [
+        ("wl-copy", &["--type", "image/png"]),
+        ("xclip", &["-selection", "clipboard", "-t", "image/png"]),
+    ]
+}
+
 /// Copy `text` to the system clipboard, returning whether a tool accepted it.
 /// Tries each [`clipboard_candidates`] entry until one spawns and exits cleanly;
 /// a missing tool (or a spawn error) just falls through to the next. Never
@@ -34,9 +44,27 @@ pub(crate) fn copy(text: &str) -> bool {
     false
 }
 
+/// Copy PNG `bytes` to the system clipboard as an image (same fall-through as
+/// [`copy`]). Returns whether a tool accepted it.
+#[must_use]
+pub(crate) fn copy_image_png(bytes: &[u8]) -> bool {
+    for (prog, args) in image_candidates() {
+        if try_write(prog, args, bytes) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Spawn one tool and feed it `text`. Returns true only if the child spawned,
 /// took the whole write, and exited successfully.
 fn try_copy(prog: &str, args: &[&str], text: &str) -> bool {
+    try_write(prog, args, text.as_bytes())
+}
+
+/// Spawn one tool and feed it `bytes` on stdin. Returns true only if the child
+/// spawned, took the whole write, and exited successfully.
+fn try_write(prog: &str, args: &[&str], bytes: &[u8]) -> bool {
     let Ok(mut child) = Command::new(prog)
         .args(args)
         .stdin(Stdio::piped())
@@ -49,7 +77,7 @@ fn try_copy(prog: &str, args: &[&str], text: &str) -> bool {
     let wrote = child
         .stdin
         .take()
-        .map(|mut stdin| stdin.write_all(text.as_bytes()).is_ok())
+        .map(|mut stdin| stdin.write_all(bytes).is_ok())
         .unwrap_or(false);
     // Always reap the child; success needs the write AND a clean exit.
     let exited_ok = child.wait().map(|s| s.success()).unwrap_or(false);

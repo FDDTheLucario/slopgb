@@ -387,7 +387,11 @@ impl Interconnect {
     fn io_write(&mut self, addr: u16, value: u8) {
         match addr {
             0xFF00 => {
-                self.joypad.write(value);
+                if self.joypad.write(value) {
+                    // "break on SGB transfer start": a command packet's first
+                    // reset pulse. Gated (inert unless armed) — golden-safe.
+                    self.sgb_transfer_exception();
+                }
                 // On SGB the ICD2 snoops the P1 write; a completed
                 // presentation command (palettes / attributes / mask) is
                 // forwarded to the PPU here. `None` unless the joypad is an

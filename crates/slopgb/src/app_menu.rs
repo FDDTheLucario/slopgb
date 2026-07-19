@@ -56,6 +56,30 @@ impl App {
             self.request_game_redraw();
             return;
         }
+        // The controller-rebind wizard shares the same modal slot + buttons.
+        if self.gamepad_wizard.is_some() {
+            if button == MouseButton::Left {
+                let area = self.window_area();
+                match crate::keymap::wizard_button_at(area, px, py) {
+                    Some(WizardButton::Cancel) => self.gamepad_wizard = None,
+                    Some(WizardButton::SkipKeep) => {
+                        if let Some(w) = self.gamepad_wizard.as_mut() {
+                            w.skip_keep();
+                        }
+                        self.commit_gamepad_wizard_if_done();
+                    }
+                    Some(WizardButton::SkipClear) => {
+                        if let Some(w) = self.gamepad_wizard.as_mut() {
+                            w.skip_clear();
+                        }
+                        self.commit_gamepad_wizard_if_done();
+                    }
+                    None => {}
+                }
+            }
+            self.request_game_redraw();
+            return;
+        }
         // A path modal is topmost — it can float over the Options dialog (the
         // bootrom `...` browse) as well as stand alone (Load ROM / save state),
         // so it is checked before Options. Route the click to OK/Cancel.
@@ -114,9 +138,35 @@ impl App {
                 match out {
                     // Float the key-rebind wizard above the (still-open) dialog.
                     OptionsOutcome::ConfigureKeyboard => self.open_key_wizard(),
+                    // Float the controller-rebind wizard above the dialog.
+                    OptionsOutcome::ConfigureGamepad => {
+                        self.gamepad_wizard = Some(crate::gamepad::GamepadConfigWizard::open(
+                            self.gamepad_bindings.clone(),
+                        ));
+                    }
+                    // Unbind every controller button, committing immediately.
+                    OptionsOutcome::ClearGamepad => {
+                        self.gamepad_bindings.clear();
+                        let cfg = self.gamepad_bindings.to_config();
+                        self.apply_gamepad_map(cfg);
+                    }
                     // Open the path modal over the dialog to edit a bootrom path.
                     OptionsOutcome::PickBootrom(slot) => {
                         self.open_path_prompt("Bootrom path", crate::PathPurpose::Bootrom(slot))
+                    }
+                    // Open the path modal to edit the plugins directory.
+                    OptionsOutcome::PickPluginsDir => {
+                        self.open_path_prompt("Plugins dir", crate::PathPurpose::PluginsDir)
+                    }
+                    // Advance the working output device to the next enumerated one.
+                    OptionsOutcome::CycleSoundcard => {
+                        if let Some(o) = &mut self.options {
+                            let devices = crate::audio::AudioOutput::device_names();
+                            o.working.audio_device = crate::audio::cycle_output_device(
+                                &o.working.audio_device,
+                                &devices,
+                            );
+                        }
                     }
                     // OK/Apply push working live; Cancel/Defaults do not (Defaults
                     // only edits the controls, matching bgb — nothing goes live
@@ -152,8 +202,9 @@ impl App {
             // (Re)open the right-click menu as its own borderless window, at the
             // pointer, so it can extend past the game window instead of clipping.
             if let Some(win) = self.window.clone() {
+                let theme = self.settings.theme.resolve(&self.custom_themes);
                 self.menu_popup =
-                    MenuPopup::open(event_loop, &win, (px, py), !self.muted, self.paused);
+                    MenuPopup::open(event_loop, &win, (px, py), !self.muted, self.paused, theme);
             }
         }
     }
@@ -330,6 +381,34 @@ impl App {
             .collect()
     }
 
+    /// Rebuild the plugin host from `dir` (Options → Plugins → "..." changed the
+    /// directory): load the new directory (empty = an empty host), then mirror
+    /// the discovered set — including higher-tier subsystem plugins — into the
+    /// Options tab. The plugins dir is the unified subsystem source, so it also
+    /// feeds the SGB coprocessor seam: with `spc700.wasm` + `w65c816.wasm` present
+    /// there, enabling the SGB-coprocessor backend loads them from this dir. A bad
+    /// dir logs and leaves an empty host so a typo can't wedge the dialog.
+    fn rebuild_plugins(&mut self, dir: &str) {
+        self.plugins = if dir.is_empty() {
+            slopgb_plugin_host::PluginHost::new()
+        } else {
+            slopgb_plugin_host::PluginHost::load_dir(std::path::Path::new(dir)).unwrap_or_else(
+                |e| {
+                    eprintln!("slopgb: cannot load plugins dir '{dir}': {e}");
+                    slopgb_plugin_host::PluginHost::new()
+                },
+            )
+        };
+        // The SGB coprocessor is a plugin: point the session at the same dir so
+        // spc700 + w65c816 auto-load (on SGB) from the plugins dir the UI just set.
+        self.session
+            .set_plugins_dir((!dir.is_empty()).then(|| std::path::PathBuf::from(dir)));
+        self.sync_plugin_entries();
+        for line in self.plugins.take_log() {
+            eprintln!("{line}");
+        }
+    }
+
     /// Re-scan the plugins directory (Plugins submenu → "Reload plugins"), then
     /// refresh the Options-tab entry list from the live host and drain its log.
     fn reload_plugins(&mut self) {
@@ -486,11 +565,35 @@ impl App {
         if let Some(pipe) = &mut self.audio {
             pipe.set_volume(s.volume, s.mono);
         }
-        // Sound → SGB audio backend: swap the live SGB machine's coprocessor (a
-        // no-op off SGB). Mirror the choice into `sgb_coprocessor` so a later ROM
-        // (re)load re-injects the same backend. Built-in = byte-identical golden.
-        self.sgb_coprocessor = s.audio_backend.is_coprocessor();
-        self.session.set_sgb_coprocessor(self.sgb_coprocessor);
+        // Sound → device/samplerate/latency/8-bit/quality: rebuild the output
+        // stream, but only when one of those actually changed (Apply otherwise
+        // leaves the running stream untouched — no glitch).
+        if self.audio_prefs() != self.audio_prefs_applied || s.audio_hq != self.audio_hq_applied {
+            self.reopen_audio();
+        }
+        // Joypad → "Audio": start/stop the audio recorder to match the setting.
+        self.sync_audio_recording();
+        // Joypad → "Video": start/stop the AVI video recorder to match the setting.
+        self.sync_video_recording();
+        // Joypad → "Audio channels": start/stop the per-channel WAV recorder.
+        self.sync_channel_recording();
+        // System → "Save RTC in SAV file (VBA compatible)" + "Save BGB legacy RTC
+        // files": choose the .sav RTC layout + the sidecar for the next write.
+        self.session.set_rtc_vba_export(s.rtc_vba_sav);
+        self.session.set_rtc_bgb_legacy(s.rtc_bgb_legacy);
+        // Joypad → game controller: re-derive the live map (Defaults/import may
+        // have changed it; the wizard/clear paths set both in lock-step already).
+        self.gamepad_bindings = crate::gamepad::GamepadBindings::from_config(&s.gamepad_map);
+        // Plugins → dir changed ("..."): rebuild the host from the new directory
+        // (rescans) and refresh the tab's entry list. No-op if unchanged.
+        let cur_dir = self
+            .plugins
+            .dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        if s.plugins.dir != cur_dir {
+            self.rebuild_plugins(&s.plugins.dir);
+        }
         // Power-on RAM init (bgb's UninitedWRAM): store it for the next reset/
         // reload — power-on state, so it doesn't scramble the running machine.
         self.session.set_ram_init(crate::cli::effective_ram_init(
@@ -500,7 +603,9 @@ impl App {
         // Switch the emulated system FIRST: `set_model` rebuilds the machine from
         // the ROM, which resets the PPU palette to the power-on default — so the
         // DMG palette must be (re)applied to the (possibly fresh) machine after.
-        if self.session.set_model(s.model) {
+        // With "automatic reset on system change" off, the choice is deferred and
+        // applied by the next Reset (see `Action::Reset`).
+        if s.auto_reset_on_system_change && self.session.set_model(s.model) {
             self.resync_pacing();
             self.request_game_redraw();
         }
@@ -516,6 +621,9 @@ impl App {
         }
         // Debug-tab disasm display flags → the debugger view.
         self.push_disasm_fmt();
+        // Debug-tab "Registers can be edited" → the debugger's edit menu.
+        self.tools
+            .set_registers_editable(self.settings.registers_editable);
         // Debug-tab "8-bit tile hex" → the VRAM viewer.
         self.tools.set_tile_hex_8bit(self.settings.tile_hex_8bit);
         // Defer opening/closing the standalone memory window to `about_to_wait`,
@@ -550,6 +658,7 @@ impl App {
             lowercase_hex: self.settings.lowercase_hex,
             show_clocks: self.settings.show_clocks,
             rgbds: self.settings.rgbds_disasm,
+            lowercase_disasm: self.settings.lowercase_disasm,
         });
     }
 

@@ -53,6 +53,106 @@ impl App {
         self.input_ops.push((button, pressed));
     }
 
+    /// Drain the controller into the joypad: poll `gilrs` for button/stick edges
+    /// (Options → Joypad → game controller) and feed each through the same
+    /// deferred sub-frame path as the keyboard. A no-op with no controller.
+    pub(crate) fn poll_gamepad(&mut self) {
+        // A rebind wizard is open: swallow controller presses to assign buttons
+        // instead of driving the player.
+        if self.gamepad_wizard.is_some() {
+            if let Some(gp) = self.gamepad.next_pressed() {
+                if let Some(w) = self.gamepad_wizard.as_mut() {
+                    w.bind(gp);
+                }
+                self.commit_gamepad_wizard_if_done();
+            }
+            return;
+        }
+        let ops = self.gamepad.poll(&self.gamepad_bindings);
+        // "Game controller works only if app has focus": drop the edges when
+        // unfocused (still drained above, so nothing backs up). Any button held
+        // across focus loss is released by `release_all_input`.
+        if self.settings.gamepad_needs_focus && !self.window_focused {
+            return;
+        }
+        for (button, pressed) in ops {
+            self.set_gamepad_button(button, pressed);
+        }
+    }
+
+    /// Commit a finished controller-config wizard: adopt its bindings, persist
+    /// them, and drop the wizard.
+    pub(crate) fn commit_gamepad_wizard_if_done(&mut self) {
+        if let Some(binds) = self.gamepad_wizard.as_ref().and_then(|w| w.finished()) {
+            let cfg = binds.to_config();
+            self.gamepad_bindings = binds;
+            self.gamepad_wizard = None;
+            self.apply_gamepad_map(cfg);
+        }
+    }
+
+    /// Commit a new controller map (from the wizard or "clear"): store it, mirror
+    /// it into an open Options dialog's working + baseline scratch so a later
+    /// Apply/Cancel can't revert this already-committed change, and persist.
+    pub(crate) fn apply_gamepad_map(&mut self, cfg: String) {
+        self.settings.gamepad_map = cfg;
+        if let Some(o) = &mut self.options {
+            o.working.gamepad_map = self.settings.gamepad_map.clone();
+            o.baseline.gamepad_map = self.settings.gamepad_map.clone();
+        }
+        crate::settings_file::save(&self.settings, &self.recent);
+    }
+
+    /// Apply a controller button edge to the joypad, with the same SOCD filter as
+    /// the keyboard (Joypad → "allow pressing L+R or U+D") over a controller-only
+    /// held-set — a stick can't report opposing directions, but a face button
+    /// mapped to a direction could.
+    fn set_gamepad_button(&mut self, button: Button, pressed: bool) {
+        let idx = crate::gamepad::gb_index(button);
+        self.gamepad_held[idx] = pressed;
+        if pressed {
+            if let Some(opp) = keymap::socd_suppress(button, self.settings.allow_opposing) {
+                self.queue_input(opp, false);
+            }
+            self.queue_input(button, true);
+        } else {
+            self.queue_input(button, false);
+            if let Some(opp) = keymap::socd_suppress(button, self.settings.allow_opposing) {
+                if self.gamepad_held[crate::gamepad::gb_index(opp)] {
+                    self.queue_input(opp, true);
+                }
+            }
+        }
+    }
+
+    /// Rapid-fire (Joypad "Rapid speed"): while `[`/`]` is held, toggle A/B every
+    /// `rapid_speed` frames; release cleanly when the key is let go. Queued into
+    /// the same deferred-input path as a real press. Called once per emulated
+    /// frame batch, before `apply_pending_input`.
+    pub(crate) fn apply_autofire(&mut self) {
+        self.rapid_counter = self.rapid_counter.wrapping_add(1);
+        let period = self.settings.rapid_speed.max(1);
+        let on = (self.rapid_counter / period) % 2 == 0;
+        if self.rapid_a {
+            if on != self.rapid_a_on {
+                self.queue_input(Button::A, on);
+                self.rapid_a_on = on;
+            }
+        } else if self.rapid_a_on {
+            self.queue_input(Button::A, false);
+            self.rapid_a_on = false;
+        }
+        if self.rapid_b {
+            if on != self.rapid_b_on {
+                self.queue_input(Button::B, on);
+                self.rapid_b_on = on;
+            }
+        } else if self.rapid_b_on {
+            self.queue_input(Button::B, false);
+            self.rapid_b_on = false;
+        }
+    }
+
     /// Apply any deferred joypad ops at their captured sub-frame offset, just
     /// before the frame pacers run. A no-op when nothing is queued.
     pub(crate) fn apply_pending_input(&mut self) {
@@ -77,6 +177,7 @@ impl App {
     /// they stick.
     pub(crate) fn release_all_input(&mut self) {
         self.buttons.clear();
+        self.gamepad_held = [false; 8];
         // No release events will arrive for the keys held at focus loss, so forget
         // them — else a later fresh press would look like a still-held repeat and
         // be dropped by the key-repeat guard.

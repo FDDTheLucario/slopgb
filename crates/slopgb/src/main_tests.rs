@@ -10,13 +10,12 @@ fn blank_app() -> App {
         mute: true,
         boot: None,
         sgb_bios: None,
-        sgb_coprocessor: false,
         mcp_port: None,
         plugins_dir: None,
         msu1: None,
         ram_init: None,
     };
-    App::new(opts, Session::blank(Model::Dmg), false, None, None, false)
+    App::new(opts, Session::blank(Model::Dmg), false, None, None)
 }
 
 #[test]
@@ -33,6 +32,88 @@ fn no_rom_idles_emulation_like_pause() {
         !should_idle(false, false, true),
         "running with a ROM emulates"
     );
+}
+
+#[test]
+fn recovery_save_state_restores_a_crashed_session_and_clears_on_clean_quit() {
+    let dir = std::env::temp_dir().join(format!("slopgb-recov-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rom_path = dir.join("recov.gb");
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x147] = 0x00; // ROM ONLY
+    std::fs::write(&rom_path, &rom).unwrap();
+
+    // Load, stamp a WRAM marker, and force a recovery write (bypass the throttle).
+    let mut app = blank_app();
+    app.load_dropped(&rom_path);
+    app.session.gb.debug_write(0xC000, 0xAB);
+    app.recovery_next = std::time::Instant::now();
+    app.write_recovery_state();
+    assert!(
+        app.recovery_path.as_ref().unwrap().exists(),
+        "recovery file written"
+    );
+
+    // A crash = no clean quit → the file survives, so the next load restores it.
+    let mut crashed = blank_app();
+    crashed.load_dropped(&rom_path);
+    assert_eq!(
+        crashed.session.gb.debug_read(0xC000),
+        0xAB,
+        "restored the crashed machine's WRAM"
+    );
+
+    // A clean quit deletes the recovery, so the following load starts fresh.
+    crashed.clear_recovery_state();
+    let mut fresh = blank_app();
+    fresh.load_dropped(&rom_path);
+    assert_eq!(
+        fresh.session.gb.debug_read(0xC000),
+        0x00,
+        "fresh machine after a clean quit"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn audio_latency_frames_maps_the_slider_monotonically() {
+    assert_eq!(audio_latency_frames(0.0), 128, "low end");
+    assert_eq!(audio_latency_frames(1.0), 4096, "high end");
+    assert!(audio_latency_frames(0.5) > 128 && audio_latency_frames(0.5) < 4096);
+    // Out-of-range fractions clamp, never panic.
+    assert_eq!(audio_latency_frames(-1.0), 128);
+    assert_eq!(audio_latency_frames(2.0), 4096);
+}
+
+#[test]
+fn should_poll_spins_for_turbo_or_reduce_cpu_off() {
+    assert!(
+        !should_poll(false, true),
+        "normal run parks (reduce-cpu on)"
+    );
+    assert!(should_poll(true, true), "turbo always polls");
+    assert!(should_poll(false, false), "reduce-cpu off spins");
+    assert!(should_poll(true, false));
+}
+
+#[test]
+fn cpu_usage_pct_is_the_non_halted_share() {
+    assert_eq!(cpu_usage_pct(0, 0), 0.0, "no elapsed cycles → 0");
+    assert_eq!(cpu_usage_pct(1000, 0), 100.0, "never halted → 100%");
+    assert_eq!(cpu_usage_pct(1000, 1000), 0.0, "fully halted → 0%");
+    assert_eq!(cpu_usage_pct(1000, 250), 75.0, "quarter halted → 75%");
+    // halt can't exceed total, but a bad delta must not underflow/panic.
+    assert_eq!(cpu_usage_pct(100, 200), 0.0, "saturates, no panic");
+}
+
+#[test]
+fn rom_load_error_box_respects_the_show_errors_option() {
+    // Off → no box (silent, console-only). On → a box carrying the message.
+    assert_eq!(rom_load_error_box(false, "bad rom"), None);
+    let b = rom_load_error_box(true, "bad rom").expect("box shown when enabled");
+    assert_eq!(b.title, "ROM load failed");
+    assert_eq!(b.lines, vec!["bad rom".to_string()]);
 }
 
 #[test]

@@ -9,9 +9,12 @@ members = [
     "crates/slopgb-plugin-host",
     "crates/slopgb-sgb-coprocessor",
     "crates/slopgb-snes-apu",
+    "crates/slopgb-snes-ppu",
+    "crates/slopgb-snes-ppu-plugin",
     "crates/slopgb-spc700-plugin",
     "crates/slopgb-w65c816",
     "crates/slopgb-w65c816-plugin",
+    "xtask",
 ]
 
 [workspace.package]

@@ -114,7 +114,30 @@ impl ApplicationHandler for App {
                 if let Some(sym) = crate::app_path::sym_sidecar(&rom) {
                     self.load_symbols(&sym);
                 }
+                // Recovery save state for a CLI-launched ROM (drag-drop loads go
+                // through `load_dropped`, which arms it there).
+                self.arm_recovery(&rom);
             }
+        }
+        // System → RTC save options: apply the persisted choices to the session
+        // built for a CLI-launched ROM (drag-drop loads set them in
+        // `load_dropped`).
+        self.session.set_rtc_vba_export(self.settings.rtc_vba_sav);
+        self.session
+            .set_rtc_bgb_legacy(self.settings.rtc_bgb_legacy);
+        // Debug → "Start in debugger": open the debugger window at launch (unless
+        // SLOPGB_OPEN_TOOLS already did, to avoid toggling it back closed).
+        if self.settings.start_in_debugger && !self.tools.is_open(ui::ToolWindow::Debugger) {
+            self.tools.toggle(event_loop, ui::ToolWindow::Debugger);
+            self.push_disasm_fmt();
+            self.tools
+                .set_registers_editable(self.settings.registers_editable);
+            self.tools.set_symbols(self.symbols.clone());
+        }
+        // Misc → "Load ROM dialog on startup": if enabled and no ROM was given
+        // on the command line, pop the file picker so the user can pick one.
+        if self.settings.load_rom_dialog_on_startup && !self.rom_loaded {
+            self.open_path_prompt("Load ROM", crate::PathPurpose::LoadRom);
         }
         self.resync_pacing();
         self.update_title();
@@ -301,6 +324,7 @@ impl ApplicationHandler for App {
             // events, so drop all input before any button can stick. With
             // Options → Misc → "Pause if losing focus" set, also pause.
             WindowEvent::Focused(false) | WindowEvent::Occluded(true) => {
+                self.window_focused = false;
                 self.release_all_input();
                 if self.settings.pause_on_focus_loss && !self.paused {
                     self.paused = true;
@@ -312,6 +336,7 @@ impl ApplicationHandler for App {
             // Refocus auto-resumes, but only a pause we induced — a manual pause
             // (P) stays put (bgb's "Pause if losing focus" resume behaviour).
             WindowEvent::Focused(true) | WindowEvent::Occluded(false) => {
+                self.window_focused = true;
                 if self.paused_by_focus && self.paused {
                     self.paused = false;
                     self.resync_pacing();
@@ -342,6 +367,10 @@ impl ApplicationHandler for App {
         if self.window.is_none() {
             return; // not resumed yet
         }
+        // Drain controller input every wake (before the idle guard, so the gilrs
+        // queue never backs up while paused). Frozen presses are dropped by
+        // `flush_idle_input` like keyboard presses.
+        self.poll_gamepad();
         // Serve any queued MCP tool calls first — before the idle guard, so an
         // agent can still inspect a paused / breakpoint-halted machine (that is
         // exactly when it wants to). A no-op when no server is running.
@@ -376,6 +405,24 @@ impl ApplicationHandler for App {
             }
             return;
         }
+        // Rewind (Backspace held + "Rewind enabled"): step backward through the
+        // save-state ring at frame cadence instead of advancing. Falls through to
+        // normal play when the ring is exhausted.
+        if self.rewinding && self.settings.rewind_enabled && self.session.rewind_step() {
+            self.flush_idle_input(); // don't feed presses into a rewound machine
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+            self.tools.request_redraw_all();
+            self.update_fps(0);
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + crate::FRAME_DURATION,
+            ));
+            return;
+        }
+        // Rapid-fire (Joypad "Rapid speed") queues its A/B toggles into the same
+        // deferred-input path, so drive it just before applying that input.
+        self.apply_autofire();
         // Apply deferred joypad input at its sub-frame offset before emulating,
         // so the joypad interrupt lands on a realistic, varied LCD line.
         self.apply_pending_input();
@@ -403,6 +450,14 @@ impl ApplicationHandler for App {
         self.check_audio_health();
         if frames > 0 {
             self.session.autosave();
+            self.write_recovery_state();
+            // Build the rewind ring while playing forward (System → "Rewind
+            // enabled"); throttled internally to the capture interval.
+            if self.settings.rewind_enabled {
+                self.session.capture_rewind();
+            }
+            // Joypad → "Video": append this frame to the AVI (no-op when off).
+            self.write_video_frame();
             // Drive read-only plugins once per rendered frame-batch. A no-op with
             // no plugins loaded (default), so the golden path is untouched.
             self.plugins.pump(&self.session.gb);
@@ -412,8 +467,10 @@ impl ApplicationHandler for App {
             if let Some(window) = &self.window {
                 window.request_redraw();
             }
-            // Keep the open debug windows tracking live machine state.
-            self.tools.request_redraw_all();
+            // Keep the open debug windows tracking live machine state (the
+            // standalone memory viewer honours "Live update memory viewer").
+            self.tools
+                .request_redraw_live(self.settings.mem_live_update);
         }
         self.update_fps(frames);
         // Both audio and timer pacing now march the `next_frame` grid (audio
@@ -422,7 +479,7 @@ impl ApplicationHandler for App {
         // transient bands still burst (CatchUp) or skip (Hold), so `frames` may
         // be >1 or 0 on a given wake — the redraw below is gated on frames > 0.
         // Turbo free-runs.
-        let flow = if self.turbo {
+        let flow = if crate::should_poll(self.turbo, self.settings.reduce_cpu) {
             ControlFlow::Poll
         } else {
             ControlFlow::WaitUntil(self.next_frame)
@@ -432,5 +489,38 @@ impl ApplicationHandler for App {
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         self.session.flush_save();
+        // Clean quit: drop the recovery state so the next load starts fresh.
+        self.clear_recovery_state();
+        // Finalise an in-progress video recording so it isn't lost.
+        self.finish_video_recording();
+        // Finalise an in-progress audio recording so it isn't lost.
+        if self
+            .audio
+            .as_ref()
+            .is_some_and(crate::pacing::AudioPipe::is_recording)
+        {
+            if let Some(frames) = self
+                .audio
+                .as_mut()
+                .map(crate::pacing::AudioPipe::take_record)
+            {
+                self.save_wav_recording(&frames);
+            }
+        }
+        // Finalise an in-progress per-channel recording too.
+        if self
+            .audio
+            .as_ref()
+            .is_some_and(crate::pacing::AudioPipe::is_recording_channels)
+        {
+            if let Some(chans) = self
+                .audio
+                .as_mut()
+                .map(crate::pacing::AudioPipe::take_record_channels)
+            {
+                self.session.gb.set_record_channels(false);
+                self.save_channel_recordings(&chans);
+            }
+        }
     }
 }

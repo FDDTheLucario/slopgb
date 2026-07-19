@@ -9,6 +9,7 @@ use super::*;
 /// Interrupt vector addresses (bank 0): (emulation, native).
 const BRK_VECTOR: (u32, u32) = (0xFFFE, 0xFFE6);
 const COP_VECTOR: (u32, u32) = (0xFFF4, 0xFFE4);
+const NMI_VECTOR: (u32, u32) = (0xFFFA, 0xFFEA);
 
 impl Cpu {
     /// `BRK`: software interrupt through the IRQ/BRK vector.
@@ -37,6 +38,44 @@ impl Cpu {
         self.set_flag(flag::D, false);
         self.regs.pbr = 0;
         let addr = if self.regs.e { vector.0 } else { vector.1 };
+        let lo = self.read8(bus, addr) as u16;
+        let hi = self.read8(bus, addr.wrapping_add(1)) as u16;
+        self.regs.pc = lo | (hi << 8);
+    }
+
+    /// Hardware NMI: push the return state and vector through `$FFFA`
+    /// (emulation) / `$FFEA` (native), per the WDC W65C816S datasheet. Unlike
+    /// `BRK` there is no signature byte — the pushed PC is the next
+    /// un-executed instruction — and the emulation-mode pushed P has bit 4
+    /// clear (the hardware-interrupt signature). Wakes a `WAI`-ing CPU.
+    /// The caller invokes this between instructions (a real /NMI is sampled
+    /// at instruction boundaries); [`Cpu::nmi`] wraps it with the per-call
+    /// cycle accounting.
+    pub(crate) fn nmi_sequence(&mut self, bus: &mut impl Bus) {
+        self.waiting = false;
+        self.io();
+        self.io();
+        if !self.regs.e {
+            let pbr = self.regs.pbr;
+            self.push8(bus, pbr);
+        }
+        let pc = self.regs.pc;
+        self.push8(bus, (pc >> 8) as u8);
+        self.push8(bus, pc as u8);
+        let p = if self.regs.e {
+            self.regs.p & !flag::X
+        } else {
+            self.regs.p
+        };
+        self.push8(bus, p);
+        self.set_flag(flag::I, true);
+        self.set_flag(flag::D, false);
+        self.regs.pbr = 0;
+        let addr = if self.regs.e {
+            NMI_VECTOR.0
+        } else {
+            NMI_VECTOR.1
+        };
         let lo = self.read8(bus, addr) as u16;
         let hi = self.read8(bus, addr.wrapping_add(1)) as u16;
         self.regs.pc = lo | (hi << 8);

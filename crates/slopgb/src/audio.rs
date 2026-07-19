@@ -148,16 +148,51 @@ pub struct AudioOutput {
     failed: Arc<AtomicBool>,
 }
 
+/// Sound-tab device preferences applied when opening the output stream. Every
+/// field is best-effort: an unsupported device/rate/format falls back to the
+/// device default, so audio never breaks (Sound → soundcard / samplerate /
+/// latency / 8-bit output).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AudioPrefs {
+    /// Output device by name (empty = the host default).
+    pub device: String,
+    /// Requested output sample rate (0 = the device default).
+    pub sample_rate: u32,
+    /// Requested device buffer size in frames (0 = the device default).
+    pub latency_frames: u32,
+    /// Force 8-bit (`U8`) output when the device supports it.
+    pub eight_bit: bool,
+}
+
 impl AudioOutput {
-    /// Open the default output device at its default stream config.
-    pub fn new() -> Result<Self, String> {
+    /// Every output device's name, for the Sound-tab soundcard dropdown. The
+    /// host default is not specially marked; an empty [`AudioPrefs::device`]
+    /// selects it.
+    #[must_use]
+    pub fn device_names() -> Vec<String> {
+        cpal::default_host()
+            .output_devices()
+            .map(|it| it.filter_map(|d| d.name().ok()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Open the output stream honouring `prefs`, falling back to the device
+    /// default for any unsupported preference (so audio always opens if a
+    /// device exists).
+    pub fn with_prefs(prefs: &AudioPrefs) -> Result<Self, String> {
         let host = cpal::default_host();
+        // Named device, else the host default.
         let device = host
-            .default_output_device()
+            .output_devices()
+            .ok()
+            .and_then(|mut it| {
+                (!prefs.device.is_empty())
+                    .then(|| it.find(|d| d.name().is_ok_and(|n| n == prefs.device)))
+                    .flatten()
+            })
+            .or_else(|| host.default_output_device())
             .ok_or("no audio output device")?;
-        let supported = device
-            .default_output_config()
-            .map_err(|e| format!("no default stream config: {e}"))?;
+        let supported = choose_config(&device, prefs)?;
         let sample_rate = supported.sample_rate().0;
         let channels = usize::from(supported.channels());
         if sample_rate == 0 || channels == 0 {
@@ -177,16 +212,30 @@ impl AudioOutput {
             cpal::SupportedBufferSize::Unknown => DEFAULT_SCRATCH_FRAMES,
         };
         let failed = Arc::new(AtomicBool::new(false));
-        let config = supported.config();
-        let stream = build_for_format(
-            supported.sample_format(),
-            &device,
-            &config,
-            channels,
-            Arc::clone(&ring),
-            &failed,
-            scratch_frames,
-        )
+        let mut config = supported.config();
+        let fmt = supported.sample_format();
+        let build = |config: &cpal::StreamConfig| {
+            build_for_format(
+                fmt,
+                &device,
+                config,
+                channels,
+                Arc::clone(&ring),
+                &failed,
+                scratch_frames,
+            )
+        };
+        // Latency: a requested buffer size. If the device rejects a fixed size,
+        // retry with its default so the latency preference can't disable audio.
+        let stream = if prefs.latency_frames != 0 {
+            config.buffer_size = cpal::BufferSize::Fixed(prefs.latency_frames);
+            build(&config).or_else(|_| {
+                config.buffer_size = cpal::BufferSize::Default;
+                build(&config)
+            })
+        } else {
+            build(&config)
+        }
         .map_err(|e| format!("cannot build output stream: {e}"))?;
         stream
             .play()
@@ -219,6 +268,50 @@ impl AudioOutput {
     pub fn failed(&self) -> bool {
         self.failed.load(Ordering::Relaxed)
     }
+}
+
+/// The device name after `current` in the cycle `["" (host default), dev0,
+/// dev1, …]` — what the Sound-tab soundcard dropdown advances to on click. Pure
+/// over `devices` so it is unit-testable; the caller passes
+/// [`AudioOutput::device_names`].
+#[must_use]
+pub fn cycle_output_device(current: &str, devices: &[String]) -> String {
+    let mut list = Vec::with_capacity(devices.len() + 1);
+    list.push(String::new()); // the host default
+    list.extend(devices.iter().cloned());
+    let idx = list.iter().position(|d| d == current).unwrap_or(0);
+    list[(idx + 1) % list.len()].clone()
+}
+
+/// Pick the device's stream config honouring the requested sample rate / 8-bit
+/// format (Sound tab), else its default. Best-effort: an unsupported
+/// combination silently uses the default so audio still opens.
+fn choose_config(
+    device: &cpal::Device,
+    prefs: &AudioPrefs,
+) -> Result<cpal::SupportedStreamConfig, String> {
+    let default = device
+        .default_output_config()
+        .map_err(|e| format!("no default stream config: {e}"))?;
+    if prefs.sample_rate == 0 && !prefs.eight_bit {
+        return Ok(default);
+    }
+    let want = if prefs.sample_rate != 0 {
+        prefs.sample_rate
+    } else {
+        default.sample_rate().0
+    };
+    if let Ok(ranges) = device.supported_output_configs() {
+        for r in ranges {
+            if prefs.eight_bit && r.sample_format() != cpal::SampleFormat::U8 {
+                continue;
+            }
+            if r.min_sample_rate().0 <= want && want <= r.max_sample_rate().0 {
+                return Ok(r.with_sample_rate(cpal::SampleRate(want)));
+            }
+        }
+    }
+    Ok(default) // the requested rate/format isn't supported → device default
 }
 
 /// Dispatch on the device's sample format, building the stream with the
@@ -341,16 +434,26 @@ pub struct Resampler {
     prev: (f32, f32),
     /// False until `prev` has been seeded from the first input frame.
     primed: bool,
+    /// Linear interpolation (Sound → "High quality sound rendering"); when off,
+    /// a cheaper zero-order hold (nearest, audibly grainier on resample).
+    linear: bool,
 }
 
 impl Resampler {
     pub fn new(src_rate: u32, dst_rate: u32) -> Self {
+        Self::new_quality(src_rate, dst_rate, true)
+    }
+
+    /// Like [`Self::new`] but choosing the interpolation quality (`linear` =
+    /// high quality; false = zero-order hold).
+    pub fn new_quality(src_rate: u32, dst_rate: u32, linear: bool) -> Self {
         Self {
             src_rate,
             dst_rate,
             pos: 0.0,
             prev: (0.0, 0.0),
             primed: false,
+            linear,
         }
     }
 
@@ -372,11 +475,15 @@ impl Resampler {
         let step = f64::from(self.src_rate) / f64::from(self.dst_rate);
         for &cur in input {
             while self.pos < 1.0 {
-                let t = self.pos as f32;
-                out.push((
-                    self.prev.0 + (cur.0 - self.prev.0) * t,
-                    self.prev.1 + (cur.1 - self.prev.1) * t,
-                ));
+                out.push(if self.linear {
+                    let t = self.pos as f32;
+                    (
+                        self.prev.0 + (cur.0 - self.prev.0) * t,
+                        self.prev.1 + (cur.1 - self.prev.1) * t,
+                    )
+                } else {
+                    self.prev // zero-order hold
+                });
                 self.pos += step;
             }
             self.pos -= 1.0;
@@ -388,6 +495,39 @@ impl Resampler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cycle_output_device_wraps_through_default_and_devices() {
+        let devs = vec!["Speakers".to_string(), "HDMI".to_string()];
+        // "" (default) -> dev0 -> dev1 -> back to default.
+        assert_eq!(cycle_output_device("", &devs), "Speakers");
+        assert_eq!(cycle_output_device("Speakers", &devs), "HDMI");
+        assert_eq!(cycle_output_device("HDMI", &devs), "");
+        // An unknown current name restarts from the default's successor.
+        assert_eq!(cycle_output_device("gone", &devs), "Speakers");
+        // With no devices, it stays on the default.
+        assert_eq!(cycle_output_device("", &[]), "");
+    }
+
+    #[test]
+    fn resampler_quality_selects_interpolation() {
+        // 1 Hz -> 2 Hz: linear inserts the midpoint; zero-order hold repeats.
+        let input = [(0.0, 0.0), (1.0, 1.0)];
+        let mut hi = Resampler::new_quality(1, 2, true);
+        let mut lo = Resampler::new_quality(1, 2, false);
+        let (mut a, mut b) = (Vec::new(), Vec::new());
+        hi.run(&input, &mut a);
+        lo.run(&input, &mut b);
+        // The second output frame is the interpolated 0.5 (hi) vs a hold (lo).
+        assert!(
+            a.iter().any(|&(l, _)| (l - 0.5).abs() < 1e-6),
+            "linear midpoint"
+        );
+        assert!(
+            b.iter().all(|&(l, _)| l == 0.0 || l == 1.0),
+            "zero-order hold: only source values"
+        );
+    }
 
     fn ring_with(frames: &[(f32, f32)]) -> Arc<SpscRing> {
         let ring = Arc::new(SpscRing::with_min_capacity(frames.len().max(1)));

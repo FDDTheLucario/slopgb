@@ -148,6 +148,27 @@ fn cdl_ranges_lists_continuous_spans_in_address_form() {
 }
 
 #[test]
+fn coprocessor_reports_not_sgb_on_dmg_and_a_backend_on_sgb() {
+    let syms = SymbolTable::default();
+    let mut bps = Breakpoints::default();
+    // A DMG machine has no SGB coprocessor at all.
+    let dmg = GameBoy::new(Model::Dmg, rom_at_0100(&[0x00])).unwrap();
+    let out = call_text(&Call::Coprocessor, &dmg, &mut bps, &syms);
+    let lower = out.to_lowercase();
+    assert!(
+        lower.contains("not") && lower.contains("super game boy"),
+        "DMG must report no SGB coprocessor: {out:?}"
+    );
+    // An SGB machine has the built-in HLE APU by default (no wasm coprocessor).
+    let sgb = GameBoy::new(Model::Sgb, rom_at_0100(&[0x00])).unwrap();
+    let out = call_text(&Call::Coprocessor, &sgb, &mut bps, &syms);
+    assert!(
+        out.contains("HLE"),
+        "SGB default backend is the built-in HLE: {out:?}"
+    );
+}
+
+#[test]
 fn registers_has_every_field() {
     let gb = GameBoy::new(Model::Dmg, rom_at_0100(&[0x00])).unwrap();
     let syms = SymbolTable::default();

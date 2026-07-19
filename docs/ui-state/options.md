@@ -20,12 +20,14 @@ where bgb itself greys them).
 
 | Tab | Setting → effect |
 |---|---|
-| System | Emulated system (Gameboy/Gameboy Color/automatic → `ModelChoice` → `Session::set_model` rebuilds the machine on change; palette re-applied after) |
+| System | Emulated system (Gameboy/Gameboy Color/automatic → `ModelChoice` → `Session::set_model` rebuilds the machine on change; palette re-applied after); **Save RTC in SAV file (VBA compatible)** — writes an MBC3 cart's RTC as VBA's portable `.sav` footer (raw SRAM + a wall-clock-stamped 48-byte block) instead of slopgb's own, via the golden-safe read-only `GameBoy::battery_sram` / `rtc_state` + `rtc_export::vba_footer` (`Session::save_image`; the dirty check stays on the timestamp-free image so the moving clock doesn't force redundant writes). slopgb's core already reads the VBA footer back. **Save BGB legacy RTC files** additionally writes a `<rom>.rtc` sidecar (the same shared 48-byte footer) on the same dirty edge (`Session::write_rtc_sidecar`) |
 | GB Colors | scheme (`SCHEMES` presets → `GameBoy::set_dmg_palette`) |
-| Sound | volume + mono (`AudioPipe::set_volume` gain/downmix); **SGB audio backend** dropdown (Built-in HLE APU / SGB coprocessor → `Settings.audio_backend` → `Session::set_sgb_coprocessor`, the same seam `--sgb-coprocessor` drives; the CLI flag/env still wins the launch, else the persisted choice is honored at startup. Default Built-in → byte-identical. A no-op off SGB) |
-| Graphics | stretch (→ fullscreen-stretched window size) |
-| Debug | lowercase-hex + show-clocks (→ `DisasmFmt` via `tools.set_disasm_fmt`); "pressing Esc shows debugger" (`Settings.esc_shows_debugger`, default on → `handle_key` opens the debugger on Esc instead of quitting); RGBDS syntax; "memory viewer in own window" |
-| Misc | fast-forward-speed + framerate-limit sliders (→ `app_pacing` `turbo_max_frames`/`frame_interval`); show-framerate (title); freeze-recent-ROMs (`push_recent` gate); pause-if-losing-focus (auto-pause on focus loss, auto-resume on refocus unless manually paused via `App.paused_by_focus`) |
+| Sound | volume + mono (`AudioPipe::set_volume` gain/downmix). No SGB-backend control: the SGB coprocessor is a plugin — `spc700.wasm` + `w65c816.wasm` in the plugins dir (Options→Plugins / `--plugins`) auto-replace the built-in HLE `SgbApu` on an SGB machine (`Session::set_plugins_dir`); absent, the HLE default stands (byte-identical). A no-op off SGB |
+| Graphics | stretch (→ fullscreen-stretched window size); **frame blend** (`postfx` present filter — averages the frame with the previous one); **SGB border in screenshot** (`save_screenshot` uses the 256×224 composite when a border is loaded) |
+| GB Colors | (above) plus **per-colour RGB editor** (bgb's three sliders + number readouts editing the selected shade of `dmg_palette`; **select** dropdown picks the shade; **0-31 numbers** toggles the readouts between 8-bit 0-255 and native 5-bit 0-31 — `v8>>3`, captured 1:1 from real bgb: 232/252/204→29/31/25, `docs/bgb-reference/options/options-gbcolors-031.png`; edits snap to `v5<<3` in 5-bit mode) + **DMG on GBC LCD colors** + **contrast** wheel — `postfx` per-pixel present filters (frontend-only, golden-safe) |
+| Debug | lowercase-hex + show-clocks (→ `DisasmFmt` via `tools.set_disasm_fmt`); "pressing Esc shows debugger" (`Settings.esc_shows_debugger`, default on → `handle_key` opens the debugger on Esc instead of quitting); RGBDS syntax; "memory viewer in own window"; **Registers can be edited** (→ `DebuggerState.registers_editable` via `tools.set_registers_editable`; off greys the register-edit menu); **Start in debugger** (opens the debugger window at launch); **Live update memory viewer** (`tools.request_redraw_live` skips the standalone memory window's per-frame redraw when off — it then repaints only on interaction, bgb's non-continuous refresh); **GB CPU usage meter** (the emulated CPU's non-halted duty %, from the golden-safe `GameBoy::halt_cycles` counter, shown in the window title alongside FPS) |
+| Misc | fast-forward-speed + framerate-limit sliders (→ `app_pacing` `turbo_max_frames`/`frame_interval`); show-framerate (title); freeze-recent-ROMs (`push_recent` gate); pause-if-losing-focus (auto-pause on focus loss, auto-resume on refocus unless manually paused via `App.paused_by_focus`); **Show errors on ROM load** (a failed load pops an info box, default on); **Load ROM dialog on startup** (opens the picker at launch when no CLI ROM) |
+| Joypad | **Screenshot button** saves↔copies (copies puts the frame on the clipboard as PNG via `clipboard::copy_image_png`); **Screenshots** format bmp↔png (`ScreenshotFormat` → `screenshot::to_bmp` / `mcp::png::encode`); **Audio** records a WAV, **Video** records an uncompressed AVI (`avi::AviWriter` streams the 160×144 LCD one frame per rendered batch, patching sizes + `idx1` on finalise; toggling off / quitting finalises); **Audio channels** records the 4 GB sound channels to separate WAVs (`slopgb-<stamp>-chN.wav`) via the golden-safe core tap `GameBoy::set_record_channels` / `drain_audio_channels` — each channel's isolated mono output, box-averaged over the mix's own window |
 | Theme | Light/Dark/Classic radios → `Settings.theme` (`ThemeChoice`; the render path recolors from it each redraw — see [theming.md](theming.md)). Custom themes stay config-only. |
 | Plugins | Per-plugin **enable** checkbox (`Field::PluginEnable(i)` → `PluginConfig.entries[i].enabled` → `PluginHost::set_enabled`, skipping a disabled plugin's `on_frame`), the read-only plugins-dir display, and an **allow-mutation** toggle (`Field::PluginAllowMutation`, default off). No bgb equivalent — see [plugin-api.md](plugin-api.md#managing-plugins-from-the-ui). |
 
@@ -66,8 +68,24 @@ clean golden-safe detector/backend.
   opposite direction on a new press and **resurrects** a still-held one on release
   (last-input priority); verified via the golden-safe `&self` read
   `GameBoy::debug_button`→`Joypad::pressed` (tests only).
-- The rest (game-controller config/clear, Mappable-button-records,
-  Screenshots/Rapid-speed/Screenshot-button combos, joystick-ID) is faithful-but-inert.
+- **Game controller** (`gilrs`): a plugged controller drives the joypad through a
+  rebindable `gamepad::GamepadBindings` (default South=A/East=B/D-pad+left-stick =
+  directions, mapped across pads via gilrs's SDL_GameControllerDB) fed into the same
+  deferred sub-frame input path as the keyboard (`App::poll_gamepad`/`set_gamepad_
+  button`, polled each `about_to_wait`). **configure game controller** opens a
+  rebind wizard sharing the keyboard wizard's modal (`gamepad::GamepadConfigWizard`
+  → `keymap::render_rebind_wizard`; binds the next controller press per step);
+  **clear game controller** unbinds everything. The map persists (`Settings.
+  gamepad_map`, 8 comma-separated controller-button names). **Game controller works
+  only if app has focus** (`Settings.gamepad_needs_focus`, default on) gates the
+  input on window focus — meaningful because gilrs reads the device directly, unlike
+  the keyboard.
+- **Screenshot button** (saves↔copies) and **Screenshots** (bmp↔png) combos are
+  live (see the Live-settings table). The still-inert Joypad chrome is the
+  Mappable-button-records (Audio/Video/channels are live), Rapid-speed combo (live),
+  the joypad-0 selector, "configure extra buttons", the MBC7 joystick-ID, and the
+  "Keyboard works only if app has focus" check (winit only delivers keys to the
+  focused window, so it is always in effect).
 
 ## Live input timing (`app_input` + `input::apply_input`)
 
@@ -118,7 +136,31 @@ saved on ROM load + Quit. bgb's window-geometry / open-on-start keys have no
 slopgb equivalent — preserved verbatim, not acted on. Phase 1 complete; phase 2
 (a modern native format) is planned.
 
+Now live (were inert): reduce-CPU-usage, recovery-save-state, auto-reset-on-
+system-change, the three remaining Exceptions breaks (OAM-DMA-bad-access,
+16-bit-inc/dec-FE00-FEFF, SGB-transfer-start — golden-safe core detectors),
+lowercase-disassembler, the whole Sound row (soundcard / samplerate / latency /
+8-bit / high-quality), Graphics doubler (scale2x) + disable-SGB-colors (golden-
+safe PPU `sgb_mono`), System Rewind (Backspace, a savestate ring), Joypad
+rapid-speed (`[`/`]` auto-fire) + Audio WAV recording + Video AVI recording +
+Audio-channels recording (golden-safe per-channel APU tap) + VBA-compatible RTC
+`.sav` export + BGB-legacy `.rtc` sidecar (golden-safe read-only RTC accessors) +
+the GB Colors per-colour RGB editor with **0-31 numbers** (captured 1:1 from real
+bgb via the wine rig). See the Live table.
+
 ## Inert
 
-SGB, game-controller config, WAV/AVI, rewind, RTC, Load-ROM-on-startup render
-faithfully but inert — slopgb has no backend for them.
+Still inert — each is a genuine hard constraint (a banned dep, absent core
+hardware, the golden-safe law, or no softbuffer/desktop equivalent), NOT a
+buildable control:
+
+- **Model detection** (GB-pocket/SGB2 · GBA · GB Player · MGB-auto-border) — the
+  core has no distinct GBA/MGB/GB-Player models to detect into.
+- **Waitloop detection** — a speed hack that skips CPU wait loops → perturbs
+  emulated timing → forbidden by the golden-safe law.
+- **Hard-blocked**: `bpp`/`output`/`vsync` (DirectDraw-era concepts, no softbuffer
+  equivalent); the joypad-0 selector (single player); "configure extra buttons"
+  (maps non-Game-Boy controls — no target); the MBC7 joystick-ID (the core has no
+  MBC7 tilt sensor); the "Keyboard works only if app has focus" check (winit only
+  delivers keys to the focused window). The game-controller config/clear + its
+  focus gate are **now live** via `gilrs` (see the Joypad section).

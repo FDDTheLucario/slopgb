@@ -309,6 +309,9 @@ fn armed_debug_hooks_do_not_perturb_emulation() {
             ]);
             gb.set_exceptions(EXC_LD_B_B | EXC_INVALID_OPCODE | EXC_ECHO_RAM | EXC_LCD_OFF_VBLANK);
             gb.set_profiling(true);
+            // The per-channel recording tap only reads channel state into side
+            // buffers; arming it must not perturb the machine either.
+            gb.set_record_channels(true);
         }
         gb
     };

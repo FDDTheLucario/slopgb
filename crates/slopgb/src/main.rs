@@ -20,6 +20,7 @@ mod app_pacing;
 mod app_path;
 mod app_run;
 mod audio;
+mod avi;
 mod cdl;
 mod cheat;
 mod cheat_ui;
@@ -27,6 +28,7 @@ mod cli;
 mod clipboard;
 mod dbg;
 mod file_picker;
+mod gamepad;
 mod input;
 mod keymap;
 mod link;
@@ -35,6 +37,8 @@ mod menupopup;
 mod msu1;
 mod net_worker;
 mod pacing;
+mod postfx;
+mod rtc_export;
 mod screenshot;
 mod session;
 mod settings_file;
@@ -42,6 +46,7 @@ mod symbols;
 mod toolwin;
 mod ui;
 mod video;
+mod wav;
 mod windows;
 
 use std::collections::HashSet;
@@ -77,6 +82,10 @@ use windows::mainwin::{InfoBox, WindowSizeChoice};
 const FRAME_DURATION: Duration =
     Duration::from_nanos(CYCLES_PER_FRAME as u64 * 1_000_000_000 / CLOCK_HZ as u64);
 
+/// How often the recovery save state is rewritten while a ROM runs (Misc →
+/// "Recovery save state").
+const RECOVERY_INTERVAL: Duration = Duration::from_secs(10);
+
 fn main() {
     let opts = match Options::parse(env::args().skip(1)) {
         Ok(ParseOutcome::Run(opts)) => opts,
@@ -99,17 +108,10 @@ fn main() {
     // Optional SGB BIOS (--sgb-bios / SLOPGB_SGB_BIOS): feeds the SGB audio path
     // on every ROM (re)load; border/palette are not extracted (HLE).
     let sgb_bios = resolve_sgb_bios(&opts);
-    // Optional SGB audio-coprocessor backend (--sgb-coprocessor / the presence of
-    // SLOPGB_SGB_COPROCESSOR): swaps the built-in HLE APU for the combined chip on
-    // every SGB (re)load. Off = the built-in default (byte-identical golden path).
-    let cli_coprocessor = opts.sgb_coprocessor || env::var_os("SLOPGB_SGB_COPROCESSOR").is_some();
     // Effective emulated-system choice for this load: an explicit CLI `--model`
     // wins, else the persisted Options choice (so a saved SGB / "prefer SGB" /
     // border selection is honored at startup, not just after opening Options).
     let loaded = settings_file::load();
-    // Effective audio backend: the CLI flag / env var wins the launch, else the
-    // persisted Options choice — honored at startup like --model above.
-    let sgb_coprocessor = cli_coprocessor || loaded.settings.audio_backend.is_coprocessor();
     let model_choice = opts.model.map_or(loaded.settings.model, |m| {
         windows::options::ModelChoice::from_option(Some(m))
     });
@@ -135,8 +137,8 @@ fn main() {
         ),
     };
     session.set_sgb_bios(sgb_bios.clone());
-    session.set_sgb_coprocessor_dir(resolve_sgb_coprocessor_dir(&opts));
-    session.set_sgb_coprocessor(sgb_coprocessor);
+    // The plugins dir (and the SGB coprocessor it auto-loads) is applied in
+    // `App::new`, from the CLI/env/persisted dir it reconciles into `settings`.
     let event_loop = match EventLoop::new() {
         Ok(l) => l,
         Err(e) => {
@@ -144,14 +146,7 @@ fn main() {
             process::exit(1);
         }
     };
-    let mut app = App::new(
-        opts,
-        session,
-        rom_loaded,
-        boot_rom,
-        sgb_bios,
-        sgb_coprocessor,
-    );
+    let mut app = App::new(opts, session, rom_loaded, boot_rom, sgb_bios);
     if let Err(e) = event_loop.run_app(&mut app) {
         eprintln!("error: event loop failed: {e}");
         process::exit(1);
@@ -178,6 +173,9 @@ enum PathPurpose {
     /// Set a bootrom path in the open Options dialog's working scratch
     /// (Options → System → DMG/GBC/SGB bootrom `...`).
     Bootrom(windows::options::BootromSlot),
+    /// Set the plugins directory in the open Options dialog's working scratch
+    /// (Options → Plugins → `...`). Applied (rescanned) on OK/Apply.
+    PluginsDir,
     /// Load a `.sym` symbol file from the typed path (debugger labels/go-to).
     SymbolFile,
     /// Save the CDL flags to the typed path (RLE-compressed).
@@ -228,8 +226,18 @@ fn load_plugins(opts: &Options, settings: &windows::options::Settings) -> Plugin
     };
     match PluginHost::load_dir(&dir) {
         Ok(host) => {
-            if host.is_empty() {
-                eprintln!("slopgb: no plugins loaded from '{}'", dir.display());
+            let total = host.infos().len();
+            if total == 0 {
+                eprintln!("slopgb: no plugins found in '{}'", dir.display());
+            } else if host.is_empty() {
+                // Discovered plugins, but none the per-frame pump drives — all
+                // higher-tier (subsystem/tool), driven via their own seams.
+                eprintln!(
+                    "slopgb: {total} subsystem/tool plugin(s) in '{}' — the SGB \
+                     coprocessor (spc700 + w65c816) auto-loads from here; MSU-1 via \
+                     --msu1. Not the per-frame --plugins pump.",
+                    dir.display()
+                );
             }
             host
         }
@@ -256,19 +264,6 @@ fn load_msu1(opts: &Options) -> Option<msu1::Msu1> {
             None
         }
     }
-}
-
-/// Resolve the directory the SGB audio coprocessor loads its two plugin `.wasm`
-/// (`spc700.wasm` + `w65c816.wasm`) from: `SLOPGB_SGB_COPROCESSOR` (a directory
-/// path) wins, else the conventional `--plugins` / `SLOPGB_PLUGINS_DIR` plugin
-/// directory. `None` when none is set → the coprocessor is unavailable and the
-/// built-in `SgbApu` stands.
-fn resolve_sgb_coprocessor_dir(opts: &Options) -> Option<PathBuf> {
-    env::var_os("SLOPGB_SGB_COPROCESSOR")
-        .map(PathBuf::from)
-        .filter(|p| !p.as_os_str().is_empty())
-        .or_else(|| opts.plugins_dir.clone())
-        .or_else(|| env::var_os("SLOPGB_PLUGINS_DIR").map(PathBuf::from))
 }
 
 /// Resolve the optional SGB BIOS bytes from `--sgb-bios` or `SLOPGB_SGB_BIOS`,
@@ -306,9 +301,6 @@ struct App {
     /// Optional SGB BIOS bytes (from `--sgb-bios`/`SLOPGB_SGB_BIOS`), re-applied
     /// to the fresh machine on every ROM (re)load. `None` = no SGB BIOS.
     sgb_bios: Option<Vec<u8>>,
-    /// Whether the combined SGB audio coprocessor backend (`--sgb-coprocessor`) is
-    /// selected, re-injected on every ROM (re)load. `false` = the built-in HLE APU.
-    sgb_coprocessor: bool,
     session: Session,
     /// Whether a real ROM is loaded. `false` at a no-ROM (bgb-style) startup:
     /// the blank machine is frozen at power-on (emulation gated off) and the LCD
@@ -320,15 +312,63 @@ struct App {
     /// Scratch copy of the presented frame, reused only when a VRAM OAM hover
     /// asks for a sprite outline drawn into the (immutable) core frame.
     overlay_frame: Vec<u32>,
+    /// The last SNES-side frame a full-takeover SGB coprocessor rendered
+    /// (256x224, converted to 0xRRGGBB). `Some` switches presentation to the
+    /// SNES picture; cleared on ROM load. `None` everywhere the coprocessor
+    /// (or its PPU plugin) is absent — the golden presentation paths.
+    snes_frame: Option<Vec<u32>>,
+    /// Scratch for the presentation filters (`postfx`): the core frame is copied
+    /// here and filtered in place before the blit, so the core buffer is never
+    /// touched. Empty on the all-off path (the borrow is presented directly).
+    postfx_buf: Vec<u32>,
+    /// The previously presented (pre-filter) frame, used by "frame blend".
+    prev_frame: Vec<u32>,
+    /// Scratch for the "doubler" scale2x output (2× the source), presented in
+    /// place of the base frame when the doubler is on.
+    scale_buf: Vec<u32>,
+    /// Misc → "Recovery save state": the `<rom>.recovery` path for the loaded
+    /// ROM (None with no ROM). Written periodically and deleted on a clean quit,
+    /// so its presence at load time means the last session crashed.
+    recovery_path: Option<std::path::PathBuf>,
+    /// Wall-clock deadline for the next recovery-state write.
+    recovery_next: Instant,
     window: Option<Rc<Window>>,
     video: Option<Video>,
     audio: Option<AudioPipe>,
+    /// The Sound-tab prefs the open audio stream was built with, so Apply only
+    /// rebuilds it (a brief glitch) when a device/rate/latency/8-bit/quality
+    /// setting actually changed.
+    audio_prefs_applied: audio::AudioPrefs,
+    audio_hq_applied: bool,
+    /// Joypad → "Video": the active AVI recorder while recording, else `None`.
+    /// Started/finalised by `sync_video_recording`; fed one LCD frame per
+    /// rendered batch in `about_to_wait`.
+    video_rec: Option<avi::AviWriter>,
     /// Runtime audio mute (bgb's "Enable sound" toggle). Initialised from the
     /// `--mute` flag; gates audio pacing so the pipe drains to silence without
     /// tearing down the cpal stream. See [`pacing::audio_pacing`].
     muted: bool,
     paused: bool,
     turbo: bool,
+    /// Backspace held with rewind enabled: step backward through the save-state
+    /// ring instead of advancing (see `about_to_wait`).
+    rewinding: bool,
+    /// Rapid-fire held state (`[`/`]`) + the last auto-fired level per button,
+    /// and the frame counter driving the "Rapid speed" toggle cadence.
+    rapid_a: bool,
+    rapid_b: bool,
+    rapid_a_on: bool,
+    rapid_b_on: bool,
+    rapid_counter: u32,
+    /// Game controller input (Options → Joypad): the `gilrs` handle, the
+    /// controller→Game-Boy button map, and the controller-only held-set for the
+    /// SOCD filter.
+    gamepad: gamepad::Gamepads,
+    gamepad_bindings: gamepad::GamepadBindings,
+    gamepad_held: [bool; 8],
+    /// The open "configure game controller" wizard, if any (floats over the LCD
+    /// like the keyboard wizard; captures controller presses to rebind).
+    gamepad_wizard: Option<gamepad::GamepadConfigWizard>,
     /// Per-key hold state, so two keys mapped to one button release cleanly.
     buttons: ButtonTracker,
     /// Rebindable keyboard → Game Boy button map (Joypad "configure keyboard").
@@ -353,6 +393,12 @@ struct App {
     fps_frames: u32,
     fps_since: Instant,
     fps: f64,
+    /// GB-CPU-usage meter (Debug → "GB CPU usage meter"): the non-halted duty %,
+    /// recomputed each FPS window from the `cycles`/`halt_cycles` deltas below.
+    cpu_usage: f64,
+    /// Machine `cycles` / `halt_cycles` at the last FPS-window sample.
+    cpu_cycles_prev: u64,
+    cpu_halt_prev: u64,
     /// Open bgb-style debug tool windows (F2/F3/F4). The game window is handled
     /// directly; these are routed by [`toolwin::ToolWindows::owns`].
     tools: toolwin::ToolWindows,
@@ -418,6 +464,10 @@ struct App {
     /// → "Pause if losing focus"), so refocus auto-resumes — but a *manual* pause
     /// is never clobbered on refocus.
     paused_by_focus: bool,
+    /// Whether the game window currently has OS focus — gates controller input
+    /// when "Game controller works only if app has focus" is on (the gamepad,
+    /// unlike the keyboard, delivers events regardless of focus).
+    window_focused: bool,
     /// Last windowed integer scale chosen (CLI or Window-size menu), restored
     /// when leaving fullscreen-stretched so the menu-picked size isn't lost.
     last_scale: u32,
@@ -450,7 +500,6 @@ impl App {
         rom_loaded: bool,
         boot_rom: Option<Vec<u8>>,
         sgb_bios: Option<Vec<u8>>,
-        sgb_coprocessor: bool,
     ) -> Self {
         let muted = opts.mute;
         let scale = opts.scale;
@@ -468,13 +517,6 @@ impl App {
             model: match opts.model {
                 Some(m) => windows::options::ModelChoice::from_option(Some(m)),
                 None => loaded.settings.model,
-            },
-            // The effective backend (CLI/env flag wins, else persisted) — so the
-            // Sound-tab dropdown shows what is actually live this launch.
-            audio_backend: if sgb_coprocessor {
-                windows::options::AudioBackend::SgbCoprocessor
-            } else {
-                loaded.settings.audio_backend
             },
             ..loaded.settings
         };
@@ -498,26 +540,47 @@ impl App {
         let mcp = mcp::Mcp::with_tool_plugins(mcp::plugin_host::ToolPlugins::from_options(&opts));
         // Opt-in MSU-1 pack (--msu1 / SLOPGB_MSU1); None keeps the golden path.
         let msu1 = load_msu1(&opts);
+        // Build the controller map before `settings` is moved into the struct.
+        let gamepad_bindings = gamepad::GamepadBindings::from_config(&settings.gamepad_map);
         let mut app = Self {
             opts,
             boot_rom,
             sgb_bios,
-            sgb_coprocessor,
             session,
             rom_loaded,
             blank_frame,
             overlay_frame: Vec::new(),
+            snes_frame: None,
+            postfx_buf: Vec::new(),
+            prev_frame: Vec::new(),
+            scale_buf: Vec::new(),
+            recovery_path: None,
+            recovery_next: Instant::now(),
             settings,
             options: None,
             key_wizard: None,
             paused_by_focus: false,
+            window_focused: true,
             last_scale: scale,
             window: None,
             video: None,
             audio: None,
+            audio_prefs_applied: audio::AudioPrefs::default(),
+            audio_hq_applied: true,
+            video_rec: None,
             muted,
             paused: false,
             turbo: false,
+            rewinding: false,
+            rapid_a: false,
+            rapid_b: false,
+            rapid_a_on: false,
+            rapid_b_on: false,
+            rapid_counter: 0,
+            gamepad: gamepad::Gamepads::new(),
+            gamepad_bindings,
+            gamepad_held: [false; 8],
+            gamepad_wizard: None,
             buttons: ButtonTracker::default(),
             bindings: keymap::KeyBindings::default(),
             input_ops: Vec::new(),
@@ -529,6 +592,9 @@ impl App {
             fps_frames: 0,
             fps_since: Instant::now(),
             fps: 0.0,
+            cpu_usage: 0.0,
+            cpu_cycles_prev: 0,
+            cpu_halt_prev: 0,
             tools: toolwin::ToolWindows::new(),
             dbg: dbg::Debugger::default(),
             modifiers: ModifiersState::empty(),
@@ -558,6 +624,14 @@ impl App {
         app.apply_palette();
         // Arm the default exception-break mask (bgb's "break on invalid opcode").
         app.apply_exceptions();
+        // The SGB coprocessor is a plugin: point the session at the resolved
+        // plugins dir (CLI `--plugins` / env / persisted — the single source
+        // `load_plugins` already reconciled into `settings.plugins.dir`) so it
+        // auto-loads `spc700.wasm` + `w65c816.wasm` on an SGB machine at startup.
+        app.session.set_plugins_dir(
+            (!app.settings.plugins.dir.is_empty())
+                .then(|| PathBuf::from(&app.settings.plugins.dir)),
+        );
         app
     }
 
@@ -568,6 +642,11 @@ impl App {
     /// path (`apply_settings`).
     fn apply_palette(&mut self) {
         self.session.gb.set_dmg_palette(self.settings.dmg_palette);
+        // Graphics → "disable SGB colors" is a display option like the palette,
+        // so it rides the same apply path (Options apply + every ROM load).
+        self.session
+            .gb
+            .set_sgb_mono(self.settings.disable_sgb_colors);
         self.blank_frame = blank_frame(self.settings.dmg_palette[0]);
     }
 
@@ -577,10 +656,16 @@ impl App {
                 " (debugging)".to_owned()
             } else if self.paused {
                 " — paused".to_owned()
-            } else if self.settings.show_framerate {
-                format!(" — {:.1} fps", self.fps)
             } else {
-                String::new()
+                // FPS and the GB-CPU-usage meter both append when enabled.
+                let mut s = String::new();
+                if self.settings.show_framerate {
+                    s.push_str(&format!(" — {:.1} fps", self.fps));
+                }
+                if self.settings.cpu_usage_meter {
+                    s.push_str(&format!(" — {:.0}% cpu", self.cpu_usage));
+                }
+                s
             };
             let mut title = window_title(self.rom_loaded, &self.session.title, &state);
             // The serial-link status (bgb shows it in the title bar) is appended
@@ -608,17 +693,25 @@ impl App {
         // never paints. On an SGB with a border loaded (CHR_TRN+PCT_TRN), the
         // 256×224 composite replaces the bare 160×144 frame automatically — the
         // blit letterboxes whichever size it gets.
-        let (mut frame, src_w, src_h): (&[u32], usize, usize) = if self.rom_loaded {
-            match self.session.gb.sgb_border() {
-                Some(b) => (&b[..], SGB_BORDER_W, SGB_BORDER_H),
-                None => (&self.session.gb.frame()[..], SCREEN_W, SCREEN_H),
+        // A full-takeover SGB coprocessor renders the SNES side itself; a
+        // fresh 256×224 frame (converted here) replaces the GB composite
+        // until the next ROM load. Absent coprocessor/PPU: never `Some`.
+        if let Some(f) = self.session.gb.take_snes_frame() {
+            self.snes_frame = Some(f.iter().map(|&c| postfx::snes_rgb555_px(c)).collect());
+        }
+        let (mut frame, mut src_w, mut src_h): (&[u32], usize, usize) = if self.rom_loaded {
+            match (&self.snes_frame, self.session.gb.sgb_border()) {
+                (Some(s), _) => (&s[..], SGB_BORDER_W, SGB_BORDER_H),
+                (None, Some(b)) => (&b[..], SGB_BORDER_W, SGB_BORDER_H),
+                (None, None) => (&self.session.gb.frame()[..], SCREEN_W, SCREEN_H),
             }
         } else {
             (&self.blank_frame[..], SCREEN_W, SCREEN_H)
         };
         // Outline the sprite hovered in the VRAM viewer's OAM tab, drawn into the
         // frame pre-blit so it scales with the screen. The core frame is immutable
-        // (golden-safe), so XOR the perimeter into a scratch copy instead.
+        // (golden-safe), so XOR the perimeter into a scratch copy instead; the
+        // presentation filters below then treat the outlined copy as the frame.
         if let Some(r) = self.tools.oam_hover_rect(&self.session.gb) {
             // SGB composites the 160×144 screen at (48,40) inside the 256×224 border.
             let (ox, oy) = if src_w == SGB_BORDER_W {
@@ -639,6 +732,26 @@ impl App {
             );
             frame = &self.overlay_frame;
         }
+        // Presentation filters (frontend-only, golden-safe): copy the core frame
+        // into the scratch buffer and filter it in place, then present that.
+        if postfx::any_active(&self.settings) {
+            self.postfx_buf.clear();
+            self.postfx_buf.extend_from_slice(frame);
+            postfx::apply(&mut self.postfx_buf, &self.prev_frame, &self.settings);
+            self.prev_frame.clear();
+            self.prev_frame.extend_from_slice(frame);
+            frame = &self.postfx_buf[..];
+        } else if !self.prev_frame.is_empty() {
+            self.prev_frame.clear(); // drop history so re-enabling blend starts fresh
+        }
+        // Graphics → "doubler": scale2x the (filtered) frame to 2×, presented in
+        // its place; the blit then scales/letterboxes the larger image.
+        if self.settings.doubler {
+            postfx::scale2x(frame, src_w, src_h, &mut self.scale_buf);
+            frame = &self.scale_buf[..];
+            src_w *= 2;
+            src_h *= 2;
+        }
         // The right-click menu is its own window now (see `menupopup`), so it is
         // not part of the game-window overlay. The remaining overlays (info box /
         // Options / path modal / key wizard) stay centred/modal here. (Captures
@@ -655,6 +768,7 @@ impl App {
         let picker = self.file_picker.as_mut();
         let options = self.options.as_ref();
         let wizard = self.key_wizard.as_ref();
+        let gp_wizard = self.gamepad_wizard.as_ref();
         let theme = self.settings.theme.resolve(&self.custom_themes);
         let stretch = self.window_size == WindowSizeChoice::FullscreenStretched;
         if let Err(e) = video.draw(window, frame, src_w, src_h, stretch, |canvas| {
@@ -684,6 +798,10 @@ impl App {
             }
             // The key-rebind wizard floats above even the Options dialog.
             if let Some(w) = wizard {
+                w.render(canvas, &theme);
+            }
+            // The controller-rebind wizard shares the same modal slot.
+            if let Some(w) = gp_wizard {
                 w.render(canvas, &theme);
             }
         }) {
@@ -751,6 +869,16 @@ impl App {
                     w.bind_key(code);
                     self.commit_wizard_if_done();
                 }
+            }
+            self.request_game_redraw();
+            return;
+        }
+        // The controller-rebind wizard captures game-window keys too: Escape
+        // cancels it; other keys are swallowed (the binding target is the
+        // controller, not the keyboard) so they don't move the game mid-config.
+        if focus == Focus::Game && key.state.is_pressed() && self.gamepad_wizard.is_some() {
+            if let PhysicalKey::Code(KeyCode::Escape) = key.physical_key {
+                self.gamepad_wizard = None;
             }
             self.request_game_redraw();
             return;
@@ -929,6 +1057,17 @@ impl App {
                     self.resync_pacing();
                 }
             }
+            // Rewind while held (System → "Rewind enabled"); resume forward play
+            // on release. A no-op if rewind is off / the ring is empty.
+            Action::Rewind => {
+                self.rewinding = pressed;
+                if !pressed {
+                    self.resync_pacing();
+                }
+            }
+            // Rapid-fire A / B while held (Joypad "Rapid speed" cadence).
+            Action::RapidA => self.rapid_a = pressed,
+            Action::RapidB => self.rapid_b = pressed,
             // Every other action fires on press only; the debugger menu items
             // reuse this same dispatch via `run_action`, so a hotkey and its
             // menu entry can never diverge.
@@ -995,18 +1134,44 @@ impl App {
     /// (when not launched `--mute`) and when "Enable sound" is toggled on after a
     /// muted start, so the menu toggle always restores audio. A device that won't
     /// open just leaves `audio` `None` — the timer paces, silently.
+    /// The current Sound-tab device preferences (used to open the stream + to
+    /// detect when a re-open is needed on Apply).
+    fn audio_prefs(&self) -> audio::AudioPrefs {
+        audio::AudioPrefs {
+            device: self.settings.audio_device.clone(),
+            sample_rate: self.settings.audio_sample_rate,
+            latency_frames: audio_latency_frames(self.settings.audio_latency),
+            eight_bit: self.settings.audio_8bit,
+        }
+    }
+
     fn try_open_audio(&mut self) {
         if self.audio.is_some() {
             return;
         }
-        match AudioOutput::new() {
+        let prefs = self.audio_prefs();
+        self.audio_prefs_applied = prefs.clone();
+        self.audio_hq_applied = self.settings.audio_hq;
+        match AudioOutput::with_prefs(&prefs) {
             Ok(out) => {
-                let mut pipe = AudioPipe::new(out);
+                let mut pipe = AudioPipe::new_with_quality(out, self.settings.audio_hq);
                 pipe.set_volume(self.settings.volume, self.settings.mono);
                 self.audio = Some(pipe);
             }
             Err(e) => eprintln!("slopgb: audio disabled: {e}"),
         }
+    }
+
+    /// Re-open the audio stream with the current Sound-tab preferences (device /
+    /// samplerate / latency / 8-bit / quality). No-op when audio isn't running
+    /// (e.g. `--mute`), so it never forces the stream open behind the user.
+    pub(crate) fn reopen_audio(&mut self) {
+        if self.audio.is_none() {
+            return;
+        }
+        self.audio = None;
+        self.try_open_audio();
+        self.resync_pacing();
     }
 
     /// The boot ROM spec for a ROM load: the Options bootrom paths (when enabled)
@@ -1030,18 +1195,27 @@ impl App {
         match Session::load(path, self.settings.model, &self.boot_spec(), ram_init) {
             Ok(mut new) => {
                 new.set_sgb_bios(self.sgb_bios.clone());
-                new.set_sgb_coprocessor_dir(resolve_sgb_coprocessor_dir(&self.opts));
-                new.set_sgb_coprocessor(self.sgb_coprocessor);
+                // Carry the live plugins dir (seeded from --plugins at startup,
+                // possibly re-pointed via the UI) so the SGB coprocessor plugin
+                // re-injects into the fresh machine.
+                new.set_plugins_dir(
+                    (!self.settings.plugins.dir.is_empty())
+                        .then(|| PathBuf::from(&self.settings.plugins.dir)),
+                );
+                new.set_rtc_vba_export(self.settings.rtc_vba_sav);
+                new.set_rtc_bgb_legacy(self.settings.rtc_bgb_legacy);
                 self.session = new;
                 // A loaded ROM starts emulation: leave the no-ROM blank state and
                 // (re)apply the DMG palette to the fresh machine (GameBoy::new
                 // resets it to the core grayscale default).
                 self.rom_loaded = true;
+                self.snes_frame = None;
                 self.apply_palette();
                 // The fresh machine starts with no exception mask; re-arm it.
                 self.apply_exceptions();
                 self.paused = false;
                 self.push_recent(path);
+                self.arm_recovery(path);
                 // Auto-load a sidecar `.sym` (foo.gb -> foo.sym) if present, so
                 // symbols reach the disassembler and memory viewer without a
                 // manual load. Absent sidecar = silent no-op.
@@ -1054,9 +1228,22 @@ impl App {
                     window.request_redraw();
                 }
             }
-            Err(e) => eprintln!("slopgb: load ignored: {e}"),
+            Err(e) => {
+                eprintln!("slopgb: load ignored: {e}");
+                // Misc → "Show errors on ROM load": surface the failure in a
+                // modal info box (bgb behaviour); otherwise it stays console-only.
+                self.info_box =
+                    rom_load_error_box(self.settings.show_errors_on_rom_load, &e.to_string());
+            }
         }
     }
+}
+
+/// The info box shown when a ROM fails to load, or `None` when the "Show errors
+/// on ROM load" option is off. A free function so the gate is unit-testable
+/// without a live event loop.
+fn rom_load_error_box(show: bool, msg: &str) -> Option<InfoBox> {
+    show.then(|| InfoBox::new("ROM load failed", vec![msg.to_string()]))
 }
 
 /// Whether emulation should idle (emulate zero frames) this wake: when paused,
@@ -1076,6 +1263,31 @@ fn window_title(rom_loaded: bool, title: &str, state: &str) -> String {
     } else {
         "slopgb".to_owned()
     }
+}
+
+/// Whether `about_to_wait` should busy-poll instead of parking until the next
+/// frame: always while turbo runs flat-out, and when "reduce CPU usage" is off
+/// (spin for lowest input latency). A free function so the choice is testable.
+fn should_poll(turbo: bool, reduce_cpu: bool) -> bool {
+    turbo || !reduce_cpu
+}
+
+/// Map the Sound-tab latency slider fraction (0..=1) to a device buffer size in
+/// frames: ~128 (low latency) to ~4096 (high). A free function so the mapping is
+/// unit-testable.
+fn audio_latency_frames(frac: f32) -> u32 {
+    (128.0 + frac.clamp(0.0, 1.0) * (4096.0 - 128.0)) as u32
+}
+
+/// GB CPU duty percent over a sample window: the share of `delta_cycles` the CPU
+/// was NOT halted (`delta_cycles - delta_halt`). 0 when no cycles elapsed (paused
+/// / no ROM). A free function so it is unit-testable without a live machine.
+fn cpu_usage_pct(delta_cycles: u64, delta_halt: u64) -> f64 {
+    if delta_cycles == 0 {
+        return 0.0;
+    }
+    let active = delta_cycles.saturating_sub(delta_halt);
+    100.0 * active as f64 / delta_cycles as f64
 }
 
 /// A solid LCD frame filled with `color` (the palette's lightest shade) — the

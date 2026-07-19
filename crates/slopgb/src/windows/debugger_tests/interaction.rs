@@ -695,6 +695,32 @@ fn editable_register_row_opens_a_seeded_prompt_and_writes_on_accept() {
 }
 
 #[test]
+fn registers_not_editable_option_greys_edit_register() {
+    // Debug → "Registers can be edited" off: even the af row's edit item greys.
+    let l = DebuggerLayout::for_size(AREA.w, AREA.h);
+    let mut st = DebuggerState {
+        registers_editable: false,
+        ..DebuggerState::default()
+    };
+    on_right_click(
+        NOPS,
+        AREA,
+        &mut st,
+        0x0100,
+        0xFFFE,
+        l.regs.x + 5,
+        l.regs.y + 5,
+        |_| 0,
+    );
+    let om = st.menu.as_ref().expect("registers menu");
+    assert_eq!(om.items.len(), 1);
+    assert!(
+        !om.items[0].enabled,
+        "edit register greyed when the option is off"
+    );
+}
+
+#[test]
 fn non_editable_register_row_greys_edit_register() {
     let l = DebuggerLayout::for_size(AREA.w, AREA.h);
     let lh = line_height();

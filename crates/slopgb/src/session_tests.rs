@@ -449,7 +449,7 @@ fn build_sgb_plugins(dir: &Path) -> bool {
 }
 
 #[test]
-fn sgb_coprocessor_toggle_swaps_the_audio_backend() {
+fn sgb_coprocessor_plugin_in_the_dir_swaps_the_audio_backend() {
     let dir = scratch("sgb-coprocessor");
     let path = dir.join("game.gb");
     fs::write(&path, sgb_rom()).unwrap();
@@ -466,14 +466,14 @@ fn sgb_coprocessor_toggle_swaps_the_audio_backend() {
         "default built-in backend makes no tone for a bare SOUND command (peak {off_peak})"
     );
 
-    // Coprocessor selected but no plugin directory set: the load fails and the
-    // built-in APU stands (the golden-safe fallback) — no panic, still silent.
+    // No plugins directory set: no coprocessor plugin to load, so the built-in
+    // APU stands (the golden-safe fallback) — no panic, still silent.
     let mut nodir = Session::load(&path, ModelChoice::Sgb, &BootSpec::NONE, None).expect("load");
-    nodir.set_sgb_coprocessor(true);
+    nodir.set_plugins_dir(None);
     send_sgb_packet(&mut nodir.gb, &sound_packet());
     assert!(
         play_and_peak(&mut nodir.gb, 16) < 1e-3,
-        "no plugin directory falls back to the silent built-in backend"
+        "no plugins directory falls back to the silent built-in backend"
     );
 
     // With the two plugins present in a directory: the coprocessor loads them and
@@ -485,8 +485,7 @@ fn sgb_coprocessor_toggle_swaps_the_audio_backend() {
         return;
     }
     let mut on = Session::load(&path, ModelChoice::Sgb, &BootSpec::NONE, None).expect("load");
-    on.set_sgb_coprocessor_dir(Some(dir.clone()));
-    on.set_sgb_coprocessor(true);
+    on.set_plugins_dir(Some(dir.clone()));
     send_sgb_packet(&mut on.gb, &sound_packet());
     let on_peak = play_and_peak(&mut on.gb, 16);
     assert!(
@@ -516,4 +515,27 @@ fn atomic_write_replaces_existing_file() {
     assert_eq!(fs::read(&path).unwrap(), b"second");
     assert!(!path.with_extension("sav.tmp").exists());
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn rewind_ring_captures_then_restores_and_empties() {
+    // A blank machine is fine here: save_state/load_state work regardless of the
+    // frozen front-end gate, and frame_count starts at 0 so the first capture fires.
+    let mut s = Session::blank(Model::Dmg);
+    s.gb.debug_write(0xC000, 0xAB); // WRAM marker
+    s.capture_rewind(); // frame 0 >= next(0) -> snapshot taken
+    s.gb.debug_write(0xC000, 0x00); // move past it
+
+    assert!(s.rewind_step(), "a snapshot was available");
+    assert_eq!(
+        s.gb.debug_read(0xC000),
+        0xAB,
+        "rewind restored the captured WRAM"
+    );
+    assert!(!s.rewind_step(), "ring now empty");
+
+    // Reset drops the ring so stale states can't be rewound into.
+    s.capture_rewind();
+    s.reset();
+    assert!(!s.rewind_step(), "reset cleared the ring");
 }

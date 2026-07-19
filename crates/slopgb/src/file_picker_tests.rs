@@ -17,6 +17,7 @@ fn picker_with(entries: Vec<Entry>) -> FilePicker {
         last_offset: 0,
         list_rect: Rect::new(0, 0, 0, 0),
         last_rowcount,
+        select_rect: Rect::new(0, 0, 0, 0),
     }
 }
 
