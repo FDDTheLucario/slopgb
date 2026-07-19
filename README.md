@@ -5,7 +5,14 @@ Cycle-accurate Game Boy / Game Boy Color emulator in Rust.
 - `crates/slopgb-core` — emulator core: zero dependencies, no unsafe,
   deterministic. Emulates DMG0/DMG/MGB/SGB/SGB2/CGB/AGB models.
 - `crates/slopgb` — cross-platform desktop frontend (winit + softbuffer +
-  cpal).
+  cpal + gilrs) with a bgb-style debugger UI.
+- A Rust→wasm plugin system (`slopgb-plugin-api` guest SDK +
+  `slopgb-plugin-host` wasmi runtime) with three capability tiers:
+  per-frame introspection, MCP tools, and coprocessor subsystems. Super
+  Game Boy support runs its SNES side as clean-room chip cores compiled to
+  wasm coprocessor plugins — SPC700 + S-DSP audio (`slopgb-snes-apu`),
+  65C816 (`slopgb-w65c816`), SNES PPU (`slopgb-snes-ppu`) — plus MSU-1
+  streaming audio (`--msu1`). Build them with `cargo xtask stage-plugins`.
 
 Accuracy is validated against the
 [mooneye-test-suite](https://github.com/Gekkio/mooneye-test-suite)
@@ -22,14 +29,16 @@ ROMs (see `docs/ARCHITECTURE.md`).
 Needs **Rust 1.85+** (the workspace is edition 2024); install via [rustup](https://rustup.rs).
 
 The **core** (`slopgb-core`) is pure `std` — it builds anywhere with no system
-libraries. The **frontend** (`slopgb`) draws with winit + softbuffer and plays
-audio with cpal, so on Linux it needs the usual desktop dev libraries:
+libraries. The **frontend** (`slopgb`) draws with winit + softbuffer, plays
+audio with cpal and reads game controllers with gilrs, so on Linux it needs
+the usual desktop dev libraries (libudev is gilrs's controller-hotplug
+backend):
 
 | Distro | Install |
 |---|---|
 | Arch | `sudo pacman -S base-devel alsa-lib libxkbcommon` (Wayland: `wayland`; X11: `libxcb libx11`) |
-| Debian/Ubuntu | `sudo apt install build-essential pkg-config libasound2-dev libxkbcommon-dev libwayland-dev libxcb1-dev` |
-| Fedora | `sudo dnf install @development-tools alsa-lib-devel libxkbcommon-devel wayland-devel libxcb-devel` |
+| Debian/Ubuntu | `sudo apt install build-essential pkg-config libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libxcb1-dev` |
+| Fedora | `sudo dnf install @development-tools alsa-lib-devel systemd-devel libxkbcommon-devel wayland-devel libxcb-devel` |
 
 macOS and Windows need only the Rust toolchain (no extra system packages).
 

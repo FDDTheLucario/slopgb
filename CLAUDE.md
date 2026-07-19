@@ -5,7 +5,12 @@ no unsafe) + `crates/slopgb` (frontend: winit/softbuffer/cpal + gilrs for game
 controllers, a BGB-style debugger UI) + `crates/slopgb-plugin-api` (guest SDK for
 Rust→wasm plugins) + `crates/slopgb-plugin-host` (the wasmi runtime — the one place
 `wasmi` is a dep, isolated so core stays zero-dep and the frontend keeps its lean
-dep set).
+dep set). Support crates: `slopfp` (dep-free file-picker state machine),
+`slopgb-sgb-coprocessor` (the SNES-side SGB machine the frontend drives), the
+clean-room chip cores `slopgb-snes-apu` (SPC700 + S-DSP) / `slopgb-w65c816` /
+`slopgb-snes-ppu` + their wasm wrappers
+`slopgb-{spc700,w65c816,snes-ppu,msu1}-plugin` (built by
+`cargo xtask stage-plugins`).
 
 **Plugins have three peer capability tiers, one loader each** (see
 [`crates/slopgb-plugin-host/CLAUDE.md`](crates/slopgb-plugin-host/CLAUDE.md)):
