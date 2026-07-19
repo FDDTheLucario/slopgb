@@ -27,8 +27,17 @@ default.
   each a 16×24 grid fitted to half the content width via `windows::tiles_two_col`
   (shared by render + hover so they can't drift); each grid gets its own overlay/frame,
   and the hover maps to the correct bank + prints the real `bank:addr`
-  (`tile_details_two`). DMG stays single-grid (bank 0). The old bank-0/1 checkbox is now
-  vestigial on CGB (both always show) — follow-up to hide/repurpose.
+  (`tile_details_two`). DMG stays single-grid (bank 0). (The old bank-0/1 checkbox is
+  gone — both banks always show.)
+- **Tiles "show paletted"**: a raw tile carries no palette, so the checkbox *guesses*
+  one per tile from where it is used (`debug::tile_palette_guess`): scan both BG tilemaps
+  (BG palette + CGB attr bank), then OAM sprites (OBJ palette) for tiles no BG cell
+  referenced — BG wins ties. Off → the neutral grey ramp. `render_tiles` takes a
+  per-tile `palette(tile)` closure resolving the guess to `bg_palettes`/`obj_palettes`
+  RGB (unreferenced tiles stay grey). The hover panel also shows the guess as a
+  `guessed palette BG n`/`OBJ n` line (`guessed_palette_line`), blank when the tile is
+  referenced nowhere — shown regardless of the checkbox (the guess is computed once via
+  `tile_guess` and shared by the colouring + the detail line).
 - **BG map: BG + window tilemaps side by side** (like the CGB two-bank Tiles view) —
   BG tilemap left (LCDC bit 3), window tilemap right (bit 6), each fitted to half the
   content via `windows::bgmap_two_col` (shared by render + hover). The left grid gets

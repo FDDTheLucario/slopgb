@@ -33,7 +33,7 @@ impl ToolContext for FrontendToolContext<'_> {
         self.gb
     }
     fn set_breakpoint(&mut self, addr: u16) {
-        self.breakpoints.set(addr);
+        self.breakpoints.set(addr, None);
     }
     fn registers(&self) -> String {
         tools::registers(self.gb)

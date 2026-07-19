@@ -183,8 +183,16 @@ impl ApplicationHandler for App {
                 // Mouse drives the tool windows' tabs/checkboxes/details and the
                 // debugger's context menu (left selects/acts, right opens it).
                 WindowEvent::CursorMoved { position, .. } => {
-                    self.tools
-                        .on_cursor_moved(window_id, position.x, position.y);
+                    // A VRAM OAM hover change moves the game window's sprite outline,
+                    // so nudge the game window (it won't repaint itself while paused).
+                    if self
+                        .tools
+                        .on_cursor_moved(window_id, position.x, position.y)
+                    {
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                    }
                 }
                 WindowEvent::CursorLeft { .. } => self.tools.on_cursor_left(window_id),
                 // Mouse wheel scrolls the debugger memory pane (bgb).
@@ -431,6 +439,10 @@ impl ApplicationHandler for App {
         // window had focus (bgb does this).
         if hit_bp {
             self.dbg.set_broken(true);
+            // Snap the disasm view to where it stopped (PC, in its live bank), so
+            // a breakpoint halt shows the actual instruction — not a stale pinned
+            // bank the free run left behind.
+            self.tools.center_debugger_on_pc(&self.session.gb);
             self.tools.focus_debugger();
             self.update_title();
         }

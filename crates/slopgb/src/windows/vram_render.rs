@@ -40,8 +40,7 @@ fn vram_geom(tab: VramTab, content: Rect, tall: bool) -> VramGeom {
         }
         VramTab::Oam => {
             // 8×16 mode needs a taller row pitch so the stacked tiles don't overlap.
-            let (nw, nh) = (8 * vram::oam_cell(1), 5 * vram::oam_cell_h(1, tall));
-            let s = vram::fit_scale(content.w, content.h, nw, nh);
+            let s = vram::oam_scale(content, tall);
             tiled(8, 5, vram::oam_cell(s), vram::oam_cell_h(s, tall), s)
         }
         VramTab::Palettes => VramGeom {
@@ -100,16 +99,35 @@ pub(super) fn render_vram(
     // The BG-map tab shows the BG tilemap (left) and window tilemap (right) side
     // by side, like the two-bank Tiles view.
     let bgmap_two = (state.tab == VramTab::BgMap).then(|| bgmap_two_col(l.content));
+    // A raw tile carries no palette, so guess one per tile from where it is used
+    // (both BG maps, then OAM; BG wins) — colours the grid when "show paletted"
+    // is on and feeds the hover panel's guessed-palette line. Cheap; computed once.
+    let tile_guess = (state.tab == VramTab::Tiles).then(|| {
+        let signed = gb.debug_read(0xFF40) & 0x10 == 0;
+        debug::tile_palette_guess(gb.vram(), gb.oam(), signed, tall, cgb)
+    });
     match state.tab {
         VramTab::Tiles => {
-            // A raw tile has no inherent palette, so bgb renders the Tiles grid
-            // in a neutral grey ramp rather than through one game palette. On CGB
-            // both banks show at once (bank 0 left, bank 1 right); DMG has one.
+            // "show paletted" resolves each tile's guess to its BG/OBJ RGB; off (or
+            // an unreferenced tile) shows the neutral grey ramp. On CGB both banks
+            // show at once (bank 0 left, bank 1 right); DMG has one.
+            let rgb = state
+                .show_paletted
+                .then(|| (bg_palettes(gb, true).0, obj_palettes(gb, true).0));
+            let guess = tile_guess
+                .as_ref()
+                .expect("tile_guess set on the Tiles tab");
+            let pal = |bank: usize, tile: usize| match &rgb {
+                Some((bg, obj)) => guess[bank][tile].map_or(vram::GREYS, |r| {
+                    (if r.obj { obj } else { bg })[r.index as usize]
+                }),
+                None => vram::GREYS,
+            };
             if let Some((left, right, s)) = tiles_two {
-                vram::render_tiles(c, left, gb.vram(), 0, &vram::GREYS, s);
-                vram::render_tiles(c, right, gb.vram(), 1, &vram::GREYS, s);
+                vram::render_tiles(c, left, gb.vram(), 0, |t| pal(0, t), s);
+                vram::render_tiles(c, right, gb.vram(), 1, |t| pal(1, t), s);
             } else {
-                vram::render_tiles(c, l.content, gb.vram(), 0, &vram::GREYS, g.scale);
+                vram::render_tiles(c, l.content, gb.vram(), 0, |t| pal(0, t), g.scale);
             }
         }
         VramTab::Oam => {
@@ -195,8 +213,8 @@ pub(super) fn render_vram(
         c.outline_rect(if g.grid { g.extent } else { l.content }, theme.border);
     }
     c.outline_rect(l.details, theme.border);
-    render_vram_controls(c, &l, state, cgb, theme);
-    render_vram_details(gb, c, &l, state, g.scale, two, theme);
+    render_vram_controls(c, &l, state, theme);
+    render_vram_details(gb, c, &l, state, g.scale, two, tile_guess.as_ref(), theme);
 }
 
 /// The BG-map tab's 8 BG palettes (CGB) or single BGP palette (DMG) as RGB888,
@@ -312,25 +330,8 @@ fn draw_grid(c: &mut Canvas, content: Rect, cell_w: i32, cell_h: i32, theme: &Th
     c.set_clip(saved);
 }
 
-/// Draw the checkboxes/radios in the details column, reflecting `state`. `cgb`
-/// gates the CGB-only Tiles bank toggle.
-fn render_vram_controls(
-    c: &mut Canvas,
-    l: &VramLayout,
-    state: &VramState,
-    cgb: bool,
-    theme: &Theme,
-) {
-    if state.tab == VramTab::Tiles && cgb {
-        checkbox(
-            c,
-            l.tile_bank_box.x,
-            l.tile_bank_box.y,
-            state.tile_bank != 0,
-            "VRAM bank 1",
-            theme,
-        );
-    }
+/// Draw the checkboxes/radios in the details column, reflecting `state`.
+fn render_vram_controls(c: &mut Canvas, l: &VramLayout, state: &VramState, theme: &Theme) {
     if state.tab == VramTab::BgMap {
         radio_group(
             c,
@@ -366,6 +367,7 @@ fn render_vram_controls(
 /// Draw the hovered-cell field list (bgb's right panel) for the active tab.
 /// `scale` is the tab's live render scale ([`vram_geom`]), so the hover hit-test
 /// matches the drawn cell size at any window size.
+#[allow(clippy::too_many_arguments)]
 fn render_vram_details(
     gb: &GameBoy,
     c: &mut Canvas,
@@ -373,6 +375,7 @@ fn render_vram_details(
     state: &VramState,
     scale: i32,
     two: Option<(Rect, Rect, i32)>,
+    tile_guess: Option<&TileGuess>,
     theme: &Theme,
 ) {
     let Some((hx, hy)) = state.hover else {
@@ -385,8 +388,8 @@ fn render_vram_details(
     let m8 = state.tile_hex_8bit;
     let lines = match state.tab {
         VramTab::Tiles => match two {
-            Some((left, right, s)) => tile_details_two(lx, ly, left, right, s, m8),
-            None => tile_details(lx, ly, scale, m8),
+            Some((left, right, s)) => tile_details_two(lx, ly, left, right, s, m8, tile_guess),
+            None => tile_details(lx, ly, scale, m8, tile_guess),
         },
         VramTab::Oam => oam_details(gb, lx, ly, scale, m8),
         VramTab::BgMap => match two {
@@ -411,9 +414,31 @@ fn dec_hex(n: u32, mask8: bool) -> String {
     format!("{n} (${hex:02X})")
 }
 
+/// The per-tile palette guess for both banks ([`debug::tile_palette_guess`]).
+type TileGuess = [[Option<debug::PaletteRef>; 384]; 2];
+
+/// bgb's Tiles hover "guessed palette" line: `BG n`/`OBJ n` for a guessed tile,
+/// or a blank line (the tile is referenced nowhere) so the panel layout is stable.
+fn guessed_palette_line(guess: Option<&TileGuess>, bank: usize, tile: usize) -> String {
+    match guess.and_then(|g| g[bank][tile]) {
+        Some(r) => format!(
+            "guessed palette {} {}",
+            if r.obj { "OBJ" } else { "BG" },
+            r.index
+        ),
+        None => String::new(),
+    }
+}
+
 /// Tiles-tab details: the tile under `(lx, ly)` in the 16-wide grid at `scale`.
 /// The content area is wider than the grid, so an out-of-column hover has no tile.
-fn tile_details(lx: i32, ly: i32, scale: i32, mask8: bool) -> Vec<String> {
+fn tile_details(
+    lx: i32,
+    ly: i32,
+    scale: i32,
+    mask8: bool,
+    guess: Option<&TileGuess>,
+) -> Vec<String> {
     let col = lx / (8 * scale);
     let tile = (ly / (8 * scale)) * 16 + col;
     if col >= 16 || !(0..384).contains(&tile) {
@@ -422,6 +447,7 @@ fn tile_details(lx: i32, ly: i32, scale: i32, mask8: bool) -> Vec<String> {
     vec![
         format!("Tile No. {}", dec_hex(tile as u32, mask8)),
         format!("Tile Address 0:{:04X}", 0x8000 + tile * 16),
+        guessed_palette_line(guess, 0, tile as usize),
     ]
 }
 
@@ -436,6 +462,7 @@ fn tile_details_two(
     right: Rect,
     scale: i32,
     mask8: bool,
+    guess: Option<&TileGuess>,
 ) -> Vec<String> {
     let (bank, gx) = if lx < left.w {
         (0, lx)
@@ -455,20 +482,16 @@ fn tile_details_two(
     vec![
         format!("Tile No. {}", dec_hex(tile as u32, mask8)),
         format!("Tile Address {bank}:{:04X}", 0x8000 + tile * 16),
+        guessed_palette_line(guess, bank, tile as usize),
     ]
 }
 
 /// OAM-tab details: the sprite under `(lx, ly)` in the 8-wide cell grid at `scale`.
 fn oam_details(gb: &GameBoy, lx: i32, ly: i32, scale: i32, mask8: bool) -> Vec<String> {
     let tall = gb.debug_read(0xFF40) & 0x04 != 0;
-    let (col, row) = (
-        lx / vram::oam_cell(scale),
-        ly / vram::oam_cell_h(scale, tall),
-    );
-    let idx = (row * 8 + col) as usize;
-    if col >= 8 || idx >= 40 {
+    let Some(idx) = vram::oam_cell_at(lx, ly, scale, tall) else {
         return Vec::new();
-    }
+    };
     let s = debug::oam_sprites(gb.oam())[idx];
     vec![
         format!("OAM addr FE{:02X}", idx * 4),
@@ -515,7 +538,7 @@ fn bgmap_details_two(
     let base = if is_window { win_base } else { bg_base };
     let idx = (row * 32 + col) as usize;
     let cell = debug::bg_map(gb.vram(), base)[idx];
-    let tile = vram::tile_index(cell.tile, signed);
+    let tile = debug::bg_tile_index(cell.tile, signed);
     vec![
         format!(
             "{}  X {col}  Y {row}",

@@ -35,7 +35,7 @@ fn run_frame_until_breakpoint_halts_at_a_breakpoint_mid_frame() {
     let frames_before = gb.frame_count();
     // 0x100 nop -> 0x101 jp -> 0x150 nop -> 0x151: stops within a handful of
     // cycles, far short of a full frame's worth of dots.
-    assert_eq!(gb.run_frame_until_breakpoint(&[0x151]), Some(0x151));
+    assert_eq!(gb.run_frame_until_breakpoint(&[(0x151, None)]), Some(0x151));
     assert_eq!(gb.cpu_regs().pc, 0x151);
     assert_eq!(
         gb.frame_count(),
@@ -45,12 +45,42 @@ fn run_frame_until_breakpoint_halts_at_a_breakpoint_mid_frame() {
 }
 
 #[test]
+fn run_frame_until_breakpoint_qualifies_a_breakpoint_by_rom_bank() {
+    // Entry switches to ROM bank 2 (MBC1) then jumps into the switchable area at
+    // 0x4000, so PC reaches 0x4000 while rom_bank() == 2.
+    let mut rom = mbc1_4bank_rom();
+    rom[0x100..0x108].copy_from_slice(&[
+        0x3E, 0x02, // ld a,$02
+        0xEA, 0x00, 0x20, // ld ($2000),a  -> MBC1 ROM bank = 2
+        0xC3, 0x00, 0x40, // jp $4000
+    ]);
+    // Bank 2's 0x4000 (file offset 2*0x4000) stays nops from the zero-fill.
+
+    // A breakpoint qualified to the *wrong* bank never fires: the frame runs out.
+    let mut gb = GameBoy::new(Model::Dmg, rom.clone()).unwrap();
+    assert_eq!(gb.run_frame_until_breakpoint(&[(0x4000, Some(1))]), None);
+
+    // Qualified to the live bank (2), and the bank-agnostic form, both halt.
+    let mut gb = GameBoy::new(Model::Dmg, rom.clone()).unwrap();
+    assert_eq!(
+        gb.run_frame_until_breakpoint(&[(0x4000, Some(2))]),
+        Some(0x4000)
+    );
+    assert_eq!(gb.rom_bank(), 2);
+    let mut gb = GameBoy::new(Model::Dmg, rom).unwrap();
+    assert_eq!(
+        gb.run_frame_until_breakpoint(&[(0x4000, None)]),
+        Some(0x4000)
+    );
+}
+
+#[test]
 fn run_frame_until_breakpoint_with_no_hit_completes_a_frame_like_run_frame() {
     // No reachable breakpoint -> runs a whole frame and returns None,
     // leaving the machine exactly where a plain run_frame would.
     let mut a = GameBoy::new(Model::Dmg, linear_code_rom()).unwrap();
     let mut b = GameBoy::new(Model::Dmg, linear_code_rom()).unwrap();
-    assert_eq!(a.run_frame_until_breakpoint(&[0xBEEF]), None);
+    assert_eq!(a.run_frame_until_breakpoint(&[(0xBEEF, None)]), None);
     b.run_frame();
     assert_eq!(a.frame_count(), b.frame_count());
     assert_eq!(a.cycles(), b.cycles());

@@ -48,12 +48,12 @@ fn apply_clear_is_idempotent_never_re_adds() {
     // row clicked twice must not re-arm the entry.
     let mut d = Debugger::default();
     let mut gb = machine(write_c000_rom());
-    d.apply(&mut gb, DebugAction::ToggleBreakpoint(0x0150));
-    assert!(d.breakpoints().contains(0x0150));
+    d.apply(&mut gb, DebugAction::ToggleBreakpoint(0x0150, None));
+    assert!(d.breakpoints().dot_at(0x0150, 0));
     d.apply(&mut gb, DebugAction::ClearBreakpoint(0x0150));
-    assert!(!d.breakpoints().contains(0x0150));
+    assert!(!d.breakpoints().dot_at(0x0150, 0));
     d.apply(&mut gb, DebugAction::ClearBreakpoint(0x0150)); // again: still gone
-    assert!(!d.breakpoints().contains(0x0150));
+    assert!(!d.breakpoints().dot_at(0x0150, 0));
     // Same for watchpoints.
     d.apply(&mut gb, DebugAction::ToggleWatchpoint(0xC000));
     assert!(!d.watchpoints().is_empty());
@@ -228,22 +228,38 @@ fn step_out_detects_a_return_that_wraps_the_stack_top() {
 fn breakpoints_toggle_on_off_and_report() {
     let mut bp = Breakpoints::default();
     assert!(bp.is_empty());
-    assert!(bp.toggle(0x0150), "first toggle sets it");
-    assert!(bp.contains(0x0150));
+    assert!(bp.toggle(0x0150, None), "first toggle sets it");
+    assert!(bp.dot_at(0x0150, 0));
     assert!(!bp.is_empty());
     assert_eq!(bp.pc_list(), vec![0x0150]);
-    assert!(!bp.toggle(0x0150), "second toggle clears it");
-    assert!(!bp.contains(0x0150));
+    assert!(!bp.toggle(0x0150, None), "second toggle clears it");
+    assert!(!bp.dot_at(0x0150, 0));
     assert!(bp.is_empty());
+}
+
+#[test]
+fn bank_qualified_breakpoint_dots_only_in_its_own_bank() {
+    let mut bp = Breakpoints::default();
+    bp.toggle(0x6401, Some(1)); // a bank-1 breakpoint
+    assert!(
+        bp.dot_at(0x6401, 1),
+        "dot shows while bank 1 is the shown bank"
+    );
+    assert!(!bp.dot_at(0x6401, 7), "no dot while bank 7 is shown");
+    // The bank-qualified breakpoint is exposed to the run loop with its bank.
+    assert_eq!(bp.bp_list(), vec![(0x6401, Some(1))]);
+    // A bank-agnostic breakpoint dots in every bank's view.
+    bp.toggle(0x4000, None);
+    assert!(bp.dot_at(0x4000, 2) && bp.dot_at(0x4000, 9));
 }
 
 #[test]
 fn pc_list_is_sorted_and_deduped() {
     let mut bp = Breakpoints::default();
-    bp.toggle(0x0200);
-    bp.toggle(0x0100);
-    bp.toggle(0x0200); // clears 0x0200
-    bp.toggle(0x0150);
+    bp.toggle(0x0200, None);
+    bp.toggle(0x0100, None);
+    bp.toggle(0x0200, None); // clears 0x0200
+    bp.toggle(0x0150, None);
     assert_eq!(bp.pc_list(), vec![0x0100, 0x0150], "sorted, 0x0200 removed");
 }
 
@@ -251,10 +267,10 @@ fn pc_list_is_sorted_and_deduped() {
 fn apply_toggle_breakpoint_updates_the_set() {
     let mut d = Debugger::default();
     let mut gb = machine(call_rom());
-    d.apply(&mut gb, DebugAction::ToggleBreakpoint(0x0150));
-    assert!(d.breakpoints().contains(0x0150));
-    d.apply(&mut gb, DebugAction::ToggleBreakpoint(0x0150));
-    assert!(!d.breakpoints().contains(0x0150));
+    d.apply(&mut gb, DebugAction::ToggleBreakpoint(0x0150, None));
+    assert!(d.breakpoints().dot_at(0x0150, 0));
+    d.apply(&mut gb, DebugAction::ToggleBreakpoint(0x0150, None));
+    assert!(!d.breakpoints().dot_at(0x0150, 0));
 }
 
 #[test]

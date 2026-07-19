@@ -254,7 +254,7 @@ fn breakpoint_sets_pc() {
         &mut bps,
         &syms,
     );
-    assert!(bps.contains(0x0150), "breakpoint inserted");
+    assert!(bps.dot_at(0x0150, 0), "breakpoint inserted");
     assert!(out.contains("0150"));
     // Idempotent: setting again keeps it set.
     let _ = call_text(
@@ -265,7 +265,7 @@ fn breakpoint_sets_pc() {
         &mut bps,
         &syms,
     );
-    assert!(bps.contains(0x0150));
+    assert!(bps.dot_at(0x0150, 0));
 }
 
 #[test]

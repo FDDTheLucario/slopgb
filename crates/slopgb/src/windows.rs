@@ -20,7 +20,7 @@ use crate::ui::canvas::Rect;
 use crate::ui::dialog::InputDialog;
 use crate::ui::font::GLYPH_W;
 use crate::ui::text::{draw_text, line_height};
-use crate::ui::widgets::{checkbox, radio_group, scroll_content, vscrollbar};
+use crate::ui::widgets::{SCROLLBAR_W, checkbox, radio_group, scroll_content, vscrollbar};
 use crate::ui::{Canvas, Theme, ToolWindow};
 use debugger::DebuggerState;
 use vram::{VramLayout, VramState, VramTab};
@@ -122,7 +122,11 @@ impl MemoryView {
         // colon isn't misread as a bank prefix). Then `BB:AAAA` — a bank-prefixed
         // address (the same form the MCP/debugger use), letting a human jump to an
         // arbitrary bank + address in one go. Then a bare hex address.
-        if let Some(addr) = self.symbols.resolve(t) {
+        if let Some((bank, addr)) = self.symbols.resolve(t) {
+            // Pin the browser to the symbol's own bank (so `01:6401 Foo` shows
+            // bank 1's bytes). A bank-0 symbol lives in a fixed/unbanked region,
+            // so keep following the live bank there (no needless pin chip).
+            self.bank = (bank != 0).then_some(bank);
             self.mem_base = addr;
             self.cursor = addr;
             self.edit_hi = None;
@@ -334,6 +338,13 @@ pub(crate) fn banked_read(gb: &GameBoy, sel: Option<u16>, addr: u16) -> u8 {
     }
 }
 
+/// The concrete bank the dump shows for `addr`: the pinned selection folded to
+/// `addr`'s region, or the live-mapped bank when following live. The bank a
+/// symbol must match to be named at `addr` (bank-discriminated `name_at`).
+pub(crate) fn shown_bank(gb: &GameBoy, sel: Option<u16>, addr: u16) -> u16 {
+    browse_bank(sel, gb, addr).unwrap_or_else(|| live_bank(gb, addr))
+}
+
 /// Write `val` to `addr` through the browser selection `sel` — the write mirror
 /// of [`banked_read`], so an edit lands exactly where the dump shows it. Follow-
 /// live (`None`) uses the RAMG-gated `debug_write` (matching the gated dump: a
@@ -383,6 +394,21 @@ fn bank_chip_label(gb: &GameBoy, base: u16, sel: Option<u16>) -> Option<String> 
     sel_bank_label(gb, base, eff)
 }
 
+/// Draw a right-aligned bank chip over the top row of a pane (the disasm/memory
+/// panes have no status bar). `None` label → nothing drawn, so a live-following
+/// pane is untouched.
+fn draw_bank_chip(c: &mut Canvas, pane: Rect, label: Option<String>, theme: &Theme) {
+    let Some(chip) = label else { return };
+    let w = (chip.len() as i32) * GLYPH_W as i32;
+    // Sit left of the pane's vertical scrollbar so the bar doesn't cover the chip.
+    let cx = (pane.right() - SCROLLBAR_W - w - 2).max(pane.x);
+    c.fill_rect(
+        Rect::new(cx - 1, pane.y, w + 2, line_height()),
+        theme.current,
+    );
+    draw_text(c, cx, pane.y, &chip, theme.bg);
+}
+
 /// The memory-viewer bank status prefix for `loc` (the `AAAA  Name+off` part):
 /// `None` follows the live bank → the classic `ROM05:loc` (live label, no
 /// marker); `Some(raw)` is pinned → the selected label, plus `[live ROM02]` when
@@ -406,8 +432,8 @@ pub(crate) fn mem_status_line(gb: &GameBoy, base: u16, sel: Option<u16>, loc: &s
 }
 
 /// Render the standalone memory viewer: the hex dump from the base address
-/// filling the window above a one-line status bar showing the nearest preceding
-/// symbol (`Name+offset`, or `----` with no symbols loaded).
+/// filling the window above a one-line status bar showing the nearest symbol
+/// preceding the cursor (`Name+offset`, or `----` with no symbols loaded).
 fn render_memory_window(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme, st: &MemoryView) {
     let lh = line_height();
     let body = Rect::new(area.x, area.y, area.w, (area.h - lh).max(0));
@@ -423,6 +449,7 @@ fn render_memory_window(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme,
         st.mem_base,
         theme,
         &st.symbols,
+        |a| shown_bank(gb, st.bank, a),
     );
     // Draggable scrollbar on the dump's right edge.
     let vis_rows = (body.h / lh).max(0);
@@ -453,14 +480,17 @@ fn render_memory_window(gb: &GameBoy, c: &mut Canvas, area: Rect, theme: &Theme,
     }
     let bar_y = area.bottom() - lh;
     c.hline(area.x, bar_y, area.w, theme.border);
-    let loc = match st.symbols.nearest_before(st.mem_base) {
-        Some((name, base)) => format!("{:04X}  {name}+{:X}", st.mem_base, st.mem_base - base),
-        None => format!("{:04X}  ----", st.mem_base),
+    let loc = match st
+        .symbols
+        .nearest_before(shown_bank(gb, st.bank, st.cursor), st.cursor)
+    {
+        Some((name, base)) => format!("{:04X}  {name}+{:X}", st.cursor, st.cursor - base),
+        None => format!("{:04X}  ----", st.cursor),
     };
     // Following the live bank (`None`) shows the classic "ROM05:4000 …" status
     // (live label, no marker). When pinned to a bank, name it and append the live
     // bank it has diverged from: "…  [live ROM02]".
-    let status = mem_status_line(gb, st.mem_base, st.bank, &loc);
+    let status = mem_status_line(gb, st.cursor, st.bank, &loc);
     draw_text(c, area.x + 2, bar_y + 1, &status, theme.text);
     if let Some(dlg) = &st.goto {
         crate::ui::dialog::render(c, area, dlg, theme);
@@ -508,13 +538,14 @@ fn render_debugger(
     let rows = debugger::render_disasm(
         c,
         scroll_content(l.disasm),
-        |a| gb.debug_read(a),
+        |a| banked_read(gb, st.disasm_bank, a),
         start,
         pc,
         bps,
         &st.data_hints,
         st.disasm_fmt,
         &st.symbols,
+        |a| shown_bank(gb, st.disasm_bank, a),
         theme,
     );
     // Profiler: overlay per-line execution counts while logging (MB5).
@@ -548,16 +579,23 @@ fn render_debugger(
         st.mem_base,
         theme,
         &st.symbols,
+        |a| shown_bank(gb, st.mem_bank, a),
     );
-    if let Some(chip) = bank_chip_label(gb, st.mem_base, st.mem_bank) {
-        let w = (chip.len() as i32) * GLYPH_W as i32;
-        let cx = (l.memory.right() - w - 2).max(l.memory.x);
-        c.fill_rect(
-            Rect::new(cx - 1, l.memory.y, w + 2, line_height()),
-            theme.current,
-        );
-        draw_text(c, cx, l.memory.y, &chip, theme.bg);
-    }
+    draw_bank_chip(
+        c,
+        l.memory,
+        bank_chip_label(gb, st.mem_base, st.mem_bank),
+        theme,
+    );
+    // The disasm pane carries the same pinned-bank chip: while pinned to a bank
+    // it names that bank (e.g. "ROM01"), so the "other bank view" reads as a
+    // separate view even as the game maps other banks in.
+    draw_bank_chip(
+        c,
+        l.disasm,
+        bank_chip_label(gb, st.disasm_base, st.disasm_bank),
+        theme,
+    );
     // Draggable scrollbars on the three scrollable panes (right-edge strip).
     let lh = line_height();
     let (df, dv) = st.disasm_scroll((l.disasm.h / lh).max(0) as usize);
