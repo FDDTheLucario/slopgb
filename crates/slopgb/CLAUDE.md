@@ -23,8 +23,12 @@ Per-area state lives in `docs/ui-state/<area>.md` — read the matching file fir
   `--plugins <dir>` / Options→Plugins feeds the tier-1 `INTROSPECTION` pump *and*
   is where the tier-3 SGB coprocessor auto-loads its plugins from — on an SGB
   machine, `spc700.wasm` + `w65c816.wasm` in that dir replace the built-in HLE
-  `SgbApu` (`slopgb-sgb-coprocessor`, via `Session::set_plugins_dir`). MSU-1 loads
-  from a `--msu1` pack (`msu1.rs` drives `msu1.wasm` via `LoadedCoprocessor`). The
+  `SgbApu` (`slopgb-sgb-coprocessor`, via `Session::set_plugins_dir`). MSU-1 is
+  part of that SGB coprocessor: `msu1.wasm` (optional, same plugins dir) driven at
+  SNES `$2000-$2007` via the game's resident 65C816 handler; `--msu1` /
+  `SLOPGB_MSU1` (threaded via `Session::set_msu1_override` / `apply_sgb_coprocessor`)
+  only selects the `.pcm` pack dir, which defaults to the loaded ROM's directory —
+  no frontend cart-bus bridge. The
   tier-1 pump itself skips subsystem plugins in the dir (wrong loader, not an
   invalid plugin) — the coprocessor seam picks them up.
 

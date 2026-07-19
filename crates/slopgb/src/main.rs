@@ -34,7 +34,6 @@ mod keymap;
 mod link;
 mod mcp;
 mod menupopup;
-mod msu1;
 mod net_worker;
 mod pacing;
 mod postfx;
@@ -234,8 +233,9 @@ fn load_plugins(opts: &Options, settings: &windows::options::Settings) -> Plugin
                 // higher-tier (subsystem/tool), driven via their own seams.
                 eprintln!(
                     "slopgb: {total} subsystem/tool plugin(s) in '{}' — the SGB \
-                     coprocessor (spc700 + w65c816) auto-loads from here; MSU-1 via \
-                     --msu1. Not the per-frame --plugins pump.",
+                     coprocessor (spc700 + w65c816, + optional msu1) auto-loads from \
+                     here; MSU-1's .pcm pack comes from --msu1 (or the ROM dir). Not \
+                     the per-frame --plugins pump.",
                     dir.display()
                 );
             }
@@ -248,22 +248,14 @@ fn load_plugins(opts: &Options, settings: &windows::options::Settings) -> Plugin
     }
 }
 
-/// Load an MSU-1 pack from `--msu1` or `SLOPGB_MSU1` (in that precedence).
-/// Absent → `None` (no MSU-1; the core + audio path stay byte-identical). A pack
-/// that fails to load (missing plugin wasm, bad module) is logged and treated as
-/// absent (non-fatal — the game still runs, just without MSU-1 audio).
-fn load_msu1(opts: &Options) -> Option<msu1::Msu1> {
-    let dir = opts
-        .msu1
+/// The explicit MSU-1 pack directory from `--msu1` or `SLOPGB_MSU1` (in that
+/// precedence). `None` = default the pack to the loaded ROM's own directory. The
+/// MSU-1 chip is now an SGB-coprocessor plugin driven over the SNES `$2000` bus
+/// (see `slopgb-sgb-coprocessor`); this only selects where its `.pcm` pack lives.
+fn msu1_override(opts: &Options) -> Option<PathBuf> {
+    opts.msu1
         .clone()
-        .or_else(|| env::var_os("SLOPGB_MSU1").map(PathBuf::from))?;
-    match msu1::Msu1::load(&dir) {
-        Ok(m) => Some(m),
-        Err(e) => {
-            eprintln!("slopgb: {e}");
-            None
-        }
-    }
+        .or_else(|| env::var_os("SLOPGB_MSU1").map(PathBuf::from))
 }
 
 /// Resolve the optional SGB BIOS bytes from `--sgb-bios` or `SLOPGB_SGB_BIOS`,
@@ -478,11 +470,6 @@ struct App {
     /// Opt-in wasm plugins (`--plugins` / `SLOPGB_PLUGINS_DIR`). Empty unless a
     /// directory was given; pumped once per rendered frame with a read-only view.
     plugins: PluginHost,
-    /// Opt-in MSU-1 streaming-audio pack (`--msu1` / `SLOPGB_MSU1`). `None` unless
-    /// a pack loaded; when present, its resampled PCM is mixed into the audio each
-    /// frame and its registers ($A000-$A007) are polled from the running game.
-    /// With no pack the core + audio path are byte-identical (golden-safe).
-    msu1: Option<msu1::Msu1>,
     /// Custom themes loaded from the settings file's `[theme.NAME]` sections
     /// (the theming API's registry) — what `settings.theme`'s `Custom(name)`
     /// variant resolves against. Loaded once at startup; like every other
@@ -535,8 +522,6 @@ impl App {
             .map(windows::options::PluginEntry::from)
             .collect();
         let mcp = mcp::Mcp::with_tool_plugins(mcp::plugin_host::ToolPlugins::from_options(&opts));
-        // Opt-in MSU-1 pack (--msu1 / SLOPGB_MSU1); None keeps the golden path.
-        let msu1 = load_msu1(&opts);
         // Build the controller map before `settings` is moved into the struct.
         let gamepad_bindings = gamepad::GamepadBindings::from_config(&settings.gamepad_map);
         let mut app = Self {
@@ -607,7 +592,6 @@ impl App {
             link: link::Link::new(),
             mcp,
             plugins,
-            msu1,
             recent,
             menu_popup: None,
             window_size,
@@ -620,10 +604,15 @@ impl App {
         app.apply_palette();
         // Arm the default exception-break mask (bgb's "break on invalid opcode").
         app.apply_exceptions();
+        // MSU-1 pack directory (--msu1 / SLOPGB_MSU1; else the ROM's own dir).
+        // Set before the plugins dir so the coprocessor injection below picks it
+        // up — the MSU-1 chip (msu1.wasm) rides the same SGB coprocessor.
+        app.session.set_msu1_override(msu1_override(&app.opts));
         // The SGB coprocessor is a plugin: point the session at the resolved
         // plugins dir (CLI `--plugins` / env / persisted — the single source
         // `load_plugins` already reconciled into `settings.plugins.dir`) so it
-        // auto-loads `spc700.wasm` + `w65c816.wasm` on an SGB machine at startup.
+        // auto-loads `spc700.wasm` + `w65c816.wasm` (+ optional `msu1.wasm`) on an
+        // SGB machine at startup.
         app.session.set_plugins_dir(
             (!app.settings.plugins.dir.is_empty())
                 .then(|| PathBuf::from(&app.settings.plugins.dir)),
@@ -1167,6 +1156,10 @@ impl App {
         match Session::load(path, self.settings.model, &self.boot_spec(), ram_init) {
             Ok(mut new) => {
                 new.set_sgb_bios(self.sgb_bios.clone());
+                // MSU-1 pack: explicit --msu1 override, else this newly loaded
+                // ROM's own directory. Set before the plugins dir so the fresh
+                // coprocessor injection points the MSU-1 plugin at the pack.
+                new.set_msu1_override(msu1_override(&self.opts));
                 // Carry the live plugins dir (seeded from --plugins at startup,
                 // possibly re-pointed via the UI) so the SGB coprocessor plugin
                 // re-injects into the fresh machine.

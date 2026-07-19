@@ -68,6 +68,12 @@ pub(crate) struct Session {
     /// (or a dir missing either wasm) → the built-in `SgbApu` stands (golden-safe
     /// default). Kept so a power-cycle / model switch re-injects it.
     plugins_dir: Option<PathBuf>,
+    /// Explicit MSU-1 pack directory (`--msu1`/`SLOPGB_MSU1`). `None` defaults the
+    /// pack to the loaded ROM's own directory (`.pcm` tracks beside the ROM). The
+    /// MSU-1 chip itself is an SGB-coprocessor plugin (`msu1.wasm` in the plugins
+    /// dir); this only points it at the audio pack. Kept so a power-cycle / model
+    /// switch re-applies it.
+    msu1_override: Option<PathBuf>,
     /// Overlay the built-in default SGB border on a non-SGB machine — bgb's
     /// "GBC + initial SGB border" system mode (`ModelChoice::CgbBorder`). A
     /// machine property, so a power-cycle (`reset`) re-applies it.
@@ -105,6 +111,7 @@ impl Session {
             boot: OwnedBootSpec::default(),
             sgb_bios: None,
             plugins_dir: None,
+            msu1_override: None,
             sgb_border: false,
             ram_init: None,
         }
@@ -169,6 +176,7 @@ impl Session {
             boot: boot.to_owned(),
             sgb_bios: None,
             plugins_dir: None,
+            msu1_override: None,
             sgb_border,
             ram_init,
         })
@@ -204,6 +212,13 @@ impl Session {
         self.apply_sgb_coprocessor();
     }
 
+    /// Set the explicit MSU-1 pack directory (`--msu1`); `None` = default to the
+    /// loaded ROM's own directory. Re-injects the coprocessor so the change lands.
+    pub(crate) fn set_msu1_override(&mut self, dir: Option<PathBuf>) {
+        self.msu1_override = dir;
+        self.apply_sgb_coprocessor();
+    }
+
     /// Inject the combined coprocessor into the current (freshly built) machine
     /// when its plugin is present. The SGB SNES-side chips run only from a loaded
     /// plugin: with `spc700.wasm` + `w65c816.wasm` in the plugins dir and an SGB
@@ -236,6 +251,18 @@ impl Session {
                              using clean-room firmware"
                         );
                     }
+                }
+                // Point the MSU-1 plugin (if `msu1.wasm` was in the plugins dir)
+                // at its `.pcm` pack: an explicit `--msu1` dir, else the loaded
+                // ROM's own directory (`sav_path` is ROM-adjacent). A game's SGB
+                // driver then finds the chip on the SNES $2000 bus.
+                let pack = self
+                    .msu1_override
+                    .clone()
+                    .or_else(|| self.sav_path.parent().map(Path::to_path_buf))
+                    .filter(|p| !p.as_os_str().is_empty());
+                if let Some(dir) = pack {
+                    cop.set_msu_pack(&dir);
                 }
                 self.gb.set_audio_coprocessor(Box::new(cop));
             }

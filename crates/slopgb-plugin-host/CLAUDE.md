@@ -31,8 +31,9 @@ is **generic** — it loads any module exporting the `slopgb_reset` /
 `slopgb_run_until` / `slopgb_port_write` / `slopgb_port_read` ABI, with no
 per-subsystem special-casing. The host is therefore obligated to support ALL
 valid subsystem plugins; a new subsystem needs no new loader, only a caller that
-drives it (the SGB coprocessor drives three — spc700 + w65c816 + the optional
-snes-ppu; MSU-1 drives one).
+drives it (the SGB coprocessor drives up to four loaded plugins — spc700 +
+w65c816 + the optional snes-ppu + the optional msu1, MSU-1 being part of the SGB
+bridge, driven at SNES `$2000-$2007`, not a separate loader).
 The three loaders are **peers, one per capability** — a `SUBSYSTEM` plugin is NOT
 "lesser" than a tier-1 one, it simply exports the coprocessor ABI instead of
 `on_frame`, so `PluginHost` (the tier-1 per-frame pump) is the wrong loader for

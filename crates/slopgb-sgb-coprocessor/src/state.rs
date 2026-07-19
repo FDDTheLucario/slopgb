@@ -158,6 +158,14 @@ impl SgbCoprocessor {
         // (the core re-supplies both on the next step/flush).
         self.src.clear();
         self.out.clear();
+        // The MSU-1 mix buffers are transient too. ponytail: the MSU-1 plugin's
+        // own playback position is not part of the on-disk snapshot — the loaded
+        // machine keeps the chip wherever it was, and the game's resident handler
+        // re-selects the track on its next song change. Add the plugin's opaque
+        // block to the format here if exact cross-load MSU-1 resume is wanted.
+        self.msu_src.clear();
+        self.msu_src_acc = 0.0;
+        self.msu_cur = (0, 0);
         self.pads_taken = false;
         self.pads_shadow = [0xFF; 4];
         self.char_write_row = 0;
@@ -248,6 +256,36 @@ impl SgbCoprocessor {
         fresh.nspc_cmd = self.nspc_cmd;
         fresh.nspc_shadow = self.nspc_shadow;
         fresh.nspc_pending = self.nspc_pending;
+        // Re-attach the MSU-1 plugin so a clone (rewind/in-memory restore) keeps
+        // its streaming audio: reload the plugin, re-point it at the pack, restore
+        // its opaque chip state, and copy the host-side mix runtime.
+        // ponytail: re-reading the pack from disk is O(pack bytes) per clone (the
+        // plugin file map is not clonable). Fine for savestate/rewind; cache the
+        // bytes if a large-pack rewind ever shows up in a profile.
+        if let Some(wasm) = &self.msu_wasm {
+            let msu_state = self.msu.as_ref().map(|m| m.borrow_mut().save_state().unwrap_or_default());
+            if let Err(e) = fresh.attach_msu(wasm) {
+                eprintln!("slopgb: SGB coprocessor MSU-1 re-attach failed on clone: {e}");
+            } else {
+                if let Some(dir) = &self.msu_pack_dir {
+                    fresh.set_msu_pack(dir);
+                }
+                if let (Some(m), Some(state)) = (&fresh.msu, &msu_state) {
+                    if !state.is_empty() {
+                        if let Err(e) = m.borrow_mut().load_state(state) {
+                            eprintln!("slopgb: SGB coprocessor MSU-1 load_state failed on clone: {e}");
+                        }
+                    }
+                }
+            }
+            fresh.msu_present = self.msu_present;
+            fresh.msu_cycle = self.msu_cycle;
+            fresh.msu_acc = self.msu_acc;
+            fresh.msu_src = self.msu_src.clone();
+            fresh.msu_src_acc = self.msu_src_acc;
+            fresh.msu_cur = self.msu_cur;
+            fresh.msu_playing = self.msu_playing;
+        }
         Ok(fresh)
     }
 }

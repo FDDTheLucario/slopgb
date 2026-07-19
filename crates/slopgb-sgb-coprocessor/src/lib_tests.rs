@@ -1119,3 +1119,6 @@ mod dma;
 
 #[path = "lib_tests_ppu.rs"]
 mod ppu;
+
+#[path = "lib_tests_msu.rs"]
+mod msu;
