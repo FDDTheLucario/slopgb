@@ -16,7 +16,7 @@ fn render_disasm_draws_a_red_gutter_dot_on_breakpoint_rows() {
     let (w, h) = (200usize, lh * 4);
     let mut buf = vec![0x00AA_AAAA_u32; w * h];
     let mut bps = Breakpoints::default();
-    bps.toggle(0x0101); // rows are 0x100,0x101,... -> dot on visible row 1
+    bps.toggle(0x0101, None); // rows are 0x100,0x101,... -> dot on visible row 1
     {
         let mut c = Canvas::new(&mut buf, w, h);
         render_disasm(
@@ -29,6 +29,7 @@ fn render_disasm_draws_a_red_gutter_dot_on_breakpoint_rows() {
             &BTreeSet::new(),
             DisasmFmt::default(),
             &SymbolTable::default(),
+            |_| 0,
             &t,
         );
     }
@@ -53,6 +54,7 @@ fn target_at_resolves_each_pane_to_its_address() {
         0xFFFE,
         l.disasm.x + 9,
         l.disasm.y + 2 * lh + 1,
+        |_| 0,
     );
     assert_eq!(t, ClickTarget::Disasm(0x0102));
     // Memory row 1 from the 0xFF00 base: 0xFF00 + 16.
@@ -64,6 +66,7 @@ fn target_at_resolves_each_pane_to_its_address() {
         0xFFFE,
         l.memory.x + 9,
         l.memory.y + lh,
+        |_| 0,
     );
     assert_eq!(t, ClickTarget::Memory(0xFF10));
     // Stack row 1 descends by 2 from SP.
@@ -75,11 +78,21 @@ fn target_at_resolves_each_pane_to_its_address() {
         0xFFFE,
         l.stack.x + 5,
         l.stack.y + lh,
+        |_| 0,
     );
     assert_eq!(t, ClickTarget::Stack(0xFFFC));
     // Registers pane: row 0 (af) is an editable pair; a row past pc (ime/ima)
     // is the non-editable `Registers`.
-    let t = target_at(NOPS, AREA, &st, 0x0100, 0xFFFE, l.regs.x + 5, l.regs.y + 5);
+    let t = target_at(
+        NOPS,
+        AREA,
+        &st,
+        0x0100,
+        0xFFFE,
+        l.regs.x + 5,
+        l.regs.y + 5,
+        |_| 0,
+    );
     assert_eq!(t, ClickTarget::Reg(RegField::Af));
     let t = target_at(
         NOPS,
@@ -89,6 +102,7 @@ fn target_at_resolves_each_pane_to_its_address() {
         0xFFFE,
         l.regs.x + 5,
         l.regs.y + 6 * lh + 1,
+        |_| 0,
     );
     assert_eq!(t, ClickTarget::Registers);
 }
@@ -110,6 +124,7 @@ fn pinned_disasm_follows_the_base_not_pc() {
         0xFFFE,
         l.disasm.x + 9,
         l.disasm.y + 1,
+        |_| 0,
     );
     assert_eq!(t, ClickTarget::Disasm(0x0200));
 }
@@ -174,6 +189,7 @@ fn right_click_opens_the_matching_pane_menu_and_sets_the_cursor() {
         0xFFFE,
         l.disasm.x + 9,
         l.disasm.y + 2 * lh + 1,
+        |_| 0,
     );
     let om = st.menu.as_ref().expect("disasm menu opened");
     assert_eq!(om.items.len(), 12, "rc-disasm has 12 items");
@@ -188,6 +204,7 @@ fn right_click_opens_the_matching_pane_menu_and_sets_the_cursor() {
         0xFFFE,
         l.memory.x + 9,
         l.memory.y + lh,
+        |_| 0,
     );
     assert_eq!(st.menu.as_ref().unwrap().items.len(), 12);
     // Stack -> 4, registers -> 1.
@@ -200,6 +217,7 @@ fn right_click_opens_the_matching_pane_menu_and_sets_the_cursor() {
         0xFFFE,
         l.stack.x + 5,
         l.stack.y + lh,
+        |_| 0,
     );
     assert_eq!(st.menu.as_ref().unwrap().items.len(), 4);
     let mut st = DebuggerState::default();
@@ -211,6 +229,7 @@ fn right_click_opens_the_matching_pane_menu_and_sets_the_cursor() {
         0xFFFE,
         l.regs.x + 5,
         l.regs.y + 5,
+        |_| 0,
     );
     assert_eq!(st.menu.as_ref().unwrap().items.len(), 1);
 }
@@ -228,6 +247,7 @@ fn open_disasm_menu() -> (DebuggerState, Vec<Rect>) {
         0xFFFE,
         l.disasm.x + 9,
         l.disasm.y + 2 * lh + 1,
+        |_| 0,
     );
     let om = st.menu.as_ref().unwrap();
     let rects = menu_rects(om.origin, &om.items);
@@ -239,10 +259,20 @@ fn selecting_set_break_returns_a_toggle_breakpoint_action() {
     let (mut st, rects) = open_disasm_menu();
     // "Set break/condition…" is the last (index 11) item; cursor is 0x0102.
     let r = rects[11];
-    let action = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
+    let action = on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        regs0(),
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+        |_| 0,
+    );
     assert_eq!(
         action,
-        Some(MenuOutcome::Act(DebugAction::ToggleBreakpoint(0x0102)))
+        Some(MenuOutcome::Act(DebugAction::ToggleBreakpoint(
+            0x0102, None
+        )))
     );
     assert!(st.menu.is_none(), "menu closes after a selection");
 }
@@ -254,11 +284,27 @@ fn copy_data_and_code_route_to_clipboard_actions() {
     // clicked address (cursor 0x0102) to the clipboard actions.
     let (mut st, rects) = open_disasm_menu();
     let r = rects[2]; // "Copy data"
-    let a = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
+    let a = on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        regs0(),
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+        |_| 0,
+    );
     assert_eq!(a, Some(MenuOutcome::Command(Action::DbgCopyData(0x0102))));
     let (mut st, rects) = open_disasm_menu();
     let r = rects[3]; // "Copy code"
-    let a = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
+    let a = on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        regs0(),
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+        |_| 0,
+    );
     assert_eq!(a, Some(MenuOutcome::Command(Action::DbgCopyCode(0x0102))));
 }
 
@@ -266,7 +312,15 @@ fn copy_data_and_code_route_to_clipboard_actions() {
 fn selecting_run_to_cursor_returns_a_run_action() {
     let (mut st, rects) = open_disasm_menu();
     let r = rects[7]; // "Run to cursor"
-    let action = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
+    let action = on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        regs0(),
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+        |_| 0,
+    );
     assert_eq!(
         action,
         Some(MenuOutcome::Act(DebugAction::RunToCursor(0x0102)))
@@ -278,7 +332,15 @@ fn stay_on_bank_toggles_pin_and_freezes_the_view() {
     let (mut st, rects) = open_disasm_menu();
     assert!(!st.pinned);
     let r = rects[6]; // "Stay on bank and address"
-    let action = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
+    let action = on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        regs0(),
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+        |_| 0,
+    );
     assert_eq!(action, None, "pin is a view effect, no machine action");
     assert!(st.pinned, "pin turned on");
     assert_eq!(st.disasm_base, 0x0100, "froze the view at the current PC");
@@ -290,7 +352,15 @@ fn clicking_a_disabled_item_or_away_just_closes_the_menu() {
     // A disabled row ("Insert size", index 4) selects nothing.
     let (mut st, rects) = open_disasm_menu();
     let r = rects[4];
-    let action = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
+    let action = on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        regs0(),
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+        |_| 0,
+    );
     assert_eq!(action, None);
     assert!(st.menu.is_none(), "disabled item dismisses the menu");
     assert_eq!(
@@ -302,7 +372,7 @@ fn clicking_a_disabled_item_or_away_just_closes_the_menu() {
     // A click off the menu (and off the menu bar) also dismisses it.
     let (mut st, _) = open_disasm_menu();
     let l = DebuggerLayout::for_size(AREA.w, AREA.h);
-    let action = on_left_click(NOPS, AREA, &mut st, regs0(), 5, l.memory.y + 5);
+    let action = on_left_click(NOPS, AREA, &mut st, regs0(), 5, l.memory.y + 5, |_| 0);
     assert_eq!(action, None);
     assert!(st.menu.is_none(), "click-away dismisses the menu");
 }
@@ -319,6 +389,7 @@ fn right_click_with_a_menu_open_dismisses_it() {
         0xFFFE,
         l.disasm.x + 9,
         l.disasm.y + 1,
+        |_| 0,
     );
     assert!(st.menu.is_none(), "a second right-click closes the menu");
 }
@@ -339,7 +410,15 @@ fn disasm_menu_go_to_is_enabled_and_opens_the_dialog() {
     let (mut st, rects) = open_disasm_menu();
     // "Go to…" is the first item, now enabled (was greyed in M5a).
     let r = rects[0];
-    let action = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
+    let action = on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        regs0(),
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+        |_| 0,
+    );
     assert_eq!(action, None, "opening a dialog is a view effect");
     assert!(st.menu.is_none(), "menu closed");
     let gd = st.dialog.as_ref().expect("Go-to dialog opened");
@@ -355,6 +434,43 @@ fn goto_disasm_pins_the_view_to_the_entered_address() {
     assert!(st.dialog.is_none(), "accept closes the dialog");
     assert!(st.pinned, "disasm Go-to pins the view");
     assert_eq!(st.disasm_base, 0x0150);
+}
+
+#[test]
+fn goto_disasm_bank_prefixed_pins_the_disasm_bank() {
+    let mut st = DebuggerState::default();
+    open_goto(&mut st, GotoTarget::Disasm);
+    // `01:6401` while some other bank is live must show bank 1, not the live bank.
+    type_goto(&mut st, "01:6401");
+    feed_dialog(&mut st, DialogKey::Enter);
+    assert_eq!(st.disasm_base, 0x6401);
+    assert_eq!(
+        st.disasm_bank,
+        Some(1),
+        "BB:AAAA pins the disasm pane's bank"
+    );
+    assert!(st.pinned, "a banked Go-to pins the view");
+    // A breakpoint toggled here qualifies to bank 1 (switchable-ROM address).
+    assert_eq!(st.disasm_bp_bank(0x6401), Some(1));
+    // Re-attaching to PC drops the pinned bank (follows the live bank again).
+    st.center_disasm_on_pc(0x0100, |_| 0x00, 10);
+    assert_eq!(st.disasm_bank, None, "go-to-PC clears the pinned bank");
+}
+
+#[test]
+fn goto_disasm_symbol_pins_its_own_bank() {
+    let mut st = DebuggerState {
+        symbols: std::rc::Rc::new(crate::symbols::SymbolTable::parse("01:6401 SomeWhere")),
+        ..DebuggerState::default()
+    };
+    open_goto(&mut st, GotoTarget::Disasm);
+    type_goto(&mut st, "SomeWhere");
+    feed_dialog(&mut st, DialogKey::Enter);
+    assert_eq!(
+        (st.disasm_base, st.disasm_bank),
+        (0x6401, Some(1)),
+        "a banked symbol jumps into its own bank"
+    );
 }
 
 #[test]
@@ -441,12 +557,28 @@ fn jump_and_call_cursor_return_their_actions() {
     // Disasm menu (cursor 0x0102): Jump to cursor = index 8, Call cursor = 9.
     let (mut st, rects) = open_disasm_menu();
     let r = rects[8];
-    let out = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
+    let out = on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        regs0(),
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+        |_| 0,
+    );
     assert_eq!(out, Some(MenuOutcome::Act(DebugAction::SetPc(0x0102))));
 
     let (mut st, rects) = open_disasm_menu();
     let r = rects[9];
-    let out = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
+    let out = on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        regs0(),
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+        |_| 0,
+    );
     assert_eq!(out, Some(MenuOutcome::Act(DebugAction::Call(0x0102))));
 }
 
@@ -457,6 +589,7 @@ fn address_list_menu_lists_entries_with_clear_choices() {
         &[0x0150, 0xC000],
         DebugAction::ClearBreakpoint,
         &SymbolTable::default(),
+        |_| 0,
         (40, 30),
     );
     assert_eq!(m.items.len(), 2);
@@ -474,6 +607,7 @@ fn address_list_menu_lists_entries_with_clear_choices() {
         &[0xFF44],
         DebugAction::ClearWatchpoint,
         &SymbolTable::default(),
+        |_| 0,
         (40, 30),
     );
     assert_eq!(
@@ -485,6 +619,7 @@ fn address_list_menu_lists_entries_with_clear_choices() {
         &[],
         DebugAction::ClearBreakpoint,
         &SymbolTable::default(),
+        |_| 0,
         (40, 30),
     );
     assert_eq!(e.items.len(), 1);
@@ -497,7 +632,15 @@ fn set_watchpoint_menu_item_returns_a_toggle_action() {
     // "Set watchpoint..." is index 10 (was greyed; now enabled, RM8); cursor 0x0102.
     let (mut st, rects) = open_disasm_menu();
     let r = rects[10];
-    let out = on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
+    let out = on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        regs0(),
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+        |_| 0,
+    );
     assert_eq!(
         out,
         Some(MenuOutcome::Act(DebugAction::ToggleWatchpoint(0x0102)))
@@ -517,6 +660,7 @@ fn editable_register_row_opens_a_seeded_prompt_and_writes_on_accept() {
         0xFFFE,
         l.regs.x + 5,
         l.regs.y + 5,
+        |_| 0,
     );
     let om = st.menu.as_ref().expect("registers menu");
     assert_eq!(om.items.len(), 1);
@@ -527,7 +671,15 @@ fn editable_register_row_opens_a_seeded_prompt_and_writes_on_accept() {
     // with the current value.
     let mut regs = Registers::default();
     regs.set_af(0x12F0);
-    let out = on_left_click(NOPS, AREA, &mut st, regs, r.x + r.w / 2, r.y + r.h / 2);
+    let out = on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        regs,
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+        |_| 0,
+    );
     assert_eq!(out, None, "opening the prompt is a view effect");
     let md = st.dialog.as_ref().expect("edit-register prompt opened");
     assert_eq!(md.kind, DialogKind::EditReg(RegField::Af));
@@ -558,6 +710,7 @@ fn registers_not_editable_option_greys_edit_register() {
         0xFFFE,
         l.regs.x + 5,
         l.regs.y + 5,
+        |_| 0,
     );
     let om = st.menu.as_ref().expect("registers menu");
     assert_eq!(om.items.len(), 1);
@@ -581,6 +734,7 @@ fn non_editable_register_row_greys_edit_register() {
         0xFFFE,
         l.regs.x + 5,
         l.regs.y + 6 * lh + 1,
+        |_| 0,
     );
     let om = st.menu.as_ref().expect("registers menu");
     assert_eq!(om.items.len(), 1);
@@ -602,13 +756,21 @@ fn click_menu_item(target_kind: char, idx: usize) -> DebuggerState {
         _ => unreachable!(),
     };
     let mut st = DebuggerState::default();
-    on_right_click(NOPS, AREA, &mut st, 0x0100, 0xFFFE, px, py);
+    on_right_click(NOPS, AREA, &mut st, 0x0100, 0xFFFE, px, py, |_| 0);
     let rects = menu_rects(
         st.menu.as_ref().unwrap().origin,
         &st.menu.as_ref().unwrap().items,
     );
     let r = rects[idx];
-    on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
+    on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        regs0(),
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+        |_| 0,
+    );
     st
 }
 
@@ -630,13 +792,22 @@ fn modify_code_data_toggles_the_hint_at_the_cursor() {
         0xFFFE,
         l.disasm.x + 9,
         l.disasm.y + 2 * lh + 1,
+        |_| 0,
     );
     let rects = menu_rects(
         st.menu.as_ref().unwrap().origin,
         &st.menu.as_ref().unwrap().items,
     );
     let r = rects[1];
-    on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
+    on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        regs0(),
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+        |_| 0,
+    );
     assert!(!st.data_hints.contains(&0x0102), "toggled back to code");
 }
 
@@ -655,13 +826,22 @@ fn force_code_view_clears_a_data_hint() {
         0xFFFE,
         l.disasm.x + 9,
         l.disasm.y + 2 * lh + 1,
+        |_| 0,
     );
     let rects = menu_rects(
         st.menu.as_ref().unwrap().origin,
         &st.menu.as_ref().unwrap().items,
     );
     let r = rects[5]; // "force code view"
-    on_left_click(NOPS, AREA, &mut st, regs0(), r.x + r.w / 2, r.y + r.h / 2);
+    on_left_click(
+        NOPS,
+        AREA,
+        &mut st,
+        regs0(),
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+        |_| 0,
+    );
     assert!(!st.data_hints.contains(&0x0102), "forced back to code");
 }
 

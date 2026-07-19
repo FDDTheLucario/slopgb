@@ -263,7 +263,12 @@ impl ToolWindows {
         if let WinState::Debugger(s) = &mut view.state {
             let l = debugger::DebuggerLayout::for_size(size.width as i32, size.height as i32);
             let visible = (l.disasm.h / line_height()).max(0) as usize;
-            s.disasm_follow(gb.cpu_regs().pc, |a| gb.debug_read(a), visible);
+            let bank = s.disasm_bank;
+            s.disasm_follow(
+                gb.cpu_regs().pc,
+                |a| crate::windows::banked_read(gb, bank, a),
+                visible,
+            );
         }
         {
             let mut canvas = Canvas::new(&mut buf, size.width as usize, size.height as usize);
@@ -292,28 +297,32 @@ impl ToolWindows {
 
     /// Record the cursor moving to physical `(x, y)` over tool window `id`;
     /// updates the hovered-cell details and redraws only if the hover changed.
-    pub fn on_cursor_moved(&mut self, id: WindowId, x: f64, y: f64) {
+    /// Returns whether a VRAM hover changed — the game window then repaints its
+    /// OAM sprite outline (which won't follow the cursor on its own while paused).
+    pub fn on_cursor_moved(&mut self, id: WindowId, x: f64, y: f64) -> bool {
         let (px, py) = (x as i32, y as i32);
         {
             let Some(view) = self.views.get_mut(&id) else {
-                return;
+                return false;
             };
             view.cursor = Some((px, py));
         }
         // A scrollbar drag owns the cursor: update its offset, skip hover.
         if matches!(self.scroll_drag, Some((d, _)) if d == id) {
             self.apply_scroll_drag(id);
-            return;
+            return false;
         }
         let Some(view) = self.views.get_mut(&id) else {
-            return;
+            return false;
         };
         let area = view.area();
         match &mut view.state {
             WinState::Vram(s) => {
-                if vram::on_hover(s, area, px, py) {
+                let changed = vram::on_hover(s, area, px, py);
+                if changed {
                     view.window.request_redraw();
                 }
+                changed
             }
             // Track the hovered row of an open context menu.
             WinState::Debugger(s) => {
@@ -322,10 +331,23 @@ impl ToolWindows {
                         view.window.request_redraw();
                     }
                 }
+                false
             }
             // The memory window has no hover state (just the cursor, tracked above).
-            WinState::Stateless | WinState::Memory(_) => {}
+            WinState::Stateless | WinState::Memory(_) => false,
         }
+    }
+
+    /// Emu-pixel bounding box of the sprite hovered in an open VRAM viewer's OAM
+    /// tab, for the game window to outline over the live screen. `None` unless a
+    /// VRAM window is open on the OAM tab with the cursor over a live sprite.
+    #[must_use]
+    pub fn oam_hover_rect(&self, gb: &GameBoy) -> Option<Rect> {
+        let tall = gb.debug_read(0xFF40) & 0x04 != 0;
+        self.views.values().find_map(|v| match &v.state {
+            WinState::Vram(s) => vram::oam_hover_rect(s, v.area(), gb.oam(), tall),
+            _ => None,
+        })
     }
 
     /// If a left-press landed on a scrollbar track, begin dragging it and jump
@@ -406,7 +428,7 @@ impl ToolWindows {
         let double = view.note_click(px, py);
         match &mut view.state {
             WinState::Vram(s) => {
-                if vram::on_click(s, area, px, py, gb.model().is_cgb()) {
+                if vram::on_click(s, area, px, py) {
                     view.window.request_redraw();
                 }
                 None
@@ -473,7 +495,8 @@ impl ToolWindows {
                     if l.memory.contains(px, py) {
                         s.scroll_memory(rows);
                     } else if l.disasm.contains(px, py) {
-                        s.scroll_disasm(rows, |a| gb.debug_read(a));
+                        let bank = s.disasm_bank;
+                        s.scroll_disasm(rows, |a| crate::windows::banked_read(gb, bank, a));
                     } else if l.stack.contains(px, py) {
                         s.scroll_stack(rows);
                     } else {
@@ -690,7 +713,19 @@ fn debugger_left_click(
     // Refresh the CDL-on flag so the Debug dropdown's "CDL logging" check-mark
     // reflects the live state (bgb's toggled-item tick).
     s.cdl_on = gb.cdl_flags().is_some();
-    debugger::on_left_click(|a| gb.debug_read(a), area, s, r, px, py)
+    // Hit-test through the same pinned-bank read + bank the renderer used, so
+    // symbol label lines land on the same rows and the click maps to the drawn
+    // address (a live-bank read would shift rows when the view is bank-pinned).
+    let bank = s.disasm_bank;
+    debugger::on_left_click(
+        |a| windows::banked_read(gb, bank, a),
+        area,
+        s,
+        r,
+        px,
+        py,
+        |a| windows::shown_bank(gb, bank, a),
+    )
 }
 
 /// Glue for [`debugger::on_double_click`] (toggles a breakpoint on a
@@ -703,7 +738,16 @@ fn debugger_double_click(
     py: i32,
 ) -> Option<MenuOutcome> {
     let r = gb.cpu_regs();
-    debugger::on_double_click(|a| gb.debug_read(a), area, s, r.pc, r.sp, px, py)
+    debugger::on_double_click(
+        |a| windows::banked_read(gb, s.disasm_bank, a),
+        area,
+        s,
+        r.pc,
+        r.sp,
+        px,
+        py,
+        |a| windows::shown_bank(gb, s.disasm_bank, a),
+    )
 }
 
 /// Glue for [`debugger::on_right_click`] (opens / dismisses the context menu).
@@ -715,7 +759,18 @@ fn debugger_right_click(
     py: i32,
 ) {
     let r = gb.cpu_regs();
-    debugger::on_right_click(|a| gb.debug_read(a), area, s, r.pc, r.sp, px, py);
+    // Same renderer-matched read/bank as the left-click glue (row alignment).
+    let bank = s.disasm_bank;
+    debugger::on_right_click(
+        |a| windows::banked_read(gb, bank, a),
+        area,
+        s,
+        r.pc,
+        r.sp,
+        px,
+        py,
+        |a| windows::shown_bank(gb, bank, a),
+    );
 }
 
 /// Whether a tool window should auto-refresh on the per-frame tick: everything
@@ -727,8 +782,53 @@ fn auto_redraws(is_memory_window: bool, mem_live: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{auto_redraws, is_double_click};
+    use super::{auto_redraws, debugger_double_click, is_double_click};
+    use crate::dbg::DebugAction;
+    use crate::symbols::SymbolTable;
+    use crate::ui::canvas::Rect;
+    use crate::ui::text::line_height;
+    use crate::windows::debugger::{self, MenuOutcome};
+    use slopgb_core::{GameBoy, Model};
+    use std::rc::Rc;
     use std::time::Duration;
+
+    /// A bank-pinned view must hit-test through the pinned bank, not the live
+    /// one: the renderer names symbols per the *shown* bank, and a live-bank
+    /// hit-test would miss the label row and toggle the breakpoint one line off.
+    #[test]
+    fn double_click_hits_the_drawn_row_in_a_pinned_bank() {
+        // MBC1, 64 KiB (4 banks), all-nop body; live ROM bank is 1 at reset.
+        let mut rom = vec![0u8; 0x10000];
+        rom[0x0147] = 0x01;
+        rom[0x0148] = 0x01;
+        let gb = GameBoy::new(Model::Dmg, rom).unwrap();
+        assert_ne!(gb.rom_bank(), 2, "live bank must differ from the pin");
+        // View pinned to bank 2 with a symbol at its first shown row, so the
+        // rendered pane is: row 0 `Foo:` label, row 1 the 02:4000 instruction.
+        let st = debugger::DebuggerState {
+            pinned: true,
+            disasm_base: 0x4000,
+            disasm_bank: Some(2),
+            symbols: Rc::new(SymbolTable::parse("02:4000 Foo")),
+            ..debugger::DebuggerState::default()
+        };
+        let area = Rect::new(0, 0, 760, 560);
+        let l = debugger::DebuggerLayout::for_size(area.w, area.h);
+        let out = debugger_double_click(
+            &st,
+            area,
+            &gb,
+            l.disasm.x + 9,
+            l.disasm.y + line_height() + 1, // row 1: the labeled instruction
+        );
+        assert_eq!(
+            out,
+            Some(MenuOutcome::Act(DebugAction::ToggleBreakpoint(
+                0x4000,
+                Some(2)
+            )))
+        );
+    }
 
     #[test]
     fn double_click_within_window_and_radius() {

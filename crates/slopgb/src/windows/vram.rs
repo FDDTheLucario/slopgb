@@ -67,8 +67,6 @@ pub struct VramState {
     pub map_src: u8,
     /// `Tiles` source radio index into [`TILE_SRC`].
     pub tile_src: u8,
-    /// Which CGB VRAM bank the Tiles tab shows (0/1); ignored on DMG.
-    pub tile_bank: u8,
     /// Cursor position (window pixels) while it is over the content area, for
     /// the hovered-cell details panel; `None` when outside.
     pub hover: Option<(i32, i32)>,
@@ -88,7 +86,6 @@ impl Default for VramState {
             scxy: true,
             map_src: 0,
             tile_src: 0,
-            tile_bank: 0,
             hover: None,
             tile_hex_8bit: false,
         }
@@ -108,8 +105,6 @@ pub struct VramLayout {
     pub scxy_box: Rect,
     pub map_src: Vec<Rect>,
     pub tile_src: Vec<Rect>,
-    /// Tiles-tab CGB VRAM-bank-1 toggle.
-    pub tile_bank_box: Rect,
 }
 
 /// Compute the VRAM window layout for `area`.
@@ -123,9 +118,7 @@ pub fn layout(area: Rect) -> VramLayout {
     let details = Rect::new(dx, top, area.right() - dx - 2, area.bottom() - top);
     // Controls fill the lower rows of the details column, top-down. Each tab
     // shows only the subset that applies (gated in render/click).
-    let mut cy = details.bottom() - 1 - 6 * lh;
-    let tile_bank_box = checkbox_rect(dx, cy, "VRAM bank 1");
-    cy += lh;
+    let mut cy = details.bottom() - 1 - 5 * lh;
     let map_src = radio_rects(dx, cy, &MAP_SRC);
     cy += lh;
     let tile_src = radio_rects(dx, cy, &TILE_SRC);
@@ -144,14 +137,13 @@ pub fn layout(area: Rect) -> VramLayout {
         scxy_box,
         map_src,
         tile_src,
-        tile_bank_box,
     }
 }
 
 /// Handle a left-click at window-pixel `(px, py)`: switch tab, toggle a
-/// checkbox, or select a BG-map source radio. `cgb` gates the CGB-only Tiles
-/// bank toggle. Returns whether `state` changed (i.e. a redraw is needed).
-pub fn on_click(state: &mut VramState, area: Rect, px: i32, py: i32, cgb: bool) -> bool {
+/// checkbox, or select a BG-map source radio. Returns whether `state` changed
+/// (i.e. a redraw is needed).
+pub fn on_click(state: &mut VramState, area: Rect, px: i32, py: i32) -> bool {
     let l = layout(area);
     for (i, r) in l.tabs.iter().enumerate() {
         if r.contains(px, py) {
@@ -165,11 +157,6 @@ pub fn on_click(state: &mut VramState, area: Rect, px: i32, py: i32, cgb: bool) 
     }
     if l.paletted_box.contains(px, py) {
         state.show_paletted = !state.show_paletted;
-        return true;
-    }
-    // The Tiles tab's bank toggle is CGB-only (DMG has a single VRAM bank).
-    if state.tab == VramTab::Tiles && cgb && l.tile_bank_box.contains(px, py) {
-        state.tile_bank ^= 1;
         return true;
     }
     // scxy + the source radios only apply on the BG map tab (where they show).
@@ -234,14 +221,16 @@ pub fn render_tabs(c: &mut Canvas, x: i32, y: i32, active: VramTab, theme: &Them
     tab_strip(c, x, y, &labels, active_idx, theme)
 }
 
-/// Render the Tiles tab: all 384 tiles of `bank` in a 16-wide grid through
-/// `palette` at integer `scale`, top-left at `rect`. Clipped to `rect`.
+/// Render the Tiles tab: all 384 tiles of `bank` in a 16-wide grid at integer
+/// `scale`, top-left at `rect`. `palette(tile)` gives each tile's four shades —
+/// a fixed grey ramp when "show paletted" is off, or the tile's guessed palette
+/// when on ([`debug::tile_palette_guess`]). Clipped to `rect`.
 pub fn render_tiles(
     c: &mut Canvas,
     rect: Rect,
     vram: &[u8],
     bank: usize,
-    palette: &[u32; 4],
+    palette: impl Fn(usize) -> [u32; 4],
     scale: i32,
 ) {
     const COLS: usize = 16;
@@ -250,7 +239,7 @@ pub fn render_tiles(
         let px = rect.x + (tile % COLS) as i32 * 8 * scale;
         let py = rect.y + (tile / COLS) as i32 * 8 * scale;
         let pixels = debug::tile_pixels(vram, bank, tile);
-        c.blit_tile(px, py, &pixels, palette, scale);
+        c.blit_tile(px, py, &pixels, &palette(tile), scale);
     }
     c.set_clip(saved);
 }
@@ -268,6 +257,53 @@ pub fn oam_cell(scale: i32) -> i32 {
 #[must_use]
 pub fn oam_cell_h(scale: i32, tall: bool) -> i32 {
     (if tall { 18 } else { 10 }) * scale
+}
+
+/// The integer render scale the OAM tab fits into `content` (mirrors `vram_geom`'s
+/// OAM arm). Shared so the render, the details panel, and the game-window
+/// highlight all resolve sprites at the same pitch.
+#[must_use]
+pub fn oam_scale(content: Rect, tall: bool) -> i32 {
+    fit_scale(
+        content.w,
+        content.h,
+        8 * oam_cell(1),
+        5 * oam_cell_h(1, tall),
+    )
+}
+
+/// The OAM-grid cell index (0..40) under content-relative `(lx, ly)` at `scale`,
+/// or `None` off the 8×5 grid. Shared by the details panel and the game-window
+/// highlight so they can never resolve different sprites.
+#[must_use]
+pub fn oam_cell_at(lx: i32, ly: i32, scale: i32, tall: bool) -> Option<usize> {
+    if lx < 0 || ly < 0 {
+        return None;
+    }
+    let (col, row) = (lx / oam_cell(scale), ly / oam_cell_h(scale, tall));
+    let idx = (row * 8 + col) as usize;
+    (col < 8 && idx < 40).then_some(idx)
+}
+
+/// Emu-pixel (LCD-space) bounding box of the sprite hovered in the OAM tab, or
+/// `None` when the tab isn't OAM or the cursor isn't over a live sprite. `x`/`y`
+/// un-offset OAM's stored +8/+16 to on-screen coords; the box is 8 wide and 8 or
+/// 16 (`tall`, LCDC bit 2) high. Lets the game window outline the hovered sprite.
+#[must_use]
+pub fn oam_hover_rect(state: &VramState, area: Rect, oam: &[u8], tall: bool) -> Option<Rect> {
+    if state.tab != VramTab::Oam {
+        return None;
+    }
+    let (hx, hy) = state.hover?;
+    let content = layout(area).content;
+    let scale = oam_scale(content, tall);
+    let idx = oam_cell_at(hx - content.x, hy - content.y, scale, tall)?;
+    let s = debug::oam_sprites(oam)[idx];
+    if s.x == 0 && s.y == 0 {
+        return None; // empty slot — render_oam skips these
+    }
+    let h = if tall { 16 } else { 8 };
+    Some(Rect::new(i32::from(s.x) - 8, i32::from(s.y) - 16, 8, h))
 }
 
 /// Mirror an 8×8 tile's pixels horizontally and/or vertically (the OAM/BG-map
@@ -412,18 +448,6 @@ pub fn render_palettes(c: &mut Canvas, rect: Rect, bg: &[u8], obj: &[u8], theme:
     c.set_clip(saved);
 }
 
-/// Absolute tile index (0..=383) for a BG-map tile number under the LCDC tile
-/// data area: unsigned 0x8000 method (`n`), or signed 0x8800 method where `n`
-/// is taken as `i8` relative to tile 256 (`0x9000`).
-#[must_use]
-pub fn tile_index(n: u8, signed: bool) -> usize {
-    if signed {
-        (256 + i16::from(n as i8)) as usize
-    } else {
-        n as usize
-    }
-}
-
 /// Split a `start`-anchored `len`-long span over a `modulus`-wide axis into the
 /// 1 or 2 contiguous pieces it occupies once it wraps past the edge.
 fn wrap_spans(start: i32, len: i32, modulus: i32) -> Vec<(i32, i32)> {
@@ -544,7 +568,7 @@ pub fn render_bgmap(
             continue;
         };
         let pixels = flip_tile(
-            debug::tile_pixels(vram, bank, tile_index(cell.tile, signed)),
+            debug::tile_pixels(vram, bank, debug::bg_tile_index(cell.tile, signed)),
             xf,
             yf,
         );

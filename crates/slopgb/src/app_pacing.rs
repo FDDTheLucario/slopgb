@@ -44,12 +44,12 @@ impl App {
     /// debugger is open with a halt source), it first drains any stale hit the
     /// core recorded while the debugger was closed — see
     /// [`Self::drain_stale_debug_hits`].
-    fn run_breakpoints(&mut self) -> Option<Vec<u16>> {
+    fn run_breakpoints(&mut self) -> Option<Vec<(u16, Option<u16>)>> {
         if !self.dbg_armed() {
             return None;
         }
         self.drain_stale_debug_hits();
-        Some(self.dbg.breakpoints().pc_list())
+        Some(self.dbg.breakpoints().bp_list())
     }
 
     /// Discard any watchpoint / exception-break / profiler-break hit the core
@@ -248,7 +248,7 @@ const LINK_CHUNK_CYCLES: u32 = 4096;
 /// golden-safe `debug_write`.
 fn run_one_frame(
     gb: &mut GameBoy,
-    breakpoints: &Option<Vec<u16>>,
+    breakpoints: &Option<Vec<(u16, Option<u16>)>>,
     link: &mut crate::link::Link,
     freeze: &[(u16, u8)],
     cheats: &[(u16, u8)],
@@ -278,7 +278,7 @@ fn pump_audio_frame(pipe: &mut AudioPipe, msu1: &mut Option<Msu1>, gb: &mut Game
 
 fn advance_frame(
     gb: &mut GameBoy,
-    breakpoints: &Option<Vec<u16>>,
+    breakpoints: &Option<Vec<(u16, Option<u16>)>>,
     link: &mut crate::link::Link,
 ) -> bool {
     // Debugger armed: a single breakpoint-aware frame (breakpoints take priority

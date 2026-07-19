@@ -90,6 +90,84 @@ pub fn bg_map(vram: &[u8], base: u16) -> [MapCell; 1024] {
     out
 }
 
+/// A guessed display palette for a raw tile: which palette set (BG vs OBJ) and
+/// index, inferred from where the tile is referenced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PaletteRef {
+    /// `true` = OBJ palette (OBP/CGB OBJ CRAM); `false` = BG palette (BGP/CGB BG
+    /// CRAM).
+    pub obj: bool,
+    /// Palette index: CGB 0-7. DMG BG is always 0 (BGP); DMG OBJ is 0/1
+    /// (OBP0/OBP1, from OAM attr bit 4).
+    pub index: u8,
+}
+
+/// A BG-map tile byte's absolute tile index (0..=383) under the current
+/// tile-data addressing mode. Unsigned (LCDC.4=1, 0x8000 base): index = byte.
+/// Signed (LCDC.4=0, 0x8800/0x9000 base): byte is `i8` around tile 256, so
+/// 0..127 → 256..383 and 128..255 → 128..255.
+#[must_use]
+pub fn bg_tile_index(byte: u8, signed: bool) -> usize {
+    if signed {
+        (256 + i32::from(byte as i8)) as usize
+    } else {
+        byte as usize
+    }
+}
+
+/// Guess a display palette for every tile in each VRAM bank by finding a
+/// reference to it — bgb's Tiles "show paletted". A raw tile carries no palette,
+/// so infer one from usage: scan both BG tilemaps (BG palette + CGB attr bank),
+/// then OAM sprites (OBJ palette) for tiles no BG cell referenced. BG wins when a
+/// tile is used by both. `signed` is BG tile-data addressing (LCDC.4=0 → 0x8800
+/// signed); `tall` is 8×16 OBJ (LCDC.2, so a sprite covers `tile&!1` and
+/// `tile|1`); `cgb` selects CGB attr palettes vs the DMG OBP bit. Unreferenced
+/// tiles stay `None` (caller renders them neutral grey).
+#[must_use]
+pub fn tile_palette_guess(
+    vram: &[u8],
+    oam: &[u8],
+    signed: bool,
+    tall: bool,
+    cgb: bool,
+) -> [[Option<PaletteRef>; 384]; 2] {
+    let mut guess = [[None; 384]; 2];
+    // BG first (first reference wins, and BG wins over OBJ). Both tilemaps.
+    for base in [0x9800u16, 0x9C00] {
+        for cell in bg_map(vram, base) {
+            let bank = if cgb { usize::from(cell.attr >> 3 & 1) } else { 0 };
+            let slot = &mut guess[bank][bg_tile_index(cell.tile, signed)];
+            if slot.is_none() {
+                *slot = Some(PaletteRef {
+                    obj: false,
+                    index: if cgb { cell.attr & 7 } else { 0 },
+                });
+            }
+        }
+    }
+    // OBJ fills only tiles no BG cell claimed.
+    for s in oam_sprites(oam) {
+        if s.y == 0 && s.x == 0 {
+            continue; // unused OAM slot
+        }
+        let bank = if cgb { usize::from(s.attr >> 3 & 1) } else { 0 };
+        let pal = PaletteRef {
+            obj: true,
+            index: if cgb { s.attr & 7 } else { s.attr >> 4 & 1 },
+        };
+        // Sprites use 0x8000 unsigned addressing; 8×16 covers two stacked tiles.
+        let top = if tall { s.tile & 0xFE } else { s.tile } as usize;
+        let tiles: &[usize] = if tall { &[top, top + 1] } else { &[top] };
+        for &t in tiles {
+            let slot = &mut guess[bank][t];
+            if slot.is_none() {
+                *slot = Some(pal);
+            }
+        }
+    }
+    guess
+}
+
 #[cfg(test)]
 #[path = "vram_tests.rs"]
 mod tests;

@@ -92,5 +92,5 @@ fn start_then_pump_serves_a_live_tool_call() {
     let resp = client.join().unwrap();
     assert!(resp.contains("breakpoint set at"), "tool ran: {resp}");
     // The breakpoint tool's mutation landed in the App-owned set (round-trip).
-    assert!(dbg.breakpoints().contains(0x0150));
+    assert!(dbg.breakpoints().dot_at(0x0150, 0));
 }

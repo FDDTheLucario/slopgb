@@ -46,22 +46,25 @@ fn vram_render_routes_each_tab_and_shows_hover_details() {
 fn tile_details_has_no_phantom_tile_right_of_the_grid() {
     // At scale 2 the 16-col grid spans 256 px; the content area is wider. A
     // hover left of the edge resolves a tile; at/beyond column 16 there is none.
-    assert!(!tile_details(0, 0, 2, false).is_empty(), "col 0 -> tile 0");
     assert!(
-        !tile_details(255, 0, 2, false).is_empty(),
+        !tile_details(0, 0, 2, false, None).is_empty(),
+        "col 0 -> tile 0"
+    );
+    assert!(
+        !tile_details(255, 0, 2, false, None).is_empty(),
         "col 15 still in grid"
     );
     assert!(
-        tile_details(256, 0, 2, false).is_empty(),
+        tile_details(256, 0, 2, false, None).is_empty(),
         "col 16 is blank space"
     );
     assert!(
-        tile_details(400, 0, 2, false).is_empty(),
+        tile_details(400, 0, 2, false, None).is_empty(),
         "far right is blank"
     );
     // Below the 24-row bank-0 grid there is no tile either.
     assert!(
-        tile_details(0, 384, 2, false).is_empty(),
+        tile_details(0, 384, 2, false, None).is_empty(),
         "row 24 past tile 383"
     );
 }
@@ -87,17 +90,43 @@ fn dec_hex_shows_decimal_and_uppercase_hex() {
 }
 
 #[test]
+fn tile_details_shows_guessed_palette_or_a_blank_line() {
+    let mut guess: TileGuess = [[None; 384]; 2];
+    guess[0][0] = Some(debug::PaletteRef {
+        obj: false,
+        index: 2,
+    });
+    guess[0][1] = Some(debug::PaletteRef {
+        obj: true,
+        index: 5,
+    });
+    // scale 2 → 16 px/cell. Tile 0 guessed BG 2, tile 1 (col 1) OBJ 5.
+    assert_eq!(
+        tile_details(0, 0, 2, false, Some(&guess))[2],
+        "guessed palette BG 2"
+    );
+    assert_eq!(
+        tile_details(16, 0, 2, false, Some(&guess))[2],
+        "guessed palette OBJ 5"
+    );
+    // Unreferenced tile → blank line (kept so the panel layout is stable).
+    assert_eq!(tile_details(32, 0, 2, false, Some(&guess))[2], "");
+    // No guess available at all → also blank.
+    assert_eq!(tile_details(0, 0, 2, false, None)[2], "");
+}
+
+#[test]
 fn tile_details_appends_hex_to_the_tile_number() {
     // scale 2 -> 16 px/cell. Top-left tile 0.
-    assert_eq!(tile_details(0, 0, 2, false)[0], "Tile No. 0 ($00)");
+    assert_eq!(tile_details(0, 0, 2, false, None)[0], "Tile No. 0 ($00)");
     // col 15, row 23 -> tile 23*16+15 = 383 -> three hex digits.
     assert_eq!(
-        tile_details(15 * 16, 23 * 16, 2, false)[0],
+        tile_details(15 * 16, 23 * 16, 2, false, None)[0],
         "Tile No. 383 ($17F)"
     );
     // With the 8-bit-hex option the same tile wraps to $7F.
     assert_eq!(
-        tile_details(15 * 16, 23 * 16, 2, true)[0],
+        tile_details(15 * 16, 23 * 16, 2, true, None)[0],
         "Tile No. 383 ($7F)"
     );
 }
@@ -180,14 +209,14 @@ fn tile_details_two_maps_hover_to_bank_and_prints_real_bank() {
     let content = Rect::new(0, 0, 400, 400);
     let (left, right, s) = tiles_two_col(content);
     // Hover inside the left grid -> bank 0.
-    let d0 = tile_details_two(4, 4, left, right, s, false);
+    let d0 = tile_details_two(4, 4, left, right, s, false, None);
     assert!(d0[1].starts_with("Tile Address 0:"), "{d0:?}");
     // Hover inside the right grid -> bank 1 (real bank in the label).
     let rx = (right.x - left.x) + 4; // content-relative x just inside right grid
-    let d1 = tile_details_two(rx, 4, left, right, s, false);
+    let d1 = tile_details_two(rx, 4, left, right, s, false, None);
     assert!(d1[1].starts_with("Tile Address 1:"), "{d1:?}");
     // Hover in the gutter between the grids -> no tile.
-    assert!(tile_details_two(left.w + 1, 4, left, right, s, false).is_empty());
+    assert!(tile_details_two(left.w + 1, 4, left, right, s, false, None).is_empty());
 }
 
 #[test]
@@ -195,12 +224,12 @@ fn tile_details_track_the_live_scale() {
     // The same hover pixel resolves to a different tile at a different scale, so
     // the details hit-test must use the live (fitted) scale, not a fixed one.
     assert_eq!(
-        tile_details(32, 0, 2, false)[0],
+        tile_details(32, 0, 2, false, None)[0],
         "Tile No. 2 ($02)",
         "16px/tile at scale 2"
     );
     assert_eq!(
-        tile_details(32, 0, 3, false)[0],
+        tile_details(32, 0, 3, false, None)[0],
         "Tile No. 1 ($01)",
         "24px/tile at scale 3"
     );

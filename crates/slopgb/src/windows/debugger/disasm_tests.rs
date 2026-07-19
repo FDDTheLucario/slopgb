@@ -33,11 +33,18 @@ fn disasm_rows_decode_format_and_advance() {
         0x105 => 0xFF,
         _ => 0x00, // nop fills the rest
     };
-    let rows = disasm_rows(mem, 0x100, 3, &BTreeSet::new(), DisasmFmt::default());
+    let rows = disasm_rows(
+        mem,
+        0x100,
+        3,
+        &BTreeSet::new(),
+        DisasmFmt::default(),
+        &|_| 0,
+    );
     assert_eq!(rows.len(), 3);
 
     assert_eq!(rows[0].addr, 0x100);
-    assert!(rows[0].text.starts_with("ROM0:0100 "), "{}", rows[0].text);
+    assert!(rows[0].text.starts_with("ROM00:0100 "), "{}", rows[0].text);
     assert!(rows[0].text.contains("nop"));
     assert!(rows[0].text.ends_with(";1"));
 
@@ -53,6 +60,35 @@ fn disasm_rows_decode_format_and_advance() {
     assert_eq!(rows[2].addr, 0x104, "advanced past the 3-byte jp");
     assert!(rows[2].text.contains("3E FF"));
     assert!(rows[2].text.contains("ld a,$FF"));
+}
+
+#[test]
+fn switchable_rom_rows_name_the_shown_bank() {
+    // A 0x4000-0x7FFF row labels its bank (`ROM07`), not the generic `ROMX`, from
+    // the `bank_of` resolver — so a banked view reads `ROM01:6401`.
+    let mem = |_a: u16| 0x00u8;
+    let live = disasm_rows(
+        mem,
+        0x6401,
+        1,
+        &BTreeSet::new(),
+        DisasmFmt::default(),
+        &|_| 7,
+    );
+    assert!(live[0].text.starts_with("ROM07:6401 "), "{}", live[0].text);
+    let pinned = disasm_rows(
+        mem,
+        0x6401,
+        1,
+        &BTreeSet::new(),
+        DisasmFmt::default(),
+        &|_| 1,
+    );
+    assert!(
+        pinned[0].text.starts_with("ROM01:6401 "),
+        "{}",
+        pinned[0].text
+    );
 }
 
 #[test]
@@ -78,6 +114,7 @@ fn render_disasm_highlights_the_pc_row() {
             &BTreeSet::new(),
             DisasmFmt::default(),
             &SymbolTable::default(),
+            |_| 0,
             &t,
         );
     }
@@ -98,14 +135,21 @@ fn data_hint_renders_db_and_advances_one_byte() {
         _ => 0x00,
     };
     let hints: BTreeSet<u16> = [0x0150].into_iter().collect();
-    let rows = disasm_rows(mem, 0x0150, 2, &hints, DisasmFmt::default());
+    let rows = disasm_rows(mem, 0x0150, 2, &hints, DisasmFmt::default(), &|_| 0);
     assert!(rows[0].text.contains("db $C3"), "{}", rows[0].text);
     assert_eq!(
         rows[1].addr, 0x0151,
         "a data byte advances by 1, not the jp's 3"
     );
     // Without the hint the same address decodes as the 3-byte jp.
-    let code = disasm_rows(mem, 0x0150, 2, &BTreeSet::new(), DisasmFmt::default());
+    let code = disasm_rows(
+        mem,
+        0x0150,
+        2,
+        &BTreeSet::new(),
+        DisasmFmt::default(),
+        &|_| 0,
+    );
     assert!(code[0].text.contains("jp $0150"));
     assert_eq!(code[1].addr, 0x0153);
 }
@@ -124,7 +168,7 @@ fn disasm_fmt_lowercase_hex_and_hide_clocks() {
         rgbds: false,
         lowercase_disasm: true,
     };
-    let rows = disasm_rows(mem, 0x0100, 1, &BTreeSet::new(), lower);
+    let rows = disasm_rows(mem, 0x0100, 1, &BTreeSet::new(), lower, &|_| 0);
     assert!(
         rows[0].text.contains("3e ff"),
         "lowercase byte hex: {}",
@@ -136,7 +180,7 @@ fn disasm_fmt_lowercase_hex_and_hide_clocks() {
         rows[0].text
     );
     assert!(
-        rows[0].text.starts_with("ROM0:0100"),
+        rows[0].text.starts_with("ROM00:0100"),
         "region label stays upper: {}",
         rows[0].text
     );
@@ -147,7 +191,7 @@ fn disasm_fmt_lowercase_hex_and_hide_clocks() {
         rgbds: false,
         lowercase_disasm: true,
     };
-    let rows = disasm_rows(mem, 0x0100, 1, &BTreeSet::new(), no_clk);
+    let rows = disasm_rows(mem, 0x0100, 1, &BTreeSet::new(), no_clk, &|_| 0);
     assert!(
         !rows[0].text.contains(';'),
         "clocks column hidden: {}",
@@ -175,8 +219,15 @@ fn annotate_symbols_inserts_labels_and_substitutes_operands() {
         _ => 0x00,
     };
     let syms = SymbolTable::parse("00:0150 Loop");
-    let raw = disasm_rows(mem, 0x0150, 1, &BTreeSet::new(), DisasmFmt::default());
-    let rows = annotate_symbols(raw, &syms, DisasmFmt::default());
+    let raw = disasm_rows(
+        mem,
+        0x0150,
+        1,
+        &BTreeSet::new(),
+        DisasmFmt::default(),
+        &|_| 0,
+    );
+    let rows = annotate_symbols(raw, &syms, DisasmFmt::default(), &|_| 0);
     // A label line precedes the instruction whose address is the symbol.
     assert!(rows[0].is_label, "row 0 is a label line");
     assert_eq!(rows[0].text, "Loop:");
@@ -201,8 +252,15 @@ fn annotate_symbols_blank_spacer_above_midlist_label() {
     // (0x0100) keeps no leading blank (the !out.is_empty() guard).
     let mem = |_a: u16| 0x00u8; // NOP
     let syms = SymbolTable::parse("00:0101 Foo");
-    let raw = disasm_rows(mem, 0x0100, 2, &BTreeSet::new(), DisasmFmt::default());
-    let rows = annotate_symbols(raw, &syms, DisasmFmt::default());
+    let raw = disasm_rows(
+        mem,
+        0x0100,
+        2,
+        &BTreeSet::new(),
+        DisasmFmt::default(),
+        &|_| 0,
+    );
+    let rows = annotate_symbols(raw, &syms, DisasmFmt::default(), &|_| 0);
     // rows: [instr@0100, <blank>, "Foo:", instr@0101]
     assert!(!rows[0].is_label, "top instruction row, no leading blank");
     let label = rows
@@ -217,10 +275,49 @@ fn annotate_symbols_blank_spacer_above_midlist_label() {
 }
 
 #[test]
+fn annotate_symbols_names_only_the_active_bank() {
+    // Same ROMX address 0x6ACE has a symbol in bank 0B and none in bank 24. With
+    // bank 24 mapped there, the 0B symbol must NOT be shown (the reported bug);
+    // with bank 0B mapped it is.
+    let mem = |_a: u16| 0x00u8; // NOP
+    let syms = SymbolTable::parse("0B:6ACE Palette_0b");
+    let raw = disasm_rows(
+        mem,
+        0x6ACE,
+        1,
+        &BTreeSet::new(),
+        DisasmFmt::default(),
+        &|_| 0,
+    );
+    let live24 = annotate_symbols(raw.clone(), &syms, DisasmFmt::default(), &|_| 0x24);
+    assert!(
+        !live24.iter().any(|r| r.text == "Palette_0b:"),
+        "wrong-bank label suppressed while bank 24 is mapped"
+    );
+    let live0b = annotate_symbols(raw, &syms, DisasmFmt::default(), &|_| 0x0B);
+    assert!(
+        live0b.iter().any(|r| r.text == "Palette_0b:"),
+        "matching-bank label shown while bank 0B is mapped"
+    );
+}
+
+#[test]
 fn annotate_symbols_empty_table_is_identity() {
     let mem = |_a: u16| 0x00u8;
-    let raw = disasm_rows(mem, 0x0100, 3, &BTreeSet::new(), DisasmFmt::default());
-    let rows = annotate_symbols(raw.clone(), &SymbolTable::default(), DisasmFmt::default());
+    let raw = disasm_rows(
+        mem,
+        0x0100,
+        3,
+        &BTreeSet::new(),
+        DisasmFmt::default(),
+        &|_| 0,
+    );
+    let rows = annotate_symbols(
+        raw.clone(),
+        &SymbolTable::default(),
+        DisasmFmt::default(),
+        &|_| 0,
+    );
     assert_eq!(rows, raw, "no symbols -> rows unchanged");
 }
 
@@ -233,7 +330,14 @@ fn disasm_fmt_rgbds_toggle_switches_syntax() {
         0x0102 => 0x12,
         _ => 0x00,
     };
-    let rgbds = disasm_rows(mem, 0x0100, 1, &BTreeSet::new(), DisasmFmt::default());
+    let rgbds = disasm_rows(
+        mem,
+        0x0100,
+        1,
+        &BTreeSet::new(),
+        DisasmFmt::default(),
+        &|_| 0,
+    );
     assert!(
         rgbds[0].text.contains("ld a,[$1234]"),
         "default is rgbds: {}",
@@ -243,7 +347,7 @@ fn disasm_fmt_rgbds_toggle_switches_syntax() {
         rgbds: false,
         ..DisasmFmt::default()
     };
-    let bgb = disasm_rows(mem, 0x0100, 1, &BTreeSet::new(), bgb);
+    let bgb = disasm_rows(mem, 0x0100, 1, &BTreeSet::new(), bgb, &|_| 0);
     assert!(
         bgb[0].text.contains("ld a,(1234)"),
         "toggled to bgb: {}",

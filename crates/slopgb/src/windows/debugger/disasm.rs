@@ -93,6 +93,7 @@ pub fn disasm_rows(
     count: usize,
     data_hints: &BTreeSet<u16>,
     fmt: DisasmFmt,
+    bank_of: &impl Fn(u16) -> u16,
 ) -> Vec<DisasmRow> {
     let hx2 = |b: u8| {
         if fmt.lowercase_hex {
@@ -100,6 +101,14 @@ pub fn disasm_rows(
         } else {
             format!("{b:02X}")
         }
+    };
+    // ROM regions name their bank (`ROM00`..`ROMFF`), matching bgb, so a banked
+    // view reads `ROM01:6401` — not the region-generic `ROMX`. `bank_of` gives
+    // the shown bank (0 for the fixed 0x0000-0x3FFF area). The tag stays uppercase
+    // like the other region labels; other regions keep their fixed 4-char tag.
+    let region = |a: u16| match a {
+        0x0000..=0x7FFF => format!("ROM{:02X}", bank_of(a)),
+        _ => region_label(a).to_string(),
     };
     let addr_s = |a: u16| {
         if fmt.lowercase_hex {
@@ -126,7 +135,7 @@ pub fn disasm_rows(
             let db_kw = if fmt.lowercase_disasm { "db" } else { "DB" };
             let text = format!(
                 "{}:{} {:<9}{:<20}{}",
-                region_label(addr),
+                region(addr),
                 addr_s(addr),
                 hx2(b),
                 format!("{db_kw} {prefix}{}", hx2(b)),
@@ -159,7 +168,7 @@ pub fn disasm_rows(
         let mnem = case_disasm(&insn.text, fmt.lowercase_disasm, fmt.lowercase_hex);
         let text = format!(
             "{}:{} {:<9}{:<20}{}",
-            region_label(addr),
+            region(addr),
             addr_s(addr),
             hex.trim_end(),
             mnem,
@@ -186,6 +195,7 @@ pub fn annotate_symbols(
     rows: Vec<DisasmRow>,
     syms: &SymbolTable,
     fmt: DisasmFmt,
+    bank_of: &impl Fn(u16) -> u16,
 ) -> Vec<DisasmRow> {
     if syms.is_empty() {
         return rows;
@@ -193,7 +203,7 @@ pub fn annotate_symbols(
     let mut out = Vec::with_capacity(rows.len());
     for mut row in rows {
         if !row.is_label {
-            if let Some(name) = syms.name_at(row.addr) {
+            if let Some(name) = syms.name_at(bank_of(row.addr), row.addr) {
                 // Blank spacer above the label for breathing room (bgb parity),
                 // skipped when the label is the very top row of the pane.
                 if !out.is_empty() {
@@ -211,7 +221,10 @@ pub fn annotate_symbols(
                     is_label: true,
                 });
             }
-            if let Some((t, n)) = row.target.and_then(|t| syms.name_at(t).map(|n| (t, n))) {
+            if let Some((t, n)) = row
+                .target
+                .and_then(|t| syms.name_at(bank_of(t), t).map(|n| (t, n)))
+            {
                 // Replace only the *last* hex occurrence (the operand): the same
                 // digits also appear in the row's leading address label.
                 row.text = replace_last(&row.text, &target_hex(t, fmt), n);
@@ -263,14 +276,16 @@ pub fn render_disasm(
     data_hints: &BTreeSet<u16>,
     fmt: DisasmFmt,
     symbols: &SymbolTable,
+    bank_of: impl Fn(u16) -> u16,
     theme: &Theme,
 ) -> Vec<DisasmRow> {
     let lh = line_height();
     let count = (rect.h / lh).max(0) as usize + 1;
     let rows = annotate_symbols(
-        disasm_rows(read, start, count, data_hints, fmt),
+        disasm_rows(read, start, count, data_hints, fmt, &bank_of),
         symbols,
         fmt,
+        &bank_of,
     );
     let texts: Vec<&str> = rows.iter().map(|r| r.text.as_str()).collect();
     // Highlight the *instruction* row at PC, not a label line sharing its address.
@@ -288,7 +303,10 @@ pub fn render_disasm(
         if Some(i) == highlight {
             c.fill_rect(Rect::new(rect.x, y, DISASM_GUTTER, lh), theme.current);
         }
-        if !row.is_label && bps.contains(row.addr) {
+        // A dot only where a breakpoint applies to the bank this row shows: a
+        // bank-agnostic breakpoint everywhere, a bank-qualified one only in its
+        // own bank's view.
+        if !row.is_label && bps.dot_at(row.addr, bank_of(row.addr)) {
             let cy = y + lh / 2;
             c.fill_rect(Rect::new(rect.x + 1, cy - 2, 4, 4), theme.breakpoint);
         }

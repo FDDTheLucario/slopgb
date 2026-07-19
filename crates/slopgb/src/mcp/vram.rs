@@ -8,7 +8,8 @@
 
 use slopgb_core::GameBoy;
 use slopgb_core::debug::{
-    bg_map, cgb_palette_words, dmg_palette_shades, oam_sprites, rgb555_to_rgb888, tile_pixels,
+    bg_map, bg_tile_index, cgb_palette_words, dmg_palette_shades, oam_sprites, rgb555_to_rgb888,
+    tile_pixels,
 };
 
 /// A captured bitmap: `w×h` XRGB8888 (top-down, row-major) — the format the PNG
@@ -30,16 +31,6 @@ fn xrgb(word: u16) -> u32 {
 
 fn dmg_pal(reg: u8) -> [u32; 4] {
     dmg_palette_shades(reg).map(|s| GREYS[s as usize])
-}
-
-/// Resolve a tilemap tile byte to an absolute `0..=383` tile index (0x8000
-/// unsigned vs 0x8800 signed addressing).
-fn tile_index(n: u8, signed: bool) -> usize {
-    if signed {
-        (256i16 + i16::from(n as i8)) as usize
-    } else {
-        usize::from(n)
-    }
 }
 
 impl Bitmap {
@@ -123,7 +114,7 @@ fn tilemap(gb: &GameBoy, base_bit: u8) -> Bitmap {
     for cy in 0..32 {
         for cx in 0..32 {
             let cell = cells[cy * 32 + cx];
-            let idx = tile_index(cell.tile, signed);
+            let idx = bg_tile_index(cell.tile, signed);
             let bank = if cgb {
                 usize::from(cell.attr >> 3 & 1)
             } else {
