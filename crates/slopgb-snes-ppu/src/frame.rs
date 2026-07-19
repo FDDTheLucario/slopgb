@@ -73,44 +73,76 @@ impl SnesPpu {
             return;
         }
         let mut bg = [[None; 256]; 4];
+        let mut bg_used = [false; 4];
         for (i, buf) in bg.iter_mut().enumerate() {
             if self.tm & 1 << i != 0 {
                 self.bg_line(i, y, buf);
+                bg_used[i] = buf.iter().any(Option::is_some);
             }
         }
         let mut obj = [None; 256];
+        let mut obj_used = false;
         if self.tm & 0x10 != 0 {
             self.obj_line(y, &mut obj);
+            obj_used = obj.iter().any(Option::is_some);
         }
         let rungs: &[Rung] = match self.bgmode & 7 {
             0 => &MODE0,
             _ if self.bgmode & 8 != 0 => &MODE1A,
             _ => &MODE1B,
         };
+        // Top rung first over the backdrop: each pixel keeps the first
+        // opaque hit (the chart order), later rungs fill only what is
+        // still unresolved; layers with nothing on this line skip whole.
         let backdrop = self.cgram[0] & 0x7FFF;
-        for (x, px) in out.iter_mut().enumerate() {
-            let mut color = backdrop;
-            for rung in rungs {
-                let hit = match *rung {
-                    Bg(b, want) => bg[b][x].filter(|&(_, p)| p == want).map(|(c, _)| c),
-                    Obj(want) => obj[x].filter(|&(_, p)| p == want).map(|(c, _)| c),
-                };
-                if let Some(c) = hit {
-                    color = c;
-                    break;
+        out.fill(backdrop);
+        let mut resolved = [false; 256];
+        let mut left = 256usize;
+        for rung in rungs {
+            match *rung {
+                Bg(b, _) if !bg_used[b] => continue,
+                Obj(_) if !obj_used => continue,
+                Bg(b, want) => {
+                    for x in 0..256 {
+                        if !resolved[x] {
+                            if let Some((c, p)) = bg[b][x] {
+                                if p == want {
+                                    out[x] = c;
+                                    resolved[x] = true;
+                                    left -= 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                Obj(want) => {
+                    for x in 0..256 {
+                        if !resolved[x] {
+                            if let Some((c, p)) = obj[x] {
+                                if p == want {
+                                    out[x] = c;
+                                    resolved[x] = true;
+                                    left -= 1;
+                                }
+                            }
+                        }
+                    }
                 }
             }
-            // Master brightness scales each channel by (N+1)/16
-            // (fullsnes 2100h); N=15 is exact identity.
-            *px = if brightness == 15 {
-                color
-            } else {
-                let f = brightness + 1;
-                let r = (color & 0x1F) * f / 16;
-                let g = (color >> 5 & 0x1F) * f / 16;
-                let b = (color >> 10 & 0x1F) * f / 16;
-                b << 10 | g << 5 | r
-            };
+            if left == 0 {
+                break;
+            }
+        }
+        // Master brightness scales each channel by (N+1)/16
+        // (fullsnes 2100h); N=15 is exact identity.
+        if brightness != 15 {
+            let f = brightness + 1;
+            for px in out.iter_mut() {
+                let r = (*px & 0x1F) * f / 16;
+                let g = (*px >> 5 & 0x1F) * f / 16;
+                let b = (*px >> 10 & 0x1F) * f / 16;
+                *px = b << 10 | g << 5 | r;
+            }
         }
     }
 }

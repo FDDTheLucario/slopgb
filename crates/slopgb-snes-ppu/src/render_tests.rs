@@ -163,3 +163,157 @@ fn mode1_bg3_is_2bpp_and_bg4_absent() {
     let out = line(&ppu, 3, 0);
     assert!(out.iter().all(Option::is_none), "no BG4 in mode 1");
 }
+
+/// A frozen copy of the per-pixel `bg_line` (the pre-run-decode shape),
+/// kept as the fuzz oracle: the production renderer must stay
+/// slot-identical to it over randomized states.
+fn bg_line_ref(ppu: &SnesPpu, bg: usize, y: u16, out: &mut [Option<(u16, bool)>; 256]) {
+    out.fill(None);
+    let bpp = match (ppu.bgmode & 7, bg) {
+        (0, 0..=3) => 2u16,
+        (1, 0 | 1) => 4,
+        (1, 2) => 2,
+        _ => return,
+    };
+    let tile16 = ppu.bgmode & 1 << (4 + bg) != 0;
+    let map_base = usize::from(ppu.bgsc[bg] >> 2) << 10;
+    let size = ppu.bgsc[bg] & 3;
+    let char_base = usize::from(ppu.nba[bg / 2] >> (bg % 2 * 4) & 0xF) << 12;
+    let words_per_tile = usize::from(bpp) * 4;
+    let fine_mask = if tile16 { 15u16 } else { 7 };
+    let shift = if tile16 { 4 } else { 3 };
+    let vy = y.wrapping_add(ppu.vofs[bg]) & 0x3FF;
+    for (x, slot) in out.iter_mut().enumerate() {
+        let vx = (x as u16).wrapping_add(ppu.hofs[bg]) & 0x3FF;
+        let (tx, ty) = (vx >> shift, vy >> shift);
+        let mut map = usize::from(ty & 31) << 5 | usize::from(tx & 31);
+        if size & 1 != 0 && tx & 32 != 0 {
+            map += 0x400;
+        }
+        if size & 2 != 0 && ty & 32 != 0 {
+            map += 0x400 << (size & 1);
+        }
+        let entry = ppu.vram[(map_base + map) & 0x7FFF];
+        let mut ch = usize::from(entry & 0x3FF);
+        let pal = usize::from(entry >> 10 & 7);
+        let prio = entry & 0x2000 != 0;
+        let mut fx = vx & fine_mask;
+        let mut fy = vy & fine_mask;
+        if entry & 0x4000 != 0 {
+            fx = fine_mask - fx;
+        }
+        if entry & 0x8000 != 0 {
+            fy = fine_mask - fy;
+        }
+        if tile16 {
+            if fx >= 8 {
+                ch = (ch + 1) & 0x3FF;
+                fx -= 8;
+            }
+            if fy >= 8 {
+                ch = (ch + 0x10) & 0x3FF;
+                fy -= 8;
+            }
+        }
+        let row = char_base + ch * words_per_tile + usize::from(fy);
+        let bit = 7 - fx;
+        let w0 = ppu.vram[row & 0x7FFF];
+        let mut idx = usize::from(w0 >> bit & 1 | (w0 >> 8 >> bit & 1) << 1);
+        if bpp == 4 {
+            let w1 = ppu.vram[(row + 8) & 0x7FFF];
+            idx |= usize::from((w1 >> bit & 1) << 2 | (w1 >> 8 >> bit & 1) << 3);
+        }
+        if idx == 0 {
+            continue;
+        }
+        let cg = if ppu.bgmode & 7 == 0 {
+            bg * 0x20 + pal * 4 + idx
+        } else {
+            pal * usize::from(1u16 << bpp) + idx
+        };
+        *slot = Some((ppu.cgram[cg & 0xFF] & 0x7FFF, prio));
+    }
+}
+
+/// xorshift32 — deterministic in-test randomness (no deps).
+fn xs(state: &mut u32) -> u32 {
+    let mut x = *state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    *state = x;
+    x
+}
+
+/// The production `bg_line` stays slot-identical to the frozen per-pixel
+/// reference over fuzzed states: both modes, 8/16-px tiles, every screen
+/// size, flips, scrolls including the 10-bit wrap seam, all BGs.
+#[test]
+fn bg_line_matches_reference_over_fuzzed_states() {
+    let mut s = 0x1234_5678u32;
+    for case in 0..200 {
+        let mut ppu = SnesPpu::new();
+        // Sparse-random VRAM: enough structure for maps + tiles everywhere.
+        for _ in 0..4096 {
+            let i = xs(&mut s) as usize & 0x7FFF;
+            ppu.vram[i] = xs(&mut s) as u16;
+        }
+        for c in ppu.cgram.iter_mut() {
+            *c = xs(&mut s) as u16;
+        }
+        ppu.bgmode = (xs(&mut s) as u8 & 1) | (xs(&mut s) as u8 & 0xF8);
+        for i in 0..4 {
+            ppu.bgsc[i] = xs(&mut s) as u8;
+        }
+        ppu.nba = [xs(&mut s) as u8, xs(&mut s) as u8];
+        for i in 0..4 {
+            // Bias half the scrolls onto the wrap seam.
+            ppu.hofs[i] = if xs(&mut s) & 1 == 0 {
+                (0x3F8 + (xs(&mut s) & 0xF)) as u16 & 0x3FF
+            } else {
+                xs(&mut s) as u16 & 0x3FF
+            };
+            ppu.vofs[i] = xs(&mut s) as u16 & 0x3FF;
+        }
+        for &y in &[0u16, 1, 7, 8, 100, 223] {
+            for bg in 0..4 {
+                let mut want = [None; 256];
+                bg_line_ref(&ppu, bg, y, &mut want);
+                let mut got = [None; 256];
+                ppu.bg_line(bg, y, &mut got);
+                assert_eq!(got[..], want[..], "case {case} bg {bg} y {y}");
+            }
+        }
+    }
+}
+
+/// A run that straddles the 10-bit playfield wrap while X-flipped: the
+/// seam splits mid-run (vx 0x3FE,0x3FF,0x000...) and each side samples its
+/// own map entry with the mirror applied inside that entry's tile.
+#[test]
+fn run_straddling_the_wrap_seam_with_xflip() {
+    let mut ppu = SnesPpu::new();
+    ppu.write(0x05, 0x01); // mode 1
+    ppu.write(0x07, 0x04); // BG1 map at word $400, 32x32 (wraps at 256px)
+    ppu.write(0x0B, 0x01); // tiles at word $1000
+    // vx 0x3FE-0x3FF live in map tile 31 of a wrapped row (playfield x
+    // wraps mod 1024 but the 32x32 map repeats every 256px -> tile 31).
+    ppu.vram[0x400 + 31] = 2 | 1 << 14; // char 2, X-flip
+    ppu.vram[0x400] = 3; // char 3, no flip (post-wrap tile 0)
+    let t2 = 0x1000 + 2 * 16;
+    // Screen cols 6,7 X-flip onto tile cols 1,0 = plane bits 6,7 ($C0).
+    ppu.vram[t2] = 0x00C0;
+    let t3 = 0x1000 + 3 * 16;
+    ppu.vram[t3] = 0x0080; // pixel 0 = color 1
+    ppu.cgram[1] = 0x2222;
+    ppu.write(0x0D, 0xFE); // BG1HOFS = 0x3FE
+    ppu.write(0x0D, 0x03);
+
+    let out = line(&ppu, 0, 0);
+    // Screen x0 -> vx 0x3FE = tile col 6, X-flipped -> sampled col 1 = set.
+    assert_eq!(out[0], Some((0x2222, false)), "pre-seam flipped pixel");
+    assert_eq!(out[1], Some((0x2222, false)), "pre-seam flipped pixel 2");
+    // Screen x2 -> vx 0x000 = the post-wrap tile's pixel 0.
+    assert_eq!(out[2], Some((0x2222, false)), "post-seam pixel 0");
+    assert_eq!(out[3], None, "post-seam pixel 1 empty");
+}

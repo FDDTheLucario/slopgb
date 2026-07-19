@@ -122,3 +122,137 @@ fn obj_order_rotation_and_range_limit() {
     assert_eq!(out[31 * 7], Some((0x1111, 0)), "sprite 31 kept");
     assert_eq!(out[32 * 7], None, "sprite 32 dropped: range over");
 }
+
+/// xorshift32 — deterministic in-test randomness (no deps).
+fn xs(state: &mut u32) -> u32 {
+    let mut x = *state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    *state = x;
+    x
+}
+
+/// A frozen copy of the per-pixel `obj_line` (the pre-chunk-decode shape):
+/// the production renderer must stay slot-identical to it.
+fn obj_line_ref(ppu: &SnesPpu, y: u16, out: &mut [Option<(u16, u8)>; 256]) {
+    const SIZES: [(u16, u16, u16, u16); 8] = [
+        (8, 8, 16, 16),
+        (8, 8, 32, 32),
+        (8, 8, 64, 64),
+        (16, 16, 32, 32),
+        (16, 16, 64, 64),
+        (32, 32, 64, 64),
+        (16, 32, 32, 64),
+        (16, 32, 32, 32),
+    ];
+    out.fill(None);
+    let base = usize::from(ppu.obsel & 7) << 13;
+    let gap = usize::from(ppu.obsel >> 3 & 3) << 12;
+    let (sw, sh, lw, lh) = SIZES[usize::from(ppu.obsel >> 5)];
+    let first = if ppu.oam_priority {
+        usize::from(ppu.oam_reload >> 1) & 0x7F
+    } else {
+        0
+    };
+    let mut range = 0;
+    let mut slots = 34;
+    for i in 0..128 {
+        let n = (first + i) & 0x7F;
+        let e = &ppu.oam[n * 4..n * 4 + 4];
+        let hi = ppu.oam[0x200 + n / 4] >> (n % 4 * 2);
+        let (w, h) = if hi & 2 != 0 { (lw, lh) } else { (sw, sh) };
+        let row = y.wrapping_sub(u16::from(e[1])) & 0xFF;
+        if row >= h {
+            continue;
+        }
+        if range == 32 {
+            break;
+        }
+        range += 1;
+        let x9 = u16::from(e[0]) | u16::from(hi & 1) << 8;
+        let sx = if x9 >= 256 {
+            i32::from(x9) - 512
+        } else {
+            i32::from(x9)
+        };
+        let attr = e[3];
+        let tile = u16::from(e[2]) | u16::from(attr & 1) << 8;
+        let pal = usize::from(attr >> 1 & 7);
+        let prio = attr >> 4 & 3;
+        let fy = if attr & 0x80 != 0 { h - 1 - row } else { row };
+        let trow = tile & 0x100 | (tile >> 4).wrapping_add(fy / 8) << 4 & 0xF0 | tile & 0xF;
+        for chunk in 0..w / 8 {
+            let on_screen = (0..8).any(|p| {
+                let x = sx + i32::from(chunk * 8 + p);
+                (0..256).contains(&x)
+            });
+            if !on_screen {
+                continue;
+            }
+            if slots == 0 {
+                return;
+            }
+            slots -= 1;
+            for p in 0..8u16 {
+                let c = chunk * 8 + p;
+                let x = sx + i32::from(c);
+                if !(0..256).contains(&x) {
+                    continue;
+                }
+                let slot = &mut out[x as usize];
+                if slot.is_some() {
+                    continue;
+                }
+                let src = if attr & 0x40 != 0 { w - 1 - c } else { c };
+                let t = trow & 0x1F0 | trow.wrapping_add(src / 8) & 0xF;
+                let word = base
+                    + usize::from(t) * 16
+                    + if t >= 0x100 { gap } else { 0 }
+                    + usize::from(fy & 7);
+                let bit = 7 - (src & 7);
+                let w0 = ppu.vram[word & 0x7FFF];
+                let w1 = ppu.vram[(word + 8) & 0x7FFF];
+                let idx = usize::from(
+                    w0 >> bit & 1
+                        | (w0 >> 8 >> bit & 1) << 1
+                        | (w1 >> bit & 1) << 2
+                        | (w1 >> 8 >> bit & 1) << 3,
+                );
+                if idx != 0 {
+                    *slot = Some((ppu.cgram[0x80 + pal * 16 + idx] & 0x7FFF, prio));
+                }
+            }
+        }
+    }
+}
+
+/// The production `obj_line` stays slot-identical to the frozen per-pixel
+/// reference over fuzzed OAM/OBSEL/rotation states.
+#[test]
+fn obj_line_matches_reference_over_fuzzed_states() {
+    let mut s = 0xDEAD_BEEFu32;
+    for case in 0..200 {
+        let mut ppu = SnesPpu::new();
+        for _ in 0..4096 {
+            let i = xs(&mut s) as usize & 0x7FFF;
+            ppu.vram[i] = xs(&mut s) as u16;
+        }
+        for c in ppu.cgram.iter_mut() {
+            *c = xs(&mut s) as u16;
+        }
+        for b in ppu.oam.iter_mut() {
+            *b = xs(&mut s) as u8;
+        }
+        ppu.obsel = xs(&mut s) as u8;
+        ppu.oam_reload = xs(&mut s) as u16;
+        ppu.oam_priority = xs(&mut s) & 1 != 0;
+        for &y in &[0u16, 31, 100, 223] {
+            let mut want = [None; 256];
+            obj_line_ref(&ppu, y, &mut want);
+            let mut got = [None; 256];
+            ppu.obj_line(y, &mut got);
+            assert_eq!(got[..], want[..], "case {case} y {y}");
+        }
+    }
+}
