@@ -224,13 +224,17 @@ impl SDsp {
             );
             prev_out = out;
 
-            let l = (out * self.reg_i8(base)) >> 7;
-            let r = (out * self.reg_i8(base + 1)) >> 7;
-            main_l += l;
-            main_r += r;
-            if eon & (1 << v) != 0 {
-                echo_l += l;
-                echo_r += r;
+            // A silent voice (e.g. released, level 0) returns exactly 0; the
+            // volume multiply and mix add are no-ops, so skip them.
+            if out != 0 {
+                let l = (out * self.reg_i8(base)) >> 7;
+                let r = (out * self.reg_i8(base + 1)) >> 7;
+                main_l += l;
+                main_r += r;
+                if eon & (1 << v) != 0 {
+                    echo_l += l;
+                    echo_r += r;
+                }
             }
         }
         self.endx = endx;
