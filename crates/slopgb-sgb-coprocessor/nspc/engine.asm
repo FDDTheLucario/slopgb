@@ -42,7 +42,7 @@ BANKS 1
                                 ; b4:b5 = base pitch, BIG-ENDIAN (b4=high, b5=low)
 .DEFINE REF_NOTE       $80      ; note byte offset subtracted before octave/semitone
                                 ; split (octave = (note-REF)/12). Tune octaves by ear.
-.DEFINE OCT_REF        6        ; ratio >> (OCT_REF - octave); higher octave = higher
+.DEFINE OCT_REF        5        ; ratio >> (OCT_REF - octave); higher octave = higher
                                 ; pitch. Raise/lower to shift every note by octaves.
 .DEFINE PITCH_OUT_SHIFT 8       ; VxPITCH = (base*factor) >> PITCH_OUT_SHIFT.
                                 ; Dial +/- a few to align the absolute octave by ear.
@@ -128,6 +128,9 @@ BANKS 1
 .DEFINE op0         $AF      ; first operand of the current command
 .DEFINE transpose   $B0      ; global transpose (signed semitones, $E9)
 .DEFINE tgate       $B1      ; per-track note-gate countdown ($B1..$B8)
+.DEFINE ttrans      $B9      ; per-track transpose ($B9..$C0), signed semitones ($EA)
+.DEFINE newptlo     $C1      ; frame-load scratch: new track pointer low  ($C1..$C8)
+.DEFINE newpthi     $C9      ; frame-load scratch: new track pointer high ($C9..$D0)
 
 ; --------------------------------------------------------------------------
 ; Macros for S-DSP register access via $F2 (address) / $F3 (data).
@@ -217,52 +220,34 @@ main:
     jmp !main
 
 ; ==========================================================================
-; Host comm-port ($F4..$F7). Commands are edge-detected on port0 ($F4) and
-; port3 ($F7); acted on, then echoed back (host no longer needs the echo,
-; SPEC.md, but it is harmless). Command semantics (SPEC.md):
-;   port3 ($F7) != 0 while playing -> fade-out the current song
-;   else port0 ($F4) in $01..$7F   -> play that song at $2B00 from the start
-;   else (port0 $00, or $80..$FF)  -> stop / idle (bit7 set = stop, no restart)
-; play has port3=0 and fade has port0=0, so the two never collide.
+; Host comm-port. Only port0 ($F4) — the Music Score Code — controls music;
+; ports 1..3 are the SGB sound-effect bytes and MUST NOT touch playback, so we
+; edge-detect a change on port0 alone (SPEC.md "Host comm-port protocol"). A
+; sound effect fires with score $00 and arbitrary nonzero port1..3 while a song
+; plays, and the song must keep playing. On a changed port0:
+;   $00        -> no music change (SFX-only command; leave the song playing)
+;   $01..$7F   -> play that song at $2B00 from the start
+;   $80..$FF   -> stop / idle (bit7 set = stop, not a song index; no restart)
+; There is no confirmed host fade signal; never enter state 2 (fade_step stays
+; dormant). Then echo port0 back (harmless, not required).
 ; ==========================================================================
 poll_comm:
     mov a, $f4
     cmp a, lastp0
     bne pc_new
-    mov a, $f7
-    cmp a, lastp3
-    bne pc_new
-    ret                     ; command unchanged
+    ret                     ; port0 unchanged -> not a new music command
 pc_new:
     mov a, $f4
-    mov lastp0, a
-    mov a, $f7
-    mov lastp3, a
-    ; fade only if we are actually playing (state 1) and port3 is set
-    mov a, state
-    cmp a, #1
-    bne pc_playcheck        ; idle or fading -> not a fresh fade
-    mov a, lastp3
-    beq pc_playcheck        ; port3 0 -> a play/stop command
-    mov a, #2               ; begin fade-out
-    mov state, a
-    mov fadeacc, #0
+    mov lastp0, a           ; store does not touch flags; N/Z still reflect port0
+    beq pc_echo             ; $00 -> SFX-only, leave the current song playing
+    bmi pc_stop             ; bit7 set ($80..$FF) -> stop / idle, no restart
+    call !start_song        ; $01..$7F -> play that song, resetting playback state
     jmp !pc_echo
-pc_playcheck:
-    mov a, lastp0
-    beq pc_stop             ; port0 $00 -> stop/idle
-    bmi pc_stop             ; port0 bit7 set ($80..$FF) -> stop/idle, no restart
-    jmp !pc_play            ; port0 $01..$7F -> play that song
 pc_stop:
     call !stop_all
-    jmp !pc_echo
-pc_play:
-    call !start_song         ; plays / restarts, fully resetting playback state
 pc_echo:
     mov a, lastp0
     mov $f4, a
-    mov a, lastp3
-    mov $f7, a
     ret
 
 ; ==========================================================================
@@ -334,9 +319,14 @@ det_skip:
     mov a, konpending       ; latch this tick's key-ons
     mov $f2, #$4c
     mov $f3, a
+    ; Channel 0 is the conductor: advance the frame the moment voice 0 stops, i.e.
+    ; when its $00 has cleared bit0 of activemask (SPEC.md "Frame advance"). A $00 on
+    ; any other channel only clears its own bit and never advances. AND sets Z for the
+    ; branch below it (no clobber between).
     mov a, activemask
-    bne det_ret
-    call !load_frame         ; all tracks ended -> next frame
+    and a, #$01
+    bne det_ret              ; channel 0 still playing -> stay on this frame
+    call !load_frame         ; conductor reached $00 -> next frame
     mov a, konpending       ; latch key-ons primed by the new frame
     mov $f2, #$4c
     mov $f3, a
@@ -378,6 +368,12 @@ start_song:
     mov fadeacc, #0
     mov konpending, #0
     mov transpose, #0       ; clear global transpose for the new song
+    mov x, #7               ; clear per-channel transpose ($EA) for all 8 tracks
+    mov a, #0
+clr_ttrans:
+    mov ttrans+x, a
+    dec x
+    bpl clr_ttrans
     mov a, !$2b00           ; song list pointer = word at $2B00
     mov songlp, a
     mov a, !$2b01
@@ -437,6 +433,8 @@ lf_read:
     call !stop_all           ; $0000 -> end of song (stop + idle)
     ret
 lf_loop:                     ; ponytail: loop-forever; honor tmp0 as a finite
+    mov y, #0               ; rdword needs Y=0, but the movw ya,wptr above left Y =
+                            ; high(wptr); without this the loop-target read derails.
     call !rdword             ; repeat count if a song ever needs it.
     mov a, tmp0              ; next word = loop target address
     mov songlp, a
@@ -451,21 +449,26 @@ lf_have:
     mov y, #0
     mov x, #0
 lf_rd:
-    call !rdword             ; track pointer i -> tmp1:tmp0
-    mov a, tmp0
-    mov tptrlo+x, a
-    mov a, tmp1
-    mov tptrhi+x, a
+    call !rdword             ; new track pointer i -> tmp1:tmp0. Read into scratch,
+    mov a, tmp0             ; NOT tptr: a null new pointer means "leave the channel
+    mov newptlo+x, a       ; running", so it must not clobber that channel's live
+    mov a, tmp1            ; read position. (rdword also reuses wptr, which parse_track
+    mov newpthi+x, a       ; below clobbers -- so read all 8 first, then set up.)
     inc x
     cmp x, #8
     bne lf_rd
-    mov activemask, #0
+    ; Do NOT clear activemask: a channel the new frame leaves 0 keeps playing its
+    ; current track (a long line rides across the frame boundary, SPEC.md).
     mov x, #0
 lf_setup:
-    mov a, tptrlo+x
-    or  a, tptrhi+x
-    beq lf_next             ; pointer 0 -> channel unused this frame
-    mov a, #$01             ; per-track defaults (reset each frame; see README)
+    mov a, newptlo+x
+    or  a, newpthi+x
+    beq lf_next             ; new pointer 0 -> leave this channel running, untouched
+    mov a, newptlo+x       ; non-zero -> (re)start this channel on the new track
+    mov tptrlo+x, a
+    mov a, newpthi+x
+    mov tptrhi+x, a
+    mov a, #$01             ; per-track defaults (reset for the (re)started channel)
     mov tdur+x, a
     mov a, #VEL_DEFAULT
     mov tvel+x, a
@@ -595,9 +598,12 @@ pt_save:
     mov tptrhi+x, a
     ret
 
-pt_endtrack:
+pt_endtrack:                ; $00 = end of track: stop THIS channel (key off + drop
+                            ; its active bit); it rests until the next frame reloads it.
+                            ; It does not loop. Channel 0's stop is what advances the
+                            ; frame (see do_engine_tick); any other channel just stops.
     call !note_off
-    mov a, vbit             ; clear this track's active bit
+    mov a, vbit
     eor a, #$ff
     and a, activemask
     mov activemask, a
@@ -632,16 +638,18 @@ pt_cmd_act:
     mov a, cmdb
     cmp a, #$e0
     beq pt_instr
+    cmp a, #$e1
+    beq pt_pan             ; $E1 = pan
     cmp a, #$e5
     beq pt_mvol
     cmp a, #$e7
     beq pt_tempo
     cmp a, #$e9
-    beq pt_transpose
+    beq pt_transpose       ; $E9 = global transpose
     cmp a, #$ea
-    beq pt_chvol
+    beq pt_chtrans         ; $EA = per-channel transpose
     cmp a, #$ed
-    beq pt_pan
+    beq pt_chvol           ; $ED = channel volume
     jmp !pt_next           ; unsupported: operands already consumed
 pt_instr:                   ; $E0 nn -> load instrument-table entry nn (nn = op0)
     mov a, op0
@@ -690,11 +698,15 @@ pt_transpose:               ; $E9 nn -> global transpose (signed semitones)
     mov a, op0
     mov transpose, a
     jmp !pt_next
-pt_chvol:                   ; $EA xx -> channel volume
+pt_chtrans:                 ; $EA nn -> per-channel transpose (signed semitones)
+    mov a, op0
+    mov ttrans+x, a
+    jmp !pt_next
+pt_chvol:                   ; $ED vv -> channel volume
     mov a, op0
     mov tchvol+x, a
     jmp !pt_next
-pt_pan:                     ; $ED xx -> pan
+pt_pan:                     ; $E1 pp -> pan
     mov a, op0
     mov tpan+x, a
     jmp !pt_next
@@ -704,8 +716,10 @@ pt_pan:                     ; $ED xx -> pan
 ; A = note byte ($80..$C7). vbase/vbit already set for voice X.
 ; ==========================================================================
 note_on:
-    clrc                    ; apply global transpose (default 0) to the pitch note
-    adc a, transpose
+    clrc                    ; apply global ($E9) then per-channel ($EA) transpose
+    adc a, transpose        ; both default 0; signed semitones, byte-wraps
+    clrc
+    adc a, ttrans+x
     mov p_note, a
     mov a, tsrcn+x          ; snapshot per-track params so X is free afterwards
     mov p_srcn, a

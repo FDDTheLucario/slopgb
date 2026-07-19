@@ -31,16 +31,28 @@ this reference stays clean.
 All of `$2B00`/`$4B00`/`$4C10`/`$4C30`/`$4DB0` is provided data — read only.
 
 ## Host comm-port protocol (SPC I/O ports `$F4`–`$F7`)
-The host writes commands to the four ports; you edge-detect a *changed* command.
-- **port0 (`$F4`) = `$01`–`$7F`** → **play** the song at `$2B00` from the start.
-- **port0 = `$00` or `$80`–`$FF`** → **stop / idle** (do not restart). (A score
-  with bit 7 set is a stop, not a song index.)
-- **port3 (`$F7`) != 0** → **fade out** the current song, then stop.
-Play (`port3 = 0`) and fade (`port0 = 0`) are mutually exclusive. Echoing the
-command back is harmless but not required (the host does not gate on it). The main
-loop must ALWAYS poll the command port every iteration — no path (fade, stop,
-idle) may block it. After a fade completes, return to the exact power-on idle
-state so a later play command cold-starts a fresh song.
+The four ports carry an SGB SOUND command. **Only `port0` (`$F4`) — the Music
+Score Code — controls music.** Ports 1–3 are the SGB sound-effect bytes (effect A
+id, effect B id, effect attributes) and MUST NOT affect music: a sound effect
+fires with score `$00` and arbitrary nonzero `port1`–`port3` while a song is
+playing, and the song must keep playing untouched.
+
+Edge-detect a change on **`port0` only** (ports 1–3 change on every sound effect
+and are not music commands). On a changed `port0`:
+- **`$00`** → **no music change** (SFX-only command; leave the current song
+  playing).
+- **`$01`–`$7F`** → **play** the song at `$2B00` from the start.
+- **`$80`–`$FF`** → **stop / idle** (bit 7 set = stop, not a song index; do not
+  restart). Return to the exact power-on idle state so a later play cold-starts.
+
+Echoing the command back is harmless but not required. The main loop must ALWAYS
+poll `port0` every iteration — no path (stop, idle) may block it.
+
+**No fade:** there is no confirmed host signal for a music fade-out (an earlier
+draft wrongly read `port3 != 0` as fade — that byte is the SFX-attributes byte and
+is nonzero for ordinary sound effects). Leave any `state 2` / `fade_step` code
+present but unreachable until a real fade trigger is identified; never enter it
+from `port3`.
 
 ## Song data (at `$2B00`)
 All pointers are little-endian 16-bit ARAM addresses.
@@ -53,13 +65,27 @@ song list: a stream of 16-bit words, decoded by HIGH byte:
         low != 0   -> LOOP: the NEXT word is the loop-target address; set the song
                       pointer to it and keep reading. (low byte is a repeat count;
                       loop-forever is the simplest correct behavior.)
-frame: u16 track_ptr[8]         ; one per voice 0..7; 0 = channel unused
+frame: u16 track_ptr[8]         ; one per voice 0..7; 0 = channel unused (silent)
 track: a byte stream of events (below), terminated by $00
 ```
-Play a song = walk the song list; each frame plays its (up to) 8 tracks in
-parallel across the 8 DSP voices. The 8 tracks of a frame are composed to be equal
-length; the frame advances to the next song-list word when the tracks reach their
-`$00` terminator. Loading a frame resets all 8 channels and starts them together.
+Play a song = walk the song list; each frame (re)starts its tracks and they play
+in parallel across the 8 DSP voices.
+
+**Frame loading — a `0` track pointer means "leave the channel running", NOT
+silence.** For each of the 8 channels: if the frame's track pointer is NON-zero,
+(re)start that channel on the new track (reset it, play from the top). If the
+pointer is `0`, DO NOT touch that channel — it keeps playing whatever track it was
+already on. A melodic line longer than one frame is therefore carried on a channel
+that the *next* frame leaves `0`, so it continues seamlessly across the frame
+boundary (it is not restarted and not silenced).
+
+**Frame advance — channel 0 is the conductor.** The frame advances to the next
+song-list word when **channel 0 (voice 0) reaches its `$00` end-of-track**. A
+`$00` on any OTHER channel just stops that channel (it rests until the next frame
+reloads it); it does NOT advance the frame and does NOT loop. So a track never
+repeats itself within a frame — tracks are composed so the non-conductor channels
+are ≤ channel 0's length, and any longer line rides a channel that the next frame
+leaves `0` (per above). On advance, load the next frame per the loading rule.
 
 ## Track event encoding
 Per channel, read events until one occupies time (note / tie / rest) or ends.
@@ -84,7 +110,7 @@ duration reuses the last duration; a note directly after a duration (next byte
 | cmd | ops | meaning | act? |
 |-----|-----|------|------|
 | E0 | 1 | instrument | yes |
-| E1 | 1 | pan | opt |
+| E1 | 1 | pan | yes |
 | E2 | 2 | pan fade | no |
 | E3 | 3 | vibrato | no |
 | E4 | 0 | vibrato off | no |
@@ -93,10 +119,10 @@ duration reuses the last duration; a note directly after a duration (next byte
 | E7 | 1 | tempo | yes |
 | E8 | 2 | tempo fade | no |
 | E9 | 1 | global transpose | yes |
-| EA | 1 | channel volume | yes |
+| EA | 1 | per-channel transpose | yes |
 | EB | 3 | tremolo | no |
 | EC | 0 | tremolo off | no |
-| ED | 1 | channel pan | yes |
+| ED | 1 | channel volume | yes |
 | EE | 2 | channel volume fade | no |
 | EF | 3 | call subroutine | no |
 | F0 | 1 | vibrato fade | no |
@@ -111,8 +137,14 @@ duration reuses the last duration; a note directly after a duration (next byte
 | F9 | 3 | pitch slide | no |
 | FA | 1 | percussion base | no |
 
-("no"/"opt" = consume operands, skip the effect — the Animaniacs songs need only
-E0/E5/E7/EA/ED plus consuming F5/F7. Add others as needed.)
+("no" = consume operands, skip the effect — the Animaniacs songs need
+E0/E1/E5/E7/E9/EA/ED plus consuming F5/F7. Add others as needed.)
+
+**Do not confuse the three that look alike** (getting this wrong plays a channel
+at the wrong octave *and* mangles its volume): `$E1` = **pan**, `$EA` =
+**per-channel transpose** (signed semitones, adds to the note like `$E9` but only
+for its own channel), `$ED` = **channel volume**. The title theme keys its lead
+via `$EA` (`+12`) and other channels via `$EA` (`-12`).
 
 ## Velocity byte (the `< $80` byte after a duration)
 Split it: `quant_index = (byte >> 4) & 7`, `vel_index = byte & $0F`, then look up
@@ -124,7 +156,7 @@ VELTAB   (16): 19 32 4C 65 72 7F 8C 98 A5 B2 BF CB D8 E5 F2 FC   ; curvel = VELT
 
 ## Note timing & gate
 On a note (`$80`–`$C7`): compute pitch (below), set the voice volume from `curvel`
-scaled by channel volume (`$EA`) and master volume (`$E5`), key the voice ON for
+scaled by channel volume (`$ED`) and master volume (`$E5`), key the voice ON for
 `gate = (curdur * curquant) >> 8` ticks (min 1), then key OFF — but the channel
 still occupies the full `curdur` ticks before reading the next event. (Gate =
 articulation; it must NOT change the total `curdur` timing.) Tie holds for the
@@ -141,9 +173,10 @@ from bytes 0–3, and store the base pitch as **`base16 = (byte4 << 8) | byte5`*
 
 ## Pitch
 ```
-n        = note - REF_NOTE              ; REF_NOTE = $80
+note'    = note + global_transpose($E9) + per_channel_transpose($EA)  ; signed, byte-wraps
+n        = note' - REF_NOTE             ; REF_NOTE = $80
 octave   = n / 12                       ; semitone = n % 12
-factor   = ratiotab[semitone] >> (OCT_REF - octave)   ; OCT_REF = 6; octave is an
+factor   = ratiotab[semitone] >> (OCT_REF - octave)   ; OCT_REF = 5; octave is an
                                           ; exact bit shift (left-shift if octave > OCT_REF)
 VxPITCH  = (base16 * factor) >> PITCH_OUT_SHIFT        ; 16x16 multiply; PITCH_OUT_SHIFT ~ 8
 clamp VxPITCH to $3FFF
@@ -206,5 +239,24 @@ found live. Kept here so the record survives without cluttering the reference.
   its dependent branch clobbers the flag — re-establish it before branching.
 
 ## Known-remaining (as of this writing)
-Title lead plays octave-low + quiet; fade cuts instead of ramping MVOL; clipping
-with many voices. See `docs/hardware-state/sgb-audio.md`.
+- Clipping with many simultaneous voices (wants a mix / master-volume trim; the
+  songs' own `$E5` master-volume values run hot vs. the reference).
+
+See `docs/hardware-state/sgb-audio.md`.
+
+## Fixed since the last draft
+- **VCMD mis-map**: `$EA` is **per-channel transpose** (not channel volume) and
+  `$ED` is **channel volume** (not pan); `$E1` is pan. The old mapping dropped the
+  title lead's `$EA +12` (octave-low) and wrote the transpose into channel volume
+  (too quiet). Operand counts were already right, so only the handlers moved.
+- **Octave calibration**: `OCT_REF` 6 → 5 (playback measured exactly one octave
+  low across all voices once the transpose was applied).
+- **Song-list loop** (`$00nn` control word): a `movw ya, wptr` left `Y` = high
+  byte of the pointer, so the loop-target `rdword` read at `[wptr]+Y` and derailed
+  the song cursor to garbage → freeze. Re-establish `Y=0` before that read.
+- **SFX vs. fade**: music is driven by the score code (port0) ONLY; the SFX
+  attributes byte (port3) is not a fade signal, and a `$00` score = no music
+  change. An ordinary sound effect no longer stops the song.
+- **Frame model = conductor**: a track's `$00` stops only that channel; the frame
+  advances when **channel 0** ends; a null (`0`) frame track pointer leaves that
+  channel running (a long line spans frames). Tracks never loop within a frame.
