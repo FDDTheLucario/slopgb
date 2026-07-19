@@ -554,3 +554,42 @@ fn icd2_bus_window_reads_the_char_port_with_side_effects() {
         "index reset"
     );
 }
+
+// ---- Fast-path optimization: WRAM and program-area accesses ----
+
+/// The fast-path optimization for WRAM and program-area accesses must not
+/// break MMIO capture: a `$2100` write still enters the capture ring, and
+/// simultaneous WRAM accesses round-trip correctly.
+#[test]
+fn fast_path_does_not_skip_mmio_capture_or_wram_access() {
+    let mut cop = W65816Cop::new();
+    // Program: write $CC to zero-page $10, read it back, write $2100 with $8F
+    // (captured), then read zero-page and export via port 0.
+    // LDA #$CC; STA $10; LDA #$8F; STA $2100; LDA $10; STA $2140; STP.
+    let prog = [
+        0xA9, 0xCC, // LDA #$CC
+        0x85, 0x10, // STA $10 (zero-page WRAM)
+        0xA9, 0x8F, // LDA #$8F
+        0x8D, 0x00, 0x21, // STA $2100 (INIDISP — captured)
+        0xA5, 0x10, // LDA $10 (zero-page WRAM read)
+        0x8D, 0x40, 0x21, // STA $2140 (export to port 0)
+        0xDB, // STP
+    ];
+    cop.write_ram(u32::from(PROG_ORG), &prog);
+    cop.cpu = Cpu::new();
+    cop.cpu.regs.pc = PROG_ORG;
+    cop.cycles = 0;
+    cop.run_until(2000);
+    assert!(cop.cpu.stopped, "STP halted the CPU");
+
+    // Verify MMIO was captured: $2100 write of $8F.
+    let ring = cop.read_ram(HW_MMIO_RING, 3 + 3 * MMIO_RING_CAP);
+    let n = usize::from(ring[0]) | usize::from(ring[1]) << 8;
+    assert_eq!(n, 1, "one captured MMIO write");
+    assert_eq!(ring[2], 0, "no MMIO ring overflow");
+    assert_eq!(&ring[3..6], &[0x00, 0x21, 0x8F], "$2100 = $8F captured");
+
+    // Verify WRAM round-trip: zero-page write $CC, read it back, confirm it
+    // exits via port 0. The fast-path optimization must not skip WRAM accesses.
+    assert_eq!(cop.port_read(0), 0xCC, "WRAM write/read round-trip");
+}
