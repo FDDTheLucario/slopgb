@@ -73,9 +73,18 @@ const CPU_NUM: i64 = 5;
 const CPU_DEN: i64 = 8;
 /// The S-DSP emits one stereo sample every 32 SPC700 cycles → 32 kHz.
 const DSP_RATE: f64 = 32_000.0;
-/// Full-scale S-DSP output (±32768) → mix amplitude; half scale, matching the
-/// built-in path so an injected coprocessor is no louder than the default.
-const MIX_SCALE: f32 = 0.5 / 32768.0;
+/// Full-scale S-DSP output (±32768) → mix amplitude. Tuned above unity (1.2):
+/// real N-SPC songs mix conservatively (master volume + few active voices), so
+/// their DSP output sits well below full scale and needs lifting to match a
+/// normal GB game's loudness. >1.0 only clips a song whose DSP output nears full
+/// scale, which is rare. ponytail: fixed loudness; expose a per-game knob if one
+/// clips or still reads quiet.
+const MIX_SCALE: f32 = 1.2 / 32768.0;
+/// The GB APU feed into the SGB mix. Real SGB routes the Game Boy audio through
+/// the SNES mixer below the SNES APU's own level, so the enhanced music sits on
+/// top of the GB channels rather than under them. ponytail: fixed ratio; a
+/// per-game knob if one needs a different balance.
+const GB_GAIN: f32 = 0.6;
 /// GB T-cycles of emulation accumulated before the two plugins are pumped once
 /// (mediated + clocked + drained). Batching keeps the per-frame wasm-crossing
 /// count low (a frame is ~17 chunks) while the comm-port handshake still
@@ -434,6 +443,34 @@ pub struct SgbCoprocessor {
     /// completed-frame count + the guest's last INIDISP write.
     frames_done: u64,
     last_inidisp: u8,
+    /// The real SGB resident sound driver (N-SPC engine + soundfont) was
+    /// installed from a user-supplied `--sgb-bios`. When set, SGB SOUND/SOU_TRN
+    /// feed that resident engine over the plugin comm ports instead of driving
+    /// the clean-room square driver. Default false = clean-room behavior.
+    nspc_resident: bool,
+    /// A pending N-SPC command word `[cmd_lo, cmd_hi, data_lo, data_hi]` = ports
+    /// 0/1 (command) + 2/3 (data), set by a SOUND packet, delivered by
+    /// [`Self::nspc_flush`] with the SGB BIOS echo-ack handshake.
+    nspc_cmd: [u8; 4],
+    /// The last command word actually sent to the engine — the ack shadow the
+    /// handshake compares the engine's echo against (BIOS `$0344`/`$0346`).
+    nspc_shadow: [u8; 4],
+    /// A SOUND command is queued in `nspc_cmd` and not yet acked.
+    nspc_pending: bool,
+    /// Diagnostics (`debug_status`): how many SOUND / SOU_TRN / DATA_SND commands
+    /// have been drained from the core, and the last SOUND packet's four bytes.
+    dbg_sound: u32,
+    dbg_soutrn: u32,
+    dbg_datasnd: u32,
+    dbg_last_sound: [u8; 4],
+    /// First block dest + total bytes of the last SOU_TRN upload, and the loudest
+    /// S-DSP sample amplitude mixed so far (0.0 = the engine produced only
+    /// silence) — `debug_status` diagnostics for the N-SPC audio path.
+    dbg_soutrn_dest: u16,
+    dbg_soutrn_len: u32,
+    dbg_soutrn_nonzero: u32,
+    dbg_soutrn_head: [u8; 16],
+    dbg_pcm_peak: f32,
 }
 
 impl SgbCoprocessor {
@@ -452,6 +489,41 @@ impl SgbCoprocessor {
         let ppu_bytes = fs::read(dir.join(PPU_WASM)).ok();
         Self::from_wasm_full(&spc_bytes, &cpu_bytes, ppu_bytes.as_deref(), output_rate)
             .map_err(|e| format!("cannot load SGB coprocessor plugins: {e}"))
+    }
+
+    /// Install the real SGB resident sound driver from a user-supplied SGB
+    /// system ROM (`--sgb-bios`) so games that ship only song data (Animaniacs
+    /// et al.) play. The SGB stores its resident SPC700 program — the N-SPC
+    /// engine, sample directory, and BRR soundfont — as a standard SNES APU
+    /// block table (`[u16 len, u16 dest, len bytes]*` then `[0000, entry]`) that
+    /// its boot loader streams to the audio chip. We parse that table, upload
+    /// each block into APU RAM through the plugin ABI (`write_ram`), and enter
+    /// the engine at its terminator entry. Returns whether a valid driver was
+    /// installed; on any parse failure the clean-room firmware stays untouched.
+    ///
+    /// Everything reaches the SPC700 through the plugin's public ABI — the ROM
+    /// parsing is host-side, so the plugin boundary stays clean. The supplied
+    /// bytes are the user's own ROM; nothing here is committed to the tree.
+    pub fn install_sgb_bios(&mut self, program_rom: &[u8]) -> bool {
+        // The driver upload table sits at LoROM $06:8000 in the SGB1/SGB2
+        // system ROM. ponytail: fixed offset for the known dump; a different
+        // revision would need the boot loader's own source pointer instead of
+        // this constant (read it from the loader at $00:AC43).
+        const TABLE_OFF: usize = 0x3_0000;
+        let Some((entry, blocks)) = parse_apu_blocks(program_rom, TABLE_OFF) else {
+            return false;
+        };
+        let spc = self.spc.get_mut();
+        for (dest, data) in &blocks {
+            if spc.write_ram(u32::from(*dest), data).is_err() {
+                return false;
+            }
+        }
+        if spc.set_pc(u32::from(entry)).is_err() {
+            return false;
+        }
+        self.nspc_resident = true;
+        true
     }
 
     /// Build the backend from the two plugins' wasm bytes: instantiate, reset,
@@ -534,6 +606,19 @@ impl SgbCoprocessor {
             snes_live: false,
             frames_done: 0,
             last_inidisp: 0,
+            nspc_resident: false,
+            nspc_cmd: [0; 4],
+            nspc_shadow: [0; 4],
+            nspc_pending: false,
+            dbg_sound: 0,
+            dbg_soutrn: 0,
+            dbg_datasnd: 0,
+            dbg_last_sound: [0; 4],
+            dbg_soutrn_dest: 0,
+            dbg_soutrn_len: 0,
+            dbg_soutrn_nonzero: 0,
+            dbg_soutrn_head: [0; 16],
+            dbg_pcm_peak: 0.0,
         };
         me.install_firmware()?;
         Ok(me)
@@ -1102,6 +1187,10 @@ impl SgbCoprocessor {
                     self.cur = s;
                 }
             }
+            let amp = f32::from(self.cur.0.unsigned_abs().max(self.cur.1.unsigned_abs()));
+            if amp > self.dbg_pcm_peak {
+                self.dbg_pcm_peak = amp;
+            }
             if self.out.len() < self.max_out {
                 self.out.push((
                     f32::from(self.cur.0) * MIX_SCALE,
@@ -1112,6 +1201,16 @@ impl SgbCoprocessor {
     }
 
     fn mix_into(&mut self, gb: &mut [(f32, f32)]) {
+        // Only with the real N-SPC driver resident (--sgb-bios) does the SGB
+        // hardware mix apply: the GB audio feeds the SNES mixer below the SNES
+        // APU's level. Without it — clean-room square SFX, or no --sgb-bios —
+        // leave the GB channels at full so nothing is quieted for no benefit.
+        if self.nspc_resident {
+            for s in gb.iter_mut() {
+                s.0 *= GB_GAIN;
+                s.1 *= GB_GAIN;
+            }
+        }
         let n = gb.len().min(self.out.len());
         for (dst, src) in gb.iter_mut().zip(self.out.iter()).take(n) {
             dst.0 += src.0;
@@ -1323,9 +1422,45 @@ impl AudioCoprocessor for SgbCoprocessor {
             ),
             None => "no SNES PPU plugin (audio-only)".into(),
         };
+        let driver = if self.nspc_resident {
+            // Live SPC output ports (the engine's echo) + the ARAM entry byte, to
+            // diagnose the N-SPC handshake. borrow_mut from &self via the RefCell.
+            let mut spc = self.spc.borrow_mut();
+            let echo = [
+                spc.port_read(0).unwrap_or(0xEE),
+                spc.port_read(1).unwrap_or(0xEE),
+                spc.port_read(2).unwrap_or(0xEE),
+                spc.port_read(3).unwrap_or(0xEE),
+            ];
+            let song = spc.read_ram(u32::from(self.dbg_soutrn_dest), 8).unwrap_or_default();
+            format!(
+                "N-SPC resident (--sgb-bios): SOUND x{} last {:02X?}, SOU_TRN x{} \
+                 (dest ${:04X} len {}), DATA_SND x{}; cmd {:02X?} shadow {:02X?} \
+                 pending {}; SPC echo ports {:02X?}; DSP peak {}; SOU_TRN head {:02X?} \
+                 nonzero {}/{}; song@${:04X} {:02X?}",
+                self.dbg_sound,
+                self.dbg_last_sound,
+                self.dbg_soutrn,
+                self.dbg_soutrn_dest,
+                self.dbg_soutrn_len,
+                self.dbg_datasnd,
+                self.nspc_cmd,
+                self.nspc_shadow,
+                self.nspc_pending,
+                echo,
+                self.dbg_pcm_peak,
+                self.dbg_soutrn_head,
+                self.dbg_soutrn_nonzero,
+                self.dbg_soutrn_len,
+                self.dbg_soutrn_dest,
+                song,
+            )
+        } else {
+            "clean-room firmware".to_string()
+        };
         format!(
             "wasm SGB coprocessor: SPC700 + 65C816 plugins loaded; {} \
-             (65C816 ran to cyc {}, SPC700 to cyc {}); last GB->SPC ports {:02X?}; {}",
+             (65C816 ran to cyc {}, SPC700 to cyc {}); last GB->SPC ports {:02X?}; {}; {}",
             if running {
                 "RUNNING"
             } else {
@@ -1334,6 +1469,7 @@ impl AudioCoprocessor for SgbCoprocessor {
             self.cpu_target,
             self.spc_target,
             self.to_spc,
+            driver,
             ppu,
         )
     }
@@ -1341,6 +1477,32 @@ impl AudioCoprocessor for SgbCoprocessor {
 
 /// Install the clean-room SPC700 driver + one-entry sample directory + a
 /// square BRR sample into APU RAM (the chip itself boots its IPL ROM; see
+/// Parse a standard SNES APU upload table (`[u16 len, u16 dest, len bytes]*`
+/// terminated by `[0000, entry]`) starting at `off`, returning `(entry,
+/// blocks)`. Rejects a malformed table (out-of-bounds length, no terminator, or
+/// no block loading the N-SPC engine entry `$0400`) so a wrong offset / wrong
+/// ROM falls back to the clean-room firmware rather than uploading garbage.
+fn parse_apu_blocks(rom: &[u8], mut off: usize) -> Option<(u16, Vec<(u16, Vec<u8>)>)> {
+    let mut blocks: Vec<(u16, Vec<u8>)> = Vec::new();
+    loop {
+        let len = u16::from_le_bytes([*rom.get(off)?, *rom.get(off + 1)?]);
+        let dest = u16::from_le_bytes([*rom.get(off + 2)?, *rom.get(off + 3)?]);
+        off += 4;
+        if len == 0 {
+            // Terminator: `dest` is the SPC700 execution entry. A valid driver
+            // table loads the engine to $0400 and jumps there.
+            return (dest == 0x0400 && blocks.iter().any(|(d, _)| *d == 0x0400))
+                .then_some((dest, blocks));
+        }
+        let end = off.checked_add(usize::from(len))?;
+        blocks.push((dest, rom.get(off..end)?.to_vec()));
+        off = end;
+        if blocks.len() > 64 {
+            return None; // runaway guard: no real driver table is this long
+        }
+    }
+}
+
 /// `install_firmware`). The original clean-room driver waits on comm port 1
 /// (the SNES trigger), then programs the S-DSP to key a ~2 kHz square-wave
 /// voice. Authored from the SPC700 opcode table + S-DSP register map

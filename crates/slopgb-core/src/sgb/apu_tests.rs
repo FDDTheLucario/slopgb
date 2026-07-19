@@ -29,8 +29,9 @@ fn clock_emits_output_samples_at_the_rate() {
 #[test]
 fn sou_trn_upload_writes_apu_ram_and_starts_execution() {
     let mut apu = SgbApu::new(48_000);
-    // One descriptor: dest 0x0400, len 3, data [0xAA,0xBB,0xCC].
-    let block = [0x00, 0x04, 0x03, 0x00, 0xAA, 0xBB, 0xCC, 0x00, 0x00];
+    // One descriptor: len 3, dest 0x0400, data [0xAA,0xBB,0xCC] (SBN order:
+    // length first, destination second).
+    let block = [0x03, 0x00, 0x00, 0x04, 0xAA, 0xBB, 0xCC, 0x00, 0x00];
     apu.upload_transfer(&block, true);
     let ram = apu.spc.apu_ram();
     assert_eq!(ram[0x0400], 0xAA);
@@ -145,12 +146,13 @@ fn original_sgb_tone_driver() -> Vec<u8> {
     let mut brr = vec![0x93u8];
     brr.extend_from_slice(&[0x77, 0x77, 0x77, 0x77, 0x88, 0x88, 0x88, 0x88]);
 
-    // Assemble the SOU_TRN descriptor stream: (dest_le, len_le, data...). The
-    // FIRST descriptor's address is the entry point, so the program leads.
+    // Assemble the SOU_TRN descriptor stream: (len_le, dest_le, data...) per the
+    // SBN / SNES APU block format. The FIRST descriptor's address is the entry
+    // point, so the program leads.
     let mut block = Vec::new();
     let mut push = |dest: u16, data: &[u8]| {
-        block.extend_from_slice(&dest.to_le_bytes());
         block.extend_from_slice(&(data.len() as u16).to_le_bytes());
+        block.extend_from_slice(&dest.to_le_bytes());
         block.extend_from_slice(data);
     };
     push(0x0400, &prog); // program (entry)

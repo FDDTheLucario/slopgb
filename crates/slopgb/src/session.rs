@@ -224,7 +224,21 @@ impl Session {
             return;
         }
         match SgbCoprocessor::load(dir, DEFAULT_SAMPLE_RATE) {
-            Ok(cop) => self.gb.set_audio_coprocessor(Box::new(cop)),
+            Ok(mut cop) => {
+                // With a user-supplied SGB system ROM (`--sgb-bios`), install its
+                // real resident sound driver (the N-SPC engine + soundfont) so
+                // games that ship only song data play. Missing/unrecognized ROM
+                // → the clean-room firmware stands (best-effort, logged once).
+                if let Some(bios) = &self.sgb_bios {
+                    if !cop.install_sgb_bios(bios) {
+                        eprintln!(
+                            "slopgb: --sgb-bios present but no SGB sound driver found in it; \
+                             using clean-room firmware"
+                        );
+                    }
+                }
+                self.gb.set_audio_coprocessor(Box::new(cop));
+            }
             Err(e) => eprintln!("slopgb: {e}; using the built-in SGB APU"),
         }
     }
