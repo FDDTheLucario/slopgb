@@ -81,6 +81,88 @@ fn oam_sprites_short_slice_pads_zero() {
 }
 
 #[test]
+fn bg_tile_index_resolves_signed_and_unsigned_addressing() {
+    assert_eq!(bg_tile_index(0, false), 0);
+    assert_eq!(bg_tile_index(255, false), 255);
+    // Signed (0x8800): byte is i8 relative to tile 256.
+    assert_eq!(bg_tile_index(0, true), 256);
+    assert_eq!(bg_tile_index(127, true), 383);
+    assert_eq!(bg_tile_index(0x80, true), 128); // -128
+    assert_eq!(bg_tile_index(0xFF, true), 255); // -1
+}
+
+#[test]
+fn tile_guess_from_bg_cell_uses_cgb_palette_and_bank() {
+    let mut vram = vec![0u8; 0x4000];
+    // 0x9800 cell 0 → tile 5, attr palette 3 + VRAM bank 1 (bit 3).
+    vram[0x1800] = 5;
+    vram[0x2000 + 0x1800] = 0x0B; // bits2-0 = 3, bit3 = 1
+    let g = tile_palette_guess(&vram, &[0u8; 0xA0], false, false, true);
+    assert_eq!(
+        g[1][5],
+        Some(PaletteRef {
+            obj: false,
+            index: 3
+        })
+    );
+    assert_eq!(g[0][5], None, "different bank untouched");
+    // Tile 0 is referenced by every zero-filled map cell, so it is guessed BG 0;
+    // a tile no cell names stays grey.
+    assert_eq!(g[0][200], None, "unreferenced tile stays grey");
+}
+
+#[test]
+fn tile_guess_signed_addressing_maps_byte_to_tile_256_block() {
+    let mut vram = vec![0u8; 0x4000];
+    vram[0x1800] = 0; // signed byte 0 → tile 256
+    let g = tile_palette_guess(&vram, &[0u8; 0xA0], true, false, true);
+    assert_eq!(g[0][256].map(|p| p.obj), Some(false));
+    assert_eq!(g[0][0], None);
+}
+
+#[test]
+fn tile_guess_obj_fills_unreferenced_and_bg_wins() {
+    let mut vram = vec![0u8; 0x4000];
+    // BG cell → tile 7, palette 1.
+    vram[0x1800] = 7;
+    vram[0x2000 + 0x1800] = 0x01;
+    let mut oam = vec![0u8; 0xA0];
+    oam[0..4].copy_from_slice(&[16, 8, 7, 0x05]); // sprite also uses tile 7, OBJ pal 5
+    oam[4..8].copy_from_slice(&[16, 8, 20, 0x04]); // sprite uses tile 20, OBJ pal 4
+    let g = tile_palette_guess(&vram, &oam, false, false, true);
+    // Tile 7 referenced by both → BG wins.
+    assert_eq!(
+        g[0][7],
+        Some(PaletteRef {
+            obj: false,
+            index: 1
+        })
+    );
+    // Tile 20 only by a sprite → OBJ palette.
+    assert_eq!(
+        g[0][20],
+        Some(PaletteRef {
+            obj: true,
+            index: 4
+        })
+    );
+}
+
+#[test]
+fn tile_guess_dmg_obj_uses_obp_bit_and_tall_covers_two_tiles() {
+    let mut oam = vec![0u8; 0xA0];
+    // 8×16 sprite, tile 0x11 → covers 0x10 and 0x11; OBP bit4 set → index 1.
+    oam[0..4].copy_from_slice(&[16, 8, 0x11, 0x10]);
+    let g = tile_palette_guess(&[0u8; 0x4000], &oam, false, true, false);
+    let want = Some(PaletteRef {
+        obj: true,
+        index: 1,
+    });
+    assert_eq!(g[0][0x10], want);
+    assert_eq!(g[0][0x11], want);
+}
+
+#[test]
 fn bg_map_reads_tile_from_bank0_and_attr_from_bank1() {
     let mut vram = vec![0u8; 0x4000];
     // 0x9800 map: offset 0x1800. cell (row 1, col 2) = 1*32 + 2 = index 34.

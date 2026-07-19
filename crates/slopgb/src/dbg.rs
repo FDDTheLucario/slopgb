@@ -6,7 +6,7 @@
 //! `run_until_breakpoint` (run to a return address) — no test-only paths, so the
 //! golden gate is untouched (it never breaks).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use slopgb_core::{DebugReg, GameBoy, Watchpoint, debug};
 
@@ -17,24 +17,36 @@ use slopgb_core::{DebugReg, GameBoy, Watchpoint, debug};
 /// [`Watchpoints`] below).
 #[derive(Default, Clone, Debug)]
 pub struct Breakpoints {
-    pc: BTreeSet<u16>,
+    /// `addr -> ROM-bank qualifier`. `None` halts on `addr` in any bank (the
+    /// flat-address default); `Some(b)` halts only while ROM bank `b` is mapped
+    /// (a `0x4000-0x7FFF` breakpoint set from a bank-pinned disasm view).
+    // ponytail: one qualifier per address — re-setting `01:6401` after `02:6401`
+    // replaces it rather than keeping both. Split into a `(addr, bank)` set if
+    // per-bank breakpoints at the same address ever matter.
+    pc: BTreeMap<u16, Option<u16>>,
 }
 
 impl Breakpoints {
-    /// Toggle a breakpoint at `addr`; returns whether it is now set.
-    pub fn toggle(&mut self, addr: u16) -> bool {
-        if self.pc.remove(&addr) {
+    /// Toggle a breakpoint at `addr` (qualified to ROM `bank`, or bank-agnostic
+    /// when `None`); returns whether it is now set. Re-toggling any breakpoint at
+    /// `addr` clears it regardless of its bank.
+    pub fn toggle(&mut self, addr: u16, bank: Option<u16>) -> bool {
+        if self.pc.remove(&addr).is_some() {
             false
         } else {
-            self.pc.insert(addr);
+            self.pc.insert(addr, bank);
             true
         }
     }
 
-    /// Whether a breakpoint is set at `addr` (the disasm gutter dot).
+    /// Whether a gutter dot shows at `addr` in a pane showing ROM bank `shown`: a
+    /// bank-agnostic breakpoint always shows; a bank-qualified one only in its own
+    /// bank's view (so a bank-1 breakpoint's dot doesn't bleed onto bank 7).
     #[must_use]
-    pub fn contains(&self, addr: u16) -> bool {
-        self.pc.contains(&addr)
+    pub fn dot_at(&self, addr: u16, shown: u16) -> bool {
+        self.pc
+            .get(&addr)
+            .is_some_and(|bank| bank.is_none_or(|b| b == shown))
     }
 
     /// Remove the breakpoint at `addr` if present (the manager's clear — an
@@ -43,16 +55,23 @@ impl Breakpoints {
         self.pc.remove(&addr);
     }
 
-    /// Set a breakpoint at `addr` (idempotent — unlike [`Self::toggle`], calling
-    /// it twice keeps the breakpoint set). Used by the MCP `breakpoint` tool.
-    pub fn set(&mut self, addr: u16) {
-        self.pc.insert(addr);
+    /// Set a breakpoint at `addr` qualified to ROM `bank` (`None` = any bank),
+    /// idempotent unlike [`Self::toggle`]. Used by the MCP `breakpoint` tool.
+    pub fn set(&mut self, addr: u16, bank: Option<u16>) {
+        self.pc.insert(addr, bank);
     }
 
-    /// The breakpoint addresses, for [`GameBoy::run_frame_until_breakpoint`].
+    /// The breakpoint addresses (bank dropped), for the bookmark/breakpoint
+    /// navigation walk and the manager list.
     #[must_use]
     pub fn pc_list(&self) -> Vec<u16> {
-        self.pc.iter().copied().collect()
+        self.pc.keys().copied().collect()
+    }
+
+    /// The bank-qualified breakpoints for [`GameBoy::run_frame_until_breakpoint`].
+    #[must_use]
+    pub fn bp_list(&self) -> Vec<(u16, Option<u16>)> {
+        self.pc.iter().map(|(&a, &b)| (a, b)).collect()
     }
 
     /// Whether no breakpoint is set (the free-run loop stays a plain `run_frame`).
@@ -171,8 +190,9 @@ impl RegField {
 /// every `&mut gb` mutation stays in `main`, where the golden gate is honored.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DebugAction {
-    /// Toggle a breakpoint at the address (F2 / `Set break`).
-    ToggleBreakpoint(u16),
+    /// Toggle a breakpoint at the address (F2 / `Set break`), qualified to the
+    /// ROM bank when set from a bank-pinned disasm view (`None` = any bank).
+    ToggleBreakpoint(u16, Option<u16>),
     /// Run until PC reaches the address (`Run to cursor`, F4).
     RunToCursor(u16),
     /// Redirect PC to the address without running (`Jump to cursor`, F6).
@@ -262,8 +282,8 @@ impl Debugger {
     /// machine. `Run to cursor` halts at the cursor afterward (bgb's behavior).
     pub fn apply(&mut self, gb: &mut GameBoy, action: DebugAction) {
         match action {
-            DebugAction::ToggleBreakpoint(addr) => {
-                self.bps.toggle(addr);
+            DebugAction::ToggleBreakpoint(addr, bank) => {
+                self.bps.toggle(addr, bank);
             }
             DebugAction::RunToCursor(addr) => {
                 gb.run_until_breakpoint(&[addr], RUN_TO_CURSOR_CAP);

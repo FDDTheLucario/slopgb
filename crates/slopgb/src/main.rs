@@ -301,6 +301,9 @@ struct App {
     /// A solid LCD-off frame (the palette's lightest shade) shown while no ROM is
     /// loaded — bgb's pale-green blank screen. Rebuilt when the palette changes.
     blank_frame: Box<[u32; SCREEN_PIXELS]>,
+    /// Scratch copy of the presented frame, reused only when a VRAM OAM hover
+    /// asks for a sprite outline drawn into the (immutable) core frame.
+    overlay_frame: Vec<u32>,
     /// The last SNES-side frame a full-takeover SGB coprocessor rendered
     /// (256x224, converted to 0xRRGGBB). `Some` switches presentation to the
     /// SNES picture; cleared on ROM load. `None` everywhere the coprocessor
@@ -531,6 +534,7 @@ impl App {
             session,
             rom_loaded,
             blank_frame,
+            overlay_frame: Vec::new(),
             snes_frame: None,
             postfx_buf: Vec::new(),
             prev_frame: Vec::new(),
@@ -693,6 +697,30 @@ impl App {
         } else {
             (&self.blank_frame[..], SCREEN_W, SCREEN_H)
         };
+        // Outline the sprite hovered in the VRAM viewer's OAM tab, drawn into the
+        // frame pre-blit so it scales with the screen. The core frame is immutable
+        // (golden-safe), so XOR the perimeter into a scratch copy instead; the
+        // presentation filters below then treat the outlined copy as the frame.
+        if let Some(r) = self.tools.oam_hover_rect(&self.session.gb) {
+            // SGB composites the 160×144 screen at (48,40) inside the 256×224 border.
+            let (ox, oy) = if src_w == SGB_BORDER_W {
+                (48, 40)
+            } else {
+                (0, 0)
+            };
+            self.overlay_frame.clear();
+            self.overlay_frame.extend_from_slice(frame);
+            invert_outline(
+                &mut self.overlay_frame,
+                src_w,
+                src_h,
+                r.x + ox,
+                r.y + oy,
+                r.w,
+                r.h,
+            );
+            frame = &self.overlay_frame;
+        }
         // Presentation filters (frontend-only, golden-safe): copy the core frame
         // into the scratch buffer and filter it in place, then present that.
         if postfx::any_active(&self.settings) {
@@ -1259,6 +1287,48 @@ fn cpu_usage_pct(delta_cycles: u64, delta_halt: u64) -> f64 {
 /// no-ROM blank screen. A free function so the fill is unit-testable.
 fn blank_frame(color: u32) -> Box<[u32; SCREEN_PIXELS]> {
     Box::new([color; SCREEN_PIXELS])
+}
+
+/// XOR the RGB of the 1-pixel perimeter of the `w`×`h` box at `(x, y)` in a
+/// `fw`×`fh` frame, clipped to the frame. Inverting whatever it covers keeps the
+/// outline self-contrasting on any background; the blit forces alpha opaque after.
+/// Corner pixels are hit once (the side runs skip the top/bottom rows) so a double
+/// XOR can't cancel them back to invisible.
+fn invert_outline(frame: &mut [u32], fw: usize, fh: usize, x: i32, y: i32, w: i32, h: i32) {
+    let mut xor = |px: i32, py: i32| {
+        if (0..fw as i32).contains(&px) && (0..fh as i32).contains(&py) {
+            frame[py as usize * fw + px as usize] ^= 0x00FF_FFFF;
+        }
+    };
+    for cx in x..x + w {
+        xor(cx, y);
+        xor(cx, y + h - 1);
+    }
+    for cy in (y + 1)..(y + h - 1) {
+        xor(x, cy);
+        xor(x + w - 1, cy);
+    }
+}
+
+#[cfg(test)]
+mod overlay_tests {
+    use super::invert_outline;
+
+    #[test]
+    fn outline_inverts_perimeter_once_and_clips() {
+        // 4×4 frame, box covering it all: perimeter (12 px) flips, center (2×2) untouched.
+        let mut f = [0u32; 16];
+        invert_outline(&mut f, 4, 4, 0, 0, 4, 4);
+        for (i, &px) in f.iter().enumerate() {
+            let (x, y) = (i % 4, i / 4);
+            let edge = x == 0 || x == 3 || y == 0 || y == 3;
+            assert_eq!(px, if edge { 0x00FF_FFFF } else { 0 }, "px {i}");
+        }
+        // Off-frame box: fully clipped, no panic, no change.
+        let mut g = [7u32; 16];
+        invert_outline(&mut g, 4, 4, -8, -8, 4, 4);
+        assert_eq!(g, [7u32; 16]);
+    }
 }
 
 /// Insert `path` at the front of the recent-ROMs list (MN4): de-duplicated,

@@ -59,39 +59,44 @@ impl SymbolTable {
         self.syms.is_empty()
     }
 
-    // ponytail: the lookups below are bank-agnostic — `Symbol.bank` is parsed
-    // and stored but never consulted. Two symbols sharing a 0x4000-0x7FFF
-    // address in different ROM banks therefore collide and an arbitrary one is
-    // returned (`name_at`'s binary_search picks any equal-address match;
-    // `nearest_before` the sorted-last). Fine today: every caller
-    // (debugger/mem-viewer/mcp) looks up by bare address with no active bank in
-    // hand. Upgrade path = thread the active ROM bank through those call sites
-    // and add a `name_at(bank, addr)` that prefers the matching-bank symbol.
-
-    /// The name of a symbol at exactly `addr`, if any. Bank-agnostic (see the
-    /// ceiling note above): on a same-address multi-bank collision, an arbitrary
-    /// one is returned.
+    /// The name of the symbol at exactly `addr` in `bank`, if any. Banks
+    /// discriminate: a `0x4000-0x7FFF` symbol in ROM bank `0B` is not shown while
+    /// bank `24` is mapped there, matching bgb (the caller passes the live-mapped
+    /// bank for `addr`'s region — bank 0 for the fixed regions). On a same-address
+    /// multi-bank collision the matching-bank symbol wins.
     #[must_use]
-    pub fn name_at(&self, addr: u16) -> Option<&str> {
-        let i = self.syms.binary_search_by_key(&addr, |s| s.addr).ok()?;
-        Some(self.syms[i].name.as_str())
+    pub fn name_at(&self, bank: u16, addr: u16) -> Option<&str> {
+        let lo = self.syms.partition_point(|s| s.addr < addr);
+        self.syms[lo..]
+            .iter()
+            .take_while(|s| s.addr == addr)
+            .find(|s| s.bank == bank)
+            .map(|s| s.name.as_str())
     }
 
-    /// The nearest symbol at or before `addr` (name + its address), for the
-    /// standalone memory viewer's status bar ("Name+offset").
+    /// The nearest symbol in `bank` at or before `addr` (name + its address), for
+    /// the standalone memory viewer's status bar ("Name+offset"). Bank-filtered
+    /// like [`Self::name_at`].
     #[must_use]
-    pub fn nearest_before(&self, addr: u16) -> Option<(&str, u16)> {
+    pub fn nearest_before(&self, bank: u16, addr: u16) -> Option<(&str, u16)> {
         let end = self.syms.partition_point(|s| s.addr <= addr);
-        self.syms[..end].last().map(|s| (s.name.as_str(), s.addr))
+        self.syms[..end]
+            .iter()
+            .rev()
+            .find(|s| s.bank == bank)
+            .map(|s| (s.name.as_str(), s.addr))
     }
 
-    /// The address of the symbol named `name` (case-insensitive), for `Go to…`.
+    /// The `(bank, addr)` of the symbol named `name` (case-insensitive), for `Go
+    /// to…`. The bank lets a Go-to pin the disasm/memory bank browser to the
+    /// symbol's own bank (so `01:6401 SomeWhere` jumps into bank 1, not whatever
+    /// is mapped).
     #[must_use]
-    pub fn resolve(&self, name: &str) -> Option<u16> {
+    pub fn resolve(&self, name: &str) -> Option<(u16, u16)> {
         self.syms
             .iter()
             .find(|s| s.name.eq_ignore_ascii_case(name))
-            .map(|s| s.addr)
+            .map(|s| (s.bank, s.addr))
     }
 }
 

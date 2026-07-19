@@ -76,7 +76,7 @@ pub fn menubar_menu(idx: usize, bar: Rect, st: &DebuggerState, pc: u16) -> OpenM
         0 => file_menu(),
         1 => search_menu(),
         2 => run_menu(cursor),
-        3 => debug_menu(cursor, st.cdl_on),
+        3 => debug_menu(cursor, st.disasm_bp_bank(cursor), st.cdl_on),
         4 => window_menu(),
         _ => profiler_menu(st.prof),
     };
@@ -185,11 +185,11 @@ fn run_menu(cursor: u16) -> Vec<(MenuItem, MenuChoice)> {
     ]
 }
 
-fn debug_menu(cursor: u16, cdl_on: bool) -> Vec<(MenuItem, MenuChoice)> {
+fn debug_menu(cursor: u16, bp_bank: Option<u16>, cdl_on: bool) -> Vec<(MenuItem, MenuChoice)> {
     vec![
         (
             MenuItem::new("Toggle breakpoint").shortcut("F2"),
-            MenuChoice::Act(DebugAction::ToggleBreakpoint(cursor)),
+            MenuChoice::Act(DebugAction::ToggleBreakpoint(cursor, bp_bank)),
         ),
         (
             MenuItem::new("Evaluate expression"),
@@ -228,6 +228,7 @@ pub fn address_list_menu(
     addrs: &[u16],
     clear: fn(u16) -> DebugAction,
     symbols: &SymbolTable,
+    bank_of: impl Fn(u16) -> u16,
     origin: (i32, i32),
 ) -> OpenMenu {
     let entries: Vec<(MenuItem, MenuChoice)> = if addrs.is_empty() {
@@ -240,7 +241,7 @@ pub fn address_list_menu(
                 // snapshot can never re-arm an entry the user cleared elsewhere.
                 let choice = MenuChoice::Act(clear(a));
                 // Append the symbol name when the address is an exact symbol.
-                let label = match symbols.name_at(a) {
+                let label = match symbols.name_at(bank_of(a), a) {
                     Some(name) => format!("{}:{a:04X} {name}", region_label(a)),
                     None => format!("{}:{a:04X}", region_label(a)),
                 };

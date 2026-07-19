@@ -11,7 +11,7 @@ use std::fmt::Write as _;
 use slopgb_core::{GameBoy, debug};
 
 use crate::dbg::Breakpoints;
-use crate::mcp::addr::{self, Addr};
+use crate::mcp::addr::{self, Addr, Region};
 use crate::mcp::{png, vram};
 use crate::symbols::SymbolTable;
 
@@ -79,7 +79,10 @@ pub fn dispatch(
         ))),
         Call::Breakpoint { addr } => {
             let a = addr::parse_one(addr)?;
-            breakpoints.set(a.addr);
+            // A `BB:AAAA` breakpoint in switchable ROM qualifies to that bank, so
+            // it halts only when bank `BB` is mapped; elsewhere it's bank-agnostic.
+            let bank = (0x4000..=0x7FFF).contains(&a.addr).then_some(a.bank);
+            breakpoints.set(a.addr, bank);
             Ok(ToolResult::Text(format!(
                 "breakpoint set at {:02X}:{:04X}",
                 a.bank, a.addr
@@ -133,14 +136,27 @@ pub(crate) fn encode_scaled(px: &[u32], w: usize, h: usize, scale: u32) -> Vec<u
 /// operand (bgb's inline label).
 pub(crate) fn disassemble(gb: &GameBoy, symbols: &SymbolTable, from: Addr, to: Addr) -> String {
     let read = |a: u16| gb.debug_read_banked(from.bank, a);
+    // A symbol is named in the viewed bank: addresses in the disassembled region
+    // (the listing itself + intra-bank branch operands) resolve against `from.bank`;
+    // an operand into another region uses that region's live-mapped bank.
+    let bank_of = |addr: u16| {
+        if Region::of(addr) == Region::of(from.addr) {
+            from.bank
+        } else {
+            crate::windows::live_bank(gb, addr)
+        }
+    };
     let mut out = String::new();
     let mut a = from.addr;
     loop {
         let bytes = [read(a), read(a.wrapping_add(1)), read(a.wrapping_add(2))];
         let insn = debug::decode_with(&bytes, a, debug::Syntax::Rgbds);
-        let label = symbols.name_at(a).unwrap_or("");
+        let label = symbols.name_at(bank_of(a), a).unwrap_or("");
         let mut text = insn.text;
-        if let Some((t, name)) = insn.target.and_then(|t| symbols.name_at(t).map(|n| (t, n))) {
+        if let Some((t, name)) = insn
+            .target
+            .and_then(|t| symbols.name_at(bank_of(t), t).map(|n| (t, n)))
+        {
             text = replace_last(&text, &format!("${t:04X}"), name);
         }
         let _ = writeln!(

@@ -32,6 +32,31 @@ clipboard — dep-free via a `std::process` shell-out to `wl-copy`/`xclip`/`xsel
 `toolwin::debugger_copy_text` builds the text, `Action::DbgCopyData`/`DbgCopyCode`
 carry the clicked addr). A host with no clipboard tool logs a hint (non-fatal).
 
+## Disasm bank browser + bank-qualified breakpoints
+
+The disasm pane has the same pinned-bank browser as the memory pane
+(`DebuggerState::disasm_bank`, mirroring `mem_bank`): a `BB:AAAA` Go-to — or a
+banked symbol like `01:6401 SomeWhere` (`SymbolTable::resolve` now returns
+`(bank, addr)`) — pins the listing to that ROM bank and shows its bytes even as
+the game maps other banks in, a **separate view** (`banked_read`/`shown_bank`,
+byte-for-byte the standalone viewer's read path — never touches the live bank
+state). A pinned pane draws a right-aligned bank chip (`draw_bank_chip`, shared
+with the memory pane, sat left of the scrollbar so the bar doesn't cover it).
+Re-attaching to PC (`center_disasm_on_pc`, via go-to-PC / step / a break) clears
+the pin so the pane shows the live bank again. Every disasm row's ROM label names
+its bank — `ROM00`..`ROMFF` (from `disasm_rows`' `bank_of` resolver), never the
+region-generic `ROMX` — so the row reads `ROM01:6401`.
+
+A breakpoint toggled from a bank-pinned disasm view on a switchable-ROM
+(`0x4000-0x7FFF`) line is **bank-qualified** (`DebuggerState::disasm_bp_bank`):
+`Breakpoints` stores `addr -> Option<bank>`, and core
+`run_frame_until_breakpoint` (now `&[(addr, Option<bank>)]`) halts on a qualified
+breakpoint only while that ROM bank is mapped (`rom_bank()`), so `01:6401` breaks
+in bank 1, not on whatever code shares 6401 in the live bank. A live-followed or
+non-ROMX toggle stays bank-agnostic (`None`, the flat-address default). The
+gutter dot (`Breakpoints::dot_at`) shows only in the breakpoint's own bank view.
+The MCP `breakpoint` tool likewise qualifies a `BB:AAAA` ROMX breakpoint.
+
 ## Modal prompt
 
 One `InputDialog` + key/click plumbing backs every `DialogKind` (Go to… / edit
@@ -127,6 +152,10 @@ the name. **Auto-load:** on ROM load a sidecar `foo.sym` beside `foo.gb` loads
 automatically (`app_path::sym_sidecar`, `exists()`-gated silent no-op), applied to both
 the disassembler and the memory viewer via the existing `set_symbols` fan-out. Also
 loaded manually via Debug→"Load symbols..." (`PathPurpose::SymbolFile`).
+The disasm click glue (`toolwin.rs` left/double/right) hit-tests through the same
+`banked_read`/`shown_bank` closures the renderer uses — a live-bank hit-test resolves
+symbols against the wrong bank when the view is pinned, shifting label rows so clicks
+land one line off (pinned by `double_click_hits_the_drawn_row_in_a_pinned_bank`).
 
 ## CDL (code/data logging)
 

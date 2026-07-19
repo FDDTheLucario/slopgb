@@ -18,6 +18,7 @@ pub fn on_left_click(
     regs: Registers,
     px: i32,
     py: i32,
+    bank_of: impl Fn(u16) -> u16,
 ) -> Option<MenuOutcome> {
     let l = DebuggerLayout::for_size(area.w, area.h);
     // An open menu eats the click: an enabled item acts; a click anywhere else
@@ -40,7 +41,7 @@ pub fn on_left_click(
     }
     // Otherwise select the clicked pane line (sets the cursor).
     if let ClickTarget::Disasm(a) | ClickTarget::Memory(a) | ClickTarget::Stack(a) =
-        target_at(read, area, st, regs.pc, regs.sp, px, py)
+        target_at(read, area, st, regs.pc, regs.sp, px, py, bank_of)
     {
         st.cursor = Some(a);
     }
@@ -52,6 +53,7 @@ pub fn on_left_click(
 /// the click isn't on a disasm line (the paired single-click already moved the
 /// cursor). Pure over `read`, so it tests headless.
 #[must_use]
+#[allow(clippy::too_many_arguments)]
 pub fn on_double_click(
     read: impl Fn(u16) -> u8,
     area: Rect,
@@ -60,12 +62,16 @@ pub fn on_double_click(
     sp: u16,
     px: i32,
     py: i32,
+    bank_of: impl Fn(u16) -> u16,
 ) -> Option<MenuOutcome> {
     if st.menu.is_some() {
         return None;
     }
-    match target_at(read, area, st, pc, sp, px, py) {
-        ClickTarget::Disasm(a) => Some(MenuOutcome::Act(DebugAction::ToggleBreakpoint(a))),
+    match target_at(read, area, st, pc, sp, px, py, bank_of) {
+        ClickTarget::Disasm(a) => Some(MenuOutcome::Act(DebugAction::ToggleBreakpoint(
+            a,
+            st.disasm_bp_bank(a),
+        ))),
         _ => None,
     }
 }
@@ -128,6 +134,7 @@ fn apply_choice(
 
 /// Handle a right-click: open the clicked pane's context menu at the cursor (and
 /// select that line), or dismiss an already-open menu. Pure over `read`.
+#[allow(clippy::too_many_arguments)]
 pub fn on_right_click(
     read: impl Fn(u16) -> u8,
     area: Rect,
@@ -136,12 +143,13 @@ pub fn on_right_click(
     sp: u16,
     px: i32,
     py: i32,
+    bank_of: impl Fn(u16) -> u16,
 ) {
     if st.menu.is_some() {
         st.menu = None;
         return;
     }
-    let target = target_at(read, area, st, pc, sp, px, py);
+    let target = target_at(read, area, st, pc, sp, px, py, bank_of);
     if let ClickTarget::Disasm(a) | ClickTarget::Memory(a) | ClickTarget::Stack(a) = target {
         st.cursor = Some(a);
     }
@@ -200,34 +208,35 @@ pub fn open_edit_reg(st: &mut DebuggerState, field: RegField, value: u16) {
     });
 }
 
-/// Apply a `BB:AAAA` memory Go-to: pin the pane's bank browser to `BB` and jump
-/// to `AAAA`. Returns whether the text was a well-formed bank-prefixed address.
-fn apply_mem_bank_goto(st: &mut DebuggerState, text: &str) -> bool {
-    let Some((b, a)) = text.split_once(':') else {
-        return false;
-    };
+/// Parse a `BB:AAAA` bank-prefixed address (the `$`/`0x` prefixes on the address
+/// are tolerated), or `None` when the text isn't that form.
+fn parse_bank_addr(text: &str) -> Option<(u16, u16)> {
+    let (b, a) = text.split_once(':')?;
     let addr = a.trim().trim_start_matches('$').trim_start_matches("0x");
-    if let (Ok(bank), Ok(addr)) = (
-        u16::from_str_radix(b.trim(), 16),
-        u16::from_str_radix(addr, 16),
-    ) {
-        st.mem_bank = Some(bank);
-        st.mem_base = addr;
-        true
-    } else {
-        false
-    }
+    Some((
+        u16::from_str_radix(b.trim(), 16).ok()?,
+        u16::from_str_radix(addr, 16).ok()?,
+    ))
 }
 
-/// Apply an accepted `Go to…` address: reposition the target pane (the disasm
-/// pane pins to the entered base so it stops following PC).
-fn apply_goto(st: &mut DebuggerState, target: GotoTarget, addr: u16) {
+/// Apply an accepted `Go to…` address to the target pane: pin its bank browser to
+/// `bank` (`None` leaves the browser as it was — a bare address doesn't disturb a
+/// pinned bank). The disasm pane also pins its base so it stops following PC.
+fn apply_goto(st: &mut DebuggerState, target: GotoTarget, bank: Option<u16>, addr: u16) {
     match target {
         GotoTarget::Disasm => {
+            if bank.is_some() {
+                st.disasm_bank = bank;
+            }
             st.disasm_base = addr;
             st.pinned = true;
         }
-        GotoTarget::Memory => st.mem_base = addr,
+        GotoTarget::Memory => {
+            if bank.is_some() {
+                st.mem_bank = bank;
+            }
+            st.mem_base = addr;
+        }
     }
 }
 
@@ -245,15 +254,16 @@ pub(crate) fn accept_dialog(
     match kind {
         DialogKind::Goto(target) => {
             let t = text.trim();
-            // A loaded symbol name wins; then a `BB:AAAA` bank+address for the
-            // memory pane's bank browser (parity with the MCP/standalone form);
-            // then a bare hex address.
-            if let Some(addr) = st.symbols.resolve(t) {
-                apply_goto(st, target, addr);
-            } else if target == GotoTarget::Memory && apply_mem_bank_goto(st, t) {
-                // handled: BB:AAAA set mem_bank + mem_base
+            // A loaded symbol name wins (pinning the browser to the symbol's own
+            // bank, so `01:6401 Foo` jumps into bank 1); then a `BB:AAAA` bank+
+            // address (parity with the MCP/standalone form); then a bare hex
+            // address (which leaves any pinned bank alone).
+            if let Some((bank, addr)) = st.symbols.resolve(t) {
+                apply_goto(st, target, (bank != 0).then_some(bank), addr);
+            } else if let Some((bank, addr)) = parse_bank_addr(t) {
+                apply_goto(st, target, Some(bank), addr);
             } else if let Some(addr) = parsed {
-                apply_goto(st, target, addr);
+                apply_goto(st, target, None, addr);
             }
             None
         }
