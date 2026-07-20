@@ -105,8 +105,8 @@ pub trait Bus {
     /// then advances the remaining 2 (`GB_cpu_run`, `sm83_cpu.c:1621-1628`),
     /// so the halt-exit check runs on a HALF-M-cycle grid and a wake resumes
     /// the CPU — and its whole dispatch + handler read stream — at that
-    /// sub-M-cycle T (the deferred clock keeps the 2-T offset until the
-    /// machine re-aligns). The default (the base impl and every
+    /// sub-M-cycle T, holding the 2-T offset until the machine re-aligns. The
+    /// default (the base impl and every
     /// non-interconnect test bus) is the plain end-sampled
     /// [`pending_halt_wake`](Bus::pending_halt_wake); the interconnect
     /// overrides it for the DMG family.
@@ -134,9 +134,8 @@ pub trait Bus {
     /// default's plain `pending()` sees every rise before it — the SameBoy
     /// view — and needs no interconnect override: only the m0-rise
     /// visibility deadline (the same frame offset the halt samples consult)
-    /// would apply on top, and a flush here was measured to shift the
-    /// deferred operand frame of every following instruction (8 pins broken)
-    /// and is NOT SameBoy's semantics.
+    /// would apply on top. An extra flush here is NOT SameBoy's semantics — it
+    /// would re-frame every following instruction's deferred operand timing.
     fn pending_dispatch(&mut self) -> u8 {
         self.pending()
     }

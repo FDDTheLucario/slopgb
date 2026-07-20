@@ -87,12 +87,12 @@ impl Bus for Interconnect {
         // whole-dot borrow mis-maps a co-instant STAT rise onto the wrong side
         // of the write (`lycwirq_trigger_*_lcdoffset1_1`).
         // DMG is single-speed with the same 4-dot M-cycle and 1-T WriteCpu
-        // commit as CGB SS, so the identical whole-dot borrow re-hosts the DMG
-        // FF0F-clear straddle (`m2int_m0irq_scx3_ifw_2`/`_4`,
+        // commit as CGB single-speed, so the identical whole-dot borrow applies
+        // to the DMG FF0F-clear straddle (`m2int_m0irq_scx3_ifw_2`/`_4`,
         // `ly0/lycint152_lyc153irq_ifw_2`). Scoped to FF0F on DMG: the FF41/FF45
-        // WriteCpu borrow recovers on CGB but is a net-negative A/B swap on DMG
-        // (`m0enable/lycdisable_ff41_2`/`ff45_3` invert), so only the FF0F
-        // IF-clear borrow crosses to DMG.
+        // WriteCpu borrow holds on CGB but is a net-negative trade on DMG
+        // (`m0enable/lycdisable_ff41_2`/`ff45_3` invert — floor-class index), so
+        // only the FF0F IF-clear borrow crosses to DMG.
         let borrow_addr = if self.model.is_cgb() {
             matches!(addr, 0xFF0F | 0xFF41 | 0xFF45)
         } else {

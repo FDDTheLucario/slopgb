@@ -164,8 +164,7 @@ impl Ppu {
                     // coupled: `glitch_line` (SCX re-open, `ly0_late_scx7`) and
                     // `wy_trig_sb` (a WINDOW line masks the discard, `late_scx_late_
                     // disable`); the m2int length rows write at dot 152 with
-                    // `hunt_done` → the post-match arm above, never here. Full A/B:
-                    // `eager-scxlow-recheck-2026-07-12.md`.
+                    // `hunt_done` → the post-match arm above, never here.
                     0xFF43
                         if !self.ds
                             && !self.render.hunt_done
@@ -187,7 +186,7 @@ impl Ppu {
                 // whole dot past the post-lock commit. Debt 2 → 6hd re-lands it,
                 // recovering the 4 `scx_during_m3_ds` post-match fine-scroll pixel
                 // legs (scx_0060c0/0063c0 `_5`/`_8`). Pre-match / line-start DS SCX
-                // writes keep 4. See `eager-ds-scx-2026-07-12.md`.
+                // writes keep 4.
                 match addr {
                     0xFF43 if self.render.hunt_done && self.dot > self.render.hunt_match_dot => 2,
                     _ => 4,

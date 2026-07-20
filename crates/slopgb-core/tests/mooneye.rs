@@ -150,9 +150,9 @@ fn sprite_priority() {
     common::run_sprite_priority();
 }
 
-/// Cross-model pin for the counter-pinned PPU-timing family on the production
-/// (eager) clock: `intr_2_mode0/mode3/sprites` must pass on BOTH hardware
-/// families (the suffix-driven matrix only runs each on its filename model).
+/// Cross-model pin for the PPU-timing family: `intr_2_mode0/mode3/sprites`
+/// must pass on BOTH hardware families (the suffix-driven matrix only runs
+/// each on its filename model).
 #[test]
 fn intr_2_timing_both_models() {
     let Some(root) = common::mts_root() else {

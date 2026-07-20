@@ -110,8 +110,8 @@ impl Ppu {
         self.vis_mode()
     }
 
-    /// Current (line, dot) — the rendering-FSM position, for the interconnect's
-    /// post-halt-wake LY read-phase carry (`Interconnect::halt_ly_phase`).
+    /// Current (line, dot) — the rendering-FSM position (the interconnect uses
+    /// the line for the DMG line-153 speed-switch LY quirk).
     pub(crate) fn line_dot(&self) -> (u8, u16) {
         (self.line, self.dot)
     }

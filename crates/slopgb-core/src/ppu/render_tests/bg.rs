@@ -86,8 +86,8 @@ fn strobe_bgp_write_commits_with_a_dmg_blend_pixel() {
         set_map(&mut p, 0x1800, 0, col, 1);
     }
     // BGP 0xE4 (color 1 -> shade 1 = LIGHT). At dot 130, strobe 0xE8 (color 1
-    // -> shade 2 = DARK) through the production write path (mcycle_write stages
-    // at the eager `stage_write_dots` offset). The commit lands mid-line, so
+    // -> shade 2 = DARK) through the write path (mcycle_write stages
+    // at the `stage_write_dots` offset). The commit lands mid-line, so
     // pixels before it keep the old palette, the exact transition pixel reads
     // the DMG BGP OR-quirk value old|new = 0xE4|0xE8 = 0xEC (color 1 -> shade 3
     // = BLACK), and pixels after it take the new palette.
@@ -129,7 +129,7 @@ fn strobe_bgp_write_clean_switch_on_cgb() {
     let blend = p.cgb_color(&p.bg_pal_ram, 0, 3);
     // CGB remaps color 1 through the compat BGP but does NOT blend (unlike DMG):
     // pixels switch cleanly old -> new at the commit, no OR-quirk transition
-    // pixel. The commit lands mid-line at the eager `stage_write_dots` offset.
+    // pixel. The commit lands mid-line at the `stage_write_dots` offset.
     assert_eq!(px(&p, 2, 45), old, "before the commit: old color");
     assert_eq!(px(&p, 2, 46), new, "at the commit: new color, clean switch");
     assert_ne!(px(&p, 2, 46), blend, "CGB never blends (no old|new pixel)");
@@ -142,7 +142,7 @@ fn strobe_obp0_write_blend_pixel_dmg() {
     set_tile_row(&mut p, 0, 4, 0, 0xFF, 0x00); // sprite solid color 1
     sprite(&mut p, 0, 18, 8, 4, 0x00); // line 2, screen 0-7, OBP0
     // The X=8 sprite's 8 pixels render across mode 3; strobing OBP0 0xE8
-    // (color 1 -> shade 2 = DARK) so its eager commit lands mid-sprite makes
+    // (color 1 -> shade 2 = DARK) so its commit lands mid-sprite makes
     // the transition visible ON the sprite: pixels before the commit take the
     // old OBP0, the transition pixel reads the DMG OR-quirk old|new =
     // 0xE4|0xE8 = 0xEC (color 1 -> shade 3 = BLACK), and pixels after take new.

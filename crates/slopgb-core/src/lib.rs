@@ -189,8 +189,8 @@ const STATE_MAGIC: &[u8; 4] = b"SLPS";
 /// Save-state format version (bumped on any layout change). v3 dropped the
 /// APU output queues (`samples`/`raw_samples`) from the payload; v4 appends the
 /// SGB audio subsystem (SPC700 + S-DSP) on `Model::Sgb`/`Sgb2` states; v6 dropped
-/// the retired eager-clock flags (`leading-edge`/`eager`) from the
-/// interconnect + PPU payloads; v7 records a has-SGB-audio-tail flag byte right
+/// two retired clock-mode flag bytes from the interconnect + PPU payloads; v7
+/// records a has-SGB-audio-tail flag byte right
 /// after the header so a cross-model load (SGB state into DMG/CGB or vice versa)
 /// is rejected with `StateError::ModelMismatch` instead of silently dropping the
 /// tail or failing as `Truncated`; v8 appends the SGB raw-packet tee queue to

@@ -44,9 +44,9 @@ fn test_rom() -> Vec<u8> {
     rom
 }
 
-// These interconnect unit tests build the production (eager-value) machine.
-// The eager clock's correctness is pinned by the gbtr battery + mooneye, not
-// these micro-timing units.
+// These interconnect unit tests build the machine directly. Overall clock
+// correctness is pinned by the gbtr battery + mooneye, not these
+// micro-timing units.
 fn ic(model: Model) -> Interconnect {
     Interconnect::new(model, Cartridge::from_bytes(test_rom()).unwrap())
 }

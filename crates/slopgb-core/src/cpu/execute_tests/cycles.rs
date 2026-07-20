@@ -31,12 +31,12 @@ fn cycle_counts_all_cb_opcodes() {
     }
 }
 
-// ---- S1 deferred-commit clock: instruction-boundary flush --------------
+// ---- deferred-commit clock: instruction-boundary flush -----------------
 //
 // `Bus::flush_pending` is the SameBoy `flush_pending_cycles` boundary
 // (`sm83_cpu.c:336`). The CPU must call it exactly once per `step`, *after*
-// the instruction's last M-cycle, on every exit path — the inert clock it
-// drains becomes load-bearing at port Stage S2 (leading-edge reads).
+// the instruction's last M-cycle, on every exit path, so the next
+// instruction begins at a clean cc+0.
 
 #[test]
 fn flush_pending_fires_once_per_step_after_the_last_m_cycle() {

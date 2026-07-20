@@ -120,7 +120,7 @@ impl Ppu {
         // (`lcdon_timing-GS` STAT tables; gambatte enable_display / post-enable
         // m3stat). `bare_flip` is false on the glitch line, so it lands in the +4
         // arm. DS excluded (the DS read offset is 2, deferred). `vis_early`
-        // anticipates the visible mode→0 flip by the same dots the eager read
+        // anticipates the visible mode→0 flip by the same dots the cc+0 read
         // samples early, and IS set below on single-speed lines (`!self.ds`).
         // The IRQ side (`mode_for_interrupt`/`prev_done`, reclock.rs) keys on
         // `line_render_done`, never `vis_early`, so the counter-pinned dispatch
@@ -158,7 +158,7 @@ impl Ppu {
             // ACCESSIBLE on the dot `line_render_done` fires, not the trailing
             // mode 3. A read 4 dots earlier (`_1`, a different M-cycle) sees no
             // stamp and stays blocked, so releasing the boundary M-cycle's stamp
-            // is a clean separation (full-CGB two-bin +7/−0 single speed). Push
+            // is a clean separation (CGB single speed). Push
             // the M0Access edge to phase 0 (`lead = -8` clamps there) so the cc+0
             // access is never pre-empted. SINGLE SPEED only: the same release in
             // double speed unblocks the DS VRAM-WRITE path too (the stamp gates

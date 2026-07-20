@@ -42,7 +42,7 @@ impl Ppu {
             && self.dot - self.vram_wr_dot < 8
     }
 
-    /// Emergent-flip accessibility release (HALFDOT Part-A): the OAM/VRAM read +
+    /// Emergent-flip accessibility release: the OAM/VRAM read +
     /// write mode-3→0 unblock keyed to the render's OWN projected flip via the
     /// read's exact half-dot position, not the `vis_early` boolean (which fires
     /// 2 dots early and over-releases the `_1` reads). The read's `read_pos_hd`

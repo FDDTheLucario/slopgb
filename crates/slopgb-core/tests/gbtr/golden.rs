@@ -1,13 +1,12 @@
-//! Phase-0 golden safety net for the PPU cc-granular reclock.
+//! Golden safety net for CPU-visible PPU timing.
 //!
 //! A per-ROM frame + audio FINGERPRINT of the whole collection under one fixed
-//! 16-LCD-frame protocol (gambatte's run length). The reclock will change
-//! CPU-visible PPU timing; the existing baselines catch pass/fail flips, but a
-//! reclock can also drift *rendered pixels* without flipping any suite's
-//! verdict. This fingerprint is the net for that silent drift: every (ROM,
-//! model) gets a frame hash + audio verdict, captured at HEAD, then diffed
-//! after each reclock phase — an unexpected change blocks immediately, an
-//! expected one is reviewed against the targeted cluster.
+//! 16-LCD-frame protocol (gambatte's run length). The existing baselines catch
+//! pass/fail flips, but a timing change can also drift *rendered pixels* without
+//! flipping any suite's verdict. This fingerprint is the net for that silent
+//! drift: every (ROM, model) gets a frame hash + audio verdict — an unexpected
+//! change blocks immediately, an expected one is reviewed against the targeted
+//! cluster.
 //!
 //! std-only (the core forbids deps): a 64-bit FNV-1a over the XRGB frame bytes.
 //!

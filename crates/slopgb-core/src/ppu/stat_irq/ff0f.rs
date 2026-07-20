@@ -12,8 +12,7 @@ impl Ppu {
     /// cc+0 FF0F read's VERDICT includes a STAT engine rise whose emission dot
     /// is deterministically known at read time and lands within the read's
     /// SameBoy-frame sample window — verdict-only, no machine advance, no IF
-    /// commit (the refuted sub-M FF0F sampling moved the machine and broke the
-    /// want-early `_1` legs; this never moves anything). SameBoy's
+    /// commit (this never moves anything). SameBoy's
     /// `read_high_memory` samples IF after `GB_display_sync` runs the PPU to the
     /// exact read half-dot with PPU-events-first ordering; our machine advance
     /// stops a hair short of that frame, so a rise at the very next dot(s) that
@@ -78,7 +77,7 @@ impl Ppu {
         // EARLIER, at R-2 (measured m0rise: wxA5 261→259, wxA6 257→255). So a
         // cc+0 FF0F read landing in that 2-dot gap `[R-2, R)` observes clear
         // where SameBoy's events-first cc+4 frame has already delivered the bit
-        // (`m2int_wxA5/A6_m0irq_2`: read R-1, want E2, EV reads E0). NON-window
+        // (`m2int_wxA5/A6_m0irq_2`: read R-1, want E2, E0 without this arm). NON-window
         // rows keep R == SameBoy's rise (no back-date), so the gap is empty and
         // the plain `m0irq_1`/`scx2_1` reads (which want CLEAR) never trip this
         // arm — the `win_active` gate is the discriminator. The `_1` window
@@ -128,8 +127,7 @@ impl Ppu {
         }
     }
 
-    /// The CGB double-speed glitch-line mode-0 read-view mask (the
-    /// `ff0f_dmg_m0_coincident_mask` analogue for the CGB DS frame). On the
+    /// The CGB double-speed glitch-line mode-0 read-view mask. On the
     /// first line after an LCD enable (`glitch_line`) an `enable_display` ROM
     /// polls FF0F (DI, `IE=0`) with the mode-0 STAT source armed; the CGB DS
     /// frame emits the glitch-line mode-0 STAT source EARLY (measured: the
@@ -183,8 +181,7 @@ impl Ppu {
         // `lyc153int_m2irq_1` want 0). The LYC-152 ISR's `_2` read — the
         // same slopgb dot-4 collapse — lands 4 dots AFTER the rise on
         // SameBoy (SBREAD fp = rise fp + 8) and must SEE it
-        // (`lycint152_m2irq_2`/`_ds_2` want E2, measured A/B without this
-        // guard).
+        // (`lycint152_m2irq_2`/`_ds_2` want E2).
         // Second arm: the shifted-frame co-instant mode-0 rise
         // (see `m0sh_age`).
         // The DMG line-0 dot-4 OAM-pulse mask is DISABLED: the dot-4 LYC=153
@@ -192,8 +189,7 @@ impl Ppu {
         // earlier, so `_1` (want 0) reads dot 0 (before the pulse — naturally
         // clear, no mask needed) while `_2` (want E2) reads dot 4 co-instant
         // with the pulse and must SEE it (`lyc153int_m2irq_2`). CGB keeps the
-        // mask (its read frame is unmoved — the CGB two-bin 287-neutral
-        // requires it).
+        // mask: its read frame is unmoved.
         if (self.model.is_cgb()
             && self.ly0_pulse_age > 0
             && self.line == 0

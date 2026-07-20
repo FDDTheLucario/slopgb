@@ -190,14 +190,12 @@ pub struct Interconnect {
     /// palette data ports are disabled (misc/boot_hwio-C).
     cgb_mode: bool,
     double_speed: bool,
-    /// CPU↔PPU sub-dot phase for the cc-granular reclock: which cc's of the
-    /// M-cycle tick a PPU dot in double speed (see [`dot_ticks_on_cc`]). 0 = the
-    /// fixed even-cc {2,4} alignment (single speed is phase-independent); 1 =
-    /// the odd-cc {1,3} offset a STOP speed switch can establish. Held at 0:
-    /// setting it at the speed switch lifts zero gambatte DS rows
-    /// (`cc_grid_matches_dot_loop` confirms 0 is bit-identical to the dot loop);
-    /// the m3stat/speedchange `_2` reads need the pixel-pipe END dot to move,
-    /// not the M-cycle sample phase.
+    /// CPU↔PPU sub-dot phase: which cc's of the M-cycle tick a PPU dot in
+    /// double speed. 0 = the fixed even-cc {2,4} alignment (single speed is
+    /// phase-independent); 1 = the odd-cc {1,3} offset a STOP speed switch
+    /// could establish. Held at 0 (`dot_phase_defaults_zero`): 0 is
+    /// bit-identical to the plain dot loop, and the m3stat/speedchange `_2`
+    /// reads need the pixel-pipe END dot to move, not the M-cycle sample phase.
     dot_phase: u8,
     /// KEY1 bit 0: speed switch armed for the next STOP.
     key1_armed: bool,
@@ -217,29 +215,15 @@ pub struct Interconnect {
     /// see them immediately ([`Bus::pending_halt_wake`]; `Timer::tick`'s
     /// `late`).
     if_late: u8,
-    /// Inert deferred-clock scratch (the removed −1 TIMA-phase mode-0 STAT
-    /// halt-wake delay). Never set on the current clock; kept for savestate
-    /// stability.
+    // Unused fields, always at their 0/false init — nothing reads them. Kept
+    // only so the save-state byte layout stays stable (dropping them would
+    // shift every following field). Serialized in `interconnect/state.rs`.
     m0_halt_hold: u8,
-    /// Inert deferred-clock scratch (the removed exact-T timer/serial
-    /// ack-squash deadline; the live squash uses the `ack_squash_*` tick/dot
-    /// counters below). Never set now; kept for savestate stability.
     ack_squash_deadline_t: u64,
-    /// Inert deferred-clock scratch (the removed sub-M-cycle wake-skew clock
-    /// offset). Never set now; kept for savestate stability.
     wake_skew: u32,
-    /// Inert deferred-clock scratch (the removed per-T machine clock). Never
-    /// set now; kept for savestate stability.
     machine_now: u64,
-    /// Inert deferred-clock scratch (the removed pre-write VRAM-DMA-request
-    /// latch). Never set now; kept for savestate stability.
     vram_dma_req_pre: bool,
-    /// Inert deferred-clock scratch (the removed mode-0 STAT halt-wake
-    /// visibility deadline in machine T). Never set now; kept for savestate
-    /// stability.
     stat_vis_from_t: u64,
-    /// Inert deferred-clock scratch (the removed post-mode-0-halt-wake FF44
-    /// read-phase carry). Never set now; kept for savestate stability.
     halt_ly_phase: u8,
     /// STAT IF bit raised by the PPU in the *current* M-cycle's second
     /// half (line-0 OAM rise): readable via FF0F at once, but the CPU's
@@ -292,9 +276,8 @@ pub struct Interconnect {
     ack_squash_ticks: u8,
     ack_squash_dots: u8,
 
-    /// Inert deferred-clock scratch (the removed −2 dispatch reclock's timer/
-    /// serial squash latch); the live squash is recomputed per `tick_machine`
-    /// call. Never set now; kept for savestate stability.
+    // Unused, always 0 — the live timer/serial squash is recomputed per
+    // `tick_machine` call. Kept only for save-state layout stability.
     deferred_squash: u8,
 
     /// FF46 readback is simply the last written value
