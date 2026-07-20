@@ -47,8 +47,10 @@ this core, and their MVN/MVP tests capture a cycle-capped partial move (the CPU
 yields via `step_bounded`; `step` runs the move to completion). The Klaus
 cross-check is not yet wired (no 65C816 build in the canonical Klaus repo).
 
-Vectors are gitignored; fetch with `test-roms/download-65816-tests.sh` (tests
-skip when absent, or fail under `SLOPGB_REQUIRE_ROMS`).
+Vectors are gitignored (~2 GB); fetch with `test-roms/download-65816-tests.sh`
+(tests skip when absent, or fail under `SLOPGB_REQUIRE_65816_VECTORS` — a
+separate gate from `SLOPGB_REQUIRE_ROMS`, which CI sets while fetching only the
+GB ROM bundles).
 
 ## Test
 

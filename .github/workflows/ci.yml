@@ -59,6 +59,9 @@ jobs:
         run: cargo test --workspace
         env:
           # Missing test ROMs must fail loudly here, never skip-to-green.
+          # (The 65816 SingleStepTests vectors are a separate ~2 GB gate —
+          # SLOPGB_REQUIRE_65816_VECTORS — deliberately not set: CI doesn't
+          # download them, so those tests skip.)
           SLOPGB_REQUIRE_ROMS: "1"
 
       - name: Build release binary
