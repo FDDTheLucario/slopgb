@@ -366,7 +366,7 @@ fn data_trn_lands_at_packet_dest_in_wram() {
     );
 }
 
-/// DATA_SND ($0F) is no longer a no-op: the packet's data lands at its target
+/// DATA_SND ($0F) lands the packet's data at its target
 /// SNES-work-RAM address of the 65C816 plugin (fullsnes `dest_lo, dest_hi, len,
 /// data…`).
 #[test]
@@ -392,7 +392,7 @@ fn data_snd_writes_to_snes_work_ram() {
     });
 }
 
-/// JUMP ($12) is no longer a no-op: it redirects the 65C816 plugin's program
+/// JUMP ($12) redirects the 65C816 plugin's program
 /// counter, and the CPU then executes at the target. Verified functionally — a
 /// sentinel program pre-loaded at the (bank-aliased) target writes a marker byte
 /// only reachable if the CPU actually jumped there and ran.
@@ -600,10 +600,9 @@ fn nmi_counting_cop() -> Option<SgbCoprocessor> {
     Some(cop)
 }
 
-/// DATA_TRN pairing under the one-frame capture skew: the payload lands a
 /// The DATA_TRN payload check gates on the source's capture counter: an
-/// unchanged counter skips the 4 KB read+hash entirely (it used to run once
-/// per GB instruction), a bump reopens exactly one check, and a source
+/// unchanged counter skips the 4 KB read+hash entirely, a bump reopens exactly
+/// one check, and a source
 /// without a counter (`None`) checks every poll as before.
 #[test]
 fn data_trn_checks_gate_on_the_capture_counter() {

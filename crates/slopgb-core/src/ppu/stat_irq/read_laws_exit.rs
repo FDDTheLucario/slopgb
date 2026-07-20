@@ -368,8 +368,8 @@ impl Ppu {
         // land before the window's first tile ships (~dot 106 for the scx03
         // early setup — `_1` abort104 bare / `_2` abort108 extend, ALL
         // wx0f-12; wx-INDEPENDENT, a `wx_match+1`-relative form REFUTED). A
-        // later abort catches the first tile and EXTENDS (per-config length —
-        // the atomic render reclock's). Currently-DISABLED window only
+        // later abort catches the first tile and EXTENDS (a per-config length
+        // not modelled on the whole-dot grid). Currently-DISABLED window only
         // (excludes late_reenable); bare non-sprite non-glitch CGB lines.
         if self.model.is_cgb()
             && !self.ds
@@ -418,7 +418,7 @@ impl Ppu {
         // early aborts bare with the penalty dropped, exit `cfl257 dc2` (the
         // DS half-dot bare exit) = slopgb 254. The DS abort boundary is
         // wx-DEPENDENT: `(89 + WX) & !1` — the window's first-fetch M-cycle
-        // start on the DS 2-dot grid (three candidates built + refuted first).
+        // start on the DS 2-dot grid.
         if self.model.is_cgb()
             && self.ds
             && self.render.win_predraw_abort
@@ -678,10 +678,9 @@ impl Ppu {
                 // the two class variables; ISR carry drops out (the
                 // carried m2int and polled ly44 legs share constants).
                 // Scoped to mid-frame-anchored dances post-LCD-on-leave
-                // (`stop_anchor_midframe`): a blanket arm's 14
-                // SameBoy-pass drops were the VBlank/boot-anchored classes
-                // (base/frame1/nop m2int + offset2/3 counts) this anchor
-                // excludes; the emergent arm still serves those. In scope
+                // (`stop_anchor_midframe`): the VBlank/boot-anchored classes
+                // (base/frame1/nop m2int + offset2/3 counts) fall outside this
+                // anchor and are served by the emergent arm. In scope
                 // the law REPLACES the emergent exit for BOTH directions —
                 // the emergent `2*flip + 2` m==0 hold over-holds the
                 // post-switch frame by up to 6 rp
@@ -758,8 +757,8 @@ impl Ppu {
             // wxmatch 97). The corrected DS line-153 lyfc table moves
             // the LYC=153 wake — and with it every ISR-timed WY write in this
             // family — 2 dots earlier (`_1` 99 / `_2` 101), so the DS slack
-            // re-derives to the SS value (+2); the same shift is what fixes
-            // the `late_wy_ds` blocker trio outright.
+            // re-derives to the SS value (+2); the same shift moves the
+            // `late_wy_ds` wake 2 dots earlier.
             //
             // SS DMG: the LYC=153-wake shift. The dot-4
             // line-153 LYC STAT emission decouple (`reclock.rs`) fires the

@@ -116,7 +116,7 @@ fn measured_kernel_reads_straddle_sameboy_visible_boundary() {
     // Our `vis_mode` puts the visible mode-2 start at our-line dot 4 (dots 0-3
     // are the line-start window); the `ModeTimeline` spine starts at its dot 0.
     const OUR_MODE2_START: u16 = 4;
-    // The leading-edge read dots measured this session (bare, SCX 0).
+    // The leading-edge read dots (bare, SCX 0).
     const M2INT_READ_OUR_DOT: u16 = 248;
     const M0INT_READ_OUR_DOT: u16 = 252;
     // Our production visible mode→0 flip dot (pipe end 256 − 2; `m0_flip_events`).

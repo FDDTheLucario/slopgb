@@ -57,7 +57,7 @@ impl Timer {
         self.out = 0;
     }
 
-    /// Serialize timer state for a save state (Phase-3 SGB APU). Additive;
+    /// Serialize timer state for a save state. Additive;
     /// no behavior change.
     pub(super) fn write_state(&self, w: &mut crate::state::Writer) {
         w.bool(self.enabled);

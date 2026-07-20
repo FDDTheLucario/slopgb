@@ -354,7 +354,7 @@ impl Ppu {
     /// Recompute the readable comparison flag (`cmp`), the IRQ-side
     /// comparison (`cmp_irq`) and the legacy line level (`stat_line` —
     /// kept for the LCD-off edge path and the CGB FF45 trigger's level
-    /// check; IF emission no longer hangs on it).
+    /// check).
     pub(super) fn refresh_cmp(&mut self, from_tick: bool) {
         if self.enabled {
             self.cmp = self.compare_ly() == Some(self.lyc);

@@ -400,11 +400,6 @@ impl SgbCoprocessor {
         std::mem::take(&mut self.out)
     }
 
-    /// Apply one captured MMIO write from the guest (also the target of DMA
-    /// B-bus writes — `dma::bbus_write` routes through here). The clocking
-    /// loop consumes NMITIMEN; the DMA engine consumes the channel
-    /// registers, MDMAEN, and the WRAM access ports; everything else is
-    /// inert until its consumer lands (PPU routing).
     /// Apply a buffered run of pure-PPU `(port, val)` pairs as one batched
     /// plugin call, in order, and clear the buffer. No-op when empty or
     /// without a PPU plugin (matching the unbatched path's routing).
@@ -418,6 +413,11 @@ impl SgbCoprocessor {
         run.clear();
     }
 
+    /// Apply one captured MMIO write from the guest (also the target of DMA
+    /// B-bus writes — `dma::bbus_write` routes through here). The clocking
+    /// loop consumes NMITIMEN; the DMA engine consumes the channel registers,
+    /// MDMAEN, and the WRAM access ports; every other B-bus port routes to the
+    /// PPU when one is loaded.
     pub(crate) fn apply_mmio(&mut self, addr: u16, val: u8) {
         match addr {
             0x2180 => self.wmdata_write(val),

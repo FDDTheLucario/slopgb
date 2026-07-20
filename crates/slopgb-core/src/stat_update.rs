@@ -6,9 +6,7 @@
 //! source — and fires `IF |= STAT` only on its **0→1 rising edge**
 //! (`display.c:523-560`). That is the classic STAT-blocking model: while the
 //! line is already high from one source, a second source going high produces
-//! no new interrupt. (This replaced an earlier gambatte-derived per-source
-//! event engine; the fork collapse removed that alternate path, so this is now
-//! the sole STAT IRQ source.)
+//! no new interrupt.
 //!
 //! This module is the executable, unit-tested encoding of that rising-edge
 //! core. It is a pure function of the *decoupled* interrupt mode (the

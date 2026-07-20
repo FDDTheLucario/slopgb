@@ -123,7 +123,7 @@ pub fn inventory() -> (Vec<String>, Vec<String>) {
     (claimed, Vec::new())
 }
 
-/// Self-check ahead of the global Phase B2 guard: claimed and exempted are
+/// Self-check ahead of the global inventory guard: claimed and exempted are
 /// disjoint, and together cover exactly the on-disk `.gb`/`.gbc` set of the
 /// suite dirs.
 #[test]

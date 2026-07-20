@@ -43,7 +43,7 @@ fn rejects_abi_version_mismatch() {
 
 #[test]
 fn rejects_unsupported_capability() {
-    // caps = 3 = INTROSPECTION | MUTATE; MUTATE is not served in phase 1.
+    // caps = 3 = INTROSPECTION | MUTATE; MUTATE is not served by this loader.
     let bytes = wasm(&plugin_wat(ABI_VERSION, 0b011, ""));
     let err = PluginHost::load_bytes("greedy", &bytes).err().unwrap();
     assert!(

@@ -280,8 +280,8 @@ fn selecting_set_break_returns_a_toggle_breakpoint_action() {
 #[test]
 fn copy_data_and_code_route_to_clipboard_actions() {
     use crate::input::Action;
-    // RM10: the formerly-greyed Copy rows (indices 2/3) are live + carry the
-    // clicked address (cursor 0x0102) to the clipboard actions.
+    // RM10: the Copy rows (indices 2/3) are live + carry the clicked address
+    // (cursor 0x0102) to the clipboard actions.
     let (mut st, rects) = open_disasm_menu();
     let r = rects[2]; // "Copy data"
     let a = on_left_click(
@@ -629,7 +629,7 @@ fn address_list_menu_lists_entries_with_clear_choices() {
 
 #[test]
 fn set_watchpoint_menu_item_returns_a_toggle_action() {
-    // "Set watchpoint..." is index 10 (was greyed; now enabled, RM8); cursor 0x0102.
+    // "Set watchpoint..." is index 10 (RM8); cursor 0x0102.
     let (mut st, rects) = open_disasm_menu();
     let r = rects[10];
     let out = on_left_click(

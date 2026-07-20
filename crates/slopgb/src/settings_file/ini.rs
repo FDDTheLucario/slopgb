@@ -172,8 +172,8 @@ pub fn fmt_color_hex(xrgb: u32) -> String {
 }
 
 // (Decimal-COLORREF codec for the `Debug*Color` theme keys + repeated-key
-// `get_all` for the `ColorScheme` list are deferred — no Settings field maps to
-// them yet. Re-add with the debugger-theme / scheme-list mapping task.)
+// `get_all` for the `ColorScheme` list are omitted — no Settings field maps to
+// those keys.)
 
 #[cfg(test)]
 #[path = "ini_tests.rs"]

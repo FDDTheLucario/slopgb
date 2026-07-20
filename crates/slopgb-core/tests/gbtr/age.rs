@@ -339,7 +339,7 @@ fn suite_roms(test: &str) -> Option<(PathBuf, Vec<PathBuf>)> {
     Some((root, roms))
 }
 
-/// Inventory hook for the Phase B2 coverage guard: collection-relative
+/// Inventory hook for the global coverage guard: collection-relative
 /// forward-slash paths of every `.gb`/`.gbc` under `age-test-roms/`,
 /// partitioned into (claimed = produces at least one rom×model case,
 /// exempted = the [`segment_models`] revision-skips — `cgbE`-only and
@@ -399,9 +399,6 @@ fn age_matrix() {
     harness::assert_against_baseline("age", &results, BASELINE);
 }
 
-/// Self-check for the inventory hook: claimed and exempted are disjoint and
-/// together cover exactly the on-disk `.gb`/`.gbc` set, and the exempted
-/// set is exactly the nine documented revision-skips.
 /// Pins the per-register CGB write-commit stage offset (`Ppu::stage_write`
 /// palette `6 + 2*parity`): age's m3-bg-bgp is a DMG-compat mid-mode-3 BGP
 /// change that lands the wrong pixel column without the palette offset
@@ -430,6 +427,9 @@ fn age_eager_cgb_m3_bg_bgp_writecommit_passes() {
         .unwrap_or_else(|e| panic!("m3-bg-bgp [Cgb] eager: {e}"));
 }
 
+/// Self-check for the inventory hook: claimed and exempted are disjoint and
+/// together cover exactly the on-disk `.gb`/`.gbc` set, and the exempted
+/// set is exactly the nine documented revision-skips.
 #[test]
 fn age_inventory_partitions_suite() {
     let Some((root, roms)) = suite_roms("age inventory") else {

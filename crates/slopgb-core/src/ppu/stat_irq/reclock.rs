@@ -200,8 +200,8 @@ impl Ppu {
             // REFUTED on CGB: the lcd-offset shifts a REAL edge onto the START
             // carryover dot — but NOT onto the line-END last M-cycle, where lyfc
             // is fixed and only a fresh write moves the latch). CGB only.
-            // The CGB line-START carryover hold generalized to lines 1-143
-            // (was line 1 only): SameBoy re-latches `lyc_interrupt_line` ONLY
+            // The CGB line-START carryover hold covers lines 1-143:
+            // SameBoy re-latches `lyc_interrupt_line` ONLY
             // at the state-6/-7 GB_SLEEP steps (dot 3 → -1/hold, dot 4 →
             // line), never during the dots-0-2 carryover where
             // `ly_for_comparison` still names line-1 — so a late FF45 write
@@ -480,9 +480,9 @@ impl Ppu {
     /// selects the OAM (mode-2) source there and the `GB_STAT_update` line never
     /// rises for it. SameBoy raises the 144-entry pulse as a **direct `IF |= 2`
     /// poke** (`display.c:2160`), independent of `stat_interrupt_line`, NOT a
-    /// line rise. This reproduces it with the *same* guard and commit masks the
-    /// removed gambatte STAT event engine used (the `vblank_stat_intr-GS` DMG /
-    /// `-C` CGB lift).
+    /// line rise. This reproduces it with the same guard and commit masks the
+    /// rising-edge engine applies elsewhere (`vblank_stat_intr-GS` DMG /
+    /// `-C` CGB).
     ///
     /// The visible-line m2 pulses (lines 1-143 dot 0) are already covered by the
     /// rising-edge engine — its level-OR naturally reproduces `m2_pulse_fires`'
@@ -521,9 +521,9 @@ impl Ppu {
     }
 
     /// The halt/interrupt-sample commit masks for the [`Self::stat_update_tick`]
-    /// rising edge — the analogue of the per-source `stat_late` /
-    /// `stat_halt_late` / `m0_rise` masks the removed gambatte STAT event engine
-    /// set (truth table in `stat_irq.rs`). `mfi` is the
+    /// rising edge — the `stat_late` / `stat_halt_late` / `m0_rise` masks that
+    /// hold the mode-2 line-start pulse out of the running CPU's interrupt
+    /// sample and the halt-exit sampler (truth table in `stat_irq.rs`). `mfi` is the
     /// [`Ppu::mode_for_interrupt`] that drove this 0→1 rise, so it names the source.
     ///
     /// The gambatte engine reads FF41/IF at the M-cycle trailing edge (cc+4) and

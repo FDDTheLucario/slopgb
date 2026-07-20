@@ -52,8 +52,7 @@ impl InputDialog {
     /// A fresh prompt. Hex fields cap at a 4-digit `u16` address; text fields
     /// (paths, expressions, conditions) get a generous cap — long enough for any
     /// real filesystem path — since [`render`] scrolls the field horizontally so
-    /// a long value never spills past the box (it used to cap at 40, truncating
-    /// most paths and overflowing the box visually).
+    /// a long value never spills past the box.
     #[must_use]
     pub fn new(title: impl Into<String>, hex_only: bool) -> Self {
         Self {

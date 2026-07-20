@@ -620,7 +620,7 @@ pub struct Ppu {
     /// SameBoy's `GB_STAT_update` rising-edge STAT interrupt line
     /// ([`StatUpdate`](crate::stat_update)), driven each dot from
     /// `mode_for_interrupt` | the LYC latch. This is the production STAT IRQ
-    /// engine; it replaced the gambatte per-source event engine, since removed.
+    /// engine.
     stat_update: crate::stat_update::StatUpdate,
     /// SameBoy `lyc_interrupt_line` (`display.c:534`): the LYC==LY STAT source
     /// as a *latch* — re-evaluated to `ly_for_comparison == LYC` whenever
@@ -670,8 +670,8 @@ pub struct Ppu {
     /// `m0_access_flip`'s bare-line gate: it routes the FF41 mode-bit read,
     /// which the OAM/VRAM-read gate does not cover, on exactly the lines the
     /// `m3stat_ds` cluster exercises. Bare-line DS reads reach FF41 through
-    /// the DMA-cycle / lcd-offset chains at a different sub-cycle offset, so a
-    /// bare-line override regresses them (the parked multi-chain problem). In
+    /// the DMA-cycle / lcd-offset chains at a different sub-cycle offset, so the
+    /// sprite-extended gate is the only line class this override covers. In
     /// CGB double speed the visible flip lands at a sub-dot (cc) phase the
     /// whole-dot grid cannot place, so a CPU STAT read whose M-cycle straddles
     /// the flip still reads mode 3 (gambatte's `m3stat_ds_1` rows). The
@@ -679,8 +679,7 @@ pub struct Ppu {
     /// half-classifies it against the dot-loop index (`2*(i+1) > dots`): a
     /// second-half flip holds the FF41 read at mode 3. The override is gated
     /// to double speed; the single-speed read, and DS reads reaching FF41
-    /// through other dispatch chains, are the parked multi-chain
-    /// problem.
+    /// through other dispatch chains, are not covered by it.
     /// `Some(lead_eighths)` when the flip lands this dot (the flip's sub-dot
     /// offset is carried here; `Some(0)` = net-zero whole-M-cycle commit),
     /// `None` otherwise.
