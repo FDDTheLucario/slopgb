@@ -31,6 +31,9 @@ fn bank_at(c: &Cartridge, base: u16) -> u16 {
 #[path = "cartridge_tests/banks.rs"]
 mod banks;
 
+#[path = "cartridge_tests/mbc6.rs"]
+mod mbc6;
+
 // --- header parsing ---
 
 #[test]

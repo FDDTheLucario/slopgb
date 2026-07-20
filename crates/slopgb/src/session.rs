@@ -18,6 +18,11 @@ const AUTOSAVE_CYCLES: u64 = 5 * CLOCK_HZ as u64;
 const REWIND_INTERVAL_FRAMES: u64 = 2;
 /// Rewind ring cap — ~20 s of backward playback at the capture rate.
 const REWIND_MAX_STATES: usize = 600;
+/// Rewind ring byte budget. Classic-mapper states (~260 KiB) fit the full
+/// 600-state depth under it; a cart whose state embeds large chip contents
+/// (MBC6 serializes its 1 MiB flash) loses depth instead of ballooning
+/// memory (600 × ~1.3 MiB would be ~750 MiB).
+const REWIND_MAX_BYTES: usize = 160 << 20;
 
 pub(crate) struct Session {
     pub(crate) gb: GameBoy,
@@ -51,6 +56,8 @@ pub(crate) struct Session {
     /// dropped when full), captured every [`REWIND_INTERVAL_FRAMES`] while
     /// playing. Empty until rewind is enabled; cleared on reset / ROM change.
     rewind: std::collections::VecDeque<Vec<u8>>,
+    /// Total bytes across the `rewind` ring, for [`REWIND_MAX_BYTES`].
+    rewind_bytes: usize,
     /// Frame count at which the next rewind snapshot is taken.
     next_rewind_frame: u64,
     /// Boot-ROM configuration captured at load, so a power-cycle (`reset`) or a
@@ -101,6 +108,7 @@ impl Session {
             next_autosave: AUTOSAVE_CYCLES,
             quick_state: None,
             rewind: std::collections::VecDeque::new(),
+            rewind_bytes: 0,
             next_rewind_frame: 0,
             boot: OwnedBootSpec::default(),
             sgb_bios: None,
@@ -165,6 +173,7 @@ impl Session {
             next_autosave: AUTOSAVE_CYCLES,
             quick_state: None,
             rewind: std::collections::VecDeque::new(),
+            rewind_bytes: 0,
             next_rewind_frame: 0,
             boot: boot.to_owned(),
             sgb_bios: None,
@@ -258,10 +267,15 @@ impl Session {
             return;
         }
         self.next_rewind_frame = frame + REWIND_INTERVAL_FRAMES;
-        if self.rewind.len() >= REWIND_MAX_STATES {
-            self.rewind.pop_front();
+        let state = self.gb.save_state();
+        self.rewind_bytes += state.len();
+        self.rewind.push_back(state);
+        while self.rewind.len() > REWIND_MAX_STATES || self.rewind_bytes > REWIND_MAX_BYTES {
+            match self.rewind.pop_front() {
+                Some(old) => self.rewind_bytes -= old.len(),
+                None => break,
+            }
         }
-        self.rewind.push_back(self.gb.save_state());
     }
 
     /// Restore (and drop) the most recent rewind snapshot. Returns whether one
@@ -269,6 +283,7 @@ impl Session {
     pub(crate) fn rewind_step(&mut self) -> bool {
         match self.rewind.pop_back() {
             Some(bytes) => {
+                self.rewind_bytes -= bytes.len();
                 let _ = self.gb.load_state(&bytes);
                 self.next_autosave = self.gb.cycles().saturating_add(AUTOSAVE_CYCLES);
                 self.next_rewind_frame = 0; // recapture promptly once play resumes
@@ -281,6 +296,7 @@ impl Session {
     /// Drop the rewind ring — a reset / ROM change makes the states stale.
     pub(crate) fn clear_rewind(&mut self) {
         self.rewind.clear();
+        self.rewind_bytes = 0;
         self.next_rewind_frame = 0;
     }
 

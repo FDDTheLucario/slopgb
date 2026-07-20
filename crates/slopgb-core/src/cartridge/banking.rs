@@ -70,6 +70,16 @@ impl Cartridge {
                     usize::from(romb1) << 8 | usize::from(romb0)
                 }
             }
+            // MBC6 windows are 8 KiB; for this 16 KiB-granularity view
+            // report the bank pair containing window A. The byte-exact
+            // mapping lives in mbc6.rs (read_rom/rom_offset dispatch there).
+            Mapper::Mbc6 { romb_a, .. } => {
+                if low_area {
+                    0
+                } else {
+                    usize::from(romb_a >> 1)
+                }
+            }
         }
     }
 
@@ -77,7 +87,12 @@ impl Cartridge {
     /// list is empty in production, so this is byte-identical there (the empty
     /// check is skipped and the raw ROM byte returns unchanged).
     pub fn read_rom(&self, addr: u16) -> u8 {
-        let byte = self.rom_at(self.rom_bank_for(addr < 0x4000), addr);
+        let byte = if let Mapper::Mbc6 { .. } = self.mapper {
+            // 8 KiB windows + the flash chip need their own mapping.
+            self.mbc6_read_rom(addr)
+        } else {
+            self.rom_at(self.rom_bank_for(addr < 0x4000), addr)
+        };
         if self.gg.is_empty() {
             return byte;
         }
@@ -105,6 +120,37 @@ impl Cartridge {
         self.rom_bank_for(false) & self.rom_bank_mask()
     }
 
+    /// [`cur_rom_bank`](Self::cur_rom_bank) resolved per address: only MBC6
+    /// differs, its window B (0x6000-0x7FFF) banking independently of window
+    /// A — the memory viewer labels each window with its own 16 KiB pair.
+    /// Side-effect-free.
+    #[must_use]
+    pub fn rom_bank_at(&self, addr: u16) -> usize {
+        if let Mapper::Mbc6 { romb_b, .. } = self.mapper {
+            if addr >= 0x6000 {
+                return usize::from(romb_b >> 1) & self.rom_bank_mask();
+            }
+        }
+        self.cur_rom_bank()
+    }
+
+    /// [`cur_ram_bank`](Self::cur_ram_bank) resolved per address: only MBC6
+    /// differs, its RAM window B (0xB000-0xBFFF) banking independently of
+    /// window A — same 8 KiB pair units as `cur_ram_bank`. Side-effect-free.
+    #[must_use]
+    pub fn ram_bank_at(&self, addr: u16) -> Option<usize> {
+        if self.ram.is_empty() {
+            return None;
+        }
+        if let Mapper::Mbc6 { .. } = self.mapper {
+            if let Some(RamTarget::Mbc6(base)) = self.ram_target(addr) {
+                return Some(base / RAM_BANK_SIZE);
+            }
+            return None;
+        }
+        self.cur_ram_bank()
+    }
+
     /// The external-RAM bank currently visible at 0xA000, or `None` when RAM is
     /// disabled/absent or an RTC register (not a RAM bank) is mapped instead —
     /// for the debug bank indicator. Side-effect-free.
@@ -116,12 +162,17 @@ impl Cartridge {
         if self.ram.is_empty() {
             return None;
         }
-        match self.ram_target()? {
+        match self.ram_target(0xA000)? {
             RamTarget::Ram(bank) => Some(bank),
             // MBC2 has a single built-in 512×4-bit RAM: "bank 0".
             RamTarget::Mbc2 => Some(0),
             // An RTC register is mapped, not a RAM bank.
             RamTarget::Rtc(_) => None,
+            // Window A's bank in the 8 KiB units every banked-SRAM debug
+            // consumer indexes with (`ram_read_banked` and the CDL use
+            // bank * RAM_BANK_SIZE), so the indicator, the pinned-bank
+            // browser and the CDL tint agree on MBC6.
+            RamTarget::Mbc6(base) => Some(base / RAM_BANK_SIZE),
         }
     }
 
@@ -130,6 +181,9 @@ impl Cartridge {
     /// returns) — for the bank-aware CDL. Side-effect-free.
     #[must_use]
     pub fn rom_offset(&self, addr: u16) -> usize {
+        if let Mapper::Mbc6 { .. } = self.mapper {
+            return self.mbc6_rom_offset(addr);
+        }
         (self.rom_bank_for(addr < 0x4000) & self.rom_bank_mask()) * ROM_BANK_SIZE
             + usize::from(addr & 0x3FFF)
     }
@@ -168,12 +222,13 @@ impl Cartridge {
     /// register mapped) — for the bank-aware CDL. Side-effect-free.
     #[must_use]
     pub fn ram_offset(&self, addr: u16) -> Option<usize> {
-        match self.ram_target()? {
+        match self.ram_target(addr)? {
             RamTarget::Ram(bank) => self.ram_index(bank, addr),
             // MBC2's 512×4-bit RAM mirrors across the window at addr & 0x1FF.
             RamTarget::Mbc2 => Some(usize::from(addr & 0x1FF)),
             // An RTC register is not a RAM byte.
             RamTarget::Rtc(_) => None,
+            RamTarget::Mbc6(base) => self.mbc6_ram_index(base, addr),
         }
     }
 
@@ -190,8 +245,12 @@ impl Cartridge {
         self.ram.len()
     }
 
-    /// Write 0x0000-0x7FFF (mapper registers).
+    /// Write 0x0000-0x7FFF (mapper registers; on MBC6 also the flash chip
+    /// through a flash-mapped window).
     pub fn write_rom(&mut self, addr: u16, value: u8) {
+        if let Mapper::Mbc6 { .. } = self.mapper {
+            return self.mbc6_write_rom(addr, value);
+        }
         match &mut self.mapper {
             Mapper::None => {}
             Mapper::Mbc1 {
@@ -281,6 +340,8 @@ impl Cartridge {
                 // No register at 0x6000-0x7FFF on MBC5.
                 _ => {}
             },
+            // Dispatched to mbc6_write_rom above.
+            Mapper::Mbc6 { .. } => unreachable!("MBC6 writes handled by mbc6_write_rom"),
         }
     }
 
@@ -297,9 +358,11 @@ impl Cartridge {
         Some((bank * RAM_BANK_SIZE + usize::from(addr & 0x1FFF)) & (self.ram.len() - 1))
     }
 
-    /// Which RAM bank (or RTC register) is currently visible at 0xA000.
-    /// Returns None when the area is unmapped or disabled.
-    fn ram_target(&self) -> Option<RamTarget> {
+    /// Which RAM bank (or RTC register) is currently visible at `addr` in
+    /// 0xA000-0xBFFF. Returns None when the area is unmapped or disabled.
+    /// Only MBC6 actually decodes `addr` (its two 4 KiB windows bank
+    /// independently); every other mapper maps one bank across the window.
+    fn ram_target(&self, addr: u16) -> Option<RamTarget> {
         match &self.mapper {
             Mapper::None => Some(RamTarget::Ram(0)),
             Mapper::Mbc1 {
@@ -327,15 +390,32 @@ impl Cartridge {
                 }
             }
             Mapper::Mbc5 { ramg, ramb, .. } => ramg.then_some(RamTarget::Ram(usize::from(*ramb))),
+            Mapper::Mbc6 {
+                ramg,
+                ramb_a,
+                ramb_b,
+                ..
+            } => {
+                if !*ramg {
+                    return None;
+                }
+                // Address bit 12 splits window A (0xA000) from B (0xB000).
+                let bank = if addr & 0x1000 == 0 { *ramb_a } else { *ramb_b };
+                Some(RamTarget::Mbc6(usize::from(bank) * MBC6_RAM_BANK_SIZE))
+            }
         }
     }
 
     /// Read 0xA000-0xBFFF (external RAM / RTC / MBC2 built-in RAM).
     pub fn read_ram(&self, addr: u16) -> u8 {
-        match self.ram_target() {
+        match self.ram_target(addr) {
             // Disabled or absent RAM reads as open bus 0xFF.
             None => 0xFF,
             Some(RamTarget::Ram(bank)) => match self.ram_index(bank, addr) {
+                Some(i) => self.ram[i],
+                None => 0xFF,
+            },
+            Some(RamTarget::Mbc6(base)) => match self.mbc6_ram_index(base, addr) {
                 Some(i) => self.ram[i],
                 None => 0xFF,
             },
@@ -353,10 +433,15 @@ impl Cartridge {
 
     /// Write 0xA000-0xBFFF.
     pub fn write_ram(&mut self, addr: u16, value: u8) {
-        match self.ram_target() {
+        match self.ram_target(addr) {
             None => {}
             Some(RamTarget::Ram(bank)) => {
                 if let Some(i) = self.ram_index(bank, addr) {
+                    self.ram[i] = value;
+                }
+            }
+            Some(RamTarget::Mbc6(base)) => {
+                if let Some(i) = self.mbc6_ram_index(base, addr) {
                     self.ram[i] = value;
                 }
             }
