@@ -1,9 +1,10 @@
 //! Cartridge: header parsing and MBC mappers. Cartridge work package.
 //!
 //! Supported mappers: none (32 KiB), MBC1 (incl. 8 Mbit multicart detection),
-//! MBC2, MBC3 (+RTC), MBC5. Mooneye `emulator-only/` is the oracle for
-//! banking edge cases (register bit widths, RAMG gating, bank-0 aliasing,
-//! mode 1 behavior, unused-bit masking).
+//! MBC2, MBC3 (+RTC), MBC5, MBC6 (+flash). Mooneye `emulator-only/` is the
+//! oracle for banking edge cases (register bit widths, RAMG gating, bank-0
+//! aliasing, mode 1 behavior, unused-bit masking); the committed `roms/mbc6`
+//! exerciser pins MBC6.
 
 use std::fmt;
 
@@ -14,6 +15,7 @@ use std::fmt;
 // tick), `rtc` (the RTC clock), `state` (manual save-state serialization).
 mod banking;
 mod header;
+mod mbc6;
 mod rtc;
 mod save;
 mod state;
@@ -66,6 +68,13 @@ const NINTENDO_LOGO: [u8; 48] = [
 
 const ROM_BANK_SIZE: usize = 0x4000;
 const RAM_BANK_SIZE: usize = 0x2000;
+/// MBC6 banks are half/quarter the usual size (Pan Docs "MBC6"): 8 KiB ROM
+/// windows at 0x4000/0x6000, 4 KiB RAM windows at 0xA000/0xB000.
+const MBC6_ROM_BANK_SIZE: usize = 0x2000;
+const MBC6_RAM_BANK_SIZE: usize = 0x1000;
+/// The MBC6 flash chip (Macronix MX29F008): 1 MiB in eight 128 KiB sectors.
+const MBC6_FLASH_SIZE: usize = 0x100000;
+const MBC6_FLASH_SECTOR_SIZE: usize = 0x20000;
 /// T-cycles (dots) per RTC second at the 4.194304 MHz master clock.
 const CYCLES_PER_SECOND: u32 = 4_194_304;
 /// Size of the RTC block appended to [`Cartridge::save_data`] images.
@@ -103,6 +112,51 @@ const RTC_DH: usize = 4;
 const RTC_HALT: u8 = 0x40;
 const RTC_CARRY: u8 = 0x80;
 
+/// What reads from a flash-mapped MBC6 window return (Pan Docs "MBC6",
+/// MX29F008 JEDEC command set). `Read` maps the flash array itself; every
+/// other mode substitutes command results for array bytes until a $F0 write.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum FlashMode {
+    Read,
+    /// JEDEC ID: 0xC2 (Macronix) at even addresses, 0x81 at odd.
+    Id,
+    /// The hidden 256-byte region is mapped instead of the array.
+    HiddenRead,
+    /// Writes program (AND into) array bytes; reads return the status byte.
+    Program,
+    /// Writes program the hidden region; reads return the status byte.
+    ProgramHidden,
+    /// An erase/protect operation completed; reads return the status byte.
+    Status,
+}
+
+/// The MBC6 cart's MX29F008 flash: a 1 MiB array in eight 128 KiB sectors
+/// plus a hidden 256-byte region, commanded through JEDEC $5555/$2AAA unlock
+/// writes. Operations complete instantaneously (the status byte always
+/// reads "finished"); programming can only clear bits, erasing sets 0xFF.
+#[derive(Clone)]
+struct Mbc6Flash {
+    data: Vec<u8>,
+    hidden: [u8; 256],
+    mode: FlashMode,
+    /// Unlock progress: 0 = idle, 1 = $AA@$5555 seen, 2 = $55@$2AAA seen.
+    seq: u8,
+    /// First half of a two-cycle command ($80 erase / $60 extended / $77
+    /// hidden-read), 0 when none is pending.
+    prefix: u8,
+    /// Sector-0 protection set by the Protect Sector 0 command (non-volatile
+    /// on hardware, a second layer on top of the Flash Write Enable bit).
+    protect: bool,
+    /// Program-mode page buffer: 128 pending bytes (0xFF = untouched slot),
+    /// ANDed into the array/hidden region only by the commit write.
+    buf: [u8; 128],
+    /// Base offset of the page being loaded, latched by the first data
+    /// write of a program operation; None before it.
+    page: Option<usize>,
+    /// Data writes seen in this page load; the commit is armed at 128.
+    loaded: u8,
+}
+
 #[derive(Clone)]
 enum Mapper {
     /// 0x00, 0x08, 0x09: ROM directly mapped, optional always-enabled RAM.
@@ -139,6 +193,31 @@ enum Mapper {
         rumble_cart: bool,
         rumble: bool,
     },
+    /// 0x20: two independently switchable 8 KiB ROM/flash windows
+    /// (A: 0x4000-0x5FFF, B: 0x6000-0x7FFF) and two 4 KiB RAM windows
+    /// (A: 0xA000-0xAFFF, B: 0xB000-0xBFFF), plus the MX29F008 flash chip
+    /// either window can map in place of the ROM (Pan Docs "MBC6").
+    Mbc6 {
+        ramg: bool,
+        /// RAM bank per window, 3 bits each.
+        ramb_a: u8,
+        ramb_b: u8,
+        /// ROM/flash bank per window, 7 bits each.
+        romb_a: u8,
+        romb_b: u8,
+        /// Per-window ROM (false) vs flash (true) select.
+        flash_a: bool,
+        flash_b: bool,
+        /// The flash chip's /CE gate: flash-mapped windows read open bus
+        /// (0xFF) and drop writes while disabled.
+        flash_enable: bool,
+        /// The flash /WP pin: gates erase/program of sector 0 + the hidden
+        /// region (register 0x1000, default off after power-up).
+        flash_we: bool,
+        /// Boxed to keep the Mapper enum near the size of its other
+        /// variants (the chip state is ~300 bytes inline).
+        flash: Box<Mbc6Flash>,
+    },
 }
 
 #[derive(Clone)]
@@ -167,12 +246,15 @@ pub struct GgPatch {
 
 /// What the 0xA000-0xBFFF window currently addresses.
 enum RamTarget {
-    /// External RAM bank (pre-masking).
+    /// External RAM bank (pre-masking), in 8 KiB [`RAM_BANK_SIZE`] units.
     Ram(usize),
     /// MBC2 built-in half-byte RAM.
     Mbc2,
     /// MBC3 RTC register index 0-4 (S, M, H, DL, DH).
     Rtc(usize),
+    /// MBC6 4 KiB RAM bank, as the byte base offset of the selected bank
+    /// (the two windows address independent banks, see `ram_target`).
+    Mbc6(usize),
 }
 
 /// mooneye-gb's MBC1 multicart heuristic: multicarts can't be told apart from

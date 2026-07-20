@@ -25,6 +25,65 @@ impl Rtc {
     }
 }
 
+impl FlashMode {
+    fn to_u8(self) -> u8 {
+        match self {
+            FlashMode::Read => 0,
+            FlashMode::Id => 1,
+            FlashMode::HiddenRead => 2,
+            FlashMode::Program => 3,
+            FlashMode::ProgramHidden => 4,
+            FlashMode::Status => 5,
+        }
+    }
+    fn from_u8(v: u8) -> Result<Self, crate::state::StateError> {
+        Ok(match v {
+            0 => FlashMode::Read,
+            1 => FlashMode::Id,
+            2 => FlashMode::HiddenRead,
+            3 => FlashMode::Program,
+            4 => FlashMode::ProgramHidden,
+            5 => FlashMode::Status,
+            _ => return Err(crate::state::StateError::Truncated),
+        })
+    }
+}
+
+impl Mbc6Flash {
+    fn write_state(&self, w: &mut crate::state::Writer) {
+        w.bytes(&self.data);
+        w.bytes(&self.hidden);
+        w.u8(self.mode.to_u8());
+        w.u8(self.seq);
+        w.u8(self.prefix);
+        w.bool(self.protect);
+        w.bytes(&self.buf);
+        w.bool(self.page.is_some());
+        w.u32(self.page.unwrap_or(0) as u32);
+        w.u8(self.loaded);
+    }
+    fn read_state(
+        &mut self,
+        r: &mut crate::state::Reader<'_>,
+    ) -> Result<(), crate::state::StateError> {
+        r.bytes_into(&mut self.data)?;
+        r.bytes_into(&mut self.hidden)?;
+        self.mode = FlashMode::from_u8(r.u8()?)?;
+        self.seq = r.u8()?;
+        self.prefix = r.u8()?;
+        self.protect = r.bool()?;
+        r.bytes_into(&mut self.buf)?;
+        let has_page = r.bool()?;
+        // Masked page-aligned inside the array so a corrupt state cannot
+        // make a later commit index out of bounds (the hidden-page commit
+        // additionally masks to its 256 bytes at use).
+        let page = r.u32()? as usize & (MBC6_FLASH_SIZE - 1) & !0x7F;
+        self.page = has_page.then_some(page);
+        self.loaded = r.u8()?.min(128);
+        Ok(())
+    }
+}
+
 impl Mapper {
     fn write_state(&self, w: &mut crate::state::Writer) {
         match self {
@@ -76,6 +135,29 @@ impl Mapper {
                 w.u8(*romb1);
                 w.u8(*ramb);
                 w.bool(*rumble);
+            }
+            Mapper::Mbc6 {
+                ramg,
+                ramb_a,
+                ramb_b,
+                romb_a,
+                romb_b,
+                flash_a,
+                flash_b,
+                flash_enable,
+                flash_we,
+                flash,
+            } => {
+                w.bool(*ramg);
+                w.u8(*ramb_a);
+                w.u8(*ramb_b);
+                w.u8(*romb_a);
+                w.u8(*romb_b);
+                w.bool(*flash_a);
+                w.bool(*flash_b);
+                w.bool(*flash_enable);
+                w.bool(*flash_we);
+                flash.write_state(w);
             }
         }
     }
@@ -137,6 +219,33 @@ impl Mapper {
                 *romb1 = r.u8()?;
                 *ramb = r.u8()?;
                 *rumble = r.bool()?;
+            }
+            Mapper::Mbc6 {
+                ramg,
+                ramb_a,
+                ramb_b,
+                romb_a,
+                romb_b,
+                flash_a,
+                flash_b,
+                flash_enable,
+                flash_we,
+                flash,
+            } => {
+                *ramg = r.bool()?;
+                // Masked like the live register writes (banking is 3/7 bits):
+                // the flash read/write paths index the fixed 1 MiB array
+                // without a size mask, so an unmasked bank from a corrupt
+                // state blob would read/erase out of bounds and panic.
+                *ramb_a = r.u8()? & 0x07;
+                *ramb_b = r.u8()? & 0x07;
+                *romb_a = r.u8()? & 0x7F;
+                *romb_b = r.u8()? & 0x7F;
+                *flash_a = r.bool()?;
+                *flash_b = r.bool()?;
+                *flash_enable = r.bool()?;
+                *flash_we = r.bool()?;
+                flash.read_state(r)?;
             }
         }
         Ok(())

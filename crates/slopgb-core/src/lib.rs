@@ -646,6 +646,24 @@ impl GameBoy {
         self.bus.cartridge().cur_rom_bank()
     }
 
+    /// [`Self::rom_bank`] resolved for the region containing `addr`: only
+    /// MBC6 differs, where 0x6000-0x7FFF (window B) banks independently of
+    /// 0x4000-0x5FFF. For the memory viewer's per-region bank label.
+    /// Side-effect-free.
+    #[must_use]
+    pub fn rom_bank_at(&self, addr: u16) -> usize {
+        self.bus.cartridge().rom_bank_at(addr)
+    }
+
+    /// [`Self::ram_bank`] resolved for the region containing `addr`: only
+    /// MBC6 differs, where 0xB000-0xBFFF (RAM window B) banks independently
+    /// of 0xA000-0xAFFF. For the memory viewer's per-region bank label.
+    /// Side-effect-free.
+    #[must_use]
+    pub fn ram_bank_at(&self, addr: u16) -> Option<usize> {
+        self.bus.cartridge().ram_bank_at(addr)
+    }
+
     /// Set the Game Genie ROM-patch cheats (frontend cheat engine). Empty (the
     /// default / no cheats) leaves ROM reads byte-identical — a default-off
     /// mutating debug hook, never set on a golden/test path.
