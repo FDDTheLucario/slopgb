@@ -18,3 +18,4 @@ goal.md
 boot/boot.o
 boot/*.o
 boot/*.map
+roms/mbc6/*.o
