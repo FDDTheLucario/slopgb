@@ -445,6 +445,7 @@ impl App {
         let msu1 = load_msu1(&opts);
         // Build the controller map before `settings` is moved into the struct.
         let gamepad_bindings = gamepad::GamepadBindings::from_config(&settings.gamepad_map);
+        let bindings = keymap::KeyBindings::from_config(&settings.key_map);
         let mut app = Self {
             opts,
             boot_rom,
@@ -485,7 +486,7 @@ impl App {
             gamepad_held: [false; 8],
             gamepad_wizard: None,
             buttons: ButtonTracker::default(),
-            bindings: keymap::KeyBindings::default(),
+            bindings,
             input_ops: Vec::new(),
             input_offset: 0,
             epoch: Instant::now(),

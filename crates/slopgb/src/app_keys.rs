@@ -272,6 +272,14 @@ impl App {
             self.bindings = bindings;
             self.release_all_input();
             self.key_wizard = None;
+            // Persist, mirroring the map into an open Options dialog's working +
+            // baseline scratch so a later Apply/Cancel can't revert it.
+            self.settings.key_map = bindings.to_config();
+            if let Some(o) = &mut self.options {
+                o.working.key_map = self.settings.key_map.clone();
+                o.baseline.key_map = self.settings.key_map.clone();
+            }
+            crate::settings_file::save(&self.settings, &self.recent);
         }
     }
 }

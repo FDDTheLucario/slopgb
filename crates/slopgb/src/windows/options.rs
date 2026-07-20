@@ -370,6 +370,10 @@ pub struct Settings {
     /// as `crate::gamepad::GamepadBindings::to_config` (8 comma-separated
     /// controller-button names in Right,Left,Up,Down,A,B,Select,Start order).
     pub gamepad_map: String,
+    /// Joypad → "configure keyboard": the keyboard→Game-Boy button map,
+    /// persisted as `crate::keymap::KeyBindings::to_config` (8 comma-separated
+    /// key names in Right,Left,Up,Down,A,B,Select,Start order).
+    pub key_map: String,
     /// Joypad → "Game controller works only if app has focus". `true` (bgb
     /// default) gates controller input on window focus; `false` accepts it in
     /// the background (gilrs reads the device directly, unlike the keyboard).
@@ -494,6 +498,7 @@ impl Default for Settings {
             palette_0_31: false,
             allow_opposing: false,
             gamepad_map: crate::gamepad::default_map_config(),
+            key_map: crate::keymap::default_map_config(),
             gamepad_needs_focus: true,
             rapid_speed: 2,
             record_audio: false,

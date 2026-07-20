@@ -584,6 +584,8 @@ impl App {
         // Joypad → game controller: re-derive the live map (Defaults/import may
         // have changed it; the wizard/clear paths set both in lock-step already).
         self.gamepad_bindings = crate::gamepad::GamepadBindings::from_config(&s.gamepad_map);
+        // Joypad → configure keyboard: same deal for the key map.
+        self.bindings = crate::keymap::KeyBindings::from_config(&s.key_map);
         // Plugins → dir changed ("..."): rebuild the host from the new directory
         // (rescans) and refresh the tab's entry list. No-op if unchanged.
         let cur_dir = self

@@ -13,6 +13,8 @@ handoff.md
 goal.md
 /.claude/worktrees/
 /bootroms/
+# `cargo xtask stage-plugins plugins` output — rebuildable, not source.
+/plugins/
 boot/boot.o
 boot/*.o
 boot/*.map

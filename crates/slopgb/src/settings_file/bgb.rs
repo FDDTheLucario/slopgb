@@ -104,6 +104,7 @@ pub fn from_ini(f: &Ini) -> Settings {
         allow_opposing: boolean("JoyOpposite", d.allow_opposing),
         rapid_speed: int("SlopgbRapidSpeed", i64::from(d.rapid_speed)).clamp(1, 4) as u32,
         gamepad_map: text("SlopgbGamepadMap", &d.gamepad_map),
+        key_map: text("SlopgbKeyMap", &d.key_map),
         gamepad_needs_focus: boolean("SlopgbGamepadNeedsFocus", d.gamepad_needs_focus),
         record_audio: boolean("SlopgbRecordAudio", d.record_audio),
         record_video: boolean("SlopgbRecordVideo", d.record_video),
@@ -189,6 +190,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         palette_0_31: _,
         allow_opposing: _,
         gamepad_map: _,
+        key_map: _,
         gamepad_needs_focus: _,
         rapid_speed: _,
         record_audio: _,
@@ -263,6 +265,7 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
     f.set("JoyOpposite", ini::fmt_bool(s.allow_opposing));
     f.set("SlopgbRapidSpeed", &s.rapid_speed.to_string());
     f.set("SlopgbGamepadMap", &s.gamepad_map);
+    f.set("SlopgbKeyMap", &s.key_map);
     f.set(
         "SlopgbGamepadNeedsFocus",
         ini::fmt_bool(s.gamepad_needs_focus),

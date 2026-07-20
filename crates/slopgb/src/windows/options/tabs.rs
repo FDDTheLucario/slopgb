@@ -495,12 +495,13 @@ pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
             s.palette_edit_shade = d.palette_edit_shade;
             s.palette_0_31 = d.palette_0_31;
         }
-        // configure-keyboard is not a Settings field; the SOCD toggle + the
-        // screenshot format are the live Joypad fields that reset.
+        // Both wizard maps reset here too — the App re-derives its live
+        // bindings from these strings when the dialog applies.
         OptionsTab::Joypad => {
             s.allow_opposing = d.allow_opposing;
             s.gamepad_needs_focus = d.gamepad_needs_focus;
             s.gamepad_map = d.gamepad_map.clone();
+            s.key_map = d.key_map.clone();
             s.screenshot_format = d.screenshot_format;
             s.screenshot_copies = d.screenshot_copies;
             s.rapid_speed = d.rapid_speed;
