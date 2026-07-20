@@ -45,6 +45,13 @@ fn exit_a(c: &mut Cartridge) {
     c.write_rom(0x4000, 0xF0);
 }
 
+/// Run the emulated clock past the longest embedded-operation time, then
+/// exit the mode — the poll-until-done + $F0 the exerciser ROM performs.
+fn settle_and_exit(c: &mut Cartridge) {
+    c.tick_time(MBC6_FLASH_CHIP_ERASE_CYCLES);
+    exit_a(c);
+}
+
 /// Program a full 128-byte page (offsets 0-0x7F of flash bank `bank`) with
 /// `f(offset)` per byte, following the hardware protocol (Pan Docs): 128
 /// data loads, a commit rewrite of the final address (value ignored, must
@@ -56,7 +63,7 @@ fn program_page_a(c: &mut Cartridge, bank: u8, f: impl Fn(u16) -> u8) {
         c.write_rom(0x4000 + i, f(i));
     }
     c.write_rom(0x407F, 0xAB);
-    exit_a(c);
+    settle_and_exit(c);
 }
 
 /// Program every byte of a page to `value` through window A.
@@ -74,7 +81,7 @@ fn program_hidden_page_a(c: &mut Cartridge, f: impl Fn(u16) -> u8) {
         c.write_rom(0x4000 + i, f(i));
     }
     c.write_rom(0x407F, 0xAB);
-    exit_a(c);
+    settle_and_exit(c);
 }
 
 /// Erase the sector containing flash bank `bank` through window A
@@ -84,7 +91,7 @@ fn erase_sector_a(c: &mut Cartridge, bank: u8) {
     unlock_a(c);
     c.write_rom(0x2000, bank);
     c.write_rom(0x4000, 0x30);
-    exit_a(c);
+    settle_and_exit(c);
 }
 
 /// Read window A at `addr` with flash/ROM bank `bank` selected.
@@ -328,13 +335,40 @@ fn mbc6_flash_program_mode_reads_status() {
     for i in 0..128u16 {
         c.write_rom(0x4000 + i, 0x55);
     }
-    // Program mode reads status; the commit is instantaneous, so bit 7
-    // (finished) is always set.
+    // Program mode reads status; no operation is running yet during the
+    // page load, so bit 7 (finished) reads set.
     assert_eq!(c.read_rom(0x4000), 0x80);
+    // The commit starts the embedded program operation: busy until the
+    // program time elapses on the emulated clock.
     c.write_rom(0x407F, 0x55);
-    assert_eq!(c.read_rom(0x4000), 0x80);
+    assert_eq!(c.read_rom(0x4000), 0x00, "busy right after commit");
+    c.tick_time(1_000);
+    assert_eq!(c.read_rom(0x4000), 0x00, "still busy mid-program");
+    c.tick_time(MBC6_FLASH_PROGRAM_CYCLES);
+    assert_eq!(c.read_rom(0x4000), 0x80, "finished after the program time");
     exit_a(&mut c);
     assert_eq!(c.read_rom(0x4000), 0x55);
+}
+
+#[test]
+fn mbc6_flash_erase_runs_on_the_emulated_clock() {
+    let mut c = mbc6_cart();
+    flash_on_a(&mut c);
+    program_a(&mut c, 16, 0x00);
+    cmd_a(&mut c, 0x80);
+    unlock_a(&mut c);
+    c.write_rom(0x2000, 16);
+    c.write_rom(0x4000, 0x30);
+    // The sector erase is in flight: status busy, and the chip ignores
+    // bus writes ($F0 included — the embedded operation cannot be
+    // aborted) until it completes.
+    assert_eq!(c.read_rom(0x4000), 0x00, "busy right after erase start");
+    c.write_rom(0x4000, 0xF0);
+    assert_eq!(c.read_rom(0x4000), 0x00, "$F0 ignored while busy");
+    c.tick_time(MBC6_FLASH_SECTOR_ERASE_CYCLES);
+    assert_eq!(c.read_rom(0x4000), 0x80, "finished after the erase time");
+    exit_a(&mut c);
+    assert_eq!(c.read_rom(0x4000), 0xFF);
 }
 
 #[test]
@@ -409,14 +443,14 @@ fn mbc6_flash_erase_chip_spares_locked_sector0() {
     program_a(&mut c, 16, 0x11); // sector 1
     cmd_a(&mut c, 0x80);
     cmd_a(&mut c, 0x10); // chip erase, WE still 0
-    exit_a(&mut c);
+    settle_and_exit(&mut c);
     assert_eq!(read_a(&mut c, 16, 0x4000), 0xFF, "sector 1 erased");
     assert_eq!(read_a(&mut c, 4, 0x4000), 0x44, "locked sector 0 spared");
     // With WE set the chip erase reaches sector 0 too.
     c.write_rom(0x1000, 0x01);
     cmd_a(&mut c, 0x80);
     cmd_a(&mut c, 0x10);
-    exit_a(&mut c);
+    settle_and_exit(&mut c);
     assert_eq!(read_a(&mut c, 4, 0x4000), 0xFF);
 }
 
@@ -454,6 +488,10 @@ fn mbc6_flash_protect_sector0_command() {
     // Protect sector 0 (requires WE); the status byte reports it in bit 1.
     cmd_a(&mut c, 0x60);
     cmd_a(&mut c, 0x20);
+    // The protect-bit program runs on the clock: busy first, then done
+    // with bit 1 reporting the new protection.
+    assert_eq!(c.read_rom(0x4000), 0x02);
+    c.tick_time(MBC6_FLASH_PROGRAM_CYCLES);
     assert_eq!(c.read_rom(0x4000), 0x82);
     exit_a(&mut c);
     // WE=1 alone is not enough now: the command protect also blocks.
@@ -462,6 +500,7 @@ fn mbc6_flash_protect_sector0_command() {
     // Unprotect: back to writable, status bit 1 clears.
     cmd_a(&mut c, 0x60);
     cmd_a(&mut c, 0x40);
+    c.tick_time(MBC6_FLASH_PROGRAM_CYCLES);
     assert_eq!(c.read_rom(0x4000), 0x80);
     exit_a(&mut c);
     program_a(&mut c, 4, 0x00);
@@ -510,7 +549,7 @@ fn mbc6_flash_hidden_region() {
     // Chip erase must not touch the hidden region...
     cmd_a(&mut c, 0x80);
     cmd_a(&mut c, 0x10);
-    exit_a(&mut c);
+    settle_and_exit(&mut c);
     cmd_a(&mut c, 0x77);
     cmd_a(&mut c, 0x77);
     c.write_rom(0x2000, 0);
@@ -519,7 +558,7 @@ fn mbc6_flash_hidden_region() {
     // ...only the dedicated hidden-erase command does.
     cmd_a(&mut c, 0x60);
     cmd_a(&mut c, 0x04);
-    exit_a(&mut c);
+    settle_and_exit(&mut c);
     cmd_a(&mut c, 0x77);
     cmd_a(&mut c, 0x77);
     assert_eq!(c.read_rom(0x4000), 0xFF);
@@ -604,6 +643,165 @@ fn mbc6_flash_out_of_sequence_write_clears_pending_command() {
         0x11,
         "stale $80 prefix survived"
     );
+}
+
+#[test]
+fn mbc6_flash_unprotect_command_needs_we() {
+    let mut c = mbc6_cart();
+    flash_on_a(&mut c);
+    c.write_rom(0x1000, 0x01);
+    program_a(&mut c, 4, 0x55);
+    cmd_a(&mut c, 0x60);
+    cmd_a(&mut c, 0x20); // protect sector 0
+    settle_and_exit(&mut c);
+    // Unprotect is WE-gated too (Pan Docs marks it with *): with WE
+    // dropped it must not clear the protection.
+    c.write_rom(0x1000, 0x00);
+    cmd_a(&mut c, 0x60);
+    cmd_a(&mut c, 0x40);
+    exit_a(&mut c);
+    c.write_rom(0x1000, 0x01);
+    program_a(&mut c, 4, 0x00);
+    assert_eq!(read_a(&mut c, 4, 0x4000), 0x55, "protection must survive");
+}
+
+#[test]
+fn mbc6_flash_disabled_ignores_command_writes() {
+    let mut c = mbc6_cart();
+    flash_on_a(&mut c);
+    program_a(&mut c, 16, 0x11);
+    // /CE low: the whole unlock + ID command never reaches the chip.
+    c.write_rom(0x0C00, 0x00);
+    cmd_a(&mut c, 0x90);
+    c.write_rom(0x0C00, 0x01);
+    assert_eq!(
+        read_a(&mut c, 16, 0x4000),
+        0x11,
+        "must read array data, not the JEDEC ID"
+    );
+}
+
+#[test]
+fn mbc6_flash_hidden_upper_page() {
+    let mut c = mbc6_cart();
+    flash_on_a(&mut c);
+    c.write_rom(0x1000, 0x01);
+    // Program the second 128-byte hidden page (offsets 0x80-0xFF): the
+    // page base comes from the first data write's bit 7.
+    cmd_a(&mut c, 0x60);
+    cmd_a(&mut c, 0xE0);
+    c.write_rom(0x2000, 0);
+    for i in 0..128u16 {
+        c.write_rom(0x4080 + i, if i == 0 { 0x21 } else { 0xFF });
+    }
+    c.write_rom(0x40FF, 0xAB);
+    settle_and_exit(&mut c);
+    cmd_a(&mut c, 0x77);
+    cmd_a(&mut c, 0x77);
+    c.write_rom(0x2000, 0);
+    assert_eq!(c.read_rom(0x4080), 0x21, "upper hidden page programmed");
+    assert_eq!(c.read_rom(0x4000), 0xFF, "lower hidden page untouched");
+    exit_a(&mut c);
+}
+
+#[test]
+fn mbc6_flash_chip_erase_spares_command_protected_sector0() {
+    let mut c = mbc6_cart();
+    flash_on_a(&mut c);
+    c.write_rom(0x1000, 0x01);
+    program_a(&mut c, 4, 0x44);
+    program_a(&mut c, 16, 0x11);
+    cmd_a(&mut c, 0x60);
+    cmd_a(&mut c, 0x20); // protect sector 0
+    settle_and_exit(&mut c);
+    // WE=1 alone does not open sector 0: the command protect also gates
+    // the chip erase.
+    cmd_a(&mut c, 0x80);
+    cmd_a(&mut c, 0x10);
+    settle_and_exit(&mut c);
+    assert_eq!(read_a(&mut c, 16, 0x4000), 0xFF, "sector 1 erased");
+    assert_eq!(read_a(&mut c, 4, 0x4000), 0x44, "protected sector 0 spared");
+    cmd_a(&mut c, 0x60);
+    cmd_a(&mut c, 0x40); // unprotect again
+    settle_and_exit(&mut c);
+}
+
+#[test]
+fn mbc6_flash_hidden_region_ignores_sector0_protect() {
+    let mut c = mbc6_cart();
+    flash_on_a(&mut c);
+    c.write_rom(0x1000, 0x01);
+    cmd_a(&mut c, 0x60);
+    cmd_a(&mut c, 0x20); // protect sector 0
+    settle_and_exit(&mut c);
+    // The protect command covers sector 0 only; the hidden region is
+    // gated by /WP alone and must still program + erase.
+    program_hidden_page_a(&mut c, |i| if i == 0 { 0x12 } else { 0xFF });
+    cmd_a(&mut c, 0x77);
+    cmd_a(&mut c, 0x77);
+    c.write_rom(0x2000, 0);
+    assert_eq!(c.read_rom(0x4000), 0x12);
+    exit_a(&mut c);
+    cmd_a(&mut c, 0x60);
+    cmd_a(&mut c, 0x04);
+    settle_and_exit(&mut c);
+    cmd_a(&mut c, 0x77);
+    cmd_a(&mut c, 0x77);
+    c.write_rom(0x2000, 0);
+    assert_eq!(c.read_rom(0x4000), 0xFF);
+    exit_a(&mut c);
+    cmd_a(&mut c, 0x60);
+    cmd_a(&mut c, 0x40); // unprotect again
+    settle_and_exit(&mut c);
+}
+
+#[test]
+fn mbc6_flash_sector_extent_is_128kib() {
+    let mut c = mbc6_cart();
+    flash_on_a(&mut c);
+    c.write_rom(0x1000, 0x01);
+    // Witnesses across sector boundaries: bank 8 is the upper half of
+    // sector 0, banks 0x70/0x7F span sector 7, bank 0x60 sits in sector 6.
+    program_a(&mut c, 8, 0x77);
+    program_a(&mut c, 0x70, 0x11);
+    program_a(&mut c, 0x7F, 0x22);
+    program_a(&mut c, 0x60, 0x33);
+    // Erasing sector 0 through bank 4 must clear bank 8 too.
+    erase_sector_a(&mut c, 4);
+    assert_eq!(read_a(&mut c, 8, 0x4000), 0xFF, "same 128 KiB sector");
+    // Erasing sector 7 through its last bank clears its first bank, but
+    // not sector 6.
+    erase_sector_a(&mut c, 0x7F);
+    assert_eq!(read_a(&mut c, 0x70, 0x4000), 0xFF, "same 128 KiB sector");
+    assert_eq!(read_a(&mut c, 0x60, 0x4000), 0x33, "sector 6 untouched");
+}
+
+#[test]
+fn mbc6_flash_we_register_uses_bit0() {
+    let mut c = mbc6_cart();
+    flash_on_a(&mut c);
+    // Bit 0 only: 0x02 leaves /WP asserted, sector 0 stays locked.
+    c.write_rom(0x1000, 0x02);
+    program_a(&mut c, 4, 0x00);
+    assert_eq!(read_a(&mut c, 4, 0x4000), 0xFF);
+    c.write_rom(0x1000, 0x03);
+    program_a(&mut c, 4, 0x00);
+    assert_eq!(read_a(&mut c, 4, 0x4000), 0x00);
+}
+
+#[test]
+fn mbc6_ram_windows_hold_differing_banks_at_once() {
+    let mut c = mbc6_cart();
+    c.write_rom(0x0000, 0x0A);
+    c.write_rom(0x0400, 1);
+    c.write_rom(0x0800, 6);
+    c.write_ram(0xA000, 0x1A);
+    c.write_ram(0xB000, 0x6B);
+    assert_eq!(c.read_ram(0xA000), 0x1A);
+    assert_eq!(c.read_ram(0xB000), 0x6B);
+    // Cross-check through the other window: bank 6 really holds 0x6B.
+    c.write_rom(0x0400, 6);
+    assert_eq!(c.read_ram(0xA000), 0x6B);
 }
 
 // --- debug indicators ---
@@ -713,7 +911,7 @@ fn mbc6_state_roundtrip() {
     program_a(&mut c, 16, 0x5A);
     cmd_a(&mut c, 0x60);
     cmd_a(&mut c, 0x20); // protect sector 0
-    exit_a(&mut c);
+    settle_and_exit(&mut c);
     c.write_rom(0x0000, 0x0A);
     c.write_rom(0x0400, 5);
     c.write_ram(0xA000, 0x66);

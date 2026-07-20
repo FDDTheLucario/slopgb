@@ -61,6 +61,7 @@ impl Mbc6Flash {
         w.bool(self.page.is_some());
         w.u32(self.page.unwrap_or(0) as u32);
         w.u8(self.loaded);
+        w.u32(self.busy);
     }
     fn read_state(
         &mut self,
@@ -80,6 +81,7 @@ impl Mbc6Flash {
         let page = r.u32()? as usize & (MBC6_FLASH_SIZE - 1) & !0x7F;
         self.page = has_page.then_some(page);
         self.loaded = r.u8()?.min(128);
+        self.busy = r.u32()?;
         Ok(())
     }
 }

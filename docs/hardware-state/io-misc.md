@@ -57,8 +57,17 @@
   final address commits (trigger only — its value is not data; $F0 there
   aborts the page). AND semantics on commit; a partial page never lands.
   The in-flight buffer is serialized in save states.
-- Deliberate model simplification: operations are instantaneous (status
-  always reads bit 7 "finished", the timeout bit never rises).
+- Embedded operations run on the emulated clock (`Cartridge::tick_time`,
+  the seam the MBC3 RTC uses): status bit 7 reads 0 and bus writes are
+  ignored until the operation's duration elapses (~1.5 ms page program /
+  protect, ~0.5 s block erase, 8×that for chip erase — order-of-magnitude
+  typical MX29F008-family figures; Pan Docs gives none). The timeout bit 4
+  never rises: it reports exceeding the chip's internal retry limit, a
+  failure a healthy modeled chip cannot have. The busy counter is
+  serialized in save states.
+- Audited against every Pan Docs claim (57 claims: all accurate or the
+  maximal deterministic reading; SameBoy has no MBC6 support to
+  cross-reference, so Pan Docs is the sole oracle).
 - Decode choices where Pan Docs is silent: the /WP register (listed only as
   "1000") decodes at 0x1000-0x13FF, the 1 KiB granularity of its neighbors;
   writes to 1400-1FFF do nothing.

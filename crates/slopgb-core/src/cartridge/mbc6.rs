@@ -22,6 +22,7 @@ impl Mbc6Flash {
             buf: [0xFF; 128],
             page: None,
             loaded: 0,
+            busy: 0,
         }
     }
 
@@ -33,11 +34,13 @@ impl Mbc6Flash {
     }
 
     /// Status byte read back during/after operations: bit 7 = finished
-    /// (always — operations are modeled as instantaneous, so the timeout
-    /// bit 4 can never rise either), bit 1 = sector 0 protected by the
-    /// Protect Sector 0 command.
+    /// (0 while an embedded operation's `busy` time runs), bit 1 =
+    /// sector 0 protected by the Protect Sector 0 command. The timeout
+    /// bit 4 never rises: it reports an operation exceeding the chip's
+    /// internal retry limit, a failure a healthy modeled chip cannot have.
     fn status(&self) -> u8 {
-        0x80 | if self.protect { 0x02 } else { 0x00 }
+        let done = if self.busy == 0 { 0x80 } else { 0x00 };
+        done | if self.protect { 0x02 } else { 0x00 }
     }
 
     /// May sector 0 be erased/programmed? Both protection layers must be
@@ -67,6 +70,11 @@ impl Mbc6Flash {
     /// A write with the chip selected. `we` is the Flash Write Enable
     /// register bit (the /WP pin), sampled per write.
     fn write(&mut self, addr: usize, value: u8, we: bool) {
+        // A running embedded operation ignores the bus ($F0 included —
+        // program/erase cannot be aborted on this part) until it elapses.
+        if self.busy > 0 {
+            return;
+        }
         match self.mode {
             FlashMode::Program => self.program_write(addr, value, we, false),
             FlashMode::ProgramHidden => self.program_write(addr & 0xFF, value, we, true),
@@ -118,6 +126,7 @@ impl Mbc6Flash {
                     self.data[page + i] &= b;
                 }
             }
+            self.busy = MBC6_FLASH_PROGRAM_CYCLES;
             FlashMode::Status
         } else {
             FlashMode::Read
@@ -172,6 +181,7 @@ impl Mbc6Flash {
             // on reads returning array data after a blocked op).
             (0x80, 0x30) => {
                 self.mode = if self.erase_sector(addr / MBC6_FLASH_SECTOR_SIZE, we) {
+                    self.busy = MBC6_FLASH_SECTOR_ERASE_CYCLES;
                     FlashMode::Status
                 } else {
                     FlashMode::Read
@@ -185,11 +195,13 @@ impl Mbc6Flash {
                 for sector in 0..MBC6_FLASH_SIZE / MBC6_FLASH_SECTOR_SIZE {
                     self.erase_sector(sector, we);
                 }
+                self.busy = MBC6_FLASH_CHIP_ERASE_CYCLES;
                 self.mode = FlashMode::Status;
             }
             (0x60, 0x04) if addr == 0x5555 => {
                 self.mode = if we {
                     self.hidden = [0xFF; 256];
+                    self.busy = MBC6_FLASH_SECTOR_ERASE_CYCLES;
                     FlashMode::Status
                 } else {
                     FlashMode::Read
@@ -207,6 +219,7 @@ impl Mbc6Flash {
             (0x60, 0x40) if addr == 0x5555 => {
                 self.mode = if we {
                     self.protect = false;
+                    self.busy = MBC6_FLASH_PROGRAM_CYCLES;
                     FlashMode::Status
                 } else {
                     FlashMode::Read
@@ -215,6 +228,7 @@ impl Mbc6Flash {
             (0x60, 0x20) if addr == 0x5555 => {
                 self.mode = if we {
                     self.protect = true;
+                    self.busy = MBC6_FLASH_PROGRAM_CYCLES;
                     FlashMode::Status
                 } else {
                     FlashMode::Read
