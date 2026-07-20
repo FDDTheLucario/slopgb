@@ -219,7 +219,8 @@ impl PluginHost {
             .get_typed_func::<(), i32>(&store, "slopgb_capabilities")
             .map_err(|_| LoadError::MissingExport("slopgb_capabilities"))?
             .call(&mut store, ())? as u32;
-        // Phase 1 serves introspection only; anything else is refused up front.
+        // This loader (the per-frame pump) serves introspection only; anything
+        // else is refused up front.
         if !Capabilities::INTROSPECTION.contains(Capabilities::from_bits(caps_bits)) {
             return Err(LoadError::UnsupportedCapabilities {
                 requested: caps_bits,

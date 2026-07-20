@@ -209,8 +209,8 @@ pub(super) struct Render {
     /// cfl257, not 257+SCX&7; slopgb's whole-dot render over-extends it. The
     /// CGB-visible flag for the shadow bare-exit law (`stat_irq.rs::
     /// vis_mode_read`) — `win_aborted` is DMG-only. A POST-draw abort is NOT
-    /// flagged (its exit extends by the tiles drawn, a per-config length the
-    /// atomic render reclock owns). Reset per line. `pub(super)` for the law.
+    /// flagged (its exit extends by the tiles drawn, a per-config length not
+    /// modelled on the whole-dot grid). Reset per line. `pub(super)` for the law.
     pub(super) win_predraw_abort: bool,
     /// The dot of a pre-draw window abort (see [`Self::
     /// win_predraw_abort`]). The bare exit still tracks the abort dot within

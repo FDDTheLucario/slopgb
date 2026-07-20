@@ -183,7 +183,7 @@ fn baseline() -> Vec<&'static str> {
     harness::parse_baseline(include_str!("baselines/mealybug.txt"))
 }
 
-/// Phase B2 inventory guard hook: (claimed, exempted) collection-relative
+/// Inventory guard hook: (claimed, exempted) collection-relative
 /// forward-slash paths of every `.gb`/`.gbc` under the suite directory.
 /// claimed = at least one rom×model leg runs; exempted = documented
 /// never-run (`ppu/win_without_bg.gb`: no reference image shipped, see the

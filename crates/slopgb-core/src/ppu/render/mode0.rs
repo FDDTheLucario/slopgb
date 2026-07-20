@@ -97,8 +97,7 @@ impl Ppu {
         // carry a different cc+2 accessibility phase (gambatte
         // oam_access/10spritesprline_postread_2 reads unblocked; gbmicrotest
         // lcdon_to_oam_unlock/oam_read_l0 + mooneye lcdon_timing-GS unlock
-        // earlier). Gate the OAM-read MID signal to those lines; the
-        // sprite/window/glitch phases are later increments.
+        // earlier). Gate the OAM-read MID signal to those lines.
         let bare_flip = r.fetched == 0 && !r.win_active && !self.glitch_line;
         // Back-date the CPU-visible mode→0 boundary (`vis_mode`) AHEAD of the
         // dispatch flip (single
@@ -173,9 +172,9 @@ impl Ppu {
             // sprite-extended lines (`r.fetched != 0`): bare-line DS reads
             // that reach FF41 through the DMA-cycle / lcd-offset chains
             // (dma/gdma/hdma_cycles_scx5_ds_2, lcd_offset m0stat_count) sit at
-            // a different sub-cycle offset within the same M-cycle half, so a
-            // bare-line override regresses them — the parked multi-chain
-            // problem. Sprite lines are the clean, hold-floor-safe subset.
+            // a different sub-cycle offset within the same M-cycle half, so the
+            // sprite-extended gate is the only line class this override covers.
+            // Sprite lines are the clean, hold-floor-safe subset.
             self.m0_stat_flip = (r.fetched != 0).then_some(0i8);
         }
     }

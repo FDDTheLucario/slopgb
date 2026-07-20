@@ -117,8 +117,8 @@ const BASELINE: &[&str] = &[
     // envelope/zombie/freq-change families pass via the SameBoy-style
     // countdown model (src/apu/; the -A variant passes through the same
     // `just_reloaded` + NRx4 freq-high glitch path); the sweep family —
-    // channel_1_sweep, channel_1_sweep_restart AND the formerly
-    // expected-fail channel_1_sweep_restart_2 (apu/README.md: passes
+    // channel_1_sweep, channel_1_sweep_restart AND
+    // channel_1_sweep_restart_2 (apu/README.md: passes
     // only on real CGB-E; even SameBoy emulating CGB-E fails it) —
     // passes via the SameBoy sweep-calculation countdown machinery in
     // src/apu/pulse.rs. What remains is the CGB-C-suffixed
@@ -195,7 +195,7 @@ fn same_suite_breakpoint_matrix() {
     harness::assert_against_baseline("same-suite", &results, BASELINE);
 }
 
-/// Phase B2 inventory: (claimed, exempted) collection-relative paths of
+/// Inventory: (claimed, exempted) collection-relative paths of
 /// every `.gb`/`.gbc` under `same-suite/`. Claimed ROMs produce exactly one
 /// rom×model case in `same_suite_breakpoint_matrix`; exempted ROMs are the
 /// documented §CGB-revision-policy skips (their suffix revision set
@@ -216,7 +216,7 @@ pub fn inventory() -> (Vec<String>, Vec<String>) {
     (claimed, exempted)
 }
 
-/// Self-check ahead of the global Phase B2 guard: the inventory partitions
+/// Self-check ahead of the global inventory guard: the inventory partitions
 /// the on-disk ROM set exactly (claimed ∩ exempted = ∅, claimed ∪ exempted
 /// = every `.gb`/`.gbc` under `same-suite/`), the exempt set is pinned to
 /// the six documented revision-skips and the partition sizes to the v7.0

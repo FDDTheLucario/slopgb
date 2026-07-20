@@ -701,8 +701,7 @@ impl Apu {
     /// filtered sample. Accumulates one dot and, on the T-cycle a resampling
     /// window closes (`cycles_per_sample` dots gathered), divides the sum by
     /// the dot count (arithmetic mean) and runs it through the capacitor,
-    /// returning the emitted stereo sample; otherwise `None`. Behaviour is
-    /// byte-identical to the previously-inlined version.
+    /// returning the emitted stereo sample; otherwise `None`.
     fn accumulate_output(&mut self, l: f32, r: f32) -> Option<(f32, f32)> {
         self.sum_l += l;
         self.sum_r += r;

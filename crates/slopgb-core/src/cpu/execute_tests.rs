@@ -52,7 +52,7 @@ struct TestBus {
     /// core clock gate.
     halt_calls: Vec<(usize, bool)>,
     /// `Bus::flush_pending` calls — the instruction-boundary hook fires
-    /// exactly once per `step`, on every exit path (S1 deferred-commit
+    /// exactly once per `step`, on every exit path (the deferred-commit
     /// clock).
     flush_count: u32,
     /// M-cycle count (`cycles`) captured at each `flush_pending` call — the

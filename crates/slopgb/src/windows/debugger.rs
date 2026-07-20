@@ -679,10 +679,10 @@ pub fn target_at(
 }
 
 /// Build the context menu for a right-click `target`, item-for-item as bgb's
-/// captures (`docs/bgb-reference/menus/rc-*.png`). Items whose action isn't
-/// wired yet (Go to / copy / modify / watchpoints / register edit — later
-/// milestones) render **disabled** (greyed) so the menu structure matches bgb
-/// while only the working subset is selectable. `None` for a pane with no menu.
+/// captures (`docs/bgb-reference/menus/rc-*.png`). Items with no slopgb action
+/// (e.g. "Insert size") render **disabled** (greyed) so the menu structure
+/// matches bgb while the working subset stays selectable. `None` for a pane
+/// with no menu.
 #[must_use]
 pub fn menu_for(target: ClickTarget, st: &DebuggerState, origin: (i32, i32)) -> Option<OpenMenu> {
     let entries: Vec<(MenuItem, MenuChoice)> = match target {

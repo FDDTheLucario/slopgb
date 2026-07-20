@@ -29,7 +29,7 @@ fn ticks(t: &mut Timer, n: u32) -> u8 {
 /// timers in lockstep — one through `tick`, the other through 4
 /// `tick_substep` calls per M-cycle (after a `begin_mcycle` reset) — yields
 /// byte-identical IF / `late` / div / TIMA across an overflow + reload window.
-/// Pins the refactor that made `tick` byte-identical to the T-granular advance.
+/// Pins that `tick` stays byte-identical to the T-granular advance.
 #[test]
 fn tick_substep_composes_into_tick() {
     let mut whole = timer_with(0x05, 0xFD, 0x37); // enabled, freq bit 3, near overflow

@@ -290,8 +290,7 @@ impl Ppu {
             // than DMG, and NOT keyed to the m0 IF rise (which fires while
             // VRAM is still locked). slopgb held the lock to
             // `line_render_done` (261) so `m2int_wxA6_vrambusyread_3`'s
-            // dot-260 read stayed blocked (want open, out5). wxA6-SCOPED —
-            // the generic win-line release was the vramw A/B.
+            // dot-260 read stayed blocked (want open, out5). wxA6-SCOPED.
             if !self.ds
                 && (1..=143).contains(&self.line)
                 && self.render.win_active

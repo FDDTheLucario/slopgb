@@ -1,4 +1,4 @@
-//! Boot-ROM convergence oracle (task 7): running the **real** DMG boot ROM
+//! Boot-ROM convergence oracle: running the **real** DMG boot ROM
 //! from power-on must hand off (FF50) to the exact same register state the
 //! direct post-boot install produces — PC=0x0100 + the documented post-boot
 //! registers. Skipped when `bootroms/dmg_boot.bin` is absent (the boot ROMs are

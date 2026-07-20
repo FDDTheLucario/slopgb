@@ -66,7 +66,7 @@ impl SgbCoprocessor {
         while let Some(s) = cmds.take_sound_event() {
             self.apply_sound(s);
         }
-        // DATA_SND ($0F): a write to SNES work RAM — no longer a no-op. fullsnes:
+        // DATA_SND ($0F): a write to SNES work RAM. fullsnes:
         // the packet is `dest_lo, dest_hi, len, data…`.
         while let Some(pkt) = cmds.take_data_snd() {
             self.apply_data_snd(&pkt);
@@ -174,8 +174,7 @@ impl SgbCoprocessor {
         let _ = self.cpu.get_mut().write_ram(dest, &data);
     }
 
-    /// JUMP ($12): redirect the 65C816 to the SNES program target — no longer a
-    /// no-op now that a real SNES CPU is present.
+    /// JUMP ($12): redirect the 65C816 to the SNES program target.
     fn apply_flags(&mut self, flags: SgbFlags) {
         if let Some(target) = flags.jump {
             if self.jump != Some(target) {

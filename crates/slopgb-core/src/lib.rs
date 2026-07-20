@@ -127,7 +127,7 @@ impl XorShift64 {
 
 /// A decoded SGB SOUND ($08) command: two sound-effect IDs, an
 /// attenuation/flags byte and the effect-bank selector. The core decodes and
-/// queues these; Phase 3 (the S-DSP) drains the queue via
+/// queues these; the S-DSP drains the queue via
 /// [`GameBoy::sgb_take_sound_event`]. (Pan Docs "SGB Command $08 — SOUND".)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SgbSound {
@@ -143,7 +143,7 @@ pub struct SgbSound {
 
 /// A read-only snapshot of the SGB flag commands (ATRC_EN/TEST_EN/ICON_EN/
 /// PAL_PRI) and the latched JUMP target — SNES-side state with no Game-Boy-bus
-/// effect, exposed for Phase-2/3 consumers. (Pan Docs "SGB Command $0C-$0E /
+/// effect, exposed for the SNES-side consumers. (Pan Docs "SGB Command $0C-$0E /
 /// $12 / $19".)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SgbFlags {
