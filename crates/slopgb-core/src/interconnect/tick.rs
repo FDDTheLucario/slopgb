@@ -76,7 +76,7 @@ impl Interconnect {
         self.intf |= self.serial.tick(div) & IF_MASK & !tick_squash;
         self.intf |= self.joypad.take_irq() & IF_MASK;
         // RTC wall time is dot time (2 dots per M-cycle in double speed).
-        self.cart.tick_rtc(dots as u32);
+        self.cart.tick_time(dots as u32);
     }
 
     /// Fold a completed PPU dot's IF bits, halt-late masks, accessibility/STAT

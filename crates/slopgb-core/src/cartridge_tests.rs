@@ -631,8 +631,8 @@ fn mbc3_rtc_latch_requires_0_then_1() {
     rtc_latch(&mut c);
     assert_eq!(rtc_read_latched(&mut c, 0x08), 10);
     // Latched value is stable while the live clock ticks.
-    c.tick_rtc(CYCLES_PER_SECOND);
-    c.tick_rtc(CYCLES_PER_SECOND);
+    c.tick_time(CYCLES_PER_SECOND);
+    c.tick_time(CYCLES_PER_SECOND);
     assert_eq!(rtc_read_latched(&mut c, 0x08), 10);
     rtc_latch(&mut c);
     assert_eq!(rtc_read_latched(&mut c, 0x08), 12);
@@ -646,7 +646,7 @@ fn mbc3_rtc_full_carry_chain_and_day_carry() {
     rtc_write(&mut c, 0x0A, 23);
     rtc_write(&mut c, 0x0B, 0xFF);
     rtc_write(&mut c, 0x0C, 0x01); // day = 511
-    c.tick_rtc(CYCLES_PER_SECOND);
+    c.tick_time(CYCLES_PER_SECOND);
     rtc_latch(&mut c);
     assert_eq!(rtc_read_latched(&mut c, 0x08), 0);
     assert_eq!(rtc_read_latched(&mut c, 0x09), 0);
@@ -655,7 +655,7 @@ fn mbc3_rtc_full_carry_chain_and_day_carry() {
     // Day wrapped 511 -> 0: bit 0 clear, carry (bit 7) set.
     assert_eq!(rtc_read_latched(&mut c, 0x0C), 0x80);
     // Carry is sticky until written.
-    c.tick_rtc(CYCLES_PER_SECOND);
+    c.tick_time(CYCLES_PER_SECOND);
     rtc_latch(&mut c);
     assert_eq!(rtc_read_latched(&mut c, 0x0C), 0x80);
 }
@@ -664,11 +664,11 @@ fn mbc3_rtc_full_carry_chain_and_day_carry() {
 fn mbc3_rtc_halt_stops_clock() {
     let mut c = rtc_cart();
     rtc_write(&mut c, 0x0C, 0x40); // halt
-    c.tick_rtc(CYCLES_PER_SECOND);
+    c.tick_time(CYCLES_PER_SECOND);
     rtc_latch(&mut c);
     assert_eq!(rtc_read_latched(&mut c, 0x08), 0);
     rtc_write(&mut c, 0x0C, 0x00); // resume
-    c.tick_rtc(CYCLES_PER_SECOND);
+    c.tick_time(CYCLES_PER_SECOND);
     rtc_latch(&mut c);
     assert_eq!(rtc_read_latched(&mut c, 0x08), 1);
 }
@@ -676,12 +676,12 @@ fn mbc3_rtc_halt_stops_clock() {
 #[test]
 fn mbc3_rtc_seconds_write_resets_subsecond_counter() {
     let mut c = rtc_cart();
-    c.tick_rtc(CYCLES_PER_SECOND / 2);
+    c.tick_time(CYCLES_PER_SECOND / 2);
     rtc_write(&mut c, 0x08, 0); // resets the sub-second divider
-    c.tick_rtc(CYCLES_PER_SECOND * 3 / 4);
+    c.tick_time(CYCLES_PER_SECOND * 3 / 4);
     rtc_latch(&mut c);
     assert_eq!(rtc_read_latched(&mut c, 0x08), 0);
-    c.tick_rtc(CYCLES_PER_SECOND / 4);
+    c.tick_time(CYCLES_PER_SECOND / 4);
     rtc_latch(&mut c);
     assert_eq!(rtc_read_latched(&mut c, 0x08), 1);
 }
@@ -692,7 +692,7 @@ fn mbc3_rtc_out_of_range_seconds_wrap_without_carry() {
     // a minute carry (verified by rtc3test on hardware).
     let mut c = rtc_cart();
     rtc_write(&mut c, 0x08, 63);
-    c.tick_rtc(CYCLES_PER_SECOND);
+    c.tick_time(CYCLES_PER_SECOND);
     rtc_latch(&mut c);
     assert_eq!(rtc_read_latched(&mut c, 0x08), 0);
     assert_eq!(rtc_read_latched(&mut c, 0x09), 0); // no minute carry
@@ -728,7 +728,7 @@ fn mbc3_save_data_roundtrip_with_rtc() {
     assert_eq!(c2.read_ram(0xA000), 0x42);
     // Both live and latched RTC state restored.
     assert_eq!(rtc_read_latched(&mut c2, 0x08), 7);
-    c2.tick_rtc(CYCLES_PER_SECOND);
+    c2.tick_time(CYCLES_PER_SECOND);
     rtc_latch(&mut c2);
     assert_eq!(rtc_read_latched(&mut c2, 0x08), 8);
 }
@@ -978,6 +978,6 @@ fn rumble_false_for_non_mbc5() {
     assert!(!cart(0x00, 2, 0).rumble());
     assert!(!cart(0x01, 4, 0).rumble());
     let mut c = cart(0x10, 4, 3);
-    c.tick_rtc(123); // tick_rtc on RTC cart is fine
-    cart(0x01, 4, 0).tick_rtc(123); // and a no-op elsewhere
+    c.tick_time(123); // tick_time on RTC cart is fine
+    cart(0x01, 4, 0).tick_time(123); // and a no-op elsewhere
 }

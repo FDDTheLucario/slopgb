@@ -143,13 +143,19 @@ impl Cartridge {
         }
     }
 
-    /// Advance the MBC3 real-time clock by `t_cycles` T-cycles (dots) of
-    /// wall-clock time (4_194_304 per second; in CGB double speed mode pass
-    /// dots, not CPU cycles, so wall time stays correct). Deterministic: the
-    /// RTC never reads the host clock. No-op for carts without an RTC.
-    pub fn tick_rtc(&mut self, t_cycles: u32) {
-        if let Mapper::Mbc3 { rtc: Some(rtc), .. } = &mut self.mapper {
-            rtc.tick_cycles(t_cycles);
+    /// Advance the cartridge's wall-time devices by `t_cycles` T-cycles
+    /// (dots) of wall-clock time (4_194_304 per second; in CGB double speed
+    /// mode pass dots, not CPU cycles, so wall time stays correct): the
+    /// MBC3 real-time clock and the MBC6 flash's embedded-operation busy
+    /// timer. Deterministic — never reads the host clock. No-op for carts
+    /// with neither device.
+    pub fn tick_time(&mut self, t_cycles: u32) {
+        match &mut self.mapper {
+            Mapper::Mbc3 { rtc: Some(rtc), .. } => rtc.tick_cycles(t_cycles),
+            Mapper::Mbc6 { flash, .. } => {
+                flash.busy = flash.busy.saturating_sub(t_cycles);
+            }
+            _ => {}
         }
     }
 

@@ -75,13 +75,22 @@ const MBC6_RAM_BANK_SIZE: usize = 0x1000;
 /// The MBC6 flash chip (Macronix MX29F008): 1 MiB in eight 128 KiB sectors.
 const MBC6_FLASH_SIZE: usize = 0x100000;
 const MBC6_FLASH_SECTOR_SIZE: usize = 0x20000;
+/// MX29F008 embedded-operation durations, in T-cycles of wall time (dots at
+/// 4.194304 MHz; in double speed the caller passes dots, like the RTC).
+/// Pan Docs gives no timings, so these are order-of-magnitude typical
+/// figures for the part family: ~1.5 ms for a 128-byte page program (and
+/// the non-volatile protect bit), ~0.5 s for a block erase, chip erase =
+/// the eight sectors in sequence. Status bit 7 reads 0 until they elapse.
+const MBC6_FLASH_PROGRAM_CYCLES: u32 = 6_291;
+const MBC6_FLASH_SECTOR_ERASE_CYCLES: u32 = 2_097_152;
+const MBC6_FLASH_CHIP_ERASE_CYCLES: u32 = 8 * MBC6_FLASH_SECTOR_ERASE_CYCLES;
 /// T-cycles (dots) per RTC second at the 4.194304 MHz master clock.
 const CYCLES_PER_SECOND: u32 = 4_194_304;
 /// Size of the RTC block appended to [`Cartridge::save_data`] images.
 const RTC_SAVE_LEN: usize = 16;
 
 /// MBC3 real-time clock. Driven deterministically from emulated cycles via
-/// [`Cartridge::tick_rtc`]; never reads the host clock.
+/// [`Cartridge::tick_time`]; never reads the host clock.
 ///
 /// Register layout (gbctr / Pan Docs "MBC3 RTC"):
 /// - S (0x08): seconds, 6-bit counter
@@ -132,8 +141,9 @@ enum FlashMode {
 
 /// The MBC6 cart's MX29F008 flash: a 1 MiB array in eight 128 KiB sectors
 /// plus a hidden 256-byte region, commanded through JEDEC $5555/$2AAA unlock
-/// writes. Operations complete instantaneously (the status byte always
-/// reads "finished"); programming can only clear bits, erasing sets 0xFF.
+/// writes. Embedded operations run on the emulated clock (`busy`, the
+/// `MBC6_FLASH_*_CYCLES` durations); programming can only clear bits,
+/// erasing sets 0xFF.
 #[derive(Clone)]
 struct Mbc6Flash {
     data: Vec<u8>,
@@ -155,6 +165,10 @@ struct Mbc6Flash {
     page: Option<usize>,
     /// Data writes seen in this page load; the commit is armed at 128.
     loaded: u8,
+    /// T-cycles until the running embedded operation finishes. While
+    /// nonzero the chip ignores bus writes and status bit 7 reads 0;
+    /// decremented by [`Cartridge::tick_time`].
+    busy: u32,
 }
 
 #[derive(Clone)]
