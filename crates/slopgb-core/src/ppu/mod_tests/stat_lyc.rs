@@ -2,12 +2,11 @@
 
 use super::*;
 
-/// S5/A1: SameBoy `ly_for_comparison` (`display.c`) — the *delayed* LY value the
+/// SameBoy `ly_for_comparison` (`display.c`) — the *delayed* LY value the
 /// LYC==LY interrupt source compares against, distinct from the live FF44. It is
 /// `-1` ("no line") at line start, latches to the line number a few dots in, and
 /// holds the previous line's value across the first dots of the next line (the
-/// LYC-match tail). Pinned for single speed across DMG / CGB-C / AGB; the field
-/// is computed for the StatUpdate path (A4).
+/// LYC-match tail). Pinned for single speed across DMG / CGB-C / AGB.
 #[test]
 fn ly_for_comparison_visible_line_schedule() {
     let mut p = dmg();
@@ -41,7 +40,7 @@ fn ly_for_comparison_visible_line_schedule() {
     assert_eq!(p.ly_for_comparison(), 1, "line 1 dot 4: latched to 1");
 }
 
-/// S5/A1: VBlank `ly_for_comparison` is `-1` for the first four dots of every
+/// VBlank `ly_for_comparison` is `-1` for the first four dots of every
 /// line (144-152) then latches to the line number (`display.c` 144-152 loop:
 /// `ly_for_comparison = -1` at entry, `= current_line` after GB_SLEEP 26+12).
 #[test]
@@ -66,7 +65,7 @@ fn ly_for_comparison_vblank_schedule() {
     }
 }
 
-/// S5/A1: line 153's `ly_for_comparison` runs a model-specific micro-sequence
+/// Line 153's `ly_for_comparison` runs a model-specific micro-sequence
 /// (`display.c` line-153 tail). DMG / CGB-C single speed: `-1` (dots 0-5) ->
 /// `153` (6-7) -> `-1` (8-11) -> `0` (12+) — the brief LYC=153 window and the
 /// early LYC=0 that fire the once-per-frame line-153 LYC sources. AGB
@@ -114,7 +113,7 @@ fn ly_for_comparison_line_153_schedule() {
     }
 }
 
-/// S5/A4: the STAT engine drives SameBoy's `GB_STAT_update` rising-edge
+/// The STAT engine drives SameBoy's `GB_STAT_update` rising-edge
 /// model (`stat_update_tick`). With only the LYC
 /// source enabled (LYC=2), the engine raises exactly one STAT IF per frame — on
 /// the rising edge when `ly_for_comparison` reaches 2 — and the held match
@@ -211,9 +210,9 @@ fn ly153_lyc153_compare_window() {
     p.write(0xFF45, 153);
     p.write(0xFF40, 0x81);
     run_to(&mut p, 153, 3);
-    assert_eq!(p.read(0xFF41) & 4, 4); // eager: 153 compare set dots 0-3
+    assert_eq!(p.read(0xFF41) & 4, 4); // 153 compare set dots 0-3
     p.tick();
-    assert_eq!(p.read(0xFF41) & 4, 0); // eager: drops to no-match from dot 4
+    assert_eq!(p.read(0xFF41) & 4, 0); // drops to no-match from dot 4
     tick_n(&mut p, 3);
     assert_eq!(p.read(0xFF41) & 4, 0);
     p.tick();
@@ -229,7 +228,7 @@ fn ly153_lyc0_compare_from_dot_12() {
     p.write(0xFF41, 0x40);
     p.write(0xFF40, 0x81);
     run_to(&mut p, 153, 11);
-    assert_eq!(p.read(0xFF41) & 4, 4); // eager: LYC=0 compare already set by dot 11
+    assert_eq!(p.read(0xFF41) & 4, 4); // LYC=0 compare already set by dot 11
     assert_eq!(p.tick(), 0x02, "LYC=0 IRQ fires at 153:12");
     assert_eq!(p.read(0xFF41) & 4, 4);
     // The compare stays set through line 0; no further edge.
@@ -242,21 +241,20 @@ fn lyc_compare_invalid_first_4_dots_of_line() {
     p.write(0xFF45, 2);
     p.write(0xFF40, 0x81);
     run_to(&mut p, 2, 0);
-    assert_eq!(p.read(0xFF41) & 4, 4); // eager: compares line 2 from dot 0
+    assert_eq!(p.read(0xFF41) & 4, 4); // compares line 2 from dot 0
     tick_n(&mut p, 3);
-    assert_eq!(p.read(0xFF41) & 4, 4); // state(2,3) eager: still matching
+    assert_eq!(p.read(0xFF41) & 4, 4); // state(2,3) still matching
     p.tick();
     assert_eq!(p.read(0xFF41) & 4, 4); // state(2,4)
 }
 
-/// Port Stage A11 — an FF41 write that enables a source whose condition is
-/// already met fires the STAT IF exactly ONCE. SameBoy
-/// computes the write-fire through `GB_STAT_update` (the rising-edge engine)
-/// after `write_stat` (`display.c`); this must do the same instead
-/// of *also* running the gambatte `stat_write_trigger`, which would double-fire
-/// (once on the write, again on the next dot-clocked `stat_update_tick` rising
-/// edge re-seeing the new enable). The
-/// double-fire is read-frame-independent, so this banks standalone.
+/// An FF41 write that enables a source whose condition is already met fires the
+/// STAT IF exactly ONCE. SameBoy computes the write-fire through
+/// `GB_STAT_update` (the rising-edge engine) after `write_stat` (`display.c`);
+/// this must do the same instead of *also* running the gambatte
+/// `stat_write_trigger`, which would double-fire (once on the write, again on
+/// the next dot-clocked `stat_update_tick` rising edge re-seeing the new
+/// enable).
 #[test]
 fn ff41_enable_lyc_fires_once() {
     let count = || -> u32 {
@@ -280,13 +278,12 @@ fn ff41_enable_lyc_fires_once() {
     );
 }
 
-/// Port Stage A12 — an FF45 (LYC) write that creates a match fires the STAT IF
-/// exactly ONCE, the FF45 analogue of A11. `write_lyc_*`
-/// fires the gambatte LYC-write trigger; without A12 the dot-clocked
-/// `stat_update_tick` then re-sees `lyc_interrupt_line` rise next tick and
-/// double-fires. The fix re-derives
-/// `lyc_interrupt_line` for the new LYC and re-syncs the `StatUpdate` line when
-/// the write-trigger fired, so the next tick sees no fresh rise.
+/// An FF45 (LYC) write that creates a match fires the STAT IF exactly ONCE.
+/// `write_lyc_*` fires the gambatte LYC-write trigger; the dot-clocked
+/// `stat_update_tick` would then re-see `lyc_interrupt_line` rise next tick and
+/// double-fire, so the write re-derives `lyc_interrupt_line` for the new LYC
+/// and re-syncs the `StatUpdate` line when the write-trigger fired — the next
+/// tick sees no fresh rise.
 #[test]
 fn ff45_match_fires_once() {
     let count = || -> u32 {
@@ -310,20 +307,19 @@ fn ff45_match_fires_once() {
     );
 }
 
-/// Port Stage C / S5 (mech 3 root 2) — `stat_update_tick` HOLDS
-/// `lyc_interrupt_line` across the line-start LYC carryover (lines 1-143, dots
-/// 0-2, where [`Ppu::ly_for_comparison`] still names the PREVIOUS line). SameBoy
-/// re-evaluates `lyc_interrupt_line` only at the `GB_SLEEP` steps that *set*
-/// `ly_for_comparison` — state-6 (`= -1`, holds) and state-7 (`= current_line`,
-/// re-latch) — and does NOT call `GB_STAT_update` during the held carryover. So
-/// a late FF45 write whose new LYC equals that carryover number raises NO fresh
-/// LYC edge there (`lyc0_late_ff45_enable_3`, `lycwirq_trigger_ly00_stat50_2`).
-/// slopgb's per-dot engine used to re-latch the carryover match → a spurious
-/// `ly1 dot0` STAT edge (`got=E2`, want E0). This pins the hold: a freshly-set
-/// LYC matching the carryover with the latch low must stay low across dots 0-2
-/// and raise no IF (a legitimate LYC=N-1 *tail* is already latched true at line
-/// N-1, so the hold preserves it — tested by the steady-state family rows). LE
-/// path only.
+/// `stat_update_tick` HOLDS `lyc_interrupt_line` across the line-start LYC
+/// carryover (lines 1-143, dots 0-2, where [`Ppu::ly_for_comparison`] still
+/// names the PREVIOUS line). SameBoy re-evaluates `lyc_interrupt_line` only at
+/// the `GB_SLEEP` steps that *set* `ly_for_comparison` — state-6 (`= -1`,
+/// holds) and state-7 (`= current_line`, re-latch) — and does NOT call
+/// `GB_STAT_update` during the held carryover. So a late FF45 write whose new
+/// LYC equals that carryover number raises NO fresh LYC edge there
+/// (`lyc0_late_ff45_enable_3`, `lycwirq_trigger_ly00_stat50_2`). Re-latching
+/// the carryover match would fire a spurious `ly1 dot0` STAT edge (E2 vs want
+/// E0). This pins the hold: a freshly-set LYC matching the carryover with the
+/// latch low must stay low across dots 0-2 and raise no IF (a legitimate
+/// LYC=N-1 *tail* is already latched true at line N-1, so the hold preserves it
+/// — tested by the steady-state family rows).
 #[test]
 fn lyc_latch_holds_across_line_start_carryover() {
     let mut p = dmg();
@@ -360,7 +356,7 @@ fn lyc_latch_holds_across_line_start_carryover() {
     );
 }
 
-/// Write-coherence guard (the FF40 leg of the A11/A12 systematic sweep) — an
+/// Write-coherence guard — an
 /// FF40 LCD-enable that raises the STAT line (LYC source pre-enabled, LY=0=LYC
 /// matches on the glitch line) fires the STAT IF exactly ONCE on BOTH paths,
 /// with NO fix needed (unlike FF41/FF45). `write_lcdc`'s enable path runs
@@ -369,9 +365,9 @@ fn lyc_latch_holds_across_line_start_carryover() {
 /// line, where the engine's LYC input is inert (`ly_for_comparison` returns
 /// -1, so the LYC latch never re-sees the match) — and the disable path is a
 /// non-issue (LCD off → `stat_update_tick`'s `!enabled` early-return holds the
-/// engine low). So FF40 needs no A11/A12-style gated re-sync; this pins that
-/// (a future change that made the engine fire LYC on the glitch line would
-/// re-introduce the double-fire and trip here).
+/// engine low). So FF40 needs no gated re-sync; this pins that (a future change
+/// that made the engine fire LYC on the glitch line would re-introduce the
+/// double-fire and trip here).
 #[test]
 fn ff40_enable_lyc_match_fires_once() {
     let count = || -> u32 {

@@ -238,16 +238,14 @@ fn vblank_line_oam_pulses_dot12_dmg_only() {
     assert_eq!(ifs & 2, 0, "CGB: no vblank-line OAM pulses");
 }
 
-/// Port Stage A10 — the vblank-ENTRY OAM (mode-2) STAT pulse on the
-/// [`Ppu::stat_update_tick`] path. The `GB_STAT_update` rising-edge engine
-/// mirrors `vis_mode` in vblank (mode 0 at 144:0-3, mode 1 from 144:4), so it
-/// never selects the OAM source there and emits no 144:0 pulse — SameBoy raises
-/// it as a direct `IF |= 2` poke (`display.c:2160`), not a line rise. These
-/// tests complement `oam_pulse_at_vblank_entry_dmg` / `_cgb_not_halt_late`
-/// above by pinning the pulse's internal commit masks directly (DMG
-/// halt/dispatch-late, the CGB 144 exemption) — the `vblank_stat_intr-GS`/`-C`
-/// lift. The DMG 145-153 dot-12 pulses are deferred (measured net-negative,
-/// see `Ppu::stat_update_vblank_oam_pulses`).
+/// The vblank-ENTRY OAM (mode-2) STAT pulse on the [`Ppu::stat_update_tick`]
+/// path. The `GB_STAT_update` rising-edge engine mirrors `vis_mode` in vblank
+/// (mode 0 at 144:0-3, mode 1 from 144:4), so it never selects the OAM source
+/// there and emits no 144:0 pulse — SameBoy raises it as a direct `IF |= 2`
+/// poke (`display.c:2160`), not a line rise. Pins the pulse's internal commit
+/// masks (DMG halt/dispatch-late, the CGB 144 exemption; mooneye
+/// `vblank_stat_intr-GS`/`-C`). The DMG 145-153 dot-12 pulses are deferred
+/// (see `Ppu::stat_update_vblank_oam_pulses`).
 #[test]
 fn vblank_oam_pulse_144_entry_dmg_flag_on() {
     let mut p = dmg();
@@ -281,13 +279,10 @@ fn vblank_oam_pulse_144_entry_cgb_flag_on_not_halt_late() {
     );
 }
 
-/// Port Stage A10 — the DMG 145-153 dot-12 vblank OAM pulses are DEFERRED
-/// (only the 144:0 entry pulse ships). SameBoy raises them too
-/// (`display.c:2185`), but adding them here was measured net-negative — it
-/// regresses 6 SameBoy-passing rows whose cc+4 read frame mis-places the
-/// resulting read (atomic, lands at the Phase-B reclock). This pins that the
-/// engine stays silent at dot 12 until then, guarding against re-adding the
-/// pulse prematurely.
+/// The DMG 145-153 dot-12 vblank OAM pulses are DEFERRED (only the 144:0 entry
+/// pulse ships). SameBoy raises them too (`display.c:2185`); this pins that the
+/// engine stays silent at dot 12, guarding against re-adding the pulse (it is a
+/// net-negative trade — floor-class index).
 #[test]
 fn vblank_line_oam_pulses_dot12_deferred_flag_on() {
     let mut p = dmg();

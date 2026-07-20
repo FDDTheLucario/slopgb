@@ -49,11 +49,11 @@ impl Interconnect {
         self.if_late = if t.late { t_iff } else { 0 };
         self.oam_dma_tick();
         self.reset_mcycle_edges();
-        // cc-granular reclock: advance the M-cycle one CPU cc at a time
-        // (cc=1..=4), advancing the PPU per 8-MHz half-dot (2 per dot SS, 1 DS)
-        // and folding on the dot-completing half. Each event edge is stamped
-        // with its dot's [`cc_eighth`]. `cycles` is bumped once above (`dots`),
-        // so no per-dot bump here.
+        // Advance the M-cycle one CPU cc at a time (cc=1..=4), advancing the
+        // PPU per 8-MHz half-dot (2 per dot SS, 1 DS) and folding on the
+        // dot-completing half. Each event edge is stamped with its dot's
+        // [`cc_eighth`]. `cycles` is bumped once above (`dots`), so no per-dot
+        // bump here.
         for cc in 1..=4u8 {
             // Repay a WriteCpu-conflict engine write's borrowed dot: the
             // previous `Bus::write` ticked cc-1's PPU dot ahead of its
@@ -215,7 +215,7 @@ impl Interconnect {
         }
         self.engage_halt_gate(halted);
         if !halted {
-            // Reset the (now-inert) deferred mode-0 halt-wake delay scratch.
+            // Keep the unused `m0_halt_hold` scratch at its 0 default.
             self.m0_halt_hold = 0;
             // The halt-mode wake restarts the OAM DMA controller's clock
             // one M-cycle ahead of the CPU pipeline: a single catch-up

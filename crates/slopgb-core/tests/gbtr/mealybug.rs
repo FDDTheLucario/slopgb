@@ -328,11 +328,10 @@ fn mealybug_baseline_has_no_duplicate_keys() {
     assert_eq!(unique.len(), baseline.len(), "duplicate baseline entries");
 }
 
-/// Red-before-green pin for the eager per-register CGB write-commit debt
-/// (`Ppu::stage_write`, palette `6 + 2*parity`, WX `12`): these DMG-compat
-/// mode-3 pixel legs pass tier2 (identical whole-dot render code) and fail the
-/// eager clock ONLY on the cc+0 write-commit position. Fails with the CGB
-/// per-register debt reverted (uniform 8 → wrong pixel column), passes with it.
+/// Pins the per-register CGB write-commit stage offset (`Ppu::stage_write`,
+/// palette `6 + 2*parity`, WX `12`): these DMG-compat mode-3 pixel legs land
+/// the wrong pixel column without the per-register offset (uniform 8), because
+/// the write commit sits at the cc+0 position. Passes with the offset.
 #[test]
 fn mealybug_eager_cgb_m3_writecommit_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -360,33 +359,31 @@ fn mealybug_eager_cgb_m3_writecommit_passes() {
     }
 }
 
-/// Red-before-green pin for the eager DMG SCX POST-match write-commit debt
-/// (`Ppu::stage_write`, FF43 `hunt_done && dot > hunt_match_dot => 6`). A mid-
-/// mode-3 SCX write landing AFTER this line's fine-scroll comparator lock is a
-/// pure coarse/pixel tile shift; its eager cc+0 commit lands the tile column 4
-/// dots early without the render-frame debt. Fails with the FF43 post-match arm
-/// reverted (159px off, wrong tile column), passes with it.
+/// Pins the DMG SCX POST-match write-commit stage offset (`Ppu::stage_write`,
+/// FF43 `hunt_done && dot > hunt_match_dot => 6`). A mid-mode-3 SCX write
+/// landing AFTER this line's fine-scroll comparator lock is a pure coarse/pixel
+/// tile shift; its cc+0 commit lands the tile column 4 dots early without the
+/// render-frame offset (159px off, wrong tile column). Passes with it.
 #[test]
 fn mealybug_eager_dmg_m3_scx_high_writecommit_passes() {
     expect_ppu_eager_dmg("m3_scx_high_5_bits");
 }
 
-/// Red-before-green pin for the eager DMG SCX PRE-match BG-line write-commit
-/// debt (`Ppu::stage_write`, FF43 `!hunt_done && !glitch_line && !wy_trig_sb =>
-/// 6`). An earlier pass mis-refuted this row as "genuine length coupling"; the trace shows
-/// the OLD SCX=0 already matched the fine-scroll comparator at mode3_dot 5
-/// (discard 0, OFF/tier2), so the write is a pure coarse shift — the eager cc+0
-/// commit lands ~3 dots early, RE-OPENS the comparator (re-match dot 91, discard 2
-/// → 320px). The `6` debt lands the commit at OFF's dot 90 (comparator stays
-/// locked). `!wy_trig_sb`/`!glitch_line` excludes the window/glitch length rows;
-/// the m2int_scxN rows are post-match. Fails at 320px reverted, passes with it.
+/// Pins the DMG SCX PRE-match BG-line write-commit stage offset
+/// (`Ppu::stage_write`, FF43 `!hunt_done && !glitch_line && !wy_trig_sb => 6`).
+/// The OLD SCX=0 already matched the fine-scroll comparator at mode3_dot 5
+/// (discard 0), so the write is a pure coarse shift — an un-shifted cc+0 commit
+/// lands ~3 dots early and RE-OPENS the comparator (re-match dot 91, discard 2
+/// → 320px). The `6` offset lands the commit at dot 90 (comparator stays
+/// locked). `!wy_trig_sb`/`!glitch_line` excludes the window/glitch length
+/// rows; the m2int_scxN rows are post-match.
 #[test]
 fn mealybug_eager_dmg_m3_scx_low_writecommit_passes() {
     expect_ppu_eager_dmg("m3_scx_low_3_bits");
 }
 
-/// Boot a mealybug ppu ROM on the eager clock (DMG), run to breakpoint + 1 frame,
-/// assert the framebuffer matches the DMG reference PNG.
+/// Boot a mealybug ppu ROM (DMG), run to breakpoint + 1 frame, assert the
+/// framebuffer matches the DMG reference PNG.
 fn expect_ppu_eager_dmg(stem: &str) {
     let Some(root) = common::gbtr_root() else {
         return;

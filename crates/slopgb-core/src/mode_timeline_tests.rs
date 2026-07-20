@@ -109,9 +109,8 @@ fn kernel_pair_separates_on_the_decoupled_grid() {
 /// collapses, with no call-stack discriminator. It also pins the residual: our
 /// PRODUCTION visible flip sits at our-line dot 254 (= mt 250), **3 dots later**
 /// than SameBoy's mt-247 boundary — so in production both reads land before the
-/// flip (both mode 3); the lift is to back-date the visible flip those 3 dots
-/// (and reclock the dispatch, the remaining atomic work) so it slots between the
-/// two reads.
+/// flip (both mode 3); matching SameBoy would back-date the visible flip those
+/// 3 dots so it slots between the two reads.
 #[test]
 fn measured_kernel_reads_straddle_sameboy_visible_boundary() {
     // Our `vis_mode` puts the visible mode-2 start at our-line dot 4 (dots 0-3

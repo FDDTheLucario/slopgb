@@ -1,13 +1,11 @@
-//! Deferred-commit ("lazy-advance") CPU clock — the validated foundation for
-//! the SameBoy cycle-exact timing port.
+//! Deferred-commit ("lazy-advance") CPU clock: the executable encoding of
+//! SameBoy 1.0.2's `pending_cycles` clock (`sm83_cpu.c`).
 //!
-//! This module is the executable, unit-tested encoding of SameBoy 1.0.2's
-//! `pending_cycles` deferred-commit clock (`sm83_cpu.c`), the load-bearing
-//! primitive the timing port was built on. The production (eager) clock samples
-//! at the *leading* edge (cc+0) and defers the M-cycle's own 4 T-cycles — what
-//! lands a STAT/OAM/VRAM read on the correct side of a mode-3→mode-0 boundary —
-//! reusing this park/flush bookkeeping (`read`/`write`/`internal`/`flush`) while
-//! sampling PPU state directly at the access (see `interconnect::Bus`).
+//! A bus access samples at the *leading* edge (cc+0) and defers the M-cycle's
+//! own 4 T-cycles — what lands a STAT/OAM/VRAM read on the correct side of a
+//! mode-3→mode-0 boundary. `interconnect::Bus` drives this park/flush
+//! bookkeeping (`read`/`write`/`internal`/`flush`) while sampling PPU state
+//! directly at the access.
 //!
 //! Model (CPU T-cycles, 4 = one M-cycle, in both speeds — the double-speed
 //! factor is applied once, centrally, only to the PPU/APU domain, never
@@ -19,8 +17,8 @@
 /// SameBoy's per-IO-write conflict classes (`sm83_cpu.c:131-318`). Each splits
 /// the M-cycle's 4 T-cycles into a pre-commit advance and a re-parked debt so
 /// the *sub-M-cycle* commit point varies while the per-M-cycle total is
-/// conserved. Only the cases needed to validate the conservation invariant are
-/// modelled here; the remaining per-model maps are not yet modelled.
+/// conserved. `Interconnect::write_conflict` holds the per-model address→class
+/// maps; SameBoy's two-stage classes collapse to their final value-write phase.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Conflict {
     /// `GB_CONFLICT_READ_OLD` (`sm83_cpu.c:131`): plain write, commits at the
@@ -45,10 +43,9 @@ pub(crate) enum Conflict {
     /// then one extra T elapses — the `wx_just_changed` / `tile_sel_glitch`
     /// one-T window — before re-parking 3. So the running clock advances past
     /// the commit while only 3 T stay parked, conserving the per-M-cycle 4.
-    /// Today [`Interconnect::write_conflict`] routes only WX_DMG here; the
-    /// value-dependent LCDC tile-sel glitch (`((~value & old) & TILE_SEL)`)
-    /// can't be decided from the address alone, so CGB LCDC stays `ReadOld`
-    /// until its memory effect lands in a later stage.
+    /// `Interconnect::write_conflict` routes only WX_DMG here: the LCDC
+    /// tile-sel glitch is value-dependent (`(~value & old) & TILE_SEL`) and
+    /// can't be decided from the address alone, so CGB LCDC takes `ReadOld`.
     WxHold,
 }
 
@@ -109,10 +106,8 @@ impl CycleClock {
     /// also driven *standalone* by memory/blocking unit tests (no preceding
     /// fetch, `pending == 0`); the `saturating_sub` below keeps that case
     /// underflow-safe — it commits at the current clock and still conserves the
-    /// per-M-cycle 4. The live `Bus::write` discards the returned commit
-    /// position today (only the per-model class *lookup*
-    /// [`Interconnect::write_conflict`] is wired), so this stays write-only
-    /// scaffold.
+    /// per-M-cycle 4. `Bus::write` discards the returned commit position; the
+    /// advance/re-park split is the live effect.
     pub(crate) fn write(&mut self, conflict: Conflict) -> u64 {
         let repark = match conflict {
             Conflict::ReadOld => {
