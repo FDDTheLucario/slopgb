@@ -437,97 +437,128 @@ fn apply(field: Field, s: &mut Settings, ct: &Ctrl, px: i32) {
     }
 }
 
-/// Reset only the active tab's live fields to their defaults.
-pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
-    let d = Settings::default();
-    match tab {
-        OptionsTab::Graphics => {
-            s.stretch = d.stretch;
-            s.frame_blend = d.frame_blend;
-            s.doubler = d.doubler;
-            s.sgb_border_screenshot = d.sgb_border_screenshot;
-            s.disable_sgb_colors = d.disable_sgb_colors;
+/// Reset one live field to its default — the sibling of [`apply`] (which mutates
+/// a field from a click). Together they keep each field's behavior in one place.
+/// Routed/action fields (`Configure*` / `Pick*` / `SoundCard` / `PureBgb`) own no
+/// resettable setting, so they no-op. `d` is `Settings::default()`, passed in so
+/// the caller builds it once per tab.
+fn reset_field(field: Field, s: &mut Settings, d: &Settings) {
+    match field {
+        Field::Stretch => s.stretch = d.stretch,
+        Field::DisableSgbColors => s.disable_sgb_colors = d.disable_sgb_colors,
+        Field::LowercaseDisasm => s.lowercase_disasm = d.lowercase_disasm,
+        Field::FrameBlend => s.frame_blend = d.frame_blend,
+        Field::Doubler => s.doubler = d.doubler,
+        Field::DmgGbcLcd => s.dmg_gbc_lcd = d.dmg_gbc_lcd,
+        Field::Contrast => s.contrast = d.contrast,
+        Field::Palette031 => s.palette_0_31 = d.palette_0_31,
+        Field::PaletteSelectShade => s.palette_edit_shade = d.palette_edit_shade,
+        // Any RGB slider restores the whole custom shade palette to default.
+        Field::PaletteR | Field::PaletteG | Field::PaletteB => s.dmg_palette = d.dmg_palette,
+        Field::SchemeCycle => s.select_scheme(d.scheme),
+        Field::SgbBorderScreenshot => s.sgb_border_screenshot = d.sgb_border_screenshot,
+        Field::ScreenshotFormat => s.screenshot_format = d.screenshot_format,
+        Field::ScreenshotButtonMode => s.screenshot_copies = d.screenshot_copies,
+        Field::Mono => s.mono = d.mono,
+        Field::LowercaseHex => s.lowercase_hex = d.lowercase_hex,
+        Field::ShowClocks => s.show_clocks = d.show_clocks,
+        Field::RgbdsDisasm => s.rgbds_disasm = d.rgbds_disasm,
+        Field::TileHex8bit => s.tile_hex_8bit = d.tile_hex_8bit,
+        Field::MemoryWindow => s.memory_window = d.memory_window,
+        Field::EscShowsDebugger => s.esc_shows_debugger = d.esc_shows_debugger,
+        Field::RegistersEditable => s.registers_editable = d.registers_editable,
+        Field::StartInDebugger => s.start_in_debugger = d.start_in_debugger,
+        Field::MemLiveUpdate => s.mem_live_update = d.mem_live_update,
+        Field::CpuUsageMeter => s.cpu_usage_meter = d.cpu_usage_meter,
+        Field::ShowFramerate => s.show_framerate = d.show_framerate,
+        Field::FreezeRecent => s.freeze_recent = d.freeze_recent,
+        Field::PauseOnFocusLoss => s.pause_on_focus_loss = d.pause_on_focus_loss,
+        Field::ShowErrorsOnRomLoad => s.show_errors_on_rom_load = d.show_errors_on_rom_load,
+        Field::LoadRomDialogOnStartup => {
+            s.load_rom_dialog_on_startup = d.load_rom_dialog_on_startup
         }
-        OptionsTab::System => {
-            s.model = d.model;
-            s.uninited_wram = d.uninited_wram;
+        Field::ReduceCpu => s.reduce_cpu = d.reduce_cpu,
+        Field::RecoverySaveState => s.recovery_save_state = d.recovery_save_state,
+        Field::UninitedWram => s.uninited_wram = d.uninited_wram,
+        Field::AutoResetOnSystemChange => {
             s.auto_reset_on_system_change = d.auto_reset_on_system_change;
-            s.rewind_enabled = d.rewind_enabled;
-            s.rtc_vba_sav = d.rtc_vba_sav;
-            s.rtc_bgb_legacy = d.rtc_bgb_legacy;
         }
-        OptionsTab::Debug => {
-            s.lowercase_disasm = d.lowercase_disasm;
-            s.lowercase_hex = d.lowercase_hex;
-            s.show_clocks = d.show_clocks;
-            s.rgbds_disasm = d.rgbds_disasm;
-            s.tile_hex_8bit = d.tile_hex_8bit;
-            s.memory_window = d.memory_window;
-            s.esc_shows_debugger = d.esc_shows_debugger;
-            s.registers_editable = d.registers_editable;
-            s.start_in_debugger = d.start_in_debugger;
-            s.mem_live_update = d.mem_live_update;
-            s.cpu_usage_meter = d.cpu_usage_meter;
-        }
-        // The wired break conditions; the rest of the tab is inert.
-        OptionsTab::Exceptions => {
-            s.break_ld_b_b = d.break_ld_b_b;
-            s.break_invalid_op = d.break_invalid_op;
-            s.break_echo_ram = d.break_echo_ram;
-            s.break_lcd_off_vblank = d.break_lcd_off_vblank;
-            s.break_oam_dma_bad = d.break_oam_dma_bad;
-            s.break_incdec_fexx = d.break_incdec_fexx;
-            s.break_sgb_transfer = d.break_sgb_transfer;
-        }
-        OptionsTab::Sound => {
-            s.volume = d.volume;
-            s.mono = d.mono;
-            s.audio_device = d.audio_device.clone();
-            s.audio_sample_rate = d.audio_sample_rate;
-            s.audio_latency = d.audio_latency;
-            s.audio_8bit = d.audio_8bit;
-            s.audio_hq = d.audio_hq;
-        }
-        OptionsTab::GbColors => {
-            s.select_scheme(d.scheme);
-            s.dmg_gbc_lcd = d.dmg_gbc_lcd;
-            s.contrast = d.contrast;
-            s.palette_edit_shade = d.palette_edit_shade;
-            s.palette_0_31 = d.palette_0_31;
-        }
-        // Both wizard maps reset here too — the App re-derives its live
-        // bindings from these strings when the dialog applies.
-        OptionsTab::Joypad => {
-            s.allow_opposing = d.allow_opposing;
-            s.gamepad_needs_focus = d.gamepad_needs_focus;
-            s.gamepad_map = d.gamepad_map.clone();
-            s.key_map = d.key_map.clone();
-            s.screenshot_format = d.screenshot_format;
-            s.screenshot_copies = d.screenshot_copies;
-            s.rapid_speed = d.rapid_speed;
-            s.record_audio = d.record_audio;
-            s.record_video = d.record_video;
-            s.record_audio_channels = d.record_audio_channels;
-        }
-        OptionsTab::Misc => {
-            s.ff_speed = d.ff_speed;
-            s.framerate_limit = d.framerate_limit;
-            s.show_framerate = d.show_framerate;
-            s.freeze_recent = d.freeze_recent;
-            s.pause_on_focus_loss = d.pause_on_focus_loss;
-            s.show_errors_on_rom_load = d.show_errors_on_rom_load;
-            s.load_rom_dialog_on_startup = d.load_rom_dialog_on_startup;
-            s.reduce_cpu = d.reduce_cpu;
-            s.recovery_save_state = d.recovery_save_state;
-        }
-        OptionsTab::Theme => s.theme = d.theme,
-        // Reset the allow-mutation toggle + re-enable every discovered plugin
-        // (the dir + which plugins exist aren't "defaults" to reset).
-        OptionsTab::Plugins => {
-            s.plugins.allow_mutation = d.plugins.allow_mutation;
-            for e in &mut s.plugins.entries {
-                e.enabled = true;
+        Field::RewindEnabled => s.rewind_enabled = d.rewind_enabled,
+        Field::Model(_) => s.model = d.model,
+        Field::Volume => s.volume = d.volume,
+        Field::SampleRate(_) => s.audio_sample_rate = d.audio_sample_rate,
+        Field::Latency => s.audio_latency = d.audio_latency,
+        Field::EightBit => s.audio_8bit = d.audio_8bit,
+        Field::AudioHq => s.audio_hq = d.audio_hq,
+        Field::FfSpeed => s.ff_speed = d.ff_speed,
+        Field::FramerateLimit => s.framerate_limit = d.framerate_limit,
+        Field::GamepadNeedsFocus => s.gamepad_needs_focus = d.gamepad_needs_focus,
+        Field::AllowOpposing => s.allow_opposing = d.allow_opposing,
+        Field::RapidSpeed => s.rapid_speed = d.rapid_speed,
+        Field::RecordAudio => s.record_audio = d.record_audio,
+        Field::RecordVideo => s.record_video = d.record_video,
+        Field::RecordAudioChannels => s.record_audio_channels = d.record_audio_channels,
+        Field::RtcVbaSav => s.rtc_vba_sav = d.rtc_vba_sav,
+        Field::RtcBgbLegacy => s.rtc_bgb_legacy = d.rtc_bgb_legacy,
+        Field::BreakLdBB => s.break_ld_b_b = d.break_ld_b_b,
+        Field::BreakInvalidOp => s.break_invalid_op = d.break_invalid_op,
+        Field::BreakEchoRam => s.break_echo_ram = d.break_echo_ram,
+        Field::BreakLcdOffVblank => s.break_lcd_off_vblank = d.break_lcd_off_vblank,
+        Field::BreakOamDmaBad => s.break_oam_dma_bad = d.break_oam_dma_bad,
+        Field::BreakIncDecFexx => s.break_incdec_fexx = d.break_incdec_fexx,
+        Field::BreakSgbTransfer => s.break_sgb_transfer = d.break_sgb_transfer,
+        Field::BootromsEnabled => s.bootroms_enabled = d.bootroms_enabled,
+        Field::Theme(_) => s.theme = d.theme.clone(),
+        Field::PluginAllowMutation => s.plugins.allow_mutation = d.plugins.allow_mutation,
+        Field::PluginEnable(i) => {
+            if let Some(e) = s.plugins.entries.get_mut(i) {
+                e.enabled = true; // a discovered plugin defaults to enabled
             }
         }
+        // Routed/action fields own no resettable setting.
+        Field::ConfigureKeyboard
+        | Field::ConfigureGamepad
+        | Field::ClearGamepad
+        | Field::PickBootrom(_)
+        | Field::PickPluginsDir
+        | Field::SoundCard
+        | Field::PureBgb => {}
     }
 }
+
+/// Settings a tab owns that no control drives (so [`controls`] can't surface
+/// them), reset alongside the rendered ones — the wizard key maps behind the
+/// Joypad `configure…` buttons, and the Sound device behind the routed soundcard
+/// dropdown. The App re-derives its live bindings from these strings on apply.
+fn reset_uncontrolled(tab: OptionsTab, s: &mut Settings, d: &Settings) {
+    match tab {
+        OptionsTab::Sound => s.audio_device = d.audio_device.clone(),
+        OptionsTab::Joypad => {
+            s.gamepad_map = d.gamepad_map.clone();
+            s.key_map = d.key_map.clone();
+        }
+        _ => {}
+    }
+}
+
+/// Reset the active tab's live settings to their defaults. The builders
+/// ([`controls`]) are the one source of which fields a tab owns, so a control
+/// and its reset can't silently drift apart: every field the tab renders is
+/// reset via [`reset_field`], plus the handful with no control ([`reset_uncontrolled`]).
+pub(crate) fn reset_defaults(tab: OptionsTab, s: &mut Settings) {
+    let d = Settings::default();
+    // Content rect large enough for every builder to place all its controls; the
+    // field set a builder returns doesn't depend on the exact geometry.
+    let fields: Vec<Field> = controls(tab, s, Rect::new(0, 0, 760, 560))
+        .into_iter()
+        .filter_map(|c| c.field)
+        .collect();
+    for f in fields {
+        reset_field(f, s, &d);
+    }
+    reset_uncontrolled(tab, s, &d);
+}
+
+#[cfg(test)]
+#[path = "tabs_tests.rs"]
+mod tests;
