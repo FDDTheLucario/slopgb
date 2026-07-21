@@ -43,8 +43,19 @@ and are not music commands). On a changed `port0`:
   playing).
 - **`$01`–`$7F`** → **play** the song at `$2B00` from the start — but only once
   the song data is actually present (see "Play may precede the transfer" below).
-- **`$80`–`$FF`** → **stop / idle** (bit 7 set = stop, not a song index; do not
-  restart). Return to the exact power-on idle state so a later play cold-starts.
+- **`$80`–`$FF`** → **fade out** (bit 7 set = stop, not a song index; do not
+  restart). This is NOT an instant cut: set the SGB-master target to `0`; **the music
+  KEEPS PLAYING NORMALLY (the sequencer runs) while the master slews down** — measured
+  on the reference, voices keep changing (new notes key on) as DSP MVOL falls `$60`→…
+  →`0`, so do NOT freeze the sequencer. When the master reaches `0`, go idle (voices
+  off, power-on idle state so a later play cold-starts). **The fade must be quick
+  enough to finish and stop the song BEFORE the host loads the next song over `$2B00`.**
+  The host preloads the next song (a `SOU_TRN` overwriting `$2B00`) and then plays it,
+  and on the reference the fading song has already stopped by then. If the fade is so
+  slow that the sequencer is still reading `$2B00` when the reload lands, it reads the
+  new song's bytes through the old song's stale track cursors → a stuck/held garbage
+  note. So keep the fade-out reasonably fast (it stops the old song in well under the
+  gap before the next song's play command).
 
 Echoing the command back is harmless but not required. The main loop must ALWAYS
 poll `port0` every iteration — no path (stop, idle) may block it.
@@ -62,11 +73,11 @@ non-zero high byte commits the engine to playing. (Starting on a `0` pointer wal
 into zero-page, hits a `$0000` end-word, and latches silence forever — the failure
 this guards against.)
 
-**No fade:** there is no confirmed host signal for a music fade-out (an earlier
-draft wrongly read `port3 != 0` as fade — that byte is the SFX-attributes byte and
-is nonzero for ordinary sound effects). Leave any `state 2` / `fade_step` code
-present but unreachable until a real fade trigger is identified; never enter it
-from `port3`.
+**Fade trigger = `port0` in `$80`–`$FF`, NOT `port3`.** (An earlier draft wrongly
+read `port3 != 0` as fade — that byte is the SFX-attributes byte and is nonzero for
+ordinary sound effects; never fade from `port3`.) The confirmed host fade-out
+signal is a `port0` stop code (`$80`–`$FF`); it lowers the SGB-master target to `0`
+(next section), it does not cut instantly.
 
 ## Song data (at `$2B00`)
 All pointers are little-endian 16-bit ARAM addresses.
@@ -179,20 +190,23 @@ before reading the next event. (Gate = articulation; it must NOT change the tota
 1. **SGB hardware master = the DSP main volume (`$0C/$1C` MVOL L/R).** This is the
    SGB's own output level, driven by the DRIVER, never by song data. MVOL is
    SIGNED, so a large unsigned song byte written here goes negative (`$F8` = −8 ≈
-   mute) — NEVER write a song value to it. It is **boot-relative and slew-limited**:
-   set to `0` ONLY at engine boot, it then ramps up toward a target of `$60` on a
-   WALL-CLOCK schedule (paced by the base-tick timer, a few `+1` steps per so many
-   base ticks) and holds `$60` once reached. Crucially this ramp runs **continuously
-   from boot regardless of play state — it advances even while idle, before any song
-   plays.** Do NOT reset it on song start or stop, and do NOT gate it on the
-   sequencer. Consequence: whether a song fades in depends only on WHEN it starts
-   relative to boot. A song that plays immediately at boot catches the master
-   mid-ramp and audibly fades in (measured: ~`$03` at half a second, `$60` at
-   steady state). A song that starts a second or two later — after the master has
-   already slewed to `$60` during the silent boot/logo screens — starts at full
-   with NO fade. (This is why the same first-and-only `SOUND` command fades one ROM
-   and not another.) Stopping a song keys its voices off but leaves the master at
-   its current level.
+   mute) — NEVER write a song value to it. Three behaviors, kept distinct:
+   - **Boot fade-IN (one-time).** MVOL is `0` ONLY at boot; from there it slews up to
+     `$60` on the base-tick (wall-clock) timer, advancing even while idle. A song
+     that plays during this ramp catches it and audibly fades in (measured: ~`$03` at
+     half a second, `$60` at steady state); a song that starts later — after the ramp
+     already reached `$60` during the silent boot/logo screens — starts at full. This
+     is the ONLY slow fade-in; it is a boot-relative ramp, not a per-song thing.
+   - **Play snaps to full.** Once the master has reached `$60`, a play command
+     (`$01`–`$7F`) sets MVOL to `$60` **immediately (snap, no ramp)**. So after a
+     fade-out drove the master to `0` and the song stopped, the NEXT song starts at
+     full `$60` with NO fade-in (measured: title after the intro fade-out starts at
+     `$60`). Do not re-run the slow fade-in per song.
+   - **Fade-OUT** (`port0` `$80`–`$FF`): slew MVOL DOWN to `0` (base-tick paced) while
+     **the music keeps playing normally** (sequencer runs; measured `$60`→`$38`→…→`0`
+     with voices still changing). At `0`, key voices off and go idle. Keep it quick
+     enough to stop the song before the host reloads `$2B00` (see the `$80` protocol
+     note). Fade-out rate is a by-ear tunable.
 2. **Song master volume = `$E5 vv`.** `$E5` sets a SOFTWARE scalar (`vv`/256, so
    `$F8` ≈ unity/full) applied to every voice's computed volume in software. It
    MUST NOT be written to the DSP main-volume register. Default = full.

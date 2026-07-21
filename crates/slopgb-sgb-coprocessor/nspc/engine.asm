@@ -61,11 +61,17 @@ BANKS 1
 .DEFINE ADSR1_DEF      $DF      ; default ADSR1 before any $E0 (enable, fast attack)
 .DEFINE ADSR2_DEF      $C0      ; default ADSR2 before any $E0 (sustain 6/8, hold)
 .DEFINE GAIN_DEF       $00      ; default GAIN before any $E0 (unused while ADSR on)
-.DEFINE FADE_RATE      2        ; engine ticks per master-volume step during fade-out
-.DEFINE FADE_IN_RATE   8        ; BASE ticks per +1 DSP main-volume step during the
-                                ; boot-relative master fade-in (0 -> SGB_MASTER, 96 steps).
-                                ; The base tick is ~500 Hz, so 8 base ticks/step ramps in
-                                ; ~768 base ticks ~= 1.5 s. By-ear tunable; raise to slow.
+.DEFINE FADE_IN_RATE   8        ; BASE ticks per +1 DSP main-volume step during the master
+                                ; fade-IN (mvol climbs to SGB_MASTER, 96 steps). The base
+                                ; tick is ~500 Hz, so 8 base ticks/step ramps in ~768 base
+                                ; ticks ~= 1.5 s. By-ear tunable; raise to slow.
+.DEFINE FADE_OUT_RATE  4        ; BASE ticks per -1 DSP main-volume step during the master
+                                ; fade-OUT (mvol falls to 0 on a stop command, 96 steps
+                                ; ~= 1.3 s). Must finish + stop the song BEFORE the host
+                                ; reloads $2B00 for the next song, or the still-running
+                                ; sequencer reads the new song's bytes through stale track
+                                ; cursors -> a garbage held note (SPEC.md $80..$FF). By-ear
+                                ; tunable; raise to slow the fade-out.
 
 ; --------------------------------------------------------------------------
 ; Direct-page variables ($10..$77). Direct page 0 is selected (CLRP) so that
@@ -77,13 +83,17 @@ BANKS 1
 .DEFINE songlp      $12      ; (word) cursor into the song list
 .DEFINE tempo       $14      ; current tempo byte
 .DEFINE mvol        $15      ; current DSP main volume (MVOL L/R): set to 0 only at boot,
-                             ; then slews toward SGB_MASTER and holds; persists across
+                             ; then a single slew-limited value that chases mastertarget in
+                             ; either direction (fade-in up / fade-out down); persists across
                              ; stops and song changes (SPEC.md "Master volume & fade-in").
 .DEFINE tickacc     $16      ; 8-bit tempo accumulator (carry = one engine tick)
 .DEFINE lastp0      $17      ; last-seen port0 ($F4) command byte
 .DEFINE lastp3      $18      ; last-seen port3 ($F7) command byte
-.DEFINE state       $19      ; 0=idle 1=playing 2=fading
-.DEFINE fadeacc     $1A      ; fade step accumulator
+.DEFINE state       $19      ; 0=idle 1=playing. A fade-out does NOT change state: the
+                             ; song keeps playing (state stays 1) while ramp_master slews
+                             ; the master to 0, then ramp_master's stop_all idles it
+                             ; (SPEC.md fade-OUT -- the music keeps playing during the fade).
+.DEFINE fadeacc     $1A      ; master-volume slew accumulator (shared by fade-in/out)
 .DEFINE activemask  $1B      ; bit i set = track i still playing this frame
 .DEFINE vbase       $1C      ; current voice DSP register base (voice<<4)
 .DEFINE vbit        $1D      ; current voice bit (1<<voice)
@@ -146,6 +156,14 @@ BANKS 1
 .DEFINE songvol     $D1      ; ($E5) software song-master scalar (vv/256), folded into
                              ; every voice volume in software; NOT a DSP register --
                              ; DSP MVOL is signed (SPEC.md "Master volume"). Default $FF.
+.DEFINE mastertarget $D2     ; DSP-master target that the slew-limited mvol chases:
+                             ; SGB_MASTER while a song is active (boot + start_song), 0 on a
+                             ; stop/fade-out command. One value, either direction (ramp_master,
+                             ; SPEC.md "Master volume & fade-in").
+.DEFINE booted      $D3      ; 0 until the one-time boot fade-in reaches SGB_MASTER, then 1.
+                             ; Gates the fade-in as boot-ONLY: once set, start_song snaps the
+                             ; master to full instead of re-running the slow fade (SPEC.md
+                             ; "Master volume & fade-in": boot fade-IN one-time / play snaps).
 
 ; --------------------------------------------------------------------------
 ; Macros for S-DSP register access via $F2 (address) / $F3 (data).
@@ -224,6 +242,10 @@ init_v:
     mov mvol, #0         ; boot the software master at 0 to agree with the DSP MVOL
                          ; init above -- the ONLY place the master starts at 0; it
                          ; then slews up to $60 once (SPEC.md "Master volume & fade-in")
+    mov mastertarget, #SGB_MASTER   ; chase $60 from boot (fade-in emerges from WHEN a
+                                    ; song starts relative to this ramp; SPEC.md)
+    mov booted, #0       ; the one-time boot fade-in has not completed yet; ramp_master
+                         ; sets this once mvol reaches SGB_MASTER (SPEC.md boot-only fade-in)
     mov kofsoft, #$ff
     mov konpending, #0
     mov activemask, #0
@@ -245,9 +267,14 @@ main:
 ; plays, and the song must keep playing. On a changed port0:
 ;   $00        -> no music change (SFX-only command; leave the song playing)
 ;   $01..$7F   -> play that song at $2B00 from the start
-;   $80..$FF   -> stop / idle (bit7 set = stop, not a song index; no restart)
-; There is no confirmed host fade signal; never enter state 2 (fade_step stays
-; dormant). Then echo port0 back (harmless, not required).
+;   $80..$FF   -> fade out: drop mastertarget to 0 and let ramp_master slew the master
+;                 down. The song KEEPS PLAYING NORMALLY meanwhile -- state stays 1, the
+;                 sequencer runs, new notes key on as MVOL falls $60->0 (SPEC.md fade-OUT:
+;                 do NOT freeze the sequencer). ramp_master keys voices off + idles (via
+;                 stop_all) when it reaches 0 (bit7 set = stop, not a song index; no
+;                 restart). NOT an instant cut. FADE_OUT_RATE is fast enough that the
+;                 song stops before the host reloads $2B00 for the next song.
+; Then echo port0 back (harmless, not required).
 ; ==========================================================================
 poll_comm:
     mov a, $f4
@@ -258,11 +285,15 @@ pc_new:
     mov a, $f4
     mov lastp0, a           ; store does not touch flags; N/Z still reflect port0
     beq pc_echo             ; $00 -> SFX-only, leave the current song playing
-    bmi pc_stop             ; bit7 set ($80..$FF) -> stop / idle, no restart
+    bmi pc_stop             ; bit7 set ($80..$FF) -> fade out, no restart
     call !start_song        ; $01..$7F -> play that song, resetting playback state
     jmp !pc_echo
 pc_stop:
-    call !stop_all
+    mov mastertarget, #0    ; fade out: master slews to 0; ramp_master keys voices off +
+                            ; idles (stop_all) when it lands (SPEC.md). NOT instant. No
+                            ; stop_all here -- the master must slew down first. Do NOT touch
+                            ; state: the song keeps playing (state stays 1, sequencer runs)
+                            ; while the master slews down (SPEC.md fade-OUT: no freeze).
 pc_echo:
     mov a, lastp0
     mov $f4, a
@@ -270,16 +301,19 @@ pc_echo:
 
 ; ==========================================================================
 ; Timer service: convert elapsed base ticks into engine ticks via the tempo
-; accumulator, running the sequencer (and fade) once per engine tick.
+; accumulator, running the sequencer once per engine tick. The master-volume slew
+; (ramp_master) runs first, every base tick, whether idle or playing.
 ; ==========================================================================
 service_timer:
     mov a, $fd              ; elapsed base ticks (0..15), reading clears it -- read
     beq st_ret             ; ALWAYS, before the play-state gate, so the master ramp
     mov basecnt, a         ; runs whether idle or playing
-    call !ramp_master       ; boot-relative master fade-in: advances every base tick
+    call !ramp_master       ; master slew toward mastertarget: advances every base tick
                            ; regardless of play state (SPEC.md "Master volume & fade-in")
     mov a, state
-    beq st_ret             ; idle: master ramped above; no sequencer to run
+    beq st_ret             ; idle (state 0) skips the sequencer; any playing state runs it.
+                           ; The song keeps sequencing all through a fade-out (SPEC.md
+                           ; fade-OUT: no freeze); ramp_master already ran above regardless.
 st_loop:
     mov a, tickacc
     clrc
@@ -287,17 +321,11 @@ st_loop:
     mov tickacc, a
     bcc st_cont             ; no wrap past 256 -> no engine tick this base tick
     call !do_engine_tick
-    mov a, state
-    cmp a, #2
-    beq st_fadeout          ; dormant fade-out (state 2)
 st_cont:
     dec basecnt
     bne st_loop
 st_ret:
     ret
-st_fadeout:
-    call !fade_step
-    jmp !st_cont
 
 ; ==========================================================================
 ; One engine tick: advance every active track; key-ons are batched and
@@ -356,50 +384,53 @@ det_ret:
     ret
 
 ; ==========================================================================
-; Fade-out: step the master volume down toward 0, then stop.
-; ==========================================================================
-fade_step:
-    inc fadeacc
-    mov a, fadeacc
-    cmp a, #FADE_RATE
-    bcc fs_ret
-    mov fadeacc, #0
-    mov a, mvol
-    beq fs_done             ; already silent
-    dec a
-    mov mvol, a
-    mov $f2, #$0c           ; MVOLL
-    mov $f3, a
-    mov a, mvol
-    mov $f2, #$1c           ; MVOLR
-    mov $f3, a
-    ret
-fs_done:
-    call !stop_all
-fs_ret:
-    ret
-
-; ==========================================================================
-; ramp_master: boot-relative fade-in of the DSP main volume (SGB hardware
-; master, $0C/$1C MVOL L/R) up toward SGB_MASTER, then hold. Paced by the base
-; -tick timer and called from service_timer BEFORE the play-state gate, so it
-; advances on every elapsed base tick whether idle or playing -- the master
-; slews to $60 during the silent boot/logo screens, and whether a song fades in
-; depends only on WHEN it starts relative to boot (SPEC.md "Master volume &
-; fade-in"). Driven only by the driver, never by song data (MVOL is signed, so a
-; song byte there mutes). Iterates on a COPY of basecnt in Y -- must not disturb
-; basecnt, which the sequencer st_loop still needs.
+; ramp_master: slew the DSP main volume (SGB hardware master, $0C/$1C MVOL L/R)
+; toward mastertarget -- one routine, both directions (SPEC.md "Master volume &
+; fade-in"). Paced by the base-tick timer and called from service_timer BEFORE the
+; play-state gate, so it advances on every elapsed base tick whether idle or
+; playing. Whether a song audibly fades IN depends only on WHEN it starts relative
+; to the boot ramp toward $60; a stop command drops mastertarget to 0 and the same
+; slew fades OUT, keying voices off + going idle when it lands. Driven only by the
+; driver, never by song data (MVOL is signed, so a song byte there mutes). Iterates
+; on a COPY of basecnt in Y -- must not disturb basecnt, which st_loop still needs.
 ; ==========================================================================
 ramp_master:
     mov a, mvol
-    cmp a, #SGB_MASTER
-    bcs rm_ret             ; already at target -> hold, touch nothing
+    cmp a, mastertarget    ; CMP A,dp: sets Z (equal) and C (mvol >= target)
+    beq rm_ret             ; at target -> hold, touch nothing
+    bcc rm_up              ; mvol < target -> fade in (step up)
+    ; mvol > target -> fade out (step down)
     mov y, basecnt         ; copy the elapsed base-tick count; do NOT decrement basecnt
-rm_tick:
-    inc fadeacc            ; base-tick accumulator (state-2 fade-out is dormant, so
-    mov a, fadeacc         ; reusing fadeacc here does not collide)
+rm_dn:
+    inc fadeacc
+    mov a, fadeacc
+    cmp a, #FADE_OUT_RATE
+    bcc rm_dn_next         ; not enough base ticks elapsed for the next -1 step
+    mov fadeacc, #0
+    dec mvol
+    mov a, mvol
+    mov $f2, #$0c          ; MVOLL
+    mov $f3, a
+    mov $f2, #$1c          ; MVOLR
+    mov $f3, a
+    mov a, mvol
+    beq rm_dn_done         ; reached 0 -> fade-out complete
+    cmp a, mastertarget
+    beq rm_ret             ; reached a nonzero target -> hold
+rm_dn_next:
+    dec y
+    bne rm_dn
+    ret
+rm_dn_done:
+    call !stop_all         ; fade-out done: voices off + idle (SPEC.md). Leaves mvol/MVOL
+    ret                    ; at 0; a later play sets mastertarget=$60 and fades back in.
+rm_up:
+    mov y, basecnt         ; copy the elapsed base-tick count; do NOT decrement basecnt
+rm_up_loop:
+    inc fadeacc
+    mov a, fadeacc
     cmp a, #FADE_IN_RATE
-    bcc rm_next            ; not enough base ticks elapsed for the next +1 step
+    bcc rm_up_next         ; not enough base ticks elapsed for the next +1 step
     mov fadeacc, #0
     inc mvol
     mov a, mvol
@@ -407,11 +438,16 @@ rm_tick:
     mov $f3, a
     mov $f2, #$1c          ; MVOLR
     mov $f3, a
-    cmp a, #SGB_MASTER
-    bcs rm_ret            ; reached target -> done
-rm_next:
+    mov a, mvol
+    cmp a, mastertarget
+    bne rm_up_next         ; not at target yet -> keep ramping
+    mov booted, #1         ; up-ramp reached SGB_MASTER: the one-time boot fade-in is done.
+    ret                    ; From now start_song snaps to full instead of re-fading (SPEC.md
+                           ; boot-only fade-IN). Only the up path sets it; the down path
+                           ; (fade-out to 0) must not touch booted.
+rm_up_next:
     dec y
-    bne rm_tick
+    bne rm_up_loop
 rm_ret:
     ret
 
@@ -426,6 +462,8 @@ start_song:
     mov tempo, a
     mov tickacc, #0
     mov fadeacc, #0
+    mov mastertarget, #SGB_MASTER   ; chase $60 again: a song played after a fade-out left
+                                    ; the master at 0, so it must fade back in (SPEC.md)
     mov songvol, #$ff       ; song-master scalar full until an $E5 lowers it (SPEC.md)
     mov konpending, #0
     mov transpose, #0       ; clear global transpose for the new song
@@ -451,6 +489,21 @@ clr_ttrans:
     mov lastp0, #0
     ret
 ss_ready:
+    ; Play snaps the master to full -- but only AFTER the one-time boot fade-in
+    ; (booted != 0). A song starting after a fade-out (which drove the master to 0)
+    ; then begins at full $60 with NO re-fade (SPEC.md "Master volume": play snaps to
+    ; full). If booted == 0 we are still in the boot ramp: leave mvol alone so the
+    ; slow boot fade-in keeps ramping (mastertarget = SGB_MASTER, set above, still
+    ; drives ramp_master's up-slew). mov a,booted sets Z with no clobber before beq.
+    mov a, booted
+    beq ss_play
+    mov a, #SGB_MASTER
+    mov mvol, a            ; snap the slew-limited master to full immediately
+    mov $f2, #$0c          ; MVOLL = SGB_MASTER
+    mov $f3, a
+    mov $f2, #$1c          ; MVOLR = SGB_MASTER
+    mov $f3, a
+ss_play:
     mov a, #1               ; mark playing (song-end handler clears it)
     mov state, a
     call !load_frame

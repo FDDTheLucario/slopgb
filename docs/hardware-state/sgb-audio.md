@@ -428,15 +428,20 @@ code, so SGB music becomes upstreamable — only the *samples* need the user's R
      song-pointer high byte as not-ready and re-poll until the data lands.
   7. **Master volume** (was near-mute): `$E5 $F8` was written straight to DSP MVOL,
      which is **signed** (`$F8` = −8 ≈ mute). Fix: `$E5` is a *software* per-voice
-     scalar (`songvol`); the DSP main volume is the SGB hardware master, **boot-
-     relative and slew-limited** — `0` only at boot, then ramps to `$60` on the
-     base-tick timer regardless of play state and holds. The fade-in is emergent:
-     a song that plays at boot catches the ramp (fades in); one that starts after
-     the master already reached `$60` (post-logo screens) starts at full, no fade.
-     `CHVOL_DEFAULT` `$18`→`$40` (per-voice was `$12` vs. the reference `$2E`).
-- **Left to do (behind the flag):** echo/reverb (`$F5`/`$F7` operands are consumed
-  but the DSP echo path is off; the ROM engine runs EON=`$07`, EVOL=`$C0`), and the
-  music **fade-out** (dormant `fade_step`/state 2 — trigger not yet identified).
+     scalar (`songvol`); the DSP main volume is the SGB hardware master. `0` only at
+     boot, it slews up to `$60` on the base-tick timer (boot-only fade-in — a song
+     playing during that ramp catches it; one starting after starts at full). Once
+     it has reached `$60` (`booted`), a play command **snaps** to `$60` (no per-song
+     fade-in). `CHVOL_DEFAULT` `$18`→`$40` (per-voice was `$12` vs. reference `$2E`).
+  8. **Fade-out** (`port0` `$80`–`$FF`): NOT an instant stop — slew DSP MVOL down to
+     `0` while the music keeps playing (reference keeps sequencing new notes as it
+     fades), then idle. Trigger was `port0` bit 7, confirmed by A/B (`$80` → MVOL
+     `$60`→`0`). It must be quick (`FADE_OUT_RATE`, ~0.8 s): the host reloads `$2B00`
+     with the next song mid-transition, so the fade has to stop the old song before
+     that reload or the sequencer reads the new bytes through stale cursors → a
+     stuck garbage note. (Rate is a tight by-ear margin: too slow ⇒ garbage.)
+- **Left to do (behind the flag):** echo/reverb — `$F5`/`$F7` operands are consumed
+  but the DSP echo path is off; the ROM engine runs EON=`$07`, EVOL=`$C0`.
 - **Diagnostics.** The `coprocessor` MCP tool's status shows `ENG(clean-room)
   songlp/tempo/tickacc/state/activemask/tdurrem` when the flag is set. A/B against
   ground truth by toggling the env var (unset = ROM engine); `dump-spc` (UI or MCP)
