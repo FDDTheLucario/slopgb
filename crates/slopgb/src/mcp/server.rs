@@ -22,6 +22,7 @@ use std::time::Duration;
 
 use super::json::Json;
 use super::plugin_host::PluginMeta;
+use super::sim::SimArgs;
 use super::tools::{Call, ToolResult, parse_scale};
 use super::{Job, ToolInvocation};
 use crate::net_worker::ReapedWorker;
@@ -375,7 +376,13 @@ fn tool_call(msg: &Json, d: &Dispatch) -> Result<Json, (i64, String)> {
             args: args_json,
         })
     } else {
-        build_call(name, args).map(ToolInvocation::Builtin)
+        // `simulate`/`sim-result` drive UI-side fork state, so they carry their
+        // own invocation variants rather than a `dispatch`-routed `Call`.
+        match name {
+            "simulate" => build_simulate(args).map(ToolInvocation::Simulate),
+            "sim-result" => build_sim_result(args).map(|job| ToolInvocation::SimResult { job }),
+            _ => build_call(name, args).map(ToolInvocation::Builtin),
+        }
     };
     match invocation {
         Ok(call) => Ok(match run_on_ui(call, d.tx) {
@@ -442,8 +449,53 @@ fn build_call(name: &str, args: Option<&Json>) -> Result<Call, String> {
         "expr" => Ok(Call::Expr {
             expr: arg("expression")?,
         }),
+        "memdump" => Ok(Call::Memdump {
+            from: arg("from")?,
+            to: arg("to")?,
+            file: arg("file")?,
+        }),
+        "savestate" => Ok(Call::Savestate { file: arg("file")? }),
         other => Err(format!("unknown tool '{other}'")),
     }
+}
+
+/// Parse the `simulate` arguments (a what-if fork; see [`super::sim`]). Kept next
+/// to [`build_call`] but produces its own [`ToolInvocation`] variant, since a
+/// fork lives on the UI-side `Mcp` state rather than running through `dispatch`.
+fn build_simulate(args: Option<&Json>) -> Result<SimArgs, String> {
+    let arg = |k: &str| -> Result<String, String> {
+        args.and_then(|a| a.get(k))
+            .and_then(Json::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| format!("tool 'simulate' needs a string argument '{k}'"))
+    };
+    let opt = |k: &str| {
+        args.and_then(|a| a.get(k))
+            .and_then(Json::as_str)
+            .map(str::to_owned)
+    };
+    Ok(SimArgs {
+        memdump: arg("memdump_file")?,
+        in_from: arg("in_from")?,
+        in_to: arg("in_to")?,
+        out_from: arg("out_from")?,
+        out_to: arg("out_to")?,
+        start: arg("start")?,
+        budget: arg("budget")?,
+        end: opt("end"),
+        savestate: opt("savestate_file"),
+    })
+}
+
+/// Parse the `sim-result` job id.
+fn build_sim_result(args: Option<&Json>) -> Result<u64, String> {
+    let s = args
+        .and_then(|a| a.get("job"))
+        .and_then(Json::as_str)
+        .ok_or_else(|| "tool 'sim-result' needs a string argument 'job'".to_owned())?;
+    s.trim()
+        .parse::<u64>()
+        .map_err(|_| format!("bad job id '{s}' (want a decimal number)"))
 }
 
 fn text_block(s: &str) -> Json {
@@ -592,6 +644,56 @@ fn builtin_tool_defs() -> Json {
             "expr",
             "Evaluate a bgb-style debugger expression (hex default, registers, `[addr]`).",
             &[("expression", "e.g. `bc+1`, `[ff80]`, `pc`")],
+        ),
+        tool(
+            "memdump",
+            "Dump a memory range to a local file as raw bytes (feeds `simulate`).",
+            &[
+                ("from", "start address, AAAA or BB:AAAA hex (BB = bank)"),
+                ("to", "end address (inclusive), same region/bank as `from`"),
+                ("file", "local path to write the raw bytes to"),
+            ],
+        ),
+        tool(
+            "savestate",
+            "Write a full savestate (CPU + VRAM + all machine state, not the ROM) \
+             to a local file — capture a checkpoint before a glitch to feed `simulate`.",
+            &[("file", "local path to write the savestate to")],
+        ),
+        tool_opt(
+            "simulate",
+            "Fork the live machine (a clone incl. VRAM), optionally rewind it to a \
+             savestate, overlay a memdump file, set PC, and run the fork in the \
+             background without touching the live machine. Returns a job id; poll \
+             `sim-result`.",
+            &[
+                ("memdump_file", "memdump file to overlay onto the fork"),
+                ("in_from", "overlay destination start (AAAA or BB:AAAA)"),
+                (
+                    "in_to",
+                    "overlay destination end; range size must equal the file",
+                ),
+                ("out_from", "result-dump start (AAAA or BB:AAAA)"),
+                ("out_to", "result-dump end (inclusive)"),
+                ("start", "PC address to run the fork from (bare hex)"),
+                (
+                    "budget",
+                    "max instructions to run (decimal); a runaway is capped",
+                ),
+            ],
+            &[
+                ("end", "optional PC address to stop at (bare hex)"),
+                (
+                    "savestate_file",
+                    "optional savestate to rewind the fork to first",
+                ),
+            ],
+        ),
+        tool(
+            "sim-result",
+            "Poll a `simulate` job: still-running, or its stop-code \
+             (reached_end / runaway / timed_out) + registers + output-range dump.",
+            &[("job", "the job id returned by `simulate`")],
         ),
     ])
 }
