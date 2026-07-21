@@ -82,6 +82,11 @@ pub(crate) struct Session {
     /// Power-on RAM initialisation (`--ram-init`), re-applied on a power-cycle.
     /// `None` = the deterministic 0xFF cart-SRAM default.
     ram_init: Option<RamInit>,
+    /// A one-shot warning raised while loading (a `.sav` rejected as wrong-size,
+    /// or unreadable). The interactive loader (`App::load_dropped`) takes this and
+    /// shows it in a modal — a rejected `.sav` is data the next save overwrites,
+    /// so the user must see it, not just a console line they never read.
+    pub(crate) load_warning: Option<String>,
 }
 
 impl Session {
@@ -115,6 +120,7 @@ impl Session {
             plugins_dir: None,
             sgb_border: false,
             ram_init: None,
+            load_warning: None,
         }
     }
 
@@ -141,22 +147,29 @@ impl Session {
         .map_err(|e| format!("cannot load ROM '{}': {e}", path.display()))?;
         let sav_path = path.with_extension("sav");
         let mut last_saved = None;
+        let mut load_warning = None;
         match fs::read(&sav_path) {
             Ok(data) => {
                 if gb.load_save_data(&data) {
                     last_saved = Some(data);
                 } else {
-                    eprintln!(
-                        "slopgb: ignoring save file '{}' (wrong size or no battery)",
+                    // Rejected save: the machine boots fresh and the next save
+                    // will overwrite this file — the user must be told, not just
+                    // the console, so back it up first if it matters.
+                    let msg = format!(
+                        "Ignored '{}' (wrong size or cart has no battery). It will be overwritten when the game next saves — back it up first if you need it.",
                         sav_path.display()
                     );
+                    eprintln!("slopgb: {msg}");
+                    load_warning = Some(msg);
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => eprintln!(
-                "slopgb: cannot read save file '{}': {e}",
-                sav_path.display()
-            ),
+            Err(e) => {
+                let msg = format!("Cannot read save file '{}': {e}", sav_path.display());
+                eprintln!("slopgb: {msg}");
+                load_warning = Some(msg);
+            }
         }
         let title = path
             .file_stem()
@@ -180,6 +193,7 @@ impl Session {
             plugins_dir: None,
             sgb_border,
             ram_init,
+            load_warning,
         })
     }
 

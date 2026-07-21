@@ -648,9 +648,13 @@ impl App {
         }
     }
 
-    fn try_open_audio(&mut self) {
+    /// Open the audio stream if it isn't already. Returns the device error on
+    /// failure so a user-initiated open (Enable sound / a Sound-tab device change)
+    /// can surface it in a modal; the passive startup open just logs it, to avoid
+    /// nagging a deliberately audio-less (headless / VM) run every launch.
+    fn try_open_audio(&mut self) -> Result<(), String> {
         if self.audio.is_some() {
-            return;
+            return Ok(());
         }
         let prefs = self.audio_prefs();
         self.audio_prefs_applied = prefs.clone();
@@ -660,8 +664,12 @@ impl App {
                 let mut pipe = AudioPipe::new_with_quality(out, self.settings.audio_hq);
                 pipe.set_volume(self.settings.volume, self.settings.mono);
                 self.audio = Some(pipe);
+                Ok(())
             }
-            Err(e) => eprintln!("slopgb: audio disabled: {e}"),
+            Err(e) => {
+                eprintln!("slopgb: audio disabled: {e}");
+                Err(e)
+            }
         }
     }
 
@@ -673,7 +681,11 @@ impl App {
             return;
         }
         self.audio = None;
-        self.try_open_audio();
+        // A device/samplerate change the user just applied: surface a failure
+        // (else the stream silently drops with no clue why sound stopped).
+        if let Err(e) = self.try_open_audio() {
+            self.show_error("Audio device failed", e);
+        }
         self.resync_pacing();
     }
 
@@ -708,6 +720,11 @@ impl App {
                 new.set_rtc_vba_export(self.settings.rtc_vba_sav);
                 new.set_rtc_bgb_legacy(self.settings.rtc_bgb_legacy);
                 self.session = new;
+                // A rejected/unreadable `.sav` is data the next save overwrites:
+                // surface it in a modal (it also went to the console at load).
+                if let Some(w) = self.session.load_warning.take() {
+                    self.show_error("Save file ignored", w);
+                }
                 // A loaded ROM starts emulation: leave the no-ROM blank state and
                 // (re)apply the DMG palette to the fresh machine (GameBoy::new
                 // resets it to the core grayscale default).

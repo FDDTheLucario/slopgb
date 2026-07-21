@@ -169,6 +169,99 @@ fn reload_rescans_dir_and_preserves_enabled() {
 }
 
 #[test]
+fn runaway_on_frame_traps_instead_of_hanging() {
+    // A plugin whose on_frame is an infinite loop must NOT hang the host: the
+    // metered engine exhausts its per-frame fuel and traps, which pump logs and
+    // skips. If fuel weren't enabled this test would hang forever.
+    let bytes = wasm(&plugin_wat(ABI_VERSION, 1, "(loop $l br $l)"));
+    let mut host = PluginHost::new();
+    host.push(PluginHost::load_bytes("runaway", &bytes).unwrap());
+    host.pump(&gb()); // returns (traps) rather than spinning
+    let log = host.take_log();
+    assert_eq!(log.len(), 1, "the trap is logged: {log:?}");
+    assert!(log[0].contains("trapped"), "{log:?}");
+}
+
+#[test]
+fn pump_survives_a_trapping_plugin_and_runs_the_next() {
+    // One plugin trapping (here: fuel exhaustion) must not stop the others —
+    // pump logs the trap and carries on to the next plugin's on_frame.
+    let runaway = wasm(&plugin_wat(ABI_VERSION, 1, "(loop $l br $l)"));
+    let good = wasm(&plugin_wat(
+        ABI_VERSION,
+        1,
+        "(call $host_log (i32.const 0) (i32.const 2))",
+    ));
+    let mut host = PluginHost::new();
+    host.push(PluginHost::load_bytes("runaway", &runaway).unwrap());
+    host.push(PluginHost::load_bytes("good", &good).unwrap());
+    host.pump(&gb());
+    let log = host.take_log();
+    assert!(
+        log.iter().any(|l| l.contains("[runaway] trapped")),
+        "{log:?}"
+    );
+    assert!(log.iter().any(|l| l == "[good] hi"), "{log:?}");
+}
+
+#[test]
+fn oversized_host_log_len_does_not_overallocate() {
+    // A guest asking host_log for i32::MAX bytes must not trigger a ~2 GiB
+    // allocation: the read length is clamped to the guest's actual memory size.
+    // Reaching the assertion at all proves no OOM/panic on the huge len.
+    let bytes = wasm(&plugin_wat(
+        ABI_VERSION,
+        1,
+        "(call $host_log (i32.const 0) (i32.const 2147483647))",
+    ));
+    let mut host = PluginHost::new();
+    host.push(PluginHost::load_bytes("greedy", &bytes).unwrap());
+    host.pump(&gb()); // must not panic / OOM
+    assert_eq!(host.take_log().len(), 1, "the clamped read still logs once");
+}
+
+#[test]
+fn rejects_malformed_wasm() {
+    let err = PluginHost::load_bytes("junk", b"this is not wasm")
+        .err()
+        .unwrap();
+    assert!(matches!(err, LoadError::Wasm(_)), "{err:?}");
+}
+
+#[test]
+fn load_dir_skips_a_malformed_wasm_and_keeps_the_good_one() {
+    // A garbage `.wasm` in the dir is logged and skipped; a valid plugin beside
+    // it still loads (one bad file can't wedge the whole scan).
+    let dir = std::env::temp_dir().join(format!("slopgb-plugin-bad-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("broken.wasm"), b"not wasm at all").unwrap();
+    std::fs::write(dir.join("ok.wasm"), wasm(&plugin_wat(ABI_VERSION, 1, ""))).unwrap();
+
+    let host = PluginHost::load_dir(&dir).unwrap();
+    let infos = host.infos();
+    assert_eq!(infos.len(), 1, "only the valid plugin is loaded: {infos:?}");
+    assert_eq!(infos[0].name, "ok");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn rejects_module_missing_abi_export() {
+    // A module with no `slopgb_abi_version` export is rejected as MissingExport,
+    // not accepted or panicked on.
+    let src = r#"(module
+      (memory (export "memory") 1)
+      (func (export "slopgb_capabilities") (result i32) i32.const 1)
+      (func (export "slopgb_on_frame")     (result i32) i32.const 0)
+    )"#;
+    let err = PluginHost::load_bytes("noabi", &wasm(src)).err().unwrap();
+    assert!(
+        matches!(err, LoadError::MissingExport("slopgb_abi_version")),
+        "{err:?}"
+    );
+}
+
+#[test]
 fn host_read_sees_snapshot() {
     // on_frame reads byte $0147 (cartridge type) and logs it back via host_read
     // → store at mem[8] → log 1 byte. Simplest observable path: read then drop,

@@ -26,7 +26,8 @@ ROMs (see `docs/ARCHITECTURE.md`).
 
 ## Building
 
-Needs **Rust 1.85+** (the workspace is edition 2024); install via [rustup](https://rustup.rs).
+Needs **Rust 1.97+** (the pinned toolchain in `rust-toolchain.toml`; the workspace
+is edition 2024); install via [rustup](https://rustup.rs).
 
 The **core** (`slopgb-core`) is pure `std` — it builds anywhere with no system
 libraries. The **frontend** (`slopgb`) draws with winit + softbuffer, plays

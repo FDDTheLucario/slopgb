@@ -53,7 +53,9 @@ impl ApplicationHandler for App {
             }
         }
         if !self.opts.mute {
-            self.try_open_audio();
+            // Passive startup open: a failure only logs (see `try_open_audio`) —
+            // no modal, so an audio-less host isn't nagged on every launch.
+            let _ = self.try_open_audio();
         }
         self.window = Some(window);
         // Optionally open debug tool windows at startup (comma-separated

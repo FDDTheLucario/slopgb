@@ -28,6 +28,13 @@ impl LoadedCoprocessor {
     /// Instantiate a coprocessor plugin, enforcing the ABI + capability gate
     /// (tier 3 requires the `SUBSYSTEM` capability).
     pub fn load(bytes: &[u8]) -> Result<Self, LoadError> {
+        // Plain (unmetered) engine, unlike the tier-1/tier-2 loaders: coprocessor
+        // modules are first-party staged wasm (`cargo xtask stage-plugins`) driven
+        // on the host-clocked >=66fps audio path, where per-instruction fuel
+        // metering isn't worth the cost. The host bounds each `run_until` by a
+        // cycle target, so a well-formed chip can't run unbounded here.
+        // ponytail: if third-party subsystem plugins ever become loadable, switch
+        // to `metered_engine()` + a per-`run_until` fuel budget (bench first).
         let engine = Engine::default();
         let module = Module::new(&engine, bytes)?;
         let mut store = Store::new(&engine, HostState::empty());
