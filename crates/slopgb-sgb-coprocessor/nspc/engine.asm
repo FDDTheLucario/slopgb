@@ -51,10 +51,12 @@ BANKS 1
                                 ; output level, faded in on play (SPEC.md "Master
                                 ; volume"). DSP MVOL is signed -- never a song byte,
                                 ; only this driver-owned level reaches it.
-.DEFINE CHVOL_DEFAULT  $40      ; per-channel volume default; calibrated with the
-                                ; song-master scalar (~full) folded in so a full-
-                                ; velocity, center note lands near the reference at
-                                ; the DSP (SPEC.md "Per-voice volume").
+.DEFINE CHVOL_DEFAULT  $FF      ; per-channel volume default: the reference initializes
+                                ; every channel's volume to $FF at song start (a $ED
+                                ; command overrides it per channel). The final (t*t)>>8
+                                ; square in calc_vol supplies the attenuation, so the
+                                ; default is full-scale, not pre-attenuated (SPEC.md
+                                ; "Per-voice volume").
 .DEFINE PAN_CENTER     $40      ; pan center (0=hard L .. $7F=hard R)
 .DEFINE VEL_DEFAULT    $FC      ; default curvel (VELTAB value, full)
 .DEFINE QUANT_DEFAULT  $FC      ; default curquant (QUANTTAB value, full = legato)
@@ -1060,8 +1062,13 @@ mul16x16:
 
 ; ==========================================================================
 ; calc_vol: compute signed L/R voice volumes from channel volume, velocity,
-; the song-master scalar and pan (SPEC.md "Per-voice volume"):
-;   vscaled = (curvel * chvol) >> 8; vscaled = (vscaled * songvol) >> 8; then pan.
+; the song-master scalar and pan (SPEC.md "Per-voice volume"). For each side the
+; reference chain is: pan_gain, *songvol, *velocity, *chvol, then a FINAL square:
+;   vscaled = ((curvel * chvol) >> 8) * songvol >> 8   ; $E5 applied ONCE
+;   volL    = (vscaled * left_gain) >> 8               ; pan
+;   volL    = (volL * volL) >> 8                        ; final square (attenuation)
+;   (likewise volR with right_gain). The single square over the fully-accumulated
+;   per-side value IS the attenuation -- it is NOT applying songvol twice.
 ; curvel is the VELTAB value (0..$FC). Uses MUL YA (Y*A -> YA, high in Y). Y=0 out.
 ; ==========================================================================
 calc_vol:
@@ -1069,8 +1076,8 @@ calc_vol:
     mov a, p_chvol
     mul ya                  ; YA = curvel*chvol; Y = >>8 result
     mov vscaled, y
-    mov y, songvol          ; fold in the $E5 song-master scalar (SPEC.md "Per-voice
-    mov a, vscaled          ; volume"): vscaled = (vscaled * songvol) >> 8
+    mov y, songvol          ; fold in the $E5 song-master scalar ONCE (SPEC.md
+    mov a, vscaled          ; "Per-voice volume"): vscaled = (vscaled * songvol) >> 8
     mul ya
     mov vscaled, y
 
@@ -1086,6 +1093,10 @@ cv_lok:
     mov y, a
     mov a, vscaled
     mul ya
+    mov volL, y            ; volL = (vscaled * left_gain) >> 8 (pan)
+    mov y, volL           ; final square (reference attenuation): volL = (volL*volL)>>8
+    mov a, volL
+    mul ya                ; SPEC.md squares the fully-accumulated per-side value
     mov volL, y
 
     mov a, p_pan            ; right gain = min($FC, pan*4)
@@ -1098,6 +1109,10 @@ cv_rok:
     mov y, a
     mov a, vscaled
     mul ya
+    mov volR, y            ; volR = (vscaled * right_gain) >> 8 (pan)
+    mov y, volR           ; final square (reference attenuation): volR = (volR*volR)>>8
+    mov a, volR
+    mul ya                ; last op on this side, AFTER the pan multiply (SPEC.md)
     mov volR, y
 
     mov y, #0

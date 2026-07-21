@@ -432,7 +432,7 @@ code, so SGB music becomes upstreamable — only the *samples* need the user's R
      boot, it slews up to `$60` on the base-tick timer (boot-only fade-in — a song
      playing during that ramp catches it; one starting after starts at full). Once
      it has reached `$60` (`booted`), a play command **snaps** to `$60` (no per-song
-     fade-in). `CHVOL_DEFAULT` `$18`→`$40` (per-voice was `$12` vs. reference `$2E`).
+     fade-in). Software `$E5` per-voice master + boot/`$80` DSP-master fades.
   8. **Fade-out** (`port0` `$80`–`$FF`): NOT an instant stop — slew DSP MVOL down to
      `0` while the music keeps playing (reference keeps sequencing new notes as it
      fades), then idle. Trigger was `port0` bit 7, confirmed by A/B (`$80` → MVOL
@@ -440,6 +440,16 @@ code, so SGB music becomes upstreamable — only the *samples* need the user's R
      with the next song mid-transition, so the fade has to stop the old song before
      that reload or the sequencer reads the new bytes through stale cursors → a
      stuck garbage note. (Rate is a tight by-ear margin: too slow ⇒ garbage.)
+  9. **Per-voice volume formula** (was ~1.6× too loud, quiet drums audible, loud
+     songs clipping): **disassembled the ROM engine's volume routine** (from an ARAM
+     dump, coordinator-side) and RE'd the exact chain — numerically reproduces every
+     voice's `VOLL`/`VOLR`. Per side: `t = pan_gain`;
+     `t = (t*songvol)>>8` (`$E5`, ONCE); `t = (t*VELTAB[vel])>>8`; `t =
+     (t*chvol)>>8`; **`t = (t*t)>>8` (final square)**. The square is the real
+     attenuation — earlier black-box fits (a bogus "apply songvol twice") only held
+     when velocity/chvol matched. `CHVOL_DEFAULT` → `$FF` (reference inits every
+     channel to `$FF`; `$ED` overrides). `VELTAB`/`QUANTTAB` verified identical to
+     the reference (`$4C18`/`$4C10`). Off-center pan curve is a further refinement.
 - **Left to do (behind the flag):** echo/reverb — `$F5`/`$F7` operands are consumed
   but the DSP echo path is off; the ROM engine runs EON=`$07`, EVOL=`$C0`.
 - **Diagnostics.** The `coprocessor` MCP tool's status shows `ENG(clean-room)

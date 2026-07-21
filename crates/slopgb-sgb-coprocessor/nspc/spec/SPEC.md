@@ -211,10 +211,34 @@ before reading the next event. (Gate = articulation; it must NOT change the tota
    `$F8` ≈ unity/full) applied to every voice's computed volume in software. It
    MUST NOT be written to the DSP main-volume register. Default = full.
 
-**Per-voice volume** at note-on: `v = (VELTAB[vel] * channel_volume) >> 8`; then
-`v = (v * song_master) >> 8`; then apply pan to get L/R. Calibrate `CHVOL_DEFAULT`
-so a full-velocity, center-pan note lands near `$2E` at the DSP (the reference
-level); the earlier lowered defaults produced ~`$12` — far too quiet.
+**Per-voice volume** — computed independently for the left and right DSP volume
+(`VxVOLL`/`VxVOLR`). This is the EXACT reference chain (disassembled from the ROM
+engine's volume routine and numerically re-verified — it reproduces every voice's
+`VOLL`/`VOLR` byte-for-byte). For EACH side (L then R, using that side's pan gain):
+```
+t = pan_gain            ; the side's pan gain (0..$FF); $FF at hard-center (no pan)
+t = (t * song_master) >> 8    ; $E5 value ("songvol"), applied ONCE
+t = (t * VELTAB[vel])  >> 8    ; note velocity
+t = (t * channel_volume) >> 8  ; $ED value (default $FF)
+t = (t * t) >> 8               ; <-- FINAL SQUARE: square the accumulated value
+VxVOL(side) = t
+```
+Two things this fixes vs. the earlier (wrong) model:
+1. **The final `(t*t)>>8` square is the real attenuation.** It is NOT "apply songvol
+   twice." Because `song_master`, velocity, channel volume and pan are all inside the
+   square, the OUTPUT scales with each of them squared — which is why a black-box
+   measurement looked like `songvol²`, but that only held when velocity/channel-vol
+   were equal across the compared notes. Square the whole per-voice value once, at
+   the end, after every factor and the pan.
+2. **`CHVOL_DEFAULT = $FF`** (not `$40`): the reference initializes every channel's
+   volume to `$FF` at song start (a `$ED` command overrides it per channel).
+
+`VELTAB`/`QUANTTAB` are already correct (verified identical to the reference tables
+at `$4C18`/`$4C10`). Worked example (reference, center pan, `songvol $9C`, `chvol
+$FF`, `vel $BF`): `$FF·$9C>>8=$9B`, `·$BF>>8=$73`, `·$FF>>8=$72`, square `$72·$72>>8
+=$32` — matches the ROM's `VOLR=$32`. Pan curve for OFF-center voices is a further
+refinement (the reference folds pan through a per-voice pan byte); the square and
+the single master are the correctness-critical parts.
 
 ## Instruments (table at `$4C30`, 6 bytes/entry, indexed by `$E0 nn`)
 ```
