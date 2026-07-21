@@ -343,6 +343,7 @@ mod tests {
             mute: true,
             boot: None,
             sgb_bios: None,
+            sf2: None,
             mcp_port: None,
             plugins_dir: None,
             msu1: None,
@@ -352,6 +353,7 @@ mod tests {
             opts,
             crate::session::Session::blank(Model::Dmg),
             false,
+            None,
             None,
             None,
         );

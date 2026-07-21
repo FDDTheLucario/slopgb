@@ -8,6 +8,8 @@ target/
 /test-roms/*.tar.xz
 /test-roms/*.zip
 *.sav
+*.smpl
+*.sf2
 test-roms-src/
 handoff.md
 goal.md

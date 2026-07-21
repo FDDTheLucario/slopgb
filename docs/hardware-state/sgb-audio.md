@@ -463,3 +463,84 @@ code, so SGB music becomes upstreamable — only the *samples* need the user's R
   header is `[len,dest]` not `[dest,len]`; per-instrument pitch base is big-endian;
   `$F7`/`$F5` take 3 operands; two `MOV`/`INCW`-before-branch flag clobbers (froze
   ch0's tempo to 0; made `$00` end-of-track unreachable so frames never advanced).
+
+## SF2 soundfont sample bank (`--sf2`)
+
+A standard SoundFont-2 importer and exporter for the N-SPC sample bank, decoupling
+the playable audio (samples + instrument table) from the engine code and the ROM.
+Any standard RIFF SF2 can be imported; the output is uploadable to APU RAM at the
+fixed N-SPC sample destinations (`$4B00`/`$4C30`/`$4DB0`). Plays with either the
+ROM engine (requires `--sgb-bios`) or the clean-room engine (no ROM needed).
+
+**Engine and sample source are independent axes** (controlled separately):
+- **Engine:** the ROM's resident engine code (via `--sgb-bios`, default when present)
+  OR the clean-room `NSPC_ENGINE` (set `SLOPGB_NSPC_CLEANROOM`, or forced when `--sf2`
+  is given with no `--sgb-bios`).
+- **Samples:** the ROM's own `$4B00` directory + `$4C30` instrument table + `$4DB0`
+  BRR data, OR an SF2-derived bank that **overrides** all three regions.
+
+**Three combinations** (all route through [`SgbCoprocessor::install_nspc`] in
+`crates/slopgb-sgb-coprocessor/src/samples.rs`):
+1. `--sgb-bios` alone → ROM engine + ROM samples.
+2. `--sf2` alone → clean-room engine + SF2 samples (BIOS not required).
+3. `--sf2` + `--sgb-bios` → ROM engine + SF2 samples (or clean-room if the env is also set).
+
+**The importer runs as a tier-3 wasm subsystem plugin** (`sf2.wasm`, crate
+`slopgb-sf2-plugin`), riding the generic coprocessor ABI — not a plugin-host change.
+The conversion logic itself still lives in the shared `slopgb-sf2` crate (std-only,
+zero external deps, `forbid(unsafe_code)`), compiled *into* `sf2.wasm` for the guest
+side and still linked natively for the exporter (below) and the frontend's `.smpl`
+(de)serialize:
+- Takes a standard RIFF SF2 file (INFO/sdta/pdta chunks), parses it, and produces
+  the three N-SPC memory regions.
+- Resamples PCM to the SPC700's rate, BRR-encodes each sample (9-byte blocks,
+  brute-force filter×shift per block, minimum error, predictor state threaded).
+- Builds the sample directory at `$4B00` (64 entries × 4 bytes: start_lo, start_hi,
+  loop_lo, loop_hi, absolute APU addresses) and the instrument table at `$4C30`
+  (64 entries × 6 bytes: SRCN, ADSR1, ADSR2, GAIN, base16_hi, base16_lo — base16
+  is big-endian, default `$1000`).
+- **Not carried by SF2:** the quant/velocity table at `$4C10` is an **engine** table,
+  baked into the ROM engine or the clean-room engine; the SF2 does not carry it,
+  and [`import_sf2`]/[`export_sf2`] ignore it.
+
+**The `.smpl` cache** (`crates/slopgb-sf2/src/cache.rs`) is the seam between the
+cache-hit fast path and the plugin:
+- The frontend hashes the SF2 (a 64-bit `std::hash::DefaultHasher` over the
+  **content bytes**, hex-encoded, so editing the SF2 in place never serves stale
+  cache) and checks `<hash>.smpl` next to the SF2
+  file first — a cache **hit** needs no plugin at all: `sf2.wasm` doesn't even have
+  to be present, since the cache is just deserialized directly.
+- On a cache **miss**, the frontend loads `<plugins_dir>/sf2.wasm` as a
+  `slopgb_plugin_host::LoadedCoprocessor`, `set_file`s the SF2 bytes, and calls
+  `run_until`; the guest converts via `slopgb_sf2::import_sf2` + `cache::serialize`
+  internally, and the frontend pulls the resulting `.smpl` payload back out through
+  the coprocessor's `save_state` blob channel and writes it to `<hash>.smpl` before
+  deserializing it into the three regions — same on-disk format as before.
+- If `--sf2` is given, the cache misses, and `sf2.wasm` is absent or fails to load,
+  the frontend logs `--sf2 given but sf2.wasm not found in the plugins dir; no SF2
+  samples loaded` and the run proceeds without SF2 samples (ROM/clean-room engine
+  samples, if any, are used instead).
+- This is a distinct plugin seam from the SGB coprocessor's `spc700.wasm` +
+  `w65c816.wasm`: `sf2.wasm` is driven directly by the frontend on `--sf2`, not
+  auto-loaded as part of SGB machine bring-up.
+- **Format:** magic `SMP1` (4 bytes) + u8 version (currently 1) + three regions in order:
+  for each region (dir, instr, brr): u16 dest LE + u32 len LE + `len` bytes.
+
+**The exporter stays native** (`cargo xtask gen-sf2 <program.rom> <out.sf2>` — only
+the runtime *import* path moved to the `sf2.wasm` plugin, export did not):
+- Decodes a ROM's resident SPC700 BRR samples back to PCM and writes a standard,
+  playable SF2 file (loads in fluidsynth/simpler; not GM-compatible).
+- Reverses the importer: reads the APU upload table from the ROM, assembles APU RAM,
+  and exports referenced samples + instrument table via [`export_sf2`].
+- The example soundfont is generated to a scratch path outside the repo (never
+  committed, user-ROM-derived); regenerate with this command whenever the source
+  ROM changes.
+
+**Known ceilings** (from `crates/slopgb-sf2/src/mapping.rs`):
+- Single sample zone per SF2 instrument (no velocity/key splits).
+- Mono samples only (stereo not supported).
+- No 24-bit `sm24` samples.
+- Linear-interpolation resampler (not band-limited).
+- ADSR1/ADSR2/GAIN ↔ SF2 volume envelope mapping is lossy (documented in `adsr.rs`).
+- Echo/reverb not modeled.
+- 64-sample directory maximum (hard limit on N-SPC layout).

@@ -28,6 +28,10 @@ wat = "1"
 # PCM_MAGIC), so the round-trip fixtures stay in sync with the plugin. The wasm
 # artifact the test loads is built separately by cargo; this is not a runtime dep.
 slopgb-msu1-plugin = { path = "../slopgb-msu1-plugin" }
+# Test-only: native SF2 import/export, so sf2_roundtrip.rs can build a synthetic
+# SF2 fixture and compare the wasm converter's output against calling the same
+# (std-only, zero-dep) converter natively. Not a runtime dep of this crate.
+slopgb-sf2 = { path = "../slopgb-sf2" }
 
 [lints]
 workspace = true

@@ -53,8 +53,10 @@ use slopgb_plugin_host::{LoadError, LoadedCoprocessor};
 mod commands;
 mod dma;
 mod perf;
+mod samples;
 mod state;
 
+pub use samples::{Engine, SampleRegions, parse_sgb_apu_blocks};
 use state::InertCoprocessor;
 
 #[cfg(test)]
@@ -511,55 +513,6 @@ impl SgbCoprocessor {
         let ppu_bytes = fs::read(dir.join(PPU_WASM)).ok();
         Self::from_wasm_full(&spc_bytes, &cpu_bytes, ppu_bytes.as_deref(), output_rate)
             .map_err(|e| format!("cannot load SGB coprocessor plugins: {e}"))
-    }
-
-    /// Install SGB resident music playback from a user-supplied SGB system ROM
-    /// (`--sgb-bios`), so games that ship only song data (Animaniacs et al.) play.
-    /// The SGB stores its resident SPC700 program — engine, sample directory, and
-    /// BRR soundfont — as a standard SNES APU block table (`[u16 len, u16 dest,
-    /// len bytes]*` then `[0000, entry]`) at LoROM $06:8000. Returns whether a
-    /// valid table was found (else the clean-room firmware stays).
-    ///
-    /// **Default: the ROM's own resident engine** — the authentic, accurate
-    /// playback (upload every block, enter its entry point). Set
-    /// `SLOPGB_NSPC_CLEANROOM` to instead run the original [`NSPC_ENGINE`]
-    /// (uploaded over $0400, reading the ROM's sample data) — the upstreamable
-    /// clean-room path, still being refined (see `nspc/README.md`).
-    ///
-    /// Everything reaches the SPC700 through the plugin's public ABI; ROM parsing
-    /// is host-side, so the plugin boundary stays clean.
-    pub fn install_sgb_bios(&mut self, program_rom: &[u8]) -> bool {
-        // ponytail: fixed table offset + sample dests for the known SGB1/SGB2
-        // dump; a different revision would need the boot loader's own source
-        // pointer ($00:AC43) and its block dests.
-        const TABLE_OFF: usize = 0x3_0000;
-        let Some((entry, blocks)) = parse_apu_blocks(program_rom, TABLE_OFF) else {
-            return false;
-        };
-        let cleanroom = std::env::var_os("SLOPGB_NSPC_CLEANROOM").is_some();
-        let spc = self.spc.get_mut();
-        for (dest, data) in &blocks {
-            // The clean-room engine replaces the ROM's engine CODE at $0400 with
-            // its own, uploading only the ROM's sound DATA (sample directory
-            // $4B00, pitch/velocity tables $4C10, instrument table $4C30, BRR
-            // waveforms $4DB0). The default (ROM engine) uploads every block.
-            let is_engine = *dest == SPC_PROG_ORG;
-            if (!cleanroom || !is_engine) && spc.write_ram(u32::from(*dest), data).is_err() {
-                return false;
-            }
-        }
-        let pc = if !cleanroom {
-            entry
-        } else if spc.write_ram(u32::from(SPC_PROG_ORG), NSPC_ENGINE).is_ok() {
-            SPC_PROG_ORG
-        } else {
-            return false;
-        };
-        if spc.set_pc(u32::from(pc)).is_err() {
-            return false;
-        }
-        self.nspc_resident = true;
-        true
     }
 
     /// Build the backend from the two plugins' wasm bytes: instantiate, reset,

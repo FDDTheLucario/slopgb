@@ -1993,6 +1993,7 @@ dependencies = [
  "slopfp",
  "slopgb-core",
  "slopgb-plugin-host",
+ "slopgb-sf2",
  "slopgb-sgb-coprocessor",
  "softbuffer",
  "winit",
@@ -2023,9 +2024,22 @@ dependencies = [
  "slopgb-core",
  "slopgb-msu1-plugin",
  "slopgb-plugin-api",
+ "slopgb-sf2",
  "wasmi",
  "wasmtime",
  "wat",
+]
+
+[[package]]
+name = "slopgb-sf2"
+version = "0.1.0"
+
+[[package]]
+name = "slopgb-sf2-plugin"
+version = "0.1.0"
+dependencies = [
+ "slopgb-plugin-api",
+ "slopgb-sf2",
 ]
 
 [[package]]
@@ -3210,6 +3224,9 @@ checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
 [[package]]
 name = "xtask"
 version = "0.1.0"
+dependencies = [
+ "slopgb-sf2",
+]
 
 [[package]]
 name = "zerocopy"
