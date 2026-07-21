@@ -80,6 +80,18 @@ fn mem_body(area: Rect) -> Rect {
     Rect::new(area.x, area.y, area.w, (area.h - line_height()).max(0))
 }
 
+/// The debugger's three scrollable panes paired with their [`ScrollBar`] id, in
+/// hit-test order — the one source of truth for pane↔scrollbar routing, shared by
+/// scrollbar hit-testing ([`scrollbar_at`]) and wheel scrolling
+/// ([`ToolWindows::on_wheel`]). Add a pane here and both follow.
+fn debugger_panes(l: &debugger::DebuggerLayout) -> [(Rect, ScrollBar); 3] {
+    [
+        (l.disasm, ScrollBar::Disasm),
+        (l.memory, ScrollBar::Memory),
+        (l.stack, ScrollBar::Stack),
+    ]
+}
+
 /// The scrollbar track the point `(px, py)` lands in for a `kind` window of
 /// content-rect `area`, or `None`. Shared by drag-start and drag-follow so both
 /// hit the tracks the renderer drew (`vscroll_track` on the same pane rects).
@@ -87,15 +99,10 @@ fn scrollbar_at(kind: ToolWindow, area: Rect, px: i32, py: i32) -> Option<Scroll
     match kind {
         ToolWindow::Debugger => {
             let l = debugger::DebuggerLayout::for_size(area.w, area.h);
-            if vscroll_track(l.disasm).contains(px, py) {
-                Some(ScrollBar::Disasm)
-            } else if vscroll_track(l.memory).contains(px, py) {
-                Some(ScrollBar::Memory)
-            } else if vscroll_track(l.stack).contains(px, py) {
-                Some(ScrollBar::Stack)
-            } else {
-                None
-            }
+            debugger_panes(&l)
+                .into_iter()
+                .find(|(rect, _)| vscroll_track(*rect).contains(px, py))
+                .map(|(_, bar)| bar)
         }
         ToolWindow::MemoryViewer => vscroll_track(mem_body(area))
             .contains(px, py)
@@ -492,15 +499,20 @@ impl ToolWindows {
             WinState::Debugger(s) => {
                 if let Some((px, py)) = cursor {
                     let l = debugger::DebuggerLayout::for_size(area.w, area.h);
-                    if l.memory.contains(px, py) {
-                        s.scroll_memory(rows);
-                    } else if l.disasm.contains(px, py) {
-                        let bank = s.disasm_bank;
-                        s.scroll_disasm(rows, |a| crate::windows::banked_read(gb, bank, a));
-                    } else if l.stack.contains(px, py) {
-                        s.scroll_stack(rows);
-                    } else {
+                    let Some((_, bar)) = debugger_panes(&l)
+                        .into_iter()
+                        .find(|(r, _)| r.contains(px, py))
+                    else {
                         return;
+                    };
+                    match bar {
+                        ScrollBar::Memory => s.scroll_memory(rows),
+                        ScrollBar::Disasm => {
+                            let bank = s.disasm_bank;
+                            s.scroll_disasm(rows, |a| crate::windows::banked_read(gb, bank, a));
+                        }
+                        ScrollBar::Stack => s.scroll_stack(rows),
+                        ScrollBar::MemViewer => return,
                     }
                     view.window.request_redraw();
                 }
@@ -693,6 +705,17 @@ impl ToolWindows {
     }
 }
 
+/// The renderer-matched `(read, bank_of)` closure pair the pure debugger click
+/// handlers take. Both resolve through the pinned disasm `bank` the renderer drew
+/// — a live-bank read would shift symbol-label rows, so the hit-test must use the
+/// same bank. Built here once instead of re-inlined in each click glue below.
+fn banked_read_for(gb: &GameBoy, bank: Option<u16>) -> impl Fn(u16) -> u8 + '_ {
+    move |a| windows::banked_read(gb, bank, a)
+}
+fn shown_bank_for(gb: &GameBoy, bank: Option<u16>) -> impl Fn(u16) -> u16 + '_ {
+    move |a| windows::shown_bank(gb, bank, a)
+}
+
 /// Glue the live machine onto the pure [`debugger::on_left_click`] (the register
 /// snapshot + `debug_read` closure the resolver needs).
 fn debugger_left_click(
@@ -718,13 +741,13 @@ fn debugger_left_click(
     // address (a live-bank read would shift rows when the view is bank-pinned).
     let bank = s.disasm_bank;
     debugger::on_left_click(
-        |a| windows::banked_read(gb, bank, a),
+        banked_read_for(gb, bank),
         area,
         s,
         r,
         px,
         py,
-        |a| windows::shown_bank(gb, bank, a),
+        shown_bank_for(gb, bank),
     )
 }
 
@@ -738,15 +761,15 @@ fn debugger_double_click(
     py: i32,
 ) -> Option<MenuOutcome> {
     let r = gb.cpu_regs();
+    let bank = s.disasm_bank;
     debugger::on_double_click(
-        |a| windows::banked_read(gb, s.disasm_bank, a),
+        banked_read_for(gb, bank),
         area,
         s,
-        r.pc,
         r.sp,
         px,
         py,
-        |a| windows::shown_bank(gb, s.disasm_bank, a),
+        shown_bank_for(gb, bank),
     )
 }
 
@@ -762,14 +785,13 @@ fn debugger_right_click(
     // Same renderer-matched read/bank as the left-click glue (row alignment).
     let bank = s.disasm_bank;
     debugger::on_right_click(
-        |a| windows::banked_read(gb, bank, a),
+        banked_read_for(gb, bank),
         area,
         s,
-        r.pc,
         r.sp,
         px,
         py,
-        |a| windows::shown_bank(gb, bank, a),
+        shown_bank_for(gb, bank),
     );
 }
 

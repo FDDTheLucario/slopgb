@@ -50,7 +50,6 @@ fn target_at_resolves_each_pane_to_its_address() {
         NOPS,
         AREA,
         &st,
-        0x0100,
         0xFFFE,
         l.disasm.x + 9,
         l.disasm.y + 2 * lh + 1,
@@ -62,7 +61,6 @@ fn target_at_resolves_each_pane_to_its_address() {
         NOPS,
         AREA,
         &st,
-        0x0100,
         0xFFFE,
         l.memory.x + 9,
         l.memory.y + lh,
@@ -74,7 +72,6 @@ fn target_at_resolves_each_pane_to_its_address() {
         NOPS,
         AREA,
         &st,
-        0x0100,
         0xFFFE,
         l.stack.x + 5,
         l.stack.y + lh,
@@ -83,22 +80,12 @@ fn target_at_resolves_each_pane_to_its_address() {
     assert_eq!(t, ClickTarget::Stack(0xFFFC));
     // Registers pane: row 0 (af) is an editable pair; a row past pc (ime/ima)
     // is the non-editable `Registers`.
-    let t = target_at(
-        NOPS,
-        AREA,
-        &st,
-        0x0100,
-        0xFFFE,
-        l.regs.x + 5,
-        l.regs.y + 5,
-        |_| 0,
-    );
+    let t = target_at(NOPS, AREA, &st, 0xFFFE, l.regs.x + 5, l.regs.y + 5, |_| 0);
     assert_eq!(t, ClickTarget::Reg(RegField::Af));
     let t = target_at(
         NOPS,
         AREA,
         &st,
-        0x0100,
         0xFFFE,
         l.regs.x + 5,
         l.regs.y + 6 * lh + 1,
@@ -120,7 +107,6 @@ fn pinned_disasm_follows_the_base_not_pc() {
         NOPS,
         AREA,
         &st,
-        0x0100,
         0xFFFE,
         l.disasm.x + 9,
         l.disasm.y + 1,
@@ -185,7 +171,6 @@ fn right_click_opens_the_matching_pane_menu_and_sets_the_cursor() {
         NOPS,
         AREA,
         &mut st,
-        0x0100,
         0xFFFE,
         l.disasm.x + 9,
         l.disasm.y + 2 * lh + 1,
@@ -200,7 +185,6 @@ fn right_click_opens_the_matching_pane_menu_and_sets_the_cursor() {
         NOPS,
         AREA,
         &mut st,
-        0x0100,
         0xFFFE,
         l.memory.x + 9,
         l.memory.y + lh,
@@ -213,7 +197,6 @@ fn right_click_opens_the_matching_pane_menu_and_sets_the_cursor() {
         NOPS,
         AREA,
         &mut st,
-        0x0100,
         0xFFFE,
         l.stack.x + 5,
         l.stack.y + lh,
@@ -225,7 +208,6 @@ fn right_click_opens_the_matching_pane_menu_and_sets_the_cursor() {
         NOPS,
         AREA,
         &mut st,
-        0x0100,
         0xFFFE,
         l.regs.x + 5,
         l.regs.y + 5,
@@ -243,7 +225,6 @@ fn open_disasm_menu() -> (DebuggerState, Vec<Rect>) {
         NOPS,
         AREA,
         &mut st,
-        0x0100,
         0xFFFE,
         l.disasm.x + 9,
         l.disasm.y + 2 * lh + 1,
@@ -385,7 +366,6 @@ fn right_click_with_a_menu_open_dismisses_it() {
         NOPS,
         AREA,
         &mut st,
-        0x0100,
         0xFFFE,
         l.disasm.x + 9,
         l.disasm.y + 1,
@@ -656,7 +636,6 @@ fn editable_register_row_opens_a_seeded_prompt_and_writes_on_accept() {
         NOPS,
         AREA,
         &mut st,
-        0x0100,
         0xFFFE,
         l.regs.x + 5,
         l.regs.y + 5,
@@ -706,7 +685,6 @@ fn registers_not_editable_option_greys_edit_register() {
         NOPS,
         AREA,
         &mut st,
-        0x0100,
         0xFFFE,
         l.regs.x + 5,
         l.regs.y + 5,
@@ -730,7 +708,6 @@ fn non_editable_register_row_greys_edit_register() {
         NOPS,
         AREA,
         &mut st,
-        0x0100,
         0xFFFE,
         l.regs.x + 5,
         l.regs.y + 6 * lh + 1,
@@ -756,7 +733,7 @@ fn click_menu_item(target_kind: char, idx: usize) -> DebuggerState {
         _ => unreachable!(),
     };
     let mut st = DebuggerState::default();
-    on_right_click(NOPS, AREA, &mut st, 0x0100, 0xFFFE, px, py, |_| 0);
+    on_right_click(NOPS, AREA, &mut st, 0xFFFE, px, py, |_| 0);
     let rects = menu_rects(
         st.menu.as_ref().unwrap().origin,
         &st.menu.as_ref().unwrap().items,
@@ -788,7 +765,6 @@ fn modify_code_data_toggles_the_hint_at_the_cursor() {
         NOPS,
         AREA,
         &mut st,
-        0x0100,
         0xFFFE,
         l.disasm.x + 9,
         l.disasm.y + 2 * lh + 1,
@@ -822,7 +798,6 @@ fn force_code_view_clears_a_data_hint() {
         NOPS,
         AREA,
         &mut st,
-        0x0100,
         0xFFFE,
         l.disasm.x + 9,
         l.disasm.y + 2 * lh + 1,
