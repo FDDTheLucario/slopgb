@@ -47,15 +47,25 @@ BANKS 1
 .DEFINE PITCH_OUT_SHIFT 8       ; VxPITCH = (base*factor) >> PITCH_OUT_SHIFT.
                                 ; Dial +/- a few to align the absolute octave by ear.
 .DEFINE DEFAULT_BASE   $1000    ; per-instrument base multiplier before any $E0
-.DEFINE MVOL_DEFAULT   $28      ; master volume on play (lowered to sit under SFX)
-.DEFINE CHVOL_DEFAULT  $18      ; per-channel volume default (lowered)
+.DEFINE SGB_MASTER     $60      ; DSP main-volume target: the SGB hardware master
+                                ; output level, faded in on play (SPEC.md "Master
+                                ; volume"). DSP MVOL is signed -- never a song byte,
+                                ; only this driver-owned level reaches it.
+.DEFINE CHVOL_DEFAULT  $40      ; per-channel volume default; calibrated with the
+                                ; song-master scalar (~full) folded in so a full-
+                                ; velocity, center note lands near the reference at
+                                ; the DSP (SPEC.md "Per-voice volume").
 .DEFINE PAN_CENTER     $40      ; pan center (0=hard L .. $7F=hard R)
 .DEFINE VEL_DEFAULT    $FC      ; default curvel (VELTAB value, full)
 .DEFINE QUANT_DEFAULT  $FC      ; default curquant (QUANTTAB value, full = legato)
 .DEFINE ADSR1_DEF      $DF      ; default ADSR1 before any $E0 (enable, fast attack)
 .DEFINE ADSR2_DEF      $C0      ; default ADSR2 before any $E0 (sustain 6/8, hold)
 .DEFINE GAIN_DEF       $00      ; default GAIN before any $E0 (unused while ADSR on)
-.DEFINE FADE_RATE      2        ; engine ticks per master-volume step during fade
+.DEFINE FADE_RATE      2        ; engine ticks per master-volume step during fade-out
+.DEFINE FADE_IN_RATE   8        ; BASE ticks per +1 DSP main-volume step during the
+                                ; boot-relative master fade-in (0 -> SGB_MASTER, 96 steps).
+                                ; The base tick is ~500 Hz, so 8 base ticks/step ramps in
+                                ; ~768 base ticks ~= 1.5 s. By-ear tunable; raise to slow.
 
 ; --------------------------------------------------------------------------
 ; Direct-page variables ($10..$77). Direct page 0 is selected (CLRP) so that
@@ -66,7 +76,9 @@ BANKS 1
 .DEFINE wptr        $10      ; (word) working pointer for [wptr]+Y reads
 .DEFINE songlp      $12      ; (word) cursor into the song list
 .DEFINE tempo       $14      ; current tempo byte
-.DEFINE mvol        $15      ; current master volume (both channels)
+.DEFINE mvol        $15      ; current DSP main volume (MVOL L/R): set to 0 only at boot,
+                             ; then slews toward SGB_MASTER and holds; persists across
+                             ; stops and song changes (SPEC.md "Master volume & fade-in").
 .DEFINE tickacc     $16      ; 8-bit tempo accumulator (carry = one engine tick)
 .DEFINE lastp0      $17      ; last-seen port0 ($F4) command byte
 .DEFINE lastp3      $18      ; last-seen port3 ($F7) command byte
@@ -131,6 +143,9 @@ BANKS 1
 .DEFINE ttrans      $B9      ; per-track transpose ($B9..$C0), signed semitones ($EA)
 .DEFINE newptlo     $C1      ; frame-load scratch: new track pointer low  ($C1..$C8)
 .DEFINE newpthi     $C9      ; frame-load scratch: new track pointer high ($C9..$D0)
+.DEFINE songvol     $D1      ; ($E5) software song-master scalar (vv/256), folded into
+                             ; every voice volume in software; NOT a DSP register --
+                             ; DSP MVOL is signed (SPEC.md "Master volume"). Default $FF.
 
 ; --------------------------------------------------------------------------
 ; Macros for S-DSP register access via $F2 (address) / $F3 (data).
@@ -206,6 +221,9 @@ init_v:
 
     ; ---- engine state ----
     mov state, #0
+    mov mvol, #0         ; boot the software master at 0 to agree with the DSP MVOL
+                         ; init above -- the ONLY place the master starts at 0; it
+                         ; then slews up to $60 once (SPEC.md "Master volume & fade-in")
     mov kofsoft, #$ff
     mov konpending, #0
     mov activemask, #0
@@ -255,11 +273,13 @@ pc_echo:
 ; accumulator, running the sequencer (and fade) once per engine tick.
 ; ==========================================================================
 service_timer:
+    mov a, $fd              ; elapsed base ticks (0..15), reading clears it -- read
+    beq st_ret             ; ALWAYS, before the play-state gate, so the master ramp
+    mov basecnt, a         ; runs whether idle or playing
+    call !ramp_master       ; boot-relative master fade-in: advances every base tick
+                           ; regardless of play state (SPEC.md "Master volume & fade-in")
     mov a, state
-    beq st_ret              ; idle: nothing to do
-    mov a, $fd              ; elapsed base ticks (0..15), reading clears it
-    beq st_ret
-    mov basecnt, a
+    beq st_ret             ; idle: master ramped above; no sequencer to run
 st_loop:
     mov a, tickacc
     clrc
@@ -269,13 +289,15 @@ st_loop:
     call !do_engine_tick
     mov a, state
     cmp a, #2
-    bne st_cont
-    call !fade_step
+    beq st_fadeout          ; dormant fade-out (state 2)
 st_cont:
     dec basecnt
     bne st_loop
 st_ret:
     ret
+st_fadeout:
+    call !fade_step
+    jmp !st_cont
 
 ; ==========================================================================
 ; One engine tick: advance every active track; key-ons are batched and
@@ -358,14 +380,53 @@ fs_ret:
     ret
 
 ; ==========================================================================
+; ramp_master: boot-relative fade-in of the DSP main volume (SGB hardware
+; master, $0C/$1C MVOL L/R) up toward SGB_MASTER, then hold. Paced by the base
+; -tick timer and called from service_timer BEFORE the play-state gate, so it
+; advances on every elapsed base tick whether idle or playing -- the master
+; slews to $60 during the silent boot/logo screens, and whether a song fades in
+; depends only on WHEN it starts relative to boot (SPEC.md "Master volume &
+; fade-in"). Driven only by the driver, never by song data (MVOL is signed, so a
+; song byte there mutes). Iterates on a COPY of basecnt in Y -- must not disturb
+; basecnt, which the sequencer st_loop still needs.
+; ==========================================================================
+ramp_master:
+    mov a, mvol
+    cmp a, #SGB_MASTER
+    bcs rm_ret             ; already at target -> hold, touch nothing
+    mov y, basecnt         ; copy the elapsed base-tick count; do NOT decrement basecnt
+rm_tick:
+    inc fadeacc            ; base-tick accumulator (state-2 fade-out is dormant, so
+    mov a, fadeacc         ; reusing fadeacc here does not collide)
+    cmp a, #FADE_IN_RATE
+    bcc rm_next            ; not enough base ticks elapsed for the next +1 step
+    mov fadeacc, #0
+    inc mvol
+    mov a, mvol
+    mov $f2, #$0c          ; MVOLL
+    mov $f3, a
+    mov $f2, #$1c          ; MVOLR
+    mov $f3, a
+    cmp a, #SGB_MASTER
+    bcs rm_ret            ; reached target -> done
+rm_next:
+    dec y
+    bne rm_tick
+rm_ret:
+    ret
+
+; ==========================================================================
 ; start_song: (re)start playback of the song at $2B00.
 ; ==========================================================================
 start_song:
-    call !stop_all          ; full cold reset: MVOL restored, voices off, state cleared
+    call !stop_all          ; cold reset: voices off, state cleared. Leaves the
+                            ; master untouched, so a song starting while it is
+                            ; already at $60 does NOT re-fade (SPEC.md).
     mov a, #TEMPO_DEFAULT
     mov tempo, a
     mov tickacc, #0
     mov fadeacc, #0
+    mov songvol, #$ff       ; song-master scalar full until an $E5 lowers it (SPEC.md)
     mov konpending, #0
     mov transpose, #0       ; clear global transpose for the new song
     mov x, #7               ; clear per-channel transpose ($EA) for all 8 tracks
@@ -378,6 +439,18 @@ clr_ttrans:
     mov songlp, a
     mov a, !$2b01
     mov songlp+1, a
+    ; Play may precede the transfer (SPEC.md): the host can set the play score
+    ; before the song data finishes copying into $2Bxx, and while it is in flight
+    ; the pointer high byte ($2B01) reads 0. Starting on a 0 pointer walks zero-page
+    ; into a $0000 end-word and latches silence forever, so treat a 0 high byte as
+    ; not-yet-ready: stay idle, do not consume the command -- un-latch lastp0 (the
+    ; play score is always nonzero) so poll_comm re-detects the same score next
+    ; iteration and retries until the data lands.
+    mov a, songlp+1
+    bne ss_ready
+    mov lastp0, #0
+    ret
+ss_ready:
     mov a, #1               ; mark playing (song-end handler clears it)
     mov state, a
     call !load_frame
@@ -399,13 +472,11 @@ stop_all:
     mov $f3, #$ff
     mov $f2, #$4c           ; KON clear
     mov $f3, #$00
-    ; restore master volume (never leave MVOL at 0 outside an active fade)
-    mov a, #MVOL_DEFAULT
-    mov mvol, a
-    mov $f2, #$0c           ; MVOLL
-    mov $f3, a
-    mov $f2, #$1c           ; MVOLR
-    mov $f3, a
+    ; Do NOT touch mvol or the DSP main-volume regs ($0C/$1C): the SGB hardware
+    ; master is persistent and slew-limited -- set to 0 only at boot, then it
+    ; chases $60 forever (SPEC.md "Master volume & fade-in"). Stopping keys the
+    ; voices off but leaves the master where it is, so the next song starts at
+    ; full with no re-fade.
     ret
 
 ; ==========================================================================
@@ -681,15 +752,10 @@ pt_instr:                   ; $E0 nn -> load instrument-table entry nn (nn = op0
     mov tbaselo+x, a        ; b5 = base pitch LOW byte
     mov y, #0               ; restore Y for the [wptr]+Y stream reads
     jmp !pt_next
-pt_mvol:                    ; $E5 vv -> master volume
-    mov a, op0
-    mov mvol, a
-    mov $f2, #$0c
-    mov $f3, a
-    mov a, mvol
-    mov $f2, #$1c
-    mov $f3, a
-    jmp !pt_next
+pt_mvol:                    ; $E5 vv -> song-master scalar (SPEC.md "Master volume"):
+    mov a, op0              ; a SOFTWARE per-voice scalar (vv/256), NOT the DSP main
+    mov songvol, a          ; volume -- DSP MVOL is signed, so a song byte ($F8 = -8)
+    jmp !pt_next            ; there would mute. Folded into calc_vol instead.
 pt_tempo:                   ; $E7 tt -> tempo
     mov a, op0
     mov tempo, a
@@ -940,14 +1006,19 @@ mul16x16:
     ret
 
 ; ==========================================================================
-; calc_vol: compute signed L/R voice volumes from channel volume, velocity
-; and pan. vscaled = (curvel * chvol) >> 8; then split by pan. curvel is the
-; VELTAB value (0..$FC). Uses MUL YA (Y*A -> YA, high byte in Y). Restores Y=0.
+; calc_vol: compute signed L/R voice volumes from channel volume, velocity,
+; the song-master scalar and pan (SPEC.md "Per-voice volume"):
+;   vscaled = (curvel * chvol) >> 8; vscaled = (vscaled * songvol) >> 8; then pan.
+; curvel is the VELTAB value (0..$FC). Uses MUL YA (Y*A -> YA, high in Y). Y=0 out.
 ; ==========================================================================
 calc_vol:
     mov y, p_vel            ; curvel (VELTAB value)
     mov a, p_chvol
     mul ya                  ; YA = curvel*chvol; Y = >>8 result
+    mov vscaled, y
+    mov y, songvol          ; fold in the $E5 song-master scalar (SPEC.md "Per-voice
+    mov a, vscaled          ; volume"): vscaled = (vscaled * songvol) >> 8
+    mul ya
     mov vscaled, y
 
     mov a, #127             ; left gain = min($FC, (127-pan)*4)

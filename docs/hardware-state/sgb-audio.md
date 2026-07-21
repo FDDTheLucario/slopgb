@@ -421,14 +421,29 @@ code, so SGB music becomes upstreamable — only the *samples* need the user's R
      null (`0`) frame track pointer leaves a channel running so a long melody spans
      frames. (Earlier wrong guesses: "wait for all tracks" dropped the
      accompaniment; "loop every short track" made a track repeat itself.)
-- **Left to do (behind the flag):** clipping / master-volume level (`MVOL_DEFAULT`
-  `$28` + the songs' `$E5` values run hot vs. the ROM engine's `$60`).
+  6. **Play/transfer race** (silent start): the play score can reach the engine
+     before the `SOU_TRN` copy of the song into `$2B00` lands, so `start_song` read
+     an all-zero pointer, walked zero-page into a `$0000` end-word, and latched
+     silence — and edge-triggered `poll_comm` never retried. Fix: reject a `0`
+     song-pointer high byte as not-ready and re-poll until the data lands.
+  7. **Master volume** (was near-mute): `$E5 $F8` was written straight to DSP MVOL,
+     which is **signed** (`$F8` = −8 ≈ mute). Fix: `$E5` is a *software* per-voice
+     scalar (`songvol`); the DSP main volume is the SGB hardware master, **boot-
+     relative and slew-limited** — `0` only at boot, then ramps to `$60` on the
+     base-tick timer regardless of play state and holds. The fade-in is emergent:
+     a song that plays at boot catches the ramp (fades in); one that starts after
+     the master already reached `$60` (post-logo screens) starts at full, no fade.
+     `CHVOL_DEFAULT` `$18`→`$40` (per-voice was `$12` vs. the reference `$2E`).
+- **Left to do (behind the flag):** echo/reverb (`$F5`/`$F7` operands are consumed
+  but the DSP echo path is off; the ROM engine runs EON=`$07`, EVOL=`$C0`), and the
+  music **fade-out** (dormant `fade_step`/state 2 — trigger not yet identified).
 - **Diagnostics.** The `coprocessor` MCP tool's status shows `ENG(clean-room)
   songlp/tempo/tickacc/state/activemask/tdurrem` when the flag is set. A/B against
   ground truth by toggling the env var (unset = ROM engine); `dump-spc` (UI or MCP)
   writes a `.spc` whose DSP register file gives per-voice pitch/vol/SRCN.
 - **Tunables** (top of `engine.asm`): `REF_NOTE`, `OCT_REF`, `PITCH_OUT_SHIFT`
-  (pitch); `TIMER_DIV`, `TEMPO_DEFAULT` (tempo); `MVOL_DEFAULT`, `CHVOL_DEFAULT`.
+  (pitch); `TIMER_DIV`, `TEMPO_DEFAULT` (tempo); `CHVOL_DEFAULT` (per-voice level),
+  `SGB_MASTER` (`$60` DSP-master target), `FADE_IN_RATE` (base ticks per master step).
 - **Bring-up bugs fixed** (mostly SPC700 flag-clobber + my spec errors): SBN block
   header is `[len,dest]` not `[dest,len]`; per-instrument pitch base is big-endian;
   `$F7`/`$F5` take 3 operands; two `MOV`/`INCW`-before-branch flag clobbers (froze

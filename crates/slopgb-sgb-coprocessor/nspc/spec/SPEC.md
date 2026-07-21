@@ -41,12 +41,26 @@ Edge-detect a change on **`port0` only** (ports 1–3 change on every sound effe
 and are not music commands). On a changed `port0`:
 - **`$00`** → **no music change** (SFX-only command; leave the current song
   playing).
-- **`$01`–`$7F`** → **play** the song at `$2B00` from the start.
+- **`$01`–`$7F`** → **play** the song at `$2B00` from the start — but only once
+  the song data is actually present (see "Play may precede the transfer" below).
 - **`$80`–`$FF`** → **stop / idle** (bit 7 set = stop, not a song index; do not
   restart). Return to the exact power-on idle state so a later play cold-starts.
 
 Echoing the command back is harmless but not required. The main loop must ALWAYS
 poll `port0` every iteration — no path (stop, idle) may block it.
+
+**Play may precede the transfer.** The host can set a play score (`$01`–`$7F`) on
+`port0` *before* the song data has finished copying into `$2B00` (the SGB streams
+that data in separately, and the score can win the race). While the copy is still
+in flight, `$2B00`/`$2B01` read `0`. Song data always lives at `$2Bxx`, so the song
+pointer's HIGH byte (`$2B01`) is non-zero once the data is present, and `0` while it
+is not. Therefore a play command must be treated as **not-yet-ready** when the song
+pointer's high byte is `0`: do NOT begin playback, do NOT walk the (still-empty)
+song list, and do NOT consume the command — leave the engine idle and re-detect the
+same play score on the next poll, retrying until the high byte is non-zero. Only a
+non-zero high byte commits the engine to playing. (Starting on a `0` pointer walks
+into zero-page, hits a `$0000` end-word, and latches silence forever — the failure
+this guards against.)
 
 **No fade:** there is no confirmed host signal for a music fade-out (an earlier
 draft wrongly read `port3 != 0` as fade — that byte is the SFX-attributes byte and
@@ -155,12 +169,38 @@ VELTAB   (16): 19 32 4C 65 72 7F 8C 98 A5 B2 BF CB D8 E5 F2 FC   ; curvel = VELT
 ```
 
 ## Note timing & gate
-On a note (`$80`–`$C7`): compute pitch (below), set the voice volume from `curvel`
-scaled by channel volume (`$ED`) and master volume (`$E5`), key the voice ON for
-`gate = (curdur * curquant) >> 8` ticks (min 1), then key OFF — but the channel
-still occupies the full `curdur` ticks before reading the next event. (Gate =
-articulation; it must NOT change the total `curdur` timing.) Tie holds for the
-full duration; rest keys off immediately.
+On a note (`$80`–`$C7`): compute pitch (below), set the voice volume (see "Master
+volume & fade-in"), key the voice ON for `gate = (curdur * curquant) >> 8` ticks
+(min 1), then key OFF — but the channel still occupies the full `curdur` ticks
+before reading the next event. (Gate = articulation; it must NOT change the total
+`curdur` timing.) Tie holds for the full duration; rest keys off immediately.
+
+## Master volume & fade-in (two independent stages — keep them separate)
+1. **SGB hardware master = the DSP main volume (`$0C/$1C` MVOL L/R).** This is the
+   SGB's own output level, driven by the DRIVER, never by song data. MVOL is
+   SIGNED, so a large unsigned song byte written here goes negative (`$F8` = −8 ≈
+   mute) — NEVER write a song value to it. It is **boot-relative and slew-limited**:
+   set to `0` ONLY at engine boot, it then ramps up toward a target of `$60` on a
+   WALL-CLOCK schedule (paced by the base-tick timer, a few `+1` steps per so many
+   base ticks) and holds `$60` once reached. Crucially this ramp runs **continuously
+   from boot regardless of play state — it advances even while idle, before any song
+   plays.** Do NOT reset it on song start or stop, and do NOT gate it on the
+   sequencer. Consequence: whether a song fades in depends only on WHEN it starts
+   relative to boot. A song that plays immediately at boot catches the master
+   mid-ramp and audibly fades in (measured: ~`$03` at half a second, `$60` at
+   steady state). A song that starts a second or two later — after the master has
+   already slewed to `$60` during the silent boot/logo screens — starts at full
+   with NO fade. (This is why the same first-and-only `SOUND` command fades one ROM
+   and not another.) Stopping a song keys its voices off but leaves the master at
+   its current level.
+2. **Song master volume = `$E5 vv`.** `$E5` sets a SOFTWARE scalar (`vv`/256, so
+   `$F8` ≈ unity/full) applied to every voice's computed volume in software. It
+   MUST NOT be written to the DSP main-volume register. Default = full.
+
+**Per-voice volume** at note-on: `v = (VELTAB[vel] * channel_volume) >> 8`; then
+`v = (v * song_master) >> 8`; then apply pan to get L/R. Calibrate `CHVOL_DEFAULT`
+so a full-velocity, center-pan note lands near `$2E` at the DSP (the reference
+level); the earlier lowered defaults produced ~`$12` — far too quiet.
 
 ## Instruments (table at `$4C30`, 6 bytes/entry, indexed by `$E0 nn`)
 ```
@@ -201,7 +241,9 @@ DSP regs via `$F2` (address) / `$F3` (data). Per voice X (base `X<<4`): `x0/x1`
 VOL L/R, `x2/x3` PITCH, `x4` SRCN, `x5/x6` ADSR1/2, `x7` GAIN, `x8/x9` ENVX/OUTX.
 Global: `$0C/$1C` MVOL L/R, `$4C` KON, `$5C` KOF, `$6C` FLG, `$5D` DIR (= `$4B`),
 echo `$0D/$2C/$3C/$2D/$3D/$4D/$6D/$7D/$xF`. Play a note: set SRCN/PITCH/VOL/ADSR|
-GAIN, then set the KON bit. Stop: set KOF. Init: FLG echo off, MVOL up.
+GAIN, then set the KON bit. Stop: set KOF (master untouched). Init: FLG echo off,
+MVOL `0` — the ONLY time MVOL is 0; it then slews up to `$60` and stays (see
+"Master volume & fade-in").
 
 ---
 
@@ -239,8 +281,10 @@ found live. Kept here so the record survives without cluttering the reference.
   its dependent branch clobbers the flag — re-establish it before branching.
 
 ## Known-remaining (as of this writing)
-- Clipping with many simultaneous voices (wants a mix / master-volume trim; the
-  songs' own `$E5` master-volume values run hot vs. the reference).
+- **Echo/reverb not implemented.** The `$F5`/`$F7` echo commands are parsed and
+  their operands consumed, but the DSP echo path (EON/EVOL/EFB/EDL/FIR) is left
+  off. The reference enables echo (EON=`$07`, EVOL=`$C0`) and the wet tail adds
+  audible body — a follow-up.
 
 See `docs/hardware-state/sgb-audio.md`.
 
@@ -260,3 +304,13 @@ See `docs/hardware-state/sgb-audio.md`.
 - **Frame model = conductor**: a track's `$00` stops only that channel; the frame
   advances when **channel 0** ends; a null (`0`) frame track pointer leaves that
   channel running (a long line spans frames). Tracks never loop within a frame.
+- **Play/transfer race**: the play score can win the race against the song-data
+  copy, so `start_song` fired on an all-zero `$2B00` pointer, walked zero-page into
+  a `$0000` end-word, and latched silence forever (edge-triggered `poll_comm` never
+  retried). Fix: reject a `0` song-pointer high byte as not-yet-ready and un-latch
+  the score so the play command retries until the data lands.
+- **Master volume written to the wrong (signed) register**: `$E5 $F8` was written
+  straight to DSP MVOL, which is signed, so `$F8` = −8 ≈ mute — the whole song
+  came out barely audible. Fix: `$E5` is a software per-voice scalar; the DSP main
+  volume is the SGB hardware master, faded `0`→`$60` on play. Channel-volume
+  default was also far too low (`$12` per voice vs. the reference `$2E`).
