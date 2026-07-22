@@ -146,8 +146,10 @@ const TABLE_OFF: usize = 0x3_0000;
 /// no block loading the N-SPC engine entry `$0400`). Replicated (not
 /// depended-on, to keep xtask off the wasm-runtime-carrying coprocessor crate)
 /// from `crates/slopgb-sgb-coprocessor/src/lib.rs`'s `parse_apu_blocks`.
-fn parse_apu_blocks(rom: &[u8], mut off: usize) -> Option<(u16, Vec<(u16, Vec<u8>)>)> {
-    let mut blocks: Vec<(u16, Vec<u8>)> = Vec::new();
+type ApuBlocks = Vec<(u16, Vec<u8>)>;
+
+fn parse_apu_blocks(rom: &[u8], mut off: usize) -> Option<(u16, ApuBlocks)> {
+    let mut blocks: ApuBlocks = Vec::new();
     loop {
         let len = u16::from_le_bytes([*rom.get(off)?, *rom.get(off + 1)?]);
         let dest = u16::from_le_bytes([*rom.get(off + 2)?, *rom.get(off + 3)?]);

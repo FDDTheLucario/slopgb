@@ -40,7 +40,8 @@ pub fn serialize(regions: &Regions) -> Vec<u8> {
 /// Serialize `regions` to `path` in the `.smpl` cache format.
 pub fn write_cache(path: impl AsRef<Path>, regions: &Regions) -> Result<(), String> {
     let path = path.as_ref();
-    fs::write(path, serialize(regions)).map_err(|e| format!("writing cache {}: {e}", path.display()))
+    fs::write(path, serialize(regions))
+        .map_err(|e| format!("writing cache {}: {e}", path.display()))
 }
 
 fn read_region(buf: &[u8], pos: &mut usize) -> Result<Vec<u8>, String> {
@@ -48,7 +49,8 @@ fn read_region(buf: &[u8], pos: &mut usize) -> Result<Vec<u8>, String> {
         return Err("cache truncated in region header".to_string());
     }
     let _dest = u16::from_le_bytes([buf[*pos], buf[*pos + 1]]);
-    let len = u32::from_le_bytes([buf[*pos + 2], buf[*pos + 3], buf[*pos + 4], buf[*pos + 5]]) as usize;
+    let len =
+        u32::from_le_bytes([buf[*pos + 2], buf[*pos + 3], buf[*pos + 4], buf[*pos + 5]]) as usize;
     *pos += 6;
     if *pos + len > buf.len() {
         return Err("cache truncated in region data".to_string());

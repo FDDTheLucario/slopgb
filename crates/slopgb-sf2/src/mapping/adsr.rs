@@ -32,7 +32,9 @@ fn rate_seconds(rate_idx: u8) -> f64 {
 }
 
 fn seconds_to_timecents(s: f64) -> i16 {
-    (1200.0 * s.max(1e-6).log2()).round().clamp(-12000.0, 8000.0) as i16
+    (1200.0 * s.max(1e-6).log2())
+        .round()
+        .clamp(-12000.0, 8000.0) as i16
 }
 
 fn timecents_to_seconds(tc: i16) -> f64 {
@@ -70,7 +72,9 @@ pub fn adsr_to_vol_env(adsr1: u8, adsr2: u8) -> VolEnv {
     let decay_s = rate_seconds(dr * 2 + 0x10) * DECAY_TAU_STEPS;
     let release_s = rate_seconds(sr) * DECAY_TAU_STEPS;
     let sustain_frac = (f64::from(sl) + 1.0) / 8.0;
-    let sustain_cb = (-1000.0 * sustain_frac.max(1e-4).log10()).round().clamp(0.0, 1000.0) as i16;
+    let sustain_cb = (-1000.0 * sustain_frac.max(1e-4).log10())
+        .round()
+        .clamp(0.0, 1000.0) as i16;
 
     VolEnv {
         delay_tc: -12000,

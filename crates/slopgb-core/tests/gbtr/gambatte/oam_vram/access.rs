@@ -4,15 +4,12 @@
 
 use super::super::*;
 
-/// The SPRITE-line analog of the kernel pair, on the flag-on path. A
-/// sprite-laden line extends mode 3, shifting the visible mode→0 boundary; the
-/// `vis_early` back-date for sprite/window lines (`lead + 4`, vs bare's
-/// `lead + 3`) lands it at SameBoy's frame, so the two equal-`ldh` reads
-/// straddle it: `10spritesPrLine_m3stat_1` reads mode 3 (out3) and `_m3stat_2`
-/// reads mode 0 (out0) — the same out3/out0 split the kernel pair shows on a
-/// bare line. Whole-dot production reads BOTH as mode 3 (the baselined floor);
-/// this lifts 40 such sprite `m3stat_2` rows flag-on with zero regression.
-/// Flag-OFF (production) is unchanged.
+/// The SPRITE-line analog of the kernel pair. A sprite-laden line extends
+/// mode 3, shifting the visible mode→0 boundary; the `vis_early` back-date for
+/// sprite/window lines (`lead + 4`, vs a bare line's `lead + 3`) matches
+/// SameBoy's frame, so the two equal-`ldh` reads straddle it:
+/// `10spritesPrLine_m3stat_1` reads mode 3 (out3) and `_m3stat_2` reads mode 0
+/// (out0) — the same out3/out0 split the kernel pair shows on a bare line.
 #[test]
 fn sprite_kernel_pair_matches_sameboy_target() {
     let Some(root) = common::gbtr_root() else {
@@ -44,20 +41,14 @@ fn sprite_kernel_pair_matches_sameboy_target() {
     }
 }
 
-/// CGB DOUBLE-SPEED accessibility RE-HOSTED onto the eager clock (L1).
-/// Under `eager` the OAM/VRAM/palette read still resolved against the
-/// production `m0_access_edge`/`pal_access_edge` whole-M-cycle straddle stamp,
-/// which is mis-framed at double speed (the eager mode-0 flip lands at the
-/// reclocked render dot). The DS line-end read releases (`254 + SCX&7`), the
-/// OAM-write release, and the palette-pipe-end unblock all already live in the
-/// ported `Ppu::{oam,vram,pal}_*_blocked` laws (`|| eager`-gated); the
-/// fix routes eager DS accessibility through them by taking the same stamp
-/// bypass the eager clock already takes (`Interconnect::ev_ds_access`,
-/// `interconnect/memory.rs`). EV CGB two-bin 358 → 353 (clean +5/−0). Single
-/// speed keeps the stamp; production byte-identical. The `_1`
-/// siblings are the regression guards (must stay blocked). The lcd-offset
-/// `preread_ds_lcdoffset1_1` accessibility row stays parked (the STOP-shift
-/// `lcd_shift_dots` frame is unported on the eager clock).
+/// CGB DOUBLE-SPEED OAM/VRAM/palette accessibility. The whole-M-cycle
+/// `m0_access_edge`/`pal_access_edge` straddle stamps are mis-framed at double
+/// speed (the mode-0 flip lands at the render dot), so DS accessibility
+/// bypasses the stamp (`Interconnect::ev_ds_access`, `interconnect/memory.rs`)
+/// and resolves through the `Ppu::{oam,vram,pal}_*_blocked` laws: the DS
+/// line-end read release (`254 + SCX&7`), the OAM-write release, and the
+/// palette-pipe-end unblock. Single speed keeps the stamp. The `_1` siblings
+/// are the regression guards (must stay blocked).
 #[test]
 fn eager_ds_access_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -68,7 +59,7 @@ fn eager_ds_access_passes() {
         return;
     };
     let targets = [
-        // Recovered (SameBoy-pass, was EV-fail):
+        // Open-access rows (SameBoy-pass):
         (
             "gambatte/oam_access/postread_scx5_ds_2_cgb04c_out0.gbc",
             "0",
@@ -108,26 +99,21 @@ fn eager_ds_access_passes() {
     }
 }
 
-/// The eager-clock CGB SINGLE-SPEED accessibility residual: the palette
-/// whole-M-cycle stamp bypass + the STOP-shift law-frame, both clean
-/// re-hosts. Traced (`postread_scx3_2` @dot256, `preread_lcdoffset1_1` @dot83):
+/// CGB SINGLE-SPEED accessibility: the palette stamp bypass + the STOP-shift
+/// law frame (traced `postread_scx3_2` @dot256, `preread_lcdoffset1_1` @dot83):
 ///
-/// * **Palette** — the CGB `pal_access_edge` stamp is a WHOLE-M-cycle block that
-///   `access_lead` does not disarm; SS eager kept it while `tier2`/DS bypass it,
-///   re-blocking `cgbpal_m3end_scx{2,3,5}_2` reads that land past the pipe end
-///   where `Ppu::pal_ram_blocked` (already `|| eager`-gated) reads open.
-///   Fix: extend the `interconnect/memory.rs` FF69/FF6B bypass to all
-///   `eager` (`!self.eager` supersedes `!self.ev_ds_access()`).
-/// * **STOP-shift** — `Ppu::vram_read_blocked`'s law position used the raw
-///   `self.dot` under eager, not the `law_pos()` STOP-shift frame `tier2` and
-///   `pal_ram_blocked` already take, so `preread_lcdoffset1_1`'s law-dot82 read
-///   blocked (raw dot83 ≥ 83). Fix: `d = law_pos().1` under `tier2 || eager`.
+/// * **Palette** — the CGB `pal_access_edge` stamp is a WHOLE-M-cycle block
+///   that `access_lead` does not disarm; the `interconnect/memory.rs`
+///   FF69/FF6B bypass resolves the read through `Ppu::pal_ram_blocked`
+///   instead, which reads open past the pipe end
+///   (`cgbpal_m3end_scx{2,3,5}_2`).
+/// * **STOP-shift** — `Ppu::vram_read_blocked` takes the `law_pos()`
+///   STOP-shift frame (as `pal_ram_blocked` does), not the raw `self.dot`, so
+///   `preread_lcdoffset1_1`'s law-dot82 read is open (raw dot83 would block).
 ///
-/// EV CGB two-bin 323 → 318 (clean +5/−0, DMG 74 unchanged). The `_1`/`_2`
-/// siblings separate WHOLE-DOT (`preread_lcdoffset1_2` law-dot86 stays blocked;
-/// the palette `_1` entry reads stay blocked), so no render-length move is
-/// needed — NOT the `vis_early` flip-dot family (whose eager `early_lead` is
-/// mis-framed on scx0/scx5). Production + tier2-off byte-identical.
+/// The `_1`/`_2` siblings separate on whole dots (`preread_lcdoffset1_2`
+/// law-dot86 stays blocked; the palette `_1` entry reads stay blocked), so no
+/// mode-3 render-length change is involved.
 #[test]
 fn eager_ss_access_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -138,7 +124,7 @@ fn eager_ss_access_passes() {
         return;
     };
     let targets = [
-        // Recovered (SameBoy-pass, was EV-fail):
+        // Open-access rows (SameBoy-pass):
         (
             "gambatte/cgbpal_m3/cgbpal_m3end_scx2_2_cgb04c_out0.gbc",
             "0",

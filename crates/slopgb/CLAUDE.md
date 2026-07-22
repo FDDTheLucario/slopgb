@@ -13,7 +13,9 @@ Per-area state lives in `docs/ui-state/<area>.md` — read the matching file fir
   pumps (the `if frames > 0` block is the per-rendered-frame hook).
 - Pacing: `app_pacing.rs` — three pacers (turbo / audio / timer), each calling
   `run_one_frame`. Menus `app_menu.rs`; discrete actions `app_run.rs`;
-  file/path dialogs `app_path.rs`; CLI parse `cli.rs`.
+  file/path dialogs `app_path.rs`; CLI parse `cli.rs`; startup resource
+  resolvers (boot ROM / plugins / MSU-1 / SGB BIOS) `app_boot.rs`; palette +
+  redraw `app_draw.rs`; keyboard input + the key-binding wizard `app_keys.rs`.
 - Debug windows: `windows/` (debugger, viewers, options), drawn by the
   software UI toolkit `ui.rs` into softbuffer XRGB8888 buffers.
 - Read-only introspection into core: `mcp/` (opt-in MCP server) + the plugin

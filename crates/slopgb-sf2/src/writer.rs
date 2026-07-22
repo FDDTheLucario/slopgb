@@ -12,12 +12,12 @@
 //! with a single global-key zone pointing at that instrument. Generator IDs
 //! are from the SoundFont 2.01 Technical Specification §8.1.2.
 
-use crate::reader::{Sf2Instrument, Sf2Sample};
 use crate::reader::{
     GEN_ATTACK_VOL_ENV, GEN_COARSE_TUNE, GEN_DECAY_VOL_ENV, GEN_DELAY_VOL_ENV, GEN_FINE_TUNE,
     GEN_HOLD_VOL_ENV, GEN_INITIAL_ATTENUATION, GEN_INSTRUMENT, GEN_OVERRIDING_ROOT_KEY,
     GEN_RELEASE_VOL_ENV, GEN_SAMPLE_ID, GEN_SAMPLE_MODES, GEN_SUSTAIN_VOL_ENV,
 };
+use crate::reader::{Sf2Instrument, Sf2Sample};
 use crate::riff::{write_chunk, write_fixed_str, write_list};
 
 fn gen_record(out: &mut Vec<u8>, id: u16, amount: i16) {
@@ -47,7 +47,11 @@ fn build_info() -> Vec<u8> {
     write_list(b"INFO", &body)
 }
 
-fn build_sdta(samples: &[Sf2Sample]) -> (Vec<u8>, Vec<(u32, u32, u32, u32)>) {
+/// A sample's span in the `smpl` block: (start, end, startloop, endloop), in
+/// sample points.
+type SampleSpan = (u32, u32, u32, u32);
+
+fn build_sdta(samples: &[Sf2Sample]) -> (Vec<u8>, Vec<SampleSpan>) {
     let mut smpl = Vec::new();
     let mut spans = Vec::new(); // (start, end, startloop, endloop), in sample points
     for s in samples {
@@ -63,7 +67,7 @@ fn build_sdta(samples: &[Sf2Sample]) -> (Vec<u8>, Vec<(u32, u32, u32, u32)>) {
     (write_list(b"sdta", &write_chunk(b"smpl", &smpl)), spans)
 }
 
-fn build_shdr(samples: &[Sf2Sample], spans: &[(u32, u32, u32, u32)]) -> Vec<u8> {
+fn build_shdr(samples: &[Sf2Sample], spans: &[SampleSpan]) -> Vec<u8> {
     let mut body = Vec::new();
     for (s, &(start, end, loopstart, loopend)) in samples.iter().zip(spans) {
         write_fixed_str(&mut body, &s.name, 20);
@@ -104,7 +108,11 @@ fn instrument_generators(inst: &Sf2Instrument) -> Vec<u8> {
     g
 }
 
-fn build_pdta(samples: &[Sf2Sample], instruments: &[Sf2Instrument], spans: &[(u32, u32, u32, u32)]) -> Vec<u8> {
+fn build_pdta(
+    samples: &[Sf2Sample],
+    instruments: &[Sf2Instrument],
+    spans: &[(u32, u32, u32, u32)],
+) -> Vec<u8> {
     // phdr: one preset per instrument (bank 0, program = index), each with a
     // single preset zone whose only generator is `instrument` (index-generator,
     // so it must be the zone's last/only generator).

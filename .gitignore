@@ -13,8 +13,12 @@ target/
 test-roms-src/
 handoff.md
 goal.md
+/scratchpad/
 /.claude/worktrees/
 /bootroms/
+# `cargo xtask stage-plugins plugins` output — rebuildable, not source.
+/plugins/
 boot/boot.o
 boot/*.o
 boot/*.map
+roms/mbc6/*.o

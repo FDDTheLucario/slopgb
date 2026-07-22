@@ -21,8 +21,10 @@ const TABLE_OFF: usize = 0x3_0000;
 /// depended-on, so this crate stays independent of `slopgb-sgb-coprocessor`)
 /// from that crate's `src/lib.rs::parse_apu_blocks` (identical copy also in
 /// `xtask/src/main.rs`).
-fn parse_apu_blocks(rom: &[u8], mut off: usize) -> Option<(u16, Vec<(u16, Vec<u8>)>)> {
-    let mut blocks: Vec<(u16, Vec<u8>)> = Vec::new();
+type ApuBlocks = Vec<(u16, Vec<u8>)>;
+
+fn parse_apu_blocks(rom: &[u8], mut off: usize) -> Option<(u16, ApuBlocks)> {
+    let mut blocks: ApuBlocks = Vec::new();
     loop {
         let len = u16::from_le_bytes([*rom.get(off)?, *rom.get(off + 1)?]);
         let dest = u16::from_le_bytes([*rom.get(off + 2)?, *rom.get(off + 3)?]);
@@ -127,7 +129,10 @@ fn roundtrip_rom() {
     // Step 4: export to SF2.
     let sf2 = export_sf2(&ram, DIR_DEST, INSTR_DEST, n_dir, n_instr).unwrap();
     assert!(!sf2.is_empty(), "exported SF2 is empty");
-    assert!(sf2.starts_with(b"RIFF"), "exported SF2 does not start with RIFF");
+    assert!(
+        sf2.starts_with(b"RIFF"),
+        "exported SF2 does not start with RIFF"
+    );
     assert!(
         sf2.windows(4).any(|w| w == b"sfbk"),
         "exported SF2 has no sfbk form-type chunk"
@@ -136,7 +141,10 @@ fn roundtrip_rom() {
     // Step 5: import back.
     let regions = import_sf2(&sf2).unwrap();
     assert!(!regions.dir.is_empty(), "re-imported dir region is empty");
-    assert!(!regions.instr.is_empty(), "re-imported instr region is empty");
+    assert!(
+        !regions.instr.is_empty(),
+        "re-imported instr region is empty"
+    );
     assert!(!regions.brr.is_empty(), "re-imported brr region is empty");
 
     // Step 6: structural asserts.
@@ -212,7 +220,12 @@ fn roundtrip_rom() {
             .name
             .strip_prefix("srcn_")
             .and_then(|hex| usize::from_str_radix(hex, 16).ok())
-            .unwrap_or_else(|| panic!("sample name {:?} is not the expected srcn_XX form", sample.name));
+            .unwrap_or_else(|| {
+                panic!(
+                    "sample name {:?} is not the expected srcn_XX form",
+                    sample.name
+                )
+            });
 
         let orig_e = usize::from(DIR_DEST) + srcn * 4;
         let orig_start = u16::from_le_bytes([ram[orig_e], ram[orig_e + 1]]) as usize;

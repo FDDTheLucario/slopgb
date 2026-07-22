@@ -72,7 +72,10 @@ fn sine_ramp_round_trip_rms_under_threshold() {
         .sum();
     let rms = (sum_sq / pcm.len() as f64).sqrt();
     let threshold = 0.04 * 32768.0;
-    println!("BRR round-trip RMS error: {rms:.2} (threshold {threshold:.2}, {:.3}% of full scale)", rms / 32768.0 * 100.0);
+    println!(
+        "BRR round-trip RMS error: {rms:.2} (threshold {threshold:.2}, {:.3}% of full scale)",
+        rms / 32768.0 * 100.0
+    );
     assert!(
         rms < threshold,
         "RMS error {rms} exceeded 4% of full scale ({threshold})"

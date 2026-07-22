@@ -7,7 +7,8 @@ fn round_trips_byte_identical() {
         instr: vec![0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF],
         brr: vec![0x93, 0x77, 0x77, 0x77, 0x77, 0x88, 0x88, 0x88, 0x88],
     };
-    let path = std::env::temp_dir().join(format!("slopgb-sf2-cache-test-{}.smpl", std::process::id()));
+    let path =
+        std::env::temp_dir().join(format!("slopgb-sf2-cache-test-{}.smpl", std::process::id()));
 
     write_cache(&path, &regions).expect("write must succeed");
     let read_back = read_cache(&path).expect("read must succeed");
@@ -48,7 +49,8 @@ fn serialize_deserialize_match_write_read_cache() {
 
 #[test]
 fn rejects_bad_magic() {
-    let path = std::env::temp_dir().join(format!("slopgb-sf2-cache-bad-{}.smpl", std::process::id()));
+    let path =
+        std::env::temp_dir().join(format!("slopgb-sf2-cache-bad-{}.smpl", std::process::id()));
     std::fs::write(&path, b"NOPE").unwrap();
     assert!(read_cache(&path).is_err());
     let _ = std::fs::remove_file(&path);

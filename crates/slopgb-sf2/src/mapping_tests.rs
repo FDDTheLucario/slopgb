@@ -42,7 +42,10 @@ fn export_then_import_round_trips_srcn_and_tuning() {
     assert!(!regions.brr.is_empty());
 
     assert_eq!(regions.instr[0], 0, "SRCN 0 must round-trip");
-    assert_eq!(regions.instr[1], 0x9F, "ADSR1 must round-trip exactly for this rate pair");
+    assert_eq!(
+        regions.instr[1], 0x9F,
+        "ADSR1 must round-trip exactly for this rate pair"
+    );
     assert_eq!(
         regions.instr[2],
         (3 << 5) | 10,

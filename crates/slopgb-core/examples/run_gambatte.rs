@@ -81,7 +81,6 @@ fn main() {
         _ => Model::Cgb,
     };
     let rom = std::fs::read(&rom_path).expect("read rom");
-    // `new` is the production eager-value clock.
     let mut gb = GameBoy::new(model, rom).expect("load rom");
     let target = 16 * u64::from(CYCLES_PER_FRAME);
     while gb.cycles() < target {

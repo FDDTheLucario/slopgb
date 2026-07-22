@@ -14,11 +14,16 @@
 /// `slopgb_save_state` / `slopgb_load_state` (chip state snapshots). RAM writes
 /// and state restores ride the existing mailbox channel; RAM reads and state
 /// saves ride the emit channel.
-/// v6 adds the tier-3 `slopgb_dump_spc` export: an audio chip assembles a `.spc`
+/// v6 adds the tier-3 `slopgb_manifest` export: a coprocessor emits a
+/// self-describing manifest (its `id`, display `name`, advertised `provides`
+/// roles, and contributed CLI `flag`s) over the emit channel as
+/// [`crate::EMIT_KIND_MANIFEST`], so the host binds a plugin by declared role
+/// instead of by filename. Optional — an empty manifest means "undeclared".
+/// v7 adds the tier-3 `slopgb_dump_spc` export: an audio chip assembles a `.spc`
 /// (SPC700 Sound File) from its ARAM + registers + DSP and ships it over the emit
 /// channel under its own kind (`EMIT_KIND_SPC`), distinct from the opaque
 /// save-state so the payload's intent is unambiguous.
-pub const ABI_VERSION: i32 = 6;
+pub const ABI_VERSION: i32 = 7;
 
 /// A readable register or I/O byte. Discriminant is the `host_reg` wire index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

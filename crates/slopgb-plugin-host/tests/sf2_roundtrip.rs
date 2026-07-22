@@ -64,8 +64,14 @@ fn sf2_converts_in_wasm_identically_to_native() {
         return;
     };
 
-    let sf2 = slopgb_sf2::export_sf2(&synthetic_apu_ram(), slopgb_sf2::DIR_DEST, slopgb_sf2::INSTR_DEST, 64, 1)
-        .unwrap();
+    let sf2 = slopgb_sf2::export_sf2(
+        &synthetic_apu_ram(),
+        slopgb_sf2::DIR_DEST,
+        slopgb_sf2::INSTR_DEST,
+        64,
+        1,
+    )
+    .unwrap();
 
     let mut cop = LoadedCoprocessor::load(&wasm).unwrap();
     cop.reset().unwrap();

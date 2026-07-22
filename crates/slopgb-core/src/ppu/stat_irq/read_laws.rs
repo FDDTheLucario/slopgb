@@ -196,9 +196,9 @@ impl Ppu {
         // `!line_render_done`: a fresh line-0 with a PENDING OAM scan (`lrd=0`)
         // back-dates to cc+4 OAM mode 2 (`lycint152_ly0stat_3` want C2 /
         // `frame1_m2stat_count_2` want 90), while the mooneye `stat_lyc_onoff`
-        // post-enable poll resolves `lrd=1` (mode 0) — the discriminator the
-        // prior "HALFDOT floor" lacked; sibling `ly0stat_2` (want 0) verdicts on
-        // its earlier LY=153 read. Pin `tier2_eager_dmg_ly0_oam_entry_passes`.
+        // post-enable poll resolves `lrd=1` (mode 0) — the discriminator;
+        // sibling `ly0stat_2` (want 0) verdicts on its earlier LY=153 read.
+        // Pin `tier2_eager_dmg_ly0_oam_entry_passes`.
         if !self.model.is_cgb() && !self.glitch_line {
             if (1..144).contains(&self.line) && m == 0 && self.dot < 4 {
                 return 2; // line-start OAM entry (cc+4 = OAM scan)
@@ -213,8 +213,8 @@ impl Ppu {
                 return 0; // 153→0 wrap: cc+4 in line-0 dots 0-3 = DMG mode 0
             }
         }
-        // HALFDOT Part A-render: decouple the mode-3→0 verdict from the
-        // peek-time native mode where no length arm fires. The `vis_exit_hd`
+        // Decouple the mode-3→0 verdict from the peek-time native mode where
+        // no length arm fires. The `vis_exit_hd`
         // arms + arm-8 projection are already peek-independent for the reads
         // that land a length arm (`projected_flip_dot` holds as the read dot
         // advances — measured: `scx_m3_extend` `_1`@dot260 / `_2`@dot264 both
@@ -229,8 +229,8 @@ impl Ppu {
         // Mode-3 regime (past entry, render active-or-just-flipped) on a visible
         // non-glitch line. Does NOT touch the counter-pinned dispatch or the
         // `read_pos_hd` value — verdict-only. This subsumes the native-mode
-        // fallback for the off-arm window ISR reads (+2 EV CGB, 0 drops); the
-        // whole-dot render's flip STILL disagrees with the read-frame projection
+        // fallback for the off-arm window ISR reads; the whole-dot render's
+        // flip STILL disagrees with the read-frame projection
         // for extend/window lines (`flip_dot` 261 vs projection 267 on
         // `scx_m3_extend`), so a dispatch move that straddles that gap is NOT
         // held — that residual needs the half-dot render FSM.

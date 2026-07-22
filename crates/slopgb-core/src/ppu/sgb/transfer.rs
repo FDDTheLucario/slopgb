@@ -207,7 +207,7 @@ impl Ppu {
         self.sgb.as_mut().and_then(SgbView::take_char_row)
     }
 
-    /// Drain one queued SGB SOUND ($08) effect event. The Phase-3 S-DSP seam:
+    /// Drain one queued SGB SOUND ($08) effect event. The S-DSP seam:
     /// the host pulls these and feeds them to the sound engine. `None` off SGB
     /// or when the queue is empty. (Pan Docs "SGB Command $08 — SOUND".)
     pub(crate) fn sgb_take_sound_event(&mut self) -> Option<SgbSound> {
@@ -215,7 +215,7 @@ impl Ppu {
     }
 
     /// The most recent SOU_TRN ($09) SPC700 program upload (4096 bytes), or
-    /// `None`. Phase-3 S-DSP seam.
+    /// `None`. S-DSP seam.
     pub(crate) fn sgb_sou_trn_data(&self) -> Option<&[u8]> {
         self.sgb.as_ref().and_then(SgbView::sou_trn_data)
     }
@@ -236,7 +236,7 @@ impl Ppu {
         self.sgb.as_ref().map(SgbView::data_trn_seq)
     }
 
-    /// Drain one queued DATA_SND ($0F) inline SNES-RAM write. Phase-2/3 seam.
+    /// Drain one queued DATA_SND ($0F) inline SNES-RAM write. SNES-side seam.
     pub(crate) fn sgb_take_data_snd(&mut self) -> Option<Vec<u8>> {
         self.sgb.as_mut().and_then(SgbView::take_data_snd)
     }

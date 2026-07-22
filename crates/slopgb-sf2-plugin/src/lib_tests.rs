@@ -32,8 +32,9 @@ fn synthetic_apu_ram() -> [u8; 0x1_0000] {
 #[test]
 fn convert_matches_native_import_sf2() {
     let ram = synthetic_apu_ram();
-    let sf2_bytes = slopgb_sf2::export_sf2(&ram, slopgb_sf2::DIR_DEST, slopgb_sf2::INSTR_DEST, 64, 1)
-        .expect("export must succeed");
+    let sf2_bytes =
+        slopgb_sf2::export_sf2(&ram, slopgb_sf2::DIR_DEST, slopgb_sf2::INSTR_DEST, 64, 1)
+            .expect("export must succeed");
 
     let payload = convert(&sf2_bytes).expect("a valid SF2 converts");
     let via_cache = slopgb_sf2::cache::deserialize(&payload).expect("valid .smpl payload");

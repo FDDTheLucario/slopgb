@@ -64,6 +64,20 @@ impl Cartridge {
                 rumble_cart: matches!(cart_type, 0x1C..=0x1E),
                 rumble: false,
             },
+            0x20 => Mapper::Mbc6 {
+                ramg: false,
+                ramb_a: 0,
+                ramb_b: 0,
+                romb_a: 0,
+                romb_b: 0,
+                flash_a: false,
+                flash_b: false,
+                flash_enable: false,
+                // Pan Docs: the Flash Write Enable default after power-up
+                // is 0 (sector 0 + hidden region locked).
+                flash_we: false,
+                flash: Box::new(Mbc6Flash::new()),
+            },
             t => return Err(CartridgeError::UnsupportedMapper(t)),
         };
 
@@ -78,9 +92,11 @@ impl Cartridge {
             rom,
             ram: vec![0xFF; ram_len],
             mapper,
+            // 0x20 (MBC6): the type byte doesn't say "+BATTERY", but the
+            // only MBC6 cart (Net de Get) has battery-backed SRAM.
             has_battery: matches!(
                 cart_type,
-                0x03 | 0x06 | 0x09 | 0x0F | 0x10 | 0x13 | 0x1B | 0x1E
+                0x03 | 0x06 | 0x09 | 0x0F | 0x10 | 0x13 | 0x1B | 0x1E | 0x20
             ),
             gg: Vec::new(),
         })

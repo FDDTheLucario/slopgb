@@ -54,9 +54,6 @@ const SUITE_DIR: &str = "age-test-roms";
 ///   single ladder;
 /// * the m3-bg-* screenshot legs are the class-H fetch-grid residue
 ///   (same families as baselines/mealybug.txt).
-// C3 flip (2026-07-12): the eager-value clock default made
-// ei-halt-dmgC-cgbBCE ([Cgb]+[Dmg]), m3-bg-lcdc-ds [Cgb],
-// stat-int-dmgC-cgbBCE [Dmg] and stat-int-ncmBCE [Cgb] pass — removed.
 const BASELINE: &[&str] = &[
     "age-test-roms/lcd-align-ly/lcd-align-ly-cgbBC.gb [Cgb]",
     "age-test-roms/m3-bg-bgp/m3-bg-bgp.gb [Dmg]",
@@ -342,7 +339,7 @@ fn suite_roms(test: &str) -> Option<(PathBuf, Vec<PathBuf>)> {
     Some((root, roms))
 }
 
-/// Inventory hook for the Phase B2 coverage guard: collection-relative
+/// Inventory hook for the global coverage guard: collection-relative
 /// forward-slash paths of every `.gb`/`.gbc` under `age-test-roms/`,
 /// partitioned into (claimed = produces at least one rom×model case,
 /// exempted = the [`segment_models`] revision-skips — `cgbE`-only and
@@ -402,14 +399,11 @@ fn age_matrix() {
     harness::assert_against_baseline("age", &results, BASELINE);
 }
 
-/// Self-check for the inventory hook: claimed and exempted are disjoint and
-/// together cover exactly the on-disk `.gb`/`.gbc` set, and the exempted
-/// set is exactly the nine documented revision-skips.
-/// Red-before-green pin for the eager per-register CGB write-commit debt
-/// (`Ppu::stage_write` palette `6 + 2*parity`): age's m3-bg-bgp is a DMG-compat
-/// mid-mode-3 BGP change that passes tier2 (identical whole-dot render) and
-/// fails the eager clock ONLY on the cc+0 write-commit position. Fails with the
-/// CGB palette debt reverted (uniform 8), passes with it.
+/// Pins the per-register CGB write-commit stage offset (`Ppu::stage_write`
+/// palette `6 + 2*parity`): age's m3-bg-bgp is a DMG-compat mid-mode-3 BGP
+/// change that lands the wrong pixel column without the palette offset
+/// (uniform 8), because the write commit sits at the cc+0 position. Passes
+/// with the offset.
 #[test]
 fn age_eager_cgb_m3_bg_bgp_writecommit_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -433,6 +427,9 @@ fn age_eager_cgb_m3_bg_bgp_writecommit_passes() {
         .unwrap_or_else(|e| panic!("m3-bg-bgp [Cgb] eager: {e}"));
 }
 
+/// Self-check for the inventory hook: claimed and exempted are disjoint and
+/// together cover exactly the on-disk `.gb`/`.gbc` set, and the exempted
+/// set is exactly the nine documented revision-skips.
 #[test]
 fn age_inventory_partitions_suite() {
     let Some((root, roms)) = suite_roms("age inventory") else {

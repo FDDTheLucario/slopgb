@@ -267,6 +267,38 @@ fn ram_init_runs_before_sav_load_no_data_loss() {
 }
 
 #[test]
+fn wrong_size_sav_is_rejected_and_raises_a_load_warning() {
+    // A `.sav` that doesn't fit this cart is discarded (the machine boots fresh),
+    // and — because the next save silently overwrites that file — `load` raises a
+    // one-shot `load_warning` the interactive loader surfaces in a modal. Without
+    // it the user's real save vanishes with only an unseen console line.
+    let dir = scratch("wrong-size-sav");
+    let path = dir.join("game.gb");
+    fs::write(&path, battery_rom()).unwrap(); // expects an 8 KiB (0x2000) .sav
+    fs::write(path.with_extension("sav"), vec![0x55u8; 100]).unwrap(); // wrong size
+
+    let s = Session::load(&path, ModelChoice::Dmg, &BootSpec::NONE, None).expect("load");
+    let warn = s
+        .load_warning
+        .expect("a rejected .sav must raise a warning");
+    assert!(
+        warn.contains("overwritten"),
+        "warning names the risk: {warn}"
+    );
+    assert_ne!(
+        s.gb.save_data().unwrap(),
+        vec![0x55u8; 100],
+        "the wrong-size save was not applied to the machine"
+    );
+
+    // A present, correctly-sized .sav loads clean with no warning.
+    fs::write(path.with_extension("sav"), vec![0x55u8; 0x2000]).unwrap();
+    let ok = Session::load(&path, ModelChoice::Dmg, &BootSpec::NONE, None).expect("load");
+    assert!(ok.load_warning.is_none(), "a valid .sav raises no warning");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn flush_save_writes_once_then_dedups_until_ram_changes() {
     let dir = scratch("flush-dedup");
     let path = dir.join("game.gb");
@@ -531,7 +563,10 @@ fn synthetic_apu_ram() -> [u8; 0x1_0000] {
 /// if the wasm32 target / build is unavailable (the caller then skips). Own
 /// temp `CARGO_TARGET_DIR`, mirroring [`build_sgb_plugins`].
 fn build_sf2_plugin(dir: &Path) -> bool {
-    let manifest = format!("{}/../slopgb-sf2-plugin/Cargo.toml", env!("CARGO_MANIFEST_DIR"));
+    let manifest = format!(
+        "{}/../slopgb-sf2-plugin/Cargo.toml",
+        env!("CARGO_MANIFEST_DIR")
+    );
     let target = std::env::temp_dir().join("slopgb-sf2-plugin-target");
     let ok = process::Command::new(env!("CARGO"))
         .args([
@@ -569,8 +604,9 @@ fn load_or_import_sf2_cache_hit_needs_no_plugin() {
     let dir = scratch("sf2-cache-hit");
     let sf2_path = dir.join("x.sf2");
     let ram = synthetic_apu_ram();
-    let sf2_bytes = slopgb_sf2::export_sf2(&ram, slopgb_sf2::DIR_DEST, slopgb_sf2::INSTR_DEST, 64, 1)
-        .expect("export must succeed");
+    let sf2_bytes =
+        slopgb_sf2::export_sf2(&ram, slopgb_sf2::DIR_DEST, slopgb_sf2::INSTR_DEST, 64, 1)
+            .expect("export must succeed");
     fs::write(&sf2_path, &sf2_bytes).unwrap();
 
     // Pre-seed the cache with a sentinel that could not come from a real
@@ -585,9 +621,18 @@ fn load_or_import_sf2_cache_hit_needs_no_plugin() {
     slopgb_sf2::write_cache(&cache_path, &sentinel).expect("seed cache");
 
     let got = load_or_import_sf2(&sf2_path, None).expect("cache hit must succeed with no plugin");
-    assert_eq!(got.dir, sentinel.dir, "cache hit returns the sentinel dir region");
-    assert_eq!(got.instr, sentinel.instr, "cache hit returns the sentinel instr region");
-    assert_eq!(got.brr, sentinel.brr, "cache hit returns the sentinel brr region");
+    assert_eq!(
+        got.dir, sentinel.dir,
+        "cache hit returns the sentinel dir region"
+    );
+    assert_eq!(
+        got.instr, sentinel.instr,
+        "cache hit returns the sentinel instr region"
+    );
+    assert_eq!(
+        got.brr, sentinel.brr,
+        "cache hit returns the sentinel brr region"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -595,20 +640,26 @@ fn load_or_import_sf2_cache_hit_needs_no_plugin() {
 fn load_or_import_sf2_cache_miss_drives_the_plugin() {
     let dir = scratch("sf2-cache-miss-plugin");
     if !build_sf2_plugin(&dir) {
-        eprintln!("skipping load_or_import_sf2_cache_miss_drives_the_plugin: wasm32 build unavailable");
+        eprintln!(
+            "skipping load_or_import_sf2_cache_miss_drives_the_plugin: wasm32 build unavailable"
+        );
         let _ = fs::remove_dir_all(&dir);
         return;
     }
     let sf2_path = dir.join("x.sf2");
     let ram = synthetic_apu_ram();
-    let sf2_bytes = slopgb_sf2::export_sf2(&ram, slopgb_sf2::DIR_DEST, slopgb_sf2::INSTR_DEST, 64, 1)
-        .expect("export must succeed");
+    let sf2_bytes =
+        slopgb_sf2::export_sf2(&ram, slopgb_sf2::DIR_DEST, slopgb_sf2::INSTR_DEST, 64, 1)
+            .expect("export must succeed");
     fs::write(&sf2_path, &sf2_bytes).unwrap();
 
     let got = load_or_import_sf2(&sf2_path, Some(&dir)).expect("plugin conversion must succeed");
     let want = slopgb_sf2::import_sf2(&sf2_bytes).expect("native import must succeed");
     assert_eq!(got.dir, want.dir, "plugin dir region matches native import");
-    assert_eq!(got.instr, want.instr, "plugin instr region matches native import");
+    assert_eq!(
+        got.instr, want.instr,
+        "plugin instr region matches native import"
+    );
     assert_eq!(got.brr, want.brr, "plugin brr region matches native import");
 
     let smpl_files: Vec<_> = fs::read_dir(&dir)
@@ -625,8 +676,9 @@ fn load_or_import_sf2_missing_plugin_cache_miss_returns_none() {
     let dir = scratch("sf2-missing-plugin");
     let sf2_path = dir.join("x.sf2");
     let ram = synthetic_apu_ram();
-    let sf2_bytes = slopgb_sf2::export_sf2(&ram, slopgb_sf2::DIR_DEST, slopgb_sf2::INSTR_DEST, 64, 1)
-        .expect("export must succeed");
+    let sf2_bytes =
+        slopgb_sf2::export_sf2(&ram, slopgb_sf2::DIR_DEST, slopgb_sf2::INSTR_DEST, 64, 1)
+            .expect("export must succeed");
     fs::write(&sf2_path, &sf2_bytes).unwrap();
 
     assert!(

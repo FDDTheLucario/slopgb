@@ -13,7 +13,7 @@ use crate::common::framecmp::{self, CgbColorMap};
 use crate::common::png;
 
 /// Build a machine for a collection ROM; a rejected cartridge means a
-/// corrupt checkout, not a test failure. `new` is the production eager clock.
+/// corrupt checkout, not a test failure.
 pub fn boot(rom: &[u8], model: Model) -> GameBoy {
     GameBoy::new(model, rom.to_vec())
         .unwrap_or_else(|e| panic!("cartridge rejected ({model:?}): {e:?}"))

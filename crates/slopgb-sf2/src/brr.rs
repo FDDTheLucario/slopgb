@@ -148,7 +148,10 @@ pub fn encode(pcm: &[i16], loop_sample: Option<usize>) -> Encoded {
         let is_first = block_idx == 0;
         let is_last = block_idx == n_blocks - 1;
 
-        let mut best: Option<(u8, u8, i64, [i16; 16], i32, i32, [i32; 16])> = None;
+        // Best candidate: (filter, shift, error, decoded samples, predictor
+        // carries p1/p2, nibbles).
+        type BrrCandidate = (u8, u8, i64, [i16; 16], i32, i32, [i32; 16]);
+        let mut best: Option<BrrCandidate> = None;
         let filters: &[u8] = if is_first { &[0] } else { &[0, 1, 2, 3] };
         for &filter in filters {
             for shift in 0u8..=12 {

@@ -225,7 +225,7 @@ fn mooneye2022_matrix() {
     harness::assert_against_baseline("mooneye2022", &results, BASELINE);
 }
 
-/// Phase B2 inventory hook: collection-relative forward-slash paths of
+/// Inventory hook: collection-relative forward-slash paths of
 /// every `.gb`/`.gbc` under `mooneye-test-suite/`, split into (claimed,
 /// exempted). Claimed ROMs produce at least one rom×model case in
 /// [`mooneye2022_matrix`]; exempted ones are documented never-run (the
@@ -250,7 +250,7 @@ pub fn inventory() -> (Vec<String>, Vec<String>) {
     (claimed, exempted)
 }
 
-/// Self-check of the inventory hook ahead of the global Phase B2 guard:
+/// Self-check of the inventory hook ahead of the global inventory guard:
 /// claimed ∩ exempted = ∅, claimed ∪ exempted = the on-disk ROM set, and
 /// the exemptions are exactly the documented ones.
 #[test]

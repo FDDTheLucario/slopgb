@@ -87,7 +87,11 @@ fn install_nspc_rom_engine_with_sf2_samples() {
     assert_eq!(spc.read_ram(0x4DB0, 8).unwrap(), vec![0x33; 8], "sf2 brr");
     // The ROM's engine stub, not NSPC_ENGINE, sits at $0400.
     let engine_at_0400 = spc.read_ram(u32::from(SPC_PROG_ORG), 2).unwrap();
-    assert_eq!(engine_at_0400, vec![0x2F, 0xFE], "ROM engine block, not NSPC_ENGINE");
+    assert_eq!(
+        engine_at_0400,
+        vec![0x2F, 0xFE],
+        "ROM engine block, not NSPC_ENGINE"
+    );
     assert_ne!(
         NSPC_ENGINE[..2.min(NSPC_ENGINE.len())],
         engine_at_0400[..],

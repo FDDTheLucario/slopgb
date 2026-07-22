@@ -10,7 +10,7 @@ impl Ppu {
         if self.glitch_line {
             // A glitch-line FF41 read in the last 4 dots is the cc+0 view of
             // what its cc+4 trailing edge sees 4 dots later — the *next* line
-            // (line 1) at dots 0-3 (the −4 read offset, exactly A7/A13's mode
+            // (line 1) at dots 0-3 (the −4 read offset, the same mode
             // back-date). Back-date the readable compare to that line-1
             // dots-0-3 value: DMG forces the coincidence flag invalid there
             // (None), CGB holds 0 (its readable flag = LY−1 = 0 across dots 0-3,

@@ -11,7 +11,7 @@ for the UI. **Read the relevant file before touching that UI area.**
 | [options.md](options.md) | Options dialog: 9 tabs, live settings, Exceptions mask, Joypad rebind/SOCD, live input timing, bootrom UI, pure-bgb mode, Theme tab |
 | [viewers.md](viewers.md) | VRAM viewer (CGB-attr-aware, resize, Palettes), I/O map, `&self` introspection accessors |
 | [save-states-and-link.md](save-states-and-link.md) | Quick + on-disk save states, serial link cable (TCP, byte-level lockstep) |
-| [mcp-server.md](mcp-server.md) | Opt-in MCP server (`--mcp-port`): 9 debug tools over hand-rolled HTTP/JSON-RPC for an LLM agent to drive the live debugger |
+| [mcp-server.md](mcp-server.md) | Opt-in MCP server (`--mcp-port`): 14 debug tools over hand-rolled HTTP/JSON-RPC for an LLM agent to drive the live debugger — introspection, memory/state dump, and a parallel what-if fork (`simulate`) |
 | [plugin-api.md](plugin-api.md) | Opt-in wasm plugins (`--plugins`): Rust-authored, runtime-loaded, read-only per-frame introspection via the wasmi-hosted `slopgb-plugin-api`/`-host` crates — plus the UI to manage them (Options → Plugins tab, right-click Plugins submenu, per-plugin enable + reload) |
 | [startup-and-boot.md](startup-and-boot.md) | No-ROM blank-LCD startup, opt-in boot-ROM execution |
 | [pacing-and-audio.md](pacing-and-audio.md) | The three pacers (turbo/audio/timer), the audio-queue rate servo + bands, the slewed `next_frame` grid, the stall watchdog, FPS-counter semantics |

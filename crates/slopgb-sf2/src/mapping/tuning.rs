@@ -66,7 +66,9 @@ pub fn to_base16(
         - f64::from(pitch_correction)
         + f64::from(coarse_tune) * 100.0
         + f64::from(fine_tune);
-    (4096.0 * 2f64.powf(cents / 1200.0)).round().clamp(1.0, 65535.0) as u16
+    (4096.0 * 2f64.powf(cents / 1200.0))
+        .round()
+        .clamp(1.0, 65535.0) as u16
 }
 
 #[cfg(test)]

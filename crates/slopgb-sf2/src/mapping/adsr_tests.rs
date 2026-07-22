@@ -16,7 +16,10 @@ fn adsr_round_trips_through_rate_indices() {
     let adsr2 = (5 << 5) | 12;
     let env = adsr_to_vol_env(adsr1, adsr2);
     let (back1, back2) = vol_env_to_adsr(&env);
-    assert_eq!(back1, adsr1, "attack/decay rate must round-trip exactly (exact rate table hit)");
+    assert_eq!(
+        back1, adsr1,
+        "attack/decay rate must round-trip exactly (exact rate table hit)"
+    );
     assert_eq!(back2, adsr2, "sustain level/rate must round-trip exactly");
 }
 
@@ -26,7 +29,10 @@ fn attenuation_round_trips_direct_gain() {
         let cb = gain_to_attenuation_cb(gain);
         let back = attenuation_cb_to_gain(cb);
         let diff = (i32::from(back) - i32::from(gain)).abs();
-        assert!(diff <= 1, "gain {gain:#x} -> {cb}cB -> {back:#x}, diff {diff}");
+        assert!(
+            diff <= 1,
+            "gain {gain:#x} -> {cb}cB -> {back:#x}, diff {diff}"
+        );
     }
 }
 

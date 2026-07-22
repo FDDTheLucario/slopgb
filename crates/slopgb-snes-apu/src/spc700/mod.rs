@@ -108,8 +108,9 @@ pub struct Spc700 {
 
     // Internal state below is private: it is reached only by this module and
     // its descendants (the `ops_*`, `ram`, `ports`, `timers`, and test
-    // submodules), which see private items of an ancestor. Phase 3 uses the
-    // public methods (`attach_dsp`, `snes_*`), never these fields.
+    // submodules), which see private items of an ancestor. The S-DSP
+    // integration uses the public methods (`attach_dsp`, `snes_*`), never these
+    // fields.
     /// 64 KB APU RAM (RAM underlies the IPL ROM at `$FFC0-$FFFF`).
     ram: Box<[u8; 0x1_0000]>,
 
@@ -133,7 +134,7 @@ pub struct Spc700 {
     /// Prescaler accumulator for the 64 kHz T2 (÷16).
     presc_64k: u32,
 
-    /// Optional S-DSP plugged in by Phase 3. `None` → the [`Spc700::dsp_shadow`]
+    /// Optional S-DSP; `None` → no DSP attached and the [`Spc700::dsp_shadow`]
     /// answers.
     dsp: Option<Box<dyn Dsp>>,
 
@@ -203,7 +204,7 @@ impl Spc700 {
     }
 
     /// Execute one instruction; returns the cycles consumed. Drives the timers.
-    #[must_use = "the returned cycle count drives the DSP/timer clock in Phase 3"]
+    #[must_use = "the returned cycle count drives the DSP/timer clock"]
     pub fn step(&mut self) -> u32 {
         if self.stopped {
             // Oscillator halted by SLEEP/STOP. Report the minimal tick so callers

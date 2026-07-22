@@ -39,6 +39,9 @@ fn round_trips_through_the_writer() {
     let parsed = parse(&bytes).expect("writer output must parse");
     assert_eq!(parsed.samples.len(), 1);
     assert_eq!(parsed.instruments.len(), 1);
-    assert_eq!(parsed.samples[0].pcm, vec![0, 1000, 2000, 1000, 0, -1000, -2000, -1000]);
+    assert_eq!(
+        parsed.samples[0].pcm,
+        vec![0, 1000, 2000, 1000, 0, -1000, -2000, -1000]
+    );
     assert!(parsed.instruments[0].loops);
 }

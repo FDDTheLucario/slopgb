@@ -62,7 +62,11 @@ clean golden-safe detector/backend.
   finishing commits. Over the rebindable `App.bindings` (`keymap::KeyBindings`,
   default Z=A/X=B/Enter=Start/RShift=Select/arrows). `handle_key` resolves a held
   button via `bindings.button_for` **before** `input::map` (which no longer carries
-  `Action::Button`).
+  `Action::Button`). The map persists like the controller one (`Settings.key_map`,
+  8 comma-separated `keymap::key_name`s, `-` = unbound): the wizard's commit writes
+  it and saves, boot seeds `App.bindings` via `KeyBindings::from_config`, and an
+  Options apply/Defaults re-derives it. Keys `key_name` labels `"?"` don't survive
+  the round-trip and fall back to the slot default.
 - **Allow pressing L+R or U+D** toggles the SOCD filter (`Settings.allow_opposing`,
   default off = bgb). `keymap::socd_suppress` in `App::set_button` releases the
   opposite direction on a new press and **resurrects** a still-held one on release

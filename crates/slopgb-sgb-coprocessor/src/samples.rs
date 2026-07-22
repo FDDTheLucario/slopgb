@@ -104,18 +104,22 @@ impl SgbCoprocessor {
             // never reads it, so a stale upload is harmless.
             let is_engine = *dest == SPC_PROG_ORG;
             let is_sample = matches!(*dest, SAMPLE_DIR_DEST | SAMPLE_INSTR_DEST | SAMPLE_BRR_DEST);
-            let skip = (matches!(engine, Engine::CleanRoom) && is_engine)
-                || (sf2.is_some() && is_sample);
+            let skip =
+                (matches!(engine, Engine::CleanRoom) && is_engine) || (sf2.is_some() && is_sample);
             if !skip && spc.write_ram(u32::from(*dest), data).is_err() {
                 return false;
             }
         }
         if let Some(regions) = sf2 {
-            if spc.write_ram(u32::from(SAMPLE_DIR_DEST), &regions.dir).is_err()
+            if spc
+                .write_ram(u32::from(SAMPLE_DIR_DEST), &regions.dir)
+                .is_err()
                 || spc
                     .write_ram(u32::from(SAMPLE_INSTR_DEST), &regions.instr)
                     .is_err()
-                || spc.write_ram(u32::from(SAMPLE_BRR_DEST), &regions.brr).is_err()
+                || spc
+                    .write_ram(u32::from(SAMPLE_BRR_DEST), &regions.brr)
+                    .is_err()
             {
                 return false;
             }
@@ -141,9 +145,12 @@ impl SgbCoprocessor {
 /// blocks)`. The fixed [`TABLE_OFF`] wrapper around the private
 /// [`parse_apu_blocks`], exposed for the xtask SF2 exporter (which needs the
 /// ROM's own block layout without installing anything).
-pub fn parse_sgb_apu_blocks(rom: &[u8]) -> Option<(u16, Vec<(u16, Vec<u8>)>)> {
+pub fn parse_sgb_apu_blocks(rom: &[u8]) -> Option<(u16, ApuBlocks)> {
     parse_apu_blocks(rom, TABLE_OFF)
 }
+
+/// A parsed SNES APU upload table: each `(dest, bytes)` block, in order.
+type ApuBlocks = Vec<(u16, Vec<u8>)>;
 
 #[cfg(test)]
 #[path = "samples_tests.rs"]

@@ -180,3 +180,17 @@ fn socd_suppress_only_when_filter_is_on() {
     assert_eq!(socd_suppress(Button::Left, true), None);
     assert_eq!(socd_suppress(Button::Up, true), None);
 }
+
+#[test]
+fn key_map_round_trips_through_config() {
+    let mut b = KeyBindings::default();
+    b.set(Button::A, KeyCode::KeyQ);
+    b.clear(Button::Select);
+    let cfg = b.to_config();
+    assert_eq!(cfg, "Right,Left,Up,Down,Q,X,-,Enter");
+    assert_eq!(KeyBindings::from_config(&cfg), b);
+    // A truncated or garbled config falls back to the slot default, never wedges.
+    let partial = KeyBindings::from_config("Right,Left,bogus");
+    assert_eq!(partial.key_for(Button::Up), Some(KeyCode::ArrowUp));
+    assert_eq!(partial.key_for(Button::Start), Some(KeyCode::Enter));
+}

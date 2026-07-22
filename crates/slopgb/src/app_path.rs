@@ -9,6 +9,7 @@ use slopfp::Outcome as PickerOutcome;
 
 use crate::file_picker::FilePicker;
 use crate::ui::dialog::DialogResult;
+use crate::windows::mainwin::InfoBox;
 use crate::{App, PathPurpose, link, push_recent_into, symbols};
 
 /// How a path purpose collects its value: the in-app file browser (open- or
@@ -171,6 +172,16 @@ impl App {
         self.request_game_redraw();
     }
 
+    /// Show a modal error over the LCD (the [`InfoBox`] the menus already use).
+    /// The single place a user-action failure — save/load state, cheats, CDL,
+    /// symbols, link, MCP, audio — becomes visible: a GUI user never sees the
+    /// `stderr` these paths also log to, so an invisible failure reads as silent
+    /// data loss ("I saved, then my progress was gone").
+    pub(crate) fn show_error(&mut self, title: &str, msg: impl Into<String>) {
+        self.info_box = Some(InfoBox::new(title, vec![msg.into()]));
+        self.request_game_redraw();
+    }
+
     /// Carry out an accepted path entry per its purpose. `pub(crate)`: both the
     /// typed modal (this file) and the file-picker guards in `main.rs`/
     /// `app_menu.rs` route their accepted path through this one sink.
@@ -179,7 +190,7 @@ impl App {
             PathPurpose::LoadRom => self.load_dropped(path),
             PathPurpose::SaveState => match self.session.save_state_to(path) {
                 Ok(()) => println!("slopgb: saved state to {}", path.display()),
-                Err(e) => eprintln!("slopgb: save state failed: {e}"),
+                Err(e) => self.show_error("Save state failed", e),
             },
             PathPurpose::LoadState => match self.session.load_state_from(path) {
                 Ok(()) => {
@@ -194,14 +205,14 @@ impl App {
                     self.update_title();
                     self.request_game_redraw();
                 }
-                Err(e) => eprintln!("slopgb: load state failed: {e}"),
+                Err(e) => self.show_error("Load state failed", e),
             },
             PathPurpose::LinkConnect => {
                 // The "path" here is the typed host:port (the shared text modal).
                 let (host, port) = link::parse_host_port(&path.to_string_lossy());
                 match self.link.connect(host.clone(), port) {
                     Ok(()) => println!("slopgb: link connecting to {host}:{port}"),
-                    Err(e) => eprintln!("slopgb: link connect failed: {e}"),
+                    Err(e) => self.show_error("Link connect failed", e.to_string()),
                 }
                 self.update_title(); // reflect the "connecting :port" status at once
             }
@@ -213,7 +224,9 @@ impl App {
                         "slopgb: MCP server on http://127.0.0.1:{}/",
                         self.mcp.port().unwrap_or(port)
                     ),
-                    Err(e) => eprintln!("slopgb: MCP server failed on port {port}: {e}"),
+                    Err(e) => {
+                        self.show_error("MCP server failed", format!("port {port}: {e}"));
+                    }
                 }
                 self.update_title();
             }
@@ -232,13 +245,17 @@ impl App {
                 }
             }
             PathPurpose::SymbolFile => self.load_symbols(path),
-            PathPurpose::CdlSave => match self.session.gb.cdl_flags() {
-                Some(flags) => match std::fs::write(path, crate::cdl::rle_encode(flags)) {
-                    Ok(()) => println!("slopgb: saved CDL to {}", path.display()),
-                    Err(e) => eprintln!("slopgb: save CDL failed: {e}"),
-                },
-                None => eprintln!("slopgb: CDL not enabled — nothing to save"),
-            },
+            PathPurpose::CdlSave => {
+                // Encode into an owned buffer first so the `cdl_flags` borrow of
+                // `self` is released before a `show_error` (which needs `&mut self`).
+                match self.session.gb.cdl_flags().map(crate::cdl::rle_encode) {
+                    Some(bytes) => match std::fs::write(path, bytes) {
+                        Ok(()) => println!("slopgb: saved CDL to {}", path.display()),
+                        Err(e) => self.show_error("Save CDL failed", e.to_string()),
+                    },
+                    None => self.show_error("Save CDL failed", "CDL not enabled — nothing to save"),
+                }
+            }
             PathPurpose::CdlLoad => match std::fs::read(path) {
                 Ok(bytes) => {
                     let dec = crate::cdl::rle_decode(&bytes);
@@ -250,12 +267,13 @@ impl App {
                     if self.session.gb.load_cdl(&dec) {
                         println!("slopgb: loaded CDL from {}", path.display());
                     } else {
-                        eprintln!(
-                            "slopgb: CDL file doesn't match this ROM/RAM layout — not loaded"
+                        self.show_error(
+                            "Load CDL failed",
+                            "CDL file doesn't match this ROM/RAM layout — not loaded",
                         );
                     }
                 }
-                Err(e) => eprintln!("slopgb: load CDL failed: {e}"),
+                Err(e) => self.show_error("Load CDL failed", e.to_string()),
             },
             PathPurpose::SettingsExportBgb => {
                 crate::settings_file::export_bgb(path, &self.settings, &self.recent);
@@ -271,14 +289,14 @@ impl App {
             }
             PathPurpose::CheatSave => match std::fs::write(path, self.cheats.to_file_text()) {
                 Ok(()) => println!("slopgb: saved cheats to {}", path.display()),
-                Err(e) => eprintln!("slopgb: save cheats failed: {e}"),
+                Err(e) => self.show_error("Save cheats failed", e.to_string()),
             },
             PathPurpose::CheatLoad => match std::fs::read_to_string(path) {
                 Ok(text) => {
                     self.cheats.load_file_text(&text);
                     println!("slopgb: loaded cheats from {}", path.display());
                 }
-                Err(e) => eprintln!("slopgb: load cheats failed: {e}"),
+                Err(e) => self.show_error("Load cheats failed", e.to_string()),
             },
         }
     }

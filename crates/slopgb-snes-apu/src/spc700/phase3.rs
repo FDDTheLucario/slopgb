@@ -1,4 +1,4 @@
-//! Phase-3 seam completion — state access the S-DSP and the SGB APU wiring
+//! S-DSP / SGB-APU seam completion — state access the S-DSP and the SGB APU wiring
 //! need that the verified CPU surface does not expose:
 //!
 //! - a live **APU-RAM view** (the S-DSP shares the SPC700's 64 KB bus for BRR

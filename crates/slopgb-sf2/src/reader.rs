@@ -1,7 +1,7 @@
 //! Hand-rolled SF2 (`RIFF....sfbk`) reader.
 //!
-//! Parses just enough of the format for the N-SPC round-trip: samples (PCM16
-//! + loop points + tuning) and instruments (one sample zone + the vol-env /
+//! Parses just enough of the format for the N-SPC round-trip: samples (PCM16,
+//! loop points, tuning) and instruments (one sample zone plus the vol-env /
 //! attenuation / tuning generators). Preset-layer flattening is NOT built —
 //! see the module doc on [`Sf2File`] for the ceiling.
 //!
@@ -115,7 +115,10 @@ struct ShdrRec {
 
 fn parse_shdr(data: &[u8]) -> Result<Vec<ShdrRec>, String> {
     if data.len() % 46 != 0 || data.len() < 46 {
-        return Err(format!("shdr chunk size {} is not a valid multiple of 46", data.len()));
+        return Err(format!(
+            "shdr chunk size {} is not a valid multiple of 46",
+            data.len()
+        ));
     }
     let mut out = Vec::new();
     for rec in data.chunks_exact(46) {
@@ -136,7 +139,10 @@ fn parse_shdr(data: &[u8]) -> Result<Vec<ShdrRec>, String> {
 
 fn parse_inst(data: &[u8]) -> Result<Vec<InstRec>, String> {
     if data.len() % 22 != 0 || data.len() < 44 {
-        return Err(format!("inst chunk size {} is not a valid multiple of 22", data.len()));
+        return Err(format!(
+            "inst chunk size {} is not a valid multiple of 22",
+            data.len()
+        ));
     }
     Ok(data
         .chunks_exact(22)
@@ -149,7 +155,10 @@ fn parse_inst(data: &[u8]) -> Result<Vec<InstRec>, String> {
 
 fn parse_ibag(data: &[u8]) -> Result<Vec<IbagRec>, String> {
     if data.len() % 4 != 0 {
-        return Err(format!("ibag chunk size {} is not a multiple of 4", data.len()));
+        return Err(format!(
+            "ibag chunk size {} is not a multiple of 4",
+            data.len()
+        ));
     }
     Ok(data
         .chunks_exact(4)
@@ -161,7 +170,10 @@ fn parse_ibag(data: &[u8]) -> Result<Vec<IbagRec>, String> {
 
 fn parse_igen(data: &[u8]) -> Result<Vec<IgenRec>, String> {
     if data.len() % 4 != 0 {
-        return Err(format!("igen chunk size {} is not a multiple of 4", data.len()));
+        return Err(format!(
+            "igen chunk size {} is not a multiple of 4",
+            data.len()
+        ));
     }
     Ok(data
         .chunks_exact(4)
@@ -212,10 +224,7 @@ pub fn parse(bytes: &[u8]) -> Result<Sf2File, String> {
     let sdta = find_list(&subs, b"sdta").ok_or("missing sdta-list chunk")?;
     let sdta_subs = riff::parse_chunks(sdta)?;
     let smpl = find_chunk(&sdta_subs, b"smpl").unwrap_or(&[]);
-    let all_samples: Vec<i16> = smpl
-        .chunks_exact(2)
-        .map(riff::read_i16_le)
-        .collect();
+    let all_samples: Vec<i16> = smpl.chunks_exact(2).map(riff::read_i16_le).collect();
 
     let pdta = find_list(&subs, b"pdta").ok_or("missing pdta-list chunk")?;
     let pdta_subs = riff::parse_chunks(pdta)?;
@@ -255,7 +264,8 @@ pub fn parse(bytes: &[u8]) -> Result<Sf2File, String> {
             return Err(format!("instrument {i} ('{}') has no zones", inst[i].name));
         }
 
-        let mut global_gens: std::collections::HashMap<u16, [u8; 2]> = std::collections::HashMap::new();
+        let mut global_gens: std::collections::HashMap<u16, [u8; 2]> =
+            std::collections::HashMap::new();
         let mut sample_gens: Option<std::collections::HashMap<u16, [u8; 2]>> = None;
         let n_zones = bag_end - bag_start;
 
@@ -298,7 +308,9 @@ pub fn parse(bytes: &[u8]) -> Result<Sf2File, String> {
         let sample_index = gen_u16(&gens, GEN_SAMPLE_ID, 0) as usize;
         let sample_modes = gen_u16(&gens, GEN_SAMPLE_MODES, 0);
         let root_key_amount = gen_i16(&gens, GEN_OVERRIDING_ROOT_KEY, -1);
-        let root_key_override = (0..=127).contains(&root_key_amount).then_some(root_key_amount as u8);
+        let root_key_override = (0..=127)
+            .contains(&root_key_amount)
+            .then_some(root_key_amount as u8);
         // keyRange amount: byte 0 = low key, byte 1 = high key (the struct's
         // own field order, byLo then byHi — the §8.1.2 prose describing
         // "LS byte = highest" is a known erratum; every real SF2 reader,
@@ -325,7 +337,10 @@ pub fn parse(bytes: &[u8]) -> Result<Sf2File, String> {
         });
     }
 
-    Ok(Sf2File { samples, instruments })
+    Ok(Sf2File {
+        samples,
+        instruments,
+    })
 }
 
 #[cfg(test)]

@@ -14,7 +14,10 @@ fn round_trips_within_a_cent_of_rounding() {
         let (coarse, fine) = base16_to_coarse_fine(base16);
         let back = to_base16(BRR_ENCODE_RATE, SF2_ROOT_KEY, 0, None, coarse, fine);
         let diff = (i32::from(back) - i32::from(base16)).abs();
-        assert!(diff <= 1, "base16 {base16:#x} -> ({coarse},{fine}) -> {back:#x}, diff {diff}");
+        assert!(
+            diff <= 1,
+            "base16 {base16:#x} -> ({coarse},{fine}) -> {back:#x}, diff {diff}"
+        );
     }
 }
 
@@ -24,6 +27,13 @@ fn overriding_root_key_shifts_tuning_by_semitones() {
     // one semitone (12) up in overridingRootKey halves nothing precise, but
     // should shift the resulting base16 down (lower pitch multiplier).
     let base_default = to_base16(BRR_ENCODE_RATE, SF2_ROOT_KEY, 0, None, 0, 0);
-    let base_shifted = to_base16(BRR_ENCODE_RATE, SF2_ROOT_KEY, 0, Some(SF2_ROOT_KEY + 12), 0, 0);
+    let base_shifted = to_base16(
+        BRR_ENCODE_RATE,
+        SF2_ROOT_KEY,
+        0,
+        Some(SF2_ROOT_KEY + 12),
+        0,
+        0,
+    );
     assert!(base_shifted < base_default);
 }

@@ -186,17 +186,15 @@ fn run_protocol_case(rom: &[u8], model: Model) -> Result<(), String> {
     harness::check_fib(&gb)
 }
 
-/// Red-before-green pin: the six `ly_lyc_153_write-{GS,C}` rom×model
-/// cases pass on the EAGER-VALUE clock (the C3-flip target). They pass on OFF
-/// (so they are absent from the OFF `wilbertpol_matrix` baseline) but the eager
-/// dispatch frame shifts the line-153 LYC-coincidence STAT delivery relative to
-/// the ROM's `LD A,B` interrupt-count read: a late DISABLE (`ly_lyc_153_write`
-/// C015) must still fire the held-153 coincidence, while a fresh ENABLE landing
-/// in the dots-6-7 window (C017) must NOT — opposite corrections keyed on the
-/// write. The discriminated retime lives in `ppu/stat_irq/reclock.rs`
-/// (early-deliver + fresh-in-window suppress) + `ppu/lyc.rs` (the DMG held-153
-/// delayed-copy hold), gated on this line's `l153_lyc_write_dot`. Fails if any
-/// of those arms regress (eager under-/over-fires the count).
+/// Pins the six `ly_lyc_153_write-{GS,C}` rom×model cases: the line-153
+/// LYC-coincidence STAT delivery must line up with the ROM's `LD A,B`
+/// interrupt-count read. A late DISABLE (`ly_lyc_153_write` C015) must still
+/// fire the held-153 coincidence, while a fresh ENABLE landing in the
+/// dots-6-7 window (C017) must NOT — opposite corrections keyed on the write.
+/// The retime lives in `ppu/stat_irq/reclock.rs` (early-deliver +
+/// fresh-in-window suppress) + `ppu/lyc.rs` (the DMG held-153 delayed-copy
+/// hold), gated on this line's `l153_lyc_write_dot`. Fails if any of those
+/// arms regress (the count under-/over-fires).
 #[test]
 fn eager_ly_lyc_153_write_delivery() {
     let Some(root) = common::gbtr_root() else {

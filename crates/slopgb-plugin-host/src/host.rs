@@ -7,9 +7,35 @@ use std::path::{Path, PathBuf};
 
 use slopgb_core::GameBoy;
 use slopgb_plugin_api::{ABI_VERSION, Capabilities, Reg};
-use wasmtime::{Caller, Engine, Extern, Linker, Module, Store, TypedFunc};
+use wasmi::{Caller, Config, Engine, Extern, Linker, Module, Store, TypedFunc};
 
 use crate::snapshot::Snapshot;
+
+/// Fuel budget for one per-frame `on_frame` (tier 1). Sized far above any
+/// legitimate introspection pass; a runaway guest (an infinite loop) exhausts it
+/// and traps — logged and skipped by [`PluginHost::pump`] — instead of hanging
+/// the host thread with no escape but `kill -9`.
+/// ponytail: tunable ceiling — raise if a heavy legitimate plugin ever trips it.
+const FRAME_FUEL: u64 = 20_000_000;
+
+/// Fuel for one on-demand tool call (tier 2) and for the one-shot load-time
+/// setup calls (start fn + ABI/capability/metadata probes) on both loaders.
+/// Larger than [`FRAME_FUEL`] — these run on demand or once at load, not per
+/// frame, so a looser bound is fine.
+pub(crate) const CALL_FUEL: u64 = 200_000_000;
+
+/// A wasmi engine that meters guest execution, so a runaway plugin traps with
+/// `OutOfFuel` (surfaced as a normal call `Err`, handled like any trap) rather
+/// than spinning forever. Used by the tier-1 (`--plugins`) and tier-2 (tool/MCP)
+/// loaders, whose modules are arbitrary opt-in user wasm. The tier-3 coprocessor
+/// deliberately uses the plain [`Engine::default`] — its modules are first-party
+/// staged wasm on the host-clocked >=66fps path where per-instruction metering
+/// isn't worth the cost (see `coprocessor.rs`).
+pub(crate) fn metered_engine() -> Engine {
+    let mut cfg = Config::default();
+    cfg.consume_fuel(true);
+    Engine::new(&cfg)
+}
 
 /// wasmi store data: the frame snapshot the imports read, the log lines the
 /// guest emitted this frame, and the last result a tool plugin pushed via
@@ -47,7 +73,7 @@ impl HostState {
 #[derive(Debug)]
 pub enum LoadError {
     /// The wasm was malformed or an expected export was missing/mistyped.
-    Wasm(wasmtime::Error),
+    Wasm(wasmi::Error),
     /// A required export (`slopgb_abi_version` / `_capabilities` / `_on_frame`)
     /// was absent.
     MissingExport(&'static str),
@@ -74,17 +100,9 @@ impl fmt::Display for LoadError {
 
 impl std::error::Error for LoadError {}
 
-impl From<wasmtime::Error> for LoadError {
-    fn from(e: wasmtime::Error) -> Self {
-        LoadError::Wasm(e)
-    }
-}
-
-// The tier-2 tool path still runs on wasmi (its per-call store borrows the
-// live tool context, which wasmtime's `'static` store data cannot hold).
 impl From<wasmi::Error> for LoadError {
     fn from(e: wasmi::Error) -> Self {
-        LoadError::Wasm(wasmtime::Error::msg(e.to_string()))
+        LoadError::Wasm(e)
     }
 }
 
@@ -206,14 +224,17 @@ impl PluginHost {
     /// Instantiate a plugin from raw wasm bytes, enforcing the ABI version and
     /// capability gate. Its own fresh engine keeps plugins independent.
     pub fn load_bytes(name: &str, bytes: &[u8]) -> Result<LoadedPlugin, LoadError> {
-        let engine = Engine::default();
+        let engine = metered_engine();
         let module = Module::new(&engine, bytes)?;
         let mut store = Store::new(&engine, HostState::empty());
+        // Metered engine: every guest call must be fuelled or it traps at once.
+        // Cover the start fn (run by `instantiate_and_start`) + the load probes.
+        store.set_fuel(CALL_FUEL)?;
         let linker = build_linker(&engine);
-        let instance = linker.instantiate(&mut store, &module)?;
+        let instance = linker.instantiate_and_start(&mut store, &module)?;
 
         let version = instance
-            .get_typed_func::<(), i32>(&mut store, "slopgb_abi_version")
+            .get_typed_func::<(), i32>(&store, "slopgb_abi_version")
             .map_err(|_| LoadError::MissingExport("slopgb_abi_version"))?
             .call(&mut store, ())?;
         if version != ABI_VERSION {
@@ -224,10 +245,11 @@ impl PluginHost {
         }
 
         let caps_bits = instance
-            .get_typed_func::<(), i32>(&mut store, "slopgb_capabilities")
+            .get_typed_func::<(), i32>(&store, "slopgb_capabilities")
             .map_err(|_| LoadError::MissingExport("slopgb_capabilities"))?
             .call(&mut store, ())? as u32;
-        // Phase 1 serves introspection only; anything else is refused up front.
+        // This loader (the per-frame pump) serves introspection only; anything
+        // else is refused up front.
         if !Capabilities::INTROSPECTION.contains(Capabilities::from_bits(caps_bits)) {
             return Err(LoadError::UnsupportedCapabilities {
                 requested: caps_bits,
@@ -235,7 +257,7 @@ impl PluginHost {
         }
 
         let on_frame = instance
-            .get_typed_func::<(), i32>(&mut store, "slopgb_on_frame")
+            .get_typed_func::<(), i32>(&store, "slopgb_on_frame")
             .map_err(|_| LoadError::MissingExport("slopgb_on_frame"))?;
 
         Ok(LoadedPlugin {
@@ -270,6 +292,9 @@ impl PluginHost {
             let data = p.store.data_mut();
             data.snap = Snapshot::capture(snap_src);
             data.log.clear();
+            // Refill the per-frame fuel budget; a guest that overruns it traps
+            // below instead of hanging this thread.
+            let _ = p.store.set_fuel(FRAME_FUEL);
             if let Err(e) = p.on_frame.call(&mut p.store, ()) {
                 log.push(format!("[{}] trapped: {e}", p.name));
                 continue;
@@ -353,7 +378,7 @@ impl PluginHost {
 
 impl LoadError {
     fn from_io(e: std::io::Error) -> Self {
-        LoadError::Wasm(wasmtime::Error::msg(e.to_string()))
+        LoadError::Wasm(wasmi::Error::new(e.to_string()))
     }
 }
 
@@ -393,6 +418,10 @@ pub(crate) fn build_linker(engine: &Engine) -> Linker<HostState> {
                     let (Ok(off), Ok(n)) = (usize::try_from(ptr), usize::try_from(len)) else {
                         return;
                     };
+                    // Clamp before allocating: a guest-supplied `len` can be up to
+                    // i32::MAX; never allocate more than the guest's memory holds
+                    // (an over-long read fails the bounds check below anyway).
+                    let n = n.min(mem.data_size(&caller));
                     let mut buf = vec![0u8; n];
                     if mem.read(&caller, off, &mut buf).is_ok() {
                         if let Ok(s) = String::from_utf8(buf) {
@@ -413,6 +442,9 @@ pub(crate) fn build_linker(engine: &Engine) -> Linker<HostState> {
                     let (Ok(off), Ok(n)) = (usize::try_from(ptr), usize::try_from(len)) else {
                         return;
                     };
+                    // Clamp before allocating (see `host_log`): bound the alloc by
+                    // actual guest memory size, not the guest-supplied `len`.
+                    let n = n.min(mem.data_size(&caller));
                     let mut buf = vec![0u8; n];
                     if mem.read(&caller, off, &mut buf).is_ok() {
                         caller.data_mut().emitted = Some((kind, buf));

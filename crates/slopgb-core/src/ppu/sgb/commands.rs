@@ -205,7 +205,7 @@ impl SgbView {
     }
 
     /// SOUND ($08): queue a sound-effect event (effect A, effect B, attenuation,
-    /// effect-bank). Decode + state only this phase — Phase 3 (S-DSP) drains the
+    /// effect-bank). Decode + state only; the S-DSP drains the
     /// queue. (Pan Docs "SGB Command $08 — SOUND".)
     pub(super) fn sound(&mut self, cmd: &[u8]) {
         self.push_capped_sound(SgbSound {
@@ -217,7 +217,7 @@ impl SgbView {
     }
 
     /// DATA_SND ($0F): store an inline packet written to SNES RAM (bytes 1..) for
-    /// Phase 2/3 to consume. (Pan Docs "SGB Command $0F — DATA_SND".)
+    /// the SNES-side consumer to drain. (Pan Docs "SGB Command $0F — DATA_SND".)
     pub(super) fn data_snd(&mut self, cmd: &[u8]) {
         if self.data_snd.len() >= SOUND_QUEUE_CAP {
             self.data_snd.remove(0);
@@ -226,7 +226,7 @@ impl SgbView {
     }
 
     /// JUMP ($12): latch the SNES program-jump target (24-bit PC in bytes 1-3)
-    /// for Phase 2. (Pan Docs "SGB Command $12 — JUMP".)
+    /// for the SNES-side consumer. (Pan Docs "SGB Command $12 — JUMP".)
     pub(super) fn jump(&mut self, cmd: &[u8]) {
         self.jump = Some(u32::from(cmd[1]) | (u32::from(cmd[2]) << 8) | (u32::from(cmd[3]) << 16));
     }

@@ -26,7 +26,7 @@ impl Ppu {
             }
             0xFF40 => self.lcdc,
             0xFF41 => {
-                // The eager halt-woken re-fetch boundary override rides on top
+                // The halt-woken re-fetch boundary override rides on top
                 // of the read-law mode; the sole non-probe consumer.
                 let vm = self.vis_mode_read();
                 let vm = self.halt_refetch_read_override(vm).unwrap_or(vm);
@@ -225,9 +225,9 @@ impl Ppu {
                             k: 0,
                         });
                     } else if !self.model.is_cgb() && self.line == 153 && !self.glitch_line {
-                        // HALFDOT piece 4: on LINE 153 the DMG FF41
+                        // On LINE 153 the DMG FF41
                         // engine-view (`eng_stat`) write commits its
-                        // disable/enable ~2 dots LATER than the eager cc+4 whole-
+                        // disable/enable ~2 dots LATER than the cc+4 whole-
                         // dot landing — the line-153 write quirk. SameBoy's
                         // VBLANK-disable on line 153 lands COINCIDENT with the
                         // LYC=153 re-latch (dot 6), so the held LYC match keeps
@@ -236,12 +236,11 @@ impl Ppu {
                         // whole-dot cc+4 commit at dot 4 dropped the line 2 dots
                         // before the LYC re-latch → spurious edge → E2). Deferring
                         // ONLY the engine `eng_stat` view via the odd-half
-                        // `stat_update_half` (piece 1) resolves it at the
+                        // `stat_update_half` resolves it at the
                         // coincident sub-dot without moving the whole-dot cc+4
                         // FF41-read frame. Line-153-scoped (the write side of the
-                        // documented line-153 LYC side-effect zone), NOT ROM-
-                        // specific. The sibling `m0enable/lycdisable_ff41_2` (line
-                        // 1) is untouched.
+                        // documented line-153 LYC side-effect zone). The sibling
+                        // `m0enable/lycdisable_ff41_2` (line 1) is untouched.
                         self.eng_stat_half = Some((data, 2));
                         self.eng_stat_pending = None;
                     } else {
@@ -264,7 +263,7 @@ impl Ppu {
                         // line to the post-write level so the next dot-clocked
                         // `stat_update_tick` does NOT re-fire the SAME edge — else
                         // enabling a source whose condition is already met fires IF
-                        // twice (`ff41_enable_lyc_fires_once_flag_on`). The edge is
+                        // twice (`ff41_enable_lyc_fires_once`). The edge is
                         // discarded; this only seeds the line level. Gated on `fire`:
                         // a write that does NOT trigger here must leave the line
                         // untouched so a legitimate dot-engine rise next tick still
@@ -320,7 +319,7 @@ impl Ppu {
                 // catches the tail-write class (`late_wy_FFto0/FFto1/10to0/1toFF`)
                 // the read-frame WY laws pair with.
                 // The write dot the tail/head boundary classifies against.
-                // Under the eager DMG line-153 emission decouple the
+                // Under the DMG line-153 emission decouple the
                 // shared LYC=153 ISR — and every WY write it times — fires one
                 // M-cycle (4 dots SS) EARLIER than the stale dot-6/dot-8
                 // recognition these 452/4 boundaries were tuned against, so a
@@ -485,7 +484,7 @@ impl Ppu {
                         // re-sync above: the LYC-write trigger just fired, so
                         // re-derive `lyc_interrupt_line` for the NEW LYC and re-sync
                         // the `StatUpdate` line so the next dot tick does NOT re-fire
-                        // the same match (`ff45_match_fires_once_flag_on`). The edge
+                        // the same match (`ff45_match_fires_once`). The edge
                         // is discarded.
                         let ly = self.ly_for_comparison();
                         if ly != -1 {
