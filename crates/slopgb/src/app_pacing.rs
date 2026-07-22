@@ -172,6 +172,34 @@ impl App {
         (frames, hit)
     }
 
+    /// Step the rewind backward on the same wall-clock frame grid as forward
+    /// play, so held-Backspace rewind runs at 1× (native framerate), not at the
+    /// raw wake rate (`request_redraw` wakes `about_to_wait` far faster than a
+    /// frame). Returns:
+    /// - `Some((stepped, next))` — still rewinding this wake (hold; the caller
+    ///   redraws when `stepped > 0` and parks until `next`). `stepped == 0` when
+    ///   no frame interval has elapsed yet.
+    /// - `None` — the ring is exhausted with no backward progress this wake, so
+    ///   the caller falls through to normal forward play (bgb: releasing at the
+    ///   end resumes).
+    pub(crate) fn rewind_frames(&mut self) -> Option<(u32, Instant)> {
+        let now = Instant::now();
+        let interval = frame_interval(self.settings.framerate_limit, FRAME_DURATION);
+        let (budget, next) = advance_grid(now, self.next_frame, interval, MAX_FRAMES_PER_WAKE);
+        let mut stepped = 0;
+        for _ in 0..budget {
+            if self.session.reverse_frame() {
+                stepped += 1;
+            } else if stepped == 0 {
+                return None; // ring empty and nothing rewound → resume forward
+            } else {
+                break; // hit the wall mid-budget; hold what we rewound
+            }
+        }
+        self.next_frame = next;
+        Some((stepped, next))
+    }
+
     /// Detect a dead or stalled cpal stream and fall back to wall-clock
     /// pacing, so audio-paced emulation can't freeze forever topping up a
     /// queue nobody drains.
