@@ -14,7 +14,12 @@
 /// `slopgb_save_state` / `slopgb_load_state` (chip state snapshots). RAM writes
 /// and state restores ride the existing mailbox channel; RAM reads and state
 /// saves ride the emit channel.
-pub const ABI_VERSION: i32 = 5;
+/// v6 adds the tier-3 `slopgb_manifest` export: a coprocessor emits a
+/// self-describing manifest (its `id`, display `name`, advertised `provides`
+/// roles, and contributed CLI `flag`s) over the emit channel as
+/// [`crate::EMIT_KIND_MANIFEST`], so the host binds a plugin by declared role
+/// instead of by filename. Optional — an empty manifest means "undeclared".
+pub const ABI_VERSION: i32 = 6;
 
 /// A readable register or I/O byte. Discriminant is the `host_reg` wire index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

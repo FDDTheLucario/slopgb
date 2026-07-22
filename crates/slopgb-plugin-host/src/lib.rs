@@ -4,11 +4,13 @@
 
 mod coprocessor;
 mod host;
+mod manifest;
 mod snapshot;
 mod tool;
 
 pub use coprocessor::LoadedCoprocessor;
 pub use host::{LoadError, LoadedPlugin, PluginHost, PluginInfo};
+pub use manifest::{FlagContribution, Manifest};
 pub use slopgb_plugin_api::ToolResult;
 pub use snapshot::Snapshot;
 pub use tool::{LoadedTool, ToolContext, ToolMeta};
