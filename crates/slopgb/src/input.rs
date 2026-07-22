@@ -122,6 +122,14 @@ pub enum Action {
     DbgGoToPc,
     /// Step out of the current subroutine — debugger F8, on press.
     DbgStepOut,
+    /// Reverse one instruction via the checkpoint ring — debugger Ctrl+Backspace,
+    /// on press. Lands the exact previous instruction boundary; no-op past the
+    /// oldest checkpoint.
+    DbgReverseStep,
+    /// Run backward to the most recent breakpoint (or watch/profiler/exception
+    /// halt) before now — debugger Shift+Backspace, on press. The inverse of the
+    /// F9 free run; no-op if no halt lies in the retained history.
+    DbgRunBackToBreakpoint,
     /// Open the Go-to address prompt — debugger Ctrl+G, on press.
     DbgGoto,
     /// Toggle audio output (bgb's main-menu "Enable sound"). Menu-only — no key
@@ -250,7 +258,10 @@ pub fn map(code: KeyCode, mods: ModifiersState, focus: Focus) -> Option<Action> 
     // buttons are resolved earlier, through `App.bindings` (rebindable).
     let global = match code {
         KeyCode::Tab => Some(Action::Turbo),
-        KeyCode::Backspace => Some(Action::Rewind),
+        // Plain Backspace is the player rewind (any focus). Ctrl/Shift+Backspace
+        // fall through to the debugger's reverse controls below, so gate them out
+        // here.
+        KeyCode::Backspace if !mods.control_key() && !mods.shift_key() => Some(Action::Rewind),
         KeyCode::KeyP => Some(Action::Pause),
         KeyCode::KeyR => Some(Action::Reset),
         KeyCode::KeyT => Some(Action::ToggleTheme),
@@ -271,6 +282,11 @@ pub fn map(code: KeyCode, mods: ModifiersState, focus: Focus) -> Option<Action> 
             KeyCode::F6 => Some(Action::DbgJumpToCursor),
             KeyCode::F7 => Some(Action::DbgStep),
             KeyCode::F8 => Some(Action::DbgStepOut),
+            // Reverse controls (non-bgb keys, mnemonic of Backspace = "back"):
+            // Ctrl+Backspace reverses one instruction, Shift+Backspace runs back
+            // to the previous breakpoint. Placed before the Ctrl-digit fallthrough.
+            KeyCode::Backspace if mods.control_key() => Some(Action::DbgReverseStep),
+            KeyCode::Backspace if mods.shift_key() => Some(Action::DbgRunBackToBreakpoint),
             KeyCode::F5 => Some(Action::ToggleTool(ToolWindow::Vram)),
             KeyCode::F10 => Some(Action::ToggleTool(ToolWindow::IoMap)),
             KeyCode::KeyG if mods.control_key() => Some(Action::DbgGoto),

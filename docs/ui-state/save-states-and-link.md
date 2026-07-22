@@ -34,6 +34,19 @@ ROM bytes + the debugger fields (watch/prof/exc mask) are **not** serialized.
 whole-machine round-trip oracle (save→fresh→load→run-both byte-identical across
 frame/cycles/regs/memory/audio) + gbtr golden byte-identical.
 
+## Rewind ring + reverse execution
+
+`Session::rewind` is a bounded ring of `(cycle, save_state())` blobs
+(`REWIND_INTERVAL_FRAMES` cadence, capped by `REWIND_MAX_STATES` /
+`REWIND_MAX_BYTES`; cleared on reset / ROM change). It fills while playing forward
+when System → "Rewind enabled" is on *or* the debugger is open. It backs both the
+player rewind (held Backspace) and the debugger's reverse controls, via the
+replay engine in `session/reverse.rs` — the cycle key lets it pick the nearest
+checkpoint before a target, then `step()` forward to land the exact instruction
+(`reverse_step`), the previous frame (`reverse_frame`, the frame-exact player
+rewind), or the previous breakpoint (`reverse_to_breakpoint`). Full model +
+ceilings: [`debugger.md`](debugger.md) § Reverse execution.
+
 ## Link submenu (`SubKind::Link`) — serial link cable over TCP
 
 Rows (`main-sub-link.png`) grey by state via `link_items(active, listening)`:

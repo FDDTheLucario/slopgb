@@ -412,6 +412,16 @@ fn run_on_ui(call: ToolInvocation, tx: &Sender<Job>) -> Result<ToolResult, Strin
     }
 }
 
+/// Whether a JSON arg reads as true — a real boolean `true`, or a `"true"`/`"1"`
+/// string (some MCP clients string-encode flags).
+fn truthy(j: &Json) -> bool {
+    match j {
+        Json::Bool(b) => *b,
+        Json::Str(s) => matches!(s.trim(), "true" | "1" | "yes"),
+        _ => false,
+    }
+}
+
 /// Build a typed [`Call`] from a tool name + arguments, or a descriptive error.
 fn build_call(name: &str, args: Option<&Json>) -> Result<Call, String> {
     let arg = |k: &str| -> Result<String, String> {
@@ -439,6 +449,7 @@ fn build_call(name: &str, args: Option<&Json>) -> Result<Call, String> {
         "vram" => Ok(Call::Vram {
             view: arg("view")?,
             scale: scale?,
+            no_palette: args.and_then(|a| a.get("no_palette")).is_some_and(truthy),
         }),
         "screencap" => Ok(Call::Screencap { scale: scale? }),
         "breakpoint" => Ok(Call::Breakpoint {
@@ -619,9 +630,18 @@ fn builtin_tool_defs() -> Json {
         ),
         tool_opt(
             "vram",
-            "Capture a VRAM view as a PNG.",
-            &[("view", "one of: bg, win, tile0, tile1, oam, palette")],
-            &[SCALE_PROP],
+            "Capture a VRAM view as a PNG (or `palreg` as text).",
+            &[(
+                "view",
+                "one of: bg, win, tile0, tile1, oam, palette, palreg (palette registers as text)",
+            )],
+            &[
+                SCALE_PROP,
+                (
+                    "no_palette",
+                    "\"true\" to force the neutral grey ramp on bg/win/oam (raw tile pixels, ignore game palettes)",
+                ),
+            ],
         ),
         tool_opt(
             "screencap",

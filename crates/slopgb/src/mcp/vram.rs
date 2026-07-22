@@ -73,19 +73,56 @@ impl Bitmap {
     }
 }
 
-/// Capture the named view, or `Err` for an unknown name.
-pub fn capture(gb: &GameBoy, view: &str) -> Result<Bitmap, String> {
+/// Capture the named view, or `Err` for an unknown name. `no_palette` forces the
+/// neutral grey ramp on the game-paletted views (bg/win/oam) — the raw tile
+/// pixels, ignoring the live BG/OBJ palettes (the Tiles views are always grey).
+pub fn capture(gb: &GameBoy, view: &str, no_palette: bool) -> Result<Bitmap, String> {
     match view {
         "tile0" => Ok(tiles(gb, 0)),
         "tile1" => Ok(tiles(gb, 1)),
-        "bg" => Ok(tilemap(gb, 0x08)), // LCDC bit3 selects the BG map base
-        "win" => Ok(tilemap(gb, 0x40)), // LCDC bit6 selects the window map base
-        "oam" => Ok(oam(gb)),
+        "bg" => Ok(tilemap(gb, 0x08, no_palette)), // LCDC bit3 selects the BG map base
+        "win" => Ok(tilemap(gb, 0x40, no_palette)), // LCDC bit6 selects the window map base
+        "oam" => Ok(oam(gb, no_palette)),
         "palette" => Ok(palette(gb)),
         other => Err(format!(
-            "unknown vram view '{other}' — want bg|win|tile0|tile1|oam|palette"
+            "unknown vram view '{other}' — want bg|win|tile0|tile1|oam|palette|palreg"
         )),
     }
+}
+
+/// The palette registers as text (the `palreg` view): DMG BGP/OBP0/OBP1 shade
+/// maps, or the CGB 8 BG + 8 OBJ palettes as raw BGR555 words + the auto-index
+/// registers. Text because a colour word is more useful to read than a swatch.
+pub fn palreg(gb: &GameBoy) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    if gb.model().is_cgb() {
+        let (bg, obj) = gb.cgb_palette_ram();
+        let _ = writeln!(
+            out,
+            "CGB palettes  BGPI=${:02X} OBPI=${:02X}",
+            gb.debug_read(0xFF68),
+            gb.debug_read(0xFF6A)
+        );
+        for (tag, cram) in [("BG", bg), ("OB", obj)] {
+            for pal in 0..8 {
+                let w = cgb_palette_words(cram, pal);
+                let _ = writeln!(
+                    out,
+                    "{tag}{pal}  {:04X} {:04X} {:04X} {:04X}",
+                    w[0], w[1], w[2], w[3]
+                );
+            }
+        }
+    } else {
+        let _ = writeln!(out, "DMG palettes (shade per colour id 0-3)");
+        for (name, reg) in [("BGP ", 0xFF47u16), ("OBP0", 0xFF48), ("OBP1", 0xFF49)] {
+            let v = gb.debug_read(reg);
+            let s = dmg_palette_shades(v);
+            let _ = writeln!(out, "{name} ${v:02X}  {} {} {} {}", s[0], s[1], s[2], s[3]);
+        }
+    }
+    out
 }
 
 /// The 384 tiles of one VRAM bank, 16 across (128×192), grey ramp.
@@ -101,7 +138,7 @@ fn tiles(gb: &GameBoy, bank: usize) -> Bitmap {
 
 /// A 32×32 tilemap (256×256), game-paletted. `base_bit` is the LCDC bit that
 /// picks the 0x9800/0x9C00 base (bit3 for BG, bit6 for window).
-fn tilemap(gb: &GameBoy, base_bit: u8) -> Bitmap {
+fn tilemap(gb: &GameBoy, base_bit: u8, no_palette: bool) -> Bitmap {
     let vram = gb.vram();
     let lcdc = gb.debug_read(0xFF40);
     let base = if lcdc & base_bit != 0 { 0x9C00 } else { 0x9800 };
@@ -126,7 +163,9 @@ fn tilemap(gb: &GameBoy, base_bit: u8) -> Bitmap {
             } else {
                 (false, false)
             };
-            let pal = if cgb {
+            let pal = if no_palette {
+                GREYS
+            } else if cgb {
                 cgb_palette_words(bg_cram, usize::from(cell.attr & 7)).map(xrgb)
             } else {
                 dmg_bgp
@@ -138,7 +177,7 @@ fn tilemap(gb: &GameBoy, base_bit: u8) -> Bitmap {
 }
 
 /// The 40 OAM sprites in an 8×5 grid, each with its own palette/bank/flip.
-fn oam(gb: &GameBoy) -> Bitmap {
+fn oam(gb: &GameBoy, no_palette: bool) -> Bitmap {
     let vram = gb.vram();
     let lcdc = gb.debug_read(0xFF40);
     let tall = lcdc & 0x04 != 0;
@@ -158,7 +197,9 @@ fn oam(gb: &GameBoy) -> Bitmap {
         } else {
             0
         };
-        let pal = if cgb {
+        let pal = if no_palette {
+            GREYS
+        } else if cgb {
             cgb_palette_words(obj_cram, usize::from(sp.attr & 7)).map(xrgb)
         } else {
             dmg[usize::from(sp.attr >> 4 & 1)]

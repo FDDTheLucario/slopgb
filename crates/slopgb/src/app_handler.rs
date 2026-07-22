@@ -408,19 +408,22 @@ impl ApplicationHandler for App {
             return;
         }
         // Rewind (Backspace held + "Rewind enabled"): step backward through the
-        // save-state ring at frame cadence instead of advancing. Falls through to
-        // normal play when the ring is exhausted.
-        if self.rewinding && self.settings.rewind_enabled && self.session.rewind_step() {
-            self.flush_idle_input(); // don't feed presses into a rewound machine
-            if let Some(window) = &self.window {
-                window.request_redraw();
+        // save-state ring on the forward-play frame grid (so it runs at 1×, not
+        // the raw wake rate). Falls through to normal play when the ring is
+        // exhausted.
+        if self.rewinding && self.settings.rewind_enabled {
+            if let Some((stepped, next)) = self.rewind_frames() {
+                self.flush_idle_input(); // don't feed presses into a rewound machine
+                if stepped > 0 {
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                    self.tools.request_redraw_all();
+                    self.update_fps(0);
+                }
+                event_loop.set_control_flow(ControlFlow::WaitUntil(next));
+                return;
             }
-            self.tools.request_redraw_all();
-            self.update_fps(0);
-            event_loop.set_control_flow(ControlFlow::WaitUntil(
-                Instant::now() + crate::FRAME_DURATION,
-            ));
-            return;
         }
         // Rapid-fire (Joypad "Rapid speed") queues its A/B toggles into the same
         // deferred-input path, so drive it just before applying that input.
@@ -453,9 +456,11 @@ impl ApplicationHandler for App {
         if frames > 0 {
             self.session.autosave();
             self.write_recovery_state();
-            // Build the rewind ring while playing forward (System → "Rewind
-            // enabled"); throttled internally to the capture interval.
-            if self.settings.rewind_enabled {
+            // Build the rewind ring while playing forward — for the player
+            // rewind (System → "Rewind enabled") and, so reverse-step /
+            // run-back-to-breakpoint always have history, whenever the debugger
+            // is open. Throttled internally to the capture interval.
+            if self.settings.rewind_enabled || self.tools.is_open(ui::ToolWindow::Debugger) {
                 self.session.capture_rewind();
             }
             // Joypad → "Video": append this frame to the AVI (no-op when off).

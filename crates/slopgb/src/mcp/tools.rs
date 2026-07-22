@@ -41,6 +41,7 @@ pub enum Call {
     Vram {
         view: String,
         scale: u32,
+        no_palette: bool,
     },
     Screencap {
         scale: u32,
@@ -88,8 +89,16 @@ pub fn dispatch(
             })))
         }
         Call::CdlRanges => Ok(ToolResult::Text(cdl_ranges(gb))),
-        Call::Vram { view, scale } => {
-            let bmp = vram::capture(gb, view)?;
+        Call::Vram {
+            view,
+            scale,
+            no_palette,
+        } => {
+            // `palreg` is the one text view; the rest render to a PNG.
+            if view == "palreg" {
+                return Ok(ToolResult::Text(vram::palreg(gb)));
+            }
+            let bmp = vram::capture(gb, view, *no_palette)?;
             Ok(ToolResult::Image(encode_scaled(
                 &bmp.px, bmp.w, bmp.h, *scale,
             )))

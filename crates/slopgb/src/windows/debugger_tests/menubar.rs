@@ -29,7 +29,8 @@ fn menubar_rects_tile_the_bar_left_to_right() {
 fn each_bar_menu_has_the_captured_item_count() {
     let l = DebuggerLayout::for_size(AREA.w, AREA.h);
     let st = DebuggerState::default();
-    let counts = [16, 5, 18, 11, 11, 5]; // File, Search, Run, Debug, Window, Profiler
+    // Run is the bgb-captured 18 + slopgb's 2 reverse-execution items appended.
+    let counts = [16, 5, 20, 11, 11, 5]; // File, Search, Run, Debug, Window, Profiler
     for (idx, &n) in counts.iter().enumerate() {
         let m = menubar_menu(idx, l.menu, &st, 0x0100);
         assert_eq!(m.items.len(), n, "menu {idx} item count");
@@ -48,7 +49,7 @@ fn clicking_a_bar_label_opens_its_dropdown() {
     assert_eq!(action, None);
     let m = st.menu.as_ref().expect("Run dropdown opened");
     assert_eq!(m.bar, Some(2));
-    assert_eq!(m.items.len(), 18);
+    assert_eq!(m.items.len(), 20);
 }
 
 #[test]
@@ -178,6 +179,17 @@ fn run_menu_wires_forward_execution_commands() {
     // The reverse / not-yet-built variants stay greyed (no outcome).
     assert_eq!(click_menubar_item(2, 1), None, "Run no break greyed");
     assert_eq!(click_menubar_item(2, 8), None, "Animate greyed");
+    // slopgb's appended reverse-execution items are live (last two).
+    assert_eq!(
+        click_menubar_item(2, 18),
+        Some(MenuOutcome::Command(Action::DbgReverseStep)),
+        "Reverse step"
+    );
+    assert_eq!(
+        click_menubar_item(2, 19),
+        Some(MenuOutcome::Command(Action::DbgRunBackToBreakpoint)),
+        "Run back to breakpoint"
+    );
 }
 
 #[test]
