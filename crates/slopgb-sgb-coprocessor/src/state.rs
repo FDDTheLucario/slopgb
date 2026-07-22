@@ -263,7 +263,10 @@ impl SgbCoprocessor {
         // plugin file map is not clonable). Fine for savestate/rewind; cache the
         // bytes if a large-pack rewind ever shows up in a profile.
         if let Some(wasm) = &self.msu_wasm {
-            let msu_state = self.msu.as_ref().map(|m| m.borrow_mut().save_state().unwrap_or_default());
+            let msu_state = self
+                .msu
+                .as_ref()
+                .map(|m| m.borrow_mut().save_state().unwrap_or_default());
             if let Err(e) = fresh.attach_msu(wasm) {
                 eprintln!("slopgb: SGB coprocessor MSU-1 re-attach failed on clone: {e}");
             } else {
@@ -273,7 +276,9 @@ impl SgbCoprocessor {
                 if let (Some(m), Some(state)) = (&fresh.msu, &msu_state) {
                     if !state.is_empty() {
                         if let Err(e) = m.borrow_mut().load_state(state) {
-                            eprintln!("slopgb: SGB coprocessor MSU-1 load_state failed on clone: {e}");
+                            eprintln!(
+                                "slopgb: SGB coprocessor MSU-1 load_state failed on clone: {e}"
+                            );
                         }
                     }
                 }

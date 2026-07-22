@@ -13,7 +13,7 @@
 //! two sides communicate only through the paired opposite latch. (fullsnes,
 //! "SNES APU I/O Ports".)
 //!
-//! # DSP seam (Phase 3)
+//! # S-DSP seam
 //!
 //! `$F2` selects a DSP register, `$F3` reads/writes it. Attach the S-DSP with
 //! [`Spc700::attach_dsp`]; the raw `$F2` address is forwarded to [`Dsp`]. With
@@ -22,7 +22,7 @@
 
 use super::*;
 
-/// The S-DSP seam Phase 3 plugs into. The SPC700 forwards `$F2`/`$F3` accesses
+/// The S-DSP seam. The SPC700 forwards `$F2`/`$F3` accesses
 /// here (the raw `$F2` address is passed through, so the DSP sees the read-only
 /// mirror bit) and ticks the DSP from each instruction's cycle count.
 pub trait Dsp {
@@ -35,9 +35,9 @@ pub trait Dsp {
 }
 
 impl Spc700 {
-    // -- Phase 3 seam ------------------------------------------------------
+    // -- S-DSP seam --------------------------------------------------------
 
-    /// Attach the S-DSP (Phase 3). Replaces any previously attached DSP.
+    /// Attach the S-DSP. Replaces any previously attached DSP.
     pub fn attach_dsp(&mut self, dsp: Box<dyn Dsp>) {
         self.dsp = Some(dsp);
     }

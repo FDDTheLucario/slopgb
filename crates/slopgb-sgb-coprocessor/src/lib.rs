@@ -561,8 +561,9 @@ impl SgbCoprocessor {
             .map_err(|e| format!("cannot read SGB plugin '{}': {e}", cpu_path.display()))?;
         // The PPU plugin is optional: absent keeps the audio-only backend.
         let ppu_bytes = fs::read(dir.join(PPU_WASM)).ok();
-        let mut me = Self::from_wasm_full(&spc_bytes, &cpu_bytes, ppu_bytes.as_deref(), output_rate)
-            .map_err(|e| format!("cannot load SGB coprocessor plugins: {e}"))?;
+        let mut me =
+            Self::from_wasm_full(&spc_bytes, &cpu_bytes, ppu_bytes.as_deref(), output_rate)
+                .map_err(|e| format!("cannot load SGB coprocessor plugins: {e}"))?;
         // The MSU-1 plugin is optional and loads from the *same* plugins dir as
         // the other coprocessor chips (its `.pcm` pack comes separately via
         // [`Self::set_msu_pack`]). Absent = no MSU-1.
@@ -1373,7 +1374,11 @@ impl SgbCoprocessor {
             let batch = cop.drain_pcm().unwrap_or_default();
             // port_read(0) = MSU_STATUS (a pure read; the data-read port 1 is the
             // only one with a side effect, and it is never mirrored).
-            let status = if present { cop.port_read(0).unwrap_or(0) } else { 0 };
+            let status = if present {
+                cop.port_read(0).unwrap_or(0)
+            } else {
+                0
+            };
             (batch, status)
         };
         self.msu_src.extend(batch);

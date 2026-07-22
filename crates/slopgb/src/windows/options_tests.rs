@@ -1,6 +1,5 @@
 use super::tabs::{Field, Kind, ThemeRadio, controls};
 use super::*;
-use crate::ui::canvas::Canvas;
 
 const T: Theme = Theme::BGB;
 const BOUNDS: Rect = Rect::new(0, 0, 500, 420);
@@ -23,40 +22,6 @@ fn field_rect(tab: OptionsTab, s: &Settings, field: Field) -> Rect {
 fn click_field(st: &mut OptionsState, field: Field) {
     let r = field_rect(st.active, &st.working, field);
     st.on_click(r.x + r.w / 2, r.y + r.h / 2, BOUNDS);
-}
-
-// --- Task 1: Settings defaults ----------------------------------------------
-
-#[test]
-fn settings_default_matches_spec() {
-    let d = Settings::default();
-    assert_eq!(d.model, ModelChoice::Auto);
-    assert_eq!(d.volume, 1.0);
-    assert_eq!(d.ff_speed, 10);
-    assert_eq!(d.framerate_limit, 0);
-    assert!(!d.show_framerate);
-    assert!(d.lowercase_disasm);
-    assert!(!d.lowercase_hex);
-    assert!(d.show_clocks);
-    assert!(!d.freeze_recent);
-    assert!(!d.pause_on_focus_loss);
-    // bgb shows the debugger on Esc by default (BUG-1) — the slopgb-faithful default.
-    assert!(d.esc_shows_debugger);
-    assert_eq!(d.scheme, 0);
-    assert_eq!(d.dmg_palette, SCHEMES[0].colors);
-    // The default scheme is bgb's pale-green LCD ("BGB 0.3"), decoded from
-    // bgb.ini Color0..3 (stored BGR) — so a fresh slopgb (and its no-ROM blank
-    // screen) looks like bgb. The lightest shade is the captured #E8FCCC.
-    assert_eq!(SCHEMES[0].name, "BGB 0.3");
-    assert_eq!(d.dmg_palette[0], 0x00E8_FCCC);
-    // Exceptions: bgb ships with "break on invalid opcode" checked, the rest off.
-    assert!(d.break_invalid_op);
-    assert!(!d.break_ld_b_b);
-    assert!(!d.break_echo_ram);
-    assert!(!d.break_lcd_off_vblank);
-    // Boot ROMs: off + no paths by default (golden-safe — post-boot install).
-    assert!(!d.bootroms_enabled);
-    assert!(d.bootrom_dmg.is_empty() && d.bootrom_gbc.is_empty() && d.bootrom_sgb.is_empty());
 }
 
 // --- Task 9: System-tab bootrom controls ------------------------------------
@@ -197,138 +162,6 @@ fn bootrom_checkbox_toggles_and_browse_routes_outcome() {
 }
 
 #[test]
-fn exception_mask_maps_settings_to_core_bits() {
-    use slopgb_core::{EXC_ECHO_RAM, EXC_INVALID_OPCODE, EXC_LCD_OFF_VBLANK, EXC_LD_B_B};
-    // Default = invalid-opcode only.
-    assert_eq!(Settings::default().exception_mask(), EXC_INVALID_OPCODE);
-    // Nothing armed → 0 (golden-safe / inert).
-    let none = Settings {
-        break_invalid_op: false,
-        ..Settings::default()
-    };
-    assert_eq!(none.exception_mask(), 0);
-    // All four armed → all four bits.
-    let all = Settings {
-        break_ld_b_b: true,
-        break_invalid_op: true,
-        break_echo_ram: true,
-        break_lcd_off_vblank: true,
-        ..Settings::default()
-    };
-    assert_eq!(
-        all.exception_mask(),
-        EXC_LD_B_B | EXC_INVALID_OPCODE | EXC_ECHO_RAM | EXC_LCD_OFF_VBLANK
-    );
-}
-
-// --- Task 2: tab labels + groups --------------------------------------------
-
-#[test]
-fn options_tab_labels_and_groups() {
-    let all: Vec<OptionsTab> = OptionsTab::GROUP_A
-        .iter()
-        .chain(&OptionsTab::GROUP_B)
-        .copied()
-        .collect();
-    assert_eq!(all.len(), 10);
-    assert_eq!(
-        all.iter().map(|t| t.label()).collect::<Vec<_>>(),
-        [
-            "Graphics",
-            "System",
-            "Debug",
-            "Exceptions",
-            "Sound",
-            "GB Colors",
-            "Joypad",
-            "Misc",
-            "Theme",
-            "Plugins"
-        ]
-    );
-    // The slopgb Theme tab lives in the bottom group.
-    assert!(OptionsTab::GROUP_B.contains(&OptionsTab::Theme));
-    for t in OptionsTab::GROUP_A {
-        assert_eq!(t.group(), 0);
-    }
-    for t in OptionsTab::GROUP_B {
-        assert_eq!(t.group(), 1);
-    }
-}
-
-// --- Task 3: tab switching + two-row swap ------------------------------------
-
-#[test]
-fn tab_click_switches_active() {
-    let mut st = OptionsState::new(Settings::default());
-    let boxes = st.tab_hitboxes(dialog());
-    let (tab, r) = boxes
-        .iter()
-        .find(|(t, _)| *t == OptionsTab::Sound)
-        .cloned()
-        .unwrap();
-    assert_eq!(tab, OptionsTab::Sound);
-    st.on_click(r.x + 2, r.y + 2, BOUNDS);
-    assert_eq!(st.active, OptionsTab::Sound);
-}
-
-#[test]
-fn active_group_sits_on_bottom_row() {
-    // System (group A) active → group A is the bottom row (larger y).
-    let st = OptionsState::new(Settings::default()); // active = System
-    let boxes = st.tab_hitboxes(dialog());
-    let row_y = |want: OptionsTab| boxes.iter().find(|(t, _)| *t == want).unwrap().1.y;
-    assert!(
-        row_y(OptionsTab::System) > row_y(OptionsTab::Sound),
-        "active group A must be the bottom row"
-    );
-
-    // Switch to a group-B tab → group B drops to the bottom.
-    let mut st2 = OptionsState::new(Settings::default());
-    st2.active = OptionsTab::GbColors;
-    let b2 = st2.tab_hitboxes(dialog());
-    let y2 = |want: OptionsTab| b2.iter().find(|(t, _)| *t == want).unwrap().1.y;
-    assert!(
-        y2(OptionsTab::GbColors) > y2(OptionsTab::Graphics),
-        "active group B must be the bottom row"
-    );
-}
-
-// --- Task 4: chrome layout ---------------------------------------------------
-
-#[test]
-fn chrome_button_order() {
-    let rects = OptionsState::button_rects(dialog());
-    assert_eq!(
-        rects.iter().map(|(b, _)| *b).collect::<Vec<_>>(),
-        OptionsButton::ALL.to_vec()
-    );
-    // left-to-right
-    for w in rects.windows(2) {
-        assert!(w[0].1.x < w[1].1.x);
-    }
-}
-
-#[test]
-fn render_does_not_panic_and_draws() {
-    let mut buf = vec![0u32; (BOUNDS.w * BOUNDS.h) as usize];
-    let mut c = Canvas::new(&mut buf, BOUNDS.w as usize, BOUNDS.h as usize);
-    let st = OptionsState::new(Settings::default());
-    render(&mut c, &st, &T);
-    let d = dialog();
-    // The dialog bg (white) was written.
-    let idx = ((d.y + 1) * BOUNDS.w + d.x + 1) as usize;
-    assert_eq!(buf[idx], T.bg);
-    // The button row drew ink (the OK button's border) somewhere on its row.
-    let (_, ok) = OptionsState::button_rects(d)[0];
-    let row_has_ink = (ok.x..ok.right()).any(|x| {
-        let i = ((ok.y + ok.h / 2) * BOUNDS.w + x) as usize;
-        buf[i] == T.text
-    });
-    assert!(row_has_ink, "button row should draw the OK button border");
-}
-
-#[test]
 fn sound_volume_slider_full_range() {
     let mut st = OptionsState::new(Settings::default());
     st.active = OptionsTab::Sound;
@@ -383,112 +216,7 @@ fn configure_keyboard_button_routes_outcome_without_applying_or_closing() {
     assert!(!OptionsOutcome::ConfigureKeyboard.closes());
 }
 
-// --- Task 5: scratch / button semantics --------------------------------------
-
-#[test]
-fn scratch_semantics_cancel_reverts() {
-    let mut st = OptionsState::new(Settings::default());
-    st.working.volume = 0.25;
-    let out = st.press(OptionsButton::Cancel);
-    assert_eq!(out, OptionsOutcome::Close);
-    assert_eq!(st.working.volume, 1.0, "Cancel reverts to baseline");
-}
-
-#[test]
-fn scratch_semantics_apply_commits_stays_open() {
-    let mut st = OptionsState::new(Settings::default());
-    st.working.volume = 0.25;
-    let out = st.press(OptionsButton::Apply);
-    assert_eq!(out, OptionsOutcome::StayApply);
-    assert!(out.applies() && !out.closes(), "Apply applies + stays open");
-    assert_eq!(st.baseline.volume, 0.25, "Apply commits baseline");
-    // a subsequent Cancel keeps the committed value
-    st.working.volume = 0.9;
-    st.press(OptionsButton::Cancel);
-    assert_eq!(st.working.volume, 0.25);
-}
-
-#[test]
-fn scratch_semantics_ok_applies_and_closes() {
-    let mut st = OptionsState::new(Settings::default());
-    st.working.mono = true;
-    let out = st.press(OptionsButton::Ok);
-    assert_eq!(out, OptionsOutcome::CloseApply);
-    assert!(out.applies() && out.closes(), "OK applies + closes");
-    assert!(st.baseline.mono);
-}
-
-#[test]
-fn defaults_button_stays_open_without_applying() {
-    // bgb's Defaults only edits the controls — it does not push live until OK/Apply.
-    let mut st = OptionsState::new(Settings::default());
-    st.active = OptionsTab::Sound;
-    st.working.volume = 0.3;
-    let out = st.press(OptionsButton::Defaults);
-    assert_eq!(out, OptionsOutcome::StayReset);
-    assert!(!out.applies(), "Defaults does not apply live");
-    assert!(!out.closes(), "Defaults stays open");
-    assert_eq!(st.working.volume, 1.0, "Defaults reset the working control");
-}
-
-#[test]
-fn defaults_resets_only_active_tab() {
-    let mut st = OptionsState::new(Settings::default());
-    st.active = OptionsTab::Sound;
-    st.working.volume = 0.1;
-    st.working.lowercase_hex = true; // a Debug-tab field, must survive
-    st.press(OptionsButton::Defaults);
-    assert_eq!(st.working.volume, 1.0, "Sound Defaults resets volume");
-    assert!(
-        st.working.lowercase_hex,
-        "Debug field untouched by Sound Defaults"
-    );
-}
-
 // --- Tasks 6-13: per-tab live control hit-tests ------------------------------
-
-#[test]
-fn model_choice_from_option_maps_preference() {
-    use slopgb_core::Model;
-    // The persistent --model preference seeds the dialog: None → Auto (bgb
-    // default; never force-switches on Apply), explicit models → their radio.
-    assert_eq!(ModelChoice::from_option(None), ModelChoice::Auto);
-    assert_eq!(ModelChoice::from_option(Some(Model::Dmg)), ModelChoice::Dmg);
-    assert_eq!(ModelChoice::from_option(Some(Model::Cgb)), ModelChoice::Cgb);
-    assert_eq!(
-        ModelChoice::from_option(Some(Model::Agb)),
-        ModelChoice::Cgb,
-        "AGB is CGB-family"
-    );
-}
-
-#[test]
-fn model_choice_resolve_maps_policies() {
-    use slopgb_core::Model;
-    // Forcing choices ignore the ROM header.
-    let none = &[0u8; 0][..];
-    assert_eq!(ModelChoice::Dmg.resolve(none), (Model::Dmg, false));
-    assert_eq!(ModelChoice::Sgb.resolve(none), (Model::Sgb, false));
-    assert_eq!(ModelChoice::Sgb2.resolve(none), (Model::Sgb2, false));
-    // "GBC + initial SGB border" = a CGB machine plus the border-overlay flag.
-    assert_eq!(ModelChoice::CgbBorder.resolve(none), (Model::Cgb, true));
-
-    // A CGB-flagged, SGB-capable header.
-    let mut rom = vec![0u8; 0x8000];
-    rom[0x143] = 0xC0; // CGB only
-    rom[0x146] = 0x03;
-    rom[0x14B] = 0x33; // SGB unlock (both bytes)
-    // "prefer SGB" picks SGB when the header unlocks it...
-    assert_eq!(ModelChoice::AutoSgb.resolve(&rom), (Model::Sgb, false));
-    // ...while "prefer GBC" / "Gameboy or GBC" ignore SGB → CGB here.
-    assert_eq!(ModelChoice::Auto.resolve(&rom), (Model::Cgb, false));
-    assert_eq!(ModelChoice::AutoNoSgb.resolve(&rom), (Model::Cgb, false));
-    // Without the SGB unlock bytes, prefer-SGB falls back to auto (DMG here).
-    assert_eq!(
-        ModelChoice::AutoSgb.resolve(&vec![0u8; 0x8000]),
-        (Model::Dmg, false)
-    );
-}
 
 #[test]
 fn system_tab_model_radios() {
@@ -646,17 +374,6 @@ fn graphics_frame_blend_dropdown_toggles() {
 }
 
 #[test]
-fn screenshot_format_ext_next_and_key_roundtrip() {
-    use crate::windows::options::ScreenshotFormat;
-    assert_eq!(ScreenshotFormat::Bmp.ext(), "bmp");
-    assert_eq!(ScreenshotFormat::Png.ext(), "png");
-    assert_eq!(ScreenshotFormat::Bmp.next(), ScreenshotFormat::Png);
-    assert_eq!(ScreenshotFormat::Png.next(), ScreenshotFormat::Bmp);
-    assert_eq!(ScreenshotFormat::from_key("png"), ScreenshotFormat::Png);
-    assert_eq!(ScreenshotFormat::from_key("garbage"), ScreenshotFormat::Bmp);
-}
-
-#[test]
 fn graphics_sgb_border_screenshot_toggles() {
     let mut st = OptionsState::new(Settings::default());
     st.active = OptionsTab::Graphics;
@@ -800,58 +517,6 @@ fn theme_tab_radios_select_theme() {
 }
 
 #[test]
-fn defaults_resets_every_tab_only_its_own_fields() {
-    // For each tab, mutate one of its live fields away from default, press
-    // Defaults on that tab, and assert it reset (and an out-of-tab field is
-    // untouched). Covers every reset_defaults branch, not just Sound.
-    type Case = (OptionsTab, fn(&mut Settings), fn(&Settings) -> bool);
-    let cases: &[Case] = &[
-        (OptionsTab::Graphics, |s| s.stretch = true, |s| !s.stretch),
-        (
-            OptionsTab::System,
-            |s| s.model = ModelChoice::Cgb,
-            |s| s.model == ModelChoice::Auto,
-        ),
-        (
-            OptionsTab::Debug,
-            |s| s.lowercase_hex = true,
-            |s| !s.lowercase_hex,
-        ),
-        (OptionsTab::Sound, |s| s.volume = 0.1, |s| s.volume == 1.0),
-        (OptionsTab::GbColors, |s| s.scheme = 2, |s| s.scheme == 0),
-        (OptionsTab::Misc, |s| s.ff_speed = 3, |s| s.ff_speed == 10),
-        (
-            OptionsTab::Theme,
-            |s| s.theme = ThemeChoice::Dark,
-            |s| s.theme == ThemeChoice::Light,
-        ),
-        (
-            // invalid-opcode defaults checked, so flip it off to test the reset.
-            OptionsTab::Exceptions,
-            |s| s.break_invalid_op = false,
-            |s| s.break_invalid_op,
-        ),
-    ];
-    for (tab, mutate, is_default) in cases {
-        let mut st = OptionsState::new(Settings::default());
-        st.active = *tab;
-        mutate(&mut st.working);
-        st.working.mono = true; // an out-of-tab field (Sound) — survives unless tab==Sound
-        st.press(OptionsButton::Defaults);
-        assert!(
-            is_default(&st.working),
-            "{tab:?} Defaults did not reset its field"
-        );
-        if *tab != OptionsTab::Sound {
-            assert!(
-                st.working.mono,
-                "{tab:?} Defaults clobbered an out-of-tab field"
-            );
-        }
-    }
-}
-
-#[test]
 fn misc_tab_live_toggles() {
     let mut st = OptionsState::new(Settings::default());
     st.active = OptionsTab::Misc;
@@ -972,58 +637,6 @@ fn joypad_video_record_checkbox_toggles() {
     assert!(!st.working.record_video);
     click_field(&mut st, Field::RecordVideo);
     assert!(st.working.record_video);
-}
-
-#[test]
-fn palette_0_31_display_matches_captured_bgb() {
-    // Captured from real bgb (docs/bgb-reference/options/options-gbcolors-031.png):
-    // the lightest BGB-0.3 colour 232/252/204 reads 29/31/25 with "0-31 numbers"
-    // on — i.e. v8 >> 3.
-    let mut s = Settings::default();
-    s.select_scheme(0); // BGB 0.3: colour 0 = 0x00E8FCCC = 232,252,204
-    s.palette_edit_shade = 0;
-    s.palette_0_31 = false;
-    assert_eq!(
-        [
-            s.palette_channel_display(0),
-            s.palette_channel_display(1),
-            s.palette_channel_display(2)
-        ],
-        [232, 252, 204]
-    );
-    s.palette_0_31 = true;
-    assert_eq!(
-        [
-            s.palette_channel_display(0),
-            s.palette_channel_display(1),
-            s.palette_channel_display(2)
-        ],
-        [29, 31, 25],
-        "0-31 numbers must show bgb's v8>>3 readout"
-    );
-}
-
-#[test]
-fn set_palette_channel_edits_the_selected_shade_and_snaps_in_5bit() {
-    let mut s = Settings::default();
-    s.select_scheme(0);
-    s.palette_edit_shade = 2; // a mid shade
-    // 8-bit mode: max frac -> 255 in the green channel, others untouched.
-    s.palette_0_31 = false;
-    let before = s.dmg_palette;
-    s.set_palette_channel(1, 1.0);
-    assert_eq!((s.dmg_palette[2] >> 8) & 0xFF, 255, "green set to 255");
-    assert_eq!(s.dmg_palette[2] & 0xFF, before[2] & 0xFF, "blue untouched");
-    assert_eq!(s.dmg_palette[0], before[0], "other shades untouched");
-    // 5-bit mode: setting level 15 snaps to v5<<3 = 120 (bgb's readout inverse).
-    s.palette_0_31 = true;
-    s.set_palette_channel(0, 15.0 / 31.0);
-    assert_eq!((s.dmg_palette[2] >> 16) & 0xFF, 120, "red snaps to 15<<3");
-    assert_eq!(
-        s.palette_channel_display(0),
-        15,
-        "reads back as 15 in 5-bit"
-    );
 }
 
 #[test]
@@ -1207,13 +820,9 @@ fn super_gameboy_radio_selects_sgb() {
     );
 }
 
-// --- slider helper -----------------------------------------------------------
-
-#[test]
-fn slider_frac_maps_position() {
-    let track = Rect::new(10, 0, 100, 10);
-    assert_eq!(slider_frac(track, 10), 0.0);
-    assert_eq!(slider_frac(track, 110), 1.0);
-    assert!((slider_frac(track, 60) - 0.5).abs() < 0.01);
-    assert_eq!(slider_frac(track, -5), 0.0, "clamped");
-}
+// Test category modules (split for the 1000-line cap); each is a `mod`
+// via `use super::*`, reaching the shared fixtures above + the crate items.
+#[path = "options_tests/chrome.rs"]
+mod chrome;
+#[path = "options_tests/settings.rs"]
+mod settings;

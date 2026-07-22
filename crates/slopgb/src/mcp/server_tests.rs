@@ -21,7 +21,7 @@ fn tool_defs_lists_every_named_tool() {
     let Json::Arr(tools) = tool_defs(&[]) else {
         panic!("tools is an array")
     };
-    assert_eq!(tools.len(), 11);
+    assert_eq!(tools.len(), 15);
     let names: Vec<&str> = tools
         .iter()
         .filter_map(|t| t.get("name").and_then(Json::as_str))
@@ -38,6 +38,10 @@ fn tool_defs_lists_every_named_tool() {
         "coprocessor",
         "dump-spc",
         "expr",
+        "memdump",
+        "savestate",
+        "simulate",
+        "sim-result",
     ] {
         assert!(names.contains(&want), "missing tool {want}");
     }
@@ -184,6 +188,10 @@ fn end_to_end_over_a_socket() {
                 }
                 crate::mcp::ToolInvocation::Plugin { name, .. } => {
                     Err(format!("no plugin in this test: {name}"))
+                }
+                crate::mcp::ToolInvocation::Simulate(_)
+                | crate::mcp::ToolInvocation::SimResult { .. } => {
+                    Err("no fork tool in this test".to_owned())
                 }
             };
             let _ = job.reply.send(r);

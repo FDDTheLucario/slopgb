@@ -117,8 +117,8 @@ const BASELINE: &[&str] = &[
     // envelope/zombie/freq-change families pass via the SameBoy-style
     // countdown model (src/apu/; the -A variant passes through the same
     // `just_reloaded` + NRx4 freq-high glitch path); the sweep family —
-    // channel_1_sweep, channel_1_sweep_restart AND the formerly
-    // expected-fail channel_1_sweep_restart_2 (apu/README.md: passes
+    // channel_1_sweep, channel_1_sweep_restart AND
+    // channel_1_sweep_restart_2 (apu/README.md: passes
     // only on real CGB-E; even SameBoy emulating CGB-E fails it) —
     // passes via the SameBoy sweep-calculation countdown machinery in
     // src/apu/pulse.rs. What remains is the CGB-C-suffixed
@@ -143,13 +143,11 @@ const BASELINE: &[&str] = &[
     // variants (which phase-lock DIV == $10, i.e. the DIV-APU bit HIGH,
     // before each NR52 power-on / DIV write — they never touch KEY1) all
     // pass via the power-on DIV-event skip glitch (SameBoy GB_apu_init).
-    // dma: none — hdma_mode0 joined via the CGB-C mode-0/OAM timeline
-    // (2026-06); gbc_dma_cont, gdma_addr_mask, hdma_lcd_off passed
-    // already.
+    // dma: none — hdma_mode0 passes via the CGB-C mode-0/OAM timeline;
+    // gbc_dma_cont, gdma_addr_mask, hdma_lcd_off all pass.
     // interrupt: none — ei_delay_halt (the EI one-instruction IME delay
-    // chained into a HALT wake) now passes under the C3 eager-value flip
-    // (2026-07-12; the coherent dispatch frame resolves its
-    // halt-wake intra-cycle IF view).
+    // chained into a HALT wake) passes: the dispatch frame resolves its
+    // halt-wake intra-cycle IF view.
     // sgb: none — both MLT_REQ command tests pass via the joypad's SGB
     // packet receiver + MLT_REQ multiplexer (src/joypad.rs `Sgb`).
 ];
@@ -197,7 +195,7 @@ fn same_suite_breakpoint_matrix() {
     harness::assert_against_baseline("same-suite", &results, BASELINE);
 }
 
-/// Phase B2 inventory: (claimed, exempted) collection-relative paths of
+/// Inventory: (claimed, exempted) collection-relative paths of
 /// every `.gb`/`.gbc` under `same-suite/`. Claimed ROMs produce exactly one
 /// rom×model case in `same_suite_breakpoint_matrix`; exempted ROMs are the
 /// documented §CGB-revision-policy skips (their suffix revision set
@@ -218,7 +216,7 @@ pub fn inventory() -> (Vec<String>, Vec<String>) {
     (claimed, exempted)
 }
 
-/// Self-check ahead of the global Phase B2 guard: the inventory partitions
+/// Self-check ahead of the global inventory guard: the inventory partitions
 /// the on-disk ROM set exactly (claimed ∩ exempted = ∅, claimed ∪ exempted
 /// = every `.gb`/`.gbc` under `same-suite/`), the exempt set is pinned to
 /// the six documented revision-skips and the partition sizes to the v7.0

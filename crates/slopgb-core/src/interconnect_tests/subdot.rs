@@ -2,11 +2,11 @@
 
 use super::*;
 
-/// OAM accessibility after the eager mode-3→mode-0 unblock: by the M-cycle
-/// where the m0 IRQ is dispatch-visible (`line_render_done` set), the eager
-/// clock's back-dated flip has already opened OAM, so a CPU OAM read at that
-/// M-cycle's cc+2 phase returns the unblocked value on both SCX geometries.
-/// Production accessibility is pinned by gambatte `oam_access/postread_*`.
+/// OAM accessibility after the mode-3→mode-0 unblock: by the M-cycle where
+/// the m0 IRQ is dispatch-visible (`line_render_done` set), the back-dated
+/// flip has already opened OAM, so a CPU OAM read at that M-cycle's cc+2 phase
+/// returns the unblocked value on both SCX geometries. Accessibility is pinned
+/// by gambatte `oam_access/postread_*`.
 #[test]
 fn oam_read_unblocks_by_the_m0_dispatch_mcycle() {
     for scx in [0u8, 1] {
@@ -30,9 +30,9 @@ fn oam_read_unblocks_by_the_m0_dispatch_mcycle() {
 }
 
 /// VRAM unblocks on the same mode-3→mode-0 edge as OAM: by the M-cycle where
-/// the eager clock's back-dated flip has opened VRAM, a CPU VRAM read at cc+2
-/// returns the unblocked value on both SCX geometries. Production accessibility
-/// is pinned by gambatte `vram_m3/postread_*`.
+/// the back-dated flip has opened VRAM, a CPU VRAM read at cc+2 returns the
+/// unblocked value on both SCX geometries. Accessibility is pinned by gambatte
+/// `vram_m3/postread_*`.
 #[test]
 fn vram_read_unblocks_by_the_m0_dispatch_mcycle() {
     for scx in [0u8, 1] {
@@ -50,9 +50,9 @@ fn vram_read_unblocks_by_the_m0_dispatch_mcycle() {
     }
 }
 
-/// A CPU VRAM write after the eager mode-3→mode-0 unblock lands: by the
-/// M-cycle where the back-dated flip has opened VRAM, the cc+2 write is
-/// accepted on both SCX geometries. Pins gambatte `vramw_m3end_*`.
+/// A CPU VRAM write after the mode-3→mode-0 unblock lands: by the M-cycle
+/// where the back-dated flip has opened VRAM, the cc+2 write is accepted on
+/// both SCX geometries. Pins gambatte `vramw_m3end_*`.
 #[test]
 fn vram_write_lands_by_the_m0_dispatch_mcycle() {
     for scx in [0u8, 1] {
@@ -73,12 +73,11 @@ fn vram_write_lands_by_the_m0_dispatch_mcycle() {
 
 /// The CGB FF69/FF6B palette read is held at the cc+2 MID phase: the
 /// pipe-end palette unblock commits at the M-cycle END (`PalAccess` =
-/// phase 8, the whole-M-cycle block — INC-G3 task 5), so the CPU read still
-/// returns $FF for the entire straddle M-cycle even though the PPU's own
-/// (end-view) palette RAM has unlocked. Pins gambatte `cgbpal_m3` (the
-/// pipe-end-anchored read; population + end-to-end correctness validated by
-/// that suite). Anchored at `render_finished`, one dot after the m0 flip —
-/// see `Ppu::pal_access_flip`.
+/// phase 8, the whole-M-cycle block), so the CPU read still returns $FF for
+/// the entire straddle M-cycle even though the PPU's own (end-view) palette
+/// RAM has unlocked. Pins gambatte `cgbpal_m3` (the pipe-end-anchored read).
+/// Anchored at `render_finished`, one dot after the m0 flip — see
+/// `Ppu::pal_access_flip`.
 #[test]
 fn cgb_palette_read_mid_override_returns_ff() {
     let mut b = ic(Model::Cgb);
@@ -104,13 +103,11 @@ fn cgb_palette_read_mid_override_returns_ff() {
 /// In double speed the FF41 mode bits read at the cc+2 MID phase: when a
 /// sprite-line mode-3→mode-0 flip fired anywhere in the straddle M-cycle the
 /// STAT read still shows the old mode 3, even though the PPU's whole-dot end
-/// view has flipped to mode 0 (gambatte sprites m3stat_ds). INC-G3 task 6
-/// promotes the block to the WHOLE M-cycle (`event_phase(StatMode)=END_PHASE`,
-/// like the palette block): a flip on the M-cycle's FIRST dot — which the
-/// INC-DS-1 dot-END half-split left readable as mode 0 — now also holds
-/// mode 3 (the +84 residual `m3stat_ds_1` rows whose flip lands in the first
-/// half). Single speed keeps the end view (the parked multi-chain STAT-mode
-/// read; cross-oracle, see `stat_mode_override_requires_double_speed`).
+/// view has flipped to mode 0 (gambatte sprites m3stat_ds). The block covers
+/// the WHOLE M-cycle (`event_phase(StatMode)=END_PHASE`, like the palette
+/// block): a flip on the M-cycle's FIRST dot holds mode 3 too (the
+/// `m3stat_ds_1` rows whose flip lands in the first half). Single speed keeps
+/// the end view (see `stat_mode_override_requires_double_speed`).
 #[test]
 fn stat_mode_read_forces_mode3_whole_mcycle_in_double_speed() {
     let mut b = ic(Model::Cgb);
@@ -150,22 +147,21 @@ fn stat_mode_read_forces_mode3_whole_mcycle_in_double_speed() {
     assert_eq!(b.stat_mode_edge, None, "stamp cleared by the next tick");
 }
 
-/// INC-G3 task 6/7 ceiling pin: the `double_speed` gate on the FF41
-/// STAT-mode override is load-bearing, NOT belt-and-braces. The same
-/// `stat_mode_edge` stamp serves single- and double-speed reads (the
-/// dot-loop is speed-agnostic past `dots`), but they want OPPOSITE results:
-/// the double-speed sprite `m3stat_ds` reads want the held mode 3 (lifted),
-/// while the single-speed `m3stat` direct-poll reads (enable_display,
-/// sprite-count, m0int/ine_m3stat) and the m2-dispatch FF41/FF0F chains want
-/// the mode-0 end view. Relaxing the gate measured LIFT 0 / REGRESS 30
-/// (task 6 single-speed probe). The single discriminator that would separate
-/// them is a per-read-chain CPU↔bus sub-cc phase, and the IF-flop set/read
-/// race that implements it (task 7, intr_2_mode0_nops / m2int_m0irq) is
-/// cross-oracle irreducible — gbmicrotest hblank_int_scx*_if pins the very
-/// dots gambatte's m2int reads contradict, and the G2c ack-countdown tag
-/// that lifted the gambatte side broke the canonical `intr_2_mode0_timing`
-/// mooneye test. So the gate stays speed-conditioned; this test fails the
-/// moment someone drops `&& self.double_speed`.
+/// The `double_speed` gate on the FF41 STAT-mode override is load-bearing,
+/// NOT belt-and-braces. The same `stat_mode_edge` stamp serves single- and
+/// double-speed reads (the dot-loop is speed-agnostic past `dots`), but they
+/// want OPPOSITE results: the double-speed sprite `m3stat_ds` reads want the
+/// held mode 3, while the single-speed `m3stat` direct-poll reads
+/// (enable_display, sprite-count, m0int/ine_m3stat) and the m2-dispatch
+/// FF41/FF0F chains want the mode-0 end view — relaxing the gate regresses the
+/// single-speed side. The discriminator that would separate them is a
+/// per-read-chain CPU↔bus sub-cc phase, and the IF-flop set/read race that
+/// implements it (intr_2_mode0_nops / m2int_m0irq) is cross-oracle
+/// irreducible: gbmicrotest hblank_int_scx*_if pins the very dots gambatte's
+/// m2int reads contradict, and widening the ack countdown to lift the gambatte
+/// side breaks the canonical `intr_2_mode0_timing` mooneye test. So the gate
+/// stays speed-conditioned; this test fails the moment someone drops
+/// `&& self.double_speed`.
 #[test]
 fn stat_mode_override_requires_double_speed() {
     let mut b = ic(Model::Cgb);
@@ -193,30 +189,19 @@ fn stat_mode_override_requires_double_speed() {
     );
 }
 
-/// R3 closure pin — the single-speed FF41 STAT mode-bit read at cc+2 MID stays
-/// CLOSED on BOTH models. The
-/// abandoned R3 override (force the FF41 mode bits to 3 when a bare-line
-/// mode-3→mode-0 flip lands in the read M-cycle's second half, reusing the
-/// `m0_access_edge` half-split, the single-speed analog of the double-speed
-/// `stat_mode_edge` override) was re-measured + classified END-TO-END this
-/// session and is NOT shippable on either model. The CGB slice is a −22
-/// read-site swap — class-A `lcd_offset` / class-B `speedchange` / window /
-/// display-start flip-POSITION errors our CGB `m0_flip_events` projection gets
-/// wrong (the out-of-scope pixel-pipe reclock, gambatte.txt class-A header),
-/// with no read-site discriminator separating the few clean CGB lifts from
-/// those regressors. The DMG slice looked like a clean gambatte +4/−1, but it
-/// is the CROSS-ORACLE swap the project rejected — it lifts +16 wilbertpol
-/// `intr_2_mode0_*_nops` (class-E 2016-era expectations) while REGRESSING 4
-/// currently-green gbmicrotest `ppu_sprite0_scx{1,2,5,6}_b` [Dmg] (class-H
-/// one-dot conflicts the mode-0 grid pins — "don't chase one-sidedly",
-/// gbmicrotest.txt header), i.e. dropping SameBoy-aligned hardware rows to gain
-/// the rejected wilbertpol side, which violates the oracle policy (CLAUDE.md:
-/// never drop a test SameBoy passes).
-///
-/// So the single-speed FF41 read keeps the PPU end view on every model no matter
-/// which sub-dot edge is stamped this M-cycle — only the double-speed StatMode
-/// override (pinned above) ever moves the mode bits. Fails the moment any
-/// single-speed FF41 sub-dot override (e.g. via `m0_access_edge`) is introduced.
+/// The single-speed FF41 STAT mode-bit read at cc+2 MID stays CLOSED on BOTH
+/// models: the read keeps the PPU end view no matter which sub-dot edge is
+/// stamped this M-cycle — only the double-speed StatMode override (pinned
+/// above) ever moves the mode bits. A single-speed analog of that override
+/// (forcing mode 3 when a bare-line mode-3→mode-0 flip lands in the read
+/// M-cycle's second half, via the `m0_access_edge` half-split) is a
+/// cross-oracle trade the oracle policy rejects (CLAUDE.md: never drop a test
+/// SameBoy passes): on DMG it would lift wilbertpol `intr_2_mode0_*_nops` while
+/// regressing green gbmicrotest `ppu_sprite0_scx{1,2,5,6}_b` [Dmg]; on CGB the
+/// `m0_flip_events` flip-position projection is not accurate enough to separate
+/// the clean lifts from the regressors (see the floor-class index,
+/// gambatte.txt). Fails the moment any single-speed FF41 sub-dot override
+/// (e.g. via `m0_access_edge`) is introduced.
 #[test]
 fn single_speed_ff41_keeps_end_view_under_every_edge() {
     for model in [Model::Dmg, Model::Cgb] {
@@ -247,10 +232,9 @@ fn single_speed_ff41_keeps_end_view_under_every_edge() {
     }
 }
 
-/// The cc-granular reclock's `dot_phase` starts at 0 — the fixed even-cc
-/// {2,4} double-speed alignment the old dot loop baked in — so a fresh
-/// interconnect (no speed switch yet) is bit-identical to the dot loop. A
-/// speed switch is what sets it to the half-dot offset (the next increment).
+/// `dot_phase` starts at 0 — the fixed even-cc {2,4} double-speed alignment —
+/// so a fresh interconnect (no speed switch yet) matches the plain dot loop. A
+/// speed switch is what would set it to the half-dot offset.
 #[test]
 fn dot_phase_defaults_zero() {
     for model in [Model::Dmg, Model::Cgb] {
@@ -258,17 +242,13 @@ fn dot_phase_defaults_zero() {
     }
 }
 
-/// The eighth-grid sub-cc phase comparator (`obs_pre_edge` /
-/// `edge_eighth`) is a bit-exact reframe of the old `2 * (i + 1) > dots`
-/// half-split, expressing each per-M-cycle event/observer timing in
-/// eighths of an M-cycle (8 eighths = 4 cc; MID = cc+2, END = cc+4). The
-/// reframe lifts ZERO rows by itself — its worth is converting the parked
-/// multi-chain CPU↔PPU read-phase problem from one boolean (which
-/// conflates *when the edge committed* with *the single cc+2 observer*)
-/// into a comparison where later increments can give an edge its own
-/// sub-dot commit offset and a read chain its own sampling phase. This
-/// test pins the equivalence the scaffold MUST preserve: every green floor
-/// row still rides on the legacy boolean.
+/// The eighth-grid sub-cc phase comparator (`obs_pre_edge` / `edge_eighth`)
+/// expresses each per-M-cycle event/observer timing in eighths of an M-cycle
+/// (8 eighths = 4 cc; MID = cc+2, END = cc+4), bit-exact equivalent to the
+/// plain `2 * (i + 1) > dots` half-split. Expressing it this way lets a later
+/// change give an edge its own sub-dot commit offset and a read chain its own
+/// sampling phase. This test pins that equivalence: every value agrees with
+/// the boolean half-split.
 #[test]
 fn eighth_grid_predicate_matches_half_split() {
     assert_eq!(MID_PHASE, 4, "cc+2 observer = M-cycle midpoint (eighths)");
@@ -292,11 +272,9 @@ fn eighth_grid_predicate_matches_half_split() {
     }
 }
 
-/// The `Option<u8>` edge-stamp (INC-G2a) must reproduce the legacy
-/// precomputed boolean exactly: for an edge firing on dot `i`, a MID
-/// observer is blocked iff the old `2 * (i + 1) > dots` half-split was
-/// true, and an unstamped (`None`) M-cycle never blocks. This is the
-/// net-zero proof — every green floor row still rides on it.
+/// The `Option<u8>` edge-stamp reproduces the plain boolean exactly: for an
+/// edge firing on dot `i`, a MID observer is blocked iff `2 * (i + 1) > dots`,
+/// and an unstamped (`None`) M-cycle never blocks.
 #[test]
 fn stamp_blocks_matches_half_split() {
     for dots in [2u64, 4] {
@@ -314,18 +292,17 @@ fn stamp_blocks_matches_half_split() {
     );
 }
 
-/// `event_phase` generalizes `edge_eighth` over an [`EdgeKind`] so a lift
-/// can give one boundary event its own sub-dot offset (INC-G3). The
-/// OAM/VRAM accessibility unblock (`M0Access`) and the halt-exit mode-0
-/// rise (`M0Rise`) still ride the legacy dot-END commit eighth, for both
-/// speeds and every dot — the scaffold stays net-zero for those edges. Both
-/// calibrated kinds — `PalAccess` (task 5) and `StatMode` (task 6) — commit
-/// at the whole-M-cycle END phase instead (their own assertions below).
+/// `event_phase` generalizes `edge_eighth` over an [`EdgeKind`] so one
+/// boundary event can take its own sub-dot offset. The OAM/VRAM accessibility
+/// unblock (`M0Access`) and the halt-exit mode-0 rise (`M0Rise`) ride the
+/// dot-END commit eighth, for both speeds and every dot. The two calibrated
+/// kinds — `PalAccess` and `StatMode` — commit at the whole-M-cycle END phase
+/// instead (their own assertions below).
 #[test]
 fn event_phase_net_zero_except_pal_and_stat() {
     // The dot-clocked kinds commit at their cc's `cc_eighth` for every cc on
-    // the 1..=4 grid — the cc-granular net-zero seam (the cc already carries
-    // the `dot_phase` sub-dot offset, so there is no `i`/`dots` parameter).
+    // the 1..=4 grid (the cc already carries the `dot_phase` sub-dot offset, so
+    // there is no `i`/`dots` parameter).
     for kind in [EdgeKind::M0Rise, EdgeKind::M0Access] {
         for cc in 1..=4u8 {
             assert_eq!(
@@ -336,9 +313,8 @@ fn event_phase_net_zero_except_pal_and_stat() {
         }
     }
     // The two calibrated whole-M-cycle blocks commit at END regardless of cc
-    // (PalAccess: task 5; StatMode: task 6 — the double-speed sprite m3stat_ds
-    // block, lifted from the dot-END half-split so a 1st-half flip also holds
-    // the old mode 3).
+    // (PalAccess; StatMode — the double-speed sprite m3stat_ds block, so a
+    // 1st-half flip also holds the old mode 3).
     for kind in [EdgeKind::PalAccess, EdgeKind::StatMode] {
         for cc in 1..=4u8 {
             assert_eq!(event_phase(kind, cc, 0), END_PHASE, "kind={kind:?} cc={cc}");
@@ -346,12 +322,11 @@ fn event_phase_net_zero_except_pal_and_stat() {
     }
 }
 
-/// The eighth-grid reclock hook (INC-G3 / pixel-pipe reclock S0): a non-zero
-/// `lead_eighths` shifts an event's commit phase by that many eighths (signed —
-/// negative pulls it earlier toward unblock, positive later), clamped to
-/// `0..=END_PHASE`. This is the per-event sub-dot offset the reclock lifts use
-/// (e.g. the per-SCX CGB palette unblock — S2) WITHOUT moving the whole-dot
-/// pixel pipe; `lead_eighths == 0` is the net-zero identity already pinned by
+/// A non-zero `lead_eighths` shifts an event's commit phase by that many
+/// eighths (signed — negative pulls it earlier toward unblock, positive
+/// later), clamped to `0..=END_PHASE`. This is the per-event sub-dot offset
+/// used (e.g. the per-SCX CGB palette unblock) WITHOUT moving the whole-dot
+/// pixel pipe; `lead_eighths == 0` is the identity already pinned by
 /// `event_phase_net_zero_except_pal_and_stat`. The clamp keeps the result a
 /// valid phase: `0` never blocks an `ACCESS_PHASE` observer, `END_PHASE` blocks
 /// the whole straddle M-cycle (the stamp resets each tick, so a larger lead is
@@ -369,13 +344,12 @@ fn event_phase_lead_shifts_and_clamps() {
     assert_eq!(event_phase(EdgeKind::PalAccess, 1, -1), 7);
 }
 
-/// INC-G3 task 5: the CGB palette-RAM unblock commits at the M-cycle END
-/// (phase 8 = cc+4), one observer grid later than OAM/VRAM's dot-split, so
-/// a cc+2 [`ACCESS_PHASE`] FF69/FF6B read stays blocked ($FF) for the WHOLE
-/// straddle M-cycle regardless of which dot lx==160 lands on — readable
-/// only next M-cycle. The half-split under-blocked the 1st-half (scx2/scx5)
-/// geometries that gambatte cgbpal_m3end `scx2_1`/`scx5_1`/`scx5_ds_1`
-/// (out7) pin (+3 floor rows, zero cross-suite regression).
+/// The CGB palette-RAM unblock commits at the M-cycle END (phase 8 = cc+4),
+/// one observer grid later than OAM/VRAM's dot-split, so a cc+2
+/// [`ACCESS_PHASE`] FF69/FF6B read stays blocked ($FF) for the WHOLE straddle
+/// M-cycle regardless of which dot lx==160 lands on — readable only next
+/// M-cycle. Pins gambatte cgbpal_m3end `scx2_1`/`scx5_1`/`scx5_ds_1` (out7),
+/// the 1st-half (scx2/scx5) geometries the dot-split half-split under-blocked.
 #[test]
 fn pal_access_blocks_whole_mcycle() {
     for cc in 1..=4u8 {
@@ -390,12 +364,10 @@ fn pal_access_blocks_whole_mcycle() {
     }
 }
 
-/// INC-G3 net-zero scaffold, task 4: every CPU bus access samples the edge
-/// stamps at one fixed phase ([`ACCESS_PHASE`]) — correcting the reverted
-/// G2c per-read-chain `obs_phase(addr)`. The single constant equals
-/// [`MID_PHASE`] (cc+2), which is what keeps the scaffold net-zero; the
-/// read chains are later separated by the EVENT's sub-dot position
-/// ([`event_phase`]), not the observer's.
+/// Every CPU bus access samples the edge stamps at one fixed phase
+/// ([`ACCESS_PHASE`]). The single constant equals [`MID_PHASE`] (cc+2); read
+/// chains are separated by the EVENT's sub-dot position ([`event_phase`]), not
+/// the observer's.
 #[test]
 fn access_phase_is_single_constant() {
     assert_eq!(
@@ -404,14 +376,14 @@ fn access_phase_is_single_constant() {
     );
 }
 
-// ---- S1 deferred-commit CPU clock wiring (net-zero) --------------------
+// ---- deferred-commit CPU clock wiring ----------------------------------
 //
 // Every CPU-driven M-cycle (the five `Bus` access methods) drives the
-// `CycleClock`; the instruction boundary `flush_pending` drains it. The
-// clock is write-only scaffold today (nothing samples it), so its only
-// observable property is conservation: after a boundary flush its committed
-// position equals 4 T-cycles × the M-cycle count, in either speed. This pins
-// the wiring; the clock's own arithmetic is unit-tested in `cycle_clock`.
+// `CycleClock`; the instruction boundary `flush_pending` drains it. Nothing
+// samples the clock's committed position, so its only observable property is
+// conservation: after a boundary flush that position equals 4 T-cycles × the
+// M-cycle count, in either speed. This pins the wiring; the clock's own
+// arithmetic is unit-tested in `cycle_clock`.
 
 #[test]
 fn cpu_clock_deferred_commit_conserves_t_count() {
@@ -453,9 +425,9 @@ fn cpu_clock_read_inc_and_tick_addr_drive_the_clock() {
 #[test]
 fn cpu_clock_write_first_conserves_with_no_parked_debt() {
     // A standalone first write (no preceding fetch → pending==0) is the case
-    // the production `write` relaxed from a panic to a saturating commit:
-    // ReadOld commits at the current clock (no advance) and reparks 4, still
-    // conserving the per-M-cycle 4 T. Pins "no panic + conserves".
+    // `write` handles with a saturating commit rather than a panic: ReadOld
+    // commits at the current clock (no advance) and reparks 4, still conserving
+    // the per-M-cycle 4 T. Pins "no panic + conserves".
     let mut b = ic(Model::Dmg);
     b.write(0xFF80, 0); // pending was 0
     assert_eq!((b.cpu_clock_t(), b.cpu_clock_pending()), (0, 4));
@@ -470,9 +442,9 @@ fn cpu_clock_write_first_conserves_with_no_parked_debt() {
 #[test]
 fn cpu_clock_write_routes_through_the_per_model_conflict_class() {
     // `Bus::write` selects the SameBoy conflict class via `write_conflict`
-    // (A3, byte-identical because the commit position is still discarded).
-    // The class's re-park is observable on the deferred-commit clock: a
-    // fetch parks 4, then the write re-parks per class. (Same pattern as
+    // (byte-identical because the commit position is still discarded). The
+    // class's re-park is observable on the deferred-commit clock: a fetch
+    // parks 4, then the write re-parks per class. (Same pattern as
     // `cpu_clock_deferred_commit_conserves_t_count`; here we vary the address
     // so the class — not just `ReadOld` — drives the re-park.)
     let repark = |model: Model, addr: u16| {
@@ -493,20 +465,21 @@ fn cpu_clock_write_routes_through_the_per_model_conflict_class() {
         (Model::Dmg, 0xFF45, 4, "DMG LYC ReadOld"),
         (Model::Cgb, 0xFF45, 3, "CGB LYC WriteCpu"),
         (Model::Cgb, 0xFF43, 4, "CGB SCX ReadOld"),
-        // CGB LCDC's value-dependent tile-sel glitch is deferred to S6, so it
-        // stays ReadOld(4) here — pins the documented deferral, not WxHold(3).
+        // CGB LCDC's value-dependent tile-sel glitch is not decidable from the
+        // address, so it stays ReadOld(4) here — pins the documented default,
+        // not WxHold(3).
         (Model::Cgb, 0xFF40, 4, "CGB LCDC ReadOld S6"),
     ] {
         assert_eq!(repark(model, addr), want, "{class}");
     }
 }
 
-// ---- S2a leading-edge (cc+0) FF41 read ---------------------------------
+// ---- leading-edge (cc+0) FF41 read -------------------------------------
 //
-// The production eager clock latches FF41 at the M-cycle's *leading* edge
-// (before the PPU advances), the slopgb equivalent of SameBoy force-syncing the
-// PPU to the read's access cycle. At a mode-3→0
-// boundary M-cycle it reads mode 3 where a trailing cc+4 view would read mode 0.
+// FF41 is latched at the M-cycle's *leading* edge (before the PPU advances),
+// the slopgb equivalent of SameBoy force-syncing the PPU to the read's access
+// cycle. At a mode-3→0 boundary M-cycle it reads mode 3 where a trailing cc+4
+// view would read mode 0.
 
 #[test]
 fn leading_edge_ff41_reads_pre_tick_mode_at_the_mode0_boundary() {

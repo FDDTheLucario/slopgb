@@ -5,8 +5,7 @@ use super::*;
 /// The STAT mode-bit flip edge (`m0_stat_flip`, drained by
 /// `take_m0_stat_flip`) fires once per *sprite-extended* line on the
 /// mode-3→mode-0 flip dot, and not at all on a bare line (the sprite gate
-/// keeps the bare-line DMA/lcd-offset reads off the override — sub-dot
-/// event-phase model, INC-DS-1).
+/// keeps the bare-line DMA/lcd-offset reads off the override).
 #[test]
 fn m0_stat_flip_fires_once_on_a_sprite_line() {
     let mut p = cgb();
@@ -34,7 +33,7 @@ fn m0_stat_flip_fires_once_on_a_sprite_line() {
 
 /// The STAT mode-bit flip edge stays off on a bare line: those DS reads
 /// reach FF41 through the DMA-cycle / lcd-offset chains at a different
-/// sub-cycle offset, so the override would regress them (INC-DS-1 gate).
+/// sub-cycle offset, so the override would regress them.
 #[test]
 fn m0_stat_flip_is_off_on_a_bare_line() {
     let mut p = cgb();
@@ -51,13 +50,11 @@ fn m0_stat_flip_is_off_on_a_bare_line() {
     assert_eq!(fired, 0, "bare-line flip stays off the STAT-mode override");
 }
 
-/// S2b: the interrupt-facing mode (`mode_for_interrupt`) diverges from the
+/// The interrupt-facing mode (`mode_for_interrupt`) diverges from the
 /// CPU-visible mode in two one-dot windows on a visible line — the OAM
 /// (mode-2) IRQ leads the visible byte by one dot (dot 3), and the mode-0
-/// IRQ lags it by one dot (the dot after the visible 3→0 flip). That 2-dot
-/// relative swing is what separates the kernel pair.
-/// The field is inert at S2b (the STAT engine still fires on the old path);
-/// this pins the decoupling directly against the visible mode.
+/// IRQ lags it by one dot (the dot after the visible 3→0 flip). This pins
+/// that decoupling directly against the visible mode.
 #[test]
 fn mode_for_interrupt_swings_two_dots_against_the_visible_mode() {
     let mut p = dmg();
@@ -116,13 +113,13 @@ fn mode_for_interrupt_swings_two_dots_against_the_visible_mode() {
     assert!(lag_seen, "mode-0 lag window observed");
 }
 
-/// S2b/S5-refine: the mode-2 lead is suppressed on line 0 — the OAM STAT IRQ
+/// The mode-2 lead is suppressed on line 0 — the OAM STAT IRQ
 /// does not fire one dot early there (`display.c:1778` "except on line 0"), so
 /// at dot 3 the IRQ mode does NOT read `2` (no lead), unlike lines 1-143. Line 0
 /// instead pulses the OAM source *at* the visible mode→2 edge (dot 4,
 /// `display.c:1792`'s unconditional set), then falls to NONE.
 ///
-/// Mech 3 root 2: line 0's dots 0-3 carry the VBlank source (mode 1), NOT the
+/// Line 0's dots 0-3 carry the VBlank source (mode 1), NOT the
 /// visible mode (0). SameBoy never re-sets `mode_for_interrupt` between the
 /// line-144 entry (`= 1`) and line 0's OAM step (`= 2`), so the IRQ mode holds 1
 /// across vblank and into line 0's first dots — keeping the STAT line high when
@@ -166,7 +163,7 @@ fn mode_for_interrupt_has_no_mode2_lead_on_line_0() {
     );
 }
 
-/// S5-refine: on lines 1-143 the OAM (mode-2) IRQ source is carried across the
+/// On lines 1-143 the OAM (mode-2) IRQ source is carried across the
 /// *whole* line-start window (dots 0-3), not just pulsed at dot 3. SameBoy sets
 /// `mode_for_interrupt = 2` at the prior line's end (`display.c:2138`, skipped
 /// only for the last visible line `LINES-1`) and re-sets it at the line top
@@ -174,8 +171,7 @@ fn mode_for_interrupt_has_no_mode2_lead_on_line_0() {
 /// HBlank exit through this line's OAM-search start — the "OAM int 1 T-cycle
 /// before STAT" lead (`display.c:1778`) seen as a sustained carryover rather
 /// than only the one-dot lead the swing test pins at dot 3. The visible byte
-/// still reads the mode-0 gap (0) across those dots. Inert field; pins the
-/// decoupled model the S5 StatUpdate swap consumes (line 0 is the exception —
+/// still reads the mode-0 gap (0) across those dots (line 0 is the exception —
 /// no prior-line carryover, see the line-0 test).
 #[test]
 fn mode_for_interrupt_holds_oam_source_across_line_start() {
@@ -200,7 +196,7 @@ fn mode_for_interrupt_holds_oam_source_across_line_start() {
     );
 }
 
-/// S5-refine: the VBlank interrupt-facing mode (`display.c` 144-152 loop +
+/// The VBlank interrupt-facing mode (`display.c` 144-152 loop +
 /// line-153 tail). Line 144 still reads line 143's HBlank carryover (mode 0)
 /// for its first dots, flips to the VBlank source (mode 1) at the vblank-entry
 /// step (`display.c:2178` `mode_for_interrupt = 1`, ~dot 4), and every later
@@ -237,20 +233,16 @@ fn mode_for_interrupt_vblank_timeline() {
     }
 }
 
-/// S2c — cycle-exact mode-3 length, validated as a parallel function.
+/// Cycle-exact mode-3 length, validated as a parallel function.
 ///
 /// SameBoy's bare-line (no sprites, no active window) mode-3 length is
 /// `167 + (SCX & 7)` (`display.c:1493`), so the visible STAT mode flips 3→0
 /// at dot `MODE2_LENGTH + 167 + (SCX & 7)` = `247 + (SCX & 7)`
-/// (`display.c:2091`). The kernel pair renders BG-only, so this closed form
-/// is exact for it. [`crate::mode_timeline::ModeTimeline`] is that function;
-/// this test pins it to the live PPU's actual SCX sweep and measures the
-/// **reclock magnitude** the S2d atomic flip must apply: slopgb's live
-/// `m0_flip_events` flip lands a *constant* 7 dots later than the SameBoy
-/// boundary (a +4 line-start mode-0-window offset plus a +3 longer mode 3),
-/// across every SCX. That fixed delta is exactly what makes the lift a whole
-/// re-clock (it moves the rendered pixel-pop dot, hence the mealybug photos)
-/// rather than a net-zero sub-dot nudge.
+/// (`display.c:2091`). A BG-only line, so this closed form is exact for it.
+/// [`crate::mode_timeline::ModeTimeline`] is that function; this test pins it
+/// to the live PPU's SCX sweep: slopgb's live `m0_flip_events` dispatch flip
+/// lands a *constant* 7 dots later than the SameBoy boundary (a +4 line-start
+/// mode-0-window offset plus a +3 longer mode 3), across every SCX.
 #[test]
 fn sameboy_mode3_length_is_four_dots_short_of_the_live_flip() {
     for scx in 0u8..8 {
@@ -290,13 +282,12 @@ fn sameboy_mode3_length_is_four_dots_short_of_the_live_flip() {
     }
 }
 
-/// S2c — the visible mode→0 back-date (`vis_early`, the kernel-pair
-/// separator). On the `leading-edge` path a bare single-speed line's
+/// The visible mode→0 back-date (`vis_early`). A bare single-speed line's
 /// CPU-visible STAT mode flips 3→0 at SameBoy's `visible_mode0_dot` (`+4` past
 /// the live dispatch's `+7`, i.e. **3 dots earlier**), while the IRQ-dispatch
-/// flip (`line_render_done`/`m0_src`) stays at `+7` — the decoupling the
-/// instrumentation showed separates `m2int_m3stat_1` (read at our dot 248,
-/// stays mode 3) from `m0int_m3stat_2` (read at our dot 252, now mode 0).
+/// flip (`line_render_done`/`m0_src`) stays at `+7` — this decoupling
+/// separates `m2int_m3stat_1` (read at our dot 248, stays mode 3) from
+/// `m0int_m3stat_2` (read at our dot 252, now mode 0).
 #[test]
 fn visible_mode0_backdates_three_dots_bare_line() {
     let live_visible_flip = || -> u16 {
@@ -361,11 +352,11 @@ fn mode0_irq_at_254_plus_scx_fine() {
     }
 }
 
-/// Port Stage A8 — the mode-0 IRQ side fires at `line_render_done` (the
-/// gambatte-calibrated `m0_rise_dot` frame), NOT the +1-dot `mfi_m0_prev` lag.
-/// The lag put the `StatUpdate` mode-0 STAT IF one dot late and broke
-/// `hblank_ly_scx_timing`. Pinned by comparing the `mode_for_interrupt` 3→0
-/// dot to the visible mode→0 flip (= `line_render_done`).
+/// The mode-0 IRQ side fires at `line_render_done` (the gambatte-calibrated
+/// `m0_rise_dot` frame), NOT the +1-dot `mfi_m0_prev` lag — that lag would put
+/// the `StatUpdate` mode-0 STAT IF one dot late (`hblank_ly_scx_timing`).
+/// Pinned by comparing the `mode_for_interrupt` 3→0 dot to the visible mode→0
+/// flip (= `line_render_done`).
 #[test]
 fn mode0_irq_fires_at_render_done_not_lagged() {
     // The line_render_done dot = the visible mode 3→0 flip (bare SCX 0).
@@ -414,9 +405,8 @@ fn mode0_irq_fires_at_render_done_not_lagged() {
     );
 }
 
-/// The mode-2→3 entry back-date. On the leading-edge path a bare single-speed
-/// line's CPU-visible STAT mode flips 2→3 at dot 80 (4 dots earlier than the
-/// dispatch's dot 84),
+/// The mode-2→3 entry back-date. A bare single-speed line's CPU-visible STAT
+/// mode flips 2→3 at dot 80 (4 dots earlier than the dispatch's dot 84),
 /// making the cc+0 FF41 read observationally match SameBoy's cc+4 view for
 /// the mode-2→3 entry (mooneye `intr_2_mode3_timing` passes).
 #[test]
@@ -442,10 +432,9 @@ fn mode3_entry_backdates_four_dots() {
     assert_eq!(entry(), 80, "back-dated 4 dots to dot 80");
 }
 
-/// Port Stage A13 — the LCD-enable glitch-line mode-3 boundary
-/// back-dates. On the leading-edge path the
-/// glitch first line's CPU-visible STAT mode-3 window is back-dated the full
-/// single-speed read offset (4 dots, like A7): the mode-0→3 ENTRY moves 78→74
+/// The LCD-enable glitch-line mode-3 boundary back-dates. The glitch first
+/// line's CPU-visible STAT mode-3 window is back-dated the full
+/// single-speed read offset (4 dots): the mode-0→3 ENTRY moves 78→74
 /// and the 3→0 EXIT (the `line_render_done` flip at dot 252) is anticipated by
 /// `vis_early` rising at dot 248, so the cc+0 FF41 read reproduces SameBoy's
 /// cc+4 view (`lcdon_timing-GS` STAT tables; gambatte enable_display).
@@ -474,15 +463,13 @@ fn glitch_line_mode3_backdates_four_dots() {
     assert_eq!(window(), (74, 248), "both back-dated 4 dots");
 }
 
-/// Port Stage A15 — the LCD-enable glitch line raises NO mode-0 (HBlank) STAT
-/// IRQ in its line-start prefix (single speed). The glitch prefix shows visible
-/// mode 0 but it is the LCD-enable glitch, not a real hblank, so
-/// `stat_line_level` / `stat_write_trigger_dmg` suppress the HBlank source there.
-/// The rising-edge engine's glitch `mode_for_interrupt` used to mirror `vis_mode`
-/// (mode 0 in the prefix) and fired a spurious m0 IRQ at the first glitch dot
-/// (`enable_display/ly0_m0irq_trigger` rendered E2 vs SameBoy/gambatte's
-/// out0). Now the SS prefix selects NONE; only the real post-render glitch m0
-/// fires. (`dmg()` is single speed, so the `!ds` gate is active here.)
+/// The LCD-enable glitch line raises NO mode-0 (HBlank) STAT IRQ in its
+/// line-start prefix (single speed). The glitch prefix shows visible mode 0
+/// but it is the LCD-enable glitch, not a real hblank, so `stat_line_level` /
+/// `stat_write_trigger_dmg` suppress the HBlank source there: the SS prefix
+/// selects NONE, and only the real post-render glitch m0 fires
+/// (`enable_display/ly0_m0irq_trigger` wants out0, not E2). (`dmg()` is single
+/// speed, so the `!ds` gate is active here.)
 #[test]
 fn glitch_line_prefix_suppresses_m0_irq() {
     // mode_for_interrupt across the glitch line with HBlank enabled (single speed).
@@ -526,9 +513,8 @@ fn glitch_line_prefix_suppresses_m0_irq() {
     );
 }
 
-/// Port Stage A14 — the glitch line's LYC *readable* compare back-dates 4
-/// dots on the leading-edge single-speed path, like A13's mode-3 window: a
-/// glitch-line FF41 read in the last 4 dots (≥ GLITCH_LINE_DOTS−4 = 448) is
+/// The glitch line's LYC *readable* compare back-dates 4 dots (single speed):
+/// a glitch-line FF41 read in the last 4 dots (≥ GLITCH_LINE_DOTS−4 = 448) is
 /// the cc+0 view of what its cc+4 trailing edge sees 4 dots later — the next
 /// line (line 1) at dots 0-3 (the −4 read offset). There the DMG readable
 /// coincidence flag is forced invalid (no-match), so the glitch compare drops
@@ -554,12 +540,11 @@ fn glitch_line_lyc_compare_backdates_four_dots() {
     }
 }
 
-/// Port Stage C/S5 mech-1 — the window vis-HOLD foundation (`vis_hold_until`)
-/// keeps the CPU-visible STAT mode at 3 PAST the dispatch flip
-/// (`line_render_done`/`vis_early`) until SameBoy's `263 + SCX&7` window-length
-/// exit, WITHOUT moving the dispatch. Always 0 (no hold) in production today,
-/// so `vis_mode` still reads the plain `line_render_done` flip. (Validated
-/// foundation for the C2 window-length model — see the `vis_hold_until` docs.)
+/// The window vis-HOLD foundation (`vis_hold_until`) keeps the CPU-visible STAT
+/// mode at 3 PAST the dispatch flip (`line_render_done`/`vis_early`) until
+/// SameBoy's `263 + SCX&7` window-length exit, WITHOUT moving the dispatch.
+/// Default 0 (no hold), so `vis_mode` reads the plain `line_render_done` flip;
+/// see the `vis_hold_until` docs.
 #[test]
 fn vis_hold_extends_visible_mode3_past_the_dispatch() {
     let mut p = dmg();

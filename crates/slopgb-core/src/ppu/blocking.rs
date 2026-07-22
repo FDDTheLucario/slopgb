@@ -42,7 +42,7 @@ impl Ppu {
             && self.dot - self.vram_wr_dot < 8
     }
 
-    /// Emergent-flip accessibility release (HALFDOT Part-A): the OAM/VRAM read +
+    /// Emergent-flip accessibility release: the OAM/VRAM read +
     /// write mode-3→0 unblock keyed to the render's OWN projected flip via the
     /// read's exact half-dot position, not the `vis_early` boolean (which fires
     /// 2 dots early and over-releases the `_1` reads). The read's `read_pos_hd`
@@ -290,8 +290,7 @@ impl Ppu {
             // than DMG, and NOT keyed to the m0 IF rise (which fires while
             // VRAM is still locked). slopgb held the lock to
             // `line_render_done` (261) so `m2int_wxA6_vrambusyread_3`'s
-            // dot-260 read stayed blocked (want open, out5). wxA6-SCOPED —
-            // the generic win-line release was the vramw A/B.
+            // dot-260 read stayed blocked (want open, out5). wxA6-SCOPED.
             if !self.ds
                 && (1..=143).contains(&self.line)
                 && self.render.win_active

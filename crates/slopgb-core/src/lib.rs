@@ -127,7 +127,7 @@ impl XorShift64 {
 
 /// A decoded SGB SOUND ($08) command: two sound-effect IDs, an
 /// attenuation/flags byte and the effect-bank selector. The core decodes and
-/// queues these; Phase 3 (the S-DSP) drains the queue via
+/// queues these; the S-DSP drains the queue via
 /// [`GameBoy::sgb_take_sound_event`]. (Pan Docs "SGB Command $08 — SOUND".)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SgbSound {
@@ -143,7 +143,7 @@ pub struct SgbSound {
 
 /// A read-only snapshot of the SGB flag commands (ATRC_EN/TEST_EN/ICON_EN/
 /// PAL_PRI) and the latched JUMP target — SNES-side state with no Game-Boy-bus
-/// effect, exposed for Phase-2/3 consumers. (Pan Docs "SGB Command $0C-$0E /
+/// effect, exposed for the SNES-side consumers. (Pan Docs "SGB Command $0C-$0E /
 /// $12 / $19".)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SgbFlags {
@@ -189,8 +189,8 @@ const STATE_MAGIC: &[u8; 4] = b"SLPS";
 /// Save-state format version (bumped on any layout change). v3 dropped the
 /// APU output queues (`samples`/`raw_samples`) from the payload; v4 appends the
 /// SGB audio subsystem (SPC700 + S-DSP) on `Model::Sgb`/`Sgb2` states; v6 dropped
-/// the retired eager-clock flags (`leading-edge`/`eager`) from the
-/// interconnect + PPU payloads; v7 records a has-SGB-audio-tail flag byte right
+/// two retired clock-mode flag bytes from the interconnect + PPU payloads; v7
+/// records a has-SGB-audio-tail flag byte right
 /// after the header so a cross-model load (SGB state into DMG/CGB or vice versa)
 /// is rejected with `StateError::ModelMismatch` instead of silently dropping the
 /// tail or failing as `Truncated`; v8 appends the SGB raw-packet tee queue to
@@ -644,6 +644,24 @@ impl GameBoy {
     #[must_use]
     pub fn rom_bank(&self) -> usize {
         self.bus.cartridge().cur_rom_bank()
+    }
+
+    /// [`Self::rom_bank`] resolved for the region containing `addr`: only
+    /// MBC6 differs, where 0x6000-0x7FFF (window B) banks independently of
+    /// 0x4000-0x5FFF. For the memory viewer's per-region bank label.
+    /// Side-effect-free.
+    #[must_use]
+    pub fn rom_bank_at(&self, addr: u16) -> usize {
+        self.bus.cartridge().rom_bank_at(addr)
+    }
+
+    /// [`Self::ram_bank`] resolved for the region containing `addr`: only
+    /// MBC6 differs, where 0xB000-0xBFFF (RAM window B) banks independently
+    /// of 0xA000-0xAFFF. For the memory viewer's per-region bank label.
+    /// Side-effect-free.
+    #[must_use]
+    pub fn ram_bank_at(&self, addr: u16) -> Option<usize> {
+        self.bus.cartridge().ram_bank_at(addr)
     }
 
     /// Set the Game Genie ROM-patch cheats (frontend cheat engine). Empty (the

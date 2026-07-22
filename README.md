@@ -1,11 +1,28 @@
 # slopgb
 
+[![CI](https://github.com/FDDTheLucario/slopgb/actions/workflows/ci.yml/badge.svg)](https://github.com/FDDTheLucario/slopgb/actions/workflows/ci.yml)
+
 Cycle-accurate Game Boy / Game Boy Color emulator in Rust.
+
+| Pokémon Crystal (CGB) | Space Invaders (Super Game Boy) |
+|---|---|
+| ![Pokémon Crystal running in slopgb](docs/screenshots/crystal-cgb.png) | ![Space Invaders in SGB mode with border](docs/screenshots/space-invaders-sgb.png) |
+
+The Super Game Boy shot is the SNES side running for real: the SGB border and
+audio come from clean-room SPC700 + 65C816 + SNES-PPU chip cores compiled to
+wasm coprocessor plugins, driven by the running Game Boy.
 
 - `crates/slopgb-core` — emulator core: zero dependencies, no unsafe,
   deterministic. Emulates DMG0/DMG/MGB/SGB/SGB2/CGB/AGB models.
 - `crates/slopgb` — cross-platform desktop frontend (winit + softbuffer +
-  cpal).
+  cpal + gilrs) with a bgb-style debugger UI.
+- A Rust→wasm plugin system (`slopgb-plugin-api` guest SDK +
+  `slopgb-plugin-host` wasmi runtime) with three capability tiers:
+  per-frame introspection, MCP tools, and coprocessor subsystems. Super
+  Game Boy support runs its SNES side as clean-room chip cores compiled to
+  wasm coprocessor plugins — SPC700 + S-DSP audio (`slopgb-snes-apu`),
+  65C816 (`slopgb-w65c816`), SNES PPU (`slopgb-snes-ppu`) — plus MSU-1
+  streaming audio (`--msu1`). Build them with `cargo xtask stage-plugins`.
 
 Accuracy is validated against the
 [mooneye-test-suite](https://github.com/Gekkio/mooneye-test-suite)
@@ -19,17 +36,20 @@ ROMs (see `docs/ARCHITECTURE.md`).
 
 ## Building
 
-Needs **Rust 1.85+** (the workspace is edition 2024); install via [rustup](https://rustup.rs).
+Needs **Rust 1.97+** (the pinned toolchain in `rust-toolchain.toml`; the workspace
+is edition 2024); install via [rustup](https://rustup.rs).
 
 The **core** (`slopgb-core`) is pure `std` — it builds anywhere with no system
-libraries. The **frontend** (`slopgb`) draws with winit + softbuffer and plays
-audio with cpal, so on Linux it needs the usual desktop dev libraries:
+libraries. The **frontend** (`slopgb`) draws with winit + softbuffer, plays
+audio with cpal and reads game controllers with gilrs, so on Linux it needs
+the usual desktop dev libraries (libudev is gilrs's controller-hotplug
+backend):
 
 | Distro | Install |
 |---|---|
 | Arch | `sudo pacman -S base-devel alsa-lib libxkbcommon` (Wayland: `wayland`; X11: `libxcb libx11`) |
-| Debian/Ubuntu | `sudo apt install build-essential pkg-config libasound2-dev libxkbcommon-dev libwayland-dev libxcb1-dev` |
-| Fedora | `sudo dnf install @development-tools alsa-lib-devel libxkbcommon-devel wayland-devel libxcb-devel` |
+| Debian/Ubuntu | `sudo apt install build-essential pkg-config libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libxcb1-dev` |
+| Fedora | `sudo dnf install @development-tools alsa-lib-devel systemd-devel libxkbcommon-devel wayland-devel libxcb-devel` |
 
 macOS and Windows need only the Rust toolchain (no extra system packages).
 
@@ -50,6 +70,14 @@ clipboard for the debugger's copy commands (`wl-copy` / `xclip` / `xsel`).
 test-roms/download.sh        # fetch the pinned test-ROM bundles (~once)
 cargo test --workspace       # unit tests + mooneye + game-boy-test-roms harnesses
 ```
+
+Beyond accuracy, the suite pins robustness the way a shipping app needs it:
+the untrusted parsers a user actually feeds — the ROM image, the `.sav`, the
+savestate blob, the CDL file — are fuzzed with hundreds of thousands of random
+and mutated inputs and must never panic (`tests/fuzz.rs`); every model runs
+faster than real time (`tests/realtime_perf.rs`, ~9× headless); and audio +
+joypad carry signal end to end (`tests/audio_input_smoke.rs`). All of it, plus
+`cargo fmt`/`clippy -D warnings`, runs in CI on Linux, Windows, and macOS.
 
 ## Running
 

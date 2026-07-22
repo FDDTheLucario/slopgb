@@ -1,7 +1,7 @@
 //! SingleStepTests 65816 vector conformance, grouped by opcode family. Each test
 //! runs all 10000 cases per opcode in both emulation and native mode. Vectors
-//! are gitignored; absent, the tests skip (set `SLOPGB_REQUIRE_ROMS` to fail
-//! instead). See `test-roms/download-65816-tests.sh`.
+//! are gitignored; absent, the tests skip (set `SLOPGB_REQUIRE_65816_VECTORS`
+//! to fail instead). See `test-roms/download-65816-tests.sh`.
 
 mod support;
 

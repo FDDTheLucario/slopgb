@@ -33,13 +33,16 @@ impl Cartridge {
         self.rtc().map(|r| (r.regs, r.latched))
     }
 
-    /// Battery-backed RAM image (+ serialized RTC for MBC3), None if the
-    /// cartridge has no battery.
+    /// Battery-backed RAM image (+ serialized RTC for MBC3, + the flash for
+    /// MBC6), None if the cartridge has no battery.
     ///
     /// Format: the raw RAM contents (MBC2: 512 bytes, low nibble valid),
     /// followed — for RTC carts (types 0x0F/0x10) — by a 16-byte block:
     /// live S,M,H,DL,DH; latched S,M,H,DL,DH; sub-second T-cycle counter as
     /// little-endian u32; the last latch register write; one zero pad byte.
+    /// For MBC6 the trailer is instead the non-volatile flash chip: the
+    /// 1 MiB array, the 256-byte hidden region, and one protect-flag byte
+    /// (Pan Docs "MBC6": the Protect Sector 0 state "is stored non-volatile").
     pub fn save_data(&self) -> Option<Vec<u8>> {
         if !self.has_battery {
             return None;
@@ -52,6 +55,11 @@ impl Cartridge {
             // latch_prev so an armed 0x00 -> 0x01 latch sequence survives a
             // save taken between the two writes.
             data.extend_from_slice(&[rtc.latch_prev, 0]);
+        }
+        if let Mapper::Mbc6 { flash, .. } = &self.mapper {
+            data.extend_from_slice(&flash.data);
+            data.extend_from_slice(&flash.hidden);
+            data.push(u8::from(flash.protect));
         }
         Some(data)
     }
@@ -73,8 +81,27 @@ impl Cartridge {
         }
         let (ram, trailer) = data.split_at(self.ram.len());
         self.ram.copy_from_slice(ram);
-        let rtc_restored = self.load_rtc_trailer(trailer);
-        !self.ram.is_empty() || rtc_restored
+        let trailer_restored = self.load_rtc_trailer(trailer) || self.load_mbc6_trailer(trailer);
+        !self.ram.is_empty() || trailer_restored
+    }
+
+    /// Parse the post-RAM trailer of an MBC6 save image into the flash
+    /// chip (see [`Self::save_data`]). An unknown trailer size (e.g. a
+    /// foreign SRAM-only .sav) skips only the flash restore, leaving a
+    /// fresh all-0xFF chip. Returns whether flash state was restored.
+    fn load_mbc6_trailer(&mut self, trailer: &[u8]) -> bool {
+        let Mapper::Mbc6 { flash, .. } = &mut self.mapper else {
+            return false;
+        };
+        if trailer.len() != MBC6_FLASH_SIZE + 256 + 1 {
+            return false;
+        }
+        flash.data.copy_from_slice(&trailer[..MBC6_FLASH_SIZE]);
+        flash
+            .hidden
+            .copy_from_slice(&trailer[MBC6_FLASH_SIZE..MBC6_FLASH_SIZE + 256]);
+        flash.protect = trailer[MBC6_FLASH_SIZE + 256] != 0;
+        true
     }
 
     /// Parse the post-RAM trailer of a save image into the RTC, if any.
@@ -116,13 +143,19 @@ impl Cartridge {
         }
     }
 
-    /// Advance the MBC3 real-time clock by `t_cycles` T-cycles (dots) of
-    /// wall-clock time (4_194_304 per second; in CGB double speed mode pass
-    /// dots, not CPU cycles, so wall time stays correct). Deterministic: the
-    /// RTC never reads the host clock. No-op for carts without an RTC.
-    pub fn tick_rtc(&mut self, t_cycles: u32) {
-        if let Mapper::Mbc3 { rtc: Some(rtc), .. } = &mut self.mapper {
-            rtc.tick_cycles(t_cycles);
+    /// Advance the cartridge's wall-time devices by `t_cycles` T-cycles
+    /// (dots) of wall-clock time (4_194_304 per second; in CGB double speed
+    /// mode pass dots, not CPU cycles, so wall time stays correct): the
+    /// MBC3 real-time clock and the MBC6 flash's embedded-operation busy
+    /// timer. Deterministic — never reads the host clock. No-op for carts
+    /// with neither device.
+    pub fn tick_time(&mut self, t_cycles: u32) {
+        match &mut self.mapper {
+            Mapper::Mbc3 { rtc: Some(rtc), .. } => rtc.tick_cycles(t_cycles),
+            Mapper::Mbc6 { flash, .. } => {
+                flash.busy = flash.busy.saturating_sub(t_cycles);
+            }
+            _ => {}
         }
     }
 

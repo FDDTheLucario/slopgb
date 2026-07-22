@@ -184,7 +184,7 @@ impl Ppu {
         let wxm = self.render.wx_match_dot;
         let abd = self.render.win_predraw_abort_dot;
         // Extend once the clear lands within 3 dots of the WX match (the
-        // first tile has shipped) — 4 on the eager cc+0 read frame, which records
+        // first tile has shipped) — 4 on the cc+0 read frame, which records
         // `abd` one M-cycle earlier than a cc+4 read would, so the threshold is
         // 4 where a cc+4 read would use 3 (`wx11_2`
         // abd106 EXTEND vs `_1` abd102 BARE). EXCEPT a low-WX window whose
@@ -199,8 +199,8 @@ impl Ppu {
         if !self.model.is_cgb()
             && self.render.win_predraw_abort
             && wxm != 0
-            // A mid-line SCX rewrite (`scx_write_dot != 0`) is admitted on the
-            // eager clock: `late_scx_late_disable` rewrites SCX 0→4 AFTER the
+            // A mid-line SCX rewrite (`scx_write_dot != 0`) is admitted:
+            // `late_scx_late_disable` rewrites SCX 0→4 AFTER the
             // window fetched, so its fetch-time `wx_match_scx` (=4) still drives
             // the exit fine-scroll and the fetch-ship deadline.
             && self.eff.lcdc & LCDC_WIN_ENABLE == 0
@@ -210,12 +210,12 @@ impl Ppu {
             && !self.glitch_line
         {
             // The fetch-ship deadline `abd + K >= wxm` and the bare exit take a
-            // wider K and a back-dated base on the eager scx-rewrite frame: the
+            // wider K and a back-dated base on the scx-rewrite frame: the
             // fine-scroll (fscx=4) pushes the window's first-tile ship, so extend
             // needs K = 8 (measured: `late_scx_late_disable` abd 122 bare / 126
-            // extend, wxm 133), and the eager cc+0 bare exit back-dates one dot
+            // extend, wxm 133), and the cc+0 bare exit back-dates one dot
             // (253→252, the +1 read-debt) so the early-abort `_0` (read rp 512)
-            // reads mode 0. Non-scx eager keeps K=4 / base 253.
+            // reads mode 0. Non-scx keeps K=4 / base 253.
             let eager_scx = self.render.scx_write_dot != 0;
             let ek = if eager_scx { 8 } else { 4 };
             let extend = i32::from(abd) + ek >= i32::from(wxm) && !scx_kills_early;
@@ -312,7 +312,7 @@ impl Ppu {
         // at wx_match−1 clears the DMG deadline but misses the CGB one):
         // FFto2_ly2 `_2` latch 98 ≤ 99 (extend) /
         // `_3` latch 102 > 99 (bare), wx0f `_2` 106 ≤ 107 / `_3` 110 > 107.
-        // The eager DMG FIRST-window-line (`wy2 == ly`) trigger is admitted even
+        // The DMG FIRST-window-line (`wy2 == ly`) trigger is admitted even
         // when slopgb's render DID activate (`win_active`): arm D1 excludes the
         // trigger line (mode 3 extends later than the steady 259 law) and native
         // mode has already flipped, so the late-WY-triggered first line falls to
@@ -329,7 +329,7 @@ impl Ppu {
         {
             fold(&mut exit, 2 * (263 + scx7 + ds1));
         }
-        // Arm D-wx0 — the eager DMG low-WX co-incident-trigger BARE exit
+        // Arm D-wx0 — the DMG low-WX co-incident-trigger BARE exit
         // (the Arm-2 complement). On a low-WX window's OWN trigger line
         // the WX comparator matches during the 8-dot prefill, so slopgb's
         // whole-dot render activates (`win_active`) the instant `wy2 == ly` is
@@ -368,8 +368,8 @@ impl Ppu {
         // land before the window's first tile ships (~dot 106 for the scx03
         // early setup — `_1` abort104 bare / `_2` abort108 extend, ALL
         // wx0f-12; wx-INDEPENDENT, a `wx_match+1`-relative form REFUTED). A
-        // later abort catches the first tile and EXTENDS (per-config length —
-        // the atomic render reclock's). Currently-DISABLED window only
+        // later abort catches the first tile and EXTENDS (a per-config length
+        // not modelled on the whole-dot grid). Currently-DISABLED window only
         // (excludes late_reenable); bare non-sprite non-glitch CGB lines.
         if self.model.is_cgb()
             && !self.ds
@@ -418,7 +418,7 @@ impl Ppu {
         // early aborts bare with the penalty dropped, exit `cfl257 dc2` (the
         // DS half-dot bare exit) = slopgb 254. The DS abort boundary is
         // wx-DEPENDENT: `(89 + WX) & !1` — the window's first-fetch M-cycle
-        // start on the DS 2-dot grid (three candidates built + refuted first).
+        // start on the DS 2-dot grid.
         if self.model.is_cgb()
             && self.ds
             && self.render.win_predraw_abort
@@ -457,7 +457,7 @@ impl Ppu {
         // arm-5 port. The redraw deadline carries an SCX term absent on CGB:
         // bare iff `reen + K > wx_match + SCX&7` (the fine-scroll delays the
         // redraw start, so a higher-SCX re-enable at the same dot still
-        // catches the tile); K = 4 on the eager cc+0 read frame, which records
+        // catches the tile); K = 4 on the cc+0 read frame, which records
         // `win_reenable_dot` one M-cycle earlier than the frame the CGB arm's
         // +3 above was calibrated against (`late_reenable_2` reen 94 —
         // mirroring the arm-D3 +4). `late_reenable_2` reen 94 /
@@ -526,7 +526,7 @@ impl Ppu {
             let base = if self.read_carried { 259 } else { 263 };
             fold(&mut exit, 2 * (base + scx7 + ds1));
         }
-        // Arm 8-spr — the DS WINDOW+SPRITE mode-3 exit (eager CGB). Arm 1 (the
+        // Arm 8-spr — the DS WINDOW+SPRITE mode-3 exit (CGB). Arm 1 (the
         // triggering-window length law) EXCLUDES sprite-laden DS lines
         // (`!ds || n_sprites == 0`) because its closed-form `259 + SCX&7` exit
         // cannot carry the per-line sprite penalty; a NON-window sprite DS line
@@ -536,13 +536,11 @@ impl Ppu {
         // PAST the render's flip (`10spritesPrLine_wx0..7_m3stat_ds_2`: eager
         // read dot 370 < the render's flip 371, raw mode still 3, want 0). The
         // render's OWN recorded/projected flip bakes in the exact window+sprite
-        // cost, so the EMERGENT exit `2*flip` resolves the pair on the eager DS
+        // cost, so the EMERGENT exit `2*flip` resolves the pair on the DS
         // read frame with NO closed form: `_1` reads rp 740 < 743 → mode 3 (want
         // 3); `_2` reads rp 744 ≥ 743 → mode 0 (want 0). The `+1` (over the bare
-        // arm's `−2` DS lead) is the projected-flip lead for a window+sprite line
-        // (swept unique-optimal `2*flip + 1` on the DS window+sprite set: `+0`
-        // drops 7 sibling rows, `+1`/`+2` recover `wx7` clean, `+3` loses it —
-        // the `+1`/`+2` plateau centre). Only `10spritesPrLine_wx7` has the
+        // arm's `−2` DS lead) is the projected-flip lead for a window+sprite
+        // line. Only `10spritesPrLine_wx7` has the
         // render's flip 371 MATCHING SameBoy's mode-3 end; `wx0..6` share the
         // same render flip 371 but SameBoy ends mode 3 wx-dependently earlier
         // (~321..361) — those are a RENDER-length mismatch, not a read-frame miss
@@ -655,9 +653,9 @@ impl Ppu {
                 } else {
                     self.projected_flip_dot()
                 };
-                // Back out the eager render's spurious mid-mode-3 SCX
+                // Back out the render's spurious mid-mode-3 SCX
                 // extension for the BARE-line exit verdict. A mid-mode-3 SCX
-                // rewrite (`scx_write_dot != 0`) commits `eff.scx` at the eager
+                // rewrite (`scx_write_dot != 0`) commits `eff.scx` at the
                 // cc+0 write frame — 4 dots (8hd) before its true cc+4 landing
                 // — so it reaches the render's fine-scroll hunt (`render.rs`
                 // ~dot 89) BEFORE the hunt latches and the render over-discards
@@ -680,10 +678,9 @@ impl Ppu {
                 // the two class variables; ISR carry drops out (the
                 // carried m2int and polled ly44 legs share constants).
                 // Scoped to mid-frame-anchored dances post-LCD-on-leave
-                // (`stop_anchor_midframe`): a blanket arm's 14
-                // SameBoy-pass drops were the VBlank/boot-anchored classes
-                // (base/frame1/nop m2int + offset2/3 counts) this anchor
-                // excludes; the emergent arm still serves those. In scope
+                // (`stop_anchor_midframe`): the VBlank/boot-anchored classes
+                // (base/frame1/nop m2int + offset2/3 counts) fall outside this
+                // anchor and are served by the emergent arm. In scope
                 // the law REPLACES the emergent exit for BOTH directions —
                 // the emergent `2*flip + 2` m==0 hold over-holds the
                 // post-switch frame by up to 6 rp
@@ -707,14 +704,14 @@ impl Ppu {
                     // CPU-visible mode-0 boundary sits at rphd `2*flip`, not
                     // `2*flip + 2`. sprite0's polled measurement read is the one
                     // ROM that reads at exactly rphd `2*flip` (its whole point is
-                    // to bracket the flip): `ppu_sprite0_scx{2,6}_b` eager reads
+                    // to bracket the flip): `ppu_sprite0_scx{2,6}_b` reads
                     // rphd 512/520 = `2*flip` and want mode 0, but `+2` (514/522)
                     // forces mode 3. The carried m2int/scx weld-partners
                     // (`late_scx4_1`, `m2int_m3stat_1`) read the SAME rphd 512 yet
                     // carry `= 4` — their `- carry` already lands exit `2*flip - 2`
-                    // — and want mode 3, so the split is `read_carried`, NOT the
-                    // uniform read-frame bias swept (`ARM8BIAS`, which shifts
-                    // both and shuffles). Drop the `+2` only for the eager-DMG
+                    // — and want mode 3, so the split is `read_carried`, NOT a
+                    // uniform read-frame bias (which would shift both and
+                    // shuffle). Drop the `+2` only for the DMG
                     // polled read; every other case still keeps `+2`, carried
                     // reads untouched (`- carry` owns them).
                     let over = if !self.model.is_cgb() && !self.read_carried {
@@ -760,10 +757,10 @@ impl Ppu {
             // wxmatch 97). The corrected DS line-153 lyfc table moves
             // the LYC=153 wake — and with it every ISR-timed WY write in this
             // family — 2 dots earlier (`_1` 99 / `_2` 101), so the DS slack
-            // re-derives to the SS value (+2); the same shift is what fixes
-            // the `late_wy_ds` blocker trio outright.
+            // re-derives to the SS value (+2); the same shift moves the
+            // `late_wy_ds` wake 2 dots earlier.
             //
-            // SS DMG eager: the same LYC=153-wake re-host. The dot-4
+            // SS DMG: the LYC=153-wake shift. The dot-4
             // line-153 LYC STAT emission decouple (`reclock.rs`) fires the
             // shared LYC=153 ISR one M-cycle (4 dots SS) EARLIER than the stale
             // dot-6/dot-8 recognition the `+2` slack was tuned against, so every

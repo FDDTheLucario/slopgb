@@ -214,7 +214,9 @@ impl App {
             Action::ToggleSound => {
                 self.muted = !self.muted;
                 if !self.muted {
-                    self.try_open_audio();
+                    if let Err(e) = self.try_open_audio() {
+                        self.show_error("Enable sound failed", e);
+                    }
                 }
                 self.resync_pacing();
             }

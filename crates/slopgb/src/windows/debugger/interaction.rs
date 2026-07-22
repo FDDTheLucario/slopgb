@@ -41,7 +41,7 @@ pub fn on_left_click(
     }
     // Otherwise select the clicked pane line (sets the cursor).
     if let ClickTarget::Disasm(a) | ClickTarget::Memory(a) | ClickTarget::Stack(a) =
-        target_at(read, area, st, regs.pc, regs.sp, px, py, bank_of)
+        target_at(read, area, st, regs.sp, px, py, bank_of)
     {
         st.cursor = Some(a);
     }
@@ -53,12 +53,10 @@ pub fn on_left_click(
 /// the click isn't on a disasm line (the paired single-click already moved the
 /// cursor). Pure over `read`, so it tests headless.
 #[must_use]
-#[allow(clippy::too_many_arguments)]
 pub fn on_double_click(
     read: impl Fn(u16) -> u8,
     area: Rect,
     st: &DebuggerState,
-    pc: u16,
     sp: u16,
     px: i32,
     py: i32,
@@ -67,7 +65,7 @@ pub fn on_double_click(
     if st.menu.is_some() {
         return None;
     }
-    match target_at(read, area, st, pc, sp, px, py, bank_of) {
+    match target_at(read, area, st, sp, px, py, bank_of) {
         ClickTarget::Disasm(a) => Some(MenuOutcome::Act(DebugAction::ToggleBreakpoint(
             a,
             st.disasm_bp_bank(a),
@@ -134,12 +132,10 @@ fn apply_choice(
 
 /// Handle a right-click: open the clicked pane's context menu at the cursor (and
 /// select that line), or dismiss an already-open menu. Pure over `read`.
-#[allow(clippy::too_many_arguments)]
 pub fn on_right_click(
     read: impl Fn(u16) -> u8,
     area: Rect,
     st: &mut DebuggerState,
-    pc: u16,
     sp: u16,
     px: i32,
     py: i32,
@@ -149,7 +145,7 @@ pub fn on_right_click(
         st.menu = None;
         return;
     }
-    let target = target_at(read, area, st, pc, sp, px, py, bank_of);
+    let target = target_at(read, area, st, sp, px, py, bank_of);
     if let ClickTarget::Disasm(a) | ClickTarget::Memory(a) | ClickTarget::Stack(a) = target {
         st.cursor = Some(a);
     }

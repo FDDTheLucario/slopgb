@@ -8,8 +8,7 @@ use std::time::{Duration, Instant};
 use slopgb_core::{CYCLES_PER_FRAME, GameBoy};
 
 use crate::pacing::{
-    MAX_FRAMES_PER_WAKE, advance_grid, frame_interval, slewed_interval, turbo_max_frames,
-    wake_plan,
+    MAX_FRAMES_PER_WAKE, advance_grid, frame_interval, slewed_interval, turbo_max_frames, wake_plan,
 };
 use crate::{App, FRAME_DURATION, ui};
 

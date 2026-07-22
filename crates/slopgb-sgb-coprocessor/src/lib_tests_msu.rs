@@ -49,7 +49,10 @@ fn msu1_track_plays_through_the_2000_bus_routing() {
     let _ = fs::create_dir_all(&dir);
     write_test_pcm(&dir.join("track_1.pcm"), 44_100);
     cop.set_msu_pack(&dir);
-    assert!(cop.msu_present, "a pack with a .pcm advertises the S-MSU1 chip");
+    assert!(
+        cop.msu_present,
+        "a pack with a .pcm advertises the S-MSU1 chip"
+    );
 
     // The resident handler selects track 1 (writing $2005 commits the 16-bit
     // index) and sets MSU_CONTROL play (bit 0).

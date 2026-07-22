@@ -1,13 +1,12 @@
-//! Phase-0 golden safety net for the PPU cc-granular reclock.
+//! Golden safety net for CPU-visible PPU timing.
 //!
 //! A per-ROM frame + audio FINGERPRINT of the whole collection under one fixed
-//! 16-LCD-frame protocol (gambatte's run length). The reclock will change
-//! CPU-visible PPU timing; the existing baselines catch pass/fail flips, but a
-//! reclock can also drift *rendered pixels* without flipping any suite's
-//! verdict. This fingerprint is the net for that silent drift: every (ROM,
-//! model) gets a frame hash + audio verdict, captured at HEAD, then diffed
-//! after each reclock phase — an unexpected change blocks immediately, an
-//! expected one is reviewed against the targeted cluster.
+//! 16-LCD-frame protocol (gambatte's run length). The existing baselines catch
+//! pass/fail flips, but a timing change can also drift *rendered pixels* without
+//! flipping any suite's verdict. This fingerprint is the net for that silent
+//! drift: every (ROM, model) gets a frame hash + audio verdict — an unexpected
+//! change blocks immediately, an expected one is reviewed against the targeted
+//! cluster.
 //!
 //! std-only (the core forbids deps): a 64-bit FNV-1a over the XRGB frame bytes.
 //!
@@ -41,10 +40,9 @@ fn fnv1a(mut h: u64, bytes: &[u8]) -> u64 {
 
 /// `(frame_hash, audio_hash)`: a 64-bit FNV-1a over frame 16's XRGB bytes and a
 /// second FNV-1a over frame 16's whole raw stereo sample stream (length +
-/// every sample's bits). The stream hash catches any waveform drift — the old
-/// 0/1/2 "silent/sound/none" sentinel missed every change that kept a frame
-/// merely non-silent. The sentinel `(0, 0)` marks a ROM the model rejected or
-/// that panicked — a stable marker so drift in *that* is caught too.
+/// every sample's bits). The stream hash catches any waveform drift. The
+/// sentinel `(0, 0)` marks a ROM the model rejected or that panicked — a stable
+/// marker so drift in *that* is caught too.
 fn fingerprint(rom: &[u8], model: Model) -> (u64, u64) {
     let rom = rom.to_vec();
     let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
@@ -129,7 +127,7 @@ fn capture(root: &Path) -> Vec<String> {
     lines
 }
 
-/// Phase-0 net: capture or diff the collection fingerprint. See the module doc.
+/// Capture or diff the collection fingerprint. See the module doc.
 #[test]
 fn golden_fingerprint() {
     let mode = std::env::var("SLOPGB_GOLDEN").ok();

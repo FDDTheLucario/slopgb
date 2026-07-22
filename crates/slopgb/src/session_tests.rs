@@ -267,6 +267,38 @@ fn ram_init_runs_before_sav_load_no_data_loss() {
 }
 
 #[test]
+fn wrong_size_sav_is_rejected_and_raises_a_load_warning() {
+    // A `.sav` that doesn't fit this cart is discarded (the machine boots fresh),
+    // and — because the next save silently overwrites that file — `load` raises a
+    // one-shot `load_warning` the interactive loader surfaces in a modal. Without
+    // it the user's real save vanishes with only an unseen console line.
+    let dir = scratch("wrong-size-sav");
+    let path = dir.join("game.gb");
+    fs::write(&path, battery_rom()).unwrap(); // expects an 8 KiB (0x2000) .sav
+    fs::write(path.with_extension("sav"), vec![0x55u8; 100]).unwrap(); // wrong size
+
+    let s = Session::load(&path, ModelChoice::Dmg, &BootSpec::NONE, None).expect("load");
+    let warn = s
+        .load_warning
+        .expect("a rejected .sav must raise a warning");
+    assert!(
+        warn.contains("overwritten"),
+        "warning names the risk: {warn}"
+    );
+    assert_ne!(
+        s.gb.save_data().unwrap(),
+        vec![0x55u8; 100],
+        "the wrong-size save was not applied to the machine"
+    );
+
+    // A present, correctly-sized .sav loads clean with no warning.
+    fs::write(path.with_extension("sav"), vec![0x55u8; 0x2000]).unwrap();
+    let ok = Session::load(&path, ModelChoice::Dmg, &BootSpec::NONE, None).expect("load");
+    assert!(ok.load_warning.is_none(), "a valid .sav raises no warning");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn flush_save_writes_once_then_dedups_until_ram_changes() {
     let dir = scratch("flush-dedup");
     let path = dir.join("game.gb");

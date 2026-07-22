@@ -187,22 +187,18 @@ fn gbmicrotest_dmg_matrix() {
     );
 }
 
-/// The eager-clock DMG sprite0 mode-3→0 boundary read
-/// (`ppu_sprite0_scx{2,6}_b`). Each `_b` ROM reads STAT with its
-/// measurement `ldh a,(FF41)` landing exactly on the bare-line mode-0 flip and
-/// wants mode 0 (`$80`); its `_a` sibling reads one M-cycle earlier and wants
-/// mode 3 (`$83`) — the pair brackets `flip_dot`. On the eager clock the CPU
-/// dispatch moves the read 4 dots (one M-cycle) early but the `+8hd` read-debt
-/// keeps its `read_pos_hd` at `2*flip`; production reads mode 0 AT `flip_dot`
-/// (the flip is inclusive), so the true CPU-visible boundary is rphd `2*flip`.
-/// The bare-exit arm's emergent `2*flip + 2` over-held by 2hd, forcing mode 3
-/// (`$83`, wrong). The `- carry` term already lands the CARRIED weld-partners
-/// (`gambatte late_scx4_1`/`m2int_m3stat_1`, which read the same rphd 512 wanting
-/// mode 3) at `2*flip - 2`, so dropping the `+2` for the POLLED read
-/// (`!read_carried`) is the exact discriminator — NOT the uniform read-frame
-/// bias a prior sweep (`ARM8BIAS`) mistook for a weld. `eager` +
-/// `!is_cgb` + polled scoped → production + tier2 byte-identical (this pin fails
-/// with the `+2` restored). SameBoy passes these on real DMG.
+/// DMG sprite0 mode-3→0 boundary read (`ppu_sprite0_scx{2,6}_b`). Each `_b`
+/// ROM reads STAT with its measurement `ldh a,(FF41)` landing exactly on the
+/// bare-line mode-0 flip and wants mode 0 (`$80`); its `_a` sibling reads one
+/// M-cycle earlier and wants mode 3 (`$83`) — the pair brackets `flip_dot`.
+/// The mode-0 flip is inclusive (mode 0 is visible AT `flip_dot`), so the
+/// CPU-visible boundary sits at `read_pos_hd` == `2*flip`. The bare-exit arm's
+/// emergent `2*flip + 2` over-holds by 2hd, forcing mode 3 (`$83`, wrong); the
+/// `- carry` term lands the carried partners (`gambatte late_scx4_1`/
+/// `m2int_m3stat_1`, same `read_pos_hd` 512 wanting mode 3) at `2*flip - 2`, so
+/// dropping the `+2` for the POLLED read (`!read_carried`) is the exact
+/// discriminator. DMG-scoped (`!is_cgb`) + polled; fails with the `+2`
+/// restored. SameBoy passes these on real DMG.
 #[test]
 fn eager_dmg_sprite0_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -215,7 +211,7 @@ fn eager_dmg_sprite0_passes() {
     for name in ["ppu_sprite0_scx2_b", "ppu_sprite0_scx6_b"] {
         let rel = format!("gbmicrotest/{name}.gb");
         let rom = std::fs::read(root.join(&rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        // Production eager clock. Same fixed-point protocol as `run_case`.
+        // Same fixed-point protocol as `run_case`.
         let mut gb =
             GameBoy::new(Model::Dmg, rom).unwrap_or_else(|e| panic!("cartridge rejected: {e:?}"));
         let deadline = gb.cycles().saturating_add(DEADLINE_TCYCLES);

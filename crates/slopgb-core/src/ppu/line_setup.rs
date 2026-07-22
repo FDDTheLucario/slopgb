@@ -6,7 +6,7 @@ use super::*;
 
 impl Ppu {
     pub(super) fn start_line(&mut self) {
-        // Reset the eager line-153 FF45-write discriminator each line.
+        // Reset the line-153 FF45-write discriminator each line.
         self.l153_lyc_write_dot = u16::MAX;
         match self.line {
             0 => {

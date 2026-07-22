@@ -46,9 +46,7 @@ impl Writer {
     }
     /// Write an `Option<T>` as a presence byte, followed (if `Some`) by the
     /// payload written by `write_payload` — the one canonical shape for every
-    /// optional staged-event/scratch field across the save-state format
-    /// (replaces the several near-identical `write_opt*` helpers that used to
-    /// be hand-duplicated per payload shape in each module).
+    /// optional staged-event/scratch field across the save-state format.
     pub fn write_opt<T>(&mut self, o: &Option<T>, write_payload: impl FnOnce(&mut Self, &T)) {
         match o {
             Some(v) => {

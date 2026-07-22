@@ -16,6 +16,7 @@ use slopgb_plugin_api::{
 use wasmi::{Caller, Engine, Extern, Linker, Memory, Module, Store, TypedFunc};
 
 use crate::LoadError;
+use crate::host::{CALL_FUEL, metered_engine};
 
 /// The live machine and its debugger surface, supplied by whoever hosts the tool
 /// plugins (the frontend). The scalar reads come off the [`GameBoy`] directly;
@@ -78,7 +79,7 @@ impl LoadedTool {
     /// Compile a tool module, enforce the ABI + capability gate, and read the
     /// metadata of every tool it exposes.
     pub fn load(bytes: &[u8]) -> Result<Self, LoadError> {
-        let engine = Engine::default();
+        let engine = metered_engine();
         let module = Module::new(&engine, bytes)?;
         let empty = ToolStore {
             ctx: None,
@@ -87,6 +88,8 @@ impl LoadedTool {
             mutate: false,
         };
         let mut store = Store::new(&engine, empty);
+        // Metered engine: fuel the start fn + the load-time metadata probes.
+        store.set_fuel(CALL_FUEL)?;
         let linker = build_tool_linker(&engine);
         let instance = linker.instantiate_and_start(&mut store, &module)?;
 
@@ -115,7 +118,7 @@ impl LoadedTool {
 
         let count = call0(&mut store, "slopgb_tool_count")?.max(0);
         let meta_fn = instance
-            .get_typed_func::<(i32, i32), ()>(&mut store, "slopgb_tool_meta")
+            .get_typed_func::<(i32, i32), ()>(&store, "slopgb_tool_meta")
             .map_err(|_| LoadError::MissingExport("slopgb_tool_meta"))?;
         let mut tools = Vec::new();
         for idx in 0..count {
@@ -173,6 +176,9 @@ impl LoadedTool {
             mutate: self.mutate,
         };
         let mut store = Store::new(&self.engine, store_data);
+        // Metered engine: bound this call so a runaway tool traps instead of
+        // hanging the caller (the frontend / MCP request thread).
+        store.set_fuel(CALL_FUEL)?;
         let linker = build_tool_linker(&self.engine);
         let instance = linker.instantiate_and_start(&mut store, &self.module)?;
 
@@ -180,7 +186,7 @@ impl LoadedTool {
             .get_memory(&store, "memory")
             .ok_or(LoadError::MissingExport("memory"))?;
         let arg_alloc = instance
-            .get_typed_func::<i32, i32>(&mut store, "slopgb_arg_alloc")
+            .get_typed_func::<i32, i32>(&store, "slopgb_arg_alloc")
             .map_err(|_| LoadError::MissingExport("slopgb_arg_alloc"))?;
         let call_tool: TypedFunc<(i32, i32), i32> = instance
             .get_typed_func(&store, "slopgb_call_tool")
@@ -194,7 +200,7 @@ impl LoadedTool {
                 ptr as usize,
                 &args.as_bytes()[..len.max(0) as usize],
             )
-            .map_err(|e| LoadError::Wasm(wasmtime::Error::msg(e.to_string())))?;
+            .map_err(|e| LoadError::Wasm(wasmi::Error::new(e.to_string())))?;
         call_tool.call(&mut store, (idx as i32, len))?;
 
         Ok(match store.data_mut().emitted.take() {
@@ -230,6 +236,9 @@ fn read_guest_str(caller: &Caller<'_, ToolStore>, ptr: i32, len: i32) -> String 
     let (Ok(off), Ok(n)) = (usize::try_from(ptr), usize::try_from(len)) else {
         return String::new();
     };
+    // Clamp before allocating: never allocate more than the guest's memory holds
+    // (an over-long read fails the bounds check below anyway).
+    let n = n.min(mem.data_size(caller));
     let mut buf = vec![0u8; n];
     if mem.read(caller, off, &mut buf).is_ok() {
         String::from_utf8_lossy(&buf).into_owned()
@@ -304,6 +313,9 @@ fn build_tool_linker<'a>(engine: &Engine) -> Linker<ToolStore<'a>> {
                 let (Ok(off), Ok(n)) = (usize::try_from(ptr), usize::try_from(len)) else {
                     return;
                 };
+                // Clamp before allocating (see `read_guest_str`): bound the alloc
+                // by actual guest memory size, not the guest-supplied `len`.
+                let n = n.min(mem.data_size(&caller));
                 let mut buf = vec![0u8; n];
                 if mem.read(&caller, off, &mut buf).is_ok() {
                     caller.data_mut().emitted = Some((kind, buf));

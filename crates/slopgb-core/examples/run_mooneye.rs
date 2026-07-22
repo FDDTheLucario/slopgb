@@ -64,9 +64,8 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    // gbmicrotest verdict mode (port-validation tooling): run ~0.7 emulated s
-    // then print $FF80/$FF81/$FF82 ($FF82==0x01 is PASS). Lets the Stage-B
-    // flag-on (SLOPGB_TIER2) reclock be measured against gbmicrotest's cc+4
+    // gbmicrotest verdict mode: run ~0.7 emulated s then print
+    // $FF80/$FF81/$FF82 ($FF82==0x01 is PASS). Checks gbmicrotest's cc+4
     // counter ROMs (e.g. int_hblank_halt) without the full gbtr matrix.
     if std::env::var("SLOPGB_GBMICRO").is_ok() {
         let deadline = gb.cycles().saturating_add(3_000_000);

@@ -479,23 +479,64 @@ code, so SGB music becomes upstreamable — only the *samples* need the user's R
   ONLY — never the ROM or any disassembly. The (dirty) coordinator produced those
   behavioral specs from ROM disassembly and relayed only black-box test results.
   Keep this wall if resuming: never feed the ROM/disassembly to the engine author.
-- **Works:** plays Animaniacs' intro + title songs, correct pattern sequence
-  (song-list loop controls), tempo `(500*tempo)/256`, all 8 channels, correct
-  pitch on nearly everything, `$00`-terminated tracks / frame advance, fade→stop,
-  velocity + quantization + instrument tables, comm-port play/stop protocol.
-- **Left to do (polish, behind the flag):**
-  1. On the title song (song.2) the lead (ch0, instrument `$2C`) plays ~1 octave
-     low + quiet. Puzzling: `$2C`'s base pitch (`$08F0`) is ~2× the intro's `$30`
-     (`$04F0`), so it should play *higher* — needs a per-voice `VxPITCH` readout
-     (DSP registers, not yet exposed to the host) to tell whether the engine
-     mis-applies the base or the lead is a different channel.
-  2. Fade cuts to silence instead of ramping MVOL down (regressed).
-  3. Clipping (`DSP peak` maxes) with many simultaneous voices — wants a mix scale.
+- **Works:** plays Animaniacs' intro + title + level songs, correct pattern
+  sequence (song-list loop controls), tempo `(500*tempo)/256`, all 8 channels,
+  correct pitch, `$00`-terminated tracks, velocity + quantization + instrument
+  tables, comm-port play/stop protocol. Verified against the ROM engine by A/B via
+  the MCP `dump-spc` tool (decode the `.spc`'s DSP voice registers per engine).
+- **Fixed in this polish pass** (each a spec error I corrected, then a walled agent
+  re-implemented from the spec — clean-room wall kept):
+  1. **VCMD map**: `$E1`=pan, `$EA`=per-channel transpose, `$ED`=channel volume
+     (were mis-assigned; the title lead's `$EA +12` was dropped → octave-low, and
+     the transpose value corrupted channel volume → quiet).
+  2. **Octave**: `OCT_REF` 6 → 5 (everything was exactly one octave low).
+  3. **Song-list loop freeze**: a `movw ya, wptr` left `Y`=hi(ptr) so the
+     loop-target read derailed the cursor to garbage (SPC700 flag/reg-carryover).
+  4. **SFX faded the music**: music is score-code-only (port0); the SFX-attributes
+     byte (port3) is not a fade trigger; score `$00` = no music change.
+  5. **Frame model** (the tricky one): the *conductor* model — a track's `$00`
+     stops only that channel, the frame advances when **channel 0** ends, and a
+     null (`0`) frame track pointer leaves a channel running so a long melody spans
+     frames. (Earlier wrong guesses: "wait for all tracks" dropped the
+     accompaniment; "loop every short track" made a track repeat itself.)
+  6. **Play/transfer race** (silent start): the play score can reach the engine
+     before the `SOU_TRN` copy of the song into `$2B00` lands, so `start_song` read
+     an all-zero pointer, walked zero-page into a `$0000` end-word, and latched
+     silence — and edge-triggered `poll_comm` never retried. Fix: reject a `0`
+     song-pointer high byte as not-ready and re-poll until the data lands.
+  7. **Master volume** (was near-mute): `$E5 $F8` was written straight to DSP MVOL,
+     which is **signed** (`$F8` = −8 ≈ mute). Fix: `$E5` is a *software* per-voice
+     scalar (`songvol`); the DSP main volume is the SGB hardware master. `0` only at
+     boot, it slews up to `$60` on the base-tick timer (boot-only fade-in — a song
+     playing during that ramp catches it; one starting after starts at full). Once
+     it has reached `$60` (`booted`), a play command **snaps** to `$60` (no per-song
+     fade-in). Software `$E5` per-voice master + boot/`$80` DSP-master fades.
+  8. **Fade-out** (`port0` `$80`–`$FF`): NOT an instant stop — slew DSP MVOL down to
+     `0` while the music keeps playing (reference keeps sequencing new notes as it
+     fades), then idle. Trigger was `port0` bit 7, confirmed by A/B (`$80` → MVOL
+     `$60`→`0`). It must be quick (`FADE_OUT_RATE`, ~0.8 s): the host reloads `$2B00`
+     with the next song mid-transition, so the fade has to stop the old song before
+     that reload or the sequencer reads the new bytes through stale cursors → a
+     stuck garbage note. (Rate is a tight by-ear margin: too slow ⇒ garbage.)
+  9. **Per-voice volume formula** (was ~1.6× too loud, quiet drums audible, loud
+     songs clipping): **disassembled the ROM engine's volume routine** (from an ARAM
+     dump, coordinator-side) and RE'd the exact chain — numerically reproduces every
+     voice's `VOLL`/`VOLR`. Per side: `t = pan_gain`;
+     `t = (t*songvol)>>8` (`$E5`, ONCE); `t = (t*VELTAB[vel])>>8`; `t =
+     (t*chvol)>>8`; **`t = (t*t)>>8` (final square)**. The square is the real
+     attenuation — earlier black-box fits (a bogus "apply songvol twice") only held
+     when velocity/chvol matched. `CHVOL_DEFAULT` → `$FF` (reference inits every
+     channel to `$FF`; `$ED` overrides). `VELTAB`/`QUANTTAB` verified identical to
+     the reference (`$4C18`/`$4C10`). Off-center pan curve is a further refinement.
+- **Left to do (behind the flag):** echo/reverb — `$F5`/`$F7` operands are consumed
+  but the DSP echo path is off; the ROM engine runs EON=`$07`, EVOL=`$C0`.
 - **Diagnostics.** The `coprocessor` MCP tool's status shows `ENG(clean-room)
   songlp/tempo/tickacc/state/activemask/tdurrem` when the flag is set. A/B against
-  ground truth by toggling the env var (unset = ROM engine).
+  ground truth by toggling the env var (unset = ROM engine); `dump-spc` (UI or MCP)
+  writes a `.spc` whose DSP register file gives per-voice pitch/vol/SRCN.
 - **Tunables** (top of `engine.asm`): `REF_NOTE`, `OCT_REF`, `PITCH_OUT_SHIFT`
-  (pitch); `TIMER_DIV`, `TEMPO_DEFAULT` (tempo); `MVOL_DEFAULT`, `CHVOL_DEFAULT`.
+  (pitch); `TIMER_DIV`, `TEMPO_DEFAULT` (tempo); `CHVOL_DEFAULT` (per-voice level),
+  `SGB_MASTER` (`$60` DSP-master target), `FADE_IN_RATE` (base ticks per master step).
 - **Bring-up bugs fixed** (mostly SPC700 flag-clobber + my spec errors): SBN block
   header is `[len,dest]` not `[dest,len]`; per-instrument pitch base is big-endian;
   `$F7`/`$F5` take 3 operands; two `MOV`/`INCW`-before-branch flag clobbers (froze
