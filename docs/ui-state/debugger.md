@@ -7,7 +7,7 @@ bgb functional clone. Keys are **focus-dependent** like bgb.
 | Window | Keys |
 |---|---|
 | **game** | F2/F3/F4 open the debugger / VRAM viewer / I/O map (also `SLOPGB_OPEN_TOOLS=debugger,vram,iomap`) |
-| **debugger** | F2 toggle breakpoint · F3 step over · F4 run to cursor · F6 jump to cursor · F7 trace (step) · F8 step out · Ctrl+G go to · arrows/PageUp-Down scroll the memory pane · **`[` / `]` step the memory pane's browsed bank** · Ctrl+H/Ctrl+J/Ctrl+K open the breakpoint/watchpoint/freeze manager · F5/F10 open VRAM/iomap |
+| **debugger** | F2 toggle breakpoint · F3 step over · F4 run to cursor · F6 jump to cursor · F7 trace (step) · F8 step out · **Ctrl+Backspace reverse step · Shift+Backspace run back to breakpoint** · Ctrl+G go to · arrows/PageUp-Down scroll the memory pane · **`[` / `]` step the memory pane's browsed bank** · Ctrl+H/Ctrl+J/Ctrl+K open the breakpoint/watchpoint/freeze manager · F5/F10 open VRAM/iomap |
 | **memory viewer** (standalone) | arrows move the byte cursor (a byte / a row), PageUp/Down a window (auto-scroll) · **hex digits type over the cursor byte in place** (2nd nibble commits via `debug_write_banked`) · Esc cancels a pending edit · Ctrl+G go to (`BB:AAAA` bank-prefixed OK) · **`[` / `]` step the browsed bank** |
 | **any** | F9 break/resume (focus-independent so a frozen machine is always resumable) |
 
@@ -138,6 +138,37 @@ middle row (walks back `visible/2` instructions via `prev_disasm_addr`). So you 
 scroll away (which pins), and the next F7 snaps the traced instruction back to
 center. A breakpoint toggle (F2) does **not** recenter — it acts on the cursor
 without moving the view.
+
+## Reverse execution (step back / run back to breakpoint)
+
+Two reverse controls in the debugger (Run menu: "Reverse step" Ctrl+Backspace,
+"Run back to breakpoint" Shift+Backspace — non-bgb keys, so the greyed bgb reverse
+stubs above them stay free) and the frame-exact player rewind (held Backspace) all
+run on one engine in `session/reverse.rs`, over the existing save-state ring
+(`Session::rewind`). The ring's frame-boundary snapshots are **replay anchors**:
+each is keyed by its emulated cycle, so the engine loads the nearest checkpoint
+before the target and `step()`s forward deterministically to the exact
+instruction. The ring fills while playing forward whenever the debugger is open
+(not only when the player "Rewind enabled" toggle is on), so reverse always has
+history. A landing truncates checkpoints newer than it (the rewound-past future)
+and re-anchors capture.
+
+- **Reverse step** (`reverse_step`) — the instruction boundary just before now.
+- **Run back to breakpoint** (`reverse_to_breakpoint`) — replays checkpoint
+  windows newest-first with the live bank-aware predicate
+  (`GameBoy::run_frame_until_breakpoint`), landing on the most recent breakpoint /
+  watch / profiler / exception halt strictly before now.
+- **Player rewind** (`reverse_frame`) — the previous *frame* boundary, one
+  displayed frame per held-Backspace tick (frame-exact, not the old 2-frame pop).
+
+Both debugger commands stay broken and re-center the disasm; they no-op (no view
+change) past the oldest checkpoint. Known ceilings: reverse depth = the oldest
+retained checkpoint (~20 s at the ring cap); `reverse_to_breakpoint` is O(history)
+worst case (a halt far back re-replays the tail — fine interactively, since a
+per-frame breakpoint resolves in the newest window); and replay drives the machine
+via `step()`, so a **link-cable / SGB-coprocessor** peer not advanced identically
+to the normal loop can diverge — reverse is reliable for a self-contained DMG/CGB
+machine.
 
 ## .sym symbols
 

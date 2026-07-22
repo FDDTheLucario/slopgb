@@ -182,6 +182,15 @@ fn run_menu(cursor: u16) -> Vec<(MenuItem, MenuChoice)> {
         dis_sc("Step out reverse", "Shift+F8"),
         disabled("jump (SP); SP=SP+2"),
         dis_sc("Rewind cycles...", "Ctrl+E"),
+        // slopgb reverse execution (not in bgb's captured menu): instruction-
+        // accurate step-back / run-back-to-breakpoint over the save-state ring,
+        // on non-bgb keys so the greyed bgb reverse stubs above stay free.
+        cmd("Reverse step", "Ctrl+Backspace", Action::DbgReverseStep),
+        cmd(
+            "Run back to breakpoint",
+            "Shift+Backspace",
+            Action::DbgRunBackToBreakpoint,
+        ),
     ]
 }
 

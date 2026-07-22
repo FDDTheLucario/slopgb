@@ -52,10 +52,13 @@ pub(crate) struct Session {
     /// resets to `None`; it deliberately **survives a reset** so a Quick Load can
     /// undo the reset (bgb's behavior — the snapshot is the same ROM).
     quick_state: Option<Box<GameBoy>>,
-    /// System → "Rewind enabled": a bounded ring of recent save states (oldest
-    /// dropped when full), captured every [`REWIND_INTERVAL_FRAMES`] while
-    /// playing. Empty until rewind is enabled; cleared on reset / ROM change.
-    rewind: std::collections::VecDeque<Vec<u8>>,
+    /// A bounded ring of recent save states (oldest dropped when full), each
+    /// keyed by the emulated cycle it was taken at, captured every
+    /// [`REWIND_INTERVAL_FRAMES`] while playing (System → "Rewind enabled") or
+    /// while the debugger is open. The cycle key lets the reverse engine (see
+    /// `reverse.rs`) pick the nearest checkpoint before a target without
+    /// deserializing every blob. Cleared on reset / ROM change.
+    rewind: std::collections::VecDeque<(u64, Vec<u8>)>,
     /// Total bytes across the `rewind` ring, for [`REWIND_MAX_BYTES`].
     rewind_bytes: usize,
     /// Frame count at which the next rewind snapshot is taken.
@@ -273,37 +276,25 @@ impl Session {
         true
     }
 
-    /// Capture a rewind snapshot if the interval has elapsed (System → "Rewind
-    /// enabled"; the caller invokes this only while playing with rewind on).
+    /// Capture a rewind snapshot if the interval has elapsed. The caller invokes
+    /// this only while playing forward with rewind on, or with the debugger open
+    /// (so a reverse-step / run-back-to-breakpoint has history to replay from).
+    /// Each blob is keyed by the cycle it was taken at for the reverse engine.
     pub(crate) fn capture_rewind(&mut self) {
         let frame = self.gb.frame_count();
         if frame < self.next_rewind_frame {
             return;
         }
         self.next_rewind_frame = frame + REWIND_INTERVAL_FRAMES;
+        let cycle = self.gb.cycles();
         let state = self.gb.save_state();
         self.rewind_bytes += state.len();
-        self.rewind.push_back(state);
+        self.rewind.push_back((cycle, state));
         while self.rewind.len() > REWIND_MAX_STATES || self.rewind_bytes > REWIND_MAX_BYTES {
             match self.rewind.pop_front() {
-                Some(old) => self.rewind_bytes -= old.len(),
+                Some((_, old)) => self.rewind_bytes -= old.len(),
                 None => break,
             }
-        }
-    }
-
-    /// Restore (and drop) the most recent rewind snapshot. Returns whether one
-    /// was available — `false` means the ring is empty (nothing to rewind to).
-    pub(crate) fn rewind_step(&mut self) -> bool {
-        match self.rewind.pop_back() {
-            Some(bytes) => {
-                self.rewind_bytes -= bytes.len();
-                let _ = self.gb.load_state(&bytes);
-                self.next_autosave = self.gb.cycles().saturating_add(AUTOSAVE_CYCLES);
-                self.next_rewind_frame = 0; // recapture promptly once play resumes
-                true
-            }
-            None => false,
         }
     }
 
@@ -724,6 +715,12 @@ fn build_gb(
     }
     Ok(gb)
 }
+
+// The reverse engine (instruction-accurate step-back / run-back-to-breakpoint /
+// frame-exact player rewind) as a second `impl Session`, built on the same
+// checkpoint ring + `GameBoy::{save,load}_state`/`step`.
+#[path = "reverse.rs"]
+mod reverse;
 
 #[cfg(test)]
 #[path = "session_tests.rs"]

@@ -123,6 +123,22 @@ impl App {
                 self.tools.center_debugger_on_pc(&self.session.gb);
                 self.refresh_after_step();
             }
+            // Reverse one instruction from the checkpoint ring; stay broken.
+            // No-op (no view change) once history is exhausted.
+            Action::DbgReverseStep if self.dbg.is_broken() => {
+                if self.session.reverse_step() {
+                    self.tools.center_debugger_on_pc(&self.session.gb);
+                    self.refresh_after_step();
+                }
+            }
+            // Run backward to the most recent breakpoint before now; stay broken.
+            Action::DbgRunBackToBreakpoint if self.dbg.is_broken() => {
+                let bps = self.dbg.breakpoints().bp_list();
+                if self.session.reverse_to_breakpoint(&bps) {
+                    self.tools.center_debugger_on_pc(&self.session.gb);
+                    self.refresh_after_step();
+                }
+            }
             // Debugger F2 / F4 act on the cursor (or PC when nothing is selected).
             Action::DbgToggleBreakpoint => {
                 let addr = self.debug_cursor_or_pc();

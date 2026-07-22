@@ -145,7 +145,9 @@ system-change, the three remaining Exceptions breaks (OAM-DMA-bad-access,
 16-bit-inc/dec-FE00-FEFF, SGB-transfer-start — golden-safe core detectors),
 lowercase-disassembler, the whole Sound row (soundcard / samplerate / latency /
 8-bit / high-quality), Graphics doubler (scale2x) + disable-SGB-colors (golden-
-safe PPU `sgb_mono`), System Rewind (Backspace, a savestate ring), Joypad
+safe PPU `sgb_mono`), System Rewind (Backspace, a savestate ring — frame-exact; also backs the
+debugger's reverse-step / run-back-to-breakpoint, see
+[`debugger.md`](debugger.md) § Reverse execution), Joypad
 rapid-speed (`[`/`]` auto-fire) + Audio WAV recording + Video AVI recording +
 Audio-channels recording (golden-safe per-channel APU tap) + VBA-compatible RTC
 `.sav` export + BGB-legacy `.rtc` sidecar (golden-safe read-only RTC accessors) +

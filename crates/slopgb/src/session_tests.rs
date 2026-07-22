@@ -549,25 +549,88 @@ fn atomic_write_replaces_existing_file() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-#[test]
-fn rewind_ring_captures_then_restores_and_empties() {
-    // A blank machine is fine here: save_state/load_state work regardless of the
-    // frozen front-end gate, and frame_count starts at 0 so the first capture fires.
+/// A ROM that jumps to a tight `jr -2` loop at 0x0150 — the CPU stays on a known
+/// PC while the LCD (post-boot `LCDC=0x91`) keeps ticking frames, so the machine
+/// is fully deterministic and `frame_count` advances one per `run_frame`.
+fn loop_rom() -> Vec<u8> {
+    let mut rom = vec![0u8; 0x8000];
+    rom[0x100] = 0x00; // nop
+    rom[0x101] = 0xC3; // jp 0x0150
+    rom[0x102] = 0x50;
+    rom[0x103] = 0x01;
+    rom[0x150] = 0x18; // jr -2  (tight loop, PC pinned at 0x0150)
+    rom[0x151] = 0xFE;
+    rom
+}
+
+/// A [`loop_rom`] machine run forward `frames`, capturing the rewind ring each
+/// frame (the debugger-open capture path). The deterministic loop lets the
+/// replay-based reverse engine reproduce the run exactly.
+fn played_forward(frames: u64) -> Session {
     let mut s = Session::blank(Model::Dmg);
-    s.gb.debug_write(0xC000, 0xAB); // WRAM marker
-    s.capture_rewind(); // frame 0 >= next(0) -> snapshot taken
-    s.gb.debug_write(0xC000, 0x00); // move past it
+    s.gb = GameBoy::new(Model::Dmg, loop_rom()).unwrap();
+    for _ in 0..frames {
+        s.gb.run_frame();
+        s.capture_rewind();
+    }
+    s
+}
 
-    assert!(s.rewind_step(), "a snapshot was available");
+#[test]
+fn reverse_frame_steps_back_one_frame_at_a_time() {
+    let mut s = played_forward(10);
+    let start = s.gb.frame_count();
+
+    assert!(s.reverse_frame(), "history available");
     assert_eq!(
-        s.gb.debug_read(0xC000),
-        0xAB,
-        "rewind restored the captured WRAM"
+        s.gb.frame_count(),
+        start - 1,
+        "landed exactly one frame back"
     );
-    assert!(!s.rewind_step(), "ring now empty");
+    assert!(s.reverse_frame(), "history still available");
+    assert_eq!(s.gb.frame_count(), start - 2, "and one more frame back");
+}
 
-    // Reset drops the ring so stale states can't be rewound into.
-    s.capture_rewind();
+#[test]
+fn reverse_step_lands_the_previous_instruction_boundary() {
+    let mut s = played_forward(8);
+    let before = s.gb.cycles();
+
+    assert!(s.reverse_step(), "history available");
+    let landed = s.gb.cycles();
+    assert!(landed < before, "reversed to an earlier cycle");
+    // The landing is exactly one instruction before `before`: a single forward
+    // step returns to the original boundary (deterministic replay).
+    s.gb.step();
+    assert_eq!(
+        s.gb.cycles(),
+        before,
+        "one step forward is the exact inverse"
+    );
+}
+
+#[test]
+fn reverse_to_breakpoint_lands_on_the_previous_hit() {
+    let mut s = played_forward(8);
+    let before = s.gb.cycles();
+    // The CPU loops on 0x0150 every iteration, so it recurs many times before now.
+    let bps = [(0x0150u16, None)];
+
+    assert!(s.reverse_to_breakpoint(&bps), "a prior hit exists");
+    assert!(s.gb.cycles() < before, "landed strictly before the start");
+    assert_eq!(s.gb.cpu_regs().pc, 0x0150, "landed on the breakpoint PC");
+}
+
+#[test]
+fn reverse_returns_false_past_the_oldest_checkpoint() {
+    // No forward play → no checkpoints → nothing to reverse into.
+    let mut s = Session::blank(Model::Dmg);
+    assert!(!s.reverse_step(), "no history");
+    assert!(!s.reverse_frame(), "no history");
+    assert!(!s.reverse_to_breakpoint(&[(0x0100, None)]), "no history");
+
+    // Reset drops the ring so stale states can't be reversed into.
+    let mut s = played_forward(6);
     s.reset();
-    assert!(!s.rewind_step(), "reset cleared the ring");
+    assert!(!s.reverse_frame(), "reset cleared the ring");
 }
