@@ -1,6 +1,16 @@
 # slopgb
 
+[![CI](https://github.com/FDDTheLucario/slopgb/actions/workflows/ci.yml/badge.svg)](https://github.com/FDDTheLucario/slopgb/actions/workflows/ci.yml)
+
 Cycle-accurate Game Boy / Game Boy Color emulator in Rust.
+
+| Pokémon Crystal (CGB) | Space Invaders (Super Game Boy) |
+|---|---|
+| ![Pokémon Crystal running in slopgb](docs/screenshots/crystal-cgb.png) | ![Space Invaders in SGB mode with border](docs/screenshots/space-invaders-sgb.png) |
+
+The Super Game Boy shot is the SNES side running for real: the SGB border and
+audio come from clean-room SPC700 + 65C816 + SNES-PPU chip cores compiled to
+wasm coprocessor plugins, driven by the running Game Boy.
 
 - `crates/slopgb-core` — emulator core: zero dependencies, no unsafe,
   deterministic. Emulates DMG0/DMG/MGB/SGB/SGB2/CGB/AGB models.
@@ -60,6 +70,14 @@ clipboard for the debugger's copy commands (`wl-copy` / `xclip` / `xsel`).
 test-roms/download.sh        # fetch the pinned test-ROM bundles (~once)
 cargo test --workspace       # unit tests + mooneye + game-boy-test-roms harnesses
 ```
+
+Beyond accuracy, the suite pins robustness the way a shipping app needs it:
+the untrusted parsers a user actually feeds — the ROM image, the `.sav`, the
+savestate blob, the CDL file — are fuzzed with hundreds of thousands of random
+and mutated inputs and must never panic (`tests/fuzz.rs`); every model runs
+faster than real time (`tests/realtime_perf.rs`, ~9× headless); and audio +
+joypad carry signal end to end (`tests/audio_input_smoke.rs`). All of it, plus
+`cargo fmt`/`clippy -D warnings`, runs in CI on Linux, Windows, and macOS.
 
 ## Running
 

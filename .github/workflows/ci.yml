@@ -66,3 +66,14 @@ jobs:
 
       - name: Build release binary
         run: cargo build --release -p slopgb
+
+      # Publish the built binary so a green run yields a downloadable build per OS
+      # (Actions → this run → Artifacts). Names avoid clobbering across the matrix.
+      - name: Upload release binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: slopgb-${{ runner.os }}
+          path: |
+            target/release/slopgb
+            target/release/slopgb.exe
+          if-no-files-found: ignore
