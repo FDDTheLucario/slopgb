@@ -189,6 +189,12 @@ impl Msu1 {
 }
 
 impl Coprocessor for Msu1 {
+    const MANIFEST: &'static str = concat!(
+        "id\tmsu1\n",
+        "name\tMSU-1 Streaming Audio\n",
+        "flag\tmsu1\tdir\tLoad an MSU-1 streaming-audio pack from DIR",
+    );
+
     fn new() -> Self {
         Msu1 {
             seek_buf: [0; 4],

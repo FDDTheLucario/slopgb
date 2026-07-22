@@ -25,17 +25,45 @@ pub enum ToolResult {
 /// A parsed tool invocation, produced by the transport and executed by
 /// [`dispatch`] on the UI thread.
 pub enum Call {
-    Disassemble { from: String, to: String },
-    Peek { from: String, to: String },
-    Cdl { from: String, to: String },
+    Disassemble {
+        from: String,
+        to: String,
+    },
+    Peek {
+        from: String,
+        to: String,
+    },
+    Cdl {
+        from: String,
+        to: String,
+    },
     CdlRanges,
-    Vram { view: String, scale: u32 },
-    Screencap { scale: u32 },
-    Breakpoint { addr: String },
+    Vram {
+        view: String,
+        scale: u32,
+    },
+    Screencap {
+        scale: u32,
+    },
+    Breakpoint {
+        addr: String,
+    },
     Registers,
     Coprocessor,
-    DumpSpc { mode: String },
-    Expr { expr: String },
+    DumpSpc {
+        mode: String,
+    },
+    Expr {
+        expr: String,
+    },
+    Memdump {
+        from: String,
+        to: String,
+        file: String,
+    },
+    Savestate {
+        file: String,
+    },
 }
 
 /// Execute a tool call against the live machine. `breakpoints` is the only
@@ -54,9 +82,7 @@ pub fn dispatch(
         }
         Call::Peek { from, to } => {
             let (a, b) = addr::parse_range(from, to)?;
-            Ok(ToolResult::Text(dump_rows(a, b, |bank, addr| {
-                format!("{:02X}", gb.debug_read_banked(bank, addr))
-            })))
+            Ok(ToolResult::Text(peek_range(gb, a, b)))
         }
         Call::Cdl { from, to } => {
             let (a, b) = addr::parse_range(from, to)?;
@@ -92,6 +118,24 @@ pub fn dispatch(
         Call::Coprocessor => Ok(ToolResult::Text(coprocessor_status(gb))),
         Call::DumpSpc { mode } => Ok(ToolResult::Text(dump_spc(gb, mode))),
         Call::Expr { expr } => Ok(ToolResult::Text(expr_eval(gb, expr))),
+        Call::Memdump { from, to, file } => {
+            let (a, b) = addr::parse_range(from, to)?;
+            let bytes: Vec<u8> = (a.addr..=b.addr)
+                .map(|addr| gb.debug_read_banked(a.bank, addr))
+                .collect();
+            let n = bytes.len();
+            std::fs::write(file, bytes).map_err(|e| format!("write '{file}': {e}"))?;
+            Ok(ToolResult::Text(format!(
+                "dumped {n} bytes {:02X}:{:04X}-{:04X} to {file}",
+                a.bank, a.addr, b.addr
+            )))
+        }
+        Call::Savestate { file } => {
+            let bytes = gb.save_state();
+            let n = bytes.len();
+            std::fs::write(file, bytes).map_err(|e| format!("write '{file}': {e}"))?;
+            Ok(ToolResult::Text(format!("saved {n}-byte state to {file}")))
+        }
     }
 }
 
@@ -171,6 +215,14 @@ pub(crate) fn disassemble(gb: &GameBoy, symbols: &SymbolTable, from: Addr, to: A
         a = next;
     }
     out
+}
+
+/// A hex-byte dump of `[from, to]`, 16 per row — the `peek` tool's body, reused
+/// for a finished `simulate` fork's output range.
+pub(crate) fn peek_range(gb: &GameBoy, from: Addr, to: Addr) -> String {
+    dump_rows(from, to, |bank, addr| {
+        format!("{:02X}", gb.debug_read_banked(bank, addr))
+    })
 }
 
 /// A memory/CDL dump: 16 cells per row, `BB:AAAA\t` then the space-joined cells.

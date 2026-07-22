@@ -19,12 +19,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # cpal needs the ALSA headers on Linux.
-      - name: Install ALSA development package (Linux)
+      # cpal needs the ALSA headers on Linux; gilrs needs libudev.
+      - name: Install ALSA + udev development packages (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev
+          sudo apt-get install -y libasound2-dev libudev-dev
 
       # Pinned — keep in sync with rust-toolchain.toml. Unpinned @stable let a
       # new stable release surface fresh clippy lints in CI that passed locally.
@@ -59,7 +59,21 @@ jobs:
         run: cargo test --workspace
         env:
           # Missing test ROMs must fail loudly here, never skip-to-green.
+          # (The 65816 SingleStepTests vectors are a separate ~2 GB gate —
+          # SLOPGB_REQUIRE_65816_VECTORS — deliberately not set: CI doesn't
+          # download them, so those tests skip.)
           SLOPGB_REQUIRE_ROMS: "1"
 
       - name: Build release binary
         run: cargo build --release -p slopgb
+
+      # Publish the built binary so a green run yields a downloadable build per OS
+      # (Actions → this run → Artifacts). Names avoid clobbering across the matrix.
+      - name: Upload release binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: slopgb-${{ runner.os }}
+          path: |
+            target/release/slopgb
+            target/release/slopgb.exe
+          if-no-files-found: ignore

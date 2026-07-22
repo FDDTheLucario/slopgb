@@ -98,6 +98,104 @@ impl KeyBindings {
     pub fn clear(&mut self, button: Button) {
         self.keys[index(button)] = None;
     }
+
+    /// Serialize as eight comma-separated [`key_name`]s (`-` = unbound) in
+    /// [`WIZARD_ORDER`]. Round-trips through [`Self::from_config`].
+    #[must_use]
+    pub(crate) fn to_config(self) -> String {
+        self.keys
+            .iter()
+            .map(|k| k.map_or("-", key_name))
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
+    /// Parse [`Self::to_config`]; unknown/absent names default to the standard
+    /// binding for that slot, so a truncated or hand-edited config can't wedge.
+    #[must_use]
+    pub(crate) fn from_config(s: &str) -> Self {
+        let def = Self::default();
+        let mut out = def;
+        for (i, tok) in s.split(',').enumerate().take(8) {
+            out.keys[i] = if tok == "-" {
+                None
+            } else {
+                key_from_name(tok).or(def.keys[i])
+            };
+        }
+        out
+    }
+}
+
+/// The default keyboard map as a config string (seeds `Settings::default`).
+#[must_use]
+pub(crate) fn default_map_config() -> String {
+    KeyBindings::default().to_config()
+}
+
+/// Reverse of [`key_name`], for loading a persisted map. Scans the bindable
+/// keys rather than duplicating the name table, so the two can't drift.
+///
+/// ponytail: keys `key_name` labels `"?"` (F-keys, punctuation) don't survive a
+/// save/load round-trip — they fall back to the slot default. Give them real
+/// names in `key_name` if anyone binds them.
+#[must_use]
+fn key_from_name(name: &str) -> Option<KeyCode> {
+    use KeyCode::*;
+    const BINDABLE: [KeyCode; 51] = [
+        ArrowUp,
+        ArrowDown,
+        ArrowLeft,
+        ArrowRight,
+        Enter,
+        Space,
+        Tab,
+        Backspace,
+        Escape,
+        ShiftLeft,
+        ShiftRight,
+        ControlLeft,
+        ControlRight,
+        AltLeft,
+        AltRight,
+        KeyA,
+        KeyB,
+        KeyC,
+        KeyD,
+        KeyE,
+        KeyF,
+        KeyG,
+        KeyH,
+        KeyI,
+        KeyJ,
+        KeyK,
+        KeyL,
+        KeyM,
+        KeyN,
+        KeyO,
+        KeyP,
+        KeyQ,
+        KeyR,
+        KeyS,
+        KeyT,
+        KeyU,
+        KeyV,
+        KeyW,
+        KeyX,
+        KeyY,
+        KeyZ,
+        Digit0,
+        Digit1,
+        Digit2,
+        Digit3,
+        Digit4,
+        Digit5,
+        Digit6,
+        Digit7,
+        Digit8,
+        Digit9,
+    ];
+    BINDABLE.into_iter().find(|&k| key_name(k) == name)
 }
 
 /// A short display label for a key, for the wizard's "currently mapped to:"

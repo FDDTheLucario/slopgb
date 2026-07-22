@@ -20,6 +20,7 @@ pub mod json;
 pub mod plugin_host;
 pub mod png;
 pub mod server;
+pub mod sim;
 pub mod tools;
 pub mod vram;
 
@@ -48,7 +49,16 @@ pub fn parse_port(s: &str) -> u16 {
 /// (addressed by name, with its raw MCP `arguments` object as a JSON string).
 pub enum ToolInvocation {
     Builtin(Call),
-    Plugin { name: String, args: String },
+    Plugin {
+        name: String,
+        args: String,
+    },
+    /// Start a what-if fork of the live machine (see [`sim`]).
+    Simulate(sim::SimArgs),
+    /// Poll a running/finished fork by its job id.
+    SimResult {
+        job: u64,
+    },
 }
 
 /// A tool call handed from the socket thread to the UI thread, with a one-shot
@@ -71,6 +81,12 @@ pub struct Mcp {
     /// Cloned to the socket thread at [`Self::start`] so `tools/list` can
     /// advertise plugin tools without touching the UI-thread modules.
     plugin_meta: Arc<Vec<PluginMeta>>,
+    /// The single in-flight `simulate` fork, advanced one slice per pump (see
+    /// [`sim`]). `None` until a `simulate` call starts one.
+    sim: Option<sim::SimJob>,
+    /// Monotonic id handed to the next `simulate` fork, so `sim-result` can tell
+    /// a stale poll from the current job.
+    next_sim_id: u64,
 }
 
 impl Mcp {
@@ -102,6 +118,7 @@ impl Mcp {
     pub fn stop(&mut self) {
         self.server = None; // Server::drop joins the socket thread
         self.rx = None;
+        self.sim = None; // drop any in-flight fork; nothing can poll it now
     }
 
     /// Whether a server is running.
@@ -135,37 +152,67 @@ impl Mcp {
         {
             self.server = None;
             self.rx = None;
+            self.sim = None;
             return;
         }
-        let Some(rx) = &self.rx else { return };
-        loop {
-            match rx.try_recv() {
-                Ok(job) => {
-                    let result = match &job.call {
-                        ToolInvocation::Builtin(call) => {
-                            tools::dispatch(call, gb, dbg.breakpoints_mut(), symbols)
-                        }
-                        ToolInvocation::Plugin { name, args } => {
-                            let mut ctx = FrontendToolContext {
-                                gb,
-                                breakpoints: dbg.breakpoints_mut(),
-                                symbols,
-                            };
-                            self.tools
-                                .dispatch(name, args, &mut ctx)
-                                .unwrap_or_else(|| Err(format!("unknown tool '{name}'")))
-                        }
-                    };
-                    // The socket thread may have already timed out and dropped the
-                    // receiver; a failed send is fine (its request is abandoned).
-                    let _ = job.reply.send(result);
-                }
-                Err(TryRecvError::Empty) => return,
-                Err(TryRecvError::Disconnected) => {
-                    self.rx = None;
-                    return;
+        if self.rx.is_none() {
+            return;
+        }
+        // Drain queued jobs into a Vec first so the `rx` borrow is released before
+        // we run them — a `simulate`/`sim-result` job mutates `self.sim`.
+        let mut jobs = Vec::new();
+        let mut disconnected = false;
+        if let Some(rx) = &self.rx {
+            loop {
+                match rx.try_recv() {
+                    Ok(job) => jobs.push(job),
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        disconnected = true;
+                        break;
+                    }
                 }
             }
+        }
+        for job in jobs {
+            let result = self.run_job(&job.call, gb, dbg, symbols);
+            // The socket thread may have already timed out and dropped the
+            // receiver; a failed send is fine (its request is abandoned).
+            let _ = job.reply.send(result);
+        }
+        if disconnected {
+            self.rx = None;
+            self.sim = None;
+            return;
+        }
+        // Advance any in-flight what-if fork by one bounded slice, so a long run
+        // stays cooperative with the UI (see [`sim`]).
+        self.advance_sim();
+    }
+
+    /// Run one queued tool call. Read-only built-ins go through
+    /// [`tools::dispatch`]; the two fork tools drive `self.sim` directly.
+    fn run_job(
+        &mut self,
+        call: &ToolInvocation,
+        gb: &GameBoy,
+        dbg: &mut Debugger,
+        symbols: &SymbolTable,
+    ) -> Result<ToolResult, String> {
+        match call {
+            ToolInvocation::Builtin(c) => tools::dispatch(c, gb, dbg.breakpoints_mut(), symbols),
+            ToolInvocation::Plugin { name, args } => {
+                let mut ctx = FrontendToolContext {
+                    gb,
+                    breakpoints: dbg.breakpoints_mut(),
+                    symbols,
+                };
+                self.tools
+                    .dispatch(name, args, &mut ctx)
+                    .unwrap_or_else(|| Err(format!("unknown tool '{name}'")))
+            }
+            ToolInvocation::Simulate(a) => self.start_sim(gb, a),
+            ToolInvocation::SimResult { job } => self.sim_result(*job),
         }
     }
 }

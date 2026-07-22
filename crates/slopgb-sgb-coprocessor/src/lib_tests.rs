@@ -366,7 +366,7 @@ fn data_trn_lands_at_packet_dest_in_wram() {
     );
 }
 
-/// DATA_SND ($0F) is no longer a no-op: the packet's data lands at its target
+/// DATA_SND ($0F) lands the packet's data at its target
 /// SNES-work-RAM address of the 65C816 plugin (fullsnes `dest_lo, dest_hi, len,
 /// data…`).
 #[test]
@@ -392,7 +392,7 @@ fn data_snd_writes_to_snes_work_ram() {
     });
 }
 
-/// JUMP ($12) is no longer a no-op: it redirects the 65C816 plugin's program
+/// JUMP ($12) redirects the 65C816 plugin's program
 /// counter, and the CPU then executes at the target. Verified functionally — a
 /// sentinel program pre-loaded at the (bank-aliased) target writes a marker byte
 /// only reachable if the CPU actually jumped there and ran.
@@ -600,131 +600,9 @@ fn nmi_counting_cop() -> Option<SgbCoprocessor> {
     Some(cop)
 }
 
-#[test]
-fn vblank_nmi_fires_once_per_frame_when_enabled() {
-    let Some(mut cop) = nmi_counting_cop() else {
-        return;
-    };
-    cop.clock(70_224 * 2);
-    assert_eq!(
-        cop.debug_cpu_ram(0x0340, 1),
-        vec![2],
-        "exactly one NMI per frame across two frames"
-    );
-}
-
-#[test]
-fn no_nmi_without_the_guest_enabling_it() {
-    let Some(mut cop) = build_cop(48_000) else {
-        return;
-    };
-    {
-        let mut cpu = cop.cpu.borrow_mut();
-        cpu.write_ram(0xFFFA, &[0x00, 0x92]).unwrap();
-        cpu.write_ram(0x9000, &[0xCB, 0x80, 0xFD]).unwrap(); // WAI loop, no $4200
-        cpu.write_ram(0x9200, &[0xEE, 0x40, 0x03, 0x40]).unwrap();
-        cpu.set_pc(0x9000).unwrap();
-    }
-    cop.clock(70_224 * 2);
-    assert_eq!(
-        cop.debug_cpu_ram(0x0340, 1),
-        vec![0],
-        "NMITIMEN bit 7 gates NMI"
-    );
-}
-
-/// RDNMI/HVBJOY shadows: the guest spins on HVBJOY bit 7, then reads RDNMI
-/// twice — first read shows the flag + CPU version, the second shows the
-/// read-acknowledge (bit 7 cleared, guest-side).
-#[test]
-fn rdnmi_and_hvbjoy_shadows_follow_the_frame() {
-    let Some(mut cop) = build_cop(48_000) else {
-        return;
-    };
-    {
-        let mut cpu = cop.cpu.borrow_mut();
-        // wait: LDA $4212 / BPL wait / LDA $4210 / STA $0341 / LDA $4210 /
-        // STA $0342 / STP.
-        let prog = [
-            0xAD, 0x12, 0x42, // LDA $4212 (HVBJOY)
-            0x10, 0xFB, // BPL -5 (spin until vblank bit sets)
-            0xAD, 0x10, 0x42, // LDA $4210 (RDNMI)
-            0x8D, 0x41, 0x03, // STA $0341
-            0xAD, 0x10, 0x42, // LDA $4210 (again)
-            0x8D, 0x42, 0x03, // STA $0342
-            0xDB, // STP
-        ];
-        cpu.write_ram(0x9000, &prog).unwrap();
-        cpu.set_pc(0x9000).unwrap();
-    }
-    cop.clock(70_224);
-    let first = cop.debug_cpu_ram(0x0341, 1)[0];
-    let second = cop.debug_cpu_ram(0x0342, 1)[0];
-    assert_eq!(first & 0x80, 0x80, "RDNMI flag set inside vblank");
-    assert_eq!(first & 0x0F, 0x02, "CPU version bits");
-    assert_eq!(second & 0x80, 0, "read acknowledged the flag");
-}
-
-/// The resident NMI handler dispatches through the RAM vector at $00:00BB
-/// (fullsnes SGB notes: the hookable NMI vector JUMP clobbers). Empty vector
-/// -> the NMI is a no-op for the program; installed vector -> the hook runs.
-#[test]
-fn nmi_dispatches_through_the_ram_vector() {
-    let Some(mut cop) = nmi_counting_cop() else {
-        return;
-    };
-    // Point the RAM vector at a counting hook: INC $0344 / RTI... the hook
-    // is entered by JML, so return with RTI (the handler's JML replaced its
-    // own frame — the interrupt frame is still on the stack).
-    {
-        let mut cpu = cop.cpu.borrow_mut();
-        cpu.write_ram(0x9300, &[0xEE, 0x44, 0x03, 0x40]).unwrap(); // INC $0344 / RTI
-        cpu.write_ram(0x00BB, &[0x00, 0x93, 0x00]).unwrap(); // [$00BB] = $00:9300
-        // Note: nmi_counting_cop's own $FFFA override is replaced back with
-        // the resident handler so the RAM-vector path is what runs.
-        cpu.write_ram(0xFFFA, &[0x30, 0xBE]).unwrap();
-    }
-    cop.clock(70_224);
-    assert_eq!(
-        cop.debug_cpu_ram(0x0344, 1),
-        vec![1],
-        "the hook behind the RAM vector ran"
-    );
-    assert_eq!(
-        cop.debug_cpu_ram(0x0340, 1),
-        vec![0],
-        "the test vector override was replaced"
-    );
-}
-
-/// The resident NMI handler preserves the interrupted program's A on the
-/// empty-vector path (the BIOS-only case): A survives across an NMI.
-#[test]
-fn nmi_handler_preserves_a_with_empty_vector() {
-    let Some(mut cop) = build_cop(48_000) else {
-        return;
-    };
-    {
-        let mut cpu = cop.cpu.borrow_mut();
-        // LDA #$81 / STA $4200 (enable NMI) / LDA #$5A / WAI / STA $0346 / STP
-        let prog = [
-            0xA9, 0x81, 0x8D, 0x00, 0x42, 0xA9, 0x5A, 0xCB, 0x8D, 0x46, 0x03, 0xDB,
-        ];
-        cpu.write_ram(0x9000, &prog).unwrap();
-        cpu.set_pc(0x9000).unwrap();
-    }
-    cop.clock(70_224);
-    assert_eq!(
-        cop.debug_cpu_ram(0x0346, 1),
-        vec![0x5A],
-        "A survived the NMI round trip"
-    );
-}
-
-/// DATA_TRN pairing under the one-frame capture skew: the payload lands a
 /// The DATA_TRN payload check gates on the source's capture counter: an
-/// unchanged counter skips the 4 KB read+hash entirely (it used to run once
-/// per GB instruction), a bump reopens exactly one check, and a source
+/// unchanged counter skips the 4 KB read+hash entirely, a bump reopens exactly
+/// one check, and a source
 /// without a counter (`None`) checks every poll as before.
 #[test]
 fn data_trn_checks_gate_on_the_capture_counter() {
@@ -930,132 +808,6 @@ fn aux_service_waits_for_vblank_without_nmis() {
     assert_eq!(cop.nmitimen, 0, "NMITIMEN untouched");
 }
 
-// ---- Joypad autopoll ($4200 bit 0 → $4218-$421F) ----
-
-/// The GB→SNES bit mapping (fullsnes 4218h): every mapped button lands on
-/// its SNES bit, unmapped SNES bits (Y/X/L/R + the id nibble) stay clear.
-#[test]
-fn joy1_mapping_covers_the_gb_matrix() {
-    assert_eq!(joy1_bytes(0x0F, 0x0F), [0x00, 0x00], "idle");
-    assert_eq!(joy1_bytes(0x00, 0x00), [0x80, 0xBF], "everything pressed");
-    assert_eq!(
-        joy1_bytes(0x07, 0x07),
-        [0x00, 0x14],
-        "Start (bit 12) + Down (bit 10)"
-    );
-    assert_eq!(
-        joy1_bytes(0x0E, 0x0E),
-        [0x80, 0x01],
-        "A (bit 7) + Right (bit 8)"
-    );
-}
-
-/// End to end: the guest enables autopoll (NMITIMEN bit 0), sees the HVBJOY
-/// busy bit pulse at vblank, and after it clears reads the pushed GB input
-/// from the JOY1 shadows — values become valid when busy drops (fullsnes:
-/// reads during the poll window are unreliable).
-#[test]
-fn joypad_autopoll_serves_input_after_the_busy_pulse() {
-    let Some(mut cop) = build_cop(48_000) else {
-        return;
-    };
-    {
-        let mut cpu = cop.cpu.borrow_mut();
-        let prog = [
-            0xA9, 0x01, 0x8D, 0x00, 0x42, // LDA #$01 / STA $4200 (autopoll on)
-            0xAD, 0x12, 0x42, 0x29, 0x01, 0xF0, 0xF9, // w1: busy set?
-            0x8D, 0x60, 0x04, // STA $0460 (records 1)
-            0xAD, 0x12, 0x42, 0x29, 0x01, 0xD0, 0xF9, // w2: busy clear?
-            0xAD, 0x18, 0x42, 0x8D, 0x61, 0x04, // JOY1L -> $0461
-            0xAD, 0x19, 0x42, 0x8D, 0x62, 0x04, // JOY1H -> $0462
-            0xDB, // STP
-        ];
-        cpu.write_ram(0x9000, &prog).unwrap();
-        cpu.set_pc(0x9000).unwrap();
-    }
-    cop.set_input(0x0E, 0x0E); // Right + A pressed (active-low GB nibbles)
-    cop.clock(70_224 * 2);
-    assert_eq!(
-        cop.debug_cpu_ram(0x0460, 3),
-        vec![0x01, 0x80, 0x01],
-        "busy pulse seen, then JOY1L = A, JOY1H = Right"
-    );
-}
-
-/// Without NMITIMEN bit 0 the JOY shadows never move — the seam is inert
-/// until the guest itself asks for autopoll.
-#[test]
-fn no_autopoll_without_the_guest_enabling_it() {
-    let Some(mut cop) = build_cop(48_000) else {
-        return;
-    };
-    {
-        let mut cpu = cop.cpu.borrow_mut();
-        // loop: copy JOY1L to $0470 forever (no $4200 write).
-        let prog = [0xAD, 0x18, 0x42, 0x8D, 0x70, 0x04, 0x80, 0xF8];
-        cpu.write_ram(0x9000, &prog).unwrap();
-        cpu.set_pc(0x9000).unwrap();
-    }
-    cop.set_input(0x00, 0x00); // everything pressed
-    cop.clock(70_224 * 2);
-    assert_eq!(
-        cop.debug_cpu_ram(0x0470, 1),
-        vec![0x00],
-        "JOY1 shadow untouched with autopoll disabled"
-    );
-}
-
-/// The pad feed preserves sub-flush latch sequences and passes the local
-/// matrix through when idle: a guest writing $3F / $01 / $00 back to back
-/// (the takeover init's one-shot Select+Start trigger chased by an ACK
-/// sandwich) surfaces each value in order — each dwelling long enough for
-/// GB polls — and afterwards the player's own buttons flow (the resident
-/// BIOS's continuous pad forward).
-#[test]
-fn pad_feed_replays_latch_sequences_then_passes_the_matrix_through() {
-    let Some(mut cop) = build_cop(48_000) else {
-        return;
-    };
-    assert_eq!(cop.joypad_feed(), None, "matrix untouched before takeover");
-    let prog = [
-        0xA9, 0x3F, 0x8D, 0x04, 0x60, // LDA #$3F / STA $6004
-        0xA9, 0x01, 0x8D, 0x04, 0x60, // LDA #$01 / STA $6004
-        0xA9, 0x00, 0x8D, 0x04, 0x60, // LDA #$00 / STA $6004
-        0xDB, // STP
-    ];
-    {
-        let mut cpu = cop.cpu.borrow_mut();
-        cpu.write_ram(0x9000, &prog).unwrap();
-        cpu.set_pc(0x9000).unwrap();
-    }
-    cop.clock(8192);
-    let mut seen = Vec::new();
-    for _ in 0..8192 {
-        let f = cop.joypad_feed().expect("taken over");
-        if seen.last() != Some(&f[0]) {
-            seen.push(f[0]);
-        }
-    }
-    assert_eq!(
-        seen[..3],
-        [0x3F, 0x01, 0x00],
-        "every latch write surfaced, in order"
-    );
-    assert_eq!(
-        seen.get(3),
-        Some(&0xFF),
-        "then the idle matrix (nothing pressed) passes through"
-    );
-    // Queue drained: the local matrix (Select+Start = buttons $3, dpad $F,
-    // active low) passes through as the latch byte.
-    cop.set_input(0x0F, 0x03);
-    assert_eq!(
-        cop.joypad_feed(),
-        Some([0x3F, 0xFF, 0xFF, 0xFF]),
-        "player input forwards while the SNES side is idle"
-    );
-}
-
 /// The pilot's phase streams cover ALL of bank $7F and the upper half of
 /// bank $7E (the observed DATA_TRN dest map: $7F:0100-$F100 + $7E:8000-
 /// $F000), so the host-side staging buffers and the delivery mailbox must
@@ -1119,3 +871,10 @@ mod dma;
 
 #[path = "lib_tests_ppu.rs"]
 mod ppu;
+
+// Test category modules (split for the 1000-line cap); each is a `mod`
+// via `use super::*`, reaching the shared fixtures above + the crate items.
+#[path = "lib_tests/nmi.rs"]
+mod nmi;
+#[path = "lib_tests/pads.rs"]
+mod pads;

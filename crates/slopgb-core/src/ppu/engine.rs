@@ -229,7 +229,7 @@ impl Ppu {
         std::mem::take(&mut self.pending_if)
     }
 
-    /// Advance one 8 MHz HALF-dot — the eager clock's PPU grain: two half-dots
+    /// Advance one 8 MHz HALF-dot — the PPU's tick grain: two half-dots
     /// per whole dot (single speed = 2 half-dots per CPU-T; double speed = 1).
     /// The first half of a dot (`dhalf 0→1`) does no structural work and the
     /// second (`dhalf 1→0`) runs the whole-dot [`Self::tick`] body, so a run of

@@ -200,8 +200,8 @@ impl Ppu {
             // REFUTED on CGB: the lcd-offset shifts a REAL edge onto the START
             // carryover dot — but NOT onto the line-END last M-cycle, where lyfc
             // is fixed and only a fresh write moves the latch). CGB only.
-            // The CGB line-START carryover hold generalized to lines 1-143
-            // (was line 1 only): SameBoy re-latches `lyc_interrupt_line` ONLY
+            // The CGB line-START carryover hold covers lines 1-143:
+            // SameBoy re-latches `lyc_interrupt_line` ONLY
             // at the state-6/-7 GB_SLEEP steps (dot 3 → -1/hold, dot 4 →
             // line), never during the dots-0-2 carryover where
             // `ly_for_comparison` still names line-1 — so a late FF45 write
@@ -241,7 +241,7 @@ impl Ppu {
             // mis-map the window (`ff45_enable_weirdpoint_lcdoffset1_1`).
             self.lyc_interrupt_line = ly == i16::from(self.lyc)
                 || (!self.ds && self.lcd_shift_dots == 0 && ly == i16::from(self.lyc_event));
-            // Eager line-153 fresh-ENABLE suppression (`ly_lyc_153_write` C017):
+            // Line-153 fresh-ENABLE suppression (`ly_lyc_153_write` C017):
             // a fresh LYC=153 write that COMMITTED at/after dot 6 — inside the
             // dots-6-7 coincidence window — raises no fresh trigger on hardware
             // (SameBoy's "writing LYC during this period has side effects" zone).
@@ -249,7 +249,7 @@ impl Ppu {
             // steady-state LYC=153 or an earlier-committed write (C016) fires
             // normally. Also cancel the pending deferred `lyc_if_delay` delivery
             // the fresh write scheduled (Agb's dots-4-11 window re-delivers at dot
-            // 9 via that path). Eager+CGB only.
+            // 9 via that path). CGB only.
             if self.model.is_cgb()
                 && self.line == 153
                 && self.lyc == 153
@@ -373,15 +373,15 @@ impl Ppu {
         }
         self.stat_if_squash = self.stat_if_squash.saturating_sub(1);
         self.stat_update_vblank_oam_pulses();
-        // Eager line-153 DISABLE early-delivery (`ly_lyc_153_write` C015): a late
+        // Line-153 DISABLE early-delivery (`ly_lyc_153_write` C015): a late
         // FF45 disable write (LYC 153→x) leaves the held coincidence value in the
         // delayed `lyc_event` copy, which the dots-6-7 engine window still fires —
-        // but on the eager frame that dot-6 delivery lands AFTER the CPU has
+        // but that dot-6 delivery lands AFTER the CPU has
         // latched its interrupt-count read (the ROM reads `B` one M-cycle after
         // the FF45 write). Deliver the held-153 coincidence at dot 3 instead — the
         // eager-frame dot the CPU's dispatch check observes — matching SameBoy's
         // serviced count. Fires once (`force_level` suppresses the dots-6-7 re-
-        // edge). CGB, eager-only; the DMG twin rides the `write_lyc_dmg`
+        // edge). CGB only; the DMG twin rides the `write_lyc_dmg`
         // `lyc_event` hold + the natural dot-6 delivery (its write commits later,
         // so dot 6 already precedes the count read).
         if self.model.is_cgb()
@@ -397,13 +397,13 @@ impl Ppu {
             self.pending_if |= IF_STAT;
             self.stat_update.force_level(true);
         }
-        // Eager DMG line-153 LYC=153 ENABLE emission-dot decouple:
+        // DMG line-153 LYC=153 ENABLE emission-dot decouple:
         // the DMG `ly_for_comparison` line-153 table sets 153 only at dot 6
         // (`GB_SLEEP(14,4)`, pinned by wilbertpol `ly_lyc_153-C`), so the eager
         // `stat_update` engine's natural 0→1 LYC rise fires at slopgb dot 6 —
         // the READ frame (cc+4 = +2 read-debt). But SameBoy sets `IF |= 2` at
         // `display_cycles == 4` (traced `SBIF su ly=153 dc=4`), the DISPATCH
-        // frame, and production gambatte fires there too. On the eager clock the
+        // frame, and production gambatte fires there too. The
         // dot-6 fold lands mid-M-cycle → the CPU recognizes it one M-cycle late
         // → the ISR's fixed-cycle wait carries the offset to `m1statwirq_3`'s
         // FF41 glitch write (`0`, want `2`). Emit the IF at dot 4 (the dispatch
@@ -425,13 +425,12 @@ impl Ppu {
         }
     }
 
-    /// HALFDOT: the idempotent odd-half `GB_STAT_update` level
+    /// The idempotent odd-half `GB_STAT_update` level
     /// re-eval. The SameBoy STAT interrupt line is recomputed on the 8-MHz
     /// ODD half-dot (`Ppu::tick_half`, `dhalf 0→1`) as well as the whole-dot
     /// even half, so a coincident FF41 write-commit (`eng_stat_half`), LYC
     /// re-latch, or mode-0 source rise resolves at its true SUB-dot phase
-    /// rather than snapping to the whole-dot even-half tick — the coupled
-    /// engine the port maps scoped (pieces 1+3+4). On the ALIGNED grid
+    /// rather than snapping to the whole-dot even-half tick. On the ALIGNED grid
     /// (no odd-half input change) `(mfi, eng_stat, lyc_interrupt_line)` are
     /// unchanged from the even-half tick, so `StatUpdate::update` recomputes
     /// the SAME level → no 0→1 edge → no IF → byte-identical to the
@@ -439,7 +438,7 @@ impl Ppu {
     /// folded at this dot's completing (even) half.
     pub(super) fn stat_update_half(&mut self) {
         // Commit any FF41 engine-view (`eng_stat`) write scheduled to land on
-        // THIS odd half-dot (piece 4 — the write's true WriteCpu sub-dot
+        // THIS odd half-dot (the write's true WriteCpu sub-dot
         // position). DMG-scoped (the CGB two-phase `eng_stat_pending` owns the
         // CGB write frame). The odd-half level re-eval runs ONLY when such a
         // commit lands: without an armed `eng_stat_half` the inputs
@@ -481,9 +480,9 @@ impl Ppu {
     /// selects the OAM (mode-2) source there and the `GB_STAT_update` line never
     /// rises for it. SameBoy raises the 144-entry pulse as a **direct `IF |= 2`
     /// poke** (`display.c:2160`), independent of `stat_interrupt_line`, NOT a
-    /// line rise. This reproduces it with the *same* guard and commit masks the
-    /// removed gambatte STAT event engine used (the `vblank_stat_intr-GS` DMG /
-    /// `-C` CGB lift).
+    /// line rise. This reproduces it with the same guard and commit masks the
+    /// rising-edge engine applies elsewhere (`vblank_stat_intr-GS` DMG /
+    /// `-C` CGB).
     ///
     /// The visible-line m2 pulses (lines 1-143 dot 0) are already covered by the
     /// rising-edge engine — its level-OR naturally reproduces `m2_pulse_fires`'
@@ -513,19 +512,18 @@ impl Ppu {
             }
         }
         // The DMG per-line vblank OAM pulses at dot 12 (`display.c:2185`;
-        // `intr_1_2_timing-GS`) are DEFERRED with the atomic read-frame work.
-        // Adding them here was MEASURED net-negative: the extra dot-12 IF
-        // regresses 6 SameBoy-passing rows (gambatte ly0/lycint152_m2irq,
-        // lycm2int/lyc0m2int_m2irq, window/late_enable_afterVblank ×4). SameBoy
+        // `intr_1_2_timing-GS`) are NOT emitted here. Adding them regresses
+        // SameBoy-passing rows (gambatte ly0/lycint152_m2irq,
+        // lycm2int/lyc0m2int_m2irq, window/late_enable_afterVblank): SameBoy
         // fires them too, but this frame's cc+4 read/halt placement mis-places
         // the read. The 144:0 entry pulse above has no such problem, so it banks
         // standalone.
     }
 
     /// The halt/interrupt-sample commit masks for the [`Self::stat_update_tick`]
-    /// rising edge — the analogue of the per-source `stat_late` /
-    /// `stat_halt_late` / `m0_rise` masks the removed gambatte STAT event engine
-    /// set (truth table in `stat_irq.rs`). `mfi` is the
+    /// rising edge — the `stat_late` / `stat_halt_late` / `m0_rise` masks that
+    /// hold the mode-2 line-start pulse out of the running CPU's interrupt
+    /// sample and the halt-exit sampler (truth table in `stat_irq.rs`). `mfi` is the
     /// [`Ppu::mode_for_interrupt`] that drove this 0→1 rise, so it names the source.
     ///
     /// The gambatte engine reads FF41/IF at the M-cycle trailing edge (cc+4) and
@@ -545,7 +543,7 @@ impl Ppu {
         // one setting the currently-pending STAT bit — is the mode-2 OAM
         // line-start rise. Sticky until the next STAT edge (a held STAT bit
         // raises no new edge, so the flag keeps naming the source of the pending
-        // bit). The interconnect's eager ack (`ack_impl`) keys the per-ISR
+        // bit). The interconnect's ack (`ack_impl`) keys the per-ISR
         // read carry on it. Line 0's OAM pulse takes no carry
         // (its read frame already matches — same exemption as the halt mask).
         self.stat_rise_oam = mfi == 2 && self.eng_stat & STAT_SRC_OAM != 0 && self.line != 0;
@@ -598,8 +596,8 @@ impl Ppu {
 
     /// Recompute the interrupt-facing mode ([`Ppu::mode_for_interrupt`])
     /// for the current dot, applying the mode-2 lead / mode-0 lag anchor swing
-    /// against the CPU-visible [`Self::vis_mode`]. Inert today; the substrate
-    /// for the STAT engine and the kernel-pair flip.
+    /// against the CPU-visible [`Self::vis_mode`]. Consumed every dot by the
+    /// STAT engine ([`Self::stat_update_tick`]).
     pub(super) fn update_mode_for_interrupt(&mut self) {
         // `mfi_m0_prev` lags `line_render_done` by one dot: read the previous
         // dot's value for this dot's mode-0 decision, then latch this dot's.

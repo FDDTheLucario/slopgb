@@ -1563,8 +1563,11 @@ impl AudioCoprocessor for SgbCoprocessor {
 /// blocks)`. Rejects a malformed table (out-of-bounds length, no terminator, or
 /// no block loading the N-SPC engine entry `$0400`) so a wrong offset / wrong
 /// ROM falls back to the clean-room firmware rather than uploading garbage.
-fn parse_apu_blocks(rom: &[u8], mut off: usize) -> Option<(u16, Vec<(u16, Vec<u8>)>)> {
-    let mut blocks: Vec<(u16, Vec<u8>)> = Vec::new();
+/// A parsed SNES APU upload table: each `(dest, bytes)` block, in order.
+type ApuBlocks = Vec<(u16, Vec<u8>)>;
+
+fn parse_apu_blocks(rom: &[u8], mut off: usize) -> Option<(u16, ApuBlocks)> {
+    let mut blocks: ApuBlocks = Vec::new();
     loop {
         let len = u16::from_le_bytes([*rom.get(off)?, *rom.get(off + 1)?]);
         let dest = u16::from_le_bytes([*rom.get(off + 2)?, *rom.get(off + 3)?]);

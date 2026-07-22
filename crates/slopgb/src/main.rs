@@ -3,8 +3,10 @@
 //! the keymap in [`input`].
 //!
 //! `App` is split across cohesive `impl` blocks: the discrete-action dispatch
-//! in [`app_run`], the game-window menu handling in [`app_menu`], and the
-//! emulation pacing loop in [`app_pacing`]. One loaded ROM (the machine + save
+//! in [`app_run`], the game-window menu handling in [`app_menu`], the emulation
+//! pacing loop in [`app_pacing`], the keyboard dispatch in [`app_keys`], the
+//! game-window presentation in [`app_draw`], and the startup resource
+//! resolution in [`app_boot`]. One loaded ROM (the machine + save
 //! persistence) is [`session::Session`]; CLI parsing is [`cli`]; the audio pipe
 //! / watchdog / pacing decision are [`pacing`].
 //!
@@ -13,8 +15,11 @@
 //! (or if the device fails to open), a wall-clock loop paces frames at the
 //! hardware rate, 4194304 / 70224 ≈ 59.7275 Hz.
 
+mod app_boot;
+mod app_draw;
 mod app_handler;
 mod app_input;
+mod app_keys;
 mod app_menu;
 mod app_pacing;
 mod app_path;
@@ -56,24 +61,23 @@ use std::process;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use slopgb_core::{
-    Button, CLOCK_HZ, CYCLES_PER_FRAME, SCREEN_H, SCREEN_PIXELS, SCREEN_W, SGB_BORDER_H,
-    SGB_BORDER_W,
-};
+use slopgb_core::{Button, CLOCK_HZ, CYCLES_PER_FRAME, SCREEN_PIXELS};
 use slopgb_plugin_host::PluginHost;
-use winit::event::KeyEvent;
-use winit::event_loop::{ActiveEventLoop, EventLoop};
-use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
+use winit::event_loop::EventLoop;
+use winit::keyboard::{KeyCode, ModifiersState};
 use winit::window::Window;
 
+use app_boot::{load_msu1, load_plugins, resolve_boot_rom, resolve_sgb_bios};
+use app_draw::blank_frame;
+pub(crate) use app_keys::dialog_key_from;
 use audio::AudioOutput;
 use cli::{Options, ParseOutcome, USAGE};
-use input::{Action, ButtonTracker, Focus};
+use input::ButtonTracker;
 use menupopup::MenuPopup;
 use pacing::{AudioPipe, StallWatchdog};
 use session::Session;
 use ui::canvas::Rect;
-use ui::dialog::{self, DialogKey, InputDialog};
+use ui::dialog::InputDialog;
 use video::Video;
 use windows::mainwin::{InfoBox, WindowSizeChoice};
 
@@ -190,107 +194,6 @@ enum PathPurpose {
     CheatLoad,
     /// Save cheats to a cheat file at the typed path.
     CheatSave,
-}
-
-/// Resolve the boot ROM bytes from `--boot` or the `SLOPGB_BOOT` env var,
-/// reading the file. A read error is logged and treated as no boot ROM
-/// (non-fatal) — the machine then boots post-boot as usual.
-fn resolve_boot_rom(opts: &Options) -> Option<Vec<u8>> {
-    let path = opts
-        .boot
-        .clone()
-        .or_else(|| env::var_os("SLOPGB_BOOT").map(PathBuf::from))?;
-    match std::fs::read(&path) {
-        Ok(bytes) => Some(bytes),
-        Err(e) => {
-            eprintln!("slopgb: cannot read boot ROM '{}': {e}", path.display());
-            None
-        }
-    }
-}
-
-/// Load wasm plugins from `--plugins`, `SLOPGB_PLUGINS_DIR`, or the persisted
-/// `settings.plugins.dir` (in that precedence). Absent → an empty host (no
-/// plugins, golden path untouched); a directory that can't be read is logged and
-/// treated as empty (non-fatal).
-fn load_plugins(opts: &Options, settings: &windows::options::Settings) -> PluginHost {
-    let persisted =
-        (!settings.plugins.dir.is_empty()).then(|| PathBuf::from(&settings.plugins.dir));
-    let Some(dir) = opts
-        .plugins_dir
-        .clone()
-        .or_else(|| env::var_os("SLOPGB_PLUGINS_DIR").map(PathBuf::from))
-        .or(persisted)
-    else {
-        return PluginHost::new();
-    };
-    match PluginHost::load_dir(&dir) {
-        Ok(host) => {
-            let total = host.infos().len();
-            if total == 0 {
-                eprintln!("slopgb: no plugins found in '{}'", dir.display());
-            } else if host.is_empty() {
-                // Discovered plugins, but none the per-frame pump drives — all
-                // higher-tier (subsystem/tool), driven via their own seams.
-                eprintln!(
-                    "slopgb: {total} subsystem/tool plugin(s) in '{}' — the SGB \
-                     coprocessor (spc700 + w65c816) auto-loads from here; MSU-1 via \
-                     --msu1. Not the per-frame --plugins pump.",
-                    dir.display()
-                );
-            }
-            host
-        }
-        Err(e) => {
-            eprintln!("slopgb: cannot read plugins dir '{}': {e}", dir.display());
-            PluginHost::new()
-        }
-    }
-}
-
-/// Load an MSU-1 pack from `--msu1` or `SLOPGB_MSU1` (in that precedence).
-/// Absent → `None` (no MSU-1; the core + audio path stay byte-identical). A pack
-/// that fails to load (missing plugin wasm, bad module) is logged and treated as
-/// absent (non-fatal — the game still runs, just without MSU-1 audio).
-fn load_msu1(opts: &Options) -> Option<msu1::Msu1> {
-    let dir = opts
-        .msu1
-        .clone()
-        .or_else(|| env::var_os("SLOPGB_MSU1").map(PathBuf::from))?;
-    match msu1::Msu1::load(&dir) {
-        Ok(m) => Some(m),
-        Err(e) => {
-            eprintln!("slopgb: {e}");
-            None
-        }
-    }
-}
-
-/// Resolve the optional SGB BIOS bytes from `--sgb-bios` or `SLOPGB_SGB_BIOS`,
-/// reading the file. A read error is logged and treated as no BIOS (non-fatal).
-/// The border/title-palette are *not* extracted from it — slopgb is high-level
-/// and never runs the SNES CPU — so only the SGB audio path is fed; the honest
-/// status is logged and the default border stands (`docs/hardware-state/sgb.md`).
-fn resolve_sgb_bios(opts: &Options) -> Option<Vec<u8>> {
-    let path = opts
-        .sgb_bios
-        .clone()
-        .or_else(|| env::var_os("SLOPGB_SGB_BIOS").map(PathBuf::from))?;
-    match std::fs::read(&path) {
-        Ok(bytes) => {
-            eprintln!(
-                "slopgb: loaded SGB BIOS '{}' ({} bytes) — audio-driver image only; \
-                 the Nintendo border/palette are not extracted (HLE), default border kept",
-                path.display(),
-                bytes.len()
-            );
-            Some(bytes)
-        }
-        Err(e) => {
-            eprintln!("slopgb: cannot read SGB BIOS '{}': {e}", path.display());
-            None
-        }
-    }
 }
 
 struct App {
@@ -542,6 +445,7 @@ impl App {
         let msu1 = load_msu1(&opts);
         // Build the controller map before `settings` is moved into the struct.
         let gamepad_bindings = gamepad::GamepadBindings::from_config(&settings.gamepad_map);
+        let bindings = keymap::KeyBindings::from_config(&settings.key_map);
         let mut app = Self {
             opts,
             boot_rom,
@@ -582,7 +486,7 @@ impl App {
             gamepad_held: [false; 8],
             gamepad_wizard: None,
             buttons: ButtonTracker::default(),
-            bindings: keymap::KeyBindings::default(),
+            bindings,
             input_ops: Vec::new(),
             input_offset: 0,
             epoch: Instant::now(),
@@ -635,21 +539,6 @@ impl App {
         app
     }
 
-    /// Push the current DMG palette to the live machine and rebuild the no-ROM
-    /// blank frame from its lightest shade. Called after every machine (re)build
-    /// (startup, ROM load) since `GameBoy::new` resets the palette to the core
-    /// grayscale default; Options OK/Apply applies the palette through its own
-    /// path (`apply_settings`).
-    fn apply_palette(&mut self) {
-        self.session.gb.set_dmg_palette(self.settings.dmg_palette);
-        // Graphics → "disable SGB colors" is a display option like the palette,
-        // so it rides the same apply path (Options apply + every ROM load).
-        self.session
-            .gb
-            .set_sgb_mono(self.settings.disable_sgb_colors);
-        self.blank_frame = blank_frame(self.settings.dmg_palette[0]);
-    }
-
     fn update_title(&self) {
         if let Some(window) = &self.window {
             let state = if self.dbg.is_broken() {
@@ -681,134 +570,6 @@ impl App {
         }
     }
 
-    fn redraw(&mut self) {
-        let Some(window) = self.window.as_ref() else {
-            return;
-        };
-        let Some(video) = self.video.as_mut() else {
-            return;
-        };
-        // With no ROM loaded the LCD shows a solid lightest-shade blank (bgb's
-        // pale-green off screen); the machine is frozen so its own front buffer
-        // never paints. On an SGB with a border loaded (CHR_TRN+PCT_TRN), the
-        // 256×224 composite replaces the bare 160×144 frame automatically — the
-        // blit letterboxes whichever size it gets.
-        // A full-takeover SGB coprocessor renders the SNES side itself; a
-        // fresh 256×224 frame (converted here) replaces the GB composite
-        // until the next ROM load. Absent coprocessor/PPU: never `Some`.
-        if let Some(f) = self.session.gb.take_snes_frame() {
-            self.snes_frame = Some(f.iter().map(|&c| postfx::snes_rgb555_px(c)).collect());
-        }
-        let (mut frame, mut src_w, mut src_h): (&[u32], usize, usize) = if self.rom_loaded {
-            match (&self.snes_frame, self.session.gb.sgb_border()) {
-                (Some(s), _) => (&s[..], SGB_BORDER_W, SGB_BORDER_H),
-                (None, Some(b)) => (&b[..], SGB_BORDER_W, SGB_BORDER_H),
-                (None, None) => (&self.session.gb.frame()[..], SCREEN_W, SCREEN_H),
-            }
-        } else {
-            (&self.blank_frame[..], SCREEN_W, SCREEN_H)
-        };
-        // Outline the sprite hovered in the VRAM viewer's OAM tab, drawn into the
-        // frame pre-blit so it scales with the screen. The core frame is immutable
-        // (golden-safe), so XOR the perimeter into a scratch copy instead; the
-        // presentation filters below then treat the outlined copy as the frame.
-        if let Some(r) = self.tools.oam_hover_rect(&self.session.gb) {
-            // SGB composites the 160×144 screen at (48,40) inside the 256×224 border.
-            let (ox, oy) = if src_w == SGB_BORDER_W {
-                (48, 40)
-            } else {
-                (0, 0)
-            };
-            self.overlay_frame.clear();
-            self.overlay_frame.extend_from_slice(frame);
-            invert_outline(
-                &mut self.overlay_frame,
-                src_w,
-                src_h,
-                r.x + ox,
-                r.y + oy,
-                r.w,
-                r.h,
-            );
-            frame = &self.overlay_frame;
-        }
-        // Presentation filters (frontend-only, golden-safe): copy the core frame
-        // into the scratch buffer and filter it in place, then present that.
-        if postfx::any_active(&self.settings) {
-            self.postfx_buf.clear();
-            self.postfx_buf.extend_from_slice(frame);
-            postfx::apply(&mut self.postfx_buf, &self.prev_frame, &self.settings);
-            self.prev_frame.clear();
-            self.prev_frame.extend_from_slice(frame);
-            frame = &self.postfx_buf[..];
-        } else if !self.prev_frame.is_empty() {
-            self.prev_frame.clear(); // drop history so re-enabling blend starts fresh
-        }
-        // Graphics → "doubler": scale2x the (filtered) frame to 2×, presented in
-        // its place; the blit then scales/letterboxes the larger image.
-        if self.settings.doubler {
-            postfx::scale2x(frame, src_w, src_h, &mut self.scale_buf);
-            frame = &self.scale_buf[..];
-            src_w *= 2;
-            src_h *= 2;
-        }
-        // The right-click menu is its own window now (see `menupopup`), so it is
-        // not part of the game-window overlay. The remaining overlays (info box /
-        // Options / path modal / key wizard) stay centred/modal here. (Captures
-        // locals, not `self`, so the disjoint field borrows stay clean.)
-        let info = self.info_box.as_ref();
-        let cheat = self.cheat_dialog.as_ref();
-        let cheat_list = &self.cheats;
-        let path_dlg = self.path_dialog.as_ref();
-        // `&mut` (not `&ref`, unlike the other overlays): the picker's `view()`
-        // is a live widget call, not a plain read — see `file_picker.rs`.
-        // Still a disjoint field borrow from `video`/`options`/etc above, and
-        // `video.draw`'s overlay is `FnOnce`, so moving this `Option<&mut _>`
-        // into the closure (called exactly once) borrow-checks cleanly.
-        let picker = self.file_picker.as_mut();
-        let options = self.options.as_ref();
-        let wizard = self.key_wizard.as_ref();
-        let gp_wizard = self.gamepad_wizard.as_ref();
-        let theme = self.settings.theme.resolve(&self.custom_themes);
-        let stretch = self.window_size == WindowSizeChoice::FullscreenStretched;
-        if let Err(e) = video.draw(window, frame, src_w, src_h, stretch, |canvas| {
-            // The info box / Load-ROM modal draw on top of everything (modal).
-            if let Some(i) = info {
-                windows::mainwin::render_info(canvas, i, &theme);
-            }
-            // The Cheat dialog draws as a modal over the LCD.
-            if let Some(cd) = cheat {
-                cheat_ui::render(canvas, cd, cheat_list, &theme);
-            }
-            // The Options control panel draws on top of the menus/info box.
-            if let Some(o) = options {
-                windows::options::render(canvas, o, &theme);
-            }
-            // A path modal draws above Options too — it can float over the dialog
-            // (the bootrom `...` browse) as well as stand alone.
-            if let Some(d) = path_dlg {
-                let area = canvas.bounds();
-                dialog::render(canvas, area, d, &theme);
-            }
-            // The in-app file browser is the same kind of standalone
-            // overlay as the path modal (never open at the same time as it).
-            if let Some(fp) = picker {
-                let area = canvas.bounds();
-                fp.render(canvas, area.w, area.h, &theme);
-            }
-            // The key-rebind wizard floats above even the Options dialog.
-            if let Some(w) = wizard {
-                w.render(canvas, &theme);
-            }
-            // The controller-rebind wizard shares the same modal slot.
-            if let Some(w) = gp_wizard {
-                w.render(canvas, &theme);
-            }
-        }) {
-            eprintln!("slopgb: failed to present frame: {e}");
-        }
-    }
-
     /// Apply an accepted Cheat Add/Edit entry to the cheat list.
     fn apply_cheat_edit(&mut self, e: &cheat_ui::CheatEdit) {
         match e.editing {
@@ -832,264 +593,6 @@ impl App {
     fn resync_pacing(&mut self) {
         self.next_frame = Instant::now();
         self.watchdog.reset();
-    }
-
-    fn handle_key(&mut self, event_loop: &ActiveEventLoop, key: &KeyEvent, focus: Focus) {
-        // In the debugger, memory-nav keys (arrows / PageUp-Down) auto-repeat so a
-        // held arrow scrolls the memory pane continuously; every other key — and
-        // the same arrows in the game window, where they are the D-pad — is
-        // de-repeated (see the guards below).
-        let nav = focus == Focus::Debugger
-            && matches!(
-                key.physical_key,
-                PhysicalKey::Code(
-                    KeyCode::ArrowUp | KeyCode::ArrowDown | KeyCode::PageUp | KeyCode::PageDown
-                )
-            );
-        if key.repeat && !nav {
-            return;
-        }
-        // Platform-independent key-repeat guard: some Wayland compositors don't
-        // set winit's `repeat` flag, so a held step key (F7/F3/F8) would step
-        // repeatedly. Drop a press for an already-held key; always honor releases.
-        if let PhysicalKey::Code(code) = key.physical_key {
-            if !nav && !input::accept_key(&mut self.held_keys, code, key.state.is_pressed()) {
-                return;
-            }
-        }
-        // The key-rebind wizard (Joypad → "configure keyboard") is the topmost
-        // game-window modal: every key is captured. Escape cancels the whole
-        // wizard (edits discarded); any other key binds the current button and
-        // advances — finishing commits the new bindings.
-        if focus == Focus::Game && key.state.is_pressed() && self.key_wizard.is_some() {
-            if let PhysicalKey::Code(code) = key.physical_key {
-                if code == KeyCode::Escape {
-                    self.key_wizard = None;
-                } else if let Some(w) = self.key_wizard.as_mut() {
-                    w.bind_key(code);
-                    self.commit_wizard_if_done();
-                }
-            }
-            self.request_game_redraw();
-            return;
-        }
-        // The controller-rebind wizard captures game-window keys too: Escape
-        // cancels it; other keys are swallowed (the binding target is the
-        // controller, not the keyboard) so they don't move the game mid-config.
-        if focus == Focus::Game && key.state.is_pressed() && self.gamepad_wizard.is_some() {
-            if let PhysicalKey::Code(KeyCode::Escape) = key.physical_key {
-                self.gamepad_wizard = None;
-            }
-            self.request_game_redraw();
-            return;
-        }
-        // A path modal captures every key while open (so typing a path can't
-        // fire a hotkey); Enter accepts, Esc cancels. Checked before Options
-        // because it can float over the dialog (the bootrom `...` browse).
-        if focus == Focus::Game && key.state.is_pressed() && self.path_dialog.is_some() {
-            if let Some(dk) = dialog_key_from(key) {
-                if let Some(result) = self.path_dialog.as_mut().map(|d| d.on_key(dk)) {
-                    self.resolve_path_dialog(result);
-                }
-            }
-            return;
-        }
-        // The in-app file browser captures keys with the same rule as the path
-        // modal above, translated through `file_picker::winit_key_to_picker`
-        // instead of `dialog_key_from`.
-        if focus == Focus::Game && key.state.is_pressed() && self.file_picker.is_some() {
-            if let PhysicalKey::Code(code) = key.physical_key {
-                if let Some(pk) =
-                    file_picker::winit_key_to_picker(code, key.text.as_deref(), self.modifiers)
-                {
-                    let outcome = self.file_picker.as_mut().map(|fp| fp.feed_key(pk));
-                    self.resolve_file_picker(outcome);
-                }
-            }
-            return;
-        }
-        // The Cheat dialog captures keys while open. An open Add/Edit entry takes
-        // every key (typing a code can't fire a hotkey); otherwise arrows move the
-        // selection, Space toggles enable, Delete removes, Escape closes.
-        if focus == Focus::Game && key.state.is_pressed() && self.cheat_dialog.is_some() {
-            if self
-                .cheat_dialog
-                .as_ref()
-                .is_some_and(cheat_ui::CheatDialog::editor_open)
-            {
-                if let PhysicalKey::Code(code) = key.physical_key {
-                    match code {
-                        KeyCode::Tab => {
-                            if let Some(d) = &mut self.cheat_dialog {
-                                d.switch_field();
-                            }
-                        }
-                        KeyCode::Enter | KeyCode::NumpadEnter => {
-                            let edit = self
-                                .cheat_dialog
-                                .as_mut()
-                                .and_then(cheat_ui::CheatDialog::accept);
-                            if let Some(e) = edit {
-                                self.apply_cheat_edit(&e);
-                            }
-                        }
-                        KeyCode::Escape => {
-                            if let Some(d) = &mut self.cheat_dialog {
-                                d.cancel_editor();
-                            }
-                        }
-                        KeyCode::Backspace => {
-                            if let Some(d) = &mut self.cheat_dialog {
-                                d.backspace();
-                            }
-                        }
-                        _ => {
-                            if let Some(ch) = key.text.as_ref().and_then(|t| t.chars().next()) {
-                                if !ch.is_control() {
-                                    if let Some(d) = &mut self.cheat_dialog {
-                                        d.type_char(ch);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            } else if let PhysicalKey::Code(code) = key.physical_key {
-                let sel = self.cheat_dialog.as_ref().map_or(0, |d| d.sel);
-                match code {
-                    KeyCode::Escape => self.cheat_dialog = None,
-                    KeyCode::ArrowUp => {
-                        if let Some(d) = &mut self.cheat_dialog {
-                            d.sel = d.sel.saturating_sub(1);
-                        }
-                    }
-                    KeyCode::ArrowDown => {
-                        let n = self.cheats.len();
-                        if let Some(d) = &mut self.cheat_dialog {
-                            d.sel = (d.sel + 1).min(n.saturating_sub(1));
-                        }
-                    }
-                    KeyCode::Space => {
-                        self.cheats.toggle(sel);
-                    }
-                    KeyCode::Delete => {
-                        self.cheats.remove(sel);
-                        self.clamp_cheat_sel();
-                    }
-                    _ => {}
-                }
-            }
-            self.request_game_redraw();
-            return;
-        }
-        // Options control panel is modal: while it's open every key is swallowed
-        // (so a hotkey can't fire underneath it); Escape cancels (reverts edits)
-        // and closes, matching a Windows dialog's Esc.
-        if focus == Focus::Game && key.state.is_pressed() && self.options.is_some() {
-            if let PhysicalKey::Code(KeyCode::Escape) = key.physical_key {
-                // Esc = Cancel: just drop the dialog without applying — the live
-                // state already equals the baseline (only OK/Apply push live), so
-                // discarding the unapplied `working` edits is the whole revert.
-                self.options = None;
-                self.request_game_redraw();
-            }
-            return;
-        }
-        // With a game-window overlay open, Escape closes it (rather than quitting
-        // the emulator) and is swallowed so it can't also fire a hotkey. The info
-        // box peels first; the right-click popup (its own window) also closes on
-        // its own Escape, but close it here too in case the game window kept focus.
-        let overlay_open = self.info_box.is_some() || self.menu_popup.is_some();
-        if focus == Focus::Game && key.state.is_pressed() && overlay_open {
-            if let PhysicalKey::Code(KeyCode::Escape) = key.physical_key {
-                if self.info_box.take().is_none() {
-                    self.menu_popup = None;
-                }
-                self.request_game_redraw();
-                return;
-            }
-        }
-        // Modal capture: while the debugger's modal prompt (Go to… / edit
-        // register) is open, every key goes to it (so typing an address can't
-        // trigger a debugger hotkey). An `edit register` accept yields a
-        // register write, applied through the same path a menu/click uses.
-        if focus == Focus::Debugger && key.state.is_pressed() && self.tools.debugger_modal_active()
-        {
-            if let Some(dk) = dialog_key_from(key) {
-                if let Some(outcome) = self.tools.feed_debugger_dialog(dk) {
-                    self.apply_menu_outcome(outcome, event_loop);
-                }
-            }
-            return;
-        }
-        let PhysicalKey::Code(code) = key.physical_key else {
-            return;
-        };
-        let pressed = key.state.is_pressed();
-        // Game Boy buttons resolve through the rebindable map first, before the
-        // focus-specific actions — but only in the game window. A tool window
-        // (e.g. the debugger) must not drive the joypad, so its arrow keys can
-        // scroll the memory pane instead of moving the D-pad.
-        if focus == Focus::Game {
-            if let Some(b) = self.bindings.button_for(code) {
-                self.set_button(code, b, pressed);
-                return;
-            }
-        }
-        // bgb shows the debugger on Esc — it never quits the emulator. Handled
-        // here (not in the pure `input::map`) because honouring the Options
-        // "pressing Esc shows debugger" toggle needs the runtime setting. Toggles
-        // from any focus (game/viewer opens, debugger closes); the modal guards
-        // above already consumed Esc where a dialog was open. BUG-1.
-        if code == KeyCode::Escape {
-            if pressed && self.settings.esc_shows_debugger {
-                self.run_action(Action::ToggleTool(ui::ToolWindow::Debugger), event_loop);
-            }
-            return;
-        }
-        let Some(action) = input::map(code, self.modifiers, focus) else {
-            return;
-        };
-        match action {
-            Action::Turbo => {
-                self.turbo = pressed;
-                if !pressed {
-                    self.resync_pacing();
-                }
-            }
-            // Rewind while held (System → "Rewind enabled"); resume forward play
-            // on release. A no-op if rewind is off / the ring is empty.
-            Action::Rewind => {
-                self.rewinding = pressed;
-                if !pressed {
-                    self.resync_pacing();
-                }
-            }
-            // Rapid-fire A / B while held (Joypad "Rapid speed" cadence).
-            Action::RapidA => self.rapid_a = pressed,
-            Action::RapidB => self.rapid_b = pressed,
-            // Every other action fires on press only; the debugger menu items
-            // reuse this same dispatch via `run_action`, so a hotkey and its
-            // menu entry can never diverge.
-            _ if pressed => self.run_action(action, event_loop),
-            _ => {}
-        }
-    }
-
-    /// Open the Joypad "configure keyboard" wizard seeded from the live map.
-    pub(crate) fn open_key_wizard(&mut self) {
-        self.key_wizard = Some(keymap::KeyConfigWizard::open(self.bindings));
-    }
-
-    /// If the wizard has run through all eight buttons, commit its working map
-    /// to the live `bindings` and close it. Any buttons held under the old map
-    /// are released so a remap can't leave a key stuck down.
-    pub(crate) fn commit_wizard_if_done(&mut self) {
-        if let Some(bindings) = self.key_wizard.as_ref().and_then(|w| w.finished()) {
-            self.bindings = bindings;
-            self.release_all_input();
-            self.key_wizard = None;
-        }
     }
 
     /// After a single/over step, repaint the game window (the LCD may have
@@ -1145,9 +648,13 @@ impl App {
         }
     }
 
-    fn try_open_audio(&mut self) {
+    /// Open the audio stream if it isn't already. Returns the device error on
+    /// failure so a user-initiated open (Enable sound / a Sound-tab device change)
+    /// can surface it in a modal; the passive startup open just logs it, to avoid
+    /// nagging a deliberately audio-less (headless / VM) run every launch.
+    fn try_open_audio(&mut self) -> Result<(), String> {
         if self.audio.is_some() {
-            return;
+            return Ok(());
         }
         let prefs = self.audio_prefs();
         self.audio_prefs_applied = prefs.clone();
@@ -1157,8 +664,12 @@ impl App {
                 let mut pipe = AudioPipe::new_with_quality(out, self.settings.audio_hq);
                 pipe.set_volume(self.settings.volume, self.settings.mono);
                 self.audio = Some(pipe);
+                Ok(())
             }
-            Err(e) => eprintln!("slopgb: audio disabled: {e}"),
+            Err(e) => {
+                eprintln!("slopgb: audio disabled: {e}");
+                Err(e)
+            }
         }
     }
 
@@ -1170,7 +681,11 @@ impl App {
             return;
         }
         self.audio = None;
-        self.try_open_audio();
+        // A device/samplerate change the user just applied: surface a failure
+        // (else the stream silently drops with no clue why sound stopped).
+        if let Err(e) = self.try_open_audio() {
+            self.show_error("Audio device failed", e);
+        }
         self.resync_pacing();
     }
 
@@ -1205,6 +720,11 @@ impl App {
                 new.set_rtc_vba_export(self.settings.rtc_vba_sav);
                 new.set_rtc_bgb_legacy(self.settings.rtc_bgb_legacy);
                 self.session = new;
+                // A rejected/unreadable `.sav` is data the next save overwrites:
+                // surface it in a modal (it also went to the console at load).
+                if let Some(w) = self.session.load_warning.take() {
+                    self.show_error("Save file ignored", w);
+                }
                 // A loaded ROM starts emulation: leave the no-ROM blank state and
                 // (re)apply the DMG palette to the fresh machine (GameBoy::new
                 // resets it to the core grayscale default).
@@ -1290,54 +810,6 @@ fn cpu_usage_pct(delta_cycles: u64, delta_halt: u64) -> f64 {
     100.0 * active as f64 / delta_cycles as f64
 }
 
-/// A solid LCD frame filled with `color` (the palette's lightest shade) — the
-/// no-ROM blank screen. A free function so the fill is unit-testable.
-fn blank_frame(color: u32) -> Box<[u32; SCREEN_PIXELS]> {
-    Box::new([color; SCREEN_PIXELS])
-}
-
-/// XOR the RGB of the 1-pixel perimeter of the `w`×`h` box at `(x, y)` in a
-/// `fw`×`fh` frame, clipped to the frame. Inverting whatever it covers keeps the
-/// outline self-contrasting on any background; the blit forces alpha opaque after.
-/// Corner pixels are hit once (the side runs skip the top/bottom rows) so a double
-/// XOR can't cancel them back to invisible.
-fn invert_outline(frame: &mut [u32], fw: usize, fh: usize, x: i32, y: i32, w: i32, h: i32) {
-    let mut xor = |px: i32, py: i32| {
-        if (0..fw as i32).contains(&px) && (0..fh as i32).contains(&py) {
-            frame[py as usize * fw + px as usize] ^= 0x00FF_FFFF;
-        }
-    };
-    for cx in x..x + w {
-        xor(cx, y);
-        xor(cx, y + h - 1);
-    }
-    for cy in (y + 1)..(y + h - 1) {
-        xor(x, cy);
-        xor(x + w - 1, cy);
-    }
-}
-
-#[cfg(test)]
-mod overlay_tests {
-    use super::invert_outline;
-
-    #[test]
-    fn outline_inverts_perimeter_once_and_clips() {
-        // 4×4 frame, box covering it all: perimeter (12 px) flips, center (2×2) untouched.
-        let mut f = [0u32; 16];
-        invert_outline(&mut f, 4, 4, 0, 0, 4, 4);
-        for (i, &px) in f.iter().enumerate() {
-            let (x, y) = (i % 4, i / 4);
-            let edge = x == 0 || x == 3 || y == 0 || y == 3;
-            assert_eq!(px, if edge { 0x00FF_FFFF } else { 0 }, "px {i}");
-        }
-        // Off-frame box: fully clipped, no panic, no change.
-        let mut g = [7u32; 16];
-        invert_outline(&mut g, 4, 4, -8, -8, 4, 4);
-        assert_eq!(g, [7u32; 16]);
-    }
-}
-
 /// Insert `path` at the front of the recent-ROMs list (MN4): de-duplicated,
 /// most-recent first, capped at 10. A free function so the list logic is
 /// unit-testable without a live `App`.
@@ -1346,22 +818,6 @@ fn push_recent_into(recent: &mut Vec<PathBuf>, path: &Path) {
     recent.retain(|e| e != &p);
     recent.insert(0, p);
     recent.truncate(10);
-}
-
-/// Translate a winit key event into an abstract [`DialogKey`] for the modal
-/// prompt: the named editing keys (backspace / enter / escape), else the typed
-/// character.
-pub(crate) fn dialog_key_from(key: &KeyEvent) -> Option<DialogKey> {
-    if let PhysicalKey::Code(code) = key.physical_key {
-        match code {
-            KeyCode::Backspace => return Some(DialogKey::Backspace),
-            KeyCode::Enter | KeyCode::NumpadEnter => return Some(DialogKey::Enter),
-            KeyCode::Escape => return Some(DialogKey::Escape),
-            _ => {}
-        }
-    }
-    let ch = key.text.as_ref()?.chars().next()?;
-    (!ch.is_control()).then_some(DialogKey::Char(ch))
 }
 
 #[cfg(test)]

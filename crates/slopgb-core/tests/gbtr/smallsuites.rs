@@ -496,7 +496,7 @@ pub fn inventory() -> (Vec<String>, Vec<String>) {
 }
 
 /// Self-check: `claimed` and `exempted` are disjoint and together cover the
-/// on-disk `.gb`/`.gbc` set of [`SUITE_DIRS`] exactly (the global Phase B2
+/// on-disk `.gb`/`.gbc` set of [`SUITE_DIRS`] exactly (the global inventory
 /// guard re-asserts this across all suites later).
 #[test]
 fn smallsuites_inventory_covers_suite_dirs() {

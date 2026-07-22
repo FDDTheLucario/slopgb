@@ -90,16 +90,7 @@ fn stack_hit_test_honors_offset() {
     };
     let l = DebuggerLayout::for_size(AREA.w, AREA.h);
     // Row 0 of a stack scrolled down 2 words = SP - (2+0)*2 = SP - 4.
-    let t = target_at(
-        NOPS,
-        AREA,
-        &st,
-        0x0100,
-        0xFFFE,
-        l.stack.x + 2,
-        l.stack.y + 1,
-        |_| 0,
-    );
+    let t = target_at(NOPS, AREA, &st, 0xFFFE, l.stack.x + 2, l.stack.y + 1, |_| 0);
     assert_eq!(t, ClickTarget::Stack(0xFFFA));
 }
 
@@ -141,7 +132,7 @@ fn double_click_disasm_toggles_a_breakpoint() {
     // Row 2 of the disasm pane = pc + 2 = 0x0102 (NOPS = 1-byte lines).
     let (px, py) = (l.disasm.x + 9, l.disasm.y + 2 * lh + 1);
     assert_eq!(
-        on_double_click(NOPS, AREA, &st, 0x0100, 0xFFFE, px, py, |_| 0),
+        on_double_click(NOPS, AREA, &st, 0xFFFE, px, py, |_| 0),
         Some(MenuOutcome::Act(DebugAction::ToggleBreakpoint(
             0x0102, None
         ))),
@@ -149,22 +140,13 @@ fn double_click_disasm_toggles_a_breakpoint() {
     );
     // Off the disasm pane (the menu bar) it does nothing.
     assert_eq!(
-        on_double_click(
-            NOPS,
-            AREA,
-            &st,
-            0x0100,
-            0xFFFE,
-            l.menu.x + 2,
-            l.menu.y + 1,
-            |_| 0
-        ),
+        on_double_click(NOPS, AREA, &st, 0xFFFE, l.menu.x + 2, l.menu.y + 1, |_| 0),
         None
     );
     // With a context menu open, a double-click is swallowed.
     let mut st2 = DebuggerState::default();
-    on_right_click(NOPS, AREA, &mut st2, 0x0100, 0xFFFE, px, py, |_| 0);
-    assert!(on_double_click(NOPS, AREA, &st2, 0x0100, 0xFFFE, px, py, |_| 0).is_none());
+    on_right_click(NOPS, AREA, &mut st2, 0xFFFE, px, py, |_| 0);
+    assert!(on_double_click(NOPS, AREA, &st2, 0xFFFE, px, py, |_| 0).is_none());
 }
 
 #[test]

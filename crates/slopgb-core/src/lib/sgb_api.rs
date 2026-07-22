@@ -1,6 +1,6 @@
 //! Super Game Boy accessors on [`GameBoy`]: the colorized border surface and
 //! the SNES-side command seams (SOUND / SOU_TRN / OBJ_TRN / DATA_TRN /
-//! DATA_SND / flags + JUMP) the Phase-3 S-DSP consumes, plus the opt-in SGB
+//! DATA_SND / flags + JUMP) the S-DSP consumes, plus the opt-in SGB
 //! audio BIOS loader.
 //!
 //! A second `impl GameBoy` block, split out of `lib.rs` to keep it under the
@@ -24,32 +24,32 @@ impl GameBoy {
         self.bus.ppu().sgb_border()
     }
 
-    /// Drain one queued SGB SOUND ($08) effect event — the Phase-3 S-DSP seam.
+    /// Drain one queued SGB SOUND ($08) effect event — the S-DSP seam.
     /// `None` off SGB or when the queue is empty.
     pub fn sgb_take_sound_event(&mut self) -> Option<SgbSound> {
         self.bus.ppu_mut().sgb_take_sound_event()
     }
 
     /// The most recent SOU_TRN ($09) SPC700 program upload (4096 bytes captured
-    /// from the screen), or `None`. Phase-3 S-DSP seam.
+    /// from the screen), or `None`. S-DSP seam.
     pub fn sgb_sou_trn_data(&self) -> Option<&[u8]> {
         self.bus.ppu().sgb_sou_trn_data()
     }
 
     /// The most recent OBJ_TRN ($18) payload (SGB OBJ palettes / attributes), or
-    /// `None`. Phase-2/3 seam.
+    /// `None`. SNES-side seam.
     pub fn sgb_obj_trn_data(&self) -> Option<&[u8]> {
         self.bus.ppu().sgb_obj_trn_data()
     }
 
     /// The most recent DATA_TRN ($10) payload destined for SNES RAM, or `None`.
-    /// Phase-2/3 seam.
+    /// SNES-side seam.
     pub fn sgb_data_trn_data(&self) -> Option<&[u8]> {
         self.bus.ppu().sgb_data_trn_data()
     }
 
     /// Drain one queued DATA_SND ($0F) inline SNES-RAM write, or `None`.
-    /// Phase-2/3 seam.
+    /// SNES-side seam.
     pub fn sgb_take_data_snd(&mut self) -> Option<Vec<u8>> {
         self.bus.ppu_mut().sgb_take_data_snd()
     }

@@ -5,7 +5,12 @@ no unsafe) + `crates/slopgb` (frontend: winit/softbuffer/cpal + gilrs for game
 controllers, a BGB-style debugger UI) + `crates/slopgb-plugin-api` (guest SDK for
 Rust→wasm plugins) + `crates/slopgb-plugin-host` (the wasmi runtime — the one place
 `wasmi` is a dep, isolated so core stays zero-dep and the frontend keeps its lean
-dep set).
+dep set). Support crates: `slopfp` (dep-free file-picker state machine),
+`slopgb-sgb-coprocessor` (the SNES-side SGB machine the frontend drives), the
+clean-room chip cores `slopgb-snes-apu` (SPC700 + S-DSP) / `slopgb-w65c816` /
+`slopgb-snes-ppu` + their wasm wrappers
+`slopgb-{spc700,w65c816,snes-ppu,msu1}-plugin` (built by
+`cargo xtask stage-plugins`).
 
 **Plugins have three peer capability tiers, one loader each** (see
 [`crates/slopgb-plugin-host/CLAUDE.md`](crates/slopgb-plugin-host/CLAUDE.md)):
@@ -81,9 +86,10 @@ When a **hardware** question comes up, consult in order:
   `crates/slopgb-core/tests/gbtr/baselines/gambatte.txt`: every baselined cluster is an
   A/B-swept trade — one-sided "fixes" regress the now-green siblings.
 - No new deps in core (std only); no unsafe anywhere (`forbid(unsafe_code)`); clippy
-  `-D warnings` clean. The external runtime deps (`wasmtime` for the coprocessor +
-  per-frame plugin paths, `wasmi` for the tier-2 tool path whose store borrows the
-  live tool context) are quarantined in `crates/slopgb-plugin-host`; the guest SDK uses
+  `-D warnings` clean. The external runtime dep (`wasmi`, the sole wasm engine —
+  all three plugin tiers run on the interpreter; the coprocessor path holds
+  >=66fps on the pilot post-optimization) is quarantined in
+  `crates/slopgb-plugin-host`; the guest SDK uses
   `deny(unsafe_code)` + a scoped `allow` for two wasm linkage markers only (no
   `unsafe` blocks).
 - No god files: keep every `.rs` **under 1000 lines**. Split a growing file into

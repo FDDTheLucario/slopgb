@@ -264,9 +264,11 @@ pub fn render(
 /// bank 0; D000-DFFF follows SVBK.
 pub(crate) fn mem_bank_label(gb: &GameBoy, base: u16) -> Option<String> {
     match base {
-        0x4000..=0x7FFF => Some(format!("ROM{:02X}", gb.rom_bank())),
+        // Per-address: MBC6's window B (6000-7FFF) banks independently.
+        0x4000..=0x7FFF => Some(format!("ROM{:02X}", gb.rom_bank_at(base))),
         0x8000..=0x9FFF => Some(format!("VRM{}", gb.vram_bank())),
-        0xA000..=0xBFFF => gb.ram_bank().map(|b| format!("SRM{b:02X}")),
+        // Per-address: MBC6's RAM window B (B000-BFFF) banks independently.
+        0xA000..=0xBFFF => gb.ram_bank_at(base).map(|b| format!("SRM{b:02X}")),
         0xC000..=0xCFFF => Some("WRM0".to_string()),
         0xD000..=0xDFFF => Some(format!("WRM{}", gb.wram_bank())),
         _ => None,
@@ -312,9 +314,11 @@ pub(crate) fn effective_bank(sel: u16, count: u16) -> u16 {
 /// absent/disabled RAM chip) — the "follow live" bank, and the stepper's start.
 pub(crate) fn live_bank(gb: &GameBoy, base: u16) -> u16 {
     let b = match base {
-        0x4000..=0x7FFF => gb.rom_bank(),
+        // Per-address: MBC6's window B (6000-7FFF) banks independently.
+        0x4000..=0x7FFF => gb.rom_bank_at(base),
         0x8000..=0x9FFF => gb.vram_bank(),
-        0xA000..=0xBFFF => gb.ram_bank().unwrap_or(0),
+        // Per-address: MBC6's RAM window B (B000-BFFF) banks independently.
+        0xA000..=0xBFFF => gb.ram_bank_at(base).unwrap_or(0),
         0xD000..=0xDFFF => gb.wram_bank(),
         _ => 0,
     };
@@ -534,7 +538,7 @@ fn render_debugger(
     // The menu bar across the top, highlighting an open dropdown's parent label.
     debugger::render_menubar(c, l.menu, st.menu.as_ref().and_then(|m| m.bar), theme);
     // Disasm follows PC (or the pinned base); memory + stack from their bases.
-    let start = st.disasm_start(pc);
+    let start = st.disasm_start();
     let rows = debugger::render_disasm(
         c,
         scroll_content(l.disasm),

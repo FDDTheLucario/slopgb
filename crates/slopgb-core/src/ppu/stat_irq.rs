@@ -110,8 +110,8 @@ impl Ppu {
         self.vis_mode()
     }
 
-    /// Current (line, dot) — the rendering-FSM position, for the interconnect's
-    /// post-halt-wake LY read-phase carry (`Interconnect::halt_ly_phase`).
+    /// Current (line, dot) — the rendering-FSM position (the interconnect uses
+    /// the line for the DMG line-153 speed-switch LY quirk).
     pub(crate) fn line_dot(&self) -> (u8, u16) {
         (self.line, self.dot)
     }
@@ -354,7 +354,7 @@ impl Ppu {
     /// Recompute the readable comparison flag (`cmp`), the IRQ-side
     /// comparison (`cmp_irq`) and the legacy line level (`stat_line` —
     /// kept for the LCD-off edge path and the CGB FF45 trigger's level
-    /// check; IF emission no longer hangs on it).
+    /// check).
     pub(super) fn refresh_cmp(&mut self, from_tick: bool) {
         if self.enabled {
             self.cmp = self.compare_ly() == Some(self.lyc);

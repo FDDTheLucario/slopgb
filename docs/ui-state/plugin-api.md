@@ -262,11 +262,30 @@ pattern (the host writes into a guest-owned buffer through wasmi's bounds-checke
   only the requested chunk crosses. `key`'s meaning is a host↔plugin convention
   (MSU-1: the audio track number, or `DATA_FILE_KEY` for the data ROM).
 
-**Orchestration + snapshots (ABI v5–v6).** The exports the SGB coprocessor uses
+**Manifest (ABI v6).** A coprocessor self-describes through the `Coprocessor::MANIFEST`
+associated const (default empty). The generated `slopgb_manifest` export ships it over
+the emit channel (kind `EMIT_KIND_MANIFEST`); the host parses it in
+`LoadedCoprocessor::manifest() -> Option<Manifest>`. The format is line-based UTF-8, one
+record per line, TAB-separated, first field = record type; unknown record types are
+ignored, so the schema grows without an ABI break. Records:
+
+```text
+id\t<stable-token>            logical identity + role key (e.g. "msu1")
+name\t<display name>          human label
+provides\t<role>            (0..n) a capability slot this chip can fill
+flag\t<name>\t<arg>\t<help>  (0..n) a CLI flag this plugin contributes
+```
+
+This lets a caller bind a chip by declared identity/role instead of by filename, and lets
+the frontend surface a plugin's contributed flags. Optional and metadata-only: an absent
+or empty manifest parses to `None` ("undeclared"), and its absence never fails a load —
+so it is golden-neutral. Proof: `msu1_roundtrip::manifest_self_describes_the_chip_and_its_flag`.
+
+**Orchestration + snapshots (ABI v5, v7).** The exports the SGB coprocessor uses
 to install firmware into and snapshot its chips: `set_pc` / `write_ram` /
 `read_ram` (v5 — memory peek/poke; reads ride the emit channel as
 `EMIT_KIND_RAM`) and `save_state` / `load_state` (v5 — opaque chip state as
-`EMIT_KIND_STATE`). An audio chip additionally exports `dump_spc` (v6): it
+`EMIT_KIND_STATE`). An audio chip additionally exports `dump_spc` (v7): it
 assembles a `.spc` (SPC700 Sound File) from its ARAM + registers + DSP and ships
 it over the emit channel under **its own `EMIT_KIND_SPC`** — a distinct kind from
 the save-state so the payload's intent is unambiguous. `LoadedCoprocessor::
@@ -323,8 +342,10 @@ byte-identical.
 The guest exports `slopgb_abi_version()`; the host refuses a plugin whose version
 differs from its own (`ABI_VERSION`). Rebuild a plugin against the matching SDK
 after an ABI bump. History: v3 added the coprocessor PCM drain; **v4** added the
-two coprocessor bulk imports (`host_recv` / `host_file`, above). The wat test
-fixtures interpolate `ABI_VERSION`, so a bump auto-tracks; the Rust SDK macros
+two coprocessor bulk imports (`host_recv` / `host_file`, above); **v5** added the
+five orchestration exports (`set_pc` / `write_ram` / `read_ram` / `save_state` /
+`load_state`); **v6** added the `slopgb_manifest` self-description export. The wat
+test fixtures interpolate `ABI_VERSION`, so a bump auto-tracks; the Rust SDK macros
 emit it too — no literal to chase.
 
 ## For the full contract

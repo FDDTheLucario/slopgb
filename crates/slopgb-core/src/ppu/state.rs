@@ -2,11 +2,11 @@
 //! `crate::state`). Covers the registers, OAM, both VRAM banks, the CGB palette
 //! RAM, the STAT/LYC event ladder, and the sub-dot fetch/FIFO pipeline (`eff`,
 //! `staged`, `render`). `model` is ROM-derived (not serialized — a state loads
-//! into a same-model machine). Every other field of the live struct is
-//! serialized, including the now-inert scratch (`eng_*`, `m0sh_*`, ...):
-//! production keeps them at their initial 0/false, so serializing them is
-//! harmless and guarantees no live field is silently dropped from a future
-//! round-trip.
+//! into a same-model machine); every other field of the live struct is
+//! serialized in declaration order, so no field is silently dropped from a
+//! round-trip. A few fields are dead scratch (`lcd_regs_written`,
+//! `ack_squash_ppu*`) kept only for a stable serialized layout; they are
+//! serialized like the rest.
 //! Live-debugger/UI only, so golden-safe.
 
 use super::*;

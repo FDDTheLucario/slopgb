@@ -163,7 +163,6 @@ impl ToolWindows {
     /// disasm to a match and remembers it for "Continue search"; a miss leaves
     /// the view unchanged.
     pub fn debugger_search(&mut self, gb: &GameBoy) {
-        let pc = gb.cpu_regs().pc;
         let Some(view) = self.debugger_view_mut() else {
             return;
         };
@@ -173,7 +172,7 @@ impl ToolWindows {
             }
             let from = s
                 .search_hit
-                .map_or_else(|| s.disasm_start(pc), |h| h.wrapping_add(1));
+                .map_or_else(|| s.disasm_start(), |h| h.wrapping_add(1));
             if let Some(addr) = debugger::find_match(|a| gb.debug_read(a), from, &s.search_query) {
                 s.disasm_base = addr;
                 s.pinned = true;
@@ -232,7 +231,7 @@ impl ToolWindows {
     #[must_use]
     pub fn debugger_disasm_ref(&self, pc: u16) -> u16 {
         match self.debugger_view().map(|v| &v.state) {
-            Some(WinState::Debugger(s)) => s.disasm_start(pc),
+            Some(WinState::Debugger(s)) => s.disasm_start(),
             _ => pc,
         }
     }
@@ -245,7 +244,7 @@ impl ToolWindows {
         const COUNT: usize = 4096;
         let pc = gb.cpu_regs().pc;
         let (start, hints, fmt) = match self.debugger_view().map(|v| &v.state) {
-            Some(WinState::Debugger(s)) => (s.disasm_start(pc), s.data_hints.clone(), s.disasm_fmt),
+            Some(WinState::Debugger(s)) => (s.disasm_start(), s.data_hints.clone(), s.disasm_fmt),
             _ => (
                 pc,
                 std::collections::BTreeSet::new(),

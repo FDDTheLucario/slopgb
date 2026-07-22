@@ -330,7 +330,7 @@ impl DebuggerState {
     /// is authoritative — [`disasm_follow`](Self::disasm_follow) keeps it tracking
     /// PC (unless pinned) before each render, so this is just the base.
     #[must_use]
-    pub fn disasm_start(&self, _pc: u16) -> u16 {
+    pub fn disasm_start(&self) -> u16 {
         self.disasm_base
     }
 
@@ -619,12 +619,10 @@ impl OpenMenu {
 /// `disasm_rows` from the same view-base the renderer used (variable-length
 /// instructions ⇒ fixed pixel math can't work), so hit-test and render agree.
 #[must_use]
-#[allow(clippy::too_many_arguments)]
 pub fn target_at(
     read: impl Fn(u16) -> u8,
     area: Rect,
     st: &DebuggerState,
-    pc: u16,
     sp: u16,
     px: i32,
     py: i32,
@@ -639,7 +637,7 @@ pub fn target_at(
         let rows = annotate_symbols(
             disasm_rows(
                 read,
-                st.disasm_start(pc),
+                st.disasm_start(),
                 row + 1,
                 &st.data_hints,
                 st.disasm_fmt,
@@ -679,10 +677,10 @@ pub fn target_at(
 }
 
 /// Build the context menu for a right-click `target`, item-for-item as bgb's
-/// captures (`docs/bgb-reference/menus/rc-*.png`). Items whose action isn't
-/// wired yet (Go to / copy / modify / watchpoints / register edit — later
-/// milestones) render **disabled** (greyed) so the menu structure matches bgb
-/// while only the working subset is selectable. `None` for a pane with no menu.
+/// captures (`docs/bgb-reference/menus/rc-*.png`). Items with no slopgb action
+/// (e.g. "Insert size") render **disabled** (greyed) so the menu structure
+/// matches bgb while the working subset stays selectable. `None` for a pane
+/// with no menu.
 #[must_use]
 pub fn menu_for(target: ClickTarget, st: &DebuggerState, origin: (i32, i32)) -> Option<OpenMenu> {
     let entries: Vec<(MenuItem, MenuChoice)> = match target {

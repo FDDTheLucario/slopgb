@@ -6,7 +6,7 @@ impl Interconnect {
     /// Double-speed accessibility bypass. At double speed the whole-M-cycle
     /// `m0_access_edge`/`pal_access_edge` stamp is mis-framed (the mode-0 flip
     /// lands at the reclocked render dot), so a DS OAM/VRAM/palette read routes
-    /// through the ported `Ppu::{oam,vram,pal}_*_blocked` laws instead (they
+    /// through the `Ppu::{oam,vram,pal}_*_blocked` laws instead (they
     /// carry the DS line-end / entry / palette-pipe boundaries). Single speed
     /// keeps the stamp.
     fn ev_ds_access(&self) -> bool {
@@ -220,7 +220,7 @@ impl Interconnect {
             // same edge as the OAM/VRAM read. The straddle stamp stays even at
             // double speed: bypassing it here drops the SameBoy-passing
             // `vramw_m3end_scx5_ds_4` (the write side of the co-temporality;
-            // only the reads + the OAM write resolve through the ported laws).
+            // only the reads + the OAM write resolve through the laws).
             0x8000..=0x9FFF if stamp_blocks(self.m0_access_edge, ACCESS_PHASE) => {}
             0x8000..=0x9FFF => self.intf |= self.ppu.write(addr, value) & IF_MASK,
             0xA000..=0xBFFF => self.cart.write_ram(addr, value),

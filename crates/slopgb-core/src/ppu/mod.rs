@@ -270,16 +270,11 @@ pub struct Ppu {
     model: Model,
     frame_count: u64,
 
-    /// The CPU has written an LCD register (FF40-FF4B) since power-on — the boot
-    /// hand-off PPU frame is no longer pristine. Inert: the DMG boot-frame read
-    /// law it gated — distinguishing the `poweron_*` ROMs' untouched boot frame
-    /// (pure NOP sled, no PPU write) from every other early reader, which
-    /// configures the PPU first (`lcdon_to_*`/`oam_read`/`sprite`/`win` toggle
-    /// the LCD (FF40), the gambatte kernel/halt STAT-ISR tests arm a mode
-    /// interrupt (FF41)) before reading its own frame at cc+0 — was removed
-    /// along with the deferred clock that used to consult it. Never set to
-    /// `true` and never read anywhere in the crate today (only round-tripped
-    /// through save-state, `state.rs`): dead scratch, not a live gate.
+    /// The CPU has written an LCD register (FF40-FF4B) since power-on —
+    /// nominally "the boot hand-off PPU frame is no longer pristine". Dead
+    /// scratch: never set to `true` and never read for logic anywhere in the
+    /// crate; only round-tripped through save-state (`state.rs`) to keep the
+    /// serialized layout stable. Not a live gate.
     lcd_regs_written: bool,
 
     // Registers.
@@ -328,7 +323,7 @@ pub struct Ppu {
     ///   (`m0enable/lycdisable_ff41_scx*`: the dying LYC hold and the mode-0
     ///   rise are separated on hardware, collapsed by slopgb's early flip).
     eng_stat_pending: Option<EngStatPending>,
-    /// HALFDOT: a DMG FF41 engine-view (`eng_stat`) write scheduled to
+    /// A DMG FF41 engine-view (`eng_stat`) write scheduled to
     /// commit at its true WriteCpu sub-dot position, `(value, half_dots_left)`,
     /// counted down by the odd-half engine ([`Ppu::stat_update_half`]) so the
     /// disable/enable lands at the coincident LYC re-latch / mode-0 flip half-
@@ -352,19 +347,17 @@ pub struct Ppu {
     /// level-re-raise — strict edge). Armed to 2 at the deferred FF0F write,
     /// decremented per engine dot, one-shot on consumption.
     stat_if_squash: u8,
-    /// A planned PPU-side dispatch-ack squash — the intended replacement for
-    /// the interconnect's whole-dot bit-0/1 `ack_squash_dots` — designed so a
-    /// rise of the acked bit landing within the per-SOURCE window after the
-    /// ack merges into the dispatch (SameBoy: the rise fp at/before the SBACK
-    /// fp was already in the sampled IF); past it, it would survive and
-    /// re-set IF (the six `late_*_retrigger` rows). Intended windows in dots
-    /// (SS, DS): mode-0 (0, 1) · mode-2 pulse (0, 0) · LYC / mode-1 /
-    /// vblank-IF (2, 0), armed to 2 at `ack`, decremented per dot, consumed
-    /// as `ctr >= 3 − W`. **Dead**: no call site in the crate ever arms
-    /// `mask`/`ctr` to non-zero (confirmed by an assert-on-read probe across
-    /// the full gbtr battery — never trips), so both fields always read 0 and
-    /// the consumption sites below are unreachable in practice. `mask` names
-    /// the acked bit.
+    /// A PPU-side dispatch-ack squash: a rise of the acked bit landing within
+    /// the per-SOURCE window after the ack merges into the dispatch (SameBoy:
+    /// the rise fp at/before the SBACK fp was already in the sampled IF); past
+    /// it, it survives and re-sets IF (the six `late_*_retrigger` rows). Windows
+    /// in dots (SS, DS): mode-0 (0, 1) · mode-2 pulse (0, 0) · LYC / mode-1 /
+    /// vblank-IF (2, 0), armed to 2 at `ack`, decremented per dot, consumed as
+    /// `ctr >= 3 − W`. **Dead**: no call site ever arms `mask`/`ctr` to non-zero
+    /// (confirmed by an assert-on-read probe across the full gbtr battery — never
+    /// trips), so both fields always read 0 and the consumption sites (in
+    /// `reclock.rs`/`engine.rs`) are unreachable in practice. `mask` names the
+    /// acked bit.
     ack_squash_ppu_mask: u8,
     ack_squash_ppu: u8,
     /// The line-0 dot-4 OAM pulse's read-view age: armed (1)
@@ -518,16 +511,15 @@ pub struct Ppu {
     /// (one source per 0→1 edge); both false for a pure-LYC rise.
     stat_rise_m0: bool,
     /// Set by the interconnect's
-    /// `ack_impl` when it carried a STAT-ISR read (`carry_read`), so the
+    /// `ack_impl` when it carried a STAT-ISR read, so the
     /// FIRST FF41 mode read of the handler — now landed at SameBoy's absolute
     /// cfl — resolves its verdict against SameBoy's bare exit `SBex` instead of
     /// slopgb's native mode (a full 3↔0 override, both directions). Cleared by
-    /// the interconnect after that FF41 read (one-shot). This SCOPING is the
-    /// global-consistency fix: the blanket `M2HOLD` exit law fired for
-    /// non-carried polled/other-ISR reads too (dropping 50 SameBoy-passes whose
-    /// native frame was already correct); gating the SBex override on
-    /// `read_carried` confines it to exactly the reads the carry moved to
-    /// SameBoy's frame. LIVE: read unconditionally by the FF41 read laws
+    /// the interconnect after that FF41 read (one-shot). Gating the SBex
+    /// override on `read_carried` confines it to exactly the reads the carry
+    /// moved to SameBoy's frame — an unscoped override fires for non-carried
+    /// polled/other-ISR reads whose native frame is already correct and
+    /// regresses them. LIVE: read unconditionally by the FF41 read laws
     /// (`stat_irq/read_laws.rs`, `stat_irq/read_laws_exit.rs`) and cleared by
     /// the interconnect (`interconnect/bus.rs`).
     read_carried: bool,
@@ -593,21 +585,10 @@ pub struct Ppu {
     /// law), past the counter-pinned
     /// dispatch dot, while slopgb's window flip is flat at ~261. Set
     /// unconditionally in `m0_flip_events` when the flip fires on a
-    /// `win_active` single-speed line (0 = no hold); consumed only by
-    /// `vis_mode` — the IRQ dispatch (`line_render_done`) is NOT moved.
-    ///
-    /// **Validated foundation, currently INERT** (like `cycle_clock`/
-    /// `mode_timeline`): the rows it targets are blocked on a SEPARATE missing
-    /// piece — the want=3 window rows render BARE on the measurement frame
-    /// (`wy_ok=false`, a render-level WY-latch trigger gap, `win_active=false`
-    /// so the hold cannot reach them) and the win-active fails read BEFORE the
-    /// dispatch (want=0, need the opposite direction). Measured 0/233 alone;
-    /// it is the visible-mode half of the parallel window-length model
-    /// (which must also replicate the WY-latch trigger to drive it).
-    /// Confirmed by probe: forcing the set above off leaves
-    /// `golden_fingerprint` byte-identical today — the field IS set (no flag
-    /// gates it), it just never reaches a read that would observe it yet.
-    /// Reset at line start + on `m0_unflip`, like `vis_early`.
+    /// `win_active` single-speed line (0 = no hold); consumed by `vis_mode`
+    /// (`stat_irq.rs`: `dot < vis_hold_until` reads mode 3) — the IRQ dispatch
+    /// (`line_render_done`) is NOT moved. Reset at line start + on `m0_unflip`,
+    /// like `vis_early`.
     vis_hold_until: u16,
     /// The mode-0 STAT IRQ source level: rises on the visible flip's
     /// dot — 2 dots before the pipe end on a bare line, 1 in double
@@ -639,7 +620,7 @@ pub struct Ppu {
     /// SameBoy's `GB_STAT_update` rising-edge STAT interrupt line
     /// ([`StatUpdate`](crate::stat_update)), driven each dot from
     /// `mode_for_interrupt` | the LYC latch. This is the production STAT IRQ
-    /// engine; it replaced the gambatte per-source event engine, since removed.
+    /// engine.
     stat_update: crate::stat_update::StatUpdate,
     /// SameBoy `lyc_interrupt_line` (`display.c:534`): the LYC==LY STAT source
     /// as a *latch* — re-evaluated to `ly_for_comparison == LYC` whenever
@@ -689,8 +670,8 @@ pub struct Ppu {
     /// `m0_access_flip`'s bare-line gate: it routes the FF41 mode-bit read,
     /// which the OAM/VRAM-read gate does not cover, on exactly the lines the
     /// `m3stat_ds` cluster exercises. Bare-line DS reads reach FF41 through
-    /// the DMA-cycle / lcd-offset chains at a different sub-cycle offset, so a
-    /// bare-line override regresses them (the parked multi-chain problem). In
+    /// the DMA-cycle / lcd-offset chains at a different sub-cycle offset, so the
+    /// sprite-extended gate is the only line class this override covers. In
     /// CGB double speed the visible flip lands at a sub-dot (cc) phase the
     /// whole-dot grid cannot place, so a CPU STAT read whose M-cycle straddles
     /// the flip still reads mode 3 (gambatte's `m3stat_ds_1` rows). The
@@ -698,8 +679,7 @@ pub struct Ppu {
     /// half-classifies it against the dot-loop index (`2*(i+1) > dots`): a
     /// second-half flip holds the FF41 read at mode 3. The override is gated
     /// to double speed; the single-speed read, and DS reads reaching FF41
-    /// through other dispatch chains, are the parked multi-chain
-    /// problem.
+    /// through other dispatch chains, are not covered by it.
     /// `Some(lead_eighths)` when the flip lands this dot (the flip's sub-dot
     /// offset is carried here; `Some(0)` = net-zero whole-M-cycle commit),
     /// `None` otherwise.

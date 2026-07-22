@@ -570,8 +570,7 @@ fn gambatte_matrix() {
     harness::assert_against_baseline("gambatte", &results, &harness::parse_baseline(BASELINE_TXT));
 }
 
-/// The eager-clock (`eager`) pixel pin — the pin form of the
-/// `SLOPGB_PROBE_EV` two-bin for the eager render-reclock rows.
+/// The pixel-reference pin for the render-reclock rows.
 fn assert_pixel_leg_eager(root: &Path, rel: &str, model: Model) {
     assert_pixel_leg(root, rel, model, harness::boot, "eager");
 }

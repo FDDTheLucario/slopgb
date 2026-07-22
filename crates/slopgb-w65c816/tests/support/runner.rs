@@ -17,8 +17,10 @@ fn vectors_dir() -> Option<PathBuf> {
 }
 
 /// Run every vector for `opcode` (two hex digits) in both emulation and native
-/// mode. Absent vectors skip (unless `SLOPGB_REQUIRE_ROMS` is set). Panics on the
-/// first mismatch.
+/// mode. Absent vectors skip (unless `SLOPGB_REQUIRE_65816_VECTORS` is set —
+/// its own gate, not `SLOPGB_REQUIRE_ROMS`: the vectors are a ~2 GB download
+/// `test-roms/download.sh` does not fetch, so a ROM-requiring CI must still be
+/// able to skip them). Panics on the first mismatch.
 pub fn run_opcode(opcode: &str) {
     run_opcodes(&[opcode]);
 }
@@ -27,7 +29,7 @@ pub fn run_opcode(opcode: &str) {
 pub fn run_opcodes(opcodes: &[&str]) {
     let Some(dir) = vectors_dir() else {
         assert!(
-            std::env::var_os("SLOPGB_REQUIRE_ROMS").is_none(),
+            std::env::var_os("SLOPGB_REQUIRE_65816_VECTORS").is_none(),
             "65816 vectors missing; run test-roms/download-65816-tests.sh"
         );
         eprintln!("skipping: 65816 vectors not downloaded");
@@ -38,7 +40,7 @@ pub fn run_opcodes(opcodes: &[&str]) {
             let path = dir.join(format!("{op}.{mode}.json"));
             if !path.is_file() {
                 assert!(
-                    std::env::var_os("SLOPGB_REQUIRE_ROMS").is_none(),
+                    std::env::var_os("SLOPGB_REQUIRE_65816_VECTORS").is_none(),
                     "missing vector file {}",
                     path.display()
                 );

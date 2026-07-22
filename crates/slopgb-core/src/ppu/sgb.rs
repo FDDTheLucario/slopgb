@@ -8,7 +8,7 @@
 //! HLE port of SameBoy `Core/sgb.c` (`command_ready` / `GB_sgb_render`) — the
 //! palettes, attribute grid, window mask, the screen-capture VRAM transfers
 //! (`*_TRN`), the 256×224 border composite, and the sound/flag/data command
-//! state (Phase-2/3 audio seams).
+//! state (the SNES-side audio/data seams).
 //!
 //! **The VRAM-transfer trap:** the `*_TRN` commands do NOT read VRAM. The SNES
 //! captures the *rendered Game Boy screen* and reads its 2-bit pixel shades as
@@ -125,10 +125,10 @@ pub(super) struct SgbView {
     fade_from: Box<[u32; BORDER_PIXELS]>,
     fade_pending: bool,
 
-    // --- Phase 2/3 seams: stored, exposed read-only, not consumed this phase ---
+    // --- SNES-side seams: stored, exposed read-only for the host to drain ---
     /// OBJ_TRN ($18) captured payload (SGB OBJ palettes/attributes).
     obj_data: Option<Box<[u8; 4096]>>,
-    /// SOU_TRN ($09) captured SPC700 program (Phase 3 S-DSP feeds this).
+    /// SOU_TRN ($09) captured SPC700 program (the S-DSP feeds this).
     sou_trn: Option<Box<[u8; 4096]>>,
     /// DATA_TRN ($10) captured payload destined for SNES RAM.
     data_trn: Option<Box<[u8; 4096]>>,
@@ -147,7 +147,7 @@ pub(super) struct SgbView {
     char_rows: std::collections::VecDeque<(u8, Box<[u8; 320]>)>,
     /// DATA_SND ($0F) inline packets written to SNES RAM (drained by the host).
     data_snd: Vec<Vec<u8>>,
-    /// SOUND ($08) effect events (drained by the host / Phase 3).
+    /// SOUND ($08) effect events (drained by the host).
     sound_events: Vec<SgbSound>,
 
     /// ATRC_EN ($0C) / TEST_EN ($0D) / ICON_EN ($0E) / PAL_PRI ($19) flags.
@@ -155,7 +155,7 @@ pub(super) struct SgbView {
     test_en: bool,
     icon_en: bool,
     pal_pri: bool,
-    /// JUMP ($12) SNES target (24-bit PC), latched for Phase 2.
+    /// JUMP ($12) SNES target (24-bit PC), latched for the 65C816 consumer.
     jump: Option<u32>,
 }
 
