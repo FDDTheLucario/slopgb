@@ -14,6 +14,10 @@ pub const EMIT_KIND_STATE: i32 = 3;
 /// The [`crate::__emit`] `kind` `slopgb_read_ram` uses to push a read chunk of
 /// the chip's internal memory back to the host.
 pub const EMIT_KIND_RAM: i32 = 4;
+/// The [`crate::__emit`] `kind` `slopgb_manifest` uses to push the coprocessor's
+/// self-describing manifest (line-based UTF-8 text, see [`Coprocessor::MANIFEST`])
+/// back to the host.
+pub const EMIT_KIND_MANIFEST: i32 = 5;
 
 /// Read the host→guest **mailbox** — the bytes a game (or the frontend) last
 /// deposited for this coprocessor, e.g. a streaming-audio play-request written
@@ -61,6 +65,23 @@ pub fn read_file(key: u32, offset: u32, buf: &mut [u8]) -> usize {
 pub trait Coprocessor {
     /// Capabilities; subsystem hosting is the tier-3 gate.
     const CAPABILITIES: crate::Capabilities = crate::Capabilities::SUBSYSTEM;
+
+    /// A self-describing manifest the host reads at load to bind this chip by
+    /// declared identity/role rather than by filename. Line-based UTF-8, one
+    /// record per line, TAB-separated, first field = record type; unknown record
+    /// types are ignored so the schema can grow without an ABI break:
+    ///
+    /// ```text
+    /// id\t<stable-token>            e.g. "msu1" — logical identity + role key
+    /// name\t<display name>          human label for UI / logs
+    /// provides\t<role>             (0..n) a capability slot this chip can fill
+    /// flag\t<name>\t<arg>\t<help>  (0..n) a CLI flag this plugin contributes
+    /// ```
+    ///
+    /// Default: empty — an undeclared coprocessor (the host reports no manifest).
+    /// The generated `slopgb_manifest` export ships it over the emit channel as
+    /// [`crate::EMIT_KIND_MANIFEST`].
+    const MANIFEST: &'static str = "";
 
     /// Construct the coprocessor. Called once, when the host instantiates it.
     fn new() -> Self
@@ -149,6 +170,19 @@ macro_rules! slopgb_coprocessor_plugin {
         #[unsafe(no_mangle)]
         pub extern "C" fn slopgb_capabilities() -> i32 {
             <$ty as $crate::Coprocessor>::CAPABILITIES.bits() as i32
+        }
+
+        /// Ship the coprocessor's self-describing manifest to the host over the
+        /// emit channel (kind [`EMIT_KIND_MANIFEST`]); returns the byte count.
+        /// Empty for a chip that declares none.
+        ///
+        /// [`EMIT_KIND_MANIFEST`]: $crate::EMIT_KIND_MANIFEST
+        #[allow(unsafe_code)]
+        #[unsafe(no_mangle)]
+        pub extern "C" fn slopgb_manifest() -> i32 {
+            let m = <$ty as $crate::Coprocessor>::MANIFEST;
+            $crate::__emit($crate::EMIT_KIND_MANIFEST, m.as_bytes());
+            m.len() as i32
         }
 
         #[allow(unsafe_code)]

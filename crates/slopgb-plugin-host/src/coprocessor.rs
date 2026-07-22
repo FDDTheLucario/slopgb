@@ -2,11 +2,13 @@
 //! 65C816), driven by the host through reset / clock / comm-port calls. The
 //! chip's internal RAM stays inside the sandbox; only the comm ports cross.
 
-use slopgb_plugin_api::{ABI_VERSION, Capabilities, EMIT_KIND_PCM, EMIT_KIND_RAM, EMIT_KIND_STATE};
+use slopgb_plugin_api::{
+    ABI_VERSION, Capabilities, EMIT_KIND_MANIFEST, EMIT_KIND_PCM, EMIT_KIND_RAM, EMIT_KIND_STATE,
+};
 use wasmi::{Engine, Module, Store, TypedFunc};
 
-use crate::LoadError;
 use crate::host::{HostState, build_linker};
+use crate::{LoadError, Manifest};
 
 /// One instantiated coprocessor plugin and the entry points the host drives it
 /// with.
@@ -22,6 +24,9 @@ pub struct LoadedCoprocessor {
     read_ram: TypedFunc<(i32, i32), i32>,
     save_state: TypedFunc<(), i32>,
     load_state: TypedFunc<(), ()>,
+    /// Optional (v6): a chip that predates the manifest export, or a hand-rolled
+    /// module without one, simply reports no manifest.
+    manifest: Option<TypedFunc<(), i32>>,
 }
 
 impl LoadedCoprocessor {
@@ -93,6 +98,10 @@ impl LoadedCoprocessor {
         let load_state = instance
             .get_typed_func::<(), ()>(&store, "slopgb_load_state")
             .map_err(|_| LoadError::MissingExport("slopgb_load_state"))?;
+        // Optional: manifest is metadata, so its absence never fails a load.
+        let manifest = instance
+            .get_typed_func::<(), i32>(&store, "slopgb_manifest")
+            .ok();
 
         Ok(Self {
             store,
@@ -106,7 +115,22 @@ impl LoadedCoprocessor {
             read_ram,
             save_state,
             load_state,
+            manifest,
         })
+    }
+
+    /// Read the coprocessor's self-describing [`Manifest`] (v6). `None` if the
+    /// module exports none, declares an empty one, or emits a malformed blob —
+    /// all of which mean "undeclared", so the caller falls back to its own
+    /// wiring (e.g. filename convention).
+    pub fn manifest(&mut self) -> Option<Manifest> {
+        let func = self.manifest?;
+        self.store.data_mut().emitted = None;
+        func.call(&mut self.store, ()).ok()?;
+        match self.store.data_mut().emitted.take() {
+            Some((EMIT_KIND_MANIFEST, buf)) => Manifest::parse(&buf),
+            _ => None,
+        }
     }
 
     /// Power-on / reset the chip.

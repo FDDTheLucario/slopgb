@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use slopgb_msu1_plugin::{DATA_FILE_KEY, PCM_MAGIC};
-use slopgb_plugin_host::LoadedCoprocessor;
+use slopgb_plugin_host::{FlagContribution, LoadedCoprocessor};
 
 fn build_plugin() -> Option<Vec<u8>> {
     let manifest = concat!(
@@ -61,6 +61,29 @@ fn scaled(s: i16) -> i16 {
 // Status-register bits (MSU_STATUS `$2000` read).
 const ST_TRACK_MISSING: u8 = 1 << 3;
 const ST_AUDIO_PLAYING: u8 = 1 << 4;
+
+#[test]
+fn manifest_self_describes_the_chip_and_its_flag() {
+    let Some(bytes) = build_plugin() else {
+        eprintln!("skipping manifest_self_describes_the_chip_and_its_flag: wasm32 unavailable");
+        return;
+    };
+    // The v6 manifest export is read from the real wasm and parsed host-side: the
+    // chip self-describes its id/name and contributes its `--msu1` CLI flag, so a
+    // caller binds it by declared identity instead of by filename.
+    let mut cop = LoadedCoprocessor::load(&bytes).unwrap();
+    let m = cop.manifest().expect("msu1 declares a manifest");
+    assert_eq!(m.id, "msu1");
+    assert_eq!(m.name, "MSU-1 Streaming Audio");
+    assert_eq!(
+        m.flags,
+        [FlagContribution {
+            name: "msu1".into(),
+            arg: "dir".into(),
+            help: "Load an MSU-1 streaming-audio pack from DIR".into(),
+        }]
+    );
+}
 
 #[test]
 fn register_interface_selects_seeks_and_plays() {
