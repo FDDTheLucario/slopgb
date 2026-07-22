@@ -116,6 +116,7 @@ fn reference_plugins_match_builtins_byte_for_byte() {
             Call::Vram {
                 view: "bg".into(),
                 scale: 1,
+                no_palette: false,
             },
         ),
         (
@@ -124,6 +125,7 @@ fn reference_plugins_match_builtins_byte_for_byte() {
             Call::Vram {
                 view: "palette".into(),
                 scale: 3,
+                no_palette: false,
             },
         ),
         ("screencap", "{}".into(), Call::Screencap { scale: 1 }),

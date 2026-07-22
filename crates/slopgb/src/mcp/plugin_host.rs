@@ -50,7 +50,7 @@ impl ToolContext for FrontendToolContext<'_> {
         )
     }
     fn vram_png(&self, view: &str, scale: u32) -> Vec<u8> {
-        match vram::capture(self.gb, view) {
+        match vram::capture(self.gb, view, false) {
             Ok(bmp) => tools::encode_scaled(&bmp.px, bmp.w, bmp.h, scale),
             Err(_) => Vec::new(),
         }

@@ -72,6 +72,40 @@ fn build_call_validates_arguments() {
         Ok(Call::Screencap { scale: 5 })
     ));
     assert!(build_call("screencap", Some(&Json::obj([("scale", Json::str("9x"))]))).is_err());
+    // vram's no_palette flag defaults off and reads a real bool or a "true" string.
+    assert!(matches!(
+        build_call("vram", Some(&Json::obj([("view", Json::str("bg"))]))),
+        Ok(Call::Vram {
+            no_palette: false,
+            ..
+        })
+    ));
+    assert!(matches!(
+        build_call(
+            "vram",
+            Some(&Json::obj([
+                ("view", Json::str("oam")),
+                ("no_palette", Json::Bool(true)),
+            ])),
+        ),
+        Ok(Call::Vram {
+            no_palette: true,
+            ..
+        })
+    ));
+    assert!(matches!(
+        build_call(
+            "vram",
+            Some(&Json::obj([
+                ("view", Json::str("oam")),
+                ("no_palette", Json::str("true")),
+            ])),
+        ),
+        Ok(Call::Vram {
+            no_palette: true,
+            ..
+        })
+    ));
 }
 
 #[test]
