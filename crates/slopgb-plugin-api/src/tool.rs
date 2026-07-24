@@ -62,6 +62,17 @@ pub fn __emit(kind: i32, bytes: &[u8]) {
     abi::host_emit(kind, bytes.as_ptr() as i32, bytes.len() as i32);
 }
 
+/// Push `words` as their little-endian byte image. wasm linear memory is
+/// little-endian, so a `[u16]` already *is* that image: the host reads the
+/// slice's own region and the guest never materializes the bytes. Use this
+/// instead of [`__emit`] for a large word payload (a framebuffer) — building
+/// the intermediate `Vec<u8>` costs an interpreted pass over every byte, which
+/// dwarfs the host's single bulk copy.
+#[doc(hidden)]
+pub fn __emit_words(kind: i32, words: &[u16]) {
+    abi::host_emit(kind, words.as_ptr() as i32, (words.len() * 2) as i32);
+}
+
 /// Export one or more [`ToolPlugin`]s as a loadable tool module: generates the
 /// ABI / capability query, the per-tool metadata + count queries, and the
 /// argument-in, result-out call entry points. Tools are addressed by their index

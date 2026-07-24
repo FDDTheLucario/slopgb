@@ -364,6 +364,15 @@ dump_spc` decodes that kind; the SGB coprocessor surfaces it as `export_spc` for
 the frontend's "Export SPC" (see
 [`docs/hardware-state/sgb-audio.md`](../hardware-state/sgb-audio.md)).
 
+The guest half of `read_ram` is `Coprocessor::emit_ram`, defaulted to
+`read_ram` + `__emit`. A chip whose bytes are already contiguous in guest memory
+overrides it and hands the host that region instead — `__emit_words` for a `[u16]`
+buffer, whose little-endian wasm memory already *is* the byte stream. No ABI
+change: the export shape and emit kind are untouched, only what the guest passes
+to `host_emit`. The SNES PPU's 112 KB framebuffer does exactly this; building
+those bytes in the guest cost ~4.5 ms a frame against a ~4 µs host copy (see
+[`docs/hardware-state/sgb-snes-ppu.md`](../hardware-state/sgb-snes-ppu.md)).
+
 ## Golden-safe rules
 
 The one invariant this project guards is that no UI/extension feature perturbs

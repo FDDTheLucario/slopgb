@@ -236,11 +236,12 @@ impl LoadedCoprocessor {
                 (addr as i32, i32::try_from(len).unwrap_or(i32::MAX)),
             )?
             .max(0) as usize;
-        let bytes = match self.store.data_mut().emitted.take() {
+        let mut bytes = match self.store.data_mut().emitted.take() {
             Some((EMIT_KIND_RAM, buf)) => buf,
             _ => return Ok(Vec::new()),
         };
-        Ok(bytes.into_iter().take(n).collect())
+        bytes.truncate(n);
+        Ok(bytes)
     }
 
     /// Snapshot the chip's full state to bytes (guest ships them over the emit

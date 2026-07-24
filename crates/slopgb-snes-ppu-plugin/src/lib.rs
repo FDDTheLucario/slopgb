@@ -17,7 +17,11 @@
 
 #![deny(unsafe_code)]
 
-use slopgb_plugin_api::{Coprocessor, slopgb_coprocessor_plugin};
+use core::ops::Range;
+
+use slopgb_plugin_api::{
+    __emit, __emit_words, Coprocessor, EMIT_KIND_RAM, slopgb_coprocessor_plugin,
+};
 use slopgb_snes_ppu::{PPU_STATE_LEN, SnesPpu};
 
 /// Frame geometry: 256x224 (fullsnes "SNES PPU Resolution", NTSC).
@@ -41,6 +45,19 @@ pub const HW_PORTS: u32 = HOST_WIN + 0x2000;
 
 /// Serialized state: the PPU snapshot + the framebuffer + the cycle counter.
 const STATE_LEN: usize = PPU_STATE_LEN + FB_BYTES + 8;
+
+/// The framebuffer words a `read_ram(addr, len)` covers, when it lands whole
+/// and word-aligned inside the frame. `None` for every other request (outside
+/// the window, odd start or length, running past the last pixel) — those keep
+/// the general [`Coprocessor::read_ram`] path, which zero-fills the parts it
+/// cannot serve.
+fn fb_words(addr: u32, len: usize) -> Option<Range<usize>> {
+    let off = addr.checked_sub(HW_FB)? as usize;
+    if off % 2 != 0 || len % 2 != 0 || off > FB_BYTES || len > FB_BYTES - off {
+        return None;
+    }
+    Some(off / 2..(off + len) / 2)
+}
 
 struct SnesPpuCop {
     ppu: SnesPpu,
@@ -122,6 +139,25 @@ impl Coprocessor for SnesPpuCop {
             }
         }
         out
+    }
+
+    fn emit_ram(&mut self, addr: u32, len: usize) -> usize {
+        // The framebuffer is `[u16]` in little-endian wasm memory, so its own
+        // bytes already are the RGB555 stream `read_ram` builds: hand the host
+        // that region and let it do the single bulk copy. Materializing the
+        // 112 KB frame byte by byte instead cost ~4.5 ms per frame — three
+        // orders of magnitude more than the copy it fed.
+        match fb_words(addr, len) {
+            Some(r) => {
+                __emit_words(EMIT_KIND_RAM, &self.fb[r]);
+                len
+            }
+            None => {
+                let bytes = self.read_ram(addr, len);
+                __emit(EMIT_KIND_RAM, &bytes);
+                bytes.len()
+            }
+        }
     }
 
     fn save_state(&self) -> Vec<u8> {

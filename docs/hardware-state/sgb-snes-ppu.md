@@ -35,6 +35,34 @@ SNES V-counter each flush (`PPU_HW_LINE`), latches a frame at the vblank
 edge, and `GameBoy::take_snes_frame` hands it to the frontend (which
 presents SNES > border > bare, `snes_rgb555_px` expanding BGR555).
 
+## Frame handoff (zero-copy out of the plugin)
+
+`take_snes_frame` pulls the whole 112 KB framebuffer once per vblank through
+`LoadedCoprocessor::read_ram(PPU_HW_FB, …)`. The plugin serves that pull from
+`Coprocessor::emit_ram` (the guest half of `slopgb_read_ram`, defaulted to
+`read_ram` + `__emit`): its `fb` is `[u16]` in little-endian wasm memory, which
+already *is* the RGB555 byte stream, so a word-aligned request wholly inside the
+frame is handed over as a region (`__emit_words`) and the host's existing bulk
+`Memory::read` copies it once. Everything else (odd start or length, past the
+last pixel, outside the host window) still goes through `read_ram`, which
+zero-fills what it cannot serve; `fb_words` decides which, and its agreement with
+`read_ram` is pinned byte-for-byte by
+`fb_word_range_is_byte_identical_to_read_ram` (native) plus
+`whole_frame_pull_matches_the_byte_by_byte_path` (across the wasm boundary).
+
+Materializing those bytes in the guest instead cost **~4.5 ms per frame** — a
+per-byte interpreted loop against a ~4 µs host memcpy of the same bytes — and was
+roughly half of all arcade-takeover wall time. Removing it took the headless
+arcade bench from ~96 to ~184 fps median (interleaved A/B of the two
+`snes-ppu.wasm` builds, same host binary, 500 frames x3 each). The
+`SLOPGB_PERF=1` sections only cover `SgbCoprocessor::flush`, so the win shows up
+as the ~2.4 s/500 frames that used to sit *outside* the accounted total
+disappearing: after the change, arcade wall time and the perf total agree.
+
+No ABI change: the export shape (`slopgb_read_ram(addr, len) -> i32`, emitting
+`EMIT_KIND_RAM`) is untouched, `emit_ram` is a defaulted guest-side trait method,
+so `ABI_VERSION` stays 7.
+
 ## Renderer shape (interpreter-speed, oracle-pinned)
 
 The scanline renderers are written for interpreted-wasm speed with

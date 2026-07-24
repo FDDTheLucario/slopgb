@@ -13,7 +13,7 @@ pub use coprocessor::{
     Coprocessor, EMIT_KIND_MANIFEST, EMIT_KIND_PCM, EMIT_KIND_RAM, EMIT_KIND_SPC, EMIT_KIND_STATE,
     read_file, recv_mailbox,
 };
-pub use tool::{__emit, ToolPlugin, ToolResult};
+pub use tool::{__emit, __emit_words, ToolPlugin, ToolResult};
 pub use view::{GameBoyView, Registers};
 
 /// What a plugin is allowed to do, as a bit set. Tier 1 ([`INTROSPECTION`]) is

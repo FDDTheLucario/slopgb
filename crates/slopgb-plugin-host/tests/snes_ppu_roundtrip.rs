@@ -70,3 +70,46 @@ fn snes_ppu_round_trip() {
     cop.reset().unwrap();
     assert_eq!(cop.read_ram(HW_FB + 5 * 512, 2).unwrap(), vec![0, 0]);
 }
+
+/// Frame geometry (`slopgb-snes-ppu-plugin` consts — wasm-loaded, never linked).
+const FB_BYTES: usize = 256 * 224 * 2;
+
+/// The whole-frame pull the SGB coprocessor makes every vblank is served by the
+/// plugin's zero-copy path (it hands the host its framebuffer region instead of
+/// building the bytes). Pin it against the general path: a request the fast path
+/// declines (odd length, odd start) is answered by the byte-by-byte reader, so
+/// the two must agree everywhere on a frame with distinct content per row.
+#[test]
+fn whole_frame_pull_matches_the_byte_by_byte_path() {
+    let Some(bytes) = build_plugin() else {
+        eprintln!("skipping whole_frame_pull_matches_the_byte_by_byte_path: no wasm32");
+        return;
+    };
+    let mut cop = LoadedCoprocessor::load(&bytes).unwrap();
+    cop.reset().unwrap();
+
+    // Full brightness, then one row per backdrop colour: every row differs, and
+    // the two bytes of a pixel differ from each other, so a wrong offset,
+    // length, or byte order cannot compare equal by accident.
+    cop.port_write(0x00, 0x0F).unwrap();
+    for y in 0..224u16 {
+        cop.port_write(0x21, 0x00).unwrap();
+        cop.port_write(0x22, y as u8).unwrap();
+        cop.port_write(0x22, (0x2A ^ y >> 3) as u8).unwrap();
+        cop.write_ram(0x0100_0000, &y.to_le_bytes()).unwrap();
+    }
+
+    let frame = cop.read_ram(HW_FB, FB_BYTES).unwrap();
+    assert_eq!(frame.len(), FB_BYTES, "the whole frame crossed");
+    assert_eq!(&frame[..4], &[0x00, 0x2A, 0x00, 0x2A], "row 0 backdrop");
+    assert_eq!(
+        &frame[223 * 512..223 * 512 + 2],
+        &[223, 0x2A ^ (223 >> 3)],
+        "row 223 backdrop"
+    );
+
+    let odd_len = cop.read_ram(HW_FB, FB_BYTES - 1).unwrap();
+    assert_eq!(odd_len, frame[..FB_BYTES - 1], "same bytes, general path");
+    let odd_start = cop.read_ram(HW_FB + 1, 3).unwrap();
+    assert_eq!(odd_start, frame[1..4], "unaligned start still lines up");
+}
