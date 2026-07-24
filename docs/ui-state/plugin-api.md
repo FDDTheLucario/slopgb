@@ -450,6 +450,34 @@ five orchestration exports (`set_pc` / `write_ram` / `read_ram` / `save_state` /
 test fixtures interpolate `ABI_VERSION`, so a bump auto-tracks; the Rust SDK macros
 emit it too — no literal to chase.
 
+A **stale plugin is diagnosed, not silent.** Because a plugin's CLI flags and menu
+rows come from its manifest, a plugin the registry cannot load contributes nothing,
+and the symptom surfaces as `unknown option '--sf2'` — which blames the flag rather
+than the plugin that vanished. `PluginRegistry::scan` therefore records any
+coprocessor it had to skip (`PluginRegistry::skipped`) and the frontend prints it:
+
+```
+slopgb: plugin ignored — sf2.wasm: plugin ABI 6 != host ABI 7; re-run `cargo xtask stage-plugins`
+```
+
+Only a module that *is* a coprocessor but cannot be used is reported (a stale ABI, or
+no manifest). A tier-1/tier-2 plugin sharing the directory fails the coprocessor
+export lookup by design — that is a loader mismatch, stays silent, and would
+otherwise print a line per plugin on every launch.
+
+## Why wasmi, and the JIT escape hatch
+
+All three tiers run on the **wasmi interpreter** — there is no JIT. The coprocessor
+path briefly ran on wasmtime (Cranelift) when three interpreted chips managed only a
+few fps; the renderer work that followed (run-decode, LUT planes, batched wasm
+crossings, unresolved-index merge) made the interpreter fast enough, and wasmtime was
+reverted for one engine instead of two, a Cranelift-free dep tree, and a 20.8 -> 8.9 MB
+release binary. The cost is a **~2x ceiling on fast-forward** with the full plugin
+stack: profiling attributes ~98% of `spc`+`cpu` time to `run_until` itself, i.e. pure
+interpretation, so no host-side lever reaches it. wasmtime remains a revert away
+(5-8x headroom) if a title ever needs it; the tier-2 tool path could not follow, since
+its per-call store borrows the live tool context.
+
 ## For the full contract
 
 Run `cargo doc -p slopgb-plugin-api --open` — the SDK is the authoritative,

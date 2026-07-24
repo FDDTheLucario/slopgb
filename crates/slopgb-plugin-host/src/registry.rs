@@ -10,6 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::coprocessor::LoadedCoprocessor;
+use crate::host::LoadError;
 use crate::manifest::{FlagContribution, Manifest, MenuContribution};
 
 /// Ambient context every unit's contributed defaults resolve against.
@@ -64,6 +65,7 @@ pub struct PluginRegistry {
     units: Vec<Unit>,
     context: Context,
     explicit_flags: Vec<(String, String)>,
+    skipped: Vec<String>,
 }
 
 impl PluginRegistry {
@@ -76,7 +78,10 @@ impl PluginRegistry {
     /// order, load each through [`LoadedCoprocessor::load`] and read its
     /// manifest. A file that fails to load or declares no manifest is a
     /// loader mismatch (a tier-1/tier-2 plugin, or a non-plugin file), not an
-    /// error, and is skipped silently. A duplicate role is a hard error.
+    /// error, and is skipped silently. A file that *is* a coprocessor but
+    /// cannot be used — a stale ABI, or no manifest — is skipped too, but
+    /// recorded in [`Self::skipped`] so the caller can say so. A duplicate role
+    /// is a hard error.
     pub fn scan(dir: &Path) -> Result<Self, RegistryError> {
         let mut paths: Vec<PathBuf> = fs::read_dir(dir)
             .map_err(|e| RegistryError::Io(format!("{}: {e}", dir.display())))?
@@ -93,13 +98,34 @@ impl PluginRegistry {
                 .unwrap_or_default()
                 .to_string_lossy()
                 .into_owned();
-            let Ok(bytes) = fs::read(&path) else {
-                continue;
+            let bytes = match fs::read(&path) {
+                Ok(b) => b,
+                Err(e) => {
+                    registry.skipped.push(format!("{name}: unreadable ({e})"));
+                    continue;
+                }
             };
-            let Ok(mut cop) = LoadedCoprocessor::load(&bytes) else {
-                continue;
+            let mut cop = match LoadedCoprocessor::load(&bytes) {
+                Ok(c) => c,
+                // A stale plugin left over from an older build: it is a real
+                // coprocessor, it just targets a different ABI, so it silently
+                // contributes no flags or menu rows and the user sees only
+                // `unknown option '--sf2'` — which blames the flag, not the
+                // plugin. Worth a word.
+                Err(e @ LoadError::AbiMismatch { .. }) => {
+                    registry.skipped.push(format!("{name}: {e}"));
+                    continue;
+                }
+                // Not a coprocessor at all (a tier-1/tier-2 plugin, or a
+                // non-plugin file): a loader mismatch, not a fault. Silent —
+                // these share the directory, so reporting them would print a
+                // line per plugin on every launch.
+                Err(_) => continue,
             };
             let Some(manifest) = cop.manifest() else {
+                registry
+                    .skipped
+                    .push(format!("{name}: coprocessor declares no manifest"));
                 continue;
             };
             registry.register(&name, manifest)?;
@@ -203,6 +229,16 @@ impl PluginRegistry {
         self.units
             .iter()
             .find(|u| u.manifest.provides.iter().any(|r| r == role))
+    }
+
+    /// Plugins [`Self::scan`] found but could not use, one human-readable line
+    /// each (`"sf2.wasm: plugin ABI 6 != host ABI 7"`). Empty for a registry
+    /// built any other way. A loader mismatch — a tier-1/tier-2 plugin sharing
+    /// the directory — is not listed; only a coprocessor that should have
+    /// contributed and didn't.
+    #[must_use]
+    pub fn skipped(&self) -> &[String] {
+        &self.skipped
     }
 
     #[must_use]

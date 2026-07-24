@@ -156,6 +156,13 @@ autopoll, the arcade-takeover runtime — Space Invaders' ARCADE mode runs its o
 SNES program end to end) and the bgb-UI clone (debugger, viewers, Options, link,
 opt-in boot ROM, MCP) are all merged — per-area detail in
 [`docs/ui-state/`](docs/ui-state/README.md) + [`docs/hardware-state/`](docs/hardware-state/README.md).
+
+**Core emulates no SNES chip.** Every SNES-side capability arrives as a plugin: with
+no `spc700.wasm` + `w65c816.wasm` (or either disabled in Options→Plugins) the
+coprocessor slot stays empty and an SGB machine plays no SGB music. The GB APU, the
+SGB border, palettes and the ATTR/PAL packet handling are core PPU/APU HLE and are
+unaffected. Save states carry the SNES tail only when a coprocessor is installed
+(`STATE_VERSION` 10; older states are rejected outright, there is no migration).
 UI theming (contemporary Light default / Dark / Classic + custom-theme API; colour-only,
 `T` toggles Light↔Dark): [`docs/ui-state/theming.md`](docs/ui-state/theming.md).
 Known residuals (all SameBoy-FAIL/floored, NOT regressions): DS mid-dot render floor,

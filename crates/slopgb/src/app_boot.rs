@@ -131,7 +131,16 @@ pub(crate) fn build_registry(dir: Option<&Path>) -> PluginRegistry {
         return PluginRegistry::new();
     };
     match PluginRegistry::scan(dir) {
-        Ok(reg) => reg,
+        Ok(reg) => {
+            // A coprocessor that could not be used contributes no flags or menu
+            // rows, so its absence surfaces as `unknown option '--sf2'` — which
+            // points at the flag, not at the stale plugin that caused it. Say
+            // which file and why.
+            for line in reg.skipped() {
+                eprintln!("slopgb: plugin ignored — {line}; re-run `cargo xtask stage-plugins`");
+            }
+            reg
+        }
         Err(e @ RegistryError::DuplicateRole { .. }) => {
             eprintln!("slopgb: fatal: {e}");
             process::exit(2);

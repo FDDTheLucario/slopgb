@@ -207,3 +207,64 @@ fn scan_skips_a_malformed_wasm_file_silently() {
     );
     fs::remove_dir_all(&dir).ok();
 }
+
+/// A coprocessor-shaped module declaring ABI `version` — enough to reach the
+/// version check, which `LoadedCoprocessor::load` runs before any other export
+/// lookup (so a stale plugin fails here, exactly as in the field).
+fn abi_wat(version: i32) -> Vec<u8> {
+    wat::parse_str(format!(
+        r#"(module
+          (memory (export "memory") 1)
+          (func (export "slopgb_abi_version") (result i32) i32.const {version})
+        )"#
+    ))
+    .unwrap()
+}
+
+#[test]
+fn scan_reports_a_plugin_skipped_for_a_stale_abi() {
+    // A plugin left over from an older build still loads as a file but declares
+    // the wrong ABI, so it contributes no flags — and the user sees only
+    // `unknown option '--sf2'`, which blames the flag rather than the plugin.
+    // The skip has to be diagnosable.
+    let dir = std::env::temp_dir().join(format!("slopgb-registry-stale-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("sf2.wasm"),
+        abi_wat(slopgb_plugin_api::ABI_VERSION - 1),
+    )
+    .unwrap();
+    let reg = PluginRegistry::scan(&dir).unwrap();
+    assert!(reg.is_empty(), "a stale plugin contributes nothing");
+    let skipped = reg.skipped();
+    assert_eq!(skipped.len(), 1, "the stale plugin must be reported");
+    assert!(
+        skipped[0].contains("sf2.wasm"),
+        "the report names the file: {:?}",
+        skipped[0]
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn scan_stays_silent_for_a_module_that_is_not_a_coprocessor() {
+    // Tier-1 plugins live in the same directory and never export the
+    // coprocessor ABI. Reporting those would print a line per plugin on every
+    // launch, so a loader mismatch stays silent — only a real coprocessor that
+    // cannot be used is worth a word.
+    let dir = std::env::temp_dir().join(format!("slopgb-registry-quiet-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("bad.wasm"), b"not a real wasm module").unwrap();
+    fs::write(
+        dir.join("tier1.wasm"),
+        wat::parse_str(r#"(module (memory (export "memory") 1))"#).unwrap(),
+    )
+    .unwrap();
+    let reg = PluginRegistry::scan(&dir).unwrap();
+    assert!(
+        reg.skipped().is_empty(),
+        "a loader mismatch is not a diagnosable skip: {:?}",
+        reg.skipped()
+    );
+    fs::remove_dir_all(&dir).ok();
+}
