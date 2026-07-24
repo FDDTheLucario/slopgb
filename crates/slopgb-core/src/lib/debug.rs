@@ -85,14 +85,33 @@ impl GameBoy {
     /// Restore a machine from [`Self::save_state`] bytes (bgb's File → Load
     /// state). Validates the magic/version/ROM fingerprint against the *loaded*
     /// ROM, then restores the volatile state. The debugger state (breakpoints,
-    /// watchpoints, profiler, exception mask) is left untouched. **Atomic**: on
-    /// any error the machine is unchanged (the restore lands in a clone that
-    /// only replaces `self` on full success). Live-debugger/UI only.
+    /// watchpoints, profiler, exception mask) is left untouched. Live-debugger/UI
+    /// only.
+    ///
+    /// **Atomic for the Game Boy itself**: CPU + bus land in a scratch machine
+    /// that only replaces `self` on full success, so any error leaves them
+    /// unchanged. The installed SGB coprocessor (if any) is *moved* into that
+    /// scratch machine rather than cloned — [`sgb::AudioCoprocessor::clone_box`]
+    /// re-instantiates a plugin-backed coprocessor's wasm, and the tail read
+    /// below overwrites the chips' state anyway, so the rebuild was pure waste on
+    /// a path the player rewind runs once per rewound frame. What that costs: a
+    /// state whose coprocessor tail is truncated leaves those chips part-restored
+    /// (the tail is read last, after the Game Boy side is already safely parsed),
+    /// and the next successful load overwrites them wholesale.
     pub fn load_state(&mut self, bytes: &[u8]) -> Result<(), StateError> {
+        let apu = self.sgb_apu.take();
         let mut restored = self.clone();
-        restored.load_state_into(bytes)?;
-        *self = restored;
-        Ok(())
+        restored.sgb_apu = apu;
+        match restored.load_state_into(bytes) {
+            Ok(()) => {
+                *self = restored;
+                Ok(())
+            }
+            Err(e) => {
+                self.sgb_apu = restored.sgb_apu.take();
+                Err(e)
+            }
+        }
     }
 
     fn load_state_into(&mut self, bytes: &[u8]) -> Result<(), StateError> {

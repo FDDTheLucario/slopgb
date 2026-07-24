@@ -565,6 +565,107 @@ fn injected_coprocessor_makes_a_gameboy_sound_command_audible() {
     );
 }
 
+/// An SGB machine with the plugin-backed coprocessor installed, driven far enough
+/// that a snapshot carries live SNES-side chip state rather than a reset.
+fn sgb_machine_with_coprocessor() -> Option<GameBoy> {
+    let cop = build_cop(slopgb_core::DEFAULT_SAMPLE_RATE)?;
+    let mut gb = GameBoy::new(Model::Sgb, sgb_rom()).unwrap();
+    gb.set_audio_coprocessor(Box::new(cop));
+    // SOUND ($08), length 1: gives the SNES side a running audio driver.
+    let mut packet = [0u8; 16];
+    packet[0] = 0x08 * 8 + 1;
+    packet[1] = 0x40;
+    send_sgb_packet(&mut gb, &packet);
+    Some(gb)
+}
+
+/// The rewind restore: `GameBoy::load_state` moves the installed coprocessor into
+/// the restored machine instead of re-instantiating its plugin wasm. Restoring
+/// must therefore land the *same* machine a freshly instantiated coprocessor
+/// would, and replay identically from there.
+#[test]
+fn load_state_onto_a_live_coprocessor_matches_a_fresh_one() {
+    let (Some(mut gb), Some(mut reference)) = (
+        sgb_machine_with_coprocessor(),
+        sgb_machine_with_coprocessor(),
+    ) else {
+        return;
+    };
+    for _ in 0..4 {
+        gb.run_frame();
+    }
+    let snapshot = gb.save_state();
+    // The reference restores those bytes into its own never-run coprocessor —
+    // exactly what the clone-based restore used to build on every load.
+    reference.load_state(&snapshot).expect("restores");
+    // The live machine runs on, then rewinds (its coprocessor is moved, not rebuilt).
+    for _ in 0..4 {
+        gb.run_frame();
+    }
+    gb.load_state(&snapshot).expect("restores");
+    assert_eq!(
+        gb.save_state(),
+        reference.save_state(),
+        "restoring onto the live coprocessor lands the same machine as a fresh one",
+    );
+
+    let (mut rewound, mut direct) = (Vec::new(), Vec::new());
+    for _ in 0..8 {
+        gb.run_frame();
+        gb.drain_audio(&mut rewound);
+        reference.run_frame();
+        reference.drain_audio(&mut direct);
+    }
+    assert_eq!(rewound, direct, "and replays sample-for-sample from there");
+}
+
+/// ...and it is no *less* faithful than the rebuild it replaced. `read_state`
+/// deliberately drops the transient character-row cursor (`char_write_row` /
+/// `char_queue`), so neither restore reproduces a never-restored machine
+/// byte-for-byte — but moving the live coprocessor must not widen that gap.
+#[test]
+fn a_rewound_coprocessor_is_no_further_from_the_truth_than_a_rebuilt_one() {
+    let (Some(mut truth), Some(mut rewound), Some(mut rebuilt)) = (
+        sgb_machine_with_coprocessor(),
+        sgb_machine_with_coprocessor(),
+        sgb_machine_with_coprocessor(),
+    ) else {
+        return;
+    };
+    // The truth: frame 12 with no save/restore anywhere.
+    for _ in 0..12 {
+        truth.run_frame();
+    }
+    // The rewind: same first 4 frames, run on to 8, then restored to 4 and
+    // replayed to 12 on the coprocessor it has been using all along.
+    for _ in 0..4 {
+        rewound.run_frame();
+    }
+    let snapshot = rewound.save_state();
+    for _ in 0..4 {
+        rewound.run_frame();
+    }
+    rewound.load_state(&snapshot).expect("restores");
+    // The rebuild: the same bytes into a never-run coprocessor.
+    rebuilt.load_state(&snapshot).expect("restores");
+    for _ in 0..8 {
+        rewound.run_frame();
+        rebuilt.run_frame();
+    }
+    let bytes_off = |m: &GameBoy| {
+        m.save_state()
+            .iter()
+            .zip(truth.save_state())
+            .filter(|(a, b)| **a != *b)
+            .count()
+    };
+    let (a, b) = (bytes_off(&rewound), bytes_off(&rebuilt));
+    assert!(
+        a <= b,
+        "the rewound machine is {a} bytes off the truth, the rebuilt one {b}",
+    );
+}
+
 /// Injecting off an SGB model is impossible (no slot); a plain DMG is unaffected
 /// and the coprocessor is never driven. Guards golden-safety at the seam.
 #[test]

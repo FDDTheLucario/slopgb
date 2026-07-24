@@ -160,10 +160,18 @@ and re-anchors capture.
   watch / profiler / exception halt strictly before now.
 - **Player rewind** (`reverse_frame`) — the previous *frame* boundary, one
   displayed frame per held-Backspace tick (frame-exact, not the old 2-frame pop).
+  Frame boundaries are *numbered*, so this landing is named rather than searched
+  for: replay whole `run_frame`s from the nearest checkpoint until `frame_count`
+  reaches the target — at most `REWIND_INTERVAL_FRAMES` frames, and none at all
+  when the checkpoint already is the landing. No exploratory scan, no second
+  replay pass. Divergent replay (joypad input inside the window) that overruns
+  the start falls back to landing on the checkpoint.
 
 Both debugger commands stay broken and re-center the disasm; they no-op (no view
 change) past the oldest checkpoint. Known ceilings: reverse depth = the oldest
-retained checkpoint (~20 s at the ring cap); `reverse_to_breakpoint` is O(history)
+retained checkpoint (~20 s at the ring cap, ~9 s once an SGB coprocessor doubles
+the state size — see [`save-states-and-link.md`](save-states-and-link.md));
+`reverse_to_breakpoint` is O(history)
 worst case (a halt far back re-replays the tail — fine interactively, since a
 per-frame breakpoint resolves in the newest window); and replay drives the machine
 via `step()`, so a **link-cable / SGB-coprocessor** peer not advanced identically

@@ -770,6 +770,28 @@ fn reverse_frame_steps_back_one_frame_at_a_time() {
 }
 
 #[test]
+fn reverse_frame_reproduces_the_earlier_machine_exactly() {
+    // Frame-exactness, not just the frame counter: each rewound frame must be
+    // byte-identical to the machine as it stood at that frame going forward.
+    let mut s = Session::blank(Model::Dmg);
+    s.gb = GameBoy::new(Model::Dmg, loop_rom()).unwrap();
+    let mut forward = Vec::new();
+    for _ in 0..10 {
+        s.gb.run_frame();
+        s.capture_rewind();
+        forward.push(s.gb.save_state());
+    }
+    for back in 1..=4 {
+        assert!(s.reverse_frame(), "history available {back} frames back");
+        assert_eq!(
+            s.gb.save_state(),
+            forward[forward.len() - 1 - back],
+            "rewinding {back} frame(s) restores that exact machine",
+        );
+    }
+}
+
+#[test]
 fn reverse_step_lands_the_previous_instruction_boundary() {
     let mut s = played_forward(8);
     let before = s.gb.cycles();

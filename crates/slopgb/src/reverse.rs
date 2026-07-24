@@ -64,28 +64,29 @@ impl Session {
     /// is exhausted, so the caller falls through to normal play.
     pub(crate) fn reverse_frame(&mut self) -> bool {
         let original = self.gb.cycles();
+        // Frame boundaries are numbered, so the landing is *named*, not searched
+        // for: one frame back from the frame we are in. Checkpoints are taken at
+        // frame boundaries too, so replaying whole `run_frame`s from the nearest
+        // one arrives exactly on it — no exploratory scan and no second replay
+        // pass (the rewind ring holds a checkpoint every REWIND_INTERVAL_FRAMES,
+        // so this replays at most that many frames, and none at all when the
+        // checkpoint already *is* the landing).
+        let target = self.gb.frame_count().saturating_sub(1);
         let Some(bytes) = self.nearest_checkpoint_before(original) else {
             return false;
         };
         let _ = self.gb.load_state(&bytes);
-        // The nearest checkpoint is itself a frame boundary, so it is always a
-        // valid landing; refine to the latest frame boundary strictly before now.
-        let mut landing = self.gb.cycles();
-        let mut fc = self.gb.frame_count();
-        while self.gb.cycles() < original {
-            self.gb.step();
-            if self.gb.frame_count() != fc {
-                fc = self.gb.frame_count();
-                if self.gb.cycles() < original {
-                    landing = self.gb.cycles();
-                }
-            }
+        while self.gb.frame_count() < target && self.gb.cycles() < original {
+            self.gb.run_frame();
         }
-        let _ = self.gb.load_state(&bytes);
-        while self.gb.cycles() < landing {
-            self.gb.step();
+        // Replay reproduces the original run as long as no joypad input landed
+        // inside the window (input is baked into each state, not journalled). If
+        // it diverged far enough to run past where we started, the checkpoint
+        // itself is still a frame boundary before `original` — land there.
+        if self.gb.cycles() >= original {
+            let _ = self.gb.load_state(&bytes);
         }
-        self.land_at(landing);
+        self.land_at(self.gb.cycles());
         true
     }
 
