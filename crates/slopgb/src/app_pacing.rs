@@ -121,6 +121,9 @@ impl App {
         // Game Genie ROM patches are a persistent core read-intercept: push the
         // current set once per wake (re-syncs after a ROM reload clears them).
         self.session.gb.set_gg_patches(self.cheats.gg_patches());
+        // Normal-speed play always presents the SNES-side frame: undo any
+        // fast-forward render skip left by `run_turbo`.
+        self.session.gb.set_coprocessor_render(true);
         let now = Instant::now();
         // Options → Misc → framerate limit (0 = native ~59.7275 Hz). The grid
         // resync + owed-frame count is the same march audio pacing uses (shared
@@ -149,6 +152,11 @@ impl App {
         // Game Genie ROM patches are a persistent core read-intercept: push the
         // current set once per wake (re-syncs after a ROM reload clears them).
         self.session.gb.set_gg_patches(self.cheats.gg_patches());
+        // Fast-forward presents no SNES-side frame the player can see (turbo
+        // draws far faster than 60 Hz), so skip its rasterization regardless
+        // of mute — a fast-forwarding user with sound on still shouldn't pay
+        // for pixels nobody sees. Idempotent + cheap: safe to set every wake.
+        self.session.gb.set_coprocessor_render(false);
         let muted = self.muted;
         // Options → Misc → fast-forward speed caps frames per wake.
         let cap = turbo_max_frames(self.settings.ff_speed);

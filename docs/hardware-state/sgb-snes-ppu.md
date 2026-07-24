@@ -66,3 +66,33 @@ Renderer correctness is pinned by the crate's unit tests (27, including
 the three fuzz oracles) + `slopgb-plugin-host`'s `snes_ppu_roundtrip`.
 Probe fps (ARCADE takeover, every 500-frame window): wasmi >= 66
 (gameplay 92-106), wasmtime several hundred.
+
+## Fast-forward throughput
+
+`AudioCoprocessor::set_render_enabled` (default on) gates only the
+`PPU_HW_LINE` scanline rasterization in `SgbCoprocessor::flush`; the
+`$21xx`/DMA register capture and both chips' `run_until` stay unconditional,
+so chip timing is untouched. `crates/slopgb/src/app_pacing.rs`'s `run_turbo`
+(fast-forward) disables it; `run_audio_paced`/`run_timer_paced` always
+restore it for normal-speed play. Headless bench (`slopgb-sgb-coprocessor`'s
+`examples/throughput.rs`, driving the coprocessor directly — no SGB ROM ships
+in this repo): median fps, 600 frames/run x3, one representative run on a
+shared/sandboxed build machine (run-to-run variance was +-20% on repeats —
+treat the `SLOPGB_PERF=1` section breakdown as the more reliable signal):
+
+| workload | render | fps | x real-time |
+|---|---|---|---|
+| plain SGB (spc700+w65c816) | on | 152.8 | 2.56x |
+| plain SGB (spc700+w65c816) | off | 147.8 | 2.48x (no PPU to skip: within noise, as expected) |
+| arcade (spc700+w65c816+snes-ppu) | on | 128.2 | 2.15x |
+| arcade (spc700+w65c816+snes-ppu) | off | 154.5 | 2.59x |
+
+`SLOPGB_PERF=1` confirms the mechanism: per 8572-flush window, arcade's `ppu`
+section drops from ~755-796 ms (render on) to ~0.5-0.6 ms (render off), while
+`spc`/`cpu` (the mandatory chip execution) stay flat (~1.2-1.3 s / ~25 ms) —
+the skip is real and touches only rasterization. Targets (2x arcade / 4x
+plain SGB, normal render-on play): arcade sits near the 2x line (1.95-2.55x
+across repeats); plain SGB fell short of 4x (2.15-2.94x across repeats) — the
+`spc`/`cpu` chip-execution cost (not gateable, since it must run every flush
+regardless of render) dominates both workloads' flush time, so it, not the
+PPU, is the ceiling on this build machine.

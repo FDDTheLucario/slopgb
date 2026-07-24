@@ -405,7 +405,29 @@ Plumbing: the SPC700 plugin's `dump_spc` export assembles the file guest-side
 (the CPU/DSP/`$F0-$FF` state the ARAM-only `read_ram` ABI can't reach) and ships
 it over the emit channel under `EMIT_KIND_SPC` (ABI v6); `AudioCoprocessor::
 export_spc` / `can_export_spc` / `export_spc_live` carry it through `GameBoy` to
-the frontend action and the MCP `dump-spc` tool.
+the MCP `dump-spc` tool.
+
+**The mediator declares the menu row, not the plugin.** The right-click "Export
+SPC" row is no longer hardcoded in the frontend — it is a manifest contribution.
+`AudioCoprocessor` carries three more read-only defaults (`manifest`,
+`export_ready`, `call_export`; empty/false/`None` — never advance a cycle or
+mutate state), and `GameBoy` mirrors them as `coprocessor_manifest` /
+`coprocessor_export_ready` / `coprocessor_export`. `SgbCoprocessor`
+(`crates/slopgb-sgb-coprocessor/src/audio_coprocessor.rs`) is the only
+implementor that overrides them: its `MANIFEST` const declares one menu record
+(`menu\tExport SPC\texport_spc\tspc`), `export_ready`/`call_export` delegate to
+the existing `can_export_spc`/`export_spc`. The export name is `export_spc`,
+deliberately **not** `dump_spc` — the plugin's live dump stays a separate,
+distinct entry point (see the MCP paragraph above), so declaring the row on
+`spc700.wasm` would silently downgrade the exported file to a mid-song dump.
+Consequence: no plugins loaded ⇒ the built-in HLE `SgbApu` (defaults only) ⇒
+`coprocessor_manifest` is empty ⇒ the frontend's menu-row table is empty ⇒ the
+row is **absent entirely** on the SGB HLE path, not greyed; plugins loaded but no
+song captured yet ⇒ the row is **present and greyed** (`export_ready` false).
+The frontend (`crates/slopgb/src/app_menu.rs` `build_plugin_menu_rows`,
+`crates/slopgb/src/app_run.rs` `run_plugin_menu`) contains no SPC-specific
+string or logic — it parses the manifest generically and dispatches by the
+declared `export` name.
 
 ## Save states
 
