@@ -138,9 +138,11 @@ pub enum Action {
     /// Save the current frame to a BMP (bgb's main-menu "Save screenshot").
     /// Menu-only — no key binds it.
     SaveScreenshot,
-    /// Export the SGB audio chip's state as a `.spc` file (main menu → "Export
-    /// SPC"). Menu-only; a no-op with a log off SGB / with no SPC700.
-    ExportSpc,
+    /// Run the manifest-declared coprocessor menu row at this index in the
+    /// live [`PluginMenuRow`](crate::PluginMenuRow) table (e.g. "Export SPC",
+    /// declared by the engaged SGB coprocessor's manifest — see
+    /// `docs/ui-state/game-menu.md`). Menu-only — no key binds it.
+    PluginMenu(u8),
     /// Dump the whole 64 KiB address space to a file (debugger File →
     /// "save memory_dump..."). Menu-only.
     DbgSaveMemDump,

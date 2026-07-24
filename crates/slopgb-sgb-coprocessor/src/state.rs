@@ -174,6 +174,10 @@ impl SgbCoprocessor {
         self.feed_queue.clear();
         self.feed_hold = 0;
         self.input = (0x0F, 0x0F);
+        // Not part of the snapshot (a frontend-driven runtime toggle, not
+        // emulated state): a loaded machine always starts back at the
+        // default-on render path.
+        self.render_enabled = true;
         Ok(())
     }
 
@@ -250,6 +254,7 @@ impl SgbCoprocessor {
         fresh.joy_busy = self.joy_busy;
         fresh.trn_flip = self.trn_flip;
         fresh.ppu_row = self.ppu_row;
+        fresh.render_enabled = self.render_enabled;
         fresh.frame_ready = self.frame_ready;
         fresh.snes_live = self.snes_live;
         fresh.nspc_resident = self.nspc_resident;

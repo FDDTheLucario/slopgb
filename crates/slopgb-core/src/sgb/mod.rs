@@ -140,6 +140,15 @@ pub trait AudioCoprocessor {
     /// untouched.
     fn set_input(&mut self, _dpad: u8, _buttons: u8) {}
 
+    /// Whether the coprocessor should keep rasterizing its SNES-side
+    /// framebuffer. A frontend fast-forwarding past frames nobody presents
+    /// sets this `false` to skip that work; it must not change chip timing or
+    /// audio — only whether pixels get drawn. Default no-op (`true` is
+    /// implied): the built-in HLE `SgbApu` has no framebuffer to skip, and
+    /// any coprocessor that never gets this call keeps rendering exactly as
+    /// today (golden-safe).
+    fn set_render_enabled(&mut self, _on: bool) {}
+
     /// The last completed SNES-side frame (256x224 RGB555 words, row-major)
     /// a full-takeover program rendered, handed out at most once per SNES
     /// vblank. The default has no SNES PPU and returns `None`, so the
@@ -197,6 +206,29 @@ pub trait AudioCoprocessor {
     /// start. For the MCP `dump-spc` debug path (inspect a driver at the exact
     /// moment of a bug). `None` if this coprocessor has no SPC700 to dump.
     fn export_spc_live(&self) -> Option<Vec<u8>> {
+        None
+    }
+
+    /// The coprocessor's self-describing manifest (the plugin-host manifest
+    /// wire format — `id`/`name`/`menu` records), read by the frontend to build
+    /// its menu-row table. Empty for a coprocessor that contributes no rows
+    /// (the built-in HLE `SgbApu`). Read-only introspection.
+    fn manifest(&self) -> &'static str {
+        ""
+    }
+
+    /// Whether the export named `name` (one declared in [`Self::manifest`]'s
+    /// `menu` records) can produce a blob right now — the UI greys the row
+    /// when false. Read-only introspection.
+    fn export_ready(&self, name: &str) -> bool {
+        let _ = name;
+        false
+    }
+
+    /// Run the export named `name` and return its blob, or `None` if `name`
+    /// names no export this coprocessor declares. Read-only introspection.
+    fn call_export(&self, name: &str) -> Option<Vec<u8>> {
+        let _ = name;
         None
     }
 }

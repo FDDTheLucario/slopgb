@@ -658,6 +658,64 @@ fn set_audio_coprocessor_is_a_noop_off_sgb() {
     );
 }
 
+/// A minimal coprocessor that declares one menu row, to prove the manifest
+/// path is read through when a coprocessor DOES contribute one.
+struct MenuCop;
+impl AudioCoprocessor for MenuCop {
+    fn clock(&mut self, _gb_cycles: u64) {}
+    fn poll(&mut self, _cmds: &mut dyn SgbCommandSource) {}
+    fn mix_into(&mut self, _out: &mut [(f32, f32)]) {}
+    fn set_output_rate(&mut self, _hz: u32) {}
+    fn load_bios(&mut self, _bios: &[u8]) {}
+    fn write_state(&self, _w: &mut crate::state::Writer) {}
+    fn read_state(&mut self, _r: &mut crate::state::Reader<'_>) -> Result<(), crate::StateError> {
+        Ok(())
+    }
+    fn clone_box(&self) -> Box<dyn AudioCoprocessor> {
+        Box::new(MenuCop)
+    }
+    fn manifest(&self) -> &'static str {
+        "id\tmenucop\nname\tMenu Cop\nmenu\tExport Thing\texport_thing\tbin"
+    }
+    fn export_ready(&self, name: &str) -> bool {
+        name == "export_thing"
+    }
+    fn call_export(&self, name: &str) -> Option<Vec<u8>> {
+        (name == "export_thing").then(|| vec![1, 2, 3])
+    }
+}
+
+/// The core half of the "row absent, not greyed, with no coprocessor" rule
+/// (the frontend half lives in `crates/slopgb/src/windows/mainwin_tests.rs`):
+/// the built-in HLE `SgbApu` (the default on an SGB machine with no
+/// coprocessor plugin loaded) declares an empty manifest, so the frontend's
+/// menu-row table built from `coprocessor_manifest()` is empty and the row is
+/// absent entirely — never present-but-greyed. A coprocessor that DOES
+/// declare a row is read straight through instead.
+#[test]
+fn coprocessor_manifest_is_empty_by_default_a_declaring_coprocessor_is_read_through() {
+    let gb = sgb_machine();
+    assert_eq!(
+        gb.coprocessor_manifest(),
+        "",
+        "the built-in HLE SgbApu declares no manifest -> no menu row at all"
+    );
+    assert!(!gb.coprocessor_export_ready("export_spc"));
+    assert!(gb.coprocessor_export("export_spc").is_none());
+
+    let mut with_cop = sgb_machine();
+    with_cop.set_audio_coprocessor(Box::new(MenuCop));
+    assert!(
+        with_cop.coprocessor_manifest().contains("Export Thing"),
+        "an engaged coprocessor's declared row is read through"
+    );
+    assert!(with_cop.coprocessor_export_ready("export_thing"));
+    assert_eq!(
+        with_cop.coprocessor_export("export_thing"),
+        Some(vec![1, 2, 3])
+    );
+}
+
 /// `capture_initial_sgb_border` returns `None` for a ROM that never uploads an
 /// SGB border (here a NOP sled), so the frontend falls back to the default
 /// border. (The successful-capture path needs a real SGB game and is verified

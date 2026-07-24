@@ -13,14 +13,17 @@ fn at(m: &MainMenu, idx: usize) -> (i32, i32) {
     (r.x + r.w / 2, r.y + r.h / 2)
 }
 
-/// Index of the "Window size" row (carries the submenu opener).
-const WINDOW_SIZE_ROW: usize = 12;
+/// Index of the "Window size" row (carries the submenu opener). With no
+/// plugin-contributed rows (the default in every test below that doesn't pass
+/// one), the removed hardcoded "Export SPC" row is gone entirely, so every row
+/// from "Debugger" on shifted up by one versus the old contract.
+const WINDOW_SIZE_ROW: usize = 11;
 /// Index of the "Sound channel" row (MN3 submenu opener).
-const SOUND_CHANNEL_ROW: usize = 11;
+const SOUND_CHANNEL_ROW: usize = 10;
 
 #[test]
 fn popup_size_unions_main_menu_and_submenu() {
-    let menu = MainMenu::open((0, 0), true, false);
+    let menu = MainMenu::open((0, 0), true, false, &[]);
     let main_only = popup_content_size(&menu, None);
     let mb = crate::ui::menu::menu_bounds(menu.origin, &menu.items);
     assert_eq!(main_only, (mb.right(), mb.bottom()));
@@ -56,7 +59,7 @@ fn popup_gap_around_submenu_is_transparent() {
     // so a short submenu leaves an L-shaped gap (right of the main menu, above /
     // below the submenu box). bgb's submenu is a separate floating box — that gap
     // must be transparent (desktop shows through), NOT a filled background.
-    let menu = MainMenu::open((0, 0), true, false);
+    let menu = MainMenu::open((0, 0), true, false, &[]);
     let row = menu
         .row_rect(MenuEffect::Submenu(SubKind::State))
         .expect("State row exists");
@@ -89,7 +92,10 @@ fn popup_gap_around_submenu_is_transparent() {
 
 #[test]
 fn menu_has_the_rc_main_rows_in_order() {
-    let m = MainMenu::open((10, 10), true, false);
+    // No plugin-contributed rows: the old hardcoded "Export SPC" row is gone
+    // entirely (see `plugin_menu_row_absent_with_no_rows` below), not just
+    // greyed, so every row is one slot earlier than the old contract.
+    let m = MainMenu::open((10, 10), true, false, &[]);
     let labels: Vec<&str> = m.items.iter().map(|i| i.label.as_str()).collect();
     assert_eq!(
         labels,
@@ -101,7 +107,6 @@ fn menu_has_the_rc_main_rows_in_order() {
             "Cheat...",
             "Reset gameboy",
             "Save screenshot",
-            "Export SPC",
             "Debugger",
             "State",
             "Other",
@@ -120,16 +125,16 @@ fn menu_has_the_rc_main_rows_in_order() {
 #[test]
 fn pause_row_checks_when_paused() {
     // BUG-3: bgb check-marks the Pause row while paused; slopgb left it blank.
-    let paused = MainMenu::open((0, 0), true, true);
+    let paused = MainMenu::open((0, 0), true, true, &[]);
     assert!(paused.items[0].checked, "Pause checked while paused");
-    let running = MainMenu::open((0, 0), true, false);
+    let running = MainMenu::open((0, 0), true, false, &[]);
     assert!(!running.items[0].checked, "Pause unchecked while running");
 }
 
 #[test]
 fn enable_sound_checkmark_tracks_the_sound_state() {
-    let on = MainMenu::open((0, 0), true, false);
-    let off = MainMenu::open((0, 0), false, false);
+    let on = MainMenu::open((0, 0), true, false, &[]);
+    let off = MainMenu::open((0, 0), false, false, &[]);
     assert!(on.items[2].checked, "checked when sound is on");
     assert!(!off.items[2].checked, "unchecked when muted");
     assert_eq!(on.effects[2], MenuEffect::Run(Action::ToggleSound));
@@ -137,15 +142,15 @@ fn enable_sound_checkmark_tracks_the_sound_state() {
 
 #[test]
 fn supported_rows_run_their_action_window_size_opens_a_submenu_rest_none() {
-    let m = MainMenu::open((0, 0), true, false);
+    let m = MainMenu::open((0, 0), true, false, &[]);
     assert_eq!(m.effects[0], MenuEffect::Run(Action::Pause));
     assert_eq!(m.effects[2], MenuEffect::Run(Action::ToggleSound));
     assert_eq!(m.effects[5], MenuEffect::Run(Action::Reset));
     assert_eq!(
-        m.effects[8],
+        m.effects[7],
         MenuEffect::Run(Action::ToggleTool(ToolWindow::Debugger))
     );
-    assert_eq!(m.effects[17], MenuEffect::Run(Action::Quit));
+    assert_eq!(m.effects[16], MenuEffect::Run(Action::Quit));
     assert_eq!(
         m.effects[WINDOW_SIZE_ROW],
         MenuEffect::Submenu(SubKind::WindowSize)
@@ -161,12 +166,7 @@ fn supported_rows_run_their_action_window_size_opens_a_submenu_rest_none() {
         "Save screenshot is wired (MN4)"
     );
     assert_eq!(
-        m.effects[7],
-        MenuEffect::Run(Action::ExportSpc),
-        "Export SPC is wired"
-    );
-    assert_eq!(
-        m.effects[10],
+        m.effects[9],
         MenuEffect::Submenu(SubKind::Other),
         "Other opens its submenu (MN5)"
     );
@@ -174,42 +174,74 @@ fn supported_rows_run_their_action_window_size_opens_a_submenu_rest_none() {
     assert_eq!(m.effects[3], MenuEffect::Run(Action::MainOptions));
     assert_eq!(m.effects[4], MenuEffect::Run(Action::MainCheats));
     // State opens its submenu (MN6 Quick Save/Load).
-    assert_eq!(m.effects[9], MenuEffect::Submenu(SubKind::State));
+    assert_eq!(m.effects[8], MenuEffect::Submenu(SubKind::State));
     // Load ROM (MN4) opens the path modal; Recent ROMs (MN4) opens its submenu.
     assert_eq!(m.effects[1], MenuEffect::Run(Action::MainLoadRom));
-    assert_eq!(m.effects[16], MenuEffect::Submenu(SubKind::RecentRoms));
+    assert_eq!(m.effects[15], MenuEffect::Submenu(SubKind::RecentRoms));
     // Link opens its submenu (rows grey by connection state — see
     // link_submenu_greys_rows_by_state).
-    assert_eq!(m.effects[13], MenuEffect::Submenu(SubKind::Link));
+    assert_eq!(m.effects[12], MenuEffect::Submenu(SubKind::Link));
     // MCP opens its submenu (Start/Stop, greyed by server state).
-    assert_eq!(m.effects[14], MenuEffect::Submenu(SubKind::Mcp));
+    assert_eq!(m.effects[13], MenuEffect::Submenu(SubKind::Mcp));
     // Plugins opens its submenu (live status + Reload plugins).
-    assert_eq!(m.effects[15], MenuEffect::Submenu(SubKind::Plugins));
+    assert_eq!(m.effects[14], MenuEffect::Submenu(SubKind::Plugins));
+}
+
+// --- Manifest-declared coprocessor menu rows (was the hardcoded "Export SPC"
+// row) — deliberate new contract: with NO plugin rows the row is ABSENT
+// ENTIRELY (not greyed), and the following rows shift up to fill the gap; with
+// a row supplied it appears right after "Save screenshot" and greys/enables
+// per its `enabled` flag. Do not "restore" a hardcoded Export SPC row here.
+
+#[test]
+fn plugin_menu_row_absent_with_no_rows() {
+    let m = MainMenu::open((0, 0), true, false, &[]);
+    assert!(
+        m.items.iter().all(|i| i.label != "Export SPC"),
+        "no coprocessor manifest rows -> no Export SPC row at all"
+    );
+    // "Debugger" (used to sit at row 8, after the hardcoded Export SPC row)
+    // shifted up to fill the gap.
+    assert_eq!(m.items[7].label, "Debugger");
 }
 
 #[test]
-fn export_spc_greys_when_no_song_to_export() {
-    let mut m = MainMenu::open((0, 0), true, false);
-    assert!(m.items[7].enabled, "Export SPC enabled by default");
-    m.disable_effect(MenuEffect::Run(Action::ExportSpc));
-    assert!(
-        !m.items[7].enabled,
-        "Export SPC greyed after disable_effect"
+fn plugin_menu_row_present_at_its_declared_position() {
+    let m = MainMenu::open((0, 0), true, false, &[("Export SPC".to_string(), true)]);
+    assert_eq!(
+        m.items[7].label, "Export SPC",
+        "a supplied row lands right after Save screenshot"
     );
+    assert_eq!(m.effects[7], MenuEffect::Run(Action::PluginMenu(0)));
+    assert_eq!(m.items[8].label, "Debugger", "Debugger follows it");
+}
+
+#[test]
+fn plugin_menu_row_greys_when_its_enabled_flag_is_false() {
+    let mut m = MainMenu::open((0, 0), true, false, &[("Export SPC".to_string(), false)]);
+    assert!(!m.items[7].enabled, "greyed when the row reports not-ready");
     // A greyed row resolves to no effect even if clicked.
     let (cx, cy) = at(&m, 7);
     assert_eq!(
         m.effect_at(cx, cy),
         MenuEffect::None,
-        "clicking the greyed Export SPC row does nothing"
+        "clicking the greyed row does nothing"
+    );
+    // The enabled counterpart is clickable at the same position.
+    m = MainMenu::open((0, 0), true, false, &[("Export SPC".to_string(), true)]);
+    assert!(m.items[7].enabled);
+    assert_eq!(
+        m.effect_at(cx, cy),
+        MenuEffect::Run(Action::PluginMenu(0)),
+        "clicking the enabled row runs its action"
     );
 }
 
 #[test]
 fn submenu_rows_show_the_arrow_window_size_enabled_others_greyed() {
-    let m = MainMenu::open((0, 0), true, false);
+    let m = MainMenu::open((0, 0), true, false, &[]);
     // All seven submenu rows draw the arrow.
-    for i in [9, 10, 11, 12, 13, 14, 15] {
+    for i in [8, 9, 10, 11, 12, 13, 14] {
         assert!(m.items[i].submenu, "row {i} draws the submenu arrow");
     }
     // Window size + Sound channel are live; the rest stay greyed until MN4-7.
@@ -221,12 +253,12 @@ fn submenu_rows_show_the_arrow_window_size_enabled_others_greyed() {
         m.items[SOUND_CHANNEL_ROW].enabled,
         "Sound channel is wired (MN3)"
     );
-    assert!(m.items[10].enabled, "Other is wired (MN5)");
-    assert!(m.items[9].enabled, "State is wired (MN6)");
-    assert!(m.items[16].enabled, "Recent ROMs is wired (MN4)");
-    assert!(m.items[15].enabled, "Plugins is wired");
-    assert!(m.items[14].enabled, "MCP is wired");
-    assert!(m.items[13].enabled, "Link is wired");
+    assert!(m.items[9].enabled, "Other is wired (MN5)");
+    assert!(m.items[8].enabled, "State is wired (MN6)");
+    assert!(m.items[15].enabled, "Recent ROMs is wired (MN4)");
+    assert!(m.items[14].enabled, "Plugins is wired");
+    assert!(m.items[13].enabled, "MCP is wired");
+    assert!(m.items[12].enabled, "Link is wired");
     assert!(m.items[1].enabled, "Load ROM is wired (MN4)");
     assert!(
         !m.items[1].submenu,
@@ -236,7 +268,7 @@ fn submenu_rows_show_the_arrow_window_size_enabled_others_greyed() {
 
 #[test]
 fn effect_at_resolves_only_enabled_rows() {
-    let m = MainMenu::open((10, 10), true, false);
+    let m = MainMenu::open((10, 10), true, false, &[]);
     assert_eq!(
         m.effect_at(at(&m, 0).0, at(&m, 0).1),
         MenuEffect::Run(Action::Pause)
@@ -250,10 +282,10 @@ fn effect_at_resolves_only_enabled_rows() {
         m.effect_at(at(&m, 1).0, at(&m, 1).1),
         MenuEffect::Run(Action::MainLoadRom)
     );
-    // Link (row 13) now opens its submenu; a point outside the box resolves to
+    // Link (row 12) now opens its submenu; a point outside the box resolves to
     // None (greyed-row → None is exercised by the submenu tests).
     assert_eq!(
-        m.effect_at(at(&m, 13).0, at(&m, 13).1),
+        m.effect_at(at(&m, 12).0, at(&m, 12).1),
         MenuEffect::Submenu(SubKind::Link)
     );
     assert_eq!(m.effect_at(-50, -50), MenuEffect::None);
@@ -261,16 +293,16 @@ fn effect_at_resolves_only_enabled_rows() {
 
 #[test]
 fn row_rect_locates_the_window_size_row_for_its_submenu() {
-    let m = MainMenu::open((10, 10), true, false);
+    let m = MainMenu::open((10, 10), true, false, &[]);
     let r = m
         .row_rect(MenuEffect::Submenu(SubKind::WindowSize))
         .expect("window size row exists");
-    assert_eq!(r, row_rect(&m, WINDOW_SIZE_ROW), "matches the 12th row");
+    assert_eq!(r, row_rect(&m, WINDOW_SIZE_ROW), "matches the 11th row");
 }
 
 #[test]
 fn hover_at_tracks_the_enabled_row_and_reports_changes() {
-    let mut m = MainMenu::open((10, 10), true, false);
+    let mut m = MainMenu::open((10, 10), true, false, &[]);
     assert!(
         m.hover_at(at(&m, 0).0, at(&m, 0).1),
         "moving onto Pause changes hover"
@@ -291,7 +323,7 @@ fn hover_at_tracks_the_enabled_row_and_reports_changes() {
 fn render_draws_ink_including_the_check_and_arrow_columns() {
     use crate::ui::Canvas;
     use crate::ui::menu::{menu_height, menu_width};
-    let m = MainMenu::open((0, 0), true, false);
+    let m = MainMenu::open((0, 0), true, false, &[]);
     let w = menu_width(&m.items).max(1) as usize;
     let h = menu_height(&m.items).max(1) as usize;
     let mut buf = vec![0x00AA_AAAA_u32; w * h];

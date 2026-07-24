@@ -41,6 +41,25 @@ Leaf rows run via `run_action`; rows carry a `MenuEffect` (Run/Submenu/None).
   24-bit BMP, `screenshot::to_bmp`).
 - **Exit**.
 
+**Plugin/mediator menu rows** splice in right after "Save screenshot" — one row
+per `menu` record the live engaged SGB coprocessor's manifest declares (e.g.
+"Export SPC", declared by the native `SgbCoprocessor` mediator, not by
+`spc700.wasm` — see
+[`plugin-api.md`](plugin-api.md#menu-records-and-who-declares-them) and
+[`../hardware-state/sgb-audio.md`](../hardware-state/sgb-audio.md)). `App`
+snapshots the table (`App.plugin_menu_rows: Vec<PluginMenuRow>`) when the popup
+opens (`build_plugin_menu_rows`, parsing `GameBoy::coprocessor_manifest` via
+`slopgb_plugin_host::Manifest::parse`), so a click's `Action::PluginMenu(i)`
+always indexes what was actually shown even if the live machine changes before
+the click lands; `run_plugin_menu` looks the row up, calls
+`GameBoy::coprocessor_export`, and writes the blob to
+`slopgb-<unix-millis>.<ext>`. **Deliberate new contract:** with no engaged
+coprocessor (or one that declares no rows — the built-in HLE `SgbApu`) the row
+is **absent entirely**, not greyed; a declared row is greyed only when its
+`AudioCoprocessor::export_ready` is false right now. `mainwin::MainMenu::open`
+takes the row table (`&[(label, enabled)]`) as a plain parameter — the widget
+layer carries no SPC-specific string or logic.
+
 Submenu (`▶`) rows **open on hover** as well as click: `menupopup::hover_open`
 decides from the hovered effect + a tracked `open_kind`, so a per-pixel move over
 the already-open row doesn't rebuild — `on_cursor_moved` returns the same `OpenSub`

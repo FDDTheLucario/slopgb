@@ -13,13 +13,19 @@ fn blank_app() -> App {
         mute: true,
         boot: None,
         sgb_bios: None,
-        sf2: None,
         mcp_port: None,
         plugins_dir: None,
-        msu1: None,
         ram_init: None,
+        plugin_flags: Vec::new(),
     };
-    App::new(opts, Session::blank(Model::Dmg), false, None, None, None)
+    App::new(
+        opts,
+        Session::blank(Model::Dmg),
+        false,
+        None,
+        None,
+        slopgb_plugin_host::PluginRegistry::new(),
+    )
 }
 
 #[test]

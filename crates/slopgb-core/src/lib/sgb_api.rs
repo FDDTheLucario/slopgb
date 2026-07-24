@@ -120,6 +120,20 @@ impl GameBoy {
         }
     }
 
+    /// Tell the SGB coprocessor whether its SNES-side framebuffer is being
+    /// presented right now — a frontend fast-forwarding past frames nobody
+    /// sees calls this with `false` to skip rasterization, and `true` to
+    /// resume it for normal play. A no-op off `Model::Sgb`/`Sgb2` (there is
+    /// no coprocessor slot) and on the built-in HLE `SgbApu` (no framebuffer
+    /// to skip). Never called, or called with `true`, leaves emulation
+    /// byte-identical to today (golden-safe) — only whether pixels get drawn
+    /// changes, never chip timing or audio.
+    pub fn set_coprocessor_render(&mut self, on: bool) {
+        if let Some(apu) = self.sgb_apu.as_mut() {
+            apu.set_render_enabled(on);
+        }
+    }
+
     /// Attach the built-in default SGB border surface to a non-SGB machine (the
     /// fallback for "GBC + initial SGB border" when the game uploads no border).
     /// Presentation-only: `frame()`/cycles are byte-identical to the same model
@@ -151,6 +165,28 @@ impl GameBoy {
     pub fn install_sgb_border(&mut self, border: &SgbBorder) {
         self.bus
             .install_sgb_border(border.tiles.clone(), border.raw.clone());
+    }
+
+    /// The SGB audio coprocessor's self-describing manifest (the plugin-host
+    /// manifest wire format), for the frontend's menu-row table. Empty off SGB
+    /// or when the engaged coprocessor contributes no rows (the built-in HLE
+    /// `SgbApu`). Read-only.
+    pub fn coprocessor_manifest(&self) -> &'static str {
+        self.sgb_apu.as_ref().map_or("", |a| a.manifest())
+    }
+
+    /// Whether the coprocessor's export named `name` (one its manifest
+    /// declares in a `menu` record) can produce a blob right now — the UI
+    /// greys the row when false. Read-only.
+    pub fn coprocessor_export_ready(&self, name: &str) -> bool {
+        self.sgb_apu.as_ref().is_some_and(|a| a.export_ready(name))
+    }
+
+    /// Run the coprocessor's export named `name` and return its blob, or
+    /// `None` off SGB or when `name` names no export the engaged coprocessor
+    /// declares. Read-only.
+    pub fn coprocessor_export(&self, name: &str) -> Option<Vec<u8>> {
+        self.sgb_apu.as_ref().and_then(|a| a.call_export(name))
     }
 }
 

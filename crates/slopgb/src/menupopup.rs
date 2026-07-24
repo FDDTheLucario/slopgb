@@ -90,15 +90,10 @@ impl MenuPopup {
         cursor: (i32, i32),
         sound_on: bool,
         paused: bool,
-        can_export_spc: bool,
+        plugin_rows: &[(String, bool)],
         theme: Theme,
     ) -> Option<Self> {
-        let mut menu = MainMenu::open((0, 0), sound_on, paused);
-        // Grey "Export SPC" unless a from-start snapshot is ready (only a
-        // recognized resident SGB engine that has started a song fills it).
-        if !can_export_spc {
-            menu.disable_effect(MenuEffect::Run(Action::ExportSpc));
-        }
+        let menu = MainMenu::open((0, 0), sound_on, paused, plugin_rows);
         let (pw, ph) = popup_content_size(&menu, None);
         let (anchor, monitor) = anchor_and_monitor(game_window, cursor);
         let (ox, oy) = popup_screen_origin(anchor, (0, 0), (pw, ph), monitor);

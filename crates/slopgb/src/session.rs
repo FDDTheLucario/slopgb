@@ -79,18 +79,22 @@ pub(crate) struct Session {
     /// (or a dir missing either wasm) → the built-in `SgbApu` stands (golden-safe
     /// default). Kept so a power-cycle / model switch re-injects it.
     plugins_dir: Option<PathBuf>,
-    /// Optional SF2 soundfont path (`--sf2`/`SLOPGB_SF2`), kept so a power-cycle /
-    /// model switch re-applies it to the fresh machine. When present, its
-    /// converted sample regions override the ROM's own `$4B00`/`$4C30`/`$4DB0`
-    /// N-SPC sample bank; `None` = the ROM's own samples (or, off SGB / no
-    /// coprocessor plugin, a no-op).
-    sf2: Option<PathBuf>,
-    /// Explicit MSU-1 pack directory (`--msu1`/`SLOPGB_MSU1`). `None` defaults the
-    /// pack to the loaded ROM's own directory (`.pcm` tracks beside the ROM). The
-    /// MSU-1 chip itself is an SGB-coprocessor plugin (`msu1.wasm` in the plugins
-    /// dir); this only points it at the audio pack. Kept so a power-cycle / model
-    /// switch re-applies it.
-    msu1_override: Option<PathBuf>,
+    /// Effective values of plugin-contributed CLI flags (`sf2`, `msu1`, ...:
+    /// see `slopgb_plugin_host::FlagContribution`), keyed by the flag's
+    /// declared name — already resolved by the frontend's `PluginRegistry`
+    /// (explicit CLI/env value, else the manifest's declared default expanded
+    /// against the current ROM/plugins-dir context, else absent). `sf2`
+    /// overrides the ROM's own `$4B00`/`$4C30`/`$4DB0` N-SPC sample bank when
+    /// present; `msu1` points the MSU-1 chip (an SGB-coprocessor plugin) at
+    /// its `.pcm` pack directory. Kept so a power-cycle / model switch
+    /// re-applies them to the fresh machine.
+    plugin_flags: Vec<(String, String)>,
+    /// One-shot-per-load guard for the deferred-validation warning: an
+    /// explicit plugin flag value resolved but this machine can't use it this
+    /// run (not an SGB model, or no SGB-coprocessor plugin in the dir). Reset
+    /// by `set_plugin_flags` so it fires at most once per (re)load, never as a
+    /// hard error (a drag-drop ROM swap can change applicability).
+    plugin_flags_warned: bool,
     /// Overlay the built-in default SGB border on a non-SGB machine — bgb's
     /// "GBC + initial SGB border" system mode (`ModelChoice::CgbBorder`). A
     /// machine property, so a power-cycle (`reset`) re-applies it.
@@ -134,8 +138,8 @@ impl Session {
             boot: OwnedBootSpec::default(),
             sgb_bios: None,
             plugins_dir: None,
-            sf2: None,
-            msu1_override: None,
+            plugin_flags: Vec::new(),
+            plugin_flags_warned: false,
             sgb_border: false,
             ram_init: None,
             load_warning: None,
@@ -209,8 +213,8 @@ impl Session {
             boot: boot.to_owned(),
             sgb_bios: None,
             plugins_dir: None,
-            sf2: None,
-            msu1_override: None,
+            plugin_flags: Vec::new(),
+            plugin_flags_warned: false,
             sgb_border,
             ram_init,
             load_warning,
@@ -247,19 +251,41 @@ impl Session {
         self.apply_sgb_coprocessor();
     }
 
-    /// Set the optional `--sf2` soundfont path, then re-apply the coprocessor's
-    /// N-SPC install so its sample regions take over immediately. Kept so a
-    /// `reset`/`set_model` rebuild re-applies it to the fresh machine.
-    pub(crate) fn set_sf2(&mut self, sf2: Option<PathBuf>) {
-        self.sf2 = sf2;
+    /// Set the effective values of every plugin-contributed CLI flag (the
+    /// frontend's already-resolved `PluginRegistry::flag` results — see the
+    /// `plugin_flags` field doc), then re-apply the coprocessor so `sf2` /
+    /// `msu1` take over immediately. Resets the deferred-validation warning
+    /// guard, so an inapplicable value warns again on this fresh load.
+    pub(crate) fn set_plugin_flags(&mut self, flags: Vec<(String, String)>) {
+        self.plugin_flags = flags;
+        self.plugin_flags_warned = false;
         self.apply_sgb_coprocessor();
     }
 
-    /// Set the explicit MSU-1 pack directory (`--msu1`); `None` = default to the
-    /// loaded ROM's own directory. Re-injects the coprocessor so the change lands.
-    pub(crate) fn set_msu1_override(&mut self, dir: Option<PathBuf>) {
-        self.msu1_override = dir;
-        self.apply_sgb_coprocessor();
+    /// The effective value of a plugin flag by name (`sf2`, `msu1`, ...), if
+    /// the frontend resolved one.
+    fn plugin_flag(&self, name: &str) -> Option<&str> {
+        self.plugin_flags
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// Warn once per load when a resolved plugin flag can't apply this run
+    /// (deferred validation: never a hard error, since a drag-drop ROM swap
+    /// can change applicability — see `plugin_flags_warned`).
+    fn warn_plugin_flags_inapplicable(&mut self) {
+        if self.plugin_flags.is_empty() || self.plugin_flags_warned {
+            return;
+        }
+        self.plugin_flags_warned = true;
+        let names: Vec<&str> = self.plugin_flags.iter().map(|(n, _)| n.as_str()).collect();
+        eprintln!(
+            "slopgb: plugin flag(s) {} resolved but no SGB coprocessor is active this \
+             load (not an SGB model, or spc700.wasm/w65c816.wasm missing from the \
+             plugins dir) — ignored",
+            names.join(", ")
+        );
     }
 
     /// Inject the combined coprocessor into the current (freshly built) machine
@@ -274,11 +300,16 @@ impl Session {
         // Off SGB the machine holds no coprocessor slot; skip the wasm load
         // entirely (`set_audio_coprocessor` would drop the box anyway).
         if !matches!(self.model, Model::Sgb | Model::Sgb2) {
+            self.warn_plugin_flags_inapplicable();
             return;
         }
-        let Some(dir) = &self.plugins_dir else { return };
+        let Some(dir) = &self.plugins_dir else {
+            self.warn_plugin_flags_inapplicable();
+            return;
+        };
         // No coprocessor plugin in the dir → HLE default, not an error.
         if !dir.join(SPC_WASM).exists() || !dir.join(CPU_WASM).exists() {
+            self.warn_plugin_flags_inapplicable();
             return;
         }
         match SgbCoprocessor::load(dir, DEFAULT_SAMPLE_RATE) {
@@ -287,7 +318,7 @@ impl Session {
                 // `slopgb-sgb-coprocessor`'s `install_nspc`): the ROM's own
                 // resident engine plays only with `--sgb-bios` present (unless
                 // the clean-room env override is set); the sample bank is the
-                // ROM's own unless `--sf2` supplies an override — which also
+                // ROM's own unless `sf2` supplies an override — which also
                 // forces the clean-room engine when no `--sgb-bios` is given,
                 // since there is no ROM engine code to fall back to.
                 let cleanroom_env = std::env::var_os("SLOPGB_NSPC_CLEANROOM").is_some();
@@ -296,8 +327,8 @@ impl Session {
                 } else {
                     Engine::CleanRoom
                 };
-                let sf2_regions: Option<SampleRegions> = self
-                    .sf2
+                let sf2_path = self.plugin_flag("sf2").map(PathBuf::from);
+                let sf2_regions: Option<SampleRegions> = sf2_path
                     .as_ref()
                     .and_then(|p| load_or_import_sf2(p, self.plugins_dir.as_deref()));
                 if (self.sgb_bios.is_some() || sf2_regions.is_some())
@@ -308,16 +339,13 @@ impl Session {
                     );
                 }
                 // Point the MSU-1 plugin (if `msu1.wasm` was in the plugins dir)
-                // at its `.pcm` pack: an explicit `--msu1` dir, else the loaded
-                // ROM's own directory (`sav_path` is ROM-adjacent). A game's SGB
-                // driver then finds the chip on the SNES $2000 bus.
-                let pack = self
-                    .msu1_override
-                    .clone()
-                    .or_else(|| self.sav_path.parent().map(Path::to_path_buf))
-                    .filter(|p| !p.as_os_str().is_empty());
-                if let Some(dir) = pack {
-                    cop.set_msu_pack(&dir);
+                // at its `.pcm` pack: the `msu1` flag's effective value — an
+                // explicit `--msu1`/`SLOPGB_MSU1`, else the manifest's `$rom_dir`
+                // default (the loaded ROM's own directory), already resolved by
+                // the frontend's `PluginRegistry`. A game's SGB driver then finds
+                // the chip on the SNES $2000 bus.
+                if let Some(pack) = self.plugin_flag("msu1") {
+                    cop.set_msu_pack(Path::new(pack));
                 }
                 self.gb.set_audio_coprocessor(Box::new(cop));
             }

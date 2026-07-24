@@ -246,7 +246,7 @@ impl App {
                 self.request_game_redraw();
             }
             Action::SaveScreenshot => self.save_screenshot(),
-            Action::ExportSpc => self.export_spc(),
+            Action::PluginMenu(i) => self.run_plugin_menu(i),
             Action::DbgSaveMemDump => self.save_memory_dump(),
             // bgb's "Options..." (F11): open the tabbed control panel, seeded
             // from the live settings. Routed/applied by `on_game_click` +
@@ -349,22 +349,29 @@ impl App {
         }
     }
 
-    /// Export the SGB audio chip's current state as `slopgb-<unix-millis>.spc`
-    /// (main menu → "Export SPC"); best captured while a song is playing, so the
-    /// SPC is self-sustaining. Logs the path, or a hint if there's no SPC to dump
-    /// (not an SGB machine, or the coprocessor has no SPC700).
-    fn export_spc(&self) {
-        let Some(spc) = self.session.gb.export_spc() else {
-            eprintln!("slopgb: no SPC to export (needs an SGB machine with audio)");
+    /// Run the manifest-declared coprocessor menu row at `idx` in the cached
+    /// `plugin_menu_rows` table (built when the popup opened — see
+    /// `build_plugin_menu_rows`), writing its blob to
+    /// `slopgb-<unix-millis>.<ext>` — the same naming/logging shape the
+    /// previous SPC-specific "Export SPC" action used. A stale index (the row
+    /// table changed after the popup closed) or an export that yields nothing
+    /// logs and no-ops.
+    fn run_plugin_menu(&self, idx: u8) {
+        let Some(row) = self.plugin_menu_rows.get(idx as usize) else {
+            eprintln!("slopgb: plugin menu row {idx} no longer exists");
+            return;
+        };
+        let Some(blob) = self.session.gb.coprocessor_export(&row.export) else {
+            eprintln!("slopgb: {} produced nothing to export", row.label);
             return;
         };
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis());
-        let path = format!("slopgb-{stamp}.spc");
-        match fs::write(&path, &spc) {
-            Ok(()) => eprintln!("saved SPC ({} bytes) to {path}", spc.len()),
-            Err(e) => eprintln!("error: could not save SPC: {e}"),
+        let path = format!("slopgb-{stamp}.{}", row.ext);
+        match fs::write(&path, &blob) {
+            Ok(()) => eprintln!("saved {} ({} bytes) to {path}", row.label, blob.len()),
+            Err(e) => eprintln!("error: could not save {}: {e}", row.label),
         }
     }
 

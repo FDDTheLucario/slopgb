@@ -78,6 +78,9 @@ impl App {
         // Game Genie ROM patches are a persistent core read-intercept: push the
         // current set once per wake (re-syncs after a ROM reload clears them).
         self.session.gb.set_gg_patches(self.cheats.gg_patches());
+        // Normal-speed play always presents the SNES-side frame: undo any
+        // fast-forward render skip left by `run_turbo`.
+        self.session.gb.set_coprocessor_render(true);
         let now = Instant::now();
         let mut frames = 0;
         let mut hit = false;
@@ -353,11 +356,10 @@ mod tests {
             mute: true,
             boot: None,
             sgb_bios: None,
-            sf2: None,
             mcp_port: None,
             plugins_dir: None,
-            msu1: None,
             ram_init: None,
+            plugin_flags: Vec::new(),
         };
         let mut app = App::new(
             opts,
@@ -365,7 +367,7 @@ mod tests {
             false,
             None,
             None,
-            None,
+            slopgb_plugin_host::PluginRegistry::new(),
         );
         app.session.gb = GameBoy::new(Model::Dmg, rom).expect("valid test ROM");
         app

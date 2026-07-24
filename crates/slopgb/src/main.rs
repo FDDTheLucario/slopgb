@@ -61,16 +61,19 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use slopgb_core::{Button, CLOCK_HZ, CYCLES_PER_FRAME, SCREEN_PIXELS};
-use slopgb_plugin_host::PluginHost;
+use slopgb_plugin_host::{Context, FlagContribution, PluginHost, PluginRegistry};
 use winit::event_loop::EventLoop;
 use winit::keyboard::{KeyCode, ModifiersState};
 use winit::window::Window;
 
-use app_boot::{load_plugins, msu1_override, resolve_boot_rom, resolve_sf2, resolve_sgb_bios};
+use app_boot::{
+    apply_plugin_flags, build_registry, effective_plugin_flags, load_plugins, prescan_plugins_dir,
+    resolve_boot_rom, resolve_sgb_bios,
+};
 use app_draw::blank_frame;
 pub(crate) use app_keys::dialog_key_from;
 use audio::AudioOutput;
-use cli::{Options, ParseOutcome, USAGE};
+use cli::{Options, ParseOutcome};
 use input::ButtonTracker;
 use menupopup::MenuPopup;
 use pacing::{AudioPipe, StallWatchdog};
@@ -90,18 +93,37 @@ const FRAME_DURATION: Duration =
 const RECOVERY_INTERVAL: Duration = Duration::from_secs(10);
 
 fn main() {
-    let opts = match Options::parse(env::args().skip(1)) {
+    // Pure I/O, loaded once and reused for both the plugins-dir pre-scan
+    // (needs the persisted dir as its third-precedence fallback) and `App::new`
+    // (needs the persisted Options) — never loaded twice.
+    let loaded = settings_file::load();
+    let args: Vec<String> = env::args().skip(1).collect();
+    // Manifest-declared CLI flags (present-iff their plugin is in the
+    // resolved plugins dir): pre-scan for `--plugins`/env/persisted-dir
+    // *before* the real parse, since that parse needs the declared-flag table
+    // this directory's plugins contribute (see `docs/ui-state/plugin-api.md`).
+    let plugins_dir = prescan_plugins_dir(args.iter().cloned(), &loaded.settings);
+    let mut registry = build_registry(plugins_dir.as_deref());
+    let declared: Vec<FlagContribution> = registry
+        .flags()
+        .into_iter()
+        .map(|(_, f)| f.clone())
+        .collect();
+    let opts = match Options::parse(args.into_iter(), &declared) {
         Ok(ParseOutcome::Run(opts)) => opts,
         Ok(ParseOutcome::Help) => {
-            print!("{USAGE}");
+            print!("{}", cli::usage(&declared));
             return;
         }
         Err(e) => {
             eprintln!("error: {e}\n");
-            eprint!("{USAGE}");
+            eprint!("{}", cli::usage(&declared));
             process::exit(2);
         }
     };
+    // Explicit CLI value wins over the generic `SLOPGB_<FLAG>` env fallback;
+    // absent either, `registry.flag` falls back to the manifest's own default.
+    apply_plugin_flags(&mut registry, &opts.plugin_flags);
     // No ROM on the command line → boot to a blank LCD (bgb behaviour); a ROM
     // loads later via drag-drop / the Load ROM... menu. With a ROM, a load error
     // still aborts (the user named a file that can't be read).
@@ -111,13 +133,9 @@ fn main() {
     // Optional SGB BIOS (--sgb-bios / SLOPGB_SGB_BIOS): feeds the SGB audio path
     // on every ROM (re)load; border/palette are not extracted (HLE).
     let sgb_bios = resolve_sgb_bios(&opts);
-    // Optional SF2 soundfont (--sf2 / SLOPGB_SF2): overrides the SGB N-SPC
-    // sample bank on every ROM (re)load, independent of the engine choice.
-    let sf2 = resolve_sf2(&opts);
     // Effective emulated-system choice for this load: an explicit CLI `--model`
     // wins, else the persisted Options choice (so a saved SGB / "prefer SGB" /
     // border selection is honored at startup, not just after opening Options).
-    let loaded = settings_file::load();
     let model_choice = opts.model.map_or(loaded.settings.model, |m| {
         windows::options::ModelChoice::from_option(Some(m))
     });
@@ -143,9 +161,9 @@ fn main() {
         ),
     };
     session.set_sgb_bios(sgb_bios.clone());
-    session.set_sf2(sf2.clone());
-    // The plugins dir (and the SGB coprocessor it auto-loads) is applied in
-    // `App::new`, from the CLI/env/persisted dir it reconciles into `settings`.
+    // The plugins dir + registry context (and the effective `sf2`/`msu1` plugin
+    // flag values they gate) are applied in `App::new`, once `settings.plugins.dir`
+    // reconciles the CLI/env/persisted dir — see `App::new`.
     let event_loop = match EventLoop::new() {
         Ok(l) => l,
         Err(e) => {
@@ -153,7 +171,7 @@ fn main() {
             process::exit(1);
         }
     };
-    let mut app = App::new(opts, session, rom_loaded, boot_rom, sgb_bios, sf2);
+    let mut app = App::new(opts, session, rom_loaded, boot_rom, sgb_bios, registry);
     if let Err(e) = event_loop.run_app(&mut app) {
         eprintln!("error: event loop failed: {e}");
         process::exit(1);
@@ -199,6 +217,18 @@ enum PathPurpose {
     CheatSave,
 }
 
+/// One row the live engaged coprocessor's manifest declares for the main menu
+/// (e.g. "Export SPC" — see `docs/hardware-state/sgb-audio.md`): its label, the
+/// guest/mediator `export` name `GameBoy::coprocessor_export` dispatches to,
+/// the file `ext` to save the result as, and whether it can produce a blob
+/// right now (the UI greys the row when false).
+pub(crate) struct PluginMenuRow {
+    pub(crate) label: String,
+    pub(crate) export: String,
+    pub(crate) ext: String,
+    pub(crate) enabled: bool,
+}
+
 struct App {
     opts: Options,
     /// Boot ROM bytes (from `--boot`/`SLOPGB_BOOT`), executed from power-on on
@@ -207,9 +237,19 @@ struct App {
     /// Optional SGB BIOS bytes (from `--sgb-bios`/`SLOPGB_SGB_BIOS`), re-applied
     /// to the fresh machine on every ROM (re)load. `None` = no SGB BIOS.
     sgb_bios: Option<Vec<u8>>,
-    /// Optional SF2 soundfont path (from `--sf2`/`SLOPGB_SF2`), re-applied to the
-    /// fresh machine on every ROM (re)load. `None` = the ROM's own N-SPC samples.
-    sf2: Option<PathBuf>,
+    /// The plugin registry: every manifest the resolved plugins dir's `*.wasm`
+    /// declared (CLI flags, roles), plus the ambient [`Context`] (ROM path/dir,
+    /// plugins dir) their default flag values resolve against. Rebuilt (rescanned)
+    /// on a plugins-dir change (`app_menu::rebuild_plugins`); its `Context` is
+    /// refreshed on every ROM (re)load. `Session::set_plugin_flags` consumes its
+    /// resolved `sf2`/`msu1` values — the frontend keeps no typed field for either.
+    registry: PluginRegistry,
+    /// The currently loaded ROM's path (`None` at the no-ROM startup screen),
+    /// kept only to rebuild the plugin registry's ambient [`Context`] — see
+    /// [`Self::registry_context`] — on a plugins-dir change
+    /// (`app_menu::rebuild_plugins`) without re-deriving it from `opts.rom`,
+    /// which goes stale the moment a ROM is dropped.
+    current_rom: Option<PathBuf>,
     session: Session,
     /// Whether a real ROM is loaded. `false` at a no-ROM (bgb-style) startup:
     /// the blank machine is frozen at power-on (emulation gated off) and the LCD
@@ -329,6 +369,12 @@ struct App {
     /// **own borderless window** (so it can extend past the game window's edge
     /// instead of being clipped), holding the main menu + open submenu.
     menu_popup: Option<MenuPopup>,
+    /// The live engaged coprocessor's manifest-declared menu rows (e.g. "Export
+    /// SPC"), snapshotted when the popup opens (`on_game_click`) so a click's
+    /// `Action::PluginMenu(i)` always indexes the table it was built from, even
+    /// if the live machine's manifest could change before the click lands.
+    /// Empty when no coprocessor is engaged or it contributes no rows.
+    plugin_menu_rows: Vec<PluginMenuRow>,
     /// An open info box (Other → Cart info / System info / About), drawn centred
     /// over the LCD; any click or Escape closes it.
     info_box: Option<InfoBox>,
@@ -404,7 +450,7 @@ impl App {
         rom_loaded: bool,
         boot_rom: Option<Vec<u8>>,
         sgb_bios: Option<Vec<u8>>,
-        sf2: Option<PathBuf>,
+        registry: PluginRegistry,
     ) -> Self {
         let muted = opts.mute;
         let scale = opts.scale;
@@ -446,11 +492,13 @@ impl App {
         // Build the controller map before `settings` is moved into the struct.
         let gamepad_bindings = gamepad::GamepadBindings::from_config(&settings.gamepad_map);
         let bindings = keymap::KeyBindings::from_config(&settings.key_map);
+        let current_rom = opts.rom.clone();
         let mut app = Self {
             opts,
             boot_rom,
             sgb_bios,
-            sf2,
+            registry,
+            current_rom,
             session,
             rom_loaded,
             blank_frame,
@@ -518,6 +566,7 @@ impl App {
             plugins,
             recent,
             menu_popup: None,
+            plugin_menu_rows: Vec::new(),
             window_size,
             game_cursor: (0, 0),
             custom_themes,
@@ -528,19 +577,22 @@ impl App {
         app.apply_palette();
         // Arm the default exception-break mask (bgb's "break on invalid opcode").
         app.apply_exceptions();
-        // MSU-1 pack directory (--msu1 / SLOPGB_MSU1; else the ROM's own dir).
-        // Set before the plugins dir so the coprocessor injection below picks it
-        // up — the MSU-1 chip (msu1.wasm) rides the same SGB coprocessor.
-        app.session.set_msu1_override(msu1_override(&app.opts));
+        // The registry's ambient context: the resolved plugins dir (the single
+        // source `load_plugins` already reconciled into `settings.plugins.dir`)
+        // plus this load's ROM, so a manifest default (e.g. msu1's `$rom_dir`)
+        // expands correctly. Set before resolving the effective flag values below.
+        let plugins_dir = (!app.settings.plugins.dir.is_empty())
+            .then(|| PathBuf::from(&app.settings.plugins.dir));
+        let ctx = app.registry_context(plugins_dir.clone());
+        app.registry.set_context(ctx);
         // The SGB coprocessor is a plugin: point the session at the resolved
-        // plugins dir (CLI `--plugins` / env / persisted — the single source
-        // `load_plugins` already reconciled into `settings.plugins.dir`) so it
-        // auto-loads `spc700.wasm` + `w65c816.wasm` (+ optional `msu1.wasm`) on an
-        // SGB machine at startup.
-        app.session.set_plugins_dir(
-            (!app.settings.plugins.dir.is_empty())
-                .then(|| PathBuf::from(&app.settings.plugins.dir)),
-        );
+        // plugins dir so it auto-loads `spc700.wasm` + `w65c816.wasm` (+ optional
+        // `msu1.wasm`) on an SGB machine at startup, then feed it the registry's
+        // resolved `sf2`/`msu1` flag values (the plugin consumes its own value —
+        // the frontend keeps no typed field for either).
+        app.session.set_plugins_dir(plugins_dir);
+        app.session
+            .set_plugin_flags(effective_plugin_flags(&app.registry));
         app
     }
 
@@ -623,6 +675,23 @@ impl App {
             let s = w.inner_size();
             Rect::new(0, 0, s.width as i32, s.height as i32)
         })
+    }
+
+    /// Build the plugin registry's ambient [`Context`] for `plugins_dir` from
+    /// [`Self::current_rom`] (`None` at the no-ROM startup screen) — shared by
+    /// `App::new`, `load_dropped`, and `app_menu::rebuild_plugins` so a
+    /// plugins-dir-only change (the ROM unchanged) still resolves defaults
+    /// against the right ROM instead of a stale `opts.rom`.
+    pub(crate) fn registry_context(&self, plugins_dir: Option<PathBuf>) -> Context {
+        Context {
+            rom_dir: self
+                .current_rom
+                .as_deref()
+                .and_then(Path::parent)
+                .map(Path::to_path_buf),
+            rom_path: self.current_rom.clone(),
+            plugins_dir,
+        }
     }
 
     /// Basenames of the recent ROMs for the Recent ROMs submenu (MN4).
@@ -715,18 +784,18 @@ impl App {
         match Session::load(path, self.settings.model, &self.boot_spec(), ram_init) {
             Ok(mut new) => {
                 new.set_sgb_bios(self.sgb_bios.clone());
-                new.set_sf2(self.sf2.clone());
-                // MSU-1 pack: explicit --msu1 override, else this newly loaded
-                // ROM's own directory. Set before the plugins dir so the fresh
-                // coprocessor injection points the MSU-1 plugin at the pack.
-                new.set_msu1_override(msu1_override(&self.opts));
-                // Carry the live plugins dir (seeded from --plugins at startup,
-                // possibly re-pointed via the UI) so the SGB coprocessor plugin
-                // re-injects into the fresh machine.
-                new.set_plugins_dir(
-                    (!self.settings.plugins.dir.is_empty())
-                        .then(|| PathBuf::from(&self.settings.plugins.dir)),
-                );
+                // Refresh the registry's ambient context to this newly-dropped
+                // ROM, so a manifest default (e.g. msu1's `$rom_dir`) re-expands
+                // against it, then carry the live plugins dir (seeded from
+                // `--plugins` at startup, possibly re-pointed via the UI) so the
+                // SGB coprocessor plugin re-injects into the fresh machine.
+                self.current_rom = Some(path.to_path_buf());
+                let plugins_dir = (!self.settings.plugins.dir.is_empty())
+                    .then(|| PathBuf::from(&self.settings.plugins.dir));
+                let ctx = self.registry_context(plugins_dir.clone());
+                self.registry.set_context(ctx);
+                new.set_plugins_dir(plugins_dir);
+                new.set_plugin_flags(effective_plugin_flags(&self.registry));
                 new.set_rtc_vba_export(self.settings.rtc_vba_sav);
                 new.set_rtc_bgb_legacy(self.settings.rtc_bgb_legacy);
                 self.session = new;

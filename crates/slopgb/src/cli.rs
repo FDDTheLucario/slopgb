@@ -1,11 +1,20 @@
 //! Command-line parsing for the slopgb frontend. Kept pure (no I/O, no exit)
 //! so [`Options::parse`] is unit-testable; `main` prints the help / errors.
+//!
+//! Plugin-contributed flags (declared in a coprocessor's manifest — see
+//! `slopgb_plugin_host::FlagContribution`) are threaded in as `declared`
+//! rather than hardcoded here: a flag exists **iff** its plugin is present in
+//! the resolved plugins dir (present-iff rule), so the same `--foo` can be a
+//! hard `unknown option` error on one run and a valid flag on the next,
+//! depending only on what's in the plugins dir. `main` builds `declared` by
+//! pre-scanning the plugins dir before this parse (see `app_boot`).
 
 use std::path::PathBuf;
 
 use slopgb_core::{Model, RamInit};
+use slopgb_plugin_host::FlagContribution;
 
-pub(crate) const USAGE: &str = "\
+const USAGE_HEAD: &str = "\
 slopgb — Game Boy / Game Boy Color emulator
 
 USAGE:
@@ -25,17 +34,6 @@ OPTIONS:
                       only). Feeds the SGB audio driver; the Nintendo border and
                       title palette are NOT extracted (slopgb never runs the SNES
                       CPU) — the default border stands. Also via SLOPGB_SGB_BIOS
-    --sf2 <PATH>      Supply the SGB N-SPC sample bank from a standard
-                      SoundFont-2 file, overriding the ROM's own samples. With
-                      no --sgb-bios this also forces the clean-room N-SPC
-                      engine (no ROM engine code is available). Composes with
-                      --sgb-bios (ROM engine + SF2 samples). The converted bank
-                      is cached next to the SF2 as <hash>.smpl, keyed on the
-                      soundfont contents; a cache hit needs no plugin. On a
-                      cache miss the import runs via sf2.wasm from the
-                      plugins dir (see --plugins) — if it's missing, no SF2
-                      samples load. Also via
-                      SLOPGB_SF2
     --mcp-port <N>    Host an MCP server on 127.0.0.1:<N> so an LLM agent can
                       drive the debugger (disassemble/peek/cdl/vram/breakpoint/
                       registers/expr). Also via SLOPGB_MCP_PORT=<N>
@@ -44,11 +42,13 @@ OPTIONS:
                       (spc700.wasm + w65c816.wasm) auto-loads from here on SGB
                       models. See docs/ui-state/plugin-api.md. Also via
                       SLOPGB_PLUGINS_DIR
-    --msu1 <DIR>      Load an MSU-1 streaming-audio pack from <DIR> (the MSU-1
-                      coprocessor plugin msu1.wasm + track_N.pcm tracks + an
-                      optional .msu data ROM). Registers map to $A000-$A007; the
-                      track's PCM is mixed into the audio. Also via SLOPGB_MSU1
-    --ram-init <SPEC> Power-on RAM: fill:HH sets cart SRAM to a byte (default
+";
+
+// No `"\` opening continuation here (unlike `USAGE_HEAD`): that continuation
+// trims ALL leading whitespace off the line right after it, and this tail's
+// very first line legitimately needs its 4-space `OPTIONS` indent kept.
+const USAGE_TAIL: &str =
+    "    --ram-init <SPEC> Power-on RAM: fill:HH sets cart SRAM to a byte (default
                       fill:FF); random[:seed] fills all RAM with seeded xorshift
                       garbage (authentic power-on). A .sav still overrides SRAM.
     -h, --help        Print this help
@@ -69,6 +69,76 @@ Serial link cable: open the game-window right-click Link menu (Listen / Connect)
 or set SLOPGB_LINK_LISTEN=1 / SLOPGB_LINK_CONNECT=host:port to link at startup.
 ";
 
+/// The full `--help` text: the built-in `OPTIONS` block plus whatever the
+/// current plugins dir's manifests declared (`declared`, in scan order),
+/// spliced in where the flags they replaced (`--sf2` / `--msu1`) used to be
+/// documented. With no plugins scanned, byte-identical to the old fixed
+/// `USAGE` constant.
+pub(crate) fn usage(declared: &[FlagContribution]) -> String {
+    let mut extra = String::new();
+    for f in declared {
+        extra.push_str(&flag_usage_block(f));
+    }
+    format!("{USAGE_HEAD}{extra}{USAGE_TAIL}")
+}
+
+/// Column the right (help) side of an `OPTIONS` row starts at — 4-space
+/// indent + an 18-wide left field, matching the hand-formatted built-ins.
+const HELP_COLUMN: usize = 22;
+/// Wrapped-help content width (so the full line stays close to the built-ins'
+/// ~80-column wrap).
+const HELP_WIDTH: usize = 80 - HELP_COLUMN;
+
+/// Format one declared flag as an `OPTIONS` row: `--name <ARG>` (or bare
+/// `--name` for `arg == "none"`, matching `--mute`) in the left column, its
+/// help word-wrapped into the right column at [`HELP_COLUMN`].
+fn flag_usage_block(f: &FlagContribution) -> String {
+    let left = if f.arg == "none" || f.arg.is_empty() {
+        format!("    --{}", f.name)
+    } else {
+        format!("    --{} <{}>", f.name, f.arg.to_ascii_uppercase())
+    };
+    let pad = " ".repeat(HELP_COLUMN.saturating_sub(left.len()).max(1));
+    let mut out = String::new();
+    let lines = wrap_help(&f.help, HELP_WIDTH);
+    if lines.is_empty() {
+        out.push_str(&left);
+        out.push('\n');
+        return out;
+    }
+    for (i, line) in lines.iter().enumerate() {
+        if i == 0 {
+            out.push_str(&left);
+            out.push_str(&pad);
+        } else {
+            out.push_str(&" ".repeat(HELP_COLUMN));
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
+/// Greedy word-wrap of `text` into lines at most `width` columns wide.
+fn wrap_help(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        if !line.is_empty() && line.len() + 1 + word.len() > width {
+            lines.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
+#[derive(Debug)]
 pub(crate) struct Options {
     /// ROM to load at startup, or `None` to boot to a blank LCD (bgb-style) and
     /// load one later via drag-drop / the Load ROM... menu.
@@ -84,12 +154,6 @@ pub(crate) struct Options {
     /// image). `--sgb-bios <path>`; falls back to `SLOPGB_SGB_BIOS` (resolved in
     /// `main`). `None` = SGB audio silent for the default bank, default border.
     pub(crate) sgb_bios: Option<PathBuf>,
-    /// Optional SF2 soundfont supplying the SGB N-SPC sample bank (`--sf2
-    /// <path>`; falls back to `SLOPGB_SF2` (resolved in `main`). `None` = the
-    /// ROM's own samples. Overrides the ROM's `$4B00`/`$4C30`/`$4DB0` sample
-    /// regions when present; with no `--sgb-bios` it also forces the
-    /// clean-room N-SPC engine (there is no ROM engine to fall back to).
-    pub(crate) sf2: Option<PathBuf>,
     /// Port for the opt-in MCP debug server (`--mcp-port`; falls back to
     /// `SLOPGB_MCP_PORT`, resolved in `main`). `None` = no server (default).
     pub(crate) mcp_port: Option<u16>,
@@ -97,37 +161,46 @@ pub(crate) struct Options {
     /// `SLOPGB_PLUGINS_DIR`, resolved in `main`). `None` = no plugins (default,
     /// golden path untouched).
     pub(crate) plugins_dir: Option<PathBuf>,
-    /// Directory of an MSU-1 pack to load (`--msu1`; falls back to `SLOPGB_MSU1`,
-    /// resolved in `main`). `None` = no MSU-1 (default; the core is untouched and
-    /// the audio path is byte-identical).
-    pub(crate) msu1: Option<PathBuf>,
     /// Power-on RAM initialisation (`--ram-init fill:HH` / `--ram-init
     /// random[:seed]`). `None` = the deterministic 0xFF cart-SRAM default (leaves
     /// the machine byte-identical to `GameBoy::new`).
     pub(crate) ram_init: Option<RamInit>,
+    /// Values for CLI flags a scanned plugin's manifest declared (present iff
+    /// that plugin is in the resolved plugins dir — see the module doc), keyed
+    /// by the flag's declared `name` (no dashes). The plugin consumes its own
+    /// value (`Session::set_plugin_flags`); the frontend keeps no typed field.
+    /// A flag with `arg == "none"` is recorded with an empty value.
+    pub(crate) plugin_flags: Vec<(String, String)>,
 }
 
 /// What a successful argument parse asks the program to do. Printing the
 /// help text (and exiting) is the caller's job, keeping `parse` pure and
 /// testable.
+#[derive(Debug)]
 pub(crate) enum ParseOutcome {
     Run(Options),
     Help,
 }
 
 impl Options {
-    pub(crate) fn parse(mut args: impl Iterator<Item = String>) -> Result<ParseOutcome, String> {
+    /// Parse `args` against the built-in flags plus whatever `declared`
+    /// plugin flags the current plugins dir contributed. An unmatched `--foo`
+    /// not named in `declared` is a hard `unknown option` error — a flag
+    /// exists only while its declaring plugin is present (see module doc).
+    pub(crate) fn parse(
+        mut args: impl Iterator<Item = String>,
+        declared: &[FlagContribution],
+    ) -> Result<ParseOutcome, String> {
         let mut rom = None;
         let mut model = None;
         let mut scale = 3u32;
         let mut mute = false;
         let mut boot = None;
         let mut sgb_bios = None;
-        let mut sf2 = None;
         let mut mcp_port = None;
         let mut plugins_dir = None;
-        let mut msu1 = None;
         let mut ram_init = None;
+        let mut plugin_flags = Vec::new();
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "-h" | "--help" => return Ok(ParseOutcome::Help),
@@ -140,10 +213,6 @@ impl Options {
                     let v = args.next().ok_or("--sgb-bios requires a path")?;
                     sgb_bios = Some(PathBuf::from(v));
                 }
-                "--sf2" => {
-                    let v = args.next().ok_or("--sf2 requires a path")?;
-                    sf2 = Some(PathBuf::from(v));
-                }
                 "--mcp-port" => {
                     let v = args.next().ok_or("--mcp-port requires a port number")?;
                     mcp_port = Some(
@@ -154,10 +223,6 @@ impl Options {
                 "--plugins" => {
                     let v = args.next().ok_or("--plugins requires a directory")?;
                     plugins_dir = Some(PathBuf::from(v));
-                }
-                "--msu1" => {
-                    let v = args.next().ok_or("--msu1 requires a directory")?;
-                    msu1 = Some(PathBuf::from(v));
                 }
                 "--model" => {
                     let v = args.next().ok_or("--model requires a value")?;
@@ -175,7 +240,23 @@ impl Options {
                         .filter(|n| (1..=16).contains(n))
                         .ok_or_else(|| format!("invalid --scale '{v}' (expected 1-16)"))?;
                 }
-                s if s.starts_with('-') => return Err(format!("unknown option '{s}'")),
+                s if s.starts_with('-') => {
+                    let found = s
+                        .strip_prefix("--")
+                        .and_then(|name| declared.iter().find(|f| f.name == name));
+                    match found {
+                        Some(f) if f.arg == "none" => {
+                            plugin_flags.push((f.name.clone(), String::new()));
+                        }
+                        Some(f) => {
+                            let v = args
+                                .next()
+                                .ok_or_else(|| format!("--{} requires a value", f.name))?;
+                            plugin_flags.push((f.name.clone(), v));
+                        }
+                        None => return Err(format!("unknown option '{s}'")),
+                    }
+                }
                 _ => {
                     if rom.is_some() {
                         return Err(format!("unexpected extra argument '{arg}'"));
@@ -193,11 +274,10 @@ impl Options {
             mute,
             boot,
             sgb_bios,
-            sf2,
             mcp_port,
             plugins_dir,
-            msu1,
             ram_init,
+            plugin_flags,
         }))
     }
 }

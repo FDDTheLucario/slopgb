@@ -52,10 +52,19 @@ pub struct MainMenu {
 impl MainMenu {
     /// Build the menu with its top-left at `origin`; `sound_on` check-marks the
     /// "Enable sound" row and `paused` check-marks "Pause" (reflecting the
-    /// runtime mute / paused state, as bgb does).
+    /// runtime mute / paused state, as bgb does). `plugin_rows` is the live
+    /// engaged coprocessor's manifest-declared menu rows (`(label, enabled)`,
+    /// e.g. "Export SPC") spliced in right after "Save screenshot" — empty
+    /// when no coprocessor contributes any (the row is then ABSENT ENTIRELY,
+    /// not greyed: see [`Action::PluginMenu`](crate::input::Action::PluginMenu)).
     #[must_use]
-    pub fn open(origin: (i32, i32), sound_on: bool, paused: bool) -> Self {
-        let (items, effects) = entries(sound_on, paused).into_iter().unzip();
+    pub fn open(
+        origin: (i32, i32),
+        sound_on: bool,
+        paused: bool,
+        plugin_rows: &[(String, bool)],
+    ) -> Self {
+        let (items, effects) = entries(sound_on, paused, plugin_rows).into_iter().unzip();
         Self {
             origin,
             items,
@@ -82,15 +91,6 @@ impl MainMenu {
             .nth(i)
     }
 
-    /// Grey the row carrying `effect` (renders greyed, `effect_at` skips it).
-    /// No-op if no row has that effect. Used to disable a runtime-gated action
-    /// (e.g. Export SPC when no exportable song is playing).
-    pub fn disable_effect(&mut self, effect: MenuEffect) {
-        if let Some(i) = self.effects.iter().position(|&e| e == effect) {
-            self.items[i].enabled = false;
-        }
-    }
-
     /// Update the hovered row; returns whether it changed (so `main` only
     /// redraws on a real change).
     pub fn hover_at(&mut self, px: i32, py: i32) -> bool {
@@ -110,8 +110,17 @@ pub fn render(c: &mut Canvas, m: &MainMenu, theme: &Theme) {
 /// (Load ROM / Options / Cheat / Save screenshot → MN4/later) or a not-yet-wired
 /// submenu row (State / Other / Sound channel / Link / Recent ROMs → MN3–MN7),
 /// which renders its `▶` arrow greyed. **Window size** is live (MN2).
-fn entries(sound_on: bool, paused: bool) -> Vec<(MenuItem, MenuEffect)> {
-    vec![
+///
+/// `plugin_rows` splices in one row per manifest-declared coprocessor menu
+/// contribution (e.g. "Export SPC") right after "Save screenshot", each running
+/// [`Action::PluginMenu`] with its index; empty when no engaged coprocessor
+/// contributes any (that row is then absent entirely, not greyed).
+fn entries(
+    sound_on: bool,
+    paused: bool,
+    plugin_rows: &[(String, bool)],
+) -> Vec<(MenuItem, MenuEffect)> {
+    let mut v = vec![
         (
             MenuItem::new("Pause").checked(paused),
             MenuEffect::Run(Action::Pause),
@@ -140,10 +149,15 @@ fn entries(sound_on: bool, paused: bool) -> Vec<(MenuItem, MenuEffect)> {
             MenuItem::new("Save screenshot"),
             MenuEffect::Run(Action::SaveScreenshot),
         ),
-        (
-            MenuItem::new("Export SPC"),
-            MenuEffect::Run(Action::ExportSpc),
-        ),
+    ];
+    for (i, (label, enabled)) in plugin_rows.iter().enumerate() {
+        let mut item = MenuItem::new(label.clone());
+        if !*enabled {
+            item = item.disabled();
+        }
+        v.push((item, MenuEffect::Run(Action::PluginMenu(i as u8))));
+    }
+    v.extend([
         (
             MenuItem::new("Debugger").shortcut("Esc"),
             MenuEffect::Run(Action::ToggleTool(ToolWindow::Debugger)),
@@ -181,7 +195,8 @@ fn entries(sound_on: bool, paused: bool) -> Vec<(MenuItem, MenuEffect)> {
             MenuEffect::Submenu(SubKind::RecentRoms),
         ),
         (MenuItem::new("Exit"), MenuEffect::Run(Action::Quit)),
-    ]
+    ]);
+    v
 }
 
 // --- Submenus (MN2 Window size, MN3 Sound channel) -------------------------
