@@ -192,7 +192,8 @@ impl Coprocessor for Msu1 {
     const MANIFEST: &'static str = concat!(
         "id\tmsu1\n",
         "name\tMSU-1 Streaming Audio\n",
-        "flag\tmsu1\tdir\tLoad an MSU-1 streaming-audio pack from DIR",
+        "provides\tstreaming-audio\n",
+        "flag\tmsu1\tdir\tLoad an MSU-1 streaming-audio pack from DIR\t$rom_dir",
     );
 
     fn new() -> Self {

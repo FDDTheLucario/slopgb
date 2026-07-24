@@ -505,6 +505,9 @@ impl W65816Cop {
 }
 
 impl Coprocessor for W65816Cop {
+    const MANIFEST: &'static str =
+        concat!("id\tw65c816\n", "name\t65C816\n", "provides\tsnes-cpu\n");
+
     fn new() -> Self {
         let mut me = W65816Cop {
             cpu: Cpu::new(),

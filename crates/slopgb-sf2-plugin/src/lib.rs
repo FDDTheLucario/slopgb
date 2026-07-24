@@ -51,6 +51,13 @@ struct Sf2Cop {
 }
 
 impl Coprocessor for Sf2Cop {
+    const MANIFEST: &'static str = concat!(
+        "id\tsf2\n",
+        "name\tSoundFont-2 Sample Importer\n",
+        "provides\tsample-import\n",
+        "flag\tsf2\tpath\tSupply the SGB N-SPC sample bank from a standard SoundFont-2 file, overriding the ROM's own samples\n",
+    );
+
     fn new() -> Self {
         Sf2Cop { payload: None }
     }

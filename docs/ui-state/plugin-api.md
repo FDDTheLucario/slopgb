@@ -270,16 +270,87 @@ record per line, TAB-separated, first field = record type; unknown record types 
 ignored, so the schema grows without an ABI break. Records:
 
 ```text
-id\t<stable-token>            logical identity + role key (e.g. "msu1")
-name\t<display name>          human label
-provides\t<role>            (0..n) a capability slot this chip can fill
-flag\t<name>\t<arg>\t<help>  (0..n) a CLI flag this plugin contributes
+id\t<stable-token>              logical identity + role key (e.g. "msu1")
+name\t<display name>            human label
+provides\t<role>               (0..n) a capability slot this chip can fill
+flag\t<name>\t<arg>\t<help>    (0..n) a CLI flag this plugin contributes
+menu\t<label>\t<export>\t<ext> (0..n) a main-menu row this plugin/mediator contributes
 ```
 
 This lets a caller bind a chip by declared identity/role instead of by filename, and lets
 the frontend surface a plugin's contributed flags. Optional and metadata-only: an absent
 or empty manifest parses to `None` ("undeclared"), and its absence never fails a load —
 so it is golden-neutral. Proof: `msu1_roundtrip::manifest_self_describes_the_chip_and_its_flag`.
+
+**`menu` records and who declares them.** A `menu` row names a `label` to show, an
+`export` entry point the row dispatches to, and the file `ext` to save the result
+as — `MenuContribution { label, export, ext }`, collected by
+`PluginRegistry::menus()`. The frontend's main menu (`crates/slopgb/src/
+app_menu.rs` `build_plugin_menu_rows`) reads them off the **live engaged SGB
+coprocessor** via `GameBoy::coprocessor_manifest` — a plain `&self` accessor over
+`AudioCoprocessor::manifest`, not the registry scan — and splices one row per
+declared record into the main menu (absent entirely when the manifest is empty,
+greyed when `AudioCoprocessor::export_ready(export)` is false). The declaring
+unit need not be a wasm plugin: `SgbCoprocessor` (a **native** mediator, not a
+guest module) is the one declarer today, for exactly the reason `dump_spc`
+(above) is plugin-owned but "Export SPC" is mediator-owned — the from-start `.spc`
+snapshot is assembled by the mediator watching the resident engine's play
+command, while a plugin's own export is necessarily live-only; letting the
+plugin declare the row would silently downgrade the export to a mid-song dump.
+`registry.menus()` (the scan-time, filesystem-driven table) stays available for
+introspection/listing, but nothing dispatches through it today — doing so would
+need a live `LoadedCoprocessor` handle the frontend doesn't hold for a
+tier-1-scanned file; that plumbing is deliberately not built.
+
+### CLI flags from manifests (`PluginRegistry`, present-iff)
+
+`crates/slopgb-plugin-host/src/registry.rs`'s `PluginRegistry::scan` reads every `*.wasm`
+in the resolved plugins dir and collects each manifest's `flag` records
+(`FlagContribution { name, arg, help, default }`); `main` pre-scans argv/env/the persisted
+setting for `--plugins` *before* the real CLI parse (a chicken-and-egg the raw pre-scan
+breaks — the parse needs the very flag table this directory produces), builds the registry
+from that directory, and threads its `flags()` into `cli::Options::parse` as the
+`declared` table.
+
+**A plugin-contributed flag exists iff its plugin is present in the resolved plugins dir.**
+`--sf2` and `--msu1` are no longer built-in `Options` fields — they parse only when
+`sf2.wasm` / `msu1.wasm` respectively are in that directory; otherwise they're a hard
+`unknown option '--sf2'` error, same as any unrecognized flag, never a soft warning. This is
+a **locked, accepted regression** for a user with a valid `<hash>.smpl` SF2 cache next to
+their soundfont and no plugins dir configured: their cache hit used to need no plugin at all
+(`session::load_or_import_sf2`'s cache path still works with no plugin); now `--sf2` itself
+won't parse without `sf2.wasm` present. `--help` mirrors the same rule: `cli::usage`
+splices in each declared flag's help line where `--sf2`/`--msu1` used to be hardcoded, and
+omits a flag whose plugin isn't scanned.
+
+The plugin consumes its own flag value — the frontend keeps no typed field for either.
+`Options::plugin_flags: Vec<(String, String)>` carries the raw parsed values;
+`app_boot::apply_plugin_flags` applies each declared flag's CLI value (else the generic
+env fallback below) into the registry via `PluginRegistry::set_flag`;
+`app_boot::effective_plugin_flags` reads back every flag's resolved value
+(`PluginRegistry::flag` — explicit override, else the manifest's own default expanded
+against the registry's `Context`, else absent) and hands the map to
+`Session::set_plugin_flags`, which `apply_sgb_coprocessor` reads by name (`"sf2"`,
+`"msu1"`) instead of a dedicated field.
+
+**Env fallback is generic**, not per-flag: a declared flag named `name` falls back to
+`SLOPGB_<NAME>` (uppercased, `-` → `_`) when no CLI value was given — `sf2` → `SLOPGB_SF2`,
+`msu1` → `SLOPGB_MSU1` (today's actual names, preserved by the rule, not coincidence).
+
+**Deferred validation, never a hard error at ROM load.** A flag whose plugin is present but
+inapplicable this run (`--msu1` on a DMG ROM, or no SGB coprocessor loaded at all) parses
+fine and `Session::apply_sgb_coprocessor` warns once per (re)load to stderr — it must not
+hard-error, since a drag-drop ROM swap can change applicability at any time after the window
+opens (`Session`'s `plugin_flags_warned` guard, reset by `set_plugin_flags`).
+
+**A duplicate role is a scan-time hard error, fatal only at startup.** Two plugins in the
+same directory both declaring the same `provides` role fail `PluginRegistry::scan` with
+`RegistryError::DuplicateRole { role, first, second }`; `main`'s startup pre-scan treats
+this as fatal (prints both file names, `process::exit(2)`) since nothing is running yet to
+lose. `app_menu::rebuild_plugins` (a live plugins-dir change from Options → Plugins) treats
+the same error as non-fatal — logged, falling back to an empty registry — because the
+window is already open and exiting mid-session would be a worse failure than losing that
+directory's contributed flags for the rest of it.
 
 **Orchestration + snapshots (ABI v5, v7).** The exports the SGB coprocessor uses
 to install firmware into and snapshot its chips: `set_pc` / `write_ram` /

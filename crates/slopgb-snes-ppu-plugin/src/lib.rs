@@ -50,6 +50,12 @@ struct SnesPpuCop {
 }
 
 impl Coprocessor for SnesPpuCop {
+    const MANIFEST: &'static str = concat!(
+        "id\tsnes-ppu\n",
+        "name\tSNES PPU\n",
+        "provides\tsnes-video\n"
+    );
+
     fn new() -> Self {
         SnesPpuCop {
             ppu: SnesPpu::new(),

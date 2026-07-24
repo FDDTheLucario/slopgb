@@ -83,6 +83,16 @@ impl Spc700Cop {
 }
 
 impl Coprocessor for Spc700Cop {
+    // No `menu` record: "Export SPC" is declared by the native SGB coprocessor
+    // mediator, not here — its from-start snapshot (`song_start_spc`) is
+    // captured there, while this plugin's `dump_spc` is live-only. Declaring
+    // the export here would silently downgrade it to a mid-song dump.
+    const MANIFEST: &'static str = concat!(
+        "id\tspc700\n",
+        "name\tSPC700 + S-DSP\n",
+        "provides\taudio-coprocessor\n"
+    );
+
     fn new() -> Self {
         Self::power_on()
     }

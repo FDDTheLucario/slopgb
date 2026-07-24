@@ -6,7 +6,7 @@ use slopgb_plugin_api::{
     ABI_VERSION, Capabilities, EMIT_KIND_MANIFEST, EMIT_KIND_PCM, EMIT_KIND_RAM, EMIT_KIND_SPC,
     EMIT_KIND_STATE,
 };
-use wasmi::{Engine, Module, Store, TypedFunc};
+use wasmi::{Engine, Instance, Module, Store, TypedFunc};
 
 use crate::host::{HostState, build_linker};
 use crate::{LoadError, Manifest};
@@ -15,6 +15,9 @@ use crate::{LoadError, Manifest};
 /// with.
 pub struct LoadedCoprocessor {
     store: Store<HostState>,
+    /// Kept so [`Self::call_export`] can resolve a guest export by name on
+    /// demand, unlike the typed funcs below, which are all resolved at load.
+    instance: Instance,
     reset: TypedFunc<(), ()>,
     run_until: TypedFunc<i64, i64>,
     port_write: TypedFunc<(i32, i32), ()>,
@@ -110,6 +113,7 @@ impl LoadedCoprocessor {
 
         Ok(Self {
             store,
+            instance,
             reset,
             run_until,
             port_write,
@@ -267,5 +271,28 @@ impl LoadedCoprocessor {
         self.store.data_mut().mailbox = bytes.to_vec();
         self.load_state.call(&mut self.store, ())?;
         Ok(())
+    }
+
+    /// Call the guest export `slopgb_<name>` and take the blob it emitted.
+    /// Unlike the typed funcs above (resolved once at load), this resolves the
+    /// export on demand, so a manifest-declared menu row can dispatch to any
+    /// `() -> i32` export the guest chooses to add without a new typed field
+    /// here. Empty when the guest emitted nothing (whatever the emit kind).
+    pub fn call_export(&mut self, name: &str) -> Result<Vec<u8>, LoadError> {
+        let export = format!("slopgb_{name}");
+        let func = self
+            .instance
+            .get_typed_func::<(), i32>(&self.store, &export)
+            .map_err(|_| {
+                LoadError::Wasm(wasmi::Error::new(format!(
+                    "plugin missing export `{export}`"
+                )))
+            })?;
+        self.store.data_mut().emitted = None;
+        func.call(&mut self.store, ())?;
+        Ok(match self.store.data_mut().emitted.take() {
+            Some((_, buf)) => buf,
+            None => Vec::new(),
+        })
     }
 }
