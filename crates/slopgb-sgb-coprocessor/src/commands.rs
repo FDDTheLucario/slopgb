@@ -244,7 +244,8 @@ impl SgbCoprocessor {
     /// Copy a SOU_TRN self-describing `(dest, len, data…)` transfer block into
     /// APU RAM (fullsnes: SGB sound transfers begin with a destination/length
     /// pair) and point the SPC700 at the first load address. Same shape as the
-    /// built-in `SgbApu` uploader, so a `SOU_TRN` game driver runs identically.
+    /// self-describing block layout the SGB system ROM's loader expects, so a
+    /// game's own `SOU_TRN` driver runs as it does on hardware.
     fn upload_transfer(&mut self, data: &[u8]) {
         let resident = self.nspc_resident;
         if resident {

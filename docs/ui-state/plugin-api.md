@@ -394,9 +394,24 @@ checkbox per discovered plugin (`name [capabilities]`), the read-only plugins-di
 line, and an **allow-mutation** toggle. The tab reads `Settings.plugins`
 (`PluginConfig` — `dir`, `allow_mutation`, `entries: Vec<PluginEntry>`); the entry
 list is synced from the live `PluginHost::infos()` each time the dialog opens
-(`App::sync_plugin_entries`). Toggling a checkbox edits `entries[i].enabled`;
-OK/Apply pushes each flag to the host via `PluginHost::set_enabled`, so a disabled
-plugin's `on_frame` is skipped by `pump` (it stays resident, just idle).
+(`App::sync_plugin_entries`) — `infos()` lists the tier-1 plugins this host drives
+*and* the higher-tier ones it only discovered, so every tier appears. Toggling a
+checkbox edits `entries[i].enabled`; OK/Apply pushes each flag to the host via
+`PluginHost::set_enabled`.
+
+**When a toggle takes effect depends on the tier.** A tier-1 `INTROSPECTION`
+plugin is skipped by the very next `pump` (it stays resident, just idle). A tier-3
+`SUBSYSTEM` plugin (`spc700` / `w65c816` / `snes-ppu` / `msu1`) loads when a
+*machine* is built, so its flag is only read then: `App::apply_settings` hands the
+off set to `Session::set_disabled_plugins`, which stores it without re-applying,
+and `Session::apply_sgb_coprocessor` consults it at the next reset / model switch
+/ ROM load. This is deliberate — swapping a running SPC700 + 65C816 out mid-frame
+would need live chip-state migration. The list shows a note saying the change
+applies on reset. A disabled subsystem plugin is treated **exactly as an absent
+file**: its slot stays empty, since there is no fallback implementation (core
+emulates no SNES chip and the native chip crates are not linked in). Disabling
+`spc700` or `w65c816` therefore means no SNES side at all; disabling `snes-ppu`
+or `msu1` drops just that optional chip.
 
 **Right-click → Plugins submenu** (`SubKind::Plugins`, `SubMenu::plugins`): a
 status row per loaded plugin — check-marked while enabled, greyed while disabled,
@@ -407,11 +422,18 @@ name.
 
 **Persistence** (`settings_file/`): `PluginConfig` round-trips the `dir`,
 `allow_mutation`, and the *disabled* plugin names (the enabled set's complement —
-a new plugin defaults to enabled). Native `slopgb.conf` uses a `[plugins]` section
-(`dir` / `allow_mutation` / `disabled = a, b`); bgb.ini uses the `Slopgb*` extras
-(`SlopgbPluginsDir` / `SlopgbPluginsAllowMutation` / `SlopgbPluginsDisabled`), so
-bgb's own keys survive verbatim. The capability label per entry is runtime-only
-(refilled from the host on sync), not persisted.
+a new plugin defaults to enabled), in **two lists split by tier**: tier-1 and
+tier-3 `SUBSYSTEM`. Native `slopgb.conf` uses a `[plugins]` section (`dir` /
+`allow_mutation` / `disabled = a, b` / `disabled_subsystems = spc700`); bgb.ini
+uses the `Slopgb*` extras (`SlopgbPluginsDir` / `SlopgbPluginsAllowMutation` /
+`SlopgbPluginsDisabled` / `SlopgbPluginsDisabledSubsystems`), so bgb's own keys
+survive verbatim. The capability label per entry is runtime-only (refilled from
+the host on sync) except on a tier-3 placeholder, which is stamped `subsystem` so
+it re-persists to the right key. **Why two keys:** before the subsystem toggle
+existed the list rendered subsystem plugins as permanently-unchecked, and OK/Apply
+wrote every one of them into the single `disabled` key. Reading that back as a
+real user choice would silently kill SGB audio for anyone who had ever pressed OK,
+so the tier-3 flag starts from a clean key.
 
 `allow_mutation` is a persisted, default-off preference reserved for the (not-yet-
 served) `MUTATE` tier — it currently gates nothing, keeping the golden path

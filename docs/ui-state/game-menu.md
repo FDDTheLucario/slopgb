@@ -54,7 +54,7 @@ always indexes what was actually shown even if the live machine changes before
 the click lands; `run_plugin_menu` looks the row up, calls
 `GameBoy::coprocessor_export`, and writes the blob to
 `slopgb-<unix-millis>.<ext>`. **Deliberate new contract:** with no engaged
-coprocessor (or one that declares no rows — the built-in HLE `SgbApu`) the row
+coprocessor (or one that declares no rows) the row
 is **absent entirely**, not greyed; a declared row is greyed only when its
 `AudioCoprocessor::export_ready` is false right now. `mainwin::MainMenu::open`
 takes the row table (`&[(label, enabled)]`) as a plain parameter — the widget

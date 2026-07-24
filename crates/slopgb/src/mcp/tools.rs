@@ -329,15 +329,15 @@ pub(crate) fn registers(gb: &GameBoy) -> String {
     )
 }
 
-/// The SGB audio coprocessor status (the `coprocessor` tool): whether this
-/// machine has an SGB coprocessor and, if so, whether the built-in HLE APU or
-/// the wasm SPC700 + 65C816 plugins are engaged and actually running. A machine
-/// that is not in SGB mode says so — the SPC700/65C816 only run on SGB.
+/// The SGB coprocessor status (the `coprocessor` tool): whether a SNES-side
+/// coprocessor is installed and, if so, whether its wasm SPC700 + 65C816 chips
+/// loaded and are actually running. An empty slot says so — the emulator ships
+/// no SNES implementation, so the chips exist only when the plugins load.
 pub(crate) fn coprocessor_status(gb: &GameBoy) -> String {
     gb.sgb_coprocessor_status().unwrap_or_else(|| {
-        "no SGB coprocessor: this machine is NOT in Super Game Boy mode, so the SPC700 / \
-         65C816 never run. Set System -> Super Gameboy (or --model sgb); the coprocessor \
-         chips exist only on Model::Sgb / Sgb2."
+        "no SGB coprocessor installed, so the SPC700 / 65C816 never run. Needs BOTH an SGB \
+         machine (System -> Super Gameboy, or --model sgb) and spc700.wasm + w65c816.wasm in \
+         the plugins dir (--plugins / Options -> Plugins, each enabled)."
             .to_string()
     })
 }
@@ -368,8 +368,8 @@ pub(crate) fn dump_spc(gb: &GameBoy, mode: &str) -> String {
                         resident engine (--sgb-bios or the clean-room engine) has started a \
                         song. Try mode 'live', or the coprocessor tool for status."
                 .to_string(),
-            _ => "no SPC to dump: this machine has no SGB SPC700 (not in Super Game Boy mode). \
-                  Set --model sgb; see the coprocessor tool."
+            _ => "no SPC to dump: this machine has no SGB SPC700 — it needs an SGB model AND \
+                  the spc700.wasm coprocessor plugin loaded. See the coprocessor tool."
                 .to_string(),
         };
     };

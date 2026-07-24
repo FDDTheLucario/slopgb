@@ -148,24 +148,21 @@ fn cdl_ranges_lists_continuous_spans_in_address_form() {
 }
 
 #[test]
-fn coprocessor_reports_not_sgb_on_dmg_and_a_backend_on_sgb() {
+fn coprocessor_reports_an_empty_slot_on_dmg_and_on_pluginless_sgb() {
     let syms = SymbolTable::default();
     let mut bps = Breakpoints::default();
-    // A DMG machine has no SGB coprocessor at all.
-    let dmg = GameBoy::new(Model::Dmg, rom_at_0100(&[0x00])).unwrap();
-    let out = call_text(&Call::Coprocessor, &dmg, &mut bps, &syms);
-    let lower = out.to_lowercase();
-    assert!(
-        lower.contains("not") && lower.contains("super game boy"),
-        "DMG must report no SGB coprocessor: {out:?}"
-    );
-    // An SGB machine has the built-in HLE APU by default (no wasm coprocessor).
-    let sgb = GameBoy::new(Model::Sgb, rom_at_0100(&[0x00])).unwrap();
-    let out = call_text(&Call::Coprocessor, &sgb, &mut bps, &syms);
-    assert!(
-        out.contains("HLE"),
-        "SGB default backend is the built-in HLE: {out:?}"
-    );
+    // Neither a DMG machine nor a pluginless SGB one has a coprocessor: the
+    // emulator ships no SNES implementation, so both report the empty slot and
+    // say what it takes to fill it.
+    for model in [Model::Dmg, Model::Sgb] {
+        let gb = GameBoy::new(model, rom_at_0100(&[0x00])).unwrap();
+        let out = call_text(&Call::Coprocessor, &gb, &mut bps, &syms);
+        let lower = out.to_lowercase();
+        assert!(
+            lower.contains("no sgb coprocessor installed") && lower.contains("spc700.wasm"),
+            "{model:?} must report the empty slot and how to fill it: {out:?}"
+        );
+    }
 }
 
 #[test]

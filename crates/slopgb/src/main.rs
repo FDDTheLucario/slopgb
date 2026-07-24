@@ -67,8 +67,8 @@ use winit::keyboard::{KeyCode, ModifiersState};
 use winit::window::Window;
 
 use app_boot::{
-    apply_plugin_flags, build_registry, effective_plugin_flags, load_plugins, prescan_plugins_dir,
-    resolve_boot_rom, resolve_sgb_bios,
+    apply_disabled_plugins, apply_plugin_flags, build_registry, effective_plugin_flags,
+    load_plugins, prescan_plugins_dir, resolve_boot_rom, resolve_sgb_bios,
 };
 use app_draw::blank_frame;
 pub(crate) use app_keys::dialog_key_from;
@@ -480,9 +480,7 @@ impl App {
         if let Some(dir) = plugins.dir() {
             settings.plugins.dir = dir.display().to_string();
         }
-        for name in settings.plugins.disabled_names() {
-            plugins.set_enabled(&name, false);
-        }
+        apply_disabled_plugins(&mut plugins, &settings.plugins);
         settings.plugins.entries = plugins
             .infos()
             .into_iter()
@@ -590,6 +588,8 @@ impl App {
         // `msu1.wasm`) on an SGB machine at startup, then feed it the registry's
         // resolved `sf2`/`msu1` flag values (the plugin consumes its own value —
         // the frontend keeps no typed field for either).
+        app.session
+            .set_disabled_plugins(app.settings.plugins.disabled_subsystem_names());
         app.session.set_plugins_dir(plugins_dir);
         app.session
             .set_plugin_flags(effective_plugin_flags(&app.registry));
@@ -794,6 +794,7 @@ impl App {
                     .then(|| PathBuf::from(&self.settings.plugins.dir));
                 let ctx = self.registry_context(plugins_dir.clone());
                 self.registry.set_context(ctx);
+                new.set_disabled_plugins(self.settings.plugins.disabled_subsystem_names());
                 new.set_plugins_dir(plugins_dir);
                 new.set_plugin_flags(effective_plugin_flags(&self.registry));
                 new.set_rtc_vba_export(self.settings.rtc_vba_sav);

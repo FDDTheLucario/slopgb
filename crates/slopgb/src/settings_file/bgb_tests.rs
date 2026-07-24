@@ -110,6 +110,11 @@ fn plugin_config_round_trips_and_preserves_unknown_keys() {
                     capabilities: "introspection".into(),
                     enabled: false,
                 },
+                PluginEntry {
+                    name: "spc700".into(),
+                    capabilities: "subsystem".into(),
+                    enabled: false,
+                },
             ],
         },
         ..Settings::default()
@@ -122,15 +127,21 @@ fn plugin_config_round_trips_and_preserves_unknown_keys() {
     assert!(out.contains("SlopgbPluginsDir=/opt/plugins"));
     assert!(out.contains("SlopgbPluginsAllowMutation=1"));
     assert!(out.contains("SlopgbPluginsDisabled=b"));
+    // Tier-3 disables persist under their own key, never mixed into the tier-1 one.
+    assert!(
+        out.contains("SlopgbPluginsDisabledSubsystems=spc700"),
+        "{out}"
+    );
     // An unrelated unmodelled bgb key still survives verbatim.
     assert!(out.contains("SoundBufSize=57"));
 
     let back = from_ini(&ini);
     assert_eq!(back.plugins.dir, "/opt/plugins");
     assert!(back.plugins.allow_mutation);
+    assert_eq!(back.plugins.disabled_subsystems_joined(), "spc700");
     assert_eq!(
-        back.plugins.entries,
-        vec![PluginEntry {
+        back.plugins.entries[..1],
+        [PluginEntry {
             name: "b".into(),
             capabilities: String::new(),
             enabled: false,

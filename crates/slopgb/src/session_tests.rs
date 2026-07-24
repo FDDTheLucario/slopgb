@@ -486,26 +486,26 @@ fn sgb_coprocessor_plugin_in_the_dir_swaps_the_audio_backend() {
     let path = dir.join("game.gb");
     fs::write(&path, sgb_rom()).unwrap();
 
-    // Default (built-in HLE APU): a bare SOUND command with no game driver / BIOS
-    // makes no real audio (the default sound bank isn't present) — the golden-safe
-    // default. The HLE path leaves only a noise-floor residue, far below a tone.
+    // No coprocessor: the emulator ships no SNES implementation, so a bare SOUND
+    // command produces nothing at all on the SNES side.
     let mut off = Session::load(&path, ModelChoice::Sgb, &BootSpec::NONE, None).expect("load");
     assert_eq!(off.gb.model(), Model::Sgb);
     send_sgb_packet(&mut off.gb, &sound_packet());
     let off_peak = play_and_peak(&mut off.gb, 16);
     assert!(
         off_peak < 1e-3,
-        "default built-in backend makes no tone for a bare SOUND command (peak {off_peak})"
+        "an SGB machine with an empty coprocessor slot is silent on the SNES side \
+         (only the GB APU's own noise floor remains: peak {off_peak})"
     );
 
-    // No plugins directory set: no coprocessor plugin to load, so the built-in
-    // APU stands (the golden-safe fallback) — no panic, still silent.
+    // No plugins directory set: nothing to load, the slot stays empty — no panic,
+    // still silent.
     let mut nodir = Session::load(&path, ModelChoice::Sgb, &BootSpec::NONE, None).expect("load");
     nodir.set_plugins_dir(None);
     send_sgb_packet(&mut nodir.gb, &sound_packet());
     assert!(
         play_and_peak(&mut nodir.gb, 16) < 1e-3,
-        "no plugins directory falls back to the silent built-in backend"
+        "no plugins directory leaves the coprocessor slot empty"
     );
 
     // With the two plugins present in a directory: the coprocessor loads them and
@@ -532,6 +532,32 @@ fn sgb_coprocessor_plugin_in_the_dir_swaps_the_audio_backend() {
     assert!(
         play_and_peak(&mut on.gb, 16) > 1e-2,
         "reset re-injects the coprocessor backend"
+    );
+
+    // Turning `spc700` off in Options -> Plugins is exactly as if the file were
+    // absent: there is no fallback implementation, so the whole slot stays empty
+    // and the SNES side goes silent again. The toggle is read when a machine is
+    // built, so it lands on the reset, never mid-run.
+    on.set_disabled_plugins(vec!["spc700".to_owned()]);
+    send_sgb_packet(&mut on.gb, &sound_packet());
+    assert!(
+        play_and_peak(&mut on.gb, 16) > 1e-2,
+        "the running coprocessor is NOT swapped out mid-run"
+    );
+    on.reset();
+    send_sgb_packet(&mut on.gb, &sound_packet());
+    assert!(
+        play_and_peak(&mut on.gb, 16) < 1e-3,
+        "after the reset the disabled spc700 leaves the slot empty"
+    );
+
+    // Re-enabling it brings the coprocessor back on the next reset.
+    on.set_disabled_plugins(Vec::new());
+    on.reset();
+    send_sgb_packet(&mut on.gb, &sound_packet());
+    assert!(
+        play_and_peak(&mut on.gb, 16) > 1e-2,
+        "re-enabling restores the coprocessor at the next reset"
     );
     let _ = fs::remove_dir_all(&dir);
 }

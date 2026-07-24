@@ -90,6 +90,11 @@ fn plugin_config_round_trips_dir_allow_mutation_and_disabled() {
                     capabilities: "introspection".into(),
                     enabled: false,
                 },
+                PluginEntry {
+                    name: "spc700".into(),
+                    capabilities: "subsystem".into(),
+                    enabled: false,
+                },
             ],
         },
         ..Settings::default()
@@ -104,15 +109,27 @@ fn plugin_config_round_trips_dir_allow_mutation_and_disabled() {
         text.contains("disabled = b"),
         "only the off plugin persists"
     );
+    // Tier-3 disables live under their own key, never mixed into `disabled`.
+    assert!(
+        text.contains("disabled_subsystems = spc700"),
+        "the subsystem disable persists separately: {text}"
+    );
 
     let (back, _) = from_doc(&Doc::parse(&text));
     assert_eq!(back.plugins.dir, "/opt/plugins");
     assert!(back.plugins.allow_mutation);
-    // Only the disabled plugin survives (an enabled one defaults on), rebuilt as
-    // a placeholder — its capability label is unknown until the host is synced.
+    assert_eq!(back.plugins.disabled_subsystems_joined(), "spc700");
+    back.plugins
+        .entries
+        .iter()
+        .find(|e| e.name == "spc700")
+        .expect("the subsystem placeholder is rebuilt");
+    // Only the disabled plugins survive (an enabled one defaults on), rebuilt as
+    // placeholders — a tier-1 one's capability label is unknown until the host is
+    // synced; a tier-3 one is stamped `subsystem` so it re-persists to its key.
     assert_eq!(
-        back.plugins.entries,
-        vec![PluginEntry {
+        back.plugins.entries[..1],
+        [PluginEntry {
             name: "b".into(),
             capabilities: String::new(),
             enabled: false,

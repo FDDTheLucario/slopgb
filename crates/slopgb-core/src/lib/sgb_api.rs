@@ -1,7 +1,7 @@
 //! Super Game Boy accessors on [`GameBoy`]: the colorized border surface and
 //! the SNES-side command seams (SOUND / SOU_TRN / OBJ_TRN / DATA_TRN /
-//! DATA_SND / flags + JUMP) the S-DSP consumes, plus the opt-in SGB
-//! audio BIOS loader.
+//! DATA_SND / flags + JUMP) an installed coprocessor consumes, plus the opt-in
+//! SGB BIOS loader.
 //!
 //! A second `impl GameBoy` block, split out of `lib.rs` to keep it under the
 //! 1000-line cap. `use super::*` pulls in
@@ -66,9 +66,9 @@ impl GameBoy {
     /// neutral palette stand, and output stays byte-identical.
     ///
     /// It feeds two things:
-    /// - **Audio** — the image is handed to the APU exactly as before (a
-    ///   self-uploaded driver still plays with no BIOS; the *default* driver
-    ///   needs the image, but without a 65816 core it is stored, not executed).
+    /// - **Audio** — the image is handed to the installed SNES coprocessor, if
+    ///   any, which decides what to do with it. With an empty slot nothing
+    ///   happens: core runs no SNES chip.
     /// - **Border + title→palette** — the two `Ppu` seams
     ///   ([`Ppu::sgb_install_border`] / [`Ppu::sgb_apply_bios_palette`]).
     ///
@@ -82,7 +82,7 @@ impl GameBoy {
     /// seams are the wired upgrade path — a checked locator drops into
     /// [`sgb_bios_border`] / [`sgb_bios_palette`] with no other change.
     ///
-    /// A no-op off `Model::Sgb`/`Sgb2`. See [`crate::sgb::apu`],
+    /// A no-op off `Model::Sgb`/`Sgb2`. See
     /// `docs/hardware-state/sgb-audio.md` and `docs/hardware-state/sgb.md` for
     /// exactly what does and does not happen with and without it.
     pub fn load_sgb_bios(&mut self, bios: &[u8]) {
@@ -100,14 +100,14 @@ impl GameBoy {
         }
     }
 
-    /// Install an alternative SGB SNES-side audio coprocessor in place of the
-    /// built-in [`sgb::apu::SgbApu`] — the injection seam a frontend/host uses to
-    /// run a plugin-backed [`sgb::AudioCoprocessor`] (e.g. a combined 65C816 +
-    /// SPC700 + S-DSP chip forwarding to a wasm plugin's `drain_pcm`).
+    /// Fill the SGB SNES-side coprocessor slot — the injection seam a
+    /// frontend/host uses to run a plugin-backed [`sgb::AudioCoprocessor`]
+    /// (e.g. a combined 65C816 + SPC700 + S-DSP chip forwarding to a wasm
+    /// plugin's `drain_pcm`). Core ships no SNES implementation, so until this
+    /// is called the slot is empty and there is no SNES side at all.
     ///
-    /// Only meaningful on `Model::Sgb`/`Sgb2`: off SGB the machine holds no audio
-    /// coprocessor slot, so there is nothing to replace — the passed `cop` is
-    /// dropped and `Dmg`/`Cgb` stay byte-identical (golden-safe). Like
+    /// Only accepted on `Model::Sgb`/`Sgb2`: off SGB the passed `cop` is dropped
+    /// and `Dmg`/`Cgb` stay byte-identical (golden-safe). Like
     /// [`Self::debug_set_reg`] / load-state, this is an explicit user-initiated
     /// mutation, never taken on the passive frame loop.
     ///
@@ -115,7 +115,7 @@ impl GameBoy {
     /// [`Self::set_sample_rate`] afterwards to align it with the host (it
     /// propagates to the newly installed coprocessor).
     pub fn set_audio_coprocessor(&mut self, cop: Box<dyn sgb::AudioCoprocessor>) {
-        if self.sgb_apu.is_some() {
+        if self.model().is_sgb() {
             self.sgb_apu = Some(cop);
         }
     }
@@ -124,8 +124,8 @@ impl GameBoy {
     /// presented right now — a frontend fast-forwarding past frames nobody
     /// sees calls this with `false` to skip rasterization, and `true` to
     /// resume it for normal play. A no-op off `Model::Sgb`/`Sgb2` (there is
-    /// no coprocessor slot) and on the built-in HLE `SgbApu` (no framebuffer
-    /// to skip). Never called, or called with `true`, leaves emulation
+    /// no coprocessor installed) and on a coprocessor with no framebuffer to
+    /// skip. Never called, or called with `true`, leaves emulation
     /// byte-identical to today (golden-safe) — only whether pixels get drawn
     /// changes, never chip timing or audio.
     pub fn set_coprocessor_render(&mut self, on: bool) {
@@ -168,9 +168,9 @@ impl GameBoy {
     }
 
     /// The SGB audio coprocessor's self-describing manifest (the plugin-host
-    /// manifest wire format), for the frontend's menu-row table. Empty off SGB
-    /// or when the engaged coprocessor contributes no rows (the built-in HLE
-    /// `SgbApu`). Read-only.
+    /// manifest wire format), for the frontend's menu-row table. Empty with an
+    /// empty slot, or when the engaged coprocessor contributes no rows.
+    /// Read-only.
     pub fn coprocessor_manifest(&self) -> &'static str {
         self.sgb_apu.as_ref().map_or("", |a| a.manifest())
     }

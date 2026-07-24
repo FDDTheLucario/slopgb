@@ -350,6 +350,7 @@ pub fn from_doc(d: &Doc) -> (Settings, Vec<String>) {
             s("plugins", "dir", ""),
             b("plugins", "allow_mutation", false),
             d.get("plugins", "disabled").unwrap_or(""),
+            d.get("plugins", "disabled_subsystems").unwrap_or(""),
         ),
     };
     let recent = d
@@ -610,6 +611,11 @@ pub fn to_doc(settings: &Settings, recent: &[String], d: &mut Doc) {
         fb(settings.plugins.allow_mutation),
     );
     d.set("plugins", "disabled", &settings.plugins.disabled_joined());
+    d.set(
+        "plugins",
+        "disabled_subsystems",
+        &settings.plugins.disabled_subsystems_joined(),
+    );
     d.set_recent(recent);
 }
 

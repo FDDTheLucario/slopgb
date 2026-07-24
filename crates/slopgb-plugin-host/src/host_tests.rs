@@ -135,8 +135,39 @@ fn load_dir_lists_subsystem_plugins_instead_of_skipping_them() {
     let chip = infos.iter().find(|i| i.name == "chip").unwrap();
     assert_eq!(chip.capabilities, "subsystem");
     assert!(
-        !chip.enabled,
-        "a subsystem plugin isn't driven by this per-frame host"
+        chip.enabled,
+        "a subsystem plugin starts enabled, like a per-frame one"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn subsystem_plugins_are_togglable_and_survive_a_reload() {
+    // The UI's per-plugin checkbox must reach a SUBSYSTEM plugin too: this host
+    // does not drive one, but it records the flag so the owning seam (the SGB
+    // coprocessor) can read it out of `infos()` when it next builds a machine —
+    // and a re-scan preserves it by name, exactly as for a per-frame plugin.
+    let dir = std::env::temp_dir().join(format!("slopgb-plugin-subtog-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("chip.wasm"),
+        wasm(&plugin_wat(ABI_VERSION, 0b100, "")), // SUBSYSTEM
+    )
+    .unwrap();
+
+    let mut host = PluginHost::load_dir(&dir).unwrap();
+    assert!(host.infos()[0].enabled);
+    host.set_enabled("chip", false);
+    assert!(
+        !host.infos()[0].enabled,
+        "the toggle reaches a subsystem plugin"
+    );
+    host.reload();
+    assert_eq!(host.infos().len(), 1);
+    assert!(
+        !host.infos()[0].enabled,
+        "the off flag survives a re-scan of the same dir"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

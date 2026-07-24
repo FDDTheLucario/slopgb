@@ -77,8 +77,7 @@ fn sgb_local_matrix_is_pushed_to_the_coprocessor() {
 }
 
 /// The SNES-frame fetch seam: a coprocessor serving a frame surfaces it
-/// through `GameBoy::take_snes_frame`; the default (and the built-in HLE)
-/// serves none.
+/// through `GameBoy::take_snes_frame`; an empty slot serves none.
 #[test]
 fn sgb_take_snes_frame_seam() {
     #[derive(Clone)]
@@ -105,7 +104,7 @@ fn sgb_take_snes_frame_seam() {
     rom[0x146] = 0x03;
     rom[0x14B] = 0x33;
     let mut gb = GameBoy::new(Model::Sgb, rom).unwrap();
-    assert!(gb.take_snes_frame().is_none(), "built-in HLE: no frames");
+    assert!(gb.take_snes_frame().is_none(), "empty slot: no frames");
     gb.set_audio_coprocessor(Box::new(FrameCop(Some(vec![0x2A55; 4]))));
     assert_eq!(gb.take_snes_frame(), Some(vec![0x2A55; 4]));
     assert!(gb.take_snes_frame().is_none(), "consumed");
@@ -142,7 +141,7 @@ fn sgb_joypad_feed_overrides_p1_reads_and_defaults_inert() {
     rom[0x146] = 0x03;
     rom[0x14B] = 0x33;
 
-    // Default machine (built-in HLE SgbApu): feed seam inert.
+    // Default machine (empty coprocessor slot): feed seam inert.
     let mut gb = GameBoy::new(Model::Sgb, rom.clone()).unwrap();
     gb.debug_write(0xFF00, 0x10); // select the button column
     gb.step();
@@ -687,18 +686,17 @@ impl AudioCoprocessor for MenuCop {
 
 /// The core half of the "row absent, not greyed, with no coprocessor" rule
 /// (the frontend half lives in `crates/slopgb/src/windows/mainwin_tests.rs`):
-/// the built-in HLE `SgbApu` (the default on an SGB machine with no
-/// coprocessor plugin loaded) declares an empty manifest, so the frontend's
-/// menu-row table built from `coprocessor_manifest()` is empty and the row is
-/// absent entirely — never present-but-greyed. A coprocessor that DOES
-/// declare a row is read straight through instead.
+/// an SGB machine with an empty coprocessor slot reports an empty manifest, so
+/// the frontend's menu-row table built from `coprocessor_manifest()` is empty
+/// and the row is absent entirely — never present-but-greyed. A coprocessor
+/// that DOES declare a row is read straight through instead.
 #[test]
 fn coprocessor_manifest_is_empty_by_default_a_declaring_coprocessor_is_read_through() {
     let gb = sgb_machine();
     assert_eq!(
         gb.coprocessor_manifest(),
         "",
-        "the built-in HLE SgbApu declares no manifest -> no menu row at all"
+        "an empty coprocessor slot declares no manifest -> no menu row at all"
     );
     assert!(!gb.coprocessor_export_ready("export_spc"));
     assert!(gb.coprocessor_export("export_spc").is_none());
@@ -728,5 +726,112 @@ fn capture_initial_sgb_border_is_none_when_the_game_uploads_nothing() {
     assert!(
         GameBoy::capture_initial_sgb_border(&rom, 30).is_none(),
         "a game that uploads no CHR_TRN/PCT_TRN yields no captured border"
+    );
+}
+
+// ---- The empty coprocessor slot (no plugin = no SNES side at all) ----
+
+/// One SGB command packet: `cmd` in the high 5 bits of byte 0, length 1.
+fn sgb_cmd_packet(cmd: u8, payload: &[u8]) -> [u8; 16] {
+    let mut p = [0u8; 16];
+    p[0] = (cmd << 3) | 1;
+    p[1..1 + payload.len()].copy_from_slice(payload);
+    p
+}
+
+/// The four SNES-side commands (`SOUND` $08, `SOU_TRN` $09, `DATA_SND` $0F,
+/// `JUMP` $12) with **no coprocessor installed**: the machine keeps running,
+/// the Game Boy-side colorization still applies, every SNES introspection seam
+/// stays empty, and the queues the commands land in are consumed/bounded rather
+/// than growing without a reader. Core emulates no SNES chip, so an SGB machine
+/// with an empty slot is simply silent on that side.
+#[test]
+fn sgb_commands_are_consumed_cleanly_with_no_coprocessor() {
+    let mut gb = sgb_machine();
+    assert!(
+        gb.sgb_coprocessor_status().is_none(),
+        "no coprocessor is installed by default"
+    );
+
+    // Colorize, so the Game Boy-side HLE path is provably still live.
+    send_sgb_packet(&mut gb, &sgb_cmd_packet(0x00, &[0x1F]));
+    gb.debug_write(0xFF47, 0xE4);
+    gb.debug_write(0xFF40, 0x91);
+
+    // Far more SNES-side commands than any queue cap, so an unbounded queue
+    // would show up as a growing drain count below.
+    for i in 0..64u8 {
+        send_sgb_packet(&mut gb, &sgb_cmd_packet(0x08, &[i, 1, 2, 3]));
+        send_sgb_packet(&mut gb, &sgb_cmd_packet(0x09, &[i]));
+        send_sgb_packet(&mut gb, &sgb_cmd_packet(0x0F, &[i, 4, 5]));
+        send_sgb_packet(&mut gb, &sgb_cmd_packet(0x12, &[i, 6, 7]));
+        gb.run_frame();
+    }
+
+    assert_eq!(gb.frame()[0], 0xFF_0000, "SGB colorization still applied");
+    assert!(
+        gb.sgb_flags().is_some_and(|f| f.jump.is_some()),
+        "JUMP latched"
+    );
+    assert!(
+        gb.take_snes_frame().is_none(),
+        "no SNES PPU without a plugin"
+    );
+    assert!(gb.export_spc_live().is_none(), "no SPC700 without a plugin");
+    assert!(!gb.can_export_spc());
+
+    // Both queues are capped rings, so a reader-less run leaves a bounded
+    // backlog that drains to empty.
+    let mut sounds = 0;
+    while gb.sgb_take_sound_event().is_some() {
+        sounds += 1;
+        assert!(sounds <= 64, "SOUND queue is unbounded without a reader");
+    }
+    let mut snds = 0;
+    while gb.sgb_take_data_snd().is_some() {
+        snds += 1;
+        assert!(snds <= 64, "DATA_SND queue is unbounded without a reader");
+    }
+}
+
+/// Game Boy audio is untouched by the missing SNES side: with the slot empty,
+/// a run that issues SOUND ($08) commands drains sample-for-sample identical
+/// audio to one that issues none — nothing mixes into the GB stream.
+#[test]
+fn gb_audio_plays_and_sgb_sound_commands_add_nothing_with_no_coprocessor() {
+    fn run(with_sound: bool) -> Vec<(f32, f32)> {
+        let mut gb = sgb_machine();
+        // Master on, both terminals, channel 1 at full envelope, retriggered.
+        for (addr, val) in [
+            (0xFF26u16, 0x80u8),
+            (0xFF25, 0xFF),
+            (0xFF24, 0x77),
+            (0xFF11, 0x80),
+            (0xFF12, 0xF0),
+            (0xFF13, 0x00),
+            (0xFF14, 0x87),
+        ] {
+            gb.debug_write(addr, val);
+        }
+        for i in 0..8u8 {
+            if with_sound {
+                send_sgb_packet(&mut gb, &sgb_cmd_packet(0x08, &[i, 0x11, 0x22, 0x33]));
+            }
+            gb.run_frame();
+        }
+        let mut out = Vec::new();
+        gb.drain_audio(&mut out);
+        out
+    }
+
+    let quiet = run(false);
+    assert!(
+        quiet.iter().any(|(l, r)| *l != 0.0 || *r != 0.0),
+        "the Game Boy APU still plays on an SGB machine with no coprocessor"
+    );
+    assert_eq!(
+        run(true),
+        quiet,
+        "SGB SOUND commands add nothing with an empty coprocessor slot"
     );
 }

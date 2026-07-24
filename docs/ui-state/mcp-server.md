@@ -1,4 +1,4 @@
-| `coprocessor` | — | SGB coprocessor status: the SPC700 + 65C816 plugins engaged / built-in HLE / not-SGB |
+| `coprocessor` | — | SGB coprocessor status: the SPC700 + 65C816 plugins engaged, or the slot is empty (not SGB, or no plugins loaded) |
 | `dump-spc` | optional `mode` | writes the SGB SPC700 state to `slopgb-<ms>-<mode>.spc` and reports the path. `mode` = `live` (default — the driver's current state, for debugging mid-song) or `start` (the from-the-top snapshot the UI's "Export SPC" writes) |
 | `expr` | `expression` | evaluates a bgb-style debugger expression (hex default, register names, `[addr]`) |
 | `memdump` | `from`, `to`, `file` | writes the range's raw bytes to a local `file` (feeds `simulate`); text confirms `N bytes … to file` |

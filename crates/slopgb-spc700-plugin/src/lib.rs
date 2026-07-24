@@ -14,8 +14,8 @@
 //! ## Clocking
 //!
 //! `run_until(target)` advances the SPC700 in its own 1.024 MHz cycle domain and
-//! drives one S-DSP sample every 32 SPC cycles (→ 32 kHz), mirroring the
-//! built-in `SgbApu` wiring exactly (the DSP shares the SPC700's APU RAM). The
+//! drives one S-DSP sample every 32 SPC cycles (→ 32 kHz), the hardware ratio
+//! (the DSP shares the SPC700's APU RAM). The
 //! synthesized stereo PCM is buffered and drained to the host over the tier-3
 //! `drain_pcm` path; ports `4-5` keep surfacing the running sample count for
 //! quick observability.

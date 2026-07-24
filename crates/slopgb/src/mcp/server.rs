@@ -664,7 +664,7 @@ fn builtin_tool_defs() -> Json {
         tool("registers", "Read the CPU + LCD register state.", &[]),
         tool(
             "coprocessor",
-            "SGB coprocessor status: whether the SPC700 + 65C816 subsystem plugins are engaged and running (or the built-in HLE / not-SGB).",
+            "SGB coprocessor status: whether the SPC700 + 65C816 subsystem plugins are engaged and running, or the slot is empty (not SGB, or no plugins loaded).",
             &[],
         ),
         tool_opt(

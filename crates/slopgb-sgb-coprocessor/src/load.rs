@@ -1,16 +1,15 @@
-//! Plugin loading and the resident clean-room firmware install: the
-//! `load`/`from_wasm*` constructors plus the 65C816 and SPC700 firmware images.
-//!
-//! A second `impl SgbCoprocessor` block, split out of `lib.rs` to keep it
-//! under the 1000-line cap.
+//! Building the backend: reading the plugin `.wasm` files (the two required
+//! chips plus the optional SNES-PPU and MSU-1 plugins), attaching an MSU-1
+//! track pack, and installing the resident clean-room firmware into both
+//! chips' RAM before either runs an instruction.
 
 use super::*;
 
 impl SgbCoprocessor {
     /// Load the two coprocessor plugins from `dir` (`spc700.wasm` + `w65c816.wasm`)
     /// and build the backend at `output_rate` Hz. Errors (missing / bad wasm) are
-    /// returned so the frontend can log them and fall back to the built-in
-    /// `SgbApu`.
+    /// returned so the frontend can log them and leave the coprocessor slot
+    /// empty.
     pub fn load(dir: &Path, output_rate: u32) -> Result<Self, String> {
         let spc_path = dir.join(SPC_WASM);
         let cpu_path = dir.join(CPU_WASM);
@@ -20,8 +19,71 @@ impl SgbCoprocessor {
             .map_err(|e| format!("cannot read SGB plugin '{}': {e}", cpu_path.display()))?;
         // The PPU plugin is optional: absent keeps the audio-only backend.
         let ppu_bytes = fs::read(dir.join(PPU_WASM)).ok();
-        Self::from_wasm_full(&spc_bytes, &cpu_bytes, ppu_bytes.as_deref(), output_rate)
-            .map_err(|e| format!("cannot load SGB coprocessor plugins: {e}"))
+        let mut me =
+            Self::from_wasm_full(&spc_bytes, &cpu_bytes, ppu_bytes.as_deref(), output_rate)
+                .map_err(|e| format!("cannot load SGB coprocessor plugins: {e}"))?;
+        // The MSU-1 plugin is optional and loads from the *same* plugins dir as
+        // the other coprocessor chips (its `.pcm` pack comes separately via
+        // [`Self::set_msu_pack`]). Absent = no MSU-1.
+        if let Ok(bytes) = fs::read(dir.join(MSU_WASM)) {
+            if let Err(e) = me.attach_msu(&bytes) {
+                eprintln!("slopgb: MSU-1 plugin '{MSU_WASM}' present but failed to load: {e}");
+            }
+        }
+        Ok(me)
+    }
+
+    /// Load the MSU-1 streaming-audio plugin from its `.wasm` bytes (absent when
+    /// `msu1.wasm` is not in the plugins dir). A game's SGB driver detects it at
+    /// SNES `$2000-$2007` and drives it there; no track pack is advertised until
+    /// [`Self::set_msu_pack`] finds `.pcm` files.
+    pub fn attach_msu(&mut self, wasm: &[u8]) -> Result<(), LoadError> {
+        let mut cop = LoadedCoprocessor::load(wasm)?;
+        cop.reset()?;
+        self.msu = Some(RefCell::new(cop));
+        self.msu_wasm = Some(wasm.to_vec());
+        self.msu_present = false;
+        Ok(())
+    }
+
+    /// Point the loaded MSU-1 plugin at a pack directory: every `game-N.pcm`
+    /// track (keyed by its trailing number, the index the game's `MSU_TRACK`
+    /// write selects) and an optional `.msu` data ROM are streamed to the chip
+    /// through the plugin's bulk-file channel. Presence (`S-MSU1`) is advertised
+    /// only when ≥1 track loads, so a game finds the chip exactly when a pack is
+    /// there. No-op without a loaded plugin.
+    pub fn set_msu_pack(&mut self, dir: &Path) {
+        let Some(msu) = &self.msu else { return };
+        let mut tracks = 0usize;
+        if let Ok(entries) = fs::read_dir(dir) {
+            let mut cop = msu.borrow_mut();
+            // ponytail: every track's full bytes are read into the plugin up
+            // front (the `set_file` model). Fine for a handful of tracks; stream
+            // a track on demand if a large pack's memory ever matters.
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if let Some(track) = track_number(&name) {
+                    if let Ok(data) = fs::read(&path) {
+                        cop.set_file(u32::from(track), data);
+                        tracks += 1;
+                    }
+                } else if name.ends_with(".msu") {
+                    if let Ok(data) = fs::read(&path) {
+                        cop.set_file(MSU_DATA_FILE_KEY, data);
+                    }
+                }
+            }
+        }
+        self.msu_pack_dir = Some(dir.to_path_buf());
+        self.msu_present = tracks > 0;
+        if tracks > 0 {
+            eprintln!(
+                "slopgb: MSU-1 pack '{}' loaded ({tracks} track(s)); served on the SGB SNES $2000-$2007 bus",
+                dir.display(),
+            );
+        }
     }
 
     /// Build the backend from the two plugins' wasm bytes: instantiate, reset,
@@ -78,6 +140,16 @@ impl SgbCoprocessor {
             out_rate: rate,
             out: Vec::new(),
             max_out: rate as usize,
+            msu: None,
+            msu_wasm: None,
+            msu_pack_dir: None,
+            msu_present: false,
+            msu_cycle: 0,
+            msu_acc: 0,
+            msu_src: VecDeque::new(),
+            msu_src_acc: 0.0,
+            msu_cur: (0, 0),
+            msu_playing: false,
             poll_ctr: 0,
             sou_trn_sig: 0,
             data_trn_sig: 0,
@@ -100,10 +172,26 @@ impl SgbCoprocessor {
             ppu,
             ppu_wasm: ppu_bytes.map(<[u8]>::to_vec),
             ppu_row: 0,
+            render_enabled: true,
             frame_ready: false,
             snes_live: false,
             frames_done: 0,
             last_inidisp: 0,
+            nspc_resident: false,
+            nspc_cmd: [0; 4],
+            nspc_shadow: [0; 4],
+            nspc_pending: false,
+            dbg_sound: 0,
+            dbg_soutrn: 0,
+            dbg_datasnd: 0,
+            dbg_last_sound: [0; 4],
+            dbg_soutrn_dest: 0,
+            dbg_soutrn_len: 0,
+            dbg_soutrn_nonzero: 0,
+            dbg_soutrn_head: [0; 16],
+            dbg_pcm_peak: 0.0,
+            song_start_spc: None,
+            capture_at: None,
         };
         me.install_firmware()?;
         Ok(me)
@@ -112,8 +200,8 @@ impl SgbCoprocessor {
     /// Install the resident clean-room firmware into both chips: the 65C816 shim
     /// into SNES RAM (+ reset vector + entry PC), and the SPC700 driver + one-
     /// entry sample directory + a square BRR sample into APU RAM (+ entry PC). A
-    /// failure aborts the load, so `from_wasm` reports it and the caller falls
-    /// back to the built-in `SgbApu` rather than running a chip with no firmware.
+    /// failure aborts the load, so `from_wasm` reports it and the caller leaves
+    /// the slot empty rather than running a chip with no firmware.
     fn install_firmware(&mut self) -> Result<(), LoadError> {
         {
             let cpu = self.cpu.get_mut();
@@ -315,54 +403,4 @@ impl SgbCoprocessor {
         }
         Ok(())
     }
-}
-
-/// Install the clean-room SPC700 driver + one-entry sample directory + a
-/// square BRR sample into APU RAM (the chip itself boots its IPL ROM; see
-/// `install_firmware`). The original clean-room driver waits on comm port 1
-/// (the SNES trigger), then programs the S-DSP to key a ~2 kHz square-wave
-/// voice. Authored from the SPC700 opcode table + S-DSP register map
-/// (nocash *fullsnes*), never from a ROM.
-fn spc_firmware() -> (Vec<u8>, [u8; 4], Vec<u8>) {
-    // `MOV dp,#imm` = `8F imm dp`; `MOV A,dp` = `E4 dp`; `CLRP` = `20`;
-    // `BEQ rel` = `F0 rel`; `BRA rel` = `2F rel` (fullsnes opcode table).
-    let mov = |dp: u8, imm: u8| [0x8F, imm, dp];
-    let mut prog = Vec::new();
-    prog.push(0x20); // CLRP: direct page = $00xx, so $F5 is the comm port
-    // wait: MOV A,$F5 / BEQ wait — spin until the SNES sets the trigger port.
-    prog.extend_from_slice(&[0xE4, 0xF5]); // MOV A,$F5 (port_in[1])
-    prog.extend_from_slice(&[0xF0, 0xFC]); // BEQ -4 -> the MOV above
-    // The S-DSP program: voice 0, GAIN-direct, square sample, KON last.
-    let dsp_writes: [(u8, u8); 12] = [
-        (0x6C, 0x00), // FLG: unmute, no reset, noise off
-        (0x5D, 0x02), // DIR = page $02 (directory at $0200)
-        (0x0C, 0x7F), // MVOLL
-        (0x1C, 0x7F), // MVOLR
-        (0x00, 0x7F), // V0 VOLL
-        (0x01, 0x7F), // V0 VOLR
-        (0x02, 0x00), // V0 pitch lo
-        (0x03, 0x10), // V0 pitch hi -> $1000
-        (0x04, 0x00), // V0 SRCN = directory entry 0
-        (0x05, 0x00), // V0 ADSR1 = 0 -> use GAIN
-        (0x07, 0x7F), // V0 GAIN = direct max
-        (0x4C, 0x01), // KON voice 0 (last)
-    ];
-    for (dp, imm) in dsp_writes {
-        prog.extend_from_slice(&mov(0xF2, dp)); // select DSP register
-        prog.extend_from_slice(&mov(0xF3, imm)); // write it
-    }
-    prog.extend_from_slice(&[0x2F, 0xFE]); // BRA * (spin so the DSP keeps playing)
-
-    // One-entry sample directory: start = loop = $0210.
-    let dir = [
-        SPC_BRR_ORG as u8,
-        (SPC_BRR_ORG >> 8) as u8,
-        SPC_BRR_ORG as u8,
-        (SPC_BRR_ORG >> 8) as u8,
-    ];
-    // A 16-sample square BRR block: header shift 9 / filter 0 / loop + end, then
-    // eight +7 nibbles and eight -8 nibbles -> a square wave, looped at $1000
-    // pitch = 32 kHz / 16 = 2 kHz.
-    let brr = vec![0x93u8, 0x77, 0x77, 0x77, 0x77, 0x88, 0x88, 0x88, 0x88];
-    (prog, dir, brr)
 }

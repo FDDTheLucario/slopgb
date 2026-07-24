@@ -178,8 +178,10 @@ pub struct PluginHost {
     dir: Option<PathBuf>,
     /// Valid plugins found in the scanned directory that this per-frame host
     /// does NOT drive — higher-tier ones (`SUBSYSTEM` / tool), which load through
-    /// their own seams (`--sgb-coprocessor` / `--msu1` / the MCP host). Recorded
-    /// so the UI can list every supported plugin, not silently drop them.
+    /// their own seams (the SGB coprocessor / the MCP host). Recorded so the UI
+    /// can list and toggle every supported plugin, not silently drop them. Their
+    /// `enabled` flag is user state this host only stores: the owning seam reads
+    /// it (via [`Self::infos`]) when it next builds a machine.
     discovered: Vec<PluginInfo>,
 }
 
@@ -211,7 +213,9 @@ impl PluginHost {
                         host.discovered.push(PluginInfo {
                             name: name.into_owned(),
                             capabilities: caps_label(Capabilities::from_bits(requested)),
-                            enabled: false,
+                            // Enabled unless the user turns it off, like a
+                            // per-frame plugin — its own seam reads the flag.
+                            enabled: true,
                         });
                     }
                     Err(e) => eprintln!("slopgb: skipping plugin {}: {e}", path.display()),
@@ -337,12 +341,20 @@ impl PluginHost {
     }
 
     /// Enable or disable the plugin named `name` (a no-op if none matches). A
-    /// disabled plugin is skipped by [`Self::pump`], so its `on_frame` stops
-    /// firing while it stays resident.
+    /// disabled per-frame plugin is skipped by [`Self::pump`], so its `on_frame`
+    /// stops firing while it stays resident. For a higher-tier plugin this host
+    /// only records the flag — its own seam reads it out of [`Self::infos`] the
+    /// next time it builds a machine, so the change lands on the next reset /
+    /// ROM load rather than mid-run.
     pub fn set_enabled(&mut self, name: &str, enabled: bool) {
         for p in &mut self.plugins {
             if p.name == name {
                 p.enabled = enabled;
+            }
+        }
+        for d in &mut self.discovered {
+            if d.name == name {
+                d.enabled = enabled;
             }
         }
     }
@@ -350,16 +362,17 @@ impl PluginHost {
     /// Re-scan the directory this host was loaded from ([`Self::load_dir`]),
     /// replacing the loaded set — so a new `.wasm` is picked up and a removed one
     /// dropped. Per-plugin enabled flags are preserved by name across the
-    /// re-scan. A no-op for a host with no source directory.
+    /// re-scan, higher-tier plugins included. A no-op for a host with no source
+    /// directory.
     pub fn reload(&mut self) {
         let Some(dir) = self.dir.clone() else {
             return;
         };
         let disabled: Vec<String> = self
-            .plugins
-            .iter()
-            .filter(|p| !p.enabled)
-            .map(|p| p.name.clone())
+            .infos()
+            .into_iter()
+            .filter(|i| !i.enabled)
+            .map(|i| i.name)
             .collect();
         match Self::load_dir(&dir) {
             Ok(fresh) => {

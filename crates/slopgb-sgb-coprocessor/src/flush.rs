@@ -1,15 +1,12 @@
-//! The runtime pump: GB-cycle clocking, the per-flush co-simulation of the
-//! two chips (ICD2 mailbox, comm-port mediation, MMIO routing, PCM output),
-//! and the `AudioCoprocessor` trait wiring.
-//!
-//! A second `impl SgbCoprocessor` block, split out of `lib.rs` to keep it
-//! under the 1000-line cap.
+//! The clocking pump: the Game Boy cycle stream batched into [`FLUSH_CHUNK`]
+//! passes, and everything one pass does — apply the guest's captured MMIO
+//! writes, rasterize the scanlines the SNES beam has passed, maintain the
+//! ICD2 window and the SNES frame / NMI / autopoll shadows, mediate the two
+//! chips' comm ports, and advance the MSU-1 chip.
 
 use super::*;
 
 impl SgbCoprocessor {
-    // -- Clocking -----------------------------------------------------------
-
     pub(crate) fn clock(&mut self, gb_cycles: u64) {
         self.pending_gb += gb_cycles;
         while self.pending_gb >= FLUSH_CHUNK {
@@ -101,19 +98,8 @@ impl SgbCoprocessor {
         // passed since the last flush (display lines are 1-based, so row r
         // is complete once V > r) — one span render per flush. Runs after
         // the ring apply, so this flush's register writes land at ~10-line
-        // granularity.
-        if let Some(ppu) = &self.ppu {
-            let v = self.gb_pos * SNES_LINES / GB_FRAME_CYCLES;
-            let target = v.min(SNES_FB_H as u64) as u16;
-            if self.ppu_row < target {
-                let count = (target - self.ppu_row).min(255) as u8;
-                let _ = ppu.borrow_mut().write_ram(
-                    PPU_HW_LINE,
-                    &[self.ppu_row as u8, (self.ppu_row >> 8) as u8, count],
-                );
-                self.ppu_row += u16::from(count);
-            }
-        }
+        // granularity. See `render.rs` for the fast-forward render-skip.
+        self.pump_ppu_scanlines();
         tp.lap(1);
         {
             let mut cpu = self.cpu.borrow_mut();
@@ -345,236 +331,63 @@ impl SgbCoprocessor {
             }
         }
         tp.lap(5);
-        // 5. Emit output-rate samples (32 kHz S-DSP → output rate, zero-order-hold).
+        // 5. Advance the MSU-1 chip + refresh its $2000 read shadow, then emit
+        // output-rate samples (S-DSP + MSU-1 → output rate, zero-order-hold).
+        self.pump_msu(span);
         self.emit_output(span);
+        // From-start capture: once the resident engine has run a frame past the
+        // play command (`nspc_flush` armed `capture_at`), the song-init has
+        // finished — grab a self-sustaining snapshot for a from-the-top export.
+        if let Some(at) = self.capture_at {
+            if self.spc_pos >= at {
+                self.capture_at = None;
+                if let Ok(spc) = self.spc.borrow_mut().dump_spc() {
+                    if !spc.is_empty() {
+                        self.song_start_spc = Some(spc);
+                    }
+                }
+            }
+        }
         tp.lap(6);
         tp.finish();
     }
 
-    /// Emit the output-rate samples owed for a `span` of GB T-cycles, resampling
-    /// the 32 kHz S-DSP source by holding the current sample (32 kHz < output).
-    fn emit_output(&mut self, span: u64) {
-        self.samp_acc += span as f64;
-        while self.samp_acc >= self.cycles_per_sample {
-            self.samp_acc -= self.cycles_per_sample;
-            self.src_acc += DSP_RATE;
-            while self.src_acc >= f64::from(self.out_rate) {
-                self.src_acc -= f64::from(self.out_rate);
-                if let Some(s) = self.src.pop_front() {
-                    self.cur = s;
-                }
-            }
-            if self.out.len() < self.max_out {
-                self.out.push((
-                    f32::from(self.cur.0) * MIX_SCALE,
-                    f32::from(self.cur.1) * MIX_SCALE,
-                ));
-            }
-        }
-    }
-
-    fn mix_into(&mut self, gb: &mut [(f32, f32)]) {
-        let n = gb.len().min(self.out.len());
-        for (dst, src) in gb.iter_mut().zip(self.out.iter()).take(n) {
-            dst.0 += src.0;
-            dst.1 += src.1;
-        }
-        self.out.drain(..n);
-    }
-
-    fn set_output_rate(&mut self, hz: u32) {
-        let hz = hz.max(1);
-        self.out_rate = hz;
-        self.cycles_per_sample = f64::from(GB_CLOCK_HZ) / f64::from(hz);
-        self.max_out = hz as usize;
-        self.samp_acc = 0.0;
-        self.src_acc = 0.0;
-        self.src.clear();
-        self.out.clear();
-    }
-
-    /// Drain the stereo output-rate PCM synthesized since the last drain, oldest
-    /// first — the equivalent of the tier-3 plugin ABI's `drain_pcm`, for a host
-    /// that would rather pull the samples than have them mixed in.
-    pub fn drain_pcm(&mut self) -> Vec<(f32, f32)> {
-        std::mem::take(&mut self.out)
-    }
-
-    /// Apply a buffered run of pure-PPU `(port, val)` pairs as one batched
-    /// plugin call, in order, and clear the buffer. No-op when empty or
-    /// without a PPU plugin (matching the unbatched path's routing).
-    pub(crate) fn flush_ppu_run(&mut self, run: &mut Vec<u8>) {
-        if run.is_empty() {
+    /// Advance the MSU-1 chip a `span` of GB T-cycles' worth of 44.1 kHz samples,
+    /// drain its PCM into `msu_src` for the mix, and refresh the CPU's read shadow
+    /// for `$2000-$2007` (MSU_STATUS + the `S-MSU1` id) so the game's resident
+    /// SNES-side handler can detect the chip and poll its status. No-op — and no
+    /// presence advertised — without a loaded plugin + a track pack.
+    fn pump_msu(&mut self, span: u64) {
+        if self.msu.is_none() {
             return;
         }
-        if let Some(ppu) = &self.ppu {
-            let _ = ppu.borrow_mut().write_ram(PPU_HW_PORTS, run);
-        }
-        run.clear();
-    }
-
-    /// Apply one captured MMIO write from the guest (also the target of DMA
-    /// B-bus writes — `dma::bbus_write` routes through here). The clocking
-    /// loop consumes NMITIMEN; the DMA engine consumes the channel registers,
-    /// MDMAEN, and the WRAM access ports; every other B-bus port routes to the
-    /// PPU when one is loaded.
-    pub(crate) fn apply_mmio(&mut self, addr: u16, val: u8) {
-        match addr {
-            0x2180 => self.wmdata_write(val),
-            0x2181 => self.wmadd = self.wmadd & 0x1_FF00 | u32::from(val),
-            0x2182 => self.wmadd = self.wmadd & 0x1_00FF | u32::from(val) << 8,
-            // WMADDH: one bit — WMADD addresses 128 KB (fullsnes 2183h).
-            0x2183 => self.wmadd = self.wmadd & 0xFFFF | u32::from(val & 1) << 16,
-            0x4200 => self.nmitimen = val,
-            0x420B => self.run_gp_dma(val),
-            0x4300..=0x437F if usize::from(addr & 0xF) < 7 => {
-                self.dma_regs[usize::from(addr >> 4 & 7)][usize::from(addr & 0xF)] = val;
-            }
-            // Every other B-bus port belongs to the PPU when one is loaded
-            // (unknown ports are inert inside the chip). $2140-$2143 only
-            // arrive via DMA (the CPU-side APU ports route earlier) — a
-            // DMA-to-APU transfer is unimplemented and lands inert too.
-            0x2100..=0x21FF => {
-                if (0x2102..=0x2103).contains(&addr) && std::env::var_os("SLOPGB_OAMDBG").is_some()
-                {
-                    eprintln!("OAMREG {addr:04X}={val:02X}");
-                }
-                if addr == 0x2100 {
-                    self.last_inidisp = val; // diagnostics (debug_status)
-                    // The display shows a picture: not force-blanked and
-                    // brightness above zero (fullsnes 2100h). Arms the
-                    // frame handoff — see `take_snes_frame`.
-                    if val & 0x80 == 0 && val & 0x0F != 0 {
-                        self.snes_live = true;
-                    }
-                }
-                if let Some(ppu) = &self.ppu {
-                    let _ = ppu.borrow_mut().port_write((addr - 0x2100) as u8, val);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// Fetch the last completed SNES frame (256x224 RGB555 words,
-    /// row-major), at most once per vblank. `None` without a PPU plugin,
-    /// until the next frame completes, or until the SNES display has ever
-    /// shown a picture (`snes_live`) — before a takeover programs the PPU
-    /// the framebuffer is permanently black, and surfacing it would black
-    /// out the frontend over the live HLE presentation. Sticky once live:
-    /// the takeover's own blank stretches present as a real TV would.
-    pub fn take_snes_frame(&mut self) -> Option<Vec<u16>> {
-        if !self.frame_ready || !self.snes_live {
-            return None;
-        }
-        self.frame_ready = false;
-        let ppu = self.ppu.as_ref()?;
-        let bytes = ppu
-            .borrow_mut()
-            .read_ram(PPU_HW_FB, SNES_FB_W * SNES_FB_H * 2)
-            .ok()?;
-        Some(
-            bytes
-                .chunks_exact(2)
-                .map(|b| u16::from_le_bytes([b[0], b[1]]))
-                .collect(),
-        )
-    }
-}
-
-impl AudioCoprocessor for SgbCoprocessor {
-    fn clock(&mut self, gb_cycles: u64) {
-        SgbCoprocessor::clock(self, gb_cycles);
-    }
-    fn poll(&mut self, cmds: &mut dyn SgbCommandSource) {
-        SgbCoprocessor::poll(self, cmds);
-    }
-    fn joypad_feed(&mut self) -> Option<[u8; 4]> {
-        // Queued latch writes first, each dwelling long enough for the GB's
-        // polls to see it (ordered protocol sequences — an ACK handshake, a
-        // one-shot phase trigger). With the queue idle, forward the local
-        // matrix — the resident BIOS's continuous pad pass-through, the
-        // only way the player's buttons reach a taken-over GB (ICD2 latch
-        // encoding: buttons high nibble, d-pad low, active low).
-        if self.feed_hold > 0 {
-            self.feed_hold -= 1;
-            return Some(self.pads_shadow);
-        }
-        if let Some(pads) = self.feed_queue.pop_front() {
-            self.pads_shadow = pads;
-            self.feed_hold = FEED_DWELL_STEPS;
-            return Some(pads);
-        }
-        if self.pads_taken {
-            let (dpad, buttons) = self.input;
-            Some([buttons << 4 | dpad & 0x0F, 0xFF, 0xFF, 0xFF])
-        } else {
-            None
-        }
-    }
-    fn set_input(&mut self, dpad: u8, buttons: u8) {
-        self.input = (dpad, buttons);
-    }
-    fn take_frame(&mut self) -> Option<Vec<u16>> {
-        self.take_snes_frame()
-    }
-    fn mix_into(&mut self, out: &mut [(f32, f32)]) {
-        SgbCoprocessor::mix_into(self, out);
-    }
-    fn set_output_rate(&mut self, hz: u32) {
-        SgbCoprocessor::set_output_rate(self, hz);
-    }
-    fn load_bios(&mut self, _bios: &[u8]) {
-        // The resident clean-room firmware is fixed; there is no user BIOS image
-        // to install (and slopgb never reads the copyrighted SGB system ROM).
-    }
-    fn write_state(&self, w: &mut Writer) {
-        SgbCoprocessor::write_state(self, w);
-    }
-    fn read_state(&mut self, r: &mut Reader<'_>) -> Result<(), StateError> {
-        SgbCoprocessor::read_state(self, r)
-    }
-    fn clone_box(&self) -> Box<dyn AudioCoprocessor> {
-        // Re-instantiating the already-validated plugin wasm can only fail on an
-        // allocation error (which aborts anyway), so this is near-unreachable —
-        // but a save-state clone must never panic the emulator. Degrade to a
-        // silent inert coprocessor and log, rather than `.expect`.
-        match self.deep_clone() {
-            Ok(fresh) => Box::new(fresh),
-            Err(e) => {
-                eprintln!(
-                    "slopgb: SGB coprocessor clone failed ({e}); audio inert for this snapshot"
-                );
-                Box::new(InertCoprocessor)
-            }
-        }
-    }
-
-    fn debug_status(&self) -> String {
-        // The run-cycle targets grow only while the host clocks the chips, so a
-        // zero here means the coprocessor loaded but was never driven (the
-        // machine isn't in SGB mode, or the GB is sending nothing) — the exact
-        // "SNES side isn't running" case. Non-zero = the chips are executing.
-        let running = self.cpu_target > 0 || self.spc_target > 0;
-        let ppu = match &self.ppu {
-            Some(_) => format!(
-                "SNES PPU plugin loaded: {} frames rendered, last INIDISP ${:02X}",
-                self.frames_done, self.last_inidisp
-            ),
-            None => "no SNES PPU plugin (audio-only)".into(),
-        };
-        format!(
-            "wasm SGB coprocessor: SPC700 + 65C816 plugins loaded; {} \
-             (65C816 ran to cyc {}, SPC700 to cyc {}); last GB->SPC ports {:02X?}; {}",
-            if running {
-                "RUNNING"
+        // GB T-cycles → 44.1 kHz chip cycles (one cycle == one output sample),
+        // fractional carry in `msu_acc` — the same ratio law as the SPC/CPU.
+        self.msu_acc += span as i64 * MSU_RATE as i64;
+        let adv = self.msu_acc.div_euclid(i64::from(GB_CLOCK_HZ)).max(0) as u64;
+        self.msu_acc -= adv as i64 * i64::from(GB_CLOCK_HZ);
+        self.msu_cycle += adv;
+        let present = self.msu_present;
+        let (batch, status) = {
+            let mut cop = self.msu.as_ref().unwrap().borrow_mut();
+            let _ = cop.run_until(self.msu_cycle);
+            let batch = cop.drain_pcm().unwrap_or_default();
+            // port_read(0) = MSU_STATUS (a pure read; the data-read port 1 is the
+            // only one with a side effect, and it is never mirrored).
+            let status = if present {
+                cop.port_read(0).unwrap_or(0)
             } else {
-                "NOT yet clocked"
-            },
-            self.cpu_target,
-            self.spc_target,
-            self.to_spc,
-            ppu,
-        )
+                0
+            };
+            (batch, status)
+        };
+        self.msu_src.extend(batch);
+        self.msu_playing = present && status & MSU_ST_PLAYING != 0;
+        let mut shadow = [0u8; 8];
+        if present {
+            shadow[0] = status;
+            shadow[2..8].copy_from_slice(&MSU_ID);
+        }
+        let _ = self.cpu.borrow_mut().write_ram(HW_MSU, &shadow);
     }
 }

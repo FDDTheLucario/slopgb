@@ -182,3 +182,39 @@ pub(crate) fn effective_plugin_flags(registry: &PluginRegistry) -> Vec<(String, 
         .filter_map(|name| registry.flag(&name).map(|v| (name, v)))
         .collect()
 }
+
+/// Push the persisted per-plugin enable flags onto the freshly scanned `host`.
+pub(crate) fn apply_disabled_plugins(host: &mut PluginHost, cfg: &windows::options::PluginConfig) {
+    let subsystem: Vec<String> = host
+        .infos()
+        .into_iter()
+        .filter(|i| i.capabilities.contains("subsystem"))
+        .map(|i| i.name)
+        .collect();
+    for name in disabled_to_apply(cfg, &subsystem) {
+        host.set_enabled(&name, false);
+    }
+}
+
+/// Which plugin names to turn off, given the persisted config and the names the
+/// live host reports as tier-3 `SUBSYSTEM` plugins.
+///
+/// Each persisted key governs **its own tier**. [`PluginHost::set_enabled`]
+/// matches by name across both the driven and the discovered lists, so a
+/// tier-1 name that collides with a subsystem plugin's is dropped: builds
+/// before the subsystem toggle wrote every discovered subsystem plugin into the
+/// tier-1 key, and honouring that stale name would silently kill SGB audio.
+/// Only `disabled_subsystems` speaks for a subsystem plugin.
+fn disabled_to_apply(cfg: &windows::options::PluginConfig, subsystem: &[String]) -> Vec<String> {
+    let mut names: Vec<String> = cfg
+        .disabled_names()
+        .into_iter()
+        .filter(|n| !subsystem.contains(n))
+        .collect();
+    names.extend(cfg.disabled_subsystem_names());
+    names
+}
+
+#[cfg(test)]
+#[path = "app_boot_tests.rs"]
+mod tests;

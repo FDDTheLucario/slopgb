@@ -144,9 +144,10 @@ pub enum StateError {
     BadVersion,
     /// The state was saved from a different ROM than the one loaded.
     RomMismatch,
-    /// The state was saved from a different *system* than the one loaded: its
-    /// SGB-audio-tail flag disagrees with this machine's model (an SGB state
-    /// loaded into DMG/CGB, or a DMG/CGB state loaded into SGB).
+    /// The state was saved from a different *machine shape* than the one
+    /// loaded: either its model flag disagrees (an SGB state loaded into
+    /// DMG/CGB, or a DMG/CGB state into SGB), or its SNES-coprocessor tail is
+    /// present/absent where this machine's coprocessor slot is not.
     ModelMismatch,
 }
 
@@ -158,7 +159,7 @@ impl std::fmt::Display for StateError {
             StateError::BadVersion => "unsupported save-state version",
             StateError::RomMismatch => "save state is for a different ROM",
             StateError::ModelMismatch => {
-                "save state is for a different system (SGB audio present/absent mismatch)"
+                "save state is for a different system (model or SNES coprocessor mismatch)"
             }
         };
         f.write_str(s)

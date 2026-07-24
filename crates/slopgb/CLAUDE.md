@@ -24,8 +24,12 @@ Per-area state lives in `docs/ui-state/<area>.md` — read the matching file fir
   see [`../slopgb-plugin-host/CLAUDE.md`](../slopgb-plugin-host/CLAUDE.md)):
   `--plugins <dir>` / Options→Plugins feeds the tier-1 `INTROSPECTION` pump *and*
   is where the tier-3 SGB coprocessor auto-loads its plugins from — on an SGB
-  machine, `spc700.wasm` + `w65c816.wasm` in that dir replace the built-in HLE
-  `SgbApu` (`slopgb-sgb-coprocessor`, via `Session::set_plugins_dir`). MSU-1 is
+  machine, `spc700.wasm` + `w65c816.wasm` in that dir (each enabled in
+  Options→Plugins) fill core's coprocessor slot
+  (`slopgb-sgb-coprocessor`, via `Session::set_plugins_dir`); absent or
+  disabled, the slot stays empty and there is no SNES side at all — core ships
+  no SNES implementation. A per-plugin toggle applies at the next reset / ROM
+  load, never mid-run. MSU-1 is
   part of that SGB coprocessor: `msu1.wasm` (optional, same plugins dir) driven at
   SNES `$2000-$2007` via the game's resident 65C816 handler; `--msu1` /
   `SLOPGB_MSU1` (threaded via `Session::set_msu1_override` / `apply_sgb_coprocessor`)

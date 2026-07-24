@@ -1,7 +1,8 @@
-//! The SNES-side scanline rasterization pump `flush` calls each pass, plus
-//! the raw guest-RAM debug helpers `examples/throughput.rs` uses to deposit
-//! a synthetic 65C816 program (split out of `lib.rs` to stay under the
-//! module size cap).
+//! The SNES-side scanline rasterization pump `flush` calls each pass and the
+//! per-frame handoff of the image it builds, plus the raw guest-RAM debug
+//! helpers — the read-only plugin-memory peeks the debugger/MCP reads the
+//! SNES side through, and the write/set-PC pair `examples/throughput.rs` uses
+//! to deposit a synthetic 65C816 program.
 
 use super::*;
 
@@ -43,5 +44,50 @@ impl SgbCoprocessor {
     /// outside the crate.
     pub fn debug_cpu_set_pc(&self, pc: u32) {
         let _ = self.cpu.borrow_mut().set_pc(pc);
+    }
+
+    /// Fetch the last completed SNES frame (256x224 RGB555 words,
+    /// row-major), at most once per vblank. `None` without a PPU plugin,
+    /// until the next frame completes, or until the SNES display has ever
+    /// shown a picture (`snes_live`) — before a takeover programs the PPU
+    /// the framebuffer is permanently black, and surfacing it would black
+    /// out the frontend over the live HLE presentation. Sticky once live:
+    /// the takeover's own blank stretches present as a real TV would.
+    pub fn take_snes_frame(&mut self) -> Option<Vec<u16>> {
+        if !self.frame_ready || !self.snes_live {
+            return None;
+        }
+        self.frame_ready = false;
+        let ppu = self.ppu.as_ref()?;
+        let bytes = ppu
+            .borrow_mut()
+            .read_ram(PPU_HW_FB, SNES_FB_W * SNES_FB_H * 2)
+            .ok()?;
+        Some(
+            bytes
+                .chunks_exact(2)
+                .map(|b| u16::from_le_bytes([b[0], b[1]]))
+                .collect(),
+        )
+    }
+
+    /// Read `len` bytes of the 65C816 plugin's memory at the 24-bit `addr` —
+    /// read-only introspection for the debugger/MCP (a `peek` into the SNES
+    /// side; never advances a cycle).
+    pub fn debug_cpu_ram(&self, addr: u32, len: usize) -> Vec<u8> {
+        self.cpu
+            .borrow_mut()
+            .read_ram(addr, len)
+            .unwrap_or_default()
+    }
+
+    /// The PPU plugin's raw state snapshot (the `slopgb-snes-ppu` image:
+    /// VRAM, CGRAM, OAM, registers, framebuffer) — read-only introspection
+    /// for the debugger/MCP; empty without a PPU plugin.
+    pub fn debug_ppu_state(&self) -> Vec<u8> {
+        self.ppu
+            .as_ref()
+            .and_then(|p| p.borrow_mut().save_state().ok())
+            .unwrap_or_default()
     }
 }

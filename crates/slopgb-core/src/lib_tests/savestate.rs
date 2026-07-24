@@ -34,12 +34,10 @@ fn save_state_round_trips_cgb_mbc_and_all_channels() {
 }
 
 #[test]
-fn save_state_round_trips_sgb_with_audio_subsystem() {
-    // On SGB the save state also carries the SPC700 + S-DSP (the v4 tail).
-    // Exercise the full serialization chain and confirm the Game Boy side stays
-    // byte-identical across save/load — the SGB APU content round-trip itself is
-    // unit-tested in `sgb::apu`. The oracle issues no SGB sound commands, so the
-    // SNES side is the deterministic IPL.
+fn save_state_round_trips_sgb() {
+    // An SGB machine with no coprocessor installed carries no SNES tail, but its
+    // PPU does carry the SGB view. Exercise the full serialization chain and
+    // confirm the Game Boy side stays byte-identical across save/load.
     assert_round_trips(
         Model::Sgb,
         &savestate_oracle_rom(),
@@ -92,10 +90,10 @@ fn load_state_rejects_corrupt_or_foreign_states() {
 
 #[test]
 fn load_state_rejects_cross_model_sgb_vs_dmg() {
-    // Same ROM, different system: an SGB state carries the SPC700 + S-DSP tail,
-    // a DMG state doesn't. Loading one into the other must be a clear
-    // `ModelMismatch` — never a silent tail-drop (SGB→DMG) nor an opaque
-    // `Truncated` (DMG→SGB).
+    // Same ROM, different system: an SGB state carries the PPU's SGB view, a
+    // DMG state doesn't. Loading one into the other must be a clear
+    // `ModelMismatch` — never a silent drop of the SGB view (SGB→DMG) nor an
+    // opaque `Truncated` (DMG→SGB).
     let rom = savestate_oracle_rom();
     let mut sgb = GameBoy::new(Model::Sgb, rom.clone()).unwrap();
     sgb.run_frame();
@@ -107,7 +105,7 @@ fn load_state_rejects_cross_model_sgb_vs_dmg() {
     assert_eq!(
         dmg.load_state(&sgb_state),
         Err(StateError::ModelMismatch),
-        "SGB state into DMG must not silently drop the audio tail"
+        "SGB state into DMG must not silently drop the SGB view"
     );
     assert_eq!(
         sgb.load_state(&dmg_state),

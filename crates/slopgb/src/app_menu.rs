@@ -229,9 +229,8 @@ impl App {
 
     /// The live engaged SGB coprocessor's manifest-declared menu rows (e.g.
     /// "Export SPC"), parsed via the plugin-host manifest wire format. Empty
-    /// off SGB or when the engaged coprocessor (the built-in HLE `SgbApu`)
-    /// declares none — the main menu then shows no such row at all, not a
-    /// greyed one.
+    /// with an empty coprocessor slot, or when the engaged coprocessor declares
+    /// none — the main menu then shows no such row at all, not a greyed one.
     fn build_plugin_menu_rows(&self) -> Vec<PluginMenuRow> {
         let manifest = self.session.gb.coprocessor_manifest();
         let Some(parsed) = Manifest::parse(manifest.as_bytes()) else {
@@ -466,7 +465,10 @@ impl App {
         self.registry.set_context(ctx);
         // The SGB coprocessor is a plugin: point the session at the same dir so
         // spc700 + w65c816 auto-load (on SGB) from the plugins dir the UI just set,
-        // then feed it the registry's freshly-resolved `sf2`/`msu1` values.
+        // then feed it the registry's freshly-resolved `sf2`/`msu1` values. The
+        // freshly scanned dir starts every plugin enabled, so the session's
+        // disabled set is cleared with it.
+        self.session.set_disabled_plugins(Vec::new());
         self.session.set_plugins_dir(plugins_dir);
         self.session
             .set_plugin_flags(crate::app_boot::effective_plugin_flags(&self.registry));
@@ -716,6 +718,12 @@ impl App {
         for (name, enabled) in states {
             self.plugins.set_enabled(&name, enabled);
         }
+        // Subsystem plugins load when a machine is built, not per frame, so the
+        // session only records the off set here — it takes effect at the next
+        // reset / model switch / ROM load (never mid-run: swapping a running
+        // SPC700 + 65C816 out would need live chip-state migration).
+        self.session
+            .set_disabled_plugins(self.settings.plugins.disabled_subsystem_names());
         self.update_title();
     }
 

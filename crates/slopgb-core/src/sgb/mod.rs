@@ -1,19 +1,14 @@
-//! Super Game Boy SNES-side subsystems.
+//! Super Game Boy SNES-side seams.
 //!
 //! The SGB cartridge embeds an SNES: a Super Famicom running the Game Boy in a
-//! window. slopgb needs the SNES audio path for SGB sound. This module holds the
-//! [`spc700`] APU CPU, the [`dsp`] S-DSP synthesizer, and the [`apu`] seam that
-//! clocks both off the Game Boy's cycle stream and routes the SGB sound
-//! commands. It is self-contained and does not touch the Game Boy core.
-
-// The SPC700 (S-SMP) CPU and the S-DSP synthesizer live in the shared
-// `slopgb-snes-apu` crate — the same logic backs both the built-in path here and
-// a wasm coprocessor plugin. Re-exported so `crate::sgb::spc700`/`::dsp` keep
-// naming them unchanged.
-pub(crate) use slopgb_snes_apu::dsp;
-pub use slopgb_snes_apu::spc700;
-
-pub(crate) mod apu;
+//! window. `slopgb-core` emulates no SNES chip at all — it only exposes the two
+//! traits an out-of-core SNES implementation plugs into: [`SgbCommandSource`]
+//! (the SGB command/packet feed the Game Boy produces) and
+//! [`AudioCoprocessor`] (the SNES side a frontend installs via
+//! [`crate::GameBoy::set_audio_coprocessor`]). With no coprocessor installed the
+//! slot is empty and the SNES side simply does not exist — SGB border,
+//! palettes, MLT_REQ and ATTR/PAL colorization are Game Boy-side PPU work and
+//! run regardless.
 
 use crate::interconnect::Interconnect;
 use crate::{SgbFlags, SgbSound};
@@ -26,9 +21,8 @@ pub const SGB_PACKET_LEN: usize = 16;
 /// The SGB SNES-side sound commands the Game Boy queues each step, handed to an
 /// [`AudioCoprocessor`] without leaking the core-private bus. `GameBoy` drains
 /// the PPU's SGB command seams through this trait; an out-of-core coprocessor
-/// (e.g. a plugin adapter) receives it as a `&mut dyn` and pulls exactly the
-/// commands the built-in [`apu::SgbApu`] does — SOUND / DATA_SND / SOU_TRN /
-/// DATA_TRN / flags+JUMP.
+/// (e.g. a plugin adapter) receives it as a `&mut dyn` and pulls the SNES-side
+/// commands — SOUND / DATA_SND / SOU_TRN / DATA_TRN / flags+JUMP.
 pub trait SgbCommandSource {
     /// Drain one raw 16-byte SGB command packet, oldest first — the ICD2
     /// mailbox feed (fullsnes "SGB Port 7000h-700Fh"). Every accepted packet
@@ -103,17 +97,17 @@ impl SgbCommandSource for Interconnect {
     }
 }
 
-/// The SGB SNES-side audio coprocessor (SPC700 + S-DSP), abstracted behind a
-/// trait so the built-in [`apu::SgbApu`] can be swapped for an alternative
-/// implementation (e.g. one backed by a wasm coprocessor plugin) via
-/// [`crate::GameBoy::set_audio_coprocessor`] without touching `GameBoy`.
+/// The SGB SNES-side audio coprocessor (SPC700 + S-DSP + 65C816), the injection
+/// seam a frontend fills via [`crate::GameBoy::set_audio_coprocessor`]. Core
+/// ships **no** implementation: with nothing installed the slot is empty and the
+/// SNES side is silent and absent.
 ///
 /// The trait is bus-agnostic: `poll` takes a [`SgbCommandSource`] instead of the
 /// core-private `Interconnect`, so it can be implemented outside `slopgb-core`.
 ///
-/// Only ever held on `Model::Sgb`/`Sgb2`; `Dmg`/`Cgb` never construct one, so
-/// those paths never touch this trait and stay byte-identical (the golden-safe
-/// law). The built-in `SgbApu` is the default implementation.
+/// Only ever installed on `Model::Sgb`/`Sgb2`; `Dmg`/`Cgb` reject the injection,
+/// so those paths never touch this trait and stay byte-identical (the
+/// golden-safe law).
 pub trait AudioCoprocessor {
     /// Advance the chip by `gb_cycles` Game Boy T-cycles, emitting output-rate
     /// samples.
@@ -128,7 +122,7 @@ pub trait AudioCoprocessor {
     /// `Some` replaces the GB's local joypad matrix with the fed lines (on
     /// real hardware the latches *are* the GB's pad); the default `None`
     /// leaves the local matrix live, so a coprocessor without a running SNES
-    /// program (or the built-in HLE) changes nothing (golden-safe).
+    /// program changes nothing (golden-safe).
     fn joypad_feed(&mut self) -> Option<[u8; 4]> {
         None
     }
@@ -136,23 +130,22 @@ pub trait AudioCoprocessor {
     /// The GB→SNES input path: `step` pushes the local (physical) joypad
     /// matrix — active-low `dpad`/`buttons` nibbles — into the SNES side,
     /// whose joypad autopoll serves it back at `$4218-$421F`. The default
-    /// drops it (the built-in HLE runs no SNES CPU), so plain runs are
-    /// untouched.
+    /// drops it, so a coprocessor with no SNES CPU is untouched.
     fn set_input(&mut self, _dpad: u8, _buttons: u8) {}
 
     /// Whether the coprocessor should keep rasterizing its SNES-side
     /// framebuffer. A frontend fast-forwarding past frames nobody presents
     /// sets this `false` to skip that work; it must not change chip timing or
     /// audio — only whether pixels get drawn. Default no-op (`true` is
-    /// implied): the built-in HLE `SgbApu` has no framebuffer to skip, and
+    /// implied): a coprocessor with no framebuffer has nothing to skip, and
     /// any coprocessor that never gets this call keeps rendering exactly as
     /// today (golden-safe).
     fn set_render_enabled(&mut self, _on: bool) {}
 
     /// The last completed SNES-side frame (256x224 RGB555 words, row-major)
     /// a full-takeover program rendered, handed out at most once per SNES
-    /// vblank. The default has no SNES PPU and returns `None`, so the
-    /// built-in HLE presentation is untouched.
+    /// vblank. The default has no SNES PPU and returns `None`, so the Game
+    /// Boy-side presentation is untouched.
     fn take_frame(&mut self) -> Option<Vec<u16>> {
         None
     }
@@ -179,11 +172,10 @@ pub trait AudioCoprocessor {
 
     /// A human-readable status line for the debugger / MCP: which SGB audio
     /// coprocessor is engaged, and — for the wasm plugin coprocessor — whether
-    /// its chips loaded and how many SGB sound commands it has processed. The
-    /// default is the built-in HLE APU; the wasm coprocessor overrides it.
+    /// its chips loaded and how many SGB sound commands it has processed.
     /// Read-only introspection (never advances a cycle).
     fn debug_status(&self) -> String {
-        "built-in SGB APU (HLE) — no wasm coprocessor plugins loaded".to_string()
+        "an SGB audio coprocessor is installed (no status reported)".to_string()
     }
 
     /// A self-sustaining `.spc` (SPC700 Sound File) snapshot of the current
@@ -195,8 +187,8 @@ pub trait AudioCoprocessor {
 
     /// Whether a from-start `.spc` is available to export right now — true only
     /// for a recognized resident engine that has started a song, so the UI greys
-    /// the action for engines it can't snapshot from the top (the square SFX
-    /// driver, a game-uploaded foreign engine, or no song yet).
+    /// the action for engines it can't snapshot from the top (a game-uploaded
+    /// foreign engine, or no song yet).
     fn can_export_spc(&self) -> bool {
         false
     }
@@ -211,8 +203,8 @@ pub trait AudioCoprocessor {
 
     /// The coprocessor's self-describing manifest (the plugin-host manifest
     /// wire format — `id`/`name`/`menu` records), read by the frontend to build
-    /// its menu-row table. Empty for a coprocessor that contributes no rows
-    /// (the built-in HLE `SgbApu`). Read-only introspection.
+    /// its menu-row table. Empty for a coprocessor that contributes no rows.
+    /// Read-only introspection.
     fn manifest(&self) -> &'static str {
         ""
     }

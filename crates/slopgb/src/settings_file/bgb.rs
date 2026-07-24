@@ -138,6 +138,7 @@ pub fn from_ini(f: &Ini) -> Settings {
             text("SlopgbPluginsDir", ""),
             boolean("SlopgbPluginsAllowMutation", false),
             f.get("SlopgbPluginsDisabled").unwrap_or(""),
+            f.get("SlopgbPluginsDisabledSubsystems").unwrap_or(""),
         ),
     }
 }
@@ -334,6 +335,10 @@ pub fn to_ini(s: &Settings, f: &mut Ini) {
         ini::fmt_bool(s.plugins.allow_mutation),
     );
     f.set("SlopgbPluginsDisabled", &s.plugins.disabled_joined());
+    f.set(
+        "SlopgbPluginsDisabledSubsystems",
+        &s.plugins.disabled_subsystems_joined(),
+    );
 }
 
 #[cfg(test)]

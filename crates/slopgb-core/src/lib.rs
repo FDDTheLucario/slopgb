@@ -187,16 +187,17 @@ pub const EXC_SGB_TRANSFER: u16 = 1 << 6;
 /// Leading bytes of a slopgb save state (see [`GameBoy::save_state`]).
 const STATE_MAGIC: &[u8; 4] = b"SLPS";
 /// Save-state format version (bumped on any layout change). v3 dropped the
-/// APU output queues (`samples`/`raw_samples`) from the payload; v4 appends the
-/// SGB audio subsystem (SPC700 + S-DSP) on `Model::Sgb`/`Sgb2` states; v6 dropped
+/// APU output queues (`samples`/`raw_samples`) from the payload; v6 dropped
 /// two retired clock-mode flag bytes from the interconnect + PPU payloads; v7
-/// records a has-SGB-audio-tail flag byte right
-/// after the header so a cross-model load (SGB state into DMG/CGB or vice versa)
-/// is rejected with `StateError::ModelMismatch` instead of silently dropping the
-/// tail or failing as `Truncated`; v8 appends the SGB raw-packet tee queue to
+/// records an is-SGB-model flag byte right after the header so a cross-model
+/// load (SGB state into DMG/CGB or vice versa) is rejected with
+/// `StateError::ModelMismatch` instead of silently dropping SGB-only payload;
+/// v8 appends the SGB raw-packet tee queue to
 /// the joypad payload (the ICD2 mailbox feed; the SNES-fed pad latches stay
-/// transient — a live coprocessor re-feeds them on the next step).
-const STATE_VERSION: u16 = 9;
+/// transient — a live coprocessor re-feeds them on the next step); v10 moves the
+/// SNES-coprocessor tail behind its own presence flag at the very end, since the
+/// tail exists only when a coprocessor is installed, not per model.
+const STATE_VERSION: u16 = 10;
 
 /// A debugger memory watchpoint (bgb's "Set watchpoint"): the free run halts
 /// after the CPU accesses `addr` with a matching access kind. A frontend/
@@ -228,9 +229,10 @@ pub enum DebugReg {
 pub struct GameBoy {
     cpu: cpu::Cpu,
     bus: interconnect::Interconnect,
-    /// SGB audio subsystem (SPC700 + S-DSP), behind the [`sgb::AudioCoprocessor`]
-    /// swap seam. `Some` only on `Model::Sgb`/`Sgb2` (the built-in `SgbApu`);
-    /// `None` elsewhere, so `Dmg`/`Cgb` are byte-identical (golden-safe).
+    /// The SNES-side SGB coprocessor slot ([`sgb::AudioCoprocessor`]). Core
+    /// emulates no SNES chip, so this starts `None` on every model and only a
+    /// frontend's [`Self::set_audio_coprocessor`] (accepted on
+    /// `Model::Sgb`/`Sgb2` only) fills it. Empty = no SNES side at all.
     sgb_apu: Option<Box<dyn sgb::AudioCoprocessor>>,
 }
 
@@ -244,12 +246,6 @@ impl Clone for GameBoy {
             sgb_apu: self.sgb_apu.as_ref().map(|a| a.clone_box()),
         }
     }
-}
-
-/// Build the default (built-in) SGB audio coprocessor for `model`, boxed behind
-/// the [`sgb::AudioCoprocessor`] swap seam. `None` off `Model::Sgb`/`Sgb2`.
-fn build_sgb_apu(model: Model) -> Option<Box<dyn sgb::AudioCoprocessor>> {
-    sgb::apu::SgbApu::for_model(model).map(|a| Box::new(a) as Box<dyn sgb::AudioCoprocessor>)
 }
 
 impl GameBoy {
@@ -295,8 +291,11 @@ impl GameBoy {
             cpu.regs_mut().set_de(0xFF56);
             cpu.regs_mut().set_hl(0x000D);
         }
-        let sgb_apu = build_sgb_apu(model);
-        Self { cpu, bus, sgb_apu }
+        Self {
+            cpu,
+            bus,
+            sgb_apu: None,
+        }
     }
 
     /// Build a machine that **executes `boot_rom`** from power-on (bgb's
@@ -329,8 +328,11 @@ impl GameBoy {
         // constructor state (LCD off, DIV 0, …) and the boot ROM brings it up.
         bus.attach_boot_rom(boot_rom);
         let cpu = cpu::Cpu::power_on();
-        let sgb_apu = build_sgb_apu(model);
-        Ok(Self { cpu, bus, sgb_apu })
+        Ok(Self {
+            cpu,
+            bus,
+            sgb_apu: None,
+        })
     }
 
     /// Pick the best model for a ROM from its CGB-support header flag
@@ -359,21 +361,23 @@ impl GameBoy {
     pub fn step(&mut self) {
         let before = self.bus.cycles();
         self.cpu.step(&mut self.bus);
-        // Advance the SGB audio subsystem by the cycles that instruction spent,
-        // and drain any SGB sound commands it produced. Present only on
-        // `Model::Sgb`/`Sgb2`, so `Dmg`/`Cgb` runs are byte-identical.
+        let elapsed = self.bus.cycles().wrapping_sub(before);
+        // The SGB `*_TRN` capture window (CHR/PCT/PAL/ATTR/SOU/DATA transfers)
+        // runs on the SNES-side clock — it ticks here, whatever the GB LCD is
+        // doing, and independently of whether a SNES coprocessor is installed.
+        // A no-op off `Model::Sgb`/`Sgb2`, so `Dmg`/`Cgb` runs are unchanged.
+        self.bus.ppu_mut().sgb_tick_trn(elapsed as u32);
+        // Advance an installed SNES-side coprocessor by the cycles that
+        // instruction spent, and drain the SGB commands it produced. Filled
+        // only by `set_audio_coprocessor` on an SGB machine, so every other
+        // run is byte-identical.
         if let Some(apu) = self.sgb_apu.as_mut() {
-            let elapsed = self.bus.cycles().wrapping_sub(before);
-            // The SGB `*_TRN` capture window runs on the SNES-side clock —
-            // it ticks here, whatever the GB LCD is doing.
-            self.bus.ppu_mut().sgb_tick_trn(elapsed as u32);
             apu.clock(elapsed);
             apu.poll(&mut self.bus);
             // The SNES→GB return path: pad bytes the coprocessor's SNES
             // program wrote into the ICD2 latches replace the local joypad
-            // matrix. `None` (the default, and the built-in HLE) feeds
-            // nothing, so the matrix — and every non-coprocessor run — is
-            // untouched.
+            // matrix. `None` (the trait default) feeds nothing, so the matrix
+            // — and every non-coprocessor run — is untouched.
             if let Some(pads) = apu.joypad_feed() {
                 self.bus.joypad_mut().set_sgb_feed(pads);
             }
@@ -388,7 +392,7 @@ impl GameBoy {
 
     /// The last completed SNES-side frame from a loaded SGB coprocessor
     /// (256x224 RGB555 — `SGB_BORDER_W`x`SGB_BORDER_H`), at most once per
-    /// SNES vblank. `None` on the built-in HLE path (and always on
+    /// SNES vblank. `None` with an empty coprocessor slot (and always on
     /// DMG/CGB), so a frontend polling this changes nothing there.
     pub fn take_snes_frame(&mut self) -> Option<Vec<u16>> {
         self.sgb_apu.as_mut()?.take_frame()
@@ -529,9 +533,9 @@ impl GameBoy {
     pub fn drain_audio(&mut self, out: &mut Vec<(f32, f32)>) {
         let start = out.len();
         self.bus.apu_mut().drain_samples(out);
-        // On SGB, mix the SNES-side stream into the GB samples just drained
+        // Mix an installed SNES-side stream into the GB samples just drained
         // (both emit at the same output rate off the same clock, so they align
-        // sample-for-sample). Inert / absent off `Model::Sgb`/`Sgb2`.
+        // sample-for-sample). Absent with an empty coprocessor slot.
         if let Some(apu) = self.sgb_apu.as_mut() {
             apu.mix_into(&mut out[start..]);
         }
@@ -707,10 +711,9 @@ impl GameBoy {
         self.bus.cartridge().rtc_state()
     }
 
-    /// The SGB audio coprocessor's status line, or `None` when this machine has
-    /// no SGB coprocessor at all (not `Model::Sgb` / `Sgb2`). Reports whether the
-    /// built-in HLE APU or the wasm SPC700+65C816 plugin coprocessor is engaged —
-    /// read-only introspection for the debugger / MCP. Side-effect-free.
+    /// The installed SGB coprocessor's status line, or `None` when the slot is
+    /// empty — off `Model::Sgb`/`Sgb2`, or on SGB with no coprocessor plugin
+    /// loaded. Read-only introspection for the debugger / MCP. Side-effect-free.
     #[must_use]
     pub fn sgb_coprocessor_status(&self) -> Option<String> {
         self.sgb_apu.as_ref().map(|a| a.debug_status())
@@ -731,8 +734,9 @@ impl GameBoy {
     }
 
     /// A `.spc` snapshot of the SGB audio chip's **current** (live, mid-song)
-    /// state, for the MCP `dump-spc` debug path. `None` off SGB or without an
-    /// SPC700. Read-only. Contrast [`Self::export_spc`] (the song from its top).
+    /// state, for the MCP `dump-spc` debug path. `None` with an empty
+    /// coprocessor slot, or with one that has no SPC700. Read-only. Contrast
+    /// [`Self::export_spc`] (the song from its top).
     pub fn export_spc_live(&self) -> Option<Vec<u8>> {
         self.sgb_apu.as_ref().and_then(|a| a.export_spc_live())
     }

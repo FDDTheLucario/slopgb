@@ -64,14 +64,18 @@ impl GameBoy {
         let id = self.bus.cartridge().rom_id();
         w.u32(id.len() as u32);
         w.bytes(&id);
-        // Has-SGB-audio-tail flag: the ROM header pins the ROM but not the model,
-        // yet the same ROM runs as SGB (with the audio tail below) or DMG/CGB
-        // (without). Record it so `load_state` can reject a cross-model load.
-        w.bool(self.sgb_apu.is_some());
+        // Is-SGB-model flag: the ROM header pins the ROM but not the model, yet
+        // the same ROM runs as SGB (whose PPU carries the SGB view) or DMG/CGB.
+        // Record it so `load_state` can reject a cross-model load.
+        w.bool(self.model().is_sgb());
         self.cpu.write_state(&mut w);
         self.bus.write_state(&mut w);
-        // SGB audio state (SPC700 + S-DSP), appended only on SGB models — so
-        // `Dmg`/`Cgb` states are byte-identical to the pre-SGB-audio format.
+        // The installed SNES coprocessor's own state, appended only when the
+        // slot is filled — so `Dmg`/`Cgb` (and a pluginless SGB) states carry
+        // no tail at all. Its length is the coprocessor's business, so the
+        // reader can only consume it with the same kind of coprocessor
+        // installed; the flag lets a mismatch be rejected instead of misparsed.
+        w.bool(self.sgb_apu.is_some());
         if let Some(apu) = &self.sgb_apu {
             apu.write_state(&mut w);
         }
@@ -106,17 +110,23 @@ impl GameBoy {
         if id != self.bus.cartridge().rom_id() {
             return Err(StateError::RomMismatch);
         }
-        // Reject a cross-model load before touching state: an SGB state (tail
-        // present) loaded into DMG/CGB would silently drop the ~64 KB tail; a
-        // DMG/CGB state loaded into SGB would fail opaquely as `Truncated` on the
-        // missing tail. Both are a model mismatch.
-        if r.bool()? != self.sgb_apu.is_some() {
+        // Reject a cross-model load before touching state: a DMG/CGB state
+        // restored into SGB would silently drop that machine's PPU SGB view
+        // (the PPU's own presence flag would clear it), and the reverse would
+        // load SGB-only payload into a machine that has none.
+        if r.bool()? != self.model().is_sgb() {
             return Err(StateError::ModelMismatch);
         }
         self.cpu.read_state(&mut r)?;
         self.bus.read_state(&mut r)?;
-        if let Some(apu) = self.sgb_apu.as_mut() {
-            apu.read_state(&mut r)?;
+        // The SNES-coprocessor tail is only readable by a coprocessor of the
+        // same kind: its length is opaque here, so a state whose tail presence
+        // disagrees with this machine's slot is rejected, never guessed at.
+        let has_tail = r.bool()?;
+        match (has_tail, self.sgb_apu.as_mut()) {
+            (true, Some(apu)) => apu.read_state(&mut r)?,
+            (false, None) => {}
+            _ => return Err(StateError::ModelMismatch),
         }
         Ok(())
     }
