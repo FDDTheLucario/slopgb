@@ -440,6 +440,9 @@ pub struct Resampler {
 }
 
 impl Resampler {
+    /// High-quality (linear) resampler. Only the tests construct one directly;
+    /// the audio pipe uses [`Self::new_quality`] with the configured quality.
+    #[cfg(test)]
     pub fn new(src_rate: u32, dst_rate: u32) -> Self {
         Self::new_quality(src_rate, dst_rate, true)
     }

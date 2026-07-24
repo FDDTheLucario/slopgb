@@ -16,8 +16,9 @@ clean-room chip cores `slopgb-snes-apu` (SPC700 + S-DSP) / `slopgb-w65c816` /
 [`crates/slopgb-plugin-host/CLAUDE.md`](crates/slopgb-plugin-host/CLAUDE.md)):
 tier-1 `INTROSPECTION` (`PluginHost` per-frame pump, `--plugins`), tier-2 tool
 (`LoadedTool`, MCP), tier-3 `SUBSYSTEM` (`LoadedCoprocessor`): the SGB
-coprocessor auto-loads `spc700.wasm` + `w65c816.wasm` from the `--plugins` dir on
-SGB models; MSU-1 loads from a `--msu1` pack. **Subsystem plugins (SPC700 / 65C816
+coprocessor auto-loads `spc700.wasm` + `w65c816.wasm` (and optionally `msu1.wasm`)
+from the `--plugins` dir on SGB models; `--msu1` only points the MSU-1 plugin at its
+`.pcm` pack. **Subsystem plugins (SPC700 / 65C816
 / MSU-1 / SF2 — `slopgb-*-plugin`, built by `cargo xtask stage-plugins`) are
 first-class**: the host supports every valid subsystem type via the generic
 coprocessor ABI. `sf2.wasm` (crate `slopgb-sf2-plugin`) is driven directly by the
@@ -65,7 +66,7 @@ This file is a lean index. Implementation-state narratives live in dedicated dir
 | [`docs/hardware-state/`](docs/hardware-state/README.md) | **core** per-subsystem state, quirks, parked/disproven approaches (one file per subsystem) |
 | [`docs/ui-state/`](docs/ui-state/README.md) | **frontend / bgb-UI** per-area state (menus, debugger, options, viewers, save-states + link, startup + boot, layout) |
 | [`docs/bgb-reference/`](docs/bgb-reference/README.md) | real bgb screenshots + capture rig — **never invent bgb's UI, capture it** |
-| [`docs/msu1-plugin-plan.md`](docs/msu1-plugin-plan.md) | MSU-1 streaming-audio coprocessor plugin, wired into a running machine (`--msu1`; registers at `$A000-$A007`, frontend-owned, golden-safe) + the resident-handler/polled-mailbox pattern |
+| [`docs/msu1-plugin-plan.md`](docs/msu1-plugin-plan.md) | MSU-1 streaming-audio coprocessor plugin (`msu1.wasm` from the plugins dir), driven the real-hardware way — SNES `$2000-$2007` via the game's DATA_SND-uploaded resident 65C816 handler (the SGB bridge); `--msu1` selects the `.pcm` pack dir (defaults to the ROM dir), requires an SGB model + the resident-handler/polled-mailbox pattern |
 | `crates/slopgb-core/tests/gbtr/baselines/gambatte.txt` header | floor-class index (A–H + lift conditions) — read before touching baselined behavior |
 
 When a **hardware** question comes up, consult in order:

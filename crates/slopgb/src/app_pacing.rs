@@ -7,10 +7,8 @@ use std::time::{Duration, Instant};
 
 use slopgb_core::{CYCLES_PER_FRAME, GameBoy};
 
-use crate::msu1::Msu1;
 use crate::pacing::{
-    AudioPipe, MAX_FRAMES_PER_WAKE, advance_grid, frame_interval, slewed_interval,
-    turbo_max_frames, wake_plan,
+    MAX_FRAMES_PER_WAKE, advance_grid, frame_interval, slewed_interval, turbo_max_frames, wake_plan,
 };
 use crate::{App, FRAME_DURATION, ui};
 
@@ -97,9 +95,9 @@ impl App {
             self.next_frame = next;
             while frames < budget && !hit {
                 hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link, &freeze, &cheats);
-                // Unconditional — the device ring drops any overflow. Mixes an
-                // MSU-1 track when a pack is loaded (a no-op otherwise).
-                pump_audio_frame(pipe, &mut self.msu1, &mut self.session.gb);
+                // Unconditional — the device ring drops any overflow. Any MSU-1
+                // audio is mixed in by the SGB coprocessor inside `drain_audio`.
+                pipe.pump(&mut self.session.gb);
                 frames += 1;
                 // A silent link peer left the master stalled (run_one_frame
                 // timed out): stop the wake instead of blocking again per frame
@@ -158,9 +156,7 @@ impl App {
             hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link, &freeze, &cheats);
             match &mut self.audio {
                 // The queue keeps ~250 ms and drops the rest.
-                Some(pipe) if !muted => {
-                    pump_audio_frame(pipe, &mut self.msu1, &mut self.session.gb);
-                }
+                Some(pipe) if !muted => pipe.pump(&mut self.session.gb),
                 _ => self.discard_audio(),
             }
             frames += 1;
@@ -288,20 +284,6 @@ fn run_one_frame(
         gb.debug_write(addr, value);
     }
     hit
-}
-
-/// Pump one frame of audio to the device queue, mixing an MSU-1 track when a
-/// pack is loaded. A free function (not a method) so it can borrow the disjoint
-/// `audio` / `msu1` / `session.gb` fields while the pacers hold `&mut self.audio`.
-/// With no pack this is exactly `pipe.pump(gb)` — byte-identical output.
-fn pump_audio_frame(pipe: &mut AudioPipe, msu1: &mut Option<Msu1>, gb: &mut GameBoy) {
-    match msu1 {
-        Some(m) => {
-            let extra = m.pump_frame(gb);
-            pipe.pump_mixing(gb, extra);
-        }
-        None => pipe.pump(gb),
-    }
 }
 
 fn advance_frame(

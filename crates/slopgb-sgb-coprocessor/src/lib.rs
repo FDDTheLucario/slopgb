@@ -44,7 +44,7 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use slopgb_core::sgb::{AudioCoprocessor, SgbCommandSource};
 use slopgb_core::{Reader, SgbFlags, SgbSound, StateError, Writer};
@@ -103,6 +103,31 @@ pub const SPC_WASM: &str = "spc700.wasm";
 pub const CPU_WASM: &str = "w65c816.wasm";
 /// The optional SNES-PPU plugin: absent = the audio-only backend, unchanged.
 pub const PPU_WASM: &str = "snes-ppu.wasm";
+/// The optional MSU-1 streaming-audio plugin: absent = no MSU-1, unchanged. A
+/// game reaches it the real-hardware way — its SGB driver uploads a resident
+/// 65C816 handler (`DATA_SND` + `JUMP`) that drives the MSU-1 registers at SNES
+/// `$2000-$2007`, which the host serves from this plugin (see `apply_mmio` +
+/// [`SgbCoprocessor::flush`]).
+pub const MSU_WASM: &str = "msu1.wasm";
+/// MSU-1 `.pcm` tracks stream at CD rate (44.1 kHz), one chip cycle per sample.
+const MSU_RATE: f64 = 44_100.0;
+/// Full-scale MSU-1 i16 → mix amplitude. MSU-1 is the game's replacement
+/// soundtrack (a GB game mutes its own music when it hands off to MSU-1), so it
+/// carries the music while the GB channels carry only SFX (ducked below, as real
+/// SGB routes GB audio under the cartridge-in level). `.pcm` tracks are typically
+/// mastered with headroom (peak ~-6 dB), so unity would read quiet against a GB
+/// SFX near full scale — lift ~2x to match. ponytail: fixed loudness; a per-game
+/// knob if a hot track clips or a quiet one still reads low.
+const MSU_MIX_SCALE: f32 = 2.0 / 32768.0;
+/// MSU_STATUS bit 4 (audio playing) — mirrors the plugin's `ST_AUDIO_PLAYING`;
+/// while set, the GB channels duck so the music sits on top.
+const MSU_ST_PLAYING: u8 = 0x10;
+/// The `S-MSU1` id string a driver reads back at `$2002-$2007` to detect the
+/// chip (mirrors the plugin's own `ID`; the driver's presence check compares it).
+const MSU_ID: [u8; 6] = *b"S-MSU1";
+/// The MSU-1 data-ROM host-file key (mirrors `slopgb_msu1_plugin::DATA_FILE_KEY`;
+/// a reserved 32-bit key a 16-bit track number can never collide with).
+const MSU_DATA_FILE_KEY: u32 = 0xFFFF_FFFF;
 
 /// The snes-ppu plugin's host window (mirrored, wasm-loaded never linked):
 /// `W len 2` at `PPU_HW_LINE`: render framebuffer row y (`len 3` renders a
@@ -139,6 +164,8 @@ const HW_ICD2_BUS: u32 = 0x0100_6000;
 const HW_MMIO_RING: u32 = 0x0100_1000;
 /// `W len L` at `+ i`: CPU-read shadows for `$4200 + i`.
 const HW_SHADOW: u32 = 0x0100_2000;
+/// `W len 8`: the MSU-1 read shadows for `$2000-$2007` (status + `S-MSU1` id).
+const HW_MSU: u32 = 0x0100_8000;
 /// `W len 1`: request an NMI (consumed at the next instruction boundary).
 const HW_NMI: u32 = 0x0100_3000;
 /// `W len 1` zero: DMA service complete, un-stall the CPU. (`R len 1`: the
@@ -372,6 +399,31 @@ pub struct SgbCoprocessor {
     out: Vec<(f32, f32)>,
     max_out: usize,
 
+    /// The optional MSU-1 streaming-audio plugin (loaded from `msu1.wasm` in the
+    /// plugins dir) + its bytes for [`Self::deep_clone`]. `None` = no MSU-1, the
+    /// SGB path unchanged. Reached via the SNES `$2000-$2007` bus, not GB `$A000`.
+    msu: Option<RefCell<LoadedCoprocessor>>,
+    msu_wasm: Option<Vec<u8>>,
+    /// The MSU-1 pack directory (`.pcm` tracks + optional `.msu`), retained so
+    /// [`Self::deep_clone`] can re-attach the pack to the cloned plugin.
+    msu_pack_dir: Option<PathBuf>,
+    /// A track pack with ≥1 `.pcm` is loaded: gates the `S-MSU1` presence shadow
+    /// so a game only detects the chip when tracks are actually available.
+    msu_present: bool,
+    /// The MSU-1 chip cycle (== 44.1 kHz output-sample index) + the GB→44.1 kHz
+    /// fractional carry that advances it each flush.
+    msu_cycle: u64,
+    msu_acc: i64,
+    /// Undrained 44.1 kHz MSU-1 samples (oldest first), the 44.1 kHz→output-rate
+    /// resample carry, and the held sample — mixed into `out` in `emit_output`
+    /// alongside the S-DSP source.
+    msu_src: VecDeque<(i16, i16)>,
+    msu_src_acc: f64,
+    msu_cur: (i16, i16),
+    /// The MSU-1 chip reported audio-playing at the last flush: while set, the GB
+    /// channels duck in `mix_into` so the streamed music sits above the SFX.
+    msu_playing: bool,
+
     /// Command-poll throttle for the transfer getters (they persist between
     /// transfers, so edge-detect by checksum — same policy as the built-in).
     poll_ctr: u32,
@@ -511,8 +563,71 @@ impl SgbCoprocessor {
             .map_err(|e| format!("cannot read SGB plugin '{}': {e}", cpu_path.display()))?;
         // The PPU plugin is optional: absent keeps the audio-only backend.
         let ppu_bytes = fs::read(dir.join(PPU_WASM)).ok();
-        Self::from_wasm_full(&spc_bytes, &cpu_bytes, ppu_bytes.as_deref(), output_rate)
-            .map_err(|e| format!("cannot load SGB coprocessor plugins: {e}"))
+        let mut me =
+            Self::from_wasm_full(&spc_bytes, &cpu_bytes, ppu_bytes.as_deref(), output_rate)
+                .map_err(|e| format!("cannot load SGB coprocessor plugins: {e}"))?;
+        // The MSU-1 plugin is optional and loads from the *same* plugins dir as
+        // the other coprocessor chips (its `.pcm` pack comes separately via
+        // [`Self::set_msu_pack`]). Absent = no MSU-1.
+        if let Ok(bytes) = fs::read(dir.join(MSU_WASM)) {
+            if let Err(e) = me.attach_msu(&bytes) {
+                eprintln!("slopgb: MSU-1 plugin '{MSU_WASM}' present but failed to load: {e}");
+            }
+        }
+        Ok(me)
+    }
+
+    /// Load the MSU-1 streaming-audio plugin from its `.wasm` bytes (absent when
+    /// `msu1.wasm` is not in the plugins dir). A game's SGB driver detects it at
+    /// SNES `$2000-$2007` and drives it there; no track pack is advertised until
+    /// [`Self::set_msu_pack`] finds `.pcm` files.
+    pub fn attach_msu(&mut self, wasm: &[u8]) -> Result<(), LoadError> {
+        let mut cop = LoadedCoprocessor::load(wasm)?;
+        cop.reset()?;
+        self.msu = Some(RefCell::new(cop));
+        self.msu_wasm = Some(wasm.to_vec());
+        self.msu_present = false;
+        Ok(())
+    }
+
+    /// Point the loaded MSU-1 plugin at a pack directory: every `game-N.pcm`
+    /// track (keyed by its trailing number, the index the game's `MSU_TRACK`
+    /// write selects) and an optional `.msu` data ROM are streamed to the chip
+    /// through the plugin's bulk-file channel. Presence (`S-MSU1`) is advertised
+    /// only when ≥1 track loads, so a game finds the chip exactly when a pack is
+    /// there. No-op without a loaded plugin.
+    pub fn set_msu_pack(&mut self, dir: &Path) {
+        let Some(msu) = &self.msu else { return };
+        let mut tracks = 0usize;
+        if let Ok(entries) = fs::read_dir(dir) {
+            let mut cop = msu.borrow_mut();
+            // ponytail: every track's full bytes are read into the plugin up
+            // front (the `set_file` model). Fine for a handful of tracks; stream
+            // a track on demand if a large pack's memory ever matters.
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if let Some(track) = track_number(&name) {
+                    if let Ok(data) = fs::read(&path) {
+                        cop.set_file(u32::from(track), data);
+                        tracks += 1;
+                    }
+                } else if name.ends_with(".msu") {
+                    if let Ok(data) = fs::read(&path) {
+                        cop.set_file(MSU_DATA_FILE_KEY, data);
+                    }
+                }
+            }
+        }
+        self.msu_pack_dir = Some(dir.to_path_buf());
+        self.msu_present = tracks > 0;
+        if tracks > 0 {
+            eprintln!(
+                "slopgb: MSU-1 pack '{}' loaded ({tracks} track(s)); served on the SGB SNES $2000-$2007 bus",
+                dir.display(),
+            );
+        }
     }
 
     /// Build the backend from the two plugins' wasm bytes: instantiate, reset,
@@ -569,6 +684,16 @@ impl SgbCoprocessor {
             out_rate: rate,
             out: Vec::new(),
             max_out: rate as usize,
+            msu: None,
+            msu_wasm: None,
+            msu_pack_dir: None,
+            msu_present: false,
+            msu_cycle: 0,
+            msu_acc: 0,
+            msu_src: VecDeque::new(),
+            msu_src_acc: 0.0,
+            msu_cur: (0, 0),
+            msu_playing: false,
             poll_ctr: 0,
             sou_trn_sig: 0,
             data_trn_sig: 0,
@@ -1159,7 +1284,9 @@ impl SgbCoprocessor {
             }
         }
         tp.lap(5);
-        // 5. Emit output-rate samples (32 kHz S-DSP → output rate, zero-order-hold).
+        // 5. Advance the MSU-1 chip + refresh its $2000 read shadow, then emit
+        // output-rate samples (S-DSP + MSU-1 → output rate, zero-order-hold).
+        self.pump_msu(span);
         self.emit_output(span);
         // From-start capture: once the resident engine has run a frame past the
         // play command (`nspc_flush` armed `capture_at`), the song-init has
@@ -1178,6 +1305,45 @@ impl SgbCoprocessor {
         tp.finish();
     }
 
+    /// Advance the MSU-1 chip a `span` of GB T-cycles' worth of 44.1 kHz samples,
+    /// drain its PCM into `msu_src` for the mix, and refresh the CPU's read shadow
+    /// for `$2000-$2007` (MSU_STATUS + the `S-MSU1` id) so the game's resident
+    /// SNES-side handler can detect the chip and poll its status. No-op — and no
+    /// presence advertised — without a loaded plugin + a track pack.
+    fn pump_msu(&mut self, span: u64) {
+        if self.msu.is_none() {
+            return;
+        }
+        // GB T-cycles → 44.1 kHz chip cycles (one cycle == one output sample),
+        // fractional carry in `msu_acc` — the same ratio law as the SPC/CPU.
+        self.msu_acc += span as i64 * MSU_RATE as i64;
+        let adv = self.msu_acc.div_euclid(i64::from(GB_CLOCK_HZ)).max(0) as u64;
+        self.msu_acc -= adv as i64 * i64::from(GB_CLOCK_HZ);
+        self.msu_cycle += adv;
+        let present = self.msu_present;
+        let (batch, status) = {
+            let mut cop = self.msu.as_ref().unwrap().borrow_mut();
+            let _ = cop.run_until(self.msu_cycle);
+            let batch = cop.drain_pcm().unwrap_or_default();
+            // port_read(0) = MSU_STATUS (a pure read; the data-read port 1 is the
+            // only one with a side effect, and it is never mirrored).
+            let status = if present {
+                cop.port_read(0).unwrap_or(0)
+            } else {
+                0
+            };
+            (batch, status)
+        };
+        self.msu_src.extend(batch);
+        self.msu_playing = present && status & MSU_ST_PLAYING != 0;
+        let mut shadow = [0u8; 8];
+        if present {
+            shadow[0] = status;
+            shadow[2..8].copy_from_slice(&MSU_ID);
+        }
+        let _ = self.cpu.borrow_mut().write_ram(HW_MSU, &shadow);
+    }
+
     /// Emit the output-rate samples owed for a `span` of GB T-cycles, resampling
     /// the 32 kHz S-DSP source by holding the current sample (32 kHz < output).
     fn emit_output(&mut self, span: u64) {
@@ -1191,25 +1357,35 @@ impl SgbCoprocessor {
                     self.cur = s;
                 }
             }
+            // The MSU-1 source (44.1 kHz) rides the same output timeline. Unlike
+            // the S-DSP hold, an underrun/stop drops to silence (pop-or-zero) so a
+            // finished track leaves no held-DC click.
+            self.msu_src_acc += MSU_RATE;
+            while self.msu_src_acc >= f64::from(self.out_rate) {
+                self.msu_src_acc -= f64::from(self.out_rate);
+                self.msu_cur = self.msu_src.pop_front().unwrap_or((0, 0));
+            }
             let amp = f32::from(self.cur.0.unsigned_abs().max(self.cur.1.unsigned_abs()));
             if amp > self.dbg_pcm_peak {
                 self.dbg_pcm_peak = amp;
             }
             if self.out.len() < self.max_out {
                 self.out.push((
-                    f32::from(self.cur.0) * MIX_SCALE,
-                    f32::from(self.cur.1) * MIX_SCALE,
+                    f32::from(self.cur.0) * MIX_SCALE + f32::from(self.msu_cur.0) * MSU_MIX_SCALE,
+                    f32::from(self.cur.1) * MIX_SCALE + f32::from(self.msu_cur.1) * MSU_MIX_SCALE,
                 ));
             }
         }
     }
 
     fn mix_into(&mut self, gb: &mut [(f32, f32)]) {
-        // Only with the real N-SPC driver resident (--sgb-bios) does the SGB
-        // hardware mix apply: the GB audio feeds the SNES mixer below the SNES
-        // APU's level. Without it — clean-room square SFX, or no --sgb-bios —
-        // leave the GB channels at full so nothing is quieted for no benefit.
-        if self.nspc_resident {
+        // The SGB hardware mix routes the GB audio into the SNES mixer below the
+        // SNES-side level: duck the GB channels when the SNES side is the primary
+        // voice — the resident N-SPC driver (--sgb-bios) or a playing MSU-1 track
+        // (whose game has already muted its own GB music, leaving only SFX). With
+        // neither, leave the GB channels at full so nothing is quieted for no
+        // benefit (clean-room square SFX / no enhancement).
+        if self.nspc_resident || self.msu_playing {
             for s in gb.iter_mut() {
                 s.0 *= GB_GAIN;
                 s.1 *= GB_GAIN;
@@ -1232,6 +1408,9 @@ impl SgbCoprocessor {
         self.src_acc = 0.0;
         self.src.clear();
         self.out.clear();
+        self.msu_src_acc = 0.0;
+        self.msu_src.clear();
+        self.msu_cur = (0, 0);
     }
 
     /// Drain the stereo output-rate PCM synthesized since the last drain, oldest
@@ -1281,6 +1460,14 @@ impl SgbCoprocessor {
 
     fn apply_mmio(&mut self, addr: u16, val: u8) {
         match addr {
+            // MSU-1 register window: the resident 65C816 handler a game's SGB
+            // driver uploaded writes seek/track/volume/control here, and the host
+            // forwards them to the MSU-1 plugin (comm port n == `$2000 + n`).
+            0x2000..=0x2007 => {
+                if let Some(msu) = &self.msu {
+                    let _ = msu.borrow_mut().port_write((addr - 0x2000) as u8, val);
+                }
+            }
             0x2180 => self.wmdata_write(val),
             0x2181 => self.wmadd = self.wmadd & 0x1_FF00 | u32::from(val),
             0x2182 => self.wmadd = self.wmadd & 0x1_00FF | u32::from(val) << 8,
@@ -1509,18 +1696,16 @@ impl AudioCoprocessor for SgbCoprocessor {
     }
 }
 
-/// Install the clean-room SPC700 driver + one-entry sample directory + a
-/// square BRR sample into APU RAM (the chip itself boots its IPL ROM; see
+/// A parsed SNES APU upload table: the entry point + `(dest, bytes)` blocks.
+type ApuBlocks = (u16, Vec<(u16, Vec<u8>)>);
+
 /// Parse a standard SNES APU upload table (`[u16 len, u16 dest, len bytes]*`
 /// terminated by `[0000, entry]`) starting at `off`, returning `(entry,
 /// blocks)`. Rejects a malformed table (out-of-bounds length, no terminator, or
 /// no block loading the N-SPC engine entry `$0400`) so a wrong offset / wrong
 /// ROM falls back to the clean-room firmware rather than uploading garbage.
-/// A parsed SNES APU upload table: each `(dest, bytes)` block, in order.
-type ApuBlocks = Vec<(u16, Vec<u8>)>;
-
-fn parse_apu_blocks(rom: &[u8], mut off: usize) -> Option<(u16, ApuBlocks)> {
-    let mut blocks: ApuBlocks = Vec::new();
+fn parse_apu_blocks(rom: &[u8], mut off: usize) -> Option<ApuBlocks> {
+    let mut blocks: Vec<(u16, Vec<u8>)> = Vec::new();
     loop {
         let len = u16::from_le_bytes([*rom.get(off)?, *rom.get(off + 1)?]);
         let dest = u16::from_le_bytes([*rom.get(off + 2)?, *rom.get(off + 3)?]);
@@ -1604,4 +1789,15 @@ fn joy1_bytes(dpad: u8, buttons: u8) -> [u8; 2] {
         | (d & 1); // Right
     let low = (b & 1) << 7; // A
     [low, high]
+}
+
+/// The track number a `.pcm` filename ends with (`track_1.pcm` / `game-3.pcm` /
+/// `5.pcm` → `1` / `3` / `5`), or `None` for a non-`.pcm` / un-numbered name.
+/// The number is the plugin host-file key a game selects via `MSU_TRACK`.
+fn track_number(name: &str) -> Option<u16> {
+    let stem = name.strip_suffix(".pcm")?;
+    // Trailing digits are ASCII (1 byte each), so the char count is the byte
+    // length of the run — slice it straight off the end.
+    let run = stem.chars().rev().take_while(char::is_ascii_digit).count();
+    stem.get(stem.len() - run..).and_then(|d| d.parse().ok())
 }

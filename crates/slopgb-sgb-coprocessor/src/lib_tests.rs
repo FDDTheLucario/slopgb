@@ -876,6 +876,8 @@ mod ppu;
 
 // Test category modules (split for the 1000-line cap); each is a `mod`
 // via `use super::*`, reaching the shared fixtures above + the crate items.
+#[path = "lib_tests_msu.rs"]
+mod msu;
 #[path = "lib_tests/nmi.rs"]
 mod nmi;
 #[path = "lib_tests/pads.rs"]

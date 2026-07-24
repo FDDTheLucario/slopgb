@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use slopgb_plugin_host::PluginHost;
 
 use crate::cli::Options;
-use crate::{msu1, windows};
+use crate::windows;
 
 /// Resolve the boot ROM bytes from `--boot` or the `SLOPGB_BOOT` env var,
 /// reading the file. A read error is logged and treated as no boot ROM
@@ -67,22 +67,14 @@ pub(crate) fn load_plugins(opts: &Options, settings: &windows::options::Settings
     }
 }
 
-/// Load an MSU-1 pack from `--msu1` or `SLOPGB_MSU1` (in that precedence).
-/// Absent → `None` (no MSU-1; the core + audio path stay byte-identical). A pack
-/// that fails to load (missing plugin wasm, bad module) is logged and treated as
-/// absent (non-fatal — the game still runs, just without MSU-1 audio).
-pub(crate) fn load_msu1(opts: &Options) -> Option<msu1::Msu1> {
-    let dir = opts
-        .msu1
+/// Resolve the optional MSU-1 pack directory from `--msu1` or `SLOPGB_MSU1` (in
+/// that precedence). Only the path is resolved here — the SGB coprocessor drives
+/// MSU-1 as part of the SNES-side bridge (`$2000-$2007`), so the pack is fed to
+/// the session, not loaded as a standalone coprocessor.
+pub(crate) fn msu1_override(opts: &Options) -> Option<PathBuf> {
+    opts.msu1
         .clone()
-        .or_else(|| env::var_os("SLOPGB_MSU1").map(PathBuf::from))?;
-    match msu1::Msu1::load(&dir) {
-        Ok(m) => Some(m),
-        Err(e) => {
-            eprintln!("slopgb: {e}");
-            None
-        }
-    }
+        .or_else(|| env::var_os("SLOPGB_MSU1").map(PathBuf::from))
 }
 
 /// Resolve the optional SGB BIOS bytes from `--sgb-bios` or `SLOPGB_SGB_BIOS`,

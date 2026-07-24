@@ -1,13 +1,15 @@
 # MSU-1 (+ resident-handler streaming) plugin — plan
 
-**Status: implemented + wired into a running machine.** The chip is
-`crates/slopgb-msu1-plugin` (the register interface + polled-mailbox mode) on the
-v4 coprocessor bulk channels (proof: `slopgb-plugin-host/tests/msu1_roundtrip.rs`;
-SDK surface in [`ui-state/plugin-api.md`](ui-state/plugin-api.md#coprocessor-plugins-tier-3)).
-The frontend now hosts it as a playable peripheral (`crates/slopgb/src/msu1.rs`,
-`--msu1 <dir>`): the register mapping + live play + PCM mixing landed — see
-**Mapping decision** below. The register-map / bit-layout spec further down is the
-design reference.
+**Status: implemented + shipped the real-hardware way (SGB bridge, SNES
+`$2000-$2007`).** The chip is `crates/slopgb-msu1-plugin` (the register interface +
+polled-mailbox mode) on the v4 coprocessor bulk channels (proof:
+`slopgb-plugin-host/tests/msu1_roundtrip.rs`; SDK surface in
+[`ui-state/plugin-api.md`](ui-state/plugin-api.md#coprocessor-plugins-tier-3)). It
+loads as `msu1.wasm` from the **plugins dir** and is driven by the SGB coprocessor
+(`slopgb-sgb-coprocessor`) at SNES `$2000-$2007` — the same route real Game Boy
+MSU-1 hacks take (Super Game Boy mode). Core wiring + mix live in
+[`hardware-state/sgb-audio.md`](hardware-state/sgb-audio.md#msu-1-over-the-sgb-bridge);
+the register-map / bit-layout spec further down is the design reference.
 
 An MSU-1-style streaming-audio coprocessor as a slopgb tier-3 plugin, plus the
 more general "resident frame-handler + polled mailbox" custom-music pattern it
@@ -27,54 +29,63 @@ generalizes.
   `unsafe`, no `from_raw_parts`). The per-frame handler hook is the already-pumped
   `run_until`.
 
-## Mapping decision (the "one integration decision")
+## Mapping decision (the "one integration decision") — resolved
 
-**Where the 8 registers live:** the Game Boy cartridge I/O window, base
-**`$A000-$A007`** (register `n` ↔ plugin comm port `n`, mirroring the SNES
-`$2000-$2007`). Rationale: slopgb is a Game Boy, so the natural route is a
-GB-cartridge-mapped MSU-1, not the SNES memory map. `$A000-$BFFF` is the external-
-cartridge address space where MBC RAM / RTC registers already sit — and real MSU-1
-hardware carries SRAM there — so a homebrew MSU-1 cart maps its control registers
-into that same window. (`$2000-$2007` is the SNES convention being adapted, not a
-GB address.)
+**What shipped: the SGB-bridge LLE.** Real Game Boy MSU-1 hacks (e.g. the Pokémon
+Red MSU-1 hack) reach the chip only through **Super Game Boy mode** — the game's
+SGB driver uploads a resident **65C816 handler** into SNES WRAM via `DATA_SND`
+packets, `JUMP`s to it, and that handler runs each SNES NMI, reads a mailbox the
+game fills with more `DATA_SND` packets, and drives the MSU-1 registers at SNES
+**`$2000-$2007`**. slopgb already ran that handler (`slopgb-sgb-coprocessor`:
+`apply_data_snd` lands packets in SNES WRAM, JUMP runs the 65C816); the missing
+piece was MSU-1 at `$2000-$2007`, now wired:
 
-**What landed (`crates/slopgb/src/msu1.rs`, opt-in `--msu1 <dir>` / `SLOPGB_MSU1`):**
+- The **w65c816 plugin** (`mmio.rs`) captures writes to `$2000-$2007` into its MMIO
+  ring (drained by the host) and serves reads from a host-fed 8-byte shadow
+  (`$2000` = MSU_STATUS, `$2002-$2007` = `S-MSU1` id) via the `HW_MSU` host-window
+  (`lib.rs`).
+- The **coprocessor** loads `msu1.wasm` from the plugins dir (`attach_msu`), points
+  it at a `.pcm` pack (`set_msu_pack`), routes `$2000-$2007` writes to the plugin
+  in `apply_mmio`, and each flush (`pump_msu`) advances the chip, refreshes the
+  `$2000` read shadow (status + `S-MSU1`), and mixes its 44.1 kHz PCM into the SGB
+  output. Presence (`S-MSU1`) is advertised only when ≥1 `.pcm` track loads.
+- **Frontend.** `--msu1 <DIR>` / `SLOPGB_MSU1` still exist but now only select the
+  `.pcm` **pack directory**; absent, the pack defaults to the loaded ROM's own
+  directory. Threaded via `Session::set_msu1_override` / `apply_sgb_coprocessor`.
+  Requires an SGB model + the coprocessor plugins. There is **no** frontend cart-bus
+  bridge (`crates/slopgb/src/msu1.rs` deleted).
+- **Mix.** MSU-1 mixes at `2.0/32768` and the GB channels duck (`GB_GAIN`) while a
+  track plays, so the music sits above the GB SFX (the game mutes its own GB music
+  on SGB).
 
-- **Live play** (golden-safe). Each rendered frame the frontend polls
-  `$A004-$A007` with the read-only `&self` `GameBoy::debug_read` and edge-forwards
-  the audio-control registers (track select / volume / control) to the chip's
-  comm ports; a change on either track-select byte re-commits `select_track`
-  (so a low-byte-only change with a stable high byte still re-selects), and the
-  control register is edge-triggered (write-once-and-leave does not restart). It
-  then advances the plugin one frame of 44.1 kHz samples, drains its PCM, and
-  resamples 44.1 kHz → the core output rate.
-- **PCM mixing.** `AudioPipe::pump_mixing` adds the resampled track into the Game
-  Boy stream sample-for-sample before the device resample + gain (mirroring the
-  built-in SGB `mix_into`). An empty extra is byte-identical to the plain pump.
-- **Pack loading.** `--msu1 <dir>` reads the coprocessor plugin (`dir/msu1.wasm`),
-  every `*.pcm` (keyed by its trailing track number → the plugin host-file key),
-  and an optional `*.msu` data ROM. A missing/broken plugin is a non-fatal logged
-  error (the game still runs, MSU-1 silent).
+**Golden-safe.** MSU-1 lives entirely on the SGB side (`Model::Sgb`/`Sgb2` only) as
+a wasm coprocessor the host injects via `set_audio_coprocessor`; off SGB there is no
+slot and the core path is byte-identical. See the swap-seam section in
+[`hardware-state/sgb-audio.md`](hardware-state/sgb-audio.md).
 
-**Golden-safe** (the hard gate). There is **no core memory hook at all**. A wasm
-store can't be cloned into the machine's save-state, so MSU-1 lives entirely in
-the frontend (outside `GameBoy`), like the audio pipe; with no `--msu1` pack the
-`msu1: Option<Msu1>` is `None`, nothing is polled or mixed, and the core + audio
-path are byte-identical (proven: `golden_fingerprint` + mooneye 93/93 unchanged;
-no core file was touched). Test: `crates/slopgb/src/msu1_tests.rs` authors a
-fixture pack, writes the registers into cart RAM, and asserts a pumped frame
-produces non-silent mixed audio; with no pack the path is inert.
+### Why `$A000` originally (resolved history)
+
+Commit `b4cbf6c` "feat(frontend): wire MSU-1 into a running machine" first mapped
+the 8 registers into the **Game Boy cartridge window `$A000-$A007`**: *"slopgb
+emulates a Game Boy, and `$A000-$BFFF` is the external-cartridge window where MBC
+RAM/RTC registers already sit and real MSU-1 hardware carries SRAM."* That was a
+plausible-homebrew GB placement adapting the SNES `$2000-$2007` layout — but no
+real GB MSU-1 hack addresses `$A000`; they all go through the SGB bridge. This doc
+had explicitly parked "a SNES-side SGB coprocessor" as the alternative (see
+**Placement** below); that alternative is what has now landed, and the `$A000`
+route (and its frontend `msu1.rs` cart-bus poll) is superseded and removed.
 
 ## Still deferred (honest coverage)
 
-- **Per-access live register reads.** A running game reads `$A000` (status) /
-  `$A001` (data-ROM byte) / the id ports from its own CPU mid-frame; the frontend
-  can't observe those golden-safe without a per-access core intercept. The live
-  poll therefore drives the *write* side (which is what starts a track); the
-  data-ROM seek/read feature (`$A000-$A003`) awaits that intercept. The
-  register↔port read map itself is proven (`Msu1::read_reg`, test-only today).
-- **Muted / timer-paced audio.** MSU-1 pumps only where the audio pipe pumps
-  (audio-paced, un-muted), so a muted or device-less session leaves the track
+- **Data-read port `$2001` not live-served over the SGB bridge.** The host
+  refreshes the CPU's read shadow only for `$2000` (MSU_STATUS) and `$2002-$2007`
+  (the `S-MSU1` id) each flush — those are pure/pre-shadowable. `$2001` (the
+  auto-incrementing data-ROM read port) can't be pre-shadowed, so the `.msu` data
+  file is **optional and SGB is audio-only**. Same limitation as the old `$A000`
+  route; fine for the SGB use case (SGB games use only audio). The plugin's
+  `port_read(1)` data path itself is proven (`msu1_roundtrip.rs`).
+- **Muted / timer-paced audio.** MSU-1 pumps where the SGB coprocessor pumps
+  (batched per emulated span), so a muted or device-less session leaves the track
   paused — same gating as the built-in APU.
 
 ## Two usage modes (both ride the coprocessor tier)
@@ -109,18 +120,18 @@ MSU-1 is an open homebrew spec (near/byuu). The audio + data packs are
 **user-supplied files**; uploaded game code is the game's own. Nothing to
 reproduce or clean-room here.
 
-## Placement
+## Placement — resolved
 
-MSU-1 is natively a SNES `$002000` register mapping. slopgb took the
-Game-Boy-cart-mapped route (registers at `$A000-$A007`; see **Mapping decision**
-above) rather than a SNES-side SGB coprocessor — slopgb emulates a Game Boy, and
-the cart window is where GB homebrew would map the chip. The coprocessor *plugin*
-is the host either way.
+MSU-1 is natively a SNES `$002000` register mapping. slopgb ships it exactly there:
+the **SNES-side SGB coprocessor** drives the chip at `$2000-$2007`, matching real
+Game Boy MSU-1 hardware (the SGB bridge). An earlier iteration took the
+Game-Boy-cart-mapped route (`$A000-$A007`); that is superseded (see **Mapping
+decision** above). The coprocessor *plugin* is the host either way.
 
-## Depends on
+## Depends on — satisfied
 
-The SGB tier-3 PCM-drain path (in progress). Queue the build after that lands — it
-unblocks MSU-1 and the SGB driver together.
+Built on the SGB tier-3 PCM-drain path + the resident-handler chain (both landed —
+`slopgb-sgb-coprocessor`). MSU-1 rides the same seam as the SGB N-SPC driver.
 
 ## References (read before building)
 

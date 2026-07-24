@@ -289,6 +289,84 @@ host-side. The pieces, all reverse-engineered from a real SGB1 `program.rom`:
 The `coprocessor` MCP tool's status line reports the resident-driver state and
 SOUND/SOU_TRN/DATA_SND counts + DSP peak for diagnosing this path.
 
+## MSU-1 over the SGB bridge
+
+MSU-1 (near/byuu's open homebrew streaming-audio chip) is wired the
+**real-hardware way**: as part of the SGB coprocessor, at SNES `$2000-$2007`. Real
+Game Boy MSU-1 hacks (e.g. the Pokémon Red MSU-1 hack) reach the chip only through
+**Super Game Boy mode** — the game's SGB driver uploads a resident **65C816
+handler** into SNES WRAM via `DATA_SND` packets and `JUMP`s to it; that handler
+runs each SNES NMI, reads a mailbox the game fills with more `DATA_SND` packets, and
+drives the MSU-1 registers. slopgb already ran that handler
+(`slopgb-sgb-coprocessor`); the MSU-1 piece at `$2000-$2007` is now wired in.
+
+- **Plugin + pack loading.** The coprocessor optionally loads `msu1.wasm`
+  (`crates/slopgb-msu1-plugin`) from the **plugins dir** — the same dir as
+  `spc700.wasm` / `w65c816.wasm` / the optional snes-ppu — via
+  `SgbCoprocessor::attach_msu`, and points it at a `.pcm` **pack dir** via
+  `set_msu_pack`. The frontend's `--msu1 <DIR>` / `SLOPGB_MSU1` selects the pack dir
+  only (not the wasm); absent, the pack **defaults to the loaded ROM's directory**
+  (threaded via `Session::set_msu1_override` / `apply_sgb_coprocessor`). Every
+  `*.pcm` is keyed by its trailing track number → the plugin host-file key; the
+  `.msu` data file is **optional**. Presence (`S-MSU1`) is advertised only when ≥1
+  `.pcm` track loads. Requires an SGB model + the coprocessor plugins.
+- **Register capture / read shadow (w65c816 plugin, `mmio.rs` + `lib.rs`).** The
+  65C816 plugin captures resident-handler writes to `$2000-$2007` into its MMIO ring
+  (drained each flush) and serves CPU reads from a host-fed 8-byte shadow at the
+  `HW_MSU` host-window: `$2000` = MSU_STATUS, `$2002-$2007` = the `S-MSU1` id. Absent
+  a pack the shadow is all-zero (never `S-MSU1`, so a presence check finds no chip).
+- **Coprocessor drive (`apply_mmio` / `pump_msu`).** `apply_mmio` routes each
+  captured `$2000-$2007` write to the plugin (comm port `n` == `$2000 + n`). Each
+  flush, `pump_msu` advances the chip (GB T-cycles → 44.1 kHz via the same
+  fractional-carry ratio law as the SPC/CPU), drains its PCM into the mix queue, and
+  refreshes the `$2000-$2007` read shadow — MSU_STATUS from the plugin's
+  `port_read(0)` plus the `S-MSU1` id (only when a pack is present).
+- **Mix (`emit_output` / `mix_into`).** The 44.1 kHz MSU-1 source rides the output
+  timeline alongside the S-DSP; it mixes at `MSU_MIX_SCALE = 2.0/32768` (≈ 2×) and,
+  while a track plays, the GB channels duck by `GB_GAIN` — so the streamed music
+  sits above the GB SFX (an MSU-1 game mutes its own GB music on SGB, leaving only
+  effects). An underrun drops to silence (pop-or-zero) so a finished track leaves no
+  held-DC click.
+- **Known limitation — `$2001` data-read not live-served.** The read shadow only
+  pre-images `$2000` (MSU_STATUS) and `$2002-$2007` (the id) — those are pure /
+  pre-shadowable. `$2001`, the auto-incrementing data-ROM read port, can't be
+  pre-shadowed over the bridge, so the `.msu` data file is optional and **SGB MSU-1
+  is audio-only**. The plugin's own `port_read(1)` data path is proven in
+  `msu1_roundtrip.rs`; it just isn't reachable through the SGB read shadow.
+
+### Spec adherence (vs `MSU-1-Docs/MSU-1.MD`)
+
+Checked `crates/slopgb-msu1-plugin/src/lib.rs` + the coprocessor `$2000` wiring
+against the MSU-1-Docs reference; all conform:
+
+- **Read/write register split** (MSU-1.MD "Register Chart"): reads serve
+  MSU_STATUS (`$2000`), the data port (`$2001`), and the id (`$2002-$2007`); writes
+  take the 32-bit seek (`$2000-$2003`, committed on `$2003`), the 16-bit track
+  (`$2004-$2005`, committed on `$2005`), volume (`$2006`), and control (`$2007`) —
+  `port_write`/`port_read` match 1:1.
+- **`S-MSU1` id at `$2002-$2007`** (MSU-1.MD "Chip Identification"): `ID = "S-MSU1"`,
+  `port_read(p) = ID[p-2]`, so `$2002`→'S' … `$2007`→'1'. Advertised only when a pack
+  loads.
+- **MSU_STATUS bit layout** (MSU-1.MD "Chip Status Port"): revision in bits 0-2
+  (reports **1**), track-missing bit 3, audio-playing bit 4, audio-repeat bit 5. The
+  data-busy (7) / audio-busy (6) bits are **always clear**, matching MSU-1.MD
+  "Emulator Behavior": *no emulator (bar ZSNES 2) emulates the busy bits; they are
+  never updated and always cleared.* (Reporting revision 1 while still honoring the
+  rev-2 resume bit is explicitly allowed: *"some emulators report a revision of 1 and
+  still support this feature."*)
+- **Volume `$00-$FF`** (MSU-1.MD "Audio Volume Control", `$00` off / `$FF` max):
+  `scale_sample` does `(sample * volume) >> 8`, so `$00` mutes and `$FF` ≈ unity.
+- **MSU_CONTROL** (MSU-1.MD "Audio State Control"): `write_control` reads bit 0
+  (play — restarts from the top), bit 1 (repeat → loop to the header loop point), and
+  bit 2 (resume — keeps position). A missing track forces stop.
+- **`.pcm` format** (MSU-1.MD "`.pcm` Format"): `parse_pcm_header` requires the
+  8-byte header — 4-byte `MSU1` magic + 32-bit LE loop point in samples — and streams
+  interleaved 16-bit LE stereo (left first) samples at 44.1 kHz. A bad magic → track
+  missing.
+- **Deliberate gap:** the `$2001` data-read port is not live-served over the SGB
+  bridge (above) → SGB MSU-1 is audio-only. This is per the task scope, not a spec
+  divergence in the chip model.
+
 ## SPC export (right-click → "Export SPC")
 
 Writes the playing song as a 66048-byte `.spc` (SPC700 Sound File v0.30) —
