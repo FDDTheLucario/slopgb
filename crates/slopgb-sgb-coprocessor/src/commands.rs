@@ -64,11 +64,14 @@ impl SgbCoprocessor {
         // SOUND ($08): a play request. Deposit the effect id + a trigger in the
         // CPU's mailbox; the 65C816 shim forwards them to the SPC700 driver.
         while let Some(s) = cmds.take_sound_event() {
+            self.dbg_sound = self.dbg_sound.wrapping_add(1);
+            self.dbg_last_sound = [s.effect_a, s.effect_b, s.attenuation, s.effect_bank];
             self.apply_sound(s);
         }
         // DATA_SND ($0F): a write to SNES work RAM. fullsnes:
         // the packet is `dest_lo, dest_hi, len, data…`.
         while let Some(pkt) = cmds.take_data_snd() {
+            self.dbg_datasnd = self.dbg_datasnd.wrapping_add(1);
             self.apply_data_snd(&pkt);
         }
 
@@ -99,11 +102,42 @@ impl SgbCoprocessor {
             let sig = checksum(data);
             if sig != self.sou_trn_sig {
                 self.sou_trn_sig = sig;
+                self.dbg_soutrn = self.dbg_soutrn.wrapping_add(1);
                 self.upload_transfer(data);
             }
         }
         if let Some(flags) = cmds.flags() {
             self.apply_flags(flags);
+        }
+        if self.nspc_resident {
+            self.nspc_flush();
+        }
+    }
+
+    /// Deliver a queued command word to the resident clean-room engine by writing
+    /// ports 0/1 (command) + 2/3 (data); the engine edge-detects a changed word
+    /// and acts. No echo-ack gate: this is our own host↔engine protocol (both
+    /// sides ours), and a gate that waited for the engine to echo the last word
+    /// could wedge forever if the engine's post-fade idle state stopped echoing
+    /// it — leaving later play commands undelivered (permanent silence). Just
+    /// deliver the latest pending command; last write wins. Runs at the throttled
+    /// poll cadence so the wasm port crossings stay bounded.
+    fn nspc_flush(&mut self) {
+        if !self.nspc_pending {
+            return;
+        }
+        let spc = self.spc.get_mut();
+        for (p, &v) in self.nspc_cmd.iter().enumerate() {
+            let _ = spc.port_write(p as u8, v);
+        }
+        self.nspc_shadow = self.nspc_cmd;
+        self.nspc_pending = false;
+        // A music play command (score code, bit 7 = stop) restarts the song
+        // from its top — arm a from-start capture one frame out, once the
+        // engine has re-inited (see `SONG_START_CAPTURE_DELAY`).
+        let score = self.nspc_cmd[0];
+        if score != 0 && score & 0x80 == 0 {
+            self.capture_at = Some(self.spc_pos + SONG_START_CAPTURE_DELAY);
         }
     }
 
@@ -146,6 +180,17 @@ impl SgbCoprocessor {
     /// SOUND ($08): mailbox `note = effect_a`, `trigger = 1` (or the effect-on
     /// flags byte if non-zero), so the shim wakes the SPC700 driver.
     fn apply_sound(&mut self, s: SgbSound) {
+        if self.nspc_resident {
+            // Real N-SPC engine resident: queue the command word exactly as the
+            // SGB BIOS SOUND handler forms it (program.rom $00:C554) — command =
+            // (Music Score Code | effect_a<<8), data = (effect_b | attr<<8) — and
+            // let nspc_flush deliver it with the engine's echo-ack handshake.
+            // `effect_bank` carries the Music Score Code (Pan Docs "SOUND" byte 4;
+            // sgb-music-test `PlaySPC: SOUND 0,0,0,1`).
+            self.nspc_cmd = [s.effect_bank, s.effect_a, s.effect_b, s.attenuation];
+            self.nspc_pending = true;
+            return;
+        }
         let trig = if s.attenuation != 0 { s.attenuation } else { 1 };
         let _ = self
             .cpu
@@ -201,12 +246,31 @@ impl SgbCoprocessor {
     /// pair) and point the SPC700 at the first load address. Same shape as the
     /// built-in `SgbApu` uploader, so a `SOU_TRN` game driver runs identically.
     fn upload_transfer(&mut self, data: &[u8]) {
+        let resident = self.nspc_resident;
+        if resident {
+            let dst = u16::from_le_bytes([*data.get(2).unwrap_or(&0), *data.get(3).unwrap_or(&0)]);
+            self.dbg_soutrn_dest = dst;
+            self.dbg_soutrn_len = data.len() as u32;
+            self.dbg_soutrn_nonzero = data.iter().filter(|&&b| b != 0).count() as u32;
+            for (i, slot) in self.dbg_soutrn_head.iter_mut().enumerate() {
+                *slot = *data.get(i).unwrap_or(&0);
+            }
+            // Dev: dump each captured SBN to `$SLOPGB_DUMP_SOUTRN.<n>` for offline
+            // N-SPC reverse-engineering. Off unless the env var is set.
+            if let Some(path) = std::env::var_os("SLOPGB_DUMP_SOUTRN") {
+                let p = format!("{}.{}", path.to_string_lossy(), self.dbg_soutrn);
+                let _ = std::fs::write(&p, data);
+            }
+        }
         let spc = self.spc.get_mut();
         let mut off = 0usize;
         let mut entry = None;
         while off + 4 <= data.len() {
-            let dest = u16::from_le_bytes([data[off], data[off + 1]]);
-            let len = usize::from(u16::from_le_bytes([data[off + 2], data[off + 3]]));
+            // SBN / SNES APU block header is `[u16 len, u16 dest]` (SBN2SPC;
+            // the SGB loader at program.rom $00:AC6C reads len into $9C/$9D and
+            // dest into $9E/$9F) — length first, destination second.
+            let len = usize::from(u16::from_le_bytes([data[off], data[off + 1]]));
+            let dest = u16::from_le_bytes([data[off + 2], data[off + 3]]);
             off += 4;
             if len == 0 || off + len > data.len() {
                 break;
@@ -215,8 +279,14 @@ impl SgbCoprocessor {
             entry.get_or_insert(dest);
             off += len;
         }
+        // With the real N-SPC engine resident, SOU_TRN carries only song data
+        // (loaded to $2B00) for the already-running engine — re-entering its PC
+        // would restart the chip and drop the driver state. Only a self-uploaded
+        // driver (clean-room path) owns the entry point.
         if let Some(e) = entry {
-            let _ = spc.set_pc(u32::from(e));
+            if !resident {
+                let _ = spc.set_pc(u32::from(e));
+            }
         }
     }
 }

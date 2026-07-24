@@ -281,6 +281,18 @@ the frontend surface a plugin's contributed flags. Optional and metadata-only: a
 or empty manifest parses to `None` ("undeclared"), and its absence never fails a load —
 so it is golden-neutral. Proof: `msu1_roundtrip::manifest_self_describes_the_chip_and_its_flag`.
 
+**Orchestration + snapshots (ABI v5, v7).** The exports the SGB coprocessor uses
+to install firmware into and snapshot its chips: `set_pc` / `write_ram` /
+`read_ram` (v5 — memory peek/poke; reads ride the emit channel as
+`EMIT_KIND_RAM`) and `save_state` / `load_state` (v5 — opaque chip state as
+`EMIT_KIND_STATE`). An audio chip additionally exports `dump_spc` (v7): it
+assembles a `.spc` (SPC700 Sound File) from its ARAM + registers + DSP and ships
+it over the emit channel under **its own `EMIT_KIND_SPC`** — a distinct kind from
+the save-state so the payload's intent is unambiguous. `LoadedCoprocessor::
+dump_spc` decodes that kind; the SGB coprocessor surfaces it as `export_spc` for
+the frontend's "Export SPC" (see
+[`docs/hardware-state/sgb-audio.md`](../hardware-state/sgb-audio.md)).
+
 ## Golden-safe rules
 
 The one invariant this project guards is that no UI/extension feature perturbs

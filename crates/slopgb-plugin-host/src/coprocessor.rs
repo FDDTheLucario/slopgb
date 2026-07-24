@@ -3,7 +3,8 @@
 //! chip's internal RAM stays inside the sandbox; only the comm ports cross.
 
 use slopgb_plugin_api::{
-    ABI_VERSION, Capabilities, EMIT_KIND_MANIFEST, EMIT_KIND_PCM, EMIT_KIND_RAM, EMIT_KIND_STATE,
+    ABI_VERSION, Capabilities, EMIT_KIND_MANIFEST, EMIT_KIND_PCM, EMIT_KIND_RAM, EMIT_KIND_SPC,
+    EMIT_KIND_STATE,
 };
 use wasmi::{Engine, Module, Store, TypedFunc};
 
@@ -24,6 +25,7 @@ pub struct LoadedCoprocessor {
     read_ram: TypedFunc<(i32, i32), i32>,
     save_state: TypedFunc<(), i32>,
     load_state: TypedFunc<(), ()>,
+    dump_spc: TypedFunc<(), i32>,
     /// Optional (v6): a chip that predates the manifest export, or a hand-rolled
     /// module without one, simply reports no manifest.
     manifest: Option<TypedFunc<(), i32>>,
@@ -98,6 +100,9 @@ impl LoadedCoprocessor {
         let load_state = instance
             .get_typed_func::<(), ()>(&store, "slopgb_load_state")
             .map_err(|_| LoadError::MissingExport("slopgb_load_state"))?;
+        let dump_spc = instance
+            .get_typed_func::<(), i32>(&store, "slopgb_dump_spc")
+            .map_err(|_| LoadError::MissingExport("slopgb_dump_spc"))?;
         // Optional: manifest is metadata, so its absence never fails a load.
         let manifest = instance
             .get_typed_func::<(), i32>(&store, "slopgb_manifest")
@@ -115,6 +120,7 @@ impl LoadedCoprocessor {
             read_ram,
             save_state,
             load_state,
+            dump_spc,
             manifest,
         })
     }
@@ -240,6 +246,17 @@ impl LoadedCoprocessor {
         self.save_state.call(&mut self.store, ())?;
         Ok(match self.store.data_mut().emitted.take() {
             Some((EMIT_KIND_STATE, buf)) => buf,
+            _ => Vec::new(),
+        })
+    }
+
+    /// Ask the chip for a `.spc` snapshot (an audio chip assembles the SPC700
+    /// file from its ARAM + registers + DSP; a non-audio chip returns empty).
+    pub fn dump_spc(&mut self) -> Result<Vec<u8>, LoadError> {
+        self.store.data_mut().emitted = None;
+        self.dump_spc.call(&mut self.store, ())?;
+        Ok(match self.store.data_mut().emitted.take() {
+            Some((EMIT_KIND_SPC, buf)) => buf,
             _ => Vec::new(),
         })
     }

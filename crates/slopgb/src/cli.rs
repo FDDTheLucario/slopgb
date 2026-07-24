@@ -25,6 +25,17 @@ OPTIONS:
                       only). Feeds the SGB audio driver; the Nintendo border and
                       title palette are NOT extracted (slopgb never runs the SNES
                       CPU) — the default border stands. Also via SLOPGB_SGB_BIOS
+    --sf2 <PATH>      Supply the SGB N-SPC sample bank from a standard
+                      SoundFont-2 file, overriding the ROM's own samples. With
+                      no --sgb-bios this also forces the clean-room N-SPC
+                      engine (no ROM engine code is available). Composes with
+                      --sgb-bios (ROM engine + SF2 samples). The converted bank
+                      is cached next to the SF2 as <hash>.smpl, keyed on the
+                      soundfont contents; a cache hit needs no plugin. On a
+                      cache miss the import runs via sf2.wasm from the
+                      plugins dir (see --plugins) — if it's missing, no SF2
+                      samples load. Also via
+                      SLOPGB_SF2
     --mcp-port <N>    Host an MCP server on 127.0.0.1:<N> so an LLM agent can
                       drive the debugger (disassemble/peek/cdl/vram/breakpoint/
                       registers/expr). Also via SLOPGB_MCP_PORT=<N>
@@ -73,6 +84,12 @@ pub(crate) struct Options {
     /// image). `--sgb-bios <path>`; falls back to `SLOPGB_SGB_BIOS` (resolved in
     /// `main`). `None` = SGB audio silent for the default bank, default border.
     pub(crate) sgb_bios: Option<PathBuf>,
+    /// Optional SF2 soundfont supplying the SGB N-SPC sample bank (`--sf2
+    /// <path>`; falls back to `SLOPGB_SF2` (resolved in `main`). `None` = the
+    /// ROM's own samples. Overrides the ROM's `$4B00`/`$4C30`/`$4DB0` sample
+    /// regions when present; with no `--sgb-bios` it also forces the
+    /// clean-room N-SPC engine (there is no ROM engine to fall back to).
+    pub(crate) sf2: Option<PathBuf>,
     /// Port for the opt-in MCP debug server (`--mcp-port`; falls back to
     /// `SLOPGB_MCP_PORT`, resolved in `main`). `None` = no server (default).
     pub(crate) mcp_port: Option<u16>,
@@ -106,6 +123,7 @@ impl Options {
         let mut mute = false;
         let mut boot = None;
         let mut sgb_bios = None;
+        let mut sf2 = None;
         let mut mcp_port = None;
         let mut plugins_dir = None;
         let mut msu1 = None;
@@ -121,6 +139,10 @@ impl Options {
                 "--sgb-bios" => {
                     let v = args.next().ok_or("--sgb-bios requires a path")?;
                     sgb_bios = Some(PathBuf::from(v));
+                }
+                "--sf2" => {
+                    let v = args.next().ok_or("--sf2 requires a path")?;
+                    sf2 = Some(PathBuf::from(v));
                 }
                 "--mcp-port" => {
                     let v = args.next().ok_or("--mcp-port requires a port number")?;
@@ -171,6 +193,7 @@ impl Options {
             mute,
             boot,
             sgb_bios,
+            sf2,
             mcp_port,
             plugins_dir,
             msu1,

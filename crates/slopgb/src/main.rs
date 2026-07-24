@@ -67,7 +67,7 @@ use winit::event_loop::EventLoop;
 use winit::keyboard::{KeyCode, ModifiersState};
 use winit::window::Window;
 
-use app_boot::{load_msu1, load_plugins, resolve_boot_rom, resolve_sgb_bios};
+use app_boot::{load_msu1, load_plugins, resolve_boot_rom, resolve_sf2, resolve_sgb_bios};
 use app_draw::blank_frame;
 pub(crate) use app_keys::dialog_key_from;
 use audio::AudioOutput;
@@ -112,6 +112,9 @@ fn main() {
     // Optional SGB BIOS (--sgb-bios / SLOPGB_SGB_BIOS): feeds the SGB audio path
     // on every ROM (re)load; border/palette are not extracted (HLE).
     let sgb_bios = resolve_sgb_bios(&opts);
+    // Optional SF2 soundfont (--sf2 / SLOPGB_SF2): overrides the SGB N-SPC
+    // sample bank on every ROM (re)load, independent of the engine choice.
+    let sf2 = resolve_sf2(&opts);
     // Effective emulated-system choice for this load: an explicit CLI `--model`
     // wins, else the persisted Options choice (so a saved SGB / "prefer SGB" /
     // border selection is honored at startup, not just after opening Options).
@@ -141,6 +144,7 @@ fn main() {
         ),
     };
     session.set_sgb_bios(sgb_bios.clone());
+    session.set_sf2(sf2.clone());
     // The plugins dir (and the SGB coprocessor it auto-loads) is applied in
     // `App::new`, from the CLI/env/persisted dir it reconciles into `settings`.
     let event_loop = match EventLoop::new() {
@@ -150,7 +154,7 @@ fn main() {
             process::exit(1);
         }
     };
-    let mut app = App::new(opts, session, rom_loaded, boot_rom, sgb_bios);
+    let mut app = App::new(opts, session, rom_loaded, boot_rom, sgb_bios, sf2);
     if let Err(e) = event_loop.run_app(&mut app) {
         eprintln!("error: event loop failed: {e}");
         process::exit(1);
@@ -204,6 +208,9 @@ struct App {
     /// Optional SGB BIOS bytes (from `--sgb-bios`/`SLOPGB_SGB_BIOS`), re-applied
     /// to the fresh machine on every ROM (re)load. `None` = no SGB BIOS.
     sgb_bios: Option<Vec<u8>>,
+    /// Optional SF2 soundfont path (from `--sf2`/`SLOPGB_SF2`), re-applied to the
+    /// fresh machine on every ROM (re)load. `None` = the ROM's own N-SPC samples.
+    sf2: Option<PathBuf>,
     session: Session,
     /// Whether a real ROM is loaded. `false` at a no-ROM (bgb-style) startup:
     /// the blank machine is frozen at power-on (emulation gated off) and the LCD
@@ -403,6 +410,7 @@ impl App {
         rom_loaded: bool,
         boot_rom: Option<Vec<u8>>,
         sgb_bios: Option<Vec<u8>>,
+        sf2: Option<PathBuf>,
     ) -> Self {
         let muted = opts.mute;
         let scale = opts.scale;
@@ -450,6 +458,7 @@ impl App {
             opts,
             boot_rom,
             sgb_bios,
+            sf2,
             session,
             rom_loaded,
             blank_frame,
@@ -710,6 +719,7 @@ impl App {
         match Session::load(path, self.settings.model, &self.boot_spec(), ram_init) {
             Ok(mut new) => {
                 new.set_sgb_bios(self.sgb_bios.clone());
+                new.set_sf2(self.sf2.clone());
                 // Carry the live plugins dir (seeded from --plugins at startup,
                 // possibly re-pointed via the UI) so the SGB coprocessor plugin
                 // re-injects into the fresh machine.

@@ -138,6 +138,9 @@ pub enum Action {
     /// Save the current frame to a BMP (bgb's main-menu "Save screenshot").
     /// Menu-only — no key binds it.
     SaveScreenshot,
+    /// Export the SGB audio chip's state as a `.spc` file (main menu → "Export
+    /// SPC"). Menu-only; a no-op with a log off SGB / with no SPC700.
+    ExportSpc,
     /// Dump the whole 64 KiB address space to a file (debugger File →
     /// "save memory_dump..."). Menu-only.
     DbgSaveMemDump,

@@ -18,6 +18,10 @@ pub const EMIT_KIND_RAM: i32 = 4;
 /// self-describing manifest (line-based UTF-8 text, see [`Coprocessor::MANIFEST`])
 /// back to the host.
 pub const EMIT_KIND_MANIFEST: i32 = 5;
+/// The [`crate::__emit`] `kind` `slopgb_dump_spc` uses to push an assembled
+/// `.spc` (SPC700 Sound File) back to the host — distinct from the opaque
+/// save-state ([`EMIT_KIND_STATE`]) so the payload's intent is self-documenting.
+pub const EMIT_KIND_SPC: i32 = 6;
 
 /// Read the host→guest **mailbox** — the bytes a game (or the frontend) last
 /// deposited for this coprocessor, e.g. a streaming-audio play-request written
@@ -146,6 +150,13 @@ pub trait Coprocessor {
     /// Default: ignored.
     fn load_state(&mut self, bytes: &[u8]) {
         let _ = bytes;
+    }
+
+    /// Assemble a `.spc` (SPC700 Sound File) snapshot of the chip, if it is an
+    /// audio chip — ARAM + CPU registers + DSP registers. Default: none (a
+    /// non-audio subsystem returns empty).
+    fn dump_spc(&self) -> Vec<u8> {
+        Vec::new()
     }
 }
 
@@ -287,6 +298,20 @@ macro_rules! slopgb_coprocessor_plugin {
         pub extern "C" fn slopgb_load_state() {
             let bytes = $crate::recv_mailbox();
             __SLOPGB_COP.with_borrow_mut(|c| $crate::Coprocessor::load_state(c, &bytes));
+        }
+
+        /// Emit a `.spc` snapshot to the host ([`EMIT_KIND_SPC`]); returns the
+        /// byte count (0 for a non-audio chip).
+        ///
+        /// [`EMIT_KIND_SPC`]: $crate::EMIT_KIND_SPC
+        #[allow(unsafe_code)]
+        #[unsafe(no_mangle)]
+        pub extern "C" fn slopgb_dump_spc() -> i32 {
+            __SLOPGB_COP.with_borrow(|c| {
+                let bytes = $crate::Coprocessor::dump_spc(c);
+                $crate::__emit($crate::EMIT_KIND_SPC, &bytes);
+                bytes.len() as i32
+            })
         }
     };
 }

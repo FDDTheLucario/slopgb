@@ -203,8 +203,16 @@ impl App {
             // pointer, so it can extend past the game window instead of clipping.
             if let Some(win) = self.window.clone() {
                 let theme = self.settings.theme.resolve(&self.custom_themes);
-                self.menu_popup =
-                    MenuPopup::open(event_loop, &win, (px, py), !self.muted, self.paused, theme);
+                let can_export_spc = self.session.gb.can_export_spc();
+                self.menu_popup = MenuPopup::open(
+                    event_loop,
+                    &win,
+                    (px, py),
+                    !self.muted,
+                    self.paused,
+                    can_export_spc,
+                    theme,
+                );
             }
         }
     }

@@ -50,13 +50,13 @@ use slopgb_core::sgb::{AudioCoprocessor, SgbCommandSource};
 use slopgb_core::{Reader, SgbFlags, SgbSound, StateError, Writer};
 use slopgb_plugin_host::{LoadError, LoadedCoprocessor};
 
-mod clocking;
 mod commands;
 mod dma;
-mod firmware;
 mod perf;
+mod samples;
 mod state;
 
+pub use samples::{Engine, SampleRegions, parse_sgb_apu_blocks};
 use state::InertCoprocessor;
 
 #[cfg(test)]
@@ -75,9 +75,23 @@ const CPU_NUM: i64 = 5;
 const CPU_DEN: i64 = 8;
 /// The S-DSP emits one stereo sample every 32 SPC700 cycles → 32 kHz.
 const DSP_RATE: f64 = 32_000.0;
-/// Full-scale S-DSP output (±32768) → mix amplitude; half scale, matching the
-/// built-in path so an injected coprocessor is no louder than the default.
-const MIX_SCALE: f32 = 0.5 / 32768.0;
+/// Full-scale S-DSP output (±32768) → mix amplitude. Tuned above unity (1.2):
+/// real N-SPC songs mix conservatively (master volume + few active voices), so
+/// their DSP output sits well below full scale and needs lifting to match a
+/// normal GB game's loudness. >1.0 only clips a song whose DSP output nears full
+/// scale, which is rare. ponytail: fixed loudness; expose a per-game knob if one
+/// clips or still reads quiet.
+const MIX_SCALE: f32 = 1.2 / 32768.0;
+/// The GB APU feed into the SGB mix. Real SGB routes the Game Boy audio through
+/// the SNES mixer below the SNES APU's own level, so the enhanced music sits on
+/// top of the GB channels rather than under them. ponytail: fixed ratio; a
+/// per-game knob if one needs a different balance.
+const GB_GAIN: f32 = 0.6;
+/// The clean-room N-SPC music engine (original SPC700 code, built offline from a
+/// format spec by a walled-off implementer — see `nspc/README.md`; not derived
+/// from any SGB ROM). Uploaded to APU $0400 over the ROM's own engine, driving
+/// the ROM-supplied samples. `nspc/driver.bin` (WLA-DX; `make` in `nspc/`).
+pub const NSPC_ENGINE: &[u8] = include_bytes!("../nspc/driver.bin");
 /// GB T-cycles of emulation accumulated before the two plugins are pumped once
 /// (mediated + clocked + drained). Batching keeps the per-frame wasm-crossing
 /// count low (a frame is ~17 chunks) while the comm-port handshake still
@@ -256,6 +270,12 @@ const MB_NOTE: u16 = 0x0200;
 const SPC_PROG_ORG: u16 = 0x0400;
 const SPC_DIR_ORG: u16 = 0x0200;
 const SPC_BRR_ORG: u16 = 0x0210;
+/// SPC700 cycles (~1.024 MHz) to let a resident N-SPC engine run past a play
+/// command before grabbing the [from-start snapshot](SgbCoprocessor::song_start_spc)
+/// — about one 60 Hz frame, enough for the driver's song-init to finish (timers
+/// enabled, sequencer pointer reset to the score top) so the captured `.spc` is
+/// self-sustaining, while losing only an imperceptible sliver of the first note.
+const SONG_START_CAPTURE_DELAY: u64 = 17_000;
 
 /// The clean-room 65C816 shim (emulation mode, 8-bit). It watches the
 /// SNES-RAM mailbox `[$0200,$0201]` and, when the trigger is armed, copies it
@@ -436,9 +456,791 @@ pub struct SgbCoprocessor {
     /// completed-frame count + the guest's last INIDISP write.
     frames_done: u64,
     last_inidisp: u8,
+    /// The real SGB resident sound driver (N-SPC engine + soundfont) was
+    /// installed from a user-supplied `--sgb-bios`. When set, SGB SOUND/SOU_TRN
+    /// feed that resident engine over the plugin comm ports instead of driving
+    /// the clean-room square driver. Default false = clean-room behavior.
+    nspc_resident: bool,
+    /// A pending N-SPC command word `[cmd_lo, cmd_hi, data_lo, data_hi]` = ports
+    /// 0/1 (command) + 2/3 (data), set by a SOUND packet, delivered by
+    /// [`Self::nspc_flush`] with the SGB BIOS echo-ack handshake.
+    nspc_cmd: [u8; 4],
+    /// The last command word actually sent to the engine — the ack shadow the
+    /// handshake compares the engine's echo against (BIOS `$0344`/`$0346`).
+    nspc_shadow: [u8; 4],
+    /// A SOUND command is queued in `nspc_cmd` and not yet acked.
+    nspc_pending: bool,
+    /// Diagnostics (`debug_status`): how many SOUND / SOU_TRN / DATA_SND commands
+    /// have been drained from the core, and the last SOUND packet's four bytes.
+    dbg_sound: u32,
+    dbg_soutrn: u32,
+    dbg_datasnd: u32,
+    dbg_last_sound: [u8; 4],
+    /// First block dest + total bytes of the last SOU_TRN upload, and the loudest
+    /// S-DSP sample amplitude mixed so far (0.0 = the engine produced only
+    /// silence) — `debug_status` diagnostics for the N-SPC audio path.
+    dbg_soutrn_dest: u16,
+    dbg_soutrn_len: u32,
+    dbg_soutrn_nonzero: u32,
+    dbg_soutrn_head: [u8; 16],
+    dbg_pcm_peak: f32,
+    /// A self-sustaining `.spc` grabbed shortly after the resident engine
+    /// (re)started a song, so an export reproduces that song from its opening
+    /// rather than from the instant the user clicks. `None` until a recognized
+    /// resident engine reaches a play command — which doubles as the export
+    /// gate ([`Self::can_export_spc`]): the built-in square driver and any
+    /// game-uploaded foreign engine never fill it, so they stay un-exportable
+    /// (the menu greys the row) instead of yielding a broken mid-song dump.
+    song_start_spc: Option<Vec<u8>>,
+    /// When armed (a play command just landed), the `spc_pos` target at which
+    /// [`Self::flush`] grabs [`Self::song_start_spc`].
+    capture_at: Option<u64>,
 }
 
 impl SgbCoprocessor {
+    /// Load the two coprocessor plugins from `dir` (`spc700.wasm` + `w65c816.wasm`)
+    /// and build the backend at `output_rate` Hz. Errors (missing / bad wasm) are
+    /// returned so the frontend can log them and fall back to the built-in
+    /// `SgbApu`.
+    pub fn load(dir: &Path, output_rate: u32) -> Result<Self, String> {
+        let spc_path = dir.join(SPC_WASM);
+        let cpu_path = dir.join(CPU_WASM);
+        let spc_bytes = fs::read(&spc_path)
+            .map_err(|e| format!("cannot read SGB plugin '{}': {e}", spc_path.display()))?;
+        let cpu_bytes = fs::read(&cpu_path)
+            .map_err(|e| format!("cannot read SGB plugin '{}': {e}", cpu_path.display()))?;
+        // The PPU plugin is optional: absent keeps the audio-only backend.
+        let ppu_bytes = fs::read(dir.join(PPU_WASM)).ok();
+        Self::from_wasm_full(&spc_bytes, &cpu_bytes, ppu_bytes.as_deref(), output_rate)
+            .map_err(|e| format!("cannot load SGB coprocessor plugins: {e}"))
+    }
+
+    /// Build the backend from the two plugins' wasm bytes: instantiate, reset,
+    /// install the resident clean-room firmware, and point both chips at their
+    /// entry. The bytes are kept for [`Self::clone_box`].
+    pub fn from_wasm(
+        spc_bytes: &[u8],
+        cpu_bytes: &[u8],
+        output_rate: u32,
+    ) -> Result<Self, LoadError> {
+        Self::from_wasm_full(spc_bytes, cpu_bytes, None, output_rate)
+    }
+
+    /// [`Self::from_wasm`] plus the optional SNES-PPU plugin.
+    pub fn from_wasm_full(
+        spc_bytes: &[u8],
+        cpu_bytes: &[u8],
+        ppu_bytes: Option<&[u8]>,
+        output_rate: u32,
+    ) -> Result<Self, LoadError> {
+        let mut spc = LoadedCoprocessor::load(spc_bytes)?;
+        let mut cpu = LoadedCoprocessor::load(cpu_bytes)?;
+        spc.reset()?;
+        cpu.reset()?;
+        let ppu = match ppu_bytes {
+            Some(b) => {
+                let mut p = LoadedCoprocessor::load(b)?;
+                p.reset()?;
+                Some(RefCell::new(p))
+            }
+            None => None,
+        };
+        let rate = output_rate.max(1);
+        let mut me = SgbCoprocessor {
+            spc: RefCell::new(spc),
+            cpu: RefCell::new(cpu),
+            spc_wasm: spc_bytes.to_vec(),
+            cpu_wasm: cpu_bytes.to_vec(),
+            spc_target: 0,
+            cpu_target: 0,
+            spc_pos: 0,
+            cpu_pos: 0,
+            char_write_row: 0,
+            char_queue: VecDeque::new(),
+            spc_acc: 0,
+            cpu_acc: 0,
+            pending_gb: 0,
+            to_spc: [0; N_PORTS],
+            src: VecDeque::new(),
+            src_acc: 0.0,
+            cur: (0, 0),
+            samp_acc: 0.0,
+            cycles_per_sample: f64::from(GB_CLOCK_HZ) / f64::from(rate),
+            out_rate: rate,
+            out: Vec::new(),
+            max_out: rate as usize,
+            poll_ctr: 0,
+            sou_trn_sig: 0,
+            data_trn_sig: 0,
+            data_trn_seq_seen: None,
+            jump: None,
+            pending_packets: VecDeque::new(),
+            pads_taken: false,
+            pads_shadow: [0xFF; 4],
+            feed_queue: VecDeque::new(),
+            feed_hold: 0,
+            gb_pos: 0,
+            pending_trn: VecDeque::new(),
+            trn_flip: false,
+            nmitimen: 0,
+            in_vblank: false,
+            dma_regs: [[0; 7]; 8],
+            wmadd: 0,
+            input: (0x0F, 0x0F),
+            joy_busy: false,
+            ppu,
+            ppu_wasm: ppu_bytes.map(<[u8]>::to_vec),
+            ppu_row: 0,
+            frame_ready: false,
+            snes_live: false,
+            frames_done: 0,
+            last_inidisp: 0,
+            nspc_resident: false,
+            nspc_cmd: [0; 4],
+            nspc_shadow: [0; 4],
+            nspc_pending: false,
+            dbg_sound: 0,
+            dbg_soutrn: 0,
+            dbg_datasnd: 0,
+            dbg_last_sound: [0; 4],
+            dbg_soutrn_dest: 0,
+            dbg_soutrn_len: 0,
+            dbg_soutrn_nonzero: 0,
+            dbg_soutrn_head: [0; 16],
+            dbg_pcm_peak: 0.0,
+            song_start_spc: None,
+            capture_at: None,
+        };
+        me.install_firmware()?;
+        Ok(me)
+    }
+
+    /// Install the resident clean-room firmware into both chips: the 65C816 shim
+    /// into SNES RAM (+ reset vector + entry PC), and the SPC700 driver + one-
+    /// entry sample directory + a square BRR sample into APU RAM (+ entry PC). A
+    /// failure aborts the load, so `from_wasm` reports it and the caller falls
+    /// back to the built-in `SgbApu` rather than running a chip with no firmware.
+    fn install_firmware(&mut self) -> Result<(), LoadError> {
+        {
+            let cpu = self.cpu.get_mut();
+            // Model the entire unshipped BIOS ROM as inert returns: an RTS
+            // sled across the whole program area, so an uploaded program
+            // JSR-ing any service entry slopgb has not (yet) pinned returns
+            // harmlessly instead of executing zeroes. Specific resident
+            // routines overwrite their spots below.
+            cpu.write_ram(0x8000, &[0x60u8; 0x8000])?;
+            // Keep the documented revision byte: $FFDB = 0 selects the first
+            // entry of each BIOS service pair (sgb-arcade-takeover.md).
+            cpu.write_ram(0xFFDB, &[0x00])?;
+            cpu.write_ram(u32::from(SHIM_ORG), &SNES_SHIM)?;
+            cpu.write_ram(
+                u32::from(RESET_VEC),
+                &[SHIM_ORG as u8, (SHIM_ORG >> 8) as u8],
+            )?;
+            cpu.set_pc(u32::from(SHIM_ORG))?;
+            // Resident BIOS service entries (JMP thunks; the entries sit 3
+            // bytes apart, too tight for inline bodies). Opcodes per the WDC
+            // datasheet: 4C = JMP abs, AD = LDA abs, F0 = BEQ, 20 = JSR,
+            // 60 = RTS.
+            for entry in BIOS_MAIN_ENTRIES {
+                cpu.write_ram(
+                    entry,
+                    &[0x4C, BIOS_MAIN_BODY as u8, (BIOS_MAIN_BODY >> 8) as u8],
+                )?;
+            }
+            for entry in BIOS_AUX_ENTRIES {
+                cpu.write_ram(
+                    entry,
+                    &[0x4C, BIOS_AUX_BODY as u8, (BIOS_AUX_BODY >> 8) as u8],
+                )?;
+            }
+            // Main body (see BIOS_MAIN_BODY): consume the delivery mailbox
+            // with long addressing (caller's DBR unknown), then the guarded
+            // hook call. PLP precedes the JSR so the hook sees exactly the
+            // caller's two return addresses (its PLA PLA / RTS fixup).
+            let hook_lo = BIOS_HOOK_SLOT as u8;
+            let hook_hi = (BIOS_HOOK_SLOT >> 8) as u8;
+            let mb = |off: u32| {
+                let a = BIOS_DELIVERY + off;
+                [a as u8, (a >> 8) as u8, (a >> 16) as u8]
+            };
+            let [d0, d1, d2] = mb(0);
+            let [c0, c1, c2] = mb(0x10);
+            let [p0, p1, p2] = mb(0x11);
+            let [q0, q1, q2] = mb(0x12);
+            let [f0, f1, f2] = mb(0x16);
+            cpu.write_ram(
+                BIOS_MAIN_BODY,
+                &[
+                    0x08, // BE80 PHP
+                    0xE2,
+                    0x30, // BE81 SEP #$30
+                    0xAF,
+                    f0,
+                    f1,
+                    f2, // BE83 LDA long flag
+                    // No delivery pending: skip the publish, still call the
+                    // hook — the BIOS invokes it every service loop, and
+                    // the pilot's hook re-ACKs on stale $02C2 (its own
+                    // pacing protocol with the GB).
+                    0xF0,
+                    0x2B, // BE87 BEQ hookcall (BEB4)
+                    0xA2,
+                    0x0F, // BE89 LDX #$0F
+                    0xBF,
+                    d0,
+                    d1,
+                    d2, // BE8B loop: LDA long packet,X
+                    0x9F,
+                    BIOS_PKT_BUF as u8,
+                    (BIOS_PKT_BUF >> 8) as u8,
+                    0x00, // BE8F STA long $0600,X
+                    0xCA, // BE93 DEX
+                    0x10,
+                    0xF5, // BE94 BPL loop
+                    0xAF,
+                    c0,
+                    c1,
+                    c2, // BE96 LDA long cmd
+                    0x8F,
+                    BIOS_LAST_CMD as u8,
+                    (BIOS_LAST_CMD >> 8) as u8,
+                    0x00, // BE9A STA long $02C2
+                    0xAF,
+                    p0,
+                    p1,
+                    p2, // BE9E LDA long ptr lo
+                    0x8F,
+                    BIOS_TRN_PTR as u8,
+                    (BIOS_TRN_PTR >> 8) as u8,
+                    0x00, // BEA2 STA long $0284
+                    0xAF,
+                    q0,
+                    q1,
+                    q2, // BEA6 LDA long ptr hi
+                    0x8F,
+                    (BIOS_TRN_PTR + 1) as u8,
+                    ((BIOS_TRN_PTR + 1) >> 8) as u8,
+                    0x00, // BEAA
+                    0xA9,
+                    0x00, // BEAE LDA #$00
+                    0x8F,
+                    f0,
+                    f1,
+                    f2, // BEB0 STA long flag (consumed)
+                    0xAF,
+                    hook_lo,
+                    hook_hi,
+                    0x00, // BEB4 LDA long $0800 (hook?)
+                    0xF0,
+                    0x05, // BEB8 BEQ exit (BEBF: the PLP)
+                    0x28, // BEBA PLP
+                    0x20,
+                    hook_lo,
+                    hook_hi, // BEBB JSR $0800
+                    0x60,    // BEBE RTS
+                    0x28,    // BEBF exit: PLP
+                    0x60,    // BEC0 RTS
+                ],
+            )?;
+            // Aux body (see BIOS_AUX_BODY): PHP / SEP #$20 /
+            // wait: LDA $4210 / BPL wait / PLP / RTS — the $4210 reads ride
+            // the host-fed RDNMI shadow (set at every vblank edge,
+            // read-clear guest-side), so the wait spans to the next edge.
+            cpu.write_ram(
+                BIOS_AUX_BODY,
+                &[
+                    0x08, // PHP (caller's register widths preserved)
+                    0xE2, 0x20, // SEP #$20
+                    0xAD, 0x10, 0x42, // wait: LDA $4210 (RDNMI)
+                    0x10, 0xFB, // BPL wait
+                    0x28, // PLP
+                    0x60, // RTS
+                ],
+            )?;
+            // The resident NMI handler + both CPU-mode NMI vectors.
+            cpu.write_ram(
+                NMI_HANDLER,
+                &[
+                    0x48, // PHA (interrupted width)
+                    0x08, // PHP
+                    0xE2,
+                    0x20, // SEP #$20 (8-bit A for the guard)
+                    0xAF,
+                    NMI_RAM_VEC,
+                    0x00,
+                    0x00, // LDA $0000BB (long)
+                    0x0F,
+                    NMI_RAM_VEC + 1,
+                    0x00,
+                    0x00, // ORA $0000BC
+                    0x0F,
+                    NMI_RAM_VEC + 2,
+                    0x00,
+                    0x00, // ORA $0000BD
+                    0xF0,
+                    0x05, // BEQ +5 -> the empty-vector PLP/PLA/RTI
+                    0x28, // PLP (width back to the interrupted M)
+                    0x68, // PLA (original A restored for the hook)
+                    0xDC,
+                    NMI_RAM_VEC,
+                    0x00, // JML [$00BB]
+                    0x28, // PLP
+                    0x68, // PLA
+                    0x40, // RTI
+                ],
+            )?;
+            let nmi_vec = [NMI_HANDLER as u8, (NMI_HANDLER >> 8) as u8];
+            cpu.write_ram(0xFFEA, &nmi_vec)?; // native NMI vector
+            cpu.write_ram(0xFFFA, &nmi_vec)?; // emulation NMI vector
+            // Break/interrupt vectors -> the resident RTI (see RTI_STUB).
+            cpu.write_ram(RTI_STUB, &[0x40])?;
+            let rti = [RTI_STUB as u8, (RTI_STUB >> 8) as u8];
+            cpu.write_ram(0xFFE4, &rti)?; // native COP
+            cpu.write_ram(0xFFE6, &rti)?; // native BRK
+            cpu.write_ram(0xFFEE, &rti)?; // native IRQ
+            cpu.write_ram(0xFFF4, &rti)?; // emulation COP
+            cpu.write_ram(0xFFFE, &rti)?; // emulation IRQ/BRK
+            // RDNMI reads the CPU version bits from power-on (fullsnes 4210h).
+            cpu.write_ram(HW_SHADOW + SH_RDNMI, &[0x02])?;
+        }
+        {
+            let (prog, dir, brr) = spc_firmware();
+            let spc = self.spc.get_mut();
+            spc.write_ram(u32::from(SPC_PROG_ORG), &prog)?;
+            spc.write_ram(u32::from(SPC_DIR_ORG), &dir)?;
+            spc.write_ram(u32::from(SPC_BRR_ORG), &brr)?;
+            // No set_pc: the SPC700 boots its own IPL ROM (the chip
+            // ships the documented 64-byte boot loader at $FFC0). The
+            // pilot's loader speaks exactly the standard uploader protocol
+            // ($2142/43 dest, $2141 nonzero cmd = its length bytes ORed,
+            // kick chain, terminator with cmd 0 + entry dest) — and its
+            // own entry-jumped APU driver re-announces $AA/$BB to serve
+            // the next upload round. The square driver above is entered
+            // host-side on a SOUND command instead (see apply_sound).
+        }
+        Ok(())
+    }
+
+    // -- Clocking -----------------------------------------------------------
+
+    fn clock(&mut self, gb_cycles: u64) {
+        self.pending_gb += gb_cycles;
+        while self.pending_gb >= FLUSH_CHUNK {
+            self.pending_gb -= FLUSH_CHUNK;
+            self.flush(FLUSH_CHUNK);
+        }
+    }
+
+    /// Pump both plugins once for a `span` of GB T-cycles: pump the ICD2
+    /// window (LCD-row shadow + packet deposit), mediate the comm ports
+    /// (65C816 → SPC700, then SPC700 → 65C816), advance each chip to its cycle
+    /// target, pull the ICD2 pad latches back, drain the S-DSP PCM, and emit
+    /// `span`'s worth of output samples.
+    fn flush(&mut self, span: u64) {
+        let mut tp = perf::PerfTimer::start();
+        // ICD2, GB→SNES half: refresh the $6000 LCD-row shadow (fullsnes "SGB
+        // Port 6000h": character row 0-$11, $11 = last row or vblank) and
+        // deposit the next teed packet once the guest consumed the last one
+        // ($6002 clear — never overwrite an unread mailbox).
+        self.gb_pos = (self.gb_pos + span) % GB_FRAME_CYCLES;
+        let line = self.gb_pos / GB_LINE_CYCLES;
+        let row = ((line / 8) as u8).min(0x11);
+        // Drain the guest's captured MMIO writes from the last slice and
+        // apply the ones the clocking loop consumes (NMITIMEN for now; the
+        // PPU/DMA routing grows here).
+        let captured: Vec<(u16, u8)> = {
+            let mut cpu = self.cpu.borrow_mut();
+            // Two-phase drain: a 3-byte header probe reports the pending
+            // count without draining; a sized read drains exactly `pending`
+            // entries (clamped to full-window capacity).
+            let pending = match cpu.read_ram(HW_MMIO_RING, 3) {
+                Ok(h) if h.len() >= 2 => usize::from(h[0]) | usize::from(h[1]) << 8,
+                _ => 0,
+            };
+            let bulk = if pending > 0 {
+                let size = (3 + 3 * pending).min(3 + 3 * MMIO_RING_CAP);
+                cpu.read_ram(HW_MMIO_RING, size)
+            } else {
+                Ok(Vec::new())
+            };
+            match bulk {
+                Ok(buf) if buf.len() >= 3 => {
+                    let n = usize::from(buf[0]) | usize::from(buf[1]) << 8;
+                    if buf[2] != 0 {
+                        eprintln!("slopgb: SNES MMIO capture ring overflowed; writes dropped");
+                    }
+                    buf[3..]
+                        .chunks_exact(3)
+                        .take(n)
+                        .map(|e| (u16::from(e[0]) | u16::from(e[1]) << 8, e[2]))
+                        .collect()
+                }
+                _ => Vec::new(),
+            }
+        };
+        // Consecutive pure-PPU writes ($2100-$213F; the WMDATA quartet and
+        // the CPU I/O block are host-consumed) apply as one batched wasm
+        // call; any host-consumed register is an order barrier that flushes
+        // the run first, so the guest-observable sequence is unchanged.
+        let mut ppu_run: Vec<u8> = Vec::new();
+        for (addr, val) in captured {
+            if (0x2100..=0x213F).contains(&addr) {
+                if addr == 0x2100 {
+                    self.last_inidisp = val; // diagnostics (debug_status)
+                    // The display shows a picture: not force-blanked and
+                    // brightness above zero (fullsnes 2100h). Arms the
+                    // frame handoff — see `take_snes_frame`.
+                    if val & 0x80 == 0 && val & 0x0F != 0 {
+                        self.snes_live = true;
+                    }
+                }
+                if (0x2102..=0x2103).contains(&addr) && std::env::var_os("SLOPGB_OAMDBG").is_some()
+                {
+                    eprintln!("OAMREG {addr:04X}={val:02X}");
+                }
+                ppu_run.push((addr - 0x2100) as u8);
+                ppu_run.push(val);
+            } else {
+                self.flush_ppu_run(&mut ppu_run);
+                self.apply_mmio(addr, val);
+            }
+        }
+        self.flush_ppu_run(&mut ppu_run);
+        // The ring is applied — any $420B in it just ran its transfer — so
+        // release a DMA-stalled CPU before this flush's run_until.
+        let _ = self.cpu.get_mut().write_ram(HW_DMA_STALL, &[0]);
+        tp.lap(0);
+        // The scanline pump: render every framebuffer row the SNES beam has
+        // passed since the last flush (display lines are 1-based, so row r
+        // is complete once V > r) — one span render per flush. Runs after
+        // the ring apply, so this flush's register writes land at ~10-line
+        // granularity.
+        if let Some(ppu) = &self.ppu {
+            let v = self.gb_pos * SNES_LINES / GB_FRAME_CYCLES;
+            let target = v.min(SNES_FB_H as u64) as u16;
+            if self.ppu_row < target {
+                let count = (target - self.ppu_row).min(255) as u8;
+                let _ = ppu.borrow_mut().write_ram(
+                    PPU_HW_LINE,
+                    &[self.ppu_row as u8, (self.ppu_row >> 8) as u8, count],
+                );
+                self.ppu_row += u16::from(count);
+            }
+        }
+        tp.lap(1);
+        {
+            let mut cpu = self.cpu.borrow_mut();
+            // One character row per flush: land it in its rotating buffer
+            // and advance the $6000 write-row shadow so the guest observes
+            // every band value in sequence (18 bands/frame vs ~17 flushes
+            // — near-lockstep with the real stream).
+            if let Some((band, data)) = self.char_queue.pop_front() {
+                let _ = cpu.write_ram(HW_CHAR_ROWS + u32::from(band % 4) * 320, &data[..]);
+                self.char_write_row = band % 4;
+            }
+            let _ = cpu.write_ram(HW_LCD_ROW, &[row, self.char_write_row]);
+            // The SNES frame clock: scale the GB frame position onto the
+            // 262-line NTSC frame; on the vblank edges maintain the RDNMI
+            // flag (set at begin, auto-clear at end — fullsnes 4210h; the
+            // read-acknowledge runs guest-side) and deliver the NMI when
+            // NMITIMEN bit 7 enables it (fullsnes 4200h).
+            let v = self.gb_pos * SNES_LINES / GB_FRAME_CYCLES;
+            let vblank = v >= SNES_VBLANK_LINE;
+            if vblank != self.in_vblank {
+                self.in_vblank = vblank;
+                if vblank {
+                    let _ = cpu.write_ram(HW_SHADOW + SH_RDNMI, &[0x82]);
+                    if self.nmitimen & 0x80 != 0 {
+                        let _ = cpu.write_ram(HW_NMI, &[1]);
+                    }
+                    // Joypad autopoll begins on the first vblank line when
+                    // NMITIMEN bit 0 asks for it (fullsnes 4200h).
+                    self.joy_busy = self.nmitimen & 1 != 0;
+                    // The scanline pump completed the frame before this
+                    // edge (V >= 225 implies all 224 rows rendered).
+                    self.frame_ready = self.ppu.is_some();
+                    self.frames_done += u64::from(self.frame_ready);
+                } else {
+                    let _ = cpu.write_ram(HW_SHADOW + SH_RDNMI, &[0x02]);
+                    // A new frame begins as vblank ends.
+                    self.ppu_row = 0;
+                }
+                // HVBJOY bit 7 tracks vblank, bit 0 the autopoll window
+                // (bit 6 hblank is below this pump's resolution).
+                let hvbjoy = (vblank as u8) << 7 | u8::from(self.joy_busy);
+                let _ = cpu.write_ram(HW_SHADOW + SH_HVBJOY, &[hvbjoy]);
+            } else if self.joy_busy {
+                // The poll window ends (~4224 master cycles ≈ under one
+                // flush): the JOY1 shadows become valid exactly when the
+                // busy bit drops — mid-window reads are unreliable on
+                // hardware, so nothing is published earlier.
+                self.joy_busy = false;
+                let (dpad, buttons) = self.input;
+                let _ = cpu.write_ram(HW_SHADOW + SH_JOY1, &joy1_bytes(dpad, buttons));
+                let _ = cpu.write_ram(HW_SHADOW + SH_HVBJOY, &[(vblank as u8) << 7]);
+            }
+            if !self.pending_packets.is_empty() {
+                let clear = matches!(cpu.read_ram(HW_PACKET, 1).as_deref(), Ok([0]));
+                if clear {
+                    if let Some(p) = self.pending_packets.pop_front() {
+                        let _ = cpu.write_ram(HW_PACKET, &p);
+                    }
+                }
+            }
+        }
+        tp.lap(2);
+        // Advance the chips' absolute cycle targets by the GB→chip ratios.
+        self.spc_acc += span as i64 * SPC_NUM;
+        let spc_adv = self.spc_acc.div_euclid(SPC_DEN).max(0) as u64;
+        self.spc_acc -= spc_adv as i64 * SPC_DEN;
+        self.spc_target += spc_adv;
+        self.cpu_acc += span as i64 * CPU_NUM;
+        let cpu_adv = self.cpu_acc.div_euclid(CPU_DEN).max(0) as u64;
+        self.cpu_acc -= cpu_adv as i64 * CPU_DEN;
+        self.cpu_target += cpu_adv;
+
+        // 1+2. Interleaved co-simulation, in rounds: drain the 65C816's
+        // ordered APU-port write ring, replay each write into the SPC700 with
+        // a consume slice, hand the echoes back and give the CPU a produce
+        // slice — then drain again, because those CPU slices produce the
+        // *next* writes (an echo-paced upload advances exactly one byte per
+        // round). Without the rounds a whole flush moved one byte; the bound
+        // keeps a flush finite. Ordered per-event replay matters: the IPL
+        // upload's index/ack pump repeats mod-256 values, so delivering only
+        // final latch states aliases the handshake and desyncs the chips.
+        //
+        // A comm port is a register, not a queue: each write needs the SPC700
+        // to run enough cycles to consume it before the next lands (the IPL's
+        // per-byte pump is ~25 cycles — fullsnes "Boot ROM"), and the CPU
+        // needs enough to check the echo and produce the next byte. The
+        // per-event floors let both chips run ahead of their clock targets
+        // during a burst; the positions are anchored across flushes
+        // (`spc_pos`/`cpu_pos`), and later flush targets simply no-op until
+        // real time catches back up.
+        {
+            let spc_start = self.spc_target - spc_adv;
+            let cpu_start = self.cpu_target - cpu_adv;
+            let dbg = std::env::var_os("SLOPGB_APUDBG").is_some();
+            const SPC_MIN_EVENT_CYCLES: u64 = 64;
+            const CPU_MIN_EVENT_CYCLES: u64 = 64;
+            const MAX_MEDIATION_ROUNDS: usize = 512;
+            let mut spc_pos = self.spc_pos.max(spc_start);
+            let mut cpu_pos = self.cpu_pos.max(cpu_start);
+            for _ in 0..MAX_MEDIATION_ROUNDS {
+                let events: Vec<(u8, u8)> = {
+                    let mut cpu = self.cpu.borrow_mut();
+                    // Two-phase drain (see the MMIO ring): header probe
+                    // first, a sized read drains exactly `pending` entries.
+                    let pending = match cpu.read_ram(HW_PORT_RING, 3) {
+                        Ok(h) if h.len() >= 2 => usize::from(h[0]) | usize::from(h[1]) << 8,
+                        _ => 0,
+                    };
+                    let bulk = if pending > 0 {
+                        let size = (3 + 2 * pending).min(3 + 2 * PORT_RING_CAP);
+                        cpu.read_ram(HW_PORT_RING, size)
+                    } else {
+                        Ok(Vec::new())
+                    };
+                    match bulk {
+                        Ok(buf) if buf.len() >= 3 => {
+                            let n = usize::from(buf[0]) | usize::from(buf[1]) << 8;
+                            if buf[2] != 0 {
+                                eprintln!("slopgb: SNES APU port ring overflowed; writes dropped");
+                            }
+                            buf[3..]
+                                .chunks_exact(2)
+                                .take(n)
+                                .map(|e| (e[0], e[1]))
+                                .collect()
+                        }
+                        _ => Vec::new(),
+                    }
+                };
+                if events.is_empty() {
+                    break;
+                }
+                for &(p, v) in &events {
+                    let mut spc = self.spc.borrow_mut();
+                    let _ = spc.port_write(p, v);
+                    if usize::from(p) < N_PORTS {
+                        self.to_spc[usize::from(p)] = v;
+                    }
+                    spc_pos += SPC_MIN_EVENT_CYCLES;
+                    let _ = spc.run_until(spc_pos);
+                    let mut echoes = [0u8; N_PORTS];
+                    for (q, slot) in echoes.iter_mut().enumerate() {
+                        *slot = spc.port_read(q as u8).unwrap_or(0);
+                    }
+                    if dbg {
+                        eprintln!(
+                            "apu<- p{p}={v:02X} | out {:02X} {:02X}",
+                            echoes[0], echoes[1]
+                        );
+                    }
+                    drop(spc);
+                    let mut cpu = self.cpu.borrow_mut();
+                    for (q, &e) in echoes.iter().enumerate() {
+                        let _ = cpu.port_write(q as u8, e);
+                    }
+                    cpu_pos += CPU_MIN_EVENT_CYCLES;
+                    let _ = cpu.run_until(cpu_pos);
+                }
+            }
+            tp.lap(3);
+            // Run the SPC700 + S-DSP to the target (or wherever the event
+            // floor left it, if that is already past) and pull the PCM.
+            self.spc_pos = self.spc_target.max(spc_pos);
+            self.cpu_pos = self.cpu_target.max(cpu_pos);
+            let mut spc = self.spc.borrow_mut();
+            let _ = spc.run_until(self.spc_pos);
+            if let Ok(batch) = spc.drain_pcm() {
+                self.src.extend(batch);
+            }
+        }
+        tp.lap(4);
+        // 3. Read the SPC700's final comm-port replies back for the 65C816.
+        let mut spc_out = [0u8; N_PORTS];
+        {
+            let mut spc = self.spc.borrow_mut();
+            for (p, slot) in spc_out.iter_mut().enumerate() {
+                *slot = spc.port_read(p as u8).unwrap_or(0);
+            }
+        }
+        {
+            let mut cpu = self.cpu.borrow_mut();
+            for (p, &v) in spc_out.iter().enumerate() {
+                let _ = cpu.port_write(p as u8, v);
+            }
+            // 4. Run the 65C816 to its target (or the event floor's position).
+            let _ = cpu.run_until(self.cpu_target.max(self.cpu_pos));
+            // ICD2, SNES→GB half: drain the ordered pad-latch write ring.
+            // Every write becomes one queued feed snapshot, so a sub-flush
+            // protocol sequence (the takeover init's one-shot Select+Start
+            // trigger chased by the hook's ACK sandwich) reaches the GB one
+            // value per step instead of collapsing to the final latch state.
+            // The sticky written flag still gates the takeover as a whole —
+            // before the SNES side writes a latch, the GB's local matrix
+            // must stay live.
+            if let Ok(v) = cpu.read_ram(HW_PADS, 5) {
+                if let [p1, p2, p3, p4, written] = v[..] {
+                    if written != 0 {
+                        self.pads_taken = true;
+                        self.pads_shadow = [p1, p2, p3, p4];
+                    }
+                }
+            }
+            // Two-phase drain (see the MMIO ring): header probe first, sized read.
+            let pad_pending = match cpu.read_ram(HW_PAD_RING, 2) {
+                Ok(h) if !h.is_empty() => usize::from(h[0]),
+                _ => 0,
+            };
+            let pad_bulk = if pad_pending > 0 {
+                let size = (2 + 2 * pad_pending).min(2 + 2 * PAD_RING_CAP);
+                cpu.read_ram(HW_PAD_RING, size)
+            } else {
+                Ok(Vec::new())
+            };
+            if let Ok(ring) = pad_bulk {
+                if ring.len() >= 2 {
+                    let n = usize::from(ring[0]);
+                    let mut pads = self.feed_queue.back().copied().unwrap_or(self.pads_shadow);
+                    for i in 0..n {
+                        let (r, v) = (ring[2 + i * 2], ring[3 + i * 2]);
+                        if usize::from(r) < 4 {
+                            pads[usize::from(r)] = v;
+                            self.feed_queue.push_back(pads);
+                        }
+                    }
+                    while self.feed_queue.len() > FEED_QUEUE_CAP {
+                        self.feed_queue.pop_front();
+                    }
+                }
+            }
+        }
+        tp.lap(5);
+        // 5. Emit output-rate samples (32 kHz S-DSP → output rate, zero-order-hold).
+        self.emit_output(span);
+        // From-start capture: once the resident engine has run a frame past the
+        // play command (`nspc_flush` armed `capture_at`), the song-init has
+        // finished — grab a self-sustaining snapshot for a from-the-top export.
+        if let Some(at) = self.capture_at {
+            if self.spc_pos >= at {
+                self.capture_at = None;
+                if let Ok(spc) = self.spc.borrow_mut().dump_spc() {
+                    if !spc.is_empty() {
+                        self.song_start_spc = Some(spc);
+                    }
+                }
+            }
+        }
+        tp.lap(6);
+        tp.finish();
+    }
+
+    /// Emit the output-rate samples owed for a `span` of GB T-cycles, resampling
+    /// the 32 kHz S-DSP source by holding the current sample (32 kHz < output).
+    fn emit_output(&mut self, span: u64) {
+        self.samp_acc += span as f64;
+        while self.samp_acc >= self.cycles_per_sample {
+            self.samp_acc -= self.cycles_per_sample;
+            self.src_acc += DSP_RATE;
+            while self.src_acc >= f64::from(self.out_rate) {
+                self.src_acc -= f64::from(self.out_rate);
+                if let Some(s) = self.src.pop_front() {
+                    self.cur = s;
+                }
+            }
+            let amp = f32::from(self.cur.0.unsigned_abs().max(self.cur.1.unsigned_abs()));
+            if amp > self.dbg_pcm_peak {
+                self.dbg_pcm_peak = amp;
+            }
+            if self.out.len() < self.max_out {
+                self.out.push((
+                    f32::from(self.cur.0) * MIX_SCALE,
+                    f32::from(self.cur.1) * MIX_SCALE,
+                ));
+            }
+        }
+    }
+
+    fn mix_into(&mut self, gb: &mut [(f32, f32)]) {
+        // Only with the real N-SPC driver resident (--sgb-bios) does the SGB
+        // hardware mix apply: the GB audio feeds the SNES mixer below the SNES
+        // APU's level. Without it — clean-room square SFX, or no --sgb-bios —
+        // leave the GB channels at full so nothing is quieted for no benefit.
+        if self.nspc_resident {
+            for s in gb.iter_mut() {
+                s.0 *= GB_GAIN;
+                s.1 *= GB_GAIN;
+            }
+        }
+        let n = gb.len().min(self.out.len());
+        for (dst, src) in gb.iter_mut().zip(self.out.iter()).take(n) {
+            dst.0 += src.0;
+            dst.1 += src.1;
+        }
+        self.out.drain(..n);
+    }
+
+    fn set_output_rate(&mut self, hz: u32) {
+        let hz = hz.max(1);
+        self.out_rate = hz;
+        self.cycles_per_sample = f64::from(GB_CLOCK_HZ) / f64::from(hz);
+        self.max_out = hz as usize;
+        self.samp_acc = 0.0;
+        self.src_acc = 0.0;
+        self.src.clear();
+        self.out.clear();
+    }
+
+    /// Drain the stereo output-rate PCM synthesized since the last drain, oldest
+    /// first — the equivalent of the tier-3 plugin ABI's `drain_pcm`, for a host
+    /// that would rather pull the samples than have them mixed in.
+    pub fn drain_pcm(&mut self) -> Vec<(f32, f32)> {
+        std::mem::take(&mut self.out)
+    }
+
     /// Read `len` bytes of the 65C816 plugin's memory at the 24-bit `addr` —
     /// read-only introspection for the debugger/MCP (a `peek` into the SNES
     /// side; never advances a cycle).
@@ -459,7 +1261,331 @@ impl SgbCoprocessor {
             .unwrap_or_default()
     }
 
+    /// Apply one captured MMIO write from the guest (also the target of DMA
+    /// B-bus writes — `dma::bbus_write` routes through here). The clocking
+    /// loop consumes NMITIMEN; the DMA engine consumes the channel
+    /// registers, MDMAEN, and the WRAM access ports; everything else is
+    /// inert until its consumer lands (PPU routing).
+    /// Apply a buffered run of pure-PPU `(port, val)` pairs as one batched
+    /// plugin call, in order, and clear the buffer. No-op when empty or
+    /// without a PPU plugin (matching the unbatched path's routing).
+    fn flush_ppu_run(&mut self, run: &mut Vec<u8>) {
+        if run.is_empty() {
+            return;
+        }
+        if let Some(ppu) = &self.ppu {
+            let _ = ppu.borrow_mut().write_ram(PPU_HW_PORTS, run);
+        }
+        run.clear();
+    }
+
+    fn apply_mmio(&mut self, addr: u16, val: u8) {
+        match addr {
+            0x2180 => self.wmdata_write(val),
+            0x2181 => self.wmadd = self.wmadd & 0x1_FF00 | u32::from(val),
+            0x2182 => self.wmadd = self.wmadd & 0x1_00FF | u32::from(val) << 8,
+            // WMADDH: one bit — WMADD addresses 128 KB (fullsnes 2183h).
+            0x2183 => self.wmadd = self.wmadd & 0xFFFF | u32::from(val & 1) << 16,
+            0x4200 => self.nmitimen = val,
+            0x420B => self.run_gp_dma(val),
+            0x4300..=0x437F if usize::from(addr & 0xF) < 7 => {
+                self.dma_regs[usize::from(addr >> 4 & 7)][usize::from(addr & 0xF)] = val;
+            }
+            // Every other B-bus port belongs to the PPU when one is loaded
+            // (unknown ports are inert inside the chip). $2140-$2143 only
+            // arrive via DMA (the CPU-side APU ports route earlier) — a
+            // DMA-to-APU transfer is unimplemented and lands inert too.
+            0x2100..=0x21FF => {
+                if (0x2102..=0x2103).contains(&addr) && std::env::var_os("SLOPGB_OAMDBG").is_some()
+                {
+                    eprintln!("OAMREG {addr:04X}={val:02X}");
+                }
+                if addr == 0x2100 {
+                    self.last_inidisp = val; // diagnostics (debug_status)
+                    // The display shows a picture: not force-blanked and
+                    // brightness above zero (fullsnes 2100h). Arms the
+                    // frame handoff — see `take_snes_frame`.
+                    if val & 0x80 == 0 && val & 0x0F != 0 {
+                        self.snes_live = true;
+                    }
+                }
+                if let Some(ppu) = &self.ppu {
+                    let _ = ppu.borrow_mut().port_write((addr - 0x2100) as u8, val);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Fetch the last completed SNES frame (256x224 RGB555 words,
+    /// row-major), at most once per vblank. `None` without a PPU plugin,
+    /// until the next frame completes, or until the SNES display has ever
+    /// shown a picture (`snes_live`) — before a takeover programs the PPU
+    /// the framebuffer is permanently black, and surfacing it would black
+    /// out the frontend over the live HLE presentation. Sticky once live:
+    /// the takeover's own blank stretches present as a real TV would.
+    pub fn take_snes_frame(&mut self) -> Option<Vec<u16>> {
+        if !self.frame_ready || !self.snes_live {
+            return None;
+        }
+        self.frame_ready = false;
+        let ppu = self.ppu.as_ref()?;
+        let bytes = ppu
+            .borrow_mut()
+            .read_ram(PPU_HW_FB, SNES_FB_W * SNES_FB_H * 2)
+            .ok()?;
+        Some(
+            bytes
+                .chunks_exact(2)
+                .map(|b| u16::from_le_bytes([b[0], b[1]]))
+                .collect(),
+        )
+    }
+
     // Save state, deep clone, and the inert fallback live in `state.rs`.
+}
+
+impl AudioCoprocessor for SgbCoprocessor {
+    fn clock(&mut self, gb_cycles: u64) {
+        SgbCoprocessor::clock(self, gb_cycles);
+    }
+    fn poll(&mut self, cmds: &mut dyn SgbCommandSource) {
+        SgbCoprocessor::poll(self, cmds);
+    }
+    fn joypad_feed(&mut self) -> Option<[u8; 4]> {
+        // Queued latch writes first, each dwelling long enough for the GB's
+        // polls to see it (ordered protocol sequences — an ACK handshake, a
+        // one-shot phase trigger). With the queue idle, forward the local
+        // matrix — the resident BIOS's continuous pad pass-through, the
+        // only way the player's buttons reach a taken-over GB (ICD2 latch
+        // encoding: buttons high nibble, d-pad low, active low).
+        if self.feed_hold > 0 {
+            self.feed_hold -= 1;
+            return Some(self.pads_shadow);
+        }
+        if let Some(pads) = self.feed_queue.pop_front() {
+            self.pads_shadow = pads;
+            self.feed_hold = FEED_DWELL_STEPS;
+            return Some(pads);
+        }
+        if self.pads_taken {
+            let (dpad, buttons) = self.input;
+            Some([buttons << 4 | dpad & 0x0F, 0xFF, 0xFF, 0xFF])
+        } else {
+            None
+        }
+    }
+    fn set_input(&mut self, dpad: u8, buttons: u8) {
+        self.input = (dpad, buttons);
+    }
+    fn take_frame(&mut self) -> Option<Vec<u16>> {
+        self.take_snes_frame()
+    }
+    fn mix_into(&mut self, out: &mut [(f32, f32)]) {
+        SgbCoprocessor::mix_into(self, out);
+    }
+    fn set_output_rate(&mut self, hz: u32) {
+        SgbCoprocessor::set_output_rate(self, hz);
+    }
+    fn load_bios(&mut self, _bios: &[u8]) {
+        // The resident clean-room firmware is fixed; there is no user BIOS image
+        // to install (and slopgb never reads the copyrighted SGB system ROM).
+    }
+    fn write_state(&self, w: &mut Writer) {
+        SgbCoprocessor::write_state(self, w);
+    }
+    fn read_state(&mut self, r: &mut Reader<'_>) -> Result<(), StateError> {
+        SgbCoprocessor::read_state(self, r)
+    }
+    fn clone_box(&self) -> Box<dyn AudioCoprocessor> {
+        // Re-instantiating the already-validated plugin wasm can only fail on an
+        // allocation error (which aborts anyway), so this is near-unreachable —
+        // but a save-state clone must never panic the emulator. Degrade to a
+        // silent inert coprocessor and log, rather than `.expect`.
+        match self.deep_clone() {
+            Ok(fresh) => Box::new(fresh),
+            Err(e) => {
+                eprintln!(
+                    "slopgb: SGB coprocessor clone failed ({e}); audio inert for this snapshot"
+                );
+                Box::new(InertCoprocessor)
+            }
+        }
+    }
+
+    fn export_spc(&self) -> Option<Vec<u8>> {
+        // The from-start snapshot the resident engine's last play command
+        // produced (assembled by the SPC700 plugin from its ARAM + registers +
+        // DSP). `None` until a recognized song has started.
+        self.song_start_spc.clone()
+    }
+
+    fn can_export_spc(&self) -> bool {
+        self.song_start_spc.is_some()
+    }
+
+    fn export_spc_live(&self) -> Option<Vec<u8>> {
+        // The SPC700 plugin assembles a `.spc` from its current ARAM + registers
+        // + DSP — the live state, whatever is playing now.
+        match self.spc.borrow_mut().dump_spc() {
+            Ok(spc) if !spc.is_empty() => Some(spc),
+            _ => None,
+        }
+    }
+
+    fn debug_status(&self) -> String {
+        // The run-cycle targets grow only while the host clocks the chips, so a
+        // zero here means the coprocessor loaded but was never driven (the
+        // machine isn't in SGB mode, or the GB is sending nothing) — the exact
+        // "SNES side isn't running" case. Non-zero = the chips are executing.
+        let running = self.cpu_target > 0 || self.spc_target > 0;
+        let ppu = match &self.ppu {
+            Some(_) => format!(
+                "SNES PPU plugin loaded: {} frames rendered, last INIDISP ${:02X}",
+                self.frames_done, self.last_inidisp
+            ),
+            None => "no SNES PPU plugin (audio-only)".into(),
+        };
+        let driver = if self.nspc_resident {
+            // Live SPC output ports (the engine's echo) + the ARAM entry byte, to
+            // diagnose the N-SPC handshake. borrow_mut from &self via the RefCell.
+            let mut spc = self.spc.borrow_mut();
+            let song = spc
+                .read_ram(u32::from(self.dbg_soutrn_dest), 8)
+                .unwrap_or_default();
+            // The default ROM engine has its own internals; only the clean-room
+            // engine (SLOPGB_NSPC_CLEANROOM) has the engine.asm variable layout
+            // this decodes ($12 songlp, $14 tempo, $16 tickacc, $19 state, $1B
+            // activemask, $48.. per-channel tdurrem).
+            let eng = if std::env::var_os("SLOPGB_NSPC_CLEANROOM").is_some() {
+                let v = spc.read_ram(0x12, 10).unwrap_or_default();
+                let durrem = spc.read_ram(0x48, 8).unwrap_or_default();
+                let g = |i: usize| v.get(i).copied().unwrap_or(0);
+                let songlp = u16::from(g(0)) | u16::from(g(1)) << 8;
+                format!(
+                    "; ENG(clean-room) songlp ${songlp:04X} tempo ${:02X} tickacc \
+                     ${:02X} state {} activemask ${:02X} tdurrem {durrem:02X?}",
+                    g(2),
+                    g(4),
+                    g(7),
+                    g(9),
+                )
+            } else {
+                "; ROM engine (default; SLOPGB_NSPC_CLEANROOM for the clean-room engine)"
+                    .to_string()
+            };
+            format!(
+                "N-SPC resident (--sgb-bios): SOUND x{} last {:02X?}, SOU_TRN x{} \
+                 (dest ${:04X} len {}), DATA_SND x{}; cmd {:02X?}; DSP peak {}; \
+                 song@${:04X} {:02X?}{eng}",
+                self.dbg_sound,
+                self.dbg_last_sound,
+                self.dbg_soutrn,
+                self.dbg_soutrn_dest,
+                self.dbg_soutrn_len,
+                self.dbg_datasnd,
+                self.nspc_cmd,
+                self.dbg_pcm_peak,
+                self.dbg_soutrn_dest,
+                song,
+            )
+        } else {
+            "clean-room firmware".to_string()
+        };
+        format!(
+            "wasm SGB coprocessor: SPC700 + 65C816 plugins loaded; {} \
+             (65C816 ran to cyc {}, SPC700 to cyc {}); last GB->SPC ports {:02X?}; {}; {}",
+            if running {
+                "RUNNING"
+            } else {
+                "NOT yet clocked"
+            },
+            self.cpu_target,
+            self.spc_target,
+            self.to_spc,
+            driver,
+            ppu,
+        )
+    }
+}
+
+/// Install the clean-room SPC700 driver + one-entry sample directory + a
+/// square BRR sample into APU RAM (the chip itself boots its IPL ROM; see
+/// Parse a standard SNES APU upload table (`[u16 len, u16 dest, len bytes]*`
+/// terminated by `[0000, entry]`) starting at `off`, returning `(entry,
+/// blocks)`. Rejects a malformed table (out-of-bounds length, no terminator, or
+/// no block loading the N-SPC engine entry `$0400`) so a wrong offset / wrong
+/// ROM falls back to the clean-room firmware rather than uploading garbage.
+/// A parsed SNES APU upload table: each `(dest, bytes)` block, in order.
+type ApuBlocks = Vec<(u16, Vec<u8>)>;
+
+fn parse_apu_blocks(rom: &[u8], mut off: usize) -> Option<(u16, ApuBlocks)> {
+    let mut blocks: ApuBlocks = Vec::new();
+    loop {
+        let len = u16::from_le_bytes([*rom.get(off)?, *rom.get(off + 1)?]);
+        let dest = u16::from_le_bytes([*rom.get(off + 2)?, *rom.get(off + 3)?]);
+        off += 4;
+        if len == 0 {
+            // Terminator: `dest` is the SPC700 execution entry. A valid driver
+            // table loads the engine to $0400 and jumps there.
+            return (dest == 0x0400 && blocks.iter().any(|(d, _)| *d == 0x0400))
+                .then_some((dest, blocks));
+        }
+        let end = off.checked_add(usize::from(len))?;
+        blocks.push((dest, rom.get(off..end)?.to_vec()));
+        off = end;
+        if blocks.len() > 64 {
+            return None; // runaway guard: no real driver table is this long
+        }
+    }
+}
+
+/// `install_firmware`). The original clean-room driver waits on comm port 1
+/// (the SNES trigger), then programs the S-DSP to key a ~2 kHz square-wave
+/// voice. Authored from the SPC700 opcode table + S-DSP register map
+/// (nocash *fullsnes*), never from a ROM.
+fn spc_firmware() -> (Vec<u8>, [u8; 4], Vec<u8>) {
+    // `MOV dp,#imm` = `8F imm dp`; `MOV A,dp` = `E4 dp`; `CLRP` = `20`;
+    // `BEQ rel` = `F0 rel`; `BRA rel` = `2F rel` (fullsnes opcode table).
+    let mov = |dp: u8, imm: u8| [0x8F, imm, dp];
+    let mut prog = Vec::new();
+    prog.push(0x20); // CLRP: direct page = $00xx, so $F5 is the comm port
+    // wait: MOV A,$F5 / BEQ wait — spin until the SNES sets the trigger port.
+    prog.extend_from_slice(&[0xE4, 0xF5]); // MOV A,$F5 (port_in[1])
+    prog.extend_from_slice(&[0xF0, 0xFC]); // BEQ -4 -> the MOV above
+    // The S-DSP program: voice 0, GAIN-direct, square sample, KON last.
+    let dsp_writes: [(u8, u8); 12] = [
+        (0x6C, 0x00), // FLG: unmute, no reset, noise off
+        (0x5D, 0x02), // DIR = page $02 (directory at $0200)
+        (0x0C, 0x7F), // MVOLL
+        (0x1C, 0x7F), // MVOLR
+        (0x00, 0x7F), // V0 VOLL
+        (0x01, 0x7F), // V0 VOLR
+        (0x02, 0x00), // V0 pitch lo
+        (0x03, 0x10), // V0 pitch hi -> $1000
+        (0x04, 0x00), // V0 SRCN = directory entry 0
+        (0x05, 0x00), // V0 ADSR1 = 0 -> use GAIN
+        (0x07, 0x7F), // V0 GAIN = direct max
+        (0x4C, 0x01), // KON voice 0 (last)
+    ];
+    for (dp, imm) in dsp_writes {
+        prog.extend_from_slice(&mov(0xF2, dp)); // select DSP register
+        prog.extend_from_slice(&mov(0xF3, imm)); // write it
+    }
+    prog.extend_from_slice(&[0x2F, 0xFE]); // BRA * (spin so the DSP keeps playing)
+
+    // One-entry sample directory: start = loop = $0210.
+    let dir = [
+        SPC_BRR_ORG as u8,
+        (SPC_BRR_ORG >> 8) as u8,
+        SPC_BRR_ORG as u8,
+        (SPC_BRR_ORG >> 8) as u8,
+    ];
+    // A 16-sample square BRR block: header shift 9 / filter 0 / loop + end, then
+    // eight +7 nibbles and eight -8 nibbles -> a square wave, looped at $1000
+    // pitch = 32 kHz / 16 = 2 kHz.
+    let brr = vec![0x93u8, 0x77, 0x77, 0x77, 0x77, 0x88, 0x88, 0x88, 0x88];
+    (prog, dir, brr)
 }
 
 /// Map the GB active-low matrix nibbles onto the SNES JOY1 layout, `[low,

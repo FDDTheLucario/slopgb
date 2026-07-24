@@ -716,6 +716,27 @@ impl GameBoy {
         self.sgb_apu.as_ref().map(|a| a.debug_status())
     }
 
+    /// A from-start `.spc` (SPC700 Sound File) snapshot of the SGB song playing
+    /// now, if the resident engine has one to give. `None` off SGB or when
+    /// [`Self::can_export_spc`] is false. Read-only.
+    pub fn export_spc(&self) -> Option<Vec<u8>> {
+        self.sgb_apu.as_ref().and_then(|a| a.export_spc())
+    }
+
+    /// Whether a from-start `.spc` can be exported right now (SGB, a recognized
+    /// resident engine, a song started) — the UI greys the export action when
+    /// false. Cheap: no snapshot is assembled.
+    pub fn can_export_spc(&self) -> bool {
+        self.sgb_apu.as_ref().is_some_and(|a| a.can_export_spc())
+    }
+
+    /// A `.spc` snapshot of the SGB audio chip's **current** (live, mid-song)
+    /// state, for the MCP `dump-spc` debug path. `None` off SGB or without an
+    /// SPC700. Read-only. Contrast [`Self::export_spc`] (the song from its top).
+    pub fn export_spc_live(&self) -> Option<Vec<u8>> {
+        self.sgb_apu.as_ref().and_then(|a| a.export_spc_live())
+    }
+
     /// True once the CPU has executed `LD B,B` (opcode 0x40) — the mooneye
     /// test suite's "test finished" software breakpoint.
     pub fn debug_breakpoint_hit(&self) -> bool {

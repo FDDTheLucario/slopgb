@@ -160,6 +160,10 @@ impl Coprocessor for Spc700Cop {
         w.into_vec()
     }
 
+    fn dump_spc(&self) -> Vec<u8> {
+        slopgb_snes_apu::build_spc_file(&self.spc, &self.dsp.borrow())
+    }
+
     fn load_state(&mut self, bytes: &[u8]) {
         let mut r = Reader::new(bytes);
         let restored = (|| -> Result<(), StateError> {

@@ -67,6 +67,10 @@ impl SgbCoprocessor {
         w.u16(self.ppu_row);
         w.bool(self.frame_ready);
         w.bool(self.snes_live);
+        w.bool(self.nspc_resident);
+        w.bytes(&self.nspc_cmd);
+        w.bytes(&self.nspc_shadow);
+        w.bool(self.nspc_pending);
     }
 
     pub(crate) fn read_state(&mut self, r: &mut Reader<'_>) -> Result<(), StateError> {
@@ -145,6 +149,10 @@ impl SgbCoprocessor {
         self.ppu_row = r.u16()?.min(SNES_FB_H as u16);
         self.frame_ready = r.bool()?;
         self.snes_live = r.bool()?;
+        self.nspc_resident = r.bool()?;
+        r.bytes_into(&mut self.nspc_cmd)?;
+        r.bytes_into(&mut self.nspc_shadow)?;
+        self.nspc_pending = r.bool()?;
         // The undrained source/output PCM is transient, not part of the
         // snapshot — and so are the pad feed and the pushed input matrix
         // (the core re-supplies both on the next step/flush).
@@ -236,6 +244,10 @@ impl SgbCoprocessor {
         fresh.ppu_row = self.ppu_row;
         fresh.frame_ready = self.frame_ready;
         fresh.snes_live = self.snes_live;
+        fresh.nspc_resident = self.nspc_resident;
+        fresh.nspc_cmd = self.nspc_cmd;
+        fresh.nspc_shadow = self.nspc_shadow;
+        fresh.nspc_pending = self.nspc_pending;
         Ok(fresh)
     }
 }
@@ -275,6 +287,10 @@ fn write_empty_state(w: &mut Writer) {
     w.u16(0); // ppu_row
     w.bool(false); // frame_ready
     w.bool(false); // snes_live
+    w.bool(false); // nspc_resident (inert has no driver)
+    w.bytes(&[0u8; 4]); // nspc_cmd
+    w.bytes(&[0u8; 4]); // nspc_shadow
+    w.bool(false); // nspc_pending
 }
 
 /// A no-op [`AudioCoprocessor`] producing silence. Only ever the result of

@@ -128,6 +128,16 @@ fn parse_sgb_bios_path_and_default() {
 }
 
 #[test]
+fn parse_sf2_path_and_default() {
+    // `--sf2 <path>` records the SF2 soundfont; absent, it defaults to None.
+    let opts = parse_run(&["--sf2", "/roms/bank.sf2", "game.gb"]).unwrap();
+    assert_eq!(opts.sf2, Some(PathBuf::from("/roms/bank.sf2")));
+    assert_eq!(parse_run(&["game.gb"]).unwrap().sf2, None);
+    // A missing value is an error (like --sgb-bios).
+    assert!(parse(&["--sf2"]).is_err());
+}
+
+#[test]
 fn parse_help_returns_outcome_instead_of_exiting() {
     assert!(matches!(parse(&["-h"]), Ok(ParseOutcome::Help)));
     assert!(matches!(parse(&["--help"]), Ok(ParseOutcome::Help)));

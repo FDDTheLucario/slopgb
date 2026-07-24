@@ -111,3 +111,19 @@ pub(crate) fn resolve_sgb_bios(opts: &Options) -> Option<Vec<u8>> {
         }
     }
 }
+
+/// Resolve the optional `--sf2` soundfont path from `--sf2` or `SLOPGB_SF2`
+/// (in that precedence). Only the path is resolved here — the bytes are read
+/// in [`crate::session`], which needs the path itself to place the `.smpl`
+/// cache file alongside it.
+pub(crate) fn resolve_sf2(opts: &Options) -> Option<PathBuf> {
+    let path = opts
+        .sf2
+        .clone()
+        .or_else(|| env::var_os("SLOPGB_SF2").map(PathBuf::from))?;
+    eprintln!(
+        "slopgb: using SF2 soundfont '{}' for the SGB sample bank",
+        path.display()
+    );
+    Some(path)
+}

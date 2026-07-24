@@ -10,8 +10,8 @@ mod view;
 
 pub use abi::{ABI_VERSION, META_DESCRIPTION, META_NAME, META_SCHEMA, Reg};
 pub use coprocessor::{
-    Coprocessor, EMIT_KIND_MANIFEST, EMIT_KIND_PCM, EMIT_KIND_RAM, EMIT_KIND_STATE, read_file,
-    recv_mailbox,
+    Coprocessor, EMIT_KIND_MANIFEST, EMIT_KIND_PCM, EMIT_KIND_RAM, EMIT_KIND_SPC, EMIT_KIND_STATE,
+    read_file, recv_mailbox,
 };
 pub use tool::{__emit, ToolPlugin, ToolResult};
 pub use view::{GameBoyView, Registers};

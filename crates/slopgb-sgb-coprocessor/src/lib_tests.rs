@@ -57,7 +57,9 @@ fn plugins() -> Option<(Vec<u8>, Vec<u8>)> {
 }
 
 /// Build a coprocessor from the freshly built plugins, or `None` to skip.
-fn build_cop(rate: u32) -> Option<SgbCoprocessor> {
+/// `pub(crate)`: also reused by `samples_tests.rs` (a cousin test module, not
+/// a descendant of this one) so the wasm plugins build only once per run.
+pub(crate) fn build_cop(rate: u32) -> Option<SgbCoprocessor> {
     let (spc, cpu) = plugins()?;
     Some(SgbCoprocessor::from_wasm(&spc, &cpu, rate).unwrap())
 }

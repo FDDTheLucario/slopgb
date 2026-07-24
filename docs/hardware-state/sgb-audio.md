@@ -240,17 +240,94 @@ ROM**, which slopgb does not ship, and slopgb does **not** emulate the SNES's
 | Scenario | Result |
 |---|---|
 | Game uploads its own driver via **SOU_TRN** (e.g. Space Invaders) | **Real audio, no BIOS needed** — the uploaded SPC700 program runs on the emulated SPC700 and the S-DSP synthesizes it. |
-| Game uses only **SOUND ($08)** default-bank effects, no BIOS | **Silent** — the default driver/samples aren't present, and there's no 65816 to run the SGB system sound program. |
-| Game uses **SOUND ($08)**, BIOS supplied via `load_sgb_bios` | Currently still **silent for the default bank**: the BIOS image is stored, but with no 65816 core the SGB system program that would upload the standard SPC700 driver + samples is not executed. No sample data is ever fabricated. |
+| Game uses only **SOUND ($08)** / **SOU_TRN** song data, no BIOS | **Silent for real music** — a game that ships only song data (Animaniacs et al.) relies on the SGB's *resident* sound driver, which the clean-room firmware does not implement. |
+| Game uses song data, **BIOS supplied via `--sgb-bios`** (coprocessor path) | **Real audio** — the resident N-SPC driver is extracted from the supplied SGB ROM and uploaded to the SPC700 (see below). |
 | `Dmg`/`Cgb` | Subsystem absent; output byte-identical. |
 
-`GameBoy::load_sgb_bios(&[u8])` mirrors the opt-in boot-ROM **bytes** API
-— an embedder supplies the SGB SNES ROM image. A
-`--sgb-bios` CLI flag paralleling `--boot` is **intentionally deferred**: until a
-supplied BIOS can actually enable audio (which needs either a 65816 core or a
-verified offset of the standard SPC700 driver+samples inside a real SGB BIOS),
-threading it through the session machinery would only move an inert byte array.
-Absent a BIOS, everything else works and there is **zero regression**.
+`GameBoy::load_sgb_bios(&[u8])` mirrors the opt-in boot-ROM **bytes** API — an
+embedder supplies the SGB SNES ROM image. On the built-in HLE path this is still
+inert (no 65816 to run the SGB system program). On the **coprocessor path** it is
+live — see below.
+
+## Resident N-SPC driver from `--sgb-bios` (coprocessor extract+upload path)
+
+Games like **Animaniacs** ship only *song data* and rely on the SGB's resident
+sound driver — the **N-SPC engine** (sneslab.net/wiki/N-SPC_Engine) plus its
+sample "soundfont", both living in the SGB system ROM. With that ROM supplied via
+`--sgb-bios` on an SGB machine with the coprocessor plugins loaded,
+`SgbCoprocessor::install_sgb_bios` (`slopgb-sgb-coprocessor`) makes it play. This
+is a **local convenience path** — the copyrighted ROM is the user's, nothing is
+committed; the clean-room engine is the upstreamable version (parked below).
+
+Everything reaches the SPC700 through the plugin ABI (`write_ram`/`set_pc`/
+`port_read`/`port_write`) — the plugin boundary stays clean; ROM parsing is
+host-side. The pieces, all reverse-engineered from a real SGB1 `program.rom`:
+
+- **Driver upload.** The SGB stores its resident SPC700 program as a standard SNES
+  APU block table (`[u16 len, u16 dest, len bytes]*` then `[0000, entry]`) at
+  LoROM `$06:8000`. `install_sgb_bios` parses it (`parse_apu_blocks`, validated —
+  a wrong ROM/offset falls back to clean-room), uploads the 5 blocks (engine
+  `$0400`, routines `$4C10`/`$4C30`, sample dir `$4B00`, ~40 KB BRR soundfont
+  `$4DB0`) into APU RAM, and execs `$0400`.
+- **Song upload = SOU_TRN ($09).** The game renders SBN into VRAM tiles; the SGB
+  screen-capture delivers the 4 KB to `upload_transfer`, which writes the SBN
+  blocks into APU RAM (song base `$2B00`) **without** re-execing the running
+  engine. SBN header order is **`[len, dest]`** (SBN2SPC; the ROM's loader at
+  `$00:AC6C`) — not `[dest, len]`.
+- **Play trigger = SOUND ($08).** Byte 4 (Music Score Code) selects the song. The
+  SGB BIOS forms a command word (command = `score | effect_a<<8`, data =
+  `effect_b | attr<<8`; `program.rom $00:C554`) and delivers it to the engine over
+  comm ports `$2140-$2143` with a 16-bit **echo-ack handshake** (BIOS `$00:BAC4`):
+  send the word, wait for the engine to echo it back, retry otherwise.
+  `nspc_flush` ports this handshake to the host, driven at the throttled poll
+  cadence; `nspc_cmd`/`nspc_shadow`/`nspc_pending` hold its state (serialized).
+- **Mix balance.** The SNES DSP mixes at unity (`MIX_SCALE = 1.0/32768`, matching
+  the GB APU's full-scale headroom); the GB feed is attenuated (`GB_GAIN = 0.6`)
+  in `mix_into` **only while `nspc_resident`**, mirroring the SGB routing GB below
+  the SNES level. Off that path GB audio is untouched.
+
+The `coprocessor` MCP tool's status line reports the resident-driver state and
+SOUND/SOU_TRN/DATA_SND counts + DSP peak for diagnosing this path.
+
+## SPC export (right-click → "Export SPC")
+
+Writes the playing song as a 66048-byte `.spc` (SPC700 Sound File v0.30) —
+`slopgb-<unix-millis>.spc` in the working dir. `slopgb_snes_apu::build_spc_file`
+assembles the header (CPU regs), the 64 KB ARAM, and the 128-byte DSP register
+file; it also writes the `$F0-$FF` I/O registers from a non-destructive
+`Spc700::io_snapshot` (control + timer targets). Those live in struct fields, not
+ARAM — omitting them left the timers disabled, so a timer-paced N-SPC dump came
+back frozen/silent.
+
+**From the top, not mid-song.** The coprocessor arms a capture when the resident
+engine receives a music play command (score code, bit 7 = stop) and grabs the
+snapshot one frame later (`SONG_START_CAPTURE_DELAY` ≈ 17k SPC cycles), once
+song-init has set the timers and reset the sequencer. So the export reproduces
+the song from its opening no matter when the user clicks — no restart handshake
+is reverse-engineered; the driver re-inits itself and we just wait.
+
+**Availability gate.** That captured snapshot is also the recognition signal:
+`export_spc` / `can_export_spc` are `Some`/true only for a recognized resident
+engine (ROM via `--sgb-bios`, or the clean-room engine) that has started a song.
+The UI greys "Export SPC" otherwise — the built-in square SFX driver, a
+game-uploaded foreign engine, or no song yet — so it never yields a broken dump.
+This stands in for literal ARAM fingerprinting and is more robust (any N-SPC
+variant, no per-game hashes).
+
+**Live state, for debugging.** The from-start capture is the UI's job; the MCP
+`dump-spc` tool instead defaults to `mode: live` — the driver's *current* state,
+snapshotted on demand, so a driver stuck on a note or mis-advancing a pattern can
+be dumped at the exact moment and played back / inspected (`mode: start` gives the
+same from-top snapshot the UI exports). `AudioCoprocessor::export_spc_live`
+assembles it from the live chip: the SPC700 plugin's `dump_spc` for the resident
+path, `build_spc_file` directly for the built-in HLE `SgbApu` (which the UI
+export greys but the debug path still dumps).
+
+Plumbing: the SPC700 plugin's `dump_spc` export assembles the file guest-side
+(the CPU/DSP/`$F0-$FF` state the ARAM-only `read_ram` ABI can't reach) and ships
+it over the emit channel under `EMIT_KIND_SPC` (ABI v6); `AudioCoprocessor::
+export_spc` / `can_export_spc` / `export_spc_live` carry it through `GameBoy` to
+the frontend action and the MCP `dump-spc` tool.
 
 ## Save states
 
@@ -304,3 +381,166 @@ the shared DSP and re-attaching the SPC700 link).
   pipeline phase and the exact ~5-sample decode startup are approximated.
 - **Bent GAIN** uses `env` for the `0x600` test rather than a separate hidden
   envelope shadow (a minor curve difference).
+
+## Clean-room N-SPC engine (opt-in, work-in-progress)
+
+An **original** SPC700 N-SPC engine that replaces the SGB ROM's copyrighted engine
+code, so SGB music becomes upstreamable — only the *samples* need the user's ROM.
+**Default is the ROM's own engine** (authentic, accurate); set the env var
+`SLOPGB_NSPC_CLEANROOM` to run the clean-room engine instead.
+
+- **Where / build.** `crates/slopgb-sgb-coprocessor/nspc/`: `engine.asm` (source),
+  `driver.bin` (built artifact, `include_bytes!` as `NSPC_ENGINE` in `lib.rs`),
+  `Makefile`, `linkfile`, `README.md`, `spec/SPEC.md` (design specs). Built with
+  **WLA-DX** (`wla-spc700` + `wlalink` on `PATH`), run `make` in `nspc/`. Commit
+  both `engine.asm` **and** `driver.bin`. It loads at
+  APU `$0400`; `install_sgb_bios` uploads it over `$0400` and uploads the ROM's
+  sound DATA (`$4B00` sample dir, `$4C10` pitch/velocity tables, `$4C30` instrument
+  table, `$4DB0` BRR) from `--sgb-bios`.
+- **Clean-room process.** Written by a walled subagent from `nspc/spec/SPEC.md`
+  ONLY — never the ROM or any disassembly. The (dirty) coordinator produced those
+  behavioral specs from ROM disassembly and relayed only black-box test results.
+  Keep this wall if resuming: never feed the ROM/disassembly to the engine author.
+- **Works:** plays Animaniacs' intro + title + level songs, correct pattern
+  sequence (song-list loop controls), tempo `(500*tempo)/256`, all 8 channels,
+  correct pitch, `$00`-terminated tracks, velocity + quantization + instrument
+  tables, comm-port play/stop protocol. Verified against the ROM engine by A/B via
+  the MCP `dump-spc` tool (decode the `.spc`'s DSP voice registers per engine).
+- **Fixed in this polish pass** (each a spec error I corrected, then a walled agent
+  re-implemented from the spec — clean-room wall kept):
+  1. **VCMD map**: `$E1`=pan, `$EA`=per-channel transpose, `$ED`=channel volume
+     (were mis-assigned; the title lead's `$EA +12` was dropped → octave-low, and
+     the transpose value corrupted channel volume → quiet).
+  2. **Octave**: `OCT_REF` 6 → 5 (everything was exactly one octave low).
+  3. **Song-list loop freeze**: a `movw ya, wptr` left `Y`=hi(ptr) so the
+     loop-target read derailed the cursor to garbage (SPC700 flag/reg-carryover).
+  4. **SFX faded the music**: music is score-code-only (port0); the SFX-attributes
+     byte (port3) is not a fade trigger; score `$00` = no music change.
+  5. **Frame model** (the tricky one): the *conductor* model — a track's `$00`
+     stops only that channel, the frame advances when **channel 0** ends, and a
+     null (`0`) frame track pointer leaves a channel running so a long melody spans
+     frames. (Earlier wrong guesses: "wait for all tracks" dropped the
+     accompaniment; "loop every short track" made a track repeat itself.)
+  6. **Play/transfer race** (silent start): the play score can reach the engine
+     before the `SOU_TRN` copy of the song into `$2B00` lands, so `start_song` read
+     an all-zero pointer, walked zero-page into a `$0000` end-word, and latched
+     silence — and edge-triggered `poll_comm` never retried. Fix: reject a `0`
+     song-pointer high byte as not-ready and re-poll until the data lands.
+  7. **Master volume** (was near-mute): `$E5 $F8` was written straight to DSP MVOL,
+     which is **signed** (`$F8` = −8 ≈ mute). Fix: `$E5` is a *software* per-voice
+     scalar (`songvol`); the DSP main volume is the SGB hardware master. `0` only at
+     boot, it slews up to `$60` on the base-tick timer (boot-only fade-in — a song
+     playing during that ramp catches it; one starting after starts at full). Once
+     it has reached `$60` (`booted`), a play command **snaps** to `$60` (no per-song
+     fade-in). Software `$E5` per-voice master + boot/`$80` DSP-master fades.
+  8. **Fade-out** (`port0` `$80`–`$FF`): NOT an instant stop — slew DSP MVOL down to
+     `0` while the music keeps playing (reference keeps sequencing new notes as it
+     fades), then idle. Trigger was `port0` bit 7, confirmed by A/B (`$80` → MVOL
+     `$60`→`0`). It must be quick (`FADE_OUT_RATE`, ~0.8 s): the host reloads `$2B00`
+     with the next song mid-transition, so the fade has to stop the old song before
+     that reload or the sequencer reads the new bytes through stale cursors → a
+     stuck garbage note. (Rate is a tight by-ear margin: too slow ⇒ garbage.)
+  9. **Per-voice volume formula** (was ~1.6× too loud, quiet drums audible, loud
+     songs clipping): **disassembled the ROM engine's volume routine** (from an ARAM
+     dump, coordinator-side) and RE'd the exact chain — numerically reproduces every
+     voice's `VOLL`/`VOLR`. Per side: `t = pan_gain`;
+     `t = (t*songvol)>>8` (`$E5`, ONCE); `t = (t*VELTAB[vel])>>8`; `t =
+     (t*chvol)>>8`; **`t = (t*t)>>8` (final square)**. The square is the real
+     attenuation — earlier black-box fits (a bogus "apply songvol twice") only held
+     when velocity/chvol matched. `CHVOL_DEFAULT` → `$FF` (reference inits every
+     channel to `$FF`; `$ED` overrides). `VELTAB`/`QUANTTAB` verified identical to
+     the reference (`$4C18`/`$4C10`). Off-center pan curve is a further refinement.
+- **Left to do (behind the flag):** echo/reverb — `$F5`/`$F7` operands are consumed
+  but the DSP echo path is off; the ROM engine runs EON=`$07`, EVOL=`$C0`.
+- **Diagnostics.** The `coprocessor` MCP tool's status shows `ENG(clean-room)
+  songlp/tempo/tickacc/state/activemask/tdurrem` when the flag is set. A/B against
+  ground truth by toggling the env var (unset = ROM engine); `dump-spc` (UI or MCP)
+  writes a `.spc` whose DSP register file gives per-voice pitch/vol/SRCN.
+- **Tunables** (top of `engine.asm`): `REF_NOTE`, `OCT_REF`, `PITCH_OUT_SHIFT`
+  (pitch); `TIMER_DIV`, `TEMPO_DEFAULT` (tempo); `CHVOL_DEFAULT` (per-voice level),
+  `SGB_MASTER` (`$60` DSP-master target), `FADE_IN_RATE` (base ticks per master step).
+- **Bring-up bugs fixed** (mostly SPC700 flag-clobber + my spec errors): SBN block
+  header is `[len,dest]` not `[dest,len]`; per-instrument pitch base is big-endian;
+  `$F7`/`$F5` take 3 operands; two `MOV`/`INCW`-before-branch flag clobbers (froze
+  ch0's tempo to 0; made `$00` end-of-track unreachable so frames never advanced).
+
+## SF2 soundfont sample bank (`--sf2`)
+
+A standard SoundFont-2 importer and exporter for the N-SPC sample bank, decoupling
+the playable audio (samples + instrument table) from the engine code and the ROM.
+Any standard RIFF SF2 can be imported; the output is uploadable to APU RAM at the
+fixed N-SPC sample destinations (`$4B00`/`$4C30`/`$4DB0`). Plays with either the
+ROM engine (requires `--sgb-bios`) or the clean-room engine (no ROM needed).
+
+**Engine and sample source are independent axes** (controlled separately):
+- **Engine:** the ROM's resident engine code (via `--sgb-bios`, default when present)
+  OR the clean-room `NSPC_ENGINE` (set `SLOPGB_NSPC_CLEANROOM`, or forced when `--sf2`
+  is given with no `--sgb-bios`).
+- **Samples:** the ROM's own `$4B00` directory + `$4C30` instrument table + `$4DB0`
+  BRR data, OR an SF2-derived bank that **overrides** all three regions.
+
+**Three combinations** (all route through [`SgbCoprocessor::install_nspc`] in
+`crates/slopgb-sgb-coprocessor/src/samples.rs`):
+1. `--sgb-bios` alone → ROM engine + ROM samples.
+2. `--sf2` alone → clean-room engine + SF2 samples (BIOS not required).
+3. `--sf2` + `--sgb-bios` → ROM engine + SF2 samples (or clean-room if the env is also set).
+
+**The importer runs as a tier-3 wasm subsystem plugin** (`sf2.wasm`, crate
+`slopgb-sf2-plugin`), riding the generic coprocessor ABI — not a plugin-host change.
+The conversion logic itself still lives in the shared `slopgb-sf2` crate (std-only,
+zero external deps, `forbid(unsafe_code)`), compiled *into* `sf2.wasm` for the guest
+side and still linked natively for the exporter (below) and the frontend's `.smpl`
+(de)serialize:
+- Takes a standard RIFF SF2 file (INFO/sdta/pdta chunks), parses it, and produces
+  the three N-SPC memory regions.
+- Resamples PCM to the SPC700's rate, BRR-encodes each sample (9-byte blocks,
+  brute-force filter×shift per block, minimum error, predictor state threaded).
+- Builds the sample directory at `$4B00` (64 entries × 4 bytes: start_lo, start_hi,
+  loop_lo, loop_hi, absolute APU addresses) and the instrument table at `$4C30`
+  (64 entries × 6 bytes: SRCN, ADSR1, ADSR2, GAIN, base16_hi, base16_lo — base16
+  is big-endian, default `$1000`).
+- **Not carried by SF2:** the quant/velocity table at `$4C10` is an **engine** table,
+  baked into the ROM engine or the clean-room engine; the SF2 does not carry it,
+  and [`import_sf2`]/[`export_sf2`] ignore it.
+
+**The `.smpl` cache** (`crates/slopgb-sf2/src/cache.rs`) is the seam between the
+cache-hit fast path and the plugin:
+- The frontend hashes the SF2 (a 64-bit `std::hash::DefaultHasher` over the
+  **content bytes**, hex-encoded, so editing the SF2 in place never serves stale
+  cache) and checks `<hash>.smpl` next to the SF2
+  file first — a cache **hit** needs no plugin at all: `sf2.wasm` doesn't even have
+  to be present, since the cache is just deserialized directly.
+- On a cache **miss**, the frontend loads `<plugins_dir>/sf2.wasm` as a
+  `slopgb_plugin_host::LoadedCoprocessor`, `set_file`s the SF2 bytes, and calls
+  `run_until`; the guest converts via `slopgb_sf2::import_sf2` + `cache::serialize`
+  internally, and the frontend pulls the resulting `.smpl` payload back out through
+  the coprocessor's `save_state` blob channel and writes it to `<hash>.smpl` before
+  deserializing it into the three regions — same on-disk format as before.
+- If `--sf2` is given, the cache misses, and `sf2.wasm` is absent or fails to load,
+  the frontend logs `--sf2 given but sf2.wasm not found in the plugins dir; no SF2
+  samples loaded` and the run proceeds without SF2 samples (ROM/clean-room engine
+  samples, if any, are used instead).
+- This is a distinct plugin seam from the SGB coprocessor's `spc700.wasm` +
+  `w65c816.wasm`: `sf2.wasm` is driven directly by the frontend on `--sf2`, not
+  auto-loaded as part of SGB machine bring-up.
+- **Format:** magic `SMP1` (4 bytes) + u8 version (currently 1) + three regions in order:
+  for each region (dir, instr, brr): u16 dest LE + u32 len LE + `len` bytes.
+
+**The exporter stays native** (`cargo xtask gen-sf2 <program.rom> <out.sf2>` — only
+the runtime *import* path moved to the `sf2.wasm` plugin, export did not):
+- Decodes a ROM's resident SPC700 BRR samples back to PCM and writes a standard,
+  playable SF2 file (loads in fluidsynth/simpler; not GM-compatible).
+- Reverses the importer: reads the APU upload table from the ROM, assembles APU RAM,
+  and exports referenced samples + instrument table via [`export_sf2`].
+- The example soundfont is generated to a scratch path outside the repo (never
+  committed, user-ROM-derived); regenerate with this command whenever the source
+  ROM changes.
+
+**Known ceilings** (from `crates/slopgb-sf2/src/mapping.rs`):
+- Single sample zone per SF2 instrument (no velocity/key splits).
+- Mono samples only (stereo not supported).
+- No 24-bit `sm24` samples.
+- Linear-interpolation resampler (not band-limited).
+- ADSR1/ADSR2/GAIN ↔ SF2 volume envelope mapping is lossy (documented in `adsr.rs`).
+- Echo/reverb not modeled.
+- 64-sample directory maximum (hard limit on N-SPC layout).

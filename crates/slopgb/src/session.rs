@@ -7,7 +7,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use slopgb_core::{CLOCK_HZ, CartridgeError, DEFAULT_SAMPLE_RATE, GameBoy, Model, RamInit};
-use slopgb_sgb_coprocessor::{CPU_WASM, SPC_WASM, SgbCoprocessor};
+use slopgb_plugin_host::LoadedCoprocessor;
+use slopgb_sgb_coprocessor::{CPU_WASM, Engine, SPC_WASM, SampleRegions, SgbCoprocessor};
 
 use crate::windows::options::ModelChoice;
 
@@ -78,6 +79,12 @@ pub(crate) struct Session {
     /// (or a dir missing either wasm) → the built-in `SgbApu` stands (golden-safe
     /// default). Kept so a power-cycle / model switch re-injects it.
     plugins_dir: Option<PathBuf>,
+    /// Optional SF2 soundfont path (`--sf2`/`SLOPGB_SF2`), kept so a power-cycle /
+    /// model switch re-applies it to the fresh machine. When present, its
+    /// converted sample regions override the ROM's own `$4B00`/`$4C30`/`$4DB0`
+    /// N-SPC sample bank; `None` = the ROM's own samples (or, off SGB / no
+    /// coprocessor plugin, a no-op).
+    sf2: Option<PathBuf>,
     /// Overlay the built-in default SGB border on a non-SGB machine — bgb's
     /// "GBC + initial SGB border" system mode (`ModelChoice::CgbBorder`). A
     /// machine property, so a power-cycle (`reset`) re-applies it.
@@ -121,6 +128,7 @@ impl Session {
             boot: OwnedBootSpec::default(),
             sgb_bios: None,
             plugins_dir: None,
+            sf2: None,
             sgb_border: false,
             ram_init: None,
             load_warning: None,
@@ -194,6 +202,7 @@ impl Session {
             boot: boot.to_owned(),
             sgb_bios: None,
             plugins_dir: None,
+            sf2: None,
             sgb_border,
             ram_init,
             load_warning,
@@ -230,6 +239,14 @@ impl Session {
         self.apply_sgb_coprocessor();
     }
 
+    /// Set the optional `--sf2` soundfont path, then re-apply the coprocessor's
+    /// N-SPC install so its sample regions take over immediately. Kept so a
+    /// `reset`/`set_model` rebuild re-applies it to the fresh machine.
+    pub(crate) fn set_sf2(&mut self, sf2: Option<PathBuf>) {
+        self.sf2 = sf2;
+        self.apply_sgb_coprocessor();
+    }
+
     /// Inject the combined coprocessor into the current (freshly built) machine
     /// when its plugin is present. The SGB SNES-side chips run only from a loaded
     /// plugin: with `spc700.wasm` + `w65c816.wasm` in the plugins dir and an SGB
@@ -250,7 +267,33 @@ impl Session {
             return;
         }
         match SgbCoprocessor::load(dir, DEFAULT_SAMPLE_RATE) {
-            Ok(cop) => self.gb.set_audio_coprocessor(Box::new(cop)),
+            Ok(mut cop) => {
+                // Engine and sample source are independent axes (see
+                // `slopgb-sgb-coprocessor`'s `install_nspc`): the ROM's own
+                // resident engine plays only with `--sgb-bios` present (unless
+                // the clean-room env override is set); the sample bank is the
+                // ROM's own unless `--sf2` supplies an override — which also
+                // forces the clean-room engine when no `--sgb-bios` is given,
+                // since there is no ROM engine code to fall back to.
+                let cleanroom_env = std::env::var_os("SLOPGB_NSPC_CLEANROOM").is_some();
+                let engine = if self.sgb_bios.is_some() && !cleanroom_env {
+                    Engine::Rom
+                } else {
+                    Engine::CleanRoom
+                };
+                let sf2_regions: Option<SampleRegions> = self
+                    .sf2
+                    .as_ref()
+                    .and_then(|p| load_or_import_sf2(p, self.plugins_dir.as_deref()));
+                if (self.sgb_bios.is_some() || sf2_regions.is_some())
+                    && !cop.install_nspc(self.sgb_bios.as_deref(), engine, sf2_regions.as_ref())
+                {
+                    eprintln!(
+                        "slopgb: N-SPC sample/engine install failed; using clean-room firmware"
+                    );
+                }
+                self.gb.set_audio_coprocessor(Box::new(cop));
+            }
             Err(e) => eprintln!("slopgb: {e}; using the built-in SGB APU"),
         }
     }
@@ -474,6 +517,124 @@ impl Session {
         if self.gb.cycles() >= self.next_autosave {
             self.next_autosave = self.gb.cycles().saturating_add(AUTOSAVE_CYCLES);
             self.flush_save();
+        }
+    }
+}
+
+/// Host-file key handed to the SF2 converter plugin's `set_file` (mirrors
+/// `slopgb_sf2_plugin::SF2_FILE_KEY`; the plugin reads only this one file, so a
+/// single fixed key suffices). Hardcoded to keep the plugin crate out of the
+/// frontend's dep list — the same pattern `msu1.rs` uses for `DATA_FILE_KEY`.
+const SF2_FILE_KEY: u32 = 0;
+/// Filename of the SF2 converter coprocessor plugin inside the plugins dir.
+const SF2_PLUGIN_WASM: &str = "sf2.wasm";
+
+/// Resolve an `--sf2` path to its [`SampleRegions`]: check the `.smpl` cache
+/// sitting next to the file (named `<hash-of-the-sf2-contents>.smpl` in the
+/// SF2's parent directory — content-addressed, so an SF2 edited in place at
+/// the same path is never served a stale cache) first (no plugin needed on a
+/// cache hit), else drive the `sf2.wasm` tier-3 coprocessor plugin to convert
+/// it and write the cache for next time. `None` on any unrecoverable error
+/// (read/import/plugin failure), logged — the caller then falls back to the
+/// ROM's own samples.
+fn load_or_import_sf2(sf2_path: &Path, plugins_dir: Option<&Path>) -> Option<SampleRegions> {
+    let bytes = match fs::read(sf2_path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("slopgb: cannot read SF2 '{}': {e}", sf2_path.display());
+            return None;
+        }
+    };
+    use std::hash::Hasher;
+    let mut h = std::hash::DefaultHasher::new();
+    h.write(&bytes);
+    let key = h.finish();
+    let cache_path = sf2_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(format!("{key:016x}.smpl"));
+    if cache_path.exists() {
+        match slopgb_sf2::read_cache(&cache_path) {
+            Ok(r) => {
+                return Some(SampleRegions {
+                    dir: r.dir,
+                    instr: r.instr,
+                    brr: r.brr,
+                });
+            }
+            Err(e) => eprintln!(
+                "slopgb: SF2 cache '{}' unreadable ({e}); re-importing",
+                cache_path.display()
+            ),
+        }
+    }
+
+    let Some(dir) = plugins_dir else {
+        eprintln!(
+            "slopgb: --sf2 given but sf2.wasm not found in the plugins dir; no SF2 samples loaded"
+        );
+        return None;
+    };
+    let wasm_path = dir.join(SF2_PLUGIN_WASM);
+    let wasm_bytes = match fs::read(&wasm_path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!(
+                "slopgb: --sf2 given but sf2.wasm not found in the plugins dir; no SF2 samples loaded ({e})"
+            );
+            return None;
+        }
+    };
+    let mut cop = match LoadedCoprocessor::load(&wasm_bytes) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!(
+                "slopgb: --sf2 given but sf2.wasm not found in the plugins dir; no SF2 samples loaded ({e})"
+            );
+            return None;
+        }
+    };
+    if let Err(e) = cop.reset() {
+        eprintln!("slopgb: sf2.wasm reset failed: {e}");
+        return None;
+    }
+    cop.set_file(SF2_FILE_KEY, bytes);
+    if let Err(e) = cop.run_until(1) {
+        eprintln!("slopgb: sf2.wasm conversion failed: {e}");
+        return None;
+    }
+    let payload = match cop.save_state() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("slopgb: sf2.wasm save_state failed: {e}");
+            return None;
+        }
+    };
+    if payload.is_empty() {
+        eprintln!(
+            "slopgb: SF2 '{}' import (via sf2.wasm) produced no samples",
+            sf2_path.display()
+        );
+        return None;
+    }
+    if let Err(e) = fs::write(&cache_path, &payload) {
+        eprintln!(
+            "slopgb: cannot write SF2 cache '{}': {e}",
+            cache_path.display()
+        );
+    }
+    match slopgb_sf2::cache::deserialize(&payload) {
+        Ok(r) => Some(SampleRegions {
+            dir: r.dir,
+            instr: r.instr,
+            brr: r.brr,
+        }),
+        Err(e) => {
+            eprintln!(
+                "slopgb: SF2 '{}' plugin output unreadable: {e}",
+                sf2_path.display()
+            );
+            None
         }
     }
 }

@@ -1,35 +1,5 @@
-# MCP server
-
-An opt-in [Model Context Protocol](https://modelcontextprotocol.io) server so an
-LLM agent can drive the debugger against the **live machine you're watching** —
-befitting the name. Off by default. Start it at launch with `--mcp-port <N>` /
-`SLOPGB_MCP_PORT=<N>`, or at runtime from the game-window right-click **MCP**
-submenu (Start server… / Stop server) — mirrors the Link menu. The bound port
-shows in the title bar (`MCP :<port>`, like the link status). Lives in
-`crates/slopgb/src/mcp.rs` + `mcp/`.
-
-## Wiring it to a client
-
-```sh
-slopgb --mcp-port 8123 game.gb        # you play; window stays open
-claude mcp add --transport http slopgb http://127.0.0.1:8123/mcp
-```
-
-The server binds `127.0.0.1` only (never `0.0.0.0`) — localhost, not the network.
-
-## The tools
-
-| Tool | Args | Output |
-|---|---|---|
-| `disassemble` | `from`, `to` | `BB:AAAA<tab>label<tab>instruction<tab>cycles` per row (empty label → two tabs, bare cycle count). Symbol names substituted into branch/call operands. |
-| `peek` | `from`, `to` | 16 hex bytes/row, `BB:AAAA<tab>…` |
-| `cdl` | `from`, `to` | like `peek`, each byte → an `r`/`w`/`x` access word or `.` |
-| `cdl-ranges` | — | the continuous address ranges the CDL has logged (non-`.`), one `AAAA-AAAA` / `BB:AAAA-BB:AAAA` per line; empty when off / nothing logged |
-| `vram` | `view` (`bg`\|`win`\|`tile0`\|`tile1`\|`oam`\|`palette`), optional `scale` | a PNG (`image/png` content); `bg`/`win` game-paletted, Tiles grey-ramp |
-| `screencap` | optional `scale` | the current 160×144 screen (`gb.frame()`) as a PNG — cross-reference against `vram *` |
-| `breakpoint` | `address` | sets a PC breakpoint (the only mutating tool) |
-| `registers` | — | `af=… bc=… … lcdc=… stat=… ly=… cnt=… ie=… if=… ime=… ima=… spd=… rom=… ram=… wave=…` |
-| `coprocessor` | — | SGB coprocessor status: whether the SPC700 + 65C816 subsystem plugins are engaged (or the built-in HLE / not-SGB) |
+| `coprocessor` | — | SGB coprocessor status: the SPC700 + 65C816 plugins engaged / built-in HLE / not-SGB |
+| `dump-spc` | optional `mode` | writes the SGB SPC700 state to `slopgb-<ms>-<mode>.spc` and reports the path. `mode` = `live` (default — the driver's current state, for debugging mid-song) or `start` (the from-the-top snapshot the UI's "Export SPC" writes) |
 | `expr` | `expression` | evaluates a bgb-style debugger expression (hex default, register names, `[addr]`) |
 | `memdump` | `from`, `to`, `file` | writes the range's raw bytes to a local `file` (feeds `simulate`); text confirms `N bytes … to file` |
 | `savestate` | `file` | writes a full savestate (CPU + VRAM + all machine state, **not** the ROM) to `file` — capture a checkpoint before a glitch |

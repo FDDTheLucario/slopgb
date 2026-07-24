@@ -18,9 +18,11 @@ tier-1 `INTROSPECTION` (`PluginHost` per-frame pump, `--plugins`), tier-2 tool
 (`LoadedTool`, MCP), tier-3 `SUBSYSTEM` (`LoadedCoprocessor`): the SGB
 coprocessor auto-loads `spc700.wasm` + `w65c816.wasm` from the `--plugins` dir on
 SGB models; MSU-1 loads from a `--msu1` pack. **Subsystem plugins (SPC700 / 65C816
-/ MSU-1 — `slopgb-*-plugin`, built by `cargo xtask stage-plugins`) are
+/ MSU-1 / SF2 — `slopgb-*-plugin`, built by `cargo xtask stage-plugins`) are
 first-class**: the host supports every valid subsystem type via the generic
-coprocessor ABI. They load through their own seam — the tier-1 `--plugins`
+coprocessor ABI. `sf2.wasm` (crate `slopgb-sf2-plugin`) is driven directly by the
+FRONTEND on a `--sf2` cache miss, not auto-loaded by the SGB coprocessor. They
+load through their own seam — the tier-1 `--plugins`
 *scanner* skips them (a loader mismatch, not an invalid plugin), even though the
 SGB coprocessor reads its plugins from that same directory.
 

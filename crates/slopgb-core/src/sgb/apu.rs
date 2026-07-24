@@ -45,10 +45,11 @@ const DSP_PERIOD: u32 = 32;
 /// is accumulated in `1/512`-SPC-cycle units to stay exact.
 const SPC_NUM: i64 = 125;
 const SPC_DEN: i64 = 512;
-/// Full-scale S-DSP output (±32768) → mix amplitude. Half scale keeps the SNES
-/// audio from swamping the Game Boy channels or clipping the device.
-// ponytail: fixed loudness balance; expose a knob if a game needs rebalancing.
-const MIX_SCALE: f32 = 0.5 / 32768.0;
+/// Full-scale S-DSP output (±32768) → mix amplitude. Unity: full-scale DSP maps
+/// to ±1.0, the same headroom as the GB APU's full-scale output, so SGB music
+/// sits at parity with the GB channels instead of half-volume under them.
+// ponytail: fixed loudness balance; expose a per-game knob if one needs it.
+const MIX_SCALE: f32 = 1.0 / 32768.0;
 
 /// A lightweight [`Dsp`] the SPC700 owns; it forwards `$F2`/`$F3` register
 /// accesses to the shared [`SDsp`]. Synthesis (which needs APU RAM) is driven
@@ -248,8 +249,10 @@ impl SgbApu {
         let mut off = 0usize;
         let mut entry = None;
         while off + 4 <= data.len() {
-            let dest = u16::from_le_bytes([data[off], data[off + 1]]);
-            let len = usize::from(u16::from_le_bytes([data[off + 2], data[off + 3]]));
+            // SBN / SNES APU block header is `[u16 len, u16 dest]` (SBN2SPC; the
+            // SGB system ROM's loader) — length first, destination second.
+            let len = usize::from(u16::from_le_bytes([data[off], data[off + 1]]));
+            let dest = u16::from_le_bytes([data[off + 2], data[off + 3]]);
             off += 4;
             if len == 0 || off + len > data.len() {
                 break;
@@ -352,6 +355,17 @@ impl super::AudioCoprocessor for SgbApu {
 
     fn clone_box(&self) -> Box<dyn super::AudioCoprocessor> {
         Box::new(self.clone())
+    }
+    // No `export_spc` / `can_export_spc`: this HLE square driver plays SGB sound
+    // effects, not sequenced music with a song-start to snapshot from — the
+    // trait default (`None` / not exportable) greys the UI export for it.
+
+    fn export_spc_live(&self) -> Option<Vec<u8>> {
+        // The MCP debug path still dumps its live SPC700 + DSP state on demand.
+        Some(slopgb_snes_apu::build_spc_file(
+            &self.spc,
+            &self.dsp.borrow(),
+        ))
     }
 }
 
