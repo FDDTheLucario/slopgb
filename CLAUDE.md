@@ -17,21 +17,20 @@ clean-room chip cores `slopgb-snes-apu` (SPC700 + S-DSP) / `slopgb-w65c816` /
 tier-1 `INTROSPECTION` (`PluginHost` per-frame pump, `--plugins`), tier-2 tool
 (`LoadedTool`, MCP), tier-3 `SUBSYSTEM` (`LoadedCoprocessor`): the SGB
 coprocessor auto-loads `spc700.wasm` + `w65c816.wasm` from the `--plugins` dir on
-SGB models; MSU-1 loads from a `--msu1` pack. **Subsystem plugins (SPC700 / 65C816
-/ MSU-1 — `slopgb-*-plugin`, built by `cargo xtask stage-plugins`) are
+SGB models; MSU-1 loads from a `--msu1` pack. **Subsystem plugins are
 first-class**: the host supports every valid subsystem type via the generic
-coprocessor ABI. They load through their own seam — the tier-1 `--plugins`
-*scanner* skips them (a loader mismatch, not an invalid plugin), even though the
+coprocessor ABI, loading through their own seam — the tier-1 `--plugins`
+*scanner* skips them (a loader mismatch, not an invalid plugin) even though the
 SGB coprocessor reads its plugins from that same directory.
 
 **Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before touching core** — timing
 contract (tick-then-access M-cycles), memory map, module ownership, mooneye +
 game-boy-test-roms harness protocols.
 
-This tree is the integration of two lines: the **SameBoy cycle-exact timing port**
-(the accuracy-critical, actively-developed core — its State ladder below) and the
-**BGB-style debugger frontend** (viewers, savestate, link, right-click menus). Core
-accuracy is authoritative; the UI hooks are read-only introspection layered on top.
+This tree integrates two lines: the **SameBoy cycle-exact timing port** (the
+accuracy-critical core) and the **BGB-style debugger frontend** (viewers,
+savestate, link, right-click menus). Core accuracy is authoritative; the UI
+hooks are read-only introspection layered on top.
 
 ## The golden-safe law (the one invariant)
 
@@ -54,9 +53,7 @@ dual-clock fork scaffolding was deleted). The golden/baselines are the eager ref
 
 ## Where the detail lives
 
-This file is a lean index. Implementation-state narratives live in dedicated dirs —
-**read the matching file before touching that area, and write changes there, not here**
-(see Rules).
+This file is a lean index; implementation-state narratives live in dedicated dirs — **read the matching file before touching that area, and write changes there, not here** (see Rules).
 
 | Dir / file | Holds |
 |---|---|
@@ -102,15 +99,13 @@ When a **hardware** question comes up, consult in order:
   `docs/ui-state/` (frontend) file — one file per subsystem/area. Keep CLAUDE.md a
   lean index: durable rules, commands, and pointers only.
 - **No jargon comments; keep comments fresh.** A comment explains what the *current*
-  code does + *why* the hardware behaves so — never process narrative. Forbidden in
-  comments: fork/session codenames (`tier2`, `eager`, `flag-on/off`, `byte-identical
-  OFF`, `#11x`, `S5`, `C3`, "port stage N"), A/B-sweep stories, and "inert/dead/never-
-  called/off" claims you haven't just verified. Put narrative in the commit or `docs/`;
-  keep the pinning ROM + hardware citation inline. **When you touch a comment, re-verify
-  it against the code**: every named symbol must exist (grep it); a "removing this is
-  byte-identical" claim must be *probed* (force the value off, run `golden_fingerprint`
-  — if golden changes it is LIVE and the claim is false). A stale/false core comment is
-  a regression trap: a defect, not a nit.
+  code does + *why* the hardware behaves so — never process narrative (no fork/session
+  codenames, A/B-sweep stories, or unverified "inert/dead/never-called" claims).
+  Narrative belongs in the commit or `docs/`; keep the pinning ROM + hardware citation
+  inline. **When you touch a comment, re-verify it**: every named symbol must exist
+  (grep it); a "byte-identical if removed" claim must be *probed* (force the value
+  off, run `golden_fingerprint` — if golden changes it's LIVE, the claim is false). A
+  stale/false core comment is a regression trap, not a nit.
 - Commit + push frequently. **Every commit MUST be SSH-signed** (`commit.gpgsign=true`,
   `gpg.format=ssh`, key `~/.ssh/id_ed25519`, committer `richard@richardmoch.xyz`, verify
   `%G?`=G; `export SSH_AUTH_SOCK=/run/user/1000/ssh-agent.socket`, commit `-S`). Signing
@@ -145,16 +140,11 @@ emulated s.
 
 ## State
 
-Baseline (all green, on `main`): mooneye **93/93**, gbtr v7.0 **215/0**, core lib +
-frontend green, clippy clean. Missing ROMs skip unless `SLOPGB_REQUIRE_ROMS=1` (run
-`test-roms/download.sh` first). The SameBoy cycle-exact port, SGB support (SPC700 +
-S-DSP audio, BIOS, border, and the SNES-side LLE: 65C816 + SNES-PPU plugins, GP-DMA,
-autopoll, the arcade-takeover runtime — Space Invaders' ARCADE mode runs its own
-SNES program end to end) and the bgb-UI clone (debugger, viewers, Options, link,
-opt-in boot ROM, MCP) are all merged — per-area detail in
+Baseline (all green, on `main`): mooneye **439/439** (rom×model), gbtr v7.0
+**7047 cases** (5941 pass + 1106 baselined floor), core lib + frontend green,
+clippy clean. Missing ROMs skip unless `SLOPGB_REQUIRE_ROMS=1` (run
+`test-roms/download.sh` first). Per-area detail:
 [`docs/ui-state/`](docs/ui-state/README.md) + [`docs/hardware-state/`](docs/hardware-state/README.md).
-UI theming (contemporary Light default / Dark / Classic + custom-theme API; colour-only,
-`T` toggles Light↔Dark): [`docs/ui-state/theming.md`](docs/ui-state/theming.md).
-Known residuals (all SameBoy-FAIL/floored, NOT regressions): DS mid-dot render floor,
-halt-wake/HDMA levers.
+Known residuals (all SameBoy-FAIL/floored, NOT regressions): DS mid-dot render
+floor, halt-wake/HDMA levers.
 

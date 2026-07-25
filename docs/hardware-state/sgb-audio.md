@@ -38,7 +38,7 @@ coprocessor here. It only replaces on `Model::Sgb`/`Sgb2` (off SGB there is no
 slot, so the box is dropped); like `debug_set_reg`/load-state it is an explicit
 user-initiated mutation, never taken on the passive frame loop. The box exists
 only on `Model::Sgb`/`Sgb2`, so `Dmg`/`Cgb` never touch the seam (golden-safe).
-Verified byte-identical: `golden_fingerprint` + mooneye 93/93 + the SGB audio
+Verified byte-identical: `golden_fingerprint` + mooneye 439/439 + the SGB audio
 unit tests + the two injection tests
 (`injected_audio_coprocessor_is_driven_through_the_public_seam`,
 `set_audio_coprocessor_is_a_noop_off_sgb`), all green after the decoupling.

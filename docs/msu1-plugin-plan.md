@@ -60,7 +60,7 @@ GB address.)
 store can't be cloned into the machine's save-state, so MSU-1 lives entirely in
 the frontend (outside `GameBoy`), like the audio pipe; with no `--msu1` pack the
 `msu1: Option<Msu1>` is `None`, nothing is polled or mixed, and the core + audio
-path are byte-identical (proven: `golden_fingerprint` + mooneye 93/93 unchanged;
+path are byte-identical (proven: `golden_fingerprint` + mooneye 439/439 unchanged;
 no core file was touched). Test: `crates/slopgb/src/msu1_tests.rs` authors a
 fixture pack, writes the registers into cart RAM, and asserts a pumped frame
 produces non-silent mixed audio; with no pack the path is inert.
