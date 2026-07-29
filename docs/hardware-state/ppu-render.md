@@ -459,6 +459,29 @@ Variants measured and rejected while narrowing this: anchor `8 - cgb_lead`
 a per-line measured anchor (mealybug regresses), and extending the position form
 into the pre-output window once the hunt resolved (no effect).
 
+**Best variant so far: 39 recovered, 1 regression, mealybug clean.** Add a
+`fine_moved` gate to the fallback — the position form is only reached once
+`scx & 7` differs from the value the line started with:
+
+```rust
+// Render: line_fine = eff.scx & 7, captured at the render reset.
+// call: bg_map_col(scx, r.lx, r.fetch_x, is_cgb, r.stall == 0, r.hunt_done,
+//                  scx & 7 != r.line_fine)
+if (lx == 0 && !hunted) || !lead || !cgb || !fine_moved {
+    return (scx >> 3).wrapping_add(fetch_x) & 31;
+}
+let v = i32::from(scx) + i32::from(lx) + 6;
+(v.div_euclid(8) & 31) as u8
+```
+
+The gate is free by construction: while the fine scroll holds, the two forms are
+provably identical (that is what the equivalence check proves), so it can only
+remove behavior on lines that actually move `SCX & 7`.
+
+Also rejected: latching the column at `TileNoWait` to mirror SameBoy forming the
+address in `GET_TILE_T1` and reading in T2 — 13 regressions plus mealybug, so
+our T2-side computation is right for our pipeline.
+
 What remains is the `old/offset_3` DS + lcd-offset row: 8 px on row 0, the last
 tile. Our per-line dot alignment there puts `lx` off the `≡ 2 (mod 8)` grid the
 fixed anchor assumes. Solve that one row — without disturbing mealybug's
