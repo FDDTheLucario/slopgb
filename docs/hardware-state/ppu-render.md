@@ -320,10 +320,49 @@ plus `golden_fingerprint`, not on this cluster. `fetch_x` is also the window's
 tile counter (`win_mode` uses it directly), so the window path has to keep its
 own counter when the BG path stops using one.
 
-**Status: unfixed, root cause identified.** Seven arms measured and refuted
-(uniform delay, line-start latch, fetch-phase threshold, dots-since-fetch-start,
-deferred FIFO refill, fetch restart, `read - 4` dot rule) — all of them variations
-on sampling time, all doomed by the formula above.
+### Porting the formula in isolation does NOT work (attempted 2026-07-28)
+
+The formula was ported behind a gate, with a `pos_in_line` field added to
+`Render` to stand in for SameBoy's `position_in_line`. Two variants were
+measured against the cluster plus the scy / window / bgtiledata / bgtilemap /
+dmgpalette guard families:
+
+| variant | cluster | guards |
+|---|---|---|
+| shipped | 31/135 | unchanged |
+| ported formula, position advanced on every pop | 21/135 | unchanged |
+| + SameBoy's `-9 -> -16` hunt wrap (display.c:716) | **0/135** | unchanged |
+
+The guards are byte-stable in both variants, which proves the formula is
+*equivalent to ours for a stable SCX* — the port is arithmetically right. What
+is wrong is the position semantics, and that is not a detail that can be bolted
+on:
+
+- our pipeline has no pixel-position counter. It carries `prefill_pos`,
+  `hunt_idx`, `discard` and `fetch_x` as four separate pieces of state, and the
+  discarded first tile's pixels are never actually popped (the comparator runs
+  "as a bare counter", see `render.rs`), so there is nothing that corresponds
+  to `position_in_line` running -16 -> 160;
+- SameBoy hunts in a single counter that wraps `-9 -> -16` until the comparator
+  matches, so its position is never in `[-8, 0)` while hunting. We hunt in *two*
+  phases (a dot-rate prefill phase and a pop-rate phase after the FIFO starts
+  draining). Feeding the wrap into the pop-rate phase pushes mid-line fetches
+  into SameBoy's line-start branch (`position_in_line < -8` -> bare `SCX >> 3`),
+  which is what takes the cluster to zero.
+
+**So the column formula cannot be ported without first porting
+`position_in_line` itself as the pipeline's primary position state**, replacing
+the prefill/hunt/discard/fetch_x quartet. That is the fetcher-structure change,
+and it is a multi-session refactor: `fetch_x` is also the window's tile counter,
+the discarded-tile phase would have to start popping real pixels, and every one
+of the ~6000 green dot-level cases re-derives.
+
+**Status: unfixed, root cause identified, incremental porting exhausted.** Eight
+arms measured and refuted (uniform delay, line-start latch, fetch-phase
+threshold, dots-since-fetch-start, deferred FIFO refill, fetch restart,
+`read - 4` dot rule, ported column formula). The first seven were variations on
+sampling time and were doomed by the formula; the eighth shows the formula alone
+is not portable either.
 
 ## Post-boot VRAM (boot logo)
 
