@@ -158,7 +158,31 @@ so `scx_write_dot` never latches and the comparator hunt matches on its first
 dot: the coarse map column is the *only* live path, which is what makes this
 family a clean probe.
 
-The remaining lever is therefore the **phase relationship between the write
-commit and the fetch cycle**, not the sample point — i.e. which fetch sub-phase
-a mid-tile coarse write is allowed to affect. That needs a discriminated arm
-keyed on the in-flight fetch phase, swept against the full battery.
+### The in-flight fetch phase is not a discriminator either (swept 2026-07-28)
+
+The follow-up hypothesis — that a mid-tile coarse write should retarget the
+in-flight fetch only while it is early enough in the fetch — was built as a
+real discriminated arm (`Render::coarse` latched per tile fetch, with the FF43
+write applying to it only below a threshold) and swept two ways:
+
+- threshold on `FetchPhase` rank (0..=6);
+- threshold on dots-since-fetch-start (0..=8), which resolves finer than the
+  phase because the fetcher parks in `Push` for the tail of the 8-dot cycle
+  and the phase rank saturates there.
+
+**Both collapse to a binary.** Threshold 0 (never retarget: coarse latched at
+fetch start) scores 34/135; every threshold >= 1 reproduces the shipped live
+read at 31/135, with nothing in between. The knob is degenerate — writes always
+land at least one dot into a fetch, so "retarget if early" is never distinct
+from "always retarget". Only two behaviors are reachable in this formulation,
+and both were already measured above: latch-at-fetch-start is the +13/-10
+shuffle, live is the baseline.
+
+So the split between the two sibling groups is **not** about where in the tile
+fetch the write lands. Ruled out as a family; look instead at the FIFO pop /
+push coupling or at `fetch_x` alignment (does hardware re-fetch or re-align the
+column on a coarse change?), not at when SCX is sampled.
+
+For the record, the groups that want opposite answers, from the double-speed
+ladder: `_ds_1/4/5/8` (positions 0,1 mod 4) want the live read; `_ds_2/3/6/7`
+(positions 2,3 mod 4) want the latched one.
