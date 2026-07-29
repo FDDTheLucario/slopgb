@@ -393,6 +393,372 @@ it — with the window keeping its own tile counter. That re-derives every green
 dot-level case (mealybug photos, the mode-3 fetch grid, the window machine) and
 is a scoped rewrite of mode 3, not an increment.
 
+### The working formula (measured, +40, not yet landed)
+
+The port DOES work once the position mapping is derived from data instead of
+guessed. `Render::lx` is our `position_in_line`; the mapping was found with an
+**equivalence check** — with SCX held constant the ported column must reproduce
+`(scx / 8) + fetch_x` fetch-for-fetch, which runs in seconds on one ROM and
+needs no battery. Use it for every future iteration; it caught three wrong
+constants that a battery run would have taken 6 minutes each to reject.
+
+Current best (equivalence-clean on both models, `bgtilemap` / `bgtiledata` /
+`window`, CGB and DMG all zero mismatches):
+
+```rust
+fn bg_map_col(scx: u8, lx: u8, fetch_x: u8, cgb: bool, lead: bool) -> u8 {
+    // lx == 0: pre-output, still in the leading-discard band.
+    // !lead (sprite stall running): our BG fetcher free-runs while the output
+    // position is frozen, so the position cannot track the fetch there —
+    // SameBoy instead parks its fetcher in PUSH.
+    if lx == 0 || !lead {
+        return (scx >> 3).wrapping_add(fetch_x) & 31;
+    }
+    let v = i32::from(scx) + i32::from(lx) + 6 + i32::from(cgb);
+    (v.div_euclid(8) & 31) as u8
+}
+// call site: bg_map_col(scx, r.lx, r.fetch_x, model.is_cgb(), r.stall == 0)
+```
+
+The `6 + cgb` anchor is measured, not SameBoy's literal `8 - is_cgb`: our `lx`
+sits at `8 * fetch_x - 6` at fetch time rather than SameBoy's multiple of 8,
+because we re-fetch the discarded first tile instead of pushing and popping it.
+DMG anchors 2 lower than CGB, consistent with the blob's pipeline already
+sitting two dots behind (6-dot OBJ fetches vs 5, mode-0 flip leading by 3 vs 2).
+
+**Ledger: `scx_during_m3` 31/135 -> 64/135, 40 baseline rows now passing, 5
+regressions** — 4 gambatte (`scx_during_m3/old/offset_3/scx_during_m3_ds_1
+[Cgb]` and three siblings, 8 px on row 0 each) and 1 mealybug
+(`m3_scx_high_5_bits_change2 [Cgb]`, 160 px). Every guard family
+(scy/window/bgtiledata/bgtilemap/dmgpalette) is byte-stable. An earlier variant
+(`+8 - cgb_lead`, no stall fallback) scored +39 with 3 regressions.
+
+**Not landed.** A net -35 floor is the kind of trade this project does land (the
+C3 flip removed 327 and added 44), but landing it needs the full sequence:
+whole battery, baseline rewrite (drop 40, add the residual), golden fingerprint
+regeneration, mooneye, and `classify_*.py` confirmation that each newly
+baselined row is SameBoy-FAIL — a row SameBoy passes may never be added. Do that
+in one pass; the formula above is the starting point, and the equivalence check
+is how to iterate on the residual cheaply.
+
+## Post-boot VRAM (boot logo)
+
+- Post-boot VRAM holds the boot logo *tile data* (incl. the (R) tile `$19`; `install_boot_logo_vram`).
+- Do: leave the DMG logo tile-**map** rows uninstalled — the pinned gambatte reference PNGs predate initial-VRAM modelling (see the doc comment), and gambatte's `_blank` halt ROMs are judged on the top tile row only.
+
+## Frame skip and CGB boot palettes
+
+- The first frame after an LCD enable is presented blank (`Ppu::frame_skip`, Pan Docs LCDC.7 / SameBoy frame-skip) — frame-compare harnesses must sample >=2 vblanks after the ROM's re-enable.
+- CGB DMG-compat boot palettes are the real boot-ROM *defaults* (BG table != OBJ table, `interconnect.rs`).
+- Do: leave the Nintendo-licensee title-hash table deliberately unmodelled.
+
+## PPU interrupt raising
+
+- The PPU raises STAT/VBlank IRQs via `Ppu::write`'s return value (single drain).
+- When adding a PPU register path, OR the returned IF bits into `intf` like the existing interconnect call sites.
+
+## Mid-mode-3 SCX and the BG map column (open, localized)
+
+The gambatte `scx_during_m3/scx_*c0/` families write SCX during mode 3 at an
+increasing NOP offset (`_1`.._8`); the dir name is the value sequence, so
+`scx_0060c0` writes $00 -> $60 -> $c0. 116 of these rows are baselined and
+SameBoy passes them, so they are bugs, not a floor.
+
+The failures are far smaller than the raw pixel counts suggest — probed
+2026-07-28 by running the 15+1-frame protocol and aligning each scanline
+against the reference:
+
+- `scx_0060c0/scx_during_m3_2` [Cgb]: **143 of 144 rows exact**; row 0 differs
+  in exactly 8 pixels (x0-x7).
+- `scx_0360c0/scx_during_m3_2` [Cgb]: 143 of 144 exact; row 0 is a clean
+  **+8-pixel (one tile) shift**, residual 0.
+- `scx_0060c0/scx_during_m3_3`: the inverse — row 0 exact, rows 1-143 off by 8.
+
+The 8 wrong pixels keep the reference's *bit pattern* and change only the
+shade, which is the test's tell: the map repeats one tile graphic with a
+different CGB palette attribute per column, so a shade change means the wrong
+map **column** was fetched. Attribute and tile number are read from the same
+map index in the same dot (`render/mode0.rs`), so they cannot desync — the
+column itself is wrong.
+
+The column is `(scx / 8) + fetch_x & 31`, sampled **live at the tile-number
+read** (`render/mode0.rs`). The pass/fail ladder is the discriminator:
+
+| dir (SCX sequence) | `_1` | `_2` | `_3` | `_4` | `_5` | `_6` |
+|---|---|---|---|---|---|---|
+| scx_0060c0 | pass | FAIL | FAIL | pass | pass | pass |
+| scx_0063c0 | FAIL | FAIL | FAIL | pass | pass | pass |
+| scx_0360c0 | pass | FAIL | FAIL | FAIL | FAIL | FAIL |
+
+so the coarse-SCX sample point is off by a bounded window, and the initial
+fine scroll (`scx & 7` = 0 vs 3 vs 7) selects which offsets land wrong — a
+nonzero initial fine scroll leaves the dot-5..12 comparator hunt
+(`render.rs`, `hunt_idx` vs a live `eff.scx & 7`) still running when the write
+arrives, whereas `scx & 7 == 0` matches on the first hunt dot and is immune.
+
+### The coarse-SCX sample point is NOT the lever (swept 2026-07-28)
+
+Do not re-chase this. Both arms were built and measured against the
+scx_during_m3 + scy/window/bgtiledata/bgtilemap PNG legs:
+
+- **Uniform delay** on the coarse SCX feeding the map column (sample it N dots
+  before the tile-number read; N=0 is the shipped behavior). N=1 is a no-op,
+  N=2 scores +3 net, N=3 is -14 and N=4 is -25, so N=2 looks like a unique
+  optimum — but the per-row delta shows it is a **shuffle, not a fix**: 13 rows
+  recover (`_2`, `_3`, `_ds_2/3/6/7`) while 10 rows that were passing break
+  (`_ds_1/4/5/8`, `scx_during_m3_spx0/1/2`). Want-opposite siblings, exactly
+  the uniform-lever artifact `rom-diff-weld` exists to catch.
+- **Line-start coarse latch** (only the fine scroll live mid-line): 4/135 vs a
+  31/135 baseline. Refuted — hardware does re-read coarse SCX mid-line.
+
+The guard families (scy, window, bgtiledata, bgtilemap) were byte-stable across
+every arm, so the effect is confined to this cluster.
+
+What the ladder actually says: the double-speed row `scx_0060c0` is
+`pass FAIL FAIL pass pass FAIL FAIL pass` over `_ds_1.._8` — a period of 4
+M-cycles, and at double speed 4 M-cycles = 8 dots = exactly one steady-state
+BG tile fetch cycle. So a 4-dot window inside each 8-dot fetch cycle is
+mishandled, and a uniform shift only slides which offsets land in it. For
+`scx_0060c0` the fine scroll never changes ($00/$60/$c0 all have `scx & 7 == 0`),
+so `scx_write_dot` never latches and the comparator hunt matches on its first
+dot: the coarse map column is the *only* live path, which is what makes this
+family a clean probe.
+
+### The in-flight fetch phase is not a discriminator either (swept 2026-07-28)
+
+The follow-up hypothesis — that a mid-tile coarse write should retarget the
+in-flight fetch only while it is early enough in the fetch — was built as a
+real discriminated arm (`Render::coarse` latched per tile fetch, with the FF43
+write applying to it only below a threshold) and swept two ways:
+
+- threshold on `FetchPhase` rank (0..=6);
+- threshold on dots-since-fetch-start (0..=8), which resolves finer than the
+  phase because the fetcher parks in `Push` for the tail of the 8-dot cycle
+  and the phase rank saturates there.
+
+**Both collapse to a binary.** Threshold 0 (never retarget: coarse latched at
+fetch start) scores 34/135; every threshold >= 1 reproduces the shipped live
+read at 31/135, with nothing in between. The knob is degenerate — writes always
+land at least one dot into a fetch, so "retarget if early" is never distinct
+from "always retarget". Only two behaviors are reachable in this formulation,
+and both were already measured above: latch-at-fetch-start is the +13/-10
+shuffle, live is the baseline.
+
+So the split between the two sibling groups is **not** about where in the tile
+fetch the write lands.
+
+### The FIFO pop/push coupling is correct (swept 2026-07-28)
+
+The follow-up leads were measured too, and both are refuted:
+
+- **No same-dot FIFO refill** (a FIFO that drains on a dot refills on the next
+  dot instead of the same one): 29/312 against a 158/312 baseline, wrecking
+  scy/bgtiledata/bgtilemap outright. The same-dot refill is load-bearing — it
+  is what produces the 8-dot steady-state cadence. `render_step` pops first and
+  then lets `fetcher_step` push into the emptied FIFO on that same dot, and
+  that ordering is right.
+- **A coarse SCX change restarts the in-flight tile fetch** (phase back to the
+  tile-number read, the way a window start re-anchors): 2/135 in the cluster.
+  The guard families are untouched, since the arm only fires on coarse changes,
+  so this is a clean refutation rather than a trade.
+
+Ruled out for this cluster, all measured: uniform coarse sample delay
+(shuffle), line-start coarse latch, a fetch-phase-discriminated arm, a
+dots-since-fetch-start threshold, deferred FIFO refill, and fetch restart on a
+coarse change.
+
+### The map-column latch: what one unified trace actually shows
+
+Tracing fetch phases and FF43 writes **in the same run on `ds_4`**, on the
+evaluated (16th) frame, settles the earlier inconsistency. The previous two
+traces had been taken from different ROMs and different frames, which is what
+made the numbers disagree.
+
+Line 1 of `scx_0060c0/scx_during_m3_ds_4`, steady state:
+
+```
+* dot= 92 SCXWR 00->60
+  dot=233 TileNoWait fx=18   dot=234 TileNo fx=18 (scx=60)
+  dot=237 HiWait     fx=18
+* dot=237 SCXWR 60->C0
+  dot=238 Hi         fx=18  (scx already C0)
+  dot=241 TileNoWait fx=19   dot=242 TileNo fx=19 (scx=C0)
+```
+
+So the fetch cadence is 8 dots with `Hi` at `read - 4`, exactly as inferred,
+and the ladder's writes step 2 dots per index (ds_1 at 243 down to ds_8 at 229).
+
+**Correction to the earlier entry in this file:** the claim that a
+`latch = read - 4` rule makes all eight `_ds` rows pass was wrong. The rule only
+changes rows whose write falls in the open window `(read-4, read)` — dots 239
+and 241 for the `fx=19` read at 242, i.e. **`ds_3` and `ds_2` only**. Rows
+whose write lands outside that window (ds_1 at 243, ds_4 at 237, ds_5 at 235,
+ds_8 at 229) are unaffected by the rule and keep whatever the shipped live read
+already gives them. The honest prediction is +2 with no regressions, not +8.
+
+That also explains why implementing it as "latch at the previous `Hi`" measured
+31/135 -> 9/135. `Hi == read - 4` holds only in steady state; around the
+line-start fetches (`first_discard`, the push gating in `push_allowed`, the
+12-dot startup walk) the previous `Hi` sits much further back than 4 dots, so
+the arm silently retimed the *early* tiles too. The cell-symbol dump is the
+check that catches this: on `ds_2` the shipped build already matches the
+reference on cells 0-18 and differs only at cell 19, so any arm that perturbs
+an early cell is wrong by construction.
+
+### The `read - 4` rule is REFUTED as a dot offset (built 2026-07-28)
+
+Built exactly as specified: a per-dot `eff.scx` ring, the tile-number read
+taking the value from 4 dots earlier, and the line's first real fetch
+(`fetch_x == 0`) exempted — that fetch's read coincides with the line-start SCX
+write, measured at dot 92 on both counts, and the startup walk has no 4-dot
+history.
+
+The prediction was +2 (`ds_2`, `ds_3`) with nothing else moving. Measured: the
+cluster goes 31/135 -> **8/135**. Exactly one row recovers (`ds_2`) and 24
+regress. `ds_3` does not recover at all. The guard families are byte-stable, so
+the arm is scoped correctly and this is a genuine refutation of the rule, not a
+cross-family trade.
+
+The regressions name the reason: `scx_0060c0` and `scx_0063c0` lose their
+single-speed `_4/_5/_6` legs on **both models**, plus `_ds_4/5/8`, all three
+`scx_during_m3_spx*` ROMs, and `scx_0761c0/_1 [Dmg]`. A 4-dot offset is two
+M-cycles at double speed but a **single** M-cycle at single speed, so one
+constant cannot mean the same thing on both — the single-speed legs shift by a
+whole instruction's worth of write timing and fall out of the window they were
+already inside.
+
+So the window is not a fixed dot offset. Anything replacing it has to be
+expressed in a unit that survives the speed switch (fetch-relative, or
+M-cycle-relative with a speed term), and it has to explain why `ds_3` stays red
+under a rule tuned to admit exactly its write dot. Both remain open.
+
+### ROOT CAUSE: our BG map column formula is structurally wrong
+
+Reading SameBoy 1.0.2 `Core/display.c` ends the guessing. In
+`advance_fetcher_state_machine`, case `GB_FETCHER_GET_TILE_T1` (display.c:958-962):
+
+```c
+else if ((uint8_t)(gb->position_in_line + 16) < 8) {
+    x = gb->io_registers[GB_IO_SCX] >> 3;          // line-start window
+}
+else {
+    x = ((gb->io_registers[GB_IO_SCX] + gb->position_in_line + 8
+          - (GB_is_cgb(gb) && !gb->during_object_fetch)) / 8) & 0x1F;
+}
+gb->last_tile_index_address = map + x + y / 8 * 32;
+```
+
+Ours (`render/mode0.rs`, `FetchPhase::TileNo`) is
+`(scx / 8).wrapping_add(fetch_x) & 31`.
+
+Three divergences, in order of importance:
+
+1. **Sum then divide, not divide then count.** SameBoy adds SCX to
+   `position_in_line` (the *pixel* output position, running from -16) and
+   divides once, so SCX's low three bits carry into the tile index. We divide
+   the coarse part out first and track tiles with an independent `fetch_x`
+   counter, so a fine-scroll change can never move our column. For a stable SCX
+   the two agree exactly — which is why the rest of the BG corpus passes — and
+   they diverge precisely when SCX changes mid-line, i.e. this cluster.
+2. **A CGB-only -1 term**, `8 - (is_cgb && !during_object_fetch)`: the CGB forms
+   the address one pixel earlier than the DMG except while an object fetch is in
+   flight. We have no such term, which is why the single-speed and
+   double-speed legs of the same dir disagree under every uniform arm.
+3. **The address is formed one T-cycle before the read.** SameBoy computes it in
+   `GET_TILE_T1` and does the VRAM read in `GET_TILE_T2`; we compute and read in
+   the same dot.
+
+This explains all seven failed arms at once: every one of them tuned *when* SCX
+is sampled, but the *formula* is wrong, so no sampling time can be right for
+both a fine-scroll-0 dir (`scx_0060c0`) and a fine-scroll-3/7 one
+(`scx_0360c0`, `scx_0761c0`). It also explains why the pass/fail ladder keyed on
+the initial fine scroll from the very first measurement.
+
+Note the SCX fine comparator itself already matches SameBoy: display.c:710
+resolves the discard with `(position_in_line & 7) == (SCX & 7)` against a live
+SCX, which is what `render.rs`'s `hunt_idx` does.
+
+**Fixing this is a fetcher-structure change, not a timing tweak.** Replacing
+`scx / 8 + fetch_x` with a position-derived column touches every BG fetch on
+every line, so it re-derives the ~6000 green dot-level cases (mealybug photos,
+the mode-3 fetch grid, the window machine) and must be gated on the full battery
+plus `golden_fingerprint`, not on this cluster. `fetch_x` is also the window's
+tile counter (`win_mode` uses it directly), so the window path has to keep its
+own counter when the BG path stops using one.
+
+### Porting the formula in isolation does NOT work (attempted 2026-07-28)
+
+The formula was ported behind a gate, with a `pos_in_line` field added to
+`Render` to stand in for SameBoy's `position_in_line`. Two variants were
+measured against the cluster plus the scy / window / bgtiledata / bgtilemap /
+dmgpalette guard families:
+
+| variant | cluster | guards |
+|---|---|---|
+| shipped | 31/135 | unchanged |
+| ported formula, position advanced on every pop | 21/135 | unchanged |
+| + SameBoy's `-9 -> -16` hunt wrap (display.c:716) | **0/135** | unchanged |
+
+The guards are byte-stable in both variants, which proves the formula is
+*equivalent to ours for a stable SCX* — the port is arithmetically right. What
+is wrong is the position semantics, and that is not a detail that can be bolted
+on:
+
+- our pipeline has no pixel-position counter. It carries `prefill_pos`,
+  `hunt_idx`, `discard` and `fetch_x` as four separate pieces of state, and the
+  discarded first tile's pixels are never actually popped (the comparator runs
+  "as a bare counter", see `render.rs`), so there is nothing that corresponds
+  to `position_in_line` running -16 -> 160;
+- SameBoy hunts in a single counter that wraps `-9 -> -16` until the comparator
+  matches, so its position is never in `[-8, 0)` while hunting. We hunt in *two*
+  phases (a dot-rate prefill phase and a pop-rate phase after the FIFO starts
+  draining). Feeding the wrap into the pop-rate phase pushes mid-line fetches
+  into SameBoy's line-start branch (`position_in_line < -8` -> bare `SCX >> 3`),
+  which is what takes the cluster to zero.
+
+**So the column formula cannot be ported without first porting
+`position_in_line` itself as the pipeline's primary position state**, replacing
+the prefill/hunt/discard/fetch_x quartet. That is the fetcher-structure change,
+and it is a multi-session refactor: `fetch_x` is also the window's tile counter,
+the discarded-tile phase would have to start popping real pixels, and every one
+of the ~6000 green dot-level cases re-derives.
+
+### Why the refactor is a pipeline rewrite: the fetch/output coupling differs
+
+The cheap way to test any port of the column formula is an **equivalence check
+on a stable-SCX ROM**: with SCX constant the ported formula must reproduce
+`(scx / 8) + fetch_x` exactly, fetch for fetch, because every non-`scx_during_m3`
+BG row already passes. Instrument both columns at the tile-number read and
+count mismatches — seconds per run, no battery needed. Use it before any
+full-matrix measurement.
+
+Running that check while porting `position_in_line` gives the blocker directly.
+On `bgtilemap_spx08_ds_1` (SCX constant at 0), with the position maintained as
+a real output counter:
+
+```
+COLDIFF ly=0 dot=84 fx=0 pos=0
+COLDIFF ly=0 dot=90 fx=0 pos=0
+COLDIFF ly=0 dot=96 fx=1 pos=2      <-- fetch 1 happens at output position 2
+```
+
+SameBoy's formula assumes a **fixed** fetcher-ahead-of-output distance: the tile
+fetched at position `p` supplies the pixels at `p + 8`, which is exactly what the
+`+8` in `(SCX + position_in_line + 8 - cgb) / 8` encodes. Our pipeline does not
+hold that invariant — at `fetch_x == 1` the output position is 2, not 8, because
+our fetcher runs ahead during the 12-dot startup while the FIFO fills and,
+unlike SameBoy, we never pop the discarded first tile's pixels. A single
+additive constant cannot reconcile the two: sweeping it moved the bulk error
+from a uniform -1 tile (constant `+8`) to 23.6M mismatches (constant `0`).
+
+So the column formula is not portable on top of our fetch/output relationship.
+Landing it requires giving the pipeline SameBoy's lockstep first — the
+discarded tile actually popping its 8 pixels, the position counter as the
+primary state, and `prefill_pos`/`hunt_idx`/`discard`/`fetch_x` collapsing into
+it — with the window keeping its own tile counter. That re-derives every green
+dot-level case (mealybug photos, the mode-3 fetch grid, the window machine) and
+is a scoped rewrite of mode 3, not an increment.
+
 **Status: unfixed. Root cause identified, incremental porting exhausted.** Nine
 arms measured and refuted (uniform delay, line-start latch, fetch-phase
 threshold, dots-since-fetch-start, deferred FIFO refill, fetch restart,
