@@ -130,7 +130,35 @@ nonzero initial fine scroll leaves the dot-5..12 comparator hunt
 (`render.rs`, `hunt_idx` vs a live `eff.scx & 7`) still running when the write
 arrives, whereas `scx & 7 == 0` matches on the first hunt dot and is immune.
 
-Not yet fixed: the candidate lever is *when* coarse SCX is sampled for the map
-column relative to the write commit. Sweep it for a unique optimum against the
-whole battery — the hunt and the column share `eff.scx`, so moving one without
-discriminating the other will shuffle siblings rather than fix them.
+### The coarse-SCX sample point is NOT the lever (swept 2026-07-28)
+
+Do not re-chase this. Both arms were built and measured against the
+scx_during_m3 + scy/window/bgtiledata/bgtilemap PNG legs:
+
+- **Uniform delay** on the coarse SCX feeding the map column (sample it N dots
+  before the tile-number read; N=0 is the shipped behavior). N=1 is a no-op,
+  N=2 scores +3 net, N=3 is -14 and N=4 is -25, so N=2 looks like a unique
+  optimum — but the per-row delta shows it is a **shuffle, not a fix**: 13 rows
+  recover (`_2`, `_3`, `_ds_2/3/6/7`) while 10 rows that were passing break
+  (`_ds_1/4/5/8`, `scx_during_m3_spx0/1/2`). Want-opposite siblings, exactly
+  the uniform-lever artifact `rom-diff-weld` exists to catch.
+- **Line-start coarse latch** (only the fine scroll live mid-line): 4/135 vs a
+  31/135 baseline. Refuted — hardware does re-read coarse SCX mid-line.
+
+The guard families (scy, window, bgtiledata, bgtilemap) were byte-stable across
+every arm, so the effect is confined to this cluster.
+
+What the ladder actually says: the double-speed row `scx_0060c0` is
+`pass FAIL FAIL pass pass FAIL FAIL pass` over `_ds_1.._8` — a period of 4
+M-cycles, and at double speed 4 M-cycles = 8 dots = exactly one steady-state
+BG tile fetch cycle. So a 4-dot window inside each 8-dot fetch cycle is
+mishandled, and a uniform shift only slides which offsets land in it. For
+`scx_0060c0` the fine scroll never changes ($00/$60/$c0 all have `scx & 7 == 0`),
+so `scx_write_dot` never latches and the comparator hunt matches on its first
+dot: the coarse map column is the *only* live path, which is what makes this
+family a clean probe.
+
+The remaining lever is therefore the **phase relationship between the write
+commit and the fetch cycle**, not the sample point — i.e. which fetch sub-phase
+a mid-tile coarse write is allowed to affect. That needs a discriminated arm
+keyed on the in-flight fetch phase, swept against the full battery.
