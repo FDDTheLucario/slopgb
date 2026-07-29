@@ -239,11 +239,39 @@ check that catches this: on `ds_2` the shipped build already matches the
 reference on cells 0-18 and differs only at cell 19, so any arm that perturbs
 an early cell is wrong by construction.
 
-**Where this leaves the cluster.** The `read - 4` window is the right shape but
-must be expressed as a true per-fetch dot rule that is inert during line
-startup, not as a phase alias. Before building that, confirm the +2 prediction
-by measuring only `ds_2`/`ds_3` — an arm that moves any other row in this family
-has retimed something it should not have touched.
+### The `read - 4` rule is REFUTED as a dot offset (built 2026-07-28)
+
+Built exactly as specified: a per-dot `eff.scx` ring, the tile-number read
+taking the value from 4 dots earlier, and the line's first real fetch
+(`fetch_x == 0`) exempted — that fetch's read coincides with the line-start SCX
+write, measured at dot 92 on both counts, and the startup walk has no 4-dot
+history.
+
+The prediction was +2 (`ds_2`, `ds_3`) with nothing else moving. Measured: the
+cluster goes 31/135 -> **8/135**. Exactly one row recovers (`ds_2`) and 24
+regress. `ds_3` does not recover at all. The guard families are byte-stable, so
+the arm is scoped correctly and this is a genuine refutation of the rule, not a
+cross-family trade.
+
+The regressions name the reason: `scx_0060c0` and `scx_0063c0` lose their
+single-speed `_4/_5/_6` legs on **both models**, plus `_ds_4/5/8`, all three
+`scx_during_m3_spx*` ROMs, and `scx_0761c0/_1 [Dmg]`. A 4-dot offset is two
+M-cycles at double speed but a **single** M-cycle at single speed, so one
+constant cannot mean the same thing on both — the single-speed legs shift by a
+whole instruction's worth of write timing and fall out of the window they were
+already inside.
+
+So the window is not a fixed dot offset. Anything replacing it has to be
+expressed in a unit that survives the speed switch (fetch-relative, or
+M-cycle-relative with a speed term), and it has to explain why `ds_3` stays red
+under a rule tuned to admit exactly its write dot. Both remain open.
+
+**Status of the cluster: unfixed.** Seven arms have now been built and measured
+(uniform delay, line-start latch, fetch-phase threshold, dots-since-fetch-start,
+deferred FIFO refill, fetch restart, `read - 4` dot rule). Every one either
+shuffles want-opposite siblings or retimes rows outside the intended window.
+The 116 SameBoy-PASS rows here are real bugs and the geometry is fully
+characterised, but no candidate law has survived measurement.
 
 ## Post-boot VRAM (boot logo)
 
