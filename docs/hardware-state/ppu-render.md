@@ -238,13 +238,43 @@ Direct evidence for the pixel claim: on `_ds_2` the reference's last cell
 trace shows why: our `fetch_x=19` read at dot 242 picked up the `$C0` written
 at 241 and addressed column 11 instead of 31.
 
-**Not yet implemented.** One tension to settle first: the earlier uniform-delay
-sweep put D=4 at 6/135, which this law predicts should be a large win. The
-delay arm fed the delayed value into the column but was sampled through a
-per-dot ring updated in `render_step`; re-derive it as an explicit
-`latch = read - 4` (latch the column value at that dot, do not re-read it) and
-re-measure before trusting either number. The guard families to watch are the
-ones that share `eff.scx`: scy, window, bgtiledata, bgtilemap.
+### Implementing the latch does NOT reproduce the law (attempted 2026-07-28)
+
+The law was built as an explicit one-fetch-ahead latch: `Render::map_scx`
+captured at the previous tile's `Hi` phase and consumed at the next
+tile-number read, with a `map_scx_valid` fallback so the first fetch of a line
+uses the live value. The phase layout was then *measured* rather than inferred
+and confirms the intent exactly — on line 1 the fetcher runs
+`… Hi@238, Push@239, Push@240, TileNoWait@241, TileNo@242 …`, so the latch sits
+at `read - 4` and is consumed by the next fetch, which is what the derivation
+asks for.
+
+It still does not reproduce the predicted result. The cluster drops 31/135 ->
+9/135 and the `scx_0060c0` double-speed ladder moves by one index in the wrong
+direction:
+
+| arm | ds_1 | ds_2 | ds_3 | ds_4 | ds_5 | ds_6 | ds_7 | ds_8 |
+|---|---|---|---|---|---|---|---|---|
+| shipped (live read) | pass | FAIL | FAIL | pass | pass | FAIL | FAIL | pass |
+| latch at `Hi` | FAIL | pass | FAIL | FAIL | FAIL | pass | FAIL | FAIL |
+| law predicts | pass | pass | pass | pass | pass | pass | pass | pass |
+
+The guard families (scy, window, bgtiledata, bgtilemap) are byte-stable under
+the latch, so the arm is correctly scoped — the error is inside the cluster's
+own accounting, not a cross-family trade. `ds_4` is the sharpest contradiction:
+its write lands at dot 237, one dot *before* the measured latch at 238, so the
+latch should admit it and leave the row exactly as the shipped arm has it
+(passing), yet it fails.
+
+So one of the two measurements is lying and they have not been taken in the
+same run: the write dots came from a per-ROM trace of the `_ds` ladder, while
+the phase dots were captured from whichever ROM the sweep visited first (a
+single-speed one). **The next step is to trace phases and FF43 writes together,
+in one run, on `ds_4` specifically**, and check what `map_scx` actually holds at
+dot 242 — rather than trusting a phase layout measured on a different ROM.
+Until that is done neither the law nor its refutation is safe to build on.
+
+Nothing was shipped: every probe was reverted and the battery is green.
 
 For the record, the groups that want opposite answers, from the double-speed
 ladder: `_ds_1/4/5/8` (positions 0,1 mod 4) want the live read; `_ds_2/3/6/7`
