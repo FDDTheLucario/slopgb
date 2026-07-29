@@ -11,6 +11,10 @@ target/
 test-roms-src/
 handoff.md
 goal.md
+# Vendored Pan Docs source clone — pinned + documented in
+# docs/reference/README.md, re-cloneable, not our source.
+/docs/reference/pandocs/
+__pycache__/
 /scratchpad/
 /.claude/worktrees/
 /bootroms/

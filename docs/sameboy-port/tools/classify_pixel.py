@@ -33,10 +33,19 @@ SBT = os.environ.get(
     _CACHE_SBT if os.path.exists(_CACHE_SBT)
     else '/tmp/sbbuild/SameBoy-1.0.2/build/bin/tester/sameboy_tester',
 )
+# Default to the collection in this checkout (this script lives in
+# docs/sameboy-port/tools/). A default pointing at a throwaway worktree
+# silently classifies every row UNK once that worktree is pruned, which reads
+# as a clean bar rather than a measurement that never ran.
+_REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))))
 ROOT = os.environ.get(
     'SLOPGB_GBTR_ROOT',
-    '/home/soulcatcher/personal_repos/slopgb/.claude/worktrees/phase-b-s7/test-roms/game-boy-test-roms-v7.0',
+    os.path.join(_REPO, 'test-roms', 'game-boy-test-roms-v7.0'),
 )
+if not os.path.isdir(ROOT):
+    sys.exit(f"ROM collection not found at {ROOT} — set SLOPGB_GBTR_ROOT. "
+             "Classifying zero rows is a vacuous result, not a bar.")
 W, H = 160, 144
 
 

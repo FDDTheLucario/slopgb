@@ -5,7 +5,10 @@
 //! the protocol-neutral building blocks (run-to-breakpoint, run-for-time,
 //! serial/memory polling, frame-vs-PNG comparison, baseline ratchets).
 
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::Path;
+use std::sync::Mutex;
 
 use slopgb_core::{CLOCK_HZ, GameBoy, Model};
 
@@ -211,6 +214,7 @@ pub fn case_key(rel: &str, model: Model) -> String {
 ///
 /// Failure output carries every offending case with its error detail.
 pub fn assert_against_baseline(suite: &str, results: &[CaseResult], baseline: &[&str]) {
+    dump_census(suite, results);
     let mut regressions = Vec::new();
     let mut stale: Vec<&str> = Vec::new();
     for case in results {
@@ -258,6 +262,50 @@ pub fn assert_against_baseline(suite: &str, results: &[CaseResult], baseline: &[
     panic!("{msg}");
 }
 
+/// Serializes census appends: the suites are separate `#[test]` fns in one
+/// binary, so their `assert_against_baseline` calls run on parallel threads.
+static CENSUS_LOCK: Mutex<()> = Mutex::new(());
+
+/// Append every executed case to the file named by `SLOPGB_GBTR_CENSUS`, as
+/// `suite \t key \t verdict \t detail` — the raw input for the floor census
+/// (`docs/hardware-state/floor-census.tsv`). Unset variable = no dump, so a
+/// normal `cargo test` run is unaffected.
+///
+/// `detail` keeps only the first line of a failure message: the frame
+/// comparators embed multi-line ASCII screens, and the value delta a census
+/// needs is always on line 1 (`want "X", screen shows "Y"`).
+fn dump_census(suite: &str, results: &[CaseResult]) {
+    let Ok(path) = std::env::var("SLOPGB_GBTR_CENSUS") else {
+        return;
+    };
+    let mut block = String::new();
+    for case in results {
+        let (verdict, detail) = match &case.result {
+            Ok(()) => ("pass", String::new()),
+            Err(e) => ("fail", census_cell(e)),
+        };
+        block.push_str(suite);
+        block.push('\t');
+        block.push_str(&case.key);
+        block.push('\t');
+        block.push_str(verdict);
+        block.push('\t');
+        block.push_str(&detail);
+        block.push('\n');
+    }
+    // A case that panicked elsewhere must not silence the dump, so a poisoned
+    // lock is taken anyway — the guard only orders writes, it guards no state.
+    let _guard = CENSUS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = f.write_all(block.as_bytes());
+    }
+}
+
+/// One TSV cell from a failure message: first line, tabs neutralized.
+fn census_cell(msg: &str) -> String {
+    msg.lines().next().unwrap_or_default().replace('\t', " ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,6 +350,19 @@ mod tests {
             case_key("dmg-acid2/dmg-acid2.gb", slopgb_core::Model::Cgb),
             "dmg-acid2/dmg-acid2.gb [Cgb]"
         );
+    }
+
+    #[test]
+    fn census_cell_is_one_tab_free_line() {
+        // mealybug/age frame comparators append a multi-line ASCII screen; the
+        // value delta the census wants is always on line 1.
+        let msg = "hex screen mismatch: want \"0\", screen shows \"1\"\n....\n####";
+        assert_eq!(
+            census_cell(msg),
+            "hex screen mismatch: want \"0\", screen shows \"1\""
+        );
+        assert_eq!(census_cell("a\tb\tc"), "a b c");
+        assert_eq!(census_cell(""), "");
     }
 
     // --- panic isolation ---
