@@ -357,12 +357,49 @@ and it is a multi-session refactor: `fetch_x` is also the window's tile counter,
 the discarded-tile phase would have to start popping real pixels, and every one
 of the ~6000 green dot-level cases re-derives.
 
-**Status: unfixed, root cause identified, incremental porting exhausted.** Eight
+### Why the refactor is a pipeline rewrite: the fetch/output coupling differs
+
+The cheap way to test any port of the column formula is an **equivalence check
+on a stable-SCX ROM**: with SCX constant the ported formula must reproduce
+`(scx / 8) + fetch_x` exactly, fetch for fetch, because every non-`scx_during_m3`
+BG row already passes. Instrument both columns at the tile-number read and
+count mismatches — seconds per run, no battery needed. Use it before any
+full-matrix measurement.
+
+Running that check while porting `position_in_line` gives the blocker directly.
+On `bgtilemap_spx08_ds_1` (SCX constant at 0), with the position maintained as
+a real output counter:
+
+```
+COLDIFF ly=0 dot=84 fx=0 pos=0
+COLDIFF ly=0 dot=90 fx=0 pos=0
+COLDIFF ly=0 dot=96 fx=1 pos=2      <-- fetch 1 happens at output position 2
+```
+
+SameBoy's formula assumes a **fixed** fetcher-ahead-of-output distance: the tile
+fetched at position `p` supplies the pixels at `p + 8`, which is exactly what the
+`+8` in `(SCX + position_in_line + 8 - cgb) / 8` encodes. Our pipeline does not
+hold that invariant — at `fetch_x == 1` the output position is 2, not 8, because
+our fetcher runs ahead during the 12-dot startup while the FIFO fills and,
+unlike SameBoy, we never pop the discarded first tile's pixels. A single
+additive constant cannot reconcile the two: sweeping it moved the bulk error
+from a uniform -1 tile (constant `+8`) to 23.6M mismatches (constant `0`).
+
+So the column formula is not portable on top of our fetch/output relationship.
+Landing it requires giving the pipeline SameBoy's lockstep first — the
+discarded tile actually popping its 8 pixels, the position counter as the
+primary state, and `prefill_pos`/`hunt_idx`/`discard`/`fetch_x` collapsing into
+it — with the window keeping its own tile counter. That re-derives every green
+dot-level case (mealybug photos, the mode-3 fetch grid, the window machine) and
+is a scoped rewrite of mode 3, not an increment.
+
+**Status: unfixed. Root cause identified, incremental porting exhausted.** Nine
 arms measured and refuted (uniform delay, line-start latch, fetch-phase
 threshold, dots-since-fetch-start, deferred FIFO refill, fetch restart,
-`read - 4` dot rule, ported column formula). The first seven were variations on
-sampling time and were doomed by the formula; the eighth shows the formula alone
-is not portable either.
+`read - 4` dot rule, ported column formula, ported formula + position counter).
+The first seven were variations on sampling time and were doomed by the formula;
+the last two show neither the formula nor the position counter ports without the
+pipeline underneath them.
 
 ## Post-boot VRAM (boot logo)
 
