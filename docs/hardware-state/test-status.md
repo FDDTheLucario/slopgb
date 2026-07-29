@@ -57,6 +57,31 @@ The prose floor-class index (A–H) in `tests/gbtr/baselines/gambatte.txt` still
 carries the *lift conditions* and the dated do-not-retry results, but its row
 counts are a pre-eager-flip census — trust the TSV for counts.
 
+#### What the first census found (2026-07-28)
+
+| Bucket | Rows | Meaning |
+|---|---|---|
+| BUG | 409 | hardware-captured want we miss (333 of them SameBoy-PASS, 76 SameBoy-unmeasured) |
+| EXCEED | 203 | hardware-captured want that SameBoy misses too — fixing these puts us ahead of SameBoy |
+| JUNK | 39 | 3 known-defective assets + 36 wilbertpol 2016 rows |
+| CONFLICT | 3 | same-suite NR43 rows upstream documents as revision-specific |
+
+Two results worth carrying forward:
+
+- **The floor is not padded with junk.** 612 of 654 rows carry hardware-backed
+  provenance. Nothing is currently safe to exempt: the 3 defective assets are
+  deliberately kept baselined under class-F policy, and the 36 wilbertpol rows
+  are `sameboy=unknown` (no classifier reads their `0xED` protocol), so
+  dropping them on provenance alone would be exempting an unmeasured row.
+- **Half the floor is confirmed bugs, not structural limits.** 333 rows are
+  SameBoy-PASS: SameBoy reproduces the captured value on the same ROM where we
+  do not. The largest such cluster is `gambatte/scx_during_m3` (116 rows),
+  whose failures are coherent sub-pixel geometry differences against the
+  `_cgb04c`/`_dmg08` references, not noise. Treat any "class A/H needs a
+  sub-dot rewrite" note as unproven until re-probed with a discriminated
+  lever — the `rom-diff-weld` skill exists because that verdict has been
+  wrong before.
+
 ### Runtime
 
 - Full gbtr run ≈330 s debug.
