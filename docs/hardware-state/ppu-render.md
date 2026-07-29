@@ -266,12 +266,64 @@ expressed in a unit that survives the speed switch (fetch-relative, or
 M-cycle-relative with a speed term), and it has to explain why `ds_3` stays red
 under a rule tuned to admit exactly its write dot. Both remain open.
 
-**Status of the cluster: unfixed.** Seven arms have now been built and measured
+### ROOT CAUSE: our BG map column formula is structurally wrong
+
+Reading SameBoy 1.0.2 `Core/display.c` ends the guessing. In
+`advance_fetcher_state_machine`, case `GB_FETCHER_GET_TILE_T1` (display.c:958-962):
+
+```c
+else if ((uint8_t)(gb->position_in_line + 16) < 8) {
+    x = gb->io_registers[GB_IO_SCX] >> 3;          // line-start window
+}
+else {
+    x = ((gb->io_registers[GB_IO_SCX] + gb->position_in_line + 8
+          - (GB_is_cgb(gb) && !gb->during_object_fetch)) / 8) & 0x1F;
+}
+gb->last_tile_index_address = map + x + y / 8 * 32;
+```
+
+Ours (`render/mode0.rs`, `FetchPhase::TileNo`) is
+`(scx / 8).wrapping_add(fetch_x) & 31`.
+
+Three divergences, in order of importance:
+
+1. **Sum then divide, not divide then count.** SameBoy adds SCX to
+   `position_in_line` (the *pixel* output position, running from -16) and
+   divides once, so SCX's low three bits carry into the tile index. We divide
+   the coarse part out first and track tiles with an independent `fetch_x`
+   counter, so a fine-scroll change can never move our column. For a stable SCX
+   the two agree exactly — which is why the rest of the BG corpus passes — and
+   they diverge precisely when SCX changes mid-line, i.e. this cluster.
+2. **A CGB-only -1 term**, `8 - (is_cgb && !during_object_fetch)`: the CGB forms
+   the address one pixel earlier than the DMG except while an object fetch is in
+   flight. We have no such term, which is why the single-speed and
+   double-speed legs of the same dir disagree under every uniform arm.
+3. **The address is formed one T-cycle before the read.** SameBoy computes it in
+   `GET_TILE_T1` and does the VRAM read in `GET_TILE_T2`; we compute and read in
+   the same dot.
+
+This explains all seven failed arms at once: every one of them tuned *when* SCX
+is sampled, but the *formula* is wrong, so no sampling time can be right for
+both a fine-scroll-0 dir (`scx_0060c0`) and a fine-scroll-3/7 one
+(`scx_0360c0`, `scx_0761c0`). It also explains why the pass/fail ladder keyed on
+the initial fine scroll from the very first measurement.
+
+Note the SCX fine comparator itself already matches SameBoy: display.c:710
+resolves the discard with `(position_in_line & 7) == (SCX & 7)` against a live
+SCX, which is what `render.rs`'s `hunt_idx` does.
+
+**Fixing this is a fetcher-structure change, not a timing tweak.** Replacing
+`scx / 8 + fetch_x` with a position-derived column touches every BG fetch on
+every line, so it re-derives the ~6000 green dot-level cases (mealybug photos,
+the mode-3 fetch grid, the window machine) and must be gated on the full battery
+plus `golden_fingerprint`, not on this cluster. `fetch_x` is also the window's
+tile counter (`win_mode` uses it directly), so the window path has to keep its
+own counter when the BG path stops using one.
+
+**Status: unfixed, root cause identified.** Seven arms measured and refuted
 (uniform delay, line-start latch, fetch-phase threshold, dots-since-fetch-start,
-deferred FIFO refill, fetch restart, `read - 4` dot rule). Every one either
-shuffles want-opposite siblings or retimes rows outside the intended window.
-The 116 SameBoy-PASS rows here are real bugs and the geometry is fully
-characterised, but no candidate law has survived measurement.
+deferred FIFO refill, fetch restart, `read - 4` dot rule) — all of them variations
+on sampling time, all doomed by the formula above.
 
 ## Post-boot VRAM (boot logo)
 
