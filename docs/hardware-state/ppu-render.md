@@ -90,3 +90,47 @@ Remaining (not yet pixel-perfect) legs are mostly:
 
 - The PPU raises STAT/VBlank IRQs via `Ppu::write`'s return value (single drain).
 - When adding a PPU register path, OR the returned IF bits into `intf` like the existing interconnect call sites.
+
+## Mid-mode-3 SCX and the BG map column (open, localized)
+
+The gambatte `scx_during_m3/scx_*c0/` families write SCX during mode 3 at an
+increasing NOP offset (`_1`.._8`); the dir name is the value sequence, so
+`scx_0060c0` writes $00 -> $60 -> $c0. 116 of these rows are baselined and
+SameBoy passes them, so they are bugs, not a floor.
+
+The failures are far smaller than the raw pixel counts suggest — probed
+2026-07-28 by running the 15+1-frame protocol and aligning each scanline
+against the reference:
+
+- `scx_0060c0/scx_during_m3_2` [Cgb]: **143 of 144 rows exact**; row 0 differs
+  in exactly 8 pixels (x0-x7).
+- `scx_0360c0/scx_during_m3_2` [Cgb]: 143 of 144 exact; row 0 is a clean
+  **+8-pixel (one tile) shift**, residual 0.
+- `scx_0060c0/scx_during_m3_3`: the inverse — row 0 exact, rows 1-143 off by 8.
+
+The 8 wrong pixels keep the reference's *bit pattern* and change only the
+shade, which is the test's tell: the map repeats one tile graphic with a
+different CGB palette attribute per column, so a shade change means the wrong
+map **column** was fetched. Attribute and tile number are read from the same
+map index in the same dot (`render/mode0.rs`), so they cannot desync — the
+column itself is wrong.
+
+The column is `(scx / 8) + fetch_x & 31`, sampled **live at the tile-number
+read** (`render/mode0.rs`). The pass/fail ladder is the discriminator:
+
+| dir (SCX sequence) | `_1` | `_2` | `_3` | `_4` | `_5` | `_6` |
+|---|---|---|---|---|---|---|
+| scx_0060c0 | pass | FAIL | FAIL | pass | pass | pass |
+| scx_0063c0 | FAIL | FAIL | FAIL | pass | pass | pass |
+| scx_0360c0 | pass | FAIL | FAIL | FAIL | FAIL | FAIL |
+
+so the coarse-SCX sample point is off by a bounded window, and the initial
+fine scroll (`scx & 7` = 0 vs 3 vs 7) selects which offsets land wrong — a
+nonzero initial fine scroll leaves the dot-5..12 comparator hunt
+(`render.rs`, `hunt_idx` vs a live `eff.scx & 7`) still running when the write
+arrives, whereas `scx & 7 == 0` matches on the first hunt dot and is immune.
+
+Not yet fixed: the candidate lever is *when* coarse SCX is sampled for the map
+column relative to the write commit. Sweep it for a unique optimum against the
+whole battery — the hunt and the column share `eff.scx`, so moving one without
+discriminating the other will shuffle siblings rather than fix them.
