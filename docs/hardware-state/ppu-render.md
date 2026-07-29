@@ -201,6 +201,176 @@ Ruled out for this cluster, all measured: uniform coarse sample delay
 dots-since-fetch-start threshold, deferred FIFO refill, and fetch restart on a
 coarse change.
 
+### The map-column latch: what one unified trace actually shows
+
+Tracing fetch phases and FF43 writes **in the same run on `ds_4`**, on the
+evaluated (16th) frame, settles the earlier inconsistency. The previous two
+traces had been taken from different ROMs and different frames, which is what
+made the numbers disagree.
+
+Line 1 of `scx_0060c0/scx_during_m3_ds_4`, steady state:
+
+```
+* dot= 92 SCXWR 00->60
+  dot=233 TileNoWait fx=18   dot=234 TileNo fx=18 (scx=60)
+  dot=237 HiWait     fx=18
+* dot=237 SCXWR 60->C0
+  dot=238 Hi         fx=18  (scx already C0)
+  dot=241 TileNoWait fx=19   dot=242 TileNo fx=19 (scx=C0)
+```
+
+So the fetch cadence is 8 dots with `Hi` at `read - 4`, exactly as inferred,
+and the ladder's writes step 2 dots per index (ds_1 at 243 down to ds_8 at 229).
+
+**Correction to the earlier entry in this file:** the claim that a
+`latch = read - 4` rule makes all eight `_ds` rows pass was wrong. The rule only
+changes rows whose write falls in the open window `(read-4, read)` — dots 239
+and 241 for the `fx=19` read at 242, i.e. **`ds_3` and `ds_2` only**. Rows
+whose write lands outside that window (ds_1 at 243, ds_4 at 237, ds_5 at 235,
+ds_8 at 229) are unaffected by the rule and keep whatever the shipped live read
+already gives them. The honest prediction is +2 with no regressions, not +8.
+
+That also explains why implementing it as "latch at the previous `Hi`" measured
+31/135 -> 9/135. `Hi == read - 4` holds only in steady state; around the
+line-start fetches (`first_discard`, the push gating in `push_allowed`, the
+12-dot startup walk) the previous `Hi` sits much further back than 4 dots, so
+the arm silently retimed the *early* tiles too. The cell-symbol dump is the
+check that catches this: on `ds_2` the shipped build already matches the
+reference on cells 0-18 and differs only at cell 19, so any arm that perturbs
+an early cell is wrong by construction.
+
+**Where this leaves the cluster.** The `read - 4` window is the right shape but
+must be expressed as a true per-fetch dot rule that is inert during line
+startup, not as a phase alias. Before building that, confirm the +2 prediction
+by measuring only `ds_2`/`ds_3` — an arm that moves any other row in this family
+has retimed something it should not have touched.
+
+## Post-boot VRAM (boot logo)
+
+- Post-boot VRAM holds the boot logo *tile data* (incl. the (R) tile `$19`; `install_boot_logo_vram`).
+- Do: leave the DMG logo tile-**map** rows uninstalled — the pinned gambatte reference PNGs predate initial-VRAM modelling (see the doc comment), and gambatte's `_blank` halt ROMs are judged on the top tile row only.
+
+## Frame skip and CGB boot palettes
+
+- The first frame after an LCD enable is presented blank (`Ppu::frame_skip`, Pan Docs LCDC.7 / SameBoy frame-skip) — frame-compare harnesses must sample >=2 vblanks after the ROM's re-enable.
+- CGB DMG-compat boot palettes are the real boot-ROM *defaults* (BG table != OBJ table, `interconnect.rs`).
+- Do: leave the Nintendo-licensee title-hash table deliberately unmodelled.
+
+## PPU interrupt raising
+
+- The PPU raises STAT/VBlank IRQs via `Ppu::write`'s return value (single drain).
+- When adding a PPU register path, OR the returned IF bits into `intf` like the existing interconnect call sites.
+
+## Mid-mode-3 SCX and the BG map column (open, localized)
+
+The gambatte `scx_during_m3/scx_*c0/` families write SCX during mode 3 at an
+increasing NOP offset (`_1`.._8`); the dir name is the value sequence, so
+`scx_0060c0` writes $00 -> $60 -> $c0. 116 of these rows are baselined and
+SameBoy passes them, so they are bugs, not a floor.
+
+The failures are far smaller than the raw pixel counts suggest — probed
+2026-07-28 by running the 15+1-frame protocol and aligning each scanline
+against the reference:
+
+- `scx_0060c0/scx_during_m3_2` [Cgb]: **143 of 144 rows exact**; row 0 differs
+  in exactly 8 pixels (x0-x7).
+- `scx_0360c0/scx_during_m3_2` [Cgb]: 143 of 144 exact; row 0 is a clean
+  **+8-pixel (one tile) shift**, residual 0.
+- `scx_0060c0/scx_during_m3_3`: the inverse — row 0 exact, rows 1-143 off by 8.
+
+The 8 wrong pixels keep the reference's *bit pattern* and change only the
+shade, which is the test's tell: the map repeats one tile graphic with a
+different CGB palette attribute per column, so a shade change means the wrong
+map **column** was fetched. Attribute and tile number are read from the same
+map index in the same dot (`render/mode0.rs`), so they cannot desync — the
+column itself is wrong.
+
+The column is `(scx / 8) + fetch_x & 31`, sampled **live at the tile-number
+read** (`render/mode0.rs`). The pass/fail ladder is the discriminator:
+
+| dir (SCX sequence) | `_1` | `_2` | `_3` | `_4` | `_5` | `_6` |
+|---|---|---|---|---|---|---|
+| scx_0060c0 | pass | FAIL | FAIL | pass | pass | pass |
+| scx_0063c0 | FAIL | FAIL | FAIL | pass | pass | pass |
+| scx_0360c0 | pass | FAIL | FAIL | FAIL | FAIL | FAIL |
+
+so the coarse-SCX sample point is off by a bounded window, and the initial
+fine scroll (`scx & 7` = 0 vs 3 vs 7) selects which offsets land wrong — a
+nonzero initial fine scroll leaves the dot-5..12 comparator hunt
+(`render.rs`, `hunt_idx` vs a live `eff.scx & 7`) still running when the write
+arrives, whereas `scx & 7 == 0` matches on the first hunt dot and is immune.
+
+### The coarse-SCX sample point is NOT the lever (swept 2026-07-28)
+
+Do not re-chase this. Both arms were built and measured against the
+scx_during_m3 + scy/window/bgtiledata/bgtilemap PNG legs:
+
+- **Uniform delay** on the coarse SCX feeding the map column (sample it N dots
+  before the tile-number read; N=0 is the shipped behavior). N=1 is a no-op,
+  N=2 scores +3 net, N=3 is -14 and N=4 is -25, so N=2 looks like a unique
+  optimum — but the per-row delta shows it is a **shuffle, not a fix**: 13 rows
+  recover (`_2`, `_3`, `_ds_2/3/6/7`) while 10 rows that were passing break
+  (`_ds_1/4/5/8`, `scx_during_m3_spx0/1/2`). Want-opposite siblings, exactly
+  the uniform-lever artifact `rom-diff-weld` exists to catch.
+- **Line-start coarse latch** (only the fine scroll live mid-line): 4/135 vs a
+  31/135 baseline. Refuted — hardware does re-read coarse SCX mid-line.
+
+The guard families (scy, window, bgtiledata, bgtilemap) were byte-stable across
+every arm, so the effect is confined to this cluster.
+
+What the ladder actually says: the double-speed row `scx_0060c0` is
+`pass FAIL FAIL pass pass FAIL FAIL pass` over `_ds_1.._8` — a period of 4
+M-cycles, and at double speed 4 M-cycles = 8 dots = exactly one steady-state
+BG tile fetch cycle. So a 4-dot window inside each 8-dot fetch cycle is
+mishandled, and a uniform shift only slides which offsets land in it. For
+`scx_0060c0` the fine scroll never changes ($00/$60/$c0 all have `scx & 7 == 0`),
+so `scx_write_dot` never latches and the comparator hunt matches on its first
+dot: the coarse map column is the *only* live path, which is what makes this
+family a clean probe.
+
+### The in-flight fetch phase is not a discriminator either (swept 2026-07-28)
+
+The follow-up hypothesis — that a mid-tile coarse write should retarget the
+in-flight fetch only while it is early enough in the fetch — was built as a
+real discriminated arm (`Render::coarse` latched per tile fetch, with the FF43
+write applying to it only below a threshold) and swept two ways:
+
+- threshold on `FetchPhase` rank (0..=6);
+- threshold on dots-since-fetch-start (0..=8), which resolves finer than the
+  phase because the fetcher parks in `Push` for the tail of the 8-dot cycle
+  and the phase rank saturates there.
+
+**Both collapse to a binary.** Threshold 0 (never retarget: coarse latched at
+fetch start) scores 34/135; every threshold >= 1 reproduces the shipped live
+read at 31/135, with nothing in between. The knob is degenerate — writes always
+land at least one dot into a fetch, so "retarget if early" is never distinct
+from "always retarget". Only two behaviors are reachable in this formulation,
+and both were already measured above: latch-at-fetch-start is the +13/-10
+shuffle, live is the baseline.
+
+So the split between the two sibling groups is **not** about where in the tile
+fetch the write lands.
+
+### The FIFO pop/push coupling is correct (swept 2026-07-28)
+
+The follow-up leads were measured too, and both are refuted:
+
+- **No same-dot FIFO refill** (a FIFO that drains on a dot refills on the next
+  dot instead of the same one): 29/312 against a 158/312 baseline, wrecking
+  scy/bgtiledata/bgtilemap outright. The same-dot refill is load-bearing — it
+  is what produces the 8-dot steady-state cadence. `render_step` pops first and
+  then lets `fetcher_step` push into the emptied FIFO on that same dot, and
+  that ordering is right.
+- **A coarse SCX change restarts the in-flight tile fetch** (phase back to the
+  tile-number read, the way a window start re-anchors): 2/135 in the cluster.
+  The guard families are untouched, since the arm only fires on coarse changes,
+  so this is a clean refutation rather than a trade.
+
+Ruled out for this cluster, all measured: uniform coarse sample delay
+(shuffle), line-start coarse latch, a fetch-phase-discriminated arm, a
+dots-since-fetch-start threshold, deferred FIFO refill, and fetch restart on a
+coarse change.
+
 ### DERIVED: the map column is latched 4 dots before our tile-number read
 
 Instrumenting what the reference actually demands (decode each 8-pixel cell to
