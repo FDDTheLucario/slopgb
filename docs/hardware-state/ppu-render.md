@@ -196,12 +196,55 @@ The follow-up leads were measured too, and both are refuted:
   The guard families are untouched, since the arm only fires on coarse changes,
   so this is a clean refutation rather than a trade.
 
-Ruled out for this cluster so far, all measured: uniform coarse sample delay
+Ruled out for this cluster, all measured: uniform coarse sample delay
 (shuffle), line-start coarse latch, a fetch-phase-discriminated arm, a
 dots-since-fetch-start threshold, deferred FIFO refill, and fetch restart on a
-coarse change. The mod-4 split below is still unexplained by any of them, so
-the next attempt should start from a *new* observable rather than another
-variation on when the map column is addressed.
+coarse change.
+
+### DERIVED: the map column is latched 4 dots before our tile-number read
+
+Instrumenting what the reference actually demands (decode each 8-pixel cell to
+a column identity via its palette, then trace the FF43 write dot against every
+tile-number read dot on line 1) resolves the whole `scx_0060c0` double-speed
+ladder with one constant.
+
+On line 1 the tile-number reads land on an 8-dot cadence — `fetch_x=18` at dot
+234, `fetch_x=19` at dot 242 — and the `_ds_1.._8` ROMs step their write 2 dots
+earlier per index (243, 241, 239, 237, 235, 233, 231, 229). Writing
+`latch = read_dot - 4`, a write retargets a fetch only if it lands strictly
+before that fetch's latch:
+
+| ROM | write dot | fx18 (latch 230) | fx19 (latch 238) | ours == HW | verdict |
+|---|---|---|---|---|---|
+| ds_1 | 243 | no | no | yes | pass |
+| ds_2 | 241 | no | no (we apply) | **no** | FAIL |
+| ds_3 | 239 | no | no (we apply) | **no** | FAIL |
+| ds_4 | 237 | no | yes | yes | pass |
+| ds_5 | 235 | no | yes | yes | pass |
+| ds_6 | 233 | no (we apply) | yes | **no** | FAIL |
+| ds_7 | 231 | no (we apply) | yes | **no** | FAIL |
+| ds_8 | 229 | yes | yes | yes | pass |
+
+All eight agree. Our model applies a write whenever it precedes the *read* dot,
+so it wrongly retargets exactly the writes landing in the 4-dot window
+`[read-4, read)` — which is the mod-4 split, and why every uniform arm traded
+one group for the other: shifting the sample point moves the window instead of
+narrowing it.
+
+Direct evidence for the pixel claim: on `_ds_2` the reference's last cell
+(x152-159) is a pure column with the dark palette (`404040`/`000000`, symbol
+`b`, continuing the `c,b,c,b…` alternation), while we emit the light palette
+(`A0A0A0`/`F8F8F8`) — a third symbol that appears nowhere in the reference. The
+trace shows why: our `fetch_x=19` read at dot 242 picked up the `$C0` written
+at 241 and addressed column 11 instead of 31.
+
+**Not yet implemented.** One tension to settle first: the earlier uniform-delay
+sweep put D=4 at 6/135, which this law predicts should be a large win. The
+delay arm fed the delayed value into the column but was sampled through a
+per-dot ring updated in `render_step`; re-derive it as an explicit
+`latch = read - 4` (latch the column value at that dot, do not re-read it) and
+re-measure before trusting either number. The guard families to watch are the
+ones that share `eff.scx`: scy, window, bgtiledata, bgtilemap.
 
 For the record, the groups that want opposite answers, from the double-speed
 ladder: `_ds_1/4/5/8` (positions 0,1 mod 4) want the live read; `_ds_2/3/6/7`
