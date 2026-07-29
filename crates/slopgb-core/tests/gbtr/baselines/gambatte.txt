@@ -3,8 +3,15 @@
 # growing it is a regression (harness::assert_against_baseline).
 #
 # ---------------------------------------------------------------------
-# FLOOR-CLASS INDEX (2026-06 census, recounted after wave 8: 976 rows in
-# this file). The class letters are shared by every suite's baseline
+# ROW COUNTS HERE ARE STALE — use docs/hardware-state/floor-census.tsv.
+# The per-class tallies below are a 2026-06 census of a 976-row file; the
+# 2026-07-12 eager flip cut it to 548 rows and changed the class mix (the
+# `_ds`/lcdoffset population is 202, not 397, and single-speed rows are now
+# the majority). What stays authoritative here: the class *definitions*,
+# their *lift conditions*, the "never chase one-sidedly" rule, and the dated
+# do-not-retry results. Counts come from the census.
+#
+# FLOOR-CLASS INDEX. The class letters are shared by every suite's baseline
 # header; the dated swap blocks at the end of this file carry the
 # per-cluster A/B evidence. Common rule for ALL classes: each cluster
 # was A/B-swept and the kept configuration maximizes the corpus — every

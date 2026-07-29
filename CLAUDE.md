@@ -141,10 +141,16 @@ emulated s.
 ## State
 
 Baseline (all green, on `main`): mooneye **439/439** (rom×model), gbtr v7.0
-**7047 cases** (5941 pass + 1106 baselined floor), core lib + frontend green,
+**7041 cases** (6387 pass + 654 baselined floor), core lib + frontend green,
 clippy clean. Missing ROMs skip unless `SLOPGB_REQUIRE_ROMS=1` (run
 `test-roms/download.sh` first). Per-area detail:
 [`docs/ui-state/`](docs/ui-state/README.md) + [`docs/hardware-state/`](docs/hardware-state/README.md).
-Known residuals (all SameBoy-FAIL/floored, NOT regressions): DS mid-dot render
-floor, halt-wake/HDMA levers.
+
+The floor is enumerated per row in
+[`docs/hardware-state/floor-census.tsv`](docs/hardware-state/floor-census.tsv)
+— what we produce, what the ROM wants, what SameBoy produces, and how
+hardware-backed the expectation is. Regenerate it with
+`SLOPGB_GBTR_CENSUS=<tsv> cargo test -p slopgb-core --test gbtr` then
+`python3 docs/sameboy-port/tools/census.py <tsv>`. Prefer it over any prose
+row count: the narrative headers in the baseline files predate the eager flip.
 

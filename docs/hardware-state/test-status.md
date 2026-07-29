@@ -21,28 +21,45 @@
   - passing/orphaned entry = stale
   - both fail the run.
 - A whole-collection inventory guard pins every on-disk ROM claimed-or-exempt exactly once.
-- 7047 rom×model cases = 5941 pass + 1106 baselined floor.
+- 7041 rom×model cases = 6387 pass + 654 baselined floor.
 
 ### Per-suite breakdown (cases/baselined)
+
+Measured from a full run, not asserted — regenerate with the census command
+below rather than editing these by hand.
 
 | Suite | Cases | Baselined |
 |---|---|---|
 | acid | 4 | 1 |
-| age | 49 | 38 |
+| age | 49 | 33 |
 | blargg | 82 | 1 |
-| gambatte | 5330 | 918 |
-| gbmicrotest | 483 | 32 |
-| mealybug | 55 | 26 |
+| gambatte | 5272 | 548 |
+| gbmicrotest | 483 | 7 |
+| mealybug | 55 | 23 |
 | mooneye2022 | 439 | 1 |
-| same-suite | 72 | 4 |
-| smallsuites | 30 | 6 |
-| wilbertpol | 561 | 79 |
+| same-suite | 72 | 3 |
+| smallsuites | 24 | 0 |
+| wilbertpol | 561 | 37 |
 
-- Floor classes A–H with lift conditions are indexed in `tests/gbtr/baselines/gambatte.txt`.
+### The floor census
+
+`floor-census.tsv` (this directory) is the live, per-row tally: for each of the
+654 baselined rows it records our value, the ROM's wanted value, SameBoy's
+value, and the provenance of that want (which silicon the expectation was
+captured on, or that it is a known-defective asset). Regenerate:
+
+```sh
+SLOPGB_GBTR_CENSUS=/tmp/dump.tsv cargo test -p slopgb-core --test gbtr
+python3 docs/sameboy-port/tools/census.py /tmp/dump.tsv
+```
+
+The prose floor-class index (A–H) in `tests/gbtr/baselines/gambatte.txt` still
+carries the *lift conditions* and the dated do-not-retry results, but its row
+counts are a pre-eager-flip census — trust the TSV for counts.
 
 ### Runtime
 
-- Full gbtr run ≈230 s debug / ≈350 s release.
+- Full gbtr run ≈330 s debug.
 - Dominated by gambatte_matrix's 5272 frame-rendered cases (dev/test profiles already build core at opt-level 2).
 
 ## Unit tests & ROM availability
