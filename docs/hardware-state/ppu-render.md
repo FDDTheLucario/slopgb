@@ -179,9 +179,29 @@ and both were already measured above: latch-at-fetch-start is the +13/-10
 shuffle, live is the baseline.
 
 So the split between the two sibling groups is **not** about where in the tile
-fetch the write lands. Ruled out as a family; look instead at the FIFO pop /
-push coupling or at `fetch_x` alignment (does hardware re-fetch or re-align the
-column on a coarse change?), not at when SCX is sampled.
+fetch the write lands.
+
+### The FIFO pop/push coupling is correct (swept 2026-07-28)
+
+The follow-up leads were measured too, and both are refuted:
+
+- **No same-dot FIFO refill** (a FIFO that drains on a dot refills on the next
+  dot instead of the same one): 29/312 against a 158/312 baseline, wrecking
+  scy/bgtiledata/bgtilemap outright. The same-dot refill is load-bearing — it
+  is what produces the 8-dot steady-state cadence. `render_step` pops first and
+  then lets `fetcher_step` push into the emptied FIFO on that same dot, and
+  that ordering is right.
+- **A coarse SCX change restarts the in-flight tile fetch** (phase back to the
+  tile-number read, the way a window start re-anchors): 2/135 in the cluster.
+  The guard families are untouched, since the arm only fires on coarse changes,
+  so this is a clean refutation rather than a trade.
+
+Ruled out for this cluster so far, all measured: uniform coarse sample delay
+(shuffle), line-start coarse latch, a fetch-phase-discriminated arm, a
+dots-since-fetch-start threshold, deferred FIFO refill, and fetch restart on a
+coarse change. The mod-4 split below is still unexplained by any of them, so
+the next attempt should start from a *new* observable rather than another
+variation on when the map column is addressed.
 
 For the record, the groups that want opposite answers, from the double-speed
 ladder: `_ds_1/4/5/8` (positions 0,1 mod 4) want the live read; `_ds_2/3/6/7`
