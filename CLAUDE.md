@@ -141,7 +141,7 @@ emulated s.
 ## State
 
 Baseline (all green, on `main`): mooneye **439/439** (rom×model), gbtr v7.0
-**7041 cases** (6387 pass + 654 baselined floor), core lib + frontend green,
+**7041 cases** (6424 pass + 617 baselined floor), core lib + frontend green,
 clippy clean. Missing ROMs skip unless `SLOPGB_REQUIRE_ROMS=1` (run
 `test-roms/download.sh` first). Per-area detail:
 [`docs/ui-state/`](docs/ui-state/README.md) + [`docs/hardware-state/`](docs/hardware-state/README.md).

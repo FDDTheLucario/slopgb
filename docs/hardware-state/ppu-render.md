@@ -91,6 +91,80 @@ Remaining (not yet pixel-perfect) legs are mostly:
 - The PPU raises STAT/VBlank IRQs via `Ppu::write`'s return value (single drain).
 - When adding a PPU register path, OR the returned IF bits into `intf` like the existing interconnect call sites.
 
+## Mid-mode-3 SCX and the BG map column (LANDED 2026-07-29)
+
+The BG tile-map column is derived from the pixel output position, not from a
+tile counter. SameBoy `display.c` `GB_FETCHER_GET_TILE_T1` forms it as
+`(SCX + position_in_line + 8 - (is_cgb && !during_object_fetch)) / 8`: SCX is
+summed with the position and divided **once**, so SCX's low three bits carry
+into the tile index. Dividing the coarse part out first and counting tiles
+separately (`scx / 8 + fetch_x`) cannot express that carry — which is exactly
+what the gambatte `scx_during_m3/scx_*c0` ladders measure, and why the whole
+family failed on any *timing* adjustment.
+
+`Render::lx` is our position. Three details are ours rather than SameBoy's, all
+measured with an equivalence check (see below):
+
+- the anchor is **6**, not `8 - is_cgb`, because our `lx` sits at
+  `8 * fetch_x - 6` at the tile-number read instead of a multiple of 8 — we
+  re-fetch the discarded first tile where SameBoy pushes it and pops its pixels;
+- the position form is gated to CGB and to fetches after the line's first pixel
+  ships, with a running sprite stall excluded: our BG fetcher free-runs through
+  a stall while the output position is frozen, where SameBoy parks its fetcher
+  in `PUSH`;
+- it applies only once `SCX & 7` has moved away from the value latched at the
+  fine-scroll comparator match (`Render::hunt_fine`) — the value that fixed this
+  line's discard, and therefore `lx`'s alignment to the tile grid. While it
+  holds, the two forms are provably identical, so the gate costs nothing.
+
+Result: **37 baseline rows recovered, zero regressions** (34 gambatte + 3 age
+`m3-bg-scx`). Golden drift is confined to 79 ROMs, every one of them SCX-named.
+
+### The equivalence check (use this for any future work here)
+
+With SCX held constant the position-derived column must reproduce
+`(scx / 8) + fetch_x` fetch-for-fetch, because every BG row outside
+`scx_during_m3` already passes. Instrument both at the tile-number read and
+count mismatches: seconds per ROM, no battery run. It found the anchor and
+rejected four wrong constants that would each have cost a six-minute matrix run,
+and it is what proves any future variant safe before measuring it.
+
+Cover the fine-scroll values: ROMs with `scx & 7` of 0-3 are plentiful
+(`spx08`..`spx0B`) but a constant that is right there can still be wrong at 6/7
+— that mistake cost two mealybug rows once.
+
+### Measured dead ends (do not re-chase)
+
+All of these were built and measured against this cluster; every one either
+shuffles want-opposite siblings or retimes rows outside the intended window:
+a uniform coarse-SCX sample delay, a line-start coarse latch, a fetch-phase
+threshold, a dots-since-fetch-start threshold, a deferred FIFO refill (the
+same-dot refill is load-bearing — it is what produces the 8-dot cadence), a
+fetch restart on a coarse change, a `read - 4` dot rule, a per-line measured
+anchor, and latching the column at `TileNoWait` to mirror SameBoy's T1/T2 split
+(13 regressions — computing it on the T2 side is correct for our pipeline).
+
+Residual in this family is now the `scx1_scx0`/`scx2_scx1` DMG legs and the
+remaining `_ds` rounds; the DMG side needs its own anchor before the position
+form can be enabled there (enabling it with anchor 6 recovers 43 but costs 4
+SameBoy-PASS rows, which class F forbids baselining).
+
+## Post-boot VRAM (boot logo)
+
+- Post-boot VRAM holds the boot logo *tile data* (incl. the (R) tile `$19`; `install_boot_logo_vram`).
+- Do: leave the DMG logo tile-**map** rows uninstalled — the pinned gambatte reference PNGs predate initial-VRAM modelling (see the doc comment), and gambatte's `_blank` halt ROMs are judged on the top tile row only.
+
+## Frame skip and CGB boot palettes
+
+- The first frame after an LCD enable is presented blank (`Ppu::frame_skip`, Pan Docs LCDC.7 / SameBoy frame-skip) — frame-compare harnesses must sample >=2 vblanks after the ROM's re-enable.
+- CGB DMG-compat boot palettes are the real boot-ROM *defaults* (BG table != OBJ table, `interconnect.rs`).
+- Do: leave the Nintendo-licensee title-hash table deliberately unmodelled.
+
+## PPU interrupt raising
+
+- The PPU raises STAT/VBlank IRQs via `Ppu::write`'s return value (single drain).
+- When adding a PPU register path, OR the returned IF bits into `intf` like the existing interconnect call sites.
+
 ## Mid-mode-3 SCX and the BG map column (open, localized)
 
 The gambatte `scx_during_m3/scx_*c0/` families write SCX during mode 3 at an

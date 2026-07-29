@@ -302,7 +302,15 @@ impl Ppu {
                     (
                         LCDC_BG_MAP,
                         self.ly.wrapping_add(scy) >> 3,
-                        (scx / 8).wrapping_add(self.render.fetch_x) & 31,
+                        bg_map_col(
+                            scx,
+                            self.render.lx,
+                            self.render.fetch_x,
+                            self.model.is_cgb(),
+                            self.render.stall == 0,
+                            self.render.hunt_done,
+                            scx & 7 != self.render.hunt_fine,
+                        ),
                     )
                 };
                 let base = if lcdc & map_bit != 0 { 0x1C00 } else { 0x1800 };
@@ -407,4 +415,35 @@ impl Ppu {
         };
         bank + base + usize::from(fine) * 2
     }
+}
+
+/// BG tile-map column.
+///
+/// SameBoy `display.c` `GB_FETCHER_GET_TILE_T1` forms it as
+/// `(SCX + position_in_line + 8 - (is_cgb && !during_object_fetch)) / 8`: SCX
+/// summed with the pixel output position and divided **once**, so SCX's low
+/// bits carry into the tile index. Dividing the coarse part out first and
+/// counting tiles separately cannot express that carry, which is what the
+/// gambatte `scx_during_m3/scx_*c0` ladders measure.
+fn bg_map_col(
+    scx: u8,
+    lx: u8,
+    fetch_x: u8,
+    cgb: bool,
+    lead: bool,
+    hunted: bool,
+    fine_moved: bool,
+) -> u8 {
+    // The tile counter is exact unless the fine scroll has moved away from the
+    // value that fixed this line's discard: `lx == 0` is the pre-output band,
+    // `!lead` a running sprite stall (our BG fetcher free-runs there while the
+    // output position is frozen, where SameBoy parks its fetcher in `PUSH`).
+    if (lx == 0 && !hunted) || !lead || !cgb || !fine_moved {
+        return (scx >> 3).wrapping_add(fetch_x) & 31;
+    }
+    // `lx` is the output position; the anchor is 6 because our `lx` sits at
+    // `8 * fetch_x - 6` at the tile-number read rather than a multiple of 8 —
+    // we re-fetch the discarded first tile where SameBoy pushes and pops it.
+    let v = i32::from(scx) + i32::from(lx) + 6;
+    (v.div_euclid(8) & 31) as u8
 }

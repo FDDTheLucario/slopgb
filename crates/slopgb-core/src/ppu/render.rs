@@ -248,6 +248,13 @@ pub(super) struct Render {
     /// D3) cannot represent — so the arm is skipped on such lines (the row keeps
     /// its native verdict, parked). Reset per line; law input only.
     pub(super) scx_write_dot: u16,
+
+    /// `SCX & 7` at the fine-scroll comparator match — the value that fixed
+    /// this line's discard, and therefore the alignment of `lx` to the tile
+    /// grid. The BG map column only needs its position-derived form once the
+    /// fine scroll moves away from it; while it holds, that form and the tile
+    /// counter agree exactly.
+    pub(super) hunt_fine: u8,
     /// WX comparator output on the previous dot: activations and
     /// reactivations fire on the rising edge only (the match holds while
     /// lx is frozen during the start stall and must not re-fire).
@@ -313,6 +320,7 @@ impl Render {
             win_enable_dot: 0,
             wx_write_dot: 0,
             scx_write_dot: 0,
+            hunt_fine: 0,
             win_match_prev: false,
             prefill_pos: 0,
             wx_match_dot: 0,
@@ -375,6 +383,7 @@ impl Ppu {
         r.win_enable_dot = 0;
         r.wx_write_dot = 0;
         r.scx_write_dot = 0;
+        r.hunt_fine = self.eff.scx & 7;
         r.win_match_prev = false;
         r.prefill_pos = 0;
         r.wx_match_dot = 0;
@@ -453,6 +462,7 @@ impl Ppu {
                     self.render.hunt_done = true;
                     self.render.discard = pos;
                     self.render.hunt_match_dot = self.dot;
+                    self.render.hunt_fine = self.eff.scx & 7;
                 } else {
                     self.render.hunt_idx = (self.render.hunt_idx + 1) & 7;
                 }
@@ -573,6 +583,7 @@ impl Ppu {
                 if r.hunt_idx == fine_scx {
                     r.hunt_done = true;
                     r.discard = 7;
+                    r.hunt_fine = fine_scx;
                 } else {
                     r.hunt_idx = (r.hunt_idx + 1) & 7;
                 }

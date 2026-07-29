@@ -31,6 +31,6 @@ asm → SameBoy/mooneye/gambatte source.
 ```sh
 cargo test -p slopgb-core --lib <module>
 cargo test -p slopgb-core --test mooneye     # 439/439
-cargo test -p slopgb-core --test gbtr        # 6387/7041 pass (654 baselined), ~5.5 min
+cargo test -p slopgb-core --test gbtr        # 6424/7041 pass (617 baselined), ~5.5 min
 cargo run  -p slopgb-core --example run_mooneye -- <rom> [model]
 ```
