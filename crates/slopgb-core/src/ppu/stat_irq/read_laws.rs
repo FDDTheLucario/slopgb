@@ -198,7 +198,7 @@ impl Ppu {
         // `frame1_m2stat_count_2` want 90), while the mooneye `stat_lyc_onoff`
         // post-enable poll resolves `lrd=1` (mode 0) — the discriminator;
         // sibling `ly0stat_2` (want 0) verdicts on its earlier LY=153 read.
-        // Pin `tier2_eager_dmg_ly0_oam_entry_passes`.
+        // Pin `dmg_ly0_oam_entry_passes`.
         if !self.model.is_cgb() && !self.glitch_line {
             if (1..144).contains(&self.line) && m == 0 && self.dot < 4 {
                 return 2; // line-start OAM entry (cc+4 = OAM scan)

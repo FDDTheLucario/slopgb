@@ -282,7 +282,7 @@ impl Ppu {
         // `lyc_write_wrap_153` wrap fire that SameBoy delivers
         // (`lyc153_late_ff45_enable_3` outE2) — suppressing there drops a real
         // edge.
-        let tier2_minus1_gap = (1..=143).contains(&ll) && self.ly_for_comparison_at(ll, ld) == -1;
+        let ly_cmp_minus1_gap = (1..=143).contains(&ll) && self.ly_for_comparison_at(ll, ld) == -1;
         // The FF45-write fire is suppressed under the engine when a NON-LYC
         // source holds the line: SameBoy's `GB_STAT_update` raises IF only on
         // the line's 0→1 edge, and a line held by an enabled MODE source (the
@@ -303,7 +303,7 @@ impl Ppu {
             _ => 0,
         };
         let engine_line_high = self.stat_update.line() && mode_src_en != 0;
-        let fire = !tier2_minus1_gap
+        let fire = !ly_cmp_minus1_gap
             && !engine_line_high
             && self.stat_en & STAT_SRC_LYC != 0
             && ((target == Some(value) && !blocked && !lyc_level_high) || lyc_write_wrap_153);

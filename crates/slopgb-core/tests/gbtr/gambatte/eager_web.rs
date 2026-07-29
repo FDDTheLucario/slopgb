@@ -338,10 +338,10 @@ fn eager_window_m0irq_deliver_passes() {
 /// `ly0/lycint152_ly0stat_3` (want C2; its `_2` sibling reads the earlier
 /// LY=153, untouched) and `enable_display/frame1_m2stat_count_2` (want 90).
 #[test]
-fn tier2_eager_dmg_ly0_oam_entry_passes() {
+fn dmg_ly0_oam_entry_passes() {
     let Some(root) = common::gbtr_root() else {
         common::skip_or_fail_gbtr(
-            "tier2_eager_dmg_ly0_oam_entry",
+            "dmg_ly0_oam_entry",
             "game-boy-test-roms collection not present",
         );
         return;
