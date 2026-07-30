@@ -8,14 +8,19 @@ rule. Guest SDK: `slopgb-plugin-api`.
 ## Safe under `forbid(unsafe_code)`
 
 The whole crate is `forbid(unsafe_code)`; wasmi's host API is fully safe. The
-per-frame + coprocessor paths keep the store data `'static` by copying observable
-state into an owned `Snapshot` (64KB bus image + registers) before each call, so
-those imports read a frame-consistent copy and never borrow the `GameBoy`. The
-tool path instead lets the wasmi store hold **borrowed** data (a `&mut dyn
-ToolContext`) for the duration of one call, so its imports run the exact same
-core/frontend tool code — no copy, byte-identical to the built-in tools. Guest
-memory crosses only via the bounds-checked `Memory::read`/`write`, never a raw
-pointer.
+per-frame and coprocessor paths share one owned, `'static` store data
+(`HostState`), so neither borrows the `GameBoy` — but only tier 1 pays for a
+copy of the machine: `PluginHost::pump` refreshes `HostState::snap` with a fresh
+`Snapshot` (64KB bus image + registers) before each plugin's `on_frame`, so those
+imports read a frame-consistent picture. The tier-3 coprocessor path never
+snapshots at all — `LoadedCoprocessor::load` sets `HostState::empty()` once at
+`Store::new` and leaves `snap` zeroed, because a chip reads its own sandboxed RAM,
+not the Game Boy; its calls touch only the owned bulk channels (`mailbox` /
+`files` / `emitted`). The tool path instead lets the wasmi store hold **borrowed**
+data (a `&mut dyn ToolContext`) for the duration of one call, so its imports run
+the exact same core/frontend tool code — no copy, byte-identical to the built-in
+tools. Guest memory crosses only via the bounds-checked `Memory::read`/`write`,
+never a raw pointer.
 
 ## The loaders (one per capability)
 
@@ -31,8 +36,9 @@ is **generic** — it loads any module exporting the `slopgb_reset` /
 `slopgb_run_until` / `slopgb_port_write` / `slopgb_port_read` ABI, with no
 per-subsystem special-casing. The host is therefore obligated to support ALL
 valid subsystem plugins; a new subsystem needs no new loader, only a caller that
-drives it (the SGB coprocessor drives three — spc700 + w65c816 + the optional
-snes-ppu; MSU-1 drives one).
+drives it (the SGB coprocessor drives up to four loaded plugins — spc700 +
+w65c816 + the optional snes-ppu + the optional msu1, MSU-1 being part of the SGB
+bridge, driven at SNES `$2000-$2007`, not a separate loader).
 The three loaders are **peers, one per capability** — a `SUBSYSTEM` plugin is NOT
 "lesser" than a tier-1 one, it simply exports the coprocessor ABI instead of
 `on_frame`, so `PluginHost` (the tier-1 per-frame pump) is the wrong loader for

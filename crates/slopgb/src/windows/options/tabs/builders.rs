@@ -914,35 +914,39 @@ pub(super) fn plugins(s: &Settings, content: Rect) -> Vec<Ctrl> {
     ));
     l.row();
     l.row();
-    // One row per discovered plugin: "name [caps]". A per-frame introspection
-    // plugin gets a live enable checkbox (the pump drives it). A higher-tier
-    // SUBSYSTEM plugin is listed but the checkbox is inert — it loads through its
-    // own seam (`--sgb-coprocessor` / `--msu1`), not this per-frame pump, so an
-    // enable toggle here would do nothing. The dynamic "name [caps]" string is a
-    // separate label beside a static-empty checkbox (`Kind::Check`'s label is
-    // `&'static str`). An empty list shows an inert note.
+    // One row per discovered plugin: "name [caps]", each with a live enable
+    // checkbox. Turning a per-frame INTROSPECTION plugin off stops its `on_frame`
+    // at the next pump; turning a SUBSYSTEM plugin off leaves its slot empty from
+    // the next reset / ROM load (swapping a chip under a running machine would
+    // need live state migration, so it is not done). The dynamic "name [caps]"
+    // string is a separate label beside a static-empty checkbox (`Kind::Check`'s
+    // label is `&'static str`). An empty list shows an inert note.
     if s.plugins.entries.is_empty() {
         v.push(text_label(l.at(), "(no plugins discovered)".to_owned()));
     } else {
         let box_sz = line_height() - 4;
+        let mut any_subsystem = false;
         for (i, e) in s.plugins.entries.iter().enumerate() {
             let (x, y) = l.at();
             let label = format!("{} [{}]", e.name, e.capabilities);
+            any_subsystem |= e.capabilities.contains("subsystem");
             let w = box_sz + 3 + measure(&label);
             let box_rect = Rect::new(x, y, w, box_sz);
             let check = Kind::Check {
                 checked: e.enabled,
                 label: "",
             };
-            // Only per-frame plugins are pump-togglable; subsystem/tool ones are
-            // driven by their own loader, so their row is informational (inert).
-            if e.capabilities.contains("subsystem") {
-                v.push(Ctrl::inert(box_rect, check));
-            } else {
-                v.push(Ctrl::live(box_rect, check, Field::PluginEnable(i)));
-            }
+            v.push(Ctrl::live(box_rect, check, Field::PluginEnable(i)));
             v.push(text_label((x + box_sz + 3, y), label));
             l.row();
+        }
+        if any_subsystem {
+            l.row();
+            v.push(text_label(
+                l.at(),
+                "(subsystem plugins load at reset — a change applies on the next reset / ROM load)"
+                    .to_owned(),
+            ));
         }
     }
     v

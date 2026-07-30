@@ -99,6 +99,13 @@ impl SDsp {
 
     // -- Register access (forwarded from the SPC700 $F2/$F3 port) -----------
 
+    /// The raw 128-byte register file `$00-$7F` as last written — the form an
+    /// SPC-file dump wants (not [`Self::read`], which live-computes ENVX/OUTX/
+    /// ENDX). Read-only introspection.
+    pub fn regs(&self) -> &[u8; 128] {
+        &self.regs
+    }
+
     /// Read a DSP register. `addr` is the raw `$F2` value; bit 7 selects the
     /// read-only mirror (same data). `ENVX`/`OUTX`/`ENDX` return live state.
     pub fn read(&self, addr: u8) -> u8 {

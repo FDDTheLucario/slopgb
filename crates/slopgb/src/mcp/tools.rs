@@ -51,6 +51,9 @@ pub enum Call {
     },
     Registers,
     Coprocessor,
+    DumpSpc {
+        mode: String,
+    },
     Expr {
         expr: String,
     },
@@ -122,6 +125,7 @@ pub fn dispatch(
         }
         Call::Registers => Ok(ToolResult::Text(registers(gb))),
         Call::Coprocessor => Ok(ToolResult::Text(coprocessor_status(gb))),
+        Call::DumpSpc { mode } => Ok(ToolResult::Text(dump_spc(gb, mode))),
         Call::Expr { expr } => Ok(ToolResult::Text(expr_eval(gb, expr))),
         Call::Memdump { from, to, file } => {
             let (a, b) = addr::parse_range(from, to)?;
@@ -325,17 +329,58 @@ pub(crate) fn registers(gb: &GameBoy) -> String {
     )
 }
 
-/// The SGB audio coprocessor status (the `coprocessor` tool): whether this
-/// machine has an SGB coprocessor and, if so, whether the built-in HLE APU or
-/// the wasm SPC700 + 65C816 plugins are engaged and actually running. A machine
-/// that is not in SGB mode says so — the SPC700/65C816 only run on SGB.
+/// The SGB coprocessor status (the `coprocessor` tool): whether a SNES-side
+/// coprocessor is installed and, if so, whether its wasm SPC700 + 65C816 chips
+/// loaded and are actually running. An empty slot says so — the emulator ships
+/// no SNES implementation, so the chips exist only when the plugins load.
 pub(crate) fn coprocessor_status(gb: &GameBoy) -> String {
     gb.sgb_coprocessor_status().unwrap_or_else(|| {
-        "no SGB coprocessor: this machine is NOT in Super Game Boy mode, so the SPC700 / \
-         65C816 never run. Set System -> Super Gameboy (or --model sgb); the coprocessor \
-         chips exist only on Model::Sgb / Sgb2."
+        "no SGB coprocessor installed, so the SPC700 / 65C816 never run. Needs BOTH an SGB \
+         machine (System -> Super Gameboy, or --model sgb) and spc700.wasm + w65c816.wasm in \
+         the plugins dir (--plugins / Options -> Plugins, each enabled)."
             .to_string()
     })
+}
+
+/// The `dump-spc` tool: write the SGB audio chip's state to a `.spc` file and
+/// report the path. `mode` = `live` (default — the driver's current state, for
+/// debugging a driver mid-song) or `start` (the from-the-top snapshot the UI
+/// exports). Returns an explanatory line if there is nothing to dump (not an SGB
+/// machine, or `start` before a recognized song has played).
+pub(crate) fn dump_spc(gb: &GameBoy, mode: &str) -> String {
+    let mode = if mode.trim().is_empty() {
+        "live"
+    } else {
+        mode.trim()
+    };
+    let spc = match mode {
+        "live" => gb.export_spc_live(),
+        "start" => gb.export_spc(),
+        other => {
+            return format!(
+                "unknown mode '{other}': use 'live' (current state) or 'start' (song top)"
+            );
+        }
+    };
+    let Some(spc) = spc else {
+        return match mode {
+            "start" => "no from-start SPC available: needs an SGB machine whose recognized \
+                        resident engine (--sgb-bios or the clean-room engine) has started a \
+                        song. Try mode 'live', or the coprocessor tool for status."
+                .to_string(),
+            _ => "no SPC to dump: this machine has no SGB SPC700 — it needs an SGB model AND \
+                  the spc700.wasm coprocessor plugin loaded. See the coprocessor tool."
+                .to_string(),
+        };
+    };
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    let path = format!("slopgb-{stamp}-{mode}.spc");
+    match std::fs::write(&path, &spc) {
+        Ok(()) => format!("wrote {} state to {path} ({} bytes)", mode, spc.len()),
+        Err(e) => format!("error: could not write {path}: {e}"),
+    }
 }
 
 /// Evaluate a bgb-style debugger expression against the live regs + memory.

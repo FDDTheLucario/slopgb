@@ -7,7 +7,10 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use slopgb_core::{CLOCK_HZ, CartridgeError, DEFAULT_SAMPLE_RATE, GameBoy, Model, RamInit};
-use slopgb_sgb_coprocessor::{CPU_WASM, SPC_WASM, SgbCoprocessor};
+use slopgb_plugin_host::LoadedCoprocessor;
+use slopgb_sgb_coprocessor::{
+    CPU_WASM, Engine, MSU_WASM, PPU_WASM, SPC_WASM, SampleRegions, SgbCoprocessor,
+};
 
 use crate::windows::options::ModelChoice;
 
@@ -74,10 +77,32 @@ pub(crate) struct Session {
     /// Plugins directory (`--plugins`/`SLOPGB_PLUGINS_DIR`, or the UI browse). The
     /// SGB coprocessor is a plugin: when this dir holds `spc700.wasm` +
     /// `w65c816.wasm` and the machine is SGB, the combined 65C816+SPC700+S-DSP
-    /// coprocessor auto-loads over the built-in HLE `SgbApu` at inject time. `None`
-    /// (or a dir missing either wasm) → the built-in `SgbApu` stands (golden-safe
-    /// default). Kept so a power-cycle / model switch re-injects it.
+    /// coprocessor is installed at inject time. `None` (or a dir missing either
+    /// wasm) leaves the machine's coprocessor slot empty — no SNES side at all.
+    /// Kept so a power-cycle / model switch re-injects it.
     plugins_dir: Option<PathBuf>,
+    /// Subsystem plugins the user turned off in Options → Plugins, by file stem
+    /// (`spc700`, `w65c816`, `snes-ppu`, `msu1`). Read only when a machine is
+    /// (re)built, so a toggle lands on the next reset / ROM load rather than
+    /// swapping a chip under a running SNES program. A disabled plugin leaves
+    /// its slot empty — there is no fallback implementation.
+    disabled_plugins: Vec<String>,
+    /// Effective values of plugin-contributed CLI flags (`sf2`, `msu1`, ...:
+    /// see `slopgb_plugin_host::FlagContribution`), keyed by the flag's
+    /// declared name — already resolved by the frontend's `PluginRegistry`
+    /// (explicit CLI/env value, else the manifest's declared default expanded
+    /// against the current ROM/plugins-dir context, else absent). `sf2`
+    /// overrides the ROM's own `$4B00`/`$4C30`/`$4DB0` N-SPC sample bank when
+    /// present; `msu1` points the MSU-1 chip (an SGB-coprocessor plugin) at
+    /// its `.pcm` pack directory. Kept so a power-cycle / model switch
+    /// re-applies them to the fresh machine.
+    plugin_flags: Vec<(String, String)>,
+    /// One-shot-per-load guard for the deferred-validation warning: an
+    /// explicit plugin flag value resolved but this machine can't use it this
+    /// run (not an SGB model, or no active SGB-coprocessor plugin). Reset
+    /// by `set_plugin_flags` so it fires at most once per (re)load, never as a
+    /// hard error (a drag-drop ROM swap can change applicability).
+    plugin_flags_warned: bool,
     /// Overlay the built-in default SGB border on a non-SGB machine — bgb's
     /// "GBC + initial SGB border" system mode (`ModelChoice::CgbBorder`). A
     /// machine property, so a power-cycle (`reset`) re-applies it.
@@ -121,6 +146,9 @@ impl Session {
             boot: OwnedBootSpec::default(),
             sgb_bios: None,
             plugins_dir: None,
+            disabled_plugins: Vec::new(),
+            plugin_flags: Vec::new(),
+            plugin_flags_warned: false,
             sgb_border: false,
             ram_init: None,
             load_warning: None,
@@ -194,6 +222,9 @@ impl Session {
             boot: boot.to_owned(),
             sgb_bios: None,
             plugins_dir: None,
+            disabled_plugins: Vec::new(),
+            plugin_flags: Vec::new(),
+            plugin_flags_warned: false,
             sgb_border,
             ram_init,
             load_warning,
@@ -222,6 +253,14 @@ impl Session {
         }
     }
 
+    /// Record which subsystem plugins are turned off in Options → Plugins.
+    /// Deliberately does NOT re-apply the coprocessor: the change takes effect
+    /// the next time a machine is built (reset / model switch / ROM load), so a
+    /// running SPC700 + 65C816 is never swapped out from under the game.
+    pub(crate) fn set_disabled_plugins(&mut self, names: Vec<String>) {
+        self.disabled_plugins = names;
+    }
+
     /// Set the plugins directory the SGB coprocessor auto-loads from, then apply
     /// it to the current machine. Kept so a `reset`/`set_model` rebuild re-injects
     /// from the same place.
@@ -230,29 +269,146 @@ impl Session {
         self.apply_sgb_coprocessor();
     }
 
+    /// Set the effective values of every plugin-contributed CLI flag (the
+    /// frontend's already-resolved `PluginRegistry::flag` results — see the
+    /// `plugin_flags` field doc), then re-apply the coprocessor so `sf2` /
+    /// `msu1` take over immediately. Resets the deferred-validation warning
+    /// guard, so an inapplicable value warns again on this fresh load.
+    pub(crate) fn set_plugin_flags(&mut self, flags: Vec<(String, String)>) {
+        self.plugin_flags = flags;
+        self.plugin_flags_warned = false;
+        self.apply_sgb_coprocessor();
+    }
+
+    /// The effective value of a plugin flag by name (`sf2`, `msu1`, ...), if
+    /// the frontend resolved one.
+    fn plugin_flag(&self, name: &str) -> Option<&str> {
+        self.plugin_flags
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// Warn once per load when a resolved plugin flag can't apply this run
+    /// (deferred validation: never a hard error, since a drag-drop ROM swap
+    /// can change applicability — see `plugin_flags_warned`).
+    fn warn_plugin_flags_inapplicable(&mut self) {
+        if self.plugin_flags.is_empty() || self.plugin_flags_warned {
+            return;
+        }
+        self.plugin_flags_warned = true;
+        let names: Vec<&str> = self.plugin_flags.iter().map(|(n, _)| n.as_str()).collect();
+        eprintln!(
+            "slopgb: plugin flag(s) {} resolved but no SGB coprocessor is active this \
+             load (not an SGB model, or spc700.wasm/w65c816.wasm missing from the \
+             plugins dir or disabled in Options -> Plugins) — ignored",
+            names.join(", ")
+        );
+    }
+
     /// Inject the combined coprocessor into the current (freshly built) machine
     /// when its plugin is present. The SGB SNES-side chips run only from a loaded
     /// plugin: with `spc700.wasm` + `w65c816.wasm` in the plugins dir and an SGB
-    /// machine, the combined 65C816+SPC700+S-DSP coprocessor replaces the built-in
-    /// HLE `SgbApu`. A missing plugin (or non-SGB machine) leaves the `SgbApu` in
-    /// place — the golden-safe default — silently, since absence is the norm; only
-    /// a present-but-broken plugin is logged. Built at the core's default output
-    /// rate (the GameBoy APU's rate) so the two streams stay sample-aligned.
+    /// machine, the combined 65C816+SPC700+S-DSP coprocessor fills the machine's
+    /// coprocessor slot. A missing plugin (or non-SGB machine) leaves the slot
+    /// empty — no SNES audio, no SNES video — silently, since absence is the
+    /// norm; only a present-but-broken plugin is logged. Built at the core's
+    /// default output rate (the GameBoy APU's rate) so the two streams stay
+    /// sample-aligned.
     fn apply_sgb_coprocessor(&mut self) {
-        // Off SGB the machine holds no coprocessor slot; skip the wasm load
+        // Off SGB the machine rejects a coprocessor; skip the wasm load
         // entirely (`set_audio_coprocessor` would drop the box anyway).
         if !matches!(self.model, Model::Sgb | Model::Sgb2) {
+            self.warn_plugin_flags_inapplicable();
             return;
         }
-        let Some(dir) = &self.plugins_dir else { return };
-        // No coprocessor plugin in the dir → HLE default, not an error.
-        if !dir.join(SPC_WASM).exists() || !dir.join(CPU_WASM).exists() {
+        let Some(dir) = self.plugins_dir.clone() else {
+            self.warn_plugin_flags_inapplicable();
+            return;
+        };
+        // Neither chip in the dir (or the user turned one off) → empty slot, not
+        // an error. Both are required: there is no partial SNES side.
+        if !self.subsystem_active(&dir, SPC_WASM) || !self.subsystem_active(&dir, CPU_WASM) {
+            self.warn_plugin_flags_inapplicable();
             return;
         }
-        match SgbCoprocessor::load(dir, DEFAULT_SAMPLE_RATE) {
-            Ok(cop) => self.gb.set_audio_coprocessor(Box::new(cop)),
-            Err(e) => eprintln!("slopgb: {e}; using the built-in SGB APU"),
+        match self.load_sgb_coprocessor(&dir) {
+            Ok(mut cop) => {
+                // Engine and sample source are independent axes (see
+                // `slopgb-sgb-coprocessor`'s `install_nspc`): the ROM's own
+                // resident engine plays only with `--sgb-bios` present (unless
+                // the clean-room env override is set); the sample bank is the
+                // ROM's own unless `sf2` supplies an override — which also
+                // forces the clean-room engine when no `--sgb-bios` is given,
+                // since there is no ROM engine code to fall back to.
+                let cleanroom_env = std::env::var_os("SLOPGB_NSPC_CLEANROOM").is_some();
+                let engine = if self.sgb_bios.is_some() && !cleanroom_env {
+                    Engine::Rom
+                } else {
+                    Engine::CleanRoom
+                };
+                let sf2_path = self.plugin_flag("sf2").map(PathBuf::from);
+                let sf2_regions: Option<SampleRegions> = sf2_path
+                    .as_ref()
+                    .and_then(|p| load_or_import_sf2(p, self.plugins_dir.as_deref()));
+                if (self.sgb_bios.is_some() || sf2_regions.is_some())
+                    && !cop.install_nspc(self.sgb_bios.as_deref(), engine, sf2_regions.as_ref())
+                {
+                    eprintln!(
+                        "slopgb: N-SPC sample/engine install failed; using clean-room firmware"
+                    );
+                }
+                // Point the MSU-1 plugin (if `msu1.wasm` was in the plugins dir)
+                // at its `.pcm` pack: the `msu1` flag's effective value — an
+                // explicit `--msu1`/`SLOPGB_MSU1`, else the manifest's `$rom_dir`
+                // default (the loaded ROM's own directory), already resolved by
+                // the frontend's `PluginRegistry`. A game's SGB driver then finds
+                // the chip on the SNES $2000 bus.
+                if let Some(pack) = self.plugin_flag("msu1") {
+                    cop.set_msu_pack(Path::new(pack));
+                }
+                self.gb.set_audio_coprocessor(Box::new(cop));
+            }
+            Err(e) => eprintln!("slopgb: {e}; no SGB SNES side this run"),
         }
+    }
+
+    /// Whether the subsystem plugin file `wasm` (e.g. `spc700.wasm`) is present
+    /// in `dir` *and* left enabled in Options → Plugins. A disabled plugin is
+    /// treated exactly as an absent file — there is no fallback implementation,
+    /// so its slot simply stays empty.
+    fn subsystem_active(&self, dir: &Path, wasm: &str) -> bool {
+        let stem = wasm.trim_end_matches(".wasm");
+        dir.join(wasm).exists() && !self.disabled_plugins.iter().any(|d| d == stem)
+    }
+
+    /// Build the SGB coprocessor from the active plugins in `dir`. Both
+    /// `spc700.wasm` and `w65c816.wasm` are required (the caller has already
+    /// checked they are active); `snes-ppu.wasm` and `msu1.wasm` join only when
+    /// present and enabled. Built at the core's default output rate so the SNES
+    /// and Game Boy streams stay sample-aligned.
+    fn load_sgb_coprocessor(&self, dir: &Path) -> Result<SgbCoprocessor, String> {
+        let read = |wasm: &str| {
+            fs::read(dir.join(wasm))
+                .map_err(|e| format!("cannot read SGB plugin '{}': {e}", dir.join(wasm).display()))
+        };
+        let optional = |wasm: &str| {
+            self.subsystem_active(dir, wasm)
+                .then(|| read(wasm).ok())
+                .flatten()
+        };
+        let spc = read(SPC_WASM)?;
+        let cpu = read(CPU_WASM)?;
+        let ppu = optional(PPU_WASM);
+        let mut cop =
+            SgbCoprocessor::from_wasm_full(&spc, &cpu, ppu.as_deref(), DEFAULT_SAMPLE_RATE)
+                .map_err(|e| format!("cannot load SGB coprocessor plugins: {e}"))?;
+        if let Some(bytes) = optional(MSU_WASM) {
+            if let Err(e) = cop.attach_msu(&bytes) {
+                eprintln!("slopgb: MSU-1 plugin '{MSU_WASM}' present but failed to load: {e}");
+            }
+        }
+        Ok(cop)
     }
 
     /// Quick Save (bgb State → Quick Save): snapshot the whole machine into
@@ -721,6 +877,12 @@ fn build_gb(
 // checkpoint ring + `GameBoy::{save,load}_state`/`step`.
 #[path = "reverse.rs"]
 mod reverse;
+
+// The `--sf2` soundfont import (cache lookup + the `sf2.wasm` converter), whose
+// only caller is `apply_sgb_coprocessor` above.
+#[path = "session_sf2.rs"]
+mod sf2;
+use sf2::load_or_import_sf2;
 
 #[cfg(test)]
 #[path = "session_tests.rs"]

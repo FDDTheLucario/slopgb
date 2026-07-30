@@ -18,6 +18,10 @@ pub const EMIT_KIND_RAM: i32 = 4;
 /// self-describing manifest (line-based UTF-8 text, see [`Coprocessor::MANIFEST`])
 /// back to the host.
 pub const EMIT_KIND_MANIFEST: i32 = 5;
+/// The [`crate::__emit`] `kind` `slopgb_dump_spc` uses to push an assembled
+/// `.spc` (SPC700 Sound File) back to the host — distinct from the opaque
+/// save-state ([`EMIT_KIND_STATE`]) so the payload's intent is self-documenting.
+pub const EMIT_KIND_SPC: i32 = 6;
 
 /// Read the host→guest **mailbox** — the bytes a game (or the frontend) last
 /// deposited for this coprocessor, e.g. a streaming-audio play-request written
@@ -134,6 +138,19 @@ pub trait Coprocessor {
         vec![0u8; len]
     }
 
+    /// Ship what [`Self::read_ram`] would return over the emit channel
+    /// ([`EMIT_KIND_RAM`]) and report the byte count — the guest half of the
+    /// host's `read_ram`. Override when the bytes are already contiguous in
+    /// guest memory (e.g. a framebuffer) to hand the host that region directly
+    /// via [`crate::__emit`] / [`crate::__emit_words`]: the host copies the
+    /// payload once through wasmi's bounds-checked `Memory` either way, so
+    /// skipping the intermediate `Vec` skips a whole interpreted pass over it.
+    fn emit_ram(&mut self, addr: u32, len: usize) -> usize {
+        let bytes = self.read_ram(addr, len);
+        crate::__emit(EMIT_KIND_RAM, &bytes);
+        bytes.len()
+    }
+
     /// Serialize the chip's full volatile state to bytes for a host save-state.
     /// The format is private to the chip; [`Self::load_state`] is its inverse.
     /// Default: empty (a stateless / non-persisted coprocessor).
@@ -146,6 +163,13 @@ pub trait Coprocessor {
     /// Default: ignored.
     fn load_state(&mut self, bytes: &[u8]) {
         let _ = bytes;
+    }
+
+    /// Assemble a `.spc` (SPC700 Sound File) snapshot of the chip, if it is an
+    /// audio chip — ARAM + CPU registers + DSP registers. Default: none (a
+    /// non-audio subsystem returns empty).
+    fn dump_spc(&self) -> Vec<u8> {
+        Vec::new()
     }
 }
 
@@ -254,16 +278,17 @@ macro_rules! slopgb_coprocessor_plugin {
         }
 
         /// Read `len` bytes of the chip's memory at `addr` back to the host over
-        /// the emit channel ([`EMIT_KIND_RAM`]); returns the byte count.
+        /// the emit channel ([`EMIT_KIND_RAM`]); returns the byte count. The
+        /// emit itself is [`Coprocessor::emit_ram`], so a chip holding the bytes
+        /// contiguously can hand the host that region without a copy.
         ///
         /// [`EMIT_KIND_RAM`]: $crate::EMIT_KIND_RAM
+        /// [`Coprocessor::emit_ram`]: $crate::Coprocessor::emit_ram
         #[allow(unsafe_code)]
         #[unsafe(no_mangle)]
         pub extern "C" fn slopgb_read_ram(addr: i32, len: i32) -> i32 {
             __SLOPGB_COP.with_borrow_mut(|c| {
-                let bytes = $crate::Coprocessor::read_ram(c, addr as u32, len.max(0) as usize);
-                $crate::__emit($crate::EMIT_KIND_RAM, &bytes);
-                bytes.len() as i32
+                $crate::Coprocessor::emit_ram(c, addr as u32, len.max(0) as usize) as i32
             })
         }
 
@@ -287,6 +312,20 @@ macro_rules! slopgb_coprocessor_plugin {
         pub extern "C" fn slopgb_load_state() {
             let bytes = $crate::recv_mailbox();
             __SLOPGB_COP.with_borrow_mut(|c| $crate::Coprocessor::load_state(c, &bytes));
+        }
+
+        /// Emit a `.spc` snapshot to the host ([`EMIT_KIND_SPC`]); returns the
+        /// byte count (0 for a non-audio chip).
+        ///
+        /// [`EMIT_KIND_SPC`]: $crate::EMIT_KIND_SPC
+        #[allow(unsafe_code)]
+        #[unsafe(no_mangle)]
+        pub extern "C" fn slopgb_dump_spc() -> i32 {
+            __SLOPGB_COP.with_borrow(|c| {
+                let bytes = $crate::Coprocessor::dump_spc(c);
+                $crate::__emit($crate::EMIT_KIND_SPC, &bytes);
+                bytes.len() as i32
+            })
         }
     };
 }

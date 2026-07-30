@@ -88,6 +88,27 @@ impl Spc700 {
 
     // -- $F0-$FF decode ----------------------------------------------------
 
+    /// Snapshot the `$F0-$FF` I/O register latches for an `.spc` dump. Unlike
+    /// [`Spc700::io_read`] this is non-destructive (reading timer counters does
+    /// not clear them) and returns the *retained* state a player must restore:
+    /// control (`$F1`, timer enables + IPL) and the timer targets (`$FA-$FC`),
+    /// without which the SPC's timers stay stopped and a timer-paced driver
+    /// (N-SPC) never advances. Timer output counters (`$FD-$FF`) read back 0;
+    /// the player re-derives them from the running stage.
+    pub fn io_snapshot(&self) -> [u8; 16] {
+        let mut r = [0u8; 16];
+        r[0x0] = self.test;
+        r[0x1] = self.control;
+        r[0x2] = self.dsp_addr;
+        r[0x4..0x8].copy_from_slice(&self.port_in); // reads of $F4-$F7 return these
+        r[0x8] = self.aux[0];
+        r[0x9] = self.aux[1];
+        r[0xA] = self.timer[0].target;
+        r[0xB] = self.timer[1].target;
+        r[0xC] = self.timer[2].target;
+        r
+    }
+
     /// Read an I/O register (`reg` in `$F0..=$FF`).
     pub(super) fn io_read(&mut self, reg: u8) -> u8 {
         match reg {

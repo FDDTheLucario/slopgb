@@ -270,16 +270,108 @@ record per line, TAB-separated, first field = record type; unknown record types 
 ignored, so the schema grows without an ABI break. Records:
 
 ```text
-id\t<stable-token>            logical identity + role key (e.g. "msu1")
-name\t<display name>          human label
-provides\t<role>            (0..n) a capability slot this chip can fill
-flag\t<name>\t<arg>\t<help>  (0..n) a CLI flag this plugin contributes
+id\t<stable-token>              logical identity + role key (e.g. "msu1")
+name\t<display name>            human label
+provides\t<role>               (0..n) a capability slot this chip can fill
+flag\t<name>\t<arg>\t<help>    (0..n) a CLI flag this plugin contributes
+menu\t<label>\t<export>\t<ext> (0..n) a main-menu row this plugin/mediator contributes
 ```
 
 This lets a caller bind a chip by declared identity/role instead of by filename, and lets
 the frontend surface a plugin's contributed flags. Optional and metadata-only: an absent
 or empty manifest parses to `None` ("undeclared"), and its absence never fails a load —
 so it is golden-neutral. Proof: `msu1_roundtrip::manifest_self_describes_the_chip_and_its_flag`.
+
+**`menu` records and who declares them.** A `menu` row names a `label` to show, an
+`export` entry point the row dispatches to, and the file `ext` to save the result
+as — `MenuContribution { label, export, ext }`, collected by
+`PluginRegistry::menus()`. The frontend's main menu (`crates/slopgb/src/
+app_menu.rs` `build_plugin_menu_rows`) reads them off the **live engaged SGB
+coprocessor** via `GameBoy::coprocessor_manifest` — a plain `&self` accessor over
+`AudioCoprocessor::manifest`, not the registry scan — and splices one row per
+declared record into the main menu (absent entirely when the manifest is empty,
+greyed when `AudioCoprocessor::export_ready(export)` is false). The declaring
+unit need not be a wasm plugin: `SgbCoprocessor` (a **native** mediator, not a
+guest module) is the one declarer today, for exactly the reason `dump_spc`
+(above) is plugin-owned but "Export SPC" is mediator-owned — the from-start `.spc`
+snapshot is assembled by the mediator watching the resident engine's play
+command, while a plugin's own export is necessarily live-only; letting the
+plugin declare the row would silently downgrade the export to a mid-song dump.
+`registry.menus()` (the scan-time, filesystem-driven table) stays available for
+introspection/listing, but nothing dispatches through it today — doing so would
+need a live `LoadedCoprocessor` handle the frontend doesn't hold for a
+tier-1-scanned file; that plumbing is deliberately not built.
+
+### CLI flags from manifests (`PluginRegistry`, present-iff)
+
+`crates/slopgb-plugin-host/src/registry.rs`'s `PluginRegistry::scan` reads every `*.wasm`
+in the resolved plugins dir and collects each manifest's `flag` records
+(`FlagContribution { name, arg, help, default }`); `main` pre-scans argv/env/the persisted
+setting for `--plugins` *before* the real CLI parse (a chicken-and-egg the raw pre-scan
+breaks — the parse needs the very flag table this directory produces), builds the registry
+from that directory, and threads its `flags()` into `cli::Options::parse` as the
+`declared` table.
+
+**A plugin-contributed flag exists iff its plugin is present in the resolved plugins dir.**
+`--sf2` and `--msu1` are no longer built-in `Options` fields — they parse only when
+`sf2.wasm` / `msu1.wasm` respectively are in that directory; otherwise they're a hard
+`unknown option '--sf2'` error, same as any unrecognized flag, never a soft warning. This is
+a **locked, accepted regression** for a user with a valid `<hash>.smpl` SF2 cache next to
+their soundfont and no plugins dir configured: their cache hit used to need no plugin at all
+(`session::load_or_import_sf2`'s cache path still works with no plugin); now `--sf2` itself
+won't parse without `sf2.wasm` present. `--help` mirrors the same rule: `cli::usage`
+splices in each declared flag's help line where `--sf2`/`--msu1` used to be hardcoded, and
+omits a flag whose plugin isn't scanned.
+
+The plugin consumes its own flag value — the frontend keeps no typed field for either.
+`Options::plugin_flags: Vec<(String, String)>` carries the raw parsed values;
+`app_boot::apply_plugin_flags` applies each declared flag's CLI value (else the generic
+env fallback below) into the registry via `PluginRegistry::set_flag`;
+`app_boot::effective_plugin_flags` reads back every flag's resolved value
+(`PluginRegistry::flag` — explicit override, else the manifest's own default expanded
+against the registry's `Context`, else absent) and hands the map to
+`Session::set_plugin_flags`, which `apply_sgb_coprocessor` reads by name (`"sf2"`,
+`"msu1"`) instead of a dedicated field.
+
+**Env fallback is generic**, not per-flag: a declared flag named `name` falls back to
+`SLOPGB_<NAME>` (uppercased, `-` → `_`) when no CLI value was given — `sf2` → `SLOPGB_SF2`,
+`msu1` → `SLOPGB_MSU1` (today's actual names, preserved by the rule, not coincidence).
+
+**Deferred validation, never a hard error at ROM load.** A flag whose plugin is present but
+inapplicable this run (`--msu1` on a DMG ROM, or no SGB coprocessor loaded at all) parses
+fine and `Session::apply_sgb_coprocessor` warns once per (re)load to stderr — it must not
+hard-error, since a drag-drop ROM swap can change applicability at any time after the window
+opens (`Session`'s `plugin_flags_warned` guard, reset by `set_plugin_flags`).
+
+**A duplicate role is a scan-time hard error, fatal only at startup.** Two plugins in the
+same directory both declaring the same `provides` role fail `PluginRegistry::scan` with
+`RegistryError::DuplicateRole { role, first, second }`; `main`'s startup pre-scan treats
+this as fatal (prints both file names, `process::exit(2)`) since nothing is running yet to
+lose. `app_menu::rebuild_plugins` (a live plugins-dir change from Options → Plugins) treats
+the same error as non-fatal — logged, falling back to an empty registry — because the
+window is already open and exiting mid-session would be a worse failure than losing that
+directory's contributed flags for the rest of it.
+
+**Orchestration + snapshots (ABI v5, v7).** The exports the SGB coprocessor uses
+to install firmware into and snapshot its chips: `set_pc` / `write_ram` /
+`read_ram` (v5 — memory peek/poke; reads ride the emit channel as
+`EMIT_KIND_RAM`) and `save_state` / `load_state` (v5 — opaque chip state as
+`EMIT_KIND_STATE`). An audio chip additionally exports `dump_spc` (v7): it
+assembles a `.spc` (SPC700 Sound File) from its ARAM + registers + DSP and ships
+it over the emit channel under **its own `EMIT_KIND_SPC`** — a distinct kind from
+the save-state so the payload's intent is unambiguous. `LoadedCoprocessor::
+dump_spc` decodes that kind; the SGB coprocessor surfaces it as `export_spc` for
+the frontend's "Export SPC" (see
+[`docs/hardware-state/sgb-audio.md`](../hardware-state/sgb-audio.md)).
+
+The guest half of `read_ram` is `Coprocessor::emit_ram`, defaulted to
+`read_ram` + `__emit`. A chip whose bytes are already contiguous in guest memory
+overrides it and hands the host that region instead — `__emit_words` for a `[u16]`
+buffer, whose little-endian wasm memory already *is* the byte stream. No ABI
+change: the export shape and emit kind are untouched, only what the guest passes
+to `host_emit`. The SNES PPU's 112 KB framebuffer does exactly this; building
+those bytes in the guest cost ~4.5 ms a frame against a ~4 µs host copy (see
+[`docs/hardware-state/sgb-snes-ppu.md`](../hardware-state/sgb-snes-ppu.md)).
 
 ## Golden-safe rules
 
@@ -302,9 +394,24 @@ checkbox per discovered plugin (`name [capabilities]`), the read-only plugins-di
 line, and an **allow-mutation** toggle. The tab reads `Settings.plugins`
 (`PluginConfig` — `dir`, `allow_mutation`, `entries: Vec<PluginEntry>`); the entry
 list is synced from the live `PluginHost::infos()` each time the dialog opens
-(`App::sync_plugin_entries`). Toggling a checkbox edits `entries[i].enabled`;
-OK/Apply pushes each flag to the host via `PluginHost::set_enabled`, so a disabled
-plugin's `on_frame` is skipped by `pump` (it stays resident, just idle).
+(`App::sync_plugin_entries`) — `infos()` lists the tier-1 plugins this host drives
+*and* the higher-tier ones it only discovered, so every tier appears. Toggling a
+checkbox edits `entries[i].enabled`; OK/Apply pushes each flag to the host via
+`PluginHost::set_enabled`.
+
+**When a toggle takes effect depends on the tier.** A tier-1 `INTROSPECTION`
+plugin is skipped by the very next `pump` (it stays resident, just idle). A tier-3
+`SUBSYSTEM` plugin (`spc700` / `w65c816` / `snes-ppu` / `msu1`) loads when a
+*machine* is built, so its flag is only read then: `App::apply_settings` hands the
+off set to `Session::set_disabled_plugins`, which stores it without re-applying,
+and `Session::apply_sgb_coprocessor` consults it at the next reset / model switch
+/ ROM load. This is deliberate — swapping a running SPC700 + 65C816 out mid-frame
+would need live chip-state migration. The list shows a note saying the change
+applies on reset. A disabled subsystem plugin is treated **exactly as an absent
+file**: its slot stays empty, since there is no fallback implementation (core
+emulates no SNES chip and the native chip crates are not linked in). Disabling
+`spc700` or `w65c816` therefore means no SNES side at all; disabling `snes-ppu`
+or `msu1` drops just that optional chip.
 
 **Right-click → Plugins submenu** (`SubKind::Plugins`, `SubMenu::plugins`): a
 status row per loaded plugin — check-marked while enabled, greyed while disabled,
@@ -315,11 +422,18 @@ name.
 
 **Persistence** (`settings_file/`): `PluginConfig` round-trips the `dir`,
 `allow_mutation`, and the *disabled* plugin names (the enabled set's complement —
-a new plugin defaults to enabled). Native `slopgb.conf` uses a `[plugins]` section
-(`dir` / `allow_mutation` / `disabled = a, b`); bgb.ini uses the `Slopgb*` extras
-(`SlopgbPluginsDir` / `SlopgbPluginsAllowMutation` / `SlopgbPluginsDisabled`), so
-bgb's own keys survive verbatim. The capability label per entry is runtime-only
-(refilled from the host on sync), not persisted.
+a new plugin defaults to enabled), in **two lists split by tier**: tier-1 and
+tier-3 `SUBSYSTEM`. Native `slopgb.conf` uses a `[plugins]` section (`dir` /
+`allow_mutation` / `disabled = a, b` / `disabled_subsystems = spc700`); bgb.ini
+uses the `Slopgb*` extras (`SlopgbPluginsDir` / `SlopgbPluginsAllowMutation` /
+`SlopgbPluginsDisabled` / `SlopgbPluginsDisabledSubsystems`), so bgb's own keys
+survive verbatim. The capability label per entry is runtime-only (refilled from
+the host on sync) except on a tier-3 placeholder, which is stamped `subsystem` so
+it re-persists to the right key. **Why two keys:** before the subsystem toggle
+existed the list rendered subsystem plugins as permanently-unchecked, and OK/Apply
+wrote every one of them into the single `disabled` key. Reading that back as a
+real user choice would silently kill SGB audio for anyone who had ever pressed OK,
+so the tier-3 flag starts from a clean key.
 
 `allow_mutation` is a persisted, default-off preference reserved for the (not-yet-
 served) `MUTATE` tier — it currently gates nothing, keeping the golden path
@@ -335,6 +449,34 @@ five orchestration exports (`set_pc` / `write_ram` / `read_ram` / `save_state` /
 `load_state`); **v6** added the `slopgb_manifest` self-description export. The wat
 test fixtures interpolate `ABI_VERSION`, so a bump auto-tracks; the Rust SDK macros
 emit it too — no literal to chase.
+
+A **stale plugin is diagnosed, not silent.** Because a plugin's CLI flags and menu
+rows come from its manifest, a plugin the registry cannot load contributes nothing,
+and the symptom surfaces as `unknown option '--sf2'` — which blames the flag rather
+than the plugin that vanished. `PluginRegistry::scan` therefore records any
+coprocessor it had to skip (`PluginRegistry::skipped`) and the frontend prints it:
+
+```
+slopgb: plugin ignored — sf2.wasm: plugin ABI 6 != host ABI 7; re-run `cargo xtask stage-plugins`
+```
+
+Only a module that *is* a coprocessor but cannot be used is reported (a stale ABI, or
+no manifest). A tier-1/tier-2 plugin sharing the directory fails the coprocessor
+export lookup by design — that is a loader mismatch, stays silent, and would
+otherwise print a line per plugin on every launch.
+
+## Why wasmi, and the JIT escape hatch
+
+All three tiers run on the **wasmi interpreter** — there is no JIT. The coprocessor
+path briefly ran on wasmtime (Cranelift) when three interpreted chips managed only a
+few fps; the renderer work that followed (run-decode, LUT planes, batched wasm
+crossings, unresolved-index merge) made the interpreter fast enough, and wasmtime was
+reverted for one engine instead of two, a Cranelift-free dep tree, and a 20.8 -> 8.9 MB
+release binary. The cost is a **~2x ceiling on fast-forward** with the full plugin
+stack: profiling attributes ~98% of `spc`+`cpu` time to `run_until` itself, i.e. pure
+interpretation, so no host-side lever reaches it. wasmtime remains a revert away
+(5-8x headroom) if a title ever needs it; the tier-2 tool path could not follow, since
+its per-call store borrows the live tool context.
 
 ## For the full contract
 

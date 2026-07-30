@@ -7,10 +7,8 @@ use std::time::{Duration, Instant};
 
 use slopgb_core::{CYCLES_PER_FRAME, GameBoy};
 
-use crate::msu1::Msu1;
 use crate::pacing::{
-    AudioPipe, MAX_FRAMES_PER_WAKE, advance_grid, frame_interval, slewed_interval,
-    turbo_max_frames, wake_plan,
+    MAX_FRAMES_PER_WAKE, advance_grid, frame_interval, slewed_interval, turbo_max_frames, wake_plan,
 };
 use crate::{App, FRAME_DURATION, ui};
 
@@ -80,6 +78,9 @@ impl App {
         // Game Genie ROM patches are a persistent core read-intercept: push the
         // current set once per wake (re-syncs after a ROM reload clears them).
         self.session.gb.set_gg_patches(self.cheats.gg_patches());
+        // Normal-speed play always presents the SNES-side frame: undo any
+        // fast-forward render skip left by `run_turbo`.
+        self.session.gb.set_coprocessor_render(true);
         let now = Instant::now();
         let mut frames = 0;
         let mut hit = false;
@@ -97,9 +98,9 @@ impl App {
             self.next_frame = next;
             while frames < budget && !hit {
                 hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link, &freeze, &cheats);
-                // Unconditional — the device ring drops any overflow. Mixes an
-                // MSU-1 track when a pack is loaded (a no-op otherwise).
-                pump_audio_frame(pipe, &mut self.msu1, &mut self.session.gb);
+                // Unconditional — the device ring drops any overflow. Any MSU-1
+                // audio is mixed in by the SGB coprocessor inside `drain_audio`.
+                pipe.pump(&mut self.session.gb);
                 frames += 1;
                 // A silent link peer left the master stalled (run_one_frame
                 // timed out): stop the wake instead of blocking again per frame
@@ -120,6 +121,9 @@ impl App {
         // Game Genie ROM patches are a persistent core read-intercept: push the
         // current set once per wake (re-syncs after a ROM reload clears them).
         self.session.gb.set_gg_patches(self.cheats.gg_patches());
+        // Normal-speed play always presents the SNES-side frame: undo any
+        // fast-forward render skip left by `run_turbo`.
+        self.session.gb.set_coprocessor_render(true);
         let now = Instant::now();
         // Options → Misc → framerate limit (0 = native ~59.7275 Hz). The grid
         // resync + owed-frame count is the same march audio pacing uses (shared
@@ -148,6 +152,11 @@ impl App {
         // Game Genie ROM patches are a persistent core read-intercept: push the
         // current set once per wake (re-syncs after a ROM reload clears them).
         self.session.gb.set_gg_patches(self.cheats.gg_patches());
+        // Fast-forward presents no SNES-side frame the player can see (turbo
+        // draws far faster than 60 Hz), so skip its rasterization regardless
+        // of mute — a fast-forwarding user with sound on still shouldn't pay
+        // for pixels nobody sees. Idempotent + cheap: safe to set every wake.
+        self.session.gb.set_coprocessor_render(false);
         let muted = self.muted;
         // Options → Misc → fast-forward speed caps frames per wake.
         let cap = turbo_max_frames(self.settings.ff_speed);
@@ -158,9 +167,7 @@ impl App {
             hit = run_one_frame(&mut self.session.gb, &bps, &mut self.link, &freeze, &cheats);
             match &mut self.audio {
                 // The queue keeps ~250 ms and drops the rest.
-                Some(pipe) if !muted => {
-                    pump_audio_frame(pipe, &mut self.msu1, &mut self.session.gb);
-                }
+                Some(pipe) if !muted => pipe.pump(&mut self.session.gb),
                 _ => self.discard_audio(),
             }
             frames += 1;
@@ -290,20 +297,6 @@ fn run_one_frame(
     hit
 }
 
-/// Pump one frame of audio to the device queue, mixing an MSU-1 track when a
-/// pack is loaded. A free function (not a method) so it can borrow the disjoint
-/// `audio` / `msu1` / `session.gb` fields while the pacers hold `&mut self.audio`.
-/// With no pack this is exactly `pipe.pump(gb)` — byte-identical output.
-fn pump_audio_frame(pipe: &mut AudioPipe, msu1: &mut Option<Msu1>, gb: &mut GameBoy) {
-    match msu1 {
-        Some(m) => {
-            let extra = m.pump_frame(gb);
-            pipe.pump_mixing(gb, extra);
-        }
-        None => pipe.pump(gb),
-    }
-}
-
 fn advance_frame(
     gb: &mut GameBoy,
     breakpoints: &Option<Vec<(u16, Option<u16>)>>,
@@ -373,8 +366,8 @@ mod tests {
             sgb_bios: None,
             mcp_port: None,
             plugins_dir: None,
-            msu1: None,
             ram_init: None,
+            plugin_flags: Vec::new(),
         };
         let mut app = App::new(
             opts,
@@ -382,6 +375,7 @@ mod tests {
             false,
             None,
             None,
+            slopgb_plugin_host::PluginRegistry::new(),
         );
         app.session.gb = GameBoy::new(Model::Dmg, rom).expect("valid test ROM");
         app

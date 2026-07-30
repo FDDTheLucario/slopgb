@@ -173,8 +173,9 @@ point. The frontend loads a user-owned SGB image (`--sgb-bios <path>` /
 `SLOPGB_SGB_BIOS`, mirroring `--boot`) and hands the bytes here; the call funnels
 to everything a BIOS can feed:
 
-1. **Audio** — the image goes to the APU (`SgbApu::load_bios`) exactly as
-   before. See [sgb-audio.md](sgb-audio.md).
+1. **Audio** — the image goes to whatever fills the SNES coprocessor slot
+   (`AudioCoprocessor::load_bios`); with an empty slot it goes nowhere, since
+   core emulates no SNES chip. See [sgb-audio.md](sgb-audio.md).
 2. **Border + title→palette** — the two `Ppu` seams below, reached only through
    this entry point (there is no second public way in).
 

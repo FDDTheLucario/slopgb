@@ -35,6 +35,34 @@ SNES V-counter each flush (`PPU_HW_LINE`), latches a frame at the vblank
 edge, and `GameBoy::take_snes_frame` hands it to the frontend (which
 presents SNES > border > bare, `snes_rgb555_px` expanding BGR555).
 
+## Frame handoff (zero-copy out of the plugin)
+
+`take_snes_frame` pulls the whole 112 KB framebuffer once per vblank through
+`LoadedCoprocessor::read_ram(PPU_HW_FB, …)`. The plugin serves that pull from
+`Coprocessor::emit_ram` (the guest half of `slopgb_read_ram`, defaulted to
+`read_ram` + `__emit`): its `fb` is `[u16]` in little-endian wasm memory, which
+already *is* the RGB555 byte stream, so a word-aligned request wholly inside the
+frame is handed over as a region (`__emit_words`) and the host's existing bulk
+`Memory::read` copies it once. Everything else (odd start or length, past the
+last pixel, outside the host window) still goes through `read_ram`, which
+zero-fills what it cannot serve; `fb_words` decides which, and its agreement with
+`read_ram` is pinned byte-for-byte by
+`fb_word_range_is_byte_identical_to_read_ram` (native) plus
+`whole_frame_pull_matches_the_byte_by_byte_path` (across the wasm boundary).
+
+Materializing those bytes in the guest instead cost **~4.5 ms per frame** — a
+per-byte interpreted loop against a ~4 µs host memcpy of the same bytes — and was
+roughly half of all arcade-takeover wall time. Removing it took the headless
+arcade bench from ~96 to ~184 fps median (interleaved A/B of the two
+`snes-ppu.wasm` builds, same host binary, 500 frames x3 each). The
+`SLOPGB_PERF=1` sections only cover `SgbCoprocessor::flush`, so the win shows up
+as the ~2.4 s/500 frames that used to sit *outside* the accounted total
+disappearing: after the change, arcade wall time and the perf total agree.
+
+No ABI change: the export shape (`slopgb_read_ram(addr, len) -> i32`, emitting
+`EMIT_KIND_RAM`) is untouched, `emit_ram` is a defaulted guest-side trait method,
+so `ABI_VERSION` stays 7.
+
 ## Renderer shape (interpreter-speed, oracle-pinned)
 
 The scanline renderers are written for interpreted-wasm speed with
@@ -66,3 +94,33 @@ Renderer correctness is pinned by the crate's unit tests (27, including
 the three fuzz oracles) + `slopgb-plugin-host`'s `snes_ppu_roundtrip`.
 Probe fps (ARCADE takeover, every 500-frame window): wasmi >= 66
 (gameplay 92-106), wasmtime several hundred.
+
+## Fast-forward throughput
+
+`AudioCoprocessor::set_render_enabled` (default on) gates only the
+`PPU_HW_LINE` scanline rasterization in `SgbCoprocessor::flush`; the
+`$21xx`/DMA register capture and both chips' `run_until` stay unconditional,
+so chip timing is untouched. `crates/slopgb/src/app_pacing.rs`'s `run_turbo`
+(fast-forward) disables it; `run_audio_paced`/`run_timer_paced` always
+restore it for normal-speed play. Headless bench (`slopgb-sgb-coprocessor`'s
+`examples/throughput.rs`, driving the coprocessor directly — no SGB ROM ships
+in this repo): median fps, 600 frames/run x3, one representative run on a
+shared/sandboxed build machine (run-to-run variance was +-20% on repeats —
+treat the `SLOPGB_PERF=1` section breakdown as the more reliable signal):
+
+| workload | render | fps | x real-time |
+|---|---|---|---|
+| plain SGB (spc700+w65c816) | on | 152.8 | 2.56x |
+| plain SGB (spc700+w65c816) | off | 147.8 | 2.48x (no PPU to skip: within noise, as expected) |
+| arcade (spc700+w65c816+snes-ppu) | on | 128.2 | 2.15x |
+| arcade (spc700+w65c816+snes-ppu) | off | 154.5 | 2.59x |
+
+`SLOPGB_PERF=1` confirms the mechanism: per 8572-flush window, arcade's `ppu`
+section drops from ~755-796 ms (render on) to ~0.5-0.6 ms (render off), while
+`spc`/`cpu` (the mandatory chip execution) stay flat (~1.2-1.3 s / ~25 ms) —
+the skip is real and touches only rasterization. Targets (2x arcade / 4x
+plain SGB, normal render-on play): arcade sits near the 2x line (1.95-2.55x
+across repeats); plain SGB fell short of 4x (2.15-2.94x across repeats) — the
+`spc`/`cpu` chip-execution cost (not gateable, since it must run every flush
+regardless of render) dominates both workloads' flush time, so it, not the
+PPU, is the ceiling on this build machine.

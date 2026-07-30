@@ -12,7 +12,7 @@
 //! changes, so the `SingleStepTests/spc700` validation (256/256) is untouched.
 //! Kept in this one file so the verified opcode / RAM / ports modules stay
 //! pristine. The attached [`Dsp`] is intentionally NOT part of `Clone` /
-//! `write_state`: the owner (`slopgb-core`'s `SgbApu`) re-attaches it, since
+//! `write_state`: the owner (the coprocessor plugin) re-attaches it, since
 //! `Box<dyn Dsp>` is neither `Clone` nor serializable.
 
 use super::*;

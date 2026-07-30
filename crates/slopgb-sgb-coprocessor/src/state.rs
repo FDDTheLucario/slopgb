@@ -67,6 +67,10 @@ impl SgbCoprocessor {
         w.u16(self.ppu_row);
         w.bool(self.frame_ready);
         w.bool(self.snes_live);
+        w.bool(self.nspc_resident);
+        w.bytes(&self.nspc_cmd);
+        w.bytes(&self.nspc_shadow);
+        w.bool(self.nspc_pending);
     }
 
     pub(crate) fn read_state(&mut self, r: &mut Reader<'_>) -> Result<(), StateError> {
@@ -145,11 +149,23 @@ impl SgbCoprocessor {
         self.ppu_row = r.u16()?.min(SNES_FB_H as u16);
         self.frame_ready = r.bool()?;
         self.snes_live = r.bool()?;
+        self.nspc_resident = r.bool()?;
+        r.bytes_into(&mut self.nspc_cmd)?;
+        r.bytes_into(&mut self.nspc_shadow)?;
+        self.nspc_pending = r.bool()?;
         // The undrained source/output PCM is transient, not part of the
         // snapshot — and so are the pad feed and the pushed input matrix
         // (the core re-supplies both on the next step/flush).
         self.src.clear();
         self.out.clear();
+        // The MSU-1 mix buffers are transient too. ponytail: the MSU-1 plugin's
+        // own playback position is not part of the on-disk snapshot — the loaded
+        // machine keeps the chip wherever it was, and the game's resident handler
+        // re-selects the track on its next song change. Add the plugin's opaque
+        // block to the format here if exact cross-load MSU-1 resume is wanted.
+        self.msu_src.clear();
+        self.msu_src_acc = 0.0;
+        self.msu_cur = (0, 0);
         self.pads_taken = false;
         self.pads_shadow = [0xFF; 4];
         self.char_write_row = 0;
@@ -158,6 +174,10 @@ impl SgbCoprocessor {
         self.feed_queue.clear();
         self.feed_hold = 0;
         self.input = (0x0F, 0x0F);
+        // Not part of the snapshot (a frontend-driven runtime toggle, not
+        // emulated state): a loaded machine always starts back at the
+        // default-on render path.
+        self.render_enabled = true;
         Ok(())
     }
 
@@ -234,8 +254,48 @@ impl SgbCoprocessor {
         fresh.joy_busy = self.joy_busy;
         fresh.trn_flip = self.trn_flip;
         fresh.ppu_row = self.ppu_row;
+        fresh.render_enabled = self.render_enabled;
         fresh.frame_ready = self.frame_ready;
         fresh.snes_live = self.snes_live;
+        fresh.nspc_resident = self.nspc_resident;
+        fresh.nspc_cmd = self.nspc_cmd;
+        fresh.nspc_shadow = self.nspc_shadow;
+        fresh.nspc_pending = self.nspc_pending;
+        // Re-attach the MSU-1 plugin so a clone (rewind/in-memory restore) keeps
+        // its streaming audio: reload the plugin, re-point it at the pack, restore
+        // its opaque chip state, and copy the host-side mix runtime.
+        // ponytail: re-reading the pack from disk is O(pack bytes) per clone (the
+        // plugin file map is not clonable). Fine for savestate/rewind; cache the
+        // bytes if a large-pack rewind ever shows up in a profile.
+        if let Some(wasm) = &self.msu_wasm {
+            let msu_state = self
+                .msu
+                .as_ref()
+                .map(|m| m.borrow_mut().save_state().unwrap_or_default());
+            if let Err(e) = fresh.attach_msu(wasm) {
+                eprintln!("slopgb: SGB coprocessor MSU-1 re-attach failed on clone: {e}");
+            } else {
+                if let Some(dir) = &self.msu_pack_dir {
+                    fresh.set_msu_pack(dir);
+                }
+                if let (Some(m), Some(state)) = (&fresh.msu, &msu_state) {
+                    if !state.is_empty() {
+                        if let Err(e) = m.borrow_mut().load_state(state) {
+                            eprintln!(
+                                "slopgb: SGB coprocessor MSU-1 load_state failed on clone: {e}"
+                            );
+                        }
+                    }
+                }
+            }
+            fresh.msu_present = self.msu_present;
+            fresh.msu_cycle = self.msu_cycle;
+            fresh.msu_acc = self.msu_acc;
+            fresh.msu_src = self.msu_src.clone();
+            fresh.msu_src_acc = self.msu_src_acc;
+            fresh.msu_cur = self.msu_cur;
+            fresh.msu_playing = self.msu_playing;
+        }
         Ok(fresh)
     }
 }
@@ -275,6 +335,10 @@ fn write_empty_state(w: &mut Writer) {
     w.u16(0); // ppu_row
     w.bool(false); // frame_ready
     w.bool(false); // snes_live
+    w.bool(false); // nspc_resident (inert has no driver)
+    w.bytes(&[0u8; 4]); // nspc_cmd
+    w.bytes(&[0u8; 4]); // nspc_shadow
+    w.bool(false); // nspc_pending
 }
 
 /// A no-op [`AudioCoprocessor`] producing silence. Only ever the result of

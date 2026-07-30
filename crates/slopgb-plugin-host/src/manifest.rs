@@ -19,15 +19,32 @@ pub struct Manifest {
     pub provides: Vec<String>,
     /// CLI flags this plugin contributes to the frontend.
     pub flags: Vec<FlagContribution>,
+    /// Menu rows this plugin contributes (e.g. an "Export ..." action).
+    pub menus: Vec<MenuContribution>,
 }
 
 /// A CLI flag a plugin contributes: the flag `name` (without dashes), an `arg`
-/// hint (`none` / `path` / `dir` / `string`), and one-line `help`.
+/// hint (`none` / `path` / `dir` / `string`), one-line `help`, and a `default`
+/// value used when the flag is not given explicitly. `default` may be empty (no
+/// default), a literal, or one of the ambient tokens `$rom_dir` / `$rom_path` /
+/// `$plugins_dir`, expanded by the [`crate::PluginRegistry`] against its current
+/// ambient context.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct FlagContribution {
     pub name: String,
     pub arg: String,
     pub help: String,
+    pub default: String,
+}
+
+/// A menu row a plugin contributes: a `label` to show, the guest `export` (a
+/// coprocessor entry point, e.g. a save-state-shaped dump) it invokes, and the
+/// file `ext` the result should be saved as (without the dot).
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct MenuContribution {
+    pub label: String,
+    pub export: String,
+    pub ext: String,
 }
 
 impl Manifest {
@@ -57,11 +74,21 @@ impl Manifest {
                             name: name.to_string(),
                             arg: f.next().unwrap_or_default().to_string(),
                             help: f.next().unwrap_or_default().to_string(),
+                            default: f.next().unwrap_or_default().to_string(),
+                        });
+                    }
+                }
+                Some("menu") => {
+                    if let Some(label) = f.next().filter(|l| !l.is_empty()) {
+                        m.menus.push(MenuContribution {
+                            label: label.to_string(),
+                            export: f.next().unwrap_or_default().to_string(),
+                            ext: f.next().unwrap_or_default().to_string(),
                         });
                     }
                 }
                 // Blank line or a record type this host version doesn't know
-                // (a newer plugin's `menu` / `requires` / etc.) — ignored.
+                // (a newer plugin's `requires` / etc.) — ignored.
                 _ => {}
             }
         }

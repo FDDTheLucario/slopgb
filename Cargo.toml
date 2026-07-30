@@ -7,6 +7,8 @@ members = [
     "crates/slopgb-msu1-plugin",
     "crates/slopgb-plugin-api",
     "crates/slopgb-plugin-host",
+    "crates/slopgb-sf2",
+    "crates/slopgb-sf2-plugin",
     "crates/slopgb-sgb-coprocessor",
     "crates/slopgb-snes-apu",
     "crates/slopgb-snes-ppu",

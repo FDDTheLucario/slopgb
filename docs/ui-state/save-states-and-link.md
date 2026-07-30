@@ -19,8 +19,14 @@ serde/no unsafe):
 - `GameBoy::save_state(&self) → Vec<u8>` — magic+version+ROM-fingerprint header then
   every peripheral's `write_state`.
 - `load_state(&mut self, &[u8]) → Result<(), StateError>` — validates the header +
-  ROM key vs the loaded cart, then restores **atomically into a clone**, so a
-  bad/foreign/truncated file leaves the machine intact.
+  ROM key vs the loaded cart, then restores the Game Boy **atomically into a scratch
+  clone**, so a bad/foreign/truncated file leaves the machine intact. An installed
+  SGB coprocessor is *moved* into that scratch machine, never cloned:
+  `AudioCoprocessor::clone_box` re-instantiates the plugin wasm (~4 ms with
+  spc700+w65c816 loaded, vs ~0.2 ms for the whole rest of the restore), and the
+  tail read overwrites the chips wholesale anyway. Cost of the move: a state whose
+  coprocessor tail is truncated leaves those chips part-restored (the tail is read
+  last, after the Game Boy side has already parsed cleanly).
 
 The header carries a `bool` has-SGB-audio-tail flag (v7, right after the
 ROM-fingerprint): the same ROM legally runs as SGB (with the ~64 KB SPC700+S-DSP
@@ -46,6 +52,12 @@ checkpoint before a target, then `step()` forward to land the exact instruction
 (`reverse_step`), the previous frame (`reverse_frame`, the frame-exact player
 rewind), or the previous breakpoint (`reverse_to_breakpoint`). Full model +
 ceilings: [`debugger.md`](debugger.md) § Reverse execution.
+
+An SGB coprocessor roughly doubles a state (566 KB vs 252 KB on the pilot), so
+`REWIND_MAX_BYTES` (160 MB) binds before `REWIND_MAX_STATES` and the ring holds
+~280 checkpoints instead of 600 — about half the rewind depth. Capture itself is
+cheap (~0.6 ms, ~3 % of a coprocessor frame at the 2-frame cadence) and only runs
+with rewind enabled or the debugger open, so fast-forward never pays it.
 
 ## Link submenu (`SubKind::Link`) — serial link cable over TCP
 

@@ -194,7 +194,13 @@ impl From<slopgb_plugin_host::PluginInfo> for PluginEntry {
 /// The plugins feature's config (Options → Plugins tab). `dir` + `allow_mutation`
 /// persist directly; `entries` is the live discovered list — only the *disabled*
 /// names are persisted (a new plugin defaults to enabled), reconstructed as
-/// placeholders on load and refilled from the host once it is scanned.
+/// placeholders on load and refilled from the host once it is scanned. The
+/// disabled names persist under **two** keys, split by tier: the tier-1 per-frame
+/// plugins and the tier-3 `SUBSYSTEM` ones. They are separate because the tier-1
+/// key predates the subsystem toggle, and builds before it wrote every discovered
+/// subsystem plugin into that key as a side effect of the list rendering them
+/// unchecked — reading those stale names back as real user choices would silently
+/// kill SGB audio.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PluginConfig {
     /// Directory scanned for `*.wasm` plugins (empty = none).
@@ -208,44 +214,85 @@ pub struct PluginConfig {
 }
 
 impl PluginConfig {
-    /// The disabled plugin names, comma-joined — the persisted form of the
-    /// enabled set (an empty list means every plugin is enabled).
+    /// Whether `e` is a tier-3 `SUBSYSTEM` plugin (the capability label the host
+    /// reports, or the one [`Self::from_persisted`] stamps on a placeholder).
+    fn is_subsystem(e: &PluginEntry) -> bool {
+        e.capabilities.contains("subsystem")
+    }
+
+    /// The disabled tier-1 plugin names, comma-joined — the persisted form of
+    /// the enabled set (an empty list means every tier-1 plugin is enabled).
     #[must_use]
     pub(crate) fn disabled_joined(&self) -> String {
+        self.join_disabled(|e| !Self::is_subsystem(e))
+    }
+
+    /// The disabled tier-3 `SUBSYSTEM` plugin names, comma-joined — persisted
+    /// under their own key (see the type doc).
+    #[must_use]
+    pub(crate) fn disabled_subsystems_joined(&self) -> String {
+        self.join_disabled(Self::is_subsystem)
+    }
+
+    fn join_disabled(&self, tier: impl Fn(&PluginEntry) -> bool) -> String {
         self.entries
             .iter()
-            .filter(|e| !e.enabled)
+            .filter(|e| !e.enabled && tier(e))
             .map(|e| e.name.as_str())
             .collect::<Vec<_>>()
             .join(", ")
     }
 
-    /// The disabled plugin names, owned — pushed to the host at startup so a
-    /// remembered-off plugin stays skipped in `pump`.
+    /// The disabled **tier-1** plugin names, owned — pushed to the host at
+    /// startup so a remembered-off plugin stays skipped in `pump`. Excludes the
+    /// tier-3 ones ([`Self::disabled_subsystem_names`]): a name read back from
+    /// the tier-1 key must never govern a subsystem plugin (see the type doc).
     #[must_use]
     pub fn disabled_names(&self) -> Vec<String> {
+        self.names_of(|e| !Self::is_subsystem(e))
+    }
+
+    /// The disabled **tier-3** `SUBSYSTEM` plugin names, owned — what
+    /// `Session::set_disabled_plugins` consults when it next builds a machine.
+    #[must_use]
+    pub fn disabled_subsystem_names(&self) -> Vec<String> {
+        self.names_of(Self::is_subsystem)
+    }
+
+    fn names_of(&self, tier: impl Fn(&PluginEntry) -> bool) -> Vec<String> {
         self.entries
             .iter()
-            .filter(|e| !e.enabled)
+            .filter(|e| !e.enabled && tier(e))
             .map(|e| e.name.clone())
             .collect()
     }
 
-    /// Reconstruct from the persisted fields. `disabled` is a comma-list of
-    /// plugin names to start disabled; each becomes a placeholder entry (its
-    /// capability label is unknown until the live host is synced in).
+    /// Reconstruct from the persisted fields. `disabled` /
+    /// `disabled_subsystems` are comma-lists of plugin names to start disabled
+    /// (tier-1 and tier-3 respectively); each becomes a placeholder entry. A
+    /// tier-1 placeholder's capability label is unknown until the live host is
+    /// synced in; a tier-3 one is stamped `subsystem` so it re-persists to the
+    /// same key even if the host never scans that directory again.
     #[must_use]
-    pub(crate) fn from_persisted(dir: String, allow_mutation: bool, disabled: &str) -> Self {
-        let entries = disabled
-            .split(',')
-            .map(str::trim)
-            .filter(|n| !n.is_empty())
-            .map(|n| PluginEntry {
-                name: n.to_owned(),
-                capabilities: String::new(),
-                enabled: false,
-            })
-            .collect();
+    pub(crate) fn from_persisted(
+        dir: String,
+        allow_mutation: bool,
+        disabled: &str,
+        disabled_subsystems: &str,
+    ) -> Self {
+        let placeholders = |list: &str, caps: &str| -> Vec<PluginEntry> {
+            list.split(',')
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+                .map(|n| PluginEntry {
+                    name: n.to_owned(),
+                    capabilities: caps.to_owned(),
+                    enabled: false,
+                })
+                .collect()
+        };
+        let mut entries = placeholders(disabled, "");
+        entries.extend(placeholders(disabled_subsystems, "subsystem"));
         Self {
             dir,
             allow_mutation,

@@ -10,6 +10,8 @@ use winit::window::Fullscreen;
 
 use slopgb_core::{CLOCK_HZ, SCREEN_H, SCREEN_W};
 
+use slopgb_plugin_host::Manifest;
+
 use crate::cheat_ui::{self, CheatButton, CheatHit};
 use crate::input::Action;
 use crate::keymap::WizardButton;
@@ -17,7 +19,7 @@ use crate::menupopup::{MenuPopup, PopupOutcome};
 use crate::ui::canvas::Rect;
 use crate::windows::mainwin::{InfoBox, SubChoice, SubKind, SubMenu, WindowSizeChoice};
 use crate::windows::options::OptionsOutcome;
-use crate::{App, ui, windows};
+use crate::{App, PluginMenuRow, ui, windows};
 
 impl App {
     /// A left/right press on the game window. Right-click (re)opens the bgb
@@ -203,10 +205,50 @@ impl App {
             // pointer, so it can extend past the game window instead of clipping.
             if let Some(win) = self.window.clone() {
                 let theme = self.settings.theme.resolve(&self.custom_themes);
-                self.menu_popup =
-                    MenuPopup::open(event_loop, &win, (px, py), !self.muted, self.paused, theme);
+                // Cache the row table now, so `Action::PluginMenu(i)` always
+                // indexes what was actually shown, even if the live coprocessor's
+                // readiness changes before the click lands.
+                self.plugin_menu_rows = self.build_plugin_menu_rows();
+                let rows: Vec<(String, bool)> = self
+                    .plugin_menu_rows
+                    .iter()
+                    .map(|r| (r.label.clone(), r.enabled))
+                    .collect();
+                self.menu_popup = MenuPopup::open(
+                    event_loop,
+                    &win,
+                    (px, py),
+                    !self.muted,
+                    self.paused,
+                    &rows,
+                    theme,
+                );
             }
         }
+    }
+
+    /// The live engaged SGB coprocessor's manifest-declared menu rows (e.g.
+    /// "Export SPC"), parsed via the plugin-host manifest wire format. Empty
+    /// with an empty coprocessor slot, or when the engaged coprocessor declares
+    /// none — the main menu then shows no such row at all, not a greyed one.
+    fn build_plugin_menu_rows(&self) -> Vec<PluginMenuRow> {
+        let manifest = self.session.gb.coprocessor_manifest();
+        let Some(parsed) = Manifest::parse(manifest.as_bytes()) else {
+            return Vec::new();
+        };
+        parsed
+            .menus
+            .into_iter()
+            .map(|mc| {
+                let enabled = self.session.gb.coprocessor_export_ready(&mc.export);
+                PluginMenuRow {
+                    label: mc.label,
+                    export: mc.export,
+                    ext: mc.ext,
+                    enabled,
+                }
+            })
+            .collect()
     }
 
     /// Route an event for the right-click menu's own borderless window
@@ -388,6 +430,14 @@ impl App {
     /// feeds the SGB coprocessor seam: with `spc700.wasm` + `w65c816.wasm` present
     /// there, enabling the SGB-coprocessor backend loads them from this dir. A bad
     /// dir logs and leaves an empty host so a typo can't wedge the dialog.
+    ///
+    /// Also rescans the plugin **registry** (manifest-declared CLI flags): unlike
+    /// `main`'s startup scan, a duplicate-role error here is logged and left as an
+    /// empty registry rather than fatal — the window is already open, so exiting
+    /// the process would be a worse failure than losing the newly-conflicting
+    /// plugins' flags for this session. Any CLI/env value the user gave those
+    /// flags at startup is re-applied on top of the fresh scan, so a plugins-dir
+    /// change made later doesn't silently drop it.
     fn rebuild_plugins(&mut self, dir: &str) {
         self.plugins = if dir.is_empty() {
             slopgb_plugin_host::PluginHost::new()
@@ -399,10 +449,29 @@ impl App {
                 },
             )
         };
+        self.registry = if dir.is_empty() {
+            slopgb_plugin_host::PluginRegistry::new()
+        } else {
+            slopgb_plugin_host::PluginRegistry::scan(std::path::Path::new(dir)).unwrap_or_else(
+                |e| {
+                    eprintln!("slopgb: plugin registry for '{dir}': {e}");
+                    slopgb_plugin_host::PluginRegistry::new()
+                },
+            )
+        };
+        crate::app_boot::apply_plugin_flags(&mut self.registry, &self.opts.plugin_flags);
+        let plugins_dir = (!dir.is_empty()).then(|| std::path::PathBuf::from(dir));
+        let ctx = self.registry_context(plugins_dir.clone());
+        self.registry.set_context(ctx);
         // The SGB coprocessor is a plugin: point the session at the same dir so
-        // spc700 + w65c816 auto-load (on SGB) from the plugins dir the UI just set.
+        // spc700 + w65c816 auto-load (on SGB) from the plugins dir the UI just set,
+        // then feed it the registry's freshly-resolved `sf2`/`msu1` values. The
+        // freshly scanned dir starts every plugin enabled, so the session's
+        // disabled set is cleared with it.
+        self.session.set_disabled_plugins(Vec::new());
+        self.session.set_plugins_dir(plugins_dir);
         self.session
-            .set_plugins_dir((!dir.is_empty()).then(|| std::path::PathBuf::from(dir)));
+            .set_plugin_flags(crate::app_boot::effective_plugin_flags(&self.registry));
         self.sync_plugin_entries();
         for line in self.plugins.take_log() {
             eprintln!("{line}");
@@ -649,6 +718,12 @@ impl App {
         for (name, enabled) in states {
             self.plugins.set_enabled(&name, enabled);
         }
+        // Subsystem plugins load when a machine is built, not per frame, so the
+        // session only records the off set here — it takes effect at the next
+        // reset / model switch / ROM load (never mid-run: swapping a running
+        // SPC700 + 65C816 out would need live chip-state migration).
+        self.session
+            .set_disabled_plugins(self.settings.plugins.disabled_subsystem_names());
         self.update_title();
     }
 

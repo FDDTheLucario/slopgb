@@ -35,8 +35,9 @@ valid a plugin as any introspection one. The plugin **system** must support
 exporting the `reset`/`run_until`/`port_read`/`port_write` ABI loads). What
 differs is the *loader*, not the validity — a `SUBSYSTEM` plugin exports the
 coprocessor ABI, not `on_frame`, so it loads through `LoadedCoprocessor` (driven
-by the frontend's coprocessor seams — the SGB coprocessor auto-loads from the
-`--plugins` dir, MSU-1 from a `--msu1` pack), **not** the tier-1 `PluginHost`
+by the frontend's coprocessor seams — the SGB coprocessor auto-loads spc700 +
+w65c816 + the optional snes-ppu + msu1 from the `--plugins` dir; `--msu1` only
+selects the MSU-1 `.pcm` pack dir, not the wasm), **not** the tier-1 `PluginHost`
 per-frame pump. The tier-1 `--plugins` *scanner* skips a subsystem plugin in that
 dir — a loader mismatch, never "an invalid plugin".
 

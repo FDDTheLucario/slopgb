@@ -17,7 +17,7 @@
 // upload banks thousands of captured writes between host drains.
 pub const MMIO_RING_CAP: usize = 16384;
 /// Serialized [`Mmio::save_state`] length.
-pub(crate) const MMIO_STATE_LEN: usize = 2 + 1 + MMIO_RING_CAP * 3 + 0x20 + 2 + 1;
+pub(crate) const MMIO_STATE_LEN: usize = 2 + 1 + MMIO_RING_CAP * 3 + 0x20 + 8 + 2 + 1;
 
 /// Captured-write ring + read shadows.
 pub(crate) struct Mmio {
@@ -29,6 +29,13 @@ pub(crate) struct Mmio {
     /// Host-fed images for CPU reads of `$4200 + i` (RDNMI, TIMEUP, HVBJOY,
     /// the autopoll pads…). Read side effects run in [`Self::cpu_read`].
     shadow: [u8; 0x20],
+    /// Host-fed images for CPU reads of the MSU-1 register window `$2000-$2007`
+    /// (`$2000` = MSU_STATUS, `$2002-$2007` = the `S-MSU1` id string). The host
+    /// refreshes these from the loaded MSU-1 coprocessor each flush; unused when
+    /// no MSU-1 pack is present (all zero → open-bus-like, never `S-MSU1`, so a
+    /// game's presence check simply finds no chip). fullsnes lists `$2000-$20FF`
+    /// as unused SNES I/O — the address MSU-1 hardware claims.
+    msu: [u8; 8],
     /// Host-fed images for `$4016`/`$4017` (manual joypad serial reads).
     joy_serial: [u8; 2],
     /// A nonzero MDMAEN (`$420B`) write pauses the CPU until the host has
@@ -43,17 +50,19 @@ impl Mmio {
             ring: Vec::new(),
             overflow: false,
             shadow: [0; 0x20],
+            msu: [0; 8],
             joy_serial: [0; 2],
             dma_stall: false,
         }
     }
 
     /// Whether `addr` (bank-local, system bank) is in a captured window:
+    /// the MSU-1 register window `$2000-$2007` (an add-on chip the host services),
     /// the PPU B-bus registers `$2100-$213F` (minus the `$2140-$2143` APU
     /// ports, routed earlier), the WRAM access ports `$2180-$2183`, or the
     /// CPU I/O block `$4000-$44FF`.
     fn captured(addr: u16) -> bool {
-        matches!(addr, 0x2100..=0x213F | 0x2180..=0x2183 | 0x4000..=0x44FF)
+        matches!(addr, 0x2000..=0x2007 | 0x2100..=0x213F | 0x2180..=0x2183 | 0x4000..=0x44FF)
     }
 
     /// Observe a CPU write; returns whether it was captured. Full writes
@@ -122,6 +131,7 @@ impl Mmio {
     /// register"); everything else is a plain shadow byte.
     pub(crate) fn cpu_read(&mut self, addr: u16) -> Option<u8> {
         match addr {
+            0x2000..=0x2007 => Some(self.msu[usize::from(addr - 0x2000)]),
             0x4016 | 0x4017 => Some(self.joy_serial[usize::from(addr - 0x4016)]),
             0x4200..=0x421F => {
                 let i = usize::from(addr - 0x4200);
@@ -164,6 +174,13 @@ impl Mmio {
         }
     }
 
+    /// Set the MSU-1 read shadow byte for `$2000 + i` (`i` = 0..8).
+    pub(crate) fn host_set_msu(&mut self, i: u8, v: u8) {
+        if usize::from(i) < self.msu.len() {
+            self.msu[usize::from(i)] = v;
+        }
+    }
+
     /// Set one `$4016`/`$4017` serial-read byte (`i` = 0 or 1); the sibling
     /// byte is untouched.
     pub(crate) fn host_set_joy_serial_byte(&mut self, i: usize, v: u8) {
@@ -184,6 +201,7 @@ impl Mmio {
             buf.extend_from_slice(&[0, 0, 0]);
         }
         buf.extend_from_slice(&self.shadow);
+        buf.extend_from_slice(&self.msu);
         buf.extend_from_slice(&self.joy_serial);
         buf.push(u8::from(self.dma_stall));
     }
@@ -207,8 +225,9 @@ impl Mmio {
             .collect();
         let off = 3 + MMIO_RING_CAP * 3;
         self.shadow.copy_from_slice(&b[off..off + 0x20]);
-        self.joy_serial.copy_from_slice(&b[off + 0x20..off + 0x22]);
-        self.dma_stall = b[off + 0x22] != 0;
+        self.msu.copy_from_slice(&b[off + 0x20..off + 0x28]);
+        self.joy_serial.copy_from_slice(&b[off + 0x28..off + 0x2A]);
+        self.dma_stall = b[off + 0x2A] != 0;
     }
 }
 

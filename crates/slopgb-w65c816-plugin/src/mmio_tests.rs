@@ -19,6 +19,30 @@ fn writes_are_captured_in_order() {
     assert!(m.host_drain_up_to(usize::MAX).is_empty(), "drain consumes");
 }
 
+/// The MSU-1 register window `$2000-$2007` is a captured write window (the host
+/// forwards seek/track/volume/control to the MSU-1 coprocessor) and a host-fed
+/// read shadow (so an SNES-side driver reads back `S-MSU1` + status).
+#[test]
+fn msu1_window_captures_writes_and_shadows_reads() {
+    let mut m = Mmio::new();
+    // Writes to $2004 (MSU_TRACK) / $2007 (MSU_CONTROL) are captured for the host.
+    assert!(m.cpu_write(0x2004, 0x05), "MSU_TRACK captured");
+    assert!(m.cpu_write(0x2007, 0x01), "MSU_CONTROL captured");
+    assert_eq!(
+        m.host_drain_up_to(usize::MAX),
+        vec![(0x2004, 0x05), (0x2007, 0x01)],
+    );
+    // Reads serve the host shadow: the id string a presence check needs.
+    for (i, &b) in b"S-MSU1".iter().enumerate() {
+        m.host_set_msu(2 + i as u8, b);
+    }
+    m.host_set_msu(0, 0x01); // MSU_STATUS: revision 1, all busy/flag bits clear
+    assert_eq!(m.cpu_read(0x2000), Some(0x01), "status shadow");
+    assert_eq!(m.cpu_read(0x2002), Some(b'S'));
+    assert_eq!(m.cpu_read(0x2003), Some(b'-'));
+    assert_eq!(m.cpu_read(0x2007), Some(b'1'), "last id byte");
+}
+
 /// The ring is bounded: past capacity the newest writes are dropped (the
 /// causal prefix is preserved) and the sticky overflow flag arms.
 #[test]

@@ -1,0 +1,23 @@
+[package]
+name = "slopgb-sf2-plugin"
+description = "slopgb coprocessor plugin: converts a host-supplied SF2 soundfont into the N-SPC sample-bank cache format (slopgb-sf2) inside a wasm sandbox."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+# cdylib is the loadable wasm artifact; rlib lets the native unit tests link the
+# wrapper directly (the Coprocessor logic is target-independent).
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+slopgb-plugin-api = { path = "../slopgb-plugin-api" }
+slopgb-sf2 = { path = "../slopgb-sf2" }
+
+# NOT `[lints] workspace = true`: the wasm export macro needs the
+# `#[unsafe(no_mangle)]` linkage marker the workspace `forbid(unsafe_code)`
+# rejects; `deny` lets the macro scope-`allow` it, everything else stays safe.
+[lints.rust]
+unsafe_code = "deny"
