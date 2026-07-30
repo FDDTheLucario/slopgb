@@ -668,8 +668,19 @@ impl Ppu {
                 // `stage_write`). This is the verdict-only READ analogue: undo the
                 // extension in the bare exit ONLY (window aborts own the
                 // `scx_write_dot` arm above). DMG + bare only.
+                //
+                // The spurious part is only what the render added BEYOND the
+                // fine scroll its comparator actually resolved, so back out
+                // `SCX&7 - hunt_fine`, not the whole live `SCX&7`. On
+                // `late_scx4_2` the hunt latched 0 while the write left
+                // `eff.scx&7 == 4`, so both forms back out 4. On
+                // `scx_m3_extend_1` the hunt latched the same 5 the write left
+                // — the render's length is legitimate and nothing is backed
+                // out; subtracting the full 5 there double-counted the fine
+                // scroll and read mode 0 one M-cycle early.
                 if !self.model.is_cgb() && self.render.scx_write_dot != 0 {
-                    flip = flip.saturating_sub(u16::from(self.scx & 7));
+                    let spurious = (self.scx & 7).saturating_sub(self.render.hunt_fine);
+                    flip = flip.saturating_sub(u16::from(spurious));
                 }
                 // The SS post-switch bare exit: a
                 // 4-variable table. `E = 504 + leave_k −

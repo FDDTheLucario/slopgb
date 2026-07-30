@@ -392,10 +392,11 @@ gambatte/oamdma/oamdmasrcC000_hdmasrc0000_cgb04c_out0A940C0D.gbc [Cgb]
 # column; docs/hardware-state/ppu-render.md). The `_ds_*` rows below are class
 # A (the CGB double-speed sub-cycle phase — SameBoy runs its PPU on 8 MHz
 # half-dots, six whole-dot arms measured flat). The two survivors that are NOT
-# double speed are a different subsystem each: `scx_during_m3_spx2 [Cgb]` is a
-# CGB OBJ-palette mode-3 write-commit row (its reference pixel is a colour in
-# neither committed palette) and `scx_m3_extend_1 [Dmg]` is the FF41
-# mode-3-exit read frame (mode 3 ends on the same dot on both models).
+# double speed is `scx_during_m3_spx2 [Cgb]`, a CGB OBJ-palette VALUE
+# divergence: its reference pixel is raw $4261, ours $1CF2, and the ROM
+# computes the entry at runtime (never writes FF6A/FF6B in init, and the byte
+# $61 is never written at all) — upstream of the PPU, not a fetch or timing
+# row. `scx_m3_extend_1 [Dmg]` was recovered 2026-07-30.
 gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_2.gbc [Cgb]
 gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_3.gbc [Cgb]
 gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_6.gbc [Cgb]
@@ -749,7 +750,6 @@ gambatte/lcd_offset/offset1_lyc99int_m0stat_count_scx3_1_cgb04c_out90.gbc [Cgb]
 gambatte/lcd_offset/offset2_lyc99int_m0stat_count_scx2_1_cgb04c_out90.gbc [Cgb]
 gambatte/m0enable/enable_wxA6_2x_spxA7_ds_4_cgb04c_out2.gbc [Cgb]
 gambatte/m0int_m0stat/m0int_m0stat_scx5_ds_2_cgb04c_out2.gbc [Cgb]
-gambatte/scx_during_m3/scx_m3_extend_1_dmg08_cgb04c_out3.gbc [Dmg]
 gambatte/scy/scy_during_m3_spx09_2.gbc [Cgb]
 gambatte/scy/scy_during_m3_spx09_4.gbc [Cgb]
 gambatte/speedchange/speedchange2_nop_m2int_m3stat_scx1_1_cgb04c_out3.gbc [Cgb]

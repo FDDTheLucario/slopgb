@@ -93,6 +93,10 @@ Remaining (not yet pixel-perfect) legs are mostly:
 
 ## Mid-mode-3 SCX and the BG map column (single speed CLOSED 2026-07-30)
 
+Single-speed status: every row in this cluster passes except
+`scx_during_m3_spx2 [Cgb]`, which is a CGB OBJ-palette value divergence, not a
+fetch or timing row (see the last section). The `_ds_` ladder is class A.
+
 The BG tile-map column is derived from the pixel output position, not from a
 tile counter. SameBoy `display.c` `GB_FETCHER_GET_TILE_T1` forms it as
 `(SCX + position_in_line + 8 - (is_cgb && !during_object_fetch)) / 8`: SCX is
@@ -468,23 +472,62 @@ Method note: the round matrix runs in **3.6 s**, not 90 s — a release build of
 mealybug/age guards separately (`LD B,B` + 1 frame); the two
 `m3_lcdc_obj_size_change_scx` legs fail at baseline, so the guard bar is 6/8.
 
-#### The two survivors are NOT map-column rows
+#### CLOSED: `scx_m3_extend_1 [Dmg]` — the bare-exit back-out was over-correcting
 
-Both were traced to a different mechanism; do not attack them from `bg_map_col`.
+Not a mode-3-length row (mode 3 ends on the same dot on both models) and not a
+dispatch floor. `cmp -l` against its `_2` sibling shows a single inserted `00`
+before the shared `ldh a,(FF41)`, so `_2` reads exactly one M-cycle later;
+`_1` wants mode 3, `_2` mode 0. Traced at the scoring read (ly 1):
 
-* `scx_during_m3_spx2.gbc [Cgb]` — 8 px, x0 of rows 0-7, i.e. the on-screen
-  half of the single `X = 2` object (tile 0, row 0 = colours `0,2,2,2,2,2,2,0`,
-  OBJ palette 0). We emit OBP0 colour 2; the reference wants CGB colour
-  `(r5,g5,b5) = (1,19,16)`, which is in **neither** committed palette at frame
-  end. So the reference samples an OBJ palette entry mid-write: this is the
-  CGB palette-RAM mode-3 write-commit family, not the fetch column.
-* `scx_m3_extend_1_dmg08_cgb04c_out3.gbc [Dmg]` — `STAT & 7` reads 0, want 3;
-  its `_2` sibling (one extra `nop` before the same `ldh a,(FF41)`) wants and
-  gets 0 on both models. Mode 3 **ends at dot 256 on both models and every
-  line** (`disc_fine = 0`; the `SCX = 5` write lands post-match, so it extends
-  nothing), so the length is right and the DMG/CGB split is entirely in the
-  FF41 mode-3-exit read frame — the counter-pinned dispatch family, pinned by
-  the gbmicrotest/mooneye/wilbertpol hblank grids. Also SameBoy-FAIL (EXCEED).
+| | read | arm-8 exit | verdict |
+|---|---|---|---|
+| `_1` CGB | rp 528 | 532 (flip 267) | 3 ✓ |
+| `_1` DMG | rp 528 | 522 (flip 267 − 5) | 0 ✗ |
+| `_2` both | rp 536 | 534/536 | 0 ✓ |
+
+The whole difference was the DMG `scx_write_dot` back-out in arm 8 subtracting
+the live `SCX & 7`. That back-out exists to undo the render's *spurious*
+mid-mode-3 SCX extension, and the spurious part is only what the render added
+beyond the fine scroll its comparator actually resolved:
+
+| ROM | `hunt_fine` | `eff.scx & 7` | back out |
+|---|---|---|---|
+| `late_scx4_2` | 0 | 4 | 4 — the render added a discard the hunt never latched |
+| `scx_m3_extend_1` | 5 | 5 | 0 — the render's length is legitimate |
+
+So the term is `SCX&7 − hunt_fine`, not `SCX&7`. Byte-identical on
+`late_scx4_2` (the case it was written for), and `scx_m3_extend_1 [Dmg]`
+recovers. **+1 row, zero regressions**, golden drift confined to that one ROM.
+
+Note the earlier reading in this file — "mode 3 ends at dot 256 on both models
+and every line" — was sampled on lines 0 and 100+, never on line 1, the kernel
+line. It does not.
+
+#### OPEN: `scx_during_m3_spx2 [Cgb]` is a palette-VALUE row, not a fetch row
+
+8 px, x0 of rows 0-7. `cmp -l` across the ladder: spx0/spx1/spx2 differ in
+**two bytes** — the OBJ X (0/1/2) and the header checksum. So X=2 is simply the
+first leg where any sprite pixel reaches the screen (X=0 is fully clipped, X=1
+shows only the transparent px7), which is why the passing siblings cannot
+discriminate anything.
+
+We and the reference agree on the colour *index*: the DMG reference is black at
+x0, and the DMG leg passes. They disagree on the CGB OBJ palette *content* —
+reference `(r5,g5,b5) = (1,19,16)` = raw `$4261`, ours OBP0 c2 = `$1CF2`.
+Measured, so do not re-chase:
+
+* the palette is written **once**, 16 bytes at frame 2 ly 144 (VBlank, not
+  blocked) — there is no mid-mode-3 palette write to time, and no write is
+  dropped;
+* the ROM's init routine (`$01C4-$01E1`) writes OAM, BGP and the BG palette but
+  **never** touches FF6A/FF6B, and the ROM contains no `ld c,6A`/`ld c,6B` and
+  no literal `61 42` / `F2 1C` byte pair — the entries are computed at runtime;
+* no index shift of the 16 written bytes produces `$4261`: the byte `$61` is
+  never written at all.
+
+So the divergence is upstream of the PPU, in whatever the ROM reads to compute
+the entry. That is a different investigation from this cluster; the fetch column
+and the write-commit timing are both already correct here.
 
 The arms measured and rejected in this pass are folded into the canonical dead-end
 list above.

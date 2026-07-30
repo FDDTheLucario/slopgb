@@ -238,3 +238,133 @@ fn eager_ff0f_read_peek_passes() {
             .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected out{expect} (eager): {e}"));
     }
 }
+
+/// The DMG bare-line mode-3 exit backs out only the fine scroll the render
+/// added *beyond* what its comparator resolved (`read_laws_exit.rs`, arm 8).
+///
+/// A mid-mode-3 SCX rewrite commits `eff.scx` at the cc+0 write frame, so the
+/// render can over-discard the new fine scroll and flip late. Backing out the
+/// whole live `SCX & 7` over-corrects when the hunt latched that same value:
+/// `scx_m3_extend_1` writes SCX=5 with `hunt_fine == 5`, so its length is
+/// legitimate and the read must still see mode 3 one M-cycle before its `_2`
+/// sibling sees mode 0. `late_scx4_2` is the case the back-out exists for —
+/// hunt 0 against `eff.scx & 7 == 4` — and is pinned here alongside it.
+#[test]
+fn eager_dmg_scx_m3_extend_bare_exit_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_dmg_scx_m3_extend_bare_exit",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    // (rel, expected, model)
+    let rows = [
+        (
+            "gambatte/scx_during_m3/scx_m3_extend_1_dmg08_cgb04c_out3.gbc",
+            "3",
+            Model::Dmg,
+        ),
+        (
+            "gambatte/scx_during_m3/scx_m3_extend_2_dmg08_cgb04c_out0.gbc",
+            "0",
+            Model::Dmg,
+        ),
+        (
+            "gambatte/scx_during_m3/scx_m3_extend_1_dmg08_cgb04c_out3.gbc",
+            "3",
+            Model::Cgb,
+        ),
+        (
+            "gambatte/scx_during_m3/scx_m3_extend_2_dmg08_cgb04c_out0.gbc",
+            "0",
+            Model::Cgb,
+        ),
+        // The siblings the back-out exists for — hunt_fine 0 vs eff.scx&7 4.
+        (
+            "gambatte/m2int_m3stat/scx/late_scx4_1_dmg08_cgb04c_out3.gbc",
+            "3",
+            Model::Dmg,
+        ),
+        (
+            "gambatte/m2int_m3stat/scx/late_scx4_2_dmg08_cgb04c_out0.gbc",
+            "0",
+            Model::Dmg,
+        ),
+    ];
+    for (rel, expect, model) in rows {
+        let rom = std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot(&rom, model);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, model.is_cgb())
+            .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected out{expect}: {e}"));
+    }
+}
+
+/// The mid-mode-3 SCX BG map column: the DMG pre-output fetch lead
+/// (`map_scx_formed`) and the never-matched-hunt column holdback
+/// (`render.rs`, at `prefill_pos == 8`).
+///
+/// `scx_0363c0/_4` pins the lead — its first full tile must miss a write that
+/// commits one dot after the CGB cut-off. `scx_0360c0/_2` and `scx_0761c0/_4`
+/// pin the holdback: when an SCX write moves `SCX & 7` behind the comparator,
+/// the whole first tile is dropped and must not advance the map counter.
+/// `old/offset_3/_ds_1` guards the double-speed side, where the holdback is
+/// off — running it there moves this row off its reference.
+#[test]
+fn eager_scx_during_m3_map_column_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_scx_during_m3_map_column",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    // (rel, reference-png suffix, model)
+    let rows = [
+        (
+            "gambatte/scx_during_m3/scx_0363c0/scx_during_m3_4.gbc",
+            "_dmg08",
+            Model::Dmg,
+        ),
+        (
+            "gambatte/scx_during_m3/scx_0360c0/scx_during_m3_2.gbc",
+            "_dmg08",
+            Model::Dmg,
+        ),
+        (
+            "gambatte/scx_during_m3/scx_0360c0/scx_during_m3_2.gbc",
+            "_cgb04c",
+            Model::Cgb,
+        ),
+        (
+            "gambatte/scx_during_m3/scx_0761c0/scx_during_m3_4.gbc",
+            "_dmg08",
+            Model::Dmg,
+        ),
+        (
+            // Bare `<stem>.png` (the .gbc-extension fallback the harness uses).
+            "gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_1.gbc",
+            "",
+            Model::Cgb,
+        ),
+    ];
+    for (rel, suffix, model) in rows {
+        let path = root.join(rel);
+        let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot(&rom, model);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        let png = path
+            .parent()
+            .unwrap_or(Path::new(""))
+            .join(format!("{stem}{suffix}.png"));
+        let map = if model.is_cgb() {
+            CgbColorMap::Gambatte
+        } else {
+            CgbColorMap::Identity
+        };
+        harness::expect_frame_png(&gb, &png, map)
+            .unwrap_or_else(|e| panic!("{rel} [{model:?}]: {e}"));
+    }
+}

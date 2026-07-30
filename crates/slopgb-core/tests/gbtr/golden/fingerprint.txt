@@ -4489,7 +4489,7 @@ gambatte/scx_during_m3/scx_during_m3_spx2.gbc [Dmg] | 327f4c04b578a025 | b6b0632
 gambatte/scx_during_m3/scx_during_m3_spx2_ds.gbc [Cgb] | 4241fbe7d8389bf5 | b6b0632d997517d6
 gambatte/scx_during_m3/scx_during_m3_spx2_ds.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gambatte/scx_during_m3/scx_m3_extend_1_dmg08_cgb04c_out3.gbc [Cgb] | 2d66115b8bae97cc | b6b0632d997517d6
-gambatte/scx_during_m3/scx_m3_extend_1_dmg08_cgb04c_out3.gbc [Dmg] | 56446e45a2c42f7c | b6b0632d997517d6
+gambatte/scx_during_m3/scx_m3_extend_1_dmg08_cgb04c_out3.gbc [Dmg] | 2d66115b8bae97cc | b6b0632d997517d6
 gambatte/scx_during_m3/scx_m3_extend_2_dmg08_cgb04c_out0.gbc [Cgb] | 56446e45a2c42f7c | b6b0632d997517d6
 gambatte/scx_during_m3/scx_m3_extend_2_dmg08_cgb04c_out0.gbc [Dmg] | 56446e45a2c42f7c | b6b0632d997517d6
 gambatte/scx_during_m3/scx_m3_extend_ds_1_cgb04c_out3.gbc [Cgb] | 2d66115b8bae97cc | b6b0632d997517d6
