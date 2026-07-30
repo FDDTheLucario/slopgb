@@ -434,7 +434,32 @@ down the pipe (tile-data addressing or the FIFO), or in per-ROM VRAM the trace
 did not capture.
 
 That is the concrete starting point for the next attempt: compare the two ROMs'
-*tile data* reads on row 0, not their map addresses. **+20 rows, zero
+*tile data* reads on row 0, not their map addresses.
+
+#### The 8 EXCEED rows are the same one-tile bug, at either end of the line
+
+Frame-diffed, they classify cleanly and fold into the same family:
+
+| ROM | signature |
+|---|---|
+| `old/offset_3/_2` [Dmg] | row 0 only, 8 px at **x152-159** (last tile) |
+| `old/offset_3/_3` [Dmg] | 143 rows, same last tile |
+| `old/offset_3/_4` [Dmg] | row 0 only, 8 px at **x5-12** (first tile) |
+| `old/offset_3/_5` [Dmg] | 143 rows, same first tile |
+| `old/offset_3/_ds_3` [Cgb] | 144 rows, 6 px spread x0-157 |
+| `scx_0761c0/_2`, `_3` [Dmg] | 151 / 143 px from x0 |
+
+Rounds 2/3 corrupt the line's **last** tile and rounds 4/5 its **first** — one
+M-cycle of write timing moves the damage from one end of the line to the other,
+and the `_2`/`_4` versus `_3`/`_5` split is row-0-only versus every row. So
+these are the same one-tile-wrong bug as the single-speed BUG rows, seen at the
+line boundary.
+
+That suggested the `scx_ring` per-line reset was discarding the pre-write
+history a boundary write needs. **Measured: removing the reset changes nothing**
+— the ring is refilled every fetcher step, so at a line boundary it already
+holds the previous line's last dots. Hypothesis dead; the reset is harmless
+either way. **+20 rows, zero
 regressions**; mealybug and age both clean. Note the earlier "mealybug
 m3_scx_high_5_bits regresses" reading was an artifact of scoring mealybug ROMs
 with the gambatte 15+1-frame protocol — they exit on `LD B,B`.
