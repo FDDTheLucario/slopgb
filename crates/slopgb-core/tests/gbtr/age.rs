@@ -59,7 +59,6 @@ const BASELINE: &[&str] = &[
     "age-test-roms/m3-bg-bgp/m3-bg-bgp.gb [Dmg]",
     "age-test-roms/m3-bg-lcdc/m3-bg-lcdc-nocgb.gb [Cgb]",
     "age-test-roms/m3-bg-lcdc/m3-bg-lcdc.gb [Cgb]",
-    "age-test-roms/m3-bg-scx/m3-bg-scx.gb [Dmg]",
     "age-test-roms/oam/oam-read-dmgC-cgbBC.gb [Cgb]",
     "age-test-roms/oam/oam-read-dmgC-cgbBC.gb [Dmg]",
     "age-test-roms/oam/oam-read-ncmBC.gb [Cgb]",

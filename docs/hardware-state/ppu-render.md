@@ -91,7 +91,7 @@ Remaining (not yet pixel-perfect) legs are mostly:
 - The PPU raises STAT/VBlank IRQs via `Ppu::write`'s return value (single drain).
 - When adding a PPU register path, OR the returned IF bits into `intf` like the existing interconnect call sites.
 
-## Mid-mode-3 SCX and the BG map column (LANDED 2026-07-29)
+## Mid-mode-3 SCX and the BG map column (LANDED 2026-07-29, both models)
 
 The BG tile-map column is derived from the pixel output position, not from a
 tile counter. SameBoy `display.c` `GB_FETCHER_GET_TILE_T1` forms it as
@@ -105,20 +105,26 @@ family failed on any *timing* adjustment.
 `Render::lx` is our position. Three details are ours rather than SameBoy's, all
 measured with an equivalence check (see below):
 
-- the anchor is **6**, not `8 - is_cgb`, because our `lx` sits at
-  `8 * fetch_x - 6` at the tile-number read instead of a multiple of 8 — we
-  re-fetch the discarded first tile where SameBoy pushes it and pops its pixels;
-- the position form is gated to CGB and to fetches after the line's first pixel
-  ships, with a running sprite stall excluded: our BG fetcher free-runs through
-  a stall while the output position is frozen, where SameBoy parks its fetcher
-  in `PUSH`;
+- the anchor is **6 on CGB and 7 on DMG**, not `8 - is_cgb`, because our `lx`
+  sits at `8 * fetch_x - 6` at the tile-number read instead of a multiple of 8 —
+  we re-fetch the discarded first tile where SameBoy pushes it and pops its
+  pixels. The DMG runs a dot further back (6-dot OBJ fetches against the CGB's
+  5, mode-0 flip leading by 3 not 2). Sweeping the DMG anchor over 0..=7 against
+  the `scx1_scx0`/`scx2_scx1`/`scx2_scx0`/`scx_0761c0` legs gives a unique
+  optimum: 0..=6 fail all four identically, 7 passes all four;
+- the position form is gated to fetches after the line's first pixel ships, with
+  a running sprite stall excluded: our BG fetcher free-runs through a stall
+  while the output position is frozen, where SameBoy parks its fetcher in
+  `PUSH`;
 - it applies only once `SCX & 7` has moved away from the value latched at the
   fine-scroll comparator match (`Render::hunt_fine`) — the value that fixed this
   line's discard, and therefore `lx`'s alignment to the tile grid. While it
   holds, the two forms are provably identical, so the gate costs nothing.
 
-Result: **37 baseline rows recovered, zero regressions** (34 gambatte + 3 age
-`m3-bg-scx`). Golden drift is confined to 79 ROMs, every one of them SCX-named.
+Result: **48 baseline rows recovered, zero regressions** — 37 on the CGB pass
+(34 gambatte + 3 age `m3-bg-scx`) and 11 more when the DMG anchor enabled the
+form there (10 gambatte + `m3-bg-scx.gb [Dmg]`). Golden drift is confined to
+SCX-named ROMs in both passes (79, then 34).
 
 ### The equivalence check (use this for any future work here)
 
@@ -144,10 +150,9 @@ fetch restart on a coarse change, a `read - 4` dot rule, a per-line measured
 anchor, and latching the column at `TileNoWait` to mirror SameBoy's T1/T2 split
 (13 regressions — computing it on the T2 side is correct for our pipeline).
 
-Residual in this family is now the `scx1_scx0`/`scx2_scx1` DMG legs and the
-remaining `_ds` rounds; the DMG side needs its own anchor before the position
-form can be enabled there (enabling it with anchor 6 recovers 43 but costs 4
-SameBoy-PASS rows, which class F forbids baselining).
+Residual in this family is the remaining `_ds` rounds and the `old/`
+offset/revoffset variants — double-speed and lcd-offset lines, where the
+per-line dot alignment moves `lx` off the grid a fixed anchor assumes.
 
 ## Post-boot VRAM (boot logo)
 

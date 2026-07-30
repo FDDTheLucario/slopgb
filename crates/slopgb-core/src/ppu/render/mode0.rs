@@ -438,12 +438,16 @@ fn bg_map_col(
     // value that fixed this line's discard: `lx == 0` is the pre-output band,
     // `!lead` a running sprite stall (our BG fetcher free-runs there while the
     // output position is frozen, where SameBoy parks its fetcher in `PUSH`).
-    if (lx == 0 && !hunted) || !lead || !cgb || !fine_moved {
+    if (lx == 0 && !hunted) || !lead || !fine_moved {
         return (scx >> 3).wrapping_add(fetch_x) & 31;
     }
     // `lx` is the output position; the anchor is 6 because our `lx` sits at
     // `8 * fetch_x - 6` at the tile-number read rather than a multiple of 8 —
     // we re-fetch the discarded first tile where SameBoy pushes and pops it.
-    let v = i32::from(scx) + i32::from(lx) + 6;
+    // The DMG blob's pipeline runs a dot behind the CGB's (6-dot OBJ fetches
+    // against the CGB's 5, mode-0 flip leading by 3 not 2), so its output
+    // position anchors one higher.
+    let anchor = if cgb { 6 } else { 7 };
+    let v = i32::from(scx) + i32::from(lx) + anchor;
     (v.div_euclid(8) & 31) as u8
 }
