@@ -375,7 +375,23 @@ scroll. What distinguishes a non-zero initial fine scroll is that the comparator
 match lands at a different `prefill_pos`, giving a different `discard` and so a
 different `lx`-to-fetch alignment; the fixed anchor absorbs that only when the
 discard is 0. Deriving the alignment term for a non-zero discard is the open
-work here. **+20 rows, zero
+work here.
+
+**MEASURED, and it refutes that:** logging `lx` against `fetch_x` at every
+tile-number read shows `8 * fetch_x - lx == 6` **uniformly** — on fine-0 and
+fine-3 directories alike, and on the lines that actually carry a non-zero SCX
+(these ROMs only write SCX on lines 139-143; the directory name is the value
+sequence, not the line-start value, which invalidates the "non-zero *initial*
+fine" reading above). 364 of 364 sampled fetches on writing lines give offset 6.
+
+So there is no discard-dependent alignment term to derive: the anchor is
+universally correct, and combined with the DMG round-4/5 rows being
+lead-independent and both anchor sweeps already optimal, the remaining
+single-speed failures are **not** map-column errors at all. Whatever they are,
+it is a different mechanism in the mode-3 pipeline, and no parameter of
+`bg_map_col` will reach them. Start the next attempt by diffing a failing row's
+frame against its reference to find *what* is wrong, before assuming it is the
+column. **+20 rows, zero
 regressions**; mealybug and age both clean. Note the earlier "mealybug
 m3_scx_high_5_bits regresses" reading was an artifact of scoring mealybug ROMs
 with the gambatte 15+1-frame protocol — they exit on `LD B,B`.
