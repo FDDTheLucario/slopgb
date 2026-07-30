@@ -110,3 +110,30 @@ Pending HBlank block across the switch (`hdma_transition_speedchange` matrix):
 |---|---|
 | Entering DS | aborts the block (FF55 \|= $80, count latched) |
 | Leaving DS | defers it |
+
+## Parked: moving the dispatch dot off the read frame
+
+Four approaches to separating the IRQ-dispatch dot from the read frame were each
+built and measured during the SameBoy port, and each dropped a test SameBoy
+passes. Kept here so none is re-attempted; the eager clock landed without them.
+
+- **Advancing the PPU +4 at dispatch, alone.** Hangs mooneye `intr_2_*`
+  (B=42) — the dispatch dot is counter-pinned by those tests and cannot move
+  independently of the frame the ISR reads.
+- **Imminent-rise fold** (dispatch a cycle late, reads at the leading edge). Won
+  presence rows but lost dispatch-*count* rows plus the same `intr_2` hang: the
+  two are incoherent, and on the shared mode-0 rise there is no bus-observable
+  discriminator between a row that wants the move and one that does not.
+- **Eager-PPU / deferred-CPU split.** Built in full and refuted: it traded
+  coherent-count rows the wrong way and cost mooneye passes.
+- **Folding the timer/serial completion into the read.** Even the minimal
+  `FF0F`-OR fold drops `gambatte/tima/tc00_late_div_write_if_1a`. The timer
+  read-state is identical for rows with opposite wants, so no read-time
+  discriminator exists.
+
+Two sweeps in the same area also measured inert: the power-on DIV offset across
+{−4..12} changes nothing, and reading `FF0F` a cycle late is refuted.
+
+Before concluding that a surviving row here is structurally welded, read
+`.claude/skills/rom-diff-weld/SKILL.md` — that method recovered rows several
+investigations had each called a floor.
