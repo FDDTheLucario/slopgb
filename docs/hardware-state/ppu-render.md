@@ -459,7 +459,29 @@ That suggested the `scx_ring` per-line reset was discarding the pre-write
 history a boundary write needs. **Measured: removing the reset changes nothing**
 — the ring is refilled every fetcher step, so at a line boundary it already
 holds the previous line's last dots. Hypothesis dead; the reset is harmless
-either way. **+20 rows, zero
+either way.
+
+#### Instrument check (do this before trusting any frame diff)
+
+The frame-diff probe was validated against **known-passing** rows before its
+readings were relied on: `scx_0060c0/_4` on both models and `scx_0363c0/_1` and
+`_2` on DMG all report **0 px**, and the hand-rolled diff agrees with
+`harness::expect_frame_png` on every row including the failing one (8 px). So
+the signatures recorded above are sound, not artifacts of the probe's colour
+mapping or PNG selection.
+
+That also dissolves an apparent contradiction recorded earlier — that row 0 of
+the failing `scx_0363c0/_4 [Dmg]` traces *identical* fetch state to the passing
+`scx_0060c0/_4 [Dmg]` yet differs by 8 px. There is no contradiction: the two
+are different ROMs with different VRAM graphics, so identical fetch state does
+not imply identical output. The failing ROM's reference simply wants different
+map columns on row 0 than we produce, which puts this row **back** in the column
+family rather than below the fetcher.
+
+Row 0 is the frame's first line and these ROMs only write SCX on lines 139-143,
+so row 0 inherits SCX across the frame boundary. The live trace shows `SCX = $00`
+by row 0's fetches; whether hardware still sees the carried value for the line's
+first tiles is the specific question to answer next. **+20 rows, zero
 regressions**; mealybug and age both clean. Note the earlier "mealybug
 m3_scx_high_5_bits regresses" reading was an artifact of scoring mealybug ROMs
 with the gambatte 15+1-frame protocol — they exit on `LD B,B`.
