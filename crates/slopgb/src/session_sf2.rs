@@ -8,7 +8,8 @@ use super::*;
 /// Host-file key handed to the SF2 converter plugin's `set_file` (mirrors
 /// `slopgb_sf2_plugin::SF2_FILE_KEY`; the plugin reads only this one file, so a
 /// single fixed key suffices). Hardcoded to keep the plugin crate out of the
-/// frontend's dep list — the same pattern `msu1.rs` uses for `DATA_FILE_KEY`.
+/// frontend's dep list — the same pattern `slopgb-sgb-coprocessor`'s
+/// `MSU_DATA_FILE_KEY` uses for `slopgb_msu1_plugin::DATA_FILE_KEY`.
 const SF2_FILE_KEY: u32 = 0;
 /// Filename of the SF2 converter coprocessor plugin inside the plugins dir.
 const SF2_PLUGIN_WASM: &str = "sf2.wasm";

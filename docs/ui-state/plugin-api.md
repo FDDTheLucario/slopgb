@@ -87,7 +87,9 @@ slopgb --plugins target/wasm32-unknown-unknown/release game.gb
 
 `--plugins <DIR>` (or `SLOPGB_PLUGINS_DIR=<DIR>`) loads **every** `*.wasm` in the
 directory. A file that fails to load is logged and skipped, so one bad plugin
-can't stop the rest. With no such flag, no plugin machinery runs at all.
+can't stop the rest. Absent both, `load_plugins` / `prescan_plugins_dir` fall back
+to the persisted `settings.plugins.dir`; with none of the three, no plugin
+machinery runs at all.
 
 ## Compiling several plugins at once
 
@@ -273,7 +275,10 @@ ignored, so the schema grows without an ABI break. Records:
 id\t<stable-token>              logical identity + role key (e.g. "msu1")
 name\t<display name>            human label
 provides\t<role>               (0..n) a capability slot this chip can fill
-flag\t<name>\t<arg>\t<help>    (0..n) a CLI flag this plugin contributes
+flag\t<name>\t<arg>\t<help>\t<default>
+                               (0..n) a CLI flag this plugin contributes; the
+                               5th field is the default value (may name an
+                               ambient token, e.g. msu1's "$rom_dir")
 menu\t<label>\t<export>\t<ext> (0..n) a main-menu row this plugin/mediator contributes
 ```
 
@@ -435,9 +440,11 @@ wrote every one of them into the single `disabled` key. Reading that back as a
 real user choice would silently kill SGB audio for anyone who had ever pressed OK,
 so the tier-3 flag starts from a clean key.
 
-`allow_mutation` is a persisted, default-off preference reserved for the (not-yet-
-served) `MUTATE` tier — it currently gates nothing, keeping the golden path
-byte-identical.
+`allow_mutation` is a persisted, default-off preference that currently gates
+nothing: the tool host's `MUTATE` grant comes from the plugin's own declared
+capabilities (`tool.rs` allows `INTROSPECTION | MUTATE` and only then lets
+`host_set_breakpoint` act), not from this toggle. Nothing reads it outside
+`settings_file/` + `windows/options.rs`.
 
 ## ABI versioning
 
@@ -446,7 +453,8 @@ differs from its own (`ABI_VERSION`). Rebuild a plugin against the matching SDK
 after an ABI bump. History: v3 added the coprocessor PCM drain; **v4** added the
 two coprocessor bulk imports (`host_recv` / `host_file`, above); **v5** added the
 five orchestration exports (`set_pc` / `write_ram` / `read_ram` / `save_state` /
-`load_state`); **v6** added the `slopgb_manifest` self-description export. The wat
+`load_state`); **v6** added the `slopgb_manifest` self-description export; **v7**
+added the `slopgb_dump_spc` export (`EMIT_KIND_SPC`). The wat
 test fixtures interpolate `ABI_VERSION`, so a bump auto-tracks; the Rust SDK macros
 emit it too — no literal to chase.
 

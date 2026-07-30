@@ -28,9 +28,11 @@ serde/no unsafe):
   coprocessor tail is truncated leaves those chips part-restored (the tail is read
   last, after the Game Boy side has already parsed cleanly).
 
-The header carries a `bool` has-SGB-audio-tail flag (v7, right after the
-ROM-fingerprint): the same ROM legally runs as SGB (with the ~64 KB SPC700+S-DSP
-tail) or DMG/CGB (without). On load a mismatch vs the target machine's model is a
+The header carries an is-SGB-model `bool` right after the ROM-fingerprint, plus a
+has-coprocessor-tail `bool` written last of all, after the CPU + bus (state v10):
+the same ROM legally runs as SGB (with the ~64 KB SPC700+S-DSP tail, appended only
+when a coprocessor is actually installed) or DMG/CGB (without). On load a mismatch
+vs the target machine's model is a
 clear `StateError::ModelMismatch` — never a silent tail-drop (SGB→DMG) nor an
 opaque `Truncated` (DMG→SGB).
 

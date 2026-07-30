@@ -20,13 +20,14 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Each plugin: its cargo package, the wasm artifact cargo emits, and the
-/// filename the loader opens (`msu1.rs` `msu1.wasm`; `session.rs`
-/// `spc700.wasm`/`w65c816.wasm`/`snes-ppu.wasm`; the frontend's `--sf2` path
-/// `sf2.wasm`). Staging them all into one dir serves every seam: the SGB
-/// coprocessor auto-loads `spc700.wasm`/`w65c816.wasm`/`snes-ppu.wasm` from the
-/// `--plugins` dir on SGB models, `--sf2` reads `sf2.wasm` from that same dir
-/// on an SF2 cache miss, and MSU-1 reads `msu1.wasm` from its own `--msu1`
-/// pack — each seam looks up only the file(s) it needs.
+/// filename the loader opens. `session.rs`'s `load_sgb_coprocessor` opens the
+/// four subsystem wasms (`spc700.wasm`/`w65c816.wasm` plus the optional
+/// `snes-ppu.wasm`/`msu1.wasm`); the frontend's `--sf2` path (`session_sf2.rs`)
+/// opens `sf2.wasm`. Staging them all into one dir serves every seam: the SGB
+/// coprocessor auto-loads its four from the `--plugins` dir on SGB models and
+/// `--sf2` reads `sf2.wasm` from that same dir on an SF2 cache miss. `--msu1`
+/// names the `.pcm` pack dir, never a wasm — each seam looks up only the
+/// file(s) it needs.
 const PLUGINS: &[Plugin] = &[
     Plugin {
         pkg: "slopgb-spc700-plugin",

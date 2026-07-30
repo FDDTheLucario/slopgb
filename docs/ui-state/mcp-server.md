@@ -1,3 +1,34 @@
+# MCP server
+
+An opt-in [Model Context Protocol](https://modelcontextprotocol.io) server so an
+LLM agent can drive the debugger against the **live machine you're watching** —
+befitting the name. Off by default. Start it at launch with `--mcp-port <N>` /
+`SLOPGB_MCP_PORT=<N>`, or at runtime from the game-window right-click **MCP**
+submenu (Start server… / Stop server) — mirrors the Link menu. The bound port
+shows in the title bar (`MCP :<port>`, like the link status). Lives in
+`crates/slopgb/src/mcp.rs` + `mcp/`.
+
+## Wiring it to a client
+
+```sh
+slopgb --mcp-port 8123 game.gb        # you play; window stays open
+claude mcp add --transport http slopgb http://127.0.0.1:8123/mcp
+```
+
+The server binds `127.0.0.1` only (never `0.0.0.0`) — localhost, not the network.
+
+## The tools
+
+| Tool | Args | Output |
+|---|---|---|
+| `disassemble` | `from`, `to` | `BB:AAAA<tab>label<tab>instruction<tab>cycles` per row (empty label → two tabs, bare cycle count). Symbol names substituted into branch/call operands. |
+| `peek` | `from`, `to` | 16 hex bytes/row, `BB:AAAA<tab>…` |
+| `cdl` | `from`, `to` | like `peek`, each byte → an `r`/`w`/`x` access word or `.` |
+| `cdl-ranges` | — | the continuous address ranges the CDL has logged (non-`.`), one `AAAA-AAAA` / `BB:AAAA-BB:AAAA` per line; empty when off / nothing logged |
+| `vram` | `view` (`bg`\|`win`\|`tile0`\|`tile1`\|`oam`\|`palette`\|`palreg`), optional `scale`, `no_palette` | a PNG (`image/png` content); `bg`/`win` game-paletted, Tiles grey-ramp. `palreg` is the palette registers as **text**, not a PNG; `no_palette=true` forces the neutral grey ramp on `bg`/`win`/`oam` (raw tile pixels) |
+| `screencap` | optional `scale` | the current 160×144 screen (`gb.frame()`) as a PNG — cross-reference against `vram *` |
+| `breakpoint` | `address` | sets a PC breakpoint (the only mutating built-in tool) |
+| `registers` | — | `af=… bc=… … lcdc=… stat=… ly=… cnt=… ie=… if=… ime=… ima=… spd=… rom=… ram=… wave=…` |
 | `coprocessor` | — | SGB coprocessor status: the SPC700 + 65C816 plugins engaged, or the slot is empty (not SGB, or no plugins loaded) |
 | `dump-spc` | optional `mode` | writes the SGB SPC700 state to `slopgb-<ms>-<mode>.spc` and reports the path. `mode` = `live` (default — the driver's current state, for debugging mid-song) or `start` (the from-the-top snapshot the UI's "Export SPC" writes) |
 | `expr` | `expression` | evaluates a bgb-style debugger expression (hex default, register names, `[addr]`) |
@@ -113,6 +144,6 @@ on the fork) — the live machine never advances a cycle, verified by a unit tes
 that runs a fork and asserts the live `PC` is unmoved. Two core accessors back the banked tools —
 `GameBoy::debug_read_banked` and `cdl_flag_banked` (both cover ROMX/VRAM/SRAM/
 WRAMX via the cartridge `ram_read_banked` / `ram_offset_banked` helpers), all
-read-only `&self`, verified golden byte-identical + mooneye 91/91. The whole server is opt-in and
+read-only `&self`, verified golden byte-identical + mooneye 439/439. The whole server is opt-in and
 inert by default, so no golden path is touched. See the golden-safe law in the
 [README](README.md).

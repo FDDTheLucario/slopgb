@@ -129,12 +129,6 @@ impl LoadedPlugin {
     pub fn capabilities(&self) -> Capabilities {
         self.caps
     }
-
-    /// Whether `pump` currently drives this plugin.
-    #[must_use]
-    pub fn is_enabled(&self) -> bool {
-        self.enabled
-    }
 }
 
 /// A loaded plugin's UI-facing metadata: its name, a human capability label, and

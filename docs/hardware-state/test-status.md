@@ -21,22 +21,28 @@
   - passing/orphaned entry = stale
   - both fail the run.
 - A whole-collection inventory guard pins every on-disk ROM claimed-or-exempt exactly once.
-- 7047 rom×model cases = 5941 pass + 1106 baselined floor.
+- 654 baselined floor cases (per-suite below), all 215 suite tests green. The
+  harness emits no total case count, so re-derive one before citing it.
 
 ### Per-suite breakdown (cases/baselined)
 
-| Suite | Cases | Baselined |
+Baselined counts are the live entry counts in `tests/gbtr/baselines/*.txt` plus
+each suite's inline `BASELINE` const — one entry is one rom×model case, so they
+sum to the 654 above. The Cases column predates the current tree and is *not*
+verified; re-count it before citing.
+
+| Suite | Cases (unverified) | Baselined |
 |---|---|---|
 | acid | 4 | 1 |
-| age | 49 | 38 |
+| age | 49 | 33 |
 | blargg | 82 | 1 |
-| gambatte | 5330 | 918 |
-| gbmicrotest | 483 | 32 |
-| mealybug | 55 | 26 |
+| gambatte | 5330 | 548 |
+| gbmicrotest | 483 | 7 |
+| mealybug | 55 | 23 |
 | mooneye2022 | 439 | 1 |
-| same-suite | 72 | 4 |
-| smallsuites | 30 | 6 |
-| wilbertpol | 561 | 79 |
+| same-suite | 72 | 3 |
+| smallsuites | 30 | 0 |
+| wilbertpol | 561 | 37 |
 
 - Floor classes A–H with lift conditions are indexed in `tests/gbtr/baselines/gambatte.txt`.
 
@@ -47,5 +53,5 @@
 
 ## Unit tests & ROM availability
 
-- All subsystems implemented; 597 unit tests.
+- All subsystems implemented; 890 core unit tests (`cargo test -p slopgb-core --lib`).
 - Missing test ROMs skip silently unless `SLOPGB_REQUIRE_ROMS=1` (set in CI) — run `test-roms/download.sh` first.

@@ -1,7 +1,7 @@
 //! Optional **user-supplied SGB BIOS** seam: install the SGB firmware's real
 //! default border and its title→palette table.
 //!
-//! slopgb never runs the SNES CPU (it is a high-level SGB emulation), so it
+//! Core never runs the SNES CPU (it is a high-level SGB emulation), so it
 //! cannot *execute* the firmware to reproduce Nintendo's border/palettes. The
 //! frontend (which the user points at their own BIOS copy) locates the border
 //! payload and the palette table in the firmware and hands them to these

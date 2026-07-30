@@ -312,7 +312,7 @@ drives the MSU-1 registers. slopgb already ran that handler
   `SgbCoprocessor::attach_msu`, and points it at a `.pcm` **pack dir** via
   `set_msu_pack`. The frontend's `--msu1 <DIR>` / `SLOPGB_MSU1` selects the pack dir
   only (not the wasm); absent, the pack **defaults to the loaded ROM's directory**
-  (threaded via `Session::set_msu1_override` / `apply_sgb_coprocessor`). Every
+  (threaded via `Session::set_plugin_flags` / `apply_sgb_coprocessor`). Every
   `*.pcm` is keyed by its trailing track number → the plugin host-file key; the
   `.msu` data file is **optional**. Presence (`S-MSU1`) is advertised only when ≥1
   `.pcm` track loads. Requires an SGB model + the coprocessor plugins.
@@ -470,7 +470,7 @@ Two independent flags sit in the state (format **v10**):
   latched JUMP still live), and Game Boy audio with SGB SOUND commands is
   sample-for-sample identical to the same run without them.
 - **Integration** (`lib_tests.rs`): SGB save-state round-trip through `GameBoy`;
-  mooneye 93/93 unchanged (the SGB seams do not perturb GB timing).
+  mooneye 439/439 unchanged (the SGB seams do not perturb GB timing).
 
 ## What's unverified / parked
 

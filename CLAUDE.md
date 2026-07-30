@@ -16,7 +16,8 @@ clean-room chip cores `slopgb-snes-apu` (SPC700 + S-DSP) / `slopgb-w65c816` /
 [`crates/slopgb-plugin-host/CLAUDE.md`](crates/slopgb-plugin-host/CLAUDE.md)):
 tier-1 `INTROSPECTION` (`PluginHost` per-frame pump, `--plugins`), tier-2 tool
 (`LoadedTool`, MCP), tier-3 `SUBSYSTEM` (`LoadedCoprocessor`): the SGB
-coprocessor auto-loads `spc700.wasm` + `w65c816.wasm` (and optionally `msu1.wasm`)
+coprocessor auto-loads `spc700.wasm` + `w65c816.wasm` (and optionally
+`snes-ppu.wasm` + `msu1.wasm`)
 from the `--plugins` dir on SGB models; `--msu1` only points the MSU-1 plugin at its
 `.pcm` pack. **Subsystem plugins (SPC700 / 65C816
 / MSU-1 / SF2 — `slopgb-*-plugin`, built by `cargo xtask stage-plugins`) are
@@ -145,14 +146,10 @@ emulated s.
 ## State
 
 Baseline (all green, on `main`): mooneye **439/439** (rom×model), gbtr v7.0
-**7047 cases** (5941 pass + 1106 baselined floor), core lib + frontend green,
-clippy clean. Missing ROMs skip unless `SLOPGB_REQUIRE_ROMS=1` (run
+**215/215** suite tests green with **654** baselined floor cases, core lib +
+frontend green, clippy clean. Missing ROMs skip unless `SLOPGB_REQUIRE_ROMS=1` (run
 `test-roms/download.sh` first). Per-area detail:
 [`docs/ui-state/`](docs/ui-state/README.md) + [`docs/hardware-state/`](docs/hardware-state/README.md).
-<<<<<<< HEAD
-Known residuals (all SameBoy-FAIL/floored, NOT regressions): DS mid-dot render
-floor, halt-wake/HDMA levers.
-=======
 
 **Core emulates no SNES chip.** Every SNES-side capability arrives as a plugin: with
 no `spc700.wasm` + `w65c816.wasm` (or either disabled in Options→Plugins) the
@@ -164,5 +161,4 @@ UI theming (contemporary Light default / Dark / Classic + custom-theme API; colo
 `T` toggles Light↔Dark): [`docs/ui-state/theming.md`](docs/ui-state/theming.md).
 Known residuals (all SameBoy-FAIL/floored, NOT regressions): DS mid-dot render floor,
 halt-wake/HDMA levers.
->>>>>>> feat/sgb-improvements
 

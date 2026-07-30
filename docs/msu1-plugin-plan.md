@@ -51,7 +51,8 @@ piece was MSU-1 at `$2000-$2007`, now wired:
   output. Presence (`S-MSU1`) is advertised only when ≥1 `.pcm` track loads.
 - **Frontend.** `--msu1 <DIR>` / `SLOPGB_MSU1` still exist but now only select the
   `.pcm` **pack directory**; absent, the pack defaults to the loaded ROM's own
-  directory. Threaded via `Session::set_msu1_override` / `apply_sgb_coprocessor`.
+  directory. Threaded via `Session::set_plugin_flags` / `apply_sgb_coprocessor`
+  (the value is read back with `Session::plugin_flag("msu1")`).
   Requires an SGB model + the coprocessor plugins. There is **no** frontend cart-bus
   bridge (`crates/slopgb/src/msu1.rs` deleted).
 - **Mix.** MSU-1 mixes at `2.0/32768` and the GB channels duck (`GB_GAIN`) while a

@@ -72,7 +72,7 @@ impl GameBoy {
     /// - **Border + title→palette** — the two `Ppu` seams
     ///   ([`Ppu::sgb_install_border`] / [`Ppu::sgb_apply_bios_palette`]).
     ///
-    /// **The honest limit:** slopgb is high-level — it never runs the SNES
+    /// **The honest limit:** core is high-level — it runs no SNES
     /// 65816 — so it can neither *execute* the firmware to build the
     /// border/palette nor trust a raw, firmware-revision-specific offset (an
     /// unverifiable guess would ship a wrong border dressed up as right). The
@@ -194,7 +194,7 @@ impl GameBoy {
 /// banks + the 2176-byte tilemap/palette payload — the CHR_TRN/PCT_TRN formats
 /// [`Ppu::sgb_install_border`] takes) inside a user-supplied BIOS image.
 ///
-/// Returns `None`: slopgb never runs the SNES 65816, so it cannot execute the
+/// Returns `None`: core runs no SNES 65816, so it cannot execute the
 /// firmware to produce the border, and the raw payload offset is
 /// firmware-revision-specific — trusting one blind would ship a wrong border.
 /// A locator that first *validates* a documented structure drops in here; until

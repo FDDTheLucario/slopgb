@@ -80,14 +80,4 @@ impl SgbCoprocessor {
             .read_ram(addr, len)
             .unwrap_or_default()
     }
-
-    /// The PPU plugin's raw state snapshot (the `slopgb-snes-ppu` image:
-    /// VRAM, CGRAM, OAM, registers, framebuffer) — read-only introspection
-    /// for the debugger/MCP; empty without a PPU plugin.
-    pub fn debug_ppu_state(&self) -> Vec<u8> {
-        self.ppu
-            .as_ref()
-            .and_then(|p| p.borrow_mut().save_state().ok())
-            .unwrap_or_default()
-    }
 }

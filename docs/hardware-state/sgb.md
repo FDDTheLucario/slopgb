@@ -261,7 +261,7 @@ never executes on Dmg/Cgb. The BIOS entry point (`load_sgb_bios`) is likewise
 gated: the audio path is `Model::Sgb`/`Sgb2`-only, and the two border/palette
 seams route through `SgbView` (reached only through `Some`). Verified:
 `golden_fingerprint` **passes byte-identically** (`SLOPGB_REQUIRE_ROMS=1`);
-mooneye 91/91; core lib + frontend tests green; clippy `-D warnings` clean.
+mooneye 439/439; core lib + frontend tests green; clippy `-D warnings` clean.
 
 ## Tests
 

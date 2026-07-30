@@ -32,8 +32,8 @@ OPTIONS:
                       DMG/MGB/SGB, 2304 B for CGB/AGB. Also via SLOPGB_BOOT=<path>
     --sgb-bios <PATH> Your own SGB cartridge SNES-side ROM image (SGB models
                       only). Feeds the SGB audio driver; the Nintendo border and
-                      title palette are NOT extracted (slopgb never runs the SNES
-                      CPU) — the default border stands. Also via SLOPGB_SGB_BIOS
+                      title palette are NOT extracted from the image — the
+                      default border stands. Also via SLOPGB_SGB_BIOS
     --mcp-port <N>    Host an MCP server on 127.0.0.1:<N> so an LLM agent can
                       drive the debugger (disassemble/peek/cdl/vram/breakpoint/
                       registers/expr). Also via SLOPGB_MCP_PORT=<N>

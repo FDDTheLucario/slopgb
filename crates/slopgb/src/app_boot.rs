@@ -72,8 +72,8 @@ pub(crate) fn load_plugins(opts: &Options, settings: &windows::options::Settings
 
 /// Resolve the optional SGB BIOS bytes from `--sgb-bios` or `SLOPGB_SGB_BIOS`,
 /// reading the file. A read error is logged and treated as no BIOS (non-fatal).
-/// The border/title-palette are *not* extracted from it — slopgb is high-level
-/// and never runs the SNES CPU — so only the SGB audio path is fed; the honest
+/// The border/title-palette are *not* extracted from it — core is high-level and
+/// runs no SNES CPU itself — so only the SGB audio path is fed; the honest
 /// status is logged and the default border stands (`docs/hardware-state/sgb.md`).
 pub(crate) fn resolve_sgb_bios(opts: &Options) -> Option<Vec<u8>> {
     let path = opts
