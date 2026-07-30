@@ -199,15 +199,30 @@ Splitting by speed sharpens it — the lead is single-speed only:
 `(ds 0, single 2)` is a unique optimum at 76/120, and delaying the double-speed
 side at all costs rows. On the full battery that is **+20 gambatte rows**.
 
-**It still cannot land: all 7 regressions are SameBoy-PASS** (`classify_pixel`,
+**Initially blocked: all 7 regressions were SameBoy-PASS** (`classify_pixel`,
 `mm=0`) — mealybug `m3_scx_high_5_bits` [Dmg]+[Cgb] and `_change2` [Cgb], plus
 the four `scx_*_spx0/1/2` sprite-position ROMs. Gating the delay away from
 sprite stalls changes nothing; delaying only the coarse bits scores worse (16).
 
-So the 2-dot single-speed lead is real but incomplete: the `spx*` ROMs and
-mealybug's high-5-bits writes want the live value at the same dot where the
-`scx_*c0` rounds want the early one. That discriminator is what the next attempt
-needs to find — not another offset.
+#### The discriminator: sprites (LANDED, +20)
+
+The `spx*` names are the tell — they place an OBJ at x = 0/1/2. An OBJ fetch
+stalls the BG fetcher and carries the address formation with it, so the fixed
+lead does not hold on a line that selected any sprite. Gating it off there
+(`r.n_sprites > 0`) keeps the round matrix at 76/120 — the `scx_*c0` dirs have
+no sprites, so they are untouched — and returns all four `spx` rows to passing.
+
+Final law, in `render/mode0.rs`:
+
+```rust
+let d = if ds || r.n_sprites > 0 { 0 } else { 2 };
+r.scx_ring[(usize::from(r.scx_ring_i) + 8 - d) & 7]
+```
+
+with `scx_ring` sampled once per BG fetcher advance. **+20 rows, zero
+regressions**; mealybug and age both clean. Note the earlier "mealybug
+m3_scx_high_5_bits regresses" reading was an artifact of scoring mealybug ROMs
+with the gambatte 15+1-frame protocol — they exit on `LD B,B`.
 
 ## Post-boot VRAM (boot logo)
 

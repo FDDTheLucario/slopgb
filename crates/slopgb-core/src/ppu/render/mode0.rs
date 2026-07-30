@@ -273,6 +273,9 @@ impl Ppu {
     }
 
     pub(super) fn fetcher_step(&mut self) {
+        self.render.scx_ring_i = (self.render.scx_ring_i + 1) & 7;
+        let ri = self.render.scx_ring_i as usize;
+        self.render.scx_ring[ri] = self.eff.scx;
         // Every fetch read samples the pipeline view (eff) at its read
         // dot — the m3_lcdc_tile_sel/bg_map blob bands bracket each
         // stage's sampling to the eff commit exactly, and the gambatte
@@ -303,7 +306,7 @@ impl Ppu {
                         LCDC_BG_MAP,
                         self.ly.wrapping_add(scy) >> 3,
                         bg_map_col(
-                            scx,
+                            map_scx_formed(&self.render, self.ds),
                             self.render.lx,
                             self.render.fetch_x,
                             self.model.is_cgb(),
@@ -450,4 +453,19 @@ fn bg_map_col(
     let anchor = if cgb { 6 } else { 7 };
     let v = i32::from(scx) + i32::from(lx) + anchor;
     (v.div_euclid(8) & 31) as u8
+}
+
+/// PROBE: SCX as of N fetcher advances before now.
+fn map_scx_formed(r: &Render, ds: bool) -> u8 {
+    // The BG map address is formed two fetcher steps before the VRAM access,
+    // so an SCX write inside that window cannot retarget the fetch already in
+    // flight. The lead is single-speed only, and does not hold on a line that
+    // selected sprites: an OBJ fetch stalls the BG fetcher and moves the
+    // address formation with it (gambatte `scx_during_m3_spx*`).
+    //
+    // Swept on the round matrix (six `scx_*c0` dirs x 14 rounds x 2 models):
+    // 60 pass at 0, 66 at 1, 76 at 2, 53 at 3; delaying the double-speed side
+    // costs rows (55 at ds 2 / single 0).
+    let d = if ds || r.n_sprites > 0 { 0 } else { 2 };
+    r.scx_ring[(usize::from(r.scx_ring_i) + 8 - d) & 7]
 }

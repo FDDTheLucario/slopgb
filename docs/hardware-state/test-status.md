@@ -21,7 +21,7 @@
   - passing/orphaned entry = stale
   - both fail the run.
 - A whole-collection inventory guard pins every on-disk ROM claimed-or-exempt exactly once.
-- 7041 rom×model cases = 6435 pass + 606 baselined floor.
+- 7041 rom×model cases = 6455 pass + 586 baselined floor.
 
 ### Per-suite breakdown (cases/baselined)
 
@@ -33,7 +33,7 @@ below rather than editing these by hand.
 | acid | 4 | 1 |
 | age | 49 | 29 |
 | blargg | 82 | 1 |
-| gambatte | 5272 | 504 |
+| gambatte | 5272 | 484 |
 | gbmicrotest | 483 | 7 |
 | mealybug | 55 | 23 |
 | mooneye2022 | 439 | 1 |
@@ -44,7 +44,7 @@ below rather than editing these by hand.
 ### The floor census
 
 `floor-census.tsv` (this directory) is the live, per-row tally: for each of the
-606 baselined rows it records our value, the ROM's wanted value, SameBoy's
+586 baselined rows it records our value, the ROM's wanted value, SameBoy's
 value, and the provenance of that want (which silicon the expectation was
 captured on, or that it is a known-defective asset). Regenerate:
 

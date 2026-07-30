@@ -255,6 +255,10 @@ pub(super) struct Render {
     /// fine scroll moves away from it; while it holds, that form and the tile
     /// counter agree exactly.
     pub(super) hunt_fine: u8,
+    /// History of `eff.scx` sampled once per BG fetcher advance, newest at
+    /// `scx_ring_i`.
+    pub(super) scx_ring: [u8; 8],
+    pub(super) scx_ring_i: u8,
     /// WX comparator output on the previous dot: activations and
     /// reactivations fire on the rising edge only (the match holds while
     /// lx is frozen during the start stall and must not re-fire).
@@ -321,6 +325,8 @@ impl Render {
             wx_write_dot: 0,
             scx_write_dot: 0,
             hunt_fine: 0,
+            scx_ring: [0; 8],
+            scx_ring_i: 0,
             win_match_prev: false,
             prefill_pos: 0,
             wx_match_dot: 0,
@@ -384,6 +390,8 @@ impl Ppu {
         r.wx_write_dot = 0;
         r.scx_write_dot = 0;
         r.hunt_fine = self.eff.scx & 7;
+        r.scx_ring = [self.eff.scx; 8];
+        r.scx_ring_i = 0;
         r.win_match_prev = false;
         r.prefill_pos = 0;
         r.wx_match_dot = 0;
