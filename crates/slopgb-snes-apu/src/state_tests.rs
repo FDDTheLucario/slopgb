@@ -64,6 +64,6 @@ fn state_error_displays() {
     );
     assert_eq!(
         StateError::ModelMismatch.to_string(),
-        "save state is for a different system (SGB audio present/absent mismatch)"
+        "save state is for a different system (model or SNES coprocessor mismatch)"
     );
 }
