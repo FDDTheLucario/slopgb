@@ -111,10 +111,14 @@ When a **hardware** question comes up, consult in order:
   (grep it); a "byte-identical if removed" claim must be *probed* (force the value
   off, run `golden_fingerprint` — if golden changes it's LIVE, the claim is false). A
   stale/false core comment is a regression trap, not a nit.
-- Commit + push frequently. **Every commit MUST be SSH-signed** (`commit.gpgsign=true`,
-  `gpg.format=ssh`, key `~/.ssh/id_ed25519`, committer `richard@richardmoch.xyz`, verify
-  `%G?`=G; `export SSH_AUTH_SOCK=/run/user/1000/ssh-agent.socket`, commit `-S`). Signing
-  fails with `ssh_askpass` → the agent is down; ask the user to start it in-session.
+- Commit + push frequently. **Every commit MUST be SSH-signed** (`gpg.format=ssh`,
+  key = the RSA `~/.ssh/id_rsa` in `user.signingkey`, committer
+  `daxuya.zumi+code@protonmail.com`, `gpg.ssh.allowedSignersFile=~/.ssh/allowed_signers`
+  so `%G?` can verify; commit `-S` and check `%G?`=G). The default `git` here is 2.30.2,
+  which **cannot** SSH-sign — use the guix-store git ≥2.34
+  (`/gnu/store/li2qq4l9skr8vxk4hrjrknj652jbcgs1-git-minimal-2.52.0/bin/git`).
+  `export SSH_AUTH_SOCK=/tmp/agent.socket` before committing; signing that fails with
+  `ssh_askpass` means the agent is down — ask the user to start it in-session.
 - Each iteration: run `/rust-diff-review` on that iteration's diff, fix every finding
   before the next iteration.
 - **Enable the pre-commit gate once per clone: `git config core.hooksPath .githooks`.**
