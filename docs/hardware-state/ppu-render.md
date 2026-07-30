@@ -305,7 +305,41 @@ across the frame and the mapping is not injective.
 Six arms measured on the double-speed half, all capped at 20/48: lead, anchor,
 `sb_dsa8`, write-phase mask, phase-keyed lead, pre-output-gated lead. The
 rotation result stands (the two groups are real and complementary) but no state
-term yet separates them. **+20 rows, zero
+term yet separates them.
+
+#### CLOSED: the DS residual is the whole-dot contract, not a missing term
+
+Reading SameBoy's clock settles it. Its PPU is driven at **8 MHz — half-dots**,
+not dots:
+
+* `display.c` `dma_sync`: `unsigned offset = *cycles - gb->display_cycles;`
+  commented *"Time passed in 8MHz ticks"*;
+* `GB_display_run`: `gb->cycles_since_vblank_callback += cycles / 2;` — the
+  display's `cycles` unit is half of a 4 MHz dot;
+* the state machine itself runs with a divisor of two:
+  `GB_BATCHABLE_STATE_MACHINE(gb, display, cycles, 2, !force)`, so one PPU step
+  consumes two 8 MHz ticks but the entry point can be interrupted **between**
+  them.
+
+So a CPU write can land on either half of a dot, and SameBoy resolves which.
+`Ppu::render_step` advances one whole dot at a time and cannot represent that.
+
+At single speed one M-cycle is 4 dots, so consecutive ladder rounds are 4 dots
+apart and the half-dot they land on never separates them — which is why the
+single-speed side fell to a plain 2-dot lead. At double speed an M-cycle is
+2 dots: the rounds step 2 dots, all land on odd dots, and the surviving
+distinction between the two rotation groups is *which half of that dot the write
+took effect in*. That is unrepresentable on a whole-dot clock, which is exactly
+what `baselines/gambatte.txt` class A calls the "CGB double-speed sub-cycle
+phase" floor with the stated lift condition of re-clocking to a half-dot grid.
+
+**Therefore the 39 CGB double-speed rows are class A, not an undiscovered
+discriminator.** They are blocked on the half-dot PPU clock, the same
+architectural change class A has always named. Stop sweeping them; the six
+measured arms above are the proof that no whole-dot term separates the groups.
+
+The 18 remaining single-speed rows (9 CGB, 9 DMG) are *not* covered by this
+argument and remain open on their own merits. **+20 rows, zero
 regressions**; mealybug and age both clean. Note the earlier "mealybug
 m3_scx_high_5_bits regresses" reading was an artifact of scoring mealybug ROMs
 with the gambatte 15+1-frame protocol — they exit on `LD B,B`.
