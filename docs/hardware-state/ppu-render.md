@@ -339,7 +339,43 @@ architectural change class A has always named. Stop sweeping them; the six
 measured arms above are the proof that no whole-dot term separates the groups.
 
 The 18 remaining single-speed rows (9 CGB, 9 DMG) are *not* covered by this
-argument and remain open on their own merits. **+20 rows, zero
+argument and remain open on their own merits.
+
+#### The single-speed residual: 15 rows, all with a non-zero *initial* fine scroll
+
+Three of the "18" are `*_ds.gbc` (double speed, so class A above); the true
+single-speed residual is **15**. The per-dir ladder at the landed settings
+(columns are round 1..6, CGB then DMG):
+
+```
+scx_0060c0   ............     first SCX $00  -> clean
+scx_0063c0   ............     first SCX $00  -> clean
+scx_0360c0   ..XXXX.X.X..     first SCX $03
+scx_0363c0   .......X.X..     first SCX $03
+scx_0367c0   .......X.X..     first SCX $03
+scx_0761c0   ..XXXXXX....     first SCX $07
+```
+
+Every failure is in a directory whose **first** SCX value has a non-zero fine
+scroll; both fine-0 directories are fully green. The most consistent signature is
+DMG rounds 4 and 5, present in all three `$03` dirs.
+
+Measured and rejected on this ladder (baseline 56/72):
+
+| arm | result |
+|---|---|
+| anchor scaled by `hunt_fine` (`+/-1 * fine`) | 23 and 45 — far worse |
+| DMG anchor swept 5..=9 | 55, 55, **56**, 54, 46 — 7 already optimal |
+| single-speed lead swept 1..=3 | 48, **56**, 33 — 2 already optimal |
+
+The DMG round-4/5 rows are **lead-independent** — they fail identically at leads
+1, 2 and 3, while lead 3 additionally destroys every CGB column. So they are not
+a read-frame problem, and the anchor is not a function of the line's fine
+scroll. What distinguishes a non-zero initial fine scroll is that the comparator
+match lands at a different `prefill_pos`, giving a different `discard` and so a
+different `lx`-to-fetch alignment; the fixed anchor absorbs that only when the
+discard is 0. Deriving the alignment term for a non-zero discard is the open
+work here. **+20 rows, zero
 regressions**; mealybug and age both clean. Note the earlier "mealybug
 m3_scx_high_5_bits regresses" reading was an artifact of scoring mealybug ROMs
 with the gambatte 15+1-frame protocol — they exit on `LD B,B`.
