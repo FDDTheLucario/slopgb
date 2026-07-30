@@ -559,6 +559,72 @@ regressions**; mealybug and age both clean. Note the earlier "mealybug
 m3_scx_high_5_bits regresses" reading was an artifact of scoring mealybug ROMs
 with the gambatte 15+1-frame protocol — they exit on `LD B,B`.
 
+### CLOSED: the single-speed residual, 22 rows (LANDED 2026-07-30)
+
+Two independent laws, both found by tracing the tile-number read against the
+SCX write-commit dot on a fail/pass round pair. Correction to the record above:
+these ROMs write SCX on **every** line, not only 139-143, so row 0 is an
+ordinary line — the "carried value" question was a false lead.
+
+**1. The DMG pre-output map lead is 3, not 2** (`map_scx_formed`). On
+`scx_0363c0/_4 [Dmg]` the first full tile (x5-12, `fetch_x = 1`) reads its tile
+number at dot 98; the `$03 -> $63` write commits at dot 95 and its passing
+sibling `_3` commits at 94. The reference separates them, so the read frame has
+to cut between 94 and 95 — one dot earlier than the landed lead 2 gives. Gating
+the extra step to the pre-output band (`lx == 0`) and to DMG is what makes it
+safe: a uniform lead 3 scores 33/72 on the round matrix, `lx == 0` alone 57/72
+(it breaks five CGB rows), `lx == 0 && !cgb` **62/72**. CGB keeps 2 — the same
+model split its `bg_map_col` anchor already carries.
+
+**2. A prefill hunt that never matches must not advance the map column**
+(`render.rs`, at `prefill_pos == 8`). When an SCX write moves `SCX & 7` *behind*
+the comparator counter (`$03 -> $60`, `$07 -> $61`), the prefill runs out with
+no match, the counter wraps into the pop phase and the whole first tile shifts
+out. Our fetcher counted that thrown-away tile, so every column on the line was
+one too high — a whole-row tile swap (160 px) wherever the count crossed the
+map's `02/03` → `00/01` block boundary. Holding `fetch_x` back one tile at the
+exhaustion point fixes both ends of the line at once. The wrap itself is
+correct: it already yields the right discard (`8 + SCX&7` dropped pixels —
+`scx_0761c0` needs 9, `scx_0360c0` 8), only the column counter was wrong.
+
+Both laws are **single speed only**. Letting the holdback run in double speed
+scores +3/-1 on the DS ladder — it breaks `old/offset_3/_ds_1 [Cgb]`, a
+green SameBoy-PASS row — so it is gated off there; the DS ladder stays class A.
+
+Together: round matrix **72/72** (was 56/72), whole `scx_during_m3` tree
+108 → 128 of 172, **20 baseline rows recovered**, which is every targeted
+single-speed row except the two below. Zero regressions across the battery.
+
+Method note: the round matrix runs in **3.6 s**, not 90 s — a release build of a
+15+1-frame dumper plus a numpy compare against the reference PNGs. Score
+mealybug/age guards separately (`LD B,B` + 1 frame); the two
+`m3_lcdc_obj_size_change_scx` legs fail at baseline, so the guard bar is 6/8.
+
+#### The two survivors are NOT map-column rows
+
+Both were traced to a different mechanism; do not attack them from `bg_map_col`.
+
+* `scx_during_m3_spx2.gbc [Cgb]` — 8 px, x0 of rows 0-7, i.e. the on-screen
+  half of the single `X = 2` object (tile 0, row 0 = colours `0,2,2,2,2,2,2,0`,
+  OBJ palette 0). We emit OBP0 colour 2; the reference wants CGB colour
+  `(r5,g5,b5) = (1,19,16)`, which is in **neither** committed palette at frame
+  end. So the reference samples an OBJ palette entry mid-write: this is the
+  CGB palette-RAM mode-3 write-commit family, not the fetch column.
+* `scx_m3_extend_1_dmg08_cgb04c_out3.gbc [Dmg]` — `STAT & 7` reads 0, want 3;
+  its `_2` sibling (one extra `nop` before the same `ldh a,(FF41)`) wants and
+  gets 0 on both models. Mode 3 **ends at dot 256 on both models and every
+  line** (`disc_fine = 0`; the `SCX = 5` write lands post-match, so it extends
+  nothing), so the length is right and the DMG/CGB split is entirely in the
+  FF41 mode-3-exit read frame — the counter-pinned dispatch family, pinned by
+  the gbmicrotest/mooneye/wilbertpol hblank grids. Also SameBoy-FAIL (EXCEED).
+
+Measured and rejected here, on top of the earlier list: a uniform pre-match or
+post-match FF43 commit debt (plateau 4-7 hd, 6 already optimal), the same debt
+discriminated on `mode3_dot` at stage time or on whether the write moves
+`SCX & 7`, a first-fetch (`fetch_x == 0`) lead, and a separate earlier-committing
+*coarse* SCX view feeding the map address (identical to widening the ring lead,
+which is already known dead).
+
 ## Post-boot VRAM (boot logo)
 
 - Post-boot VRAM holds the boot logo *tile data* (incl. the (R) tile `$19`; `install_boot_logo_vram`).

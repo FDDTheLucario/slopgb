@@ -488,6 +488,26 @@ impl Ppu {
             // 12-dot startup anchor is held by the `pos_dot` push gate
             // in `push_allowed`, not by freezing the fetch.
             self.render.prefill_pos += 1;
+            if self.render.prefill_pos == 8 && !self.render.hunt_done && !self.ds {
+                // The prefill ran out with no comparator match: an SCX write
+                // moved `SCX & 7` behind the counter, so the whole first tile
+                // shifts out while the hunt carries on through the real pops
+                // below. That tile is thrown away like the line's first fetch,
+                // so it must not advance the map column either — hold the
+                // counter back one tile, or every column on the line reads one
+                // too high (gambatte scx_during_m3 `scx_0360c0`/`scx_0761c0`
+                // rounds 2-5, whose references keep the pre-write coarse column
+                // at pixel 0). The subtraction wraps when the tile has not
+                // pushed yet — `push_allowed` shares this dot — which is the
+                // same hold: `push_bg_row`'s increment brings the counter back
+                // to the index the dropped tile would have taken, and
+                // `bg_map_col` masks to 5 bits either way.
+                //
+                // Single speed only. In double speed the write lands on a
+                // half-dot this clock cannot place (the class-A `_ds_` ladder),
+                // and the hold moves `old/offset_3/_ds_1` off its reference.
+                self.render.fetch_x = self.render.fetch_x.wrapping_sub(1);
+            }
             if self.eff.lcdc & LCDC_OBJ_ENABLE != 0 {
                 loop {
                     let mut pick: Option<usize> = None;
