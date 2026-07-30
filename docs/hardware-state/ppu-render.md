@@ -114,6 +114,40 @@ staging layer holds no more rows either, and the "fix belongs in
 arms, every *scalar* offset in the SCX write path is now measured and at its
 best value; what remains needs a term that is not an offset.
 
+#### Exact pixel shape of a failing SS row (measured, DMG shades)
+
+`scx_0363c0/scx_during_m3_4 [Dmg]`, row 0, x0..23 as shade indices
+(0 = white .. 3 = black), against the passing `_1` for contrast:
+
+```
+_4  ours 1111 0 2333333 2 32222223233
+_4  want 1111 0 1000000 1 32222223233     <- want == 3 - ours, x5..12 only
+_1  ours 2222 3 2333333 2 32222223233     (identical to want)
+```
+
+Three things this pins down:
+
+* the differing run is **x5-12**, and x4 and x13 match, so the tile grid is
+  aligned at 5/13/21 — i.e. the line renders with **fine scroll 3 and the
+  discard is correct**; the comparator is not at fault;
+* `want == 3 - ours` across the whole run is a clean shade inversion, which on
+  DMG (global BGP) means different tile *data* — the inverse tile — so exactly
+  **one tile has the wrong column**, the first full tile of the line;
+* everything after x13 matches, so the error does not propagate.
+
+Two further arms measured against this and both are flat (76/120 unchanged):
+
+| arm | result |
+|---|---|
+| lead on the fine-scroll comparator's SCX view, 0..=4 | 76, 68, 67, 67, 66 — 0 best |
+| pre-output column offset applied only when `hunt_fine != 0`, -1/0/+1 | 76 for all three — no effect |
+
+The second is informative: adjusting the `lx == 0 \|\| !lead` branch changes
+nothing, so the failing tile is resolved through the **position** branch, not
+the pre-output one. Combined with every scalar offset in the write path already
+being optimal, the remaining work is to find what distinguishes that one tile
+inside the position branch — a state term, not an offset.
+
 ## Post-boot VRAM (boot logo)
 
 - Post-boot VRAM holds the boot logo *tile data* (incl. the (R) tile `$19`; `install_boot_logo_vram`).
