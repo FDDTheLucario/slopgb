@@ -391,7 +391,30 @@ single-speed failures are **not** map-column errors at all. Whatever they are,
 it is a different mechanism in the mode-3 pipeline, and no parameter of
 `bg_map_col` will reach them. Start the next attempt by diffing a failing row's
 frame against its reference to find *what* is wrong, before assuming it is the
-column. **+20 rows, zero
+column.
+
+**Frame diff, run — and it partly corrects the paragraph above.** Four failing
+single-speed rows, diffed against their references:
+
+| row | signature |
+|---|---|
+| `scx_0363c0/_4` [Dmg] | row 0 only, **8 px at x5-12** — one tile |
+| `scx_0363c0/_5` [Dmg] | same 8 px at x5-12, but on many rows |
+| `scx_0360c0/_2` [Cgb] | row 0 only, **160 px** — the whole row |
+| `scx_0761c0/_4` [Cgb] | 135 px at x0-134, many rows |
+
+The DMG case *is* a column error after all: on DMG the shades come from a global
+BGP, so `want AAAAAA/FFFFFF` against `got 555555/000000` (a clean `3 - shade`
+inversion) means different tile *data*, i.e. the wrong tile was fetched. The
+x5-12 span is one tile in the fine-3 shifted grid. So the earlier "not a
+map-column error at all" conclusion is too strong — it holds for the
+lead/anchor parameters, not for the column as such.
+
+But the four rows do **not** share one mechanism: two are a single tile and two
+are most or all of a row, and they split across both models and both
+row-0-only and many-rows. This residual is a *mixture*, which is why every
+single-parameter sweep flattened against it. It needs to be split by signature
+and each class attacked separately; do not look for one law. **+20 rows, zero
 regressions**; mealybug and age both clean. Note the earlier "mealybug
 m3_scx_high_5_bits regresses" reading was an artifact of scoring mealybug ROMs
 with the gambatte 15+1-frame protocol — they exit on `LD B,B`.
