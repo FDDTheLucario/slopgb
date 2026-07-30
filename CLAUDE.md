@@ -1,47 +1,45 @@
 # slopgb
 
-Cycle-accurate GB/GBC emulator. Workspace: `crates/slopgb-core` (emulator, zero deps,
-no unsafe) + `crates/slopgb` (frontend: winit/softbuffer/cpal + gilrs for game
-controllers, a BGB-style debugger UI) + `crates/slopgb-plugin-api` (guest SDK for
-Rust→wasm plugins) + `crates/slopgb-plugin-host` (the wasmi runtime — the one place
-`wasmi` is a dep, isolated so core stays zero-dep and the frontend keeps its lean
-dep set). Support crates: `slopfp` (dep-free file-picker state machine),
-`slopgb-sgb-coprocessor` (the SNES-side SGB machine the frontend drives), the
-clean-room chip cores `slopgb-snes-apu` (SPC700 + S-DSP) / `slopgb-w65c816` /
-`slopgb-snes-ppu` + their wasm wrappers
-`slopgb-{spc700,w65c816,snes-ppu,msu1}-plugin` (built by
-`cargo xtask stage-plugins`).
+Cycle-accurate GB/GBC emulator. Workspace:
 
-**Plugins have three peer capability tiers, one loader each** (see
+- `slopgb-core` — the emulator. Zero deps, no unsafe.
+- `slopgb` — frontend: winit/softbuffer/cpal + gilrs, BGB-style debugger UI.
+- `slopgb-plugin-api` / `slopgb-plugin-host` — guest SDK for Rust→wasm plugins, and
+  the wasmi runtime (the only crate that deps on `wasmi`).
+- Support: `slopfp` (dep-free file picker), `slopgb-sgb-coprocessor` (the SNES-side
+  SGB machine), clean-room chip cores `slopgb-snes-apu` (SPC700 + S-DSP) /
+  `slopgb-w65c816` / `slopgb-snes-ppu`, and their wasm wrappers
+  `slopgb-{spc700,w65c816,snes-ppu,msu1}-plugin` (`cargo xtask stage-plugins`).
+
+**Plugins have three peer capability tiers, one loader each** (detail:
 [`crates/slopgb-plugin-host/CLAUDE.md`](crates/slopgb-plugin-host/CLAUDE.md)):
-tier-1 `INTROSPECTION` (`PluginHost` per-frame pump, `--plugins`), tier-2 tool
-(`LoadedTool`, MCP), tier-3 `SUBSYSTEM` (`LoadedCoprocessor`): the SGB
-coprocessor auto-loads `spc700.wasm` + `w65c816.wasm` from the `--plugins` dir on
-SGB models; MSU-1 loads from a `--msu1` pack. **Subsystem plugins are
-first-class**: the host supports every valid subsystem type via the generic
-coprocessor ABI, loading through their own seam — the tier-1 `--plugins`
-*scanner* skips them (a loader mismatch, not an invalid plugin) even though the
-SGB coprocessor reads its plugins from that same directory.
+
+| Tier | Loader | Loaded from |
+|---|---|---|
+| 1 `INTROSPECTION` | `PluginHost` per-frame pump | `--plugins` scan |
+| 2 tool | `LoadedTool` | MCP |
+| 3 `SUBSYSTEM` | `LoadedCoprocessor` | SGB: `spc700`/`w65c816` wasm in the `--plugins` dir; MSU-1: a `--msu1` pack |
+
+**Subsystem plugins are first-class**: the host supports every valid subsystem
+type via the generic coprocessor ABI, through its own seam. The tier-1 scanner
+skipping them is a loader mismatch, not an invalid plugin — even though the SGB
+coprocessor reads from that same directory.
 
 **Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before touching core** — timing
 contract (tick-then-access M-cycles), memory map, module ownership, mooneye +
 game-boy-test-roms harness protocols.
 
-This tree integrates two lines: the **SameBoy cycle-exact timing port** (the
-accuracy-critical core) and the **BGB-style debugger frontend** (viewers,
-savestate, link, right-click menus). Core accuracy is authoritative; the UI
-hooks are read-only introspection layered on top.
-
 ## The golden-safe law (the one invariant)
 
-Every core change made *for the UI* is read-only `&self` debug introspection
-(`slopgb_core::debug` + a few `GameBoy` accessors) that never advances a cycle or
-mutates state; every mutating hook is gated off by default — watchpoints, the
-exception mask, the profiler, CDL, link, channel mute, the opt-in boot ROM, RAM
-init, and Game Genie patches (all default-empty/off, verified per gate in a unit
-test). A third class — explicit user-initiated mutations (`debug_set_reg`,
-`debug_write`, load-state) — changes state only on a direct user action, never on
-the passive frame loop. So every UI path stays **byte-identical** to the golden.
+Core accuracy is authoritative; UI hooks layer on top and every UI path stays
+**byte-identical** to the golden. Exactly three classes of core change are allowed:
+(1) read-only `&self` introspection (`slopgb_core::debug` + a few `GameBoy`
+accessors) that never advances a cycle or mutates state; (2) mutating hooks gated
+off by default — watchpoints, exception mask, profiler, CDL, link, channel mute,
+opt-in boot ROM, RAM init, Game Genie (all default-empty/off, one unit test per
+gate); (3) explicit user-initiated mutations (`debug_set_reg`, `debug_write`,
+load-state), on a direct user action only, never on the passive frame loop.
+
 Verify any core touch with `cargo test -p slopgb-core --test gbtr`
 (`golden_fingerprint`) + the mooneye matrix; the armed-hook half is pinned by
 `armed_debug_hooks_do_not_perturb_emulation` + `cdl_logging_does_not_perturb_emulation`.
@@ -49,11 +47,13 @@ Verify any core touch with `cargo test -p slopgb-core --test gbtr`
 The SameBoy port is complete: the eager cycle-exact clock is the **only** clock (the
 dual-clock fork scaffolding was deleted). The golden/baselines are the eager reference,
 **NOT** byte-identical to the pre-port core. Never `pkill` a build sharing a
-`CARGO_TARGET_DIR` (corrupts the target → false failures).
+`CARGO_TARGET_DIR` — it corrupts the target and yields false failures; give each
+parallel run its own `CARGO_TARGET_DIR=target/<name>` and let stragglers finish.
 
 ## Where the detail lives
 
-This file is a lean index; implementation-state narratives live in dedicated dirs — **read the matching file before touching that area, and write changes there, not here** (see Rules).
+A lean index. Implementation state lives in dedicated dirs — **read the matching
+file before touching that area, and write changes there, not here**.
 
 | Dir / file | Holds |
 |---|---|
@@ -83,29 +83,22 @@ When a **hardware** question comes up, consult in order:
   `crates/slopgb-core/tests/gbtr/baselines/gambatte.txt`: every baselined cluster is an
   A/B-swept trade — one-sided "fixes" regress the now-green siblings.
 - No new deps in core (std only); no unsafe anywhere (`forbid(unsafe_code)`); clippy
-  `-D warnings` clean. The external runtime dep (`wasmi`, the sole wasm engine —
-  all three plugin tiers run on the interpreter; the coprocessor path holds
-  >=66fps on the pilot post-optimization) is quarantined in
-  `crates/slopgb-plugin-host`; the guest SDK uses
-  `deny(unsafe_code)` + a scoped `allow` for two wasm linkage markers only (no
+  `-D warnings` clean. The one runtime dep (`wasmi`, the sole wasm engine for all
+  three plugin tiers) is quarantined in `crates/slopgb-plugin-host`; the guest SDK
+  uses `deny(unsafe_code)` + a scoped `allow` for two wasm linkage markers (no
   `unsafe` blocks).
 - No god files: keep every `.rs` **under 1000 lines**. Split a growing file into
   cohesive submodules (`foo.rs` + `foo/`, each a second `impl` block via
   `use super::*`; struct/fields/consts stay in the parent) and externalize inline
   tests to a `#[cfg(test)] #[path = "X_tests.rs"] mod tests;` sibling (split further
   into nested `#[path]` category modules if it too passes 1000).
-- **Document state in the dedicated dirs, not here.** When you build or change a
-  subsystem, write its state/quirks to the matching `docs/hardware-state/` (core) or
-  `docs/ui-state/` (frontend) file — one file per subsystem/area. Keep CLAUDE.md a
-  lean index: durable rules, commands, and pointers only.
 - **No jargon comments; keep comments fresh.** A comment explains what the *current*
   code does + *why* the hardware behaves so — never process narrative (no fork/session
-  codenames, A/B-sweep stories, or unverified "inert/dead/never-called" claims).
-  Narrative belongs in the commit or `docs/`; keep the pinning ROM + hardware citation
-  inline. **When you touch a comment, re-verify it**: every named symbol must exist
-  (grep it); a "byte-identical if removed" claim must be *probed* (force the value
-  off, run `golden_fingerprint` — if golden changes it's LIVE, the claim is false). A
-  stale/false core comment is a regression trap, not a nit.
+  codenames, A/B-sweep stories, unverified "inert/dead" claims). Narrative goes in the
+  commit or `docs/`; keep the pinning ROM + hardware citation inline. **When you touch a
+  comment, re-verify it**: grep every named symbol; *probe* any "byte-identical if
+  removed" claim (force the value off, run `golden_fingerprint` — if golden changes it
+  is LIVE). A stale core comment is a regression trap, not a nit.
 - Commit + push frequently. **Every commit MUST be SSH-signed** (`commit.gpgsign=true`,
   `gpg.format=ssh`, key `~/.ssh/id_ed25519`, committer `richard@richardmoch.xyz`, verify
   `%G?`=G; `export SSH_AUTH_SOCK=/run/user/1000/ssh-agent.socket`, commit `-S`). Signing
@@ -116,7 +109,6 @@ When a **hardware** question comes up, consult in order:
   It runs `cargo fmt --all --check` + `cargo clippy --workspace --all-targets -D
   warnings` (the CI checks) on the pinned toolchain (`rust-toolchain.toml`, 1.97.0) and
   blocks the commit if either fails. Bump the pin + fix new lints in the same PR.
-- Keep this file updated (and `/clean-docs`-clean) as the project evolves.
 
 ## Commands
 
@@ -147,10 +139,9 @@ clippy clean. Missing ROMs skip unless `SLOPGB_REQUIRE_ROMS=1` (run
 [`docs/ui-state/`](docs/ui-state/README.md) + [`docs/hardware-state/`](docs/hardware-state/README.md).
 
 The floor is enumerated per row in
-[`docs/hardware-state/floor-census.tsv`](docs/hardware-state/floor-census.tsv)
-— what we produce, what the ROM wants, what SameBoy produces, and how
-hardware-backed the expectation is. Regenerate it with
-`SLOPGB_GBTR_CENSUS=<tsv> cargo test -p slopgb-core --test gbtr` then
-`python3 docs/sameboy-port/tools/census.py <tsv>`. Prefer it over any prose
-row count: the narrative headers in the baseline files predate the eager flip.
-
+[`docs/hardware-state/floor-census.tsv`](docs/hardware-state/floor-census.tsv) —
+what we produce, what the ROM wants, what SameBoy produces, how hardware-backed
+the want is. Prefer it over any prose row count (baseline-file headers predate the
+eager flip). Regenerate with `SLOPGB_GBTR_CENSUS=<tsv> cargo test -p slopgb-core
+--test gbtr` then `python3 docs/sameboy-port/tools/census.py <tsv>` — that script
+leaves `bucket`/`evidence` blank, so hand-adjudicated rows must be merged back.
