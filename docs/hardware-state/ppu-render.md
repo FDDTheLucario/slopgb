@@ -219,7 +219,24 @@ let d = if ds || r.n_sprites > 0 { 0 } else { 2 };
 r.scx_ring[(usize::from(r.scx_ring_i) + 8 - d) & 7]
 ```
 
-with `scx_ring` sampled once per BG fetcher advance. **+20 rows, zero
+with `scx_ring` sampled once per BG fetcher advance.
+
+#### The double-speed residual does NOT respond to these parameters
+
+After the landing the residual is **57 rows, 39 of them CGB double-speed** (9
+CGB single-speed, 9 DMG single-speed). Three sweeps, each scored on the DS half
+of the round matrix (48 legs, baseline 20 pass) with the single-speed side
+pinned at its landed values:
+
+| sweep | result |
+|---|---|
+| DS lead 0..=4 | 20, 18, 15, 3, 0 — **0 is best**, any lead is worse |
+| CGB DS anchor 2..=9 | 14, 17, 17, 20, 20, 20, 18, 10 — flat plateau at 5-7 |
+| DS lead keyed on `sb_dsa8 & 4` (hi, lo) | best (0, 2) = 21 vs 20 baseline — noise |
+
+So the double-speed rows are not a read-frame, anchor, or DS-alignment-phase
+problem in the shape that solved single speed. Something structurally different
+governs them; do not spend a fourth sweep on this parameter family. **+20 rows, zero
 regressions**; mealybug and age both clean. Note the earlier "mealybug
 m3_scx_high_5_bits regresses" reading was an artifact of scoring mealybug ROMs
 with the gambatte 15+1-frame protocol — they exit on `LD B,B`.
