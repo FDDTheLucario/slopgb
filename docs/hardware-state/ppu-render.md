@@ -75,6 +75,31 @@ Remaining (not yet pixel-perfect) legs are mostly:
 - DMG-family only; suppressed while halted / during OAM DMA.
 - Window + patterns are CRC-calibrated against blargg `oam_bug/` — all green **except** 7-timing_effect, a defective single build that self-destructs on real hardware too (see the baseline note in `tests/gbtr/blargg.rs`).
 
+#### There is ALREADY an FF43 write-commit stage — the lead stacks on it
+
+`Ppu::stage_write_dots` (`regs/stage.rs`) defers every FF43 write by a
+per-register dot offset before it reaches `eff.scx`, and it already carries a
+**double-speed-specific** term:
+
+* DS: `2 + (scan_pos().1 & 1)` — 2 or 3 dots on scan-position parity;
+* SS: the shared `else` arm.
+
+So `map_scx_formed`'s 2-dot lead is applied *on top of* an existing staged
+commit, not to the raw CPU write. That is very likely why every double-speed
+lead sweep came out flat: the DS side already has its own parity-dependent
+offset, so adding a second uniform one cannot separate the rotation groups — it
+only shifts a term that was already doing the job.
+
+Resume here by reading `stage_write_dots` and deciding whether the fix belongs
+**there** (already per-register, parity-aware, and split by model and speed)
+rather than in `bg_map_col`'s lead.
+
+Two trace corrections that came with this, both of which invalidate assumptions
+made earlier in this file: these ROMs write FF43 on essentially every line, so a
+trace must filter on `old != new` rather than on write events; and the commits
+that actually change `eff.scx` landed **outside mode 3** for the ROM sampled, so
+the directory name does not describe the line-start value.
+
 ## Post-boot VRAM (boot logo)
 
 - Post-boot VRAM holds the boot logo *tile data* (incl. the (R) tile `$19`; `install_boot_logo_vram`).
