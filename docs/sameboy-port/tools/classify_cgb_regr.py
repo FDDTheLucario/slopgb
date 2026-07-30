@@ -35,7 +35,17 @@ SBT=_sbt()
 if not os.path.exists(SBT):
     sys.exit(f"sameboy_tester not found at {SBT} — run build_sameboy_tracers.sh or set SBT=. "
              "Classifying with a missing tester is a vacuous result, not a bar.")
-ROOT='/home/soulcatcher/personal_repos/slopgb/test-roms/game-boy-test-roms-v7.0'
+_REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))))
+ROOT = os.environ.get(
+    'SLOPGB_GBTR_ROOT',
+    os.path.join(_REPO, 'test-roms', 'game-boy-test-roms-v7.0'),
+)
+if not os.path.isdir(ROOT):
+    sys.exit(f"ROM collection not found at {ROOT} — set SLOPGB_GBTR_ROOT. "
+             "Classifying zero rows is a vacuous result, not a bar.")
+# Scratch dir for the per-ROM copy + the tester's BMP; the writes below assume it.
+os.makedirs('/tmp/s7', exist_ok=True)
 rows=[l.strip() for l in open(sys.argv[1]) if l.strip()]
 bug=[];floor=[];unk=[]
 for rel in rows:

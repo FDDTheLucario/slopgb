@@ -33,9 +33,11 @@ SBT = os.environ.get(
     _CACHE_SBT if os.path.exists(_CACHE_SBT)
     else '/tmp/sbbuild/SameBoy-1.0.2/build/bin/tester/sameboy_tester',
 )
+_REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))))
 ROOT = os.environ.get(
     'SLOPGB_GBTR_ROOT',
-    '/home/soulcatcher/personal_repos/slopgb/.claude/worktrees/phase-b-s7/test-roms/game-boy-test-roms-v7.0',
+    os.path.join(_REPO, 'test-roms', 'game-boy-test-roms-v7.0'),
 )
 W, H = 160, 144
 
