@@ -100,6 +100,20 @@ trace must filter on `old != new` rather than on write events; and the commits
 that actually change `eff.scx` landed **outside mode 3** for the ROM sampled, so
 the directory name does not describe the line-start value.
 
+**Swept, and the staging is already optimal.** Overriding the FF43 stage on the
+round matrix (120 legs; landed values are DS 2 / SS 3, scoring 76):
+
+| (DS, SS) | (2,3) | (1,3) | (3,3) | (0,3) | (2,2) | (2,4) |
+|---|---|---|---|---|---|---|
+| total | **76** | 71 | 73 | 57 | 68 | 53 |
+
+Both axes are at their optimum already: the SS score is flat at 56/72 for any DS
+value and collapses when SS moves off 3, and the DS score peaks at 2. So the
+staging layer holds no more rows either, and the "fix belongs in
+`stage_write_dots`" lead above is closed. Between this and the six lead/anchor
+arms, every *scalar* offset in the SCX write path is now measured and at its
+best value; what remains needs a term that is not an offset.
+
 ## Post-boot VRAM (boot logo)
 
 - Post-boot VRAM holds the boot logo *tile data* (incl. the (R) tile `$19`; `install_boot_logo_vram`).
