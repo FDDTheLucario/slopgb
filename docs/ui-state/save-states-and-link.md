@@ -3,8 +3,10 @@
 ## State submenu (`SubKind::State`)
 
 - **Quick Save / Quick Load** — snapshot/restore the whole machine in memory.
-  `GameBoy: Clone` (a transitive derive across the core, runtime-inert / golden-safe
-  — gbtr fingerprint byte-identical) feeds `Session.quick_state: Option<Box<GameBoy>>`
+  `GameBoy: Clone` (a manual `impl` — `Box<dyn AudioCoprocessor>` isn't `Clone`, so
+  the installed coprocessor deep-clones via `clone_box`; derives everywhere else in
+  the core, runtime-inert / golden-safe — gbtr fingerprint byte-identical) feeds
+  `Session.quick_state: Option<Box<GameBoy>>`
   (`quick_save`/`quick_load`). Survives reset (rewind past it); auto-cleared by a ROM
   change (fresh `Session`). **Click-only** — bgb's F2/F4/F3 accelerator labels are
   dropped (slopgb binds game-window F2/F3/F4 to the debugger/VRAM/iomap windows).
@@ -13,8 +15,9 @@
 
 ## On-disk save states (golden-safe)
 
-A manual std-only binary serializer (`slopgb_core::state` Writer/Reader, no
-serde/no unsafe):
+A manual std-only binary serializer (`slopgb_core::{Writer, Reader}`, re-exported
+from the shared `slopgb-snes-apu` `state` module so core and the SNES-side crates
+share one format; no serde/no unsafe):
 
 - `GameBoy::save_state(&self) → Vec<u8>` — magic+version+ROM-fingerprint header then
   every peripheral's `write_state`.
@@ -29,10 +32,14 @@ serde/no unsafe):
   last, after the Game Boy side has already parsed cleanly).
 
 The header carries an is-SGB-model `bool` right after the ROM-fingerprint, plus a
-has-coprocessor-tail `bool` written last of all, after the CPU + bus (state v10):
-the same ROM legally runs as SGB (with the ~64 KB SPC700+S-DSP tail, appended only
-when a coprocessor is actually installed) or DMG/CGB (without). On load a mismatch
-vs the target machine's model is a
+has-coprocessor-tail `bool` written last of all, after the CPU + bus (state v10 —
+any other version is `StateError::BadVersion`, there is no migration): the same ROM
+legally runs as SGB (with the SNES tail — the SPC700 and 65C816 plugins' opaque
+blocks, the optional SNES-PPU block, and the mediator's own packet/pacing state —
+appended only when a coprocessor is actually installed) or DMG/CGB (without). An
+SGB machine with an empty coprocessor slot carries no tail either. The MSU-1 plugin
+is **not** in the tail, so a load leaves a streaming track where it was. On load a
+mismatch vs the target machine's model is a
 clear `StateError::ModelMismatch` — never a silent tail-drop (SGB→DMG) nor an
 opaque `Truncated` (DMG→SGB).
 
@@ -42,6 +49,19 @@ ROM bytes + the debugger fields (watch/prof/exc mask) are **not** serialized.
 whole-machine round-trip oracle (save→fresh→load→run-both byte-identical across
 frame/cycles/regs/memory/audio) + gbtr golden byte-identical.
 
+## Recovery save state (crash sidecar)
+
+Options → Misc → "Recovery save state" (see [`options.md`](options.md)) turns the
+same on-disk format into a crash sidecar next to the ROM, `<rom>.recovery`:
+`arm_recovery` (every load path — CLI startup + drag-drop) points at the sidecar and
+restores it over the freshly-loaded machine when the file is already there (a
+leftover file means the last session of this ROM crashed), `write_recovery_state`
+rewrites it every `RECOVERY_INTERVAL` (10 s) from the frame loop, and
+`clear_recovery_state` deletes it on a clean quit — so its mere presence is the
+crash signal. With the setting off `arm_recovery` only records the path and
+`write_recovery_state` does nothing; the clean-quit delete is *not* gated, so
+turning the option off and quitting still clears a sidecar left by an earlier run.
+
 ## Rewind ring + reverse execution
 
 `Session::rewind` is a bounded ring of `(cycle, save_state())` blobs
@@ -49,7 +69,7 @@ frame/cycles/regs/memory/audio) + gbtr golden byte-identical.
 `REWIND_MAX_BYTES`; cleared on reset / ROM change). It fills while playing forward
 when System → "Rewind enabled" is on *or* the debugger is open. It backs both the
 player rewind (held Backspace) and the debugger's reverse controls, via the
-replay engine in `session/reverse.rs` — the cycle key lets it pick the nearest
+replay engine in `reverse.rs` — the cycle key lets it pick the nearest
 checkpoint before a target, then `step()` forward to land the exact instruction
 (`reverse_step`), the previous frame (`reverse_frame`, the frame-exact player
 rewind), or the previous breakpoint (`reverse_to_breakpoint`). Full model +
@@ -114,7 +134,8 @@ black-holed peer. Protocol:
   stalled (stale replies dropped).
 - `drain_pending` dispatches buffered bytes once the port is ready (slave arms /
   master stalls).
-- `run_one_frame` runs the frame in 4096-cycle slices pumping between each — the
+- `run_one_frame` (in `app_pacing.rs`, which owns `LINK_CHUNK_CYCLES`) runs the
+  frame in 4096-cycle slices pumping between each — the
   master stall breaks a slice early (`pump_blocking` waits ≤16 ms `poll_blocking`/
   `recv_timeout`), the slave runs full slices; no peer ⇒ a plain `run_frame`
   (golden-safe), debugger ⇒ a single breakpoint-aware frame; a dead peer times out →

@@ -5,10 +5,14 @@
 Interactive (tab/checkbox/radio clicks + hover details) and **resizes with the
 window**: each tab's grid renders at the largest integer scale that fits
 (`vram::fit_scale`), keeping a 1px tile border at any scale; the grid + frame are
-**bounded to the actual map extent** (`windows::vram_geom`, so the BG map doesn't
-bleed grid lines into empty space — QA finding). Hit-tests (`tile/oam/bgmap_details`)
-take `scale`; `vram::oam_cell` = `10*scale`. Tile-number detail lines show decimal
-+ hex, bgb-style (`windows::dec_hex`: `Tile No. 10 ($0A)`, `383 ($17F)` — widens
+**bounded to the actual map extent** (`vram_render::vram_geom`, so the BG map doesn't
+bleed grid lines into empty space — QA finding). Hit-tests (`vram_render`'s
+`tile_details`/`oam_details`/`bgmap_details_two`) take `scale`; `vram::oam_cell` =
+`10*scale`. The layout/render/hit-test helpers named below all live in the private
+`windows/vram_render.rs`; the reusable primitives (`fit_scale`, `oam_cell*`,
+`flip_tile`, `render_tiles`, the palette/viewport helpers) are `pub` in
+`windows/vram.rs`. Tile-number detail lines show decimal
++ hex, bgb-style (`vram_render::dec_hex`: `Tile No. 10 ($0A)`, `383 ($17F)` — widens
 past two hex digits for the 0-383 range); addresses/attributes stay hex, small
 enums (palette 0-7, flips) stay decimal. Options → Debug **"8-bit tile hex"**
 (`Settings.tile_hex_8bit` → `VramState.tile_hex_8bit` via `set_tile_hex_8bit`,
@@ -24,7 +28,7 @@ default.
 - CGB OBJ/BG palette (attr bits 0-2) vs DMG (OBP bit 4 / BGP); X/Y flip
   (`vram::flip_tile`).
 - **Tiles: both VRAM banks side by side on CGB** — bank 0 (left) + bank 1 (right),
-  each a 16×24 grid fitted to half the content width via `windows::tiles_two_col`
+  each a 16×24 grid fitted to half the content width via `vram_render::tiles_two_col`
   (shared by render + hover so they can't drift); each grid gets its own overlay/frame,
   and the hover maps to the correct bank + prints the real `bank:addr`
   (`tile_details_two`). DMG stays single-grid (bank 0). (The old bank-0/1 checkbox is
@@ -40,11 +44,11 @@ default.
   `tile_guess` and shared by the colouring + the detail line).
 - **BG map: BG + window tilemaps side by side** (like the CGB two-bank Tiles view) —
   BG tilemap left (LCDC bit 3), window tilemap right (bit 6), each fitted to half the
-  content via `windows::bgmap_two_col` (shared by render + hover). The left grid gets
+  content via `vram_render::bgmap_two_col` (shared by render + hover). The left grid gets
   the **SCX/SCY viewport box** (wraps the 256×256 map, `vram::bgmap_viewport_segments`,
   ≤4 segments), the right the **WX/WY window box** (`vram::window_region_rect`), both
   gated by `scxy`. Hover maps to the grid under the cursor and prints `BG`/`Window` +
-  the map address (`windows::bgmap_details_two`). Bases from `windows::bgmap_bases`
+  the map address (`vram_render::bgmap_details_two`). Bases from `vram_render::bgmap_bases`
   (`Auto` = each grid's LCDC bit; the `Map` radio forces both to 9800/9C00). The old
   BG⇄window toggle checkbox is **gone** (both always show).
 

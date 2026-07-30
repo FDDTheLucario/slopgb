@@ -79,7 +79,8 @@ the crate's tests before the rewrite:
 - `obj_line` fetches + spreads each 8-pixel chunk's two VRAM words once.
 
 The host/plugin boundary is batched (one wasm crossing per run, not per
-byte): `HW_LINE` takes a `[y, count]` span, `HW_PORTS` applies a
+byte): `HW_LINE` takes `[y_lo, y_hi]` for one line or `[y_lo, y_hi, count]`
+for a span, `HW_PORTS` applies a
 `(port, val)` run in order, the flush batches consecutive captured
 pure-PPU writes (host-consumed registers are order barriers; INIDISP
 keeps its `snes_live` bookkeeping), and GP-DMA bulk-reads contiguous
@@ -92,17 +93,19 @@ All host-side plumbing is exercised by the pilot (Space Invaders ARCADE):
 the takeover game runs and its `$21xx` traffic routes through `apply_mmio`.
 Renderer correctness is pinned by the crate's unit tests (27, including
 the three fuzz oracles) + `slopgb-plugin-host`'s `snes_ppu_roundtrip`.
-Probe fps (ARCADE takeover, every 500-frame window): wasmi >= 66
-(gameplay 92-106), wasmtime several hundred.
+Probe fps (ARCADE takeover, every 500-frame window) on `wasmi`, the only
+wasm engine in the tree: >= 66 (gameplay 92-106).
 
 ## Fast-forward throughput
 
 `AudioCoprocessor::set_render_enabled` (default on) gates only the
 `PPU_HW_LINE` scanline rasterization in `SgbCoprocessor::flush`; the
 `$21xx`/DMA register capture and both chips' `run_until` stay unconditional,
-so chip timing is untouched. `crates/slopgb/src/app_pacing.rs`'s `run_turbo`
-(fast-forward) disables it; `run_audio_paced`/`run_timer_paced` always
-restore it for normal-speed play. Headless bench (`slopgb-sgb-coprocessor`'s
+so chip timing is untouched. The frontend reaches it through
+`GameBoy::set_coprocessor_render` (a no-op with an empty slot):
+`crates/slopgb/src/app_pacing.rs`'s `run_turbo`
+(fast-forward) passes `false`; `run_audio_paced`/`run_timer_paced` always
+pass `true` for normal-speed play. Headless bench (`slopgb-sgb-coprocessor`'s
 `examples/throughput.rs`, driving the coprocessor directly — no SGB ROM ships
 in this repo): median fps, 600 frames/run x3, one representative run on a
 shared/sandboxed build machine (run-to-run variance was +-20% on repeats —

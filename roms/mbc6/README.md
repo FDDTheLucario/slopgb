@@ -13,7 +13,8 @@ Fibonacci registers = pass, `B=$42` with the failing test number in `C`).
 
 ## Rebuild
 
-RGBDS (tested with v1.0.1):
+RGBDS ≥ 0.5 (the `DEF x EQU` form). Verified byte-identical to the committed
+`mbc6test.gb` with rgbasm 0.7.0, 0.8.0 and 0.9.3:
 
 ```sh
 rgbasm -o mbc6test.o mbc6test.asm
@@ -21,7 +22,7 @@ rgblink -o mbc6test.gb -p 0xFF mbc6test.o
 rgbfix -v -p 0xFF -m 0x20 -r 0x03 -t "MBC6TEST" mbc6test.gb
 ```
 
-wla-dx (tested with v10.8a):
+wla-dx (verified byte-identical with v10.8a):
 
 ```sh
 wla-gb -o mbc6test-wla.o mbc6test-wla.s

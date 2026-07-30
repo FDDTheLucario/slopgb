@@ -14,9 +14,12 @@ test ROMs are fetched separately by `test-roms/download.sh`.
 ### SameBoy
 
 The emulator core's cycle-exact timing (the sub-dot PPU / SM83 model) is a Rust
-port of SameBoy's Core implementation (`Core/display.c`, `Core/sm83_cpu.c`).
-SameBoy's Core is distributed under the Expat License (the MIT license), which
-requires its copyright and permission notice to be reproduced:
+port of SameBoy's Core implementation (`Core/display.c`, `Core/sm83_cpu.c`), as is
+the SGB HLE layer (`Core/sgb.c`); behaviour in `Core/memory.c`, `Core/timing.c`,
+`Core/mbc.c` and `Core/apu.c` is ported or cited the same way, file by file, in
+the core's comments. SameBoy's Core is distributed under the Expat License (the
+MIT license), which requires its copyright and permission notice to be
+reproduced:
 
 > Copyright (c) 2015-2026 Lior Halphon
 >
@@ -41,6 +44,29 @@ requires its copyright and permission notice to be reproduced:
 Upstream: <https://github.com/LIJI32/SameBoy> — Expat/MIT. (SameBoy's `iOS/`
 and `HexFiend/` directories carry additional terms; slopgb ports only Core
 files, which are under the Expat grant above.)
+
+---
+
+## Linked crates.io dependencies (fetched by cargo, not vendored here)
+
+Nothing below is in this repository — cargo resolves and downloads it, so these
+crates' own notices ship with the crates. They do link into a built `slopgb`
+binary, so a *binary* distribution has to carry their notices. Licences as
+declared in each crate's manifest, at the versions in `Cargo.lock`:
+
+| Crate | Version | Declared license | Used by |
+|---|---|---|---|
+| `winit` | 0.30.13 | Apache-2.0 | `crates/slopgb` (windowing) |
+| `softbuffer` | 0.4.8 | MIT OR Apache-2.0 | `crates/slopgb` (software framebuffer) |
+| `cpal` | 0.16.0 | Apache-2.0 | `crates/slopgb` (audio out) |
+| `gilrs` | 0.11.2 | Apache-2.0/MIT | `crates/slopgb` (game controllers) |
+| `wasmi` | 1.1.0 | MIT/Apache-2.0 | `crates/slopgb-plugin-host` (the sole wasm engine) |
+| `wat` | 1.253.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | `crates/slopgb-plugin-host` dev-dependency (tests only) |
+
+These are the only external dependencies any workspace crate declares;
+`slopgb-core` is std-only. Their transitive dependencies are pinned in
+`Cargo.lock` and are **not** enumerated here — generate that tree from the lock
+file when preparing a binary distribution.
 
 ---
 

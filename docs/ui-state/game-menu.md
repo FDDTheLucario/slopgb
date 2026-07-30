@@ -33,7 +33,7 @@ Leaf rows run via `run_action`; rows carry a `MenuEffect` (Run/Submenu/None).
 - **Pause** — check-marked while paused (`paused` threaded through
   `entries()`/`MainMenu::open`/`MenuPopup::open`).
 - **Enable sound** — runtime `App.muted` gate, checked while audible.
-- **Reset**.
+- **Reset gameboy** (`*`).
 - **Debugger** — also opens on **Esc** from the game/viewer windows when the
   Options "pressing Esc shows debugger" toggle is on (`Settings.esc_shows_debugger`,
   default on). Esc never quits.
@@ -44,8 +44,10 @@ Leaf rows run via `run_action`; rows carry a `MenuEffect` (Run/Submenu/None).
 **Plugin/mediator menu rows** splice in right after "Save screenshot" — one row
 per `menu` record the live engaged SGB coprocessor's manifest declares (e.g.
 "Export SPC", declared by the native `SgbCoprocessor` mediator, not by
-`spc700.wasm` — see
-[`plugin-api.md`](plugin-api.md#menu-records-and-who-declares-them) and
+`spc700.wasm`, because the from-start snapshot the export needs
+(`song_start_spc`) is the mediator's — see
+[`plugin-api.md`](plugin-api.md#coprocessor-plugins-tier-3) (§ "`menu` records and
+who declares them") and
 [`../hardware-state/sgb-audio.md`](../hardware-state/sgb-audio.md)). `App`
 snapshots the table (`App.plugin_menu_rows: Vec<PluginMenuRow>`) when the popup
 opens (`build_plugin_menu_rows`, parsing `GameBoy::coprocessor_manifest` via
@@ -77,6 +79,8 @@ Each child is one `SubMenu` type with a `SubChoice` variant per kind.
 | **State** | see [save-states-and-link.md](save-states-and-link.md) |
 | **Recent ROMs** | lists `App.recent: Vec<PathBuf>` (most-recent-first, deduped, capped at 10 by `push_recent_into`); each row reloads that ROM (`SubChoice::LoadRecent`) |
 | **Link** | see [save-states-and-link.md](save-states-and-link.md) |
+| **MCP** | Start server... (port modal → `PathPurpose::McpStart`) / Stop server; see [mcp-server.md](mcp-server.md) |
+| **Plugins** | one non-clickable status row per loaded plugin (checked while enabled, greyed while disabled) or `(no plugins)`, then live "Reload plugins" (`SubChoice::ReloadPlugins` → re-scan the plugins dir); see [plugin-api.md](plugin-api.md#managing-plugins-from-the-ui) |
 
 - **Cart info** parses the header straight from `Session.rom_bytes`
   (`cart_info_lines`/`cart_type_name`).

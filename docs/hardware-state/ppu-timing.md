@@ -19,7 +19,7 @@
 
 ## STAT IRQs — per-source events with predicates
 
-STAT IRQs are **per-source events with predicates** (`Ppu::stat_events_tick`, a function-by-function port of gambatte `mstat_irq.h` `MStatIrqEvent` + `lyc_irq.cpp` `LycIrq` — the truth table is the doc comment there).
+STAT IRQs are **per-source events with predicates** (`Ppu::stat_update_tick` in `ppu/stat_irq/reclock.rs`, a function-by-function port of gambatte `mstat_irq.h` `MStatIrqEvent` + `lyc_irq.cpp` `LycIrq` — the truth table is the doc comment there).
 
 - There is **NO wired-OR STAT line on the IRQ side.**
 
@@ -56,7 +56,7 @@ STAT IRQs are **per-source events with predicates** (`Ppu::stat_events_tick`, a 
 
 | Model | FF41-write behavior |
 |---|---|
-| DMG | the STAT-write glitch branch table (`stat_write_trigger_dmg`: hblank/vblank levels + held compare, old-enable suppression) **+** a dots-0/4 pulse re-decide (`m2_pulse_fires` retro; gbmicrotest `oam_int_if_level_d` is AGS-verified and contradicts the DMG-verified gambatte cell — baselined) |
+| DMG | the STAT-write glitch branch table (`stat_write_trigger_dmg`: hblank/vblank levels + held compare, old-enable suppression) **+** a dots-0/4 pulse re-decide (`m2_pulse_fires` retro; gbmicrotest `oam_int_if_level_d` is AGS-verified and reads the opposite way from the DMG-verified gambatte cell; it is no longer baselined — both sides pass) |
 | CGB | `stat_write_trigger_cgb` (newly-enabled bits only: m0 enables fire in hblank but defer to a pending in-line m0 event; m1 in vblank except mode-1's last M-cycle; m2 only in the last M-cycle before a pulse; lyc anywhere the held compare matches) **+** a dot-0 retro |
 
 ### FF45 writes — DMG vs CGB
@@ -90,25 +90,25 @@ Both port `lycRegChangeTriggersStatIrq` (held-compare target tables, m0/m1 block
 - FF45 writes follow gambatte `lycRegChange` (4-dot event protection, boundary writes compare against the upcoming line, +1 M-cycle IF at single speed).
 - line-0 dots 0-3 read **mode 1** with the vblank level extended.
 - VRAM read block starts **dot 83**.
-- CGB OAM writes blocked at line-start dots 0-3 and through 80-83.
+- CGB OAM writes blocked at line-start dots 0-3 of lines whose predecessor was visible; the DMG dots-80-83 writable gap does not exist.
 - LY=153 loads **2 dots early at SS** / wraps at **dot 6 in ds**.
 - FF41 m2-enable writes fire **only in the last M-cycle before a visible line**.
 
 ### Rows flipped
 
 - 16 wilbertpol -C rows + age `ly`/`ly-ncm` + same-suite `hdma_mode0` + 74 gambatte rows.
-- 36 gambatte sub-cycle/lcd-offset/ds rows are **documented swaps** (see the 2026-06 block in `baselines/gambatte.txt`).
+- 16 gambatte sub-cycle/lcd-offset/ds rows are **documented swaps** (the "CGB-C LY/STAT timeline" block in `baselines/gambatte.txt`).
 
 ### Parked
 
 - **Parked:** wilbertpol `ly_lyc_0-C` / `ly_new_frame-C` — cross-suite LY=153-window contradiction with age (see the wilbertpol baseline note).
-- **Parked:** `hblank_ly_scx_timing-C` — needs the CGB mode-0 flip +1 dot in `render.rs`.
+- **Parked:** `hblank_ly_scx_timing-C` — needs the CGB mode-0 flip +1 dot in `render/mode0.rs`.
 
 ## Mode-0 end-of-line event grid
 
 (The formerly **PARKED** flip/IF split, re-derived jointly.)
 
-- The visible flip **AND** the mode-0 IRQ source rise together, via a stall/refill projection over committed renderer state that can **un-flip** when a late write arms a new stall (`m0_flip_events` / `m0_unflip` in `render.rs`).
+- The visible flip **AND** the mode-0 IRQ source rise together, via a stall/refill projection over committed renderer state that can **un-flip** when a late write arms a new stall (`m0_flip_events` / `m0_unflip` in `render/mode0.rs`).
 - `pipe end = 256 + SCX%8 + penalties` stays the HDMA/palette anchor.
 
 ### Flip / m0-IRQ-rise offset from pipe end

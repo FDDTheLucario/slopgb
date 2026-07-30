@@ -1,16 +1,19 @@
 # slopgb
 
-Cycle-accurate GB/GBC emulator. Workspace: `crates/slopgb-core` (emulator, zero deps,
-no unsafe) + `crates/slopgb` (frontend: winit/softbuffer/cpal + gilrs for game
+Cycle-accurate GB/GBC emulator. Workspace: `crates/slopgb-core` (emulator, no
+external deps, no unsafe — its one in-tree path dep, `slopgb-snes-apu`, is imported
+for the shared save-state `Reader`/`Writer` only, no chip code)
++ `crates/slopgb` (frontend: winit/softbuffer/cpal + gilrs for game
 controllers, a BGB-style debugger UI) + `crates/slopgb-plugin-api` (guest SDK for
 Rust→wasm plugins) + `crates/slopgb-plugin-host` (the wasmi runtime — the one place
 `wasmi` is a dep, isolated so core stays zero-dep and the frontend keeps its lean
 dep set). Support crates: `slopfp` (dep-free file-picker state machine),
-`slopgb-sgb-coprocessor` (the SNES-side SGB machine the frontend drives), the
+`slopgb-sgb-coprocessor` (the SNES-side SGB machine the frontend drives),
+`slopgb-sf2` (dep-free SF2/BRR codec for the N-SPC sample bank), the
 clean-room chip cores `slopgb-snes-apu` (SPC700 + S-DSP) / `slopgb-w65c816` /
 `slopgb-snes-ppu` + their wasm wrappers
-`slopgb-{spc700,w65c816,snes-ppu,msu1}-plugin` (built by
-`cargo xtask stage-plugins`).
+`slopgb-{spc700,w65c816,snes-ppu,msu1,sf2}-plugin` (built by
+`cargo xtask stage-plugins <dir>`).
 
 **Plugins have three peer capability tiers, one loader each** (see
 [`crates/slopgb-plugin-host/CLAUDE.md`](crates/slopgb-plugin-host/CLAUDE.md)):
@@ -20,7 +23,7 @@ coprocessor auto-loads `spc700.wasm` + `w65c816.wasm` (and optionally
 `snes-ppu.wasm` + `msu1.wasm`)
 from the `--plugins` dir on SGB models; `--msu1` only points the MSU-1 plugin at its
 `.pcm` pack. **Subsystem plugins (SPC700 / 65C816
-/ MSU-1 / SF2 — `slopgb-*-plugin`, built by `cargo xtask stage-plugins`) are
+/ MSU-1 / SF2 — `slopgb-*-plugin`, built by `cargo xtask stage-plugins <dir>`) are
 first-class**: the host supports every valid subsystem type via the generic
 coprocessor ABI. `sf2.wasm` (crate `slopgb-sf2-plugin`) is driven directly by the
 FRONTEND on a `--sf2` cache miss, not auto-loaded by the SGB coprocessor. They
@@ -66,7 +69,8 @@ This file is a lean index; implementation-state narratives live in dedicated dir
 | [`docs/ui-state/`](docs/ui-state/README.md) | **frontend / bgb-UI** per-area state (menus, debugger, options, viewers, save-states + link, startup + boot, layout) |
 | [`docs/bgb-reference/`](docs/bgb-reference/README.md) | real bgb screenshots + capture rig — **never invent bgb's UI, capture it** |
 | [`docs/msu1-plugin-plan.md`](docs/msu1-plugin-plan.md) | MSU-1 streaming-audio coprocessor plugin (`msu1.wasm` from the plugins dir), driven the real-hardware way — SNES `$2000-$2007` via the game's DATA_SND-uploaded resident 65C816 handler (the SGB bridge); `--msu1` selects the `.pcm` pack dir (defaults to the ROM dir), requires an SGB model + the resident-handler/polled-mailbox pattern |
-| `crates/slopgb-core/tests/gbtr/baselines/gambatte.txt` header | floor-class index (A–H + lift conditions) — read before touching baselined behavior |
+| [`docs/game-accuracy-targets.md`](docs/game-accuracy-targets.md) | per-game accuracy targets + ROM checksums/hashes for the commercial titles used as real-world checks |
+| `crates/slopgb-core/tests/gbtr/baselines/gambatte.txt` header | floor-class index (A–C, E–H + lift conditions; class D was lifted) — read before touching baselined behavior |
 
 When a **hardware** question comes up, consult in order:
 
@@ -122,9 +126,11 @@ When a **hardware** question comes up, consult in order:
 - Each iteration: run `/rust-diff-review` on that iteration's diff, fix every finding
   before the next iteration.
 - **Enable the pre-commit gate once per clone: `git config core.hooksPath .githooks`.**
-  It runs `cargo fmt --all --check` + `cargo clippy --workspace --all-targets -D
-  warnings` (the CI checks) on the pinned toolchain (`rust-toolchain.toml`, 1.97.0) and
-  blocks the commit if either fails. Bump the pin + fix new lints in the same PR.
+  It runs `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -D
+  warnings`, then `cargo clippy -p slopgb-plugin-api --target wasm32-unknown-unknown
+  -D warnings` (the guest SDK ships to wasm, which the host-target run doesn't
+  cross-compile) on the pinned toolchain (`rust-toolchain.toml`, 1.97.0), and blocks
+  the commit if any fails. Bump the pin + fix new lints in the same PR.
 - Keep this file updated (and `/clean-docs`-clean) as the project evolves.
 
 ## Commands

@@ -14,6 +14,9 @@ this reference stays clean.
 ## Target & build
 - CPU: SPC700. Assembler `wla-spc700`, linker `wlalink` (WLA-DX, both on `PATH`);
   `.spc700` syntax. `make` produces `driver.bin`.
+- The built binary runs inside the **`spc700.wasm` plugin** the SGB coprocessor
+  loads (slopgb's core emulates no SNES chip); the host only uploads it to ARAM
+  and moves comm-port bytes. See `../README.md` "Where it runs".
 - Output loads at ARAM **`$0400`** and is entered there (PC = `$0400`) with the
   SPC700 already IPL-booted. Keep the engine + its variables clear of the host
   data regions below.
@@ -271,8 +274,9 @@ at **`(500 * tempo) / 256`** ticks/sec, and a duration-D note lasts exactly D
 ticks. `$E7` sets `tempo` (default `TEMPO_DEFAULT`).
 
 ## Tunables (top of `engine.asm`)
-`REF_NOTE`, `OCT_REF`, `PITCH_OUT_SHIFT` (pitch); `TIMER_DIV`, `TEMPO_DEFAULT`
-(tempo); `MVOL_DEFAULT`, `CHVOL_DEFAULT` (volume).
+`REF_NOTE`, `OCT_REF`, `PITCH_OUT_SHIFT`, `DEFAULT_BASE` (pitch); `TIMER_DIV`,
+`TEMPO_DEFAULT` (tempo); `SGB_MASTER`, `CHVOL_DEFAULT`, `FADE_IN_RATE`,
+`FADE_OUT_RATE` (volume).
 
 ## S-DSP register interface (public hardware, nocash *fullsnes*)
 DSP regs via `$F2` (address) / `$F3` (data). Per voice X (base `X<<4`): `x0/x1`
@@ -294,8 +298,8 @@ found live. Kept here so the record survives without cluttering the reference.
 - **SBN / APU block header is `[len, dest]`**, not `[dest, len]` — song data never
   landed until this was fixed (upload path).
 - **Pitch is per-instrument, not a fixed global base.** A note maps to
-  `note_ratio * instrument_base16`; octave is a bit shift against an octave-6
-  reference; the ratio table is scaled to `$085F`, not `$1000`.
+  `note_ratio * instrument_base16`; octave is a bit shift against the `OCT_REF`
+  reference octave; the ratio table is scaled to `$085F`, not `$1000`.
 - **The instrument base is BIG-ENDIAN** (`byte4<<8 | byte5`). Little-endian gave
   nonsense bases (`$0004`, `$F01D`) — this was the "pitch all out of whack".
 - **Tempo base is 500 Hz** (Timer0 target 16); rate `(500*tempo)/256`.
@@ -303,7 +307,9 @@ found live. Kept here so the record survives without cluttering the reference.
   earlier mislabeled as pitch tables.
 - **VCMD operands**: `$F7`/`$F5` take **3** (not 2); the full `$E0`–`$FA` table
   above must be honored or the track parse desyncs.
-- **Fade is signalled on port3 (`$F7`)**, and a `$80`+ score is a **stop**.
+- **Fade is signalled on port0**: a `$80`+ score code is the **stop**. (Port3 is
+  the SFX-attributes byte and is never a fade signal — see "Host comm-port
+  protocol".)
 - **Song list has loop/end control words** (high byte 0), not a flat list.
 - **Commands take zero ticks**; **duration/velocity bytes are optional**.
 

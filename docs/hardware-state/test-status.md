@@ -44,11 +44,14 @@ verified; re-count it before citing.
 | smallsuites | 30 | 0 |
 | wilbertpol | 561 | 37 |
 
-- Floor classes A–H with lift conditions are indexed in `tests/gbtr/baselines/gambatte.txt`.
+- Floor classes A–C and E–H with lift conditions are indexed in
+  `tests/gbtr/baselines/gambatte.txt`; class D (dot-serial OAM scan) was lifted.
 
 ### Runtime
 
-- Full gbtr run ≈230 s debug / ≈350 s release.
+- Full gbtr run ≈230 s debug / ≈350 s release. Heavily machine-dependent — a slow
+  box runs several times longer; treat these as a fast-workstation figure, not a
+  budget.
 - Dominated by gambatte_matrix's 5272 frame-rendered cases (dev/test profiles already build core at opt-level 2).
 
 ## Unit tests & ROM availability

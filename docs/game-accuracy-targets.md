@@ -207,7 +207,13 @@ category below has a concrete behavioral pass signal a human can watch for.
   documented quirk before relying on it.
 
 - **Special-hardware titles** — verify the **named peripheral actually
-  responds**:
+  responds**. Note the cartridge layer's current reach: it accepts ROM-only,
+  MBC1 (+MBC1M), MBC2, MBC3/MBC30 (+RTC), MBC5 (+rumble bit) and MBC6, and
+  **rejects every other mapper at load** with `CartridgeError::UnsupportedMapper`
+  (`crates/slopgb-core/src/cartridge/header.rs`). So the MBC7 tilt carts and the
+  Game Boy Camera do not load at all yet — those rows are targets to build toward,
+  not checks that can be run today. The MBC5 rumble bit is latched in cartridge
+  state but no frontend output is wired to it.
   - *RTC* (Pokemon Crystal/Gold, Harvest Moon GBC, Robopon, JP MBC30 Crystal):
     the in-game clock **advances in real time** and persists across resets;
     time-of-day and daily/seasonal events fire.

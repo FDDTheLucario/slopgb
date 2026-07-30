@@ -21,7 +21,11 @@
 - Gated on Sgb/Sgb2 *and* the header SGB flag (`Cartridge::supports_sgb`: $146=$03 ∧ $14B=$33).
 - Joypad-ID increments on JOYP bit-5 rising edges.
 - The glitched MLT_REQ mode 2 is pinned by SameSuite sgb/ (both green).
-- Only MLT_REQ executes — other commands are SNES-side only.
+- Only MLT_REQ acts on the joypad. Every other completed command is teed out
+  twice and has no effect observable from the GB bus: to the core PPU's SGB
+  presentation layer (`Joypad::take_sgb_command` → `Ppu::sgb_command`, see
+  [sgb.md](sgb.md)) and, as the raw 16-byte packet, to the SNES-side
+  coprocessor's ICD2 mailbox (`Joypad::take_sgb_packet`).
 
 ## MBC30
 
@@ -82,7 +86,11 @@
 
 ## Core public API
 
-- Curated facade: `GameBoy`, `Registers`, `Button`, `CartridgeError`, `Model` + screen/clock consts.
+- Curated facade: `GameBoy`, `Registers`, `Button`, `CartridgeError`, `Model` + screen/clock consts, the `debug` and `sgb` modules, and the SGB value types (`SgbBorder`, `SgbSound`, `SgbFlags`).
+- The save-state plumbing is re-exported from the one in-tree path dep:
+  `Reader`/`Writer`/`StateError` come from `slopgb-snes-apu` so core and the
+  SNES-side crates serialize through one format. Core takes nothing else from it
+  — it emulates no SNES chip.
 - Keep internals `pub(crate)`; new integration-test escape hatches go behind `#[doc(hidden)]`.
 
 ## Audio frontend

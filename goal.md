@@ -1,3 +1,17 @@
+> **SUPERSEDED — this goal landed; do not execute the plan below.** The SameBoy
+> cycle-exact eager clock is now the **only** clock: the dual-clock scaffolding is
+> deleted, and the flags this document turns on (`leading_edge_reads`,
+> `tier2_reclock`) no longer exist anywhere in the tree. So are the files it says
+> to read first — `measurements/` is gone and `docs/sameboy-port/` holds only
+> `tools/`. The god-file splits it lists as pending are done (`ppu/mod.rs` 932
+> lines, `interconnect.rs` 534). The test figures below are from that era; the
+> current baseline is mooneye 439/439 rom×model, gbtr 215/215 suite tests green
+> with 654 baselined floor cases, core lib 890 unit tests, frontend bins 676.
+> Current state lives in `CLAUDE.md` §State, [`docs/hardware-state/`](docs/hardware-state/README.md)
+> and [`docs/ui-state/`](docs/ui-state/README.md); the timing contract is
+> [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Everything after this block is
+> kept only as the historical record of how the port was landed.
+
 GOAL: **LAND THE C3 FLIP — flip the SameBoy cycle-exact timing on by default.**
 The entire flag-gated approach is measured-COMPLETE (render 100/100; dispatch +
 S6 build-measured atomic). The flip is gated on exactly ONE open architectural

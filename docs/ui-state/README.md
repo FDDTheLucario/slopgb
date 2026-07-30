@@ -7,16 +7,16 @@ for the UI. **Read the relevant file before touching that UI area.**
 | File | Covers |
 |---|---|
 | [game-menu.md](game-menu.md) | Game-window right-click menu + submenus (Window size, Sound channel, Other, State, Recent ROMs), info boxes, screenshot |
-| [debugger.md](debugger.md) | Debugger window: focus keys, context menus, modal prompts, menu bar, Search, Evaluate, profiler, symbols, memory viewer, disassembler, UX |
-| [options.md](options.md) | Options dialog: 9 tabs, live settings, Exceptions mask, Joypad rebind/SOCD, live input timing, bootrom UI, pure-bgb mode, Theme tab |
+| [debugger.md](debugger.md) | Debugger window: focus keys, context menus, modal prompts, menu bar, Search, Evaluate, profiler, reverse execution, symbols, CDL, freeze, memory viewer, disassembler, UX |
+| [options.md](options.md) | Options dialog: 10 tabs (bgb's 8 + slopgb Theme/Plugins), live settings, Exceptions mask, Joypad rebind/SOCD, live input timing, bootrom UI, pure-bgb mode |
 | [viewers.md](viewers.md) | VRAM viewer (CGB-attr-aware, resize, Palettes), I/O map, `&self` introspection accessors |
 | [save-states-and-link.md](save-states-and-link.md) | Quick + on-disk save states, serial link cable (TCP, byte-level lockstep) |
-| [mcp-server.md](mcp-server.md) | Opt-in MCP server (`--mcp-port`): 14 debug tools over hand-rolled HTTP/JSON-RPC for an LLM agent to drive the live debugger — introspection, memory/state dump, and a parallel what-if fork (`simulate`) |
-| [plugin-api.md](plugin-api.md) | Opt-in wasm plugins (`--plugins`): Rust-authored, runtime-loaded, read-only per-frame introspection via the wasmi-hosted `slopgb-plugin-api`/`-host` crates — plus the UI to manage them (Options → Plugins tab, right-click Plugins submenu, per-plugin enable + reload) |
+| [mcp-server.md](mcp-server.md) | Opt-in MCP server (`--mcp-port`): 15 built-in debug tools (plus any a tier-2 tool plugin adds) over hand-rolled HTTP/JSON-RPC for an LLM agent to drive the live debugger — introspection, memory/state dump, and a parallel what-if fork (`simulate`) |
+| [plugin-api.md](plugin-api.md) | Rust→wasm plugins across all three capability tiers: tier-1 `INTROSPECTION` (`--plugins`, read-only per-frame), tier-2 tool (MCP), tier-3 `SUBSYSTEM` (the SGB coprocessor's `spc700`/`w65c816`/`snes-ppu`/`msu1`, `sf2`) — the wasmi-hosted `slopgb-plugin-api`/`-host` crates, plus the UI to manage them (Options → Plugins tab, right-click Plugins submenu, per-plugin enable + reload) |
 | [startup-and-boot.md](startup-and-boot.md) | No-ROM blank-LCD startup, opt-in boot-ROM execution |
 | [pacing-and-audio.md](pacing-and-audio.md) | The three pacers (turbo/audio/timer), the audio-queue rate servo + bands, the slewed `next_frame` grid, the stall watchdog, FPS-counter semantics |
 | [frontend-layout.md](frontend-layout.md) | Module split satisfying the <1000-line cap; key types/entry points |
-| [theming.md](theming.md) | Light/Dark/Classic themes, the 16-role `Theme` palette, the Light↔Dark hotkey, persistence, and the custom-theme (`[theme.NAME]`) config API |
+| [theming.md](theming.md) | Light/Dark/Classic themes, the 14-role `Theme` palette (+ its `rounded` border-style flag), the Light↔Dark hotkey, persistence, and the custom-theme (`[theme.NAME]`) config API |
 
 ## The golden-safe law (the one invariant)
 

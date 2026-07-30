@@ -5,8 +5,15 @@ primitives live in [`crate::pacing`](../../crates/slopgb/src/pacing.rs) (the aud
 pipe, the servo/band math, the stall watchdog, the pacing decision); the pacing
 *loops* on `App` live in [`crate::app_pacing`](../../crates/slopgb/src/app_pacing.rs);
 the wake in `about_to_wait` lives in
-[`crate::app_handler`](../../crates/slopgb/src/app_handler.rs). Frontend-only — no
-core cycle is advanced or state mutated by any of it, so it's trivially golden-safe.
+[`crate::app_handler`](../../crates/slopgb/src/app_handler.rs). The pacing decision
+itself is frontend-only: it advances no cycle and mutates no core state. The core
+writes the pacing *loops* make per wake are all default-off gated hooks — the Game
+Genie patch set (`set_gg_patches`), the freeze/GameShark `debug_write` pokes in
+`run_one_frame`, and the fast-forward render skip (`set_coprocessor_render(false)` in
+`run_turbo`, re-enabled by both normal-speed pacers; see
+[`../hardware-state/sgb-snes-ppu.md`](../hardware-state/sgb-snes-ppu.md)). Empty
+lists and an empty coprocessor slot make each a no-op, so the golden path stays
+byte-identical.
 
 ## The three pacers
 
@@ -18,6 +25,11 @@ audio-vs-timer):
 | **turbo** (`run_turbo`) | fast-forward held | free-run inside a 10 ms wall-clock budget, `ControlFlow::Poll` |
 | **audio** (`run_audio_paced`) | live pipe + sound un-muted | slewed `next_frame` grid, `WaitUntil(next_frame)` |
 | **timer** (`run_timer_paced`) | muted or no pipe | fixed `next_frame` grid at the framerate limit, `WaitUntil(next_frame)` |
+
+Turbo's per-wake frame count is additionally capped by Options → Misc →
+fast-forward speed (`turbo_max_frames`); the two `WaitUntil` rows hold with the
+default "reduce CPU usage" *on* — off, every wake busy-polls instead
+(`should_poll(turbo, reduce_cpu)`).
 
 Both non-turbo pacers now march the **same `next_frame` wall-clock grid**: one wake
 schedules one frame → one present. That is the fix for the audio-paced judder (see

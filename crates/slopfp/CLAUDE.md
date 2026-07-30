@@ -1,9 +1,11 @@
 # slopfp
 
 Std-only, framework-agnostic file-picker state machine + view-model (no
-rendering, no deps). `#![forbid(unsafe_code)]`. Cargo metadata is concrete
-(non-inherited) so the crate directory is liftable into any project by
-copy-paste — keep it that way.
+rendering, no deps). Keeps its own inline `#![forbid(unsafe_code)]` (lib.rs) on
+top of the workspace lint, so it stays safe standalone. Package metadata is
+concrete (non-inherited) so the crate directory is liftable into any project by
+copy-paste — keep it that way; `[lints] workspace = true` is the only inherited
+line, and the inline `forbid` makes it droppable on a lift.
 
 ## Shape
 

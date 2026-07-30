@@ -1,13 +1,15 @@
 # Theming: Light/Dark/Classic + a custom-theme API
 
-Contemporary UI look, replacing the bare "Windows 3" bgb chrome as the default —
-**colour only**: no rect/control was moved, resized, or added. `Theme` (`ui/theme.rs`)
-carries only `u32` XRGB8888 fields, so it structurally cannot encode geometry; every
-tool window already took `&Theme`, so swapping the active
-palette recolors the whole UI with zero call-site churn beyond the handful of
-role-repoints below.
+Contemporary UI look, replacing the bare "Windows 3" bgb chrome as the default: no
+rect/control was moved, resized, or added. `Theme` (`ui/theme.rs`) carries `u32`
+XRGB8888 colour fields plus **one non-colour field**, `rounded: bool` — the chrome
+border style, read only by `Theme::frame` (`round_outline` when set, `outline_rect`
+otherwise), so the widest change a theme can make to a frame is chamfering its four
+corner pixels. It still structurally cannot move or resize anything. Every tool window
+already took `&Theme`, so swapping the active palette recolors the whole UI with zero
+call-site churn beyond the handful of role-repoints below.
 
-## Role set (13, additive over the original 7)
+## Role set (14 colour roles, additive over the original 7)
 
 `bg`/`text`/`current`/`breakpoint`/`hilight`/`freeze`/`border` are the original bgb
 roles, unchanged. New: `panel` (recessed field bg), `button_face` (unpressed button
@@ -26,11 +28,9 @@ input-field fill → `panel`; `windows/options.rs` `fg()` disabled colour →
 `disabled_text`, button-row fill → `button_face`) is pixel-identical for `BGB`.
 `Theme::CLASSIC == Theme::BGB` (offered as a selectable choice, not just the default).
 
-A prior revision also carried `bevel_light`/`bevel_dark` (raised-bevel edges) and a
-`to_pairs`/`role`/`ROLE_NAMES` export API; both were dead (no draw call read the bevel
-roles, no export UI called `to_pairs`) and were deleted (YAGNI) — `from_pairs` (the
-import half, live via `settings_file::load_custom_themes`) stands alone on `role_mut`.
-A theme file setting `bevel_light`/`bevel_dark` now honestly gets `UnknownRole`.
+There are no bevel roles and no export direction: `role_mut` (the one role-name table)
+serves `from_pairs` alone, live via `settings_file::load_custom_themes`. A theme file
+naming `bevel_light`/`bevel_dark` gets `UnknownRole`.
 
 ## Palettes (hex, XRGB8888)
 
@@ -49,19 +49,20 @@ A theme file setting `bevel_light`/`bevel_dark` now honestly gets `UnknownRole`.
 | disabled_text | `BDC1C6` | `5F6368` |
 | scrollbar | `C4C7C5` | `80868B` |
 
-One accent family (blue) shared by `current`/`accent`/`selection_bg` in both; flat
-borders (no raised/sunken 3-D bevel effect — drawing one wasn't needed to hit
-"contemporary" and would only ever be a pixel recolor if added later, never a
-geometry change).
+One accent family (blue) shared by `current`/`accent`/`selection_bg` in both. Both set
+`rounded: true` (chamfered frame corners); `BGB`/`CLASSIC` keep `false`, the hard
+rectangle. No raised/sunken 3-D bevel effect in any theme.
 
 ## `ThemeChoice` + resolution
 
 `enum ThemeChoice { Light, Dark, Classic, Custom(String) }`, `Default = Light` (a
 fresh install now looks modern, not bgb-grey). `Settings.theme: ThemeChoice`
 (`windows/options.rs`) is the persisted choice; `ThemeChoice::resolve(&CustomThemes)
--> Theme` is called once per `redraw()` in `main.rs` (`self.settings.theme.resolve
-(&self.custom_themes)`), replacing the old hardcoded `ui::Theme::BGB` — the **only**
-line in the whole render path that changed to make every window themeable. No new
+-> Theme` is called once per redraw in `app_draw.rs`
+(`self.settings.theme.resolve(&self.custom_themes)`, and once more in `app_menu.rs`
+when the right-click popup opens as its own window), replacing the old hardcoded
+`ui::Theme::BGB` — the **only** line in the whole render path that changed to make
+every window themeable. No new
 `&Theme` plumbing anywhere: the same parameter that always flowed through now just
 carries a different value.
 
@@ -128,7 +129,9 @@ case needed.
 `ui/theme_tests.rs::theme_swap_only_recolors_a_whole_window_never_moves_it`: renders
 the real Options dialog (tabs/checkboxes/radios/dropdown/slider/buttons — nearly every
 shared widget) three times, once per LIGHT/DARK/CLASSIC, into a `Canvas::new_recording`
-that logs every `put`/`fill_rect` call's rect; asserts the three recorded geometry
-lists are identical and the three pixel buffers differ. This is the test that would
-fail first if any repoint above had accidentally also touched a position/size argument
-instead of only a colour argument.
+that logs every `put`/`fill_rect` call's rect. It asserts LIGHT and DARK — which share
+`rounded: true` — record the **identical** geometry list, that LIGHT vs CLASSIC
+**differ** (the corner-omitted contemporary border is the one intended geometry
+difference, `rounded` flipping `Theme::frame`), and that all three pixel buffers
+differ. This is the test that would fail first if any repoint above had accidentally
+also touched a position/size argument instead of only a colour argument.

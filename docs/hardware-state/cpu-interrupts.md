@@ -19,8 +19,8 @@ Per-source sync-ahead point:
 
 In our grid, the following are swallowed when their bit was just acked — and only the acked source is swallowed; others just get flagged:
 
-- Timer/serial sets produced by the next machine tick (next two on CGB/AGB).
-- STAT/VBlank rises in the first 2 dots of the next tick (both families, both speeds — in ds that's the whole tick, which is what flips the `*_late_retrigger_ds_2` rows).
+- Timer/serial sets produced by the next machine tick (next two on CGB/AGB) — `ack_squash_ticks`.
+- STAT/VBlank rises inside the LCD squash window `ack_squash_dots`: **6** dots at single speed, **10** on DMG line 153 (its dot-4 LYC=153 emission fires the ISR — and this ack — one M-cycle earlier than the dot-6 read frame the 6 was tuned to), **3** in double speed and **4** there when HBlank is the enabled STAT source (`Ppu::stat_src_hblank`, the `late_m0irq_retrigger` family). gambatte's own `lcd_.update(cc + 2)` window is 2 dots; ours is widened by the read-debt because our read frame enters the STAT/OAM ISR that much earlier, which is what keeps the `*_late_retrigger_2` rows consumed while their `_1` siblings deliver.
 
 Pins the gambatte `*_late_retrigger_2/3` model splits: tima tc00 dmg08_outE4 / cgb04c_outE0, serial trigger_int8, irq_precedence late_m0irq.
 
@@ -38,37 +38,39 @@ Halt wake uses a separate, earlier intra-cycle sample (`Bus::pending_halt_wake`,
 - The STAT bit joins the mask per event (the PPU's dot-0 pulse commits, via `take_stat_halt_late`), **not** wholesale — masking other PPU bits breaks mooneye `intr_2_*` / `halt_ime1_timing2-GS`.
 - The CGB/AGB start-of-cycle staleness for first-half PPU commits stays unmodelled (gambatte `halt/*_cgb04c` split rows) pending a per-model widening of the mask.
 
-**Parked: masking the whole CGB M-cycle's commits (halt-wake-phase fix)** — AXIS-1 probed + DISPROVEN 2026-06 (workflow wcwot9hvs, instrumented vs gambatte). It is a DOUBLE-COUNT of gambatte's `cc+=4`: our natural CGB wake already lands at gambatte's post-+4 phase (the seam $8000 read is dot-for-dot identical). Don't pursue a halt-wake-phase fix.
+**Parked: masking the whole CGB M-cycle's commits (halt-wake-phase fix)** — probed and DISPROVEN: it is a DOUBLE-COUNT of gambatte's `cc+=4`, because our natural CGB wake already lands at gambatte's post-+4 phase (the seam $8000 read is dot-for-dot identical). Don't pursue a halt-wake-phase fix.
 
-The 13 "halt" rows actually fail READ-side (CGB getLyReg LY+1-near-boundary + getStat line-start mode-2/3), entangled with the A/B-swept CGB-C LY/STAT timeline + the parked mode-3 +1-dot — see the class-H index note in `tests/gbtr/baselines/gambatte.txt`.
+The 6 baselined CGB `halt/` rows (`m1int_ly_2`, `lycirq_m2stat_2`, `m0int`/`m0irq_m0stat_scx{2,3}_ds_2`) actually fail READ-side (CGB getLyReg LY+1-near-boundary + getStat line-start mode-2/3), entangled with the A/B-swept CGB-C LY/STAT timeline + the parked mode-3 +1-dot — see the class-H index note in `tests/gbtr/baselines/gambatte.txt`.
 
-### Eager sub-M-cycle wake clock (`eager_value`, CGB single-speed) — #11dl
+### Sub-M-cycle wake peek (`Interconnect::halt_wake_mid_impl`, CGB single-speed)
 
-The eager halt idle loop samples the wake once per **whole** M-cycle, and the
-PPU commits the mode-0 STAT IF at the END of the M-cycle containing the flip, so
-two lines whose `projected_flip_dot` differ by <4 dots (an `SCX&7` delta) wake at
-the same boundary — collapsing the wake **instant** tier2's 4k+2 sample
-resolves. The 5 CGB halt bar rows (`late_m0int_halt_m0stat_scx{2,3}_3a`,
-`late_m0irq_halt_dec_scx{2,3}_2`, `late_m0irq_halt_m0stat_scx3_3b`) turn on that
-instant. Recovered (+14/−0, all SameBoy-PASS) by two coupled **pure value
-peeks** — no machine advance, timer-safe:
+The halt idle loop samples the wake once per **whole** M-cycle, and the PPU
+commits the mode-0 STAT IF at the END of the M-cycle containing the flip, so two
+lines whose `projected_flip_dot` differ by <4 dots (an `SCX&7` delta) commit —
+and wake — at the same boundary, collapsing the sub-M-cycle wake instant the
+hardware separates. The 5 CGB halt bar rows
+(`late_m0int_halt_m0stat_scx{2,3}_3a`, `late_m0irq_halt_dec_scx{2,3}_2`,
+`late_m0irq_halt_m0stat_scx3_3b`) turn on that instant. It is restored by two
+coupled **pure value peeks** — no machine advance, timer-safe:
 
 - **`Ppu::m0_stat_flip_reached`** (`interconnect/speed.rs` wake): OR `IF_STAT` in
   when `self.dot ∈ [flip, flip+4)` (flip = `flip_dot`/`projected_flip_dot`), so
-  the wake lands at the flip's M-cycle boundary (`pfd256`→256, `pfd257`→260) —
-  tier2's sub-M-cycle instant. The `+4` upper bound stops it re-firing on the
-  stale flip after the IME=1 halt rewind.
+  the wake lands at the flip's M-cycle boundary rather than at the M-cycle-end IF
+  commit — a flip projected at dot 256 wakes at 256, one at 257 wakes at 260, so
+  the resumed stream and its FF41 read separate by the `SCX&7` delta. The `+4`
+  upper bound stops it re-firing on the stale flip after the IME=1 halt rewind.
 - **`Ppu::halt_refetch_read_override`** (applied at `regs.rs` FF41): the armed
   `halt_refetch` flag makes the IME=1 dispatch's first FF41 read return mode 2
   once `read_pos_hd >= LINE_DOTS*2` (SameBoy's cc+4 re-fetch in the next line's
   OAM); one-shot, cleared at the boundary read / next halt entry.
 
-Coupled: the sub-M-cycle wake **separates the read position** (want-0 `_a` wakes
-one M-cycle early → `read_pos_hd` 904 < 912 → stays mode 0), so the override has
-zero collateral — where the entry peek alone (#11cw/#11cy) or the read shift
-alone (#11cz, −9) each dropped a SameBoy-pass row. This
-is distinct from the DMG deferred sub-M-cycle sampler (`halt_wake_mid_impl`, the
-tier2 `!is_cgb` mid-block) and from the parked CGB whole-cycle mask above.
+The two are **coupled**: the wake peek separates the read position (want-0 `_a`
+wakes one M-cycle early → `read_pos_hd` 904 < 912 → stays mode 0), which is what
+leaves the override collateral-free — either peek on its own drops a
+SameBoy-pass row. `halt_wake_mid_impl` carries only this CGB single-speed arm
+(`is_cgb() && !double_speed`); the DMG half-M-cycle halt sampler SameBoy runs is
+**not modelled** — `Bus::pending_halt_wake_mid`'s default is the plain
+end-sampled view. Distinct from the parked CGB whole-cycle mask above.
 
 ## HALT/STOP clock gating
 

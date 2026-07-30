@@ -51,14 +51,16 @@ The tool set is **pluggable**: a wasm tool plugin (see
 via `--plugins` registers new MCP tools, which `tools/list` advertises and
 `tools/call` dispatches alongside these built-ins. A plugin tool whose name
 matches a built-in wins (so the reference plugins in
-`crates/slopgb/reference-tools/` — the nine built-ins re-implemented on the
-plugin ABI, parity-pinned byte-identical — can stand in for them).
+`crates/slopgb/reference-tools/` — nine of the fifteen built-ins re-implemented on
+the plugin ABI, parity-pinned byte-identical — can stand in for them).
 
 The introspection built-ins stay native; the plugins call back into the same
 `mcp::tools` formatters through a borrowed `plugin_host::FrontendToolContext`, so
-a ported tool's output (text or PNG) is identical to the built-in's. The
-file/fork tools (`memdump`, `savestate`, `simulate`, `sim-result`) are built-in
-only — they have no reference-plugin counterparts. The socket
+a ported tool's output (text or PNG) is identical to the built-in's. Six built-ins
+have no reference-plugin counterpart: the four file/fork tools (`memdump`,
+`savestate`, `simulate`, `sim-result`) plus `coprocessor` and `dump-spc`, which
+read the SGB coprocessor slot (`GameBoy::sgb_coprocessor_status` / `export_spc`) —
+a surface the tool-plugin imports don't expose. The socket
 thread advertises plugin tools from a metadata snapshot taken at server start;
 `tools/call` for a plugin name is forwarded to the UI thread like a built-in and
 run against the live machine. Loading plugins is opt-in, so the default path is

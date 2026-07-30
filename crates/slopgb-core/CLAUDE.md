@@ -1,6 +1,8 @@
 # slopgb-core
 
-The cycle-accurate GB/GBC emulator. Zero external deps (std only),
+The cycle-accurate GB/GBC emulator. Zero external (crates.io) deps — std only,
+plus one in-tree path dep, `slopgb-snes-apu`, re-exported for the shared
+save-state `Reader`/`Writer` and `StateError`.
 `forbid(unsafe_code)`. The root `CLAUDE.md` and `docs/ARCHITECTURE.md` are
 authoritative — **read `docs/ARCHITECTURE.md` before touching timing.**
 
@@ -14,8 +16,15 @@ authoritative — **read `docs/ARCHITECTURE.md` before touching timing.**
 - **Baselines are A/B-swept trades:** read the floor-class index header in
   `tests/gbtr/baselines/gambatte.txt` before touching baselined behavior — a
   one-sided "fix" regresses the now-green siblings.
+- **Core emulates no SNES chip.** No HLE SNES audio/CPU/PPU lives here — every
+  SNES-side capability arrives through the `sgb::AudioCoprocessor` slot, which
+  starts `None` on every model and only `set_audio_coprocessor` (SGB/SGB2 only)
+  fills. SGB border, palettes and the ATTR/PAL packet handling (`ppu/sgb/`) ARE
+  core PPU HLE and stay. Save states carry a SNES tail only when a coprocessor is
+  installed (`STATE_VERSION` 10; older states are rejected, there is no migration).
 - **No new deps, ever.** No god files (<1000 lines): split into `foo.rs` + `foo/`
-  (second `impl` via `use super::*`), externalize tests to `#[path] *_tests.rs`.
+  (second `impl` via `use super::*`), externalize tests to `#[path] *_tests.rs`;
+  `tests/source_size.rs` (`LIMIT = 1000`) enforces it.
 - **No jargon comments:** no fork/session codenames or A/B-sweep stories; keep the
   pinning ROM + hardware citation inline; re-verify a comment when you touch it.
 

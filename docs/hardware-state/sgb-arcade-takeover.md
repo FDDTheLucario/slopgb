@@ -26,7 +26,7 @@ the pilot's uploaded code, quoted from the observed DATA_SND payloads.
 | Packet buffer | `$7E:0600-$060F` | dispatcher reads the DATA_TRN dest from `$0601-$0603` (`LDA $0601 / STA $B0` …) |
 | Last command number | `$7E:02C2` | dispatcher `LDA $02C2 / CMP #$10 / BNE` |
 | DATA_TRN staging pointer | `$7E:0284/85` (bank `$7E` implied) | dispatcher copy loop `LDA $0284… / STA $98 / LDA #$7E / STA $9A / … LDA [$98],Y / STA [$B0],Y` — it copies the staged payload to the packet's dest itself |
-| Main service entries | `$BBED` / `$BBF0` (per-revision pair, chosen on `$00:FFDB`; slopgb keeps `$FFDB = 0` → `$BBED`) | bootstrap `JSR` loop |
+| Main service entries | `$BBED` / `$BBF0` (per-revision pair, chosen on `$00:FFDB`; slopgb keeps `$FFDB = 0`, and both thunks `JMP` the same resident body, so the choice is cosmetic) | bootstrap `JSR` loop |
 | Aux service entries | `$C58D` / `$C590` | dispatcher `JSR` on the DATA_TRN path |
 | Hook slot | `$00:0800`, called by the main service | the dispatcher's `PLA PLA / RTS` stack fixup requires exactly two JSR levels (mainloop → service → hook) |
 | Native-mode handover | JUMP targets run in native mode | dispatcher `REP #$30` + 16-bit `LDX #$0800` copy loop — impossible in emulation mode |
@@ -34,13 +34,34 @@ the pilot's uploaded code, quoted from the observed DATA_SND payloads.
 
 slopgb's resident firmware (all original, opcodes from the WDC datasheet):
 `JMP` thunks at the four entries (they sit 3 bytes apart — no room for
-bodies), a guarded hook-caller body at `$BE00` (`LDA $0800 / BEQ +3 /
-JSR $0800 / RTS`), an RTS aux body at `$BE20`, and a `CLC / XCE / JML`
-JUMP trampoline at `$BF00`. The host pump maintains the WRAM variables on
-every teed packet and stages DATA_TRN payloads at `$7E:D000` behind the
-`$0284` pointer (any address works — the game only follows the pointer),
-while still copying to the packet's dest directly for programs that expect
-the BIOS to have done it.
+bodies), the main-service body at `BIOS_MAIN_BODY` (`$BE80`) — publish the
+host's delivery mailbox to the BIOS-runtime variables, then the guarded
+`JSR $0800` hook call — the aux body at `BIOS_AUX_BODY` (`$BE60`, a
+wait-for-vblank, below), the NMI handler at `$BE30`, an `RTI_STUB` at `$BE50`
+that the BRK/COP/IRQ vectors point at (a stray break resumes instead of
+cascading through zeroed memory), and a `CLC / XCE / JML` JUMP trampoline at
+`$BF00`. The whole `$8000-$FFFF` program area underneath is an `RTS` sled, so
+a program `JSR`-ing any service entry slopgb has not pinned returns
+harmlessly.
+
+The host does **not** poke the WRAM variables itself. It writes each teed
+packet into a delivery mailbox (`BIOS_DELIVERY`, `$7E:4F00`: the 16 packet
+bytes, the command byte, the staging pointer, a pending flag) and the
+resident main-service body publishes them **inside** one guest-side service
+call. That ordering is load-bearing: the real BIOS is single-threaded, so a
+hook that reads its dest before its vblank wait and its staging pointer
+after it must never see a half-delivered update. Publishing asynchronously
+from the host instead lands in exactly that window and re-routes the payload
+over the pilot's program area. DATA_TRN payloads are staged behind the `$0284`
+pointer in **two ping-pong buffers** (`BIOS_TRN_STAGING` = `$7E:5000` /
+`$7E:6000`):
+the pilot's phase streams cover all of `$7F` and the upper half of `$7E`, so
+staging must sit in the stream-free mid-bank window, and the dispatcher
+caches the pointer at copy start while its 4 KB copy spans several flushes —
+transfer N+1 legitimately arrives mid-copy, so it must land in the *other*
+buffer or the in-flight copy reads torn data. The host still copies to the
+packet's own dest directly as well, for programs that expect the BIOS to
+have done it.
 
 ## Where the pilot stands (2026-07-17)
 
@@ -59,8 +80,11 @@ disassembly of the teed bytes):
   the **aux service** (`$C590`), writes pad latch `$00`, then copies the
   4 KB staging to `[$B0]`. The aux service is therefore a **wait-for-
   vblank** (the wait holds the `$01` latch across a vblank so the GB
-  observes both handshake values); an NMI-enabling variant was probed and
-  refuted — see `BIOS_AUX_BODY` in the coprocessor.
+  observes both handshake values). It polls RDNMI bit 7 (`$4210`, which sets
+  regardless of NMITIMEN — fullsnes 4210h) and must **not** touch NMITIMEN:
+  the pilot's JUMP points the `$00BB` NMI vector at its own bootstrap entry,
+  so a delivered NMI would re-enter the main loop recursively and the stack
+  would eat the direct page (`BIOS_AUX_BODY` in the coprocessor).
 - **JUMP carries the NMI vector**: the pilot's first JUMP is
   `PC=$001800 / NMI=$001800`; once streaming is up it sends a second JUMP
   `PC=$7F:0103 / NMI=$7F:0100` (Pan Docs 12h bytes 4-6 → the `$00BB-BD`
@@ -127,7 +151,6 @@ drives the later dispatches. The 15-block initial stream is table
   completed DATA_TRN (`SgbCommandSource::data_trn_seq`) and the
   coprocessor re-hashes only on a counter edge (~380 fps probe-side;
   sources without the counter keep the per-poll check).
-
 - **`*_TRN` capture clock**: captures fire one GB-frame after the command
   on a machine-clocked window (core `SgbView::trn_countdown`) — the GB's
   line-144 boundary loses latches across LCD-off stretches (blocks 7/10
@@ -145,7 +168,7 @@ drives the later dispatches. The 15-block initial stream is table
   resident BIOS's per-frame pad forward, and the only path for player
   input into a taken-over GB.
 
-With all three in place the pilot runs end to end: both IPL chains
+With all five resolved the pilot runs end to end: both IPL chains
 upload, the driver takes the APU (live port-3 dispatch traffic), the
 init's `$3F` fires phase 2, the GB streams the stage tables and sends
 `JUMP $7F:2000`, the arcade game's own main loop runs (`$7F:207E` +

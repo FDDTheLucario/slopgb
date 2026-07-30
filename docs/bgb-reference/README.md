@@ -2,10 +2,10 @@
 
 Functional-parity target for slopgb's debugger/viewer UI. **Every spec line here is
 derived from a real bgb screenshot in this directory** — captured from bgb 1.6.4 (the
-binary at `~/Downloads/bgb/bgb64.exe`) running *Pokemon Crystal* under wine on this
-machine, not from memory. Re-capture protocol is at the bottom. Goal is **functional
-1:1, not code/pixel parity**: same panels, same data, same controls, laid out the same
-way — re-implemented on slopgb's own software renderer (winit + softbuffer, no GUI deps).
+binary at `~/Downloads/bgb/bgb64.exe`) running *Pokemon Crystal* under wine, not
+from memory. Re-capture protocol — and its prerequisites — is at the bottom. Goal
+is **functional 1:1, not code/pixel parity**: same panels, same data, same
+controls, laid out the same way — re-implemented on slopgb's own software renderer (winit + softbuffer, no GUI deps).
 
 ## Image index
 
@@ -22,6 +22,13 @@ way — re-implemented on slopgb's own software renderer (winit + softbuffer, no
 | `03c-vram-oam.png` | VRAM viewer — **OAM** tab |
 | `03d-vram-palettes.png` | VRAM viewer — **Palettes** tab |
 | `04-iomap.png` | I/O map window |
+| `disasm-probe-{1,2,3}.png` | Debugger disasm of `gen_disasm_rom.py`'s opcode probe (see below) |
+| `bgb.ini` | the config the captures were taken with (colours, `DisasmSyntax`) |
+| `slopgb-{debugger,vram,iomap}.png` | slopgb's own windows, for side-by-side comparison |
+| [`menus/`](menus/) | menu-bar dropdowns, right-click menus, main-window submenus |
+| [`options/`](options/) | bgb's 8 Options tabs + its joypad key-config, and slopgb's own for comparison |
+| [`cheat/`](cheat/README.md) | the Cheat dialog (see that dir's README for the decode) |
+| [`qa-fixes/`](qa-fixes/) | before/after shots pinning specific viewer fixes |
 
 ## Windows
 
@@ -128,6 +135,12 @@ opcodes at 0x0150) in bgb and reading its debugger. Rules slopgb's disassembler 
   cumulative counter is a pane-level running sum, not part of per-instruction decode.
 
 ## Re-capture protocol (must use real screenshots, never invent)
+
+The rig is **not** part of this repo and is not installed by default — check
+first, because none of it can be improvised: bgb 1.6.4 unpacked at
+`~/Downloads/bgb/` (`bgb64.exe` + `bgb.ini`), plus `wine`, `xdotool`, `Xvfb` and
+ImageMagick's `import` on `PATH`. The `.png` files here are the durable record;
+re-capture only to add a window this index does not already cover.
 
 1. `cp ~/Downloads/bgb/bgb.ini{,.slopbak}` (restore after).
 2. In `bgb.ini` set `StartDebug=1`, `DebugWinShowOnStart=1`, `VramWinShowOnStart=1`,
