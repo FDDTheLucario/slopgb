@@ -4,10 +4,6 @@ age-test-roms/lcd-align-ly/lcd-align-ly-cgbBC.gb [Cgb]	age	age/lcd-align-ly	Cgb	
 age-test-roms/m3-bg-bgp/m3-bg-bgp.gb [Dmg]	age	age/m3-bg-bgp	Dmg	2px-diff	reference-png	unknown	hw-age	BUG	hardware-captured want; SameBoy verdict unmeasured
 age-test-roms/m3-bg-lcdc/m3-bg-lcdc-nocgb.gb [Cgb]	age	age/m3-bg-lcdc	Cgb	256px-diff	reference-png	unknown	hw-age	BUG	hardware-captured want; SameBoy verdict unmeasured
 age-test-roms/m3-bg-lcdc/m3-bg-lcdc.gb [Cgb]	age	age/m3-bg-lcdc	Cgb	256px-diff	reference-png	unknown	hw-age	BUG	hardware-captured want; SameBoy verdict unmeasured
-age-test-roms/m3-bg-scx/m3-bg-scx-ds.gb [Cgb]	age	age/m3-bg-scx	Cgb	140px-diff	reference-png	unknown	hw-age	BUG	hardware-captured want; SameBoy verdict unmeasured
-age-test-roms/m3-bg-scx/m3-bg-scx-nocgb.gb [Cgb]	age	age/m3-bg-scx	Cgb	140px-diff	reference-png	unknown	hw-age	BUG	hardware-captured want; SameBoy verdict unmeasured
-age-test-roms/m3-bg-scx/m3-bg-scx.gb [Cgb]	age	age/m3-bg-scx	Cgb	140px-diff	reference-png	unknown	hw-age	BUG	hardware-captured want; SameBoy verdict unmeasured
-age-test-roms/m3-bg-scx/m3-bg-scx.gb [Dmg]	age	age/m3-bg-scx	Dmg	112px-diff	reference-png	unknown	hw-age	BUG	hardware-captured want; SameBoy verdict unmeasured
 age-test-roms/oam/oam-read-dmgC-cgbBC.gb [Cgb]	age	age/oam	Cgb	B=00,C=6B,D=14,E=06,H=98,L=10	fib:03/05/08/0D/15/22	unknown	hw-age:dmgC	BUG	hardware-captured want; SameBoy verdict unmeasured
 age-test-roms/oam/oam-read-dmgC-cgbBC.gb [Dmg]	age	age/oam	Dmg	B=00,C=6B,D=14,E=06,H=98,L=10	fib:03/05/08/0D/15/22	unknown	hw-age:dmgC	BUG	hardware-captured want; SameBoy verdict unmeasured
 age-test-roms/oam/oam-read-ncmBC.gb [Cgb]	age	age/oam	Cgb	B=00,C=6B,D=14,E=19,H=98,L=10	fib:03/05/08/0D/15/22	unknown	hw-age:ncmBC	BUG	hardware-captured want; SameBoy verdict unmeasured
@@ -286,20 +282,16 @@ gambatte/oamdma/late_sp39y_ds_1_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/oamdma	C
 gambatte/oamdma/oamdma_late_speedchange_stat_2_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/oamdma	Cgb	0	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/oamdma/oamdmasrcC000_hdmasrc0000_cgb04c_out0A940C0D.gbc [Cgb]	gambatte	gambatte/oamdma	Cgb	0A0B0C0D	0A940C0D	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/old/offset_3/scx_during_m3_2.gb [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	8px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/scx_during_m3/old/offset_3/scx_during_m3_3.gb [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	1147px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/scx_during_m3/old/offset_3/scx_during_m3_4.gb [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	440px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/scx_during_m3/old/offset_3/scx_during_m3_5.gb [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	1576px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1157px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	2725px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_4.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	432px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_5.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	432px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_6.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1576px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_7.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1576px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/old/revoffset_3/scx_during_m3_1.gb [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	432px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/scx_during_m3/old/revoffset_3/scx_during_m3_2.gb [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	437px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
+gambatte/scx_during_m3/old/offset_3/scx_during_m3_3.gb [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	1144px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
+gambatte/scx_during_m3/old/offset_3/scx_during_m3_4.gb [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	8px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
+gambatte/scx_during_m3/old/offset_3/scx_during_m3_5.gb [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	1144px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
+gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1154px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	2723px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
+gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_6.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_7.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/old/revoffset_3/scx_during_m3_2.gb [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	8px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/scx_during_m3/old/revoffset_3/scx_during_m3_3.gb [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	1144px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/scx_during_m3/old/revoffset_3/scx_during_m3_ds_1.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1576px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/old/revoffset_3/scx_during_m3_ds_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	429px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/old/revoffset_3/scx_during_m3_ds_1.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1147px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/old/revoffset_3/scx_during_m3_ds_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/old/revoffset_3/scx_during_m3_ds_5.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/old/revoffset_3/scx_during_m3_ds_7.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
@@ -309,10 +301,6 @@ gambatte/scx_during_m3/old/scx_during_m3_ds_2.gbc [Cgb]	gambatte	gambatte/scx_du
 gambatte/scx_during_m3/old/scx_during_m3_ds_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/old/scx_during_m3_ds_6.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/old/scx_during_m3_ds_7.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx1_scx0_during_m3_1.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	13960px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx2_scx0_during_m3_1.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	14104px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx2_scx0_during_m3_1.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	14104px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx2_scx1_during_m3_1.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	14104px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/scx_0060c0/scx_during_m3_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	8px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/scx_0060c0/scx_during_m3_2.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	8px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/scx_0060c0/scx_during_m3_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
@@ -321,94 +309,58 @@ gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_2.gbc [Cgb]	gambatte	gambatte
 gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_6.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_7.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0063c0/scx_during_m3_1.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	432px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0063c0/scx_during_m3_1.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	432px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0063c0/scx_during_m3_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1581px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0063c0/scx_during_m3_2.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	1581px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0063c0/scx_during_m3_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	8px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0063c0/scx_during_m3_2.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	8px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/scx_0063c0/scx_during_m3_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/scx_0063c0/scx_during_m3_3.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_1.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	491px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1573px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_1.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	64px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_6.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_7.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/scx_0360c0/scx_during_m3_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	160px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/scx_0360c0/scx_during_m3_2.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	160px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0360c0/scx_during_m3_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	23035px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0360c0/scx_during_m3_3.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	23035px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0360c0/scx_during_m3_4.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	22312px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0360c0/scx_during_m3_4.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	22320px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0360c0/scx_during_m3_5.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	21168px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0360c0/scx_during_m3_5.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	22312px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0360c0/scx_during_m3_6.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	21160px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0360c0/scx_during_m3_6.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	21160px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0360c0/scx_during_m3_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	22880px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0360c0/scx_during_m3_3.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	22880px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0360c0/scx_during_m3_4.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	8px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0360c0/scx_during_m3_5.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_1.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	160px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1212px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	23035px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_4.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	22320px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_5.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	22320px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_6.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	22312px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_7.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	22312px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_8.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	21168px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_1.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	432px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_1.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	432px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1581px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_2.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	1581px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	2299px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_3.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	2299px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_4.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	2728px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_4.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	2736px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_5.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	2736px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_5.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	3880px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_6.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	3880px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_6.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	3880px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_ds_1.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	432px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_ds_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1576px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_ds_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	2291px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_ds_4.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1584px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_ds_5.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1584px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_ds_6.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	2728px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_ds_7.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	3872px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_ds_8.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	2736px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_1.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1008px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_1.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	1008px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	2153px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_2.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	2153px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	2299px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_3.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	2299px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_4.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	2728px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_4.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	2736px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_5.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	2736px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_5.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	3880px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_6.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	3880px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_6.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	3880px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_ds_1.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1008px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_ds_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	2231px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_ds_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	2291px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_ds_4.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1584px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_ds_5.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1584px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_ds_6.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	2728px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_ds_7.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	3872px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_ds_8.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	2736px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_1.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1447px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_2.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	160px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	21888px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_3.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	23040px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_4.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	20743px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_4.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	23031px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_5.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	21744px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_5.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	21744px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_6.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	21736px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_6.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	21736px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_1.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	303px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1447px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	21896px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_4.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	21854px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_5.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	21895px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_6.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	22888px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_7.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	21744px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_8.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	21744px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1248px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	22880px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_6.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_7.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0363c0/scx_during_m3_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	5px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0363c0/scx_during_m3_2.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	5px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0363c0/scx_during_m3_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	715px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0363c0/scx_during_m3_3.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	715px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0363c0/scx_during_m3_4.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	8px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0363c0/scx_during_m3_5.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0363c0/scx_during_m3_ds_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0363c0/scx_during_m3_ds_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	715px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0363c0/scx_during_m3_ds_6.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0363c0/scx_during_m3_ds_7.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0367c0/scx_during_m3_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0367c0/scx_during_m3_2.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	1px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0367c0/scx_during_m3_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	143px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0367c0/scx_during_m3_3.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	143px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0367c0/scx_during_m3_4.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	8px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0367c0/scx_during_m3_5.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0367c0/scx_during_m3_ds_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1228px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0367c0/scx_during_m3_ds_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	143px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0367c0/scx_during_m3_ds_6.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0367c0/scx_during_m3_ds_7.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0761c0/scx_during_m3_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	151px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0761c0/scx_during_m3_2.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	151px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
+gambatte/scx_during_m3/scx_0761c0/scx_during_m3_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	20592px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0761c0/scx_during_m3_3.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	20592px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
+gambatte/scx_during_m3/scx_0761c0/scx_during_m3_4.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	19305px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0761c0/scx_during_m3_4.gbc [Dmg]	gambatte	gambatte/scx_during_m3	Dmg	19305px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_1.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	159px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1295px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_3.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	20600px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_4.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	20499px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_5.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	20457px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_6.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/scx_attrib_during_m3_spx1_ds.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1096px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/scx_attrib_during_m3_spx2_ds.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	1096px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/scx_during_m3_spx2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	8px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not

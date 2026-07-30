@@ -29,7 +29,8 @@ import sys
 import tempfile
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(os.path.dirname(TOOLS))
+# TOOLS is <repo>/docs/sameboy-port/tools, so the root is three levels up.
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(TOOLS)))
 
 # Suites the battery actually ratchets. blargg and smallsuites label their rows
 # per sub-suite (`blargg/oam_bug`, `smallsuites/rtc3test`), so the match is on
