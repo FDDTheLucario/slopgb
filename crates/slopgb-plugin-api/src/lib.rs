@@ -26,9 +26,12 @@ pub struct Capabilities(u32);
 impl Capabilities {
     /// Read-only observation of the live machine (tier 1).
     pub const INTROSPECTION: Self = Self(1 << 0);
-    /// Reserved: writing registers/memory/breakpoints (tier 2).
+    /// Writing registers/memory/breakpoints. Served on the tool loader, which
+    /// accepts `INTROSPECTION | MUTATE` and no-ops `host_set_breakpoint` for a
+    /// module that didn't declare this bit. Rejected by the tier-1 per-frame host.
     pub const MUTATE: Self = Self(1 << 1);
-    /// Reserved: hosting a whole subsystem, e.g. the SPC700 (tier 3).
+    /// Hosting a whole subsystem, e.g. the SPC700. The tier-3 gate:
+    /// `LoadedCoprocessor` requires it.
     pub const SUBSYSTEM: Self = Self(1 << 2);
 
     #[must_use]

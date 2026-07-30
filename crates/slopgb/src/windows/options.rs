@@ -205,9 +205,12 @@ impl From<slopgb_plugin_host::PluginInfo> for PluginEntry {
 pub struct PluginConfig {
     /// Directory scanned for `*.wasm` plugins (empty = none).
     pub dir: String,
-    /// Whether mutation-capable plugins are permitted. Default off (golden-safe);
-    /// only the read-only introspection tier is served today, so this is a
-    /// persisted preference reserved for when the MUTATE tier lands.
+    /// Whether mutation-capable plugins are permitted. Default off (golden-safe).
+    /// Persisted but currently gates nothing: the tool host grants `MUTATE` from
+    /// the plugin's own declared capabilities (`tool.rs` — `host_set_breakpoint`
+    /// no-ops without it), not from this toggle. Wiring the two together is the
+    /// open work; today it is only persisted (`settings_file/`) and drawn in the
+    /// Options tab — no runtime path consults it.
     pub allow_mutation: bool,
     /// Discovered plugins with their enabled flag (synced from the live host).
     pub entries: Vec<PluginEntry>,

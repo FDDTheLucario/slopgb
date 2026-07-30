@@ -69,7 +69,7 @@ impl App {
     /// present per tick in steady state — with the interval slewed and the
     /// per-wake budget banded by the audio queue level, so the long-run rate
     /// stays locked to the device clock without the audio-callback-cadence
-    /// judder of a `needs_more()` refill. Returns the frame count and whether a
+    /// judder of refilling on a queue-low query. Returns the frame count and whether a
     /// breakpoint halted emulation.
     pub(crate) fn run_audio_paced(&mut self) -> (u32, bool) {
         let bps = self.run_breakpoints();

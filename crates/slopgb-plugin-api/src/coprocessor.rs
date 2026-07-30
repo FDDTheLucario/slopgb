@@ -79,7 +79,13 @@ pub trait Coprocessor {
     /// id\t<stable-token>            e.g. "msu1" — logical identity + role key
     /// name\t<display name>          human label for UI / logs
     /// provides\t<role>             (0..n) a capability slot this chip can fill
-    /// flag\t<name>\t<arg>\t<help>  (0..n) a CLI flag this plugin contributes
+    /// flag\t<name>\t<arg>\t<help>\t<default>
+    ///                              (0..n) a CLI flag this plugin contributes;
+    ///                              <default> may be an ambient token the host
+    ///                              expands, e.g. "$rom_dir"
+    /// menu\t<label>\t<export>\t<ext>
+    ///                              (0..n) a main-menu row that calls <export>
+    ///                              and saves its bytes with extension <ext>
     /// ```
     ///
     /// Default: empty — an undeclared coprocessor (the host reports no manifest).

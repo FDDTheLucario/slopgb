@@ -110,8 +110,9 @@ fn suite_roms(root: &Path) -> Vec<(PathBuf, String)> {
 /// discovered by running the full matrix; shrinking it is progress,
 /// growing it a regression. Every entry reaches `LD B,B` with the all-$42
 /// fail registers (no timeouts). Floor classes per the index in
-/// `baselines/gambatte.txt`: freq_change_timing-cgb0BC is class C,
-/// channel_4_align/freq_change are class G, ei_delay_halt class H.
+/// `baselines/gambatte.txt`: freq_change_timing-cgb0BC is class C and
+/// channel_4_align/freq_change are class G. (ei_delay_halt is no longer
+/// baselined — it passes; see the interrupt note below.)
 const BASELINE: &[&str] = &[
     // apu/channel_1: 1 of 19 claimed cases. The trigger/duty/alignment/
     // envelope/zombie/freq-change families pass via the SameBoy-style

@@ -16,9 +16,11 @@ use super::*;
 
 impl GameBoy {
     /// The 256×224 SGB border surface (32×28 tiles) with the colorized 160×144
-    /// GB screen composited as an inset at (48, 40), or `None` until a
-    /// CHR_TRN+PCT_TRN border pair has landed (and always `None` off
-    /// `Model::Sgb`/`Sgb2`). The frontend renders this in place of [`Self::frame`]
+    /// GB screen composited as an inset at (48, 40). `Some` whenever the PPU
+    /// carries an `SgbView` — from power-on with the built-in default border,
+    /// swapped for the game's own once CHR_TRN+PCT_TRN land. That means Sgb/Sgb2,
+    /// or any model on which the frontend called [`Self::enable_sgb_border`];
+    /// `None` otherwise. The frontend renders this in place of [`Self::frame`]
     /// when present. ([`Self::frame`] itself stays 160×144 — the golden hash reads it.)
     pub fn sgb_border(&self) -> Option<&[u32; SGB_BORDER_PIXELS]> {
         self.bus.ppu().sgb_border()

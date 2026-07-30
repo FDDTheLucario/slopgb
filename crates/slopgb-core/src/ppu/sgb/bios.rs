@@ -13,7 +13,7 @@
 //! These are frontend seams: the `GameBoy`-level wrapper that reaches them is
 //! [`crate::GameBoy::load_sgb_bios`] (via `lib/sgb_api.rs`), the single BIOS
 //! entry point. The locators it funnels through find nothing verifiable in a
-//! bare SNES image (slopgb never runs the 65816), so the seams are the wired
+//! bare SNES image (core runs no SNES 65816), so the seams are the wired
 //! upgrade path a checked payload locator drops into.
 
 use super::*;

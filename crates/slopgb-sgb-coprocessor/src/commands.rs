@@ -184,7 +184,8 @@ impl SgbCoprocessor {
             // Real N-SPC engine resident: queue the command word exactly as the
             // SGB BIOS SOUND handler forms it (program.rom $00:C554) — command =
             // (Music Score Code | effect_a<<8), data = (effect_b | attr<<8) — and
-            // let nspc_flush deliver it with the engine's echo-ack handshake.
+            // let `nspc_flush` deliver it at the throttled poll cadence, last
+            // write wins (see its doc for why there is no echo-ack gate).
             // `effect_bank` carries the Music Score Code (Pan Docs "SOUND" byte 4;
             // sgb-music-test `PlaySPC: SOUND 0,0,0,1`).
             self.nspc_cmd = [s.effect_bank, s.effect_a, s.effect_b, s.attenuation];

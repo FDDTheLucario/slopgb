@@ -11,10 +11,11 @@ repository.workspace = true
 default = []
 
 [dependencies]
-# No external (crates.io) deps — std only. The one path dependency is an
-# in-tree split of core's own SNES-side audio code (SPC700 + S-DSP), shared so
-# the exact same logic backs both this built-in path and a wasm coprocessor
-# plugin (no duplication). Also std-only + forbid(unsafe_code).
+# No external (crates.io) deps — std only. The one path dependency is in-tree:
+# core emulates no SNES chip, so it takes nothing of the SPC700/S-DSP from here
+# and imports only the shared save-state plumbing (`state::{Reader, Writer}` +
+# `StateError`, re-exported in lib.rs) so core and the SNES-side crates serialize
+# through one format. Also std-only + forbid(unsafe_code).
 slopgb-snes-apu = { path = "../slopgb-snes-apu" }
 
 [lints]

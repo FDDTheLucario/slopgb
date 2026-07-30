@@ -25,8 +25,10 @@ impl Interconnect {
     }
 
     /// Advance the whole machine by one CPU M-cycle (docs/ARCHITECTURE.md
-    /// §Timing: timer, OAM DMA engine, PPU dots, VRAM DMA, APU, serial,
-    /// joypad; IF bits OR-ed in as produced).
+    /// §Timing: timer, OAM DMA engine, PPU dots, APU, serial, joypad; IF bits
+    /// OR-ed in as produced). VRAM DMA is *not* serviced here — it is driven
+    /// from the access sites in `Bus::read`/`write` (`service_vram_dma`), since
+    /// a block steals cycles around the CPU's own bus access.
     pub(super) fn tick_machine(&mut self) {
         let dots: u64 = if self.double_speed { 2 } else { 4 };
         self.cycles += dots;

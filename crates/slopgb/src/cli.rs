@@ -39,9 +39,11 @@ OPTIONS:
                       registers/expr). Also via SLOPGB_MCP_PORT=<N>
     --plugins <DIR>   Load every *.wasm plugin in <DIR>. Tier-1 introspection
                       plugins run in the per-frame pump; the SGB coprocessor
-                      (spc700.wasm + w65c816.wasm) auto-loads from here on SGB
-                      models. See docs/ui-state/plugin-api.md. Also via
-                      SLOPGB_PLUGINS_DIR
+                      (spc700.wasm + w65c816.wasm, plus optional snes-ppu.wasm
+                      and msu1.wasm) auto-loads from here on SGB models. Plugin
+                      manifests also contribute the flags listed below — each
+                      exists only while its plugin is in the dir. See
+                      docs/ui-state/plugin-api.md. Also via SLOPGB_PLUGINS_DIR
 ";
 
 // No `"\` opening continuation here (unlike `USAGE_HEAD`): that continuation
@@ -53,15 +55,17 @@ const USAGE_TAIL: &str =
                       garbage (authentic power-on). A .sav still overrides SRAM.
     -h, --help        Print this help
 
-KEYS:
-    Z = A        X = B        Enter = Start    RShift/Backspace = Select
-    Arrow keys = D-pad        Tab (hold) = turbo
-    P = pause    R = reset    Esc = debugger   F9 = break/resume
+KEYS (Game Boy buttons are rebindable — Options -> Joypad; defaults shown):
+    Z = A        X = B        Enter = Start    RShift = Select
+    Arrow keys = D-pad        Tab (hold) = turbo    [ / ] (hold) = rapid A/B
+    P = pause    R = reset    T = theme    Esc = debugger    F9 = break/resume
+    Backspace (hold) = rewind (needs Options -> Rewind enabled; off by default)
     F2 = debugger    F3 = VRAM viewer    F4 = I/O map  (bgb-style debug windows)
 
 When the debugger window is focused its keys follow bgb: F2 toggle breakpoint,
-F3 step over, F7 trace (step), F4 run to cursor, Ctrl+G go to, F5/F10 open the
-VRAM viewer / I/O map. Right-click a debugger pane for its context menu.
+F3 step over, F4 run to cursor, F6 jump to cursor, F7 trace (step), F8 step out,
+Ctrl+G go to, F5/F10 open the VRAM viewer / I/O map. Right-click a debugger pane
+for its context menu.
 
 A ROM file dropped onto the window is loaded in place of the current one.
 Set SLOPGB_OPEN_TOOLS=debugger,vram,iomap to open debug windows at startup.

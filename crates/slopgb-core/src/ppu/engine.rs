@@ -235,10 +235,13 @@ impl Ppu {
     /// second (`dhalf 1→0`) runs the whole-dot [`Self::tick`] body, so a run of
     /// aligned half-dots is byte-identical to the whole-dot advance; the seam is
     /// that a mode-3-exit / read boundary can sit on the odd half-dot. This is
-    /// the sole PPU tick path: the per-M-cycle machine advance
+    /// the emulation loop's only PPU tick path: the per-M-cycle machine advance
     /// (`interconnect::tick`), the mid-M-cycle write strobe (`interconnect::bus`)
-    /// and the STOP dance (`interconnect::speed`) all drive it. Returns the IF
-    /// bits produced (0 on the non-completing half).
+    /// and the STOP dance (`interconnect::speed`) all drive it. (The post-boot
+    /// LCD warmup in `interconnect::boot` is the one caller that advances whole
+    /// dots through [`Self::tick`] directly, since it only needs to reach a
+    /// known line/dot.) Returns the IF bits produced (0 on the non-completing
+    /// half).
     pub(crate) fn tick_half(&mut self) -> u8 {
         if self.dhalf == 0 {
             self.dhalf = 1;

@@ -39,14 +39,14 @@ pub(super) const BORDER_PIXELS: usize = BORDER_W * BORDER_H;
 pub(super) const INSET_X: usize = 48;
 pub(super) const INSET_Y: usize = 40;
 
-/// `pending_transfer` destination codes: which buffer the next captured screen
-/// (4096 bytes) is routed into. Stored as a `u8` so the save-state stream stays
-/// a flat scalar (SameBoy's `transfer_dest`).
 /// `*_TRN` capture-window length: the capture happens on the SNES side
 /// during the frame after the command (Pan Docs "SGB Functions — VRAM
 /// Transfer" wants the screen visible then), so one GB frame of cycles.
 pub(super) const TRN_CAPTURE_DELAY: u32 = 70_224;
 
+/// `pending_transfer` destination codes: which buffer the next captured screen
+/// (4096 bytes) is routed into. Stored as a `u8` so the save-state stream stays
+/// a flat scalar (SameBoy's `transfer_dest`).
 pub(super) const TR_PAL: u8 = 0; // PAL_TRN  → ram_palettes (512 palettes × 4 colors)
 pub(super) const TR_ATTR: u8 = 1; // ATTR_TRN → attr_files (45 files × 90 bytes)
 pub(super) const TR_CHR0: u8 = 2; // CHR_TRN  → border tiles, bank 0 (tiles 0-127)
@@ -247,7 +247,9 @@ impl SgbView {
             0x05 => self.attr_lin(cmd),
             0x06 => self.attr_div(cmd),
             0x07 => self.attr_chr(cmd),
-            // Sound / audio (decode + state only this phase; see the seams).
+            // Sound / audio: core decodes and queues only — an installed SNES
+            // coprocessor drains it through `SgbCommandSource`; with an empty
+            // slot the queues are consumed and dropped.
             0x08 => self.sound(cmd),             // SOUND
             0x09 => self.latch_transfer(TR_SOU), // SOU_TRN
             // Palette RAM select / transfer (Pan Docs "SGB Command $0A/$0B").

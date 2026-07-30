@@ -602,10 +602,11 @@ pub(super) fn joypad(s: &Settings, content: Rect) -> Vec<Ctrl> {
     // Single column: like the Misc tab, slopgb's font is wide enough that bgb's
     // two-column Joypad layout (`options-joypad.png`) would overlap (the long
     // "configure game controller" / focus-check labels span the whole width), so
-    // the controls stack vertically — functional 1:1, not pixel. The two live
-    // controls are "configure keyboard" (the key-rebind wizard) and "allow
-    // pressing L+R or U+D" (SOCD toggle); the rest is inert (no gamepad /
-    // WAV-AVI recording / joystick backend under the winit/softbuffer/cpal rule).
+    // the controls stack vertically — functional 1:1, not pixel. Every control
+    // here is live: the key-rebind wizard, the gamepad configure/clear +
+    // needs-focus rows (gilrs), "allow pressing L+R or U+D" (SOCD), rapid-fire
+    // speed, and the audio/video recording + screenshot rows. bgb's joypad-0
+    // selector, extra-button config and MBC7 ID are the rows slopgb omits.
     let mut l = Lay::new(content);
     let mut v = Vec::new();
     let btn = |label: &'static str, w: i32| Kind::Button { label, w };

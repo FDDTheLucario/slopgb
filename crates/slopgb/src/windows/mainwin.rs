@@ -106,10 +106,10 @@ pub fn render(c: &mut Canvas, m: &MainMenu, theme: &Theme) {
     menu::render(c, m.origin, &m.items, m.hovered, theme);
 }
 
-/// The `rc-main.png` rows paired with each row's effect. `None` is a greyed stub
-/// (Load ROM / Options / Cheat / Save screenshot → MN4/later) or a not-yet-wired
-/// submenu row (State / Other / Sound channel / Link / Recent ROMs → MN3–MN7),
-/// which renders its `▶` arrow greyed. **Window size** is live (MN2).
+/// The `rc-main.png` rows paired with each row's effect. Every row is wired —
+/// each carries a live [`MenuEffect`], whether a direct action or a submenu
+/// (State / Other / Sound channel / Window size / Link / MCP / Plugins /
+/// Recent ROMs). MCP and Plugins are slopgb additions, not bgb rows.
 ///
 /// `plugin_rows` splices in one row per manifest-declared coprocessor menu
 /// contribution (e.g. "Export SPC") right after "Save screenshot", each running
@@ -445,10 +445,11 @@ fn other_items() -> Vec<(MenuItem, Option<SubChoice>)> {
 }
 
 /// The State rows (`main-sub-state.png`): Quick Save / Quick Load are the
-/// in-memory snapshot; Select / Load recovery / Load state... are greyed (the
-/// on-disk format isn't built). bgb's F2/F4/F3 accelerators are dropped (BUG-2):
-/// in slopgb those keys open the debugger/VRAM/iomap from the game window, so
-/// the rows are click-only rather than advertising a colliding hotkey.
+/// in-memory snapshot and Load state... opens the on-disk load modal; only
+/// Select and Load recovery state are greyed. bgb's F2/F4/F3 accelerators are
+/// dropped: in slopgb those keys open the debugger/VRAM/iomap from the game
+/// window, so the rows are click-only rather than advertising a colliding
+/// hotkey.
 fn state_items() -> Vec<(MenuItem, Option<SubChoice>)> {
     vec![
         (MenuItem::new("Quick Save"), Some(SubChoice::QuickSave)),

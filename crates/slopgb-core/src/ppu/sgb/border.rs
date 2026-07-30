@@ -129,9 +129,10 @@ fn lerp(a: u32, b: u32, num: u32, den: u32) -> u32 {
 }
 
 impl Ppu {
-    /// Recomposite the SGB border surface from the just-presented `front` frame.
-    /// A no-op off SGB or before a CHR_TRN+PCT_TRN pair has landed. Called at the
-    /// frame boundary and after a save-state load.
+    /// Recomposite the SGB border surface from the just-presented `front` frame:
+    /// the game's border once CHR_TRN+PCT_TRN have both landed, else the built-in
+    /// default (shown from power-on). A no-op only with no `SgbView` attached.
+    /// Called at the frame boundary and after a save-state load.
     pub(in crate::ppu) fn sgb_composite_border(&mut self) {
         let front = &self.front;
         let Some(s) = self.sgb.as_mut() else {
@@ -147,8 +148,9 @@ impl Ppu {
     }
 
     /// The 256×224 SNES border surface with the GB screen composited as a
-    /// 160×144 inset, or `None` until a CHR_TRN+PCT_TRN pair has landed (or off
-    /// SGB). The frontend renders this in place of the bare 160×144 frame.
+    /// 160×144 inset. `Some` for any attached `SgbView` (the default border from
+    /// power-on, the game's once a CHR_TRN+PCT_TRN pair lands); `None` only with
+    /// no view. The frontend renders this in place of the bare 160×144 frame.
     pub(crate) fn sgb_border(&self) -> Option<&[u32; BORDER_PIXELS]> {
         self.sgb.as_ref().and_then(SgbView::border_fb)
     }
