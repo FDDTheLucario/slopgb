@@ -150,9 +150,37 @@ fetch restart on a coarse change, a `read - 4` dot rule, a per-line measured
 anchor, and latching the column at `TileNoWait` to mirror SameBoy's T1/T2 split
 (13 regressions — computing it on the T2 side is correct for our pipeline).
 
-Residual in this family is the remaining `_ds` rounds and the `old/`
-offset/revoffset variants — double-speed and lcd-offset lines, where the
-per-line dot alignment moves `lx` off the grid a fixed anchor assumes.
+### Residual: 73 rows, and it is the read frame, not the column value
+
+What is left in this family is the `_2`/`_3` rounds of every `scx_*c0` dir plus
+their `_ds_2/3/6/7` counterparts, 39 double-speed and 34 single-speed.
+
+These are **not** a column-value problem. `scx_0060c0` writes `$00 -> $60 -> $c0`,
+all with `SCX & 7 == 0`, so only the coarse scroll moves — and for a coarse-only
+change the position form and the tile counter shift by the same amount. Widening
+the gate from "fine moved" to "any SCX moved" was measured and changes nothing
+(40/80 either way on the round matrix), which is the proof: whatever the column
+formula, these rounds land the same value.
+
+They fail on **when** SCX is sampled. On line 1 of the double-speed ladder the
+tile-number reads sit at dots 234 and 242 and the writes step 2 dots per round;
+`_2` writes at 241 and `_3` at 239, both inside `(238, 242)`, so we apply a write
+that hardware's already-formed address does not see.
+
+Three read-frame arms measured against the round matrix (baseline 40 pass / 40
+fail), all refuted:
+
+| arm | result |
+|---|---|
+| latch SCX at `TileNoWait` (SameBoy's T1) | 43/37 — a shuffle, round 19 regresses in all four dirs |
+| latch SCX **and** `lx` at `TileNoWait` | 40/40, `scx_0761c0` round 1 regresses |
+| latch SCX at the previous fetch's `Hi` (read − 4) | 8/72 — `Hi == read - 4` only holds in steady state |
+
+So the address-formation dot is somewhere between our `TileNoWait` and the read,
+and no single latch point expresses it — the same shape as the original bug, one
+level down. A fast round-matrix harness (four dirs x 14 rounds x 2 models,
+seconds per run) is the tool to iterate on it; rebuild it before trying a fourth
+arm.
 
 ## Post-boot VRAM (boot logo)
 
