@@ -181,6 +181,33 @@ and no single latch point expresses it — the same shape as the original bug, o
 level down. A fast round-matrix harness (four dirs x 14 rounds x 2 models,
 seconds per run) is the tool to iterate on it; rebuild it before trying a fourth
 arm.
+#### MEASURED: the address forms 2 dots early, single speed only
+
+A per-dot `eff.scx` ring with the delay swept over 0..=7, scored on the round
+matrix (six `scx_*c0` dirs x 14 rounds x 2 models = 120 legs, baseline 60 pass):
+
+| delay | 0 | 1 | **2** | 3 | 4 | 5-7 |
+|---|---|---|---|---|---|---|
+| pass | 60 | 66 | **71** | 36 | 4 | 2 |
+
+Splitting by speed sharpens it — the lead is single-speed only:
+
+| (ds, single) | (2,0) | (0,2) | (2,2) | (1,2) | (2,1) | (0,1) | (0,3) | (0,4) |
+|---|---|---|---|---|---|---|---|---|
+| pass | 55 | **76** | 71 | 74 | 63 | 68 | 53 | 24 |
+
+`(ds 0, single 2)` is a unique optimum at 76/120, and delaying the double-speed
+side at all costs rows. On the full battery that is **+20 gambatte rows**.
+
+**It still cannot land: all 7 regressions are SameBoy-PASS** (`classify_pixel`,
+`mm=0`) — mealybug `m3_scx_high_5_bits` [Dmg]+[Cgb] and `_change2` [Cgb], plus
+the four `scx_*_spx0/1/2` sprite-position ROMs. Gating the delay away from
+sprite stalls changes nothing; delaying only the coarse bits scores worse (16).
+
+So the 2-dot single-speed lead is real but incomplete: the `spx*` ROMs and
+mealybug's high-5-bits writes want the live value at the same dot where the
+`scx_*c0` rounds want the early one. That discriminator is what the next attempt
+needs to find — not another offset.
 
 ## Post-boot VRAM (boot logo)
 
