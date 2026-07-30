@@ -236,7 +236,44 @@ pinned at its landed values:
 
 So the double-speed rows are not a read-frame, anchor, or DS-alignment-phase
 problem in the shape that solved single speed. Something structurally different
-governs them; do not spend a fourth sweep on this parameter family. **+20 rows, zero
+governs them; do not spend a fourth sweep on this parameter family.
+
+#### The DS ladder ROTATES under the lead — the groups are pinned
+
+Per-directory tracing shows why every DS sweep looks flat: the lead does not
+fix the ladder, it **rotates** it. `scx_0060c0` double speed, CGB:
+
+```
+lead 0:  . X X . . X X .      (ds_1..ds_8)
+lead 2:  X . . X X . . X      exactly complementary
+```
+
+So `ds_1/4/5/8` want no lead and `ds_2/3/6/7` want it — want-opposite siblings,
+and any single lead trades one group for the other. The two groups are pinned by
+their write dots (reads at 234 and 242, writes stepping 2 dots from 243 down to
+229):
+
+| group | write dots | `(read - write) mod 8` |
+|---|---|---|
+| wants lead 0 | 243, 237, 235, 229 | {5, 7} |
+| wants lead 2 | 241, 239, 233, 231 | {1, 3} |
+
+Confirmed by trace that the column value is *not* the difference: `ds_2` (write
+241) and `ds_4` (write 237) both produce column 11 for `fetch_x=19`, yet `ds_4`
+passes and `ds_2` fails, so hardware honours the write at 237 and ignores the
+one at 241.
+
+Keying the lead on that phase was built and swept anyway — every 8-bit mask over
+`(dot - scx_any_dot) & 7` scores at best 20/48, i.e. never better than no lead.
+(Note `scx_write_dot` is useless as the key: it only latches when `SCX & 7`
+changes, and `scx_0060c0` never moves the fine bits. A separate `scx_any_dot`
+was added for the sweep and reverted.)
+
+So a discriminator provably exists and its two groups are known, but it is not
+the write's dot phase, the fetch phase, the anchor, or `sb_dsa8`. Five arms
+measured. The next attempt needs a *new observable* — most likely a trace of
+what column the reference demands per line on a `ds_2`/`ds_4` pair, the way the
+single-speed law was found. **+20 rows, zero
 regressions**; mealybug and age both clean. Note the earlier "mealybug
 m3_scx_high_5_bits regresses" reading was an artifact of scoring mealybug ROMs
 with the gambatte 15+1-frame protocol — they exit on `LD B,B`.
