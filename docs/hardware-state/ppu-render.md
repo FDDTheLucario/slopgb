@@ -414,7 +414,27 @@ But the four rows do **not** share one mechanism: two are a single tile and two
 are most or all of a row, and they split across both models and both
 row-0-only and many-rows. This residual is a *mixture*, which is why every
 single-parameter sweep flattened against it. It needs to be split by signature
-and each class attacked separately; do not look for one law. **+20 rows, zero
+and each class attacked separately; do not look for one law.
+
+**Row 0 is not a fetcher problem.** Tracing `ly = 0` on the failing
+`scx_0363c0/_4 [Dmg]` against the fully-green `scx_0060c0/_4 [Dmg]` gives
+*identical* fetch state — same `fetch_x`, same `lx`, `SCX = $00`, `discard = 0`,
+and `tno = $00` for every tile:
+
+```
+R0 fx=0 lx=0 disc=0 hunted=false scx=00 col=0 tno=00
+R0 fx=1 lx=2 disc=0 hunted=true  scx=00 col=1 tno=00
+R0 fx=2 lx=10 ...                              tno=00
+```
+
+Both ROMs fetch the same single repeated tile across row 0, so the 8 wrong
+pixels at x5-12 cannot come from the map column, the lead, or the anchor — the
+column is provably identical to a passing ROM's. Whatever differs lives further
+down the pipe (tile-data addressing or the FIFO), or in per-ROM VRAM the trace
+did not capture.
+
+That is the concrete starting point for the next attempt: compare the two ROMs'
+*tile data* reads on row 0, not their map addresses. **+20 rows, zero
 regressions**; mealybug and age both clean. Note the earlier "mealybug
 m3_scx_high_5_bits regresses" reading was an artifact of scoring mealybug ROMs
 with the gambatte 15+1-frame protocol — they exit on `LD B,B`.
