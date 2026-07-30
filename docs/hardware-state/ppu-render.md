@@ -273,7 +273,39 @@ So a discriminator provably exists and its two groups are known, but it is not
 the write's dot phase, the fetch phase, the anchor, or `sb_dsa8`. Five arms
 measured. The next attempt needs a *new observable* — most likely a trace of
 what column the reference demands per line on a `ds_2`/`ds_4` pair, the way the
-single-speed law was found. **+20 rows, zero
+single-speed law was found.
+
+#### The new observable, run: the divergence is at the line's FIRST fetch
+
+Logging the actual map column per fetch on the `ds_2`/`ds_4` pair (line 1,
+`scx_0060c0`, CGB) — `ds_4` passes, `ds_2` fails:
+
+```
+ds_4  fx: 0 0 1  2  3  ...      cols: 0  0 13 14 15 ...
+ds_2  fx: 0 0 1  2  3  ...      cols: 0 12 13 14 15 ...
+                 ^ identical from here on
+```
+
+They differ at **`fetch_x = 0`, the line's first real fetch**, where `ds_2`
+already sees the line's `$00 -> $60` write (column 12) and `ds_4` does not
+(column 0). Everything from `fetch_x = 1` onward is identical. So the residual
+is decided at the *start* of the line, not at the last tile as the write-dot
+ladder analysis assumed — that earlier reading was wrong.
+
+Gating the DS lead to exactly that window (`lx == 0`) and sweeping it 1..=4
+still does not move the ladder: 20, 18, 18, 16 of 48, against a 20 baseline.
+Making `ds_2` agree with `ds_4` at `fetch_x = 0` is therefore *not* what its
+reference wants — the two ROMs have different write timing and legitimately
+expect different first columns.
+
+Calibrating signature to column from the passing sibling was also tried and is a
+dead end: the map reuses palettes, so only 4 distinct cell signatures exist
+across the frame and the mapping is not injective.
+
+Six arms measured on the double-speed half, all capped at 20/48: lead, anchor,
+`sb_dsa8`, write-phase mask, phase-keyed lead, pre-output-gated lead. The
+rotation result stands (the two groups are real and complementary) but no state
+term yet separates them. **+20 rows, zero
 regressions**; mealybug and age both clean. Note the earlier "mealybug
 m3_scx_high_5_bits regresses" reading was an artifact of scoring mealybug ROMs
 with the gambatte 15+1-frame protocol — they exit on `LD B,B`.
