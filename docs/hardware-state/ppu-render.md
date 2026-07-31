@@ -534,7 +534,7 @@ dissolve the moment the line-0 edge is phase-correct.
 
 | row(s) | shape | note |
 |---|---|---|
-| `old/offset_3/_ds_2`, `scx_0360c0/_ds_1`, `_ds_2`, `scx_0367c0/_ds_2`, `scx_0063c0/_ds_1`, `old/revoffset_3/_ds_1`, `scx_0761c0/_ds_1`, `_ds_4`, `_ds_5` | line 0 only | the line-0 dispatch phase above |
+| `old/offset_3/_ds_2` (10 px), `old/revoffset_3/_ds_1` (3 px), `scx_0063c0/_ds_1` (64 px), `scx_0360c0/_ds_1` (160 px), `_ds_2` (104 px), `scx_0367c0/_ds_2` (84 px), `scx_0761c0/_ds_1` (8 px), `_ds_4` (50 px), `_ds_5` (8 px), `scx_attrib_spx1_ds` (8 px) | line 0 only | the line-0 dispatch phase above; every one was 150-20500 px before this landing |
 | `scx_0761c0/_ds_6` | first tile, lines 1-143 | its `$61` write commits exactly on the hunt lock dot 96 but is *pre*-lock by raw dot (92 < 96), so term 2 does not reach it; the reference wants it visible at the dot-98 read |
 | `old/offset_3/_ds_3` | 2723 px | EXCEED — SameBoy misses it too |
 
