@@ -488,7 +488,9 @@ impl Ppu {
             // 12-dot startup anchor is held by the `pos_dot` push gate
             // in `push_allowed`, not by freezing the fetch.
             self.render.prefill_pos += 1;
-            if self.render.prefill_pos == 8 && !self.render.hunt_done && (!self.ds || self.ly >= 1)
+            if self.render.prefill_pos == 8
+                && !self.render.hunt_done
+                && (!self.ds || self.ly >= 1 || self.eff.scx & 7 != 0)
             {
                 // The prefill ran out with no comparator match: an SCX write
                 // moved `SCX & 7` behind the counter, so the whole first tile
@@ -504,18 +506,26 @@ impl Ppu {
                 // to the index the dropped tile would have taken, and
                 // `bg_map_col` masks to 5 bits either way.
                 //
-                // Double speed excludes LINE 0 only. The hold is required at
-                // double speed too — `scx_0360c0/_ds_3`'s reference demands an
-                // EVEN first column (12/14/../30) and an ODD last (1..11),
-                // which only the held indices 0 and 19 produce. Line 0 is
-                // carved out for `old/offset_3/_ds_1`, whose line-0 reference
-                // wants its last tile at a column in 12..31: held, that tile is
-                // index 19 against the line's late `$c0`, giving column 11.
-                // Fixing it needs that write unseen 3 dots later, and no map
-                // lead does that without breaking the rows whose writes land
-                // closer still and must be seen (swept 0..7, both with and
-                // without a pre-output exemption). Empirical, not derived — the
-                // constraint tables are in docs/hardware-state/ppu-render.md.
+                // Double speed carves out ONE case: line 0 with the fine
+                // scroll back at 0. The hold is otherwise required there too —
+                // `scx_0360c0/_ds_3`'s reference demands an EVEN first column
+                // (12/14/../30) and an ODD last (1..11), which only the held
+                // indices 0 and 19 produce, and `scx_0761c0/_ds_3` needs it on
+                // line 0 itself.
+                //
+                // The carve-out is `old/offset_3/_ds_1`, and it is a CPU-phase
+                // artefact rather than a render law. That ROM drives its kernel
+                // purely from STAT (it takes no VBlank interrupt at all), so
+                // between the line-144 dispatch and the line-0 one the CPU runs
+                // off the end of the kernel's NOP sled. The line-0 dispatch
+                // therefore completes mid-instruction — dot 10, where every
+                // other line dispatches at dot 6 — which lands the line's `$c0`
+                // write 4 dots late (commit 247, read 250) and makes the held
+                // last tile column 11 where the reference wants 12..31. No map
+                // lead reaches it (swept 0..7, plain and with a pre-output
+                // exemption); the rows that break need writes landing closer
+                // still to stay visible. Constraint tables in
+                // docs/hardware-state/ppu-render.md.
                 self.render.fetch_x = self.render.fetch_x.wrapping_sub(1);
             }
             if self.eff.lcdc & LCDC_OBJ_ENABLE != 0 {

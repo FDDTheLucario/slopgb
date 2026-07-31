@@ -359,6 +359,13 @@ fn eager_scx_during_m3_map_column_passes() {
             "_cgb04c",
             Model::Cgb,
         ),
+        (
+            // Double speed on LINE 0, fine scroll non-zero: the holdback is
+            // required here too, so the line-0 carve-out cannot be blanket.
+            "gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_3.gbc",
+            "_cgb04c",
+            Model::Cgb,
+        ),
     ];
     for (rel, suffix, model) in rows {
         let path = root.join(rel);

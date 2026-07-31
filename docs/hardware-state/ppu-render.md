@@ -411,20 +411,34 @@ each column, match) rather than by sweeping:
 13, odd where an even column is required. **The holdback is required at double
 speed.** It recovers that row with zero regressions.
 
-Line 0 is carved out for `old/offset_3/_ds_1`, the only DS row that exhausts
-its hunt on line 0. Its reference is degenerate everywhere except ly 0's last
-tile, which must land in columns 12..31; held, that tile is index 19 against
-the line's `$c0` (coarse 24) → column 11. Making it right needs that write —
-committed at dot 247, read at 250 — to go *unseen*, and no map lead achieves
-that: swept 0..7, plain and with a pre-output exemption, everything >= 3
-collapses (129 → 114 → 103) because other DS rows have writes landing closer
-still that must be seen. The line-0 exclusion is therefore **empirical, not
-derived**; it is pinned from both sides in
+The line-0 carve-out is narrower than first landed: `scx_0761c0/_ds_3`
+exhausts its hunt on line 0 too and **needs** the hold there, so line 0 cannot
+be excluded wholesale. The single case that must not hold is
+`old/offset_3/_ds_1` — line 0 with the fine scroll back at 0 — and
+disassembling it gives the direct cause rather than a fitted predicate.
+
+That ROM's kernel is driven purely from STAT: `$0048` is `ei; jp $1000`, the
+kernel writes `$60` at `$101E` and `$c0` at `$106A` (the ladder steps those two
+writes in opposite directions), and it takes **no VBlank interrupt at all** —
+zero dispatches to `$0040` across a whole run. So between the ly-144 dispatch
+and the ly-0 one the CPU runs off the end of the kernel's NOP sled instead of
+waiting on it. Measured, every line dispatches STAT at **dot 6 except line 0,
+which dispatches at dot 10**: the interrupt arrives mid-instruction there and
+completes 2 M-cycles (4 dots) later. That is the whole of the 247-vs-243
+difference in the line's `$c0` commit, and with the read at dot 250 it is what
+puts the held last tile at column 11 where the reference wants 12..31.
+
+So the carve-out is a CPU instruction-phase fingerprint of one ROM's control
+flow, not a render law — which is also why no map lead reaches it (swept 0..7,
+plain and with a pre-output exemption; everything >= 3 collapses 129 → 114 →
+103 because other DS rows have writes landing closer still that must stay
+visible). The gate is `ly >= 1 || SCX&7 != 0`, pinned from both sides in
 `gambatte::misc::eager_scx_during_m3_map_column_passes`.
 
-What would settle it: `_ds_1`'s line-0 last tile is the only constraint holding
-the exclusion up, and it is a *line-end late-write* question, not a holdback
-question. Attack that write's column, and the exclusion should dissolve.
+What would settle it properly: our line-0 dispatch phase depends on the
+VBlank-region (ly 144 → 0) timing this ROM free-runs through. If that phase is
+off by an M-cycle, the exception disappears on its own — that is the
+`lyc153`/`ly0` family, not this cluster.
 
 #### SUPERSEDED: the DS residual as "the whole-dot contract" (kept for its measurements)
 
