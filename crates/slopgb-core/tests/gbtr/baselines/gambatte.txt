@@ -409,12 +409,14 @@ gambatte/oamdma/oamdmasrcC000_hdmasrc0000_cgb04c_out0A940C0D.gbc [Cgb]
 # exists the map lead carries an `ly == 0` exemption instead. See
 # docs/hardware-state/ppu-render.md.
 #
-# The one survivor that is NOT double speed is `scx_during_m3_spx2 [Cgb]`, a
-# CGB OBJ-palette VALUE divergence: its reference pixel is raw $4261, ours
-# $1CF2, and the ROM
-# computes the entry at runtime (never writes FF6A/FF6B in init, and the byte
-# $61 is never written at all) — upstream of the PPU, not a fetch or timing
-# row. `scx_m3_extend_1 [Dmg]` was recovered 2026-07-30.
+# The three `spx2` rows are one divergence, and it is POST-BOOT RESIDUE, not a
+# fetch or timing row: the failing pixel is OBJ palette 0 colour 2 (proved by
+# marking every palette slot), and a byte scan of the whole ROM finds only
+# FF68/FF69 writes — it never writes an OBJ palette at all, so the reference's
+# $4261 is what that console had in OBJ palette RAM at hand-off. Ours is $1CF2
+# because the post-boot synthesis installs the DMG-compat OBJ palette even for
+# CGB-flagged carts. See docs/hardware-state/ppu-render.md.
+# `scx_m3_extend_1 [Dmg]` was recovered 2026-07-30.
 gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_2.gbc [Cgb]
 gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_3.gbc [Cgb]
 gambatte/scx_during_m3/old/revoffset_3/scx_during_m3_ds_1.gbc [Cgb]

@@ -714,9 +714,50 @@ Measured, so do not re-chase:
 * no index shift of the 16 written bytes produces `$4261`: the byte `$61` is
   never written at all.
 
-So the divergence is upstream of the PPU, in whatever the ROM reads to compute
-the entry. That is a different investigation from this cluster; the fetch column
-and the write-commit timing are both already correct here.
+**RESOLVED to post-boot residue 2026-07-31** — the earlier "the ROM computes the
+entry at runtime" reading was wrong; the ROM never produces it at all.
+
+* Which entry the pixel uses was settled by marking every palette slot with a
+  unique value before the scoring frame: x0 of rows 0-7 is **OBJ palette 0,
+  colour 2**, and everything from x1 on is BG palette 0.
+* A byte scan of the whole 32 KiB finds exactly two palette-port writes,
+  `ldh (FF68),a` at `$01AD` and `ld c,69` at `$01AF` — the **BG** ports. There
+  is no `ldh (FF6A/6B)`, no `ld c,6A/6B` and no `ld (FF6A/6B),a` anywhere. The
+  ROM never writes an OBJ palette, so the reference's `$4261` is whatever the
+  console had in OBJ palette RAM at hand-off.
+* Ours is `$1CF2` because `interconnect/boot.rs` installs
+  `CGB_COMPAT_OBJ_PALETTE` (`7FFF 421F 1CF2 0000`) on **any** CGB-model machine
+  — including CGB-*flagged* carts. That contradicts the same function's
+  `cgb_cart_cut` comment, which subtracts `$7D8` T-cycles from the hand-off
+  precisely because "the DMG-compat path does its compatibility-palette work
+  after the logo" and a CGB cart skips it. Booting these ROMs through the real
+  `bootroms/cgb_boot.bin` / `cgbE_boot.bin` leaves OBJ palette RAM at its
+  power-on fill instead.
+
+So the row is a **power-on OBJ-palette-RAM residue** row, not a fetch, timing or
+palette-write row. Making it pass means knowing what a cgb04c leaves there, which
+neither the compat set nor our `0xFF` power-on fill supplies. The genuine bug the
+investigation did surface — the unconditional compat install for CGB-flagged
+carts — is worth fixing on its own merits, but it cannot recover this row (it
+would render `$7FFF`, not `$4261`), and it moves post-boot state for every CGB
+cart, so measure `misc/boot_hwio-C` (BCPS `$C8` / OCPS `$D0`) before touching it.
+
+`scx_attrib_during_m3_spx2_ds` and `scx_during_m3_spx2_ds` dropped from 1096 px
+to the same 8 px at x0 with the 2026-07-31 double-speed landing: all three spx2
+rows are now this one divergence and nothing else.
+
+#### Measured dead end: the CGB LCDC render-view delay (2026-07-31)
+
+`bgtilemap_spx09_{1,2,3,4} [Cgb]` and `bgtiledata_spx08_ds_{3,4} [Cgb]` corrupt
+the tile at BOTH ends of the mid-mode-3 LCDC toggle (128 px over rows 0-15, the
+pair of tiles stepping with the rung), while the DMG legs pass with an
+*identical* map-select sequence — traced fetch for fetch, the two models differ
+only by the CGB pipeline's 1-dot lead. `RENDER_LCDC_DELAY` swept CGB-only over
+1..=12 against the whole bgtilemap+bgtiledata set: 37, 37, **61**, 61, 49, 45,
+then 37 flat. The shipped 3 is already optimal and no value recovers the spx
+rows, so the delay is not the lever — both failing families are sprite lines, so
+the term to look for is the CGB OBJ-stall geometry's effect on when the deferred
+LCDC view reaches the fetch grid, not the deferral length.
 
 The arms measured and rejected in this pass are folded into the canonical dead-end
 list above.
