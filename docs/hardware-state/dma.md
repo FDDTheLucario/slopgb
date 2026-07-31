@@ -51,7 +51,48 @@ A gambatte-shaped request engine (`Interconnect::vram_dma_req`):
 ### Parked / disproven
 
 - **Disproven: a longer VRAM-DMA service.** The `{g,h}dma_cycles*_2` rows read `STAT & 3` one M-cycle after their `_1` siblings and want mode 0 where we still read mode 3, and the SameBoy trace puts its FF41 read 4 dots later than ours on the same line — but padding the service with extra teardown M-cycles is monotonically worse over `gambatte/dma/` (72 → 82 → 88 → 92 failures for +0..+3 M-cycles): it recovers the plain `long`/`hdma` rows and breaks the `_scx{2,3,5}` siblings plus the `hdma_late_*` family. The residual is the service's *placement* against the CPU's own fetch, not its length.
-- **Disproven: retiming the HBlank trigger anchor.** `hdma_late_disable[_scx*]_2` (want 1) need the block flagged BEFORE their cancel write: SameBoy sets `hdma_on` at its HBlank entry (`cfl` 257 on an SCX=0 line) with the `_1` cancel landing at 256 and the `_2` cancel at 261, while our `hdma_lead` rises at dot 255 — after both cancels, so the disable kills the block on both rungs. Leading the trigger (firing `hdma_lead` at `lx 159 - K`) was swept K = 0..7 over all 458 `gambatte/dma/` rows: 72, 73, 72, 75, 82, 83, 86, 89 — and single-speed-scoped (K = 1..4): 73, 73, 75, 78. Every K is a trade, not a lift: K = 2 recovers `hdma_late_disable_scx{2,3}_2` and four speedchange rows but breaks `hdma_late_disable[_scx5]_ds_1/2`, `hdma_late_m3halt_m2unhalt_*` and the GREEN `hdma_start_scx{2,3}_1`. A uniform anchor shift moves every row equally, so the `_1`/`_2` pairs never separate — the discriminator has to be a latched write dot or render-FSM term, not the anchor.
+#### What the `hdma_start` / `hdma_late_disable` rows actually constrain (2026-07-31)
+
+Disassembled rather than swept. Both families share ONE kernel: the LYC=1 STAT
+ISR arms `HDMA5 = $80` at `$1000`, then a NOP sled, then a single observation.
+`hdma_late_disable` observes with `xor a; ldh ($55),a` (cancel); `hdma_start`
+observes with `ld a,(hl)` from VRAM `$8000`. Both print `observed & 7`, with
+`$8000` preset to `$00` and the DMA source `$C000` = `$01`, so **0 = readable and
+untransferred · 1 = transferred · 7 = the read was BLOCKED** (`$FF & 7`).
+
+The `scx` variants are not the same rung: they add `ld a,N; ldh ($43),a` before
+the `HALT` *and* one extra sled NOP, so their observation sits one M-cycle later
+than the `scx0` rung while their mode 3 lengthens by `SCX`.
+
+`hdma_start_1` reads **7**, so it is not a DMA-timing row at all — it fails on
+VRAM accessibility. Measured on line 1 (SCX=0, mode 3 nominally ending at 252):
+
+| quantity | ours | demanded | Δ |
+|---|---|---|---|
+| VRAM read release (`line_render_done`) | dot 253 | ≤ 252 (`hdma_start_1` must read `$00`, not `$FF`) | −1 |
+| HBlank DMA trigger (`hdma_lead`, lx 159) | dot 255 | 249..252 (after `hdma_late_disable_1`'s cancel at 248, at or before `_2`'s at 252) | −3..−6 |
+| block serviced in the observing M-cycle | yes, for reads | must NOT be, for `hdma_start_1` | read-side asymmetry |
+
+The two anchors need *different* shifts, which is why a uniform lead cannot land
+them: swept K = 0..7 over all 458 `gambatte/dma/` rows (72, 73, 72, 75, 82, 83,
+86, 89) and single-speed-scoped K = 1..4 (73, 73, 75, 78), every K trades — K = 2
+recovers `hdma_late_disable_scx{2,3}_2` and four speedchange rows while breaking
+`hdma_late_disable[_scx5]_ds_*`, `hdma_late_m3halt_m2unhalt_*` and the GREEN
+`hdma_start_scx{2,3}_1`.
+
+The third row of the table is the real blocker, and it is a genuine conflict:
+`hdma_late_disable_2`'s cancel and `hdma_start_1`'s read both land at dot 252,
+and the cancel must see an already-triggered block (SameBoy's `GB_IO_HDMA5`
+cancel clears only `hdma_on_hblank`, never a pending `hdma_on`, so the block
+still runs — traced: cancel at `cfl` 261, run after it) while the read must not
+be stolen from. Inverting the same-cycle service asymmetry was measured both
+ways: the full swap (reads stop yielding, writes start) scores 80, and dropping
+only the read-side post-tick service scores 75 — the read side is pinned by
+`hdma_start[_scx{2,3,5}]_2` and the write side by
+`hdma_late_{destl,length,wrambank}_1`, and neither even recovers `hdma_start_1`.
+Both directions are load-bearing, so the split is below the M-cycle: the FF55
+write commits in its cycle's second half while the VRAM read samples at the end.
+
 - **Disproven: SameBoy's whole placement (service only after an opcode fetch).** It recovers the `late_hdma_vs_*` family and `hdma_{start_ly0,pc_7ffe}` but breaks the M-cycle-granular races the head placement models (`hdma_late_{destl,length,wrambank}_2`, `hdma_start[_scx*]_2`, `hdma_transition_{oamdma,halt_hdmadst_unhalt}`) — ~15 recovered for ~11 lost. Only the dispatch-hold half of it is kept above.
 - **Parked: SameBoy-derived VRAM wrap** — the old wrap behavior; superseded by terminating at the 0x10000 crossing (no VRAM wrap), per gambatte `dma_dst_wrap_2`.
 - **Parked: chasing the residual `_2`/`a-phase` parity rows with whole-dot timing** — these are documented swaps in `baselines/gambatte.txt`; they need sub-M-cycle phase, so whole-dot timing won't close them.
